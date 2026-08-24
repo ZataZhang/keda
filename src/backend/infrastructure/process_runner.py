@@ -657,6 +657,11 @@ def run_filtered_claude_stream(
 
     Returns:
         CompletedProcess with collected stdout if requested.
+
+    Raises:
+        subprocess.TimeoutExpired: 墙钟或静默期超时被看门狗杀掉时抛出，异常的
+            ``output`` 带着杀进程前渲染出的输出（``collect_stdout=False`` 时为空，
+            因为那种调用本来就没在收集）。stderr 走 ``display_sink``，不收集。
     """
     renderer = ClaudeStreamRenderer()
     capture_stderr = display_sink is not None
@@ -745,7 +750,7 @@ def run_filtered_claude_stream(
             if buffered:
                 logger.info("Agent output: %s", buffered)
         return_code = process.wait(timeout=timeout)
-        watchdog.raise_if_timed_out()
+        watchdog.raise_if_timed_out(partial_stdout="".join(stdout_lines))
     except BaseException:
         _terminate_process_tree(process)
         process.wait()
@@ -791,6 +796,11 @@ def _run_pty_stream(
 
     Returns:
         CompletedProcess with the collected stdout (stderr merged into it).
+
+    Raises:
+        subprocess.TimeoutExpired: 墙钟或静默期超时被看门狗杀掉时抛出，异常的
+            ``output`` 带着杀进程前从 PTY 读到的全部输出。stderr 已经并进 PTY，
+            所以只填 stdout 一侧。
     """
     master_fd, slave_fd = pty.openpty()
     try:
@@ -872,7 +882,7 @@ def _run_pty_stream(
         if output_sink is None:
             _flush_log_lines(final=True)
         return_code = process.wait(timeout=timeout)
-        watchdog.raise_if_timed_out()
+        watchdog.raise_if_timed_out(partial_stdout="".join(collected))
     except BaseException:
         _terminate_process_tree(process)
         process.wait()

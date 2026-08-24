@@ -660,3 +660,127 @@ def test_attempt_phase_timer_records_even_when_phase_raises() -> None:
 
     assert [phase.name for phase in snapshot] == ["rv_reexec"]
     assert snapshot[0].seconds >= 0.02
+
+
+def test_run_once_passes_prd_baseline_to_change_log_gate(tmp_path: Path) -> None:
+    """执行循环必须把 PRD baseline 透传给交付门禁，否则 Change Log 校验形同虚设。
+
+    这条守的是"接线"而不是"判定"：``_validate_prd_change_log`` 自身的分支由
+    ``tests/test_agent_runner_prd_delivery.py`` 直接覆盖，但那些测试是自己传
+    ``prd_baseline_content=`` 调用门禁的，切断执行循环里的 baseline 读取它们
+    照样全绿。这里让 Agent 在第一轮改 PRD 却不写 Change Log，只有 baseline 真
+    的被透传，门禁才会打回并触发第二轮。
+    """
+    fake_client = FakeGitHubClient()
+    issue = make_prd_issue("tasks/pending/example.md")
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    # 基线：验收清单已全勾且无 Change Log 章节——清单门禁不会拦，只有 Change
+    # Log 门禁可能触发，从而把失败原因唯一化。
+    write_complete_prd(worktree_path, "tasks/pending/example.md")
+    (worktree_path / "tasks" / "archive").mkdir(parents=True, exist_ok=True)
+    prd_path = worktree_path / "tasks" / "pending" / "example.md"
+
+    class _BaselinePassThroughRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._committed = False
+            self.agent_prompts: list[str] = []
+
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            check=True,
+            timeout=None,
+            inactivity_timeout=None,
+            capture_output=True,
+            label=None,
+        ):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            if command_tuple[:1] == ("codex",):
+                prompt = command_tuple[-1]
+                self.agent_prompts.append(prompt)
+                write_commit_request(worktree_path, "agent: prd edit")
+                if "Recovery attempt: 1/2" in prompt:
+                    # 第二轮：补上结构化 Change Log 条目，门禁应放行。
+                    prd_path.write_text(
+                        prd_path.read_text(encoding="utf-8")
+                        + "\n## Change Log\n\n"
+                        + "### 2026-08-24 · 补记需求演进\n"
+                        + "- 类型：实现说明补充\n"
+                        + "- 原文：无实现说明\n"
+                        + "- 变更后：补充实现说明段落\n"
+                        + "- 原因：实现中发现需要说明取舍\n"
+                        + "- 影响：不改变验收范围\n"
+                        + "- 审核：runner 门禁校验\n",
+                        encoding="utf-8",
+                    )
+                else:
+                    # 第一轮：改了 PRD 正文但不写 Change Log。
+                    prd_path.write_text(
+                        prd_path.read_text(encoding="utf-8") + "\n实现中补充的说明段落。\n",
+                        encoding="utf-8",
+                    )
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                stdout = "" if self._committed else " M file.txt\n"
+                return CommandResult(command_tuple, 0, stdout, "")
+            if command_tuple == ("git", "commit", "-m", "agent: prd edit"):
+                self._committed = True
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == (
+                "git",
+                "mv",
+                "tasks/pending/example.md",
+                "tasks/archive/example.md",
+            ):
+                pending_path = Path(cwd) / "tasks" / "pending" / "example.md"
+                archive_path = Path(cwd) / "tasks" / "archive" / "example.md"
+                if pending_path.exists():
+                    archive_path.parent.mkdir(parents=True, exist_ok=True)
+                    pending_path.rename(archive_path)
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _BaselinePassThroughRunner()
+    path_command, path_result = worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        git_remote_command(): git_remote_result("origin"),
+    }
+    config = config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.run_agent_once import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    # baseline 被切断时第一轮就会通过门禁，只会有 1 次 Agent 调用。
+    assert len(fake_runner.agent_prompts) == 2
+    recovery_prompt = fake_runner.agent_prompts[1]
+    assert "PRD delivery check failed" in recovery_prompt
+    assert "Change Log" in recovery_prompt

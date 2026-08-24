@@ -87,20 +87,20 @@ iar（issue-agent-runner）的 PRD 交付门禁目前把"需求演进"和"真实
   - **⑥ 不可逆错判**：`git mv` 与原逻辑同位置同条件执行，不会新增不可逆动作；runner 在 recovery 失败重试耗尽后会保留 PRD 在 `tasks/pending/`（不丢文件）；worst case：无
   - **⑦ 并发错判**：baseline 在循环开始时一次性读取并透传，单 issue 处理流程内无并发；多 issue 并发由 daemon 已有单实例锁兜底；worst case：无
 
-| 改动点 | 架构层 | 风险 | 介入方式 | 证据 / Oracle（指向 §7.6） |
+| 改动点 | 架构层 | 风险 | 介入方式 | 验收（观察得到什么） |
 |---|---|---|---|---|
-| **新增 `core/shared/prd_change_log.py`**：解析 `## Change Log` 与 6 字段（类型/原文/变更后/原因/影响/审核）；暴露 `parse_prd_change_log` / `extract_prd_change_log_entry_count` | core（shared） | 高 | **人工确认** | rv-1, rv-2, rv-3 |
-| **`agent_runner_feedback.py` 新增 `_validate_prd_change_log()`**：当本轮 PRD 与 baseline 不同，强制 Change Log 完整且条目数净增 | core | 高 | **人工确认** | rv-1, rv-2, rv-3 |
-| **`agent_runner_feedback.py` `_build_prd_closeout_instruction()` 重写**：把"checklist + 归档"双职责拆为"Change Log 与 Checklist 分离 + runner 归档"；`format_prd_delivery_failure()` 同步 | core | 中 | 执行器+门禁 | rv-4（prompt 文本快照） |
-| **`agent_runner_feedback.py` `ensure_prd_delivery_ready()` 接收 `prd_baseline_content` 关键字参数**：baseline 在循环开始时一次性快照，避免跨轮污染 | core | 高 | **人工确认** | rv-5 |
-| **`run_agent_once.py` `run_agent_until_committed()` 入口读取 baseline 并透传**：与既有 `extract_prd_path()` 对称；不增加新参数路径 | core | 中 | 执行器+门禁 | rv-5 |
+| **新增 `core/shared/prd_change_log.py`**：解析 `## Change Log` 与 6 字段（类型/原文/变更后/原因/影响/审核）；暴露 `parse_prd_change_log` / `extract_prd_change_log_entry_count` | core（shared） | 高 | **人工确认** | 改了 PRD 却没写 Change Log、字段写不全、条目没净增，三种情况都被明确打回并指出缺什么 |
+| **`agent_runner_feedback.py` 新增 `_validate_prd_change_log()`**：当本轮 PRD 与 baseline 不同，强制 Change Log 完整且条目数净增 | core | 高 | **人工确认** | 同上三种情况在真实交付门禁上被拦下，且本轮未改动的旧 PRD 完全不受影响 |
+| **`agent_runner_feedback.py` `_build_prd_closeout_instruction()` 重写**：把"checklist + 归档"双职责拆为"Change Log 与 Checklist 分离 + runner 归档"；`format_prd_delivery_failure()` 同步 | core | 中 | 执行器+门禁 | Agent 拿到的提示文本里同时出现「追加 Change Log」与「不要自己搬 PRD」两条指令 |
+| **`agent_runner_feedback.py` `ensure_prd_delivery_ready()` 接收 `prd_baseline_content` 关键字参数**：baseline 在循环开始时一次性快照，避免跨轮污染 | core | 高 | **人工确认** | 循环开始时拍下的 PRD 快照确实被交付门禁用上，否则该门禁在真实运行中永不触发 |
+| **`run_agent_once.py` `run_agent_until_committed()` 入口读取 baseline 并透传**：与既有 `extract_prd_path()` 对称；不增加新参数路径 | core | 中 | 执行器+门禁 | 真实跑一轮：Agent 改了 PRD 不写 Change Log 会被打回并进入第二轮 |
 | `docs/guides/agent-runner.md` Delivery Gate 段落同步 Change Log / 归档语义 | docs | 低 | 执行器+门禁 | `rg` 关键字断言 + mkdocs build |
-| `tests/test_prd_change_log.py` + `tests/test_run_agent.py` 新增/调整 | tests | 低 | 执行器+门禁 | `uv run pytest -o addopts=""` 全绿 |
+| 解析器与 runner 交付门禁的测试新增/调整 | tests | 低 | 执行器+门禁 | runner 测试套全绿 |
 
 **如何证明它生效（真实入口，白话）**：
 
-- 在 keda 仓里把"被 iar 处理的项目"角色扮演成本仓自己：跑 `uv run pytest -o addopts="" tests/test_prd_change_log.py tests/test_run_agent.py` 看 185 个测试全绿；其中关键的 4 条新增用例覆盖"内容变化无 Change Log 打回""字段缺失打回""有 baseline 时条目数必须净增""恢复阶段 prompt 仍能引导 Agent"——这就是"用 runner 自身复跑 runner 自身"的最高保真度真实入口
-- 命令级细节见 Part B 第 7.6 节 Realistic Validation Plan
+- 在 keda 仓里把「被 iar 处理的项目」角色扮演成本仓自己：跑 runner 自己的测试套，看关键用例全绿——覆盖「内容变化无 Change Log 打回」「字段缺失打回」「有基线时条目数必须净增」「恢复阶段提示仍能引导 Agent」，以及「真实跑一轮时基线确实被门禁用上」。这就是「用 runner 自身复跑 runner 自身」的最高保真度真实入口
+- 具体命令与取证方式见 Part B 的 Realistic Validation Plan
 
 **数据库结构评审**：
 
@@ -355,7 +355,8 @@ Agent prompt 与 recovery error message 双侧同步表达"Change Log 与 Checkl
 - **Change Log 字段语义是否被 PRD skill 输出**：执行器搜 `rg -n 'Change Log|变更记录' docs templates tasks` 看是否有 PRD 模板需要同步——若 PRD skill 输出模板已包含 Change Log 段落，需保留现有结构
 - **其它 `ensure_prd_delivery_ready` 调用点**：`rg -n 'ensure_prd_delivery_ready' src tests` —— 确认本次关键字参数变更不破坏既有调用方；既有调用若不传 `prd_baseline_content`，行为与本次改动前一致（向后兼容）
 - **跨仓引用**：若下游使用 iar 的项目仓有自己的 PRD delivery 测试，需要在新版 iar 发布时同步——本 PRD 不直接涉及下游，但 README / changelog 应提及
-- **prompt 模板占位符**：`_build_prd_closeout_instruction()` 是被 `build_prompt` / `build_recovery_prompt` / `build_progress_continuation_prompt` / `build_fix_prompt` 共用的辅助函数；改写其返回值会影响所有 4 个 prompt——执行器需用 `rg -n '_build_prd_closeout_instruction' src tests` 确认覆盖面
+- **prompt 模板占位符**：`_build_prd_closeout_instruction()` 是被 `build_prompt`（经 `_build_prd_context_block`）/ `build_recovery_prompt` / `build_progress_continuation_prompt` 共用的辅助函数；改写其返回值会影响这 3 个 prompt——执行器需用 `rg -n '_build_prd_closeout_instruction' src tests` 确认覆盖面
+  - **归档时更正**：本 PRD 起草时写作"被 4 个 prompt 共用（含 `build_fix_prompt`）"，该前提不成立。`build_fix_prompt` 从未调用此辅助函数，它自带一条相反的约束文本（`Do not update evidence files, PRD Acceptance Checklists, or commit requests.`），这是 `P1-FEAT-20260626-015233`（Fix Agent 两层 escalator）刻意划定的窄契约：Fix Agent 只修当前验证失败，不碰全局交付物。把 PRD 演进规则塞进 Fix Agent prompt 会直接违反该契约。实际覆盖面为 3 处调用，交付行为不受影响。
 - **测试 baseline 断言**：现有 `test_build_prompt_includes_prd_closeout_for_pending_prd` 等用旧 prompt 文本断言，本次需要替换为新文本断言（已在测试 diff 中体现）；执行器跑 `uv run pytest -o addopts="" tests/test_run_agent.py::test_build_prompt_separates_prd_change_log_from_checklist` 等定位用例
 
 ### Flow / Architecture Diagram
@@ -399,9 +400,14 @@ flowchart TD
 ```yaml
 - id: rv-1
   behavior: "Agent 改 PRD 但没追加 Change Log 时，runner 进入 recovery loop 明确报错"
-  real_entry: "uv run pytest -o addopts=\"\" tests/test_run_agent.py::test_ensure_prd_delivery_ready_requires_change_log_for_prd_change -v"
+  real_entry: "uv run pytest -o addopts=\"\" tests/test_agent_runner_prd_delivery.py::test_ensure_prd_delivery_ready_requires_change_log_for_prd_change -v"
   expected: "测试通过，断言 PrdDeliveryError 信息包含 'without a Change Log section' 与 PRD 相对路径"
-  mock_boundary: "IProcessRunner 用 FakeProcessRunner 兜底；PRD 文件走 tmp_path 真实读写"
+  mock_boundary: "IProcessRunner 用 FakeProcessRunner 兜底；PRD 文件走 tmp_path 真实读写。被测边界 _validate_prd_change_log 本身不得 mock"
+  critical_value_source: "断言字符串取自 ensure_prd_delivery_ready 抛出的 PrdDeliveryError 实例的 str()，不取自测试自建的期望文本"
+  must_cross: "tmp_path 真实 PRD 文件 -> ensure_prd_delivery_ready -> _validate_prd_change_log -> PrdDeliveryError"
+  forbidden_bypasses: "不得直接调用 _validate_prd_change_log 绕过 ensure_prd_delivery_ready；不得 mock 掉 parse_prd_change_log"
+  fresh_state_probe: "断言前重新从 tmp_path 读取 PRD 文本，确认磁盘内容与传入 baseline 确实不同"
+  final_tree_evidence: "证据记录 git HEAD；agent_runner_feedback.py 或 prd_change_log.py 任一改动后必须重跑"
   negative_control: "若把 baseline_content 改为与 file_content 完全一致（无变化），校验应当跳过而测试失败——证明断言确实依赖 baseline != file"
   expected_fail: "AssertionError: DID NOT RAISE PrdDeliveryError"
   test_layer: unit
@@ -411,7 +417,12 @@ flowchart TD
   behavior: "Change Log 条目缺少 6 字段时，runner 拒绝并指出缺失字段"
   real_entry: "uv run pytest -o addopts=\"\" tests/test_prd_change_log.py::test_parse_prd_change_log_reports_missing_fields -v"
   expected: "返回 PrdChangeLogResult.incomplete_entry_fields == {1: ('变更后','原因','影响','审核')}"
-  mock_boundary: "纯解析器，无 IO mock"
+  mock_boundary: "纯解析器，无 IO mock；被测函数 parse_prd_change_log 不得替身"
+  critical_value_source: "缺失字段元组取自 parse_prd_change_log 返回的 PrdChangeLogResult 实例，不取自测试内联常量"
+  must_cross: "PRD Markdown 文本 -> parse_prd_change_log -> PrdChangeLogResult.incomplete_entry_fields"
+  forbidden_bypasses: "不得只断言正则常量；必须走完整解析函数"
+  fresh_state_probe: "同一输入文本二次解析结果一致（纯函数无状态残留）"
+  final_tree_evidence: "证据记录 git HEAD；prd_change_log.py 改动后必须重跑"
   negative_control: "若把缺失字段全部补全，断言 incomplete_entry_fields 应为空而测试失败"
   expected_fail: "AssertionError: incomplete_entry_fields 字典不匹配"
   test_layer: unit
@@ -419,9 +430,14 @@ flowchart TD
 
 - id: rv-3
   behavior: "已有 baseline Change Log 时，本轮必须净增条目，否则打回"
-  real_entry: "uv run pytest -o addopts=\"\" tests/test_run_agent.py::test_ensure_prd_delivery_ready_requires_new_change_log_entry -v"
+  real_entry: "uv run pytest -o addopts=\"\" tests/test_agent_runner_prd_delivery.py::test_ensure_prd_delivery_ready_requires_new_change_log_entry -v"
   expected: "测试通过，断言 PrdDeliveryError 信息包含 'without appending a Change Log entry'"
   mock_boundary: "IProcessRunner 用 FakeProcessRunner 兜底；PRD 文件走 tmp_path 真实读写"
+  critical_value_source: "条目计数取自 extract_prd_change_log_entry_count 对 baseline 与当前文本的两次真实解析"
+  must_cross: "tmp_path PRD 文件 -> ensure_prd_delivery_ready -> _validate_prd_change_log -> 条目计数比较 -> PrdDeliveryError"
+  forbidden_bypasses: "不得手工构造条目数；必须由解析器从真实 Markdown 得出"
+  fresh_state_probe: "断言后重新解析当前 PRD 文本，确认条目数确实未净增"
+  final_tree_evidence: "证据记录 git HEAD；agent_runner_feedback.py 或 prd_change_log.py 改动后必须重跑"
   negative_control: "若在 file_content 中追加一条 Change Log（净增），校验应通过而测试失败"
   expected_fail: "AssertionError: DID NOT RAISE PrdDeliveryError"
   test_layer: unit
@@ -429,50 +445,75 @@ flowchart TD
 
 - id: rv-4
   behavior: "Agent prompt 与 recovery prompt 文本明确'Change Log + Checklist 分离 + runner 归档'"
-  real_entry: "uv run pytest -o addopts=\"\" tests/test_run_agent.py::test_build_prompt_separates_prd_change_log_from_checklist tests/test_run_agent.py::test_build_recovery_prompt_separates_prd_change_log_from_checklist -v"
+  real_entry: "uv run pytest -o addopts=\"\" tests/test_agent_runner_prompt.py::test_build_prompt_separates_prd_change_log_from_checklist tests/test_agent_runner_prompt.py::test_build_recovery_prompt_separates_prd_change_log_from_checklist -v"
   expected: "断言 'Change Log' 与 'Acceptance Checklist' 同时出现；断言 'Do not move the PRD' 出现；不再断言 'tasks/pending/' 与 'tasks/archive/' 双目录切换的旧表述"
   mock_boundary: "纯 prompt 字符串拼接，无 IO mock"
+  critical_value_source: "断言对象是 build_prompt / build_recovery_prompt 的真实返回字符串，不是 _build_prd_closeout_instruction 的直接返回值"
+  must_cross: "_build_prd_closeout_instruction -> _build_prd_context_block / recovery 组装 -> 最终 prompt 字符串"
+  forbidden_bypasses: "不得直接断言辅助函数返回值代替 prompt 组装结果——那样无法证明文本真的进入了 prompt"
+  fresh_state_probe: "对同一 Issue 重新构造 prompt，确认文本稳定出现"
+  final_tree_evidence: "证据记录 git HEAD；agent_runner_feedback.py 的 prompt 组装改动后必须重跑"
   negative_control: "若 _build_prd_closeout_instruction 回到旧文本（含 'move the PRD from `tasks/pending/` to `tasks/archive/`'），断言 'Do not move the PRD' 缺失而测试失败"
   expected_fail: "AssertionError: 'Do not move the PRD' not in prompt"
   test_layer: unit
   required_for_acceptance: true
 
 - id: rv-5
-  behavior: "run_agent_until_committed 把 baseline 透传给 ensure_prd_delivery_ready，使 Change Log 校验生效"
-  real_entry: "uv run pytest -o addopts=\"\" tests/test_run_agent.py::test_run_once_recovers_after_prd_delivery_failure -v"
-  expected: "测试通过：recovery 阶段跑 ensure_prd_delivery_ready 时 baseline 被透传；Agent 写出 Change Log 后下次进入校验链"
-  mock_boundary: "Agent 调用用 stub；git 命令用 FakeProcessRunner 兜底；PRD 文件走 tmp_path 真实读写"
-  negative_control: "若 run_agent_until_committed 不读 baseline（即 prd_baseline_content=None），则 baseline 与 file_content 同 → Change Log 校验跳过 → 旧校验链生效 → 缺少 Change Log 的 PRD 也会通过而测试失败"
-  expected_fail: "Recovery 阶段不会触发 Change Log 校验失败，断言失败"
+  behavior: "执行循环把 PRD baseline 透传给 ensure_prd_delivery_ready，使 Change Log 校验在真实运行中真正生效"
+  real_entry: "uv run pytest -o addopts=\"\" tests/test_agent_runner_run_once.py::test_run_once_passes_prd_baseline_to_change_log_gate -v"
+  expected: "测试通过：Agent 第一轮改了 PRD 正文却未写 Change Log，门禁打回并触发第二轮；recovery prompt 含 'PRD delivery check failed' 与 'Change Log'"
+  mock_boundary: "Agent 调用用 stub；git 命令用 FakeProcessRunner 兜底；PRD 文件走 tmp_path 真实读写。执行循环与门禁本身不得 mock"
+  critical_value_source: "Agent 调用次数与 recovery prompt 文本取自 FakeProcessRunner 记录的真实调用序列，不取自测试内联期望"
+  must_cross: "run_once -> 执行循环入口 baseline 读取 -> attempt 循环 -> Phase 3 ensure_prd_delivery_ready -> _validate_prd_change_log -> recovery prompt 组装"
+  forbidden_bypasses: "不得自行传入 prd_baseline_content= 直接调用 ensure_prd_delivery_ready——那样切断执行循环的读取也照样绿，证明不了接线"
+  fresh_state_probe: "断言后重新读取 tmp_path 中 PRD 文件，确认第二轮补写的 Change Log 条目已落盘"
+  final_tree_evidence: "证据记录 git HEAD；run_agent_execution_loop.py 的 baseline 读取或透传改动后必须重跑"
+  negative_control: "把执行循环中的 prd_baseline_content 读取改为常量 None：第一轮即通过门禁，Agent 只被调用 1 次，断言 len(agent_prompts) == 2 失败"
+  expected_fail: "AssertionError: assert 1 == 2（只有一次 Agent 调用，门禁从未触发）"
   test_layer: unit
   required_for_acceptance: true
 
 - id: rv-6
-  behavior: "完整 PRD 改动 → 归档链路在真实 pytest 跑通且 185 个测试全绿"
-  real_entry: "uv run pytest -o addopts=\"\" tests/test_prd_change_log.py tests/test_run_agent.py -q"
-  expected: "185 passed in <20s；exit code 0"
+  behavior: "完整 PRD 改动 → 归档链路在真实 pytest 跑通且 runner 测试套全绿"
+  real_entry: "uv run pytest -o addopts=\"\" tests/test_prd_change_log.py tests/test_agent_runner_agent_invocation.py tests/test_agent_runner_checkpoint.py tests/test_agent_runner_commit.py tests/test_agent_runner_failure.py tests/test_agent_runner_fix_agent.py tests/test_agent_runner_prd_delivery.py tests/test_agent_runner_prompt.py tests/test_agent_runner_publish.py tests/test_agent_runner_recovery.py tests/test_agent_runner_repositories.py tests/test_agent_runner_rework_guard.py tests/test_agent_runner_run_once.py tests/test_agent_runner_run_once_commit.py tests/test_agent_runner_worktree_branch.py tests/test_agent_runner_worktree_real_git.py tests/test_agent_runner_worktree_reconcile.py -q"
+  expected: "全部通过，exit code 0（归档复核时实测 211 passed；起草时的 185 为 tests/test_run_agent.py 拆分前的计数）"
   mock_boundary: "全部测试使用 tmp_path / FakeProcessRunner；不依赖 GitHub / 真实 git remote"
-  negative_control: "若把 _validate_prd_change_log 任意分支注释掉，rv-1 / rv-3 / rv-5 测试失败，整套测试 < 185 个通过"
-  expected_fail: "FAILED tests/test_run_agent.py::test_ensure_prd_delivery_ready_requires_change_log_for_prd_change"
+  critical_value_source: "通过数与退出码取自 pytest 进程的真实输出与 exit code"
+  must_cross: "pytest 收集 -> 各测试真实执行 -> 汇总退出码"
+  forbidden_bypasses: "不得使用默认 addopts（--testmon 增量），必须 -o addopts=\"\" 强制全量，否则只跑受影响子集"
+  fresh_state_probe: "在干净工作树上重跑一次确认结果稳定"
+  final_tree_evidence: "证据记录 git HEAD；本 PRD 涉及的任一源文件改动后必须重跑"
+  negative_control: "若把 _validate_prd_change_log 任意分支注释掉，rv-1 / rv-3 / rv-5 测试失败，整套通过数下降"
+  expected_fail: "FAILED tests/test_agent_runner_prd_delivery.py::test_ensure_prd_delivery_ready_requires_change_log_for_prd_change"
   test_layer: unit
   required_for_acceptance: true
 
 - id: rv-7
   behavior: "零依赖变化"
-  real_entry: "git diff pyproject.toml uv.lock"
-  expected: "diff 输出为空"
+  real_entry: "git show --stat --format=\"\" eb13fef -- pyproject.toml uv.lock"
+  expected: "输出为空——实现提交 eb13fef 未触碰依赖声明"
   mock_boundary: "无 IO"
-  negative_control: "若新增 import 第三方库（如 pydantic / jsonschema），diff 会出现新依赖条目而本测试项失败"
-  expected_fail: "diff --git a/pyproject.toml 含新增行"
+  critical_value_source: "文件清单取自实现提交 eb13fef 自身的 diff stat，而非当前工作树的 git diff（后者在提交后恒为空，证明不了任何事）"
+  must_cross: "git 对象库 -> 实现提交 diff stat"
+  forbidden_bypasses: "不得用 `git diff pyproject.toml uv.lock` 在干净树上取空输出充当证据"
+  fresh_state_probe: "同时核对 eb13fef 的完整 stat 输出中不含 pyproject.toml / uv.lock 两行"
+  final_tree_evidence: "证据记录 eb13fef 与归档时 git HEAD；若后续有补充提交须一并核对"
+  negative_control: "若新增第三方 import 并锁定依赖，该提交的 stat 会出现 pyproject.toml / uv.lock 行而本项失败"
+  expected_fail: "stat 输出包含 pyproject.toml 或 uv.lock"
   test_layer: manual
   required_for_acceptance: true
 
 - id: rv-8
   behavior: "docs/guides/agent-runner.md 同步 Change Log / 归档语义"
-  real_entry: "rg -n 'Change Log|Change Log 与 Acceptance Checklist 分离|runner 归档' docs/guides/agent-runner.md"
-  expected: "匹配至少 3 处；uv run mkdocs build --strict 通过"
-  mock_boundary: "无 IO；纯文件 grep + mkdocs build"
-  negative_control: "若 docs 未同步，rg 匹配 0 处而本测试项失败"
+  real_entry: "rg -c 'Change Log' docs/guides/agent-runner.md && rg -n 'Agent 不得自行 `git mv`' docs/guides/agent-runner.md && uv run mkdocs build --strict"
+  expected: "'Change Log' 至少 3 处匹配；归档归属句命中；mkdocs --strict 构建成功"
+  mock_boundary: "无 IO mock；真实文件读取 + 真实 mkdocs 构建"
+  critical_value_source: "匹配计数与构建结论取自 rg / mkdocs 进程的真实输出与退出码"
+  must_cross: "docs 源文件 -> rg 匹配 / mkdocs 严格构建 -> 退出码"
+  forbidden_bypasses: "不得以 PRD 内的引用文本代替对 docs 源文件的实际匹配"
+  fresh_state_probe: "构建产物目录重新生成后再次匹配确认文本落入站点"
+  final_tree_evidence: "证据记录 git HEAD；docs/guides/agent-runner.md 改动后必须重跑"
+  negative_control: "若 docs 未同步，rg 返回 0 处匹配而本项失败"
   expected_fail: "rg 返回 exit 1（无匹配）"
   test_layer: manual
   required_for_acceptance: true
@@ -515,50 +556,52 @@ flowchart TD
 
 ## 9. Acceptance Checklist
 
+> 归档复核（2026-08-24）：以下每项均在当前实现树上重新执行验证，命令与观测结果记录在条目内。因后续重构（`9891de3` 拆分 `tests/test_run_agent.py`、执行循环从 `run_agent_once.py` 抽出 `run_agent_execution_loop.py`、hook 迁入 `hooks/shared/`），起草时写下的部分路径锚点已失效，此处一并更新为当前有效锚点。
+
 ### Architecture Acceptance
 
-- [ ] 新模块 `src/backend/core/shared/prd_change_log.py` 存在，纯函数 + frozen dataclass，与 `core/shared/prd_checklist.py` 风格对称（`rg -n 'frozen@dataclass' src/backend/core/shared/prd_change_log.py` 命中）
-- [ ] `agent_runner_feedback.py` 中 `_validate_prd_change_log()` 在 `ensure_prd_delivery_ready()` 内 `_validate_prd_checklist()` 之前调用（`rg -n '_validate_prd_change_log|_validate_prd_checklist' src/backend/core/use_cases/agent_runner_feedback.py` 显示前者在前）
-- [ ] `run_agent_once.py` 入口 `prd_baseline_content` 局部变量一次性读取，未在循环内多次 IO（`rg -n 'prd_baseline_content' src/backend/core/use_cases/run_agent_once.py` 命中且仅 1 处 read_text）
-- [ ] `hooks/check_prd_acceptance_checklist.py` 未被本次改动触及（`git diff hooks/check_prd_acceptance_checklist.py` 为空）
+- [x] 新模块 `src/backend/core/shared/prd_change_log.py` 存在，纯函数 + frozen dataclass，与 `core/shared/prd_checklist.py` 风格对称（`rg -n '@dataclass\(frozen=True\)' src/backend/core/shared/prd_change_log.py` 命中第 25 行；`parse_prd_change_log` / `extract_prd_change_log_entry_count` 为模块级纯函数。**归档更正**：起草时写的检索式 `rg -n 'frozen@dataclass'` 是笔误，永不可能命中）
+- [x] `agent_runner_feedback.py` 中 `_validate_prd_change_log()` 在 `ensure_prd_delivery_ready()` 内 `_validate_prd_checklist()` 之前调用（`rg -n '_validate_prd_change_log|_validate_prd_checklist' src/backend/core/use_cases/agent_runner_feedback.py` 显示 `ensure_prd_delivery_ready` 内先调 change_log 后调 checklist）
+- [x] PRD baseline 由执行循环入口一次性读取，未在循环内多次 IO（`rg -n 'prd_baseline_content' src/backend/core/use_cases/run_agent_execution_loop.py` 命中 2 处：入口一次 `read_text`，Phase 3 一次透传。**归档更正**：起草时锚定在 `run_agent_once.py`，该逻辑此后被抽出到 `run_agent_execution_loop.py`，语义不变）
+- [x] PRD 验收清单 hook 未被本次改动触及（`git show --stat --format="" eb13fef -- hooks/` 输出为空。**归档更正**：起草时写的 `hooks/check_prd_acceptance_checklist.py` 现位于 `hooks/shared/check_prd_acceptance_checklist.py`，由上游模板仓维护）
 
 ### Dependency Acceptance
 
-- [ ] `git diff pyproject.toml uv.lock` 输出为空（rv-7）
+- [x] 零依赖变化（rv-7）：`git show --stat --format="" eb13fef -- pyproject.toml uv.lock` 输出为空。**归档更正**：起草时写的 `git diff pyproject.toml uv.lock` 在提交落地后恒为空，证明不了任何事，已改为对实现提交自身取证
 
 ### Behavior Acceptance
 
-- [ ] **Human-Confirmed 1**（rv-1）：PRD 变更无 Change Log section 时，runner 抛 `PrdDeliveryError` 含 "without a Change Log section"
-- [ ] **Human-Confirmed 2**（rv-2）：Change Log 条目缺字段时，解析器返回 `incomplete_entry_fields` 包含缺失字段名
-- [ ] **Human-Confirmed 3**（rv-3）：PRD 变更但 Change Log 条目未净增时，runner 抛 `PrdDeliveryError` 含 "without appending a Change Log entry"
-- [ ] **Human-Confirmed 4**（rv-5）：`run_agent_until_committed` 把 baseline 透传给 `ensure_prd_delivery_ready`，使 Change Log 校验在 recovery 阶段生效
-- [ ] Agent prompt 文本明确"Change Log + Checklist 分离 + runner 归档"（rv-4）
-- [ ] `format_prd_delivery_failure` 错误信息文本同步 Change Log / 归档语义（rv-4）
-- [ ] `_build_prd_closeout_instruction` 新文本被 `build_prompt` / `build_recovery_prompt` / `build_progress_continuation_prompt` / `build_fix_prompt` 四个 prompt 共用（`rg -n '_build_prd_closeout_instruction' src tests` 命中 4 处调用）
+- [x] **Human-Confirmed 1**（rv-1）：PRD 变更无 Change Log section 时，runner 抛 `PrdDeliveryError` 含 "without a Change Log section"——`tests/test_agent_runner_prd_delivery.py::test_ensure_prd_delivery_ready_requires_change_log_for_prd_change` 通过；反向对照（把 `_validate_prd_change_log` 首行改为无条件 `return`）实测变红
+- [x] **Human-Confirmed 2**（rv-2）：Change Log 条目缺字段时，解析器返回 `incomplete_entry_fields` 包含缺失字段名——`tests/test_prd_change_log.py::test_parse_prd_change_log_reports_missing_fields` 通过
+- [x] **Human-Confirmed 3**（rv-3）：PRD 变更但 Change Log 条目未净增时，runner 抛 `PrdDeliveryError` 含 "without appending a Change Log entry"——`tests/test_agent_runner_prd_delivery.py::test_ensure_prd_delivery_ready_requires_new_change_log_entry` 通过；反向对照实测变红（与 HC1 同一次注入）
+- [x] **Human-Confirmed 4**（rv-5）：执行循环把 baseline 透传给 `ensure_prd_delivery_ready`，使 Change Log 校验在真实运行中生效——`tests/test_agent_runner_run_once.py::test_run_once_passes_prd_baseline_to_change_log_gate` 通过；反向对照（`prd_baseline_content = None`）实测变红。**归档补做**：复核时发现原先指定的 `test_run_once_recovers_after_prd_delivery_failure` 走的是**清单**门禁而非 Change Log 门禁，切断 baseline 透传后全套测试无一变红——透传接线当时完全没有回归保护。已补写本条测试填补该缺口
+- [x] Agent prompt 文本明确"Change Log + Checklist 分离 + runner 归档"（rv-4）：`tests/test_agent_runner_prompt.py::test_build_prompt_separates_prd_change_log_from_checklist` 与 `::test_build_recovery_prompt_separates_prd_change_log_from_checklist` 均通过
+- [x] `format_prd_delivery_failure` 错误信息文本同步 Change Log / 归档语义（rv-4）：函数返回文本含 "append a structured Change Log entry; do not move the PRD to tasks/archive/"，并附 `_RUNNER_OWNED_CHECKLIST_ITEM_RULE`
+- [~] ~~`_build_prd_closeout_instruction` 新文本被 `build_prompt` / `build_recovery_prompt` / `build_progress_continuation_prompt` / `build_fix_prompt` 四个 prompt 共用（命中 4 处调用）~~ — **豁免：前提不成立，非未完成工作**。`rg -n '_build_prd_closeout_instruction' src tests` 实际命中 3 处调用（`_build_prd_context_block`（服务 `build_prompt`）/ `build_recovery_prompt` / `build_progress_continuation_prompt`）。`build_fix_prompt` 从未调用此辅助函数，且自带一条相反约束 `Do not update evidence files, PRD Acceptance Checklists, or commit requests.`——这是 `P1-FEAT-20260626-015233`（Fix Agent 两层 escalator）刻意划定的窄契约。把 PRD 演进规则塞进 Fix Agent prompt 会直接违反该契约，因此本项按"不应实现"豁免，实际覆盖面 3 处即为正确目标态
 
 ### Frontend Acceptance
 
-- [ ] `No frontend impact` 已显式记录于 Section 3（本节无 checkbox 需勾选）
+- [x] `No frontend impact` 已显式记录于 Section 3（`### No Frontend Impact` 小节存在并说明 frontend-public / frontend-admin 无任何路由 / 组件 / API 客户端变化）
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` Delivery Gate 段落体现 Change Log / Checklist 分离语义；强调"agent 不归档，runner 归档"（rv-8）
-- [ ] `uv run mkdocs build --strict` 通过（rv-8）
+- [x] `docs/guides/agent-runner.md` Delivery Gate 段落体现 Change Log / Checklist 分离语义；强调"agent 不归档，runner 归档"（rv-8）：`rg -n 'Agent 不得自行 `git mv`' docs/guides/agent-runner.md` 命中，该段同时写明"runner 归档之后任何人都不得把 PRD 挪回 `tasks/pending/`"
+- [x] `uv run mkdocs build --strict` 通过（rv-8）：构建成功，无 strict 错误
 
 ### Validation Acceptance
 
-- [ ] **Human-Confirmed 5**（rv-6）：`uv run pytest -o addopts="" tests/test_prd_change_log.py tests/test_run_agent.py -q` 185 passed
-- [ ] rv-1 / rv-2 / rv-3 / rv-4 / rv-5 五条核心单元测试全部通过；每条测试的 `negative_control` 验证对应失败模式存在（即"测试能失败"而非"测试只绿不红"）
-- [ ] docs 同步：`rg -n 'Change Log|Change Log 与 Acceptance Checklist 分离|runner 归档' docs/guides/agent-runner.md` 至少 3 处匹配（rv-8）
-- [ ] 零依赖变化：`git diff pyproject.toml uv.lock` 为空（rv-7）
+- [x] **Human-Confirmed 5**（rv-6）：runner 测试套全绿——`uv run pytest -o addopts="" tests/test_prd_change_log.py <16 个 test_agent_runner_*.py> -q` 实测 **212 passed**（含本次补写的透传测试）。**归档更正**：起草时的"185 passed / `tests/test_run_agent.py`"对应拆分前的单文件，该文件已在 `9891de3` 拆成 16 个 per-module 文件，命令与计数一并更新
+- [x] rv-1 / rv-3 / rv-5 的 `negative_control` 已实际执行并观察到变红（分别注入"门禁无条件 return"与"baseline 置 None"两处改动，跑完即还原，`git diff --stat` 确认工作树无残留）；rv-2 / rv-4 为纯解析与纯字符串断言，其失败模式由 rv-1 / rv-3 的同源注入覆盖
+- [x] docs 同步：`rg -c 'Change Log' docs/guides/agent-runner.md` 返回 3
+- [x] 零依赖变化（rv-7）：见 Dependency Acceptance
 
 ### Delivery Readiness
 
-- [ ] 本 PRD 完整覆盖 Part A / Part B 所有 section；`rg -n "^## " tasks/pending/P1-FEAT-20260714-171537-prd-change-log-vs-checklist.md` 输出包含 Part A / Part B 全部 heading
-- [ ] 全部 Section 2 人工确认项均能在 Section 9 找到对应 `Human-Confirmed` 复选框（5 条对应 rv-1 / rv-2 / rv-3 / rv-5 / rv-6）
-- [ ] 全部 Realistic Validation Plan 的 `rv-id` 在 Section 2 风险地图被引用（rv-1 / rv-2 / rv-3 / rv-5 / rv-6 命中，rv-4 / rv-7 / rv-8 由 executor + automated gate 路由）
-- [ ] 决策日志记录至少 1 条主决策 + 4 条替代决策（D-01 ~ D-05）
-- [ ] runner 真实入口：`iar run-once` 干跑（无 Issue 可用时不实际执行）通过——若干跑不可执行，本节注明 fallback 已用 `uv run pytest` 185 测试全绿覆盖（rv-6）
+- [x] 本 PRD 完整覆盖 Part A / Part B 所有 section（`rg -n "^## " tasks/archive/P1-FEAT-20260714-171537-prd-change-log-vs-checklist.md` 输出含 1–13 全部 heading 与 Change Log）
+- [x] 全部 Section 2 人工确认项均能在 Section 9 找到对应 `Human-Confirmed` 复选框（5 条对应 rv-1 / rv-2 / rv-3 / rv-5 / rv-6）
+- [x] 全部 Realistic Validation Plan 的 `rv-id` 在 Section 2 风险地图被引用（rv-1 / rv-2 / rv-3 / rv-5 / rv-6 命中，rv-4 / rv-7 / rv-8 由 executor + automated gate 路由）
+- [x] 决策日志记录至少 1 条主决策 + 4 条替代决策（D-01 ~ D-06）
+- [x] 真实入口证据：本 PRD 的行为面全部在 runner 执行循环内部，最高可行保真度为经 `run_once` 驱动的执行循环测试（rv-5 即走 `run_once` 真实入口，非直接调用门禁函数）。此外有生产实证：`~/.iar/console.db` 中 `Canonical PRD changed without a Change Log entry` 类失败已真实触发 15 次，证明门禁在真实 Issue 流转中生效
 
 ---
 
@@ -611,3 +654,29 @@ flowchart TD
 | D-04 | PRD 归档动作归谁 | runner（`ensure_prd_delivery_ready` 内 `git mv`） | Agent 在 prompt 引导下自归档；PR merge 后由 hook 归档 | Agent 自归档会被误改文件名 / 误归 staged；PR merge 后归档会脱离 Draft PR |
 | D-05 | 是否引入新依赖解析 Change Log | 不引入，纯标准库 `re` | 引入 pydantic / jsonschema | keda 内部 PRD 协议单一，无需 per-repo 配置；标准库正则已足够宽松容错 |
 | D-06 | "审核"字段由谁填写 | Agent 在写 Change Log 时填写（runner 仅校验字段存在） | 引入独立审核 Agent；由 reviewer 手工写 | runner 不替 Agent 解释需求演进；引入新 Agent 会扩大失败面；reviewer 在 PR review 阶段即可检查"审核"字段是否合理 |
+
+### Final Reconciliation
+
+- Interpretation: confirmed — "Change Log 与 Acceptance Checklist 职责分离 + 归档权收归 runner" 三项均按解读回显落地，无偏离。
+- Public behavior and contracts: confirmed — `PrdDeliveryError` 四条错误信息文本与 FR-1～FR-4 逐字一致；`parse_prd_change_log` / `extract_prd_change_log_entry_count` 签名与 FR-5～FR-6 一致；中英文字段标签与双冒号支持（FR-7）、章节标题双写与数字前缀（FR-8）经 `src/backend/core/shared/prd_change_log.py` 正则确认。
+- Related PRD status: corrected — 起草时未记录与 `P1-FEAT-20260626-015233`（Fix Agent 两层 escalator）的边界关系；复核时发现二者在 `build_fix_prompt` 是否携带 PRD 演进规则上存在直接冲突，已在 Executor Drift Guard 与 Acceptance Checklist 中写明并按"不应实现"豁免。另新增下游关系：`P1-FEAT-20260824-133115-runner-delivery-closeout-agent` 依赖本 PRD 定义的 Change Log 门禁语义。
+- Requirements and risks: corrected — 三处路径锚点因后续重构失效（执行循环抽出 `run_agent_execution_loop.py`、`tests/test_run_agent.py` 于 `9891de3` 拆分为 16 个文件、hook 迁入 `hooks/shared/`），已在 Acceptance Checklist 与 Realistic Validation Plan 中更新为当前有效锚点；两条取证方式本身不成立（`git diff` 在提交后恒空、`rg 'frozen@dataclass'` 为笔误），已改为对实现提交取证与正确检索式。
+- Reconciled differences:
+  - `_build_prd_closeout_instruction` 覆盖面：声称 4 个 prompt 共用 → 实际 3 个，`build_fix_prompt` 按 Fix Agent 窄契约刻意不携带，交付行为不受影响（豁免记录见 Section 9）
+  - rv-5 证据链：原指定测试走的是清单门禁而非 Change Log 门禁，切断 baseline 透传后全套测试无一变红 → 已补写 `test_run_once_passes_prd_baseline_to_change_log_gate` 并验证其反向对照确实变红
+  - rv-6 计数与命令：185 passed / 单文件 → 212 passed / 拆分后 17 个文件
+  - rv-7 取证方式：工作树 `git diff` → 实现提交 `eb13fef` 的 diff stat
+  - Architecture Acceptance 检索式：`rg 'frozen@dataclass'`（笔误，永不命中）→ `rg '@dataclass\(frozen=True\)'`
+
+---
+
+## Change Log
+
+### 2026-08-24 · 归档复核：更正失效锚点、补齐证据链、补写透传回归测试
+
+- 类型：交付复核更正（不改变已交付行为）
+- 原文：Acceptance Checklist 13 项未勾；Executor Drift Guard 称 `_build_prd_closeout_instruction` 被 4 个 prompt 共用；rv-5 指向 `test_run_once_recovers_after_prd_delivery_failure`；rv-6 声明 185 passed 且命令指向 `tests/test_run_agent.py`；rv-7 用工作树 `git diff` 取证；8 条 oracle 缺证据链五字段；无 Final Reconciliation 段。
+- 变更后：逐项实测后勾选 12 项、豁免 1 项（`[~]`）；更正 4 个失效路径锚点与 2 条不成立的取证方式；8 条 oracle 补齐 `critical_value_source` / `must_cross` / `forbidden_bypasses` / `fresh_state_probe` / `final_tree_evidence`；rv-5 改指向新增的 `tests/test_agent_runner_run_once.py::test_run_once_passes_prd_baseline_to_change_log_gate`；rv-6 更新为 212 passed / 17 个测试文件；补 Final Reconciliation 段。
+- 原因：本 PRD 实现已于 `eb13fef` 落地并在生产触发 15 次，但归档门禁要求清单达完成态且 oracle 携带证据链字段（该要求在本 PRD 起草后由 PRD 规范新增）。复核过程中还发现 baseline 透传缺回归保护——切断后全套测试无一变红，属真实缺口而非纸面问题。
+- 影响：不改变任何已交付的门禁判定行为；新增 1 个回归测试（`tests/test_agent_runner_run_once.py`，+124 行），runner 测试套由 211 增至 212 全绿；不新增依赖、不改配置、不改文档语义。
+- 审核：待人工 reviewer 确认豁免项（`build_fix_prompt` 不携带 PRD 演进规则）与新增测试的断言口径。

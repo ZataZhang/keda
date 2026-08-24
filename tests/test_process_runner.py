@@ -760,6 +760,57 @@ def test_inactivity_timeout_exception_carries_partial_output(tmp_path: Path) -> 
     assert "checked rv-1" in str(exc_info.value.output or "")
 
 
+def test_pty_stream_timeout_exception_carries_partial_output(tmp_path: Path) -> None:
+    """PTY 流式路径(kimi / codex)被超时杀掉时也必须带回部分输出。
+
+    这条路径的失败摘要只剩一句 "No output was captured before the kill."——
+    Issue 的 Attempt History 因此把"卡在派子 agent 之前"渲染成"什么都没输出",
+    排障只能回去翻 runner 的文件日志。
+    """
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    runner = SubprocessRunner()
+    script = "import time\nprint('checked rv-1', flush=True)\ntime.sleep(60)\n"
+
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+        runner.run(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            capture_output=False,
+            timeout=3600,
+            inactivity_timeout=2,
+        )
+
+    assert "checked rv-1" in str(exc_info.value.output or "")
+
+
+def test_claude_stream_timeout_exception_carries_partial_output(tmp_path: Path) -> None:
+    """Claude stream-json 路径超时被杀时,渲染出的输出必须挂在异常上。"""
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    text_event = _json_line(
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "checked rv-1\n"},
+            },
+        }
+    )
+    script = f"import time\nprint({text_event.strip()!r}, flush=True)\ntime.sleep(60)\n"
+
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+        run_filtered_claude_stream(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            timeout=3600,
+            inactivity_timeout=2,
+            collect_stdout=True,
+        )
+
+    assert "checked rv-1" in str(exc_info.value.output or "")
+
+
 def test_subprocess_runner_keeps_active_process_alive(
     tmp_path: Path,
 ) -> None:
