@@ -62,6 +62,65 @@ class FailureType(Enum):
     PROVIDER_CAPACITY = "provider_capacity"
     UNRECOVERABLE = "unrecoverable"
     FORBIDDEN_BLOCKED = "forbidden_blocked"
+    DELIVERY_CLOSEOUT = "delivery_closeout"
+
+
+class DeliveryGateFailureKind(Enum):
+    """交付门禁失败的分类，决定该失败能否交给收尾层（Closeout Agent）。
+
+    分类由**抛出门禁错误的那行代码**显式声明，而不是在执行循环里匹配错误文案：
+    门禁文案是给 agent 读的英文散文，会随 prompt 调优被改写，用正则分流必然漂移，
+    且漂移方向恰好最危险——一条被改写的"RV 重跑失败"文案匹配不上真失败规则就会
+    掉进轻量收尾路径。默认取值是 :attr:`SUBSTANTIVE`，因此新增抛出点漏标的后果
+    是"少省一点时间"而不是"门禁被绕过"。
+
+    Attributes:
+        SUBSTANTIVE: 真失败——行为没做对或验证没真跑过，必须整轮重跑完整实现。
+        CHECKLIST_UNCHECKED: 验收清单存在未勾条目。
+        CHANGE_LOG_INCOMPLETE: PRD 已改动但 Change Log 缺失、为零、未追加或字段不全。
+        EVIDENCE_MANIFEST_FORMAT: 结构化证据清单文件的字段格式非法。
+        FRONTEND_VISUAL_EVIDENCE_MISSING: 前端有改动但证据目录缺少截图 / 录屏。
+    """
+
+    SUBSTANTIVE = "substantive"
+    CHECKLIST_UNCHECKED = "checklist_unchecked"
+    CHANGE_LOG_INCOMPLETE = "change_log_incomplete"
+    EVIDENCE_MANIFEST_FORMAT = "evidence_manifest_format"
+    FRONTEND_VISUAL_EVIDENCE_MISSING = "frontend_visual_evidence_missing"
+
+    @property
+    def is_closeout_eligible(self) -> bool:
+        """该分类是否可以交给收尾层处理（真失败类永远不可以）。"""
+        return self is not DeliveryGateFailureKind.SUBSTANTIVE
+
+    @property
+    def needs_visual_capture(self) -> bool:
+        """收尾是否需要真实启动应用采集视觉证据（决定用哪个超时预算）。"""
+        return self is DeliveryGateFailureKind.FRONTEND_VISUAL_EVIDENCE_MISSING
+
+
+class DeliveryGateError(RuntimeError):
+    """携带 :class:`DeliveryGateFailureKind` 的交付门禁错误基类。
+
+    PRD 交付门禁与 Realistic Validation 证据门禁的错误类型都继承本类，使
+    "分类在抛出处声明"这条规则只有一份实现。仍然继承 :class:`RuntimeError`，
+    既有 ``except RuntimeError`` 调用方行为不变。
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: DeliveryGateFailureKind = DeliveryGateFailureKind.SUBSTANTIVE,
+    ) -> None:
+        """记录门禁失败文案与分类。
+
+        Args:
+            message: 给 agent 阅读的失败说明。
+            kind: 门禁失败分类；不传时按真失败处理。
+        """
+        super().__init__(message)
+        self.kind = kind
 
 
 @dataclass(frozen=True)
@@ -255,6 +314,14 @@ class RunnerConfig:
             When ``None``, falls back to ``timeout_seconds``.
         recovery_timeout_seconds: Optional timeout for the full Recovery Agent
             phase. When ``None``, falls back to ``timeout_seconds``.
+        closeout_agent_enabled: 交付收尾层（Closeout Agent）开关。为 ``False``
+            时，四类收尾类门禁失败按本层落地前的行为整轮重跑。
+        closeout_timeout_seconds: 文本类收尾（补勾选 / 补 Change Log / 修证据
+            清单字段）的 wall-clock 上限。``None`` 时依次回退到
+            ``fix_timeout_seconds``、再到 ``timeout_seconds``。
+        closeout_visual_timeout_seconds: 视觉证据补采的 wall-clock 上限。补一张
+            截图要真把应用跑起来，不该和"补一条 Change Log"共用同一个短超时。
+            ``None`` 时的回退链同上。
     """
 
     max_issues: int = 1
@@ -270,12 +337,34 @@ class RunnerConfig:
     fix_agent_enabled: bool = True
     fix_timeout_seconds: int | None = None
     recovery_timeout_seconds: int | None = None
+    closeout_agent_enabled: bool = True
+    closeout_timeout_seconds: int | None = 600
+    closeout_visual_timeout_seconds: int | None = 1800
     inactivity_timeout_seconds: int = 1200
     verification_commands: tuple[str, ...] = (
         "git diff --check",
         "uv run mkdocs build",
     )
     pre_commit_verification_command: str | None = None
+
+    def resolve_closeout_timeout_seconds(self, kind: DeliveryGateFailureKind) -> int:
+        """返回该类收尾实际生效的 wall-clock 超时秒数。
+
+        视觉证据补采与文本类收尾各有一个上限；任一项为空时依次回退到 Fix Agent
+        超时、再到常规 agent 超时，因此运营者只配 ``timeout_seconds`` 也能工作。
+
+        Args:
+            kind: 触发本次收尾的门禁失败分类。
+
+        Returns:
+            该次收尾传给子进程的超时秒数。
+        """
+        configured_timeout_seconds = (
+            self.closeout_visual_timeout_seconds
+            if kind.needs_visual_capture
+            else self.closeout_timeout_seconds
+        )
+        return configured_timeout_seconds or self.fix_timeout_seconds or self.timeout_seconds
 
 
 @dataclass(frozen=True)

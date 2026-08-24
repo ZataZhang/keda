@@ -482,6 +482,17 @@ class AgentRunnerRunnerSettings(BaseModel):
     fix_agent_enabled: bool = True
     fix_timeout_seconds: int | None = None
     recovery_timeout_seconds: int | None = None
+    # Whether the delivery Closeout Agent runs when a PRD-delivery / RV-evidence
+    # gate fails with a closeout-eligible kind. False keeps the pre-closeout
+    # behavior (the whole attempt restarts with the full implementation agent).
+    closeout_agent_enabled: bool = True
+    # Wall-clock budget for a text-only closeout (tick items / append a Change
+    # Log entry / repair manifest fields). None falls back to
+    # fix_timeout_seconds, then timeout_seconds.
+    closeout_timeout_seconds: int | None = 600
+    # Wall-clock budget for re-capturing visual evidence: that needs the app
+    # actually started, so it must not share the short text budget.
+    closeout_visual_timeout_seconds: int | None = 1800
     inactivity_timeout_seconds: int = 1200
     verification_commands: list[str] = Field(
         default_factory=lambda: [

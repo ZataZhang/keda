@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 ACCEPTANCE_CHECKLIST_HEADING_RE = re.compile(
@@ -21,10 +21,14 @@ class PrdChecklistResult:
     Attributes:
         section_found: Whether an Acceptance Checklist section was located.
         unchecked_items: List of unchecked items as (1-based line number, line text).
+        checked_items: List of ticked items as (1-based line number, line text).
+            用于区分"被勾上"与"被删掉"——只看 ``unchecked_items`` 变小的话，
+            删除一个条目和勾上它无法区分。
     """
 
     section_found: bool
     unchecked_items: list[tuple[int, str]]
+    checked_items: list[tuple[int, str]] = field(default_factory=list)
 
     @property
     def is_complete(self) -> bool:
@@ -63,6 +67,7 @@ def parse_prd_checklist(file_content: str) -> PrdChecklistResult:
             break
 
     unchecked_items: list[tuple[int, str]] = []
+    checked_items: list[tuple[int, str]] = []
     in_code_block = False
 
     for line_index in range(start_index + 1, end_index):
@@ -74,7 +79,15 @@ def parse_prd_checklist(file_content: str) -> PrdChecklistResult:
             continue
 
         checkbox_match = CHECKBOX_RE.match(line)
-        if checkbox_match and checkbox_match.group("mark") == " ":
+        if not checkbox_match:
+            continue
+        if checkbox_match.group("mark") == " ":
             unchecked_items.append((line_index + 1, line.rstrip()))
+        else:
+            checked_items.append((line_index + 1, line.rstrip()))
 
-    return PrdChecklistResult(section_found=True, unchecked_items=unchecked_items)
+    return PrdChecklistResult(
+        section_found=True,
+        unchecked_items=unchecked_items,
+        checked_items=checked_items,
+    )

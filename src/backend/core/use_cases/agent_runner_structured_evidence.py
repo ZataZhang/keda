@@ -22,7 +22,11 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
-from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+    DeliveryGateError,
+    DeliveryGateFailureKind,
+)
 from backend.core.use_cases.agent_runner_evidence_format import (
     IMAGE_EVIDENCE_SUFFIXES,
 )
@@ -43,8 +47,16 @@ _PR_URL_PATTERN = re.compile(
 _MAX_INLINE_EVIDENCE_CHARS = 3000
 
 
-class ValidationEvidenceError(RuntimeError):
-    """Raised when required Realistic Validation evidence is missing or invalid."""
+class ValidationEvidenceError(DeliveryGateError):
+    """Raised when required Realistic Validation evidence is missing or invalid.
+
+    分类规则（与 ``docs/guides/agent-runner.md`` 的收尾层章节一致）：manifest 的
+    **JSON 结构 / 字段格式**非法属于
+    :attr:`DeliveryGateFailureKind.EVIDENCE_MANIFEST_FORMAT`（收尾类）；manifest
+    与 Issue / 清单 / 证据文件**内容对不上**（覆盖缺失、编号错位、交叉污染、缺
+    negative control、产物健全性、manifest 根本不存在）一律保持真失败类，因为那
+    意味着"验证没真跑过"，不能由一次轻量收尾抹平。
+    """
 
 
 @dataclass(frozen=True)
@@ -221,6 +233,27 @@ def _evidence_dir_path(worktree_path: Path, config: AppConfig) -> Path:
     return worktree_path / config.validation.evidence_dir
 
 
+def _manifest_format_error(message: str) -> ValidationEvidenceError:
+    """构造一个标记为"证据清单字段格式非法"的门禁错误。
+
+    manifest 的 JSON 结构 / 字段格式错误是纯文本收尾动作，可交给收尾层修；
+    与之相对，"内容对不上"的失败（覆盖缺失、交叉污染、产物不健全）必须继续
+    用默认的真失败分类整轮重跑，因此那些抛出点直接 ``raise
+    ValidationEvidenceError(...)``，不走本构造器。分类值只写在这一处，避免
+    16 个抛出点各写一遍后漂移。
+
+    Args:
+        message: 给 agent 阅读的失败说明。
+
+    Returns:
+        带 ``EVIDENCE_MANIFEST_FORMAT`` 分类的 :class:`ValidationEvidenceError`。
+    """
+    return ValidationEvidenceError(
+        message,
+        kind=DeliveryGateFailureKind.EVIDENCE_MANIFEST_FORMAT,
+    )
+
+
 def _load_manifest_json(worktree_path: Path, config: AppConfig) -> dict[str, object]:
     """Load and parse ``evidence.json`` as a Python dict."""
     evidence_dir = _evidence_dir_path(worktree_path, config)
@@ -236,11 +269,11 @@ def _load_manifest_json(worktree_path: Path, config: AppConfig) -> dict[str, obj
         with manifest_path.open("r", encoding="utf-8") as manifest_file:
             manifest_data = json.load(manifest_file)
     except json.JSONDecodeError as decode_error:
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"`{config.validation.evidence_dir}/evidence.json` is not valid JSON: {decode_error}"
         ) from decode_error
     if not isinstance(manifest_data, dict):
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"`{config.validation.evidence_dir}/evidence.json` must be a JSON object."
         )
     return manifest_data
@@ -249,7 +282,7 @@ def _load_manifest_json(worktree_path: Path, config: AppConfig) -> dict[str, obj
 def _parse_evidence_block(block_data: object, item_number: int) -> EvidenceBlock:
     """Parse a single evidence block and validate required fields."""
     if not isinstance(block_data, dict):
-        raise ValidationEvidenceError(f"Item {item_number}: evidence block must be a JSON object.")
+        raise _manifest_format_error(f"Item {item_number}: evidence block must be a JSON object.")
 
     item_name = _extract_nonempty_string(block_data, "item_name", item_number)
     command = _extract_nonempty_string(block_data, "command", item_number)
@@ -281,7 +314,7 @@ def _extract_nonempty_string(
     """Extract a required non-empty string field from an evidence block."""
     value = block_data.get(field_name)
     if not isinstance(value, str) or not value.strip():
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"Item {item_number}: missing or empty required field "
             f"`{field_name}` in evidence manifest."
         )
@@ -325,18 +358,18 @@ def _extract_evidence_files(block_data: dict[str, object], item_number: int) -> 
     """Extract and validate the ``evidence_files`` list."""
     raw_files = block_data.get("evidence_files")
     if not isinstance(raw_files, list) or not raw_files:
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"Item {item_number}: `evidence_files` must be a non-empty list."
         )
     evidence_files: list[str] = []
     for file_name in raw_files:
         if not isinstance(file_name, str) or not file_name.strip():
-            raise ValidationEvidenceError(
+            raise _manifest_format_error(
                 f"Item {item_number}: `evidence_files` contains an empty or non-string entry."
             )
         normalized_name = _normalize_evidence_file_name(file_name.strip(), item_number)
         if not normalized_name:
-            raise ValidationEvidenceError(
+            raise _manifest_format_error(
                 f"Item {item_number}: `evidence_files` entry {file_name!r} has no file name."
             )
         evidence_files.append(normalized_name)
@@ -358,11 +391,11 @@ def _extract_expected_artifacts(
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        raise ValidationEvidenceError(f"Item {item_number}: `expected_artifacts` must be a list.")
+        raise _manifest_format_error(f"Item {item_number}: `expected_artifacts` must be a list.")
     specs: list[ArtifactSpec] = []
     for index, entry in enumerate(raw):
         if not isinstance(entry, dict):
-            raise ValidationEvidenceError(
+            raise _manifest_format_error(
                 f"Item {item_number}: `expected_artifacts[{index}]` must be a JSON object."
             )
         path = _extract_nonempty_string(entry, "path", item_number)
@@ -371,7 +404,7 @@ def _extract_expected_artifacts(
         min_size: int | None = None
         if min_size_raw is not None:
             if not isinstance(min_size_raw, int) or min_size_raw < 0:
-                raise ValidationEvidenceError(
+                raise _manifest_format_error(
                     f"Item {item_number}: `expected_artifacts[{index}].min_size` "
                     "must be a non-negative integer."
                 )
@@ -380,7 +413,7 @@ def _extract_expected_artifacts(
         min_duration: float | None = None
         if min_duration_raw is not None:
             if not isinstance(min_duration_raw, (int, float)) or min_duration_raw < 0:
-                raise ValidationEvidenceError(
+                raise _manifest_format_error(
                     f"Item {item_number}: "
                     "`expected_artifacts[{index}].min_duration_seconds` must be a "
                     "non-negative number."
@@ -405,7 +438,7 @@ def load_evidence_manifest(worktree_path: Path, config: AppConfig) -> EvidenceMa
 
     version_value = manifest_data.get("version")
     if version_value != 1:
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"`{config.validation.evidence_dir}/evidence.json` version must be 1, "
             f"got {version_value!r}."
         )
@@ -414,7 +447,7 @@ def load_evidence_manifest(worktree_path: Path, config: AppConfig) -> EvidenceMa
 
     raw_items = manifest_data.get("items")
     if not isinstance(raw_items, list) or not raw_items:
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"`{config.validation.evidence_dir}/evidence.json` must contain a "
             "non-empty `items` array."
         )
@@ -437,7 +470,7 @@ def _extract_manifest_string(
     """Extract a required non-empty string field from the top-level manifest."""
     value = manifest_data.get(field_name)
     if not isinstance(value, str) or not value.strip():
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"`{config.validation.evidence_dir}/evidence.json` missing or empty "
             f"top-level field `{field_name}`."
         )
@@ -452,7 +485,7 @@ def _extract_manifest_item_number(raw_block: object, config: AppConfig) -> int:
     真正无法解析的值仍然抛 ``ValidationEvidenceError``。
     """
     if not isinstance(raw_block, dict):
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"`{config.validation.evidence_dir}/evidence.json` contains a non-object "
             "entry in `items`."
         )
@@ -474,7 +507,7 @@ def _extract_manifest_item_number(raw_block: object, config: AppConfig) -> int:
             pass
 
     if not isinstance(item_number_value, int) or item_number_value < 1:
-        raise ValidationEvidenceError(
+        raise _manifest_format_error(
             f"`{config.validation.evidence_dir}/evidence.json` has invalid "
             f"`item_number` {raw_block.get('item_number')!r}; must be a positive integer."
         )

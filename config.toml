@@ -161,6 +161,15 @@ recovery_retry_delay_seconds = 30
 timeout_seconds = 14400
 # Inactivity timeout: kill the agent if it produces no stdout/stderr for this long.
 inactivity_timeout_seconds = 1200
+# 交付收尾层（Closeout Agent）开关：清单未勾 / PRD 改了缺 Change Log / 证据清单字段
+# 格式非法 / 前端改动缺视觉证据这四类门禁失败，先起一次只做收尾的短命修复，失败才
+# 退回整轮重跑。设为 false 即回到本层落地前的行为。
+closeout_agent_enabled = true
+# 文本类收尾（补勾选、补 Change Log、修证据清单字段）的 wall-clock 超时（秒）。
+closeout_timeout_seconds = 600
+# 视觉证据补采的 wall-clock 超时（秒）：补一张截图要真把应用跑起来，
+# 不与文本类收尾共用同一个短超时。
+closeout_visual_timeout_seconds = 1800
 # 提交前自动运行的验证命令；任一命令失败会进入 recovery。
 # 这里显式拆出 pre-commit，避免 `just test` 的 quality-flag 缓存把 lint 跳过；
 # `SKIP=check-test-flag` 防止 pre-commit 在 just test 还没跑完就因标记不存在而失败。

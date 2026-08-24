@@ -8,6 +8,7 @@ from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, CommandResult
 
 __all__ = [
+    "expand_changed_path",
     "get_active_rebase_target",
     "get_current_branch",
     "get_head_sha",
@@ -204,6 +205,29 @@ def list_changed_paths(worktree_path: Path, process_runner: IProcessRunner) -> l
             if rename_source_path:
                 changed_paths.append(rename_source_path)
     return changed_paths
+
+
+def expand_changed_path(worktree_path: Path, changed_path: str) -> list[str]:
+    """把一条 :func:`list_changed_paths` 条目展开为具体文件路径。
+
+    ``git status --porcelain`` 对未跟踪目录只输出 ``?? dir/`` 一行而不展开其中
+    文件，不展开就只能拿到目录本身，逐文件判定会整体漏掉。
+
+    Args:
+        worktree_path: worktree 根目录。
+        changed_path: ``git status`` 报出的单条仓库相对路径。
+
+    Returns:
+        该条目对应的文件路径列表（POSIX 分隔符，仓库相对）。
+    """
+    candidate_path = worktree_path / changed_path
+    if not changed_path.endswith("/") or not candidate_path.is_dir():
+        return [changed_path.strip("/")]
+    return [
+        file_path.relative_to(worktree_path).as_posix()
+        for file_path in candidate_path.rglob("*")
+        if file_path.is_file()
+    ]
 
 
 def list_git_remotes(worktree_path: Path, process_runner: IProcessRunner) -> list[str]:

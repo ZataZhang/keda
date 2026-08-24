@@ -11,6 +11,7 @@ import pytest
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
+    DeliveryGateFailureKind,
     IssueSummary,
     PullRequestContext,
     ValidationConfig,
@@ -2174,3 +2175,101 @@ def test_frontend_visual_gate_defaults_on() -> None:
     """默认开：既有无此键的配置自动获得门禁，前缀默认两前端目录。"""
     assert AppConfig().validation.frontend_visual_evidence_required is True
     assert AppConfig().validation.frontend_paths == ("frontend-admin", "frontend-public")
+
+
+# ---------------------------------------------------------------------------
+# 门禁失败分类：收尾类 vs 真失败类
+# ---------------------------------------------------------------------------
+
+
+def test_frontend_visual_gate_marks_the_failure_as_closeout(tmp_path: Path) -> None:
+    """前端缺视觉证据是"只差采集动作"，标为视觉证据收尾类。"""
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    worktree = _init_git_worktree_with_change(tmp_path, "frontend-admin/src/x.tsx")
+    _write_evidence_file(worktree, "rv-1-log.txt", b"log")
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_frontend_visual_evidence(_issue(), worktree, AppConfig(), SubprocessRunner())
+
+    assert exc_info.value.kind is DeliveryGateFailureKind.FRONTEND_VISUAL_EVIDENCE_MISSING
+
+
+def test_manifest_field_format_failures_are_closeout_class(tmp_path: Path) -> None:
+    """清单的字段格式非法可以由收尾 pass 修，标为清单格式类。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    _write_manifest(evidence_dir, version=2)
+    (evidence_dir / "rv-1-run.txt").write_text("run output", encoding="utf-8")
+    (evidence_dir / "rv-2-serve.txt").write_text("serve output", encoding="utf-8")
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_evidence_ready(_structured_issue(), tmp_path, AppConfig())
+
+    assert exc_info.value.kind is DeliveryGateFailureKind.EVIDENCE_MANIFEST_FORMAT
+
+
+def test_empty_evidence_dir_stays_substantive(tmp_path: Path) -> None:
+    """证据目录为空 = 验证没真跑过，必须保持真失败类。"""
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_evidence_ready(_issue(), tmp_path, AppConfig())
+
+    assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
+
+
+def test_missing_manifest_stays_substantive(tmp_path: Path) -> None:
+    """manifest 根本不存在 ≠ 字段格式错，保持真失败类。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "rv-1-run.txt").write_text("run output", encoding="utf-8")
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_evidence_ready(_structured_issue(), tmp_path, AppConfig())
+
+    assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
+
+
+def test_evidence_coverage_mismatch_stays_substantive(tmp_path: Path) -> None:
+    """证据与清单覆盖对不上 = 有条目没跑过，保持真失败类。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "rv-1-run.txt").write_text("run output", encoding="utf-8")
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_evidence_ready(_issue(), tmp_path, AppConfig())
+
+    assert "does not match the checklist" in str(exc_info.value)
+    assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
+
+
+def test_rv_command_reexecution_failure_stays_substantive(tmp_path: Path) -> None:
+    """keda 复跑 RV 命令未通过 = 行为没做对，收尾层不得接手。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    _write_manifest(evidence_dir)
+    (evidence_dir / "rv-1-run.txt").write_text("run output", encoding="utf-8")
+    (evidence_dir / "rv-2-serve.txt").write_text("serve output", encoding="utf-8")
+
+    class _FailingCommandRunner(FakeProcessRunner):
+        def run(self, command, **kwargs):  # type: ignore[override]
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple[:2] == ("bash", "-lc"):
+                return CommandResult(command_tuple, 1, "boom", "boom")
+            return CommandResult(command_tuple, 0, "", "")
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_commands_pass(
+            _structured_issue(), tmp_path, AppConfig(), _FailingCommandRunner()
+        )
+
+    assert "failed when keda" in str(exc_info.value)
+    assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
+
+
+def test_misplaced_rv_helper_stays_substantive(tmp_path: Path) -> None:
+    """RV 脚本错放 = 取证脚本已进代码 diff，保持真失败类。"""
+    fake_runner = _status_runner("A  scripts/rv_capture.sh\0")
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_no_misplaced_evidence_helpers(tmp_path, AppConfig(), fake_runner)
+
+    assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE

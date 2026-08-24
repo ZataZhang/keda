@@ -244,6 +244,18 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     ),
     "runner.transient_retry_attempts": ("瞬时网络错误（socket 断开 / 5xx / 超时）的就地重试次数"),
     "runner.transient_retry_delay_seconds": "瞬时错误每次重试前等待的秒数",
+    "runner.closeout_agent_enabled": (
+        "是否启用交付收尾层（Closeout Agent）：清单未勾 / 缺 Change Log / 证据清单字段格式非法 / "
+        "前端改动缺视觉证据这四类门禁失败先用一次短命收尾修复，失败才整轮重跑；设 false 回到旧行为"
+    ),
+    "runner.closeout_timeout_seconds": (
+        "文本类收尾（补勾选、补 Change Log、修证据清单字段）的 wall-clock 超时秒数；"
+        "留空依次回退到 fix_timeout_seconds、再到 timeout_seconds"
+    ),
+    "runner.closeout_visual_timeout_seconds": (
+        "视觉证据补采的 wall-clock 超时秒数（要真启动应用截图/录屏，不与文本类共用短超时）；"
+        "留空回退链同上"
+    ),
     "runner.verification_commands": "提交前自动运行的验证命令；任一命令失败会进入 recovery",
     "runner.pre_commit_verification_command": "git add 后、git commit 前额外运行的 pre-commit 命令；失败转 Fix Agent",
     "safety.auto_merge": "是否允许自动合并 PR（强烈建议保持 false；与 agent_runner.autopilot.enabled 同时为 true 才会真正生效）",

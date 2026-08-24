@@ -35,6 +35,7 @@ from backend.core.shared.interfaces.agent_runner import (
 )
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    DeliveryGateFailureKind,
     IssueSummary,
 )
 from backend.core.use_cases.agent_runner_evidence_format import (
@@ -44,7 +45,11 @@ from backend.core.use_cases.agent_runner_evidence_format import (
     demanded_evidence_kinds as demanded_evidence_kinds,
     extract_evidence_format_markers as extract_evidence_format_markers,
 )
-from backend.core.use_cases.agent_runner_git import has_changes, list_changed_paths
+from backend.core.use_cases.agent_runner_git import (
+    expand_changed_path,
+    has_changes,
+    list_changed_paths,
+)
 from backend.core.use_cases.agent_runner_structured_evidence import (
     ValidationEvidenceError,
     has_structured_evidence_marker,
@@ -364,7 +369,8 @@ def ensure_frontend_visual_evidence(
         f"`{config.validation.evidence_dir}/`. Changed frontend paths: "
         f"{touched_preview}. Run the target repo's UI/e2e entry point and save "
         "at least one real screenshot or screen recording into the evidence "
-        "directory; a text log does not prove a UI change."
+        "directory; a text log does not prove a UI change.",
+        kind=DeliveryGateFailureKind.FRONTEND_VISUAL_EVIDENCE_MISSING,
     )
 
 
@@ -399,6 +405,7 @@ def ensure_validation_evidence_ready(
     ensure_frontend_visual_evidence(issue, worktree_path, config, process_runner)
     evidence_files = list_evidence_files(worktree_path, config)
     if not evidence_files:
+        # 证据目录为空 = 验证根本没跑过，保持真失败分类（整轮重跑），不进收尾层。
         raise ValidationEvidenceError(
             "Realistic Validation evidence is required but "
             f"`{config.validation.evidence_dir}/` is empty or missing. "
@@ -436,6 +443,7 @@ def ensure_validation_evidence_ready(
     )
     if coverage_problems:
         problems_text = "\n".join(f"- {coverage_problem}" for coverage_problem in coverage_problems)
+        # 覆盖对不上 = 有条目没真跑过，保持真失败分类，不进收尾层。
         raise ValidationEvidenceError(
             "Realistic Validation evidence does not match the checklist:\n"
             f"{problems_text}\n"
@@ -598,6 +606,7 @@ def ensure_validation_commands_pass(
                 label=f"rv-reexec-{block.item_number}",
             )
         except subprocess.TimeoutExpired as timeout_error:
+            # RV 命令复跑超时 / 失败 = 行为没做对，保持真失败分类（收尾层不得接手）。
             raise ValidationEvidenceError(
                 f"Realistic Validation item {block.item_number} timed out when keda "
                 f"re-ran its command (>{timeout_seconds}s): `{block.command}`. The "
@@ -701,22 +710,6 @@ def is_misplaced_evidence_helper(repo_relative_path: str, config: AppConfig) -> 
     )
 
 
-def _expand_changed_path(worktree_path: Path, changed_path: str) -> list[str]:
-    """把一条变更条目展开为具体文件路径。
-
-    ``git status --porcelain`` 对未跟踪目录只输出 ``?? dir/`` 一行而不展开其中
-    文件,不展开就只能拿到目录本身,逐文件判定会整体漏掉。
-    """
-    candidate_path = worktree_path / changed_path
-    if not changed_path.endswith("/") or not candidate_path.is_dir():
-        return [changed_path.strip("/")]
-    return [
-        file_path.relative_to(worktree_path).as_posix()
-        for file_path in candidate_path.rglob("*")
-        if file_path.is_file()
-    ]
-
-
 def ensure_no_misplaced_evidence_helpers(
     worktree_path: Path,
     config: AppConfig,
@@ -742,13 +735,14 @@ def ensure_no_misplaced_evidence_helpers(
     for changed_path in list_changed_paths(worktree_path, process_runner):
         misplaced_paths.extend(
             expanded_path
-            for expanded_path in _expand_changed_path(worktree_path, changed_path)
+            for expanded_path in expand_changed_path(worktree_path, changed_path)
             if is_misplaced_evidence_helper(expanded_path, config)
         )
     if not misplaced_paths:
         return
     misplaced_paths_text = ", ".join(sorted(set(misplaced_paths)))
     evidence_oracle_dir = f"{config.validation.evidence_dir.strip('/')}/{EVIDENCE_ORACLE_SUBDIR}/"
+    # RV 脚本错放 = 取证脚本已进代码 diff，收尾层不得代为搬运，保持真失败分类。
     raise ValidationEvidenceError(
         f"RV scripts must never enter the code diff: {misplaced_paths_text}. "
         f"Move every one of them to `{evidence_oracle_dir}` — that is the only "

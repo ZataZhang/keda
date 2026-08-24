@@ -19,6 +19,8 @@ from backend.core.agent.memory.protocols import (
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import (
     CommandResult,
+    DeliveryGateError,
+    DeliveryGateFailureKind,
     IssueSummary,
     MemoryConfig,
     PromptConfig,
@@ -51,8 +53,12 @@ class VerificationFailedError(RuntimeError):
         super().__init__(format_verification_failure(verification_results))
 
 
-class PrdDeliveryError(RuntimeError):
-    """Raised when the canonical PRD is not ready for delivery."""
+class PrdDeliveryError(DeliveryGateError):
+    """Raised when the canonical PRD is not ready for delivery.
+
+    每个 ``raise`` 处显式声明 ``kind``；不声明时按
+    :attr:`DeliveryGateFailureKind.SUBSTANTIVE` 处理（整轮重跑）。
+    """
 
 
 def extract_prd_path(issue_body: str) -> str | None:
@@ -132,7 +138,7 @@ def _read_prd_text(prd_path: Path) -> str | None:
 # Change Log 条目”，而 prompt 从未说明必须用 ``###`` + bullet，导致 recovery
 # 每轮往表格里再补一行、永不收敛的死循环。prompt 与失败反馈共用本样例，确保
 # agent 拿到的格式说明与门禁实际校验的格式严格一致。
-_PRD_CHANGE_LOG_FORMAT_EXAMPLE = "\n".join(
+PRD_CHANGE_LOG_FORMAT_EXAMPLE = "\n".join(
     [
         "Change Log entries MUST use this exact Markdown structure — each entry is a "
         "`###` heading followed by six bullet fields. Markdown tables are NOT parsed "
@@ -157,7 +163,7 @@ _PRD_CHANGE_LOG_FORMAT_EXAMPLE = "\n".join(
 # ``ensure_prd_delivery_ready`` 里合法完成的归档判成越权并回滚，紧接着推送前的
 # ``assert_prd_archived_for_publish`` 又硬要求 PRD 位于 archive，两道门禁互相打架，
 # reviewer 每轮来回搬运文件、永不收敛（实证：freshai Issue #99）。
-_PRD_ARCHIVE_OWNERSHIP_RULE = (
+PRD_ARCHIVE_OWNERSHIP_RULE = (
     "Archiving the PRD is the runner's job alone: never `git mv` it into "
     "`tasks/archive/` yourself, and once the runner has archived it, never move it "
     "back to `tasks/pending/` — the pre-push gate requires it to stay archived."
@@ -169,7 +175,7 @@ _PRD_ARCHIVE_OWNERSHIP_RULE = (
 # agent 只能在同一行上空转。实证：freshai Issue #111 连续 5 次 attempt 都失败在同一条
 # `- [ ] 独立 verifier 对 rv-1～rv-6 全链证据 PASS 后才归档。`。因此必须给出明确出口——
 # runner 自己负责的门禁写成 `- [~]` + 一行理由（`[~]` 不是复选框，解析器视为已处理）。
-_RUNNER_OWNED_CHECKLIST_ITEM_RULE = (
+RUNNER_OWNED_CHECKLIST_ITEM_RULE = (
     "An Acceptance Checklist item that waits on a runner-owned gate can never be ticked "
     "here: this archive check runs BEFORE the runner's independent verifier, PR creation "
     'and review, so an item such as "archive only after the independent verifier passes" '
@@ -189,9 +195,9 @@ def _build_prd_closeout_instruction(prd_relative_path: str) -> str:
         "Acceptance Checklist item after its stated behavior was actually executed "
         "and evidenced. Never weaken a user-visible, security, scope, or realistic "
         "validation requirement without recording the change and its review status. "
-        f"{_PRD_ARCHIVE_OWNERSHIP_RULE} "
+        f"{PRD_ARCHIVE_OWNERSHIP_RULE} "
         f"Canonical PRD: `{prd_relative_path}`.\n\n"
-        f"{_PRD_CHANGE_LOG_FORMAT_EXAMPLE}"
+        f"{PRD_CHANGE_LOG_FORMAT_EXAMPLE}"
     )
 
 
@@ -392,9 +398,9 @@ def build_prd_review_reference(issue: IssueSummary, worktree_path: Path) -> str:
         return (
             f"Canonical PRD: `{archive_relative_path}` — the runner already archived it "
             f"from `{prd_relative_path}`, which is why the Issue body still shows the "
-            f"pre-archive path. {_PRD_ARCHIVE_OWNERSHIP_RULE}"
+            f"pre-archive path. {PRD_ARCHIVE_OWNERSHIP_RULE}"
         )
-    return f"Canonical PRD: `{prd_relative_path}`. {_PRD_ARCHIVE_OWNERSHIP_RULE}"
+    return f"Canonical PRD: `{prd_relative_path}`. {PRD_ARCHIVE_OWNERSHIP_RULE}"
 
 
 def _format_unchecked_items(
@@ -420,11 +426,13 @@ def _validate_prd_checklist(
     """
     checklist_result = parse_prd_checklist(file_content)
     if not checklist_result.section_found:
+        # 章节整体缺失说明 PRD 结构有问题，不是"漏勾了几个框"——保持真失败类。
         raise PrdDeliveryError(f"Acceptance Checklist section missing in {prd_relative_path}")
     if checklist_result.unchecked_items:
         unchecked_summary = _format_unchecked_items(checklist_result.unchecked_items)
         raise PrdDeliveryError(
-            f"Acceptance Checklist has unchecked items in {prd_relative_path}:\n{unchecked_summary}"
+            f"Acceptance Checklist has unchecked items in {prd_relative_path}:\n{unchecked_summary}",
+            kind=DeliveryGateFailureKind.CHECKLIST_UNCHECKED,
         )
 
 
@@ -441,17 +449,20 @@ def _validate_prd_change_log(
     change_log_result = parse_prd_change_log(file_content)
     if not change_log_result.section_found:
         raise PrdDeliveryError(
-            f"Canonical PRD changed without a Change Log section: {prd_relative_path}"
+            f"Canonical PRD changed without a Change Log section: {prd_relative_path}",
+            kind=DeliveryGateFailureKind.CHANGE_LOG_INCOMPLETE,
         )
     if change_log_result.entry_count == 0:
         raise PrdDeliveryError(
             f"Canonical PRD changed without a Change Log entry: {prd_relative_path} "
             "(a `## Change Log` section exists but no entry was parsed; entries must be "
-            "`###` headings with bullet fields — Markdown table rows are not counted)"
+            "`###` headings with bullet fields — Markdown table rows are not counted)",
+            kind=DeliveryGateFailureKind.CHANGE_LOG_INCOMPLETE,
         )
     if change_log_result.entry_count <= baseline_entry_count:
         raise PrdDeliveryError(
-            f"Canonical PRD changed without appending a Change Log entry: {prd_relative_path}"
+            f"Canonical PRD changed without appending a Change Log entry: {prd_relative_path}",
+            kind=DeliveryGateFailureKind.CHANGE_LOG_INCOMPLETE,
         )
     if change_log_result.incomplete_entry_fields:
         missing_by_entry = "; ".join(
@@ -459,7 +470,8 @@ def _validate_prd_change_log(
             for entry_number, missing_fields in change_log_result.incomplete_entry_fields.items()
         )
         raise PrdDeliveryError(
-            f"Canonical PRD Change Log is incomplete in {prd_relative_path}: {missing_by_entry}"
+            f"Canonical PRD Change Log is incomplete in {prd_relative_path}: {missing_by_entry}",
+            kind=DeliveryGateFailureKind.CHANGE_LOG_INCOMPLETE,
         )
 
 
@@ -619,7 +631,7 @@ def format_prd_delivery_failure(message: str) -> str:
             "Complete the missing real work and evidence before marking its Acceptance "
             "Checklist item. If the PRD itself must change, append a structured Change Log "
             "entry; do not move the PRD to tasks/archive/.",
-            _RUNNER_OWNED_CHECKLIST_ITEM_RULE,
+            RUNNER_OWNED_CHECKLIST_ITEM_RULE,
         ]
     )
 

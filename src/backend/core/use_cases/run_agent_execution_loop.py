@@ -13,6 +13,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     AttemptResult,
     CommandResult,
+    DeliveryGateError,
     FailureType,
     IssueSummary,
 )
@@ -47,6 +48,17 @@ from backend.core.use_cases.run_agent_once import (
     unstage_changes,
     wait_before_recovery_attempt,
 )
+from backend.core.use_cases.agent_runner_closeout import (
+    CloseoutPromptContext,
+    CloseoutSnapshot,
+    build_closeout_allowed_scope,
+    capture_closeout_snapshot,
+    find_closeout_scope_violations,
+    format_closeout_attempt_detail,
+    restore_prd_from_snapshot,
+    run_closeout_agent,
+    summarize_closeout_changes,
+)
 from backend.core.use_cases.agent_runner_failure import (
     ForbiddenBlockedError,
     is_recoverable_commit_request_error,
@@ -80,6 +92,242 @@ class AgentExecutionRequest:
     expected_branch: str
     prompt_override: str | None = None
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None
+
+
+@dataclass(frozen=True)
+class _AttemptRecordContext:
+    """一次 attempt 的记录上下文。
+
+    执行循环里每个失败分支都要"记一条 attempt + 通知增量持久化 + 写短期记忆"，
+    这三步共用同一组 attempt 级状态；逐个参数展开会在每个分支复制一段二十多行的
+    样板，因此收敛成一个上下文对象由 :func:`_record_attempt` 消费。
+    """
+
+    request: AgentExecutionRequest
+    attempt_index: int
+    attempt_phases: AttemptPhaseTimer
+    attempt_started_mono: float
+    attempt_started_iso: str
+    attempt_results: list[AttemptResult]
+    repo_id: str
+
+
+@dataclass(frozen=True)
+class _DeliveryCloseoutContext:
+    """一次交付收尾所需的上下文：attempt 记录上下文 + 门禁失败 + PRD 基线。"""
+
+    record: _AttemptRecordContext
+    gate_failure: DeliveryGateError
+    prd_baseline_content: str | None
+
+    @property
+    def request(self) -> AgentExecutionRequest:
+        """Return the execution request this closeout belongs to."""
+        return self.record.request
+
+
+def _record_attempt(
+    context: _AttemptRecordContext,
+    *,
+    failure_type: FailureType,
+    detail: str,
+    recovered: bool = False,
+) -> AttemptResult:
+    """记一条 attempt，通知增量持久化回调，并写入短期记忆。
+
+    Args:
+        context: 当前 attempt 的记录上下文。
+        failure_type: 本次 attempt 的分类结果。
+        detail: 写进 attempt 历史与 Issue 评论的诊断文本。
+        recovered: 本次 attempt 是否从先前的失败中恢复。
+
+    Returns:
+        刚刚记录的 :class:`AttemptResult`。
+    """
+    _append_attempt_and_notify(
+        context.attempt_results,
+        _make_attempt_result(
+            attempt_number=context.attempt_index + 1,
+            failure_type=failure_type,
+            recovered=recovered,
+            detail=detail,
+            agent=context.request.selected_agent,
+            started_mono=context.attempt_started_mono,
+            started_iso=context.attempt_started_iso,
+            phase_durations=context.attempt_phases.snapshot(),
+        ),
+        context.request.on_attempt_recorded,
+    )
+    recorded_attempt = context.attempt_results[-1]
+    _persist_short_term_memory(
+        config=context.request.config,
+        issue=context.request.issue,
+        worktree_path=context.request.worktree_path,
+        attempt=recorded_attempt,
+        repo_id=context.repo_id,
+    )
+    return recorded_attempt
+
+
+def _classify_and_record_gate_failure(
+    context: _AttemptRecordContext,
+    *,
+    detail: str,
+    verification_results: list[CommandResult],
+    exc: BaseException | None,
+) -> FailureType:
+    """给一次"代码已在 worktree、尚未提交"的失败分类并记一条 attempt。
+
+    Phase 2 验证、Phase 3 PRD 交付、Phase 3.5 证据门禁、Phase 4 暂存后验证四处的
+    失败形状完全一致（读一次 HEAD、按未提交状态分类、记一条 attempt），差别只在
+    诊断文本与传给分类器的上下文，因此共用本函数而不是各写一遍。
+
+    Args:
+        context: 当前 attempt 的记录上下文。
+        detail: 写进 attempt 历史的诊断文本。
+        verification_results: 传给分类器的验证结果。
+        exc: 触发本次失败的异常；``None`` 表示失败由验证结果本身表达。
+
+    Returns:
+        分类结果，供调用方决定 recovery 措辞与升级路径。
+    """
+    request = context.request
+    failure_type = classify_failure(
+        before_sha=request.before_sha,
+        after_sha=get_head_sha(request.worktree_path, request.process_runner),
+        has_uncommitted=False,
+        agent_result=CommandResult(("",), 0, "", ""),
+        verification_results=verification_results,
+        exc=exc,
+    )
+    _record_attempt(context, failure_type=failure_type, detail=detail)
+    return failure_type
+
+
+def _revert_failed_closeout(
+    context: _DeliveryCloseoutContext,
+    before_snapshot: CloseoutSnapshot,
+) -> None:
+    """收尾判失败后撤销它对 canonical PRD 的编辑。
+
+    失败的收尾一个字节都不该留下：它可能已经勾上了举不出证据的验收条目，而清单
+    这道门禁只问"还有没有未勾项"，留着就等于让随后的完整重跑把那个凭空的勾当成
+    既成事实收下。撤销只针对 PRD——证据目录不进代码 diff 且会被独立重判，越界写入
+    的其他文件按设计交给完整重跑处理。
+
+    Args:
+        context: 本次收尾的上下文。
+        before_snapshot: 收尾前采集的快照，提供还原用的 PRD 原文。
+    """
+    if restore_prd_from_snapshot(
+        context.request.issue, context.request.worktree_path, before_snapshot
+    ):
+        _logger.info(
+            "Reverted the failed closeout's PRD edits for Issue #%d.",
+            context.request.issue.number,
+        )
+
+
+def _attempt_delivery_closeout(context: _DeliveryCloseoutContext) -> bool:
+    """尝试用一次短命的收尾修复接住交付门禁失败。
+
+    只接住被抛出点标记为收尾类的失败；真失败与收尾层被关闭时立刻返回 ``False``，
+    调用方走本层落地前的整轮重跑路径。返回 ``True`` 表示收尾 pass 没有越界、
+    完整门禁链已重跑通过，本轮可以继续原流程。
+
+    Args:
+        context: 本次收尾的执行请求、attempt 计时与 PRD 基线。
+
+    Returns:
+        收尾成功且门禁链重跑通过时为 ``True``，其余一律 ``False``。
+    """
+    request = context.request
+    config = request.config
+    issue = request.issue
+    gate_failure = context.gate_failure
+    if not gate_failure.kind.is_closeout_eligible:
+        return False
+    if not config.runner.closeout_agent_enabled:
+        _logger.info(
+            "Closeout Agent disabled for Issue #%d; escalating %s gate failure to full recovery.",
+            issue.number,
+            gate_failure.kind.value,
+        )
+        return False
+
+    worktree_path = request.worktree_path
+    process_runner = request.process_runner
+    allowed_scope = build_closeout_allowed_scope(issue, config)
+    before_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
+    try:
+        with context.record.attempt_phases.measure("closeout"):
+            run_closeout_agent(
+                request.selected_agent,
+                config,
+                process_runner,
+                prompt_context=CloseoutPromptContext(
+                    issue=issue,
+                    worktree_path=worktree_path,
+                    gate_failure_message=str(gate_failure),
+                    kind=gate_failure.kind,
+                    allowed_scope=allowed_scope,
+                ),
+            )
+    except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        _logger.warning("Closeout Agent failed for Issue #%d: %s", issue.number, exc)
+        _revert_failed_closeout(context, before_snapshot)
+        return False
+
+    after_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
+    scope_violations = find_closeout_scope_violations(
+        before_snapshot, after_snapshot, allowed_scope
+    )
+    if scope_violations:
+        _logger.warning(
+            "Closeout Agent modified out-of-scope files for Issue #%d (%s); "
+            "escalating to full recovery.",
+            issue.number,
+            ", ".join(scope_violations),
+        )
+        _revert_failed_closeout(context, before_snapshot)
+        return False
+
+    try:
+        ensure_prd_delivery_ready(
+            issue,
+            worktree_path,
+            process_runner,
+            prd_baseline_content=context.prd_baseline_content,
+        )
+        ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
+        ensure_no_misplaced_evidence_helpers(worktree_path, config, process_runner)
+        ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
+    except DeliveryGateError as exc:
+        _logger.warning(
+            "Delivery gates still fail after closeout for Issue #%d; "
+            "escalating to full recovery: %s",
+            issue.number,
+            exc,
+        )
+        _revert_failed_closeout(context, before_snapshot)
+        return False
+
+    # 门禁链已在收尾流程内整体重跑，PRD 可能刚被归档，因此留痕用的"收尾后"快照
+    # 必须重取一次，否则新归档路径下的 PRD 文本会被当成"消失了"。
+    final_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
+    closeout_summary = summarize_closeout_changes(before_snapshot, final_snapshot)
+    _record_attempt(
+        context.record,
+        failure_type=FailureType.DELIVERY_CLOSEOUT,
+        detail=format_closeout_attempt_detail(closeout_summary),
+        recovered=True,
+    )
+    _logger.info(
+        "Closeout Agent repaired the %s gate failure for Issue #%d; continuing this attempt.",
+        gate_failure.kind.value,
+        issue.number,
+    )
+    return True
 
 
 def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResult:
@@ -119,7 +367,6 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
     before_sha = request.before_sha
     expected_branch = request.expected_branch
     prompt_override = request.prompt_override
-    on_attempt_recorded = request.on_attempt_recorded
     max_recovery_attempts = max(0, config.runner.max_recovery_attempts)
     recovery_retry_delay_seconds = max(0, config.runner.recovery_retry_delay_seconds)
     prd_relative_path = extract_prd_path(issue.body)
@@ -148,6 +395,15 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         attempt_phases = AttemptPhaseTimer()
         attempt_started_iso = datetime.now(timezone.utc).isoformat()
         repo_id = _resolve_repo_id(issue, worktree_path)
+        attempt_record_context = _AttemptRecordContext(
+            request=request,
+            attempt_index=attempt_index,
+            attempt_phases=attempt_phases,
+            attempt_started_mono=attempt_started_mono,
+            attempt_started_iso=attempt_started_iso,
+            attempt_results=attempt_results,
+            repo_id=repo_id,
+        )
 
         # Phase 1: 运行 agent 或 recovery prompt
         try:
@@ -226,29 +482,10 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 exc=exc,
                 detect_provider_errors=True,
             )
-            (
-                _append_attempt_and_notify(
-                    attempt_results,
-                    _make_attempt_result(
-                        attempt_number=attempt_index + 1,
-                        failure_type=failure_type,
-                        recovered=False,
-                        detail=format_agent_execution_failure(exc),
-                        agent=selected_agent,
-                        started_mono=attempt_started_mono,
-                        started_iso=attempt_started_iso,
-                        phase_durations=attempt_phases.snapshot(),
-                    ),
-                    on_attempt_recorded,
-                ),
-            )
-
-            _persist_short_term_memory(
-                config=config,
-                issue=issue,
-                worktree_path=worktree_path,
-                attempt=attempt_results[-1],
-                repo_id=repo_id,
+            _record_attempt(
+                attempt_record_context,
+                failure_type=failure_type,
+                detail=format_agent_execution_failure(exc),
             )
             if failure_type == FailureType.UNRECOVERABLE:
                 raise UnrecoverableError(str(exc), attempt_results) from exc
@@ -278,41 +515,14 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         try:
             ensure_verification_passed(verification_results)
         except VerificationFailedError as exc:
-            after_sha = get_head_sha(worktree_path, process_runner)
-            failure_type = classify_failure(
-                before_sha=before_sha,
-                after_sha=after_sha,
-                has_uncommitted=False,
-                agent_result=CommandResult(("",), 0, "", ""),
+            failure_type = _classify_and_record_gate_failure(
+                attempt_record_context,
+                detail=format_recovery_failure_summary(
+                    "Verification before staging failed.",
+                    exc.verification_results,
+                ),
                 verification_results=exc.verification_results,
                 exc=None,
-            )
-            (
-                _append_attempt_and_notify(
-                    attempt_results,
-                    _make_attempt_result(
-                        attempt_number=attempt_index + 1,
-                        failure_type=failure_type,
-                        recovered=False,
-                        detail=format_recovery_failure_summary(
-                            "Verification before staging failed.",
-                            exc.verification_results,
-                        ),
-                        agent=selected_agent,
-                        started_mono=attempt_started_mono,
-                        started_iso=attempt_started_iso,
-                        phase_durations=attempt_phases.snapshot(),
-                    ),
-                    on_attempt_recorded,
-                ),
-            )
-
-            _persist_short_term_memory(
-                config=config,
-                issue=issue,
-                worktree_path=worktree_path,
-                attempt=attempt_results[-1],
-                repo_id=repo_id,
             )
             if attempt_index >= max_recovery_attempts:
                 raise MaxRetriesExceededError(attempt_results) from exc
@@ -330,6 +540,9 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             continue
 
         # Phase 3: 检查 PRD 交付（归档已完成 PRD）
+        # 收尾流程会整体重跑完整门禁链；重跑通过后 Phase 3.5 不必再跑一遍相同的
+        # 三道门禁（RV 命令复跑在脏工作区下不走缓存，跑两遍是纯浪费）。
+        delivery_gates_revalidated = False
         try:
             with attempt_phases.measure("prd_delivery"):
                 ensure_prd_delivery_ready(
@@ -339,104 +552,80 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     prd_baseline_content=prd_baseline_content,
                 )
         except PrdDeliveryError as exc:
-            after_sha = get_head_sha(worktree_path, process_runner)
-            failure_type = classify_failure(
-                before_sha=before_sha,
-                after_sha=after_sha,
-                has_uncommitted=False,
-                agent_result=CommandResult(("",), 0, "", ""),
-                verification_results=verification_results,
-                exc=exc,
+            delivery_gates_revalidated = _attempt_delivery_closeout(
+                _DeliveryCloseoutContext(
+                    record=attempt_record_context,
+                    gate_failure=exc,
+                    prd_baseline_content=prd_baseline_content,
+                )
             )
-            (
-                _append_attempt_and_notify(
-                    attempt_results,
-                    _make_attempt_result(
-                        attempt_number=attempt_index + 1,
-                        failure_type=failure_type,
-                        recovered=False,
-                        detail=format_prd_delivery_detail(str(exc)),
-                        agent=selected_agent,
-                        started_mono=attempt_started_mono,
-                        started_iso=attempt_started_iso,
-                        phase_durations=attempt_phases.snapshot(),
-                    ),
-                    on_attempt_recorded,
-                ),
-            )
-
-            _persist_short_term_memory(
-                config=config,
-                issue=issue,
-                worktree_path=worktree_path,
-                attempt=attempt_results[-1],
-                repo_id=repo_id,
-            )
-            if attempt_index >= max_recovery_attempts:
-                raise MaxRetriesExceededError(attempt_results) from exc
-            recovery_failure_summary = format_prd_delivery_failure(str(exc))
-            recovery_failure_type = failure_type.value
-            recovery_failure_summary = format_prd_delivery_failure(str(exc))
-            _logger.warning(
-                "PRD delivery check failed for Issue #%d; asking agent to recover (%d/%d).",
-                issue.number,
-                attempt_index + 1,
-                max_recovery_attempts,
-            )
-            continue
+            if not delivery_gates_revalidated:
+                failure_type = _classify_and_record_gate_failure(
+                    attempt_record_context,
+                    detail=format_prd_delivery_detail(str(exc)),
+                    verification_results=verification_results,
+                    exc=exc,
+                )
+                if attempt_index >= max_recovery_attempts:
+                    raise MaxRetriesExceededError(attempt_results) from exc
+                recovery_failure_summary = format_prd_delivery_failure(str(exc))
+                recovery_failure_type = failure_type.value
+                _logger.warning(
+                    "PRD delivery check failed for Issue #%d; asking agent to recover (%d/%d).",
+                    issue.number,
+                    attempt_index + 1,
+                    max_recovery_attempts,
+                )
+                continue
 
         # Phase 3.5: Realistic Validation 证据门禁（要求验证且无豁免时）
+        # 收尾成功时门禁链已在收尾流程内整体重跑通过，这里不再跑第二遍：脏工作区
+        # 下 RV 复跑不走缓存，重复执行纯属浪费。
+        evidence_gate_failure: ValidationEvidenceError | None = None
         try:
-            with attempt_phases.measure("evidence"):
-                ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
-                ensure_no_misplaced_evidence_helpers(worktree_path, config, process_runner)
-            # 存量违规只告警不阻塞：前瞻守卫只看本次变更，历史交付留在主干里的
-            # 取证脚本否则永远不可见。
-            warn_legacy_evidence_helpers(worktree_path, config, process_runner)
-            with attempt_phases.measure("rv_reexec"):
-                ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
-            # Phase 3.6: independent verifier (pre-PR; red -> this same recovery
-            # loop auto-repairs, bounded; escalates to a human only on exhaustion).
-            # Local import breaks the run_agent_once <-> run_verifier_agent cycle.
-            from backend.core.use_cases.run_verifier_agent import run_verifier_gate
-
-            with attempt_phases.measure("verifier"):
-                verifier_verdict = run_verifier_gate(
-                    issue, worktree_path, config, process_runner, selected_agent
-                )
+            if not delivery_gates_revalidated:
+                with attempt_phases.measure("evidence"):
+                    ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
+                    ensure_no_misplaced_evidence_helpers(worktree_path, config, process_runner)
+                # 存量违规只告警不阻塞：前瞻守卫只看本次变更，历史交付留在主干里的
+                # 取证脚本否则永远不可见。
+                warn_legacy_evidence_helpers(worktree_path, config, process_runner)
+                with attempt_phases.measure("rv_reexec"):
+                    ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
         except ValidationEvidenceError as exc:
-            after_sha = get_head_sha(worktree_path, process_runner)
-            failure_type = classify_failure(
-                before_sha=before_sha,
-                after_sha=after_sha,
-                has_uncommitted=False,
-                agent_result=CommandResult(("",), 0, "", ""),
+            if _attempt_delivery_closeout(
+                _DeliveryCloseoutContext(
+                    record=attempt_record_context,
+                    gate_failure=exc,
+                    prd_baseline_content=prd_baseline_content,
+                )
+            ):
+                delivery_gates_revalidated = True
+            else:
+                evidence_gate_failure = exc
+
+        # Phase 3.6: independent verifier (pre-PR; red -> this same recovery
+        # loop auto-repairs, bounded; escalates to a human only on exhaustion).
+        # 独立复验的红灯永远是真失败，因此刻意不经过收尾层。
+        if evidence_gate_failure is None:
+            try:
+                # Local import breaks the run_agent_once <-> run_verifier_agent cycle.
+                from backend.core.use_cases.run_verifier_agent import run_verifier_gate
+
+                with attempt_phases.measure("verifier"):
+                    verifier_verdict = run_verifier_gate(
+                        issue, worktree_path, config, process_runner, selected_agent
+                    )
+            except ValidationEvidenceError as exc:
+                evidence_gate_failure = exc
+
+        if evidence_gate_failure is not None:
+            exc = evidence_gate_failure
+            failure_type = _classify_and_record_gate_failure(
+                attempt_record_context,
+                detail=format_validation_evidence_detail(str(exc)),
                 verification_results=verification_results,
                 exc=exc,
-            )
-            (
-                _append_attempt_and_notify(
-                    attempt_results,
-                    _make_attempt_result(
-                        attempt_number=attempt_index + 1,
-                        failure_type=failure_type,
-                        recovered=False,
-                        detail=format_validation_evidence_detail(str(exc)),
-                        agent=selected_agent,
-                        started_mono=attempt_started_mono,
-                        started_iso=attempt_started_iso,
-                        phase_durations=attempt_phases.snapshot(),
-                    ),
-                    on_attempt_recorded,
-                ),
-            )
-
-            _persist_short_term_memory(
-                config=config,
-                issue=issue,
-                worktree_path=worktree_path,
-                attempt=attempt_results[-1],
-                repo_id=repo_id,
             )
             if attempt_index >= max_recovery_attempts:
                 raise MaxRetriesExceededError(attempt_results) from exc
@@ -525,41 +714,14 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         issue.number,
                     )
                 else:
-                    after_sha = get_head_sha(worktree_path, process_runner)
-                    failure_type = classify_failure(
-                        before_sha=before_sha,
-                        after_sha=after_sha,
-                        has_uncommitted=False,
-                        agent_result=CommandResult(("",), 0, "", ""),
+                    failure_type = _classify_and_record_gate_failure(
+                        attempt_record_context,
+                        detail=format_recovery_failure_summary(
+                            "Verification after runner staged changes with git add -A failed.",
+                            exc.verification_results,
+                        ),
                         verification_results=exc.verification_results,
                         exc=None,
-                    )
-                    (
-                        _append_attempt_and_notify(
-                            attempt_results,
-                            _make_attempt_result(
-                                attempt_number=attempt_index + 1,
-                                failure_type=failure_type,
-                                recovered=False,
-                                detail=format_recovery_failure_summary(
-                                    "Verification after runner staged changes with git add -A failed.",
-                                    exc.verification_results,
-                                ),
-                                agent=selected_agent,
-                                started_mono=attempt_started_mono,
-                                started_iso=attempt_started_iso,
-                                phase_durations=attempt_phases.snapshot(),
-                            ),
-                            on_attempt_recorded,
-                        ),
-                    )
-
-                    _persist_short_term_memory(
-                        config=config,
-                        issue=issue,
-                        worktree_path=worktree_path,
-                        attempt=attempt_results[-1],
-                        repo_id=repo_id,
                     )
                     if attempt_index >= max_recovery_attempts:
                         raise MaxRetriesExceededError(attempt_results) from exc
@@ -593,29 +755,10 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         verification_results=final_verification_results,
                         exc=exc,
                     )
-                    (
-                        _append_attempt_and_notify(
-                            attempt_results,
-                            _make_attempt_result(
-                                attempt_number=attempt_index + 1,
-                                failure_type=failure_type,
-                                recovered=False,
-                                detail=str(exc),
-                                agent=selected_agent,
-                                started_mono=attempt_started_mono,
-                                started_iso=attempt_started_iso,
-                                phase_durations=attempt_phases.snapshot(),
-                            ),
-                            on_attempt_recorded,
-                        ),
-                    )
-
-                    _persist_short_term_memory(
-                        config=config,
-                        issue=issue,
-                        worktree_path=worktree_path,
-                        attempt=attempt_results[-1],
-                        repo_id=repo_id,
+                    _record_attempt(
+                        attempt_record_context,
+                        failure_type=failure_type,
+                        detail=str(exc),
                     )
                     if failure_type == FailureType.UNRECOVERABLE:
                         raise UnrecoverableError(str(exc), attempt_results) from exc
@@ -632,29 +775,10 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     verification_results=final_verification_results,
                     exc=None,
                 )
-                (
-                    _append_attempt_and_notify(
-                        attempt_results,
-                        _make_attempt_result(
-                            attempt_number=attempt_index + 1,
-                            failure_type=failure_type,
-                            recovered=False,
-                            detail=f"The runner could not process the commit request.\n{exc}",
-                            agent=selected_agent,
-                            started_mono=attempt_started_mono,
-                            started_iso=attempt_started_iso,
-                            phase_durations=attempt_phases.snapshot(),
-                        ),
-                        on_attempt_recorded,
-                    ),
-                )
-
-                _persist_short_term_memory(
-                    config=config,
-                    issue=issue,
-                    worktree_path=worktree_path,
-                    attempt=attempt_results[-1],
-                    repo_id=repo_id,
+                _record_attempt(
+                    attempt_record_context,
+                    failure_type=failure_type,
+                    detail=f"The runner could not process the commit request.\n{exc}",
                 )
                 if attempt_index >= max_recovery_attempts:
                     raise MaxRetriesExceededError(attempt_results) from exc
@@ -677,37 +801,11 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # Phase 5: 检查 agent 是否实际产生了 commit
         after_sha = get_head_sha(worktree_path, process_runner)
         if before_sha != after_sha:
-            success_attempt = _make_attempt_result(
-                attempt_number=attempt_index + 1,
+            _record_attempt(
+                attempt_record_context,
                 failure_type=FailureType.SUCCESS,
-                recovered=attempt_index > 0,
                 detail="Agent produced commits and passed verification.",
-                agent=selected_agent,
-                started_mono=attempt_started_mono,
-                started_iso=attempt_started_iso,
-                phase_durations=attempt_phases.snapshot(),
-            )
-            (
-                _append_attempt_and_notify(
-                    attempt_results,
-                    success_attempt,
-                    on_attempt_recorded,
-                ),
-            )
-
-            _persist_short_term_memory(
-                config=config,
-                issue=issue,
-                worktree_path=worktree_path,
-                attempt=attempt_results[-1],
-                repo_id=repo_id,
-            )
-            _persist_short_term_memory(
-                config=config,
-                issue=issue,
-                worktree_path=worktree_path,
-                attempt=success_attempt,
-                repo_id=repo_id,
+                recovered=attempt_index > 0,
             )
             return AgentCommitResult(final_verification_results, attempt_results, verifier_verdict)
 
@@ -721,29 +819,10 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             verification_results=verification_results,
             exc=None,
         )
-        (
-            _append_attempt_and_notify(
-                attempt_results,
-                _make_attempt_result(
-                    attempt_number=attempt_index + 1,
-                    failure_type=failure_type,
-                    recovered=False,
-                    detail="Agent produced no git commits.",
-                    agent=selected_agent,
-                    started_mono=attempt_started_mono,
-                    started_iso=attempt_started_iso,
-                    phase_durations=attempt_phases.snapshot(),
-                ),
-                on_attempt_recorded,
-            ),
-        )
-
-        _persist_short_term_memory(
-            config=config,
-            issue=issue,
-            worktree_path=worktree_path,
-            attempt=attempt_results[-1],
-            repo_id=repo_id,
+        _record_attempt(
+            attempt_record_context,
+            failure_type=failure_type,
+            detail="Agent produced no git commits.",
         )
         if attempt_index >= max_recovery_attempts:
             raise MaxRetriesExceededError(attempt_results)

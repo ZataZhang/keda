@@ -99,6 +99,58 @@ def test_factory_maps_fix_agent_enabled() -> None:
     assert app_config.runner.fix_agent_enabled is False
 
 
+def test_factory_maps_closeout_settings() -> None:
+    """收尾层的三项配置必须活着走完 settings → factory → domain。
+
+    运行时读的是 domain 对象；两侧默认值相同会掩盖漏掉的 factory 映射，因此这里
+    一律用非默认值断言 ``AppConfig.runner`` 侧读到的结果。
+    """
+    from backend.core.shared.models.agent_runner import RunnerConfig
+    from backend.engines.agent_runner.factory import build_app_config_from_settings
+    from backend.infrastructure.config.settings import AgentRunnerRunnerSettings
+
+    default_settings = AgentRunnerRunnerSettings()
+    default_core = RunnerConfig()
+    assert default_settings.closeout_agent_enabled == default_core.closeout_agent_enabled
+    assert default_settings.closeout_timeout_seconds == default_core.closeout_timeout_seconds
+    assert (
+        default_settings.closeout_visual_timeout_seconds
+        == default_core.closeout_visual_timeout_seconds
+    )
+
+    settings = AgentRunnerSettings()
+    settings.runner = AgentRunnerRunnerSettings(
+        closeout_agent_enabled=False,
+        closeout_timeout_seconds=123,
+        closeout_visual_timeout_seconds=456,
+    )
+    app_config = build_app_config_from_settings(settings)
+
+    assert app_config.runner.closeout_agent_enabled is False
+    assert app_config.runner.closeout_timeout_seconds == 123
+    assert app_config.runner.closeout_visual_timeout_seconds == 456
+
+
+def test_root_config_toml_declares_closeout_settings() -> None:
+    """根 config.toml 必须显式登记三项收尾配置，运营者才看得到它们的存在。"""
+    config_toml_text = (Path(__file__).resolve().parents[1] / "config.toml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "closeout_agent_enabled" in config_toml_text
+    assert "closeout_timeout_seconds" in config_toml_text
+    assert "closeout_visual_timeout_seconds" in config_toml_text
+
+
+def test_iar_toml_key_table_documents_closeout_settings() -> None:
+    """逐仓库 .iar.toml 的键说明表必须登记三项新键，否则生成的文件里没有注释。"""
+    from backend.engines.agent_runner.repository_local import _IAR_FIELD_COMMENTS
+
+    assert "runner.closeout_agent_enabled" in _IAR_FIELD_COMMENTS
+    assert "runner.closeout_timeout_seconds" in _IAR_FIELD_COMMENTS
+    assert "runner.closeout_visual_timeout_seconds" in _IAR_FIELD_COMMENTS
+
+
 def test_settings_and_core_agent_labels_are_identical() -> None:
     """AgentRunnerLabelSettings must aggregate the same keys as Core LabelConfig."""
     assert AgentRunnerLabelSettings().agent_labels == CoreLabelConfig().agent_labels

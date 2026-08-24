@@ -606,7 +606,10 @@ def test_run_once_recovers_after_prd_delivery_failure(tmp_path: Path) -> None:
     assert exit_code == 0
     commands = [tuple(command) for command in fake_runner.calls]
     agent_commands = [command for command in commands if command[:1] == ("codex",)]
-    assert len(agent_commands) == 2
+    # 实现 → 收尾（本桩不修任何东西，门禁重跑仍红）→ 完整 recovery。
+    assert len(agent_commands) == 3
+    assert "Finish the delivery closeout" in agent_commands[1][-1]
+    assert "Recovery attempt: 1/2" in agent_commands[2][-1]
     mv_index = commands.index(("git", "mv", "tasks/pending/example.md", "tasks/archive/example.md"))
     add_index = commands.index(("git", "add", "-A"))
     commit_index = commands.index(("git", "commit", "-m", "agent: recovered fix"))
@@ -780,7 +783,9 @@ def test_run_once_passes_prd_baseline_to_change_log_gate(tmp_path: Path) -> None
 
     assert exit_code == 0
     # baseline 被切断时第一轮就会通过门禁，只会有 1 次 Agent 调用。
-    assert len(fake_runner.agent_prompts) == 2
-    recovery_prompt = fake_runner.agent_prompts[1]
+    # 实现 → 收尾（同样只改正文不写 Change Log，门禁重跑仍红）→ 完整 recovery。
+    assert len(fake_runner.agent_prompts) == 3
+    assert "Finish the delivery closeout" in fake_runner.agent_prompts[1]
+    recovery_prompt = fake_runner.agent_prompts[2]
     assert "PRD delivery check failed" in recovery_prompt
     assert "Change Log" in recovery_prompt

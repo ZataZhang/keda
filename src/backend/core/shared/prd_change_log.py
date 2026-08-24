@@ -30,11 +30,14 @@ class PrdChangeLogResult:
         section_found: 是否存在顶级 Change Log/变更记录章节。
         entry_count: 章节中记录到的变更条数。
         incomplete_entry_fields: 每条不完整记录缺少的字段，键为 1-based 条目序号。
+        entry_titles: 各条记录的 ``###`` 标题文本，顺序与 ``entry_count`` 一致；
+            供 runner 算出"本轮新增了哪条 Change Log"。
     """
 
     section_found: bool
     entry_count: int
     incomplete_entry_fields: dict[int, tuple[str, ...]]
+    entry_titles: tuple[str, ...] = ()
 
     @property
     def is_complete(self) -> bool:
@@ -76,11 +79,13 @@ def parse_prd_change_log(file_content: str) -> PrdChangeLogResult:
         len(prd_lines),
     )
     change_entries: list[list[str]] = []
+    entry_titles: list[str] = []
     active_entry_lines: list[str] | None = None
     for line in prd_lines[section_start_index + 1 : section_end_index]:
         if CHANGE_ENTRY_HEADING_RE.match(line):
             active_entry_lines = []
             change_entries.append(active_entry_lines)
+            entry_titles.append(line.lstrip("#").strip())
             continue
         if active_entry_lines is not None:
             active_entry_lines.append(line)
@@ -98,6 +103,7 @@ def parse_prd_change_log(file_content: str) -> PrdChangeLogResult:
         section_found=True,
         entry_count=len(change_entries),
         incomplete_entry_fields=incomplete_entry_fields,
+        entry_titles=tuple(entry_titles),
     )
 
 

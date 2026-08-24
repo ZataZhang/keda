@@ -438,6 +438,10 @@ rg -n "fix_agent_enabled|fix_timeout_seconds|recovery_timeout_seconds" src/ test
 rg -n "run_fix_agent|build_fix_prompt" src/ tests/
 ```
 
+```bash
+rg -n "closeout" src/ tests/ config.toml docs/
+```
+
 排查提示：
 - 新增 `FailureType` 取值后，若某处对失败类型做穷举匹配（`match` / 字典查表）而未加分支，表现为收尾 attempt 在某个渲染路径上丢失或报 KeyError——第一处该看的是失败分类与 attempt 历史渲染。
 - 三项配置若只改了 Settings 与 factory、漏了 core 领域 dataclass（或反过来），因默认值相同，测试与运行都可能"看起来正常"，直到有人在 `.iar.toml` 里改值才发现不生效。断言方式必须是"改 settings 后从领域对象读到新值"，不能只断言 settings 自身。
@@ -593,47 +597,47 @@ flowchart TD
 
 ### Human-Confirmed
 
-- [ ] **决策一 · 勾选权边界**：rv-2 通过——`uv run iar run --repo $CLOSEOUT_FIXTURE_REPO_NO_EVIDENCE` 后，无证据条目在 PRD 文本中仍为未勾，且尝试历史显示本轮升级为完整重跑；反向对照（移除收尾后的门禁链重跑）已执行并变红，证据文件记录两次运行的输出与最终实现树 git HEAD。
-- [ ] **决策二 · 收尾不许碰代码**：rv-3 通过——桩 agent 在收尾阶段写入 `src/` 下文件后，runner 判越界并升级，越界改动未进入发布；反向对照（移除越界检查）已执行并变红，证据记录两次运行输出与 git HEAD。
-- [ ] **决策三 · 真失败不进收尾层**：rv-4 通过——RV 重跑失败、证据不匹配、RV 脚本错放三种 fixture 的尝试历史均无 `delivery_closeout` 记录，流转与改动前一致；反向对照（误标 `ensure_validation_commands_pass` 抛出点）已执行并变红。
+- [x] **决策一 · 勾选权边界**：rv-2 通过——`uv run iar run --repo <no-evidence fixture>` 后，无证据条目在 PRD 文本中仍为未勾，且尝试历史显示本轮升级为完整重跑；反向对照（移除收尾后的门禁链重跑）已执行并变红，证据文件记录两次运行的输出与最终实现树 git HEAD。
+- [x] **决策二 · 收尾不许碰代码**：rv-3 通过——桩 agent 在收尾阶段写入 `src/` 下文件后，runner 判越界并升级，越界改动未进入发布；反向对照（移除越界检查）已执行并变红，证据记录两次运行输出与 git HEAD。
+- [x] **决策三 · 真失败不进收尾层**：rv-4 通过——RV 重跑失败、证据不匹配、RV 脚本错放三种 fixture 的尝试历史均无 `delivery_closeout` 记录，流转与改动前一致；反向对照（误标 `ensure_validation_commands_pass` 抛出点）已执行并变红。
 
 ### Behavior Acceptance
 
-- [ ] rv-1 通过：收尾成功时实现 Agent 仅被调用 1 次，本轮直接进入发布路径，Issue 尝试历史新增一条 `delivery_closeout` 记录并列出被勾选条目及其依据证据；反向对照（短路收尾分支）变红。
-- [ ] rv-5 通过：fixture 仓 `.iar.toml` 中 `closeout_agent_enabled = false` 时，四类收尾失败的流转与改动前一致，无收尾记录——同时证明逐仓库配置对本功能真实生效。
-- [ ] rv-6 通过：视觉类收尾使用 `closeout_visual_timeout_seconds`、文本类使用 `closeout_timeout_seconds`，把视觉超时设为极小值时该次收尾超时并升级。
-- [ ] Issue 评论中的"本轮勾了哪几项"由 runner 对收尾前后 PRD 文本比对得出：单测覆盖"agent 自述与实际差异不一致"时以实际差异为准。
+- [x] rv-1 通过：收尾成功时实现 Agent 仅被调用 1 次，本轮直接进入发布路径，Issue 尝试历史新增一条 `delivery_closeout` 记录并列出被勾选条目及其依据证据；反向对照（短路收尾分支）变红。
+- [x] rv-5 通过：fixture 仓 `.iar.toml` 中 `closeout_agent_enabled = false` 时，四类收尾失败的流转与改动前一致，无收尾记录——同时证明逐仓库配置对本功能真实生效。
+- [x] rv-6 通过：视觉类收尾使用 `closeout_visual_timeout_seconds`、文本类使用 `closeout_timeout_seconds`，把视觉超时设为极小值时该次收尾超时并升级。
+- [x] Issue 评论中的"本轮勾了哪几项"由 runner 对收尾前后 PRD 文本比对得出：单测覆盖"agent 自述与实际差异不一致"时以实际差异为准。
 
 ### Architecture Acceptance
 
-- [ ] 门禁失败分类枚举定义在 `src/backend/core/shared/models/agent_runner.py`，`core/` 层不引入对 `engines/` / `infrastructure/` 的新依赖：`rg -n "from backend.(engines|infrastructure)" src/backend/core/use_cases/run_agent_execution_loop.py src/backend/core/use_cases/agent_runner_feedback.py src/backend/core/use_cases/agent_runner_validation.py` 无新增命中。
-- [ ] 收尾流程 helper 在执行循环中只有一份实现，两处 `except` 共用：`rg -n "closeout" src/backend/core/use_cases/run_agent_execution_loop.py` 显示单一 helper 定义与两处调用。
-- [ ] 分流不依赖错误文案匹配：`rg -n "Acceptance Checklist has unchecked|does not match the checklist|failed when keda" src/backend/core/use_cases/run_agent_execution_loop.py` 无命中。
-- [ ] 未显式标注分类的门禁抛出点默认按真失败处理：`test_agent_runner_validation.py` 中存在断言，覆盖 `ensure_validation_commands_pass` 与 `ensure_no_misplaced_evidence_helpers`。
+- [x] 门禁失败分类枚举定义在 `src/backend/core/shared/models/agent_runner.py`，`core/` 层不引入对 `engines/` / `infrastructure/` 的新依赖：`rg -n "from backend.(engines|infrastructure)" src/backend/core/use_cases/run_agent_execution_loop.py src/backend/core/use_cases/agent_runner_feedback.py src/backend/core/use_cases/agent_runner_validation.py` 无新增命中。
+- [x] 收尾流程 helper 在执行循环中只有一份实现，两处 `except` 共用：`rg -n "closeout" src/backend/core/use_cases/run_agent_execution_loop.py` 显示单一 helper 定义与两处调用。
+- [x] 分流不依赖错误文案匹配：`rg -n "Acceptance Checklist has unchecked|does not match the checklist|failed when keda" src/backend/core/use_cases/run_agent_execution_loop.py` 无命中。
+- [x] 未显式标注分类的门禁抛出点默认按真失败处理：`test_agent_runner_validation.py` 中存在断言，覆盖 `ensure_validation_commands_pass` 与 `ensure_no_misplaced_evidence_helpers`。
 
 ### Dependency Acceptance
 
-- [ ] 三处配置同步完成且运行时读到的是领域对象的值：修改 settings 后 `test_agent_runner_config.py` 断言 `AppConfig.runner` 侧读到新值（不只断言 settings 自身）。
-- [ ] `.iar.toml` 键说明表已登记三项新键：`rg -n "closeout_agent_enabled|closeout_timeout_seconds|closeout_visual_timeout_seconds" src/backend/engines/agent_runner/repository_local.py config.toml` 三处均命中。
-- [ ] 默认 env / 配置未填写时配置加载正常完成（三项均有默认值，无必填新增）。
+- [x] 三处配置同步完成且运行时读到的是领域对象的值：修改 settings 后 `tests/test_agent_config_consistency.py::test_factory_maps_closeout_settings` 断言 `AppConfig.runner` 侧读到新值（不只断言 settings 自身）。
+- [x] `.iar.toml` 键说明表已登记三项新键：`rg -n "closeout_agent_enabled|closeout_timeout_seconds|closeout_visual_timeout_seconds" src/backend/engines/agent_runner/repository_local.py config.toml` 三处均命中。
+- [x] 默认 env / 配置未填写时配置加载正常完成（三项均有默认值，无必填新增）。
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 在 Fix Agent 相关章节后新增收尾层说明，覆盖：触发的四类失败、明确排除的三类、两个超时及其回退链、开关、Issue 评论留痕内容。
-- [ ] `uv run mkdocs build --strict` 通过。
+- [x] `docs/guides/agent-runner.md` 在 Fix Agent 相关章节后新增收尾层说明，覆盖：触发的四类失败、明确排除的三类、两个超时及其回退链、开关、Issue 评论留痕内容。
+- [x] `uv run mkdocs build --strict` 通过。
 
 ### Validation Acceptance
 
-- [ ] 最高保真真实入口已执行：rv-1 至 rv-6 全部通过 `uv run iar run --repo <fixture>` 真实 CLI 入口运行，而非直接调用内部函数；证据文件保存运行输出。
-- [ ] 每条人工确认项的反向对照均已实际执行并观察到变红，证据文件包含变红时的输出。
-- [ ] 关键值来源合规：被勾选条目清单来自 runner 对 PRD 文本的前后比对、越界文件集来自改动路径快照差异、生效超时值来自运行日志——均非 agent 自述、非配置文件回读。
-- [ ] 全部证据在执行循环 / feedback / validation 三个模块的最后一次改动之后重新采集，证据文件中记录对应 git HEAD。
+- [x] 最高保真真实入口已执行：rv-1 至 rv-6 全部通过 `uv run iar run --repo <fixture>` 真实 CLI 入口运行，而非直接调用内部函数；证据文件保存运行输出。
+- [x] 每条人工确认项的反向对照均已实际执行并观察到变红，证据文件包含变红时的输出。
+- [x] 关键值来源合规：被勾选条目清单来自 runner 对 PRD 文本的前后比对、越界文件集来自改动路径快照差异、生效超时值来自运行日志——均非 agent 自述、非配置文件回读。
+- [x] 全部证据在执行循环 / feedback / validation 三个模块的最后一次改动之后重新采集，证据文件中记录对应 git HEAD。
 
 ### Delivery Readiness
 
-- [ ] `SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure` 通过。
-- [ ] `just test all` 通过。
-- [ ] 四类收尾失败与三类真失败的分流在真实运行中各自验证过至少一次，无未决回归。
+- [x] `SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure` 通过。
+- [x] `just test all` 通过。
+- [x] 四类收尾失败与三类真失败的分流在真实运行中各自验证过至少一次，无未决回归。
 
 ## 10. Functional Requirements
 
@@ -683,3 +687,61 @@ flowchart TD
 | D-06 | 留痕内容以谁为准 | runner 比对收尾前后 PRD 文本自行计算 | 采信收尾 agent 的自述报告 | agent 可以在自述中说谎，前后文本差异不会；且比对逻辑可单测 |
 | D-07 | 视觉证据补采是否纳入收尾层 | 纳入，使用独立的更长超时 | 排除，继续整轮重跑 / 纳入但共用文本超时 | 代码已正确且已提交，缺的只是采集动作，仍远轻于重写实现；但采集需真实启动应用，与"补一条 Change Log"共用短超时会把它变成超时失败 |
 | D-08 | 收尾失败后是否重试收尾 | 不重试，一次不成立刻升级 | 允许 N 次收尾重试 | 收尾失败通常意味着类别判断错了（其实是真失败），重试只放大延迟；与 Fix Agent 既有策略一致 |
+
+## 14. Change Log
+
+### 收尾层落在独立模块而不是 feedback / run_agent_once
+- Type: 实现落点
+- Before: Change Impact Tree 把收尾 prompt 与差异计算放进 `agent_runner_feedback.py`，把 `run_closeout_agent` 放进 `run_agent_once.py`。
+- After: 三者统一落在新模块 `src/backend/core/use_cases/agent_runner_closeout.py`；执行循环仍只有一份收尾 helper。
+- Reason: 两个目标文件分别已 959 / 1044 行，继续追加会越过 `docs/ai-standards/code-reuse.md` 的 800 行上限与 1000 行 warn 线；收尾层本身是一个内聚的新概念。
+- Impact: 不改变任何对外行为与依赖方向（新模块仍在 `core/use_cases/`）；Drift Guard 的搜索命令需要把新模块一并纳入。
+- Review: 由 `just lint --reuse` 的 check-max-file-lines 与 check-architecture 覆盖。
+
+### 两项收尾超时的默认值取 600 / 1800 而非 None
+- Type: 配置默认值
+- Before: Change Impact Tree 写 `closeout_timeout_seconds: int | None = None`、`closeout_visual_timeout_seconds: int | None = None`；§3 与 FR-14 写默认 600 秒 / 1800 秒。
+- After: 领域对象与 Pydantic Settings 的默认值取 600 / 1800，`None` 仍触发 `fix_timeout_seconds → timeout_seconds` 回退链。
+- Reason: 两处原文冲突；取 §3/FR-14 的口径，运营者看到的默认值与文档一致，且 `None` 的回退语义完整保留。
+- Impact: 未显式配置的仓库拿到 10 分钟 / 30 分钟预算，而不是继承 4 小时的实现超时。
+- Review: `tests/test_agent_config_consistency.py::test_factory_maps_closeout_settings` 断言三处默认值一致且非默认值能穿透到领域对象。
+
+### 越界判定改用改动路径的内容摘要差异
+- Type: 判定机制
+- Before: 7.2 描述"收尾前后各取一次改动文件集"，判定基准是改动路径集合。
+- After: 快照记录每条改动路径的内容摘要，越界集 = 摘要发生变化且不在允许集内的路径。
+- Reason: 交付门禁跑在 commit proxy 之前，实现 agent 的改动此刻仍未提交，改动路径集合里本来就有 `src/` 文件；只比集合的话，收尾 pass 再改一次同一个源文件不会产生任何差异，越界检查形同虚设。
+- Impact: 判定更严格，覆盖"改写已有脏文件"这一最可能的越界形态；rv-3 的桩正是改写实现阶段已写过的 `src/feature.py`。
+- Review: rv-3 主运行与反向对照均已执行，见 `.iar/evidence/rv-3-out-of-scope-blocked.txt`。
+
+### 收尾判失败时还原 canonical PRD 文本
+- Type: 安全边界补强
+- Before: 7.2 只写"判失败，升级"，未规定失败收尾已经写下的 PRD 编辑如何处置。
+- After: 收尾在任一环节判失败时，runner 用收尾前快照把 canonical PRD 还原（实现阶段的合法 PRD 修改完整保留），越界写入的其他文件仍按原设计交给完整重跑处理。
+- Reason: 决策一的验收要求"无证据条目在跑完之后仍为未勾"。清单门禁只问"还有没有未勾项"，不还原的话，失败收尾留下的凭空勾会被随后的完整重跑当成既成事实收下，"举证后才可勾选"就成了空话。
+- Impact: 失败路径对 PRD 而言与本层落地前逐字节一致；`tests/test_agent_runner_closeout.py` 与 rv-2 / rv-3 各有断言。
+- Review: rv-2 主运行确认条目仍为未勾，反向对照确认移除门禁链重跑后条目会被勾满。
+
+### 收尾成功后 Phase 3.5 不再重复跑同一批门禁
+- Type: 执行顺序
+- Before: 7.2 的流程图在收尾成功后回到 Phase 3.5。
+- After: 收尾流程内部已整体重跑 PRD 交付 + 证据齐备 + RV 脚本位置 + RV 命令复跑，因此本轮 Phase 3.5 跳过这四道门禁，只继续跑 Phase 3.6 的独立 verifier。
+- Reason: 收尾后工作区必然是脏的，RV 复跑缓存按定义不命中，重复执行会把每条 RV 命令跑两遍。
+- Impact: 门禁强度不变（同一批门禁在收尾流程里已真实执行且必须全过）；verifier 红灯仍是真失败，刻意不经过收尾层。
+- Review: rv-1 的 runner 日志显示单轮内门禁链只跑一次即进入发布路径。
+
+### 顺带消除执行循环里的 attempt 记录样板重复
+- Type: 重构
+- Before: 执行循环的每个失败分支各自复制一段"记 attempt + 通知回调 + 写短期记忆"的二十多行样板；Phase 5 成功路径还重复调用了两次短期记忆写入。
+- After: 抽出 `_AttemptRecordContext` / `_record_attempt` / `_classify_and_record_gate_failure`，八处调用点共用一份实现。
+- Reason: 本 PRD 的改动触达了这些行，`just lint --reuse` 的 jscpd 因此判定重复；同时 Phase 5 的双写是既有笔误。
+- Impact: 无对外行为变化（除去重复的短期记忆写入）；执行循环文件从 764 行只增至 843 行，仍在阈值内。
+- Review: 全量 `just test all`（1860 项）通过，`just lint --reuse` 全绿。
+
+### 三处配置同步断言落在既有测试文件
+- Type: 测试落点
+- Before: Change Impact Tree 指向 `tests/test_agent_runner_config.py`。
+- After: 断言写在既有的 `tests/test_agent_config_consistency.py`，与 `test_factory_maps_fix_agent_enabled` / `test_factory_maps_verifier_timeouts` 同型并列。
+- Reason: 该文件才是"settings → factory → domain 三处同步"的既有归属地；`test_agent_runner_config.py` 是另一类配置解析测试。
+- Impact: 仅测试位置差异，断言口径与 PRD 要求一致（改 settings 后从领域对象读到新值）。
+- Review: 三项配置的默认值一致性与非默认值穿透均有断言。

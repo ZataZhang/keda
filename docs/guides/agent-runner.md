@@ -373,6 +373,12 @@ fix_agent_enabled = true
 fix_timeout_seconds = 1800
 # 完整 Recovery Agent 阶段的 wall-clock 超时（秒）；未设置时沿用 timeout_seconds
 recovery_timeout_seconds = 7200
+# 是否启用交付收尾层（Closeout Agent）；false 时四类收尾失败直接整轮重跑
+closeout_agent_enabled = true
+# 文本类收尾（补勾选 / 补 Change Log / 修证据清单字段）的 wall-clock 超时（秒）
+closeout_timeout_seconds = 600
+# 视觉证据补采的 wall-clock 超时（秒）：要真启动应用截图/录屏，不与文本类共用
+closeout_visual_timeout_seconds = 1800
 # 无输出超时（秒）：agent 子进程在指定时间内没有 stdout/stderr 输出时被 kill
 inactivity_timeout_seconds = 1200
 # 提交前自动运行的验证命令；任一命令失败会进入 recovery
@@ -392,9 +398,11 @@ pre_commit_verification_command = "uv run pre-commit run --all-files"
 | `timeout_seconds` | `14400`（4 小时） | 单次 agent 执行的 wall-clock 上限。超过后 runner 会 kill 子进程，并将本次尝试记录为可恢复的 `AGENT_ERROR`，随后进入 recovery 流程。 |
 | `fix_timeout_seconds` | `None`（沿用 `timeout_seconds`） | Fix Agent 阶段的 wall-clock 上限。用于修复提交前验证失败等局部问题，通常可以给一个比完整实现更短的预算。 |
 | `recovery_timeout_seconds` | `None`（沿用 `timeout_seconds`） | 完整 Recovery Agent 阶段的 wall-clock 上限。Recovery Agent 需要基于失败摘要做全局重规划，可单独配置。 |
+| `closeout_timeout_seconds` | `600`（10 分钟） | 文本类交付收尾（补勾选、补 Change Log、修证据清单字段）的 wall-clock 上限。留空时依次回退到 `fix_timeout_seconds`、再到 `timeout_seconds`。 |
+| `closeout_visual_timeout_seconds` | `1800`（30 分钟） | 视觉证据补采的 wall-clock 上限。补一张截图要真把应用跑起来，因此与文本类收尾分开配置；留空时的回退链同上。 |
 | `inactivity_timeout_seconds` | `1200`（20 分钟） | 无输出上限。只要 agent 子进程持续产生 stdout/stderr 数据，时钟就会重置；如果超过 20 分钟没有任何输出，runner 认为进程已卡死并 kill。 |
 
-四类超时独立生效，满足任意一个都会终止子进程。`timeout_seconds` 是首次实现与默认 fallback 的基准；`fix_timeout_seconds` 与 `recovery_timeout_seconds` 分别覆盖 Fix Agent 与完整 Recovery Agent，未设置时自动回退到 `timeout_seconds`。
+六类超时独立生效，满足任意一个都会终止子进程。`timeout_seconds` 是首次实现与默认 fallback 的基准；`fix_timeout_seconds` 与 `recovery_timeout_seconds` 分别覆盖 Fix Agent 与完整 Recovery Agent，`closeout_timeout_seconds` / `closeout_visual_timeout_seconds` 覆盖交付收尾层，未设置时自动回退到 `timeout_seconds`。
 
 如果某个任务确实需要更长时间，可以在目标仓库的 `.iar.toml` 或全局 `config.toml` 中调大对应值；如果某类任务经常静默运行（例如大型编译），可适当提高 `inactivity_timeout_seconds`。
 
@@ -429,6 +437,45 @@ Agent command failed for Issue #19; asking agent to recover (1/5).
 这一分层修复的目的是把大量常见的 lint/类型错误（如 agent 遗漏 import、简单单测失败）用更短的超时和更聚焦的 prompt 解决，避免动辄调用一次完整的 recovery agent。
 
 Fix Agent 的每次启动、修复成功、修复失败以及被配置关闭跳过都会写入 runner 日志（`Starting Fix Agent` / `Fix Agent repaired` / `Fix Agent failed` / `Fix Agent disabled`），可以据此统计这一层的实际触发率与成功率，评估是否值得为仓库保留或关闭。
+
+### 交付收尾层（Closeout Agent）
+
+Fix Agent 只挂在「提交前验证失败」这一个入口。代码写完、验证全过之后还有一道**交付门禁**：PRD 验收清单要全勾、PRD 改动要有 Change Log、Realistic Validation 证据要齐备。这道门禁失败时，原先只有一种处理方式——整轮作废、重新调用完整实现 Agent。但其中很大一部分失败其实是「代码是对的，只差交付收尾动作」，为此重跑一次完整实现代价过高。
+
+**Closeout Agent 是修复阶梯的第三层**，只接住这四类失败：
+
+| 收尾类失败 | 触发点 |
+|---|---|
+| 验收清单有未勾项 | `_validate_prd_checklist` |
+| PRD 改了但 Change Log 缺失 / 为零条 / 未追加 / 字段不全 | `_validate_prd_change_log` |
+| 结构化证据清单（`evidence.json`）字段格式非法 | `validate_evidence_manifest` 的清单解析层 |
+| 前端有改动但证据目录缺截图 / 录屏 | `ensure_frontend_visual_evidence` |
+
+**明确不接这三类**，它们保持整轮重跑：
+
+- RV 命令被 keda 复跑后未通过或超时（`ensure_validation_commands_pass`）
+- 证据目录为空、证据与清单覆盖不匹配、证据文件交叉污染、缺 negative control、产物健全性不达标
+- RV 辅助脚本放错位置（`ensure_no_misplaced_evidence_helpers`）
+
+理由是这三类表达的是「行为没做对」或「验证没真跑过」，让一个轻量 pass 去消除这类信号等于自拆验证体系。
+
+分流依据**不是匹配错误文案**，而是在抛出门禁错误的那行代码上显式声明分类（`DeliveryGateFailureKind`）。门禁文案是会随 prompt 调优被改写的英文散文，用正则分流必然漂移，且漂移方向恰恰最危险。未显式声明的抛出点默认按真失败处理，因此新增门禁时漏标的后果是「少省一点时间」，不是「门禁被绕过」。
+
+一次收尾的完整流程：
+
+1. **快照** —— 记录 worktree 改动路径的内容摘要、canonical PRD 全文、证据目录文件清单。
+2. **启动收尾 agent** —— 复用当前轮次已选定的 agent（不引入「收尾用哪个 agent」这个新配置维度），prompt 只含该门禁失败与收尾约束，超时按类别取 `closeout_timeout_seconds` 或 `closeout_visual_timeout_seconds`。
+3. **越界检查** —— 再取一次快照，比对内容摘要。收尾 pass 只被允许改 canonical PRD（含其归档目标路径）与证据目录；出现任何其他被改动的路径即判本次收尾失败。这条**不靠 prompt 约束**，靠 runner 自己比对强制。
+4. **完整门禁链重跑** —— PRD 交付 + 证据齐备 + RV 脚本位置 + RV 命令复跑，全过才算收尾成功。
+5. **留痕** —— runner 比对收尾前后的 PRD 文本与证据清单，算出「本轮勾了哪几项 / 追加了哪条 Change Log / 新增了哪些证据文件」，以 `delivery_closeout` + `recovered=true` 记一条 attempt，同步到 Issue 的尝试历史评论。**这份记录不采信 agent 自述**——agent 可以在总结里说谎，前后文本差异不会。
+
+任一环节失败即升级为整轮重跑，与本层落地前的行为一致；同时 runner 会把收尾 pass 对 PRD 的编辑**原样撤销**。验收清单是这几道门禁里唯一没有独立验证源的一道（门禁只问「还有没有未勾项」），失败的收尾若把一个举不出证据的勾留在 worktree 里，随后的完整重跑会把它当成既成事实收下，「举证后才可勾选」就成了空话。越界写入的其他文件不撤销，按设计交给完整重跑重新处理。
+
+收尾 pass 的 prompt 要求：勾选任何验收条目前必须指认出它依据的证据文件或命令输出；举不出依据的条目保持未勾并说明原因；不得修改源码、测试与 RV 命令；不得为了让条目通过而弱化、删除或改写条目文本。
+
+日志关键字：`Starting Closeout Agent` / `Closeout Agent repaired` / `Closeout Agent failed` / `Closeout Agent disabled` / `Closeout Agent modified out-of-scope files` / `Delivery gates still fail after closeout`。收尾耗时进入 attempt 的 phase 分解（`closeout`）。
+
+通过 `closeout_agent_enabled = false` 可以整层关掉，四类收尾失败回到整轮重跑。这个键走的是逐仓库配置路径，在目标仓库自己的 `.iar.toml` 里改完下一轮轮询即生效。
 
 ### WIP checkpoint 不合并
 

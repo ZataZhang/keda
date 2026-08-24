@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import (
+    DeliveryGateFailureKind,
     IssueSummary,
 )
 from backend.core.use_cases.run_agent_once import (
@@ -461,3 +462,131 @@ def test_ensure_prd_delivery_ready_archives_untracked_prd_real_git(
         text=True,
     ).stdout.strip()
     assert tracked == "tasks/archive/example.md"
+
+
+# ---------------------------------------------------------------------------
+# 门禁失败分类：收尾类 vs 真失败类
+# ---------------------------------------------------------------------------
+
+_CHECKLIST_BASELINE = "# PRD\n\n## Acceptance Checklist\n\n- [x] done\n"
+_COMPLETE_CHANGE_LOG_ENTRY = "\n".join(
+    [
+        "",
+        "### 已有条目",
+        "- 类型：范围",
+        "- 原文：旧",
+        "- 变更后：新",
+        "- 原因：需要",
+        "- 影响：无",
+        "- 审核：已记录",
+        "",
+    ]
+)
+
+
+def _write_prd(tmp_path: Path, content: str) -> None:
+    """Write the canonical pending PRD used by the classification cases."""
+    prd_path = tmp_path / "tasks" / "pending" / "example.md"
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(content, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("prd_content", "baseline_content", "expected_kind"),
+    (
+        # 清单未勾 → 收尾类。
+        (
+            "# PRD\n\n## Acceptance Checklist\n\n- [x] done\n- [ ] undone\n",
+            None,
+            DeliveryGateFailureKind.CHECKLIST_UNCHECKED,
+        ),
+        # 清单章节整体缺失 → PRD 结构有问题，保持真失败类。
+        ("# PRD\n", None, DeliveryGateFailureKind.SUBSTANTIVE),
+        # 改了 PRD 却没有 Change Log 章节 → 收尾类。
+        (
+            _CHECKLIST_BASELINE + "\n新增实现说明。\n",
+            _CHECKLIST_BASELINE,
+            DeliveryGateFailureKind.CHANGE_LOG_INCOMPLETE,
+        ),
+        # 有章节但一条都解析不出（表格写法）→ 收尾类。
+        (
+            _CHECKLIST_BASELINE + "\n## Change Log\n\n| 类型 | 原文 |\n|---|---|\n| 范围 | 旧 |\n",
+            _CHECKLIST_BASELINE,
+            DeliveryGateFailureKind.CHANGE_LOG_INCOMPLETE,
+        ),
+        # 改了 PRD 但没有相对基线追加新条目 → 收尾类。
+        (
+            _CHECKLIST_BASELINE
+            + "\n## Change Log\n"
+            + _COMPLETE_CHANGE_LOG_ENTRY
+            + "\n实现说明。\n",
+            _CHECKLIST_BASELINE + "\n## Change Log\n" + _COMPLETE_CHANGE_LOG_ENTRY,
+            DeliveryGateFailureKind.CHANGE_LOG_INCOMPLETE,
+        ),
+        # 新条目缺字段 → 收尾类。
+        (
+            _CHECKLIST_BASELINE + "\n## Change Log\n\n### 新条目\n- 类型：范围\n",
+            _CHECKLIST_BASELINE,
+            DeliveryGateFailureKind.CHANGE_LOG_INCOMPLETE,
+        ),
+    ),
+)
+def test_prd_delivery_errors_carry_their_closeout_classification(
+    tmp_path: Path,
+    prd_content: str,
+    baseline_content: str | None,
+    expected_kind: DeliveryGateFailureKind,
+) -> None:
+    """每个 PRD 交付抛出点都在抛出处声明分类，不靠事后匹配错误文案。"""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    _write_prd(tmp_path, prd_content)
+
+    with pytest.raises(PrdDeliveryError) as exc_info:
+        ensure_prd_delivery_ready(
+            issue,
+            tmp_path,
+            FakeProcessRunner(),
+            prd_baseline_content=baseline_content,
+        )
+
+    assert exc_info.value.kind is expected_kind
+
+
+def test_missing_canonical_prd_stays_substantive(tmp_path: Path) -> None:
+    """PRD 文件根本不存在 → 真失败类，整轮重跑。"""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+
+    with pytest.raises(PrdDeliveryError) as exc_info:
+        ensure_prd_delivery_ready(issue, tmp_path, FakeProcessRunner())
+
+    assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
+
+
+def test_missing_archive_dir_stays_substantive(tmp_path: Path) -> None:
+    """归档目录缺失是仓库结构问题 → 真失败类。"""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    _write_prd(tmp_path, _CHECKLIST_BASELINE)
+
+    with pytest.raises(PrdDeliveryError) as exc_info:
+        ensure_prd_delivery_ready(issue, tmp_path, FakeProcessRunner())
+
+    assert "Archive directory does not exist" in str(exc_info.value)
+    assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
