@@ -8,7 +8,6 @@ of non-ASCII paths, which mock-based tests cannot reproduce.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -19,32 +18,23 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.agent_runner_git import (
     list_changed_paths,
+    list_stageable_paths,
     run_verification,
 )
 from backend.core.use_cases.agent_runner_publish import validate_safe_changes
 from backend.infrastructure.process_runner import SubprocessRunner
-
-
-def _run_git(repo_path: Path, *git_args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *git_args],
-        cwd=repo_path,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+from tests.support.agent_runner import run_git
 
 
 def _init_git_repository(tmp_path: Path) -> Path:
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
-    _run_git(repo_path, "init", "--initial-branch=main")
-    _run_git(repo_path, "config", "user.email", "test@example.com")
-    _run_git(repo_path, "config", "user.name", "Test User")
+    run_git(repo_path, "init", "--initial-branch=main")
+    run_git(repo_path, "config", "user.email", "test@example.com")
+    run_git(repo_path, "config", "user.name", "Test User")
     (repo_path / "README.md").write_text("placeholder\n", encoding="utf-8")
-    _run_git(repo_path, "add", "README.md")
-    _run_git(repo_path, "commit", "-m", "init")
+    run_git(repo_path, "add", "README.md")
+    run_git(repo_path, "commit", "-m", "init")
     return repo_path
 
 
@@ -61,7 +51,7 @@ def test_list_changed_paths_returns_non_ascii_paths_verbatim(
     secret_file_path = repo_path / "secrets" / "密钥.txt"
     secret_file_path.parent.mkdir()
     secret_file_path.write_text("token\n", encoding="utf-8")
-    _run_git(repo_path, "add", "secrets")
+    run_git(repo_path, "add", "secrets")
 
     changed_paths = list_changed_paths(repo_path, SubprocessRunner())
 
@@ -74,12 +64,65 @@ def test_list_changed_paths_includes_rename_source_and_target(
 ) -> None:
     """A staged rename must report both the new and the original path."""
     repo_path = _init_git_repository(tmp_path)
-    _run_git(repo_path, "mv", "README.md", "说明.md")
+    run_git(repo_path, "mv", "README.md", "说明.md")
 
     changed_paths = list_changed_paths(repo_path, SubprocessRunner())
 
     assert "说明.md" in changed_paths
     assert "README.md" in changed_paths
+
+
+def test_list_stageable_paths_drops_staged_rename_source(tmp_path: Path) -> None:
+    """A staged rename's source path must not reach a ``git add`` pathspec.
+
+    ``git mv`` removes the source from both the working tree and the index, so
+    ``git add -- <source>`` aborts the *whole* command with exit 128. The
+    rename itself is already in the index, so dropping it loses nothing.
+    """
+    repo_path = _init_git_repository(tmp_path)
+    (repo_path / "src").mkdir()
+    (repo_path / "src" / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    run_git(repo_path, "mv", "README.md", "说明.md")
+
+    stageable_paths = list_stageable_paths(repo_path, SubprocessRunner())
+
+    assert "README.md" not in stageable_paths
+    assert "说明.md" in stageable_paths
+    assert "src/" in stageable_paths
+    # The whole point of the filter: git must accept every path it returns.
+    run_git(repo_path, "add", "--", *stageable_paths)
+
+
+def test_list_stageable_paths_drops_already_staged_deletion(tmp_path: Path) -> None:
+    """An already-staged deletion (``D `` status) is unmatched by ``git add`` too."""
+    repo_path = _init_git_repository(tmp_path)
+    (repo_path / "doomed.txt").write_text("bye\n", encoding="utf-8")
+    run_git(repo_path, "add", "doomed.txt")
+    run_git(repo_path, "commit", "-m", "add doomed")
+    run_git(repo_path, "rm", "doomed.txt")
+
+    stageable_paths = list_stageable_paths(repo_path, SubprocessRunner())
+
+    assert "doomed.txt" not in stageable_paths
+    assert "doomed.txt" in list_changed_paths(repo_path, SubprocessRunner())
+
+
+def test_list_stageable_paths_keeps_unstaged_deletion(tmp_path: Path) -> None:
+    """An unstaged deletion must stay: ``git add`` still stages it from the index.
+
+    Filtering purely on on-disk existence would drop it and leave the
+    checkpoint commit inconsistent (e.g. a moved module committed as an
+    addition while the original file lives on).
+    """
+    repo_path = _init_git_repository(tmp_path)
+    (repo_path / "README.md").unlink()
+
+    stageable_paths = list_stageable_paths(repo_path, SubprocessRunner())
+
+    assert "README.md" in stageable_paths
+    run_git(repo_path, "add", "--", *stageable_paths)
+    status_after_add = run_git(repo_path, "status", "--porcelain")
+    assert status_after_add.startswith("D ")
 
 
 def test_validate_safe_changes_blocks_non_ascii_forbidden_path(
@@ -90,7 +133,7 @@ def test_validate_safe_changes_blocks_non_ascii_forbidden_path(
     secret_file_path = repo_path / "secrets" / "密钥.txt"
     secret_file_path.parent.mkdir()
     secret_file_path.write_text("token\n", encoding="utf-8")
-    _run_git(repo_path, "add", "secrets")
+    run_git(repo_path, "add", "secrets")
 
     with pytest.raises(RuntimeError, match="Refusing to publish forbidden paths"):
         validate_safe_changes(repo_path, AppConfig(), SubprocessRunner())

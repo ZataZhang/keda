@@ -179,6 +179,23 @@ def is_bash_wrapped_verification_call(
     return False
 
 
+def run_git(repo_path: Path, *git_args: str) -> str:
+    """Run a real ``git`` command inside ``repo_path`` and return its stdout.
+
+    Real-git tests need an arrange step that git itself performs (``git mv``
+    staging a rename, ``git rm`` staging a deletion); mock runners cannot
+    reproduce the resulting index states.
+    """
+    return subprocess.run(
+        ["git", *git_args],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout
+
+
 def init_bare_git_repo(path: Path) -> Path:
     """Create a bare repository at ``path`` to act as a test remote."""
     subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)

@@ -29,6 +29,7 @@ from backend.core.use_cases.agent_runner_git import (
     get_head_sha,
     has_changes,
     list_changed_paths,
+    list_stageable_paths,
     run_verification,
 )
 
@@ -372,6 +373,10 @@ def checkpoint_uncommitted_progress(
       旧实现一旦发现禁改路径就整块放弃 checkpoint,导致最该保住的在途代码也被
       丢掉;现在改为保住安全部分,禁改文件交人工/下一次处理。全部都是禁改路径时
       没有可提交内容,返回 ``None``。
+    - **只用可 stage 的路径构造 pathspec**（:func:`list_stageable_paths`）：已 staged
+      的重命名源路径（如 PRD 归档 ``git mv`` 留下的 ``tasks/pending/*.md``）与已
+      staged 的删除在工作区和 index 里都不存在,``git add`` 会因此整条失败,把在途
+      代码一并丢掉。这些内容已在 index 中,``git commit`` 仍会带上。
 
     发布门禁（``_reuse_existing_local_commit`` / publication）仍会拦截未完成的
     工作，因此 checkpoint 永远不会被推送或合入；它只让进度可续作。
@@ -395,14 +400,21 @@ def checkpoint_uncommitted_progress(
     # Imported locally to avoid a circular dependency with agent_runner_publish.
     from backend.core.use_cases.agent_runner_publish import is_forbidden_path
 
+    # 审计口径要看重命名的两端（把 secret 移出 secrets/ 也必须被发现）,因此
+    # excluded_paths 用 ``list_changed_paths``。
     changed_paths = list_changed_paths(worktree_path, process_runner)
+    # staging 口径只能用 ``git add`` 仍能匹配的子集:PRD 归档门禁
+    # (``ensure_prd_delivery_ready``) 的 ``git mv tasks/pending/x.md
+    # tasks/archive/x.md`` 之后,源路径在工作区和 index 里都已不存在,把它留在
+    # pathspec 里会让整条 git add 以 exit 128 失败——连 agent 真正的在途改动一起
+    # 丢掉,而归档后才失败的尝试（如 RV 证据门禁）恰恰最需要这个续作点。
     safe_paths = [
-        changed_path
-        for changed_path in changed_paths
-        if not is_forbidden_path(changed_path, config)
+        stageable_path
+        for stageable_path in list_stageable_paths(worktree_path, process_runner)
+        if not is_forbidden_path(stageable_path, config)
     ]
     if not safe_paths:
-        # 在途改动全是禁改路径:没有可安全 checkpoint 的内容。
+        # 在途改动全是禁改路径、或全都已在 index 里:没有需要新 stage 的内容。
         return None
     process_runner.run(["git", "add", "--", *safe_paths], cwd=worktree_path)
     checkpoint_message = (

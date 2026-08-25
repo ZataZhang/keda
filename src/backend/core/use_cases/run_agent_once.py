@@ -92,6 +92,7 @@ from backend.core.use_cases.agent_runner_git import (
     is_detached_head,
     list_changed_paths,
     list_git_remotes,
+    list_stageable_paths,
     run_verification,
 )
 from backend.core.use_cases.agent_runner_publish import (
@@ -166,6 +167,7 @@ __all__ = [
     "is_detached_head",
     "list_changed_paths",
     "list_git_remotes",
+    "list_stageable_paths",
     "publish_changes",
     "resolve_agent_fallback_order",
     "resolve_prd_archive_path",

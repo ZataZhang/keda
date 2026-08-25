@@ -487,6 +487,8 @@ runner **不在 publish 前对 WIP checkpoint 做 squash**：
 - WIP checkpoint 的历史噪音在最终合并 PR 时，由 GitHub/GitLab 的 squash merge 收敛为一条干净历史。
 - checkpoint 的跨 claim 续作价值被完整保留。
 
+checkpoint 的 `git add` 只使用 git 仍能匹配的路径（非禁改、且在工作区或 index 中存在）。这一点对**归档之后才失败**的尝试尤其关键：PRD 交付门禁（`ensure_prd_delivery_ready`）会用 `git mv` 把 PRD 从 `tasks/pending/` 移到 `tasks/archive/`，此后 `git status` 仍报告 `tasks/pending/` 源路径，但它在工作区和 index 里都已不存在——把它塞进 pathspec 会让整条 `git add` 以 `fatal: pathspec ... did not match any files`（exit 128）失败，连 agent 真正的在途代码一起丢掉，而 checkpoint 失败只记 warning，很容易被忽略。已 staged 的重命名与删除本身仍在 index 中，`git commit` 会照常带上，因此剔除这些 pathspec 不会丢内容。
+
 ### 非 claude agent 的实时输出（PTY）
 
 `claude` 用 `--output-format stream-json` 显式吐增量事件，所以一直能实时看到进度。`kimi` / `codex` 没有这种流式协议，而且很多 CLI 在发现 stdout 是管道（非终端）时会把输出从行缓冲切成**块缓冲**——结果就是运行中只看到几个点、最后才一次性打印，期间只有 watchdog 的 `still running after Ns` 心跳。

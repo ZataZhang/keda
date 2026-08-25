@@ -13,14 +13,18 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
 )
+from backend.infrastructure.process_runner import SubprocessRunner
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import (
     config_with_review_disabled,
     git_remote_command,
     git_remote_result,
+    init_git_repo,
     make_prd_issue,
     make_ready_issue,
+    run_git,
     worktree_path_response,
+    write_complete_prd,
 )
 
 
@@ -198,6 +202,54 @@ def test_checkpoint_uncommitted_progress_excludes_forbidden_but_keeps_safe(
     add_calls = [c for c in commands if c[:2] == ("git", "add")]
     assert all(".env" not in token for call in add_calls for token in call)
     assert [c for c in commands if c[:2] == ("git", "commit")]
+
+
+def test_checkpoint_uncommitted_progress_survives_archived_prd(tmp_path: Path) -> None:
+    """PRD 归档之后仍必须 checkpoint 成功（真实 git，回归 exit 128）。
+
+    ``ensure_prd_delivery_ready`` 用 ``git mv`` 把 PRD 从 ``tasks/pending/`` 移到
+    ``tasks/archive/``；此后 ``git status`` 仍会报告源路径（作为重命名的一端），
+    但它在工作区和 index 里都已不存在。旧实现把它塞进 ``git add --`` 的 pathspec，
+    整条命令以 ``fatal: pathspec ... did not match any files`` (exit 128) 失败，
+    连 agent 的在途代码一起丢掉——而这正是归档后才失败的尝试（如 RV 证据门禁）最
+    需要保住的续作点。
+    """
+    from backend.core.use_cases.run_agent_once import (
+        checkpoint_uncommitted_progress,
+        ensure_prd_delivery_ready,
+        list_changed_paths,
+    )
+
+    worktree_path = init_git_repo(tmp_path / "issue-84")
+    write_complete_prd(worktree_path, "tasks/pending/example.md")
+    (worktree_path / "tasks" / "archive").mkdir(parents=True, exist_ok=True)
+    run_git(worktree_path, "add", "-A")
+    run_git(worktree_path, "commit", "-m", "seed pending PRD")
+    run_git(worktree_path, "checkout", "-b", "issue-84")
+    # agent 的在途产出：交付门禁尚未全部满足，但代码改动必须被保住。
+    (worktree_path / "src").mkdir()
+    (worktree_path / "src" / "feature.py").write_text("value = 1\n", encoding="utf-8")
+
+    issue = _checkpoint_issue()
+    subprocess_runner = SubprocessRunner()
+    ensure_prd_delivery_ready(issue, worktree_path, subprocess_runner)
+    # 前置条件：源路径确实仍出现在 status 里，否则这个回归测试没有守住任何东西。
+    assert "tasks/pending/example.md" in list_changed_paths(worktree_path, subprocess_runner)
+
+    checkpoint_sha = checkpoint_uncommitted_progress(
+        issue,
+        worktree_path,
+        AppConfig(),
+        subprocess_runner,
+        expected_branch="issue-84",
+    )
+
+    assert checkpoint_sha is not None
+    committed_paths = run_git(worktree_path, "show", "--name-only", "--format=", "HEAD").split()
+    assert "src/feature.py" in committed_paths
+    # 归档移动本身已在 index 中，checkpoint 会照常带上它：没有内容被丢掉。
+    assert "tasks/archive/example.md" in committed_paths
+    assert not run_git(worktree_path, "status", "--porcelain").strip()
 
 
 def test_process_ready_issue_continues_from_partial_commit(

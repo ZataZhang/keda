@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
@@ -17,10 +18,30 @@ __all__ = [
     "is_detached_head",
     "list_changed_paths",
     "list_git_remotes",
+    "list_stageable_paths",
     "pop_worktree_stash",
     "run_verification",
     "stash_worktree_changes",
 ]
+
+# ``git status --porcelain`` 状态码：第 1 位是 index 侧，第 2 位是工作区侧。
+# ``D `` = 删除已 staged（工作区无对应文件），``R*`` = index 侧记录了重命名。
+_INDEX_DELETED_STATUS_CODE = "D "
+_INDEX_RENAMED_STATUS = "R"
+
+
+@dataclass(frozen=True, slots=True)
+class _GitStatusEntry:
+    """``git status --porcelain -z`` 的单条记录。"""
+
+    status_code: str
+    """两字符状态码；第 1 位是 index 侧状态，第 2 位是工作区侧状态。"""
+
+    path: str
+    """变更路径；重命名/复制时是目标路径。"""
+
+    rename_source_path: str | None
+    """重命名/复制的源路径；其他状态为 ``None``。"""
 
 
 def get_head_sha(worktree_path: Path, process_runner: IProcessRunner) -> str:
@@ -178,8 +199,10 @@ def pop_worktree_stash(
         raise RuntimeError(f"Failed to restore auto-stashed changes: {pop_result.stderr.strip()}")
 
 
-def list_changed_paths(worktree_path: Path, process_runner: IProcessRunner) -> list[str]:
-    """List changed paths in a worktree.
+def _parse_status_entries(
+    worktree_path: Path, process_runner: IProcessRunner
+) -> list[_GitStatusEntry]:
+    """Parse ``git status --porcelain -z`` into one entry per changed path.
 
     Uses NUL-separated ``--porcelain -z`` output so paths containing
     non-ASCII or special characters arrive verbatim. Plain ``--porcelain``
@@ -188,22 +211,43 @@ def list_changed_paths(worktree_path: Path, process_runner: IProcessRunner) -> l
     """
     status_result = process_runner.run(["git", "status", "--porcelain", "-z"], cwd=worktree_path)
     status_tokens = status_result.stdout.split("\0")
-    changed_paths: list[str] = []
+    status_entries: list[_GitStatusEntry] = []
     token_index = 0
     while token_index < len(status_tokens):
-        status_entry = status_tokens[token_index]
+        status_entry_text = status_tokens[token_index]
         token_index += 1
         # Minimum entry is "XY p": two status chars, a space, one path char.
-        if len(status_entry) < 4:
+        if len(status_entry_text) < 4:
             continue
-        status_code = status_entry[:2]
-        changed_paths.append(status_entry[3:])
+        status_code = status_entry_text[:2]
+        rename_source_path: str | None = None
         # Renames/copies emit the source path as the next NUL token.
         if ("R" in status_code or "C" in status_code) and token_index < len(status_tokens):
-            rename_source_path = status_tokens[token_index]
+            rename_source_path = status_tokens[token_index] or None
             token_index += 1
-            if rename_source_path:
-                changed_paths.append(rename_source_path)
+        status_entries.append(
+            _GitStatusEntry(
+                status_code=status_code,
+                path=status_entry_text[3:],
+                rename_source_path=rename_source_path,
+            )
+        )
+    return status_entries
+
+
+def list_changed_paths(worktree_path: Path, process_runner: IProcessRunner) -> list[str]:
+    """List changed paths in a worktree.
+
+    Reports **both** sides of a rename/copy so the forbidden-path safety gate
+    also sees the source path — moving a secret out of ``secrets/`` must not
+    slip through. Callers that turn the result into a ``git add`` pathspec
+    must use :func:`list_stageable_paths` instead; see its docstring.
+    """
+    changed_paths: list[str] = []
+    for status_entry in _parse_status_entries(worktree_path, process_runner):
+        changed_paths.append(status_entry.path)
+        if status_entry.rename_source_path:
+            changed_paths.append(status_entry.rename_source_path)
     return changed_paths
 
 
@@ -228,6 +272,36 @@ def expand_changed_path(worktree_path: Path, changed_path: str) -> list[str]:
         for file_path in candidate_path.rglob("*")
         if file_path.is_file()
     ]
+
+
+def list_stageable_paths(worktree_path: Path, process_runner: IProcessRunner) -> list[str]:
+    """List changed paths that ``git add -- <path>`` can still match.
+
+    ``git add`` resolves each pathspec against the working tree *and* the
+    index, and aborts the **whole** command with ``fatal: pathspec ... did
+    not match any files`` (exit 128) on the first path found in neither.
+    Two states reported by ``git status`` are exactly that:
+
+    - 已 staged 的重命名源路径：PRD 归档门禁执行
+      ``git mv tasks/pending/x.md tasks/archive/x.md`` 之后，源路径既不在工作区
+      也不在 index 中。
+    - 已 staged 的删除（状态码 ``D ``）：``git rm`` 之后同样两侧都不存在。
+
+    这两类路径都已经记录在 index 里，后续 ``git commit`` 会照常带上它们，所以把
+    它们从 pathspec 里剔除不会丢内容；反之保留它们会让整批 staging 失败——例如
+    checkpoint 会连 agent 真正的在途代码改动一起丢掉。若删除/重命名的源路径随后
+    又被重建，``git status`` 会为它单独输出一条 ``??`` 记录，仍然会被保留。
+    """
+    stageable_paths: list[str] = []
+    for status_entry in _parse_status_entries(worktree_path, process_runner):
+        if status_entry.status_code != _INDEX_DELETED_STATUS_CODE:
+            stageable_paths.append(status_entry.path)
+        # 复制不移除源路径（index 里仍然跟踪），只有重命名的源路径不可再 stage。
+        if status_entry.rename_source_path and not status_entry.status_code.startswith(
+            _INDEX_RENAMED_STATUS
+        ):
+            stageable_paths.append(status_entry.rename_source_path)
+    return stageable_paths
 
 
 def list_git_remotes(worktree_path: Path, process_runner: IProcessRunner) -> list[str]:
