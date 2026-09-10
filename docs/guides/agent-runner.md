@@ -834,7 +834,7 @@ path = "/Users/zata/code/keda"
 enabled = true
 # Optional ``owner/name`` for ``gh pr list --repo`` (PR column on
 # ``iar issue list``). 缺省时 PR 列为空 + stderr 一次性 WARN。
-github_repo = "zata-zhangtao/keda"
+github_repo = "ZataZhang/keda"
 
 [agent_runner.repositories.backend_service]
 path = "/Users/zata/code/backend-service"
@@ -901,13 +901,13 @@ verification_commands = ["git diff --check", "uv run pytest"]
 
 ```bash
 # 默认把 remote 重置为 origin，覆盖现有 .iar.toml
-iar registry reinit --repo-id zata-zhangtao-fsense
+iar registry reinit --repo-id ZataZhang-fsense
 
 # 显式指定 remote 和 base_branch
-iar registry reinit --repo-id zata-zhangtao-fsense --remote upstream --base-branch develop
+iar registry reinit --repo-id ZataZhang-fsense --remote upstream --base-branch develop
 
 # 重新初始化后立刻重启 daemon 和 review-daemon
-iar registry reinit --repo-id zata-zhangtao-fsense --start-daemons
+iar registry reinit --repo-id ZataZhang-fsense --start-daemons
 ```
 
 #### 取消托管（`iar registry remove`）
@@ -916,10 +916,10 @@ iar registry reinit --repo-id zata-zhangtao-fsense --start-daemons
 
 ```bash
 # 仅取消托管，保留本地 clone
-iar registry remove --repo-id zata-zhangtao-fsense
+iar registry remove --repo-id ZataZhang-fsense
 
 # 取消托管并删除本地 clone 目录
-iar registry remove --repo-id zata-zhangtao-fsense --delete
+iar registry remove --repo-id ZataZhang-fsense --delete
 ```
 
 `--delete` 只会删除 registry 中记录的克隆路径，且会校验路径与 registry 记录一致，防止误删其他目录。
@@ -937,7 +937,7 @@ iar registry list
 ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ repo_id               ┃ display... ┃ path                   ┃ daemon  ┃ review-daemon ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━┩
-│ zata-zhangtao-fsense  │ fsense     │ /Users/.../fsense      │ running │ running       │
+│ ZataZhang-fsense  │ fsense     │ /Users/.../fsense      │ running │ running       │
 │                       │            │                        │ (p123)  │ (p124)        │
 │ another-owner-repo    │ another    │ /Users/.../another     │ stopped │ stopped       │
 └───────────────────────┴────────────┴────────────────────────┴─────────┴───────────────┘
@@ -1559,7 +1559,7 @@ body_template = "..."
 prompt = "..."   # fallback only — used when the prd skill spec is unreachable
 ```
 
-In `mode = "agent"`, the PRD prompt is built from the `prd` skill spec rather than the inline `prompt`. The skill path is resolved as: explicit override → `IAR_PRD_SKILL_PATH` → `CC_SWITCH_SKILLS_DIR` → existing user-level `~/.cc-switch/skills`、`~/.codex/skills`、`~/.claude/skills`、`~/.kimi-code/skills` candidates. `iar init` fetches only `prd` and `code-reviewer` from the remote `zata-zhangtao/zata-codes-template` repository and installs them under the selected user-level root; Keda does not ship their contents in its wheel. The skill is the single source of the PRD methodology/output contract, so the inline `prompt` is kept only as a fallback for when the skill file cannot be read. Set `IAR_PRD_SKILL_PATH` when the runner runs in a product repo while the skill lives under a different home directory.
+In `mode = "agent"`, the PRD prompt is built from the `prd` skill spec rather than the inline `prompt`. The skill path is resolved as: explicit override → `IAR_PRD_SKILL_PATH` → `CC_SWITCH_SKILLS_DIR` → existing user-level `~/.cc-switch/skills`、`~/.codex/skills`、`~/.claude/skills`、`~/.kimi-code/skills` candidates. `iar init` fetches only `prd` and `code-reviewer` from the remote `ZataZhang/zata-codes-template` repository and installs them under the selected user-level root; Keda does not ship their contents in its wheel. The skill is the single source of the PRD methodology/output contract, so the inline `prompt` is kept only as a fallback for when the skill file cannot be read. Set `IAR_PRD_SKILL_PATH` when the runner runs in a product repo while the skill lives under a different home directory.
 
 See the "Generated Content 配置" section above for the full template variable list and example.
 
@@ -2691,14 +2691,14 @@ Agent Runner 同时暴露只读状态端点：
 Agent Runner 在启动和结束一次 agent 执行时，会显式记录当前处理的 GitHub Issue 编号和完整 URL：
 
 ```text
-Starting agent for Issue #23: https://github.com/zata-zhangtao/fsense/issues/23
-Agent finished for Issue #23: https://github.com/zata-zhangtao/fsense/issues/23 (exit_code=0)
+Starting agent for Issue #23: https://github.com/ZataZhang/fsense/issues/23
+Agent finished for Issue #23: https://github.com/ZataZhang/fsense/issues/23 (exit_code=0)
 ```
 
 对于运行时间超过心跳阈值（默认 60 秒）的长命令，process runner 的 watchdog 心跳日志也会携带 Issue 上下文：
 
 ```text
-Claude stream (Issue #23: https://github.com/zata-zhangtao/fsense/issues/23) still running after 60s: claude --dangerously-skip-permissions ...
+Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still running after 60s: claude --dangerously-skip-permissions ...
 ```
 
 这样即使命令摘要因 `_summarize_command` 的 240 字符限制被截断，Issue URL 仍以独立字段完整保留，便于从日志直接定位当前处理的 Issue。

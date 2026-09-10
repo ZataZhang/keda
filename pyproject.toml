@@ -3,7 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "keda"
+# 分发包名的单一声明处（PRD FR-1）：PyPI/Homebrew 分发名是 kedacode，
+# CLI 入口名仍是 iar（装 kedacode、敲 iar）。改名时穷举命令见 PRD 7.5 第 3 条。
+name = "kedacode"
 version = "0.2.0"
 description = "Issue Agent Runner (iar) — turn GitHub Issues into a local AI agent queue."
 readme = "README.md"

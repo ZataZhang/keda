@@ -188,7 +188,7 @@ uv run python scripts/provision_preview_server.py ... --generate-deploy-key --ap
 6. 验证（可选，但能提前确认 PAT 配对了）：
 
    ```bash
-   echo "ghp_你的PAT" | docker login ghcr.io -u zata-zhangtao --password-stdin
+   echo "ghp_你的PAT" | docker login ghcr.io -u ZataZhang --password-stdin
    # → Login Succeeded 表示 OK
    ```
 

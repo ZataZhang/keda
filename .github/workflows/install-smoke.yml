@@ -1,5 +1,10 @@
 name: Install smoke
 
+# 两个维度（PRD FR-9，实现期修订：发布触发改挂 release published 后，
+# tag 事件只产出 draft、PyPI 无变化，故"从 PyPI 真实安装"档挂在 release published）：
+#   1. install-check：install.sh 计划检查 + 可编辑安装（install.sh 是 bash 脚本，Windows 不适用）
+#   2. real-install：真实安装 + iar console 启动探活——
+#      PR / 分支 / tag 事件从本次构建的 wheel 装；release published 事件从公共 PyPI 装
 on:
   pull_request:
   push:
@@ -7,6 +12,8 @@ on:
       - main
     tags:
       - "v*"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -17,8 +24,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  install-smoke:
-    name: Install + repository init on ${{ matrix.os }} / py${{ matrix.python-version }}
+  install-check:
+    name: install.sh plan + editable install on ${{ matrix.os }} / py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -44,7 +51,7 @@ jobs:
       - name: Run install.sh --check (local)
         run: bash install.sh --check
 
-      - name: Install keda from local checkout (editable + reinstall)
+      - name: Install kedacode from local checkout (editable + reinstall)
         run: |
           uv tool install --reinstall --editable .
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -76,3 +83,252 @@ jobs:
             "https://raw.githubusercontent.com/${KEDA_REPO}/${GITHUB_REF_NAME}/install.sh" \
             -o /tmp/install.sh
           bash /tmp/install.sh --check
+
+  build-wheel:
+    name: Build wheel with bundled console assets
+    runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: "3.12"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Sync dependencies from lock file
+        run: uv sync --all-extras --all-groups --frozen
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Build frontend-public static export
+        run: |
+          pnpm --filter frontend-public install --frozen-lockfile
+          pnpm --filter frontend-public build
+
+      - name: Copy static export into package data
+        run: |
+          rm -rf src/backend/api/static/console
+          cp -R frontend-public/out src/backend/api/static/console
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Verify wheel bundles the console assets
+        run: |
+          if ! python -m zipfile -l dist/*.whl | grep -q "backend/api/static/console/index.html"; then
+            echo "wheel must contain the bundled console static export"
+            exit 1
+          fi
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kedacode-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  real-install:
+    name: Real install + console probe on ${{ matrix.os }}
+    needs: build-wheel
+    if: github.event_name != 'release'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Download built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: kedacode-wheel
+          path: dist
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install from built wheel (real install, not --check)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          uv tool install --reinstall dist/*.whl
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          iar --version
+
+      - name: Install from built wheel (real install, Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $wheel_path = (Get-ChildItem "dist/*.whl" | Select-Object -First 1).FullName
+          if (-not $wheel_path) { throw "no wheel found under dist/" }
+          uv tool install --reinstall $wheel_path
+          Add-Content $env:GITHUB_PATH (Join-Path $env:USERPROFILE ".local/bin")
+          iar --version
+
+      - name: Probe iar console (bash)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          probe_dir="$(mktemp -d)"
+          cd "$probe_dir"
+          iar console --no-browser --port 8611 &
+          console_pid=$!
+          trap 'kill "$console_pid" 2>/dev/null || true' EXIT
+          http_code=""
+          for _ in $(seq 1 30); do
+            sleep 2
+            http_code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8611/ || true)"
+            if [ "$http_code" = "200" ]; then
+              echo "iar console returned 200"
+              exit 0
+            fi
+          done
+          echo "iar console did not return 200 within 60s (last code: ${http_code:-none})"
+          exit 1
+
+      - name: Probe iar console (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $probe_dir = Join-Path $env:RUNNER_TEMP "iar-console-probe"
+          New-Item -ItemType Directory -Force -Path $probe_dir | Out-Null
+          Set-Location $probe_dir
+          $console_proc = Start-Process -FilePath "iar" `
+            -ArgumentList "console", "--no-browser", "--port", "8611" `
+            -PassThru -NoNewWindow
+          $probe_ok = $false
+          try {
+            foreach ($attempt in 1..30) {
+              Start-Sleep -Seconds 2
+              try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:8611/" `
+                  -UseBasicParsing -TimeoutSec 5
+                if ($response.StatusCode -eq 200) {
+                  Write-Host "iar console returned 200"
+                  $probe_ok = $true
+                  break
+                }
+              } catch {
+                # 服务尚未就绪，继续等待
+              }
+            }
+            if (-not $probe_ok) {
+              throw "iar console did not return 200 within 60s"
+            }
+          } finally {
+            if (-not $console_proc.HasExited) {
+              Stop-Process -Id $console_proc.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+  post-publish-smoke:
+    name: Install from public PyPI + console probe on ${{ matrix.os }}
+    # release 正式发布后从公共索引真实安装（PRD rv-1 的 CI 级证据收集器）
+    if: github.event_name == 'release'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install kedacode from public PyPI (pinned to the published version)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          PUBLISHED_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          package_version="${PUBLISHED_VERSION#v}"
+          # 固定到刚发布的版本号：公共索引上不存在该版本时本步直接失败
+          uv tool install --reinstall "kedacode==${package_version}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          iar --version
+
+      - name: Install kedacode from public PyPI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PUBLISHED_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          $package_version = $env:PUBLISHED_VERSION -replace '^v', ''
+          uv tool install --reinstall "kedacode==$package_version"
+          Add-Content $env:GITHUB_PATH (Join-Path $env:USERPROFILE ".local/bin")
+          iar --version
+
+      - name: Probe iar console (bash)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          probe_dir="$(mktemp -d)"
+          cd "$probe_dir"
+          iar console --no-browser --port 8612 &
+          console_pid=$!
+          trap 'kill "$console_pid" 2>/dev/null || true' EXIT
+          http_code=""
+          for _ in $(seq 1 30); do
+            sleep 2
+            http_code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8612/ || true)"
+            if [ "$http_code" = "200" ]; then
+              echo "iar console returned 200"
+              exit 0
+            fi
+          done
+          echo "iar console did not return 200 within 60s (last code: ${http_code:-none})"
+          exit 1
+
+      - name: Probe iar console (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $probe_dir = Join-Path $env:RUNNER_TEMP "iar-console-probe"
+          New-Item -ItemType Directory -Force -Path $probe_dir | Out-Null
+          Set-Location $probe_dir
+          $console_proc = Start-Process -FilePath "iar" `
+            -ArgumentList "console", "--no-browser", "--port", "8612" `
+            -PassThru -NoNewWindow
+          $probe_ok = $false
+          try {
+            foreach ($attempt in 1..30) {
+              Start-Sleep -Seconds 2
+              try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:8612/" `
+                  -UseBasicParsing -TimeoutSec 5
+                if ($response.StatusCode -eq 200) {
+                  Write-Host "iar console returned 200"
+                  $probe_ok = $true
+                  break
+                }
+              } catch {
+                # 服务尚未就绪，继续等待
+              }
+            }
+            if (-not $probe_ok) {
+              throw "iar console did not return 200 within 60s"
+            }
+          } finally {
+            if (-not $console_proc.HasExited) {
+              Stop-Process -Id $console_proc.Id -Force -ErrorAction SilentlyContinue
+            }
+          }

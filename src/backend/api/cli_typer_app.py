@@ -64,17 +64,18 @@ __all__ = [
 
 
 def _resolve_keda_version() -> str:
-    """Return the installed ``keda`` distribution version, falling back to ``0.0.0+unknown``.
+    """Return the installed ``kedacode`` distribution version, falling back to ``0.0.0+unknown``.
 
     The install-smoke workflow shells out to ``iar --version`` after a
     ``uv tool install --reinstall --editable .``; the editable install resolves
     to the metadata recorded in ``pyproject.toml``. If the distribution cannot
     be located (for example when running from an unpacked sdist), we still want
     a well-formed version line instead of an exception so the smoke gate has a
-    deterministic contract.
+    deterministic contract. 分发包名是 ``kedacode``（PRD FR-1），查询必须用发行名
+    而非仓库名 ``keda``。
     """
     try:
-        return importlib_metadata.version("keda")
+        return importlib_metadata.version("kedacode")
     except importlib_metadata.PackageNotFoundError:
         return "0.0.0+unknown"
 

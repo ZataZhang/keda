@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-TEMPLATE_REPO="${SYNC_TEMPLATE_TEMPLATE_REPO:-https://github.com/zata-zhangtao/zata-codes-template.git}"
+TEMPLATE_REPO="${SYNC_TEMPLATE_TEMPLATE_REPO:-https://github.com/ZataZhang/zata-codes-template.git}"
 LOCAL_ROOT="$(git rev-parse --show-toplevel)"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT

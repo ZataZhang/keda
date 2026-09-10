@@ -5,60 +5,65 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zata-zhangtao/keda/stargazers"><img src="https://img.shields.io/github/stars/zata-zhangtao/keda?style=flat-square" alt="GitHub Stars"></a>
-  <a href="https://github.com/zata-zhangtao/keda/network/members"><img src="https://img.shields.io/github/forks/zata-zhangtao/keda?style=flat-square" alt="GitHub Forks"></a>
-  <a href="https://github.com/zata-zhangtao/keda/issues"><img src="https://img.shields.io/github/issues/zata-zhangtao/keda?style=flat-square" alt="GitHub Issues"></a>
-  <a href="https://github.com/zata-zhangtao/keda/pulls"><img src="https://img.shields.io/github/issues-pr/zata-zhangtao/keda?style=flat-square" alt="GitHub PRs"></a>
+  <a href="https://github.com/ZataZhang/keda/stargazers"><img src="https://img.shields.io/github/stars/ZataZhang/keda?style=flat-square" alt="GitHub Stars"></a>
+  <a href="https://github.com/ZataZhang/keda/network/members"><img src="https://img.shields.io/github/forks/ZataZhang/keda?style=flat-square" alt="GitHub Forks"></a>
+  <a href="https://github.com/ZataZhang/keda/issues"><img src="https://img.shields.io/github/issues/ZataZhang/keda?style=flat-square" alt="GitHub Issues"></a>
+  <a href="https://github.com/ZataZhang/keda/pulls"><img src="https://img.shields.io/github/issues-pr/ZataZhang/keda?style=flat-square" alt="GitHub PRs"></a>
   <img src="https://img.shields.io/badge/python-≥3.11-blue?style=flat-square" alt="Python">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square" alt="License: Apache-2.0"></a>
-  <a href="https://pypi.org/project/keda/"><img src="https://img.shields.io/pypi/v/keda?style=flat-square" alt="PyPI"></a>
+  <a href="https://pypi.org/project/kedacode/"><img src="https://img.shields.io/pypi/v/kedacode?style=flat-square" alt="PyPI"></a>
 </p>
 
 > 面向 AI Agent 与通用 Python 工程实践的模块化单体项目模板。基于 Clean Architecture 四层架构，内置 `iar`（issue-agent-runner）CLI，支持将 GitHub Issues 转为本地 AI Agent 队列并自动管理 Worktree 生命周期。
+>
+> 注：本仓库与 CNCF 毕业项目 KEDA（keda.sh，Kubernetes 事件驱动自动扩缩）无关；分发包名为 `kedacode`，安装后的命令名是 `iar`。
 
 ## 一键安装
 
-无需克隆仓库，直接在新机器上安装 `iar` CLI。安装器会自动选择 `uv` / `pipx` / `pip --user` 中可用的那个，零 sudo，失败有明确提示。详见 `docs/getting-started/installation.md`。
+无需克隆仓库，一条命令装上 `iar` CLI 并打开管理面板。三条等价入口任选其一；装完执行 `iar --version` 验证，在任意目录 `iar console` 打开管理面板。详见 `docs/getting-started/installation.md`。
 
-**默认安装（从 GitHub release tarball）：**
+**macOS（Homebrew）：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zata-zhangtao/keda/main/install.sh | bash
-iar --version
-iar init   # 在任意 Git 仓库内写入 .iar.toml 并同步 IAR 初始化配置
+brew install ZataZhang/tap/kedacode
 ```
 
-**从 PyPI 安装（keda 已发布到 PyPI 后可用）：**
+**任何平台（uv / pipx，含 Windows PowerShell）：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zata-zhangtao/keda/main/install.sh | bash -s -- --source pypi
-iar --version
-```
-
-也可以绕过 install.sh，直接用包管理器安装：
-
-```bash
-uv tool install keda          # 推荐：uv 隔离环境
+uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
 # 或
-pip install --user keda       # 兜底：用户级安装
+pipx install kedacode
+```
+
+**install.sh（自动选择 `uv` / `pipx` / `pip --user`，零 sudo，失败有明确提示）：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | bash
+```
+
+默认 `--source auto` 从 GitHub release tarball 安装；加 `--source pypi` 改从 PyPI 安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | bash -s -- --source pypi
 ```
 
 **安装参数速查：**
 
 | 选项 | 说明 |
 |------|------|
-| `--version <tag>` | 安装指定 release tag（默认: latest） |
+| `--version <tag>` | 安装指定 release tag / PyPI 版本（默认: latest） |
 | `--method uv\|pipx\|pip` | 强制使用指定安装器（默认自动选择） |
 | `--source auto\|pypi\|tarball` | 安装源（默认: `auto` = GitHub tarball） |
 | `--check` | dry-run，只打印计划 |
-| `--uninstall` | 卸载 keda 工具环境与 iar binary |
+| `--uninstall` | 卸载 kedacode 工具环境与 iar binary |
 
 环境变量等价：`KEDA_VERSION`、`KEDA_INSTALL_METHOD`、`KEDA_SOURCE`、`KEDA_PYPI=1`（legacy，等价于 `--source pypi`）。
 
 ### 安装 Agent Skills
 
 `prd` 与 `code-reviewer` 由远程
-[`zata-codes-template`](https://github.com/zata-zhangtao/zata-codes-template) 仓库维护，不随 Keda
+[`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 仓库维护，不随 Keda
 wheel 分发。`iar init` 会仅下载这两个 Skill 并安装到用户级目录，绝不会写入项目目录；因此同一台
 机器上的所有项目共用同一份规范。安装目标依次为 `CC_SWITCH_SKILLS_DIR`、已有的 cc-switch、Codex、
 Claude、Kimi Code 配置目录；若都不存在则创建 `~/.codex/skills`。
@@ -371,9 +376,9 @@ uv run mkdocs build --strict
 wheel 默认只装轻量核心依赖；以下能力按需安装 extras（源码开发用 `uv sync --all-extras` 一次装齐）：
 
 ```bash
-uv pip install "keda[db]"       # 数据库能力：alembic、psycopg2、pymysql
-uv pip install "keda[llm]"      # LLM 能力：langchain-openai / anthropic / core
-uv pip install "keda[backup]"   # 云备份：boto3
+uv pip install "kedacode[db]"       # 数据库能力：alembic、psycopg2、pymysql
+uv pip install "kedacode[llm]"      # LLM 能力：langchain-openai / anthropic / core
+uv pip install "kedacode[backup]"   # 云备份：boto3
 ```
 
 ## 架构概览

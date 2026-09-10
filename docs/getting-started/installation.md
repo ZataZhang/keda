@@ -1,27 +1,46 @@
 # 一键安装 iar CLI
 
-> 草稿：本文档为骨架，详细内容将由后续 PRD 补充。当前提供 curl-pipe 模式、参数说明与排错指南。
+> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆），安装后的命令名是 `iar`：装 `kedacode`、敲 `iar`。
 
 ## 最快路径
 
+**macOS（Homebrew）：**
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zata-zhangtao/keda/main/install.sh | bash
+brew install ZataZhang/tap/kedacode
 iar --version
 ```
 
-安装器会按 `uv → pipx → pip --user` 的优先级选择安装方式，缺失 `uv` 时自动从 `astral.sh` 引导；不需要 `sudo`。
+**任何平台（uv / pipx，含 Windows PowerShell）：**
+
+```bash
+uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
+# 或
+pipx install kedacode
+```
+
+**curl 一键脚本（macOS / Linux）：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | bash
+iar --version
+```
+
+脚本默认从 GitHub Release tarball 安装（`--source auto`）；`--source pypi` 改为从 PyPI 安装已发布的 `kedacode` 包——PyPI 不可达或版本不存在时直接报错退出，绝不静默回退到 tarball。脚本会按 `uv → pipx → pip --user` 的优先级选择安装方式，缺失 `uv` 时自动从 `astral.sh` 引导；不需要 `sudo`。
 
 ## 常用参数
 
 | 参数 / 环境变量 | 作用 |
 | --- | --- |
-| `--version <tag>` | 锁定具体 release tag，例如 `--version v0.2.0`。 |
+| `--version <tag>` | 锁定具体 release tag，例如 `--version v0.2.0`。PyPI 来源时映射为精确版本 pin（`v0.2.0` → `kedacode==0.2.0`）。 |
+| `--source auto\|pypi\|tarball` | 安装来源：`auto`/`tarball` 走 GitHub tarball（默认），`pypi` 走 PyPI。 |
 | `--method uv\|pipx\|pip` | 强制使用指定安装器。 |
 | `--check` | 打印安装计划但不做任何修改。 |
-| `--uninstall` | 卸载 `keda` tool 与 `iar` 入口。 |
-| `KEDA_INSTALL_METHOD` | 等价于 `--method`。 |
+| `--uninstall` | 卸载 `kedacode` tool 与 `iar` 入口。 |
 | `KEDA_VERSION` | 等价于 `--version`。 |
-| `KEDA_PYPI=1` | 预留钩子，从 PyPI 拉取（尚未启用）。 |
+| `KEDA_SOURCE` | 等价于 `--source`。 |
+| `KEDA_PYPI=1` | `--source pypi` 的旧别名（向后兼容保留）。 |
+| `KEDA_INSTALL_METHOD` | 等价于 `--method`。 |
 
 ## 初始化仓库与用户级 Skills
 
@@ -39,7 +58,7 @@ iar init
 3. 同步标准 GitHub label（`agent`、`rework-prd` 等）。
 
 `prd` 与 `code-reviewer` 不随 wheel 分发。`iar init` 会从远程
-[`zata-codes-template`](https://github.com/zata-zhangtao/zata-codes-template) 下载且仅下载这两个
+[`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 下载且仅下载这两个
 Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`.codex/skills` 或
 `.kimi-code/skills`。它优先使用 `CC_SWITCH_SKILLS_DIR`，随后选择已有的 cc-switch、Codex、Claude、
 Kimi Code 配置目录；都不存在时创建 `~/.codex/skills`。因此该步骤需要能够访问 GitHub。
@@ -84,4 +103,10 @@ iar container down
 bash install.sh --uninstall
 ```
 
-会清理 `keda` tool 目录与 `~/.local/bin/iar`。
+会清理 `kedacode` tool 目录与 `~/.local/bin/iar`。
+
+uv / pipx / Homebrew 安装的用户直接用对应工具卸载：
+
+```bash
+uv tool uninstall kedacode      # 或 pipx uninstall kedacode / brew uninstall kedacode
+```

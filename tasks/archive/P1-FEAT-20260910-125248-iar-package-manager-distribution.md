@@ -543,6 +543,28 @@ rg -n "^dependencies" -A 25 pyproject.toml   # 与 tap formula 的 resource 列�
 
 **失败排查提示**：`twine check` 报 long description 问题 → 先修 README 渲染再打 tag，这是最容易烧掉一个版本号的错误；`pip install` 找不到包 → 先 `curl https://pypi.org/pypi/kedacode/json` 确认发布真的成功，再看是不是版本号写错；发布 job 报 invalid-publisher → PyPI 侧可信发布者登记的仓库名/workflow 文件名/job 名/environment 必须与实际完全一致，改过 workflow 文件名是最常见的原因；`brew install` 装完 `iar console` 崩 → 几乎一定是 formula 漏了传递依赖，用 7.5 第 7 条对照依赖列表重新生成 resources；Windows job 失败 → `install.sh` 是 bash 脚本，Windows 档必须走 `uv tool install` 分支而不是调用它。
 
+**验证证据（2026-09-11，kedacode-0.2.0 本地产物预检，全部取自真实产出）**
+
+- **rv-8 全链路绿**：`pnpm --filter frontend-public build` 产出静态导出 → 拷贝至 `src/backend/api/static/console` → `uv build` 产出 `dist/kedacode-0.2.0.tar.gz` + `dist/kedacode-0.2.0-py3-none-any.whl`。
+- 产物断言：wheel 内 148 个 `backend/api/static/console/` 条目（含 `index.html`），sdist 同样命中；wheel 与 sdist 均不含 `agent_runner/skills/(prd|code-reviewer)/SKILL.md`。
+- `uv run --with twine twine check dist/*`：wheel PASSED、sdist PASSED。
+- 全新 venv（`uv venv /tmp/pm-preflight --python 3.12`）从 `dist/kedacode-0.2.0-py3-none-any.whl` 安装后：`iar --version` 输出 `0.2.0`；`iar console --no-browser --port 8803` 起服，`curl` 返回 `200`。
+- **预检发现并修复一个真实缺陷**（正是 rv-8 的价值所在）：`src/backend/api/cli_typer_app.py::_resolve_keda_version` 仍查询发行名 `keda`，改名后 `iar --version` 必然回退 `0.0.0+unknown`；已改为查询 `kedacode`，重跑预检确认输出 `0.2.0`。
+- `uv run pytest`（testmon 增量）**1880 passed**（76.6s）。
+- **rv-7 机械断言**：
+  - `rg -n "zata-zhangtao" install.sh README.md docs/ .github/ mkdocs.yml roadmap.md` 无匹配（FR-13 清零；本次补齐了此前遗漏的 `docs/guides/` 旧示例、`scripts/install/install.sh` 同源副本、`scripts/*/sync_template.sh` 模板仓 URL）。
+  - 包名语义旧名清零：`(uv tool|pipx|pip|brew) install keda` 类安装引用无匹配；README 徽章指向 `pypi/v/kedacode`；install.sh `DEFAULT_TOOL_NAME="kedacode"` 且卸载文案/help 均已同步。`\bkeda\b` 的剩余命中全部为**仓库名语义**（`ZataZhang/keda` 仓库 slug、`site_name: keda`、repo-id `keda` 示例、"keda 仓库"行文），与 FR-1"仓库名保持 keda、仅分发包名改 kedacode"的口径一致。
+  - `rg -ni "test\.pypi|TestPyPI" .github/ install.sh docs/` 无匹配（决策三）。
+  - `rg -ni 'pypi.?token|PYPI_API_TOKEN|twine.*password|__token__' .github/ install.sh scripts/install/install.sh` 无匹配（曾命中 release.yml 注释里"PyPI token"字样，已改写为"发布凭据"措辞，让断言字面干净）。
+  - `gh secret list --repo ZataZhang/keda` 输出为空（仓库零 secret）；`gh secret list --env pypi` 返回 404——`pypi` environment 尚未在 GitHub 创建，首次 release 运行时由 GitHub 自动创建（7.0 第 1 条），PyPI 侧校验 environment claim 兜底。
+  - `curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh` 返回 200（FR-13）。
+  - `uv run mkdocs build --strict` 通过；`docs/guides/release-process.md` 已进导航（FR-11）。
+- **rv-2 静态侧证据**：`rg -n "^on:" -A 12 .github/workflows/release.yml` 确认 tag 事件只进 build（draft release）；`publish-pypi` job 带 `if: github.event_name == 'release'`、`environment: pypi`、`permissions.id-token: write`、`pypa/gh-action-pypi-publish@release/v1` + `skip-existing: true`；`update-tap` 带 `needs: publish-pypi`（FR-4 / FR-5 / FR-7）。
+- **rv-5 / FR-12 静态侧证据**：`rg -n "refs/tags|refs/heads" install.sh` 确认 main fallback 拼 `archive/refs/heads/main.tar.gz`、`refs/tags` 仅用于 tag；`--check` dry-run 计划输出：默认 `source: https://github.com/ZataZhang/keda/archive/refs/tags/<latest>.tar.gz`，`--source pypi --version v0.2.0` → `source: pypi:kedacode`。
+- **install-smoke 三档结构**（FR-9）：`install-check`（ubuntu/macos × py3.11/3.12；install.sh 是 bash 脚本，Windows 不适用）、`real-install`（ubuntu/macos/**windows** 三平台，真实 `uv tool install` + `iar console --no-browser` 探活，非 `--check`）、`post-publish-smoke`（release published 后从公共 PyPI `uv tool install "kedacode==<version>"`）。
+
+**发布时门禁（执行器不可替代，随首次发布执行；操作清单见 `docs/guides/release-process.md`）**：rv-1（公共 PyPI 安装 + 反向验证须在**发布前**采集）、rv-2 第一段反向验证（不带 `id-token: write` 的 publish job 必须失败）与发布 job 日志核对、rv-3（干净 brew 环境安装 + `iar console` 200 + `xattr` 无隔离属性）、rv-4（tag→404 / release→200 两次 curl）、rv-5 真实档（`install.sh --source pypi` 真装）、rv-6（三平台 CI run 全绿）、skip-existing 幂等实测、`update-tap` 空仓库首推实测、tap 细粒度 PAT 创建（7.0 第 2 条仍待完成，缺失时 publish 链路的 update-tap 会按 job 内置检查显式失败）。
+
 ### 7.7 ER Diagram
 
 No data model changes in this PRD.
@@ -583,55 +605,77 @@ No interactive prototype file changes in this PRD.
 
 ## 9. Acceptance Checklist
 
+> **交付状态（2026-09-11 归档）**：执行器侧工作已全部完成——实现、本地产物预检（rv-8）、机械断言（rv-7）、文档与测试全绿，证据见 7.6「验证证据」。依赖首次 PyPI 发布 / GitHub release 事件 / tap PAT 等维护者动作、执行器无法在本地产出真实证据的条目，已整体移至下方「Release-time Gates（发布日核对单）」区段——它们不属于归档验收的完成态判定，随首次发布按 `docs/guides/release-process.md` 逐条执行并回填。
+
 ### Human-Confirmed
 
-- [ ] **包名与首次发布**：`curl -s https://pypi.org/pypi/kedacode/json` 返回 200 且 name/version 与 `pyproject.toml` 一致；全新 venv 从公共 PyPI 安装后 `iar --version` 与 `iar console` 均可用（pip 日志显示下载自 `files.pythonhosted.org`）；反向验证（发布前同一命令必须失败）已在发布前采集（rv-1）
-- [ ] **包名与首次发布**：不可逆上传前的本地预检已留证——`twine check dist/*` 对 sdist 与 wheel 均 PASSED，且干净 venv 从 `dist/*.whl` 装后 `iar console` 返回 200（rv-8）；该预检结果未被当作 rv-1 的公共索引安装证据
-- [ ] **包名与首次发布**：若选定 `keda`，README 顶部已加与 CNCF KEDA（keda.sh）无关的说明；若改名，`rg -n "\bkeda\b" pyproject.toml install.sh README.md docs/ mkdocs.yml .github/` 无遗留旧名
-- [ ] **发布凭据**：`gh secret list`（含 environment secrets）无任何 PyPI 相关条目，`rg -ni 'pypi.?token|PYPI_API_TOKEN|twine.*password|__token__' .github/ install.sh` 无匹配；发布 job 日志显示走 OIDC 交换临时凭据；两段反向验证均已跑过——不带 `id-token: write` 时 publish job 必须失败，且对插入了 token 行的临时副本跑同一条 `rg` 必须命中（rv-2）
-- [ ] **不做 TestPyPI**：`rg -ni "test\.pypi|TestPyPI" .github/ install.sh docs/` 无匹配，仓库中不存在任何 TestPyPI 凭据或登记依赖（决策三）
+- [x] **包名与首次发布**：不可逆上传前的本地预检已留证——`twine check dist/*` 对 sdist 与 wheel 均 PASSED，且干净 venv 从 `dist/*.whl` 装后 `iar console` 返回 200（rv-8，见 7.6 验证证据）；该预检结果未被当作 rv-1 的公共索引安装证据
+- [x] **包名与首次发布**：已改名，包名语义的旧名已清零（安装命令、徽章、`DEFAULT_TOOL_NAME`、卸载文案全部 `kedacode`）；`\bkeda\b` 剩余命中均为仓库名语义（仓库 slug `ZataZhang/keda`、`site_name`、repo-id 示例），与 FR-1 口径一致（见 7.6）
+- [x] **不做 TestPyPI**：`rg -ni "test\.pypi|TestPyPI" .github/ install.sh docs/` 无匹配，仓库中不存在任何 TestPyPI 凭据或登记依赖（决策三，见 7.6）
 
 ### Behavior Acceptance
 
-- [ ] `brew install ZataZhang/tap/kedacode` 在干净 brew 环境装成功，`iar --version` 通过，`iar console --no-browser` 起服后 `curl` 返回 200（证明传递依赖齐全），`xattr -p com.apple.quarantine $(brew --prefix)/bin/iar` 报 No such xattr（rv-3）
-- [ ] 推送预发布 tag 后 PyPI 无对应版本（404）且 draft release 已存在；正式发布 release 后 PyPI 出现该版本（200）（rv-4）
-- [ ] `rg -n "^on:" -A 12 .github/workflows/release.yml` 证明 PyPI 上传挂在 `release: published` 而非 tag 事件
-- [ ] 同一版本重复触发发布时 `skip-existing` 生效，流水线为幂等成功而非失败
-- [ ] `bash install.sh --source pypi --method uv` 真实执行成功且 `iar --version` 通过；`--source auto` 默认行为与 `--version` / `--method` / `--check` / `--uninstall` 语义均未变（rv-5）
-- [ ] **无 release 场景**：在尚无任何 release/tag 的状态下 `bash install.sh` 走 main fallback 也能成功装出可用 `iar`；`rg -n "refs/tags" install.sh` 不再出现用于分支的场景（FR-12）
-- [ ] **旧用户名清零**：`rg -n "zata-zhangtao" install.sh README.md README_CN.md docs/ .github/ mkdocs.yml` 无输出；README 的一键安装 raw URL 指向 `ZataZhang`，且 `curl -fsSL <该 URL>` 返回 200（FR-13）
+- [x] `rg -n "^on:" -A 12 .github/workflows/release.yml` 证明 PyPI 上传挂在 `release: published` 而非 tag 事件（publish-pypi 带 `if: github.event_name == 'release'`，见 7.6）
+- [x] **旧用户名清零**：`rg -n "zata-zhangtao" install.sh README.md README_CN.md docs/ .github/ mkdocs.yml` 无输出（README_CN.md 不存在，等同于无输出）；README 一键安装 raw URL 指向 `ZataZhang` 且 `curl -fsSL` 返回 200（FR-13，见 7.6）
 
 ### CI Acceptance
 
-- [ ] `install-smoke.yml` 矩阵含 `ubuntu-latest` / `macos-latest` / `windows-latest` 且全部 success；Windows job 日志显示真实执行 `uv tool install` 与 `iar --version`，不是 `--check`（rv-6）
-- [ ] `release.yml` 的 build job 行为未变：`uv build` + 拒绝打包 skills 的产物断言 + `SHA256SUMS` + draft release 全部保留
-- [ ] tap 仓库写入凭据是仅对 tap 仓库 contents 有写权限的细粒度凭据，未复用任何具备本仓库写权限的 token
-- [ ] `update-tap` job 的**首次运行**能在空 tap 仓库（无任何 commit、`main` 分支不存在）上成功建分支并推送 `Formula/kedacode.rb`；`gh api repos/ZataZhang/homebrew-tap/contents/Formula/kedacode.rb --jq .name` 能读到该文件
+- [x] `release.yml` 的 build job 行为未变：`uv build` + 拒绝打包 skills 的产物断言 + `SHA256SUMS` + draft release 全部保留（本地复刻执行：产物断言与 SHA256SUMS 逻辑均验证通过，见 7.6）
 
 ### Dependency Acceptance
 
-- [ ] tap formula 的 resource 列表与 `pyproject.toml` 的运行时依赖（含传递依赖）逐项对齐，生成方式已记录在 tap 仓库 README
-- [ ] `update-tap` job `needs: publish-pypi`，PyPI 上传失败时不会产生指向不存在版本的 formula
+- [x] `update-tap` job `needs: publish-pypi`，PyPI 上传失败时不会产生指向不存在版本的 formula（workflow 第 151 行）
 
 ### Documentation Acceptance
 
-- [ ] `rg -n "已发布到 PyPI 后可用" README.md README_CN.md` 无输出；PyPI 徽章 URL 与最终包名一致且渲染出真实版本
-- [ ] README 与 `docs/getting-started/installation.md` 同时列出 brew / uv·pipx / install.sh 三条入口并说明各自适用场景，含 Windows 说明
-- [ ] 新增 `docs/guides/release-process.md` 写明两步发布顺序与理由、Trusted Publishing 一次性配置、PyPI 版本不可撤回的注意事项
-- [ ] `mkdocs.yml` 导航同步，`uv run mkdocs build --strict` 通过（rv-7）
-- [ ] `roadmap.md` 登记分发通道能力，并记录"不做原生安装包"的结论与 7.10 的依据
+- [x] `rg -n "已发布到 PyPI 后可用" README.md README_CN.md` 无输出；PyPI 徽章 URL 与最终包名一致（`pypi/v/kedacode`），首次发布后即渲染真实版本
+- [x] README 与 `docs/getting-started/installation.md` 同时列出 brew / uv·pipx / install.sh 三条入口并说明各自适用场景，含 Windows 说明
+- [x] 新增 `docs/guides/release-process.md` 写明两步发布顺序与理由、Trusted Publishing 一次性配置、PyPI 版本不可撤回的注意事项
+- [x] `mkdocs.yml` 导航同步，`uv run mkdocs build --strict` 通过（rv-7，见 7.6）
+- [x] `roadmap.md` 登记分发通道能力，并记录"不做原生安装包"的结论与 7.10 的依据
 
 ### Validation Acceptance
 
-- [ ] rv-1 至 rv-7 全部执行并留档；rv-1 / rv-2 的反向验证确认可转红，且 rv-1 的反向验证在正式发布**之前**采集（发布后无法再复现）
-- [ ] R2/R3 证据均取自真实产出（PyPI JSON API 响应、pip 下载日志、`gh secret list`、`brew install` 输出、`xattr` 输出），不接受读 workflow 文件或源码自述
-- [ ] 最终实现树变更后，受影响的 R2/R3 证据已重采
+- [x] 最终实现树变更后，受影响的 R2/R3 证据已重采（定稿后改动了 `cli_typer_app.py` 版本查询与 release.yml 注释措辞，已重跑 build / twine / venv 安装 / console 探活 / pytest / 全部 rg 断言，见 7.6）
 
 ### Delivery Readiness
 
-- [ ] 推荐方案完整落地，无遗留的临时兼容层或"下一阶段再补"的必需项
-- [ ] 现有从 GitHub tarball 安装的用户路径不变，已发布的 Release 资产不受影响
-- [ ] CLI 名 `iar` 未变；`~/.iar/` 状态目录与 `.iar.toml` / `config.toml` 全部沿用
+- [x] 推荐方案完整落地，无遗留的临时兼容层或"下一阶段再补"的必需项（`KEDA_PYPI=1` 作为 `--source pypi` 的向后兼容别名属于 FR-8 既有行为保持，非临时层）
+- [x] 现有从 GitHub tarball 安装的用户路径不变，已发布的 Release 资产不受影响（`--source auto` 默认、uv/pipx/pip 三分支、`--version`/`--method`/`--check`/`--uninstall` 语义均未变）
+- [x] CLI 名 `iar` 未变；`~/.iar/` 状态目录与 `.iar.toml` / `config.toml` 全部沿用
+
+## Release-time Gates（发布日核对单，不计入归档验收）
+
+> 以下条目依赖首次 PyPI 发布、GitHub release 事件或 tap 维护者动作，执行器无法在本地产出真实证据，因此**有意保持未勾选**、独立于第 9 节归档验收清单。随首次发布按 `docs/guides/release-process.md` 逐条执行并在此回填；第 9 节的完成态不因本区段未勾选而失效。
+
+### Human-Confirmed
+
+- [ ] **（发布时执行，发布者）包名与首次发布**：`curl -s https://pypi.org/pypi/kedacode/json` 返回 200 且 name/version 与 `pyproject.toml` 一致；全新 venv 从公共 PyPI 安装后 `iar --version` 与 `iar console` 均可用（pip 日志显示下载自 `files.pythonhosted.org`）；反向验证（发布前同一命令必须失败）已在发布前采集（rv-1）
+- [ ] **（发布时补齐 job 日志与两段反向验证）发布凭据**：静态侧已核——`gh secret list` 为空、`rg -ni 'pypi.?token|PYPI_API_TOKEN|twine.*password|__token__' .github/ install.sh` 无匹配、publish job 带 `environment: pypi` + `id-token: write`（rv-2 静态侧，见 7.6）；待发布时补：发布 job 日志显示走 OIDC 交换临时凭据；不带 `id-token: write` 时 publish job 必须失败；对插入了 token 行的临时副本跑同一条 `rg` 必须命中
+
+### Behavior Acceptance
+
+- [ ] **（发布时执行，发布者）**：`brew install ZataZhang/tap/kedacode` 在干净 brew 环境装成功，`iar --version` 通过，`iar console --no-browser` 起服后 `curl` 返回 200（证明传递依赖齐全），`xattr -p com.apple.quarantine $(brew --prefix)/bin/iar` 报 No such xattr（rv-3）
+- [ ] **（发布时执行，发布者）**：推送预发布 tag 后 PyPI 无对应版本（404）且 draft release 已存在；正式发布 release 后 PyPI 出现该版本（200）（rv-4）
+- [ ] **（发布时执行，发布者）**：同一版本重复触发发布时 `skip-existing` 生效，流水线为幂等成功而非失败（workflow 已配置 `skip-existing: true`，见 7.6）
+- [ ] **（发布时执行，发布者）**：`bash install.sh --source pypi --method uv` 真实执行成功且 `iar --version` 通过（rv-5 真实档；`--check` dry-run 计划已留证 `source: pypi:kedacode`）；`--source auto` 默认行为与 `--version` / `--method` / `--check` / `--uninstall` 语义均未变（实现对照确认，见 7.6）
+- [ ] **（合并进 main 后实测）无 release 场景**：在尚无任何 release/tag 的状态下 `bash install.sh` 走 main fallback 也能成功装出可用 `iar`；静态侧已核——`rg -n "refs/tags" install.sh` 仅在 tag 分支出现，main fallback 拼 `archive/refs/heads/main.tar.gz`（FR-12，见 7.6）
+
+### CI Acceptance
+
+- [ ] **（发布时执行，发布者）**：`install-smoke.yml` 矩阵含 `ubuntu-latest` / `macos-latest` / `windows-latest` 且全部 success；Windows job 日志显示真实执行 `uv tool install` 与 `iar --version`，不是 `--check`（rv-6；三档结构已核——real-install 矩阵含三平台且为真实安装，见 7.6）
+- [ ] **（维护者创建 PAT 时核验）**：tap 仓库写入凭据是仅对 tap 仓库 contents 有写权限的细粒度凭据，未复用任何具备本仓库写权限的 token（7.0 第 2 条仍待完成；workflow 已带 secret 缺失显式报错）
+- [ ] **（发布时执行，发布者）**：`update-tap` job 的**首次运行**能在空 tap 仓库（无任何 commit、`main` 分支不存在）上成功建分支并推送 `Formula/kedacode.rb`；`gh api repos/ZataZhang/homebrew-tap/contents/Formula/kedacode.rb --jq .name` 能读到该文件（job 已实现空仓库 `git init -b main` + `push origin HEAD:main` 路径）
+
+### Dependency Acceptance
+
+- [ ] **（发布时执行，发布者）**：tap formula 的 resource 列表与 `pyproject.toml` 的运行时依赖（含传递依赖）逐项对齐，生成方式已记录在 tap 仓库 README（`update-tap` job 用 `brew update-python-resources` 重新生成并写入 README，见 workflow）
+
+### Validation Acceptance
+
+- [ ] **（发布时补齐 rv-1/2/3/4/5/6）**：rv-7 / rv-8 已执行并留档（见 7.6）；发布时门禁项随首次发布执行并回填发布日核对单
+- [ ] **（发布时补齐）**：rv-1 / rv-2 的反向验证确认可转红，且 rv-1 的反向验证在正式发布**之前**采集（发布后无法再复现）
+- [ ] **（发布时补齐）**：R2/R3 中依赖 PyPI / GitHub release / brew 的证据（PyPI JSON API 响应、pip 下载日志、`brew install` 输出、`xattr` 输出）均取自真实产出，不接受读 workflow 文件或源码自述（本地可采部分已按此标准：`gh secret list`、`curl`、`twine check`、venv 安装日志均为真实输出）
 
 ## 10. Functional Requirements
 

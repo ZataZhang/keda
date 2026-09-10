@@ -44,6 +44,7 @@
 - **Agent Runner 记忆锚点稳定化已落地**：所有记忆目录在 `factory` 构建 `RepositoryRunContext` 时被一次性绝对化到目标仓库主检出根，跨 worktree / 跨 Issue 持久化真实生效；共享目录写入采用 tmp + `os.replace` 原子落盘，并发场景 last-write-wins 不产生半写文件；原 PRD 验收降级为"同目录内部函数调用"的失真场景已被纠正，证据脚本强制 `git worktree add` 创建两个真实副本。
 - **`api → engines` 直连已迁移回 `core` 编排层**：`src/backend/api/` 对 11 个 `engines/agent_runner/` 能力的直连 import 全部清零，业务类能力在 `core/use_cases/` 补薄 facade 用例或复用既有用例；`live_terminal` / `runner_live_view` 等呈现模块从 engines 迁入 `api/`；`hooks/shared/check_architecture.py` 的 `FORBIDDEN_IMPORTS["api"]` 恢复严格态 `["infrastructure", "engines"]` 并稳定通过 `just lint --full`；`CLAUDE.md` 与 `docs/ai-standards/architecture.md`、`docs/architecture/system-design.md` 关于 `api/` 依赖方向的表述三处一致。
 - **文档与测试基础已落地**：已有 Agent Runner 使用指南、配置说明、架构规范、归档 PRD、pytest 覆盖和 `just test` 验证入口。
+- **包管理器分发链路已落地**：PyPI 分发包定名 `kedacode`（命令名仍是 `iar`，避免与 CNCF KEDA 撞名），发布走"tag 构建 draft release → 人工正式发布 → OIDC Trusted Publishing 上传 PyPI → 自动更新 Homebrew tap"两步走；用户侧三条等价入口 `brew install ZataZhang/tap/kedacode`、`uv tool install kedacode` / `pipx install kedacode`、`curl -fsSL .../install.sh | bash`（`--source auto|pypi|tarball`，pypi 来源失败不静默回退）。明确不做原生安装包：macOS 不签名不公证在 Sequoia 是硬阻断，Homebrew 5.0 起下架过不了 Gatekeeper 的 cask，原生 .app 需要每年 $99 的开发者账号，而 CLI 包管理器路径完全不碰 Gatekeeper、成本为零（PRD `P1-FEAT-20260910-125248` 决策一 / "本次明确不涉及"）。
 
 ### Partially Completed
 

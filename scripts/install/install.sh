@@ -2,33 +2,43 @@
 # keda / iar CLI installer.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/zata-zhangtao/keda/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | bash
 #   curl -fsSL ... | bash -s -- --version v0.2.0
+#   curl -fsSL ... | bash -s -- --source pypi
 #   bash install.sh --check
 #   bash install.sh --uninstall
 #
 # Behaviour:
 #   * Detects host OS (macOS / Linux) and Python >= 3.11.
 #   * Prefers `uv` (bootstrap if missing), then `pipx`, then `pip --user`.
-#   * Installs the keda wheel from the GitHub Release tarball by default.
+#   * Installs from the GitHub Release tarball by default (--source auto).
+#   * --source pypi installs the published PyPI package `kedacode`（命令名仍是 iar）；
+#     PyPI 不可达或版本不存在时直接报错，绝不静默回退到 tarball。
 #   * Verifies `iar --version` exits 0 and emits a clear PATH hint if needed.
 #   * Refuses to use sudo; never touches system package managers.
 #
 # Environment overrides:
 #   KEDA_VERSION       Tag to install (default: latest non-draft release).
-#   KEDA_PYPI=1        Install from PyPI (placeholder; reserved for future use).
+#   KEDA_SOURCE=auto|pypi|tarball  Install source (default: auto = GitHub tarball).
+#   KEDA_PYPI=1        Legacy alias for `--source pypi` (kept for backward compatibility).
 #   KEDA_INSTALL_METHOD=uv|pipx|pip  Force installer selection.
 
 set -euo pipefail
 
-readonly REPO_SLUG="${KEDA_REPO:-zata-zhangtao/keda}"
+readonly REPO_SLUG="${KEDA_REPO:-ZataZhang/keda}"
+readonly PYPI_INDEX_URL="https://pypi.org/pypi"
 readonly PY_MIN_MAJOR=3
 readonly PY_MIN_MINOR=11
-readonly DEFAULT_TOOL_NAME="keda"
+# 分发包名的单一声明处（PRD FR-1）：PyPI 包名是 kedacode，命令名是 iar。
+readonly DEFAULT_TOOL_NAME="kedacode"
 readonly TOOL_BIN_NAME="iar"
 
 INSTALL_METHOD="${KEDA_INSTALL_METHOD:-}"
 VERSION_TAG="${KEDA_VERSION:-}"
+SOURCE="${KEDA_SOURCE:-auto}"
+if [ "${KEDA_PYPI:-0}" = "1" ]; then
+    SOURCE="pypi"
+fi
 UNINSTALL_ONLY=0
 CHECK_ONLY=0
 SHORT_HELP=0
@@ -44,13 +54,15 @@ keda / iar installer
 Usage: install.sh [options]
   --version <tag>     Install a specific release tag (default: latest).
   --method uv|pipx|pip  Force a specific installer.
+  --source auto|pypi|tarball  Install source (default: auto = GitHub tarball).
   --check             Dry-run; print the plan without writing anything.
   --uninstall         Remove the keda tool environment and the iar binary.
   -h, --help          Show this help.
 
 Environment:
   KEDA_VERSION         Same as --version.
-  KEDA_PYPI=1          Reserved; install from PyPI when published.
+  KEDA_SOURCE=auto|pypi|tarball  Same as --source.
+  KEDA_PYPI=1          Legacy alias for `--source pypi`.
   KEDA_INSTALL_METHOD  Same as --method.
 EOF
 }
@@ -62,6 +74,8 @@ parse_args() {
             --version=*) VERSION_TAG="${1#*=}"; shift ;;
             --method) INSTALL_METHOD="${2:-}"; shift 2 ;;
             --method=*) INSTALL_METHOD="${1#*=}"; shift ;;
+            --source) SOURCE="${2:-}"; shift 2 ;;
+            --source=*) SOURCE="${1#*=}"; shift ;;
             --check) CHECK_ONLY=1; shift ;;
             --uninstall) UNINSTALL_ONLY=1; shift ;;
             -h|--help) show_help; exit 0 ;;
@@ -151,11 +165,63 @@ resolve_version() {
 }
 
 tarball_url() {
-    if [ "${KEDA_PYPI:-0}" = "1" ]; then
-        printf 'pypi:%s' "$DEFAULT_TOOL_NAME"
-    else
-        printf 'https://github.com/%s/archive/refs/tags/%s.tar.gz' "$REPO_SLUG" "$VERSION_TAG"
+    case "$SOURCE" in
+        auto|tarball)
+            # 无 release 时的 fallback 会把 VERSION_TAG 置为 main（分支而非 tag），
+            # 必须拼 archive/refs/heads/main.tar.gz（PRD FR-12）；其余按 tag 拼 refs/tags。
+            if [ "$VERSION_TAG" = "main" ]; then
+                printf 'https://github.com/%s/archive/refs/heads/main.tar.gz' "$REPO_SLUG"
+            else
+                printf 'https://github.com/%s/archive/refs/tags/%s.tar.gz' "$REPO_SLUG" "$VERSION_TAG"
+            fi
+            ;;
+        *)
+            log_err "Unknown --source: $SOURCE (expected auto|pypi|tarball)"
+            exit 2
+            ;;
+    esac
+}
+
+pypi_requirement() {
+    # 输出 pip 风格的 PyPI 安装需求；--version 的 v* tag / 语义化版本映射为精确 pin。
+    # 非检查模式下先验证 PyPI 可达与版本存在，失败即报错退出（PRD FR-8）。
+    local pinned_version
+    case "$VERSION_TAG" in
+        v[0-9]*)              pinned_version="${VERSION_TAG#v}" ;;
+        [0-9]*.[0-9]*.[0-9]*) pinned_version="$VERSION_TAG" ;;
+        *)                    pinned_version="" ;;
+    esac
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+        if [ -n "$pinned_version" ]; then
+            printf '%s==%s' "$DEFAULT_TOOL_NAME" "$pinned_version"
+        else
+            printf '%s' "$DEFAULT_TOOL_NAME"
+        fi
+        return
     fi
+    if ! curl -fsSL --max-time 30 "${PYPI_INDEX_URL}/${DEFAULT_TOOL_NAME}/json" >/dev/null 2>&1; then
+        log_err "PyPI 上找不到 ${DEFAULT_TOOL_NAME}（${PYPI_INDEX_URL}/${DEFAULT_TOOL_NAME}/json 不可达）。"
+        log_err "--source pypi 不会静默回退到 GitHub tarball；请确认包已发布，或改用 --source auto。"
+        exit 1
+    fi
+    if [ -n "$pinned_version" ] \
+        && ! curl -fsSL --max-time 30 "${PYPI_INDEX_URL}/${DEFAULT_TOOL_NAME}/${pinned_version}/json" >/dev/null 2>&1; then
+        log_err "PyPI 上不存在版本 ${pinned_version}（${PYPI_INDEX_URL}/${DEFAULT_TOOL_NAME}/${pinned_version}/json 返回 404）。"
+        exit 1
+    fi
+    if [ -n "$pinned_version" ]; then
+        printf '%s==%s' "$DEFAULT_TOOL_NAME" "$pinned_version"
+    else
+        printf '%s' "$DEFAULT_TOOL_NAME"
+    fi
+}
+
+source_label() {
+    case "$SOURCE" in
+        pypi) printf 'pypi:%s' "$DEFAULT_TOOL_NAME" ;;
+        auto|tarball) tarball_url ;;
+        *) printf 'unknown:%s' "$SOURCE" ;;
+    esac
 }
 
 print_plan() {
@@ -165,37 +231,44 @@ print_plan() {
   python:    ${PY_VERSION}
   method:    ${INSTALL_METHOD}
   version:   ${VERSION_TAG:-<unset>}
-  source:    $(tarball_url || true)
+  source:    $(source_label)
   tool:      ${DEFAULT_TOOL_NAME} (binary: ${TOOL_BIN_NAME})
 EOF
 }
 
 run_install() {
-    local source
-    source="$(tarball_url)"
-    log_info "Installing ${DEFAULT_TOOL_NAME} from ${source}"
+    local install_target
+    case "$SOURCE" in
+        pypi)         install_target="$(pypi_requirement)" ;;
+        auto|tarball) install_target="$(tarball_url)" ;;
+        *)
+            log_err "Unknown --source: $SOURCE (expected auto|pypi|tarball)"
+            exit 2
+            ;;
+    esac
+    log_info "Installing ${DEFAULT_TOOL_NAME} from ${install_target}"
     case "$INSTALL_METHOD" in
         uv)
             if ! command -v uv >/dev/null 2>&1; then bootstrap_uv; fi
             if [ "$CHECK_ONLY" -eq 1 ]; then
-                log_info "[check] would run: uv tool install ${source}"
+                log_info "[check] would run: uv tool install ${install_target}"
                 return
             fi
-            uv tool install --reinstall "$source"
+            uv tool install --reinstall "$install_target"
             ;;
         pipx)
             if [ "$CHECK_ONLY" -eq 1 ]; then
-                log_info "[check] would run: pipx install ${source}"
+                log_info "[check] would run: pipx install ${install_target}"
                 return
             fi
-            pipx install --force "$source"
+            pipx install --force "$install_target"
             ;;
         pip)
             if [ "$CHECK_ONLY" -eq 1 ]; then
-                log_info "[check] would run: python3 -m pip install --user ${source}"
+                log_info "[check] would run: python3 -m pip install --user ${install_target}"
                 return
             fi
-            "$PY_BIN" -m pip install --user --upgrade "$source"
+            "$PY_BIN" -m pip install --user --upgrade "$install_target"
             ;;
     esac
 }
@@ -249,10 +322,7 @@ main() {
         return
     fi
 
-    if [ "${KEDA_PYPI:-0}" = "1" ]; then
-        log_warn "KEDA_PYPI=1 is a placeholder; falling back to GitHub tarball."
-    fi
-    log_info "Selected installer: ${INSTALL_METHOD}"
+    log_info "Selected installer: ${INSTALL_METHOD}; source: $(source_label)"
     run_install
     verify_iar
     log_info "Done. Run \`iar init\` inside a Git repository to start."
