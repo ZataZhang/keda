@@ -578,6 +578,8 @@ No interactive prototype file changes in this PRD.
   - P1-FEAT-20260910-111901-iar-console-bundled-web-terminal
 - Gate type: hard
 - Notes: 前置 PRD 交付「wheel 内含前端静态产物」与 `iar console` 命令；它未落地时发布到 PyPI 只是发一个打不开面板的 CLI，本 PRD 的价值主张不成立。其依赖瘦身（FR-11）同时减少本 PRD 需要声明的 Homebrew resource 数量，因此顺序不可颠倒。本 PRD 取代已删除的 `P1-FEAT-20260910-114319-iar-desktop-installer-tauri`。
+  **建 Issue 的顺序是硬性的，违反会静默死锁**：上面这条 slug 依赖由 `_materialize_prd_dependencies`（`core/use_cases/create_issue_from_prd.py`）在 `iar issue create` 时物化——它先读上游 PRD 的 `- GitHub Issue: .../issues/N` 行，读到就落 `iar:depends-on #N`（正确）；读不到（仍是 `（待创建）` 占位符）则退化为落上游 PRD 的 **Group**，也就是 `group:iar-console-distribution`。而本 PRD 自己也在这个 group 里、会带上同名 `task-group/` 标签，于是形成自引用：`evaluate_dependencies` 的判定是"组内所有 Issue 都关闭且组内至少有一个成员"，本 Issue 自己开着就永远不满足，会一直停在 `agent/waiting`。
+  因此：**必须先给前置 PRD 建 Issue**（`iar issue create` 会把 Issue URL 回写进那份 PRD），确认它的 `- GitHub Issue:` 行已是真实链接之后，再给本 PRD 建 Issue。若已经建错，补救方式是手工把本 Issue 正文里的 `iar:depends-on` 标记从 `group:iar-console-distribution` 改成 `#<前置 Issue 号>`，无需重建 Issue。
 
 ## 9. Acceptance Checklist
 
