@@ -10,7 +10,7 @@
 - 前端优先搜索 `frontend-admin/src/lib/`、`frontend-admin/src/api/`、`frontend-admin/src/features/`、`frontend-public/lib/`、`frontend-public/components/`
 - 业务规则优先复用 `src/backend/core/`
 - 管理平台前端纯工具、格式化、API 客户端优先复用 `frontend-admin/src/lib/` 或 `frontend-admin/src/api/`
-- 前台官网纯工具与 API 客户端优先复用 `frontend-public/lib/`
+- 管理终端前端纯工具与 API 客户端优先复用 `frontend-public/lib/`
 
 禁止复制粘贴已有代码后微调。发现逻辑重复率明显超过 50% 时，优先直接调用已有函数；如果调用方向不合适，先提取公共业务规则或纯转换函数，再由调用方复用。
 

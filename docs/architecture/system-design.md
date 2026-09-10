@@ -69,12 +69,10 @@ flowchart TD
             FE_ADMIN_LAYOUT --> FE_ADMIN_API
         end
 
-        subgraph FE_PUBLIC["frontend-public/ 前台官网"]
-            FE_PUBLIC_MARKETING["app/(marketing)/\nHome · Pricing · Features"]
-            FE_PUBLIC_APP["app/(app)/\nDashboard · Settings"]
+        subgraph FE_PUBLIC["frontend-public/ Agent Runner 管理终端"]
+            FE_PUBLIC_APP["app/(app)/\nDashboard · Roadmap · Settings"]
             FE_PUBLIC_AUTH["lib/auth.tsx"]
             FE_PUBLIC_API["lib/api.ts"]
-            FE_PUBLIC_MARKETING --> FE_PUBLIC_AUTH
             FE_PUBLIC_APP --> FE_PUBLIC_AUTH
             FE_PUBLIC_APP --> FE_PUBLIC_API
             FE_PUBLIC_AUTH --> FE_PUBLIC_API
@@ -144,19 +142,18 @@ flowchart TD
 | 认证层 | `src/auth/` | SessionProvider 上下文、RequireSession 路由守卫 |
 | API 层 | `src/api/` | API 客户端封装、会话缓存，与后端唯一通信入口 |
 
-### 前台官网 `frontend-public/`
+### 管理终端 `frontend-public/`
 
 | 层 | 路径 | 职责 |
 |---|---|---|
-| 营销页面 | `app/(marketing)/` | 首页、功能、定价、FAQ 等落地页 |
-| 应用页面 | `app/(app)/` | 登录后的 Dashboard、Settings、Tasks、Projects |
+| 应用页面 | `app/(app)/` | Agent Runner 管理终端：Dashboard、Roadmap、Processes、Stats、Settings |
 | 认证层 | `lib/auth.tsx` | 会话状态、受保护布局 |
 | API 层 | `lib/api.ts` | axios/fetch 封装、环境基址、错误处理 |
 
 前端与后端之间**仅通过 `/api/*` HTTP 接口通信**：
 
 - `frontend-admin/` 开发时由 Vite 代理转发，生产时由 Nginx `/api/*` 反代到后端。
-- `frontend-public/` 开发时直接请求 `http://localhost:8000`，生产时通过 `API_BASE_URL` 指向后端。
+- `frontend-public/` 开发时经 Next.js rewrites 代理到后端；静态导出（`output: "export"`）产物随 wheel 打包，由 `iar console` 的 FastAPI 同源托管，`/api` 直连同一服务。
 
 两侧无任何代码直接依赖。
 

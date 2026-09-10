@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from backend.api.response_cache import TTLResponseCache
 from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
@@ -82,8 +83,8 @@ def _get_monitoring_dependencies() -> tuple[Callable[[Path], IGitHubClient], IPr
     return create_github_client, create_process_runner()
 
 
-_OVERVIEW_CACHE: dict[str, Any] = {}
 _OVERVIEW_CACHE_TTL_SECONDS = 30
+_OVERVIEW_CACHE = TTLResponseCache(ttl_seconds=_OVERVIEW_CACHE_TTL_SECONDS)
 
 # In-memory overview job store. Each job tracks the lifecycle of an async
 # overview build. Local single-user deployment: jobs are lost on restart.
@@ -224,16 +225,10 @@ def _get_cached_overview_response(repo_ids: list[str] | None = None) -> dict:
     that single-repo refreshes and full overviews don't stomp each other.
     """
     cache_key = ",".join(repo_ids) if repo_ids else "__all__"
-    now = time.time()
-    cache_branch = _OVERVIEW_CACHE.get(cache_key)
-    if isinstance(cache_branch, dict):
-        cached_payload = cache_branch.get("payload")
-        cached_at = cache_branch.get("timestamp", 0)
-        if cached_payload is not None and (now - cached_at) < _OVERVIEW_CACHE_TTL_SECONDS:
-            return cached_payload
-    payload = _build_overview_response(repo_ids=repo_ids)
-    _OVERVIEW_CACHE[cache_key] = {"payload": payload, "timestamp": now}
-    return payload
+    return _OVERVIEW_CACHE.get_or_build(
+        cache_key,
+        lambda: _build_overview_response(repo_ids=repo_ids),
+    )
 
 
 def _build_issue_detail_response(issue_number: int) -> dict:

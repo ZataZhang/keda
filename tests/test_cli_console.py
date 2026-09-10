@@ -1,0 +1,178 @@
+"""Tests for the ``iar console`` command: port resolution and browser flag."""
+
+from __future__ import annotations
+
+import socket
+
+import pytest
+from typer.testing import CliRunner
+
+import backend.api.cli_typer_console as cli_console
+from backend.api.cli_typer_console import (
+    ConsolePortUnavailableError,
+    launch_console,
+    resolve_console_port,
+)
+from backend.api.cli_typer_app import console_app
+from backend.infrastructure.config.settings import (
+    AgentRunnerConsoleSettings,
+)
+from backend.infrastructure.config import settings as console_settings_module
+
+
+def _occupy_port(port: int, host: str = "127.0.0.1") -> socket.socket:
+    """Bind a real listening socket to simulate an occupied port."""
+    blocking_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    blocking_socket.bind((host, port))
+    blocking_socket.listen(1)
+    return blocking_socket
+
+
+class TestResolveConsolePort:
+    """resolve_console_port 的顺延与显式端口语义。"""
+
+    def test_explicit_free_port_returned_as_is(self) -> None:
+        """A free explicit port is honored verbatim."""
+        assert (
+            resolve_console_port(host="127.0.0.1", explicit_port=58321, default_port=8313) == 58321
+        )
+
+    def test_explicit_occupied_port_raises(self) -> None:
+        """An occupied explicit port must fail loudly instead of shifting."""
+        blocker = _occupy_port(58322)
+        try:
+            with pytest.raises(ConsolePortUnavailableError, match="already in use"):
+                resolve_console_port(host="127.0.0.1", explicit_port=58322, default_port=8313)
+        finally:
+            blocker.close()
+
+    def test_default_port_free_returned(self) -> None:
+        """Without --port the configured default port is used when free."""
+        assert (
+            resolve_console_port(host="127.0.0.1", explicit_port=None, default_port=58323) == 58323
+        )
+
+    def test_scans_forward_from_default_port(self) -> None:
+        """Without --port, an occupied default port shifts to the next free one."""
+        blocker = _occupy_port(58324)
+        try:
+            resolved = resolve_console_port(
+                host="127.0.0.1", explicit_port=None, default_port=58324
+            )
+            assert resolved == 58325
+        finally:
+            blocker.close()
+
+    def test_scan_window_exhausted_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No free port inside the scan window must raise, not bind blindly."""
+        monkeypatch.setattr(cli_console, "_port_is_available", lambda host, port: False)
+        with pytest.raises(ConsolePortUnavailableError, match="No free port"):
+            resolve_console_port(host="127.0.0.1", explicit_port=None, default_port=8313)
+
+
+class FakeTimer:
+    """threading.Timer 替身：start() 时同步执行，便于断言调用顺序。"""
+
+    instances: list["FakeTimer"] = []
+
+    def __init__(self, interval, function, args=None, kwargs=None) -> None:
+        self.interval = interval
+        self.function = function
+        self.args = args or ()
+        self.kwargs = kwargs or {}
+        self.daemon = False
+        FakeTimer.instances.append(self)
+
+    def start(self) -> None:
+        self.function(*self.args, **self.kwargs)
+
+
+def test_launch_console_opens_browser_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """launch_console should schedule the browser open and run uvicorn."""
+    calls: list[tuple[str, tuple]] = []
+    monkeypatch.setattr(cli_console, "_BROWSER_OPEN_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(cli_console.threading, "Timer", FakeTimer)
+    FakeTimer.instances.clear()
+    monkeypatch.setattr(
+        cli_console.webbrowser,
+        "open",
+        lambda url, *args, **kwargs: calls.append(("browser", (url,))),
+    )
+    monkeypatch.setattr(
+        cli_console.uvicorn,
+        "run",
+        lambda app_target, host, port: calls.append(("uvicorn", (app_target, host, port))),
+    )
+
+    launch_console(host="127.0.0.1", port=58326, open_browser=True)
+
+    assert ("browser", ("http://127.0.0.1:58326/",)) in calls
+    assert ("uvicorn", ("backend.api.app:app", "127.0.0.1", 58326)) in calls
+
+
+def test_launch_console_no_browser_skips_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--no-browser must not touch webbrowser at all."""
+
+    def _fail_open(*args, **kwargs):
+        raise AssertionError("webbrowser.open must not be called with --no-browser")
+
+    monkeypatch.setattr(
+        cli_console.uvicorn,
+        "run",
+        lambda app_target, host, port: None,
+    )
+    monkeypatch.setattr(cli_console.webbrowser, "open", _fail_open)
+
+    launch_console(host="127.0.0.1", port=58327, open_browser=False)
+
+
+def test_console_command_reports_occupied_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit --port occupied → friendly error and non-zero exit."""
+
+    def _fail_launch(*args, **kwargs):
+        raise AssertionError("uvicorn.run must not be reached on a port error")
+
+    monkeypatch.setattr(cli_console.uvicorn, "run", _fail_launch)
+    blocker = _occupy_port(58328)
+    try:
+        result = CliRunner().invoke(console_app, ["--port", "58328", "--no-browser"])
+    finally:
+        blocker.close()
+    assert result.exit_code != 0
+
+
+class TestDefaultRunnerCommand:
+    """_default_runner_command 的运行时解析顺序与显式配置优先。"""
+
+    def test_explicit_config_wins_over_runtime_resolution(self) -> None:
+        """config.toml 显式配置的 runner_command 始终优先于运行时默认解析。"""
+        console_settings = AgentRunnerConsoleSettings(runner_command=["/custom/iar"])
+        assert console_settings.runner_command == ["/custom/iar"]
+
+    def test_argv0_named_iar_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """iar 入口直接运行时取 sys.argv[0]，保证与当前安装态同源。"""
+        monkeypatch.setattr(
+            console_settings_module.sys, "argv", ["/tmp/iar-clean/bin/iar", "console"]
+        )
+        monkeypatch.setattr(console_settings_module.shutil, "which", lambda name: "/from/which/iar")
+        assert console_settings_module._default_runner_command() == ["/tmp/iar-clean/bin/iar"]
+
+    def test_falls_back_to_which_when_argv0_is_not_iar(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """uvicorn 等其它入口启动后端时，从 PATH 解析 iar。"""
+        monkeypatch.setattr(
+            console_settings_module.sys, "argv", ["/usr/bin/uvicorn", "backend.api.app:app"]
+        )
+        monkeypatch.setattr(
+            console_settings_module.shutil, "which", lambda name: "/opt/homebrew/bin/iar"
+        )
+        assert console_settings_module._default_runner_command() == ["/opt/homebrew/bin/iar"]
+
+    def test_falls_back_to_uv_run_when_iar_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """既非 iar 入口、PATH 也找不到 iar 时兜底 uv run。"""
+        monkeypatch.setattr(console_settings_module.sys, "argv", ["python", "-m", "backend.main"])
+        monkeypatch.setattr(console_settings_module.shutil, "which", lambda name: None)
+        assert console_settings_module._default_runner_command() == ["uv", "run", "iar"]

@@ -33,7 +33,7 @@ export function AppSidebar() {
     <aside className="flex w-64 flex-col border-r bg-sidebar">
       <div className="flex h-14 items-center gap-2 border-b px-4">
         <span className="size-6 rounded-md bg-primary" />
-        <span className="font-semibold text-sidebar-foreground">Zata</span>
+        <span className="font-semibold text-sidebar-foreground">iar</span>
       </div>
       <nav className="flex-1 p-3">
         <ul className="space-y-1">

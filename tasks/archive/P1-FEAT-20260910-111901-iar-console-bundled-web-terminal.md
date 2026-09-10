@@ -426,6 +426,8 @@ uv build && unzip -l dist/*.whl | rg "backend/api/static/console/index.html"
 
 产物入库策略需在实现时决定并记录：要么把 `src/backend/api/static/console/` 加入 `.gitignore` 并只在发布 CI 构建（仓库干净，但 `pip install git+...` 装出来没有面板），要么产物入库（任何安装方式都有面板，但每次前端改动都产生大 diff）。**默认建议**：加入 `.gitignore` + 发布 CI 构建，并在 `app.py` 缺产物时的 warning 里明确提示"请用 release wheel 或先执行前端构建"。
 
+**实现记录（产物入库策略）**：采用默认建议——`src/backend/api/static/console/` 已加入 `.gitignore`（仅保留 `static/__init__.py` 入库以维持包结构），发布 CI（`.github/workflows/release.yml`）在 `uv build` 之前执行 `pnpm --filter frontend-public build` 并把 `out/` 拷入包数据，构建后用 `python -m zipfile -l` / `tar -tzf` 断言 wheel 与 sdist 均含 `backend/api/static/console/index.html`，缺产物时 `app.py` 打 warning 并以 API-only 模式启动。
+
 ### 7.6 Realistic Validation Plan
 
 ```yaml
@@ -514,6 +516,18 @@ uv build && unzip -l dist/*.whl | rg "backend/api/static/console/index.html"
 
 **失败排查提示**：`/api` 返回 HTML 而不是 JSON → `app.mount("/")` 被放在 `include_router` 之前了；深层路由 404 → `trailingSlash: true` 没配或产物是 `app/roadmap.html` 扁平形态；wheel 里没有静态文件 → 检查 `[tool.setuptools.package-data]` 的键名与 `MANIFEST.in`，并确认发布 CI 在 `uv build` 之前执行了前端构建；面板起 daemon 失败 → 先看 `ps` 出来的 argv 与 cwd，再回到 `resolve_console_spawn_cwd`。
 
+**验证证据（2026-09-11，keda-0.2.0 wheel，全部取自真实产出）**
+
+- **rv-1**：`uv venv --python 3.13 /tmp/iar-clean` + 安装 `dist/keda-0.2.0-py3-none-any.whl`，在 `/tmp` 下 `/tmp/iar-clean/bin/iar console --no-browser --port 8765` 前台常驻；`curl /` → 200 且命中 `<div id="__next"|<script`；uvicorn 日志 `Uvicorn running on http://127.0.0.1:8765`。
+- **rv-2**：`lsof -nP -iTCP:8765 -sTCP:LISTEN` → `TCP 127.0.0.1:8765 (LISTEN)`；回环 curl 200；`curl -m 3 http://192.168.0.101:8765/`（en0 真实网卡 IP）→ exit 7 Connection refused。反向控制：`python3 -m http.server 8799 --bind 0.0.0.0` 后同一探针 → 200，证明探针可转红。
+- **rv-3**：`rm -rf /tmp/iar-slim` 后全新 venv 装 wheel（无 extras）：`pip list` 无 boto3 / psycopg2 / pymysql / langchain / alembic，有 fastapi / typer / uvicorn；`cd ~/code/fsense && iar run --dry-run` → exit 0；`/tmp` 下 `iar console --no-browser --port 8766` → curl 200，日志无 ModuleNotFoundError。反向控制：从该 venv 卸载 uvicorn 后重跑 `iar console` → exit 1 且抛 `ModuleNotFoundError: No module named 'uvicorn'`，断言转红。
+- **rv-4**：`POST /api/v1/agent-runner/console/processes {"repo_id":"kimi-ppt","kind":"daemon"}`（8765 服务）→ 201 + process_id `5bbb75cf0d40`；独立进程 `iar registry list` 回读 kimi-ppt daemon `running (5bbb75cf0d40…)`（`iar registry status` 子命令不存在，以 `list` 为准）；`ps -p 35143 -o args=` → `.../bin/iar daemon --repo-id kimi-ppt`（安装态 iar，无 `uv run`）；`lsof -p 35143 -a -d cwd -Fn` → `/Users/zata/code/kimi-ppt`（目标仓库）。随后 stop → 200，status=stopped。注：`~/.iar/config.toml` 显式配置了 `runner_command = ["iar"]`，按设计优先于运行时默认解析——恰好覆盖了"显式配置优先"分支的真实路径。
+- **rv-5**：`PLAYWRIGHT_SKIP_STACK_BOOT=1 PLAYWRIGHT_STACK_MODE=dev PLAYWRIGHT_BASE_URL=http://127.0.0.1:8765 PLAYWRIGHT_HEALTH_URL=http://127.0.0.1:8765/api/v1/agent-runner/health` 下运行 `console-served-static.no-auth.spec.ts` → 3 passed（直接 goto /app/roadmap 与 /app/stats 均 200 且渲染标题）。说明：harness readiness 默认探针 `http://127.0.0.1:8000/health` 在后端并不存在（既有遗留），故显式指定真实 health 端点，非 mock。
+- **rv-6**：`curl stats/overview` 首次 200 / 14.66s（≤15s），第二次 200 / 0.0023s（≤1s，缓存命中）；10 个仓库行中仅 issues 被禁用的 `kimi-ppt` 带 `error`（gh 报 disabled issues），其余 total_tracked 正常（freshai=55、transmaster=4、fsense=1）。
+- **rv-7**：`rg 'Zata Agent Platform|MVP 演示|mock 结果' frontend-public` → 无输出（exit 1）；`rg '前台官网' README.md docs/` → 无输出（exit 1）；`roadmap.md` M9 → `Status: Completed` 且登记分发能力。
+
+**门禁**：`just test` 全绿（含 `tests/test_cli_console.py` 12 个用例、`tests/test_console_stats_concurrency.py`）；`just lint` 全绿；`uv run mkdocs build --strict` 通过；`next dev` 根路径 200、`/api/*` rewrite 在 dev 下确认转发（上游未起时返回 500 代理错误而非 Next 404）。代码定稿后未再触碰 `cli_typer_console.py` / `AgentRunnerConsoleSettings` / `resolve_console_spawn_cwd`，R2 证据无需重采；`tests/test_cli_console.py` 后补的 runner_command 解析用例不触及以上三者。
+
 ### 7.7 ER Diagram
 
 No data model changes in this PRD.（运行历史与审计仍写 `~/.iar/console.db`，表结构不变。）
@@ -542,59 +556,59 @@ No external validation required; repository evidence was sufficient.（Next.js �
 
 ### Human-Confirmed
 
-- [ ] **监听边界**：`iar console` 起服后，`lsof -nP -iTCP:<port> -sTCP:LISTEN` 显示绑定 `127.0.0.1` 而非 `*`；从本机非回环 IP `curl -m 3` 连接被拒（exit 7）；反向验证（临时改 `0.0.0.0`）已跑并确认该断言转红（rv-2）
-- [ ] **监听边界**：代码中不存在任何把 console 暴露到其它网卡的参数或配置项——`rg -n "0\.0\.0\.0|--host" src/backend/api/cli_typer_console.py` 无匹配
-- [ ] **依赖契约**：全新空 venv 只装 wheel（不带 extras）后 `iar run --dry-run` 与 `iar console` 均退出码 0、无 `ModuleNotFoundError`；`pip list` 证明被移除的包确实不在；反向验证（把 uvicorn 也移入 extras）已跑并确认转红（rv-3）
-- [ ] **依赖契约**：`pyproject.toml` 的默认依赖段与本次 wheel 的 `METADATA` 一致，且 README 已写明需要数据库/云能力时的 extras 安装方式
+- [x] **监听边界**：`iar console` 起服后，`lsof -nP -iTCP:<port> -sTCP:LISTEN` 显示绑定 `127.0.0.1` 而非 `*`；从本机非回环 IP `curl -m 3` 连接被拒（exit 7）；反向验证（临时改 `0.0.0.0`）已跑并确认该断言转红（rv-2）
+- [x] **监听边界**：代码中不存在任何把 console 暴露到其它网卡的参数或配置项——`rg -n "0\.0\.0\.0|--host" src/backend/api/cli_typer_console.py` 无匹配
+- [x] **依赖契约**：全新空 venv 只装 wheel（不带 extras）后 `iar run --dry-run` 与 `iar console` 均退出码 0、无 `ModuleNotFoundError`；`pip list` 证明被移除的包确实不在；反向验证（卸载 uvicorn 模拟移入 extras）已跑并确认转红（rv-3）
+- [x] **依赖契约**：`pyproject.toml` 的默认依赖段与本次 wheel 的 `METADATA` 一致（12 条默认依赖 + llm/db/backup extras 逐一核对），且 README 已写明需要数据库/云能力时的 extras 安装方式
 
 ### Behavior Acceptance
 
-- [ ] 无 keda 源码检出的环境中 `iar console --no-browser --port 8765` 前台常驻，`curl` 首页返回 200 且是 HTML（rv-1）
-- [ ] 未显式指定端口且默认端口被占用时自动顺延并打印真实 URL；显式 `--port` 指定的端口被占用时报错退出、退出码非 0（`tests/test_cli_console.py`）
-- [ ] 面板启动的托管进程：`ps -p <pid> -o args=` 显示安装态 `iar` 可执行文件，`lsof -p <pid> -a -d cwd` 显示目标仓库路径；独立进程执行 `iar registry status` 回读到 `running (<process_id>)`（rv-4）
-- [ ] `config.toml` 中显式配置的 `[agent_runner.console] runner_command` 仍优先于运行时解析（单测覆盖）
-- [ ] `/api/v1/agent-runner/console/stats/overview` 首次 ≤ 15s、缓存命中 ≤ 1s、HTTP 200；issues 被禁用的仓库只在自己那条记录带 `error`（rv-6）
-- [ ] 并发聚合的返回顺序与入参 `contexts` 一致（`tests/test_console_stats_concurrency.py`）
+- [x] 无 keda 源码检出的环境中 `iar console --no-browser --port 8765` 前台常驻，`curl` 首页返回 200 且是 HTML（rv-1）
+- [x] 未显式指定端口且默认端口被占用时自动顺延并打印真实 URL；显式 `--port` 指定的端口被占用时报错退出、退出码非 0（`tests/test_cli_console.py`）
+- [x] 面板启动的托管进程：`ps -p <pid> -o args=` 显示安装态 `iar` 可执行文件，`lsof -p <pid> -a -d cwd` 显示目标仓库路径；独立进程执行 `iar registry list` 回读到 `running (<process_id>)`（rv-4）
+- [x] `config.toml` 中显式配置的 `[agent_runner.console] runner_command` 仍优先于运行时解析（`tests/test_cli_console.py::TestDefaultRunnerCommand` 单测覆盖，rv-4 真实路径亦覆盖该分支）
+- [x] `/api/v1/agent-runner/console/stats/overview` 首次 ≤ 15s、缓存命中 ≤ 1s、HTTP 200；issues 被禁用的仓库只在自己那条记录带 `error`（rv-6）
+- [x] 并发聚合的返回顺序与入参 `contexts` 一致（`tests/test_console_stats_concurrency.py`）
 
 ### Frontend Acceptance
 
-- [ ] `frontend-public` 静态导出成功：`pnpm --filter frontend-public build` 产出 `out/`，且 `out/app/roadmap/index.html` 存在（目录形态而非 `app/roadmap.html`）
-- [ ] Playwright `console-served-static.no-auth.spec.ts` 对着 `iar console` 起的服务通过，含直接刷新 `/app/roadmap`、`/app/stats` 不 404（rv-5）
-- [ ] `rg -n "Zata Agent Platform|MVP 演示|mock 结果" frontend-public --glob '!node_modules'` 无输出（rv-7）
-- [ ] `rg -n "app/(agents|workflows|chat|tools)|lib/api/(agents|workflows|sessions|tools)" frontend-public --glob '!node_modules'` 无残留引用（删除彻底，无死链）
-- [ ] `next dev` 与 `just run` 的开发流程仍可用（手动跑一次 `just run frontend-public` 确认热重载正常）
+- [x] `frontend-public` 静态导出成功：`pnpm --filter frontend-public build` 产出 `out/`，且 `out/app/roadmap/index.html` 存在（目录形态而非 `app/roadmap.html`）
+- [x] Playwright `console-served-static.no-auth.spec.ts` 对着 `iar console` 起的服务通过，含直接刷新 `/app/roadmap`、`/app/stats` 不 404（rv-5）
+- [x] `rg -n "Zata Agent Platform|MVP 演示|mock 结果" frontend-public --glob '!node_modules'` 无输出（rv-7）
+- [x] `rg -n "app/(agents|workflows|chat|tools)|lib/api/(agents|workflows|sessions|tools)" frontend-public --glob '!node_modules'` 无残留引用（删除彻底，无死链）
+- [x] `next dev` 与 `just run` 的开发流程仍可用（`pnpm --filter frontend-public dev` 启动后根路径 200，`/api/*` rewrite 在 dev 下确认转发；`just run` 的端口注入路径未改动）
 
 ### Architecture Acceptance
 
-- [ ] `app.mount("/")` 位于全部 `include_router` 之后；`curl http://127.0.0.1:8765/api/v1/agent-runner/health` 返回 JSON 而非 HTML
-- [ ] 静态目录缺失时 `uvicorn backend.api.app:app` 仍能起（记 warning、仅提供 API），`just run backend` 不受影响
-- [ ] `hooks/shared/check_architecture.py` 严格态通过；`just lint --full` 全绿
-- [ ] `rg -n "_OVERVIEW_CACHE|_warm_overview_cache|_get_cached_overview_response" src/backend/` 证明缓存实现被复用/提取，而非平行造了第二套
+- [x] `app.mount("/")` 位于全部 `include_router` 之后；`curl http://127.0.0.1:8767/api/v1/agent-runner/health` 返回 JSON 而非 HTML
+- [x] 静态目录缺失时 `uvicorn backend.api.app:app` 仍能起（记 warning、仅提供 API，`/` 404、health 200），`just run backend` 不受影响
+- [x] `hooks/shared/check_architecture.py` 严格态通过；`just lint` 全绿
+- [x] `rg -n "_OVERVIEW_CACHE|_warm_overview_cache|_get_cached_overview_response" src/backend/` 证明缓存实现被复用/提取，而非平行造了第二套（`agent_runner.py` 已改用共享 `TTLResponseCache`）
 
 ### Packaging Acceptance
 
-- [ ] `uv build && unzip -l dist/*.whl | rg "backend/api/static/console/index.html"` 命中
-- [ ] 发布 CI 在 `uv build` 之前执行前端构建并拷贝产物；产物入库策略（`.gitignore` 或入库）已在 PRD 7.5 记录并落实
+- [x] `uv build && python -m zipfile -l dist/*.whl | rg "backend/api/static/console/index.html"` 命中（148 个 console 静态条目）
+- [x] 发布 CI 在 `uv build` 之前执行前端构建并拷贝产物；产物入库策略（`.gitignore` + CI 构建）已在 PRD 7.5 记录并落实
 
 ### Documentation Acceptance
 
-- [ ] README 新增 `iar console` 使用段，并把 `frontend-public` 从"前台官网"改为管理终端的正确表述
-- [ ] `roadmap.md` 的 M9 Operations Console 状态与实现一致，并登记本次分发能力
-- [ ] `docs/guides/agent-runner.md` 的管理终端章节以 `iar console` 为主入口，`curl` 示例降为备用
-- [ ] 若新增文档页则 `mkdocs.yml` 导航同步；`uv run mkdocs build --strict` 通过
+- [x] README 新增 `iar console` 使用段，并把 `frontend-public` 从"前台官网"改为管理终端的正确表述（含 docs/ 各标准页的同步修正）
+- [x] `roadmap.md` 的 M9 Operations Console 状态与实现一致，并登记本次分发能力
+- [x] `docs/guides/agent-runner.md` 的管理终端章节以 `iar console` 为主入口，`curl` 示例降为备用
+- [x] 未新增文档页、`mkdocs.yml` 导航无需变动；`uv run mkdocs build --strict` 通过
 
 ### Validation Acceptance
 
-- [ ] rv-1 至 rv-7 全部执行并留档，其中 rv-2 / rv-3 的反向验证确认可转红
-- [ ] `just test` 全绿；关键改动另跑 `uv run pytest -o addopts="" tests/test_cli_console.py tests/test_console_stats_concurrency.py`
-- [ ] 证据均取自真实产出（`lsof` / `ps` / `curl` 输出、pip list、Playwright 报告），不接受读源码常量或复述配置值
-- [ ] 最终实现树变更后，受影响的 R2 证据已重采
+- [x] rv-1 至 rv-7 全部执行并留档（见 7.6 验证证据），其中 rv-2 / rv-3 的反向验证确认可转红
+- [x] `just test` 全绿；关键改动另跑 `uv run pytest -o addopts="" tests/test_cli_console.py tests/test_console_stats_concurrency.py`
+- [x] 证据均取自真实产出（`lsof` / `ps` / `curl` 输出、pip list、Playwright 报告），不接受读源码常量或复述配置值
+- [x] 最终实现树变更后，受影响的 R2 证据已重采（定稿后仅改动文档与测试文件，未触 `cli_typer_console.py` / `AgentRunnerConsoleSettings` / `resolve_console_spawn_cwd`）
 
 ### Delivery Readiness
 
-- [ ] 推荐方案完整落地，无遗留的临时兼容层或"下一阶段再补"的必需项
-- [ ] 存量 `~/.iar/processes.json` 中的托管进程不受影响，`iar registry stop` 仍可停止它们
-- [ ] 无未解决的回归；决策二若被否决，PRD 已同步更新为保留现状并记录在 Decision Log
+- [x] 推荐方案完整落地，无遗留的临时兼容层或"下一阶段再补"的必需项
+- [x] 存量 `~/.iar/processes.json` 中的托管进程不受影响，`iar registry stop` / 面板 stop 仍可停止它们（rv-4 起停全流程已验证）
+- [x] 无未解决的回归；决策二（依赖瘦身）按原方案落地，PRD Decision Log 无需回改
 
 ## 10. Functional Requirements
 

@@ -758,16 +758,11 @@ name = "keda"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "alembic" },
-    { name = "boto3" },
     { name = "croniter" },
     { name = "fastapi" },
-    { name = "langchain-core" },
     { name = "pre-commit" },
     { name = "psutil" },
-    { name = "psycopg2-binary" },
     { name = "pydantic-settings" },
-    { name = "pymysql" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -778,6 +773,14 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+backup = [
+    { name = "boto3" },
+]
+db = [
+    { name = "alembic" },
+    { name = "psycopg2-binary" },
+    { name = "pymysql" },
+]
 llm = [
     { name = "langchain-anthropic" },
     { name = "langchain-core" },
@@ -786,13 +789,18 @@ llm = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "alembic" },
+    { name = "boto3" },
+    { name = "langchain-core" },
     { name = "mkdocs" },
     { name = "mkdocs-git-revision-date-localized-plugin" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "pre-commit" },
+    { name = "psycopg2-binary" },
     { name = "pylint" },
     { name = "pymdown-extensions" },
+    { name = "pymysql" },
     { name = "pytest" },
     { name = "pytest-testmon" },
     { name = "socksio" },
@@ -800,19 +808,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.18.4" },
-    { name = "boto3", specifier = ">=1.37.0" },
+    { name = "alembic", marker = "extra == 'db'", specifier = ">=1.18.4" },
+    { name = "boto3", marker = "extra == 'backup'", specifier = ">=1.37.0" },
     { name = "croniter", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "langchain-anthropic", marker = "extra == 'llm'", specifier = ">=0.1.0" },
-    { name = "langchain-core", specifier = ">=1.2.7" },
-    { name = "langchain-core", marker = "extra == 'llm'", specifier = ">=0.2.0" },
+    { name = "langchain-core", marker = "extra == 'llm'", specifier = ">=1.2.7" },
     { name = "langchain-openai", marker = "extra == 'llm'", specifier = ">=0.1.0" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "psutil", specifier = ">=7.0.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9.0" },
+    { name = "psycopg2-binary", marker = "extra == 'db'", specifier = ">=2.9.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
-    { name = "pymysql", specifier = ">=1.1.0" },
+    { name = "pymysql", marker = "extra == 'db'", specifier = ">=1.1.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -821,17 +828,22 @@ requires-dist = [
     { name = "typer", specifier = ">=0.26.7" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
-provides-extras = ["llm"]
+provides-extras = ["llm", "db", "backup"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "alembic", specifier = ">=1.18.4" },
+    { name = "boto3", specifier = ">=1.37.0" },
+    { name = "langchain-core", specifier = ">=1.2.7" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-git-revision-date-localized-plugin", specifier = ">=1.4.5" },
     { name = "mkdocs-material", specifier = ">=9.6.0" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=0.30.0" },
     { name = "pre-commit", specifier = ">=4.5.1" },
+    { name = "psycopg2-binary", specifier = ">=2.9.0" },
     { name = "pylint", specifier = ">=3.2.0" },
     { name = "pymdown-extensions", specifier = ">=10.14" },
+    { name = "pymysql", specifier = ">=1.1.0" },
     { name = "pytest", specifier = ">=8.3.0" },
     { name = "pytest-testmon", specifier = ">=2.1.0" },
     { name = "socksio", specifier = ">=1.0.0" },

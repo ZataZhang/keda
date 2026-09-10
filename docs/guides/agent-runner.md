@@ -1105,7 +1105,7 @@ iar takeover --repos owner/repo-a --dry-run
 - `~/.iar/processes.json`：托管进程 pidfile registry。
 - `~/.iar/process-logs/<repo_id>/`：daemon / review-daemon 的 stdout/stderr 日志。
 
-你可以通过现有 HTTP 管理终端查看、停止、重启这些进程（console 子命令可通过 FastAPI 服务或已暴露的 Typer 子命令访问，具体取决于部署方式）。
+你可以通过 `iar console` 启动管理终端查看、停止、重启这些进程；已运行的 FastAPI 服务也可以直接访问同一组 console API。
 
 ### 接管后的日常命令
 
@@ -2770,6 +2770,30 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 | 统计 | `/stats` | 实时完成度（GitHub 口径）+ 历史趋势与最近运行记录（本地 SQLite 口径） |
 | 项目 | `/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
 
+### 启动方式（`iar console`）
+
+管理终端的前端静态产物随 wheel 打包。装好 `iar` 后在任意目录一条命令即可启动，无需 clone keda、无需 Node / pnpm / just：
+
+```bash
+# 启动 API + 内置面板并自动打开浏览器（前台运行）
+iar console
+
+# 指定端口（省略时从 [agent_runner.console].port 起自动挑选空闲端口）
+iar console --port 8600
+
+# 只启动服务，不自动开浏览器
+iar console --no-browser
+```
+
+- 服务固定监听 `127.0.0.1`（见下文信任边界）；端口缺省值来自
+  `config.toml` 的 `[agent_runner.console].port`，被占用时自动顺延挑选
+  空闲端口，显式指定的端口不顺延、占用即报错退出。
+- 源码开发模式（wheel 里没有静态产物）时，`iar console` 仍可启动并只
+  提供 API，日志会提示先构建前端：`pnpm --filter frontend-public build`，
+  再把 `frontend-public/out/` 复制到 `src/backend/api/static/console/`；
+  或直接沿用 `just run` / `pnpm --filter frontend-public dev` 的开发双端口。
+- 面板与 API 同源，开发代理仅在 `frontend-public dev` 模式生效。
+
 ### 信任边界与白名单动作
 
 管理终端按**本机单用户部署**信任边界运行：`/api/auth/*` 返回固定的
@@ -2801,10 +2825,13 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
 - 子进程以 `start_new_session` 脱离后端进程组：后端重启不影响执行中
   的 runner；重启后从 pidfile registry（`~/.iar/processes.json`）复活
   记录并重新探活。
-- 子进程默认以 `uv run iar <command> --repo-id <id>` 启动、cwd 为
-  keda 项目根——全局安装的 `iar` 读不到项目本地 `config.toml`，
-  必须经 `uv run`。命令前缀可用 `[agent_runner.console] runner_command`
-  覆盖。
+- 子进程以 `<iar> <command> --repo-id <id>` 启动，cwd 为**目标仓库自身
+  路径**：托管的 daemon 必须在目标仓库内读取该仓的 `.iar` 状态与 git
+  上下文；全局安装场景下 keda 项目根与目标仓库无关。
+- 默认启动命令运行时解析：`iar console` 入口直接取 `sys.argv[0]`（与
+  当前安装态完全同源），否则从 PATH 解析 `iar`，兜底 `uv run iar`（源码
+  树内的 uv 项目场景）。可用 `[agent_runner.console] runner_command`
+  显式覆盖。
 - 进程 stdout/stderr 写入 `logs/agent-runner/processes/<repo_id>/`，
   面板通过 offset 轮询续读，无 WebSocket/SSE。
 
@@ -2856,8 +2883,10 @@ PATCH  /api/v1/agent-runner/repositories/{repo_id}             {enabled}
 history_db_path = "~/.iar/console.db"            # 运行历史与审计 SQLite
 process_registry_path = "~/.iar/processes.json"  # 托管进程 pidfile
 process_log_dir = "logs/agent-runner/processes"  # 进程日志目录（相对 keda 根）
-runner_command = ["uv", "run", "iar"]            # 托管进程启动命令前缀
+runner_command = ["uv", "run", "iar"]            # 托管进程启动命令前缀（缺省运行时解析，见上文）
 stop_timeout_seconds = 30                        # SIGTERM → SIGKILL 等待秒数
+host = "127.0.0.1"                               # 监听地址（固定本机，不开放配置其它网卡）
+port = 8600                                      # iar console 缺省端口（被占用时自动顺延）
 ```
 
 ## deliberate 多 Agent 合议

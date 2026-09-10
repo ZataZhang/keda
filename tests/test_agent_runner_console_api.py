@@ -67,7 +67,8 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         lambda: TomlRegistryEditor(config_path),
     )
     monkeypatch.setattr(console_routes, "_resolve_contexts", lambda: contexts)
-    monkeypatch.setattr(console_routes, "resolve_console_spawn_cwd", lambda: tmp_path)
+    # resolve_console_spawn_cwd 不再打桩：contexts 里已带 repo_path，
+    # 真实实现应把托管进程 cwd 解析到目标仓库自身路径。
 
     fake_settings = AgentRunnerSettings(
         console=AgentRunnerConsoleSettings(

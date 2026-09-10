@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +34,9 @@ _logger = logging.getLogger(__name__)
 
 #: 单 label 查询上限；命中上限时标记 truncated，避免静默截断。
 _PER_LABEL_QUERY_LIMIT = 200
+
+#: 跨仓库并发的线程数上限；沿用 ``agent_runner_monitor`` 的既有范式。
+_MAX_CONCURRENT_REPOS = 5
 
 
 @dataclass(frozen=True)
@@ -142,19 +146,59 @@ def build_completion_stats(
     )
 
 
+def _build_stats_for_context(
+    context: RepositoryRunContext,
+    github_client_factory: Callable[[Path], IGitHubClient],
+) -> RepositoryCompletionStats:
+    """单仓库统计的兜底包装：客户端构建或查询失败都降级为该行 ``error``。"""
+    try:
+        return build_completion_stats(
+            context=context,
+            github_client=github_client_factory(context.repo_path),
+        )
+    except Exception as exc:  # noqa: BLE001 - isolate per-repo stats failures.
+        _logger.warning("Completion stats unavailable for '%s': %s", context.repo_id, exc)
+        return RepositoryCompletionStats(
+            repo_id=context.repo_id,
+            display_name=context.display_name,
+            total_tracked=0,
+            completed=0,
+            failed=0,
+            blocked=0,
+            open_in_pipeline=0,
+            completion_rate=None,
+            truncated=False,
+            error=str(exc),
+        )
+
+
 def build_completion_stats_overview(
     *,
     contexts: list[RepositoryRunContext],
     github_client_factory: Callable[[Path], IGitHubClient],
 ) -> list[RepositoryCompletionStats]:
-    """对全部仓库构建实时完成度统计。"""
-    return [
-        build_completion_stats(
-            context=context,
-            github_client=github_client_factory(context.repo_path),
+    """对全部仓库构建实时完成度统计（线程池并发）。
+
+    每个仓库的统计相互独立，逐仓库在 ``gh`` 子进程上串行会随仓库数线性
+    变慢；改为线程池并发后整体落在秒级。``executor.map`` 保证返回顺序与
+    入参 ``contexts`` 一致；单仓库失败（客户端构建或 GitHub 查询）已在
+    ``_build_stats_for_context`` 内降级为该仓库条目的 ``error`` 字段，
+    不会拖垮整页统计。
+
+    Args:
+        contexts: 当前 enabled 的仓库运行上下文。
+        github_client_factory: 按仓库路径构建 GitHub 客户端的工厂。
+
+    Returns:
+        与 ``contexts`` 顺序一致的各仓库完成度统计列表。
+    """
+    with ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_REPOS) as executor:
+        return list(
+            executor.map(
+                lambda context: _build_stats_for_context(context, github_client_factory),
+                contexts,
+            )
         )
-        for context in contexts
-    ]
 
 
 def build_run_history_trend(

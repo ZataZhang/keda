@@ -11,7 +11,7 @@ continues to re-export them for backward compatibility.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Sequence
 
 from backend.core.shared.interfaces.agent_output_view import IAgentOutputView
 from backend.core.shared.interfaces.runner_console import (
@@ -234,9 +234,32 @@ def create_registry_editor() -> IRepositoryRegistryEditor:
     return TomlRegistryEditor(resolve_registry_config_toml_path())
 
 
-def resolve_console_spawn_cwd() -> Path:
-    """托管进程的工作目录：keda 项目根（保证子进程读到正确配置）。"""
-    return resolve_project_root_path()
+def resolve_console_spawn_cwd(
+    repo_id: str,
+    contexts: Sequence[RepositoryRunContext],
+) -> Path:
+    """托管进程的工作目录：目标仓库自身的路径。
+
+    面板托管的 runner 必须在目标仓库内运行——读取该仓库的 ``.iar`` 状态
+    与 git 上下文。全局安装场景下 keda 项目根与目标仓库无关，继续把
+    cwd 指向它会让 daemon 在错误目录用一个不存在的 uv 项目启动。
+    （``iar registry start`` / ``iar takeover`` 仍以 registry config.toml
+    所在目录为 cwd，不经本函数。）
+
+    Args:
+        repo_id: 目标仓库 ID。
+        contexts: 当前可解析的 enabled 仓库上下文。
+
+    Returns:
+        目标仓库的本地路径。
+
+    Raises:
+        ValueError: ``repo_id`` 不在 ``contexts`` 中（路由层映射为 4xx）。
+    """
+    for context in contexts:
+        if context.repo_id == repo_id:
+            return context.repo_path
+    raise ValueError(f"Repository '{repo_id}' is not an enabled registry target.")
 
 
 def create_process_runner() -> SubprocessRunner:

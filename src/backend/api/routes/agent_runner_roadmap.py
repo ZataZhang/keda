@@ -268,6 +268,10 @@ def start_roadmap_prd(encoded_path: str, request: StartPrdRequest) -> dict:
     contexts = _resolve_contexts()
     store = create_roadmap_store()
     try:
+        spawn_cwd = resolve_console_spawn_cwd(request.repo_id, contexts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
         result = start_prd(
             prd_path=prd_path,
             repo_id=request.repo_id,
@@ -276,7 +280,7 @@ def start_roadmap_prd(encoded_path: str, request: StartPrdRequest) -> dict:
             supervisor=create_process_supervisor(),
             store=store,
             runner_command=settings.console.runner_command,
-            spawn_cwd=resolve_console_spawn_cwd(),
+            spawn_cwd=spawn_cwd,
             process_runner=create_process_runner(),
         )
     except RoadmapActionError as exc:
@@ -310,6 +314,10 @@ def start_roadmap_global(request: StartGlobalRequest) -> dict:
     contexts = _resolve_contexts()
     store = create_roadmap_store()
     try:
+        spawn_cwd = resolve_console_spawn_cwd(request.repo_id, contexts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
         result = start_global_roadmap(
             repo_id=request.repo_id,
             max_parallel=request.max_parallel,
@@ -318,7 +326,7 @@ def start_roadmap_global(request: StartGlobalRequest) -> dict:
             supervisor=create_process_supervisor(),
             store=store,
             runner_command=settings.console.runner_command,
-            spawn_cwd=resolve_console_spawn_cwd(),
+            spawn_cwd=spawn_cwd,
             process_runner=create_process_runner(),
         )
     except RoadmapActionError as exc:

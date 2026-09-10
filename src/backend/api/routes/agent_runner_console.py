@@ -19,6 +19,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.api.response_cache import TTLResponseCache
 from backend.core.shared.interfaces.runner_console import RunnerProcessKind
 from backend.core.use_cases.console_actions import (
     ConsoleActionError,
@@ -100,14 +101,19 @@ def list_console_processes() -> dict:
 def start_console_process(request: StartProcessRequest) -> dict:
     """为目标仓库启动一个白名单类型的 runner 进程。"""
     settings = load_fresh_agent_runner_settings()
+    contexts = _resolve_contexts()
+    try:
+        spawn_cwd = resolve_console_spawn_cwd(request.repo_id, contexts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         record = start_runner_process(
             repo_id=request.repo_id,
             kind=request.kind,
-            contexts=_resolve_contexts(),
+            contexts=contexts,
             supervisor=create_process_supervisor(),
             runner_command=settings.console.runner_command,
-            spawn_cwd=resolve_console_spawn_cwd(),
+            spawn_cwd=spawn_cwd,
         )
     except ConsoleProcessError as exc:
         status_code = 409 if "already exists" in str(exc) else 400
@@ -198,15 +204,20 @@ class IssueActionRequest(BaseModel):
 def execute_console_repository_action(repo_id: str, request: RepositoryActionRequest) -> dict:
     """执行仓库级白名单动作。"""
     settings = load_fresh_agent_runner_settings()
+    contexts = _resolve_contexts()
+    try:
+        spawn_cwd = resolve_console_spawn_cwd(repo_id, contexts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         action_result = execute_repository_action(
             action=request.action,
             repo_id=repo_id,
-            contexts=_resolve_contexts(),
+            contexts=contexts,
             supervisor=create_process_supervisor(),
             store=create_console_store(),
             runner_command=settings.console.runner_command,
-            spawn_cwd=resolve_console_spawn_cwd(),
+            spawn_cwd=spawn_cwd,
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -219,17 +230,22 @@ def execute_console_issue_action(
 ) -> dict:
     """执行 Issue 级白名单动作。"""
     settings = load_fresh_agent_runner_settings()
+    contexts = _resolve_contexts()
+    try:
+        spawn_cwd = resolve_console_spawn_cwd(repo_id, contexts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         action_result = execute_issue_action(
             action=request.action,
             repo_id=repo_id,
             issue_number=issue_number,
-            contexts=_resolve_contexts(),
+            contexts=contexts,
             github_client_factory=create_github_client,
             supervisor=create_process_supervisor(),
             store=create_console_store(),
             runner_command=settings.console.runner_command,
-            spawn_cwd=resolve_console_spawn_cwd(),
+            spawn_cwd=spawn_cwd,
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -240,13 +256,21 @@ def execute_console_issue_action(
 # 统计与审计
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: 统计缓存的 TTL；并发聚合后构建落在秒级，30 秒窗口足够让 GitHub 查询
+#: 高频刷新时不会每次都打满 gh 子进程。
+_STATS_CACHE_TTL_SECONDS = 30
+_STATS_CACHE = TTLResponseCache(ttl_seconds=_STATS_CACHE_TTL_SECONDS)
+
 
 @router.get("/agent-runner/console/stats/overview")
 def get_console_stats_overview() -> dict:
-    """各仓库的实时完成度统计（GitHub 口径）。"""
-    stats = build_completion_stats_overview(
-        contexts=_resolve_contexts(),
-        github_client_factory=create_github_client,
+    """各仓库的实时完成度统计（GitHub 口径，TTL 内直接返回缓存）。"""
+    stats = _STATS_CACHE.get_or_build(
+        "overview",
+        lambda: build_completion_stats_overview(
+            contexts=_resolve_contexts(),
+            github_client_factory=create_github_client,
+        ),
     )
     return {"repositories": [_serialize(entry) for entry in stats]}
 

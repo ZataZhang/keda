@@ -211,12 +211,14 @@ Status: Not completed.
 
 ### M9: Operations Console
 
-Status: Not completed.
+Status: Completed. 监控面板与时间线 API 已随 `#39` / `#81` / `#89` 落地，随后升级为统一管理终端（写操作白名单 + 审计），并在 `P1-FEAT-20260910-111901-iar-console-bundled-web-terminal` 中补齐分发能力。
 
-- 提供只读 Agent Runner 监控面板，展示队列统计、仓库健康、Issue 状态、PR context、worktree 状态和最新事件。
+- 提供监控面板，展示队列统计、仓库健康、Issue 状态、PR context、worktree 状态和最新事件。
 - 提供 Issue 时间线 API，复用 `iar:event` marker、Issue comments、PR comments 和本地 worktree 状态。
 - 检测 label 与 PR/worktree 状态不一致、failed/blocked、dirty worktree、stale PR、checks failed 和缺失 supervisor event 等异常。
-- 所有恢复操作继续通过 CLI 执行；面板不暴露写 GitHub label/comment/PR 或修改 worktree 的 API。
+- 运维写操作收敛在管理终端 API（白名单动作 + 审计）：启停 daemon / runner 进程、重试 failed、roadmap 队列与 idea inbox 管理；直接写 GitHub label/comment/PR 仍走 CLI。
+- 统计接口线程池并发构建并带 TTL 缓存，多仓库下仪表盘首屏不串行等待。
+- 分发能力：`frontend-public` 静态导出产物随 wheel 打包，`iar console` 一条命令启动 API + 内置面板并自动打开浏览器；无需源码检出、Node / pnpm / just。
 
 ### M10: Autopilot Fast-Lane (Product Repos)
 
@@ -249,7 +251,7 @@ Status: Not completed; 与 M10 同组，硬依赖 `autopilot.enabled` 门控。
 4. **发布恢复后的 supervisor 安全闭环**：恢复成功后先进入 `agent/supervising`，supervisor approve 后再进入 `agent/review`，并修正分支 token 匹配与发布失败阶段分类。
 5. **rebase detached HEAD branch guard**：确保 active rebase target 可确认时允许继续，无法确认时安全停止并输出可诊断错误。
 6. **CI rework state recovery、blocked/forbidden resolution 与 process runner 错误可诊断性增强**：从 supervisor 修复回路单点补齐。
-7. **Agent Runner operator 监控面板、异常检测和 Issue 时间线 API**（M9）：先只读面板，不暴露写 GitHub / 修改 worktree 的 API。
+7. **Agent Runner operator 监控面板、异常检测和 Issue 时间线 API**（M9）：已交付，并升级为统一管理终端 + `iar console` 随 wheel 分发一键启动。
 8. **基于现有 generated content 和合议能力补齐 Issue -> PRD / PRD rewrite**：`agent/rework-prd`、管理员 PRD gate、确认后落盘 PRD 并添加 `agent/ready`；M8 全闭环。
 9. **把多 agent deliberation 接入 PRD review**：生成结构化 verdict、finding、risk 和后续动作 comment，与 M8 协同。
 10. **高风险 review finding 的稳定阻断规则**：定义哪些风险必须转人工，哪些可以自动重试或自动合并。

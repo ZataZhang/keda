@@ -7,6 +7,8 @@
 """
 
 import os
+import shutil
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any, Literal
@@ -588,14 +590,52 @@ class AgentRunnerValidationSettings(BaseModel):
     frontend_paths: list[str] = Field(default_factory=lambda: ["frontend-admin", "frontend-public"])
 
 
+#: ``iar console`` 的默认端口；被占用时 CLI 会自动顺延，显式 ``--port`` 不顺延。
+_CONSOLE_DEFAULT_PORT = 8313
+
+#: 托管进程启动命令的兜底值：运行时解析失败时回退为 uv 项目内运行（旧行为）。
+_FALLBACK_RUNNER_COMMAND = ["uv", "run", "iar"]
+
+
+def _default_runner_command() -> list[str]:
+    """解析当前 ``iar`` 可执行文件，作为托管进程的默认启动命令。
+
+    解析顺序：
+
+    1. ``sys.argv[0]``：``iar console`` 等入口直接运行时，argv[0] 就是
+       当前可执行文件的绝对路径，用它可保证托管的 daemon 与当前安装态
+       的 iar 完全同源。
+    2. ``shutil.which("iar")``：由 uvicorn 等其它入口启动后端时，argv[0]
+       不是 iar，此时从 PATH 中解析（安装态与开发 venv 均可见）。
+    3. 兜底 ``["uv", "run", "iar"]``：旧默认值，仅在既非 iar 入口、PATH
+       又找不到 iar 时使用（keda 源码树内的 uv 项目场景）。
+
+    用户在 ``config.toml`` 里显式配置的 ``runner_command`` 始终优先于本默认值。
+    """
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0 and Path(argv0).name == "iar":
+        return [argv0]
+    resolved_iar = shutil.which("iar")
+    if resolved_iar:
+        return [resolved_iar]
+    return list(_FALLBACK_RUNNER_COMMAND)
+
+
 class AgentRunnerConsoleSettings(BaseModel):
-    """统一管理终端（运行历史落库与托管进程）配置。"""
+    """统一管理终端（运行历史落库与托管进程）配置。
+
+    ``host`` 固定 ``127.0.0.1``：面板带写操作而认证是空实现，监听地址即
+    唯一访问控制，因此不提供把它暴露到其它网卡的 CLI 参数或配置建议
+    （需要远程访问请走 SSH 端口转发）。
+    """
 
     history_db_path: str = "~/.iar/console.db"
     process_registry_path: str = "~/.iar/processes.json"
     process_log_dir: str = "logs/agent-runner/processes"
-    runner_command: list[str] = Field(default_factory=lambda: ["uv", "run", "iar"])
+    runner_command: list[str] = Field(default_factory=_default_runner_command)
     stop_timeout_seconds: int = 30
+    host: str = "127.0.0.1"
+    port: int = _CONSOLE_DEFAULT_PORT
 
 
 class AgentRunnerDaemonSettings(BaseModel):

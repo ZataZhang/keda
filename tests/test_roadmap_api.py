@@ -73,7 +73,9 @@ def roadmap_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             },
         )(),
     )
-    monkeypatch.setattr(roadmap_routes, "resolve_console_spawn_cwd", lambda: tmp_path)
+    monkeypatch.setattr(
+        roadmap_routes, "resolve_console_spawn_cwd", lambda repo_id, contexts: tmp_path
+    )
 
     from backend.infrastructure.config.settings import (
         AgentRunnerConsoleSettings,

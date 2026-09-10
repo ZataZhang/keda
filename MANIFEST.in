@@ -3,3 +3,6 @@ include README.md
 include CHANGELOG.md
 
 recursive-include src/backend/engines/agent_runner/templates *
+
+# Console 静态导出产物：不入库（见 .gitignore），由发布流程拷入后随包分发。
+recursive-include src/backend/api/static/console *

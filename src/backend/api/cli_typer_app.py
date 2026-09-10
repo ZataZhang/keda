@@ -51,6 +51,7 @@ __all__ = [
     "auth_app",
     "completion_app",
     "container_app",
+    "console_app",
     "daemon_app",
     "issue_app",
     "labels_app",
@@ -164,6 +165,11 @@ container_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+console_app = typer.Typer(
+    help="Serve the bundled Agent Runner web console (API + panel).",
+    no_args_is_help=False,
+    context_settings=_HELP_CONTEXT,
+)
 auth_app = typer.Typer(
     help="Manage the container-side authentication snapshot.",
     no_args_is_help=True,
@@ -180,6 +186,7 @@ app.add_typer(daemon_app, name="daemon")
 app.add_typer(workflow_app, name="workflow")
 app.add_typer(loop_app, name="loop")
 app.add_typer(container_app, name="container")
+app.add_typer(console_app, name="console")
 
 RepoOption = Annotated[str | None, typer.Option("--repo", help="Target repository path.")]
 RepoIdOption = Annotated[
@@ -327,6 +334,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_container,
     cli_typer_takeover,
     cli_typer_loop,
+    cli_typer_console,
 )
 
 

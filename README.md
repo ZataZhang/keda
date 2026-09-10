@@ -86,7 +86,7 @@ uv run python -m backend.main          # 后端（默认 8000 端口）
 
 # 前端使用 pnpm workspace（frontend-public + frontend-admin）
 pnpm install                            # 安装两个前端的依赖
-pnpm --filter frontend-public dev       # 前台官网（Next.js，默认 3000 端口）
+pnpm --filter frontend-public dev       # Agent Runner 管理终端（Next.js，默认 3000 端口）
 pnpm --filter frontend-admin dev        # 管理平台（Vite，默认 5173 端口）
 ```
 
@@ -202,6 +202,23 @@ iar review-daemon
 # 只监控单个仓库
 iar daemon --repo-id keda
 ```
+
+### 管理终端（`iar console`）
+
+`frontend-public` 构建出的管理终端静态产物会随 wheel 一起分发。装好 `iar` 后，在任意目录一条命令即可启动 Web 管理终端（API + 内置面板），无需 clone 本仓库、无需 Node / pnpm / just：
+
+```bash
+# 启动管理终端并自动打开浏览器（前台运行）
+iar console
+
+# 指定端口（省略时从 config.toml [agent_runner.console].port 起自动挑选空闲端口）
+iar console --port 8600
+
+# 只启动服务，不自动开浏览器
+iar console --no-browser
+```
+
+面板提供所有已注册仓库的队列状态、Issue 事件时间线、运行历史与完成度统计，并支持启停 daemon、重试 failed Issue、管理 roadmap 队列。默认只监听本机（`127.0.0.1`）；更多配置见 `docs/guides/agent-runner.md` 的「统一管理终端」一节。
 
 ### 自然语言决策入口（`iar ask`）
 
@@ -350,6 +367,14 @@ uv run mkdocs build --strict
 - `database.*` — PostgreSQL 数据库配置
 - `chat_model.*` — LLM 模型配置（provider、temperature 等）
 - `agent_runner.*` — Agent Runner 完整配置（labels、git、worktree、runner、safety、prompts）
+
+wheel 默认只装轻量核心依赖；以下能力按需安装 extras（源码开发用 `uv sync --all-extras` 一次装齐）：
+
+```bash
+uv pip install "keda[db]"       # 数据库能力：alembic、psycopg2、pymysql
+uv pip install "keda[llm]"      # LLM 能力：langchain-openai / anthropic / core
+uv pip install "keda[backup]"   # 云备份：boto3
+```
 
 ## 架构概览
 

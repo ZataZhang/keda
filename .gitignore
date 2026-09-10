@@ -39,6 +39,9 @@ site/
 .tanstack/
 .vitest-attachments/
 
+# Console 静态导出产物（frontend-public build 产物拷入，仅发布 CI 构建，不入库）
+src/backend/api/static/console/
+
 # Environment files - ignore all .env* except *.env*.example
 .env*
 !.env*.example

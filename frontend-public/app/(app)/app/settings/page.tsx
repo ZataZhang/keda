@@ -37,10 +37,12 @@ export default function SettingsPage() {
         </p>
       </div>
       <div className="rounded-2xl border bg-muted/30 p-6">
-        <h2 className="mb-2 text-lg font-semibold">关于 Zata Agent Platform</h2>
+        <h2 className="mb-2 text-lg font-semibold">关于 iar 管理终端</h2>
         <p className="text-sm text-muted-foreground">
-          当前版本为 MVP 演示，真实 LLM 调用需要在后端配置 provider 和 API key。
-          工作流执行目前返回 mock 结果，用于验证编排流程。
+          这是 iar 内置的 Agent Runner 管理终端（本机单用户模式，仅监听
+          127.0.0.1）。仓库队列、托管进程与 roadmap 数据均来自本机后端
+          API；runner 的行为由各仓库的 config.toml 与 .iar.toml 决定。
+          退出后可通过命令行重新执行 <code>iar console</code> 打开。
         </p>
       </div>
       <Button variant="destructive" onClick={handleLogout}>

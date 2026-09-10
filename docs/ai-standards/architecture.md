@@ -79,7 +79,7 @@ src/<module>/api/ -> src/<module>/core/ -> src/<module>/engines/ -> src/<module>
 | App | Path | Stack | 定位 |
 |---|---|---|---|
 | 管理平台前端 | `frontend-admin/` | Vite + React + TypeScript (pnpm) | 内部管理后台 |
-| 前台官网 | `frontend-public/` | Next.js + TypeScript (pnpm) | 对外公开站点 |
+| 管理终端前端 | `frontend-public/` | Next.js + TypeScript (pnpm) | Agent Runner 管理终端（静态导出随 wheel 分发） |
 
 它们不受后端四层依赖规则约束，遵循各自目录下的前端约定（见各自 `README.md`）。
 

@@ -13,9 +13,9 @@ const fontMono = Geist_Mono({
 })
 
 export const metadata = {
-  title: "Zata Agent Platform - 面向开发者团队的 AI Agent 平台",
+  title: "iar — Agent Runner 管理终端",
   description:
-    "Zata Agent Platform 帮助开发者团队创建、运行和编排 AI Agent，支持多 Agent 协作、工具调用与可视化工作流。",
+    "iar 统一管理终端：查看仓库队列、托管 runner 进程、跟踪 roadmap 与完成度统计。",
 }
 
 /** Root layout for the root section. */

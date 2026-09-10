@@ -25,16 +25,14 @@ classifiers = [
     "Topic :: Software Development",
     "Typing :: Typed",
 ]
+# 依赖分组原则（FR-11 / PRD 决策二）：默认依赖只保留 console / CLI / daemon
+# 主路径真正 import 的包；云 SDK 与数据库驱动按使用场景收进 extras，
+# README「安装」一节说明各自何时需要。
 dependencies = [
-    "alembic>=1.18.4",
-    "boto3>=1.37.0",
     "croniter>=3.0.0",
     "fastapi>=0.115.0",
-    "langchain-core>=1.2.7",
     "pre-commit>=4.5.1",
     "psutil>=7.0.0",
-    "psycopg2-binary>=2.9.0",
-    "pymysql>=1.1.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.1.0",
     "pyyaml>=6.0.3",
@@ -51,8 +49,16 @@ iar = "backend.api.cli:main"
 [project.optional-dependencies]
 llm = [
     "langchain-anthropic>=0.1.0",
-    "langchain-core>=0.2.0",
+    "langchain-core>=1.2.7",
     "langchain-openai>=0.1.0",
+]
+db = [
+    "alembic>=1.18.4",
+    "psycopg2-binary>=2.9.0",
+    "pymysql>=1.1.0",
+]
+backup = [
+    "boto3>=1.37.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -60,9 +66,16 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "backend.engines.agent_runner.templates" = ["**/*"]
+"backend.api.static" = ["console/**/*"]
 
 [dependency-groups]
 dev = [
+    # extras 里的可选依赖在仓库开发/测试环境照常可用（不属于 wheel 默认依赖）。
+    "alembic>=1.18.4",
+    "boto3>=1.37.0",
+    "langchain-core>=1.2.7",
+    "psycopg2-binary>=2.9.0",
+    "pymysql>=1.1.0",
     "pre-commit>=4.5.1",
     "pylint>=3.2.0",
     "pytest>=8.3.0",

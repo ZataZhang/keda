@@ -43,8 +43,41 @@ jobs:
       - name: Sync dependencies from lock file
         run: uv sync --all-extras --all-groups --frozen
 
+      # Console 静态产物不入库（见 .gitignore），发布时先构建前端再打 wheel。
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Build frontend-public static export
+        run: |
+          pnpm --filter frontend-public install --frozen-lockfile
+          pnpm --filter frontend-public build
+
+      - name: Copy static export into package data
+        run: |
+          rm -rf src/backend/api/static/console
+          cp -R frontend-public/out src/backend/api/static/console
+
       - name: Build sdist + wheel
         run: uv build
+
+      - name: Verify distributions bundle the console assets
+        run: |
+          if ! python -m zipfile -l dist/*.whl | grep -q "backend/api/static/console/index.html"; then
+            echo "wheel must contain the bundled console static export"
+            exit 1
+          fi
+          if ! tar -tzf dist/*.tar.gz | grep -q "backend/api/static/console/index.html"; then
+            echo "sdist must contain the bundled console static export"
+            exit 1
+          fi
 
       - name: Verify distributions omit bundled skills
         run: |
