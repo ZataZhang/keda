@@ -97,16 +97,20 @@ jobs:
           uv run python hooks/shared/check_max_file_lines.py \
             --max-lines 1000 --glob "*.py" src/backend "${allow_list_args[@]}"
 
+      # timeout-minutes 是诊断也是防护。基线：2026-07-28 的 eb75be4 用同一条命令
+      # 跑完 1773 个测试只要 45 秒；2026-09-11 起同一步骤 25 分钟不结束——因为
+      # 此前 max-file-lines 一直先失败、本步一直被 skip，某个在 CI 里会挂住的
+      # 东西就这样藏了一个多月。挂住的套件应该快速失败并**保留日志**（超时会保留，
+      # 取消不会），`-v` 输出里最后一个测试就是嫌疑人。
+      #
+      # --no-testmon 与本地 `just test all` 一致：CI 是全新 checkout，testmon 的
+      # 增量选择零收益。注意它不是上面那个慢的原因（45 秒那次 testmon 也开着），
+      # 只是顺手去掉无谓开销。这处是**有意的下游分歧**，不要回流上游：上游
+      # pytest.ini 的 addopts 是 `-m '...' -n auto --dist=loadgroup`，套用会砍掉
+      # 它的 xdist 并行。
       - name: Run local test suite
-        # --no-testmon 与本地 `just test all` 保持一致。keda 的 pyproject 把
-        # addopts 设成 --testmon 做增量选择，但 CI 是全新 checkout、没有
-        # .testmondata，testmon 只能对每个测试做覆盖率追踪从零建库——增量选择
-        # 在一次性容器里零收益，追踪开销却是实打实的：实测本地 --no-testmon
-        # 跑完 1885 个测试约 70-140 秒，CI 带 testmon 跑到 25 分钟仍未结束。
-        #
-        # 这处是**有意的下游分歧**，不要回流上游：上游 pytest.ini 的 addopts 是
-        # `-m '...' -n auto --dist=loadgroup`，套用本改动会砍掉它的 xdist 并行。
-        run: uv run pytest tests/ -v -m "not expensive" --no-testmon
+        timeout-minutes: 12
+        run: uv run pytest tests/ -v -m "not expensive" --no-testmon --durations=25
 
       - name: Build documentation
         run: uv run mkdocs build --strict
