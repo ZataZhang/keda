@@ -28,8 +28,11 @@ concurrency:
 jobs:
   build:
     name: Build & upload sdist + wheel
-    # release published 事件只跑 publish-pypi / update-tap；build 仅响应 tag / dispatch
-    if: github.event_name != 'release'
+    # 只响应 tag push。release published 事件跑 publish-pypi / update-tap；
+    # workflow_dispatch 是 update-tap 的补救入口，此时 GITHUB_REF 是
+    # refs/heads/main 而非 tag，action-gh-release 会去找名为 refs/heads/main
+    # 的 release 然后重试到超时（v0.2.0 补救时实测如此，无副作用但噪音大）。
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: "3.12"
