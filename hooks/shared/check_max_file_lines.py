@@ -60,6 +60,44 @@ def _expand_paths(raw_paths: list[str], glob_pattern: str | None) -> tuple[list[
     return deduplicated_files, errors
 
 
+def _relative_label(file_path: Path) -> str:
+    """把文件路径规范成相对仓库根的 POSIX 形式，用于与白名单条目比对。
+
+    Args:
+        file_path: 待检查文件路径。
+
+    Returns:
+        相对当前工作目录的 POSIX 路径；无法相对化时退回原路径的 POSIX 形式。
+    """
+    try:
+        return file_path.resolve().relative_to(Path.cwd()).as_posix()
+    except ValueError:
+        return file_path.as_posix()
+
+
+def _load_allow_list(allow_list_file: str | None) -> tuple[set[str], list[str]]:
+    """读取白名单文件。
+
+    Args:
+        allow_list_file: 白名单文件路径；``None`` 表示不启用白名单。
+
+    Returns:
+        (白名单路径集合, 错误信息列表)。文件路径给了却不存在时返回一条错误，
+        避免白名单静默失效让硬门禁形同虚设。
+    """
+    if allow_list_file is None:
+        return set(), []
+    allow_list_path = Path(allow_list_file)
+    if not allow_list_path.is_file():
+        return set(), [f"Allow-list file does not exist: {allow_list_path}"]
+    allowed_paths: set[str] = set()
+    for raw_line in allow_list_path.read_text(encoding="utf-8").splitlines():
+        stripped_line = raw_line.strip()
+        if stripped_line and not stripped_line.startswith("#"):
+            allowed_paths.add(stripped_line)
+    return allowed_paths, []
+
+
 def main(argv: list[str] | None = None) -> int:
     """入口函数，返回退出码。"""
     parser = argparse.ArgumentParser(
@@ -82,6 +120,15 @@ def main(argv: list[str] | None = None) -> int:
         help="目录递归时的 glob 过滤模式（例如 '*.py'）。",
     )
     parser.add_argument(
+        "--allow-list-file",
+        default=None,
+        help=(
+            "可选的白名单文件路径；每行一个相对仓库根的文件路径，`#` 开头为注释。"
+            "命中白名单的文件即使超过 --max-lines 也只产生 WARNING，不会导致非零"
+            "退出码。用于标记存量超额文件，同时仍对新文件保持硬门禁。"
+        ),
+    )
+    parser.add_argument(
         "files",
         nargs="+",
         help="待检查的文件或目录路径列表。",
@@ -90,19 +137,33 @@ def main(argv: list[str] | None = None) -> int:
 
     files_to_check, errors = _expand_paths(args.files, args.glob)
 
+    allowed_paths, allow_list_errors = _load_allow_list(args.allow_list_file)
+    errors.extend(allow_list_errors)
+
     for error_message in errors:
         print(f"[ERROR] {error_message}")
 
     violations: list[tuple[Path, int]] = []
+    allow_listed: list[tuple[Path, int]] = []
     for file_path in files_to_check:
         line_count = count_non_empty_lines(file_path)
-        if line_count > args.max_lines:
+        if line_count <= args.max_lines:
+            continue
+        if _relative_label(file_path) in allowed_paths:
+            allow_listed.append((file_path, line_count))
+        else:
             violations.append((file_path, line_count))
 
     if violations:
         level = "WARNING" if args.warn_only else "ERROR"
         for file_path, line_count in violations:
             print(f"[{level}] {file_path}: {line_count} 非空行，" f"超过上限 {args.max_lines} 行。")
+
+    for file_path, line_count in allow_listed:
+        print(
+            f"[WARNING] {file_path}: {line_count} 非空行，"
+            f"超过上限 {args.max_lines} 行（已在白名单中）。"
+        )
 
     if errors and not args.warn_only:
         return 1

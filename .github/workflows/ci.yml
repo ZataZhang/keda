@@ -81,14 +81,21 @@ jobs:
 
       - name: Check max file lines (hard limit)
         # 模板硬门禁:新文件 / 修改文件非空行 ≤ 1000。存量超额文件落在
-        # hooks/shared/max_file_lines.allowlist.txt 中,只产生 WARNING。
-        # 清零进度由拆分 PRD 推动,见 tasks/pending/ 下对应的 P0-DEBT PRD。
-        run: >-
-          uv run python hooks/shared/check_max_file_lines.py
-          --max-lines 1000
-          --glob '*.py'
-          src/backend
-          --allow-list-file hooks/shared/max_file_lines.allowlist.txt
+        # hooks/max_file_lines.allowlist.txt 中,只产生 WARNING。清零进度由
+        # tasks/pending/P1-REFACTOR-20260705-210702-file-line-split-seven-files.md 推动。
+        #
+        # 白名单刻意放在项目自有的 hooks/ 而非上游维护的 hooks/shared/:放后者
+        # 会被模板同步用上游内容覆盖掉本仓的豁免条目。写法与上游模板一致,
+        # 将来同步过来是零差异。
+        run: |
+          allow_list_file=hooks/max_file_lines.allowlist.txt
+          allow_list_args=()
+          if [ -f "$allow_list_file" ]; then
+            allow_list_args=(--allow-list-file "$allow_list_file")
+            echo "using allow-list: $allow_list_file"
+          fi
+          uv run python hooks/shared/check_max_file_lines.py \
+            --max-lines 1000 --glob "*.py" src/backend "${allow_list_args[@]}"
 
       - name: Run local test suite
         run: uv run pytest tests/ -v -m "not expensive"

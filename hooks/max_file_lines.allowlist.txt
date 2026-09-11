@@ -1,0 +1,3 @@
+# 存量超额文件；由 tasks/pending/P1-REFACTOR-20260705-210702-file-line-split-seven-files.md 逐步清零
+# 新增文件不得进入本名单——超限即应拆分。
+src/backend/infrastructure/config/settings.py
