@@ -116,6 +116,12 @@ def _run_script(
 ) -> subprocess.CompletedProcess[str]:
     """Run preview_env.py inside ``cwd`` so [preview] is read from there."""
     env = os.environ.copy()
+    # 脚本在 GITHUB_ENV 存在时会向该文件追加 PREVIEW_* 变量。继承调用方环境时，
+    # 在 GitHub Actions 里这就是 runner 真实的 $GITHUB_ENV——等于每个没有显式
+    # 覆盖它的用例都会把变量注入 job 的后续步骤。本地没有这个变量，所以这种
+    # 污染只在 CI 发生、且完全看不见。默认指向 cwd 下的一次性文件；需要断言
+    # 追加行为的用例通过 extra_env 显式覆盖。
+    env["GITHUB_ENV"] = str(Path(cwd) / "_github_env_sink")
     if extra_env:
         env.update(extra_env)
     return subprocess.run(
@@ -125,6 +131,9 @@ def _run_script(
         cwd=str(cwd),
         env=env,
         check=True,
+        # 没有 timeout 的 capture_output 子进程一旦阻塞就永久挂起，而挂起的
+        # pytest 在 CI 里只会表现为"某一步跑不完"，连是谁都查不出来。
+        timeout=60,
     )
 
 
