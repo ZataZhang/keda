@@ -238,6 +238,12 @@ jobs:
               '  license "Apache-2.0"',
               "",
               '  depends_on "python@3.12"',
+              # Homebrew 的 Python formula 一律从 sdist 源码构建，而依赖树里有
+              # Rust 扩展（pydantic-core 经 pydantic-settings -> pydantic 引入，
+              # 无法避免）。不声明这条，用户机器上没有 Rust 时 brew install 会在
+              # 构建 pydantic-core 时失败；声明后 Homebrew 会自行准备 Rust。
+              # update-python-resources 只重写 resource 块，本行会被保留。
+              '  depends_on "rust" => :build',
               "",
               "  def install",
               "    virtualenv_install_with_resources",

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # 分发包名的单一声明处（PRD FR-1）：PyPI/Homebrew 分发名是 kedacode，
 # CLI 入口名仍是 iar（装 kedacode、敲 iar）。改名时穷举命令见 PRD 7.5 第 3 条。
 name = "kedacode"
-version = "0.2.0"
+version = "0.2.1"
 description = "Issue Agent Runner (iar) — turn GitHub Issues into a local AI agent queue."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -45,7 +45,12 @@ dependencies = [
     "tomli-w>=1.0.0",
     "tomlkit>=0.15.0",
     "typer>=0.26.7",
-    "uvicorn[standard]>=0.30.0",
+    # 刻意不用 uvicorn[standard]：它带的 uvloop / httptools / websockets /
+    # watchfiles 全是编译型扩展，而本项目一个都用不上——代码里没有 --reload
+    # （watchfiles）、api/ 下没有真正的 WebSocket 路由，uvloop 与 httptools 只是
+    # 性能 extra，对本机单用户面板没有意义。它们的代价很实：Homebrew formula
+    # 一律从 sdist 源码构建，多这 4 个就多 4 个要在用户机器上编译的扩展。
+    "uvicorn>=0.30.0",
 ]
 
 [project.scripts]
