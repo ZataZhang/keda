@@ -16,7 +16,7 @@
 
 > 把 GitHub Issue 变成本地 AI Agent 队列。给 Issue 打上 `agent/ready`，`iar` 就会创建隔离 worktree、驱动 Claude / Codex / Kimi 改代码、跑验证、做 code review、推分支开 Draft PR，并在 PR 合并前持续盯着 CI 与评论变化。你不想用命令行时，`iar console` 一条命令打开内置的管理面板。
 >
-> 装什么、敲什么：`uv tool install kedacode` 之后命令是 `iar`（包名和命令名不同，见下方安装一节）。
+> 装什么、敲什么：`uv tool install kedacode` 之后主命令是 `iar`，也可以直接敲包名 `kedacode`（两者完全等价，见下方安装一节）。
 >
 > 仓库同时是一套可复用的 Python 工程骨架——Clean Architecture 四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链，可以整体拿去起新项目。
 >
@@ -130,7 +130,7 @@ pnpm --filter frontend-admin dev        # 管理平台（Vite，默认 5173 端�
 
 ### 安装 `iar` 全局命令
 
-本项目通过 `pyproject.toml` 的 `[project.scripts]` 注册了 `iar` CLI。开发本仓库时推荐以可编辑模式安装为全局命令，这样源码改动可直接反映到 `iar`，无需每次重新构建安装：
+本项目通过 `pyproject.toml` 的 `[project.scripts]` 注册了两个等价入口：主命令 `iar`，以及与分发名对齐的别名 `kedacode`（装完想不起来敲什么时，敲包名也能用）。开发本仓库时推荐以可编辑模式安装为全局命令，这样源码改动可直接反映到 `iar`，无需每次重新构建安装：
 
 ```bash
 # 在仓库根目录安装（推荐）

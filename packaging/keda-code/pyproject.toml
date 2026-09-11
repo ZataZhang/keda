@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# 防守型转发包：占住与正式分发名 kedacode 最容易混淆的那个名字。
+# 按 PEP 503 归一化，keda-code / keda_code / keda.code 是同一个名字，注册一次全覆盖
+# （kedacode 不含分隔符，归一化后与本名不相等，所以确实是另一个名字）。
+name = "keda-code"
+# 与 kedacode 的版本号刻意脱钩：本包只发一次，主包发版不需要带着它一起动。
+version = "0.1.0"
+description = "Name forwarder for kedacode (the Issue Agent Runner). Install `kedacode` instead."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "zata" },
+]
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+]
+# 刻意不 pin 版本：本包不跟着主包发版，pin 住只会让它越来越旧。
+dependencies = [
+    "kedacode",
+]
+
+# 刻意没有 [project.scripts]。本包必然和 kedacode 出现在同一个环境里（它就是依赖
+# 后者），两边声明同名 console script 就是往同一个 bin 目录写同名文件，谁后装谁覆盖。
+# 代价是 `uv tool install keda-code` 装完拿不到可执行命令——uv 只暴露主包的
+# entry point。这个代价可以接受：本包的职责是占名 + 把人引导到正确的包名，
+# 不是当安装入口。README 里对用户明说了这一点。
+
+[project.urls]
+Homepage = "https://github.com/ZataZhang/keda"
+Source = "https://github.com/ZataZhang/keda"
+
+[tool.setuptools]
+# 本包没有任何 Python 模块，只有元数据和一条依赖。显式置空以关掉 setuptools 的
+# 自动发现，否则它会去扫目录并对"找不到包"报错。
+py-modules = []

@@ -12,7 +12,7 @@
 #   * Detects host OS (macOS / Linux) and Python >= 3.11.
 #   * Prefers `uv` (bootstrap if missing), then `pipx`, then `pip --user`.
 #   * Installs from the GitHub Release tarball by default (--source auto).
-#   * --source pypi installs the published PyPI package `kedacode`（命令名仍是 iar）；
+#   * --source pypi installs the published PyPI package `kedacode`（主命令 iar，别名 kedacode）；
 #     PyPI 不可达或版本不存在时直接报错，绝不静默回退到 tarball。
 #   * Verifies `iar --version` exits 0 and emits a clear PATH hint if needed.
 #   * Refuses to use sudo; never touches system package managers.
@@ -29,9 +29,12 @@ readonly REPO_SLUG="${KEDA_REPO:-ZataZhang/keda}"
 readonly PYPI_INDEX_URL="https://pypi.org/pypi"
 readonly PY_MIN_MAJOR=3
 readonly PY_MIN_MINOR=11
-# 分发包名的单一声明处（PRD FR-1）：PyPI 包名是 kedacode，命令名是 iar。
+# 分发包名的单一声明处（PRD FR-1）：PyPI 包名是 kedacode，主命令名是 iar。
 readonly DEFAULT_TOOL_NAME="kedacode"
 readonly TOOL_BIN_NAME="iar"
+# wheel 实际装出来的全部 console script（pyproject [project.scripts] 的镜像）。
+# 卸载必须逐个清理：只删 iar 会在 ~/.local/bin 里留下指向已删环境的死链接。
+readonly TOOL_BIN_NAMES="iar kedacode"
 
 INSTALL_METHOD="${KEDA_INSTALL_METHOD:-}"
 VERSION_TAG="${KEDA_VERSION:-}"
@@ -56,7 +59,7 @@ Usage: install.sh [options]
   --method uv|pipx|pip  Force a specific installer.
   --source auto|pypi|tarball  Install source (default: auto = GitHub tarball).
   --check             Dry-run; print the plan without writing anything.
-  --uninstall         Remove the keda tool environment and the iar binary.
+  --uninstall         Remove the keda tool environment and the iar/kedacode binaries.
   -h, --help          Show this help.
 
 Environment:
@@ -232,7 +235,7 @@ print_plan() {
   method:    ${INSTALL_METHOD}
   version:   ${VERSION_TAG:-<unset>}
   source:    $(source_label)
-  tool:      ${DEFAULT_TOOL_NAME} (binary: ${TOOL_BIN_NAME})
+  tool:      ${DEFAULT_TOOL_NAME} (binaries: ${TOOL_BIN_NAMES})
 EOF
 }
 
@@ -275,7 +278,7 @@ run_install() {
 
 run_uninstall() {
     if [ "$CHECK_ONLY" -eq 1 ]; then
-        log_info "[check] would remove tool env + iar binary"
+        log_info "[check] would remove tool env + these binaries: ${TOOL_BIN_NAMES}"
         return
     fi
     case "$INSTALL_METHOD" in
@@ -283,7 +286,9 @@ run_uninstall() {
         pipx)  pipx uninstall "$DEFAULT_TOOL_NAME" >/dev/null 2>&1 || true ;;
         pip)   "$PY_BIN" -m pip uninstall -y "$DEFAULT_TOOL_NAME" >/dev/null 2>&1 || true ;;
     esac
-    rm -f "$HOME/.local/bin/${TOOL_BIN_NAME}"
+    for bin_name in $TOOL_BIN_NAMES; do
+        rm -f "$HOME/.local/bin/${bin_name}"
+    done
     log_info "Uninstall complete."
 }
 

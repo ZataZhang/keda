@@ -55,7 +55,10 @@ jobs:
         run: |
           uv tool install --reinstall --editable .
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # 两个 console script 都要验：漏掉别名时 pyproject 的 [project.scripts]
+          # 改动不会在这里冒烟出来。
           iar --version
+          kedacode --version
 
       - name: Exercise iar init in a throwaway git repo
         run: |
@@ -172,6 +175,7 @@ jobs:
           uv tool install --reinstall dist/*.whl
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           iar --version
+          kedacode --version
 
       - name: Install from built wheel (real install, Windows)
         if: runner.os == 'Windows'
@@ -182,6 +186,7 @@ jobs:
           uv tool install --reinstall $wheel_path
           Add-Content $env:GITHUB_PATH (Join-Path $env:USERPROFILE ".local/bin")
           iar --version
+          kedacode --version
 
       - name: Probe iar console (bash)
         if: runner.os != 'Windows'
@@ -286,6 +291,7 @@ jobs:
           uv tool install --reinstall "kedacode==${package_version}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           iar --version
+          kedacode --version
 
       # Windows 档同样要等（原因见上方非 Windows 档的注释）。
       - name: Wait for the version to appear on PyPI (Windows)
@@ -317,6 +323,7 @@ jobs:
           uv tool install --reinstall "kedacode==$package_version"
           Add-Content $env:GITHUB_PATH (Join-Path $env:USERPROFILE ".local/bin")
           iar --version
+          kedacode --version
 
       - name: Probe iar console (bash)
         if: runner.os != 'Windows'

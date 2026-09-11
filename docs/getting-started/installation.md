@@ -1,6 +1,8 @@
 # 一键安装 iar CLI
 
-> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆），安装后的命令名是 `iar`：装 `kedacode`、敲 `iar`。
+> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆）。安装后有两个完全等价的命令：主命令 `iar`，以及与安装名对齐的别名 `kedacode`——装完想不起来敲什么时，直接敲包名也能用。本文其余部分统一写 `iar`。
+>
+> 刻意**不**提供 `keda` 命令：`bin/keda` 会与 CNCF KEDA 将来可能进入 homebrew-core 的同名 formula 抢符号链接，那时用户 `brew install` 会直接失败。
 
 ## 最快路径
 
@@ -36,7 +38,7 @@ iar --version
 | `--source auto\|pypi\|tarball` | 安装来源：`auto`/`tarball` 走 GitHub tarball（默认），`pypi` 走 PyPI。 |
 | `--method uv\|pipx\|pip` | 强制使用指定安装器。 |
 | `--check` | 打印安装计划但不做任何修改。 |
-| `--uninstall` | 卸载 `kedacode` tool 与 `iar` 入口。 |
+| `--uninstall` | 卸载 `kedacode` tool，以及 `iar` / `kedacode` 两个命令入口。 |
 | `KEDA_VERSION` | 等价于 `--version`。 |
 | `KEDA_SOURCE` | 等价于 `--source`。 |
 | `KEDA_PYPI=1` | `--source pypi` 的旧别名（向后兼容保留）。 |
@@ -103,7 +105,7 @@ iar container down
 bash install.sh --uninstall
 ```
 
-会清理 `kedacode` tool 目录与 `~/.local/bin/iar`。
+会清理 `kedacode` tool 目录，以及 `~/.local/bin/` 下的 `iar` 与 `kedacode` 两个入口。
 
 uv / pipx / Homebrew 安装的用户直接用对应工具卸载：
 

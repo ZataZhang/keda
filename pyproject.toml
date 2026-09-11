@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 # 分发包名的单一声明处（PRD FR-1）：PyPI/Homebrew 分发名是 kedacode，
-# CLI 入口名仍是 iar（装 kedacode、敲 iar）。改名时穷举命令见 PRD 7.5 第 3 条。
+# CLI 主命令是 iar，另有同名别名 kedacode（见 [project.scripts]）。
+# 改名时穷举命令见 PRD 7.5 第 3 条。
 name = "kedacode"
 version = "0.2.1"
 description = "Issue Agent Runner (iar) — turn GitHub Issues into a local AI agent queue."
@@ -55,6 +56,11 @@ dependencies = [
 
 [project.scripts]
 iar = "backend.api.cli:main"
+# 装的是 kedacode、敲的是 iar，这个落差让人装完不知道该敲什么，所以给安装名留一个
+# 同功能别名。刻意不提供 keda / keda-code 入口：bin/keda 会和 CNCF KEDA 将来可能
+# 进 homebrew-core 的同名 formula 抢符号链接（那时 brew install 直接失败），
+# 而带连字符的命令名没人会敲。
+kedacode = "backend.api.cli:main"
 
 [project.optional-dependencies]
 llm = [

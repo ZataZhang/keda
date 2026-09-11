@@ -248,10 +248,13 @@ jobs:
               "  def install",
               "    virtualenv_install_with_resources",
               '    bin.install_symlink libexec/"bin/iar"',
+              # kedacode 是 iar 的同功能别名（见 pyproject [project.scripts]）。
+              '    bin.install_symlink libexec/"bin/kedacode"',
               "  end",
               "",
               "  test do",
               '    assert_match version.to_s, shell_output("#{bin}/iar --version")',
+              '    assert_match version.to_s, shell_output("#{bin}/kedacode --version")',
               "  end",
               "end",
           ]
