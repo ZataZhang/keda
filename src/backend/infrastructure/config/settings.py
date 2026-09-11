@@ -600,18 +600,11 @@ _FALLBACK_RUNNER_COMMAND = ["uv", "run", "iar"]
 def _default_runner_command() -> list[str]:
     """解析当前 ``iar`` 可执行文件，作为托管进程的默认启动命令。
 
-    解析顺序：
-
-    1. ``sys.argv[0]``：``iar console`` 等入口直接运行时，argv[0] 就是
-       当前可执行文件的绝对路径，用它可保证托管的 daemon 与当前安装态
-       的 iar 完全同源。用 ``Path.stem`` 而非 ``Path.name`` 比较，
-       Windows 上 argv[0] 是 ``iar.exe``，用 ``name`` 会漏判。
-    2. ``shutil.which("iar")``：由 uvicorn 等其它入口启动后端时，argv[0]
-       不是 iar，此时从 PATH 中解析（安装态与开发 venv 均可见）。
-    3. 兜底 ``["uv", "run", "iar"]``：旧默认值，仅在既非 iar 入口、PATH
-       又找不到 iar 时使用（keda 源码树内的 uv 项目场景）。
-
-    用户在 ``config.toml`` 里显式配置的 ``runner_command`` 始终优先于本默认值。
+    解析顺序：① ``sys.argv[0]``（``iar`` 入口直接运行时即当前可执行文件，
+    保证托管 daemon 与安装态同源；按 ``Path.stem`` 比较，否则 Windows 的
+    ``iar.exe`` 会漏判）；② ``shutil.which("iar")``（uvicorn 等入口启动后端
+    时 argv[0] 不是 iar）；③ 兜底 ``["uv", "run", "iar"]``（keda 源码树场景）。
+    ``config.toml`` 里显式配置的 ``runner_command`` 始终优先。
     """
     argv0 = sys.argv[0] if sys.argv else ""
     if argv0 and Path(argv0).stem == "iar":
@@ -625,14 +618,10 @@ def _default_runner_command() -> list[str]:
 class AgentRunnerConsoleSettings(BaseModel):
     """统一管理终端（运行历史落库与托管进程）配置。
 
-    **这里刻意没有 host 字段。** 面板带写操作而认证是空实现
-    （``api/routes/local_auth.py`` 永远返回已登录），监听地址就是这套系统
-    事实上的唯一访问控制。因此监听地址被硬编码为回环地址
-    （``backend.api.cli_typer_console.CONSOLE_HOST``），既不提供 CLI 参数
-    也不提供配置项——否则一行 ``host = "0.0.0.0"`` 就能把无认证、可写的
-    面板暴露给整个网段。需要远程访问请走 SSH 端口转发。
-
-    历史配置里若残留 ``host`` 键会被 pydantic 按 extra 忽略，不影响加载。
+    **刻意没有 host 字段**：认证是空实现，监听地址即唯一访问控制，因此
+    硬编码在 ``cli_typer_console.CONSOLE_HOST``，不给 CLI 参数也不给配置项
+    （一行 ``host = "0.0.0.0"`` 就能把可写面板暴露给整个网段）。残留的
+    ``host`` 键按 pydantic extra 忽略。远程访问走 SSH 端口转发。
     """
 
     history_db_path: str = "~/.iar/console.db"
