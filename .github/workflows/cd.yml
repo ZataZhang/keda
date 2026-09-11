@@ -1,16 +1,29 @@
-name: Release
+# 上游模板自带的"模板脚手架归档"发布流程：跑 scripts/shared/release.py 打出
+# dist/*.zip 并发 GitHub release。keda 是模板的**消费方**而不是模板本身，这个
+# 归档在这里没有意义。
+#
+# 更要命的是它原本挂在 `push: tags: v*` 上，和 release.yml 撞同一批 tag：
+#   1. 两者共用 concurrency group `release-${{ github.ref }}`，会互相排队
+#      （v0.2.0 首次打 tag 时 release.yml 就被它挡成 pending）；
+#   2. 它的 "Publish GitHub release" 步骤**不带 draft: true**，会直接发布。
+#      而 release.yml 监听 `release: published` 去上传 PyPI —— 等于绕过
+#      "人工检查 draft 产物后再发布" 这道唯一的人工闸门，让不可逆的 PyPI
+#      上传自动发生。
+# 此前它一直因为 max-file-lines 那步失败而没走到发布，属于误打误撞的保险；
+# 那步修好后隐患才暴露出来。
+#
+# 因此在 keda 摘掉 tag 触发，只保留手动 dispatch（真要打模板归档时再说）。
+# 发布链路的唯一入口是 release.yml。
+name: Template Archive (manual only)
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: template-archive-${{ github.ref }}
   cancel-in-progress: false
 
 env:
