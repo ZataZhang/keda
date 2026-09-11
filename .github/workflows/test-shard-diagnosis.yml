@@ -1,0 +1,81 @@
+# 一次性诊断用：把测试按文件切成连续分片并行跑，靠"哪一片没活下来"定位问题范围。
+#
+# 背景：CI 的测试步骤会挂到 runner 失联，而五种取证手段全部失败——step 超时归
+# runner 管（卡死时同归于尽）、job 超时与手动取消都产生 cancelled（日志不落盘）、
+# if: always() 的 artifact 上传在 runner 死掉前根本轮不到。两个本地环境也复现不出
+# （macOS 71 秒、Linux 容器 38 秒跑完全套）。
+#
+# 分片绕开了取证本身：不需要任何日志，存活分片的补集就是嫌疑范围。定位后删掉本文件。
+name: Test shard diagnosis (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  shard:
+    name: shard ${{ matrix.shard }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - run: uv sync --all-extras --all-groups --frozen
+
+      - name: Run shard ${{ matrix.shard }} of 8
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # 连续切块而非跨步取样：怀疑范围在 test_p* 附近，连续块能直接把范围
+          # 读成"从哪个文件到哪个文件"。
+          # 不用 mapfile：那是 bash 4+ 内建，本地 macOS 的 bash 3.2 没有，
+          # 换成行切片后同一段逻辑在两边都能验。文件名无空格，直接词分割即可。
+          files="$(ls tests/test_*.py | sort)"
+          total="$(printf '%s\n' "$files" | wc -l | tr -d ' ')"
+          per=$(( (total + 7) / 8 ))
+          start=$(( (SHARD - 1) * per + 1 ))
+          end=$(( start + per - 1 ))
+          selected="$(printf '%s\n' "$files" | sed -n "${start},${end}p")"
+          if [ -z "$selected" ]; then
+            echo "shard ${SHARD}: 该片无文件，跳过"
+            exit 0
+          fi
+          echo "shard ${SHARD}/8 —— 共 ${total} 个文件，本片取第 ${start}-${end} 个："
+          printf '%s\n' "$selected" | head -1 | sed 's/^/  首: /'
+          printf '%s\n' "$selected" | tail -1 | sed 's/^/  末: /'
+
+          # 必须连 `| tee` 一起复刻 ci.yml 的原命令。有一类挂法只在有管道时出现：
+          # 某个测试留下继承了 stdout 的后台进程，pytest 正常跑完退出后管道写端
+          # 仍被占着，tee 永远等不到 EOF，步骤就卡在"测试已经跑完"之后。少了这根
+          # 管道，八片可能全绿而什么都没测到。
+          cat > /tmp/run-shard.sh <<'SCRIPT'
+          set -o pipefail
+          # SELECTED 按换行分词（IFS 含换行），文件名无空格，故意不加引号。
+          # shellcheck disable=SC2086
+          uv run pytest $SELECTED -v -m "not expensive" --no-testmon --timeout=120 2>&1 | tee /tmp/shard.log
+          SCRIPT
+
+          # 自己收尾，不用 GitHub 的超时：step 级归 runner 管（卡死时失效）、job 级
+          # 和手动取消都产生 cancelled 而**取消的日志一律不落盘**——五次取证失败全
+          # 栽在这上面。timeout 默认把命令放进独立进程组并整组发信号，连 tee 和残留
+          # 子进程一起收掉，所以这一步必定结束、日志必定保留。
+          export SELECTED="$selected"
+          set +e
+          timeout --signal=TERM --kill-after=30 600 bash /tmp/run-shard.sh
+          rc=$?
+          set -e
+          echo "=== shard ${SHARD} exit=${rc}（124 = 本片挂住，就是它）==="
+          echo "=== 收尾后仍存活的进程（挂住时这里会点名元凶）==="
+          ps -eo pid,ppid,pgid,etime,args 2>/dev/null | grep -v -e grep -e 'ps -eo' | tail -30 || true
+          exit "$rc"
