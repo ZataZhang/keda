@@ -254,6 +254,27 @@ jobs:
         with:
           version: "latest"
 
+      # 本 job 和 release.yml 的 publish-pypi 由同一个 release: published 事件
+      # 触发，分属两个 workflow、没有顺序保证——v0.2.0 实测本 job 03:19:00 启动、
+      # 上传约 03:20 才完成，于是三个平台全部 404。即便加了顺序依赖，PyPI 上传
+      # 后索引也有秒级传播延迟。所以这里先有界轮询等版本出现，再安装。
+      - name: Wait for the version to appear on PyPI
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          PUBLISHED_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          package_version="${PUBLISHED_VERSION#v}"
+          for attempt in $(seq 1 40); do
+            if curl -fsS -o /dev/null "https://pypi.org/pypi/kedacode/${package_version}/json"; then
+              echo "kedacode ${package_version} is on PyPI (attempt ${attempt})"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::kedacode ${package_version} 在 10 分钟内没有出现在 PyPI 上；先查 release.yml 的 publish-pypi job。"
+          exit 1
+
       - name: Install kedacode from public PyPI (pinned to the published version)
         if: runner.os != 'Windows'
         shell: bash
@@ -265,6 +286,26 @@ jobs:
           uv tool install --reinstall "kedacode==${package_version}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           iar --version
+
+      # Windows 档同样要等（原因见上方非 Windows 档的注释）。
+      - name: Wait for the version to appear on PyPI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PUBLISHED_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          $package_version = $env:PUBLISHED_VERSION -replace '^v', ''
+          for ($attempt = 1; $attempt -le 40; $attempt++) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri "https://pypi.org/pypi/kedacode/$package_version/json" -TimeoutSec 15 | Out-Null
+              Write-Host "kedacode $package_version is on PyPI (attempt $attempt)"
+              exit 0
+            } catch {
+              Start-Sleep -Seconds 15
+            }
+          }
+          Write-Host "::error::kedacode $package_version did not appear on PyPI within 10 minutes; check publish-pypi in release.yml."
+          exit 1
 
       - name: Install kedacode from public PyPI (Windows)
         if: runner.os == 'Windows'
