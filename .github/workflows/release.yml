@@ -147,7 +147,17 @@ jobs:
 
   update-tap:
     name: Update Homebrew tap formula
-    if: github.event_name == 'release'
+    # 也允许手动触发：PyPI 已上传但 tap 更新失败是可恢复状态，不该逼人重新
+    # 发布一次 release 才能补救（重跑旧 run 用的是旧 workflow 文件，改了不生效）。
+    #
+    # 必须写 always()：手动触发时 publish-pypi 会被自身的 if 跳过，而不带状态
+    # 函数的自定义 if 仍隐含要求 needs 成功，skipped 不算成功，本 job 会被一起
+    # 跳掉。加 always() 后改由下面的条件自己判定：release 路径要求 publish-pypi
+    # 确实成功，手动路径不看它。
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'release' && needs.publish-pypi.result == 'success'))
     needs: publish-pypi
     runs-on: ubuntu-latest
     permissions:
@@ -168,7 +178,18 @@ jobs:
         uses: Homebrew/actions/setup-homebrew@master
 
       - name: Resolve published version
-        run: echo "KEDACODE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        # release 事件下 GITHUB_REF_NAME 就是 tag；手动触发时取 inputs.tag，
+        # 没给则回落到 PyPI 上的最新版本（补救场景通常就是补最新那次）。
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            resolved_version="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            resolved_version="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
+          else
+            resolved_version="$(curl -fsSL https://pypi.org/pypi/kedacode/json | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])')"
+          fi
+          echo "resolved version: ${resolved_version}"
+          echo "KEDACODE_VERSION=${resolved_version}" >> "$GITHUB_ENV"
 
       - name: Clone tap repository (first run creates main on the empty repo)
         env:
@@ -253,8 +274,12 @@ jobs:
           # 注意 brew tap 是 clone：改写发生在 Homebrew 自己的 tap 目录里，
           # 必须把结果拷回 ${RUNNER_TEMP}/tap，否则推出去的 formula 没有任何
           # resource —— 用户装得上但一跑就崩（PRD rv-3 要防的正是这个）。
+          # --ignore-main-package-cooldown：Homebrew 默认只认上传超过 24 小时的
+          # 包（--uploaded-prior-to=P1D 供应链防护），而这个 job 恰恰在发布后
+          # 几分钟内跑，必然解析不到 kedacode 自己。该开关只对 formula 自身放行，
+          # 依赖仍受 cooldown 保护；对自建 tap 有效（仅 official tap 会忽略它）。
           brew tap ZataZhang/tap "${RUNNER_TEMP}/tap"
-          brew update-python-resources ZataZhang/tap/kedacode
+          brew update-python-resources --ignore-main-package-cooldown ZataZhang/tap/kedacode
           brew_tap_dir="$(brew --repository ZataZhang/tap)"
           cp "${brew_tap_dir}/Formula/kedacode.rb" "${RUNNER_TEMP}/tap/Formula/kedacode.rb"
 
