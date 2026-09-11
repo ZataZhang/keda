@@ -80,7 +80,14 @@ jobs:
       # 它的 xdist 并行。
       - name: Run local test suite
         timeout-minutes: 12
-        run: uv run pytest tests/ -v -m "not expensive" --no-testmon --durations=25
+        # --timeout 是这里唯一真正能拿到证据的机制。前两次尝试都失败了：
+        # step 级 timeout-minutes 归 runner 进程管，runner 卡死时一起失效；
+        # job 级 timeout-minutes 由服务端执行、确实会回收，但产生的 conclusion
+        # 是 **cancelled**，而**取消的 job 日志一律不落盘**（实测两次都只拿到
+        # BlobNotFound）。pytest-timeout 不依赖 GitHub 的任何超时：挂住的用例
+        # 以 traceback 失败并点名，整个 run 正常结束，日志自然保留。
+        # 120 秒对单个用例极宽松——整套在本地只要 71 秒。
+        run: uv run pytest tests/ -v -m "not expensive" --no-testmon --durations=25 --timeout=120
 
       - name: Build documentation
         run: uv run mkdocs build --strict
