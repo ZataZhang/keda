@@ -402,7 +402,13 @@ class TimeoutSettings(BaseSettings):
 
 
 class AgentRunnerLabelSettings(BaseModel):
-    """GitHub labels used as runner queue state."""
+    """GitHub labels used as runner queue state.
+
+    ``codex`` / ``claude`` / ``kimi`` 是旧版 `[agent_runner.labels]` 的
+    agent 路由键，作为**兼容覆盖来源**保留：``None`` 表示未覆盖，
+    路由标签由 agent 注册表（``[agent_runner.agents.<name>].label``）
+    提供（FR-12：既有仓库的这三个键继续生效，优先级与今天一致）。
+    """
 
     ready: str = "agent/ready"
     running: str = "agent/running"
@@ -415,20 +421,57 @@ class AgentRunnerLabelSettings(BaseModel):
     validation_passed: str = "validation/passed"
     verifier_passed: str = "validation/verifier-passed"
     group_prefix: str = "task-group/"
-    codex: str = "agent/codex"
-    claude: str = "agent/claude"
-    kimi: str = "agent/kimi"
+    codex: str | None = None
+    claude: str | None = None
+    kimi: str | None = None
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
 
-    @property
-    def agent_labels(self) -> dict[str, str]:
-        """Agent routing labels as a lookup table."""
-        return {
-            "codex": self.codex,
-            "claude": self.claude,
-            "kimi": self.kimi,
-        }
+    def legacy_agent_label_overrides(self) -> dict[str, str]:
+        """返回旧版三个 agent 键中**显式设置**的标签覆盖（供注册表合并）。"""
+        overrides: dict[str, str] = {}
+        for agent_name, override_label in (
+            ("codex", self.codex),
+            ("claude", self.claude),
+            ("kimi", self.kimi),
+        ):
+            if override_label is not None:
+                overrides[agent_name] = override_label
+        return overrides
+
+
+class AgentRunnerAgentProfileSettings(BaseModel):
+    """`[agent_runner.agents.<name>.profiles.<profile>]` 的稀疏覆盖。
+
+    全部字段可选：未设置的字段回落到内置默认 spec（对既有 agent）
+    或触发配置校验错误（对全新 agent 缺关键字段时）。
+    """
+
+    args: list[str] | None = None
+    prompt_flag: str | None = None
+    prompt_delivery: str | None = None
+    output_protocol: str | None = None
+    tail_args: list[str] | None = None
+    expand: list[str] | None = None
+    read_only: bool | None = None
+
+
+class AgentRunnerAgentSettings(BaseModel):
+    """`[agent_runner.agents.<name>]` 注册块。
+
+    覆盖既有 agent 时全部字段可选（逐字段回落内置默认）；注册全新
+    agent 时 ``bin`` 与 ``label`` 必填，四种用途 profile 至少声明一种。
+    """
+
+    bin: str | None = None
+    label: str | None = None
+    label_color: str | None = None
+    label_description: str | None = None
+    auth_home: str | None = None
+    auth_include: list[str] | None = None
+    auth_exclude: list[str] | None = None
+    project_skills_dir: str | None = None
+    profiles: dict[str, AgentRunnerAgentProfileSettings] = Field(default_factory=dict)
 
 
 class AgentRunnerGitSettings(BaseModel):
@@ -926,6 +969,7 @@ class _AgentRunnerRepositoryOverrideSettings(BaseModel):
     interactive_decision: AgentRunnerInteractiveDecisionSettings | None = None
     deliberation: AgentRunnerDeliberationSettings | None = None
     repl: AgentRunnerReplSettings | None = None
+    agents: dict[str, AgentRunnerAgentSettings] = Field(default_factory=dict)
 
 
 class AgentRunnerRepositorySettings(_AgentRunnerRepositoryOverrideSettings):
@@ -1011,6 +1055,7 @@ def load_agent_runner_local_settings(
         display_name=repository_metadata.display_name,
         github_repo=repository_metadata.github_repo,
         labels=local_settings.labels,
+        agents=local_settings.agents,
         git=local_settings.git,
         worktree=local_settings.worktree,
         runner=local_settings.runner,
@@ -1063,6 +1108,10 @@ class AgentRunnerSettings(BaseSettings):
     )
     repl: AgentRunnerReplSettings = Field(default_factory=AgentRunnerReplSettings)
     repositories: dict[str, AgentRunnerRepositorySettings] = Field(default_factory=dict)
+    # agent 声明式注册表的配置覆盖层：[agent_runner.agents.<name>] 段。
+    # 内置默认在 core.shared.models.agent_spec.BUILTIN_AGENT_SPECS；
+    # 此处只存显式声明，逐字段覆盖内置值（见 factory_config_builder）。
+    agents: dict[str, AgentRunnerAgentSettings] = Field(default_factory=dict)
 
     @classmethod
     def settings_customise_sources(

@@ -57,6 +57,7 @@ def test_run_agent_until_committed_enters_recovery_after_timeout(
             capture_output=True,
             input_text=None,
             label=None,
+            output_protocol=None,
         ):
             self.attempts += 1
             raise subprocess.TimeoutExpired(cmd=list(command), timeout=timeout)
@@ -174,6 +175,7 @@ def test_run_agent_until_committed_calls_fix_agent_before_recovery(
             capture_output=True,
             input_text=None,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -287,6 +289,7 @@ def test_run_agent_until_committed_skips_fix_agent_when_disabled(
             capture_output=True,
             input_text=None,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -371,6 +374,7 @@ def test_run_agent_until_committed_recovery_uses_recovery_timeout_seconds(
             capture_output=True,
             input_text=None,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))

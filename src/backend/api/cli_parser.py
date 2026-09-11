@@ -3,11 +3,47 @@
 This module builds the argparse parser used by both the direct
 ``backend.api.cli`` entrypoint and the Typer front-end in
 ``backend.api.cli_typer``.
+
+``--agent`` 的合法值来自 agent 注册表（``[agent_runner.agents.*]`` 配置
+段 + 内置默认），不再写死 agent 名；配置加载失败时回落内置默认，
+保证 ``--help`` 等只读路径始终可用。
 """
 
 from __future__ import annotations
 
 import argparse
+
+
+def registered_agent_names() -> tuple[str, ...]:
+    """按注册顺序返回全部已注册 agent 名（CLI choices 的唯一来源）。
+
+    读取全局配置（含 ``[agent_runner.agents.*]`` 注册块）；配置加载
+    失败时回落内置注册表——choices 只影响输入校验，真正的配置错误
+    会在命令执行时原样抛出。
+    """
+    try:
+        from backend.engines.agent_runner.factories import (
+            build_app_config_from_settings,
+            load_fresh_agent_runner_settings,
+        )
+        from backend.core.use_cases.agent_invocation import resolve_registered_agents
+
+        return tuple(
+            resolve_registered_agents(
+                build_app_config_from_settings(load_fresh_agent_runner_settings())
+            )
+        )
+    except Exception:  # noqa: BLE001 - choices 必须在任何配置状态下可用
+        from backend.core.shared.models.agent_spec import builtin_agent_names
+
+        return tuple(builtin_agent_names())
+
+
+def _agent_choices_with(
+    *, prefix: tuple[str, ...] = (), suffix: tuple[str, ...] = ()
+) -> tuple[str, ...]:
+    """组合路由别名（auto / none 等）与注册表 agent 名的 choices 元组。"""
+    return (*prefix, *registered_agent_names(), *suffix)
 
 
 def add_common_options(parser: argparse.ArgumentParser) -> None:
@@ -91,7 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     issue_create_parser.add_argument(
         "--agent",
-        choices=("auto", "codex", "claude", "kimi", "none"),
+        choices=_agent_choices_with(prefix=("auto",), suffix=("none",)),
         default="auto",
         help="Optional agent routing label to add to the Issue.",
     )
@@ -170,7 +206,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--dry-run", action="store_true")
-    run_parser.add_argument("--agent", choices=("auto", "codex", "claude", "kimi"), default="auto")
+    run_parser.add_argument(
+        "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
+    )
     run_parser.add_argument("--max-issues", type=int)
     add_common_options(run_parser)
     add_all_repositories_option(run_parser)
@@ -178,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_run_options = argparse.ArgumentParser(add_help=False)
     daemon_run_options.add_argument("--interval", type=int, default=None)
     daemon_run_options.add_argument(
-        "--agent", choices=("auto", "codex", "claude", "kimi"), default="auto"
+        "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
     daemon_run_options.add_argument("--max-issues", type=int)
     daemon_run_options.add_argument(
@@ -240,7 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser = subparsers.add_parser("review")
     review_parser.add_argument("--dry-run", action="store_true")
     review_parser.add_argument(
-        "--agent", choices=("auto", "codex", "claude", "kimi"), default="auto"
+        "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
     review_parser.add_argument("--max-issues", type=int)
     add_common_options(review_parser)
@@ -255,7 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_daemon_parser.add_argument("--interval", type=int, default=None)
     review_daemon_parser.add_argument(
-        "--agent", choices=("auto", "codex", "claude", "kimi"), default="auto"
+        "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
     review_daemon_parser.add_argument("--max-issues", type=int)
     add_common_options(review_daemon_parser)
@@ -290,7 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     blocked_continue_parser.add_argument(
         "--agent",
-        choices=("auto", "codex", "claude", "kimi"),
+        choices=_agent_choices_with(prefix=("auto",)),
         default="auto",
         help="Agent runner to use.",
     )
@@ -302,7 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser.add_argument("prompt", help="Natural language request.")
     ask_parser.add_argument(
         "--agent",
-        choices=("auto", "codex", "claude", "kimi"),
+        choices=_agent_choices_with(prefix=("auto",)),
         default="auto",
         help="Planner agent to use.",
     )
@@ -334,7 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     repl_parser.add_argument(
         "--agent",
-        choices=("codex", "claude", "kimi"),
+        choices=_agent_choices_with(),
         default=None,
         help="Override the REPL agent (defaults to [agent_runner.repl].default_agent).",
     )
@@ -367,6 +405,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Return non-zero exit code if any agent fails.",
     )
     add_common_options(deliberate_parser)
+
+    agent_parser = subparsers.add_parser(
+        "agent", help="Inspect registered agents and output protocols (read-only)."
+    )
+    agent_subparsers = agent_parser.add_subparsers(dest="agent_command", required=True)
+    agent_list_parser = agent_subparsers.add_parser(
+        "list", help="List registered agents and their profiles."
+    )
+    agent_list_parser.set_defaults(command="agent list")
+    agent_doctor_parser = agent_subparsers.add_parser(
+        "doctor",
+        help="Parse and print each profile's full argv for the given agents.",
+    )
+    agent_doctor_parser.set_defaults(command="agent doctor")
+    agent_doctor_parser.add_argument(
+        "agent_names",
+        nargs="*",
+        choices=registered_agent_names(),
+        help="One or more registered agent names (omit with --protocols).",
+    )
+    agent_doctor_parser.add_argument(
+        "--all-profiles",
+        action="store_true",
+        help="Print every declared profile instead of only the run profile.",
+    )
+    agent_doctor_parser.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Emit stable sorted JSON (agent / profile / argv / prompt_delivery).",
+    )
+    agent_doctor_parser.add_argument(
+        "--protocols",
+        action="store_true",
+        help="List all registered output protocol ids and exit.",
+    )
+    agent_doctor_parser.add_argument(
+        "--prompt",
+        default="golden-prompt",
+        help="Sentinel prompt used when expanding argv (default: golden-prompt).",
+    )
 
     worktree_parser = subparsers.add_parser(
         "worktree",

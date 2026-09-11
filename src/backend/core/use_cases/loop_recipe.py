@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.core.shared.models.loop import (
     LoopRecipe,
     LoopSchedule,
@@ -144,7 +145,8 @@ def _coerce_yaml_value(text: str) -> Any:
 
 _REQUIRED_RECIPE_FIELDS: tuple[str, ...] = ("id", "schedule", "repo_id")
 _VALID_ISSUE_TYPES: frozenset[str] = frozenset({"feature", "refactor", "bug"})
-_VALID_AGENTS: frozenset[str] = frozenset({"auto", "codex", "claude", "kimi"})
+# 合法 agent 名由 agent 注册表派生；"auto" 是显式的路由别名。
+_VALID_AGENTS: frozenset[str] = frozenset({"auto", *BUILTIN_AGENT_SPECS})
 
 
 def _validate_recipe_fields(data: dict[str, Any]) -> None:

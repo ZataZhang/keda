@@ -539,6 +539,7 @@ def test_edit_issue_body_writes_via_file(tmp_path: Path) -> None:
             timeout=None,
             capture_output=True,
             input_text=None,
+            output_protocol=None,
         ):
             self.calls.append(list(command))
             if "--body-file" in command:

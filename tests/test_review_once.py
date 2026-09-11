@@ -888,6 +888,7 @@ def test_review_once_auto_stashes_dirty_worktree_and_approves() -> None:
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))

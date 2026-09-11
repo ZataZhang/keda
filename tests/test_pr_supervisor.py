@@ -804,6 +804,7 @@ def test_run_post_pr_supervisor_cycle_parses_action() -> None:
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             if tuple(command)[:1] == ("codex",):
                 self.calls.append(list(command))
@@ -864,7 +865,17 @@ class _CrashingAgentRunner(FakeProcessRunner):
         self.success_stdout = success_stdout
         self.agent_attempts = 0
 
-    def run(self, command, *, cwd, check=True, timeout=None, capture_output=True, label=None):
+    def run(
+        self,
+        command,
+        *,
+        cwd,
+        check=True,
+        timeout=None,
+        capture_output=True,
+        label=None,
+        output_protocol=None,
+    ):
         if tuple(command)[:1] == ("codex",):
             self.calls.append(list(command))
             self.agent_attempts += 1
@@ -1388,6 +1399,7 @@ def test_dirty_worktree_before_supervisor_auto_stash_and_approve(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -1483,6 +1495,7 @@ def test_dirty_worktree_after_approve_blocks_review(tmp_path: Path) -> None:
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -1568,6 +1581,7 @@ def test_supervisor_loop_waits_for_pending_checks_once(tmp_path: Path) -> None:
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -1656,6 +1670,7 @@ def test_execute_rebase_allows_detached_head_when_active_rebase_target_matches(
             timeout=None,
             capture_output=True,
             input_text=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "branch", "--show-current"):
@@ -1814,6 +1829,7 @@ def test_execute_rebase_rejects_mismatched_active_rebase_target(
             timeout=None,
             capture_output=True,
             input_text=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "branch", "--show-current"):
@@ -1947,6 +1963,7 @@ def test_execute_rebase_rejects_unknown_active_rebase_target(
             timeout=None,
             capture_output=True,
             input_text=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "branch", "--show-current"):
@@ -2344,6 +2361,7 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
             timeout=None,
             capture_output=True,
             input_text=None,
+            output_protocol=None,
         ):
             cmd = list(command)
             if (

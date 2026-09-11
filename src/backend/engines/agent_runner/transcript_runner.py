@@ -3,25 +3,26 @@
 This module provides the subprocess-based transcript runner used to execute
 agent commands during deliberation sessions and stream their output back to
 the caller.
+
+命令与输出协议完全由声明式注册表决定：
+:func:`build_agent_invocation`（profile ``"deliberate"``）组装 argv，
+注入的协议注册表解析 ``output_protocol`` 得到中继实现——本模块不再
+写死任何 agent 名或命令分支。
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
-import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from backend.core.shared.models.agent_deliberation import DeliberationEvent
-from backend.core.shared.models.agent_runner import CommandResult
-from backend.infrastructure.logging.logger import logger
-from backend.infrastructure.process_runner import (
-    SubprocessRunner,
-    _format_timestamped_line,
-    run_filtered_claude_stream,
-    should_filter_claude_stream,
+from backend.core.shared.interfaces.agent_output_protocol import (
+    IAgentOutputProtocolRegistry,
+    OutputRelayRequest,
 )
+from backend.core.shared.models.agent_deliberation import DeliberationEvent
+from backend.core.shared.models.agent_runner import AppConfig, CommandResult
+from backend.core.shared.models.agent_spec import AGENT_PROFILE_DELIBERATE
+from backend.core.use_cases.agent_invocation import build_agent_invocation
 
 
 class SubprocessTranscriptRunner:
@@ -30,8 +31,14 @@ class SubprocessTranscriptRunner:
     Implements ``IAgentTranscriptRunner`` via duck typing.
     """
 
-    def __init__(self, process_runner: SubprocessRunner) -> None:
-        self._process_runner = process_runner
+    def __init__(
+        self,
+        config: AppConfig,
+        protocol_registry: IAgentOutputProtocolRegistry,
+    ) -> None:
+        """注入应用配置与输出协议注册表（组装根负责构造）。"""
+        self._config = config
+        self._protocol_registry = protocol_registry
 
     def run(
         self,
@@ -53,185 +60,47 @@ class SubprocessTranscriptRunner:
         to it for live display only, without being collected into the
         transcript.
         """
-        command = _build_deliberation_command(agent_name, prompt, cwd)
         _ = event_sink
-        if should_filter_claude_stream(command):
-            # Pass the prompt via stdin to avoid "Argument list too long"
-            # when the transcript grows across rounds.
-            command_no_prompt = [arg for arg in command if arg != "-p"]
-            if command_no_prompt and command_no_prompt[-1] == prompt:
-                command_no_prompt = command_no_prompt[:-1]
-            completed = run_filtered_claude_stream(
-                command_no_prompt,
-                cwd=cwd,
-                timeout=None,
-                collect_stdout=True,
-                prompt_text=prompt,
-                output_sink=output_sink,
-                display_sink=display_sink,
-            )
-            return CommandResult(
-                command=tuple(command_no_prompt),
-                return_code=completed.returncode,
-                stdout=completed.stdout,
-                stderr="",
-            )
-        if agent_name in ("kimi", "codex"):
-            # Pass the prompt via stdin to avoid "Argument list too long"
-            # when the transcript grows across rounds.
-            return _run_agent_with_stdin_prompt(
-                command, prompt, cwd, output_sink=output_sink, display_sink=display_sink
-            )
-        process = subprocess.Popen(
-            list(command),
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
-        return_code, stdout_text = _relay_process_stdout(
-            process, output_sink=output_sink, display_sink=display_sink
-        )
-        return CommandResult(
-            command=tuple(command),
-            return_code=return_code,
-            stdout=stdout_text,
-            stderr="",
-        )
-
-
-def _run_agent_with_stdin_prompt(
-    command: list[str],
-    prompt: str,
-    cwd: Path,
-    output_sink: "Callable[[str], None] | None" = None,
-    display_sink: "Callable[[str], None] | None" = None,
-) -> CommandResult:
-    """Run an agent subprocess, passing the prompt via stdin."""
-    process = subprocess.Popen(
-        list(command),
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        stdin=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        bufsize=1,
-    )
-
-    def _write_stdin() -> None:
-        if process.stdin is not None:
-            try:
-                process.stdin.write(prompt)
-            except BrokenPipeError:
-                pass
-            process.stdin.close()
-
-    threading.Thread(target=_write_stdin, daemon=True).start()
-    return_code, stdout_text = _relay_process_stdout(
-        process, output_sink=output_sink, display_sink=display_sink
-    )
-    return CommandResult(
-        command=tuple(command),
-        return_code=return_code,
-        stdout=stdout_text,
-        stderr="",
-    )
-
-
-def _pump_stderr(
-    process: subprocess.Popen[str],
-    display_sink: "Callable[[str], None] | None",
-) -> None:
-    """Drain subprocess stderr, routing each line to the display sink.
-
-    Agents such as ``codex`` write their human-readable reasoning/tool log
-    to stderr. When a ``display_sink`` is present it shows those lines live
-    without collecting them into the transcript. With no sink we preserve
-    the prior behaviour of echoing stderr to the terminal.
-    """
-    if process.stderr is None:
-        return
-    for line in process.stderr:
-        if display_sink is not None:
-            display_sink(line)
-        else:
-            print(_format_timestamped_line(line), end="", file=sys.stderr)
-
-
-def _relay_process_stdout(
-    process: subprocess.Popen[str],
-    output_sink: "Callable[[str], None] | None" = None,
-    display_sink: "Callable[[str], None] | None" = None,
-) -> tuple[int, str]:
-    """Relay subprocess stdout to terminal and logger.
-
-    Stderr is drained on a background thread so the agent's reasoning/tool
-    log reaches ``display_sink`` (live view) without blocking stdout or
-    leaking raw onto the terminal and corrupting the live region.
-    """
-    stderr_thread: threading.Thread | None = None
-    if process.stderr is not None:
-        stderr_thread = threading.Thread(
-            target=_pump_stderr, args=(process, display_sink), daemon=True
-        )
-        stderr_thread.start()
-    stdout_lines: list[str] = []
-    try:
-        if process.stdout is not None:
-            for line in process.stdout:
-                stdout_lines.append(line)
-                if output_sink is not None:
-                    # The sink drives the live view and the workspace file;
-                    # avoid writing to stdout (would corrupt the live region).
-                    output_sink(line)
-                else:
-                    logger.info("%s", line.rstrip("\n"))
-                    timestamped = _format_timestamped_line(line)
-                    print(timestamped, end="")
-        return_code = process.wait(timeout=None)
-    except Exception:
-        process.kill()
-        process.wait()
-        raise
-    if stderr_thread is not None:
-        stderr_thread.join(timeout=5)
-    return return_code, "".join(stdout_lines)
-
-
-def _build_deliberation_command(agent_name: str, prompt: str, cwd: Path) -> list[str]:
-    if agent_name == "claude":
-        return [
-            "claude",
-            "--dangerously-skip-permissions",
-            "--verbose",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--include-partial-messages",
+        invocation = build_agent_invocation(
+            agent_name,
+            AGENT_PROFILE_DELIBERATE,
             prompt,
-        ]
-    if agent_name == "kimi":
-        return ["kimi", "--input-format", "text"]
-    return [
-        "codex",
-        "--cd",
-        str(cwd.resolve()),
-        "--sandbox",
-        "read-only",
-        "--ask-for-approval",
-        "never",
-        "exec",
-    ]
+            cwd,
+            self._config,
+        )
+        protocol = self._protocol_registry.resolve(invocation.output_protocol)
+        # 提示词全文始终交给协议：流式协议（claude-stream-json）会从 argv
+        # 剥离后改经 stdin 投递，避免 transcript 增长后 ``Argument list
+        # too long``；stdin 投递的 profile 由协议写 stdin；argv_tail 的
+        # plain profile 则提示词留在 argv、不写 stdin——三种情况都由
+        # ``prompt_delivery`` 声明驱动，协议实现不做猜测。
+        request = OutputRelayRequest(
+            argv=invocation.argv,
+            cwd=cwd,
+            prompt_text=prompt,
+            prompt_delivery=invocation.prompt_delivery,
+            collect_stdout=True,
+            output_sink=output_sink,
+            display_sink=display_sink,
+        )
+        return protocol.relay(request)
 
 
 def create_transcript_runner(
-    process_runner: SubprocessRunner | None = None,
+    config: AppConfig | None = None,
+    protocol_registry: IAgentOutputProtocolRegistry | None = None,
 ) -> SubprocessTranscriptRunner:
-    """Create a transcript runner instance."""
-    return SubprocessTranscriptRunner(process_runner or SubprocessRunner())
+    """Create a transcript runner instance.
+
+    Args:
+        config: 应用配置；``None`` 时使用内置默认注册表（无仓库级覆盖）。
+        protocol_registry: 输出协议注册表；``None`` 时使用进程级单例。
+    """
+    from backend.engines.agent_runner.output_protocols import (
+        get_output_protocol_registry,
+    )
+
+    return SubprocessTranscriptRunner(
+        config or AppConfig(),
+        protocol_registry or get_output_protocol_registry(),
+    )

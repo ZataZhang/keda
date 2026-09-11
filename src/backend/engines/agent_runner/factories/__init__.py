@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from backend.core.shared.interfaces.agent_output_view import IAgentOutputView
+from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.interfaces.runner_console import (
     IRoadmapStore,
     IRepositoryRegistryEditor,
@@ -262,9 +263,25 @@ def resolve_console_spawn_cwd(
     raise ValueError(f"Repository '{repo_id}' is not an enabled registry target.")
 
 
-def create_process_runner() -> SubprocessRunner:
-    """Create a new subprocess runner instance."""
-    return SubprocessRunner()
+def create_process_runner() -> IProcessRunner:
+    """Create the run-path process runner.
+
+    返回协议路由执行器：非 plain 输出协议经注册表解析为协议实现，
+    ``plain`` / 通用命令委托给内层 ``SubprocessRunner``。返回类型是
+    ``IProcessRunner`` 端口，调用方不应依赖 ``SubprocessRunner`` 的
+    具体类型。
+    """
+    from backend.engines.agent_runner.output_protocols import (
+        get_output_protocol_registry,
+    )
+    from backend.engines.agent_runner.protocol_routing_runner import (
+        ProtocolRoutingProcessRunner,
+    )
+
+    return ProtocolRoutingProcessRunner(
+        SubprocessRunner(),
+        get_output_protocol_registry(),
+    )
 
 
 def build_deliberation_config_from_settings(

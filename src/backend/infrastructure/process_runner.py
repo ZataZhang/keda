@@ -16,6 +16,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from backend.core.shared.interfaces.agent_output_protocol import (
+    CLAUDE_STREAM_JSON_PROTOCOL_ID,
+    PLAIN_PROTOCOL_ID,
+)
 from backend.infrastructure.logging.logger import logger
 
 try:
@@ -137,6 +141,7 @@ class CommandResult:
     stdout: str
     stderr: str
     duration_seconds: float = 0.0
+    output_protocol: str = PLAIN_PROTOCOL_ID
 
 
 class CommandFailedError(subprocess.CalledProcessError):
@@ -176,6 +181,7 @@ class SubprocessRunner:
         input_text: str | None = None,
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
+        output_protocol: str | None = None,
     ) -> CommandResult:
         """Run a subprocess and capture output.
 
@@ -195,9 +201,25 @@ class SubprocessRunner:
                 non-captured command), rendered text is routed to the sink
                 instead of the shared stdout, so parallel Issue runs can keep
                 each agent's output in its own panel/log without interleaving.
+            output_protocol: agent 调用路径专用的输出协议 id。非 None 的
+                流式协议（当前 ``claude-stream-json``）路由到对应的流式
+                渲染执行器，取代旧版对命令行内容的嗅探；``None`` /
+                ``"plain"`` 走通用路径。
         """
         started_mono: float = time.monotonic()
-        if input_text is not None:
+        if output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID:
+            completed = run_filtered_claude_stream(
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                inactivity_timeout=inactivity_timeout,
+                collect_stdout=True,
+                label=label,
+                output_sink=output_sink,
+            )
+            stdout = completed.stdout
+            stderr = completed.stderr
+        elif input_text is not None:
             completed = subprocess.run(
                 list(command),
                 cwd=cwd,
@@ -208,18 +230,6 @@ class SubprocessRunner:
                 errors="replace",
                 timeout=timeout,
                 input=input_text,
-            )
-            stdout = completed.stdout
-            stderr = completed.stderr
-        elif should_filter_claude_stream(command):
-            completed = run_filtered_claude_stream(
-                command,
-                cwd=cwd,
-                timeout=timeout,
-                inactivity_timeout=inactivity_timeout,
-                collect_stdout=True,
-                label=label,
-                output_sink=output_sink,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -331,6 +341,7 @@ class SubprocessRunner:
             stdout=stdout,
             stderr=stderr,
             duration_seconds=round(time.monotonic() - started_mono, 3),
+            output_protocol=output_protocol or PLAIN_PROTOCOL_ID,
         )
         if check and completed.returncode != 0:
             raise CommandFailedError(
@@ -622,17 +633,6 @@ class ClaudeStreamRenderer:
             return ""
         prefix = "[agent error] " if is_error else "[agent result] "
         return f"\n{prefix}{result_text}\n"
-
-
-def should_filter_claude_stream(command: Sequence[str]) -> bool:
-    """Return whether this command is Claude stream-json output."""
-    command_parts = list(command)
-    return (
-        bool(command_parts)
-        and command_parts[0] == "claude"
-        and "--output-format" in command_parts
-        and "stream-json" in command_parts
-    )
 
 
 def run_filtered_claude_stream(

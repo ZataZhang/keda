@@ -111,7 +111,164 @@ minio_seconds = 60
 [agent_runner]
 max_issues = 1
 
+# =============================================================================
+# Agent 注册表（声明式 agent 调用形态）
+# =============================================================================
+# 每个 agent 的全部调用差异沉淀为一段显式数据：可执行文件、路由标签、
+# 容器认证目录、项目级 skills 目录，以及四种用途（run / deliberate /
+# generate / repl）各自的 argv 片段、提示词投递方式与输出协议。
+#
+# 本文件内的四个注册块与代码内置默认（BUILTIN_AGENT_SPECS）等价，写出仅为
+# 便于发现与覆盖：未写出的字段逐字段回落内置默认。argv 元素是字面量，
+# 不做 shell 展开；占位符闭集：{cwd} / {prompt} / {worktree}；
+# 展开器闭集：git_writable_roots（写法 "git_writable_roots:--add-dir"）。
+#
+# 接入全新 agent 的最小步骤：写一段注册块（bin 与 label 必填，四种用途
+# 至少声明一种），然后运行 `iar agent doctor <name>` 自检。
+# 完整字段说明见 docs/guides/configuration.md。
+
+[agent_runner.agents.codex]
+bin = "codex"
+label = "agent/codex"
+label_color = "5319E7"
+label_description = "Use Codex for local runner execution."
+auth_home = "~/.codex"
+auth_include = ["auth.json", "skills"]
+auth_exclude = ["sessions", "cache", ".tmp", ".codex-global-state.json", "log", "logs", "history.jsonl"]
+project_skills_dir = ".codex/skills"
+
+[agent_runner.agents.codex.profiles.run]
+args = ["--cd", "{cwd}", "--sandbox", "workspace-write", "--config", "sandbox_workspace_write.network_access=true", "--ask-for-approval", "never"]
+expand = ["git_writable_roots:--add-dir"]
+tail_args = ["exec"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+
+[agent_runner.agents.codex.profiles.deliberate]
+args = ["--cd", "{cwd}", "--sandbox", "read-only", "--ask-for-approval", "never"]
+tail_args = ["exec"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.codex.profiles.generate]
+args = ["--cd", "{cwd}", "--sandbox", "read-only", "--ask-for-approval", "never"]
+tail_args = ["exec"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.codex.profiles.repl]
+args = ["--cd", "{cwd}"]
+tail_args = ["exec"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+
+[agent_runner.agents.claude]
+bin = "claude"
+label = "agent/claude"
+label_color = "BFDADC"
+label_description = "Use Claude Code for local runner execution."
+auth_home = "~/.claude"
+auth_include = ["settings.json", "skills"]
+auth_exclude = ["history.jsonl", "file-history", "paste-cache", "plans", "plugins", "cache", "ide", "backups", "telemetry", "todos"]
+project_skills_dir = ".claude/skills"
+
+[agent_runner.agents.claude.profiles.run]
+args = ["--dangerously-skip-permissions", "--verbose", "-p", "--output-format", "stream-json", "--include-partial-messages"]
+prompt_delivery = "argv_tail"
+output_protocol = "claude-stream-json"
+
+[agent_runner.agents.claude.profiles.deliberate]
+args = ["--dangerously-skip-permissions", "--verbose", "-p", "--output-format", "stream-json", "--include-partial-messages"]
+prompt_delivery = "argv_tail"
+output_protocol = "claude-stream-json"
+
+[agent_runner.agents.claude.profiles.generate]
+args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.claude.profiles.repl]
+args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+
+[agent_runner.agents.kimi]
+bin = "kimi"
+label = "agent/kimi"
+label_color = "FF6B6B"
+label_description = "Use Kimi for local runner execution."
+auth_home = "~/.kimi-code"
+auth_include = ["config.toml", "credentials", "oauth", "device_id", "skills"]
+auth_exclude = ["sessions", "logs", "cache", "session_index.jsonl", "tmp"]
+project_skills_dir = ".kimi-code/skills"
+
+[agent_runner.agents.kimi.profiles.run]
+args = []
+prompt_flag = "--prompt"
+prompt_delivery = "flag"
+output_protocol = "plain"
+
+[agent_runner.agents.kimi.profiles.deliberate]
+args = ["--input-format", "text"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+
+[agent_runner.agents.kimi.profiles.generate]
+args = []
+prompt_flag = "--prompt"
+prompt_delivery = "flag"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.kimi.profiles.repl]
+args = []
+prompt_flag = "--prompt"
+prompt_delivery = "flag"
+output_protocol = "plain"
+
+# pi 的注册块：内置默认已生效；下面照抄内置值作为"出厂注册块"参考。
+# 事实依据：-p/--print 读取管道 stdin 并入初始 prompt；--mode json 输出
+# JSON Lines 事件流；--no-tools 禁用全部工具（pi 无内置沙箱，只读表达
+# 用工具白名单）；--approve 信任项目本地文件（CLAUDE.md / AGENTS.md /
+# 项目级 skills）；配置与凭据在 ~/.pi/agent/；项目级 skills 目录 .pi/skills/。
+[agent_runner.agents.pi]
+bin = "pi"
+label = "agent/pi"
+label_color = "7C3AED"
+label_description = "Use pi for local runner execution."
+auth_home = "~/.pi/agent"
+auth_include = ["auth.json", "settings.json", "models.json", "skills"]
+auth_exclude = ["sessions", "pi-crash.log", "models-store.json"]
+project_skills_dir = ".pi/skills"
+
+[agent_runner.agents.pi.profiles.run]
+args = ["--approve", "--mode", "json"]
+prompt_delivery = "stdin"
+output_protocol = "pi-json-lines"
+
+[agent_runner.agents.pi.profiles.deliberate]
+args = ["--approve", "--no-tools", "--print"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.pi.profiles.generate]
+args = ["--no-tools", "--print"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.pi.profiles.repl]
+args = ["--approve", "--print"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+
 [agent_runner.labels]
+# codex / claude / kimi 是旧版 labels 段的 agent 路由键，作为兼容覆盖来源
+# 保留；新 agent 的路由标签请写在其注册块的 label 字段。
 ready = "agent/ready"
 running = "agent/running"
 supervising = "agent/supervising"

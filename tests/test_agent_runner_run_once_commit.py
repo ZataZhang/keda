@@ -54,6 +54,7 @@ def test_run_once_uncommitted_changes_runner_commits(
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "rev-parse", "HEAD"):
@@ -192,6 +193,7 @@ def test_run_once_recovers_after_staged_verification_failure(
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -304,6 +306,7 @@ def test_run_once_recovers_after_agent_command_failure(
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))

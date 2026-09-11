@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.core.shared.models.agent_spec import CLAUDE_STREAM_JSON_PROTOCOL_ID
 from backend.infrastructure.process_runner import (
     ClaudeStreamRenderer,
     CommandFailedError,
@@ -22,7 +23,7 @@ from backend.infrastructure.process_runner import (
     _format_timestamped_line,
     _terminate_process_tree,
     _TimestampedStreamFormatter,
-    should_filter_claude_stream,
+    run_filtered_claude_stream,
 )
 
 
@@ -30,11 +31,54 @@ def _json_line(payload: dict) -> str:
     return json.dumps(payload) + "\n"
 
 
-def test_should_filter_claude_stream_only_for_stream_json() -> None:
-    """Claude stream-json commands should use the concise renderer."""
-    assert should_filter_claude_stream(["claude", "-p", "--output-format", "stream-json", "prompt"])
-    assert not should_filter_claude_stream(["claude", "-p", "prompt"])
-    assert not should_filter_claude_stream(["codex", "exec", "prompt"])
+def test_output_protocol_routes_claude_stream_to_filtered_renderer(tmp_path: Path) -> None:
+    """``output_protocol="claude-stream-json"`` 走流式渲染路径，其余走通用路径。"""
+    text_event = _json_line(
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "approved"},
+            },
+        }
+    )
+    stop_event = _json_line({"type": "stream_event", "event": {"type": "message_stop"}})
+    mock_process = MagicMock()
+    mock_process.stdout = iter([text_event, stop_event])
+    mock_process.stdin = MagicMock()
+    mock_process.wait.return_value = 0
+    mock_process.returncode = 0
+    mock_process.poll.return_value = None
+    mock_process.communicate.return_value = ("", "")
+
+    runner = SubprocessRunner()
+    with (
+        patch("subprocess.Popen", return_value=mock_process) as popen_mock,
+        patch(
+            "backend.infrastructure.process_runner.run_filtered_claude_stream",
+            wraps=run_filtered_claude_stream,
+        ) as filtered_mock,
+    ):
+        streamed = runner.run(
+            ["claude", "--output-format", "stream-json", "-p", "Review."],
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=900,
+            output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+        )
+        plain = runner.run(
+            ["codex", "exec", "prompt"],
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=900,
+        )
+
+    # 流式协议进入 run_filtered_claude_stream；plain 协议不走。
+    assert filtered_mock.call_count == 1
+    assert popen_mock.call_count >= 1
+    assert streamed.stdout == "approved\n"
+    assert streamed.output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID
+    assert plain.output_protocol == "plain"
 
 
 def test_claude_stream_renderer_suppresses_noisy_events() -> None:
@@ -149,42 +193,46 @@ def test_transcript_runner_builds_claude_command() -> None:
     """Transcript runner should build claude deliberation command."""
     from pathlib import Path
 
-    from backend.engines.agent_runner.transcript_runner import (
-        _build_deliberation_command,
-    )
+    from backend.core.shared.models.agent_runner import AppConfig
+    from backend.core.use_cases.agent_invocation import build_agent_invocation
 
-    cmd = _build_deliberation_command("claude", "hello", Path("/tmp"))
+    invocation = build_agent_invocation("claude", "deliberate", "hello", Path("/tmp"), AppConfig())
+    cmd = invocation.argv
     assert cmd[0] == "claude"
     assert "--dangerously-skip-permissions" in cmd
-    assert "hello" in cmd
+    # 提示词在 argv 尾部；协议层（claude-stream-json）执行时再剥离改走 stdin。
+    assert cmd[-1] == "hello"
+    assert invocation.prompt_delivery == "argv_tail"
 
 
 def test_transcript_runner_builds_kimi_command() -> None:
     """Transcript runner should build kimi deliberation command."""
     from pathlib import Path
 
-    from backend.engines.agent_runner.transcript_runner import (
-        _build_deliberation_command,
-    )
+    from backend.core.shared.models.agent_runner import AppConfig
+    from backend.core.use_cases.agent_invocation import build_agent_invocation
 
-    cmd = _build_deliberation_command("kimi", "hello", Path("/tmp"))
-    assert cmd == ["kimi", "--input-format", "text"]
-    assert "--quiet" not in cmd
+    invocation = build_agent_invocation("kimi", "deliberate", "hello", Path("/tmp"), AppConfig())
+    assert invocation.argv == ("kimi", "--input-format", "text")
+    assert invocation.prompt_delivery == "stdin"
 
 
 def test_transcript_runner_builds_codex_command() -> None:
     """Transcript runner should build codex deliberation command."""
     from pathlib import Path
 
-    from backend.engines.agent_runner.transcript_runner import (
-        _build_deliberation_command,
-    )
+    from backend.core.shared.models.agent_runner import AppConfig
+    from backend.core.use_cases.agent_invocation import build_agent_invocation
 
-    cmd = _build_deliberation_command("codex", "hello", Path("relative/workspace"))
+    invocation = build_agent_invocation(
+        "codex", "deliberate", "hello", Path("/tmp/relative/workspace"), AppConfig()
+    )
+    cmd = invocation.argv
     assert cmd[0] == "codex"
     assert "--cd" in cmd
     assert "read-only" in cmd
     assert "hello" not in cmd
+    assert invocation.prompt_delivery == "stdin"
     assert Path(cmd[cmd.index("--cd") + 1]).is_absolute()
 
 
@@ -412,7 +460,7 @@ def test_run_filtered_claude_stream_output_sink_preserves_newlines(
 
 def test_relay_process_stdout_output_sink_preserves_line_boundaries() -> None:
     """Non-Claude transcript streaming should keep stdout line endings."""
-    from backend.engines.agent_runner.transcript_runner import _relay_process_stdout
+    from backend.engines.agent_runner.output_protocols.plain import _relay_process_stdout
 
     mock_process = MagicMock()
     mock_process.stdout = iter(["first\n", "second\n"])
@@ -420,12 +468,11 @@ def test_relay_process_stdout_output_sink_preserves_line_boundaries() -> None:
     mock_process.wait.return_value = 0
     streamed_output_chunks: list[str] = []
 
-    return_code, stdout_text = _relay_process_stdout(
+    stdout_text = _relay_process_stdout(
         mock_process,
         output_sink=streamed_output_chunks.append,
     )
 
-    assert return_code == 0
     assert stdout_text == "first\nsecond\n"
     assert streamed_output_chunks == ["first\n", "second\n"]
 
@@ -521,6 +568,7 @@ def test_subprocess_runner_claude_capture_uses_filtered_stream(
             cwd=tmp_path,
             capture_output=True,
             timeout=900,
+            output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
         )
 
     assert result.stdout == "approved\n"

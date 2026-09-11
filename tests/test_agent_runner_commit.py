@@ -596,6 +596,7 @@ class _PrecommitCommitRunner(FakeProcessRunner):
         capture_output=True,
         input_text=None,
         label=None,
+        output_protocol=None,
     ):
         command_tuple = tuple(command)
         is_proxy_commit = command_tuple[:2] == ("git", "commit")

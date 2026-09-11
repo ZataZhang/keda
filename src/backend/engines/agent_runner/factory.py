@@ -74,9 +74,6 @@ from backend.engines.agent_runner.factories import (
     write_deliberation_outputs,
 )
 from backend.engines.agent_runner.factories.content_generators import (
-    _build_content_generation_command,
-    _build_planner_command,
-    _build_repl_command,
     SafePlannerContentGenerator,
     SubprocessContentGenerator,
 )
@@ -90,15 +87,12 @@ __all__ = [
     "SafePlannerContentGenerator",
     "SubprocessContentGenerator",
     "_anchor_memory_config",
-    "_build_content_generation_command",
     "_build_generated_content_config",
     "_build_generated_content_target_config",
     "_build_deliberation_config",
     "_build_memory_config",
     "_build_merged_repository_context",
-    "_build_planner_command",
     "_build_repl_config",
-    "_build_repl_command",
     "_build_repository_context_from_settings",
     "_load_enabled_repository_local_settings",
     "_merge_label_config",

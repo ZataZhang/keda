@@ -62,6 +62,13 @@ iar = "backend.api.cli:main"
 # 而带连字符的命令名没人会敲。
 kedacode = "backend.api.cli:main"
 
+[project.entry-points."iar.agent_output_protocols"]
+# 内置输出协议与第三方插件走同一 entry point group 注册；
+# 实现位于 backend/engines/agent_runner/output_protocols/。
+plain = "backend.engines.agent_runner.output_protocols.plain:PlainOutputProtocol"
+claude-stream-json = "backend.engines.agent_runner.output_protocols.claude_stream_json:ClaudeStreamJsonOutputProtocol"
+pi-json-lines = "backend.engines.agent_runner.output_protocols.pi_json_lines:PiJsonLinesOutputProtocol"
+
 [project.optional-dependencies]
 llm = [
     "langchain-anthropic>=0.1.0",

@@ -30,7 +30,11 @@ def run_labels_command(ctx: ParsedCommandContext) -> int:
         _cli._ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
     for context in contexts:
         github_client = ctx.github_client_factory(context.repo_path)
-        _cli.sync_labels(labels_config=context.config.labels, github_client=github_client)
+        _cli.sync_labels(
+            labels_config=context.config.labels,
+            github_client=github_client,
+            agent_registry=context.config.agents,
+        )
     logger.info("Labels are ready.")
     return 0
 

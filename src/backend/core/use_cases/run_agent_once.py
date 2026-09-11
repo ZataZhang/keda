@@ -29,6 +29,9 @@ from pathlib import Path
 from backend.core.agent.memory import (
     save_short_term_memory,
 )
+from backend.core.shared.interfaces.agent_output_protocol import (
+    CLAUDE_STREAM_JSON_PROTOCOL_ID,
+)
 from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
@@ -42,6 +45,11 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     PhaseDuration,
 )
+from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_RUN,
+    PROMPT_DELIVERY_STDIN,
+)
+from backend.core.use_cases.agent_invocation import build_agent_invocation
 from backend.core.use_cases.agent_runner_commit import (
     EmptyCommitRequestError,
     checkpoint_uncommitted_progress,
@@ -397,98 +405,6 @@ def _resolve_repo_id(issue: IssueSummary, worktree_path: Path) -> str:
         return "default"
 
 
-def _build_claude_command(prompt: str, worktree_path: Path) -> list[str]:  # noqa: ARG001
-    return [
-        "claude",
-        "--dangerously-skip-permissions",
-        "--verbose",
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--include-partial-messages",
-        prompt,
-    ]
-
-
-def _build_kimi_command(prompt: str, worktree_path: Path) -> list[str]:  # noqa: ARG001
-    return ["kimi", "--prompt", prompt]
-
-
-def _resolve_worktree_git_writable_roots(worktree_path: Path) -> list[str]:
-    """解析 linked worktree 需要额外放行写入的 git 元数据目录。
-
-    `git worktree add` 建出的 worktree 里 `.git` 是一个指向主仓
-    `.git/worktrees/<name>/` 的指针文件，而该目录落在 codex `--cd` 的可写根之外。
-    不放行会让 lint flag（`scripts/shared/hooks/quality_flag.sh` 写
-    `.last_linted_commit`）等 git 侧写入报 `Operation not permitted`。
-
-    Args:
-        worktree_path: worktree 根目录。
-
-    Returns:
-        需要放行写入的绝对路径列表。普通 checkout（`.git` 是目录，本就在可写根内）
-        或指针文件无法解析时返回空列表。
-    """
-    git_pointer_path = worktree_path / ".git"
-    if not git_pointer_path.is_file():
-        return []
-    try:
-        pointer_text = git_pointer_path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return []
-    gitdir_prefix = "gitdir:"
-    if not pointer_text.startswith(gitdir_prefix):
-        return []
-    worktree_git_dir = Path(pointer_text[len(gitdir_prefix) :].strip())
-    if not worktree_git_dir.is_absolute():
-        worktree_git_dir = worktree_path / worktree_git_dir
-    writable_roots = [worktree_git_dir]
-    common_dir_pointer_path = worktree_git_dir / "commondir"
-    if common_dir_pointer_path.is_file():
-        try:
-            common_dir = Path(common_dir_pointer_path.read_text(encoding="utf-8").strip())
-        except OSError:
-            common_dir = None
-        if common_dir is not None:
-            if not common_dir.is_absolute():
-                common_dir = worktree_git_dir / common_dir
-            writable_roots.append(common_dir)
-    resolved_roots = (root.resolve() for root in writable_roots)
-    return [str(root) for root in dict.fromkeys(resolved_roots)]
-
-
-def _build_codex_command(prompt: str, worktree_path: Path) -> list[str]:
-    """构造 codex 的非交互执行命令。
-
-    沙箱固定为 `workspace-write`，并显式打开两项能力，否则 agent 无法完成验证：
-    - `sandbox_workspace_write.network_access`：默认禁网会让访问本机 DB / HTTP
-      入口的 Realistic Validation 恒失败（表现为 `Operation not permitted`）。
-    - `--add-dir` 放行 worktree 的 git 元数据目录，见
-      `_resolve_worktree_git_writable_roots`。
-    """
-    command = [
-        "codex",
-        "--cd",
-        str(worktree_path),
-        "--sandbox",
-        "workspace-write",
-        "--config",
-        "sandbox_workspace_write.network_access=true",
-        "--ask-for-approval",
-        "never",
-    ]
-    for writable_root in _resolve_worktree_git_writable_roots(worktree_path):
-        command += ["--add-dir", writable_root]
-    command += ["exec", prompt]
-    return command
-
-
-_AGENT_COMMAND_BUILDERS: dict[str, Callable[[str, Path], list[str]]] = {
-    "claude": _build_claude_command,
-    "kimi": _build_kimi_command,
-}
-
-
 def build_blocked_continuation_prompt(
     issue: IssueSummary,
     worktree_path: Path,
@@ -562,6 +478,7 @@ def run_agent(
         prompt,
         worktree_path,
         process_runner,
+        config=config,
         issue=issue,
         transient_retry_attempts=config.runner.transient_retry_attempts,
         transient_retry_delay_seconds=config.runner.transient_retry_delay_seconds,
@@ -612,6 +529,7 @@ def run_fix_agent(
         prompt,
         worktree_path,
         process_runner,
+        config=config,
         issue=issue,
         transient_retry_attempts=config.runner.transient_retry_attempts,
         transient_retry_delay_seconds=config.runner.transient_retry_delay_seconds,
@@ -626,33 +544,43 @@ def run_agent_with_prompt(
     worktree_path: Path,
     process_runner: IProcessRunner,
     *,
+    config: AppConfig | None = None,
     capture_output: bool = False,
     timeout_seconds: int | None = None,
     inactivity_timeout_seconds: int | None = None,
     issue: IssueSummary | None = None,
 ) -> CommandResult:
-    """Run Codex or Claude Code with a prepared prompt."""
+    """Run an agent with a prepared prompt.
+
+    命令行与输出协议全部来自 :func:`build_agent_invocation`（profile
+    ``"run"``）；调用方传入的 ``process_runner`` 只负责执行与中继。
+    """
     if issue is not None:
         _logger.info(
             "Starting agent for Issue #%d: %s",
             issue.number,
             issue.url,
         )
-    builder = _AGENT_COMMAND_BUILDERS.get(agent_name)
-    if builder is not None:
-        command = builder(prompt, worktree_path)
-    else:
-        command = _build_codex_command(prompt, worktree_path)
+    invocation = build_agent_invocation(
+        agent_name,
+        AGENT_PROFILE_RUN,
+        prompt,
+        worktree_path,
+        config or AppConfig(),
+    )
     label = f"Issue #{issue.number}: {issue.url}" if issue is not None else None
     run_kwargs: dict[str, object] = {
-        "command": command,
+        "command": list(invocation.argv),
         "cwd": worktree_path,
         "capture_output": capture_output,
         "timeout": timeout_seconds,
         "label": label,
+        "output_protocol": invocation.output_protocol,
     }
     if inactivity_timeout_seconds is not None:
         run_kwargs["inactivity_timeout"] = inactivity_timeout_seconds
+    if invocation.prompt_delivery == PROMPT_DELIVERY_STDIN:
+        run_kwargs["input_text"] = prompt
     result = process_runner.run(**run_kwargs)
     if issue is not None:
         _logger.info(
@@ -670,6 +598,7 @@ def run_agent_with_prompt_resilient(
     worktree_path: Path,
     process_runner: IProcessRunner,
     *,
+    config: AppConfig | None = None,
     capture_output: bool = False,
     timeout_seconds: int | None = None,
     inactivity_timeout_seconds: int | None = None,
@@ -691,6 +620,8 @@ def run_agent_with_prompt_resilient(
         prompt: Prepared prompt text.
         worktree_path: Worktree the agent runs in.
         process_runner: Command executor.
+        config: 应用配置；注册表取自 ``config.agents``，``None`` 时使用
+            内置默认注册表。
         capture_output: Whether to capture stdout/stderr.
         timeout_seconds: Optional per-invocation timeout.
         inactivity_timeout_seconds: Optional no-output timeout.
@@ -715,6 +646,7 @@ def run_agent_with_prompt_resilient(
                 prompt,
                 worktree_path,
                 process_runner,
+                config=config,
                 capture_output=capture_output,
                 timeout_seconds=timeout_seconds,
                 inactivity_timeout_seconds=inactivity_timeout_seconds,
@@ -747,17 +679,16 @@ def extract_agent_response_text(result: CommandResult) -> str:
 
     Claude 使用 `--output-format stream-json` 时，每行输出是一个 JSON 事件，
     包含 stream_event（文本增量）、assistant（完整消息）或 result（最终结果）。
-    本函数按优先级提取有效文本，非 stream-json 命令则直接返回原始 stdout。
+    本函数按优先级提取有效文本；非流式协议的结果直接返回原始 stdout。
 
-    注意：process runner 对 stream-json 命令会先把事件流渲染成纯文本再返回，
-    此时 stdout 已不是原始事件流；若仍逐行重解析，恰好构成合法 JSON 标量的行
-    （如数组末尾不带逗号的字符串元素）会被静默丢弃，破坏其中的 JSON 内容。
-    因此只有确实识别到 stream-json 事件时才走事件提取，否则原样返回。
+    注意：流式协议会把事件流渲染成纯文本再返回，此时 stdout 已不是原始
+    事件流；若仍逐行重解析，恰好构成合法 JSON 标量的行（如数组末尾不带
+    逗号的字符串元素）会被静默丢弃，破坏其中的 JSON 内容。因此只有
+    ``output_protocol`` 确实是流式协议时才走事件提取，否则原样返回。
     """
     if not result.stdout:
         return ""
-    command_name = result.command[0] if result.command else ""
-    if command_name != "claude" or "stream-json" not in result.command:
+    if result.output_protocol != CLAUDE_STREAM_JSON_PROTOCOL_ID:
         return result.stdout
 
     stream_text_parts: list[str] = []

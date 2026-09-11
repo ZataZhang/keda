@@ -3473,3 +3473,119 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 
 - `iar container up` 与 `iar daemon` 是**互斥**选项：同一仓库不能同时跑本机 daemon 和容器 daemon。
 - 不装 Docker 的用户零影响：`iar container` 全部子命令都是 opt-in。
+
+## 接入一个新 agent（声明式注册表）
+
+一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` 的出厂默认已在代码注册表中生效）。
+
+### 注册块字段表
+
+agent 级字段：
+
+| 字段 | 取值域 | 说明 |
+|---|---|---|
+| `bin` | 可执行文件名 | 按 `PATH` 解析，不内建嗅探 |
+| `label` | `agent/<name>` | agent 路由标签（`choose_agent` 按注册顺序匹配） |
+| `label_color` | 6 位 hex，不含 `#` | GitHub 标签颜色 |
+| `label_description` | 任意文案 | GitHub 标签描述 |
+| `auth_home` | 支持 `~` 的目录 | 本机认证/配置根目录；容器认证导入与用户级 skills 目录派生源 |
+| `auth_include` | 相对 `auth_home` 的顶层条目 | 容器认证导入白名单 |
+| `auth_exclude` | 相对 `auth_home` 的子路径 | 容器认证导入排除项（运行时状态、缓存等） |
+| `project_skills_dir` | 相对仓库根的目录 | 项目级 skills 目录 |
+
+profile 级字段（`profiles.<profile>`，用途为 4 种闭集：`run` / `deliberate` / `generate` / `repl`）：
+
+| 字段 | 取值域 | 说明 |
+|---|---|---|
+| `args` | 字面量 argv 片段 | 支持 `{cwd}` / `{worktree}` / `{prompt}` 占位符；**不做 shell 展开** |
+| `prompt_flag` | 参数名 | 仅 `prompt_delivery = "flag"` 时使用（如 kimi 的 `--prompt`） |
+| `prompt_delivery` | `argv_tail` / `flag` / `stdin` | 提示词投递方式 |
+| `output_protocol` | 已注册协议 id（默认 `plain`） | 经 `iar.agent_output_protocols` entry point 注册表解析；内置 `plain` / `claude-stream-json` / `pi-json-lines` |
+| `tail_args` | 字面量 argv 片段 | 追加在展开器之后、提示词之前（如 codex 的 `["exec"]`） |
+| `expand` | `"<展开器>:<flag>"` | 运行期参数注入；展开器为**闭集**（当前仅 `git_writable_roots`），如 codex 的 `"git_writable_roots:--add-dir"` |
+| `read_only` | bool，默认 `false` | 是否为可验证的只读调用；只读决策入口（planner / `iar ask`）以此做 fail-fast 门禁 |
+
+argv 组装顺序：`[bin] + args(占位符替换) + expanders + tail_args`，再按 `prompt_delivery` 决定提示词落在 argv 尾部、指定 flag 后还是 stdin。字段的三层合并语义与 shell 展开边界详见 [配置说明](configuration.md#agent-runner-agent-注册表配置)。
+
+### 自检流程（`iar agent doctor`）
+
+配置写完后用 doctor 做只读自检，它按**与真实执行完全相同的路径**打印各用途的完整 argv：
+
+```bash
+# 列出全部已注册 agent 及各自声明的用途
+uv run iar agent list
+
+# 打印某个 agent 全部用途的命令行（含沙箱告警）
+uv run iar agent doctor pi --all-profiles
+
+# 机读快照（agent / profile / argv / prompt_delivery，稳定排序，可入 golden diff）
+uv run iar agent doctor pi --all-profiles --json
+
+# 列出全部已注册输出协议 id
+uv run iar agent doctor --protocols
+```
+
+doctor 对三类坏输入分别非零退出并在 stderr 指名原因：agent 未注册、`bin` 不在 `PATH`、引用未注册协议。改完配置后先跑 doctor，再考虑投真实任务。
+
+### 完整范例：pi
+
+pi（`@earendil-works/pi-coding-agent`）的注册块如下（内置默认已生效；写进 `config.toml` 只是为了作为出厂注册块的可抄写参考）：
+
+```toml
+[agent_runner.agents.pi]
+bin = "pi"
+label = "agent/pi"
+label_color = "7C3AED"
+label_description = "Use pi for local runner execution."
+auth_home = "~/.pi/agent"
+auth_include = ["auth.json", "settings.json", "models.json", "skills"]
+auth_exclude = ["sessions", "pi-crash.log", "models-store.json"]
+project_skills_dir = ".pi/skills"
+
+[agent_runner.agents.pi.profiles.run]
+args = ["--approve", "--mode", "json"]
+prompt_delivery = "stdin"
+output_protocol = "pi-json-lines"
+
+[agent_runner.agents.pi.profiles.deliberate]
+args = ["--approve", "--no-tools", "--print"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.pi.profiles.generate]
+args = ["--no-tools", "--print"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.pi.profiles.repl]
+args = ["--approve", "--print"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+```
+
+几个值得注意的取舍：
+
+- pi 无内置沙箱，只读语义用 `--no-tools`（禁用全部工具）表达，因此 `generate` / `deliberate` 都声明 `read_only = true` 供只读门禁校验。
+- pi 的 `-p/--print` 模式会把管道 stdin 并入初始 prompt，四种用途全部采用 `prompt_delivery = "stdin"`，规避长 prompt 撑爆 argv 上限。
+- `run` 用途用 `--mode json` 输出 JSON Lines 事件流，由内置的 `pi-json-lines` 协议做流式渲染；其余用途走 `plain`。
+
+doctor 对它的输出：
+
+```text
+pi · deliberate
+  argv: pi --approve --no-tools --print
+  prompt_delivery: stdin
+pi · generate
+  argv: pi --no-tools --print
+  prompt_delivery: stdin
+pi · repl
+  argv: pi --approve --print
+  prompt_delivery: stdin
+pi · run
+  argv: pi --approve --mode json
+  prompt_delivery: stdin
+```
+
+接入后：`--agent` 参数、agent 路由标签、容器认证导入、live 面板协议渲染都会自动识别新 agent，无需任何代码改动。

@@ -184,6 +184,7 @@ src/backend/api/ → src/backend/core/ → src/backend/engines/ → src/backend/
 4. `src/backend/infrastructure/` 负责具体集成，不包含业务编排。
 5. 配置、日志、数据库和通用辅助函数位于 `src/backend/infrastructure/` 下的正式模块。
 6. `src/backend/composition/` 位于四层之外，只负责创建并连接对象；四层模块不得反向依赖它。
+7. agent 调用的**命令构造器落 `core/`**（`core/use_cases/agent_invocation.py`）：argv 组装是跨 `api` / `engines` 复用的领域规则（占位符替换、闭集展开器、提示词投递），纯函数实现、不依赖任何运行时能力。**输出协议实现落 `engines/`**（`engines/agent_runner/output_protocols/`）：流式渲染是平台能力，实现 `core/shared/interfaces/agent_output_protocol.py` 定义的注册契约，经 entry point 发现；`core/` 只引用协议 id 常量与接口，不 import 协议实现。
 
 ## 认证与会话域
 

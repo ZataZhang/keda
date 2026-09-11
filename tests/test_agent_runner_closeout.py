@@ -147,6 +147,7 @@ class _CloseoutScenarioRunner(FakeProcessRunner):
         input_text=None,
         label=None,
         output_sink=None,
+        output_protocol=None,
     ):
         """Serve the git / verification / agent calls the execution loop makes."""
         command_tuple = tuple(command)

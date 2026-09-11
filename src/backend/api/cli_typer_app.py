@@ -48,6 +48,7 @@ __all__ = [
     "_run_typer_repository_command",
     "_typer_selector_options",
     "app",
+    "agent_app",
     "auth_app",
     "completion_app",
     "container_app",
@@ -80,23 +81,33 @@ def _resolve_keda_version() -> str:
         return "0.0.0+unknown"
 
 
-class RunAgentChoice(str, Enum):
-    """Agent choices accepted by runner commands."""
+def _registered_agent_names() -> tuple[str, ...]:
+    """已注册 agent 名（Typer 枚举的取值来源），配置加载失败回落内置默认。"""
+    from backend.api.cli_parser import registered_agent_names
 
-    auto = "auto"
-    codex = "codex"
-    claude = "claude"
-    kimi = "kimi"
+    return registered_agent_names()
 
 
-class IssueAgentChoice(str, Enum):
-    """Agent labels accepted by issue creation commands."""
+def _build_agent_choice_enum(
+    enum_name: str,
+    *,
+    prefix: tuple[str, ...],
+    suffix: tuple[str, ...] = (),
+) -> type[Enum]:
+    """从 agent 注册表动态构建 ``--agent`` choices 枚举。
 
-    auto = "auto"
-    codex = "codex"
-    claude = "claude"
-    kimi = "kimi"
-    none = "none"
+    取值集合 = 路由别名（auto / none）+ 注册表 agent 名；配置注册的
+    新 agent 无需改代码即可出现在 ``--agent`` 的合法值里。
+    """
+    members = {name: name for name in (*prefix, *_registered_agent_names(), *suffix)}
+    return Enum(enum_name, members, type=str)  # type: ignore[no-any-return]
+
+
+RunAgentChoice = _build_agent_choice_enum("RunAgentChoice", prefix=("auto",))
+"""Agent choices accepted by runner commands（注册表派生）."""
+
+IssueAgentChoice = _build_agent_choice_enum("IssueAgentChoice", prefix=("auto",), suffix=("none",))
+"""Agent labels accepted by issue creation commands（注册表派生）."""
 
 
 class IssueTypeChoice(str, Enum):
@@ -171,6 +182,11 @@ console_app = typer.Typer(
     no_args_is_help=False,
     context_settings=_HELP_CONTEXT,
 )
+agent_app = typer.Typer(
+    help="Inspect registered agents and output protocols (read-only).",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 auth_app = typer.Typer(
     help="Manage the container-side authentication snapshot.",
     no_args_is_help=True,
@@ -188,6 +204,7 @@ app.add_typer(workflow_app, name="workflow")
 app.add_typer(loop_app, name="loop")
 app.add_typer(container_app, name="container")
 app.add_typer(console_app, name="console")
+app.add_typer(agent_app, name="agent")
 
 RepoOption = Annotated[str | None, typer.Option("--repo", help="Target repository path.")]
 RepoIdOption = Annotated[
@@ -285,8 +302,8 @@ def _app_callback(
         typer.Option(
             "--agent",
             help="Override the REPL default agent. "
-            "Accepts codex/claude/kimi; 'auto' falls back to "
-            "[agent_runner.repl].default_agent.",
+            "Accepts any registered agent name (see `iar agent list`); "
+            "'auto' falls back to [agent_runner.repl].default_agent.",
         ),
     ] = None,
 ) -> None:

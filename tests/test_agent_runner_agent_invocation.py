@@ -16,6 +16,7 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
 )
+from backend.core.shared.models.agent_spec import CLAUDE_STREAM_JSON_PROTOCOL_ID
 from backend.core.use_cases.run_agent_once import (
     AgentUnavailableError,
     choose_agent,
@@ -213,6 +214,8 @@ def test_extract_agent_response_text_from_claude_stream_json() -> None:
             '\\"approved\\"}\\n```"}}}\n'
         ),
         stderr="",
+        # 只有确实经流式协议中继的结果才走事件提取（plain 协议原样返回）。
+        output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
     )
 
     assert extract_agent_response_text(result) == ('```json\n{"verdict": "approved"}\n```')
@@ -269,6 +272,7 @@ class _SequencedAgentRunner(FakeProcessRunner):
         capture_output=True,
         input_text=None,
         label=None,
+        output_protocol=None,
     ):
         self.calls.append(list(command))
         outcome = self._outcomes[min(self._index, len(self._outcomes) - 1)]

@@ -567,6 +567,7 @@ def test_worktree_reconcile_run_once(tmp_path: Path) -> None:
             capture_output=True,
             input_text=None,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
