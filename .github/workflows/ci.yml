@@ -64,7 +64,7 @@ jobs:
     # 设 12 分钟、步骤却跑了 27 分钟没被杀就是这个原因。job 超时由
     # GitHub 服务端强制执行，能回收卡死的 runner 并把日志刷出来，
     # 这是拿到"到底卡在哪个测试"证据的唯一可靠途径。
-    timeout-minutes: 25
+    timeout-minutes: 60
     name: Validate Template
     runs-on: ubuntu-latest
     steps:
@@ -123,7 +123,22 @@ jobs:
         # BlobNotFound）。pytest-timeout 不依赖 GitHub 的任何超时：挂住的用例
         # 以 traceback 失败并点名，整个 run 正常结束，日志自然保留。
         # 120 秒对单个用例极宽松——整套在本地只要 71 秒。
-        run: uv run pytest tests/ -v -m "not expensive" --no-testmon --durations=25 --timeout=120
+        run: |
+          set -o pipefail
+          uv run pytest tests/ -v -m "not expensive" --no-testmon \
+            --durations=25 --timeout=120 2>&1 | tee /tmp/pytest.log
+
+      # if: always() 在取消时也会执行，而 artifact 的上传不依赖 job 日志是否落盘。
+      # 这是四次尝试后唯一还没被证伪的取证路径：step 超时归 runner 管（runner 卡死
+      # 时失效）、job 超时产生 cancelled（日志不落盘）、手动取消同理——三种情况
+      # 拿到的都是 2 行 BlobNotFound。
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log-${{ github.run_id }}
+          path: /tmp/pytest.log
+          if-no-files-found: warn
 
       - name: Build documentation
         run: uv run mkdocs build --strict
