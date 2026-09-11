@@ -66,7 +66,15 @@ jobs:
             --max-lines 1000 --glob "*.py" src/backend "${allow_list_args[@]}"
 
       - name: Run local test suite
-        run: uv run pytest tests/ -v -m "not expensive"
+        # --no-testmon 与本地 `just test all` 保持一致。keda 的 pyproject 把
+        # addopts 设成 --testmon 做增量选择，但 CI 是全新 checkout、没有
+        # .testmondata，testmon 只能对每个测试做覆盖率追踪从零建库——增量选择
+        # 在一次性容器里零收益，追踪开销却是实打实的：实测本地 --no-testmon
+        # 跑完 1885 个测试约 70-140 秒，CI 带 testmon 跑到 25 分钟仍未结束。
+        #
+        # 这处是**有意的下游分歧**，不要回流上游：上游 pytest.ini 的 addopts 是
+        # `-m '...' -n auto --dist=loadgroup`，套用本改动会砍掉它的 xdist 并行。
+        run: uv run pytest tests/ -v -m "not expensive" --no-testmon
 
       - name: Build documentation
         run: uv run mkdocs build --strict
