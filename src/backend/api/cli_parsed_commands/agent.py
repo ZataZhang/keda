@@ -1,4 +1,4 @@
-"""``iar ask`` / ``iar repl`` / ``iar deliberate`` handlers.
+"""``iar ask`` / ``iar repl`` / ``iar deliberate`` / ``iar agent *`` handlers.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
 dispatcher.
@@ -6,17 +6,41 @@ dispatcher.
 
 from __future__ import annotations
 
+import argparse
+import json
+import shlex
+import shutil
 from pathlib import Path
 
-from backend.api.cli_console import console
+from backend.api.cli_console import console, error_console
 
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api import cli as _cli
+from backend.core.shared.models.agent_spec import AGENT_PROFILES
+from backend.core.use_cases.agent_invocation import (
+    UnknownAgentError,
+    build_agent_invocation,
+    resolve_agent_spec,
+)
 from backend.core.use_cases.interactive_decision import run_interactive_decision
 from backend.core.shared.models.agent_deliberation import DeliberationSession
 from backend.engines.agent_runner.factory import logger
 from backend.engines.agent_runner.failure_resolver import AgentFailureResolver
 from backend.engines.agent_runner.live_terminal import create_output_view
+from backend.engines.agent_runner.factories import build_app_config
+from backend.engines.agent_runner.output_protocols import get_output_protocol_registry
+
+# 黄金快照的哨兵提示词：doctor 的 argv 输出用它替代真实提示词，
+# 使 `iar agent doctor --all-profiles --json` 可与改造前的快照逐字节 diff。
+GOLDEN_SNAPSHOT_PROMPT = "golden-prompt"
+
+# 沙箱/审批类参数的识别标记：非只读用途的 argv 不含任何标记时 doctor 给 WARN。
+_SANDBOX_APPROVAL_MARKERS: tuple[str, ...] = (
+    "--sandbox",
+    "--ask-for-approval",
+    "--dangerously-skip-permissions",
+    "--approve",
+)
 
 
 def run_ask_command(ctx: ParsedCommandContext) -> int:
@@ -37,8 +61,8 @@ def run_ask_command(ctx: ParsedCommandContext) -> int:
     context = contexts[0]
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
-    planner_runner = _cli.create_planner_runner(ctx.process_runner)
-    content_generator = _cli.create_content_generator(ctx.process_runner)
+    planner_runner = _cli.create_planner_runner(ctx.process_runner, config=context.config)
+    content_generator = _cli.create_content_generator(ctx.process_runner, config=context.config)
     agent = ctx.parsed.agent
     if agent == "auto":
         agent = context.config.interactive_decision.default_agent
@@ -46,7 +70,7 @@ def run_ask_command(ctx: ParsedCommandContext) -> int:
     if ctx.parsed.output:
         output_dir = Path(ctx.parsed.output)
     deliberation_config = context.config.deliberation
-    transcript_runner = _cli.create_transcript_runner(ctx.process_runner)
+    transcript_runner = _cli.create_transcript_runner(config=context.config)
     output_view = create_output_view()
     event_sink = _cli.create_event_sink(
         Path(context.config.interactive_decision.default_output_dir),
@@ -154,7 +178,7 @@ def run_deliberate_command(ctx: ParsedCommandContext) -> int:
         session_id=session_id,
     )
     deliberation_config = context.config.deliberation
-    transcript_runner = _cli.create_transcript_runner(ctx.process_runner)
+    transcript_runner = _cli.create_transcript_runner(config=context.config)
     output_path.mkdir(parents=True, exist_ok=True)
     output_view = create_output_view()
     event_sink = _cli.create_event_sink(output_path, output_view)
@@ -225,4 +249,130 @@ def run_deliberate_command(ctx: ParsedCommandContext) -> int:
     return 0
 
 
-__all__ = ["run_ask_command", "run_deliberate_command", "run_repl_command"]
+def run_agent_list_command(ctx: ParsedCommandContext) -> int:
+    """``iar agent list``: list registered agents and their profiles (read-only)."""
+    del ctx  # list 只读全局注册表，不需要命令上下文
+    config = build_app_config()
+    for agent_name, agent_spec in config.agents.items():
+        console.print(f"[cyan]{agent_name}[/] (bin: {agent_spec.bin}, label: {agent_spec.label})")
+        for profile_name in AGENT_PROFILES:
+            profile_spec = agent_spec.profiles.get(profile_name)
+            if profile_spec is None:
+                continue
+            read_only_mark = "read-only" if profile_spec.read_only else "writable"
+            console.print(
+                f"  {profile_name}: delivery={profile_spec.prompt_delivery}, "
+                f"protocol={profile_spec.output_protocol}, {read_only_mark}"
+            )
+    return 0
+
+
+def _doctor_entry(
+    agent_name: str,
+    profile: str,
+    prompt: str,
+    cwd: Path,
+    config,  # AppConfig（避免再引入 core 模型的运行时导入开销）
+) -> tuple[dict[str, object] | None, list[str]]:
+    """构造单个 agent/profile 的 doctor 记录与告警列表。
+
+    Returns:
+        ``(entry, warnings)``。任何失败（未注册 agent / 缺 profile /
+        未知展开器 / 协议未注册或加载失败）由调用方统一转成报错，
+        这里以 ``entry=None`` 表达。
+    """
+    warnings: list[str] = []
+    try:
+        agent_spec = resolve_agent_spec(agent_name, config)
+    except UnknownAgentError as exc:
+        error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
+        return None, warnings
+    if shutil.which(agent_spec.bin) is None:
+        error_console.print(
+            f"[red]doctor failed:[/] executable '{agent_spec.bin}' "
+            f"(agent '{agent_name}') not found in PATH.",
+            markup=False,
+        )
+        return None, warnings
+    profile_spec = agent_spec.profiles.get(profile)
+    if profile_spec is None:
+        error_console.print(
+            f"[red]doctor failed:[/] agent '{agent_name}' has no '{profile}' profile "
+            f"(declared: {', '.join(agent_spec.profiles)}).",
+            markup=False,
+        )
+        return None, warnings
+    try:
+        invocation = build_agent_invocation(agent_name, profile, prompt, cwd, config)
+    except ValueError as exc:  # 未知展开器 / flag 缺失等构造错误
+        error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
+        return None, warnings
+    registry = get_output_protocol_registry()
+    try:
+        registry.resolve(invocation.output_protocol)
+    except Exception as exc:  # noqa: BLE001 - 协议加载失败必须显式失败，不降级
+        error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
+        return None, warnings
+    if not profile_spec.read_only and not any(
+        marker in (*profile_spec.args, *profile_spec.tail_args)
+        for marker in _SANDBOX_APPROVAL_MARKERS
+    ):
+        warnings.append(
+            f"agent '{agent_name}' profile '{profile}' is writable but declares no "
+            "sandbox/approval flag; the agent runs without local sandboxing."
+        )
+    entry = {
+        "agent": agent_name,
+        "profile": profile,
+        "argv": list(invocation.argv),
+        "prompt_delivery": invocation.prompt_delivery,
+    }
+    return entry, warnings
+
+
+def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
+    """``iar agent doctor <name>...``: print resolved invocations (read-only)."""
+    parsed: argparse.Namespace = ctx.parsed
+    if getattr(parsed, "protocols", False):
+        for protocol_id in get_output_protocol_registry().list_ids():
+            print(protocol_id)
+        return 0
+    agent_names: list[str] = list(parsed.agent_names)
+    if not agent_names:
+        error_console.print("[red]doctor failed:[/] no agent name given.", markup=False)
+        return 1
+    config = build_app_config()
+    prompt = getattr(parsed, "prompt", None) or GOLDEN_SNAPSHOT_PROMPT
+    cwd = Path.cwd()
+    profile_names = list(AGENT_PROFILES) if getattr(parsed, "all_profiles", False) else ["run"]
+    entries: list[dict[str, object]] = []
+    for agent_name in agent_names:
+        for profile_name in profile_names:
+            entry, warnings = _doctor_entry(agent_name, profile_name, prompt, cwd, config)
+            if entry is None:
+                return 1
+            for warning in warnings:
+                # WARN 走 stderr：`--json` 的 stdout 重定向（黄金快照 diff）不能被污染。
+                error_console.print(f"[yellow]WARN:[/] {warning}", markup=False)
+            entries.append(entry)
+    entries.sort(key=lambda entry: (str(entry["agent"]), str(entry["profile"])))
+    if getattr(parsed, "json_output", False):
+        print(json.dumps(entries, indent=2, ensure_ascii=False))
+        return 0
+    for entry in entries:
+        console.print(f"[cyan]{entry['agent']}[/] · {entry['profile']}")
+        console.print(f"  argv: {shlex.join(str(arg) for arg in entry['argv'])}", markup=False)
+        console.print(
+            f"  prompt_delivery: {entry['prompt_delivery']}",
+            markup=False,
+        )
+    return 0
+
+
+__all__ = [
+    "run_agent_doctor_command",
+    "run_agent_list_command",
+    "run_ask_command",
+    "run_deliberate_command",
+    "run_repl_command",
+]

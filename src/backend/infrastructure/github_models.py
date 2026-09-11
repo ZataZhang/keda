@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+
 # GitHub rejects POST bodies above ~65,536 characters; stay well below it.
 _MAX_GITHUB_BODY_LENGTH = 60000
 
@@ -62,11 +64,10 @@ class LabelConfig:
     group_prefix: str = "task-group/"
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
+    # agent 路由标签由 agent 注册表派生（agent 名 -> spec.label）。
     agent_labels: dict[str, str] = field(
         default_factory=lambda: {
-            "codex": "agent/codex",
-            "claude": "agent/claude",
-            "kimi": "agent/kimi",
+            agent_name: agent_spec.label for agent_name, agent_spec in BUILTIN_AGENT_SPECS.items()
         }
     )
 

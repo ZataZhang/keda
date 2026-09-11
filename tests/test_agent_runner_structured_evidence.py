@@ -589,6 +589,7 @@ class _FakeProcessRunnerForArtifacts:
         input_text=None,
         label=None,
         output_sink=None,
+        output_protocol=None,
     ) -> object:
         from backend.core.shared.models.agent_runner import CommandResult
 

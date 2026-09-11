@@ -25,7 +25,12 @@ from backend.core.shared.models.agent_runner import (
     PromptConfig,
     RepositoryIdentity,
 )
+from backend.core.shared.models.agent_spec import AgentSpec
+from backend.engines.agent_runner.factory_config_builder import (
+    build_agent_registry_from_settings,
+)
 from backend.infrastructure.config.settings import (
+    AgentRunnerAgentSettings,
     AgentRunnerDeliberationSettings,
     AgentRunnerGeneratedContentSettings,
     AgentRunnerGeneratedContentTargetSettings,
@@ -61,15 +66,26 @@ def _merge_optional_model(base_model, override_model):
 
 
 def _merge_label_config(
-    base_config: LabelConfig, override: AgentRunnerLabelSettings | None
+    base_config: LabelConfig,
+    override: AgentRunnerLabelSettings | None,
+    *,
+    agent_registry: dict[str, AgentSpec],
 ) -> LabelConfig:
-    """Merge repository-specific label overrides into a base ``LabelConfig``."""
+    """Merge repository-specific label overrides into a base ``LabelConfig``.
+
+    agent 路由标签的覆盖键集合来自 agent 注册表（不再写死三个 agent 名）；
+    注册表派生的 ``agent_labels`` 顺序即 ``choose_agent`` 的匹配顺序。
+    """
     if override is None:
         return base_config
     override_data = _pydantic_override_dict(override)
+    # 以全局派生结果为基础（保留全局层的旧 labels 键覆盖与注册顺序），
+    # 为仓库级新注册的 agent 补上 spec.label，再应用仓库级旧键覆盖。
     agent_labels = dict(base_config.agent_labels)
-    for agent_key in ("codex", "claude", "kimi"):
-        if agent_key in override_data:
+    for agent_key, agent_spec in agent_registry.items():
+        agent_labels.setdefault(agent_key, agent_spec.label)
+    for agent_key in agent_registry:
+        if agent_key in override_data and override_data[agent_key] is not None:
             agent_labels[agent_key] = override_data[agent_key]
     return LabelConfig(
         ready=override_data.get("ready", base_config.ready),
@@ -87,6 +103,20 @@ def _merge_label_config(
         deliberate=override_data.get("deliberate", base_config.deliberate),
         agent_labels=agent_labels,
     )
+
+
+def _merge_agents(
+    base_agents: dict[str, AgentSpec],
+    override: dict[str, AgentRunnerAgentSettings] | None,
+) -> dict[str, AgentSpec]:
+    """Merge repository-level ``[agent_runner.agents.*]`` overrides.
+
+    仓库级声明对全局注册表做逐字段覆盖；覆盖既有 agent 保持其注册顺序，
+    仓库级新 agent 追加在末尾。
+    """
+    if not override:
+        return base_agents
+    return build_agent_registry_from_settings(override, base_registry=base_agents)
 
 
 def _merge_prompt_config(
@@ -236,7 +266,8 @@ def merge_repository_config(
     Returns:
         A new ``AppConfig`` with per-repository overrides applied.
     """
-    labels = _merge_label_config(global_config.labels, repo_settings.labels)
+    agents = _merge_agents(global_config.agents, repo_settings.agents)
+    labels = _merge_label_config(global_config.labels, repo_settings.labels, agent_registry=agents)
     git = _merge_optional_model(global_config.git, repo_settings.git)
     worktree = _merge_optional_model(global_config.worktree, repo_settings.worktree)
     runner = _merge_optional_model(global_config.runner, repo_settings.runner)
@@ -267,6 +298,7 @@ def merge_repository_config(
         )
     )
     return AppConfig(
+        agents=agents,
         labels=labels,
         git=git,
         worktree=worktree,

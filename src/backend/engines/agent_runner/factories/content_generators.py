@@ -1,18 +1,35 @@
 """Agent Runner content generators.
 
 Holds :class:`SubprocessContentGenerator`,
-:class:`SafePlannerContentGenerator`, and the agent-command builders used
-by both content generation and REPL flows. Extracted out of
+:class:`SafePlannerContentGenerator`. Extracted out of
 :mod:`backend.engines.agent_runner.factory` so the content-side and
 repository-side concerns can live in separate files.
+
+命令构造已全部收敛到 :func:`build_agent_invocation`：只读用途映射到
+profile ``"generate"``，REPL 用途映射到 profile ``"repl"``；planner 的
+只读门禁读注册表 spec 的 ``read_only`` 字段，不再枚举 agent 名。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from backend.core.shared.interfaces.agent_output_protocol import (
+    PLAIN_PROTOCOL_ID,
+    IAgentOutputProtocolRegistry,
+    OutputRelayRequest,
+)
 from backend.core.shared.interfaces.agent_runner import IContentGenerator
-from backend.core.shared.models.agent_runner import CommandResult
+from backend.core.shared.models.agent_runner import AppConfig, CommandResult
+from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_GENERATE,
+    AGENT_PROFILE_REPL,
+    PROMPT_DELIVERY_STDIN,
+)
+from backend.core.use_cases.agent_invocation import (
+    build_agent_invocation,
+    resolve_profile_spec,
+)
 from backend.infrastructure.process_runner import SubprocessRunner
 
 
@@ -27,9 +44,19 @@ class SubprocessContentGenerator(IContentGenerator):
         process_runner: SubprocessRunner,
         *,
         read_only: bool = True,
+        config: AppConfig | None = None,
+        protocol_registry: IAgentOutputProtocolRegistry | None = None,
     ) -> None:
         self._process_runner = process_runner
         self._read_only = read_only
+        self._config = config or AppConfig()
+        if protocol_registry is None:
+            from backend.engines.agent_runner.output_protocols import (
+                get_output_protocol_registry,
+            )
+
+            protocol_registry = get_output_protocol_registry()
+        self._protocol_registry = protocol_registry
 
     def generate(
         self,
@@ -42,96 +69,64 @@ class SubprocessContentGenerator(IContentGenerator):
         """Run a content generator and return its output.
 
         When the instance was constructed with ``read_only=True`` (the
-        default) the agent runs in its read-only sandbox. The REPL
-        entrypoint constructs the generator with ``read_only=False`` so
-        the agent can mutate files inside the user's confirmation model.
+        default) the invocation uses the agent's ``generate`` profile
+        (declared read-only). The REPL entrypoint constructs the
+        generator with ``read_only=False`` so the ``repl`` profile is
+        used, allowing file mutations inside the user's confirmation
+        model.
         """
-        command = _build_content_generation_command(
-            agent_name, prompt, cwd, read_only=self._read_only
-        )
+        profile = AGENT_PROFILE_REPL if not self._read_only else AGENT_PROFILE_GENERATE
+        invocation = build_agent_invocation(agent_name, profile, prompt, cwd, self._config)
+        if invocation.output_protocol != PLAIN_PROTOCOL_ID:
+            protocol = self._protocol_registry.resolve(invocation.output_protocol)
+            return protocol.relay(
+                OutputRelayRequest(
+                    argv=invocation.argv,
+                    cwd=cwd,
+                    prompt_text=prompt
+                    if invocation.prompt_delivery == PROMPT_DELIVERY_STDIN
+                    else None,
+                    prompt_delivery=invocation.prompt_delivery,
+                    timeout=timeout,
+                    collect_stdout=True,
+                )
+            )
         return self._process_runner.run(
-            command, cwd=cwd, capture_output=True, timeout=timeout, check=False
+            list(invocation.argv),
+            cwd=cwd,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+            input_text=prompt if invocation.prompt_delivery == PROMPT_DELIVERY_STDIN else None,
+            output_protocol=invocation.output_protocol,
         )
-
-
-def _build_content_generation_command(
-    agent_name: str,
-    prompt: str,
-    cwd: Path,
-    *,
-    read_only: bool = True,
-) -> list[str]:
-    """Build the agent command for content generation / REPL use.
-
-    Args:
-        agent_name: ``claude`` / ``codex`` / ``kimi`` (or any value that
-            should fall back to ``claude``).
-        prompt: Full prompt text passed to the agent.
-        cwd: Working directory for the agent subprocess.
-        read_only: When ``True`` (default), ``codex`` is invoked with
-            ``--sandbox read-only --ask-for-approval never`` so it cannot
-            modify the filesystem. When ``False`` (used by the REPL
-            entrypoint), the sandbox flag is dropped so the agent is free
-            to write files within the user's confirmation model. ``claude``
-            and ``kimi`` commands are unaffected by this flag because they
-            already have a single canonical invocation shape.
-
-    Returns:
-        Command argv ready to be handed to a process runner.
-    """
-    # codex / kimi 需显式指定；其余（"claude"、已解析的 "auto"、或任何未识别值）
-    # 一律构造 claude 命令，绝不静默落到 codex。
-    if agent_name == "codex":
-        if read_only:
-            return [
-                "codex",
-                "--cd",
-                str(cwd),
-                "--sandbox",
-                "read-only",
-                "--ask-for-approval",
-                "never",
-                "exec",
-                prompt,
-            ]
-        return [
-            "codex",
-            "--cd",
-            str(cwd),
-            "exec",
-            prompt,
-        ]
-    if agent_name == "kimi":
-        return ["kimi", "--prompt", prompt]
-    return [
-        "claude",
-        "--dangerously-skip-permissions",
-        "-p",
-        prompt,
-    ]
-
-
-def _build_repl_command(agent_name: str, prompt: str, cwd: Path) -> list[str]:
-    """Build the agent command used by the ``iar`` REPL entrypoint.
-
-    Delegates to :func:`_build_content_generation_command` with
-    ``read_only=False`` so that REPL-managed sessions do not run inside
-    ``codex``'s read-only sandbox. The REPL's own command executor
-    provides the safety boundary for arbitrary IAR subcommands.
-    """
-    return _build_content_generation_command(agent_name, prompt, cwd, read_only=False)
 
 
 class SafePlannerContentGenerator(IContentGenerator):
     """Generate decision plans via a local agent subprocess.
 
-    The planner delegates to the same agent command builders used for content
-    generation.  Callers are responsible for validating and sandboxing the
-    resulting plan; this runner does not enforce read-only execution.
+    The planner runs the agent's ``generate`` profile, which the registry
+    must declare ``read_only``——这是只读决策入口（planner / ``iar ask``）
+    的 fail-fast 门禁：spec 未声明只读时拒绝启动 agent。Callers are
+    responsible for validating and sandboxing the resulting plan.
     """
 
-    def __init__(self, process_runner: SubprocessRunner) -> None:
+    def __init__(
+        self,
+        process_runner: SubprocessRunner,
+        *,
+        config: AppConfig | None = None,
+        protocol_registry: IAgentOutputProtocolRegistry | None = None,
+    ) -> None:
         self._process_runner = process_runner
+        self._config = config or AppConfig()
+        if protocol_registry is None:
+            from backend.engines.agent_runner.output_protocols import (
+                get_output_protocol_registry,
+            )
+
+            protocol_registry = get_output_protocol_registry()
+        self._protocol_registry = protocol_registry
 
     def generate(
         self,
@@ -141,53 +136,80 @@ class SafePlannerContentGenerator(IContentGenerator):
         cwd: Path,
         timeout: int | None = None,
     ) -> CommandResult:
-        """Run a planner agent and return its output."""
-        command = _build_planner_command(agent_name, prompt, cwd)
+        """Run a planner agent and return its output.
+
+        Raises:
+            ValueError: 该 agent 的 ``generate`` profile 未声明
+                ``read_only``，不允许作为只读 planner 启动。
+        """
+        profile_spec = resolve_profile_spec(agent_name, AGENT_PROFILE_GENERATE, self._config)
+        if not profile_spec.read_only:
+            raise ValueError(
+                f"Agent '{agent_name}' profile '{AGENT_PROFILE_GENERATE}' is not declared "
+                f"read_only in the agent registry; refusing to start it for read-only "
+                f"decision planning. Declare read_only = true for this profile to allow it."
+            )
+        invocation = build_agent_invocation(
+            agent_name, AGENT_PROFILE_GENERATE, prompt, cwd, self._config
+        )
+        if invocation.output_protocol != PLAIN_PROTOCOL_ID:
+            protocol = self._protocol_registry.resolve(invocation.output_protocol)
+            return protocol.relay(
+                OutputRelayRequest(
+                    argv=invocation.argv,
+                    cwd=cwd,
+                    prompt_text=prompt
+                    if invocation.prompt_delivery == PROMPT_DELIVERY_STDIN
+                    else None,
+                    prompt_delivery=invocation.prompt_delivery,
+                    timeout=timeout,
+                    collect_stdout=True,
+                )
+            )
         return self._process_runner.run(
-            command, cwd=cwd, capture_output=True, timeout=timeout, check=False
+            list(invocation.argv),
+            cwd=cwd,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+            input_text=prompt if invocation.prompt_delivery == PROMPT_DELIVERY_STDIN else None,
+            output_protocol=invocation.output_protocol,
         )
-
-
-def _build_planner_command(agent_name: str, prompt: str, cwd: Path) -> list[str]:
-    """Return a command for the given planner agent.
-
-    The planner reuses the content-generation command builders so that all
-    supported agents can act as planners.  Planner output is still expected
-    to be a JSON DecisionPlan and is validated by the core use case.
-
-    Raises:
-        ValueError: If the agent is not one of the supported planner agents.
-    """
-    if agent_name not in ("claude", "codex", "kimi"):
-        raise ValueError(
-            f"Agent '{agent_name}' does not have a command builder "
-            f"for interactive decision planning. Use 'claude', 'codex', or 'kimi'."
-        )
-    return _build_content_generation_command(agent_name, prompt, cwd)
 
 
 def create_planner_runner(
     process_runner: SubprocessRunner | None = None,
+    *,
+    config: AppConfig | None = None,
+    protocol_registry: IAgentOutputProtocolRegistry | None = None,
 ) -> SafePlannerContentGenerator:
     """Create a safe planner runner instance."""
-    return SafePlannerContentGenerator(process_runner or SubprocessRunner())
+    return SafePlannerContentGenerator(
+        process_runner or SubprocessRunner(),
+        config=config,
+        protocol_registry=protocol_registry,
+    )
 
 
 def create_content_generator(
     process_runner: SubprocessRunner | None = None,
     *,
     read_only: bool = True,
+    config: AppConfig | None = None,
+    protocol_registry: IAgentOutputProtocolRegistry | None = None,
 ) -> SubprocessContentGenerator:
     """Create a content generator instance."""
-    return SubprocessContentGenerator(process_runner or SubprocessRunner(), read_only=read_only)
+    return SubprocessContentGenerator(
+        process_runner or SubprocessRunner(),
+        read_only=read_only,
+        config=config,
+        protocol_registry=protocol_registry,
+    )
 
 
 __all__ = [
     "SafePlannerContentGenerator",
     "SubprocessContentGenerator",
-    "_build_content_generation_command",
-    "_build_planner_command",
-    "_build_repl_command",
     "create_content_generator",
     "create_planner_runner",
 ]

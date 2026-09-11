@@ -40,6 +40,7 @@ from backend.core.shared.models.agent_runner import (
     GeneratedPrContent,
     IssueSummary,
 )
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 
 _logger = logging.getLogger(__name__)
 
@@ -663,9 +664,11 @@ _CC_SWITCH_SKILLS_DIR_ENV_VAR = "CC_SWITCH_SKILLS_DIR"
 _PRD_SKILL_RELATIVE_PATH = Path("prd") / "SKILL.md"
 _DEFAULT_PRD_SKILL_ROOT_RELATIVE_PATHS: tuple[Path, ...] = (
     Path(".cc-switch") / "skills",
-    Path(".codex") / "skills",
-    Path(".claude") / "skills",
-    Path(".kimi-code") / "skills",
+    *(
+        Path(agent_spec.project_skills_dir)
+        for agent_spec in BUILTIN_AGENT_SPECS.values()
+        if agent_spec.project_skills_dir is not None
+    ),
 )
 
 
@@ -674,8 +677,8 @@ def resolve_prd_skill_path(explicit_path: Path | None = None) -> Path:
 
     解析优先级：显式入参 → ``IAR_PRD_SKILL_PATH`` 环境变量 →
     ``CC_SWITCH_SKILLS_DIR`` → 模板安装器的用户级目录
-    （``~/.cc-switch/skills``、``~/.codex/skills``、``~/.claude/skills``、
-    ``~/.kimi-code/skills``）。
+    （``~/.cc-switch/skills`` 与 agent 注册表各 agent 的
+    ``project_skills_dir`` 用户级目录）。
     默认候选中优先返回存在的 ``SKILL.md``；全部缺失时返回第一个候选，
     由调用方保留现有 fallback 行为。
 

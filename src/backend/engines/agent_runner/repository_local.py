@@ -164,6 +164,7 @@ TOML_HEADER_COMMENT = """# IAR 本地仓库配置
 _IAR_SECTION_ORDER = (
     "repository",
     "labels",
+    "agents",
     "git",
     "worktree",
     "runner",
@@ -185,6 +186,7 @@ _IAR_SECTION_ORDER = (
 _IAR_SECTION_COMMENTS: dict[str, str] = {
     "repository": "仓库身份标识（用于多仓库管理时区分不同仓库）",
     "labels": "GitHub labels 状态流转配置",
+    "agents": "agent 注册表：每个 agent 的调用形态（bin / 路由标签 / 容器认证 / 四种用途的 argv 与输出协议）",
     "git": "Git 发布配置：推送 remote、目标基础分支 base_branch",
     "worktree": "Issue worktree 的创建与定位命令；默认使用 iar worktree，通常无需修改",
     "runner": "Runner 行为配置：每轮处理 Issue 数量、默认 agent、提交前验证命令",
@@ -356,6 +358,59 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
 }
 
 
+# `.iar.toml` 模板末尾追加的注释示例：以 pi 的注册块演示
+# `[agent_runner.agents.<name>]` 的完整写法（pi 已内置，照抄即可用；
+# 接入全新 agent 时取消注释并按需修改）。
+_AGENT_REGISTRY_EXAMPLE_COMMENT = """\
+#
+# =============================================================================
+# Agent 注册表：[agent_runner.agents.<name>] 声明 agent 的调用形态
+# =============================================================================
+# 字段：bin（可执行文件）、label / label_color / label_description（路由标签）、
+# auth_home / auth_include / auth_exclude（容器认证目录）、
+# project_skills_dir（项目级 skills 目录），以及四种用途 profile：
+# run（主执行）/ deliberate（辩论）/ generate（内容生成）/ repl（交互），
+# 各自可声明 args（argv 片段，字面量，支持 {cwd}/{prompt}/{worktree} 占位符）、
+# prompt_delivery（argv_tail / flag / stdin）、prompt_flag（flag 投递时的参数名）、
+# output_protocol（plain / claude-stream-json / pi-json-lines 或插件协议）、
+# expand（展开器声明，如 "git_writable_roots:--add-dir"）、tail_args、read_only。
+#
+# 下面是 pi 的注册块示例（内置默认已生效，无需复制即可用）：
+#
+# [agent_runner.agents.pi]
+# bin = "pi"
+# label = "agent/pi"
+# label_color = "7C3AED"
+# label_description = "Use pi for local runner execution."
+# auth_home = "~/.pi/agent"
+# auth_include = ["auth.json", "settings.json", "models.json", "skills"]
+# auth_exclude = ["sessions", "pi-crash.log", "models-store.json"]
+# project_skills_dir = ".pi/skills"
+#
+# [agent_runner.agents.pi.profiles.run]
+# args = ["--approve", "--mode", "json"]
+# prompt_delivery = "stdin"
+# output_protocol = "pi-json-lines"
+#
+# [agent_runner.agents.pi.profiles.deliberate]
+# args = ["--approve", "--no-tools", "--print"]
+# prompt_delivery = "stdin"
+# output_protocol = "plain"
+# read_only = true
+#
+# [agent_runner.agents.pi.profiles.generate]
+# args = ["--no-tools", "--print"]
+# prompt_delivery = "stdin"
+# output_protocol = "plain"
+# read_only = true
+#
+# [agent_runner.agents.pi.profiles.repl]
+# args = ["--approve", "--print"]
+# prompt_delivery = "stdin"
+# output_protocol = "plain"
+"""
+
+
 def settings_to_toml_string(settings: AgentRunnerLocalSettings) -> str:
     """Serialize AgentRunnerLocalSettings to a commented .iar.toml string."""
 
@@ -364,7 +419,7 @@ def settings_to_toml_string(settings: AgentRunnerLocalSettings) -> str:
     wrapped = {"agent_runner": data}
     toml_body = tomli_w.dumps(wrapped)
     annotated_body = _annotate_iar_toml(toml_body)
-    return TOML_HEADER_COMMENT + "\n" + annotated_body
+    return TOML_HEADER_COMMENT + "\n" + annotated_body + _AGENT_REGISTRY_EXAMPLE_COMMENT
 
 
 def _annotate_iar_toml(toml_body: str) -> str:

@@ -609,6 +609,7 @@ def test_run_pre_pr_review_runs_agent_and_approves_when_no_changes(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -699,6 +700,7 @@ def test_run_pre_pr_review_commits_reviewer_changes(tmp_path: Path) -> None:
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -773,7 +775,17 @@ class _PatchingReviewRunner(FakeProcessRunner):
         )
         self._verdict = verdict
 
-    def run(self, command, *, cwd, check=True, timeout=None, capture_output=True, label=None):
+    def run(
+        self,
+        command,
+        *,
+        cwd,
+        check=True,
+        timeout=None,
+        capture_output=True,
+        label=None,
+        output_protocol=None,
+    ):
         command_tuple = tuple(command)
         if command_tuple[:1] == ("codex",):
             self.calls.append(list(command))
@@ -926,6 +938,7 @@ def test_run_pre_pr_review_empty_commit_request_with_approval_converges(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1019,6 +1032,7 @@ def test_run_pre_pr_review_uses_commit_request_verdict_when_stdout_unparseable(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1109,6 +1123,7 @@ def test_run_pre_pr_review_empty_commit_request_changes_requested_soft_fails(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1167,6 +1182,7 @@ def test_run_pre_pr_review_rejects_changes_requested_without_commit_request(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1225,6 +1241,7 @@ def test_run_pre_pr_review_passes_configured_timeout(tmp_path: Path) -> None:
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1286,6 +1303,7 @@ def test_run_pre_pr_review_soft_fails_with_findings_on_last_cycle(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1390,6 +1408,7 @@ def test_run_pre_pr_review_reminds_reviewer_then_commits(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1481,6 +1500,7 @@ def test_run_pre_pr_review_zero_reminder_attempts_fails_fast(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1581,6 +1601,7 @@ def test_run_pre_pr_review_last_cycle_final_patch_is_accepted(
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1665,6 +1686,7 @@ def test_run_pre_pr_review_retries_transient_reviewer_error(tmp_path: Path) -> N
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1728,6 +1750,7 @@ def test_run_pre_pr_review_escalates_provider_capacity(tmp_path: Path) -> None:
             timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1851,7 +1874,17 @@ def test_run_pre_pr_review_feeds_commit_failure_to_next_cycle(tmp_path: Path) ->
             )
             self.review_prompts: list[str] = []
 
-        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True, label=None):
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            check=True,
+            timeout=None,
+            capture_output=True,
+            label=None,
+            output_protocol=None,
+        ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
                 self.calls.append(list(command))

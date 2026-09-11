@@ -186,6 +186,7 @@ def test_run_once_success(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -302,6 +303,7 @@ def test_run_once_failure_removes_supervising_label(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -414,6 +416,7 @@ def test_run_once_git_mv_prd_before_commit(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "rev-parse", "HEAD"):
@@ -527,6 +530,7 @@ def test_run_once_recovers_after_prd_delivery_failure(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -702,6 +706,7 @@ def test_run_once_passes_prd_baseline_to_change_log_gate(tmp_path: Path) -> None
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))

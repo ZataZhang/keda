@@ -397,6 +397,7 @@ def test_ensure_worktree_branch_resolves_conflicts_via_agent(tmp_path: Path) -> 
             capture_output=True,
             input_text=None,
             label=None,
+            output_protocol=None,
         ):
             if command[0] in ("claude", "kimi", "codex"):
                 request_path = cwd / ".agent-runner" / "commit-request.json"
@@ -618,6 +619,7 @@ def test_run_once_rebase_conflict_detached_head(
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "branch", "--show-current"):

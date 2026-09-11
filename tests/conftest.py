@@ -53,8 +53,12 @@ class FakeGitHubClient(IGitHubClient):
         self._prs_by_repo_issue: dict[tuple[str, int], list[PullRequestSummary]] = {}
         self._list_issues_by_label_result: list[IssueSummary] = []
 
-    def sync_labels(self, labels: LabelConfig) -> None:
-        self.calls.append({"method": "sync_labels", "labels": labels})
+    def sync_labels(
+        self, labels: LabelConfig, agent_registry: dict[str, object] | None = None
+    ) -> None:
+        self.calls.append(
+            {"method": "sync_labels", "labels": labels, "agent_registry": agent_registry}
+        )
 
     def list_ready_issues(self, ready_label: str, limit: int) -> list[IssueSummary]:
         self.calls.append(
@@ -316,6 +320,7 @@ class FakeProcessRunner(IProcessRunner):
         input_text: str | None = None,
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
+        output_protocol: str | None = None,
     ) -> CommandResult:
         command_list = list(command)
         # When the runner wraps verification commands in ``bash -lc``,

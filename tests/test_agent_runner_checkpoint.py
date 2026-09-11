@@ -376,6 +376,7 @@ def test_run_once_reuses_existing_clean_local_commit(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -458,6 +459,7 @@ def test_run_once_recovers_running_issue_with_existing_local_commit(
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))

@@ -40,6 +40,10 @@ from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
     LabelConfig,
 )
+from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_GENERATE,
+    BUILTIN_AGENT_SPECS,
+)
 from backend.core.use_cases.agent_runner_dependencies import (
     format_dependency_marker,
     parse_dependency_marker,
@@ -854,8 +858,13 @@ def resolve_agent_name(agent_name: str, default: str = "claude") -> str:
 
     CLI and config accept ``"auto"`` / ``"none"`` as aliases; this helper
     normalises them to a real agent that ``IContentGenerator`` can execute.
+    合法性由 agent 注册表成员校验：只有声明了 ``generate`` 用途（内容
+    生成能力）的 agent 会被接受，其余回落默认值。
     """
-    return agent_name if agent_name in ("claude", "codex", "kimi") else default
+    agent_spec = BUILTIN_AGENT_SPECS.get(agent_name)
+    if agent_spec is not None and AGENT_PROFILE_GENERATE in agent_spec.profiles:
+        return agent_name
+    return default
 
 
 def _parse_evidence_format_with_agent(

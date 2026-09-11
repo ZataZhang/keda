@@ -10,7 +10,11 @@ from backend.core.shared.models.agent_runner import (
     PostPrSupervisorConfig,
     PrePrReviewConfig,
 )
-from backend.core.use_cases.run_agent_once import _AGENT_COMMAND_BUILDERS
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.use_cases.agent_invocation import (
+    build_agent_invocation,
+    resolve_registered_agents,
+)
 from backend.engines.agent_runner.factory import build_app_config
 from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config.settings import (
@@ -152,8 +156,15 @@ def test_iar_toml_key_table_documents_closeout_settings() -> None:
 
 
 def test_settings_and_core_agent_labels_are_identical() -> None:
-    """AgentRunnerLabelSettings must aggregate the same keys as Core LabelConfig."""
-    assert AgentRunnerLabelSettings().agent_labels == CoreLabelConfig().agent_labels
+    """settings + agent 注册表派生的路由标签必须与 Core LabelConfig 一致。"""
+    from backend.engines.agent_runner.factory_config_builder import (
+        build_label_config_from_settings,
+    )
+
+    settings_derived = build_label_config_from_settings(
+        AgentRunnerLabelSettings(), dict(BUILTIN_AGENT_SPECS)
+    )
+    assert settings_derived.agent_labels == CoreLabelConfig().agent_labels
 
 
 def test_infra_label_config_matches_core_label_config() -> None:
@@ -161,13 +172,14 @@ def test_infra_label_config_matches_core_label_config() -> None:
     assert InfraLabelConfig().agent_labels == CoreLabelConfig().agent_labels
 
 
-def test_every_non_default_agent_has_a_command_builder() -> None:
-    """Every agent in LabelConfig (except the codex fallback) must be runnable."""
-    core_labels = CoreLabelConfig().agent_labels
-    supported = set(_AGENT_COMMAND_BUILDERS) | {"codex"}
-    assert (
-        set(core_labels) <= supported
-    ), f"Missing command builders for {set(core_labels) - supported}"
+def test_every_registered_agent_can_build_run_invocation() -> None:
+    """注册表里的每个 agent 都必须声明 run 用途且能构造完整调用（可运行性守卫）。"""
+    config = CoreAppConfig()
+    for agent_name in resolve_registered_agents(config):
+        invocation = build_agent_invocation(
+            agent_name, "run", "prompt", Path("/tmp/worktree"), config
+        )
+        assert invocation.argv[0] == config.agents[agent_name].bin
 
 
 def test_label_config_includes_supervising() -> None:
@@ -244,7 +256,9 @@ def test_merge_label_config_preserves_every_overridden_field() -> None:
     overrides = {name: f"override/{name}" for name in field_names}
     override_settings = AgentRunnerLabelSettings(**overrides)
 
-    merged = _merge_label_config(CoreLabelConfig(), override_settings)
+    merged = _merge_label_config(
+        CoreLabelConfig(), override_settings, agent_registry=dict(BUILTIN_AGENT_SPECS)
+    )
 
     for field_name, value in overrides.items():
         assert (
@@ -301,15 +315,16 @@ def test_factory_build_app_config_maps_supervising() -> None:
     assert app_config.post_pr_supervisor.enabled is True
 
 
-def test_deliberation_profiles_reference_runnable_agents() -> None:
-    """Default deliberation profiles must reference agents with command builders."""
+def test_deliberation_profiles_reference_registered_agents() -> None:
+    """Default deliberation profiles must reference registered agents."""
 
     deliberation = AgentRunnerDeliberationSettings()
-    supported = set(_AGENT_COMMAND_BUILDERS) | {"codex"}
+    config = CoreAppConfig()
+    registered = set(resolve_registered_agents(config))
     for profile_id, profile in deliberation.profiles.items():
         assert (
-            profile.agent in supported
-        ), f"Deliberation profile '{profile_id}' references unrunnable agent '{profile.agent}'"
+            profile.agent in registered
+        ), f"Deliberation profile '{profile_id}' references unregistered agent '{profile.agent}'"
 
 
 def test_app_config_has_deliberation() -> None:
@@ -323,36 +338,34 @@ def test_app_config_has_deliberation() -> None:
     assert profile_ids == {"architect", "skeptic", "implementer"}
 
 
-def test_default_planner_agent_has_command_builder() -> None:
-    """Default planner agent must have a supported command builder."""
-    from backend.engines.agent_runner.factory import _build_planner_command
-
-    settings = AgentRunnerSettings()
-    default_agent = settings.interactive_decision.default_agent
-    # Must not raise for the default agent
-    command = _build_planner_command(default_agent, "test prompt", Path("/tmp"))
-    assert isinstance(command, list)
-    assert len(command) > 0
-    assert command[0] == default_agent
+def test_default_planner_agent_has_generate_profile() -> None:
+    """Default planner agent must build a generate-profile invocation."""
+    config = CoreAppConfig()
+    default_agent = AgentRunnerSettings().interactive_decision.default_agent
+    invocation = build_agent_invocation(
+        default_agent, "generate", "test prompt", Path("/tmp/worktree"), config
+    )
+    assert invocation.argv[0] == default_agent
+    assert invocation.read_only is True
 
 
 def test_planner_command_builders_for_supported_agents() -> None:
-    """All supported agents can build planner commands."""
-    from backend.engines.agent_runner.factory import _build_planner_command
-
-    for agent_name in ("claude", "codex", "kimi"):
-        command = _build_planner_command(agent_name, "test prompt", Path("/tmp"))
-        assert isinstance(command, list)
-        assert len(command) > 0
-        assert command[0] == agent_name
+    """All registered agents can build planner (generate-profile) invocations."""
+    config = CoreAppConfig()
+    for agent_name in ("claude", "codex", "kimi", "pi"):
+        invocation = build_agent_invocation(
+            agent_name, "generate", "test prompt", Path("/tmp/worktree"), config
+        )
+        assert invocation.argv[0] == agent_name
 
 
 def test_unknown_planner_agent_fails_fast() -> None:
-    """Unsupported agents must raise ValueError for planner command builder."""
-    from backend.engines.agent_runner.factory import _build_planner_command
-
-    with pytest.raises(ValueError, match="does not have a command builder"):
-        _build_planner_command("unknown-agent", "test prompt", Path("/tmp"))
+    """Unregistered agents must raise ValueError for planner invocation (no silent fallback)."""
+    config = CoreAppConfig()
+    with pytest.raises(ValueError, match="not registered"):
+        build_agent_invocation(
+            "unknown-agent", "generate", "test prompt", Path("/tmp/worktree"), config
+        )
 
 
 def test_interactive_decision_settings_have_sane_defaults() -> None:
@@ -368,52 +381,48 @@ def test_interactive_decision_settings_have_sane_defaults() -> None:
     assert ids.allow_execute_yes is True
 
 
-def test_content_generation_command_defaults_to_claude() -> None:
-    """内容生成命令构造器：codex 需显式指定，其余（含已解析的 auto / 未识别值）都走 claude。"""
-    from backend.engines.agent_runner.factory import _build_content_generation_command
+def test_content_generation_invocations_come_from_registry() -> None:
+    """内容生成调用统一走构造器：注册表内 agent 直接构造，注册表外 fail fast。"""
+    config = CoreAppConfig()
 
-    for agent_name in ("auto", "claude", "gpt-unknown"):
-        command = _build_content_generation_command(agent_name, "prompt", Path("/tmp"))
-        assert command[0] == "claude", f"{agent_name} should build the claude command"
-        assert "--dangerously-skip-permissions" in command
-
-    codex_command = _build_content_generation_command("codex", "prompt", Path("/tmp"))
-    assert codex_command[0] == "codex"
-    assert "exec" in codex_command
-
-    kimi_command = _build_content_generation_command("kimi", "prompt", Path("/tmp"))
-    assert kimi_command[0] == "kimi"
-
-
-def test_content_generation_command_codex_read_only_flag() -> None:
-    """read_only=True (default) keeps the codex read-only sandbox; False drops it."""
-    from backend.engines.agent_runner.factory import _build_content_generation_command
-
-    read_only_command = _build_content_generation_command(
-        "codex", "prompt", Path("/tmp"), read_only=True
+    claude_invocation = build_agent_invocation(
+        "claude", "generate", "prompt", Path("/tmp/worktree"), config
     )
-    assert "read-only" in read_only_command
-    assert "--ask-for-approval" in read_only_command
+    assert claude_invocation.argv[0] == "claude"
+    assert "--dangerously-skip-permissions" in claude_invocation.argv
 
-    write_command = _build_content_generation_command(
-        "codex", "prompt", Path("/tmp"), read_only=False
+    codex_invocation = build_agent_invocation(
+        "codex", "generate", "prompt", Path("/tmp/worktree"), config
     )
-    assert "read-only" not in write_command
-    assert "--ask-for-approval" not in write_command
+    assert codex_invocation.argv[0] == "codex"
+    assert "exec" in codex_invocation.argv
 
-
-def test_build_repl_command_matches_write_mode() -> None:
-    """``_build_repl_command`` must use ``read_only=False`` for codex."""
-    from backend.engines.agent_runner.factory import (
-        _build_content_generation_command,
-        _build_repl_command,
+    kimi_invocation = build_agent_invocation(
+        "kimi", "generate", "prompt", Path("/tmp/worktree"), config
     )
+    assert kimi_invocation.argv[0] == "kimi"
 
-    repl_command = _build_repl_command("codex", "prompt", Path("/tmp"))
-    write_command = _build_content_generation_command(
-        "codex", "prompt", Path("/tmp"), read_only=False
+    with pytest.raises(ValueError):
+        build_agent_invocation("gpt-unknown", "generate", "prompt", Path("/tmp/worktree"), config)
+
+
+def test_content_generation_codex_read_only_flag() -> None:
+    """codex generate 声明只读（read-only 沙箱），repl 是可写形态。"""
+    config = CoreAppConfig()
+
+    read_only_invocation = build_agent_invocation(
+        "codex", "generate", "prompt", Path("/tmp/worktree"), config
     )
-    assert repl_command == write_command
+    assert "read-only" in read_only_invocation.argv
+    assert "--ask-for-approval" in read_only_invocation.argv
+    assert read_only_invocation.read_only is True
+
+    repl_invocation = build_agent_invocation(
+        "codex", "repl", "prompt", Path("/tmp/worktree"), config
+    )
+    assert "read-only" not in repl_invocation.argv
+    assert "--ask-for-approval" not in repl_invocation.argv
+    assert repl_invocation.read_only is False
 
 
 def test_local_iar_toml_can_override_repl_section(tmp_path: Path) -> None:

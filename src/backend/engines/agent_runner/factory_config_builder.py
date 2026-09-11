@@ -29,7 +29,16 @@ from backend.core.shared.models.agent_runner import (
     ValidationConfig,
     WorktreeConfig,
 )
+from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILES,
+    BUILTIN_AGENT_SPECS,
+    PROMPT_DELIVERIES,
+    AgentProfileSpec,
+    AgentSpec,
+)
 from backend.infrastructure.config.settings import (
+    AgentRunnerAgentProfileSettings,
+    AgentRunnerAgentSettings,
     AgentRunnerDeliberationSettings,
     AgentRunnerGeneratedContentSettings,
     AgentRunnerGeneratedContentTargetSettings,
@@ -130,6 +139,234 @@ def _build_repl_config(repl_settings: AgentRunnerReplSettings) -> ReplConfig:
     )
 
 
+def _merge_profile_settings(
+    base_profile: AgentProfileSpec | None,
+    profile_settings: AgentRunnerAgentProfileSettings | None,
+    *,
+    agent_name: str,
+    profile_name: str,
+) -> AgentProfileSpec:
+    """把单个用途的稀疏配置覆盖合并到基础 profile spec 上。
+
+    Args:
+        base_profile: 内置（或全局层）基础 spec；全新用途时为 ``None``。
+        profile_settings: 配置声明；``None`` 时直接返回基础 spec。
+        agent_name: 报错上下文用的 agent 名。
+        profile_name: 报错上下文用的用途名。
+
+    Returns:
+        合并后的 :class:`AgentProfileSpec`。
+
+    Raises:
+        ValueError: 用途名不在闭集、``prompt_delivery`` 非法、或全新用途
+            缺 ``prompt_delivery`` 等关键字段。
+    """
+    if profile_name not in AGENT_PROFILES:
+        raise ValueError(
+            f"agents.{agent_name}.profiles.{profile_name}: unknown profile "
+            f"'{profile_name}'. Valid profiles: {', '.join(AGENT_PROFILES)}."
+        )
+    if profile_settings is None:
+        if base_profile is None:
+            raise ValueError(
+                f"agents.{agent_name}.profiles.{profile_name} is declared empty and "
+                f"has no built-in default; declare at least prompt_delivery."
+            )
+        return base_profile
+    declared = profile_settings.model_fields_set
+    prompt_delivery = profile_settings.prompt_delivery
+    if prompt_delivery is None:
+        if base_profile is None:
+            raise ValueError(
+                f"agents.{agent_name}.profiles.{profile_name}: prompt_delivery is "
+                f"required for a new profile. Valid values: {', '.join(PROMPT_DELIVERIES)}."
+            )
+        prompt_delivery = base_profile.prompt_delivery
+    elif prompt_delivery not in PROMPT_DELIVERIES:
+        raise ValueError(
+            f"agents.{agent_name}.profiles.{profile_name}: invalid prompt_delivery "
+            f"'{prompt_delivery}'. Valid values: {', '.join(PROMPT_DELIVERIES)}."
+        )
+    if prompt_delivery == "flag" and profile_settings.prompt_flag is None:
+        base_prompt_flag = base_profile.prompt_flag if base_profile is not None else None
+    else:
+        base_prompt_flag = None
+    prompt_flag = profile_settings.prompt_flag if "prompt_flag" in declared else base_prompt_flag
+    if prompt_delivery == "flag" and not prompt_flag:
+        raise ValueError(
+            f"agents.{agent_name}.profiles.{profile_name}: prompt_delivery='flag' "
+            f"requires prompt_flag."
+        )
+    return AgentProfileSpec(
+        args=tuple(
+            profile_settings.args
+            if profile_settings.args is not None
+            else (base_profile.args if base_profile is not None else ())
+        ),
+        prompt_flag=prompt_flag,
+        prompt_delivery=prompt_delivery,
+        output_protocol=(
+            profile_settings.output_protocol
+            if profile_settings.output_protocol is not None
+            else (base_profile.output_protocol if base_profile is not None else "plain")
+        ),
+        tail_args=tuple(
+            profile_settings.tail_args
+            if profile_settings.tail_args is not None
+            else (base_profile.tail_args if base_profile is not None else ())
+        ),
+        expand=tuple(
+            profile_settings.expand
+            if profile_settings.expand is not None
+            else (base_profile.expand if base_profile is not None else ())
+        ),
+        read_only=(
+            profile_settings.read_only
+            if profile_settings.read_only is not None
+            else (base_profile.read_only if base_profile is not None else False)
+        ),
+    )
+
+
+def _merge_agent_settings(
+    agent_name: str,
+    agent_settings: AgentRunnerAgentSettings,
+    base_spec: AgentSpec | None,
+) -> AgentSpec:
+    """把一个 ``[agent_runner.agents.<name>]`` 声明合并到基础 spec 上。
+
+    覆盖既有 agent 时未声明字段逐字段回落内置默认；注册全新 agent 时
+    ``bin`` / ``label`` 必填。
+    """
+    if base_spec is None and (agent_settings.bin is None or agent_settings.label is None):
+        missing_fields = ", ".join(
+            field_name
+            for field_name, value in (
+                ("bin", agent_settings.bin),
+                ("label", agent_settings.label),
+            )
+            if value is None
+        )
+        raise ValueError(f"agents.{agent_name}: new agent registration requires {missing_fields}.")
+    label_color = agent_settings.label_color
+    if label_color is not None and (
+        len(label_color) != 6 or any(c not in "0123456789abcdefABCDEF" for c in label_color)
+    ):
+        raise ValueError(
+            f"agents.{agent_name}: label_color must be 6 hex digits (without '#'); "
+            f"got {label_color!r}."
+        )
+    profiles: dict[str, AgentProfileSpec] = {}
+    for profile_name in AGENT_PROFILES:
+        profile_settings = agent_settings.profiles.get(profile_name)
+        # 全新 agent 只要求"四种用途至少声明一种"：未声明的用途直接跳过，
+        # 不触发"声明为空且无内置默认"的报错（那是显式写空段 `[...profiles.x]` 的情况）。
+        if base_spec is None and profile_settings is None:
+            continue
+        merged_profile = _merge_profile_settings(
+            base_spec.profiles.get(profile_name) if base_spec is not None else None,
+            profile_settings,
+            agent_name=agent_name,
+            profile_name=profile_name,
+        )
+        if merged_profile is not None:
+            profiles[profile_name] = merged_profile
+    for profile_name in agent_settings.profiles:
+        if profile_name not in AGENT_PROFILES:
+            _merge_profile_settings(
+                None,
+                agent_settings.profiles[profile_name],
+                agent_name=agent_name,
+                profile_name=profile_name,
+            )
+    return AgentSpec(
+        bin=agent_settings.bin
+        if agent_settings.bin is not None
+        else (base_spec.bin if base_spec else agent_settings.bin),  # type: ignore[union-attr]
+        label=agent_settings.label
+        if agent_settings.label is not None
+        else (base_spec.label if base_spec else agent_settings.label),  # type: ignore[union-attr]
+        label_color=label_color
+        if label_color is not None
+        else (base_spec.label_color if base_spec else "5319E7"),
+        label_description=(
+            agent_settings.label_description
+            if agent_settings.label_description is not None
+            else (base_spec.label_description if base_spec else "")
+        ),
+        auth_home=(
+            agent_settings.auth_home
+            if agent_settings.auth_home is not None
+            else (base_spec.auth_home if base_spec else None)
+        ),
+        auth_include=tuple(
+            agent_settings.auth_include
+            if agent_settings.auth_include is not None
+            else (base_spec.auth_include if base_spec else ())
+        ),
+        auth_exclude=tuple(
+            agent_settings.auth_exclude
+            if agent_settings.auth_exclude is not None
+            else (base_spec.auth_exclude if base_spec else ())
+        ),
+        project_skills_dir=(
+            agent_settings.project_skills_dir
+            if agent_settings.project_skills_dir is not None
+            else (base_spec.project_skills_dir if base_spec else None)
+        ),
+        profiles=profiles,
+    )
+
+
+def build_agent_registry_from_settings(
+    agent_settings: dict[str, AgentRunnerAgentSettings],
+    *,
+    base_registry: dict[str, AgentSpec] | None = None,
+) -> dict[str, AgentSpec]:
+    """从配置的 ``agents`` 声明构建完整 agent 注册表。
+
+    内置默认（``BUILTIN_AGENT_SPECS`` 或调用方给定的基础注册表）在前，
+    配置声明逐字段覆盖在后；覆盖既有 agent 保持其原注册顺序，新 agent
+    追加在末尾（``choose_agent`` 的标签匹配按先到先得）。
+    """
+    registry = dict(base_registry if base_registry is not None else BUILTIN_AGENT_SPECS)
+    for agent_name, agent_settings in agent_settings.items():
+        registry[agent_name] = _merge_agent_settings(
+            agent_name, agent_settings, registry.get(agent_name)
+        )
+    return registry
+
+
+def build_label_config_from_settings(
+    label_settings,
+    agent_registry: dict[str, AgentSpec],
+) -> LabelConfig:
+    """从 agent 注册表派生 ``LabelConfig``，并应用旧版 labels 键的兼容覆盖。
+
+    ``agent_labels`` 由注册表按注册顺序派生（agent 名 -> 路由标签）；
+    ``[agent_runner.labels]`` 的 ``codex`` / ``claude`` / ``kimi`` 旧键
+    仍作为对应 agent 标签的覆盖来源（FR-12）。
+    """
+    agent_labels = {name: spec.label for name, spec in agent_registry.items()}
+    agent_labels.update(label_settings.legacy_agent_label_overrides())
+    return LabelConfig(
+        ready=label_settings.ready,
+        running=label_settings.running,
+        supervising=label_settings.supervising,
+        review=label_settings.review,
+        failed=label_settings.failed,
+        blocked=label_settings.blocked,
+        waiting=label_settings.waiting,
+        validation_pending=label_settings.validation_pending,
+        validation_passed=label_settings.validation_passed,
+        verifier_passed=label_settings.verifier_passed,
+        group_prefix=label_settings.group_prefix,
+        rework_prd=label_settings.rework_prd,
+        deliberate=label_settings.deliberate,
+        agent_labels=agent_labels,
+    )
+
+
 def build_app_config_from_settings(
     agent_runner_settings: AgentRunnerSettings,
 ) -> AppConfig:
@@ -150,24 +387,12 @@ def build_app_config_from_settings(
     interactive_decision = agent_runner_settings.interactive_decision
     repl = _build_repl_config(agent_runner_settings.repl)
     deliberation = _build_deliberation_config(agent_runner_settings.deliberation)
+    agent_registry = build_agent_registry_from_settings(agent_runner_settings.agents)
+    labels = build_label_config_from_settings(label_settings, agent_registry)
 
     return AppConfig(
-        labels=LabelConfig(
-            ready=label_settings.ready,
-            running=label_settings.running,
-            supervising=label_settings.supervising,
-            review=label_settings.review,
-            failed=label_settings.failed,
-            blocked=label_settings.blocked,
-            waiting=label_settings.waiting,
-            validation_pending=label_settings.validation_pending,
-            validation_passed=label_settings.validation_passed,
-            verifier_passed=label_settings.verifier_passed,
-            group_prefix=label_settings.group_prefix,
-            rework_prd=label_settings.rework_prd,
-            deliberate=label_settings.deliberate,
-            agent_labels=label_settings.agent_labels,
-        ),
+        agents=agent_registry,
+        labels=labels,
         git=GitConfig(
             remote=git_settings.remote,
             base_branch=git_settings.base_branch,

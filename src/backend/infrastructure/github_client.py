@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+from backend.core.shared.models.agent_spec import AgentSpec
 from backend.infrastructure.github_helpers import (
     _RETRYABLE_GH_ERROR_PATTERNS,
     sanitize_github_body,
@@ -232,9 +233,13 @@ class GitHubCliClient:
 
         return GhAuthStatus(authenticated=False, failure_reason=failure_reason)
 
-    def sync_labels(self, labels: LabelConfig) -> None:
+    def sync_labels(
+        self,
+        labels: LabelConfig,
+        agent_registry: dict[str, AgentSpec] | None = None,
+    ) -> None:
         """Create or update standard labels."""
-        sync_labels(self, labels)
+        sync_labels(self, labels, agent_registry)
 
     # --- issue delegations ---------------------------------------------
 

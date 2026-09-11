@@ -7,11 +7,16 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from backend.core.shared.interfaces.agent_output_protocol import PLAIN_PROTOCOL_ID
 from backend.core.shared.models.agent_decision import (
     InteractiveDecisionConfig,
     ReplConfig,
 )
 from backend.core.shared.models.agent_deliberation import DeliberationConfig
+from backend.core.shared.models.agent_spec import (
+    BUILTIN_AGENT_SPECS,
+    AgentSpec,
+)
 
 if TYPE_CHECKING:
     # `ValidationVerdict` lives in the use-cases layer; import it only for
@@ -41,6 +46,10 @@ class CommandResult:
         duration_seconds: Wall-clock seconds the command took. ``0.0`` when the
             caller constructed the result synthetically instead of running a
             process.
+        output_protocol: 产出本结果的输出协议 id（见
+            ``iar.agent_output_protocols`` 注册表）。``"plain"`` 表示通用
+            文本中继；agent 响应文本提取等消费方以此判断 stdout 是否为
+            渲染后的结构化流，而不再嗅探命令行里的 agent 名。
     """
 
     command: tuple[str, ...]
@@ -48,6 +57,7 @@ class CommandResult:
     stdout: str
     stderr: str
     duration_seconds: float = 0.0
+    output_protocol: str = PLAIN_PROTOCOL_ID
 
 
 class FailureType(Enum):
@@ -249,11 +259,11 @@ class LabelConfig:
     group_prefix: str = "task-group/"
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
+    # agent 路由标签由 agent 注册表派生（agent 名 -> spec.label），
+    # 注册顺序即 choose_agent 的标签匹配顺序。
     agent_labels: dict[str, str] = field(
         default_factory=lambda: {
-            "codex": "agent/codex",
-            "claude": "agent/claude",
-            "kimi": "agent/kimi",
+            agent_name: agent_spec.label for agent_name, agent_spec in BUILTIN_AGENT_SPECS.items()
         }
     )
 
@@ -715,6 +725,10 @@ class AppConfig:
     # ``RepositoryIdentity`` as a frozen dataclass in ``core/`` avoids
     # ``core/`` -> ``infrastructure/`` reverse dependency.
     repositories: dict[str, RepositoryIdentity] = field(default_factory=dict)
+    # agent 注册表：agent 名 -> 声明式调用 spec。默认值为内置四个 agent
+    # （codex / claude / kimi / pi）；config.toml / .iar.toml 的
+    # [agent_runner.agents.*] 段经 factory 映射与两层合并覆盖此字段。
+    agents: dict[str, AgentSpec] = field(default_factory=lambda: dict(BUILTIN_AGENT_SPECS))
     labels: LabelConfig = LabelConfig()
     git: GitConfig = GitConfig()
     worktree: WorktreeConfig = WorktreeConfig()

@@ -1,8 +1,9 @@
-"""Typer commands for the agent-driven decision flows.
+"""Typer commands for the agent-driven decision flows and agent inspection.
 
 Holds :func:`ask_command` (natural-language decision entrypoint),
-:func:`repl_command` (interactive REPL), and
-:func:`deliberate_command` (multi-agent deliberation).
+:func:`repl_command` (interactive REPL),
+:func:`deliberate_command` (multi-agent deliberation), and the
+read-only ``iar agent list`` / ``iar agent doctor`` inspection commands.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from backend.api.cli_typer_app import (
     _run_typer_command,
     _run_typer_repository_command,
     _typer_selector_options,
+    agent_app,
     app,
 )
 
@@ -134,4 +136,56 @@ def deliberate_command(
     )
 
 
-__all__ = ["ask_command", "deliberate_command", "repl_command"]
+@agent_app.command("list")
+def agent_list_command() -> int:
+    """List registered agents and their profiles."""
+    return _run_typer_command("agent list")
+
+
+@agent_app.command("doctor")
+def agent_doctor_command(
+    agent_names: Annotated[
+        list[str] | None,
+        typer.Argument(help="One or more registered agent names (omit with --protocols)."),
+    ] = None,
+    all_profiles: Annotated[
+        bool,
+        typer.Option("--all-profiles", help="Print every declared profile instead of only run."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit stable sorted JSON (agent / profile / argv / prompt_delivery).",
+        ),
+    ] = False,
+    protocols: Annotated[
+        bool,
+        typer.Option("--protocols", help="List all registered output protocol ids and exit."),
+    ] = False,
+    prompt: Annotated[
+        str,
+        typer.Option(
+            "--prompt",
+            help="Sentinel prompt used when expanding argv (default: golden-prompt).",
+        ),
+    ] = "golden-prompt",
+) -> int:
+    """Parse and print each profile's full argv for the given agents."""
+    return _run_typer_command(
+        "agent doctor",
+        agent_names=agent_names,
+        all_profiles=all_profiles,
+        json_output=json_output,
+        protocols=protocols,
+        prompt=prompt,
+    )
+
+
+__all__ = [
+    "agent_doctor_command",
+    "agent_list_command",
+    "ask_command",
+    "deliberate_command",
+    "repl_command",
+]

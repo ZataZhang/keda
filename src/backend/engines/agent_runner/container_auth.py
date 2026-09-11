@@ -30,6 +30,7 @@ from backend.core.shared.interfaces.container_runner import (
     ContainerAuthImportResult,
     IContainerAuthImporter,
 )
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS, AgentSpec
 
 _logger = logging.getLogger(__name__)
 
@@ -60,65 +61,59 @@ class AgentImportSpec:
     exclude_subpaths: frozenset[str] = field(default_factory=frozenset)
 
 
-# 显式运行时状态白名单 —— 容器只需要认证 + 关键设置 + skills。
-_CLAUDE_SPEC = AgentImportSpec(
-    agent_name="claude",
-    source_dir=Path.home() / ".claude",
-    target_subdir="claude",
-    include_top_level=("settings.json", "skills"),
-    exclude_subpaths=frozenset(
-        {
-            "history.jsonl",
-            "file-history",
-            "paste-cache",
-            "plans",
-            "plugins",
-            "cache",
-            "ide",
-            "backups",
-            "telemetry",
-            "todos",
-        }
-    ),
-)
-
-_CODEX_SPEC = AgentImportSpec(
-    agent_name="codex",
-    source_dir=Path.home() / ".codex",
-    target_subdir="codex",
-    include_top_level=("auth.json", "skills"),
-    exclude_subpaths=frozenset(
-        {
-            "sessions",
-            "cache",
-            ".tmp",
-            ".codex-global-state.json",
-            "log",
-            "logs",
-            "history.jsonl",
-        }
-    ),
-)
-
-_KIMI_SPEC = AgentImportSpec(
-    agent_name="kimi",
-    source_dir=Path.home() / ".kimi-code",
-    target_subdir="kimi-code",
-    include_top_level=("config.toml", "credentials", "oauth", "device_id", "skills"),
-    exclude_subpaths=frozenset(
-        {
-            "sessions",
-            "logs",
-            "cache",
-            "session_index.jsonl",
-            "tmp",
-        }
-    ),
-)
+# ---------------------------------------------------------------------------
+# 导入规格：从 agent 注册表（AgentSpec.auth_* 字段）派生，不再写死 agent 名。
+# ---------------------------------------------------------------------------
 
 
-SUPPORTED_AGENT_SPECS: tuple[AgentImportSpec, ...] = (_CLAUDE_SPEC, _CODEX_SPEC, _KIMI_SPEC)
-"""本模块支持的全部 agent 导入规格。"""
+def _resolve_import_target_subdir(auth_home: str) -> str:
+    """从认证家目录派生 ``container-auth/`` 下的目标子目录。
+
+    ``~/.claude`` → ``claude``、``~/.codex`` → ``codex``、
+    ``~/.kimi-code`` → ``kimi-code``、``~/.pi/agent`` → ``pi/agent``。
+    即去掉 ``~`` 前缀并逐段去掉引导点，保持与 docker-compose 挂载模板
+    的既有目录名（claude / codex / kimi-code）逐字节一致。
+    """
+    relative_home = auth_home
+    tilde_prefix = "~"
+    if relative_home.startswith(tilde_prefix):
+        relative_home = relative_home[len(tilde_prefix) :]
+    segments = [segment.lstrip(".") for segment in relative_home.split("/") if segment.strip(".")]
+    return "/".join(segments)
+
+
+def build_agent_import_specs(
+    agent_registry: dict[str, AgentSpec] | None = None,
+) -> tuple[AgentImportSpec, ...]:
+    """从 agent 注册表构建全部导入规格（保持注册顺序）。
+
+    Args:
+        agent_registry: agent 名 -> 声明式 spec；``None`` 时使用内置默认
+            注册表。``auth_home`` 未声明的 agent 自动跳过（如用户自定义的
+            无本机认证目录的 agent）。
+
+    Returns:
+        可直接交给 :func:`import_container_auth` 的规格元组。
+    """
+    registry = agent_registry if agent_registry is not None else BUILTIN_AGENT_SPECS
+    specs: list[AgentImportSpec] = []
+    for agent_name, agent_spec in registry.items():
+        if not agent_spec.auth_home:
+            continue
+        specs.append(
+            AgentImportSpec(
+                agent_name=agent_name,
+                source_dir=Path(agent_spec.auth_home),
+                target_subdir=_resolve_import_target_subdir(agent_spec.auth_home),
+                include_top_level=tuple(agent_spec.auth_include),
+                exclude_subpaths=frozenset(agent_spec.auth_exclude),
+            )
+        )
+    return tuple(specs)
+
+
+SUPPORTED_AGENT_SPECS: tuple[AgentImportSpec, ...] = build_agent_import_specs()
+"""本模块支持的全部 agent 导入规格（由内置 agent 注册表派生）。"""
 
 
 def container_auth_dir(global_iar_dir: Path | None = None) -> Path:
@@ -358,6 +353,7 @@ __all__ = [
     "ContainerAuthController",
     "ContainerAuthImportResult",
     "SUPPORTED_AGENT_SPECS",
+    "build_agent_import_specs",
     "container_auth_dir",
     "ensure_container_auth_root",
     "import_agent_auth",

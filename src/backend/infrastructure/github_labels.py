@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol, Sequence
 
+from backend.core.shared.models.agent_spec import AgentSpec, BUILTIN_AGENT_SPECS
 from backend.infrastructure.github_models import LabelConfig
 
 if TYPE_CHECKING:
@@ -85,20 +86,34 @@ _LABEL_SPECS: list[tuple[str, str, str]] = [
 ]
 
 
-_AGENT_LABEL_META: dict[str, tuple[str, str]] = {
-    "codex": ("5319E7", "Use Codex for local runner execution."),
-    "claude": ("BFDADC", "Use Claude Code for local runner execution."),
-    "kimi": ("FF6B6B", "Use Kimi for local runner execution."),
-}
+def _agent_label_meta(
+    agent_name: str,
+    agent_registry: dict[str, AgentSpec] | None,
+) -> tuple[str, str]:
+    """返回 agent 路由标签的颜色与描述（从 agent 注册表派生）。
+
+    注册表优先用调用方传入的合并视图（含配置注册的新 agent），缺省回落
+    内置默认；两者都未命中时使用通用兜底，保证未知 agent 仍可同步标签。
+    """
+    spec = None
+    if agent_registry is not None:
+        spec = agent_registry.get(agent_name)
+    if spec is None:
+        spec = BUILTIN_AGENT_SPECS.get(agent_name)
+    if spec is None:
+        return "5319E7", f"Use {agent_name} for local runner execution."
+    return spec.label_color, spec.label_description
 
 
-def sync_labels(client: _ClientProtocol, labels: LabelConfig) -> None:
+def sync_labels(
+    client: _ClientProtocol,
+    labels: LabelConfig,
+    agent_registry: dict[str, AgentSpec] | None = None,
+) -> None:
     """Create or update standard labels."""
     label_specs = list(_LABEL_SPECS)
     for agent_name, label_text in labels.agent_labels.items():
-        color, description = _AGENT_LABEL_META.get(
-            agent_name, ("5319E7", f"Use {agent_name} for local runner execution.")
-        )
+        color, description = _agent_label_meta(agent_name, agent_registry)
         label_specs.append((f"agent/{agent_name}", color, description))
     configured_names = {
         "agent/ready": labels.ready,

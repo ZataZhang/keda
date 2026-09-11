@@ -76,10 +76,10 @@ def _seed_kimi_source(source_dir: Path) -> None:
     (source_dir / "session_index.jsonl").write_text("", encoding="utf-8")
 
 
-def test_supported_agent_specs_have_three_agents() -> None:
-    """规格表恰好覆盖 claude/codex/kimi 三个 agent。"""
+def test_supported_agent_specs_follow_builtin_registry() -> None:
+    """规格表由内置注册表派生：顺序与条目一致（codex/claude/kimi/pi）。"""
     names = [spec.agent_name for spec in SUPPORTED_AGENT_SPECS]
-    assert names == ["claude", "codex", "kimi"]
+    assert names == ["codex", "claude", "kimi", "pi"]
 
 
 def test_container_auth_dir_under_global_iar() -> None:
@@ -147,34 +147,33 @@ def test_import_agent_auth_skips_missing_source(tmp_path: Path) -> None:
 
 def test_import_container_auth_full_flow(tmp_path: Path, monkeypatch) -> None:
     """``import_container_auth`` 编排：每个 agent 都跑，结果聚合。"""
-    # 给三个 agent 各构造一个临时源目录
-    claude_src = tmp_path / "host-claude"
-    codex_src = tmp_path / "host-codex"
-    kimi_src = tmp_path / "host-kimi"
-    _seed_claude_source(claude_src)
-    _seed_codex_source(codex_src)
-    _seed_kimi_source(kimi_src)
+    # 按 agent 名构造源目录映射（注册表顺序可能变化，不能按位置 zip）
+    source_by_agent = {
+        "claude": tmp_path / "host-claude",
+        "codex": tmp_path / "host-codex",
+        "kimi": tmp_path / "host-kimi",
+    }
+    _seed_claude_source(source_by_agent["claude"])
+    _seed_codex_source(source_by_agent["codex"])
+    _seed_kimi_source(source_by_agent["kimi"])
 
     # 用临时全局 iar 目录替换 Path.home()
     fake_home = tmp_path / "fake-home"
     monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-    # 用 monkeypatch 把各 spec 的 source_dir 指向临时源
+    # 用注册表派生的 spec，源目录按 agent 名替换为临时源；pi 无源目录应跳过
     from backend.engines.agent_runner import container_auth as ca_module
 
-    specs = []
-    for original, new_src in zip(
-        ca_module.SUPPORTED_AGENT_SPECS, (claude_src, codex_src, kimi_src)
-    ):
-        specs.append(
-            AgentImportSpec(
-                agent_name=original.agent_name,
-                source_dir=new_src,
-                target_subdir=original.target_subdir,
-                include_top_level=original.include_top_level,
-                exclude_subpaths=original.exclude_subpaths,
-            )
+    specs = [
+        AgentImportSpec(
+            agent_name=original.agent_name,
+            source_dir=source_by_agent.get(original.agent_name, tmp_path / "missing-pi"),
+            target_subdir=original.target_subdir,
+            include_top_level=original.include_top_level,
+            exclude_subpaths=original.exclude_subpaths,
         )
+        for original in ca_module.SUPPORTED_AGENT_SPECS
+    ]
 
     result: ContainerAuthImportResult = import_container_auth(
         global_iar_dir=fake_home / ".iar", specs=tuple(specs)
@@ -193,6 +192,8 @@ def test_import_container_auth_full_flow(tmp_path: Path, monkeypatch) -> None:
     assert "auth.json" in by_agent["codex"].copied_entries
     assert by_agent["kimi"].skipped is False
     assert "config.toml" in by_agent["kimi"].copied_entries
+    # pi 未提供源目录：跳过但不失败
+    assert by_agent["pi"].skipped is True
 
 
 def test_import_container_auth_skips_missing_agent_without_failing(

@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+from backend.core.shared.models.agent_spec import CLAUDE_STREAM_JSON_PROTOCOL_ID
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
     issue_output_routing,
@@ -61,7 +62,7 @@ def test_subprocess_runner_routes_streamed_output_to_sink(tmp_path: Path) -> Non
 def test_subprocess_runner_forwards_output_sink_to_claude_stream(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """Claude stream-json commands forward the sink to run_filtered_claude_stream."""
+    """claude-stream-json 协议把 sink 转发给 run_filtered_claude_stream。"""
     captured: dict[str, object] = {}
 
     def _fake_stream(command, **kwargs):
@@ -79,6 +80,8 @@ def test_subprocess_runner_forwards_output_sink_to_claude_stream(
         check=False,
         capture_output=False,
         output_sink=sink,
+        # 路由由调用方声明的协议驱动，不再嗅探命令行内容。
+        output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
     )
     assert captured["output_sink"] is sink
 

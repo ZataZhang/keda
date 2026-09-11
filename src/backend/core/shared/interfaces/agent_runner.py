@@ -38,6 +38,7 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.shared.models.agent_deliberation import (
     DeliberationEvent,
 )
+from backend.core.shared.models.agent_spec import AgentSpec
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,7 @@ class IProcessRunner(ABC):
         input_text: str | None = None,
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
+        output_protocol: str | None = None,
     ) -> CommandResult:
         """运行一条命令并捕获其结果。
 
@@ -148,6 +150,11 @@ class IProcessRunner(ABC):
                 终端——用于并行处理时把每个 Issue 的 agent 输出分流到独立
                 面板/日志，避免多路输出在同一 stdout 交错。非 Claude 流式
                 命令忽略该参数。
+            output_protocol: agent 调用路径专用的输出协议 id（来自
+                ``build_agent_invocation`` 的声明式 spec）。``None`` 或
+                ``"plain"`` 表示通用命令，按既有路径执行；非 plain 值由
+                执行层经 ``iar.agent_output_protocols`` 注册表解析出中继
+                实现。通用命令（git/gh/验证命令）永远传 ``None``。
 
         Returns:
             CommandResult: 包含退出码与（按需）捕获到的 stdout/stderr
@@ -292,11 +299,16 @@ class IGitHubClient(ABC):
     """
 
     @abstractmethod
-    def sync_labels(self, labels: LabelConfig) -> None:
+    def sync_labels(
+        self,
+        labels: LabelConfig,
+        agent_registry: dict[str, AgentSpec] | None = None,
+    ) -> None:
         """创建或更新标准标签。
 
         以 ``labels`` 配置为准，在仓库中建立缺失的标签并对已存在的
-        标签做幂等更新，保证标签集合与约定一致。
+        标签做幂等更新，保证标签集合与约定一致。``agent_registry``
+        提供各 agent 标签的颜色与描述来源（缺省回落内置注册表）。
         """
         ...
 

@@ -50,6 +50,7 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -136,6 +137,7 @@ def test_recovery_loop_exhausted_raises_max_retries(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -211,6 +213,7 @@ def test_attempt_history_in_issue_comment(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -310,6 +313,7 @@ def test_scenario_b_precommit_lint_failure_recovery(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -443,6 +447,7 @@ def test_scenario_e_lint_exhausted_max_retries(tmp_path: Path) -> None:
             inactivity_timeout=None,
             capture_output=True,
             label=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -560,6 +565,7 @@ def test_keyboard_interrupt_checkpoints_in_flight_work_before_exit(
             input_text=None,
             label=None,
             output_sink=None,
+            output_protocol=None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))

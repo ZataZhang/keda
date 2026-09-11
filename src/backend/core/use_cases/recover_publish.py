@@ -506,6 +506,10 @@ def recover_publish_issue(
                 if supervisor_config.supervisor_agent == "auto"
                 else supervisor_config.supervisor_agent
             )
+            # ``runner.default_agent`` 本身也可能是 "auto"；与 choose_agent 的
+            # 最终兜底保持一致（auto -> claude），避免把 "auto" 当成真实 agent 名。
+            if supervisor_agent == "auto":
+                supervisor_agent = "claude"
             # 在运行 supervisor 前再次确认工作树干净（只读 supervisor 的契约）。
             if has_changes(worktree_path, process_runner):
                 dirty_exc = PublishRecoveryError(

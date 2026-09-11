@@ -103,6 +103,28 @@ verification_commands = [
 
 未覆盖的字段自动继承全局 `[agent_runner]` 默认值。环境变量仍可对全局段生效，但暂不支持通过环境变量覆盖单个仓库的字段。
 
+## Agent Runner Agent 注册表配置
+
+`config.toml` 的 `[agent_runner.agents.<name>]` 段以声明式方式注册 agent。一个 agent 的全部调用差异（可执行文件、认证/skills 路径、各用途 argv、提示词投递、输出协议）都是纯数据，由统一的命令构造器组装；`src/` 下没有 agent 专有的分支代码。全部字段与取值域见 [Agent Runner 使用指南](agent-runner.md#接入一个新-agent声明式注册表)。
+
+### 合并语义
+
+agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
+
+1. **内置默认**：代码内 `BUILTIN_AGENT_SPECS`（`codex` / `claude` / `kimi` / `pi`），是注册表唯一的代码内默认来源；
+2. **全局覆盖**：`config.toml` 顶层 `[agent_runner.agents.*]`；
+3. **仓库级覆盖**：`[agent_runner.repositories.<repo_id>.agents.*]`。
+
+覆盖既有 agent 时保持其注册顺序（注册顺序即 `choose_agent` 标签匹配的优先级），仓库级新声明的 agent 追加在注册表末尾。旧版 `[agent_runner.labels]` 的 agent 路由键（`codex` / `claude` / `kimi`）继续作为兼容覆盖来源生效；新 agent 的路由标签写在注册块的 `label` 字段，无需再进 labels 段。
+
+### 边界：配置不做 shell 展开
+
+- `bin` / `args` / `tail_args` / `prompt_flag` 的每个元素都是**字面量**：`$(whoami)`、`a|b`、`*.py` 会原样进入子进程 argv，绝不经 shell 解释。
+- 运行期参数只通过**命名展开器**注入，且展开器是**闭集**（当前仅 `git_writable_roots`）。引用未注册展开器在构造命令时报错并列出全部已命名展开器，不静默忽略。
+- `output_protocol` 必须指向已注册的输出协议（entry point group `iar.agent_output_protocols`），加载失败直接报错，不静默回落 `plain`。
+
+配置完成后用 `uv run iar agent doctor <name> --all-profiles` 自检，确认各用途 argv 与预期逐字节一致。
+
 ## Agent Runner Deliberation 配置
 
 `config.toml` 的 `[agent_runner.deliberation]` 段配置多 Agent 合议：

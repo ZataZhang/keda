@@ -35,10 +35,13 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if contexts:
         _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
-    content_generator = _cli.create_content_generator(ctx.process_runner)
+    content_generator = _cli.create_content_generator(
+        ctx.process_runner, config=contexts[0].config if contexts else None
+    )
+    config_by_repo_path = {context.repo_path: context.config for context in contexts}
 
     def transcript_runner_factory(repo_path: Path) -> object:
-        return _cli.create_transcript_runner(ctx.process_runner)
+        return _cli.create_transcript_runner(config=config_by_repo_path.get(repo_path))
 
     return _cli.run_agent_repositories_once(
         contexts=contexts,
@@ -92,10 +95,14 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
     daemon_output_view = create_runner_live_view() if daemon_concurrency > 1 else None
 
     def content_generator_factory(repo_path: Path):
-        return _cli.create_content_generator(ctx.process_runner)
+        return _cli.create_content_generator(
+            ctx.process_runner, config=config_by_repo_path.get(repo_path)
+        )
+
+    config_by_repo_path = {context.repo_path: context.config for context in contexts}
 
     def transcript_runner_factory(repo_path: Path) -> object:
-        return _cli.create_transcript_runner(ctx.process_runner)
+        return _cli.create_transcript_runner(config=config_by_repo_path.get(repo_path))
 
     # Single-instance guard: a second daemon for an already-served
     # repository would double the queue polling and agent spawns, so
