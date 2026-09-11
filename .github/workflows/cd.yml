@@ -39,7 +39,18 @@ jobs:
         run: uv run pre-commit run --all-files --show-diff-on-failure
 
       - name: Check max file lines (hard limit)
-        run: uv run python hooks/shared/check_max_file_lines.py --max-lines 1000 --glob "*.py" src/backend
+        # 与 ci.yml 同一套调用：白名单存在才传，写法与上游模板一致。
+        # 两个 workflow 都跑这个检查，改其一必须改另一个——本仓曾只修 ci.yml
+        # 导致 tag 触发的本 workflow 仍以同样原因失败。
+        run: |
+          allow_list_file=hooks/max_file_lines.allowlist.txt
+          allow_list_args=()
+          if [ -f "$allow_list_file" ]; then
+            allow_list_args=(--allow-list-file "$allow_list_file")
+            echo "using allow-list: $allow_list_file"
+          fi
+          uv run python hooks/shared/check_max_file_lines.py \
+            --max-lines 1000 --glob "*.py" src/backend "${allow_list_args[@]}"
 
       - name: Run local test suite
         run: uv run pytest tests/ -v -m "not expensive"
