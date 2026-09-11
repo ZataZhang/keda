@@ -19,6 +19,14 @@ import uvicorn
 from backend.api.cli_typer_app import console_app, error_console
 from backend.engines.agent_runner.factory import load_fresh_agent_runner_settings
 
+#: 管理终端的监听地址，**硬编码为回环地址、不可配置**。
+#:
+#: 面板带写操作而认证是空实现，监听地址即这套系统事实上的唯一访问控制。
+#: 这里刻意不做成 CLI 参数或 ``[agent_runner.console]`` 配置项：任何一个
+#: 逃生口都意味着一行配置就能把无认证、可写的面板暴露给整个网段。需要远程
+#: 访问请走 SSH 端口转发（``ssh -L 8313:127.0.0.1:8313 <host>``）。
+CONSOLE_HOST = "127.0.0.1"
+
 #: 未显式指定 ``--port`` 时，从配置默认端口起最多顺延探测的端口数。
 _PORT_SCAN_WINDOW = 20
 
@@ -116,7 +124,7 @@ def console_callback(
     console_settings = load_fresh_agent_runner_settings().console
     try:
         resolved_port = resolve_console_port(
-            host=console_settings.host,
+            host=CONSOLE_HOST,
             explicit_port=port,
             default_port=console_settings.port,
         )
@@ -124,13 +132,14 @@ def console_callback(
         error_console.print(f"[red]{exc}[/]")
         raise typer.Exit(code=1) from exc
     launch_console(
-        host=console_settings.host,
+        host=CONSOLE_HOST,
         port=resolved_port,
         open_browser=not no_browser,
     )
 
 
 __all__ = [
+    "CONSOLE_HOST",
     "ConsolePortUnavailableError",
     "console_callback",
     "launch_console",

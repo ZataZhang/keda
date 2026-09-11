@@ -33,7 +33,10 @@ classifiers = [
 dependencies = [
     "croniter>=3.0.0",
     "fastapi>=0.115.0",
-    "pre-commit>=4.5.1",
+    # 注意：pre-commit 刻意不在这里。src/ 与 tests/ 从不 import 它，runner 只是
+    # 生成 `uv run pre-commit run --all-files` 这类命令字符串，在**目标仓库**的
+    # 环境里作为子进程执行（见 engines/agent_runner/repository_local.py）。
+    # 把它塞进默认依赖会让每个终端用户白装 identify/nodeenv/cfgv/virtualenv 一串。
     "psutil>=7.0.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.1.0",

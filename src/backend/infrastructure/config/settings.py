@@ -604,7 +604,8 @@ def _default_runner_command() -> list[str]:
 
     1. ``sys.argv[0]``：``iar console`` 等入口直接运行时，argv[0] 就是
        当前可执行文件的绝对路径，用它可保证托管的 daemon 与当前安装态
-       的 iar 完全同源。
+       的 iar 完全同源。用 ``Path.stem`` 而非 ``Path.name`` 比较，
+       Windows 上 argv[0] 是 ``iar.exe``，用 ``name`` 会漏判。
     2. ``shutil.which("iar")``：由 uvicorn 等其它入口启动后端时，argv[0]
        不是 iar，此时从 PATH 中解析（安装态与开发 venv 均可见）。
     3. 兜底 ``["uv", "run", "iar"]``：旧默认值，仅在既非 iar 入口、PATH
@@ -613,7 +614,7 @@ def _default_runner_command() -> list[str]:
     用户在 ``config.toml`` 里显式配置的 ``runner_command`` 始终优先于本默认值。
     """
     argv0 = sys.argv[0] if sys.argv else ""
-    if argv0 and Path(argv0).name == "iar":
+    if argv0 and Path(argv0).stem == "iar":
         return [argv0]
     resolved_iar = shutil.which("iar")
     if resolved_iar:
@@ -624,9 +625,14 @@ def _default_runner_command() -> list[str]:
 class AgentRunnerConsoleSettings(BaseModel):
     """统一管理终端（运行历史落库与托管进程）配置。
 
-    ``host`` 固定 ``127.0.0.1``：面板带写操作而认证是空实现，监听地址即
-    唯一访问控制，因此不提供把它暴露到其它网卡的 CLI 参数或配置建议
-    （需要远程访问请走 SSH 端口转发）。
+    **这里刻意没有 host 字段。** 面板带写操作而认证是空实现
+    （``api/routes/local_auth.py`` 永远返回已登录），监听地址就是这套系统
+    事实上的唯一访问控制。因此监听地址被硬编码为回环地址
+    （``backend.api.cli_typer_console.CONSOLE_HOST``），既不提供 CLI 参数
+    也不提供配置项——否则一行 ``host = "0.0.0.0"`` 就能把无认证、可写的
+    面板暴露给整个网段。需要远程访问请走 SSH 端口转发。
+
+    历史配置里若残留 ``host`` 键会被 pydantic 按 extra 忽略，不影响加载。
     """
 
     history_db_path: str = "~/.iar/console.db"
@@ -634,7 +640,6 @@ class AgentRunnerConsoleSettings(BaseModel):
     process_log_dir: str = "logs/agent-runner/processes"
     runner_command: list[str] = Field(default_factory=_default_runner_command)
     stop_timeout_seconds: int = 30
-    host: str = "127.0.0.1"
     port: int = _CONSOLE_DEFAULT_PORT
 
 

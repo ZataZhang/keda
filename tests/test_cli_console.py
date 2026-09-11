@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 import backend.api.cli_typer_console as cli_console
 from backend.api.cli_typer_console import (
+    CONSOLE_HOST,
     ConsolePortUnavailableError,
     launch_console,
     resolve_console_port,
@@ -159,6 +160,22 @@ class TestDefaultRunnerCommand:
         monkeypatch.setattr(console_settings_module.shutil, "which", lambda name: "/from/which/iar")
         assert console_settings_module._default_runner_command() == ["/tmp/iar-clean/bin/iar"]
 
+    def test_exe_suffixed_argv0_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Windows 上 argv[0] 带 .exe 后缀，按 stem 比较才不会漏判。
+
+        用正斜杠路径表达，避免在 POSIX 上 ``PurePosixPath`` 不把反斜杠当
+        分隔符导致用例失真；被测的差异点是 ``.exe`` 后缀本身。
+        """
+        monkeypatch.setattr(
+            console_settings_module.sys,
+            "argv",
+            ["/c/Users/zata/.local/bin/iar.exe", "console"],
+        )
+        monkeypatch.setattr(console_settings_module.shutil, "which", lambda name: "/from/which/iar")
+        assert console_settings_module._default_runner_command() == [
+            "/c/Users/zata/.local/bin/iar.exe"
+        ]
+
     def test_falls_back_to_which_when_argv0_is_not_iar(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -176,3 +193,46 @@ class TestDefaultRunnerCommand:
         monkeypatch.setattr(console_settings_module.sys, "argv", ["python", "-m", "backend.main"])
         monkeypatch.setattr(console_settings_module.shutil, "which", lambda name: None)
         assert console_settings_module._default_runner_command() == ["uv", "run", "iar"]
+
+
+class TestListenHostIsNotConfigurable:
+    """回归：监听地址必须钉死在回环，不存在任何 CLI 参数或配置逃生口。
+
+    面板带写操作而认证是空实现，监听地址是唯一访问控制。曾经把 host 做成
+    ``AgentRunnerConsoleSettings`` 字段，导致两行 config.toml 就能让面板
+    监听 ``*`` 并对整个网段返回 200。
+    """
+
+    def test_console_host_is_loopback(self) -> None:
+        """硬编码常量必须是回环地址。"""
+        assert CONSOLE_HOST == "127.0.0.1"
+
+    def test_console_settings_has_no_host_field(self) -> None:
+        """配置模型不得再暴露 host 字段。"""
+        assert "host" not in AgentRunnerConsoleSettings.model_fields
+
+    def test_stale_host_key_in_config_is_ignored(self) -> None:
+        """历史 config.toml 里残留的 host 键被忽略，且不会变成可用属性。"""
+        console_settings = AgentRunnerConsoleSettings(host="0.0.0.0")  # type: ignore[call-arg]
+        assert not hasattr(console_settings, "host")
+
+    def test_callback_always_binds_loopback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """即便配置里塞了 host，命令实际传给 uvicorn 的仍是回环地址。"""
+        monkeypatch.setattr(
+            cli_console,
+            "load_fresh_agent_runner_settings",
+            lambda: type(
+                "_Settings",
+                (),
+                {"console": AgentRunnerConsoleSettings(host="0.0.0.0", port=58327)},  # type: ignore[call-arg]
+            )(),
+        )
+        launched: list[tuple[str, int]] = []
+        monkeypatch.setattr(
+            cli_console,
+            "launch_console",
+            lambda *, host, port, open_browser: launched.append((host, port)),
+        )
+        result = CliRunner().invoke(console_app, ["--no-browser"])
+        assert result.exit_code == 0
+        assert launched == [("127.0.0.1", 58327)]

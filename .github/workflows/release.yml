@@ -231,12 +231,44 @@ jobs:
           echo "bootstrapped Formula/kedacode.rb skeleton from PyPI metadata"
           fi
 
+      # brew tap <user/repo> <path> 是 git clone：没有任何 commit 的空仓库克隆不出
+      # 工作树，首次运行会拿不到 formula。先在本地落一个种子 commit。
+      - name: Seed an initial commit so the tap is clonable
+        run: |
+          cd "${RUNNER_TEMP}/tap"
+          if ! git rev-parse HEAD >/dev/null 2>&1; then
+            git -c user.name="keda-release-bot" \
+                -c user.email="actions@users.noreply.github.com" \
+                add Formula/kedacode.rb
+            git -c user.name="keda-release-bot" \
+                -c user.email="actions@users.noreply.github.com" \
+                commit -m "seed kedacode formula skeleton"
+            echo "seeded initial commit for the empty tap repository"
+          fi
+
       - name: Regenerate Python resources from PyPI
         run: |
           # update-python-resources 会重写 formula 的 resource 块；
           # 要求 kedacode 及其全部依赖在 PyPI 上有 sdist（PRD 7.5 第 7 条）。
+          # 注意 brew tap 是 clone：改写发生在 Homebrew 自己的 tap 目录里，
+          # 必须把结果拷回 ${RUNNER_TEMP}/tap，否则推出去的 formula 没有任何
+          # resource —— 用户装得上但一跑就崩（PRD rv-3 要防的正是这个）。
           brew tap ZataZhang/tap "${RUNNER_TEMP}/tap"
           brew update-python-resources ZataZhang/tap/kedacode
+          brew_tap_dir="$(brew --repository ZataZhang/tap)"
+          cp "${brew_tap_dir}/Formula/kedacode.rb" "${RUNNER_TEMP}/tap/Formula/kedacode.rb"
+
+      - name: Verify the formula declares its dependencies
+        run: |
+          # Homebrew 用 pip --no-deps 安装，漏 resource 的表现是"装得上、一跑就崩"，
+          # 且 job 会静默变绿。这里硬性拦住：没有 resource 块就不许推。
+          formula_file="${RUNNER_TEMP}/tap/Formula/kedacode.rb"
+          resource_count="$(grep -c '^  resource "' "$formula_file" || true)"
+          echo "formula declares ${resource_count} resource block(s)"
+          if [ "${resource_count}" -lt 1 ]; then
+            echo "::error::Formula/kedacode.rb 没有任何 resource 块——update-python-resources 的结果没有回写到待推送的工作树。拒绝推送一个装上就崩的 formula。"
+            exit 1
+          fi
 
       - name: Ensure tap README records the resource generator
         run: |

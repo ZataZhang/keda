@@ -42,7 +42,7 @@ Agent Runner 的 Web 管理终端**已经存在且功能完整**，但对任何�
 **我默默定了这些**
 
 - 监听地址固定 `127.0.0.1`，不提供 `--host` 参数暴露到 `0.0.0.0`。
-- 默认端口写进 `[agent_runner.console]` 配置段（新增 `host` / `port` 字段），不在代码里硬编码；`--port` 只是覆盖。
+- 默认端口写进 `[agent_runner.console]` 配置段（新增 `port` 字段），不在代码里硬编码；`--port` 只是覆盖。**监听地址不做成配置字段**——它是唯一访问控制，硬编码在 `cli_typer_console.CONSOLE_HOST`。
 - 前端产物在**发布 CI 里预构建**后打进 wheel，不做首次启动时联网下载。
 - `iar console` 前台阻塞运行，Ctrl-C 退出；它**不**登记为托管进程（不写 `~/.iar/processes.json`），因此不会和 `iar registry start` 的进程管理相互干扰。
 - `frontend-public` 里 sidebar 之外的模板遗留页面（`agents/`、`workflows/`、`chat/`、`tools/`、marketing 的 `pricing/` `marketplace/` `features/` `about/`）连同三个动态路由一并**删除**，而不是给它们补 `generateStaticParams` 硬凑静态导出。
@@ -124,7 +124,7 @@ Agent Runner 的 Web 管理终端**已经存在且功能完整**，但对任何�
 显式配置继续生效且优先级最高；只有**没配**的人才会从写死默认值切到运行时解析。
 
 **向后兼容**
-`~/.iar/console.db`、`~/.iar/processes.json`、`.iar.toml`、`config.toml` 的既有内容全部保持可读，无迁移动作。新增的 `[agent_runner.console] host` / `port` 有默认值，不填照常工作。唯一的破坏性变化是决策二的依赖 extras——一旦确认执行，`pip install keda` 将不再顺带安装数据库与云 SDK。
+`~/.iar/console.db`、`~/.iar/processes.json`、`.iar.toml`、`config.toml` 的既有内容全部保持可读，无迁移动作。新增的 `[agent_runner.console] port` 有默认值，不填照常工作；历史配置里若残留 `host` 键会被按 extra 忽略，不影响加载。唯一的破坏性变化是决策二的依赖 extras——一旦确认执行，`pip install keda` 将不再顺带安装数据库与云 SDK。
 
 ## 4. Requirement Shape
 
@@ -194,7 +194,7 @@ cd /tmp && uv run --project <keda-root> python -c "import sys, backend.api.app; 
 
 产物的**声明方**是构建流程，运行时**只消费**、不推断：`app.py` 在所有 `include_router` **之后**用 `importlib.resources.files("backend.api.static").joinpath("console")` 定位目录并 `app.mount("/", StaticFiles(..., html=True))`；目录不存在时跳过挂载并记一条 warning，让"源码模式跑 uvicorn"的既有开发路径不受影响。
 
-新增 `iar console` 挂在现有 Typer app 上，读 `[agent_runner.console]` 的 `host` / `port`，未显式指定端口时从默认端口起顺延探测可用端口、显式指定则占用即失败，随后 `uvicorn.run` 前台阻塞并用 `webbrowser.open` 打开地址（`--no-browser` 可关）。
+新增 `iar console` 挂在现有 Typer app 上，监听地址取硬编码常量 `CONSOLE_HOST`、端口读 `[agent_runner.console].port`，未显式指定端口时从默认端口起顺延探测可用端口、显式指定则占用即失败，随后 `uvicorn.run` 前台阻塞并用 `webbrowser.open` 打开地址（`--no-browser` 可关）。
 
 系统状态与可见行为的变化：`build_completion_stats_overview` 改为线程池并发 + 模块级 TTL 缓存（沿用 `agent_runner.py` 的缓存写法），单仓库异常仍走既有的 per-repo `error` 字段降级；`resolve_console_spawn_cwd()` 改为按 `repo_id` 返回**目标仓库自己的路径**，`runner_command` 默认值改为运行时解析出的当前 `iar` 可执行文件（`sys.argv[0]` / `shutil.which("iar")`），显式配置优先级不变。
 
@@ -217,7 +217,7 @@ This section is a living implementation guide based on current repository analys
 
 ```
 iar console
-  └─ 读 AgentRunnerConsoleSettings.host / port
+  └─ host = 硬编码 CONSOLE_HOST（127.0.0.1）；port 读 AgentRunnerConsoleSettings.port
   └─ 解析可用端口（未显式指定则顺延；显式指定被占用则报错退出）
   └─ uvicorn.run("backend.api.app:app", host=127.0.0.1, port=<resolved>)
         └─ app.py: include_router(...) × 5      ← 先注册 /api/*
@@ -259,7 +259,9 @@ GET /console/stats/overview
 │   [修改]
 │   【总结】给管理终端配置补监听参数，并让托管进程启动命令改为运行时解析而非写死 uv
 │
-│   ├── AgentRunnerConsoleSettings 新增 host: str = "127.0.0.1"、port: int = <默认端口>
+│   ├── AgentRunnerConsoleSettings 只新增 port: int = <默认端口>；
+│   │   【禁止】新增 host 字段——它会变成绕过监听边界决策的配置逃生口，
+│   │   监听地址改为 cli_typer_console.CONSOLE_HOST 常量
 │   └── runner_command 的 default_factory 改为解析当前 iar 可执行文件；解析失败回退现值
 │       （锚点：rg -n "runner_command" src/backend/infrastructure/config/settings.py）
 │
@@ -516,6 +518,8 @@ uv build && unzip -l dist/*.whl | rg "backend/api/static/console/index.html"
 
 **失败排查提示**：`/api` 返回 HTML 而不是 JSON → `app.mount("/")` 被放在 `include_router` 之前了；深层路由 404 → `trailingSlash: true` 没配或产物是 `app/roadmap.html` 扁平形态；wheel 里没有静态文件 → 检查 `[tool.setuptools.package-data]` 的键名与 `MANIFEST.in`，并确认发布 CI 在 `uv build` 之前执行了前端构建；面板起 daemon 失败 → 先看 `ps` 出来的 argv 与 cwd，再回到 `resolve_console_spawn_cwd`。
 
+**一个已知且正常的行为**：`trailingSlash: true` 下产物是目录形态，因此**不带尾斜杠**的深层路径（`/app/roadmap`）由 Starlette 回 **307** 重定向到 `/app/roadmap/`，带尾斜杠才直接 200。浏览器与 Playwright 都自动跟随，不影响用户；但脚本化断言必须要么用尾斜杠形态、要么 `curl -L`，**不要**对 `/app/roadmap` 裸断言 200——e2e 用例已统一使用尾斜杠写法。
+
 **验证证据（2026-09-11，keda-0.2.0 wheel，全部取自真实产出）**
 
 - **rv-1**：`uv venv --python 3.13 /tmp/iar-clean` + 安装 `dist/keda-0.2.0-py3-none-any.whl`，在 `/tmp` 下 `/tmp/iar-clean/bin/iar console --no-browser --port 8765` 前台常驻；`curl /` → 200 且命中 `<div id="__next"|<script`；uvicorn 日志 `Uvicorn running on http://127.0.0.1:8765`。
@@ -557,7 +561,7 @@ No external validation required; repository evidence was sufficient.（Next.js �
 ### Human-Confirmed
 
 - [x] **监听边界**：`iar console` 起服后，`lsof -nP -iTCP:<port> -sTCP:LISTEN` 显示绑定 `127.0.0.1` 而非 `*`；从本机非回环 IP `curl -m 3` 连接被拒（exit 7）；反向验证（临时改 `0.0.0.0`）已跑并确认该断言转红（rv-2）
-- [x] **监听边界**：代码中不存在任何把 console 暴露到其它网卡的参数或配置项——`rg -n "0\.0\.0\.0|--host" src/backend/api/cli_typer_console.py` 无匹配
+- [x] **监听边界**：代码中不存在任何把 console 暴露到其它网卡的参数**或配置项**——`rg -n "0\.0\.0\.0|--host" src/backend/api/ src/backend/infrastructure/config/` 无匹配，且 `"host" not in AgentRunnerConsoleSettings.model_fields`（由 `tests/test_cli_console.py::TestListenHostIsNotConfigurable` 四条回归守住；该类断言曾因 grep 只扫单个文件而漏掉配置字段）
 - [x] **依赖契约**：全新空 venv 只装 wheel（不带 extras）后 `iar run --dry-run` 与 `iar console` 均退出码 0、无 `ModuleNotFoundError`；`pip list` 证明被移除的包确实不在；反向验证（卸载 uvicorn 模拟移入 extras）已跑并确认转红（rv-3）
 - [x] **依赖契约**：`pyproject.toml` 的默认依赖段与本次 wheel 的 `METADATA` 一致（12 条默认依赖 + llm/db/backup extras 逐一核对），且 README 已写明需要数据库/云能力时的 extras 安装方式
 
@@ -622,7 +626,7 @@ No external validation required; repository evidence was sufficient.（Next.js �
 - **FR-8**：托管进程的工作目录解析为目标仓库自身路径；`runner_command` 默认值改为运行时解析出的当前 `iar` 可执行文件，用户显式配置优先。
 - **FR-9**：清除 `frontend-public` 中的模板遗留页面、API 客户端与文案，站点标题与品牌改为 iar 管理终端。
 - **FR-10**：README、`roadmap.md` M9、`docs/guides/agent-runner.md` 与 `mkdocs.yml`（如有新增页）同步更新。
-- **FR-11**（依赖决策二确认）：`boto3` / `psycopg2-binary` / `pymysql` / `alembic` / `langchain-core` 移出默认依赖，改为 optional extras，并在 README 说明何时需要它们。
+- **FR-11**（依赖决策二确认）：`boto3` / `psycopg2-binary` / `pymysql` / `alembic` / `langchain-core` 移出默认依赖，改为 optional extras，并在 README 说明何时需要它们。判定口径是"默认依赖只保留主路径**真正 import** 的包"——据此 `pre-commit` 同样移出（`rg` 确认 `src/` 与 `tests/` 从不 import 它，runner 只生成 `uv run pre-commit run --all-files` 这类命令字符串交由**目标仓库**的环境执行），它仅保留在 dev group。
 
 ## 11. Non-Goals
 
