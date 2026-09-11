@@ -31,6 +31,8 @@ env:
 
 jobs:
   build-release:
+    # 见 ci.yml 同名设置：job 级超时由服务端执行，runner 卡死时仍有效。
+    timeout-minutes: 25
     name: Build Release Archive
     runs-on: ubuntu-latest
     steps:

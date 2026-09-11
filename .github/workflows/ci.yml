@@ -59,6 +59,12 @@ jobs:
         run: pnpm run build
 
   validate-template:
+    # job 级超时，不是步骤级。两者由不同的东西执行：步骤超时归 runner
+    # 进程管，runner 自己卡死时它跟着失效——v0.2.0 之后实测步骤超时
+    # 设 12 分钟、步骤却跑了 27 分钟没被杀就是这个原因。job 超时由
+    # GitHub 服务端强制执行，能回收卡死的 runner 并把日志刷出来，
+    # 这是拿到"到底卡在哪个测试"证据的唯一可靠途径。
+    timeout-minutes: 25
     name: Validate Template
     runs-on: ubuntu-latest
     steps:
