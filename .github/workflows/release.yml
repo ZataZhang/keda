@@ -305,17 +305,27 @@ jobs:
           fi
 
       - name: Ensure tap README records the resource generator
+        # 只在 README 缺失时写入骨架，不覆盖 tap 仓库里手工维护的版本。
         run: |
           readme_file="${RUNNER_TEMP}/tap/README.md"
           if [ ! -f "$readme_file" ]; then
             cat > "$readme_file" <<'EOF'
           # ZataZhang/homebrew-tap
 
-          `kedacode` formula（命令名 `iar`）由 keda 仓库的 release 流水线自动更新。
+          `kedacode` 的 Homebrew formula（命令名 `iar`），由 keda 仓库的 release 流水线自动更新。
 
-          - 安装：`brew install ZataZhang/tap/kedacode`（全限定名会自动信任该 formula，无需 `brew tap` + `brew trust`）
-          - resource 列表生成工具：`brew update-python-resources`（要求包及全部依赖在 PyPI 上有 sdist）
-          - 版本随 keda 的 GitHub Release 正式发布自动跟进，请勿手工编辑 `Formula/kedacode.rb` 的 resource 块
+          - 安装：`brew install ZataZhang/tap/kedacode`（**必须写全限定名**：Homebrew 6.0 起
+            第三方 tap 需显式信任，全限定名安装会顺带只信任该 formula；写成 `brew tap` + 短名
+            会撞上"tap 未受信任、formula 被忽略"）
+          - **这里是源码构建，约 8 分钟**：预编译 bottle 只有 homebrew-core 才有，自建 tap 没有。
+            依赖树含 Rust 扩展（`pydantic-core`），formula 声明了 `depends_on "rust" => :build`，
+            Homebrew 会顺带装约 400MB 的 Rust 工具链；还需要可用的 Xcode Command Line Tools。
+            想快请走 `uv tool install kedacode`（预编译 wheel，几秒，三平台通吃）。
+          - `Formula/kedacode.rb` 的 resource 块由 `brew update-python-resources` 自动生成
+            （要求包及全部依赖在 PyPI 上有 sdist），**请勿手工编辑**；`depends_on` 等非 resource
+            行是手工维护的，该工具不会动。
+          - 补救入口：PyPI 已发布但 tap 没跟上时，在 keda 仓库手动触发 `release.yml`
+            （`gh workflow run release.yml -f tag=vX.Y.Z`），不需要重新发版。
           EOF
           fi
 

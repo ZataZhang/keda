@@ -14,9 +14,13 @@
   <a href="https://pypi.org/project/kedacode/"><img src="https://img.shields.io/pypi/v/kedacode?style=flat-square" alt="PyPI"></a>
 </p>
 
-> 面向 AI Agent 与通用 Python 工程实践的模块化单体项目模板。基于 Clean Architecture 四层架构，内置 `iar`（issue-agent-runner）CLI，支持将 GitHub Issues 转为本地 AI Agent 队列并自动管理 Worktree 生命周期。
+> 把 GitHub Issue 变成本地 AI Agent 队列。给 Issue 打上 `agent/ready`，`iar` 就会创建隔离 worktree、驱动 Claude / Codex / Kimi 改代码、跑验证、做 code review、推分支开 Draft PR，并在 PR 合并前持续盯着 CI 与评论变化。你不想用命令行时，`iar console` 一条命令打开内置的管理面板。
 >
-> 注：本仓库与 CNCF 毕业项目 KEDA（keda.sh，Kubernetes 事件驱动自动扩缩）无关；分发包名为 `kedacode`，安装后的命令名是 `iar`。
+> 装什么、敲什么：`uv tool install kedacode` 之后命令是 `iar`（包名和命令名不同，见下方安装一节）。
+>
+> 仓库同时是一套可复用的 Python 工程骨架——Clean Architecture 四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链，可以整体拿去起新项目。
+>
+> 注：本仓库与 CNCF 毕业项目 KEDA（keda.sh，Kubernetes 事件驱动自动扩缩）无关。
 
 ## 一键安装
 
