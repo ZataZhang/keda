@@ -373,3 +373,69 @@ jobs:
               Stop-Process -Id $console_proc.Id -Force -ErrorAction SilentlyContinue
             }
           }
+
+  # install.sh 曾在 bootstrap uv 之前就用 ambient python3 做硬性版本门禁，于是
+  # README 顶部那条一键安装命令在原装 macOS（自带 3.9.x）上必然失败。CI 之所以
+  # 一直没暴露：上面几档都先跑 actions/setup-python，把"用户机器上可能没有新
+  # Python"这个前提掩盖了。本档刻意装一个低于 3.11 的解释器来复现真实场景。
+  stock-python:
+    name: install.sh with a too-old ambient python3 on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 用 3.10 而非 macOS 真实的 3.9.6：走的是同一条 `< 3.11` 分支，而 3.10 在
+      # setup-python 的各平台上都稳定可得。
+      - name: Set up a deliberately old Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Confirm the ambient python3 is below the minimum
+        run: |
+          python3 -V
+          if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+            echo "::error::本档需要一个低于 3.11 的 ambient python3，实际是 $(python3 -V)；档位失去意义，请修 matrix。"
+            exit 1
+          fi
+
+      - name: install.sh --check must succeed and fall back to uv
+        run: |
+          plan="$(bash install.sh --check --source pypi 2>&1)"
+          echo "$plan"
+          if ! printf '%s' "$plan" | grep -qE "method: *uv"; then
+            echo "::error::ambient python 过旧时 install.sh 应自动选 uv（uv 自带解释器），实际计划不是 uv。"
+            exit 1
+          fi
+
+      - name: install.sh --method pip must fail loudly, not silently
+        run: |
+          if bash install.sh --check --source pypi --method pip >/dev/null 2>&1; then
+            echo "::error::--method pip 直接使用 ambient 解释器，python 过旧时必须报错退出。"
+            exit 1
+          fi
+          echo "--method pip correctly refused the too-old interpreter"
+
+      - name: Real install from PyPI with the old ambient python
+        run: |
+          bash install.sh --source pypi --method uv
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Probe the installed console
+        run: |
+          iar --version
+          iar console --no-browser --port 8899 &
+          for _ in $(seq 1 20); do
+            if curl -fsS -o /dev/null "http://127.0.0.1:8899/api/v1/agent-runner/health"; then
+              echo "console reachable with a 3.10 ambient python"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::console 未在 60 秒内就绪。"
+          exit 1

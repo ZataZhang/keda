@@ -27,6 +27,9 @@ set -euo pipefail
 
 readonly REPO_SLUG="${KEDA_REPO:-ZataZhang/keda}"
 readonly PYPI_INDEX_URL="https://pypi.org/pypi"
+# 改名前的旧分发包名。它和 kedacode 都提供 iar 可执行文件，uv 拒绝让不同包
+# 覆盖同名 binary，因此装过旧包的用户必须先卸载（见 check_legacy_tool_conflict）。
+readonly LEGACY_TOOL_NAME="keda"
 readonly PY_MIN_MAJOR=3
 readonly PY_MIN_MINOR=11
 # 分发包名的单一声明处（PRD FR-1）：PyPI 包名是 kedacode，命令名是 iar。
@@ -97,17 +100,48 @@ detect_os() {
     esac
 }
 
+# 探测 ambient python3 但**不致命**：uv 路径自带解释器，压根不需要它。
+#
+# 这里曾经直接 exit 1，导致 README 顶部那条 `curl ... | bash` 在原装 macOS 上
+# 必然失败——系统自带的 /usr/bin/python3 是 3.9.x，而门禁在 bootstrap uv 之前
+# 就把脚本杀掉了。CI 没暴露是因为 install-smoke 先跑 actions/setup-python。
+#
+# 结果写入三个变量：PY_BIN（可能为空）、PY_VERSION（展示用）、
+# PY_OK（1=满足最低版本，0=过旧或缺失）。真正需要 ambient 解释器的只有
+# pipx / pip 两条路径，版本门禁因此下移到 resolve_installer。
 detect_python() {
+    PY_BIN=""
+    PY_VERSION="(not found)"
+    PY_OK=0
     if ! command -v python3 >/dev/null 2>&1; then
-        log_err "python3 not found in PATH. Install Python >= ${PY_MIN_MAJOR}.${PY_MIN_MINOR} first."
-        exit 1
+        return
     fi
     PY_BIN="$(command -v python3)"
-    PY_VERSION="$("$PY_BIN" -c 'import sys;print("%d.%d.%d" % sys.version_info[:3])')"
-    if ! "$PY_BIN" -c "import sys;sys.exit(0 if sys.version_info>=(${PY_MIN_MAJOR},${PY_MIN_MINOR}) else 1)"; then
-        log_err "Python ${PY_VERSION} is too old; need >= ${PY_MIN_MAJOR}.${PY_MIN_MINOR}."
-        exit 1
+    PY_VERSION="$("$PY_BIN" -c 'import sys;print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null || echo "(unknown)")"
+    if "$PY_BIN" -c "import sys;sys.exit(0 if sys.version_info>=(${PY_MIN_MAJOR},${PY_MIN_MINOR}) else 1)" 2>/dev/null; then
+        PY_OK=1
     fi
+}
+
+# 旧包名 keda 与新包名 kedacode 都注册 iar，uv 会以
+#   error: Executable already exists: iar (use `--force` to overwrite)
+# 失败。那句报错既没说清冲突来自哪个包，也没说该怎么办，所以这里提前拦下
+# 并给出确切命令。--check 模式只告警不退出，让 dry-run 能完整打印计划。
+check_legacy_tool_conflict() {
+    [ "$INSTALL_METHOD" = "uv" ] || return 0
+    command -v uv >/dev/null 2>&1 || return 0
+    uv tool list 2>/dev/null | grep -q "^${LEGACY_TOOL_NAME} " || return 0
+
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+        log_warn "Legacy tool '${LEGACY_TOOL_NAME}' is installed and owns the 'iar' executable; the real install would fail until it is removed."
+        return 0
+    fi
+    log_err "Legacy tool '${LEGACY_TOOL_NAME}' is installed and owns the 'iar' executable."
+    log_err "Both packages register 'iar', so uv refuses to overwrite it. Remove the old one first:"
+    log_err "    uv tool uninstall ${LEGACY_TOOL_NAME}"
+    log_err "    curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/install.sh | bash -s -- --source pypi"
+    log_err "If that entry is your editable development install of this repository, keep it and skip this installer."
+    exit 1
 }
 
 resolve_installer() {
@@ -116,14 +150,23 @@ resolve_installer() {
             uv|pipx|pip) ;;
             *) log_err "Unknown --method: $INSTALL_METHOD"; exit 2 ;;
         esac
-        return
-    fi
-    if command -v uv >/dev/null 2>&1; then
+    elif command -v uv >/dev/null 2>&1; then
         INSTALL_METHOD="uv"
-    elif command -v pipx >/dev/null 2>&1; then
+    elif [ "$PY_OK" -eq 1 ] && command -v pipx >/dev/null 2>&1; then
         INSTALL_METHOD="pipx"
-    else
+    elif [ "$PY_OK" -eq 1 ]; then
         INSTALL_METHOD="pip"
+    else
+        # ambient python 过旧或缺失时选 uv：它会被 bootstrap 并自带解释器，
+        # 而 pipx / pip 只能用 ambient 那个，必然装不上。
+        log_info "Ambient python3 is ${PY_VERSION} (need >= ${PY_MIN_MAJOR}.${PY_MIN_MINOR}); using uv, which brings its own interpreter."
+        INSTALL_METHOD="uv"
+    fi
+    # 版本门禁只对真正使用 ambient 解释器的两条路径生效。
+    if [ "$INSTALL_METHOD" != "uv" ] && [ "$PY_OK" -ne 1 ]; then
+        log_err "Python ${PY_VERSION} cannot run ${DEFAULT_TOOL_NAME} (need >= ${PY_MIN_MAJOR}.${PY_MIN_MINOR}) and --method ${INSTALL_METHOD} uses it directly."
+        log_err "Either drop --method so the installer picks uv, pass --method uv explicitly, or install Python >= ${PY_MIN_MAJOR}.${PY_MIN_MINOR} first."
+        exit 1
     fi
 }
 
@@ -309,6 +352,7 @@ main() {
     detect_os
     detect_python
     resolve_installer
+    check_legacy_tool_conflict
     resolve_version
 
     if [ "$CHECK_ONLY" -eq 1 ]; then
