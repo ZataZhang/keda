@@ -1,47 +1,58 @@
 # 一次性诊断用。定位后删掉本文件。
 #
-# 已知：8 个连续分片并行跑，只有 shard 6（排序后第 76-90 个测试文件）挂住，而且它
-# 熬过了内层 timeout 的整组 SIGKILL——泄漏进程在独立会话里（runner 用
-# start_new_session 单独建组），整组信号够不着，最后由 GitHub 取消，日志不落盘。
+# 三轮收敛的结果：
+#   1. 8 个连续分片并行跑 → 只有 shard 6（排序后第 76-90 个文件）挂住；
+#   2. 15 个文件塞进一个 job 顺序跑 → 我限了单文件 180 秒却没限总和，最坏 45 分钟，
+#      step 跑满 30 分钟被取消，日志第七次没拿到；
+#   3. 一个文件一个 job → 14 个全绿，只有 tests/test_process_runner.py 挂住，
+#      而且连 `timeout --signal=KILL 300` 都没能让步骤结束。
 #
-# 教训：第二次尝试把 15 个文件放进一个 job 顺序跑，限了单文件 180 秒却没限总和
-# ——最坏 45 分钟，step 跑满 30 分钟被 job 超时取消，日志同样没了（第七次）。
-#
-# 所以回到第一阶段真正奏效的形态：**让 job 本身承载信号**。一个文件一个 job，
-# 挂住的那个显示为 cancelled，其余全部正常完成、日志照常保留——结论完全不依赖
-# 能否从挂住的 run 里抠出日志。顺带每个 job 跑完探一次残留进程，
-# 把"留下进程但没挂住"这种症状也一并抓出来。
+# 所以这一轮把粒度降到单个用例。贯穿始终真正奏效的取证方式只有一种：
+# **让 job 本身承载信号**——挂住的那个显示为 cancelled，其余正常完成，
+# 结论完全不依赖能否从挂住的 run 里抠出日志。job 名就是答案。
 name: Test shard diagnosis (manual)
 
 on:
   workflow_dispatch:
 
+env:
+  SUSPECT_FILE: tests/test_process_runner.py
+
 jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
-      files: ${{ steps.list.outputs.files }}
+      tests: ${{ steps.list.outputs.tests }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv sync --all-extras --all-groups --frozen
       - id: list
-        name: List the suspect files
+        name: Collect the node ids
         run: |
-          # 从仓库实际文件列表派生，不写死文件名：范围变了改这一处的行号即可。
-          files_json="$(ls tests/test_*.py | sort | sed -n '76,90p' | jq -R . | jq -cs .)"
-          echo "files=${files_json}" >> "$GITHUB_OUTPUT"
-          echo "本轮逐个 job 跑："
-          printf '%s\n' "$files_json" | jq -r '.[]' | sed 's/^/  /'
+          # 只取 `::` 之后的用例名，这样 job 名短到能在列表里一眼读完——
+          # job 名就是本次诊断的输出，可读性即结论可读性。
+          tests_json="$(uv run pytest "$SUSPECT_FILE" --collect-only -q --no-testmon \
+            | grep '::' | sed 's/.*:://' | jq -R . | jq -cs .)"
+          echo "tests=${tests_json}" >> "$GITHUB_OUTPUT"
+          echo "本轮逐个用例跑 $(printf '%s' "$tests_json" | jq length) 个："
+          printf '%s' "$tests_json" | jq -r '.[]' | sed 's/^/  /'
 
   probe:
     needs: plan
-    name: ${{ matrix.file }}
-    # 单个文件正常只要几十秒；给 8 分钟，挂住的会被 job 超时收掉并显示 cancelled，
-    # 那就是答案本身，不需要它的日志。
-    timeout-minutes: 8
+    name: ${{ matrix.test }}
+    # 单个用例正常是毫秒级；给 6 分钟，挂住的会被 job 超时收掉并显示 cancelled，
+    # 那就是答案本身。
+    timeout-minutes: 6
     strategy:
       fail-fast: false
       matrix:
-        file: ${{ fromJSON(needs.plan.outputs.files) }}
+        test: ${{ fromJSON(needs.plan.outputs.tests) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,28 +67,26 @@ jobs:
 
       - run: uv sync --all-extras --all-groups --frozen
 
-      - name: Run ${{ matrix.file }}
+      - name: Run ${{ matrix.test }}
         run: |
-          # 输出重定向到文件而不是管道：孙进程继承的是 fd 指向的文件，握不住
-          # step 的 stdout，所以"测试跑完但步骤不结束"那一类挂法在这里不成立。
           set +e
-          timeout --signal=KILL 300 \
-            uv run pytest "${{ matrix.file }}" -q --no-testmon --timeout=60 \
+          timeout --signal=KILL 120 \
+            uv run pytest "${SUSPECT_FILE}::${{ matrix.test }}" -q --no-testmon --timeout=60 \
             > /tmp/one.log 2>&1
           rc=$?
           set -e
 
-          echo "rc=${rc}（137 = 撞到 300 秒被杀）"
+          echo "rc=${rc}（137 = 撞到 120 秒被杀）"
           tail -40 /tmp/one.log
 
           # 孙进程比父进程晚一点才出现在 ps 里，沉降一下再探。
-          # 泄漏特征取自 test_process_runner.py 里那个故意留下管道成员的回归测试：
+          # 泄漏特征取自本文件里那个故意留下管道成员的回归测试：
           # `bash -lc "... sleep 30 | tee /dev/null"`。
           sleep 2
           leftover="$(ps -eo pid,pgid,sess,etime,args 2>/dev/null \
             | grep -E 'sleep [0-9]|tee /dev/null|bash -lc' | grep -v grep || true)"
           if [ -n "$leftover" ]; then
-            echo "==== 本文件跑完后仍有残留进程 ===="
+            echo "==== 本用例跑完后仍有残留进程 ===="
             printf '%s\n' "$leftover"
           else
             echo "==== 无残留进程 ===="
