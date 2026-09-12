@@ -1,94 +1,62 @@
-# 一次性诊断用。定位后删掉本文件。
+# 一次性诊断用。结论确认后删掉本文件。
 #
-# 三轮收敛的结果：
-#   1. 8 个连续分片并行跑 → 只有 shard 6（排序后第 76-90 个文件）挂住；
-#   2. 15 个文件塞进一个 job 顺序跑 → 我限了单文件 180 秒却没限总和，最坏 45 分钟，
-#      step 跑满 30 分钟被取消，日志第七次没拿到；
-#   3. 一个文件一个 job → 14 个全绿，只有 tests/test_process_runner.py 挂住，
-#      而且连 `timeout --signal=KILL 300` 都没能让步骤结束。
+# 四轮收敛（每轮都靠"让 job 本身承载信号"，不依赖能否从挂住的 run 里抠日志）：
+#   1. 8 个连续分片 → 只有 shard 6（排序后第 76-90 个文件）挂住；
+#   2. 15 个文件塞进一个 job → 我限了单文件却没限总和，step 跑满 30 分钟被取消（失败的一轮）；
+#   3. 一个文件一个 job → 14 个全绿，只有 tests/test_process_runner.py 挂住；
+#   4. 一个用例一个 job → 41 个全绿，只有
+#      test_process_watchdog_includes_context_label_in_logs 挂住。
 #
-# 所以这一轮把粒度降到单个用例。贯穿始终真正奏效的取证方式只有一种：
-# **让 job 本身承载信号**——挂住的那个显示为 cancelled，其余正常完成，
-# 结论完全不依赖能否从挂住的 run 里抠出日志。job 名就是答案。
+# 该用例给 watchdog 传的是 MagicMock，超时分支会走到
+# `_terminate_process_tree(mock_process)`：`mock.pid` 不是整数，而 `os.getpgid()`
+# 会对参数调 `__index__`，MagicMock 的 `__index__` 默认返回 **1** ——
+# 于是 `os.getpgid(1)` 拿到 1 号进程组，守卫只比较"是不是自己的组"（1 != 自己），
+# 放行，最终对 **1 号进程组**发 SIGKILL。
+#
+# macOS 上这一步被 PermissionError 兜住，测试靠权限不足侥幸通过。
+# 本 job 在真实 runner 上探测同一条链路，全程只用信号 0（纯权限探测，不发真信号），
+# 用来确认 Linux runner 上这个 killpg 是否会被放行——若放行，杀掉的就是 runner
+# 自己的进程树，这正好解释"runner 失联 + 日志永远 BlobNotFound"。
 name: Test shard diagnosis (manual)
 
 on:
   workflow_dispatch:
 
-env:
-  SUSPECT_FILE: tests/test_process_runner.py
-
 jobs:
-  plan:
+  probe-killpg:
+    name: probe killpg(1) permission
+    timeout-minutes: 5
     runs-on: ubuntu-latest
-    outputs:
-      tests: ${{ steps.list.outputs.tests }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-      - run: uv sync --all-extras --all-groups --frozen
-      - id: list
-        name: Collect the node ids
+      - name: Probe
         run: |
-          # 只取 `::` 之后的用例名，这样 job 名短到能在列表里一眼读完——
-          # job 名就是本次诊断的输出，可读性即结论可读性。
-          tests_json="$(uv run pytest "$SUSPECT_FILE" --collect-only -q --no-testmon \
-            | grep '::' | sed 's/.*:://' | jq -R . | jq -cs .)"
-          echo "tests=${tests_json}" >> "$GITHUB_OUTPUT"
-          echo "本轮逐个用例跑 $(printf '%s' "$tests_json" | jq length) 个："
-          printf '%s' "$tests_json" | jq -r '.[]' | sed 's/^/  /'
+          python - <<'PY'
+          import os
+          import signal
+          from unittest.mock import MagicMock
 
-  probe:
-    needs: plan
-    name: ${{ matrix.test }}
-    # 单个用例正常是毫秒级；给 6 分钟，挂住的会被 job 超时收掉并显示 cancelled，
-    # 那就是答案本身。
-    timeout-minutes: 6
-    strategy:
-      fail-fast: false
-      matrix:
-        test: ${{ fromJSON(needs.plan.outputs.tests) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+          mock_process = MagicMock()
+          print("uid =", os.getuid(), " pid =", os.getpid())
+          print("MagicMock().pid.__index__() =", mock_process.pid.__index__())
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
+          child_group_id = os.getpgid(mock_process.pid)
+          own_group_id = os.getpgid(0)
+          print("os.getpgid(mock.pid) =", child_group_id)
+          print("os.getpgid(0)        =", own_group_id)
+          print("守卫放行 killpg      =", child_group_id != own_group_id)
 
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
+          # 只发信号 0：内核照常做权限检查但不投递信号。
+          try:
+              os.killpg(child_group_id, 0)
+              print(">>> killpg(%d, 0) 被允许 —— 真跑时这里是 SIGKILL，"
+                    "会杀掉该组全部可杀进程" % child_group_id)
+          except OSError as probe_error:
+              print(">>> killpg(%d, 0) 被拒绝: %r" % (child_group_id, probe_error))
 
-      - run: uv sync --all-extras --all-groups --frozen
-
-      - name: Run ${{ matrix.test }}
-        run: |
-          set +e
-          timeout --signal=KILL 120 \
-            uv run pytest "${SUSPECT_FILE}::${{ matrix.test }}" -q --no-testmon --timeout=60 \
-            > /tmp/one.log 2>&1
-          rc=$?
-          set -e
-
-          echo "rc=${rc}（137 = 撞到 120 秒被杀）"
-          tail -40 /tmp/one.log
-
-          # 孙进程比父进程晚一点才出现在 ps 里，沉降一下再探。
-          # 泄漏特征取自本文件里那个故意留下管道成员的回归测试：
-          # `bash -lc "... sleep 30 | tee /dev/null"`。
-          sleep 2
-          leftover="$(ps -eo pid,pgid,sess,etime,args 2>/dev/null \
-            | grep -E 'sleep [0-9]|tee /dev/null|bash -lc' | grep -v grep || true)"
-          if [ -n "$leftover" ]; then
-            echo "==== 本用例跑完后仍有残留进程 ===="
-            printf '%s\n' "$leftover"
-          else
-            echo "==== 无残留进程 ===="
-          fi
-          exit "$rc"
+          print("--- 1 号进程组里都有谁 ---")
+          PY
+          ps -eo pid,pgid,user,args | awk 'NR==1 || $2==1' | head -20
