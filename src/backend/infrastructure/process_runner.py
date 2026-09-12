@@ -51,6 +51,13 @@ def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
     向组发信号即可覆盖所有派生进程。若平台不支持而子进程仍留在 runner 自己的组
     里，则退回只杀直接子进程，避免把 runner 自己一起杀掉。
 
+    0 号和 1 号组同样一律不碰：``killpg(0, ...)`` 按语义就是"杀调用者自己所在的
+    组"，1 号组属于 init。两者都不可能是子进程独立建出来的组（那个组 id 等于子
+    进程 pid），所以排除它们不会漏掉任何真实场景，却能挡住 pid 取到异常值时把整台
+    机器打穿——CI 上就出现过：某个测试传进来的 ``pid`` 会被 :func:`os.getpgid`
+    当成 1，于是这里真的向 1 号组发了 SIGKILL，直接把 runner 打没，表现为任务永远
+    不结束且日志完全拿不到。
+
     Args:
         process: 需要终止的子进程句柄。
     """
@@ -60,7 +67,7 @@ def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
             child_group_id = os.getpgid(process.pid)
         except OSError:  # 子进程已退出或已被回收。
             child_group_id = None
-        if child_group_id is not None and child_group_id != os.getpgid(0):
+        if child_group_id is not None and child_group_id > 1 and child_group_id != os.getpgid(0):
             killable_group_id = child_group_id
     if killable_group_id is not None:
         try:

@@ -622,9 +622,15 @@ def test_process_watchdog_includes_context_label_in_logs() -> None:
     watchdog._started_at = 0
     watchdog._stop_event = _NeverStoppedEvent()
 
+    # 必须把 _terminate_process_tree 也挡掉。本用例考的是日志标签，但超时分支会
+    # 顺带调用它，而这里传进去的是 MagicMock：`mock.pid` 不是整数，os.getpgid()
+    # 会对参数调 __index__，MagicMock 的 __index__ 默认返回 1，于是拿到 1 号进程组
+    # 并对它发 SIGKILL。macOS 上被 PermissionError 兜住所以一直没暴露，Linux CI 上
+    # 则真的把 runner 打没，表现为任务永远不结束且日志完全拿不到。
     with (
         patch.object(process_runner.time, "monotonic", side_effect=[1.1, 2.1]),
         patch.object(process_runner, "logger") as logger_mock,
+        patch.object(process_runner, "_terminate_process_tree"),
     ):
         watchdog._run()
 
@@ -1006,6 +1012,32 @@ def test_terminate_process_tree_never_kills_runner_own_group() -> None:
 
     with (
         patch.object(process_runner.os, "getpgid", return_value=777),
+        patch.object(process_runner.os, "killpg") as killpg_mock,
+    ):
+        _terminate_process_tree(mock_process)
+
+    killpg_mock.assert_not_called()
+    mock_process.kill.assert_called_once_with()
+
+
+def test_terminate_process_tree_never_kills_init_group() -> None:
+    """子进程的组 id 解析成 1 号组时只能杀直接子进程。
+
+    1 号组属于 init，不可能是子进程独立建出来的组（那个组 id 等于子进程 pid）。
+    pid 取到异常值时如果照发 SIGKILL，在 CI runner 上会直接把 runner 打没，
+    表现为任务永远不结束且日志完全拿不到——本仓库实测过一次，
+    定位花了七轮才收敛到单个用例。
+    """
+    from backend.infrastructure import process_runner
+
+    mock_process = MagicMock()
+    mock_process.pid = 1
+
+    def _fake_getpgid(pid: int) -> int:
+        return 1 if pid == 1 else 777
+
+    with (
+        patch.object(process_runner.os, "getpgid", side_effect=_fake_getpgid),
         patch.object(process_runner.os, "killpg") as killpg_mock,
     ):
         _terminate_process_tree(mock_process)
