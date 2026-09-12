@@ -1,22 +1,47 @@
-# 一次性诊断用。第一阶段（8 个连续分片并行跑）已经出结论：只有 shard 6 挂住，
-# 嫌疑范围是排序后第 76-90 个测试文件；而且它连 `timeout` 的整组 SIGKILL 都熬过去了
-# ——泄漏进程在独立会话里（runner 用 start_new_session 单独建组），整组信号够不着。
+# 一次性诊断用。定位后删掉本文件。
 #
-# 第二阶段要拿到点名证据，关键是**让步骤必定结束**：
-# 把 pytest 的输出重定向到文件而不是管道，孙进程就没有 step 的 stdout 可握，
-# 之前五次取证失败（BlobNotFound）的根因也就不存在了。
-# 逐个文件跑，每个前后比一次残留进程，谁泄漏一目了然。
+# 已知：8 个连续分片并行跑，只有 shard 6（排序后第 76-90 个测试文件）挂住，而且它
+# 熬过了内层 timeout 的整组 SIGKILL——泄漏进程在独立会话里（runner 用
+# start_new_session 单独建组），整组信号够不着，最后由 GitHub 取消，日志不落盘。
 #
-# 定位后删掉本文件。
+# 教训：第二次尝试把 15 个文件放进一个 job 顺序跑，限了单文件 180 秒却没限总和
+# ——最坏 45 分钟，step 跑满 30 分钟被 job 超时取消，日志同样没了（第七次）。
+#
+# 所以回到第一阶段真正奏效的形态：**让 job 本身承载信号**。一个文件一个 job，
+# 挂住的那个显示为 cancelled，其余全部正常完成、日志照常保留——结论完全不依赖
+# 能否从挂住的 run 里抠出日志。顺带每个 job 跑完探一次残留进程，
+# 把"留下进程但没挂住"这种症状也一并抓出来。
 name: Test shard diagnosis (manual)
 
 on:
   workflow_dispatch:
 
 jobs:
-  leak-hunt:
-    name: leak hunt (files 76-90)
-    timeout-minutes: 25
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.list.outputs.files }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        name: List the suspect files
+        run: |
+          # 从仓库实际文件列表派生，不写死文件名：范围变了改这一处的行号即可。
+          files_json="$(ls tests/test_*.py | sort | sed -n '76,90p' | jq -R . | jq -cs .)"
+          echo "files=${files_json}" >> "$GITHUB_OUTPUT"
+          echo "本轮逐个 job 跑："
+          printf '%s\n' "$files_json" | jq -r '.[]' | sed 's/^/  /'
+
+  probe:
+    needs: plan
+    name: ${{ matrix.file }}
+    # 单个文件正常只要几十秒；给 8 分钟，挂住的会被 job 超时收掉并显示 cancelled，
+    # 那就是答案本身，不需要它的日志。
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        file: ${{ fromJSON(needs.plan.outputs.files) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,63 +56,30 @@ jobs:
 
       - run: uv sync --all-extras --all-groups --frozen
 
-      - name: Hunt the leaker
+      - name: Run ${{ matrix.file }}
         run: |
+          # 输出重定向到文件而不是管道：孙进程继承的是 fd 指向的文件，握不住
+          # step 的 stdout，所以"测试跑完但步骤不结束"那一类挂法在这里不成立。
+          set +e
+          timeout --signal=KILL 300 \
+            uv run pytest "${{ matrix.file }}" -q --no-testmon --timeout=60 \
+            > /tmp/one.log 2>&1
+          rc=$?
+          set -e
+
+          echo "rc=${rc}（137 = 撞到 300 秒被杀）"
+          tail -40 /tmp/one.log
+
+          # 孙进程比父进程晚一点才出现在 ps 里，沉降一下再探。
           # 泄漏特征取自 test_process_runner.py 里那个故意留下管道成员的回归测试：
-          # `bash -lc "... sleep 30 | tee /dev/null"`。只认这几个名字，避开 runner 自身噪声。
-          # 排除自己所在的进程组和 1 号组：下面要按 PGID 整组回收，而
-          # `kill -9 -- -1` 是"杀掉所有进程"的特殊语义，匹配到自己就是自尽。
-          self_pgid="$(ps -o pgid= -p $$ | tr -d ' ')"
-          leak_probe() {
-            ps -eo pid,pgid,sess,etime,args 2>/dev/null \
-              | grep -E 'sleep [0-9]|tee /dev/null|bash -lc' \
-              | grep -v grep \
-              | awk -v self="$self_pgid" '$2 != self && $2 > 1' || true
-          }
-
-          files="$(ls tests/test_*.py | sort | sed -n '76,90p')"
-          echo "本轮逐个跑 $(printf '%s\n' "$files" | wc -l) 个文件"
-          echo
-
-          suspects=""
-          for f in $files; do
-            # 重定向到文件，不用管道：孙进程继承的是 fd 指向的文件，握不住 step 的 stdout。
-            # 所以无论测试怎么挂，timeout 到点后这一步都会继续往下走。
-            timeout --signal=KILL 180 \
-              uv run pytest "$f" -q --no-testmon --timeout=60 > /tmp/one.log 2>&1
-            rc=$?
-
-            # 沉降一下再探：孙进程（sleep / tee）比父进程晚一点才出现在 ps 里，
-            # 探早了只抓到 `bash -lc` 一行，看不出它到底握着什么。
-            sleep 1
-            leftover="$(leak_probe)"
-            tag=""
-            [ "$rc" -eq 137 ] && tag=" ⟵ 超时被杀"
-            [ -n "$leftover" ] && tag="${tag} ⟵ 留下了进程"
-            printf '%-52s rc=%-4s%s\n' "$f" "$rc" "$tag"
-
-            if [ "$rc" -ne 0 ] || [ -n "$leftover" ]; then
-              suspects="${suspects}${f}"$'\n'
-              echo "  ---- 末尾输出 ----"
-              tail -15 /tmp/one.log | sed 's/^/  /'
-              if [ -n "$leftover" ]; then
-                echo "  ---- 残留进程 ----"
-                printf '%s\n' "$leftover" | sed 's/^/  /'
-                # 收掉再跑下一个，避免污染后续判定。只回收探针抓到的那几个进程组
-                # （ps 的第 2 列是 PGID）——不要用 `pkill -f 'sleep [0-9]'` 这种宽匹配，
-                # runner 自己也在用 sleep，会连它一起杀掉。
-                printf '%s\n' "$leftover" | awk '{print $2}' | sort -u \
-                  | while read -r pgid; do kill -9 -- "-${pgid}" 2>/dev/null || true; done
-              fi
-              echo
-            fi
-          done
-
-          echo
-          echo "================ 结论 ================"
-          if [ -z "$suspects" ]; then
-            echo "逐个文件跑全部干净 —— 说明挂住来自文件之间的相互作用，"
-            echo "而不是单个文件；下一步要按相邻组合复现。"
+          # `bash -lc "... sleep 30 | tee /dev/null"`。
+          sleep 2
+          leftover="$(ps -eo pid,pgid,sess,etime,args 2>/dev/null \
+            | grep -E 'sleep [0-9]|tee /dev/null|bash -lc' | grep -v grep || true)"
+          if [ -n "$leftover" ]; then
+            echo "==== 本文件跑完后仍有残留进程 ===="
+            printf '%s\n' "$leftover"
           else
-            printf '嫌疑文件：\n%s' "$suspects"
+            echo "==== 无残留进程 ===="
           fi
+          exit "$rc"
