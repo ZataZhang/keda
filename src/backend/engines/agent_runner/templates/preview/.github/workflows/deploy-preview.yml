@@ -23,7 +23,13 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.event.issue.number }}
+  # issue_comment 对**每一条**评论都会建运行，而取消是在运行级别发生的：分组相同
+  # 时，一条无关评论足以掐掉正在跑的部署（本工作流实测被这样取消过）。因此把非
+  # `/deploy` 的评论隔离到自己的分组里——它们本来就什么都不做，也就不该抢占别人。
+  # `/deploy` 仍与 pull_request 同组，这样重新部署会正常取代上一次。
+  group: >-
+    preview-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.event.issue.number }}-${{
+    github.event_name == 'issue_comment' && github.event.comment.body != '/deploy' && 'noop' || 'deploy' }}
   cancel-in-progress: true
 
 env:
@@ -65,14 +71,19 @@ jobs:
             else
               should_deploy="true"
             fi
+          # 本 job 刻意不做 checkout（只需解析出 PR 号与 SHA），所以 gh 必须显式
+          # 带 --repo：没有 .git 时它推断不出仓库，会以
+          # `fatal: not a git repository` 失败。
           elif [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
             pr_number="${INPUT_PR}"
-            commit_sha="$(gh pr view "${pr_number}" --json headRefOid -q .headRefOid)"
+            commit_sha="$(gh pr view "${pr_number}" --repo "${GITHUB_REPOSITORY}" --json headRefOid -q .headRefOid)"
             should_deploy="true"
           elif [ "${EVENT_NAME}" = "issue_comment" ] && [ -n "${ISSUE_PR_URL}" ]; then
-            pr_number="${ISSUE_NUMBER}"
-            commit_sha="$(gh pr view "${pr_number}" --json headRefOid -q .headRefOid)"
+            # 只有确实要部署时才去解析 SHA。此前无论评论内容是什么都会调用
+            # gh，于是任意一条无关评论都会让这个 job 失败。
             if [ "${COMMENT_BODY}" = "/deploy" ]; then
+              pr_number="${ISSUE_NUMBER}"
+              commit_sha="$(gh pr view "${pr_number}" --repo "${GITHUB_REPOSITORY}" --json headRefOid -q .headRefOid)"
               should_deploy="true"
             fi
           fi

@@ -82,6 +82,47 @@ def test_teardown_job_can_reach_the_preview_server(workflow_jobs):
     )
 
 
+def _job_has_checkout_step(job_definition: dict) -> bool:
+    """Report whether a job checks the repository out."""
+    return any("actions/checkout" in str(step.get("uses", "")) for step in job_definition["steps"])
+
+
+def test_gh_cli_calls_pass_repo_when_the_job_has_no_checkout(workflow_jobs):
+    """没有 checkout 的 job 调用 gh 时必须带 --repo。
+
+    `gh` 默认从 `.git` 推断目标仓库。`preview-context` 刻意不做 checkout（它只需
+    解析出 PR 号与 SHA），所以漏掉 `--repo` 时会以
+    `fatal: not a git repository` 失败——这条路径让 `workflow_dispatch` 与
+    `/deploy` 评论两种触发方式长期不可用。
+    """
+    for job_name, job_definition in workflow_jobs.items():
+        if _job_has_checkout_step(job_definition):
+            continue
+        for step in job_definition["steps"]:
+            run_script = str(step.get("run", ""))
+            for gh_invocation in re.findall(r"gh (?:pr|issue|api|run) [^\n)]*", run_script):
+                assert "--repo" in gh_invocation, (
+                    f"job `{job_name}` 没有 checkout，但其中的 gh 调用未带 --repo："
+                    f"{gh_invocation.strip()}"
+                )
+
+
+def test_non_deploy_comments_use_a_separate_concurrency_group():
+    """无关评论必须与部署分属不同的 concurrency 分组。
+
+    取消发生在**运行级别**：只要分组相同，一条无关评论建立的运行就会取消正在跑
+    的部署，哪怕它自己什么都不做。GitHub 表达式无法在本地求值，因此这里只能做
+    结构性断言——分组表达式必须按评论内容区分。
+    """
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    concurrency_group = workflow["concurrency"]["group"]
+
+    assert "github.event.comment.body" in concurrency_group, (
+        "concurrency.group 没有按评论内容区分，任意一条 PR 评论都会取消正在进行的"
+        f"预览部署。当前表达式：{concurrency_group}"
+    )
+
+
 def test_bundled_template_workflow_matches_source():
     """模板副本必须与源文件逐字节一致，否则下游项目会继承旧缺陷。"""
     assert TEMPLATE_WORKFLOW_PATH.read_text(encoding="utf-8") == WORKFLOW_PATH.read_text(
