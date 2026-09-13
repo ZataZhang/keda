@@ -297,11 +297,16 @@ jobs:
           # 依赖仍受 cooldown 保护；对自建 tap 有效（仅 official tap 会忽略它）。
           # Homebrew 6.x 起，第三方 tap 的 formula 默认不可加载：
           #   Refusing to load formula ... from untrusted tap
-          # 必须放在 brew tap **之前**：这道检查发生在 tap 自身（clone 完就逐个
-          # 校验 formula，失败信息是 `Cannot tap ...: invalid syntax in tap!`），
-          # 放到 tap 之后压根轮不到执行。本地实测未 tap 也能 trust，信任记录写进
-          # ~/.homebrew/trust.json。这里信任的是本项目自己的 tap，不是第三方来源。
-          brew trust --tap ZataZhang/tap
+          # 两个坑都踩过，别再改回去：
+          # 1. 必须放在 brew tap **之前**——这道检查发生在 tap 自身（clone 完就逐个
+          #    校验 formula，失败信息是 `Cannot tap ...: invalid syntax in tap!`），
+          #    放到 tap 之后压根轮不到执行；
+          # 2. 必须用 --formula 而不是 --tap——Homebrew 的报错把两条都列了出来，
+          #    但 tap 级信任不被这条加载路径采纳（本地 Homebrew 6.0.22 实测：
+          #    `Trusted tap: zatazhang/tap` 打印成功后 brew tap 照样拒绝；
+          #    换成 --formula 后立刻 `Tapped 1 formula`）。
+          # 信任的是本项目自己的 formula，不是第三方来源。
+          brew trust --formula ZataZhang/tap/kedacode
           brew tap ZataZhang/tap "${RUNNER_TEMP}/tap"
           brew update-python-resources --ignore-main-package-cooldown ZataZhang/tap/kedacode
           brew_tap_dir="$(brew --repository ZataZhang/tap)"
