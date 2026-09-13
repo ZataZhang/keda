@@ -663,3 +663,15 @@ No external validation required; repository evidence was sufficient.（Next.js �
 | D-07 | 托管进程默认启动命令 | 运行时解析当前 `iar` 可执行文件，显式配置优先 | 保留写死的 `["uv", "run", "iar"]` | 写死值在全局安装场景下指向不存在的 uv 项目，会让面板全部写操作失效 |
 | D-08 | 模板遗留动态路由处理 | 连同同族模板页一并删除 | 补 `generateStaticParams` 让其可导出 | 这些页面不在导航里、与 keda 无关，为它们付静态导出成本没有收益 |
 | D-09 | 依赖瘦身时机 | 本 PRD 一并处理（待人工确认） | 推迟到桌面安装包 PRD | 实测 CLI 与 FastAPI app 加载后这五个包均未被导入，仓库内部零可达性，越早瘦身冻结体积与 hidden-import 成本越低；但因属破坏性打包变更，交由人工拍板 |
+
+### Final Reconciliation
+
+2026-09-13 归档前复核（实现已于 2026-09-10 落地，随 `kedacode` 0.2.0 / 0.2.1 两次发布进入公共索引）。
+
+- Interpretation: confirmed —— 「把已有的 frontend-public 面板静态导出后打进 wheel，用 `iar console` 一条命令起服」这一解读按原样落地，未扩成第二套 UI、未引入 Electron/Tauri 一类额外运行时。
+- Public behavior and contracts: corrected —— D-04「监听地址硬绑 127.0.0.1」在起草时留了自相矛盾的口子：Part A 说不提供暴露开关，Part B 的 settings 里却仍有可配置的 `host` 字段，实测可把面板暴露到局域网。已收口：`AgentRunnerConsoleSettings` **整个删掉 `host` 字段**（现字段为 `history_db_path` / `process_registry_path` / `process_log_dir` / `runner_command` / `stop_timeout_seconds` / `port`），监听地址改为 `cli_typer_console.py` 里的模块常量 `CONSOLE_HOST = "127.0.0.1"`，并补回归测试断言该字段不可复活。其余对外契约（`iar console` 参数、静态资源挂载路径、`/api/v1/agent-runner/*`）与 FR 一致。
+- Related PRD status: confirmed —— 下游 `P1-FEAT-20260910-125248`（包管理器分发）同批归档，它消费本 PRD 产出的 wheel 内静态资源。D-09 的依赖瘦身在下游拿到独立佐证：0.2.1 的 Homebrew formula resource 由 32 降至 28，uvicorn 的 standard extra 带入的 uvloop / httptools / websockets / watchfiles 四个编译型依赖全部消失。
+- Requirements and risks: confirmed —— §12 五条风险均未恶化，无新增。附带的已知负债：`settings.py` 因本次改动后为 1038 非空行，超出 1000 行门禁，已按既有机制登记到 `hooks/max_file_lines.allowlist.txt`（该清单由 `P1-REFACTOR-20260705-210702` 负责清零），不是本 PRD 新引入的超限文件类型。
+- Reconciled differences:
+  - 监听地址的证据强度在归档时再次提升：0.2.1 的 rv-5 从**公共 PyPI 装出来的 `iar`**、在**临时目录**（非仓库 checkout）起 console，`/`、`/api/v1/agent-runner/health`、`/app/dashboard/`、`/app/processes/` 全部 200，`lsof` 确认只监听 `127.0.0.1`——比起草时设想的仓库内验证更贴近真实用户路径，同时也证明静态资源确实随 wheel 分发。
+  - D-07 的运行时解析按 `Path(argv0).stem == "iar"` 判定而非 `.name`，以覆盖 Windows 的 `iar.exe`；起草时未写明该细节。
