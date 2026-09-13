@@ -26,7 +26,11 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 
 # Create a virtual environment and install production dependencies.
-RUN uv sync --frozen --no-dev
+# The `db` extra is not optional for this image: CMD runs `alembic upgrade head`
+# before uvicorn, and the compose stacks connect via `postgresql+psycopg2://`.
+# Both alembic and psycopg2-binary live in that extra, so a plain `--no-dev`
+# sync produces an image that dies on startup with `alembic: not found`.
+RUN uv sync --frozen --no-dev --extra db
 
 # Create a non-root user for security
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
