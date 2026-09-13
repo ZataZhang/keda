@@ -1,0 +1,86 @@
+# 一次性验收用（PRD P1-FEAT-20260910-125248 的 rv-2 反向验证 a 段）。采到证据后删除。
+#
+# 要证明的命题：publish job 少了 `permissions: id-token: write` 就拿不到 OIDC 令牌、
+# 发布必失败——也就是"仓库内零长期密钥"这条断言**能判负**，而不是因为别的原因恰好通过。
+#
+# 为什么这么跑是安全的，两个互相独立的理由：
+#   1. 没有 `id-token: write` 时，runner 连 ACTIONS_ID_TOKEN_REQUEST_URL /
+#      ACTIONS_ID_TOKEN_REQUEST_TOKEN 都收不到，且本仓库不存在任何 PyPI token
+#      secret，publish 动作手上一份凭据都没有；
+#   2. PyPI 的 Trusted Publisher 登记绑定的是 `release.yml` + environment `pypi`，
+#      本文件两者都不是，即便真签出令牌也会被 PyPI 拒绝。
+#   另外本文件刻意不写 `environment: pypi`，避免误触任何环境级凭据。
+name: OIDC negative control (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # 反向档：缺 id-token 权限 —— 期望发布失败。
+  without-id-token:
+    name: publish WITHOUT id-token write (expect failure)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Build real distributions
+        run: |
+          uv build
+          ls -l dist
+
+      - name: Show OIDC request env
+        run: |
+          # GitHub 只在 job 拿到 id-token: write 时才注入这两个变量。
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL   is set: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}${ACTIONS_ID_TOKEN_REQUEST_URL:-no}"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN is set: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-no}"
+
+      - name: Attempt to publish (must fail)
+        id: publish
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+      - name: Assert the publish failed
+        run: |
+          echo "publish step outcome = ${{ steps.publish.outcome }}"
+          if [ "${{ steps.publish.outcome }}" != "failure" ]; then
+            echo "::error::少了 id-token: write 竟然没失败——断言判不了负，反向验证不成立"
+            exit 1
+          fi
+          echo "✅ 如期失败：没有 id-token: write 就拿不到 OIDC 令牌"
+
+  # 正向对照：同样的仓库、同样的动作，只多一个权限 —— 令牌能签出。
+  # 只签令牌、不发布，确保上面的失败确实由缺权限造成，而不是别的环节。
+  with-id-token:
+    name: mint OIDC token WITH id-token write (control)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Show OIDC request env and mint a token
+        run: |
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL   is set: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}${ACTIONS_ID_TOKEN_REQUEST_URL:-no}"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN is set: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-no}"
+          # 只看 HTTP 状态与令牌长度，绝不打印令牌本身。
+          status="$(curl -sS -o /tmp/oidc.json -w '%{http_code}' \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi")"
+          echo "OIDC 签发请求 HTTP ${status}"
+          length="$(python3 -c "import json;print(len(json.load(open('/tmp/oidc.json')).get('value','')))")"
+          echo "签出令牌长度 = ${length}"
+          rm -f /tmp/oidc.json
+          if [ "$status" != "200" ] || [ "$length" -lt 100 ]; then
+            echo "::error::带 id-token: write 也签不出令牌——对照组不成立"
+            exit 1
+          fi
+          echo "✅ 对照成立：只多了 id-token: write，令牌就能签出"
