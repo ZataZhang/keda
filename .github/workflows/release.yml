@@ -296,6 +296,12 @@ jobs:
           # 几分钟内跑，必然解析不到 kedacode 自己。该开关只对 formula 自身放行，
           # 依赖仍受 cooldown 保护；对自建 tap 有效（仅 official tap 会忽略它）。
           brew tap ZataZhang/tap "${RUNNER_TEMP}/tap"
+          # Homebrew 6.x 起，第三方 tap 的 formula 默认不可加载：
+          #   Refusing to load formula ... from untrusted tap
+          # 0.2.0 发布时没撞上，是因为当时只跑了不加载 formula 的命令；
+          # update-python-resources 要真正加载它，所以必须先显式信任。
+          # 这里信任的是本项目自己的 tap，不是第三方来源。
+          brew trust ZataZhang/tap
           brew update-python-resources --ignore-main-package-cooldown ZataZhang/tap/kedacode
           brew_tap_dir="$(brew --repository ZataZhang/tap)"
           cp "${brew_tap_dir}/Formula/kedacode.rb" "${RUNNER_TEMP}/tap/Formula/kedacode.rb"
