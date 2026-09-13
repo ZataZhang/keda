@@ -304,7 +304,6 @@ jobs:
 
       - name: Tear down preview stack
         if: ${{ env.SERVER_HOST != '' && env.SERVER_USER != '' }}
-        env:
         run: |
           ssh -o StrictHostKeyChecking=no \
             "${SERVER_USER}@${SERVER_HOST}" \
