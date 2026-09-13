@@ -8,10 +8,17 @@
 #   ./scripts/sync_template.sh --list     # print upstream-owned entries, no TUI, no apply
 #   ./scripts/sync_template.sh --list-all # print all entries (--list + --all)
 #   ./scripts/sync_template.sh --dry-run  # run TUI but don't write anything
+#   ./scripts/sync_template.sh --skill <name> [--dry-run]
+#                                         # non-interactive: redeploy one skill from this
+#                                         # repo checkout to every local tool dir that
+#                                         # already has it (first-time install: use TUI)
 
 set -euo pipefail
 
-TEMPLATE_REPO="${SYNC_TEMPLATE_TEMPLATE_REPO:-https://github.com/zata-zhangtao/zata-codes-template.git}"
+# 模板仓库地址。旧地址 zata-zhangtao/zata-codes-template 目前仍能靠 GitHub 的
+# 仓库重定向工作，但重定向不保证长期有效（旧用户名一旦被他人注册，行为即不可
+# 预期），而这个默认值会随模板分发到每个下游项目，所以直接写新地址。
+TEMPLATE_REPO="${SYNC_TEMPLATE_TEMPLATE_REPO:-https://github.com/ZataZhang/zata-codes-template.git}"
 LOCAL_ROOT="$(git rev-parse --show-toplevel)"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
@@ -42,6 +49,8 @@ PROJECT_INCLUDE_PATH_COUNT=0
 
 SHOW_ALL=false
 LOCAL_SKILLS_MODE=false
+SKILL_FILTER_MODE=false
+SKILL_FILTER_NAME=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -66,9 +75,19 @@ while [ $# -gt 0 ]; do
             LOCAL_SKILLS_MODE=true
             shift
             ;;
+        --skill)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then
+                echo "Error: --skill requires a skill name." >&2
+                exit 1
+            fi
+            LOCAL_SKILLS_MODE=true
+            SKILL_FILTER_MODE=true
+            SKILL_FILTER_NAME="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--all] [--list] [--list-all] [--dry-run] [--local-skills]" >&2
+            echo "Usage: $0 [--all] [--list] [--list-all] [--dry-run] [--local-skills] [--skill <name>]" >&2
             exit 1
             ;;
     esac
@@ -92,8 +111,34 @@ _append_split_paths() {
     done
 }
 
+# 解析 config.toml 需要 TOML 解析器：tomllib 要 Python 3.11+，而 macOS 自带的
+# python3 至今仍是 3.9。选不出可用解释器时必须报错，不能静默回退默认值——
+# 否则用户在 [template_sync] 里配的路径会被悄悄忽略，TUI 却显示得像配置生效了。
+# 依次尝试：显式指定的解释器 -> 项目 venv -> PATH 上的 python3 -> 具名新版本。
+_select_toml_python() {
+    local python_candidate
+
+    for python_candidate in \
+        "${SYNC_TEMPLATE_PYTHON:-}" \
+        "$LOCAL_ROOT/.venv/bin/python" \
+        python3 \
+        python3.14 python3.13 python3.12 python3.11
+    do
+        [ -n "$python_candidate" ] || continue
+        command -v "$python_candidate" >/dev/null 2>&1 || continue
+        if "$python_candidate" -c 'import tomllib' >/dev/null 2>&1 \
+            || "$python_candidate" -c 'import tomli' >/dev/null 2>&1; then
+            printf '%s\n' "$python_candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 _load_configured_project_paths() {
     local config_file="$LOCAL_ROOT/config.toml"
+    local toml_python=""
     local config_output=""
     local configured_skip=false
     local configured_include=false
@@ -109,14 +154,27 @@ _load_configured_project_paths() {
     PROJECT_INCLUDE_PATH_COUNT=0
 
     if [ -f "$config_file" ]; then
-        if ! config_output="$(python3 - "$config_file" <<'PYEOF'
+        toml_python="$(_select_toml_python || true)"
+    fi
+
+    if [ -z "$toml_python" ]; then
+        if [ -f "$config_file" ] \
+            && grep -q '^[[:space:]]*\[template_sync\]' "$config_file"; then
+            echo "❌ 无法解析 $config_file 里的 [template_sync]：找不到自带 TOML 解析器的 Python。" >&2
+            echo "   需要 Python 3.11+（内置 tomllib），或任一装了 tomli 的 Python。" >&2
+            echo "   可用 SYNC_TEMPLATE_PYTHON=/path/to/python3.11 指定解释器，" >&2
+            echo "   或用 SYNC_TEMPLATE_PROJECT_SKIP_PATHS / SYNC_TEMPLATE_PROJECT_INCLUDE_PATHS 直接覆盖路径。" >&2
+            exit 1
+        fi
+    else
+        if ! config_output="$("$toml_python" - "$config_file" <<'PYEOF'
 import sys
 from pathlib import Path
 
 try:
     import tomllib
-except ModuleNotFoundError:
-    sys.exit(0)
+except ModuleNotFoundError:  # Python < 3.11：调用方已确保 tomli 可用
+    import tomli as tomllib
 
 config_path = Path(sys.argv[1])
 try:
@@ -263,12 +321,16 @@ _is_always_skipped() {
         main.py|justfile) return 0 ;;
         findings.md|progress.md|task_plan.md) return 0 ;;
         .DS_Store|.dockerignore|.gitignore) return 0 ;;
+        # 模板仓库专属工具配置与历史产物：.iar.toml 含模板仓库身份/remote，
+        # 派生项目需自建；zata_code_template.zip 是含加密 .env.local 备份的
+        # 过期产物。两者都不应同步进派生项目（与 just copy 的排除名单一致）。
+        .iar.toml|zata_code_template.zip) return 0 ;;
         # Tests that exercise template-only artifacts (e.g. skills/prd/scripts)
         # are not portable to derived projects: the underlying artifact is
         # always-skipped below, so importing the test would guarantee a
         # collection-time FileNotFoundError downstream. Keep these tests
         # template-internal by listing them here.
-        tests/test_prd_skill_checker.py) return 0 ;;
+        tests/guards/test_prd_skill_checker.py) return 0 ;;
     esac
     case "$p" in
         # Local state, build output, runtime artifacts
@@ -341,6 +403,12 @@ _is_upstream_owned() {
         # hooks must live directly under hooks/ and must not be placed in
         # hooks/shared/.
         hooks/shared/*) return 0 ;;
+        # 守卫测试的所有权边界与 hooks/shared 同构：tests/guards/shared/ 守护
+        # 上面这些 upstream-owned 代码（hooks/shared、scripts/shared、
+        # scripts/build 等），必须随 sync 一起走同一条分发生命周期，否则
+        # shared 代码升级后派生项目的守卫会静默漂移。根目录的守卫测试守护
+        # 项目自有对象（src/、alembic/、compose 等），不进分发面。
+        tests/guards/shared/*) return 0 ;;
         # Pre-commit configuration is maintained by the template. Hook scripts
         # auto-detect project conventions (e.g. alembic filename separator) so
         # the config can stay generic and syncable.
@@ -471,15 +539,20 @@ _resolve_skill_install_target_dirs() {
         SKILL_INSTALL_TARGET_DIRS+=("$HOME/.pi/agent/skills")
     fi
 
+    if [ -d "$HOME/.qoder-cn" ]; then
+        SKILL_INSTALL_TARGET_DIRS+=("$HOME/.qoder-cn/skills")
+    fi
+
     if [ "${#SKILL_INSTALL_TARGET_DIRS[@]}" -gt 0 ]; then
         return 0
     fi
 
-    echo "No ~/.cc-switch or ~/.pi directory found."
+    echo "No known skill directory (~/.cc-switch, ~/.pi, ~/.qoder-cn) found."
     echo "Choose a skill install target:"
     echo "  [1] Codex  -> $HOME/.codex/skills"
     echo "  [2] Claude -> $HOME/.claude/skills"
     echo "  [3] Pi     -> $HOME/.pi/agent/skills"
+    echo "  [4] Qoder  -> $HOME/.qoder-cn/skills"
     echo "  [q] Skip skill installation"
 
     while true; do
@@ -499,6 +572,10 @@ _resolve_skill_install_target_dirs() {
                 SKILL_INSTALL_TARGET_DIRS+=("$HOME/.pi/agent/skills")
                 return 0
                 ;;
+            4)
+                SKILL_INSTALL_TARGET_DIRS+=("$HOME/.qoder-cn/skills")
+                return 0
+                ;;
             q|Q|"")
                 return 1
                 ;;
@@ -507,6 +584,56 @@ _resolve_skill_install_target_dirs() {
                 ;;
         esac
     done
+}
+
+# --skill <name>：把本仓库 checkout 里的单个 Skill 重新部署到所有已安装它的本机
+# 工具目录。刻意只做「更新已有安装」、绝不创建新目录：这条路径由 agent 非交互
+# 驱动，不能往用户可能已弃用的工具里凭空造出安装目录；首次安装走交互 TUI。
+_install_one_skill_noninteractive() {
+    local template_root="$1"
+    local skill_name="$2"
+    local src_dir="$template_root/skills/$skill_name"
+
+    if [ ! -d "$src_dir" ]; then
+        echo "❌ Skill not found in this repo: $src_dir" >&2
+        exit 1
+    fi
+
+    local -a candidate_dirs=()
+    [ -n "$CC_SWITCH_SKILLS_DIR" ] && candidate_dirs+=("$CC_SWITCH_SKILLS_DIR")
+    [ -d "$HOME/.cc-switch/skills" ] && candidate_dirs+=("$HOME/.cc-switch/skills")
+    [ -d "$HOME/.pi/agent/skills" ] && candidate_dirs+=("$HOME/.pi/agent/skills")
+    [ -d "$HOME/.qoder-cn/skills" ] && candidate_dirs+=("$HOME/.qoder-cn/skills")
+    [ -d "$HOME/.claude/skills" ] && candidate_dirs+=("$HOME/.claude/skills")
+    [ -d "$HOME/.codex/skills" ] && candidate_dirs+=("$HOME/.codex/skills")
+    [ -d "$HOME/.kimi-code/skills" ] && candidate_dirs+=("$HOME/.kimi-code/skills")
+
+    if [ "${#candidate_dirs[@]}" -eq 0 ]; then
+        echo "❌ No local skills directory found (~/.cc-switch, ~/.pi, ~/.qoder-cn, ~/.claude, ~/.codex, ~/.kimi-code)." >&2
+        echo "   Set CC_SWITCH_SKILLS_DIR to your tool's skills directory and retry." >&2
+        exit 1
+    fi
+
+    local skills_base updated=0
+    for skills_base in "${candidate_dirs[@]}"; do
+        if [ ! -d "$skills_base/$skill_name" ]; then
+            echo "  ⏭ Not installed, skipped: $skills_base"
+            continue
+        fi
+        if $DRY_RUN_MODE; then
+            echo "  ⏭ Would update: $skills_base/$skill_name"
+        else
+            rsync -a --delete "$src_dir/" "$skills_base/$skill_name/"
+            echo "  ✅ Updated: $skills_base/$skill_name"
+        fi
+        updated=$((updated + 1))
+    done
+
+    if [ "$updated" -eq 0 ]; then
+        echo "❌ '$skill_name' is not installed in any known local skills directory; nothing to redeploy." >&2
+        echo "   First-time installation: interactive TUI or just sync-local-skills." >&2
+        exit 1
+    fi
 }
 
 _collect_template_skill_updates() {
@@ -813,6 +940,11 @@ else
     TEMPLATE_ROOT="$TEMP_DIR/template"
     echo "✅ Template fetched."
     echo ""
+fi
+
+if $SKILL_FILTER_MODE; then
+    _install_one_skill_noninteractive "$TEMPLATE_ROOT" "$SKILL_FILTER_NAME"
+    exit 0
 fi
 
 # ──────────────────────────────────────────────────────────────
