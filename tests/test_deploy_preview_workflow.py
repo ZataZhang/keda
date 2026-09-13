@@ -19,7 +19,8 @@ import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "deploy-preview.yml"
+WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+WORKFLOW_PATH = WORKFLOWS_DIR / "deploy-preview.yml"
 TEMPLATE_WORKFLOW_PATH = (
     REPO_ROOT
     / "src"
@@ -130,14 +131,20 @@ def test_bundled_template_workflow_matches_source():
     ), f"{TEMPLATE_WORKFLOW_PATH} 与 {WORKFLOW_PATH} 不一致，请同步模板副本"
 
 
-def test_workflow_has_no_null_valued_keys():
+@pytest.mark.parametrize(
+    "workflow_path", sorted(WORKFLOWS_DIR.glob("*.yml")), ids=lambda path: path.name
+)
+def test_workflow_has_no_null_valued_keys(workflow_path: Path):
     """任何 key 的值为 null 都会让 GitHub 判定 schema 非法并整体拒绝解析。
 
-    空的 `env:` 曾让这个工作流连续两个月处于 startup failure：YAML 解析得动，
+    空的 `env:` 曾让 deploy-preview 连续两个月处于 startup failure：YAML 解析得动，
     但 Actions schema 要求 mapping，报 `Unexpected value ''`。本地的 check-yaml
     验不出这一类问题，所以在这里显式拦一道。
+
+    这一类缺陷与具体工作流无关——代价又格外高（整个文件拒绝解析，`on:` 读不到，
+    失败会挂到不相干的 push 上），因此对 `.github/workflows/` 下每个文件都检查。
     """
-    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     null_valued_paths: list[str] = []
 
     def _walk(node: object, path: str) -> None:
@@ -157,6 +164,6 @@ def test_workflow_has_no_null_valued_keys():
     _walk(normalized_workflow, "")
 
     assert not null_valued_paths, (
-        f"以下 key 的值为 null，GitHub 会拒绝解析整个工作流并产生 startup failure："
-        f"{null_valued_paths}"
+        f"{workflow_path.name} 里以下 key 的值为 null，GitHub 会拒绝解析整个工作流"
+        f"并产生 startup failure：{null_valued_paths}"
     )
