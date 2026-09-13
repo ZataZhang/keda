@@ -410,43 +410,29 @@ down arg1="" arg2="" arg3="" arg4="" arg5="": _check-completion
             ;;
     esac
 
-# Check that bundled workflow templates are byte-identical to their source
-# files, and that the README field table matches PreviewSettings.model_fields.
-# Exits non-zero on any drift.
+# Check that the bundled preview template stays consistent with the code it
+# documents. Exits non-zero on any drift.
+#
+# 这里原本还逐字节比对模板副本与仓库根下的同名源文件——keda 当时自己也跑预览部署，
+# 两份必须一致。keda 的预览已下线，根下副本随之删除，模板成为唯一副本，那组比对
+# 也就没有比对对象了。模板文件本身改由 tests/test_deploy_preview_*.py 直接针对
+# 模板路径验证，打包完整性由 test_every_expected_file_is_packaged 兜底。
 check-template-drift:
     #!/usr/bin/env bash
     set -euo pipefail
 
     template_root="src/backend/engines/agent_runner/templates/preview"
-
-    # 1. Byte-level diff between template copies and source files.
-    diff_pairs=(
-        ".github/workflows/deploy-preview.yml|.github/workflows/deploy-preview.yml"
-        "deploy/vps-traefik/README.md|deploy/vps-traefik/README.md"
-        "deploy/vps-traefik/docker-compose.preview.yml|deploy/vps-traefik/docker-compose.preview.yml"
-        "deploy/vps-traefik/deploy-preview.sh|deploy/vps-traefik/deploy-preview.sh"
-        "deploy/vps-traefik/preview.env.example|deploy/vps-traefik/preview.env.example"
-        "scripts/preview_env.py|scripts/preview_env.py"
-        "scripts/provision_preview_server.py|scripts/provision_preview_server.py"
-    )
+    readme_path="${template_root}/deploy/vps-traefik/README.md"
 
     drift_detected=0
-    for pair in "${diff_pairs[@]}"; do
-        template_rel="${pair%%|*}"
-        source_rel="${pair##*|}"
-        if ! diff -q "${template_root}/${template_rel}" "${source_rel}" > /dev/null; then
-            echo "❌ Template drift: ${template_root}/${template_rel} != ${source_rel}"
-            drift_detected=1
-        fi
-    done
 
-    # 2. README field table must match PreviewSettings.model_fields.
+    # README field table must match PreviewSettings.model_fields.
     if command -v uv > /dev/null 2>&1; then
         preview_field_names="$(uv run python -c "from backend.infrastructure.config.settings import PreviewSettings; import sys; [sys.stdout.write(name + \"\n\") for name in PreviewSettings.model_fields.keys()]")"
-        readme_field_names="$(awk '/^Non-sensitive structure is configured in `config.toml \[preview\]`:/{flag=1; next} flag && /^- `/ {gsub(/^- `/, ""); gsub(/`$/, ""); print}' deploy/vps-traefik/README.md)"
+        readme_field_names="$(awk '/^Non-sensitive structure is configured in `config.toml \[preview\]`:/{flag=1; next} flag && /^- `/ {gsub(/^- `/, ""); gsub(/`$/, ""); print}' "${readme_path}")"
         if [ -n "$readme_field_names" ]; then
             if [ "$(printf '%s\n' "$preview_field_names" | sort)" != "$(printf '%s\n' "$readme_field_names" | sort)" ]; then
-                echo "❌ deploy/vps-traefik/README.md field table does not match PreviewSettings.model_fields"
+                echo "❌ ${readme_path} field table does not match PreviewSettings.model_fields"
                 echo "  Expected: $(printf '%s ' $preview_field_names)"
                 echo "  Found:    $(printf '%s ' $readme_field_names)"
                 drift_detected=1
@@ -457,7 +443,7 @@ check-template-drift:
     fi
 
     if [ "$drift_detected" -ne 0 ]; then
-        echo "❌ Template drift detected; sync source files into ${template_root}."
+        echo "❌ Template drift detected in ${template_root}."
         exit 1
     fi
     echo "✅ Templates in sync."

@@ -741,9 +741,15 @@ uv run iar workflow install preview --force
 - 缺 `.iar.toml` 时拒绝并提示 `iar init`
 - 接收 `--repo` / `--repo-id` / `--config` 时拒绝并不落盘（与 `iar init` 行为一致）
 
-模板维护说明：模板文件随 IAR Python 包一起发布，路径在 `src/backend/engines/agent_runner/templates/<name>/`。
-源仓库改动（`deploy/`、`scripts/`、`.github/workflows/deploy-preview.yml`）后，需要同步把变更复制到 `templates/preview/`。
-`just check-template-drift` 会在 CI 拒绝这两边不一致的情况；`deploy/vps-traefik/README.md` 第 35-45 行的字段表也必须与 `PreviewSettings.model_fields` 对齐，否则 drift 门禁会失败。
+模板维护说明：模板文件随 IAR Python 包一起发布，路径在 `src/backend/engines/agent_runner/templates/<name>/`，**直接在那里修改**。
+
+早先 keda 自己也跑预览部署，仓库根下因此存在一份同名副本，`just check-template-drift` 逐字节比对两边。keda 的预览部署已下线、根下副本随之删除，模板成为唯一副本，那组比对也就没有了比对对象。改由以下机制保证质量：
+
+- `tests/test_deploy_preview_workflow.py` / `test_deploy_preview_script.py` / `test_preview_env_script.py` / `test_provision_preview_server.py` 直接针对模板路径验证，不再经由根下副本
+- `test_every_expected_file_is_packaged` 经 `importlib.resources` 断言每个模板文件确实被打进了包
+- `just check-template-drift` 保留字段表检查：`templates/preview/deploy/vps-traefik/README.md` 的字段表必须与 `PreviewSettings.model_fields` 对齐
+
+注意模板脚本**不要在原地执行**：`__pycache__` 会落进模板目录，而安装时逐个以 UTF-8 读取模板文件，撞上字节码即 `UnicodeDecodeError`。测试里已通过 `sys.dont_write_bytecode` 规避。
 
 ## worktree 中的本地 env 文件
 
