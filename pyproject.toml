@@ -114,6 +114,13 @@ dev = [
 # 要改用模板版本,必须同时删掉这里的对应段落并重跑全量测试确认行为一致。
 [tool.pytest.ini_options]
 addopts = "--testmon"
+# 上游模板同步下来的守卫测试会用 @pytest.mark.slow；不注册会每次跑出
+# PytestUnknownMarkWarning。描述与上游 pytest.ini 保持一致。
+# 注意 addopts 是**有意的下游分歧**（上游是 `-m '...' -n auto --dist=loadgroup`），
+# 不要顺手一起对齐，见 .github/workflows/ci.yml 的说明。
+markers = [
+    "slow: tests that are slow due to real git/subprocess/network or other heavy I/O",
+]
 
 [tool.ruff]
 target-version = "py311"

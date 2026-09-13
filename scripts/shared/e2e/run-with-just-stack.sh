@@ -24,22 +24,88 @@ repo_root="$(cd "$script_dir/../../.." && pwd)"
 e2e_root="$repo_root/tests/playwright-e2e"
 cd "$repo_root"
 
-# Load project root .env.local so AUTH_ADMIN_BOOTSTRAP_* / APP_BOOTSTRAP_* are
-# available to Playwright. E2E-specific overrides in .env.e2e.local take precedence.
-if [ -f "$repo_root/.env.local" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$repo_root/.env.local"
-  set +a
-fi
+# 用与 pydantic-settings 一致的语义读取 env 文件，而不是 shell 的 source。
+#
+# `.env` / `.env.local` 同时被三类消费方读取，而它们对 `$` 的处理并不一致：
+#   - docker compose：`$$` 是转义，容器里拿到 `$`
+#   - shell `source`：`$` 会做变量展开（`$2` 变位置参数、`$$` 变 PID），
+#     必须彻底避免，否则 bcrypt 哈希会被破坏成非法值
+#   - pydantic-settings：按字面量读取，不做任何展开
+# 因此仓库约定这类含 `$` 的值统一写成 `$$`（见 docs/guides/configuration.md），
+# 本脚本按字面量读出后再把 `$$` 还原为 `$`，与 Docker 侧最终语义对齐；
+# 调用方无需再为「shell 会展开」而额外转义。
+#
+# 支持的语法与 dotenv 对齐：`export KEY=VALUE`、单/双引号包裹、`#` 整行注释。
+_load_env_file() {
+  local env_file="$1"
+  local override_existing_environment="${2:-false}"
+  local raw_line env_key env_value env_value_unquoted
 
-# Load local E2E env overrides (gitignored, never committed).
-if [ -f "$e2e_root/.env.e2e.local" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$e2e_root/.env.e2e.local"
-  set +a
-fi
+  [ -f "$env_file" ] || return 0
+
+  while IFS= read -r raw_line || [ -n "$raw_line" ]; do
+    # 去掉行尾 CR（Windows 检出的文件）
+    raw_line="${raw_line%$'\r'}"
+    # 跳过空行与整行注释
+    case "$raw_line" in
+      ''|'#'*) continue ;;
+    esac
+    # 允许 `export KEY=VALUE` 形式
+    if [[ "$raw_line" == export[[:space:]]* ]]; then
+      raw_line="${raw_line#export}"
+      raw_line="${raw_line#"${raw_line%%[![:space:]]*}"}"
+    fi
+    # 不含 `=` 的行不是赋值
+    [[ "$raw_line" == *=* ]] || continue
+
+    env_key="${raw_line%%=*}"
+    env_value="${raw_line#*=}"
+    # key 两侧与 value 前导空白按 dotenv 规则裁剪
+    env_key="${env_key%"${env_key##*[![:space:]]}"}"
+    env_value="${env_value#"${env_value%%[![:space:]]*}"}"
+    # 校验 key 形态，避免把非法标识符 export 进环境
+    [[ "$env_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+
+    # 剥离成对引号；单/双引号内都按字面量处理（不做 shell 展开）。
+    env_value_unquoted="$env_value"
+    case "$env_value" in
+      \'*\') env_value_unquoted="${env_value#\'}"; env_value_unquoted="${env_value_unquoted%\'}" ;;
+      \"*\") env_value_unquoted="${env_value#\"}"; env_value_unquoted="${env_value_unquoted%\"}" ;;
+    esac
+
+    # 还原 Docker 语义的 `$$` -> `$`（仓库约定含 `$` 的值写 `$$`）。
+    # 转义反斜杠使模式中的 `$` 被当作字面量，而不是变量引用。
+    env_value_unquoted="${env_value_unquoted//\$\$/\$}"
+
+    # 未被本次加载声明过的外部进程环境变量优先；同一批次内后加载的文件
+    # 覆盖先加载的（.env -> .env.local -> .env.e2e.local）。
+    if [ "$override_existing_environment" != "true" ] \
+      && [ -n "${!env_key:-}" ] \
+      && ! _was_declared_by_env_file "$env_key"; then
+      continue
+    fi
+    export "${env_key}=${env_value_unquoted}"
+    _ENV_FILE_DECLARED_KEYS="${_ENV_FILE_DECLARED_KEYS} ${env_key}"
+  done < "$env_file"
+}
+
+# 记录本次加载已经写入过的 key（空格分隔）。用字符串而非关联数组，保持
+# macOS 自带 bash 3.2 兼容。
+_ENV_FILE_DECLARED_KEYS=""
+
+_was_declared_by_env_file() {
+  local env_key="$1"
+  case " ${_ENV_FILE_DECLARED_KEYS} " in
+    *" ${env_key} "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 与 settings.py 的分层一致：先 .env，再 .env.local 覆盖；
+# .env.e2e.local 是 E2E 专用覆盖层，最后加载。
+_load_env_file "$repo_root/.env"
+_load_env_file "$repo_root/.env.local"
+_load_env_file "$e2e_root/.env.e2e.local" true
 
 filter="${1:-}"
 run_state_file="$repo_root/.env.run-state"

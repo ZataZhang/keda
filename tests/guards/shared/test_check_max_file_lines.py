@@ -1,4 +1,10 @@
-"""Regression tests for the check_max_file_lines hook."""
+"""守护 check_max_file_lines hook（单文件行数上限）的守卫测试（guard test）。
+
+本文件位于 ``tests/guards/shared/``，失败意味着源代码、配置或脚本违反了仓库约定。
+正确做法是修复触发它的源代码或配置，而不是修改本文件让测试通过；仅当约定
+本身需要变更时才改本文件，并同步更新相关约定文档。详见
+``docs/ai-standards/testing.md`` 的 Guard Tests 小节。
+"""
 
 from __future__ import annotations
 
@@ -9,7 +15,7 @@ from types import ModuleType
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 CHECK_MAX_FILE_LINES_SCRIPT_PATH = REPO_ROOT / "hooks" / "shared" / "check_max_file_lines.py"
 
 

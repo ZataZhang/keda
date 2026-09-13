@@ -70,7 +70,7 @@ sync mode="": _check-completion
                         completion_dir="$HOME/.zsh/completions"
                         completion_dst="$completion_dir/_just"
                         mkdir -p "$completion_dir"
-                        just --completions zsh > "$completion_dst"
+                        cp "{{justfile_directory()}}/scripts/shared/just/worktree_completion.zsh" "$completion_dst"
                         fpath_line="fpath=(\"$completion_dir\" \$fpath)"
                         autoload_line="autoload -Uz compinit && compinit"
                         if ! grep -Fqx "$fpath_line" "$HOME/.zshrc" 2>/dev/null; then
@@ -88,7 +88,7 @@ sync mode="": _check-completion
                         completion_dst="$completion_dir/just_completion.bash"
                         source_line="[ -f \"$completion_dst\" ] && source \"$completion_dst\""
                         mkdir -p "$completion_dir"
-                        just --completions bash > "$completion_dst"
+                        cp "{{justfile_directory()}}/scripts/shared/just/worktree_completion.bash" "$completion_dst"
                         if ! grep -Fqx "$source_line" "$HOME/.bashrc" 2>/dev/null; then
                             printf '\n%s\n' "$source_line" >> "$HOME/.bashrc"
                         fi
@@ -318,7 +318,8 @@ staged_changes:
 #   just worktree -o <branch> [--cmd trae]            # open existing worktree
 #   just worktree -d <branch>                         # delete worktree
 #   just worktree -m [<feature>] [base=main] [flags]  # merge worktree (current branch if omitted)
-#   just worktree --doctor [branch]                   # doctor / cleanup-check
+#   just worktree -r [<feature>] [base=main] [flags]  # rebase-merge（线性历史，无 merge commit）
+#   just worktree --doctor [branch] [--gc] [--yes]    # doctor / 孤儿库盘点与回收
 worktree arg1 arg2="" arg3="" arg4="" arg5="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -393,13 +394,49 @@ worktree arg1 arg2="" arg3="" arg4="" arg5="":
         exit 0
     fi
 
-    # --doctor: cleanup-check
-    if [ "{{arg1}}" = "--doctor" ]; then
-        if [ -n "{{arg2}}" ]; then
-            ./scripts/shared/worktree/merge.sh --doctor "{{arg2}}"
+    # -r: rebase-merge worktree（rebase 到 base 后 --ff-only，线性历史）
+    if [ "{{arg1}}" = "-r" ]; then
+        raw_arg2="{{arg2}}"
+        declare -a merge_args=()
+
+        if [ -z "$raw_arg2" ] || [[ "$raw_arg2" == -* ]]; then
+            current_branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+            if [ -z "$current_branch" ]; then
+                echo "ERROR: Could not determine current branch."
+                echo "Usage: just worktree -r [<feature_branch>] [base_branch=main] [flags]"
+                exit 1
+            fi
+            merge_args+=("$current_branch")
+            if [ -n "$raw_arg2" ]; then
+                merge_args+=("$raw_arg2")
+            fi
+            for raw_arg in "{{arg3}}" "{{arg4}}" "{{arg5}}"; do
+                if [ -n "$raw_arg" ]; then
+                    merge_args+=("$raw_arg")
+                fi
+            done
         else
-            ./scripts/shared/worktree/merge.sh --doctor
+            merge_args+=("$raw_arg2")
+            for raw_arg in "{{arg3}}" "{{arg4}}" "{{arg5}}"; do
+                if [ -n "$raw_arg" ]; then
+                    merge_args+=("$raw_arg")
+                fi
+            done
         fi
+
+        ./scripts/shared/worktree/merge.sh "${merge_args[@]}" -r
+        exit 0
+    fi
+
+    # --doctor: cleanup-check；--gc 附加孤儿数据库删除流程（--yes 跳过确认）
+    if [ "{{arg1}}" = "--doctor" ]; then
+        doctor_args=(./scripts/shared/worktree/merge.sh --doctor)
+        for raw_arg in "{{arg2}}" "{{arg3}}" "{{arg4}}" "{{arg5}}"; do
+            if [ -n "$raw_arg" ]; then
+                doctor_args+=("$raw_arg")
+            fi
+        done
+        "${doctor_args[@]}"
         exit 0
     fi
 
@@ -495,7 +532,8 @@ worktree arg1 arg2="" arg3="" arg4="" arg5="":
                 echo "  just worktree -o <branch> [--cmd editor]"
                 echo "  just worktree -d <branch>"
                 echo "  just worktree -m [<feature>] [base=main] [flags]"
-                echo "  just worktree --doctor [branch]"
+                echo "  just worktree -r [<feature>] [base=main] [flags]"
+                echo "  just worktree --doctor [branch] [--gc] [--yes]"
                 exit 1
                 ;;
         esac
@@ -657,7 +695,47 @@ implement prd_file ai_tool prompt="":
 
     echo ""
 
+    # --- Evidence secret scan ---
+    # Mechanical gate ahead of the verifier: a leaked credential must never cost
+    # a verification round. Uses the repo-root copy of the script so it works
+    # even when the worktree branch predates it.
+    echo "Scanning evidence package for credentials..."
+    if ! "$repo_root/scripts/shared/just/scan_evidence_secrets.sh" "$worktree_path/$evidence_dir"; then
+        echo ""
+        echo "❌ Evidence package contains credential-shaped strings."
+        echo "Redact them under $worktree_path/$evidence_dir, then rerun 'just ai implement'."
+        exit 1
+    fi
+
+    echo ""
+
     # --- Verifier stage ---
+    # Rounds are capped: after the limit, open BLOCKER items escalate to a
+    # human instead of driving another executor round.
+    max_verifier_rounds=2
+    round_file="$worktree_path/$evidence_dir/.verifier-round"
+    verifier_round=1
+    if [ -f "$round_file" ]; then
+        verifier_round=$(( $(cat "$round_file") + 1 ))
+    fi
+
+    if [ "$verifier_round" -gt "$max_verifier_rounds" ]; then
+        echo "❌ Verification round limit reached ($max_verifier_rounds)."
+        echo "Remaining BLOCKER findings need a human decision, not another round."
+        echo "Read: $worktree_path/$evidence_dir/${prd_name}.evidence-report.md"
+        echo "      (section 'Open Items For Human Review')"
+        echo "To restart the count deliberately, delete $round_file."
+        exit 1
+    fi
+
+    echo "Verification round $verifier_round of $max_verifier_rounds."
+
+    # Preserve the previous verdict so round 2 re-checks only its BLOCKER items
+    prev_verifier_report="$worktree_path/$evidence_dir/${prd_name}.verifier-report.md"
+    if [ "$verifier_round" -gt 1 ] && [ -f "$prev_verifier_report" ]; then
+        cp "$prev_verifier_report" "$worktree_path/$evidence_dir/${prd_name}.verifier-report.round1.md"
+    fi
+
     # Pick the opposite tool as the default verifier tool
     if [ "$ai_tool" = "claude" ]; then
         verifier_tool="kimi"
@@ -670,6 +748,7 @@ implement prd_file ai_tool prompt="":
     verifier_prompt="${verifier_prompt//<PRD_PATH>/$prd_rel}"
     verifier_prompt="${verifier_prompt//<EVIDENCE_DIR>/$evidence_dir}"
     verifier_prompt="${verifier_prompt//<PRD_BASENAME>/$prd_name}"
+    verifier_prompt="${verifier_prompt//<ROUND>/$verifier_round}"
 
     run_verifier() {
         local tool="$1"
@@ -708,14 +787,26 @@ implement prd_file ai_tool prompt="":
         exit 1
     fi
 
+    # Only a round that actually produced a verdict counts against the cap;
+    # a quota or tool-availability failure must not burn one.
+    echo "$verifier_round" > "$round_file"
+
     verdict=$(head -n 1 "$verifier_report" | tr -d '[:space:]')
     if [ "$verdict" = "PASS" ]; then
         echo "✅ Verifier ($verifier_tool) passed."
     elif [ "$verdict" = "REJECT" ]; then
         echo ""
-        echo "❌ Verifier ($verifier_tool) rejected the evidence."
+        echo "❌ Verifier ($verifier_tool) rejected the evidence (round $verifier_round of $max_verifier_rounds)."
         echo "Verifier report: $verifier_report"
-        echo "Please review the report, fix the issues in the worktree, and rerun 'just ai implement'."
+        if [ "$verifier_round" -ge "$max_verifier_rounds" ]; then
+            echo ""
+            echo "Round limit reached — do not start another round."
+            echo "Fix only the BLOCKER findings, or escalate them to a human via an"
+            echo "'Open Items For Human Review' section in the evidence report."
+        else
+            echo "Fix the BLOCKER findings in the worktree, then rerun 'just ai implement'."
+            echo "NON-BLOCKING findings do not require another round."
+        fi
         exit 1
     else
         echo ""

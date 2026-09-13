@@ -1,4 +1,10 @@
-"""Tests for release archive exclusion rules."""
+"""守护 release 归档排除规则的守卫测试（guard test）。
+
+本文件位于 ``tests/guards/shared/``，失败意味着源代码、配置或脚本违反了仓库约定。
+正确做法是修复触发它的源代码或配置，而不是修改本文件让测试通过；仅当约定
+本身需要变更时才改本文件，并同步更新相关约定文档。详见
+``docs/ai-standards/testing.md`` 的 Guard Tests 小节。
+"""
 
 from __future__ import annotations
 
@@ -10,7 +16,7 @@ from types import ModuleType
 def _load_release_module() -> ModuleType:
     """Load the release script module from its file path."""
 
-    release_script_path = Path(__file__).resolve().parents[1] / "scripts" / "shared" / "release.py"
+    release_script_path = Path(__file__).resolve().parents[3] / "scripts" / "shared" / "release.py"
     release_module_spec = importlib.util.spec_from_file_location(
         "release_script_module",
         release_script_path,

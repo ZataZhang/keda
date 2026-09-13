@@ -452,10 +452,21 @@ def main(argv: Optional[list[str]] = None) -> int:
                 continue
             candidate_files.append(file_path)
 
+        # 探测语料必须是整个 versions 目录，而不是本次传进来的候选文件。
+        #
+        # pre-commit 只把改动的文件交给 hook，所以候选集通常就是"刚生成的那一个
+        # 迁移"。用它自己去探测多数派，等于让新文件自证合规：一个 '_' 命名的文件
+        # 在只有它自己的语料里，'_' 当然是多数派，于是提交时全绿；等到守卫测试扫
+        # 全目录（5 个 '-' 对 1 个 '_'），才判它违规。同一个文件按两套标准判，
+        # 而报错出现在离生成它的命令很远的地方。
+        #
+        # 目录为空（仓库第一条迁移）时 detect 回退到默认分隔符，行为不变。
         separator = (
             args.filename_separator
             if args.filename_separator is not None
-            else detect_filename_separator(candidate_files)
+            else detect_filename_separator(
+                sorted(versions_dir.glob("*.py")) if versions_dir.exists() else candidate_files
+            )
         )
 
         for file_path in candidate_files:

@@ -179,6 +179,32 @@ run_worktree_doctor() {
     fi
 }
 
+run_worktree_database_gc() {
+    # 盘点（以及可选删除）worktree 孤儿数据库。
+    # 默认 dry run 只列出候选孤儿库；传入 "true" 作为第一个参数时附加
+    # --gc 进入删除流程（仍逐个确认，auto_yes 为 "true" 时跳过确认）。
+    local gc_enabled="$1"
+    local auto_yes="$2"
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "❌ Current directory is not inside a Git repository."
+        exit 1
+    fi
+
+    local repo_root=""
+    repo_root="$(git rev-parse --show-toplevel)"
+
+    local gc_arguments=("$repo_root")
+    if [[ "$gc_enabled" == "true" ]]; then
+        gc_arguments+=("--gc")
+    fi
+    if [[ "$auto_yes" == "true" ]]; then
+        gc_arguments+=("--yes")
+    fi
+
+    uv run python "$repo_root/scripts/shared/worktree/gc_worktree_databases.py" "${gc_arguments[@]}"
+}
+
 usage() {
     cat <<'EOF'
 Usage:
@@ -195,6 +221,11 @@ Options:
                         Skip merge/push and only run cleanup for the feature branch.
   -D, --force-delete     Force delete: skip merge/push, force-remove worktree and force-delete
                         local branch (bypasses dirty/unmerged checks).
+  -r, --rebase           Rebase-merge: rebase <feature_branch> onto the latest [base_branch], then
+                        fast-forward merge (--ff-only) for linear history without a merge commit.
+                        Requires the feature branch to be checked out in a worktree. On rebase
+                        conflict the rebase is aborted and the branch is left untouched.
+                        Worktree and branch are preserved unless --cleanup is also passed.
   --cleanup              Remove worktree and delete local feature branch after merge succeeds.
   --delete-remote        Delete <remote>/<feature_branch> (works with --cleanup/-d/--delete/--delete-only).
   --worktree-path <path> Explicit worktree path to remove during cleanup.
@@ -202,6 +233,8 @@ Options:
   --doctor               Doctor / cleanup-check mode. Without arguments, scans all registered worktrees
                          for missing directories. With <feature_branch>, inspects the state of the
                          expected worktree path and its metadata under .git/worktrees.
+                         Additionally scans for orphan worktree databases; add --gc to
+                         interactively drop them (--yes skips per-database confirmation).
   -h, --help             Show this help message.
 
 Checks before merge:
@@ -213,12 +246,15 @@ Checks before merge:
 Examples:
   ./scripts/shared/worktree/merge.sh feature-login
   ./scripts/shared/worktree/merge.sh feature-login main --cleanup
+  ./scripts/shared/worktree/merge.sh feature-login main -r
   ./scripts/shared/worktree/merge.sh feature-login -d
   ./scripts/shared/worktree/merge.sh feature-login --delete
   ./scripts/shared/worktree/merge.sh feature-login main --remote zata --cleanup
   ./scripts/shared/worktree/merge.sh feature-login main --cleanup --delete-remote
   ./scripts/shared/worktree/merge.sh --doctor
   ./scripts/shared/worktree/merge.sh --doctor feature-login
+  ./scripts/shared/worktree/merge.sh --doctor --gc
+  ./scripts/shared/worktree/merge.sh --doctor --gc --yes
 EOF
 }
 
@@ -229,7 +265,29 @@ fi
 
 if [[ $# -ge 1 && ( "$1" == "--doctor" || "$1" == "--cleanup-check" ) ]]; then
     shift
-    run_worktree_doctor "${1:-}"
+    doctor_feature_branch=""
+    doctor_gc_enabled="false"
+    doctor_auto_yes="false"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --gc)
+                doctor_gc_enabled="true"
+                ;;
+            --yes)
+                doctor_auto_yes="true"
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                doctor_feature_branch="$1"
+                ;;
+        esac
+        shift
+    done
+    run_worktree_doctor "$doctor_feature_branch"
+    run_worktree_database_gc "$doctor_gc_enabled" "$doctor_auto_yes"
     exit 0
 fi
 
@@ -244,6 +302,7 @@ base_branch="main"
 remote_name="zata"
 delete_only_mode="false"
 force_delete_mode="false"
+rebase_mode="false"
 cleanup_mode="false"
 delete_remote_branch="false"
 worktree_path=""
@@ -266,6 +325,9 @@ while [[ $# -gt 0 ]]; do
             force_delete_mode="true"
             delete_only_mode="true"
             cleanup_mode="true"
+            ;;
+        -r|--rebase)
+            rebase_mode="true"
             ;;
         --remote)
             if [[ $# -lt 2 ]]; then
@@ -589,9 +651,33 @@ fi
 enter_base_worktree_for_merge "$base_worktree_path"
 ensure_worktree_clean "$(pwd)" "Base branch '$base_branch'"
 git pull --ff-only "$remote_name" "$base_branch"
+merge_dir="$(pwd)"
 
-echo "🔀 Merging $feature_branch into $base_branch..."
-git merge "$feature_branch"
+if [[ "$rebase_mode" == "true" ]]; then
+    if [[ -z "$feature_worktree_path" ]]; then
+        echo "❌ Rebase mode requires the feature branch to be checked out in a worktree:"
+        echo "   $feature_branch"
+        echo "   Create one with: just worktree $feature_branch"
+        echo "   Or use a plain merge: just worktree -m $feature_branch $base_branch"
+        exit 1
+    fi
+    echo "🔁 Rebasing $feature_branch onto $base_branch..."
+    echo "   $feature_worktree_path"
+    cd "$feature_worktree_path"
+    if ! git rebase "$base_branch"; then
+        echo "❌ Rebase hit a conflict. Aborting to keep the branch untouched."
+        git rebase --abort
+        echo "   Resolve the conflict manually in the worktree above, then rerun:"
+        echo "   git -C \"$feature_worktree_path\" rebase $base_branch && just worktree -r $feature_branch $base_branch"
+        exit 1
+    fi
+    cd "$merge_dir"
+    echo "🔀 Fast-forward merging $feature_branch into $base_branch..."
+    git merge --ff-only "$feature_branch"
+else
+    echo "🔀 Merging $feature_branch into $base_branch..."
+    git merge "$feature_branch"
+fi
 
 echo "📤 Pushing $base_branch to $remote_name..."
 git push "$remote_name" "$base_branch"
