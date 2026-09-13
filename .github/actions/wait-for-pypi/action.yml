@@ -1,0 +1,51 @@
+name: Wait for a version on PyPI
+description: >-
+  有界轮询 PyPI 的 simple 索引，直到指定版本的文件出现为止。
+
+  必须轮 simple 索引而不是 JSON API：两者走不同的缓存，会不同步。0.2.1 发布时
+  实测 JSON API 60 秒就返回 200，紧接着的 `uv tool install kedacode==0.2.1` 仍然
+  0 秒失败于 "no version of kedacode==0.2.1"——因为 uv / pip 解析的是 simple 索引。
+  轮询对象必须与安装器真正消费的那个索引一致，否则这道等待等于没等。
+
+inputs:
+  package:
+    description: PyPI 包名
+    required: true
+  version:
+    description: 版本号，可直接传 tag（前导 v 会被剥掉）
+    required: true
+  timeout-seconds:
+    description: 轮询上限秒数
+    required: false
+    default: "600"
+
+runs:
+  using: composite
+  steps:
+    # 用 bash 而不是按平台分叉：GitHub 的 Windows runner 自带 Git Bash，
+    # 一份实现三平台通用，省掉原先 bash / pwsh 两份重复逻辑。
+    - shell: bash
+      env:
+        PYPI_PACKAGE: ${{ inputs.package }}
+        PYPI_VERSION: ${{ inputs.version }}
+        PYPI_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+      run: |
+        # 调用方通常手上只有 tag（v0.2.1），这里统一剥掉前导 v，
+        # 省得每个调用点各写一遍。
+        PYPI_VERSION="${PYPI_VERSION#v}"
+        index_url="https://pypi.org/simple/${PYPI_PACKAGE}/"
+        deadline=$(( SECONDS + PYPI_TIMEOUT_SECONDS ))
+        attempt=0
+        while [ "$SECONDS" -lt "$deadline" ]; do
+          attempt=$(( attempt + 1 ))
+          # 加一个变化的查询串绕开中间缓存；匹配 `<包名>-<版本>` 前缀，
+          # sdist 与 wheel 命中任意一个都算已可解析。
+          if curl -fsS "${index_url}?cachebust=${SECONDS}" \
+              | grep -q "${PYPI_PACKAGE}-${PYPI_VERSION}"; then
+            echo "${PYPI_PACKAGE} ${PYPI_VERSION} 已出现在 simple 索引（第 ${attempt} 次尝试，用时 ${SECONDS}s）"
+            exit 0
+          fi
+          sleep 15
+        done
+        echo "::error::${PYPI_PACKAGE} ${PYPI_VERSION} 在 ${PYPI_TIMEOUT_SECONDS} 秒内没有出现在 PyPI 的 simple 索引上；先查 release.yml 的 publish-pypi job。"
+        exit 1
