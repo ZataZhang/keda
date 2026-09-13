@@ -40,7 +40,7 @@ def test_preview_settings_loads_from_toml(tmp_path: Path):
             project_slug = "keda"
             app_dir_root = "/opt/preview"
             registry_host = "ghcr.io"
-            registry_namespace = "zata-zhangtao"
+            registry_namespace = "example-owner"
             traefik_network = "traefik"
             url_scheme = "https"
             subdomain_template = "pr-{pr_number}.{base_domain}"
@@ -58,7 +58,7 @@ def test_preview_settings_loads_from_toml(tmp_path: Path):
     assert settings.project_slug == "keda"
     assert settings.app_dir_root == "/opt/preview"
     assert settings.registry_host == "ghcr.io"
-    assert settings.registry_namespace == "zata-zhangtao"
+    assert settings.registry_namespace == "example-owner"
     assert settings.traefik_network == "traefik"
     assert settings.url_scheme == "https"
     assert settings.subdomain_template == "pr-{pr_number}.{base_domain}"
@@ -89,6 +89,9 @@ def test_preview_settings_partial_toml_keeps_remaining_defaults(tmp_path: Path):
     assert settings.enabled is False
     assert settings.app_dir_root == "/opt/preview"
     assert settings.registry_host == "ghcr.io"
+    # 默认必须留空，由仓库 owner 推导。写死用户名会在账号改名后静默失效，
+    # 而 ghcr.io 不认改名重定向，只会回 `denied: not_found: owner not found`。
+    assert settings.registry_namespace == ""
     assert settings.traefik_network == "traefik"
     assert settings.url_scheme == "https"
     assert settings.subdomain_template == "pr-{pr_number}.{base_domain}"

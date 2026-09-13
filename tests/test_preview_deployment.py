@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from backend.core.use_cases.preview_deployment import render_preview_env
+from backend.core.use_cases.preview_deployment import (
+    render_preview_env,
+    resolve_registry_namespace,
+)
 
 
 class _FakePreviewSettings:
@@ -15,7 +18,7 @@ class _FakePreviewSettings:
     project_slug = "keda"
     app_dir_root = "/opt/preview"
     registry_host = "ghcr.io"
-    registry_namespace = "zata-zhangtao"
+    registry_namespace = "example-owner"
     traefik_network = "traefik"
     url_scheme = "https"
     subdomain_template = "pr-{pr_number}.{base_domain}"
@@ -58,8 +61,8 @@ def test_render_preview_env_uses_short_sha_for_images():
     preview = _FakePreviewSettings()
     env_vars = render_preview_env(preview, pr_number=7, commit_sha="deadbeefcafebabe")
 
-    assert env_vars["BACKEND_IMAGE"] == "ghcr.io/zata-zhangtao/keda-backend:deadbeef"
-    assert env_vars["FRONTEND_IMAGE"] == "ghcr.io/zata-zhangtao/keda-frontend:deadbeef"
+    assert env_vars["BACKEND_IMAGE"] == "ghcr.io/example-owner/keda-backend:deadbeef"
+    assert env_vars["FRONTEND_IMAGE"] == "ghcr.io/example-owner/keda-frontend:deadbeef"
 
 
 def test_render_preview_env_preserves_short_sha():
@@ -96,3 +99,69 @@ def test_render_preview_env_handles_various_pr_numbers(pr_number):
 
     assert env_vars["PREVIEW_DOMAIN"] == f"pr-{pr_number}.preview.example.com"
     assert env_vars["COMPOSE_PROJECT_NAME"] == f"keda-pr-{pr_number}"
+
+
+def test_resolve_registry_namespace_prefers_explicit_configuration():
+    """显式配置的 namespace 优先于仓库 owner。"""
+    namespace = resolve_registry_namespace(
+        configured_namespace="shared-org",
+        repository_owner="SomeOwner",
+    )
+
+    assert namespace == "shared-org"
+
+
+def test_resolve_registry_namespace_falls_back_to_repository_owner():
+    """配置留空时回退到仓库 owner，避免把用户名写死在 config.toml 里。"""
+    namespace = resolve_registry_namespace(
+        configured_namespace="",
+        repository_owner="ZataZhang",
+    )
+
+    assert namespace == "zatazhang"
+
+
+@pytest.mark.parametrize(
+    ("configured_namespace", "repository_owner"),
+    [("MixedCaseOrg", ""), ("", "  MixedCaseOrg  ")],
+)
+def test_resolve_registry_namespace_always_lowercases(configured_namespace, repository_owner):
+    """两条路径都必须转小写：OCI 镜像名的路径段不接受大写。"""
+    namespace = resolve_registry_namespace(
+        configured_namespace=configured_namespace,
+        repository_owner=repository_owner,
+    )
+
+    assert namespace == "mixedcaseorg"
+
+
+def test_resolve_registry_namespace_rejects_empty_inputs():
+    """两者都为空时必须报错，而不是生成 `ghcr.io//keda-backend` 这种坏镜像名。"""
+    with pytest.raises(ValueError, match="registry namespace"):
+        resolve_registry_namespace(configured_namespace="  ", repository_owner="")
+
+
+def test_render_preview_env_derives_namespace_from_repository_owner():
+    """配置留空时，镜像名与 REGISTRY_NAMESPACE 都应使用推导出的小写 owner。"""
+    preview = _FakePreviewSettings()
+    preview.registry_namespace = ""
+
+    env_vars = render_preview_env(
+        preview,
+        pr_number=3,
+        commit_sha="deadbeefcafe",
+        repository_owner="ZataZhang",
+    )
+
+    assert env_vars["REGISTRY_NAMESPACE"] == "zatazhang"
+    assert env_vars["BACKEND_IMAGE"] == "ghcr.io/zatazhang/keda-backend:deadbeef"
+    assert env_vars["FRONTEND_IMAGE"] == "ghcr.io/zatazhang/keda-frontend:deadbeef"
+
+
+def test_render_preview_env_requires_resolvable_namespace():
+    """既没有配置也没有 owner 时，渲染必须失败而不是产出坏镜像名。"""
+    preview = _FakePreviewSettings()
+    preview.registry_namespace = ""
+
+    with pytest.raises(ValueError, match="registry namespace"):
+        render_preview_env(preview, pr_number=3, commit_sha="deadbeef")
