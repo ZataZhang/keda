@@ -31,6 +31,15 @@ compose_args=(
   -f "${SCRIPT_DIR}/docker-compose.preview.yml"
 )
 
+dump_backend_diagnostics() {
+  # 每条都加 `|| true`：诊断本身失败时不能盖掉真正的错误，否则 set -e 会让这里
+  # 变成新的退出点，调用方反而拿不到任何信息。
+  echo "----- container state -----"
+  docker compose "${compose_args[@]}" --env-file "${APP_DIR}/.env" ps -a || true
+  echo "----- backend logs (last 100 lines) -----"
+  docker compose "${compose_args[@]}" --env-file "${APP_DIR}/.env" logs --tail=100 backend || true
+}
+
 up() {
   mkdir -p "${APP_DIR}"
 
@@ -60,20 +69,33 @@ up() {
   fi
 
   docker compose "${compose_args[@]}" --env-file "${APP_DIR}/.env" pull
-  docker compose "${compose_args[@]}" --env-file "${APP_DIR}/.env" up -d --remove-orphans
+
+  # compose 里 frontend 依赖 backend 的 service_healthy，所以 backend 起不来时
+  # `up -d` 自己就会失败。必须显式接住：否则 set -e 会在这里直接终止脚本，
+  # 下面那段等待与日志转储永远执行不到——恰好是最需要日志的那条路径。
+  if ! docker compose "${compose_args[@]}" --env-file "${APP_DIR}/.env" up -d --remove-orphans; then
+    echo "ERROR: docker compose up failed; backend never became healthy." >&2
+    dump_backend_diagnostics
+    exit 1
+  fi
+
+  # 默认 30 × 2s = 60s。抽成变量是为了让测试能把等待压到秒级，同时也方便在慢
+  # 机器上调高，而不必改脚本。
+  health_check_retries="${PREVIEW_HEALTH_RETRIES:-30}"
+  health_check_interval_seconds="${PREVIEW_HEALTH_INTERVAL_SECONDS:-2}"
 
   echo "Waiting for backend health check..."
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 "${health_check_retries}"); do
     if docker compose "${compose_args[@]}" --env-file "${APP_DIR}/.env" exec -T backend \
       curl -fsS "http://localhost:8000/api/v1/agent-runner/health" > /dev/null 2>&1; then
       echo "Backend is healthy."
       return 0
     fi
-    sleep 2
+    sleep "${health_check_interval_seconds}"
   done
 
   echo "ERROR: Backend failed to become healthy." >&2
-  docker compose "${compose_args[@]}" --env-file "${APP_DIR}/.env" logs --tail=50 backend
+  dump_backend_diagnostics
   exit 1
 }
 
