@@ -50,7 +50,7 @@
 
 - 不推翻"不签名、不上 cask"的**公开分发**结论——本 PRD 只覆盖本机构建自用。
 - 不替换 `iar console` 浏览器入口，两者并存。
-- 不做 PRD 原文浏览功能本身——那是独立 PRD（`P1-FEAT-20260913-204530-console-prd-content-reader.md`）。壳因同源加载会自动获得它，但不依赖它才能交付。
+- 不做 PRD 原文浏览功能本身——那由另一份 PRD（`P1-FEAT-20260913-204530-console-prd-content-reader.md`）交付，壳因同源加载会自动获得它。注意这不代表两者无关：**本 PRD 排在它后面做**（§8 声明为 hard 门禁）。壳单独跑得起来，但先做壳只会得到一个读不了 PRD 的窗口——恰好是本 PRD 立项时最想要的那件事没有。
 
 **文字版解读**：把这件事读作"给 kedacode 加一个 Tauri 原生壳，壳内加载本机 console 服务提供的现有控制台界面"，而不是"重写一套桌面 UI"或"恢复被否决的签名安装包分发方案"。关键边界：壳只是 HTTP 客户端，不拥有任何业务状态；不引入签名/公证/cask。非目标：跨平台包、替换浏览器控制台、在壳里做界面功能。
 
@@ -134,7 +134,7 @@
 
 - 已归档 `P1-FEAT-20260910-125248-iar-package-manager-distribution.md`：本 PRD **修订**其 D-01 的适用边界（该结论仅约束公开分发）。其 §7.10 关于签名/Gatekeeper/cask 的外部核实事实被继承引用，不重复核实。
 - 已归档 `P1-FEAT-20260910-111901-iar-console-bundled-web-terminal.md`：其交付的 `iar console`（wheel 内置控制台 + 一键启动）是本 PRD 的直接底座——sidecar 复用它，界面复用它服务的静态导出。
-- `tasks/pending/P1-FEAT-20260913-204530-console-prd-content-reader.md`：**并行**提案。它给控制台加 PRD 原文浏览；因为壳是同源加载，它落地后壳自动获得该能力。两者**无硬依赖**，可任意顺序交付。
+- `tasks/pending/P1-FEAT-20260913-204530-console-prd-content-reader.md`：**上游**提案，§8 声明为 `hard` 门禁。需要分清两种依赖：**构建上不依赖**——壳同源加载控制台，对方没落地壳照样能跑通；**交付顺序上依赖**——本 PRD 的立项动机含「读 PRD 原文」，那块能力由对方交付，壳先落地会交出一个读不了 PRD 的窗口且本 PRD 验收仍全绿。故按交付顺序钉死为 hard。
 - 本 PRD 与原 `P1-FEAT-20260912-181533-tauri-desktop-gui.md` 是拆分关系：那份把"读 PRD 原文"与"做桌面壳"绑在一起，二者成本与价值差一个数量级且可独立交付，已按 Scope Cohesion 拆为两份，原文件删除。
 
 ## 6. Recommendation
@@ -348,9 +348,9 @@ No interactive prototype file changes in this PRD.
 
 - Group: none
 - Depends on tasks/issues:
-  - none
-- Gate type: none
-- Notes: 底座 `iar console`（已归档 PRD `P1-FEAT-20260910-111901`）能力已在代码库可用。并行提案 `P1-FEAT-20260913-204530-console-prd-content-reader.md` 与本 PRD **无硬依赖**：壳同源加载控制台，对方落地后壳自动获得 PRD 原文能力；先做哪个都不阻塞另一个。
+  - `tasks/pending/P1-FEAT-20260913-204530-console-prd-content-reader.md`
+- Gate type: hard
+- Notes: 这是**交付顺序依赖，不是构建依赖**。技术上本 PRD 不碰对方的任何产物——壳加载回环地址，控制台服务什么它就显示什么，先做壳也能跑通。但本 PRD 的立项动机（§1）原文是"双击打开、直接浏览 PRD 原文、看任务队列和执行状态"，而"读 PRD 原文"由对方交付；壳先落地而对方没有，等于交付一个读不了 PRD 的原生窗口——最想要的那件事恰好缺席，且本 PRD 的验收会全绿，掩盖这个缺口。两种写错的代价不对称：写 none 会让执行器先啃成本最大的壳（要首次引入 Rust）却没解决原始诉求；写 hard 若将来确实想先做壳，改这一行即可解开。底座 `iar console`（已归档 PRD `P1-FEAT-20260910-111901`）能力已在代码库可用，不构成额外依赖。
 
 ## 9. Acceptance Checklist
 
@@ -443,7 +443,7 @@ No interactive prototype file changes in this PRD.
 | D-05 | 分发策略 | 本机构建 + `install.sh --app`，不签名不上 cask | 立即 $99 签名 + cask 公开分发 | 本机构建产物无 quarantine、零成本覆盖自用场景；将来补签名只是加流水线步骤 |
 | D-06 | 修订旧分发决策的方式 | 新 PRD 显式修订其适用边界 | 静默绕过旧决策 | 旧决策是正式记录，边界变化必须留痕，否则后人无法判断哪条有效 |
 | D-07 | sidecar 可执行文件如何定位 | 显式枚举候选路径 + `$PATH` 保底 | 只依赖 `$PATH` | Finder 启动的 App 只有最小 PATH，依赖 `$PATH` 在真实安装方式下基本命不中 |
-| D-08 | 与 PRD 原文浏览的关系 | 拆为两个独立 PRD，本 PRD 不依赖对方 | 合并为一个 PRD | 二者可独立实现、独立回滚、独立验收，成本与价值差一个数量级；合并会让低成本高价值改动被高成本改动拖住 |
+| D-08 | 与 PRD 原文浏览的关系 | 拆为两个 PRD，并把本 PRD 对其声明为 `hard` 交付门禁 | 合并为一个 PRD；拆开但不声明依赖（`none`） | 拆分理由：二者可独立实现、独立回滚，成本与价值差一个数量级，合并会让低成本高价值改动被高成本改动拖住。但拆开后仍须声明顺序——本 PRD 构建上不依赖对方，交付上依赖：壳先落地会交出一个读不了 PRD 的窗口而验收全绿。两种写错的代价不对称：`none` 会让执行器先啃需要引入 Rust 的壳却没解决原始诉求；`hard` 若将来确实想先做壳，改一行即可解开 |
 
 ### Final Reconciliation
 

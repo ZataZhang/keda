@@ -127,7 +127,7 @@
 **相关 PRD 关系：**
 
 - `tasks/archive/P1-FEAT-20260910-111901-iar-console-bundled-web-terminal.md`（已归档）：本 PRD 改的面板与端点就跑在它交付的 `iar console` 上，是底座而非依赖阻塞。
-- `tasks/pending/P1-FEAT-20260913-204531-tauri-desktop-shell.md`：**下游**提案（Tauri 桌面壳）。它以同源方式加载本控制台，因此本 PRD 落地后它自动获得 PRD 原文能力。两者可独立交付、独立回滚，无硬依赖。
+- `tasks/pending/P1-FEAT-20260913-204531-tauri-desktop-shell.md`：**下游**提案（Tauri 桌面壳），它在自己的 §8 中把本 PRD 声明为 `hard` 交付门禁。依赖是单向的：**本 PRD 不依赖它**，可独立实现、独立验收、独立归档；它以同源方式加载本控制台，故本 PRD 落地后它自动获得 PRD 原文能力。
 - 本 PRD 与原 `P1-FEAT-20260912-181533-tauri-desktop-gui.md` 是拆分关系：那份把"读 PRD 原文"与"做桌面壳"绑在一起，二者成本与价值差一个数量级且可独立交付，已按 Scope Cohesion 拆为两份，原文件删除。
 
 ## 6. Recommendation
@@ -309,7 +309,7 @@ No interactive prototype file changes in this PRD.
 - Depends on tasks/issues:
   - none
 - Gate type: none
-- Notes: 底座 `iar console`（已归档 PRD `P1-FEAT-20260910-111901`）能力已在代码库可用。下游 `P1-FEAT-20260913-204531-tauri-desktop-shell.md` 会因同源加载自动获得本能力，但两者**无硬依赖**，可任意顺序独立交付与回滚。
+- Notes: 本 PRD **无任何上游依赖**，可立即开工。底座 `iar console`（已归档 PRD `P1-FEAT-20260910-111901`）能力已在代码库可用。下游 `P1-FEAT-20260913-204531-tauri-desktop-shell.md` 在其 §8 把本 PRD 声明为 `hard` 门禁——依赖单向，本 PRD 不被它阻塞。
 
 ## 9. Acceptance Checklist
 
