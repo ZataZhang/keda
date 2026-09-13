@@ -178,7 +178,12 @@ jobs:
           fi
 
       - name: Set up Homebrew
-        uses: Homebrew/actions/setup-homebrew@master
+        # 用 @main 而不是 @master：上游 2026-09-13 前后删掉了 master 分支
+        # （仓库里留着一个 `remove-master-sync` 分支为证），默认分支已是 main。
+        # 0.2.0 发布时 @master 还能解析，0.2.1 发布时就报
+        # `Unable to resolve action Homebrew/actions@master`，整个 update-tap
+        # 在 Set up job 阶段就挂掉——注意这发生在任何步骤跑起来之前。
+        uses: Homebrew/actions/setup-homebrew@main
 
       - name: Resolve published version
         # release 事件下 GITHUB_REF_NAME 就是 tag；手动触发时取 inputs.tag，
