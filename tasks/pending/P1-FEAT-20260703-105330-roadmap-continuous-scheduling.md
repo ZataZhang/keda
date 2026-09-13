@@ -1,5 +1,8 @@
 # PRD: Roadmap 持续调度：完成检测、队列自动晋升与失败泊车
 
+> ⛔ **交付前置**：排在 `P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile` 之后开工（gate=hard）。
+> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
+
 > 本 PRD 分两个阅读高度：Part A 供人审（判断要不要做、哪里必须人工确认），Part B 供执行器（怎么做）。人审只需读 Part A，按 Human Review Map 指到的点再下钻 Part B。
 
 # Part A · 人审层 (Review Layer)

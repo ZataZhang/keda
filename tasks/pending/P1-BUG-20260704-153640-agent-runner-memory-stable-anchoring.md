@@ -1,5 +1,8 @@
 # PRD: Agent Runner 记忆锚点修复——跨 worktree 稳定持久化
 
+> ✅ **交付前置**：无，可立即开工。
+> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
+
 - GitHub Issue: （待创建；缺陷源自 PR #125 / Issue #124 的交付）
 - 缺陷来源 PRD: `tasks/archive/P1-FEAT-20260626-093933-agent-runner-memory-persistence.md`
 

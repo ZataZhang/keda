@@ -1,5 +1,8 @@
 # PRD: api → engines 直连迁移至 core 编排层并恢复架构门禁
 
+> ✅ **交付前置**：无，可立即开工。
+> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
+
 > **2026-07-31：本 PRD 现在卡着一次模板同步。** 上游 `zata-codes-template` 的
 > `hooks/shared/check_architecture.py` 已删除 `api/ → engines/` 的过渡期放宽
 > （`api` 的禁止列表加入了 `engines`，并新增 composition root 规则）。keda 当前树上

@@ -1,5 +1,8 @@
 # PRD: Agent CLI 适配层：单一命令构造器 + 声明式 agent 注册
 
+> ✅ **交付前置**：无，可立即开工。
+> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
+
 - GitHub Issue: （待创建）
 
 > 本 PRD 分两个阅读高度，自上而下阅读：
