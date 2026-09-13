@@ -13,8 +13,14 @@ if TYPE_CHECKING:
     from backend.core.shared.interfaces.agent_runner import IProcessRunner
 
 
-REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL = "https://github.com/zata-zhangtao/zata-codes-template.git"
-"""用户级 Skill 的唯一远程内容来源。"""
+REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL = "https://github.com/ZataZhang/zata-codes-template.git"
+"""用户级 Skill 的唯一远程内容来源。
+
+必须写当前用户名 ``ZataZhang``。旧名 ``zata-zhangtao`` 已废弃：GitHub 的仓库级
+重定向让旧 URL 目前仍能 clone（实测 301），所以这类残留极难被发现；但废弃的用户名
+**可以被他人重新注册**，一旦被抢注，``iar init`` 就会从陌生人的仓库拉取内容，并把
+结果当作 agent 指令安装进每个用户的 skills 目录。这是供应链路径，不是文案问题。
+"""
 
 REMOTE_TEMPLATE_SKILLS_REF = "main"
 """每次 ``iar init`` 要获取的模板分支。"""

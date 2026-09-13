@@ -119,9 +119,18 @@ RUN groupadd -g 1000 runner || true \
     && useradd -m -u 1000 -g runner -s /bin/bash runner \
     && chmod 0755 /home/runner
 
-# 安装 keda（iar 自身）。默认从 GitHub 源码安装（keda 暂未发布 PyPI / release
-# tarball，PyPI 上也没有 ``keda`` 包）；通过 git tag 钉版本。开发模式
+# 安装 iar 自身。默认从 GitHub 源码按 git tag 钉版本安装；开发模式
 # （KEDA_VERSION=editable + KEDA_LOCAL_SRC）走本地源码 editable 安装。
+#
+# 下面那条 git 安装串里有两处历史上都过期过，改动时请一并核对：
+#   1. PEP 508 名字必须是 kedacode。包在 0.2.0 从 keda 改名，遗留的 `keda @`
+#      与包元数据不符，uv/pip 会直接拒装。
+#   2. owner 必须是 ZataZhang。旧名 zata-zhangtao 已废弃且可被他人重新注册，
+#      而 GitHub 的仓库级重定向让旧 URL 目前仍能解析，这类残留极难被发现。
+# 仓库名本身仍是 keda，不要跟着一起改。
+#
+# 注：kedacode 现已发布到 PyPI，这里仍走 git 是为了能钉任意 tag/commit
+# （含未发布版本）；要改成从 PyPI 装属于另一次决策。
 ARG KEDA_LOCAL_SRC=""
 USER root
 RUN set -eux; \
@@ -133,9 +142,9 @@ RUN set -eux; \
         . .venv/bin/activate \
             && uv pip install -e "${KEDA_LOCAL_SRC}"; \
     else \
-        echo "Installing keda from git tag: ${KEDA_VERSION}"; \
+        echo "Installing kedacode from git tag: ${KEDA_VERSION}"; \
         . .venv/bin/activate \
-            && uv pip install "keda @ git+https://github.com/zata-zhangtao/keda.git@${KEDA_VERSION}"; \
+            && uv pip install "kedacode @ git+https://github.com/ZataZhang/keda.git@${KEDA_VERSION}"; \
     fi; \
     echo "/opt/keda/.venv/bin" > /etc/profile.d/keda-path.sh
 
