@@ -20,6 +20,24 @@ from backend.core.use_cases.preview_deployment import render_preview_env
 from backend.infrastructure.config.settings import config
 
 
+def _read_repository_owner() -> str:
+    """Read the repository owner from the GitHub Actions environment.
+
+    `GITHUB_REPOSITORY_OWNER` 是 Actions 直接提供的 owner；退一步从
+    `GITHUB_REPOSITORY`（`owner/repo` 形式）里切出 owner，便于在只设置了
+    后者的本地或第三方 runner 上同样可用。
+
+    Returns:
+        仓库 owner；两个环境变量都缺失时返回空字符串。
+    """
+    repository_owner = os.getenv("GITHUB_REPOSITORY_OWNER", "").strip()
+    if repository_owner:
+        return repository_owner
+
+    repository_slug = os.getenv("GITHUB_REPOSITORY", "").strip()
+    return repository_slug.split("/", 1)[0] if "/" in repository_slug else ""
+
+
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Derive preview deployment environment variables.")
@@ -46,6 +64,7 @@ def main() -> int:
         preview=preview,
         pr_number=args.pr,
         commit_sha=args.sha,
+        repository_owner=_read_repository_owner(),
     )
 
     for key, value in env_vars.items():

@@ -45,6 +45,13 @@ Non-sensitive structure is configured in `config.toml [preview]`:
 - `subdomain_template`
 - `compose_template`
 
+Leave `registry_namespace` empty to derive it from the repository owner
+(`GITHUB_REPOSITORY_OWNER`, lowercased). Set it explicitly only when preview
+images must be published under a different namespace than the repository owner.
+Pinning a literal username here is what breaks after a GitHub account rename:
+repository redirects keep working, but `ghcr.io` does not follow them and fails
+with `denied: not_found: owner not found`.
+
 ### How it works
 
 1. `.github/workflows/deploy-preview.yml` resolves the PR number and head SHA.

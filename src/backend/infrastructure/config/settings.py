@@ -1092,7 +1092,7 @@ class PreviewSettings(BaseSettings):
     project_slug: str = "keda"
     app_dir_root: str = "/opt/preview"
     registry_host: str = "ghcr.io"
-    registry_namespace: str = "zata-zhangtao"
+    registry_namespace: str = ""
     traefik_network: str = "traefik"
     url_scheme: str = "https"
     subdomain_template: str = "pr-{pr_number}.{base_domain}"
