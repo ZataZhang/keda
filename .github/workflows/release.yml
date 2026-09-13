@@ -295,13 +295,14 @@ jobs:
           # 包（--uploaded-prior-to=P1D 供应链防护），而这个 job 恰恰在发布后
           # 几分钟内跑，必然解析不到 kedacode 自己。该开关只对 formula 自身放行，
           # 依赖仍受 cooldown 保护；对自建 tap 有效（仅 official tap 会忽略它）。
-          brew tap ZataZhang/tap "${RUNNER_TEMP}/tap"
           # Homebrew 6.x 起，第三方 tap 的 formula 默认不可加载：
           #   Refusing to load formula ... from untrusted tap
-          # 0.2.0 发布时没撞上，是因为当时只跑了不加载 formula 的命令；
-          # update-python-resources 要真正加载它，所以必须先显式信任。
-          # 这里信任的是本项目自己的 tap，不是第三方来源。
-          brew trust ZataZhang/tap
+          # 必须放在 brew tap **之前**：这道检查发生在 tap 自身（clone 完就逐个
+          # 校验 formula，失败信息是 `Cannot tap ...: invalid syntax in tap!`），
+          # 放到 tap 之后压根轮不到执行。本地实测未 tap 也能 trust，信任记录写进
+          # ~/.homebrew/trust.json。这里信任的是本项目自己的 tap，不是第三方来源。
+          brew trust --tap ZataZhang/tap
+          brew tap ZataZhang/tap "${RUNNER_TEMP}/tap"
           brew update-python-resources --ignore-main-package-cooldown ZataZhang/tap/kedacode
           brew_tap_dir="$(brew --repository ZataZhang/tap)"
           cp "${brew_tap_dir}/Formula/kedacode.rb" "${RUNNER_TEMP}/tap/Formula/kedacode.rb"
