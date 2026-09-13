@@ -267,6 +267,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: preview-context
     if: ${{ needs.preview-context.outputs.should_teardown == 'true' }}
+    # SERVER_* 只存在于 preview 环境。不声明 environment 时它们解析为空字符串，
+    # 下面两步的 `if: env.SERVER_HOST != ''` 便恒为假而被跳过，job 却照样报绿，
+    # 结果是预览栈从未真正拆除、每个关闭的 PR 都在服务器上留下一套。
+    environment: preview
     env:
       PR_NUMBER: ${{ needs.preview-context.outputs.pr_number }}
       SERVER_HOST: ${{ secrets.SERVER_HOST }}
