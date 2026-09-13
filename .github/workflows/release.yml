@@ -269,19 +269,68 @@ jobs:
           echo "bootstrapped Formula/kedacode.rb skeleton from PyPI metadata"
           fi
 
+      - name: Pin the formula to the published version
+        # 上一步只在 formula **不存在**时才写，而 update-python-resources 只重写
+        # resource 块、不碰主包 url——两者相加的后果是：首次之后的每次发布，
+        # formula 的主 url 都还钉在最初 bootstrap 的那个版本，用户 brew install
+        # 装到的是旧版。0.2.0 时看不出来（那次正好是 bootstrap），0.2.1 实测
+        # job 绿灯但 tap 上的 url 仍是 kedacode-0.2.0.tar.gz。
+        #
+        # 主包的 url/sha256 缩进两格，resource 块里的缩进四格，据此区分。
+        run: |
+          cd "${RUNNER_TEMP}/tap"
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import urllib.request
+
+          package_version = os.environ["KEDACODE_VERSION"]
+          metadata_url = f"https://pypi.org/pypi/kedacode/{package_version}/json"
+          payload = json.load(urllib.request.urlopen(metadata_url))
+          sdist = next(u for u in payload["urls"] if u["packagetype"] == "sdist")
+
+          formula_path = pathlib.Path("Formula/kedacode.rb")
+          lines = formula_path.read_text(encoding="utf-8").splitlines()
+          replaced_url = replaced_sha = False
+          for index, line in enumerate(lines):
+              if not replaced_url and line.startswith('  url "'):
+                  lines[index] = f'  url "{sdist["url"]}"'
+                  replaced_url = True
+              elif not replaced_sha and line.startswith('  sha256 "'):
+                  lines[index] = f'  sha256 "{sdist["digests"]["sha256"]}"'
+                  replaced_sha = True
+              if replaced_url and replaced_sha:
+                  break
+          if not (replaced_url and replaced_sha):
+              raise SystemExit(
+                  f"formula 里没找到主包的 url/sha256 行 "
+                  f"(url={replaced_url} sha256={replaced_sha})"
+              )
+          formula_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(f"pinned formula to kedacode {package_version}")
+          PY
+
       # brew tap <user/repo> <path> 是 git clone：没有任何 commit 的空仓库克隆不出
       # 工作树，首次运行会拿不到 formula。先在本地落一个种子 commit。
       - name: Seed an initial commit so the tap is clonable
         run: |
           cd "${RUNNER_TEMP}/tap"
+          git add Formula/kedacode.rb
           if ! git rev-parse HEAD >/dev/null 2>&1; then
-            git -c user.name="keda-release-bot" \
-                -c user.email="actions@users.noreply.github.com" \
-                add Formula/kedacode.rb
             git -c user.name="keda-release-bot" \
                 -c user.email="actions@users.noreply.github.com" \
                 commit -m "seed kedacode formula skeleton"
             echo "seeded initial commit for the empty tap repository"
+          elif ! git diff --cached --quiet; then
+            # 版本 pin 也必须先落成 commit：下一步的 `brew tap <repo> <path>` 是
+            # clone，只认已提交的内容，工作区里的改动它看不见。
+            git -c user.name="keda-release-bot" \
+                -c user.email="actions@users.noreply.github.com" \
+                commit -m "kedacode ${KEDACODE_VERSION}: pin to the published sdist"
+            echo "committed the version pin so brew tap can clone it"
+          else
+            echo "formula already points at the published version"
           fi
 
       - name: Regenerate Python resources from PyPI
@@ -321,6 +370,15 @@ jobs:
           echo "formula declares ${resource_count} resource block(s)"
           if [ "${resource_count}" -lt 1 ]; then
             echo "::error::Formula/kedacode.rb 没有任何 resource 块——update-python-resources 的结果没有回写到待推送的工作树。拒绝推送一个装上就崩的 formula。"
+            exit 1
+          fi
+
+          # 同理拦住"绿灯但版本没更新"：0.2.1 发布时 job 全绿，tap 上的主 url
+          # 却仍是 kedacode-0.2.0.tar.gz，用户 brew install 装到的是旧版。
+          main_url="$(grep -m1 '^  url "' "$formula_file")"
+          echo "formula main url: ${main_url}"
+          if ! printf '%s' "$main_url" | grep -q "kedacode-${KEDACODE_VERSION}\.tar\.gz"; then
+            echo "::error::Formula 的主 url 不是 kedacode-${KEDACODE_VERSION}.tar.gz——版本 pin 没生效，拒绝推送一个指向旧版本的 formula。"
             exit 1
           fi
 
