@@ -17,24 +17,6 @@
 name = "keda"
 log_level = "INFO"
 
-# =============================================================================
-# Preview Deployment Settings
-# =============================================================================
-# Non-sensitive structure only. Sensitive values (server host, SSH key,
-# registry password, database password) must be provided via GitHub Secrets
-# or environment variables and are never committed to this file.
-# =============================================================================
-[preview]
-enabled = true
-base_domain = "preview.yewmoon.fun"
-app_dir_root = "/opt/preview"
-url_scheme = "https"
-registry_host = "ghcr.io"
-# 留空表示按仓库 owner 推导（自动转小写）。只有当预览镜像要发布到仓库 owner
-# 之外的 namespace 时才显式填写；写死用户名会在账号改名后静默失效。
-registry_namespace = ""
-traefik_network = "traefik"
-
 [template_sync]
 # Project-specific paths skipped by default by `just sync-template`.
 # Use `just sync-template --all` to include these paths for a one-off sync.

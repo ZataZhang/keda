@@ -25,7 +25,9 @@ from backend.infrastructure.process_runner import CommandResult
 from tests.conftest import FakeProcessRunner
 
 
-_EXPECTED_SOURCE_FILES = (
+# keda 自身不再跑预览部署，这些文件在仓库根下已无副本，模板即唯一来源，
+# 因此不再有"与源文件逐字节一致"可比——这里只断言安装会把它们悉数写出。
+_EXPECTED_FILES = (
     ".github/workflows/deploy-preview.yml",
     "deploy/vps-traefik/README.md",
     "deploy/vps-traefik/deploy-preview.sh",
@@ -33,9 +35,6 @@ _EXPECTED_SOURCE_FILES = (
     "deploy/vps-traefik/preview.env.example",
     "scripts/preview_env.py",
     "scripts/provision_preview_server.py",
-)
-
-_EXPECTED_FILES = _EXPECTED_SOURCE_FILES + (
     "scripts/_apply.py",
     "scripts/_remote.py",
 )
@@ -71,14 +70,20 @@ def test_template_package_lists_preview() -> None:
     assert (template_root / "preview").is_dir()
 
 
-def test_template_files_byte_match_source() -> None:
-    """Bundled template files must be byte-identical to the source files."""
-    repo_root = Path(__file__).resolve().parents[1]
+def test_every_expected_file_is_packaged() -> None:
+    """安装后的包里必须真的带着每个模板文件。
+
+    这里刻意经由 ``importlib.resources`` 解析，而不是直接读仓库目录：非 editable
+    安装时它指向 wheel 里的副本，能抓到"文件躺在仓库里、却没被打进包"这类遗漏。
+    模板是这些文件唯一的副本，漏打即下游项目装不出可用的预览工作流。
+    """
     template_root = files(TEMPLATE_PACKAGE_NAME) / "preview"
-    for relative_posix_path in _EXPECTED_SOURCE_FILES:
-        bundled_bytes = (template_root / relative_posix_path).read_bytes()
-        source_bytes = (repo_root / relative_posix_path).read_bytes()
-        assert bundled_bytes == source_bytes, relative_posix_path
+    missing_paths = [
+        relative_posix_path
+        for relative_posix_path in _EXPECTED_FILES
+        if not (template_root / relative_posix_path).is_file()
+    ]
+    assert not missing_paths, f"这些模板文件没有被打进包：{missing_paths}"
 
 
 def test_deploy_preview_sh_keeps_executable_bit() -> None:

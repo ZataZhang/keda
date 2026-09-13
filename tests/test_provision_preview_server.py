@@ -1,4 +1,5 @@
-"""Unit tests for the pure helpers in ``scripts/provision_preview_server.py``.
+"""Unit tests for the pure helpers in the bundled preview template's
+``scripts/provision_preview_server.py``.
 
 The script is not importable as a regular module (lives outside any package),
 so we load it once via :mod:`importlib` and exercise the helpers directly.
@@ -16,8 +17,15 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = PROJECT_ROOT / "scripts" / "provision_preview_server.py"
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+TEMPLATE_ROOT = (
+    PROJECT_ROOT / "src" / "backend" / "engines" / "agent_runner" / "templates" / "preview"
+)
+SCRIPT_PATH = TEMPLATE_ROOT / "scripts" / "provision_preview_server.py"
+# 这些脚本位于随产品分发的模板目录下。在原地执行/导入会把 __pycache__ 落进模板，
+# 而 install_workflow 逐个以 UTF-8 读取模板文件，撞上字节码就是 UnicodeDecodeError
+# ——editable 安装下这会让 `iar workflow install` 直接装不出来。所以全程禁写字节码。
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(TEMPLATE_ROOT / "scripts"))
 import _apply  # noqa: E402
 import _remote  # noqa: E402
 

@@ -60,6 +60,14 @@
 
 ### PR 预览部署（每 PR 临时 Docker + Traefik）
 
+> ⚠️ **keda 自身不再跑预览部署。** 这是 IAR 提供给**目标仓库**的能力，通过
+> `uv run iar workflow install preview` 装进去（见
+> [agent-runner.md](agent-runner.md) 的 Workflow Templates 一节）。本节出现的
+> `.github/workflows/deploy-preview.yml`、`deploy/vps-traefik/`、
+> `scripts/provision_preview_server.py` 等路径，指的都是**安装之后目标仓库里的
+> 路径**，在 keda 仓库根下并不存在——它们只以模板形式存放于
+> `src/backend/engines/agent_runner/templates/preview/`。
+
 `.github/workflows/deploy-preview.yml` 在 PR 打开、更新或重新打开时，自动构建并部署一个独立的预览栈：
 
 - 每个 PR 拥有独立的 Compose project、网络与命名卷。
@@ -257,4 +265,5 @@ uv run python scripts/provision_preview_server.py ... --generate-deploy-key --ap
 
 预览部署是独立的非必需检查，失败不会阻塞 review/merge；失败信息写入 sticky 评论。
 
-详细模板与脚本位于 `deploy/vps-traefik/`。
+详细模板与脚本，在目标仓库里位于 `deploy/vps-traefik/`；在 keda 仓库里则是它们的来源
+`src/backend/engines/agent_runner/templates/preview/deploy/vps-traefik/`。

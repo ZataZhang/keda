@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEPLOY_SCRIPT_PATH = REPO_ROOT / "deploy" / "vps-traefik" / "deploy-preview.sh"
+TEMPLATE_ROOT = REPO_ROOT / "src" / "backend" / "engines" / "agent_runner" / "templates" / "preview"
+DEPLOY_SCRIPT_PATH = TEMPLATE_ROOT / "deploy" / "vps-traefik" / "deploy-preview.sh"
 
 # 假 docker：把每次调用的参数追加到 $DOCKER_CALL_LOG，并按 $DOCKER_FAIL_ON
 # 决定哪个子命令返回失败。`up` 与 `logs` 的判定都基于完整参数串。

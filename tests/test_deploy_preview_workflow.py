@@ -20,19 +20,14 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
-WORKFLOW_PATH = WORKFLOWS_DIR / "deploy-preview.yml"
-TEMPLATE_WORKFLOW_PATH = (
-    REPO_ROOT
-    / "src"
-    / "backend"
-    / "engines"
-    / "agent_runner"
-    / "templates"
-    / "preview"
-    / ".github"
-    / "workflows"
-    / "deploy-preview.yml"
-)
+TEMPLATE_ROOT = REPO_ROOT / "src" / "backend" / "engines" / "agent_runner" / "templates" / "preview"
+
+# keda 自身不再跑预览部署，模板副本因此成为这个工作流的唯一副本，守卫直接指向它。
+WORKFLOW_PATH = TEMPLATE_ROOT / ".github" / "workflows" / "deploy-preview.yml"
+
+# 空值 key 的代价与文件归属无关，所以仓库自身的工作流和随产品分发的模板工作流
+# 都要检查——后者一旦带着这种缺陷发出去，每个下游项目都会复现 startup failure。
+ALL_WORKFLOW_PATHS = sorted(WORKFLOWS_DIR.glob("*.yml")) + [WORKFLOW_PATH]
 
 # GITHUB_TOKEN 由 Actions 自动注入，任何 job 都能读到，无需声明 environment。
 # 其余 secret 在本仓库都配置在 preview 环境下，必须声明 environment 才可见。
@@ -124,15 +119,10 @@ def test_non_deploy_comments_use_a_separate_concurrency_group():
     )
 
 
-def test_bundled_template_workflow_matches_source():
-    """模板副本必须与源文件逐字节一致，否则下游项目会继承旧缺陷。"""
-    assert TEMPLATE_WORKFLOW_PATH.read_text(encoding="utf-8") == WORKFLOW_PATH.read_text(
-        encoding="utf-8"
-    ), f"{TEMPLATE_WORKFLOW_PATH} 与 {WORKFLOW_PATH} 不一致，请同步模板副本"
-
-
 @pytest.mark.parametrize(
-    "workflow_path", sorted(WORKFLOWS_DIR.glob("*.yml")), ids=lambda path: path.name
+    "workflow_path",
+    ALL_WORKFLOW_PATHS,
+    ids=lambda path: str(path.relative_to(REPO_ROOT)),
 )
 def test_workflow_has_no_null_valued_keys(workflow_path: Path):
     """任何 key 的值为 null 都会让 GitHub 判定 schema 非法并整体拒绝解析。
