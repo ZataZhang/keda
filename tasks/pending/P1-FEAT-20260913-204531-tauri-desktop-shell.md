@@ -1,5 +1,9 @@
 # PRD: Tauri 桌面壳 —— 免签名本机构建的原生窗口
 
+> ⛔ **交付前置**：排在 `P1-FEAT-20260913-204530-console-prd-content-reader.md` 之后开工。
+> 构建上不依赖它（壳单独能跑），但先做壳只会得到一个读不了 PRD 的窗口。
+> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**；本行只为让人一眼看到，改动请以 §8 为准。
+
 本 PRD 分两层阅读：**Part A（人审层）** 供人决定"做不做、怎么做才对"，不含实现细节；**Part B（执行器层）** 供执行者（人或 Agent）落地实现。人只需审 Part A，并按 Part A 的指引在需要时下钻 Part B。
 
 ## Feature Overview (功能一览)

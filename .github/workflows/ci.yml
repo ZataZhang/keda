@@ -139,6 +139,21 @@ jobs:
           name: pytest-log-${{ github.run_id }}
           path: /tmp/pytest.log
           if-no-files-found: warn
+          # 默认 90 天保留会累积吃满账户 Actions 存储配额；retention-days
+          # 仅作 prune 步骤失败时的兜底。
+          retention-days: 7
+
+      - name: Prune old pytest-log artifacts (keep latest 3)
+        if: always()
+        # 数量封顶：无论 CI 频率多高，同前缀制品只保留最新 3 份。
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" --paginate \
+            --jq '.artifacts[] | select(.expired==false) | select(.name | startswith("pytest-log-")) | "\(.created_at)\t\(.id)"' \
+            | sort -r | tail -n +4 | cut -f2 \
+            | xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/{}"
 
       - name: Build documentation
         run: uv run mkdocs build --strict
@@ -163,3 +178,17 @@ jobs:
           name: template-release-${{ github.sha }}
           path: ${{ steps.release_archive.outputs.release_archive_path }}
           if-no-files-found: error
+          # 默认 90 天保留会累积吃满账户 Actions 存储配额；retention-days
+          # 仅作 prune 步骤失败时的兜底。
+          retention-days: 7
+
+      - name: Prune old template-release artifacts (keep latest 3)
+        # 数量封顶：无论 CI 频率多高，同前缀制品只保留最新 3 份。
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" --paginate \
+            --jq '.artifacts[] | select(.expired==false) | select(.name | startswith("template-release-")) | "\(.created_at)\t\(.id)"' \
+            | sort -r | tail -n +4 | cut -f2 \
+            | xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/{}"

@@ -1,5 +1,8 @@
 # PRD: 控制台内直接阅读 PRD 原文
 
+> ✅ **交付前置**：无，可立即开工。下游 `P1-FEAT-20260913-204531-tauri-desktop-shell.md` 依赖本 PRD，但依赖单向、不阻塞本 PRD。
+> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
+
 本 PRD 分两层阅读：**Part A（人审层）** 供人决定"做不做、怎么做才对"，不含实现细节；**Part B（执行器层）** 供执行者（人或 Agent）落地实现。人只需审 Part A，并按 Part A 的指引在需要时下钻 Part B。
 
 ## Feature Overview (功能一览)
