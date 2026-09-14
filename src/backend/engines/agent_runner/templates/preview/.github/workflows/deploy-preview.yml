@@ -39,6 +39,19 @@ jobs:
   preview-context:
     name: Resolve preview context
     runs-on: ubuntu-latest
+    # `/deploy` 只接受本来就有写权限的人发出。
+    #
+    # 与 fork 发来的 pull_request 不同，issue_comment 始终以基仓库身份运行、带着
+    # 完整 secrets；而下游的 deploy job 会检出 PR head 并在持有 SERVER_SSH_KEY 的
+    # 环境里执行其中的代码。没有这道闸门，公开仓库里任何人都能改掉 PR 里的脚本、
+    # 评论一句 /deploy，把部署凭据取走。
+    #
+    # author_association 由 GitHub 服务端写入事件载荷，评论者无法伪造。
+    # 注意 CONTRIBUTOR 只表示"历史上有过 PR 被合并"，不代表任何写权限，不可放行。
+    if: >-
+      github.event_name != 'issue_comment' ||
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+      github.event.comment.author_association)
     outputs:
       pr_number: ${{ steps.context.outputs.pr_number }}
       commit_sha: ${{ steps.context.outputs.commit_sha }}

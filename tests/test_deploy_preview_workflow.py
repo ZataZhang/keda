@@ -103,6 +103,29 @@ def test_gh_cli_calls_pass_repo_when_the_job_has_no_checkout(workflow_jobs):
                 )
 
 
+def test_comment_trigger_is_gated_on_write_access(workflow_jobs):
+    """`/deploy` 评论必须限定在本来就有写权限的人。
+
+    issue_comment 带着完整 secrets 运行（fork 的 pull_request 不会），而 deploy job
+    会检出 PR head 并在持有 SERVER_SSH_KEY 的环境里执行其中的代码。缺了这道闸门，
+    公开仓库里任何人都能借一条评论把 PR 代码提权到可读取部署凭据。
+    """
+    context_guard = str(workflow_jobs["preview-context"].get("if", ""))
+
+    assert "author_association" in context_guard, (
+        "preview-context 没有按 author_association 限制 issue_comment，"
+        "任何人都能通过 /deploy 评论让 PR 代码在持有 SERVER_SSH_KEY 的 job 里执行。"
+    )
+
+    # CONTRIBUTOR 听起来像自己人，实际只表示历史上有 PR 被合并过，不含写权限；
+    # 放进白名单等于这道闸门不存在。
+    for untrusted_association in ("CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE"):
+        assert untrusted_association not in context_guard, (
+            f"`{untrusted_association}` 不代表写权限，不能出现在 /deploy 的放行名单里："
+            f"{context_guard}"
+        )
+
+
 def test_non_deploy_comments_use_a_separate_concurrency_group():
     """无关评论必须与部署分属不同的 concurrency 分组。
 
