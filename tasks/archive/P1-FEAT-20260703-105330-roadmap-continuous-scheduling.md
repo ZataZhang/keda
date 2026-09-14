@@ -396,7 +396,11 @@ tests/test_roadmap_actions.py::test_global_start_skips_running_and_blocked
   - **槽位口径人工确认**：`free_slots = max_parallel - RUNNING 条目数`，BLOCKED 保留条目但既不占槽也不晋升（`test_blocked_prd_holds_entry_but_consumes_no_slot`）；饱和时晋升 0 个（`test_no_slot_when_max_parallel_is_saturated`）。
 - **rv-2（真实入口 `iar roadmap advance --dry-run`，keda 本仓）**：
 
-  > 采集时点：2026-09-14，**本 PRD 仍在 `tasks/pending/`**（故下表 9 条含本 PRD）。归档后 pending 集合变化，重跑输出会不同（本 PRD 归档还会解锁 hard 依赖它的 `P1-FEAT-20260703-105340-prd-regrounding`）——这本身就是"依赖每轮重算、上游完成即解锁"的预期行为，不改变本条证据的结论。
+  > 采集时点：2026-09-14 首次执行时本 PRD 仍在 `tasks/pending/`，故下表 9 条含本 PRD。
+  >
+  > **rebase 到 main 后复测（pending 变为 7 条，本 PRD 已归档）**：输出变为 promote `P1-FEAT-20260705-161739-completeness-judgment-hardening` + `P1-FEAT-20260911-010513-agent-cli-adapter-layer`，queued `P1-FEAT-20260913-204531-tauri-desktop-shell` + `P1-BUG-20260914-171901-console-e2e-and-archive-view-defects`。其中 tauri-desktop-shell 的 hard 上游 `console-prd-content-reader` 在此期间被归档，**于是本轮被自动解锁并捡起**——这是 FR-3「依赖每轮重算、上游完成即解锁」的实测证据。
+  >
+  > 未入选的 3 条原因：`api-engines-layer-migration` 与 `file-line-split-seven-files` 的 `Depends on` 写作 `none（…）` / `none(…)` 而非字面 `none` → 判为未解析；**`prd-regrounding` 把依赖写成裸 PRD id（缺 `tasks/` 路径前缀）**，`roadmap_dependencies.py:154-158` 按路径查表查不到，故阻塞为「上游 PRD 不存在」。后者是**本 PRD 之外的既有数据缺陷**：需把该行改成 `tasks/archive/P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md` 才能解锁。已如实记录，不在本 PRD 范围内。
 
   ```
   $ uv run iar roadmap advance --dry-run
