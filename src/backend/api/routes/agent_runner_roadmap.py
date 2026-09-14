@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from backend.core.shared.interfaces.runner_console import AuditEntry, IRoadmapStore
@@ -25,6 +26,7 @@ from backend.core.shared.models.roadmap import (
     RoadmapPrd,
     RoadmapSettingsEntry,
 )
+from backend.core.use_cases.prd_content_reader import PrdContentError, read_prd_content
 from backend.core.use_cases.roadmap_actions import (
     RoadmapActionError,
     get_or_create_roadmap_settings,
@@ -223,6 +225,25 @@ def get_roadmap_settings(repo_id: str) -> dict:
     store = create_roadmap_store()
     settings = get_or_create_roadmap_settings(store, repo_id)
     return _serialize(settings)
+
+
+@router.get(
+    "/agent-runner/roadmap/prds/{encoded_path}/content",
+    response_class=PlainTextResponse,
+)
+def get_roadmap_prd_content(encoded_path: str, repo_id: str) -> PlainTextResponse:
+    """返回单个 PRD 的 Markdown 原文。
+
+    路径编码复用 ``POST /roadmap/prds/{encoded_path}/start`` 的 base64url 约定；
+    目录白名单与后缀校验由 core 用例负责，本层只做 HTTP 映射与 4xx 转换。
+    """
+    prd_path = _decode_prd_path(encoded_path)
+    context = _resolve_context(repo_id)
+    try:
+        prd_content_text = read_prd_content(context.repo_path, prd_path)
+    except PrdContentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PlainTextResponse(prd_content_text, media_type="text/plain; charset=utf-8")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

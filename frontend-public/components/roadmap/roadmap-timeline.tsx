@@ -4,6 +4,7 @@ import type { RoadmapPrd } from "@/lib/api/types";
 interface RoadmapTimelineProps {
   prds: RoadmapPrd[];
   onStart: (prd: RoadmapPrd) => void;
+  onOpenContent: (prd: RoadmapPrd) => void;
   startingPath: string | null;
 }
 
@@ -61,7 +62,7 @@ function buildTopologicalLevels(prds: RoadmapPrd[]): RoadmapPrd[][] {
   return levels.filter((level) => level.length > 0);
 }
 
-export function RoadmapTimeline({ prds, onStart, startingPath }: RoadmapTimelineProps) {
+export function RoadmapTimeline({ prds, onStart, onOpenContent, startingPath }: RoadmapTimelineProps) {
   if (prds.length === 0) {
     return <p className="text-sm text-slate-500">暂无 PRD。</p>;
   }
@@ -81,6 +82,7 @@ export function RoadmapTimeline({ prds, onStart, startingPath }: RoadmapTimeline
                 key={prd.prd_path}
                 prd={prd}
                 onStart={() => onStart(prd)}
+                onOpenContent={() => onOpenContent(prd)}
                 starting={startingPath === prd.prd_path}
               />
             ))}
