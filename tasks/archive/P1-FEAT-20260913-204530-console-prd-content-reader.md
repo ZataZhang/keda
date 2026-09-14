@@ -187,26 +187,57 @@
 ├── frontend-public/
 │   ├── lib/api/roadmap.ts
 │   │   [修改]
-│   │   【总结】新增 getPrdContent(encodedPath)，类型与既有 roadmap API 风格一致
+│   │   【总结】新增 fetchPrdContent(repoId, prdPath)，内部复用既有 encodePrdPath
+│   ├── lib/api/client.ts
+│   │   [修改]
+│   │   【总结】apiGet 增加可选 axios config，供原文请求声明 responseType: "text"
 │   ├── app/（roadmap 相关路由目录；按 frontend-public/AGENTS.md 要求先读 node_modules/next/dist/docs/ 对应指南）
 │   │   [新增]/[修改]
 │   │   【总结】PRD 详情视图：从列表进入，渲染 Markdown 原文，含加载态与错误态，保留返回列表导航
 │   │   └── 锚点：rg -n "roadmap" frontend-public/app frontend-public/components frontend-public/lib
+│   ├── components/roadmap/
+│   │   [新增]/[修改]
+│   │   【总结】新增 prd-content-view.tsx；prd-card / roadmap-list / roadmap-timeline 增加「查看原文」回调
+│   ├── app/globals.css
+│   │   [修改]
+│   │   【总结】新增 .prd-markdown 样式块（Tailwind preflight 会清掉原生 Markdown 排版）
 │   └── package.json
 │       [修改]
 │       【总结】新增 Markdown 渲染依赖（frontend-public 目前一个都没有；选型时核对 Next 版本兼容性）
+├── pnpm-lock.yaml（仓库根）
+│   [修改]
+│   【总结】pnpm workspace 的锁文件在根目录，新增 frontend-public 依赖会连带更新它
 ├── tests/
 │   ├── test_roadmap_prd_content.py
 │   │   [新增]
 │   │   【总结】core 用例 + api 端点测试：合法原文往返；目录穿越/绝对路径/非 .md/符号链接逃逸全部 4xx
 │   │   └── 负向用例必须能判负：删掉归属校验后这些用例应变红（见 rv-1 的 expected_fail）
 │   └── playwright-e2e/tests/
-│       [新增]
+│       [新增]/[修改]
 │       【总结】真实浏览器打开 roadmap → 进入 PRD 详情 → 断言渲染的 H1 与磁盘文件首行标题一致
+│       ├── 新增 smoke/roadmap-prd-content.spec.ts（rv-2）
+│       └── 修改 setup/auth.setup.ts：修正 `app/` 路由段（见下方 Drift 记录）
 └── docs/ + mkdocs.yml
     [修改]
     【总结】控制台使用文档补充 PRD 原文浏览说明并登记导航
+    └── 顺带修正 guides/agent-runner.md 里失效的 `/roadmap` 路由写法（见下方 Drift 记录）
 ```
+
+**Drift 记录（执行期发现，2026-09-14）：**
+
+- **控制台真实路由带 `app/` 段。** 前端路由是 `frontend-public/app/(app)/app/<page>/page.tsx`，
+  `(app)` 是路由组不占 URL，但 `app/` 是真实段，因此 canonical 路径为 `/app/roadmap`、`/app/dashboard`
+  （见 `frontend-public/components/layout/app-sidebar.tsx` 的 `href`）。实测：dev server 上
+  `/app/roadmap` → 200，`/roadmap` → 404。受影响的既有文件（本次**不**一并修，属独立技术债）：
+  `tests/smoke/pages.spec.ts`、`roadmap.spec.ts`、`roadmap-realistic.spec.ts`、`idea-inbox.spec.ts`、
+  `workflows/screenshot.spec.ts`、`workflows/console-pages.no-auth.spec.ts` 仍写无前缀路径。
+  本 PRD 只修 `setup/auth.setup.ts`——它是 `chromium` project 的依赖，不修则**任何**带鉴权的
+  e2e 都跑不起来，rv-2 无法取证。
+- **e2e 就绪探针默认 URL 在 keda 上不存在。** `scripts/shared/e2e/run-with-just-stack.sh` 与
+  `tests/playwright-e2e/scripts/stack-control.mjs` 默认探测 `http://127.0.0.1:<port>/health`，
+  但后端只有 `/api/v1/agent-runner/health`，导致 `just e2e` 必然在 readiness 轮询超时。
+  二者是 `just sync-template` 同步的共享模板文件，本 PRD 不改动，改用其已文档化的覆盖开关
+  `PLAYWRIGHT_HEALTH_URL` 取证，并把模板修复留作独立技术债。
 
 以上为起点而非穷尽清单；发现隐藏引用时按下方 Drift Guard 处理。
 
@@ -318,46 +349,65 @@ No interactive prototype file changes in this PRD.
 
 验收证据包按风险排序呈现：人工确认项与高层级判据在前，普通门禁折叠在后。所有证据须在最终代码树上采集；相关代码后续改动使对应证据失效，须重验后方可归档。
 
+证据目录：`.iar/evidence/rv1/`（`rv1-report.txt` 为完整逐条输出）。
+
 ### Human-Confirmed
 
-- [ ] （决策一）rv-1 证据显示合法路径原文与磁盘逐字节一致（`diff` 为空），且目录穿越、绝对路径、非 `.md`、符号链接逃逸四类请求全部 4xx、响应体不含文件内容
-- [ ] （决策一）负向对照**实跑记录**：删除 core 用例里 resolve 后的归属校验时，穿越用例由 4xx 变 200 —— 证明这组测试能判负而非恒绿
+- [x] （决策一）rv-1 证据显示合法路径原文与磁盘逐字节一致（`diff` 为空），且目录穿越、绝对路径、非 `.md`、符号链接逃逸四类请求全部 4xx、响应体不含文件内容
+      - 证据：`rv1-report.txt`。pending 条目 48598 字节、archived 条目 34243 字节，响应与磁盘字节数相等且逐字节相同；四类负向用例全部 400，`泄露文件内容: False`。
+- [x] （决策一）负向对照**实跑记录**：删除 core 用例里 resolve 后的归属校验时，穿越用例由 4xx 变 200 —— 证明这组测试能判负而非恒绿
+      - 证据：`negative-control-containment-removed.txt`。删除 `is_relative_to` 归属校验后重启 console，穿越请求由 400 变 **200** 并返回仓库根 `README.md` 真实内容；同批的绝对路径校验未动，仍返回 400（证明删除是外科手术式的）。恢复后复验：合法路径 200 / 穿越 400（`negative-control-restored.txt`），且 core 文件 md5 与删除前一致。
 
 ### Architecture Acceptance
 
-- [ ] 新增端点经 `api -> core` 分层落地，无跨层直连（api 层不含文件读取逻辑）
-- [ ] 目录白名单复用 `_DEFAULT_PRD_DIRS`，无第二份硬编码常量（`rg -n "tasks/pending" src/backend/core/`）
-- [ ] 路径编码复用既有 `_encode_prd_path` / `_decode_prd_path`，未发明第二种编码
-- [ ] 文件读取显式 `encoding="utf-8"`
+- [x] 新增端点经 `api -> core` 分层落地，无跨层直连（api 层不含文件读取逻辑）
+      - 证据：`just lint --full` 中 `Check architecture layer dependencies` Passed；api 层仅做 base64url 解码与 `PrdContentError -> 400` 映射。
+- [x] 目录白名单复用 `_DEFAULT_PRD_DIRS`，无第二份硬编码常量（`rg -n "tasks/pending" src/backend/core/`）
+      - 证据：`prd_content_reader.py` 直接 `from backend.core.use_cases.roadmap_prd_scanner import _DEFAULT_PRD_DIRS`，本 PRD 新增代码中无 `tasks/pending` 字面量常量。
+- [x] 路径编码复用既有 `_encode_prd_path` / `_decode_prd_path`，未发明第二种编码
+      - 证据：端点调用既有 `_decode_prd_path`；前端复用既有 `encodePrdPath`。
+- [x] 文件读取显式 `encoding="utf-8"`
+      - 证据：`read_prd_content` 中 `resolved_path.read_text(encoding="utf-8")`。
 
 ### Behavior Acceptance
 
-- [ ] 既有端点行为不变：`GET /roadmap/prds`、`POST /roadmap/prds/{encoded_path}/start` 等响应结构与既有测试全绿
-- [ ] 文件不存在时返回 4xx 而非 500（OSError 未泄漏到 api 层）
-- [ ] 含中文/空格文件名的 PRD 正常往返，无字符丢失
+- [x] 既有端点行为不变：`GET /roadmap/prds`、`POST /roadmap/prds/{encoded_path}/start` 等响应结构与既有测试全绿
+      - 证据：后端测试套件 `just test` 通过；新端点为纯新增路由，未改动既有端点函数体。
+- [x] 文件不存在时返回 4xx 而非 500（OSError 未泄漏到 api 层）
+      - 证据：`rv1-report.txt` 末段，返回 400 + `{"detail":"PRD 文件不存在。"}`；`resolve_prd_content_path` 用 `is_file()` 判定，`read_prd_content` 捕获 `OSError`/`UnicodeDecodeError`。
+- [x] 含中文/空格文件名的 PRD 正常往返，无字符丢失
+      - 证据：`rv1-report.txt`「含中文与空格的文件名」段。临时 fixture `tasks/pending/ZZ-RV1-FIXTURE-中文 名称.md`（响应落盘为 `positive-non-ascii-name`）往返逐字节一致；`tests/test_roadmap_prd_content.py` 亦含 `P1-FEAT-中文 名称.md` 参数化用例。
 
 ### Frontend Acceptance
 
-- [ ] rv-2 证据：`just e2e` 中 PRD 详情 spec 通过，渲染 H1 与磁盘文件标题一致
-- [ ] 后端不可达时详情视图显示明确错误态（附截图并标注验证层级），非白屏或永久加载
-- [ ] `pnpm --filter frontend-public build` 静态导出通过，产物仍被 FastAPI 正常挂载
-- [ ] frontend-admin 无任何改动（`git diff --stat frontend-admin/` 为空）
+- [x] rv-2 证据：`just e2e` 中 PRD 详情 spec 通过，渲染 H1 与磁盘文件标题一致
+      - 证据：`just e2e tests/smoke/roadmap-prd-content.spec.ts` → **4 passed**（1 个 setup + 3 个用例）。E2E-PRD-CONTENT-1 断言详情视图渲染的 H1 与磁盘文件首行标题一致，并断言表格与勾选框可见。
+- [x] 后端不可达时详情视图显示明确错误态（附截图并标注验证层级），非白屏或永久加载
+      - 证据：E2E-PRD-CONTENT-3。验证层级为 **`error-state injection`**（界面与后端真实，仅用 `page.route` 中断原文请求），断言错误态可见、含「读取 PRD 原文失败」、加载态已消失。另附 `page.route` 中断时真实截图于 `test-results/`。
+- [x] `pnpm --filter frontend-public build` 静态导出通过，产物仍被 FastAPI 正常挂载
+      - 证据：构建产出 13 个静态页面含 `/app/roadmap`；`app.py` 已有 `app.mount("/", StaticFiles(directory=console_dir, html=True))`，本次未改动挂载方式。
+- [x] frontend-admin 无任何改动（`git diff --stat frontend-admin/` 为空）
+      - 证据：`git status --short` 中无 frontend-admin 条目。
 
 ### Documentation Acceptance
 
-- [ ] 控制台文档补充 PRD 原文浏览说明，`mkdocs.yml` 导航同步，`uv run mkdocs build --strict` 通过
+- [x] 控制台文档补充 PRD 原文浏览说明，`mkdocs.yml` 导航同步，`uv run mkdocs build --strict` 通过
+      - 证据：`docs/guides/agent-runner.md` 新增「PRD 原文浏览」小节；`docs/api/references.md` 新增端点说明。`mkdocs.yml` 无须改动——两个文件已在既有导航中。`uv run mkdocs build --strict` 退出码 0。
 
 ### Validation Acceptance
 
-- [ ] rv-1（integration，真实 HTTP + 真实文件系统）通过，含实现前 404 与校验删除后变红两组对照记录
-- [ ] rv-2（e2e，`just e2e` 真实栈）通过
-- [ ] `just lint` 与后端测试套件全绿
+- [x] rv-1（integration，真实 HTTP + 真实文件系统）通过，含实现前 404 与校验删除后变红两组对照记录
+      - 证据：实现前把路由回退到 HEAD 后重启 console，合法路径与穿越路径均为 **404**，同时 `/roadmap/prds` 与 `/health` 仍 200（证明服务本身健康、404 来自端点不存在）；校验删除后的对照见上。
+- [x] rv-2（e2e，`just e2e` 真实栈）通过
+      - 证据：`just e2e` 4 passed，日志中可见真实路由 `GET /app/roadmap/ 200` 与真实 content 端点 200。
+- [x] `just lint` 与后端测试套件全绿
+      - 证据：`just lint --full` 中 ruff / ruff-format / 准则一致性 / 架构分层 / 行数 / 守卫测试改动 全部 Passed；`just test` 通过。
 
 ### Delivery Readiness
 
-- [ ] 推荐方案全部落地，无遗留临时兼容层或"二期再补"项
-- [ ] 独立 verifier Agent 审查通过
-- [ ] 归档前完成 Section 13 Final Reconciliation，正文无与最终实现矛盾的表述
+- [x] 推荐方案全部落地，无遗留临时兼容层或"二期再补"项
+- [x] 独立 verifier Agent 审查通过
+- [x] 归档前完成 Section 13 Final Reconciliation，正文无与最终实现矛盾的表述
 
 ## 10. Functional Requirements
 
@@ -401,4 +451,31 @@ No interactive prototype file changes in this PRD.
 
 ### Final Reconciliation
 
-- 待归档前填写。须按模板核对：Interpretation、Public behavior and contracts、Related PRD status、Requirements and risks，以及 `Feature Overview (功能一览)` 与 §10 的一致性。
+归档前核对（2026-09-14，与最终代码树一致）：
+
+**Interpretation（§1 行为样例逐行核对）**
+
+| 行为样例 | 结果 |
+|---|---|
+| 点开 pending PRD 看到完整 Markdown 渲染 | ✅ rv-2，H1 与磁盘首行标题一致，表格与勾选框渲染可见 |
+| 点开 archived PRD 同样可读 | ✅ rv-1 中 `tasks/archive/` 条目逐字节一致（34243 字节）。注：因既有缺陷，`include_archived=true` 目前 500，故该条目路径取自磁盘真实文件而非列表响应 |
+| 直接请求接口，编码路径取自列表响应 | ✅ 200，正文与磁盘逐字节一致（48598 字节） |
+| 文件名含中文或空格 | ✅ 往返逐字节一致 |
+| `../` 穿越 / 绝对路径 / `.py` 后缀 | ✅ 一律 400，响应体不含文件内容 |
+| 已被删除的 PRD | ✅ 400 + `{"detail":"PRD 文件不存在。"}`，非 500 |
+| 前端请求时后端不可达 | ✅ 错误态可见，非白屏/永久加载（验证层级：error-state injection） |
+
+**Public behavior and contracts**：新增 `GET /api/v1/agent-runner/roadmap/prds/{encoded_path}/content`（`text/plain; charset=utf-8`），契约已登记在 `docs/api/references.md`。既有端点、CLI 行为、静态挂载方式均未改动；`GET /roadmap/prds` 仍只返回元数据。
+
+**Related PRD status**：`P1-FEAT-20260913-204531-tauri-desktop-shell.md` 仍在 pending，其对本 PRD 的 `hard` 门禁已满足，本 PRD 不依赖它。底座 PRD `P1-FEAT-20260910-111901` 已归档，未改动。
+
+**Requirements and risks**：FR-1～FR-5 全部落地。§12 四项风险中，"路径校验缺口" 已由 resolve 后归属校验 + 负向对照实跑覆盖；"Markdown 依赖与静态导出不兼容" 已由 `pnpm --filter frontend-public build` 通过证伪；"响应体偏大" 未触发（本仓最大 PRD 48 KB）；"符号链接逃逸漏测" 已列为 rv-1 四类负向之一并通过。执行期新发现的技术债（路由 `app/` 段失效写法、e2e 就绪探针默认 URL 不存在、`include_archived=true` 因脏数据 500）已记入 §7 Drift 记录，均非本 PRD 引入。
+
+**`Feature Overview` 与 §10 一致性**：一致。四个功能点分别对应 FR-2、FR-1、FR-3、§11/FR-5，无遗漏、无新增承诺。
+
+**相对原 PRD 的偏离（均在 PRD 授权范围内）**
+
+1. 详情视图形态取「同一页面内切换 + 返回列表」而非独立路由：PRD §1 已明确"形态留给执行器决定"。选它是因为 frontend-public 是 `output: "export"` 静态导出，独立动态路由会与静态导出约束冲突。
+2. 白名单归属校验锚定在**解析后的仓库根**再拼相对目录，而不是解析白名单目录本身。这是比 PRD 描述更严的实现：额外挡住了"白名单目录整体被替换为符号链接"这一绕过方式（该 case 已被 `test_rejects_symlink_to_outside_directory` 覆盖，且初版实现确实在它上面判负过）。
+3. 前端 API 方法命名为 `fetchPrdContent(repoId, prdPath)` 而非 §6 示例中的 `getPrdContent(encodedPath)`：让调用方直接传列表响应里的 `prd_path`，编码在函数内部完成。这样「编码方式只有一处」更不容易漂移（FR-4），也与调用点只持有 `prd_path` 的事实相符。
+4. 顺带修正 `tests/playwright-e2e/tests/setup/auth.setup.ts` 的 `/app/dashboard` 路由与 `docs/guides/agent-runner.md` 中失效的 `/roadmap` 写法——均为执行期发现的既有失效引用，前者不修则任何带鉴权 e2e 都无法取证。细节见 §7 Drift 记录。

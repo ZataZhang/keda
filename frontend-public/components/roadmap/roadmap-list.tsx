@@ -16,6 +16,7 @@ type ListSortKey = "state" | "priority" | "updated_at";
 interface RoadmapListProps {
   prds: RoadmapPrd[];
   onStart: (prd: RoadmapPrd) => void;
+  onOpenContent: (prd: RoadmapPrd) => void;
   startingPath: string | null;
 }
 
@@ -79,7 +80,7 @@ const SORT_LABELS: Record<ListSortKey, string> = {
   updated_at: "按更新时间",
 };
 
-export function RoadmapList({ prds, onStart, startingPath }: RoadmapListProps) {
+export function RoadmapList({ prds, onStart, onOpenContent, startingPath }: RoadmapListProps) {
   const [sortKey, setSortKey] = useState<ListSortKey>("priority");
   const sortedPrds = useMemo(() => sortPrds(prds, sortKey), [prds, sortKey]);
 
@@ -116,6 +117,7 @@ export function RoadmapList({ prds, onStart, startingPath }: RoadmapListProps) {
             key={prd.prd_path}
             prd={prd}
             onStart={() => onStart(prd)}
+            onOpenContent={() => onOpenContent(prd)}
             starting={startingPath === prd.prd_path}
           />
         ))}

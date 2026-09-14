@@ -130,3 +130,121 @@
     @apply mx-auto;
   }
 }
+
+/* PRD 原文渲染样式：react-markdown 输出的是无类名的原生标签，Tailwind preflight
+   会清掉标题、列表、表格的默认样式，这里按主题变量补回来。 */
+.prd-markdown {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: var(--foreground);
+  overflow-wrap: break-word;
+}
+
+.prd-markdown > * + * {
+  margin-top: 0.75rem;
+}
+
+.prd-markdown h1,
+.prd-markdown h2,
+.prd-markdown h3,
+.prd-markdown h4,
+.prd-markdown h5,
+.prd-markdown h6 {
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.prd-markdown > h1,
+.prd-markdown > h2,
+.prd-markdown > h3,
+.prd-markdown > h4 {
+  margin-top: 1.5rem;
+}
+
+.prd-markdown h1 {
+  font-size: 1.5rem;
+}
+
+.prd-markdown h2 {
+  font-size: 1.25rem;
+}
+
+.prd-markdown h3 {
+  font-size: 1.1rem;
+}
+
+.prd-markdown ul,
+.prd-markdown ol {
+  padding-left: 1.5rem;
+}
+
+.prd-markdown ul {
+  list-style-type: disc;
+}
+
+.prd-markdown ol {
+  list-style-type: decimal;
+}
+
+.prd-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.prd-markdown li.task-list-item {
+  list-style-type: none;
+  margin-left: -1.25rem;
+}
+
+.prd-markdown input[type="checkbox"] {
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.prd-markdown a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.prd-markdown code {
+  background: var(--muted);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.85em;
+}
+
+.prd-markdown pre {
+  background: var(--muted);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+}
+
+.prd-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.prd-markdown blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.prd-markdown table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.prd-markdown th,
+.prd-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.prd-markdown hr {
+  border-color: var(--border);
+}

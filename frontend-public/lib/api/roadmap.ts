@@ -53,6 +53,23 @@ export async function startRoadmapPrd(repoId: string, prdPath: string): Promise<
   return post(`${BASE_PATH}/prds/${encodedPath}/start`, { repo_id: repoId });
 }
 
+/**
+ * 读取单个 PRD 的 Markdown 原文。
+ *
+ * @param repoId - 仓库标识。
+ * @param prdPath - 相对仓库根目录的 PRD 路径，取自列表响应。
+ * @returns 与磁盘文件逐字节一致的 UTF-8 原文。
+ */
+export async function fetchPrdContent(repoId: string, prdPath: string): Promise<string> {
+  const encodedPath = encodePrdPath(prdPath);
+  const searchParams = new URLSearchParams();
+  searchParams.set("repo_id", repoId);
+  // 端点返回 text/plain，显式声明 responseType 避免 axios 把原文当 JSON 解析。
+  return get<string>(`${BASE_PATH}/prds/${encodedPath}/content?${searchParams.toString()}`, {
+    responseType: "text",
+  });
+}
+
 export async function startGlobalRoadmap(params: {
   repoId: string;
   maxParallel: number;

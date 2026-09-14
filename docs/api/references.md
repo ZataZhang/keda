@@ -92,6 +92,28 @@
 }
 ```
 
+### `GET /api/v1/agent-runner/roadmap/prds/{encoded_path}/content`
+
+返回单个 PRD 的 Markdown 原文（`text/plain; charset=utf-8`，与磁盘文件逐字节一致）。该端点为**只读**。
+
+`encoded_path` 是 PRD 相对路径的 URL-safe base64 编码，与 `POST /api/v1/agent-runner/roadmap/prds/{encoded_path}/start` 使用同一约定；路径本身取自 `GET /api/v1/agent-runner/roadmap/prds` 列表响应中的 `prd_path`。
+
+查询参数：
+
+- `repo_id`：仓库标识，必填。
+
+只允许读取 `tasks/pending/` 与 `tasks/archive/` 下后缀为 `.md` 的文件。路径在 `resolve()` 之后仍必须落在白名单目录内，因此 `../` 目录穿越、绝对路径、非 `.md` 后缀与符号链接逃逸都返回 `400`，且响应体不含任何文件内容；目标文件不存在同样返回 `400` 而不是 `500`。
+
+```bash
+# 把 PRD 相对路径编码成 URL-safe base64。
+# 必须保留 `=` padding：后端按 base64.urlsafe_b64decode 解码，去掉 padding 会被判为
+# 非法编码并返回 400。这与后端 _encode_prd_path 及前端 encodePrdPath 的编码一致。
+encoded_path="$(printf '%s' 'tasks/pending/P1-FEAT-20260101-demo.md' \
+  | base64 | tr -d '\n' | tr '+/' '-_')"
+curl -sS \
+  "http://127.0.0.1:8000/api/v1/agent-runner/roadmap/prds/${encoded_path}/content?repo_id=keda-main"
+```
+
 ## 模型模块
 
 ### `backend.infrastructure.models.model_loader`

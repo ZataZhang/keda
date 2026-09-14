@@ -35,10 +35,11 @@ const STATE_VARIANTS: Record<RoadmapPrd["state"], BadgeVariant> = {
 interface PrdCardProps {
   prd: RoadmapPrd;
   onStart: () => void;
+  onOpenContent: () => void;
   starting: boolean;
 }
 
-export function PrdCard({ prd, onStart, starting }: PrdCardProps) {
+export function PrdCard({ prd, onStart, onOpenContent, starting }: PrdCardProps) {
   const progress =
     prd.acceptance_total > 0
       ? Math.round((prd.acceptance_checked / prd.acceptance_total) * 100)
@@ -113,6 +114,15 @@ export function PrdCard({ prd, onStart, starting }: PrdCardProps) {
         ) : null}
 
         <div className="flex items-center gap-2 pt-1">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onOpenContent}
+            data-testid="prd-open-content"
+            data-prd-path={prd.prd_path}
+          >
+            查看原文
+          </Button>
           {isStartable ? (
             <Button size="sm" onClick={onStart} disabled={starting || !!prd.block_reason}>
               {starting ? "启动中…" : "开始"}

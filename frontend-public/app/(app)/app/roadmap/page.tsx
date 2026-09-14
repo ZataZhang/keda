@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PrdContentView } from "@/components/roadmap/prd-content-view";
 import { RoadmapList } from "@/components/roadmap/roadmap-list";
 import { RoadmapTimeline } from "@/components/roadmap/roadmap-timeline";
 import { fetchRegistryRepositories } from "@/lib/api/console";
@@ -53,6 +54,7 @@ export default function RoadmapPage() {
   const [view, setView] = useState<RoadmapView>("list");
   const [startingPath, setStartingPath] = useState<string | null>(null);
   const [globalStarting, setGlobalStarting] = useState(false);
+  const [openedPrd, setOpenedPrd] = useState<RoadmapPrd | null>(null);
 
   const loadData = useCallback(async () => {
     if (!selectedRepoId) {
@@ -198,7 +200,10 @@ export default function RoadmapPage() {
           <select
             className="h-9 w-48 rounded-md border border-slate-200 bg-transparent px-2 text-sm dark:border-slate-700"
             value={selectedRepoId}
-            onChange={(event) => setSelectedRepoId(event.target.value)}
+            onChange={(event) => {
+              setSelectedRepoId(event.target.value);
+              setOpenedPrd(null);
+            }}
             disabled={reposLoading || repositories.length === 0}
             aria-label="选择仓库"
           >
@@ -258,11 +263,19 @@ export default function RoadmapPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">
-            {VIEW_LABELS[view]}（{visiblePrds.length}）
+            {openedPrd ? "PRD 原文" : `${VIEW_LABELS[view]}（${visiblePrds.length}）`}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {openedPrd ? (
+            <PrdContentView
+              key={openedPrd.prd_path}
+              repoId={selectedRepoId}
+              prdPath={openedPrd.prd_path}
+              prdTitle={openedPrd.title}
+              onBack={() => setOpenedPrd(null)}
+            />
+          ) : loading ? (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
               <Skeleton className="h-40" />
               <Skeleton className="h-40" />
@@ -272,12 +285,14 @@ export default function RoadmapPage() {
             <RoadmapTimeline
               prds={visiblePrds}
               onStart={(prd) => void handleStart(prd)}
+              onOpenContent={setOpenedPrd}
               startingPath={startingPath}
             />
           ) : (
             <RoadmapList
               prds={visiblePrds}
               onStart={(prd) => void handleStart(prd)}
+              onOpenContent={setOpenedPrd}
               startingPath={startingPath}
             />
           )}

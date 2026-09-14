@@ -11,9 +11,11 @@ import { ensureAuthDirectory, getAuthStorageStatePath } from '../../support/env'
 setup('authenticate and persist storage state', async ({ page }) => {
   ensureAuthDirectory()
 
-  await page.goto('/dashboard')
+  // 控制台真实路由带 `app/` 段（见 frontend-public/components/layout/app-sidebar.tsx
+  // 的 href），无前缀的 `/dashboard` 在静态导出与 dev server 上都是 404。
+  await page.goto('/app/dashboard')
   await expect(page.getByRole('main')).toBeVisible()
-  await expect(page).toHaveURL(/\/dashboard/)
+  await expect(page).toHaveURL(/\/app\/dashboard/)
 
   await page.context().storageState({ path: getAuthStorageStatePath() })
 })

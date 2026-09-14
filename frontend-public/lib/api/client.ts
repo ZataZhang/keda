@@ -1,4 +1,5 @@
 import axios from "axios"
+import type { AxiosRequestConfig } from "axios"
 
 /** Axios instance for the public frontend API with credentials and 401 handling. */
 export const apiClient = axios.create({
@@ -38,10 +39,16 @@ export class ApiRequestError extends Error {
   }
 }
 
-/** Send a GET request and return the typed response data. */
-export async function apiGet<T>(url: string): Promise<T> {
+/**
+ * Send a GET request and return the typed response data.
+ *
+ * @param url - Request URL relative to the API base path.
+ * @param config - Optional axios config, e.g. `responseType: "text"` for plain text.
+ * @returns The typed response payload.
+ */
+export async function apiGet<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
   try {
-    const response = await apiClient.get<T>(url)
+    const response = await apiClient.get<T>(url, config)
     return response.data
   } catch (error) {
     if (axios.isAxiosError(error)) {

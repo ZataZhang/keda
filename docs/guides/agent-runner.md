@@ -3209,13 +3209,22 @@ uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 ## 路线图（Roadmap）
 
-管理终端提供 `/roadmap` 页面，以 PRD 文件为粒度展示 `tasks/pending/` 与 `tasks/archive/` 中的任务全景。
+管理终端提供 `/app/roadmap` 页面，以 PRD 文件为粒度展示 `tasks/pending/` 与 `tasks/archive/` 中的任务全景。
 
 ### 视图说明
 
 - 默认只显示 `pending` PRD，勾选「显示已归档」后同时展示 `archived` PRD。
 - 每个 PRD 卡片展示：标题、当前状态、验收清单进度、关联 Issue、依赖关系与下一步操作。
 - 列表视图按优先级（P0 → P3）与更新时间排序；时间轴视图在后续版本中提供。
+
+### PRD 原文浏览
+
+每张 PRD 卡片上的「查看原文」按钮会在同一页面切换到详情视图，按需拉取该 PRD 的完整 Markdown 原文并渲染——标题层级、表格、代码块与验收清单的勾选状态都会保留，顶部保留「返回列表」导航。
+
+- 原文经只读端点 `GET /api/v1/agent-runner/roadmap/prds/{encoded_path}/content` 获取，路径编码与「开始」按钮复用同一套 base64url 约定。
+- 只有 `tasks/pending/` 与 `tasks/archive/` 下后缀为 `.md` 的文件可读；目录穿越、绝对路径、非 `.md` 后缀与符号链接逃逸一律返回 4xx，响应体不含任何文件内容。
+- 全文按需单独取，`GET /roadmap/prds` 列表响应仍只携带元数据，不随 PRD 篇幅膨胀。
+- 读取失败（PRD 已被删除、后端不可达等）时详情视图显示明确错误态并提供「重试」，不会白屏或永久加载。
 
 ### 状态映射
 
