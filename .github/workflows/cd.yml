@@ -34,6 +34,11 @@ jobs:
     # 见 ci.yml 同名设置：job 级超时由服务端执行，runner 卡死时仍有效。
     timeout-minutes: 25
     name: Build Release Archive
+    # 覆盖顶层 permissions，故 contents: write（发布 Release 需要）要重写一遍；
+    # actions: write 供 prune 步骤删除旧 artifact。
+    permissions:
+      contents: write
+      actions: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -112,6 +117,20 @@ jobs:
           name: template-release-${{ github.run_id }}
           path: ${{ steps.release_archive.outputs.release_archive_path }}
           if-no-files-found: error
+          # 正式发布物已挂在 GitHub Releases（附件存储不计入 Actions 配额），
+          # 这份 artifact 只是重复副本；retention-days 仅作 prune 失败兜底。
+          retention-days: 7
+
+      - name: Prune old template-release artifacts (keep latest 3)
+        # 数量封顶：无论 CI 频率多高，同前缀制品只保留最新 3 份。
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" --paginate \
+            --jq '.artifacts[] | select(.expired==false) | select(.name | startswith("template-release-")) | "\(.created_at)\t\(.id)"' \
+            | sort -r | tail -n +4 | cut -f2 \
+            | xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/{}"
 
       - name: Publish GitHub release
         if: ${{ github.event_name == 'push' }}
