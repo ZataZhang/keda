@@ -3271,7 +3271,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
    - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/roadmap` 页面处理后再回到调度。
    - BLOCKED → 保留为 `running`，但**不占槽也不晋升**，等人工解除阻塞。
    - WAITING → 不动，依赖未满足的 PRD 继续等待。
-2. **槽位核算**：`free_slots = max_parallel - RUNNING 条目数`。只有 RUNNING 计数，BLOCKED 不占槽；结果为负时按 0 处理。
+2. **槽位核算**：`free_slots = max_parallel - RUNNING 条目数`。只有 RUNNING 计数，BLOCKED 不占槽；结果为负时按 0 处理。`max_parallel` **沿用控制台「全局调度」里持久化的并发数**（1–10，缺省 1），不是独立配置项——想调整在途数量就改控制台那个值，或用 `--dry-run` 先预检当前口径。
 3. **晋升（promote）**：候选集 = 队列中 `queued` 的条目 ∪ 新发现的未入队 pending PRD（**发现式入队**）。候选经依赖重算后过滤出 `NOT_STARTED` 且无 `block_reason` 的 PRD，按 `P0 > P1 > P2 > P3`、再按 `updated_at` 升序排序，最多晋升 `free_slots` 个。
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
@@ -3295,6 +3295,11 @@ uv run iar roadmap advance --repo <repo-id>
 - 同一 pass 内重复执行不会重复建 Issue 或重复打 label；没有可晋升候选时是零写入。
 - 已 `failed` 泊车的 PRD 不会被下一 pass 重新发现；已 `running` 的条目不会被重复晋升。
 - 手动「开始」与调度阶段并发时不会双开：晋升只负责把 PRD 推到 `agent/ready`，进程拉起是单点行为。
+
+#### 使用注意
+
+- **开启持续调度后，`tasks/pending/` 的语义收紧为「放进去就会被自动执行」**。发现式入队会捡起任何满足条件的新 pending PRD，包括只是想先记下来的实验性草稿。不想被自动执行的草稿请放 `tasks/inbox/`（既有惯例），成熟后再由 PRD 流程升级到 `tasks/pending/`。
+- **状态解析依赖 GitHub 可达性**：`gh` 调用失败时 resolver 保守返回（依赖判定不通过），本轮会少晋升而不是误晋升，下一轮 pass 自愈；调度阶段自身的异常只记日志，不影响 daemon 后续阶段。
 
 ### 依赖等待
 
