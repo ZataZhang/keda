@@ -94,7 +94,7 @@ test.describe('smoke: idea inbox page', () => {
   })
 
   test('idea inbox renders entries, summary, and drafts', async ({ page }) => {
-    await page.goto('/ideas')
+    await page.goto('/app/ideas')
     await expect(page.getByText('Idea Inbox')).toBeVisible()
     // Entry shows up.
     await expect(page.getByText('第一条想法')).toBeVisible()
@@ -129,7 +129,7 @@ test.describe('smoke: idea inbox page', () => {
         await route.continue()
       },
     )
-    await page.goto('/ideas')
+    await page.goto('/app/ideas')
     const textarea = page.getByLabel('新想法')
     await textarea.fill('新想法原文')
     await page.getByRole('button', { name: '追加到 inbox' }).click()

@@ -93,7 +93,7 @@ test.describe('smoke: roadmap page', () => {
   })
 
   test('roadmap renders pending PRDs by default', async ({ page }) => {
-    await page.goto('/roadmap')
+    await page.goto('/app/roadmap')
     await expect(page.getByRole('main')).toBeVisible()
     await expect(page.getByText('Alpha Feature')).toBeVisible()
     await expect(page.getByText('Beta Feature')).toBeVisible()
@@ -101,7 +101,7 @@ test.describe('smoke: roadmap page', () => {
   })
 
   test('archived PRD appears when include archived is checked', async ({ page }) => {
-    await page.goto('/roadmap')
+    await page.goto('/app/roadmap')
     await expect(page.getByText('Archived Feature')).not.toBeVisible()
     await page.getByLabel('显示已归档').check()
     await expect(page.getByText('Archived Feature')).toBeVisible()

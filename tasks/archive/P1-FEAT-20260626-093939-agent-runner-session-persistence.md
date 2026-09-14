@@ -67,8 +67,8 @@ keda Agent Runner 当前对每一次尝试都启动一个全新的 agent 子进�
   - none
 - Depends on tasks/issues:
   - freshai #23（复盘参考，非硬依赖）
-- Gate type: research-gate（需先完成调研，再决定是否进入实现）
-- Notes: 本 PRD 当前只产生文档与决策，不修改生产代码。
+- Gate type: hard
+- Notes: 本 PRD 当前只产生文档与决策，不修改生产代码。原 Gate type 误写为 "research-gate（需先完成调研，再决定是否进入实现）"；按作者原意"需先完成调研才能进入实现"取更严一侧判为 hard（2026-09-14 由 P1-BUG-20260914-171901 修正为合法值，判据见其 §13 D-05）。
 
 
 ## 2. Requirement Shape

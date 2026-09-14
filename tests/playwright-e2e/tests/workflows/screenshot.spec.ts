@@ -45,13 +45,13 @@ function buildDynamicMaskList(page: Page): Locator[] {
 
 test.describe('dashboard page', () => {
   test('captures a screenshot for manual review @review', async ({ page }, testInfo) => {
-    await page.goto('/dashboard')
+    await page.goto('/app/dashboard')
     await expect(page.getByRole('main')).toBeVisible()
     await attachScreenshot(page, testInfo, 'dashboard-page')
   })
 
   test('page shell is visually stable @visual', async ({ page }) => {
-    await page.goto('/dashboard')
+    await page.goto('/app/dashboard')
     await expect(page.getByRole('main')).toBeVisible()
 
     await expect(page).toHaveScreenshot('dashboard-shell.png', {

@@ -135,7 +135,7 @@ test.describe('realistic: roadmap page', () => {
   })
 
   test('E2E-1 roadmap renders pending PRDs and archived switch works', async ({ page }) => {
-    await page.goto('/roadmap')
+    await page.goto('/app/roadmap')
     await expect(page.getByRole('heading', { name: '路线图' })).toBeVisible()
     await waitForPrdCards(page)
 
@@ -152,7 +152,7 @@ test.describe('realistic: roadmap page', () => {
   })
 
   test('E2E-1 list sorting and timeline view', async ({ page }) => {
-    await page.goto('/roadmap')
+    await page.goto('/app/roadmap')
     await expect(page.getByRole('heading', { name: '路线图' })).toBeVisible()
     await waitForPrdCards(page)
 
@@ -169,7 +169,7 @@ test.describe('realistic: roadmap page', () => {
   })
 
   test('E2E-5 review and merged highlight cards', async ({ page }) => {
-    await page.goto('/roadmap')
+    await page.goto('/app/roadmap')
     await expect(page.getByRole('heading', { name: '路线图' })).toBeVisible()
     await waitForPrdCards(page)
 
