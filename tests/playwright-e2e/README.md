@@ -34,12 +34,13 @@ playwright-e2e/
 
 本项目已适配：
 
-1. **`support/env.ts`** — dev 模式默认 URL 优先读取 `just run` 写入项目根目录运行状态文件（`.env.run-state`）的端口；无 run-state 时 fallback public 前端 `3000`、admin 前端 `5173`、backend `8000`，健康检查路径 `/health`。
-2. **`scripts/stack-control.mjs`** — 健康检查路径同步为 `/health`。
+1. **`support/env.ts`** — dev 模式默认 URL 优先读取 `just run` 写入项目根目录运行状态文件（`.env.run-state`）的端口；无 run-state 时 fallback public 前端 `3000`、admin 前端 `5173`、backend `8000`，健康检查路径 `/api/v1/agent-runner/health`（本项目后端没有根路径 `/health`）。
+2. **`scripts/stack-control.mjs`** — 健康检查路径同步为 `/api/v1/agent-runner/health`。
 3. **`page-objects/LoginPage.ts`** — 保留模板，供需要表单登录的测试复用。
 4. **`tests/setup/auth.setup.ts` / `tests/setup/admin-auth.setup.ts`** — 使用 `/api/auth/login` / `/api/admin/auth/login` 建立 session。
 5. **`tests/smoke/public-home.no-auth.spec.ts`** — public 首页冒烟测试。
 6. **`tests/smoke/admin-sign-in.admin.spec.ts`** — admin 前端表单登录冒烟测试（admin project，自行完成登录）。
+7. **控制台路由前缀** — 本项目控制台页面的 canonical 路径以 `app/` 段开头（如 `/app/dashboard`、`/app/roadmap`、`/app/stats`；权威来源见 `frontend-public/components/layout/app-sidebar.tsx` 的 `href`）。写 spec 时 `goto()` 不要漏掉 `app/` 段，否则页面 404。
 
 ## 模板同步边界
 
