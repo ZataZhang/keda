@@ -45,6 +45,7 @@ from backend.api.cli_parsed_commands.registry import (
     run_registry_stop_command,
     run_registry_sync_command,
 )
+from backend.api.cli_parsed_commands.roadmap import run_roadmap_advance_command
 from backend.api.cli_parsed_commands.runner import (
     run_blocked_continue_command,
     run_daemon_command,
@@ -91,6 +92,7 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "loop cancel": run_loop_command,
     "loop run": run_loop_command,
     "loop-daemon": run_loop_command,
+    "roadmap advance": run_roadmap_advance_command,
     "container auth import": run_container_auth_import_command,
     "container up": run_container_up_command,
     "container down": run_container_down_command,

@@ -59,6 +59,7 @@ __all__ = [
     "loop_app",
     "main",
     "registry_app",
+    "roadmap_app",
     "worktree_app",
     "workflow_app",
 ]
@@ -172,6 +173,11 @@ loop_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+roadmap_app = typer.Typer(
+    help="Drive the roadmap scheduler manually.",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 container_app = typer.Typer(
     help="Manage the iar runner container (auth import, up, down, logs).",
     no_args_is_help=True,
@@ -202,6 +208,7 @@ app.add_typer(registry_app, name="registry")
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(workflow_app, name="workflow")
 app.add_typer(loop_app, name="loop")
+app.add_typer(roadmap_app, name="roadmap")
 app.add_typer(container_app, name="container")
 app.add_typer(console_app, name="console")
 app.add_typer(agent_app, name="agent")
@@ -352,6 +359,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_container,
     cli_typer_takeover,
     cli_typer_loop,
+    cli_typer_roadmap,
     cli_typer_console,
 )
 

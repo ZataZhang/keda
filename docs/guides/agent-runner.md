@@ -3260,6 +3260,42 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 - 超出槽位的 PRD 进入 `roadmap_queue` 等待队列。
 - 点击「停止全局调度」可清空等待队列，已运行的进程不会被中断。
 
+### 持续调度（Continuous Scheduling）
+
+「全局开始」是一次性动作：启动后即使有 PRD 跑完，空出来的槽位也不会自动补位。持续调度补的就是这一环——把「对账 → 释放槽位 → 晋升下一批」做成一个幂等的调度阶段，由 daemon 在每个 pass 开始时自动执行，也可以手动触发。
+
+调度阶段由 `core/use_cases/roadmap_actions.py::advance_roadmap_queue` 实现，一次 pass 分三步：
+
+1. **对账（reconcile）**：把 `roadmap_queue` 中 `queued`/`running` 的条目与 PRD 的真实 GitHub 状态对齐。
+   - MERGED / ARCHIVED → `completed`，槽位释放。
+   - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/roadmap` 页面处理后再回到调度。
+   - BLOCKED → 保留为 `running`，但**不占槽也不晋升**，等人工解除阻塞。
+   - WAITING → 不动，依赖未满足的 PRD 继续等待。
+2. **槽位核算**：`free_slots = max_parallel - RUNNING 条目数`。只有 RUNNING 计数，BLOCKED 不占槽；结果为负时按 0 处理。
+3. **晋升（promote）**：候选集 = 队列中 `queued` 的条目 ∪ 新发现的未入队 pending PRD（**发现式入队**）。候选经依赖重算后过滤出 `NOT_STARTED` 且无 `block_reason` 的 PRD，按 `P0 > P1 > P2 > P3`、再按 `updated_at` 升序排序，最多晋升 `free_slots` 个。
+
+排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
+
+daemon 路径下的晋升**只**做幂等的 Issue 创建/复用 + 打上 `agent/ready` label，**不 spawn 进程**；真正的进程拉起仍由 daemon 的 Phase 2 在消费 `agent/ready` 时统一完成。该阶段仅在 `autopilot.enabled` 时执行，任何异常都会被记录且不影响 daemon 后续阶段。
+
+#### 手动触发：iar roadmap advance
+
+```bash
+# 预演：输出完整调度计划，零副作用
+uv run iar roadmap advance --dry-run
+
+# 实际执行
+uv run iar roadmap advance --repo <repo-id>
+```
+
+`--dry-run` 会打印对账结果（completed / failed 泊车）、`max_parallel` 与 `free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
+
+#### 幂等与竞态
+
+- 同一 pass 内重复执行不会重复建 Issue 或重复打 label；没有可晋升候选时是零写入。
+- 已 `failed` 泊车的 PRD 不会被下一 pass 重新发现；已 `running` 的条目不会被重复晋升。
+- 手动「开始」与调度阶段并发时不会双开：晋升只负责把 PRD 推到 `agent/ready`，进程拉起是单点行为。
+
 ### 依赖等待
 
 PRD 的 `Delivery Dependencies` 小节会解析为三种依赖边：

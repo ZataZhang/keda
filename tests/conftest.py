@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -11,6 +12,12 @@ from backend.core.shared.interfaces.agent_runner import (
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
+)
+from backend.core.shared.interfaces.runner_console import (
+    AuditEntry,
+    IRoadmapStore,
+    RoadmapQueueEntry,
+    RoadmapSettingsEntry,
 )
 from backend.core.shared.models.agent_runner import (
     CommandResult,
@@ -378,3 +385,126 @@ class FakeProcessRunner(IProcessRunner):
                     )
                 return result
         return CommandResult(command=tuple(command), return_code=0, stdout="", stderr="")
+
+
+class FakeRoadmapStore(IRoadmapStore):
+    """In-memory roadmap queue store that records every write.
+
+    Shared by the roadmap tests so a scheduling pass can be asserted on both
+    its resulting queue state and the exact number of writes it performed
+    (idempotency and dry-run guarantees depend on the latter).
+    """
+
+    def __init__(self, *, repo_id: str = "keda-test", max_parallel: int = 1) -> None:
+        self.repo_id = repo_id
+        self._entries: list[RoadmapQueueEntry] = []
+        self._next_entry_id = 1
+        self.settings = RoadmapSettingsEntry(
+            repo_id=repo_id,
+            max_parallel=max_parallel,
+            default_view="list",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+        self.enqueue_calls: list[RoadmapQueueEntry] = []
+        self.update_calls: list[dict] = []
+        self.clear_calls = 0
+        self.audits: list[AuditEntry] = []
+
+    # -- reads ---------------------------------------------------------------
+    def get_roadmap_settings(self, repo_id: str) -> RoadmapSettingsEntry | None:
+        if repo_id != self.repo_id:
+            return None
+        return self.settings
+
+    def list_roadmap_queue(
+        self, *, repo_id: str | None = None, status: str | None = None
+    ) -> list[RoadmapQueueEntry]:
+        entries = list(self._entries)
+        if repo_id is not None:
+            entries = [entry for entry in entries if entry.repo_id == repo_id]
+        if status is not None:
+            entries = [entry for entry in entries if entry.status == status]
+        return entries
+
+    # -- writes --------------------------------------------------------------
+    def save_roadmap_settings(self, settings: RoadmapSettingsEntry) -> None:
+        self.settings = settings
+
+    def enqueue_roadmap(self, entry: RoadmapQueueEntry) -> int:
+        self.enqueue_calls.append(entry)
+        stored_entry = replace(entry, entry_id=self._next_entry_id)
+        self._next_entry_id += 1
+        self._entries.append(stored_entry)
+        return int(stored_entry.entry_id)
+
+    def update_roadmap_queue_status(
+        self,
+        *,
+        entry_id: int,
+        status: str,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+        error_detail: str | None = None,
+    ) -> None:
+        self.update_calls.append(
+            {
+                "entry_id": entry_id,
+                "status": status,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "error_detail": error_detail,
+            }
+        )
+        for index, entry in enumerate(self._entries):
+            if entry.entry_id == entry_id:
+                self._entries[index] = replace(
+                    entry,
+                    status=status,
+                    started_at=started_at if started_at is not None else entry.started_at,
+                    finished_at=finished_at,
+                    error_detail=error_detail,
+                )
+                return
+        raise KeyError(f"unknown queue entry {entry_id}")
+
+    def clear_roadmap_queue(self, *, repo_id: str | None = None) -> None:
+        self.clear_calls += 1
+        if repo_id is None:
+            self._entries.clear()
+            return
+        self._entries = [entry for entry in self._entries if entry.repo_id != repo_id]
+
+    def append_audit(self, audit_entry: AuditEntry) -> None:
+        self.audits.append(audit_entry)
+
+    # -- test helpers --------------------------------------------------------
+    def seed(self, prd_path: str, status: str) -> int:
+        """Insert a queue entry directly and return its id."""
+        entry_id = self._next_entry_id
+        self._next_entry_id += 1
+        self._entries.append(
+            RoadmapQueueEntry(
+                repo_id=self.repo_id,
+                prd_path=prd_path,
+                status=status,
+                trigger="global",
+                started_at="2026-01-01T00:00:00+00:00",
+                finished_at=None,
+                error_detail=None,
+                entry_id=entry_id,
+            )
+        )
+        return entry_id
+
+    def entry_for(self, prd_path: str) -> RoadmapQueueEntry:
+        entry = next(
+            (entry for entry in self._entries if entry.prd_path == prd_path),
+            None,
+        )
+        assert entry is not None, f"no queue entry for {prd_path}"
+        return entry
+
+    @property
+    def write_count(self) -> int:
+        """Total number of store writes (enqueue + update + clear)."""
+        return len(self.enqueue_calls) + len(self.update_calls) + self.clear_calls

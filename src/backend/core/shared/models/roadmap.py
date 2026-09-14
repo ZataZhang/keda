@@ -115,3 +115,32 @@ class RoadmapGlobalStartResult:
     started: list[RoadmapActionResult]
     queued: list[str]
     skipped: list[str]
+
+
+@dataclass(frozen=True)
+class RoadmapAdvanceReport:
+    """Result of one continuous-scheduling advance pass.
+
+    Attributes:
+        repo_id: Target repository ID.
+        dry_run: ``True`` when the pass only computed the plan without writing.
+        max_parallel: Concurrency ceiling read from the persisted roadmap settings.
+        free_slots: Slots available for promotion in this pass.
+        reconciled_completed: PRD paths whose queue entry was closed as ``completed``
+            because the PRD is merged or archived.
+        reconciled_failed: PRD paths whose queue entry was parked as ``failed``.
+        started: Promotions (issue + ``agent/ready`` + queue entry ``running``);
+            in dry-run mode these are the promotions that *would* happen.
+        queued: PRD paths that were (or would be) enqueued as ``queued``.
+        skipped: Promotion attempts rejected by the action layer, with reasons.
+    """
+
+    repo_id: str
+    dry_run: bool
+    max_parallel: int
+    free_slots: int
+    reconciled_completed: list[str]
+    reconciled_failed: list[str]
+    started: list[RoadmapActionResult]
+    queued: list[str]
+    skipped: list[str]

@@ -40,6 +40,7 @@ from backend.core.use_cases.daemon_single_instance import (
     release_daemon_locks,
 )
 from backend.core.use_cases.run_agent_daemon import run_agent_daemon
+from backend.core.use_cases.roadmap_actions import advance_roadmap_queue
 from backend.core.use_cases.run_agent_repositories_once import (
     run_agent_repositories_once,
 )
@@ -75,6 +76,7 @@ from backend.engines.agent_runner.factory import (
     create_planner_runner,
     create_process_runner,
     create_repl_command_executor,
+    create_roadmap_store,
     create_transcript_runner,
     get_agent_runner_settings,
     resolve_issue_from_prd_target,
@@ -96,6 +98,7 @@ __all__ = [
     "_resolve_cli_repository_targets",
     "_resolve_run_trigger",
     "acquire_daemon_locks",
+    "advance_roadmap_queue",
     "create_content_generator",
     "create_default_session_id",
     "create_event_sink",
@@ -106,6 +109,7 @@ __all__ = [
     "create_planner_runner",
     "create_process_runner",
     "create_repl_command_executor",
+    "create_roadmap_store",
     "create_transcript_runner",
     "daemon_lock_dir",
     "get_agent_runner_settings",

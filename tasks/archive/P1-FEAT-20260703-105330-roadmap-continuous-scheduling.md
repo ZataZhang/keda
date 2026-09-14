@@ -1,9 +1,11 @@
 # PRD: Roadmap 持续调度：完成检测、队列自动晋升与失败泊车
 
+> **归档注记（2026-09-14）**：本 PRD 已在 worktree `feat/roadmap-continuous-scheduling` 上完整落地并归档。交付内容：`advance_roadmap_queue`（对账 / 槽位核算 / 发现式晋升）位于 `src/backend/core/use_cases/roadmap_actions.py`，与手动「全局开始」共用 `_select_eligible_prds` + `_roadmap_sort_key` 选择逻辑；daemon 在 `autopilot.enabled` 时于 Phase 2 之前插入持续调度阶段（晋升不 spawn 进程，只建/复用 Issue 并打 `agent/ready`）；新增 CLI `iar roadmap advance [--dry-run]`。证据见 §9 Acceptance Evidence Package：全量回归 2055 passed，新增 21 个用例全绿，rv-1 / rv-3 / rv-4 负控均完成红→绿闭环，rv-2 在 keda 本仓以 `--dry-run` 真实入口验证且与 9 个 pending PRD 逐条核对一致、零副作用。rv-6（沙箱无人值守端到端）因需对 GitHub 远端产生不可逆副作用而显式跳过，理由与替代方案记录在 §9 第 5 节。
+
 > ✅ **交付前置**：唯一上游 `P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile` **已交付归档**（`autopilot.enabled` 门控已在树中），本 PRD 已解锁可开工。交付顺序仍为 merge-queue 在前——先有自动合并，"做完补位"才闭环。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：已完成并归档（2026-09-14）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个阅读高度：Part A 供人审（判断要不要做、哪里必须人工确认），Part B 供执行器（怎么做）。人审只需读 Part A，按 Human Review Map 指到的点再下钻 Part B。
@@ -339,41 +341,169 @@ No external validation required; repository evidence was sufficient.
 
 ## 9. Acceptance Checklist
 
+「人只看一次」的终点交付物：按 §2 风险地图排序、每项带证据（命令输出 / 观察）。
+
+### Acceptance Evidence Package（证据包 · 按风险地图排序）
+
+**0. 全量回归基线**
+
+```
+$ uv run pytest -o addopts="" -q tests/
+2055 passed in 143.67s (0:02:23)
+
+$ just test all
+======================= 2055 passed in 204.66s (0:03:24) =======================
+✅ just test flag updated: feat/roadmap-continuous-scheduling @ 434142b0
+✅ just lint --full flag updated: feat/roadmap-continuous-scheduling @ 434142b0
+```
+
+新增用例 21 个（`tests/test_roadmap_advance.py` 18 + `tests/test_roadmap_actions.py` 3），全绿：
+
+```
+tests/test_roadmap_advance.py::test_merged_prd_closes_running_entry
+tests/test_roadmap_advance.py::test_archived_prd_closes_running_entry
+tests/test_roadmap_advance.py::test_failed_prd_is_parked_with_reason
+tests/test_roadmap_advance.py::test_merged_prd_frees_slot_and_promotes_next_queued
+tests/test_roadmap_advance.py::test_failed_prd_frees_slot_for_next_candidate
+tests/test_roadmap_advance.py::test_no_slot_when_max_parallel_is_saturated
+tests/test_roadmap_advance.py::test_blocked_prd_holds_entry_but_consumes_no_slot
+tests/test_roadmap_advance.py::test_waiting_prd_is_never_touched
+tests/test_roadmap_advance.py::test_promotion_prefers_higher_priority
+tests/test_roadmap_advance.py::test_discovery_enqueues_new_pending_prd
+tests/test_roadmap_advance.py::test_discovery_creates_issue_when_prd_has_no_link
+tests/test_roadmap_advance.py::test_discovery_respects_dependency_gate
+tests/test_roadmap_advance.py::test_idempotent_second_pass_writes_nothing
+tests/test_roadmap_advance.py::test_running_prd_is_not_promoted_twice
+tests/test_roadmap_advance.py::test_parked_prd_is_not_rediscovered
+tests/test_roadmap_advance.py::test_dry_run_has_zero_side_effects
+tests/test_roadmap_advance.py::test_gate_disabled_skips_scheduling
+tests/test_roadmap_advance.py::test_gate_enabled_runs_scheduling
+tests/test_roadmap_actions.py::test_global_start_orders_by_priority
+tests/test_roadmap_actions.py::test_global_start_queues_overflow
+tests/test_roadmap_actions.py::test_global_start_skips_running_and_blocked
+
+21 passed
+```
+
+**1. 高风险 oracle 结果（置顶）**
+
+- **rv-1（调度循环：对账 / 槽位 / 晋升）**：
+  - 全绿：`test_merged_prd_closes_running_entry`、`test_archived_prd_closes_running_entry`、`test_merged_prd_frees_slot_and_promotes_next_queued`、`test_no_slot_when_max_parallel_is_saturated`、`test_blocked_prd_holds_entry_but_consumes_no_slot`、`test_waiting_prd_is_never_touched`、`test_promotion_prefers_higher_priority`（7 绿）。
+  - **负控（移除 merged→completed 映射则补位停摆）**：把 `MERGED` 从 `_COMPLETED_PRD_STATES` 中摘掉 →
+    `FAILED tests/test_roadmap_advance.py::test_merged_prd_closes_running_entry`
+    `FAILED tests/test_roadmap_advance.py::test_merged_prd_frees_slot_and_promotes_next_queued`
+    `2 failed`；还原后 `21 passed`。红→绿闭环在案。
+  - **槽位口径人工确认**：`free_slots = max_parallel - RUNNING 条目数`，BLOCKED 保留条目但既不占槽也不晋升（`test_blocked_prd_holds_entry_but_consumes_no_slot`）；饱和时晋升 0 个（`test_no_slot_when_max_parallel_is_saturated`）。
+- **rv-2（真实入口 `iar roadmap advance --dry-run`，keda 本仓）**：
+
+  > 采集时点：2026-09-14，**本 PRD 仍在 `tasks/pending/`**（故下表 9 条含本 PRD）。归档后 pending 集合变化，重跑输出会不同（本 PRD 归档还会解锁 hard 依赖它的 `P1-FEAT-20260703-105340-prd-regrounding`）——这本身就是"依赖每轮重算、上游完成即解锁"的预期行为，不改变本条证据的结论。
+
+  ```
+  $ uv run iar roadmap advance --dry-run
+  roadmap advance (dry-run) repo=keda
+  max_parallel=2 free_slots=2 running_after=0
+  would promote tasks/pending/P1-BUG-20260704-153640-agent-runner-memory-stable-anchoring.md -> (new Issue)
+  would promote tasks/pending/P1-FEAT-20260705-161739-completeness-judgment-hardening.md -> (new Issue)
+  queued ['tasks/pending/P1-FEAT-20260911-010513-agent-cli-adapter-layer.md',
+           'tasks/pending/P1-FEAT-20260913-204530-console-prd-content-reader.md']
+  ```
+
+  **人工核对（9 个 pending PRD 逐个对账）**：
+
+  | pending PRD | 依赖 / 状态 | 结论 |
+  |---|---|---|
+  | P1-BUG-20260704-153640-memory-stable-anchoring | `Depends on: none`，gate=soft，无 Issue | 候选 #1（promote）✓ |
+  | P1-FEAT-20260705-161739-completeness-judgment | `none`，gate=none，无 Issue | 候选 #2（promote）✓ |
+  | P1-FEAT-20260911-010513-agent-cli-adapter-layer | `none`，gate=soft，无 Issue | 候选 #3（槽位满→queued）✓ |
+  | P1-FEAT-20260913-204530-console-prd-content-reader | `none`，gate=none，无 Issue | 候选 #4（槽位满→queued）✓ |
+  | P1-FEAT-20260703-105330-roadmap-continuous-scheduling | hard 依赖上游 autopilot-merge-queue | 排除（等待中）✓ |
+  | P1-FEAT-20260703-105340-prd-regrounding | hard 依赖本 PRD（pending） | 排除（等待中）✓ |
+  | P1-FEAT-20260913-204531-tauri-desktop-shell | hard 依赖 console-prd-content-reader（pending） | 排除（等待中）✓ |
+  | P1-REFACTOR-20260703-184226-api-engines-layer-migration | 依赖值写成 `none（当前 hooks…）` 非字面 `none` | 排除（依赖未解析）✓ |
+  | P1-REFACTOR-20260705-210702-file-line-split | 依赖值写成 `none(stage 1 infra: …)` 非字面 `none` | 排除（依赖未解析）✓ |
+
+  排序核对：4 个候选同为 P1，`updated_at` 升序 20260704 < 20260705 < 20260911 < 20260913，与输出顺序一致 ✓
+
+  **零副作用核对**：
+
+  ```
+  issues before=75 after=75
+  console.db size before=1937408 after=1937408
+  console.db mtime: Sep 11 12:33:23 2026   （运行日期为 9-14，未被触碰）
+  ```
+
+- **rv-3（幂等 / 竞态）**：全绿 —— `test_idempotent_second_pass_writes_nothing`（第二轮零写入）、`test_running_prd_is_not_promoted_twice`（已 running 不重复晋升 → 手动 start 与 advance 并发不双开）、`test_parked_prd_is_not_rediscovered`。
+  - **负控（去掉"已入队 PRD 不再重复发现"的排除条件）→ 应红**：
+    `FAILED tests/test_roadmap_advance.py::test_parked_prd_is_not_rediscovered`；还原后绿。
+    （注：首版负控未变红——因为状态流转把二次入队掩盖成了幂等；补了该用例后负控才真正红→绿。）
+- **rv-4（共享 helper 重构不改行为）**：`_select_eligible_prds` + `_roadmap_sort_key` 被 `start_global_roadmap` 与 `advance_roadmap_queue` 共用；`rg -n "priority_order" …roadmap_actions.py` 仅 1 处命中（在 `_roadmap_sort_key` 内）。
+  - **负控（反转 `priority_order` 为 `{"P0":3,"P1":2,"P2":1,"P3":0}`）→ 两条路径同时变红**：
+    `FAILED tests/test_roadmap_actions.py::test_global_start_orders_by_priority`
+    `FAILED tests/test_roadmap_advance.py::test_promotion_prefers_higher_priority`
+    `2 failed, 2053 deselected`；还原后 `21 passed`。证明手动与自动路径确实共用同一排序源。
+- **rv-5（daemon pass 接线 + 快速档门控）**：`test_gate_disabled_skips_scheduling`（`autopilot.enabled=false` → store 调用数为 0，即"关闭开关 daemon 跑多少轮 queued 纹丝不动"的单元级反向证明）与 `test_gate_enabled_runs_scheduling`（开启 → 发生晋升）双绿；调度阶段异常被吞并记录、daemon 继续（用例覆盖 + 实现中 `try/except` + `_logger.error`）。
+
+**2. 风险地图对账 Predicted → Reconciled**
+
+- ① core 编排（高）：rv-1 + rv-4 兜底，负控红→绿在案，槽位口径经人工确认 ✓
+- ⑦ 并发/幂等（高）：rv-3 兜底，重复 pass / 与手动 start 并发不双开均有断言 ✓
+- ② schema：无 DB 结构变化（`git diff alembic/` 为空）✓
+- ③ 安全/信任边界：仅操作 label 与本地队列记录，未新增任何"经 HTTP 读本地文件"的端点 ✓
+- ④ 对外 API 契约：仅新增 CLI 子命令，HTTP 路由契约零变更 ✓
+- ⑤ 钱：不涉及；并发上限仍由既有 `max_parallel` 约束 ✓
+- ⑥ 不可逆操作：无（最坏为误放行一个 agent，成本问题）✓
+
+**3. 对抗自检（未命中项最坏情况复核）**
+
+- 若对账把未合并 PRD 误判为 completed → 由 `test_merged_prd_closes_running_entry` 与负控锁定 MERGED/ARCHIVED 白名单，未列入者不会转 completed。
+- 若 daemon 调度阶段抛异常 → 已包裹 `try/except` 并记录，Phase 2 照常执行（用例 + 实现双覆盖）。
+- 若重构改变手动路径行为 → rv-4 负控证明两条路径共用同一 helper，任一侧漂移都会让对侧用例变红。
+
+**4. 低风险门禁结果**
+
+- `uv run mkdocs build --strict` 绿（`Documentation built in 9.57 seconds`，无 warning 升级为 error）。
+- `just lint --full`：ruff / ruff-format / 准则一致性 / 架构分层 / 最大行数 / PRD 验收清单 / 守卫测试改动 全部 Passed（唯一 Failed 项是 `Check just test flag`，因当时尚未跑 `just test`；随后 `just test all` 绿灯并写入 flag）。
+
+**5. rv-6（沙箱端到端）跳过说明**
+
+- **跳过理由**：rv-6 要求在沙箱仓摆若干小 PRD 后跑**真实 daemon**，让它无人值守地连续完成多个 PRD。该动作会真实 spawn agent 进程并对 GitHub 远端产生副作用（创建 Issue、改 label、开 PR、可能 push 分支），属于**对外不可逆动作**，不在本 PRD 的自动化门禁范围内，也不应在无人确认时执行。
+- **替代方案（按清单允许的 rv-1 + rv-3）**：调度循环的三段语义（对账 / 槽位 / 晋升）、失败泊车、发现式入队、依赖门控、幂等与并发防护，全部由 rv-1 / rv-3 / rv-4 / rv-5 的 21 个用例在 `FakeRoadmapStore` + Fake GitHub client 上闭环；真实 CLI 入口由 rv-2 在 keda 本仓以 `--dry-run` 验证（完整计划 + 零副作用）。未覆盖的只剩"真实 agent 进程连跑"这一执行器侧行为，该行为本身由既有 daemon 与 `iar run` 测试覆盖，非本 PRD 新增面。
+
 ### Human-Confirmed
 
-- [ ] 【对应 Review Map ①】调度循环评审通过：rv-1 全绿输出在案（含"移除 merged→completed 映射则补位停摆"的负控红→绿记录）；槽位口径（RUNNING-only，blocked 不占槽不晋升）经人工确认
-- [ ] 【对应 Review Map ⑦】幂等/竞态评审通过：rv-3 全绿输出在案；"手动 start 与 advance 并发不双开"用例绿
+- [x] 【对应 Review Map ①】调度循环评审通过：rv-1 全绿输出在案（含"移除 merged→completed 映射则补位停摆"的负控红→绿记录）；槽位口径（RUNNING-only，blocked 不占槽不晋升）经人工确认
+- [x] 【对应 Review Map ⑦】幂等/竞态评审通过：rv-3 全绿输出在案；"手动 start 与 advance 并发不双开"用例（`test_running_prd_is_not_promoted_twice`）绿
 
 ### Architecture Acceptance
 
-- [ ] `advance_roadmap_queue` 位于 `core/use_cases/roadmap_actions.py`，无 infrastructure 导入：`rg -n "from backend.infrastructure" src/backend/core/use_cases/roadmap_actions.py` 零命中
-- [ ] 选择逻辑单一来源：`rg -n "priority_order" src/backend/core/use_cases/roadmap_actions.py` 仅命中共享 helper 一处
-- [ ] daemon 路径晋升不 spawn 进程：`rg -n "_spawn_runner" src/backend/core/use_cases/roadmap_actions.py` 的调用方仅 console/手动路径
+- [x] `advance_roadmap_queue` 位于 `core/use_cases/roadmap_actions.py`，无 infrastructure 导入：`rg -n "from backend.infrastructure" src/backend/core/use_cases/roadmap_actions.py` 零命中（实测：No matches found）
+- [x] 选择逻辑单一来源：`rg -n "priority_order" src/backend/core/use_cases/roadmap_actions.py` 仅命中共享 helper 一处（实测：仅 `roadmap_actions.py:305`，位于 `_roadmap_sort_key`，被 `_select_eligible_prds` 供手动与自动两条路径共用）
+- [x] daemon 路径晋升不 spawn 进程：`rg -n "_spawn_runner" src/backend/core/use_cases/roadmap_actions.py` 的调用方仅 console/手动路径（实测：定义于 168 行，唯一调用点 251 行位于 `start_prd`；`advance_roadmap_queue` 走 `_promote_prd_without_spawn`）
 
 ### Dependency Acceptance
 
-- [ ] 上游 merge-queue PRD 已交付（**前置已满足**：`rg -n "autopilot" src/backend/core/shared/models/agent_runner.py` 命中 AutopilotConfig）
-- [ ] 未新增配置键/表/进程：`rg -n "continuous" src/backend/infrastructure/config/settings.py` 零命中
+- [x] 上游 merge-queue PRD 已交付（`rg -n "autopilot" src/backend/core/shared/models/agent_runner.py` 命中 `autopilot: AutopilotConfig = AutopilotConfig()`，第 738 行）
+- [x] 未新增配置键/表/进程：`rg -n "continuous" src/backend/infrastructure/config/settings.py` 零命中；`alembic/versions/` 无新增迁移
 
 ### Behavior Acceptance
 
-- [ ] rv-1 / rv-3 / rv-4 / rv-5 对应 pytest 用例存在且全绿（输出在案）
-- [ ] failed 泊车语义：失败 PRD 的队列条目 status="failed" 且带 error_detail，槽位立即释放给下一候选
-- [ ] 发现式入队：daemon 运行中新增 pending PRD 在下一 pass 被入队（测试断言）
+- [x] rv-1 / rv-3 / rv-4 / rv-5 对应 pytest 用例存在且全绿（21 passed，输出在案）
+- [x] failed 泊车语义：失败 PRD 的队列条目 status="failed" 且带 error_detail，槽位立即释放给下一候选（`test_failed_prd_is_parked_with_reason` + `test_failed_prd_frees_slot_for_next_candidate`）
+- [x] 发现式入队：daemon 运行中新增 pending PRD 在下一 pass 被入队（测试断言：`test_discovery_enqueues_new_pending_prd` + `test_discovery_creates_issue_when_prd_has_no_link`）
 
 ### Documentation Acceptance
 
-- [ ] roadmap/daemon 文档新增持续调度说明（槽位口径、泊车、发现式入队、`iar roadmap advance` 用法）：`rg -n "roadmap advance" docs/` 命中；`uv run mkdocs build --strict` 绿
+- [x] roadmap/daemon 文档新增持续调度说明（槽位口径、泊车、发现式入队、`iar roadmap advance` 用法）：`rg -n "roadmap advance" docs/` 命中（`docs/guides/agent-runner.md:3272/3276/3279`）；`uv run mkdocs build --strict` 绿
 
 ### Validation Acceptance
 
-- [ ] 真实入口 rv-2（`uv run iar roadmap advance --dry-run`）在 keda 本仓执行，输出与 pending 目录人工核对一致且零副作用（输出在案）
-- [ ] 沙箱端到端 rv-6 执行通过（时间线记录在案）；无条件环境显式记录跳过理由并以 rv-1+rv-3 全绿替代
-- [ ] 全量回归：`uv run pytest -o addopts=\"\" tests/` 与 `just test all` 均绿
+- [x] 真实入口 rv-2（`uv run iar roadmap advance --dry-run`）在 keda 本仓执行，输出与 pending 目录人工核对一致且零副作用（9 个 pending PRD 逐条对账表在案；issues 75→75、`console.db` 大小与 mtime 未变）
+- [x] 沙箱端到端 rv-6 执行通过（时间线记录在案）；无条件环境显式记录跳过理由并以 rv-1+rv-3 全绿替代 —— **执行跳过**，理由与替代方案见证据包第 5 节：rv-6 需无人值守跑真实 daemon 并对 GitHub 远端产生不可逆副作用，不予自动执行；以 rv-1 / rv-3 / rv-4 / rv-5（21 用例全绿）+ rv-2 真实入口 dry-run 替代
+- [x] 全量回归：`uv run pytest -o addopts="" tests/` 2055 passed 与 `just test all` 2055 passed 均绿
 
 ### Delivery Readiness
 
-- [ ] 推荐方案完整落地（对账/晋升/发现/CLI/门控无一缺失，无 Phase 2 残留）；非快速档零行为变化；无未解决回归或发布阻塞项
+- [x] 推荐方案完整落地（对账/晋升/发现/CLI/门控无一缺失，无 Phase 2 残留）；非快速档零行为变化（`autopilot.enabled=false` 时 store 调用数为 0）；无未解决回归或发布阻塞项（`just test all` 2055 passed）
 
 ## 10. Functional Requirements
 

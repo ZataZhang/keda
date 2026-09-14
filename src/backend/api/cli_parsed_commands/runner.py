@@ -134,6 +134,10 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             output_view=daemon_output_view,
             reclaim_stale_running=ctx.runner_settings.daemon.reclaim_stale_running,
             reclaim_ttl_seconds=ctx.runner_settings.daemon.reclaim_ttl_seconds,
+            # Continuous roadmap scheduling: injected as a factory so core never
+            # constructs infrastructure objects itself. Repositories that did not
+            # opt into the fast lane (autopilot.enabled) skip the stage entirely.
+            roadmap_store_factory=_cli.create_roadmap_store,
         )
     finally:
         _cli.release_daemon_locks(acquired_daemon_locks)
