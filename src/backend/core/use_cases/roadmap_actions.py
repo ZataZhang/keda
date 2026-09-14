@@ -198,7 +198,7 @@ def start_prd(
         Action result with the new state.
     """
     context = _resolve_context(repo_id, contexts)
-    prds = scan_roadmap_prds(context.repo_path, include_archived=False)
+    prds = scan_roadmap_prds(context.repo_path, include_archived=False).prds
     prd = next((p for p in prds if p.prd_path == prd_path), None)
     if prd is None:
         raise RoadmapActionError(f"PRD not found or not pending: {prd_path}")
@@ -320,7 +320,7 @@ def start_global_roadmap(
 
     context = _resolve_context(repo_id, contexts)
     github_client = github_client_factory(context.repo_path)
-    prds = scan_roadmap_prds(context.repo_path, include_archived=False)
+    prds = scan_roadmap_prds(context.repo_path, include_archived=False).prds
     block_reasons = evaluate_roadmap_dependencies(
         prds,
         github_client=github_client,

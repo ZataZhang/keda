@@ -121,7 +121,7 @@ export class AgentRunnerMonitorPage {
   }
 
   async goto(): Promise<void> {
-    await this.page.goto('/dashboard')
+    await this.page.goto('/app/dashboard')
   }
 
   async expectHeading(): Promise<void> {

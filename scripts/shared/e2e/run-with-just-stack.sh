@@ -205,7 +205,7 @@ export PLAYWRIGHT_BASE_URL="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:$FRONTEND_PU
 # Admin Vite dev server binds to localhost (IPv6 loopback on macOS), so use
 # localhost rather than 127.0.0.1 to avoid ERR_CONNECTION_REFUSED.
 export PLAYWRIGHT_ADMIN_BASE_URL="${PLAYWRIGHT_ADMIN_BASE_URL:-http://localhost:$FRONTEND_ADMIN_PORT}"
-export PLAYWRIGHT_HEALTH_URL="${PLAYWRIGHT_HEALTH_URL:-http://127.0.0.1:$BACKEND_PORT/health}"
+export PLAYWRIGHT_HEALTH_URL="${PLAYWRIGHT_HEALTH_URL:-http://127.0.0.1:$BACKEND_PORT/api/v1/agent-runner/health}"
 export PLAYWRIGHT_API_BASE_URL="${PLAYWRIGHT_API_BASE_URL:-http://127.0.0.1:$BACKEND_PORT}"
 
 # Put this run's artifacts under a single timestamped directory so multiple

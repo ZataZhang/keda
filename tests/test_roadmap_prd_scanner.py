@@ -29,11 +29,11 @@ def test_scan_finds_pending_and_archived_prds(tmp_path: Path) -> None:
         "# PRD: Archived Bug\n\n## Acceptance Checklist\n- [x] item 1\n",
     )
 
-    prds = scan_roadmap_prds(tmp_path, include_archived=False)
+    prds = scan_roadmap_prds(tmp_path, include_archived=False).prds
     assert len(prds) == 1
     assert prds[0].status == "pending"
 
-    all_prds = scan_roadmap_prds(tmp_path, include_archived=True)
+    all_prds = scan_roadmap_prds(tmp_path, include_archived=True).prds
     assert len(all_prds) == 2
     archived = next(p for p in all_prds if p.status == "archived")
     assert archived.state == RoadmapPrdState.ARCHIVED
@@ -46,7 +46,7 @@ def test_extracts_title_and_priority(tmp_path: Path) -> None:
         "tasks/pending/P0-FEAT-20260101-critical.md",
         "# PRD: Critical Feature\n\n## Acceptance Checklist\n- [ ] a\n",
     )
-    prds = scan_roadmap_prds(tmp_path)
+    prds = scan_roadmap_prds(tmp_path).prds
     assert len(prds) == 1
     assert prds[0].title == "Critical Feature"
     assert prds[0].priority == "P0"
@@ -63,7 +63,7 @@ def test_extracts_issue_url_and_number(tmp_path: Path) -> None:
             "## Acceptance Checklist\n- [ ] a\n"
         ),
     )
-    prds = scan_roadmap_prds(tmp_path)
+    prds = scan_roadmap_prds(tmp_path).prds
     assert len(prds) == 1
     assert prds[0].issue_number == 42
     assert prds[0].issue_url == "https://github.com/org/repo/issues/42"
@@ -80,7 +80,7 @@ def test_placeholder_issue_is_ignored(tmp_path: Path) -> None:
             "## Acceptance Checklist\n- [ ] a\n"
         ),
     )
-    prds = scan_roadmap_prds(tmp_path)
+    prds = scan_roadmap_prds(tmp_path).prds
     assert len(prds) == 1
     assert prds[0].issue_number is None
     assert prds[0].issue_url is None
@@ -99,7 +99,7 @@ def test_counts_acceptance_progress(tmp_path: Path) -> None:
             "- [X] also done\n"
         ),
     )
-    prds = scan_roadmap_prds(tmp_path)
+    prds = scan_roadmap_prds(tmp_path).prds
     assert len(prds) == 1
     assert prds[0].acceptance_total == 3
     assert prds[0].acceptance_checked == 2
@@ -123,7 +123,7 @@ def test_parses_delivery_dependencies(tmp_path: Path) -> None:
         "tasks/pending/P1-FEAT-20260101-upstream.md",
         "# PRD: Upstream\n\n## Acceptance Checklist\n- [ ] a\n",
     )
-    prds = scan_roadmap_prds(tmp_path)
+    prds = scan_roadmap_prds(tmp_path).prds
     prd = next(p for p in prds if p.prd_path == "tasks/pending/P1-FEAT-20260101-deps.md")
     kinds = {dep.kind for dep in prd.delivery_dependencies}
     assert RoadmapDependencyKind.ISSUE in kinds
@@ -142,11 +142,35 @@ def test_unresolved_prd_dependency_is_marked(tmp_path: Path) -> None:
             "- Depends on tasks/issues: tasks/pending/P1-FEAT-20260101-does-not-exist.md\n"
         ),
     )
-    prds = scan_roadmap_prds(tmp_path)
+    prds = scan_roadmap_prds(tmp_path).prds
     assert len(prds) == 1
     assert all(
         dep.kind is RoadmapDependencyKind.UNRESOLVED for dep in prds[0].delivery_dependencies
     )
+
+
+def test_invalid_gate_type_prd_is_skipped_not_fatal(tmp_path: Path) -> None:
+    """单条脏数据（非法 Gate type）应被跳过留痕，其余 PRD 照常返回。"""
+    _write_prd(
+        tmp_path,
+        "tasks/pending/P1-FEAT-20260101-healthy.md",
+        "# PRD: Healthy\n\n## Acceptance Checklist\n- [ ] a\n",
+    )
+    _write_prd(
+        tmp_path,
+        "tasks/archive/P1-FEAT-20260101-dirty-gate.md",
+        (
+            "# PRD: Dirty Gate\n\n"
+            "## Delivery Dependencies\n"
+            "- Gate type: research-gate（需先完成调研，再决定是否进入实现）\n"
+        ),
+    )
+
+    result = scan_roadmap_prds(tmp_path, include_archived=True)
+    assert [prd.prd_path for prd in result.prds] == ["tasks/pending/P1-FEAT-20260101-healthy.md"]
+    assert len(result.skipped) == 1
+    assert result.skipped[0].prd_path == "tasks/archive/P1-FEAT-20260101-dirty-gate.md"
+    assert "Gate type" in result.skipped[0].reason
 
 
 def test_archived_prd_dependency_is_resolved_even_when_hidden(tmp_path: Path) -> None:
@@ -170,7 +194,7 @@ def test_archived_prd_dependency_is_resolved_even_when_hidden(tmp_path: Path) ->
         ),
     )
 
-    pending_only_prds = scan_roadmap_prds(tmp_path, include_archived=False)
+    pending_only_prds = scan_roadmap_prds(tmp_path, include_archived=False).prds
     pending_prd = next(
         prd
         for prd in pending_only_prds

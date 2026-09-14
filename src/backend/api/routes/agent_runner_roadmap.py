@@ -136,7 +136,8 @@ def _build_roadmap_response(
     """Scan PRDs and resolve live GitHub state."""
     context = _resolve_context(repo_id)
     github_client = create_github_client(context.repo_path)
-    prds = scan_roadmap_prds(context.repo_path, include_archived=include_archived)
+    scan_result = scan_roadmap_prds(context.repo_path, include_archived=include_archived)
+    prds = scan_result.prds
     block_reasons = evaluate_roadmap_dependencies(
         prds,
         github_client=github_client,
@@ -188,6 +189,7 @@ def _build_roadmap_response(
         )
     return {
         "prds": [_serialize(p) for p in enriched],
+        "skipped": [_serialize(s) for s in scan_result.skipped],
         "repo_id": repo_id,
         "include_archived": include_archived,
         "scanned_at": _now_iso(),

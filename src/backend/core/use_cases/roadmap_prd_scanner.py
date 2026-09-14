@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +39,32 @@ _PRIORITY_RE = re.compile(r"^(P\d+)-")
 
 #: Default directories to scan, relative to the repository root.
 _DEFAULT_PRD_DIRS = ("tasks/pending", "tasks/archive")
+
+
+@dataclass(frozen=True)
+class RoadmapSkippedPrd:
+    """单条解析失败而被跳过的 PRD 记录。
+
+    Attributes:
+        prd_path: 相对仓库根目录的 PRD 文件路径。
+        reason: 跳过原因（通常为解析异常的消息文本）。
+    """
+
+    prd_path: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class RoadmapScanResult:
+    """``scan_roadmap_prds`` 的返回结构。
+
+    Attributes:
+        prds: 成功解析的 PRD 模型对象列表。
+        skipped: 解析失败被跳过的 PRD 记录，用于在响应中留痕排查。
+    """
+
+    prds: list[RoadmapPrd]
+    skipped: list[RoadmapSkippedPrd]
 
 
 def _resolve_prd_directories(repo_path: Path, dirs: Sequence[str] | None) -> list[Path]:
@@ -184,8 +211,12 @@ def scan_roadmap_prds(
     *,
     include_archived: bool = False,
     dirs: Sequence[str] | None = None,
-) -> list[RoadmapPrd]:
-    """Scan PRD files and return roadmap model objects.
+) -> RoadmapScanResult:
+    """扫描 PRD 文件并返回路线图扫描结果。
+
+    单条 PRD 的 ``Delivery Dependencies`` 解析失败时不会让整个扫描失败：
+    该条会被跳过、记录 WARNING 日志，并进入返回结果中的 ``skipped`` 列表
+    （含路径与原因），其余 PRD 照常返回。
 
     Args:
         repo_path: Repository root path.
@@ -193,9 +224,10 @@ def scan_roadmap_prds(
         dirs: Optional explicit directories to scan.
 
     Returns:
-        List of ``RoadmapPrd`` objects. Issue numbers and state are left as
-        parsed from the file; callers should resolve live GitHub state via
-        :mod:`roadmap_state_resolver`.
+        ``RoadmapScanResult``：``prds`` 为成功解析的 ``RoadmapPrd`` 列表；
+        ``skipped`` 为被跳过的条目（路径 + 原因）。Issue numbers and state are
+        left as parsed from the file; callers should resolve live GitHub state
+        via :mod:`roadmap_state_resolver`.
     """
     dependency_index_dirs = _resolve_prd_directories(repo_path, dirs)
     target_dirs = dependency_index_dirs
@@ -229,6 +261,7 @@ def scan_roadmap_prds(
 
     # Third pass: build RoadmapPrd objects.
     prds: list[RoadmapPrd] = []
+    skipped_prds: list[RoadmapSkippedPrd] = []
     for target_dir, md_path in candidate_files:
         relative_path = md_path.relative_to(repo_path).as_posix()
         try:
@@ -240,7 +273,13 @@ def scan_roadmap_prds(
         issue_url = _extract_issue_url(prd_text)
         issue_number = prd_path_to_issue_number.get(relative_path)
         acceptance_checked, acceptance_total = _parse_acceptance_progress(prd_text)
-        delivery_decl = parse_delivery_dependencies(prd_text)
+        try:
+            delivery_decl = parse_delivery_dependencies(prd_text)
+        except ValueError as exc:
+            # 单条脏数据只跳过该条并留痕，不让整个扫描端点瘫痪。
+            skipped_prds.append(RoadmapSkippedPrd(prd_path=relative_path, reason=str(exc)))
+            _logger.warning("Skipping PRD %s: %s", relative_path, exc)
+            continue
         dependencies = _build_dependencies(relative_path, delivery_decl, prd_path_to_issue_number)
         status = "archived" if "archive" in target_dir.name else "pending"
         updated_at = datetime.fromtimestamp(md_path.stat().st_mtime, tz=timezone.utc).isoformat(
@@ -266,4 +305,4 @@ def scan_roadmap_prds(
             )
         )
 
-    return prds
+    return RoadmapScanResult(prds=prds, skipped=skipped_prds)

@@ -65,7 +65,7 @@ function resolveModeDefaults() {
       stackUpCommand: process.env.PLAYWRIGHT_STACK_UP_COMMAND ?? 'docker compose up -d --wait',
       stackDownCommand: process.env.PLAYWRIGHT_STACK_DOWN_COMMAND ?? 'docker compose down',
       readinessUrlList: [
-        process.env.PLAYWRIGHT_HEALTH_URL ?? 'http://127.0.0.1:8000/health',
+        process.env.PLAYWRIGHT_HEALTH_URL ?? 'http://127.0.0.1:8000/api/v1/agent-runner/health',
         process.env.PLAYWRIGHT_BASE_URL  ?? 'http://127.0.0.1:8080',
       ],
     }
@@ -75,7 +75,7 @@ function resolveModeDefaults() {
     stackUpCommand: process.env.PLAYWRIGHT_STACK_UP_COMMAND ?? '',
     stackDownCommand: process.env.PLAYWRIGHT_STACK_DOWN_COMMAND ?? '',
     readinessUrlList: [
-      process.env.PLAYWRIGHT_HEALTH_URL ?? 'http://127.0.0.1:8000/health',
+      process.env.PLAYWRIGHT_HEALTH_URL ?? 'http://127.0.0.1:8000/api/v1/agent-runner/health',
       process.env.PLAYWRIGHT_BASE_URL  ?? 'http://127.0.0.1:3000',
     ],
   }

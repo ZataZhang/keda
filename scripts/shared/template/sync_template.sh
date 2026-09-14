@@ -375,6 +375,15 @@ _is_always_skipped() {
 _is_upstream_owned() {
     local p="$1"
     case "$p" in
+        # 例外必须排在下面的 glob 之前——case 取首个匹配。
+        # keda 的后端没有根路径 /health（只有 /api/v1/agent-runner/health），
+        # E2E 就绪探针默认值必须按项目后端适配；模板自带的 /health 与模板
+        # 自己的后端一致，无法为派生项目做权威版本（同 pytest.ini 判例）。
+        # 健康默认值相关文件归项目所有，避免 sync 把默认值回滚成 /health。
+        scripts/shared/e2e/run-with-just-stack.sh) return 1 ;;
+        tests/playwright-e2e/scripts/stack-control.mjs) return 1 ;;
+        tests/playwright-e2e/.env.e2e.example) return 1 ;;
+        tests/playwright-e2e/README.md) return 1 ;;
         # Shared justfile recipes (the project-private justfile imports this)
         justfile.shared) return 0 ;;
         # Shared shell / Python / bash utilities shipped with the template

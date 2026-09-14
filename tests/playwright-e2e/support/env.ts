@@ -109,10 +109,10 @@ export function getApiBaseUrl(): string {
  * URL checked by the global-setup readiness poller before tests start.
  *
  * Override: PLAYWRIGHT_HEALTH_URL
- * Default: same as getApiBaseUrl() + '/healthz'
+ * Default: same as getApiBaseUrl() + '/api/v1/agent-runner/health'
  */
 export function getHealthUrl(): string {
-  return process.env.PLAYWRIGHT_HEALTH_URL?.trim() ?? `${getApiBaseUrl()}/health`
+  return process.env.PLAYWRIGHT_HEALTH_URL?.trim() ?? `${getApiBaseUrl()}/api/v1/agent-runner/health`
 }
 
 // ── Credentials ───────────────────────────────────────────────────────────────

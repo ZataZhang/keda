@@ -259,6 +259,14 @@ README 明确写着「不要改动上层共享基础设施，除非要向上游�
 │   │   [修改]
 │   │   【总结】goto() 的 /dashboard 改为 /app/dashboard
 │   │   ⚠ 共享模板文件（page-objects/ 当前不在 project_skip_paths 内，需先按决策二敲定）
+│   ├── support/api-client.ts
+│   │   [修改]（实现期发现的清单外文件，2026-09-14 验证时确认）
+│   │   【总结】login() 的 /auth/login 改为 /api/auth/login。后端 local_auth
+│   │   router 挂载在 /api 前缀下（真实路径 /api/auth/login），api-client 的
+│   │   无前缀路径恒 404，导致依赖 api fixture 的 roadmap-realistic /
+│   │   agent-runner-monitor 全组失败（该缺陷在主仓同样存在，此前被缺陷 B 的
+│   │   404 掩盖）。文件自带 TODO：'Adapt login() to match your application's
+│   │   auth endpoint'，本改动即完成该适配。文件不在模板同步面内。
 │   └── tests/
 │       [修改]
 │       【总结】6 个 spec 的控制台路由加 /app/ 前缀
@@ -509,9 +517,10 @@ No interactive prototype file changes in this PRD.
 | ID | 决策问题 | Chosen | Rejected | Rationale |
 |---|---|---|---|---|
 | D-01 | 扫描器遇到非法 PRD 怎么办 | 跳过该条 + WARNING + `skipped` 清单 | 整端 500；静默丢弃；静默降级为 none | 500 让整页不可用；静默丢弃不可观测；降级为 none 是篡改作者意图 |
-| D-02 | 共享模板文件怎么改 | 待人工确认（决策二：改上游 / 登记私有 / 只改本地） | — | 待定，见 §2 决策二 |
+| D-02 | 共享模板文件怎么改 | 在 `_is_upstream_owned` 登记项目所有权（2026-09-14 人工确认） | 原方案一（改上游默认值）：模板自带 `/health` 与模板自己的后端一致，改成 keda 路径会破坏模板；原方案二（`project_skip_paths`）：实测对 upstream-owned 文件无效，默认同步模式照样列出 | 沿用 `pytest.ini`/`ruff.toml` 判例：健康探针默认值必须按项目后端适配，模板无法做权威版本。登记 4 个文件（run-with-just-stack.sh、stack-control.mjs、.env.e2e.example、README.md）；同一改动已提交模板仓库本地 clone（289ac16），push 合入后闭环。env.ts 与 AgentRunnerMonitorPage.ts 不在同步面内，无需登记 |
 | D-03 | 缺陷 A 是改默认值还是加后端路由 | 改默认值指向既有 `/api/v1/agent-runner/health` | 新增 `/health` 路由 | 不为迁就测试脚手架给生产加端点 |
 | D-04 | 缺陷 B 是改测试还是改路由 | 改测试，加 `app/` 前缀 | 改前端路由去掉 `app/` 段 | `app/` 段是静态导出深层路由能被解析的前提，动它会波及生产 |
+| D-05 | 归档 PRD 的非法 Gate type 判为哪个合法值 | `hard` | `soft`；`none` | 原文 "需先完成调研，再决定是否进入实现" 中 "需先" 表达了硬性前置（实现开始前调研必须完成），按 §12 风险表 "拿不准时取更严的一侧" 判为 hard；该 PRD 无可物化的 depends-on（唯一引用 freshai #23 标注"非硬依赖"），hard 不会引入额外的机械阻塞 marker |
 
 ### Final Reconciliation
 

@@ -180,7 +180,7 @@ test.describe('console pages smoke (mocked API)', () => {
     page,
   }) => {
     await mockConsoleApi(page)
-    await page.goto('/dashboard')
+    await page.goto('/app/dashboard')
     await expect(
       page.getByRole('heading', { name: 'Agent Runner 管理终端' }),
     ).toBeVisible()
@@ -212,7 +212,7 @@ test.describe('console pages smoke (mocked API)', () => {
 
     // 第一次 dismiss 确认框 → 不应发请求。
     page.once('dialog', (dialog) => void dialog.dismiss())
-    await page.goto('/dashboard')
+    await page.goto('/app/dashboard')
     await page.getByRole('button', { name: '重试' }).click()
     expect(actionRequestBody).toBeNull()
 
@@ -226,7 +226,7 @@ test.describe('console pages smoke (mocked API)', () => {
 
   test('processes page lists managed processes', async ({ page }) => {
     await mockConsoleApi(page)
-    await page.goto('/processes')
+    await page.goto('/app/processes')
     await expect(page.getByRole('heading', { name: '托管进程' })).toBeVisible()
     await expect(page.getByText('4242')).toBeVisible()
     await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
@@ -234,14 +234,14 @@ test.describe('console pages smoke (mocked API)', () => {
 
   test('stats page shows completion table', async ({ page }) => {
     await mockConsoleApi(page)
-    await page.goto('/stats')
+    await page.goto('/app/stats')
     await expect(page.getByRole('heading', { name: '完成度统计' })).toBeVisible()
     await expect(page.getByText('70%')).toBeVisible()
   })
 
   test('repositories page shows registry and audit log', async ({ page }) => {
     await mockConsoleApi(page)
-    await page.goto('/repositories')
+    await page.goto('/app/repositories')
     await expect(page.getByRole('heading', { name: '项目接入' })).toBeVisible()
     await expect(page.getByText('/Users/me/code/keda')).toBeVisible()
     await expect(page.getByText('retry_failed')).toBeVisible()
