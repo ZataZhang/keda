@@ -25,23 +25,24 @@ concurrency:
 
 jobs:
   install-check:
-    name: install.sh plan + editable install on ${{ matrix.os }} / py${{ matrix.python-version }}
+    name: install.sh plan + editable install on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.11", "3.12"]
     env:
       KEDA_REPO: ${{ github.repository }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # install.sh 的版本分支只有 ">= 3.11 / < 3.11" 一条线，3.11 与 3.12 走同一
+      # 代码路径，第二个版本档零信息量，故固定 3.12；< 3.11 分支由 stock-python 档覆盖。
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
