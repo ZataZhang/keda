@@ -1,9 +1,24 @@
 # PRD: Roadmap 持续调度：完成检测、队列自动晋升与失败泊车
 
-> ⛔ **交付前置**：排在 `P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile` 之后开工（gate=hard）。
+> ✅ **交付前置**：唯一上游 `P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile` **已交付归档**（`autopilot.enabled` 门控已在树中），本 PRD 已解锁可开工。交付顺序仍为 merge-queue 在前——先有自动合并，"做完补位"才闭环。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
+> ⬜ **验收状态**：未开工。
+> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+
 > 本 PRD 分两个阅读高度：Part A 供人审（判断要不要做、哪里必须人工确认），Part B 供执行器（怎么做）。人审只需读 Part A，按 Human Review Map 指到的点再下钻 Part B。
+
+## Feature Overview (功能一览)
+
+> 本块是 §10 Functional Requirements 的投影，**§10 是唯一事实源**。
+
+- **持续调度循环**（FR-1、FR-2、FR-6）：daemon 每轮 pass 先对账（已合并/已归档→completed、失败→failed 泊车），再按 `max_parallel` 槽位补位晋升；快速档仓库随 `autopilot.enabled` 自动生效，非快速档零变化。
+- **发现式入队**（FR-3）：`tasks/pending/` 新增的合格 PRD 下一轮自动入队，依赖每轮重算、上游合并后下游自动解锁。
+- **统一选择逻辑**（FR-4）：排序复用从 `start_global_roadmap` 提取的共享 helper，手动与自动路径行为一致。
+- **标签驱动晋升**（FR-5）：daemon 内晋升只建/复用 Issue + 打 `agent/ready`，不 spawn 独立进程。
+- **一次性 CLI 入口**（FR-7）：`iar roadmap advance [--dry-run]` 可手动触发一轮调度或零副作用演练"下一轮会发生什么"。
+- **幂等防护**（FR-8）：重复调用零写操作，与 console 手动 start 并发不双开。
+- **范围边界**（§11）：失败不自动重试、不碰 `agent/waiting`、不跨仓库调度、不改 console 手动路径与前端、不新增配置键/表/进程。
 
 # Part A · 人审层 (Review Layer)
 
@@ -104,9 +119,9 @@ uv run iar roadmap advance
 - `src/backend/core/use_cases/roadmap_prd_scanner.py`：`scan_roadmap_prds`（PRD 文件为真相源）；`roadmap_dependencies.py`：`evaluate_roadmap_dependencies`（依赖对 GitHub 状态归一 + 环检测）；`roadmap_state_resolver.py`：`resolve_roadmap_states`（含 MERGED/ARCHIVED/FAILED/WAITING 全枚举）。
 - `src/backend/core/shared/interfaces/runner_console.py`：`IRoadmapStore`（`enqueue_roadmap` / `list_roadmap_queue(status=...)` / `update_roadmap_queue_status(entry_id, status, finished_at, error_detail)`）、`RoadmapQueueEntry`（status 词表注释即 `queued / running / completed / failed`）。
 - `src/backend/core/use_cases/run_agent_daemon.py`：daemon 轮询壳（Phase -1 reclaim → Phase 0 deliberation → Phase 1 rework-prd → Phase 2 构建，调度阶段插在这里）。
-- `src/backend/api/cli.py`（daemon 装配，`run_agent_daemon(` 调用点）与 `src/backend/api/cli_typer.py`（typer 子命令组惯例：`daemon_app` / `worktree_app` / `loop_app`，roadmap 组尚不存在）。
-- `src/backend/engines/agent_runner/factory.py`：`create_roadmap_store` / `create_github_client`（API 层已从 engines 工厂取 store，daemon 装配沿用同一工厂，api→engines 合法）。
-- 前端 `frontend/src/components/roadmap/roadmap-list.tsx`：状态映射已含 `waiting` 等全枚举，轮询展示，无需改动。
+- `src/backend/api/cli.py`（daemon 装配参数注入）与 `src/backend/api/cli_parsed_commands/runner.py`（`run_agent_daemon(` 实际调用点）；typer 侧命令树在 `src/backend/api/cli_typer_app.py` + 分域模块（`cli_typer_runner.py` / `cli_typer_loop.py` / `cli_typer_registry.py` 等，`cli_typer.py` 已是 re-export 门面），roadmap 分域模块尚不存在。
+- `src/backend/engines/agent_runner/factory.py`：`create_roadmap_store` / `create_github_client`（现为 re-export 门面，实现在 `factories/` 包）。当前 api→engines 直连仍合法；待 `P1-REFACTOR-20260703-184226-api-engines-layer-migration` 交付后须改走 core 层，见 §8 与 Executor Drift Guard 后的说明。
+- 前端 `frontend-public/components/roadmap/roadmap-list.tsx`（frontend-template-migration 交付后前端为 `frontend-admin/` 与 `frontend-public/` 双应用，roadmap 页在 public 侧）：状态映射已含 `waiting` 等全枚举，轮询展示，无需改动。
 
 **架构约束**：调度逻辑在 `core/use_cases/`，只依赖 `IRoadmapStore` / `IGitHubClient` 端口；store 构造在 engines 工厂；CLI 装配在 `api/`。
 
@@ -114,7 +129,8 @@ uv run iar roadmap advance
 
 **相关 PRD（已检查 `tasks/pending/` 与 `tasks/archive/`）**：
 
-- **依赖（pending，同组）**：`P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile`——持续调度以它交付的 `autopilot.enabled` 为门控开关，且"做完自动补位"只有在合并也自动化时才闭环；两者还共享 daemon pass 结构，串行交付避免冲突。硬依赖。
+- **依赖（已交付归档）**：`P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile`——持续调度以它交付的 `autopilot.enabled` 为门控开关，且"做完自动补位"只有在合并也自动化时才闭环；两者还共享 daemon pass 结构，串行交付避免冲突。上游已交付（`AutopilotConfig` 位于 `src/backend/core/shared/models/agent_runner.py`），硬依赖已满足。
+- **相关（pending，交付顺序约束）**：`P1-REFACTOR-20260703-184226-api-engines-layer-migration`——它要清零 `api/ → engines/` 直连并恢复严格架构门禁，与本 PRD 的 daemon 装配改动面重叠。不宜并行改 `cli.py` 装配；先后顺序约束见 §8。
 - **被依赖（pending，同组）**：`P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance` 将在本 PRD 的调度循环上挂 waiting 重晋升。
 - **相关（archive）**：`20260521-104408-...-multi-repository-agent-runner`（多仓 contexts 结构）；roadmap 相关归档 PRD 定义了现有 scanner/resolver/actions 分层，本 PRD 沿用不改。
 - **无重复**：pending 其余 PRD（nightly-cleanup-loop、memory/session-persistence、verifier-gate、frontend-template-migration）与本 PRD 正交。
@@ -134,7 +150,7 @@ uv run iar roadmap advance
 - **核心机制**：`advance_roadmap_queue(context, github_client, store, *, dry_run=False) -> RoadmapAdvanceReport`，每次调用执行三步：
   1. **对账**：`list_roadmap_queue(repo_id, status="running")` 逐条对照 `resolve_roadmap_states` 结果——PRD 状态为 `MERGED` 或 `ARCHIVED` → `update_roadmap_queue_status(status="completed", finished_at=now)`；`FAILED` → `status="failed"` + `error_detail`（泊车，不重试）；`BLOCKED` 保持 running 记录但**不计入槽位**（等人工 `blocked-continue`）；`WAITING` 本 PRD 不碰。
   2. **槽位核算**：`free = max_parallel(来自 RoadmapSettingsEntry，无则默认 1) - resolve 结果中 state==RUNNING 的数量`（沿用 `start_global_roadmap` 的口径：supervising/review/blocked 不占槽，槽位约束的是"执行中 agent"，agent 进程总量另由 daemon `--concurrency` 兜底）。
-  3. **晋升与发现**：候选 = queued 条目对应的 PRD ∪ pending 目录新发现的合格 PRD（NOT_STARTED、无 block_reason、未在队列中）；用共享 helper 按 P0>P1>P2>P3 + 时间排序；取前 `free` 个——daemon 路径调用 `_create_issue_for_prd` 幂等建 Issue（复用其既有"已存在 Issue 则复用"判定）+ `_ensure_ready_label`，队列条目置 running（新发现者先 enqueue 再置 running）；超额候选 enqueue 为 queued。`dry_run=True` 时只产出报告不落任何变更。
+  3. **晋升与发现**：候选 = queued 条目对应的 PRD ∪ pending 目录新发现的合格 PRD（NOT_STARTED、无 block_reason、未在队列中）；用共享 helper 按 P0>P1>P2>P3 + 时间排序；取前 `free` 个——daemon 路径先查 `prd.issue_number`（scanner 解析 PRD 内回写的 Issue 链接）：非空则复用该 Issue、只补 `_ensure_ready_label`；为空才调用 `_create_issue_for_prd`（其底层 `create_issue_from_prd` 对已有 Issue 链接的 PRD 会拒绝，天然防双建），队列条目置 running（新发现者先 enqueue 再置 running）；超额候选 enqueue 为 queued。`dry_run=True` 时只产出报告不落任何变更。
 - **谁供给配置**：`max_parallel` 来自 console 已持久化的 roadmap 设置（`get_or_create_roadmap_settings` 缺省 1）；是否启用持续调度由 merge-queue PRD 的 `autopilot.enabled` 决定，本 PRD 不新增配置键。
 - **插入点**：`run_agent_daemon` 每仓 pass 中 Phase 2 之前（先补位再消费 ready，同一 pass 内即可启动新 PRD）；CLI 一次性入口 `iar roadmap advance`。
 - **主要状态变化**：queued 从死状态变为被持续消费；failed PRD 队列条目获得终态与原因。
@@ -153,7 +169,7 @@ uv run iar roadmap advance
 
 数据/控制流：daemon 每仓 pass → `advance_roadmap_queue`：`scan_roadmap_prds`（pending+archive）→ `evaluate_roadmap_dependencies` → `resolve_roadmap_states` → 对账 running 条目 → 槽位核算 → 共享 helper 选择候选 → 幂等晋升（建/复用 Issue + ready 标签 + 队列状态推进）→ 报告（started/queued/completed/failed/skipped）写 log。随后 daemon Phase 2 照常 `list_ready_issues` 消费，被晋升的 PRD 进入既有构建流水线。
 
-幂等要点：候选过滤排除"已在队列中（任意状态）且对应 Issue 仍 open"的 PRD；`_create_issue_for_prd` 的既有"同名 Issue 已存在则复用"判定挡住重复建 Issue；对账只对 running 条目做单向推进（running→completed/failed），重复 pass 无副作用；与 console 手动 `start_prd` 并发时，标签与 Issue 复用判定保证最坏情况是"同一 PRD 的队列里出现一条手动 + 一条自动记录"，不会双开执行（Issue 唯一，ready 标签唯一）。
+幂等要点：候选过滤排除"已在队列中（任意状态）且对应 Issue 仍 open"的 PRD；Issue 复用依据是 PRD 文件内回写的 Issue 链接——`create_issue_from_prd` 创建 Issue 后经 `write_issue_link` 回写（`src/backend/core/use_cases/create_issue_from_prd.py`），scanner 下轮解析出非空 `issue_number` 即复用；该函数对已有链接的 PRD 直接拒绝（要求 `--force`），是防双建的硬闸。注意：`_issue_already_exists`（位于 `loop_fire.py`）是 loop 场景专用判定（label + 日 token），与 roadmap 无关，勿复用。对账只对 running 条目做单向推进（running→completed/failed），重复 pass 无副作用；与 console 手动 `start_prd` 并发时，最坏情况是"同一 PRD 的队列里出现一条手动 + 一条自动记录"，不会双开执行（Issue 唯一，ready 标签唯一）。
 
 ### Change Impact Tree
 
@@ -168,10 +184,12 @@ uv run iar roadmap advance
 │       [修改]【总结】每仓 pass 在 Phase 2 前插入调度阶段（context.config.autopilot.enabled 门控，
 │           异常吞掉记 log 保证 daemon 存活，模式同既有 reclaim 阶段）
 ├── API
-│   ├── src/backend/api/cli.py
-│   │   [修改]【总结】daemon 装配注入 roadmap store（经 engines 工厂 create_roadmap_store），传入 run_agent_daemon
-│   └── src/backend/api/cli_typer.py
-│       [修改]【总结】新增 roadmap_app 子命令组与 advance 命令（--dry-run / --repo 过滤），装配模式仿 daemon_app
+│   ├── src/backend/api/cli.py + src/backend/api/cli_parsed_commands/runner.py
+│   │   [修改]【总结】daemon 装配注入 roadmap store（经 engines 工厂 create_roadmap_store）；
+│   │       run_agent_daemon 的实际调用点在 cli_parsed_commands/runner.py，注入参数两处同步
+│   └── src/backend/api/cli_typer_app.py + 新增 cli_typer_roadmap.py
+│       [修改]【总结】新增 roadmap 分域命令模块与 advance 命令（--dry-run / --repo 过滤），
+│           装配模式仿 cli_typer_loop 等既有分域模块（cli_typer.py 为 re-export 门面，无需改）
 ├── Tests
 │   ├── tests/test_roadmap_advance.py
 │   │   [新增]【总结】fake store + fake GitHub：对账映射、槽位口径、晋升顺序、发现式入队、
@@ -194,20 +212,24 @@ rg -n "def start_global_roadmap|priority_order|eligible" src/backend/core/use_ca
 # 2. daemon pass 阶段结构与"阶段异常不杀 daemon"的既有模式
 rg -n "Phase|except Exception" src/backend/core/use_cases/run_agent_daemon.py
 
-# 3. daemon 装配点与现有注入参数（store 注入仿此）
-rg -n "run_agent_daemon\(" src/backend/api/cli.py
+# 3. daemon 装配点与现有注入参数（store 注入仿此；实际调用点在 parsed_commands）
+rg -n "run_agent_daemon\(" src/backend/api/cli_parsed_commands/runner.py
+rg -n "run_agent_daemon" src/backend/api/cli.py
 
-# 4. typer 子命令组惯例（roadmap_app 仿 daemon_app / worktree_app）
-rg -n "daemon_app = |worktree_app = |add_typer" src/backend/api/cli_typer.py
+# 4. typer 分域命令模块惯例（roadmap 分域模块仿 cli_typer_loop / cli_typer_registry）
+rg -n "loop_app|registry_app|add_typer" src/backend/api/cli_typer_app.py src/backend/api/cli_typer_loop.py
 
-# 5. Issue 幂等建立判定（发现式入队依赖它防重复）
-rg -n "_issue_already_exists|already" src/backend/core/use_cases/create_issue_from_prd.py
+# 5. Issue 链接回写与防双建硬闸（发现式入队的幂等依据）
+rg -n "def write_issue_link|already has a GitHub Issue link" src/backend/core/use_cases/create_issue_from_prd.py
+rg -n "prd.issue_number" src/backend/core/use_cases/roadmap_actions.py
 
 # 6. 队列状态词表与 update 接口（completed/failed 已在词表内，勿新造状态）
 rg -n "queued / running|update_roadmap_queue_status" src/backend/core/shared/interfaces/runner_console.py
 ```
 
 若 `run_agent_daemon` 的参数注入方式与预期不符（例如 store 需经 factory 回调），沿既有 `github_client_factory` 回调模式加 `roadmap_store_factory`，保持 core 不构造 infrastructure 对象。
+
+若 `P1-REFACTOR-20260703-184226-api-engines-layer-migration` 已交付（架构检查恢复严格态、api 禁导 engines），daemon 装配不得在 api 层调用 engines 工厂取 store——改按迁移后既有的 core 编排模式封装（core 层用例/端口），其余设计不变。
 
 ### Flow Diagram
 
@@ -310,9 +332,10 @@ No external validation required; repository evidence was sufficient.
 - Depends on groups:
   - none
 - Depends on tasks/issues:
-  - P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile
+  - P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile（**已交付归档**，`AutopilotConfig` 已在 `src/backend/core/shared/models/agent_runner.py`，本 PRD 已解锁）
 - Gate type: hard
-- Notes: 门控开关 `autopilot.enabled` 由上游 PRD 交付；且"补位"只有在合并自动化后才闭环（否则槽位被等人合并的 PRD 永久占满）。两 PRD 均改 `run_agent_daemon` pass 结构，串行交付避免文本冲突。
+- Notes: 门控开关 `autopilot.enabled` 已随上游交付；"补位"只有在合并自动化后才闭环（否则槽位被等人合并的 PRD 永久占满），故交付顺序始终为 merge-queue 在前。
+- 同组顺序约束（软依赖）：`P1-REFACTOR-20260703-184226-api-engines-layer-migration`（pending）要清零 api→engines 直连并恢复严格门禁，与本 PRD 的 daemon 装配改动面重叠，不宜并行改 `cli.py` 装配。先做迁移则本 PRD 的 store 获取改走 core 层；先做本 PRD 则迁移时一并收编本 PRD 新增的装配代码。
 
 ## 9. Acceptance Checklist
 
@@ -329,7 +352,7 @@ No external validation required; repository evidence was sufficient.
 
 ### Dependency Acceptance
 
-- [ ] 上游 merge-queue PRD 已交付（`rg -n "autopilot" src/backend/core/shared/models/agent_runner.py` 命中 AutopilotConfig）
+- [ ] 上游 merge-queue PRD 已交付（**前置已满足**：`rg -n "autopilot" src/backend/core/shared/models/agent_runner.py` 命中 AutopilotConfig）
 - [ ] 未新增配置键/表/进程：`rg -n "continuous" src/backend/infrastructure/config/settings.py` 零命中
 
 ### Behavior Acceptance
@@ -358,7 +381,7 @@ No external validation required; repository evidence was sufficient.
 - **FR-2**：槽位核算 `free = max_parallel - RUNNING 数`（口径与 `start_global_roadmap` 一致）；晋升数严格 ≤ free。
 - **FR-3**：候选集 = queued 条目 ∪ pending 目录新发现的合格 PRD（NOT_STARTED、无 block_reason、未在队列）；依赖每轮重算，上游合并后下游自动出现在候选集。
 - **FR-4**：排序复用从 `start_global_roadmap` 提取的共享 helper（P0>P1>P2>P3 + 时间），两调用方行为一致。
-- **FR-5**：daemon 路径晋升 = 幂等建 Issue（复用既有存在性判定）+ `agent/ready` 标签 + 队列条目置 running；不 spawn 独立进程。
+- **FR-5**：daemon 路径晋升 = 幂等晋升 Issue——PRD 已回写 Issue 链接（`prd.issue_number` 非空）则复用该 Issue、仅补 `agent/ready` 标签；为空才走既有建 Issue 路径（其对"已有链接的 PRD"的拒绝校验兜底防双建）——+ 队列条目置 running；不 spawn 独立进程。
 - **FR-6**：daemon 每仓 pass 在 Phase 2 前执行调度阶段，仅当 `autopilot.enabled`；阶段内异常记 log 不杀 daemon。
 - **FR-7**：新增 `iar roadmap advance [--dry-run]`：dry-run 输出完整调度计划且零副作用；非 dry-run 执行一轮真实调度。
 - **FR-8**：重复调用幂等：零新状态时第二次调用无任何写操作；与 console 手动 start 并发不导致同一 PRD 双开。
