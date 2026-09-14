@@ -89,6 +89,12 @@ jobs:
 
   build-wheel:
     name: Build wheel with bundled console assets
+    # job 级 permissions 会整体覆盖顶层的 `contents: read`，所以这里必须
+    # 把 contents 一并写出。actions: write 是删 artifact 的 API 所需权限，
+    # 缺了它 prune 步骤只会拿到 403 并被 continue-on-error 静默吞掉。
+    permissions:
+      contents: read
+      actions: write
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: "3.12"
@@ -146,6 +152,20 @@ jobs:
           name: kedacode-wheel
           path: dist/*.whl
           if-no-files-found: error
+          # 默认 90 天保留会累积吃满账户 Actions 存储配额；retention-days
+          # 仅作 prune 步骤失败时的兜底。
+          retention-days: 7
+
+      - name: Prune old kedacode-wheel artifacts (keep latest 3)
+        # 数量封顶：无论 CI 频率多高，同前缀制品只保留最新 3 份。
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" --paginate \
+            --jq '.artifacts[] | select(.expired==false) | select(.name | startswith("kedacode-wheel")) | "\(.created_at)\t\(.id)"' \
+            | sort -r | tail -n +4 | cut -f2 \
+            | xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/{}"
 
   real-install:
     name: Real install + console probe on ${{ matrix.os }}
