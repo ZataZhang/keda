@@ -61,6 +61,15 @@
 - `just frontend dev` 与 `just frontend-public dev` 会委托给对应的 `just run` target，因此同样读取 `.env.run-state`，不会绕过已保存端口。
 - `just run docker` 会把 `.env.run-state` 作为最后一层 Compose 插值环境，动态设置三个主机端口；容器内部端口仍固定为 backend `8000`、admin `80`、public `3000`，不属于需要随机化的主机端口。
 
+## Run Process Guard
+
+会启动 dev server 或触发前端构建的 `just` 入口（`run`，以及项目私有 justfile 中直接调用 `pnpm` 的前端 recipe）在执行前会 source `scripts/shared/just/process_guard.sh`，为整棵进程树设置 `RLIMIT_NPROC` 上限，兜住构建工具 fork 失控的场景。
+
+- 触发背景：`next dev`(turbopack) 在陈旧 `.next` 产物下会无上限 spawn postcss worker，每个 worker 自带 `tailwindcss-oxide` 的 rayon 线程池（50–78MB / ~9 线程）且任务完成后不回收。实测一个页面请求即 spawn 159 个，数分钟可堆到数千进程、耗尽内存把机器压进 swap。撞上上限的代价只是该次构建失败，远小于整机失去响应。
+- 上限按 **当前用户进程数 + 余量** 动态计算：`RLIMIT_NPROC` 统计的是整个 uid 的进程数而非本 shell 的子进程，写死一个小值会连启动命令自身都 fork 不出来。
+- 余量默认 400；用 `RUN_PROCESS_HEADROOM=<n>` 调整，`RUN_PROCESS_HEADROOM=0` 关闭保护。
+- 脚本缺失、余量非法或 hard limit 低于目标值时，打印告警并放行，不阻断启动。
+
 ## Project Database Isolation
 
 `just copy <name>` 派生新项目时，会读取目标目录 `.env.local` 中的 `DATABASE_URL`。如果该 URL 使用 PostgreSQL，脚本会基于新项目名称派生一个唯一的数据库名（小写、下划线连接、不超过 63 字节），替换 URL 中的数据库名部分，并尝试连接 `postgres` 维护数据库自动创建该数据库；数据库创建后会立即执行 `uv run alembic upgrade head`。这样多个派生项目不会共享同一个数据库，且复制完成后已有完整迁移结构，避免迁移版本冲突或数据串扰。

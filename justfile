@@ -45,6 +45,13 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
     #!/usr/bin/env bash
     set -euo pipefail
 
+    # 进程数上限守护，兜住构建工具 fork 失控（背景与开关见脚本内注释）
+    process_guard_script="{{justfile_directory()}}/scripts/shared/just/process_guard.sh"
+    if [ -f "$process_guard_script" ]; then
+        source "$process_guard_script"
+        apply_process_limit_guard
+    fi
+
     target="all"
     frontend_dir="frontend-admin"
     frontend_public_dir="frontend-public"
@@ -472,6 +479,12 @@ check-template-drift:
 frontend-public action="dev":
     #!/usr/bin/env bash
     set -euo pipefail
+    # 进程数上限守护，兜住构建工具 fork 失控（背景与开关见脚本内注释）
+    process_guard_script="{{justfile_directory()}}/scripts/shared/just/process_guard.sh"
+    if [ -f "$process_guard_script" ]; then
+        source "$process_guard_script"
+        apply_process_limit_guard
+    fi
     cd "{{justfile_directory()}}/frontend-public"
     case "{{action}}" in
         dev)
@@ -499,6 +512,12 @@ frontend-public action="dev":
 frontend-admin action="dev":
     #!/usr/bin/env bash
     set -euo pipefail
+    # 进程数上限守护，兜住构建工具 fork 失控（背景与开关见脚本内注释）
+    process_guard_script="{{justfile_directory()}}/scripts/shared/just/process_guard.sh"
+    if [ -f "$process_guard_script" ]; then
+        source "$process_guard_script"
+        apply_process_limit_guard
+    fi
     cd "{{justfile_directory()}}/frontend-admin"
     case "{{action}}" in
         dev)
