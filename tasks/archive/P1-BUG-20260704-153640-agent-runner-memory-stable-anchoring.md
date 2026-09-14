@@ -175,7 +175,7 @@ promoted_skills_dirs = ["~/.iar/memory/keda-main/skills"]
 |---|---|---|
 | 锚点解析 | `src/backend/infrastructure/memory/adapters.py` | `resolve_memory_paths(worktree_path, ...)` 的 `anchor()`：相对路径挂到传入路径下，绝对路径原样使用。缺陷根源。 |
 | 记忆服务组装 | `src/backend/core/agent/memory/_composition.py` | `build_default_memory_services(worktree_path, memory_config)`，把传入路径透传给 `resolve_memory_paths`；已实现相对路径防回归告警。 |
-| per-repo 配置构建 | `src/backend/engines/agent_runner/factory_repository_resolver.py` | `_build_repository_context_from_settings`（`RepositoryRunContext` 的唯一构建点）与 `_anchor_memory_config`（记忆目录绝对化辅助）——**修复的实际注入点**（由 `factory.py` 拆分迁入）。 |
+| per-repo 配置构建 | `src/backend/engines/agent_runner/factory_repository_resolver.py` | `_build_merged_repository_context`（`RepositoryRunContext` 的唯一构建点；`_build_repository_context_from_settings` 是其单仓库包装）与 `_anchor_memory_config`（记忆目录绝对化辅助）——**修复的实际注入点**（由 `factory.py` 拆分迁入）。 |
 | MemoryConfig 域模型 | `src/backend/core/shared/models/agent_runner.py` | `MemoryConfig` frozen dataclass；docstring 的锚点语义声明已更正。 |
 | 记忆调用点 | `src/backend/core/use_cases/run_agent_once.py` / `agent_runner_publication.py` / `agent_runner_feedback.py` | `_persist_short_term_memory`、`_try_distill_skill_after_success`、`build_prompt`→`load_relevant_memory`，均以 `worktree_path` 作锚传入组装函数——配置绝对化后该实参对路径解析不再起作用，签名不动。 |
 | 存储实现 | `src/backend/infrastructure/memory/_atomic_io.py` / `short_term_store.py` / `long_term_store.py` / `skill_draft_store.py` | 纯文件系统读写；原子写入已统一收敛到 `_atomic_io.py`（tmp + `os.replace`）。 |
@@ -220,8 +220,8 @@ promoted_skills_dirs = ["~/.iar/memory/keda-main/skills"]
 ### Recommended Approach（最小改动路径）
 
 1. **factory 构建 per-repo 配置时绝对化记忆目录**
-   - 在 `_build_repository_context_from_settings` 中、`return RepositoryRunContext(...)` 之前，对 `effective_config.memory` 做一次变换：`base_dir`、`skill_drafts_dir`、`promoted_skills_dirs` 中的每个路径先 `expanduser()`，仍为相对路径者解析为 `effective_repo_path / <rel>` 的绝对路径；用 `dataclasses.replace` 写回（`AppConfig`、`MemoryConfig` 均 frozen）。
-   - 该函数是仓库中 `RepositoryRunContext(` 的唯一构建点（见 Drift Guard #1），所有 CLI/daemon 消费路径都经过它。（实现落地后位于 `factory_repository_resolver.py`。）
+   - 在 `_build_merged_repository_context` 中、`return RepositoryRunContext(...)` 之前，对 `effective_config.memory` 做一次变换：`base_dir`、`skill_drafts_dir`、`promoted_skills_dirs` 中的每个路径先 `expanduser()`，仍为相对路径者解析为 `effective_repo_path / <rel>` 的绝对路径；用 `dataclasses.replace` 写回（`AppConfig`、`MemoryConfig` 均 frozen）。
+   - 该函数是仓库中 `RepositoryRunContext(` 的唯一构建点（见 Drift Guard #1）；`_build_repository_context_from_settings` 与 `resolve_repository_targets` 系列都汇聚到它，所有 CLI/daemon 消费路径都经过这里。（实现落地后位于 `factory_repository_resolver.py`。）
 
 2. **组装层防回归告警**
    - `build_default_memory_services` 在收到仍为相对路径的记忆目录时，记一条 warning（说明预期应由 factory 绝对化），行为保持现状（继续以传入路径为锚）——保证直接构造 `MemoryConfig` 的既有测试不破坏，同时让任何漏网的生产路径在日志里现形。
@@ -298,7 +298,7 @@ per-repo 上下文构建（本次修复点, engines/factory 系模块）:
 │       [新增于本次修复；原计划落点 factory.py 已按行数拆分 PRD 拆分，实现随迁至此]
 │       【总结】构建 RepositoryRunContext 前将 memory 相对目录 expanduser 并绝对化到 effective_repo_path。
 │       ├── 新增模块级辅助 _anchor_memory_config(memory: MemoryConfig, repo_root_path: Path) -> MemoryConfig
-│       └── _build_repository_context_from_settings 在 return 前应用该辅助（dataclasses.replace 写回 config）
+│       └── _build_merged_repository_context 在 return RepositoryRunContext(...) 前应用该辅助（dataclasses.replace 写回 config）
 │
 ├── Core
 │   ├── src/backend/core/agent/memory/_composition.py
@@ -341,6 +341,9 @@ per-repo 上下文构建（本次修复点, engines/factory 系模块）:
 │
 │   注：rv-1/rv-2/rv-3 的可复跑 oracle 脚本 `rv_anchor_cross_worktree.py` **不进代码树**，
 │   执行时创建在 `.iar/evidence/scripts/` 下（`.iar/` 不入 git，证据按证据分支流程留存）。
+│   脚本取配置的方式必须走**生产注入点**：调用 `_build_repository_context_from_settings`
+│   并回读 `context.config.memory`，不得直接调用 `_anchor_memory_config` 或手工拼绝对路径
+│   （2026-09-14 复核时按此要求重写；`--legacy-anchor` 则刻意跳过 builder 以复现旧语义）。
 │
 └── Docs
     └── docs/guides/agent-runner.md
@@ -507,6 +510,22 @@ No data model changes in this PRD.（持久化仍为本地 JSON/Markdown 文件�
   expected_fail: "第二次 run 的 prompt 无记忆注入"
   test_layer: e2e
   required_for_acceptance: false
+
+- id: rv-8
+  behavior: 记忆目录绝对化确实由生产注入点完成——把 `_build_merged_repository_context` 内的绝对化摘掉后，rv-1 必须变红（注入点守卫，2026-09-14 归档前复核补充）
+  real_entry: "uv run --no-sync python .iar/evidence/scripts/rv_anchor_cross_worktree.py --scenario cross-worktree"
+  expected: "未施加变异时 exit=0 且打印 builder_absolutized=True；临时把该处的 `_anchor_memory_config(...)` 调用换成直通赋值后，同一条命令 exit=1、打印 builder_absolutized=False，记忆文件落回 worktree 而非主检出"
+  mock_boundary: "变异只临时施加于工作树源码，采集后立即还原；最终产品源码零改动（`git status -- src/ docs/ config.toml` 为空）"
+  tier: R3
+  critical_value_source: "脚本直接读取 `_build_repository_context_from_settings` 返回的 `context.config.memory` 的 base_dir / skill_drafts_dir / promoted_skills_dirs，不经中间变量转写"
+  must_cross: ["engines 层真实 per-repo 配置构建（_build_repository_context_from_settings）", "_build_merged_repository_context 内的绝对化步骤"]
+  forbidden_bypasses: ["禁止直连调用 _anchor_memory_config 充当生产路径证据", "禁止在脚本内手工拼接绝对路径"]
+  fresh_state_probe: "每轮重建沙箱仓库与 worktree 后重跑"
+  final_tree_evidence: "证据与脚本存 .iar/evidence/；注入点或 oracle 脚本再改动后必须重采 rv-1 与 rv-8"
+  negative_control: "临时删除 _build_merged_repository_context 内的 _anchor_memory_config 调用（改为直通赋值）"
+  expected_fail: "rv-1 打印 builder_absolutized=False 并以非零码退出"
+  test_layer: integration
+  required_for_acceptance: true
 ```
 
 **Failure Triage Notes**
@@ -514,7 +533,7 @@ No data model changes in this PRD.（持久化仍为本地 JSON/Markdown 文件�
 - rv-1 红且 --legacy-anchor 也"绿" → 脚本没有真正走 factory 构建路径，检查是否直连构造了 MemoryConfig（必须调用 `_build_repository_context_from_settings` 或其公开包装）。
 - rv-2 红 → 先查 `promoted_skills_dirs` 绝对化是否遗漏（三类目录逐一核对），再查检索的目录扫描。
 - rv-6 红 → 确认各 store 的每个写入点（Drift Guard #4）都走 `_atomic_io`（tmp 与目标同目录，跨文件系统 rename 不原子）。
-- rv-7（opt-in）无凭据时：以 rv-1/rv-2/rv-3 为最高可行保真档，并在验收证据中如实标注"live 档未执行"。
+- rv-7（opt-in）无凭据时：以 rv-1/rv-2/rv-3/rv-8 为最高可行保真档，并在验收证据中如实标注"live 档未执行"。
 
 ### Low-Fidelity Prototype
 
@@ -548,7 +567,7 @@ No external validation required; repository evidence was sufficient.
 
 ### Human-Confirmed
 
-- [x] 锚点解析语义正确：rv-1 正反向证据齐备（正向 exit=0 输出、`--legacy-anchor` 反向非零退出输出，各存 `.iar/evidence/rv-1-{positive,negative}.txt`），且 rv-2、rv-3 证据证明检索与晋升在真实双副本拓扑下成立（对应 §2 决策一）。
+- [x] 锚点解析语义正确：rv-1 正反向证据齐备（正向 exit=0 输出、`--legacy-anchor` 反向非零退出输出，各存 `.iar/evidence/rv-1-{positive,negative}.txt`），且 rv-2、rv-3 证据证明检索与晋升在真实双副本拓扑下成立（对应 §2 决策一）。三个场景的记忆配置一律取自生产注入点 `_build_repository_context_from_settings`（不再直连 `_anchor_memory_config`），并由 rv-8 变异守卫证明：摘掉 `_build_merged_repository_context` 内的绝对化后 rv-1 转红。
 - [x] 共享目录并发写入原子性：rv-6 正反向证据齐备（含"去掉原子替换后同用例变红"的反向记录），确认 last-write-wins 且无半写（对应 §2 决策二）。
 
 ### Behavior Acceptance (R2/R3 证据)
@@ -560,14 +579,15 @@ No external validation required; repository evidence was sufficient.
 
 ### Validation Acceptance
 
-- [x] rv-1、rv-2、rv-3 脚本通过且其实现满足保真度纪律（脚本源码中存在 `git worktree add` 双副本创建，无同目录复用；review 时以 `rg -n "worktree add" .iar/evidence/scripts/rv_anchor_cross_worktree.py` 佐证）。
+- [x] rv-1、rv-2、rv-3 脚本通过且其实现满足保真度纪律：脚本源码中存在真实 `git worktree add` 双副本创建（`rg -n "worktree add" .iar/evidence/scripts/rv_anchor_cross_worktree.py`），且配置一律经 `_build_repository_context_from_settings` 取得，无 `_anchor_memory_config` 直连、无手工拼接绝对路径（`rg -n "_anchor_memory_config|_build_repository_context_from_settings" .iar/evidence/scripts/rv_anchor_cross_worktree.py`）。
+- [x] rv-8 注入点守卫：未变异时 rv-1 exit=0 且打印 `builder_absolutized=True`；临时把 `_build_merged_repository_context` 内的 `_anchor_memory_config(...)` 换成直通赋值后，同一条命令 exit=1 且 `builder_absolutized=False`、文件落回 worktree（`.iar/evidence/rv-1-injection-point-probe.txt`）；采集后源码已还原（`git status -- src/ docs/ config.toml` 为空）。
 - [x] rv-6 并发原子性用例通过。
-- [x] rv-5：`uv run --no-sync pytest -o addopts=""` 全绿 + `just lint --full` 全部 hook Passed（附计数输出）。
-- [~] rv-7 live 档：执行则附两次 `iar run` 的 prompt 注入证据；未执行则在证据包中显式标注"opt-in 未执行，最高可行保真档为 rv-1/rv-2/rv-3"。
+- [x] rv-5：`uv run --no-sync pytest -o addopts=""` 全绿（2034 passed）+ `just lint --full` 全部 hook Passed（附计数输出）。
+- [~] rv-7 live 档：执行则附两次 `iar run` 的 prompt 注入证据；未执行则在证据包中显式标注"opt-in 未执行，最高可行保真档为 rv-1/rv-2/rv-3/rv-8"（本轮未执行，标注见 Delivery Readiness 与 §12）。
 
 ### Architecture Acceptance (R1/R0 门禁)
 
-- [x] `rg -n "RepositoryRunContext\(" src/backend --type=py` 仍仅有 factory 系模块一处构建点，且该处 return 前应用了记忆目录绝对化（现位于 `factory_repository_resolver.py`）。
+- [x] `rg -n "RepositoryRunContext\(" src/backend --type=py` 仍仅有 factory 系模块一处构建点（`factory_repository_resolver.py:_build_merged_repository_context`），且该处在 `return RepositoryRunContext(...)` 前应用了记忆目录绝对化。
 - [x] use-case 层签名未变：`rg -n "def run_agent_until_committed|def build_prompt|def _try_distill_skill_after_success" src/backend/core/use_cases` 与实现前一致（无新增锚点参数）。
 - [x] 依赖方向未破坏：`hooks/shared/check_architecture.py`（经 pre-commit）通过。
 
@@ -579,7 +599,7 @@ No external validation required; repository evidence was sufficient.
 ### Delivery Readiness
 
 - [x] Change Impact Tree 所列改动全部完成且与目标态一致。
-- [ ] **归档前证据复核**：本 PRD 引用的证据文件（`.iar/evidence/rv-1-{positive,negative}.txt` 等）与 oracle 脚本已不在当前工作树——`.iar/evidence/` 已被后续 closeout 证据轮换占用，且 `.iar/` 不入主仓 git。归档前须按证据分支流程恢复或在证据分支上复核齐备后方可归档。
+- [x] **归档前证据复核（2026-09-14 重采）**：`.iar/evidence/` 已被后续 closeout 证据轮换占用、且 `.iar/` 不入主仓 git，故在 worktree 分支 `agent-runner-memory-stable-anchoring` 内按 §7 重采全部 oracle。oracle 脚本自 `dbddd12` 恢复至 `.iar/evidence/scripts/rv_anchor_cross_worktree.py`，并按 §7 的 `must_cross` / `forbidden_bypasses` 重写为**经生产注入点取配置**（rv-3 同时改为驱动生产发布入口 `_try_distill_skill_after_success`，使"自动晋升"与 `--auto-promote-off` 负控不再是脚本自演）；仓库根探测改为向上查找 `pyproject.toml`，以适配 §7 指定的新位置。重采结果：rv-1 exit=0、`--legacy-anchor` exit=1、rv-2 exit=0、rv-3 exit=0（`usage_count=3` 且晋升到 `.iar/skills/`、`draft: false`）、rv-3 `--auto-promote-off` 保留草稿不晋升、rv-4 `2 passed`、rv-6 `6 passed`、rv-8 变异探针 exit=1、rv-5 `2034 passed` 且 `just lint --full` 全 hook Passed。证据文件全部位于 `.iar/evidence/`（`rv-1-{positive,negative}`、`rv-2-{promoted-skill,negative}`、`rv-3-{auto-promote,negative,legacy}`、`rv-4-disabled`、`rv-6-atomic`、`rv-1-injection-point-probe`、`rv-5-{full-suite,lint-full}`）。rv-7 live 档仍未执行（opt-in、无 GitHub 凭据），最高可行保真档为 rv-1/rv-2/rv-3/rv-8。
 - [x] 无未解决回归或上线阻塞项。
 
 ---
@@ -617,6 +637,10 @@ No external validation required; repository evidence was sufficient.
 | 操作者用 `--repo` 直接指向某个 worktree 路径，锚点落在该 worktree | 低 | 文档说明 `--repo` 应指向主检出；Drift Guard #1 提示检查 | 可选 follow-up：仓库根探测升级为 git common-dir 解析 |
 | `api-engines-layer-migration` 或后续行数拆分再次移动注入点 | 低 | §5/§8 已声明软依赖与 rebase 检查责任；本轮已发生一次并随迁 | 后合入者复跑 Drift Guard #1 |
 | 并发 last-write-wins 丢失一次草稿计数更新 | 低 | 原子写保证不损坏；advisory 知识库可接受偶发少计 | 若实测频发，follow-up 引入 O_EXCL 重试 |
+| 晋升用 `shutil.move`（`skill_draft_store.py`）在**跨文件系统**时退化为 copy + delete，非原子（2026-09-14 复核发现） | 低 | 默认布局下草稿目录与晋升目录同属 `.iar/skills`、同一文件系统，不触发；只有运营者把两者配到不同挂载点才可能出现 | follow-up：把晋升写入也收敛到 `_atomic_io`（同目录 tmp + `os.replace`），或在文档中提示避免跨挂载点配置 |
+| rv-7 live 档（连续两次真实 `iar run`）本轮仍未执行 | 低 | opt-in 档，`required_for_acceptance: false`；§9 已显式标注最高可行保真档为 rv-1/rv-2/rv-3/rv-8 | 有 GitHub 凭据与沙箱仓库时补跑，作为端到端加验 |
+| oracle 以 `AppConfig(memory=MemoryConfig())` 直接取默认值，未跨越 settings 装载层（`config.toml` → `AppConfig`）（2026-09-14 复核发现） | 低 | 当前 `MemoryConfig` 默认值与 `config.toml` 逐字一致，故结论不因此失真；rv-1 的 `must_cross` 只要求跨越 engines 层 per-repo 配置构建，该要求已满足 | follow-up：让 oracle 从真实 settings 装载入口取配置，把 `config.toml` → settings 这一层也纳入覆盖 |
+| `_composition.py` 告警文案与 `config.toml` 注释仍写作 `engines.factory._anchor_memory_config`（该符号由 `factory.py` 再导出，故可用；定义处实为 `engines.agent_runner.factory_repository_resolver`） | 低 | 引用并非失效路径；§5 已按定义处标注正确模块 | follow-up：统一为定义处模块路径 |
 
 ---
 
@@ -637,3 +661,12 @@ No external validation required; repository evidence was sufficient.
 - Public behavior and contracts: 配置项名称、磁盘布局、文件格式与原 PRD 承诺一致；`enabled=false` 行为与修复前一致；无对外 API 契约变化。记忆文件落点从副本内变为主检出 `.iar/` 下，是本 PRD 声明的唯一对外可观察行为变化，与 §3 Usage 一致。
 - Related PRD status: 缺陷来源 `P1-FEAT-20260626-093933-agent-runner-memory-persistence`（已归档）保持不动；软相关 `P1-REFACTOR-20260703-184226-api-engines-layer-migration` 仍 pending；行数拆分 `P1-REFACTOR-20260705-210702-file-line-split-seven-files` 已实际造成注入点迁移（`factory.py` → `factory_repository_resolver.py`），本 PRD 已同步。无状态冲突。
 - Requirements and risks: FR-1–FR-9 全部落地；§12 风险表无需修订。仍开放的归档前提：① `.iar/evidence/` 下本 PRD 的证据文件与 oracle 脚本已被后续 closeout 证据轮换移出工作树，须按证据分支流程恢复复核（§9 Delivery Readiness 对应 open 项）；② rv-7 live 档为 opt-in，未执行则证据包须显式标注最高可行保真档。两项闭合后方可归档。
+
+### Pre-Archive Evidence Review（2026-09-14）
+
+- 前提①已闭合：在 worktree 分支内重采全部 oracle，证据落在 `.iar/evidence/`（`.iar/` 不入 git，故仅存在于本地工作树；清单见 §9 Delivery Readiness）。
+- 前提②已闭合：rv-7 live 档仍未执行，§9 与 §12 均已显式标注 opt-in 未执行、最高可行保真档为 rv-1/rv-2/rv-3/rv-8。
+- 复核中发现并修正的**证据保真度缺口**（不涉及产品代码）：原 oracle 脚本直接调用 `_anchor_memory_config` 并手工构造绝对化配置，绕开了 §7 rv-1 明确要求跨越的 `_build_repository_context_from_settings`，因此摘掉生产注入点不会让任何 oracle 转红；rv-3 的"自动晋升"由脚本自己调用 `promote_draft_to_skills`，`--auto-promote-off` 只是让脚本跳过该调用，负控近乎同义反复。本轮已重写脚本：配置一律经生产注入点取得，rv-3 改为驱动 `_try_distill_skill_after_success`，并新增 rv-8 变异守卫。
+- 复核中确认的**文档事实性偏差**（已就地修正）：`RepositoryRunContext` 的唯一构建点是 `_build_merged_repository_context`（`_build_repository_context_from_settings` 是其单仓库包装），§5/§6/§7/§9 原先把两者混称，现已按代码现状更正。
+- 独立 verifier 复核：本轮归档前运行了独立 verifier Agent。第一轮给出 PASS 但指出上述两条证据保真度缺口（正是重写 oracle 的动因）；重写后再复核，确认两条缺口均已闭合（配置一律经 `_build_repository_context_from_settings`、rv-3 由生产发布入口驱动），并自行复现了 rv-1 正/反向、rv-3 正/反向与 rv-8 变异探针的退出码。
+- 仍未修改、留作 follow-up 的项（均在 §12 新增行中记录）：`shutil.move` 跨文件系统非原子；`docs/guides/agent-runner.md` 维护者小节仍以 `<worktree>/.iar/...` 表述手写长期记忆的位置（§9 Documentation Acceptance 的断言只覆盖 `Always written as`，故未阻断归档）；oracle 未跨越 settings 装载层；`_composition.py` 告警文案与 `config.toml` 注释仍引用 `engines.factory._anchor_memory_config` 这一再导出路径而非定义处模块。
