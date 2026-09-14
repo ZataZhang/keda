@@ -1218,7 +1218,7 @@ sync-template flags="":
 # their respective stages; that is what keeps `just test` under 30 seconds in
 # steady-state local development. The fast path is only consulted when the
 # flag file's branch, HEAD and effective tree all still match.
-@test type="local": _check-completion
+test type="local": _check-completion
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -1242,6 +1242,18 @@ sync-template flags="":
         exit 0
     fi
 
+    # `just test` has no watchdog of its own, and its real failure mode is the
+    # top-level process exiting while a lint or pytest subtree stays alive: three
+    # hand-run `just test` trees were once still resident 14 hours later. Both
+    # heavy steps therefore run under with_timeout.py, which tears the whole
+    # process group down instead of only the top process. These budgets exist to
+    # tell a hang apart from slow work, so they are deliberately generous — a
+    # healthy run never reaches them. Projects with a slower suite raise
+    # JUST_TEST_TIMEOUT_SECONDS in their own .env or shell.
+    with_timeout=(python3 ./scripts/shared/just/with_timeout.py)
+    lint_timeout_seconds="${JUST_LINT_TIMEOUT_SECONDS:-1800}"
+    pytest_timeout_seconds="${JUST_TEST_TIMEOUT_SECONDS:-3600}"
+
     # Lint fast path: when .last_linted_commit is valid for the current working
     # tree, `just lint --full` short-circuits to <1s. Reuse that path here so
     # `just test` on a warm tree stays well under 30s; only fall through to a
@@ -1260,7 +1272,8 @@ sync-template flags="":
         # /dev/null made runner failures undiagnosable — see freshai Issue #99.
         echo "🔍 Running full lint checks..."
         lint_output_file="$(mktemp)"
-        if ! SKIP=check-test-flag just lint --full >"$lint_output_file" 2>&1; then
+        if ! SKIP=check-test-flag "${with_timeout[@]}" "$lint_timeout_seconds" \
+            just lint --full >"$lint_output_file" 2>&1; then
             echo "ERROR: Lint failed. Fix lint errors before running tests."
             echo "   Run: just lint --full"
             echo "--- just lint --full output (last 200 lines) ---"
@@ -1296,11 +1309,41 @@ sync-template flags="":
         pytest_verbosity_flag="-q"
     fi
 
+    # 全量档（all / real）附加的 pytest 参数。默认 `-n auto` 走 xdist 并行，但
+    # 这个默认值并非对所有项目成立：用 pytest-testmon 做增量的项目与 xdist 互斥
+    # 且通常不声明 pytest-xdist，硬编码 `-n auto` 会让它们的 `just test all` 直接
+    # 报错——而 `just test all` 往往是 agent runner 的 verification command。这类
+    # 项目设 `JUST_FULL_TEST_FLAGS="--no-testmon"` 即可；设为空串表示不附加任何
+    # 参数。和 JUST_LOCAL_TEST_TARGET 同理用环境变量而非 just 变量：`import` 进来
+    # 的变量不允许被导入方重定义（just 1.53 报 "multiple definitions"）。
+    if [ -n "${JUST_FULL_TEST_FLAGS+x}" ]; then
+        read -r -a full_test_flags <<< "$JUST_FULL_TEST_FLAGS"
+    else
+        full_test_flags=(-n auto)
+    fi
+
+    # 本地档附加的 pytest 参数，同样按项目可配（JUST_LOCAL_TEST_FLAGS）。默认省掉
+    # 输出头并禁用 cacheprovider 以压低启动开销，但 `-p no:cacheprovider` 同样不是
+    # 对所有项目成立：pytest-testmon 在 configure 阶段会读 cacheprovider 提供的
+    # `lf` 选项，禁用后直接 `INTERNALERROR ... KeyError: 'lf'`，整个本地档跑不起来。
+    # 用 testmon 的项目设 `JUST_LOCAL_TEST_FLAGS="--no-header"` 即可。
+    if [ -n "${JUST_LOCAL_TEST_FLAGS+x}" ]; then
+        read -r -a local_test_flags <<< "$JUST_LOCAL_TEST_FLAGS"
+    else
+        local_test_flags=(--no-header -p no:cacheprovider)
+    fi
+
+    # macOS 自带 bash 3.2 下，`set -u` 中裸展开空数组会报 unbound variable，
+    # 故上面两个数组统一用 ${arr[@]+"${arr[@]}"} 形式展开，允许它们为空。
     pytest_exit_code=0
     if [ "{{type}}" = "all" ]; then
-        uv run pytest tests/ -v -m '' -n auto || pytest_exit_code=$?
+        "${with_timeout[@]}" "$pytest_timeout_seconds" \
+            uv run pytest tests/ -v -m '' \
+            ${full_test_flags[@]+"${full_test_flags[@]}"} || pytest_exit_code=$?
     elif [ "{{type}}" = "real" ]; then
-        uv run pytest tests/ -v -m 'real_api' -n auto || pytest_exit_code=$?
+        "${with_timeout[@]}" "$pytest_timeout_seconds" \
+            uv run pytest tests/ -v -m 'real_api' \
+            ${full_test_flags[@]+"${full_test_flags[@]}"} || pytest_exit_code=$?
         if [ "$pytest_exit_code" -eq 5 ]; then
             echo "ℹ️  No real_api tests collected; treating as success."
             pytest_exit_code=0
@@ -1316,7 +1359,9 @@ sync-template flags="":
         # `just test full` 承担。用环境变量而非 just 变量:`import` 进来的变量
         # 不允许被导入方重定义（just 1.53 报 "multiple definitions"）。
         local_test_target="${JUST_LOCAL_TEST_TARGET:-tests/}"
-        uv run pytest "$local_test_target" "$pytest_verbosity_flag" --no-header -p no:cacheprovider || pytest_exit_code=$?
+        "${with_timeout[@]}" "$pytest_timeout_seconds" \
+            uv run pytest "$local_test_target" "$pytest_verbosity_flag" \
+            ${local_test_flags[@]+"${local_test_flags[@]}"} || pytest_exit_code=$?
     fi
 
     if [ "$pytest_exit_code" -ne 0 ]; then

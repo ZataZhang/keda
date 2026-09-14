@@ -12,6 +12,16 @@ set allow-duplicate-recipes := true
 
 import "justfile.shared"
 
+# keda 用 pytest-testmon 做增量（pyproject 的 addopts = "--testmon"），与 xdist 互斥，
+# 因此不声明 pytest-xdist——共享 test recipe 的默认值 `-n auto` 在这里会直接报错。
+# `just test all` / `just test real` 本就要求无视 .testmondata 强制全跑，改成
+# `--no-testmon` 同时满足这两点。keda 曾为此整段复制共享 recipe（85 行的陈旧 fork，
+# 缺 CI 强制全跑、lint 快路径、超时兜底），上游加了这个开关后改用一行配置。
+export JUST_FULL_TEST_FLAGS := "--no-testmon"
+# 同理去掉共享默认值里的 `-p no:cacheprovider`：testmon 在 configure 阶段会读
+# cacheprovider 提供的 `lf` 选项，禁用后直接 INTERNALERROR KeyError: 'lf'。
+export JUST_LOCAL_TEST_FLAGS := "--no-header"
+
 # Default recipe (runs when you type `just`)
 default: _check-completion
     @just --list
@@ -449,91 +459,6 @@ check-template-drift:
     echo "✅ Templates in sync."
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
-
-# Run tests after `just lint --full` (usage: just test [local|all|real])
-#   just test        - Run local tests change-aware via pytest-testmon
-#   just test all    - Run all tests (ignores .testmondata)
-#   just test real   - Run tests requiring API keys (ignores .testmondata)
-#
-# This override shadows the shared @test recipe because keda does not include
-# pytest-xdist in dev dependencies (-n auto would fail), and because all/real
-# must force a full run regardless of .testmondata state.
-@test type="local": _check-completion
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    source ./scripts/shared/hooks/quality_flag.sh
-
-    git_dir="$(quality_git_dir)"
-    flag_file="$git_dir/.last_tested_commit"
-    branch_name="$(quality_branch_name)"
-    head_hash="$(quality_head_hash)"
-    test_tree="$(quality_effective_tree working test)"
-
-    if [ "{{type}}" = "local" ] && quality_flag_matches "$flag_file" "$branch_name" "$head_hash" "$test_tree"; then
-        echo "✅ just test flag valid: $branch_name @ ${head_hash:0:8} (tree: ${test_tree:0:8}); skipping tests."
-        exit 0
-    fi
-
-    # Capture the lint output instead of discarding it: this gate runs inside the
-    # agent runner's commit path, and when it fails the only thing a human (or the
-    # repair agent) ever sees is this recipe's stdout. Sending it to /dev/null made
-    # runner failures undiagnosable — see freshai Issue #99.
-    echo "🔍 Running full lint checks..."
-    lint_output_file="$(mktemp)"
-    if ! SKIP=check-test-flag just lint --full >"$lint_output_file" 2>&1; then
-        echo "ERROR: Lint failed. Fix lint errors before running tests."
-        echo "   Run: just lint --full"
-        echo "--- just lint --full output (last 200 lines) ---"
-        tail -n 200 "$lint_output_file"
-        echo "--- end of just lint --full output ---"
-        rm -f "$lint_output_file"
-        exit 1
-    fi
-    rm -f "$lint_output_file"
-    lint_tree_after_lint="$(quality_effective_tree working lint)"
-    echo "✅ Lint passed. Proceeding to tests..."
-
-    # Check Alembic migration heads if Alembic is installed
-    if command -v alembic &>/dev/null; then
-        alembic_heads="$(uv run alembic heads 2>/dev/null || true)"
-        if [ -n "$alembic_heads" ]; then
-            alembic_head_count="$(printf "%s\n" "$alembic_heads" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
-            if [ "$alembic_head_count" -gt 1 ]; then
-                echo "ERROR: Alembic migration graph must have exactly one head; found $alembic_head_count."
-                printf "%s\n" "$alembic_heads"
-                exit 1
-            fi
-        fi
-    fi
-
-    pytest_exit_code=0
-    if [ "{{type}}" = "all" ]; then
-        uv run pytest tests/ -v -m '' --no-testmon || pytest_exit_code=$?
-    elif [ "{{type}}" = "real" ]; then
-        uv run pytest tests/ -v -m 'real_api' --no-testmon || pytest_exit_code=$?
-        if [ "$pytest_exit_code" -eq 5 ]; then
-            echo "ℹ️  No real_api tests collected; treating as success."
-            pytest_exit_code=0
-        fi
-    else
-        # Local mode: --testmon is picked up from pyproject.toml addopts.
-        # pytest-xdist is intentionally not used; keda does not declare it.
-        uv run pytest tests/ -v || pytest_exit_code=$?
-    fi
-
-    if [ "$pytest_exit_code" -ne 0 ]; then
-        exit "$pytest_exit_code"
-    fi
-
-    # Write flag after tests pass, binding branch, HEAD and effective tree.
-    branch_name="$(quality_branch_name)"
-    head_hash="$(quality_head_hash)"
-    test_tree="$(quality_effective_tree working test)"
-    quality_write_flag "$git_dir/.last_tested_commit" "$branch_name" "$head_hash" "$test_tree"
-    quality_write_flag "$git_dir/.last_linted_commit" "$branch_name" "$head_hash" "$lint_tree_after_lint"
-    echo "✅ just test flag updated: $branch_name @ $head_hash"
-    echo "✅ just lint --full flag updated: $branch_name @ $head_hash"
 
 # Frontend helpers (pnpm workspace: frontend-admin + frontend-public)
 # Usage:
