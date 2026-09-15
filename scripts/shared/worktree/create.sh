@@ -6,6 +6,10 @@
 #   或直接执行:
 #   ./scripts/shared/worktree/create.sh <新分支名> [--base <base_branch>] [--cmd [code_cmd]]
 
+# 分支名 ↔ pending PRD 匹配规则的唯一事实源（与 prd_status.py 文件名解析一致）。
+_CREATE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$_CREATE_SCRIPT_DIR/prd_branch_match.sh"
+
 ai_worktree_usage() {
     cat <<'EOF'
 Usage:
@@ -683,43 +687,56 @@ resolve_worktree_creation_plan() {
     esac
 }
 
-# 分支名与某条 pending PRD 的 slug 匹配时，先领取该 PRD 的执行锁。
-# 推导规则与 justfile.shared 的 implement recipe 分支名推导保持一致：
-# 去掉 .md 后缀，再去掉开头的 YYYYMMDD-HHMMSS- 或 YYYYMMDD- 日期前缀。
-# 不匹配时完全不干预（worktree 是通用工具，不能假设每次创建都对应 PRD）。
+# 分支名与某条 pending PRD 匹配时，先领取该 PRD 的执行锁。
+# 匹配规则的唯一事实源在 prd_branch_match.sh（与 prd_status.py 的文件名解析一致）：
+# slug 与分支全名或分支最后一段相等即命中。不匹配时完全不干预
+# （worktree 是通用工具，不能假设每次创建都对应 PRD）。
+# 领锁成功时把 PRD 文件路径写入 CLAIMED_PRD_FILE_PATH，供创建完成后的归属移交使用。
 # 参数:
 #   $1: 主仓库根目录
 #   $2: 待创建的分支名
 claim_prd_lock_for_branch() {
     local repo_root_path="$1"
     local branch_name="$2"
-    local pending_dir_path="$repo_root_path/tasks/pending"
     local prd_lock_script_path="$repo_root_path/scripts/shared/just/prd_lock.py"
 
-    [ -d "$pending_dir_path" ] || return 0
+    CLAIMED_PRD_FILE_PATH=""
     [ -f "$prd_lock_script_path" ] || return 0
 
     local prd_file_path=""
-    local candidate_branch_name=""
-    for prd_file_path in "$pending_dir_path"/*.md; do
-        [ -e "$prd_file_path" ] || continue
-        candidate_branch_name="$(basename "$prd_file_path")"
-        candidate_branch_name="${candidate_branch_name%.md}"
-        if [[ "$candidate_branch_name" =~ ^[0-9]{8}-[0-9]{6}-(.+)$ ]]; then
-            candidate_branch_name="${BASH_REMATCH[1]}"
-        elif [[ "$candidate_branch_name" =~ ^[0-9]{8}-(.+)$ ]]; then
-            candidate_branch_name="${BASH_REMATCH[1]}"
-        fi
-        if [ "$candidate_branch_name" = "$branch_name" ]; then
-            echo "🔒 分支名匹配 pending PRD: $(basename "$prd_file_path")，先领取执行锁 ..."
-            if ! python3 "$prd_lock_script_path" claim "$prd_file_path" --tool unknown --branch "$branch_name"; then
-                echo "❌ 该 PRD 已被其他会话领取，拒绝创建 worktree。"
-                return 1
-            fi
-            return 0
-        fi
-    done
+    if ! prd_file_path="$(find_pending_prd_for_branch "$repo_root_path" "$branch_name")"; then
+        return 0
+    fi
+
+    echo "🔒 分支名匹配 pending PRD: $(basename "$prd_file_path")，先领取执行锁 ..."
+    if ! python3 "$prd_lock_script_path" claim "$prd_file_path" --branch "$branch_name"; then
+        echo "❌ 该 PRD 已被其他会话领取，拒绝创建 worktree。"
+        return 1
+    fi
+    CLAIMED_PRD_FILE_PATH="$prd_file_path"
     return 0
+}
+
+# 创建完成后的锁归属移交：创建前的领锁发生在主仓库（归属标签为空），
+# 创建成功后从 new worktree 内重新领一次，借 prd_lock.py 的"主仓库锁被
+# linked worktree 认领"语义把归属移交到 worktree——看板定位与 worktree
+# 活性探测（心跳兜底）都依赖归属标签指向真实工作目录。
+# 移交失败不阻断创建（锁仍有效，只是归属停在主仓库）。
+# 参数:
+#   $1: 主仓库根目录
+#   $2: new worktree 绝对路径
+#   $3: 分支名
+adopt_claimed_prd_lock() {
+    local repo_root_path="$1"
+    local target_abs_path="$2"
+    local branch_name="$3"
+    local prd_lock_script_path="$repo_root_path/scripts/shared/just/prd_lock.py"
+
+    [ -n "${CLAIMED_PRD_FILE_PATH:-}" ] || return 0
+    if ! (cd "$target_abs_path" \
+        && python3 "$prd_lock_script_path" claim "$CLAIMED_PRD_FILE_PATH" --branch "$branch_name"); then
+        echo "⚠️ 锁归属移交到 worktree 失败（可能被他人接管），请用 just prd status 核对。"
+    fi
 }
 
 function ai_worktree() {
@@ -956,6 +973,9 @@ function ai_worktree() {
             return 1
             ;;
     esac
+
+    # 锁归属移交到 new worktree（仅当创建前成功领锁；未匹配 PRD 时为空操作）
+    adopt_claimed_prd_lock "$repo_root_path" "$target_abs_path" "$local_branch_name"
 
     # 2. 为新 worktree 分配随机端口，避免与主仓库/其他 worktree 冲突
     echo "🔌 正在分配随机运行端口 ..."

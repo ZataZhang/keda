@@ -6,6 +6,10 @@
 #   或直接执行:
 #   ./scripts/shared/worktree/open.sh <分支名> [--cmd [code_cmd]]
 
+# 分支名 ↔ pending PRD 匹配规则的唯一事实源（与 create.sh 共用）。
+_OPEN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$_OPEN_SCRIPT_DIR/prd_branch_match.sh"
+
 ai_open_usage() {
     cat <<'EOF'
 Usage:
@@ -121,6 +125,14 @@ function ai_open() {
         echo "❌ 未找到分支 '$branch_name' 对应的 worktree 目录。"
         echo "   已尝试查找 git worktree list 及约定路径: $repo_parent_path/$branch_name"
         return 1
+    fi
+
+    # 分支名匹配 pending PRD 时顺手领锁：无锁直接领取（归属记为该 worktree），
+    # 同归属幂等刷新心跳；他人新鲜锁仅输出持锁者信息，不阻塞打开。
+    local prd_file_path=""
+    if prd_file_path="$(find_pending_prd_for_branch "$repo_root_path" "$branch_name")"; then
+        (cd "$worktree_path" && python3 "$repo_root_path/scripts/shared/just/prd_lock.py" \
+            claim "$prd_file_path" --branch "$branch_name") || true
     fi
 
     if ! command -v "$vscode_command_name" >/dev/null 2>&1; then

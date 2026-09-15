@@ -626,18 +626,15 @@ implement prd_file ai_tool prompt="":
         exit 1
     fi
 
+    # 分支名 / 展示名的推导规则与 prd_status.py 文件名解析一致，
+    # 唯一事实源在 scripts/shared/worktree/prd_branch_match.sh。
+    source ./scripts/shared/worktree/prd_branch_match.sh
+
     # Auto-generate default prompt if not provided
     if [ -z "$prompt_text" ]; then
         filename=$(basename "$prd_file")
         prd_name="${filename%.md}"
-        # Strip date prefix for display
-        if [[ "$prd_name" =~ ^[0-9]{8}-[0-9]{6}-(.+)$ ]]; then
-            prd_display="${BASH_REMATCH[1]}"
-        elif [[ "$prd_name" =~ ^[0-9]{8}-(.+)$ ]]; then
-            prd_display="${BASH_REMATCH[1]}"
-        else
-            prd_display="$prd_name"
-        fi
+        prd_display="$(strip_prd_file_stem_to_slug "$prd_name")"
         evidence_dir="tasks/evidence/${prd_name}"
         executor_prompt_file="$repo_root/scripts/shared/just/executor_prompt.txt"
         prompt_text=$(cat "$executor_prompt_file")
@@ -649,15 +646,9 @@ implement prd_file ai_tool prompt="":
         echo ""
     fi
 
-    # Extract branch name from PRD filename
+    # Extract branch name from PRD filename（与看板 slug 解析同一套规则）
     filename=$(basename "$prd_file")
-    branch_name="${filename%.md}"
-    # Strip date prefix: YYYYMMDD-HHMMSS- or YYYYMMDD-
-    if [[ "$branch_name" =~ ^[0-9]{8}-[0-9]{6}-(.+)$ ]]; then
-        branch_name="${BASH_REMATCH[1]}"
-    elif [[ "$branch_name" =~ ^[0-9]{8}-(.+)$ ]]; then
-        branch_name="${BASH_REMATCH[1]}"
-    fi
+    branch_name="$(strip_prd_file_stem_to_slug "${filename%.md}")"
 
     # Claim the PRD execution lock before any worktree/executor side effects.
     # A fresh lock held by another session aborts here: no worktree, no executor.

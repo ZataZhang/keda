@@ -12,9 +12,12 @@
    否则各 worktree 各存一份锁，重复开工防护形同虚设。
 2. **并发领锁唯一成功。** ``O_EXCL`` 原子创建保证两个不同归属的会话同时领锁时
    恰一个成功；去掉这层原子性就会重演"两个会话改同一批文件"的事故。
-3. **死锁可被接管且留档，但接管理由只有心跳过期。** 心跳超时的锁必须能自动
-   接管，旧锁改名留档而不是静默覆盖；持锁 pid 已死**不**构成接管理由——锁脚本
-   与 agent 工具调用的会话首领都是短命进程，pid 死亡不代表持锁会话已死。
+3. **死锁可被接管且留档，但接管前提是"心跳过期且归属 worktree 无近期文件改动"。**
+   心跳超时且无活性佐证的锁必须能自动接管，旧锁改名留档而不是静默覆盖；
+   心跳过期但归属 worktree 仍在写入时视为存活会话、拒绝接管——心跳只是
+   无活性佐证时的兜底信号，避免误抢忘记续期但确实在执行的会话。持锁 pid
+   已死**不**构成接管理由——锁脚本与 agent 工具调用的会话首领都是短命进程，
+   pid 死亡不代表持锁会话已死。
 """
 
 from __future__ import annotations
@@ -246,6 +249,60 @@ def test_stale_heartbeat_lock_is_taken_over_and_archived(tmp_path: Path) -> None
     new_lock_metadata = _read_lock_metadata(_lock_file_path(main_repo_path))
     assert new_lock_metadata["worktree"] == ""
     assert new_lock_metadata["ai_tool"] == "kimi"
+
+
+def test_stale_lock_with_active_worktree_is_not_taken_over(tmp_path: Path) -> None:
+    """心跳过期但归属 worktree 近期仍有文件改动：视为存活会话，拒绝接管、不留档。
+
+    心跳只是无活性佐证时的兜底信号；worktree 内的近期写入说明会话确实还在
+    执行（只是忘了续期），此时接管会让两个会话改同一批文件。
+    """
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "wt-active")
+    worktree_label = os.path.relpath(linked_worktree_path, main_repo_path)
+    _write_foreign_lock(
+        main_repo_path,
+        heartbeat_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        holder_pid=os.getpid(),
+        holder_worktree=worktree_label,
+    )
+    # worktree 内的近期文件改动是"会话仍存活"的活性佐证。
+    (linked_worktree_path / "recent-edit.py").write_text("# active\n", encoding="utf-8")
+
+    claim_result = _run_lock_cli(main_repo_path, "claim", _FIXTURE_PRD_RELATIVE_PATH)
+
+    assert claim_result.returncode == 1
+    assert not list(_lock_file_path(main_repo_path).parent.glob("active.lock.*.stale"))
+
+
+def test_stale_lock_with_idle_worktree_is_taken_over(tmp_path: Path) -> None:
+    """心跳过期且归属 worktree 无近期改动（mtime 均在窗口外）：正常接管并留档。
+
+    与活性场景对偶：活性探测不能把"worktree 目录还在但会话早已停止"的锁
+    也挡在接管门外，否则死锁永远无法被回收。
+    """
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "wt-idle")
+    worktree_label = os.path.relpath(linked_worktree_path, main_repo_path)
+    _write_foreign_lock(
+        main_repo_path,
+        heartbeat_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        holder_pid=os.getpid(),
+        holder_worktree=worktree_label,
+    )
+    # 把 worktree 内所有文件 mtime 拨到过期窗口外，模拟早已停止的会话。
+    idle_mtime_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).timestamp()
+    for existing_file_path in linked_worktree_path.rglob("*"):
+        if existing_file_path.is_file():
+            os.utime(existing_file_path, (idle_mtime_timestamp, idle_mtime_timestamp))
+
+    claim_result = _run_lock_cli(
+        main_repo_path, "claim", _FIXTURE_PRD_RELATIVE_PATH, "--tool", "kimi"
+    )
+
+    assert claim_result.returncode == 0, claim_result.stderr
+    stale_archive_files = list(_lock_file_path(main_repo_path).parent.glob("active.lock.*.stale"))
+    assert len(stale_archive_files) == 1
 
 
 def test_dead_holder_pid_alone_does_not_make_lock_stale(tmp_path: Path) -> None:

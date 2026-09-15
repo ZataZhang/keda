@@ -370,6 +370,26 @@ def format_evidence_cell(prd_record: PrdRecord, palette: Palette) -> str:
 RECENT_TOUCH_WINDOW_MINUTES = 15
 
 
+def match_worktree_by_slug(
+    worktree_branches_list: list[tuple[str, Path]], slug_text: str
+) -> tuple[str, Path] | None:
+    """在 worktree 列表中找分支名（或其最后一段）与 PRD slug 相等的条目。
+
+    Args:
+        worktree_branches_list (list[tuple[str, Path]]): ``(分支名, worktree 路径)``
+            列表，来自 ``prd_lock.list_linked_worktree_branches``。
+        slug_text (str): PRD 文件名解析出的 slug。
+
+    Returns:
+        tuple[str, Path] | None: 命中的 ``(分支名, worktree 路径)``；无匹配为 ``None``。
+    """
+    for branch_name_text, worktree_path in worktree_branches_list:
+        branch_basename_text = branch_name_text.rsplit("/", 1)[-1]
+        if slug_text == branch_name_text or slug_text == branch_basename_text:
+            return branch_name_text, worktree_path
+    return None
+
+
 def format_duration_text(elapsed_seconds: float) -> str:
     """把秒数渲染成紧凑时长文本，例如 ``12m`` / ``1h5m`` / ``2d3h``。
 
@@ -428,8 +448,11 @@ def format_activity_cell(
     """格式化运行态列（ACTIVITY）。
 
     新鲜锁 → 黄色 ``RUNNING <tool> <时长> @<branch>``（branch 缺失回退 worktree）；
-    过期锁 → 红色 ``STALE <最后心跳>``；无锁但近期有改动 → 暗色 ``⚡ active <n>m ago``；
-    其余 ``-``。
+    过期锁但归属 worktree 仍有近期改动 → 同样按 RUNNING 渲染（心跳只是兜底信号，
+    活性佐证说明会话仍在执行）；过期锁且无活性佐证 → 红色 ``STALE <最后心跳>``；
+    无锁但存在分支名匹配的 worktree → 黄色 ``⚠ unlocked @<branch>``（互斥未生效
+    的漏洞必须摆到台面上，而不是静默显示 ``-``）；无锁但 PRD 文件或证据目录
+    近期有改动 → 暗色 ``⚡ active <n>m ago``；其余 ``-``。
 
     Args:
         prd_record (PrdRecord): 单条 PRD 记录。
@@ -441,25 +464,46 @@ def format_activity_cell(
         str: 运行态单元格文本。
     """
     lock_snapshot = prd_lock.inspect_prd_lock(main_repo_root, prd_record.prd_path.stem)
-    if lock_snapshot.state == "fresh":
+    if lock_snapshot.state in ("fresh", "stale"):
         lock_metadata = lock_snapshot.metadata
-        raw_tool_text = str(lock_metadata.get("ai_tool") or "unknown")
-        raw_location_text = (
-            str(lock_metadata.get("branch") or "")
-            or str(lock_metadata.get("worktree") or "")
-            or "主仓库"
-        )
-        raw_started_text = lock_metadata.get("started_at")
-        started_moment = prd_lock.parse_lock_timestamp(raw_started_text)
-        if started_moment is not None:
-            elapsed_seconds = (datetime.now(timezone.utc) - started_moment).total_seconds()
-        else:
-            elapsed_seconds = 0.0
-        raw_duration_text = format_duration_text(elapsed_seconds)
-        return palette.yellow(f"RUNNING {raw_tool_text} {raw_duration_text} @{raw_location_text}")
-    if lock_snapshot.state == "stale":
-        raw_heartbeat_text = str(lock_snapshot.metadata.get("heartbeat_at") or "?")
+        lock_is_active = lock_snapshot.state == "fresh"
+        if not lock_is_active:
+            lock_is_active = prd_lock.lock_worktree_has_recent_activity(
+                main_repo_root, lock_metadata
+            )
+        if lock_is_active:
+            raw_tool_text = str(lock_metadata.get("ai_tool") or "unknown")
+            raw_location_text = (
+                str(lock_metadata.get("branch") or "")
+                or str(lock_metadata.get("worktree") or "")
+                or "主仓库"
+            )
+            raw_started_text = lock_metadata.get("started_at")
+            started_moment = prd_lock.parse_lock_timestamp(raw_started_text)
+            if started_moment is not None:
+                elapsed_seconds = (datetime.now(timezone.utc) - started_moment).total_seconds()
+            else:
+                elapsed_seconds = 0.0
+            raw_duration_text = format_duration_text(elapsed_seconds)
+            raw_running_text = f"RUNNING {raw_tool_text} {raw_duration_text} @{raw_location_text}"
+            return palette.yellow(raw_running_text)
+        raw_heartbeat_text = str(lock_metadata.get("heartbeat_at") or "?")
         return palette.red(f"STALE {raw_heartbeat_text}")
+
+    matched_worktree = match_worktree_by_slug(
+        prd_lock.list_linked_worktree_branches(main_repo_root), prd_record.slug
+    )
+    if matched_worktree is not None:
+        branch_name_text, worktree_path = matched_worktree
+        worktree_activity_minutes = prd_lock.detect_worktree_activity_minutes(
+            worktree_path, RECENT_TOUCH_WINDOW_MINUTES
+        )
+        raw_activity_suffix_text = (
+            f" · active {worktree_activity_minutes}m ago"
+            if worktree_activity_minutes is not None
+            else ""
+        )
+        return palette.yellow(f"⚠ unlocked @{branch_name_text}{raw_activity_suffix_text}")
 
     recent_touch_minutes = detect_recent_touch_minutes(prd_record, evidence_root)
     if recent_touch_minutes is not None:

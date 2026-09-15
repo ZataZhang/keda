@@ -18,14 +18,18 @@
   他人新鲜锁拒绝并输出持锁者信息（退出 1）；过期锁（心跳超 30 分钟）自动接管
   并把旧锁改名留档为 ``active.lock.<时间戳>.stale``；同归属（worktree 相对路径
   一致）重复领锁幂等刷新。
-- **过期判定只看心跳**。锁脚本自身是命令结束即退出的短命进程，且 agent 工具
-  调用通常给每条命令开新会话——无论记自身 pid 还是会话首领 pid，"pid 已死"
-  都会在领锁动作返回后立刻成立，所有锁瞬间过期、互斥失效（实测证实）。
-  ``pid`` / ``hostname`` 字段仍记录在锁 JSON 里，仅供排查展示，不参与判定。
+- **过期判定看心跳 + worktree 活性，不做 pid 探测。** 锁脚本自身是命令结束即
+  退出的短命进程，且 agent 工具调用通常给每条命令开新会话——无论记自身 pid
+  还是会话首领 pid，"pid 已死"都会在领锁动作返回后立刻成立，所有锁瞬间过期、
+  互斥失效（实测证实）。``pid`` / ``hostname`` 字段仍记录在锁 JSON 里，仅供
+  排查展示，不参与判定。反过来，心跳过期但归属 worktree 在过期窗口内仍有文件
+  改动时，视为存活会话拒绝接管——心跳只是无活性佐证时的兜底信号，避免误抢
+  忘记续期但确实在执行的会话。
 - 归属判定只看锁里的 ``worktree`` 字段；``ai_tool`` / ``branch`` 是纯展示元数据，
   不参与互斥判定。主仓库领取的锁被同一仓库 linked worktree 再次领取时视为开工
-  入口到执行器的移交（``just implement`` 先领锁、executor 进 worktree 后自检），
-  刷新心跳并把归属更新为当前 worktree。
+  入口到执行器的移交（``just implement`` 先领锁、executor 进 worktree 后自检；
+  ``just worktree`` 创建成功后也会自动做这次移交），刷新心跳并把归属更新为
+  当前 worktree。
 """
 
 from __future__ import annotations
@@ -43,6 +47,29 @@ from pathlib import Path
 LOCK_FILENAME = "active.lock"
 STALE_AFTER = timedelta(minutes=30)
 UNKNOWN_TOOL_LABEL = "unknown"
+
+# worktree 活性探测跳过依赖目录与构建产物目录；``os.walk`` 默认不跟随目录符号
+# 链接，symlink 复用的 ``node_modules`` 天然不会被下钻，这里仍显式列出以覆盖
+# 真实目录的安装方式。
+WORKTREE_ACTIVITY_PRUNE_DIR_NAMES = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".next",
+        ".turbo",
+        "dist",
+        "build",
+        "site",
+    }
+)
+# 扫描文件数上限：超出后按已扫到的最新 mtime 给出结论，保证看板与领锁路径耗时可控。
+WORKTREE_ACTIVITY_SCAN_FILE_LIMIT = 200_000
 
 
 @dataclass
@@ -209,6 +236,125 @@ def inspect_prd_lock(
     current_moment = now_moment or datetime.now(timezone.utc)
     lock_state = "stale" if is_lock_stale(lock_metadata, current_moment) else "fresh"
     return LockSnapshot(state=lock_state, metadata=lock_metadata, lock_path=lock_path)
+
+
+def resolve_lock_worktree_path(main_repo_root: Path, worktree_label: str) -> Path | None:
+    """把锁里的 worktree 归属标签解析为磁盘上的目录路径。
+
+    Args:
+        main_repo_root (Path): 主仓库根目录。
+        worktree_label (str): 锁 JSON 的 ``worktree`` 字段（相对主仓库根的路径；
+            主仓库归属为空串）。
+
+    Returns:
+        Path | None: 存在的 worktree 目录；主仓库归属或目录已被删除时为 ``None``。
+    """
+    if not worktree_label:
+        return None
+    worktree_path = (main_repo_root / worktree_label).resolve()
+    if not worktree_path.is_dir():
+        return None
+    return worktree_path
+
+
+def detect_worktree_activity_minutes(worktree_path: Path, window_minutes: int) -> int | None:
+    """探测 worktree 在最近窗口内是否有文件改动。
+
+    跳过 ``WORKTREE_ACTIVITY_PRUNE_DIR_NAMES`` 中的依赖与构建产物目录；文件数
+    超过 ``WORKTREE_ACTIVITY_SCAN_FILE_LIMIT`` 时提前收尾，按已扫到的最新
+    mtime 给出结论。
+
+    Args:
+        worktree_path (Path): 待扫描的 worktree 目录。
+        window_minutes (int): 活性窗口（分钟）；最新改动落在窗口内即视为活跃。
+
+    Returns:
+        int | None: 最新改动距今分钟数（向下取整，仅在窗口内时返回）；窗口内
+        无改动或目录不可读时为 ``None``。
+    """
+    now_timestamp = datetime.now(timezone.utc).timestamp()
+    newest_mtime_timestamp = 0.0
+    scanned_file_count = 0
+    scan_truncated = False
+    for current_dir_text, subdir_names_list, file_names_list in os.walk(worktree_path):
+        subdir_names_list[:] = [
+            subdir_name
+            for subdir_name in subdir_names_list
+            if subdir_name not in WORKTREE_ACTIVITY_PRUNE_DIR_NAMES
+        ]
+        for file_name in file_names_list:
+            if scanned_file_count >= WORKTREE_ACTIVITY_SCAN_FILE_LIMIT:
+                scan_truncated = True
+                break
+            scanned_file_count += 1
+            try:
+                newest_mtime_timestamp = max(
+                    newest_mtime_timestamp,
+                    (Path(current_dir_text) / file_name).stat().st_mtime,
+                )
+            except OSError:
+                continue
+        if scan_truncated:
+            break
+
+    if newest_mtime_timestamp <= 0:
+        return None
+    elapsed_minutes = int((now_timestamp - newest_mtime_timestamp) // 60)
+    if elapsed_minutes <= window_minutes:
+        return elapsed_minutes
+    return None
+
+
+def lock_worktree_has_recent_activity(main_repo_root: Path, lock_metadata: dict) -> bool:
+    """锁归属的 worktree 是否在过期窗口内仍有文件改动（心跳之外的存活佐证）。
+
+    Args:
+        main_repo_root (Path): 主仓库根目录。
+        lock_metadata (dict): 锁 JSON 内容；主仓库归属（无 worktree 标签）时没有
+            可扫描的独立工作目录，直接判否。
+
+    Returns:
+        bool: 归属 worktree 存在且 ``STALE_AFTER`` 窗口内有文件改动时为 ``True``。
+    """
+    worktree_path = resolve_lock_worktree_path(
+        main_repo_root, str(lock_metadata.get("worktree") or "")
+    )
+    if worktree_path is None:
+        return False
+    stale_window_minutes = int(STALE_AFTER.total_seconds() // 60)
+    return detect_worktree_activity_minutes(worktree_path, stale_window_minutes) is not None
+
+
+def list_linked_worktree_branches(main_repo_root: Path) -> list[tuple[str, Path]]:
+    """列出主仓库所有 worktree 的 ``(分支名, 目录路径)``。
+
+    Args:
+        main_repo_root (Path): 主仓库根目录。
+
+    Returns:
+        list[tuple[str, Path]]: 每条 worktree 的分支名与目录；detached HEAD 的
+        worktree 无分支名，跳过。git 调用失败时返回空列表，调用方按"无
+        worktree 信号"降级处理。
+    """
+    try:
+        raw_porcelain_text = subprocess.run(
+            ["git", "-C", str(main_repo_root), "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+
+    worktree_branches_list: list[tuple[str, Path]] = []
+    current_worktree_path: Path | None = None
+    for raw_line_text in raw_porcelain_text.splitlines():
+        if raw_line_text.startswith("worktree "):
+            current_worktree_path = Path(raw_line_text[len("worktree ") :])
+        elif raw_line_text.startswith("branch refs/heads/") and current_worktree_path is not None:
+            branch_name_text = raw_line_text[len("branch refs/heads/") :]
+            worktree_branches_list.append((branch_name_text, current_worktree_path))
+    return worktree_branches_list
 
 
 def _build_lock_metadata(worktree_label: str, ai_tool: str, branch_name: str) -> dict:
@@ -381,6 +527,12 @@ def claim_lock(prd_file_name: str, ai_tool: str | None, branch_name: str | None)
             return 0
 
         if is_lock_stale(existing_metadata, datetime.now(timezone.utc)):
+            if lock_worktree_has_recent_activity(main_repo_root, existing_metadata):
+                # 心跳过期但归属 worktree 仍在写入：视为存活会话拒绝接管，
+                # 心跳只是无活性佐证时的兜底信号。
+                print("⚠️ 锁心跳已过期，但归属 worktree 近期仍有文件改动，视为仍在执行。")
+                _print_holder_info(existing_metadata, prd_file_name)
+                return 1
             archive_suffix = datetime.now().strftime("%Y%m%d-%H%M%S")
             stale_archive_path = lock_path.with_name(
                 f"{LOCK_FILENAME}.{archive_suffix}.{os.getpid()}.stale"
