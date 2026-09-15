@@ -424,8 +424,14 @@ _is_upstream_owned() {
         .pre-commit-config.yaml) return 0 ;;
         # Shared Playwright E2E infrastructure. Project-specific specs live in
         # tests/playwright-e2e/tests/ and are skipped via project_skip_paths.
+        #
+        # support/ 与 page-objects/ 故意不在清单里：前者承载项目的 API 客户端与
+        # 环境解析，后者是项目 UI 形态的镜像（freshai 前台登录是 mode tab +
+        # agreement checkbox，模板那份是极简表单），两者都必须由派生项目就地
+        # 改写。同 pytest.ini/ruff.toml 判例：模板无法为任何一方做权威版本，
+        # 声明所有权只会让 sync 反复要求覆盖，直到某次真的覆盖掉、静默丢掉
+        # 项目定制。
         tests/playwright-e2e/fixtures/*) return 0 ;;
-        tests/playwright-e2e/page-objects/*) return 0 ;;
         tests/playwright-e2e/scripts/*) return 0 ;;
         tests/playwright-e2e/*.config.ts) return 0 ;;
         tests/playwright-e2e/package.json) return 0 ;;
@@ -435,7 +441,11 @@ _is_upstream_owned() {
         tests/playwright-e2e/.eslintrc.cjs) return 0 ;;
         tests/playwright-e2e/.gitignore) return 0 ;;
         tests/playwright-e2e/README.md) return 0 ;;
-        tests/playwright-e2e/demo/*) return 0 ;;
+        # demo/ 不在 upstream-owned 清单里：它是起始内容而非锁步基础设施，派生
+        # 项目会把它改成自己产品的演示脚本（freshai 已改成 CargoX 定制版）。留在
+        # 清单里会让 sync 反复要求用通用模板覆盖项目定制版本。新建项目从模板克隆
+        # 时仍会拿到 demo 初始副本；tests/ 在默认 project_skip_paths 里，所以
+        # --all 模式也不会再显示它。
     esac
     return 1
 }

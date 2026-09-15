@@ -92,6 +92,12 @@ repos:
         language: system
         files: \.py$
         pass_filenames: true
+      - id: check-prd-lock-conflict
+        name: Check PRD execution lock conflict (warn-only)
+        entry: uv run python hooks/shared/check_prd_lock_conflict.py --warn-only
+        language: system
+        files: ^tasks/(pending|evidence)/
+        pass_filenames: true
       # 两个重复检测 wrapper 每次调用都做一次全量语料扫描，
       # 必须 require_serial 禁止 pre-commit 按 CPU 分片并行，否则 --all-files 会同时跑 N 份相同的全量扫描
       - id: jscpd

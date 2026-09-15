@@ -644,6 +644,7 @@ implement prd_file ai_tool prompt="":
         prompt_text="${prompt_text//<PRD_DISPLAY>/$prd_display}"
         prompt_text="${prompt_text//<EVIDENCE_DIR>/$evidence_dir}"
         prompt_text="${prompt_text//<PRD_BASENAME>/$prd_name}"
+        prompt_text="${prompt_text//<PRD_FILE>/$prd_file}"
         echo "ℹ️  No prompt provided, using evidence-aware default prompt."
         echo ""
     fi
@@ -657,6 +658,14 @@ implement prd_file ai_tool prompt="":
     elif [[ "$branch_name" =~ ^[0-9]{8}-(.+)$ ]]; then
         branch_name="${BASH_REMATCH[1]}"
     fi
+
+    # Claim the PRD execution lock before any worktree/executor side effects.
+    # A fresh lock held by another session aborts here: no worktree, no executor.
+    if ! python3 ./scripts/shared/just/prd_lock.py claim "$prd_file" --tool "$ai_tool" --branch "$branch_name"; then
+        echo "❌ PRD 执行锁冲突，已中止：未创建 worktree、未启动 executor。"
+        exit 1
+    fi
+    echo ""
 
     # Evidence directory (must match prompt and verifier expectations)
     evidence_dir="tasks/evidence/${prd_name}"
@@ -895,6 +904,61 @@ ai subcommand arg1="" arg2="" arg3="" :
             echo "  just ai push                    # run just test, then commit and push"
             echo "  just ai implement <prd-file>    # implement a PRD"
             echo "  just ai tag [name]              # tag & push (no name = auto-bump patch, e.g. v0.1.2 -> v0.1.3; default: claude)"
+            exit 1
+            ;;
+    esac
+
+# PRD 状态看板与执行锁。
+# 扫描 tasks/pending 与 tasks/archive，汇总每条 PRD 的优先级、类型、创建时间、
+# 验收清单勾选进度、证据包状态与运行态（ACTIVITY 列）。清单进度与 verifier 结论
+# 均为从文件内容推断的启发式结果，看板只用于快速定位，最终判断以 PRD 正文与
+# 证据文件原文为准。
+# 执行锁：开工前必须先领锁（just prd start），他人新鲜锁会被拒绝；锁的唯一事实
+# 源在主仓库 tasks/evidence/<prd-stem>/active.lock，各 worktree 共享同一视图。
+# Usage:
+#   just prd status            # pending 逐条列出，archive 按月折叠
+#   just prd status all        # 展开 archive 每条
+#   just prd status pending    # 只看 pending
+#   just prd status archive    # 只看 archive（按月折叠）
+#   just prd start <prd-file> [--tool <名称>] [--branch <名称>]   # 领取执行锁
+#   just prd heartbeat <prd-file>                                 # 续期自己的锁
+#   just prd release <prd-file> [--force]                         # 释放执行锁
+prd subcommand scope="" *extra_args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{subcommand}}" in
+        status)
+            if [ -z "{{scope}}" ]; then
+                python3 ./scripts/shared/just/prd_status.py
+            else
+                python3 ./scripts/shared/just/prd_status.py "{{scope}}"
+            fi
+            ;;
+        start|heartbeat|release)
+            if [ -z "{{scope}}" ]; then
+                echo "Usage: just prd {{subcommand}} <prd-file> [--tool <名称>] [--branch <名称>] [--force]"
+                exit 1
+            fi
+            lock_subcommand="{{subcommand}}"
+            if [ "$lock_subcommand" = "start" ]; then
+                lock_subcommand="claim"
+            fi
+            lock_args=("$lock_subcommand" "{{scope}}")
+            if [ -n "{{extra_args}}" ]; then
+                read -ra extra_words <<< "{{extra_args}}"
+                lock_args+=("${extra_words[@]}")
+            fi
+            python3 ./scripts/shared/just/prd_lock.py "${lock_args[@]}"
+            ;;
+        *)
+            echo "Usage:"
+            echo "  just prd status          # dashboard: pending rows + archive grouped by month"
+            echo "  just prd status all      # expand every archived PRD"
+            echo "  just prd status pending  # only tasks/pending"
+            echo "  just prd status archive  # only tasks/archive"
+            echo "  just prd start <prd-file> [--tool <名称>] [--branch <名称>]  # claim execution lock"
+            echo "  just prd heartbeat <prd-file>                              # renew own lock"
+            echo "  just prd release <prd-file> [--force]                      # release lock"
             exit 1
             ;;
     esac

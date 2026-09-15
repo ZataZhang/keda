@@ -1,7 +1,8 @@
 #compdef just
 
-# `just worktree` recipe 的 Zsh 补全扩展。
-# `-o`、`-d`、`-D`、`-m` 和 `-r` 补全本地分支名。
+# `just` 的 Zsh 补全扩展，补齐 just 动态补全器不支持的 recipe 参数值。
+#   - `just worktree`：`-o`、`-d`、`-D`、`-m` 和 `-r` 补全本地分支名。
+#   - `just prd`：补全子命令与 scope。
 
 # 在辅助函数中加载 just 的动态补全器，避免 autoload `_just` 时提前执行它。
 _just_load_dynamic_completer() {
@@ -28,14 +29,37 @@ fi
 if (( CURRENT == 3 )) && [[ "${words[2]:-}" == worktree ]] && [[ "${PREFIX:-}" == -* ]]; then
   local -a option_candidates
   option_candidates=(
-    '-o[open an existing worktree]'
-    '-d[delete a worktree and its local branch]'
-    '-D[force-delete a worktree and its local branch]'
-    '-m[merge a worktree]'
-    '-r[rebase-merge a worktree (linear history)]'
-    '--doctor[check and clean worktree state]'
+    '-o:open an existing worktree'
+    '-d:delete a worktree and its local branch'
+    '-D:force-delete a worktree and its local branch'
+    '-m:merge a worktree'
+    '-r:rebase-merge a worktree (linear history)'
+    '--doctor:check and clean worktree state'
   )
   _describe 'worktree option' option_candidates
+  return
+fi
+
+if (( CURRENT == 4 )) && [[ "${words[2]:-}" == prd ]] && [[ "${words[3]:-}" == status ]]; then
+  local -a prd_scope_candidates
+  prd_scope_candidates=(
+    'all:展开 archive 每条'
+    'pending:只看 pending'
+    'archive:只看 archive（按月折叠）'
+  )
+  _describe 'prd scope' prd_scope_candidates
+  return
+fi
+
+if (( CURRENT == 3 )) && [[ "${words[2]:-}" == prd ]]; then
+  local -a prd_subcommand_candidates
+  prd_subcommand_candidates=(
+    'status:查看 PRD 状态看板'
+    'start:领取 PRD 执行锁（--tool/--branch 自报）'
+    'heartbeat:续期自己持有的执行锁'
+    'release:释放执行锁（--force 强制）'
+  )
+  _describe 'prd subcommand' prd_subcommand_candidates
   return
 fi
 

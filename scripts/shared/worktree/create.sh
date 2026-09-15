@@ -34,6 +34,8 @@ Behavior:
   只能从 Git primary worktree 创建，避免嵌套创建和本地资源冲突。
   新 worktree 会获得独立 PostgreSQL 数据库；开发和 E2E 共用该库。
   issue-* 分支在未指定 --subdir 时，默认归入 tasks/ 子目录。
+  分支名与某条 tasks/pending PRD 的 slug 匹配时，会先领取该 PRD 的执行锁；
+  锁被其他会话持有（新鲜锁）时拒绝创建 worktree 并输出持锁者信息。
   默认会同步 base/源远程的 tracking ref 作为新 worktree 起点。
   可通过环境变量控制远程同步行为:
     KEDA_WORKTREE_SYNC_BASE      默认 true，设为 false 关闭远程同步
@@ -681,6 +683,45 @@ resolve_worktree_creation_plan() {
     esac
 }
 
+# 分支名与某条 pending PRD 的 slug 匹配时，先领取该 PRD 的执行锁。
+# 推导规则与 justfile.shared 的 implement recipe 分支名推导保持一致：
+# 去掉 .md 后缀，再去掉开头的 YYYYMMDD-HHMMSS- 或 YYYYMMDD- 日期前缀。
+# 不匹配时完全不干预（worktree 是通用工具，不能假设每次创建都对应 PRD）。
+# 参数:
+#   $1: 主仓库根目录
+#   $2: 待创建的分支名
+claim_prd_lock_for_branch() {
+    local repo_root_path="$1"
+    local branch_name="$2"
+    local pending_dir_path="$repo_root_path/tasks/pending"
+    local prd_lock_script_path="$repo_root_path/scripts/shared/just/prd_lock.py"
+
+    [ -d "$pending_dir_path" ] || return 0
+    [ -f "$prd_lock_script_path" ] || return 0
+
+    local prd_file_path=""
+    local candidate_branch_name=""
+    for prd_file_path in "$pending_dir_path"/*.md; do
+        [ -e "$prd_file_path" ] || continue
+        candidate_branch_name="$(basename "$prd_file_path")"
+        candidate_branch_name="${candidate_branch_name%.md}"
+        if [[ "$candidate_branch_name" =~ ^[0-9]{8}-[0-9]{6}-(.+)$ ]]; then
+            candidate_branch_name="${BASH_REMATCH[1]}"
+        elif [[ "$candidate_branch_name" =~ ^[0-9]{8}-(.+)$ ]]; then
+            candidate_branch_name="${BASH_REMATCH[1]}"
+        fi
+        if [ "$candidate_branch_name" = "$branch_name" ]; then
+            echo "🔒 分支名匹配 pending PRD: $(basename "$prd_file_path")，先领取执行锁 ..."
+            if ! python3 "$prd_lock_script_path" claim "$prd_file_path" --tool unknown --branch "$branch_name"; then
+                echo "❌ 该 PRD 已被其他会话领取，拒绝创建 worktree。"
+                return 1
+            fi
+            return 0
+        fi
+    done
+    return 0
+}
+
 function ai_worktree() {
     local branch_name=""
     local base_branch_name="${KODA_WORKTREE_BASE_BRANCH:-main}"
@@ -827,6 +868,12 @@ function ai_worktree() {
         echo "   current: $normalized_current_worktree_path"
         return 1
     fi
+
+    # 分支名匹配 pending PRD 时先领锁；他人新鲜锁在此拒绝，不产生任何副作用。
+    if ! claim_prd_lock_for_branch "$repo_root_path" "$branch_name"; then
+        return 1
+    fi
+
     repo_parent_path="$(dirname "$repo_root_path")"
     # 1. 约定 worktree 统一集中到 <repo_parent>/<repo-name>-worktrees/
     #    issue-* 分支在未指定 --subdir 时默认归入 tasks/ 子目录

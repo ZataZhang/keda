@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-# `just worktree` recipe 的 Bash 补全扩展。
-# `-o`、`-d`、`-D`、`-m` 和 `-r` 补全本地分支名。
+# `just` 的 Bash 补全扩展，补齐 just 动态补全器不支持的 recipe 参数值。
+#   - `just worktree`：`-o`、`-d`、`-D`、`-m` 和 `-r` 补全本地分支名。
+#   - `just prd`：补全子命令与 scope。
 
 _just_worktree_branch_candidates() {
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -30,6 +31,17 @@ _just_worktree_completion() {
 
             if [[ "$COMP_CWORD" -eq 2 && "$cur" == -* ]]; then
                 COMPREPLY=( $(compgen -W "$option_candidates" -- "$cur") )
+                return 0
+            fi
+            ;;
+        prd)
+            if [[ "$COMP_CWORD" -eq 3 && "${COMP_WORDS[2]}" == "status" ]]; then
+                COMPREPLY=( $(compgen -W "all pending archive" -- "$cur") )
+                return 0
+            fi
+
+            if [[ "$COMP_CWORD" -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "status start heartbeat release" -- "$cur") )
                 return 0
             fi
             ;;

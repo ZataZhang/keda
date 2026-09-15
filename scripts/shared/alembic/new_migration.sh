@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Create a new Alembic migration script with a YYYYMMDD_HHMMSS_<slug>.py name.
+# Create a new Alembic migration script whose filename follows the repository's
+# existing convention (YYYYMMDD<sep>HHMMSS<sep><slug>.py).
 #
 # This script enforces the migration naming convention documented in
-# docs/ai-standards/alembic.md. It only generates the file shell; the developer
+# docs/database/migrations.md. It only generates the file shell; the developer
 # (or AI agent) is responsible for filling in upgrade() / downgrade() and the
 # docstring.
 
@@ -25,8 +26,13 @@ Behavior:
   - Refuses to run when alembic heads reports zero or multiple heads; the
     version graph must be a single linear head.
   - Invokes `alembic revision -m <slug>` so the body matches script.py.mako,
-    then renames the generated file to YYYYMMDD_HHMMSS_<slug>.py and rewrites
-    the docstring header + `revision` variable so they match the filename.
+    then renames the generated file to the repository's naming convention and
+    rewrites the docstring header to match the file.
+  - Leaves the `revision` variable as Alembic generated it, unless the
+    repository's existing migrations consistently use the filename timestamp
+    prefix as the revision; in that case the rewritten revision keeps the
+    separator style of the existing revisions ('-' and '_' are both seen in
+    the wild, including mixed with the filename separator).
   - Does NOT auto-fill upgrade() / downgrade(); the caller edits those by hand.
 EOF
 }
@@ -112,19 +118,47 @@ timestamp="$(date "+%Y%m%d${separator}%H%M%S")"
 target_filename="${timestamp}${separator}${slug}.py"
 target_path="${versions_dir%/}/${target_filename}"
 
-# revision 是否等于时间戳前缀，同样按既有迁移的约定走。
-# 本仓库用 alembic 生成的 hex（如 cdcecd56387a），派生项目也可能用时间戳前缀
-# （对应门禁的 --require-revision-equals-timestamp-prefix）。改写成时间戳只在后
-# 一种约定下正确；在前一种约定下会凭空造出一个与全仓库格式不一致的 revision。
+# 读出迁移文件里 `revision` 变量的值。
+# script.py.mako 用单引号，手写的迁移多用双引号——两种都要认，否则会把整行
+# 当成 revision 值塞回去。
+read_revision_value() {
+    grep -E '^revision: str = ' "$1" 2>/dev/null | head -n 1 |
+        sed -E "s|^revision: str = ['\"]([^'\"]*)['\"].*|\1|" || true
+}
+
+# revision 用哪套约定（alembic 自动生成的 hex，还是文件名的时间戳前缀），按
+# versions 目录里既有迁移的多数派决定；平票或目录为空时回落到 hex——模板自身
+# 的默认是 hex，时间戳前缀是派生项目可选加的约定（对应门禁的
+# --require-revision-equals-timestamp-prefix）。
+#
+# 必须扫全目录，不能只看排序第一个文件：中途改过约定的仓库里，最老的那些迁移
+# 会一直把它判回旧形态，而新旧文件从此各写各的。
+#
+# 比较前要归一化分隔符：文件名用 '-' 而 revision 用 '_' 是合法组合——模板自身的
+# file_template 就是 '-'，而它早期版本的脚本写出的 revision 是 '_'。直接按字符串
+# 比会把这类仓库误判成 hex 约定，凭空造出一个与全仓库格式不一致的 revision。
 uses_timestamp_revision=0
+migration_total_count=0
+migration_timestamp_style_count=0
+revision_separator=""
 for existing_migration in "$versions_dir"/[0-9]*.py; do
     [ -e "$existing_migration" ] || continue
-    existing_prefix="$(basename "$existing_migration" | cut -c1-15)"
-    if grep -qE "^revision: str = \"${existing_prefix}\"" "$existing_migration" 2>/dev/null; then
-        uses_timestamp_revision=1
+    migration_total_count=$(( migration_total_count + 1 ))
+    existing_filename_prefix="$(basename "$existing_migration" | cut -c1-15)"
+    existing_revision_value="$(read_revision_value "$existing_migration")"
+    if [ -n "$existing_revision_value" ] &&
+        [ "${existing_revision_value//-/_}" = "${existing_filename_prefix//-/_}" ]; then
+        migration_timestamp_style_count=$(( migration_timestamp_style_count + 1 ))
+        # 记录存量时间戳风格 revision 实际使用的分隔符（第 9 个字符）：比较时
+        # 归一化是为了正确计数，写出时必须还原成项目自己的分隔符，否则文件名
+        # 用 '-' 而 revision 用 '_' 的仓库会拿到一个与全仓库不一致的 revision。
+        revision_separator="${existing_revision_value:8:1}"
     fi
-    break
 done
+if [ "$migration_timestamp_style_count" -gt 0 ] &&
+    [ "$(( migration_timestamp_style_count * 2 ))" -gt "$migration_total_count" ]; then
+    uses_timestamp_revision=1
+fi
 
 if [ -e "$target_path" ]; then
     echo "ERROR: target file already exists: $target_path" >&2
@@ -156,15 +190,14 @@ mv "$generated_path" "$target_path"
 create_date="$(date '+%Y-%m-%d %H:%M:%S.000000')"
 
 # revision 用哪个值：项目若约定 revision == 时间戳前缀就改写成时间戳，否则保留
-# alembic 生成的 hex。Revision ID 文档串始终跟着实际的 revision 走——两者不一致
-# 时，排查的人会照文档串去 `alembic downgrade`，然后发现那个 revision 根本不存在。
+# alembic 生成的 hex。改写时用存量时间戳风格 revision 的分隔符（多数派探测时
+# 记录），而不是文件名分隔符。Revision ID 文档串始终跟着实际的 revision 走——
+# 两者不一致时，排查的人会照文档串去 `alembic downgrade`，然后发现那个 revision
+# 根本不存在。
 if [ "$uses_timestamp_revision" -eq 1 ]; then
-    revision_value="$timestamp"
+    revision_value="${timestamp:0:8}${revision_separator:-$separator}${timestamp:9:6}"
 else
-    # script.py.mako 用单引号，手写的迁移多用双引号——两种都要认，否则会把整行
-    # 当成 revision 值塞回去。
-    revision_value="$(grep -E '^revision: str = ' "$target_path" | head -n 1 |
-        sed -E "s|^revision: str = ['\"]([^'\"]*)['\"].*|\1|")"
+    revision_value="$(read_revision_value "$target_path")"
 fi
 
 sed_in_place() {

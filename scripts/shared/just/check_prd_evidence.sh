@@ -28,11 +28,19 @@ prd_basename="$(basename "$prd_path" .md)"
 evidence_dir="$search_root/tasks/evidence/$prd_basename"
 
 # Determine whether this PRD touches frontend apps.
+# Priority 0: an explicit "No frontend impact" declaration in the PRD — trust
+# git diff, not text mentions.
 # Priority 1: inspect the PRD Change Impact Tree for frontend paths.
 # Priority 2: if the PRD has no explicit tree, fall back to git diff against main.
 touches_frontend=false
 
-if grep -qE 'frontend-admin/|frontend-public/' "$prd_path"; then
+if grep -qiE 'No frontend impact' "$prd_path"; then
+    # Backend-only PRD 会在 non-goals/兼容说明中引用前端路径；文字引用不等于变更。
+    if git -C "$search_root" diff --name-only HEAD -- frontend-admin frontend-public 2>/dev/null \
+        | grep -q .; then
+        touches_frontend=true
+    fi
+elif grep -qE 'frontend-admin/|frontend-public/' "$prd_path"; then
     touches_frontend=true
 fi
 
