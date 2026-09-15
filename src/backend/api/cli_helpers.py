@@ -15,11 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend.api.cli_console import console, error_console
-from backend.core.use_cases.worktree_cleanup import (
-    WorktreeCleanupResult,
-    WorktreeCleanupStatus,
-)
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
     find_repository_match_for_path,
@@ -27,10 +23,14 @@ from backend.engines.agent_runner.factory import (
     logger,
     resolve_repository_targets,
 )
-from backend.engines.agent_runner.repository_local import (
+from backend.core.use_cases.agent_runner_repository_local import (
     IARRepositoryNotInitializedError,
     detect_git_repository_root,
     require_iar_repository_initialized,
+)
+from backend.core.use_cases.worktree_cleanup import (
+    WorktreeCleanupResult,
+    WorktreeCleanupStatus,
 )
 
 if TYPE_CHECKING:

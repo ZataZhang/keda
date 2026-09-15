@@ -9,8 +9,9 @@ are available:
 - ``PlainOutputView``: Line-prefixed plain text output for non-TTY, CI,
   redirected, or explicit plain mode.
 
-Both implementations reside in the engines layer, keeping terminal UI
-dependencies (``rich``) out of the core business layer.
+Both implementations reside in the api layer (CLI rendering is an
+adapter-layer concern), keeping terminal UI dependencies (``rich``) out of
+the core business layer.
 
 All terminal output during a live session (agent chunks, status changes and
 session-level log lines) flows through the single ``Console`` owned by the
@@ -30,8 +31,8 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
+from backend.api.agent_runner_views.live_panels import PanelState, render_panel_grid
 from backend.core.shared.interfaces.agent_output_view import IAgentOutputView
-from backend.engines.agent_runner.live_panels import PanelState, render_panel_grid
 
 if TYPE_CHECKING:
     from backend.core.shared.models.agent_deliberation import DeliberationAgentProfile

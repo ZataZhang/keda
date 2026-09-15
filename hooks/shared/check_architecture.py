@@ -7,7 +7,7 @@
     <module>/api/ → <module>/core/ → <module>/engines/ → <module>/infrastructure/
 
 依赖规则（只允许向内依赖）：
-    - <module>/api/              可以依赖: <module>/core, <module>/engines
+    - <module>/api/              可以依赖: <module>/core
     - <module>/core/             可以依赖: （仅 <module>/core 内部的 shared/interfaces）
     - <module>/engines/          可以依赖: <module>/core, <module>/infrastructure
     - <module>/infrastructure/   可以依赖: （仅外部第三方包）
@@ -15,11 +15,8 @@
 禁止的方向：
     - <module>/infrastructure/ 不得 import <module>/core, <module>/engines, <module>/api
     - <module>/core/           不得 import <module>/engines, <module>/infrastructure, <module>/api
-    - <module>/api/            不得 import <module>/infrastructure（直接依赖）
+    - <module>/api/            不得 import <module>/infrastructure, <module>/engines（直接依赖）
     - 任意层                  不得反向依赖外层
-
-注：`api/ → engines/` 当前作为过渡期放宽允许（与 CLAUDE.md 一致）；docs 架构规范
-的最终目标是 `api/ → core/ → engines/`，相关迁移由独立 PRD 跟踪。
 """
 
 import ast
@@ -38,13 +35,10 @@ LAYER_ORDER: list[str] = ["infrastructure", "engines", "core", "api"]
 FORBIDDEN_IMPORTS: dict[str, list[str]] = {
     "infrastructure": ["core", "engines", "api"],
     "core": ["engines", "infrastructure", "api"],
-    "api": ["infrastructure"],
+    "api": ["infrastructure", "engines"],
     "engines": ["api"],
 }
-"""每个层禁止 import 的其他层列表。
-
-`api/` 暂未禁止 `engines/`：过渡期放宽，与 CLAUDE.md 一致；最终目标见模块 docstring。
-"""
+"""每个层禁止 import 的其他层列表。"""
 
 LEGACY_MODULES: set[str] = set()
 """迁移期兼容模块，不参与架构检查（见 system-design.md 迁移策略）。"""

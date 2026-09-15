@@ -2,9 +2,12 @@
 
 本模块是容器化 runner 编排的 core 层入口。它**不**直接 import ``engines`` 或
 ``infrastructure``（受架构守门约束），而是通过
-:mod:`backend.core.shared.interfaces.container_runner` 定义的端口与具体实现解耦：
-``api`` 层在 dispatch 时把 engines 实现（``container_auth`` / ``container_ops``）
-注入本 facade。
+:mod:`backend.core.shared.interfaces.container_runner` 定义的端口与具体实现解耦。
+``api`` 层不再 import engines 构造实现：默认实现由本模块的
+:func:`create_default_container_auth_importer` /
+:func:`create_default_container_ops_controller` 经 ``importlib`` 运行时解析
+（遵循 :mod:`backend.core.agent.memory._composition` 先例，engines 模块
+``container_auth`` / ``container_ops`` 仍保持原位）。
 
 同时，启动容器前复用 :mod:`backend.core.use_cases.daemon_single_instance` 的锁
 判断语义，确保本机 ``iar daemon`` 与 ``iar container up`` 不会抢同一仓库（rv-7）。
@@ -20,12 +23,13 @@
 - ``stream_runner_container_logs(controller, compose_file, *, runner=None)`` —— 同步
   streaming 容器日志。
 
-依赖方向：core 只允许依赖自身（含 ``core/shared/interfaces``）；api 层负责注入
-engines 实现。
+依赖方向：core 只允许依赖自身（含 ``core/shared/interfaces``）；engines
+实现经 ``importlib`` 运行时解析，不产生静态跨层 import。
 """
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -232,9 +236,31 @@ def _is_pid_alive(pid: int) -> bool:
     return True
 
 
+def create_default_container_auth_importer() -> IContainerAuthImporter:
+    """装配默认的容器认证导入器（engines ``container_auth`` 实现）。
+
+    Returns:
+        实现 :class:`IContainerAuthImporter` 端口的默认实例。
+    """
+    container_auth_module = importlib.import_module("backend.engines.agent_runner.container_auth")
+    return container_auth_module.ContainerAuthController()
+
+
+def create_default_container_ops_controller() -> IContainerRunnerController:
+    """装配默认的容器生命周期控制器（engines ``container_ops`` 实现）。
+
+    Returns:
+        实现 :class:`IContainerRunnerController` 端口的默认实例。
+    """
+    container_ops_module = importlib.import_module("backend.engines.agent_runner.container_ops")
+    return container_ops_module.ContainerOpsController()
+
+
 __all__ = [
     "StartRunnerContainerOptions",
     "StartRunnerContainerResult",
+    "create_default_container_auth_importer",
+    "create_default_container_ops_controller",
     "import_container_auth",
     "start_runner_container",
     "stop_runner_container",

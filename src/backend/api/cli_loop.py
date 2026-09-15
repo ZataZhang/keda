@@ -375,7 +375,7 @@ def utcnow_iso() -> str:
 # Helper for callers that need the singleton state store.
 def default_state_store():
     """Return the default JSON-backed state store."""
-    from backend.engines.agent_runner.persistence.loop_state_json import (
+    from backend.core.use_cases.agent_runner_loop_state import (
         JsonLoopStateStore,
     )
 
@@ -400,7 +400,7 @@ def _resolve_loop_repo_path_for_task(task: LoopTask) -> Path:
         ValueError: When the repository is not registered in ``config.toml``
             or is disabled.
     """
-    from backend.engines.agent_runner.factory import get_agent_runner_settings
+    from backend.core.use_cases.agent_runner_factory import get_agent_runner_settings
 
     settings = get_agent_runner_settings()
     if task.repo_id not in settings.repositories:
@@ -418,7 +418,7 @@ def build_loop_cli_dependencies() -> dict[str, Any]:
         Mapping with state-store factory, GitHub-client factory, process
         runner, clock, content-generator factory and repo resolver.
     """
-    from backend.engines.agent_runner.factory import (
+    from backend.core.use_cases.agent_runner_factory import (
         create_content_generator,
         create_github_client,
         create_loop_clock,

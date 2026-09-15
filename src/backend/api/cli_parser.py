@@ -22,7 +22,7 @@ def registered_agent_names() -> tuple[str, ...]:
     会在命令执行时原样抛出。
     """
     try:
-        from backend.engines.agent_runner.factories import (
+        from backend.core.use_cases.agent_runner_factory import (
             build_app_config_from_settings,
             load_fresh_agent_runner_settings,
         )

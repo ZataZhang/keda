@@ -23,12 +23,11 @@ from backend.core.use_cases.agent_invocation import (
     resolve_agent_spec,
 )
 from backend.core.use_cases.interactive_decision import run_interactive_decision
+from backend.api.agent_runner_views.live_terminal import create_output_view
 from backend.core.shared.models.agent_deliberation import DeliberationSession
-from backend.engines.agent_runner.factory import logger
-from backend.engines.agent_runner.failure_resolver import AgentFailureResolver
-from backend.engines.agent_runner.live_terminal import create_output_view
-from backend.engines.agent_runner.factories import build_app_config
-from backend.engines.agent_runner.output_protocols import get_output_protocol_registry
+from backend.core.use_cases.agent_runner_factory import build_app_config, logger
+from backend.core.use_cases.agent_runner_failure_resolver import AgentFailureResolver
+from backend.core.use_cases.agent_runner_output_protocols import get_output_protocol_registry
 
 # 黄金快照的哨兵提示词：doctor 的 argv 输出用它替代真实提示词，
 # 使 `iar agent doctor --all-profiles --json` 可与改造前的快照逐字节 diff。

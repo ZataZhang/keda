@@ -17,7 +17,7 @@ import typer
 import uvicorn
 
 from backend.api.cli_typer_app import console_app, error_console
-from backend.engines.agent_runner.factory import load_fresh_agent_runner_settings
+from backend.core.use_cases.agent_runner_factory import load_fresh_agent_runner_settings
 
 #: 管理终端的监听地址，**硬编码为回环地址、不可配置**。
 #:

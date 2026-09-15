@@ -8,13 +8,16 @@ from typing import TYPE_CHECKING
 
 from backend.api.cli_console import console, error_console
 from backend.core.shared.models.agent_runner import LabelConfig
-from backend.core.use_cases.sync_labels import sync_labels
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_github_client,
     create_registry_editor,
     logger,
 )
-from backend.engines.agent_runner.repository_local import (
+from backend.core.use_cases.agent_runner_init_assets import (
+    RemoteTemplateSkillInstallOptions,
+    install_remote_template_skills,
+)
+from backend.core.use_cases.agent_runner_repository_local import (
     GITIGNORE_BLOCK_FOOTER,
     GITIGNORE_BLOCK_HEADER,
     IAR_GITIGNORE_SECTIONS,
@@ -25,11 +28,8 @@ from backend.engines.agent_runner.repository_local import (
     ensure_gitignore_entries,
     initialize_repository_local_config,
 )
-from backend.engines.agent_runner.remote_template_skills import (
-    RemoteTemplateSkillInstallOptions,
-    install_remote_template_skills,
-)
-from backend.engines.agent_runner.takeover import upsert_repository
+from backend.core.use_cases.agent_runner_takeover import upsert_repository
+from backend.core.use_cases.sync_labels import sync_labels
 
 if TYPE_CHECKING:
     from backend.core.shared.interfaces.agent_runner import IProcessRunner

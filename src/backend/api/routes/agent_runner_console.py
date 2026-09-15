@@ -36,14 +36,7 @@ from backend.core.use_cases.console_stats import (
     build_completion_stats_overview,
     build_run_history_trend,
 )
-from backend.core.use_cases.repository_registry import (
-    RegistryValidationError,
-    add_registry_repository,
-    list_registry_repositories,
-    set_registry_repository_enabled,
-)
-from backend.engines.agent_runner.repository_local import discover_iar_repositories
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
     create_process_supervisor,
@@ -51,6 +44,13 @@ from backend.engines.agent_runner.factory import (
     load_fresh_agent_runner_settings,
     resolve_console_spawn_cwd,
     resolve_repository_targets_with_diagnostics,
+)
+from backend.core.use_cases.agent_runner_repository_local import discover_iar_repositories
+from backend.core.use_cases.repository_registry import (
+    RegistryValidationError,
+    add_registry_repository,
+    list_registry_repositories,
+    set_registry_repository_enabled,
 )
 
 _logger = logging.getLogger(__name__)

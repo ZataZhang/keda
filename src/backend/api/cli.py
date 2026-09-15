@@ -26,12 +26,12 @@ from backend.api.cli_parsed_commands import (
     ParsedCommandContext,
     dispatch_parsed_command,
 )
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_github_client,
     create_process_runner,
     logger,
 )
-from backend.engines.agent_runner.repository_local import (
+from backend.core.use_cases.agent_runner_repository_local import (
     IARRepositoryNotInitializedError,
 )
 

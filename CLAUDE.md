@@ -38,6 +38,8 @@
 - 当用户提到“当前项目”“这个仓库”“keda”“本项目”时，必须重新读取项目定位文件，不要依赖历史会话中的假设。
 - 后端必须遵守四层依赖方向：
   `src/backend/api/ -> src/backend/core/ -> src/backend/engines/ -> src/backend/infrastructure/`
+  （`api/` 只可导入 `core/`，不得直接导入 `engines/` 或 `infrastructure/`；
+  与 `docs/ai-standards/architecture.md`、`docs/architecture/system-design.md` 一致）
 - Python 项目优先使用 `uv` 和 `just`
 - 公共 Python API 使用 Google Style Docstrings；后端启用 Ruff `D100`–`D107`/`D419` 强制检查
 - 内部注释、docstring、JSDoc/TSDoc 统一使用中文（专有名词除外）

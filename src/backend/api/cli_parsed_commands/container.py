@@ -1,11 +1,11 @@
 """``iar container ...`` 命令的 core 命令入口（dispatch handler）。
 
-每个 handler 接收 :class:`ParsedCommandContext`，构造 engines 实现并注入到
-:mod:`backend.core.use_cases.agent_runner_container` 中的 facade；本模块自身
-不写任何 docker / 文件复制实现，仅做参数校验、日志格式化、退出码返回。
+每个 handler 接收 :class:`ParsedCommandContext`，经
+:mod:`backend.core.use_cases.agent_runner_container` 的默认装配函数取得
+容器控制器实现并调用同模块的 facade；本模块自身不写任何 docker / 文件
+复制实现，仅做参数校验、日志格式化、退出码返回。
 
-依赖方向：api → core（facade）；api → engines（构造实现并注入）。
-本模块同时 import engines 实现类与 core facade，是合法的 ``api`` 层职责。
+依赖方向：api → core（facade 与默认装配），不直接 import engines。
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ from backend.api.cli_console import console
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.core.use_cases.agent_runner_container import (
     StartRunnerContainerOptions,
+    create_default_container_auth_importer,
+    create_default_container_ops_controller,
     import_container_auth,
     start_runner_container,
     stop_runner_container,
     stream_runner_container_logs,
 )
 from backend.core.use_cases.daemon_single_instance import DaemonAlreadyRunningError
-from backend.engines.agent_runner.container_auth import ContainerAuthController
-from backend.engines.agent_runner.container_ops import ContainerOpsController
 
 
 def _resolve_repo_path(parsed) -> Path | None:
@@ -77,7 +77,7 @@ def run_container_auth_import_command(ctx: ParsedCommandContext) -> int:
         )
         return 1
 
-    importer = ContainerAuthController()
+    importer = create_default_container_auth_importer()
     result = import_container_auth(importer)
     console.print(f"[green]Container auth root:[/] {result.container_auth_dir}")
     for agent_result in result.agent_results:
@@ -125,7 +125,7 @@ def run_container_up_command(ctx: ParsedCommandContext) -> int:
         build=build,
     )
 
-    controller = ContainerOpsController()
+    controller = create_default_container_ops_controller()
     try:
         result = start_runner_container(controller, options, runner=_dry_run_runner(dry_run))
     except DaemonAlreadyRunningError as exc:
@@ -159,7 +159,7 @@ def run_container_down_command(ctx: ParsedCommandContext) -> int:
     """``iar container down``：停止容器。"""
     parsed = ctx.parsed
     dry_run = bool(getattr(parsed, "dry_run", False))
-    controller = ContainerOpsController()
+    controller = create_default_container_ops_controller()
     assets = controller.resolve_packaged_runner_assets()
     argv = stop_runner_container(controller, assets.compose_file, runner=_dry_run_runner(dry_run))
     argv_text = " ".join(shlex.quote(part) for part in argv)
@@ -174,7 +174,7 @@ def run_container_logs_command(ctx: ParsedCommandContext) -> int:
     """``iar container logs``：streaming 容器日志。"""
     parsed = ctx.parsed
     follow = bool(getattr(parsed, "follow", True))
-    controller = ContainerOpsController()
+    controller = create_default_container_ops_controller()
     assets = controller.resolve_packaged_runner_assets()
     # 先打印提示再进入 streaming：``--follow`` 会阻塞直到 SIGINT，
     # 若把提示放在调用之后，用户在 streaming 期间永远看不到它，且

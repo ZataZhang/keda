@@ -17,9 +17,8 @@ from backend.api.cli_registry import (
     _run_registry_start_command,
     _run_registry_stop_command,
 )
-from backend.engines.agent_runner.factory import logger
-from backend.engines.agent_runner.factory import create_registry_editor
-from backend.engines.agent_runner.repository_local import discover_iar_repositories
+from backend.core.use_cases.agent_runner_factory import create_registry_editor, logger
+from backend.core.use_cases.agent_runner_repository_local import discover_iar_repositories
 
 
 def run_registry_scan_command(ctx: ParsedCommandContext) -> int:

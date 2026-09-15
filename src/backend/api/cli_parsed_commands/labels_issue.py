@@ -12,7 +12,7 @@ from backend.api.cli_console import console, error_console
 from backend.api.cli_helpers import _resolve_cli_repository_targets
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api import cli as _cli
-from backend.engines.agent_runner.factory import logger
+from backend.core.use_cases.agent_runner_factory import logger
 from backend.api.cli_utils import _format_cli_exception
 
 

@@ -64,10 +64,10 @@ from backend.api.cli_loop import (  # noqa: E402,F401
     run_loop_list_command,
     run_loop_run_now_command,
 )
-from backend.engines.agent_runner.factory import (  # noqa: E402,F401
+from backend.core.use_cases.agent_runner_factory import (  # noqa: E402,F401
     resolve_repository_targets,
 )
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_content_generator,
     create_event_sink,
     create_github_client,
@@ -82,7 +82,7 @@ from backend.engines.agent_runner.factory import (
     resolve_issue_from_prd_target,
     write_deliberation_outputs,
 )
-from backend.engines.agent_runner.repository_local import (
+from backend.core.use_cases.agent_runner_repository_local import (
     require_iar_repository_initialized,
 )
 

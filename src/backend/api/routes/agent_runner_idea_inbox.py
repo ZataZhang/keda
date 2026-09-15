@@ -39,15 +39,15 @@ from backend.core.use_cases.idea_inbox import (
     read_idea_inbox,
     refresh_idea_summary,
 )
+from backend.core.use_cases.agent_runner_factory import (
+    create_content_generator,
+    load_fresh_agent_runner_settings,
+    resolve_repository_targets_with_diagnostics,
+)
 from backend.core.use_cases.idea_prd_drafts import (
     IdeaInboxError,
     approve_prd_draft,
     create_prd_draft,
-)
-from backend.engines.agent_runner.factory import (
-    create_content_generator,
-    load_fresh_agent_runner_settings,
-    resolve_repository_targets_with_diagnostics,
 )
 
 _logger = logging.getLogger(__name__)

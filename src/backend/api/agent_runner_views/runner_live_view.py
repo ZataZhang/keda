@@ -22,12 +22,12 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
+from backend.api.agent_runner_views.live_panels import PanelState, render_panel_grid
+from backend.api.agent_runner_views.live_terminal import _is_interactive_tty
 from backend.core.shared.interfaces.runner_live_view import (
     IRunnerLiveView,
     NoOpRunnerLiveView,
 )
-from backend.engines.agent_runner.live_panels import PanelState, render_panel_grid
-from backend.engines.agent_runner.live_terminal import _is_interactive_tty
 
 
 def create_runner_live_view(*, plain: bool = False) -> IRunnerLiveView:
