@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.infrastructure.config import settings as settings_module
+from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import PreviewSettings
 
 
@@ -50,7 +50,7 @@ def test_preview_settings_loads_from_toml(tmp_path: Path):
         encoding="utf-8",
     )
 
-    with patch.object(settings_module, "_find_config_toml", return_value=config_path):
+    with patch.object(settings_sources, "_find_config_toml", return_value=config_path):
         settings = PreviewSettings()
 
     assert settings.enabled is True
@@ -79,7 +79,7 @@ def test_preview_settings_partial_toml_keeps_remaining_defaults(tmp_path: Path):
         encoding="utf-8",
     )
 
-    with patch.object(settings_module, "_find_config_toml", return_value=config_path):
+    with patch.object(settings_sources, "_find_config_toml", return_value=config_path):
         settings = PreviewSettings()
 
     # From TOML

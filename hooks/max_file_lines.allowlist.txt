@@ -1,3 +1,7 @@
 # 存量超额文件；由 tasks/pending/P1-REFACTOR-20260705-210702-file-line-split-seven-files.md 逐步清零
 # 新增文件不得进入本名单——超限即应拆分。
-src/backend/infrastructure/config/settings.py
+#
+# 2026-09-15：已清零。原先 7 个目标文件的条目随各批拆分移除，最后的
+# src/backend/infrastructure/config/settings.py（1078 非空行）在本次对账后
+# 拆为 settings.py / settings_sources.py / agent_runner_settings.py。
+# 本文件保留为空名单：机制仍在（CI 会传 --allow-list-file），但不再豁免任何文件。

@@ -23,7 +23,7 @@ keda 的价值在编排层（issue 队列、worktree 隔离、标签路由、失
 | 输出协议差异 | 主要成本，但适配层 PRD 已收敛为"一段配置注册块" | 单一协议，但只此一家 |
 | 用户迁移成本 | 用户已有 claude/codex 订阅，零成本 | 需为新 agent 单独配模型 |
 
-关键前提：`tasks/pending/P1-FEAT-20260911-010513-agent-cli-adapter-layer.md` 的适配层落地后，接一个新 agent（如 opencode、pi CLI）的边际成本就是写一段声明式注册块，方案 A 最大的劣势（协议碎片化）正是该 PRD 要解决的。
+关键前提：适配层（`tasks/archive/P1-FEAT-20260911-010513-agent-cli-adapter-layer.md`，2026-09-11 已交付归档）落地后，接一个新 agent（如 opencode、pi CLI）的边际成本就是写一段声明式注册块，方案 A 最大的劣势（协议碎片化）正是该 PRD 要解决的。
 
 ## 自建 agent（pi-task-agent）的定位
 

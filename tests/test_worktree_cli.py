@@ -20,7 +20,7 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     WorktreeConfig,
 )
-from backend.core.use_cases import run_agent_once as run_agent_once_module
+from backend.core.use_cases import agent_runner_worktree_create as worktree_create_module
 from backend.core.use_cases.run_agent_once import create_or_reuse_worktree
 from backend.infrastructure.git.worktree import WorktreeManager, WORKTREE_DIR_NAME
 from backend.infrastructure.process_runner import SubprocessRunner
@@ -252,7 +252,9 @@ def test_create_or_reuse_worktree_provisions_database_when_enabled(
     def fake_provision(request: object, _: object) -> None:
         provision_requests.append(request)
 
-    monkeypatch.setattr(run_agent_once_module, "provision_worktree_database", fake_provision)
+    # 补丁点随实现搬到了 agent_runner_worktree_create：create_or_reuse_worktree
+    # 从该模块的命名空间解析 provision_worktree_database。
+    monkeypatch.setattr(worktree_create_module, "provision_worktree_database", fake_provision)
 
     resolved_worktree_path = create_or_reuse_worktree(repo_path, issue, config, SubprocessRunner())
 

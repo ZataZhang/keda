@@ -559,36 +559,36 @@ def test_running_publish_recovery_holds_worktree_lock_around_heal(
     Guards against two runners concurrently rebasing/publishing the same
     worktree once mid-rebase Issues become reachable by the recovery path.
     """
-    import backend.core.use_cases.agent_runner_orchestrate as orchestrate
+    import backend.core.use_cases.agent_runner_issue_handlers as handlers
 
     events: list[str] = []
     issue = _make_ready_issue(85, "Issue #85", "", (AppConfig().labels.running,))
 
-    monkeypatch.setattr(orchestrate, "choose_agent", lambda *a, **k: "claude")
-    monkeypatch.setattr(orchestrate, "_find_worktree_path_for_issue", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(handlers, "choose_agent", lambda *a, **k: "claude")
+    monkeypatch.setattr(handlers, "_find_worktree_path_for_issue", lambda *a, **k: tmp_path)
     monkeypatch.setattr(
-        orchestrate,
+        handlers,
         "_acquire_blocked_claim_lock",
         lambda lock_path, number: events.append("acquire"),
     )
     monkeypatch.setattr(
-        orchestrate,
+        handlers,
         "_release_blocked_claim_lock",
         lambda lock_path: events.append("release"),
     )
     monkeypatch.setattr(
-        orchestrate,
+        handlers,
         "_ensure_worktree_branch",
         lambda *a, **k: events.append("heal"),
     )
-    monkeypatch.setattr(orchestrate, "_reuse_existing_local_commit", lambda *a, **k: object())
+    monkeypatch.setattr(handlers, "_reuse_existing_local_commit", lambda *a, **k: object())
     monkeypatch.setattr(
-        orchestrate,
+        handlers,
         "_finish_existing_commit_publication",
         lambda **k: events.append("publish"),
     )
 
-    orchestrate._process_running_publish_recovery(
+    handlers._process_running_publish_recovery(
         issue=issue,
         repo_path=Path("."),
         config=AppConfig(),

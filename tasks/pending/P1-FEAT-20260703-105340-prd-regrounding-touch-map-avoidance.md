@@ -1,6 +1,6 @@
 # PRD: PRD Re-grounding 阶段与触碰面重叠避让
 
-> ⛔ **交付前置**：排在 `P1-FEAT-20260703-105330-roadmap-continuous-scheduling` 之后开工（gate=hard）。
+> ✅ **交付前置**：上游 `tasks/archive/P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md` 已交付归档，gate=hard 已解锁，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
 > 本 PRD 分两个阅读高度：Part A 供人审（判断要不要做、哪里必须人工确认），Part B 供执行器（怎么做）。人审只需读 Part A，按 Human Review Map 指到的点再下钻 Part B。
@@ -115,7 +115,7 @@ max_defers = 3          # 同一 Issue 最多让路次数，超限带警告继�
 
 **相关 PRD（已检查 `tasks/pending/` 与 `tasks/archive/`）**：
 
-- **依赖（pending，同组）**：`P1-FEAT-20260703-105330-roadmap-continuous-scheduling`——waiting 重晋升需要挂在其 `advance_roadmap_queue` 循环上；autopilot 配置段由更上游的 `P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile` 建立（经由调度 PRD 传递依赖，不重复声明）。硬依赖。
+- **依赖（已归档，同组）**：`tasks/archive/P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md`——waiting 重晋升需要挂在其 `advance_roadmap_queue` 循环上；autopilot 配置段由更上游的 `P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile` 建立（经由调度 PRD 传递依赖，不重复声明）。硬依赖。
 - **相关（archive，机制复用）**：`20260521-140600-...-agent-prompt-template-phase`（prompt 模板 phase 结构）、`20260523-...-rebase-conflict-agent-resolution-...`（冲突兜底的下游机制）、`20260522-101500-...-multi-agent-debate` 与 deliberation 相关 PRD（`IAgentTranscriptRunner` 只读 agent 模式的先例）。
 - **无重复**：pending 其余 PRD 与本 PRD 正交；`rework-prd`（Issue→PRD 再生成）解决的是"PRD 内容质量"，本 PRD 解决"执行时刻的地图时效"，不同层。
 
@@ -336,7 +336,7 @@ No external validation required; repository evidence was sufficient.
 - Depends on groups:
   - none
 - Depends on tasks/issues:
-  - P1-FEAT-20260703-105330-roadmap-continuous-scheduling
+  - `tasks/archive/P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md`
 - Gate type: hard
 - Notes: waiting 重晋升挂在调度 PRD 的 `advance_roadmap_queue` 上；autopilot 配置段由链条最上游的 merge-queue PRD 建立（传递依赖，不重复声明）。三个 PRD 同属 autopilot-fast-lane 组，交付顺序：merge-queue → continuous-scheduling → 本 PRD。
 

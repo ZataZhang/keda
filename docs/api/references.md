@@ -12,6 +12,22 @@
       show_root_heading: true
       members_order: source
 
+### `backend.infrastructure.config.agent_runner_settings`
+
+::: backend.infrastructure.config.agent_runner_settings
+    handler: python
+    options:
+      show_root_heading: true
+      members_order: source
+
+### `backend.infrastructure.config.settings_sources`
+
+::: backend.infrastructure.config.settings_sources
+    handler: python
+    options:
+      show_root_heading: true
+      members_order: source
+
 ### `backend.infrastructure.logging.logger`
 
 ::: backend.infrastructure.logging.logger

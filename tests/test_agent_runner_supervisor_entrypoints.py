@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_runner import (
     SupervisorActionResult,
 )
 from backend.core.use_cases import (
+    agent_runner_issue_handlers,
     agent_runner_orchestrate,
     agent_runner_publication,
     agent_runner_supervisor,
@@ -179,23 +180,23 @@ def test_running_rework_defers_supervisor_without_full_pr_context(
 
     with (
         patch.object(
-            agent_runner_orchestrate,
+            agent_runner_issue_handlers,
             "_find_worktree_path_for_issue",
             return_value=tmp_path,
         ),
         patch.object(
-            agent_runner_orchestrate,
+            agent_runner_issue_handlers,
             "get_current_branch",
             return_value="issue-1",
         ),
-        patch.object(agent_runner_orchestrate, "choose_agent", return_value="codex"),
-        patch.object(agent_runner_orchestrate, "execute_rebase", return_value=[]),
-        patch.object(agent_runner_orchestrate, "get_head_sha", return_value="after-sha"),
+        patch.object(agent_runner_issue_handlers, "choose_agent", return_value="codex"),
+        patch.object(agent_runner_issue_handlers, "execute_rebase", return_value=[]),
+        patch.object(agent_runner_issue_handlers, "get_head_sha", return_value="after-sha"),
         patch.object(
-            agent_runner_orchestrate, "_run_supervisor_with_repair_loop"
+            agent_runner_issue_handlers, "_run_supervisor_with_repair_loop"
         ) as run_supervisor,
     ):
-        agent_runner_orchestrate._process_running_rework(
+        agent_runner_issue_handlers._process_running_rework(
             issue=_make_issue(),
             repo_path=tmp_path,
             config=config,
@@ -222,20 +223,20 @@ def test_running_rework_without_supervisor_does_not_require_pr_context(
 
     with (
         patch.object(
-            agent_runner_orchestrate,
+            agent_runner_issue_handlers,
             "_find_worktree_path_for_issue",
             return_value=tmp_path,
         ),
         patch.object(
-            agent_runner_orchestrate,
+            agent_runner_issue_handlers,
             "get_current_branch",
             return_value="issue-1",
         ),
-        patch.object(agent_runner_orchestrate, "choose_agent", return_value="codex"),
-        patch.object(agent_runner_orchestrate, "execute_rebase", return_value=[]),
-        patch.object(agent_runner_orchestrate, "get_head_sha", return_value="after-sha"),
+        patch.object(agent_runner_issue_handlers, "choose_agent", return_value="codex"),
+        patch.object(agent_runner_issue_handlers, "execute_rebase", return_value=[]),
+        patch.object(agent_runner_issue_handlers, "get_head_sha", return_value="after-sha"),
     ):
-        agent_runner_orchestrate._process_running_rework(
+        agent_runner_issue_handlers._process_running_rework(
             issue=_make_issue(),
             repo_path=tmp_path,
             config=config,

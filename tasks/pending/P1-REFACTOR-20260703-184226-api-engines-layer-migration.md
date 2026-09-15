@@ -331,9 +331,9 @@ Failure triage:
 - Depends on groups:
   - none
 - Depends on tasks/issues:
-  - none（当前 hooks 整合重构已落地，本 PRD 是其善后；无未完成的硬上游）
+  - none
 - Gate type: none
-- Notes: 本 PRD 不阻塞当前 staged 重构的提交（检查器已临时放宽）；可在 hooks 整合合入后独立排期。
+- Notes: 当前 hooks 整合重构已落地，本 PRD 是其善后；无未完成的硬上游。本 PRD 不阻塞当前 staged 重构的提交（检查器已临时放宽）；可在 hooks 整合合入后独立排期。
 
 ---
 

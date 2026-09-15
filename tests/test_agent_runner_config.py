@@ -25,6 +25,7 @@ from backend.engines.agent_runner.repository_local import (
     require_iar_repository_initialized,
 )
 from backend.infrastructure.config import settings as settings_module
+from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
     AgentRunnerAutopilotSettings,
     AgentRunnerDeliberationProfileSettings,
@@ -71,7 +72,7 @@ def _make_settings(**kwargs) -> AgentRunnerSettings:
 @pytest.fixture(autouse=True)
 def isolate_agent_runner_toml(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep repository target tests independent from the developer's config.toml."""
-    original_loader = settings_module._load_toml_section_data
+    original_loader = settings_sources._load_toml_section_data
 
     def load_toml_section_without_agent_repositories(
         section_name: str,
@@ -84,14 +85,14 @@ def isolate_agent_runner_toml(monkeypatch: pytest.MonkeyPatch) -> None:
         return isolated_section_data
 
     monkeypatch.setattr(
-        settings_module,
+        settings_sources,
         "_load_toml_section_data",
         load_toml_section_without_agent_repositories,
     )
     # Registry repositories are loaded from a separate config path; keep those
     # isolated from the developer's ~/.iar/config.toml as well.
     monkeypatch.setattr(
-        settings_module,
+        settings_sources,
         "_load_registry_toml_section_data",
         lambda _section_name: {},
     )
@@ -677,14 +678,14 @@ def test_build_app_config_maps_validation_language_and_structured_evidence(
     """Validation language and structured-evidence flags reach the core config."""
     from backend.infrastructure.config.settings import AgentRunnerValidationSettings
 
-    original_loader = settings_module._load_toml_section_data
+    original_loader = settings_sources._load_toml_section_data
 
     def load_empty_agent_runner(section_name: str) -> dict[str, object]:
         if section_name == "agent_runner":
             return {}
         return original_loader(section_name)
 
-    monkeypatch.setattr(settings_module, "_load_toml_section_data", load_empty_agent_runner)
+    monkeypatch.setattr(settings_sources, "_load_toml_section_data", load_empty_agent_runner)
 
     settings = AgentRunnerSettings(
         validation=AgentRunnerValidationSettings(language="en-US", structured_evidence=False)

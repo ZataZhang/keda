@@ -347,8 +347,9 @@ def test_run_once_recovers_after_agent_command_failure(
         git_remote_command(): git_remote_result("origin"),
     }
     sleep_calls: list[int] = []
+    # wait_before_recovery_attempt 已迁到 agent_runner_attempt，补丁点随实现移动。
     monkeypatch.setattr(
-        "backend.core.use_cases.run_agent_once.time.sleep",
+        "backend.core.use_cases.agent_runner_attempt.time.sleep",
         lambda seconds: sleep_calls.append(seconds),
     )
     config = config_with_review_disabled(worktree_path, recovery_retry_delay_seconds=7)

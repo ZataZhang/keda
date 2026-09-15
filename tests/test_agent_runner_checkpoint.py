@@ -257,7 +257,7 @@ def test_process_ready_issue_continues_from_partial_commit(
 ) -> None:
     """已有部分提交但门禁未过时，应重跑 agent 续作（带 continuation prompt），不硬失败。"""
     from backend.core.shared.models.agent_runner import AgentCommitResult
-    from backend.core.use_cases import agent_runner_orchestrate as orch
+    from backend.core.use_cases import agent_runner_issue_handlers as handlers
     from backend.core.use_cases import run_agent_once
     from backend.core.use_cases.run_agent_once import PrdDeliveryError
 
@@ -268,10 +268,10 @@ def test_process_ready_issue_continues_from_partial_commit(
     def _raise_not_ready(*_args: object, **_kwargs: object) -> None:
         raise PrdDeliveryError("Acceptance Checklist has unchecked items")
 
-    monkeypatch.setattr(orch, "_reuse_existing_local_commit", _raise_not_ready)
-    monkeypatch.setattr(orch, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
-    monkeypatch.setattr(orch, "get_head_sha", lambda *a, **k: "partial-sha")
-    monkeypatch.setattr(orch, "get_current_branch", lambda *a, **k: "issue-123")
+    monkeypatch.setattr(handlers, "_reuse_existing_local_commit", _raise_not_ready)
+    monkeypatch.setattr(handlers, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
+    monkeypatch.setattr(handlers, "get_head_sha", lambda *a, **k: "partial-sha")
+    monkeypatch.setattr(handlers, "get_current_branch", lambda *a, **k: "issue-123")
 
     captured: dict[str, object] = {}
 
@@ -289,9 +289,9 @@ def test_process_ready_issue_continues_from_partial_commit(
     def _fake_finish(**_kwargs: object) -> None:
         finish_called["yes"] = True
 
-    monkeypatch.setattr(orch, "_finish_implementation_publication", _fake_finish)
+    monkeypatch.setattr(handlers, "_finish_implementation_publication", _fake_finish)
 
-    orch._process_ready_issue(
+    handlers._process_ready_issue(
         issue=issue,
         repo_path=Path("."),
         config=config_with_review_disabled(worktree_path),
@@ -311,7 +311,7 @@ def test_process_ready_issue_checkpoints_on_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """run_agent_until_committed 耗尽重试时，应 checkpoint 在途进度后再抛出。"""
-    from backend.core.use_cases import agent_runner_orchestrate as orch
+    from backend.core.use_cases import agent_runner_issue_handlers as handlers
     from backend.core.use_cases import run_agent_once
     from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
 
@@ -319,10 +319,10 @@ def test_process_ready_issue_checkpoints_on_failure(
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
 
-    monkeypatch.setattr(orch, "_reuse_existing_local_commit", lambda *a, **k: None)
-    monkeypatch.setattr(orch, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
-    monkeypatch.setattr(orch, "get_head_sha", lambda *a, **k: "before-sha")
-    monkeypatch.setattr(orch, "get_current_branch", lambda *a, **k: "issue-123")
+    monkeypatch.setattr(handlers, "_reuse_existing_local_commit", lambda *a, **k: None)
+    monkeypatch.setattr(handlers, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
+    monkeypatch.setattr(handlers, "get_head_sha", lambda *a, **k: "before-sha")
+    monkeypatch.setattr(handlers, "get_current_branch", lambda *a, **k: "issue-123")
 
     def _raise_max(**_kwargs: object) -> None:
         raise MaxRetriesExceededError([])
@@ -345,7 +345,7 @@ def test_process_ready_issue_checkpoints_on_failure(
     monkeypatch.setattr(run_agent_once, "checkpoint_uncommitted_progress", _fake_checkpoint)
 
     with pytest.raises(MaxRetriesExceededError):
-        orch._process_ready_issue(
+        handlers._process_ready_issue(
             issue=issue,
             repo_path=Path("."),
             config=config_with_review_disabled(worktree_path),

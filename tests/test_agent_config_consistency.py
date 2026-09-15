@@ -17,6 +17,7 @@ from backend.core.use_cases.agent_invocation import (
 )
 from backend.engines.agent_runner.factory import build_app_config
 from backend.infrastructure.config import settings as settings_module
+from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
     AgentRunnerDeliberationSettings,
     AgentRunnerLabelSettings,
@@ -35,7 +36,7 @@ def test_agent_runner_reads_root_config_toml() -> None:
     app_config = build_app_config()
 
     assert settings_module._PROJECT_ROOT_PATH == repository_root
-    assert settings_module._find_config_toml() == repository_root / "config.toml"
+    assert settings_sources._find_config_toml() == repository_root / "config.toml"
     assert app_config.runner.default_agent == "claude"
     assert app_config.runner.recovery_retry_delay_seconds == 30
     assert app_config.runner.timeout_seconds == 14400

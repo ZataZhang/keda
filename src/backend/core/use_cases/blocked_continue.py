@@ -16,6 +16,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     BlockedWorktreeClaimedError,
     _find_worktree_path_for_issue,
     _process_blocked_resolution,
+    refresh_runtime_dependencies,
 )
 from backend.core.use_cases.agent_runner_publish import validate_safe_changes
 from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
@@ -114,6 +115,10 @@ def blocked_continue_issue(
         return False
 
     # Proceed with blocked resolution
+    # 本入口不经过 daemon 派发，因此注入面不会自动刷新；状态处理器在自己模块的
+    # 命名空间里解析协作者，不刷新的话在 agent_runner_orchestrate 上打的补丁
+    # 会静默失效（拆分前同样位置是生效的）。
+    refresh_runtime_dependencies()
     try:
         _process_blocked_resolution(
             issue=issue,

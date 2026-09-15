@@ -18,7 +18,7 @@ from backend.api.cli_typer_app import console_app
 from backend.infrastructure.config.settings import (
     AgentRunnerConsoleSettings,
 )
-from backend.infrastructure.config import settings as console_settings_module
+from backend.infrastructure.config import agent_runner_settings
 
 
 def _occupy_port(port: int, host: str = "127.0.0.1") -> socket.socket:
@@ -155,10 +155,10 @@ class TestDefaultRunnerCommand:
     def test_argv0_named_iar_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """iar 入口直接运行时取 sys.argv[0]，保证与当前安装态同源。"""
         monkeypatch.setattr(
-            console_settings_module.sys, "argv", ["/tmp/iar-clean/bin/iar", "console"]
+            agent_runner_settings.sys, "argv", ["/tmp/iar-clean/bin/iar", "console"]
         )
-        monkeypatch.setattr(console_settings_module.shutil, "which", lambda name: "/from/which/iar")
-        assert console_settings_module._default_runner_command() == ["/tmp/iar-clean/bin/iar"]
+        monkeypatch.setattr(agent_runner_settings.shutil, "which", lambda name: "/from/which/iar")
+        assert agent_runner_settings._default_runner_command() == ["/tmp/iar-clean/bin/iar"]
 
     def test_exe_suffixed_argv0_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Windows 上 argv[0] 带 .exe 后缀，按 stem 比较才不会漏判。
@@ -167,12 +167,12 @@ class TestDefaultRunnerCommand:
         分隔符导致用例失真；被测的差异点是 ``.exe`` 后缀本身。
         """
         monkeypatch.setattr(
-            console_settings_module.sys,
+            agent_runner_settings.sys,
             "argv",
             ["/c/Users/zata/.local/bin/iar.exe", "console"],
         )
-        monkeypatch.setattr(console_settings_module.shutil, "which", lambda name: "/from/which/iar")
-        assert console_settings_module._default_runner_command() == [
+        monkeypatch.setattr(agent_runner_settings.shutil, "which", lambda name: "/from/which/iar")
+        assert agent_runner_settings._default_runner_command() == [
             "/c/Users/zata/.local/bin/iar.exe"
         ]
 
@@ -181,18 +181,18 @@ class TestDefaultRunnerCommand:
     ) -> None:
         """uvicorn 等其它入口启动后端时，从 PATH 解析 iar。"""
         monkeypatch.setattr(
-            console_settings_module.sys, "argv", ["/usr/bin/uvicorn", "backend.api.app:app"]
+            agent_runner_settings.sys, "argv", ["/usr/bin/uvicorn", "backend.api.app:app"]
         )
         monkeypatch.setattr(
-            console_settings_module.shutil, "which", lambda name: "/opt/homebrew/bin/iar"
+            agent_runner_settings.shutil, "which", lambda name: "/opt/homebrew/bin/iar"
         )
-        assert console_settings_module._default_runner_command() == ["/opt/homebrew/bin/iar"]
+        assert agent_runner_settings._default_runner_command() == ["/opt/homebrew/bin/iar"]
 
     def test_falls_back_to_uv_run_when_iar_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """既非 iar 入口、PATH 也找不到 iar 时兜底 uv run。"""
-        monkeypatch.setattr(console_settings_module.sys, "argv", ["python", "-m", "backend.main"])
-        monkeypatch.setattr(console_settings_module.shutil, "which", lambda name: None)
-        assert console_settings_module._default_runner_command() == ["uv", "run", "iar"]
+        monkeypatch.setattr(agent_runner_settings.sys, "argv", ["python", "-m", "backend.main"])
+        monkeypatch.setattr(agent_runner_settings.shutil, "which", lambda name: None)
+        assert agent_runner_settings._default_runner_command() == ["uv", "run", "iar"]
 
 
 class TestListenHostIsNotConfigurable:
