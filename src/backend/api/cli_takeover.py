@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING
 
 from backend.api.cli_console import console, error_console
 from backend.core.shared.interfaces.runner_console import RunnerProcessKind
-from backend.core.use_cases.console_processes import start_runner_process
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_github_client,
     create_process_supervisor,
     create_registry_editor,
@@ -18,16 +17,15 @@ from backend.engines.agent_runner.factory import (
     resolve_registry_config_toml_path,
     resolve_repository_targets_with_diagnostics,
 )
-from backend.engines.agent_runner.takeover import (
+from backend.core.use_cases.agent_runner_takeover import (
     build_takeover_options,
     execute_takeover,
     filter_unregistered_candidates,
     list_github_repositories,
     parse_selected_repositories,
-)
-from backend.engines.agent_runner.takeover_interactive import (
     select_repositories_interactive,
 )
+from backend.core.use_cases.console_processes import start_runner_process
 
 if TYPE_CHECKING:
     from backend.core.shared.interfaces.agent_runner import IProcessRunner

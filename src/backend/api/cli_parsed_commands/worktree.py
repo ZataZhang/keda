@@ -14,17 +14,17 @@ from backend.api.cli_helpers import (
 )
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api import cli as _cli
+from backend.core.use_cases.agent_runner_repository_local import (
+    IARRepositoryNotInitializedError,
+    detect_git_repository_root,
+    require_iar_repository_initialized,
+)
+from backend.core.use_cases.agent_runner_worktree_cli import build_worktree_manager
 from backend.core.use_cases.worktree_cleanup import (
     WorktreeCleanupRequest,
     cleanup_iar_worktrees,
 )
 from backend.core.use_cases.worktree_env import copy_missing_env_files
-from backend.engines.agent_runner.repository_local import (
-    IARRepositoryNotInitializedError,
-    detect_git_repository_root,
-    require_iar_repository_initialized,
-)
-from backend.engines.agent_runner.worktree_cli import build_worktree_manager
 
 
 def run_worktree_command(ctx: ParsedCommandContext) -> int:

@@ -17,13 +17,7 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
     RunnerProcessRecord,
 )
-from backend.core.use_cases.console_processes import (
-    _DEFAULT_LOG_CHUNK_BYTES,
-    start_runner_process,
-    stop_runner_process,
-    tail_runner_log,
-)
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_process_supervisor,
     create_registry_editor,
     load_fresh_agent_runner_settings,
@@ -32,9 +26,15 @@ from backend.engines.agent_runner.factory import (
     resolve_repository_targets,
     resolve_repository_targets_with_diagnostics,
 )
-from backend.engines.agent_runner.repository_local import (
+from backend.core.use_cases.agent_runner_repository_local import (
     RepositoryInitOptions,
     initialize_repository_local_config,
+)
+from backend.core.use_cases.console_processes import (
+    _DEFAULT_LOG_CHUNK_BYTES,
+    start_runner_process,
+    stop_runner_process,
+    tail_runner_log,
 )
 
 # ``ProcessSupervisor`` stores ``kind`` as the string value of the enum member

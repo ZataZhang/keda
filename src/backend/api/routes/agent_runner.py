@@ -18,18 +18,18 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.use_cases.agent_runner_monitor import (
-    IssueMonitoringSnapshot,
-    MonitoringResult,
-    build_issue_snapshot,
-    build_overview,
-)
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_github_client,
     create_process_runner,
     get_agent_runner_status_data,
     load_fresh_agent_runner_settings,
     resolve_repository_targets_with_diagnostics,
+)
+from backend.core.use_cases.agent_runner_monitor import (
+    IssueMonitoringSnapshot,
+    MonitoringResult,
+    build_issue_snapshot,
+    build_overview,
 )
 
 _logger = logging.getLogger(__name__)

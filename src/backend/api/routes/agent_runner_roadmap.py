@@ -34,10 +34,7 @@ from backend.core.use_cases.roadmap_actions import (
     start_prd,
     stop_global_roadmap,
 )
-from backend.core.use_cases.roadmap_dependencies import evaluate_roadmap_dependencies
-from backend.core.use_cases.roadmap_prd_scanner import scan_roadmap_prds
-from backend.core.use_cases.roadmap_state_resolver import resolve_roadmap_states
-from backend.engines.agent_runner.factory import (
+from backend.core.use_cases.agent_runner_factory import (
     create_github_client,
     create_process_runner,
     create_process_supervisor,
@@ -46,6 +43,9 @@ from backend.engines.agent_runner.factory import (
     resolve_console_spawn_cwd,
     resolve_repository_targets_with_diagnostics,
 )
+from backend.core.use_cases.roadmap_dependencies import evaluate_roadmap_dependencies
+from backend.core.use_cases.roadmap_prd_scanner import scan_roadmap_prds
+from backend.core.use_cases.roadmap_state_resolver import resolve_roadmap_states
 
 _logger = logging.getLogger(__name__)
 

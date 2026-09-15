@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.engines.agent_runner.live_panels import PanelState
+from backend.api.agent_runner_views.live_panels import PanelState
 
 
 def test_agent_panel_state_joins_fragmented_chunks_on_current_line() -> None:
