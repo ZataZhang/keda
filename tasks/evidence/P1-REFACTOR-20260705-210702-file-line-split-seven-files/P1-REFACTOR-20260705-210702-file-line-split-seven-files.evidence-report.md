@@ -343,6 +343,29 @@ PRD §7.2 计划拆出 `agent_command.py`、`agent_run_loop.py`、
 必须显式传路径：`pre-commit run ruff --files <paths>` 与 `... run ruff-format --files <paths>`
 （两个独立钩子，pin 的 ruff 为 0.7.4）。
 
+## 未覆盖在「CLI 逐字节不变」之内的可观测变化：logger 归属
+
+搬走的函数各自使用新模块的 `logging.getLogger(__name__)`，因此**日志记录的 logger 名**变了，
+共 8 条日志调用：
+
+| 迁出函数 | 原 logger | 现 logger | 条数 |
+|---|---|---|---|
+| `create_or_reuse_worktree` | `...run_agent_once` | `...agent_runner_worktree_create` | 2 |
+| attempt 记账（`AttemptPhaseTimer` 等） | `...run_agent_once` | `...agent_runner_attempt` | 2 |
+| 4 个 `_process_*` | `...agent_runner_orchestrate` | `...agent_runner_issue_handlers` | 4 |
+
+日志**正文与级别不变**，只有归属模块名变化。rv-4 的「CLI 逐字节一致」不覆盖这一项——
+它测的是 CLI 表面输出，不是日志归属。按 logger 名过滤日志的下游需要知道这点。
+
+**为什么声明而不是改写**：保持原 logger 名要么在子模块里硬编码外部模块名（
+`getLogger("backend.core.use_cases.run_agent_once")`，明显更差），要么把 logger 也纳入注入面
+（为一个纯展示属性引入运行期耦合）。两者都不如如实声明。
+
+测试不受影响：`caplog` 断言基于 message 文本且捕获所有传播记录（`rv-5` 2071 passed 即证）。
+
+**这是我在实现时想到、但直到重启 daemon 看日志才落进记录的一项**——归档前漏声明，
+归档后补记于此与 PRD §13 Final Reconciliation。
+
 ## 未采集 / 非阻塞
 
 - 真实 `iar daemon` 连 GitHub / LLM 的端到端：按 PRD §7.6 标 `opt-in / post-merge`，
