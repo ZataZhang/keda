@@ -16,6 +16,15 @@
 >
 > 违规清单可用 `uv run --no-sync python hooks/shared/check_architecture.py` 随时重出。
 
+> **2026-09-16 基线重测（PRD 更新）**：违规已增至 **44 处 import、20 个文件、15 个 engines 模块**
+> （历史基线：PRD 撰写时 26，2026-07-31 注记 40，持续漂移）。对比初版模块清单：
+> `init_flow` 已不被 api 直连（消失）；新增 `factories`（包）、`remote_template_skills`、
+> `output_protocols`、`container_auth`、`container_ops` 五个被直连模块。§1、§5 能力归类表、
+> §7.2 影响树、§9、§10、§12、§13 的计数与清单已同步更新，验收 oracle（`rg` 归零）不受影响。
+> 另：`cli_typer_container.py`、`cli_parsed_context.py`、`api/__init__.py` 等新代码已在
+> docstring 中按严格规则声明不直连 engines，违规集中在既有 cli / routes 模块。
+> 截至本次更新，`hooks/shared/check_architecture.py` 仍为本地放宽版（第 3 次 hold back 模板同步）。
+
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
 >
@@ -30,7 +39,7 @@
 
 ### Problem Statement
 
-仓库的权威架构文档规定后端四层依赖方向为 `api/ → core/ → engines/ → infrastructure/`，且 `api/` 只能调用 `core/` 暴露的用例和 DTO（`docs/architecture/system-design.md`、`docs/ai-standards/architecture.md`）。但实际上 `api/` 层（CLI 与路由）有 26 处 `import` 直接打到 `engines/agent_runner/`，绕过了 `core/` 编排层。最近一次 hooks 整合（`hooks/` → `hooks/shared/`）把架构检查器从"宽松版"（`api` 仅禁 `infrastructure`）切到"严格版"（`api` 禁 `infrastructure` + `engines`），这 26 处直连立刻变成违规，挡住了 `just lint --full` 与提交。为了让 lint 通过，检查器被临时放宽回宽松版——但这让"文档写的严格规则"与"实际执行的宽松规则"持续漂移，架构债越欠越深。现状的问题不是"检查器太严"，而是"代码没按文档要求的层次走"。
+仓库的权威架构文档规定后端四层依赖方向为 `api/ → core/ → engines/ → infrastructure/`，且 `api/` 只能调用 `core/` 暴露的用例和 DTO（`docs/architecture/system-design.md`、`docs/ai-standards/architecture.md`）。但实际上 `api/` 层（CLI 与路由）有 44 处 `import` 直接打到 `engines/agent_runner/`（2026-09-16 实测，20 个文件、15 个模块，且随新增 CLI 命令持续增长），绕过了 `core/` 编排层。最近一次 hooks 整合（`hooks/` → `hooks/shared/`）把架构检查器从"宽松版"（`api` 仅禁 `infrastructure`）切到"严格版"（`api` 禁 `infrastructure` + `engines`），这些直连立刻全部变成违规（当时为 26 处，2026-09-16 已增至 44 处），挡住了 `just lint --full` 与提交。为了让 lint 通过，检查器被临时放宽回宽松版——但这让"文档写的严格规则"与"实际执行的宽松规则"持续漂移，架构债越欠越深。现状的问题不是"检查器太严"，而是"代码没按文档要求的层次走"。
 
 ### Interpretation (解读回显)
 
@@ -75,7 +84,7 @@
 
 | 改动点 | 架构层 | 风险 | 介入方式 | 证据 / Oracle（指向 §7.6 oracle 块的 rv-id） |
 |---|---|---|---|---|
-| `core/` 用例边界与 facade 取舍（11 个 engines 能力的编排入口） | core | 高 | 人工确认（高证据负担） | rv-1, rv-2 |
+| `core/` 用例边界与 facade 取舍（15 个 engines 能力的编排入口） | core | 高 | 人工确认（高证据负担） | rv-1, rv-2 |
 | CLI / HTTP 路由行为零变化 | api | 高 | 人工确认（高证据负担） | rv-3, rv-4 |
 | 迁移不改变 daemon 并发调用顺序 | core/engines | 中 | 人工确认（高证据负担） | rv-5 |
 | 重新收紧检查器 + 同步 CLAUDE.md | infrastructure/docs | 低 | 执行器+门禁 | rv-1（架构检查即门禁） |
@@ -94,7 +103,7 @@
 
 ### 维护者 / Maintainer
 - 新增 `api/`（CLI 子命令或 HTTP 路由）时，需要的能力一律从 `src/backend/core/use_cases/` 或 `src/backend/core/shared/interfaces/` 取；`api/` 直接 `import backend.engines.*` 会被 `just lint --full` 的架构检查拦截。
-- 11 个 agent runner 能力的编排入口集中在 `core/use_cases/`（部分为本次新增的薄 facade，部分复用已有用例），命名沿用既有 `agent_runner_*` / `run_agent_*` 惯例。
+- 15 个 agent runner 能力的编排入口集中在 `core/use_cases/`（部分为本次新增的薄 facade，部分复用已有用例），命名沿用既有 `agent_runner_*` / `run_agent_*` 惯例。
 
 ### 操作者 / Operator（repo operator）
 - `uv run iar daemon run`、`uv run iar run`、`uv run iar takeover`、`uv run iar init` 等入口命令、参数、输出均与迁移前一致；`.iar.toml` 配置项不变。
@@ -129,25 +138,32 @@
 - Existing PRD relationship: 检查 `tasks/pending/` 与 `tasks/archive/` 后无重复或依赖——本 PRD 是对当前 hooks 整合（`24b05b8c` 起的 `hooks/` → `hooks/shared/` 重构）引入的架构检查收紧的善后；与 `P1-FEAT-20260703-105*` 系列（autopilot / roadmap / prd-regrounding）正交。
 - Redundancy risks: 薄 facade 用例可能与 `engines/agent_runner/` 原函数形成"透传壳"——需逐个判断是该走薄 facade（满足层次边界即可），还是该把实现上移到 `core/`（当原 engines 函数本质是 domain 编排时）。见 §6 与 D-02。
 
-**当前 26 处违规的 engines 能力归类**（实现起点，非穷尽）：
+**当前 44 处违规的 engines 能力归类**（2026-09-16 按 `rg -n "from backend\.engines" src/backend/api/` 实测重排，实现起点，非穷尽）：
 
-| engines 模块 | 性质 | api/ 引用方 |
-|---|---|---|
-| `factory`（`get_agent_runner_settings` 等） | 配置装配 / 工厂 | cli, cli_helpers, cli_init, cli_loop, cli_registry, cli_takeover, routes/agent_runner*, agent_runner_roadmap, agent_runner_idea_inbox |
-| `repository_local`（`discover_iar_repositories` 等） | 仓库注册表（本地 FS） | cli, cli_helpers, cli_init, cli_registry, agent_runner_console |
-| `takeover` / `takeover_interactive` | 接管流程 | cli_init, cli_takeover |
-| `init_flow` | 初始化流程 | cli_init |
-| `failure_resolver`（`AgentFailureResolver`） | 失败恢复编排 | cli |
-| `persistence/loop_state_json` | loop 状态持久化 | cli_loop |
-| `worktree_cli` | worktree 管理 | cli |
-| `workflow_install` | workflow 文件安装 | cli |
-| `live_terminal`（`create_output_view`） | CLI 终端渲染（呈现） | cli |
-| `runner_live_view`（`create_runner_live_view`） | runner 实时视图渲染（呈现） | cli |
+| engines 模块 | 引用次数 | 性质 | api/ 引用方 |
+|---|---|---|---|
+| `factory`（`load_fresh_agent_runner_settings`、`create_*` 装配函数、`logger`） | 20 | 配置装配 / 工厂 | cli, cli_helpers, cli_init, cli_loop(2), cli_registry, cli_takeover, cli_reexports(2), cli_typer_console, routes/agent_runner, agent_runner_console, agent_runner_roadmap, agent_runner_idea_inbox, cli_parsed_commands/{runner, labels_issue, registry(2), agent, init_workflow_takeover} |
+| `repository_local`（`discover_iar_repositories`、`require_iar_repository_initialized` 等） | 9 | 仓库注册表（本地 FS） | cli, cli_helpers, cli_init, cli_registry, cli_reexports, routes/agent_runner_console, cli_parsed_commands/{worktree, registry, init_workflow_takeover} |
+| `factories`（包，`build_app_config` / `build_app_config_from_settings`） | 2 | 应用配置装配 | cli_parser（函数内 lazy import）, cli_parsed_commands/agent |
+| `takeover` / `takeover_interactive` | 2 / 1 | 接管流程 | cli_init, cli_takeover |
+| `failure_resolver`（`AgentFailureResolver`） | 1 | 失败恢复编排 | cli_parsed_commands/agent |
+| `persistence/loop_state_json` | 1 | loop 状态持久化 | cli_loop（函数内 lazy import） |
+| `worktree_cli` | 1 | worktree 管理 | cli_parsed_commands/worktree |
+| `workflow_install` | 1 | workflow 文件安装 | cli_parsed_commands/init_workflow_takeover |
+| `remote_template_skills` | 1 | 远程模板技能安装 | cli_init |
+| `output_protocols` | 1 | 输出协议注册表 | cli_parsed_commands/agent |
+| `container_auth` / `container_ops` | 1 / 1 | 容器鉴权 / 容器操作控制 | cli_parsed_commands/container |
+| `live_terminal`（`create_output_view`） | 1 | CLI 终端渲染（呈现） | cli_parsed_commands/agent |
+| `runner_live_view`（`create_runner_live_view`） | 1 | runner 实时视图渲染（呈现） | cli_parsed_commands/runner |
+
+> 与初版清单的差异：`init_flow` 已不被 api 直连（消失）；新增 `factories`、`remote_template_skills`、`output_protocols`、`container_auth`、`container_ops` 五个被直连模块。
+> `factory` 一家占 20/44（约 45%），其中 5 处仅 import `logger`（cli_parsed_commands/{runner, labels_issue, registry, agent, init_workflow_takeover}），经 core re-export 即可低成本消除。
+> `container_auth` / `container_ops` 可优先评估并入既有 `core/use_cases/agent_runner_container.py`。
 
 ## 6. Recommendation
 
 ### Recommended Approach
-- Approach: **逐能力在 `core/` 落编排入口，`api/` 改打 `core/`，最后收紧检查器并同步文档。** 业务逻辑类能力（factory / repository_local / takeover / init_flow / failure_resolver / worktree_cli / workflow_install / persistence）在 `core/use_cases/` 建薄 facade 用例（复用已有则直接指）；呈现适配类（`live_terminal` / `runner_live_view`）移入 `api/`（CLI 渲染本属接入层，不该住 engines）。
+- Approach: **逐能力在 `core/` 落编排入口，`api/` 改打 `core/`，最后收紧检查器并同步文档。** 业务逻辑类能力（factory / factories / repository_local / takeover / failure_resolver / worktree_cli / workflow_install / persistence / remote_template_skills / output_protocols / container_auth / container_ops）在 `core/use_cases/` 建薄 facade 用例（复用已有则直接指）；呈现适配类（`live_terminal` / `runner_live_view`）移入 `api/`（CLI 渲染本属接入层，不该住 engines）。
 - Why this is the best fit: 复用既有 `core/use_cases/` 体系与命名惯例，最小新增；呈现适配归位 `api/` 消除"core 编排终端渲染"的别扭；检查器恢复严格态后架构债真正清零，而非靠放宽遮盖。
 - Rejected redundancy: 不为每条 import 盲建一对一透传壳——能并入相近用例的并入；不把 `engines/agent_runner/` 实现整体搬进 `core/`（保留 engines 作为适配 / 工厂层的本职）。
 
@@ -180,16 +196,22 @@ This section is a living implementation guide based on current repository analys
 │       [新增] / [修改]
 │       【总结】为 api 直连的 engines 能力补 core 编排入口（薄 facade 或并入既有用例）
 │
-│       ├── factory 能力：build_agent_runner_settings 等（或并入既有 settings 用例）
-│       ├── repository_local 能力：discover_repositories 等
-│       ├── takeover / takeover_interactive / init_flow / failure_resolver 能力
-│       ├── worktree_cli / workflow_install / persistence(loop_state_json) 能力
+│       ├── factory 能力：load_fresh_agent_runner_settings、create_* 装配函数、logger（或并入既有 settings 用例；5 处纯 logger import 可经 core re-export 消除）
+│       ├── factories 包能力：build_app_config / build_app_config_from_settings
+│       ├── repository_local 能力：discover_repositories、require_iar_repository_initialized 等
+│       ├── takeover / takeover_interactive / failure_resolver / remote_template_skills 能力
+│       ├── worktree_cli / workflow_install / persistence(loop_state_json) / output_protocols 能力
+│       ├── container_auth / container_ops 能力（优先评估并入既有 agent_runner_container 用例）
 │       └── 每个 facade 经 core/shared/interfaces 端口或直接调 engines 实现
 │
 ├── src/backend/api/
-│   ├── cli.py / cli_loop.py / cli_takeover.py / cli_helpers.py / cli_init.py / cli_registry.py
+│   ├── cli.py / cli_loop.py / cli_takeover.py / cli_helpers.py / cli_init.py / cli_registry.py / cli_reexports.py / cli_typer_console.py / cli_parser.py
 │   │   [修改]
 │   │   【总结】把 from backend.engines.agent_runner.* 改为 from backend.core.use_cases.*（呈现类改指 api 内迁模块）
+│   │
+│   ├── cli_parsed_commands/{runner, worktree, registry, agent, container, labels_issue, init_workflow_takeover}.py
+│   │   [修改]
+│   │   【总结】同上；其中 runner / labels_issue / registry / agent / init_workflow_takeover 含纯 logger import，优先消除
 │   │
 │   ├── routes/agent_runner.py / agent_runner_console.py / agent_runner_roadmap.py / agent_runner_idea_inbox.py
 │   │   [修改]
@@ -266,7 +288,7 @@ flowchart TD
   required_for_acceptance: true
 
 - id: rv-2
-  behavior: core facade 覆盖全部 11 个 engines 能力且无重复职责
+  behavior: core facade 覆盖全部 15 个 engines 能力且无重复职责
   real_entry: "rg -n 'from backend\\.engines' src/backend/core/use_cases/ 与 rg -n 'def ' src/backend/core/use_cases/agent_runner_*.py"
   expected: "所有原 api 直连的 engines 能力都有 core/use_cases 入口；无一对一冗余透传壳（除非该能力本就是 domain 编排）"
   mock_boundary: "不 mock；静态扫描"
@@ -353,7 +375,7 @@ Failure triage:
 
 > Part A 第 2 节每个"必须人工确认"的改动点，这里都要有对应的已确认验收项。
 
-- [ ] core facade 边界与"薄 facade vs. 深度迁移"取舍已逐能力确认（11 个 engines 能力的落点）
+- [ ] core facade 边界与"薄 facade vs. 深度迁移"取舍已逐能力确认（15 个 engines 能力的落点）
 - [ ] CLI / HTTP 路由行为零变化的判定基准与 rv-3/rv-4 证据已确认
 - [ ] 迁移不触碰 daemon 并发调用顺序已确认（rv-5）
 
@@ -391,7 +413,7 @@ Failure triage:
 
 ### Delivery Readiness
 
-- [ ] 推荐方案完整实现：11 个 engines 能力均有 core 编排入口或已迁入 api；无未批准的并行抽象
+- [ ] 推荐方案完整实现：15 个 engines 能力均有 core 编排入口或已迁入 api；无未批准的并行抽象
 - [ ] 无遗留回归或 rollout 阻塞；CLI / 路由 / daemon 行为零变化
 
 ---
@@ -400,7 +422,7 @@ Failure triage:
 
 - FR-1: `src/backend/api/` 下所有 `.py` 文件不得出现 `from backend.engines` 直接 import。
 - FR-2: `hooks/shared/check_architecture.py` 的 `FORBIDDEN_IMPORTS["api"]` 必须为 `["infrastructure", "engines"]`，且 `just lint --full` 以此配置通过。
-- FR-3: 原 `api/` 直连的 11 个 `engines/agent_runner/` 能力必须在 `core/use_cases/` 有编排入口（新增 facade 或复用既有用例），或在呈现类情况下迁入 `api/`。
+- FR-3: 原 `api/` 直连的 15 个 `engines/agent_runner/` 能力必须在 `core/use_cases/` 有编排入口（新增 facade 或复用既有用例），或在呈现类情况下迁入 `api/`。
 - FR-4: `live_terminal` 与 `runner_live_view` 迁出 `engines/agent_runner/`，落入 `api/` 层。
 - FR-5: `CLAUDE.md` 的 `api/` 依赖规则表述与 `docs/ai-standards/architecture.md`、`docs/architecture/system-design.md` 一致。
 - FR-6: `iar` CLI 子命令集合、参数、输出、退出码与迁移前逐字节一致。
@@ -420,7 +442,7 @@ Failure triage:
 
 - 风险：薄 facade 沦为无意义透传壳。缓解：逐能力判断——本质是 domain 编排的上移到 `core/`，仅适配 / 工厂类保留薄 facade；以 rv-2 守。
 - 风险：呈现模块迁入 `api/` 后被 `engines/` 内部其他模块反向引用。缓解：§7.3 `rg` 搜 `engines.agent_runner.(live_terminal|runner_live_view)` 确认无残留；若有则先解耦再迁。
-- 风险：迁移面大（26 处 import、11 模块），单 PR 评审负担重。缓解：按 engines 能力分批提交（factory → repository_local → takeover/init → 其余 → 呈现迁移 → 收紧检查器），每批独立可过 lint/test。
+- 风险：迁移面大（44 处 import、15 模块），单 PR 评审负担重。缓解：按 engines 能力分批提交（factory（含 5 处纯 `logger` import，最先批）→ repository_local → takeover/init/remote_template_skills → container/output_protocols/factories → 其余 → 呈现迁移 → 收紧检查器），每批独立可过 lint/test。
 
 ## 13. Decision Log
 
@@ -429,4 +451,4 @@ Failure triage:
 | D-01 | 检查器当前如何处置 | 临时放宽到 `["infrastructure"]` 并写本 PRD 跟踪 | 立即收紧卡住 staged 重构 / 永久放宽 | 放宽让重构可提交，PRD 锁定善后，避免架构债被静默遗忘 |
 | D-02 | 业务类 engines 能力如何落 core | 薄 facade 用例（复用既有则直接指） | 一对一透传壳 / 把 engines 实现搬进 core | 满足层次边界且最小新增；本质是 domain 编排的才上移 |
 | D-03 | 呈现类（live_terminal / runner_live_view）归属 | 迁入 `api/` | 在 core 建呈现端口 / 留 engines 永久豁免 | CLI 终端渲染本属接入层，core 不该编排渲染；迁入 api 消除别扭 |
-| D-04 | 迁移节奏 | 按 engines 能力分批提交 | 一次性大 PR | 26 处 / 11 模块分批降低评审与回归风险，每批可独立过门禁 |
+| D-04 | 迁移节奏 | 按 engines 能力分批提交 | 一次性大 PR | 44 处 / 15 模块分批降低评审与回归风险，每批可独立过门禁 |
