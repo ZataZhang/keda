@@ -21,7 +21,7 @@ PRD：`tasks/pending/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync
 
 ![rv-3 设置面板展开态：开启 + 1 分钟选中，已保存](rv-3-settings-panel.png)
 
-- PR：[提交后由运行器创建，链接见 PR 页面]
+- PR：[#143 feat(console): dashboard 本地快照缓存与可配置后台定时同步](https://github.com/ZataZhang/keda/pull/143)
 - CI：本分支运行 `just lint --repo`（含 full lint / reuse / `just test` / `mkdocs build --strict`）、`just test all`、`just e2e`（证据见下表）
 
 **执行者已替人完成的核对**：rv-1、rv-4、rv-5、rv-6 全为自动化 oracle（迁移往返、调度生命周期、HTTP 契约、Playwright、门禁），
