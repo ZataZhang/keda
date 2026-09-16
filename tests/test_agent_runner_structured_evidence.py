@@ -746,3 +746,66 @@ def test_validate_evidence_manifest_parses_expected_artifacts(tmp_path: Path) ->
     assert specs[0].mime == "image/png"
     assert specs[0].min_size == 50000
     assert specs[0].key_claim == "Welcome, Alice"
+
+
+def _write_manifest_with_stdout_assertions(evidence_dir: Path, stdout_assertions: object) -> None:
+    """Write a single-item manifest whose evidence block has stdout_assertions."""
+    item: dict = {
+        "item_number": 1,
+        "item_name": "API contract validated",
+        "command": "curl -s http://localhost:8080/health",
+        "evidence_files": ["rv-1-health.txt"],
+        "output_summary": "health endpoint responds",
+        "explanation": "real request against the running service",
+        "risks": "local only",
+        "negative_control": "stop the service",
+        "expected_fail": "connection refused",
+    }
+    if stdout_assertions is not None:
+        item["stdout_assertions"] = stdout_assertions
+    manifest = {"version": 1, "language": "en-US", "items": [item]}
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    (evidence_dir / "evidence.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_evidence_block_parses_stdout_assertions(tmp_path: Path) -> None:
+    """stdout_assertions are parsed into StdoutAssertion objects (补丁 1 / FR-1)."""
+    _write_manifest_with_stdout_assertions(
+        tmp_path / ".iar" / "evidence",
+        [
+            {"severity": "high", "pattern": "200 OK", "source": "stdout", "must_match": True},
+            {"pattern": "ERROR", "must_match": False},
+        ],
+    )
+    manifest = load_evidence_manifest(tmp_path, _legacy_config())
+    assertions = manifest.items[0].stdout_assertions
+    assert len(assertions) == 2
+    assert assertions[0].severity == "high"
+    assert assertions[0].pattern == "200 OK"
+    assert assertions[0].source == "stdout"
+    assert assertions[0].must_match is True
+    # 缺省值：severity=high / source=stdout
+    assert assertions[1].severity == "high"
+    assert assertions[1].source == "stdout"
+    assert assertions[1].must_match is False
+
+
+def test_evidence_block_legacy_manifest_compatible(tmp_path: Path) -> None:
+    """A legacy manifest without stdout_assertions still parses (rv-2)."""
+    _write_manifest_with_stdout_assertions(tmp_path / ".iar" / "evidence", None)
+    manifest = load_evidence_manifest(tmp_path, _legacy_config())
+    assert manifest.items[0].stdout_assertions == ()
+
+
+def test_evidence_block_rejects_malformed_stdout_assertion(tmp_path: Path) -> None:
+    """Malformed assertions fail loudly instead of degrading to 'no check'."""
+    _write_manifest_with_stdout_assertions(tmp_path / ".iar" / "evidence", [{"severity": "high"}])
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        load_evidence_manifest(tmp_path, _legacy_config())
+    assert "pattern" in str(exc_info.value)
+
+
+def test_prompt_suffix_documents_stdout_assertions() -> None:
+    """Both prompt variants tell the agent how to declare output assertions."""
+    assert "stdout_assertions" in build_structured_evidence_prompt_suffix("zh-CN")
+    assert "stdout_assertions" in build_structured_evidence_prompt_suffix("en-US")

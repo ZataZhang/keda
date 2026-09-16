@@ -7,8 +7,6 @@ import logging
 import re
 import subprocess
 import time
-from dataclasses import asdict, replace
-from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
@@ -36,6 +34,18 @@ from backend.core.use_cases.agent_runner_validation import (
 )
 from backend.core.use_cases.agent_runner_failure import (
     format_recovery_failure_summary,
+)
+
+# 补丁 3 / 补丁 4 的实现按职责拆到同级子模块（整文件 1000 非空行硬上限）：
+# pr_supervisor_diff.py 负责 diff 分层，pr_supervisor_findings.py 负责跨 cycle finding。
+from backend.core.use_cases.pr_supervisor_diff import (
+    _build_layered_diff,
+)
+from backend.core.use_cases.pr_supervisor_findings import (
+    _build_previous_findings_section,
+    _extract_supervisor_findings,
+    _load_previous_findings,
+    _persist_findings,
 )
 from backend.core.use_cases.pr_supervisor_repair import execute_repair
 from backend.core.use_cases.agent_runner_verification_recovery import (
@@ -182,294 +192,6 @@ def is_sign_off_gate_only_failure(pr_context: PullRequestContext) -> bool:
     """
     return bool(pr_context.checks_summary) and all(
         REALISTIC_VALIDATION_SIGN_OFF_CHECK in check for check in pr_context.checks_summary
-    )
-
-
-# ---------------------------------------------------------------------------
-# 补丁 3：supervisor diff 分层注入（关键路径全量 + 其余按字符预算截断）
-# ---------------------------------------------------------------------------
-
-_DIFF_FILE_HEADER_PREFIX = "diff --git "
-_DIFF_FILE_PATH_PATTERN = re.compile(r"^diff --git a/(.+?) b/(.+?)$")
-_DIFF_TRUNCATION_MARKER = "...(diff truncated)"
-
-
-def _normalize_diff_path(raw_path: str) -> str:
-    """归一化 diff 路径与 ``key_paths`` 前缀，避免 ``./`` 或反斜杠写法漏匹配。"""
-    return raw_path.replace("\\", "/").removeprefix("./").strip()
-
-
-def _diff_file_path(header_line: str) -> str:
-    """从 ``diff --git a/<path> b/<path>`` 行取出变更文件路径。"""
-    path_match = _DIFF_FILE_PATH_PATTERN.match(header_line.strip())
-    if path_match is None:
-        return ""
-    return _normalize_diff_path(path_match.group(2))
-
-
-def _split_diff_by_file(diff_text: str) -> tuple[tuple[str, str], ...]:
-    """把 unified diff 切成 ``(文件路径, 该文件 diff 文本)`` 序列。
-
-    分不出文件边界时（例如 ``(diff unavailable)`` 或非标准格式）返回空元组，
-    由调用方退回整体截断，保持补丁前的降级行为。
-    """
-    file_chunks: list[tuple[str, str]] = []
-    current_path = ""
-    current_lines: list[str] = []
-    for raw_line in diff_text.splitlines():
-        if raw_line.startswith(_DIFF_FILE_HEADER_PREFIX):
-            if current_lines:
-                file_chunks.append((current_path, "\n".join(current_lines)))
-            current_path = _diff_file_path(raw_line)
-            current_lines = [raw_line]
-            continue
-        if current_path:
-            current_lines.append(raw_line)
-    if current_lines:
-        file_chunks.append((current_path, "\n".join(current_lines)))
-    return tuple(file_chunks)
-
-
-def _is_key_diff_path(file_path: str, key_paths: tuple[str, ...]) -> bool:
-    """判断某文件的 diff 是否落在配置声明的关键路径下。"""
-    normalized_path = _normalize_diff_path(file_path)
-    return any(
-        normalized_path.startswith(_normalize_diff_path(key_path))
-        for key_path in key_paths
-        if key_path.strip()
-    )
-
-
-def _truncate_diff_text(diff_text: str, max_diff_chars: int) -> str:
-    """按字符预算截断 diff，并显式留下截断标记。"""
-    if max_diff_chars <= 0 or len(diff_text) <= max_diff_chars:
-        return diff_text
-    return f"{diff_text[:max_diff_chars]}\n{_DIFF_TRUNCATION_MARKER}"
-
-
-def _build_layered_diff(
-    diff_text: str,
-    key_paths: tuple[str, ...],
-    max_diff_chars: int,
-) -> str:
-    """构建分层 diff：文件清单 + 关键文件全量 + 其余按预算截断。
-
-    补丁前整个 diff 被截断到 6000 字符，长 PR 的关键变更常常整个落在窗口外，
-    supervisor 只看得到前半截就 approve。这里按 ``key_paths`` 前缀把关键文件
-    的 diff 完整保留，非关键文件共享剩余字符预算。
-
-    Args:
-        diff_text: ``git diff`` 原始输出。
-        key_paths: 关键路径前缀；为空时退化为整体截断（补丁前行为）。
-        max_diff_chars: 非关键文件 diff 的字符预算。
-
-    Returns:
-        str: 供 prompt 注入的分层 diff 文本。
-    """
-    file_chunks = _split_diff_by_file(diff_text)
-    if not file_chunks:
-        return _truncate_diff_text(diff_text, max_diff_chars)
-
-    key_chunks = [chunk for chunk in file_chunks if _is_key_diff_path(chunk[0], key_paths)]
-    other_chunks = [chunk for chunk in file_chunks if not _is_key_diff_path(chunk[0], key_paths)]
-    if key_paths and not key_chunks:
-        _logger.warning(
-            "Supervisor key_paths %s matched no file in the PR diff; "
-            "check for a wrong path prefix.",
-            key_paths,
-        )
-
-    sections = [
-        f"Changed files ({len(file_chunks)}):",
-        "\n".join(f"- {file_path}" for file_path, _ in file_chunks),
-    ]
-    if key_chunks:
-        sections.extend(
-            [
-                "",
-                "--- Key files (full diff) ---",
-                "\n".join(chunk_text for _, chunk_text in key_chunks),
-            ]
-        )
-    if other_chunks:
-        other_diff_text = "\n".join(chunk_text for _, chunk_text in other_chunks)
-        sections.extend(
-            [
-                "",
-                f"--- Other files (truncated to {max_diff_chars} chars) ---",
-                _truncate_diff_text(other_diff_text, max_diff_chars),
-            ]
-        )
-    return "\n".join(sections)
-
-
-# ---------------------------------------------------------------------------
-# 补丁 4：跨 cycle finding 累积（worktree 内 artifact，不污染 PR 评论流）
-# ---------------------------------------------------------------------------
-
-_FINDINGS_ARTIFACT_FILE_NAME = "findings.json"
-_FINDINGS_ARTIFACT_VERSION = 1
-_OPEN_FINDING_STATUS = "open"
-_RESOLVED_FINDING_STATUS = "resolved"
-
-
-def _findings_artifact_path(worktree_path: Path, config: AppConfig, issue_number: int) -> Path:
-    """finding artifact 路径：``<worktree>/<artifact_dir>/issue-<N>/findings.json``。"""
-    return (
-        worktree_path
-        / config.post_pr_supervisor.findings_artifact_dir
-        / f"issue-{issue_number}"
-        / _FINDINGS_ARTIFACT_FILE_NAME
-    )
-
-
-def _parse_finding_entry(raw_finding: object, default_cycle: int) -> FindingDetail | None:
-    """解析一条 finding JSON 记录；缺 title 的条目无法跨 cycle 去重，直接丢弃。"""
-    if not isinstance(raw_finding, dict):
-        return None
-    title = str(raw_finding.get("title") or "").strip()
-    if not title:
-        return None
-    try:
-        line_number = int(raw_finding.get("line") or 0)
-    except (TypeError, ValueError):
-        line_number = 0
-    try:
-        reported_cycle = int(raw_finding.get("cycle_reported") or 0) or default_cycle
-    except (TypeError, ValueError):
-        reported_cycle = default_cycle
-    return FindingDetail(
-        severity=str(raw_finding.get("severity") or "medium"),
-        title=title,
-        description=str(raw_finding.get("description") or ""),
-        file=str(raw_finding.get("file") or ""),
-        line=line_number,
-        status=str(raw_finding.get("status") or _OPEN_FINDING_STATUS),
-        cycle_reported=reported_cycle,
-    )
-
-
-def _load_previous_findings(
-    worktree_path: Path, config: AppConfig, issue_number: int
-) -> tuple[FindingDetail, ...]:
-    """读取历轮仍未解决的 findings。
-
-    artifact 不存在、JSON 损坏或结构不符时一律静默返回空：这是给模型看的
-    上下文增强，任何解析问题都不应阻断 supervisor cycle。
-
-    Returns:
-        tuple[FindingDetail, ...]: 状态为 ``open`` 的累积 findings。
-    """
-    artifact_path = _findings_artifact_path(worktree_path, config, issue_number)
-    if not artifact_path.is_file():
-        return ()
-    try:
-        artifact_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as artifact_error:
-        _logger.warning(
-            "Ignoring unreadable supervisor findings artifact %s: %s",
-            artifact_path,
-            artifact_error,
-        )
-        return ()
-    raw_findings = artifact_payload.get("findings") if isinstance(artifact_payload, dict) else None
-    if not isinstance(raw_findings, list):
-        return ()
-    parsed_findings = (
-        _parse_finding_entry(raw_finding, default_cycle=0) for raw_finding in raw_findings
-    )
-    return tuple(
-        finding
-        for finding in parsed_findings
-        if finding is not None and finding.status == _OPEN_FINDING_STATUS
-    )
-
-
-def _persist_findings(
-    worktree_path: Path,
-    config: AppConfig,
-    issue_number: int,
-    cycle: int,
-    current_findings: tuple[FindingDetail, ...],
-) -> None:
-    """把本 cycle 的 findings 合并进 artifact。
-
-    合并规则（FR-10）：``(file, title)`` 为去重键——status 为 ``resolved`` 的
-    finding 从累积列表移除，``open`` 的 finding 首次出现时记下 ``cycle_reported``，
-    重复出现只更新内容不新增条目。
-    """
-    artifact_path = _findings_artifact_path(worktree_path, config, issue_number)
-    previous_findings = _load_previous_findings(worktree_path, config, issue_number)
-    if not previous_findings and not current_findings and not artifact_path.exists():
-        return
-
-    merged_findings: dict[tuple[str, str], FindingDetail] = {
-        (finding.file, finding.title): finding for finding in previous_findings
-    }
-    for finding in current_findings:
-        finding_key = (finding.file, finding.title)
-        if finding.status == _RESOLVED_FINDING_STATUS:
-            merged_findings.pop(finding_key, None)
-            continue
-        already_reported_finding = merged_findings.get(finding_key)
-        merged_findings[finding_key] = replace(
-            finding,
-            cycle_reported=(
-                already_reported_finding.cycle_reported
-                if already_reported_finding is not None
-                else cycle
-            ),
-        )
-
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    artifact_path.write_text(
-        json.dumps(
-            {
-                "version": _FINDINGS_ARTIFACT_VERSION,
-                "issue_number": issue_number,
-                "last_updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "findings": [asdict(finding) for finding in merged_findings.values()],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-
-def _extract_supervisor_findings(payload: dict[str, object]) -> tuple[FindingDetail, ...]:
-    """从 supervisor JSON 输出里抽取可选 ``findings[]``（FR-11，向后兼容）。
-
-    旧模型不输出该字段时返回空；单条记录畸形只丢弃该条，不影响已解析出的
-    action——action 的 fail-closed 解析始终先于 findings 抽取。
-    """
-    raw_findings = payload.get("findings")
-    if not isinstance(raw_findings, list):
-        return ()
-    parsed_findings = (
-        _parse_finding_entry(raw_finding, default_cycle=0) for raw_finding in raw_findings
-    )
-    return tuple(finding for finding in parsed_findings if finding is not None)
-
-
-def _build_previous_findings_section(
-    previous_findings: tuple[FindingDetail, ...],
-) -> tuple[str, ...]:
-    """渲染 ``Previous unresolved findings`` 段；无累积 finding 时返回空。"""
-    if not previous_findings:
-        return ()
-    reported_cycles = sorted({finding.cycle_reported for finding in previous_findings})
-    cycle_range_text = f"{reported_cycles[0]}..{reported_cycles[-1]}"
-    finding_lines = [
-        f"- [{finding.severity}] {finding.file}:{finding.line} "
-        f"{finding.title} (cycle {finding.cycle_reported})"
-        for finding in previous_findings
-    ]
-    return (
-        "",
-        f"Previous unresolved findings from cycles {cycle_range_text}:",
-        *finding_lines,
-        "Re-check each of them; a finding stays in this list until it is resolved.",
     )
 
 
@@ -728,6 +450,7 @@ def guard_supervisor_action_for_pr_state(
             findings_counts=action_result.findings_counts,
             verification_status=action_result.verification_status,
             head_sha=action_result.head_sha,
+            findings_detail=action_result.findings_detail,
         )
 
     # mergeable=False 是确定性、机器可修的信号：冲突不会随等待自愈，而
@@ -754,6 +477,7 @@ def guard_supervisor_action_for_pr_state(
             findings_counts=action_result.findings_counts,
             verification_status=action_result.verification_status,
             head_sha=action_result.head_sha,
+            findings_detail=action_result.findings_detail,
         )
 
     if action_result.action != "approve_for_human_review":
@@ -783,6 +507,7 @@ def guard_supervisor_action_for_pr_state(
             findings_counts=action_result.findings_counts,
             verification_status=action_result.verification_status,
             head_sha=action_result.head_sha,
+            findings_detail=action_result.findings_detail,
         )
 
     if pr_context.checks_state == "PENDING":
@@ -802,6 +527,7 @@ def guard_supervisor_action_for_pr_state(
             findings_counts=action_result.findings_counts,
             verification_status=action_result.verification_status,
             head_sha=action_result.head_sha,
+            findings_detail=action_result.findings_detail,
         )
 
     return action_result

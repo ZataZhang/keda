@@ -609,6 +609,14 @@ max_agent_crash_retries = 5
 crash_retry_initial_backoff_seconds = 30
 # 崩溃重试单次退避等待的最大秒数
 crash_retry_max_backoff_seconds = 600
+# 命中这些路径前缀的文件 diff 全量进入 supervisor prompt，其余按预算截断
+key_paths = []
+# 非关键路径文件 diff 的字符预算
+max_diff_chars = 6000
+# 是否把历轮未解决 findings 注入下个 cycle 的 supervisor prompt
+previous_findings_injection_enabled = true
+# 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .iar/ gitignore 排除）
+findings_artifact_dir = ".iar/state"
 
 # GitHub Issue / PR 内容生成（面向人类阅读，不影响实现 Agent）
 [agent_runner.generated_content]
@@ -1219,6 +1227,20 @@ Draft PR 创建后，Issue 先进入 `agent/supervising`，并立即运行至少
 5. 需要代码修改时，runner 先写 `post_pr_rework_requested` event marker，再切到 `agent/running`
 6. 后续 `iar run` 检测到该 pending marker 和 open PR 后，在现有 PR branch 上执行 rework
 7. rework 成功后写 `rebase_repair_complete` marker，再进入后续 supervision/review 流程
+
+#### Supervisor diff 分层注入与跨 cycle finding 累积
+
+Supervisor 评审长 PR 时，整包 diff 会被截断到 `max_diff_chars`（默认 6000）字符——关键变更常常整个落在窗口外。配置 `key_paths` 后，命中的路径前缀下的文件 diff **全量**进入 prompt，其余文件共享剩余字符预算：
+
+```toml
+[agent_runner.post_pr_supervisor]
+key_paths = ["src/backend/core/", "pyproject.toml"]
+max_diff_chars = 6000
+```
+
+prompt 结构变为：`Changed files (N)` 清单 → `--- Key files (full diff) ---` → `--- Other files (truncated to N chars) ---`。`key_paths` 为空时退化为原来的整体截断。若配置的路径前缀一个文件都没命中，日志会打 WARNING 提示前缀写错。
+
+Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决策里附带 `findings[]`（每项含 `title`，以及可选的 `severity` / `file` / `line` / `description` / `status`）。iar 把它们合并进 `<worktree>/.iar/state/issue-<N>/findings.json`（已被 `.iar/` gitignore 排除），下一个 cycle 的 prompt 会带上 `Previous unresolved findings from cycles X..Y:` 段。已在后续 cycle 修好的 finding 用 `status: "resolved"` 上报即可出列。用 `previous_findings_injection_enabled = false` 关闭注入。
 
 #### Rebase Conflict Recovery Branch Guard
 
@@ -2496,6 +2518,29 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
                         带 iar:structured-evidence marker 的 Issue 还必须写
                         <证据目录>/evidence.json manifest，按 checklist item
                         分组描述命令、关键输出摘要、解释、风险及关联证据文件。
+
+#### evidence.json 的 stdout_assertions（防假绿灯）
+
+命令 exit 0 不等于检查点成立：agent 只要写 `[ -d x ] || true`、`grep ... || echo ok` 之类兜底，就能让 iar 复跑时看到绿灯，而真实断言从未执行。manifest 的每个 item 可以**可选**声明 `stdout_assertions`，由 iar 在自己复跑该命令后对真实 stdout/stderr 做子串断言：
+
+```json
+{
+  "item_number": 1,
+  "item_name": "健康检查真实验证",
+  "command": "curl -s http://localhost:8080/health",
+  "stdout_assertions": [
+    {"severity": "high", "pattern": "200 OK", "source": "stdout", "must_match": true},
+    {"pattern": "Traceback", "source": "stderr", "must_match": false}
+  ]
+}
+```
+
+- `pattern`：待匹配子串（**子串语义，不是正则**；用精确字符串，避免 `.*` 造成假阳）
+- `source`：`stdout` 或 `stderr`，缺省 `stdout`
+- `must_match`：缺省 `true` 表示必须出现；`false` 表示不得出现
+- `severity`：仅用于失败信息标注，缺省 `high`
+
+断言未通过时抛 `ValidationEvidenceError`，与 exit code 非零走同一条 recovery 循环，且不会被写进 RV 复跑缓存。旧 manifest（无该字段）行为不变，只校验退出码。
 
 commit 前门禁           要求验证但证据与清单不匹配 → 进入 recovery，
                         重试耗尽后 agent/failed。
