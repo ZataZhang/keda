@@ -18,9 +18,11 @@ import re
 import yaml
 
 from backend.core.shared.models.agent_runner import (
+    DEFAULT_VALIDATION_EVIDENCE_DIR,
     AppConfig,
     IssueSummary,
 )
+from backend.core.shared.prd_machine_contract import PRD_MACHINE_CONTRACT_POINTER
 from backend.core.use_cases.agent_runner_structured_evidence import (
     build_structured_evidence_prompt_suffix,
     format_structured_evidence_marker,
@@ -232,6 +234,7 @@ def build_issue_validation_section(
     format_waiver_reason: str | None = None,
     language: str = "zh-CN",
     structured_evidence: bool = True,
+    evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR,
 ) -> str:
     """Build the deterministic ``## Realistic Validation`` Issue body block.
 
@@ -241,6 +244,15 @@ def build_issue_validation_section(
 
     当 ``structured_evidence`` 为 true 且存在 checklist 时，在区块开头附加
     ``iar:structured-evidence`` hidden marker。
+
+    Args:
+        checklist_items: 规范化后的验收清单行。
+        waiver_reason: 整体验免理由；非 ``None`` 时输出豁免块。
+        format_waiver_reason: 逐项格式对账的豁免理由。
+        language: 固定标签语言。
+        structured_evidence: 是否物化结构化证据 marker。
+        evidence_dir: 该 Issue 的证据目录仓库相对路径（调用方按 PRD stem
+            解析；格式细则由 prd skill 的 Machine Contract 承载）。
     """
     structured_marker = ""
     if structured_evidence and checklist_items and waiver_reason is None:
@@ -278,9 +290,10 @@ def build_issue_validation_section(
             structured_marker,
             *format_waiver_lines,
             "The executing agent MUST run each item through the real entry "
-            "point and save evidence (screenshots or captured output) to "
-            "`.iar/evidence/` in the worktree. The runner refuses to publish "
-            "without evidence.",
+            "point and save evidence under "
+            f"`{evidence_dir}/` in the worktree. The runner refuses to publish "
+            "without evidence. "
+            f"{PRD_MACHINE_CONTRACT_POINTER}",
             "",
             *checklist_items,
         ]
@@ -296,20 +309,38 @@ def validation_required(issue_body: str, config: AppConfig) -> bool:
     return bool(extract_realistic_validation_items(issue_body))
 
 
-def build_validation_prompt_line(issue: IssueSummary, config: AppConfig) -> str:
+def build_validation_prompt_line(
+    issue: IssueSummary,
+    config: AppConfig,
+    *,
+    evidence_dir: str | None = None,
+) -> str:
     """Build the execution-prompt instruction enforcing real validation.
+
+    格式约定（rv-id 命名、截图分工、证据目录布局）由 prd skill 的 Machine
+    Contract 承载，这里只保留 runner 门禁语义。契约指针刻意不在本行复述：
+    它由 PRD 块（``_build_prd_closeout_instruction``）与 Issue body 的
+    Realistic Validation 区块各携带一次，同一 prompt 里重复注入会让
+    "唯一出处"滑回复述。
+
+    Args:
+        issue: 当前 Issue。
+        config: 运行配置。
+        evidence_dir: 已解析的证据目录仓库相对路径（调用方用
+            ``resolve_issue_evidence_relpath`` 计算）；为 ``None`` 时使用
+            配置根目录。
 
     Returns:
         指令文本；该 Issue 不要求证据时返回空字符串。
     """
     if not validation_required(issue.body, config):
         return ""
+    evidence_dir_text = evidence_dir or config.validation.evidence_dir.strip("/")
     if evidence_format_check_required(issue.body, config):
         enforcement_text = (
             "The runner checks evidence against the checklist before "
-            "publishing: every item must have its own `rv-<n>-*` file, and "
-            "when an item names an evidence format (截图/screenshot, pdf, "
-            "txt, word, excel, csv, 录屏/video), a file with a matching "
+            "publishing: every item must have its own evidence file, and "
+            "when an item names an evidence format, a file with a matching "
             "suffix is required. "
         )
     else:
@@ -318,22 +349,19 @@ def build_validation_prompt_line(issue: IssueSummary, config: AppConfig) -> str:
         "Realistic Validation is MANDATORY for this Issue: actually execute "
         "every item of the Realistic Validation checklist through the real "
         "entry points (not only unit tests), and save one evidence file per "
-        f"item into `{config.validation.evidence_dir}/` inside the worktree, "
-        "named `rv-<item-number>-<slug>.<ext>` (PNG screenshots for UI "
-        "behavior; captured terminal output as .txt for CLI behavior). "
+        f"item into `{evidence_dir_text}/` inside the worktree, following the "
+        "prd skill's Machine Contract for naming and layout. "
         f"{enforcement_text}"
         "Do not substitute the real entry point an item describes with "
-        "fakes, mocks, or TestClient. Never put evidence files under "
-        "version control and never capture secrets in them. "
-        f"EVERY RV script — evidence capture, temporary setup, and reproducible "
-        f"oracles referenced by an `evidence.json` command alike — belongs under "
-        f"`{config.validation.evidence_dir}/{EVIDENCE_ORACLE_SUBDIR}/`. There is no "
-        "exception: no RV script may enter the code diff, whatever the PRD asks for. "
-        "These scripts are uploaded to the evidence branch for reviewers, so they "
-        "must not contain secrets either. Before requesting a commit, inspect `git "
-        "diff --name-only` and remove every RV script from the change set."
+        "fakes, mocks, or TestClient. Never capture secrets in evidence files. "
+        "EVERY RV script — evidence capture, temporary setup, and reproducible "
+        "oracles referenced by an `evidence.json` command alike — belongs under "
+        f"`{evidence_dir_text}/{EVIDENCE_ORACLE_SUBDIR}/` and must never enter "
+        "the code diff: the runner rejects any RV script in the change set, "
+        "whatever the PRD asks for. These scripts are uploaded to the evidence "
+        "branch for reviewers, so they must not contain secrets either."
     ]
     if has_structured_evidence_marker(issue.body):
         structured_suffix = build_structured_evidence_prompt_suffix(config.validation.language)
-        prompt_parts.append(structured_suffix.format(evidence_dir=config.validation.evidence_dir))
+        prompt_parts.append(structured_suffix.format(evidence_dir=evidence_dir_text))
     return " ".join(prompt_parts)

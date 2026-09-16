@@ -4,8 +4,10 @@
 
 1. **物化解析** — 从 PRD / Issue body 解析 ``Realistic Validation`` 清单与
    ``Validation Waiver`` 豁免声明。
-2. **证据隔离** — 把证据目录写入 worktree 的 ``info/exclude``，并在发布前
-   拒绝混入代码 diff 的证据路径。
+2. **证据隔离** — 默认约定下证据落 ``tasks/evidence/<prd-stem>/``，由
+   ``iar init`` provision 的 ``.gitignore`` 白名单保证只有 ``*.md`` 报告进
+   版本库；legacy ``.iar/evidence`` 配置仍用 ``info/exclude`` 整目录排除。
+   发布前拒绝混入代码 diff 的证据产物（双保险）。
 3. **证据强制** — commit 前要求证据目录非空（``ValidationEvidenceError``
    进入既有 recovery 循环）。
 4. **证据呈现** — 用 git plumbing（``hash-object``/``mktree``/``commit-tree``）
@@ -34,9 +36,12 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.models.agent_runner import (
+    DEFAULT_VALIDATION_EVIDENCE_DIR,
     AppConfig,
+    CommandResult,
     DeliveryGateFailureKind,
     IssueSummary,
+    evidence_dir_uses_task_subdirs,
 )
 from backend.core.use_cases.agent_runner_evidence_format import (
     EvidenceKindRule as EvidenceKindRule,
@@ -45,12 +50,17 @@ from backend.core.use_cases.agent_runner_evidence_format import (
     demanded_evidence_kinds as demanded_evidence_kinds,
     extract_evidence_format_markers as extract_evidence_format_markers,
 )
+from backend.core.use_cases.agent_runner_feedback import (
+    extract_prd_path,
+)
 from backend.core.use_cases.agent_runner_git import (
     expand_changed_path,
     has_changes,
     list_changed_paths,
 )
 from backend.core.use_cases.agent_runner_structured_evidence import (
+    EvidenceBlock,
+    StdoutAssertion,
     ValidationEvidenceError,
     has_structured_evidence_marker,
     load_evidence_manifest,
@@ -152,11 +162,82 @@ class EvidenceMarker:
 
 
 def evidence_dir_path(worktree_path: Path, config: AppConfig) -> Path:
-    """Return the absolute evidence directory path inside the worktree."""
+    """Return the absolute evidence directory *root* inside the worktree.
+
+    这是配置根目录（``config.validation.evidence_dir``）的解析。新约定下证据
+    实际落在按任务分的子目录里，消费方应使用 :func:`resolve_issue_evidence_dir`
+    或 :func:`resolve_evidence_dir`；本函数只作为它们的根解析与 legacy 兜底。
+    """
     return worktree_path / config.validation.evidence_dir
 
 
-def list_evidence_files(worktree_path: Path, config: AppConfig) -> list[Path]:
+def resolve_evidence_dir(
+    worktree_path: Path,
+    config: AppConfig,
+    *,
+    prd_stem: str | None = None,
+    issue_number: int | None = None,
+) -> Path:
+    """证据目录的单一解析入口：配置根 + 任务子目录（仅新约定）。
+
+    配置为默认 ``tasks/evidence`` 时按任务分目录：有 canonical PRD 用
+    ``<root>/<prd-stem>``，无 PRD 时用 ``<root>/issue-<N>`` 兜底；两者都
+    没有时退回配置根本身。显式配置的其它目录（legacy ``.iar/evidence``）
+    保持扁平语义——那些仓库的行为逐字节不变。
+
+    Args:
+        worktree_path: worktree 根目录。
+        config: 运行配置，提供证据目录根。
+        prd_stem: canonical PRD 的文件名 stem（不含目录与扩展名）。
+        issue_number: Issue 编号；无 PRD 时用于 ``issue-<N>`` 兜底子目录。
+
+    Returns:
+        证据目录的绝对路径。
+    """
+    root = evidence_dir_path(worktree_path, config)
+    if not evidence_dir_uses_task_subdirs(config.validation.evidence_dir):
+        return root
+    if prd_stem:
+        return root / prd_stem
+    if issue_number is not None:
+        return root / f"issue-{issue_number}"
+    return root
+
+
+def resolve_evidence_relpath(
+    config: AppConfig,
+    *,
+    prd_stem: str | None = None,
+    issue_number: int | None = None,
+) -> str:
+    """与 :func:`resolve_evidence_dir` 同规则的仓库相对路径（POSIX 分隔符）。
+
+    供 prompt 插值与错误信息使用，避免各处各自拼 ``f"{root}/{stem}"``。
+    """
+    return resolve_evidence_dir(
+        Path(""), config, prd_stem=prd_stem, issue_number=issue_number
+    ).as_posix()
+
+
+def resolve_issue_evidence_dir(worktree_path: Path, config: AppConfig, issue: IssueSummary) -> Path:
+    """按 Issue 的 canonical PRD（或编号兜底）解析证据目录。"""
+    prd_relative_path = extract_prd_path(issue.body)
+    prd_stem = Path(prd_relative_path).stem if prd_relative_path else None
+    return resolve_evidence_dir(worktree_path, config, prd_stem=prd_stem, issue_number=issue.number)
+
+
+def resolve_issue_evidence_relpath(config: AppConfig, issue: IssueSummary) -> str:
+    """按 Issue 解析证据目录的仓库相对路径（POSIX 分隔符）。"""
+    prd_relative_path = extract_prd_path(issue.body)
+    prd_stem = Path(prd_relative_path).stem if prd_relative_path else None
+    return resolve_evidence_relpath(config, prd_stem=prd_stem, issue_number=issue.number)
+
+
+def list_evidence_files(
+    worktree_path: Path,
+    config: AppConfig,
+    issue: IssueSummary | None = None,
+) -> list[Path]:
     """List first-level regular evidence *artifacts*, sorted by name.
 
     隐藏文件（``.`` 开头）与子目录被忽略——**这里的单层语义是刻意的,不要改成
@@ -166,8 +247,17 @@ def list_evidence_files(worktree_path: Path, config: AppConfig) -> list[Path]:
     rv-1 的证据文件、``scripts/`` 下的 ``.png`` 会冒充视觉证据,缺证据的清单项
     就能蒙混过关。需要连子目录一起取（仅上传场景）请用
     :func:`list_evidence_upload_files`。
+
+    Args:
+        worktree_path: worktree 根目录。
+        config: 运行配置。
+        issue: 当前 Issue；提供时按任务子目录解析，否则退回配置根目录。
     """
-    evidence_dir = evidence_dir_path(worktree_path, config)
+    evidence_dir = (
+        resolve_issue_evidence_dir(worktree_path, config, issue)
+        if issue is not None
+        else evidence_dir_path(worktree_path, config)
+    )
     if not evidence_dir.is_dir():
         return []
     return sorted(
@@ -177,17 +267,30 @@ def list_evidence_files(worktree_path: Path, config: AppConfig) -> list[Path]:
     )
 
 
-def list_evidence_upload_files(worktree_path: Path, config: AppConfig) -> list[str]:
+def list_evidence_upload_files(
+    worktree_path: Path,
+    config: AppConfig,
+    issue: IssueSummary | None = None,
+) -> list[str]:
     """List every evidence file, recursively, as evidence-dir-relative POSIX paths.
 
     与 :func:`list_evidence_files` 的单层语义相对:上传到证据分支时要连同
     ``{evidence_dir}/scripts/`` 下的 oracle 源码一起带走,审阅者才能看到"产出
     这份证据的断言是怎么写的"。任何一级以 ``.`` 开头的文件或目录都跳过。
 
+    Args:
+        worktree_path: worktree 根目录。
+        config: 运行配置。
+        issue: 当前 Issue；提供时按任务子目录解析，否则退回配置根目录。
+
     Returns:
         相对证据目录的路径列表（POSIX 分隔符）,已排序;证据目录不存在时为空。
     """
-    evidence_dir = evidence_dir_path(worktree_path, config)
+    evidence_dir = (
+        resolve_issue_evidence_dir(worktree_path, config, issue)
+        if issue is not None
+        else evidence_dir_path(worktree_path, config)
+    )
     if not evidence_dir.is_dir():
         return []
     relative_paths: list[str] = []
@@ -207,22 +310,36 @@ def list_evidence_upload_files(worktree_path: Path, config: AppConfig) -> list[s
     return sorted(relative_paths)
 
 
-def evidence_oracle_digest(worktree_path: Path, config: AppConfig) -> str:
+def evidence_oracle_digest(
+    worktree_path: Path,
+    config: AppConfig,
+    issue: IssueSummary | None = None,
+) -> str:
     """Digest the RV oracle scripts so the re-execution cache tracks their content.
 
-    ``{evidence_dir}/`` 被 ``info/exclude`` 排除,因此其中的 oracle 不参与
-    ``HEAD`` 的 tree SHA。若缓存键只按 tree SHA + 命令构造,把 oracle 的断言删空
+    证据目录下的 oracle 不参与 ``HEAD`` 的 tree SHA（新约定经 ``.gitignore``
+    白名单排除非 ``.md`` 产物，legacy 配置经 ``info/exclude`` 整目录排除）。
+    若缓存键只按 tree SHA + 命令构造,把 oracle 的断言删空
     也不会改变键,门禁会继续报"已通过、跳过复跑"。本摘要把 oracle 内容并回缓存
     键,让任何 oracle 改动都必然触发真实重跑。
 
     摘要按目录整体计算而非按命令解析脚本路径:代价是改 A 脚本会让 B 条目一并
     失效,换来的是不必解析 shell 命令行,方向上宁可过度失效也不放过。
 
+    Args:
+        worktree_path: worktree 根目录。
+        config: 运行配置。
+        issue: 当前 Issue；提供时按任务子目录解析，否则退回配置根目录。
+
     Returns:
         十六进制摘要;oracle 目录不存在或为空时返回固定的 ``"-"``,保证既有仓库
         行为稳定。
     """
-    oracle_dir = evidence_dir_path(worktree_path, config) / EVIDENCE_ORACLE_SUBDIR
+    oracle_dir = (
+        resolve_issue_evidence_dir(worktree_path, config, issue)
+        if issue is not None
+        else evidence_dir_path(worktree_path, config)
+    ) / EVIDENCE_ORACLE_SUBDIR
     if not oracle_dir.is_dir():
         return "-"
     file_digests: list[str] = []
@@ -242,9 +359,14 @@ def ensure_evidence_dir_excluded(
     config: AppConfig,
     process_runner: IProcessRunner,
 ) -> None:
-    """Idempotently exclude the evidence dir and RV cache via git ``info/exclude``.
+    """Idempotently exclude the evidence dir (legacy only) and RV cache via git ``info/exclude``.
 
-    除证据目录外,同样排除 RV 复跑缓存文件(:func:`_rv_reexec_cache_relpath`),
+    新约定（默认 ``tasks/evidence``）下证据目录的 git 语义由 ``iar init``
+    provision 的 ``.gitignore`` 白名单保证（只放行 ``*.md`` 报告），这里不再对
+    它写整目录 info/exclude；显式配置了其它目录（legacy ``.iar/evidence``）的
+    仓库保持原有的整目录排除行为，逐字节不变。
+
+    无论哪种配置，都排除 RV 复跑缓存文件（:data:`_RV_REEXEC_CACHE_RELPATH`），
     避免它让工作区显示为脏或泄漏进代码 diff。
 
     使用 ``git rev-parse --git-path info/exclude`` 解析排除文件位置
@@ -276,9 +398,11 @@ def ensure_evidence_dir_excluded(
             exclude_path,
         )
         return
-    evidence_line = f"/{config.validation.evidence_dir.strip('/')}/"
-    cache_line = f"/{_rv_reexec_cache_relpath(config)}"
-    desired_lines = [evidence_line, cache_line]
+    desired_lines = []
+    if not evidence_dir_uses_task_subdirs(config.validation.evidence_dir):
+        # legacy/自定义目录：整目录排除，行为与历史版本一致。
+        desired_lines.append(f"/{config.validation.evidence_dir.strip('/')}/")
+    desired_lines.append(f"/{_RV_REEXEC_CACHE_RELPATH}")
     existing_text = ""
     if exclude_path.exists():
         existing_text = exclude_path.read_text(encoding="utf-8")
@@ -356,17 +480,18 @@ def ensure_frontend_visual_evidence(
     ]
     if not touched_frontend_paths:
         return
-    evidence_files = list_evidence_files(worktree_path, config)
+    evidence_files = list_evidence_files(worktree_path, config, issue)
     if any(
         evidence_file.suffix.lower() in VISUAL_EVIDENCE_SUFFIXES for evidence_file in evidence_files
     ):
         return
     accepted_suffixes_text = "/".join(sorted(VISUAL_EVIDENCE_SUFFIXES))
     touched_preview = ", ".join(sorted(touched_frontend_paths)[:5])
+    evidence_dir_text = resolve_issue_evidence_relpath(config, issue)
     raise ValidationEvidenceError(
         "Frontend changes were made but no visual evidence "
         f"({accepted_suffixes_text}) exists in "
-        f"`{config.validation.evidence_dir}/`. Changed frontend paths: "
+        f"`{evidence_dir_text}/`. Changed frontend paths: "
         f"{touched_preview}. Run the target repo's UI/e2e entry point and save "
         "at least one real screenshot or screen recording into the evidence "
         "directory; a text log does not prove a UI change.",
@@ -403,12 +528,13 @@ def ensure_validation_evidence_ready(
         return
     # 前端改动强制视觉证据（fail-closed，按 diff 判定，独立于 verifier）。
     ensure_frontend_visual_evidence(issue, worktree_path, config, process_runner)
-    evidence_files = list_evidence_files(worktree_path, config)
+    evidence_files = list_evidence_files(worktree_path, config, issue)
+    evidence_dir_text = resolve_issue_evidence_relpath(config, issue)
     if not evidence_files:
         # 证据目录为空 = 验证根本没跑过，保持真失败分类（整轮重跑），不进收尾层。
         raise ValidationEvidenceError(
             "Realistic Validation evidence is required but "
-            f"`{config.validation.evidence_dir}/` is empty or missing. "
+            f"`{evidence_dir_text}/` is empty or missing. "
             "Actually execute the PRD's Realistic Validation Plan through "
             "real entry points and save evidence files (PNG screenshots for "
             "UI behavior, captured terminal output as .txt for CLI behavior) "
@@ -416,17 +542,21 @@ def ensure_validation_evidence_ready(
         )
     if has_structured_evidence_marker(issue.body):
         checklist_items = extract_realistic_validation_items(issue.body)
+        resolved_evidence_dir = resolve_issue_evidence_dir(worktree_path, config, issue)
         validate_evidence_manifest(
             issue_body=issue.body,
             checklist_items=checklist_items,
             worktree_path=worktree_path,
             config=config,
+            evidence_dir=resolved_evidence_dir,
         )
         # FR-11a: artifact health hard layer (machine-checkable assertions).
         # Skip when process_runner is None (caller did not wire it) to keep the
         # legacy non-structured callers working.
         if config.validation.artifact_health_enabled and process_runner is not None:
-            manifest = load_evidence_manifest(worktree_path, config)
+            manifest = load_evidence_manifest(
+                worktree_path, config, evidence_dir=resolved_evidence_dir
+            )
             validate_evidence_artifacts(
                 manifest,
                 worktree_path,
@@ -455,21 +585,18 @@ def ensure_validation_evidence_ready(
         )
 
 
-def _rv_reexec_cache_relpath(config: AppConfig) -> str:
-    """Worktree-relative path of the RV re-execution cache file.
+_RV_REEXEC_CACHE_RELPATH = ".iar/rv_reexec_cache.json"
+"""RV 复跑缓存的 worktree 相对路径（runner 私有状态）。
 
-    Placed beside the evidence dir but outside it, so RV scripts that wipe
-    their own ``rv-*`` evidence on each run never clear the cache.
-    """
-    evidence_dir = Path(config.validation.evidence_dir.strip("/"))
-    parent = evidence_dir.parent
-    base = parent if str(parent) not in (".", "") else Path(".iar")
-    return (base / "rv_reexec_cache.json").as_posix()
+固定留在 ``.iar/``，与证据目录父目录解耦：RV 脚本每轮会清空自己产生的
+``rv-*`` 证据，缓存放进证据目录会被一并抹掉；``.iar/`` 由 init 的
+``.gitignore`` 托管块与 :func:`ensure_evidence_dir_excluded` 双重排除。
+"""
 
 
-def _rv_reexec_cache_path(worktree_path: Path, config: AppConfig) -> Path:
+def _rv_reexec_cache_path(worktree_path: Path) -> Path:
     """Absolute path of the RV re-execution cache inside ``worktree_path``."""
-    return worktree_path / _rv_reexec_cache_relpath(config)
+    return worktree_path / _RV_REEXEC_CACHE_RELPATH
 
 
 def _clean_tree_fingerprint(worktree_path: Path, process_runner: IProcessRunner) -> str | None:
@@ -532,6 +659,50 @@ def _save_rv_reexec_cache(cache_path: Path, entries: dict[str, str]) -> None:
     )
 
 
+def _assertion_target_text(assertion: StdoutAssertion, command_result: CommandResult) -> str:
+    """Return the stream the assertion must be evaluated against."""
+    return command_result.stderr if assertion.source == "stderr" else command_result.stdout
+
+
+def _is_stdout_assertion_satisfied(
+    assertion: StdoutAssertion, command_result: CommandResult
+) -> bool:
+    """判断一条输出断言是否被满足（``must_match`` 时要求出现，否则要求不出现）。"""
+    target_text = _assertion_target_text(assertion, command_result)
+    pattern_matched = assertion.pattern in target_text
+    return pattern_matched if assertion.must_match else not pattern_matched
+
+
+def _validate_stdout_assertions(block: EvidenceBlock, command_result: CommandResult) -> None:
+    """对已 exit 0 的 RV 命令执行 manifest 声明的输出断言（补丁 1）。
+
+    退出码只是"命令没崩"，不代表检查点成立：``[ -d x ] || true`` 这类兜底会让
+    命令稳定 exit 0 而从未真正验证。这里按 manifest 的 ``stdout_assertions`` 对
+    keda 自己复跑得到的 stdout/stderr 做子串断言，失败即抛
+    ``ValidationEvidenceError`` 进入既有 recovery 循环——与 exit code 失败走同一条路。
+
+    Raises:
+        ValidationEvidenceError: 任一断言未被满足。错误消息指明断言序号、
+            pattern、source，便于 agent 直接定位改哪条。
+    """
+    for assertion_index, assertion in enumerate(block.stdout_assertions, start=1):
+        if _is_stdout_assertion_satisfied(assertion, command_result):
+            continue
+        expectation_text = (
+            f"must contain {assertion.pattern!r}"
+            if assertion.must_match
+            else f"must not contain {assertion.pattern!r}"
+        )
+        raise ValidationEvidenceError(
+            f"Realistic Validation item {block.item_number} exited 0 but its stdout "
+            f"assertion #{assertion_index} failed: {expectation_text} in "
+            f"{assertion.source} (severity={assertion.severity}, "
+            f"command `{block.command}`). An exit code of 0 is not proof the "
+            "checkpoint holds — remove `|| true` / `|| echo ok` style fallbacks and "
+            "make the command actually assert, or correct the declared assertion."
+        )
+
+
 def ensure_validation_commands_pass(
     issue: IssueSummary,
     worktree_path: Path,
@@ -562,7 +733,11 @@ def ensure_validation_commands_pass(
     if not has_structured_evidence_marker(issue.body):
         return
 
-    manifest = load_evidence_manifest(worktree_path, config)
+    manifest = load_evidence_manifest(
+        worktree_path,
+        config,
+        evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
+    )
     timeout_seconds = config.validation.reexecute_timeout_seconds
 
     tree_fingerprint = (
@@ -570,12 +745,12 @@ def ensure_validation_commands_pass(
         if config.validation.reexecute_cache_enabled
         else None
     )
-    cache_path = _rv_reexec_cache_path(worktree_path, config)
+    cache_path = _rv_reexec_cache_path(worktree_path)
     cache_entries = _load_rv_reexec_cache(cache_path) if tree_fingerprint else {}
     newly_passed: dict[str, str] = {}
     # oracle 摘要按次计算一次:同一轮内脚本内容不变,逐条重算既无必要也会让
     # 中途被改写的脚本产生前后不一致的键。
-    oracle_digest = evidence_oracle_digest(worktree_path, config)
+    oracle_digest = evidence_oracle_digest(worktree_path, config, issue)
 
     for block in manifest.items:
         cache_key = (
@@ -623,6 +798,8 @@ def ensure_validation_commands_pass(
                 "command passes (or correct the command). Set "
                 "`validation.reexecute_commands=false` to opt out."
             )
+        # exit 0 只是"命令没崩"：断言未过时不得写缓存，否则假绿灯会被缓存固化。
+        _validate_stdout_assertions(block, result)
         # 逐条记耗时：attempt 历史里的 ``rv_reexec`` 只有一个合计值，慢在哪一条
         # 只能靠这条日志（例如一条 e2e 吃掉几百秒）。
         _logger.info(
@@ -656,8 +833,17 @@ def format_validation_evidence_detail(message: str) -> str:
     )
 
 
-def format_validation_evidence_failure(message: str, evidence_dir: str = ".iar/evidence") -> str:
-    """Build the failure section for an evidence recovery prompt."""
+def format_validation_evidence_failure(
+    message: str,
+    evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR,
+) -> str:
+    """Build the failure section for an evidence recovery prompt.
+
+    Args:
+        message: 门禁失败的具体原因。
+        evidence_dir: 当前 Issue 的证据目录仓库相对路径；调用方应传
+            :func:`resolve_issue_evidence_relpath` 的结果，缺省为配置默认值。
+    """
     return "\n".join(
         [
             format_validation_evidence_detail(message),
@@ -797,14 +983,21 @@ def ensure_no_evidence_paths_in_changes(
 ) -> None:
     """Refuse to publish when evidence paths leak into the code diff.
 
-    ``info/exclude`` 已经阻止常规跟踪，本守卫拦截 ``git add -f`` 一类
-    的强制加入，是发布前的双保险。
+    白名单语义随配置分两种：
+
+    - 新约定（默认 ``tasks/evidence``）：``.gitignore`` 白名单只放行 ``*.md``
+      文本报告进版本库，本守卫拦截其余证据产物（截图、录屏、JSON manifest、
+      oracle 脚本等）被 ``git add -f`` 一类强制加入的情况，是发布前的双保险。
+    - legacy/自定义目录：整目录排除语义不变，任何证据路径都拒绝（与历史
+      版本逐字节一致）。
     """
     evidence_dir_prefix = config.validation.evidence_dir.strip("/") + "/"
+    allow_markdown_reports = evidence_dir_uses_task_subdirs(config.validation.evidence_dir)
     leaked_paths = [
         changed_path
         for changed_path in list_changed_paths(worktree_path, process_runner)
         if changed_path.startswith(evidence_dir_prefix)
+        and not (allow_markdown_reports and changed_path.lower().endswith(".md"))
     ]
     if leaked_paths:
         leaked_paths_text = ", ".join(sorted(set(leaked_paths)))

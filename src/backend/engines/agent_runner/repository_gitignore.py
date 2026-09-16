@@ -31,6 +31,15 @@ IAR_GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("# Realistic Validation evidence (worktree-local)", (".iar/",)),
     ("# Agent runner state (worktree-local)", (".agent-runner/",)),
     ("# IAR-managed git worktrees (host-local)", (".iar-worktrees/",)),
+    (
+        "# PRD task evidence (commit only the *.md text reports; "
+        "raw artifacts stay out of git history)",
+        (
+            "tasks/evidence/**",
+            "!tasks/evidence/**/",
+            "!tasks/evidence/**/*.md",
+        ),
+    ),
 )
 """``iar init`` 需要写入 ``.gitignore`` 的所有条目,按段分组。"""
 

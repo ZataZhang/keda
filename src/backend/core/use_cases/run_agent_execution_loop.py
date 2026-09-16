@@ -75,6 +75,7 @@ from backend.core.use_cases.agent_runner_validation import (
     ensure_validation_evidence_ready,
     format_validation_evidence_detail,
     format_validation_evidence_failure,
+    resolve_issue_evidence_relpath,
     warn_legacy_evidence_helpers,
 )
 
@@ -447,6 +448,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     failure_type=recovery_failure_type,
                     long_term_store=long_term_store,
                     skill_store=skill_store,
+                    evidence_dir=resolve_issue_evidence_relpath(config, issue),
                 )
                 recovery_timeout = (
                     config.runner.recovery_timeout_seconds or config.runner.timeout_seconds
@@ -630,7 +632,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             if attempt_index >= max_recovery_attempts:
                 raise MaxRetriesExceededError(attempt_results) from exc
             recovery_failure_summary = format_validation_evidence_failure(
-                str(exc), config.validation.evidence_dir
+                str(exc), resolve_issue_evidence_relpath(config, issue)
             )
             recovery_failure_type = failure_type.value
             _logger.warning(

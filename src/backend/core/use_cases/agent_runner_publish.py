@@ -27,6 +27,7 @@ from backend.core.use_cases.agent_runner_validation import (
 )
 from backend.core.use_cases.generated_content import (
     build_pr_context,
+    ensure_prd_machine_contract_available,
     generate_pr_content,
 )
 
@@ -114,8 +115,14 @@ def run_preflight_checks(
     config: AppConfig,
     process_runner: IProcessRunner,
 ) -> None:
-    """Validate runner configuration before claiming any Issue."""
+    """Validate runner configuration before claiming any Issue.
+
+    除发布远端校验外，还预检 prd skill 的 Machine Contract：iar 的 prompt 只持有
+    契约指针，skill 缺失或主版本不符时执行 agent 拿不到格式约定，必须在开跑前
+    fail fast（报错含 ``iar init`` 修复指引）。
+    """
     validate_publish_remote(repo_path, config, process_runner)
+    ensure_prd_machine_contract_available()
 
 
 def _validate_branch_for_publish(

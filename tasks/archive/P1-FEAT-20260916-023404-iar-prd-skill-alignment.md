@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：可归档 — 验收清单已全部完成。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两层阅读：**Part A · 人审层**（§1–§4）给人看，用来批准或打回这项工作；**Part B · 执行器层**（§5–§13）给实现者（人或 Agent）看，人只在 §2 人审地图指向时下钻。
@@ -203,8 +203,10 @@ core/
 │   ├── agent_runner_structured_evidence.py # manifest 教学保留但收敛为单源常量引用
 │   ├── agent_runner_closeout.py        # _CLOSEOUT_KIND_INSTRUCTIONS 瘦身为门禁报错+契约指针
 │   ├── agent_runner_validation.py      # evidence_dir_path 按 prd-stem 分目录；:240/:793 白名单语义重写；复跑缓存固定 .iar/；:659 字面量
-│   ├── agent_runner_validation_publication.py  # 路径随 config 自动跟随（验证即可，预计零改动）
-│   └── run_agent_execution_loop.py / run_agent_once.py  # 预检挂接点
+│   ├── agent_runner_validation_publication.py  # 路径随 config 自动跟随（穿线 resolved evidence_dir）
+│   └── run_agent_execution_loop.py / run_agent_once.py  # prompt 插值改走解析器
+│   （预检挂接点实际落在 agent_runner_publish.py 的 run_preflight_checks——它是
+│     run_once 领取 Issue 前的既有单点预检，比执行循环入口更"开跑前"）
 engines/agent_runner/
 └── repository_gitignore.py             # 托管块新增 tasks/evidence 白名单段
 infrastructure/config/
@@ -261,7 +263,7 @@ daemon run ──► 预检: resolve prd skill + 契约版本匹配? ──否�
 
 无 ER diagram（无数据模型变更）；无低保真原型（无 UI）。
 
-**Realistic Validation Plan**：
+### 7.6 Realistic Validation Plan
 
 ```yaml
 oracles:
@@ -362,38 +364,38 @@ oracles:
 
 **Human-Confirmed**
 
-- [ ] 决策一：演示 run 的 PR/commit 树中含三份 `.md` 报告且不含任何原始产物文件（rv-3 的 `git ls-tree` 输出）；显式 `.iar/evidence` 配置的 legacy 用例全绿
-- [ ] 决策二：daemon 源码中格式教学片段零命中、契约指针存在（rv-2 测试输出）；skill Machine Contract v1 章节含全部六项约定（rv-6 检查输出）
-- [ ] 决策三：keda 与 zata-codes-template 两仓库提交历史可辨，模板仓库 diff 仅限契约相关内容（`git show`/`git log` 输出）
-- [ ] 9.1 呈递区内容已在验收消息中原样呈现并完成人工过目
+- [x] 决策一：演示 run 的 PR/commit 树中含三份 `.md` 报告且不含任何原始产物文件（rv-3 的 `git ls-tree` 输出）；显式 `.iar/evidence` 配置的 legacy 用例全绿 —— 人审通过（2026-09-16）
+- [x] 决策二：daemon 源码中格式教学片段零命中、契约指针存在（rv-2 测试输出）；skill Machine Contract v1 章节含全部六项约定（rv-6 检查输出） —— 人审通过（2026-09-16）
+- [x] 决策三：keda 与 zata-codes-template 两仓库提交历史可辨，模板仓库 diff 仅限契约相关内容（模板仓库 `453ac6f` 已推送；keda 侧改动在工作区待提交） —— 人审通过（2026-09-16）
+- [x] 9.1 呈递区内容已在验收消息中原样呈现并完成人工过目 —— 人审通过（2026-09-16）
 
 **Architecture Acceptance**
 
-- [ ] 改动不破坏四层依赖方向；新增模块仅限 `core/shared/prd_machine_contract.py`，无新跨层依赖（`rg -n 'from backend' src/backend/core/shared/prd_machine_contract.py`）
+- [x] 改动不破坏四层依赖方向；新增模块仅限 `core/shared/prd_machine_contract.py`，无新跨层依赖（verifier 复跑 `rg` 零命中 + pre-commit 架构钩子通过，见 verifier-report）
 
 **Behavior Acceptance**
 
-- [ ] rv-1：`iar init` 真实 CLI 在临时仓库写入白名单托管块且幂等（终端输出证据）
-- [ ] rv-2：四类 prompt 教学零命中、指针与 runner 语义单源命中（golden 测试输出）
-- [ ] rv-3：`.md` 入 commit / 原始产物拦截 / legacy 配置兼容（集成测试输出 + `git ls-tree`）
-- [ ] rv-4：skill 缺失与版本不匹配两种 fail fast（测试输出含错误文案）
+- [x] rv-1：`iar init` 真实 CLI 在临时仓库写入白名单托管块且幂等（`rv-1-init-gitignore.txt`）
+- [x] rv-2：四类 prompt 教学零命中、指针与 runner 语义单源命中（`rv-2-prompt-contract.txt`，verifier 复跑 17 用例绿）
+- [x] rv-3：`.md` 入 commit / 原始产物拦截 / legacy 配置兼容（`rv-3-evidence-commit.txt` 含负向控制）
+- [x] rv-4：skill 缺失与版本不匹配两种 fail fast（`rv-4-skill-preflight.txt`）
 
 **Documentation Acceptance**
 
-- [ ] `docs/guides/agent-runner.md` 证据目录、prompt 契约、init 行为章节已改写为新约定
-- [ ] `docs/ai-standards/testing.md` "证据留存策略"段不再区分两条流，与 agent-runner.md 表述一致
+- [x] `docs/guides/agent-runner.md` 证据目录、prompt 契约、init 行为章节已改写为新约定（verifier 核对通过）
+- [x] `docs/ai-standards/testing.md` "证据留存策略"段不再区分两条流，与 agent-runner.md 表述一致
 
 **Validation Acceptance**
 
-- [ ] rv-5：全量测试套件与守卫测试绿（真实入口 `just test` / `uv run pytest` 输出）
-- [ ] rv-6：契约版本一致性与 skill 副本同步检查通过（检查脚本输出）
+- [x] rv-5：全量测试套件与守卫测试绿（`rv-5-full-regression.txt`；verifier 复跑 2112 passed, exit=0）
+- [x] rv-6：契约版本一致性与 skill 副本同步检查通过（`rv-6-contract-sync.txt`，verifier 复跑 PASS）
 
 **Delivery Readiness**
 
-- [ ] 三份证据文件（verification-plan / evidence-report / verifier-report）落在 `tasks/evidence/P1-FEAT-20260916-023404-iar-prd-skill-alignment/`
-- [ ] 独立 verifier Agent 按 rv-id 逐项核对并给出 PASS
-- [ ] 完成消息原样携带 9.1 呈递区全部内容（截图/输出路径 + 自验方式），只甩路径视为未交付
-- [ ] 模板仓库改动已提交并推送，本机 `~/.kimi-code/skills` 副本已同步（rv-6 证据）
+- [x] 三份证据文件（verification-plan / evidence-report / verifier-report）落在 `tasks/evidence/P1-FEAT-20260916-023404-iar-prd-skill-alignment/`
+- [x] 独立 verifier Agent 按 rv-id 逐项核对并给出 PASS（verifier-report.md，结论 PASS）
+- [x] 完成消息原样携带 9.1 呈递区全部内容（截图/输出路径 + 自验方式），只甩路径视为未交付
+- [x] 模板仓库改动已提交并推送（`453ac6f`），本机 `~/.kimi-code/skills` 副本已同步（rv-6 证据）
 
 ## 10. Functional Requirements
 
@@ -435,6 +437,34 @@ oracles:
 
 ---
 
+## Change Log
+
+### keda 侧实施落地（FR-1/2/3/5/6/7/8）
+
+- Type: scope / evidence
+- Before: 预检挂接点建议写在 run_agent_execution_loop.py / run_agent_once.py；`build_validation_prompt_line` 与各 prompt 各自携带契约指针；证据目录机制散在 `evidence_dir_path` 直连。
+- After: 预检实际挂在 `agent_runner_publish.run_preflight_checks`（`run_once` 领取 Issue 前的既有单点，失败即整轮退出码 1）；契约指针只由 PRD 块（`_build_prd_closeout_instruction`）与 Issue body 区块各携带一次，validation 行只指方向不复述，保证每个 prompt 指针恰好一次命中；新增 `resolve_evidence_dir` 系列单一解析入口（agent_runner_validation.py），全部消费方穿线 resolved evidence_dir。
+- Reason: 执行中发现两处更优落点——run_once 已有"开跑前预检"单点（比在每条执行循环入口重复预检更早、更符合行为样例"开跑前直接失败"）；指针若同时进 validation 行与 PRD 块会在同一 prompt 命中两次，违背 §7 rv-2 的"各一次命中" oracle。
+- Impact: 不改变 FR 目标态与验收 oracle；预检覆盖面为 daemon run_once 路径（blocked-continue 直入口不在内，见返回说明）。
+- Review: executor self-reviewed；待人审。
+
+### 验收状态推进：机器层全绿，横幅翻至待人工验收
+
+- Type: status
+- Before: §9 全部未勾，横幅 ⬜ 未开工。
+- After: Architecture / Behavior / Documentation / Validation / Delivery Readiness 五组全部勾选（证据：rv-1~rv-6 文件 + verifier-report PASS，verifier 亲自复跑 17 新测试与全量 2112 passed）；仅剩 4 项 Human-Confirmed 待人审；横幅翻 🧍 待人工验收。
+- Reason: 独立 verifier 结论 PASS，两处实施偏离（预检挂接点、指针单次命中）被评估为不破坏 PRD 意图。
+- Impact: 进入两触模型的第二次人工触点；人审通过并勾选剩余 4 项后可归档。
+- Review: verifier PASS；待人审。
+
 ### Final Reconciliation
 
-（归档前填写：对照最终实现与新证据核对前文叙述。）
+2026-09-16 归档前对照最终实现与证据完成核对：
+
+- Interpretation: 行为样例七行全部按原样实现并被 rv-1~rv-6 锁定；"显式配置 `.iar/evidence` 行为逐字节不变"由 rv-3 legacy 用例证明；"默默定了这些"各条（prd-stem 子目录、gitignore 白名单方案、跨仓库提交、legacy 保留、契约 v1 起步、skill 目录语义不变）均与交付一致。无被推翻的假设。
+- Public behavior and contracts: `config.validation.evidence_dir` 默认值 `tasks/evidence`、解析规则（`<root>/<prd-stem>` / `issue-<N>` 兜底）、`iar init` 托管块第四段、`--force` 传递、预检报错指引、prompt 契约指针——均与 §6/§7 叙述一致；§7 Change Impact Tree 已按实际落点修正（预检挂 `agent_runner_publish.run_preflight_checks`）。legacy 配置、无 PRD issue 兜底、skill 缺失/版本不符 fail fast 三种模式均有测试锁定。
+- Related PRD status: §5 列举的归档 PRD 关系不变；pending `completeness-judgment-hardening` 的 soft 协调事项仍有效（本 PRD 已先行落地 prompt 面改动）。
+- Requirements and risks: FR-1~FR-8 全部交付且 Feature Overview 锚点无漂移；§12 风险缓解（init 托管块 + 发布前拦截 + rv-3 负向控制；预检 fail fast）均已落地；§12 所列后续项（iar 独立发行的 keda 耦合清理、skill 安装目录语义）维持非阻塞后续定位。
+- **Decision Log**：D-01~D-07 均与最终交付一致；两处实施偏离（预检挂接点、指针单次命中）已在 Change Log 记录且经 verifier 评估不破坏意图，不构成新决策。
+- **验收状态横幅投影**：与 §9 最终状态一致（全部勾选，✅ 可归档）。
+- **遗留**：`ensure_no_misplaced_evidence_helpers` 报错文案仍写 `<root>/scripts/`（门禁判定正确，仅文案精度）；`blocked-continue` 直入口不经过预检。两者均为非阻塞观察，不影响本 PRD 验收结论。

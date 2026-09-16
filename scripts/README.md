@@ -7,7 +7,7 @@
 - `codex/` holds Codex CLI helper integrations such as macOS Shortcut notifications.
 - `worktree/`, `template/`, `secrets/`, `release/`, `just/`, and `diagnostics/` hold implementation files grouped by responsibility.
 
-Realistic Validation scripts do **not** belong here. Every RV script — evidence capture, temporary setup, and reproducible oracles referenced by an `evidence.json` command alike — lives under `.iar/evidence/scripts/` in the executing worktree, is git-excluded, and reaches reviewers through the evidence branch. There is no committed location for them.
+Realistic Validation scripts do **not** belong here. Every RV script — evidence capture, temporary setup, and reproducible oracles referenced by an `evidence.json` command alike — lives under `tasks/evidence/<prd-stem>/scripts/` in the executing worktree (excluded from git history by the `tasks/evidence` whitelist; only `*.md` reports are committed), and reaches reviewers through the evidence branch. There is no committed location for them.
 
 When adding a new script:
 

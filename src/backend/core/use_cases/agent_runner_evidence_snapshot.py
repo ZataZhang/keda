@@ -23,8 +23,11 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.core.shared.models.agent_runner import AppConfig
-from backend.core.use_cases.agent_runner_validation import evidence_dir_path
+from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.use_cases.agent_runner_validation import (
+    evidence_dir_path,
+    resolve_issue_evidence_dir,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -43,14 +46,27 @@ class EvidenceSnapshot:
     snapshot_dir: Path
 
 
-def snapshot_evidence_dir(worktree_path: Path, config: AppConfig) -> EvidenceSnapshot | None:
+def snapshot_evidence_dir(
+    worktree_path: Path,
+    config: AppConfig,
+    issue: IssueSummary | None = None,
+) -> EvidenceSnapshot | None:
     """给证据目录拍一份临时快照。
+
+    Args:
+        worktree_path: worktree 根目录。
+        config: 运行配置。
+        issue: 当前 Issue；提供时按任务子目录解析，否则退回配置根目录。
 
     Returns:
         ``EvidenceSnapshot``;证据目录不存在或拷贝失败时返回 ``None``(调用方
         据此跳过恢复,门禁行为不变)。
     """
-    evidence_dir = evidence_dir_path(worktree_path, config)
+    evidence_dir = (
+        resolve_issue_evidence_dir(worktree_path, config, issue)
+        if issue is not None
+        else evidence_dir_path(worktree_path, config)
+    )
     if not evidence_dir.is_dir():
         return None
     try:

@@ -268,7 +268,11 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "autopilot.auto_sign_off": "verifier 绿灯后自动替人工勾选 PR body 的 sign-off 清单（幂等）",
     "autopilot.merge_check_timeout_seconds": "等 PR checks 全绿的最大秒数；超时则放弃本轮合并",
     "validation.enabled": "是否启用 Realistic Validation 证据门禁",
-    "validation.evidence_dir": "worktree 内证据目录（默认被 info/exclude 排除，不会进入代码 diff）",
+    "validation.evidence_dir": (
+        "worktree 内证据目录根（默认 tasks/evidence，按任务分子目录；.md 报告经 "
+        ".gitignore 白名单进版本库，原始产物被排除；显式配置其它值如 .iar/evidence "
+        "则保持整目录排除的旧行为）"
+    ),
     "validation.branch_prefix": "orphan 证据分支前缀",
     "validation.evidence_format_check": "是否逐项检查证据文件格式",
     "validation.parse_evidence_format_with_agent": "是否用 agent 解析 PRD 中的格式要求",

@@ -30,6 +30,9 @@ from backend.core.use_cases.agent_runner_git import (
     has_changes,
     run_verification,
 )
+from backend.core.use_cases.agent_runner_validation import (
+    resolve_issue_evidence_relpath,
+)
 from backend.core.use_cases.run_agent_once import run_agent_with_prompt
 
 
@@ -72,6 +75,7 @@ def run_recovery_after_verification_failure(
         recovery_attempt=recovery_attempt,
         max_recovery_attempts=max_recovery_attempts,
         failure_summary=failure_summary,
+        evidence_dir=resolve_issue_evidence_relpath(config, issue),
     )
     run_agent_with_prompt(
         supervisor_agent,

@@ -55,6 +55,13 @@ def _issue(body: str = _ISSUE_BODY, number: int = 42) -> IssueSummary:
     )
 
 
+def _legacy_config(**validation_overrides: object) -> AppConfig:
+    """显式 legacy 证据目录（``.iar/evidence``）配置；锁定选址翻转前的行为。"""
+    return AppConfig(
+        validation=ValidationConfig(evidence_dir=".iar/evidence", **validation_overrides)
+    )
+
+
 def _write_manifest(
     evidence_dir: Path,
     *,
@@ -170,7 +177,7 @@ def test_load_evidence_manifest_accepts_rv_prefixed_item_number(
         encoding="utf-8",
     )
 
-    result = load_evidence_manifest(tmp_path, AppConfig())
+    result = load_evidence_manifest(tmp_path, _legacy_config())
 
     assert len(result.items) == 1
     assert result.items[0].item_number == 1
@@ -210,7 +217,7 @@ def test_load_evidence_manifest_normalizes_directory_prefixed_evidence_files(
         encoding="utf-8",
     )
 
-    result = load_evidence_manifest(tmp_path, AppConfig())
+    result = load_evidence_manifest(tmp_path, _legacy_config())
 
     assert result.items[0].evidence_files == ("rv-1-run.txt",)
 
@@ -249,7 +256,7 @@ def test_validate_evidence_manifest_naming_error_explains_bare_file_name(
             issue_body=_ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN"),
             checklist_items=["- [ ] 行为 A"],
             worktree_path=tmp_path,
-            config=AppConfig(),
+            config=_legacy_config(),
         )
 
     error_text = str(error_info.value)
@@ -288,7 +295,7 @@ def test_ensure_validation_evidence_ready_passes_with_complete_manifest(
     _write_manifest(evidence_dir)
     body = _ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN")
 
-    ensure_validation_evidence_ready(_issue(body=body), tmp_path, AppConfig())
+    ensure_validation_evidence_ready(_issue(body=body), tmp_path, _legacy_config())
 
 
 def test_ensure_validation_evidence_ready_rejects_missing_manifest(
@@ -300,7 +307,7 @@ def test_ensure_validation_evidence_ready_rejects_missing_manifest(
     body = _ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN")
 
     with pytest.raises(ValidationEvidenceError, match="evidence.json"):
-        ensure_validation_evidence_ready(_issue(body=body), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(body=body), tmp_path, _legacy_config())
 
 
 def test_ensure_validation_evidence_ready_rejects_missing_required_field(
@@ -313,7 +320,7 @@ def test_ensure_validation_evidence_ready_rejects_missing_required_field(
     body = _ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(body=body), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(body=body), tmp_path, _legacy_config())
     error_text = str(exc_info.value)
     assert "command" in error_text
     assert "Item 2" in error_text
@@ -333,7 +340,7 @@ def test_ensure_validation_evidence_ready_rejects_file_number_mismatch(
     body = _ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(body=body), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(body=body), tmp_path, _legacy_config())
     error_text = str(exc_info.value)
     assert "rv-2-serve.txt" in error_text
     assert "item 1" in error_text.lower()
@@ -354,7 +361,7 @@ def test_ensure_validation_evidence_ready_rejects_foreign_item_headers(
     body = _ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(body=body), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(body=body), tmp_path, _legacy_config())
     error_text = str(exc_info.value)
     assert "rv-1-run.txt" in error_text
     assert "foreign item(s) [2]" in error_text
@@ -375,7 +382,7 @@ def test_ensure_validation_evidence_ready_rejects_file_with_only_foreign_headers
     body = _ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(body=body), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(body=body), tmp_path, _legacy_config())
     error_text = str(exc_info.value)
     assert "rv-1-run.txt" in error_text
     assert "item(s) [2]" in error_text
@@ -391,7 +398,7 @@ def test_load_evidence_manifest_requires_version_one(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValidationEvidenceError, match="version must be 1"):
-        load_evidence_manifest(tmp_path, AppConfig())
+        load_evidence_manifest(tmp_path, _legacy_config())
 
 
 def test_build_evidence_comment_groups_by_item_in_chinese(tmp_path: Path) -> None:
@@ -408,7 +415,7 @@ def test_build_evidence_comment_groups_by_item_in_chinese(tmp_path: Path) -> Non
             file_names=tuple(files.keys()),
         ),
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
         issue_body=body,
@@ -442,7 +449,7 @@ def test_build_evidence_comment_renders_text_evidence_as_code_block(
             file_names=tuple(files.keys()),
         ),
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
         issue_body=body,
@@ -466,7 +473,7 @@ def test_build_evidence_comment_uses_english_labels(tmp_path: Path) -> None:
             file_names=tuple(files.keys()),
         ),
         worktree_path=tmp_path,
-        config=AppConfig(validation=ValidationConfig(language="en-US")),
+        config=_legacy_config(language="en-US"),
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
         issue_body=body,
@@ -490,7 +497,7 @@ def test_build_evidence_comment_legacy_without_marker(tmp_path: Path) -> None:
             file_names=("rv-1-run.txt", "rv-2-serve.txt"),
         ),
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
     )
@@ -522,7 +529,7 @@ def test_render_structured_evidence_comment_sorts_items(tmp_path: Path) -> None:
             "- [ ] 行为 B",
         ],
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
     )
     comment = render_structured_evidence_comment(
         report=report,
@@ -532,7 +539,7 @@ def test_render_structured_evidence_comment_sorts_items(tmp_path: Path) -> None:
             file_names=tuple(files.keys()),
         ),
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
     )
@@ -712,7 +719,7 @@ def test_validate_evidence_artifacts_opt_out_disables_check(tmp_path: Path) -> N
             ),
         ),
     )
-    config = AppConfig(validation=ValidationConfig(artifact_health_enabled=False))
+    config = _legacy_config(artifact_health_enabled=False)
     # Should NOT raise even though missing.png does not exist.
     validate_evidence_artifacts(manifest, tmp_path, config, _FakeProcessRunnerForArtifacts())
 
@@ -731,7 +738,7 @@ def test_validate_evidence_manifest_parses_expected_artifacts(tmp_path: Path) ->
             }
         ],
     )
-    manifest = load_evidence_manifest(tmp_path, AppConfig())
+    manifest = load_evidence_manifest(tmp_path, _legacy_config())
     assert len(manifest.items) == 1
     specs = manifest.items[0].expected_artifacts
     assert len(specs) == 1

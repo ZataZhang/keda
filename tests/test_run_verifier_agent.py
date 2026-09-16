@@ -613,7 +613,9 @@ def test_run_verifier_gate_restores_evidence_the_verifier_overwrote(
         return ValidationVerdict(risk="green")
 
     monkeypatch.setattr(rva, "run_verifier_agent", _verifier_that_overwrites_evidence)
-    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+    config = AppConfig(
+        validation=ValidationConfig(verifier_enabled=True, evidence_dir=".iar/evidence")
+    )
 
     rva.run_verifier_gate(_structured_issue(), tmp_path, config, FakeProcessRunner(), "claude")
 
@@ -637,7 +639,9 @@ def test_run_verifier_gate_restores_evidence_when_verifier_times_out(
         raise subprocess.TimeoutExpired(cmd=["kimi"], timeout=1800)
 
     monkeypatch.setattr(rva, "run_verifier_agent", _verifier_killed_mid_negative_control)
-    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+    config = AppConfig(
+        validation=ValidationConfig(verifier_enabled=True, evidence_dir=".iar/evidence")
+    )
 
     with pytest.raises(subprocess.TimeoutExpired):
         rva.run_verifier_gate(_structured_issue(), tmp_path, config, FakeProcessRunner(), "claude")
@@ -661,7 +665,9 @@ def test_run_verifier_gate_keeps_files_the_verifier_created(
         return ValidationVerdict(risk="green")
 
     monkeypatch.setattr(rva, "run_verifier_agent", _verifier_that_adds_a_file)
-    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+    config = AppConfig(
+        validation=ValidationConfig(verifier_enabled=True, evidence_dir=".iar/evidence")
+    )
 
     rva.run_verifier_gate(_structured_issue(), tmp_path, config, FakeProcessRunner(), "claude")
 

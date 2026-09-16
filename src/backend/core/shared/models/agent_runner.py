@@ -25,6 +25,25 @@ if TYPE_CHECKING:
     from backend.core.use_cases.run_verifier_agent import ValidationVerdict
 
 
+DEFAULT_VALIDATION_EVIDENCE_DIR = "tasks/evidence"
+"""Realistic Validation 证据目录的默认仓库相对根路径。
+
+新约定下证据按任务分子目录（``tasks/evidence/<prd-stem>/``，无 PRD 的 Issue 用
+``tasks/evidence/issue-<N>/`` 兜底），``.md`` 文本报告经 ``.gitignore`` 白名单
+进入版本库，原始产物被排除。显式把 ``validation.evidence_dir`` 配置成其它值
+（如 legacy 的 ``.iar/evidence``）的仓库保持整目录排除的旧行为，逐字节不变。
+"""
+
+
+def evidence_dir_uses_task_subdirs(evidence_dir: str) -> bool:
+    """判断证据目录配置是否走"按任务分子目录"的新约定。
+
+    只有默认值 ``tasks/evidence`` 启用子目录语义；任何显式配置（含 legacy
+    ``.iar/evidence``）保持扁平目录的旧行为。
+    """
+    return evidence_dir.strip("/") == DEFAULT_VALIDATION_EVIDENCE_DIR
+
+
 @dataclass(frozen=True)
 class AgentCommitResult:
     """Result of a successful agent execution with attempt history."""
@@ -485,9 +504,15 @@ class PromptConfig:
 class ValidationConfig:
     """Realistic Validation evidence gate configuration.
 
-    ``evidence_dir`` is relative to the worktree root and is excluded from
-    git tracking via ``info/exclude``, so evidence files can never reach the
-    code diff. ``branch_prefix`` names the orphan branches that carry
+    ``evidence_dir`` is relative to the worktree root. With the default
+    ``tasks/evidence`` the runner resolves a per-task subdirectory
+    (``tasks/evidence/<prd-stem>/``, or ``tasks/evidence/issue-<N>/`` when the
+    Issue references no canonical PRD) and relies on the ``.gitignore``
+    whitelist provisioned by ``iar init`` so that only ``*.md`` reports enter
+    the code diff while raw artifacts stay out of git history. A repo that
+    explicitly configures another value (e.g. the legacy ``.iar/evidence``)
+    keeps the old whole-directory ``info/exclude`` exclusion, byte for byte.
+    ``branch_prefix`` names the orphan branches that carry
     evidence to reviewers (``<branch_prefix>issue-<N>``); these branches are
     never merged and are deleted once the Issue closes.
 
@@ -519,7 +544,7 @@ class ValidationConfig:
     """
 
     enabled: bool = True
-    evidence_dir: str = ".iar/evidence"
+    evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR
     branch_prefix: str = "iar-evidence/"
     evidence_format_check: bool = True
     parse_evidence_format_with_agent: bool = True
@@ -581,6 +606,29 @@ class PrePrReviewConfig:
 
 
 @dataclass(frozen=True)
+class FindingDetail:
+    """一条 supervisor finding 明细（补丁 4：跨 cycle 累积的最小载体）。
+
+    Attributes:
+        severity: ``high`` / ``medium`` / ``low``。
+        title: finding 标题，与 ``file`` 组成跨 cycle 去重键。
+        description: 补充说明，可为空。
+        file: 相关文件（worktree 相对路径），可为空。
+        line: 相关行号，未知时为 ``0``。
+        status: ``open`` 表示仍未解决，``resolved`` 表示本 cycle 已修。
+        cycle_reported: 首次报告的 cycle 序号。
+    """
+
+    severity: str = "medium"
+    title: str = ""
+    description: str = ""
+    file: str = ""
+    line: int = 0
+    status: str = "open"
+    cycle_reported: int = 0
+
+
+@dataclass(frozen=True)
 class PostPrSupervisorConfig:
     """Post-PR supervisor cycle configuration."""
 
@@ -590,6 +638,12 @@ class PostPrSupervisorConfig:
     max_agent_crash_retries: int = 5
     crash_retry_initial_backoff_seconds: int = 30
     crash_retry_max_backoff_seconds: int = 600
+    # 补丁 3：关键路径前缀；命中的文件 diff 全量注入 supervisor prompt
+    key_paths: tuple[str, ...] = ()
+    max_diff_chars: int = 6000
+    # 补丁 4：跨 cycle finding 注入开关（opt-out）与 artifact 落盘目录
+    previous_findings_injection_enabled: bool = True
+    findings_artifact_dir: str = ".iar/state"
 
 
 @dataclass(frozen=True)
@@ -634,6 +688,7 @@ class SupervisorActionResult:
     findings_counts: dict[str, int] = field(default_factory=dict)
     verification_status: str = ""
     head_sha: str | None = None
+    findings_detail: tuple[FindingDetail, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -147,6 +147,17 @@ def _issue(body: str = _ISSUE_BODY_WITH_VALIDATION, number: int = 42) -> IssueSu
     )
 
 
+def _legacy_config(**validation_overrides: object) -> AppConfig:
+    """显式 legacy 证据目录（``.iar/evidence``）配置。
+
+    锁定 PRD 证据选址翻转前的行为：显式配置该值的仓库逐字节不变——证据落
+    ``.iar/evidence/`` 扁平目录、整目录排除、发布前拦截所有证据路径。
+    """
+    return AppConfig(
+        validation=ValidationConfig(evidence_dir=".iar/evidence", **validation_overrides)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Markdown 解析与物化
 # ---------------------------------------------------------------------------
@@ -228,10 +239,13 @@ def test_validation_required_rules() -> None:
 def test_build_validation_prompt_line() -> None:
     """Prompt line appears only for evidence-requiring issues."""
     config = AppConfig()
-    prompt_line = build_validation_prompt_line(_issue(), config)
-    assert ".iar/evidence" in prompt_line
+    prompt_line = build_validation_prompt_line(
+        _issue(), config, evidence_dir="tasks/evidence/issue-42"
+    )
+    # 证据落点来自调用方解析的按任务子目录。
+    assert "tasks/evidence/issue-42/" in prompt_line
     # 唯一目的地：prompt 里不得再出现任何代码树落点。
-    assert ".iar/evidence/scripts/" in prompt_line
+    assert "tasks/evidence/issue-42/scripts/" in prompt_line
     assert "scripts/rv_evidence/" not in prompt_line
     assert "scripts_evidence/" not in prompt_line
     assert "scripts/evidence_helpers/" not in prompt_line
@@ -256,11 +270,11 @@ def test_validation_evidence_detail_keeps_reason_last_and_drops_boilerplate() ->
 
 def test_validation_evidence_failure_recovery_prompt_keeps_instruction() -> None:
     """The recovery prompt fed back to the agent keeps the actionable steps."""
-    prompt = format_validation_evidence_failure("item 2 exited 2")
+    prompt = format_validation_evidence_failure("item 2 exited 2", "tasks/evidence/issue-42")
     assert "item 2 exited 2" in prompt
     assert "Run the validation plan for real" in prompt
     assert "do not fabricate evidence" in prompt
-    assert ".iar/evidence/scripts/" in prompt
+    assert "tasks/evidence/issue-42/scripts/" in prompt
     assert "scripts/rv_evidence/" not in prompt
 
 
@@ -271,7 +285,7 @@ def test_validation_evidence_failure_recovery_prompt_keeps_instruction() -> None
 
 def test_list_evidence_files_filters_hidden_and_dirs(tmp_path: Path) -> None:
     """Only first-level regular non-hidden files count as evidence."""
-    config = AppConfig()
+    config = _legacy_config()
     evidence_dir = tmp_path / ".iar" / "evidence"
     evidence_dir.mkdir(parents=True)
     (evidence_dir / "rv-1-shot.png").write_bytes(b"png")
@@ -288,14 +302,14 @@ def test_ensure_validation_evidence_ready_raises_without_evidence(
 ) -> None:
     """Required validation with empty evidence dir fails the gate."""
     with pytest.raises(ValidationEvidenceError):
-        ensure_validation_evidence_ready(_issue(), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(), tmp_path, _legacy_config())
 
 
 def test_ensure_validation_evidence_ready_passes_with_evidence(
     tmp_path: Path,
 ) -> None:
     """Per-item evidence satisfies the gate; waived issues skip it entirely."""
-    config = AppConfig()
+    config = _legacy_config()
     evidence_dir = tmp_path / ".iar" / "evidence"
     evidence_dir.mkdir(parents=True)
     (evidence_dir / "rv-1.png").write_bytes(b"png")
@@ -314,7 +328,7 @@ def test_ensure_validation_evidence_ready_rejects_uncovered_item(
     (evidence_dir / "rv-1-run.txt").write_text("$ demo run", encoding="utf-8")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(), tmp_path, _legacy_config())
     assert "item 2" in str(exc_info.value)
     assert "rv-2" in str(exc_info.value)
 
@@ -337,12 +351,12 @@ def test_ensure_validation_evidence_ready_rejects_missing_screenshot(
     (evidence_dir / "rv-2-cli.txt").write_text("$ demo run", encoding="utf-8")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(body=issue_body), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(body=issue_body), tmp_path, _legacy_config())
     assert "screenshot" in str(exc_info.value)
     assert "rv-1" in str(exc_info.value)
 
     (evidence_dir / "rv-1-login.png").write_bytes(b"png")
-    ensure_validation_evidence_ready(_issue(body=issue_body), tmp_path, AppConfig())
+    ensure_validation_evidence_ready(_issue(body=issue_body), tmp_path, _legacy_config())
 
 
 def test_ensure_validation_evidence_ready_matches_named_formats(
@@ -365,7 +379,7 @@ def test_ensure_validation_evidence_ready_matches_named_formats(
     (evidence_dir / "rv-3-cli.txt").write_text("$ demo export", encoding="utf-8")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(body=issue_body), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(body=issue_body), tmp_path, _legacy_config())
     error_text = str(exc_info.value)
     assert "PDF" in error_text
     assert "Word" in error_text
@@ -373,14 +387,14 @@ def test_ensure_validation_evidence_ready_matches_named_formats(
 
     (evidence_dir / "rv-1-report.pdf").write_bytes(b"%PDF")
     (evidence_dir / "rv-2-doc.docx").write_bytes(b"PK")
-    ensure_validation_evidence_ready(_issue(body=issue_body), tmp_path, AppConfig())
+    ensure_validation_evidence_ready(_issue(body=issue_body), tmp_path, _legacy_config())
 
 
 def test_format_check_disabled_by_config_keeps_non_empty_gate(
     tmp_path: Path,
 ) -> None:
     """Config off: per-item matching skipped, empty dir still rejected."""
-    relaxed_config = AppConfig(validation=ValidationConfig(evidence_format_check=False))
+    relaxed_config = _legacy_config(evidence_format_check=False)
     with pytest.raises(ValidationEvidenceError):
         ensure_validation_evidence_ready(_issue(), tmp_path, relaxed_config)
 
@@ -392,7 +406,7 @@ def test_format_check_disabled_by_config_keeps_non_empty_gate(
 
 def test_format_check_disabled_by_issue_marker(tmp_path: Path) -> None:
     """An iar:evidence-format-waived marker skips per-item matching."""
-    config = AppConfig()
+    config = _legacy_config()
     evidence_dir = tmp_path / ".iar" / "evidence"
     evidence_dir.mkdir(parents=True)
     (evidence_dir / "rv-1-run.txt").write_text("$ demo run", encoding="utf-8")
@@ -518,7 +532,36 @@ def test_collect_evidence_coverage_problems_with_markers() -> None:
 
 
 def test_ensure_evidence_dir_excluded_is_idempotent(tmp_path: Path) -> None:
-    """The exclude line is appended once, preserving existing content."""
+    """legacy 配置：证据目录与 RV 缓存各排除一次，保留既有内容。"""
+    exclude_path = tmp_path / ".git" / "info" / "exclude"
+    exclude_path.parent.mkdir(parents=True)
+    exclude_path.write_text("existing-rule\n", encoding="utf-8")
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "rev-parse", "--git-path", "info/exclude"): CommandResult(
+                command=("git", "rev-parse", "--git-path", "info/exclude"),
+                return_code=0,
+                stdout=str(exclude_path),
+                stderr="",
+            )
+        }
+    )
+    config = _legacy_config()
+
+    ensure_evidence_dir_excluded(tmp_path, config, fake_runner)
+    ensure_evidence_dir_excluded(tmp_path, config, fake_runner)
+
+    exclude_lines = exclude_path.read_text(encoding="utf-8").splitlines()
+    assert exclude_lines.count("/.iar/evidence/") == 1
+    # The RV re-exec cache must also be excluded so it never dirties the
+    # worktree or leaks into a commit, and it is appended exactly once.
+    assert exclude_lines.count("/.iar/rv_reexec_cache.json") == 1
+    assert "existing-rule" in exclude_lines
+
+
+def test_ensure_evidence_dir_excluded_skips_dir_line_for_tasks_evidence(tmp_path: Path) -> None:
+    """新约定（默认 tasks/evidence）：不再整目录排除（由 init 的 .gitignore 白名单
+    保证 git 语义），只排除固定在 .iar/ 的 RV 复跑缓存。"""
     exclude_path = tmp_path / ".git" / "info" / "exclude"
     exclude_path.parent.mkdir(parents=True)
     exclude_path.write_text("existing-rule\n", encoding="utf-8")
@@ -538,15 +581,13 @@ def test_ensure_evidence_dir_excluded_is_idempotent(tmp_path: Path) -> None:
     ensure_evidence_dir_excluded(tmp_path, config, fake_runner)
 
     exclude_lines = exclude_path.read_text(encoding="utf-8").splitlines()
-    assert exclude_lines.count("/.iar/evidence/") == 1
-    # The RV re-exec cache must also be excluded so it never dirties the
-    # worktree or leaks into a commit, and it is appended exactly once.
+    assert not any(line.startswith("/tasks/evidence") for line in exclude_lines)
     assert exclude_lines.count("/.iar/rv_reexec_cache.json") == 1
     assert "existing-rule" in exclude_lines
 
 
 def test_ensure_no_evidence_paths_in_changes_blocks_leak(tmp_path: Path) -> None:
-    """Evidence paths in the diff refuse publication."""
+    """legacy 配置：任何证据路径进 diff 都拒绝发布（逐字节不变的旧行为）。"""
     fake_runner = FakeProcessRunner(
         responses={
             ("git", "status", "--porcelain", "-z"): CommandResult(
@@ -558,7 +599,35 @@ def test_ensure_no_evidence_paths_in_changes_blocks_leak(tmp_path: Path) -> None
         }
     )
     with pytest.raises(RuntimeError, match="evidence"):
+        ensure_no_evidence_paths_in_changes(tmp_path, _legacy_config(), fake_runner)
+
+
+def test_ensure_no_evidence_paths_in_changes_whitelist_semantics(tmp_path: Path) -> None:
+    """新约定（默认 tasks/evidence）：放行 .md 文本报告，拦截其余证据产物。"""
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "status", "--porcelain", "-z"): CommandResult(
+                command=("git", "status", "--porcelain", "-z"),
+                stdout=(
+                    "A  tasks/evidence/P1-FEAT-x/rv-1-report.md\0"
+                    "A  tasks/evidence/P1-FEAT-x/scripts/rv-1-oracle.py\0"
+                    "M  src/app.py\0"
+                ),
+                return_code=0,
+                stderr="",
+            )
+        }
+    )
+    with pytest.raises(RuntimeError, match="rv-1-oracle.py"):
         ensure_no_evidence_paths_in_changes(tmp_path, AppConfig(), fake_runner)
+
+
+def test_ensure_no_evidence_paths_in_changes_allows_markdown_reports(tmp_path: Path) -> None:
+    """新约定下证据目录内的 .md 报告随 PR 进版本库，不被发布前拦截。"""
+    fake_runner = _status_runner(
+        "A  tasks/evidence/P1-FEAT-x/P1-FEAT-x.evidence-report.md\0M  src/app.py\0"
+    )
+    ensure_no_evidence_paths_in_changes(tmp_path, AppConfig(), fake_runner)
 
 
 def _status_runner(porcelain_stdout: str) -> FakeProcessRunner:
@@ -613,9 +682,8 @@ def test_ensure_no_misplaced_evidence_helpers_enters_recovery(
         "src/backend/core/use_cases/revenue.py",
         "src/backend/core/shared/rvalue_cache.py",
         "src/backend/api/review.py",
-        # 证据目录内一律豁免，其内部结构不受限。
-        ".iar/evidence/scripts/rv-1-oracle.py",
-        ".iar/evidence/scripts/rv_capture.sh",
+        # 新约定证据目录内一律豁免（含 oracle 脚本子目录），其内部结构不受限。
+        "tasks/evidence/P1-FEAT-20260716-x/scripts/rv-1-oracle.py",
         # 证据**产物**不归本规则管：下游按 docs/ai-standards/testing.md 把
         # 截图/日志归档到 tasks/evidence/<prd>/，拿"RV scripts must never enter
         # the code diff"去拦一张 PNG 既不自洽，也会打断那套既定流程。
@@ -634,6 +702,23 @@ def test_ensure_no_misplaced_evidence_helpers_allows_legitimate_paths(
     )
 
 
+@pytest.mark.parametrize(
+    "legacy_allowed_path",
+    (
+        # legacy 证据目录内一律豁免（显式配置 .iar/evidence 的仓库行为不变）。
+        ".iar/evidence/scripts/rv-1-oracle.py",
+        ".iar/evidence/scripts/rv_capture.sh",
+    ),
+)
+def test_ensure_no_misplaced_evidence_helpers_allows_legacy_evidence_dir(
+    tmp_path: Path, legacy_allowed_path: str
+) -> None:
+    """显式 legacy 配置下，``.iar/evidence/`` 内路径仍被豁免。"""
+    ensure_no_misplaced_evidence_helpers(
+        tmp_path, _legacy_config(), _status_runner(f"A  {legacy_allowed_path}\0")
+    )
+
+
 def test_list_evidence_upload_files_skips_bytecode_caches(tmp_path: Path) -> None:
     """oracle 被 pytest 收集过会留下 __pycache__/*.pyc，不该推到证据分支。"""
     evidence_dir = tmp_path / ".iar" / "evidence"
@@ -643,7 +728,7 @@ def test_list_evidence_upload_files_skips_bytecode_caches(tmp_path: Path) -> Non
     (evidence_dir / "scripts" / "__pycache__" / "rv-1-oracle.cpython-313.pyc").write_bytes(b"\x00")
     (evidence_dir / "scripts" / "stray.pyc").write_bytes(b"\x00")
 
-    uploaded = list_evidence_upload_files(tmp_path, AppConfig())
+    uploaded = list_evidence_upload_files(tmp_path, _legacy_config())
 
     assert uploaded == ["rv-1-run.txt", "scripts/rv-1-oracle.py"]
 
@@ -822,7 +907,7 @@ def test_upload_evidence_branch_nests_oracle_subdirectory(tmp_path: Path) -> Non
     oracle_path = evidence_dir / "scripts" / "rv-1-oracle.py"
     oracle_path.parent.mkdir()
     oracle_path.write_text("assert real_check()\n", encoding="utf-8")
-    config = AppConfig()
+    config = _legacy_config()
     responses = {
         ("git", "hash-object", "-w", "--", str(evidence_dir / "rv-1-shot.png")): CommandResult(
             ("git",), 0, "blob1\n", ""
@@ -864,7 +949,7 @@ def test_upload_evidence_branch_nests_oracle_subdirectory(tmp_path: Path) -> Non
 def test_upload_evidence_branch_uses_orphan_plumbing(tmp_path: Path) -> None:
     """Evidence is pushed via hash-object/mktree/commit-tree without parents."""
     worktree_path, evidence_dir = _evidence_worktree(tmp_path)
-    config = AppConfig()
+    config = _legacy_config()
     responses = {
         (
             "git",
@@ -936,7 +1021,7 @@ def test_build_evidence_comment_embeds_images_and_quotes_text(
 ) -> None:
     """Images embed via blob raw links; text files are quoted inline."""
     worktree_path, _evidence_dir = _evidence_worktree(tmp_path)
-    config = AppConfig()
+    config = _legacy_config()
     comment = build_evidence_comment(
         upload=EvidenceUpload(
             branch="iar-evidence/issue-42",
@@ -970,7 +1055,7 @@ def test_parse_pr_number() -> None:
 def test_publish_validation_evidence_posts_pr_comment(tmp_path: Path) -> None:
     """The composite helper uploads evidence and comments on the PR."""
     worktree_path, evidence_dir = _evidence_worktree(tmp_path)
-    config = AppConfig()
+    config = _legacy_config()
     responses = {
         (
             "git",
@@ -1046,7 +1131,7 @@ def test_publish_validation_evidence_best_effort_swallows_comment_failure(
     comment. The composite helper must degrade gracefully instead.
     """
     worktree_path, evidence_dir = _evidence_worktree(tmp_path)
-    config = AppConfig()
+    config = _legacy_config()
     responses = {
         (
             "git",
@@ -1598,7 +1683,7 @@ def test_ensure_validation_evidence_ready_passes_with_complete_manifest(
     (evidence_dir / "rv-1-run.txt").write_text("run output", encoding="utf-8")
     (evidence_dir / "rv-2-serve.txt").write_text("serve output", encoding="utf-8")
 
-    ensure_validation_evidence_ready(_structured_issue(), tmp_path, AppConfig())
+    ensure_validation_evidence_ready(_structured_issue(), tmp_path, _legacy_config())
 
 
 def test_ensure_validation_evidence_ready_rejects_missing_manifest(
@@ -1610,7 +1695,7 @@ def test_ensure_validation_evidence_ready_rejects_missing_manifest(
     (evidence_dir / "rv-1-run.txt").write_text("run output", encoding="utf-8")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_structured_issue(), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_structured_issue(), tmp_path, _legacy_config())
     assert "evidence.json" in str(exc_info.value)
 
 
@@ -1648,7 +1733,7 @@ def test_ensure_validation_evidence_ready_rejects_missing_required_field(
                 labels=("agent/review",),
             ),
             tmp_path,
-            AppConfig(),
+            _legacy_config(),
         )
     assert "Item 1" in str(exc_info.value)
     assert "explanation" in str(exc_info.value)
@@ -1688,7 +1773,7 @@ def test_ensure_validation_evidence_ready_rejects_mismatched_file_number(
                 labels=("agent/review",),
             ),
             tmp_path,
-            AppConfig(),
+            _legacy_config(),
         )
     assert "rv-2-run.txt" in str(exc_info.value)
     assert "item 1" in str(exc_info.value).lower()
@@ -1707,7 +1792,7 @@ def test_validate_evidence_manifest_computes_sha256(
         issue_body=_STRUCTURED_ISSUE_BODY,
         checklist_items=extract_realistic_validation_items(_STRUCTURED_ISSUE_BODY),
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
     )
     assert len(report.items) == 2
     assert all(len(item.files) == 1 for item in report.items)
@@ -1742,7 +1827,7 @@ def test_validate_evidence_manifest_rejects_missing_negative_control(
             issue_body=issue_body,
             checklist_items=["- [ ] **行为 A 真实验证**：通过 `demo run` 验证输出。"],
             worktree_path=tmp_path,
-            config=AppConfig(),
+            config=_legacy_config(),
         )
     assert "negative_control" in str(exc_info.value)
 
@@ -1774,7 +1859,7 @@ def test_validate_evidence_manifest_allows_missing_control_when_opted_out(
         issue_body=issue_body,
         checklist_items=["- [ ] **行为 A 真实验证**：通过 `demo run` 验证输出。"],
         worktree_path=tmp_path,
-        config=AppConfig(validation=ValidationConfig(require_negative_control=False)),
+        config=_legacy_config(require_negative_control=False),
     )
     assert len(report.items) == 1
 
@@ -1798,7 +1883,7 @@ def test_ensure_validation_commands_pass_rejects_failing_command(
         ensure_validation_commands_pass(
             _issue(body=_STRUCTURED_ISSUE_BODY),
             tmp_path,
-            AppConfig(),
+            _legacy_config(),
             runner,
         )
     assert "re-ran" in str(exc_info.value)
@@ -1813,7 +1898,7 @@ def test_ensure_validation_commands_pass_accepts_passing_commands(
     _write_manifest(evidence_dir)
     runner = FakeProcessRunner()
     ensure_validation_commands_pass(
-        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, AppConfig(), runner
+        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
     )
     assert ["bash", "-lc", "demo run"] in runner.raw_calls
     assert ["bash", "-lc", "demo serve"] in runner.raw_calls
@@ -1870,14 +1955,14 @@ def test_ensure_validation_commands_pass_caches_pass_on_clean_tree(
 
     first = FakeProcessRunner(responses=responses)
     ensure_validation_commands_pass(
-        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, AppConfig(), first
+        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), first
     )
     assert ["bash", "-lc", "demo run"] in first.raw_calls
     assert (tmp_path / ".iar" / "rv_reexec_cache.json").exists()
 
     second = FakeProcessRunner(responses=responses)
     ensure_validation_commands_pass(
-        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, AppConfig(), second
+        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), second
     )
     assert ["bash", "-lc", "demo run"] not in second.raw_calls
     assert ["bash", "-lc", "demo serve"] not in second.raw_calls
@@ -1890,12 +1975,12 @@ def test_ensure_validation_commands_pass_reruns_when_tree_changes(
     _write_manifest(tmp_path / ".iar" / "evidence")
     first = FakeProcessRunner(responses=_clean_tree_git_responses("tree-aaa"))
     ensure_validation_commands_pass(
-        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, AppConfig(), first
+        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), first
     )
 
     second = FakeProcessRunner(responses=_clean_tree_git_responses("tree-bbb"))
     ensure_validation_commands_pass(
-        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, AppConfig(), second
+        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), second
     )
     assert ["bash", "-lc", "demo run"] in second.raw_calls
 
@@ -1915,7 +2000,7 @@ def test_ensure_validation_commands_pass_does_not_cache_dirty_tree(
     }
     runner = FakeProcessRunner(responses=dirty_responses)
     ensure_validation_commands_pass(
-        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, AppConfig(), runner
+        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
     )
     assert ["bash", "-lc", "demo run"] in runner.raw_calls
     assert not (tmp_path / ".iar" / "rv_reexec_cache.json").exists()
@@ -1926,7 +2011,7 @@ def test_ensure_validation_commands_pass_cache_disabled_always_reruns(
 ) -> None:
     """``reexecute_cache_enabled=False`` keeps re-running and writes no cache."""
     _write_manifest(tmp_path / ".iar" / "evidence")
-    config = AppConfig(validation=ValidationConfig(reexecute_cache_enabled=False))
+    config = _legacy_config(reexecute_cache_enabled=False)
     responses = _clean_tree_git_responses("tree-aaa")
 
     first = FakeProcessRunner(responses=responses)
@@ -1968,7 +2053,7 @@ def test_render_structured_evidence_comment_groups_by_item(
         ),
         checklist_items=["- [ ] **行为 A 真实验证**：通过 `demo run` 验证输出。"],
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
     )
 
     comment = render_structured_evidence_comment(
@@ -1979,7 +2064,7 @@ def test_render_structured_evidence_comment_groups_by_item(
             file_names=("rv-1-run.txt",),
         ),
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
     )
@@ -2013,7 +2098,7 @@ def test_build_evidence_comment_uses_structured_rendering(
             file_names=("rv-1-run.txt", "rv-2-serve.txt"),
         ),
         worktree_path=tmp_path,
-        config=AppConfig(),
+        config=_legacy_config(),
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
         issue_body=_STRUCTURED_ISSUE_BODY,
@@ -2036,7 +2121,7 @@ def test_build_evidence_comment_uses_legacy_rendering_without_marker(
             file_names=("rv-1-shot.png", "rv-2-cli.txt"),
         ),
         worktree_path=worktree_path,
-        config=AppConfig(),
+        config=_legacy_config(),
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
     )
@@ -2133,7 +2218,7 @@ def test_frontend_visual_gate_raises_without_visual_evidence(tmp_path: Path) -> 
     worktree = _init_git_worktree_with_change(tmp_path, "frontend-admin/src/x.tsx")
     _write_evidence_file(worktree, "rv-1-public-locale.txt", b"scraped source")
     with pytest.raises(ValidationEvidenceError, match="no visual evidence"):
-        ensure_frontend_visual_evidence(_issue(), worktree, AppConfig(), SubprocessRunner())
+        ensure_frontend_visual_evidence(_issue(), worktree, _legacy_config(), SubprocessRunner())
 
 
 def test_frontend_visual_gate_passes_with_screenshot(tmp_path: Path) -> None:
@@ -2142,7 +2227,7 @@ def test_frontend_visual_gate_passes_with_screenshot(tmp_path: Path) -> None:
 
     worktree = _init_git_worktree_with_change(tmp_path, "frontend-public/app/page.tsx")
     _write_evidence_file(worktree, "rv-1-home.png", b"\x89PNG\r\n")
-    ensure_frontend_visual_evidence(_issue(), worktree, AppConfig(), SubprocessRunner())
+    ensure_frontend_visual_evidence(_issue(), worktree, _legacy_config(), SubprocessRunner())
 
 
 def test_frontend_visual_gate_ignores_non_frontend_change(tmp_path: Path) -> None:
@@ -2151,7 +2236,7 @@ def test_frontend_visual_gate_ignores_non_frontend_change(tmp_path: Path) -> Non
 
     worktree = _init_git_worktree_with_change(tmp_path, "src/backend/x.py")
     _write_evidence_file(worktree, "rv-1-cli.txt", b"log")
-    ensure_frontend_visual_evidence(_issue(), worktree, AppConfig(), SubprocessRunner())
+    ensure_frontend_visual_evidence(_issue(), worktree, _legacy_config(), SubprocessRunner())
 
 
 def test_frontend_visual_gate_opt_out_by_config(tmp_path: Path) -> None:
@@ -2168,7 +2253,7 @@ def test_frontend_visual_gate_skips_without_process_runner(tmp_path: Path) -> No
     """process_runner 为 None（旧调用方未接线）→ 跳过，保持兼容。"""
     worktree = _init_git_worktree_with_change(tmp_path, "frontend-admin/src/x.tsx")
     _write_evidence_file(worktree, "rv-1.txt", b"log")
-    ensure_frontend_visual_evidence(_issue(), worktree, AppConfig(), None)
+    ensure_frontend_visual_evidence(_issue(), worktree, _legacy_config(), None)
 
 
 def test_frontend_visual_gate_defaults_on() -> None:
@@ -2190,7 +2275,7 @@ def test_frontend_visual_gate_marks_the_failure_as_closeout(tmp_path: Path) -> N
     _write_evidence_file(worktree, "rv-1-log.txt", b"log")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_frontend_visual_evidence(_issue(), worktree, AppConfig(), SubprocessRunner())
+        ensure_frontend_visual_evidence(_issue(), worktree, _legacy_config(), SubprocessRunner())
 
     assert exc_info.value.kind is DeliveryGateFailureKind.FRONTEND_VISUAL_EVIDENCE_MISSING
 
@@ -2203,7 +2288,7 @@ def test_manifest_field_format_failures_are_closeout_class(tmp_path: Path) -> No
     (evidence_dir / "rv-2-serve.txt").write_text("serve output", encoding="utf-8")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_structured_issue(), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_structured_issue(), tmp_path, _legacy_config())
 
     assert exc_info.value.kind is DeliveryGateFailureKind.EVIDENCE_MANIFEST_FORMAT
 
@@ -2211,7 +2296,7 @@ def test_manifest_field_format_failures_are_closeout_class(tmp_path: Path) -> No
 def test_empty_evidence_dir_stays_substantive(tmp_path: Path) -> None:
     """证据目录为空 = 验证没真跑过，必须保持真失败类。"""
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(), tmp_path, _legacy_config())
 
     assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
 
@@ -2223,7 +2308,7 @@ def test_missing_manifest_stays_substantive(tmp_path: Path) -> None:
     (evidence_dir / "rv-1-run.txt").write_text("run output", encoding="utf-8")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_structured_issue(), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_structured_issue(), tmp_path, _legacy_config())
 
     assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
 
@@ -2235,7 +2320,7 @@ def test_evidence_coverage_mismatch_stays_substantive(tmp_path: Path) -> None:
     (evidence_dir / "rv-1-run.txt").write_text("run output", encoding="utf-8")
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
-        ensure_validation_evidence_ready(_issue(), tmp_path, AppConfig())
+        ensure_validation_evidence_ready(_issue(), tmp_path, _legacy_config())
 
     assert "does not match the checklist" in str(exc_info.value)
     assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
@@ -2258,7 +2343,7 @@ def test_rv_command_reexecution_failure_stays_substantive(tmp_path: Path) -> Non
 
     with pytest.raises(ValidationEvidenceError) as exc_info:
         ensure_validation_commands_pass(
-            _structured_issue(), tmp_path, AppConfig(), _FailingCommandRunner()
+            _structured_issue(), tmp_path, _legacy_config(), _FailingCommandRunner()
         )
 
     assert "failed when keda" in str(exc_info.value)

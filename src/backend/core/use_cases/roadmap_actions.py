@@ -138,6 +138,7 @@ def _create_issue_for_prd(
         git_base_branch=context.config.git.base_branch,
         generated_content_config=context.config.generated_content,
         labels_config=context.config.labels,
+        evidence_dir=context.config.validation.evidence_dir,
     )
     issue_url = create_issue_from_prd(
         request=request,

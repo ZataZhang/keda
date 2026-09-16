@@ -12,6 +12,9 @@ from backend.core.use_cases.agent_runner_feedback import (
     failed_verification_results,
 )
 from backend.core.use_cases.agent_runner_failure import format_recovery_failure_summary
+from backend.core.use_cases.agent_runner_validation import (
+    resolve_issue_evidence_relpath,
+)
 from backend.core.use_cases.run_agent_once import (
     commit_requested_changes,
     ensure_verification_passed,
@@ -103,6 +106,7 @@ def execute_repair(
                     worktree_path,
                     recovery_attempt=attempt,
                     max_recovery_attempts=max_attempts,
+                    evidence_dir=resolve_issue_evidence_relpath(config, issue),
                     failure_summary=format_recovery_failure_summary(
                         "Verification failed before repair commit.",
                         exc.verification_results,
@@ -123,6 +127,7 @@ def execute_repair(
                     worktree_path,
                     recovery_attempt=attempt,
                     max_recovery_attempts=max_attempts,
+                    evidence_dir=resolve_issue_evidence_relpath(config, issue),
                     failure_summary=format_recovery_failure_summary(
                         "Verification failed before repair commit.",
                         verification_results,

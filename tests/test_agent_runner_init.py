@@ -563,7 +563,7 @@ def test_iar_init_renders_detected_commands_and_validation_section(
     assert "uv run --extra dev mkdocs build" in config_text
     assert "[agent_runner.validation]" in config_text
     assert "enabled = true" in config_text
-    assert 'evidence_dir = ".iar/evidence"' in config_text
+    assert 'evidence_dir = "tasks/evidence"' in config_text
     assert verification_commands == [
         "git diff --check",
         "uv run --extra dev mkdocs build",
@@ -788,13 +788,24 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     text = gitignore_path.read_text(encoding="utf-8")
     assert result.block_inserted is True
     assert result.block_updated is False
-    assert result.entries_added == (".iar/", ".agent-runner/", ".iar-worktrees/")
+    assert result.entries_added == (
+        ".iar/",
+        ".agent-runner/",
+        ".iar-worktrees/",
+        "tasks/evidence/**",
+        "!tasks/evidence/**/",
+        "!tasks/evidence/**/*.md",
+    )
     assert result.entries_skipped_external == ()
     assert GITIGNORE_BLOCK_HEADER in text
     assert GITIGNORE_BLOCK_FOOTER in text
     assert ".iar/" in text
     assert ".agent-runner/" in text
     assert ".iar-worktrees/" in text
+    # tasks/evidence 白名单段：整目录排除、放行子目录、只提交 .md 文本报告。
+    assert "tasks/evidence/**" in text
+    assert "!tasks/evidence/**/" in text
+    assert "!tasks/evidence/**/*.md" in text
 
 
 def test_ensure_gitignore_skips_patterns_already_outside_block(
@@ -813,7 +824,13 @@ def test_ensure_gitignore_skips_patterns_already_outside_block(
 
     text = gitignore.read_text(encoding="utf-8")
     assert result.block_inserted is True
-    assert result.entries_added == (".iar/", ".iar-worktrees/")
+    assert result.entries_added == (
+        ".iar/",
+        ".iar-worktrees/",
+        "tasks/evidence/**",
+        "!tasks/evidence/**/",
+        "!tasks/evidence/**/*.md",
+    )
     assert ".agent-runner/" in result.entries_skipped_external
     # Project rules must be preserved verbatim above the block.
     assert text.startswith("# project rules\nfoo/\n.agent-runner/\n")
@@ -874,7 +891,8 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     repo_path.mkdir()
     gitignore = repo_path / ".gitignore"
     gitignore.write_text(
-        ".iar/\n.agent-runner/\n.iar-worktrees/\n",
+        ".iar/\n.agent-runner/\n.iar-worktrees/\n"
+        "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n",
         encoding="utf-8",
     )
 
@@ -888,6 +906,9 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
         ".iar/",
         ".agent-runner/",
         ".iar-worktrees/",
+        "tasks/evidence/**",
+        "!tasks/evidence/**/",
+        "!tasks/evidence/**/*.md",
     }
     assert GITIGNORE_BLOCK_HEADER not in text
 

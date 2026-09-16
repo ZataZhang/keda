@@ -3,7 +3,8 @@
 本模块负责 Realistic Validation 的**结构化证据**能力：
 
 - 解析并物化 ``iar:structured-evidence`` hidden marker。
-- 读取 ``.iar/evidence/evidence.json`` manifest。
+- 读取证据目录下的 ``evidence.json`` manifest（默认约定为
+  ``tasks/evidence/<prd-stem>/evidence.json``，目录由调用方按任务解析传入）。
 - 校验 manifest 字段完整性、item 覆盖、证据文件存在性与编号一致性。
 - 计算证据文件 SHA-256，并按 checklist item 分组渲染 PR evidence comment。
 - 提供执行 prompt 与 recovery prompt 中使用的 manifest 要求后缀。
@@ -99,6 +100,27 @@ class ArtifactSpec:
 
 
 @dataclass(frozen=True)
+class StdoutAssertion:
+    """一条 RV 命令输出断言（补丁 1：堵住"exit 0 但什么都没验"的假绿灯）。
+
+    agent 只要写 ``[ -d x ] || true`` 或 ``grep ... || echo ok`` 就能让命令
+    exit 0；退出码因此不足以证明检查点成立。这里让 manifest 自描述"输出里
+    必须出现 / 必须不出现什么"，由 keda 复跑后对真实 stdout/stderr 断言。
+
+    Attributes:
+        severity: 断言失败时的严重级别（``high`` / ``medium`` / ``low``）。
+        pattern: 待匹配的子串（保持子串语义，不用正则，避免 ``.*`` 假阳）。
+        source: 断言目标，``stdout`` 或 ``stderr``。
+        must_match: ``True`` 表示 pattern 必须出现，``False`` 表示不得出现。
+    """
+
+    severity: str
+    pattern: str
+    source: str = "stdout"
+    must_match: bool = True
+
+
+@dataclass(frozen=True)
 class EvidenceBlock:
     """A single checklist item's structured evidence block from the manifest.
 
@@ -109,6 +131,10 @@ class EvidenceBlock:
     ``expected_artifacts`` (FR-11a, optional) carries machine-checkable shape
     assertions for non-text evidence files (images/videos/audio). Old manifests
     without this field are treated as passing the artifact-health check.
+
+    ``stdout_assertions`` (补丁 1, optional) carries substring assertions on the
+    RV command's real stdout/stderr. Old manifests without this field skip the
+    assertion step entirely.
     """
 
     item_number: int
@@ -121,6 +147,7 @@ class EvidenceBlock:
     negative_control: str = ""
     expected_fail: str = ""
     expected_artifacts: tuple[ArtifactSpec, ...] = ()
+    stdout_assertions: tuple[StdoutAssertion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -229,8 +256,27 @@ def has_structured_evidence_marker(issue_body: str) -> bool:
 
 
 def _evidence_dir_path(worktree_path: Path, config: AppConfig) -> Path:
-    """Return the absolute evidence directory path inside the worktree."""
+    """Return the absolute evidence directory *root* inside the worktree."""
     return worktree_path / config.validation.evidence_dir
+
+
+def _resolve_manifest_dir(
+    worktree_path: Path,
+    config: AppConfig,
+    evidence_dir: Path | None,
+) -> tuple[Path, str]:
+    """解析 manifest 所在目录与其仓库相对展示路径。
+
+    ``evidence_dir`` 为 ``None`` 时回退到配置根目录（旧调用方行为不变）；
+    提供时（新约定的按任务子目录）错误信息展示实际子目录而非根。
+    """
+    if evidence_dir is None:
+        return _evidence_dir_path(worktree_path, config), config.validation.evidence_dir.strip("/")
+    try:
+        display_text = evidence_dir.relative_to(worktree_path).as_posix()
+    except ValueError:
+        display_text = evidence_dir.as_posix()
+    return evidence_dir, display_text
 
 
 def _manifest_format_error(message: str) -> ValidationEvidenceError:
@@ -254,14 +300,18 @@ def _manifest_format_error(message: str) -> ValidationEvidenceError:
     )
 
 
-def _load_manifest_json(worktree_path: Path, config: AppConfig) -> dict[str, object]:
+def _load_manifest_json(
+    worktree_path: Path,
+    config: AppConfig,
+    evidence_dir: Path | None = None,
+) -> dict[str, object]:
     """Load and parse ``evidence.json`` as a Python dict."""
-    evidence_dir = _evidence_dir_path(worktree_path, config)
-    manifest_path = evidence_dir / "evidence.json"
+    resolved_dir, evidence_dir_text = _resolve_manifest_dir(worktree_path, config, evidence_dir)
+    manifest_path = resolved_dir / "evidence.json"
     if not manifest_path.is_file():
         raise ValidationEvidenceError(
             "Structured evidence is required for this Issue, but "
-            f"`{config.validation.evidence_dir}/evidence.json` is missing. "
+            f"`{evidence_dir_text}/evidence.json` is missing. "
             "Create the manifest with one evidence block per Realistic Validation "
             "checklist item."
         )
@@ -270,12 +320,10 @@ def _load_manifest_json(worktree_path: Path, config: AppConfig) -> dict[str, obj
             manifest_data = json.load(manifest_file)
     except json.JSONDecodeError as decode_error:
         raise _manifest_format_error(
-            f"`{config.validation.evidence_dir}/evidence.json` is not valid JSON: {decode_error}"
+            f"`{evidence_dir_text}/evidence.json` is not valid JSON: {decode_error}"
         ) from decode_error
     if not isinstance(manifest_data, dict):
-        raise _manifest_format_error(
-            f"`{config.validation.evidence_dir}/evidence.json` must be a JSON object."
-        )
+        raise _manifest_format_error(f"`{evidence_dir_text}/evidence.json` must be a JSON object.")
     return manifest_data
 
 
@@ -293,6 +341,7 @@ def _parse_evidence_block(block_data: object, item_number: int) -> EvidenceBlock
     negative_control = _extract_optional_string(block_data, "negative_control")
     expected_fail = _extract_optional_string(block_data, "expected_fail")
     expected_artifacts = _extract_expected_artifacts(block_data, item_number)
+    stdout_assertions = _extract_stdout_assertions(block_data, item_number)
 
     return EvidenceBlock(
         item_number=item_number,
@@ -305,6 +354,7 @@ def _parse_evidence_block(block_data: object, item_number: int) -> EvidenceBlock
         negative_control=negative_control,
         expected_fail=expected_fail,
         expected_artifacts=expected_artifacts,
+        stdout_assertions=stdout_assertions,
     )
 
 
@@ -336,7 +386,7 @@ def _normalize_evidence_file_name(raw_file_name: str, item_number: int) -> str:
     但 prompt 只要求"证据文件命名为 ``rv-<item_number>-<slug>.<ext>`` 并放在
     ``{evidence_dir}/`` 下"，从未规定 manifest 里填文件名还是路径；同一份
     manifest 里的 ``expected_artifacts[].path`` 又确实是 worktree 相对路径。
-    因此 agent 极易写成 ``.iar/evidence/rv-1-foo.png``——两条 prompt 语句都满足，
+    因此 agent 极易写成 ``tasks/evidence/<prd-stem>/rv-1-foo.png``——两条 prompt 语句都满足，
     却撞上纯文件名的正则，且报错只说"不匹配 rv-1-* 命名"，无法自我修复。
 
     这里做与 :func:`_extract_manifest_item_number` 同类的防御性归一：剥掉目录
@@ -432,29 +482,89 @@ def _extract_expected_artifacts(
     return tuple(specs)
 
 
-def load_evidence_manifest(worktree_path: Path, config: AppConfig) -> EvidenceManifest:
-    """Load ``evidence.json`` and parse it into an ``EvidenceManifest``."""
-    manifest_data = _load_manifest_json(worktree_path, config)
+_VALID_ASSERTION_SOURCES = ("stdout", "stderr")
+
+
+def _extract_stdout_assertions(
+    block_data: dict[str, object], item_number: int
+) -> tuple[StdoutAssertion, ...]:
+    """Extract and validate the optional ``stdout_assertions`` list (补丁 1).
+
+    缺失 / 非 list / 空 → ``()``（向后兼容：旧 manifest 不做关键词断言，行为与
+    补丁前一致）。每条断言必须是 JSON 对象并带非空 ``pattern``；``severity``
+    缺省 ``"high"``，``source`` 只允许 ``stdout`` / ``stderr``（缺省 ``stdout``），
+    ``must_match`` 缺省 ``True``。畸形条目抛 ``ValidationEvidenceError``，避免
+    agent 把断言写坏后静默降级为"不检查"。
+    """
+    raw_assertions = block_data.get("stdout_assertions")
+    if raw_assertions is None:
+        return ()
+    if not isinstance(raw_assertions, list):
+        raise _manifest_format_error(f"Item {item_number}: `stdout_assertions` must be a list.")
+    assertions: list[StdoutAssertion] = []
+    for index, entry in enumerate(raw_assertions):
+        if not isinstance(entry, dict):
+            raise _manifest_format_error(
+                f"Item {item_number}: `stdout_assertions[{index}]` must be a JSON object."
+            )
+        pattern = _extract_nonempty_string(entry, "pattern", item_number)
+        severity = _extract_optional_string(entry, "severity") or "high"
+        source = _extract_optional_string(entry, "source") or "stdout"
+        if source not in _VALID_ASSERTION_SOURCES:
+            raise _manifest_format_error(
+                f"Item {item_number}: `stdout_assertions[{index}].source` must be one of "
+                f"{_VALID_ASSERTION_SOURCES}, got {source!r}."
+            )
+        raw_must_match = entry.get("must_match", True)
+        if not isinstance(raw_must_match, bool):
+            raise _manifest_format_error(
+                f"Item {item_number}: `stdout_assertions[{index}].must_match` must be a boolean."
+            )
+        assertions.append(
+            StdoutAssertion(
+                severity=severity,
+                pattern=pattern,
+                source=source,
+                must_match=raw_must_match,
+            )
+        )
+    return tuple(assertions)
+
+
+def load_evidence_manifest(
+    worktree_path: Path,
+    config: AppConfig,
+    *,
+    evidence_dir: Path | None = None,
+) -> EvidenceManifest:
+    """Load ``evidence.json`` and parse it into an ``EvidenceManifest``.
+
+    Args:
+        worktree_path: worktree 根目录。
+        config: 运行配置。
+        evidence_dir: 已解析的证据目录（按任务子目录）；为 ``None`` 时使用
+            配置根目录，保持旧调用方行为。
+    """
+    manifest_data = _load_manifest_json(worktree_path, config, evidence_dir)
+    _, evidence_dir_text = _resolve_manifest_dir(worktree_path, config, evidence_dir)
 
     version_value = manifest_data.get("version")
     if version_value != 1:
         raise _manifest_format_error(
-            f"`{config.validation.evidence_dir}/evidence.json` version must be 1, "
-            f"got {version_value!r}."
+            f"`{evidence_dir_text}/evidence.json` version must be 1, " f"got {version_value!r}."
         )
 
-    language = _extract_manifest_string(manifest_data, "language", config)
+    language = _extract_manifest_string(manifest_data, "language", evidence_dir_text)
 
     raw_items = manifest_data.get("items")
     if not isinstance(raw_items, list) or not raw_items:
         raise _manifest_format_error(
-            f"`{config.validation.evidence_dir}/evidence.json` must contain a "
-            "non-empty `items` array."
+            f"`{evidence_dir_text}/evidence.json` must contain a " "non-empty `items` array."
         )
 
     parsed_blocks: list[EvidenceBlock] = []
     for raw_block in raw_items:
-        block_item_number = _extract_manifest_item_number(raw_block, config)
+        block_item_number = _extract_manifest_item_number(raw_block, evidence_dir_text)
         parsed_blocks.append(_parse_evidence_block(raw_block, block_item_number))
 
     return EvidenceManifest(
@@ -465,19 +575,19 @@ def load_evidence_manifest(worktree_path: Path, config: AppConfig) -> EvidenceMa
 
 
 def _extract_manifest_string(
-    manifest_data: dict[str, object], field_name: str, config: AppConfig
+    manifest_data: dict[str, object], field_name: str, evidence_dir_text: str
 ) -> str:
     """Extract a required non-empty string field from the top-level manifest."""
     value = manifest_data.get(field_name)
     if not isinstance(value, str) or not value.strip():
         raise _manifest_format_error(
-            f"`{config.validation.evidence_dir}/evidence.json` missing or empty "
+            f"`{evidence_dir_text}/evidence.json` missing or empty "
             f"top-level field `{field_name}`."
         )
     return value.strip()
 
 
-def _extract_manifest_item_number(raw_block: object, config: AppConfig) -> int:
+def _extract_manifest_item_number(raw_block: object, evidence_dir_text: str) -> int:
     """Extract ``item_number`` from a raw evidence block.
 
     对 agent 常见笔误做防御性兼容：把 ``\"rv-1\"`` 或 ``\"1\"`` 这类字符串
@@ -486,8 +596,7 @@ def _extract_manifest_item_number(raw_block: object, config: AppConfig) -> int:
     """
     if not isinstance(raw_block, dict):
         raise _manifest_format_error(
-            f"`{config.validation.evidence_dir}/evidence.json` contains a non-object "
-            "entry in `items`."
+            f"`{evidence_dir_text}/evidence.json` contains a non-object " "entry in `items`."
         )
     item_number_value = raw_block.get("item_number")
 
@@ -508,7 +617,7 @@ def _extract_manifest_item_number(raw_block: object, config: AppConfig) -> int:
 
     if not isinstance(item_number_value, int) or item_number_value < 1:
         raise _manifest_format_error(
-            f"`{config.validation.evidence_dir}/evidence.json` has invalid "
+            f"`{evidence_dir_text}/evidence.json` has invalid "
             f"`item_number` {raw_block.get('item_number')!r}; must be a positive integer."
         )
     return item_number_value
@@ -525,7 +634,7 @@ def _validate_evidence_file(
     file_name: str,
     expected_item_number: int,
     evidence_dir: Path,
-    config: AppConfig,
+    evidence_dir_text: str,
 ) -> EvidenceFileInfo:
     """Validate that an evidence file exists and matches the expected item number."""
     file_match = _EVIDENCE_ITEM_FILE_PATTERN.match(file_name)
@@ -535,7 +644,7 @@ def _validate_evidence_file(
             f"match the required `rv-{expected_item_number}-*` or "
             f"`rv-{expected_item_number}.*` naming pattern. Rename the file to "
             f"`rv-{expected_item_number}-<slug>.<ext>` inside "
-            f"`{config.validation.evidence_dir}/`, and list it in `evidence_files` "
+            f"`{evidence_dir_text}/`, and list it in `evidence_files` "
             "as a bare file name without any directory prefix."
         )
     actual_item_number = int(file_match.group("item"))
@@ -549,7 +658,7 @@ def _validate_evidence_file(
     if not file_path.is_file():
         raise ValidationEvidenceError(
             f"Item {expected_item_number}: evidence file `{file_name}` is listed "
-            f"in the manifest but does not exist in `{config.validation.evidence_dir}/`."
+            f"in the manifest but does not exist in `{evidence_dir_text}/`."
         )
 
     file_info = EvidenceFileInfo(
@@ -619,14 +728,18 @@ def validate_evidence_manifest(
     checklist_items: list[str],
     worktree_path: Path,
     config: AppConfig,
+    *,
+    evidence_dir: Path | None = None,
 ) -> StructuredEvidenceReport:
     """Validate the structured evidence manifest against the Issue checklist.
 
     Args:
         issue_body: Issue body used to locate the structured evidence marker.
         checklist_items: Realistic Validation checklist items from the Issue body.
-        worktree_path: Worktree root where ``.iar/evidence/`` lives.
+        worktree_path: Worktree root holding the evidence directory.
         config: Application configuration.
+        evidence_dir: 已解析的证据目录（按任务子目录）；为 ``None`` 时使用
+            配置根目录，保持旧调用方行为。
 
     Raises:
         ValidationEvidenceError: When the manifest is missing, malformed, or
@@ -642,7 +755,7 @@ def validate_evidence_manifest(
             "an `iar:structured-evidence` marker."
         )
 
-    manifest = load_evidence_manifest(worktree_path, config)
+    manifest = load_evidence_manifest(worktree_path, config, evidence_dir=evidence_dir)
     if manifest.language != marker.language:
         raise ValidationEvidenceError(
             f"Manifest language `{manifest.language}` does not match Issue marker "
@@ -676,7 +789,9 @@ def validate_evidence_manifest(
             f"{', '.join(str(num) for num in duplicate_numbers)}."
         )
 
-    evidence_dir = _evidence_dir_path(worktree_path, config)
+    resolved_evidence_dir, evidence_dir_text = _resolve_manifest_dir(
+        worktree_path, config, evidence_dir
+    )
     item_reports: list[StructuredEvidenceItemReport] = []
     for block in manifest.items:
         file_infos: list[EvidenceFileInfo] = []
@@ -685,8 +800,8 @@ def validate_evidence_manifest(
                 _validate_evidence_file(
                     file_name=file_name,
                     expected_item_number=block.item_number,
-                    evidence_dir=evidence_dir,
-                    config=config,
+                    evidence_dir=resolved_evidence_dir,
+                    evidence_dir_text=evidence_dir_text,
                 )
             )
         item_reports.append(StructuredEvidenceItemReport(block=block, files=tuple(file_infos)))
@@ -740,6 +855,7 @@ def _render_evidence_file_lines(
     worktree_path: Path,
     config: AppConfig,
     language: str,
+    evidence_dir: Path | None = None,
 ) -> list[str]:
     """Render a single evidence file entry with hash and optional inline content."""
     file_name = file_info.file_name
@@ -753,7 +869,8 @@ def _render_evidence_file_lines(
         lines.append(f"  - ![{_label(language, 'image_alt')}]({blob_url}?raw=true)")
 
     if file_suffix in {".txt", ".log", ".md", ".out"}:
-        evidence_file_path = _evidence_dir_path(worktree_path, config) / file_name
+        resolved_dir, _ = _resolve_manifest_dir(worktree_path, config, evidence_dir)
+        evidence_file_path = resolved_dir / file_name
         try:
             file_text = evidence_file_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -777,6 +894,8 @@ def render_structured_evidence_comment(
     config: AppConfig,
     pr_url: str,
     head_sha: str,
+    *,
+    evidence_dir: Path | None = None,
 ) -> str:
     """Render the structured PR evidence comment grouped by checklist item."""
     language = report.language
@@ -818,6 +937,7 @@ def render_structured_evidence_comment(
                     worktree_path=worktree_path,
                     config=config,
                     language=language,
+                    evidence_dir=evidence_dir,
                 )
             )
         comment_lines.extend(
@@ -866,6 +986,12 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
             "`negative_control`（能让该项变红的命令或注入的故障）、`expected_fail`（变红时的样子）。"
             "每个检查点都要证明'这测试会失败'：先用 negative_control 让它变红、记录 expected_fail，"
             "再展示修复后变绿——只有绿、无法证明会红的证据视为无效。"
+            "命令退出码为 0 不等于检查点成立：禁止用 `|| true`、`|| echo ok` 之类兜底把命令刷绿。"
+            "可选填 `stdout_assertions` 声明输出断言（数组，每项含 `pattern`，以及可选的 "
+            "`severity`（默认 high）、`source`（stdout/stderr，默认 stdout）、`must_match`（默认 true，"
+            "false 表示不得出现）；用精确子串而非正则，避免 `.*` 之类假阳）："
+            '例如 `[{{{{"severity": "high", "pattern": "200 OK", "must_match": true}}}}, '
+            '{{{{"pattern": "Traceback", "must_match": false}}}}]`。'
             'manifest 顶层必须声明 `version: 1` 和 `language: "{language}"`。'
             "所有证据文件必须命名为 `rv-<item_number>-<slug>.<ext>` 并放在 `{evidence_dir}/` 下。"
             "重要：每个证据文件必须只包含对应 item 的输出，禁止混入其他 item 的内容；"
@@ -886,6 +1012,14 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
         "Every checkpoint must prove the test can fail: use negative_control to make it "
         "red and record expected_fail, then show it green after the fix — evidence that "
         "is only ever green, with no way to show it failing, is not accepted. "
+        "Exit code 0 does not prove the checkpoint: never paper over failures with "
+        "`|| true` or `|| echo ok`. "
+        "Optionally declare `stdout_assertions` (a list of objects with `pattern` plus "
+        "optional `severity` (default `high`), `source` (`stdout`/`stderr`, default "
+        "`stdout`) and `must_match` (default `true`; `false` forbids the substring)) — "
+        'e.g. `[{{{{"severity": "high", "pattern": "200 OK", "must_match": true}}}}, '
+        '{{{{"pattern": "Traceback", "must_match": false}}}}]`. '
+        "Prefer exact substrings over regex so `.*` cannot fake a pass. "
         'The manifest top level must declare `version: 1` and `language: "{language}"`. '
         "All evidence files must be named `rv-<item_number>-<slug>.<ext>` and placed "
         "under `{evidence_dir}/`. "

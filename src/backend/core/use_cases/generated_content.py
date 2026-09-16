@@ -41,6 +41,11 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
 )
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.shared.prd_machine_contract import (
+    PrdSkillPreflightError,
+    SUPPORTED_MACHINE_CONTRACT_VERSION,
+    parse_machine_contract_version,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -732,6 +737,51 @@ def load_prd_skill_spec(explicit_path: Path | None = None) -> str | None:
         return None
     skill_text = skill_text.strip()
     return skill_text or None
+
+
+def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> Path:
+    """启动预检：prd skill 必须可解析且 Machine Contract 主版本匹配。
+
+    daemon 起执行循环前调用（``run_preflight_checks``）。iar 的 prompt 只持有
+    指向 skill Machine Contract 的指针，skill 缺失或版本不符时执行 agent 将
+    拿不到格式约定，因此必须 fail fast 而不是跑到交付门禁才失败。
+
+    Args:
+        explicit_path: 显式 skill 路径；为 ``None`` 时按
+            :func:`resolve_prd_skill_path` 的优先级解析（含
+            ``IAR_PRD_SKILL_PATH`` 环境变量覆盖）。
+
+    Returns:
+        通过预检的 skill 路径。
+
+    Raises:
+        PrdSkillPreflightError: skill 不可读或契约主版本与
+            ``SUPPORTED_MACHINE_CONTRACT_VERSION`` 不一致；报错含修复指引。
+    """
+    skill_path = resolve_prd_skill_path(explicit_path)
+    try:
+        skill_text = skill_path.read_text(encoding="utf-8")
+    except OSError as read_error:
+        raise PrdSkillPreflightError(
+            f"prd skill is not readable at {skill_path}. The agent runner delegates "
+            "PRD format conventions to the prd skill's Machine Contract, so it "
+            "cannot run without the skill installed. Run `iar init` to install the "
+            "remote template skills, or point IAR_PRD_SKILL_PATH at a prd SKILL.md."
+        ) from read_error
+    contract_version = parse_machine_contract_version(skill_text)
+    if contract_version != SUPPORTED_MACHINE_CONTRACT_VERSION:
+        declared_version_text = (
+            f"v{contract_version}"
+            if contract_version is not None
+            else "no Machine-Contract-Version marker"
+        )
+        raise PrdSkillPreflightError(
+            f"prd skill at {skill_path} declares {declared_version_text}, but this "
+            f"runner supports Machine Contract v{SUPPORTED_MACHINE_CONTRACT_VERSION}. "
+            "Run `iar init --force` to update the installed prd skill, or point "
+            "IAR_PRD_SKILL_PATH at a compatible SKILL.md."
+        )
+    return skill_path
 
 
 def _build_prd_agent_prompt(skill_spec: str, context: PrdContext, max_context_chars: int) -> str:

@@ -18,6 +18,7 @@ from backend.core.agent.memory.protocols import (
 )
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import (
+    DEFAULT_VALIDATION_EVIDENCE_DIR,
     CommandResult,
     DeliveryGateError,
     DeliveryGateFailureKind,
@@ -30,6 +31,7 @@ from backend.core.shared.prd_change_log import (
     parse_prd_change_log,
 )
 from backend.core.shared.prd_checklist import parse_prd_checklist
+from backend.core.shared.prd_machine_contract import PRD_MACHINE_CONTRACT_POINTER
 from backend.core.use_cases.agent_runner_structured_evidence import (
     build_structured_evidence_prompt_suffix,
     has_structured_evidence_marker,
@@ -132,31 +134,6 @@ def _read_prd_text(prd_path: Path) -> str | None:
         return None
 
 
-# 结构化 Change Log 的唯一可解析格式：每条记录是一个 ``###`` 标题，后跟六个
-# bullet 字段。解析器 ``parse_prd_change_log`` 只识别这种结构；Markdown 表格行
-# 会被数成 0 条。历史上 agent 把 Change Log 写成表格后，门禁反复判定“未追加
-# Change Log 条目”，而 prompt 从未说明必须用 ``###`` + bullet，导致 recovery
-# 每轮往表格里再补一行、永不收敛的死循环。prompt 与失败反馈共用本样例，确保
-# agent 拿到的格式说明与门禁实际校验的格式严格一致。
-PRD_CHANGE_LOG_FORMAT_EXAMPLE = "\n".join(
-    [
-        "Change Log entries MUST use this exact Markdown structure — each entry is a "
-        "`###` heading followed by six bullet fields. Markdown tables are NOT parsed "
-        "and count as zero entries (this is the #1 cause of repeated delivery failures):",
-        "",
-        "## Change Log",
-        "",
-        "### <short title of this change>",
-        "- Type: <scope / evidence / test / doc / ...>",
-        "- Before: <prior wording or state>",
-        "- After: <new wording or state>",
-        "- Reason: <why the PRD changed>",
-        "- Impact: <effect on deliverables and requirements>",
-        "- Review: <review status>",
-    ]
-)
-
-
 # 归档动作由 runner 独占，且这条规则必须**双向**表述：既禁止 agent 自己 ``git mv``
 # 到 ``tasks/archive/``，也禁止任何人把 runner 已归档的 PRD 挪回 ``tasks/pending/``。
 # 历史上只写了前半句，pre-PR reviewer 读到「不要归档 PRD」后，把 runner 在
@@ -187,17 +164,21 @@ RUNNER_OWNED_CHECKLIST_ITEM_RULE = (
 
 
 def _build_prd_closeout_instruction(prd_relative_path: str) -> str:
-    """构建所有 Agent prompt 共用的 PRD 演进规则。"""
+    """构建所有 Agent prompt 共用的 PRD 演进规则。
+
+    格式细则（Change Log 条目结构、复选框语法）已并入 prd skill 的 Machine
+    Contract，这里只保留 runner 门禁纪律与一行契约指针。
+    """
     return (
         "The PRD may evolve during implementation, but Change Log and Acceptance "
         "Checklist are separate: when changing the PRD, append a `## Change Log` "
-        "entry with Type, Before, After, Reason, Impact, and Review. Only mark an "
-        "Acceptance Checklist item after its stated behavior was actually executed "
-        "and evidenced. Never weaken a user-visible, security, scope, or realistic "
-        "validation requirement without recording the change and its review status. "
+        "entry, and only mark an Acceptance Checklist item after its stated "
+        "behavior was actually executed and evidenced. Never weaken a user-visible, "
+        "security, scope, or realistic validation requirement without recording "
+        "the change and its review status. "
+        f"{PRD_MACHINE_CONTRACT_POINTER} "
         f"{PRD_ARCHIVE_OWNERSHIP_RULE} "
-        f"Canonical PRD: `{prd_relative_path}`.\n\n"
-        f"{PRD_CHANGE_LOG_FORMAT_EXAMPLE}"
+        f"Canonical PRD: `{prd_relative_path}`."
     )
 
 
@@ -806,13 +787,20 @@ def build_recovery_prompt(
     failure_type: str | None = None,
     long_term_store: ILongTermMemoryStore | None = None,
     skill_store: ISkillStore | None = None,
+    evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR,
 ) -> str:
-    """Build a prompt that asks the agent to repair a failed attempt."""
+    """Build a prompt that asks the agent to repair a failed attempt.
+
+    Args:
+        evidence_dir: 当前 Issue 的证据目录仓库相对路径（调用方用
+            ``resolve_issue_evidence_relpath`` 计算）；缺省为配置默认值。
+    """
     prd_path = extract_prd_path(issue.body)
     if prd_path:
-        prd_closeout = _build_prd_closeout_instruction(prd_path)
+        # PRD 演进规则已随 :func:`_build_prd_context_block` 内嵌，此处不重复拼接，
+        # 保证契约指针与归档归属规则在同一 prompt 里各只出现一次。
         prd_context_block = _build_prd_context_block(issue, worktree_path)
-        prd_line = f"Re-check the canonical PRD below. {prd_closeout}\n\n{prd_context_block}"
+        prd_line = f"Re-check the canonical PRD below.\n\n{prd_context_block}"
     else:
         prd_line = "If the Issue references a PRD, re-check it if it affects the fix."
 
@@ -822,7 +810,7 @@ def build_recovery_prompt(
         language = marker.language if marker is not None else "zh-CN"
         structured_evidence_line = (
             "This Issue requires a structured evidence manifest. "
-            f"{build_structured_evidence_prompt_suffix(language).format(evidence_dir='.iar/evidence')} "
+            f"{build_structured_evidence_prompt_suffix(language).format(evidence_dir=evidence_dir)} "
             "Fix the manifest and the referenced evidence files before requesting a commit."
         )
 
@@ -916,11 +904,12 @@ def build_progress_continuation_prompt(
     """
     prd_path = extract_prd_path(issue.body)
     if prd_path:
-        prd_closeout = _build_prd_closeout_instruction(prd_path)
+        # PRD 演进规则已随 :func:`_build_prd_context_block` 内嵌，此处不重复拼接，
+        # 保证契约指针与归档归属规则在同一 prompt 里各只出现一次。
         prd_context_block = _build_prd_context_block(issue, worktree_path)
         prd_line = (
             "The canonical PRD is inlined below. Use it and its Acceptance "
-            f"Checklist to see which items are already done. {prd_closeout}\n\n"
+            "Checklist to see which items are already done.\n\n"
             f"{prd_context_block}"
         )
     else:

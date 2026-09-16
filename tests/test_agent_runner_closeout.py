@@ -496,5 +496,6 @@ def test_build_closeout_allowed_scope_covers_the_archive_target() -> None:
 
     assert scope.prd_paths == (_PRD_RELATIVE_PATH, "tasks/archive/example.md")
     assert scope.allows("tasks/archive/example.md") is True
-    assert scope.allows(".iar/evidence/scripts/rv-1-oracle.py") is True
+    # 收尾 pass 可在证据目录（含按任务子目录）内补证据。
+    assert scope.allows("tasks/evidence/example/scripts/rv-1-oracle.py") is True
     assert scope.allows("src/feature.py") is False

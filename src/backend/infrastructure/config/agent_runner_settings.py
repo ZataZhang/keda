@@ -239,7 +239,9 @@ class AgentRunnerValidationSettings(BaseModel):
     """Realistic Validation evidence gate configuration."""
 
     enabled: bool = True
-    evidence_dir: str = ".iar/evidence"
+    # 与 core.shared.models.agent_runner.DEFAULT_VALIDATION_EVIDENCE_DIR 保持一致；
+    # infrastructure 处于四层最底，不能反向 import core 的常量。
+    evidence_dir: str = "tasks/evidence"
     branch_prefix: str = "iar-evidence/"
     evidence_format_check: bool = True
     parse_evidence_format_with_agent: bool = True
@@ -374,6 +376,12 @@ class AgentRunnerPostPrSupervisorSettings(BaseModel):
     max_agent_crash_retries: int = 5
     crash_retry_initial_backoff_seconds: int = 30
     crash_retry_max_backoff_seconds: int = 600
+    # 补丁 3：命中这些路径前缀的文件 diff 全量注入 supervisor prompt
+    key_paths: list[str] = Field(default_factory=list)
+    max_diff_chars: int = 6000
+    # 补丁 4：跨 cycle finding 注入开关与 artifact 目录（worktree 相对路径）
+    previous_findings_injection_enabled: bool = True
+    findings_artifact_dir: str = ".iar/state"
 
 
 class AgentRunnerDeliberationProfileSettings(BaseModel):

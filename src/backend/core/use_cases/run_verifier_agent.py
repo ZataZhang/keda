@@ -33,7 +33,10 @@ from backend.core.use_cases.agent_runner_structured_evidence import (
     has_structured_evidence_marker,
     load_evidence_manifest,
 )
-from backend.core.use_cases.agent_runner_validation import validation_required
+from backend.core.use_cases.agent_runner_validation import (
+    resolve_issue_evidence_dir,
+    validation_required,
+)
 from backend.core.use_cases.run_agent_once import (
     extract_agent_response_text,
     get_head_sha,
@@ -481,14 +484,20 @@ def run_verifier_gate(
     if not has_structured_evidence_marker(issue.body):
         return None
 
-    manifest = load_evidence_manifest(worktree_path, config)
+    manifest = load_evidence_manifest(
+        worktree_path,
+        config,
+        evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
+    )
     verifier_agent = _choose_verifier_agent(config, builder_agent)
     builder_sha = get_head_sha(worktree_path, process_runner)
-    response_log_path = worktree_path / config.validation.evidence_dir / _VERIFIER_RESPONSE_FILENAME
+    response_log_path = (
+        resolve_issue_evidence_dir(worktree_path, config, issue) / _VERIFIER_RESPONSE_FILENAME
+    )
     # verifier 复跑的正是 builder 的 capture 脚本,会把 rv-*.txt 覆盖成自己的
     # (可能是 negative control 的)输出;快照 + 恢复保证发布出去的仍是通过门禁
     # 的那份证据。恢复放在 finally:超时被杀时污染最严重。
-    evidence_snapshot = snapshot_evidence_dir(worktree_path, config)
+    evidence_snapshot = snapshot_evidence_dir(worktree_path, config, issue)
     try:
         verdict = run_verifier_agent(
             issue,

@@ -103,6 +103,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                     parse_evidence_format_with_agent=context.config.validation.parse_evidence_format_with_agent,
                     validation_language=context.config.validation.language,
                     structured_evidence=context.config.validation.structured_evidence,
+                    evidence_dir=context.config.validation.evidence_dir,
                 ),
                 github_client=github_client,
                 process_runner=ctx.process_runner,

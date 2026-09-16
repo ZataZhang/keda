@@ -271,6 +271,20 @@ uv run --project /path/to/keda iar init
 
 `iar init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `iar daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
+### `.gitignore` 托管块与 prd skill 契约
+
+`iar init` 会在目标仓库 `.gitignore` 写入一个 `# >>> iar (managed by iar init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中除 `.iar/`、`.agent-runner/`、`.iar-worktrees/` 外还包含 `tasks/evidence` 白名单段：
+
+```gitignore
+tasks/evidence/**
+!tasks/evidence/**/
+!tasks/evidence/**/*.md
+```
+
+这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），`git add -A` 天然只把 `.md` 文本报告（verification-plan / evidence-report / verifier-report）带进 commit，截图、录屏、oracle 脚本等原始产物不进 git 历史；发布前拦截（`ensure_no_evidence_paths_in_changes`）再兜底拒绝被 `git add -f` 强制加入的非 `.md` 证据产物。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
+
+同时 `iar init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (v1)` 章节；iar 各 prompt 只注入一行指向该契约的指针，不复述教学。**daemon 在每轮执行循环前预检** prd skill 可解析且其 `Machine-Contract-Version` 主版本与 runner 支持的版本一致，缺失或不匹配即 fail fast，报错含 `iar init` / `iar init --force` 修复指引（可用 `IAR_PRD_SKILL_PATH` 显式指定 skill 路径）。
+
 ### 提交前验证命令自动探测
 
 `iar init` 不会写死验证命令，而是按目标仓库实际情况探测 `[agent_runner.runner].verification_commands` 与 `pre_commit_verification_command`（实现见 `src/backend/engines/agent_runner/repository_local.py`）：
@@ -541,8 +555,11 @@ merge_check_timeout_seconds = 1800
 [agent_runner.validation]
 # 是否启用 Realistic Validation 证据门禁
 enabled = true
-# worktree 内证据目录（默认被 info/exclude 排除，不会进入代码 diff）
-evidence_dir = ".iar/evidence"
+# worktree 内证据目录根；默认 tasks/evidence 时按任务分子目录
+# （tasks/evidence/<prd-stem>/，无 PRD 的 Issue 用 issue-<N> 兜底），
+# .md 文本报告经 .gitignore 白名单进版本库，原始产物被排除。
+# 显式配置为其它值（如 legacy 的 .iar/evidence）则保持整目录排除的旧行为。
+evidence_dir = "tasks/evidence"
 # orphan 证据分支前缀
 branch_prefix = "iar-evidence/"
 # 是否逐项检查证据文件格式
@@ -2455,16 +2472,25 @@ iar issue create        PRD 含 Realistic Validation 清单
                           配置 structured_evidence = false 时省略 structured marker）
 
 agent 执行              prompt 强制要求实跑验证计划，证据写入 worktree 的
-                        .iar/evidence/（runner 在 worktree 创建时写入
-                        git info/exclude，证据永远进不了代码 diff）。
+                        tasks/evidence/<prd-stem>/（无 PRD 的 Issue 兜底到
+                        tasks/evidence/issue-<N>/）。git 语义由 iar init
+                        provision 的 .gitignore 白名单保证：只有 *.md 文本
+                        报告随 PR 进版本库，截图/录屏等原始产物被排除在
+                        git 历史之外；发布前拦截仍是双保险。
+                        PRD 格式约定（Change Log 条目结构、验收复选框语法、
+                        rv-id 证据命名、证据目录布局）不在 prompt 里复述，
+                        唯一出处是 prd skill 的 Machine Contract v1 章节；
+                        prompt 只注入一行契约指针。daemon 起执行循环前会
+                        预检 prd skill 可解析且契约主版本匹配，缺失或
+                        版本不符即 fail fast 并提示 iar init 修复。
                         所有 RV 脚本——截图采集、临时 server、探针，以及被
                         evidence.json command 引用的可复跑 oracle——一律留在
-                        .iar/evidence/scripts/，没有例外，任何 RV 脚本都不得
+                        <证据目录>/scripts/，没有例外，任何 RV 脚本都不得
                         进入代码 diff。门禁按"目录前缀 + rv-<n>- 命名"两条规则
                         识别错放并打回 recovery；已提交在树里的历史违规只记
                         WARNING 日志，不阻塞交付。
                         带 iar:structured-evidence marker 的 Issue 还必须写
-                        .iar/evidence/evidence.json manifest，按 checklist item
+                        <证据目录>/evidence.json manifest，按 checklist item
                         分组描述命令、关键输出摘要、解释、风险及关联证据文件。
 
 commit 前门禁           要求验证但证据与清单不匹配 → 进入 recovery，
@@ -2481,7 +2507,7 @@ commit 前门禁           要求验证但证据与清单不匹配 → 进入 re
                         - runner 计算每个证据文件的 SHA-256
 
                         未带 marker 的 Issue 保持原有行为：
-                        - .iar/evidence/ 非空
+                        - 证据目录（默认 tasks/evidence/<prd-stem>/）非空
                         - 第 n 个清单条目必须有 rv-<n>-* 证据文件
                         - Issue body 含 iar:evidence-format marker 时，
                           按 marker 的 kind 检查后缀（优先于正则匹配）
@@ -2495,7 +2521,8 @@ commit 前门禁           要求验证但证据与清单不匹配 → 进入 re
                           "Evidence Format Waiver: <理由>"，物化为
                           iar:evidence-format-waived marker
 
-publish                 - diff 混入证据路径 → 拒绝 push（双保险）
+publish                 - diff 混入证据产物（.md 报告以外的证据路径）→ 拒绝
+                          push（gitignore 白名单之外的强制加入在此兜底）
                         - PR body 末尾追加 marker 包裹的人工签收清单
                         - 证据经 git plumbing 推送到 orphan 分支
                           iar-evidence/issue-<N>（无父提交、永不合并）
@@ -2528,7 +2555,9 @@ publish                 - diff 混入证据路径 → 拒绝 push（双保险）
 ```toml
 [agent_runner.validation]
 enabled = true                    # 关闭后整套门禁退化为不启用
-evidence_dir = ".iar/evidence"    # worktree 内证据目录（info/exclude 本地排除）
+evidence_dir = "tasks/evidence"   # 证据目录根；默认按任务分子目录（<prd-stem>/ 或 issue-<N>/），
+                                  # .md 报告经 gitignore 白名单入版本库；显式改为 ".iar/evidence"
+                                  # 则回到整目录 info/exclude 排除的 legacy 行为
 branch_prefix = "iar-evidence/"   # orphan 证据分支前缀
 evidence_format_check = true      # 逐项格式对账；false 退化为仅要求证据非空
 parse_evidence_format_with_agent = true  # 用 agent 解析格式要求；false 只用正则
@@ -2556,7 +2585,7 @@ validation_passed = "validation/passed"
 
 verifier 以 `capture_output` 运行，输出不进 stdout、也不逐行落日志。为了让阻断事后可查证：
 
-- **原始响应落盘**：每次 verifier 跑完，完整响应写到 `<evidence_dir>/verifier-response.txt`（默认 `.iar/evidence/verifier-response.txt`），文件头记录 issue、verifier agent、builder sha、解析出的 risk、**是否找到 verdict marker**、响应字符数。写盘失败只降级为告警，不影响门禁本身。
+- **原始响应落盘**：每次 verifier 跑完，完整响应写到 `<证据目录>/verifier-response.txt`（默认 `tasks/evidence/<prd-stem>/verifier-response.txt`），文件头记录 issue、verifier agent、builder sha、解析出的 risk、**是否找到 verdict marker**、响应字符数。写盘失败只降级为告警，不影响门禁本身。
 - **两种阻断成因分开表述**：verdict marker 缺失时仍按 fail-safe 阻断（绝不静默放行），但它是 **verifier 侧的协议/可靠性故障**，不代表 builder 的改动有缺陷。此时 attempt Detail 与 recovery prompt 明确写"NO verdict marker / verifier-side protocol failure / do not invent fixes"，并指向上面那份原始响应；只有真判 `red` 才说"Fix what the verifier found"。
 - **为什么必须区分**：`ValidationVerdict.findings` 总会被填入响应文本，所以"findings 是否为空"无法用来判断有没有 verdict——唯一可靠信号是 `marker_found`。混在一起时，verifier 只是漏了最后那行 marker，builder 却被指使去修一个不存在的发现，白烧一轮 attempt。
 - **排查顺序**：daemon 被 verifier 挡下时，先读 `verifier-response.txt`；若里面没有任何实际发现，问题在 verifier agent（考虑用 `verifier_agent` 显式指定一个稳定的 agent，而不是 `auto`），不在被验的代码。
@@ -2582,7 +2611,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 
 ### 前端改动强制真实视觉证据（fail-closed）
 
-当目标仓库本轮 git 变更命中 `frontend_paths` 前缀（默认 `frontend-admin/` 与 `frontend-public/`）时，`.iar/evidence/` 第一层**必须至少有一个视觉证据文件**（图片 `.png/.jpg/.jpeg/.gif/.webp` 或视频 `.mp4/.mov/.webm`），否则证据门禁抛 `ValidationEvidenceError`，与其余门禁一样进入既有 recovery，不放行发布。
+当目标仓库本轮 git 变更命中 `frontend_paths` 前缀（默认 `frontend-admin/` 与 `frontend-public/`）时，证据目录（默认 `tasks/evidence/<prd-stem>/`）第一层**必须至少有一个视觉证据文件**（图片 `.png/.jpg/.jpeg/.gif/.webp` 或视频 `.mp4/.mov/.webm`），否则证据门禁抛 `ValidationEvidenceError`，与其余门禁一样进入既有 recovery，不放行发布。
 
 要点：
 
@@ -2593,7 +2622,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 
 ### Structured evidence manifest 格式
 
-带 `iar:structured-evidence` marker 的 Issue 必须在 `.iar/evidence/evidence.json` 提供如下 manifest：
+带 `iar:structured-evidence` marker 的 Issue 必须在 `<证据目录>/evidence.json`（默认 `tasks/evidence/<prd-stem>/evidence.json`）提供如下 manifest：
 
 ```json
 {
@@ -2619,9 +2648,9 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 - `language` 必须等于 Issue marker 与 config 中的语言。
 - `items` 必须覆盖 Realistic Validation checklist 的全部 item，每个 item 出现一次。
 - 每个 item 必填字段：`item_number`、`item_name`、`command`、`evidence_files`、`output_summary`、`explanation`、`risks`。
-- `evidence_files` 可有多个文件；每个文件必须存在于 `.iar/evidence/`，且文件名匹配 `rv-<item_number>-*` 或 `rv-<item_number>.*`。**条目只写纯文件名**（`"rv-1-run.txt"`），不带 `.iar/evidence/` 等目录前缀——存在性按 `evidence_dir / file_name` 解析；这与同一 manifest 中 `expected_artifacts[].path` 使用 worktree 相对路径的约定相反，是历史上 agent 最容易写错的一处。写成带前缀的路径时 runner 会剥掉目录并 warning 放过，不再判红。
-- `command` 必须是可独立复现、自终止的检查命令。如果命令涉及多行 Python 或复杂 setup，应将其落到 `.iar/evidence/scripts/` 下的独立脚本并在 `command` 中引用；避免把内联 `python -c "..."` 写进 manifest，否则 runner 复跑时难以维护，也容易被 keda 判定为不可复现。**所有 RV 脚本一律放 `.iar/evidence/scripts/`，不存在可提交到代码树的例外**；每次复跑覆盖的是 `.iar/evidence/` 下的证据产物，不是脚本本身。
-- 证据分支会连同 `.iar/evidence/scripts/` 下的 oracle 源码一起上传（树形因此可含 `scripts/` 子目录，PR 评论中的条目名带相对路径前缀），审阅者能读到产出证据的断言本身。也因此 **oracle 脚本同样不得含密钥**。
+- `evidence_files` 可有多个文件；每个文件必须存在于证据目录（默认 `tasks/evidence/<prd-stem>/`），且文件名匹配 `rv-<item_number>-*` 或 `rv-<item_number>.*`。**条目只写纯文件名**（`"rv-1-run.txt"`），不带 `tasks/evidence/<prd-stem>/` 等目录前缀——存在性按 `evidence_dir / file_name` 解析；这与同一 manifest 中 `expected_artifacts[].path` 使用 worktree 相对路径的约定相反，是历史上 agent 最容易写错的一处。写成带前缀的路径时 runner 会剥掉目录并 warning 放过，不再判红。
+- `command` 必须是可独立复现、自终止的检查命令。如果命令涉及多行 Python 或复杂 setup，应将其落到 `<证据目录>/scripts/` 下的独立脚本并在 `command` 中引用；避免把内联 `python -c "..."` 写进 manifest，否则 runner 复跑时难以维护，也容易被 keda 判定为不可复现。**所有 RV 脚本一律放 `<证据目录>/scripts/`，不存在可提交到代码树的例外**；每次复跑覆盖的是证据目录下的证据产物，不是脚本本身。
+- 证据分支会连同 `<证据目录>/scripts/` 下的 oracle 源码一起上传（树形因此可含 `scripts/` 子目录，PR 评论中的条目名带相对路径前缀），审阅者能读到产出证据的断言本身。也因此 **oracle 脚本同样不得含密钥**。
 - 复跑缓存键并入 oracle 目录的内容摘要：命令字符串不变但脚本被改写时，缓存必然失效并真实重跑，不会用旧 oracle 的结论蒙混。
 - runner 在渲染 PR comment 时重新计算每个证据文件的 SHA-256，展示短 hash 与完整 hash。
 
@@ -3213,9 +3242,11 @@ uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 ### 视图说明
 
+- 页面为两栏布局：左侧是受管理仓库列表（含启用/路径状态点），右侧是当前仓库的 PRD 画布与工具条。
 - 默认只显示 `pending` PRD，勾选「显示已归档」后同时展示 `archived` PRD。
+- 提供三种视图：依赖图（默认，按 PRD 依赖做拓扑分层绘制节点与连线）、时间轴、列表。列表视图按优先级（P0 → P3）与更新时间排序。
+- 「时间轴」「列表」选择会通过 `PATCH /roadmap/settings` 回写 `default_view`；「依赖图」是纯前端默认视图，不回写后端（后端 `default_view` 仅接受 `timeline`/`list`）。
 - 每个 PRD 卡片展示：标题、当前状态、验收清单进度、关联 Issue、依赖关系与下一步操作。
-- 列表视图按优先级（P0 → P3）与更新时间排序；时间轴视图在后续版本中提供。
 
 ### PRD 原文浏览
 

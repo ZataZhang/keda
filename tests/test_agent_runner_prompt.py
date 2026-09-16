@@ -18,6 +18,7 @@ from backend.core.use_cases.run_agent_once import (
     build_prompt,
     extract_prd_path,
 )
+from backend.core.shared.prd_machine_contract import PRD_MACHINE_CONTRACT_POINTER
 from backend.core.use_cases.agent_runner_feedback import (
     build_progress_continuation_prompt,
 )
@@ -232,8 +233,8 @@ def test_build_recovery_prompt_separates_prd_change_log_from_checklist() -> None
     assert "never move it back to `tasks/pending/`" in prompt
 
 
-def test_build_prompt_includes_change_log_format_example() -> None:
-    """Prompt 必须内嵌可解析的 Change Log 格式样例，且声明表格不被解析。"""
+def test_build_prompt_references_machine_contract_pointer() -> None:
+    """execution prompt 内嵌 Machine Contract 指针；Change Log 格式教学已并入 prd skill。"""
     issue = IssueSummary(
         number=1,
         title="Test",
@@ -242,9 +243,9 @@ def test_build_prompt_includes_change_log_format_example() -> None:
         labels=(),
     )
     prompt = build_prompt(issue, Path("/worktree"), PromptConfig())
-    assert "### <short title of this change>" in prompt
-    assert "- Type:" in prompt
-    assert "Markdown tables are NOT parsed" in prompt
+    assert PRD_MACHINE_CONTRACT_POINTER in prompt
+    assert "Markdown tables are NOT parsed" not in prompt
+    assert "- Type:" not in prompt
 
 
 def test_build_progress_continuation_prompt_mentions_existing_progress() -> None:

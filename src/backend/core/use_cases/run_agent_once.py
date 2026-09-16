@@ -110,6 +110,7 @@ from backend.core.use_cases.agent_runner_publish import (
 )
 from backend.core.use_cases.agent_runner_validation import (
     build_validation_prompt_line,
+    resolve_issue_evidence_relpath,
 )
 from backend.core.use_cases.agent_runner_worktree_branch import (
     _ensure_worktree_branch,
@@ -296,7 +297,9 @@ def run_agent(
         worktree_path,
         config.prompts,
         phase="execution",
-        validation_line=build_validation_prompt_line(issue, config),
+        validation_line=build_validation_prompt_line(
+            issue, config, evidence_dir=resolve_issue_evidence_relpath(config, issue)
+        ),
         verification_commands_summary=_build_verification_commands_summary(config),
         memory_config=config.memory,
         long_term_store=long_term_store,

@@ -66,7 +66,9 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
         print(init_result.config_text, end="")
         _print_gitignore_plan(gitignore_result)
         remote_skill_result = install_remote_template_skills(
-            RemoteTemplateSkillInstallOptions(process_runner=process_runner, dry_run=True)
+            RemoteTemplateSkillInstallOptions(
+                process_runner=process_runner, dry_run=True, force=parsed.force
+            )
         )
         remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
         console.print(
@@ -82,7 +84,7 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
     _print_gitignore_summary(gitignore_result)
     try:
         remote_skill_result = install_remote_template_skills(
-            RemoteTemplateSkillInstallOptions(process_runner=process_runner)
+            RemoteTemplateSkillInstallOptions(process_runner=process_runner, force=parsed.force)
         )
     except Exception as exc:  # noqa: BLE001 - remote availability is required by iar init.
         error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")

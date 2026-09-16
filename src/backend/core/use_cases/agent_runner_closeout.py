@@ -29,9 +29,9 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.prd_change_log import parse_prd_change_log
 from backend.core.shared.prd_checklist import CHECKBOX_RE, parse_prd_checklist
+from backend.core.shared.prd_machine_contract import PRD_MACHINE_CONTRACT_POINTER
 from backend.core.use_cases.agent_runner_feedback import (
     PRD_ARCHIVE_OWNERSHIP_RULE,
-    PRD_CHANGE_LOG_FORMAT_EXAMPLE,
     RUNNER_OWNED_CHECKLIST_ITEM_RULE,
     extract_prd_path,
     resolve_prd_archive_path,
@@ -239,7 +239,7 @@ def capture_closeout_snapshot(
     prd_path = resolve_prd_worktree_path(issue, worktree_path)
     prd_text = prd_path.read_text(encoding="utf-8") if prd_path is not None else ""
     evidence_file_names = tuple(
-        evidence_path.name for evidence_path in list_evidence_files(worktree_path, config)
+        evidence_path.name for evidence_path in list_evidence_files(worktree_path, config, issue)
     )
     changed_path_digests: dict[str, str] = {}
     for changed_path in list_changed_paths(worktree_path, process_runner):
@@ -481,7 +481,7 @@ def build_closeout_prompt(context: CloseoutPromptContext) -> str:
             "already holds this attempt's commit request and will commit your closeout edits "
             "together with the implementation.",
             "",
-            PRD_CHANGE_LOG_FORMAT_EXAMPLE,
+            PRD_MACHINE_CONTRACT_POINTER,
             "",
             "Finish with a concise summary listing, per Acceptance Checklist item you ticked, "
             "the evidence you relied on — and every item you deliberately left unchecked, "

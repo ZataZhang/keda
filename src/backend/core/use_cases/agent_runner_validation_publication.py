@@ -112,11 +112,11 @@ def upload_evidence_branch(
     Returns:
         EvidenceUpload；证据目录为空时返回 ``None``。
     """
-    evidence_relative_paths = validation.list_evidence_upload_files(worktree_path, config)
+    evidence_relative_paths = validation.list_evidence_upload_files(worktree_path, config, issue)
     if not evidence_relative_paths:
         return None
 
-    evidence_dir = validation.evidence_dir_path(worktree_path, config)
+    evidence_dir = validation.resolve_issue_evidence_dir(worktree_path, config, issue)
     blob_shas_by_path: dict[str, str] = {}
     for relative_path in evidence_relative_paths:
         blob_result = process_runner.run(
@@ -186,12 +186,17 @@ def build_evidence_comment(
     pr_url: str,
     head_sha: str,
     issue_body: str = "",
+    evidence_dir: Path | None = None,
 ) -> str:
     """Build the PR evidence comment with embedded images and quoted text.
 
     当 ``issue_body`` 带 ``iar:structured-evidence`` marker 时，按 checklist item
     分组渲染结构化证据块（命令、摘要、解释、风险、SHA-256）；否则按文件名平铺，
     保持与旧 Issue 的兼容。
+
+    Args:
+        evidence_dir: 已解析的证据目录（按任务子目录）；为 ``None`` 时使用
+            配置根目录，保持旧调用方行为。
     """
     if has_structured_evidence_marker(issue_body):
         checklist_items = validation.extract_realistic_validation_items(issue_body)
@@ -200,6 +205,7 @@ def build_evidence_comment(
             checklist_items=checklist_items,
             worktree_path=worktree_path,
             config=config,
+            evidence_dir=evidence_dir,
         )
         return render_structured_evidence_comment(
             report=report,
@@ -208,6 +214,7 @@ def build_evidence_comment(
             config=config,
             pr_url=pr_url,
             head_sha=head_sha,
+            evidence_dir=evidence_dir,
         )
 
     marker = (
@@ -235,7 +242,12 @@ def build_evidence_comment(
             comment_lines.append(f"[Open image]({file_blob_url})")
             continue
         if file_suffix in _INLINE_TEXT_SUFFIXES:
-            evidence_file_path = validation.evidence_dir_path(worktree_path, config) / file_name
+            resolved_evidence_dir = (
+                evidence_dir
+                if evidence_dir is not None
+                else validation.evidence_dir_path(worktree_path, config)
+            )
+            evidence_file_path = resolved_evidence_dir / file_name
             try:
                 file_text = evidence_file_path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -303,6 +315,7 @@ def publish_validation_evidence(
             pr_url=pr_url,
             head_sha=head_sha,
             issue_body=issue.body,
+            evidence_dir=validation.resolve_issue_evidence_dir(worktree_path, config, issue),
         ),
     )
     return upload

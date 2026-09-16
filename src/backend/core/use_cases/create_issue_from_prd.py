@@ -37,8 +37,10 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.models.agent_runner import (
+    DEFAULT_VALIDATION_EVIDENCE_DIR,
     GeneratedContentConfig,
     LabelConfig,
+    evidence_dir_uses_task_subdirs,
 )
 from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_GENERATE,
@@ -112,6 +114,9 @@ class IssueFromPrdRequest:
         parse_evidence_format_with_agent: 是否用 agent 解析 PRD 中的格式要求。
         validation_language: Realistic Validation 固定标签语言，如 ``zh-CN``。
         structured_evidence: 是否为该 Issue 物化 ``iar:structured-evidence`` marker。
+        evidence_dir: 证据目录配置根（仓库相对）。默认 ``tasks/evidence`` 时
+            Issue body 指向按 PRD stem 解析的子目录；显式配置的 legacy 目录
+            原样展示。
     """
 
     repo_path: Path
@@ -131,6 +136,7 @@ class IssueFromPrdRequest:
     parse_evidence_format_with_agent: bool = True
     validation_language: str = "zh-CN"
     structured_evidence: bool = True
+    evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR
 
 
 @dataclass(frozen=True)
@@ -1114,12 +1120,19 @@ def create_issue_from_prd(
                 agent_name=request.issue_agent,
             )
             format_markers = _build_evidence_format_markers(parsed_formats)
+        evidence_dir_root = request.evidence_dir.strip("/")
+        issue_evidence_dir = (
+            f"{evidence_dir_root}/{relative_prd_path.stem}"
+            if evidence_dir_uses_task_subdirs(evidence_dir_root)
+            else evidence_dir_root
+        )
         validation_section = build_issue_validation_section(
             checklist_items=validation_checklist_items,
             waiver_reason=validation_waiver_reason,
             format_waiver_reason=extract_evidence_format_waiver_reason(prd_text),
             language=request.validation_language,
             structured_evidence=request.structured_evidence,
+            evidence_dir=issue_evidence_dir,
         )
         if format_markers:
             validation_section = f"{format_markers}\n\n{validation_section}"

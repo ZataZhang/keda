@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import sys
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Sequence
+
+import pytest
 
 from backend.core.shared.interfaces.agent_runner import (
     IContentGenerator,
@@ -35,6 +39,30 @@ def _ensure_project_root_on_path() -> None:
 
 
 _ensure_project_root_on_path()
+
+_PRD_SKILL_FIXTURE_PATH = Path(__file__).parent / "support" / "prd_skill_fixtures" / "SKILL_v1.md"
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _prd_skill_contract_env() -> Iterator[Path]:
+    """会话级 prd skill 桩：让 Machine Contract 启动预检在测试里确定性通过。
+
+    daemon 开跑前的预检（``run_preflight_checks``）要求能解析到带
+    ``Machine-Contract-Version`` 标记的 prd skill；本 fixture 用优先级最高的
+    ``IAR_PRD_SKILL_PATH`` 环境变量把解析指向仓库内的 fixture 文件，与执行机器
+    上是否安装了真实 skill 解耦。要触发预检失败路径的用例用
+    ``monkeypatch.setenv("IAR_PRD_SKILL_PATH", ...)`` 覆盖即可——monkeypatch 在
+    用例结束后会还原到这里的会话级取值。
+    """
+    previous_value = os.environ.get("IAR_PRD_SKILL_PATH")
+    os.environ["IAR_PRD_SKILL_PATH"] = str(_PRD_SKILL_FIXTURE_PATH)
+    try:
+        yield _PRD_SKILL_FIXTURE_PATH
+    finally:
+        if previous_value is None:
+            os.environ.pop("IAR_PRD_SKILL_PATH", None)
+        else:
+            os.environ["IAR_PRD_SKILL_PATH"] = previous_value
 
 
 class FakeGitHubClient(IGitHubClient):
