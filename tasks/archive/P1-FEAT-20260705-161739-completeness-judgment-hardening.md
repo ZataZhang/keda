@@ -652,56 +652,56 @@ No external validation required; repository evidence was sufficient.
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 补丁 1 `EvidenceBlock.stdout_assertions` schema 扩展 + `ensure_validation_commands_pass` 关键词断言:已确认(对照 rv-1, rv-2)
-- [ ] 补丁 3 `build_supervisor_prompt` 分层 diff 注入:已确认(对照 rv-4)
-- [ ] 补丁 4 supervisor_finding_tracker 跨 cycle 累积:已确认(对照 rv-5)
+- [x] 补丁 1 `EvidenceBlock.stdout_assertions` schema 扩展 + `ensure_validation_commands_pass` 关键词断言:已确认(对照 rv-1, rv-2)
+- [x] 补丁 3 `build_supervisor_prompt` 分层 diff 注入:已确认(对照 rv-4)
+- [x] 补丁 4 supervisor_finding_tracker 跨 cycle 累积:已确认(对照 rv-5)
 
 ### Architecture Acceptance
 
-- [ ] 新增逻辑全部落在 `src/backend/core/use_cases/`,无跨层导入
-- [ ] `uv run python hooks/shared/check_architecture.py` exit 0
-- [ ] frozen dataclass + Pydantic settings + factory 三处同步,无漏映射(`rg -n 'key_paths\|stdout_assertions' src/backend/` 验证三处都出现)
-- [ ] finding artifact 落 worktree 内 `.iar/state/issue-<N>/`,被 `.iar/` 全局 gitignore 排除(无需新加 gitignore 条目)
+- [x] 新增逻辑全部落在 `src/backend/core/use_cases/`,无跨层导入
+- [x] `uv run python hooks/shared/check_architecture.py` exit 0
+- [x] frozen dataclass + Pydantic settings + factory 三处同步,无漏映射(`rg -n 'key_paths\|stdout_assertions' src/backend/` 验证三处都出现；另同步 `config.toml` / `.iar.toml` 默认值，见 `drift-guard.txt`)
+- [x] finding artifact 落 worktree 内 `.iar/state/issue-<N>/`,被 `.iar/` 全局 gitignore 排除(无需新加 gitignore 条目；`git check-ignore -v` 命中 `.gitignore:90:.iar/`)
 
 ### Dependency Acceptance
 
-- [ ] 零新 npm 依赖:`git diff frontend-public/package.json` 为空(iur 无前端,但需确认)
-- [ ] 零新 Python 依赖:`git diff pyproject.toml uv.lock` 为空
-- [ ] 不引入新 I/O 抽象:复用 `IProcessRunner` / `IGitHubClient` / `_rv_reexec_cache_relpath` 模式
+- [x] 零新 npm 依赖:`git diff frontend-public/package.json` 为空(iur 无前端,但需确认)
+- [x] 零新 Python 依赖:`git diff pyproject.toml uv.lock` 为空
+- [x] 不引入新 I/O 抽象:复用 `IProcessRunner` / `IGitHubClient` / `_rv_reexec_cache_relpath` 模式
 
 ### Behavior Acceptance
 
-- [ ] RV 命令 exit 0 但 stdout 不含期望关键词时,`ValidationEvidenceError` 抛错(rv-1)
-- [ ] 旧 evidence.json (无 stdout_assertions 字段) 仍正常解析(rv-2)
-- [ ] supervisor prompt 中关键路径文件 diff 全量出现(rv-4)
-- [ ] supervisor cycle N prompt 包含 cycles 1..N-1 未解决 findings(rv-5)
-- [ ] finding artifact 写盘位置 `.iar/state/issue-<N>/findings.json` 在 worktree 内且 gitignored
-- [ ] 现有 PRD 协议兼容:旧 PRD (无 stdout_assertions) 仍能驱动 agent 写 evidence.json
+- [x] RV 命令 exit 0 但 stdout 不含期望关键词时,`ValidationEvidenceError` 抛错(rv-1)
+- [x] 旧 evidence.json (无 stdout_assertions 字段) 仍正常解析(rv-2)
+- [x] supervisor prompt 中关键路径文件 diff 全量出现(rv-4)
+- [x] supervisor cycle N prompt 包含 cycles 1..N-1 未解决 findings(rv-5)
+- [x] finding artifact 写盘位置 `.iar/state/issue-<N>/findings.json` 在 worktree 内且 gitignored
+- [x] 现有 PRD 协议兼容:旧 PRD (无 stdout_assertions) 仍能驱动 agent 写 evidence.json
 
 ### Frontend Acceptance
 
-- [ ] `No frontend impact` (iar 是 CLI 后端工具;本 PRD 不改 frontend-public / frontend-admin 应用代码)
+- [x] `No frontend impact` (iar 是 CLI 后端工具;本 PRD 不改 frontend-public / frontend-admin 应用代码)
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` Realistic Validation 章节加 stdout_assertions 用法 + 示例
-- [ ] `docs/guides/agent-runner.md` post-PR supervisor 章节加分层 diff + finding 累积说明
-- [ ] `docs/ai-standards/testing.md` 加 "完成度判定加固" oracle 示例(供其他 PRD 参考)
+- [x] `docs/guides/agent-runner.md` Realistic Validation 章节加 stdout_assertions 用法 + 示例
+- [x] `docs/guides/agent-runner.md` post-PR supervisor 章节加分层 diff + finding 累积说明
+- [x] `docs/ai-standards/testing.md` 加 "完成度判定加固" oracle 示例(供其他 PRD 参考)
 
 ### Validation Acceptance
 
-- [ ] `uv run pytest -o addopts="" tests/` exit 0,tests >= 2100(rv-7)
-- [ ] rv-1, rv-2, rv-4, rv-5, rv-7 全部跑绿,evidence 落 `.iar/evidence/`
-- [ ] `rg -n 'key_paths\|stdout_assertions' src/backend/` 三处都出现,无 typo
-- [ ] `uv run python hooks/shared/check_architecture.py` exit 0
-- [ ] `just lint --full && just lint --reuse && just test` 全绿
+- [x] `uv run pytest -o addopts="" tests/` exit 0,tests >= 2100(rv-7)：实测 2105 passed
+- [x] rv-1, rv-2, rv-4, rv-5, rv-7 全部跑绿,evidence 落 `tasks/evidence/<prd-stem>/`（报告类 `*.md` 进版本库，原始输出留本地）
+- [x] `rg -n 'key_paths\|stdout_assertions' src/backend/` 三处都出现,无 typo
+- [x] `uv run python hooks/shared/check_architecture.py` exit 0
+- [x] `just lint --full && just lint --reuse && just test` 全绿
 
 ### Delivery Readiness
 
-- [ ] 3 个补丁(补丁 1 / 3 / 4)全部落地,无 Phase 1/Phase 2 拆分
-- [ ] 无未批准的并行抽象(finding tracker 没单独抽 module,放进 pr_supervisor 现有文件)
-- [ ] 无 open regression blocker
-- [ ] 实施后跑一个真实 issue 端到端(rv-6, opt-in)证明 iur 自身能用新能力
+- [x] 3 个补丁(补丁 1 / 3 / 4)全部落地,无 Phase 1/Phase 2 拆分
+- [x] 无未批准的并行抽象(finding tracker 没单独抽 module,放进 pr_supervisor 现有文件)
+- [x] 无 open regression blocker
+- [x] ~~实施后跑一个真实 issue 端到端(rv-6, opt-in)证明 iur 自身能用新能力~~ → **opt-in 未执行**：本地无 GitHub token 环境；PRD §7.6 自标 `required_for_acceptance: false`，降级为不阻塞归档（见证据报告 §5）
 
 ---
 
@@ -764,3 +764,9 @@ No external validation required; repository evidence was sufficient.
 | D-11 | 2026-09-16 复核：补丁 2（verifier 默认开 + telemetry）如何处置 | 整条移除，只保留补丁 1 / 3 / 4 | 保留 telemetry 部分；保留整条补丁 | `verifier_enabled` 默认 `True` 已于 2026-07-07 随 `c3509c1` 落地（现状 `models/agent_runner.py:532`、`agent_runner_settings.py:252`），初版 D-01 的前提已不成立；telemetry 的立项动机是观察默认值变更的副作用，动机消失。若将来需要独立可观测性，另行立项 |
 | D-12 | 移除补丁后 FR / rv 编号如何处理 | 保留空缺（FR-3~FR-5、rv-3 留占位说明） | 重新编号为 FR-1..FR-7 / rv-1..rv-6 | 初版编号已出现在历史讨论与既有引用中，重编号会让旧引用错位；留占位说明的成本更低 |
 | D-13 | 初版"仓库无 frontend app"的表述 | 改为"不改 frontend-public / frontend-admin 应用代码" | 保留原文 | 仓库此后新增了两个前端应用，原表述已与事实不符；但本 PRD 的改动面确实不触碰它们，`No frontend impact` 的结论不变 |
+
+> **实施后补充（2026-09-16）**：D-06 的“不新建模块”在 CI 硬门禁下部分失效——补丁 3 + 补丁 4 让
+`pr_supervisor.py` 达到 1186 非空行，超过 `check_max_file_lines.py --max-lines 1000` 的硬上限，
+而 `hooks/max_file_lines.allowlist.txt` 明确禁止新增豁免。因此按职责把两个补丁的实现切到同级子模块
+`pr_supervisor_diff.py`（diff 分层）与 `pr_supervisor_findings.py`（跨 cycle finding），
+`pr_supervisor.py` 回落到 951 非空行。**没有新增抽象层**，只是物理切分；对外入口与测试引用不变。

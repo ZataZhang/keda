@@ -11,6 +11,7 @@ import pytest
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
+    FindingDetail,
     IssueSummary,
     PostPrSupervisorConfig,
     PullRequestContext,
@@ -19,7 +20,10 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.agent_runner_events import parse_latest_event_marker
 from backend.core.use_cases.pr_supervisor import (
+    _build_layered_diff,
     _ensure_rebase_context_matches_pr_branch,
+    _load_previous_findings,
+    _persist_findings,
     build_conflict_resolution_prompt,
     build_rework_intent_comment,
     build_supervisor_prompt,
@@ -2481,3 +2485,204 @@ def test_ensure_rebase_context_rejects_mismatched_target(tmp_path: Path) -> None
             process_runner=fake_runner,
             pr_branch="issue-1",
         )
+
+
+def _long_pr_diff() -> str:
+    """5 个关键文件 + 10 个测试文件、总长约 15000 字符的 PR diff（rv-4 规模）。"""
+    file_chunks: list[str] = []
+    for index in range(5):
+        file_path = f"src/backend/core/use_cases/mod_{index}.py"
+        file_chunks.append(
+            "\n".join(
+                [
+                    f"diff --git a/{file_path} b/{file_path}",
+                    f"--- a/{file_path}",
+                    f"+++ b/{file_path}",
+                    f"+CORE-{index}-" + "A" * 900,
+                ]
+            )
+        )
+    for index in range(10):
+        file_path = f"tests/test_mod_{index}.py"
+        file_chunks.append(
+            "\n".join(
+                [
+                    f"diff --git a/{file_path} b/{file_path}",
+                    f"--- a/{file_path}",
+                    f"+++ b/{file_path}",
+                    f"+TEST-{index}-" + "B" * 900,
+                ]
+            )
+        )
+    return "\n".join(file_chunks)
+
+
+def _prompt_issue() -> IssueSummary:
+    return IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Do something.",
+        labels=(),
+    )
+
+
+def _prompt_pr_context() -> PullRequestContext:
+    return PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-1",
+        head_sha="abc123",
+        base_sha="def456",
+    )
+
+
+def test_build_layered_diff_includes_full_key_files_and_truncates_rest() -> None:
+    """关键路径文件 diff 全量保留，其余按字符预算截断（补丁 3 / FR-6, FR-7）。"""
+    layered_diff_text = _build_layered_diff(_long_pr_diff(), ("src/backend/core/",), 6000)
+    for index in range(5):
+        assert f"CORE-{index}-" + "A" * 900 in layered_diff_text
+    assert "--- Key files (full diff) ---" in layered_diff_text
+    assert "--- Other files (truncated to 6000 chars) ---" in layered_diff_text
+    # 负控：非关键文件超预算的部分被截掉
+    assert "TEST-9-" + "B" * 900 not in layered_diff_text
+
+
+def test_build_supervisor_prompt_includes_layered_diff_for_key_paths() -> None:
+    """配置 key_paths 后，大 PR 的关键文件全量进入 supervisor prompt（rv-4）。"""
+    diff_text = _long_pr_diff()
+    runner = FakeProcessRunner(
+        responses={
+            ("git", "diff", "main...abc123"): CommandResult(
+                command=("git", "diff", "main...abc123"),
+                return_code=0,
+                stdout=diff_text,
+                stderr="",
+            )
+        }
+    )
+    config = AppConfig(
+        post_pr_supervisor=PostPrSupervisorConfig(
+            key_paths=("src/backend/core/",), max_diff_chars=2000
+        )
+    )
+    prompt = build_supervisor_prompt(
+        issue=_prompt_issue(),
+        pr_context=_prompt_pr_context(),
+        config=config,
+        process_runner=runner,
+        worktree_path=Path("."),
+        issue_comments=[],
+        pr_comments=[],
+        base_sha_remote="remote-sha",
+    )
+    assert "--- Key files (full diff) ---" in prompt
+    assert "CORE-4-" + "A" * 900 in prompt
+
+    # 负控：key_paths 为空时退化为整体截断，关键文件同样被截掉
+    legacy_prompt = build_supervisor_prompt(
+        issue=_prompt_issue(),
+        pr_context=_prompt_pr_context(),
+        config=AppConfig(post_pr_supervisor=PostPrSupervisorConfig(max_diff_chars=2000)),
+        process_runner=FakeProcessRunner(
+            responses={
+                ("git", "diff", "main...abc123"): CommandResult(
+                    command=("git", "diff", "main...abc123"),
+                    return_code=0,
+                    stdout=diff_text,
+                    stderr="",
+                )
+            }
+        ),
+        worktree_path=Path("."),
+        issue_comments=[],
+        pr_comments=[],
+        base_sha_remote="remote-sha",
+    )
+    assert "Key files" not in legacy_prompt
+    assert "CORE-4-" + "A" * 900 not in legacy_prompt
+
+
+def test_build_supervisor_prompt_includes_previous_unresolved_findings() -> None:
+    """cycle N 的 prompt 注入 cycles 1..N-1 未解决 findings（rv-5 / FR-9）。"""
+    previous_findings = (
+        FindingDetail(
+            severity="high",
+            title="Missing error handling",
+            file="src/backend/core/use_cases/foo.py",
+            line=42,
+            cycle_reported=1,
+        ),
+    )
+    prompt = build_supervisor_prompt(
+        issue=_prompt_issue(),
+        pr_context=_prompt_pr_context(),
+        config=AppConfig(),
+        process_runner=FakeProcessRunner(),
+        worktree_path=Path("."),
+        issue_comments=[],
+        pr_comments=[],
+        base_sha_remote="remote-sha",
+        previous_findings=previous_findings,
+    )
+    assert "Previous unresolved findings from cycles 1..1:" in prompt
+    assert "[high] src/backend/core/use_cases/foo.py:42" in prompt
+    assert "Missing error handling" in prompt
+
+    # 负控：无累积 finding 时不出现该段
+    clean_prompt = build_supervisor_prompt(
+        issue=_prompt_issue(),
+        pr_context=_prompt_pr_context(),
+        config=AppConfig(),
+        process_runner=FakeProcessRunner(),
+        worktree_path=Path("."),
+        issue_comments=[],
+        pr_comments=[],
+        base_sha_remote="remote-sha",
+    )
+    assert "Previous unresolved" not in clean_prompt
+
+
+def test_supervisor_finding_tracker_persists_and_loads_findings(tmp_path: Path) -> None:
+    """finding artifact 写入后可读回；resolved 的 finding 从累积列表移除（FR-10）。"""
+    config = AppConfig()
+    open_finding = FindingDetail(
+        severity="high",
+        title="Missing error handling",
+        file="src/backend/core/use_cases/foo.py",
+        line=42,
+    )
+    _persist_findings(tmp_path, config, 42, 1, (open_finding,))
+
+    artifact_path = tmp_path / ".iar" / "state" / "issue-42" / "findings.json"
+    assert artifact_path.is_file()
+    loaded_findings = _load_previous_findings(tmp_path, config, 42)
+    assert len(loaded_findings) == 1
+    assert loaded_findings[0].title == "Missing error handling"
+    assert loaded_findings[0].cycle_reported == 1
+
+    # 同 key 重复报告不新增条目；标记 resolved 后出列
+    _persist_findings(tmp_path, config, 42, 2, (replace(open_finding, description="still open"),))
+    assert len(_load_previous_findings(tmp_path, config, 42)) == 1
+    _persist_findings(tmp_path, config, 42, 3, (replace(open_finding, status="resolved"),))
+    assert _load_previous_findings(tmp_path, config, 42) == ()
+
+
+def test_parse_supervisor_action_extracts_findings() -> None:
+    """LLM 输出 findings[] 时被解析；旧输出（无该字段）静默空 list（FR-11）。"""
+    text = (
+        "```json\n"
+        '{"action": "repair_pr_branch", "summary": "fix it", '
+        '"findings": [{"severity": "high", "title": "Missing error handling", '
+        '"file": "src/foo.py", "line": 42, "status": "open"}]}\n'
+        "```"
+    )
+    result = parse_supervisor_action(text)
+    assert result.action == "repair_pr_branch"
+    assert len(result.findings_detail) == 1
+    assert result.findings_detail[0].title == "Missing error handling"
+    assert result.findings_detail[0].severity == "high"
+
+    legacy_result = parse_supervisor_action(
+        '{"action": "approve_for_human_review", "summary": "ok"}'
+    )
+    assert legacy_result.findings_detail == ()

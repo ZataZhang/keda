@@ -10,6 +10,7 @@ import pytest
 from backend.core.shared.models.agent_runner import (
     AgentCommitResult,
     AppConfig,
+    CommandResult,
     IssueSummary,
     PostPrSupervisorConfig,
     PullRequestContext,
@@ -18,11 +19,13 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases import (
     agent_runner_issue_handlers,
+    pr_supervisor as pr_supervisor_module,
     agent_runner_orchestrate,
     agent_runner_publication,
     agent_runner_supervisor,
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
+from backend.core.use_cases.pr_supervisor import run_post_pr_supervisor_cycle
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
 
@@ -299,3 +302,46 @@ def test_supervisor_loop_defers_after_rework_when_pr_context_refresh_fails(
     ]
     assert any("phase=post_pr_rework_requested" in body for body in comment_bodies)
     assert any("phase=rebase_repair_complete" in body for body in comment_bodies)
+
+
+def test_supervisor_loop_injects_previous_findings_into_cycle_2_prompt(
+    tmp_path: Path,
+) -> None:
+    """cycle 1 报的 finding 会出现在 cycle 2 的 supervisor prompt 里（rv-5 端到端）。"""
+    github_client = FakeGitHubClient()
+    github_client._pr_contexts["issue-1"] = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-1",
+        head_sha="abc123",
+        base_sha="base-sha",
+    )
+    agent_response_text = (
+        "```json\n"
+        '{"action": "repair_pr_branch", "summary": "needs work", '
+        '"findings": [{"severity": "high", "title": "Missing error handling", '
+        '"file": "src/foo.py", "line": 42, "status": "open"}]}\n'
+        "```"
+    )
+    captured_prompts: list[str] = []
+
+    def _fake_run_agent(agent_name, prompt, worktree_path, process_runner, **kwargs):
+        captured_prompts.append(prompt)
+        return CommandResult(command=(), return_code=0, stdout=agent_response_text, stderr="")
+
+    with patch.object(pr_supervisor_module, "run_agent_with_prompt", _fake_run_agent):
+        for cycle in (1, 2):
+            run_post_pr_supervisor_cycle(
+                issue=_make_issue(),
+                worktree_path=tmp_path,
+                config=AppConfig(),
+                github_client=github_client,
+                process_runner=FakeProcessRunner(),
+                pr_context=github_client._pr_contexts["issue-1"],
+                supervisor_agent="claude",
+                cycle=cycle,
+            )
+
+    assert len(captured_prompts) == 2
+    assert "Previous unresolved" not in captured_prompts[0]
+    assert "Previous unresolved findings from cycles 1..1:" in captured_prompts[1]
+    assert "Missing error handling" in captured_prompts[1]

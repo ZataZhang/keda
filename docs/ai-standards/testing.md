@@ -218,6 +218,28 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 
 人工终点审查时，按风险地图顺序查看证据包，重点抽查高风险 oracle 结果、前端截图/录屏和 verifier report。
 
+### 完成度判定加固类改动的 oracle 示例
+
+（`P1-FEAT-20260705-161739-completeness-judgment-hardening` 归纳的写法，供同类 PRD 参考）
+
+这类改动的判别力来自"补上缺失的那一刀"，oracle 必须同时给出**正例**和**负控**：
+
+```yaml
+- id: rv-1
+  behavior: RV 命令含 [ -d x ] || true 兜底时，新版 iar 复跑必须抓到假绿灯
+  real_entry: "在临时 worktree 的 .iar/evidence/evidence.json 里声明 stdout_assertions:"
+              "{"pattern": "REAL_OUTPUT", "must_match": true}，命令写成 `[ -d /tmp/missing ] || true`，"
+              "再跑 ensure_validation_commands_pass"
+  expected: "抛 ValidationEvidenceError，消息含 pattern 与 source"
+  mock_boundary: "IProcessRunner 必须真跑 subprocess；manifest 解析器真跑"
+  negative_control: "删掉 stdout_assertions → exit 0 通过（证明断言才是判别力，不是退出码）"
+  expected_fail: "删断言后通过、加断言后失败"
+  test_layer: integration
+  required_for_acceptance: true
+```
+
+要点：把"补上的那一刀"（这里是 `stdout_assertions`）作为唯一变量，其余输入保持不变；负控必须能被同一条命令复现，否则无法证明改动真的起作用。跨 cycle 累积类改动同理——负控是"删掉 artifact 后 prompt 里不再出现累积段"。
+
 ## Change Recording
 
 当任务带有 PRD 或 planning 记录时，记录实际执行的验证命令和结果。
