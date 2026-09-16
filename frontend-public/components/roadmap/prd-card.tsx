@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import type { RoadmapPrd } from "@/lib/api/types";
 
-const STATE_LABELS: Record<RoadmapPrd["state"], string> = {
+export const STATE_LABELS: Record<RoadmapPrd["state"], string> = {
   not_started: "未开始",
   ready: "就绪",
   running: "运行中",
@@ -18,7 +18,7 @@ const STATE_LABELS: Record<RoadmapPrd["state"], string> = {
   waiting: "等待中",
 };
 
-const STATE_VARIANTS: Record<RoadmapPrd["state"], BadgeVariant> = {
+export const STATE_VARIANTS: Record<RoadmapPrd["state"], BadgeVariant> = {
   not_started: "default",
   ready: "ready",
   running: "running",

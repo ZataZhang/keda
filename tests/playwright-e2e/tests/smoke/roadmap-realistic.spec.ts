@@ -14,6 +14,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test } from '../../fixtures/session.fixture'
+import type { Page } from '@playwright/test'
 
 const currentDirectoryPath = dirname(fileURLToPath(import.meta.url))
 const repositoryRootPath = resolve(currentDirectoryPath, '../../../..')
@@ -37,6 +38,16 @@ async function saveScreenshot(page: import('@playwright/test').Page, filename: s
 
 async function waitForPrdCards(page: import('@playwright/test').Page): Promise<void> {
   await page.waitForSelector('[data-slot="card"]', { timeout: 15_000 })
+}
+
+/**
+ * 切换到列表视图：页面默认视图已改为依赖图，卡片类断言需要先切到列表。
+ *
+ * @param page - Playwright 页面对象。
+ */
+async function switchToListView(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /视图：/ }).click()
+  await page.getByRole('menuitemradio', { name: '列表' }).click()
 }
 
 const MOCK_PRDS_RESPONSE = {
@@ -137,6 +148,7 @@ test.describe('realistic: roadmap page', () => {
   test('E2E-1 roadmap renders pending PRDs and archived switch works', async ({ page }) => {
     await page.goto('/app/roadmap')
     await expect(page.getByRole('heading', { name: '路线图' })).toBeVisible()
+    await switchToListView(page)
     await waitForPrdCards(page)
 
     await saveJsonEvidence('roadmap-prds-response.json', MOCK_PRDS_RESPONSE)
@@ -154,6 +166,7 @@ test.describe('realistic: roadmap page', () => {
   test('E2E-1 list sorting and timeline view', async ({ page }) => {
     await page.goto('/app/roadmap')
     await expect(page.getByRole('heading', { name: '路线图' })).toBeVisible()
+    await switchToListView(page)
     await waitForPrdCards(page)
 
     await page.getByTestId('roadmap-sort-trigger').click()
@@ -171,6 +184,7 @@ test.describe('realistic: roadmap page', () => {
   test('E2E-5 review and merged highlight cards', async ({ page }) => {
     await page.goto('/app/roadmap')
     await expect(page.getByRole('heading', { name: '路线图' })).toBeVisible()
+    await switchToListView(page)
     await waitForPrdCards(page)
 
     await expect(page.getByText('Roadmap E2E Review Highlight Test')).toBeVisible()

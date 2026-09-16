@@ -1,13 +1,12 @@
 "use client"
 /* eslint-disable react-hooks/set-state-in-effect */
 
-// 路线图页面：展示 PRD 全景、依赖与批量启动能力。
+// 路线图页面：左侧受管理仓库栏 + 右侧 PRD 画布（依赖图/时间轴/列表）。
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,8 +16,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PrdContentView } from "@/components/roadmap/prd-content-view";
+import { RoadmapGraph } from "@/components/roadmap/roadmap-graph";
 import { RoadmapList } from "@/components/roadmap/roadmap-list";
 import { RoadmapTimeline } from "@/components/roadmap/roadmap-timeline";
+import { cn } from "@/lib/utils";
 import { fetchRegistryRepositories } from "@/lib/api/console";
 import {
   fetchRoadmapPrds,
@@ -36,12 +37,26 @@ import type {
 
 const POLL_INTERVAL_MS = 30000;
 
-type RoadmapView = "timeline" | "list";
+type RoadmapView = "graph" | "timeline" | "list";
 
 const VIEW_LABELS: Record<RoadmapView, string> = {
+  graph: "依赖图",
   timeline: "时间轴",
   list: "列表",
 };
+
+/**
+ * 仓库状态点的颜色：绿 = 启用且路径存在，黄 = 启用但路径缺失，灰 = 未启用。
+ *
+ * @param repo - 注册表中的仓库条目。
+ * @returns 状态点的 Tailwind 背景色类名。
+ */
+function repoStatusDotClass(repo: RegistryRepositoryEntry): string {
+  if (!repo.enabled) {
+    return "bg-slate-400";
+  }
+  return repo.path_exists ? "bg-emerald-500" : "bg-amber-500";
+}
 
 export default function RoadmapPage() {
   const [prds, setPrds] = useState<RoadmapPrd[]>([]);
@@ -51,7 +66,7 @@ export default function RoadmapPage() {
   const [repositories, setRepositories] = useState<RegistryRepositoryEntry[]>([]);
   const [reposLoading, setReposLoading] = useState(true);
   const [settings, setSettings] = useState<RoadmapSettings | null>(null);
-  const [view, setView] = useState<RoadmapView>("list");
+  const [view, setView] = useState<RoadmapView>("graph");
   const [startingPath, setStartingPath] = useState<string | null>(null);
   const [globalStarting, setGlobalStarting] = useState(false);
   const [openedPrd, setOpenedPrd] = useState<RoadmapPrd | null>(null);
@@ -75,8 +90,8 @@ export default function RoadmapPage() {
     setReposLoading(true);
     fetchRegistryRepositories()
       .then((loadedRepositories) => {
+        setRepositories(loadedRepositories);
         const enabledRepositories = loadedRepositories.filter((repo) => repo.enabled);
-        setRepositories(enabledRepositories);
         if (enabledRepositories.length === 0) {
           return;
         }
@@ -108,7 +123,6 @@ export default function RoadmapPage() {
     fetchRoadmapSettings(selectedRepoId)
       .then((loadedSettings) => {
         setSettings(loadedSettings);
-        setView(loadedSettings.default_view);
       })
       .catch((error: unknown) => {
         toast.error(error instanceof Error ? error.message : "加载设置失败。");
@@ -117,7 +131,9 @@ export default function RoadmapPage() {
 
   async function handleViewChange(nextView: RoadmapView) {
     setView(nextView);
-    if (!settings || settings.default_view === nextView) {
+    // 后端 PATCH /roadmap/settings 的 default_view 仅接受 timeline/list（路由层
+    // pattern 校验），「依赖图」是纯前端默认视图，不向后端回写该值。
+    if (nextView === "graph" || !settings || settings.default_view === nextView) {
       return;
     }
     try {
@@ -182,41 +198,54 @@ export default function RoadmapPage() {
     : prds.filter((prd) => prd.status === "pending");
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-6">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
-          路线图
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          查看 pending/archived PRD 的状态、依赖关系，并批量启动开发。
-        </p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">控制面板</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-3">
-          <select
-            className="h-9 w-48 rounded-md border border-slate-200 bg-transparent px-2 text-sm dark:border-slate-700"
-            value={selectedRepoId}
-            onChange={(event) => {
-              setSelectedRepoId(event.target.value);
-              setOpenedPrd(null);
-            }}
-            disabled={reposLoading || repositories.length === 0}
-            aria-label="选择仓库"
-          >
-            {repositories.length === 0 ? (
-              <option value="">{reposLoading ? "加载中…" : "无可用仓库"}</option>
-            ) : (
-              repositories.map((repo) => (
-                <option key={repo.repo_id} value={repo.repo_id}>
+    <div className="flex h-[calc(100svh-4rem)] gap-4">
+      <aside className="flex w-60 shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+        <div className="border-b border-slate-200 px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-800">
+          受管理仓库
+        </div>
+        <div className="flex-1 space-y-0.5 overflow-y-auto p-1.5">
+          {reposLoading ? (
+            <div className="space-y-1.5 p-1">
+              <Skeleton className="h-8" />
+              <Skeleton className="h-8" />
+              <Skeleton className="h-8" />
+            </div>
+          ) : repositories.length === 0 ? (
+            <p className="p-2 text-xs text-slate-500">无可用仓库。</p>
+          ) : (
+            repositories.map((repo) => (
+              <button
+                key={repo.repo_id}
+                type="button"
+                disabled={!repo.enabled}
+                onClick={() => {
+                  setSelectedRepoId(repo.repo_id);
+                  setOpenedPrd(null);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                  repo.repo_id === selectedRepoId
+                    ? "bg-slate-100 font-medium dark:bg-slate-800"
+                    : "hover:bg-slate-100 dark:hover:bg-slate-800",
+                  !repo.enabled && "cursor-not-allowed opacity-50",
+                )}
+              >
+                <span
+                  className={cn("h-2 w-2 shrink-0 rounded-full", repoStatusDotClass(repo))}
+                  aria-hidden="true"
+                />
+                <span className="truncate" title={repo.display_name ?? repo.repo_id}>
                   {repo.display_name ?? repo.repo_id}
-                </option>
-              ))
-            )}
-          </select>
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+
+      <section className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-50">路线图</h2>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -236,11 +265,15 @@ export default function RoadmapPage() {
                 value={view}
                 onValueChange={(value) => void handleViewChange(value as RoadmapView)}
               >
+                <DropdownMenuRadioItem value="graph">依赖图</DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="timeline">时间轴</DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="list">列表</DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
+          <span className="text-xs text-slate-500">
+            {openedPrd ? "PRD 原文" : `${visiblePrds.length} 个 PRD`}
+          </span>
           <div className="flex-1" />
           <Button
             size="sm"
@@ -257,16 +290,9 @@ export default function RoadmapPage() {
           >
             停止全局调度
           </Button>
-        </CardContent>
-      </Card>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">
-            {openedPrd ? "PRD 原文" : `${VIEW_LABELS[view]}（${visiblePrds.length}）`}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+        <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 p-4 dark:border-slate-800">
           {openedPrd ? (
             <PrdContentView
               key={openedPrd.prd_path}
@@ -281,6 +307,8 @@ export default function RoadmapPage() {
               <Skeleton className="h-40" />
               <Skeleton className="h-40" />
             </div>
+          ) : view === "graph" ? (
+            <RoadmapGraph prds={visiblePrds} onOpenContent={setOpenedPrd} />
           ) : view === "timeline" ? (
             <RoadmapTimeline
               prds={visiblePrds}
@@ -296,8 +324,8 @@ export default function RoadmapPage() {
               startingPath={startingPath}
             />
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </div>
   );
 }
