@@ -2,15 +2,16 @@
 """PRD 状态看板。
 
 扫描 ``tasks/pending`` 与 ``tasks/archive``，汇总每条 PRD 的优先级、类型、
-创建时间、验收清单勾选进度、证据包状态与执行锁运行态（ACTIVITY 列），
-供开工前判断哪些尚未交付、哪些正被其他会话执行。
+创建时间、验收清单勾选进度、证据包状态、交付依赖（DEPS 列）与执行锁运行态
+（ACTIVITY 列），供开工前判断哪些尚未交付、哪些被上游依赖挡住、哪些正被
+其他会话执行。
 
 用法::
 
     python3 scripts/shared/just/prd_status.py [all|pending|archive]
 
-清单进度与 verifier 结论均为从文件内容推断的启发式结果，看板只用于快速定位，
-最终判断以 PRD 正文与证据文件原文为准。
+清单进度、依赖满足与 verifier 结论均为从文件内容推断的启发式结果，看板只用于
+快速定位，最终判断以 PRD 正文与证据文件原文为准。
 """
 
 from __future__ import annotations
@@ -36,6 +37,19 @@ CHECKLIST_HEADING_PATTERN = re.compile(
 )
 CHECKED_ITEM_PATTERN = re.compile(r"^\s*[-*]\s*\[[xX]\]")
 UNCHECKED_ITEM_PATTERN = re.compile(r"^\s*[-*]\s*\[\s*\]")
+
+DEPENDENCY_SECTION_PATTERN = re.compile(
+    r"^##\s+(?:\d+[.、]\s*)?(?:Delivery Dependencies|交付依赖)\s*$"
+)
+DEPENDENCY_GATE_PATTERN = re.compile(
+    r"^[-*]\s*Gate type\s*[:：]\s*(?P<gate>.+?)\s*$", re.IGNORECASE
+)
+DEPENDENCY_REFS_HEADING_PATTERN = re.compile(
+    r"^[-*]\s*Depends on tasks/issues\s*[:：]\s*$", re.IGNORECASE
+)
+DEPENDENCY_NESTED_REF_PATTERN = re.compile(r"^\s+[-*]\s+(?P<ref>.+?)\s*$")
+
+DEPENDENCY_SLUG_MAX_WIDTH = 26
 
 STRONG_VERDICT_PATTERN = re.compile(
     r"^\s*[-*>#\s]*(?:VERDICT|最终结论|结论)\s*[:：]\s*\**\s*(PASS|REJECT)\b",
@@ -65,6 +79,10 @@ class PrdRecord:
         has_evidence_report (bool): 是否存在证据报告文件。
         verifier_verdict (str): verifier 结论，``PASS`` / ``REJECT`` / 空串。
         verifier_verdict_certain (bool): 结论是否来自显式结论行而非散文推断。
+        dependency_gate (str): §8 声明的 gate 类型，``none`` / ``soft`` / ``hard``
+            / ``""``（无 §8 章节或未声明）。
+        dependency_refs (tuple[str, ...]): §8 ``Depends on tasks/issues`` 下的
+            原始引用 token（``none`` 会被解析阶段剔除）。
     """
 
     prd_path: Path
@@ -79,6 +97,8 @@ class PrdRecord:
     has_evidence_report: bool
     verifier_verdict: str
     verifier_verdict_certain: bool
+    dependency_gate: str
+    dependency_refs: tuple[str, ...]
 
     @property
     def checklist_complete(self) -> bool:
@@ -148,6 +168,148 @@ def count_checklist_items(prd_text: str) -> tuple[int, int]:
     return checked_item_count, checked_item_count + unchecked_item_count
 
 
+def parse_delivery_dependencies(prd_text: str) -> tuple[str, tuple[str, ...]]:
+    """解析 §8 Delivery Dependencies 的 gate 类型与任务/Issue 引用。
+
+    只消费 ``Gate type`` 与 ``Depends on tasks/issues`` 两个字段；组依赖
+    （``Depends on groups``）需要展开成员，不参与本地判定，直接忽略。
+
+    Args:
+        prd_text (str): PRD 文件全文。
+
+    Returns:
+        tuple[str, tuple[str, ...]]: ``(gate 类型, 引用 token 元组)``；gate 统一
+        小写，未声明时为空串；``none`` 引用在解析阶段剔除，无 §8 章节时返回
+        ``("", ())``。
+    """
+    raw_lines_list = prd_text.splitlines()
+    section_start_index = -1
+    for line_index, raw_line_text in enumerate(raw_lines_list):
+        if DEPENDENCY_SECTION_PATTERN.match(raw_line_text):
+            section_start_index = line_index + 1
+            break
+    if section_start_index < 0:
+        return "", ()
+
+    gate_text = ""
+    dependency_refs_list: list[str] = []
+    is_collecting_refs = False
+    for raw_line_text in raw_lines_list[section_start_index:]:
+        if raw_line_text.startswith("## "):
+            break
+        gate_match = DEPENDENCY_GATE_PATTERN.match(raw_line_text)
+        if gate_match:
+            gate_text = gate_match.group("gate").strip().strip("`").lower()
+            is_collecting_refs = False
+            continue
+        if DEPENDENCY_REFS_HEADING_PATTERN.match(raw_line_text):
+            is_collecting_refs = True
+            continue
+        if is_collecting_refs:
+            ref_match = DEPENDENCY_NESTED_REF_PATTERN.match(raw_line_text)
+            if not ref_match:
+                is_collecting_refs = False
+                continue
+            raw_ref_text = ref_match.group("ref").strip().strip("`").strip()
+            if raw_ref_text and raw_ref_text.lower() != "none":
+                dependency_refs_list.append(raw_ref_text)
+
+    return gate_text, tuple(dependency_refs_list)
+
+
+def classify_dependency_ref(raw_ref: str, pending_dir: Path, archive_dir: Path) -> tuple[str, str]:
+    """判定单条依赖引用的交付状态。
+
+    引用可能是 ``tasks/pending/xxx.md`` 完整路径、裸文件名或 stem、或 ``#123``
+    Issue 引用。PRD 引用按所在目录判定：``tasks/pending`` 下 = 未交付；
+    ``tasks/archive`` 下 = 已交付；两处都无 = 悬空引用，无法判定。Issue 引用
+    需要远端状态，本地一律视为无法判定。
+
+    Args:
+        raw_ref (str): 依赖引用原文（已去反引号与首尾空白）。
+        pending_dir (Path): ``tasks/pending`` 目录。
+        archive_dir (Path): ``tasks/archive`` 目录。
+
+    Returns:
+        tuple[str, str]: ``(kind, display)``；kind 为 ``"pending"`` /
+        ``"delivered"`` / ``"unknown"``，display 为展示用 slug（Issue 引用
+        返回 ``#<编号>``）。
+    """
+    if raw_ref.startswith("#") or raw_ref.isdigit():
+        return "unknown", f"#{raw_ref.lstrip('#')}"
+
+    raw_stem_text = Path(raw_ref).name
+    if raw_stem_text.endswith(".md"):
+        raw_stem_text = raw_stem_text[: -len(".md")]
+    _, _, _, raw_slug_text = parse_prd_filename(Path(f"{raw_stem_text}.md"))
+
+    if (pending_dir / f"{raw_stem_text}.md").is_file():
+        return "pending", raw_slug_text
+    if (archive_dir / f"{raw_stem_text}.md").is_file():
+        return "delivered", raw_slug_text
+    return "unknown", raw_slug_text
+
+
+def shorten_dependency_slug(slug_text: str) -> str:
+    """把依赖 slug 截断到表格可容纳的宽度，超宽时以省略号结尾。"""
+    if len(slug_text) <= DEPENDENCY_SLUG_MAX_WIDTH:
+        return slug_text
+    return slug_text[: DEPENDENCY_SLUG_MAX_WIDTH - 1] + "…"
+
+
+def format_deps_cell(
+    prd_record: PrdRecord, pending_dir: Path, archive_dir: Path, palette: Palette
+) -> str:
+    """格式化交付依赖列（DEPS）。
+
+    ``hard`` gate 三态：存在仍在 ``tasks/pending`` 的依赖 → 红色
+    ``⛔ blocked by <slug>``（多个追加 ``+N``）；无未交付依赖但含本地无法判定的
+    引用（Issue 号、悬空路径）→ 黄色 ``? <slug>``；全部满足 → 绿色
+    ``✔ deps ok``。``soft`` gate 仅在存在未交付依赖时以暗色 ``soft → <slug>``
+    提示。``none`` gate 或无 §8 章节 → ``-``（无需关注的默认态）。
+
+    Args:
+        prd_record (PrdRecord): 单条 PRD 记录。
+        pending_dir (Path): ``tasks/pending`` 目录。
+        archive_dir (Path): ``tasks/archive`` 目录。
+        palette (Palette): 颜色包装器。
+
+    Returns:
+        str: 依赖列单元格文本。
+    """
+    raw_gate_text = prd_record.dependency_gate
+    if not raw_gate_text or raw_gate_text == "none":
+        return palette.dim("-")
+
+    blocked_slugs_list: list[str] = []
+    unknown_slugs_list: list[str] = []
+    for raw_ref_text in prd_record.dependency_refs:
+        ref_kind, ref_display_text = classify_dependency_ref(raw_ref_text, pending_dir, archive_dir)
+        if ref_kind == "pending":
+            blocked_slugs_list.append(ref_display_text)
+        elif ref_kind == "unknown":
+            unknown_slugs_list.append(ref_display_text)
+
+    if raw_gate_text == "hard":
+        if blocked_slugs_list:
+            raw_blocked_text = shorten_dependency_slug(blocked_slugs_list[0])
+            if len(blocked_slugs_list) > 1:
+                raw_blocked_text += f" +{len(blocked_slugs_list) - 1}"
+            return palette.red(f"⛔ blocked by {raw_blocked_text}")
+        if unknown_slugs_list:
+            raw_unknown_text = ", ".join(
+                shorten_dependency_slug(slug_text) for slug_text in unknown_slugs_list[:2]
+            )
+            if len(unknown_slugs_list) > 2:
+                raw_unknown_text += f" +{len(unknown_slugs_list) - 2}"
+            return palette.yellow(f"? {raw_unknown_text}")
+        return palette.green("✔ deps ok")
+
+    if blocked_slugs_list:
+        return palette.dim(f"soft → {shorten_dependency_slug(blocked_slugs_list[0])}")
+    return palette.dim("-")
+
+
 def find_named_evidence_file(evidence_dir: Path, stem_suffix: str) -> Path | None:
     """在证据目录中查找 ``<prd-basename>.<suffix>.md`` 或 ``<suffix>.md``。
 
@@ -211,6 +373,7 @@ def collect_prd_record(prd_path: Path, evidence_root: Path) -> PrdRecord:
     )
     raw_prd_text = prd_path.read_text(encoding="utf-8")
     checked_item_count, checklist_item_count = count_checklist_items(raw_prd_text)
+    raw_gate_text, raw_dependency_refs_tuple = parse_delivery_dependencies(raw_prd_text)
 
     evidence_dir = evidence_root / prd_path.stem
     verification_plan_path = find_named_evidence_file(evidence_dir, "verification-plan")
@@ -237,6 +400,8 @@ def collect_prd_record(prd_path: Path, evidence_root: Path) -> PrdRecord:
         has_evidence_report=evidence_report_path is not None,
         verifier_verdict=verifier_verdict_text,
         verifier_verdict_certain=is_verdict_certain,
+        dependency_gate=raw_gate_text,
+        dependency_refs=raw_dependency_refs_tuple,
     )
 
 
@@ -450,9 +615,12 @@ def format_activity_cell(
     新鲜锁 → 黄色 ``RUNNING <tool> <时长> @<branch>``（branch 缺失回退 worktree）；
     过期锁但归属 worktree 仍有近期改动 → 同样按 RUNNING 渲染（心跳只是兜底信号，
     活性佐证说明会话仍在执行）；过期锁且无活性佐证 → 红色 ``STALE <最后心跳>``；
-    无锁但存在分支名匹配的 worktree → 黄色 ``⚠ unlocked @<branch>``（互斥未生效
-    的漏洞必须摆到台面上，而不是静默显示 ``-``）；无锁但 PRD 文件或证据目录
-    近期有改动 → 暗色 ``⚡ active <n>m ago``；其余 ``-``。
+    无锁但存在分支名匹配的 worktree 时先看该 worktree 是否已把 PRD 归档：
+    已归档 → 绿色 ``✔ branch-archived @<branch> · <n>/<m> · awaiting merge``
+    （收尾已在分支完成，缺的只是合并回主线，不得再按互斥漏洞报警）；未归档 →
+    黄色 ``⚠ unlocked @<branch>``（互斥未生效的漏洞必须摆到台面上，而不是
+    静默显示 ``-``）；无锁但 PRD 文件或证据目录近期有改动 → 暗色
+    ``⚡ active <n>m ago``；其余 ``-``。
 
     Args:
         prd_record (PrdRecord): 单条 PRD 记录。
@@ -495,6 +663,21 @@ def format_activity_cell(
     )
     if matched_worktree is not None:
         branch_name_text, worktree_path = matched_worktree
+        worktree_archive_prd_path = worktree_path / "tasks" / "archive" / prd_record.prd_path.name
+        if worktree_archive_prd_path.is_file():
+            # worktree 内 tasks/archive 已有这条 PRD：收尾已在分支上完成，主线缺的
+            # 只是合并动作。此时继续亮 ⚠ unlocked 会误导人重新执行一个已完成的
+            # PRD；清单进度改用分支上归档副本的真实勾选。
+            branch_checked_count, branch_total_count = count_checklist_items(
+                worktree_archive_prd_path.read_text(encoding="utf-8")
+            )
+            raw_branch_progress_text = (
+                f" · {branch_checked_count}/{branch_total_count}" if branch_total_count > 0 else ""
+            )
+            return palette.green(
+                f"✔ branch-archived @{branch_name_text}{raw_branch_progress_text}"
+                " · awaiting merge"
+            )
         worktree_activity_minutes = prd_lock.detect_worktree_activity_minutes(
             worktree_path, RECENT_TOUCH_WINDOW_MINUTES
         )
@@ -544,14 +727,18 @@ def render_prd_table(
     palette: Palette,
     main_repo_root: Path,
     evidence_root: Path,
+    pending_dir: Path,
+    archive_dir: Path,
 ) -> None:
-    """输出逐条 PRD 的对齐表格（含 ACTIVITY 运行态列）。
+    """输出逐条 PRD 的对齐表格（含 DEPS 依赖列与 ACTIVITY 运行态列）。
 
     Args:
         prd_records_list (list[PrdRecord]): 待输出的 PRD 记录。
         palette (Palette): 颜色包装器。
         main_repo_root (Path): 主仓库根目录，用于查询执行锁。
         evidence_root (Path): ``tasks/evidence`` 目录，用于弱信号探测。
+        pending_dir (Path): ``tasks/pending`` 目录，用于依赖交付状态判定。
+        archive_dir (Path): ``tasks/archive`` 目录，用于依赖交付状态判定。
     """
     if not prd_records_list:
         print(palette.dim("  (无)"))
@@ -579,6 +766,7 @@ def render_prd_table(
             pad_to_width("PRD", slug_column_width),
             "CHECKLIST",
             "EVIDENCE",
+            "DEPS",
             "ACTIVITY",
         ]
     )
@@ -607,6 +795,7 @@ def render_prd_table(
                 pad_to_width(raw_slug_cell, slug_column_width),
                 pad_to_width(format_checklist_cell(prd_record, palette), 9),
                 format_evidence_cell(prd_record, palette),
+                format_deps_cell(prd_record, pending_dir, archive_dir, palette),
                 raw_activity_cell,
             ]
         )
@@ -681,6 +870,8 @@ def print_bucket_section(
     collapsed_months: bool,
     main_repo_root: Path,
     evidence_root: Path,
+    pending_dir: Path,
+    archive_dir: Path,
 ) -> None:
     """输出单个分组的小标题与内容。
 
@@ -692,6 +883,8 @@ def print_bucket_section(
         collapsed_months (bool): 为真时 archive 按月折叠，为假时逐条列出。
         main_repo_root (Path): 主仓库根目录，用于查询执行锁。
         evidence_root (Path): ``tasks/evidence`` 目录，用于弱信号探测。
+        pending_dir (Path): ``tasks/pending`` 目录，用于依赖交付状态判定。
+        archive_dir (Path): ``tasks/archive`` 目录，用于依赖交付状态判定。
     """
     print(
         palette.bold(f"{raw_title_text} ({len(bucket_records_list)})")
@@ -701,7 +894,14 @@ def print_bucket_section(
     if collapsed_months:
         render_archive_months(bucket_records_list, palette)
     else:
-        render_prd_table(bucket_records_list, palette, main_repo_root, evidence_root)
+        render_prd_table(
+            bucket_records_list,
+            palette,
+            main_repo_root,
+            evidence_root,
+            pending_dir,
+            archive_dir,
+        )
     print()
 
 
@@ -753,6 +953,8 @@ def main() -> int:
             collapsed_months=False,
             main_repo_root=main_repo_root_path,
             evidence_root=evidence_root_path,
+            pending_dir=pending_dir_path,
+            archive_dir=archive_dir_path,
         )
     if raw_scope_text in ("status", "archive", "all"):
         print_bucket_section(
@@ -763,6 +965,8 @@ def main() -> int:
             collapsed_months=raw_scope_text != "all",
             main_repo_root=main_repo_root_path,
             evidence_root=evidence_root_path,
+            pending_dir=pending_dir_path,
+            archive_dir=archive_dir_path,
         )
     return 0
 

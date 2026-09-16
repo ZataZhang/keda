@@ -901,9 +901,10 @@ ai subcommand arg1="" arg2="" arg3="" :
 
 # PRD 状态看板与执行锁。
 # 扫描 tasks/pending 与 tasks/archive，汇总每条 PRD 的优先级、类型、创建时间、
-# 验收清单勾选进度、证据包状态与运行态（ACTIVITY 列）。清单进度与 verifier 结论
-# 均为从文件内容推断的启发式结果，看板只用于快速定位，最终判断以 PRD 正文与
-# 证据文件原文为准。
+# 验收清单勾选进度、证据包状态、交付依赖（DEPS 列：hard gate 且上游 PRD 仍在
+# tasks/pending 时亮 ⛔ blocked by，已交付显示 ✔ deps ok）与运行态（ACTIVITY 列）。
+# 清单进度、依赖满足与 verifier 结论均为从文件内容推断的启发式结果，看板只用于
+# 快速定位，最终判断以 PRD 正文与证据文件原文为准。
 # 执行锁：开工前必须先领锁（just prd start），他人新鲜锁会被拒绝；锁的唯一事实
 # 源在主仓库 tasks/evidence/<prd-stem>/active.lock，各 worktree 共享同一视图。
 # Usage:
