@@ -37,7 +37,7 @@
 因此 canonical 路径是 `/app/roadmap`（权威依据：`frontend-public/components/layout/app-sidebar.tsx` 的 `href`；
 旁证：`workflows/console-served-static.no-auth.spec.ts` 的注释明确写「刷新 /app/roadmap、/app/stats 不 404」）。
 实测 dev server：`/app/roadmap` → 200，`/roadmap` → 404。
-仍写无前缀路径的位置共 **7 处文件、15 处 goto**：
+仍写无前缀路径的位置共 **7 处文件、16 处 goto**（逐项见下表；初版写 15 处，按表内各行相加应为 16）：
 
 | 文件 | 次数 | 路径 |
 |---|---|---|
@@ -97,7 +97,7 @@ roadmap 的「显示已归档」能打开，而且以后某条 PRD 写错了门�
 ### Measurable Objectives
 
 - `just e2e` 在**不设** `PLAYWRIGHT_HEALTH_URL` 的前提下，就绪探针在 30s 内通过。
-- 缺陷 B 列出的 7 个文件在 `just e2e` 中不再产生页面 404；`rg -n "goto\('/(?!app)" tests/playwright-e2e` 无命中。
+- 缺陷 B 列出的 7 个文件在 `just e2e` 中不再产生页面 404；`rg -n --pcre2 "goto\(['\"]/(?!(app/|'))" tests/playwright-e2e/tests tests/playwright-e2e/page-objects` 无命中（精确口径：排除合法的 `goto('/')` 与 `goto('/login')`）。
 - `GET /roadmap/prds?include_archived=true` 返回 200 且 `prds` 中含 `status == "archived"` 的条目。
 - 注入一条非法 `Gate type` 的临时 PRD 后，端点仍返回 200，只是该条不出现在列表里。
 
@@ -178,6 +178,9 @@ README 明确写着「不要改动上层共享基础设施，除非要向上游�
   不得把 try/except 上浮到 api 层去兜。
 - 公共 Python API 用 Google Style 中文 docstring（后端启用 Ruff `D100`–`D107`）。
 - 前端公共函数/类需中文 JSDoc/TSDoc。
+- **Frontend impact**：No frontend impact（本 PRD 只改 e2e 测试路径、共享 e2e 脚本与后端扫描器；
+  不改 `frontend-public/` 与 `frontend-admin/` 的任何应用代码——已由
+  `git diff --stat 80ef1bf^..80ef1bf -- frontend-public frontend-admin` 核对为空）。
 - `tests/playwright-e2e` 是独立 TypeScript/Node 包，用 `npm`，遵循该目录自己的 README。
 
 **相关 PRD 关系：**
@@ -276,7 +279,8 @@ README 明确写着「不要改动上层共享基础设施，除非要向上游�
 │       ├── smoke/pages.spec.ts（/dashboard ×1）
 │       ├── workflows/screenshot.spec.ts（/dashboard ×2）
 │       └── workflows/console-pages.no-auth.spec.ts（/dashboard ×2、/processes、/repositories、/stats）
-│       锚点：rg -n "goto\('/(?!app)" tests/playwright-e2e/ → 修复后应无命中
+│       锚点：rg -n --pcre2 "goto\(['\"]/(?!(app/|'))" tests/playwright-e2e/tests tests/playwright-e2e/page-objects
+│       → 修复后应无命中（修复后实测 goto('/app...) 共 20 处）
 ├── src/backend/core/use_cases/
 │   ├── roadmap_prd_scanner.py
 │   │   [修改]
@@ -313,7 +317,7 @@ README 明确写着「不要改动上层共享基础设施，除非要向上游�
 - 默认值分布：`rg -n "PLAYWRIGHT_HEALTH_URL" scripts/ tests/playwright-e2e/`
 - 后端健康检查唯一入口：`rg -n '"\(/api/v1\)\?/health' src/backend/`
 - 控制台路由权威来源：`rg -n 'href: "/app' frontend-public/components/layout/app-sidebar.tsx`
-- 残留无前缀路由：`rg -n "goto\('/(?!app)" tests/playwright-e2e/`（修复后应无命中）
+- 残留无前缀路由：`rg -n --pcre2 "goto\(['\"]/(?!(app/|'))" tests/playwright-e2e/tests tests/playwright-e2e/page-objects`（修复后应无命中）
 - 拦截点：`rg -n "raise ValueError" src/backend/core/use_cases/agent_runner_dependencies.py`
 - 模板同步清单：`just sync-template --list`
 - 若上述搜索暴露清单外文件，先更新本 PRD 的 Change Impact Tree 再动手。
@@ -443,43 +447,43 @@ No interactive prototype file changes in this PRD.
 
 ### Human-Confirmed
 
-- [ ] （决策一）rv-3 证据显示注入非法 `Gate type` 的临时 PRD 后端点仍 200，该条出现在 skipped 而非 prds，且日志/响应可查到原因
-- [ ] （决策一）负向对照**实跑记录**：去掉容错逻辑后，同一条脏数据让端点回到 500
-- [ ] （决策二）rv-4 证据显示本次改动的共享文件不在 `just sync-template --list` 的覆盖清单内（或已按选定选项显式处理）
+- [x] （决策一）rv-3 证据显示注入非法 `Gate type` 的临时 PRD 后端点仍 200，该条出现在 skipped 而非 prds，且日志/响应可查到原因（`rv-3.curl-steps.log` 第 3 步：reason 为 `Invalid 'Gate type' ... Expected one of: none, soft, hard.`；后端同记 WARNING）。独立 verifier 以真实 `tasks/archive/` 数据复跑：117 条 / 113 archived / skipped 空。
+- [x] （决策一）负向对照**实跑记录**：`git stash push -- roadmap_prd_scanner.py` 去掉容错后，同一条脏数据让端点回到 **500**；恢复后 200（`rv-3.curl-steps.log` 第 4 步）。
+- [x] （决策二）rv-4 证据显示本次改动的共享文件不在 `just sync-template --list` 的覆盖清单内：4 个文件在 `_is_upstream_owned` 登记项目所有权（`sync_template.sh` 改动随 `80ef1bf` 落地），`--list` 从 5 条降到 2 条（均为与本 PRD 无关的既有漂移）。**未闭环项已消解**：原"待人工 push 上游合入"的 `289ac16` 已在模板远端 `zata/main`（verifier 用 `--contains` 核实），实跑 `sync_template.sh --list` 现为 **0 候选**；`d953a49` 的真实模板同步未回滚本 PRD 的修复。
 
 ### Architecture Acceptance
 
-- [ ] 四层依赖方向未被破坏：容错逻辑落在 core 用例内，api 层没有新增 try/except 兜底（`rg -n "except" src/backend/api/routes/agent_runner_roadmap.py` 无新增）
-- [ ] 新增/修改的公共 Python API 有中文 Google Style docstring，Ruff `D100`–`D107` 通过
-- [ ] `parse_delivery_dependencies` 的合法值域仍为 `none/soft/hard`，未被放宽
+- [x] 四层依赖方向未被破坏：容错逻辑落在 core 用例内（`roadmap_prd_scanner.py:269-280` 捕获 `ValueError` 并收集 `skipped_prds`）；api 层无新增 try/except 兜底——`git diff 80ef1bf^..80ef1bf -- src/backend/api/routes/agent_runner_roadmap.py` 只有两处改动（接 `scan_result`、响应加 `skipped` 字段）。
+- [x] 新增/修改的公共 Python API 有中文 Google Style docstring，Ruff `D100`–`D107` 通过（`just lint --full` 的 ruff 步骤 Passed）。
+- [x] `parse_delivery_dependencies` 的合法值域仍为 `none/soft/hard`，未被放宽（`agent_runner_dependencies.py` 的值域检查未改；本 PRD 只改调用侧的容错）。
 
 ### Behavior Acceptance
 
-- [ ] `GET /roadmap/prds`（不带 include_archived）行为与响应结构与修复前一致（`include_archived=false` 路径未受影响）
-- [ ] `include_archived=true` 返回 200 且含 `status == "archived"` 条目
-- [ ] 归档 PRD `P1-FEAT-20260626-093939-agent-runner-session-persistence.md` 的 Gate type 已改为合法值，改动有说明（为何判为该值）
+- [x] `GET /roadmap/prds`（不带 include_archived）行为与响应结构与修复前一致：仍 200，8 条 pending，`skipped=[]`；响应结构仅新增授权的 `skipped` 字段（`rv-3.curl-steps.log` 第 1 步）。
+- [x] `include_archived=true` 返回 200 且含 `status == "archived"` 条目：修复后 118 条（archived 110）；独立 verifier 在最终代码树复跑得 117 条 / 113 archived（数量差来自两次运行之间新增的归档 PRD）。
+- [x] 归档 PRD `P1-FEAT-20260626-093939-agent-runner-session-persistence.md:70` 的 Gate type 已由非法的 `research-gate（…）` 改为 `hard`，并在同一行注明判据（作者原意"需先完成调研才能进入实现"→ 取更严一侧；判据见本 PRD §13 D-05）。
 
 ### Frontend / Test Acceptance
 
-- [ ] rv-1 通过：`just e2e` 在不设 `PLAYWRIGHT_HEALTH_URL` 时就绪探针 30s 内通过
-- [ ] rv-2 通过：7 个文件的控制台路由全部带 `/app/` 前缀，`rg -n "goto\('/(?!app)" tests/playwright-e2e/` 无命中
-- [ ] 缺陷 B 涉及的 spec 在 `just e2e` 中不再产生页面 404
-- [ ] frontend-admin 无任何改动（`git diff --stat frontend-admin/` 为空）
+- [x] rv-1 通过：`just e2e tests/smoke/pages.spec.ts` 在不设 `PLAYWRIGHT_HEALTH_URL` 时就绪探针数秒内通过（后端访问日志 `GET /api/v1/agent-runner/health 200`），`2 passed (6.3s)`；负向对照把默认值改回 `/health` 后复现 240s 型超时。
+- [x] rv-2 通过：7 个文件的控制台路由全部带 `/app/` 前缀（16 处 goto 全部修正），精确口径 `rg -n --pcre2 "goto\(['\"]/(?!(app/|'))" tests/playwright-e2e/tests tests/playwright-e2e/page-objects` 无命中；修复后 `goto('/app...)` 共 20 处。证据：`rv-2.rg-residual.log` 与真实栈 smoke/no-auth 运行日志；独立 verifier 复跑同结论。
+- [x] 缺陷 B 涉及的 spec 在 `just e2e` 中不再产生页面 404：`/app/dashboard/`、`/app/roadmap/`、`/app/ideas/` 均 200；`pages.spec`、`idea-inbox`、`roadmap-realistic`（4 passed）全过。基线对照：修复前同一套件连 global-setup 都过不去。
+- [x] frontend-admin 无任何改动（`git diff --stat 80ef1bf^..80ef1bf -- frontend-public frontend-admin` 为空）。
 
 ### Documentation Acceptance
 
-- [ ] `tests/playwright-e2e/README.md` 补充一条说明：控制台路由以 `app/` 段开头，写 spec 时不要漏
-- [ ] `docs/guides/agent-runner.md` 中若仍有无前缀路由写法，一并修正；`uv run mkdocs build --strict` 通过
+- [x] `tests/playwright-e2e/README.md` 补充了说明（第 43 行"控制台路由前缀"条目）：canonical 路径以 `app/` 段开头，写 spec 时不要漏 `app/`。
+- [x] `docs/guides/agent-runner.md` 中残留的无前缀路由写法已一并修正（管理终端四个页面表：`/dashboard`、`/processes`、`/stats`、`/repositories` → `/app/...`，2026-09-16 归档前补修）；`uv run mkdocs build --strict` 通过（仅 2 条既有 INFO 锚点提示，非本次引入）。
 
 ### Validation Acceptance
 
-- [ ] rv-1 / rv-2 / rv-3 / rv-4 全部通过
-- [ ] `just lint --full` 与 `just test` 全绿
-- [ ] 临时注入的脏数据 fixture 已删除（`rg -l "ZZ-RV-FIXTURE" tasks/` 无命中）
+- [x] rv-1 / rv-2 / rv-3 / rv-4 全部通过（证据报告逐条对应；独立 verifier 复跑一致）。
+- [x] `just lint --full` 全绿（含 ruff、PRD 验收清单、架构分层、max-file-lines）；全量 `uv run pytest tests/ -q -o addopts=""` 2091 passed（`just test` 因 testmon 标记命中会跳过，故直接跑 pytest 取证）。
+- [x] 临时注入的脏数据 fixture 已删除：`rg -l "ZZ-RV-FIXTURE" tasks/` 的命中**仅为**本 PRD 与证据文档中对该名称的文字记录（PRD §7 自己规定了该命名），无实际文件残留；删除后 `skipped=[]`。
 
 ### Delivery Readiness
 
-- [ ] 三项缺陷全部落地，无遗留"二期再补"项；若拆分交付，未交付项已从本 PRD 移出并另立 PRD
+- [x] 三项缺陷全部落地，无遗留"二期再补"项。实现期发现的两件事已处理/记录：(a) `support/api-client.ts` 登录路径 404 属同一根因链，已一并修复并在 §7 Change Impact Tree 登记；(b) `agent-runner-monitor` 的标题断言失效与本 PRD 三项缺陷无关，已移入 §12 Follow-ups 另立处理。
 
 ## 10. Functional Requirements
 
@@ -508,6 +512,10 @@ No interactive prototype file changes in this PRD.
 
 **Follow-ups（不阻塞本 PRD）**：
 
+- **`tests/playwright-e2e/tests/smoke/agent-runner-monitor.spec.ts` 的标题断言失效**（实现期发现，2026-09-14）：
+  该 spec 断言的 `Agent Runner Monitor` 标题在 `frontend-public` 中已不存在（`rg` 无命中），属旧版 UI 文案。
+  它不在缺陷 B 的 7 文件清单内，其 goto 路径已按清单修正（`/app/dashboard` 200），但断言目标 UI 已消失，
+  需要独立 PRD 决定是更新断言还是删除该 spec。
 - roadmap 页上展示被跳过的 PRD 条目数与原因（把"留痕"做到界面上）。
 - 给 PRD 元数据加一个 lint 命令，在写 PRD 时就能发现非法的 `Gate type`。
 - `tests/playwright-e2e` 的其他共享基础设施默认值（如 `docker` 模式的 8080/8081 端口）同样未经本项目校准，值得一起核。
@@ -522,6 +530,18 @@ No interactive prototype file changes in this PRD.
 | D-04 | 缺陷 B 是改测试还是改路由 | 改测试，加 `app/` 前缀 | 改前端路由去掉 `app/` 段 | `app/` 段是静态导出深层路由能被解析的前提，动它会波及生产 |
 | D-05 | 归档 PRD 的非法 Gate type 判为哪个合法值 | `hard` | `soft`；`none` | 原文 "需先完成调研，再决定是否进入实现" 中 "需先" 表达了硬性前置（实现开始前调研必须完成），按 §12 风险表 "拿不准时取更严的一侧" 判为 hard；该 PRD 无可物化的 depends-on（唯一引用 freshai #23 标注"非硬依赖"），hard 不会引入额外的机械阻塞 marker |
 
-### Final Reconciliation
+### Final Reconciliation（2026-09-16 归档前填写）
 
-- 待归档前填写。须按模板核对：Interpretation、Public behavior and contracts、Related PRD status、Requirements and risks，以及 `Feature Overview (功能一览)` 与 §10 的一致性。
+- **Interpretation**：§1 行为样例表 8 行全部落地并被证据覆盖；"我默默定了这些"的 6 条（改默认值而非靠调用方传 env、
+  只改路径不动断言语义、容错 + 修数据双管、三件事可同批或分三批、壳内界面载体等）与实现一致；
+  "我理解为不做"的 3 条（不重写套件、不扩值域、不全量洗数据）未被突破。
+- **Public behavior and contracts**：`GET /roadmap/prds` 契约仅新增 `skipped` 字段（PRD 授权的追加），
+  既有字段与 `include_archived=false` 行为不变；`PLAYWRIGHT_HEALTH_URL` 覆盖能力保留；`parse_delivery_dependencies`
+  值域仍为 `none/soft/hard`。
+- **Related PRD status**：上游 `P1-FEAT-20260913-204530-console-prd-content-reader` 已归档（本 PRD 的三项缺陷来自它的取证过程，
+  不反向阻塞）；`P1-FEAT-20260913-204531-tauri-desktop-shell` 与本 PRD 无依赖。本 PRD 归档后 pending 中不再有引用它的未解门禁。
+- **Requirements and risks**：FR-1~FR-4 全部达标；§12 风险表的 5 条缓解措施均落地，新增 1 条实现期发现的 follow-up
+  （monitor 标题断言），另立处理。
+- **`Feature Overview` 与 §10 一致性**：Feature Overview 的 4 条（FR-1~FR-4 的通俗投影）与 §10 逐条对应，无遗漏。
+- **证据保真度**：证据在最终代码树上由独立 verifier 复跑（rv-1~rv-4 全 PASS），含 rv-1 / rv-3 的负向对照与基线对照；
+  `docs/guides/agent-runner.md` 的无前缀路由为归档前补修（属 Documentation Acceptance 第 2 条的范围）。

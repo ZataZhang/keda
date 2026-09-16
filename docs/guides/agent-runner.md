@@ -2771,10 +2771,10 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 | 页面 | 路由 | 能力 |
 |---|---|---|
-| 总览 | `/dashboard` | 队列监控（原有）+ 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
-| 进程 | `/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
-| 统计 | `/stats` | 实时完成度（GitHub 口径）+ 历史趋势与最近运行记录（本地 SQLite 口径） |
-| 项目 | `/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
+| 总览 | `/app/dashboard` | 队列监控（原有）+ 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
+| 进程 | `/app/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
+| 统计 | `/app/stats` | 实时完成度（GitHub 口径）+ 历史趋势与最近运行记录（本地 SQLite 口径） |
+| 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
 
 ### 启动方式（`iar console`）
 

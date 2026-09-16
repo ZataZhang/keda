@@ -3,27 +3,20 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> **2026-07-31：本 PRD 现在卡着一次模板同步。** 上游 `zata-codes-template` 的
-> `hooks/shared/check_architecture.py` 已删除 `api/ → engines/` 的过渡期放宽
-> （`api` 的禁止列表加入了 `engines`，并新增 composition root 规则）。keda 当前树上
-> 有 **40 处** `[backend/api] → [engines]` 违规，直接同步会让每次 commit 硬失败，
-> 因此该文件被**暂缓同步**，keda 继续使用带放宽的本地版本。
+> **2026-09-16 交付完成，已归档。** 迁移随 `fea15af`（PR #141）合入 main：
+> `rg -n "from backend\.engines" src/backend/api/` **0 命中**；`hooks/shared/check_architecture.py`
+> 以严格态 `["infrastructure", "engines"]` 扫描 241 个文件 **0 违规**；`just lint --full` 全绿；
+> CLI `--help` 三连与迁移前逐字节一致。证据包见
+> `tasks/evidence/P1-REFACTOR-20260703-184226-api-engines-layer-migration/`。
 >
-> **解除条件**：本 PRD 完成、40 处违规清零后，执行
-> `cp <template>/hooks/shared/check_architecture.py hooks/shared/` 完成同步，
-> 并同步更新 `CLAUDE.md` 与 `docs/architecture/system-design.md` 中关于过渡期放宽的措辞。
-> 届时 keda 才算真正回到上游一致。
+> **模板同步的 hold back 已解除**：违规清零后 `hooks/shared/check_architecture.py` 不再需要被
+> `just sync-template` 排除（此前因 40→44 处违规被连续三次 hold back：ebb9f67、ae79ffc、7e228da）。
+> 收尾动作已完成：`d953a49` 同步上游版 `check_architecture.py`（api 禁止列表为
+> `["infrastructure", "engines", "composition"]`，比本 PRD FR-2 的下限更严），`CLAUDE.md` 与
+> `docs/architecture/system-design.md` 的措辞已核对为一致。
 >
-> 违规清单可用 `uv run --no-sync python hooks/shared/check_architecture.py` 随时重出。
-
-> **2026-09-16 基线重测（PRD 更新）**：违规已增至 **44 处 import、20 个文件、15 个 engines 模块**
-> （历史基线：PRD 撰写时 26，2026-07-31 注记 40，持续漂移）。对比初版模块清单：
-> `init_flow` 已不被 api 直连（消失）；新增 `factories`（包）、`remote_template_skills`、
-> `output_protocols`、`container_auth`、`container_ops` 五个被直连模块。§1、§5 能力归类表、
-> §7.2 影响树、§9、§10、§12、§13 的计数与清单已同步更新，验收 oracle（`rg` 归零）不受影响。
-> 另：`cli_typer_container.py`、`cli_parsed_context.py`、`api/__init__.py` 等新代码已在
-> docstring 中按严格规则声明不直连 engines，违规集中在既有 cli / routes 模块。
-> 截至本次更新，`hooks/shared/check_architecture.py` 仍为本地放宽版（第 3 次 hold back 模板同步）。
+> 历史基线（仅供追溯，非现状）：撰写时 26 处 → 2026-07-31 注记 40 处 → 2026-09-16 基线重测
+> 44 处（20 个文件、15 个 engines 模块）→ **迁移后 0 处**。
 
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -39,7 +32,7 @@
 
 ### Problem Statement
 
-仓库的权威架构文档规定后端四层依赖方向为 `api/ → core/ → engines/ → infrastructure/`，且 `api/` 只能调用 `core/` 暴露的用例和 DTO（`docs/architecture/system-design.md`、`docs/ai-standards/architecture.md`）。但实际上 `api/` 层（CLI 与路由）有 44 处 `import` 直接打到 `engines/agent_runner/`（2026-09-16 实测，20 个文件、15 个模块，且随新增 CLI 命令持续增长），绕过了 `core/` 编排层。最近一次 hooks 整合（`hooks/` → `hooks/shared/`）把架构检查器从"宽松版"（`api` 仅禁 `infrastructure`）切到"严格版"（`api` 禁 `infrastructure` + `engines`），这些直连立刻全部变成违规（当时为 26 处，2026-09-16 已增至 44 处），挡住了 `just lint --full` 与提交。为了让 lint 通过，检查器被临时放宽回宽松版——但这让"文档写的严格规则"与"实际执行的宽松规则"持续漂移，架构债越欠越深。现状的问题不是"检查器太严"，而是"代码没按文档要求的层次走"。
+仓库的权威架构文档规定后端四层依赖方向为 `api/ → core/ → engines/ → infrastructure/`，且 `api/` 只能调用 `core/` 暴露的用例和 DTO（`docs/architecture/system-design.md`、`docs/ai-standards/architecture.md`）。但迁移前 `api/` 层（CLI 与路由）有 44 处 `import` 直接打到 `engines/agent_runner/`（2026-09-16 基线重测，20 个文件、15 个模块，且随新增 CLI 命令持续增长），绕过了 `core/` 编排层。最近一次 hooks 整合（`hooks/` → `hooks/shared/`）把架构检查器从"宽松版"（`api` 仅禁 `infrastructure`）切到"严格版"（`api` 禁 `infrastructure` + `engines`），这些直连立刻全部变成违规（当时为 26 处，2026-09-16 已增至 44 处），挡住了 `just lint --full` 与提交。为了让 lint 通过，检查器被临时放宽回宽松版——但这让"文档写的严格规则"与"实际执行的宽松规则"持续漂移，架构债越欠越深。现状的问题不是"检查器太严"，而是"代码没按文档要求的层次走"。
 
 ### Interpretation (解读回显)
 
@@ -138,7 +131,7 @@
 - Existing PRD relationship: 检查 `tasks/pending/` 与 `tasks/archive/` 后无重复或依赖——本 PRD 是对当前 hooks 整合（`24b05b8c` 起的 `hooks/` → `hooks/shared/` 重构）引入的架构检查收紧的善后；与 `P1-FEAT-20260703-105*` 系列（autopilot / roadmap / prd-regrounding）正交。
 - Redundancy risks: 薄 facade 用例可能与 `engines/agent_runner/` 原函数形成"透传壳"——需逐个判断是该走薄 facade（满足层次边界即可），还是该把实现上移到 `core/`（当原 engines 函数本质是 domain 编排时）。见 §6 与 D-02。
 
-**当前 44 处违规的 engines 能力归类**（2026-09-16 按 `rg -n "from backend\.engines" src/backend/api/` 实测重排，实现起点，非穷尽）：
+**迁移前 44 处违规的 engines 能力归类**（2026-09-16 按 `rg -n "from backend\.engines" src/backend/api/` 实测重排；**现在这些 import 已全部改指 `core/`**）：
 
 | engines 模块 | 引用次数 | 性质 | api/ 引用方 |
 |---|---|---|---|
@@ -370,13 +363,13 @@ Failure triage:
 
 1. **高风险 oracle 结果**（置顶）：
    - rv-1：`rg -n "from backend\.engines" src/backend/api/` 返回 **0 行**（exit 1，无匹配）；`uv run python hooks/shared/check_architecture.py` 以 `FORBIDDEN_IMPORTS["api"]=["infrastructure","engines"]` 严格态通过（241 文件无违规）；上游版（含 composition root 规则）同步后复跑同样全绿。
-   - rv-2：15 个 engines 能力全部有 core 编排入口或迁入 api——新建 8 个 facade（`agent_runner_factory` / `repository_local` / `takeover` / `init_assets` / `failure_resolver` / `output_protocols` / `worktree_cli` / `loop_state`）、并入既有 `agent_runner_container`（container_auth/ops）、迁入 `api/agent_runner_views/`（live_terminal / runner_live_view / live_panels）；`rg -n "from backend\.engines" src/backend/core/use_cases/` 返回 0 行（无静态直连）。
+   - rv-2：15 个 engines 能力全部有 core 编排入口或迁入 api——新建 8 个 facade（`agent_runner_factory` / `repository_local` / `takeover` / `init_assets` / `failure_resolver` / `output_protocols` / `worktree_cli` / `loop_state`）、并入既有 `agent_runner_container`（container_auth/ops）、迁入 `api/agent_runner_views/`（live_terminal / runner_live_view / live_panels）；`rg -n "from backend\.engines" src/backend/core/use_cases/` 返回 0 行（无静态直连）。AST 全量扫描 `src/backend/core/**` 的 `import_module("backend.engines...")` 共 **12 个绑定点 / 12 个模块**（单行正则口径会漏掉跨行书写，已作废）。
    - rv-3：`iar --help` / `iar run --help` / `iar daemon --help` 的 stdout/stderr/退出码与迁移前基线（`/tmp/iar-baseline/`）**逐字节一致**（diff 为空，合并后主树复测 `--help` 仍一致）。
    - rv-5：`uv run pytest tests/ -k 'daemon or loop or concurrent' -o addopts=''` → **146 passed**。
 2. **风险地图对账 Predicted → Reconciled**：发现两处偏差，均按预案处理——(a) 检查器与守门测试禁止 core 静态 import engines，facade 机制改为 importlib 运行时解析（记 D-05）；(b) `live_panels.py` 是被迁视图的隐藏共用依赖（§7.3 已预案），一并迁入 api。`failure_resolver` 识别为上移候选但按最小风险保留薄 facade，记为遗留项。
 3. **对抗自检**：rv-1 negative_control——临时向 `cli.py` 加回 `from backend.engines.agent_runner.factory import get_agent_runner_settings`，架构检查立即报 `[backend/api] → [engines]` 违规 exit 1；该行删除后复查 rg=0、检查全绿。rv-3 negative_control——改动 facade 输出文本后 CLI diff 非空，恢复后复跑逐字节一致。
 4. **对锁定契约的 diff**：rv-4 `uv run pytest tests/ -k 'agent_runner' -o addopts=''` → **906 passed**，路由签名 / 响应 schema 未动（diff 仅 import 行）；CLI `--help` diff 为空（见 rv-3）。
-5. **低风险门禁结果（折叠）**：`just lint --full` 全绿；`just test all`（`--no-testmon` 强制全量）→ **2084 passed**；两次 commit（`b7e3a67`、`d953a49`）pre-commit 全 hooks 通过。
+5. **低风险门禁结果（折叠）**：`just lint --full` 全绿；全量 `uv run pytest tests/ -q -o addopts=""` → **2091 passed**（最终代码树 `d953a49` 实测，独立 verifier 复跑同数；实现期 worktree 内 `just test all` 为 2084，差值来自两次运行之间新增用例）；两次 commit（`b7e3a67`、`d953a49`）pre-commit 全 hooks 通过。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -384,7 +377,7 @@ Failure triage:
 
 - [x] core facade 边界与"薄 facade vs. 深度迁移"取舍已逐能力确认（15 个 engines 能力的落点：8 个新薄 facade + 1 个并入既有用例 + 2 个呈现模块迁入 api；`failure_resolver` 识别为上移候选但按最小风险保留薄 facade，记为遗留项；2026-09-16 终点人审确认）
 - [x] CLI / HTTP 路由行为零变化的判定基准与 rv-3/rv-4 证据已确认（diff 为空 + 906 passed，证据包第 1/4 项；2026-09-16 终点人审确认）
-- [x] 迁移不触碰 daemon 并发调用顺序已确认（rv-5，146 passed；迁移只改 import 落点，diff 无调用顺序变化）
+- [x] 迁移不触碰 daemon 并发调用顺序已确认（rv-5，146 passed；迁移只改 import 落点，diff 无调用顺序变化）。**判据强度说明**：该结论由「测试全绿 + import 落点 diff 审阅」共同支撑，不是运行时时序断言——若将来要更强的保证，需要专门的并发时序测试
 
 ### Architecture Acceptance
 
@@ -428,7 +421,7 @@ Failure triage:
 ## 10. Functional Requirements
 
 - FR-1: `src/backend/api/` 下所有 `.py` 文件不得出现 `from backend.engines` 直接 import。
-- FR-2: `hooks/shared/check_architecture.py` 的 `FORBIDDEN_IMPORTS["api"]` 必须为 `["infrastructure", "engines"]`，且 `just lint --full` 以此配置通过。
+- FR-2: `hooks/shared/check_architecture.py` 的 `FORBIDDEN_IMPORTS["api"]` 必须**至少包含** `infrastructure` 与 `engines`，且 `just lint --full` 以此配置通过。（现状：上游版为 `["infrastructure", "engines", "composition"]`，比本条下限更严。）
 - FR-3: 原 `api/` 直连的 15 个 `engines/agent_runner/` 能力必须在 `core/use_cases/` 有编排入口（新增 facade 或复用既有用例），或在呈现类情况下迁入 `api/`。
 - FR-4: `live_terminal` 与 `runner_live_view` 迁出 `engines/agent_runner/`，落入 `api/` 层。
 - FR-5: `CLAUDE.md` 的 `api/` 依赖规则表述与 `docs/ai-standards/architecture.md`、`docs/architecture/system-design.md` 一致。
@@ -449,6 +442,7 @@ Failure triage:
 
 - 风险：薄 facade 沦为无意义透传壳。缓解：逐能力判断——本质是 domain 编排的上移到 `core/`，仅适配 / 工厂类保留薄 facade；以 rv-2 守。
 - 风险：呈现模块迁入 `api/` 后被 `engines/` 内部其他模块反向引用。缓解：§7.3 `rg` 搜 `engines.agent_runner.(live_terminal|runner_live_view)` 确认无残留；若有则先解耦再迁。
+- 风险（遗留，不阻塞归档）：**架构检查的 AST 门禁挡不住 `importlib.import_module` 运行时绑定**——facade 正是靠它消费 engines（D-05），因此「core 是否越层」目前没有静态守门，只有 `tests/test_agent_runner_container.py` 等守门测试与 code review。建议后续 PRD 补一层扫描（把 `import_module("backend.engines...")` 也纳入 `check_architecture.py` 的判定）。
 - 风险：迁移面大（44 处 import、15 模块），单 PR 评审负担重。缓解：按 engines 能力分批提交（factory（含 5 处纯 `logger` import，最先批）→ repository_local → takeover/init/remote_template_skills → container/output_protocols/factories → 其余 → 呈现迁移 → 收紧检查器），每批独立可过 lint/test。
 
 ## 13. Decision Log
@@ -461,3 +455,4 @@ Failure triage:
 | D-04 | 迁移节奏 | 按 engines 能力分批提交 | 一次性大 PR | 44 处 / 15 模块分批降低评审与回归风险，每批可独立过门禁 |
 | D-05 | facade 如何"调 engines"（实施期发现，Reconciled） | 模块加载时经 `importlib.import_module` 解析绑定（遵循 `core/agent/memory/_composition.py` 仓内先例） | 静态 `from backend.engines...`（被检查器 `FORBIDDEN_IMPORTS["core"]` 与 `tests/test_agent_runner_container.py` 守门测试共同禁止）/ 放开 core→engines 静态 import | §7.1 原写"facade 经端口或直接调 engines"，但静态直连违反现行门禁；importlib 运行时解析是唯一静态合规路径，且 `from facade import X` 绑定时机、import 副作用、`patch()` 语义与迁移前完全一致 |
 | D-06 | `live_panels.py` 归属（实施期发现，Reconciled） | 随两个视图一并迁入 `api/agent_runner_views/` | 留在 engines 由 api 反向 import / 拆成 core 共享模块 | 它是被迁两个视图的 engines 内唯一共用依赖（§7.3 预案的"先解耦再迁"情形），零 backend 依赖、纯 rich 渲染，属呈现层 |
+| D-07 | 归档时机 | 实现合入后补采证据再归档（证据在最终代码树 `d953a49` 上重新采集） | 合入即归档 | 归档代表交付完成；证据包含 rv-1 / rv-3 的负向对照，且独立于 PR #141 的实现期自验 |
