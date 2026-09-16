@@ -5,8 +5,11 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``iar run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 2）。
-- 任何写入失败都不允许向上抛出阻断 runner 主流程，降级为日志警告。
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 4：v4 新增
+  ``monitoring_snapshots`` 与 ``monitor_settings`` 两张表）。
+- 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
+  runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
+  与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
 """
 
 from __future__ import annotations
@@ -81,7 +84,7 @@ class DailyRunTrendEntry:
     average_duration_seconds: float | None
 
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 _CREATE_RUN_RECORDS = """
 CREATE TABLE IF NOT EXISTS run_records (
@@ -152,9 +155,30 @@ CREATE TABLE IF NOT EXISTS roadmap_settings (
 )
 """
 
+_CREATE_MONITORING_SNAPSHOTS = """
+CREATE TABLE IF NOT EXISTS monitoring_snapshots (
+    repo_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    scanned_at TEXT NOT NULL
+)
+"""
+
+_CREATE_MONITOR_SETTINGS = """
+CREATE TABLE IF NOT EXISTS monitor_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    sync_enabled INTEGER NOT NULL,
+    sync_interval_seconds INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
 
 class SqliteConsoleStore:
-    """``IRunHistoryStore`` 与 ``IRoadmapStore`` 端口的 SQLite 实现（鸭子类型）。"""
+    """``IRunHistoryStore`` / ``IRoadmapStore`` / ``IMonitorSnapshotStore`` 的 SQLite 实现。
+
+    三个端口都以鸭子类型实现：本类不 import core，仅保证方法签名与 core
+    侧同名 dataclass 结构一致。
+    """
 
     def __init__(self, db_path: str | Path) -> None:
         """初始化存储并确保 schema 就绪。
@@ -187,6 +211,9 @@ class SqliteConsoleStore:
             connection.execute(_CREATE_ROADMAP_SETTINGS)
         if current_version < 3:
             connection.execute(_CREATE_ATTEMPT_RECORDS)
+        if current_version < 4:
+            connection.execute(_CREATE_MONITORING_SNAPSHOTS)
+            connection.execute(_CREATE_MONITOR_SETTINGS)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 
@@ -508,6 +535,70 @@ class SqliteConsoleStore:
                 connection.execute("DELETE FROM roadmap_queue WHERE repo_id = ?", (repo_id,))
             connection.commit()
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Monitor snapshots / settings (IMonitorSnapshotStore duck-type implementation)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def upsert_monitor_snapshot(self, entry: MonitorSnapshotEntry) -> None:
+        """写入或覆盖一个仓库的监控快照；失败时抛出异常。"""
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO monitoring_snapshots (repo_id, payload_json, scanned_at) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(repo_id) DO UPDATE SET "
+                "payload_json=excluded.payload_json, scanned_at=excluded.scanned_at",
+                (entry.repo_id, entry.payload_json, entry.scanned_at),
+            )
+            connection.commit()
+
+    def list_monitor_snapshots(self) -> list[MonitorSnapshotEntry]:
+        """列出全部仓库的监控快照；失败时抛出异常。"""
+        with self._connect() as connection:
+            snapshot_rows = connection.execute(
+                "SELECT repo_id, payload_json, scanned_at FROM monitoring_snapshots"
+            ).fetchall()
+        return [
+            MonitorSnapshotEntry(
+                repo_id=snapshot_row["repo_id"],
+                payload_json=snapshot_row["payload_json"],
+                scanned_at=snapshot_row["scanned_at"],
+            )
+            for snapshot_row in snapshot_rows
+        ]
+
+    def get_monitor_settings(self) -> MonitorSettingsEntry | None:
+        """读取全局监控同步设置；无记录时返回 ``None``（默认值由 core 注入）。"""
+        with self._connect() as connection:
+            settings_row = connection.execute(
+                "SELECT sync_enabled, sync_interval_seconds, updated_at "
+                "FROM monitor_settings WHERE id = 1"
+            ).fetchone()
+        if settings_row is None:
+            return None
+        return MonitorSettingsEntry(
+            sync_enabled=bool(settings_row["sync_enabled"]),
+            sync_interval_seconds=int(settings_row["sync_interval_seconds"]),
+            updated_at=settings_row["updated_at"],
+        )
+
+    def save_monitor_settings(self, settings: MonitorSettingsEntry) -> None:
+        """保存或更新全局监控同步设置；失败时抛出异常。"""
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO monitor_settings (id, sync_enabled, sync_interval_seconds, updated_at) "
+                "VALUES (1, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "sync_enabled=excluded.sync_enabled, "
+                "sync_interval_seconds=excluded.sync_interval_seconds, "
+                "updated_at=excluded.updated_at",
+                (
+                    int(settings.sync_enabled),
+                    settings.sync_interval_seconds,
+                    settings.updated_at,
+                ),
+            )
+            connection.commit()
+
 
 @dataclass(frozen=True)
 class RoadmapQueueEntry:
@@ -530,6 +621,24 @@ class RoadmapSettingsEntry:
     repo_id: str
     max_parallel: int
     default_view: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class MonitorSnapshotEntry:
+    """一个仓库的监控快照（与 core 侧同构，供 SQLite 实现使用）。"""
+
+    repo_id: str
+    payload_json: str
+    scanned_at: str
+
+
+@dataclass(frozen=True)
+class MonitorSettingsEntry:
+    """全局监控同步设置（与 core 侧同构，供 SQLite 实现使用）。"""
+
+    sync_enabled: bool
+    sync_interval_seconds: int
     updated_at: str
 
 

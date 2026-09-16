@@ -2805,10 +2805,44 @@ Dashboard 路由 `/app/dashboard`（即 `frontend-public/app/(app)/app/dashboard
 
 监控面板复用两个只读 API：
 
-- `GET /api/v1/agent-runner/overview` — 按仓库返回健康、队列统计、Issue 摘要、最近事件和异常计数。
+- `GET /api/v1/agent-runner/overview` — 按仓库返回健康、队列统计、Issue 摘要、最近事件和异常计数。这是**实时扫描**口径（现场调 `gh`），供显式请求使用。
 - `GET /api/v1/agent-runner/issues/{issue_number}` — 单个 Issue 的 label、PR context、worktree 状态、event timeline、anomalies 和建议 CLI 命令。
 
-两个端点都只读，不暴露任何修改 GitHub label、comment、PR 或 worktree 的能力。
+Dashboard 首屏与轮询读的是第三个端点，见下节：
+
+- `GET /api/v1/agent-runner/overview/snapshots` — 读取本地持久化快照，不触发任何 GitHub 调用。
+
+这些端点都只读，不暴露任何修改 GitHub label、comment、PR 或 worktree 的能力。
+
+### 本地快照与后台定时同步
+
+Dashboard 的数据源是**本地快照**而不是现场扫描：打开页面先读 `GET /overview/snapshots`，
+数据来自 `~/.iar/console.db` 的 `monitoring_snapshots` 表（每个仓库一行，存整份
+per-repo overview JSON 与 `scanned_at`），因此即使 `gh` 慢或断网也能秒开并继续
+显示最近一次同步的结果。页面每 15 秒轻量轮询一次该端点，后台同步一写回界面就自动跟上。
+
+快照由一个后台同步循环维护：
+
+- 循环由 `iar console` 的 FastAPI lifespan 启动与回收（进程内唯一），导入路由模块不会产生任何线程。
+- 每个周期对当前启用仓库做一次全量扫描（仍走 `GET /overview` 的同一套构建逻辑），把**已经构建好的** payload 直接写回快照，不为写库重复扫描。
+- 同一仓库同一时刻只允许一次扫描：周期同步与手动刷新共用一个按仓库协调器，不同仓库可并行。
+- 全新环境没有快照时，由后端幂等触发一次首扫，前端只显示"尚未同步/正在同步"并轮询结果，不会重复创建扫描任务。
+- 同步或写库失败时保留该仓库的旧快照、其余仓库照常更新，失败进入 job/批次状态并记日志，不伪装成刷新成功。
+- 已从 registry 删除或禁用的仓库即使仍有历史快照行，也不会重新出现在页面上。
+
+页面上可以看到"上次同步"时间（取各仓库快照 `scanned_at` 的最大值），点击"同步设置"
+可内联展开设置面板：开关自动同步、在 1/5/15/30/60 分钟之间调整间隔。设置保存在同一个
+本地库的 `monitor_settings` 表里（运行时覆盖值），改完立即生效并在进程重启后保持；
+没有保存过时回落到配置项 `[agent_runner.console].monitor_sync_interval_seconds`。
+对应 API：
+
+```text
+GET    /api/v1/agent-runner/console/monitor/settings
+PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_interval_seconds}
+```
+
+`sync_interval_seconds` 合法区间为 60–3600 秒，两个字段都必填。保存成功后后端立即唤醒
+调度循环，按新间隔重算下一次运行时间；关闭自动同步后不再有任何后台扫描，手动刷新仍可用。
 
 ### 异常检测
 
@@ -2838,7 +2872,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 - 不暴露任何修改 label、comment、PR、worktree 的 API。
 - 不执行任意 shell 命令、不能从 UI 改 label 或触发 agent。
 - 不替代 `iar run` / `iar review` / `iar labels sync` 等恢复命令。
-- 不新增数据库、后台任务队列或 WebSocket；GitHub label/comment/PR 和本地 worktree 仍是事实来源。
+- Dashboard 展示的是本地快照（见「本地快照与后台定时同步」），不再每次进入页面现场扫描；但除快照表与同步设置表外不新增数据库表，也不引入 WebSocket 或独立调度服务；GitHub label/comment/PR 和本地 worktree 仍是事实来源。
 - 不实现自动 rebase 冲突解决；冲突的 Issue 会带 `agent/blocked` 状态出现在监控面板，由人类决定下一步。
 
 写操作统一收敛在管理终端 API（白名单动作 + 审计），见下一节。
@@ -2969,9 +3003,13 @@ process_registry_path = "~/.iar/processes.json"  # 托管进程 pidfile
 process_log_dir = "logs/agent-runner/processes"  # 进程日志目录（相对 keda 根）
 runner_command = ["uv", "run", "iar"]            # 托管进程启动命令前缀（缺省运行时解析，见上文）
 stop_timeout_seconds = 30                        # SIGTERM → SIGKILL 等待秒数
+monitor_sync_interval_seconds = 300              # dashboard 后台自动同步的静态默认间隔（秒，60–3600）
 host = "127.0.0.1"                               # 监听地址（固定本机，不开放配置其它网卡）
 port = 8600                                      # iar console 缺省端口（被占用时自动顺延）
 ```
+
+`monitor_sync_interval_seconds` 只是**从来没有保存过界面设置**时的回落值；用户在
+dashboard 上改过的间隔存在 `~/.iar/console.db` 的 `monitor_settings` 表里，优先于配置。
 
 ## deliberate 多 Agent 合议
 

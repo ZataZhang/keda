@@ -300,6 +300,9 @@ class AgentRunnerConsoleSettings(BaseModel):
     runner_command: list[str] = Field(default_factory=_default_runner_command)
     stop_timeout_seconds: int = 30
     port: int = _CONSOLE_DEFAULT_PORT
+    # dashboard 后台自动同步的静态默认间隔（秒）。界面上改的是 DB 里的运行时
+    # 覆盖值（monitor_settings 表）；只有在从来没有保存过设置时才回落到这里。
+    monitor_sync_interval_seconds: int = 300
 
 
 class AgentRunnerDaemonSettings(BaseModel):

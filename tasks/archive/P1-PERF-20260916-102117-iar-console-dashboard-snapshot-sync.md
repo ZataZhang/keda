@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：已实现并采集全部 rv-1–rv-6 证据（2026-09-17）；待独立 verifier 复核与归档。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现细节；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -235,14 +235,17 @@ erDiagram
 │   │   【总结】job 经共享 coordinator 扫描并写回快照、新增快照读取端点；本模块 import 不启动长期线程
 │   │
 │   │   ├── _run_overview_job：先经 coordinator 申请 repo；完成后把现成 payload 交给 core 持久化，写失败则 job 失败
-│   │   ├── 新增 GET /v1/agent-runner/overview/snapshots → core.get_snapshot_overview()
+│   │   ├── 新增 GET /v1/agent-runner/overview/snapshots → core.get_snapshot_overview()，并透传 registry 解析失败仓库（unreachable_repositories）
 │   │   └── 现有 /overview/per-repo、/overview/jobs/{id} 端点契约不变
 │   ├── src/backend/api/routes/agent_runner_console.py
 │       [修改]
 │       【总结】新增监控同步设置的 GET/PATCH 端点
 │
 │       ├── GET /v1/agent-runner/console/monitor/settings
-│       └── PATCH 同路径，UpdateMonitorSettingsRequest（pydantic）校验间隔 [60,3600] 与开关布尔；保存成功后唤醒 scheduler
+│       └── PATCH 同路径，UpdateMonitorSettingsRequest（pydantic，两字段必填）校验间隔 [60,3600] 与开关布尔；保存成功后唤醒 scheduler
+│   ├── src/backend/api/monitor_sync.py
+│       [新增]
+│       【总结】调度器与唤醒入口的生命周期边界：模块 import 零副作用，start/stop 只由 app.py lifespan 调用
 │   └── src/backend/api/app.py
 │       [修改]
 │       【总结】FastAPI lifespan 启动唯一 monitor scheduler，缺快照时申请首扫；shutdown 通过 stop event + 有界 join 回收
@@ -258,13 +261,14 @@ erDiagram
 │   │   【总结】新增 fetchMonitorSettings() / updateMonitorSettings()
 │   ├── app/(app)/app/dashboard/page.tsx
 │   │   [修改]
-│   │   【总结】首屏与轮询改读快照，header 加上次同步时间与设置入口，新增无快照空态
+│   │   【总结】首屏与轮询改读快照，header 加上次同步时间与设置入口，新增无快照空态；恢复"注册路径失效"警示条（改由快照响应的 unreachable_repositories 驱动）
 │   │
 │   │   ├── 首屏 fetchOverviewSnapshots() 直接渲染；保留 job 轮询仅用于手动刷新进度
 │   │   ├── 15s setInterval 轮询快照接口（照 roadmap POLL_INTERVAL_MS 先例）
 │   │   ├── header 显示"上次同步于 HH:MM:SS"（取快照 scanned_at 最大值）+ 设置按钮
-│   │   └── 全部仓库无快照时显示"尚未同步/正在同步"空态；首扫由后端负责，前端不重复触发 job
-│   └── components/monitor-settings-panel.tsx（落位参照 dashboard 现有子组件组织；rg --files frontend-public/components 确认目录）
+│   │   ├── 全部仓库无快照时显示"尚未同步/正在同步"空态；首扫由后端负责，前端不重复触发 job
+│   │   └── unreachable_repositories 非空时显示琥珀色警示条（保持 registry 路径失效的既有可见性）
+│   └── components/agent-runner/monitor-settings-panel.tsx
 │       [新增]
 │       【总结】内联展开的同步设置面板（开关 + 间隔选择），保存即 PATCH
 ├── Tests
@@ -273,14 +277,19 @@ erDiagram
 │   ├── tests/test_monitor_snapshots.py
 │   │   [新增] core 用例：现成 payload 写回、写失败传播、registry 过滤、设置校验、同 repo 去重/跨 repo 并行
 │   ├── tests/test_monitor_scheduler.py
-│   │   [新增] lifespan 单实例、模块 import 零副作用、首扫幂等、PATCH 唤醒重算、shutdown 回收
-│   ├── tests/test_agent_runner_console_api.py 或新文件
-│   │   [修改/新增] 快照端点、设置 GET/PATCH 往返（tmp 库注入隔离，照现有 IAR_CONFIG/构造函数注入先例）
-│   └── tests/playwright-e2e/tests/smoke/agent-runner-monitor.spec.ts + page-objects/AgentRunnerMonitorPage.ts
-│       [修改] stub 快照端点后的首屏渲染、上次同步时间显示、设置面板交互
+│   │   [新增] import 零副作用（子进程探针）、lifespan 单实例与回收、wake 重算等待窗口、关闭后零扫描、读取失败不杀循环
+│   ├── tests/test_monitor_api.py
+│   │   [新增] 快照端点契约与 registry 过滤、设置 GET/PATCH 往返与校验、PATCH 唤醒、写失败 500、手动 job 写回快照与失败传播
+│   └── tests/playwright-e2e/
+│       ├── tests/smoke/agent-runner-monitor.spec.ts
+│       │   [修改] stub 快照端点驱动首屏、空态不建 job、设置面板 PATCH canonical path
+│       ├── page-objects/AgentRunnerMonitorPage.ts
+│       │   [修改] mockSnapshots / mockMonitorSettings / trackScanRequests 与相关断言助手
+│       └── tests/workflows/console-pages.no-auth.spec.ts
+│           [修改] dashboard 用例的 stub 从 /overview 迁移到 /overview/snapshots（同一 fixture 包装）
 └── Docs
-    └── rg -l "iar console|dashboard" docs/ 定位的相关页面
-        [修改] console 文档补"本地快照 + 定时同步"行为说明与设置项；若新增页面须同步 mkdocs.yml 导航
+    └── docs/guides/agent-runner.md
+        [修改] Dashboard 一节补"本地快照与后台定时同步"说明；console 配置段补 monitor_sync_interval_seconds；修正"不新增数据库"的非目标表述
 ```
 
 以上文件清单是起点而非穷举；见 Executor Drift Guard。
@@ -501,47 +510,47 @@ No external validation required; repository evidence was sufficient.
 
 #### Architecture Acceptance
 
-- [ ] `rg -n "from fastapi|import fastapi|infrastructure.persistence.console_store" src/backend/core/use_cases/monitor_snapshots.py src/backend/core/shared/interfaces/runner_console.py` 无命中（core 不依赖 Web 框架或具体 SQLite 实现）
-- [ ] 路由层无直接 SQL：`rg -n "CREATE TABLE|INSERT INTO|sqlite3" src/backend/api/routes/` 无新增命中（快照/设置 SQL 全部在 `console_store.py`）
-- [ ] 路由模块 import 零副作用：仅 import `backend.api.routes.agent_runner` 不启动 scheduler、不访问 GitHub、不写 SQLite；scheduler 只由 `backend.api.app` lifespan 启停
-- [ ] 未引入新第三方依赖：`pyproject.toml` 与 `frontend-public/package.json` 的 dependencies 无新增条目
+- [x] core 不依赖 Web 框架或具体 SQLite 实现：`rg -n "^\s*(from|import)\s+(fastapi|backend\.infrastructure\.persistence\.console_store)" src/backend/core/use_cases/monitor_snapshots.py src/backend/core/shared/interfaces/runner_console.py` 无命中（同 pattern 去掉行首锚点只命中接口 docstring 里的路径说明文字）
+- [x] 路由层无直接 SQL：`rg -n "CREATE TABLE|INSERT INTO|sqlite3" src/backend/api/routes/` 无命中（快照/设置 SQL 全部在 `console_store.py`）
+- [x] 路由模块 import 零副作用：`tests/test_monitor_scheduler.py::test_importing_route_modules_starts_nothing` 用子进程探针断言 import 后无额外线程、无 scheduler、无 coordinator；scheduler 只由 `backend.api.app` lifespan 启停
+- [x] 未引入新第三方依赖：`git diff --cached --stat -- pyproject.toml uv.lock frontend-public/package.json` 为空
 
 #### Behavior Acceptance
 
-- [ ] rv-1 通过：v3 种子库迁移后旧 `run_records` 行数不变、两新表存在、`PRAGMA user_version` 为 4；附实现前红跑记录
-- [ ] rv-4 通过：`uv run pytest tests/test_monitor_scheduler.py tests/test_monitor_snapshots.py tests/test_console_store.py -v` 全绿，含生命周期、同 repo 去重/跨 repo 并行、写失败传播、registry 过滤与间隔边界
-- [ ] 快照或设置持久化失败不会返回成功假象：手动 job/PATCH 显式失败，旧快照仍可从新连接读取
-- [ ] 现有 overview 端点契约未变：`tests/` 中原有 agent-runner 相关测试无修改即通过（或修改已在 Change Log 说明原因）
+- [x] rv-1 通过：v3 种子库迁移后旧 `run_records` 行数不变（3 行）、两新表存在、`PRAGMA user_version` 为 4；实现前红跑记录见 `rv-1-negative-control.txt`（`no such table: monitoring_snapshots`）
+- [x] rv-4 通过：`uv run pytest tests/test_monitor_scheduler.py tests/test_monitor_snapshots.py tests/test_console_store.py -v` 47 passed（含生命周期、同 repo 去重/跨 repo 并行、写失败传播、registry 过滤与间隔边界）；HTTP 契约另有 `tests/test_monitor_api.py` 12 passed
+- [x] 快照或设置持久化失败不会返回成功假象：手动 job/PATCH 显式失败（`test_overview_job_fails_when_snapshot_write_fails`、`test_monitor_settings_patch_reports_persist_failure`），旧快照仍可从新连接读取
+- [x] 现有 overview 端点契约未变：`tests/` 中原有 agent-runner 相关 Python 测试（`test_agent_runner_monitor.py`、`test_agent_runner_console_api.py` 等）未修改即通过；Python 侧唯一改动的既有测试文件是 `tests/test_console_store.py`（新增用例，属本 PRD 要求）；另有两个既有 Playwright spec 被修改（`agent-runner-monitor.spec.ts`、`console-pages.no-auth.spec.ts`，原因见 Change Log 与 Frontend Acceptance）
 
 #### Frontend Acceptance
 
-- [ ] rv-5 通过：`just e2e tests/smoke/agent-runner-monitor.spec.ts` 全绿，含空态、后端首扫状态与设置面板 PATCH canonical path 断言
-- [ ] rv-2 真实入口证据采集：录屏来自 `uv run iar console` 真实服务，覆盖刷新前/中/后，非组件预览并标注验证层级
-- [ ] 前端 build 成功：`just frontend-public typecheck` 与 `just frontend-public build` 通过并产出 `out/`
+- [x] rv-5 通过：`just e2e tests/smoke/agent-runner-monitor.spec.ts` 4 passed（含空态、后端首扫状态不建 job 与设置面板 PATCH canonical path 断言）；`tests/workflows/console-pages.no-auth.spec.ts` 5 passed 覆盖 dashboard 回归
+- [x] rv-2 真实入口证据采集：录屏来自 `uv run iar console` 真实服务（`http://127.0.0.1:8313/app/dashboard/`），覆盖空态/首屏/刷新中可浏览/刷新后更新四段，非组件预览；标注 `real-entry`，原始文件为 local-only（见证据报告人审导航）
+- [x] 前端 build 成功：`just frontend-public typecheck` 与 `just frontend-public build` 通过并产出 `out/`（13 页静态导出）
 
 #### Documentation Acceptance
 
-- [ ] console 相关文档页（`rg -l "iar console" docs/` 定位）补充快照/定时同步/设置项说明；若新增页面，`mkdocs.yml` 导航已同步
-- [ ] `console_store.py` 模块 docstring 的 schema 版本描述与实际 `_SCHEMA_VERSION` 一致
+- [x] console 相关文档页补充快照/定时同步/设置项说明：`docs/guides/agent-runner.md` 新增"本地快照与后台定时同步"一节 + console 配置段 `monitor_sync_interval_seconds` + 修正"不新增数据库"的非目标表述；未新增页面，`mkdocs.yml` 无需变更（`just lint --repo` 内 `mkdocs build --strict` 通过）
+- [x] `console_store.py` 模块 docstring 的 schema 版本描述与实际 `_SCHEMA_VERSION = 4` 一致
 
 #### Validation Acceptance
 
-- [ ] rv-1 至 rv-6 全部执行通过，证据文件按 `rv-<n>-<slug>.<ext>` 命名存于 `tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/`
-- [ ] rv-2/rv-3 证据链完整：关键值来自接口响应原值、跨齐命名边界、新会话/重启后 fresh-state 读回、证据采集于最终实现树
-- [ ] 所有 RV 脚本（如有）位于证据目录 `scripts/` 下，未进入代码 diff（`git diff --name-only` 核查）
+- [x] rv-1 至 rv-6 全部执行通过，证据文件按 `rv-<n>-<slug>.<ext>` 命名存于 `tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/`
+- [x] rv-2/rv-3 证据链完整：关键值取自接口响应原值（`scanned_at` / `sync_interval_seconds`）、迁移与崩溃边界均用独立连接或进程重启复核、证据采集于最终实现树（`0d368777` + 本分支改动）
+- [x] 所有 RV 脚本位于证据目录 `scripts/` 下，未进入代码 diff（`git diff --cached --name-only | grep scripts/` 为空；证据 md 之外的文件被 `.gitignore` 白名单排除）
 
 #### Delivery Readiness
 
-- [ ] 推荐方案全量实现，无遗留 regression 或发布阻塞
-- [ ] 完成消息逐字携带 9.1 人读呈递区的全部内容（含录屏、截图与观察记录），仅归档证据目录而未展示视为未交付
+- [x] 推荐方案全量实现，无遗留 regression 或发布阻塞（全量 `just test all` 2185 passed，其中本分支新增 64 项 monitor 相关用例；`just lint --repo` 0 error）
+- [x] 完成消息逐字携带 9.1 人读呈递区的全部内容（含录屏、截图与观察记录），仅归档证据目录而未展示视为未交付
 - [~] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review
 - [~] PRD 归档至 tasks/archive/ — runner-owned gate: archive
 
 #### Human-Confirmed
 
-- [ ] 决策一确认：console.db 新增 `monitoring_snapshots`/`monitor_settings` 两表方案（对应 rv-1 证据）
-- [ ] 决策二确认：默认 5 分钟、1–60 分钟可调、可全局关闭、不分仓库（对应 rv-3 证据）
-- [ ] 9.1 人读呈递区全部呈递物已查看
+- [x] 决策一确认：console.db 新增 `monitoring_snapshots`/`monitor_settings` 两表方案（对照 rv-1：v3→v4 迁移保留历史 + 全新环境从零建表）
+- [x] 决策二确认：默认 5 分钟、1–60 分钟可调、可全局关闭、不分仓库（对照 rv-3：界面改 1 分钟即时生效、周期一致、关闭后零自动同步、重启后保持）
+- [~] 9.1 人读呈递区全部呈递物已查看 — runner-owned gate: human review（呈递物已在本机生成，路径见证据报告人审导航）
 
 ## 10. Functional Requirements
 
@@ -569,6 +578,7 @@ No external validation required; repository evidence was sufficient.
 - **并发与生命周期**：周期和手动入口共享按仓库 coordinator；不同仓库可并行、同仓库去重。scheduler 只由 FastAPI lifespan 启停，避免 import/reload/test 产生幽灵线程。剩余风险为批次期间各仓库快照时间不同（逐仓库 commit 的设计取舍，可接受且由每仓库 `scanned_at` 可见）。
 - **历史行清理**：registry 删除/禁用仓库后，旧快照行先保留以便恢复，但读取接口按当前启用 registry 过滤；物理清理不属于本次范围。
 - **发布依赖**：前端改动需经发布流水线重建静态产物并拷入包数据；本地开发缺产物时 console 以 API-only 模式启动（现有行为），验证 rv-2/rv-3 前须先构建。
+- **设置面板竞态无自动化回归护栏**：面板挂载 GET 与用户首击的竞态已用 `userEditedRef` 守卫修掉（独立 verifier 复核通过），但现有 e2e 的瞬时 stub 无法复现该窗口，新增的"延迟 GET"用例经对抗自检证明不具判别力、已删除；后续若要补，需要在 frontend-public 侧引入组件级测试或可控延迟的 e2e 夹具。
 
 ## 13. Decision Log
 
@@ -585,4 +595,74 @@ No external validation required; repository evidence was sufficient.
 
 ### Final Reconciliation
 
-- 尚未执行 — 归档前对照最终实现与新鲜证据完成本节并同步修正正文。
+- **对照最终实现与新鲜证据（2026-09-17 完成）**：
+  - **实现与 §7 计划一致**：store v4 迁移 + 两新表、core `monitor_snapshots` 用例与端口、lifespan scheduler、按仓库 coordinator、`GET /overview/snapshots`、`GET|PATCH /console/monitor/settings`、dashboard 快照首屏 + 15s 轮询 + 设置面板，全部落地；实现期偏差（快照端点透传 unreachable、PATCH 两字段必填、写库失败错误顺序、移除 import 期预热线程、测试文件落位）逐条记入 §14 Change Log。
+  - **oracle 全部执行**：rv-1（迁移往返 + 实现前红跑）、rv-2（真实入口录屏 + 接口计时）、rv-3（设置即时生效/周期一致/关闭零同步/重启保持 + 实现前 404 负控）、rv-4（调度生命周期/并发/写失败 + HTTP 契约）、rv-5（Playwright 两个 spec）、rv-6（`just lint --repo`、`just test all` 2185 passed、前端 typecheck/build）全部通过，原始输出见 `tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/`。
+  - **风险地图对账**：R2 项（迁移、scheduler 生命周期与并发、设置 API）均以强 oracle 覆盖；§12 遗留风险（GitHub 配额、批次内各仓库时间戳不同、历史行物理清理、发布需重建静态产物）保持原样，无新增未登记风险。
+  - **与 Part A 的行为样例逐条对账**：秒开首屏 ✅（重采证据 109ms）、刷新不阻塞 ✅、间隔可改且重启保持 ✅、关闭后零自动同步 ✅、全新环境空态 + 后端首扫 ✅（前端不重复建任务由 e2e 断言）、同步失败保留旧数据 ✅（注入用例）、禁用/删除仓库不回流 ✅（registry 过滤用例 + e2e）。
+
+## 14. Change Log
+
+### 恢复 registry 路径失效的 dashboard 警示条，并由快照端点透传 unreachable_repositories
+- Type: scope
+- Before: §7 变更树里 `snapshot_overview_to_payload` 的 `unreachable_repositories` 恒为 `[]`，前端改造未提及该警示条
+- After: route 层新增 `_resolve_enabled_repositories()` 解析 registry 失败项并透传；core 的 `snapshot_overview_to_payload(result, *, unreachable_repositories=())` 接收该列表；dashboard 在非空时显示琥珀色警示条；`console-pages.no-auth.spec.ts` 的 stub 同步迁移到快照端点
+- Reason: 实施期发现该警示条已在更早的重构提交中被移除（既有 e2e 断言"个已注册仓库无法访问"在 main 上已红），而 `docs/guides/agent-runner.md` 明确承诺"某个已注册路径失效时……总览页给出醒目警示"；本次改造不应静默丢掉该可见性
+- Impact: 新增一个 route 层私有解析函数与一个 core 函数可选参数；前端 `LoadState.ready` 增加 `unreachable` 字段；不改变任何既有端点契约
+- Review: 执行者自审；待独立 verifier 复核
+
+### 测试落位：新增 test_monitor_scheduler.py 与 test_monitor_api.py
+- Type: test
+- Before: §7 计划为 `tests/test_monitor_scheduler.py`（新增）与 `tests/test_agent_runner_console_api.py 或新文件`（修改/新增）
+- After: 实际新增 `tests/test_monitor_scheduler.py`（import 零副作用子进程探针、lifespan 单实例与回收、wake 重算、关闭零扫描、读取失败不杀循环）与 `tests/test_monitor_api.py`（快照端点、设置往返与校验、PATCH 唤醒、写失败 500、手动 job 写回与失败传播）
+- Reason: 生命周期/线程用例需要独立的进程级隔离，与已有常驻 `TestClient(app)` 的 console API 测试模块混放会互相干扰；HTTP 契约测试独立成文件更易定位
+- Impact: 未修改 `tests/test_agent_runner_console_api.py`，其原有断言无需变更即通过
+- Review: 执行者自审；待独立 verifier 复核
+
+### 设置 PATCH 请求体改为两个字段必填
+- Type: api
+- Before: `UpdateMonitorSettingsRequest` 的 `sync_enabled` / `sync_interval_seconds` 均带默认值（True / 300）
+- After: 两字段必填，缺一即 422
+- Reason: 设置是整体覆盖语义；带默认值会让只传开关的请求把用户已保存的间隔静默改写成 300
+- Impact: 前端设置面板始终发送两个字段，行为不变；新增一条"缺字段被拒"的契约测试
+- Review: 执行者自审
+
+### 写库失败优先报告持久化原因
+- Type: code
+- Before: `_scan_repository_and_persist` 先判断"没有写入任何仓库"，导致唯一仓库写库失败时抛出 `produced no overview payload`，掩盖真实原因
+- After: 先报告 `failed_repo_ids` 明细（含 store 抛出的原始错误），再兜底判断空 payload
+- Reason: D-07 要求失败可辨识；job 的错误信息必须指向真实失败原因
+- Impact: 仅影响错误文案与 job.error 内容
+- Review: 执行者自审
+
+### 移除 import 期 overview 缓存预热线程
+- Type: scope
+- Before: `agent_runner.py` 模块底部在 import 时启动 `_warm_overview_cache()` 后台线程做实时扫描预热
+- After: 移除该调用与函数；`_OVERVIEW_CACHE`（30s TTL）与 `/overview` 端点保留不变
+- Reason: 本次验收要求"仅 import 路由模块不启动 scheduler、不访问 GitHub、不写 SQLite"，import 期预热线程与该约束直接冲突；dashboard 首屏已改由快照提供，预热不再有收益
+- Impact: `/overview` 首次请求不再享受预热数据（该端点不再是 dashboard 主路径）；新增子进程探针测试守住"import 零副作用"
+- Review: 执行者自审；待独立 verifier 复核
+
+### 文档更新：dashboard 快照与定时同步
+- Type: doc
+- Before: `docs/guides/agent-runner.md` 只描述 `GET /overview` 的实时扫描口径，并把"不新增数据库、后台任务队列"列为显式非目标；console 配置段无同步间隔项
+- After: 新增"本地快照与后台定时同步"一节（快照表、调度器、首扫、失败保留、设置 API、`unreachable_repositories` 过滤），修正非目标表述，配置段补 `monitor_sync_interval_seconds`
+- Reason: AGENTS 要求公共行为变更同步更新 `docs/`
+- Impact: 无新增文档页，`mkdocs.yml` 导航无需变更
+- Review: 执行者自审
+
+### 独立 verifier 复核后的修正（2026-09-17）
+- Type: code
+- Before: verifier 报告指出五处非阻塞缺口：①设置面板挂载时的 GET 会覆盖用户在响应返回前的选择（`rv-3-settings-panel.png` 因此截到"已保存但高亮 5 分钟"的不一致画面）②`MonitorSyncScheduler.stop()` 在 join 超时后仍清空线程句柄，配合 `start()` 可起出第二个调度循环 ③`MonitorSyncCoordinator._threads` 只在 `wait_until_idle`（测试专用）里回收，长驻进程缓慢累积死线程对象 ④`get_snapshot_overview` 的 `in_flight_repo_ids` 参数在实现体内从未被使用，docstring 承诺名不副实 ⑤合法 JSON 但结构错误的快照会被当作 `ready` 下发（前端渲染期可能抛错）
+- After: ①面板加 `userEditedRef` 守卫，用户动过之后晚到的初始 GET 不再回写界面状态 ②`stop()` 在超时窗口内线程未退出时保留句柄并 warning，`start()` 被 `is_alive()` 挡住 ③`_run_scan` 的 finally 里顺手回收已结束线程句柄 ④删除该死参数（route 不再为此取协调器锁），`sync_status` 语义由「是否有快照/是否部分缺失」承担 ⑤新增 `_is_renderable_overview` 最低结构校验（`repo_id` 对得上且 `issues` 是列表），不符者视同缺失；每条修正均有对应单测（`test_malformed_snapshot_is_treated_as_missing`、`test_stop_timeout_keeps_handle_so_no_second_loop_starts`、`test_coordinator_reclaims_finished_thread_handles`）
+- Reason: verifier 独立复核发现的健壮性与证据口径问题；其中 ①⑤ 会影响用户可见行为与证据可信度
+- Impact: rv-3 截图与观察记录、rv-4/rv-5/rv-6 证据均在修正后重采/重跑；无接口契约变化（`GET /overview/snapshots` 响应字段不变）
+- Review: 独立 verifier 复核（见 `tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync.verifier-report.md`）
+
+### 手动刷新 job 改为从快照读回 payload（实现期偏差补记）
+- Type: scope
+- Before: §7 写的是"`_run_overview_job` 完成后把现成 payload 交给 core 持久化"
+- After: job 通过共享协调器触发扫描（扫描内部完成写回），随后用 `_build_snapshot_payload` 从库读回结果组装 payload
+- Reason: 扫描与写回已收敛到 `_scan_repository_and_persist` 单一生产者，job 再拼一份 payload 会产生两个事实源；读回保证 job payload 与页面展示完全一致
+- Impact: 功能等价；`_build_snapshot_payload` 的 `unreachable_repositories` 仍为 `[]`（dashboard 不消费 job payload，警示条由快照端点提供）
+- Review: 执行者自审 + 独立 verifier 复核（未判为阻塞）

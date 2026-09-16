@@ -7,6 +7,7 @@
 import { get } from "./client";
 import type {
   IssueMonitoringSnapshot,
+  MonitorSnapshotsResponse,
   MonitoringOverview,
 } from "./types";
 
@@ -106,4 +107,15 @@ export async function fetchIssueDetail(
  */
 export async function fetchOverviewJobsByRepo(): Promise<OverviewJobsByRepo> {
   return get<OverviewJobsByRepo>(`${BASE_PATH}/overview/per-repo`);
+}
+
+/**
+ * Read the locally persisted monitoring snapshots.
+ *
+ * This is the dashboard's first-paint source: it only reads the local SQLite
+ * snapshots, so it stays fast even when `gh` is slow or unreachable. Repositories
+ * that are no longer enabled are filtered out by the backend.
+ */
+export async function fetchOverviewSnapshots(): Promise<MonitorSnapshotsResponse> {
+  return get<MonitorSnapshotsResponse>(`${BASE_PATH}/overview/snapshots`);
 }

@@ -85,8 +85,23 @@ const MONITORING_OVERVIEW = {
   ],
 }
 
-const COMPLETION_STATS = {
-  repositories: [
+/**
+ * Dashboard 首屏现在读本地快照接口；这里把同一份 fixture 包装成快照响应，
+ * 让"队列 + 完成度摘要 + 无法访问警示"三条断言仍走真实页面渲染路径。
+ */
+const MONITORING_SNAPSHOTS = {
+  sync_status: 'ready',
+  scanned_at: MONITORING_OVERVIEW.scanned_at,
+  missing_repo_ids: [],
+  unreachable_repositories: MONITORING_OVERVIEW.unreachable_repositories,
+  repositories: MONITORING_OVERVIEW.repositories.map((repository) => ({
+    repo_id: repository.repo_id,
+    scanned_at: repository.scanned_at,
+    overview: repository,
+  })),
+}
+
+const COMPLETION_STATS = {  repositories: [
     {
       repo_id: 'keda-main',
       display_name: 'Keda Main',
@@ -152,6 +167,9 @@ async function mockConsoleApi(page: Page): Promise<void> {
   )
   await page.route('**/api/v1/agent-runner/overview', (route) =>
     route.fulfill({ json: MONITORING_OVERVIEW }),
+  )
+  await page.route('**/api/v1/agent-runner/overview/snapshots', (route) =>
+    route.fulfill({ json: MONITORING_SNAPSHOTS }),
   )
   await page.route('**/api/v1/agent-runner/console/stats/overview', (route) =>
     route.fulfill({ json: COMPLETION_STATS }),

@@ -9,14 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IssueDetail } from "@/components/agent-runner/issue-detail";
+import { MonitorSettingsPanel } from "@/components/agent-runner/monitor-settings-panel";
 import { RepositoryOverview } from "@/components/agent-runner/repository-overview";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   fetchIssueDetail,
-  fetchMonitoringOverview,
   fetchOverviewJobsByRepo,
+  fetchOverviewSnapshots,
   pollOverviewJob,
-  type OverviewJobSnapshot,
 } from "@/lib/api/agentRunner";
 import {
   executeIssueAction,
@@ -24,13 +24,24 @@ import {
 } from "@/lib/api/console";
 import type {
   IssueMonitoringSnapshot,
-  MonitoringOverview,
+  MonitorSnapshotsResponse,
   RepositoryCompletionStats,
+  RepositoryMonitoringOverview,
+  UnreachableRepository,
 } from "@/lib/api/types";
+
+/** 轻量轮询本地快照的间隔：纯本地读，后台同步完成后界面自动跟上。 */
+const POLL_INTERVAL_MS = 15_000;
 
 type LoadState =
   | { kind: "loading" }
-  | { kind: "ready"; repos: RepoSlot[]; scannedAt: string }
+  | {
+      kind: "ready";
+      repos: RepoSlot[];
+      scannedAt: string;
+      syncStatus: MonitorSnapshotsResponse["sync_status"];
+      unreachable: UnreachableRepository[];
+    }
   | { kind: "error"; message: string };
 
 type RefreshState =
@@ -48,10 +59,9 @@ const STUCK_THRESHOLD_SECONDS = 120;
 
 /** Per-repository slot — one card on the dashboard. */
 type RepoSlot =
-  | { kind: "pending" }
-  | { kind: "loading"; jobId: string; startedAt: number }
-  | { kind: "ready"; repository: import("@/lib/api/types").RepositoryMonitoringOverview }
-  | { kind: "error"; message: string };
+  /** 当前启用但本地还没有快照：显示"尚未同步"占位卡，等待后端首扫。 */
+  | { kind: "missing"; repoId: string }
+  | { kind: "ready"; repository: RepositoryMonitoringOverview };
 
 /** Concurrency-limited async helper: at most `limit` tasks run concurrently. */
 async function runWithLimit<T>(
@@ -70,10 +80,10 @@ async function runWithLimit<T>(
   await Promise.all(launchers);
 }
 
-/** Repository id for a slot — only ready slots expose a real id. */
+/** Repository id for a slot — missing slots carry the id without a payload. */
 function getRepoIdFromSlot(slot: RepoSlot): string {
   if (slot.kind === "ready") return slot.repository.repo_id;
-  return "";
+  return slot.repoId;
 }
 
 export default function DashboardPage() {
@@ -90,79 +100,66 @@ export default function DashboardPage() {
   const [actionPending, setActionPending] = useState(false);
   const [refreshState, setRefreshState] = useState<RefreshState>({ kind: "idle" });
   const [repoRefresh, setRepoRefresh] = useState<Record<string, RepoRefreshState>>({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const refreshAbortRef = useRef<AbortController | null>(null);
 
-  const loadOverview = useCallback(async (signal?: AbortSignal) => {
-    setState({ kind: "loading" });
+  /**
+   * 读本地快照并渲染。首屏与 15s 轮询都走这里——快照接口只查本地 SQLite,
+   * 不扫描 GitHub,所以轮询成本约等于零。
+   */
+  const loadSnapshots = useCallback(async (signal?: AbortSignal) => {
     try {
-      // 每个仓库一个独立 job:前端立刻拿到所有 job_id,每个仓库按完成顺序
-      // 渲染到对应卡片槽位。最坏情况某个仓库 gh 不通也不会拖累其他。
-      const handle = await fetchOverviewJobsByRepo();
+      const response = await fetchOverviewSnapshots();
       if (signal?.aborted) return;
-      const repoIds = Object.keys(handle.jobs_by_repo);
-      const jobsByRepo = handle.jobs_by_repo;
-
-      // 初始化所有 slot 为 loading 状态,按仓库顺序(配 config.toml 排序)。
-      const initialSlots: RepoSlot[] = repoIds.map((repoId) => ({
-        kind: "loading",
-        jobId: jobsByRepo[repoId],
-        startedAt: Date.now(),
-      }));
-      setState({ kind: "ready", repos: initialSlots, scannedAt: "" });
-
-      // 限并发 3,每个仓库独立轮询并替换 slot。
-      await runWithLimit(repoIds, 3, async (repoId) => {
-        if (signal?.aborted) return;
-        const snapshot = await pollOverviewJob(jobsByRepo[repoId], {
-          intervalMs: 5000,
-          signal,
-        });
-        if (signal?.aborted) return;
-        const newSlot: RepoSlot =
-          snapshot.status === "completed" && snapshot.payload
-            ? {
-                kind: "ready",
-                repository:
-                  snapshot.payload.repositories.find(
-                    (r) => r.repo_id === repoId,
-                  ) ?? snapshot.payload.repositories[0],
-              }
-            : {
-                kind: "error",
-                message: snapshot.error ?? `${repoId} 加载失败`,
-              };
-        setState((prev) => {
-          if (prev.kind !== "ready") return prev;
-          return {
-            ...prev,
-            repos: prev.repos.map((slot, i) =>
-              repoIds[i] === repoId ? newSlot : slot,
-            ),
-            scannedAt: snapshot.payload?.scanned_at ?? prev.scannedAt,
-          };
-        });
-        // 第一个仓库完成时,自动选中第一个 issue 显示右侧详情。
-        if (
-          newSlot.kind === "ready" &&
-          selectedIssueNumber === null
-        ) {
-          const firstIssue = newSlot.repository.issues.find(Boolean);
-          if (firstIssue) {
-            setSelectedIssueNumber(firstIssue.number);
-            setSelectedIssue(firstIssue);
-          }
-        }
+      const slots: RepoSlot[] = [
+        ...response.repositories.map((entry) => ({
+          kind: "ready" as const,
+          repository: entry.overview,
+        })),
+        ...response.missing_repo_ids.map((repoId) => ({
+          kind: "missing" as const,
+          repoId,
+        })),
+      ];
+      setState({
+        kind: "ready",
+        repos: slots,
+        scannedAt: response.scanned_at ?? "",
+        syncStatus: response.sync_status,
+        unreachable: response.unreachable_repositories ?? [],
       });
     } catch (error: unknown) {
       if (signal?.aborted) return;
-      setState({
-        kind: "error",
-        message:
-          error instanceof Error ? error.message : "无法加载监控概览。",
-      });
+      setState((prev) =>
+        // 已有数据时不因一次轮询失败把整页打成错误态。
+        prev.kind === "ready"
+          ? prev
+          : {
+              kind: "error",
+              message:
+                error instanceof Error ? error.message : "无法加载监控快照。",
+            },
+      );
     }
-  }, [selectedIssueNumber]);
+  }, []);
+
+  /** 首屏进入后自动选中第一个 issue，避免右侧详情空着。 */
+  useEffect(() => {
+    if (selectedIssueNumber !== null) return;
+    if (state.kind !== "ready") return;
+    const firstIssue = state.repos
+      .filter(
+        (slot): slot is Extract<RepoSlot, { kind: "ready" }> =>
+          slot.kind === "ready",
+      )
+      .flatMap((slot) => slot.repository.issues)
+      .find(Boolean);
+    if (firstIssue) {
+      setSelectedIssueNumber(firstIssue.number);
+      setSelectedIssue(firstIssue);
+    }
+  }, [state, selectedIssueNumber]);
 
   const loadCompletionStats = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -176,10 +173,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadOverview(controller.signal);
+    void loadSnapshots(controller.signal);
     void loadCompletionStats(controller.signal);
-    return () => controller.abort();
-  }, [loadOverview, loadCompletionStats]);
+    // 轻量轮询本地快照：后台同步一写回，界面最多 15 秒内自动跟上。
+    const timer = window.setInterval(() => {
+      void loadSnapshots(controller.signal);
+    }, POLL_INTERVAL_MS);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [loadSnapshots, loadCompletionStats]);
 
   // 详情加载逻辑（点 issue 时拉一次）。
   useEffect(() => {
@@ -217,7 +221,7 @@ export default function DashboardPage() {
     };
   }, [selectedIssueNumber, state]);
 
-  /** 全量异步刷新：每仓库独立 job,渐进替换现有 slot。 */
+  /** 全量刷新：起后台 job 重扫并写回快照，期间保留旧数据供继续浏览。 */
   const handleRefreshAll = useCallback(async () => {
     if (refreshState.kind === "syncing") return;
     if (refreshAbortRef.current) refreshAbortRef.current.abort();
@@ -236,21 +240,8 @@ export default function DashboardPage() {
         scope: "all",
       });
 
-      // 把每个仓库对应 slot 标记为 loading(保留顺序),然后并发执行刷新。
-      setState((prev) => {
-        if (prev.kind !== "ready") return prev;
-        const newRepos = prev.repos.map((slot, i) => {
-          const repoId = repoIds[i];
-          if (!repoId) return slot;
-          return {
-            kind: "loading" as const,
-            jobId: handle.jobs_by_repo[repoId],
-            startedAt: Date.now(),
-          };
-        });
-        return { ...prev, repos: newRepos };
-      });
-
+      // 不清空 slot：刷新期间页面继续显示上一份快照，不阻塞浏览。
+      const failures: string[] = [];
       await runWithLimit(repoIds, 3, async (repoId) => {
         if (controller.signal.aborted) return;
         const snapshot = await pollOverviewJob(
@@ -258,36 +249,21 @@ export default function DashboardPage() {
           { intervalMs: 5000, signal: controller.signal },
         );
         if (controller.signal.aborted) return;
-        const newSlot: RepoSlot =
-          snapshot.status === "completed" && snapshot.payload
-            ? {
-                kind: "ready",
-                repository:
-                  snapshot.payload.repositories.find(
-                    (r) => r.repo_id === repoId,
-                  ) ?? snapshot.payload.repositories[0],
-              }
-            : {
-                kind: "error",
-                message: snapshot.error ?? `${repoId} 刷新失败`,
-              };
-        setState((prev) => {
-          if (prev.kind !== "ready") return prev;
-          const newRepos = prev.repos.map((slot) => {
-            if (getRepoIdFromSlot(slot) !== repoId) return slot;
-            return newSlot;
-          });
-          return {
-            ...prev,
-            repos: newRepos,
-            scannedAt: snapshot.payload?.scanned_at ?? prev.scannedAt,
-          };
-        });
+        if (snapshot.status !== "completed") {
+          failures.push(`${repoId}: ${snapshot.error ?? "扫描失败"}`);
+        }
       });
+      if (controller.signal.aborted) return;
 
+      // 刷新完成后重新读一次快照，让界面立即反映新数据。
+      await loadSnapshots(controller.signal);
       void loadCompletionStats(controller.signal);
-      const seconds = Math.round((Date.now() - startedAt) / 1000);
-      toast.success(`监控数据已刷新（${seconds}s）`);
+      if (failures.length > 0) {
+        toast.error(`部分仓库刷新失败：${failures.join("；")}`);
+      } else {
+        const seconds = Math.round((Date.now() - startedAt) / 1000);
+        toast.success(`监控数据已刷新（${seconds}s）`);
+      }
       setRefreshState({ kind: "idle" });
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
@@ -295,7 +271,7 @@ export default function DashboardPage() {
       toast.error(message);
       setRefreshState({ kind: "idle" });
     }
-  }, [refreshState, loadCompletionStats]);
+  }, [refreshState, loadCompletionStats, loadSnapshots]);
 
   useEffect(() => {
     return () => {
@@ -316,88 +292,24 @@ export default function DashboardPage() {
       [repoId]: { kind: "loading", startedAt },
     }));
     try {
-      // 单仓库也走 async:先开 job,再轮询,进度反馈更稳。
-      const handle = await fetchMonitoringOverview({
-        repoIds: [repoId],
-        asyncRun: true,
+      // 单仓库也走 async job：后端扫描并写回快照，前端保留旧卡片不闪空。
+      const handle = await fetchOverviewJobsByRepo();
+      if (controller.signal.aborted) return;
+      const jobId = handle.jobs_by_repo[repoId];
+      if (!jobId) {
+        throw new Error(`${repoId} 不在当前启用仓库列表中`);
+      }
+      const snapshot = await pollOverviewJob(jobId, {
+        intervalMs: 5000,
+        signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      let jobId: string;
-      let payloadDirect: MonitoringOverview | null = null;
-      if ("async" in handle && handle.async) {
-        jobId = handle.job_id;
-      } else {
-        // 后端 fallback 同步返回:jobId 为占位,直接拿 payload 替换。
-        payloadDirect = handle as MonitoringOverview;
-        jobId = "_sync_";
-      }
-      setState((prev) => {
-        if (prev.kind !== "ready") return prev;
-        return {
-          ...prev,
-          repos: prev.repos.map((slot) =>
-            getRepoIdFromSlot(slot) === repoId
-              ? {
-                  kind: "loading",
-                  jobId,
-                  startedAt: Date.now(),
-                }
-              : slot,
-          ),
-        };
-      });
-      let snapshot: OverviewJobSnapshot | null = null;
-      if (payloadDirect) {
-        snapshot = {
-          job_id: jobId,
-          status: "completed",
-          repo_ids: [repoId],
-          created_at: null,
-          started_at: null,
-          finished_at: null,
-          error: null,
-          payload: payloadDirect,
-        };
-      } else {
-        snapshot = await pollOverviewJob(jobId, {
-          intervalMs: 5000,
-          signal: controller.signal,
-        });
-      }
-      if (controller.signal.aborted) return;
-      if (snapshot.status === "failed") {
-        setState((prev) => {
-          if (prev.kind !== "ready") return prev;
-          return {
-            ...prev,
-            repos: prev.repos.map((slot) =>
-              getRepoIdFromSlot(slot) === repoId
-                ? { kind: "error", message: snapshot?.error ?? `${repoId} 失败` }
-                : slot,
-            ),
-          };
-        });
+      if (snapshot.status !== "completed") {
         throw new Error(snapshot.error ?? `${repoId} 失败`);
       }
-      if (snapshot.payload) {
-        const incoming = snapshot.payload.repositories.find(
-          (r) => r.repo_id === repoId,
-        );
-        if (incoming) {
-          setState((prev) => {
-            if (prev.kind !== "ready") return prev;
-            return {
-              ...prev,
-              repos: prev.repos.map((slot) =>
-                getRepoIdFromSlot(slot) === repoId
-                  ? { kind: "ready", repository: incoming }
-                  : slot,
-              ),
-              scannedAt: snapshot.payload?.scanned_at ?? prev.scannedAt,
-            };
-          });
-        }
-      }
+      // 重新读快照：写入由后端完成，界面只负责呈现最新落库结果。
+      await loadSnapshots(controller.signal);
+      if (controller.signal.aborted) return;
       const seconds = Math.round((Date.now() - startedAt) / 1000);
       setRepoRefresh((prev) => ({
         ...prev,
@@ -421,7 +333,7 @@ export default function DashboardPage() {
       }));
       toast.error(message);
     }
-  }, []);
+  }, [loadSnapshots]);
 
   const readySlots = useMemo(() => {
     if (state.kind !== "ready") return [] as Extract<RepoSlot, { kind: "ready" }>[];
@@ -502,11 +414,27 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <span
+            className="font-mono text-xs text-slate-500"
+            data-testid="dashboard-last-sync"
+          >
+            {state.kind === "ready" && state.scannedAt
+              ? `上次同步 ${formatLocalDateTime(state.scannedAt)}`
+              : "尚未同步"}
+          </span>
           {isRefreshingAll ? (
             <span className="text-xs text-slate-500">
               正在全量刷新… {refreshElapsed}s
             </span>
           ) : null}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setSettingsOpen((open) => !open)}
+            data-testid="dashboard-settings-toggle"
+          >
+            同步设置
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -519,6 +447,10 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {settingsOpen ? (
+        <MonitorSettingsPanel onClose={() => setSettingsOpen(false)} />
+      ) : null}
+
       {state.kind === "loading" ? <LoadingSkeleton /> : null}
 
       {state.kind === "error" ? (
@@ -527,6 +459,45 @@ export default function DashboardPage() {
             <p className="text-sm text-red-700 dark:text-red-300">
               加载监控数据失败：{state.message}
             </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {state.kind === "ready" && state.syncStatus === "pending_first_sync" ? (
+        <Card data-testid="dashboard-empty-state">
+          <CardContent className="flex flex-wrap items-center gap-3 py-6">
+            <span className="text-sm text-slate-600 dark:text-slate-300">
+              ⏳ 尚未同步 — 正在后台执行首次扫描，完成后自动显示数据
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto"
+              disabled={isRefreshingAll}
+              onClick={() => void handleRefreshAll()}
+            >
+              立即刷新
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {state.kind === "ready" && state.unreachable.length > 0 ? (
+        <Card
+          className="border-amber-300 dark:border-amber-700"
+          data-testid="dashboard-unreachable-warning"
+        >
+          <CardContent className="pt-4">
+            <p className="mb-1 text-sm font-medium text-amber-800 dark:text-amber-200">
+              {state.unreachable.length} 个已注册仓库无法访问（已从监控中跳过）：
+            </p>
+            <ul className="space-y-0.5 text-xs text-amber-700 dark:text-amber-300">
+              {state.unreachable.map((entry) => (
+                <li key={entry.repo_id}>
+                  <code>{entry.repo_id}</code>：{entry.configured_path} — {entry.error}
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       ) : null}
@@ -707,12 +678,7 @@ function RepoCard({
   onRefresh: (repoId: string) => void;
   repoRefreshState: RepoRefreshState | undefined;
 }) {
-  const headerLabel =
-    slot.kind === "ready"
-      ? slot.repository.repo_id
-      : slot.kind === "error"
-        ? "加载失败"
-        : "加载中";
+  const repoId = getRepoIdFromSlot(slot);
 
   return (
     <div className="space-y-1">
@@ -722,19 +688,17 @@ function RepoCard({
             className="font-mono text-xs text-slate-700 dark:text-slate-300"
             data-testid="dashboard-repo-header"
           >
-            {headerLabel}
+            {repoId}
           </span>
           {slot.kind === "ready" ? (
             <CompletionSummaryStrip stats={stats} />
           ) : null}
         </div>
-        {slot.kind === "ready" ? (
-          <RepoRefreshButton
-            repoId={slot.repository.repo_id}
-            state={repoRefreshState}
-            onRefresh={onRefresh}
-          />
-        ) : null}
+        <RepoRefreshButton
+          repoId={repoId}
+          state={repoRefreshState}
+          onRefresh={onRefresh}
+        />
       </div>
       {slot.kind === "ready" ? (
         <RepositoryOverview
@@ -742,24 +706,18 @@ function RepoCard({
           onSelectIssue={onSelectIssue}
           selectedIssueNumber={selectedIssueNumber}
         />
-      ) : slot.kind === "loading" ? (
-        <Card>
+      ) : (
+        <Card data-testid={`dashboard-repo-missing-${repoId}`}>
           <CardContent className="flex items-center gap-3 py-6">
             <Skeleton className="h-10 w-10 rounded-full" />
             <div className="flex-1 space-y-2">
               <Skeleton className="h-3 w-2/3" />
               <Skeleton className="h-3 w-1/2" />
             </div>
-            <span className="text-xs text-slate-500">扫描中…</span>
+            <span className="text-xs text-slate-500">尚未同步，等待后台扫描…</span>
           </CardContent>
         </Card>
-      ) : slot.kind === "error" ? (
-        <Card className="border-red-300 dark:border-red-700">
-          <CardContent className="py-4 text-xs text-red-700 dark:text-red-300">
-            加载失败：{slot.message}
-          </CardContent>
-        </Card>
-      ) : null}
+      )}
     </div>
   );
 }
