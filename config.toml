@@ -432,6 +432,14 @@ max_repair_attempts = 2
 max_agent_crash_retries = 5
 crash_retry_initial_backoff_seconds = 30
 crash_retry_max_backoff_seconds = 600
+# 命中这些路径前缀的文件 diff 全量进入 supervisor prompt（补丁 3）
+key_paths = []
+# 其余（非关键路径）文件 diff 的字符预算
+max_diff_chars = 6000
+# 是否把历轮未解决 findings 注入下个 cycle 的 supervisor prompt（补丁 4）
+previous_findings_injection_enabled = true
+# 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .iar/ gitignore 排除）
+findings_artifact_dir = ".iar/state"
 
 # =============================================================================
 # Agent Runner Prompt Templates

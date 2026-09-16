@@ -16,7 +16,7 @@
 - **后台定时同步**（FR-3）：console 服务内置一个后台循环，按设定间隔自动重新扫描并把结果写入本地快照，同步失败保留旧数据（FR-7）。
 - **界面上的全局同步设置**（FR-4）：dashboard 上可直接开关自动同步、调整同步间隔，设置持久保存，重启后仍生效。
 - **手动刷新不阻塞**（FR-5）：点"刷新全部"或单仓库刷新会触发后台重扫并写回快照，期间页面继续显示旧数据可正常浏览。
-- **首次使用自动补数据**（FR-6）：全新环境没有任何快照时，页面显示"尚未同步"并自动触发首次扫描，而不是空白或报错。
+- **首次使用自动补数据**（FR-6）：全新环境没有任何快照时，页面显示"尚未同步"；后端幂等触发首次扫描，浏览器不重复发起第二个任务。
 - **数据新鲜度可见**（FR-8）：页面显示"上次同步时间"，并轻量轮询本地快照，后台同步完成后界面自动反映新数据。
 - **明确不做逐 issue 增量 diff**（§11）：每个同步周期仍是全量扫描；基于 `updatedAt` 的增量优化列为后续跟进。
 
@@ -38,8 +38,9 @@
 | 点击"刷新全部" | 后台开始重新扫描，页面不卡死、继续显示旧数据；扫描完成后卡片更新，"上次同步"时间戳随之更新 |
 | 在设置里把同步间隔改为 15 分钟 | 设置立即保存；之后后台每 15 分钟自动同步一次；重启 console 后该设置仍然保持 |
 | 在设置里关闭自动同步（边界情况） | 不再有任何后台自动同步，只能手动刷新；页面照常显示已有快照与上次同步时间 |
-| 全新环境（本地从未同步过）打开 dashboard（边界情况） | 页面显示"尚未同步"的空态并自动触发首次扫描，而不是空白页或报错 |
+| 全新环境（本地从未同步过）打开 dashboard（边界情况） | 页面显示"尚未同步/正在同步"空态；后端只触发一次首次扫描，浏览器不重复创建任务 |
 | 后台同步期间 GitHub 网络失败（失败情况） | 页面继续显示上一份快照，数据不被清空；下个周期自动重试 |
+| 仓库在 registry 中被禁用或删除（边界情况） | dashboard 不再展示该仓库；历史快照即使仍留在本地库中也不得重新出现在页面 |
 
 **我默默定了这些**（没有逐一请示、直接定了的解读）：
 
@@ -48,6 +49,8 @@
 - 每个同步周期仍是**全量扫描**；基于 `updatedAt` 的逐 issue 增量 diff 不做（它省的是 GitHub 配额，不影响你的等待时间）。
 - 前端增加 15 秒一次的轻量轮询去读本地快照（纯本地读，成本约等于零），后台同步一完成界面就能跟上。
 - 设置 UI 复用现有组件做**内联展开面板**，不新引入对话框组件库。
+- 首次补扫由后端统一触发；前端只展示"尚未同步/正在同步"并轮询结果，不再额外创建第二个扫描任务。
+- 自动同步与手动刷新通过按仓库协调器去重：不同仓库仍可并行，同一仓库同一时刻只允许一次扫描。
 
 **我理解为不做**（你可能想要、但本 PRD 排除的）：
 
@@ -67,7 +70,7 @@
 - 手动全量刷新期间页面持续可浏览旧数据，不出现整页阻塞。
 - 在界面上修改同步间隔并重启 console 进程后，设置值保持不变（持久化生效）。
 - 断网或 `gh` 不可用时，只要本地有快照，dashboard 仍正常渲染旧数据。
-- 后台同步实际发生周期与界面设置值一致（服务端日志可观察到每次同步的时间与结果）。
+- 后台同步实际发生周期与界面设置值一致；修改间隔或关闭开关后调度器立即重新计算等待时间，不沿用旧周期继续等待。
 
 ## 2. Human Review Map (介入与风险地图)
 
@@ -106,7 +109,7 @@ erDiagram
 
 ### 自动门禁，不需要逐项人工审阅
 
-快照读写方法、后台同步循环本身（沿用服务里已有的后台线程模式，数据库已开启 WAL 并发读写）、手动刷新写回快照、两个新接口（读快照、读写同步设置）、前端页面改造与设置面板、旧文档字符串修正——这些是单一组件内的行为或纯展示改动，由失败可辨识的单元测试、接口测试、端到端测试和 lint/构建门禁覆盖。
+快照读写方法、由 FastAPI lifespan 托管的后台同步循环、按仓库扫描去重、手动刷新写回快照、两个新接口（读快照、读写同步设置）、前端页面改造与设置面板、旧文档字符串修正——这些由失败可辨识的单元测试、接口测试、端到端测试和 lint/构建门禁覆盖。后台循环不会在模块 import 时启动，服务关闭时会停止并回收。
 
 **本次明确不涉及**：不修改任何现有数据库表结构以外的 schema；不改 agent runner daemon 处理 issue 队列的逻辑；不改完成度统计接口；不引入任何新的调度框架或第三方依赖；无多用户/权限设计。
 
@@ -114,7 +117,7 @@ erDiagram
 
 **console 终端用户（dashboard 直接使用者）**：入口仍是 `http://127.0.0.1:8313/app/dashboard/`。打开页面立即看到本地快照数据与"上次同步"时间；header 新增"设置"入口，展开后可开关自动同步、选择间隔（1/5/15/30/60 分钟）；"刷新全部"与各仓库刷新按钮外观不变，但点击后页面不再阻塞等待，后台扫完数据自动更新。首次使用（无快照）时会看到"尚未同步"提示并自动开始首次扫描。断网时页面仍显示最近一次快照。
 
-**运维/安装者**：console 的启动方式（`iar console`）不变；本地库文件自动原地升级，无需手工迁移；前端静态产物需随发布流程重新构建（发布流水线已有对应步骤）。
+**运维/安装者**：console 的启动方式（`iar console`）不变；本地库文件自动原地升级，无需手工迁移；后台同步随 FastAPI 应用生命周期启动和停止，不因测试导入、reload 或重复装载路由产生额外调度器；前端静态产物需随发布流程重新构建（发布流水线已有对应步骤）。
 
 **API 调用方**：现有 overview 相关接口的地址、参数、返回结构全部保持不变；新增两个只读/设置接口属于纯增量，不影响任何既有调用。
 
@@ -124,7 +127,7 @@ erDiagram
 
 - **actor**：iar console 终端用户（通过 dashboard 页面）；间接涉及运维/安装者与 API 调用方（行为不变）。
 - **trigger**：打开 dashboard 页面；到达后台同步周期；点击"刷新全部"或单仓库刷新；在设置面板修改同步偏好；console 进程启动。
-- **expected behavior**：页面数据来自本地持久化快照；后台循环按全局设置的节奏全量重扫并写回快照；手动刷新触发同样的重扫写回且不阻塞浏览；无快照时自动首扫并显示空态；同步失败保留旧快照；设置持久化且重启后保持。
+- **expected behavior**：页面数据来自本地持久化快照；后台循环按全局设置的节奏全量重扫并写回快照；不同仓库可并行、同一仓库扫描去重；手动刷新不阻塞浏览；无快照时由后端幂等触发一次首扫并显示空态；同步或持久化失败保留旧快照并暴露失败状态；设置持久化且重启后保持。
 - **explicit scope boundary**：不做逐 issue 增量 diff；不改统计接口缓存；不改 runner daemon 逻辑；不引入新依赖或调度框架；不做多用户与远程访问。
 
 # Part B · 执行器层 (Build Layer)
@@ -133,22 +136,22 @@ erDiagram
 
 **当前相关模块**：
 
-- 后端四层：`api/`（路由与组合根）→ `core/`（用例）→ `engines/` → `infrastructure/`（GitHub 客户端、SQLite 持久化、配置），依赖方向必须保持。
+- 后端四层：`api/`（路由接入）→ `core/`（用例与端口）→ `engines/` → `infrastructure/`（GitHub 客户端、SQLite 持久化、配置），依赖方向必须保持；当前 FastAPI 应用装配入口是 `src/backend/api/app.py`。
 - 扫描逻辑：`src/backend/core/use_cases/agent_runner_monitor.py` 的 `build_repository_overview`（逐仓库全量扫描，经 `infrastructure/github_client.py` 的 `GitHubCliClient` 调 `gh` CLI）。
 - 现状断点：`src/backend/api/routes/agent_runner.py` 的 `_run_overview_job` 直接调 `_build_overview_response`，**绕过**模块级 `_OVERVIEW_CACHE`（`TTLResponseCache`，30s），dashboard 主路径无缓存可用。
 - 本地库：`src/backend/infrastructure/persistence/console_store.py` 的 `SqliteConsoleStore`（`~/.iar/console.db`，WAL，`PRAGMA user_version` 逐级迁移，当前 `_SCHEMA_VERSION = 3`，已有 `run_records`/`audit_logs`/`roadmap_queue`/`roadmap_settings`/`attempt_records` 五表；模块 docstring 的"当前版本 2"已过时）。
 - 运行时可写设置先例：`roadmap_settings` 表 + `GET/PATCH /agent-runner/roadmap/settings`（`src/backend/api/routes/agent_runner_roadmap.py`）+ core 侧 `get_or_create_roadmap_settings`，是本 PRD 设置功能的同构模板。
-- 后台线程先例：`agent_runner.py` 的 `_warm_overview_cache` 与 `_start_overview_job`（模块级 `threading.Thread(daemon=True)`，无 lifespan，进程退出即回收）。
+- 线程先例：`agent_runner.py` 的 `_warm_overview_cache` 是一次性预热，`_start_overview_job` 是短生命周期任务；二者都不能直接充当长期周期调度器。周期同步必须挂入 `src/backend/api/app.py` 的 FastAPI lifespan，显式持有 stop/wake event 并在 shutdown 回收。
 - 配置：`src/backend/infrastructure/config/agent_runner_settings.py` 的 `AgentRunnerConsoleSettings`（pydantic-settings，config.toml `[agent_runner.console]` 段）。
 - 前端：`frontend-public`（Next.js 静态导出，`output: "export"`，产物由发布流水线拷入 `src/backend/api/static/console/`）；dashboard 页 `frontend-public/app/(app)/app/dashboard/page.tsx`；API client 按域分文件（`lib/api/agentRunner.ts`、`lib/api/console.ts`），类型集中在 `lib/api/types.ts`；无 dialog 组件，有 `sheet.tsx`/`form.tsx`/`input.tsx`；roadmap 页有 `POLL_INTERVAL_MS` 轮询先例。
 
-**Reuse Candidates**：`build_repository_overview`（快照内容的生产者，原样复用）；`SqliteConsoleStore` 的迁移与 upsert 模式；`TTLResponseCache` 保留不动；per-repo job 机制（手动刷新）原样复用，仅补写回；roadmap settings 端到端链路。
+**Reuse Candidates**：`build_repository_overview`（快照内容的生产者，原样复用）；`SqliteConsoleStore` 的迁移与 upsert 模式；`TTLResponseCache` 保留不动；现有 per-repo job 机制继续作为手动刷新入口；roadmap settings 端到端链路；FastAPI lifespan 作为长期后台任务的生命周期边界。
 
-**架构约束**：路由层不直接写 SQL，须经 `SqliteConsoleStore`；core 不 import FastAPI；前端经 `lib/api/` 客户端访问，不直接 fetch 散落在组件里。
+**架构约束**：路由层不直接写 SQL；core 不 import FastAPI 或 `SqliteConsoleStore`，而是依赖 `core/shared/interfaces/runner_console.py` 中新增的快照存储端口；infrastructure 的 `SqliteConsoleStore` 实现该端口；前端经 `lib/api/` 客户端访问，不直接 fetch 散落在组件里。
 
 **Frontend Impact**：**Full-stack**。受影响前端为 `frontend-public`（仅此一个承载 console 界面）。改动页面 `app/(app)/app/dashboard/page.tsx`、API 客户端 `lib/api/agentRunner.ts` 与 `lib/api/console.ts`、类型 `lib/api/types.ts`，新增设置面板组件。
 
-**Existing PRD Relationship**：已检索 `tasks/pending/`（4 个 PRD：prd-regrounding、completeness-judgment、tauri-desktop-shell、iar-prd-skill-alignment），均与本任务无重复、无先后依赖。归档 PRD `tasks/archive/P1-FEAT-20260910-111901-iar-console-bundled-web-terminal.md` 提供了 71.7 秒实测数据与 console 静态托管背景，作为上下文引用。本 PRD 可独立交付。
+**Existing PRD Relationship**：2026-09-16 开工前复核时，除本 PRD 外 `tasks/pending/` 还有 3 个 PRD（prd-regrounding、completeness-judgment、tauri-desktop-shell），均与本任务无重复、无先后依赖；`iar-prd-skill-alignment` 已归档。归档 PRD `tasks/archive/P1-FEAT-20260910-111901-iar-console-bundled-web-terminal.md` 提供了 71.7 秒实测数据与 console 静态托管背景。本 PRD 可独立交付。
 
 **Potential Redundancy Risks**：不要新建第二套缓存（内存 TTL 缓存保留现状即可）；不要为设置再写一套 TOML 回写（沿用 DB 设置表先例）；不要新引入调度框架。
 
@@ -159,24 +162,26 @@ erDiagram
 **最小改动路径**：给 dashboard 数据加一层"本地持久化快照"，读写两侧都挂在现有机制上——
 
 1. `SqliteConsoleStore` 升 `_SCHEMA_VERSION` 到 4，新增 `monitoring_snapshots` 与 `monitor_settings` 两表及读写方法（照 `roadmap_settings` 的 upsert / get-or-create 模式）。
-2. core 新增用例模块负责"构建并写入快照""读快照概览""读写同步设置"，复用 `build_repository_overview` 逐仓库生产快照内容。
-3. `agent_runner.py` 路由：`_run_overview_job` 完成分支写回快照；新增 `GET /v1/agent-runner/overview/snapshots` 读快照；模块级 daemon 线程按设置周期触发同样的构建写回（照 `_warm_overview_cache` 模式，加非重入锁防止与手动刷新重叠）。
+2. 在 `core/shared/interfaces/runner_console.py` 增加 `IMonitorSnapshotStore` 及快照/设置 DTO；core 新增用例模块负责持久化已构建结果、读取快照概览、读写同步设置与按仓库扫描协调，不依赖具体 SQLite 实现。
+3. `agent_runner.py` 路由：`_run_overview_job` 复用本次已经生成的 payload 写回快照，绝不为持久化再次扫描；新增 `GET /v1/agent-runner/overview/snapshots`。`app.py` lifespan 启停唯一的周期调度器，PATCH 设置通过 wake event 使其立即重算等待时间。
 4. `agent_runner_console.py` 路由：新增 `GET/PATCH /v1/agent-runner/console/monitor/settings`（照 roadmap settings 路由模式，PATCH 用 pydantic 模型校验）。
-5. 前端 dashboard：首屏改读快照接口 + 15s 轮询；header 加"上次同步"时间与设置面板（内联展开，不引 dialog）；无快照时显示空态并触发首扫。
+5. 前端 dashboard：首屏改读快照接口 + 15s 轮询；header 加"上次同步"时间与设置面板（内联展开，不引 dialog）；无快照时只显示后端返回的首扫状态并等待结果，不从浏览器重复创建扫描任务。
 
-**为什么最贴合现架构**：每一条都有完全同构的现存先例（设置表→roadmap_settings；后台线程→_warm_overview_cache；手动刷新→现有 job），不新增任何依赖、不改四层边界、不改现有接口契约。
+**为什么最贴合现架构**：设置表沿用 roadmap_settings、扫描沿用现有 job、持久化沿用 console store；只有长期周期任务改用应用生命周期管理，避免把一次性预热线程误扩成常驻调度器。不新增第三方依赖、不破坏四层边界、不改现有接口契约。
 
-**拒绝冗余抽象的理由**：不引入 APScheduler/Celery（本地单机工具，现有 daemon 线程模式足够）；不写 config.toml 回写（`TomlRegistryEditor` 只覆盖 registry 子树，且运行时可调偏好的先例是 DB 表）；不做第二份内存缓存层（快照库本身就是缓存）。
+**拒绝冗余抽象的理由**：不引入 APScheduler/Celery（本地单机工具用 lifespan 托管的轻量 scheduler 足够）；不写 config.toml 回写（`TomlRegistryEditor` 只覆盖 registry 子树，且运行时可调偏好的先例是 DB 表）；不做第二份内存缓存层（快照库本身就是缓存）。
+
+**范围凝聚性复核**：数据库迁移、scheduler、设置 API 和 dashboard 看似可分别回滚，但拆开会产生“有快照无生产者”“有后台同步却仍走实时首屏”或“设置已保存但调度不响应”的临时半成品契约，因此保持为一个 PRD。四个 R2 oracle 分别守住迁移、真实读取、设置持久化和并发生命周期，不能由相邻路径互相替代。
 
 ### Proposed Solution Summary (实现机制)
 
-核心机制是**本地快照库 + 单一写入口**：所有 GitHub 全量扫描（无论后台周期触发还是手动刷新触发）结束后都把结果 upsert 进 `monitoring_snapshots`；dashboard 只读快照库。同步节奏由 `monitor_settings`（运行时覆盖，DB 持久）+ `AgentRunnerConsoleSettings` 新增字段（静态默认值 300 秒，供 config.toml 声明）两层提供，后台线程每周期开始前重读设置使改动即时生效。输入来源：仓库清单来自现有 registry 配置，快照内容由 `build_repository_overview` 生产，系统不做内容推断。挂载点：`agent_runner.py` 的 job 完成分支与模块级线程、dashboard 首屏数据加载。状态变化：console.db 出现两张新表；用户可见变化为首屏秒开、"上次同步"时间、设置面板。刻意避免的复杂度：逐 issue 增量 diff、独立调度服务、第二套缓存、config.toml 写回编辑器扩展。
+核心机制是**本地快照库 + 单一持久化入口 + 按仓库 in-flight 协调器**：GitHub 扫描仍由现有 overview 构建路径完成，构建出的 payload 只经 `persist_monitoring_result` 一次性落入 `monitoring_snapshots`，不得为写库重复扫描。周期同步与手动刷新进入同一按仓库协调器：不同仓库可并行，同一仓库已有任务时复用或报告其 in-flight 状态而不新开扫描。同步节奏由 `monitor_settings`（运行时覆盖，DB 持久）与 `AgentRunnerConsoleSettings` 的静态默认值提供；lifespan 调度器持有 stop/wake event，PATCH 后立即唤醒并重算下一次运行。仓库清单来自当前 registry，快照响应只展示当前启用仓库，已删除或禁用仓库的历史行不得泄漏回页面。状态变化：console.db 出现两张新表；用户可见变化为首屏秒开、"上次同步"时间、设置面板。刻意避免的复杂度：逐 issue 增量 diff、独立调度服务、第二套缓存、config.toml 回写编辑器扩展。
 
 ### Alternatives Considered
 
 - **基于 `updatedAt` 的逐 issue 增量重建**：只重扫有变化的 issue。拒绝理由：用户等待已被本地读消除，增量省的只是 GitHub 配额；但要在快照中维护逐 issue 的 `updated_at` 索引并处理 issue 删除/换 label 的一致性，复杂度与出错面明显更高。列为 §12 跟进。
 - **config.toml 回写设置**：拒绝理由见上（DB 设置表是同构先例，TOML 编辑器扩展影响面更大）。
-- **引入 APScheduler**：拒绝理由：零新依赖原则，现有 daemon 线程模式已覆盖需求。
+- **引入 APScheduler**：拒绝理由：零新依赖原则；FastAPI lifespan + stop/wake event 已覆盖单进程本地工具的周期、唤醒和关闭需求。
 
 ## 7. Implementation Guide
 
@@ -186,9 +191,11 @@ erDiagram
 
 数据与控制流（目标态）：
 
-1. **写路径（唯一）**：`build_and_store_monitor_snapshots(repo_ids)`（core）逐个仓库调 `build_repository_overview` → 每仓库完成即 `upsert_monitor_snapshot(repo_id, payload_json, scanned_at)`；单仓库失败记 warning、保留旧快照、继续其余仓库。两个触发源共用此函数：后台 daemon 线程（周期到点 + 启动时若缺快照立即补一次）与 `_run_overview_job` 完成分支。模块级非重入锁保证同一时刻只有一个写路径在跑（手动刷新撞上周期的，周期跳过本次）。
-2. **读路径**：`GET /overview/snapshots` → core → `SqliteConsoleStore.list_monitor_snapshots()` → 返回 `{repositories: [{repo_id, scanned_at, overview}]}；无快照仓库以空态标记返回`。dashboard 首屏与 15s 轮询都走这里。
-3. **设置路径**：`GET /console/monitor/settings` 返回 `{sync_enabled, sync_interval_seconds, updated_at}`（无记录时返回默认值：enabled=true, 300s）；`PATCH` 校验 `sync_interval_seconds ∈ [60, 3600]`、`sync_enabled` 布尔，写库。daemon 每周期开头重读设置：`sync_enabled=false` 时跳过并等待下周期。
+1. **扫描协调路径**：周期调度与手动 job 都先向 `MonitorSyncCoordinator` 申请目标 `repo_id`。协调器维护按仓库 in-flight 集合：不同仓库可并行；同仓库已有扫描时不再启动第二次扫描，而是让调用方得到已有 job/in-flight 状态。扫描仍调用现有 overview 构建函数，不复制 GitHub 查询逻辑。
+2. **持久化路径（唯一）**：扫描成功产生的现成 repository payload 交给 `persist_monitoring_result(store, payload)`，每个仓库一次 upsert；不得为了持久化重新调用 GitHub。写库异常不得在 store 内吞掉：手动 job 标记失败，周期批次记录该仓库失败并继续其他仓库，二者都保留旧快照。
+3. **读路径**：`GET /overview/snapshots` → core 用例（依赖 `IMonitorSnapshotStore`）→ store。用例以当前启用 registry 为展示集合，返回 `{repositories: [{repo_id, scanned_at, overview}], missing_repo_ids, sync_status}`；库中已删除/禁用仓库的历史行不展示。dashboard 首屏与 15s 轮询都走这里。
+4. **生命周期与首次补扫**：`src/backend/api/app.py` lifespan 创建唯一 coordinator + scheduler；启动后若当前启用仓库缺少快照，由后端幂等申请首扫。shutdown 设置 stop event 并有界 join。导入路由模块本身不得启动线程、访问 GitHub 或写库。
+5. **设置路径**：`GET /console/monitor/settings` 返回 `{sync_enabled, sync_interval_seconds, updated_at}`；无 DB 记录时，间隔取 `AgentRunnerConsoleSettings.monitor_sync_interval_seconds`，不是 core 内硬编码 300。`PATCH` 校验 `[60, 3600]` 后写库，写失败返回错误；成功后设置 wake event，使 scheduler 立即重读设置并重算等待时间。`sync_enabled=false` 时不得启动新自动扫描，已在途手动扫描不取消。
 
 ### Change Impact Tree
 
@@ -203,16 +210,19 @@ erDiagram
 │       ├── 新增 _CREATE_MONITORING_SNAPSHOTS（repo_id PK / payload_json / scanned_at）
 │       ├── 新增 _CREATE_MONITOR_SETTINGS（id PK 单行 / sync_enabled / sync_interval_seconds / updated_at）
 │       ├── 新增 upsert_monitor_snapshot / list_monitor_snapshots（照 save_roadmap_settings 的 upsert 模式；JSON 用 ensure_ascii=False）
-│       ├── 新增 get_or_create_monitor_settings / save_monitor_settings（读不到返回默认 enabled=300s）
-│       └── 写路径异常降级为 _logger.warning（照 append_run 惯例），读失败返回 None/默认
+│       ├── 新增 get_monitor_settings / save_monitor_settings（默认值由 core 用例注入，不在 store 硬编码）
+│       └── 快照/设置作为 dashboard 的事实读取路径，写异常必须抛给调用方；不得照 append_run 的旁路审计语义静默吞错
 ├── Core
+│   ├── src/backend/core/shared/interfaces/runner_console.py
+│   │   [修改] 新增 MonitorSnapshotEntry / MonitorSettingsEntry DTO 与 IMonitorSnapshotStore 端口
 │   └── src/backend/core/use_cases/monitor_snapshots.py
 │       [新增]
-│       【总结】快照构建写回、快照读取、同步设置读写的用例编排
+│       【总结】已构建 payload 的单一持久化入口、按当前 registry 过滤的快照读取、设置读写与按仓库 in-flight 协调
 │
-│       ├── build_and_store_monitor_snapshots(repo_ids=None)：逐仓库 build_repository_overview + upsert，单仓库失败降级继续
-│       ├── get_snapshot_overview()：组装 {repositories:[{repo_id, scanned_at, overview}]}
-│       └── get_monitor_settings() / update_monitor_settings(patch)：默认值回落 + 校验
+│       ├── persist_monitoring_result(store, payload)：只持久化现成结果，不再次扫描
+│       ├── get_snapshot_overview(store, enabled_repo_ids, sync_status)：过滤禁用/删除仓库并标记缺失项
+│       ├── get/update_monitor_settings(store, static_default)：默认值回落 + 校验；写失败向上传播
+│       └── MonitorSyncCoordinator：不同 repo 可并行、同 repo 去重，供周期与手动入口共用
 ├── Infrastructure
 │   └── src/backend/infrastructure/config/agent_runner_settings.py
 │       [修改]
@@ -222,18 +232,20 @@ erDiagram
 ├── API
 │   ├── src/backend/api/routes/agent_runner.py
 │   │   [修改]
-│   │   【总结】job 完成写回快照、新增快照读取端点、启动后台定时同步线程
+│   │   【总结】job 经共享 coordinator 扫描并写回快照、新增快照读取端点；本模块 import 不启动长期线程
 │   │
-│   │   ├── _run_overview_job 完成分支：payload 各仓库 upsert 进快照表（复用 core 写函数）
+│   │   ├── _run_overview_job：先经 coordinator 申请 repo；完成后把现成 payload 交给 core 持久化，写失败则 job 失败
 │   │   ├── 新增 GET /v1/agent-runner/overview/snapshots → core.get_snapshot_overview()
-│   │   ├── 新增模块级 _monitor_sync_thread（daemon，照 _warm_overview_cache 模式）：Event.wait(间隔) 循环，每周期重读设置，非重入锁防止与 job 重叠，启动时缺快照立即补扫
 │   │   └── 现有 /overview/per-repo、/overview/jobs/{id} 端点契约不变
-│   └── src/backend/api/routes/agent_runner_console.py
+│   ├── src/backend/api/routes/agent_runner_console.py
 │       [修改]
 │       【总结】新增监控同步设置的 GET/PATCH 端点
 │
 │       ├── GET /v1/agent-runner/console/monitor/settings
-│       └── PATCH 同路径，UpdateMonitorSettingsRequest（pydantic）校验间隔 [60,3600] 与开关布尔
+│       └── PATCH 同路径，UpdateMonitorSettingsRequest（pydantic）校验间隔 [60,3600] 与开关布尔；保存成功后唤醒 scheduler
+│   └── src/backend/api/app.py
+│       [修改]
+│       【总结】FastAPI lifespan 启动唯一 monitor scheduler，缺快照时申请首扫；shutdown 通过 stop event + 有界 join 回收
 ├── Frontend (frontend-public)
 │   ├── lib/api/types.ts
 │   │   [修改]
@@ -251,7 +263,7 @@ erDiagram
 │   │   ├── 首屏 fetchOverviewSnapshots() 直接渲染；保留 job 轮询仅用于手动刷新进度
 │   │   ├── 15s setInterval 轮询快照接口（照 roadmap POLL_INTERVAL_MS 先例）
 │   │   ├── header 显示"上次同步于 HH:MM:SS"（取快照 scanned_at 最大值）+ 设置按钮
-│   │   └── 全部仓库无快照时显示"尚未同步"空态并自动触发一次全量 job
+│   │   └── 全部仓库无快照时显示"尚未同步/正在同步"空态；首扫由后端负责，前端不重复触发 job
 │   └── components/monitor-settings-panel.tsx（落位参照 dashboard 现有子组件组织；rg --files frontend-public/components 确认目录）
 │       [新增]
 │       【总结】内联展开的同步设置面板（开关 + 间隔选择），保存即 PATCH
@@ -259,7 +271,9 @@ erDiagram
 │   ├── tests/test_console_store.py
 │   │   [修改] v3→v4 迁移保留旧数据、快照 upsert/读取、设置默认与往返
 │   ├── tests/test_monitor_snapshots.py
-│   │   [新增] core 用例：fake GitHub 客户端下构建写回、单仓库失败降级、设置校验边界（59s/3601s 拒绝）
+│   │   [新增] core 用例：现成 payload 写回、写失败传播、registry 过滤、设置校验、同 repo 去重/跨 repo 并行
+│   ├── tests/test_monitor_scheduler.py
+│   │   [新增] lifespan 单实例、模块 import 零副作用、首扫幂等、PATCH 唤醒重算、shutdown 回收
 │   ├── tests/test_agent_runner_console_api.py 或新文件
 │   │   [修改/新增] 快照端点、设置 GET/PATCH 往返（tmp 库注入隔离，照现有 IAR_CONFIG/构造函数注入先例）
 │   └── tests/playwright-e2e/tests/smoke/agent-runner-monitor.spec.ts + page-objects/AgentRunnerMonitorPage.ts
@@ -277,13 +291,13 @@ erDiagram
 |---|---|---|---|---|---|
 | console.db 新增两表 + user_version 3→4 迁移 | infrastructure | R2 | schema 固定区 + 持久状态 | 人工确认（决策一）+ rv-1 | rv-1 |
 | 快照/设置 store 读写方法 | infrastructure | R1 | 单组件、有测试先例 | 执行者 + 失败可辨识单测 | rv-4 |
-| core monitor_snapshots 用例 | core | R1 | 纯编排复用现有扫描，无新外部依赖 | 执行者 + rv-4 | rv-4 |
-| 后台定时同步 daemon 线程 | api | R2 | 并发触发器；沿用现有 daemon + WAL + 非重入锁模式缓解 | 执行者 + 强 oracle | rv-2、rv-4 |
+| core monitor_snapshots 用例与存储端口 | core | R1 | 纯编排复用现有扫描，无新外部依赖 | 执行者 + rv-4 | rv-4 |
+| lifespan scheduler + 按仓库 in-flight 协调器 | api/core | R2 | 长期并发触发器；必须防 import/reload 重复、同仓库重入与 shutdown 残留 | 执行者 + 强 oracle | rv-4 |
 | `_run_overview_job` 写回快照 | api | R1 | 单路由模块行为补充 | 执行者 + rv-2 覆盖 | rv-2 |
 | GET /overview/snapshots | api | R1 | 新只读端点，纯增量 | 执行者 + API 测试 | rv-4 |
 | GET/PATCH monitor settings | api | R2 | 持久状态写 + 新 API 契约（新增非破坏） | 人工确认（决策二）+ rv-3 | rv-3 |
-| dashboard 首屏/轮询/空态改造 | frontend | R1 | 用户可见、单页面 | 执行者 + e2e + 人读截图 | rv-2、rv-5 |
-| 设置面板 UI | frontend | R1 | 用户可见、复用现有组件 | 执行者 + e2e + 人读截图 | rv-3、rv-5 |
+| dashboard 首屏/轮询/空态改造 | frontend | R1 | 用户可见、单页面 | 执行者 + e2e + 人读录屏 | rv-2、rv-5 |
+| 设置面板 UI | frontend | R1 | 用户可见、复用现有组件 | 执行者 + e2e + 人读截图/观察记录 | rv-3、rv-5 |
 | console_store docstring 修正 | infrastructure | R0 | 纯文档注释 | 执行者 + lint | rv-6 |
 
 ### Executor Drift Guard
@@ -293,6 +307,8 @@ erDiagram
   - `rg -n "per-repo|overview/jobs" frontend-public/lib src/backend/api` — 确认现有 overview 端点的全部调用方，保证契约不变。
   - `rg -n "_SCHEMA_VERSION|user_version" src/backend tests` — 找出所有依赖 schema 版本的测试。
   - `rg -n "create_console_store" src/backend` — 快照读写应复用同一 store 工厂，注意路由层每次请求新建实例的惯例。
+  - `rg -n "lifespan|FastAPI\(" src/backend/api` — scheduler 只能从应用生命周期边界启停，路由模块 import 不得产生线程或 I/O 副作用。
+  - `rg -n "_start_overview_job|fetchOverviewJobsByRepo|fetchMonitoringOverview" src/backend frontend-public` — 所有手动扫描入口必须经过同一按仓库 coordinator，不能只给周期入口加锁。
   - `rg -n "POLL_INTERVAL_MS" frontend-public` — 前端轮询先例。
 - 前端组件目录确认：`rg --files frontend-public/components | head -30`。
 
@@ -305,15 +321,18 @@ flowchart LR
         SNAP --> DB[("console.db<br/>monitoring_snapshots")]
     end
     subgraph 写路径
-        TIMER["后台定时线程<br/>(每周期重读设置)"] --> BUILD["build_and_store_monitor_snapshots"]
-        MANUAL["手动刷新 job<br/>(_run_overview_job)"] --> BUILD
-        BUILD --> GH["build_repository_overview<br/>(gh CLI 全量扫描)"]
-        GH --> DB
+        LIFE["FastAPI lifespan<br/>start / shutdown"] --> TIMER["scheduler<br/>(stop + wake event)"]
+        TIMER --> COORD["MonitorSyncCoordinator<br/>按 repo 去重"]
+        MANUAL["手动刷新 job<br/>(_run_overview_job)"] --> COORD
+        COORD --> GH["现有 overview 构建<br/>(gh CLI 全量扫描)"]
+        GH --> PERSIST["persist_monitoring_result<br/>(不重复扫描)"]
+        PERSIST --> DB
     end
     subgraph 设置路径
         PANEL["设置面板"] --> PATCHS["GET/PATCH /console/monitor/settings"]
         PATCHS --> SDB[("console.db<br/>monitor_settings")]
         SDB -.每周期读取.-> TIMER
+        PATCHS -.保存成功后 wake.-> TIMER
     end
 ```
 
@@ -365,22 +384,22 @@ oracles:
     tier: R2
     test_layer: manual
     required_for_acceptance: true
-    presentation: "tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/rv-2-dashboard-snapshot.png（真实入口截图，标注验证层级为 real-entry）；自检：打开页面看 header 是否显示上次同步时间，curl -s -o /dev/null -w '%{time_total}' http://127.0.0.1:8313/api/v1/agent-runner/overview/snapshots"
+    presentation: "tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/rv-2-dashboard-refresh.webm（真实入口录屏，覆盖刷新前/刷新中仍可浏览/刷新后时间更新，标注 real-entry）；另附快照接口计时文本"
     critical_value_source: "页面上显示的上次同步时间取自 GET /overview/snapshots 响应中的 scanned_at 字段原值"
     must_cross: "浏览器 -> FastAPI 路由 -> core 用例 -> SqliteConsoleStore -> SQLite 文件"
     forbidden_bypasses: "不得用组件级预览页或手工注入状态充当 dashboard 证据；不得直接调用 core 函数代替 HTTP 路径"
     fresh_state_probe: "手动刷新完成后开新浏览器标签（新会话）重新打开 dashboard，确认新数据与新时间戳"
-    final_tree_evidence: "截图与 curl 计时在最终实现树上采集；路由、前端页面或 store 变更后重采"
+    final_tree_evidence: "录屏与接口计时在最终实现树上采集；路由、前端页面或 store 变更后重采"
   - id: rv-3
     behavior: 在 dashboard 设置面板修改同步间隔/开关后立即保存生效，重启 console 进程后设置保持，关闭后后台不再自动同步
     reviewer: human
     real_entry: "dashboard header 设置面板（真实入口同 rv-2）"
-    expected: "改为 15 分钟保存后 GET 设置接口返回新值；重启进程后值保持；服务端日志按新周期出现同步记录；关闭自动同步后日志中无新自动同步"
+    expected: "改为测试用短间隔后 GET 设置接口返回新值且 scheduler 被立即唤醒；重启进程后值保持；在两个应触发周期内出现对应自动同步记录；关闭后再观察两个同长度周期，无新自动同步，手动刷新仍成功"
     mock_boundary: "真实进程与真实库；GitHub 网络可用 fake gh 替代（设置持久化不依赖 GitHub 内容）"
     tier: R2
     test_layer: manual
     required_for_acceptance: true
-    presentation: "tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/rv-3-settings-panel.png（设置面板展开态真实截图）；自检：curl -s http://127.0.0.1:8313/api/v1/agent-runner/console/monitor/settings 对比界面显示值"
+    presentation: "tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/rv-3-settings-panel.png（设置面板展开态真实截图）+ rv-3-scheduler-observation.md（启用/关闭各两个有界周期的时间线）；自检：重新启动 console 后 GET 设置接口对比界面显示值"
     critical_value_source: "界面上显示的间隔值来自 GET /console/monitor/settings 响应原值；修改操作经 PATCH 写库"
     must_cross: "浏览器 PATCH -> FastAPI 路由校验 -> core -> store 写库 -> 进程重启 -> 新请求 GET 读回"
     forbidden_bypasses: "不得直接写 SQLite 或改 config.toml 冒充界面设置；不得只验证 PATCH 200 而不做重启后读回"
@@ -389,19 +408,24 @@ oracles:
     negative_control: "在实现前的代码上执行 curl PATCH /api/v1/agent-runner/console/monitor/settings"
     expected_fail: "404 Not Found，验证该端点此前不存在"
   - id: rv-4
-    behavior: core 与 store 层行为正确：构建写回逐仓库落库、单仓库失败保留旧快照并继续、设置校验拒绝越界值（59/3601 秒）、后台线程与手动刷新不重叠执行
+    behavior: scheduler 只随 FastAPI lifespan 启动一次并在 shutdown 回收；周期与手动入口对同一仓库去重、不同仓库可并行；持久化失败不得伪装成刷新成功
     reviewer: verifier
-    real_entry: "uv run pytest tests/test_monitor_snapshots.py tests/test_console_store.py -v"
-    expected: "fake GitHub 客户端下快照逐仓库 upsert；注入单仓库异常后其余仓库快照更新、失败仓库保留旧 scanned_at；PATCH 59/3601 返回 422；非重入锁并发用例通过"
-    mock_boundary: "GitHub 客户端以 fake 注入（网络边界可 mock）；SQLite 与线程为真实"
-    tier: R1
+    real_entry: "uv run pytest tests/test_monitor_scheduler.py tests/test_monitor_snapshots.py tests/test_console_store.py -v"
+    expected: "仅 import 路由模块时零线程/零扫描；TestClient lifespan 内恰好一个 scheduler；同 repo 周期+手动并发只执行一次扫描、两个不同 repo 可并行；写库注入异常后 job/批次报告失败且旧 scanned_at 不变；PATCH 后 wake 使等待时间立即重算；退出 lifespan 后线程终止"
+    mock_boundary: "GitHub/gh 边界用记录调用次数与并发窗口的 fake；FastAPI lifespan、真实线程、事件与 tmp_path SQLite 均不 mock"
+    tier: R2
     test_layer: integration
     required_for_acceptance: true
+    critical_value_source: "周期触发与手动 API 产生的真实 repo_id，以及 PATCH 后从 monitor_settings 重新读取的间隔值"
+    must_cross: "FastAPI lifespan start -> scheduler -> shared MonitorSyncCoordinator -> overview producer -> persist_monitoring_result -> SQLite commit；shutdown -> stop event -> thread join"
+    forbidden_bypasses: "不得直接调用持久化 helper冒充调度；不得为测试添加生产开关；不得只测独立锁而绕过周期/手动两个入口；不得以 daemon 进程退出代替 shutdown join 断言"
+    fresh_state_probe: "并发动作完成后用新 SQLite 连接读取快照，并在退出 TestClient 后枚举/探测 scheduler thread 已终止"
+    final_tree_evidence: "在最终实现树执行；app.py lifespan、coordinator、job 入口、store 或设置 PATCH 任一变更后重跑"
   - id: rv-5
     behavior: dashboard 前端在 stub 快照/设置接口下正确渲染首屏、上次同步时间、空态与设置面板交互
     reviewer: verifier
-    real_entry: "cd tests/playwright-e2e && pnpm test:smoke"
-    expected: "agent-runner-monitor.spec.ts 更新后全绿：stub 快照响应驱动首屏渲染；无快照 stub 显示空态并触发 job 请求；设置面板选择间隔后发出 PATCH 到规范路径 /api/v1/agent-runner/console/monitor/settings"
+    real_entry: "just e2e tests/smoke/agent-runner-monitor.spec.ts"
+    expected: "agent-runner-monitor.spec.ts 更新后全绿：stub 快照响应驱动首屏渲染；无快照 stub 显示后端 sync_status 且浏览器不发起 overview job；设置面板选择间隔后只向 canonical path /api/v1/agent-runner/console/monitor/settings 发出 PATCH"
     mock_boundary: "后端接口经 Playwright 路由 stub（前端为被测对象）；页面真实渲染于浏览器"
     tier: R1
     test_layer: e2e
@@ -409,15 +433,15 @@ oracles:
   - id: rv-6
     behavior: 全仓质量门禁保持绿：后端 lint/测试、前端 typecheck/lint/build
     reviewer: verifier
-    real_entry: "just lint && uv run pytest tests/ -x -q（后端）；pnpm --filter frontend-public typecheck && pnpm --filter frontend-public build（前端）"
-    expected: "全部通过；前端产物成功导出（out/ 目录生成）"
+    real_entry: "just lint --repo；just frontend-public typecheck；just frontend-public build"
+    expected: "完整 lint/reuse/test/docs 门禁通过；前端类型检查通过且 out/ 成功导出"
     mock_boundary: "无 mock"
     tier: R0
     test_layer: smoke
     required_for_acceptance: true
 ```
 
-失败排查提示：rv-2/rv-3 若 dashboard 404，先确认前端静态产物已构建并拷入 `src/backend/api/static/console/`（参照 `.github/workflows/release.yml` 的 build+copy 两步）；若快照为空，查服务端日志中同步线程的 warning；Playwright 失败先看 stub 路径是否带 `/api` 前缀。
+失败排查提示：rv-2/rv-3 若 dashboard 404，先确认前端静态产物已构建并拷入 `src/backend/api/static/console/`（参照 `.github/workflows/release.yml` 的 build+copy 两步）；若快照为空，先查 scheduler/coordinator 日志与 job 失败状态；Playwright 失败先看 stub 路径是否带 `/api` 前缀。`tests/playwright-e2e/` 是独立 npm 包，日常优先走仓库 `just e2e` 入口，不在 PRD 中直接使用 pnpm 子命令。
 
 ### Low-Fidelity Prototype
 
@@ -454,7 +478,7 @@ No external validation required; repository evidence was sufficient.
 - Depends on tasks/issues:
   - none
 - Gate type: none
-- Notes: 已检索 tasks/pending/ 全部 4 个 PRD，与本任务无重复或先后依赖；可独立交付。
+- Notes: 2026-09-16 开工前复核已检查其余 3 个 pending PRD；与本任务无重复或先后依赖，可独立交付。`iar-prd-skill-alignment` 已归档。
 
 ## 9. Acceptance Checklist
 
@@ -462,8 +486,8 @@ No external validation required; repository evidence was sufficient.
 
 | 要看的结果 | 呈递物 | 10 秒自检 |
 |---|---|---|
-| dashboard 秒开并显示上次同步时间，手动刷新不阻塞且完成后数据更新 | `tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/rv-2-dashboard-snapshot.png`（交付时填实际截图） | 打开 http://127.0.0.1:8313/app/dashboard/ 看 header 有无"上次同步"时间；`curl -s -o /dev/null -w '%{time_total}' http://127.0.0.1:8313/api/v1/agent-runner/overview/snapshots` 应远小于 1s |
-| 设置面板改间隔立即保存、重启后保持、可全局关闭自动同步 | `tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/rv-3-settings-panel.png`（交付时填实际截图） | 面板改间隔保存后 `curl -s http://127.0.0.1:8313/api/v1/agent-runner/console/monitor/settings` 显示新值 |
+| dashboard 秒开并显示上次同步时间，手动刷新期间旧数据仍可浏览、完成后数据与时间更新 | `tasks/evidence/P1-PERF-20260916-102117-iar-console-dashboard-snapshot-sync/rv-2-dashboard-refresh.webm`（交付时填实际录屏） | 打开 http://127.0.0.1:8313/app/dashboard/ 看 header 有无"上次同步"时间；快照接口本地响应应远小于 1s |
+| 设置面板改间隔后调度立即重算、重启后保持、关闭后连续两个周期无自动扫描 | `rv-3-settings-panel.png` + `rv-3-scheduler-observation.md`（交付时填实际路径） | 重启 console 后 GET 设置接口应与界面值一致；观察记录应同时包含开启与关闭窗口 |
 
 注：数据库迁移、core/store 单测、Playwright stub 测试、lint/构建属 `reviewer: verifier` 组（rv-1、rv-4、rv-5、rv-6），按设计不在人读呈递区展示，仅失败时上报。
 
@@ -471,27 +495,29 @@ No external validation required; repository evidence was sufficient.
 
 按 §7 Risk Classification Register 排序：
 
-1. **人工确认 + R2（优先审查）**：rv-1（迁移往返，含 negative_control 红跑记录）、rv-3（设置持久化，含 negative_control 404 记录）、rv-2（真实入口 dashboard）。
-2. **R1**：rv-4（core/store 集成测试输出）、rv-5（Playwright smoke 输出）。
+1. **人工确认 + R2（优先审查）**：rv-1（迁移往返，含 negative_control 红跑记录）、rv-3（设置持久化，含 negative_control 404 记录）、rv-2（真实入口 dashboard）、rv-4（scheduler 生命周期与并发协调）。
+2. **R1**：rv-5（Playwright smoke 输出）及 rv-4 内附带的 store/core 单组件断言。
 3. **R0**：rv-6（lint/typecheck/build 输出折叠呈现）。
 
 #### Architecture Acceptance
 
-- [ ] `rg -n "from fastapi|import fastapi" src/backend/core/use_cases/monitor_snapshots.py` 无命中（core 不依赖 Web 框架）
+- [ ] `rg -n "from fastapi|import fastapi|infrastructure.persistence.console_store" src/backend/core/use_cases/monitor_snapshots.py src/backend/core/shared/interfaces/runner_console.py` 无命中（core 不依赖 Web 框架或具体 SQLite 实现）
 - [ ] 路由层无直接 SQL：`rg -n "CREATE TABLE|INSERT INTO|sqlite3" src/backend/api/routes/` 无新增命中（快照/设置 SQL 全部在 `console_store.py`）
+- [ ] 路由模块 import 零副作用：仅 import `backend.api.routes.agent_runner` 不启动 scheduler、不访问 GitHub、不写 SQLite；scheduler 只由 `backend.api.app` lifespan 启停
 - [ ] 未引入新第三方依赖：`pyproject.toml` 与 `frontend-public/package.json` 的 dependencies 无新增条目
 
 #### Behavior Acceptance
 
 - [ ] rv-1 通过：v3 种子库迁移后旧 `run_records` 行数不变、两新表存在、`PRAGMA user_version` 为 4；附实现前红跑记录
-- [ ] rv-4 通过：`uv run pytest tests/test_monitor_snapshots.py tests/test_console_store.py -v` 全绿，含失败降级与间隔校验边界用例
+- [ ] rv-4 通过：`uv run pytest tests/test_monitor_scheduler.py tests/test_monitor_snapshots.py tests/test_console_store.py -v` 全绿，含生命周期、同 repo 去重/跨 repo 并行、写失败传播、registry 过滤与间隔边界
+- [ ] 快照或设置持久化失败不会返回成功假象：手动 job/PATCH 显式失败，旧快照仍可从新连接读取
 - [ ] 现有 overview 端点契约未变：`tests/` 中原有 agent-runner 相关测试无修改即通过（或修改已在 Change Log 说明原因）
 
 #### Frontend Acceptance
 
-- [ ] rv-5 通过：`cd tests/playwright-e2e && pnpm test:smoke` 全绿，含空态与设置面板 PATCH 路径断言
-- [ ] rv-2 真实入口证据采集：截图来自 `uv run iar console` 真实服务，非组件预览；截图标注验证层级
-- [ ] 前端 build 成功：`pnpm --filter frontend-public build` 产出 `out/`
+- [ ] rv-5 通过：`just e2e tests/smoke/agent-runner-monitor.spec.ts` 全绿，含空态、后端首扫状态与设置面板 PATCH canonical path 断言
+- [ ] rv-2 真实入口证据采集：录屏来自 `uv run iar console` 真实服务，覆盖刷新前/中/后，非组件预览并标注验证层级
+- [ ] 前端 build 成功：`just frontend-public typecheck` 与 `just frontend-public build` 通过并产出 `out/`
 
 #### Documentation Acceptance
 
@@ -507,7 +533,7 @@ No external validation required; repository evidence was sufficient.
 #### Delivery Readiness
 
 - [ ] 推荐方案全量实现，无遗留 regression 或发布阻塞
-- [ ] 完成消息逐字携带 9.1 人读呈递区的全部内容（含截图），仅归档证据目录而未展示视为未交付
+- [ ] 完成消息逐字携带 9.1 人读呈递区的全部内容（含录屏、截图与观察记录），仅归档证据目录而未展示视为未交付
 - [~] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review
 - [~] PRD 归档至 tasks/archive/ — runner-owned gate: archive
 
@@ -520,12 +546,12 @@ No external validation required; repository evidence was sufficient.
 ## 10. Functional Requirements
 
 - **FR-1**：系统将每个受监控仓库的队列概览快照（内容与现有 per-repo overview 相同结构）持久化到本地数据库，记录扫描完成时间，进程重启后保留。
-- **FR-2**：dashboard 首屏数据读取本地快照而非实时扫描；无快照的仓库以空态标记返回。
-- **FR-3**：console 服务运行期间，后台循环按全局设置的间隔自动对全部受监控仓库执行全量扫描并写回快照；每周期开始前重读设置使改动即时生效；手动刷新与周期同步不得重叠执行。
-- **FR-4**：用户可在 dashboard 界面查看并修改全局同步设置（开关 + 间隔，间隔合法范围 60–3600 秒），修改立即持久化并在进程重启后保持；非法值被拒绝并返回校验错误。
-- **FR-5**：手动刷新（全部或单仓库）触发后台重扫，完成后写回快照；刷新期间页面继续显示旧数据。
-- **FR-6**：本地无任何快照时，dashboard 显示"尚未同步"空态并自动触发首次扫描。
-- **FR-7**：任一仓库扫描失败时保留该仓库旧快照，其余仓库正常更新；失败记录服务端日志。
+- **FR-2**：dashboard 首屏数据读取本地快照而非实时扫描；无快照的当前启用仓库以空态标记返回；已禁用或删除仓库即使仍有历史行也不得展示。
+- **FR-3**：console 服务运行期间，由 FastAPI lifespan 管理唯一后台 scheduler，按全局设置自动扫描并写回；不同仓库可并行，同一仓库的周期与手动扫描必须去重；设置变化立即唤醒 scheduler 重算等待时间；shutdown 后不得残留线程。
+- **FR-4**：用户可在 dashboard 界面查看并修改全局同步设置（开关 + 间隔，间隔合法范围 60–3600 秒），修改立即持久化并在进程重启后保持；非法值被拒绝，持久化失败不得返回成功。
+- **FR-5**：手动刷新（全部或单仓库）复用现有扫描产物，完成后通过单一持久化入口写回快照，不得为写库再次扫描；刷新期间页面继续显示旧数据。
+- **FR-6**：本地存在缺失快照的启用仓库时，由后端 scheduler 幂等申请首扫；dashboard 只展示"尚未同步/正在同步"并轮询结果，不从前端重复创建扫描任务。
+- **FR-7**：任一仓库扫描或快照持久化失败时保留该仓库旧快照，其余仓库正常更新；失败进入 job/批次状态并记录日志，不得伪装为刷新成功。
 - **FR-8**：dashboard 显示"上次同步时间"（取各仓库快照扫描时间的最大值），并以约 15 秒周期轮询本地快照使后台同步结果自动反映到界面。
 
 ## 11. Non-Goals
@@ -540,7 +566,8 @@ No external validation required; repository evidence was sufficient.
 ## 12. Risks And Follow-Ups
 
 - **GitHub API 配额消耗**：定时全量扫描（默认 5 分钟 × 11 仓库）会持续消耗 `gh` 配额；对绝大多数个人使用场景富余，但值得作为后续优化。跟进项：基于 `updatedAt` 的逐 issue 增量重建（需快照内维护逐 issue 时间戳索引并处理 issue 删除一致性）。
-- **长事务/并发**：后台线程写库与 UI 读库并发，已由 WAL + busy_timeout + 每次操作独立连接 + 非重入锁缓解；剩余风险为单仓库扫描期间快照新旧混合（逐仓库 upsert 的设计取舍，可接受）。
+- **并发与生命周期**：周期和手动入口共享按仓库 coordinator；不同仓库可并行、同仓库去重。scheduler 只由 FastAPI lifespan 启停，避免 import/reload/test 产生幽灵线程。剩余风险为批次期间各仓库快照时间不同（逐仓库 commit 的设计取舍，可接受且由每仓库 `scanned_at` 可见）。
+- **历史行清理**：registry 删除/禁用仓库后，旧快照行先保留以便恢复，但读取接口按当前启用 registry 过滤；物理清理不属于本次范围。
 - **发布依赖**：前端改动需经发布流水线重建静态产物并拷入包数据；本地开发缺产物时 console 以 API-only 模式启动（现有行为），验证 rv-2/rv-3 前须先构建。
 
 ## 13. Decision Log
@@ -549,9 +576,12 @@ No external validation required; repository evidence was sufficient.
 |---|---|---|---|---|
 | D-01 | 快照存哪 | console.db 新增快照表 | 扩容内存 TTL 缓存；独立 JSON 文件 | 进程重启不丢且与 run_records 等同库，内存缓存重启即丢，JSON 文件要自建并发控制而 SQLite WAL 现成 |
 | D-02 | 同步设置存哪 | console.db `monitor_settings` 表 | config.toml 回写（扩 TomlRegistryEditor） | 运行时可调偏好已有 roadmap_settings 同构端到端先例；TOML 编辑器仅覆盖 registry 子树，扩展写错影响全局共享配置 |
-| D-03 | 后台同步怎么调度 | console 进程内 daemon 线程 | 引入 APScheduler/Celery | `_warm_overview_cache`/job 已有同模式线程先例，单机工具无需新依赖与调度框架 |
+| D-03 | 后台同步怎么调度 | FastAPI lifespan 托管的 scheduler（stop/wake event） | 路由模块 import 时启动 daemon；引入 APScheduler/Celery | 一次性 cache warm 不是长期任务先例；lifespan 可保证单实例边界、即时唤醒与 shutdown 回收，同时无需新依赖 |
 | D-04 | 每周期扫描策略 | 全量扫描 | 基于 `updatedAt` 的逐 issue 增量 | 用户等待已被本地读消除，增量只省配额却引入逐 issue 索引与删除一致性复杂度 |
 | D-05 | 设置 UI 形态 | header 内联展开面板 | 新增 shadcn Dialog 组件 | `components/ui/` 无 dialog，roadmap 设置先例就是内联式，避免新增组件依赖 |
+| D-06 | 周期扫描与手动刷新如何并发 | 共享按 repo_id 的 in-flight coordinator，不同仓库并行、同仓库去重 | 全局非重入锁；两套独立锁 | 全局锁会破坏现有 per-repo 并行，两套锁又无法阻止周期与手动重复扫描 |
+| D-07 | 快照写失败如何呈现 | store 抛错，job/批次记录失败并保留旧快照 | 仅 warning 后仍返回成功 | dashboard 以 SQLite 为事实读取路径，吞错会产生“刷新成功但数据未更新”的假成功 |
+| D-08 | 首次无快照由谁触发 | 后端 scheduler 幂等申请首扫，前端仅展示状态 | 后端与前端各自触发一次 | 单一所有者可避免启动竞态导致重复 GitHub 扫描 |
 
 ### Final Reconciliation
 

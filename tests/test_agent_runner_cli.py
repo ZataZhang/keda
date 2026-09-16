@@ -729,16 +729,56 @@ def test_main_worktree_create_help_alias_h(capsys) -> None:
     assert "--branch" in combined_output
 
 
-def test_main_completion_show_zsh_outputs_script(capsys) -> None:
-    """completion show should print a zsh script for iAR."""
+def _patch_console_script_entry_points(monkeypatch) -> None:
+    """将 console script 元数据扫描替换为确定性的别名入口集合。"""
+    from importlib.metadata import EntryPoint
+
+    from backend.api import cli_completion
+
+    def fake_entry_points(**_selection_kwargs):
+        return [
+            EntryPoint(name="iar", value="backend.api.cli:main", group="console_scripts"),
+            EntryPoint(name="kedacode", value="backend.api.cli:main", group="console_scripts"),
+            EntryPoint(name="unrelated", value="other.cli:app", group="console_scripts"),
+        ]
+
+    monkeypatch.setattr(cli_completion, "entry_points", fake_entry_points)
+
+
+def test_alias_command_names_derives_from_console_scripts(monkeypatch) -> None:
+    """别名命令名应从 console script 元数据派生、去重并排除主命令。"""
+    from importlib.metadata import EntryPoint
+
+    from backend.api import cli_completion
+
+    def fake_entry_points(**_selection_kwargs):
+        return [
+            EntryPoint(name="iar", value="backend.api.cli:main", group="console_scripts"),
+            EntryPoint(name="kedacode", value="backend.api.cli:main", group="console_scripts"),
+            # 残留的旧发行版会重复声明同一入口，应被去重
+            EntryPoint(name="iar", value="backend.api.cli:main", group="console_scripts"),
+            EntryPoint(name="unrelated", value="other.cli:app", group="console_scripts"),
+        ]
+
+    monkeypatch.setattr(cli_completion, "entry_points", fake_entry_points)
+
+    assert cli_completion.alias_command_names() == ("kedacode",)
+
+
+def test_main_completion_show_zsh_outputs_script(capsys, monkeypatch) -> None:
+    """completion show should print a zsh script covering iAR and its aliases."""
     from backend.api.cli import main
 
+    _patch_console_script_entry_points(monkeypatch)
     exit_code = main(["completion", "show", "--shell", "zsh"])
     captured = capsys.readouterr()
 
     assert exit_code == 0
     assert "#compdef iar" in captured.out
     assert "_IAR_COMPLETE=complete_zsh" in captured.out
+    assert "compdef _kedacode_completion kedacode" in captured.out
+    # 补全协议环境变量固定为 _IAR_COMPLETE，别名段不得派生出独立变量名
+    assert "_KEDACODE_COMPLETE" not in captured.out
 
 
 def test_main_completion_install_zsh_writes_user_files(tmp_path, monkeypatch) -> None:
@@ -746,13 +786,16 @@ def test_main_completion_install_zsh_writes_user_files(tmp_path, monkeypatch) ->
     from backend.api.cli import main
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    _patch_console_script_entry_points(monkeypatch)
 
     exit_code = main(["completion", "install", "--shell", "zsh"])
 
     completion_path = tmp_path / ".zsh" / "completions" / "_iar"
     zshrc_path = tmp_path / ".zshrc"
     assert exit_code == 0
-    assert "#compdef iar" in completion_path.read_text(encoding="utf-8")
+    completion_text = completion_path.read_text(encoding="utf-8")
+    assert "#compdef iar" in completion_text
+    assert "compdef _kedacode_completion kedacode" in completion_text
     zshrc_text = zshrc_path.read_text(encoding="utf-8")
     assert "autoload -Uz compinit && compinit" in zshrc_text
     assert f'[ -f "{completion_path}" ] && source "{completion_path}"' in zshrc_text
@@ -771,6 +814,40 @@ def test_main_completion_protocol_matches_issue_prefix(capsys, monkeypatch) -> N
 
     assert exit_code == 0
     assert "issue" in captured.out.splitlines()
+
+
+def test_main_completion_protocol_matches_issue_prefix_via_alias(capsys, monkeypatch) -> None:
+    """Shell completion protocol should complete kedacode is<Tab> to issue commands."""
+    from backend.api.cli import main
+
+    monkeypatch.setenv("_IAR_COMPLETE", "complete_bash")
+    monkeypatch.setenv("COMP_WORDS", "kedacode is")
+    monkeypatch.setenv("COMP_CWORD", "1")
+
+    exit_code = main([])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "issue" in captured.out.splitlines()
+
+
+def test_main_returns_error_on_abort(capsys, monkeypatch) -> None:
+    """main 应在 Typer app 抛出 Abort 时打印 Aborted 并返回 1。"""
+    import typer
+
+    from backend.api import cli_typer_app
+    from backend.api.cli import main
+
+    def _aborting_app(*_app_args, **_app_kwargs):
+        raise typer.Abort()
+
+    monkeypatch.setattr(cli_typer_app, "app", _aborting_app)
+
+    exit_code = main(["issue"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Aborted." in f"{captured.out}{captured.err}"
 
 
 def test_main_rejects_repo_and_repo_id_together() -> None:

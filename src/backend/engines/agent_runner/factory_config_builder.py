@@ -481,6 +481,12 @@ def build_app_config_from_settings(
                 post_supervisor.crash_retry_initial_backoff_seconds
             ),
             crash_retry_max_backoff_seconds=(post_supervisor.crash_retry_max_backoff_seconds),
+            key_paths=tuple(post_supervisor.key_paths),
+            max_diff_chars=post_supervisor.max_diff_chars,
+            previous_findings_injection_enabled=(
+                post_supervisor.previous_findings_injection_enabled
+            ),
+            findings_artifact_dir=post_supervisor.findings_artifact_dir,
         ),
         generated_content=generated_content,
         interactive_decision=InteractiveDecisionConfig(

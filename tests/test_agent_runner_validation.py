@@ -2358,3 +2358,130 @@ def test_misplaced_rv_helper_stays_substantive(tmp_path: Path) -> None:
         ensure_no_misplaced_evidence_helpers(tmp_path, AppConfig(), fake_runner)
 
     assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
+
+
+def _fake_green_command() -> str:
+    """一条 exit 0 但什么都没验证的兜底命令（补丁 1 要抓的假绿灯）。"""
+    return "[ -d /tmp/definitely-missing ] || true"
+
+
+def _write_manifest_with_assertion(
+    evidence_dir: Path, command: str, stdout_assertions: list[dict]
+) -> None:
+    import json
+
+    manifest = {
+        "version": 1,
+        "language": "zh-CN",
+        "items": [
+            {
+                "item_number": 1,
+                "item_name": "假绿灯检查点",
+                "command": command,
+                "evidence_files": ["rv-1-fake.txt"],
+                "output_summary": "命令 exit 0。",
+                "explanation": "说明。",
+                "risks": "无",
+                "negative_control": "断言命中不存在的关键字",
+                "expected_fail": "抛 ValidationEvidenceError",
+                "stdout_assertions": stdout_assertions,
+            }
+        ],
+    }
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    (evidence_dir / "rv-1-fake.txt").write_text("placeholder", encoding="utf-8")
+    (evidence_dir / "evidence.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def test_ensure_validation_commands_pass_enforces_stdout_substring(
+    tmp_path: Path,
+) -> None:
+    """exit 0 但 stdout 缺期望关键词时判失败（rv-1：`|| true` 兜底抓假绿灯）。"""
+    command = _fake_green_command()
+    _write_manifest_with_assertion(
+        tmp_path / ".iar" / "evidence",
+        command,
+        [{"severity": "high", "pattern": "REAL_OUTPUT", "source": "stdout", "must_match": True}],
+    )
+    runner = FakeProcessRunner(
+        responses={
+            ("bash", "-lc", command): CommandResult(
+                command=("bash", "-lc", command), return_code=0, stdout="", stderr=""
+            )
+        }
+    )
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_commands_pass(
+            _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
+        )
+    failure_text = str(exc_info.value)
+    assert "REAL_OUTPUT" in failure_text
+    assert "stdout" in failure_text
+    # 假绿灯不得被写进复跑缓存，否则下一轮会被缓存固化
+    assert not (tmp_path / ".iar" / "rv_reexec_cache.json").exists()
+
+
+def test_ensure_validation_commands_pass_allows_matching_stdout(tmp_path: Path) -> None:
+    """stdout 命中期望关键词时通过，且正常写缓存。"""
+    command = _fake_green_command()
+    _write_manifest_with_assertion(
+        tmp_path / ".iar" / "evidence",
+        command,
+        [{"severity": "high", "pattern": "REAL_OUTPUT", "source": "stdout", "must_match": True}],
+    )
+    runner = FakeProcessRunner(
+        responses={
+            ("bash", "-lc", command): CommandResult(
+                command=("bash", "-lc", command),
+                return_code=0,
+                stdout="probe REAL_OUTPUT ok",
+                stderr="",
+            )
+        }
+    )
+    ensure_validation_commands_pass(
+        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
+    )
+
+
+def test_ensure_validation_commands_pass_enforces_stdout_must_not_contain(
+    tmp_path: Path,
+) -> None:
+    """must_match=false 的断言：出现禁用关键词即失败。"""
+    command = "demo run"
+    _write_manifest_with_assertion(
+        tmp_path / ".iar" / "evidence",
+        command,
+        [{"severity": "high", "pattern": "Traceback", "source": "stderr", "must_match": False}],
+    )
+    runner = FakeProcessRunner(
+        responses={
+            ("bash", "-lc", command): CommandResult(
+                command=("bash", "-lc", command),
+                return_code=0,
+                stdout="done",
+                stderr="Traceback (most recent call last)",
+            )
+        }
+    )
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_commands_pass(
+            _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
+        )
+    assert "Traceback" in str(exc_info.value)
+    assert "stderr" in str(exc_info.value)
+
+
+def test_ensure_validation_commands_pass_accepts_legacy_manifest_without_assertions(
+    tmp_path: Path,
+) -> None:
+    """旧 manifest（无 stdout_assertions）行为不变：只看退出码（rv-2）。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    _write_manifest(evidence_dir)
+    runner = FakeProcessRunner()
+    ensure_validation_commands_pass(
+        _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
+    )
+    assert ["bash", "-lc", "demo run"] in runner.raw_calls

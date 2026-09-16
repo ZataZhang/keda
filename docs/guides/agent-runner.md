@@ -60,6 +60,10 @@ iar completion show --shell zsh
 
 `completion install` 同时支持 `--shell bash` 和 `--shell fish`。
 
+补全同时覆盖 `kedacode` 别名入口（别名清单从分发的 `[project.scripts]` 元数据派生），
+`kedacode is<Tab>` 与 `iar is<Tab>` 行为一致；旧版本安装的补全重跑一次
+`iar completion install` 即可升级。
+
 ## labels sync 详解
 
 `iar labels sync` 会在目标 GitHub 仓库中创建或更新一套标准化的 issue 标签，作为整个 agent-runner 工作流的状态基础设施。

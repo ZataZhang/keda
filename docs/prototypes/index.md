@@ -11,6 +11,7 @@
 
 ## 示例入口
 
+- [Roadmap 单 PRD 控制、验收证据与 Autopilot 草图](roadmap-prd-controls-evidence-autopilot.md)
 - [PRD Demo 可交互原型](prd-demo.html)
 - [Worktree 前端依赖策略 Demo](worktree-frontend-demo.html)
 - [Assets 命名规范](assets/README.md)

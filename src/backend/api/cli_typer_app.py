@@ -377,7 +377,9 @@ def main(argv: list[str] | None = None) -> int:
     except typer_click.exceptions.ClickException as exc:
         exc.show()
         return exc.exit_code
-    except typer_click.exceptions.Abort:
+    # Abort 必须走 typer 公开 API：typer 0.27 起私有 `_click.exceptions` 不再导出 Abort，
+    # 而 typer.Abort 在新旧版本都与实际抛出的类保持同一身份。
+    except typer.Abort:
         error_console.print("[red]Aborted.[/]")
         return 1
     except SystemExit as exc:
