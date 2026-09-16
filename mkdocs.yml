@@ -70,6 +70,8 @@ nav:
       - IAR Loop 定时任务: guides/iar-loop.md
   - 原型演示:
       - 概览: prototypes/index.md
+      - Prototype Hub: prototypes/hub.html
+      - Roadmap CI/CD 监控与自动修复草图: prototypes/roadmap-prd-cicd-auto-repair.md
       - Roadmap 单 PRD 控制与 Autopilot 草图: prototypes/roadmap-prd-controls-evidence-autopilot.md
       - PRD Demo UI: prototypes/prd-demo.html
       - Worktree 前端依赖策略: prototypes/worktree-frontend-demo.html

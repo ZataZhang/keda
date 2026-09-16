@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>原型目录 · keda</title>
+    <link rel="stylesheet" href="./assets/prototype-common.css" />
+    <link rel="stylesheet" href="./assets/prototype-hub.css" />
+  </head>
+  <body>
+    <main class="hub-app">
+      <aside class="hub-sidebar" aria-label="原型目录导航">
+        <a class="hub-brand" href="./hub.html" aria-label="返回原型目录首页">
+          <span class="hub-brand-mark">P</span><span>原型目录</span>
+        </a>
+        <nav class="hub-nav" aria-label="原型分类">
+          <button class="hub-nav-item is-active" type="button" data-nav-filter="all"><span>▦</span>全部原型 <strong data-total-count>0</strong></button>
+          <button class="hub-nav-item" type="button" data-nav-filter="image-state"><span>□</span>图片原型</button>
+          <button class="hub-nav-item" type="button" data-nav-filter="code-native"><span>◇</span>交互原型</button>
+          <button class="hub-nav-item" type="button" data-nav-filter="available"><span>✓</span>当前可用</button>
+        </nav>
+        <div class="hub-sidebar-footer">
+          <a class="hub-secondary-link" href="./component-library.html"><span>▤</span>组件库</a>
+          <a href="./">原型规范</a><span>仅管理原型资产与入口</span>
+        </div>
+      </aside>
+
+      <section class="hub-workspace">
+        <header class="hub-header">
+          <div>
+            <p class="hub-eyebrow">Prototype Library</p>
+            <h1>原型目录</h1>
+            <p>集中检索、预览并打开 keda 的产品原型。</p>
+          </div>
+          <div class="hub-view-note"><span class="status-dot"></span>目录视图</div>
+        </header>
+
+        <section class="hub-toolbar" aria-label="筛选原型">
+          <label class="hub-search"><span aria-hidden="true">⌕</span><input id="prototype-search" type="search" placeholder="搜索原型名称或描述" /></label>
+          <label><span class="sr-only">项目</span><select id="project-filter"><option value="all">全部项目</option></select></label>
+          <label><span class="sr-only">模块</span><select id="module-filter"><option value="all">全部模块</option></select></label>
+          <label><span class="sr-only">原型形式</span><select id="form-filter"><option value="all">全部形式</option><option value="image-state">图片原型</option><option value="code-native">交互原型</option></select></label>
+          <label><span class="sr-only">可用状态</span><select id="availability-filter"><option value="all">全部状态</option><option value="available">可用</option><option value="archived">已归档</option></select></label>
+        </section>
+
+        <div class="hub-content">
+          <section class="catalog-panel" aria-labelledby="catalog-heading">
+            <div class="catalog-summary">
+              <div><h2 id="catalog-heading">全部原型</h2><p><span id="visible-count">0</span> 个结果</p></div>
+              <button id="clear-filters" class="text-button" type="button">清除筛选</button>
+            </div>
+            <div class="catalog-table-wrap">
+              <table class="catalog-table">
+                <thead><tr><th>预览</th><th>原型名称</th><th>项目</th><th>模块</th><th>原型形式</th><th>版本</th><th>更新时间</th><th>可用状态</th></tr></thead>
+                <tbody id="prototype-list"></tbody>
+              </table>
+              <div id="empty-state" class="empty-state" hidden><strong>没有匹配的原型</strong><span>调整关键词或筛选条件后再试。</span></div>
+            </div>
+          </section>
+          <aside id="prototype-detail" class="detail-panel" aria-live="polite"></aside>
+        </div>
+      </section>
+    </main>
+    <script src="./assets/prototype-hub.js"></script>
+  </body>
+</html>

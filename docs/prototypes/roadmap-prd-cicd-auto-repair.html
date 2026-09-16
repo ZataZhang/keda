@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CI/CD 监控与自动修复 · 交互原型</title>
+    <link rel="stylesheet" href="./assets/prototype-common.css" />
+    <link rel="stylesheet" href="./assets/roadmap-prd-cicd-flow.css" />
+  </head>
+  <body>
+    <main class="flow-shell">
+      <header class="flow-header">
+        <div>
+          <p class="flow-eyebrow">Interactive prototype</p>
+          <h1>CI/CD 监控与自动修复</h1>
+          <p id="state-description">PRD 完成后，系统自动等待 GitHub Checks。</p>
+        </div>
+        <div class="flow-header-actions">
+          <a class="flow-link" href="./hub.html">返回原型目录</a>
+        </div>
+      </header>
+
+      <nav class="flow-steps" aria-label="原型状态">
+        <button type="button" data-state="waiting"><span>1</span>等待检查</button>
+        <button type="button" data-state="repairing"><span>2</span>自动修复</button>
+        <button type="button" data-state="rechecking"><span>3</span>重新检查</button>
+        <button type="button" data-state="passed"><span>4</span>检查通过</button>
+      </nav>
+
+      <section class="flow-stage" aria-live="polite">
+        <div class="flow-canvas">
+          <img id="state-image" src="./assets/roadmap-prd-cicd-01-waiting.png" alt="等待 CI/CD 检查状态" />
+          <div id="hotspot-layer" class="hotspot-layer"></div>
+        </div>
+        <div class="flow-hint" id="flow-hint">点击“模拟检查失败”查看自动修复如何启动。</div>
+      </section>
+
+      <footer class="flow-controls">
+        <button id="previous-state" class="flow-button is-secondary" type="button">上一步</button>
+        <p>主流程请直接点击原型图中的控件；顶部步骤仅用于快速预览。</p>
+      </footer>
+    </main>
+    <script src="./assets/roadmap-prd-cicd-flow.js"></script>
+  </body>
+</html>

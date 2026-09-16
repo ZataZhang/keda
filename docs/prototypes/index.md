@@ -11,6 +11,8 @@
 
 ## 示例入口
 
+- [Prototype Hub（原型总览）](hub.html)
+- [Roadmap PRD 完成后 CI/CD 监控与自动修复草图](roadmap-prd-cicd-auto-repair.md)
 - [Roadmap 单 PRD 控制、验收证据与 Autopilot 草图](roadmap-prd-controls-evidence-autopilot.md)
 - [PRD Demo 可交互原型](prd-demo.html)
 - [Worktree 前端依赖策略 Demo](worktree-frontend-demo.html)

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>keda 原型组件库</title>
+    <link rel="stylesheet" href="./assets/prototype-common.css" />
+    <link rel="stylesheet" href="./assets/component-library.css" />
+  </head>
+  <body>
+    <main class="library-shell">
+      <aside class="library-sidebar">
+        <a class="library-brand" href="./component-library.html"><span>K</span>组件库</a>
+        <nav aria-label="组件分类">
+          <button class="is-active" type="button" data-category="all">全部组件 <strong>6</strong></button>
+          <button type="button" data-category="actions">操作</button>
+          <button type="button" data-category="display">数据展示</button>
+          <button type="button" data-category="inputs">输入</button>
+          <button type="button" data-category="feedback">反馈</button>
+        </nav>
+        <a class="back-link" href="./hub.html">← 返回原型目录</a>
+      </aside>
+
+      <section class="library-main">
+        <header class="library-header">
+          <div><p>Prototype design system</p><h1>全部组件</h1><span>点击组件行展开样例、状态和使用说明。</span></div>
+          <label class="component-search">⌕ <input id="component-search" type="search" placeholder="搜索组件" /></label>
+        </header>
+
+        <section class="component-directory" id="component-grid" aria-label="组件目录">
+          <div class="directory-head"><span></span><span>组件</span><span>分类</span><span>包含内容</span><span>状态</span><span></span></div>
+
+          <details id="buttons" class="component-entry" data-category="actions" data-search="按钮 button action">
+            <summary><span class="component-icon">B</span><strong>按钮</strong><span>操作</span><span>主要、次要、危险、禁用</span><span class="entry-status">可用</span><i>⌄</i></summary>
+            <div class="component-preview"><div class="component-row"><button class="ui-button">主要操作</button><button class="ui-button secondary">次要操作</button><button class="ui-button danger">危险操作</button><button class="ui-button" disabled>处理中…</button></div><p class="usage-note">一个区域只保留一个主要操作；异步状态保持原宽度。</p><a class="component-detail-link" href="./component-detail.html?component=buttons">查看完整组件 →</a></div>
+          </details>
+
+          <details id="badges" class="component-entry" data-category="display" data-search="状态 标签 badge status">
+            <summary><span class="component-icon">●</span><strong>状态标签</strong><span>数据展示</span><span>成功、运行、等待、失败</span><span class="entry-status">可用</span><i>⌄</i></summary>
+            <div class="component-preview"><div class="component-row"><span class="ui-badge success">● 已通过</span><span class="ui-badge info">运行中</span><span class="ui-badge warning">等待检查</span><span class="ui-badge danger">失败</span><span class="ui-badge neutral">未开始</span></div><p class="usage-note">颜色与文字同时表达状态，避免仅依赖颜色。</p><a class="component-detail-link" href="./component-detail.html?component=badges">查看完整组件 →</a></div>
+          </details>
+
+          <details id="cards" class="component-entry" data-category="display" data-search="卡片 card metrics issue">
+            <summary><span class="component-icon">▢</span><strong>卡片</strong><span>数据展示</span><span>指标、问题、空状态</span><span class="entry-status">可用</span><i>⌄</i></summary>
+            <div class="component-preview"><div class="card-examples"><section class="metric-card"><span>受管理仓库</span><strong>6</strong><small>其中 4 个正在运行</small></section><section class="status-card"><div><span class="ui-badge danger">失败</span><strong>backend / typecheck</strong></div><p>SessionSnapshot 缺少 resume_token 字段</p><button class="text-action" data-toast="已打开问题详情">查看详情 →</button></section><section class="empty-card"><strong>暂无待处理问题</strong><p>所有检查均已通过。</p></section></div><a class="component-detail-link" href="./component-detail.html?component=cards">查看完整组件 →</a></div>
+          </details>
+
+          <details id="table" class="component-entry" data-category="display" data-search="表格 table row selection">
+            <summary><span class="component-icon">▤</span><strong>表格</strong><span>数据展示</span><span>表头、行选择、状态列</span><span class="entry-status">可用</span><i>⌄</i></summary>
+            <div class="component-preview"><div class="table-wrap"><table class="ui-table"><thead><tr><th>名称</th><th>模块</th><th>状态</th><th>更新时间</th></tr></thead><tbody><tr tabindex="0"><td>CI/CD 自动修复</td><td>Roadmap</td><td><span class="ui-badge success">可用</span></td><td>刚刚</td></tr><tr tabindex="0"><td>验收证据浏览</td><td>Roadmap</td><td><span class="ui-badge info">验证中</span></td><td>10 分钟前</td></tr><tr tabindex="0"><td>Worktree 依赖策略</td><td>Developer Experience</td><td><span class="ui-badge neutral">已归档</span></td><td>2026-07-07</td></tr></tbody></table></div><p class="usage-note">点击任一行查看选中反馈。</p><a class="component-detail-link" href="./component-detail.html?component=table">查看完整组件 →</a></div>
+          </details>
+
+          <details id="forms" class="component-entry" data-category="inputs" data-search="表单 input select switch checkbox progress tabs">
+            <summary><span class="component-icon">⌨</span><strong>表单与选择</strong><span>输入</span><span>输入框、选择器、开关、Tabs</span><span class="entry-status">可用</span><i>⌄</i></summary>
+            <div class="component-preview"><div class="tabs" role="tablist"><button class="is-active" data-tab="basic" type="button">基础字段</button><button data-tab="controls" type="button">控制项</button></div><div class="tab-panel" data-panel="basic"><label>原型名称<input value="CI/CD 自动修复" /></label><label>所属模块<select><option>Roadmap</option><option>Processes</option></select></label><label class="field-wide">说明<textarea rows="3">用于验证多轮检查与自动修复流程。</textarea></label></div><div class="tab-panel" data-panel="controls" hidden><label class="check-row"><input type="checkbox" checked />显示已归档原型</label><label class="switch-row"><input type="checkbox" role="switch" checked />允许直接打开交互原型</label><div class="progress-block"><span>生成进度 <strong>72%</strong></span><div><i></i></div></div></div><a class="component-detail-link" href="./component-detail.html?component=forms">查看完整组件 →</a></div>
+          </details>
+
+          <details id="feedback" class="component-entry" data-category="feedback" data-search="反馈 dialog toast modal 浮层">
+            <summary><span class="component-icon">!</span><strong>反馈与浮层</strong><span>反馈</span><span>Dialog、Toast</span><span class="entry-status">可用</span><i>⌄</i></summary>
+            <div class="component-preview"><div class="component-row"><button id="open-dialog" class="ui-button">打开确认弹窗</button><button class="ui-button secondary" data-toast="原型链接已复制">显示 Toast</button></div><a class="component-detail-link" href="./component-detail.html?component=feedback">查看完整组件 →</a></div>
+          </details>
+        </section>
+        <div id="library-empty" class="library-empty" hidden>没有匹配的组件。</div>
+      </section>
+    </main>
+
+    <div id="dialog-backdrop" class="dialog-backdrop" hidden><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><h2 id="dialog-title">归档这个原型？</h2><p>归档后仍可在 Hub 的“已归档”筛选中找到。</p><div><button id="close-dialog" class="ui-button secondary">取消</button><button class="ui-button danger" data-toast="原型已归档">确认归档</button></div></section></div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script src="./assets/component-library.js"></script>
+  </body>
+</html>
