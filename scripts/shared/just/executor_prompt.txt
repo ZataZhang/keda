@@ -11,6 +11,7 @@ Your workflow is mandatory and structured as follows:
 6. If the PRD touches frontend-admin/ or frontend-public/, you MUST run Playwright e2e tests and include at least one visual evidence file (.png, .jpg, or .webm) in <EVIDENCE_DIR>/. Describe what the screenshot/video proves.
 7. Run `./scripts/shared/just/scan_evidence_secrets.sh <EVIDENCE_DIR>` and resolve every hit before submitting. Do not hand a leaking evidence package to the verifier.
 8. Do NOT mark PRD Acceptance Checklist items as [x] yet. An independent verifier will review your evidence next. Stop after writing the evidence report.
+9. **After the verifier returns PASS, tick the checklist yourself** (same session or a later one, e.g. when asked to wrap up or archive). Mark `[x]` on every item the evidence actually proves and name its evidence file beside the item (e.g. `- [x] rv-2 …（证据：rv-2.log）`). Machine-verifiable items are the **executor's** to tick — leaving them for the human is incomplete delivery, not caution. Keep `Human-Confirmed` items unchecked until the human has confirmed them, then tick with the observed result (what was seen, not "tests passed"). Archiving stays blocked while any unchecked item remains.
 
 ## Why step 2 comes before step 3
 
@@ -45,4 +46,5 @@ The verifier's findings are labelled `BLOCKER`, `SECURITY`, or `NON-BLOCKING`.
 
 - Fix `BLOCKER` findings and resubmit. Fix `SECURITY` findings immediately, but they do not by themselves require a new verification round.
 - `NON-BLOCKING` findings do not require a resubmission. Address them if cheap, otherwise leave them listed in the evidence report as known and accepted.
+- On a `PASS` verdict, complete step 9 before you stop: a PASS round that leaves machine-verifiable boxes unchecked is an incomplete delivery, not a safer one. Only `Human-Confirmed` items may stay open, and they stay open until the human answers.
 - There is a maximum of 2 verification rounds. If `BLOCKER` items still stand after round 2, stop. Do not start a third round. Append an `## Open Items For Human Review` section to the evidence report listing each unresolved `BLOCKER`, what you tried, and what decision is needed. Escalating an honest open item is the correct outcome; grinding a third round is not.

@@ -5,18 +5,19 @@
 本身需要变更时才改本文件，并同步更新相关约定文档。详见
 ``docs/ai-standards/testing.md`` 的 Guard Tests 小节。
 
-被测对象：``scripts/shared/just/prd_status.py`` 的 ACTIVITY 与 DEPS 列。核心不变量：
+被测对象：``scripts/shared/just/prd_status.py`` 的 CHECKLIST / EVIDENCE / ACTIVITY /
+DEPS 列。核心不变量：
 
 1. **无锁但存在分支名匹配的 worktree、且其中未归档该 PRD 时必须亮 ``⚠ unlocked``
    警告。** 互斥依赖执行锁；绕过 ``just prd start`` / ``just implement`` 直接拿
    worktree 开工（裸 ``git worktree add`` 或旧版脚本路径）不会产生锁，看板若
    静默显示 ``-``，"同一条 PRD 两个会话撞车"的漏洞就被掩盖——必须把互斥未
    生效摆到台面上。
-2. **分支上已归档的 PRD 不得继续按 ``⚠ unlocked`` 报警。** 匹配 worktree 的
-   ``tasks/archive`` 里已有该 PRD 时，说明收尾已在分支完成、只差合并回主线；
-   继续亮 ⚠ 会误导人重新执行一个已完成的 PRD。ACTIVITY 应显示绿色
-   ``✔ branch-archived @<branch> · <n>/<m> · awaiting merge``（清单进度取
-   归档副本的真实勾选）。
+2. **分支上已归档的 PRD 优先于一切锁信号。** 匹配 worktree 的 ``tasks/archive``
+   里已有该 PRD 时，说明收尾已在分支完成、只差合并回主线。ACTIVITY 必须显示绿色
+   ``✔ branch-archived @<branch> · awaiting merge``，不得因残留锁渲染成 RUNNING /
+   STALE，也不得按 ``⚠ unlocked`` 报警——三种渲染都会误导人重新执行一个已完成
+   的 PRD。清单进度不在这里重复携带：它由同样读分支副本的 CHECKLIST 列承担。
 3. **心跳过期不等于会话已死。** 锁归属 worktree 在过期窗口内仍有文件改动时，
    ACTIVITY 仍按 RUNNING 渲染；只有心跳过期且 worktree 无活性佐证时才显示
    STALE。否则长会话每 30 分钟翻红一次，看板可信度会被狼来了磨光。
@@ -26,6 +27,17 @@
    交付阶段才暴露。``none`` gate 与无 §8 章节保持 ``-``，不给无依赖的 PRD
    制造噪声；本地无法判定的引用（Issue 号、悬空路径）用 ``?`` 显式标出而不是
    猜一个结论。
+5. **ACTIVITY 的位置标签绝不显示并不存在的分支。** 锁归属主仓库（``worktree``
+   为空）时必须显示 ``@主仓库``；归属 worktree 目录已消失且锁里的分支也无处检出时
+   显示归属标签本身。锁里的 ``branch`` 只是领锁瞬间的快照——``just implement``
+   在主仓库领锁、worktree 还没建出来时就会写入分支名，照抄它会让用户拿着
+   ``just worktree -o`` 去打一个根本打不开的名字。
+6. **清单进度与证据包取分支副本。** 执行发生在 worktree 里，主仓库的
+   ``tasks/pending`` 副本与证据目录要等合并回主线才更新；只读它们会让"分支上早已
+   勾完、看板仍显示 0/21"长期挂着（keda 的真实案例）。worktree 内按
+   ``tasks/archive`` → ``tasks/pending`` 取清单副本，证据每个槽位单独兜底。
+   只认 slug 匹配到的那个 worktree——每个 worktree 都带一份未改动的同名 pending
+   副本，拿错副本会显示别的分支的陈旧进度。
 """
 
 from __future__ import annotations
@@ -44,6 +56,7 @@ _JUST_SCRIPTS_PATH = Path(__file__).resolve().parents[3] / "scripts" / "shared" 
 if str(_JUST_SCRIPTS_PATH) not in sys.path:
     sys.path.insert(0, str(_JUST_SCRIPTS_PATH))
 
+import prd_lock  # noqa: E402
 import prd_status  # noqa: E402
 
 _FIXTURE_PRD_NAME = "P2-FEAT-20260101-000000-avatar-upload"
@@ -132,21 +145,51 @@ def _write_lock(
 
 def _render_activity_cell(repo_path: Path) -> str:
     """读取 fixture PRD 并渲染 ACTIVITY 单元格（无颜色）。"""
-    prd_record = prd_status.collect_prd_record(
-        repo_path / _FIXTURE_PRD_RELATIVE_PATH, repo_path / "tasks" / "evidence"
-    )
     return prd_status.format_activity_cell(
-        prd_record, repo_path, repo_path / "tasks" / "evidence", _PLAIN_PALETTE
+        _collect_fixture_record(repo_path),
+        repo_path,
+        repo_path / "tasks" / "evidence",
+        _PLAIN_PALETTE,
     )
+
+
+def _collect_fixture_record(repo_path: Path) -> prd_status.PrdRecord:
+    """收集 fixture PRD 的看板记录，工作树列表按仓库现状实时获取。"""
+    return prd_status.collect_prd_record(
+        repo_path / _FIXTURE_PRD_RELATIVE_PATH,
+        repo_path / "tasks" / "evidence",
+        prd_lock.list_linked_worktree_branches(repo_path),
+    )
+
+
+def _render_checklist_cell(repo_path: Path) -> str:
+    """渲染 CHECKLIST 单元格（无颜色）。"""
+    return prd_status.format_checklist_cell(_collect_fixture_record(repo_path), _PLAIN_PALETTE)
+
+
+def _render_evidence_cell(repo_path: Path) -> str:
+    """渲染 EVIDENCE 单元格（无颜色）。"""
+    return prd_status.format_evidence_cell(_collect_fixture_record(repo_path), _PLAIN_PALETTE)
+
+
+def _checklist_prd_text(checked_item_count: int, unchecked_item_count: int) -> str:
+    """生成带指定勾选数量的 fixture PRD 正文，用于构造分支副本与主仓库副本的差异。"""
+    checked_items_text = "".join(
+        f"- [x] item {item_index}\n" for item_index in range(1, checked_item_count + 1)
+    )
+    unchecked_items_text = "".join(
+        f"- [ ] item {item_index}\n"
+        for item_index in range(
+            checked_item_count + 1, checked_item_count + unchecked_item_count + 1
+        )
+    )
+    return f"# fixture PRD\n\n## Acceptance Checklist\n\n{checked_items_text}{unchecked_items_text}"
 
 
 def _render_deps_cell(repo_path: Path) -> str:
     """读取 fixture PRD 并渲染 DEPS 单元格（无颜色）。"""
-    prd_record = prd_status.collect_prd_record(
-        repo_path / _FIXTURE_PRD_RELATIVE_PATH, repo_path / "tasks" / "evidence"
-    )
     return prd_status.format_deps_cell(
-        prd_record,
+        _collect_fixture_record(repo_path),
         repo_path / "tasks" / "pending",
         repo_path / "tasks" / "archive",
         _PLAIN_PALETTE,
@@ -198,24 +241,87 @@ def test_no_lock_with_worktree_archived_prd_renders_branch_archived(tmp_path: Pa
     raw_cell_text = _render_activity_cell(main_repo_path)
 
     assert "✔ branch-archived @feat/avatar-upload" in raw_cell_text
-    assert "2/2" in raw_cell_text
     assert "awaiting merge" in raw_cell_text
     assert "unlocked" not in raw_cell_text
+    # 进度不再由 ACTIVITY 重复携带，CHECKLIST 列直接取分支归档副本的真实勾选。
+    assert not re.search(r"\d+/\d+", raw_cell_text)
+    assert _render_checklist_cell(main_repo_path) == "2/2"
 
 
-def test_branch_archived_without_checklist_omits_progress(tmp_path: Path) -> None:
-    """归档副本没有清单小节时不显示 n/m 进度，branch-archived 与合并提示保留。"""
+def test_branch_archived_copy_without_checklist_shows_dash_in_checklist(tmp_path: Path) -> None:
+    """分支归档副本没有清单小节：CHECKLIST 显示 ``-``，ACTIVITY 仍报 branch-archived。"""
     main_repo_path = _init_main_repo(tmp_path / "repo")
     linked_worktree_path = _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-plain")
     archived_prd_path = linked_worktree_path / "tasks" / "archive" / f"{_FIXTURE_PRD_NAME}.md"
     archived_prd_path.parent.mkdir(parents=True, exist_ok=True)
     archived_prd_path.write_text("# fixture PRD\n\n无清单小节。\n", encoding="utf-8")
 
+    raw_activity_text = _render_activity_cell(main_repo_path)
+
+    assert "✔ branch-archived @feat/avatar-upload" in raw_activity_text
+    assert "awaiting merge" in raw_activity_text
+    assert not re.search(r"\d+/\d+", raw_activity_text)
+    # 分支副本是执行现场的真相：归档副本没有清单小节时显示 -，不回退主仓库副本。
+    assert _render_checklist_cell(main_repo_path) == "-"
+
+
+def test_stale_lock_with_archived_branch_renders_branch_archived(tmp_path: Path) -> None:
+    """过期锁（无活性佐证）遇到分支已归档：archive 优先，不得继续报 STALE。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(
+        main_repo_path, "feat/avatar-upload", "wt-done-idle"
+    )
+    _write_lock(
+        main_repo_path,
+        heartbeat_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        holder_worktree=os.path.relpath(linked_worktree_path, main_repo_path),
+    )
+    archived_prd_path = linked_worktree_path / "tasks" / "archive" / f"{_FIXTURE_PRD_NAME}.md"
+    archived_prd_path.parent.mkdir(parents=True, exist_ok=True)
+    archived_prd_path.write_text(
+        "# fixture PRD\n\n## Acceptance Checklist\n\n- [x] item one\n",
+        encoding="utf-8",
+    )
+    # 归档动作本身会刷新 mtime；把 worktree 内文件全部拨到过期窗口外，确保锁真的
+    # 落在 STALE 分支（无活性佐证），证明是归档优先级压过 STALE 而非撞上 RUNNING。
+    idle_mtime_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).timestamp()
+    for existing_file_path in linked_worktree_path.rglob("*"):
+        if existing_file_path.is_file():
+            os.utime(existing_file_path, (idle_mtime_timestamp, idle_mtime_timestamp))
+
     raw_cell_text = _render_activity_cell(main_repo_path)
 
-    assert "✔ branch-archived @feat/avatar-upload" in raw_cell_text
+    assert raw_cell_text.startswith("✔ branch-archived @feat/avatar-upload")
     assert "awaiting merge" in raw_cell_text
+    assert "STALE" not in raw_cell_text
+    assert "RUNNING" not in raw_cell_text
+
+
+def test_fresh_lock_with_archived_branch_renders_branch_archived(tmp_path: Path) -> None:
+    """新鲜锁遇到分支已归档：archive 无条件优先，RUNNING 也不得盖住归档提示。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(
+        main_repo_path, "feat/avatar-upload", "wt-done-live"
+    )
+    _write_lock(
+        main_repo_path,
+        heartbeat_at=datetime.now(timezone.utc),
+        holder_worktree=os.path.relpath(linked_worktree_path, main_repo_path),
+    )
+    archived_prd_path = linked_worktree_path / "tasks" / "archive" / f"{_FIXTURE_PRD_NAME}.md"
+    archived_prd_path.parent.mkdir(parents=True, exist_ok=True)
+    archived_prd_path.write_text(
+        "# fixture PRD\n\n## Acceptance Checklist\n\n- [x] item one\n- [x] item two\n",
+        encoding="utf-8",
+    )
+
+    raw_cell_text = _render_activity_cell(main_repo_path)
+
+    assert raw_cell_text.startswith("✔ branch-archived @feat/avatar-upload")
+    assert "awaiting merge" in raw_cell_text
+    assert "RUNNING" not in raw_cell_text
     assert not re.search(r"\d+/\d+", raw_cell_text)
+    assert _render_checklist_cell(main_repo_path) == "2/2"
 
 
 def test_no_lock_without_matching_worktree_falls_back_to_dash(tmp_path: Path) -> None:
@@ -282,6 +388,72 @@ def test_fresh_lock_renders_running_without_worktree_activity(tmp_path: Path) ->
     raw_cell_text = _render_activity_cell(main_repo_path)
 
     assert raw_cell_text.startswith("RUNNING")
+
+
+def test_fresh_lock_held_from_main_repo_shows_main_repo_location(tmp_path: Path) -> None:
+    """锁归属主仓库（worktree 为空）：位置显示 @主仓库，不显示尚不存在的分支。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    _write_lock(
+        main_repo_path,
+        heartbeat_at=datetime.now(timezone.utc),
+        holder_worktree="",
+        holder_branch="fcl-sam-to-mex-platform-skill-sync",
+    )
+
+    raw_cell_text = _render_activity_cell(main_repo_path)
+
+    assert raw_cell_text.startswith("RUNNING")
+    assert raw_cell_text.endswith("@主仓库")
+    assert "fcl-sam-to-mex-platform-skill-sync" not in raw_cell_text
+
+
+def test_fresh_lock_with_missing_worktree_does_not_advertise_branch(tmp_path: Path) -> None:
+    """归属 worktree 目录已消失且分支无处检出：显示归属标签，不显示该分支。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    _write_lock(
+        main_repo_path,
+        heartbeat_at=datetime.now(timezone.utc),
+        holder_worktree="../wt-gone",
+        holder_branch="feat/avatar-upload",
+    )
+
+    raw_cell_text = _render_activity_cell(main_repo_path)
+
+    assert raw_cell_text.startswith("RUNNING")
+    assert "@../wt-gone" in raw_cell_text
+    assert "@feat/avatar-upload" not in raw_cell_text
+
+
+def test_fresh_lock_location_prefers_actual_worktree_branch(tmp_path: Path) -> None:
+    """归属 worktree 仍存在时显示它当前实际检出的分支，而不是锁里的过期分支字段。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-live")
+    _write_lock(
+        main_repo_path,
+        heartbeat_at=datetime.now(timezone.utc),
+        holder_worktree=os.path.relpath(linked_worktree_path, main_repo_path),
+        holder_branch="main",
+    )
+
+    raw_cell_text = _render_activity_cell(main_repo_path)
+
+    assert "@feat/avatar-upload" in raw_cell_text
+
+
+def test_fresh_lock_location_uses_branch_checked_out_elsewhere(tmp_path: Path) -> None:
+    """归属目录已消失但锁里的分支确实检出在某个 worktree：显示那个真实分支。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-moved")
+    _write_lock(
+        main_repo_path,
+        heartbeat_at=datetime.now(timezone.utc),
+        holder_worktree="../wt-old-path",
+        holder_branch="feat/avatar-upload",
+    )
+
+    raw_cell_text = _render_activity_cell(main_repo_path)
+
+    assert "@feat/avatar-upload" in raw_cell_text
 
 
 def test_hard_gate_with_pending_dependency_shows_blocked(tmp_path: Path) -> None:
@@ -364,9 +536,7 @@ def test_soft_gate_with_pending_dependency_shows_soft_hint(tmp_path: Path) -> No
 def test_render_prd_table_header_includes_deps_column(tmp_path: Path, capsys) -> None:
     """表头必须含 DEPS 列——依赖可见性的唯一入口，不得被静默移除。"""
     main_repo_path = _init_main_repo(tmp_path / "repo")
-    prd_record = prd_status.collect_prd_record(
-        main_repo_path / _FIXTURE_PRD_RELATIVE_PATH, main_repo_path / "tasks" / "evidence"
-    )
+    prd_record = _collect_fixture_record(main_repo_path)
 
     prd_status.render_prd_table(
         [prd_record],
@@ -380,3 +550,81 @@ def test_render_prd_table_header_includes_deps_column(tmp_path: Path, capsys) ->
 
     assert "DEPS" in raw_output_text
     assert "ACTIVITY" in raw_output_text
+
+
+def test_checklist_progress_prefers_branch_pending_copy(tmp_path: Path) -> None:
+    """分支 pending 副本已勾完、主仓库副本仍是 0：CHECKLIST 显示分支副本的进度。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo", prd_text=_checklist_prd_text(0, 2))
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-progress")
+    (linked_worktree_path / _FIXTURE_PRD_RELATIVE_PATH).write_text(
+        _checklist_prd_text(2, 0), encoding="utf-8"
+    )
+
+    assert _render_checklist_cell(main_repo_path) == "2/2"
+
+
+def test_checklist_progress_prefers_branch_archive_copy_over_pending(tmp_path: Path) -> None:
+    """分支内同时存在 archive 与 pending 副本时，收尾态（archive）优先。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo", prd_text=_checklist_prd_text(0, 2))
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-both")
+    (linked_worktree_path / _FIXTURE_PRD_RELATIVE_PATH).write_text(
+        _checklist_prd_text(1, 1), encoding="utf-8"
+    )
+    archived_prd_path = linked_worktree_path / "tasks" / "archive" / f"{_FIXTURE_PRD_NAME}.md"
+    archived_prd_path.parent.mkdir(parents=True, exist_ok=True)
+    archived_prd_path.write_text(_checklist_prd_text(2, 0), encoding="utf-8")
+
+    assert _render_checklist_cell(main_repo_path) == "2/2"
+
+
+def test_checklist_progress_ignores_unrelated_worktree_copy(tmp_path: Path) -> None:
+    """每个 worktree 都带一份未改动的同名副本；只有 slug 匹配的 worktree 才算分支副本。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo", prd_text=_checklist_prd_text(0, 2))
+    _add_linked_worktree(main_repo_path, "feat/unrelated-thing", "wt-unrelated-copy")
+    # 主仓库副本在 worktree 建好之后才被勾选；无关 worktree 里那份仍是 0/2。
+    (main_repo_path / _FIXTURE_PRD_RELATIVE_PATH).write_text(
+        _checklist_prd_text(2, 0), encoding="utf-8"
+    )
+
+    assert _render_checklist_cell(main_repo_path) == "2/2"
+
+
+def test_evidence_cell_reads_branch_evidence_dir(tmp_path: Path) -> None:
+    """证据写在分支证据目录、主仓库还没有时，EVIDENCE 必须把它显示出来。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-evidence")
+    branch_evidence_dir = linked_worktree_path / "tasks" / "evidence" / _FIXTURE_PRD_NAME
+    branch_evidence_dir.mkdir(parents=True, exist_ok=True)
+    (branch_evidence_dir / f"{_FIXTURE_PRD_NAME}.verification-plan.md").write_text(
+        "# plan\n", encoding="utf-8"
+    )
+    (branch_evidence_dir / f"{_FIXTURE_PRD_NAME}.evidence-report.md").write_text(
+        "# report\n", encoding="utf-8"
+    )
+
+    raw_cell_text = _render_evidence_cell(main_repo_path)
+
+    assert "plan✓" in raw_cell_text
+    assert "report✓" in raw_cell_text
+    assert "verifier✗" in raw_cell_text
+
+
+def test_evidence_cell_falls_back_to_main_per_slot(tmp_path: Path) -> None:
+    """分支只写了 plan、report 仍在主仓库：两个槽位各自命中，不整体丢弃主仓库文件。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-split")
+    main_evidence_dir = main_repo_path / "tasks" / "evidence" / _FIXTURE_PRD_NAME
+    main_evidence_dir.mkdir(parents=True, exist_ok=True)
+    (main_evidence_dir / f"{_FIXTURE_PRD_NAME}.evidence-report.md").write_text(
+        "# report\n", encoding="utf-8"
+    )
+    branch_evidence_dir = linked_worktree_path / "tasks" / "evidence" / _FIXTURE_PRD_NAME
+    branch_evidence_dir.mkdir(parents=True, exist_ok=True)
+    (branch_evidence_dir / f"{_FIXTURE_PRD_NAME}.verification-plan.md").write_text(
+        "# plan\n", encoding="utf-8"
+    )
+
+    raw_cell_text = _render_evidence_cell(main_repo_path)
+
+    assert "plan✓" in raw_cell_text
+    assert "report✓" in raw_cell_text

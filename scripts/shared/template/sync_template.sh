@@ -541,37 +541,76 @@ _ensure_fzf() {
 }
 
 CC_SWITCH_SKILLS_DIR="${CC_SWITCH_SKILLS_DIR:-}"
+AI_SKILLS_DIRS="${AI_SKILLS_DIRS:-}"
 SKILL_INSTALL_TARGET_DIRS=()
+
+# 工具适配器是可变清单，不是同步契约。交互安装与非交互更新共用这份注册表，
+# 避免新增或删除工具时在两条路径里分别维护目录。
+SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy")
+SKILL_ADAPTER_DIRS=(
+    "$HOME/.codex/skills"
+    "$HOME/.claude/skills"
+    "$HOME/.pi/agent/skills"
+    "$HOME/.qoder-cn/skills"
+    "$HOME/.kimi-code/skills"
+    "$HOME/.codebuddy/skills"
+)
+SKILL_ADAPTER_AUTO_DETECT_DIRS=("" "" "$HOME/.pi" "$HOME/.qoder-cn" "" "$HOME/.codebuddy")
+
+_append_unique_skill_target() {
+    local candidate_dir="$1"
+    local existing_dir
+    [ -n "$candidate_dir" ] || return 0
+    for existing_dir in ${SKILL_INSTALL_TARGET_DIRS[@]+"${SKILL_INSTALL_TARGET_DIRS[@]}"}; do
+        [ "$existing_dir" = "$candidate_dir" ] && return 0
+    done
+    SKILL_INSTALL_TARGET_DIRS+=("$candidate_dir")
+}
+
+_collect_configured_skill_targets() {
+    [ -n "$CC_SWITCH_SKILLS_DIR" ] && _append_unique_skill_target "$CC_SWITCH_SKILLS_DIR"
+
+    if [ -n "$AI_SKILLS_DIRS" ]; then
+        local configured_dir
+        local -a configured_dirs=()
+        IFS=':' read -r -a configured_dirs <<< "$AI_SKILLS_DIRS"
+        for configured_dir in "${configured_dirs[@]}"; do
+            _append_unique_skill_target "$configured_dir"
+        done
+    fi
+}
 
 _resolve_skill_install_target_dirs() {
     if [ "${#SKILL_INSTALL_TARGET_DIRS[@]}" -gt 0 ]; then
         return 0
     fi
 
-    if [ -n "$CC_SWITCH_SKILLS_DIR" ]; then
-        SKILL_INSTALL_TARGET_DIRS+=("$CC_SWITCH_SKILLS_DIR")
-    elif [ -d "$HOME/.cc-switch" ]; then
-        SKILL_INSTALL_TARGET_DIRS+=("$HOME/.cc-switch/skills")
+    _collect_configured_skill_targets
+
+    if [ -z "$CC_SWITCH_SKILLS_DIR" ] && [ -d "$HOME/.cc-switch" ]; then
+        _append_unique_skill_target "$HOME/.cc-switch/skills"
     fi
 
-    if [ -d "$HOME/.pi" ]; then
-        SKILL_INSTALL_TARGET_DIRS+=("$HOME/.pi/agent/skills")
-    fi
-
-    if [ -d "$HOME/.qoder-cn" ]; then
-        SKILL_INSTALL_TARGET_DIRS+=("$HOME/.qoder-cn/skills")
-    fi
+    local adapter_index
+    for adapter_index in "${!SKILL_ADAPTER_NAMES[@]}"; do
+        local detect_dir="${SKILL_ADAPTER_AUTO_DETECT_DIRS[$adapter_index]}"
+        if [ -n "$detect_dir" ] && [ -d "$detect_dir" ]; then
+            _append_unique_skill_target "${SKILL_ADAPTER_DIRS[$adapter_index]}"
+        fi
+    done
 
     if [ "${#SKILL_INSTALL_TARGET_DIRS[@]}" -gt 0 ]; then
         return 0
     fi
 
-    echo "No known skill directory (~/.cc-switch, ~/.pi, ~/.qoder-cn) found."
+    echo "No configured or detected skill directory found."
     echo "Choose a skill install target:"
-    echo "  [1] Codex  -> $HOME/.codex/skills"
-    echo "  [2] Claude -> $HOME/.claude/skills"
-    echo "  [3] Pi     -> $HOME/.pi/agent/skills"
-    echo "  [4] Qoder  -> $HOME/.qoder-cn/skills"
+    for adapter_index in "${!SKILL_ADAPTER_NAMES[@]}"; do
+        printf "  [%d] %-10s -> %s\n" \
+            "$((adapter_index + 1))" \
+            "${SKILL_ADAPTER_NAMES[$adapter_index]}" \
+            "${SKILL_ADAPTER_DIRS[$adapter_index]}"
+    done
     echo "  [q] Skip skill installation"
 
     while true; do
@@ -579,26 +618,16 @@ _resolve_skill_install_target_dirs() {
         printf "Your choice: "
         read -r target_choice </dev/tty
         case "$target_choice" in
-            1)
-                SKILL_INSTALL_TARGET_DIRS+=("$HOME/.codex/skills")
-                return 0
-                ;;
-            2)
-                SKILL_INSTALL_TARGET_DIRS+=("$HOME/.claude/skills")
-                return 0
-                ;;
-            3)
-                SKILL_INSTALL_TARGET_DIRS+=("$HOME/.pi/agent/skills")
-                return 0
-                ;;
-            4)
-                SKILL_INSTALL_TARGET_DIRS+=("$HOME/.qoder-cn/skills")
-                return 0
-                ;;
             q|Q|"")
                 return 1
                 ;;
             *)
+                if [[ "$target_choice" =~ ^[0-9]+$ ]] \
+                    && [ "$target_choice" -ge 1 ] \
+                    && [ "$target_choice" -le "${#SKILL_ADAPTER_NAMES[@]}" ]; then
+                    _append_unique_skill_target "${SKILL_ADAPTER_DIRS[$((target_choice - 1))]}"
+                    return 0
+                fi
                 echo "  Invalid choice: $target_choice"
                 ;;
         esac
@@ -618,23 +647,23 @@ _install_one_skill_noninteractive() {
         exit 1
     fi
 
-    local -a candidate_dirs=()
-    [ -n "$CC_SWITCH_SKILLS_DIR" ] && candidate_dirs+=("$CC_SWITCH_SKILLS_DIR")
-    [ -d "$HOME/.cc-switch/skills" ] && candidate_dirs+=("$HOME/.cc-switch/skills")
-    [ -d "$HOME/.pi/agent/skills" ] && candidate_dirs+=("$HOME/.pi/agent/skills")
-    [ -d "$HOME/.qoder-cn/skills" ] && candidate_dirs+=("$HOME/.qoder-cn/skills")
-    [ -d "$HOME/.claude/skills" ] && candidate_dirs+=("$HOME/.claude/skills")
-    [ -d "$HOME/.codex/skills" ] && candidate_dirs+=("$HOME/.codex/skills")
-    [ -d "$HOME/.kimi-code/skills" ] && candidate_dirs+=("$HOME/.kimi-code/skills")
+    SKILL_INSTALL_TARGET_DIRS=()
+    _collect_configured_skill_targets
+    [ -d "$HOME/.cc-switch/skills" ] && _append_unique_skill_target "$HOME/.cc-switch/skills"
 
-    if [ "${#candidate_dirs[@]}" -eq 0 ]; then
-        echo "❌ No local skills directory found (~/.cc-switch, ~/.pi, ~/.qoder-cn, ~/.claude, ~/.codex, ~/.kimi-code)." >&2
-        echo "   Set CC_SWITCH_SKILLS_DIR to your tool's skills directory and retry." >&2
+    local adapter_dir
+    for adapter_dir in "${SKILL_ADAPTER_DIRS[@]}"; do
+        [ -d "$adapter_dir" ] && _append_unique_skill_target "$adapter_dir"
+    done
+
+    if [ "${#SKILL_INSTALL_TARGET_DIRS[@]}" -eq 0 ]; then
+        echo "❌ No configured or detected local skills directory found." >&2
+        echo "   Set AI_SKILLS_DIRS to a colon-separated list of skill directories and retry." >&2
         exit 1
     fi
 
     local skills_base updated=0
-    for skills_base in "${candidate_dirs[@]}"; do
+    for skills_base in "${SKILL_INSTALL_TARGET_DIRS[@]}"; do
         if [ ! -d "$skills_base/$skill_name" ]; then
             echo "  ⏭ Not installed, skipped: $skills_base"
             continue
@@ -642,7 +671,7 @@ _install_one_skill_noninteractive() {
         if $DRY_RUN_MODE; then
             echo "  ⏭ Would update: $skills_base/$skill_name"
         else
-            rsync -a --delete "$src_dir/" "$skills_base/$skill_name/"
+            rsync -a --checksum --delete "$src_dir/" "$skills_base/$skill_name/"
             echo "  ✅ Updated: $skills_base/$skill_name"
         fi
         updated=$((updated + 1))
@@ -831,7 +860,7 @@ _install_template_skills() {
         template_skill_dir="$template_root/skills/$skill_name"
         for skill_target_dir in "${SKILL_INSTALL_TARGET_DIRS[@]}"; do
             mkdir -p "$skill_target_dir"
-            rsync -a --delete "$template_skill_dir/" "$skill_target_dir/$skill_name/"
+            rsync -a --checksum --delete "$template_skill_dir/" "$skill_target_dir/$skill_name/"
             echo "  ✅ Installed: $skill_target_dir/$skill_name"
             ((installed_count++)) || true
         done

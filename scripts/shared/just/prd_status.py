@@ -2,16 +2,20 @@
 """PRD 状态看板。
 
 扫描 ``tasks/pending`` 与 ``tasks/archive``，汇总每条 PRD 的优先级、类型、
-创建时间、验收清单勾选进度、证据包状态、交付依赖（DEPS 列）与执行锁运行态
-（ACTIVITY 列），供开工前判断哪些尚未交付、哪些被上游依赖挡住、哪些正被
-其他会话执行。
+创建时间、验收清单勾选进度、影响树触达进度（FILES 列）、证据包状态、交付依赖
+（DEPS 列）与执行锁运行态（ACTIVITY 列），供开工前判断哪些尚未交付、哪些被上游
+依赖挡住、哪些正被其他会话执行。
+
+进度与证据按**分支副本优先**读取：执行发生在 worktree 里，主仓库的
+``tasks/pending`` 副本与证据目录要等合并回主线才更新；存在分支名匹配的 worktree
+时取它内部的 ``tasks/archive`` → ``tasks/pending`` 副本，无匹配时回落主仓库副本。
 
 用法::
 
     python3 scripts/shared/just/prd_status.py [all|pending|archive]
 
-清单进度、依赖满足与 verifier 结论均为从文件内容推断的启发式结果，看板只用于
-快速定位，最终判断以 PRD 正文与证据文件原文为准。
+清单进度、影响树触达进度、依赖满足与 verifier 结论均为从文件内容推断的启发式
+结果，看板只用于快速定位，最终判断以 PRD 正文与证据文件原文为准。
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import prd_impact_tree
 import prd_lock
 
 PRD_FILENAME_PATTERN = re.compile(
@@ -83,6 +88,8 @@ class PrdRecord:
             / ``""``（无 §8 章节或未声明）。
         dependency_refs (tuple[str, ...]): §8 ``Depends on tasks/issues`` 下的
             原始引用 token（``none`` 会被解析阶段剔除）。
+        impact_progress (prd_impact_tree.ImpactProgress | None): Change Impact Tree
+            的分支触达进度；无分支 worktree 可比对或 PRD 没写影响树时为 ``None``。
     """
 
     prd_path: Path
@@ -99,6 +106,7 @@ class PrdRecord:
     verifier_verdict_certain: bool
     dependency_gate: str
     dependency_refs: tuple[str, ...]
+    impact_progress: prd_impact_tree.ImpactProgress | None
 
     @property
     def checklist_complete(self) -> bool:
@@ -310,26 +318,98 @@ def format_deps_cell(
     return palette.dim("-")
 
 
-def find_named_evidence_file(evidence_dir: Path, stem_suffix: str) -> Path | None:
-    """在证据目录中查找 ``<prd-basename>.<suffix>.md`` 或 ``<suffix>.md``。
+def find_named_evidence_file(
+    evidence_dir: Path,
+    stem_suffix: str,
+    suffix_extensions: tuple[str, ...] = (".md",),
+) -> Path | None:
+    """在证据目录中查找 ``<prd-basename>.<suffix><ext>`` 或 ``<suffix><ext>``。
 
     Args:
         evidence_dir (Path): 该 PRD 的证据目录。
         stem_suffix (str): 文件种类后缀，例如 ``verification-plan``。
+        suffix_extensions (tuple[str, ...]): 按优先级排列的候选扩展名，
+            默认仅 ``.md``；需要交互 HTML 优先于 Markdown 的调用方（如
+            ``prd_review.py``）传入 ``(".html", ".md")``，命名模式仍由本函数
+            单一事实源维护。
 
     Returns:
-        Path | None: 命中的文件路径，均不存在时返回 ``None``。
+        Path | None: 命中的文件路径（按扩展名优先级），均不存在时返回 ``None``。
     """
     if not evidence_dir.is_dir():
         return None
 
-    for evidence_filename in (
-        f"{evidence_dir.name}.{stem_suffix}.md",
-        f"{stem_suffix}.md",
-    ):
-        candidate_evidence_path = evidence_dir / evidence_filename
-        if candidate_evidence_path.is_file():
-            return candidate_evidence_path
+    for suffix_extension_text in suffix_extensions:
+        for evidence_filename in (
+            f"{evidence_dir.name}.{stem_suffix}{suffix_extension_text}",
+            f"{stem_suffix}{suffix_extension_text}",
+        ):
+            candidate_evidence_path = evidence_dir / evidence_filename
+            if candidate_evidence_path.is_file():
+                return candidate_evidence_path
+    return None
+
+
+def resolve_branch_prd_path(worktree_path: Path | None, prd_file_name: str) -> Path | None:
+    """在 worktree 内定位该 PRD 的分支副本。
+
+    执行发生在 worktree 里，主仓库的 ``tasks/pending`` 副本要等合并才会更新，
+    因此进度与依赖都该读分支副本。归档副本是收尾态，优先于同一分支里可能残留的
+    pending 副本。
+
+    Args:
+        worktree_path (Path | None): 分支名匹配到的 worktree 目录；无匹配时为 ``None``。
+        prd_file_name (str): PRD 文件名（含 ``.md``）。
+
+    Returns:
+        Path | None: 分支副本路径；worktree 内两处都没有时返回 ``None``。
+    """
+    if worktree_path is None:
+        return None
+
+    for bucket_dir_name in ("archive", "pending"):
+        branch_prd_path = worktree_path / "tasks" / bucket_dir_name / prd_file_name
+        if branch_prd_path.is_file():
+            return branch_prd_path
+    return None
+
+
+def resolve_evidence_dirs(evidence_dir: Path, worktree_path: Path | None) -> list[Path]:
+    """按优先级返回证据目录候选：分支副本在前，主仓库副本兜底。
+
+    Args:
+        evidence_dir (Path): 主仓库内的证据目录 ``tasks/evidence/<prd-stem>``。
+        worktree_path (Path | None): 匹配到的 worktree 目录；无匹配时为 ``None``。
+
+    Returns:
+        list[Path]: 证据目录候选，按查找优先级排列。
+    """
+    if worktree_path is None:
+        return [evidence_dir]
+
+    branch_evidence_dir = worktree_path / "tasks" / "evidence" / evidence_dir.name
+    if branch_evidence_dir.is_dir():
+        return [branch_evidence_dir, evidence_dir]
+    return [evidence_dir]
+
+
+def find_evidence_file_in_dirs(candidate_dirs: list[Path], stem_suffix: str) -> Path | None:
+    """按候选顺序查找证据文件，每个槽位独立兜底。
+
+    分支只写了 plan、report 仍在主仓库时，两个槽位各自命中不同目录，不会因为
+    分支证据目录存在就整体丢弃主仓库已有文件。
+
+    Args:
+        candidate_dirs (list[Path]): 证据目录候选，来自 ``resolve_evidence_dirs``。
+        stem_suffix (str): 文件种类后缀，例如 ``verification-plan``。
+
+    Returns:
+        Path | None: 第一个命中的证据文件路径；都没命中时返回 ``None``。
+    """
+    for candidate_dir in candidate_dirs:
+        matched_evidence_path = find_named_evidence_file(candidate_dir, stem_suffix)
+        if matched_evidence_path is not None:
+            return matched_evidence_path
     return None
 
 
@@ -358,12 +438,23 @@ def parse_verifier_verdict(verifier_report_text: str) -> tuple[str, bool]:
     return "", False
 
 
-def collect_prd_record(prd_path: Path, evidence_root: Path) -> PrdRecord:
+def collect_prd_record(
+    prd_path: Path, evidence_root: Path, worktree_branches_list: list[tuple[str, Path]]
+) -> PrdRecord:
     """读取单个 PRD 文件与对应证据目录，生成看板记录。
 
+    进度、依赖与证据都优先取**分支副本**：执行发生在 worktree 里，主仓库的
+    ``tasks/pending`` 副本与证据目录要等合并回主线才会更新，只读它们会让"分支上
+    早已勾完、看板仍显示 0/21"的状态长期挂着。worktree 按 slug 与分支名匹配
+    （``match_worktree_by_slug``）；每个 worktree 都带一份未改动的同名 pending
+    副本，因此无匹配时绝不能拿别的 worktree 的副本充数。
+
     Args:
-        prd_path (Path): PRD 文件路径。
-        evidence_root (Path): ``tasks/evidence`` 目录。
+        prd_path (Path): 主仓库内的 PRD 文件路径。
+        evidence_root (Path): 主仓库 ``tasks/evidence`` 目录。
+        worktree_branches_list (list[tuple[str, Path]]): ``(分支名, 目录路径)`` 列表，
+            来自 ``prd_lock.list_linked_worktree_branches``。调用方必须显式传入，
+            不留默认值——漏传会让看板静默退回主仓库副本，正是要修的那个 bug。
 
     Returns:
         PrdRecord: 该 PRD 的看板信息。
@@ -371,14 +462,18 @@ def collect_prd_record(prd_path: Path, evidence_root: Path) -> PrdRecord:
     raw_priority_text, raw_kind_text, formatted_created_date, raw_slug_text = parse_prd_filename(
         prd_path
     )
-    raw_prd_text = prd_path.read_text(encoding="utf-8")
+    matched_worktree = match_worktree_by_slug(worktree_branches_list, raw_slug_text)
+    worktree_path = matched_worktree[1] if matched_worktree is not None else None
+
+    source_prd_path = resolve_branch_prd_path(worktree_path, prd_path.name) or prd_path
+    raw_prd_text = source_prd_path.read_text(encoding="utf-8")
     checked_item_count, checklist_item_count = count_checklist_items(raw_prd_text)
     raw_gate_text, raw_dependency_refs_tuple = parse_delivery_dependencies(raw_prd_text)
 
-    evidence_dir = evidence_root / prd_path.stem
-    verification_plan_path = find_named_evidence_file(evidence_dir, "verification-plan")
-    evidence_report_path = find_named_evidence_file(evidence_dir, "evidence-report")
-    verifier_report_path = find_named_evidence_file(evidence_dir, "verifier-report")
+    evidence_dirs_list = resolve_evidence_dirs(evidence_root / prd_path.stem, worktree_path)
+    verification_plan_path = find_evidence_file_in_dirs(evidence_dirs_list, "verification-plan")
+    evidence_report_path = find_evidence_file_in_dirs(evidence_dirs_list, "evidence-report")
+    verifier_report_path = find_evidence_file_in_dirs(evidence_dirs_list, "verifier-report")
 
     verifier_verdict_text = ""
     is_verdict_certain = False
@@ -386,6 +481,14 @@ def collect_prd_record(prd_path: Path, evidence_root: Path) -> PrdRecord:
         verifier_verdict_text, is_verdict_certain = parse_verifier_verdict(
             verifier_report_path.read_text(encoding="utf-8")
         )
+
+    # 触达进度要和分支的实际改动比对，只有匹配到 worktree 时才谈得上测量；
+    # 主仓库副本永远是"开工前的样子"，在那里比对只会恒等于 0。
+    impact_progress = (
+        prd_impact_tree.measure_branch_impact_progress(raw_prd_text, worktree_path)
+        if worktree_path is not None
+        else None
+    )
 
     return PrdRecord(
         prd_path=prd_path,
@@ -402,6 +505,7 @@ def collect_prd_record(prd_path: Path, evidence_root: Path) -> PrdRecord:
         verifier_verdict_certain=is_verdict_certain,
         dependency_gate=raw_gate_text,
         dependency_refs=raw_dependency_refs_tuple,
+        impact_progress=impact_progress,
     )
 
 
@@ -495,6 +599,35 @@ def format_checklist_cell(prd_record: PrdRecord, palette: Palette) -> str:
     return palette.yellow(raw_progress_text)
 
 
+def format_impact_cell(prd_record: PrdRecord, palette: Palette) -> str:
+    """格式化影响树触达进度列。
+
+    ``~`` 前缀与"永不转绿"是刻意的：触达进度只说明分支碰过影响树里的哪些文件，
+    既不证明改对了，也不因为影响树自称"起点而非穷尽清单"而能代表全部工作量。
+    看板上的强信号链是 CHECKLIST → EVIDENCE → verifier，本列不参与其中，用绿色
+    会让人误读成"已完成"。``?n`` 后缀披露本地无法判定、因而未计入分母的节点数
+    （跨仓库路径、花括号展开、通配符），宁可少算也不编一个好看的分母。
+
+    Args:
+        prd_record (PrdRecord): 单条 PRD 记录。
+        palette (Palette): 颜色包装器。
+
+    Returns:
+        str: 形如 ``~7/12`` 或 ``~7/12?2`` 的进度文本；无分支可比对、PRD 没写影响树
+        或树内没有可判定节点时返回 ``-``。
+    """
+    impact_progress = prd_record.impact_progress
+    if impact_progress is None or impact_progress.judgeable_total == 0:
+        return palette.dim("-")
+
+    raw_progress_text = f"~{impact_progress.touched_total}/{impact_progress.judgeable_total}"
+    if impact_progress.unresolvable_total:
+        raw_progress_text += f"?{impact_progress.unresolvable_total}"
+    if impact_progress.touched_total == 0:
+        return palette.dim(raw_progress_text)
+    return palette.yellow(raw_progress_text)
+
+
 def format_evidence_cell(prd_record: PrdRecord, palette: Palette) -> str:
     """格式化证据包状态列。
 
@@ -555,6 +688,50 @@ def match_worktree_by_slug(
     return None
 
 
+def resolve_lock_location_text(
+    worktree_branches_list: list[tuple[str, Path]],
+    main_repo_root: Path,
+    lock_metadata: dict,
+) -> str:
+    """把锁归属渲染成 ACTIVITY 列 ``@`` 后的位置文本，绝不显示并不存在的分支。
+
+    主仓库归属（``worktree`` 为空）显示 ``主仓库``；归属 worktree 目录仍存在时显示
+    该目录**当前实际检出**的分支；目录已消失但锁里的 ``branch`` 确实还检出在某个
+    worktree 上时显示那个分支；两者都不成立时退回展示 ``worktree`` 归属标签。
+    锁里的 ``branch`` 只是领锁瞬间的快照（``just implement`` 在主仓库领锁时就会
+    写入推导出的分支名），照抄它会给看板用户一个打不开的 ``just worktree -o`` 名称。
+
+    Args:
+        worktree_branches_list (list[tuple[str, Path]]): ``(分支名, 目录路径)`` 列表，
+            来自 ``prd_lock.list_linked_worktree_branches``。
+        main_repo_root (Path): 主仓库根目录。
+        lock_metadata (dict): 锁 JSON 内容。
+
+    Returns:
+        str: ``@`` 后的位置文本。
+    """
+    worktree_label_text = str(lock_metadata.get("worktree") or "")
+    if not worktree_label_text:
+        return "主仓库"
+
+    lock_worktree_path = prd_lock.resolve_lock_worktree_path(main_repo_root, worktree_label_text)
+    if lock_worktree_path is not None:
+        for branch_name_text, worktree_path in worktree_branches_list:
+            if Path(worktree_path).resolve() == lock_worktree_path:
+                return branch_name_text
+
+    recorded_branch_text = str(lock_metadata.get("branch") or "")
+    if recorded_branch_text:
+        recorded_branch_basename_text = recorded_branch_text.rsplit("/", 1)[-1]
+        for branch_name_text, _ in worktree_branches_list:
+            if branch_name_text == recorded_branch_text or (
+                branch_name_text.rsplit("/", 1)[-1] == recorded_branch_basename_text
+            ):
+                return branch_name_text
+
+    return worktree_label_text
+
+
 def format_duration_text(elapsed_seconds: float) -> str:
     """把秒数渲染成紧凑时长文本，例如 ``12m`` / ``1h5m`` / ``2d3h``。
 
@@ -612,15 +789,20 @@ def format_activity_cell(
 ) -> str:
     """格式化运行态列（ACTIVITY）。
 
-    新鲜锁 → 黄色 ``RUNNING <tool> <时长> @<branch>``（branch 缺失回退 worktree）；
-    过期锁但归属 worktree 仍有近期改动 → 同样按 RUNNING 渲染（心跳只是兜底信号，
-    活性佐证说明会话仍在执行）；过期锁且无活性佐证 → 红色 ``STALE <最后心跳>``；
-    无锁但存在分支名匹配的 worktree 时先看该 worktree 是否已把 PRD 归档：
-    已归档 → 绿色 ``✔ branch-archived @<branch> · <n>/<m> · awaiting merge``
-    （收尾已在分支完成，缺的只是合并回主线，不得再按互斥漏洞报警）；未归档 →
-    黄色 ``⚠ unlocked @<branch>``（互斥未生效的漏洞必须摆到台面上，而不是
-    静默显示 ``-``）；无锁但 PRD 文件或证据目录近期有改动 → 暗色
-    ``⚡ active <n>m ago``；其余 ``-``。
+    分支归档优先于一切锁信号：匹配 worktree 的 ``tasks/archive`` 里已有该 PRD 时，
+    无论锁是新鲜、过期还是带活性佐证的 RUNNING，一律显示绿色
+    ``✔ branch-archived @<branch> · awaiting merge``——收尾已在分支完成，缺的只是
+    合并回主线，残留锁把已完成的 PRD 渲染成 RUNNING / STALE 会误导人重新执行。
+    清单进度不在这里重复携带：它由 CHECKLIST 列呈现，那一列同样读分支副本。
+    其余情况按锁状态渲染：新鲜锁 → 黄色
+    ``RUNNING <tool> <时长> @<位置>``，位置由 ``resolve_lock_location_text`` 按实际
+    状态解析（主仓库归属显示 ``主仓库``，归属 worktree 显示其当前实际检出的分支，
+    目录已消失且分支无处检出时显示归属标签），不照抄锁里的 ``branch`` 快照；过期锁但归属
+    worktree 仍有近期改动 → 同样按 RUNNING 渲染（心跳只是兜底信号，活性佐证说明
+    会话仍在执行）；过期锁且无活性佐证 → 红色 ``STALE <最后心跳>``；无锁但存在
+    分支名匹配的 worktree 且其中未归档该 PRD → 黄色 ``⚠ unlocked @<branch>``
+    （互斥未生效的漏洞必须摆到台面上，而不是静默显示 ``-``）；无锁但 PRD 文件或
+    证据目录近期有改动 → 暗色 ``⚡ active <n>m ago``；其余 ``-``。
 
     Args:
         prd_record (PrdRecord): 单条 PRD 记录。
@@ -631,6 +813,21 @@ def format_activity_cell(
     Returns:
         str: 运行态单元格文本。
     """
+    # worktree 列表由本函数自行获取（而不是塞进 PrdRecord）：resolve_lock_location_text
+    # 需要完整列表来判断锁里的分支是否真的检出在某处，PrdRecord 只该承载单条 PRD 的
+    # 事实。看板一次渲染只有个位数 pending 行，多一次 git 调用的代价可忽略。
+    linked_worktree_branches_list = prd_lock.list_linked_worktree_branches(main_repo_root)
+    matched_worktree = match_worktree_by_slug(linked_worktree_branches_list, prd_record.slug)
+    if matched_worktree is not None:
+        branch_name_text, worktree_path = matched_worktree
+        worktree_archive_prd_path = worktree_path / "tasks" / "archive" / prd_record.prd_path.name
+        if worktree_archive_prd_path.is_file():
+            # worktree 内 tasks/archive 已有这条 PRD：收尾已在分支上完成，主线缺的
+            # 只是合并动作。归档是比锁更强的交付事实，判定因此排在锁之前：残留锁
+            # （无论新鲜还是过期）把已完成的 PRD 渲染成 RUNNING / STALE，都会误导
+            # 人重新执行一个已完成的任务。
+            return palette.green(f"✔ branch-archived @{branch_name_text} · awaiting merge")
+
     lock_snapshot = prd_lock.inspect_prd_lock(main_repo_root, prd_record.prd_path.stem)
     if lock_snapshot.state in ("fresh", "stale"):
         lock_metadata = lock_snapshot.metadata
@@ -641,10 +838,8 @@ def format_activity_cell(
             )
         if lock_is_active:
             raw_tool_text = str(lock_metadata.get("ai_tool") or "unknown")
-            raw_location_text = (
-                str(lock_metadata.get("branch") or "")
-                or str(lock_metadata.get("worktree") or "")
-                or "主仓库"
+            raw_location_text = resolve_lock_location_text(
+                linked_worktree_branches_list, main_repo_root, lock_metadata
             )
             raw_started_text = lock_metadata.get("started_at")
             started_moment = prd_lock.parse_lock_timestamp(raw_started_text)
@@ -658,26 +853,8 @@ def format_activity_cell(
         raw_heartbeat_text = str(lock_metadata.get("heartbeat_at") or "?")
         return palette.red(f"STALE {raw_heartbeat_text}")
 
-    matched_worktree = match_worktree_by_slug(
-        prd_lock.list_linked_worktree_branches(main_repo_root), prd_record.slug
-    )
     if matched_worktree is not None:
         branch_name_text, worktree_path = matched_worktree
-        worktree_archive_prd_path = worktree_path / "tasks" / "archive" / prd_record.prd_path.name
-        if worktree_archive_prd_path.is_file():
-            # worktree 内 tasks/archive 已有这条 PRD：收尾已在分支上完成，主线缺的
-            # 只是合并动作。此时继续亮 ⚠ unlocked 会误导人重新执行一个已完成的
-            # PRD；清单进度改用分支上归档副本的真实勾选。
-            branch_checked_count, branch_total_count = count_checklist_items(
-                worktree_archive_prd_path.read_text(encoding="utf-8")
-            )
-            raw_branch_progress_text = (
-                f" · {branch_checked_count}/{branch_total_count}" if branch_total_count > 0 else ""
-            )
-            return palette.green(
-                f"✔ branch-archived @{branch_name_text}{raw_branch_progress_text}"
-                " · awaiting merge"
-            )
         worktree_activity_minutes = prd_lock.detect_worktree_activity_minutes(
             worktree_path, RECENT_TOUCH_WINDOW_MINUTES
         )
@@ -752,11 +929,19 @@ def render_prd_table(
         format_activity_cell(prd_record, main_repo_root, evidence_root, palette)
         for prd_record in prd_records_list
     ]
+    # FILES 单元格已带颜色，宽度要按可见宽度算；节点多的 PRD 会出现 ``~14/24?12``
+    # 这种 9 字符形态，写死列宽会把右边的 EVIDENCE 列挤歪。
+    raw_impact_cells_list = [
+        format_impact_cell(prd_record, palette) for prd_record in prd_records_list
+    ]
 
     priority_column_width = max(len("PR"), *(len(cell) for cell in raw_priority_cells_list))
     kind_column_width = max(len("TYPE"), *(len(cell) for cell in raw_kind_cells_list))
     created_column_width = max(len("CREATED"), *(len(cell) for cell in raw_created_cells_list))
     slug_column_width = max(len("PRD"), *(len(cell) for cell in raw_slug_cells_list))
+    impact_column_width = max(
+        len("FILES"), *(visible_width(cell) for cell in raw_impact_cells_list)
+    )
 
     raw_header_text = "  " + "  ".join(
         [
@@ -765,6 +950,7 @@ def render_prd_table(
             pad_to_width("CREATED", created_column_width),
             pad_to_width("PRD", slug_column_width),
             "CHECKLIST",
+            pad_to_width("FILES", impact_column_width),
             "EVIDENCE",
             "DEPS",
             "ACTIVITY",
@@ -778,6 +964,7 @@ def render_prd_table(
         raw_kind_cell,
         raw_created_cell,
         raw_slug_cell,
+        raw_impact_cell,
         raw_activity_cell,
     ) in zip(
         prd_records_list,
@@ -785,6 +972,7 @@ def render_prd_table(
         raw_kind_cells_list,
         raw_created_cells_list,
         raw_slug_cells_list,
+        raw_impact_cells_list,
         raw_activity_cells_list,
     ):
         raw_row_text = "  " + "  ".join(
@@ -794,6 +982,7 @@ def render_prd_table(
                 pad_to_width(raw_created_cell, created_column_width),
                 pad_to_width(raw_slug_cell, slug_column_width),
                 pad_to_width(format_checklist_cell(prd_record, palette), 9),
+                pad_to_width(raw_impact_cell, impact_column_width),
                 format_evidence_cell(prd_record, palette),
                 format_deps_cell(prd_record, pending_dir, archive_dir, palette),
                 raw_activity_cell,
@@ -933,12 +1122,15 @@ def main() -> int:
     is_color_enabled = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
     palette = Palette(is_color_enabled)
 
+    # worktree 列表只取一次，两批记录共用：进度与证据都要按它定位分支副本。
+    worktree_branches_list = prd_lock.list_linked_worktree_branches(main_repo_root_path)
+
     pending_records_list = [
-        collect_prd_record(prd_path, evidence_root_path)
+        collect_prd_record(prd_path, evidence_root_path, worktree_branches_list)
         for prd_path in sorted(pending_dir_path.glob("*.md"))
     ]
     archive_records_list = [
-        collect_prd_record(prd_path, evidence_root_path)
+        collect_prd_record(prd_path, evidence_root_path, worktree_branches_list)
         for prd_path in sorted(archive_dir_path.glob("*.md"), reverse=True)
     ]
 

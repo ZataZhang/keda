@@ -790,3 +790,86 @@ def test_sync_template_claude_md_appears_only_in_all_mode(tmp_path: Path) -> Non
     assert "CHANGED\tscripts/shared/tool.sh" in all_result.stdout
     assert "CHANGED\tCLAUDE.md" in all_result.stdout
     assert "CHANGED\tAGENTS.md" in all_result.stdout
+
+
+def test_sync_template_noninteractive_skill_deploy_updates_existing_configured_targets(
+    tmp_path: Path,
+) -> None:
+    """--skill updates every configured target where the Skill is already installed."""
+
+    template_repo_path = tmp_path / "template-repo"
+    project_repo_path = tmp_path / "project-repo"
+    fake_home_path = tmp_path / "home"
+    first_target_path = tmp_path / "agent-a" / "skills"
+    second_target_path = tmp_path / "agent-b" / "skills"
+    uninstalled_target_path = tmp_path / "agent-c" / "skills"
+
+    template_files = {"README.md": "Template README\n"}
+    project_files = {"skills/idea-inbox/SKILL.md": "# local skill copy\n"}
+
+    create_repo(template_repo_path, template_files, commit_all=True)
+    create_repo(project_repo_path, project_files, commit_all=False)
+    write_text_file(first_target_path, "idea-inbox/SKILL.md", "# stale first copy\n")
+    write_text_file(second_target_path, "idea-inbox/SKILL.md", "# stale second copy\n")
+    uninstalled_target_path.mkdir(parents=True)
+
+    configured_targets = os.pathsep.join(
+        (str(first_target_path), str(second_target_path), str(uninstalled_target_path))
+    )
+
+    completed_process = run_sync_template(
+        project_repo_path,
+        template_repo_path,
+        "--skill",
+        "idea-inbox",
+        extra_env={
+            "HOME": str(fake_home_path),
+            "AI_SKILLS_DIRS": configured_targets,
+        },
+    )
+
+    assert completed_process.returncode == 0, completed_process.stderr
+    assert f"Updated: {first_target_path / 'idea-inbox'}" in completed_process.stdout
+    assert f"Updated: {second_target_path / 'idea-inbox'}" in completed_process.stdout
+    assert f"Not installed, skipped: {uninstalled_target_path}" in completed_process.stdout
+    assert not (uninstalled_target_path / "idea-inbox").exists()
+    assert (first_target_path / "idea-inbox/SKILL.md").read_text(encoding="utf-8") == (
+        "# local skill copy\n"
+    )
+    assert (second_target_path / "idea-inbox/SKILL.md").read_text(encoding="utf-8") == (
+        "# local skill copy\n"
+    )
+
+
+def test_sync_template_noninteractive_skill_deploy_fails_without_existing_install(
+    tmp_path: Path,
+) -> None:
+    """--skill fails without creating a first-time installation."""
+
+    template_repo_path = tmp_path / "template-repo"
+    project_repo_path = tmp_path / "project-repo"
+    fake_home_path = tmp_path / "home"
+    configured_target_path = tmp_path / "agent" / "skills"
+
+    create_repo(template_repo_path, {"README.md": "Template README\n"}, commit_all=True)
+    create_repo(
+        project_repo_path,
+        {"skills/idea-inbox/SKILL.md": "# local skill copy\n"},
+        commit_all=False,
+    )
+    configured_target_path.mkdir(parents=True)
+
+    completed_process = run_sync_template(
+        project_repo_path,
+        template_repo_path,
+        "--skill",
+        "idea-inbox",
+        extra_env={
+            "HOME": str(fake_home_path),
+            "AI_SKILLS_DIRS": str(configured_target_path),
+        },
+    )
+
+    assert completed_process.returncode == 1
+    assert "is not installed in any known local skills directory" in completed_process.stderr
+    assert not (configured_target_path / "idea-inbox").exists()

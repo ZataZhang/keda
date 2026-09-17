@@ -203,8 +203,9 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 4. **独立 verifier 审查**：`just ai implement` 自动启动一个 verifier Agent，默认使用与 executor 不同的 AI 工具；verifier 只读审查证据与 PRD 验收项的匹配度，输出 `<prd-basename>.verifier-report.md`，结论为 `PASS` 或 `REJECT`。
 5. **循环**：verifier 输出 `REJECT` 时，executor 必须修复问题并重新收集证据，再次进入 verifier 审查。
 6. **前端强制视觉证据**：如果 PRD 涉及 `frontend-admin/` 或 `frontend-public/` 改动，证据目录必须包含至少一个 `.png`、`.jpg` 或 `.webm` 文件。
-7. **最终校验**：verifier 通过后，`just ai implement` 运行 `scripts/shared/just/check_prd_evidence.sh` 再次确认前端视觉证据存在，缺少则阻止流程结束。
-8. **工具不可用**：verifier 默认工具不可用时，降级到与 executor 相同工具；相同工具也不可用时，流程暂停并提示人工，不自动回退到 executor 自检。
+7. **图必须就地嵌进报告**：证据目录里的每张静态图（`.png` / `.jpg`）都必须在 `<prd-basename>.evidence-report.md` 里用 `![<说明>](<相对路径>)` 嵌入——报告与图片同目录，本地 Markdown 预览直接渲染。图片被 `.gitignore` 排除、在 GitHub 上是坏图，所以嵌图旁要标注「本地图片」并附 `open "<绝对路径>"`；标注与命令是嵌图的补充，不是替代品。只写一行 `open` 命令、让人粘完命令才看得见截图，不算呈递。录屏无法内联渲染，免嵌图。
+8. **最终校验**：verifier 通过后，`just ai implement` 运行 `scripts/shared/just/check_prd_evidence.sh`，确认静态图都已就地嵌入、且前端视觉证据存在，缺任一项都阻止流程结束。
+9. **工具不可用**：verifier 默认工具不可用时，降级到与 executor 相同工具；相同工具也不可用时，流程暂停并提示人工，不自动回退到 executor 自检。
 
 ### 证据链完整性
 
