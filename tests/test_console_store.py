@@ -1,9 +1,17 @@
-"""Tests for the SQLite console store (run history + audit log)."""
+"""Tests for the SQLite console store (run history + audit log + monitor snapshots).
+
+快照与同步设置是 dashboard 的事实读取路径，因此本文件的迁移用例以"用户真实
+旧库"为起点（用 v3 时代的 CREATE 语句手工播种），并在迁移后用**独立连接**
+复核，避免只验证新表存在而漏掉旧数据是否保留。
+"""
 
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
@@ -11,10 +19,126 @@ from backend.core.shared.interfaces.runner_console import (
     RunRecord,
 )
 from backend.infrastructure.persistence.console_store import (
+    MonitorSettingsEntry,
+    MonitorSnapshotEntry,
     RoadmapQueueEntry,
     RoadmapSettingsEntry,
     SqliteConsoleStore,
 )
+
+# v3 时代的建表语句：刻意与当前代码里的 CREATE 解耦，模拟用户磁盘上的旧库。
+_V3_CREATE_RUN_RECORDS = """
+CREATE TABLE IF NOT EXISTS run_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id TEXT NOT NULL,
+    repo_path TEXT NOT NULL,
+    issue_number INTEGER NOT NULL,
+    trigger TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    error_summary TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    duration_seconds REAL NOT NULL
+)
+"""
+
+_V3_CREATE_AUDIT_LOGS = """
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    repo_id TEXT,
+    issue_number INTEGER,
+    params_json TEXT NOT NULL,
+    result TEXT NOT NULL,
+    detail TEXT
+)
+"""
+
+_V3_CREATE_ROADMAP_QUEUE = """
+CREATE TABLE IF NOT EXISTS roadmap_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id TEXT NOT NULL,
+    prd_path TEXT NOT NULL,
+    status TEXT NOT NULL,
+    trigger TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    error_detail TEXT
+)
+"""
+
+_V3_CREATE_ROADMAP_SETTINGS = """
+CREATE TABLE IF NOT EXISTS roadmap_settings (
+    repo_id TEXT PRIMARY KEY,
+    max_parallel INTEGER NOT NULL,
+    default_view TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
+_V3_CREATE_ATTEMPT_RECORDS = """
+CREATE TABLE IF NOT EXISTS attempt_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id TEXT NOT NULL,
+    issue_number INTEGER NOT NULL,
+    agent TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    failure_type TEXT NOT NULL,
+    recovered INTEGER NOT NULL,
+    detail TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    duration_seconds REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+
+def _seed_v3_database(db_path: Path, run_record_count: int = 3) -> None:
+    """Create a v3-shaped database with historical rows and user_version=3."""
+    connection = sqlite3.connect(str(db_path))
+    try:
+        connection.execute(_V3_CREATE_RUN_RECORDS)
+        connection.execute(_V3_CREATE_AUDIT_LOGS)
+        connection.execute(_V3_CREATE_ROADMAP_QUEUE)
+        connection.execute(_V3_CREATE_ROADMAP_SETTINGS)
+        connection.execute(_V3_CREATE_ATTEMPT_RECORDS)
+        for index in range(run_record_count):
+            connection.execute(
+                "INSERT INTO run_records "
+                "(repo_id, repo_path, issue_number, trigger, agent, outcome, "
+                " error_summary, started_at, finished_at, duration_seconds) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    f"legacy-repo-{index}",
+                    f"/tmp/legacy-{index}",
+                    100 + index,
+                    "cli_run",
+                    "codex",
+                    "completed",
+                    None,
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:01:00+00:00",
+                    60.0,
+                ),
+            )
+        connection.execute(
+            "INSERT INTO roadmap_settings (repo_id, max_parallel, default_view, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("legacy-repo-0", 2, "list", "2026-01-01T00:00:00+00:00"),
+        )
+        connection.execute("PRAGMA user_version = 3")
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _fresh_connection(db_path: Path) -> sqlite3.Connection:
+    """Open a brand-new connection so no migrated in-memory state is reused."""
+    return sqlite3.connect(str(db_path))
 
 
 def _make_run_record(
@@ -255,3 +379,124 @@ def test_schema_migration_from_version_1(tmp_path: Path) -> None:
     assert "roadmap_queue" in tables
     assert "roadmap_settings" in tables
     raw.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 监控快照 / 同步设置（schema v4）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_v3_database_migrates_to_v4_and_keeps_history(tmp_path: Path) -> None:
+    """旧库打开新代码后自动升 v4，历史数据逐条保留且两张新表建成。"""
+    db_path = tmp_path / "console.db"
+    _seed_v3_database(db_path, run_record_count=3)
+
+    SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert probe.execute("SELECT COUNT(*) FROM run_records").fetchone()[0] == 3
+        table_names = {
+            row[0]
+            for row in probe.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+    finally:
+        probe.close()
+    assert "monitoring_snapshots" in table_names
+    assert "monitor_settings" in table_names
+
+    reopened = SqliteConsoleStore(db_path)
+    assert len(reopened.list_recent_runs()) == 3
+    assert reopened.get_roadmap_settings("legacy-repo-0") is not None
+
+
+def test_fresh_database_creates_monitor_tables(tmp_path: Path) -> None:
+    """全新环境首次启动从零建表（不依赖任何历史库）。"""
+    db_path = tmp_path / "fresh.db"
+
+    store = SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == 4
+    finally:
+        probe.close()
+    assert store.list_monitor_snapshots() == []
+    assert store.get_monitor_settings() is None
+
+
+def test_monitor_snapshot_upsert_overwrites_same_repo(tmp_path: Path) -> None:
+    """同一仓库重复 upsert 只保留一行，内容为最后一次写入。"""
+    store = SqliteConsoleStore(tmp_path / "console.db")
+
+    store.upsert_monitor_snapshot(
+        MonitorSnapshotEntry(
+            repo_id="keda-main",
+            payload_json='{"repo_id": "keda-main", "issues": []}',
+            scanned_at="2026-09-16T01:00:00+00:00",
+        )
+    )
+    store.upsert_monitor_snapshot(
+        MonitorSnapshotEntry(
+            repo_id="keda-main",
+            payload_json='{"repo_id": "keda-main", "issues": [1]}',
+            scanned_at="2026-09-16T02:00:00+00:00",
+        )
+    )
+    store.upsert_monitor_snapshot(
+        MonitorSnapshotEntry(
+            repo_id="other-repo",
+            payload_json='{"repo_id": "other-repo"}',
+            scanned_at="2026-09-16T02:00:00+00:00",
+        )
+    )
+
+    snapshots = {entry.repo_id: entry for entry in store.list_monitor_snapshots()}
+    assert set(snapshots) == {"keda-main", "other-repo"}
+    assert snapshots["keda-main"].scanned_at == "2026-09-16T02:00:00+00:00"
+    assert snapshots["keda-main"].payload_json == '{"repo_id": "keda-main", "issues": [1]}'
+
+
+def test_monitor_settings_round_trip(tmp_path: Path) -> None:
+    """设置写入后能被重新读回（界面改完重启仍生效的前提）。"""
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    assert store.get_monitor_settings() is None
+
+    store.save_monitor_settings(
+        MonitorSettingsEntry(
+            sync_enabled=False,
+            sync_interval_seconds=900,
+            updated_at="2026-09-16T03:00:00+00:00",
+        )
+    )
+    loaded = store.get_monitor_settings()
+    assert loaded is not None
+    assert loaded.sync_enabled is False
+    assert loaded.sync_interval_seconds == 900
+    assert loaded.updated_at == "2026-09-16T03:00:00+00:00"
+
+    store.save_monitor_settings(replace(loaded, sync_enabled=True, sync_interval_seconds=60))
+    reloaded = store.get_monitor_settings()
+    assert reloaded is not None
+    assert reloaded.sync_enabled is True
+    assert reloaded.sync_interval_seconds == 60
+
+
+def test_monitor_snapshot_write_failure_propagates(tmp_path: Path) -> None:
+    """快照是事实读取路径：写库失败必须抛出，不能像旁路审计那样被吞掉。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+    saboteur = sqlite3.connect(str(db_path))
+    saboteur.execute("DROP TABLE monitoring_snapshots")
+    saboteur.commit()
+    saboteur.close()
+
+    with pytest.raises(Exception):
+        store.upsert_monitor_snapshot(
+            MonitorSnapshotEntry(
+                repo_id="keda-main",
+                payload_json="{}",
+                scanned_at="2026-09-16T01:00:00+00:00",
+            )
+        )

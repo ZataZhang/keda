@@ -1,6 +1,6 @@
 """统一管理终端（Operations Console）的端口与共享模型。
 
-本模块定义管理终端在 core 层依赖的三个端口：
+本模块定义管理终端在 core 层依赖的端口：
 
 - ``IRunnerProcessSupervisor``：托管 runner 子进程（spawn / 探活 / 停止 /
   日志续读）。实现位于 ``infrastructure/console/process_supervisor.py``。
@@ -8,6 +8,8 @@
   ``infrastructure/persistence/console_store.py``（本地 SQLite）。
 - ``IRepositoryRegistryEditor``：对 ``config.toml`` 仓库 registry 的受限
   写回。实现位于 ``infrastructure/config/registry_editor.py``（tomlkit）。
+- ``IMonitorSnapshotStore``：dashboard 监控快照与全局同步设置的持久化。
+  实现同样位于 ``infrastructure/persistence/console_store.py``。
 
 设计约束：
 
@@ -394,4 +396,68 @@ class IRoadmapStore(ABC):
     @abstractmethod
     def clear_roadmap_queue(self, *, repo_id: str | None = None) -> None:
         """清空 roadmap 队列；失败时抛出异常。"""
+        ...
+
+
+#: 同步间隔合法区间（秒）：界面上 1–60 分钟的可调范围。
+MONITOR_SYNC_INTERVAL_MIN_SECONDS = 60
+MONITOR_SYNC_INTERVAL_MAX_SECONDS = 3600
+
+#: 快照读取接口的状态取值。
+SYNC_STATUS_READY = "ready"
+SYNC_STATUS_PARTIAL = "partial"
+SYNC_STATUS_PENDING_FIRST_SYNC = "pending_first_sync"
+
+
+@dataclass(frozen=True)
+class MonitorSnapshotEntry:
+    """一个仓库的监控快照（core 侧端口类型）。
+
+    ``payload_json`` 是单个仓库 overview 的 JSON 序列化结果，结构与
+    ``GET /agent-runner/overview`` 返回的 ``repositories[]`` 元素一致。
+    """
+
+    repo_id: str
+    payload_json: str
+    scanned_at: str
+
+
+@dataclass(frozen=True)
+class MonitorSettingsEntry:
+    """全局监控同步设置（core 侧端口类型）。
+
+    进程级别的静态默认值来自配置（``AgentRunnerConsoleSettings``），本表只存
+    用户在界面上改过的运行时覆盖值；无记录时 core 用例回落到静态默认值。
+    """
+
+    sync_enabled: bool
+    sync_interval_seconds: int
+    updated_at: str
+
+
+class IMonitorSnapshotStore(ABC):
+    """dashboard 监控快照与全局同步设置的持久化端口。
+
+    与旁路记录端口（``IRunHistoryStore``）不同：本端口是 dashboard 的事实
+    读取路径，写入失败必须抛给调用方，避免出现"刷新成功但数据未更新"。
+    """
+
+    @abstractmethod
+    def upsert_monitor_snapshot(self, entry: MonitorSnapshotEntry) -> None:
+        """写入或覆盖一个仓库的监控快照；失败时抛出异常。"""
+        ...
+
+    @abstractmethod
+    def list_monitor_snapshots(self) -> list[MonitorSnapshotEntry]:
+        """列出全部仓库的监控快照；失败时抛出异常。"""
+        ...
+
+    @abstractmethod
+    def get_monitor_settings(self) -> MonitorSettingsEntry | None:
+        """读取全局同步设置；尚无记录时返回 ``None``。"""
+        ...
+
+    @abstractmethod
+    def save_monitor_settings(self, settings: MonitorSettingsEntry) -> None:
+        """保存或更新全局同步设置；失败时抛出异常。"""
         ...

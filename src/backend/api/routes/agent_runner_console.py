@@ -14,13 +14,17 @@ import logging
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.api.monitor_sync import wake_monitor_scheduler
 from backend.api.response_cache import TTLResponseCache
-from backend.core.shared.interfaces.runner_console import RunnerProcessKind
+from backend.core.shared.interfaces.runner_console import (
+    IMonitorSnapshotStore,
+    RunnerProcessKind,
+)
 from backend.core.use_cases.console_actions import (
     ConsoleActionError,
     execute_issue_action,
@@ -46,6 +50,10 @@ from backend.core.use_cases.agent_runner_factory import (
     resolve_repository_targets_with_diagnostics,
 )
 from backend.core.use_cases.agent_runner_repository_local import discover_iar_repositories
+from backend.core.use_cases.monitor_snapshots import (
+    get_monitor_settings,
+    update_monitor_settings,
+)
 from backend.core.use_cases.repository_registry import (
     RegistryValidationError,
     add_registry_repository,
@@ -425,3 +433,48 @@ def set_console_repository_enabled(repo_id: str, request: SetRepositoryEnabledRe
         detail=f"enabled={request.enabled}",
     )
     return {"repo_id": repo_id, "enabled": request.enabled}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 监控同步设置（dashboard 本地快照的后台同步开关与节奏）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class UpdateMonitorSettingsRequest(BaseModel):
+    """更新全局监控同步设置的请求体。
+
+    两个字段都必填：设置是"整体覆盖"语义，省略其中一个会被默认值静默改写，
+    客户端必须显式给出开关与间隔。
+    """
+
+    sync_enabled: bool
+    sync_interval_seconds: int = Field(ge=60, le=3600)
+
+
+@router.get("/agent-runner/console/monitor/settings")
+def get_console_monitor_settings() -> dict:
+    """读取全局监控同步设置；无记录时回落到配置里的静态默认值。"""
+    store = cast(IMonitorSnapshotStore, create_console_store())
+    default_interval_seconds = (
+        load_fresh_agent_runner_settings().console.monitor_sync_interval_seconds
+    )
+    settings = get_monitor_settings(store, default_interval_seconds=default_interval_seconds)
+    return _serialize(settings)
+
+
+@router.patch("/agent-runner/console/monitor/settings")
+def update_console_monitor_settings(request: UpdateMonitorSettingsRequest) -> dict:
+    """保存全局监控同步设置并立即唤醒后台调度器重算等待时间。"""
+    store = cast(IMonitorSnapshotStore, create_console_store())
+    try:
+        settings = update_monitor_settings(
+            store,
+            sync_enabled=request.sync_enabled,
+            sync_interval_seconds=request.sync_interval_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"保存同步设置失败: {exc}") from exc
+    wake_monitor_scheduler()
+    return _serialize(settings)

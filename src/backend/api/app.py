@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from backend.api.monitor_sync import (
+    start_monitor_scheduler,
+    stop_monitor_scheduler,
+)
 from backend.api.routes import (
     agent_runner,
     agent_runner_console,
@@ -17,7 +23,22 @@ from backend.api.routes import (
 
 _logger = logging.getLogger(__name__)
 
-app = FastAPI(title="keda backend")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Start/stop the long-running dashboard sync loop with the app.
+
+    周期同步是唯一的长期后台任务，必须绑定应用生命周期：路由模块 import 不
+    得产生线程，服务关闭时要有界 join，避免残留幽灵线程。
+    """
+    start_monitor_scheduler()
+    try:
+        yield
+    finally:
+        stop_monitor_scheduler()
+
+
+app = FastAPI(title="keda backend", lifespan=lifespan)
 app.include_router(agent_runner.router, prefix="/api/v1")
 app.include_router(agent_runner_console.router, prefix="/api/v1")
 app.include_router(agent_runner_roadmap.router, prefix="/api/v1")

@@ -140,6 +140,34 @@ export type MonitoringOverview = {
   unreachable_repositories?: UnreachableRepository[];
 };
 
+// ── 本地快照与后台同步（GET /overview/snapshots、GET|PATCH /console/monitor/settings）
+
+/** 快照读取接口返回的单个仓库条目；`overview` 与 per-repo overview 结构一致。 */
+export type MonitorSnapshotEntry = {
+  repo_id: string;
+  scanned_at: string;
+  overview: RepositoryMonitoringOverview;
+};
+
+/** 后端对当前快照覆盖情况的整体判定。 */
+export type MonitorSyncStatus = "ready" | "partial" | "pending_first_sync";
+
+export type MonitorSnapshotsResponse = {
+  repositories: MonitorSnapshotEntry[];
+  missing_repo_ids: string[];
+  sync_status: MonitorSyncStatus;
+  /** 各仓库快照时间的最大值；无任何快照时为 null。 */
+  scanned_at: string | null;
+  unreachable_repositories: UnreachableRepository[];
+};
+
+/** 全局后台同步设置（开关 + 间隔秒数）。 */
+export type MonitorSettings = {
+  sync_enabled: boolean;
+  sync_interval_seconds: number;
+  updated_at: string;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent Runner Operations Console
 // Keep these aligned with the backend dataclasses under

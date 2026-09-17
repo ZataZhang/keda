@@ -19,6 +19,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.use_cases.agent_runner_factory import (
+    create_console_store,
     create_github_client,
     create_process_runner,
     get_agent_runner_status_data,
@@ -30,6 +31,13 @@ from backend.core.use_cases.agent_runner_monitor import (
     MonitoringResult,
     build_issue_snapshot,
     build_overview,
+)
+from backend.core.use_cases.monitor_snapshots import (
+    MonitorSyncCoordinator,
+    MonitorSyncError,
+    get_snapshot_overview,
+    persist_monitoring_result,
+    snapshot_overview_to_payload,
 )
 
 _logger = logging.getLogger(__name__)
@@ -104,6 +112,65 @@ def _prune_overview_jobs() -> None:
             _OVERVIEW_JOBS.pop(job_id, None)
 
 
+def _resolve_enabled_repositories() -> tuple[list[str], list[dict]]:
+    """解析当前启用仓库 ID，以及路径失效、已从监控跳过的仓库。
+
+    Returns:
+        tuple[list[str], list[dict]]: 启用仓库 ID 列表，与解析失败仓库的
+        序列化结果（供 dashboard 显示"无法访问"警示）。
+    """
+    settings = load_fresh_agent_runner_settings()
+    repository_contexts, resolution_failures = resolve_repository_targets_with_diagnostics(settings)
+    return (
+        [context.repo_id for context in repository_contexts],
+        [_serialize_monitoring(failure) for failure in resolution_failures],
+    )
+
+
+def _list_enabled_repo_ids() -> list[str]:
+    """Return the repo_id of every currently enabled registry repository."""
+    repo_ids, _resolution_failures = _resolve_enabled_repositories()
+    return repo_ids
+
+
+def _scan_repository_and_persist(repo_id: str) -> None:
+    """Scan a single repository and persist the already-built payload.
+
+    This is the only producer of monitoring snapshots: it builds the overview
+    once and hands the **same** payload to :func:`persist_monitoring_result`,
+    never re-scanning GitHub just to write to the database.
+    """
+    payload = _build_overview_response(repo_ids=[repo_id])
+    report = persist_monitoring_result(create_console_store(), payload)
+    if not report.ok:
+        failed_detail = "; ".join(
+            f"{failed_repo_id}: {reason}"
+            for failed_repo_id, reason in report.failed_repo_ids.items()
+        )
+        raise MonitorSyncError(f"Failed to persist snapshot for {failed_detail}")
+    if not report.persisted_repo_ids:
+        raise MonitorSyncError(f"Repository '{repo_id}' produced no overview payload.")
+
+
+_MONITOR_COORDINATOR: MonitorSyncCoordinator | None = None
+_MONITOR_COORDINATOR_LOCK = threading.Lock()
+
+
+def get_monitor_sync_coordinator() -> MonitorSyncCoordinator:
+    """Return the process-wide monitor scan coordinator (created on first use).
+
+    Creating the coordinator starts no thread and performs no I/O; the periodic
+    loop itself is owned by the FastAPI application lifespan.
+    """
+    global _MONITOR_COORDINATOR
+    if _MONITOR_COORDINATOR is not None:
+        return _MONITOR_COORDINATOR
+    with _MONITOR_COORDINATOR_LOCK:
+        if _MONITOR_COORDINATOR is None:
+            _MONITOR_COORDINATOR = MonitorSyncCoordinator(scan_runner=_scan_repository_and_persist)
+        return _MONITOR_COORDINATOR
+
+
 def _start_overview_job(repo_ids: list[str] | None) -> str:
     """Spawn an async overview build and return its job id."""
     job_id = uuid.uuid4().hex
@@ -128,7 +195,13 @@ def _start_overview_job(repo_ids: list[str] | None) -> str:
 
 
 def _run_overview_job(job_id: str, repo_ids: list[str] | None) -> None:
-    """Execute the overview build for a queued job, updating its state."""
+    """Execute the overview build for a queued job, updating its state.
+
+    Every target repository goes through the shared per-repository coordinator,
+    so a periodic sync already running for the same repo is reused instead of
+    starting a second GitHub scan. Results are read back from the local
+    snapshots (no extra scan) and keep the historical payload shape.
+    """
     with _OVERVIEW_JOBS_LOCK:
         job = _OVERVIEW_JOBS.get(job_id)
         if job is None:
@@ -136,24 +209,44 @@ def _run_overview_job(job_id: str, repo_ids: list[str] | None) -> None:
         job["status"] = "running"
         job["started_at"] = time.time()
     try:
-        payload = _build_overview_response(repo_ids=repo_ids)
-    except HTTPException as exc:
-        with _OVERVIEW_JOBS_LOCK:
-            job["status"] = "failed"
-            job["error"] = exc.detail
-            job["finished_at"] = time.time()
-        return
+        target_repo_ids = list(repo_ids) if repo_ids else _list_enabled_repo_ids()
+        coordinator = get_monitor_sync_coordinator()
+        scan_handles = {repo_id: coordinator.request_sync(repo_id) for repo_id in target_repo_ids}
     except Exception as exc:  # noqa: BLE001
-        _logger.exception("Overview job %s crashed: %s", job_id, exc)
+        _logger.exception("Overview job %s failed to start: %s", job_id, exc)
         with _OVERVIEW_JOBS_LOCK:
             job["status"] = "failed"
             job["error"] = str(exc)
             job["finished_at"] = time.time()
         return
+
+    scan_failures: dict[str, str] = {}
+    for repo_id, handle in scan_handles.items():
+        try:
+            handle.wait()
+        except MonitorSyncError as exc:
+            scan_failures[repo_id] = str(exc)
+    try:
+        payload = _build_snapshot_payload(target_repo_ids)
+    except Exception as exc:  # noqa: BLE001
+        _logger.exception("Overview job %s failed to read snapshots: %s", job_id, exc)
+        with _OVERVIEW_JOBS_LOCK:
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            job["finished_at"] = time.time()
+        return
+
     with _OVERVIEW_JOBS_LOCK:
-        job["status"] = "completed"
         job["payload"] = payload
         job["finished_at"] = time.time()
+        if scan_failures:
+            # 持久化或扫描失败绝不伪装成刷新成功：旧快照仍在，但 job 必须报错。
+            job["status"] = "failed"
+            job["error"] = "; ".join(
+                f"{failed_repo_id}: {reason}" for failed_repo_id, reason in scan_failures.items()
+            )
+        else:
+            job["status"] = "completed"
 
 
 def _serialize_overview_job(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
@@ -170,18 +263,22 @@ def _serialize_overview_job(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _warm_overview_cache(delay: int = 5) -> None:
-    """Pre-fill the overview cache in the background after server start."""
+def _build_snapshot_payload(repo_ids: list[str]) -> dict:
+    """Read persisted snapshots back into the historical ``/overview`` payload shape.
 
-    def _run() -> None:
-        time.sleep(delay)
-        try:
-            _get_cached_overview_response()
-            _logger.info("Overview cache warmed successfully.")
-        except Exception as exc:
-            _logger.warning("Overview cache warm-up failed: %s", exc)
-
-    threading.Thread(target=_run, daemon=True).start()
+    Args:
+        repo_ids: Repository IDs to include; acts as the display allow-list so
+            removed or disabled repositories never leak back.
+    """
+    snapshot_result = get_snapshot_overview(
+        create_console_store(),
+        enabled_repo_ids=repo_ids,
+    )
+    return {
+        "repositories": [entry.overview for entry in snapshot_result.repositories],
+        "scanned_at": snapshot_result.scanned_at or "",
+        "unreachable_repositories": [],
+    }
 
 
 def _build_overview_response(repo_ids: list[str] | None = None) -> dict:
@@ -341,6 +438,26 @@ def get_agent_runner_overview(
     return _get_cached_overview_response(repo_ids=parsed_repo_ids)
 
 
+@router.get("/agent-runner/overview/snapshots")
+def get_agent_runner_overview_snapshots() -> dict:
+    """Return the locally persisted monitoring snapshots.
+
+    This is the dashboard's first-paint and polling source: it only reads the
+    local SQLite snapshots and never touches GitHub, so it stays fast even when
+    ``gh`` is slow or offline. Repositories that are no longer enabled are
+    filtered out even if historical rows remain.
+    """
+    enabled_repo_ids, unreachable_repositories = _resolve_enabled_repositories()
+    snapshot_result = get_snapshot_overview(
+        create_console_store(),
+        enabled_repo_ids=enabled_repo_ids,
+    )
+    return snapshot_overview_to_payload(
+        snapshot_result,
+        unreachable_repositories=unreachable_repositories,
+    )
+
+
 @router.get("/agent-runner/overview/jobs/{job_id}")
 def get_agent_runner_overview_job(job_id: str) -> dict:
     """Return the state of an async overview build job."""
@@ -379,7 +496,3 @@ def get_agent_runner_issue_detail(issue_number: int) -> dict:
     if issue_number <= 0:
         raise HTTPException(status_code=400, detail="issue_number must be a positive integer.")
     return _build_issue_detail_response(issue_number)
-
-
-# Pre-fill cache on module import so the first dashboard hit is snappy.
-_warm_overview_cache()

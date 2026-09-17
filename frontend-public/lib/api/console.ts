@@ -12,6 +12,7 @@ import type {
   ConsoleActionResult,
   DailyRunTrendEntry,
   DiscoveredRepositoryEntry,
+  MonitorSettings,
   ProcessLogChunk,
   RegistryRepositoryEntry,
   RepositoryCompletionStats,
@@ -124,6 +125,25 @@ export async function fetchAuditLog(limit = 100): Promise<AuditEntry[]> {
     `${BASE_PATH}/console/audit?limit=${limit}`,
   );
   return response.audits;
+}
+
+// ── 监控同步设置 ────────────────────────────────────────────────────────────
+
+/** Read the global background sync settings (falls back to the static default). */
+export async function fetchMonitorSettings(): Promise<MonitorSettings> {
+  return get<MonitorSettings>(`${BASE_PATH}/console/monitor/settings`);
+}
+
+/**
+ * Save the global background sync settings.
+ *
+ * @param params - Sync switch and interval in seconds (backend accepts 60–3600).
+ */
+export async function updateMonitorSettings(params: {
+  sync_enabled: boolean;
+  sync_interval_seconds: number;
+}): Promise<MonitorSettings> {
+  return patch<MonitorSettings>(`${BASE_PATH}/console/monitor/settings`, params);
 }
 
 // ── 仓库 registry 管理 ──────────────────────────────────────────────────────
