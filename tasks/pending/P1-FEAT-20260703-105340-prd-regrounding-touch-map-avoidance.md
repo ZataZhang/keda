@@ -149,7 +149,7 @@ PRD 写下的时刻和它被执行的时刻之间隔着一段时间，这段时�
 
 - **本 PRD 是既有 pending PRD 的修订**：原版 `P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance`（re-grounding 独立阶段 + 触碰面避让）经 2026-09-16 评估后收缩为本精简版，原因与拒绝理由见 §6 Alternatives 与 §13 D-03；文件与 slug 保留以维持既有交叉引用。
 - **依赖解除**：原版声明的 hard 依赖 `tasks/archive/P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md`（waiting 重晋升挂点）随避让机制一并移除，本 PRD 现无任何交付依赖。
-- **协调（非依赖）**：pending `P1-FEAT-20260705-161739-completeness-judgment-hardening` 也改 `config.toml`（`post_pr_supervisor` 段）与提示词构建面，与本 PRD 无顺序依赖；并行实施时注意 `config.toml` 与 `docs/guides/agent-runner.md` 的改动互不冲突（不同 section / 不同章节）。
+- **协调（已交付）**：`P1-FEAT-20260705-161739-completeness-judgment-hardening` 已于 2026-09-16 交付归档（PR #142，改 `config.toml` 的 `post_pr_supervisor` 段与 `docs/guides/agent-runner.md`），未触碰 execution 模板，与本 PRD 无残留协调点。
 - **机制先例（archive）**：`20260521-140600-...-agent-prompt-template-phase`（prompt 模板 phase 结构）、`P1-FEAT-20260916-023404-iar-prd-skill-alignment`（prompt 契约指针单源化与证据目录约定，本 PRD 的测试落点沿用其模式）。
 - **无重复**：pending 其余 PRD（roadmap 控制台、CI/CD 监控、桌面壳、console 快照）与本 PRD 正交。
 
@@ -331,7 +331,7 @@ No external validation required; repository evidence was sufficient.
 - Depends on tasks/issues:
   - none
 - Gate type: none
-- Notes: 本 PRD 为既有 pending PRD 的收缩修订（原版 hard 依赖 `tasks/archive/P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md` 随避让机制移除而解除）。与 pending `P1-FEAT-20260705-161739-completeness-judgment-hardening` 共享 `config.toml` 与提示词构建表面，无顺序依赖；并行实施时需协调同文件不同 section 的改动。
+- Notes: 本 PRD 为既有 pending PRD 的收缩修订（原版 hard 依赖 `tasks/archive/P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md` 随避让机制移除而解除）。`P1-FEAT-20260705-161739-completeness-judgment-hardening` 已交付归档且未触碰 execution 模板，本 PRD 无任何同文件协调点。
 
 ## 9. Acceptance Checklist
 
@@ -445,3 +445,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 同步 `zata_code_template` 的 prd skill 2026-09-16 版（Machine Contract v1 与双受众验收证据拆分），本机安装副本已同步后再改写，避免旧格式被交付门禁拒绝。
 - Impact: 文档结构变化，不改行为目标与验收结论；oracle 由 7 条收缩为 3 条（全部 R1），验收清单按新分组重排。
 - Review: 改写随本 PRD 定稿；交付时由 runner 门禁与 verifier 复核格式合规。
+
+### 关联 PRD 状态同步：completeness-judgment-hardening 已交付归档
+
+- Type: doc / fact-sync
+- Before: §5 与 §8 将 `P1-FEAT-20260705-161739-completeness-judgment-hardening` 描述为 pending 协调对象（共享 `config.toml` / `docs/guides/agent-runner.md` 面，并行实施需协调）。
+- After: 该 PRD 已于 2026-09-16 交付归档（PR #142，commit 36c6411），未触碰 execution 模板；§5/§8 更新为"无残留协调点"，本 PRD 同文件协调点清零。
+- Reason: 开工前事实核对发现关联状态漂移，按 §7 living implementation guide 规则先同步 PRD 再开工。
+- Impact: 仅事实描述更新；方案、插入点、oracle 与验收清单均不变（插入点与 Execution rules 8 条的现状核对仍吻合）。
