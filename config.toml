@@ -452,6 +452,8 @@ findings_artifact_dir = ".iar/state"
 #   {issue_body}    - Full Issue body markdown
 #   {prd_line}      - Auto-generated PRD reference line
 #   {validation_line} - Auto-generated Realistic Validation evidence rule
+# 另注：execution 模板中的 "PRD map check (before coding):" 段是**固定规则文本**，
+# 不对应任何占位符；语义与收尾声明格式见 docs/guides/agent-runner.md。
 [agent_runner.prompts]
 default_phase = "execution"
 
@@ -466,6 +468,12 @@ execution = [
   "",
   "Issue body:",
   "{issue_body}",
+  "",
+  "PRD map check (before coding):",
+  "- The PRD predates this run; verify the file paths, symbols, and config keys it references still exist in the current worktree.",
+  "- When a referenced path or interface has changed, follow the current code and adapt the plan; do not recreate structures the PRD describes that no longer exist.",
+  "- When the PRD plans work that is not built yet (e.g. a file it asks you to create), implement it as specified.",
+  "- In your final summary, include one line starting with `PRD map check:` listing stale references and how you adapted; write `PRD map check: none` when nothing is stale (an Issue without a PRD is trivially none).",
   "",
   "Execution rules:",
   "- Read AGENTS.md and follow repository instructions.",

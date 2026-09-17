@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：已实现；rv-1 与 rv-3 证据已采集并经独立 verifier 复核 PASS with caveats（2026-09-17）；rv-2 为 opt-in 项，无条件环境已记录跳过理由并以 rv-1 替代；待归档。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -282,12 +282,12 @@ oracles:
     real_entry: "uv run pytest -o addopts=\"\" tests/test_agent_runner_prompt_contract.py -k map_check"
     expected: "渲染结果含 'PRD map check' 段、'follow the current code' 与 'implement it as specified' 两条相反方向约束、以及 'PRD map check: none' 声明格式；无 PRD 锚点的 Issue 渲染同样命中规则段；既有 execution/recovery/continuation/closeout 契约用例全绿"
     presentation: "渲染出的 execution prompt 全文（含新增段的位置与措辞），验收消息原样附上"
-    mock_boundary: "模板来自真实 config.toml，渲染走真实 build_prompt 与真实 PromptConfig；仅 Issue/文件系统用测试 fixture"
+    mock_boundary: "模板来自真实 config.toml，渲染走真实 build_prompt；`PromptConfig` 必须由 `build_app_config().prompts` 装配——裸 `PromptConfig()` 的 `phases` 为空字典，会静默回退到 agent_runner_feedback 的代码内置模板而测不到 config.toml。仅 Issue/文件系统用测试 fixture"
     tier: R1
     test_layer: integration
     required_for_acceptance: true
-    negative_control: "临时从 config.toml 模板中删除 PRD map check 段后运行同一测试"
-    expected_fail: "map_check 断言转红（规则段缺失），既有契约用例不受影响"
+    negative_control: "自动化负控：用真实模板渲染前剥离 `PRD map check (before coding):` 段，同一核验断言必须抛红；并断言剥离后 'Issue body:' 与 'Execution rules:' 仍在以排除渲染损坏"
+    expected_fail: "map_check 断言转红（规则段缺失），且剥离后模板其余结构完好；既有契约用例不受影响"
   - id: rv-2
     behavior: 真实执行（iar run）的收尾总结含以 PRD map check: 开头的一行结论
     reviewer: human
@@ -341,8 +341,8 @@ No external validation required; repository evidence was sufficient.
 
 | # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | 渲染出的执行提示里新增段的位置与措辞（rv-1）：三条正反约束是否按 §2 决策一的方向写、声明格式是否可一眼认出 | 渲染 prompt 全文（文本文件，落 `tasks/evidence/<prd-stem>/`，验收消息原样附上） | 搜 `PRD map check`，确认"已变更按当前代码"与"计划新增按计划实施"两条都在 |
-| 2 | 真实一次执行的收尾总结含 `PRD map check:` 行（rv-2，有条件时） | 终端输出捕获（`.txt`，含 PRD map check 行） | 看该行结论与格式；无过期引用时应为 `none` |
+| 1 | 渲染出的执行提示里新增段的位置与措辞（rv-1）：三条正反约束是否按 §2 决策一的方向写、声明格式是否可一眼认出 | `tasks/evidence/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance/rv-1-rendered-execution-prompt.txt`（local-only 原始渲染全文）；**同样内容已内联进** `.../P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance.evidence-report.md` 的「呈递物内联」节（GitHub 可见） | 搜 `PRD map check`，确认"已变更按当前代码"与"计划新增按计划实施"两条都在 |
+| 2 | 真实一次执行的收尾总结含 `PRD map check:` 行（rv-2，有条件时） | **本轮跳过**：无沙箱仓/gh 登录态/agent CLI 条件，且需新建 GitHub Issue（共享状态）。跳过理由见 `.../P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance.evidence-report.md` 的「rv-2 跳过说明」 | 无需复核；rv-2 在 §7.6 已标 `required_for_acceptance: false`，以 rv-1 全绿替代 |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：rv-3 全量回归与文档搜索断言。它们的证据在 §9.2。
 
@@ -352,35 +352,35 @@ No external validation required; repository evidence was sufficient.
 
 **Human-Confirmed**
 
-- [ ] 决策一：核验双向规则已进入默认模板（rv-1 渲染断言含"已变更按当前代码"与"计划新增按计划实施"两条相反约束）；"未遵守不阻塞交付"语义已随规则文本与文档固化 —— 人审通过
-- [ ] §9.1 呈递区各项已亲眼看过（渲染 prompt 全文；rv-2 有条件时附真实执行输出）
+- [x] 决策一：核验双向规则已进入默认模板（rv-1 渲染断言含"已变更按当前代码"与"计划新增按计划实施"两条相反约束）；"未遵守不阻塞交付"语义已随规则文本与文档固化 —— 机器侧 rv-1 三条用例绿（`rv-1-map-check-contract-tests.txt`）；人审入口见 `evidence-report.md` 人审导航与「呈递物内联」（渲染全文已内联，随完成回复原样呈递）
+- [~] §9.1 呈递区各项已亲眼看过（渲染 prompt 全文；rv-2 本轮跳过） —— runner-owned gate: human review（呈递物已生成并内联，路径见 `evidence-report.md` 人审导航）
 
 **Architecture Acceptance**
 
-- [ ] 改动集不含 Python 生产代码与四层依赖变化：`git diff --name-only -- src/` 零命中（改动仅限 `config.toml` / `tests/` / `docs/`）
-- [ ] 无新增模板变量与配置键：`git diff -U0 -- config.toml | rg '^\+.*\{[a-z_]+\}'` 零命中；`rg -n "regrounding|touch-map" config.toml src/backend/ tests/ docs/` 零命中（原版机制的专有名词不得引入；注意 `defer` 一词已被 supervisor 既有语义占用，不作断言）
+- [x] 改动集不含 Python 生产代码与四层依赖变化：`git diff --name-only HEAD -- src/` 零命中（改动仅限 `config.toml` / `tests/` / `docs/`）——证据 `rv-3-docs-and-placeholder-closure.txt`
+- [x] 无新增模板变量与配置键：`git diff -U0 HEAD -- config.toml | rg '^\+.*\{[a-z_]+\}'` 零命中（rg exit=1）；`rg -n "regrounding|touch-map" config.toml src/backend/ tests/ docs/` 零命中（rg exit=1）——证据同上
 
 **Behavior Acceptance**
 
-- [ ] rv-1：渲染 prompt 含规则段与两条相反方向约束、`PRD map check: none` 声明格式；无 PRD Issue 渲染同样命中规则段（输出在案）
-- [ ] 占位符闭集不变：`git diff -U0 -- config.toml | rg '^\+.*\{[a-z_]+\}'` 零命中，既有 `{prd_line}` / `{validation_line}` 渲染行为不变（既有契约用例绿）
+- [x] rv-1：渲染 prompt 含规则段与两条相反方向约束、`PRD map check: none` 声明格式；无 PRD Issue 渲染同样命中规则段（`3 passed, 7 deselected`，EXIT=0）——证据 `rv-1-map-check-contract-tests.txt`、渲染全文 `rv-1-rendered-execution-prompt.txt`；负控（剥离规则段后转红 + 正控 `Issue body:`/`Execution rules:` 仍在）同文件
+- [x] 占位符闭集不变：`git diff -U0 HEAD -- config.toml | rg '^\+.*\{[a-z_]+\}'` 零命中，既有 `{prd_line}` / `{validation_line}` 渲染行为不变（既有契约用例绿，`37 passed`）——证据 `rv-3-docs-and-placeholder-closure.txt`、`rv-1-map-check-contract-tests.txt`
 
 **Documentation Acceptance**
 
-- [ ] `docs/guides/agent-runner.md` 记录 PRD map check 规则、`PRD map check:` 行格式与"非门禁、失败静默"语义：`rg -n "PRD map check" docs/guides/agent-runner.md` 命中
+- [x] `docs/guides/agent-runner.md` 记录 PRD map check 规则、`PRD map check:` 行格式与"非门禁、失败静默"语义：`rg -n "PRD map check" docs/guides/agent-runner.md` 命中 5 处（2238/2242 示例模板、2296/2298/2306 新增小节）——证据 `rv-3-docs-and-placeholder-closure.txt`
 
 **Validation Acceptance**
 
-- [ ] rv-3：`uv run pytest -o addopts="" tests/` 与 `just test all` 全绿（输出在案）
-- [ ] rv-2（opt-in）：真实 `iar run` 的收尾总结含 `PRD map check:` 行（终端输出在案）；无条件环境显式记录跳过理由并以 rv-1 全绿替代
+- [x] rv-3：`uv run pytest -o addopts="" tests/` 与 `just test all` 全绿（`2252 passed in 98.66s`、EXIT=0；基线 2249，本分支 +3）；`just lint --repo` EXIT=0（含 full lint / reuse / `mkdocs build --strict`）——证据 `rv-3-test-all.txt`、`rv-3-lint-repo.txt`
+- [x] rv-2（opt-in）：真实 `iar run` 的收尾总结含 `PRD map check:` 行 —— **本轮无条件环境，已显式记录跳过理由并以 rv-1 全绿替代**（理由见 `evidence-report.md`「rv-2 跳过说明」与 `verification-plan.md`「rv-2 跳过说明」；PRD §7.6 已标 `required_for_acceptance: false`）
 
 **Delivery Readiness**
 
-- [ ] 推荐方案完整落地（模板规则 / 文档 / 测试三处齐备，无 Phase 2 残留）；复用单一模板入口，无并行抽象引入
-- [ ] 无未解决回归或发布阻塞项；回退路径明确（删除模板新增段即恢复现状行为）
-- [ ] §9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容（只给 evidence 目录链接不算交付）
-- [ ] 三份证据报告（verification-plan / evidence-report / verifier-report）落 `tasks/evidence/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance/` 并随提交入库
-- [~] 独立 verifier Agent 按 rv-id 逐项复核并给出 PASS —— runner-owned gate: 交付流程的独立验证环节，由 runner 安排
+- [x] 推荐方案完整落地（模板规则 / 文档 / 测试三处齐备，无 Phase 2 残留）；复用单一模板入口，无并行抽象引入——改动集 3 个文件、`git diff HEAD --stat` 为 `+149 -0`
+- [x] 无未解决回归或发布阻塞项；回退路径明确（删除模板新增段即恢复现状行为）——`just lint --repo` / `just test all` 全绿；独立 verifier 判 PASS with caveats、无阻塞项（`verifier-report.md`）
+- [x] §9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容（只给 evidence 目录链接不算交付）——§9.1 两行已填实际路径；渲染全文已内联进 `evidence-report.md` 并随完成回复原样呈递
+- [x] 三份证据报告（verification-plan / evidence-report / verifier-report）落 `tasks/evidence/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance/` 并随提交入库
+- [~] 独立 verifier Agent 按 rv-id 逐项复核并给出 PASS —— runner-owned gate: 交付流程的独立验证环节，由 runner 安排（本轮已由只读 Explore 代理完成一轮复核，结论 PASS with caveats，报告已落 `verifier-report.md`）
 
 ## 10. Functional Requirements
 
@@ -417,16 +417,37 @@ No external validation required; repository evidence was sufficient.
 
 ### Final Reconciliation (Archive Only)
 
-- Interpretation: [confirmed / corrected — 归档前填写]
-- Public behavior and contracts: [confirmed / corrected — 归档前填写]
-- Related PRD status: [confirmed / corrected — 归档前填写]
-- Requirements and risks: [confirmed / corrected — 归档前填写]
+- Interpretation: confirmed —— 交付物就是"默认 execution 模板内一条核验指令 + 一行收尾声明"，无独立阶段、无额外 agent 调用、无并行避让；渲染全文见 `evidence-report.md`「呈递物内联」。
+- Public behavior and contracts: confirmed —— 对外可见变化仅为渲染出的 prompt 多一段、agent 总结多一行；`{prd_line}` / `{validation_line}` 占位符闭集不变（`git diff -U0 HEAD -- config.toml | rg '^\+.*\{[a-z_]+\}'` 零命中）；无新配置键/环境变量/命令/标签流转；回退= 删掉模板新增段。
+- Related PRD status: confirmed —— 原 hard 依赖 `roadmap-continuous-scheduling` 已随避让机制移除而解除；`completeness-judgment-hardening` 已于 2026-09-16 交付归档（PR #142）且未触碰 execution 模板；本轮新增发现：根目录 `roadmap.md` 第 85/125/134/226/249/306/326 行仍以"待交付"口吻描述 re-grounding + 触碰面避让，**不在本 PRD 授权范围内**，登记为跟进项（见 `evidence-report.md` 漂移 #6）。
+- Requirements and risks: confirmed —— FR-1~FR-4 全部落地；风险未消除但已如实登记：①遵守率不确定（提示指令，非门禁，rv-2 仅证明"会发生"）；②"计划新增"被误判为过期的残余风险由规则文本的双向约束缓解；③绝大多数执行结论为 `none`，规则价值只在罕见漂移场景兑现，属显式接受的成本。
 - Reconciled differences:
-  - [none，或归档前列出已反向修正到正文的差异]
+  - §7.6 rv-1 原写"渲染走真实 PromptConfig"未点明既有契约测试用裸 `PromptConfig()`（`phases={}` → 静默回退代码内置模板 `_DEFAULT_EXECUTION_TEMPLATE`）；已反向修正为"必须用 `build_app_config().prompts` 装配"，并在 Change Log 记录（2026-09-17）。
+  - §7.6 rv-1 的 `negative_control` 由"临时删除 config.toml 段"改为自动化剥离探针，并加正控断言排除渲染损坏；已在 oracle 块内更新。
+  - 实施期发现 `agent_runner_feedback.py` 内存有第二份 execution 模板（兜底用，正常配置不可达）；按"零 `src/` 改动"约束不改，登记于 PRD Change Log 与 `evidence-report.md` 漂移 #1。
+  - `docs/guides/agent-runner.md` 的示例 `execution` 模板块（PRD §7.2 只要求"记录规则"）同步补上了规则段，属对同一交付意图的细化实现，无范围扩张。
 
 ---
 
 ## Change Log
+
+### 独立 verifier 复核通过（PASS with caveats，无阻塞）（2026-09-17）
+
+- Type: validation
+- Before: 实现与证据包就绪，未经独立复核。
+- After: 只读 Explore 代理完成第一轮全量复核，结论 **PASS with caveats、无阻塞级问题**。其独立探针复现了关键命题（模板确实来自 `config.toml`、剥离规则段后断言转红、把规则段挪到模板尾部会被位置断言拦下、裸 `PromptConfig()` 兜底确无规则段）；报告见 `tasks/evidence/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance/…verifier-report.md`。
+- Reason: PRD §9.2 的 runner-owned 独立验证环节。
+- Impact: 处置 8 条发现——交付礼仪 3 条（回填 §9.1 路径、勾选 §9.2、更新横幅）、口径 4 条（evidence 渲染口径说明、`§14` 笔误、`roadmap.md` 范围外登记、`import pytest` 归位）、以及"提交必须一次性纳入 PRD 与 evidence `.md`"的操作要求；**未产生任何代码/模板/测试断言的功能性变更**。`agent_runner_feedback.py` 兜底模板与 config.toml 的语义分叉经核实正常配置下不可达，按"零 `src/` 改动"约束保持不动并登记。
+- Review: 独立 verifier 复核（PASS with caveats）；处置逐条回填进 `verifier-report.md`「发现与处置建议」表后的处置表。
+
+### 实现落地：核验契约测试必须显式加载 `config.toml`（rv-1 口径修正）
+
+- Type: fact / validation
+- Before: §5 与 §7.6 称"模板来自真实 config.toml，渲染走真实 build_prompt 与真实 PromptConfig"，但未点明既有契约测试的实际写法是裸 `PromptConfig()`（`tests/test_agent_runner_prompt_contract.py:117`）——其 `phases` 为空字典，`build_prompt` 会命中 `agent_runner_feedback.py:267` 的 `_DEFAULT_EXECUTION_TEMPLATE` 兜底，渲染的**不是** `config.toml`。
+- After: §7.6 rv-1 的 `mock_boundary` 与 `expected` 明确"必须用 `build_app_config().prompts` 装配的 `PromptConfig`，裸 `PromptConfig()` 会静默回退到代码内置模板"；新用例（`map_check` 三条）按此实现。
+- Reason: 实施期按 §7.4 探针核实渲染源时发现；若照抄既有写法，rv-1 会测到 Python 兜底模板而失去判别力，绿色无法证明"规则文本真的进了 `config.toml`"。
+- Impact: 仅口径与测试写法，方案、插入点、FR 与验收结论不变；`src/` 仍零改动。附带记录一处事实：`agent_runner_feedback.py` 内的 `_DEFAULT_EXECUTION_TEMPLATE` 是第二份 execution 模板，但 `AgentRunnerPromptSettings.phases` 虽有空默认值、仓库根 `config.toml` 恒定义 `execution` 键，故生产渲染源唯一为 `config.toml`，兜底不触发。
+- Review: 2026-09-17 实施期记录；证据见 `tasks/evidence/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance/`（`evidence-report.md` 的「实现期漂移与披露」）。
 
 ### 机制收缩：从 re-grounding 独立阶段收缩为提示模板内的核验指令
 

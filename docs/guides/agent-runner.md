@@ -2235,6 +2235,12 @@ execution = [
   "Issue body:",
   "{issue_body}",
   "",
+  "PRD map check (before coding):",
+  "- The PRD predates this run; verify the file paths, symbols, and config keys it references still exist in the current worktree.",
+  "- When a referenced path or interface has changed, follow the current code and adapt the plan; do not recreate structures the PRD describes that no longer exist.",
+  "- When the PRD plans work that is not built yet (e.g. a file it asks you to create), implement it as specified.",
+  "- In your final summary, include one line starting with `PRD map check:` listing stale references and how you adapted; write `PRD map check: none` when nothing is stale (an Issue without a PRD is trivially none).",
+  "",
   "Execution rules:",
   "- Read AGENTS.md and follow repository instructions.",
   "- Only modify files inside the current worktree.",
@@ -2286,6 +2292,20 @@ Prompt 模板支持以下变量占位符：
 | `{worktree_path}` | 当前 worktree 的绝对路径 |
 | `{issue_body}` | Issue 完整正文 |
 | `{prd_line}` | 自动生成的 PRD 引用行（有 PRD 时提示读取，无 PRD 时给出通用建议） |
+
+### PRD map check（执行开工前的 PRD 引用核验）
+
+PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路径、符号、配置键可能已经失效。默认 `execution` 模板因此在 `Issue body:` 段之后、`Execution rules:` 段之前内置一段固定规则文本 `PRD map check (before coding):`（它不对应任何占位符，随默认模板分发）。
+
+规则要求执行 agent 在动代码之前：
+
+- 核验 PRD 引用的文件路径、符号、配置键是否仍存在于当前 worktree；
+- 引用已变更时**以当前代码为准**调整路线，不重建 PRD 里已不存在的旧结构；
+- PRD 计划新建、当前尚不存在的东西（例如它要求你新建的文件）**按计划实施**，不要误判为过期引用而跳过。
+
+收尾声明：执行 agent 的最后总结里带一行以 `PRD map check:` 开头的结论，列出过期引用与适配方式；没有任何过期引用时写 `PRD map check: none`（未关联 PRD 的 Issue 同样写 `none`）。
+
+这是**增益指令，不是门禁**：agent 未执行或核验不出结论时，不阻塞交付、不报错、不回滚，执行结果与现状一致——唯一的差别是总结里少一行声明。回退方式是把默认模板里这段规则删除；在本地配置里覆盖过 `[agent_runner.prompts.phases].execution` 的仓库完全不受影响（模板是仓库自有资产）。
 
 ## Generated Content 配置
 

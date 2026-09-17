@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from backend.core.shared.models.agent_runner import (
     DeliveryGateFailureKind,
     IssueSummary,
@@ -37,6 +39,7 @@ from backend.core.use_cases.agent_runner_validation import (
     build_validation_prompt_line,
     resolve_issue_evidence_relpath,
 )
+from backend.engines.agent_runner.factory import build_app_config
 
 _PRD_RELATIVE_PATH = "tasks/pending/P1-FEAT-20990101-000000-demo.md"
 
@@ -107,6 +110,78 @@ def _assert_prompt_contract(prompt: str, *, prompt_name: str) -> None:
     ), f"{prompt_name} 的归档归属规则应恰好出现一次"
 
 
+# PRD map check 契约（PRD: 执行开工前的 PRD 引用核验, FR-1 / FR-2）。
+# 规则段是默认 execution 模板里的固定文本，渲染自仓库根 ``config.toml``。
+_MAP_CHECK_HEADER = "PRD map check (before coding):"
+_MAP_CHECK_FOLLOW_CURRENT_CODE = "follow the current code and adapt the plan"
+_MAP_CHECK_IMPLEMENT_AS_SPECIFIED = "implement it as specified"
+_MAP_CHECK_NONE_DECLARATION = "PRD map check: none"
+
+
+def _execution_prompt_from_root_config(tmp_path: Path, issue: IssueSummary) -> str:
+    """从真实仓库根 ``config.toml`` 渲染 execution prompt。
+
+    必须用 ``build_app_config()`` 装配的 ``PromptConfig``：裸 ``PromptConfig()``
+    的 ``phases`` 为空字典，会静默回退到代码内置模板，测不到 config.toml。
+
+    Args:
+        tmp_path: pytest 临时目录，用作 worktree 根。
+        issue: 待渲染的 Issue。
+
+    Returns:
+        渲染后的 execution prompt 全文。
+    """
+    config = build_app_config()
+    return build_prompt(
+        issue,
+        _worktree_with_prd(tmp_path),
+        config.prompts,
+        validation_line=build_validation_prompt_line(
+            issue,
+            config,
+            evidence_dir=resolve_issue_evidence_relpath(config, issue),
+        ),
+    )
+
+
+def _assert_map_check_contract(prompt: str, *, prompt_name: str) -> None:
+    """PRD map check 契约：规则段在场、两条相反方向约束齐备、声明格式与位置正确。"""
+    assert _MAP_CHECK_HEADER in prompt, f"{prompt_name} 缺少 PRD map check 规则段"
+    assert _MAP_CHECK_FOLLOW_CURRENT_CODE in prompt, f"{prompt_name} 缺少「已变更按当前代码」约束"
+    assert (
+        _MAP_CHECK_IMPLEMENT_AS_SPECIFIED in prompt
+    ), f"{prompt_name} 缺少「计划新增按计划实施」约束"
+    assert _MAP_CHECK_NONE_DECLARATION in prompt, f"{prompt_name} 缺少收尾声明格式"
+    # 插入位置：Issue body 段之后、Execution rules 段之前。
+    assert (
+        prompt.index("Issue body:")
+        < prompt.index(_MAP_CHECK_HEADER)
+        < prompt.index("Execution rules:")
+    ), f"{prompt_name} 的 PRD map check 段位置不符合约定"
+
+
+def _strip_map_check_block(template: str) -> str:
+    """删除模板中的 PRD map check 规则段（负控用）。
+
+    Args:
+        template: 完整的 execution 模板文本。
+
+    Returns:
+        去掉规则段后的模板文本；模板不含该段时原样返回。
+    """
+    kept_lines: list[str] = []
+    inside_map_check_block = False
+    for line in template.splitlines():
+        if line.strip() == _MAP_CHECK_HEADER:
+            inside_map_check_block = True
+            continue
+        if inside_map_check_block and line.startswith("Execution rules:"):
+            inside_map_check_block = False
+        if not inside_map_check_block:
+            kept_lines.append(line)
+    return "\n".join(kept_lines)
+
+
 def test_prompt_contract_execution_prompt(tmp_path: Path) -> None:
     """execution prompt：教学零命中，指针与 runner 语义各一次。"""
     worktree_path = _worktree_with_prd(tmp_path)
@@ -122,6 +197,52 @@ def test_prompt_contract_execution_prompt(tmp_path: Path) -> None:
     _assert_prompt_contract(prompt, prompt_name="execution")
     # 证据落点按 PRD stem 子目录解析。
     assert "tasks/evidence/P1-FEAT-20990101-000000-demo/" in prompt
+
+
+def test_prompt_contract_execution_prompt_map_check(tmp_path: Path) -> None:
+    """execution prompt（真实 config.toml）含 PRD map check 规则段与声明格式。"""
+    prompt = _execution_prompt_from_root_config(tmp_path, _issue())
+    _assert_map_check_contract(prompt, prompt_name="execution")
+
+
+def test_prompt_contract_execution_prompt_map_check_without_prd(tmp_path: Path) -> None:
+    """未关联 PRD 的 Issue：规则段同样在场（核验无对象，声明写 none）。
+
+    规则段是模板里的静态文本，不依赖 ``{prd_line}`` 是否解析出 PRD 锚点。
+    """
+    issue = _issue(body="## Summary\n\nNo canonical PRD is attached here.\n")
+    prompt = _execution_prompt_from_root_config(tmp_path, issue)
+    _assert_map_check_contract(prompt, prompt_name="execution（无 PRD）")
+
+
+def test_prompt_contract_execution_prompt_map_check_negative_control(
+    tmp_path: Path,
+) -> None:
+    """负控：从真实模板删掉 PRD map check 段后，同一断言必须转红。
+
+    证明上面的绿色来自模板里真实存在的规则段，而不是断言写得过于宽松。
+    """
+    config = build_app_config()
+    template = config.prompts.phases["execution"]
+    stripped_template = _strip_map_check_block(template)
+    assert stripped_template != template, "负控失效：真实模板里找不到可删除的规则段"
+
+    issue = _issue()
+    prompt = build_prompt(
+        issue,
+        _worktree_with_prd(tmp_path),
+        PromptConfig(phases={"execution": stripped_template}),
+        validation_line=build_validation_prompt_line(
+            issue,
+            config,
+            evidence_dir=resolve_issue_evidence_relpath(config, issue),
+        ),
+    )
+    with pytest.raises(AssertionError):
+        _assert_map_check_contract(prompt, prompt_name="negative-control")
+    # 正控：剥离只去掉规则段，模板其余结构完好（排除"渲染本身就坏了"）。
+    assert _MAP_CHECK_HEADER not in prompt
+    assert "Issue body:" in prompt and "Execution rules:" in prompt
 
 
 def test_prompt_contract_recovery_prompt(tmp_path: Path) -> None:
