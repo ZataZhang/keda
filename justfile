@@ -538,3 +538,23 @@ frontend-admin action="dev":
             exit 1
             ;;
     esac
+
+# 重新构建 frontend-public 并同步到后端 static 目录，让 `iar console`
+# 面板立即用上新构建。static console 是构建产物（gitignored），FastAPI
+# 的 StaticFiles 按请求读盘，同步后刷新浏览器即可，无需重启进程。
+# Usage:
+#   just console-sync
+console-sync:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    cd "$root/frontend-public"
+    pnpm build
+    out="$root/frontend-public/out"
+    dest="$root/src/backend/api/static/console"
+    [ -f "$out/index.html" ] || { echo "❌ 构建产物缺失：$out/index.html"; exit 1; }
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    cp -R "$out/." "$dest/"
+    touch "$dest/.gitkeep"
+    echo "✅ 已同步 $out -> ${dest} （硬刷新浏览器 Cmd+Shift+R 即可看到新版）"
