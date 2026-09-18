@@ -416,6 +416,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             prompt_override,
                             worktree_path,
                             process_runner,
+                            config=config,
                             issue=issue,
                             transient_retry_attempts=(config.runner.transient_retry_attempts),
                             transient_retry_delay_seconds=(
@@ -459,6 +460,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         recovery_prompt,
                         worktree_path,
                         process_runner,
+                        config=config,
                         issue=issue,
                         transient_retry_attempts=config.runner.transient_retry_attempts,
                         transient_retry_delay_seconds=(config.runner.transient_retry_delay_seconds),

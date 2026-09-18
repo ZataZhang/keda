@@ -67,10 +67,12 @@ from backend.core.use_cases.pr_supervisor import (
     execute_rebase,
     execute_repair,
 )
+from backend.core.use_cases.pr_supervisor_findings import _load_previous_findings
 from backend.core.use_cases.run_agent_once import (
     choose_agent,
     create_or_reuse_worktree,
     get_head_sha,
+    resolve_repair_agent,
 )
 
 _logger = logging.getLogger(__name__)
@@ -454,6 +456,14 @@ def _process_running_rework(
     expected_head = marker.head_sha or get_head_sha(worktree_path, process_runner)
     action = marker.action or "repair_pr_branch"
     supervisor_agent = choose_agent(issue, config, agent)
+    # rework 路径拿不到本次实现者，``repair_agent='executor'`` 会按 Issue 标签
+    # 回落（解析器内部记录来源）；findings 取跨 cycle 落盘的未解决清单。
+    repair_agent = resolve_repair_agent(
+        config.post_pr_supervisor.repair_agent,
+        issue=issue,
+        config=config,
+        reviewing_agent=supervisor_agent,
+    )
 
     # 执行修复或 rebase
     if action == "rebase_pr_branch":
@@ -483,7 +493,8 @@ def _process_running_rework(
             process_runner=process_runner,
             pr_branch=pr_branch,
             expected_head=expected_head,
-            supervisor_agent=supervisor_agent,
+            repair_agent=repair_agent,
+            findings=_load_previous_findings(worktree_path, config, issue.number),
         )
         repair_sha = get_head_sha(worktree_path, process_runner)
         github_client.comment_issue(

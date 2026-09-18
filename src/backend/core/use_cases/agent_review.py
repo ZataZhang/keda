@@ -18,8 +18,15 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     ReviewFinding,
 )
-from backend.core.use_cases.agent_runner_events import (
-    format_event_marker,
+from backend.core.shared.models.agent_spec import AGENT_PROFILE_RUN
+from backend.core.use_cases.agent_review_comment import (
+    build_pre_pr_review_result_comment,
+)
+from backend.core.use_cases.agent_review_repair import (
+    COMMIT_REQUEST_RELATIVE_PATH,
+    build_commit_request_reminder_prompt,
+    resolve_reviewer_profile,
+    run_review_repair_agent,
 )
 from backend.core.use_cases.agent_runner_failure import (
     ProviderCapacityError,
@@ -34,6 +41,10 @@ from backend.core.use_cases.run_agent_once import (
     extract_agent_response_text,
     format_verification_failure,
     get_head_sha,
+    has_changes,
+    repair_agent_is_self,
+    resolve_repair_agent,
+    resolve_reviewer_agent,
     run_agent_with_prompt_resilient,
     unstage_changes,
 )
@@ -41,7 +52,6 @@ from backend.core.use_cases.run_agent_once import (
 _logger = logging.getLogger(__name__)
 
 _VALID_REVIEW_VERDICTS = {"approved", "changes_requested"}
-_COMMIT_REQUEST_RELATIVE_PATH = Path(".agent-runner/commit-request.json")
 
 # Default review rules appended after the review packet. The default instructs
 # the reviewer to invoke the ``code-reviewer`` skill via the Skill tool and to
@@ -133,12 +143,17 @@ def build_review_packet(
     verification_results: list[CommandResult],
     head_sha: str,
     previous_commit_failure: str | None = None,
+    *,
+    read_only_review: bool = False,
 ) -> str:
     """Build the context packet sent to the pre-PR reviewer.
 
     当上一轮 reviewer 补丁在提交门禁（如 ``just lint --reuse`` / 验证命令）上失败时，
     通过 ``previous_commit_failure`` 把失败命令与输出回喂给本轮 reviewer，使其能针对
     真正的门禁失败调整做法，而不是蒙着眼重复同样的改动。
+
+    ``read_only_review`` 用于"审-修分工"模式：提示词明确禁止审核者改代码或写提交
+    请求，改代码交给独立的修复者（见 ``pre_pr_review.repair_agent``）。
     """
     prd_line = build_prd_review_reference(issue, worktree_path)
 
@@ -175,6 +190,17 @@ def build_review_packet(
             "```",
         ]
 
+    read_only_lines: list[str] = []
+    if read_only_review:
+        read_only_lines = [
+            "",
+            "Read-only review mode:",
+            "- Do NOT modify any file in the worktree.",
+            "- Do NOT write `.agent-runner/commit-request.json`; a separate repair agent "
+            "applies the fixes and any commit request you write is discarded.",
+            "- Only report findings (a structured JSON verdict with findings).",
+        ]
+
     return "\n".join(
         [
             f"Pre-PR Review for Issue #{issue.number}: {issue.title}",
@@ -201,6 +227,7 @@ def build_review_packet(
             "",
             "Review rules:",
             review_rules,
+            *read_only_lines,
         ]
     )
 
@@ -487,102 +514,6 @@ def _int_field(payload: dict[str, object], key: str) -> int:
         return 0
 
 
-def build_pre_pr_review_result_comment(
-    *,
-    verdict: str,
-    reviewer: str,
-    head_before: str,
-    head_after: str,
-    verification_passed: bool,
-    findings_high: int,
-    findings_medium: int,
-    findings_low: int,
-    action_summary: str,
-    cycle: int,
-    findings: tuple[ReviewFinding, ...] = (),
-    findings_critical: int = 0,
-) -> str:
-    """Build the human-readable comment for a pre-PR review result."""
-    marker = format_event_marker(
-        phase="pre_pr_review",
-        cycle=cycle,
-        head_sha=head_after,
-    )
-    verification_line = "passed" if verification_passed else "failed"
-    counts_line = (
-        f"- Findings: {findings_critical} critical, {findings_high} high, "
-        f"{findings_medium} medium, {findings_low} low"
-    )
-    sections = [
-        marker,
-        "",
-        "## Agent Runner Pre-PR Review",
-        "",
-        f"- Verdict: {verdict}",
-        f"- Reviewer: {reviewer}",
-        f"- Head Before: `{head_before}`",
-        f"- Head After: `{head_after}`",
-        f"- Verification: {verification_line}",
-        counts_line,
-        f"- Action: {action_summary}",
-    ]
-    if findings:
-        sections.append("")
-        sections.append("### Findings")
-        sections.append("")
-        sections.append("| Severity | Category | File | Line | Title | Recommendation |")
-        sections.append("|---|---|---|---|---|---|")
-        for finding in findings:
-            sections.append(
-                "| {sev} | {cat} | {file} | {line} | {title} | {rec} |".format(
-                    sev=_escape_cell(finding.severity or "-"),
-                    cat=_escape_cell(finding.category or "-"),
-                    file=_escape_cell(finding.file or "-"),
-                    line=finding.line if finding.line else "-",
-                    title=_escape_cell(finding.title or "-"),
-                    rec=_escape_cell(finding.recommendation or "-"),
-                )
-            )
-    return "\n".join(sections)
-
-
-def _escape_cell(value: str) -> str:
-    """Escape a value so it can be safely embedded in a markdown table cell."""
-    return value.replace("|", "\\|").replace("\n", " ").strip() or "-"
-
-
-def _build_commit_request_reminder_prompt(
-    review_prompt: str,
-    findings: tuple[ReviewFinding, ...],
-    reminder_index: int,
-) -> str:
-    """Append a strict reminder when a reviewer listed findings but no patch.
-
-    The reminder is injected back into the same review cycle so the reviewer
-    gets another chance to produce ``.agent-runner/commit-request.json``
-    instead of leaving the runner with findings it cannot apply automatically.
-    """
-    finding_lines: list[str] = []
-    for finding in findings:
-        location = f"{finding.file}:{finding.line}" if finding.file else "unknown location"
-        finding_lines.append(
-            f"- [{location}] {finding.severity}: {finding.title}\n"
-            f"  {finding.description}\n"
-            f"  Recommendation: {finding.recommendation}"
-        )
-    findings_block = "\n".join(finding_lines) or "(no structured findings)"
-    reminder = (
-        f"\n\nREMINDER #{reminder_index}: The review above reported findings "
-        "but did not create `.agent-runner/commit-request.json`. "
-        "You MUST now apply concrete fixes in the worktree and write "
-        "`.agent-runner/commit-request.json` with a descriptive `commit_message`. "
-        "Do not just list findings; produce a patch that addresses every item."
-        "\n\nFindings that must be addressed:\n"
-        f"{findings_block}"
-    )
-    return review_prompt + reminder
-
-
 def run_pre_pr_review(
     *,
     issue: IssueSummary,
@@ -609,7 +540,8 @@ def run_pre_pr_review(
         config: Application configuration.
         github_client: GitHub client for comments.
         process_runner: Process runner for commands.
-        selected_agent: Agent to use for review.
+        selected_agent: Agent that implemented the Issue; also the default
+            reviewer and the ``executor`` repair target.
         head_sha_before: SHA before review starts.
         expected_branch: Branch the worktree should be on.
         verification_results: Existing verification results from implementation.
@@ -622,15 +554,26 @@ def run_pre_pr_review(
 
     Raises:
         RuntimeError: If review does not converge within ``max_attempts``.
+        UnknownAgentError: ``pre_pr_review.repair_agent`` names an unregistered agent.
     """
     review_config = config.pre_pr_review
     if not review_config.enabled:
         _logger.info("Pre-PR review disabled for Issue #%d.", issue.number)
         return head_sha_before, verification_results
 
-    reviewer_agent = selected_agent if review_config.allow_same_agent else "codex"
-    if review_config.review_agent != "auto":
-        reviewer_agent = review_config.review_agent
+    reviewer_agent = resolve_reviewer_agent(issue, config, selected_agent)
+    split_repair = not repair_agent_is_self(review_config.repair_agent)
+    # 解析在循环之前：未注册的 repair_agent 必须在阶段开始前 fail-fast。
+    repair_agent = resolve_repair_agent(
+        review_config.repair_agent,
+        issue=issue,
+        config=config,
+        reviewing_agent=reviewer_agent,
+        executor_agent=selected_agent,
+    )
+    reviewer_profile = (
+        resolve_reviewer_profile(reviewer_agent, config) if split_repair else AGENT_PROFILE_RUN
+    )
 
     max_attempts = max(1, review_config.max_attempts)
     timeout_seconds = max(1, review_config.timeout_seconds)
@@ -641,13 +584,18 @@ def run_pre_pr_review(
     last_action_summary = last_failure_summary
     last_cycle_verdict = "changes_requested"
     last_cycle_applied_patch = False
+    last_cycle_reviewer_patch_ignored = False
+    last_cycle_reviewer_left_changes = False
     # 上一轮补丁在提交门禁上失败时的命令与输出，回喂给下一轮 reviewer；成功或首轮为 None
     pending_commit_failure: str | None = None
     _logger.info(
-        "Starting pre-PR review for Issue #%d with reviewer '%s' "
-        "(max_attempts=%d, timeout=%ds, head=%s).",
+        "Starting pre-PR review for Issue #%d with reviewer '%s' (profile=%s, "
+        "repair_agent=%s, split_repair=%s, max_attempts=%d, timeout=%ds, head=%s).",
         issue.number,
         reviewer_agent,
+        reviewer_profile,
+        repair_agent,
+        split_repair,
         max_attempts,
         timeout_seconds,
         head_sha_before,
@@ -670,10 +618,13 @@ def run_pre_pr_review(
             verification_results=current_verification,
             head_sha=current_head,
             previous_commit_failure=pending_commit_failure,
+            read_only_review=split_repair,
         )
         # 反馈只投喂给紧接着的这一轮；若本轮再次失败，except 分支会重新填充
         pending_commit_failure = None
         max_inner_attempts = max(0, review_config.commit_request_reminder_attempts)
+        # 只读模式下也要能点名"审核者仍然改了文件"：记录审核前的工作树状态。
+        reviewer_started_dirty = has_changes(worktree_path, process_runner)
         for inner_attempt in range(max_inner_attempts + 1):
             _logger.info(
                 "Pre-PR review cycle %d/%d for Issue #%d: running reviewer '%s' "
@@ -691,11 +642,13 @@ def run_pre_pr_review(
                     review_prompt,
                     worktree_path,
                     process_runner,
+                    config=config,
                     capture_output=True,
                     timeout_seconds=timeout_seconds,
                     issue=issue,
                     transient_retry_attempts=(config.runner.transient_retry_attempts),
                     transient_retry_delay_seconds=(config.runner.transient_retry_delay_seconds),
+                    profile=reviewer_profile,
                 )
             except (subprocess.CalledProcessError, OSError) as exc:
                 # Transient blips are already retried inside the resilient
@@ -709,7 +662,7 @@ def run_pre_pr_review(
             stdout_decision = parse_reviewer_decision(reviewer_text)
 
             # Check if reviewer requested changes via commit request
-            request_path = worktree_path / _COMMIT_REQUEST_RELATIVE_PATH
+            request_path = worktree_path / COMMIT_REQUEST_RELATIVE_PATH
             commit_request_decision = (
                 _read_commit_request_decision(request_path) if request_path.is_file() else None
             )
@@ -747,13 +700,53 @@ def run_pre_pr_review(
                     issue.number,
                     len(reviewer_decision.findings),
                 )
-                review_prompt = _build_commit_request_reminder_prompt(
+                review_prompt = build_commit_request_reminder_prompt(
                     review_prompt,
                     reviewer_decision.findings,
                     reminder_index=inner_attempt + 1,
                 )
                 continue
             break
+
+        # 审-修分工（``repair_agent`` 非 self）：审核者只出结论。它越权写出的
+        # 提交请求一律丢弃、不触发提交；改代码交给解析出的修复者，本轮 findings
+        # 原样进入修复提示词。审核者已改的文件不回滚，随修复者的提交一起落地。
+        reviewer_patch_ignored = False
+        reviewer_left_changes = False
+        if split_repair:
+            reviewer_left_changes = not reviewer_started_dirty and has_changes(
+                worktree_path, process_runner
+            )
+            if reviewer_left_changes:
+                _logger.warning(
+                    "Pre-PR review cycle %d/%d for Issue #%d: reviewer '%s' edited "
+                    "files despite read-only mode; edits stay in the worktree and are "
+                    "carried into this cycle's repair commit.",
+                    cycle,
+                    max_attempts,
+                    issue.number,
+                    reviewer_agent,
+                )
+            if request_path.is_file():
+                reviewer_patch_ignored = True
+                request_path.unlink()
+                _logger.warning(
+                    "Pre-PR review cycle %d/%d for Issue #%d: reviewer '%s' ran in "
+                    "read-only mode but wrote a commit request; discarding it.",
+                    cycle,
+                    max_attempts,
+                    issue.number,
+                    reviewer_agent,
+                )
+            if reviewer_decision.verdict == "changes_requested" and reviewer_decision.has_findings:
+                run_review_repair_agent(
+                    issue=issue,
+                    worktree_path=worktree_path,
+                    config=config,
+                    process_runner=process_runner,
+                    repair_agent=repair_agent,
+                    findings=reviewer_decision.findings,
+                )
 
         elapsed_seconds = time.monotonic() - attempt_started_at
         _logger.info(
@@ -767,12 +760,15 @@ def run_pre_pr_review(
         cycle_verdict = reviewer_decision.verdict
         request_path_was_present = request_path.is_file()
         if request_path_was_present:
+            # 审-修分工模式下写出补丁的是修复者，日志必须如实反映是谁提交的。
+            patch_author = f"repairer '{repair_agent}'" if split_repair else "reviewer"
             _logger.info(
-                "Pre-PR review cycle %d/%d for Issue #%d: reviewer wrote "
+                "Pre-PR review cycle %d/%d for Issue #%d: %s wrote "
                 "commit request; processing through commit proxy.",
                 cycle,
                 max_attempts,
                 issue.number,
+                patch_author,
             )
             cycle_verdict = "changes_requested"
             try:
@@ -787,10 +783,11 @@ def run_pre_pr_review(
                 if push_callback is not None:
                     _logger.info(
                         "Pre-PR review cycle %d/%d for Issue #%d: pushing "
-                        "reviewer patch from %s to remote.",
+                        "%s patch from %s to remote.",
                         cycle,
                         max_attempts,
                         issue.number,
+                        patch_author,
                         current_head,
                     )
                     push_callback()
@@ -801,16 +798,21 @@ def run_pre_pr_review(
                 if reviewer_decision.verdict == "approved":
                     cycle_verdict = "approved"
                     action_summary = "reviewer approved and runner committed follow-up patch"
+                elif split_repair:
+                    action_summary = (
+                        f"repairer '{repair_agent}' patched and runner committed "
+                        "follow-up changes"
+                    )
                 else:
                     action_summary = "reviewer patched and runner committed follow-up changes"
                 last_failure_summary = action_summary
                 last_cycle_applied_patch = True
                 _logger.info(
-                    "Pre-PR review cycle %d/%d for Issue #%d: reviewer "
-                    "changes committed at head %s.",
+                    "Pre-PR review cycle %d/%d for Issue #%d: %s " "changes committed at head %s.",
                     cycle,
                     max_attempts,
                     issue.number,
+                    patch_author,
                     current_head,
                 )
             except EmptyCommitRequestError:
@@ -823,6 +825,8 @@ def run_pre_pr_review(
                 cycle_verdict = reviewer_decision.verdict
                 if reviewer_decision.verdict == "approved":
                     action_summary = "reviewer approved with an empty commit request"
+                elif split_repair:
+                    action_summary = f"repairer '{repair_agent}' produced no committable diff"
                 else:
                     action_summary = "reviewer requested changes but produced no committable diff"
                 last_failure_summary = action_summary
@@ -835,7 +839,7 @@ def run_pre_pr_review(
                     reviewer_decision.verdict,
                 )
             except Exception as exc:  # noqa: BLE001
-                action_summary = f"reviewer patch failed to commit: {exc}"
+                action_summary = f"{patch_author} patch failed to commit: {exc}"
                 last_failure_summary = action_summary
                 # 把门禁失败(命令+输出)回喂给下一轮 reviewer,并把失败补丁 unstage,
                 # 让下一轮在干净索引上按反馈修订,而不是让残留的 staged 内容被 git
@@ -864,6 +868,9 @@ def run_pre_pr_review(
                         findings_low=0,
                         action_summary=action_summary,
                         cycle=cycle,
+                        repairer=repair_agent if split_repair else None,
+                        reviewer_patch_ignored=reviewer_patch_ignored,
+                        reviewer_left_changes=reviewer_left_changes,
                     ),
                 )
                 if cycle >= max_attempts:
@@ -873,7 +880,11 @@ def run_pre_pr_review(
             if reviewer_decision.verdict == "approved":
                 action_summary = "reviewer approved without changes"
             elif reviewer_decision.parseable:
-                if reviewer_decision.has_findings:
+                if split_repair and reviewer_decision.has_findings:
+                    action_summary = (
+                        "reviewer reported findings; the repairer produced no commit request"
+                    )
+                elif reviewer_decision.has_findings:
                     action_summary = "reviewer reported findings but produced no commit request"
                 else:
                     action_summary = "reviewer requested changes without a commit request"
@@ -894,6 +905,9 @@ def run_pre_pr_review(
             cycle=cycle,
             findings=reviewer_decision.findings,
             findings_critical=reviewer_decision.findings_critical,
+            repairer=repair_agent if split_repair else None,
+            reviewer_patch_ignored=reviewer_patch_ignored,
+            reviewer_left_changes=reviewer_left_changes,
         )
         github_client.comment_issue(issue.number, comment_body)
         _logger.info(
@@ -909,6 +923,8 @@ def run_pre_pr_review(
         last_action_summary = action_summary
         last_cycle_verdict = cycle_verdict
         last_cycle_had_commit_request = bool(request_path_was_present)
+        last_cycle_reviewer_patch_ignored = reviewer_patch_ignored
+        last_cycle_reviewer_left_changes = reviewer_left_changes
         if action_summary.startswith("reviewer approved") and all(
             result.return_code == 0 for result in current_verification
         ):
@@ -962,6 +978,9 @@ def run_pre_pr_review(
                 cycle=max_attempts,
                 findings=final_decision.findings,
                 findings_critical=final_decision.findings_critical,
+                repairer=repair_agent if split_repair else None,
+                reviewer_patch_ignored=last_cycle_reviewer_patch_ignored,
+                reviewer_left_changes=last_cycle_reviewer_left_changes,
             ),
         )
     if last_cycle_verdict == "approved":

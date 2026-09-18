@@ -416,6 +416,13 @@ frontend_paths = ["frontend-admin", "frontend-public"]
 # Draft PR 创建前的 AI review 门禁（push 之后、PR 之前）
 enabled = true
 review_agent = "auto"
+# 谁修复 review 报出的问题：
+#   self     - 审核者自己打补丁（默认，与历史行为一致）
+#   executor - 交回本次实现者；审核者只出 findings、其提交请求被丢弃，
+#              审核者已改的文件并入实现者本轮提交
+#   其它     - 任意已注册 agent 名
+# 注意与 runner.fix_agent_enabled 区分：后者是本地验证失败时的轻量修复 agent。
+repair_agent = "self"
 allow_same_agent = true
 max_attempts = 2
 timeout_seconds = 1800
@@ -428,6 +435,11 @@ review_prompt_template = []
 [agent_runner.post_pr_supervisor]
 enabled = true
 supervisor_agent = "auto"
+# 谁执行 supervisor 判定后的代码修复：
+#   self     - supervisor 自己修（默认，与历史行为一致）
+#   executor - 交回本次实现者；拿不到本次实现者时按 Issue 标签回落并在日志中注明来源
+#   其它     - 任意已注册 agent 名
+repair_agent = "self"
 max_repair_attempts = 2
 max_agent_crash_retries = 5
 crash_retry_initial_backoff_seconds = 30

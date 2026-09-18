@@ -34,9 +34,9 @@ from backend.core.use_cases.agent_runner_git import (
     stash_worktree_changes,
 )
 from backend.core.use_cases.run_agent_once import (
-    choose_agent,
     create_or_reuse_worktree,
     get_head_sha,
+    resolve_supervisor_agent,
 )
 
 _logger = logging.getLogger(__name__)
@@ -185,7 +185,9 @@ def _process_review_candidate(
         )
 
     worktree_path = create_or_reuse_worktree(repo_path, issue, config, process_runner)
-    supervisor_agent = choose_agent(issue, config, agent)
+    # 命令行 --agent > post_pr_supervisor.supervisor_agent > Issue 标签路由，
+    # 与发布路径共用同一解析规则（此前这里只按标签走，配置的 supervisor 被忽略）。
+    supervisor_agent = resolve_supervisor_agent(issue, config, agent)
     cycle = (last_marker.cycle + 1) if last_marker else 1
 
     stashed = False

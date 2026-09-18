@@ -537,6 +537,10 @@ def recover_publish_issue(
                 process_runner=process_runner,
                 pr_context=pr_context,
                 supervisor_agent=supervisor_agent,
+                # 发布恢复路径不知道本次实现者是哪个 agent（Issue 此刻可能已经换了
+                # 几轮 agent），因此显式留空：`repair_agent = "executor"` 会按 Issue
+                # 标签回落，并在日志里写明来源（PRD D-03）。
+                executor_agent=None,
             )
             supervisor_action = "supervisor_completed"
     else:

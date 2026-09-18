@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -35,6 +36,23 @@ from backend.core.use_cases.pr_supervisor import (
     run_post_pr_supervisor_cycle,
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
+
+
+def _noop_run_agent(
+    agent_name,
+    prompt,
+    worktree_path,
+    process_runner,
+    *,
+    config=None,
+    capture_output=False,
+    timeout_seconds=None,
+    inactivity_timeout_seconds=None,
+    issue=None,
+    profile=None,
+):
+    """替换 ``run_agent_with_prompt`` 的空实现：不拉起进程，返回干净结果。"""
+    return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
 
 
 def test_parse_supervisor_action_approve() -> None:
@@ -700,7 +718,7 @@ def test_execute_repair_runs_agent_and_commits() -> None:
         process_runner=fake_runner,
         pr_branch="issue-1",
         expected_head="abc123",
-        supervisor_agent="codex",
+        repair_agent="codex",
     )
     commands = [tuple(c) for c in fake_runner.calls]
     assert ("git", "commit", "-m", "repair commit") in commands
@@ -745,11 +763,79 @@ def test_execute_repair_rejects_uncommitted_changes_without_request(
             process_runner=fake_runner,
             pr_branch="issue-1",
             expected_head="abc123",
-            supervisor_agent="codex",
+            repair_agent="codex",
         )
 
     commands = [tuple(c) for c in fake_runner.calls]
     assert ("git", "push", "origin", "issue-1") not in commands
+
+
+def test_execute_repair_uses_configured_agent_and_passes_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """修复执行者按入参解析，且共享修复提示词里带着本轮 findings。"""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    worktree_path = tmp_path / "repair-findings"
+    worktree_path.mkdir()
+    request_path = worktree_path / ".agent-runner" / "commit-request.json"
+    request_path.parent.mkdir(parents=True, exist_ok=True)
+    request_path.write_text(
+        json.dumps({"commit_message": "repair commit"}),
+        encoding="utf-8",
+    )
+
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "rev-parse", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "HEAD"), return_code=0, stdout="abc123\n", stderr=""
+            ),
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout=" M file.py\n",
+                stderr="",
+            ),
+            ("git", "commit", "-m", "repair commit"): CommandResult(
+                command=("git", "commit", "-m", "repair commit"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+        }
+    )
+    recorded_calls: list[dict[str, object]] = []
+
+    def _record_run_agent(agent_name, prompt, worktree, process_runner, **kwargs):
+        recorded_calls.append({"agent_name": agent_name, "prompt": prompt})
+        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "backend.core.use_cases.pr_supervisor_repair.run_agent_with_prompt",
+        _record_run_agent,
+    )
+
+    execute_repair(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=AppConfig(runner=RunnerConfig(verification_commands=("just test",))),
+        process_runner=fake_runner,
+        pr_branch="issue-1",
+        expected_head="abc123",
+        repair_agent="claude",
+        findings=(
+            FindingDetail(severity="high", title="Prompt finding title", file="a.py", line=7),
+        ),
+    )
+
+    assert recorded_calls[0]["agent_name"] == "claude"
+    assert "Prompt finding title" in str(recorded_calls[0]["prompt"])
+    assert ("git", "commit", "-m", "repair commit") in [tuple(c) for c in fake_runner.calls]
 
 
 def test_run_post_pr_supervisor_cycle_writes_comment() -> None:
@@ -1759,18 +1845,6 @@ def test_execute_rebase_allows_detached_head_when_active_rebase_target_matches(
         },
     )
 
-    def _noop_run_agent(
-        agent_name,
-        prompt,
-        worktree_path,
-        process_runner,
-        *,
-        capture_output=False,
-        timeout_seconds=None,
-        issue=None,
-    ):
-        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
-
     monkeypatch.setattr(
         "backend.core.use_cases.pr_supervisor.run_agent_with_prompt",
         _noop_run_agent,
@@ -1893,18 +1967,6 @@ def test_execute_rebase_rejects_mismatched_active_rebase_target(
             ),
         },
     )
-
-    def _noop_run_agent(
-        agent_name,
-        prompt,
-        worktree_path,
-        process_runner,
-        *,
-        capture_output=False,
-        timeout_seconds=None,
-        issue=None,
-    ):
-        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
 
     monkeypatch.setattr(
         "backend.core.use_cases.pr_supervisor.run_agent_with_prompt",
@@ -2039,18 +2101,6 @@ def test_execute_rebase_rejects_unknown_active_rebase_target(
         },
     )
 
-    def _noop_run_agent(
-        agent_name,
-        prompt,
-        worktree_path,
-        process_runner,
-        *,
-        capture_output=False,
-        timeout_seconds=None,
-        issue=None,
-    ):
-        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
-
     monkeypatch.setattr(
         "backend.core.use_cases.pr_supervisor.run_agent_with_prompt",
         _noop_run_agent,
@@ -2155,18 +2205,6 @@ def test_execute_rebase_conflict_path_does_not_run_git_commit(
             ),
         }
     )
-
-    def _noop_run_agent(
-        agent_name,
-        prompt,
-        worktree_path,
-        process_runner,
-        *,
-        capture_output=False,
-        timeout_seconds=None,
-        issue=None,
-    ):
-        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
 
     monkeypatch.setattr(
         "backend.core.use_cases.pr_supervisor.run_agent_with_prompt",
@@ -2334,18 +2372,6 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
         text=True,
     )
     expected_head = head_result.stdout.strip()
-
-    def _noop_run_agent(
-        agent_name,
-        prompt,
-        worktree_path,
-        process_runner,
-        *,
-        capture_output=False,
-        timeout_seconds=None,
-        issue=None,
-    ):
-        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
 
     monkeypatch.setattr(
         "backend.core.use_cases.pr_supervisor.run_agent_with_prompt",

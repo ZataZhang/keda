@@ -584,7 +584,13 @@ default_phase = "execution"
 enabled = true
 # 执行 review 的 agent：auto / claude / codex / kimi
 review_agent = "auto"
-# 是否允许实现 agent 与 reviewer 为同一个
+# 谁修复 review 报出的问题：self（审核者自己修，默认，与历史行为一致）/
+# executor（交回本次实现者）/ 任意已注册 agent 名。注意与
+# [agent_runner.runner].fix_agent_enabled 区分：后者是本地验证失败时的轻量修复 agent，
+# 与本键无关。
+repair_agent = "self"
+# 是否允许实现 agent 与 reviewer 为同一个；为 false 时从 agent 注册表里取第一个
+# 不等于实现者的 agent（不再硬编码 codex）
 allow_same_agent = true
 # review 不通过时的最大修复轮数（默认 2，最后一轮允许 reviewer 提供最终修复 commit request）
 max_attempts = 2
@@ -601,6 +607,10 @@ review_prompt_template = []
 enabled = true
 # 执行 supervisor 的 agent
 supervisor_agent = "auto"
+# 谁执行 supervisor 判定后的代码修复：self（supervisor 自己修，默认）/
+# executor（交回本次实现者，拿不到本次实现者时按 Issue 标签回落并在日志中注明来源）/
+# 任意已注册 agent 名
+repair_agent = "self"
 # supervisor 要求修复时的最大修复 / rebase 次数
 max_repair_attempts = 2
 # supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数
@@ -1198,6 +1208,35 @@ review packet 现在是 **修复-再审查收敛模式**：轮数由 `[agent_run
 
 当某一轮 reviewer 补丁在提交门禁上失败（`commit_requested_changes` 抛 `VerificationFailedError`，如 `verification_commands` 或 `pre_commit_verification_command` 复跑失败）时，runner 会做两件事再进入下一轮：(1) 把失败命令与截断后的 stdout/stderr（复用 `format_verification_failure`）写进下一轮 review packet 的 “Previous reviewer patch was REJECTED …” 段落，让 reviewer 针对真正的门禁失败调整做法，而不是蒙眼重复同一补丁；(2) 调用 `unstage_changes`（`git reset --mixed`）把失败补丁 unstage，改动仍留在工作区供下一轮修订，避免残留 staged 内容被 `git add -A` 原样重提、每轮撞同一堵墙。该反馈只投喂给紧接着的一轮；提交成功或首轮时不携带。
 
+#### 审-修分工（`repair_agent`）
+
+`[agent_runner.pre_pr_review].repair_agent` 决定这一段的 findings 由谁落实成代码，取三个值：
+
+| 取值 | 含义 |
+|---|---|
+| `self`（默认） | 审核者既出 findings 又自己打补丁，与历史行为逐字节一致 |
+| `executor` | 审核者只出 findings；改代码交回本次实现者（拿不到时按 Issue 标签回落并写日志） |
+| `<agent 名>` | 审核者只出 findings，改代码交给这个名字；未注册则在该阶段开始前 fail-fast |
+
+非 `self` 模式下这一段的执行顺序变为：
+
+1. review packet 追加 `Read-only review mode` 段（禁止改文件、禁止写 `.agent-runner/commit-request.json`），审核者以 `deliberate` 用途启动——对声明了该用途的 agent（如 codex）是沙箱级硬只读；未声明该用途的 agent 回落到 `run` 用途并打 WARNING，此时只读约束仅由提示词与下面的丢弃规则兜底。
+2. 审核者若仍写出 `commit-request.json`，该文件被**直接删除、不触发任何提交**，Issue 评论里会写明这件事；它已经改掉的**文件**不回滚（回滚是破坏性的），而是并入修复者本轮的提交。
+3. verdict 为 `changes_requested` 且有 findings 时，runner 用共享构建器 `build_repair_prompt` 生成修复提示词（Issue 上下文 + 本轮 findings 清单 + 既有的提交请求约束），以解析出的修复者、`run` 用途启动。
+4. 修复者没写出提交请求时，沿用 `commit_request_reminder_attempts` 的同轮提醒重试（提醒对象从审核者换成修复者）。
+5. 后续提交代理、验证重跑、push callback、轮数上限、收敛与软失败语义全部不变：最后一轮仍未通过但本轮已产生可提交修复 → 接受并继续发布；否则软失败进入失败标签。
+
+Issue 评论结构随之增加 `- Repairer: <agent>` 一行（仅非 `self` 模式），便于在 GitHub 上直接看出这一轮谁审、谁修。
+
+#### 三处"配置写了不生效"的修正
+
+同一批改动顺带修掉了三处静默失效的路由缺陷：
+
+1. `allow_same_agent = false` 时审核者不再硬编码回落到 `codex`，而是从 agent 注册表里取第一个不等于实现者的 agent；注册表里只有实现者一个 agent 时保持原样并打 WARNING。
+2. `iar review` 入口解析 supervisor 的优先级改为「命令行 `--agent` > `[agent_runner.post_pr_supervisor].supervisor_agent` > Issue 标签路由」，与发布路径共用 `resolve_supervisor_agent`。此前该入口完全不读配置里的 supervisor。
+3. 审核 / 修复 / 收尾 / 校验 / 恢复 / 冲突解决等**二级调用点**此前都没有把运行时配置传下去，导致注册表里的自定义 agent 与内置 agent 的参数覆盖在这些阶段被静默忽略（自定义 agent 作审核者会直接报未注册）。现在 `src/backend` 内每个 `run_agent_with_prompt*` 调用点都传 `config`，并由 `tests/test_agent_config_consistency.py::test_every_agent_invocation_call_site_passes_config` 用 AST 守卫防止回退。**已显式配置过 agent 覆盖的仓库，这些阶段第一次会真正按配置执行。**
+
+
 Pre-PR review 不产生独立的 durable label，整个过程仍在 `agent/running` 内。Runner 会记录 review start、cycle、reviewer exit code、parsed verdict、commit-request 处理、push callback、findings 计数和 result comment 写入等日志；底层进程 runner 对长时间运行的 agent 命令每 60 秒输出一次 heartbeat，并在达到 timeout 时终止子进程。
 
 > **空 commit request 行为**：当 reviewer 写出了 `.agent-runner/commit-request.json` 但工作树已无任何可提交改动（例如 reviewer 的建议与现状一致，或上一轮 cycle 已经提交过修复），runner 会按 reviewer 解析出的真实 verdict 处理：
@@ -1241,6 +1280,16 @@ max_diff_chars = 6000
 prompt 结构变为：`Changed files (N)` 清单 → `--- Key files (full diff) ---` → `--- Other files (truncated to N chars) ---`。`key_paths` 为空时退化为原来的整体截断。若配置的路径前缀一个文件都没命中，日志会打 WARNING 提示前缀写错。
 
 Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决策里附带 `findings[]`（每项含 `title`，以及可选的 `severity` / `file` / `line` / `description` / `status`）。iar 把它们合并进 `<worktree>/.iar/state/issue-<N>/findings.json`（已被 `.iar/` gitignore 排除），下一个 cycle 的 prompt 会带上 `Previous unresolved findings from cycles X..Y:` 段。已在后续 cycle 修好的 finding 用 `status: "resolved"` 上报即可出列。用 `previous_findings_injection_enabled = false` 关闭注入。
+
+#### PR 后修复的审-修分工（`post_pr_supervisor.repair_agent`）
+
+supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repair_agent` 只决定**判定需要改代码之后由谁动手**，取值语义与 pre-PR 那一段同名同义：
+
+- `self`（默认）：supervisor 自己执行修复，与历史行为一致。
+- `executor`：交回本次实现者。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `iar review`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。
+- `<agent 名>`：指定 agent；未注册时该阶段开始前 fail-fast。
+
+两个修复调用点（supervisor 修复循环、rework 路径）共用解析器 `resolve_repair_agent`，避免两条路径语义分叉。修复提示词由 `build_repair_prompt` 生成，带 Issue 上下文与本轮 findings 清单（rework 路径取 `.iar/state/issue-<N>/findings.json` 里未解决的累积 findings），修复者不必自己重新推断要改什么。
 
 #### Rebase Conflict Recovery Branch Guard
 
@@ -2255,6 +2304,7 @@ execution = [
 [agent_runner.pre_pr_review]
 enabled = true
 review_agent = "auto"
+repair_agent = "self"
 allow_same_agent = true
 max_attempts = 2
 timeout_seconds = 1800
@@ -2263,6 +2313,7 @@ commit_request_reminder_attempts = 1
 [agent_runner.post_pr_supervisor]
 enabled = true
 supervisor_agent = "auto"
+repair_agent = "self"
 max_repair_attempts = 2
 max_agent_crash_retries = 5
 crash_retry_initial_backoff_seconds = 30

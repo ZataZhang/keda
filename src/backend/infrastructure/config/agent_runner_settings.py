@@ -345,6 +345,12 @@ class AgentRunnerPrePrReviewSettings(BaseModel):
     enabled: bool = True
     review_agent: str = "auto"
     allow_same_agent: bool = True
+    # Who applies the fixes for this stage's findings: "self" (the reviewer
+    # patches the worktree itself, the historical behavior), "executor" (hand
+    # the findings back to the agent that implemented the Issue), or any
+    # registered agent name. 与 runner.fix_agent_enabled 无关：后者是本地
+    # 验证失败时的轻量修复 agent。
+    repair_agent: str = "self"
     max_attempts: int = 2
     timeout_seconds: int = 1800
     # When the reviewer reports findings but fails to write a commit request,
@@ -375,6 +381,10 @@ class AgentRunnerPostPrSupervisorSettings(BaseModel):
 
     enabled: bool = True
     supervisor_agent: str = "auto"
+    # 谁执行 supervisor 判定后的代码修复：``self``（supervisor 自己修，历史
+    # 行为）/ ``executor``（交回本次实现者，拿不到本次实现者时按 Issue 标签
+    # 回落并写日志）/ 任意已注册 agent 名。
+    repair_agent: str = "self"
     max_repair_attempts: int = 2
     max_agent_crash_retries: int = 5
     crash_retry_initial_backoff_seconds: int = 30

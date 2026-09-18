@@ -467,6 +467,7 @@ def build_app_config_from_settings(
             enabled=pre_pr.enabled,
             review_agent=pre_pr.review_agent,
             allow_same_agent=pre_pr.allow_same_agent,
+            repair_agent=pre_pr.repair_agent,
             max_attempts=pre_pr.max_attempts,
             timeout_seconds=pre_pr.timeout_seconds,
             commit_request_reminder_attempts=pre_pr.commit_request_reminder_attempts,
@@ -475,6 +476,7 @@ def build_app_config_from_settings(
         post_pr_supervisor=PostPrSupervisorConfig(
             enabled=post_supervisor.enabled,
             supervisor_agent=post_supervisor.supervisor_agent,
+            repair_agent=post_supervisor.repair_agent,
             max_repair_attempts=post_supervisor.max_repair_attempts,
             max_agent_crash_retries=post_supervisor.max_agent_crash_retries,
             crash_retry_initial_backoff_seconds=(

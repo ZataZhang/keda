@@ -42,7 +42,12 @@ from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_RUN,
     PROMPT_DELIVERY_STDIN,
 )
-from backend.core.use_cases.agent_invocation import build_agent_invocation
+from backend.core.use_cases.agent_invocation import (
+    UnknownAgentError,
+    build_agent_invocation,
+    resolve_agent_spec,
+    resolve_registered_agents,
+)
 from backend.core.use_cases.agent_runner_attempt import (
     AttemptPhaseTimer,
     _append_attempt_and_notify,
@@ -124,6 +129,12 @@ from backend.core.use_cases.agent_runner_worktree_create import (
 
 _logger = logging.getLogger(__name__)
 
+REPAIR_AGENT_SELF = "self"
+"""``repair_agent`` 取值：本阶段的审核者 / supervisor 自己修（默认，历史行为）。"""
+
+REPAIR_AGENT_EXECUTOR = "executor"
+"""``repair_agent`` 取值：把修复交回本次实现者。"""
+
 __all__ = [
     "AgentRunnerAttemptError",
     "AgentUnavailableError",
@@ -132,6 +143,9 @@ __all__ = [
     "ProviderCapacityError",
     "PublishFailureError",
     "EmptyCommitRequestError",
+    "REPAIR_AGENT_EXECUTOR",
+    "REPAIR_AGENT_SELF",
+    "UnknownAgentError",
     "UnrecoverableError",
     "VerificationFailedError",
     "AttemptPhaseTimer",
@@ -176,8 +190,12 @@ __all__ = [
     "list_git_remotes",
     "list_stageable_paths",
     "publish_changes",
+    "repair_agent_is_self",
     "resolve_agent_fallback_order",
     "resolve_prd_archive_path",
+    "resolve_repair_agent",
+    "resolve_reviewer_agent",
+    "resolve_supervisor_agent",
     "run_agent",
     "run_agent_until_committed",
     "run_agent_with_prompt",
@@ -233,6 +251,131 @@ def resolve_agent_fallback_order(
         if normalized_agent and normalized_agent not in fallback_order:
             fallback_order.append(normalized_agent)
     return fallback_order
+
+
+def resolve_repair_agent(
+    raw_setting: str,
+    *,
+    issue: IssueSummary,
+    config: AppConfig,
+    reviewing_agent: str,
+    executor_agent: str | None = None,
+) -> str:
+    """解析某阶段的 ``repair_agent`` 配置为实际执行修复的 agent 名。
+
+    ``self`` 返回本阶段的审核者 / supervisor；``executor`` 返回本次真正执行
+    实现的 agent，调用方不知道它时回落为按 Issue 标签路由的结果并在日志中
+    注明来源；其它取值必须是已注册 agent，未注册时抛
+    :class:`UnknownAgentError`（fail-fast，不静默回落到别人）。
+
+    Args:
+        raw_setting: 配置里的原始取值。
+        issue: 当前 Issue，``executor`` 回落时用于标签路由。
+        config: 应用配置，注册表取自 ``config.agents``。
+        reviewing_agent: 本阶段的审核者 / supervisor。
+        executor_agent: 本次真正执行实现的 agent；``None`` 表示调用方不知道，
+            此时按 Issue 标签回落。
+
+    Returns:
+        执行修复的 agent 名。
+
+    Raises:
+        UnknownAgentError: 取值既不是 ``self`` / ``executor``，也不在注册表中。
+    """
+    normalized_setting = _normalize_repair_agent_setting(raw_setting)
+    if normalized_setting == REPAIR_AGENT_SELF:
+        return reviewing_agent
+    if normalized_setting == REPAIR_AGENT_EXECUTOR:
+        if executor_agent is not None:
+            return executor_agent
+        fallback_agent = choose_agent(issue, config, "auto")
+        _logger.info(
+            "repair_agent='executor' for Issue #%d: the executor of this run is "
+            "unknown here, falling back to Issue-label routing -> '%s'.",
+            issue.number,
+            fallback_agent,
+        )
+        return fallback_agent
+    resolve_agent_spec(normalized_setting, config)
+    return normalized_setting
+
+
+def repair_agent_is_self(raw_setting: str) -> bool:
+    """``repair_agent`` 是否表示"本阶段的审核者 / supervisor 自己修"。"""
+    return _normalize_repair_agent_setting(raw_setting) == REPAIR_AGENT_SELF
+
+
+def _normalize_repair_agent_setting(raw_setting: str) -> str:
+    """把 ``repair_agent`` 配置值规范化成小写、去空白的裸值。"""
+    return (raw_setting or "").strip().lower() or REPAIR_AGENT_SELF
+
+
+def resolve_supervisor_agent(
+    issue: IssueSummary,
+    config: AppConfig,
+    override_agent: str,
+    *,
+    fallback_agent: str | None = None,
+) -> str:
+    """解析 post-PR supervisor：命令行 ``--agent`` > 配置 > 回落。
+
+    ``fallback_agent`` 描述"配置为 ``auto`` 时用谁"：发布路径传本次实现者
+    （保持历史行为），``iar review`` 不传，回落到按 Issue 标签路由。
+
+    Args:
+        issue: 当前 Issue。
+        config: 应用配置。
+        override_agent: 命令行 ``--agent``；``"auto"`` 表示未指定。
+        fallback_agent: 配置为 ``auto`` 时的回落 agent；``None`` 表示按标签路由。
+
+    Returns:
+        supervisor agent 名。
+    """
+    if override_agent != "auto":
+        return override_agent
+    configured_agent = config.post_pr_supervisor.supervisor_agent
+    if configured_agent != "auto":
+        return configured_agent
+    if fallback_agent is not None:
+        return fallback_agent
+    return choose_agent(issue, config, "auto")
+
+
+def resolve_reviewer_agent(
+    issue: IssueSummary,
+    config: AppConfig,
+    selected_agent: str,
+) -> str:
+    """解析 pre-PR review 的审核者。
+
+    显式 ``pre_pr_review.review_agent`` 优先；``auto`` 时在
+    ``allow_same_agent`` 为真时沿用实现者，为假时从 agent 注册表里取第一个
+    不等于实现者的 agent（不再硬编码 ``codex``）。注册表里只有实现者一个
+    agent 时保持实现者并 WARN。
+
+    Args:
+        issue: 当前 Issue。
+        config: 应用配置。
+        selected_agent: 本次实现者。
+
+    Returns:
+        审核者 agent 名。
+    """
+    review_config = config.pre_pr_review
+    if review_config.review_agent != "auto":
+        return review_config.review_agent
+    if review_config.allow_same_agent:
+        return selected_agent
+    for registered_agent in resolve_registered_agents(config):
+        if registered_agent != selected_agent:
+            return registered_agent
+    _logger.warning(
+        "pre_pr_review.allow_same_agent=false for Issue #%d but the agent "
+        "registry only contains '%s'; keeping it as the reviewer.",
+        issue.number,
+        selected_agent,
+    )
+    return selected_agent
 
 
 def build_blocked_continuation_prompt(
@@ -381,11 +524,14 @@ def run_agent_with_prompt(
     timeout_seconds: int | None = None,
     inactivity_timeout_seconds: int | None = None,
     issue: IssueSummary | None = None,
+    profile: str = AGENT_PROFILE_RUN,
 ) -> CommandResult:
     """Run an agent with a prepared prompt.
 
-    命令行与输出协议全部来自 :func:`build_agent_invocation`（profile
-    ``"run"``）；调用方传入的 ``process_runner`` 只负责执行与中继。
+    命令行与输出协议全部来自 :func:`build_agent_invocation`（``profile``
+    默认 ``"run"``）；调用方传入的 ``process_runner`` 只负责执行与中继。
+    只读审核等场景可传 ``profile="deliberate"``，让支持沙箱的 agent 走声明式
+    只读形态。
     """
     if issue is not None:
         _logger.info(
@@ -395,7 +541,7 @@ def run_agent_with_prompt(
         )
     invocation = build_agent_invocation(
         agent_name,
-        AGENT_PROFILE_RUN,
+        profile,
         prompt,
         worktree_path,
         config or AppConfig(),
@@ -430,13 +576,9 @@ def run_agent_with_prompt_resilient(
     worktree_path: Path,
     process_runner: IProcessRunner,
     *,
-    config: AppConfig | None = None,
-    capture_output: bool = False,
-    timeout_seconds: int | None = None,
-    inactivity_timeout_seconds: int | None = None,
-    issue: IssueSummary | None = None,
     transient_retry_attempts: int = 2,
     transient_retry_delay_seconds: int = 10,
+    **agent_call_options: object,
 ) -> CommandResult:
     """Run an agent, retrying transient network/transport failures in place.
 
@@ -452,14 +594,12 @@ def run_agent_with_prompt_resilient(
         prompt: Prepared prompt text.
         worktree_path: Worktree the agent runs in.
         process_runner: Command executor.
-        config: 应用配置；注册表取自 ``config.agents``，``None`` 时使用
-            内置默认注册表。
-        capture_output: Whether to capture stdout/stderr.
-        timeout_seconds: Optional per-invocation timeout.
-        inactivity_timeout_seconds: Optional no-output timeout.
-        issue: Optional Issue for logging context.
         transient_retry_attempts: Extra retries granted to transient failures.
         transient_retry_delay_seconds: Backoff between transient retries.
+        agent_call_options: 原样透传给 :func:`run_agent_with_prompt` 的关键字参数
+            （`config` / `capture_output` / `timeout_seconds` /
+            `inactivity_timeout_seconds` / `issue` / `profile`），两个入口共用同一份
+            参数契约，避免逐字段重复声明而漂移。
 
     Returns:
         The successful :class:`CommandResult`.
@@ -470,7 +610,8 @@ def run_agent_with_prompt_resilient(
             exhausted.
     """
     max_retries = max(0, transient_retry_attempts)
-    issue_number = issue.number if issue is not None else 0
+    agent_call_issue = agent_call_options.get("issue")
+    issue_number = agent_call_issue.number if isinstance(agent_call_issue, IssueSummary) else 0
     for retry_index in range(max_retries + 1):
         try:
             return run_agent_with_prompt(
@@ -478,11 +619,7 @@ def run_agent_with_prompt_resilient(
                 prompt,
                 worktree_path,
                 process_runner,
-                config=config,
-                capture_output=capture_output,
-                timeout_seconds=timeout_seconds,
-                inactivity_timeout_seconds=inactivity_timeout_seconds,
-                issue=issue,
+                **agent_call_options,
             )
         except FileNotFoundError as exc:
             raise AgentUnavailableError(agent_name) from exc

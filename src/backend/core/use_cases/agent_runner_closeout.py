@@ -524,6 +524,7 @@ def run_closeout_agent(
         build_closeout_prompt(prompt_context),
         prompt_context.worktree_path,
         process_runner,
+        config=config,
         issue=prompt_context.issue,
         transient_retry_attempts=config.runner.transient_retry_attempts,
         transient_retry_delay_seconds=config.runner.transient_retry_delay_seconds,

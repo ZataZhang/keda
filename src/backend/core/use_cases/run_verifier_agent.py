@@ -305,6 +305,7 @@ def run_verifier_agent(
     verifier_agent: str,
     process_runner: IProcessRunner,
     *,
+    config: AppConfig | None = None,
     timeout_seconds: int | None = None,
     inactivity_timeout_seconds: int | None = None,
     response_log_path: Path | None = None,
@@ -317,6 +318,8 @@ def run_verifier_agent(
     是否启用、选哪个 agent、red 后如何 repair,由编排层决定。
 
     Args:
+        config: 应用配置;注册表取自 ``config.agents``,``None`` 时使用内置
+            默认注册表。
         timeout_seconds: 墙钟上限。
         inactivity_timeout_seconds: 连续无输出多久判卡死。与墙钟并存,让墙钟
             能按最慢的真实工作量放宽,同时真卡死仍被及时杀掉。
@@ -337,6 +340,7 @@ def run_verifier_agent(
             prompt,
             worktree_path,
             process_runner,
+            config=config,
             capture_output=True,
             timeout_seconds=timeout_seconds,
             inactivity_timeout_seconds=inactivity_timeout_seconds,
@@ -506,6 +510,7 @@ def run_verifier_gate(
             manifest,
             verifier_agent,
             process_runner,
+            config=config,
             timeout_seconds=config.validation.verifier_timeout_seconds,
             inactivity_timeout_seconds=config.validation.verifier_inactivity_timeout_seconds,
             response_log_path=response_log_path,
