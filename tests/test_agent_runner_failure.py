@@ -26,6 +26,7 @@ from backend.core.use_cases.run_agent_once import (
     format_failure_comment,
     format_minimal_failure_comment,
     resolve_agent_fallback_order,
+    resolve_repair_agent,
 )
 from backend.core.use_cases.agent_runner_failure import (
     is_provider_capacity_failure,
@@ -767,3 +768,64 @@ def test_attempt_history_table_carries_phase_breakdown() -> None:
 
     assert "verification 940.0s" in table
     assert "agent 60.0s" in table
+
+
+def test_resolve_repair_agent_self_returns_reviewing_agent() -> None:
+    """``self`` 表示本阶段的审核者/supervisor 自己修（历史行为）。"""
+    issue = make_ready_issue()
+    assert (
+        resolve_repair_agent(
+            "self",
+            issue=issue,
+            config=AppConfig(),
+            reviewing_agent="codex",
+            executor_agent="claude",
+        )
+        == "codex"
+    )
+
+
+def test_resolve_repair_agent_executor_uses_explicit_executor_agent() -> None:
+    """``executor`` 在调用方知道本次实现者时直接用它，不做标签回落。"""
+    issue = make_ready_issue()
+    assert (
+        resolve_repair_agent(
+            "executor",
+            issue=issue,
+            config=AppConfig(),
+            reviewing_agent="claude",
+            executor_agent="kimi",
+        )
+        == "kimi"
+    )
+
+
+def test_resolve_repair_agent_executor_fallback_logs_its_source(caplog) -> None:
+    """拿不到本次实现者时按 Issue 标签回落，并把回落来源写进日志。"""
+    import logging
+
+    issue = make_ready_issue()
+    with caplog.at_level(logging.INFO):
+        resolved_agent = resolve_repair_agent(
+            "executor",
+            issue=issue,
+            config=AppConfig(),
+            reviewing_agent="claude",
+        )
+
+    assert resolved_agent == "codex"
+    assert "falling back to Issue-label routing" in caplog.text
+    assert "repair_agent='executor'" in caplog.text
+
+
+def test_resolve_repair_agent_rejects_unregistered_name() -> None:
+    """具名取值必须在注册表里，否则 fail-fast 并指名该 agent。"""
+    issue = make_ready_issue()
+    with pytest.raises(ValueError, match="ghost-agent"):
+        resolve_repair_agent(
+            "ghost-agent",
+            issue=issue,
+            config=AppConfig(),
+            reviewing_agent="claude",
+            executor_agent="codex",
+        )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as _json
 from pathlib import Path
 
 import pytest
@@ -14,10 +15,12 @@ from backend.core.shared.models.agent_runner import (
     RunnerConfig,
 )
 from backend.core.use_cases.agent_review import (
-    build_pre_pr_review_result_comment,
     build_review_packet,
     parse_reviewer_decision,
     run_pre_pr_review,
+)
+from backend.core.use_cases.agent_review_comment import (
+    build_pre_pr_review_result_comment,
 )
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
@@ -1939,3 +1942,279 @@ def test_run_pre_pr_review_feeds_commit_failure_to_next_cycle(tmp_path: Path) ->
     assert "jscpd found duplication" not in fake_runner.review_prompts[0]
     assert "jscpd found duplication" in fake_runner.review_prompts[1]
     assert "just lint --reuse" in fake_runner.review_prompts[1]
+
+
+class _SplitRepairRunner(FakeProcessRunner):
+    """假 runner：reviewer 与 repairer 是两个不同可执行文件。
+
+    ``codex`` 扮演只读审核者，``claude`` 扮演修复者；两者的提交请求都由测试
+    显式控制，用来验证"审核者的补丁被丢弃、只有修复者的补丁会提交"。
+    """
+
+    def __init__(self, worktree_path: Path) -> None:
+        super().__init__(
+            responses={
+                ("git", "branch", "--show-current"): CommandResult(
+                    command=("git", "branch", "--show-current"),
+                    return_code=0,
+                    stdout="issue-1\n",
+                    stderr="",
+                ),
+                ("git", "rev-parse", "HEAD"): CommandResult(
+                    command=("git", "rev-parse", "HEAD"),
+                    return_code=0,
+                    stdout="after-sha\n",
+                    stderr="",
+                ),
+            }
+        )
+        self.worktree_path = worktree_path
+        # 让工作树在审核者跑起来之前保持干净、之后变脏：用来观察"审核者只读却改
+        # 了文件"这条评论是否真的会出现。
+        self.reviewer_has_run = False
+        # 被拉起的 agent 可执行文件顺序，以及各自收到的提示词
+        self.agent_bin_sequence: list[str] = []
+        self.reviewer_prompts: list[str] = []
+        self.repairer_prompts: list[str] = []
+        self.reviewer_verdicts: list[str] = ["changes_requested"]
+        self.reviewer_request_message: str | None = None
+        self.repairer_request_message: str | None = None
+        self.finding_title = "Split-mode finding title"
+
+    @property
+    def request_path(self) -> Path:
+        return self.worktree_path / ".agent-runner" / "commit-request.json"
+
+    def _write_commit_request(self, commit_message: str) -> None:
+        self.request_path.parent.mkdir(parents=True, exist_ok=True)
+        self.request_path.write_text(
+            _json.dumps({"commit_message": commit_message}),
+            encoding="utf-8",
+        )
+
+    def run(  # type: ignore[override]
+        self,
+        command,
+        *,
+        cwd,
+        check=True,
+        timeout=None,
+        inactivity_timeout=None,
+        capture_output=True,
+        input_text=None,
+        label=None,
+        output_sink=None,
+        output_protocol=None,
+    ) -> CommandResult:
+        agent_bin = tuple(command)[0]
+        if agent_bin not in ("codex", "claude"):
+            if tuple(command[:2]) == ("git", "status"):
+                # 审核者跑过之后工作树变脏，模拟"只读审核者其实改了文件"。
+                stdout = " M file.py\n" if self.reviewer_has_run else ""
+                self.calls.append(list(command))
+                return CommandResult(
+                    command=tuple(command), return_code=0, stdout=stdout, stderr=""
+                )
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                inactivity_timeout=inactivity_timeout,
+                capture_output=capture_output,
+                input_text=input_text,
+                label=label,
+                output_sink=output_sink,
+                output_protocol=output_protocol,
+            )
+        self.calls.append(list(command))
+        self.input_texts.append(input_text)
+        self.agent_bin_sequence.append(agent_bin)
+        if agent_bin == "codex":
+            self.reviewer_has_run = True
+            # codex 的 deliberate 用途走 stdin 投递，提示词不在 argv 里。
+            self.reviewer_prompts.append(input_text or "")
+            if self.reviewer_request_message is not None:
+                self._write_commit_request(self.reviewer_request_message)
+            reviewer_index = min(
+                sum(1 for bin_name in self.agent_bin_sequence if bin_name == "codex") - 1,
+                len(self.reviewer_verdicts) - 1,
+            )
+            verdict = self.reviewer_verdicts[reviewer_index]
+            findings = (
+                '[{"category": "code", "severity": "high", "file": "a.py", "line": 3, '
+                f'"title": "{self.finding_title}", "description": "d", '
+                '"recommendation": "r"}]'
+                if verdict == "changes_requested"
+                else "[]"
+            )
+            stdout = f'{{"verdict": "{verdict}", "summary": "s", "findings": {findings}}}'
+        else:
+            self.repairer_prompts.append(str(command[-1]))
+            if self.repairer_request_message is not None:
+                self._write_commit_request(self.repairer_request_message)
+            stdout = '{"verdict": "approved", "summary": "fixed"}'
+        return CommandResult(command=tuple(command), return_code=0, stdout=stdout, stderr="")
+
+
+def _split_mode_config(**pre_pr_overrides: object) -> AppConfig:
+    """构造审-修分工的测试配置：审核者 codex、修复者 claude。"""
+    review_settings: dict[str, object] = {
+        "enabled": True,
+        "review_agent": "codex",
+        "repair_agent": "claude",
+        "commit_request_reminder_attempts": 0,
+    }
+    review_settings.update(pre_pr_overrides)
+    return AppConfig(
+        pre_pr_review=PrePrReviewConfig(**review_settings),  # type: ignore[arg-type]
+        runner=RunnerConfig(verification_commands=()),
+    )
+
+
+def _issue_comment_bodies(fake_client: FakeGitHubClient) -> list[str]:
+    """返回假 GitHub 客户端记录的所有 Issue 评论正文。"""
+    return [call["body"] for call in fake_client.calls if call["method"] == "comment_issue"]
+
+
+def test_run_pre_pr_review_split_mode_discards_reviewer_patch(tmp_path: Path) -> None:
+    """审-修分工：审核者越权写出的提交请求被丢弃，不触发任何提交。"""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    fake_client = FakeGitHubClient()
+    worktree_path = tmp_path / "split-worktree"
+    worktree_path.mkdir(parents=True)
+    fake_runner = _SplitRepairRunner(worktree_path)
+    fake_runner.reviewer_request_message = "reviewer-illegal-patch"
+    # 修复者这一轮没产出补丁，逼出"审核者补丁不得被提交"的断言
+    fake_runner.repairer_request_message = None
+
+    with pytest.raises(RuntimeError, match="did not approve"):
+        run_pre_pr_review(
+            issue=issue,
+            worktree_path=worktree_path,
+            config=_split_mode_config(max_attempts=1),
+            github_client=fake_client,
+            process_runner=fake_runner,
+            selected_agent="codex",
+            head_sha_before="before-sha",
+            expected_branch="issue-1",
+            verification_results=[],
+        )
+
+    assert fake_runner.agent_bin_sequence[0] == "codex"
+    assert "claude" in fake_runner.agent_bin_sequence
+    # 审核者写出的 commit-request 已被删除，且没有任何提交发生
+    assert not fake_runner.request_path.exists()
+    assert [call for call in fake_runner.calls if tuple(call[:2]) == ("git", "commit")] == []
+    comment_bodies = _issue_comment_bodies(fake_client)
+    assert any("discarded" in body for body in comment_bodies)
+    assert any(
+        "- Reviewer: codex" in body and "- Repairer: claude" in body for body in comment_bodies
+    )
+
+
+def test_run_pre_pr_review_split_mode_repairer_applies_findings(tmp_path: Path) -> None:
+    """审-修分工：审核者只出 findings，修复者按清单改代码并触发提交。"""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    fake_client = FakeGitHubClient()
+    worktree_path = tmp_path / "split-worktree"
+    worktree_path.mkdir(parents=True)
+    fake_runner = _SplitRepairRunner(worktree_path)
+    fake_runner.reviewer_verdicts = ["changes_requested", "approved"]
+    fake_runner.repairer_request_message = "repairer-fix"
+
+    final_sha, _verification = run_pre_pr_review(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=_split_mode_config(max_attempts=2),
+        github_client=fake_client,
+        process_runner=fake_runner,
+        selected_agent="codex",
+        head_sha_before="before-sha",
+        expected_branch="issue-1",
+        verification_results=[],
+    )
+
+    assert final_sha == "after-sha"
+    # 只有修复者的提交请求触发了提交
+    commit_calls = [call for call in fake_runner.calls if tuple(call[:2]) == ("git", "commit")]
+    assert commit_calls == [["git", "commit", "-m", "repairer-fix"]]
+    # 审核者拿到只读约束，修复者拿到本轮 findings 清单
+    assert "Read-only review mode" in fake_runner.reviewer_prompts[0]
+    assert fake_runner.finding_title in fake_runner.repairer_prompts[0]
+    # 评论里点名本轮谁审、谁修
+    assert any(
+        "- Reviewer: codex" in body and "- Repairer: claude" in body
+        for body in _issue_comment_bodies(fake_client)
+    )
+
+
+def test_run_pre_pr_review_split_mode_names_reviewer_file_edits(tmp_path: Path) -> None:
+    """审-修分工：只读审核者仍然改了文件时，评论要点名这些改动并入本轮提交。"""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    fake_client = FakeGitHubClient()
+    worktree_path = tmp_path / "split-worktree"
+    worktree_path.mkdir(parents=True)
+    fake_runner = _SplitRepairRunner(worktree_path)
+    fake_runner.reviewer_verdicts = ["changes_requested", "approved"]
+    fake_runner.repairer_request_message = "repairer-fix"
+
+    final_sha, _verification = run_pre_pr_review(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=_split_mode_config(max_attempts=2),
+        github_client=fake_client,
+        process_runner=fake_runner,
+        selected_agent="codex",
+        head_sha_before="before-sha",
+        expected_branch="issue-1",
+        verification_results=[],
+    )
+
+    assert final_sha == "after-sha"
+    assert any(
+        "carried into this cycle's repair commit" in body
+        for body in _issue_comment_bodies(fake_client)
+    )
+
+
+def test_run_pre_pr_review_rejects_unregistered_repair_agent(tmp_path: Path) -> None:
+    """未注册的 repair_agent 在阶段开始前 fail-fast 并指名该 agent。"""
+    from backend.core.use_cases.agent_invocation import UnknownAgentError
+
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    worktree_path = tmp_path / "split-worktree"
+    worktree_path.mkdir(parents=True)
+    fake_runner = _SplitRepairRunner(worktree_path)
+
+    with pytest.raises(UnknownAgentError, match="ghost-agent"):
+        run_pre_pr_review(
+            issue=issue,
+            worktree_path=worktree_path,
+            config=_split_mode_config(repair_agent="ghost-agent"),
+            github_client=FakeGitHubClient(),
+            process_runner=fake_runner,
+            selected_agent="codex",
+            head_sha_before="before-sha",
+            expected_branch="issue-1",
+            verification_results=[],
+        )
+
+    assert fake_runner.agent_bin_sequence == []
+
+
+def test_resolve_reviewer_agent_never_falls_back_to_codex() -> None:
+    """allow_same_agent=False 时审核者从注册表派生，而不是硬编码 codex。"""
+    from backend.core.use_cases.run_agent_once import resolve_reviewer_agent
+
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    config = AppConfig(
+        pre_pr_review=PrePrReviewConfig(enabled=True, review_agent="auto", allow_same_agent=False)
+    )
+
+    assert resolve_reviewer_agent(issue, config, "codex") == "claude"
+    # 显式配置的 review_agent 仍然优先
+    explicit_config = AppConfig(
+        pre_pr_review=PrePrReviewConfig(enabled=True, review_agent="kimi", allow_same_agent=False)
+    )
+    assert resolve_reviewer_agent(issue, explicit_config, "codex") == "kimi"

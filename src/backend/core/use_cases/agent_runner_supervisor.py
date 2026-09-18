@@ -39,6 +39,7 @@ from backend.core.use_cases.agent_runner_workflow import (
 )
 from backend.core.use_cases.run_agent_once import (
     get_head_sha,
+    resolve_repair_agent,
 )
 
 _logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ def _run_supervisor_with_repair_loop(
     process_runner: IProcessRunner,
     pr_context: PullRequestContext,
     supervisor_agent: str,
+    executor_agent: str | None = None,
 ) -> None:
     """运行 PR 事后监督修复循环。
 
@@ -75,8 +77,17 @@ def _run_supervisor_with_repair_loop(
         process_runner: 进程运行器
         pr_context: PR 上下文（URL、分支、SHA）
         supervisor_agent: 监督者 Agent
+        executor_agent: 本次实现者；``None`` 表示本入口拿不到，
+            ``repair_agent='executor'`` 时按 Issue 标签回落并记录来源
     """
     max_repair = max(0, config.post_pr_supervisor.max_repair_attempts)
+    repair_agent = resolve_repair_agent(
+        config.post_pr_supervisor.repair_agent,
+        issue=issue,
+        config=config,
+        reviewing_agent=supervisor_agent,
+        executor_agent=executor_agent,
+    )
     current_pr_context = pr_context
 
     # 循环：最多 max_repair + 1 次修复尝试
@@ -235,7 +246,8 @@ def _run_supervisor_with_repair_loop(
                 process_runner=process_runner,
                 pr_branch=current_pr_context.branch,
                 expected_head=current_pr_context.head_sha,
-                supervisor_agent=supervisor_agent,
+                repair_agent=repair_agent,
+                findings=action_result.findings_detail,
             )
             repair_sha = get_head_sha(worktree_path, process_runner)
             github_client.comment_issue(

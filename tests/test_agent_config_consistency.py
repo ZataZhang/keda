@@ -492,3 +492,93 @@ def test_factory_maps_frontend_visual_evidence_settings() -> None:
 
     assert app_config.validation.frontend_visual_evidence_required is False
     assert app_config.validation.frontend_paths == ("web",)
+
+
+def test_factory_maps_repair_agent_settings() -> None:
+    """两段 repair_agent 必须活着走完 settings → factory → domain。
+
+    两侧默认值相同（``"self"``）会掩盖漏掉的 factory 映射，因此这里用非默认值
+    断言运行时真正被读的 domain 对象，与 ``test_factory_maps_fix_agent_enabled``
+    同型。
+    """
+    from backend.engines.agent_runner.factory import build_app_config_from_settings
+
+    default_pre = AgentRunnerPrePrReviewSettings()
+    default_post = AgentRunnerPostPrSupervisorSettings()
+    assert default_pre.repair_agent == PrePrReviewConfig().repair_agent == "self"
+    assert default_post.repair_agent == PostPrSupervisorConfig().repair_agent == "self"
+
+    settings = AgentRunnerSettings()
+    settings.pre_pr_review = AgentRunnerPrePrReviewSettings(repair_agent="executor")
+    settings.post_pr_supervisor = AgentRunnerPostPrSupervisorSettings(repair_agent="claude")
+    app_config = build_app_config_from_settings(settings)
+
+    assert app_config.pre_pr_review.repair_agent == "executor"
+    assert app_config.post_pr_supervisor.repair_agent == "claude"
+
+
+def test_root_config_toml_declares_repair_agent() -> None:
+    """根 config.toml 必须显式登记两段 repair_agent，运营者才看得到它们。"""
+    config_toml_text = (Path(__file__).resolve().parents[1] / "config.toml").read_text(
+        encoding="utf-8"
+    )
+
+    assert config_toml_text.count("repair_agent") >= 2
+    assert "fix_agent_enabled" in config_toml_text
+
+
+def test_iar_toml_key_table_documents_repair_agent() -> None:
+    """逐仓库 .iar.toml 的键说明表必须登记两个新键，否则生成的文件里没有注释。"""
+    from backend.engines.agent_runner.repository_local import _IAR_FIELD_COMMENTS
+
+    assert "pre_pr_review.repair_agent" in _IAR_FIELD_COMMENTS
+    assert "post_pr_supervisor.repair_agent" in _IAR_FIELD_COMMENTS
+
+
+def test_every_agent_invocation_call_site_passes_config() -> None:
+    """守卫测试：``run_agent_with_prompt*`` 的每个调用点都必须传 ``config``。
+
+    漏传会让配置里的 agent 注册表与 profile 覆盖在该阶段被静默忽略（自定义
+    agent 只在实现阶段可用）。用 AST 遍历 ``src/backend`` 断言，防止以后新增
+    调用点再漏。
+
+    唯一豁免：定义这两个入口的模块内部把调用方传下来的关键字参数原样转发给
+    另一入口（``**agent_call_options``），此处无法静态断言；它的所有外部调用点
+    仍受本守卫约束。
+    """
+    import ast
+
+    backend_root = Path(__file__).resolve().parents[1] / "src" / "backend"
+    agent_call_names = {"run_agent_with_prompt", "run_agent_with_prompt_resilient"}
+    offenders: list[str] = []
+    inspected_call_count = 0
+
+    for source_path in sorted(backend_root.rglob("*.py")):
+        module_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        # 只有"定义这两个入口"的模块允许在它们之间做关键字参数透传。
+        owns_agent_entry_points = any(
+            isinstance(definition_node, ast.FunctionDef)
+            and definition_node.name in agent_call_names
+            for definition_node in ast.walk(module_tree)
+        )
+        for call_node in ast.walk(module_tree):
+            if not isinstance(call_node, ast.Call):
+                continue
+            if not isinstance(call_node.func, ast.Name):
+                continue
+            if call_node.func.id not in agent_call_names:
+                continue
+            inspected_call_count += 1
+            if any(keyword.arg == "config" for keyword in call_node.keywords):
+                continue
+            forwards_kwargs_bag = any(keyword.arg is None for keyword in call_node.keywords)
+            if forwards_kwargs_bag and owns_agent_entry_points:
+                continue
+            offenders.append(f"{source_path}:{call_node.lineno}")
+
+    assert (
+        inspected_call_count > 0
+    ), "AST guard found no run_agent_with_prompt* call sites; it would pass vacuously."
+    assert offenders == [], "run_agent_with_prompt* call sites missing config=: " + ", ".join(
+        offenders
+    )

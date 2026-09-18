@@ -589,6 +589,10 @@ class PrePrReviewConfig:
     enabled: bool = True
     review_agent: str = "auto"
     allow_same_agent: bool = True
+    # 谁应用本阶段 findings 的修复：``self``（审核者自己打补丁，历史行为）/
+    # ``executor``（交回本次实现者）/ 任意已注册 agent 名。与
+    # ``runner.fix_agent_enabled``（本地验证失败的轻量修复 agent）无关。
+    repair_agent: str = "self"
     max_attempts: int = 2
     timeout_seconds: int = 1800
     # When the reviewer reports findings but fails to write a commit request,
@@ -634,6 +638,10 @@ class PostPrSupervisorConfig:
 
     enabled: bool = True
     supervisor_agent: str = "auto"
+    # 谁执行 supervisor 判定后的代码修复：``self``（supervisor 自己修，历史
+    # 行为）/ ``executor``（交回本次实现者，拿不到时按 Issue 标签回落并记录
+    # 来源）/ 任意已注册 agent 名。
+    repair_agent: str = "self"
     max_repair_attempts: int = 2
     max_agent_crash_retries: int = 5
     crash_retry_initial_backoff_seconds: int = 30

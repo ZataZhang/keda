@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
 
 from backend.core.agent.memory import (
@@ -22,9 +23,11 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     DeliveryGateError,
     DeliveryGateFailureKind,
+    FindingDetail,
     IssueSummary,
     MemoryConfig,
     PromptConfig,
+    ReviewFinding,
 )
 from backend.core.shared.prd_change_log import (
     extract_prd_change_log_entry_count,
@@ -684,6 +687,82 @@ def build_fix_prompt(
             "- After fixing the failure, write or update "
             "`.agent-runner/commit-request.json` as JSON with `commit_message`.",
             "- Finish with a concise summary of the fix.",
+        ]
+    )
+
+
+def build_finding_bullet_lines(
+    findings: Sequence[ReviewFinding | FindingDetail],
+) -> list[str]:
+    """把 review / supervisor findings 渲染成统一的清单行。
+
+    ``ReviewFinding`` 与 ``FindingDetail`` 字段几乎一致，只有 ``recommendation``
+    仅前者声明；这里按可选字段读取，避免为渲染再造一个投影类型。同一个渲染
+    被修复提示词与"同轮提醒"两处复用。
+
+    Args:
+        findings: 待渲染的 findings。
+
+    Returns:
+        每个 finding 渲染成 1–3 行（标题行 + 可选描述 + 可选建议）。
+    """
+    finding_lines: list[str] = []
+    for finding in findings:
+        location = f"{finding.file}:{finding.line}" if finding.file else "unknown location"
+        finding_lines.append(f"- [{location}] {finding.severity or 'unknown'}: {finding.title}")
+        if finding.description:
+            finding_lines.append(f"  {finding.description}")
+        recommendation = getattr(finding, "recommendation", "")
+        if recommendation:
+            finding_lines.append(f"  Recommendation: {recommendation}")
+    return finding_lines
+
+
+def build_repair_prompt(
+    *,
+    issue: IssueSummary,
+    worktree_path: Path,
+    findings: Sequence[ReviewFinding | FindingDetail] = (),
+) -> str:
+    """构建"按本轮 findings 修代码"的共享修复提示词。
+
+    Draft PR 前的 review（非自修模式）与 PR 后的 supervisor 修复共用本构建器，
+    让两段的修复者拿到同一份具体问题清单，而不是一句泛泛的"要求改代码"。
+
+    Args:
+        issue: 当前 Issue。
+        worktree_path: 修复者运行的 worktree。
+        findings: 本轮 findings（无结构化 finding 时退化为通用说明）。
+
+    Returns:
+        修复者提示词文本。
+    """
+    findings_section = build_finding_bullet_lines(findings) or [
+        "(no structured findings were captured; inspect the branch and fix what the "
+        "review reported)"
+    ]
+    return "\n".join(
+        [
+            f"Repair the code for GitHub Issue #{issue.number}: {issue.title}",
+            "",
+            f"Issue URL: {issue.url}",
+            f"Worktree: {worktree_path}",
+            "",
+            "A reviewer examined this branch and requested code changes. Address every "
+            "finding below; if a finding is wrong, say why in your summary instead of "
+            "silently skipping it.",
+            "",
+            "Findings:",
+            *findings_section,
+            "",
+            "Repair rules:",
+            "- Only modify files inside the current worktree.",
+            "- Do not switch branches, merge main, push, or create PRs.",
+            "- Do not run `git add`, `git commit`, `git reset`, or `git checkout`; the "
+            "runner handles staging and commits.",
+            "- After fixing, write `.agent-runner/commit-request.json` as JSON with "
+            "`commit_message`.",
+            "- Finish with a concise summary of the changes.",
         ]
     )
 

@@ -60,6 +60,7 @@ from backend.core.use_cases.run_agent_once import (
     format_attempt_history,
     get_head_sha,
     has_changes,
+    resolve_supervisor_agent,
     run_verification,
 )
 
@@ -677,10 +678,11 @@ def _finish_implementation_publication(
                 branch,
             )
         else:
-            supervisor_agent = (
-                selected_agent
-                if supervisor_config.supervisor_agent == "auto"
-                else supervisor_config.supervisor_agent
+            supervisor_agent = resolve_supervisor_agent(
+                issue,
+                config,
+                "auto",
+                fallback_agent=selected_agent,
             )
             # 启动监督修复循环
             _run_supervisor_with_repair_loop(
@@ -691,6 +693,7 @@ def _finish_implementation_publication(
                 process_runner=process_runner,
                 pr_context=pr_context,
                 supervisor_agent=supervisor_agent,
+                executor_agent=selected_agent,
             )
     else:
         # 未启用监督时直接进入 review 标签
@@ -852,10 +855,11 @@ def _finish_existing_commit_publication(
                 branch,
             )
         else:
-            supervisor_agent = (
-                selected_agent
-                if supervisor_config.supervisor_agent == "auto"
-                else supervisor_config.supervisor_agent
+            supervisor_agent = resolve_supervisor_agent(
+                issue,
+                config,
+                "auto",
+                fallback_agent=selected_agent,
             )
             _run_supervisor_with_repair_loop(
                 issue=issue,
@@ -865,6 +869,7 @@ def _finish_existing_commit_publication(
                 process_runner=process_runner,
                 pr_context=pr_context,
                 supervisor_agent=supervisor_agent,
+                executor_agent=selected_agent,
             )
     else:
         _edit_issue_labels_after_publish(

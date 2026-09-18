@@ -10,6 +10,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
     IssueSummary,
+    PostPrSupervisorConfig,
     PullRequestContext,
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
@@ -89,7 +90,7 @@ def test_review_once_detects_checks_state_change_and_triggers_supervisor() -> No
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -138,7 +139,7 @@ def test_review_once_detects_new_issue_comments_and_triggers_supervisor() -> Non
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -180,7 +181,7 @@ def test_review_once_detects_new_pr_comments_and_triggers_supervisor() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -223,7 +224,7 @@ def test_review_once_detects_mergeable_change_and_triggers_supervisor() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -276,7 +277,7 @@ def test_review_once_blocks_conflicting_pr_approval() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -375,7 +376,7 @@ def test_review_once_logs_queued_rebase_outcome(caplog) -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -421,7 +422,7 @@ def test_review_once_skips_when_no_context_change() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -535,7 +536,7 @@ def test_review_once_reruns_supervisor_after_mark_failed_marker() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -615,7 +616,7 @@ def test_review_once_moves_review_label_to_supervising_on_change() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -737,7 +738,7 @@ def test_review_once_cleans_dirty_workflow_labels() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -785,7 +786,7 @@ def test_review_once_waits_for_pending_checks() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -915,7 +916,7 @@ def test_review_once_auto_stashes_dirty_worktree_and_approves() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -1004,7 +1005,7 @@ def test_review_once_dirty_worktree_stash_fails_blocked() -> None:
             return_value=Path("."),
         ),
         patch(
-            "backend.core.use_cases.review_once.choose_agent",
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
             return_value="codex",
         ),
         patch(
@@ -1028,3 +1029,25 @@ def test_review_once_dirty_worktree_stash_fails_blocked() -> None:
     assert label_calls[0]["add"] == ["agent/blocked"]
     comment_calls = [c for c in client.calls if c["method"] == "comment_issue"]
     assert any("Could not auto-stash" in c["body"] for c in comment_calls)
+
+
+def test_resolve_supervisor_agent_precedence() -> None:
+    """iar review 的 supervisor 解析：命令行 > 配置 > Issue 标签路由。
+
+    修复前该入口只按 Issue 标签走，配置里显式写的 supervisor_agent 被静默忽略。
+    """
+    from backend.core.use_cases.run_agent_once import resolve_supervisor_agent
+
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=("agent/codex",))
+    configured = AppConfig(
+        post_pr_supervisor=PostPrSupervisorConfig(supervisor_agent="kimi"),
+    )
+
+    # 命令行 --agent 优先于配置
+    assert resolve_supervisor_agent(issue, configured, "claude") == "claude"
+    # 配置优先于 Issue 标签
+    assert resolve_supervisor_agent(issue, configured, "auto") == "kimi"
+    # 未显式配置时回落到 Issue 标签路由
+    assert resolve_supervisor_agent(issue, AppConfig(), "auto") == "codex"
+    # 发布路径传本次实现者作为回落，保持既有行为
+    assert resolve_supervisor_agent(issue, AppConfig(), "auto", fallback_agent="pi") == "pi"

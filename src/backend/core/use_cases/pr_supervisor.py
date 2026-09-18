@@ -765,7 +765,12 @@ def execute_rebase(
                     evidence_dir=resolve_issue_evidence_relpath(config, issue),
                 )
             run_agent_with_prompt(
-                supervisor_agent, prompt, worktree_path, process_runner, issue=issue
+                supervisor_agent,
+                prompt,
+                worktree_path,
+                process_runner,
+                config=config,
+                issue=issue,
             )
 
             # Agent 通过 commit-request.json 显式表达提交意图
@@ -938,6 +943,7 @@ def run_post_pr_supervisor_cycle(
                 supervisor_prompt,
                 worktree_path,
                 process_runner,
+                config=config,
                 capture_output=True,
                 issue=issue,
             )

@@ -5,9 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
-from backend.core.shared.models.agent_runner import AppConfig, CommandResult, IssueSummary
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+    CommandResult,
+    FindingDetail,
+    IssueSummary,
+)
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
+    build_repair_prompt,
     build_recovery_prompt,
     failed_verification_results,
 )
@@ -32,9 +38,14 @@ def execute_repair(
     process_runner: IProcessRunner,
     pr_branch: str,
     expected_head: str,
-    supervisor_agent: str,
+    repair_agent: str,
+    findings: tuple[FindingDetail, ...] = (),
 ) -> list[CommandResult]:
     """在既有 PR 分支上运行修复 Agent 并提交变更。
+
+    修复执行者由调用方按 ``post_pr_supervisor.repair_agent`` 解析后传入，
+    与 supervisor 本身解耦；``findings`` 是本轮（或跨 cycle 累积）的具体问题
+    清单，进共享修复提示词，让修复者不必自己重新推断要改什么。
 
     Args:
         issue: 正在修复的 Issue。
@@ -43,7 +54,8 @@ def execute_repair(
         process_runner: 命令执行器。
         pr_branch: PR 分支名称。
         expected_head: 修复前预期的 HEAD SHA。
-        supervisor_agent: 执行修复的 Agent。
+        repair_agent: 执行修复的 Agent。
+        findings: 本轮要修复的具体问题清单。
 
     Returns:
         修复提交后的验证结果。
@@ -60,27 +72,22 @@ def execute_repair(
     if current_branch != pr_branch:
         raise RuntimeError(f"Repair aborted: on branch {current_branch}, expected {pr_branch}")
 
-    repair_prompt = "\n".join(
-        [
-            f"Repair PR branch for Issue #{issue.number}: {issue.title}",
-            "",
-            f"Issue URL: {issue.url}",
-            f"Worktree: {worktree_path}",
-            "",
-            "The post-PR supervisor requested code changes on this branch.",
-            "Inspect the current worktree, make the necessary fixes, and request a commit.",
-            "- Only modify files inside the current worktree.",
-            "- Do not switch branches, merge main, push, or create PRs.",
-            "- Do not run `git add` or `git commit`; the runner handles commits.",
-            "- After fixing, write `.agent-runner/commit-request.json` as JSON with `commit_message`.",
-        ]
+    repair_prompt = build_repair_prompt(
+        issue=issue,
+        worktree_path=worktree_path,
+        findings=findings,
     )
 
     max_attempts = max(1, config.post_pr_supervisor.max_repair_attempts)
     verification_results: list[CommandResult] = []
     for attempt in range(1, max_attempts + 1):
         run_agent_with_prompt(
-            supervisor_agent, repair_prompt, worktree_path, process_runner, issue=issue
+            repair_agent,
+            repair_prompt,
+            worktree_path,
+            process_runner,
+            config=config,
+            issue=issue,
         )
 
         request_path = worktree_path / ".agent-runner" / "commit-request.json"

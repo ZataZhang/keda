@@ -719,6 +719,7 @@ def test_run_once_rebase_conflict_detached_head(
         worktree_path,
         process_runner,
         *,
+        config=None,
         capture_output=False,
         timeout_seconds=None,
         issue=None,

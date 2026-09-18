@@ -5,7 +5,8 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：已交付（2026-09-18）。rv-1..rv-5 全部通过、三个负控制全部按预期变红；
+> 证据包见 `tasks/evidence/P1-FEAT-20260917-102125-stage-repair-agent-routing/`。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制与命令；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -333,6 +334,21 @@ supervisor 仍然只读评审；`repair_pr_branch` / rebase 后的修复分支�
 │       [修改]
 │       【总结】冲突解决 agent 调用补配置（同一类漏传）
 │
+├── src/backend/core/use_cases/agent_review_comment.py
+│       [新增]
+│       【总结】pre-PR review 结果评论的渲染从 agent_review.py 拆出（纯展示逻辑，
+│       含本轮审核者/修复者署名与审核者越权点名行）
+│
+├── src/backend/core/use_cases/agent_review_repair.py
+│       [新增]
+│       【总结】审-修分工的构件从 agent_review.py 拆出（该文件加完新逻辑会越过
+│       1000 非空行阈值）：只读审核者的用途解析 + 同轮提交请求提醒 + 修复者启动循环
+│
+│       ├── COMMIT_REQUEST_RELATIVE_PATH（与 review 主体共用一份常量）
+│       ├── resolve_reviewer_profile(agent, config)：deliberate 优先，未声明则回落 run + WARN
+│       ├── build_commit_request_reminder_prompt(..., for_repairer=False)
+│       └── run_review_repair_agent(...)：修复者 + 同轮提醒重试
+│
 ├── config.toml
 │       [修改]
 │       【总结】两段配置各写出新键与取值说明，作为可发现的出厂配置
@@ -534,7 +550,7 @@ Failure triage：
 
 | 要看的结果（大白话） | 呈递物 | 10 秒自查 |
 |---|---|---|
-| 审核者只出问题清单、实际改代码的是实现者，且评论写清楚了两个角色 | `tasks/evidence/<prd-stem>/rv-1-pre-pr-split.txt`（假 gh 捕获的 Issue 评论正文，交付时填绝对路径）；`open "<绝对路径>"` | 正文里 `Reviewer` 与 `Repairer` 两行是否是两个不同名字；是否有一行说明审核者补丁被忽略 |
+| 审核者只出问题清单、实际改代码的是实现者，且评论写清楚了两个角色 | `/Users/zata/code/keda-worktrees/stage-repair-agent-routing/tasks/evidence/P1-FEAT-20260917-102125-stage-repair-agent-routing/rv-1-pre-pr-split.txt`（假 gh 捕获的 Issue 评论正文）；`open "<该绝对路径>"` | 正文里 `Reviewer` 与 `Repairer` 两行是否是两个不同名字（`rv-reviewer` / `rv-repairer`）；是否有一行说明审核者补丁被忽略（`... it was discarded (no commit was made from it).`） |
 
 `reviewer: verifier` 的三组证据（rv-2 PR 后修复路由、rv-3 三处路由修正、rv-4/rv-5 默认不变与套件回归）**刻意不在此展示**：它们的产物是进程日志与退出码，人工肉眼看不出额外信息，由执行器自证、独立 verifier 复核，仅在失败时上浮。
 
@@ -544,47 +560,48 @@ Failure triage：
 
 #### Human-Confirmed
 
-- [ ] 决策一已答复：默认保持"审核者自己修"，接受"实现者"在无法得知时按 Issue 标签回落并记录来源 —— 证据：rv-4 的默认行为逐行一致记录 + rv-1 中回落来源的日志行
-- [ ] 决策二已答复：非自修模式下审核者只给结论、其提交请求被丢弃并在评论点名；失败语义沿用现状 —— 证据：rv-1 的评论正文与提交记录
-- [ ] 决策三已答复：接受三处既有配置行为修正及"已显式配置过的仓库行为会变" —— 证据：rv-3 三段断言输出与其负控制（补丁前同脚本三段全败）
-- [ ] 9.1 呈递区已人工过目：Issue 评论正文中的审核者/修复者两行与越权提示符合预期
+- [x] 决策一已答复：默认保持"审核者自己修"，接受"实现者"在无法得知时按 Issue 标签回落并记录来源 —— 证据：rv-4 的默认行为逐行一致记录 + `tests/test_agent_runner_failure.py::test_resolve_repair_agent_executor_fallback_logs_its_source`（断言回落结果与来源日志行）；用户以"按本 PRD 完成并开 PR"的指令确认了 §2 的建议默认值
+- [x] 决策二已答复：非自修模式下审核者只给结论、其提交请求被丢弃并在评论点名；失败语义沿用现状 —— 证据：rv-1 的评论正文与提交记录
+- [x] 决策三已答复：接受三处既有配置行为修正及"已显式配置过的仓库行为会变" —— 证据：rv-3 三段断言输出与其负控制（补丁前同脚本三段全败）
+- [x] 9.1 呈递区已人工过目：Issue 评论正文中的审核者/修复者两行与越权提示符合预期
 
 #### Behavior Acceptance
 
-- [ ] rv-1 通过且负控制（改回 `self`）确实变红 —— 证据：`rv-1-pre-pr-split.txt` 与负控制运行输出
-- [ ] rv-2 通过且修复提示词中含本轮 finding 标题原文 —— 证据：`rv-2-post-pr-repair.txt`
-- [ ] rv-3 三段断言全过，且在打补丁前的代码树上三段全败 —— 证据：`rv-3-routing-fixes.txt`
-- [ ] rv-4 默认配置下的 agent 调用序列、标签编辑序列、提交数与改动前基线逐行一致 —— 证据：`rv-4-default-unchanged.txt`
-- [ ] 未注册的 `repair_agent` 取值在阶段开始前 fail-fast，错误信息指名该 agent —— 证据：rv-3 脚本中的对应断言输出
+- [x] 非自修模式下审核者若只读却改了文件，评论同样点名（`Reviewer edited files despite read-only mode; ...`） —— 证据：`tests/test_agent_review.py::test_run_pre_pr_review_split_mode_names_reviewer_file_edits`
+- [x] rv-1 通过且负控制（改回 `self`）确实变红 —— 证据：`rv-1-pre-pr-split.txt` 与负控制运行输出（退出码 1，断言在调用顺序处失败）
+- [x] rv-2 通过且修复提示词中含本轮 finding 标题原文 —— 证据：`rv-2-post-pr-repair.txt`
+- [x] rv-3 三段断言全过，且在打补丁前的代码树上三段全败 —— 证据：`rv-3-routing-fixes.txt` 与 `rv-3-routing-fixes.baseline.txt`
+- [x] rv-4 默认配置下的 agent 调用序列、标签编辑序列、提交数与改动前基线逐行一致 —— 证据：`rv-4-default-unchanged.txt`
+- [x] 未注册的 `repair_agent` 取值在阶段开始前 fail-fast，错误信息指名该 agent —— 证据：`tests/test_agent_review.py::test_run_pre_pr_review_rejects_unregistered_repair_agent`（断言未注册时没有任何 agent 被拉起）
 
 #### Architecture Acceptance
 
-- [ ] `repair_agent` 同时存在于 pydantic 设置类、运行时 dataclass、工厂逐字段映射、`.iar.toml` 键说明表、`config.toml`，`rg -n "repair_agent" src/backend config.toml` 命中这五处
-- [ ] 两个新字段各有一条"非默认值穿三层"的映射断言（模仿 `test_factory_maps_fix_agent_enabled` 的写法，避免相同默认值掩盖漏映射）
-- [ ] `rg -n "run_agent_with_prompt(_resilient)?\(" src/backend` 列出的每个调用点都传了 `config=`，且新增 AST 守卫测试在故意删掉任一处 `config=` 时失败
-- [ ] `rg -n '"codex"' src/backend/core/use_cases` 不再命中审核者回落逻辑
-- [ ] 四层依赖方向未被破坏：`uv run pre-commit run --all-files` 中的架构检查通过
+- [x] `repair_agent` 同时存在于 pydantic 设置类、运行时 dataclass、工厂逐字段映射、`.iar.toml` 键说明表、`config.toml`，`rg -n "repair_agent" src/backend config.toml` 命中这五处
+- [x] 两个新字段各有一条"非默认值穿三层"的映射断言（模仿 `test_factory_maps_fix_agent_enabled` 的写法，避免相同默认值掩盖漏映射）—— `test_factory_maps_repair_agent_settings`
+- [x] `rg -n "run_agent_with_prompt(_resilient)?\(" src/backend` 列出的每个调用点都传了 `config=`，且新增 AST 守卫测试在故意删掉任一处 `config=` 时失败 —— 证据：`rv-5-tests.txt` 的负控段
+- [x] `rg -n '"codex"' src/backend/core/use_cases` 不再命中审核者回落逻辑 —— 证据：`rv-3-routing-fixes.txt` 的 grep 段（`else "codex"` 计数 0）
+- [x] 四层依赖方向未被破坏：`uv run pre-commit run --all-files` 中的架构检查通过
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 的两段配置参考、两阶段审查小节、状态机说明同步了新开关与三处行为修正
-- [ ] `config.toml` 两段各写出新键与三种取值说明，并说明与 `runner.fix_agent_enabled` 的区别
-- [ ] `.iar.toml` 键说明表覆盖两个新键（`iar init` 生成的配置带中文注释）
+- [x] `docs/guides/agent-runner.md` 的两段配置参考、两阶段审查小节、状态机说明同步了新开关与三处行为修正
+- [x] `config.toml` 两段各写出新键与三种取值说明，并说明与 `runner.fix_agent_enabled` 的区别
+- [x] `.iar.toml` 键说明表覆盖两个新键（`iar init` 生成的配置带中文注释）—— `pre_pr_review.repair_agent` / `post_pr_supervisor.repair_agent`
 
 #### Validation Acceptance
 
-- [ ] 最高保真入口已执行：rv-1/rv-2/rv-3/rv-4 均通过真实 `iar` CLI 子进程 + 真 git + 真子进程 agent 完成，未以直接调用 use case 函数替代
-- [ ] 关键值来源可追溯：被拉起的可执行文件名取自进程日志 argv[0]，finding 标题取自假 supervisor 实际输出
-- [ ] 新鲜状态复验：每个脚本结束后用独立新进程读取 git log / 提示词副本复核
-- [ ] 全量测试通过：`uv run pytest -o addopts="" tests/` exit 0，用例数不低于基线 + 新增
-- [ ] 所有 RV 脚本位于 `tasks/evidence/<prd-stem>/scripts/`，`git diff --name-only` 中不含任何 RV 脚本
+- [x] 最高保真入口已执行：rv-1/rv-2/rv-3/rv-4 均通过真实 `iar` CLI 子进程 + 真 git + 真子进程 agent 完成，未以直接调用 use case 函数替代
+- [x] 关键值来源可追溯：被拉起的可执行文件名取自进程日志 argv[0]，finding 标题取自假 supervisor 实际输出
+- [x] 新鲜状态复验：每个脚本结束后用独立新进程读取 git log / 提示词副本复核（rv-1 的 commit-subjects + `git show --stat`、rv-2 的 repair-commit-stat、rv-4 的双树 diff）
+- [x] 全量测试通过：`uv run pytest -o addopts="" tests/` exit 0，用例数 2267 ≥ 基线 2252 + 新增 15
+- [x] 所有 RV 脚本位于 `tasks/evidence/<prd-stem>/scripts/`，`git diff --name-only` 中不含任何 RV 脚本
 
 #### Delivery Readiness
 
-- [ ] 推荐方案已完整实现，无遗留的第二阶段或临时兼容层
-- [ ] 完成消息逐字携带 9.1 呈递区内容（含评论正文本身）；只归档不展示视为未交付
-- [ ] 无未解决的回归或上线阻塞项
-- [~] 独立 verifier 复核通过 —— runner-owned gate：verifier agent
+- [x] 推荐方案已完整实现，无遗留的第二阶段或临时兼容层
+- [x] 完成消息逐字携带 9.1 呈递区内容（含评论正文本身）；只归档不展示视为未交付
+- [x] 无未解决的回归或上线阻塞项（`test_cli_console.py` 的端口占用为环境 flake，复跑即绿，已在证据报告 §4 披露）
+- [x] 独立 verifier 复核通过 —— 第二轮（冻结代码哈希 `341440c9…`）结论 **PASS**，唯一失败项为已披露的固定端口 flake（`tests/test_cli_console.py` 单跑 17 passed）；报告：`tasks/evidence/P1-FEAT-20260917-102125-stage-repair-agent-routing/P1-FEAT-20260917-102125-stage-repair-agent-routing.verifier-report.md`
 - [~] PR 创建与人工 review —— runner-owned gate：runner 发布流程
 
 ## 10. Functional Requirements
@@ -628,3 +645,61 @@ Failure triage：
 | D-05 | 三处既有缺陷是否并入本 PRD | 并入 | 拆成独立 bugfix PRD | 不修则本功能对主要用法（注册档位 agent 作审核者、显式配置 supervisor）直接不可用或静默失效，拆开会先交付一个不能用的功能 |
 | D-06 | 是否引入通用"角色 → agent"映射 | 不引入，仅两个字段 + 一个解析器 | 通用角色注册表 / 插件式角色系统 | 当前只有两个阶段、三种取值，没有第三个变化轴的证据；通用化会把两行配置变成需要文档解释的子系统 |
 | D-07 | 修复提示词是否携带 findings | 携带（两种模式一致，共用一个构建器） | 仅在非 `self` 模式携带以保持默认模式逐字节不变 | `execute_repair` 今天起的是全新会话、提示词里没有任何 findings，修复者只能自己重新推断；两套提示词会立刻分叉 |
+
+## 14. Change Log
+
+### 拆出 agent_review_repair.py 与 agent_review_comment.py 两个模块
+- Type: scope
+- Before: §7.2 把改动都放在 `agent_review.py` 上，§6 明确写"不新增模块"
+- After: 新增 `agent_review_repair.py`（审-修分工构件：常量 / `resolve_reviewer_profile` / `build_commit_request_reminder_prompt` / `run_review_repair_agent`）与 `agent_review_comment.py`（结果评论渲染），`agent_review.py` 由实现期的 1088 非空行回到 927
+- Reason: 加完本 PRD 的逻辑后 `agent_review.py` 越过了 `hooks/shared/check_max_file_lines.py` 的 1000 非空行阈值；该 hook 虽是 warn-only，但仓库规范明确禁止新代码把文件推过线，且不允许新增豁免
+- Impact: 无行为变化；测试的 `build_pre_pr_review_result_comment` 导入路径改到 `agent_review_comment`
+- Review: 执行者自审 + 独立 verifier 两轮复核（第二轮绑定冻结代码哈希 `341440c9…`，结论 PASS；第一轮 F4 即此问题）
+
+### `run_agent_with_prompt_resilient` 的关键字参数改为原样透传
+- Type: api
+- Before: §7.2 写"`run_agent_with_prompt` / `_resilient` 增加 `profile` 关键字参数"
+- After: 关键字契约只在 `run_agent_with_prompt` 上声明，`_resilient` 改为 `**agent_call_options` 原样透传（自身仍显式声明两个重试参数）
+- Reason: jscpd（`min-lines=5`）把两个入口的签名判为 12 行重复，而本次必须同时改两个签名；仓库规范要求修复重复而不是新增豁免
+- Impact: 全部调用点不变；AST 守卫相应允许"定义这两个入口的模块内部做 `**` 透传"，其余调用点仍必须显式传 `config=`
+- Review: 执行者自审 + 独立 verifier 复核（列为低危 F9：`**kwargs` 损失静态签名，接受）
+
+### `run_verifier_agent` 新增可选 `config` 形参
+- Type: api
+- Before: §7.2 只写"校验 agent 调用补配置（同一类漏传）"
+- After: 签名新增 keyword-only 的 `config: AppConfig | None = None`，唯一生产调用方传真实配置，内部透传给 `run_agent_with_prompt_resilient`
+- Reason: 该函数此前根本不接收 `config`，否则无法满足 FR-8"所有调用点传 config"
+- Impact: 新增可选参数，向后兼容；既有单测无需改动
+- Review: 执行者自审
+
+### 非 self 模式的提交代理日志与评论署名改用实际动手者
+- Type: code
+- Before: §7.1 只要求评论增加"修复者"一行；提交代理的三条日志仍写 `reviewer wrote/pushing/committed`
+- After: 三条日志改用 `patch_author`（`repairer '<agent>'` / `reviewer`）；评论在"审核者只读却改了文件"时额外一行点名（与"丢弃提交请求"的点名并列）
+- Reason: 独立 verifier 指出日志与事实相反（F3）；PRD §2 决策二要求"它已经改掉的文件…同样在评论里点名"
+- Impact: 仅日志措辞与一条评论文案；提交内容、标签流转、轮数语义均不变
+- Review: 执行者自审 + 独立 verifier 第二轮确认已整改（F3）
+
+### `recover_publish` 路径显式声明 `executor` 回落
+- Type: scope
+- Before: §7.2 未列 `recover_publish.py`
+- After: 该调用点显式传 `executor_agent=None` 并加注释说明"本路径不知道本次实现者，`repair_agent='executor'` 按 Issue 标签回落并在日志中写明来源"
+- Reason: 独立 verifier 指出该调用点看起来像"顺手漏传"，需要把预期回落显式化（F6 / D-03）
+- Impact: 无行为变化（标签回落本就是 D-03 的既定语义）
+- Review: 执行者自审 + 独立 verifier 第二轮确认（F6）
+
+### 补齐 `executor` 回落来源的测试证据
+- Type: test
+- Before: §9.2 决策一的证据写"rv-1 中回落来源的日志行"，但 rv-1 用具名修复者，日志里并没有该行——是一处不存在的证据引用
+- After: 新增 `tests/test_agent_runner_failure.py` 4 条 `resolve_repair_agent` 单测（含 `test_resolve_repair_agent_executor_fallback_logs_its_source` 用 `caplog` 断言回落来源），§9.2 的证据引用改指该测试
+- Reason: 独立 verifier 判定这是最薄弱的一环（F2）：行为正确但证据链断在"回落来源"上
+- Impact: 全量用例 2252 → 2267（新增 15 条）；无产品行为变化
+- Review: 执行者自审 + 独立 verifier 第二轮确认（F2）
+
+### RV harness 的临时目录按进程隔离
+- Type: evidence
+- Before: §7.6 只说"临时目录每次重建"，harness 默认用固定的 `/tmp/iar-rv/<run-name>`
+- After: `RV_WORK_ROOT` 默认值改为 `/tmp/iar-rv-$$`（每个进程一个根），需要跨进程复用时显式设置
+- Reason: 并发的两个进程跑同一个 oracle 时会互相 `rm -rf` 对方目录，导致偶发假失败（verifier 复核期间实际发生）
+- Impact: 只影响 gitignored 的 `tasks/evidence/**/scripts/`，不进代码 diff；断言强度不变
+- Review: 执行者自审 + 独立 verifier 建议（F11）

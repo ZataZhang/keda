@@ -82,6 +82,7 @@ def run_recovery_after_verification_failure(
         recovery_prompt,
         worktree_path,
         process_runner,
+        config=config,
         issue=issue,
     )
 
