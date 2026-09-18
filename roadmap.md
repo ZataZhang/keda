@@ -17,7 +17,7 @@
 
 ## Current Status
 
-截至 2026-07-05，仓库已经形成"CLI/daemon + 多 agent runner + post-PR supervisor + independent verifier"的稳定闭环；最近一个月的进展集中在两个方向——一是把已经闭环的能力进一步钉死（Agent Runner 记忆持久化的跨 worktree 锚点修复、`api→engines` 直连迁移回 `core` 编排层、`pre-commit` 验证命令与独立 verifier gate 落地）；二是为产品仓引入了 autopilot fast-lane 能力族（合并队列、roadmap 持续调度、执行前 re-grounding 与触碰面避让），三个 PRD 已落 `tasks/pending/` 形成 `autopilot-fast-lane` 交付组。当前状态依据来自 `src/backend/` 实现、`docs/guides/agent-runner.md`、`tasks/archive/` 已归档 PRD 与 `tasks/pending/` 待完成 PRD。
+截至 2026-09-17，仓库已经形成"CLI/daemon + 多 agent runner + post-PR supervisor + independent verifier"的稳定闭环；进展集中在三个方向——一是把已经闭环的能力进一步钉死（Agent Runner 记忆持久化的跨 worktree 锚点修复、`api→engines` 直连迁移回 `core` 编排层、`pre-commit` 验证命令与独立 verifier gate 落地）；二是为产品仓引入的 autopilot fast-lane 能力族已交付两项——**合并队列**（`P1-FEAT-20260703-105322`）与 **roadmap 持续调度**（`P1-FEAT-20260703-105330`），连同独立 verifier gate 构成"打开开关即无人值守"的最小闭环；三是原计划的第三项"执行前 re-grounding 与触碰面避让"经评估**整体收缩**为默认 `execution` 提示模板内的"PRD map check"核验指令（`P1-FEAT-20260703-105340`）——不引入独立流水线阶段、不预测触碰面、不做并行撞车避让。当前状态依据来自 `src/backend/` 实现、`docs/guides/agent-runner.md`、`tasks/archive/` 已归档 PRD 与 `tasks/pending/` 待完成 PRD。
 
 ### Completed
 
@@ -55,7 +55,7 @@
 - **PR 分支维护能力**：supervisor 可请求现有 PR branch repair/rebase/resolve-conflict，review-daemon 可感知 base、checks、comment 和 mergeability 变化；detached HEAD rebase 中间态识别、恢复后 supervisor 闭环和 CI rework 状态恢复仍不完整。
 - **前端能力**：已有基础前端结构和页面骨架；面向 agent runner 的可用操作台尚未完成。
 - **Issue-first PRD 能力**：PRD -> Issue 已完成，Issue -> PRD / PRD rewrite / PRD review deliberation 仍在 pending PRD 中。
-- **Autopilot fast-lane（产品仓"打开开关即无人值守"能力族）**：三个 PRD 已落 `tasks/pending/`，形成同组交付——合并队列快速档（`[autopilot]` + `safety.auto_merge` 双开关门控，按 Issue 号 FIFO 串行 squash 合并）、roadmap 持续调度（daemon 内对账+补位+发现式入队 + `iar roadmap advance` 一次性入口）、执行前 re-grounding 与触碰面避让（`agent/waiting` 自动生产者与消费者）。依赖链 merge-queue → continuous-scheduling → re-grounding 串行交付；上不经过 verifier 绿灯禁自动签核。
+- **Autopilot fast-lane（产品仓"打开开关即无人值守"能力族）**：原三件中已交付两件——**合并队列快速档**（`P1-FEAT-20260703-105322`，已归档：`[autopilot]` + `safety.auto_merge` 双开关门控，verifier 绿灯 → 自动签核 → rebase 最新 base → 全量验证重跑 → 禁改路径终扫 → squash 合并，按 Issue 号 FIFO 串行）与 **roadmap 持续调度**（`P1-FEAT-20260703-105330`，已归档：daemon 内对账 + 补位 + 发现式入队，`iar roadmap advance [--dry-run]` 一次性入口）。第三件"执行前 re-grounding 与触碰面避让"已**取消独立阶段、取消 agent 侧触碰面预测、取消并行撞车避让**，收缩为默认 `execution` 提示模板内置的 `PRD map check` 核验指令并交付（`P1-FEAT-20260703-105340`；形态见 M2）。仍未完成的只剩 fast-lane 的发布说明（`auto_merge` 语义已从死开关激活，需显式提示升级影响）。
 
 ### Not Completed
 
@@ -68,7 +68,7 @@
 - forbidden path blocked resolution、CI rework state recovery 和 process runner 错误可诊断性增强。
 - 高风险 review 发现阻止 PR 发布或转人工的完整稳定规则。
 - 非 GitHub 平台适配层。
-- autopilot fast-lane 全部落地前的 PRD 归档与发布说明（`auto_merge` 语义从死开关激活，需显式提示升级影响）。
+- autopilot fast-lane 的发布说明：`safety.auto_merge` 语义已从死开关激活（双开关同时为真才生效），需要显式提示升级影响，发布渠道（README / release notes / daemon 启动日志）待定。
 
 ## Target Workflow
 
@@ -82,7 +82,7 @@
 8. 管理员决定创建 PRD 后，`iar` 根据 Issue 与合议结果生成 PRD 草稿，并把草稿内容或草稿链接写回 Issue，等待管理员确认。
 9. 管理员确认 PRD 后，`iar` 才把 PRD 真实写入仓库 `tasks/pending/`，在 PRD 与 Issue 之间建立双向链接，并把 Issue label 更新为 `agent/ready`。
 10. runner 基于仓库现有架构与规范创建隔离 worktree，并把 issue、PRD 和执行规则传给 agent。
-11. **快速档仓库**在 worktree 就绪后、执行 agent 启动前插入 re-grounding 阶段：只读 agent 对照当前代码结构检查 PRD，产出 addendum（注入执行 prompt）与预计触碰路径（物化为 `iar:touch-map` marker 评论）；若与在途 Issue 的触碰面有文件级交集且未达 defer 上限，则本 Issue 转 `agent/waiting` 让路，冲突消除后由调度循环自动 re-ready。非快速档仓库跳过该阶段。
+11. 执行 agent 在动代码之前先做一次 PRD 引用核验（由默认 `execution` 提示模板内置的 `PRD map check` 规则提供；所有仓库通用，非快速档专属，**不是**独立流水线阶段）：核对 PRD 点名的文件路径 / 符号 / 配置键是否仍存在于当前 worktree；已变更则以当前代码为准调整路线、不重建已不存在的旧结构；PRD 计划新增的按计划实施；收尾总结固定带一行 `PRD map check:` 结论（无过期引用写 `none`）。该指令是**增益而非门禁**——agent 未执行或核不出结论时不阻塞交付。**不做** agent 侧触碰面预测、**不做**并行撞车避让（原设计的该半边整体取消，理由与决策记录见 `tasks/archive/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance.md`）。
 12. agent 修改代码、测试和必要文档；runner 通过受限 commit proxy 完成本地提交。
 13. runner 执行配置化本地验证（含 pre-commit 验证命令与 `runner.verification_commands`），失败时把日志摘要交回 agent 做有限次数恢复。
 14. runner 做发布前安全检查和 pre-push AI review；reviewer 如需修改，仍通过受限 commit proxy 和配置化验证命令完成。
@@ -122,7 +122,7 @@ Status: Partially completed.
 
 ### M2: Code Change Agent
 
-Status: Completed for the basic code-change path; pre-execution re-grounding and structured planning remain future work.
+Status: Completed for the basic code-change path; 完整的结构化规划（任务前的形式化影响面识别与验收标准校验）仍是 future work。执行前的 PRD 引用核验已落地，但形态是"默认 `execution` 模板内置的 `PRD map check` 规则"，**不是**原设计的独立 re-grounding 阶段，也不含触碰面预测。
 
 - 已完成：runner 能创建或复用 issue worktree，并启动 Codex、Claude 或 Kimi。
 - 已完成：内置 `iar worktree` 管理 `.iar-worktrees/<branch>`，并在 worktree 路径漂移时 fail fast。
@@ -131,7 +131,8 @@ Status: Completed for the basic code-change path; pre-execution re-grounding and
 - 已完成：prompt template / phase 配置化，避免每次调整 execution prompt 都改 Python 代码。
 - 已完成：Agent Runner 记忆（长期/短期/skill 草稿/已晋升 skill）锚定在目标仓库主检出根，跨 worktree / 跨 Issue 真实持久化；并发写入采用 tmp + `os.replace` 原子落盘。
 - 已完成：`runner.pre_commit_verification_command` 在 commit 阶段独立执行，与 `runner.verification_commands` 解耦。
-- 未完成：任务前的结构化规划、影响面识别和验收标准校验仍主要依赖 agent 自身执行；快速档下由 re-grounding 阶段补"触碰面避让"，但完整结构化规划仍未到 M3 / M8 之前的形式化。
+- 已完成：执行前的 PRD 引用核验——默认 `execution` 提示模板内置 `PRD map check` 规则，agent 开工前核对 PRD 引用的路径 / 符号 / 配置是否仍有效，收尾总结带 `PRD map check:` 声明行；非门禁、失败静默退回现状。
+- 未完成：任务前的结构化规划、影响面识别和验收标准校验仍主要依赖 agent 自身执行，尚未形式化到 M3 / M8 之前；触碰面预测与并行撞车避让已明确不做（见 Open Questions 与 `P1-FEAT-20260703-105340` 决策记录）。
 
 ### M3: Verification And Review
 
@@ -161,9 +162,9 @@ Status: Partially completed.
 - 已完成：PRD-backed Issue 发布前会强制检查 Acceptance Checklist，并在完成时归档 PRD。
 - 已完成：发布前会校验 remote、branch 和 forbidden paths，降低错误发布风险。
 - 已完成：`iar recover-publish` 支持发布阶段失败后的显式恢复命令，并可复用已有 open Draft PR。
+- 已完成（新增）：快速档合并队列（verifier 绿灯 → 自动签核 → rebase → 全量验证 → 禁改终扫 → squash 合并）作为 `agent/review` 阶段的延伸，已随 `P1-FEAT-20260703-105322` 交付归档（实现：`src/backend/core/use_cases/agent_runner_merge_queue.py`；测试：`tests/test_agent_runner_merge_queue.py`；门控：`config.toml` 的 `[agent_runner.autopilot]` + `[agent_runner.safety].auto_merge`）。
 - 未完成：发布恢复成功后仍需与普通 Draft PR 发布保持同样的 post-PR supervisor 安全闭环。
 - 未完成：默认分支 token 匹配、发布失败阶段分类和只读 supervisor dirty guard 仍在 pending PRD 中。
-- 未完成（新增）：快速档合并队列（verifier 绿灯 → 自动签核 → rebase → 全量验证 → 禁改终扫 → squash 合并）作为 `agent/review` 阶段的延伸，待 `P1-FEAT-20260703-105322` 交付。
 
 ### M5: Multi-Repository Runner
 
@@ -223,7 +224,7 @@ Status: Completed. 监控面板与时间线 API 已随 `#39` / `#81` / `#89` 落
 
 ### M10: Autopilot Fast-Lane (Product Repos)
 
-Status: Not completed; PRD 组 `autopilot-fast-lane` 三件已落 `tasks/pending/`，按 merge-queue → continuous-scheduling → re-grounding 串行交付。
+Status: Completed. 随 `P1-FEAT-20260703-105322` 交付归档；实现 `src/backend/core/use_cases/agent_runner_merge_queue.py`，测试 `tests/test_agent_runner_merge_queue.py`，门控 `config.toml` 的 `[agent_runner.autopilot]`（与 `[agent_runner.safety].auto_merge` 双开关同时为真才生效）。
 
 - 快速档开关：在 `.iar.toml` 写入 `[autopilot] enabled = true` 与 `[safety] auto_merge = true`，双开关同时为真才激活；默认全关，严格档仓库零行为变化。
 - 合并队列：review pass 末尾按 Issue 号 FIFO 串行处理 supervisor 已 approve 的 PR，链式门禁（verifier 绿灯 → 自动签核 → rebase 最新 base → worktree 全量验证重跑 → 禁改路径终扫 → checks 全绿 → squash 合并），任一步失败转既有修复路径、不阻塞队列中其余 PR。
@@ -234,7 +235,7 @@ Status: Not completed; PRD 组 `autopilot-fast-lane` 三件已落 `tasks/pending
 
 ### M11: Roadmap Continuous Scheduling (Fast-Lane)
 
-Status: Not completed; 与 M10 同组，硬依赖 `autopilot.enabled` 门控。
+Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/backend/core/use_cases/roadmap_actions.py` 的 `advance_roadmap_queue`（对账 / 槽位核算 / 发现式晋升），CLI `iar roadmap advance [--dry-run]`，daemon 在 `autopilot.enabled` 时于 Phase 2 之前插入该阶段。
 
 - daemon 内每仓 pass 头部新增持续调度阶段（`autopilot.enabled` 门控）：对账 running 队列条目（merged/archived → completed、failed → failed 泊车不重试）→ 重算依赖 → 按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD。
 - 晋升动作 = 幂等建 Issue（复用既有"同名 Issue 已存在则复用"判定）+ 打 `agent/ready` + 队列条目置 running；**不** spawn 独立 runner 进程——Phase 2 既是 ready 标签的消费者也是执行入口，由 daemon `--concurrency` 统一约束并发。
@@ -246,9 +247,9 @@ Status: Not completed; 与 M10 同组，硬依赖 `autopilot.enabled` 门控。
 
 ## Near-Term Delivery Order
 
-1. **autopilot fast-lane 交付组（`tasks/pending/P1-FEAT-20260703-*`）按顺序落地**：合并队列（merge-queue）→ roadmap 持续调度（continuous-scheduling）→ 执行前 re-grounding 与触碰面避让（re-grounding）；前一步交付是后一步的门控前提。`P1-REFACTOR-20260703-184226-api-engines-layer-migration` 是层迁移善后，可与本组并行。
-2. **Agent Runner 记忆锚点稳定化落地与防回归**：`P1-BUG-20260704-153640-agent-runner-memory-stable-anchoring` 把所有记忆目录绝对化到目标仓库主检出根、共享写入原子化、证据脚本强制 `git worktree add` 双副本；交付后整套记忆系统才算真正"跨 Issue 复用"。
-3. **层迁移善后**：`P1-REFACTOR-20260703-184226-api-engines-layer-migration` 把 `api/` 对 `engines/agent_runner/` 的直连 import 全部清零，架构检查恢复严格态稳定通过；`CLAUDE.md` / `docs/ai-standards/architecture.md` / `docs/architecture/system-design.md` 三处表述一致。
+1. **autopilot fast-lane 的发布说明（本组唯一剩项）**：合并队列（`P1-FEAT-20260703-105322`）与 roadmap 持续调度（`P1-FEAT-20260703-105330`）**已交付归档**；第三件"执行前 re-grounding 与触碰面避让"已收缩为默认 `execution` 模板内的 `PRD map check` 核验指令并交付（`P1-FEAT-20260703-105340`）。剩余只有 `safety.auto_merge` 语义激活的升级提示与渠道（README / release notes / daemon 启动日志）待定。
+2. **Agent Runner 记忆锚点稳定化落地与防回归**（**已交付归档**）：`P1-BUG-20260704-153640-agent-runner-memory-stable-anchoring` 把所有记忆目录绝对化到目标仓库主检出根、共享写入原子化、证据脚本强制 `git worktree add` 双副本；整套记忆系统"跨 Issue 复用"已生效。
+3. **层迁移善后**（**已交付归档**）：`P1-REFACTOR-20260703-184226-api-engines-layer-migration` 把 `api/` 对 `engines/agent_runner/` 的直连 import 全部清零，架构检查恢复严格态稳定通过；`CLAUDE.md` / `docs/ai-standards/architecture.md` / `docs/architecture/system-design.md` 三处表述一致。
 4. **发布恢复后的 supervisor 安全闭环**：恢复成功后先进入 `agent/supervising`，supervisor approve 后再进入 `agent/review`，并修正分支 token 匹配与发布失败阶段分类。
 5. **rebase detached HEAD branch guard**：确保 active rebase target 可确认时允许继续，无法确认时安全停止并输出可诊断错误。
 6. **CI rework state recovery、blocked/forbidden resolution 与 process runner 错误可诊断性增强**：从 supervisor 修复回路单点补齐。
@@ -301,9 +302,10 @@ Status: Not completed; 与 M10 同组，硬依赖 `autopilot.enabled` 门控。
 - [ ] 能够用稳定规则阻止带有高风险问题的 PR 自动发布或自动转人工。
 - [ ] 能够强校验 PR 正文包含完整实现摘要、验证结果和残余风险。
 - [ ] 能够提供只读 operator 监控面板和 Issue 时间线 API。
-- [ ] 能够在快速档仓库中按 Issue 号 FIFO 串行 squash 合并 supervisor 已 approve 的 PR，且自动签核、rebase、全量验证、禁改终扫四道门禁全部生效。
-- [ ] 能够在快速档 daemon 每轮 pass 自动对账 running 队列条目、按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD，且 `iar roadmap advance [--dry-run]` 一次性入口可用。
-- [ ] 能够在执行 agent 启动前注入 re-grounding 勘误附录并物化触碰面评论；触碰面相交时自动转 `agent/waiting` 让路、冲突消除后由调度循环自动 re-ready，且 defer 次数有上限防止活锁。
+- [x] 能够在快速档仓库中按 Issue 号 FIFO 串行 squash 合并 supervisor 已 approve 的 PR，且自动签核、rebase、全量验证、禁改终扫四道门禁全部生效（`P1-FEAT-20260703-105322` 已交付归档；实现 `src/backend/core/use_cases/agent_runner_merge_queue.py`）。
+- [x] 能够在快速档 daemon 每轮 pass 自动对账 running 队列条目、按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD，且 `iar roadmap advance [--dry-run]` 一次性入口可用（`P1-FEAT-20260703-105330` 已交付归档）。
+- [x] 能够在执行 agent 启动前核验 PRD 引用的路径 / 符号 / 配置是否仍有效，并在收尾总结给出 `PRD map check:` 声明行；核验不通过不阻塞交付（`P1-FEAT-20260703-105340` 已交付归档；形态为默认 `execution` 模板内置规则，非独立阶段）。
+- ~~能够在执行 agent 启动前注入 re-grounding 勘误附录并物化触碰面评论；触碰面相交时自动转 `agent/waiting` 让路、冲突消除后由调度循环自动 re-ready，且 defer 次数有上限防止活锁。~~ **已取消，不再作为验收项**：默认串行时"在途 running 集合"恒空永不触发，并发下触碰面发布竞态使其在最需要的场景失效；决策记录见 `tasks/archive/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance.md` §13 D-03。
 
 ## Open Questions
 
@@ -323,5 +325,5 @@ Status: Not completed; 与 M10 同组，硬依赖 `autopilot.enabled` 门控。
 - 快速档默认是否应在产品仓中开启，还是维持纯 opt-in；`safety.auto_merge` 激活后的升级说明以哪种渠道发放（README / release notes / daemon 启动日志）。
 - 快速档是否允许只开"自动签核+rebase"但禁掉 squash 合并，或只禁合并保留自动签核；当前 PRD 锁 squash 是默认选择。
 - 持续调度的 `max_parallel` 与 daemon `--concurrency` 同时启用时，是否需要在启动时显式校验二者口径并提示用户。
-- re-grounding 触碰面在两个 Issue 几乎同时开工的竞态窗口期内相互看不见对方 touch-map 的漏网冲突，是否需要后续加锁或派发前预审，或继续由合并队列 rebase + 全量验证兜底。
+- 触碰面预测与并行撞车避让已在 2026-09-16 评估后**整体取消**（默认串行恒不触发 + 并发下发布竞态失效；触碰面本可从 PRD 自带的 `### Change Impact Tree` 静态解析，无需 agent 预测）。原"两个 Issue 几乎同时开工时互相看不见对方 touch-map 的漏网冲突"问题随之不再存在；若将来重启该方向，须先解决上述两个前提。冲突兜底仍由合并队列 rebase + 全量验证承担。
 - 跨 PRD 的 `task-group/` 依赖失败时是否需要在 queue 报告中聚合显示，避免单 PRD 错误信息淹没整组状态。
