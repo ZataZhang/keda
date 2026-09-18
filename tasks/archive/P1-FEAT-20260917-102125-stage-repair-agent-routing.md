@@ -645,3 +645,61 @@ Failure triage：
 | D-05 | 三处既有缺陷是否并入本 PRD | 并入 | 拆成独立 bugfix PRD | 不修则本功能对主要用法（注册档位 agent 作审核者、显式配置 supervisor）直接不可用或静默失效，拆开会先交付一个不能用的功能 |
 | D-06 | 是否引入通用"角色 → agent"映射 | 不引入，仅两个字段 + 一个解析器 | 通用角色注册表 / 插件式角色系统 | 当前只有两个阶段、三种取值，没有第三个变化轴的证据；通用化会把两行配置变成需要文档解释的子系统 |
 | D-07 | 修复提示词是否携带 findings | 携带（两种模式一致，共用一个构建器） | 仅在非 `self` 模式携带以保持默认模式逐字节不变 | `execute_repair` 今天起的是全新会话、提示词里没有任何 findings，修复者只能自己重新推断；两套提示词会立刻分叉 |
+
+## 14. Change Log
+
+### 拆出 agent_review_repair.py 与 agent_review_comment.py 两个模块
+- Type: scope
+- Before: §7.2 把改动都放在 `agent_review.py` 上，§6 明确写"不新增模块"
+- After: 新增 `agent_review_repair.py`（审-修分工构件：常量 / `resolve_reviewer_profile` / `build_commit_request_reminder_prompt` / `run_review_repair_agent`）与 `agent_review_comment.py`（结果评论渲染），`agent_review.py` 由实现期的 1088 非空行回到 927
+- Reason: 加完本 PRD 的逻辑后 `agent_review.py` 越过了 `hooks/shared/check_max_file_lines.py` 的 1000 非空行阈值；该 hook 虽是 warn-only，但仓库规范明确禁止新代码把文件推过线，且不允许新增豁免
+- Impact: 无行为变化；测试的 `build_pre_pr_review_result_comment` 导入路径改到 `agent_review_comment`
+- Review: 执行者自审 + 独立 verifier 两轮复核（第二轮绑定冻结代码哈希 `341440c9…`，结论 PASS；第一轮 F4 即此问题）
+
+### `run_agent_with_prompt_resilient` 的关键字参数改为原样透传
+- Type: api
+- Before: §7.2 写"`run_agent_with_prompt` / `_resilient` 增加 `profile` 关键字参数"
+- After: 关键字契约只在 `run_agent_with_prompt` 上声明，`_resilient` 改为 `**agent_call_options` 原样透传（自身仍显式声明两个重试参数）
+- Reason: jscpd（`min-lines=5`）把两个入口的签名判为 12 行重复，而本次必须同时改两个签名；仓库规范要求修复重复而不是新增豁免
+- Impact: 全部调用点不变；AST 守卫相应允许"定义这两个入口的模块内部做 `**` 透传"，其余调用点仍必须显式传 `config=`
+- Review: 执行者自审 + 独立 verifier 复核（列为低危 F9：`**kwargs` 损失静态签名，接受）
+
+### `run_verifier_agent` 新增可选 `config` 形参
+- Type: api
+- Before: §7.2 只写"校验 agent 调用补配置（同一类漏传）"
+- After: 签名新增 keyword-only 的 `config: AppConfig | None = None`，唯一生产调用方传真实配置，内部透传给 `run_agent_with_prompt_resilient`
+- Reason: 该函数此前根本不接收 `config`，否则无法满足 FR-8"所有调用点传 config"
+- Impact: 新增可选参数，向后兼容；既有单测无需改动
+- Review: 执行者自审
+
+### 非 self 模式的提交代理日志与评论署名改用实际动手者
+- Type: code
+- Before: §7.1 只要求评论增加"修复者"一行；提交代理的三条日志仍写 `reviewer wrote/pushing/committed`
+- After: 三条日志改用 `patch_author`（`repairer '<agent>'` / `reviewer`）；评论在"审核者只读却改了文件"时额外一行点名（与"丢弃提交请求"的点名并列）
+- Reason: 独立 verifier 指出日志与事实相反（F3）；PRD §2 决策二要求"它已经改掉的文件…同样在评论里点名"
+- Impact: 仅日志措辞与一条评论文案；提交内容、标签流转、轮数语义均不变
+- Review: 执行者自审 + 独立 verifier 第二轮确认已整改（F3）
+
+### `recover_publish` 路径显式声明 `executor` 回落
+- Type: scope
+- Before: §7.2 未列 `recover_publish.py`
+- After: 该调用点显式传 `executor_agent=None` 并加注释说明"本路径不知道本次实现者，`repair_agent='executor'` 按 Issue 标签回落并在日志中写明来源"
+- Reason: 独立 verifier 指出该调用点看起来像"顺手漏传"，需要把预期回落显式化（F6 / D-03）
+- Impact: 无行为变化（标签回落本就是 D-03 的既定语义）
+- Review: 执行者自审 + 独立 verifier 第二轮确认（F6）
+
+### 补齐 `executor` 回落来源的测试证据
+- Type: test
+- Before: §9.2 决策一的证据写"rv-1 中回落来源的日志行"，但 rv-1 用具名修复者，日志里并没有该行——是一处不存在的证据引用
+- After: 新增 `tests/test_agent_runner_failure.py` 4 条 `resolve_repair_agent` 单测（含 `test_resolve_repair_agent_executor_fallback_logs_its_source` 用 `caplog` 断言回落来源），§9.2 的证据引用改指该测试
+- Reason: 独立 verifier 判定这是最薄弱的一环（F2）：行为正确但证据链断在"回落来源"上
+- Impact: 全量用例 2252 → 2267（新增 15 条）；无产品行为变化
+- Review: 执行者自审 + 独立 verifier 第二轮确认（F2）
+
+### RV harness 的临时目录按进程隔离
+- Type: evidence
+- Before: §7.6 只说"临时目录每次重建"，harness 默认用固定的 `/tmp/iar-rv/<run-name>`
+- After: `RV_WORK_ROOT` 默认值改为 `/tmp/iar-rv-$$`（每个进程一个根），需要跨进程复用时显式设置
+- Reason: 并发的两个进程跑同一个 oracle 时会互相 `rm -rf` 对方目录，导致偶发假失败（verifier 复核期间实际发生）
+- Impact: 只影响 gitignored 的 `tasks/evidence/**/scripts/`，不进代码 diff；断言强度不变
+- Review: 执行者自审 + 独立 verifier 建议（F11）
