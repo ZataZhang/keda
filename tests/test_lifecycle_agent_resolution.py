@@ -343,6 +343,49 @@ def test_content_generation_matrix_value_reaches_generated_content_config(
     assert config.generated_content.lifecycle_default_agent == "kimi"
 
 
+def test_auto_declared_by_matrix_follows_concrete_legacy_keys() -> None:
+    """矩阵声明 ``auto`` 时沿用既有配置键的具体 agent，与 runner 实际取值一致。
+
+    ``auto`` 的语义是"沿用该阶段既有语义"，不是"跳过既有键"；否则 console 呈递的
+    生效值会与 runner 实际使用的 agent 分叉（见 PR #147 审核发现）。
+    """
+    from backend.core.shared.models.agent_runner import (
+        PrePrReviewConfig,
+        PostPrSupervisorConfig,
+        ValidationConfig,
+    )
+    from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
+    from backend.core.use_cases.run_agent_once import (
+        resolve_reviewer_agent,
+        resolve_supervisor_agent,
+    )
+    from backend.core.use_cases.run_verifier_agent import _choose_verifier_agent
+
+    config = AppConfig(
+        runner=RunnerConfig(agent_fallback_order=("codex", "claude")),
+        validation=ValidationConfig(verifier_agent="kimi"),
+        pre_pr_review=PrePrReviewConfig(review_agent="codex", allow_same_agent=True),
+        post_pr_supervisor=PostPrSupervisorConfig(supervisor_agent="kimi"),
+        lifecycle_agents=LifecycleAgentsConfig(
+            global_layer={"verifier": "auto", "review": "auto", "supervisor": "auto"}
+        ),
+    )
+    issue = _issue()
+
+    # 呈递视图（无 selected_agent 上下文）与 runner 实际解析必须一致。
+    assert resolve_lifecycle_agent("verifier", config) == "kimi"
+    assert _choose_verifier_agent(config, "claude") == "kimi"
+    assert (
+        resolve_lifecycle_agent("review", config, issue=issue, selected_agent="claude") == "codex"
+    )
+    assert resolve_reviewer_agent(issue, config, "claude") == "codex"
+    assert (
+        resolve_lifecycle_agent("supervisor", config, issue=issue, selected_agent="claude")
+        == "kimi"
+    )
+    assert resolve_supervisor_agent(issue, config, "auto", fallback_agent="claude") == "kimi"
+
+
 def test_fallback_order_still_driven_by_runner_config() -> None:
     """回退顺序仍由 [agent_runner.runner] 驱动（矩阵只选主 agent）。"""
     config = AppConfig(runner=RunnerConfig(agent_fallback_order=("kimi",)))
@@ -372,6 +415,54 @@ def test_parse_prd_overrides_rejects_executor_on_wrong_stage() -> None:
     """PRD 覆盖里 executor 用在非 fix/closeout 报错。"""
     with pytest.raises(ValueError):
         parse_prd_lifecycle_overrides("# PRD\n\n- lifecycle_agents:\n  - verifier: executor\n")
+
+
+def test_parse_prd_overrides_ignores_body_mention() -> None:
+    """正文里引用该语法的 bullet 不会被当成覆盖块（只扫头部 bullet 区）。"""
+    body_mention = (
+        "# PRD: Demo\n\n"
+        "- GitHub Issue: x\n\n"
+        "## §8 Delivery Dependencies\n\n"
+        "- lifecycle_agents:\n  - implementation: codex\n\n"
+        "## Body\nrest\n"
+    )
+    assert parse_prd_lifecycle_overrides(body_mention, prd_path="tasks/pending/x.md") == {}
+
+
+def test_upsert_prd_overrides_leaves_body_mention_intact() -> None:
+    """写回只落在头部 bullet 区，正文里的同名 bullet 不被改写也不被当覆盖。"""
+    body_mention = (
+        "# PRD: Demo\n\n"
+        "- GitHub Issue: x\n\n"
+        "## §8 Delivery Dependencies\n\n"
+        "- lifecycle_agents:\n  - implementation: codex\n\n"
+        "## Body\nrest\n"
+    )
+    updated = upsert_prd_lifecycle_overrides(body_mention, {"review": "kimi"})
+    assert parse_prd_lifecycle_overrides(updated) == {"review": "kimi"}
+    # 正文那一段原样保留。
+    assert (
+        "## §8 Delivery Dependencies\n\n- lifecycle_agents:\n  - implementation: codex" in updated
+    )
+
+
+def test_parse_prd_overrides_rejects_empty_value() -> None:
+    """空取值显式报错，不再因模式不匹配而把块截断、静默丢掉后续条目。"""
+    with pytest.raises(ValueError) as exc_info:
+        parse_prd_lifecycle_overrides(
+            "# PRD\n\n- lifecycle_agents:\n  - implementation:\n  - review: codex\n"
+        )
+    assert "implementation" in str(exc_info.value)
+
+
+def test_upsert_prd_overrides_preserves_crlf_line_endings() -> None:
+    """CRLF 的 PRD 写回后仍保持 CRLF，不整篇转成 LF。"""
+    original = "# PRD: Demo\r\n\r\n- GitHub Issue: x\r\n\r\n## 1. Intro\r\n正文\r\n"
+    updated = upsert_prd_lifecycle_overrides(original, {"implementation": "claude"})
+    assert "\r\n" in updated
+    # 没有任何裸 LF（即所有换行都还是 CRLF）。
+    assert "\n" not in updated.replace("\r\n", "")
+    assert parse_prd_lifecycle_overrides(updated) == {"implementation": "claude"}
 
 
 def test_upsert_prd_overrides_roundtrip_and_preserves_body() -> None:

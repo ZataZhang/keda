@@ -27,7 +27,9 @@ kimi / pi 或自定义注册的 agent）。**生命周期 Agent 矩阵**把"阶�
 - **已注册 agent 名**（`codex` / `claude` / `kimi` / `pi`，或你在
   `[agent_runner.agents.<name>]` 里注册的 agent）——未注册的名字在**该阶段开始前**
   fail-fast 报错并指名，不会静默回落到别的 agent；
-- **`auto`**——按该阶段**既有**语义路由（含义逐阶段不同，见上表），不做统一；
+- **`auto`**——按该阶段**既有**语义路由（含义逐阶段不同，见上表），不做统一。
+  既有配置键配成**具体 agent** 时 `auto` 一律先用它（`auto` 是"沿用既有语义"，
+  不是"跳过既有键"），所以 console 呈递的生效值与 runner 实际使用的 agent 一致；
 - **`executor`**——跟随实现阶段选中的 agent，**仅** `fix` / `closeout` 合法
   （其余键写 `executor` 会形成循环引用，遇到即报配置错误）。
 
@@ -69,6 +71,16 @@ PRD markdown 标题下的 bullet 区（与 §8 依赖声明同型）：
 
 只影响该 PRD 的执行；未声明的阶段继续走仓库层与全局层。未知键名与非法取值在
 解析时报错并带上 PRD 路径。
+
+块只在**头部 bullet 区**（H1 标题之后、第一个非 bullet 行之前）被识别：正文里
+引用这段语法的段落不会被误当成覆盖块，写回也只改头部那一块。
+
+PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`implementation`、
+`fix`、`closeout`、`verifier`、`review`、`supervisor`、`content_generation`、
+`deliberate`。**`planner` 不支持 PRD 覆盖**——它的唯一消费点是 `iar ask`
+（交互式决策），既没有 Issue 也没有 PRD 上下文，所以 console 的「Agent 覆盖」
+抽屉不提供该行、写回也会拒绝该键。`planner` 的**矩阵值**（`config.toml` /
+`.iar.toml`）仍然有效。
 
 ## console 界面落点：三层各写各自文件
 

@@ -46,6 +46,14 @@ LIFECYCLE_AGENT_AUTO_KEYS: frozenset[str] = frozenset(
     {"implementation", "verifier", "review", "supervisor", "deliberate"}
 )
 
+#: PRD 文件头部覆盖**真正会被消费**的生命周期键。
+#: ``planner`` 的唯一消费点是 ``iar ask``（交互式决策），既没有 Issue 也没有 PRD
+#: 上下文，PRD 级覆盖对它没有消费点；因此 PRD 覆盖抽屉不提供该行，写回也拒绝该键，
+#: 避免写入一个静默无效的声明。（``planner`` 的矩阵值本身仍然有效。）
+LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS: tuple[str, ...] = tuple(
+    key for key in LIFECYCLE_AGENT_KEYS if key != "planner"
+)
+
 #: 各阶段 ``auto`` 的**真实**语义文案（界面上如实描述，不统一成标签路由）。
 LIFECYCLE_AGENT_AUTO_DESCRIPTIONS: Mapping[str, str] = {
     "implementation": "按 Issue 上的 agent/* 标签路由",
@@ -155,6 +163,7 @@ __all__ = [
     "LIFECYCLE_AGENT_EXECUTOR",
     "LIFECYCLE_AGENT_EXECUTOR_KEYS",
     "LIFECYCLE_AGENT_KEYS",
+    "LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS",
     "LIFECYCLE_SOURCE_BUILTIN",
     "LIFECYCLE_SOURCE_GLOBAL",
     "LIFECYCLE_SOURCE_LEGACY",

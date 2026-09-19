@@ -42,7 +42,10 @@ from backend.core.use_cases.agent_runner_events import (
 from backend.core.use_cases.run_agent_deliberation import (
     run_agent_deliberation,
 )
-from backend.core.use_cases.lifecycle_agent_resolution import resolve_lifecycle_agent
+from backend.core.use_cases.lifecycle_agent_resolution import (
+    attach_prd_lifecycle_overrides,
+    resolve_lifecycle_agent,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -225,6 +228,9 @@ def process_deliberation_issues(
     for issue in issues:
         started_at = clock()
         try:
+            # PRD 级覆盖随 Issue 流动：本入口不经过编排运行时，需自行从该 Issue
+            # 引用的 PRD 文件头部回填，否则 PRD 的 ``deliberate`` 覆盖不会生效。
+            issue = attach_prd_lifecycle_overrides(issue, repo_path)
             _process_single_deliberation_issue(
                 issue=issue,
                 config=config,

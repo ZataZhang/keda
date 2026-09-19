@@ -11,13 +11,6 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -30,6 +23,8 @@ import {
   lifecycleBaselineValue,
   lifecycleDisplayName,
 } from "@/components/agent-runner/lifecycle-agent-matrix";
+import { LifecycleAgentSelect } from "@/components/agent-runner/lifecycle-agent-select";
+import { ResourceErrorAlert } from "@/components/agent-runner/resource-error-alert";
 import {
   fetchPrdAgentOverrides,
   updatePrdAgentOverrides,
@@ -163,13 +158,10 @@ export function PrdAgentOverrideSheet({
           {loading ? (
             <p className="text-sm text-slate-500">加载中…</p>
           ) : loadError ? (
-            <div
-              role="alert"
-              className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
-              data-testid="prd-agent-override-error"
-            >
-              {loadError}
-            </div>
+            <ResourceErrorAlert
+              message={loadError}
+              testId="prd-agent-override-error"
+            />
           ) : view ? (
             <div className="space-y-2" data-testid="prd-agent-override-list">
               {view.lifecycles.map((entry) => {
@@ -189,7 +181,12 @@ export function PrdAgentOverrideSheet({
                       onCheckedChange={(checked: boolean) =>
                         setDrafts((current) => ({
                           ...current,
-                          [entry.key]: { ...draft, enabled: checked },
+                          [entry.key]: {
+                            enabled: checked,
+                            // 取当前状态里的取值，不用渲染期快照，避免同一次
+                            // 交互里勾选与选择相互覆盖。
+                            value: current[entry.key]?.value ?? draft.value,
+                          },
                         }))
                       }
                       data-testid={`prd-agent-override-toggle-${entry.key}`}
@@ -198,47 +195,24 @@ export function PrdAgentOverrideSheet({
                     <span className="w-20 text-sm">
                       {lifecycleDisplayName(entry.key)}
                     </span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={!draft.enabled}
-                          className="flex-1 justify-between"
-                          data-testid={`prd-agent-override-select-${entry.key}`}
-                        >
-                          <span className="truncate">{draft.value || "—"}</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="min-w-48">
-                        <DropdownMenuRadioGroup
-                          value={draft.value}
-                          onValueChange={(value) =>
-                            setDrafts((current) => ({
-                              ...current,
-                              [entry.key]: { ...draft, value },
-                            }))
-                          }
-                        >
-                          {options.map((option) => (
-                            <DropdownMenuRadioItem
-                              key={option.value}
-                              value={option.value}
-                              data-testid={`prd-agent-override-option-${entry.key}-${option.value}`}
-                            >
-                              <span className="flex flex-col">
-                                <span>{option.label}</span>
-                                {option.description ? (
-                                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                                    {option.description}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </DropdownMenuRadioItem>
-                          ))}
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <LifecycleAgentSelect
+                      lifecycleKey={entry.key}
+                      options={options}
+                      value={draft.value}
+                      onValueChange={(value) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [entry.key]: {
+                            enabled: current[entry.key]?.enabled ?? draft.enabled,
+                            value,
+                          },
+                        }))
+                      }
+                      placeholder="—"
+                      testIdPrefix="prd-agent-override"
+                      disabled={!draft.enabled}
+                      className="flex-1"
+                    />
                   </div>
                 );
               })}

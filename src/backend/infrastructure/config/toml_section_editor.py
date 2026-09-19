@@ -67,7 +67,8 @@ def update_toml_table_keys(
 
     值为 ``None`` 时删除该键（用于"跟随上一层 / 删除本键"语义）；其余值直接写入。
     只修改签名为 ``values`` 的键，文件其余内容与格式保持不变。文件不存在时新建，
-    并按需创建中间表。
+    并按需创建中间表。**全部取值都是删除且目标键本就不存在时不落盘**（无改动、
+    不产生 diff、也不凭空创建文件）。
 
     Args:
         config_path: 目标 TOML 文件路径（``config.toml`` 或 ``.iar.toml``）。
@@ -86,12 +87,20 @@ def update_toml_table_keys(
         document = tomlkit.document()
 
     table = _ensure_table(document, table_path)
+    changed = False
     for key, value in values.items():
         if value is None:
             if key in table:
                 del table[key]
+                changed = True
         else:
             table[key] = value
+            changed = True
+    if not changed:
+        # 纯删除且目标键本就不存在：没有任何改动，不落盘。否则 tomlkit 的
+        # round-trip 会重排/补尾随空行，让"只动点名的键"在无操作时也产生 diff，
+        # 甚至在配置文件不存在时凭空建出一个空文件。
+        return
     _prune_empty_table(document, table_path)
 
     temp_path = resolved_path.with_name(resolved_path.name + ".tmp")

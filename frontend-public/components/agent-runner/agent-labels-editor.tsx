@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { ResourceErrorAlert } from "@/components/agent-runner/resource-error-alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fetchAgentLabels, updateAgentLabels } from "@/lib/api/lifecycleAgents";
@@ -114,15 +115,7 @@ export function AgentLabelsEditor() {
   }
 
   if (loadError) {
-    return (
-      <div
-        role="alert"
-        className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
-        data-testid="agent-labels-error"
-      >
-        {loadError}
-      </div>
-    );
+    return <ResourceErrorAlert message={loadError} testId="agent-labels-error" />;
   }
 
   return (

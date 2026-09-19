@@ -17,9 +17,13 @@
 已注册 agent 名——未注册时抛 :class:`UnknownAgentError`（fail-fast，不静默
 回落）。
 
-本模块刻意不重写各阶段的 ``auto`` 语义：能委托给既有函数的一律委托
-（``choose_agent`` / ``resolve_reviewer_agent``），只在"矩阵声明了 auto 但
-既有配置键不是 auto"这一条路径上就地实现同一套语义。
+本模块刻意不重写各阶段的 ``auto`` 语义：``auto`` 一律按该阶段**既有**语义路由
+（实现走 ``choose_agent`` 的标签路由；校验 / 审核 / 监督先在既有配置键里取具体
+agent、键本身也是 ``auto`` 时才展开成回退链 / 不同人优先 / 沿用实现者；辩论走标签
+路由）。能委托给既有函数的一律委托（``choose_agent`` / ``resolve_reviewer_agent`` /
+``resolve_supervisor_agent``），只有"既有配置键也是 auto、缺少委托所需的 Issue
+上下文"这条路径才就地展开同一套语义。这样 console 呈递的生效值与 runner 实际
+使用的是同一套判定。
 """
 
 from __future__ import annotations
@@ -46,8 +50,10 @@ from backend.core.shared.models.lifecycle_agent import (
 _logger = logging.getLogger(__name__)
 
 _PRD_OVERRIDE_BLOCK_PATTERN = re.compile(r"^\s*[-*]\s*lifecycle_agents\s*:\s*$", re.IGNORECASE)
+# 取值允许为空：空值交给 :func:`_validate_prd_override_entry` 显式报错，而不是因为
+# 模式匹配失败把整块解析提前截断（那会静默丢掉块里后续的条目）。
 _PRD_OVERRIDE_ENTRY_PATTERN = re.compile(
-    r"^\s+[-*]\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<value>\S.*?)\s*$"
+    r"^\s+[-*]\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<value>.*?)\s*$"
 )
 
 
@@ -64,6 +70,9 @@ def parse_prd_lifecycle_overrides(
           - implementation: claude
           - review: codex
 
+    只扫描**头部 bullet 区**（H1 之后到第一个非 bullet 行之前，见
+    :func:`_prd_header_bounds`）——正文里引用该语法的段落不会被误当成覆盖块。
+
     未知键名、非法取值（``executor`` 用在非 fix/closeout、``auto`` 用在无
     auto 语义的阶段、空值）都立即报错并带上 PRD 路径，不静默忽略。
 
@@ -77,10 +86,12 @@ def parse_prd_lifecycle_overrides(
     Raises:
         ValueError: 覆盖块里的键名或取值非法。
     """
+    lines = prd_text.splitlines()
+    header_start, header_end = _prd_header_bounds(lines)
     overrides: dict[str, str] = {}
     in_block = False
     location_suffix = f" (PRD: {prd_path})" if prd_path is not None else ""
-    for raw_line in prd_text.splitlines():
+    for raw_line in lines[header_start:header_end]:
         if not in_block:
             if _PRD_OVERRIDE_BLOCK_PATTERN.match(raw_line):
                 in_block = True
@@ -118,7 +129,9 @@ def upsert_prd_lifecycle_overrides(
     """写入 / 替换 PRD 头部的 ``lifecycle_agents`` 覆盖块，保留其余内容。
 
     ``overrides`` 是**完整的期望集合**（不是增量）：块被整体重写，块之外的
-    头部内容与正文一律不动。空集合表示删除该块。
+    头部内容与正文一律不动。空集合表示删除该块。只识别头部 bullet 区里的块
+    （与 :func:`parse_prd_lifecycle_overrides` 同一区域），正文内容不会被改写。
+    原文件的换行风格（LF / CRLF）保持不变。
 
     Args:
         prd_text: PRD markdown 全文。
@@ -134,14 +147,15 @@ def upsert_prd_lifecycle_overrides(
         _validate_prd_override_entry(lifecycle_key, raw_value, location_suffix="")
     new_block = render_prd_lifecycle_overrides_block(overrides) if overrides else []
     lines = prd_text.splitlines()
+    header_start, header_end = _prd_header_bounds(lines)
 
     block_start: int | None = None
     block_end: int | None = None
-    for index, raw_line in enumerate(lines):
-        if _PRD_OVERRIDE_BLOCK_PATTERN.match(raw_line):
+    for index in range(header_start, header_end):
+        if _PRD_OVERRIDE_BLOCK_PATTERN.match(lines[index]):
             block_start = index
             block_end = index + 1
-            while block_end < len(lines) and _PRD_OVERRIDE_ENTRY_PATTERN.match(lines[block_end]):
+            while block_end < header_end and _PRD_OVERRIDE_ENTRY_PATTERN.match(lines[block_end]):
                 block_end += 1
             break
 
@@ -157,34 +171,37 @@ def upsert_prd_lifecycle_overrides(
             block_end += 1
         updated_lines = [*lines[:block_start], *new_block, *lines[block_end:]]
     elif new_block:
-        insert_at = _find_prd_override_insert_index(lines)
+        insert_at = header_end
         updated_lines = [*lines[:insert_at], *new_block, "", *lines[insert_at:]]
     else:
         updated_lines = lines
 
-    trailing_newline = "\n" if prd_text.endswith("\n") else ""
-    return "\n".join(updated_lines) + trailing_newline
+    line_ending = "\r\n" if "\r\n" in prd_text else "\n"
+    trailing_newline = line_ending if prd_text.endswith("\n") else ""
+    return line_ending.join(updated_lines) + trailing_newline
 
 
-def _find_prd_override_insert_index(lines: list[str]) -> int:
-    """返回新覆盖块应插入的行号（标题下的 bullet 区末尾）。
+def _prd_header_bounds(lines: list[str]) -> tuple[int, int]:
+    """返回 PRD 头部 bullet 区的行号区间 ``[start, end)``。
 
-    从标题行之后推进，跳过空行与顶层 bullet（如 ``- GitHub Issue:``），落在第一
-    个非 bullet 行（通常是引用块或章节标题）之前。
+    从 H1 标题（缺失时按第 0 行）之后推进，跳过空行与顶层 bullet（如
+    ``- GitHub Issue:``），落在第一个非 bullet 行（通常是引用块或章节标题）之前。
+    覆盖块的读、写都限制在该区间内，正文里的同名 bullet 不会被误认。
     """
     title_index = 0
     for index, raw_line in enumerate(lines):
         if raw_line.startswith("# "):
             title_index = index
             break
-    insert_at = title_index + 1
-    while insert_at < len(lines):
-        stripped = lines[insert_at].lstrip()
+    start = title_index + 1
+    end = start
+    while end < len(lines):
+        stripped = lines[end].lstrip()
         if not stripped or stripped.startswith(("-", "*")):
-            insert_at += 1
+            end += 1
             continue
         break
-    return insert_at
+    return start, end
 
 
 def _validate_prd_override_entry(
@@ -461,10 +478,11 @@ def _resolve_auto(
 ) -> str:
     """按该阶段的**既有**语义解析 ``auto``。
 
-    能委托的一律委托既有函数（实现走 :func:`choose_agent`、审核 /
-    监督走 :func:`resolve_reviewer_agent` / :func:`resolve_supervisor_agent`），
-    只在"矩阵声明 auto 但既有配置键不是 auto"这一条路径上就地实现同一套语义，
-    绝不把各阶段统一成标签路由。
+    能委托的一律委托既有函数（实现走 :func:`choose_agent`，审核 / 监督走
+    :func:`resolve_reviewer_agent` / :func:`resolve_supervisor_agent`）；校验没有
+    可委托的函数，就地按 ``_choose_verifier_agent`` 的顺序展开。共同点：既有配置键
+    配成**具体 agent** 时一律先用它——``auto`` 表示"沿用既有语义"，不是"跳过既有键"，
+    否则 console 呈递的生效值会与 runner 实际取值分叉。绝不把各阶段统一成标签路由。
     """
     # Local import breaks the run_agent_once <-> resolver cycle.
     from backend.core.use_cases.run_agent_once import (
@@ -488,8 +506,15 @@ def _resolve_auto(
         return choose_agent(issue, config, override_agent)
 
     if lifecycle == "verifier":
-        # 与 run_verifier_agent._choose_verifier_agent 的 auto 分支同语义：
-        # 从回退链里挑第一个 ≠ 实现者，都没有再退回实现者。
+        # 与 run_verifier_agent._choose_verifier_agent 同语义：既有键配成具体 agent
+        # 时先用它（矩阵声明 auto 表示"沿用既有语义"，不是"跳过既有键"）。
+        legacy_verifier_agent = config.validation.verifier_agent
+        if (
+            legacy_verifier_agent
+            and normalize_lifecycle_agent_value(legacy_verifier_agent) != LIFECYCLE_AGENT_AUTO
+        ):
+            return _validate_registered(legacy_verifier_agent, lifecycle=lifecycle, config=config)
+        # 否则从回退链里挑第一个 ≠ 实现者，都没有再退回实现者。
         for candidate_agent in config.runner.agent_fallback_order:
             if candidate_agent != selected_agent:
                 return _validate_registered(candidate_agent, lifecycle=lifecycle, config=config)
@@ -500,11 +525,18 @@ def _resolve_auto(
         )
 
     if lifecycle == "review":
-        if config.pre_pr_review.review_agent == LIFECYCLE_AGENT_AUTO and issue is not None:
+        # 同 resolve_reviewer_agent：既有键配成具体 agent 时先用它。
+        legacy_review_agent = config.pre_pr_review.review_agent
+        if (
+            legacy_review_agent
+            and normalize_lifecycle_agent_value(legacy_review_agent) != LIFECYCLE_AGENT_AUTO
+        ):
+            return _validate_registered(legacy_review_agent, lifecycle=lifecycle, config=config)
+        if issue is not None:
             return resolve_reviewer_agent(
                 issue, config, selected_agent or LIFECYCLE_AGENT_BUILTIN_DEFAULT
             )
-        # 矩阵显式声明 auto 但既有键是具体 agent：按 allow_same_agent 语义就地解析。
+        # 既有键也是 auto 且没有 Issue 上下文：按 allow_same_agent 语义就地解析。
         if selected_agent and config.pre_pr_review.allow_same_agent:
             return _validate_registered(selected_agent, lifecycle=lifecycle, config=config)
         for registered_agent in config.agents:
@@ -515,14 +547,19 @@ def _resolve_auto(
         )
 
     if lifecycle == "supervisor":
-        if config.post_pr_supervisor.supervisor_agent == LIFECYCLE_AGENT_AUTO and issue is not None:
+        # 同 resolve_supervisor_agent：既有键配成具体 agent 时先用它。
+        legacy_supervisor_agent = config.post_pr_supervisor.supervisor_agent
+        if (
+            legacy_supervisor_agent
+            and normalize_lifecycle_agent_value(legacy_supervisor_agent) != LIFECYCLE_AGENT_AUTO
+        ):
+            return _validate_registered(legacy_supervisor_agent, lifecycle=lifecycle, config=config)
+        if issue is not None:
             return resolve_supervisor_agent(
                 issue, config, override_agent, fallback_agent=selected_agent
             )
         if selected_agent:
             return _validate_registered(selected_agent, lifecycle=lifecycle, config=config)
-        if issue is not None:
-            return choose_agent(issue, config, LIFECYCLE_AGENT_AUTO)
         return _validate_registered(
             LIFECYCLE_AGENT_BUILTIN_DEFAULT, lifecycle=lifecycle, config=config
         )

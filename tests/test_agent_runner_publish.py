@@ -605,3 +605,80 @@ def test_publish_changes_disabled_uses_fallback() -> None:
     assert len(pr_calls) == 1
     assert pr_calls[0]["title"] == "[Agent] Test"
     assert "Closes #1" in pr_calls[0]["body"]
+
+
+def test_draft_pr_uses_prd_content_generation_override() -> None:
+    """PRD 头部声明的 ``content_generation`` agent 优先于配置派生的默认值。
+
+    覆盖 PR #147 审核发现的"PRD 覆盖对 content_generation 静默无效"缺口：
+    Issue 携带的 ``lifecycle_overrides`` 必须真正改变 PR 正文生成所用的 agent。
+    """
+    from backend.core.use_cases.agent_runner_publish import create_draft_pr
+    from tests.conftest import FakeContentGenerator
+
+    def _runner() -> FakeProcessRunner:
+        return FakeProcessRunner(
+            responses={
+                ("git", "branch", "--show-current"): CommandResult(
+                    command=("git", "branch", "--show-current"),
+                    return_code=0,
+                    stdout="issue-42\n",
+                    stderr="",
+                ),
+                ("git", "log", "main..HEAD", "--pretty=format:%s"): CommandResult(
+                    command=("git", "log", "main..HEAD", "--pretty=format:%s"),
+                    return_code=0,
+                    stdout="feat: implement feature\n",
+                    stderr="",
+                ),
+                ("git", "diff", "--stat", "main...HEAD"): CommandResult(
+                    command=("git", "diff", "--stat", "main...HEAD"),
+                    return_code=0,
+                    stdout="1 file changed, 10 insertions\n",
+                    stderr="",
+                ),
+            }
+        )
+
+    def _issue(lifecycle_overrides: tuple[tuple[str, str], ...]) -> IssueSummary:
+        return IssueSummary(
+            number=42,
+            title="Test Feature",
+            url="https://github.com/example/repo/issues/42",
+            body="Test body",
+            labels=(),
+            lifecycle_overrides=lifecycle_overrides,
+        )
+
+    config = AppConfig(
+        git=GitConfig(remote="origin", base_branch="main"),
+        generated_content=GeneratedContentConfig(
+            enabled=True,
+            default_agent="codex",
+            lifecycle_default_agent="claude",
+            draft_pr=GeneratedContentTargetConfig(enabled=True, mode="agent", output="json"),
+        ),
+    )
+    generator_response = '{"title": "[Agent] Test Feature", "body": "Closes #42\\n\\nok"}'
+
+    with_override = FakeContentGenerator(response=generator_response)
+    create_draft_pr(
+        _issue((("content_generation", "kimi"),)),
+        Path("."),
+        config,
+        FakeGitHubClient(),
+        _runner(),
+        content_generator=with_override,
+    )
+    assert with_override.calls[0][0] == "kimi"
+
+    without_override = FakeContentGenerator(response=generator_response)
+    create_draft_pr(
+        _issue(()),
+        Path("."),
+        config,
+        FakeGitHubClient(),
+        _runner(),
+        content_generator=without_override,
+    )
+    assert without_override.calls[0][0] == "claude"

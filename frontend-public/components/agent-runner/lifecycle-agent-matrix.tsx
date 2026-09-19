@@ -14,13 +14,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { LifecycleAgentSelect } from "@/components/agent-runner/lifecycle-agent-select";
+import { ResourceErrorAlert } from "@/components/agent-runner/resource-error-alert";
 import { cn } from "@/lib/utils";
 import {
   fetchLifecycleAgents,
@@ -31,6 +26,9 @@ import type {
   LifecycleAgentScope,
   LifecycleAgentsView,
 } from "@/lib/api/types";
+import type { LifecycleOption } from "@/components/agent-runner/lifecycle-agent-select";
+
+export type { LifecycleOption } from "@/components/agent-runner/lifecycle-agent-select";
 
 /** `auto` 取值常量（与后端 `LIFECYCLE_AGENT_AUTO` 一致）。 */
 export const LIFECYCLE_AGENT_AUTO = "auto";
@@ -59,13 +57,6 @@ export const LIFECYCLE_DISPLAY_NAMES: Record<string, string> = {
 export function lifecycleDisplayName(key: string): string {
   return LIFECYCLE_DISPLAY_NAMES[key] ?? key;
 }
-
-/** 下拉框里的一个候选值。 */
-export type LifecycleOption = {
-  value: string;
-  label: string;
-  description?: string;
-};
 
 /**
  * 计算某行的「当前选择」：本层已声明则用声明值，否则用生效值。
@@ -118,20 +109,6 @@ export function buildLifecycleOptions(
     options.unshift({ value: current, label: current });
   }
   return options;
-}
-
-/** 渲染单个候选值标签（auto 时附带语义说明）。 */
-function optionLabel(option: LifecycleOption) {
-  return (
-    <span className="flex flex-col">
-      <span>{option.label}</span>
-      {option.description ? (
-        <span className="text-xs text-slate-500 dark:text-slate-400">
-          {option.description}
-        </span>
-      ) : null}
-    </span>
-  );
 }
 
 interface LifecycleAgentMatrixProps {
@@ -243,13 +220,7 @@ export function LifecycleAgentMatrix({
 
   if (loadError) {
     return (
-      <div
-        role="alert"
-        className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
-        data-testid={`${testIdPrefix}-error`}
-      >
-        {loadError}
-      </div>
+      <ResourceErrorAlert message={loadError} testId={`${testIdPrefix}-error`} />
     );
   }
 
@@ -288,42 +259,20 @@ export function LifecycleAgentMatrix({
           >
             <span className="text-sm">{lifecycleDisplayName(entry.key)}</span>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={pendingDelete}
-                  className="justify-between"
-                  data-testid={`lifecycle-matrix-select-${entry.key}`}
-                >
-                  <span className="truncate">
-                    {pendingDelete ? "待删除本层键" : selectedValue || "—"}
-                  </span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-48">
-                <DropdownMenuRadioGroup
-                  value={selectedValue}
-                  onValueChange={(value) => {
-                    setDraftValues((current) => ({
-                      ...current,
-                      [entry.key]: value,
-                    }));
-                  }}
-                >
-                  {options.map((option) => (
-                    <DropdownMenuRadioItem
-                      key={option.value}
-                      value={option.value}
-                      data-testid={`lifecycle-matrix-option-${entry.key}-${option.value}`}
-                    >
-                      {optionLabel(option)}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <LifecycleAgentSelect
+              lifecycleKey={entry.key}
+              options={options}
+              value={selectedValue}
+              onValueChange={(value) => {
+                setDraftValues((current) => ({
+                  ...current,
+                  [entry.key]: value,
+                }));
+              }}
+              placeholder={pendingDelete ? "待删除本层键" : "—"}
+              testIdPrefix="lifecycle-matrix"
+              disabled={pendingDelete}
+            />
 
             <span className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
               <span data-testid={`lifecycle-matrix-source-${entry.key}`}>

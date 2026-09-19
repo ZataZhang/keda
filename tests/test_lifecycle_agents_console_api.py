@@ -324,3 +324,30 @@ def test_prd_override_rejects_unregistered_agent(console_env: dict) -> None:
     )
     assert response.status_code == 422
     assert "codebuddy" in response.json()["detail"]
+
+
+def test_prd_override_view_excludes_planner(console_env: dict) -> None:
+    """planner 没有 PRD 消费点：覆盖抽屉不下发该行，写回也拒绝。"""
+    client = console_env["client"]
+    import base64
+
+    encoded = base64.urlsafe_b64encode(console_env["prd_relative_path"].encode("utf-8")).decode(
+        "ascii"
+    )
+    view = client.get(
+        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        params={"repo_id": "testrepo"},
+    ).json()
+    override_keys = [row["key"] for row in view["lifecycles"]]
+    assert "planner" not in override_keys
+    assert "content_generation" in override_keys
+    assert len(override_keys) == 8
+
+    rejected = client.patch(
+        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        json={"repo_id": "testrepo", "overrides": {"planner": "kimi"}},
+    )
+    assert rejected.status_code == 422
+    assert "planner" in rejected.json()["detail"]
+    # 被拒绝的写回不落盘。
+    assert "lifecycle_agents" not in console_env["prd_file"].read_text(encoding="utf-8")

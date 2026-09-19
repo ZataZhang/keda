@@ -666,3 +666,43 @@ Agent 标签设置：四个 agent 的标签名 / 颜色 / 描述可编辑，标�
 - Reason: PRD 要求"三层界面 + 两个 Tab + 回退顺序 e2e 通过"，且归档前置是 Acceptance Checklist 全部完成态。
 - Impact: e2e 只覆盖**只读交互**（不写盘，避免污染共享仓库的 config.toml / .iar.toml）；写盘语义仍由后端契约测试与 `rv-*.png` 手工真实入口证据覆盖。独立 verifier round 3 绑定 `e0d1a39e…` 判 PASS with caveats，其中一条 minor（§9.2 引用的命令与计数不符）已校正为"单文件 21 passed / 三文件 54 passed"。
 - Review: round 3 结论见 `tasks/evidence/<stem>/<stem>.verifier-report.md`。
+
+### 合并前审核整改：console 生效值与 runner 取值分叉（R4）
+- Type: fix
+- Before: 矩阵显式声明 `auto`、而既有散落配置键（`validation.verifier_agent` / `pre_pr_review.review_agent` / `post_pr_supervisor.supervisor_agent`）是具体 agent 时，`resolve_lifecycle_agent` 的 `auto` 分支跳过既有键自行展开，而生产解析器（`_choose_verifier_agent` / `resolve_reviewer_agent` / `resolve_supervisor_agent`）走既有键——console 呈递的生效值与 runner 实际使用的 agent 分叉（实测 verifier `codex` vs `kimi`、review `claude` vs `codex`、supervisor `claude` vs `kimi`）。
+- After: `_resolve_auto` 的三个分支一律先取既有配置键里的**具体 agent**；只有既有键本身也是 `auto` 时才展开回退链 / 不同人优先 / 沿用实现者。`auto` 的语义回到"沿用既有语义"，与生产解析器同源。
+- Reason: console 的核心承诺是"显示真实生效值 + 来源层"（FR-5）；分叉会让用户在界面上看到一个不会被执行的值。审核发现，已复现。
+- Impact: 新增 `test_auto_declared_by_matrix_follows_concrete_legacy_keys` 锁定三个阶段的呈递值与 runner 取值一致；既有 `auto` 语义测试（`test_auto_semantics_per_stage_are_preserved` 等）全部保持通过。
+- Review: 单测逐阶段断言两侧相等。
+
+### 合并前审核整改：PRD 覆盖块未限定头部（R4）
+- Type: fix
+- Before: `parse_prd_lifecycle_overrides` / `upsert_prd_lifecycle_overrides` 全文扫描 `- lifecycle_agents:`，正文里引用该语法的 bullet（例如 PRD 记录本特性用法）会被当成覆盖块：读路径静默套用正文取值，写路径改写正文而不是头部。
+- After: 新增 `_prd_header_bounds`，读写都限定在"H1 之后到第一个非 bullet 行之前"的头部 bullet 区。
+- Reason: 审核发现并复现——文档与 FR-4 都只承诺"文件头部"，全文匹配会误伤正文。
+- Impact: 新增 `test_parse_prd_overrides_ignores_body_mention` 与 `test_upsert_prd_overrides_leaves_body_mention_intact`；头部块正常读写行为不变（既有 PRD 覆盖用例全绿）。
+- Review: 单测锁定正文块被忽略且原样保留。
+
+### 合并前审核整改：PRD 覆盖对部分阶段静默无效（R4）
+- Type: fix
+- Before: ① `deliberate` 的 daemon 队列入口（`process_deliberation_issues`）不经过编排运行时、拿不到 `IssueSummary.lifecycle_overrides`；② `content_generation` 只读构建期派生的 `lifecycle_default_agent`，看不到 PRD 覆盖；③ `planner` 的唯一消费点 `iar ask` 没有 PRD/Issue 上下文，PRD 覆盖天然无消费点，但 UI 仍提供该行——三处都属于"界面能写、实际不生效"。
+- After: ① `process_deliberation_issues` 在循环内 `attach_prd_lifecycle_overrides(issue, repo_path)`；② `create_draft_pr` 与 `create_issue_from_prd` 按 PRD 头部覆盖 `dataclasses.replace` 装配 `lifecycle_default_agent`；③ 新增 `LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS`（八键，不含 `planner`），PRD 覆盖抽屉只下发这八行、写回拒绝 `planner` 并返回 422（`planner` 的矩阵值不受影响）。
+- Reason: PR body 声称"九个消费点统一接入"，实际只有六个端到端生效；UI 提供写入却不生效的键是静默失败。
+- Impact: 新增 `test_process_deliberation_issues_honors_prd_override`、`test_draft_pr_uses_prd_content_generation_override`、`test_prd_override_view_excludes_planner`；e2e 的 PRD 抽屉用例改为只断言八个键并断言 `planner` 行不存在；`docs/guides/lifecycle-agent-matrix.md` 写明 PRD 覆盖的生效范围与头部块边界。
+- Review: 三处均有对应单测；文档与实现口径一致。
+
+### 合并前审核整改：保留式写回与解析的边角（R4）
+- Type: fix
+- Before: ① `upsert_prd_lifecycle_overrides` 用 `splitlines()` + `\n` 拼接，CRLF 的 PRD 会被整篇转成 LF；② `_PRD_OVERRIDE_ENTRY_PATTERN` 要求非空取值，空值行会让块解析提前截断并静默丢弃后续条目，`_validate_prd_override_entry` 的空值分支形同死代码；③ `update_toml_table_keys` 在"纯删除且键不存在"时仍重写文件，给无关文件补一个尾随空行、文件不存在时凭空建空文件；④ PRD 覆盖抽屉的 `setDrafts` 展开渲染期快照而非 `current[key]`。
+- After: ① 按原文件换行风格回写；② 取值模式改为允许空值、交给校验函数显式报错；③ 无任何改动时直接返回、不落盘；④ 改为从 `current[entry.key]` 取当前状态。
+- Reason: 审核发现的低危项——前三条会让"只动点名的键/位置"的承诺在边角上失真，第四条是潜在的丢更新。
+- Impact: 新增 `test_parse_prd_overrides_rejects_empty_value`、`test_upsert_prd_overrides_preserves_crlf_line_endings`；写回与解析的既有测试不变。
+- Review: 单测锁定换行风格与空值报错。
+
+### 合并前审核整改：前端重复实现收敛（R4）
+- Type: refactor
+- Before: 生命周期下拉选择器在矩阵与 PRD 覆盖抽屉里各写一遍（含 `optionLabel` 内联复制），加载失败告警块在四处组件里逐字重复。
+- After: 抽出 `components/agent-runner/lifecycle-agent-select.tsx`（`LifecycleAgentSelect` + `LifecycleOption`）与 `components/agent-runner/resource-error-alert.tsx`（`ResourceErrorAlert`），四处调用点改为复用；`data-testid` 契约（`<prefix>-select-<key>` / `<prefix>-option-<key>-<value>`）保持不变。
+- Reason: `docs/ai-standards/code-reuse.md` 的自检清单要求消除复制粘贴。
+- Impact: 行为、可访问性与 e2e 选择器不变；矩阵组件行数下降。
+- Review: `pnpm typecheck` / `pnpm lint`（0 error）通过。

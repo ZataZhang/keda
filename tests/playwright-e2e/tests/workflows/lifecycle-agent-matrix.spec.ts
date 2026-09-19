@@ -31,6 +31,12 @@ const LIFECYCLE_KEYS = [
   'deliberate',
 ] as const
 
+/**
+ * PRD 覆盖抽屉只呈递有 PRD 消费点的键：`planner` 的唯一消费点是 `iar ask`，
+ * 既没有 Issue 也没有 PRD 上下文，PRD 级覆盖对它无效，因此后端不下发该行。
+ */
+const PRD_OVERRIDE_KEYS = LIFECYCLE_KEYS.filter((key) => key !== 'planner')
+
 /** 打开 Settings 的「Agent 管理」区块并切到指定 Tab。 */
 async function openAgentManagementTab(
   page: Page,
@@ -160,10 +166,12 @@ test.describe('生命周期 Agent 矩阵 (lifecycle-agent)', () => {
     await overrideButton.click()
 
     await expect(page.getByTestId('prd-agent-override-list')).toBeVisible()
-    for (const lifecycleKey of LIFECYCLE_KEYS) {
+    for (const lifecycleKey of PRD_OVERRIDE_KEYS) {
       await expect(page.getByTestId(`prd-agent-override-row-${lifecycleKey}`)).toBeVisible()
       await expect(page.getByTestId(`prd-agent-override-toggle-${lifecycleKey}`)).toBeVisible()
     }
+    // planner 没有 PRD 消费点，不出现在覆盖抽屉里。
+    await expect(page.getByTestId('prd-agent-override-row-planner')).toHaveCount(0)
     // 未勾选的行仍显示"当前生效值"，但下拉被禁用（未勾选 = 沿用仓库/全局层）。
     await expect(page.getByTestId('prd-agent-override-select-verifier')).toBeDisabled()
     // 勾选「校验」后该行下拉变为可编辑，代表声明了本 PRD 的覆盖。

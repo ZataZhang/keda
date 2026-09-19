@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { ResourceErrorAlert } from "@/components/agent-runner/resource-error-alert";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -104,15 +105,7 @@ export function AgentFallbackOrderEditor() {
   }
 
   if (loadError) {
-    return (
-      <div
-        role="alert"
-        className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
-        data-testid="fallback-order-error"
-      >
-        {loadError}
-      </div>
-    );
+    return <ResourceErrorAlert message={loadError} testId="fallback-order-error" />;
   }
 
   const remainingAgents = agents.filter((agentName) => !order.includes(agentName));

@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config_from_settings,
     create_lifecycle_settings_editor,
@@ -245,7 +246,11 @@ def update_agent_labels(request: UpdateAgentLabelsRequest) -> dict:
 
 @router.get("/agent-runner/roadmap/prds/{encoded_path}/agent-overrides")
 def get_prd_agent_overrides(encoded_path: str, repo_id: str) -> dict:
-    """读取某 PRD 文件头部的 ``lifecycle_agents`` 覆盖。"""
+    """读取某 PRD 文件头部的 ``lifecycle_agents`` 覆盖。
+
+    只呈递 :data:`LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS` 里的行——``planner`` 没有
+    PRD 消费点，UI 不提供（写回同样拒绝）。
+    """
     prd_path = _decode_prd_path(encoded_path)
     context = _context_for(repo_id)
     try:
@@ -261,9 +266,13 @@ def get_prd_agent_overrides(encoded_path: str, repo_id: str) -> dict:
         "prd_path": prd_path,
         "overrides": overrides,
         "agents": list(context.config.agents),
-        "lifecycles": build_lifecycle_agents_view(
-            context.config, scope=SCOPE_REPOSITORY, repo_id=repo_id
-        )["lifecycles"],
+        "lifecycles": [
+            lifecycle_row
+            for lifecycle_row in build_lifecycle_agents_view(
+                context.config, scope=SCOPE_REPOSITORY, repo_id=repo_id
+            )["lifecycles"]
+            if lifecycle_row["key"] in LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
+        ],
     }
 
 
@@ -278,6 +287,17 @@ class UpdatePrdOverridesRequest(BaseModel):
 def update_prd_agent_overrides(encoded_path: str, request: UpdatePrdOverridesRequest) -> dict:
     """把 PRD 头部覆盖块整体重写为请求里的期望集合（``null`` 表示移除该项）。"""
     prd_path = _decode_prd_path(encoded_path)
+    unsupported_keys = sorted(
+        key for key in request.overrides if key not in LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
+    )
+    if unsupported_keys:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"PRD 覆盖不支持以下生命周期键: {', '.join(unsupported_keys)}。"
+                f"可用键: {', '.join(LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS)}。"
+            ),
+        )
     context = _context_for(request.repo_id)
     try:
         prd_text = read_prd_content(context.repo_path, prd_path)
