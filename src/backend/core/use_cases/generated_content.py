@@ -526,20 +526,10 @@ def _resolve_generation_agent(
 ) -> str:
     """解析内容生成使用的具体 agent 名称。
 
-    解析顺序：target 级显式 agent 优先，其次生命周期矩阵
-    （``lifecycle_agents.content_generation``，经 ``override_agent`` 传入），
-    再次 generated-content 的全局 ``default_agent``；都为 ``"auto"`` 时收敛到
-    :data:`_DEFAULT_AUTO_AGENT`（``claude``），而不是把 ``"auto"`` 透传到命令
-    构造处被静默当作 codex。
-
-    Args:
-        target_agent: 目标级配置的 agent（``GeneratedContentTargetConfig.agent``）。
-        default_agent: generated-content 的全局默认 agent（``default_agent``）。
-        override_agent: 生命周期矩阵解析出的 content_generation agent；``None``
-            表示调用方未提供（保持既有行为）。
-
-    Returns:
-        具体 agent 名称（如 ``"claude"`` / ``"codex"`` / ``"kimi"``）。
+    顺序：target 级显式 agent > 生命周期矩阵值（``override_agent``，来自
+    ``lifecycle_agents.content_generation``）> 全局 ``default_agent``；都为
+    ``"auto"`` 时收敛到 :data:`_DEFAULT_AUTO_AGENT`，不把 ``"auto"`` 透传到
+    命令构造处被静默当作 codex。
     """
     if target_agent != "auto":
         return target_agent
