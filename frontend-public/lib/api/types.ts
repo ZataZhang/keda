@@ -351,6 +351,53 @@ export type RoadmapGlobalStartResult = {
   skipped: string[];
 };
 
+/**
+ * 仓库级 Autopilot 完整闭环状态。
+ *
+ * `enabled` 是**生效**配置的值（写后 fresh load），`persisted_enabled` 是仓库
+ * `.iar.toml` 里的持久值（文件缺失或键未设置时为 null）。两者与
+ * `auto_merge_enabled` / `daemon_running` 必须分别展示——只有全部成立才是
+ * 真正的全自动闭环。
+ */
+export type RoadmapAutopilotState = {
+  repo_id: string;
+  enabled: boolean;
+  auto_merge_enabled: boolean;
+  daemon_running: boolean;
+  max_parallel: number;
+  config_source: string;
+  persisted_enabled: boolean | null;
+};
+
+export type RoadmapEvidenceRole =
+  | "evidence_report"
+  | "verifier_report"
+  | "verification_plan"
+  | "artifact";
+
+export type RoadmapEvidenceFile = {
+  name: string;
+  size_bytes: number;
+  media_type: string;
+  role: RoadmapEvidenceRole;
+  artifact_token: string;
+};
+
+/**
+ * 某个 PRD 在仓库中仍保留的验收证据清单。
+ *
+ * 事实源是配置证据目录下该 PRD 的子目录（`tasks/evidence/<prd-stem>/` 或
+ * legacy 扁平目录）；`exists=false` 表示目录缺失，页面据此渲染明确空态，
+ * 而不是用验收清单勾选数冒充文件数。
+ */
+export type RoadmapPrdEvidenceManifest = {
+  prd_path: string;
+  prd_stem: string;
+  evidence_dir: string;
+  exists: boolean;
+  files: RoadmapEvidenceFile[];
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Idea Inbox
 // Keep these aligned with the backend dataclasses under

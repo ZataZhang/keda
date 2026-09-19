@@ -14,7 +14,9 @@ interface PrdContentViewProps {
   repoId: string
   prdPath: string
   prdTitle: string
-  onBack: () => void
+  // 可选：返回上层视图的回调。详情现在既作为整块画布（旧行为）也作为
+  // master-detail 的标签页使用；标签场景由 PrdDetail 提供头部导航，故不再必传。
+  onBack?: () => void
 }
 
 type PrdContentState =
@@ -60,19 +62,21 @@ export function PrdContentView({ repoId, prdPath, prdTitle, onBack }: PrdContent
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" size="sm" onClick={onBack} data-testid="prd-content-back">
-          ← 返回列表
-        </Button>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium" title={prdTitle}>
-            {prdTitle}
-          </p>
-          <p className="truncate text-xs text-slate-500" title={prdPath}>
-            {prdPath}
-          </p>
+      {onBack ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" onClick={onBack} data-testid="prd-content-back">
+            ← 返回列表
+          </Button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium" title={prdTitle}>
+              {prdTitle}
+            </p>
+            <p className="truncate text-xs text-slate-500" title={prdPath}>
+              {prdPath}
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {contentState.status === "loading" ? (
         <div className="space-y-3" data-testid="prd-content-loading">
