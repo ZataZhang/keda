@@ -99,15 +99,79 @@
   正文与 `- GitHub Issue:` 保留、`config.toml` 不含 `lifecycle_agents`）。
 - **消费点防漏守卫**：`test_fix_and_closeout_call_sites_resolve_through_lifecycle_function`（AST，带反空转断言）。
 
+## 2.5 真实浏览器入口证据（rv-3 / rv-4 / rv-6 / rv-7，2026-09-20 补采）
+
+**环境**：`just console-sync` 把 frontend-public 静态产物灌进后端 → 用**隔离的
+`IAR_CONFIG=/tmp/iar-rv-lifecycle/config.toml`** 起真实 console（`uvicorn backend.api.app:app`
+@127.0.0.1:8899，console 自身状态也重定向到 /tmp）→ 注册一个**一次性 git 仓库**
+`/tmp/iar-rv-lifecycle/demo-repo`（带 `.iar.toml` 与一份 PRD）→ `agent-browser`
+在真实 Chromium 里操作并截图。这样既走真实 UI + 真实 API，又不污染用户全局 registry
+与交付仓库。
+
+采集脚本（本地 only，不进代码 diff）：
+`tasks/evidence/<stem>/scripts/capture_rv_ui.sh`（交互）+
+`scripts/compose_evidence.py`（把 UI 截图与对应文件内容合成对照图）。
+
+> 关键坑：radix `DropdownMenu` 的 trigger 只认真实指针事件，`agent-browser click <sel>`
+> **不会**展开菜单；必须 `get box` → `mouse move` → `mouse down` → `mouse up`，且每步
+> 之间 `sleep 1` 等 React 重渲染，否则连续操作会丢事件。
+
+### rv-3 —— 三层各写各自文件
+
+![rv-3 三层编辑器对照](rv-3-three-layer-editors.png)
+
+10 秒自检：左＝Settings「Agent 管理 → 生命周期 Agent 设置」改**全局**矩阵（校验→codex）
+保存；中＝Roadmap 仓库行齿轮抽屉改**仓库**矩阵（校验→kimi）保存；右＝点「跟随全局（删除本键）」
+保存后仓库层键消失。三张图各自下方是**对应文件的内容**（变更行以 `▲` 标出）：
+全局保存**只**给 `config.toml` 加 `[agent_runner.lifecycle_agents] verifier = "codex"`，
+仓库保存**只**给 `demo-repo/.iar.toml` 加同段 `verifier = "kimi"`，各自反向文件 `diff` 结果均为
+`IDENTICAL`。
+
+### rv-4 —— PRD 头部覆盖写回
+
+![rv-4 PRD 覆盖抽屉与文件头对照](rv-4-prd-override.png)
+
+10 秒自检：PRD 原文页工具栏「Agent 覆盖」→ 勾选「收尾」→ 选 `pi` → 保存。下方文件内容显示
+PRD 头部只多出 `- lifecycle_agents:` / `  - closeout: pi`；正文与 `- GitHub Issue:` 行不变
+（`diff` 结果 `BODY IDENTICAL`），`config.toml` 与 `.iar.toml` 均未改动。
+另经 API + 解析函数复核：`GET .../agent-overrides` 返回 `{"closeout": "pi"}`，
+`attach_prd_lifecycle_overrides` + `resolve_lifecycle_agent('closeout')` 得到 `pi`，
+而未覆盖的 `verifier` 仍为全局层的 `codex`。
+
+### rv-6 —— agent 回退顺序
+
+![rv-6 回退顺序与 runner 段对照](rv-6-fallback-order.png)
+
+10 秒自检：Settings Tab ② 把 codex 上移、移除 kimi、最大切换次数改 3 后保存。下方文件内容显示
+`[agent_runner.runner]` **只**多出 `agent_fallback_order = ["codex", "claude"]` 与
+`max_agent_switches = 3`，既有 `default_agent = "codex"` 与
+`verification_commands = ["git diff --check"]` 原样保留。
+
+### rv-7 —— Agent 标签设置
+
+![rv-7 标签设置与 agent 注册块对照](rv-7-agent-labels.png)
+
+10 秒自检：把 claude 的标签名从 `agent/claude` 改成 `agent/cc` 后保存。下方文件内容显示
+`[agent_runner.agents.claude]` 的 `label` 变为 `agent/cc`，`label_color = "BFDADC"` 与
+`label_description` 及其它 agent 段一字未动。
+
+![rv-7 重复标签被阻断](rv-7-agent-labels-duplicate.png)
+
+重复校验：把 kimi 也配成 `agent/cc` 时界面阻断并给出
+「标签名「agent/cc」同时被 agent「claude」与「kimi」使用，请改成唯一名称。」，
+文件内容确认两个 agent 的 `label` 都**未被写坏**。
+
+**自动化侧不变**：`just test` 全绿 2326 passed；本轮只补真实入口证据，未改任何源码或测试
+（因此第二轮 verifier 的冻结凭证 `593b8665…` 仍然有效——`git diff HEAD -- src tests` 未变）。
+
 ## 3. 证据强度与已知限制（诚实披露）
 
-1. **rv-3 / rv-4 / rv-6 / rv-7 的"真实浏览器截图呈递"未执行**：本报告只以后端 TestClient +
-   磁盘文件内容为事实源验证了写回语义与文件隔离；PRD 要求的 `tasks/evidence/<stem>/rv-*.png`
-   呈递物**不存在**，§9.1 呈递区四项**未经人过目**。
-2. **Playwright e2e 未运行**：新增 `data-testid` 已就位，但 `tests/playwright-e2e`
-   未安装依赖、未编写/执行 `--grep lifecycle-agent` 用例；前端界面仅经 typecheck + lint + 静态构建验证，
-   验证层级为 **component/static build**，**不是** production composition / real user flow。
-3. **§9.2 的 Human-Confirmed 三项（决策一/二/四/五）未经人确认**。
+1. **rv-3 / rv-4 / rv-6 / rv-7 的真实浏览器呈递已补采**（见 §2.5），四张 PRD 点名文件均已产出并呈递。
+   注：为避免污染用户全局 registry 与交付仓库，验证用的是一个**一次性 git 仓库 + 隔离 `IAR_CONFIG`**，
+   而非注册交付仓库本身；UI、API、文件写入三条链路都是真实的。
+2. **Playwright e2e 仍未编写/运行**：`tests/playwright-e2e` 未安装依赖、没有 `--grep lifecycle-agent`
+   用例；本轮的浏览器验证是人工脚本化的真实入口走查（层级＝real user flow），不是 CI 化的 e2e 回归。
+3. **§9.2 Human-Confirmed 已于 2026-09-20 由用户逐条确认**（决策一～五 + 呈递审阅）。
 4. **独立 verifier 结论**：见 `<stem>.verifier-report.md`——round 1 REJECT（R1：PRD 覆盖对实现/审核/监督不生效），
    整改后 round 2 **PASS with caveats**（绑定 `593b8665…`），并留下 1 条 R3 残留
    （standalone `iar review` 路径在 round-2 时未回填 PRD 覆盖，已在整改中一并修掉）与 1 条 R4（接线测试，已补）。
@@ -120,7 +184,10 @@
 
 ## 4. 交付判定
 
-- 代码、单测、文档、配置模板齐备；`just test` 全绿；独立 verifier round 2 判 **PASS with caveats**。
-- **仍未达到 PRD §9 的完整验收**：缺人工确认（§9.2 Human-Confirmed）、真实浏览器呈递截图
-  （rv-3/4/6/7 的 `.png`）、Playwright e2e；这些不由执行者自行判过。
-- 因此本 PRD **不归档**（保留在 `tasks/pending/`），仅提交实施代码、文档与证据。
+- 代码、单测、文档、配置模板齐备；`just test` 全绿（2326 passed）；独立 verifier round 2 判
+  **PASS with caveats**；§9.2 的 **Human-Confirmed 六条已于 2026-09-20 由用户逐条确认**。
+- rv-3 / rv-4 / rv-6 / rv-7 的真实入口证据已补采并呈递（§2.5）。
+- **仍未完成**：Playwright e2e（§9.2 Frontend Acceptance 的 `pnpm test --grep lifecycle-agent` 一条）
+  与 PR 审查/合并；这两项不由执行者自行判过。
+- 因此本 PRD 仍**不归档**（保留在 `tasks/pending/`，验收状态标记为 🟡），
+  已提交实施代码、文档与证据。

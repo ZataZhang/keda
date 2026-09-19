@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🟡 **验收状态**：实施 + 自动化验证完成，人工决策与四项呈递物已确认（2026-09-20）；Playwright e2e 与 PR 审查未完成，故暂不归档。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制与命令；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -493,13 +493,13 @@ Agent 标签设置：四个 agent 的标签名 / 颜色 / 描述可编辑，标�
 
 ### 9.2 Acceptance Evidence Package
 
-**Human-Confirmed（对应 §2 三个决策 + 呈递审阅）**
-- [ ] 决策一：九个生命周期键名与清单获人确认（`rv-1` 全键基线断言为佐证）
-- [ ] 决策二：fix/closeout 默认 `executor` 语义获人确认（`rv-2` 为佐证）
-- [ ] 决策三：三层覆盖顺序（PRD 文件头部 > 仓库 `.iar.toml` > 全局 `config.toml` > 既有配置键 > 内置默认）与三层 UI 落点（Settings「Agent 管理」写全局 / Roadmap 仓库行齿轮写该仓库 / PRD 原文页写 PRD 头部）获人确认（`rv-1` 分层断言 + `rv-3` 为佐证）
-- [ ] 决策四：矩阵单值 + 全局一条回退链、`auto` 按阶段如实描述获人确认（`rv-6` + `rv-1` 的逐阶段 auto 断言为佐证）
-- [ ] 决策五：Settings 用「Agent 管理」粘性 Tab 组织、Agent 标签设置在前获人确认（`rv-7` 为佐证）
-- [ ] 9.1 呈递区四项呈递物已逐项过目并认可
+**Human-Confirmed（对应 §2 五个决策 + 呈递审阅）**
+- [x] 决策一：九个生命周期键名与清单获人确认（`rv-1` 全键基线断言为佐证）——2026-09-20 用户逐条确认
+- [x] 决策二：fix/closeout 默认 `executor` 语义获人确认（`rv-2` 为佐证）——2026-09-20 用户逐条确认
+- [x] 决策三：三层覆盖顺序（PRD 文件头部 > 仓库 `.iar.toml` > 全局 `config.toml` > 既有配置键 > 内置默认）与三层 UI 落点（Settings「Agent 管理」写全局 / Roadmap 仓库行齿轮写该仓库 / PRD 原文页写 PRD 头部）获人确认（`rv-1` 分层断言 + `rv-3` 为佐证）——2026-09-20 用户逐条确认
+- [x] 决策四：矩阵单值 + 全局一条回退链、`auto` 按阶段如实描述获人确认（`rv-6` + `rv-1` 的逐阶段 auto 断言为佐证）——2026-09-20 用户逐条确认
+- [x] 决策五：Settings 用「Agent 管理」粘性 Tab 组织、Agent 标签设置在前获人确认（`rv-7` 为佐证）——2026-09-20 用户逐条确认
+- [x] 9.1 呈递区四项呈递物已逐项过目并认可——2026-09-20 采齐 `rv-3-three-layer-editors.png` / `rv-4-prd-override.png` / `rv-6-fallback-order.png` / `rv-7-agent-labels.png` 并呈递
 
 **Architecture Acceptance**
 - [ ] `resolve_lifecycle_agent` 位于 core 层，api/routes 无业务解析逻辑；`uv run pytest tests/test_lifecycle_agent_resolution.py -q` 全绿（rv-1 佐证）
@@ -650,3 +650,11 @@ Agent 标签设置：四个 agent 的标签名 / 颜色 / 描述可编辑，标�
 - Reason: 独立 verifier 判 R3：单文件扫描覆盖面窄。
 - Impact: 守卫强度提升，反空转断言保留。
 - Review: 已整改。
+
+### 人工决策确认与四项呈递物采齐
+- Type: evidence
+- Before: §9.2 的 Human-Confirmed 六条全部未勾选；rv-3/4/6/7 要求的真实浏览器截图不存在，§9.1 呈递区四项无人过目。
+- After: 2026-09-20 用户逐条确认决策一～五与呈递审阅；用真实 console（`just console-sync` 的静态产物 + 隔离 `IAR_CONFIG` 起的后端 + 一个一次性 git 仓库）在真实浏览器里跑通四组操作并采齐 `rv-3-three-layer-editors.png` / `rv-4-prd-override.png` / `rv-6-fallback-order.png` / `rv-7-agent-labels.png`，另附 `rv-7-agent-labels-duplicate.png`（重复标签被阻断）。
+- Reason: PRD §9.1/§9.2 要求人工确认与真实入口证据，不能以组件级或内存态证据替代。
+- Impact: §9.2 的 Human-Confirmed 六条全部达到完成态；rv-3/4/6/7 的真实入口行为与文件落盘结果均有截图 + 文件内容对照。自动化侧不变。
+- Review: 截图与文件内容对照见 `tasks/evidence/P1-FEAT-20260918-110027-lifecycle-agent-matrix/`（png 本地 only，报告 md 入库）。
