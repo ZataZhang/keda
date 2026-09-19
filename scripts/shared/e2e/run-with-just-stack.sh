@@ -7,7 +7,7 @@
 # Behavior:
 #   1. Loads tests/playwright-e2e/.env.e2e.local if present.
 #   2. Reads ports from .env.run-state in the repo root (fallback: 8000/5173/3000).
-#   3. If backend/admin/public ports are already listening, reuses them.
+#   3. If backend/public ports are already listening, reuses them.
 #   4. Otherwise starts `just run all` in the background and waits for readiness.
 #   5. Runs Playwright E2E with PLAYWRIGHT_SKIP_STACK_BOOT=1.
 #   6. Tears down the stack with `just down` only if this script started it.
@@ -130,8 +130,10 @@ is_port_listening() {
 
 are_services_running() {
   load_run_ports
+  # 默认栈（`just run all`）只起 backend + public 前端；admin 前端是显式 opt-in，
+  # 且当前没有任何 *.admin.spec.ts，因此不把它计入就绪条件，避免等一个永远
+  # 不会监听的端口。需要跑 admin 时用 `just run frontend` 单独启动。
   is_port_listening "$BACKEND_PORT" \
-    && is_port_listening "$FRONTEND_ADMIN_PORT" \
     && is_port_listening "$FRONTEND_PUBLIC_PORT"
 }
 
@@ -172,7 +174,7 @@ wait_for_ports() {
     fi
     sleep 1
   done
-  echo "ERROR: timed out waiting for services on ports $BACKEND_PORT/$FRONTEND_ADMIN_PORT/$FRONTEND_PUBLIC_PORT" >&2
+  echo "ERROR: timed out waiting for services on ports $BACKEND_PORT/$FRONTEND_PUBLIC_PORT" >&2
   return 1
 }
 
@@ -185,7 +187,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if are_services_running; then
-  echo "Services already running (ports $BACKEND_PORT/$FRONTEND_ADMIN_PORT/$FRONTEND_PUBLIC_PORT), reusing them."
+  echo "Services already running (ports $BACKEND_PORT/$FRONTEND_PUBLIC_PORT), reusing them."
 else
   echo "Starting services with 'just run all'..."
   just run all &
@@ -195,7 +197,7 @@ else
   wait_for_run_state_file "$just_run_pid"
   load_run_ports
   wait_for_ports "$just_run_pid"
-  echo "Services ready on ports $BACKEND_PORT/$FRONTEND_ADMIN_PORT/$FRONTEND_PUBLIC_PORT."
+  echo "Services ready on ports $BACKEND_PORT/$FRONTEND_PUBLIC_PORT."
 fi
 
 # Point Playwright global setup / tests to the actual ports from .env.run-state.

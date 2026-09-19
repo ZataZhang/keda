@@ -2,7 +2,7 @@
 
 # `just` 的 Bash 补全扩展，补齐 just 动态补全器不支持的 recipe 参数值。
 #   - `just worktree`：`-o`、`-d`、`-D`、`-m` 和 `-r` 补全本地分支名。
-#   - `just prd`：补全子命令与 scope。
+#   - `just prd`：补全子命令、status 的 scope 与 `--detail` 旗标。
 
 _just_worktree_branch_candidates() {
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -35,8 +35,19 @@ _just_worktree_completion() {
             fi
             ;;
         prd)
+            # scope 与 --detail 同位可选，compgen 按 cur 前缀过滤
             if [[ "$COMP_CWORD" -eq 3 && "${COMP_WORDS[2]}" == "status" ]]; then
-                COMPREPLY=( $(compgen -W "all pending archive" -- "$cur") )
+                COMPREPLY=( $(compgen -W "all pending archive --detail" -- "$cur") )
+                return 0
+            fi
+
+            # 第二个参数补全另一侧：已填 scope 补 --detail，已填 --detail 补 scope
+            if [[ "$COMP_CWORD" -eq 4 && "${COMP_WORDS[2]}" == "status" ]]; then
+                if [[ "${COMP_WORDS[3]}" == "--detail" ]]; then
+                    COMPREPLY=( $(compgen -W "all pending archive" -- "$cur") )
+                elif [[ "${COMP_WORDS[3]}" =~ ^(all|pending|archive)$ ]]; then
+                    COMPREPLY=( $(compgen -W "--detail" -- "$cur") )
+                fi
                 return 0
             fi
 

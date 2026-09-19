@@ -19,17 +19,13 @@ env:
 
 jobs:
   frontend-build:
-    name: Frontend Build (${{ matrix.project }})
+    name: Frontend Build
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        project:
-          - frontend-admin
-          - frontend-public
+    # frontend-admin 已冻结（无业务开发，页面为模板脚手架），不再进入 CI；
+    # 目录与本地 just 命令保留，复活时需先补依赖升级再重新接入矩阵。
     defaults:
       run:
-        working-directory: ${{ matrix.project }}
+        working-directory: frontend-public
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -44,15 +40,12 @@ jobs:
         with:
           node-version: "22"
           cache: "pnpm"
-          cache-dependency-path: ${{ matrix.project }}/pnpm-lock.yaml
+          cache-dependency-path: frontend-public/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Type check
-        # frontend-admin 的 `build` 已自带 `tsc -b`；frontend-public 有独立
-        # `typecheck` 脚本。用 --if-present 让缺失脚本时无声跳过，且不破坏
-        # 矩阵中已有 typecheck 的项目。
         run: pnpm run --if-present typecheck
 
       - name: Build

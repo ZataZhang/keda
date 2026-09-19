@@ -18,7 +18,7 @@
 | Command | Purpose |
 |---|---|
 | `just sync` | 同步开发依赖 |
-| `just run` | 运行主应用（后端 + 管理平台前端 + 管理终端前端）；若前端 `node_modules` 缺失会自动运行 `pnpm install` |
+| `just run` | 运行主应用（后端 + 管理终端前端）；管理平台前端（admin）默认不启动，需要时用 `just run frontend`；若前端 `node_modules` 缺失会自动运行 `pnpm install` |
 | `just run backend_port=8010 frontend_admin_port=13173 frontend_public_port=3001` | 使用指定端口运行主应用，并保存为当前 Git worktree 的默认端口 |
 | `just run frontend-public` | 只启动管理终端前端（Next.js，端口读取当前 run-state） |
 | `just frontend-public dev` | 委托 `just run frontend-public`，读取当前 run-state 端口 |

@@ -54,7 +54,7 @@ playwright-e2e/
 
 ## 前置条件
 
-本地开发推荐使用 `just e2e` 单命令运行：它会先调用 `just run all` 启动 backend + admin 前端 + public 前端，跑完测试后再 `just down` 清理。如果服务已经由外部 `just run` 启动，则会复用现有服务，不会重复启动或关闭。
+本地开发推荐使用 `just e2e` 单命令运行：它会先调用 `just run all` 启动 backend + public 前端（admin 前端不参与默认栈，需要时用 `just run frontend` 单独启动），跑完测试后再 `just down` 清理。如果服务已经由外部 `just run` 启动，则会复用现有服务，不会重复启动或关闭。
 
 `just run` 会写入 `.env.run-state`，E2E 会据此自动定位端口；无 run-state 时 fallback 到 backend `8000`、admin `5173`、public `3000`。
 

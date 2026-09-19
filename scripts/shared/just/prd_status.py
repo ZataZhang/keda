@@ -12,7 +12,9 @@
 
 用法::
 
-    python3 scripts/shared/just/prd_status.py [all|pending|archive]
+    python3 scripts/shared/just/prd_status.py [all|pending|archive] [--detail]
+
+``--detail`` 在每个 PRD 行下追加标题与摘要块（解析见 ``prd_detail.py``）。
 
 清单进度、影响树触达进度、依赖满足与 verifier 结论均为从文件内容推断的启发式
 结果，看板只用于快速定位，最终判断以 PRD 正文与证据文件原文为准。
@@ -29,6 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import prd_detail
 import prd_impact_tree
 import prd_lock
 
@@ -90,6 +93,9 @@ class PrdRecord:
             原始引用 token（``none`` 会被解析阶段剔除）。
         impact_progress (prd_impact_tree.ImpactProgress | None): Change Impact Tree
             的分支触达进度；无分支 worktree 可比对或 PRD 没写影响树时为 ``None``。
+        title (str): PRD 一级标题（首个 ``# `` 行），无标题时为空串。
+        summary_lines (tuple[str, ...]): ``--detail`` 摘要行（已截断）；与清单进度
+            同源的分支副本正文，无可用正文时为空元组。
     """
 
     prd_path: Path
@@ -107,6 +113,8 @@ class PrdRecord:
     dependency_gate: str
     dependency_refs: tuple[str, ...]
     impact_progress: prd_impact_tree.ImpactProgress | None
+    title: str
+    summary_lines: tuple[str, ...]
 
     @property
     def checklist_complete(self) -> bool:
@@ -469,6 +477,7 @@ def collect_prd_record(
     raw_prd_text = source_prd_path.read_text(encoding="utf-8")
     checked_item_count, checklist_item_count = count_checklist_items(raw_prd_text)
     raw_gate_text, raw_dependency_refs_tuple = parse_delivery_dependencies(raw_prd_text)
+    parsed_title_text, parsed_summary_lines = prd_detail.extract_prd_title_and_summary(raw_prd_text)
 
     evidence_dirs_list = resolve_evidence_dirs(evidence_root / prd_path.stem, worktree_path)
     verification_plan_path = find_evidence_file_in_dirs(evidence_dirs_list, "verification-plan")
@@ -506,6 +515,8 @@ def collect_prd_record(
         dependency_gate=raw_gate_text,
         dependency_refs=raw_dependency_refs_tuple,
         impact_progress=impact_progress,
+        title=parsed_title_text,
+        summary_lines=parsed_summary_lines,
     )
 
 
@@ -906,6 +917,8 @@ def render_prd_table(
     evidence_root: Path,
     pending_dir: Path,
     archive_dir: Path,
+    *,
+    show_detail: bool = False,
 ) -> None:
     """输出逐条 PRD 的对齐表格（含 DEPS 依赖列与 ACTIVITY 运行态列）。
 
@@ -916,6 +929,7 @@ def render_prd_table(
         evidence_root (Path): ``tasks/evidence`` 目录，用于弱信号探测。
         pending_dir (Path): ``tasks/pending`` 目录，用于依赖交付状态判定。
         archive_dir (Path): ``tasks/archive`` 目录，用于依赖交付状态判定。
+        show_detail (bool): 为真时在每个 PRD 行下方追加标题与描述摘要块。
     """
     if not prd_records_list:
         print(palette.dim("  (无)"))
@@ -989,6 +1003,8 @@ def render_prd_table(
             ]
         )
         print(raw_row_text.rstrip())
+        if show_detail:
+            prd_detail.print_prd_detail_block(prd_record, palette)
 
 
 def render_archive_months(archive_records_list: list[PrdRecord], palette: Palette) -> None:
@@ -1061,6 +1077,8 @@ def print_bucket_section(
     evidence_root: Path,
     pending_dir: Path,
     archive_dir: Path,
+    *,
+    show_detail: bool = False,
 ) -> None:
     """输出单个分组的小标题与内容。
 
@@ -1074,6 +1092,7 @@ def print_bucket_section(
         evidence_root (Path): ``tasks/evidence`` 目录，用于弱信号探测。
         pending_dir (Path): ``tasks/pending`` 目录，用于依赖交付状态判定。
         archive_dir (Path): ``tasks/archive`` 目录，用于依赖交付状态判定。
+        show_detail (bool): 为真时在每个 PRD 行下方追加标题与描述摘要块。
     """
     print(
         palette.bold(f"{raw_title_text} ({len(bucket_records_list)})")
@@ -1090,6 +1109,7 @@ def print_bucket_section(
             evidence_root,
             pending_dir,
             archive_dir,
+            show_detail=show_detail,
         )
     print()
 
@@ -1109,6 +1129,9 @@ def main() -> int:
         default="status",
         choices=["status", "all", "pending", "archive"],
         help="status（默认，archive 按月折叠）/ all（展开 archive 每条）/ pending / archive",
+    )
+    raw_argument_parser.add_argument(
+        "--detail", action="store_true", help="在每个 PRD 行下方打印标题与描述摘要块"
     )
     raw_parsed_arguments = raw_argument_parser.parse_args()
 
@@ -1147,6 +1170,7 @@ def main() -> int:
             evidence_root=evidence_root_path,
             pending_dir=pending_dir_path,
             archive_dir=archive_dir_path,
+            show_detail=raw_parsed_arguments.detail,
         )
     if raw_scope_text in ("status", "archive", "all"):
         print_bucket_section(
@@ -1159,6 +1183,7 @@ def main() -> int:
             evidence_root=evidence_root_path,
             pending_dir=pending_dir_path,
             archive_dir=archive_dir_path,
+            show_detail=raw_parsed_arguments.detail,
         )
     return 0
 

@@ -915,6 +915,7 @@ ai subcommand arg1="" arg2="" arg3="" :
 #   just prd status all        # 展开 archive 每条
 #   just prd status pending    # 只看 pending
 #   just prd status archive    # 只看 archive（按月折叠）
+#   just prd status <scope> --detail   # 在每个 PRD 行下追加标题与描述摘要
 #   just prd start <prd-file> [--tool <名称>] [--branch <名称>]   # 领取执行锁
 #   just prd heartbeat <prd-file>                                 # 续期自己的锁
 #   just prd release <prd-file> [--force]                         # 释放执行锁
@@ -924,10 +925,20 @@ prd subcommand scope="" *extra_args:
     set -euo pipefail
     case "{{subcommand}}" in
         status)
-            if [ -z "{{scope}}" ]; then
+            status_args_list=()
+            if [ -n "{{scope}}" ]; then
+                status_args_list+=("{{scope}}")
+            fi
+            if [ -n "{{extra_args}}" ]; then
+                read -ra status_extra_words <<< "{{extra_args}}"
+                status_args_list+=("${status_extra_words[@]}")
+            fi
+            # just 按位置填参，`just prd status --detail` 会让 scope 吃到 "--detail"，
+            # 原样转发即可：argparse 的 nargs="?" 位置参数不吞选项样式的 token。
+            if [ "${#status_args_list[@]}" -eq 0 ]; then
                 python3 ./scripts/shared/just/prd_status.py
             else
-                python3 ./scripts/shared/just/prd_status.py "{{scope}}"
+                python3 ./scripts/shared/just/prd_status.py "${status_args_list[@]}"
             fi
             ;;
         start|heartbeat|release)
@@ -964,6 +975,7 @@ prd subcommand scope="" *extra_args:
             echo "  just prd status all      # expand every archived PRD"
             echo "  just prd status pending  # only tasks/pending"
             echo "  just prd status archive  # only tasks/archive"
+            echo "  just prd status <scope> --detail   # append title + summary under each PRD row"
             echo "  just prd start <prd-file> [--tool <名称>] [--branch <名称>]  # claim execution lock"
             echo "  just prd heartbeat <prd-file>                              # renew own lock"
             echo "  just prd release <prd-file> [--force]                      # release lock"

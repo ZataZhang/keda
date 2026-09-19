@@ -236,3 +236,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 3    2026-07-31 06:08Z    claude    agent_error    No    532.5s    Realistic Validation item 1 failed when keda re-ran its command: bash .iar/evidence/scripts/capture_rv-1-e2e.sh exited 1. keda re-executes RV commands to confirm they actually pass — the agent's ev…
 4    2026-07-31 06:17Z    claude    no_commits    No    4667.9s    error: recipe lint failed with exit code 1  这个只有在任务结束的时候才会更新, 应该任务开始的时候更新, 你觉得呢, 而且只有任务开始时间, 没有任务结束时间呀
 ```
+
+## 2026-09-18 11:19 · repo-picker-and-config-view
+
+> 应该要支持直接通过选择文件夹目录的形式来选择仓库 ，还有应该要能查看每个仓库具体的配置

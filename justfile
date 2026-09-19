@@ -34,9 +34,9 @@ reinstall-iar:
 
 # Run the development entrypoint
 # Usage:
-#   just run                        # start backend + admin frontend + public frontend
+#   just run                        # start backend + public frontend (admin frontend is opt-in)
 #   just run backend                # start backend only
-#   just run frontend               # start admin frontend only
+#   just run frontend               # start admin frontend only (not part of the default stack)
 #   just run frontend-public        # start public frontend only
 #   just run docker                 # start with Docker Compose (one-click deploy)
 #   just run backend_port=8010 frontend_admin_port=13173 frontend_public_port=3001
@@ -62,7 +62,6 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
     frontend_cmd="pnpm dev"
     frontend_public_cmd="pnpm dev"
     backend_pid=""
-    frontend_pid=""
     frontend_public_pid=""
     run_state_file="{{justfile_directory()}}/.env.run-state"
     positional_index=0
@@ -229,7 +228,7 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
     }
 
     cleanup_processes() {
-        for process_pid in "$backend_pid" "$frontend_pid" "$frontend_public_pid"; do
+        for process_pid in "$backend_pid" "$frontend_public_pid"; do
             if [ -n "$process_pid" ] && kill -0 "$process_pid" 2>/dev/null; then
                 kill "$process_pid" 2>/dev/null || true
             fi
@@ -241,11 +240,6 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
         while true; do
             if [ -n "$backend_pid" ] && ! kill -0 "$backend_pid" 2>/dev/null; then
                 wait "$backend_pid"
-                return $?
-            fi
-
-            if [ -n "$frontend_pid" ] && ! kill -0 "$frontend_pid" 2>/dev/null; then
-                wait "$frontend_pid"
                 return $?
             fi
 
@@ -276,8 +270,6 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
             trap cleanup_processes EXIT INT TERM
             run_backend &
             backend_pid=$!
-            run_frontend &
-            frontend_pid=$!
             run_frontend_public &
             frontend_public_pid=$!
             wait_for_first_exit

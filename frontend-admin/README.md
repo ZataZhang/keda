@@ -1,5 +1,10 @@
 # 管理平台前端
 
+> **状态：已冻结（dormant）**。本目录是 `zata-codes-template` 模板带来的脚手架，
+> 页面均为模板 demo，未接入 keda 业务。当前前端开发主线在 `frontend-public/`
+> （`iar console`）。目录与本地 `just frontend-admin` 命令保留，但不再进入 CI
+> 构建矩阵；复活前需先补依赖升级并重新接入 CI。
+
 本目录是 `zata-codes-template` 的管理平台前端（Admin Dashboard），基于
 [satnaing/shadcn-admin](https://github.com/satnaing/shadcn-admin) 二次开发。
 

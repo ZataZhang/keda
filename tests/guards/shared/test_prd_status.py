@@ -38,6 +38,9 @@ DEPS 列。核心不变量：
    ``tasks/archive`` → ``tasks/pending`` 取清单副本，证据每个槽位单独兜底。
    只认 slug 匹配到的那个 worktree——每个 worktree 都带一份未改动的同名 pending
    副本，拿错副本会显示别的分支的陈旧进度。
+7. **``--detail`` 摘要与清单进度同源。** 摘要解析必须吃与 CHECKLIST 相同的
+   分支副本正文，且只做有界截断——看板定位是"快速定位，最终判断以 PRD 原文
+   为准"，摘要是行下定位辅助而非正文替代。
 """
 
 from __future__ import annotations
@@ -56,6 +59,7 @@ _JUST_SCRIPTS_PATH = Path(__file__).resolve().parents[3] / "scripts" / "shared" 
 if str(_JUST_SCRIPTS_PATH) not in sys.path:
     sys.path.insert(0, str(_JUST_SCRIPTS_PATH))
 
+import prd_detail  # noqa: E402
 import prd_lock  # noqa: E402
 import prd_status  # noqa: E402
 
@@ -628,3 +632,99 @@ def test_evidence_cell_falls_back_to_main_per_slot(tmp_path: Path) -> None:
 
     assert "plan✓" in raw_cell_text
     assert "report✓" in raw_cell_text
+
+
+def test_extract_prd_title_and_summary_reads_numbered_introduction() -> None:
+    """编号写法的 Introduction & Goals 章节正文作为摘要来源，标题取首个一级标题。"""
+    prd_text = (
+        "# P1-FEAT-20260901-000000 Demo\n"
+        "\n"
+        "## 1. Introduction & Goals\n"
+        "\n"
+        "第一段描述。\n"
+        "第二段描述。\n"
+        "\n"
+        "## 2. Requirement Shape\n"
+        "\n"
+        "不属于摘要的正文。\n"
+    )
+
+    parsed_title_text, parsed_summary_lines = prd_detail.extract_prd_title_and_summary(prd_text)
+
+    assert parsed_title_text == "P1-FEAT-20260901-000000 Demo"
+    assert parsed_summary_lines == ("第一段描述。", "第二段描述。")
+
+
+def test_extract_prd_title_and_summary_falls_back_to_preamble() -> None:
+    """无 Introduction 章节时退化为一级标题之后、首个小节标题之前的引言。"""
+    prd_text = (
+        "# fixture PRD\n\n引言第一行。\n引言第二行。\n\n## Acceptance Checklist\n\n- [ ] item\n"
+    )
+
+    parsed_title_text, parsed_summary_lines = prd_detail.extract_prd_title_and_summary(prd_text)
+
+    assert parsed_title_text == "fixture PRD"
+    assert parsed_summary_lines == ("引言第一行。", "引言第二行。")
+
+
+def test_extract_prd_title_and_summary_truncates_overflow_lines() -> None:
+    """摘要超过行数上限时只取前 N 行，且末行补省略号披露后续仍有正文。"""
+    prd_text = "# fixture PRD\n\n## 1. Introduction & Goals\n\n" + "".join(
+        f"第 {index} 行。\n" for index in range(1, 7)
+    )
+
+    _, parsed_summary_lines = prd_detail.extract_prd_title_and_summary(prd_text)
+
+    assert len(parsed_summary_lines) == prd_detail.DESCRIPTION_MAX_LINES
+    assert parsed_summary_lines[0] == "第 1 行。"
+    assert parsed_summary_lines[-1].endswith("…")
+
+
+def test_extract_prd_title_and_summary_truncates_overwide_line() -> None:
+    """单行超过宽度上限时就地截断并以省略号结尾，不产生超宽摘要行。"""
+    overwide_line_text = "长" * (prd_detail.DESCRIPTION_LINE_MAX_WIDTH + 10)
+    prd_text = f"# fixture PRD\n\n## 1. Introduction & Goals\n\n{overwide_line_text}\n"
+
+    _, parsed_summary_lines = prd_detail.extract_prd_title_and_summary(prd_text)
+
+    assert len(parsed_summary_lines) == 1
+    assert parsed_summary_lines[0].endswith("…")
+    assert len(parsed_summary_lines[0]) == prd_detail.DESCRIPTION_LINE_MAX_WIDTH
+
+
+def test_render_prd_table_with_detail_prints_summary_under_row(tmp_path: Path, capsys) -> None:
+    """--detail 开启时在行下打印标题与摘要块；默认关闭时不打印。"""
+    detailed_prd_text = (
+        "# P2-FEAT-20260101-000000-avatar-upload\n"
+        "\n"
+        "## 1. Introduction & Goals\n"
+        "\n"
+        "为头像上传引入分片上传。\n"
+        "\n"
+        "## Acceptance Checklist\n"
+        "\n"
+        "- [ ] item one\n"
+    )
+    main_repo_path = _init_main_repo(tmp_path / "repo", prd_text=detailed_prd_text)
+    prd_record = _collect_fixture_record(main_repo_path)
+    render_arguments = (
+        [prd_record],
+        _PLAIN_PALETTE,
+        main_repo_path,
+        main_repo_path / "tasks" / "evidence",
+        main_repo_path / "tasks" / "pending",
+        main_repo_path / "tasks" / "archive",
+    )
+
+    prd_status.render_prd_table(*render_arguments, show_detail=True)
+    detailed_output_text = capsys.readouterr().out
+
+    # 摘要块不携带章节标题，标题取一级标题行而非文件名
+    assert "## 1. Introduction & Goals" not in detailed_output_text
+    assert "P2-FEAT-20260101-000000-avatar-upload" in detailed_output_text
+    assert "为头像上传引入分片上传。" in detailed_output_text
+
+    prd_status.render_prd_table(*render_arguments)
+    plain_output_text = capsys.readouterr().out
+
+    assert "为头像上传引入分片上传。" not in plain_output_text

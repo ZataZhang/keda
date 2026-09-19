@@ -1,0 +1,1227 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>生命周期 Agent 矩阵 · 交互原型</title>
+    <link rel="stylesheet" href="./assets/prototype-chrome.css" />
+    <style>
+      /* ───────────────────────────────────────────────────────────────────
+         真实截图 + HTML 覆盖层混合原型。
+
+         底图是三张从真实 frontend-public 采集的同尺寸截图（1440×1200，
+         采集方式见 lifecycle-agent-matrix.md）。覆盖层只绘制本 PRD 新增的
+         区域：Settings 页的全局矩阵卡片、Roadmap 受管理仓库列表的齿轮入口
+         与仓库级矩阵抽屉、PRD 原文页的「Agent 覆盖」抽屉。画布尺寸与底图
+         一一对应，整体按视口宽度等比缩放，因此热点与覆盖层不会随视口漂移。
+
+         三层落点：Settings = 全局 config.toml · Roadmap 仓库行齿轮 =
+         仓库级 .iar.toml · PRD 原文页 = PRD 头部覆盖。
+
+         下拉语义：下拉里只有真实取值（注册 agent / auto / executor），
+         当前生效值直接选中；未改动的行不写入本层文件，来源列说明它来自哪一层。
+         ─────────────────────────────────────────────────────────────────── */
+
+      /* 设计令牌取自 frontend-public/app/globals.css 的 :root 与 shadcn 组件类 */
+      :root {
+        --background: oklch(0.98 0.005 280);
+        --foreground: oklch(0.145 0 0);
+        --primary: oklch(0.55 0.22 285);
+        --muted-foreground: oklch(0.45 0.02 285);
+        --slate-200: #e2e8f0;
+        --slate-500: #64748b;
+        --slate-900: #0f172a;
+        --slate-950: #020617;
+        --red-500: #ef4444;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        min-height: 100vh;
+        background: #eef0f6;
+        color: var(--foreground);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      button, select, input { font: inherit; }
+      code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+      /* ── 评审外层 ── */
+      .viewer { width: min(1480px, 100%); margin: 0 auto; padding: 20px 20px 96px; }
+      .viewer-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 0 4px 14px; }
+      .viewer-head h1 { font-size: 17px; }
+      .viewer-head p { margin-top: 4px; font-size: 12.5px; color: #5b6478; }
+      .viewer-legend { display: flex; gap: 14px; font-size: 11.5px; color: #5b6478; }
+      .viewer-legend span { display: inline-flex; align-items: center; gap: 6px; }
+      .swatch { width: 11px; height: 11px; border-radius: 3px; }
+
+      /* ── 画布：固定 1440×1200，等比缩放 ── */
+      .stage-wrap { position: relative; width: 100%; }
+      .stage {
+        position: relative; width: 1440px; height: 1200px;
+        transform-origin: top left; overflow: hidden;
+        border: 1px solid #cdd3e0; border-radius: 12px; background: var(--background);
+        box-shadow: 0 18px 44px rgb(30 27 55 / 14%);
+      }
+      .screen { position: absolute; inset: 0; display: none; }
+      .screen.is-active { display: block; }
+      .screen > img.base { display: block; width: 1440px; height: 1200px; }
+
+      .overlay { position: absolute; inset: 0; }
+      /* 设置页覆盖层即页面内容区：内容比画布高时自身滚动，Tab 栏保持粘性 */
+      .overlay.panel { background: var(--background); overflow-y: auto; }
+
+      /* ── Agent 管理：粘性标题 + Tab 栏 ── */
+      .admin-head { position: sticky; top: 0; z-index: 6; background: var(--background); padding-bottom: 0; }
+      .admin-title { padding-top: 2px; font-size: 18px; font-weight: 600; }
+      .admin-desc { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--slate-500); }
+      .tabs { display: flex; gap: 2px; margin-top: 12px; border-bottom: 1px solid var(--slate-200); }
+      .tab {
+        padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: none;
+        color: var(--slate-500); font-size: 13px; cursor: pointer;
+      }
+      .tab:hover { color: var(--slate-950); }
+      .tab.is-active { border-bottom-color: var(--primary); color: var(--slate-950); font-weight: 600; }
+      .tab:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .tab-panel { display: none; padding-top: 16px; }
+      .tab-panel.is-active { display: block; }
+
+      /* Agent 标签设置的可编辑字段 */
+      .label-input {
+        width: 100%; height: 30px; padding: 0 8px;
+        border: 1px solid var(--slate-200); border-radius: 6px;
+        color: var(--slate-950); font-size: 12.5px;
+      }
+      .label-input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+      .label-input[data-invalid="true"] { border-color: var(--red-500); color: #b91c1c; }
+      .color-field { display: flex; align-items: center; gap: 8px; }
+      .color-field input[type="color"] { width: 30px; height: 30px; padding: 2px; border: 1px solid var(--slate-200); border-radius: 6px; background: #fff; cursor: pointer; }
+      .color-hex { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--slate-500); }
+      /* 热点容器本身不拦截点击，只有其中的齿轮可点 */
+      #repo-gears { pointer-events: none; }
+      #repo-gears .gear { pointer-events: auto; }
+
+      /* ── 真实侧栏/列表热点（截图是真实像素，交互靠热点） ── */
+      .hotspot {
+        position: absolute; display: block; padding: 0; border: 0; border-radius: 6px;
+        background: transparent; cursor: pointer;
+      }
+      .hotspot:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+      body.hotspots-on .hotspot {
+        background: color-mix(in srgb, var(--primary) 13%, transparent);
+        box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary) 58%, transparent);
+      }
+      body.hotspots-on .hotspot::after {
+        position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+        padding: 3px 7px; border-radius: 4px; background: var(--primary); color: #fff;
+        font-size: 10.5px; white-space: nowrap; content: attr(data-label); pointer-events: none;
+      }
+      body.hotspots-on .hotspot[data-label-side]::after {
+        bottom: auto; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
+      }
+      body.hotspots-on .hotspot[data-label-below]::after {
+        bottom: auto; left: 0; top: calc(100% + 6px); transform: none;
+      }
+      body.hotspots-on .hotspot:not([data-label])::after { display: none; }
+
+      /* 仓库行的齿轮入口：图标本身即语义，不加文字标签避免遮挡列表 */
+      .gear { display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 13px; }
+      .gear:hover, .gear:focus-visible { color: var(--primary); }
+      .gear.is-current { color: var(--primary); }
+      body.hotspots-on .gear {
+        background: color-mix(in srgb, #fff 78%, transparent);
+        box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--primary) 45%, transparent);
+      }
+
+      /* ── 新增区域统一标注 ── */
+      .tag-new {
+        display: inline-flex; align-items: center; margin-left: 8px; padding: 2px 7px;
+        border-radius: 999px; background: #ede9fe; color: #5b21b6;
+        font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+      }
+
+      /* ── 卡片：复刻 frontend-public/components/ui/card.tsx 的 Card ── */
+      .card {
+        border: 1px solid var(--slate-200); border-radius: 12px; background: #fff;
+        box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
+      }
+      .card.is-new { border-color: color-mix(in srgb, var(--primary) 42%, var(--slate-200)); box-shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 0 0 3px color-mix(in srgb, var(--primary) 8%, transparent); }
+      .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 14px 24px 0; }
+      .card-title { font-size: 16px; font-weight: 600; }
+      .card-desc { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--slate-500); }
+      .card-body { padding: 12px 24px 0; }
+      .card-foot { display: flex; align-items: center; gap: 10px; padding: 10px 24px 16px; }
+      .card-foot .hint { flex: 1; font-size: 12px; color: var(--slate-500); }
+
+      /* ── 表格 ── */
+      .matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .matrix thead th {
+        padding: 0 8px 8px; border-bottom: 1px solid var(--slate-200);
+        color: var(--slate-500); font-size: 11.5px; font-weight: 500; text-align: left;
+      }
+      .matrix tbody td { padding: 4px 8px; border-bottom: 1px solid #eef1f6; vertical-align: middle; }
+      .matrix tbody tr:last-child td { border-bottom: 0; }
+      .matrix tbody tr.is-error td { background: color-mix(in srgb, var(--red-500) 7%, transparent); }
+      .matrix tbody tr.is-pinned td { background: color-mix(in srgb, var(--primary) 5%, transparent); }
+      .lifecycle-name { font-size: 13px; font-weight: 500; }
+      .lifecycle-key { margin-top: 1px; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: #94a3b8; }
+      .cell-error { margin-top: 3px; font-size: 11px; color: #b91c1c; }
+      .cell-note { font-size: 10.5px; color: #94a3b8; }
+      .cell-note.is-block { display: block; margin-top: 2px; }
+
+      /* ── 回退顺序 ── */
+      .order-list { display: flex; flex-direction: column; gap: 4px; }
+      .order-row { display: flex; align-items: center; gap: 8px; padding: 3px 8px; border: 1px solid var(--slate-200); border-radius: 8px; background: #fff; }
+      .order-row .index { width: 18px; color: #94a3b8; font-size: 11px; }
+      .order-row .agent { flex: 1; font-size: 13px; font-weight: 500; }
+      .order-row .agent-missing { margin-left: 6px; font-size: 10.5px; color: #b45309; }
+      .order-row.is-first { border-color: color-mix(in srgb, var(--primary) 45%, var(--slate-200)); background: color-mix(in srgb, var(--primary) 5%, transparent); }
+      .icon-btn { width: 24px; height: 24px; border: 1px solid var(--slate-200); border-radius: 6px; background: #fff; color: var(--slate-500); font-size: 11px; line-height: 1; cursor: pointer; }
+      .icon-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+      .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+      .order-toolbar { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+      .order-toolbar .select { height: 30px; min-width: 150px; }
+      .switch-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--slate-950); }
+      .switch-field input { width: 52px; height: 28px; padding: 0 6px; border: 1px solid var(--slate-200); border-radius: 6px; font-size: 12.5px; }
+
+      /* ── 下拉：真实实现应落 shadcn 组件，此处用原生 select 演示 ── */
+      .select {
+        height: 30px; min-width: 190px; padding: 0 8px;
+        border: 1px solid var(--slate-200); border-radius: 6px; background: #fff;
+        color: var(--slate-950); font-size: 12.5px;
+      }
+      .select:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+      .select[data-edited="true"] { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 14%, transparent); }
+      .select[data-invalid="true"] { border-color: var(--red-500); color: #b91c1c; }
+
+      /* ── 徽章与行内小按钮 ── */
+      .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; }
+      .badge.repo { background: #ede9fe; color: #5b21b6; }
+      .badge.global { background: #e0f2fe; color: #075985; }
+      .badge.legacy { background: #fef3c7; color: #92400e; }
+      .badge.builtin { background: #e2e8f0; color: #334155; }
+      .link-reset {
+        margin-top: 4px; padding: 0; border: 0; background: none; cursor: pointer;
+        color: var(--primary); font-size: 11px; text-decoration: underline; text-underline-offset: 2px;
+      }
+      .link-reset:hover { color: #5b21b6; }
+
+      /* ── 按钮：复刻 shadcn Button 变体 ── */
+      .btn {
+        display: inline-flex; height: 36px; align-items: center; justify-content: center; gap: 8px;
+        padding: 0 16px; border: 1px solid transparent; border-radius: 6px;
+        font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer;
+      }
+      .btn:focus-visible { outline: 2px solid var(--slate-950); outline-offset: 1px; }
+      .btn:disabled { cursor: not-allowed; opacity: .5; }
+      .btn.default { background: var(--slate-900); color: #f8fafc; }
+      .btn.outline { border-color: var(--slate-200); background: #fff; color: var(--slate-950); }
+      .btn.ghost { background: transparent; color: var(--slate-950); }
+      .btn.destructive { background: var(--red-500); color: #fff; }
+      .btn.sm { height: 32px; padding: 0 12px; font-size: 12.5px; }
+
+      /* ── 写入预览 ── */
+      .diff { margin-top: 12px; border: 1px solid var(--slate-200); border-radius: 8px; overflow: hidden; }
+      .diff header { padding: 7px 12px; border-bottom: 1px solid var(--slate-200); background: #f8fafc; color: var(--slate-500); font-size: 11px; }
+      .diff pre { padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; line-height: 1.75; white-space: pre-wrap; }
+      .diff .add { border-radius: 3px; padding: 0 3px; background: #dcfce7; color: #166534; }
+      .diff .note { color: #94a3b8; }
+
+      /* ── PRD 原文页：工具栏新增入口 ── */
+      .prd-entry { position: absolute; left: 1259px; top: 93px; }
+      .prd-entry .btn { height: 32px; padding: 0 12px; font-size: 12.5px; }
+
+      /* ── 浮层（仓库矩阵抽屉 / PRD 覆盖抽屉） ── */
+      .mask { position: absolute; inset: 0; display: flex; justify-content: flex-end; background: rgb(2 6 23 / 45%); }
+      .drawer { display: flex; width: 720px; flex-direction: column; border-left: 1px solid var(--slate-200); background: #fff; box-shadow: -16px 0 40px rgb(2 6 23 / 18%); }
+      .drawer.is-narrow { width: 620px; }
+      .drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 22px 0; }
+      .drawer-title { font-size: 15px; font-weight: 600; }
+      .drawer-desc { margin-top: 5px; font-size: 12.5px; line-height: 1.6; color: var(--slate-500); }
+      .drawer-close { border: 0; background: none; color: var(--slate-500); font-size: 18px; line-height: 1; cursor: pointer; }
+      .drawer-body { flex: 1; overflow-y: auto; padding: 14px 22px 0; }
+      .drawer-foot { padding: 12px 22px 18px; border-top: 1px solid var(--slate-200); }
+      .drawer-foot .hint { display: block; font-size: 11.5px; line-height: 1.6; color: var(--slate-500); }
+      .drawer-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+
+      .override-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #eef1f6; }
+      .override-row:last-child { border-bottom: 0; }
+      .override-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--primary); }
+      .override-row .name { flex: 1; font-size: 13px; cursor: pointer; }
+      .override-row .select { min-width: 170px; height: 28px; font-size: 12px; }
+      .override-row.is-error { background: color-mix(in srgb, var(--red-500) 7%, transparent); }
+
+      .section-label { margin: 16px 0 6px; font-size: 11.5px; font-weight: 600; color: var(--slate-500); }
+      .head-preview { border: 1px solid var(--slate-200); border-radius: 8px; overflow: hidden; }
+      .head-preview header { padding: 7px 12px; border-bottom: 1px solid var(--slate-200); background: #f8fafc; color: var(--slate-500); font-size: 10.5px; font-family: ui-monospace, Menlo, monospace; }
+      .head-preview pre { padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; line-height: 1.8; white-space: pre-wrap; }
+      .head-preview .add { border-radius: 3px; padding: 0 3px; background: #ede9fe; color: #5b21b6; }
+      .head-preview .written { border-radius: 3px; padding: 0 3px; background: #dcfce7; color: #166534; }
+
+      /* ── Toast ── */
+      .toast-root { position: fixed; right: 22px; bottom: 92px; z-index: 1200; display: flex; flex-direction: column; gap: 8px; }
+      .toast { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--slate-200); border-radius: 9px; background: #fff; box-shadow: 0 10px 28px rgb(2 6 23 / 16%); font-size: 12.5px; }
+      .toast .dot { width: 8px; height: 8px; border-radius: 999px; background: #16a34a; }
+      .toast.is-error .dot { background: var(--red-500); }
+
+      .state-hint { padding: 12px 4px 0; font-size: 12.5px; line-height: 1.7; color: #4b5563; }
+      @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    </style>
+  </head>
+  <body class="hotspots-on">
+    <main class="viewer">
+      <header class="viewer-head">
+        <div>
+          <h1>生命周期 Agent 矩阵 · 交互原型</h1>
+          <p>底图为真实 frontend-public 截图；紫色描边区域是本 PRD 新增的界面。三层落点：Settings「Agent 管理」= 全局 config.toml（Auto 标签 / 生命周期矩阵 / 回退顺序），Roadmap 仓库行齿轮 = 仓库级 .iar.toml，PRD 原文页 = PRD 头部覆盖。</p>
+        </div>
+        <div class="viewer-legend">
+          <span><i class="swatch" style="background:#c4b5fd"></i>本原型新增</span>
+          <span><i class="swatch" style="background:#e2e8f0"></i>真实产品截图</span>
+        </div>
+      </header>
+
+      <div class="stage-wrap" id="stage-wrap">
+        <div class="stage" id="stage">
+          <!-- ══ 视图一：Settings · Agent 管理（真实截图 + 粘性 Tab 区块覆盖层） ══ -->
+          <section class="screen is-active" data-screen="settings">
+            <img class="base" src="./assets/lifecycle-agent-matrix/settings-real.png" alt="真实 frontend-public 设置页" />
+            <button class="hotspot" type="button" data-goto="roadmap" style="left:12px;top:228px;width:231px;height:36px" data-label="打开依赖图" data-label-side></button>
+
+            <!-- 覆盖既有卡片区：新增「Agent 管理」粘性 Tab 区块，再按真实样式复刻被下推的既有卡片与按钮 -->
+            <div class="overlay panel" style="left:288px;top:116px;width:1120px;height:1084px">
+              <div class="admin-head">
+                <div class="admin-title">Agent 管理<span class="tag-new">本原型新增</span></div>
+                <div class="admin-desc">
+                  配置每个 agent 的 GitHub 路由标签（<code>auto</code> 靠它判定），以及九个生命周期阶段各自用哪个 agent。两个 Tab 分别写 <code>config.toml</code> 的不同段。
+                </div>
+                <nav class="tabs" role="tablist" aria-label="Agent 管理">
+                  <button class="tab is-active" type="button" role="tab" aria-selected="true" data-clickable data-tab="labels">Agent 标签设置</button>
+                  <button class="tab" type="button" role="tab" aria-selected="false" data-clickable data-tab="lifecycle">生命周期 Agent 设置</button>
+                </nav>
+              </div>
+
+              <!-- Tab 1（默认）：Agent 标签设置 -->
+              <section class="tab-panel is-active" data-tab-panel="labels">
+                <div class="card is-new" data-clickable>
+                  <div class="card-head">
+                    <div>
+                      <div class="card-title">Agent 标签设置</div>
+                      <div class="card-desc">
+                        <code>auto</code> 的判定 = 运行时看 Issue 上挂着哪个 agent 标签。这张表配置每个 agent 对应的标签名、颜色与描述；改这里等于改 <code>config.toml</code> 里该 agent 注册块的 <code>label</code> / <code>label_color</code> / <code>label_description</code>。
+                      </div>
+                    </div>
+                  </div>
+                  <div class="card-body">
+                    <table class="matrix">
+                      <thead>
+                        <tr>
+                          <th style="width:15%">agent</th>
+                          <th style="width:24%">GitHub 标签</th>
+                          <th style="width:21%">标签颜色</th>
+                          <th>标签描述</th>
+                        </tr>
+                      </thead>
+                      <tbody id="agent-label-body"></tbody>
+                    </table>
+                  </div>
+                  <div class="card-foot">
+                    <span class="hint" id="agent-label-hint"></span>
+                    <button class="btn outline" type="button" id="demo-label-conflict" data-clickable>演示：两个 agent 用同一标签</button>
+                    <button class="btn default" type="button" id="save-agent-labels" data-clickable disabled>保存更改</button>
+                  </div>
+                  <div class="card-body" id="agent-label-diff-wrap" style="display:none;padding-bottom:20px">
+                    <div class="diff">
+                      <header id="agent-label-diff-header">保存将写入</header>
+                      <pre id="agent-label-diff-code"></pre>
+                    </div>
+                  </div>
+                </div>
+                <p class="cell-note" style="display:block;margin-top:10px">
+                  工作流标签（<code>agent/ready</code>、<code>agent/running</code>、<code>validation/pending</code> 等）来自 <code>[agent_runner.labels]</code>，不在本表范围内。
+                </p>
+              </section>
+
+              <!-- Tab 2：生命周期 Agent 设置 -->
+              <section class="tab-panel" data-tab-panel="lifecycle">
+                <div class="card is-new" data-clickable>
+                  <div class="card-head">
+                    <div>
+                      <div class="card-title">生命周期 Agent 矩阵 · 全局</div>
+                      <div class="card-desc">
+                        九个生命周期各自的 agent。下拉里是当前生效值；<strong>只写入改动过的行</strong>，没动的行继续沿用既有配置键。保存写入 <code>config.toml</code>，单仓库可用 <code>.iar.toml</code> 覆盖（Roadmap 仓库行齿轮），单 PRD 可用文件头覆盖。
+                      </div>
+                    </div>
+                  </div>
+                  <div class="card-body">
+                    <table class="matrix">
+                      <thead>
+                        <tr>
+                          <th style="width:22%">生命周期</th>
+                          <th style="width:34%">agent</th>
+                          <th>当前值来源</th>
+                        </tr>
+                      </thead>
+                      <tbody id="global-matrix-body"></tbody>
+                    </table>
+                  </div>
+                  <div class="card-foot">
+                    <span class="hint" id="global-hint"></span>
+                    <button class="btn outline" type="button" id="demo-global-unregistered" data-clickable>演示：写入未注册 agent</button>
+                    <button class="btn default" type="button" id="save-global" data-clickable disabled>保存更改</button>
+                  </div>
+                  <div class="card-body" id="global-diff-wrap" style="display:none;padding-bottom:20px">
+                    <div class="diff">
+                      <header id="global-diff-header">保存将写入</header>
+                      <pre id="global-diff-code"></pre>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card is-new" style="margin-top:16px" data-clickable>
+                  <div class="card-head">
+                    <div>
+                      <div class="card-title">agent 回退顺序</div>
+                      <div class="card-desc">
+                        <strong>主 agent 失败或额度受限时</strong>，按这个顺序换下一个；本机没装的 agent 自动跳过。设成空列表即关闭自动切换。这是 Issue 执行阶段的跨 agent 回退链。
+                      </div>
+                    </div>
+                    <label class="switch-field" style="white-space:nowrap">最多切换
+                      <input type="number" id="max-agent-switches" min="0" max="8" step="1" aria-label="最多切换次数" />
+                    </label>
+                  </div>
+                  <div class="card-body">
+                    <div class="order-list" id="fallback-order-list"></div>
+                    <div class="order-toolbar">
+                      <select class="select" id="fallback-add-select" aria-label="添加回退 agent"></select>
+                      <button class="btn outline sm" type="button" id="fallback-add" data-clickable>＋ 加到末尾</button>
+                      <span class="cell-note" id="fallback-summary"></span>
+                    </div>
+                  </div>
+                  <div class="card-foot">
+                    <span class="hint" id="fallback-hint"></span>
+                    <button class="btn default" type="button" id="save-fallback" data-clickable disabled>保存更改</button>
+                  </div>
+                  <div class="card-body" id="fallback-diff-wrap" style="display:none;padding-bottom:20px">
+                    <div class="diff">
+                      <header id="fallback-diff-header">保存将写入</header>
+                      <pre id="fallback-diff-code"></pre>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div class="card" style="margin-top:16px;padding:24px" data-clickable>
+                <h2 style="font-size:18px;font-weight:600">关于 iar 管理终端</h2>
+                <p style="margin-top:8px;font-size:14px;line-height:1.6;color:var(--muted-foreground)">
+                  这是 iar 内置的 Agent Runner 管理终端（本机单用户模式，仅监听 127.0.0.1）。仓库队列、托管进程与 roadmap 数据均来自本机后端
+                  API；runner 的行为由各仓库的 config.toml 与 .iar.toml 决定。退出后可通过命令行重新执行 <code>iar console</code> 打开。
+                </p>
+              </div>
+
+              <button class="btn destructive" type="button" style="width:100%;margin-top:16px" data-clickable>退出登录</button>
+            </div>
+          </section>
+
+          <!-- ══ 视图二：Roadmap · 仓库级（真实截图 + 齿轮入口 + 仓库矩阵抽屉） ══ -->
+          <section class="screen" data-screen="roadmap">
+            <img class="base" src="./assets/lifecycle-agent-matrix/roadmap-real.png" alt="真实 frontend-public Roadmap 依赖图" />
+            <button class="hotspot" type="button" data-goto="settings" style="left:12px;top:308px;width:231px;height:36px" data-label="打开全局矩阵（Settings）" data-label-below></button>
+            <button class="hotspot" type="button" data-goto="prd" style="left:561px;top:445px;width:220px;height:64px" data-label="直开入口：PRD 原文" data-label-side></button>
+
+            <!-- 新增：受管理仓库每行右侧的仓库级 Agent 设置入口（坐标为真实列表行实测值） -->
+            <div class="overlay" id="repo-gears"></div>
+
+            <div class="mask" id="repo-mask" style="display:none">
+              <aside class="drawer" role="dialog" aria-modal="true" aria-label="仓库 Agent 设置">
+                <div class="drawer-head">
+                  <div>
+                    <div class="drawer-title" id="repo-drawer-title">仓库 Agent 设置</div>
+                    <div class="drawer-desc">
+                      该仓库的生命周期 agent。下拉里是当前生效值；<strong>只写入改动过的行</strong>，没动的行继续跟随全局层。保存写入本仓库 <code>.iar.toml</code>，<code>config.toml</code> 与其它仓库不动。
+                    </div>
+                  </div>
+                  <button class="drawer-close" type="button" id="repo-drawer-close" aria-label="关闭仓库设置">✕</button>
+                </div>
+                <div class="drawer-body">
+                  <table class="matrix">
+                    <thead>
+                      <tr>
+                        <th style="width:20%">生命周期</th>
+                        <th style="width:32%">agent</th>
+                        <th>当前值来源</th>
+                      </tr>
+                    </thead>
+                    <tbody id="repo-matrix-body"></tbody>
+                  </table>
+                </div>
+                <div class="drawer-body" id="repo-diff-wrap" style="display:none;flex:0 0 auto;padding-bottom:0">
+                  <div class="diff" style="margin-bottom:14px">
+                    <header id="repo-diff-header">保存将写入</header>
+                    <pre id="repo-diff-code"></pre>
+                  </div>
+                </div>
+                <div class="drawer-foot">
+                  <span class="hint" id="repo-hint"></span>
+                  <div class="drawer-actions">
+                    <button class="btn outline sm" type="button" id="demo-repo-unregistered" data-clickable>演示：写入未注册 agent</button>
+                    <button class="btn default" type="button" id="save-repo" data-clickable disabled>保存更改</button>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <!-- ══ 视图三：PRD 原文 · PRD 级覆盖（真实截图 + 工具栏入口 + 覆盖抽屉） ══ -->
+          <section class="screen" data-screen="prd">
+            <img class="base" src="./assets/lifecycle-agent-matrix/prd-content-real.png" alt="真实 frontend-public PRD 原文页" />
+            <button class="hotspot" type="button" data-goto="roadmap" style="left:12px;top:228px;width:231px;height:36px" data-label="回到依赖图" data-label-side></button>
+            <button class="hotspot" type="button" data-goto="roadmap" style="left:561px;top:95px;width:100px;height:32px" data-label="返回列表" data-label-below></button>
+
+            <div class="prd-entry" data-clickable>
+              <button class="btn outline" type="button" id="open-prd-drawer"><span style="color:var(--primary)">◈</span> Agent 覆盖</button>
+            </div>
+
+            <div class="mask" id="prd-mask" style="display:none">
+              <aside class="drawer is-narrow" role="dialog" aria-modal="true" aria-label="PRD Agent 覆盖">
+                <div class="drawer-head">
+                  <div>
+                    <div class="drawer-title">Agent 覆盖 · 生命周期 Agent 矩阵——全局统一配置 + PRD 级覆盖</div>
+                    <div class="drawer-desc">
+                      勾选要覆盖的生命周期并选择 agent，保存时只改写该 PRD 文件头部，其余内容与正文不动；仅影响这一个 PRD。
+                    </div>
+                  </div>
+                  <button class="drawer-close" type="button" id="close-prd-drawer" aria-label="关闭覆盖面板">✕</button>
+                </div>
+                <div class="drawer-body">
+                  <div class="section-label">生命周期覆盖</div>
+                  <div id="override-rows"></div>
+                  <div class="section-label">PRD 文件头部（保存后）</div>
+                  <div class="head-preview">
+                    <header>tasks/pending/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md</header>
+                    <pre id="head-preview-code"></pre>
+                  </div>
+                </div>
+                <div class="drawer-foot">
+                  <span class="hint" id="drawer-hint"></span>
+                  <div class="drawer-actions">
+                    <button class="btn outline sm" type="button" id="demo-prd-unregistered" data-clickable>演示：文件里已有未注册 agent</button>
+                    <button class="btn ghost" type="button" id="clear-overrides" data-clickable>清除全部覆盖</button>
+                    <button class="btn default" type="button" id="write-prd" data-clickable disabled>写回 PRD 文件</button>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <p class="state-hint" id="state-hint"></p>
+    </main>
+
+    <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+    <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具">
+      <span class="prototype-chrome__label" aria-hidden="true">原型</span>
+      <a href="./hub.html">返回 Hub</a>
+      <a href="./lifecycle-agent-matrix.md">原型说明</a>
+      <button type="button" data-hotspot-toggle>◎ 可点击区域：开</button>
+      <button type="button" data-prototype-reset>↺ 重置</button>
+    </nav>
+    <script src="./assets/prototype-chrome.js"></script>
+
+    <script>
+      (() => {
+        // ── 真实数据（取自 config.toml、内置默认与真实 registry） ──
+        const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi'];
+        const UNREGISTERED_AGENT = 'codebuddy';
+        // 本机已安装可用的 agent（用于回退链跳过未安装项）；'pi' 本机存在，这里按真实情况全部视为可用
+        const DEFAULT_FALLBACK_ORDER = ['claude', 'kimi', 'codex'];
+        const DEFAULT_MAX_AGENT_SWITCHES = 2;
+        // [agent_runner.agents.<name>] 段里的路由标签（auto 判定靠它）
+        const AGENT_LABEL_DEFAULTS = [
+          { agent: 'codex', label: 'agent/codex', color: '5319E7', description: 'Use Codex for local runner execution.' },
+          { agent: 'claude', label: 'agent/claude', color: 'BFDADC', description: 'Use Claude Code for local runner execution.' },
+          { agent: 'kimi', label: 'agent/kimi', color: 'FF6B6B', description: 'Use Kimi for local runner execution.' },
+          { agent: 'pi', label: 'agent/pi', color: '7C3AED', description: 'Use pi for local runner execution.' },
+        ];
+        // 受管理仓库列表：repo_id / display_name 与真实 registry 一致，rowTop 是实测行位
+        const REPOS = [
+          { id: 'keda-main', label: 'Keda Main', rowTop: 72 },
+          { id: 'zata-zhangtao-freshai', label: 'freshai', rowTop: 106 },
+          { id: 'freshai', label: 'freshai', rowTop: 140 },
+          { id: 'kimi-ppt', label: 'kimi-ppt', rowTop: 174 },
+          { id: 'dw-sale-agent', label: 'dw-sale-agent', rowTop: 208 },
+          { id: 'zata-docs', label: 'zata-docs', rowTop: 242 },
+          { id: 'transmaster', label: 'TransMaster', rowTop: 276 },
+          { id: 'zata-codes-template', label: 'zata_code_template', rowTop: 310 },
+          { id: 'keda', label: 'keda', rowTop: 344 },
+          { id: 'zata-zhangtao-fsense', label: 'fsense', rowTop: 378 },
+        ];
+        // legacy* = 既有散落配置键与内置默认（矩阵未声明时的回退层）
+        // autoLabel = 该阶段 auto 的真实语义（各阶段不同，见 PRD §1 表）；只有实现了 auto 的阶段才提供该选项
+        const LIFECYCLES = [
+          { key: 'implementation', name: '实现', legacyRef: 'claude', legacyNote: 'runner.default_agent', legacySource: 'legacy', autoLabel: 'auto（按 Issue 上的 agent 标签路由）' },
+          { key: 'fix', name: '修复', legacyRef: 'executor', legacyNote: '内置默认：跟随实现阶段', legacySource: 'builtin', allowExecutor: true },
+          { key: 'closeout', name: '收尾', legacyRef: 'executor', legacyNote: '内置默认：跟随实现阶段', legacySource: 'builtin', allowExecutor: true },
+          { key: 'verifier', name: '校验', legacyRef: 'auto', legacyNote: 'validation.verifier_agent 缺省值', legacySource: 'legacy', autoLabel: 'auto（从回退链挑一个 ≠ 实现者的 agent）' },
+          { key: 'review', name: '审核', legacyRef: 'auto', legacyNote: 'pre_pr_review.review_agent', legacySource: 'legacy', autoLabel: 'auto（优先挑 ≠ 实现者；allow_same_agent 时沿用实现者）' },
+          { key: 'supervisor', name: '监督', legacyRef: 'auto', legacyNote: 'post_pr_supervisor.supervisor_agent', legacySource: 'legacy', autoLabel: 'auto（发布路径沿用本次实现者）' },
+          { key: 'planner', name: '决策', legacyRef: 'claude', legacyNote: 'interactive_decision.default_agent', legacySource: 'legacy' },
+          { key: 'content_generation', name: '内容生成', legacyRef: 'claude', legacyNote: 'generated_content.default_agent', legacySource: 'legacy' },
+          { key: 'deliberate', name: '辩论', legacyRef: 'auto', legacyNote: '内置默认：按 agent/deliberate 标签路由', legacySource: 'builtin', autoLabel: 'auto（按 agent/deliberate 标签路由）' },
+        ];
+        const SOURCE_BADGE = {
+          repo: ['badge repo', '本仓库 .iar.toml'],
+          global: ['badge global', '本机 config.toml'],
+          legacy: ['badge legacy', '既有配置键'],
+          builtin: ['badge builtin', '内置默认'],
+        };
+        // 本仓库 PRD 没有 YAML frontmatter：覆盖块落在标题下方的元信息 bullet 区。
+        const PRD_HEAD_LINES = [
+          '# PRD: 生命周期 Agent 矩阵——全局统一配置 + PRD 级覆盖',
+          '',
+          '- GitHub Issue: （创建后回填）',
+        ];
+
+        const blankMatrix = () => Object.fromEntries(LIFECYCLES.map((item) => [item.key, null]));
+        const initial = () => ({
+          screen: 'settings',
+          activeTab: 'labels',
+          agentLabels: AGENT_LABEL_DEFAULTS.map((entry) => ({ ...entry })),
+          labelBaseline: AGENT_LABEL_DEFAULTS.map((entry) => ({ ...entry })),
+          labelError: null,
+          labelErrorReason: null,
+          labelDiff: null,
+          globalMatrix: blankMatrix(),
+          globalErrorKey: null,
+          globalDiff: null,
+          repoId: 'keda-main',
+          repoMatrices: Object.fromEntries(REPOS.map((repo) => [repo.id, blankMatrix()])),
+          repoErrorKey: null,
+          repoDiff: null,
+          fallbackOrder: [...DEFAULT_FALLBACK_ORDER],
+          fallbackSwitches: DEFAULT_MAX_AGENT_SWITCHES,
+          fallbackBaseline: { order: [...DEFAULT_FALLBACK_ORDER], switches: DEFAULT_MAX_AGENT_SWITCHES },
+          fallbackDiff: null,
+          prdOverrides: {},
+          prdErrorKey: null,
+          prdWritten: false,
+        });
+        let state = initial();
+
+        const $ = (selector) => document.querySelector(selector);
+        const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+        const esc = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+        const byKey = (key) => LIFECYCLES.find((item) => item.key === key);
+        const isUnregistered = (value) => Boolean(value) && value !== 'executor' && value !== 'auto' && !REGISTERED_AGENTS.includes(value);
+        const agentLabel = (value) => (value === 'auto' ? 'auto' : value);
+        const localMatrix = () => state.repoMatrices[state.repoId];
+        const declaredIn = (matrix, lifecycle) => matrix[lifecycle.key] ?? null;
+
+        /**
+         * 下拉要显示的「当前生效值」＝优先级链上第一个被声明的值：
+         * 本层声明 > 上一层声明 > 既有配置键 / 内置默认。不做 executor → 具体 agent 的二次解析，
+         * 否则 fix/closeout 的「跟随实现」语义会在下拉里被写死成某个 agent。
+         */
+        const shownValue = (layer, lifecycle) => {
+          const local = declaredIn(layer === 'global' ? state.globalMatrix : localMatrix(), lifecycle);
+          if (local) return local;
+          if (layer === 'repo') {
+            const global = declaredIn(state.globalMatrix, lifecycle);
+            if (global) return global;
+          }
+          return lifecycle.legacyRef;
+        };
+        const shownSource = (layer, lifecycle) => {
+          if (declaredIn(layer === 'global' ? state.globalMatrix : localMatrix(), lifecycle)) return layer === 'global' ? 'global' : 'repo';
+          if (layer === 'repo' && declaredIn(state.globalMatrix, lifecycle)) return 'global';
+          return lifecycle.legacySource;
+        };
+        /** executor 只是「跟随实现」的声明，附带展示它当前解析成哪个 agent。 */
+        const executorHint = (layer, lifecycle) => {
+          if (shownValue(layer, lifecycle) !== 'executor') return null;
+          const implementation = shownValue(layer, byKey('implementation'));
+          return `当前实现阶段：${implementation}`;
+        };
+
+        const toastRoot = $('#toast-root');
+        const toast = (message, isError = false) => {
+          const node = document.createElement('div');
+          node.className = 'toast' + (isError ? ' is-error' : '');
+          node.innerHTML = `<span class="dot"></span>${esc(message)}`;
+          toastRoot.replaceChildren(node);
+          window.setTimeout(() => node.remove(), 3400);
+        };
+
+        /**
+         * 下拉选项就是真实取值：已注册 agent + auto（标签路由）+ fix/closeout 的 executor。
+         * 未注册值会被显式插入，否则原生 select 会退回首项、把非法值显示成合法值。
+         */
+        const options = (lifecycle, selected) => {
+          const entries = REGISTERED_AGENTS.map((agent) => [agent, agent])
+            .concat(lifecycle.autoLabel ? [['auto', lifecycle.autoLabel]] : [])
+            .concat(lifecycle.allowExecutor ? [['executor', '跟随实现（executor）']] : []);
+          if (selected && !entries.some(([value]) => value === selected)) {
+            entries.unshift([selected, `${selected}（未注册）`]);
+          }
+          return entries
+            .map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${esc(label)}</option>`)
+            .join('');
+        };
+
+        const rowHtml = (layer, lifecycle, { isError, errorText, selectId, resetLabel }) => {
+          const value = shownValue(layer, lifecycle);
+          const source = shownSource(layer, lifecycle);
+          const [badgeClass, badgeText] = SOURCE_BADGE[source];
+          const pinned = declaredIn(layer === 'global' ? state.globalMatrix : localMatrix(), lifecycle) !== null;
+          const hint = executorHint(layer, lifecycle);
+          const note = pinned
+            ? (layer === 'global' ? '已在本机 config.toml 显式设置' : '已在本仓库 .iar.toml 显式设置')
+            : source === 'legacy'
+              ? lifecycle.legacyNote
+              : source === 'global'
+                ? '继承全局层'
+                : '';
+          return `<tr class="${isError ? 'is-error' : pinned ? 'is-pinned' : ''}">
+            <td>
+              <div class="lifecycle-name">${esc(lifecycle.name)}</div>
+              <div class="lifecycle-key">${esc(lifecycle.key)}</div>
+            </td>
+            <td>
+              <select class="select" data-clickable ${selectId}
+                data-edited="${pinned ? 'true' : 'false'}" data-invalid="${isError ? 'true' : 'false'}"
+                aria-label="${esc(lifecycle.name)}的 agent">
+                ${options(lifecycle, isError ? UNREGISTERED_AGENT : value)}
+              </select>
+              ${hint ? `<div class="cell-note is-block">${esc(hint)}</div>` : ''}
+              ${isError ? `<div class="cell-error">${esc(errorText)}</div>` : ''}
+            </td>
+            <td>
+              <span class="${badgeClass}">${badgeText}</span>
+              ${note ? `<span class="cell-note" style="margin-left:6px">${esc(note)}</span>` : ''}
+              ${pinned ? `<div><button class="link-reset" type="button" data-clickable data-reset-layer="${layer}" data-reset-key="${lifecycle.key}">${esc(resetLabel)}</button></div>` : ''}
+            </td>
+          </tr>`;
+        };
+
+        // ── Tab 1：Agent 标签设置（写 [agent_runner.agents.<name>] 段） ──
+        const labelEntry = (agent) => state.agentLabels.find((entry) => entry.agent === agent);
+        const labelDirty = (entry) => {
+          const baseline = state.labelBaseline.find((item) => item.agent === entry.agent);
+          return entry.label !== baseline.label || entry.color !== baseline.color || entry.description !== baseline.description;
+        };
+        /** 标签名必须非空且每个 agent 唯一：重复会让 auto 无法判定。 */
+        const findLabelConflict = () => {
+          const seen = new Map();
+          for (const entry of state.agentLabels) {
+            const normalized = entry.label.trim();
+            if (!normalized) return { agent: entry.agent, reason: '标签名不能为空' };
+            if (seen.has(normalized)) {
+              return { agent: entry.agent, reason: `标签名与 ${seen.get(normalized)} 重复：auto 无法判定该 Issue 属于谁` };
+            }
+            seen.set(normalized, entry.agent);
+          }
+          return null;
+        };
+
+        const renderAgentLabels = ({ rebuildTable = true } = {}) => {
+          if (rebuildTable) {
+            $('#agent-label-body').innerHTML = state.agentLabels.map((entry) => {
+              const invalid = state.labelError === entry.agent;
+              const changed = labelDirty(entry);
+              return `<tr class="${invalid ? 'is-error' : changed ? 'is-pinned' : ''}">
+                <td>
+                  <div class="lifecycle-name">${esc(entry.agent)}</div>
+                  <div class="lifecycle-key">[agent_runner.agents.${esc(entry.agent)}]</div>
+                </td>
+                <td>
+                  <input class="label-input" type="text" data-label-field="label" data-agent="${esc(entry.agent)}"
+                    data-invalid="${invalid ? 'true' : 'false'}" value="${esc(entry.label)}"
+                    aria-label="${esc(entry.agent)} 的 GitHub 标签" />
+                  ${invalid ? `<div class="cell-error">${esc(state.labelErrorReason ?? '')}</div>` : ''}
+                </td>
+                <td>
+                  <div class="color-field">
+                    <input type="color" data-label-field="color" data-agent="${esc(entry.agent)}"
+                      value="#${esc(entry.color)}" aria-label="${esc(entry.agent)} 的标签颜色" />
+                    <span class="color-hex">#${esc(entry.color)}</span>
+                  </div>
+                </td>
+                <td>
+                  <input class="label-input" type="text" data-label-field="description" data-agent="${esc(entry.agent)}"
+                    value="${esc(entry.description)}" aria-label="${esc(entry.agent)} 的标签描述" />
+                </td>
+              </tr>`;
+            }).join('');
+          }
+
+          const changedEntries = state.agentLabels.filter(labelDirty);
+          $('#save-agent-labels').disabled = changedEntries.length === 0 || Boolean(state.labelError);
+          $('#agent-label-hint').textContent = state.labelError
+            ? '标签名非法，保存被阻断。'
+            : changedEntries.length
+              ? `${changedEntries.length} 个 agent 的标签有改动，保存写入各自的注册块。`
+              : `与 config.toml 一致：${state.agentLabels.length} 个 agent 的标签都在沿用当前值。`;
+          $('#agent-label-diff-wrap').style.display = state.labelDiff ? 'block' : 'none';
+          if (state.labelDiff) {
+            $('#agent-label-diff-header').textContent = 'config.toml — 保存将写入';
+            $('#agent-label-diff-code').innerHTML = state.labelDiff;
+          }
+        };
+
+        // ── 全局层：agent 回退顺序（写 config.toml 的 [agent_runner.runner] 段） ──
+        const fallbackDirty = () =>
+          state.fallbackOrder.join(',') !== state.fallbackBaseline.order.join(',')
+          || state.fallbackSwitches !== state.fallbackBaseline.switches;
+
+        const renderFallback = () => {
+          $('#fallback-order-list').innerHTML = state.fallbackOrder.length
+            ? state.fallbackOrder.map((agent, index) => {
+                const installed = REGISTERED_AGENTS.includes(agent);
+                return `<div class="order-row${index === 0 ? ' is-first' : ''}">
+                  <span class="index">${index + 1}</span>
+                  <span class="agent">${esc(agent)}${installed ? '' : '<span class="agent-missing">本机未安装，会被跳过</span>'}</span>
+                  <button class="icon-btn" type="button" data-clickable data-order-move="${index}" data-order-delta="-1" aria-label="上移 ${esc(agent)}" ${index === 0 ? 'disabled' : ''}>↑</button>
+                  <button class="icon-btn" type="button" data-clickable data-order-move="${index}" data-order-delta="1" aria-label="下移 ${esc(agent)}" ${index === state.fallbackOrder.length - 1 ? 'disabled' : ''}>↓</button>
+                  <button class="icon-btn" type="button" data-clickable data-order-remove="${index}" aria-label="移除 ${esc(agent)}">✕</button>
+                </div>`;
+              }).join('')
+            : '<div class="cell-note">回退链为空：主 agent 失败后不再换人（等价于关闭自动切换）。</div>';
+
+          const remaining = REGISTERED_AGENTS.filter((agent) => !state.fallbackOrder.includes(agent));
+          $('#fallback-add-select').innerHTML = remaining.length
+            ? remaining.map((agent) => `<option value="${agent}">${esc(agent)}</option>`).join('')
+            : '<option value="">（已全部加入）</option>';
+          $('#fallback-add').disabled = remaining.length === 0;
+
+          $('#max-agent-switches').value = String(state.fallbackSwitches);
+          const attempts = state.fallbackOrder.slice(0, state.fallbackSwitches).length + 1;
+          $('#fallback-summary').textContent = `主 agent 之外最多再换 ${state.fallbackSwitches} 次，最多尝试 ${attempts} 个 agent。`;
+          $('#save-fallback').disabled = !fallbackDirty();
+          $('#fallback-hint').textContent = fallbackDirty()
+            ? '有未保存的修改，保存写入 config.toml 的 [agent_runner.runner] 段。'
+            : '与 config.toml 一致（当前走代码默认值）。';
+
+          if (state.fallbackDiff) {
+            $('#fallback-diff-wrap').style.display = 'block';
+            $('#fallback-diff-header').textContent = 'config.toml — 保存将写入';
+            $('#fallback-diff-code').innerHTML = state.fallbackDiff;
+          } else {
+            $('#fallback-diff-wrap').style.display = 'none';
+          }
+        };
+
+        // ── 视图一：Settings · Agent 管理（Auto 标签 / 生命周期矩阵 / 回退顺序） ──
+        const renderGlobalMatrix = () => {
+          $('#global-matrix-body').innerHTML = LIFECYCLES.map((lifecycle) => rowHtml('global', lifecycle, {
+            isError: state.globalErrorKey === lifecycle.key,
+            errorText: `agent “${UNREGISTERED_AGENT}” 未注册：该阶段开始前报错，保存被阻断`,
+            selectId: `data-global-select="${lifecycle.key}"`,
+            resetLabel: '不写本键（跟随既有配置）',
+          })).join('');
+
+          const pinnedCount = LIFECYCLES.filter((lifecycle) => declaredIn(state.globalMatrix, lifecycle) !== null).length;
+          $('#save-global').disabled = Boolean(state.globalErrorKey) || pinnedCount === 0;
+          $('#global-hint').textContent = state.globalErrorKey
+            ? '存在未注册 agent，保存被阻断（fail-fast）。'
+            : pinnedCount
+              ? `${pinnedCount} 行已改，保存写入 config.toml；其余行继续沿用既有配置键。`
+              : '与 config.toml 一致：九个生命周期都还在沿用既有配置键与内置默认。';
+
+          if (state.globalDiff) {
+            $('#global-diff-wrap').style.display = 'block';
+            $('#global-diff-header').textContent = 'config.toml — 保存将写入';
+            $('#global-diff-code').innerHTML = state.globalDiff;
+          } else {
+            $('#global-diff-wrap').style.display = 'none';
+          }
+        };
+
+        // ── 视图二：Roadmap · 仓库级 ──
+        const renderRepoGears = () => {
+          $('#repo-gears').innerHTML = REPOS.map((repo) => `<button class="hotspot gear${repo.id === state.repoId ? ' is-current' : ''}"
+            type="button" data-open-repo="${repo.id}" aria-label="打开 ${esc(repo.label)} 的 Agent 设置"
+            style="left:490px;top:${repo.rowTop + 5}px;width:22px;height:22px">⚙</button>`).join('');
+          $$('[data-open-repo]').forEach((node) => node.addEventListener('click', () => {
+            state.repoId = node.dataset.openRepo;
+            state.repoErrorKey = null;
+            state.repoDiff = null;
+            openRepoDrawer();
+          }));
+        };
+
+        const renderRepoMatrix = () => {
+          const repo = REPOS.find((item) => item.id === state.repoId);
+          $('#repo-drawer-title').textContent = `仓库 Agent 设置 · ${repo.label}`;
+          $('#repo-matrix-body').innerHTML = LIFECYCLES.map((lifecycle) => rowHtml('repo', lifecycle, {
+            isError: state.repoErrorKey === lifecycle.key,
+            errorText: `agent “${UNREGISTERED_AGENT}” 未注册：保存被阻断`,
+            selectId: `data-repo-select="${lifecycle.key}"`,
+            resetLabel: '跟随全局（删除本键）',
+          })).join('');
+
+          const pinnedCount = LIFECYCLES.filter((lifecycle) => declaredIn(state.repoMatrices[repo.id], lifecycle) !== null).length;
+          $('#save-repo').disabled = Boolean(state.repoErrorKey) || pinnedCount === 0;
+          $('#repo-hint').textContent = state.repoErrorKey
+            ? '存在未注册 agent，保存被阻断（fail-fast）。'
+            : pinnedCount
+              ? `${pinnedCount} 行已改，保存写入 ${repo.label} 的 .iar.toml；其余行继续跟随全局层。`
+              : `与 ${repo.label} 的 .iar.toml 一致：九个生命周期都还在跟随全局层。`;
+
+          if (state.repoDiff) {
+            $('#repo-diff-wrap').style.display = 'block';
+            $('#repo-diff-header').textContent = `${repo.label}/.iar.toml — 保存将写入`;
+            $('#repo-diff-code').innerHTML = state.repoDiff;
+          } else {
+            $('#repo-diff-wrap').style.display = 'none';
+          }
+        };
+
+        const openRepoDrawer = () => { $('#repo-mask').style.display = 'flex'; renderRepoMatrix(); };
+        const closeRepoDrawer = () => { $('#repo-mask').style.display = 'none'; };
+
+        // ── 视图三：PRD · 覆盖层 ──
+        const inheritedForOverride = (lifecycle) => {
+          const value = shownValue('repo', lifecycle);
+          return value === 'auto' ? '' : value;
+        };
+
+        const renderOverrides = () => {
+          $('#override-rows').innerHTML = LIFECYCLES.map((lifecycle) => {
+            const active = Object.prototype.hasOwnProperty.call(state.prdOverrides, lifecycle.key);
+            const isError = state.prdErrorKey === lifecycle.key;
+            return `<div class="override-row ${isError ? 'is-error' : ''}">
+              <input type="checkbox" data-clickable id="override-${lifecycle.key}" data-override-check="${lifecycle.key}"
+                aria-label="覆盖${esc(lifecycle.name)}阶段" ${active ? 'checked' : ''} />
+              <label class="name" for="override-${lifecycle.key}">${esc(lifecycle.name)} <span class="lifecycle-key">${esc(lifecycle.key)}</span></label>
+              <select class="select" data-clickable data-override-select="${lifecycle.key}"
+                data-invalid="${isError ? 'true' : 'false'}" aria-label="${esc(lifecycle.name)}覆盖后的 agent" ${active ? '' : 'disabled'}>
+                ${options(lifecycle, isError ? UNREGISTERED_AGENT : state.prdOverrides[lifecycle.key] ?? '')}
+              </select>
+            </div>`;
+          }).join('');
+
+          const entries = LIFECYCLES
+            .filter((lifecycle) => lifecycle.key in state.prdOverrides)
+            .filter((lifecycle) => Boolean(state.prdOverrides[lifecycle.key]));
+          const headLineClass = state.prdWritten ? 'written' : 'add';
+          const body = [...PRD_HEAD_LINES];
+          if (entries.length) {
+            body.push('- lifecycle_agents:');
+            entries.forEach((lifecycle) => body.push(`  - ${lifecycle.key}: ${state.prdOverrides[lifecycle.key]}`));
+          }
+          $('#head-preview-code').innerHTML = entries.length
+            ? esc(body.join('\n'))
+                .replace(/^(- lifecycle_agents:)$/m, `<span class="${headLineClass}">$1</span>`)
+                .replace(/^(  - \w+: .*)$/gm, `<span class="${headLineClass}">$1</span>`)
+            : esc(body.join('\n'));
+
+          const checkedCount = Object.keys(state.prdOverrides).length;
+          const pendingCount = checkedCount - entries.length;
+          $('#write-prd').disabled = checkedCount === 0 || pendingCount > 0 || Boolean(state.prdErrorKey);
+          $('#clear-overrides').disabled = checkedCount === 0;
+          $('#drawer-hint').textContent = state.prdErrorKey
+            ? '存在未注册 agent，写回被阻断（fail-fast）。'
+            : pendingCount
+              ? `已勾选 ${pendingCount} 个生命周期但尚未选择 agent：当前生效值是 auto（标签路由），必须显式指定。`
+              : checkedCount
+                ? `已勾选 ${checkedCount} 个覆盖，写回只改该 PRD 文件头部。`
+                : '尚未勾选覆盖：该 PRD 全部跟随仓库级与全局层。';
+        };
+
+        // ── 视图切换：走真实侧栏导航，不设额外的原型标签栏 ──
+        const SCREEN_HINTS = {
+          settings:
+            'Settings → 「Agent 管理」（本原型新增）用粘性 Tab 分成两页：① Agent 标签设置（默认页）配置每个 agent 的路由标签、颜色与描述，auto 靠它判定；② 生命周期 Agent 设置 配置九个阶段用谁 + 主 agent 失败后的回退顺序。三个保存按钮各写 config.toml 的不同段。',
+          roadmap:
+            'Roadmap = 仓库级入口（本原型新增）：受管理仓库每行右侧的 ⚙ 打开该仓库的 .iar.toml 矩阵；下拉显示的是该仓库当前生效值（含继承自全局的值），只有改动过的行写进 .iar.toml，其余继续跟随全局。点侧栏 Settings 回全局页；点 PRD 卡片进原文。',
+          prd:
+            'PRD 原文 = PRD 级覆盖（本原型新增）：工具栏右侧「Agent 覆盖」打开抽屉，勾选生命周期并选择 agent，右侧实时预览写入文件头部的 bullet 块（本仓库 PRD 没有 YAML frontmatter）。',
+        };
+        const setScreen = (screen) => {
+          state.screen = screen;
+          $$('.screen').forEach((node) => node.classList.toggle('is-active', node.dataset.screen === screen));
+          if (screen !== 'roadmap') closeRepoDrawer();
+          if (screen !== 'prd') closePrdDrawer();
+          $('#state-hint').textContent = SCREEN_HINTS[screen];
+        };
+
+        const openPrdDrawer = () => { $('#prd-mask').style.display = 'flex'; renderOverrides(); };
+        const closePrdDrawer = () => { $('#prd-mask').style.display = 'none'; };
+
+        // ── 画布等比缩放：热点与覆盖层坐标恒定 ──
+        const STAGE_WIDTH = 1440;
+        const STAGE_HEIGHT = 1200;
+        const fitStage = () => {
+          const scale = Math.min(1, $('#stage-wrap').clientWidth / STAGE_WIDTH);
+          $('#stage').style.transform = `scale(${scale})`;
+          $('#stage-wrap').style.height = `${STAGE_HEIGHT * scale}px`;
+        };
+        window.addEventListener('resize', fitStage);
+
+        // 下拉 change 的统一处理：把值写进对应层的声明表（等于「本层显式设置」）
+        const applyLayerChange = (layer, key, value) => {
+          const matrix = layer === 'global' ? state.globalMatrix : localMatrix();
+          // 与继承值相同 = 不显式声明，避免把「跟随」误写成固定值
+          matrix[key] = value === shownSourceValueForCompare(layer, key) ? null : value;
+        };
+        /** 与当前继承到的值比较：相等则不写入本层。 */
+        const shownSourceValueForCompare = (layer, key) => {
+          const lifecycle = byKey(key);
+          if (layer === 'repo') {
+            const global = declaredIn(state.globalMatrix, lifecycle);
+            return global ?? lifecycle.legacyRef;
+          }
+          return lifecycle.legacyRef;
+        };
+
+        // ── 事件绑定 ──
+        $$('[data-goto]').forEach((node) => node.addEventListener('click', () => setScreen(node.dataset.goto)));
+
+        $('#global-matrix-body').addEventListener('change', (event) => {
+          const select = event.target.closest('[data-global-select]');
+          if (!select) return;
+          applyLayerChange('global', select.dataset.globalSelect, select.value);
+          state.globalErrorKey = isUnregistered(select.value) ? select.dataset.globalSelect : null;
+          state.globalDiff = null;
+          renderGlobalMatrix();
+        });
+        $('#demo-global-unregistered').addEventListener('click', () => {
+          state.globalMatrix.review = UNREGISTERED_AGENT;
+          state.globalErrorKey = 'review';
+          state.globalDiff = null;
+          renderGlobalMatrix();
+          toast(`fail-fast：agent “${UNREGISTERED_AGENT}” 未注册（阶段：审核 review）`, true);
+        });
+        $('#save-global').addEventListener('click', () => {
+          const lines = LIFECYCLES.map((lifecycle) => {
+            const declaredValue = declaredIn(state.globalMatrix, lifecycle);
+            return declaredValue
+              ? `<span class="add">+ ${lifecycle.key} = "${declaredValue}"</span>`
+              : `<span class="note">· ${lifecycle.key}：不写入，沿用 ${esc(lifecycle.legacyNote)}</span>`;
+          });
+          state.globalDiff = `<span class="note">· [agent_runner.lifecycle_agents] 原为空 / 注释</span>\n${lines.join('\n')}`;
+          renderGlobalMatrix();
+          toast('已保存到 config.toml（各仓库 .iar.toml 未改动）');
+        });
+
+        // 回退顺序：排序 / 增删 / 切换次数 / 保存
+        $('#fallback-order-list').addEventListener('click', (event) => {
+          const moveButton = event.target.closest('[data-order-move]');
+          const removeButton = event.target.closest('[data-order-remove]');
+          if (moveButton) {
+            const from = Number(moveButton.dataset.orderMove);
+            const to = from + Number(moveButton.dataset.orderDelta);
+            if (to < 0 || to >= state.fallbackOrder.length) return;
+            const [moved] = state.fallbackOrder.splice(from, 1);
+            state.fallbackOrder.splice(to, 0, moved);
+          } else if (removeButton) {
+            state.fallbackOrder.splice(Number(removeButton.dataset.orderRemove), 1);
+          } else {
+            return;
+          }
+          state.fallbackDiff = null;
+          renderFallback();
+        });
+        $('#fallback-add').addEventListener('click', () => {
+          const agent = $('#fallback-add-select').value;
+          if (!agent || state.fallbackOrder.includes(agent)) return;
+          state.fallbackOrder.push(agent);
+          state.fallbackDiff = null;
+          renderFallback();
+        });
+        $('#max-agent-switches').addEventListener('change', (event) => {
+          const parsed = Number(event.target.value);
+          state.fallbackSwitches = Number.isFinite(parsed) ? Math.min(8, Math.max(0, Math.trunc(parsed))) : DEFAULT_MAX_AGENT_SWITCHES;
+          state.fallbackDiff = null;
+          renderFallback();
+        });
+        $('#save-fallback').addEventListener('click', () => {
+          const orderLiteral = `[${state.fallbackOrder.map((agent) => `"${agent}"`).join(', ')}]`;
+          state.fallbackDiff = [
+            '<span class="note">· [agent_runner.runner] 段其余键不变</span>',
+            `<span class="add">+ agent_fallback_order = ${esc(orderLiteral)}</span>`,
+            `<span class="add">+ max_agent_switches = ${state.fallbackSwitches}</span>`,
+          ].join('\n');
+          state.fallbackBaseline = { order: [...state.fallbackOrder], switches: state.fallbackSwitches };
+          renderFallback();
+          toast('已保存到 config.toml 的 [agent_runner.runner] 段');
+        });
+
+        // ── Tab 切换 ──
+        $$('[data-tab]').forEach((node) => node.addEventListener('click', () => {
+          state.activeTab = node.dataset.tab;
+          $$('[data-tab]').forEach((tab) => {
+            const active = tab.dataset.tab === state.activeTab;
+            tab.classList.toggle('is-active', active);
+            tab.setAttribute('aria-selected', String(active));
+          });
+          $$('[data-tab-panel]').forEach((panel) => panel.classList.toggle('is-active', panel.dataset.tabPanel === state.activeTab));
+          $('.overlay.panel').scrollTop = 0;
+        }));
+
+        // ── Agent 标签设置：输入 / 校验 / 演示 / 保存 ──
+        $('#agent-label-body').addEventListener('input', (event) => {
+          const field = event.target.closest('[data-label-field]');
+          if (!field) return;
+          const entry = labelEntry(field.dataset.agent);
+          const fieldName = field.dataset.labelField;
+          entry[fieldName] = fieldName === 'color' ? field.value.replace('#', '').toUpperCase() : field.value;
+          state.labelError = null;
+          state.labelErrorReason = null;
+          state.labelDiff = null;
+          renderAgentLabels({ rebuildTable: false });
+          const hexLabel = field.closest('.color-field')?.querySelector('.color-hex');
+          if (hexLabel) hexLabel.textContent = `#${entry.color}`;
+        });
+        $('#agent-label-body').addEventListener('change', (event) => {
+          if (!event.target.closest('[data-label-field]')) return;
+          const conflict = findLabelConflict();
+          state.labelError = conflict ? conflict.agent : null;
+          state.labelErrorReason = conflict ? conflict.reason : null;
+          state.labelDiff = null;
+          renderAgentLabels();
+        });
+        $('#demo-label-conflict').addEventListener('click', () => {
+          // 把 kimi 的标签改成另一个 agent 当前用的标签，制造真实的重复
+          const other = state.agentLabels.find((entry) => entry.agent !== 'kimi');
+          labelEntry('kimi').label = other.label;
+          const conflict = findLabelConflict();
+          state.labelError = conflict ? conflict.agent : null;
+          state.labelErrorReason = conflict ? conflict.reason : null;
+          state.labelDiff = null;
+          renderAgentLabels();
+          toast(`fail-fast：${conflict?.reason ?? '标签名重复'}`, true);
+        });
+        $('#save-agent-labels').addEventListener('click', () => {
+          state.labelDiff = state.agentLabels.filter(labelDirty).map((entry) => {
+            const baseline = state.labelBaseline.find((item) => item.agent === entry.agent);
+            const lines = [];
+            if (entry.label.trim() !== baseline.label) lines.push(`<span class="add">+ label = "${esc(entry.label.trim())}"</span>`);
+            if (entry.color !== baseline.color) lines.push(`<span class="add">+ label_color = "${esc(entry.color)}"</span>`);
+            if (entry.description !== baseline.description) lines.push(`<span class="add">+ label_description = "${esc(entry.description)}"</span>`);
+            return [`<span class="note">· [agent_runner.agents.${esc(entry.agent)}] 段其余字段不变</span>`, ...lines].join('\n');
+          }).join('\n');
+          state.labelBaseline = state.agentLabels.map((entry) => ({ ...entry }));
+          renderAgentLabels();
+          toast('已保存到 config.toml 的 agent 注册块');
+        });
+
+        $('#repo-mask').addEventListener('click', (event) => { if (event.target === $('#repo-mask')) closeRepoDrawer(); });
+        $('#repo-drawer-close').addEventListener('click', closeRepoDrawer);
+        $('#repo-matrix-body').addEventListener('change', (event) => {
+          const select = event.target.closest('[data-repo-select]');
+          if (!select) return;
+          applyLayerChange('repo', select.dataset.repoSelect, select.value);
+          state.repoErrorKey = isUnregistered(select.value) ? select.dataset.repoSelect : null;
+          state.repoDiff = null;
+          renderRepoMatrix();
+        });
+        $('#demo-repo-unregistered').addEventListener('click', () => {
+          localMatrix().review = UNREGISTERED_AGENT;
+          state.repoErrorKey = 'review';
+          state.repoDiff = null;
+          renderRepoMatrix();
+          toast(`fail-fast：agent “${UNREGISTERED_AGENT}” 未注册（阶段：审核 review）`, true);
+        });
+        $('#save-repo').addEventListener('click', () => {
+          const repo = REPOS.find((item) => item.id === state.repoId);
+          const lines = LIFECYCLES.map((lifecycle) => {
+            const declaredValue = declaredIn(state.repoMatrices[repo.id], lifecycle);
+            return declaredValue
+              ? `<span class="add">+ ${lifecycle.key} = "${declaredValue}"</span>`
+              : `<span class="note">· ${lifecycle.key}：不写入，跟随全局 → ${esc(shownSourceValueForCompare('repo', lifecycle.key))}</span>`;
+          });
+          state.repoDiff = `<span class="note">· [agent_runner.lifecycle_agents] 原为空 / 注释</span>\n${lines.join('\n')}`;
+          renderRepoMatrix();
+          toast(`已保存到 ${repo.label} 的 .iar.toml（config.toml 未改动）`);
+        });
+
+        // 「跟随上一层」：清掉本层声明
+        document.addEventListener('click', (event) => {
+          const reset = event.target.closest('[data-reset-layer]');
+          if (!reset) return;
+          const layer = reset.dataset.resetLayer;
+          const matrix = layer === 'global' ? state.globalMatrix : localMatrix();
+          matrix[reset.dataset.resetKey] = null;
+          if (layer === 'global') { state.globalErrorKey = null; state.globalDiff = null; renderGlobalMatrix(); }
+          else { state.repoErrorKey = null; state.repoDiff = null; renderRepoMatrix(); }
+        });
+
+        $('#open-prd-drawer').addEventListener('click', openPrdDrawer);
+        $('#close-prd-drawer').addEventListener('click', closePrdDrawer);
+        $('#prd-mask').addEventListener('click', (event) => { if (event.target === $('#prd-mask')) closePrdDrawer(); });
+        document.addEventListener('keydown', (event) => {
+          if (event.key !== 'Escape') return;
+          closeRepoDrawer();
+          closePrdDrawer();
+        });
+
+        $('#override-rows').addEventListener('change', (event) => {
+          const check = event.target.closest('[data-override-check]');
+          const select = event.target.closest('[data-override-select]');
+          if (check) {
+            const key = check.dataset.overrideCheck;
+            if (check.checked) state.prdOverrides[key] = inheritedForOverride(byKey(key));
+            else delete state.prdOverrides[key];
+            state.prdWritten = false;
+            state.prdErrorKey = null;
+          } else if (select && !select.disabled) {
+            const key = select.dataset.overrideSelect;
+            state.prdOverrides[key] = select.value;
+            state.prdWritten = false;
+            state.prdErrorKey = isUnregistered(select.value) ? key : null;
+          }
+          renderOverrides();
+        });
+        $('#demo-prd-unregistered').addEventListener('click', () => {
+          // 下拉里只会出现已注册 agent，未注册值来自手工编辑过的 PRD 文件
+          state.prdOverrides.review = UNREGISTERED_AGENT;
+          state.prdErrorKey = 'review';
+          state.prdWritten = false;
+          renderOverrides();
+          toast(`fail-fast：PRD 覆盖里的 agent “${UNREGISTERED_AGENT}” 未注册（阶段：审核 review）`, true);
+        });
+        $('#clear-overrides').addEventListener('click', () => {
+          state.prdOverrides = {};
+          state.prdErrorKey = null;
+          state.prdWritten = false;
+          renderOverrides();
+        });
+        $('#write-prd').addEventListener('click', () => {
+          state.prdWritten = true;
+          renderOverrides();
+          toast(`已写回 PRD 头部 lifecycle_agents（${Object.keys(state.prdOverrides).length} 个生命周期）`);
+        });
+
+        document.addEventListener('prototype:reset', () => {
+          state = initial();
+          setScreen('settings');
+          $$('[data-tab]').forEach((tab) => {
+            const active = tab.dataset.tab === 'labels';
+            tab.classList.toggle('is-active', active);
+            tab.setAttribute('aria-selected', String(active));
+          });
+          $$('[data-tab-panel]').forEach((panel) => panel.classList.toggle('is-active', panel.dataset.tabPanel === 'labels'));
+          $('.overlay.panel').scrollTop = 0;
+          renderAgentLabels();
+          renderGlobalMatrix();
+          renderFallback();
+          renderRepoGears();
+          renderRepoMatrix();
+          renderOverrides();
+        });
+
+        fitStage();
+        setScreen('settings');
+        renderAgentLabels();
+        renderGlobalMatrix();
+        renderFallback();
+        renderRepoGears();
+        renderRepoMatrix();
+        renderOverrides();
+      })();
+    </script>
+  </body>
+</html>

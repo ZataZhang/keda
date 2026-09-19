@@ -13,6 +13,13 @@
       preview: './assets/roadmap-prd-controls-evidence-autopilot.png', entry: './assets/roadmap-prd-controls-evidence-autopilot.png', source: './roadmap-prd-controls-evidence-autopilot/',
     },
     {
+      id: 'lifecycle-agent-matrix', title: '生命周期 Agent 矩阵', project: 'keda', module: 'Console 设置',
+      form: 'code-native', version: 'v2.4', updatedAt: '2026-09-18', availability: 'available', validationLevel: '交互原型',
+      primaryFlow: 'Settings「Agent 管理」粘性 Tab：① Agent 标签设置（agent 路由标签 / 颜色 / 描述，默认页）② 生命周期 Agent 设置（九行矩阵 + agent 回退顺序）；Roadmap 仓库行齿轮编辑该仓库 .iar.toml；PRD 原文页工具栏「Agent 覆盖」写回 PRD 头部',
+      description: '真实 frontend-public 截图（Settings / Roadmap 依赖图 / PRD 原文）作底图，叠加新增的「Agent 管理」Tab 区块、仓库行齿轮与仓库矩阵抽屉、PRD 覆盖抽屉；覆盖层坐标与截图实测对齐。',
+      preview: './assets/lifecycle-agent-matrix/preview-settings.png', entry: './lifecycle-agent-matrix.html', source: './lifecycle-agent-matrix.md',
+    },
+    {
       id: 'worktree-dependency-demo', title: 'Worktree 前端依赖策略', project: 'keda', module: 'Developer Experience',
       form: 'code-native', version: 'v1.0', updatedAt: '2026-07-07', availability: 'available', validationLevel: '交互原型',
       primaryFlow: '比较独立安装与复用主工程依赖的反馈', description: '用于比较两种 Worktree 前端依赖策略的可交互演示。',

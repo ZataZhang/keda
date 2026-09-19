@@ -127,29 +127,35 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 
 **当前相关模块与断点**：
 
-- 页面入口：`frontend-public/app/(app)/app/roadmap/page.tsx`。已有 `handleStart` 与 `startRoadmapPrd`，但 `RoadmapGraph` 只接收 `onOpenContent`，时间轴/列表才接收 `onStart`。
-- 依赖图：`frontend-public/components/roadmap/roadmap-graph.tsx`，固定 220×64 节点 + SVG 贝塞尔连线；点击节点直接把整块主画布替换为 `PrdContentView`。
-- 列表卡片：`frontend-public/components/roadmap/prd-card.tsx` 已定义 `isStartable`（`not_started` / `failed` / `waiting`）和阻塞禁用规则，是前端按钮可见性的复用来源；不要在依赖图再复制一份判断。
+- 页面入口：`frontend-public/app/(app)/app/roadmap/page.tsx`。已有 `handleStart` 与 `startRoadmapPrd`，但 `RoadmapGraph` 只接收 `onOpenContent`，时间轴/列表才接收 `onStart`；页面以 `POLL_INTERVAL_MS = 30000` 轮询。
+- 依赖图：`frontend-public/components/roadmap/roadmap-graph.tsx`，固定 220×64 节点 + SVG 贝塞尔连线；点击节点直接把整块主画布替换为 `PrdContentView`。拓扑分层已提为同目录共享模块 `roadmap-topology.ts`；`type RoadmapView = "graph" | "timeline" | "list"`，「依赖图」是纯前端默认视图，`PATCH /roadmap/settings` 的 `default_view` 只接受 `timeline|list`，graph 不回写后端。
+- 列表卡片：`frontend-public/components/roadmap/prd-card.tsx` 已定义 `isStartable`（`not_started` / `failed` / `waiting`）和阻塞禁用规则（`block_reason` 非空时 `disabled`），是前端按钮可见性的复用来源；不要在依赖图再复制一份判断。
 - PRD 原文：`PrdContentView` + `GET /agent-runner/roadmap/prds/{encoded_path}/content` 已具备 base64url 路径、双目录白名单、containment 与 UTF-8 读取先例。
-- Roadmap API：`src/backend/api/routes/agent_runner_roadmap.py` 已装配仓库 context、store、GitHub client、process supervisor 与单个/全局动作。
+- Roadmap API：`src/backend/api/routes/agent_runner_roadmap.py`（325 非空行）已装配仓库 context、store、GitHub client、process supervisor 与单个/全局动作。注意 `GET /roadmap/prds` 走进程内 30 秒缓存（`_ROADMAP_CACHE` / `_ROADMAP_CACHE_TTL_SECONDS = 30`），`POST .../start` 成功后会主动失效该仓缓存；新增只读/写入端点时必须显式决定是否复用该缓存。
 - 持续调度：`src/backend/core/use_cases/run_agent_daemon.py` 在 `context.config.autopilot.enabled` 时调用 `advance_roadmap_queue`；`roadmap_actions.py` 已负责对账、槽位、发现、依赖解锁与晋升。
 - 自动合并：`agent_runner_merge_queue.py::_autopilot_enabled` 要求 `autopilot.enabled AND safety.auto_merge`；此双门禁必须保留。
-- 仓库本地配置：`load_agent_runner_local_settings` 只读 `.iar.toml`；现有 `TomlRegistryEditor` 只允许写 `config.toml` 的 repositories 子树，不能直接扩来写仓库配置。
+- 仓库本地配置：`load_agent_runner_local_settings` 只读 `.iar.toml`。本仓根 `.iar.toml` 是**受 git 跟踪**的文件，其中 `[agent_runner.autopilot]` 现有 `enabled` / `merge_method` / `require_verifier_pass` / `auto_sign_off` / `merge_check_timeout_seconds` 与大量注释——写回测试必须用临时注册仓，避免改脏开发仓。现有 `TomlRegistryEditor`（`src/backend/infrastructure/config/registry_editor.py`）只允许写 `config.toml` 的 repositories 子树，不能直接扩来写仓库配置。
 - daemon 状态：`create_process_supervisor().list_processes()` 返回 `repo_id`、`kind`、`status`，含托管和发现出的 unmanaged daemon，可直接解析当前仓库状态。
-- 证据路径：`agent_runner_validation.py::resolve_evidence_dir` / `resolve_evidence_relpath` 是默认 `tasks/evidence/<prd-stem>` 与 legacy 扁平目录的单一解析入口；证据列表的一层文件语义与隐藏文件排除已有先例。
-- 前端栈：`frontend-public` 是 Next.js 16 + React 19 + Tailwind v4 + shadcn/ui，静态导出随 console 分发；API 客户端集中在 `lib/api/`，类型集中在 `lib/api/types.ts`。
+- 证据路径：`agent_runner_validation.py::resolve_evidence_dir` / `resolve_evidence_relpath` / `list_evidence_files` 是默认 `tasks/evidence/<prd-stem>` 与 legacy 扁平目录的单一解析入口；证据列表的一层文件语义与隐藏文件排除已有先例。
+- 前端栈：`frontend-public` 是 Next.js 16 + React 19 + Tailwind v4 + shadcn/ui（pnpm，`packageManager: pnpm@11.3.0`）。静态导出现在由 `just console-sync` 构建并同步到 `src/backend/api/static/console/`（该目录是 gitignored 构建产物，FastAPI 按请求读盘）；API 客户端集中在 `lib/api/`，类型集中在 `lib/api/types.ts`。E2E 位于 `tests/playwright-e2e/tests/smoke/`，已有 `roadmap.spec.ts`、`roadmap-realistic.spec.ts`、`roadmap-prd-content.spec.ts` 可作新用例的复用起点。
 
 **Existing Path**：Roadmap 页面状态和动作 → `lib/api/roadmap.ts` → `agent_runner_roadmap.py` → core 用例/既有工厂。证据路径复用 validation core 解析；配置写回新增受限端口与 infrastructure 实现，经 core 用例调用。
 
-**Reuse Candidates**：`handleStart`、`startRoadmapPrd`、`PrdContentView` 的加载/错误态、`isStartable` 规则（应提为共享纯函数）、`_resolve_context`、`_decode_prd_path`、`resolve_evidence_dir`、process supervisor、tomlkit 原子 round-trip 写法、Roadmap 30 秒轮询。
+**Reuse Candidates**：`handleStart`、`startRoadmapPrd`、`PrdContentView` 的加载/错误态、`isStartable` 规则（应提为共享纯函数）、`_resolve_context`、`_decode_prd_path`、`resolve_evidence_dir`、`list_evidence_files`、process supervisor、tomlkit 原子 round-trip 写法（若 `P1-FEAT-20260918-110027` 先落地则直接复用其原语）、Roadmap 30 秒轮询、`tests/smoke/roadmap-prd-content.spec.ts` 与 `roadmap-realistic.spec.ts` 的既有用例骨架。
 
 **Architecture Constraints**：API 只校验 DTO 和调用用例；core 不 import FastAPI、tomlkit 或 infrastructure；配置写回通过 core 端口；前端只经规范 API；任何文件读取都显式 UTF-8；不得把请求路径直接拼到文件系统。
 
 **Frontend Impact**：**Full-stack**。只改 `frontend-public` 的 Roadmap 页面、Roadmap 组件、API client 与类型；`frontend-admin` 无影响。真实 UI 验证使用 `just e2e tests/smoke/roadmap*.spec.ts`，生产入口为 console 同源静态页面 `/app/roadmap/`。
 
-**Existing PRD Relationship**：已检索 `tasks/pending/`。`P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance.md` 会扩展 Autopilot 子配置和 waiting 重晋升，但本 PRD 不修改其字段、算法或门禁，可独立交付；实现配置 writer 时必须保留未知/新增子表。其余 pending PRD 无重复或硬依赖。相关归档 PRD包括：`P1-FEAT-20260614-200054-frontend-prd-roadmap.md`（Roadmap 初版与单启动目标）、`P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md`（Autopilot 持续调度）、`P1-FEAT-20260913-204530-console-prd-content-reader.md`（PRD 原文读取）。本 PRD扩展这些已交付能力，不重复实现。
+**Existing PRD Relationship**（2026-09-19 对照 `tasks/pending/` 与 `tasks/archive/` 重新核对）：
 
-**Potential Redundancy Risks**：不要新增 `roadmap.continuous` 第二开关；不要复制证据目录拼接；不要把 `.iar.toml` 写回塞进只管 registry 的 `TomlRegistryEditor`；不要为 daemon 状态新建数据库或心跳线程；不要为详情引入第二个页面路由。
+- `P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance` 已**交付归档**，且实际收缩为「execution 模板开工前的 PRD 引用核验（PRD map check）」，**没有**引入 `[agent_runner.autopilot.regrounding]` 之类的子表（`rg -n "regrounding" src/backend` 无命中）。本 PRD 因此不再需要为它的字段让路；writer 的「保留未知键/子表」要求保留，但依据改为通用保真，见 §7 Executor Drift Guard。
+- **下游硬依赖（本 PRD 阻塞它）**：`P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair` 在自身 §8 声明 `Group: roadmap-delivery-control`、`Depends on: P1-FEAT-20260916-122645-…`、`Gate type: hard`，理由是它要复用本 PRD 建立的统一 PRD 详情与仓库级设置写回边界，先交付会重复创建详情容器与配置接口。这给本 PRD 加了两条约束：详情标签容器必须能容纳第三个标签页（CI/CD），详情头部动作必须可组合而不是写死一组按钮。
+- **同面并发（需协调，非依赖）**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix` 会改 `frontend-public/app/(app)/app/roadmap/page.tsx`（受管理仓库列表加齿轮按钮）、`frontend-public/components/roadmap/prd-content-view.tsx`（工具栏加「Agent 覆盖」按钮），并**写入仓库 `.iar.toml` 的 agent 阶段配置**。它与本 PRD 在「PRD 原文工具栏容器」与「仓库级 `.iar.toml` 写回」两处重叠：两者必须共用同一份 tomlkit round-trip + 原子替换原语，各自只暴露自己的窄接口，不得各写一套 writer；工具栏与标签页的落点按「先交付者定义容器、后交付者挂载」合并。
+- `P1-FEAT-20260913-204531-tauri-desktop-shell` 与 Roadmap 控制面无关，不构成依赖或冲突。
+- 相关归档 PRD（均在 `tasks/archive/`）：`P1-FEAT-20260614-200054-frontend-prd-roadmap.md`（Roadmap 初版与单启动目标）、`P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md`（Autopilot 持续调度）、`P1-FEAT-20260913-204530-console-prd-content-reader.md`（PRD 原文读取）。本 PRD 扩展这些已交付能力，不重复实现。
+
+**Potential Redundancy Risks**：不要新增 `roadmap.continuous` 第二开关；不要复制证据目录拼接；不要把 `.iar.toml` 写回塞进只管 registry 的 `TomlRegistryEditor`；不要与 `P1-FEAT-20260918-110027-lifecycle-agent-matrix` 的仓库级 agent 设置各写一份 `.iar.toml` round-trip；不要为 daemon 状态新建数据库或心跳线程；不要为详情引入第二个页面路由。
 
 ## 6. Recommendation
 
@@ -184,8 +190,8 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 
 ### Core Logic
 
-1. Roadmap 加载仓库后并行请求 PRD 列表、Roadmap 设置与 Autopilot 状态；30 秒轮询刷新 PRD、daemon 和 effective 配置状态。
-2. 任一视图点击 PRD 只更新 `selectedPrd`；主内容改为视图区 + 详情区。移动端/窄屏退化为上下堆叠，不创建 modal。
+1. Roadmap 加载仓库后并行请求 PRD 列表、Roadmap 设置与 Autopilot 状态；30 秒轮询刷新 PRD、daemon 和 effective 配置状态。PRD 列表沿用服务端 30 秒 `_ROADMAP_CACHE`；**Autopilot 状态每轮必须 fresh 读配置，证据 manifest 每次进入标签页必须重新解析磁盘**——两者不得复用该缓存，否则 rv-2 的写后读回与 rv-3 的 fresh-state probe 会读到陈旧值。
+2. 任一视图点击 PRD 只更新 `selectedPrd`；主内容改为视图区 + 详情区。移动端/窄屏退化为上下堆叠，不创建 modal。详情容器按可扩展标签设计（本 PRD 两个标签，`P1-FEAT-20260916-134008` 将追加 CI/CD 标签），不要把标签写死为二元切换。视图选择状态不依赖 `default_view` 持久化：`graph` 是纯前端默认视图，后端只接受 `timeline|list`。
 3. 详情头部调用共享 `canStartRoadmapPrd(prd)` 决定按钮可见与禁用原因，点击继续走既有 `startRoadmapPrd`。
 4. 证据 manifest 用例先通过受限 PRD reader 规则解析合法 PRD，再取 `Path(prd_path).stem`，调用 `resolve_evidence_dir`，验证目录仍位于配置证据根；只列一层普通非隐藏文件，返回名称、大小、媒体类型、角色（evidence report / verifier report / verification plan / artifact）与 artifact URL。
 5. artifact reader 对 base64url 文件名解码后要求纯 basename、拒绝 `/`、`\\`、`.`/`..`、符号链接逃逸、目录与超限文件；Markdown/纯文本内联渲染，图片浏览器展示，其他类型下载。所有文本显式 UTF-8，解码失败返回清晰 4xx。
@@ -211,7 +217,8 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 │       [修改] 暴露 repository-local settings editor 工厂（或沿既有 composition 装配方式）
 ├── src/backend/infrastructure/config/
 │   ├── repository_settings_editor.py
-│   │   [新增] tomlkit round-trip + 同目录临时文件 + os.replace，只改 autopilot.enabled
+│   │   [新增/复用] tomlkit round-trip + 同目录临时文件 + os.replace，只改 autopilot.enabled；
+│   │   若 lifecycle-agent-matrix PRD 已先落地同类原语则复用它，不新建第二份
 │   └── agent_runner_settings.py
 │       [复用] fresh loader 做写后完整校验，不新增平行解析器
 ├── src/backend/api/routes/agent_runner_roadmap.py
@@ -227,8 +234,12 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 │   │   [新增] 仓库级开关、daemon/auto-merge/max-parallel 状态与降级文案
 │   ├── components/roadmap/prd-card.tsx
 │   │   [修改] 将可启动判断提为共享纯函数，卡片与详情复用
-│   ├── components/roadmap/roadmap-{graph,timeline,list}.tsx
+│   ├── components/roadmap/roadmap-graph.tsx
 │   │   [修改] 统一选择事件；保留现有图布局与卡片样式
+│   ├── components/roadmap/roadmap-timeline.tsx
+│   │   [修改] 统一选择事件，与依赖图共用同一选择规则
+│   ├── components/roadmap/roadmap-list.tsx
+│   │   [修改] 统一选择事件，与依赖图共用同一选择规则
 │   ├── lib/api/roadmap.ts
 │   │   [修改] 新增 Autopilot 与 evidence API wrapper，复用 encodePrdPath
 │   └── lib/api/types.ts
@@ -267,7 +278,9 @@ R2/R3 共 4 个表面看似超出建议上限，但 rv-1/rv-3 是同一 Roadmap 
 - 配置写回前检查：`rg -n "autopilot.enabled|safety.auto_merge|load_agent_runner_local_settings" src/backend`，不得新增第三份语义。
 - 证据路径检查：`rg -n "def resolve_evidence_dir|evidence_dir_uses_task_subdirs|list_evidence_files" src/backend/core`，不得手写 `tasks/evidence/${stem}`。
 - daemon 状态检查：`rg -n "RunnerProcessKind.DAEMON|kind.*daemon|list_processes" src/backend`，复用现有进程识别；若记录字段变化，更新 PRD 后再实现。
-- 配置 writer 必须对包含未知 `[agent_runner.autopilot.regrounding]` 子表的 fixture 做保真断言，避免覆盖 pending PRD 将新增的配置。
+- 配置 writer 保真断言必须覆盖两类样本：本仓 `.iar.toml` 真实的 `[agent_runner.autopilot]` 同级键（`merge_method` / `require_verifier_pass` / `auto_sign_off` / `merge_check_timeout_seconds`）与注释，以及一个人工构造的未知子表。不要再用 `[agent_runner.autopilot.regrounding]` 作样本——该 PRD 已归档且未新增任何 autopilot 子键（§5），写后除目标 bool 外必须逐行保留。
+- 写回实现前先查 `rg -n "tomlkit|os\.replace" src/backend/infrastructure/config`：若 `P1-FEAT-20260918-110027-lifecycle-agent-matrix` 已先落地仓库级 `.iar.toml` round-trip 原语，直接复用而不是新建第二份；两个 PRD 不得各持一套注释保留/原子替换逻辑。
+- 只读新端点不得搭 30 秒缓存便车：`rg -n "_ROADMAP_CACHE" src/backend/api/routes` 中不应出现 evidence 或 autopilot 路径。
 - 若 `agent_runner_roadmap.py` 接近 500 非空行，按读取/设置子路由或 DTO 职责拆分，不继续无限追加；API 仍保持同一 URL namespace。
 
 ### Flow Diagram
@@ -313,7 +326,7 @@ oracles:
     critical_value_source: "按钮可用状态直接来自 GET /roadmap/prds 返回的 state 与 block_reason，start 路径使用该响应中的 prd_path 经既有 encodePrdPath 原样编码"
     must_cross: "浏览器依赖图节点 -> page selectedPrd -> 统一详情 -> lib/api/roadmap.ts -> canonical start endpoint"
     forbidden_bypasses: "不得用组件预览或直接调用 handleStart 作为证据；不得新增第二个 start endpoint；不得仅在列表视图验证"
-    fresh_state_probe: "start 响应后重新请求 PRD 列表并让页面显示 ready/running，而非只显示本地 toast"
+    fresh_state_probe: "start 响应后重新请求 PRD 列表并让页面显示 ready/running，而非只显示本地 toast；同时覆盖服务端 _ROADMAP_CACHE 被 start 端点失效的路径"
     final_tree_evidence: "录屏、trace 与请求日志在最终前端静态产物和最终 API client 上采集；相关文件变更后重采"
     negative_control: "在实现前默认依赖图点击节点后检查页面"
     expected_fail: "整块画布被 PRD 原文替换且没有“开始此 PRD”，用例失败"
@@ -321,8 +334,8 @@ oracles:
     behavior: Roadmap 开关只原子修改当前仓库 autopilot.enabled，保留全部其他 TOML 内容；页面准确显示 auto_merge 与 daemon 状态，写后 fresh load 读回
     reviewer: human
     real_entry: "启动真实 iar console，打开 /app/roadmap，切换测试仓库 Autopilot；随后重新加载页面并读取该仓库 .iar.toml"
-    expected: "开关即时显示已开启，刷新后仍开启；diff 只有 autopilot.enabled false→true；safety.auto_merge 和未知 autopilot 子表逐字保留；daemon 停止与 auto_merge=false 分别显示明确降级文案"
-    mock_boundary: "真实 console/FastAPI、真实临时 Git 仓与真实 .iar.toml 文件；GitHub 不参与；用临时注册仓库避免修改开发仓配置"
+    expected: "开关即时显示已开启，刷新后仍开启；diff 只有 autopilot.enabled false→true；safety.auto_merge、同级键 merge_method/require_verifier_pass/auto_sign_off/merge_check_timeout_seconds、注释与未知子表逐字保留；daemon 停止与 auto_merge=false 分别显示明确降级文案"
+    mock_boundary: "真实 console/FastAPI、真实临时 Git 仓与真实 .iar.toml 文件；GitHub 不参与。本仓根 .iar.toml 受 git 跟踪，必须用临时注册仓库验证，禁止改脏开发仓配置"
     tier: R3
     test_layer: system
     required_for_acceptance: true
@@ -343,11 +356,11 @@ oracles:
     tier: R2
     test_layer: system
     required_for_acceptance: true
-    presentation: "tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/rv-3-archived-evidence.png（真实页面截图，标注 real filesystem / fake GitHub boundary）；自检：点击 evidence report，标题与磁盘文件首个 H1 相同"
+    presentation: "tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/rv-3-archived-evidence.png（真实页面截图，标注 real filesystem / fake GitHub boundary）；自检：点击 evidence report，标题与磁盘文件首个 H1 相同；该图按 docs/ai-standards/testing.md 就地嵌入 evidence report（相对路径内嵌 + 「本地图片」标注 + open 绝对路径）"
     critical_value_source: "证据文件名、大小与内容来自 resolve_evidence_dir 解析出的目标 PRD 目录内真实文件；前端不得用验收勾选数生成文件数量"
     must_cross: "浏览器 evidence tab -> manifest endpoint -> PRD path validation -> resolve_evidence_dir -> containment -> artifact endpoint -> Markdown/image renderer"
-    forbidden_bypasses: "不得手工注入证据数组；不得直接拼 tasks/evidence/<stem>；不得递归把 scripts/ oracle 冒充一层证据；不得跟随逃逸 symlink"
-    fresh_state_probe: "首次查看后新增一个允许文件并刷新页面，manifest 从新请求出现该文件；删除后再刷新消失，证明非前端硬编码/缓存"
+    forbidden_bypasses: "不得手工注入证据数组；不得直接拼 tasks/evidence/<stem>；不得递归把 scripts/ oracle 冒充一层证据；不得跟随逃逸 symlink；不得让 manifest/artifact 走 _ROADMAP_CACHE 或前端缓存而返回陈旧列表"
+    fresh_state_probe: "首次查看后新增一个允许文件并刷新页面，manifest 从新请求出现该文件；删除后再刷新消失，证明非前端硬编码/缓存（服务端也不得命中 30 秒 PRD 缓存）"
     final_tree_evidence: "截图、HTTP 攻击矩阵和字节对比在最终实现树上采集；路径或 renderer 变更后重采"
     negative_control: "在实现前请求 evidence manifest endpoint"
     expected_fail: "404；当前详情也只有 PRD 原文标签"
@@ -379,15 +392,15 @@ oracles:
   - id: rv-6
     behavior: 全仓质量、前端构建、文档与复用门禁保持绿
     reviewer: verifier
-    real_entry: "just lint --reuse && just lint --full && just test && just e2e tests/smoke/roadmap-controls-evidence-autopilot.spec.ts && cd frontend-public && pnpm build && cd .. && uv run mkdocs build --strict"
-    expected: "所有命令退出 0；frontend-public 静态导出成功；无重复实现、架构反向 import 或文档导航错误"
+    real_entry: "just lint --reuse && just lint --full && just test && just console-sync && just e2e tests/smoke/roadmap-controls-evidence-autopilot.spec.ts && uv run mkdocs build --strict"
+    expected: "所有命令退出 0；`just console-sync` 完成 frontend-public 构建与静态导出同步；无重复实现、架构反向 import 或文档导航错误"
     mock_boundary: "按各命令既有测试边界；构建/lint 无 mock"
     tier: R0
     test_layer: smoke
     required_for_acceptance: true
 ```
 
-失败排查提示：rv-1/rv-3 页面 404 先检查 `frontend-public` 静态产物是否已构建并被 console 托管；rv-2 写回失败先检查临时仓 `.iar.toml` 是否包含合法 `[agent_runner]` 段及写权限；rv-4 若未晋升，先看 dependency evaluator 是否把上游判为 merged，再看 Roadmap 槽位；任何证据路径失败先打印解析后的配置 evidence root 与 PRD stem，不要放宽 containment。
+失败排查提示：rv-1/rv-3 页面 404 先运行 `just console-sync`（重建 frontend-public 静态导出并同步到 `src/backend/api/static/console/`，`iar console` 按请求读盘，无需重启进程，浏览器硬刷新即可）；rv-2 写回失败先检查临时仓 `.iar.toml` 是否包含合法 `[agent_runner]` 段及写权限；rv-4 若未晋升，先看 dependency evaluator 是否把上游判为 merged，再看 Roadmap 槽位；任何证据路径失败先打印解析后的配置 evidence root 与 PRD stem，不要放宽 containment；rv-3 若列表不随磁盘变化，先确认 manifest 没有复用 `_ROADMAP_CACHE`。
 
 ### Low-Fidelity Prototype
 
@@ -416,6 +429,7 @@ oracles:
 
 - 2026-09-16：已基于当前 `frontend-public` 真实结构完成视觉草图，确认白色 `iar` 侧栏、受管理仓库栏、紧凑依赖节点、同页详情与顶部 Autopilot 状态条。
 - 最终草图与提示词已归档到 `docs/prototypes/roadmap-prd-controls-evidence-autopilot.md`，图片资源位于 `docs/prototypes/assets/roadmap-prd-controls-evidence-autopilot.png`。
+- 2026-09-19：该草图已登记进原型 hub（`docs/prototypes/assets/prototype-hub.js`）：条目 id `roadmap-controls-evidence`，标题「单 PRD 控制与验收证据」，`form: image-state`、`validationLevel: 概念原型`，预览与「打开原型」同为 `docs/prototypes/assets/roadmap-prd-controls-evidence-autopilot.png`，说明页为 `docs/prototypes/roadmap-prd-controls-evidence-autopilot.md`。它仍是**图片原型**（不可点击、无运行时），实现依据依然是本节 ASCII 线框与 §1 行为样例，不是图片像素。旁注：hub 中该条目的 `source` 字段指向不存在的目录 `docs/prototypes/roadmap-prd-controls-evidence-autopilot/`（点「查看说明」会 404），属原型 hub 自身待修项，不影响本 PRD 实现。
 - 草图用于需求评审，不作为运行时资源；本节 ASCII 线框、§1 行为样例与 §10 Functional Requirements 是实现/验收的稳定依据。
 
 ### External Validation
@@ -426,11 +440,13 @@ No external validation required; repository code, archived PRDs, current configu
 
 ### Delivery Dependencies
 
-- Group: none
+- Group: roadmap-delivery-control
 - Depends on tasks/issues:
   - none
+- Blocks tasks/issues:
+  - P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair（Gate type: hard，由对方 §8 声明；它复用本 PRD 的统一 PRD 详情与仓库级设置写回边界）
 - Gate type: none
-- Notes: 所需 Roadmap、PRD content、持续调度、Autopilot merge queue 与 evidence 目录约定均已交付；pending 的 regrounding PRD 可能新增 autopilot 子表，但本 PRD writer 必须保留未知子表，因此两者可独立实施。
+- Notes: 所需 Roadmap、PRD content、持续调度、Autopilot merge queue 与 evidence 目录约定均已交付。`P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance` 已归档，交付形态是 execution 模板的 PRD map check、未新增任何 `agent_runner.autopilot` 子键，故不再存在「为它预留字段」的约束；writer 的未知键保真要求按通用理由保留。本 PRD 是 `P1-FEAT-20260916-134008` 的唯一硬前置，交付顺序上应先于它完成。
 
 ## 9. Acceptance Checklist
 
@@ -457,6 +473,8 @@ No external validation required; repository code, archived PRDs, current configu
 
 - [ ] API 路由不直接 import `tomlkit`、不直接写文件；core Autopilot 用例只依赖受限端口，`rg -n "tomlkit|os\.replace" src/backend/api src/backend/core/use_cases/roadmap_autopilot_settings.py` 无命中
 - [ ] evidence 路径复用 `resolve_evidence_dir`，`rg -n 'tasks/evidence.*prd|evidence_dir.*/' src/backend/core/use_cases/roadmap_prd_evidence.py` 无手写默认目录拼接
+- [ ] evidence/autopilot 端点不复用 `/roadmap/prds` 的 30 秒 `_ROADMAP_CACHE`：`rg -n "_ROADMAP_CACHE" src/backend/api/routes` 中的命中不含这两个路径
+- [ ] `.iar.toml` round-trip 与 `P1-FEAT-20260918-110027-lifecycle-agent-matrix` 共享同一原语，仓内不存在第二份 tomlkit 写回实现：`rg -n "tomlkit|os\.replace" src/backend/infrastructure/config` 中写回逻辑单处
 - [ ] 未新增数据库表、调度线程、WebSocket 或第三方依赖；依赖清单 diff 无新增包
 - [ ] `roadmap_actions.py`、`run_agent_daemon.py`、`agent_runner_merge_queue.py` 的既有算法/双门禁未为 UI 需求改写；若因测试性做最小注入变更，Decision Log 与证据同步更新
 
@@ -464,15 +482,17 @@ No external validation required; repository code, archived PRDs, current configu
 
 - [ ] rv-4 通过：enabled=true + merged 上游自动晋升下游，enabled=false 零晋升，auto_merge=false 零自动 merge
 - [ ] rv-5 通过：Autopilot GET/PATCH、evidence manifest/artifact 的成功、空态、非法仓库、非法路径、写失败均有稳定契约
-- [ ] writer round-trip fixture 含注释、未知键和 `[agent_runner.autopilot.regrounding]` 子表，写后除目标 bool 外逐字节/语义保真
+- [ ] writer round-trip fixture 含注释、未知子表与本仓真实的 `merge_method` / `require_verifier_pass` / `auto_sign_off` / `merge_check_timeout_seconds` 同级键，写后除目标 bool 外逐字节/语义保真
 - [ ] 单 PRD 启动继续调用现有 `start_prd`，阻塞依赖、发布安全与 Issue 幂等门禁未旁路
+- [ ] start 端点仍会使 `_ROADMAP_CACHE` 中该仓条目失效，页面启动后一次刷新即读到新状态
 
 #### Frontend Acceptance
 
 - [ ] rv-1 真实页面录屏完成，默认依赖图、时间轴、列表共享统一详情与启动规则
+- [ ] 详情标签容器按可扩展设计，`P1-FEAT-20260916-134008` 追加 CI/CD 标签时无需重构容器或头部动作
 - [ ] rv-2 页面明确区分“Autopilot 开启”“Daemon 运行中”“自动合并已启用”；任一条件缺失时降级文案正确
 - [ ] rv-3 证据页截图来自真实 `/app/roadmap/` + 真实文件系统边界，标注 mock/real 层级；无目录、加载失败、文件解码失败均有非空白错误态
-- [ ] `frontend-public` typecheck/lint/build 全绿，静态导出包含 `/app/roadmap`
+- [ ] `frontend-public` typecheck/lint/build 全绿，`just console-sync` 后 `src/backend/api/static/console/` 可服务 `/app/roadmap`
 
 #### Documentation Acceptance
 
@@ -483,6 +503,7 @@ No external validation required; repository code, archived PRDs, current configu
 #### Validation Acceptance
 
 - [ ] rv-1 至 rv-6 全部通过，证据按 `rv-<n>-<slug>.<ext>` 保存到本 PRD 专属 `tasks/evidence/` 子目录
+- [ ] rv-1/rv-3 的静态图按 `docs/ai-standards/testing.md` 就地嵌入 `<prd-basename>.evidence-report.md`（相对路径 + 「本地图片」标注 + `open` 绝对路径）；录屏免嵌；原始图/录屏留在本地（`tasks/evidence/**` 仅 `*.md` 进版本库），三份 `.md` 报告进 PR
 - [ ] rv-1/rv-2/rv-3/rv-4 的关键值来源、必经边界、禁止旁路、fresh-state probe 与 final-tree 证据全部实际满足
 - [ ] rv-2 配置 diff 与 rv-3 路径攻击矩阵随 evidence report 呈递；负控结果为预期红色而非环境错误
 - [ ] 任何影响前端详情、配置 writer、evidence resolver 或 daemon gate 的后续变更都已触发对应证据重采
@@ -524,6 +545,8 @@ No external validation required; repository code, archived PRDs, current configu
 - 不编辑 PRD、验收清单或证据；不上传、删除、重命名证据文件。
 - 不递归展示 evidence `scripts/` 子目录，不把 oracle 源码混作验收产物。
 - 不从已清理的 orphan branch 恢复证据，不新增远端证据索引服务。
+- 不为 `.iar.toml` 提供通用读写端点，也不与 `P1-FEAT-20260918-110027-lifecycle-agent-matrix` 各写一份 TOML round-trip 实现（共享原语，各自窄接口）。
+- 不把「依赖图」写进后端 `default_view` 枚举；它是纯前端默认视图，`PATCH /roadmap/settings` 的取值集合不变。
 - 不改 `frontend-admin/`，不新增数据库 schema 或第三方依赖。
 
 ## 12. Risks And Follow-Ups
@@ -544,6 +567,7 @@ No external validation required; repository code, archived PRDs, current configu
 | D-05 | 配置写回实现 | 新增窄职责 repository settings editor 端口 | 扩展 registry editor；通用任意 TOML PATCH | registry editor 明确只管 config.toml repositories，通用 PATCH 会扩大写权限和误改面 |
 | D-06 | daemon 状态来源 | 复用 process supervisor | 新增 DB heartbeat/轮询线程 | supervisor 已统一发现托管与 unmanaged 进程，新存储会重复事实源 |
 | D-07 | 详情布局 | 现有页面内 master-detail 分栏 | Modal/Sheet/整页替换 | 用户需要边看依赖边判断和操作，分栏与已确认草图一致且无需新组件依赖 |
+| D-08 | 与 `P1-FEAT-20260918-110027-lifecycle-agent-matrix` 的仓库级 `.iar.toml` 写入如何共存 | 共用同一份 infrastructure round-trip/原子替换原语，各自只暴露窄接口 | 两个 PRD 各写一份 writer；把两个写入面合并成一个通用 TOML PATCH 端点 | 写回语义已由各自 PRD 锁定为窄职责；各写一份会出现两套注释保留与校验逻辑，而通用端点会把写权限扩大到全部配置键 |
 
 ### Final Reconciliation
 

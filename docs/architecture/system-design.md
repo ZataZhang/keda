@@ -135,6 +135,9 @@ flowchart TD
 
 ### 管理平台 `frontend-admin/`
 
+> 状态：**已冻结**。来自上游模板的脚手架，未接入本仓库业务，不参与 CI 构建。
+> 前端开发主线在 `frontend-public/`。
+
 | 层 | 路径 | 职责 |
 |---|---|---|
 | 页面层 | `src/pages/` | 路由级页面组件（登录、Dashboard） |
