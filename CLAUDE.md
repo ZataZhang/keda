@@ -49,7 +49,7 @@
 - 新增或修改代码前先搜索现有实现；禁止复制粘贴后微调，参数超过 4 个时收敛到对象
 - 除非用户明确要求，否则不要自动执行 `git add`、`git commit`、`git push` 等 Git 变更操作
 - 单代码文件非空行不超过 1000 行；`just lint` 会对此发出警告
-- 随手想法先落 `tasks/inbox/`：原话逐字**只追加**到 `tasks/inbox/ideas.md`（禁止改写已有条目），AI 维护 `tasks/inbox/summary.md` 做总结；想法成熟后用 PRD 流程升级到 `tasks/pending/`。详见 `docs/guides/idea-inbox.md`
+- 随手想法先落 `tasks/inbox/`：只在**想法边界**捕获（用户明确要求，或话题收敛到可开 PRD 的状态），条目 = 用户原话逐字**引用** + 标注为 `AI 派生` 的背景块，**只追加**到 `tasks/inbox/ideas.md`（禁止改写已有条目）；AI 维护 `tasks/inbox/summary.md` 做总结；想法成熟后用 PRD 流程升级到 `tasks/pending/`。详见 `docs/guides/idea-inbox.md`
 - PRD 对应任务全部完成后：生成验证计划、收集证据、经独立 verifier Agent 审查通过并完成 Acceptance Checklist，所有条目达到完成态后，再将 PRD 从 `tasks/pending/` 归档到 `tasks/archive/`
 - PRD 必须包含 Realistic Validation Plan，验收清单需覆盖最高可行保真度的真实入口验证，或说明无可执行行为变更
 - 变更代码时同步更新 `docs/` 与 `mkdocs.yml`

@@ -240,3 +240,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 ## 2026-09-18 11:19 · repo-picker-and-config-view
 
 > 应该要支持直接通过选择文件夹目录的形式来选择仓库 ，还有应该要能查看每个仓库具体的配置
+
+## 2026-09-20 00:28 · prd-multi-agent-split-and-verify
+
+> 我有一个想法，就是把PRD是不是可以拆分成若干个任务，让不同的Agent去做，然后有一个组的Agent去验收。
