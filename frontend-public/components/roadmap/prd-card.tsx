@@ -39,14 +39,29 @@ interface PrdCardProps {
   starting: boolean;
 }
 
+/**
+ * 统一的「能否开始此 PRD」判定：卡片、依赖图详情头部共用同一份规则。
+ *
+ * 规则来自既有 \`isStartable\` 语义——state 为 not_started / failed / waiting
+ * 且 block_reason 为空。任何视图都不得再复制一份判断，否则默认值（依赖图）
+ * 会与列表行为漂移。
+ *
+ * @param prd - 列表响应中的 PRD 条目。
+ * @returns 允许开始该 PRD 时为 true。
+ */
+export function canStartRoadmapPrd(prd: RoadmapPrd): boolean {
+  const stateAllowsStart =
+    prd.state === "not_started" || prd.state === "failed" || prd.state === "waiting";
+  return stateAllowsStart && !prd.block_reason;
+}
+
 export function PrdCard({ prd, onStart, onOpenContent, starting }: PrdCardProps) {
   const progress =
     prd.acceptance_total > 0
       ? Math.round((prd.acceptance_checked / prd.acceptance_total) * 100)
       : 0;
 
-  const isStartable =
-    prd.state === "not_started" || prd.state === "failed" || prd.state === "waiting";
+  const isStartable = canStartRoadmapPrd(prd);
 
   const highlightClass =
     prd.state === "review"

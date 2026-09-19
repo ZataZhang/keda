@@ -3408,9 +3408,10 @@ uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 ### PRD 原文浏览
 
-每张 PRD 卡片上的「查看原文」按钮会在同一页面切换到详情视图，按需拉取该 PRD 的完整 Markdown 原文并渲染——标题层级、表格、代码块与验收清单的勾选状态都会保留，顶部保留「返回列表」导航。
+在任一视图（依赖图 / 时间轴 / 列表）选中 PRD，右侧会以 **master-detail** 方式打开统一详情：左侧画布保持原样（依赖图的上下游关系因此不会丢失），详情头部展示标题、状态、路径与动作，下方是可扩展的标签容器。
 
-- 原文经只读端点 `GET /api/v1/agent-runner/roadmap/prds/{encoded_path}/content` 获取，路径编码与「开始」按钮复用同一套 base64url 约定。
+- 默认标签「PRD 原文」按需拉取该 PRD 的完整 Markdown 原文并渲染——标题层级、表格、代码块与验收清单的勾选状态都会保留。窄屏自动退化为上下堆叠，不引入 modal 或第二个路由。
+- 原文经只读端点 `GET /api/v1/agent-runner/roadmap/prds/{encoded_path}/content` 获取，路径编码与「开始此 PRD」按钮复用同一套 base64url 约定。
 - 只有 `tasks/pending/` 与 `tasks/archive/` 下后缀为 `.md` 的文件可读；目录穿越、绝对路径、非 `.md` 后缀与符号链接逃逸一律返回 4xx，响应体不含任何文件内容。
 - 全文按需单独取，`GET /roadmap/prds` 列表响应仍只携带元数据，不随 PRD 篇幅膨胀。
 - 读取失败（PRD 已被删除、后端不可达等）时详情视图显示明确错误态并提供「重试」，不会白屏或永久加载。
@@ -3434,11 +3435,37 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 ### 单个开始
 
-点击 PRD 卡片上的「开始」按钮后，后端会：
+三种视图都可以在详情头部「开始此 PRD」——包括默认视图依赖图里的节点（过去只有时间轴/列表有这个入口）。按钮的可见与禁用由同一个 `canStartRoadmapPrd` 规则决定：`state` 为 `not_started` / `failed` / `waiting` 且没有 `block_reason`。存在未满足依赖时按钮禁用并显示阻塞原因，不允许绕过依赖门禁。点击后后端会：
 
 1. 若 PRD 无 Issue，调用 `create_issue_from_prd` 的安全路径（`publish_prd=True, queue_ready=True`），在 PRD 成功发布到 base branch 后添加 `agent/ready`。
 2. 若 PRD 已有 Issue，直接添加 `agent/ready` 并移除 `agent/failed`。
 3. 启动一次 `iar run` 托管进程。
+
+启动成功后页面会立刻重新拉取该仓的 PRD 列表，并把详情头部状态刷新为服务端返回的最新状态——不是本地乐观值，也不是只弹一个 toast。
+
+「全局开始」与「停止全局调度」的行为没有变化：前者仍是一次性批量启动，后者仍只清空等待队列。它们与仓库级 Autopilot 开关是两件事，见下两节。
+
+### 验收证据浏览（归档 PRD）
+
+勾选「显示已归档」并选中已归档 PRD，详情里会出现「验收证据」标签，展示该 PRD 在仓库中**当前仍保留**的报告与附件——不用离开 Roadmap 去编辑器里翻目录。
+
+- 事实源是仓库里配置证据目录下该 PRD 的子目录（默认 `tasks/evidence/<prd-stem>/`，显式 legacy 目录沿用扁平语义），由既有的 `resolve_evidence_dir` 单一入口解析。
+- 清单只列一层普通非隐藏文件，带文件名、大小、类型与角色（证据报告 / 验收报告 / 验证计划 / 附件）；Markdown 与纯文本可内联预览，图片直接显示，其它类型可下载。数量与大小来自真实 `stat`，**不会**用验收清单的勾选数冒充文件数。
+- 归档后 Issue 上的临时证据 orphan 分支会被清理，因此这里承诺的是仓库保留的长期事实源；历史 PRD 若本来就没有证据目录，页面显示「尚无可用证据」与实际查找位置，而不是报错或空白。
+- 访问边界：文件名以 base64url token 传递，解码后必须是证据目录的直接子文件；路径穿越、符号链接逃逸、子目录伪装与超过 10 MiB 的文件一律返回 4xx，不泄露仓外内容。服务端每次请求都重新读盘，不做任何缓存。
+
+### 仓库级 Autopilot 开关
+
+Roadmap 顶部为当前选中仓库提供「Autopilot 自动推进」开关，写入该仓库根目录 `.iar.toml` 的 `[agent_runner.autopilot].enabled`。
+
+- 只改这一个布尔键：注释、顺序、同级键与未知子表在写回后逐字保留，写入采用同目录临时文件 + 完整加载校验 + 原子替换；写成功与否以**写后 fresh load 的生效配置**为判据，页面显示的值就是重新读出来的值。
+- 修改后不要求重启 console：daemon 每轮本来就读取对应仓库上下文，最迟下一轮生效；正在进行的那一轮不会被中断，页面文案写的是「将在下一轮生效」。
+- 页面把三件事分开显示，缺哪件都给出明确降级文案：
+  - **Autopilot 是否开启**（自动发现、依赖解锁、队列补位）；
+  - **daemon 是否运行中**（状态来自既有 process supervisor 记录；daemon 没跑时显示「自动推进暂不执行」，开关值仍可保存，可用 Processes 页面启动 daemon）；
+  - **自动合并是否启用**（`safety.auto_merge`）。
+- **开关不会联动打开 `safety.auto_merge`**。自动合并需要 `autopilot.enabled` 与 `safety.auto_merge` 同时为真（既有的双重危险动作门禁）；只有前者为真时流程会停在「待审阅」，人工合并后再由持续调度自动推进下游。想放开自动合并必须自己改 `.iar.toml`，UI 不会替你做这个决定。
+- 目标仓没有 `.iar.toml`、配置非法或不可写时返回 409，原文件保持不变。
 
 ### 全局调度
 
@@ -3465,7 +3492,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
 
-daemon 路径下的晋升**只**做幂等的 Issue 创建/复用 + 打上 `agent/ready` label，**不 spawn 进程**；真正的进程拉起仍由 daemon 的 Phase 2 在消费 `agent/ready` 时统一完成。该阶段仅在 `autopilot.enabled` 时执行，任何异常都会被记录且不影响 daemon 后续阶段。
+daemon 路径下的晋升**只**做幂等的 Issue 创建/复用 + 打上 `agent/ready` label，**不 spawn 进程**；真正的进程拉起仍由 daemon 的 Phase 2 在消费 `agent/ready` 时统一完成。该阶段仅在 `autopilot.enabled` 时执行，任何异常都会被记录且不影响 daemon 后续阶段。这个已有的开关正是 Roadmap 顶部「Autopilot 自动推进」所控制的那个值（见上文「仓库级 Autopilot 开关」）；开关关闭后同一个场景零晋升，用 Roadmap 页面与其它配置入口改这个键的效果完全一致。
 
 #### 手动触发：iar roadmap advance
 
