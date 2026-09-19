@@ -425,3 +425,102 @@ export type ApproveDraftResponse = {
   draft: PrdDraftSummary;
   pending_path: string;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 生命周期 Agent 矩阵 / agent 回退顺序 / agent 标签 / PRD 覆盖
+// 与 `src/backend/core/use_cases/lifecycle_agents_console.py` 的视图字段对齐。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 九个生命周期键；顺序与后端 `LIFECYCLE_AGENT_KEYS` 一致（即 UI 展示顺序）。 */
+export type LifecycleAgentKey =
+  | "implementation"
+  | "fix"
+  | "closeout"
+  | "verifier"
+  | "review"
+  | "supervisor"
+  | "planner"
+  | "content_generation"
+  | "deliberate";
+
+/** 生效值来源层。 */
+export type LifecycleAgentSource =
+  | "prd_override"
+  | "repository"
+  | "global"
+  | "legacy"
+  | "builtin";
+
+/** 矩阵编辑视角：全局层（config.toml）或仓库层（.iar.toml）。 */
+export type LifecycleAgentScope = "global" | "repository";
+
+/** 单个生命周期键在某视角下的生效视图。 */
+export type LifecycleAgentEntry = {
+  key: LifecycleAgentKey;
+  /** 是否允许取值为 `auto`。 */
+  auto_allowed: boolean;
+  /** 是否允许取值为 `executor`（仅 fix / closeout）。 */
+  executor_allowed: boolean;
+  /** `auto` 在该阶段的真实语义说明。 */
+  auto_description: string | null;
+  /** 本层是否显式声明了该键。 */
+  declared_in_scope: boolean;
+  /** 本层的声明值（未声明时为 null）。 */
+  declared_value: string | null;
+  /** 另一层的声明值（仓库视角下即全局层）。 */
+  inherited_value: string | null;
+  /** 当前生效的具体 agent；跟随实现者时为 null。 */
+  effective_agent: string | null;
+  /** 是否跟随实现阶段选中的 agent（fix / closeout）。 */
+  follows_executor: boolean;
+  /** 生效值来源层。 */
+  source: LifecycleAgentSource;
+};
+
+/** 生命周期矩阵某视角的完整视图。 */
+export type LifecycleAgentsView = {
+  scope: LifecycleAgentScope;
+  repo_id: string | null;
+  agents: string[];
+  lifecycles: LifecycleAgentEntry[];
+  /** 来源层 key -> 中文标签。 */
+  source_layers: Record<string, string>;
+  /** 本层「恢复/删除本键」操作的提示文案。 */
+  restore_hint: string;
+};
+
+/** agent 回退顺序视图。 */
+export type AgentFallbackOrderView = {
+  agent_fallback_order: string[];
+  max_agent_switches: number;
+  agents: string[];
+};
+
+/** 单个 agent 的路由标签配置。 */
+export type AgentLabelEntry = {
+  agent: string;
+  label: string;
+  label_color: string;
+  label_description: string;
+};
+
+/** agent 标签列表视图。 */
+export type AgentLabelsView = {
+  labels: AgentLabelEntry[];
+};
+
+/** PRD 级覆盖视图（含可供选择的 agent 与继承视角的矩阵）。 */
+export type PrdAgentOverrideView = {
+  repo_id: string;
+  prd_path: string;
+  overrides: Record<string, string>;
+  agents: string[];
+  lifecycles: LifecycleAgentEntry[];
+};
+
+/** PRD 级覆盖写回后的响应。 */
+export type PrdAgentOverrideUpdateResponse = {
+  repo_id: string;
+  prd_path: string;
+  overrides: Record<string, string>;
+};

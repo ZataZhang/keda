@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,7 @@ from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_dir,
     validation_required,
 )
+from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
 from backend.core.use_cases.run_agent_once import (
     extract_agent_response_text,
     get_head_sha,
@@ -395,12 +397,38 @@ def run_verifier_agent(
     return verdict
 
 
-def _choose_verifier_agent(config: AppConfig, builder_agent: str) -> str:
+def _choose_verifier_agent(
+    config: AppConfig,
+    builder_agent: str,
+    *,
+    prd_overrides: Mapping[str, str] | None = None,
+) -> str:
     """Pick an agent for the verifier, preferring one different from the builder.
 
-    ``verifier_agent`` 配成具体 agent 则用它;``auto`` 时从 fallback 链里挑
-    第一个 ≠ builder 的(独立性来自换 model);都没有再退回 builder。
+    生命周期矩阵（或 PRD 覆盖）显式声明了具体 agent 时用它；声明 ``auto`` 或
+    两层都未声明时沿用既有语义：``verifier_agent`` 配成具体 agent 则用它;
+    ``auto`` 时从 fallback 链里挑第一个 ≠ builder 的(独立性来自换 model);
+    都没有再退回 builder。
     """
+    from backend.core.shared.models.lifecycle_agent import (
+        LIFECYCLE_AGENT_AUTO,
+        normalize_lifecycle_agent_value,
+    )
+    from backend.core.use_cases.lifecycle_agent_resolution import resolve_lifecycle_agent
+
+    merged_overrides = dict(prd_overrides or {})
+    declared_value = merged_overrides.get("verifier")
+    if declared_value is None:
+        declared_value = config.lifecycle_agents.declared_value("verifier")
+    if declared_value is not None and (
+        normalize_lifecycle_agent_value(declared_value) != LIFECYCLE_AGENT_AUTO
+    ):
+        return resolve_lifecycle_agent(
+            "verifier",
+            config,
+            selected_agent=builder_agent,
+            prd_overrides=merged_overrides,
+        )
     configured = config.validation.verifier_agent
     if configured and configured != "auto":
         return configured
@@ -452,6 +480,8 @@ def run_verifier_gate(
     config: AppConfig,
     process_runner: IProcessRunner,
     builder_agent: str,
+    *,
+    prd_overrides: Mapping[str, str] | None = None,
 ) -> ValidationVerdict | None:
     """Pre-PR independent-verifier gate (PR#2 T3 integration).
 
@@ -493,7 +523,11 @@ def run_verifier_gate(
         config,
         evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
     )
-    verifier_agent = _choose_verifier_agent(config, builder_agent)
+    verifier_agent = _choose_verifier_agent(
+        config,
+        builder_agent,
+        prd_overrides=effective_prd_overrides(issue, prd_overrides),
+    )
     builder_sha = get_head_sha(worktree_path, process_runner)
     response_log_path = (
         resolve_issue_evidence_dir(worktree_path, config, issue) / _VERIFIER_RESPONSE_FILENAME

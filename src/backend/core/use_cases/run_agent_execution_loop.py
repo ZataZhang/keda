@@ -3,7 +3,7 @@
 from __future__ import annotations
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,6 +77,11 @@ from backend.core.use_cases.agent_runner_validation import (
     format_validation_evidence_failure,
     resolve_issue_evidence_relpath,
     warn_legacy_evidence_helpers,
+)
+from backend.core.use_cases.lifecycle_agent_resolution import (
+    effective_prd_overrides,
+    parse_prd_lifecycle_overrides,
+    resolve_lifecycle_agent,
 )
 
 
@@ -229,7 +234,11 @@ def _revert_failed_closeout(
         )
 
 
-def _attempt_delivery_closeout(context: _DeliveryCloseoutContext) -> bool:
+def _attempt_delivery_closeout(
+    context: _DeliveryCloseoutContext,
+    *,
+    prd_overrides: Mapping[str, str] | None = None,
+) -> bool:
     """尝试用一次短命的收尾修复接住交付门禁失败。
 
     只接住被抛出点标记为收尾类的失败；真失败与收尾层被关闭时立刻返回 ``False``，
@@ -238,6 +247,7 @@ def _attempt_delivery_closeout(context: _DeliveryCloseoutContext) -> bool:
 
     Args:
         context: 本次收尾的执行请求、attempt 计时与 PRD 基线。
+        prd_overrides: PRD 文件头部 lifecycle_agents 覆盖（最高优先级）。
 
     Returns:
         收尾成功且门禁链重跑通过时为 ``True``，其余一律 ``False``。
@@ -263,7 +273,13 @@ def _attempt_delivery_closeout(context: _DeliveryCloseoutContext) -> bool:
     try:
         with context.record.attempt_phases.measure("closeout"):
             run_closeout_agent(
-                request.selected_agent,
+                resolve_lifecycle_agent(
+                    "closeout",
+                    config,
+                    issue=issue,
+                    selected_agent=request.selected_agent,
+                    prd_overrides=prd_overrides,
+                ),
                 config,
                 process_runner,
                 prompt_context=CloseoutPromptContext(
@@ -376,6 +392,13 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         if prd_relative_path is not None and (worktree_path / prd_relative_path).exists()
         else None
     )
+    # PRD 文件头部 lifecycle_agents 覆盖块（PRD 级，最高优先级）。优先用 Issue 上
+    # 已回填的那份（编排入口从 PRD 解析）；缺失时回退到就地解析上面读出的文本。
+    prd_overrides = effective_prd_overrides(issue, None)
+    if not prd_overrides and prd_baseline_content is not None:
+        prd_overrides = parse_prd_lifecycle_overrides(
+            prd_baseline_content, prd_path=prd_relative_path
+        )
     recovery_failure_summary = ""
     recovery_failure_type: str = "verification_failed"
     final_verification_results: list[CommandResult] = []
@@ -561,7 +584,8 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     record=attempt_record_context,
                     gate_failure=exc,
                     prd_baseline_content=prd_baseline_content,
-                )
+                ),
+                prd_overrides=prd_overrides,
             )
             if not delivery_gates_revalidated:
                 failure_type = _classify_and_record_gate_failure(
@@ -602,7 +626,8 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     record=attempt_record_context,
                     gate_failure=exc,
                     prd_baseline_content=prd_baseline_content,
-                )
+                ),
+                prd_overrides=prd_overrides,
             ):
                 delivery_gates_revalidated = True
             else:
@@ -618,7 +643,12 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
 
                 with attempt_phases.measure("verifier"):
                     verifier_verdict = run_verifier_gate(
-                        issue, worktree_path, config, process_runner, selected_agent
+                        issue,
+                        worktree_path,
+                        config,
+                        process_runner,
+                        selected_agent,
+                        prd_overrides=prd_overrides,
                     )
             except ValidationEvidenceError as exc:
                 evidence_gate_failure = exc
@@ -674,7 +704,13 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 else:
                     try:
                         fix_agent_result = run_fix_agent(
-                            selected_agent,
+                            resolve_lifecycle_agent(
+                                "fix",
+                                config,
+                                issue=issue,
+                                selected_agent=selected_agent,
+                                prd_overrides=prd_overrides,
+                            ),
                             issue,
                             worktree_path,
                             config,

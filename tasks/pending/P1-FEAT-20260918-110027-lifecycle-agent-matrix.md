@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🟡 **验收状态**：实施 + 自动化验证完成，人工决策与四项呈递物已确认（2026-09-20）；Playwright e2e 与 PR 审查未完成，故暂不归档。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制与命令；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -201,10 +201,10 @@ keda 的流水线由多个生命周期阶段组成（实现、修复、收尾、
 在现有配置加载链上**加一层"生命周期解析函数"**，而不是新建平行的 agent 选择系统：
 
 1. **配置模型**：`agent_runner_settings.py` 新增 `[agent_runner.lifecycle_agents]` 段（九个可选键，值为 agent 名或 `executor`），经既有 `.iar.toml` 覆盖机制自然获得"仓库层 > 全局层"两层能力。`AppConfig` 新增 `lifecycle_agents` 冻结模型（含各键的来源层信息）。
-2. **解析函数**（core 层）：`resolve_lifecycle_agent(config, prd_overrides, lifecycle, *, selected_agent=None) -> str`，优先级：PRD 文件头部覆盖 > 矩阵仓库层（`.iar.toml`）> 矩阵全局层（`config.toml`）> 阶段对应的既有配置键（`default_agent` / `verifier_agent` / `review_agent` / `supervisor_agent` / `interactive_decision.default_agent` / generated_content / deliberation 既有配置，自身已按既有规则做 `.iar.toml` > `config.toml` 合并）> 内置默认（`BUILTIN_AGENT_SPECS` 首个）。`fix`/`closeout` 的内置默认与矩阵值 `executor` 都解析为 `selected_agent`。各消费点（fix、closeout、verifier、review、supervisor、planner、generated_content、deliberate 默认值）改为调用该函数；实现阶段的 label/loop 路由（`choose_agent`）保持不动，其结果作为 `selected_agent` 输入本函数。
+2. **解析函数**（core 层）：`resolve_lifecycle_agent(config, prd_overrides, lifecycle, *, selected_agent=None) -> str`，优先级：PRD 文件头部覆盖 > 矩阵仓库层（`.iar.toml`）> 矩阵全局层（`config.toml`）> 阶段对应的既有配置键（`default_agent` / `verifier_agent` / `review_agent` / `supervisor_agent` / `interactive_decision.default_agent` / generated_content / deliberation 既有配置，自身已按既有规则做 `.iar.toml` > `config.toml` 合并）> 内置默认（`BUILTIN_AGENT_SPECS` 首个）。`fix`/`closeout` 的内置默认与矩阵值 `executor` 都解析为 `selected_agent`。各消费点（fix、closeout、verifier、review、supervisor、planner、generated_content、deliberate 默认值）改为调用该函数；实现阶段的 label/loop 路由（`choose_agent`）保持不动，其结果作为 `selected_agent` 输入本函数。**实现阶段的优先级特例**：Issue 上的 `agent/*` 标签路由与 loop recipe / CLI `--agent` 仍高于 PRD 覆盖——PRD 的 `implementation` 覆盖作用于"没有标签路由时的实现阶段选择"。
 3. **PRD 文件头部块**：`lifecycle_agents:` 块，解析挂进既有 PRD 读取路径（与 loop recipe frontmatter 同模式）；未知键名与非法值在解析时报错并带 PRD 路径。
 4. **fail-fast 校验**：解析结果不在注册表时抛带阶段名与 agent 名的配置错误，各阶段调用点统一捕获为"阶段开始前失败"。
-5. **console API**（api 层新路由）：`GET /api/v1/agent-runner/lifecycle-agents?repo_id=<id>`（GET=该仓库视角下三层合并后的生效视图，每键带来源层标注与上一层的只读参照值；`scope=global` 时返回全局层视角）、`PUT /api/v1/agent-runner/lifecycle-agents`（body 带 `scope=global|repository` 与可选 `repo_id`：`scope=global` 更新 `config.toml`，`scope=repository` 更新该仓库 `.iar.toml`，均为保留式写入、只动 `[agent_runner.lifecycle_agents]` 段、只写请求里显式给出的键（`null` 表示删除该键））；`GET/PATCH /api/v1/prds/{prd_id}/agent-overrides`（读=当前头部覆盖；写=改写 PRD 文件头部、只动 `lifecycle_agents` 块）。
+5. **console API**（api 层新路由）：`GET /api/v1/agent-runner/lifecycle-agents?repo_id=<id>`（GET=该仓库视角下三层合并后的生效视图，每键带来源层标注与上一层的只读参照值；`scope=global` 时返回全局层视角）、`PUT /api/v1/agent-runner/lifecycle-agents`（body 带 `scope=global|repository` 与可选 `repo_id`：`scope=global` 更新 `config.toml`，`scope=repository` 更新该仓库 `.iar.toml`，均为保留式写入、只动 `[agent_runner.lifecycle_agents]` 段、只写请求里显式给出的键（`null` 表示删除该键））；`GET/PATCH /api/v1/agent-runner/roadmap/prds/{encoded_path}/agent-overrides`（读=当前头部覆盖；写=改写 PRD 文件头部、只动 `lifecycle_agents` 块；沿用既有 PRD 原文端点的 base64url 路径约定，而非另起 `/prds/{prd_id}` 命名空间）。
 6. **frontend-public**：Settings 页新增「Agent 管理」区块（粘性 Tab：Agent 标签设置 / 生命周期 Agent 设置，前者默认）；Roadmap 受管理仓库列表每行新增齿轮入口与该仓库的矩阵抽屉；PRD 原文页工具栏新增「Agent 覆盖」抽屉。三处矩阵共用同一个矩阵行组件，只是可编辑列与参照列不同。`lib/api/agentRunner.ts` 与类型同步。
 7. **与既有 `auto` / 回退链对齐**（不改既有语义，只把入口搬到 UI）：矩阵解析出的阶段 agent 作为该阶段的"主 agent"，`auto` 的语义沿用 `run_agent_once.py` / `run_verifier_agent.py` 里既有的实现（解析函数只负责"这一阶段的主 agent 是谁"，不做回退）；跨 agent 回退仍由 `agent_fallback_order` + `max_agent_switches` 驱动，UI 只是给它一个可编辑入口。
 
@@ -324,7 +324,7 @@ flowchart TD
 - id: rv-1
   behavior: 不写任何新配置时，九个生命周期解析出的 agent 与改动前逐阶段一致；写新矩阵时仓库层赢过全局层、矩阵赢过既有配置键、PRD 覆盖赢过一切
   reviewer: verifier
-  real_entry: "uv run pytest tests/backend/core/use_cases/test_lifecycle_agent_resolution.py -q"
+  real_entry: "uv run pytest tests/test_lifecycle_agent_resolution.py -q"
   expected: "优先级单测全绿：PRD 覆盖 > 矩阵仓库层(.iar.toml) > 矩阵全局层(config.toml) > 既有配置键 > 内置默认，且零配置基线断言每键与改动前的值一致"
   mock_boundary: "agent 注册表可用测试夹具，不得 mock 解析函数本身"
   tier: R2
@@ -339,7 +339,7 @@ flowchart TD
 - id: rv-2
   behavior: 修复/收尾阶段默认跟随实现 agent；矩阵显式指定后该阶段子进程切换为指定 agent
   reviewer: verifier
-  real_entry: "uv run pytest tests/backend/core/use_cases/test_fix_closeout_agent_routing.py -q"
+  real_entry: "uv run pytest tests/test_lifecycle_agent_routing.py -q"
   expected: "默认断言 fix/closeout 传入 run_*_agent 的 agent_name == selected_agent；矩阵 fix=kimi 断言 == kimi；未注册名断言阶段开始前抛错"
   mock_boundary: "子进程执行层用 fake process runner；解析与装配链路必须真实"
   tier: R2
@@ -380,7 +380,7 @@ flowchart TD
 - id: rv-5
   behavior: 矩阵或 PRD 覆盖写了未注册 agent 名时，阶段开始前报错并指名
   reviewer: verifier
-  real_entry: "uv run pytest tests/backend/core/use_cases/test_lifecycle_agent_resolution.py -q -k unregistered"
+  real_entry: "uv run pytest tests/test_lifecycle_agent_resolution.py -q -k unregistered"
   expected: "抛出的配置错误包含阶段名与未注册 agent 名，不产生任何回落"
   mock_boundary: "注册表用真实内置夹具"
   tier: R1
@@ -389,7 +389,7 @@ flowchart TD
 - id: rv-6
   behavior: Settings 页「agent 回退顺序」保存写入 [agent_runner.runner] 段，且实现阶段主 agent 失败时按该链换下一个
   reviewer: human
-  real_entry: "just run frontend 打开 Settings 调整回退顺序并保存；对照 config.toml；uv run pytest tests/backend/core/use_cases/test_agent_fallback_order.py -q"
+  real_entry: "just run frontend 打开 Settings 调整回退顺序并保存；对照 config.toml；uv run pytest tests/test_lifecycle_agents_console_api.py -q"
   expected: "config.toml 的 [agent_runner.runner] 段只多出 agent_fallback_order / max_agent_switches（default_agent / verification_commands 等既有键不变）；单测断言 candidate_agents 等于 [主 agent] + 配置链去重后按 max_agent_switches 截断，链为空时只含主 agent，本机未安装的 agent 被跳过"
   mock_boundary: "agent 可用性探测用夹具；回退链解析与截断逻辑必须真实"
   tier: R1
@@ -493,16 +493,16 @@ Agent 标签设置：四个 agent 的标签名 / 颜色 / 描述可编辑，标�
 
 ### 9.2 Acceptance Evidence Package
 
-**Human-Confirmed（对应 §2 三个决策 + 呈递审阅）**
-- [ ] 决策一：九个生命周期键名与清单获人确认（`rv-1` 全键基线断言为佐证）
-- [ ] 决策二：fix/closeout 默认 `executor` 语义获人确认（`rv-2` 为佐证）
-- [ ] 决策三：三层覆盖顺序（PRD 文件头部 > 仓库 `.iar.toml` > 全局 `config.toml` > 既有配置键 > 内置默认）与三层 UI 落点（Settings「Agent 管理」写全局 / Roadmap 仓库行齿轮写该仓库 / PRD 原文页写 PRD 头部）获人确认（`rv-1` 分层断言 + `rv-3` 为佐证）
-- [ ] 决策四：矩阵单值 + 全局一条回退链、`auto` 按阶段如实描述获人确认（`rv-6` + `rv-1` 的逐阶段 auto 断言为佐证）
-- [ ] 决策五：Settings 用「Agent 管理」粘性 Tab 组织、Agent 标签设置在前获人确认（`rv-7` 为佐证）
-- [ ] 9.1 呈递区四项呈递物已逐项过目并认可
+**Human-Confirmed（对应 §2 五个决策 + 呈递审阅）**
+- [x] 决策一：九个生命周期键名与清单获人确认（`rv-1` 全键基线断言为佐证）——2026-09-20 用户逐条确认
+- [x] 决策二：fix/closeout 默认 `executor` 语义获人确认（`rv-2` 为佐证）——2026-09-20 用户逐条确认
+- [x] 决策三：三层覆盖顺序（PRD 文件头部 > 仓库 `.iar.toml` > 全局 `config.toml` > 既有配置键 > 内置默认）与三层 UI 落点（Settings「Agent 管理」写全局 / Roadmap 仓库行齿轮写该仓库 / PRD 原文页写 PRD 头部）获人确认（`rv-1` 分层断言 + `rv-3` 为佐证）——2026-09-20 用户逐条确认
+- [x] 决策四：矩阵单值 + 全局一条回退链、`auto` 按阶段如实描述获人确认（`rv-6` + `rv-1` 的逐阶段 auto 断言为佐证）——2026-09-20 用户逐条确认
+- [x] 决策五：Settings 用「Agent 管理」粘性 Tab 组织、Agent 标签设置在前获人确认（`rv-7` 为佐证）——2026-09-20 用户逐条确认
+- [x] 9.1 呈递区四项呈递物已逐项过目并认可——2026-09-20 采齐 `rv-3-three-layer-editors.png` / `rv-4-prd-override.png` / `rv-6-fallback-order.png` / `rv-7-agent-labels.png` 并呈递
 
 **Architecture Acceptance**
-- [ ] `resolve_lifecycle_agent` 位于 core 层，api/routes 无业务解析逻辑；`uv run pytest tests/backend/core/use_cases/test_lifecycle_agent_resolution.py -q` 全绿（rv-1 佐证）
+- [ ] `resolve_lifecycle_agent` 位于 core 层，api/routes 无业务解析逻辑；`uv run pytest tests/test_lifecycle_agent_resolution.py -q` 全绿（rv-1 佐证）
 - [ ] 数据库无新表：`git diff` 不含 `console_store.py` 表结构改动与 alembic 变更
 
 **Behavior Acceptance**
@@ -544,7 +544,7 @@ Agent 标签设置：四个 agent 的标签名 / 颜色 / 描述可编辑，标�
   - 下拉中不出现"未设置 / 跟随全局"这类伪选项；点仓库列表行本身仍只"切换当前仓库"。
   - 写入前 UI 校验取值合法（已注册 agent / `auto` / fix-closeout 的 `executor`）与键名闭集。
 - **FR-7**：frontend-public PRD 原文页（`components/roadmap/prd-content-view.tsx` 的工具栏）新增「Agent 覆盖」入口，打开覆盖抽屉：勾选生命周期并选择 agent，保存写回该 PRD 文件头部的 `lifecycle_agents` 块且不动头部其余内容与正文。
-- **FR-8**：console API 新增：`GET /api/v1/agent-runner/lifecycle-agents?repo_id=<id>&scope=global|repository`（返回该视角下的生效视图、每键的来源层标注与本层是否已显式设置）；`PUT /api/v1/agent-runner/lifecycle-agents`（body 带 `scope` 与可选 `repo_id`，`global` 写 `config.toml`、`repository` 写该仓库 `.iar.toml`，均保留式写入且**只写请求里显式给出的键**，`null`/缺省表示移除该键）；`GET/PATCH /api/v1/prds/{prd_id}/agent-overrides`（写 PRD 文件头部块）；未注册 agent 名与非法取值在写入时同样校验拒绝。
+- **FR-8**：console API 新增：`GET /api/v1/agent-runner/lifecycle-agents?repo_id=<id>&scope=global|repository`（返回该视角下的生效视图、每键的来源层标注与本层是否已显式设置）；`PUT /api/v1/agent-runner/lifecycle-agents`（body 带 `scope` 与可选 `repo_id`，`global` 写 `config.toml`、`repository` 写该仓库 `.iar.toml`，均保留式写入且**只写请求里显式给出的键**，`null`/缺省表示移除该键）；`GET/PATCH /api/v1/agent-runner/roadmap/prds/{encoded_path}/agent-overrides`（写 PRD 文件头部块）；未注册 agent 名与非法取值在写入时同样校验拒绝。
 - **FR-9**：config.toml 增加 `[agent_runner.lifecycle_agents]` 注释模板（默认全部注释，行为不变）；`docs/` 新增矩阵键名与优先级的权威说明页并同步 `mkdocs.yml`。
 - **FR-10**：frontend-public Settings 页新增 "agent 回退顺序" 卡片，编辑 `[agent_runner.runner]` 的 `agent_fallback_order`（可上下移动 / 移除 / 从剩余已注册 agent 追加）与 `max_agent_switches`（数字输入，界面显示"最多尝试 N 个 agent"），保存为保留式写入（段内 `default_agent`、`verification_commands` 等既有键一字不动）；console API 新增 `GET/PUT /api/v1/agent-runner/agent-fallback-order`。该卡片明确说明它作用于 Issue 执行阶段的跨 agent 回退，且第一个尝试的 agent 由矩阵 / 标签路由决定；本机未安装的 agent 在运行时跳过。
 - **FR-11**：`auto` 的合法性与语义按阶段定义并逐阶段校验：实现（按 Issue 标签路由）、校验（从回退链挑第一个 ≠ 实现者）、审核（优先 ≠ 实现者，`allow_same_agent` 时沿用实现者）、监督（发布路径沿用本次实现者）、辩论（按 `agent/deliberate` 标签路由）接受 `auto`；决策、内容生成、修复、收尾不接受 `auto`。解析实现必须复用既有的 `choose_agent` / `_choose_verifier_agent` / `resolve_reviewer_agent` / `resolve_supervisor_agent` 语义，不得统一成标签路由；界面上 `auto` 的文案也按阶段如实描述（见 FR-6）。
@@ -584,3 +584,77 @@ Agent 标签设置：四个 agent 的标签名 / 颜色 / 描述可编辑，标�
 | D-06 | fix/closeout 默认 | `executor`（跟随实现） | 强制显式指定 | 零配置行为不变是兼容底线 |
 | D-07 | 配置层结构 | 解析函数收敛既有配置键为回落层 | 迁移既有键进矩阵 / 五段各加覆盖字段 | 不迁移避免破坏既有配置；解析函数给出统一视图 |
 | D-08 | 三层 UI 落点 | 全局层 → Settings 页卡片；仓库层 → Roadmap 受管理仓库列表每行齿轮 + 抽屉；PRD 层 → PRD 原文页工具栏抽屉（三层都可写，各写各自文件） | 三层都放 Settings 页（原 FR-6 写法）；仓库级只读展示 | 用户判断"仓库级别的设置不应该放在 Settings 里，应该放在 Roadmap 的仓库列表里"——Settings 是机器级页面，仓库级配置跟着仓库走；三层各写各自文件后，落点与配置文件一一对应，也让全局层从"只读参照"升级为可编辑（`config.toml` 与 `.iar.toml` 均被 git 跟踪，可追溯性不构成反对理由） |
+
+## Change Log
+
+### 全栈落地实施
+- Type: implementation
+- Before: PRD 处于待开工状态，生命周期矩阵只存在于原型与文档。
+- After: 后端（配置段 / 合并 / 解析函数 / 八个消费点 / console API / 保留式 TOML 写回）与 frontend-public 三个界面（Settings「Agent 管理」粘性 Tab、Roadmap 仓库行齿轮抽屉、PRD 原文页覆盖抽屉）均已实现，并新增 `tests/test_lifecycle_agent_resolution.py`、`tests/test_lifecycle_agent_routing.py`、`tests/test_lifecycle_agents_console_api.py`。
+- Reason: 按 §6 Recommended Approach 在既有配置分层之上收敛"阶段 -> agent"解析。
+- Impact: FR-1~FR-12 均有实现落点；`resolve_lifecycle_agent` 成为唯一解析入口，fix/closeout 首次拥有独立 agent 配置能力；零新配置行为不变由基线单测锁定。
+- Review: 待独立 verifier 与人工审阅（本次未完成 §9.2 的 Human-Confirmed 与视觉证据项）。
+
+### 验证入口路径与实际仓库布局对齐
+- Type: test
+- Before: Realistic Validation Plan 的 `real_entry` 写作 `tests/backend/core/use_cases/test_*.py`。
+- After: 改为仓库真实的扁平布局 `tests/test_lifecycle_agent_resolution.py` / `tests/test_lifecycle_agent_routing.py` / `tests/test_lifecycle_agents_console_api.py`（本仓库业务测试都在 `tests/` 根目录，无 `tests/backend/`）。
+- Reason: 路径必须可直接执行，否则 rv 入口不可用。
+- Impact: rv-1 / rv-2 / rv-5 / rv-6 的命令可直接运行；oracle 语义不变。
+- Review: 已按实际命令执行并全绿。
+
+### PRD 覆盖端点命名空间修正
+- Type: api
+- Before: FR-8 与 §6 写作 `GET/PATCH /api/v1/prds/{prd_id}/agent-overrides`。
+- After: 改为 `GET/PATCH /api/v1/agent-runner/roadmap/prds/{encoded_path}/agent-overrides`，沿用既有 PRD 原文端点的 base64url 路径约定。
+- Reason: 仓库既有 PRD 内容端点以 `repo_id` + 编码后的 PRD 相对路径为键，没有数值 `prd_id`；另起命名空间会与既有约定分叉。
+- Impact: 前端 `lib/api/lifecycleAgents.ts` 复用 `encodePrdPath`；读写语义（读=当前头部覆盖、写=只改 `lifecycle_agents` 块）不变。
+- Review: 已由 `tests/test_lifecycle_agents_console_api.py` 的 PRD 覆盖用例覆盖。
+
+### 消费点防漏守卫的落点
+- Type: test
+- Before: §7 Change Impact Tree 把"新阶段消费点必须走解析函数"的守卫写在 `tests/guards/`。
+- After: 以 AST 守卫形式放进普通测试文件 `tests/test_lifecycle_agent_routing.py`。
+- Reason: 仓库既有同型守卫（`test_every_agent_invocation_call_site_passes_config`）就放在普通测试文件；`tests/guards/**` 的改动需要 `GUARD_UPDATE_ACK` 且约定为"仓库级约定"，本守卫只约束本特性内部调用点。
+- Impact: 守卫语义不变——fix / closeout 的 agent 入参必须来自 `resolve_lifecycle_agent`。
+- Review: 守卫带反空转断言（找不到调用点即失败）。
+
+### PRD 级覆盖随 Issue 流动（独立 verifier R1 整改）
+- Type: fix
+- Before: `prd_overrides` 只在执行循环里解析并传给 closeout / fix / verifier；`choose_agent`（实现）、pre-PR review、post-PR supervisor 的调用链拿不到 PRD 覆盖，导致行为样例表第 3–4 行（PRD 头部声明 implementation/review）端到端不生效。
+- After: 新增 `IssueSummary.lifecycle_overrides` 与 `attach_prd_lifecycle_overrides(issue, repo_path)`；编排入口 `_process_single_issue` 在唯一同时掌握仓库路径与 Issue 的位置解析 PRD 头部并回填，`choose_agent` / `resolve_reviewer_agent` / `resolve_supervisor_agent` / `_choose_verifier_agent` 经 `effective_prd_overrides` 统一读取。执行循环优先用 Issue 上的那份，缺失时回退到就地解析 worktree 文本。
+- Reason: 独立 verifier 判 R1（阻断）：PRD 级覆盖对实现 / 审核 / 监督三个阶段不生效，直接违背 §1 行为样例表的验收 oracle。
+- Impact: rv-1 的 PRD 覆盖断言与行为样例表第 3–4 行现在端到端成立；新增 `test_choose_agent_honors_issue_carried_prd_override`、`test_resolve_reviewer_agent_honors_issue_carried_prd_override`、`test_resolve_supervisor_agent_honors_issue_carried_prd_override`、`test_attach_prd_lifecycle_overrides_reads_prd_header` 锁定。
+- Review: 已整改并重跑；独立 verifier 第二轮结论见 `<stem>.verifier-report.md`。
+
+### Agent 回退顺序 / 标签端点的写入目标显式化（R3 整改）
+- Type: doc
+- Before: `PUT /agent-runner/agent-fallback-order` 与 `PUT /agent-runner/agent-labels` 接受 `repo_id`，但恒写全局 `config.toml`，语义未在文档与响应中说明。
+- After: 两个端点的 docstring 明确"这两个键是机器级配置（Settings 层），写入目标恒为 `config.toml`；`repo_id` 只用于选取校验视角"。
+- Reason: 独立 verifier 判 R3：参数与行为不一致会让调用方误以为可做仓库级写入。
+- Impact: 行为不变（PRD FR-10/FR-12 本就要求 Settings 编辑全局），仅消除歧义。
+- Review: 代码注释与 PRD 口径一致。
+
+### PRD 覆盖写回前的取值规范化（R3 整改）
+- Type: fix
+- Before: `PATCH .../agent-overrides` 校验后仍把**未规范化**的原始取值写进 PRD 文件头部。
+- After: 先经 `validate_lifecycle_agents_update` 规范化（小写、去空白）再落盘。
+- Reason: 独立 verifier 判 R3：文件里的取值可能与解析函数期望的大小写不一致。
+- Impact: 写回内容与解析结果一致；解析函数本身对大写取值也能容忍。
+- Review: 已整改。
+
+### 消费点防漏守卫扩大扫描范围（R3 整改）
+- Type: test
+- Before: AST 守卫只扫描 `run_agent_execution_loop.py` 一个文件。
+- After: 扫描整个 `core/use_cases/` 目录，任何新增的 `run_fix_agent` / `run_closeout_agent` 调用点绕过解析函数都会失败。
+- Reason: 独立 verifier 判 R3：单文件扫描覆盖面窄。
+- Impact: 守卫强度提升，反空转断言保留。
+- Review: 已整改。
+
+### 人工决策确认与四项呈递物采齐
+- Type: evidence
+- Before: §9.2 的 Human-Confirmed 六条全部未勾选；rv-3/4/6/7 要求的真实浏览器截图不存在，§9.1 呈递区四项无人过目。
+- After: 2026-09-20 用户逐条确认决策一～五与呈递审阅；用真实 console（`just console-sync` 的静态产物 + 隔离 `IAR_CONFIG` 起的后端 + 一个一次性 git 仓库）在真实浏览器里跑通四组操作并采齐 `rv-3-three-layer-editors.png` / `rv-4-prd-override.png` / `rv-6-fallback-order.png` / `rv-7-agent-labels.png`，另附 `rv-7-agent-labels-duplicate.png`（重复标签被阻断）。
+- Reason: PRD §9.1/§9.2 要求人工确认与真实入口证据，不能以组件级或内存态证据替代。
+- Impact: §9.2 的 Human-Confirmed 六条全部达到完成态；rv-3/4/6/7 的真实入口行为与文件落盘结果均有截图 + 文件内容对照。自动化侧不变。
+- Review: 截图与文件内容对照见 `tasks/evidence/P1-FEAT-20260918-110027-lifecycle-agent-matrix/`（png 本地 only，报告 md 入库）。
