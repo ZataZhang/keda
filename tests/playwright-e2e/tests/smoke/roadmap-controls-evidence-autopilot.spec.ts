@@ -344,9 +344,14 @@ test.describe('realistic: roadmap controls, evidence and autopilot', () => {
     await expect(page.getByTestId('roadmap-autopilot-daemon')).toContainText('Daemon 未运行')
     await expect(page.getByTestId('roadmap-autopilot-auto-merge')).toContainText('自动合并未启用')
 
-    await page.getByTestId('roadmap-autopilot-toggle').check()
+    // 开关是受控组件：勾选状态由写后读回的响应驱动，而不是浏览器本地切换。
+    // 因此用 click() + toBeChecked() 断言，不用 check()——check() 会在点击后
+    // 立刻校验 DOM 状态，异步响应还没回来时会误报「state 未改变」。
+    const autopilotToggle = page.getByTestId('roadmap-autopilot-toggle')
+    await autopilotToggle.click()
 
     // 响应体来自写后读回：这里紧接着显示为已开启且 daemon 运行中。
+    await expect(autopilotToggle).toBeChecked()
     await expect(page.getByTestId('roadmap-autopilot-daemon')).toContainText('Daemon 运行中')
     expect(captures.patches).toHaveLength(1)
     expect(captures.patches[0]!.body).toContain('"enabled":true')

@@ -269,13 +269,6 @@ def get_roadmap_prd_content(encoded_path: str, repo_id: str) -> PlainTextRespons
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _load_fresh_contexts():
-    """重新解析当前启用的仓库上下文（每次调用都重新加载配置）。"""
-    settings = load_fresh_agent_runner_settings()
-    contexts, _failures = resolve_repository_targets_with_diagnostics(settings)
-    return contexts
-
-
 def _resolve_max_parallel(repo_id: str) -> int:
     """读取该仓库 Roadmap 并发上限（既有 roadmap settings，不新增存储）。"""
     store = create_roadmap_store()
@@ -318,7 +311,7 @@ def update_roadmap_autopilot(request: UpdateAutopilotRequest) -> dict:
     成功响应体来自写后 fresh load 的生效配置，不回显请求体；``safety.auto_merge``
     保持原样（第二道危险动作门禁，页面只读展示）。写回失败时不替换原文件。
     """
-    contexts = _load_fresh_contexts()
+    contexts = _resolve_contexts()
     if not any(context.repo_id == request.repo_id for context in contexts):
         raise HTTPException(status_code=400, detail=f"仓库 '{request.repo_id}' 不存在或未启用。")
     try:
@@ -326,7 +319,7 @@ def update_roadmap_autopilot(request: UpdateAutopilotRequest) -> dict:
             repo_id=request.repo_id,
             enabled=request.enabled,
             editor=create_repository_autopilot_settings_editor(),
-            contexts_loader=_load_fresh_contexts,
+            contexts_loader=_resolve_contexts,
             supervisor=create_process_supervisor(),
             max_parallel=_resolve_max_parallel(request.repo_id),
         )

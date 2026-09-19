@@ -350,7 +350,6 @@ def autopilot_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     contexts_loader = _contexts_for(repo_root, auto_merge=False)
     monkeypatch.setattr(roadmap_routes, "create_roadmap_store", lambda: store)
     monkeypatch.setattr(roadmap_routes, "_resolve_contexts", contexts_loader)
-    monkeypatch.setattr(roadmap_routes, "_load_fresh_contexts", contexts_loader)
     monkeypatch.setattr(roadmap_routes, "create_process_supervisor", lambda: _FakeSupervisor([]))
     return {"repo_root": repo_root, "store": store}
 
@@ -418,7 +417,6 @@ def test_patch_autopilot_conflicts_when_config_missing(
     ]
     monkeypatch.setattr(roadmap_routes, "create_roadmap_store", lambda: store)
     monkeypatch.setattr(roadmap_routes, "_resolve_contexts", contexts_loader)
-    monkeypatch.setattr(roadmap_routes, "_load_fresh_contexts", contexts_loader)
     monkeypatch.setattr(roadmap_routes, "create_process_supervisor", lambda: _FakeSupervisor([]))
 
     response = client.patch(
