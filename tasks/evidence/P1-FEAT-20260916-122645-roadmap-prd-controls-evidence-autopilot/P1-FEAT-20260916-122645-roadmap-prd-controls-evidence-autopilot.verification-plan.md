@@ -18,7 +18,7 @@ PRD：`tasks/pending/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 | rv-3 真实页面呈现 | e2e + 真实 console 截图 | `bash tasks/evidence/<stem>/scripts/rv-3-archived-evidence-screenshot.sh` | `rv-3-archived-evidence.png` |
 | rv-3 负控（实现前端点不存在） | 在基线 worktree（`git worktree add --detach /tmp/iar-rv3-baseline 4d4dd12`）上重放同一请求 | 同上脚本 §5 自动执行 | `rv-3-path-attack-matrix.txt` §5 |
 | rv-4 Autopilot 开启后 daemon 下一轮自动晋升下游；关闭零晋升；`auto_merge=false` 零合并 | integration：真实 `advance_roadmap_queue` + 真实仓库 `.iar.toml` loader + fake GitHub/store | `uv run pytest -o addopts="" tests/test_roadmap_advance.py tests/test_roadmap_autopilot_settings.py -k 'autopilot or upstream or disabled' -v` | 见 evidence report §2.3 |
-| rv-5 API / core / writer 契约（成功 / 空态 / 非法仓库 / 非法路径 / 写失败） | integration：FastAPI TestClient + 真实临时文件 | `uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -v` | 见 evidence report §2.4 |
+| rv-5 API / core / writer 契约（成功 / 空态 / 非法仓库 / 非法路径 / 写失败） | integration：FastAPI TestClient + 真实临时文件 | `uv run pytest -o addopts="" tests/test_roadmap_api.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q`（26 passed）与 `… tests/test_roadmap_autopilot_settings.py … -q`（34 passed） | 见 evidence report §2.4 |
 | rv-6 全仓质量门禁 | lint / 全量测试 / console 构建 / e2e / 文档构建 | `just lint --reuse && just lint --full && just test && just console-sync && just e2e … && uv run mkdocs build --strict` | 见 evidence report §3 |
 | 架构红线 | API 不 import tomlkit / 不直接写文件；core 只依赖窄端口；无第二份 TOML 写回；新增端点不复用 `_ROADMAP_CACHE` | `just lint --reuse`（含 check-architecture）+ 定向 `rg` | 见 evidence report §3 |
 | 文档同步 | `docs/guides/agent-runner.md` + `docs/api/references.md`；`mkdocs.yml` 无需改动 | `uv run mkdocs build --strict` | 见 evidence report §3 |
@@ -37,7 +37,7 @@ PRD：`tasks/pending/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 | Oracle | 负控 | 期望差异 |
 |---|---|---|
 | rv-1 | 在实现前的默认依赖图上点击节点 | 整块画布被 PRD 原文替换且没有「开始此 PRD」，用例失败（`expected_fail` 已写入 PRD） |
-| rv-2 | 请求 `PATCH /roadmap/autopilot` 于基线代码树；以及 PATCH 未知仓库 | 基线 404（入口此前不存在）；未知仓库 400 |
+| rv-2 | 在基线 worktree（`git worktree add --detach /tmp/iar-rv3-baseline 4d4dd12`）上重放同一 GET / PATCH；以及 PATCH 未知仓库 | 基线两条均 404（入口此前不存在）；未知仓库 400 |
 | rv-2 | 写后 fresh load 与请求值不一致时 | 用例 `test_set_autopilot_enabled_rejects_stale_fresh_loader` 报错，不返回 200 冒充成功 |
 | rv-3 | 在基线 worktree（`4d4dd12`）上重放 evidence / autopilot 请求 | 两个端点均 404 |
 | rv-3 | 恶意 artifact token（穿越 / 隐藏 / 子目录伪装 / 符号链接逃逸 / 非法 base64） | 全部 400，响应体不含仓外内容 |

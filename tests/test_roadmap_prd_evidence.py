@@ -17,6 +17,7 @@ import backend.api.routes.agent_runner_roadmap as roadmap_routes
 from backend.api.app import app
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.use_cases.roadmap_prd_evidence import (
+    MAX_EVIDENCE_FILE_BYTES,
     RoadmapPrdEvidenceError,
     build_evidence_manifest,
     encode_artifact_token,
@@ -163,6 +164,22 @@ def test_artifact_rejects_missing_file(evidence_repo: Path) -> None:
     """不存在的文件名必须是 4xx 语义的错误，而不是空内容。"""
     with pytest.raises(RoadmapPrdEvidenceError):
         read_evidence_artifact(evidence_repo, AppConfig(), ARCHIVED_PRD, "nope.md")
+
+
+def test_oversize_file_is_excluded_from_manifest_and_rejected_by_artifact(
+    evidence_repo: Path,
+) -> None:
+    """超限文件既不出现在 manifest，也不能被 artifact 读取（允许集合一致）。"""
+    oversized_name = "huge.bin"
+    evidence_dir = _evidence_dir_for(evidence_repo, ARCHIVED_PRD)
+    (evidence_dir / oversized_name).write_bytes(b"x" * (MAX_EVIDENCE_FILE_BYTES + 1))
+
+    manifest = build_evidence_manifest(
+        repo_path=evidence_repo, config=AppConfig(), prd_path=ARCHIVED_PRD
+    )
+    assert oversized_name not in {file.name for file in manifest.files}
+    with pytest.raises(RoadmapPrdEvidenceError):
+        read_evidence_artifact(evidence_repo, AppConfig(), ARCHIVED_PRD, oversized_name)
 
 
 def test_encode_decode_roundtrip() -> None:

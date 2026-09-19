@@ -17,7 +17,7 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 | rv-2 | 录屏：Autopilot 开关 + 降级文案 | `…/rv-2-autopilot-control.webm` | `open "…/rv-2-autopilot-control.webm"` | 初始「Daemon 未运行」「自动合并未启用」；开关打开后「Daemon 运行中」，自动合并仍「未启用」 |
 | rv-2 | 文本：写回前后 `.iar.toml` 逐行 diff + 真实 HTTP | `…/rv-2-config-diff.txt` | `open "…/rv-2-config-diff.txt"` | diff 只有一对 `enabled = false → true`；同级键 4 个、未知子表 1 个、注释 2 条全保留；GET→PATCH→GET 一致；未知仓库 400 |
 | rv-3 | 截图：真实 console + 真实文件系统的「验收证据」标签页 | `…/rv-3-archived-evidence.png` | `open "…/rv-3-archived-evidence.png"` | 列出真实文件名与大小；`.hidden.md` / `scripts/oracle.py` / `escape.md` 均不出现 |
-| rv-3 | 文本：路径攻击矩阵 + 负控 | `…/rv-3-path-attack-matrix.txt` | `open "…/rv-3-path-attack-matrix.txt"` | 11 条攻击 token 全部 400 且不泄露仓外内容；fresh-state probe 5→6→5；空态给出解析位置；基线代码树两个端点 404 |
+| rv-3 | 文本：路径攻击矩阵 + 负控 | `…/rv-3-path-attack-matrix.txt` | `open "…/rv-3-path-attack-matrix.txt"` | 10 个恶意 token 全部 400 且不泄露仓外内容（同表内 1 个合法 token 为 200）；fresh-state probe 5→6→5；空态给出解析位置；基线代码树 GET/PATCH 404 |
 
 ### rv-3 真实页面截图（就地嵌入）
 
@@ -32,9 +32,9 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 
 ## 0. 一句话结论
 
-后端链条（受限 `.iar.toml` 写回、证据只读访问、Autopilot 状态聚合、API 契约、现有持续调度与双重合并门禁）与前端页面全部真实跑通：全量后端 **2304 passed**、E2E **12 passed**（新 spec 6 + 既有 PRD 原文 spec 3 + console 静态入口 spec 3）、`just lint --reuse` / `pre-commit --all-files` / `just console-sync` / `uv run mkdocs build --strict` 全部退出 0。rv-1 / rv-2 / rv-3 的人读呈递物已在最终实现树采集。
+后端链条（受限 `.iar.toml` 写回、证据只读访问、Autopilot 状态聚合、API 契约、现有持续调度与双重合并门禁）与前端页面全部真实跑通：全量后端 **2306 passed**；E2E 两次运行合计 **12 passed**（新 spec 5 + 既有 PRD 原文 spec 3 + console 静态入口 spec 3 + auth setup 1）；`just lint --reuse` / `pre-commit --all-files` / `just console-sync` / `uv run mkdocs build --strict` 全部退出 0。rv-1 / rv-2 / rv-3 的人读呈递物已在最终实现树采集。
 
-本轮修复了两处实跑才暴露的问题（§4）：`agent_runner_roadmap.py` 中的重复 context loader，以及新 E2E spec 用 `check()` 驱动受控开关造成的假失败。
+本轮修复了两处实跑才暴露的问题、以及两处独立 verifier 复核提出的问题（§4）：`agent_runner_roadmap.py` 中的重复 context loader、新 E2E spec 用 `check()` 驱动受控开关造成的假失败、`.iar.toml` 中 `enabled` 非布尔时 GET 漏成 500、以及超限文件被列进 manifest 却无法下载。
 
 ## 1. 自动化 oracle 结果（真实执行）
 
@@ -42,12 +42,13 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 |---|---|---|---|---|
 | rv-1 | `just e2e tests/smoke/roadmap-controls-evidence-autopilot.spec.ts tests/smoke/roadmap-prd-content.spec.ts` | PASS 9 passed | 0 | §2.1 / `rv-1-roadmap-single-start.webm` |
 | rv-1（生产静态入口） | `just e2e tests/workflows/console-served-static.no-auth.spec.ts` | PASS 3 passed | 0 | §2.1 |
-| rv-2（写回 + 读回） | `bash tasks/evidence/<stem>/scripts/rv-2-autopilot-config-diff.sh` | PASS 1 行 diff / 未知仓库 400 | 0 | `rv-2-config-diff.txt` |
-| rv-3（受限读取 + 攻击面） | `.venv/bin/python tasks/evidence/<stem>/scripts/rv-3-path-attack-matrix.py` | PASS 11 攻击全 400，无泄露 | 0 | `rv-3-path-attack-matrix.txt` |
+| rv-2（写回 + 读回） | `bash tasks/evidence/<stem>/scripts/rv-2-autopilot-config-diff.sh` | PASS 1 行 diff / 未知仓库 400 / 基线 GET+PATCH 404 | 0 | `rv-2-config-diff.txt` |
+| rv-3（受限读取 + 攻击面） | `.venv/bin/python tasks/evidence/<stem>/scripts/rv-3-path-attack-matrix.py` | PASS 11 例中 10 例恶意 token 400 + 1 例合法 200，无泄露 | 0 | `rv-3-path-attack-matrix.txt` |
 | rv-3（真实页面） | `bash tasks/evidence/<stem>/scripts/rv-3-archived-evidence-screenshot.sh` | PASS 截图 + 自检通过 | 0 | `rv-3-archived-evidence.png` |
 | rv-4（持续调度 + 双门禁） | `uv run pytest -o addopts="" tests/test_roadmap_advance.py tests/test_roadmap_autopilot_settings.py -k 'autopilot or upstream or disabled' -v` | PASS 12 passed | 0 | §2.3 |
-| rv-5（API / core / writer 契约） | `uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -v` | PASS 32 passed | 0 | §2.4 |
-| rv-6（全仓质量） | `just test` | PASS 2304 passed in 90.25s | 0 | §3 |
+| rv-5（API / core / writer 契约） | `uv run pytest -o addopts="" tests/test_roadmap_api.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q`（PRD 的 `real_entry` 原样） | PASS 26 passed | 0 | §2.4 |
+| rv-5（三个新增测试文件合计） | `uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q` | PASS 34 passed | 0 | §2.4 |
+| rv-6（全仓质量） | `CI=true just test all`（强制全量、跳过 testmon 增量） | PASS 2306 passed in 79.11s | 0 | §3 |
 | rv-6（复用/架构/行数） | `just lint --reuse` | PASS（5 个 hook 全过） | 0 | §3 |
 | rv-6（全量 pre-commit） | `SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure` | PASS（17 个 hook 全过） | 0 | §3 |
 | rv-6（前端构建与静态同步） | `just console-sync` | PASS（13 个路由静态导出并同步） | 0 | §3 |
@@ -57,13 +58,19 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 
 ### 2.1 rv-1 · 三种视图共享统一详情与唯一启动入口
 
-`just e2e` 输出（节选）：
+`just e2e tests/smoke/roadmap-controls-evidence-autopilot.spec.ts tests/smoke/roadmap-prd-content.spec.ts`
+在最终实现树上的输出（节选，逐字）：
 
 ```text
-✓  5 [chromium] › tests/smoke/roadmap-controls-evidence-autopilot.spec.ts:296:3 › realistic: roadmap controls, evidence and autopilot › rv-1 三种视图共享同一详情与启动规则 (1.8s)
-✓  9 [chromium] › tests/smoke/roadmap-controls-evidence-autopilot.spec.ts:336:3 › realistic: roadmap controls, evidence and autopilot › rv-2 Autopilot 开关走 PATCH 并如实显示降级条件 (652ms)
-  9 passed (9.8s)
+  ✓  2 [chromium] › tests/smoke/roadmap-controls-evidence-autopilot.spec.ts:252:3 › … › rv-1 默认依赖图选中可启动 PRD 后走规范 start API (1.4s)
+  ✓  4 [chromium] › tests/smoke/roadmap-controls-evidence-autopilot.spec.ts:282:3 › … › rv-1 被依赖阻塞的 PRD 不允许绕过依赖门禁 (612ms)
+  ✓  5 [chromium] › tests/smoke/roadmap-controls-evidence-autopilot.spec.ts:296:3 › … › rv-1 三种视图共享同一详情与启动规则 (1.8s)
+  ✓  8 [chromium] › tests/smoke/roadmap-controls-evidence-autopilot.spec.ts:316:3 › … › rv-3 已归档 PRD 的验收证据标签展示受限清单 (544ms)
+  ✓  9 [chromium] › tests/smoke/roadmap-controls-evidence-autopilot.spec.ts:336:3 › … › rv-2 Autopilot 开关走 PATCH 并如实显示降级条件 (533ms)
+  9 passed (9.6s)
 ```
+
+（该次运行的 9 条 = 新 spec 5 条 + 既有 `roadmap-prd-content.spec.ts` 3 条 + `auth.setup.ts` 1 条。）
 
 断言的是外部可观察量：唯一 start 请求的 URL 必须是
 `/api/v1/agent-runner/roadmap/prds/<base64url(prd_path)>/start`，请求体含 repo_id；
@@ -99,6 +106,9 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 ## PATCH negative control: unknown repo
 {"detail":"仓库 'does-not-exist' 不存在或未启用。"}
 HTTP 400
+## 负控（基线代码树 4d4dd12，PYTHONPATH=/tmp/iar-rv3-baseline/src）
+GET  /autopilot -> HTTP 404
+PATCH /autopilot -> HTTP 404
 ```
 
 `rv-3-path-attack-matrix.txt`（节选）：
@@ -146,17 +156,26 @@ discovery 顺手捞起来的。`test_merge_queue_requires_both_switches` 在
 ### 2.4 rv-5 · API / core / writer 契约
 
 ```text
-============================== 32 passed in 0.27s ==============================
+# PRD §7 里 rv-5 的 real_entry 原样命令
+uv run pytest -o addopts="" tests/test_roadmap_api.py tests/test_roadmap_prd_evidence.py \
+  tests/test_repository_settings_editor.py -q
+============================== 26 passed in 0.25s ==============================
+
+# 三个新增测试文件合计（含 autopilot settings 契约）
+uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py \
+  tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q
+============================== 34 passed in 0.22s ==============================
 ```
 
 覆盖成功、空态、非法仓库、非法路径（穿越 / 隐藏 / 子目录 / 符号链接 / 非法
 base64）、写失败（缺文件 / 缺 `[agent_runner]` 段 / 非法 TOML 原文件不变）、
-写后读回不一致拒绝、legacy 扁平证据目录语义不变。
+写后读回不一致拒绝、`enabled` 非布尔时返回 400（而非 500）、超限文件既不进
+manifest 也无法读取、legacy 扁平证据目录语义不变。
 
 ## 3. rv-6 · 全仓门禁（真实执行，均为最终实现树）
 
 ```text
-just test                                    → 2304 passed in 90.25s
+CI=true just test all                        → 2306 passed in 79.11s
 just lint --reuse                            → jscpd / pylint-duplicate-code /
                                                check-architecture /
                                                check-guidelines-consistency /
@@ -185,7 +204,19 @@ uv run mkdocs build --strict                 → exit 0
 2. **受控开关驱动方式**：新 E2E spec 的 rv-2 用 `locator.check()` 驱动受控复选框，
    首轮实跑报 `Clicking the checkbox did not change its state`——`check()` 在点击后
    立刻校验 DOM 状态，而该开关的 `checked` 由**写后读回的异步响应**驱动。已改为
-   `click()` + `expect(...).toBeChecked()`，复跑 6 passed。
+   `click()` + `expect(...).toBeChecked()`，复跑通过。
+3. **GET 在 `enabled` 非布尔时漏成 500**（独立 verifier 提出，已复现）：`.iar.toml`
+   写成 `enabled = "yes"` / `1` 时，受限端口的 `read_enabled` 抛
+   `RepositorySettingsEditError`（`ValueError` 子类），而 `load_autopilot_state` 未做
+   转换、路由只 catch `RoadmapAutopilotError`，于是 `GET /roadmap/autopilot` 返回 500，
+   破坏 rv-5 的「稳定契约」要求。已在 `load_autopilot_state` 内把 `ValueError` 统一转成
+   `RoadmapAutopilotError`，并新增
+   `test_get_autopilot_rejects_non_bool_enabled` 断言返回 400 且 detail 提到「布尔」。
+4. **超限文件被列进 manifest 却无法下载**（独立 verifier 提出）：`build_evidence_manifest`
+   此前列出所有普通文件，而 artifact 端点对超过 10 MiB 的文件必然 400，页面因此给出
+   一个必然失败的动作。已在 manifest 阶段跳过超限文件，并新增
+   `test_oversize_file_is_excluded_from_manifest_and_rejected_by_artifact` 保证
+   manifest 与 artifact 的「允许集合」一致。
 
 ## 5. 已知限制
 
@@ -229,7 +260,7 @@ uv run mkdocs build --strict                 → exit 0
 `roadmap-graph.tsx` / `roadmap-timeline.tsx` / `roadmap-list.tsx` 未改动（既有
 `onOpenContent` prop 已足够）。
 
-测试与文档：新增 3 个测试文件（32 条）+ 1 个 E2E spec（6 条）；
+测试与文档：新增 3 个测试文件（**34 条**：settings 12 / evidence 14 / settings editor 8）+ 1 个 E2E spec（5 条）；
 `tests/smoke/roadmap-prd-content.spec.ts` 的「返回列表」断言改为 master-detail 关闭；
 `docs/guides/agent-runner.md`、`docs/api/references.md` 已同步。
 
@@ -244,18 +275,21 @@ just console-sync
 just e2e tests/smoke/roadmap-controls-evidence-autopilot.spec.ts tests/smoke/roadmap-prd-content.spec.ts
 just e2e tests/workflows/console-served-static.no-auth.spec.ts
 
-# rv-2 配置写回（真实 console + 临时 Git 仓）
+# 基线 worktree（rv-2 与 rv-3 的真实负控都用它）
+git worktree add --detach /tmp/iar-rv3-baseline 4d4dd12
+
+# rv-2 配置写回（真实 console + 临时 Git 仓 + 基线 GET/PATCH 404 负控）
 bash tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/scripts/rv-2-autopilot-config-diff.sh
 
-# rv-3 攻击矩阵（含基线负控；先建基线 worktree）
-git worktree add --detach /tmp/iar-rv3-baseline 4d4dd12
+# rv-3 攻击矩阵 + 真实页面截图
 .venv/bin/python tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/scripts/rv-3-path-attack-matrix.py
 bash tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/scripts/rv-3-archived-evidence-screenshot.sh
 
 # rv-4 / rv-5 / rv-6
 uv run pytest -o addopts="" tests/test_roadmap_advance.py tests/test_roadmap_autopilot_settings.py -k 'autopilot or upstream or disabled' -v
-uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -v
-just lint --reuse && just lint --full && just test && just console-sync && uv run mkdocs build --strict
+uv run pytest -o addopts="" tests/test_roadmap_api.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q
+uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q
+just lint --reuse && just lint --full && CI=true just test all && just console-sync && uv run mkdocs build --strict
 ```
 
 RV 脚本位于 `tasks/evidence/<prd-stem>/scripts/`，按 Machine Contract 不进入代码 diff

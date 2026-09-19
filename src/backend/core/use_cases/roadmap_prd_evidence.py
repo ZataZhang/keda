@@ -191,6 +191,10 @@ def build_evidence_manifest(
             size_bytes = candidate_path.stat().st_size
         except OSError:  # noqa: BLE001 - 单个文件不可 stat 时跳过而非整体失败
             continue
+        if size_bytes > MAX_EVIDENCE_FILE_BYTES:
+            # artifact 端点对超限文件必然 4xx，列出来只会给出一个必然失败的下载
+            # 动作；manifest 与 artifact 的「允许集合」必须一致。
+            continue
         manifest_files.append(
             RoadmapEvidenceFile(
                 name=candidate_path.name,

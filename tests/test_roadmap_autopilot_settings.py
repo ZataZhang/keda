@@ -367,6 +367,17 @@ def test_get_autopilot_endpoint(autopilot_environment) -> None:
     assert data["config_source"] == ".iar.toml"
 
 
+def test_get_autopilot_rejects_non_bool_enabled(autopilot_environment) -> None:
+    """`.iar.toml` 里的 enabled 不是布尔时必须返回 4xx，而不是漏成 500。"""
+    (autopilot_environment["repo_root"] / ".iar.toml").write_text(
+        _CONFIG_TEMPLATE.replace("enabled = false", 'enabled = "yes"'),
+        encoding="utf-8",
+    )
+    response = client.get(f"/api/v1/agent-runner/roadmap/autopilot?repo_id={REPO_ID}")
+    assert response.status_code == 400
+    assert "布尔" in response.json()["detail"]
+
+
 def test_patch_autopilot_persists_and_reads_back(autopilot_environment) -> None:
     """PATCH → 写回 → fresh GET 读回同值；配置 diff 只能有一行变化。"""
     repo_root = autopilot_environment["repo_root"]

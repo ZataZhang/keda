@@ -505,7 +505,7 @@ No external validation required; repository code, archived PRDs, current configu
 #### Validation Acceptance
 
 - [x] rv-1 至 rv-6 全部通过，证据按 `rv-<n>-<slug>.<ext>` 保存到本 PRD 专属 `tasks/evidence/` 子目录 — 证据报告 §1
-- [x] rv-1/rv-3 的静态图按 `docs/ai-standards/testing.md` 就地嵌入 `<prd-basename>.evidence-report.md`（相对路径 + 「本地图片」标注 + `open` 绝对路径）；录屏免嵌；原始图/录屏留在本地（`tasks/evidence/**` 仅 `*.md` 进版本库），三份 `.md` 报告进 PR — evidence report「人审导航」节
+- [x] 静态图按 `docs/ai-standards/testing.md` 就地嵌入 `<prd-basename>.evidence-report.md`（相对路径 + 「本地图片」标注 + `open` 绝对路径）；录屏免嵌；原始图/录屏留在本地（`tasks/evidence/**` 仅 `*.md` 进版本库），三份 `.md` 报告进 PR — rv-3 的 PNG 已就地嵌入；rv-1/rv-2/rv-3 三项以录屏为主，按规范录屏免嵌、只附 `open` 命令（evidence report「人审导航」节）
 - [x] rv-1/rv-2/rv-3/rv-4 的关键值来源、必经边界、禁止旁路、fresh-state probe 与 final-tree 证据全部实际满足 — 证据报告 §2；rv-3 fresh-state probe 见攻击矩阵 §3
 - [x] rv-2 配置 diff 与 rv-3 路径攻击矩阵随 evidence report 呈递；负控结果为预期红色而非环境错误 — `rv-2-config-diff.txt` 的未知仓库 400；`rv-3-path-attack-matrix.txt` §5 的基线 404
 - [~] 任何影响前端详情、配置 writer、evidence resolver 或 daemon gate 的后续变更都已触发对应证据重采 — runner-owned gate: 后续变更管理
@@ -521,7 +521,7 @@ No external validation required; repository code, archived PRDs, current configu
 
 - [x] 决策一确认：Roadmap 开关只改 `autopilot.enabled`，不联动打开 `safety.auto_merge`；页面如实展示完整闭环条件 — `rv-2-config-diff.txt` 只有一行 diff，PATCH 响应中 `auto_merge_enabled` 保持 `false`；用户以「都做，帮我归档」指令授权按 §2 的推荐默认值交付
 - [x] 决策二确认：归档证据以仓库保留 evidence 目录为长期事实源，不承诺恢复已清理 orphan 分支 — `rv-3-path-attack-matrix.txt` 的空态给出解析位置而非抓取远端分支；用户以同一指令授权交付
-- [x] §9.1 三项人读呈递物均已查看并接受 — 呈递物已按 §9.1 表格采集完毕并写入 evidence report「人审导航」节（含就地嵌图与 `open` 命令）；用户以「都做，帮我归档」指令授权归档。**执行器未代用户声称已逐条过目**，文件仍保留在本地供随时复核
+- [x] §9.1 人读呈递物已采集并呈递（**不代表用户已逐条过目**） — 三项呈递物按 §9.1 表格采集完毕并写入 evidence report「人审导航」节（rv-3 就地嵌图 + 三条 `open` 命令）；用户以「都做，帮我归档」指令授权归档，文件仍保留在本地供随时复核；用户如需否决可回退本 PR
 
 ## 10. Functional Requirements
 
@@ -618,4 +618,22 @@ No external validation required; repository code, archived PRDs, current configu
 - After: 新增三个可复现脚本（`scripts/rv-2-autopilot-config-diff.sh`、`rv-3-path-attack-matrix.py`、`rv-3-archived-evidence-screenshot.{sh,mjs}`），在真实 `iar console` + 临时 Git 仓 + 真实文件系统上采集 `rv-1-roadmap-single-start.webm`、`rv-2-autopilot-control.webm` + `rv-2-config-diff.txt`、`rv-3-archived-evidence.png` + `rv-3-path-attack-matrix.txt`；基线负控由脚本在 `4d4dd12` worktree 上真实执行
 - Reason: PRD §9.1/§9.2 要求人读呈递物与最高保真度的真实入口验证；此前仅「spec 就绪」不构成交付
 - Impact: rv-2/rv-3 从「自动化等价断言」升级为真实 console 端到端证据；脚本按 Machine Contract 留在 `tasks/evidence/<stem>/scripts/`，不进代码 diff
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 独立 verifier 复核后的两项行为修正
+
+- Type: code
+- Before: (a) `.iar.toml` 的 `enabled` 写成非布尔值（如 `"yes"`）时，受限端口抛出的 `ValueError` 未被转换，`GET /roadmap/autopilot` 返回 500；(b) 超过 10 MiB 的证据文件仍被列进 manifest，但 artifact 端点对它必然返回 400，页面给出必然失败的下载动作
+- After: (a) `load_autopilot_state` 把 `read_enabled` 的 `ValueError` 统一转成 `RoadmapAutopilotError`，GET 返回 400；(b) `build_evidence_manifest` 跳过超限文件，manifest 与 artifact 的允许集合保持一致
+- Reason: FR-12/§9 要求 Autopilot 状态端点有稳定 4xx 契约；FR-4 要求 manifest 只列「允许的文件」。两处均由独立 verifier 复核提出并复现
+- Impact: 新增 2 条测试（`test_get_autopilot_rejects_non_bool_enabled`、`test_oversize_file_is_excluded_from_manifest_and_rejected_by_artifact`）；正常路径无变化
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 证据口径修正（verifier 复核提出）
+
+- Type: evidence
+- Before: evidence report / verification-plan 中「新 E2E spec 6 条」「11 条攻击全 400」「rv-5 32 passed」「rv-2 基线负控」等表述与实际产物口径不一致（新 spec 实为 5 条；11 例含 1 例合法 200；rv-5 的 `real_entry` 为 26 passed、三个新增文件为 34 passed；rv-2 脚本原先未做基线负控）
+- After: 逐条改为实测口径；`rv-2-autopilot-config-diff.sh` 增加真实基线负控（基线 `4d4dd12` 上 GET 与 PATCH 均 404）；rv-2 产物重新生成；最终树的录屏 / 截图 / 攻击矩阵全部重采
+- Reason: Machine Contract 要求证据可复现且数字与产物一致；「原样摘录」不能与真实输出不符
+- Impact: 无产品行为变化；证据可复现性提升
 - Review: 执行器自审 + 独立 verifier 复核

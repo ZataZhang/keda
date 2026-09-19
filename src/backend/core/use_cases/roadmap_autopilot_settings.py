@@ -113,7 +113,12 @@ def load_autopilot_state(
 ) -> RoadmapAutopilotState:
     """聚合并返回当前仓库的 Autopilot 状态快照（每次调用都必须 fresh）。"""
     context = _resolve_context(repo_id, contexts)
-    persisted_enabled = editor.read_enabled(context.repo_path)
+    try:
+        persisted_enabled = editor.read_enabled(context.repo_path)
+    except ValueError as exc:
+        # 受限端口以 ValueError 表达「文件非法 / 键类型不符」：统一转成用例层错误，
+        # 让 GET 也返回稳定 4xx 契约，而不是把 infrastructure 异常漏成 500。
+        raise RoadmapAutopilotError(str(exc)) from exc
     return RoadmapAutopilotState(
         repo_id=repo_id,
         enabled=bool(context.config.autopilot.enabled),
