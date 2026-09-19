@@ -15,15 +15,86 @@ from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     ValidationError,
     field_validator,
     model_validator,
 )
 
+from backend.core.shared.models.lifecycle_agent import (
+    LIFECYCLE_AGENT_AUTO,
+    LIFECYCLE_AGENT_AUTO_KEYS,
+    LIFECYCLE_AGENT_EXECUTOR,
+    LIFECYCLE_AGENT_EXECUTOR_KEYS,
+    LIFECYCLE_AGENT_KEYS,
+    normalize_lifecycle_agent_value,
+)
 from backend.infrastructure.config.settings_sources import (
     IAR_REPOSITORY_CONFIG_FILENAME,
 )
+
+
+class AgentRunnerLifecycleAgentsSettings(BaseModel):
+    """``[agent_runner.lifecycle_agents]`` 段：九个生命周期各选一个 agent。
+
+    键是闭集（见 :data:`LIFECYCLE_AGENT_KEYS`），未知键在加载期报错；取值是
+    ``auto``（按该阶段既有语义路由）、``executor``（跟随实现者，**仅**
+    ``fix`` / ``closeout`` 合法）或已注册 agent 名（是否注册由解析期校验，
+    配置层只校验形状）。未声明的键继续回落到既有散落配置键与内置默认。
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    implementation: str | None = None
+    fix: str | None = None
+    closeout: str | None = None
+    verifier: str | None = None
+    review: str | None = None
+    supervisor: str | None = None
+    planner: str | None = None
+    content_generation: str | None = None
+    deliberate: str | None = None
+
+    @field_validator("*")
+    @classmethod
+    def _reject_blank_values(cls, value: str | None) -> str | None:
+        """拒绝空字符串；``None`` 表示未声明。"""
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("lifecycle agent value must be a non-empty string")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_stage_specific_values(self) -> "AgentRunnerLifecycleAgentsSettings":
+        """按阶段校验 ``auto`` / ``executor`` 的合法性。
+
+        ``executor`` 只对 fix / closeout 合法（其余键会造成循环引用），
+        ``auto`` 只对既有实现了 auto 语义的阶段合法。
+        """
+        for lifecycle_key in LIFECYCLE_AGENT_KEYS:
+            raw_value = getattr(self, lifecycle_key)
+            if raw_value is None:
+                continue
+            normalized = normalize_lifecycle_agent_value(raw_value)
+            if normalized == LIFECYCLE_AGENT_EXECUTOR and lifecycle_key not in (
+                LIFECYCLE_AGENT_EXECUTOR_KEYS
+            ):
+                raise ValueError(
+                    f"lifecycle_agents.{lifecycle_key}: 'executor' is only valid for "
+                    f"{', '.join(sorted(LIFECYCLE_AGENT_EXECUTOR_KEYS))}."
+                )
+            if (
+                normalized == LIFECYCLE_AGENT_AUTO
+                and lifecycle_key not in LIFECYCLE_AGENT_AUTO_KEYS
+            ):
+                raise ValueError(
+                    f"lifecycle_agents.{lifecycle_key}: 'auto' is not a valid value for this "
+                    "stage (the stage has no auto routing semantics)."
+                )
+        return self
 
 
 class AgentRunnerLabelSettings(BaseModel):
@@ -615,6 +686,7 @@ class _AgentRunnerRepositoryOverrideSettings(BaseModel):
     interactive_decision: AgentRunnerInteractiveDecisionSettings | None = None
     deliberation: AgentRunnerDeliberationSettings | None = None
     repl: AgentRunnerReplSettings | None = None
+    lifecycle_agents: AgentRunnerLifecycleAgentsSettings | None = None
     agents: dict[str, AgentRunnerAgentSettings] = Field(default_factory=dict)
 
 
@@ -716,4 +788,5 @@ def load_agent_runner_local_settings(
         interactive_decision=local_settings.interactive_decision,
         deliberation=local_settings.deliberation,
         repl=local_settings.repl,
+        lifecycle_agents=local_settings.lifecycle_agents,
     )

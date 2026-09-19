@@ -27,6 +27,7 @@ from backend.infrastructure.config.settings import (
     AgentRunnerGitSettings,
     AgentRunnerInteractiveDecisionSettings,
     AgentRunnerLabelSettings,
+    AgentRunnerLifecycleAgentsSettings,
     AgentRunnerLocalSettings,
     AgentRunnerMemorySettings,
     AgentRunnerPostPrSupervisorSettings,
@@ -180,6 +181,7 @@ _IAR_SECTION_ORDER = (
     "interactive_decision",
     "repl",
     "deliberation",
+    "lifecycle_agents",
 )
 
 # section -> 段前说明注释（中文为主，关键术语保留英文）。
@@ -202,6 +204,12 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
     "interactive_decision": "交互式决策（iar ask）配置：默认 agent、输出目录、执行确认等",
     "repl": "交互式 REPL（iar 无子命令）配置：默认 agent、审计目录与命令确认策略",
     "deliberation": "多 agent 审议（iar deliberate）配置：轮数、合成 agent、参与角色",
+    "lifecycle_agents": (
+        "生命周期 Agent 矩阵（仓库级覆盖）：九键 implementation / fix / closeout / "
+        "verifier / review / supervisor / planner / content_generation / deliberate，"
+        "值为已注册 agent 名、该阶段的 auto 或 fix/closeout 的 executor；未写出的键"
+        "回落全局 config.toml 与既有配置键。详见 docs/guides/lifecycle-agent-matrix.md"
+    ),
 }
 
 # 子表路径 -> 子表说明注释。
@@ -811,6 +819,9 @@ def build_repository_local_config_text(
         interactive_decision=AgentRunnerInteractiveDecisionSettings(),
         repl=AgentRunnerReplSettings(),
         deliberation=AgentRunnerDeliberationSettings(),
+        # 渲染为空段（不写入任何键）：仓库级矩阵默认全部未声明，继续回落全局层与
+        # 既有配置键；在此段下新增键即生效。
+        lifecycle_agents=AgentRunnerLifecycleAgentsSettings(),
     )
 
     return repo_root_path, settings_to_toml_string(settings), verification_commands

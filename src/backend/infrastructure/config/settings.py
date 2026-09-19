@@ -32,6 +32,7 @@ from backend.infrastructure.config.agent_runner_settings import (
     AgentRunnerGitSettings,
     AgentRunnerInteractiveDecisionSettings,
     AgentRunnerLabelSettings,
+    AgentRunnerLifecycleAgentsSettings,
     AgentRunnerLocalSettings,
     AgentRunnerMemorySettings,
     AgentRunnerPostPrSupervisorSettings,
@@ -260,6 +261,11 @@ class AgentRunnerSettings(BaseSettings):
         default_factory=AgentRunnerInteractiveDecisionSettings
     )
     repl: AgentRunnerReplSettings = Field(default_factory=AgentRunnerReplSettings)
+    # 生命周期 Agent 矩阵（九键）：把"阶段 -> agent"从散落配置段收敛到一张表。
+    # 未声明的键继续回落到既有散落配置键与内置默认（零配置行为不变）。
+    lifecycle_agents: AgentRunnerLifecycleAgentsSettings = Field(
+        default_factory=AgentRunnerLifecycleAgentsSettings
+    )
     repositories: dict[str, AgentRunnerRepositorySettings] = Field(default_factory=dict)
     # agent 声明式注册表的配置覆盖层：[agent_runner.agents.<name>] 段。
     # 内置默认在 core.shared.models.agent_spec.BUILTIN_AGENT_SPECS；
@@ -437,6 +443,7 @@ __all__ = [
     "AgentRunnerLabelSettings",
     "AgentRunnerPromptSettings",
     "AgentRunnerReplSettings",
+    "AgentRunnerLifecycleAgentsSettings",
     "AgentRunnerRepositorySettings",
     "AgentRunnerRunnerSettings",
     "AgentRunnerSafetySettings",

@@ -112,6 +112,43 @@ minio_seconds = 60
 max_issues = 1
 
 # =============================================================================
+# 生命周期 Agent 矩阵（阶段 -> agent）
+# =============================================================================
+# 把"九个生命周期阶段各用哪个 agent"收敛成一张表。键名是闭集（写错键在配置
+# 加载期报错），取值可以是：
+#   - 已注册 agent 名（codex / claude / kimi / pi 或自定义注册的 agent）；
+#   - "auto"：按该阶段既有语义路由。只有实现了 auto 语义的阶段合法——
+#       实现=按 Issue 上的 agent/* 标签路由；校验=从 agent_fallback_order 里
+#       挑第一个 ≠ 实现者；审核=优先 ≠ 实现者（allow_same_agent 时沿用实现者）；
+#       监督=发布路径沿用本次实现者；辩论=按 agent/deliberate 标签路由。
+#       决策 / 内容生成 / 修复 / 收尾 不接受 "auto"。
+#   - "executor"：跟随实现阶段选中的 agent（仅 fix / closeout 合法，默认值）。
+#
+# 覆盖优先级（高到低）：
+#   PRD 文件头部 lifecycle_agents 块 > 仓库 .iar.toml > 本文件（全局）
+#   > 既有散落配置键（runner.default_agent / validation.verifier_agent /
+#     pre_pr_review.review_agent / post_pr_supervisor.supervisor_agent /
+#     interactive_decision.default_agent / generated_content.default_agent /
+#     deliberation.default_synthesizer）> 内置默认。
+# 未声明的键继续回落既有配置键，因此**不写本节时行为与今天完全一致**。
+# 跨 agent 回退（主 agent 挂了换下一个）由下面的
+# [agent_runner.runner] agent_fallback_order + max_agent_switches 驱动，
+# 与本节"选主 agent"是两件事。
+#
+# 完整键名与优先级说明见 docs/guides/lifecycle-agent-matrix.md。
+#
+# [agent_runner.lifecycle_agents]
+# implementation = "auto"
+# fix = "executor"
+# closeout = "executor"
+# verifier = "auto"
+# review = "auto"
+# supervisor = "auto"
+# planner = "claude"
+# content_generation = "claude"
+# deliberate = "claude"
+
+# =============================================================================
 # Agent 注册表（声明式 agent 调用形态）
 # =============================================================================
 # 每个 agent 的全部调用差异沉淀为一段显式数据：可执行文件、路由标签、

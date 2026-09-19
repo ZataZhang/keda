@@ -36,12 +36,18 @@ from backend.core.shared.models.agent_spec import (
     AgentProfileSpec,
     AgentSpec,
 )
+from backend.core.shared.models.lifecycle_agent import (
+    LIFECYCLE_AGENT_KEYS,
+    LifecycleAgentsConfig,
+    concrete_declared_agent,
+)
 from backend.infrastructure.config.settings import (
     AgentRunnerAgentProfileSettings,
     AgentRunnerAgentSettings,
     AgentRunnerDeliberationSettings,
     AgentRunnerGeneratedContentSettings,
     AgentRunnerGeneratedContentTargetSettings,
+    AgentRunnerLifecycleAgentsSettings,
     AgentRunnerMemorySettings,
     AgentRunnerReplSettings,
     AgentRunnerSettings,
@@ -72,13 +78,20 @@ def _build_generated_content_target_config(
 
 def _build_generated_content_config(
     gc_settings: AgentRunnerGeneratedContentSettings,
+    *,
+    lifecycle_default_agent: str | None = None,
 ) -> GeneratedContentConfig:
-    """Convert pydantic generated-content settings to frozen core config."""
+    """Convert pydantic generated-content settings to frozen core config.
+
+    ``lifecycle_default_agent`` 是生命周期矩阵 ``content_generation`` 显式声明的
+    具体 agent（装配期派生），非空时优先于 ``default_agent``。
+    """
     return GeneratedContentConfig(
         enabled=gc_settings.enabled,
         fallback=gc_settings.fallback,
         max_input_chars=gc_settings.max_input_chars,
         default_agent=gc_settings.default_agent,
+        lifecycle_default_agent=lifecycle_default_agent,
         issue_from_prd=_build_generated_content_target_config(gc_settings.issue_from_prd),
         draft_pr=_build_generated_content_target_config(gc_settings.draft_pr),
         prd_from_issue=_build_generated_content_target_config(gc_settings.prd_from_issue),
@@ -367,6 +380,29 @@ def build_label_config_from_settings(
     )
 
 
+def build_lifecycle_agents_config_from_settings(
+    lifecycle_settings: AgentRunnerLifecycleAgentsSettings,
+) -> LifecycleAgentsConfig:
+    """从 pydantic 设置构建生命周期矩阵的**全局层**声明视图。
+
+    只收录显式声明的键（``None`` 表示未声明，交由解析函数回落）；仓库层的
+    声明由 ``merge_repository_config`` 另行合并，因此这里 ``repository_layer``
+    恒为空。
+
+    Args:
+        lifecycle_settings: ``[agent_runner.lifecycle_agents]`` 段设置。
+
+    Returns:
+        仅含全局层声明的 :class:`LifecycleAgentsConfig`。
+    """
+    global_layer = {
+        lifecycle_key: getattr(lifecycle_settings, lifecycle_key)
+        for lifecycle_key in LIFECYCLE_AGENT_KEYS
+        if getattr(lifecycle_settings, lifecycle_key) is not None
+    }
+    return LifecycleAgentsConfig(global_layer=global_layer)
+
+
 def build_app_config_from_settings(
     agent_runner_settings: AgentRunnerSettings,
 ) -> AppConfig:
@@ -383,7 +419,13 @@ def build_app_config_from_settings(
 
     pre_pr = agent_runner_settings.pre_pr_review
     post_supervisor = agent_runner_settings.post_pr_supervisor
-    generated_content = _build_generated_content_config(agent_runner_settings.generated_content)
+    lifecycle_agents = build_lifecycle_agents_config_from_settings(
+        agent_runner_settings.lifecycle_agents
+    )
+    generated_content = _build_generated_content_config(
+        agent_runner_settings.generated_content,
+        lifecycle_default_agent=concrete_declared_agent(lifecycle_agents, "content_generation"),
+    )
     interactive_decision = agent_runner_settings.interactive_decision
     repl = _build_repl_config(agent_runner_settings.repl)
     deliberation = _build_deliberation_config(agent_runner_settings.deliberation)
@@ -501,9 +543,11 @@ def build_app_config_from_settings(
         ),
         repl=repl,
         deliberation=deliberation,
+        lifecycle_agents=lifecycle_agents,
     )
 
 
 __all__ = [
     "build_app_config_from_settings",
+    "build_lifecycle_agents_config_from_settings",
 ]

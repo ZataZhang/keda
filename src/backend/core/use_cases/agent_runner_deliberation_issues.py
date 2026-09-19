@@ -42,6 +42,7 @@ from backend.core.use_cases.agent_runner_events import (
 from backend.core.use_cases.run_agent_deliberation import (
     run_agent_deliberation,
 )
+from backend.core.use_cases.lifecycle_agent_resolution import resolve_lifecycle_agent
 
 _logger = logging.getLogger(__name__)
 
@@ -287,7 +288,7 @@ def _process_single_deliberation_issue(
             "implementer",
         ),
         rounds=config.deliberation.default_rounds,
-        synthesizer=config.deliberation.default_synthesizer,
+        synthesizer=resolve_lifecycle_agent("deliberate", config, issue=issue),
         output_dir=str(output_dir),
         session_id=session_id,
     )
@@ -345,10 +346,15 @@ def _format_fallback_question_list(result) -> str:
 
 
 def _config_to_deliberation_config(config: AppConfig) -> DeliberationConfig:
-    """Pass-through translation (both layers already use the same dataclass)."""
+    """Pass-through translation (both layers already use the same dataclass).
+
+    ``default_synthesizer`` 走生命周期矩阵解析（``deliberate`` 键），矩阵未声明时
+    回落到 ``deliberation.default_synthesizer``——这是"辩论参与者默认 agent 来源"
+    的落点：显式点名参与者的既有调用方式不变，矩阵只作为默认值。
+    """
     return DeliberationConfig(
         default_rounds=config.deliberation.default_rounds,
-        default_synthesizer=config.deliberation.default_synthesizer,
+        default_synthesizer=resolve_lifecycle_agent("deliberate", config),
         default_output_dir=config.deliberation.default_output_dir,
         profiles=config.deliberation.profiles,
     )

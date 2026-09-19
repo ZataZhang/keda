@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_spec import (
     BUILTIN_AGENT_SPECS,
     AgentSpec,
 )
+from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
 
 if TYPE_CHECKING:
     # `ValidationVerdict` lives in the use-cases layer; import it only for
@@ -210,6 +211,10 @@ class IssueSummary:
     body: str
     labels: tuple[str, ...]
     state: str = "OPEN"
+    #: 该 Issue 所引用 PRD 的头部 ``lifecycle_agents`` 覆盖（键值对元组）。
+    #: 编排入口拿到仓库路径后从 PRD 文件解析回填，使实现 / 审核 / 监督等阶段
+    #: 的解析函数无需额外参数即可读到 PRD 级覆盖（PRD 级优先级最高）。
+    lifecycle_overrides: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -723,6 +728,10 @@ class GeneratedContentConfig:
     fallback: str = "template"
     max_input_chars: int = 20000
     default_agent: str = "auto"
+    # 生命周期矩阵 ``content_generation`` 显式声明的具体 agent（装配期从
+    # ``AppConfig.lifecycle_agents`` 派生）。非空时优先于 ``default_agent``，
+    # 只影响内容生成阶段，target 级 ``agent`` 仍更优先。
+    lifecycle_default_agent: str | None = None
     issue_from_prd: GeneratedContentTargetConfig = field(
         default_factory=GeneratedContentTargetConfig
     )
@@ -809,6 +818,9 @@ class AppConfig:
     )
     repl: ReplConfig = field(default_factory=ReplConfig)
     deliberation: DeliberationConfig = field(default_factory=DeliberationConfig)
+    # 生命周期 Agent 矩阵的显式声明（含来源层）；未声明的键由
+    # resolve_lifecycle_agent 回落到既有散落配置键与内置默认。
+    lifecycle_agents: LifecycleAgentsConfig = field(default_factory=LifecycleAgentsConfig)
 
 
 @dataclass(frozen=True)

@@ -77,6 +77,10 @@ from backend.engines.agent_runner.factories.content_generators import (
     SafePlannerContentGenerator,
     SubprocessContentGenerator,
 )
+from backend.engines.agent_runner.lifecycle_editor import (
+    TomlLifecycleSettingsEditor,
+    create_lifecycle_settings_editor,
+)
 from backend.infrastructure.config.settings import (
     resolve_project_root_path,
     resolve_registry_config_toml_path,
@@ -86,6 +90,7 @@ __all__ = [
     "RepositoryResolutionFailure",
     "SafePlannerContentGenerator",
     "SubprocessContentGenerator",
+    "TomlLifecycleSettingsEditor",
     "_anchor_memory_config",
     "_build_generated_content_config",
     "_build_generated_content_target_config",
@@ -109,6 +114,7 @@ __all__ = [
     "create_console_store",
     "create_event_sink",
     "create_github_client",
+    "create_lifecycle_settings_editor",
     "create_loop_clock",
     "create_loop_state_store",
     "create_planner_runner",

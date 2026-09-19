@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { PrdAgentOverrideSheet } from "@/components/agent-runner/prd-agent-override-sheet"
 import { fetchPrdContent } from "@/lib/api/roadmap"
 
 interface PrdContentViewProps {
@@ -31,6 +32,7 @@ type PrdContentState =
 export function PrdContentView({ repoId, prdPath, prdTitle, onBack }: PrdContentViewProps) {
   const [contentState, setContentState] = useState<PrdContentState>({ status: "loading" })
   const [reloadToken, setReloadToken] = useState(0)
+  const [overrideOpen, setOverrideOpen] = useState(false)
 
   useEffect(() => {
     let isCancelled = false
@@ -72,7 +74,23 @@ export function PrdContentView({ repoId, prdPath, prdTitle, onBack }: PrdContent
             {prdPath}
           </p>
         </div>
+        <div className="flex-1" />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setOverrideOpen(true)}
+          data-testid="prd-agent-override-open"
+        >
+          Agent 覆盖
+        </Button>
       </div>
+
+      <PrdAgentOverrideSheet
+        repoId={repoId}
+        prdPath={prdPath}
+        open={overrideOpen}
+        onOpenChange={setOverrideOpen}
+      />
 
       {contentState.status === "loading" ? (
         <div className="space-y-3" data-testid="prd-content-loading">

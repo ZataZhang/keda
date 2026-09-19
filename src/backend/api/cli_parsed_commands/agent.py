@@ -23,6 +23,7 @@ from backend.core.use_cases.agent_invocation import (
     resolve_agent_spec,
 )
 from backend.core.use_cases.interactive_decision import run_interactive_decision
+from backend.core.use_cases.lifecycle_agent_resolution import resolve_lifecycle_agent
 from backend.api.agent_runner_views.live_terminal import create_output_view
 from backend.core.shared.models.agent_deliberation import DeliberationSession
 from backend.core.use_cases.agent_runner_factory import build_app_config, logger
@@ -64,7 +65,7 @@ def run_ask_command(ctx: ParsedCommandContext) -> int:
     content_generator = _cli.create_content_generator(ctx.process_runner, config=context.config)
     agent = ctx.parsed.agent
     if agent == "auto":
-        agent = context.config.interactive_decision.default_agent
+        agent = resolve_lifecycle_agent("planner", context.config)
     output_dir = None
     if ctx.parsed.output:
         output_dir = Path(ctx.parsed.output)
