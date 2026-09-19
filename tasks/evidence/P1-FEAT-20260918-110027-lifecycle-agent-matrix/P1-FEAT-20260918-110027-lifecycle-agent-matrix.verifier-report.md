@@ -1,4 +1,6 @@
-> **Current verdict (Round 2, 2026-09-20): PASS with caveats.** R1 与三个 R3 均通过对抗性复核确认整改；新增 1 条 R3 残留（独立 `iar review` 路径未回填 PRD 覆盖）与 3 条 R4 覆盖/文档缺口，均不阻断。详见文末「## Round 2（整改复核）」。
+> **Current verdict (Round 3 最终树确认, 2026-09-20): PASS with caveats。** 唯一增量（新 Playwright e2e spec）经复核为真实入口、无空转；冻结凭证 MATCH；全仓 2326 passed。遗留 1 条 minor 证据引用不准（§9.2 把三文件命令的 53 挂到单文件命令上，见 R3-4）。详见文末「## Round 3（最终树确认）」。
+>
+> 历史：Round 2 = PASS with caveats（R1 与三个 R3 确认整改；1 条 R3 残留 + 3 条 R4 缺口，不阻断）；Round 1 = REJECT。
 
 # Verifier Report — P1-FEAT-20260918-110027 生命周期 Agent 矩阵
 
@@ -258,3 +260,98 @@ registered agents: ['codex', 'claude', 'kimi', 'pi']
 5. **rv-2 negative control**：PRD 要求的"旧实现下断言红色"记录仍未在 `.evidence-report.md` 中出现，我无法验证该负对照确已执行。
 6. **全仓回归** `just test`、`just lint`、`uv run mkdocs build --strict`：仅执行者报告，未复跑。
 7. `iar review` 独立路径的 supervisor 覆盖（R2-4 R3）——按当前实现为**不生效**，我未能在该路径上验证为通过。
+
+---
+
+## Round 3（最终树确认）
+
+- 角色: 独立 verifier（第三轮，最终树确认）
+- 复核时间: 2026-09-20
+- Worktree: `/Users/zata/code/keda-worktrees/lifecycle-agent-matrix`，分支 `lifecycle-agent-matrix`，HEAD `cbd3bd5`
+- 只读源码/测试/PRD，**未做任何 git 写操作**；探针脚本仅落 `/tmp`；仅写本报告。
+- 本轮增量：新增 `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts`（+174 行）+ PRD §9.2 勾选（`tasks/pending/...md`，不在凭证范围）。执行者拟据此归档 PRD，故本轮重点核验新 spec 的真实性与 §9.2 勾选项的可信度。
+
+## R3-0. 冻结凭证（第三轮）
+
+```
+$ git diff HEAD -- src tests | shasum -a 256
+e0d1a39e72cb8d4cc38cc34553423b2ec4391daf445ed0e2eafb97d14a442e8f  -
+```
+
+**结果：与第三轮冻结值逐字一致（MATCH）**。复核开始与结束两次计算一致，期间无源码/测试漂移。凭证差异仅 `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts`（`git diff HEAD --stat -- src tests`：`1 file changed, 174 insertions(+)`，无删除/改名；`src/` 侧零内容变更）。
+
+## R3-1. 判定
+
+## **PASS with caveats**
+
+- 增量 scope 与声明一致（仅新 e2e spec，`src/` 无改动）；新 spec 为**真实入口**且断言非空转；本地实跑 **7 passed**（0 skip）。
+- 全仓 `uv run pytest tests/ -q --no-testmon` = **2326 passed**，与 §9.2 一致；`pnpm typecheck` exit 0。
+- 新增 1 条 **minor** 证据引用不准（R3-4）：§9.2 把"三文件命令的 53 passed"挂到单文件命令 `tests/test_lifecycle_agent_resolution.py -q` 上，该命令实际不产出 53。**其余勾选项均经复跑或文件核对成立。**
+- 本轮未新增 R1/R2；Round 2 的 1 条 R3 残留（`iar review` 独立路径不读 PRD supervisor 覆盖）**仍未整改**，本轮确认其依旧存在（不影响本轮增量）。
+
+## R3-2. 独立复跑的命令（非引用执行者报告）
+
+| 命令 | 我的观察结果 | 与 §9.2 声明 |
+|---|---|---|
+| `git diff HEAD -- src tests \| shasum -a 256` | `e0d1a39e…2e8f` | MATCH |
+| `git diff HEAD --stat -- src tests` | 仅新增 spec，174 insertions | 一致 |
+| `pnpm test --grep lifecycle-agent`（真实 console `127.0.0.1:8899`） | **7 passed (10.6s)**，0 skipped | 一致 |
+| `uv run pytest tests/ -q --no-testmon` | **2326 passed in 136.50s** | 一致 |
+| `uv run pytest tests/test_lifecycle_agent_resolution.py -q --no-testmon` | **21 passed** | **不一致（§9.2 写 53）** |
+| `uv run pytest tests/test_lifecycle_agent_resolution.py tests/test_lifecycle_agent_routing.py tests/test_lifecycle_agents_console_api.py -q --no-testmon` | **54 passed**（Round 2 时为 53） | 53 的真实来源 |
+| `cd frontend-public && pnpm typecheck` | exit 0 | 一致 |
+| `rg -n "lifecycle_agents" config.toml docs/` | `config.toml:128,140` + `docs/guides/...:40-65` 命中 | 一致 |
+| `rg -n "既有配置键\|legacy" docs/guides/lifecycle-agent-matrix.md` | `:13`、`:46-47` 命中 | 一致 |
+| `git diff HEAD --name-only \| grep -E "console_store\.py\|alembic/"` | NO HITS | 一致 |
+
+## R3-3. 新 spec 质量评估（真实入口 / 空转对抗性检查）
+
+`tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 覆盖三处界面，均对**真实后端**（`PLAYWRIGHT_BASE_URL=127.0.0.1:8899`）发起真实请求：
+
+- **Settings「Agent 管理」**：test 1（默认停 Tab①「Agent 标签设置」→ 切 Tab②「生命周期 Agent 设置」，断言九行矩阵 + 回退顺序卡片同时出现，并保留原有页面内容）；test 2（九行 `row/select/source` 齐全 + 展开 `verifier` 下拉候选值域 = 已注册 agent + `auto`，排除 `executor`）；test 3（`fix` 行提供 `executor`、不提供 `auto`；`implementation` 行反之）；test 4（回退顺序卡片可用、排序本地态变更）。
+- **Roadmap 仓库行齿轮**：test 5（点 `repo-agent-gear-*` 打开 `repo-lifecycle-matrix-matrix`，九行 `row/source` 齐全）。
+- **PRD 覆盖抽屉**：test 6（`prd-open-content` → `prd-agent-override-open` → 九行 `row/toggle` 存在；未勾选行下拉 disabled；勾选后 enabled）。
+
+**testid 真实性核对**（防止"断言了一个永不存在的 testid 而空转"）：在 `frontend-public` 源码中逐一确认 testid 存在。`global-lifecycle-matrix-matrix` / `repo-lifecycle-matrix-matrix` 表面 `rg` 为 0，实为组件 `lifecycle-agent-matrix.tsx` 的 `namespace` 前缀动态拼接（`${n}-matrix`），settings/page.tsx 传 `global-lifecycle-matrix`、repository-agent-matrix-sheet.tsx 传 `repo-lifecycle-matrix` —— **是真实 testid，非空转**。
+
+**空转对抗性检查（逐条）**：
+
+- `expect(...).toHaveCount(0)`（`global-lifecycle-matrix-matrix`，spec:60）：**非空转**——同一 test 的 spec:64 对同一 locator 断言 `toBeVisible()`，若区块整体坏掉 64 先失败。
+- `toHaveCount(0)`（`lifecycle-matrix-option-verifier-executor` spec:86、`option-fix-auto` spec:94、`option-implementation-executor` spec:100）：**非空转**——相邻行先断言目标 option `toBeVisible()`，下拉整体未渲染时会先失败。
+- `toHaveCount(0)`（`lifecycle-matrix-restore-verifier` spec:144）：`lifecycle-matrix-restore-*` testid 确实存在于源码（仅"已在本层声明"时渲染）；该断言的先决条件 `drawerMatrix.toBeVisible()` 已在 spec:136 断言，**非空转**，但语义依赖该仓库未声明 `verifier`（环境相关，见 R3-5）。
+- `test.skip(gearCount === 0)` spec:132 / `test.skip(prdCount === 0)` spec:155 / `test.skip(orderBefore.length < 2)` spec:116：**本轮全部未触发**（7 passed、0 skipped），即仓库抽屉与 PRD 抽屉用例**真的跑了**，不构成 masking。在无预置仓库/PRD 的裸环境会 skip——已在 spec 头注释与 §9.2 披露，属可接受降级，非伪造通过。
+
+**范围披露准确性**：spec 头声明"只读交互、不写盘"。核对代码：排序（spec:121 点 `fallback-order-up-*`）只改本地态、**未点保存**；PRD 覆盖（spec:170 点 toggle）只改本地态、**未点保存**；全篇无任何 `save` 点击或写盘请求。**披露属实**——写盘语义不由 e2e 覆盖，而由后端契约测试（`tests/test_lifecycle_agents_console_api.py`，以磁盘内容为事实源）与 `rv-*.png` 覆盖。**方向正确**：e2e 跑在共享仓库上，写盘会污染真实 `config.toml` / `.iar.toml`。
+
+## R3-4. 新增 findings
+
+### minor（证据引用不准，非阻断）— §9.2「53 passed」与所引命令不符
+
+- 位置：PRD §9.2 Architecture Acceptance 第一条（`tasks/pending/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md:505`）："`uv run pytest tests/test_lifecycle_agent_resolution.py -q` 全绿（rv-1 佐证）…… 53 passed"。
+- 事实：`uv run pytest tests/test_lifecycle_agent_resolution.py -q --no-testmon` = **21 passed**；不带 `--no-testmon` 时（本仓 testmon 生效）输出 **21 deselected**（测试根本没跑）。53 实为**三文件命令**（resolution + routing + console_api）在 Round 2 的计数（Round 2 报告 `:186` 明载），本轮该三文件命令为 **54 passed**。
+- 影响：**不阻断**。底层事实（rv-1 全部用例绿）为真，仅"命令 ↔ 数字"配对复制错误。但勾选项字面陈述不可复现，属证据诚信层面的 minor 瑕疵。
+- 建议：把该行改为三文件命令 + 当前计数（`54 passed`），或改为单文件命令 + `21 passed`——二者取其一。
+
+### 低（环境相关断言）— spec:144 依赖仓库未声明 `verifier`
+
+- 该断言在当前 registry 的仓库上成立；若某环境首个受管理仓库恰好声明了 `verifier`，则该用例会**失败**（不是空转，但是环境敏感）。非阻断，若未来在多变仓库环境跑需注意。
+
+### 未消除（沿用 Round 2）— `iar review` 独立路径不读 PRD supervisor 覆盖
+
+- `src/backend/core/use_cases/review_once.py:190` 仍未调用 `attach_prd_lifecycle_overrides`（Round 2 R2-4 R3）。本轮增量未触及该文件，残留不变，仍为非阻断。
+
+## R3-5. 归档就绪结论
+
+**可以归档，但存在 1 条需诚实处理的勾选项。**
+
+- **支持归档**：凭证 MATCH；`src/` 零改动、`tests/` 增量仅为新 spec；新 spec 真实入口、0 skip、无空转；全仓 2326 passed；typecheck 0；§9.2 中被我抽查的 testid/测试名/文档命中/无 alembic 变更**全部成立**。
+- **唯一不成立项**：§9.2 `:505` 的"`uv run pytest tests/test_lifecycle_agent_resolution.py -q` …… 53 passed"——命令与计数不匹配（见 R3-4）。**只要把该行的命令/数字校正，归档即为诚实**；若不校正而直接归档，等于在验收证据里留下一条不可复现的陈述（minor）。
+- **仍需保留的披露**（不阻断，勿声称已验证）：见 R3-6。
+
+## R3-6. 明确无法验证 / 不声称通过（本轮）
+
+1. **写盘路径**：e2e 刻意只读，`config.toml` / `.iar.toml` / PRD 头部"保存后真的变了"**未由 e2e 覆盖**；其证据为后端契约测试（`tests/test_lifecycle_agents_console_api.py`，11 passed）+ `rv-3*` / `rv-4*` / `rv-6` / `rv-7` 手工截图。本轮未复跑 `just run` 手工链路。
+2. **CI / 裸环境**：`gearCount` / `prdCount` / `orderBefore` 相关的 3 个 `test.skip` 在无预置受管理仓库或 PRD 的环境会**跳过**，届时"仓库抽屉 / PRD 抽屉"用例不产生覆盖——不得据"7 passed"推断所有环境都实跑该两条。
+3. **`just lint` / `just test all`（写 lint/test flag 文件）/ `just run`**：本轮未执行（避免写共享状态文件）；`mkdocs build --strict`、frontend `pnpm lint` 亦未复跑，仅 `pnpm typecheck` 复跑通过。
+4. **rv-2 negative control**：PRD 要求的"旧实现下断言红色"记录仍未见于 `.evidence-report.md`，无法验证已执行（沿用 Round 2 R2-5:5）。
+5. **`iar review` 独立路径 supervisor 覆盖**：按当前实现为不生效（R2-4 R3 / R3-4），未能在该路径上验证通过。

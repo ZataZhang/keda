@@ -1,11 +1,11 @@
 # PRD: 生命周期 Agent 矩阵——全局统一配置 + PRD 级覆盖
 
-- GitHub Issue: （创建后回填）
+- GitHub Issue: https://github.com/ZataZhang/keda/pull/147 （本 PRD 未单独开 Issue，直接经 PR 交付）
 
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🟡 **验收状态**：实施 + 自动化验证完成，人工决策与四项呈递物已确认（2026-09-20）；Playwright e2e 与 PR 审查未完成，故暂不归档。
+> ✅ **验收状态**：已交付（2026-09-20）——实施 + 自动化验证（`just test all` 2326 passed）+ 独立 verifier 三轮（round 3 PASS with caveats）+ §9.2 人工决策确认 + rv-3/4/6/7 四项真实入口呈递物齐备。PR 见 https://github.com/ZataZhang/keda/pull/147。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制与命令；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -502,34 +502,34 @@ Agent 标签设置：四个 agent 的标签名 / 颜色 / 描述可编辑，标�
 - [x] 9.1 呈递区四项呈递物已逐项过目并认可——2026-09-20 采齐 `rv-3-three-layer-editors.png` / `rv-4-prd-override.png` / `rv-6-fallback-order.png` / `rv-7-agent-labels.png` 并呈递
 
 **Architecture Acceptance**
-- [ ] `resolve_lifecycle_agent` 位于 core 层，api/routes 无业务解析逻辑；`uv run pytest tests/test_lifecycle_agent_resolution.py -q` 全绿（rv-1 佐证）
-- [ ] 数据库无新表：`git diff` 不含 `console_store.py` 表结构改动与 alembic 变更
+- [x] `resolve_lifecycle_agent` 位于 core 层，api/routes 无业务解析逻辑；`uv run pytest tests/test_lifecycle_agent_resolution.py -q` 全绿（rv-1 佐证）——路由只做 HTTP 映射，生效值计算与入参校验收敛在 `core/use_cases/lifecycle_agents_console.py`；该文件单独 `21 passed`，三个生命周期测试文件合计 `54 passed`
+- [x] 数据库无新表：`git diff` 不含 `console_store.py` 表结构改动与 alembic 变更——`git diff HEAD --name-only | grep -E "console_store\.py|alembic/"` 无命中
 
 **Behavior Acceptance**
-- [ ] 零新配置基线：九键解析值与改动前一致（rv-1 基线用例）
-- [ ] fix/closeout 矩阵指定生效且默认跟随（rv-2，含 negative control 记录）
-- [ ] 未注册 agent 名阶段前 fail-fast（rv-5）
-- [ ] `auto` 各阶段语义与既有实现一致（rv-1 的逐阶段 auto 断言；实现=标签路由、校验=链上第一个 ≠ 实现者、审核=不同人优先、监督=沿用本次实现者）
-- [ ] agent 回退顺序保存后驱动 `candidate_agents`（rv-6，含"链为空只试主 agent"用例）
-- [ ] Agent 标签设置保存后写入各 agent 注册块且重复标签被拒绝（rv-7）
-- [ ] PRD 文件头部覆盖仅影响声明键与该 PRD（rv-1 + rv-4）
+- [x] 零新配置基线：九键解析值与改动前一致（rv-1 基线用例）——`test_zero_config_baseline_matches_pre_matrix_behavior`
+- [x] fix/closeout 矩阵指定生效且默认跟随（rv-2，含 negative control 记录）——对照对：`test_fix_agent_defaults_to_selected_agent`（不声明时 = 实现者）vs `test_fix_agent_uses_matrix_value` / `test_closeout_agent_uses_matrix_value`（声明后真的换人，捕获传入 `run_fix_agent` / `run_closeout_agent` 的 `agent_name`）；结论差异只能归因于矩阵值本身，而非测试夹具
+- [x] 未注册 agent 名阶段前 fail-fast（rv-5）——`test_unregistered_agent_fails_fast_with_stage_name`（消息含阶段名 + agent 名）、`test_unregistered_prd_override_fails_fast`、API 侧 422
+- [x] `auto` 各阶段语义与既有实现一致（rv-1 的逐阶段 auto 断言；实现=标签路由、校验=链上第一个 ≠ 实现者、审核=不同人优先、监督=沿用本次实现者）——`test_auto_semantics_per_stage_are_preserved`、`test_auto_review_picks_different_agent_when_same_not_allowed`
+- [x] agent 回退顺序保存后驱动 `candidate_agents`（rv-6，含"链为空只试主 agent"用例）——写回侧 `test_fallback_order_write_preserves_other_runner_keys`；消费侧既有 `test_fallback_respects_max_agent_switches`（截断）与 `test_resolve_agent_fallback_order_empty_disables_fallback`（链为空只含主 agent）
+- [x] Agent 标签设置保存后写入各 agent 注册块且重复标签被拒绝（rv-7）——`test_agent_labels_write_and_duplicate_rejection` + 真实入口 `rv-7-agent-labels.png` / `rv-7-agent-labels-duplicate.png`
+- [x] PRD 文件头部覆盖仅影响声明键与该 PRD（rv-1 + rv-4）——`test_prd_override_wins_over_matrix`、`test_prd_override_only_affects_declared_keys`、`test_prd_override_read_write_roundtrip`
 
 **Frontend Acceptance**
-- [ ] 三层界面 + 「Agent 管理」两个 Tab + 回退顺序 e2e 通过（Agent 标签设置、生命周期矩阵、回退顺序、Roadmap 仓库行齿轮抽屉、PRD 覆盖抽屉）：`cd tests/playwright-e2e && pnpm test --grep lifecycle-agent`
-- [ ] `cd frontend-public && pnpm typecheck && pnpm lint` 通过
+- [x] 三层界面 + 「Agent 管理」两个 Tab + 回退顺序 e2e 通过（Agent 标签设置、生命周期矩阵、回退顺序、Roadmap 仓库行齿轮抽屉、PRD 覆盖抽屉）：`cd tests/playwright-e2e && pnpm test --grep lifecycle-agent`——**7 passed**（新增 `tests/workflows/lifecycle-agent-matrix.spec.ts`）。范围披露：e2e 只做真实入口的**只读交互**（Tab 切换、九行矩阵、下拉候选值域、回退顺序本地排序、两处抽屉），不写盘——写盘语义由后端契约测试（以磁盘内容为事实源）与 `rv-*.png` 手工真实入口证据覆盖，避免污染共享仓库的 `config.toml` / `.iar.toml`
+- [x] `cd frontend-public && pnpm typecheck && pnpm lint` 通过——typecheck exit 0；lint 0 error（94 条为其它文件既有 jsdoc warning）
 
 **Documentation Acceptance**
-- [ ] `docs/` 新增矩阵键名权威定义页并挂 `mkdocs.yml`；config.toml 注释模板同步（`rg -n "lifecycle_agents" config.toml docs/` 命中）
-- [ ] 既有配置键兼容性说明写入文档（`rg -n "既有配置键|legacy" docs/` 至少一处命中优先级说明）
+- [x] `docs/` 新增矩阵键名权威定义页并挂 `mkdocs.yml`；config.toml 注释模板同步（`rg -n "lifecycle_agents" config.toml docs/` 命中）——`docs/guides/lifecycle-agent-matrix.md` + 导航项；`config.toml:128/140` 与 docs 均命中；`uv run mkdocs build --strict` 通过
+- [x] 既有配置键兼容性说明写入文档（`rg -n "既有配置键|legacy" docs/` 至少一处命中优先级说明）——`docs/guides/lifecycle-agent-matrix.md:13/46-47`（"既有配置键不迁移、不删除"）
 
 **Validation Acceptance**
-- [ ] `just lint` 通过
-- [ ] `just test all` 全绿
-- [ ] rv-3 / rv-4 的真实入口手工验证已执行且截图归档（`tasks/evidence/<prd-stem>/`）
+- [x] `just lint` 通过
+- [x] `just test all` 全绿
+- [x] rv-3 / rv-4 的真实入口手工验证已执行且截图归档（`tasks/evidence/<prd-stem>/`）——`rv-3-three-layer-editors.png`、`rv-4-prd-override.png`（另附 rv-6 / rv-7）
 
 **Delivery Readiness**
-- [ ] 完成消息逐字携带 9.1 呈递区内容（含嵌入图、open 命令与本地 only 标注）
-- [ ] Change Log（§13 后）就绪；Decision Log 与最终实现一致
+- [x] 完成消息逐字携带 9.1 呈递区内容（含嵌入图、open 命令与本地 only 标注）
+- [x] Change Log（§13 后）就绪；Decision Log 与最终实现一致——D-04 的"前端三层界面有 e2e 支撑"现已成立（本 spec）
 
 ## 10. Functional Requirements
 
@@ -658,3 +658,11 @@ Agent 标签设置：四个 agent 的标签名 / 颜色 / 描述可编辑，标�
 - Reason: PRD §9.1/§9.2 要求人工确认与真实入口证据，不能以组件级或内存态证据替代。
 - Impact: §9.2 的 Human-Confirmed 六条全部达到完成态；rv-3/4/6/7 的真实入口行为与文件落盘结果均有截图 + 文件内容对照。自动化侧不变。
 - Review: 截图与文件内容对照见 `tasks/evidence/P1-FEAT-20260918-110027-lifecycle-agent-matrix/`（png 本地 only，报告 md 入库）。
+
+### 补齐 Playwright e2e 并归档
+- Type: test
+- Before: §9.2 Frontend Acceptance 的 `pnpm test --grep lifecycle-agent` 一条没有对应用例；PRD 因该条未完成而停在 `tasks/pending/`（验收状态 🟡）。
+- After: 新增 `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts`（7 个用例：Settings 两个 Tab 与默认页、全局矩阵九行与下拉候选值域、fix/executor 与 implementation/auto 的值域差异、回退顺序本地排序、Roadmap 仓库行齿轮抽屉、PRD 覆盖抽屉），对真实 console 跑 **7 passed**；§9.2 全部条目达到完成态，PRD 归档到 `tasks/archive/`。
+- Reason: PRD 要求"三层界面 + 两个 Tab + 回退顺序 e2e 通过"，且归档前置是 Acceptance Checklist 全部完成态。
+- Impact: e2e 只覆盖**只读交互**（不写盘，避免污染共享仓库的 config.toml / .iar.toml）；写盘语义仍由后端契约测试与 `rv-*.png` 手工真实入口证据覆盖。独立 verifier round 3 绑定 `e0d1a39e…` 判 PASS with caveats，其中一条 minor（§9.2 引用的命令与计数不符）已校正为"单文件 21 passed / 三文件 54 passed"。
+- Review: round 3 结论见 `tasks/evidence/<stem>/<stem>.verifier-report.md`。

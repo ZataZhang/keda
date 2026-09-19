@@ -62,7 +62,7 @@
 | 命令 | 结果 |
 |---|---|
 | 独立 verifier round 1 | **REJECT**（1×R1 + 3×R3） |
-| `uv run pytest tests/test_lifecycle_agent_resolution.py tests/test_lifecycle_agent_routing.py tests/test_lifecycle_agents_console_api.py -q` | **53 passed**（整改后，含 PRD 覆盖端到端用例） |
+| `uv run pytest tests/test_lifecycle_agent_resolution.py tests/test_lifecycle_agent_routing.py tests/test_lifecycle_agents_console_api.py -q` | **54 passed**（整改后，含 PRD 覆盖端到端用例；其中 `test_lifecycle_agent_resolution.py` 单独 `21 passed`） |
 | `uv run pytest tests/ -q` | **2325 passed** |
 | 独立 verifier round 2（绑定 `593b86655ff313a396997b98f0f1b52d049202c9cce6f89463177208918c7c9c`） | **PASS with caveats**；R1 经独立探针确认修复，3 条 R3 确认修复 |
 
@@ -98,6 +98,27 @@
 - **PRD 覆盖**（rv-4）：`test_prd_override_read_write_roundtrip`（写回后文件头部块可重新解析、
   正文与 `- GitHub Issue:` 保留、`config.toml` 不含 `lifecycle_agents`）。
 - **消费点防漏守卫**：`test_fix_and_closeout_call_sites_resolve_through_lifecycle_function`（AST，带反空转断言）。
+
+### 第三轮（归档前最终树）
+
+| 命令 | 结果 |
+|---|---|
+| `just test all`（lint + 全仓 pytest，非 testmon） | **✅ Lint passed；2326 passed** |
+| `just lint` | exit 0 |
+| `uv run pytest tests/test_lifecycle_agent_resolution.py tests/test_lifecycle_agent_routing.py tests/test_lifecycle_agents_console_api.py -q --no-testmon` | **54 passed** |
+| `cd tests/playwright-e2e && pnpm test --grep lifecycle-agent`（对真实 console） | **7 passed**（新增 `tests/workflows/lifecycle-agent-matrix.spec.ts`） |
+| `cd frontend-public && pnpm typecheck && pnpm lint` | typecheck exit 0；lint 0 error |
+| `uv run mkdocs build --strict` | 成功 |
+| 独立 verifier round 3（绑定 `e0d1a39e…`） | **PASS with caveats**；唯一 minor 是 §9.2 一处命令与计数不符，已校正 |
+
+### e2e 覆盖范围（诚实披露）
+
+`tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 只做**只读交互**：
+Settings 两个 Tab 与默认页、九行矩阵与下拉候选值域（校验行有 `auto` 无 `executor`、
+fix 行有 `executor` 无 `auto`）、回退顺序本地排序、Roadmap 仓库行齿轮抽屉（含"未声明
+则不出现恢复入口"）、PRD 覆盖抽屉（未勾选时下拉禁用、勾选后可编辑）。**不写盘**——e2e
+跑在共享仓库上，写盘会污染真实 `config.toml` / `.iar.toml`；落盘语义由后端契约测试
+（以磁盘内容为事实源）与本文件的 `rv-*.png` 手工真实入口证据覆盖。
 
 ## 2.5 真实浏览器入口证据（rv-3 / rv-4 / rv-6 / rv-7，2026-09-20 补采）
 
