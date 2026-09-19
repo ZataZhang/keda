@@ -482,8 +482,8 @@ No external validation required; repository code, archived PRDs, current configu
 
 #### Behavior Acceptance
 
-- [x] rv-4 通过：enabled=true + merged 上游自动晋升下游，enabled=false 零晋升，auto_merge=false 零自动 merge — 证据报告 §2.3（12 passed）
-- [x] rv-5 通过：Autopilot GET/PATCH、evidence manifest/artifact 的成功、空态、非法仓库、非法路径、写失败均有稳定契约 — 证据报告 §2.4（32 passed）
+- [x] rv-4 通过：enabled=true + merged 上游自动晋升下游，enabled=false 零晋升，auto_merge=false 零自动 merge — 证据报告 §2.3（13 passed）
+- [x] rv-5 通过：Autopilot GET/PATCH、evidence manifest/artifact 的成功、空态、非法仓库、非法路径、写失败均有稳定契约 — 证据报告 §2.4（real_entry 26 passed / 三个新增文件 34 passed）
 - [x] writer round-trip fixture 含注释、未知子表与本仓真实的 `merge_method` / `require_verifier_pass` / `auto_sign_off` / `merge_check_timeout_seconds` 同级键，写后除目标 bool 外逐字节/语义保真 — `rv-2-config-diff.txt`（1 行 diff，同级键 4 / 未知子表 1 / 注释 2 全保留）
 - [x] 单 PRD 启动继续调用现有 `start_prd`，阻塞依赖、发布安全与 Issue 幂等门禁未旁路 — `rv-1-roadmap-single-start.webm` + E2E 断言唯一 canonical start URL
 - [x] start 端点仍会使 `_ROADMAP_CACHE` 中该仓条目失效，页面启动后一次刷新即读到新状态 — E2E rv-1 在启动后重新拉取列表并断言详情状态来自服务端
@@ -514,8 +514,8 @@ No external validation required; repository code, archived PRDs, current configu
 
 - [x] 推荐方案全量实现，无临时兼容层、隐藏开关或待办项留在必需范围内 — 唯一遗留是与 `P1-FEAT-20260918-110027` 的 TOML 原语收敛（该 PRD 尚未合并，属跨 PRD 协调而非本 PRD 未实现项），见证据报告 §5
 - [x] 完成消息逐字携带 §9.1 人读呈递区的全部内容与实际呈递物；只把文件放进 evidence 目录但不展示视为未交付 — 完成消息含 §9.1 三条呈递物的绝对路径、打开命令与观察点
-- [~] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review
-- [~] PRD 归档至 tasks/archive/ — runner-owned gate: archive
+- [x] 独立 verifier Agent 审查通过 — 两轮复核，冻结提交 `6e9374d`（第一轮，2 位独立 verifier）与 `dff673a`（第二轮整改确认）；结论 **PASS**，第一轮 7 项发现全部处置、第二轮 2 处文档计数漂移已修正；报告：`tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot.verifier-report.md`
+- [x] PRD 归档至 tasks/archive/ — 已执行 `git mv tasks/pending/… tasks/archive/…`，同 PR 中提交
 
 #### Human-Confirmed
 
@@ -580,7 +580,8 @@ No external validation required; repository code, archived PRDs, current configu
 - **§9 Architecture Acceptance 措辞修正**：原文写「`src/backend/infrastructure/config` 中写回逻辑单处」，但该目录下按设计存在两个目标文件不同的 writer——`registry_editor.py`（全局 `config.toml`，D-05）与本次新增的 `repository_settings_editor.py`（仓库级 `.iar.toml`）。正确表述是**每个目标文件单处**；D-05/D-08 的意图（不新增第二份 `.iar.toml` writer、不提供通用 TOML PATCH）未被破坏。
 - **D-08 的跨 PRD 收敛未在本 PR 内完成**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix`（PR #147）分支上已有 `toml_section_editor.py`，其基线晚于本 PRD 的 `4d4dd12`，实现期无法复用。两者需按「先合并者定义原语」收敛，登记为跨 PRD 协调项（证据报告 §5）。
 - **已知限制（不影响行为验收）**：`agent_runner_roadmap.py` 464 非空行，低于 500 拆分界；E2E 对 `/roadmap/**` 使用 route stub，文件系统链由真实 console 脚本覆盖。
-- **Banner 一致性**：Delivery Gate Banner（§8 投影）与 Acceptance Status Banner（§9 投影）均已更新为已交付；`[~]` 保留给独立 verifier 与归档两个 runner-owned gate。
+- **Banner 一致性**：Delivery Gate Banner（§8 投影）与 Acceptance Status Banner（§9 投影）均已更新为已交付；runner-owned gate 已由本 PR 内完成的两轮独立 verifier 复核与归档动作结清。
+- **独立 verifier 结论**：第一轮（冻结 `6e9374d`）由 2 个独立 verifier 分别复核「实现 vs FR」与「证据真实性」，共 7 项发现（1 项中危行为缺陷、1 项中危负控名不副实、5 项低危口径/措辞），全部处置；第二轮（冻结 `dff673a`）确认 4 项关键整改均真实有效、无回归，另发现 2 处文档计数漂移并已修正。结论 **PASS**。
 
 ## 14. Change Log
 

@@ -45,7 +45,7 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 | rv-2（写回 + 读回） | `bash tasks/evidence/<stem>/scripts/rv-2-autopilot-config-diff.sh` | PASS 1 行 diff / 未知仓库 400 / 基线 GET+PATCH 404 | 0 | `rv-2-config-diff.txt` |
 | rv-3（受限读取 + 攻击面） | `.venv/bin/python tasks/evidence/<stem>/scripts/rv-3-path-attack-matrix.py` | PASS 11 例中 10 例恶意 token 400 + 1 例合法 200，无泄露 | 0 | `rv-3-path-attack-matrix.txt` |
 | rv-3（真实页面） | `bash tasks/evidence/<stem>/scripts/rv-3-archived-evidence-screenshot.sh` | PASS 截图 + 自检通过 | 0 | `rv-3-archived-evidence.png` |
-| rv-4（持续调度 + 双门禁） | `uv run pytest -o addopts="" tests/test_roadmap_advance.py tests/test_roadmap_autopilot_settings.py -k 'autopilot or upstream or disabled' -v` | PASS 12 passed | 0 | §2.3 |
+| rv-4（持续调度 + 双门禁） | `uv run pytest -o addopts="" tests/test_roadmap_advance.py tests/test_roadmap_autopilot_settings.py -k 'autopilot or upstream or disabled' -v` | PASS 13 passed | 0 | §2.3 |
 | rv-5（API / core / writer 契约） | `uv run pytest -o addopts="" tests/test_roadmap_api.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q`（PRD 的 `real_entry` 原样） | PASS 26 passed | 0 | §2.4 |
 | rv-5（三个新增测试文件合计） | `uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q` | PASS 34 passed | 0 | §2.4 |
 | rv-6（全仓质量） | `CI=true just test all`（强制全量、跳过 testmon 增量） | PASS 2306 passed in 79.11s | 0 | §3 |
@@ -140,7 +140,7 @@ tests/test_roadmap_advance.py::test_gate_disabled_skips_scheduling PASSED
 tests/test_roadmap_autopilot_settings.py::test_upstream_merged_promotes_downstream_when_autopilot_enabled PASSED
 tests/test_roadmap_autopilot_settings.py::test_autopilot_disabled_promotes_nothing PASSED
 tests/test_roadmap_autopilot_settings.py::test_merge_queue_requires_both_switches PASSED
-====================== 12 passed, 17 deselected in 0.22s =======================
+====================== 13 passed, 17 deselected in 0.21s =======================
 ```
 
 `test_upstream_merged_promotes_downstream_when_autopilot_enabled`：临时仓 `.iar.toml`
