@@ -16,7 +16,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PrdContentView } from "@/components/roadmap/prd-content-view";
+import { PrdDetail } from "@/components/roadmap/prd-detail";
+import { RoadmapAutopilotControl } from "@/components/roadmap/roadmap-autopilot-control";
 import { RoadmapGraph } from "@/components/roadmap/roadmap-graph";
 import { RoadmapList } from "@/components/roadmap/roadmap-list";
 import { RoadmapTimeline } from "@/components/roadmap/roadmap-timeline";
@@ -24,15 +25,18 @@ import { RepositoryAgentMatrixSheet } from "@/components/agent-runner/repository
 import { cn } from "@/lib/utils";
 import { fetchRegistryRepositories } from "@/lib/api/console";
 import {
+  fetchRoadmapAutopilot,
   fetchRoadmapPrds,
   fetchRoadmapSettings,
   startGlobalRoadmap,
   startRoadmapPrd,
   stopGlobalRoadmap,
+  updateRoadmapAutopilot,
   updateRoadmapSettings,
 } from "@/lib/api/roadmap";
 import type {
   RegistryRepositoryEntry,
+  RoadmapAutopilotState,
   RoadmapPrd,
   RoadmapSettings,
 } from "@/lib/api/types";
@@ -71,13 +75,18 @@ export default function RoadmapPage() {
   const [view, setView] = useState<RoadmapView>("graph");
   const [startingPath, setStartingPath] = useState<string | null>(null);
   const [globalStarting, setGlobalStarting] = useState(false);
-  const [openedPrd, setOpenedPrd] = useState<RoadmapPrd | null>(null);
+  // 选中 PRD 只在右侧开详情；三种视图共用同一份详情与启动规则，
+  // 选择动作不再替换整个画布（依赖图上下文得以保留）。
+  const [selectedPrd, setSelectedPrd] = useState<RoadmapPrd | null>(null);
+  const [autopilot, setAutopilot] = useState<RoadmapAutopilotState | null>(null);
+  const [autopilotLoading, setAutopilotLoading] = useState(true);
+  const [autopilotSaving, setAutopilotSaving] = useState(false);
   // 打开仓库级生命周期 Agent 矩阵抽屉的仓库 id（null 表示关闭）。
   const [matrixRepoId, setMatrixRepoId] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (): Promise<RoadmapPrd[]> => {
     if (!selectedRepoId) {
-      return;
+      return [];
     }
     try {
       const response = await fetchRoadmapPrds({
@@ -85,8 +94,10 @@ export default function RoadmapPage() {
         includeArchived,
       });
       setPrds(response.prds);
+      return response.prds;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载路线图失败。");
+      return [];
     }
   }, [selectedRepoId, includeArchived]);
 
@@ -120,6 +131,19 @@ export default function RoadmapPage() {
     return () => clearInterval(timer);
   }, [loadData, selectedRepoId]);
 
+  const loadAutopilot = useCallback(async () => {
+    if (!selectedRepoId) {
+      return;
+    }
+    try {
+      const loaded = await fetchRoadmapAutopilot(selectedRepoId);
+      setAutopilot(loaded);
+    } catch (error) {
+      // Autopilot 状态失败不应该让整个路线图不可用：保留旧值并提示一次。
+      toast.error(error instanceof Error ? error.message : "加载 Autopilot 状态失败。");
+    }
+  }, [selectedRepoId]);
+
   useEffect(() => {
     if (!selectedRepoId) {
       return;
@@ -132,6 +156,37 @@ export default function RoadmapPage() {
         toast.error(error instanceof Error ? error.message : "加载设置失败。");
       });
   }, [selectedRepoId]);
+
+  useEffect(() => {
+    if (!selectedRepoId) {
+      return;
+    }
+    setAutopilotLoading(true);
+    void loadAutopilot().finally(() => setAutopilotLoading(false));
+    // Autopilot 状态与 PRD 列表共用 30 秒轮询节奏；daemon / 生效配置的变化
+    // 必须在下一轮刷新里真实出现，而不是读前端缓存。
+    const timer = setInterval(() => void loadAutopilot(), POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [loadAutopilot, selectedRepoId]);
+
+  async function handleToggleAutopilot(enabled: boolean) {
+    setAutopilotSaving(true);
+    try {
+      // 响应体是写后 fresh load 的生效配置，不做乐观 UI 覆盖。
+      const updated = await updateRoadmapAutopilot({ repoId: selectedRepoId, enabled });
+      setAutopilot(updated);
+      toast.success(
+        enabled
+          ? "已保存：Autopilot 开启，将在下一轮 daemon 生效。"
+          : "已保存：Autopilot 关闭。",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存 Autopilot 设置失败。");
+      await loadAutopilot();
+    } finally {
+      setAutopilotSaving(false);
+    }
+  }
 
   async function handleViewChange(nextView: RoadmapView) {
     setView(nextView);
@@ -157,7 +212,13 @@ export default function RoadmapPage() {
     try {
       await startRoadmapPrd(selectedRepoId, prd.prd_path);
       toast.success(`${prd.title} 已开始。`);
-      await loadData();
+      // fresh-state probe：启动成功后重新拉取列表，详情里的状态必须来自服务端
+      // 而不是本地乐观值——否则队列/合并状态下的按钮可用性会说谎。
+      const refreshedPrds = await loadData();
+      const refreshedPrd = refreshedPrds.find((item) => item.prd_path === prd.prd_path);
+      if (refreshedPrd) {
+        setSelectedPrd(refreshedPrd);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "启动 PRD 失败。");
     } finally {
@@ -227,7 +288,7 @@ export default function RoadmapPage() {
                   disabled={!repo.enabled}
                   onClick={() => {
                     setSelectedRepoId(repo.repo_id);
-                    setOpenedPrd(null);
+                    setSelectedPrd(null);
                   }}
                   className={cn(
                     "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
@@ -291,7 +352,7 @@ export default function RoadmapPage() {
             </DropdownMenuContent>
           </DropdownMenu>
           <span className="text-xs text-slate-500">
-            {openedPrd ? "PRD 原文" : `${visiblePrds.length} 个 PRD`}
+            {selectedPrd ? "PRD 详情" : `${visiblePrds.length} 个 PRD`}
           </span>
           <div className="flex-1" />
           <Button
@@ -311,38 +372,69 @@ export default function RoadmapPage() {
           </Button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 p-4 dark:border-slate-800">
-          {openedPrd ? (
-            <PrdContentView
-              key={openedPrd.prd_path}
-              repoId={selectedRepoId}
-              prdPath={openedPrd.prd_path}
-              prdTitle={openedPrd.title}
-              onBack={() => setOpenedPrd(null)}
-            />
-          ) : loading ? (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-              <Skeleton className="h-40" />
-              <Skeleton className="h-40" />
-              <Skeleton className="h-40" />
-            </div>
-          ) : view === "graph" ? (
-            <RoadmapGraph prds={visiblePrds} onOpenContent={setOpenedPrd} />
-          ) : view === "timeline" ? (
-            <RoadmapTimeline
-              prds={visiblePrds}
-              onStart={(prd) => void handleStart(prd)}
-              onOpenContent={setOpenedPrd}
-              startingPath={startingPath}
-            />
-          ) : (
-            <RoadmapList
-              prds={visiblePrds}
-              onStart={(prd) => void handleStart(prd)}
-              onOpenContent={setOpenedPrd}
-              startingPath={startingPath}
-            />
+        <RoadmapAutopilotControl
+          state={autopilot}
+          loading={autopilotLoading}
+          saving={autopilotSaving}
+          onToggle={(enabled) => void handleToggleAutopilot(enabled)}
+        />
+
+        {/* master-detail：左侧保留当前 Roadmap 视图（含依赖图上下文），右侧是
+            统一的 PRD 详情；窄屏自动退化为上下堆叠，不引入 modal 或新路由。 */}
+        <div
+          className={cn(
+            "grid min-h-0 flex-1 gap-3",
+            selectedPrd && "lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_440px]",
           )}
+        >
+          <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+            {loading ? (
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                <Skeleton className="h-40" />
+                <Skeleton className="h-40" />
+                <Skeleton className="h-40" />
+              </div>
+            ) : view === "graph" ? (
+              <RoadmapGraph prds={visiblePrds} onOpenContent={setSelectedPrd} />
+            ) : view === "timeline" ? (
+              <RoadmapTimeline
+                prds={visiblePrds}
+                onStart={(prd) => void handleStart(prd)}
+                onOpenContent={setSelectedPrd}
+                startingPath={startingPath}
+              />
+            ) : (
+              <RoadmapList
+                prds={visiblePrds}
+                onStart={(prd) => void handleStart(prd)}
+                onOpenContent={setSelectedPrd}
+                startingPath={startingPath}
+              />
+            )}
+          </div>
+
+          {selectedPrd ? (
+            <aside className="min-h-0 overflow-hidden rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">PRD 详情</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedPrd(null)}
+                  data-testid="prd-detail-close"
+                >
+                  关闭
+                </Button>
+              </div>
+              <PrdDetail
+                key={selectedPrd.prd_path}
+                repoId={selectedRepoId}
+                prd={selectedPrd}
+                starting={startingPath === selectedPrd.prd_path}
+                onStart={(prd) => void handleStart(prd)}
+              />
+            </aside>
+          ) : null}
         </div>
       </section>
     </div>

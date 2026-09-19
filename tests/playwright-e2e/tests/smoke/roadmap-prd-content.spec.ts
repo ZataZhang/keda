@@ -120,9 +120,15 @@ test.describe('realistic: PRD content reader', () => {
     await expect(contentBody.locator('table').first()).toBeVisible()
     await expect(contentBody.locator('input[type="checkbox"]').first()).toBeVisible()
 
-    // 返回列表导航必须保留。
-    await page.getByTestId('prd-content-back').click()
+    // 详情现在是 master-detail：左侧仍保留依赖图/列表上下文，右侧是统一详情。
+    // 关闭详情后整块画布回到当前视图（不再是「返回列表」按钮，因为列表从未离开）。
+    await expect(page.getByTestId('prd-detail')).toHaveAttribute(
+      'data-prd-path',
+      targetPrd.prd_path,
+    )
+    await page.getByTestId('prd-detail-close').click()
     await expect(page.getByTestId('prd-content-body')).not.toBeVisible()
+    await expect(page.getByTestId('prd-detail')).toHaveCount(0)
     await expect(openContentButton).toBeVisible()
   })
 

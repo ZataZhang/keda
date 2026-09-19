@@ -16,7 +16,7 @@ from enum import Enum
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 from backend.core.shared.interfaces.runner_console import AuditEntry, IRoadmapStore
@@ -26,6 +26,16 @@ from backend.core.shared.models.roadmap import (
     RoadmapPrd,
     RoadmapSettingsEntry,
 )
+from backend.core.use_cases.agent_runner_factory import (
+    create_github_client,
+    create_process_runner,
+    create_process_supervisor,
+    create_repository_autopilot_settings_editor,
+    create_roadmap_store,
+    load_fresh_agent_runner_settings,
+    resolve_console_spawn_cwd,
+    resolve_repository_targets_with_diagnostics,
+)
 from backend.core.use_cases.prd_content_reader import PrdContentError, read_prd_content
 from backend.core.use_cases.roadmap_actions import (
     RoadmapActionError,
@@ -34,16 +44,19 @@ from backend.core.use_cases.roadmap_actions import (
     start_prd,
     stop_global_roadmap,
 )
-from backend.core.use_cases.agent_runner_factory import (
-    create_github_client,
-    create_process_runner,
-    create_process_supervisor,
-    create_roadmap_store,
-    load_fresh_agent_runner_settings,
-    resolve_console_spawn_cwd,
-    resolve_repository_targets_with_diagnostics,
+from backend.core.use_cases.roadmap_autopilot_settings import (
+    RoadmapAutopilotError,
+    load_autopilot_state,
+    set_autopilot_enabled,
 )
 from backend.core.use_cases.roadmap_dependencies import evaluate_roadmap_dependencies
+from backend.core.use_cases.roadmap_prd_evidence import (
+    RoadmapPrdEvidenceError,
+    build_evidence_manifest,
+    decode_artifact_token,
+    read_evidence_artifact,
+    read_evidence_artifact_text,
+)
 from backend.core.use_cases.roadmap_prd_scanner import scan_roadmap_prds
 from backend.core.use_cases.roadmap_state_resolver import resolve_roadmap_states
 
@@ -246,6 +259,156 @@ def get_roadmap_prd_content(encoded_path: str, repo_id: str) -> PlainTextRespons
     except PrdContentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return PlainTextResponse(prd_content_text, media_type="text/plain; charset=utf-8")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Autopilot（仓库级）与验收证据
+#
+# 这两组端点刻意不复用 `_ROADMAP_CACHE`：Autopilot 状态必须是写后 fresh 读回，
+# 证据列表必须每次重新读盘，否则用户会看到陈旧值（rv-2 / rv-3 的验收基点）。
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _load_fresh_contexts():
+    """重新解析当前启用的仓库上下文（每次调用都重新加载配置）。"""
+    settings = load_fresh_agent_runner_settings()
+    contexts, _failures = resolve_repository_targets_with_diagnostics(settings)
+    return contexts
+
+
+def _resolve_max_parallel(repo_id: str) -> int:
+    """读取该仓库 Roadmap 并发上限（既有 roadmap settings，不新增存储）。"""
+    store = create_roadmap_store()
+    roadmap_settings = get_or_create_roadmap_settings(store, repo_id)
+    return roadmap_settings.max_parallel
+
+
+@router.get("/agent-runner/roadmap/autopilot")
+def get_roadmap_autopilot(repo_id: str) -> dict:
+    """读取当前仓库的 Autopilot 完整闭环状态。
+
+    返回生效的 ``autopilot.enabled``、``safety.auto_merge``、daemon 是否在跑、
+    Roadmap 并发上限与配置来源，供页面如实展示是否具备全自动闭环条件。
+    """
+    context = _resolve_context(repo_id)
+    try:
+        state = load_autopilot_state(
+            repo_id=repo_id,
+            contexts=(context,),
+            supervisor=create_process_supervisor(),
+            max_parallel=_resolve_max_parallel(repo_id),
+            editor=create_repository_autopilot_settings_editor(),
+        )
+    except RoadmapAutopilotError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize(state)
+
+
+class UpdateAutopilotRequest(BaseModel):
+    """切换当前仓库的 Autopilot 自动推进。"""
+
+    repo_id: str = Field(min_length=1)
+    enabled: bool
+
+
+@router.patch("/agent-runner/roadmap/autopilot")
+def update_roadmap_autopilot(request: UpdateAutopilotRequest) -> dict:
+    """只修改目标仓库 `.iar.toml` 的 ``autopilot.enabled``。
+
+    成功响应体来自写后 fresh load 的生效配置，不回显请求体；``safety.auto_merge``
+    保持原样（第二道危险动作门禁，页面只读展示）。写回失败时不替换原文件。
+    """
+    contexts = _load_fresh_contexts()
+    if not any(context.repo_id == request.repo_id for context in contexts):
+        raise HTTPException(status_code=400, detail=f"仓库 '{request.repo_id}' 不存在或未启用。")
+    try:
+        state = set_autopilot_enabled(
+            repo_id=request.repo_id,
+            enabled=request.enabled,
+            editor=create_repository_autopilot_settings_editor(),
+            contexts_loader=_load_fresh_contexts,
+            supervisor=create_process_supervisor(),
+            max_parallel=_resolve_max_parallel(request.repo_id),
+        )
+    except RoadmapAutopilotError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(
+        create_roadmap_store(),
+        action="autopilot_toggle",
+        repo_id=request.repo_id,
+        prd_path="",
+        issue_number=None,
+        result="accepted",
+        detail=f"autopilot.enabled={request.enabled}",
+    )
+    return _serialize(state)
+
+
+@router.get("/agent-runner/roadmap/prds/{encoded_path}/evidence")
+def get_roadmap_prd_evidence(encoded_path: str, repo_id: str) -> dict:
+    """列出某个 PRD 在仓库中仍保留的验收证据文件（每次请求重新读盘）。"""
+    prd_path = _decode_prd_path(encoded_path)
+    context = _resolve_context(repo_id)
+    try:
+        manifest = build_evidence_manifest(
+            repo_path=context.repo_path,
+            config=context.config,
+            prd_path=prd_path,
+        )
+    except RoadmapPrdEvidenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize(manifest)
+
+
+@router.get("/agent-runner/roadmap/prds/{encoded_path}/evidence/{artifact_token}")
+def read_roadmap_prd_evidence_artifact(
+    encoded_path: str, artifact_token: str, repo_id: str
+) -> Response:
+    """受限读取单个证据文件：文本内联、图片预览、其它类型下载。
+
+    文件名以 base64url 传递，解码后必须是纯 basename 且为该 PRD 证据目录的
+    直接子文件；越界、符号链接逃逸与超限文件一律 4xx，不泄露仓外内容。
+    """
+    prd_path = _decode_prd_path(encoded_path)
+    context = _resolve_context(repo_id)
+    try:
+        artifact_name = decode_artifact_token(artifact_token)
+        _content_bytes, media_type, file_name = read_evidence_artifact(
+            context.repo_path, context.config, prd_path, artifact_name
+        )
+    except RoadmapPrdEvidenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if media_type.startswith("text/") or media_type in {"application/json"}:
+        try:
+            text = read_evidence_artifact_text(
+                context.repo_path, context.config, prd_path, artifact_name
+            )
+        except RoadmapPrdEvidenceError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return PlainTextResponse(
+            text,
+            media_type=f"{media_type}; charset=utf-8",
+            headers=_artifact_headers(file_name, disposition="inline"),
+        )
+
+    content = read_evidence_artifact(context.repo_path, context.config, prd_path, artifact_name)[0]
+    disposition = "inline" if media_type.startswith("image/") else "attachment"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers=_artifact_headers(file_name, disposition=disposition),
+    )
+
+
+def _artifact_headers(file_name: str, *, disposition: str) -> dict[str, str]:
+    """证据下载的保守响应头：显式 disposition + no-sniff，避免浏览器误执行。"""
+    safe_name = file_name.replace('"', "'")
+    return {
+        "Content-Disposition": f'{disposition}; filename="{safe_name}"',
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
