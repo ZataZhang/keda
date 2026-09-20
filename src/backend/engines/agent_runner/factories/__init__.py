@@ -241,11 +241,12 @@ def create_registry_editor() -> IRepositoryRegistryEditor:
 def create_repository_autopilot_settings_editor() -> TomlRepositoryAutopilotSettingsEditor:
     """创建仓库本地 ``.iar.toml`` 的受限 Autopilot 写回编辑器。
 
-    这是全仓唯一的仓库级 TOML round-trip / 原子替换原语入口（见
-    :mod:`backend.infrastructure.config.repository_settings_editor` 的模块
-    docstring）：其它需要写仓库本地配置的能力必须复用它，而不是再引入一份
-    tomlkit 写回实现。本工厂只装配该 editor，不预设具体仓库路径——写回目标由
-    调用按当前选中的仓库上下文提供。
+    写回的 round-trip / 原子替换由共享原语
+    :func:`backend.infrastructure.config.toml_section_editor.update_toml_table_keys`
+    完成（与全局 ``config.toml`` 的写回同一份实现）；本 editor 只把范围收敛到
+    ``[agent_runner.autopilot].enabled`` 并补前置校验，见
+    :mod:`backend.infrastructure.config.repository_settings_editor`。本工厂只装配
+    该 editor，不预设具体仓库路径——写回目标由调用按当前选中的仓库上下文提供。
     """
     return TomlRepositoryAutopilotSettingsEditor()
 

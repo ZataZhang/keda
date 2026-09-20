@@ -152,7 +152,7 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 
 - `P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance` 已**交付归档**，且实际收缩为「execution 模板开工前的 PRD 引用核验（PRD map check）」，**没有**引入 `[agent_runner.autopilot.regrounding]` 之类的子表（`rg -n "regrounding" src/backend` 无命中）。本 PRD 因此不再需要为它的字段让路；writer 的「保留未知键/子表」要求保留，但依据改为通用保真，见 §7 Executor Drift Guard。
 - **下游硬依赖（本 PRD 阻塞它）**：`P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair` 在自身 §8 声明 `Group: roadmap-delivery-control`、`Depends on: P1-FEAT-20260916-122645-…`、`Gate type: hard`，理由是它要复用本 PRD 建立的统一 PRD 详情与仓库级设置写回边界，先交付会重复创建详情容器与配置接口。这给本 PRD 加了两条约束：详情标签容器必须能容纳第三个标签页（CI/CD），详情头部动作必须可组合而不是写死一组按钮。
-- **同面并发（需协调，非依赖）**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix` 会改 `frontend-public/app/(app)/app/roadmap/page.tsx`（受管理仓库列表加齿轮按钮）、`frontend-public/components/roadmap/prd-content-view.tsx`（工具栏加「Agent 覆盖」按钮），并**写入仓库 `.iar.toml` 的 agent 阶段配置**。它与本 PRD 在「PRD 原文工具栏容器」与「仓库级 `.iar.toml` 写回」两处重叠：两者必须共用同一份 tomlkit round-trip + 原子替换原语，各自只暴露自己的窄接口，不得各写一套 writer；工具栏与标签页的落点按「先交付者定义容器、后交付者挂载」合并。
+- **同面并发（原为需协调，非依赖；已按「先合并者定义、后合并者复用」结清）**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix` 改了 `frontend-public/app/(app)/app/roadmap/page.tsx`（受管理仓库列表加齿轮按钮与矩阵抽屉）、`frontend-public/components/roadmap/prd-content-view.tsx`（工具栏加「Agent 覆盖」按钮），并写入仓库 `.iar.toml` 的 agent 阶段配置。它先合并（PR #147，merge commit `8c8403e`），因此本 PRD 的交付在 rebase 到该提交后进行：本 PR 复用其 `.iar.toml` 写回原语 `update_toml_table_keys`（`infrastructure/config/toml_section_editor.py`），只保留自己的窄封装 `repository_settings_editor.py`；页面合并保留齿轮按钮与矩阵抽屉，同时把详情改为 master-detail，`PrdContentView` 的「返回列表」头改为仅在传入 `onBack` 时渲染，而「Agent 覆盖」按钮始终保留。
 - `P1-FEAT-20260913-204531-tauri-desktop-shell` 与 Roadmap 控制面无关，不构成依赖或冲突。
 - 相关归档 PRD（均在 `tasks/archive/`）：`P1-FEAT-20260614-200054-frontend-prd-roadmap.md`（Roadmap 初版与单启动目标）、`P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md`（Autopilot 持续调度）、`P1-FEAT-20260913-204530-console-prd-content-reader.md`（PRD 原文读取）。本 PRD 扩展这些已交付能力，不重复实现。
 
@@ -476,7 +476,7 @@ No external validation required; repository code, archived PRDs, current configu
 - [x] API 路由不直接 import `tomlkit`、不直接写文件；core Autopilot 用例只依赖受限端口，`rg -n "tomlkit|os\.replace" src/backend/api src/backend/core/use_cases/roadmap_autopilot_settings.py` 无命中 — 证据报告 §3
 - [x] evidence 路径复用 `resolve_evidence_dir`，`rg -n 'tasks/evidence.*prd|evidence_dir.*/' src/backend/core/use_cases/roadmap_prd_evidence.py` 无手写默认目录拼接 — 证据报告 §3
 - [x] evidence/autopilot 端点不复用 `/roadmap/prds` 的 30 秒 `_ROADMAP_CACHE`：`rg -n "_ROADMAP_CACHE" src/backend/api/routes` 中的命中不含这两个路径 — 证据报告 §3
-- [x] `.iar.toml` round-trip 原语唯一且供 lifecycle-agent-matrix 复用：新增 `repository_settings_editor.py` 为仓库级唯一 writer；`rg -n "tomlkit|os\.replace" src/backend/infrastructure/config` 的另一命中是既有 `registry_editor.py`（全局 `config.toml` 的 repositories 子树，D-05），两者目标文件不同，**每个目标文件单处**（措辞已在 §13 Final Reconciliation 修正）；与 `P1-FEAT-20260918-110027` 的收敛条件见证据报告 §5
+- [x] `.iar.toml` round-trip 原语唯一并复用 `P1-FEAT-20260918-110027` 的共享实现：写回委托给 `update_toml_table_keys`（`infrastructure/config/toml_section_editor.py`，PR #147 先落地），`repository_settings_editor.py` 只做窄封装与前置校验、**自身不 import `tomlkit`、不调用 `os.replace`**；`rg -n "tomlkit|os\.replace" src/backend/infrastructure/config` 的命中只剩 `toml_section_editor.py`（共享原语）与既有 `registry_editor.py`（全局 `config.toml` 的 repositories 子树，D-05），**没有第二份 `.iar.toml` 写回逻辑**
 - [x] 未新增数据库表、调度线程、WebSocket 或第三方依赖；依赖清单 diff 无新增包 — 本次 diff 仅含源码/测试/文档
 - [x] `roadmap_actions.py`、`run_agent_daemon.py`、`agent_runner_merge_queue.py` 的既有算法/双门禁未为 UI 需求改写；若因测试性做最小注入变更，Decision Log 与证据同步更新 — 三个文件在本次 diff 中无改动（证据报告 §2.3）
 
@@ -512,7 +512,7 @@ No external validation required; repository code, archived PRDs, current configu
 
 #### Delivery Readiness
 
-- [x] 推荐方案全量实现，无临时兼容层、隐藏开关或待办项留在必需范围内 — 唯一遗留是与 `P1-FEAT-20260918-110027` 的 TOML 原语收敛（该 PRD 尚未合并，属跨 PRD 协调而非本 PRD 未实现项），见证据报告 §5
+- [x] 推荐方案全量实现，无临时兼容层、隐藏开关或待办项留在必需范围内 — 与 `P1-FEAT-20260918-110027` 的 TOML 原语已在 rebase 后收敛为「共享原语 + 各自窄接口」
 - [x] 完成消息逐字携带 §9.1 人读呈递区的全部内容与实际呈递物；只把文件放进 evidence 目录但不展示视为未交付 — 完成消息含 §9.1 三条呈递物的绝对路径、打开命令与观察点
 - [x] 独立 verifier Agent 审查通过 — 两轮复核，冻结提交 `6e9374d`（第一轮，2 位独立 verifier）与 `dff673a`（第二轮整改确认）；结论 **PASS**，第一轮 7 项发现全部处置、第二轮 2 处文档计数漂移已修正；报告：`tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot.verifier-report.md`
 - [x] PRD 归档至 tasks/archive/ — 已执行 `git mv tasks/pending/… tasks/archive/…`，同 PR 中提交
@@ -578,7 +578,7 @@ No external validation required; repository code, archived PRDs, current configu
 - **Functional Requirements**：FR-1..FR-12 全部由 §9 的 Behavior/Frontend/Acceptance 项与证据报告 §2 逐条覆盖；无 FR 被降级或删除。
 - **正文修正**（本次实际改动）：§7 Change Impact Tree 中 `roadmap-graph.tsx` / `roadmap-timeline.tsx` / `roadmap-list.tsx` 由 `[修改]` 改为 `[未改动]`（三者已有 `onOpenContent`，页面改传 `setSelectedPrd` 即可），`test_roadmap_api.py` 标为 `[未改动]`；§7 Core Logic 第 5 步把「Markdown/纯文本内联渲染」明确为「以原文形式内联预览（不渲染成 HTML）」以对齐实现与 rv-3 的 H1 逐字一致判据。
 - **§9 Architecture Acceptance 措辞修正**：原文写「`src/backend/infrastructure/config` 中写回逻辑单处」，但该目录下按设计存在两个目标文件不同的 writer——`registry_editor.py`（全局 `config.toml`，D-05）与本次新增的 `repository_settings_editor.py`（仓库级 `.iar.toml`）。正确表述是**每个目标文件单处**；D-05/D-08 的意图（不新增第二份 `.iar.toml` writer、不提供通用 TOML PATCH）未被破坏。
-- **D-08 的跨 PRD 收敛未在本 PR 内完成**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix`（PR #147）分支上已有 `toml_section_editor.py`，其基线晚于本 PRD 的 `4d4dd12`，实现期无法复用。两者需按「先合并者定义原语」收敛，登记为跨 PRD 协调项（证据报告 §5）。
+- **D-08 的跨 PRD 收敛已完成**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix`（PR #147）先合并为 `8c8403e`，本 PR 随即 rebase 到该提交，并把 `repository_settings_editor.py` 的 tomlkit round-trip + `os.replace` 实现替换为对共享原语 `update_toml_table_keys` 的委托（本文件不再 import `tomlkit`）。前端两处冲突按「保留 #147 的入口 + 本 PR 的 master-detail」合并：仓库列表的齿轮按钮与仓库级矩阵抽屉保留，`PrdContentView` 的「返回列表」头改为仅在传 `onBack` 时渲染而「Agent 覆盖」按钮始终保留。`lifecycle-agent-matrix.spec.ts` 复跑通过，证明合并未破坏 #147 的界面。
 - **已知限制（不影响行为验收）**：`agent_runner_roadmap.py` 464 非空行，低于 500 拆分界；E2E 对 `/roadmap/**` 使用 route stub，文件系统链由真实 console 脚本覆盖。
 - **Banner 一致性**：Delivery Gate Banner（§8 投影）与 Acceptance Status Banner（§9 投影）均已更新为已交付；runner-owned gate 已由本 PR 内完成的两轮独立 verifier 复核与归档动作结清。
 - **独立 verifier 结论**：第一轮（冻结 `6e9374d`）由 2 个独立 verifier 分别复核「实现 vs FR」与「证据真实性」，共 7 项发现（1 项中危行为缺陷、1 项中危负控名不副实、5 项低危口径/措辞），全部处置；第二轮（冻结 `dff673a`）确认 4 项关键整改均真实有效、无回归，另发现 2 处文档计数漂移并已修正。结论 **PASS**。
@@ -630,11 +630,29 @@ No external validation required; repository code, archived PRDs, current configu
 - Impact: 新增 2 条测试（`test_get_autopilot_rejects_non_bool_enabled`、`test_oversize_file_is_excluded_from_manifest_and_rejected_by_artifact`）；正常路径无变化
 - Review: 执行器自审 + 独立 verifier 复核
 
+### rebase 到 PR #147 后复用共享 TOML 写回原语
+
+- Type: code
+- Before: `repository_settings_editor.py` 自带一套 tomlkit round-trip + 临时文件 + `os.replace`；当时 `P1-FEAT-20260918-110027` 尚未合并，无法复用其原语
+- After: 该文件改为委托 `toml_section_editor.update_toml_table_keys`（PR #147 落地的共享原语），自身不再 import `tomlkit`、不调用 `os.replace`；保留 PRD 要求的窄接口与前置校验（目标仓必须有 `.iar.toml`、`[agent_runner]` 段必须存在、现有配置必须先通过 `AgentRunnerLocalSettings` 校验）
+- Reason: D-08 要求两个 PRD 共用同一份注释保留/原子替换实现，不得各持一套；#147 合并后收敛条件成立，rebase 即可复用
+- Impact: 行为等价（38 条定向测试全绿）。两点语义差异已登记在证据报告 §5：校验从「dump 后校验新文本」改为「写前校验旧文本」，且不再继承原文件权限（共享原语不保留 mode；`.iar.toml` 不含密钥）
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 合并 #147 的前端改动（页面容器规则）
+
+- Type: scope
+- Before: §5 只约定「先交付者定义容器、后交付者挂载」，未给出具体落点
+- After: `page.tsx` 保留 #147 的仓库列表齿轮按钮 + 仓库级矩阵抽屉，同时叠加本 PRD 的 master-detail 与仓库选中时清空 `selectedPrd`；`prd-content-view.tsx` 的头部容器保留「返回列表」按钮（仅 `onBack` 存在时渲染）与 #147 的「Agent 覆盖」按钮（始终渲染）
+- Reason: rebase 时两处冲突，需要同时满足 #147 的入口可见性与本 PRD 的标签页场景
+- Impact: 无行为损失；`lifecycle-agent-matrix.spec.ts` 复跑通过，证明齿轮按钮与覆盖抽屉仍可用
+- Review: 执行器自审 + 独立 verifier 复核
+
 ### 证据口径修正（verifier 复核提出）
 
 - Type: evidence
 - Before: evidence report / verification-plan 中「新 E2E spec 6 条」「11 条攻击全 400」「rv-5 32 passed」「rv-2 基线负控」等表述与实际产物口径不一致（新 spec 实为 5 条；11 例含 1 例合法 200；rv-5 的 `real_entry` 为 26 passed、三个新增文件为 34 passed；rv-2 脚本原先未做基线负控）
-- After: 逐条改为实测口径；`rv-2-autopilot-config-diff.sh` 增加真实基线负控（基线 `4d4dd12` 上 GET 与 PATCH 均 404）；rv-2 产物重新生成；最终树的录屏 / 截图 / 攻击矩阵全部重采
+- After: 逐条改为实测口径；`rv-2-autopilot-config-diff.sh` 增加真实基线负控（基线 `8c8403e` 上 GET 与 PATCH 均 404）；rv-2 产物重新生成；最终树的录屏 / 截图 / 攻击矩阵全部重采
 - Reason: Machine Contract 要求证据可复现且数字与产物一致；「原样摘录」不能与真实输出不符
 - Impact: 无产品行为变化；证据可复现性提升
 - Review: 执行器自审 + 独立 verifier 复核

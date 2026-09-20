@@ -2,7 +2,7 @@
 
 PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot.md`
 分支：`feat/roadmap-prd-controls-evidence-autopilot`（worktree `/Users/zata/code/keda-worktrees/feat/roadmap-prd-controls-evidence-autopilot`）
-基线代码树：`4d4dd12`（`git merge-base HEAD main`，即本 PRD 的开工基点）
+基线代码树：`8c8403e`（`git merge-base HEAD main`；本 PRD 开工时为 `4d4dd12`，交付在 `P1-FEAT-20260918-110027-lifecycle-agent-matrix` 合并（PR #147）后 rebase 到该提交，使 TOML 写回原语可复用）
 执行时间：2026-09-20
 执行器：CodeBuddy Code（会话内自证）+ 独立 verifier 复核
 
@@ -32,7 +32,7 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 
 ## 0. 一句话结论
 
-后端链条（受限 `.iar.toml` 写回、证据只读访问、Autopilot 状态聚合、API 契约、现有持续调度与双重合并门禁）与前端页面全部真实跑通：全量后端 **2306 passed**；E2E 两次运行合计 **12 passed**（新 spec 5 + 既有 PRD 原文 spec 3 + console 静态入口 spec 3 + auth setup 1）；`just lint --reuse` / `pre-commit --all-files` / `just console-sync` / `uv run mkdocs build --strict` 全部退出 0。rv-1 / rv-2 / rv-3 的人读呈递物已在最终实现树采集。
+后端链条（受限 `.iar.toml` 写回、证据只读访问、Autopilot 状态聚合、API 契约、现有持续调度与双重合并门禁）与前端页面全部真实跑通：全量后端 **2368 passed**；E2E 两次运行合计 **17 passed**（新 spec 5 + 既有 PRD 原文 spec 3 + 合并进来的 lifecycle-agent-matrix spec 5 + console 静态入口 spec 3 + auth setup 1）；`just lint --reuse` / `pre-commit --all-files` / `just console-sync` / `uv run mkdocs build --strict` 全部退出 0。rv-1 / rv-2 / rv-3 的人读呈递物已在最终实现树采集。
 
 本轮修复了两处实跑才暴露的问题、以及两处独立 verifier 复核提出的问题（§4）：`agent_runner_roadmap.py` 中的重复 context loader、新 E2E spec 用 `check()` 驱动受控开关造成的假失败、`.iar.toml` 中 `enabled` 非布尔时 GET 漏成 500、以及超限文件被列进 manifest 却无法下载。
 
@@ -48,7 +48,8 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 | rv-4（持续调度 + 双门禁） | `uv run pytest -o addopts="" tests/test_roadmap_advance.py tests/test_roadmap_autopilot_settings.py -k 'autopilot or upstream or disabled' -v` | PASS 13 passed | 0 | §2.3 |
 | rv-5（API / core / writer 契约） | `uv run pytest -o addopts="" tests/test_roadmap_api.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q`（PRD 的 `real_entry` 原样） | PASS 26 passed | 0 | §2.4 |
 | rv-5（三个新增测试文件合计） | `uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q` | PASS 34 passed | 0 | §2.4 |
-| rv-6（全仓质量） | `CI=true just test all`（强制全量、跳过 testmon 增量） | PASS 2306 passed in 79.11s | 0 | §3 |
+| rv-6（全仓质量） | `CI=true just test all`（强制全量、跳过 testmon 增量） | PASS 2368 passed in 84.88s | 0 | §3 |
+| rv-6（#147 页面回归） | `just e2e tests/workflows/lifecycle-agent-matrix.spec.ts` | PASS（含齿轮按钮与「Agent 覆盖」抽屉 5 条） | 0 | §3 |
 | rv-6（复用/架构/行数） | `just lint --reuse` | PASS（5 个 hook 全过） | 0 | §3 |
 | rv-6（全量 pre-commit） | `SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure` | PASS（17 个 hook 全过） | 0 | §3 |
 | rv-6（前端构建与静态同步） | `just console-sync` | PASS（13 个路由静态导出并同步） | 0 | §3 |
@@ -106,7 +107,7 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 ## PATCH negative control: unknown repo
 {"detail":"仓库 'does-not-exist' 不存在或未启用。"}
 HTTP 400
-## 负控（基线代码树 4d4dd12，PYTHONPATH=/tmp/iar-rv3-baseline/src）
+## 负控（基线代码树 8c8403e，PYTHONPATH=/tmp/iar-rv3-baseline/src）
 GET  /autopilot -> HTTP 404
 PATCH /autopilot -> HTTP 404
 ```
@@ -129,7 +130,7 @@ PATCH /autopilot -> HTTP 404
 - GET .../roadmap/autopilot          -> HTTP 404
 ```
 
-负控用 `git worktree add --detach /tmp/iar-rv3-baseline 4d4dd12` 建基线树，脚本以
+负控用 `git worktree add --detach /tmp/iar-rv3-baseline 8c8403e` 建基线树（`8c8403e` = 本 PR 合并前的主线），脚本以
 `PYTHONPATH=<baseline>/src` 让同一个 venv 的 `iar` 加载基线 `backend`，因此是真正的
 「实现前 vs 实现后」对照。rv-2 的 400 负控同样是真实 HTTP。
 
@@ -175,7 +176,7 @@ manifest 也无法读取、legacy 扁平证据目录语义不变。
 ## 3. rv-6 · 全仓门禁（真实执行，均为最终实现树）
 
 ```text
-CI=true just test all                        → 2306 passed in 79.11s
+CI=true just test all                        → 2368 passed in 84.88s
 just lint --reuse                            → jscpd / pylint-duplicate-code /
                                                check-architecture /
                                                check-guidelines-consistency /
@@ -193,7 +194,7 @@ uv run mkdocs build --strict                 → exit 0
 - `rg -n "_ROADMAP_CACHE" src/backend/api/routes` → 命中只有 list / start 路径与一行说明注释，**不含** autopilot / evidence 端点。
 - `rg -n "handleStart|startRoadmapPrd|canStartRoadmapPrd" frontend-public` → 启动入口唯一：页面 `handleStart` → `lib/api/roadmap.ts::startRoadmapPrd` → canonical endpoint；规则函数 `canStartRoadmapPrd` 由卡片与详情共用。
 - `rg -n 'tasks/evidence.*prd|evidence_dir.*/' src/backend/core/use_cases/roadmap_prd_evidence.py` → 无手写默认目录拼接（唯一命中是 docstring 与 `evidence_dir / artifact_name` 的合法拼接）。
-- `rg -n "tomlkit|os\.replace" src/backend/infrastructure/config` → 命中 `repository_settings_editor.py`（本次新增，仓库级 `.iar.toml`）与 `registry_editor.py`（既有，全局 `config.toml` 的 repositories 子树）。**这是两个不同目标文件的 writer**，符合 PRD D-05/D-08；但 §9 Architecture Acceptance 的字面表述是「写回逻辑单处」，实际应为「每个目标文件单处」，已在 Final Reconciliation 中修正措辞。
+- `rg -n "tomlkit|os\.replace" src/backend/infrastructure/config` → 命中只剩 `toml_section_editor.py`（PR #147 落地的**共享原语**）与既有 `registry_editor.py`（全局 `config.toml` 的 repositories 子树，D-05）。本 PR 的 `repository_settings_editor.py` **不再 import `tomlkit`、不调用 `os.replace`**，只把写回委托给共享原语——`.iar.toml` writer 全仓单处，D-08 结清。
 
 ## 4. 本轮修复（实跑才暴露的问题）
 
@@ -217,15 +218,14 @@ uv run mkdocs build --strict                 → exit 0
    一个必然失败的动作。已在 manifest 阶段跳过超限文件，并新增
    `test_oversize_file_is_excluded_from_manifest_and_rejected_by_artifact` 保证
    manifest 与 artifact 的「允许集合」一致。
+5. **rebase 到 PR #147 后复用共享 TOML 原语**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix` 先合并（`8c8403e`），本 PR 随之 rebase，并把
+   `repository_settings_editor.py` 的 tomlkit round-trip + `os.replace` 实现改为委托
+   `toml_section_editor.update_toml_table_keys`。前端冲突（`page.tsx` 的仓库列表齿轮按钮与矩阵抽屉、`prd-content-view.tsx` 的「Agent 覆盖」按钮）按「保留 #147 的入口 + 本 PR 的 master-detail」合并。验证：全量 2368 passed；含 #147 的 `lifecycle-agent-matrix.spec.ts` 在内的 E2E 14 passed（齿轮按钮与「Agent 覆盖」抽屉均仍可用）；`repository_settings_editor.py` 现在 `import tomlkit` 计数为 0。
 
 ## 5. 已知限制
 
-- **不与 `P1-FEAT-20260918-110027-lifecycle-agent-matrix` 共用 TOML 原语（待该 PRD 合并时收敛）**：该 PRD 分支（`3326a7c`）另建了
-  `src/backend/infrastructure/config/toml_section_editor.py`，其 docstring 声明
-  「`config.toml` 与 `.iar.toml` 共用本模块」；本 PRD 的基线（`4d4dd12`）不含该文件，
-  因此无法在实现期复用。两者**不能同时按当前形态合并**，否则仓库会出现两份
-  `.iar.toml` round-trip 原语，违反 D-08。已在本 PR 描述中登记，需由后合并方
-  rebase 并改为复用 `repository_settings_editor.py`（本 PR 定义的原语）。
+- **`registry_editor.py` 仍持有自己的 tomlkit 写回**（**非本 PR 引入**）：`config.toml` 的 repositories 子树由既有的 `TomlRegistryEditor` 负责，PR #147 落地共享原语时也未迁移它。今天 infrastructure/config 下有两个 tomlkit 调用点：`toml_section_editor.update_toml_table_keys`（共享原语）与 `registry_editor`（遗留）。本 PRD 的 D-08 只要求 `.iar.toml` 写回单处，该要求已满足；把 `registry_editor` 迁到共享原语属另一个 PRD 的范围，登记为后续项。
+- **`repository_settings_editor` 的前置校验语义**：委托共享原语前先要求「目标仓已有 `.iar.toml`」且「现有配置能通过 `AgentRunnerLocalSettings` 模型校验」。原实现是「先 dump 再校验新文本」，现在是「先校验旧文本 → 只改一个 bool」。二者对合法配置等价；差异是原实现还额外保留了原文件权限（`shutil.copymode`），共享原语不保留——`.iar.toml` 不含密钥，接受该退化，已在 PRD Change Log 记录。
 - **`agent_runner_roadmap.py` 现有 464 非空行**：未到 `check_max_file_lines.py` 的 1000
   阈值，也低于 PRD §7 建议的 500 拆分界；本轮删掉一个重复 helper 后仍保持单文件。
   按 PRD §7 指引登记为待复核项：若后续 PRD 继续追加端点，应在同一 URL namespace 下
@@ -238,9 +238,10 @@ uv run mkdocs build --strict                 → exit 0
 
 后端：
 
-- 新增 `src/backend/infrastructure/config/repository_settings_editor.py`：仓库级
-  `.iar.toml` 的 tomlkit round-trip + 同目录临时文件 + 完整模型校验 + `os.replace`，
-  只写 `[agent_runner.autopilot].enabled`。
+- 新增 `src/backend/infrastructure/config/repository_settings_editor.py`：把仓库级
+  `.iar.toml` 的写回收敛到 `[agent_runner.autopilot].enabled`，并在委托前校验目标仓
+  已有配置文件且现有配置通过模型校验；round-trip 与原子替换一律走共享原语
+  `toml_section_editor.update_toml_table_keys`（本文件不 import `tomlkit`）。
 - 新增 `src/backend/core/use_cases/roadmap_autopilot_settings.py`：状态聚合 + 受限写回 +
   写后 fresh load 校验；daemon 状态复用既有 process supervisor 记录。
 - 新增 `src/backend/core/use_cases/roadmap_prd_evidence.py`：manifest 与 artifact 读取，
@@ -276,7 +277,7 @@ just e2e tests/smoke/roadmap-controls-evidence-autopilot.spec.ts tests/smoke/roa
 just e2e tests/workflows/console-served-static.no-auth.spec.ts
 
 # 基线 worktree（rv-2 与 rv-3 的真实负控都用它）
-git worktree add --detach /tmp/iar-rv3-baseline 4d4dd12
+git worktree add --detach /tmp/iar-rv3-baseline 8c8403e
 
 # rv-2 配置写回（真实 console + 临时 Git 仓 + 基线 GET/PATCH 404 负控）
 bash tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/scripts/rv-2-autopilot-config-diff.sh

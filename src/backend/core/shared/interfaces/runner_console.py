@@ -368,15 +368,17 @@ class IRepositoryAutopilotSettingsEditor(ABC):
     def set_enabled(self, repo_root_path: Path, enabled: bool) -> None:
         """仅修改 ``[agent_runner.autopilot].enabled`` 并原子替换文件。
 
-        实现必须：保留注释与未知键/子表、写入同目录临时文件、替换前做完整
-        加载校验、以 ``os.replace`` 原子替换；失败时原文件保持不变。
+        实现必须：保留注释与未知键/子表、只改这一个布尔键、失败时原文件保持
+        不变。原子替换与格式保留由共享原语 ``update_toml_table_keys`` 提供，
+        实现负责在委托前校验现有配置合法（详见
+        ``backend.infrastructure.config.repository_settings_editor``）。
 
         Args:
             repo_root_path: 目标仓库根目录。
             enabled: 目标布尔值。
 
         Raises:
-            ValueError: 配置非法、写入失败或写后校验不通过。
+            ValueError: 配置非法（文件缺失、结构不符或模型校验不通过）。
             OSError: 文件不可写。
         """
         ...
