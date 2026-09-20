@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -107,6 +108,38 @@ def test_list_roadmap_prds(roadmap_environment) -> None:
     assert data["repo_id"] == "keda-main"
     assert len(data["prds"]) == 1
     assert data["prds"][0]["title"] == "Test Feature"
+
+
+def test_roadmap_cache_reused_after_slow_build(
+    roadmap_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """构建耗时超过 TTL 时缓存仍须命中，否则前端每轮轮询都会全量重扫。"""
+    build_count = 0
+
+    def slow_build(repo_id: str, include_archived: bool) -> dict:
+        nonlocal build_count
+        build_count += 1
+        time.sleep(0.3)
+        return {
+            "prds": [],
+            "skipped": [],
+            "repo_id": repo_id,
+            "include_archived": include_archived,
+            "scanned_at": "",
+        }
+
+    roadmap_routes._ROADMAP_CACHE.clear()
+    monkeypatch.setattr(roadmap_routes, "_ROADMAP_CACHE_TTL_SECONDS", 0.2)
+    monkeypatch.setattr(roadmap_routes, "_build_roadmap_response", slow_build)
+
+    for _ in range(2):
+        response = client.get(
+            "/api/v1/agent-runner/roadmap/prds?repo_id=keda-main&include_archived=false"
+        )
+        assert response.status_code == 200
+
+    assert build_count == 1
+    roadmap_routes._ROADMAP_CACHE.clear()
 
 
 def test_update_settings(roadmap_environment) -> None:
