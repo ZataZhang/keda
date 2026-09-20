@@ -73,7 +73,7 @@ export function PrdDetail({
 
   return (
     <div
-      className="flex min-h-0 flex-col gap-3"
+      className="flex min-h-0 flex-1 flex-col gap-3"
       data-testid="prd-detail"
       data-prd-path={prd.prd_path}
     >

@@ -438,8 +438,8 @@ export default function RoadmapPage() {
           </div>
 
           {selectedPrd ? (
-            <aside className="min-h-0 overflow-hidden rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-              <div className="mb-2 flex items-center justify-between">
+            <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+              <div className="mb-2 flex shrink-0 items-center justify-between">
                 <span className="text-xs font-medium text-slate-500">PRD 详情</span>
                 <Button
                   variant="ghost"
