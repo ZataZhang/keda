@@ -41,6 +41,17 @@
 | `just prd release <prd-file> [--force]` | 释放执行锁；归属不符需显式 `--force` |
 | `just prd review <prd-file> [--print]` | 打开该 PRD 的人工审查清单（证据目录分支副本优先，交互 HTML 优先于 Markdown）：未完成 Human-Confirmed 项、9.1 人读呈递区与人工待决事项的集中页；无清单时回退打开证据报告，两者皆无时列出证据目录现状 |
 
+## Commit Messages
+
+提交信息统一使用**英文**，并遵循 Conventional Commits：
+
+- 格式：`type(scope): subject`，常见 `type` 为 `feat` / `fix` / `refactor` / `docs` / `test` / `chore`；`scope` 可省略。
+- 标题行（subject）不超过 72 字符；正文用来说明 **why** 而非 **what**。
+- 可以用正文列出关键改动点，但不要在标题里堆砌多条变更。
+- 遵循「一次提交一个意图」：不要顺手把无关改动混进同一提交。
+
+这条约定是 `just ai commit` / `just ai push` 生成提交信息时的默认行为（见 `justfile.shared` 中 `_ai_commit` / `_ai_push` 的 prompt），也是人工提交与各 AI 入口的共同基准。仓库目前**没有** `commit-msg` hook 或 commitlint 强制校验，因此需要自觉遵守；`frontend-admin/cz.yaml` 只配置了 commitizen 的 Conventional Commits 模板，不做语言检查。
+
 ## Justfile Layering
 
 仓库根目录下的 `just` 入口被拆分为两层，分别由模板上游和派生项目自己拥有：
