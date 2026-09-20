@@ -10,6 +10,7 @@ from backend.core.use_cases.repository_registry import (
     RegistryValidationError,
     add_registry_repository,
     list_registry_repositories,
+    remove_registry_repository,
     set_registry_repository_enabled,
 )
 from backend.infrastructure.config.registry_editor import TomlRegistryEditor
@@ -126,6 +127,41 @@ def test_add_rejects_duplicate_id(config_with_repo: tuple[Path, Path]) -> None:
             path=str(repo_path),
             display_name=None,
         )
+
+
+def test_add_rejects_path_already_registered(
+    config_with_repo: tuple[Path, Path],
+) -> None:
+    """A path owned by another repo_id must be rejected before any write."""
+    config_path, repo_path = config_with_repo
+    original_text = config_path.read_text(encoding="utf-8")
+    with pytest.raises(RegistryValidationError, match="already registered as 'existing'"):
+        add_registry_repository(
+            editor=TomlRegistryEditor(config_path),
+            repo_id="existing-alias",
+            path=str(repo_path),
+            display_name=None,
+        )
+    assert config_path.read_text(encoding="utf-8") == original_text
+
+
+def test_remove_repository_keeps_local_files(config_with_repo: tuple[Path, Path]) -> None:
+    """移除用例只删注册条目，本地仓库目录必须原样保留。"""
+    config_path, repo_path = config_with_repo
+    editor = TomlRegistryEditor(config_path)
+
+    removed_entry = remove_registry_repository(editor=editor, repo_id="existing")
+
+    assert removed_entry.repo_id == "existing"
+    assert list_registry_repositories(editor) == []
+    assert (repo_path / ".git").exists()
+
+
+def test_remove_repository_unknown_repo_id(config_with_repo: tuple[Path, Path]) -> None:
+    """Removing an unknown repo_id must raise RegistryValidationError."""
+    config_path, _ = config_with_repo
+    with pytest.raises(RegistryValidationError, match="is not registered"):
+        remove_registry_repository(editor=TomlRegistryEditor(config_path), repo_id="ghost")
 
 
 def test_set_enabled_round_trip(config_with_repo: tuple[Path, Path]) -> None:

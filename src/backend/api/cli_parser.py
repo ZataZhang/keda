@@ -552,11 +552,6 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Registry identifier of the repository to remove.",
     )
-    registry_remove_parser.add_argument(
-        "--delete",
-        action="store_true",
-        help="Also delete the cloned repository directory.",
-    )
 
     registry_subparsers.add_parser(
         "list",

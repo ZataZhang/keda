@@ -33,6 +33,7 @@ from backend.core.use_cases.console_actions import (
 from backend.core.use_cases.console_processes import (
     ConsoleProcessError,
     start_runner_process,
+    stop_repository_persistent_processes,
     stop_runner_process,
     tail_runner_log,
 )
@@ -58,6 +59,7 @@ from backend.core.use_cases.repository_registry import (
     RegistryValidationError,
     add_registry_repository,
     list_registry_repositories,
+    remove_registry_repository,
     set_registry_repository_enabled,
 )
 
@@ -433,6 +435,49 @@ def set_console_repository_enabled(repo_id: str, request: SetRepositoryEnabledRe
         detail=f"enabled={request.enabled}",
     )
     return {"repo_id": repo_id, "enabled": request.enabled}
+
+
+@router.delete("/agent-runner/repositories/{repo_id}")
+def remove_console_repository(repo_id: str) -> dict:
+    """移除 registry 条目：先停常驻进程，再从 config.toml 删除条目。
+
+    只移除注册。本地仓库目录（托管克隆与开发工作区）始终保留，只能由人工
+    在外部删除。
+    """
+    editor = create_registry_editor()
+    registered_ids = {entry.repo_id for entry in list_registry_repositories(editor)}
+    if repo_id not in registered_ids:
+        raise HTTPException(status_code=404, detail=f"Repository '{repo_id}' is not registered.")
+
+    settings = load_fresh_agent_runner_settings()
+    stop_result = stop_repository_persistent_processes(
+        repo_id=repo_id,
+        supervisor=create_process_supervisor(),
+        stop_timeout_seconds=settings.console.stop_timeout_seconds,
+    )
+    try:
+        removed_entry = remove_registry_repository(editor=editor, repo_id=repo_id)
+    except RegistryValidationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    _audit_process_action(
+        action="registry_remove",
+        repo_id=repo_id,
+        detail=(
+            f"Removed registry entry for {removed_entry.path}; "
+            f"stopped {len(stop_result.stopped)} process(es), "
+            f"{len(stop_result.failures)} stop failure(s)."
+        ),
+    )
+    return {
+        "repo_id": repo_id,
+        "path": removed_entry.path,
+        "stopped_processes": [record.process_id for record in stop_result.stopped],
+        "stop_failures": [
+            {"process_id": process_id, "detail": failure_detail}
+            for process_id, failure_detail in stop_result.failures
+        ],
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

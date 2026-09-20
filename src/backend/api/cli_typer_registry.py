@@ -69,16 +69,11 @@ def registry_reinit_command(
 @registry_app.command("remove")
 def registry_remove_command(
     repo_id: Annotated[str, typer.Option("--repo-id", help="Registry identifier to remove.")],
-    delete: Annotated[
-        bool,
-        typer.Option("--delete", help="Also delete the cloned repository directory."),
-    ] = False,
 ) -> int:
     """Remove a repository from the registry and stop its daemons."""
     return _run_typer_command(
         "registry remove",
         repo_id=repo_id,
-        delete=delete,
     )
 
 

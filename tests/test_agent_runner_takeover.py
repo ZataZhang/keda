@@ -5,7 +5,9 @@ from __future__ import annotations
 import io
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -218,8 +220,8 @@ def test_clone_github_repository(tmp_path: Path) -> None:
     assert ["gh", "repo", "clone", "owner/repo-a", str(repo_path)] in runner.calls
 
 
-def test_clone_github_repository_skips_existing(tmp_path: Path) -> None:
-    """clone_github_repository should not clone if the repo already exists."""
+def test_clone_github_repository_refuses_existing_directory(tmp_path: Path) -> None:
+    """clone_github_repository should refuse an existing target directory."""
     clone_root = tmp_path / "repos"
     repo_path = clone_root / "owner" / "repo-a"
     repo_path.mkdir(parents=True)
@@ -232,12 +234,12 @@ def test_clone_github_repository_skips_existing(tmp_path: Path) -> None:
         description=None,
         viewer_permission=None,
     )
-    result_path = clone_github_repository(
-        candidate=candidate,
-        clone_root=clone_root,
-        process_runner=runner,
-    )
-    assert result_path == repo_path
+    with pytest.raises(RuntimeError, match="already exists"):
+        clone_github_repository(
+            candidate=candidate,
+            clone_root=clone_root,
+            process_runner=runner,
+        )
     assert not runner.calls
 
 
@@ -337,19 +339,37 @@ def test_execute_takeover_dry_run(tmp_path: Path) -> None:
     assert not runner.calls
 
 
-def _prepare_cloned_repo(clone_root: Path, full_name: str) -> Path:
-    """Create a fake cloned repository root with .git metadata."""
+class _CloneMaterializingRunner(FakeProcessRunner):
+    """FakeProcessRunner that reproduces ``gh repo clone``'s directory creation.
+
+    接管流程不再复用已存在的目标目录，因此 fake runner 必须像真实克隆那样在
+    执行 ``gh repo clone`` 时创建目标仓库目录。
+    """
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        check: bool = True,
+        **run_options: Any,
+    ) -> CommandResult:
+        command_args = list(command)
+        if command_args[:3] == ["gh", "repo", "clone"]:
+            (Path(command_args[4]) / ".git").mkdir(parents=True, exist_ok=True)
+        return super().run(command, cwd=cwd, check=check, **run_options)
+
+
+def _clone_target_path(clone_root: Path, full_name: str) -> Path:
+    """Return the clone target path without creating it."""
     owner, _, name = full_name.partition("/")
-    repo_path = clone_root / owner / name
-    repo_path.mkdir(parents=True)
-    (repo_path / ".git").mkdir()
-    return repo_path
+    return clone_root / owner / name
 
 
 def _fake_git_runner(repo_path: Path) -> FakeProcessRunner:
-    """Return a FakeProcessRunner that answers git rev-parse with repo_path."""
+    """Return a runner that clones into repo_path and answers git rev-parse."""
     repo_path_str = str(repo_path)
-    return FakeProcessRunner(
+    return _CloneMaterializingRunner(
         responses={
             ("git", "rev-parse", "--show-toplevel", "-C", repo_path_str): CommandResult(
                 command=("git", "rev-parse", "--show-toplevel"),
@@ -370,7 +390,7 @@ def _fake_git_runner(repo_path: Path) -> FakeProcessRunner:
 def test_execute_takeover_clones_inits_registers(tmp_path: Path) -> None:
     """execute_takeover should clone, init, and register a repository."""
     clone_root = tmp_path / "repos"
-    repo_path = _prepare_cloned_repo(clone_root, "owner/repo-a")
+    repo_path = _clone_target_path(clone_root, "owner/repo-a")
     editor = _InMemoryRegistryEditor()
     runner = _fake_git_runner(repo_path)
     options = build_takeover_options(clone_root=str(clone_root), start_daemons=False, dry_run=False)
@@ -400,7 +420,7 @@ def test_execute_takeover_clones_inits_registers(tmp_path: Path) -> None:
 def test_execute_takeover_starts_daemons(tmp_path: Path) -> None:
     """execute_takeover should invoke the daemon start callback when enabled."""
     clone_root = tmp_path / "repos"
-    repo_path = _prepare_cloned_repo(clone_root, "owner/repo-a")
+    repo_path = _clone_target_path(clone_root, "owner/repo-a")
     editor = _InMemoryRegistryEditor()
     runner = _fake_git_runner(repo_path)
     options = build_takeover_options(clone_root=str(clone_root), start_daemons=True, dry_run=False)
@@ -498,7 +518,7 @@ def test_select_repositories_interactive_empty_candidates() -> None:
 def test_execute_takeover_progress_callback(tmp_path: Path) -> None:
     """execute_takeover should invoke the progress callback for each stage."""
     clone_root = tmp_path / "repos"
-    repo_path = _prepare_cloned_repo(clone_root, "owner/repo-a")
+    repo_path = _clone_target_path(clone_root, "owner/repo-a")
     editor = _InMemoryRegistryEditor()
     runner = _fake_git_runner(repo_path)
     options = build_takeover_options(clone_root=str(clone_root), start_daemons=True, dry_run=False)
@@ -537,7 +557,7 @@ def test_execute_takeover_initializes_with_origin_remote(
     written into .iar.toml.
     """
     clone_root = tmp_path / "repos"
-    repo_path = _prepare_cloned_repo(clone_root, "owner/repo-a")
+    repo_path = _clone_target_path(clone_root, "owner/repo-a")
     editor = _InMemoryRegistryEditor()
     runner = _fake_git_runner(repo_path)
     options = build_takeover_options(clone_root=str(clone_root), start_daemons=False, dry_run=False)

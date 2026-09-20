@@ -960,14 +960,10 @@ iar registry reinit --repo-id ZataZhang-fsense --start-daemons
 停止 daemon/review-daemon 并从 registry 移除条目：
 
 ```bash
-# 仅取消托管，保留本地 clone
 iar registry remove --repo-id ZataZhang-fsense
-
-# 取消托管并删除本地 clone 目录
-iar registry remove --repo-id ZataZhang-fsense --delete
 ```
 
-`--delete` 只会删除 registry 中记录的克隆路径，且会校验路径与 registry 记录一致，防止误删其他目录。
+该命令只删除 `config.toml` 中的注册条目，**永不删除本地仓库目录**：托管 clone 与开发工作区都只能由人工在外部自行处理。管理终端「项目接入」页的「移除」按钮走同一条语义。
 
 #### 查看已注册仓库与运行状态（`iar registry list`）
 
@@ -1122,6 +1118,8 @@ iar takeover
    - 在新 clone 的仓库执行 `iar init`
    - 写入 `~/.iar/config.toml` 的 `[agent_runner.repositories.<repo_id>]`
 6. 默认启动 `iar daemon` 和 `iar review-daemon` 两个托管子进程（在目标仓库路径下启动，因此只监控该仓库）。
+
+> 克隆目标目录 `~/.iar/repos/<owner>/<repo>` 已存在时不会被复用：该仓库直接判失败并报错，需人工先改名或移走那个目录（或改 `--clone-root`）再重试。
 
 ### 非交互式与批量接管
 
@@ -2996,7 +2994,8 @@ iar console --no-browser
 | `stop_process` | SIGTERM 停止托管进程，超时升级 SIGKILL |
 | `retry_failed` | 把 failed Issue 的 label 翻转回 ready（与手工操作等价） |
 | `blocked_continue` | 启动一次性 `iar blocked-continue` 托管子进程 |
-| `registry_add` / `registry_set_enabled` | registry 写回（路径必须存在且为 git 仓库） |
+| `registry_add` / `registry_set_enabled` | registry 写回（路径必须存在、为 git 仓库，且未被其他 repo_id 占用） |
+| `registry_remove` | 停该仓库常驻进程后删除 registry 条目；只删注册，不删本地仓库目录 |
 
 故意不支持：任意 shell 命令、任意 label 编辑、PR merge、worktree 删除。
 这些要么风险不可枚举（任意 shell），要么会绕过 workflow 状态机

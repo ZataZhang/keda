@@ -225,14 +225,15 @@ def clone_github_repository(
         Path to the cloned repository root.
 
     Raises:
-        RuntimeError: If cloning fails.
+        RuntimeError: If the target directory already exists or cloning fails.
     """
     repo_path = _repository_path(clone_root, candidate)
+    if repo_path.exists():
+        raise RuntimeError(
+            f"Target directory already exists: {repo_path}. Refusing to clone into it; "
+            "rename or move that directory (or the registry entry using it), then re-run."
+        )
     repo_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if (repo_path / ".git").exists():
-        _logger.info("Repository already cloned at %s", repo_path)
-        return repo_path
 
     command = [
         "gh",

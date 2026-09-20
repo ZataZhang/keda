@@ -29,6 +29,10 @@ _logger = logging.getLogger(__name__)
 
 _DEFAULT_LOG_CHUNK_BYTES = 64 * 1024
 
+#: 常驻进程 kind 的字符串值集合。infrastructure 层的进程记录携带普通字符串，
+#: 且 Enum 的 ``__hash__`` 取成员名，故不能直接用字符串去查 ``PERSISTENT_PROCESS_KINDS``。
+_PERSISTENT_PROCESS_KIND_VALUES = frozenset(kind.value for kind in PERSISTENT_PROCESS_KINDS)
+
 
 class ConsoleProcessError(ValueError):
     """托管进程操作被拒绝（参数非法、目标不存在或重复启动）。"""
@@ -159,6 +163,50 @@ def stop_runner_process(
         return supervisor.stop(process_id, timeout_seconds=stop_timeout_seconds)
     except KeyError as exc:
         raise ConsoleProcessError(str(exc)) from exc
+
+
+@dataclass(frozen=True)
+class RepositoryProcessStopResult:
+    """一次"停止某仓库全部常驻进程"的结果（best effort）。"""
+
+    stopped: tuple[RunnerProcessRecord, ...]
+    failures: tuple[tuple[str, str], ...]
+
+
+def stop_repository_persistent_processes(
+    *,
+    repo_id: str,
+    supervisor: IRunnerProcessSupervisor,
+    stop_timeout_seconds: int,
+) -> RepositoryProcessStopResult:
+    """停止某仓库的全部常驻托管进程（daemon / review_daemon）。
+
+    只处理仍处于 running 的记录：历史记录（exited / stopped / killed）不重复
+    报告，也不产生无意义的 stop 调用。逐个 best effort：单个进程停止失败不阻断
+    其余进程，失败信息随结果返回。调用方（移除注册）不应因停止失败而中止
+    registry 条目的删除。
+
+    Args:
+        repo_id: 目标仓库 ID。
+        supervisor: 进程监管端口。
+        stop_timeout_seconds: 单个进程的停止超时秒数。
+
+    Returns:
+        RepositoryProcessStopResult: 已停止的进程记录与失败 ``(process_id, 错误)`` 列表。
+    """
+    stopped: list[RunnerProcessRecord] = []
+    failures: list[tuple[str, str]] = []
+    for record in supervisor.list_processes():
+        record_kind = getattr(record.kind, "value", record.kind)
+        if record.repo_id != repo_id or record_kind not in _PERSISTENT_PROCESS_KIND_VALUES:
+            continue
+        if record.status != "running":
+            continue
+        try:
+            stopped.append(supervisor.stop(record.process_id, timeout_seconds=stop_timeout_seconds))
+        except Exception as exc:  # noqa: BLE001 - 单个进程停止失败不阻断其余进程。
+            failures.append((record.process_id, str(exc)))
+    return RepositoryProcessStopResult(stopped=tuple(stopped), failures=tuple(failures))
 
 
 def tail_runner_log(

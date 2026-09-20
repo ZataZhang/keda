@@ -5,7 +5,7 @@
 // All write operations map to backend whitelisted actions; the frontend
 // never sends raw shell commands.
 
-import { get, patch, post } from "./client";
+import { del, get, patch, post } from "./client";
 import type {
   AuditEntry,
   BatchAddRepositoriesResult,
@@ -189,4 +189,15 @@ export async function setRegistryRepositoryEnabled(
   await patch(`${BASE_PATH}/repositories/${encodeURIComponent(repoId)}`, {
     enabled,
   });
+}
+
+/**
+ * 移除一个仓库的注册：停掉其常驻进程并删除 registry 条目。
+ *
+ * 只移除注册，本地仓库目录不受影响。
+ *
+ * @param repoId 待移除的 registry 条目 ID。
+ */
+export async function removeRegistryRepository(repoId: string): Promise<void> {
+  await del(`${BASE_PATH}/repositories/${encodeURIComponent(repoId)}`);
 }

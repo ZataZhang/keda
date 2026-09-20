@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 import time
@@ -11,12 +12,14 @@ import pytest
 
 from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
+    RunnerProcessRecord,
 )
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.use_cases.console_processes import (
     ConsoleProcessError,
     build_runner_argv,
     start_runner_process,
+    stop_repository_persistent_processes,
     stop_runner_process,
     tail_runner_log,
 )
@@ -281,6 +284,96 @@ def test_tail_unknown_process_rejected(tmp_path: Path) -> None:
     supervisor = _make_supervisor(tmp_path)
     with pytest.raises(ConsoleProcessError):
         tail_runner_log(process_id="nope", offset=0, supervisor=supervisor)
+
+
+# ── 按仓库停止常驻进程 ───────────────────────────────────────────────────────
+
+
+class _RecordingSupervisor:
+    """内存 supervisor 桩：记录 stop 调用，可指定失败进程。"""
+
+    def __init__(
+        self,
+        records: list[RunnerProcessRecord],
+        failing_process_ids: set[str] | None = None,
+    ) -> None:
+        self._records = records
+        self._failing_process_ids = failing_process_ids or set()
+        self.stopped_process_ids: list[str] = []
+
+    def list_processes(self) -> list[RunnerProcessRecord]:
+        return list(self._records)
+
+    def stop(self, process_id: str, *, timeout_seconds: int) -> RunnerProcessRecord:
+        if process_id in self._failing_process_ids:
+            raise RuntimeError("stop failed")
+        self.stopped_process_ids.append(process_id)
+        record = next(item for item in self._records if item.process_id == process_id)
+        return dataclasses.replace(record, status="stopped")
+
+
+def _process_record(
+    process_id: str,
+    repo_id: str,
+    kind: RunnerProcessKind,
+    status: str,
+) -> RunnerProcessRecord:
+    """构造一条记录；kind 用字符串值，与 infrastructure 层一致。"""
+    return RunnerProcessRecord(
+        process_id=process_id,
+        repo_id=repo_id,
+        kind=kind.value,
+        pid=4242,
+        status=status,
+        exit_code=None,
+        log_path="/tmp/log",
+        command=("iar", "daemon", "--repo-id", repo_id),
+        started_at="2026-09-20T00:00:00+00:00",
+        stopped_at=None,
+    )
+
+
+def test_stop_repository_persistent_processes_filters_records() -> None:
+    """只停目标仓库仍在运行的 daemon / review_daemon。"""
+    supervisor = _RecordingSupervisor(
+        [
+            _process_record("p1", "repo-target", RunnerProcessKind.DAEMON, "running"),
+            _process_record("p2", "repo-target", RunnerProcessKind.REVIEW_DAEMON, "running"),
+            _process_record("p3", "repo-target", RunnerProcessKind.RUN_ONCE, "running"),
+            _process_record("p4", "repo-target", RunnerProcessKind.DAEMON, "exited"),
+            _process_record("p5", "repo-other", RunnerProcessKind.DAEMON, "running"),
+        ]
+    )
+
+    stop_result = stop_repository_persistent_processes(
+        repo_id="repo-target",
+        supervisor=supervisor,
+        stop_timeout_seconds=5,
+    )
+
+    assert supervisor.stopped_process_ids == ["p1", "p2"]
+    assert [record.process_id for record in stop_result.stopped] == ["p1", "p2"]
+    assert stop_result.failures == ()
+
+
+def test_stop_repository_persistent_processes_reports_failures() -> None:
+    """单个进程停止失败不阻断其余进程，失败信息随结果返回。"""
+    supervisor = _RecordingSupervisor(
+        [
+            _process_record("p1", "repo-target", RunnerProcessKind.DAEMON, "running"),
+            _process_record("p2", "repo-target", RunnerProcessKind.REVIEW_DAEMON, "running"),
+        ],
+        failing_process_ids={"p1"},
+    )
+
+    stop_result = stop_repository_persistent_processes(
+        repo_id="repo-target",
+        supervisor=supervisor,
+        stop_timeout_seconds=5,
+    )
+
+    assert [record.process_id for record in stop_result.stopped] == ["p2"]
+    assert stop_result.failures == (("p1", "stop failed"),)
 
 
 # ── 未托管进程扫描辅助函数 ─────────────────────────────────────────────────────

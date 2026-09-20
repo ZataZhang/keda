@@ -20,6 +20,7 @@ import {
   discoverRepositories,
   fetchAuditLog,
   fetchRegistryRepositories,
+  removeRegistryRepository,
   setRegistryRepositoryEnabled,
 } from "@/lib/api/console";
 import type {
@@ -171,6 +172,24 @@ export default function RepositoriesPage() {
     }
   }
 
+  async function handleRemove(entry: RegistryRepositoryEntry) {
+    const confirmed = window.confirm(
+      `确认移除仓库 ${entry.repo_id} 的注册？\n\n` +
+        "只会停止它的 daemon 并从 config.toml 删除注册条目；" +
+        "本地仓库目录不会被删除，需要时请自行在外部处理。",
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await removeRegistryRepository(entry.repo_id);
+      toast.success(`已移除仓库 ${entry.repo_id} 的注册，本地仓库未改动。`);
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "移除失败。");
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <div>
@@ -179,7 +198,7 @@ export default function RepositoriesPage() {
         </h2>
         <p className="mt-1 text-sm text-slate-500">
           registry 写回 <code>config.toml</code>，注释与格式保留。添加前会校验
-          路径存在且为 git 仓库。
+          路径存在、为 git 仓库且未被其他条目占用；移除只删除注册条目，不删除本地仓库。
         </p>
       </div>
 
@@ -226,13 +245,22 @@ export default function RepositoriesPage() {
                         </Badge>
                       </td>
                       <td className="py-2 pr-3">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void handleToggle(entry)}
-                        >
-                          {entry.enabled ? "停用" : "启用"}
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleToggle(entry)}
+                          >
+                            {entry.enabled ? "停用" : "启用"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleRemove(entry)}
+                          >
+                            移除
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}

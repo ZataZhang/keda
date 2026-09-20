@@ -179,6 +179,39 @@ def test_registry_endpoints(console_environment, tmp_path: Path) -> None:
     assert "[agent_runner.repositories.second]" in config_text
 
 
+def test_registry_delete_removes_entry_and_keeps_files(console_environment) -> None:
+    """删除接口只移除注册：条目消失，本地仓库目录保持原样。"""
+    repo_dir = console_environment["tmp_path"] / "repo"
+
+    delete_response = client.delete("/api/v1/agent-runner/repositories/keda-main")
+
+    assert delete_response.status_code == 200, delete_response.text
+    assert delete_response.json()["path"] == str(repo_dir)
+    config_text = console_environment["config_path"].read_text(encoding="utf-8")
+    assert "[agent_runner.repositories.keda-main]" not in config_text
+    assert (repo_dir / ".git").exists()
+
+
+def test_registry_delete_unknown_repo_returns_404(console_environment) -> None:
+    """Removing an unknown repo_id must return 404."""
+    assert client.delete("/api/v1/agent-runner/repositories/ghost").status_code == 404
+
+
+def test_registry_add_rejects_duplicate_path(console_environment) -> None:
+    """同一路径被第二个 repo_id 复用必须返回 400，且不写入文件。"""
+    repo_dir = console_environment["tmp_path"] / "repo"
+    original_text = console_environment["config_path"].read_text(encoding="utf-8")
+
+    response = client.post(
+        "/api/v1/agent-runner/repositories",
+        json={"repo_id": "keda-alias", "path": str(repo_dir)},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "already registered" in response.json()["detail"]
+    assert console_environment["config_path"].read_text(encoding="utf-8") == original_text
+
+
 def _write_iar_toml(repo_root: Path, repo_id: str, display_name: str) -> None:
     """Helper to write a minimal .iar.toml for discovery tests."""
     iar_toml = repo_root / ".iar.toml"

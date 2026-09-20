@@ -9,6 +9,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
+import backend.api.cli_registry as cli_registry
 from backend.api.cli import _expand_prd_paths, main
 from backend.api.cli_parser import build_parser
 from backend.core.shared.interfaces.runner_console import (
@@ -20,6 +21,7 @@ from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
 from backend.engines.agent_runner.repository_local import (
     IARRepositoryNotInitializedError,
 )
+from backend.infrastructure.console.process_supervisor import PidfileProcessSupervisor
 from backend.infrastructure.logging.logger import Logger
 
 
@@ -344,15 +346,15 @@ def test_cli_parser_registry_reinit_defaults() -> None:
 
 
 def test_cli_parser_registry_remove() -> None:
-    """registry remove should accept repo-id and optional --delete."""
+    """registry remove should accept repo-id and reject the dropped --delete flag."""
     parser = build_parser()
-    parsed = parser.parse_args(
-        ["registry", "remove", "--repo-id", "zata-zhangtao-fsense", "--delete"]
-    )
+    parsed = parser.parse_args(["registry", "remove", "--repo-id", "zata-zhangtao-fsense"])
     assert parsed.command == "registry"
     assert parsed.registry_command == "remove"
     assert parsed.repo_id == "zata-zhangtao-fsense"
-    assert parsed.delete is True
+    assert not hasattr(parsed, "delete")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["registry", "remove", "--repo-id", "zata-zhangtao-fsense", "--delete"])
 
 
 def test_cli_parser_daemon() -> None:
@@ -3068,7 +3070,7 @@ def test_main_registry_remove_deletes_entry(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry remove` should remove the registry entry but keep files."""
+    """`iar registry remove` should drop the entry and never touch the repository."""
     monkeypatch.chdir(tmp_path)
     repo_path = _init_bare_git_repository(tmp_path, "fsense")
     config_path = tmp_path / "config.toml"
@@ -3078,41 +3080,25 @@ def test_main_registry_remove_deletes_entry(
         encoding="utf-8",
     )
     monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    # 用临时 pidfile 隔离，避免测试停掉真实 ~/.iar/processes.json 里的进程。
+    monkeypatch.setattr(
+        cli_registry,
+        "create_process_supervisor",
+        lambda: PidfileProcessSupervisor(
+            registry_path=tmp_path / "processes.json",
+            log_dir=tmp_path / "process-logs",
+        ),
+    )
 
     exit_code = main(["registry", "remove", "--repo-id", "zata-zhangtao-fsense"])
-    captured = capsys.readouterr()
+    captured = _strip_ansi(capsys.readouterr().out)
 
-    assert exit_code == 0, captured.err
-    assert "Removed" in _strip_ansi(captured.out)
+    assert exit_code == 0
+    assert "Removed" in captured
+    assert "left untouched" in captured
     config_text = config_path.read_text(encoding="utf-8")
     assert "[agent_runner.repositories.zata-zhangtao-fsense]" not in config_text
-    assert repo_path.exists()
-
-
-def test_main_registry_remove_delete_removes_directory(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`iar registry remove --delete` should remove the entry and the clone."""
-    monkeypatch.chdir(tmp_path)
-    repo_path = _init_bare_git_repository(tmp_path, "fsense")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        "[agent_runner]\n[agent_runner.repositories.zata-zhangtao-fsense]\n"
-        f'path = "{repo_path}"\nenabled = true\ndisplay_name = "fsense"\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
-
-    exit_code = main(["registry", "remove", "--repo-id", "zata-zhangtao-fsense", "--delete"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 0, captured.err
-    assert "Deleted" in _strip_ansi(captured.out)
-    config_text = config_path.read_text(encoding="utf-8")
-    assert "[agent_runner.repositories.zata-zhangtao-fsense]" not in config_text
-    assert not repo_path.exists()
+    assert (repo_path / ".git").exists()
 
 
 def test_cli_parser_registry_list() -> None:
