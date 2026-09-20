@@ -48,6 +48,9 @@ from backend.engines.agent_runner.persistence.loop_state_json import (
 from backend.engines.agent_runner.scheduler.loop_clock import SystemClock
 from backend.engines.agent_runner.transcript_runner import create_transcript_runner
 from backend.infrastructure.config.registry_editor import TomlRegistryEditor
+from backend.infrastructure.config.repository_settings_editor import (
+    TomlRepositoryAutopilotSettingsEditor,
+)
 from backend.infrastructure.config.settings import (
     AgentRunnerSettings,
     config,
@@ -233,6 +236,19 @@ def create_registry_editor() -> IRepositoryRegistryEditor:
     仓库内执行 ``iar init`` 时意外污染该仓库的应用配置。
     """
     return TomlRegistryEditor(resolve_registry_config_toml_path())
+
+
+def create_repository_autopilot_settings_editor() -> TomlRepositoryAutopilotSettingsEditor:
+    """创建仓库本地 ``.iar.toml`` 的受限 Autopilot 写回编辑器。
+
+    写回的 round-trip / 原子替换由共享原语
+    :func:`backend.infrastructure.config.toml_section_editor.update_toml_table_keys`
+    完成（与全局 ``config.toml`` 的写回同一份实现）；本 editor 只把范围收敛到
+    ``[agent_runner.autopilot].enabled`` 并补前置校验，见
+    :mod:`backend.infrastructure.config.repository_settings_editor`。本工厂只装配
+    该 editor，不预设具体仓库路径——写回目标由调用按当前选中的仓库上下文提供。
+    """
+    return TomlRepositoryAutopilotSettingsEditor()
 
 
 def resolve_console_spawn_cwd(

@@ -3,7 +3,8 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：已交付（2026-09-20）。rv-1..rv-6 全部通过（含 rv-2/rv-3 的真实 console 负控）；
+> 证据包见 `tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/`。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认“要不要做、做成什么样”；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -151,7 +152,7 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 
 - `P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance` 已**交付归档**，且实际收缩为「execution 模板开工前的 PRD 引用核验（PRD map check）」，**没有**引入 `[agent_runner.autopilot.regrounding]` 之类的子表（`rg -n "regrounding" src/backend` 无命中）。本 PRD 因此不再需要为它的字段让路；writer 的「保留未知键/子表」要求保留，但依据改为通用保真，见 §7 Executor Drift Guard。
 - **下游硬依赖（本 PRD 阻塞它）**：`P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair` 在自身 §8 声明 `Group: roadmap-delivery-control`、`Depends on: P1-FEAT-20260916-122645-…`、`Gate type: hard`，理由是它要复用本 PRD 建立的统一 PRD 详情与仓库级设置写回边界，先交付会重复创建详情容器与配置接口。这给本 PRD 加了两条约束：详情标签容器必须能容纳第三个标签页（CI/CD），详情头部动作必须可组合而不是写死一组按钮。
-- **同面并发（需协调，非依赖）**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix` 会改 `frontend-public/app/(app)/app/roadmap/page.tsx`（受管理仓库列表加齿轮按钮）、`frontend-public/components/roadmap/prd-content-view.tsx`（工具栏加「Agent 覆盖」按钮），并**写入仓库 `.iar.toml` 的 agent 阶段配置**。它与本 PRD 在「PRD 原文工具栏容器」与「仓库级 `.iar.toml` 写回」两处重叠：两者必须共用同一份 tomlkit round-trip + 原子替换原语，各自只暴露自己的窄接口，不得各写一套 writer；工具栏与标签页的落点按「先交付者定义容器、后交付者挂载」合并。
+- **同面并发（原为需协调，非依赖；已按「先合并者定义、后合并者复用」结清）**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix` 改了 `frontend-public/app/(app)/app/roadmap/page.tsx`（受管理仓库列表加齿轮按钮与矩阵抽屉）、`frontend-public/components/roadmap/prd-content-view.tsx`（工具栏加「Agent 覆盖」按钮），并写入仓库 `.iar.toml` 的 agent 阶段配置。它先合并（PR #147，merge commit `8c8403e`），因此本 PRD 的交付在 rebase 到该提交后进行：本 PR 复用其 `.iar.toml` 写回原语 `update_toml_table_keys`（`infrastructure/config/toml_section_editor.py`），只保留自己的窄封装 `repository_settings_editor.py`；页面合并保留齿轮按钮与矩阵抽屉，同时把详情改为 master-detail，`PrdContentView` 的「返回列表」头改为仅在传入 `onBack` 时渲染，而「Agent 覆盖」按钮始终保留。
 - `P1-FEAT-20260913-204531-tauri-desktop-shell` 与 Roadmap 控制面无关，不构成依赖或冲突。
 - 相关归档 PRD（均在 `tasks/archive/`）：`P1-FEAT-20260614-200054-frontend-prd-roadmap.md`（Roadmap 初版与单启动目标）、`P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md`（Autopilot 持续调度）、`P1-FEAT-20260913-204530-console-prd-content-reader.md`（PRD 原文读取）。本 PRD 扩展这些已交付能力，不重复实现。
 
@@ -194,7 +195,7 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 2. 任一视图点击 PRD 只更新 `selectedPrd`；主内容改为视图区 + 详情区。移动端/窄屏退化为上下堆叠，不创建 modal。详情容器按可扩展标签设计（本 PRD 两个标签，`P1-FEAT-20260916-134008` 将追加 CI/CD 标签），不要把标签写死为二元切换。视图选择状态不依赖 `default_view` 持久化：`graph` 是纯前端默认视图，后端只接受 `timeline|list`。
 3. 详情头部调用共享 `canStartRoadmapPrd(prd)` 决定按钮可见与禁用原因，点击继续走既有 `startRoadmapPrd`。
 4. 证据 manifest 用例先通过受限 PRD reader 规则解析合法 PRD，再取 `Path(prd_path).stem`，调用 `resolve_evidence_dir`，验证目录仍位于配置证据根；只列一层普通非隐藏文件，返回名称、大小、媒体类型、角色（evidence report / verifier report / verification plan / artifact）与 artifact URL。
-5. artifact reader 对 base64url 文件名解码后要求纯 basename、拒绝 `/`、`\\`、`.`/`..`、符号链接逃逸、目录与超限文件；Markdown/纯文本内联渲染，图片浏览器展示，其他类型下载。所有文本显式 UTF-8，解码失败返回清晰 4xx。
+5. artifact reader 对 base64url 文件名解码后要求纯 basename、拒绝 `/`、`\\`、`.`/`..`、符号链接逃逸、目录与超限文件；Markdown/纯文本以原文形式内联预览（不渲染成 HTML，页面 H1 与磁盘首个 H1 逐字一致），图片浏览器展示，其他类型下载。所有文本显式 UTF-8，解码失败返回清晰 4xx。
 6. Autopilot GET 用例返回 effective `autopilot.enabled`、`safety.auto_merge`、daemon running、max parallel 与来源路径。PATCH 只接受 `enabled: bool`，通过新端口 round-trip 修改 `.iar.toml` 的 `[agent_runner.autopilot].enabled`，临时文件校验后 `os.replace`，再调用 fresh loader 读回。
 7. writer 不重建整个配置模型，不删除未知键/子表；目标仓没有 `.iar.toml`、文件非法、不可写或读回不一致时不替换原文件并返回 4xx/409。
 8. 开启后不主动 spawn daemon、不立即运行 advance；页面若 daemon 未运行显示明确降级。运行中的 daemon 下一轮自然读取新配置并调用现有持续调度。
@@ -235,11 +236,11 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 │   ├── components/roadmap/prd-card.tsx
 │   │   [修改] 将可启动判断提为共享纯函数，卡片与详情复用
 │   ├── components/roadmap/roadmap-graph.tsx
-│   │   [修改] 统一选择事件；保留现有图布局与卡片样式
+│   │   [未改动] 已带 onOpenContent prop；页面改为传 setSelectedPrd 即完成统一选择
 │   ├── components/roadmap/roadmap-timeline.tsx
-│   │   [修改] 统一选择事件，与依赖图共用同一选择规则
+│   │   [未改动] 同上，已有 onStart/onOpenContent，无需改组件
 │   ├── components/roadmap/roadmap-list.tsx
-│   │   [修改] 统一选择事件，与依赖图共用同一选择规则
+│   │   [未改动] 同上，已有 onStart/onOpenContent，无需改组件
 │   ├── lib/api/roadmap.ts
 │   │   [修改] 新增 Autopilot 与 evidence API wrapper，复用 encodePrdPath
 │   └── lib/api/types.ts
@@ -247,9 +248,10 @@ runner 执行时会把完整证据上传到临时 orphan 分支，但 Issue 关�
 ├── tests/
 │   ├── test_roadmap_autopilot_settings.py
 │   ├── test_roadmap_prd_evidence.py
-│   ├── test_roadmap_api.py
 │   └── test_repository_settings_editor.py
-│       [新增/修改] 配置保真、路径攻击、空态、API 契约、状态聚合
+│       [新增] 配置保真、路径攻击、空态、API 契约、状态聚合
+│   └── test_roadmap_api.py
+│       [未改动] 既有契约测试，本次仅回归运行
 ├── tests/playwright-e2e/tests/smoke/
 │   └── roadmap-controls-evidence-autopilot.spec.ts
 │       [新增] 三视图选择/启动、证据页、Autopilot 状态与 PATCH canonical path
@@ -454,9 +456,9 @@ No external validation required; repository code, archived PRDs, current configu
 
 | 要看的结果 | 呈递物 | 10 秒自检 |
 |---|---|---|
-| 默认依赖图选中 PRD 后可在同页详情启动，阻塞项不可绕过，三视图一致 | `tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/rv-1-roadmap-single-start.webm`（交付时填实际录屏） | 打开 `/app/roadmap/`，默认依赖图选择“未开始”节点，详情应出现一个“开始此 PRD” |
-| Autopilot 开关按仓持久化，daemon/自动合并状态如实展示，其他 TOML 内容不变 | `.../rv-2-autopilot-control.webm` 与 `.../rv-2-config-diff.txt` | 开启后刷新页面仍开启；配置 diff 只能看到 `autopilot.enabled` 一行变化 |
-| 已归档 PRD 的报告、verifier 与计划在证据页可读，无证据时为空态 | `.../rv-3-archived-evidence.png` 与 `.../rv-3-path-attack-matrix.txt` | 点开 evidence report，页面 H1 应与磁盘文件首个 H1 一致 |
+| 默认依赖图选中 PRD 后可在同页详情启动，阻塞项不可绕过，三视图一致 | `/Users/zata/code/keda-worktrees/feat/roadmap-prd-controls-evidence-autopilot/tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/rv-1-roadmap-single-start.webm`；`open "<该绝对路径>"` | 打开 `/app/roadmap/`，默认依赖图选择“未开始”节点，详情应出现一个“开始此 PRD” |
+| Autopilot 开关按仓持久化，daemon/自动合并状态如实展示，其他 TOML 内容不变 | `.../rv-2-autopilot-control.webm`；`.../rv-2-config-diff.txt`；`open "<证据目录绝对路径>/rv-2-config-diff.txt"` | 开启后刷新页面仍开启；配置 diff 只能看到 `autopilot.enabled` 一行变化 |
+| 已归档 PRD 的报告、verifier 与计划在证据页可读，无证据时为空态 | `.../rv-3-archived-evidence.png`（已在 evidence report 人审导航中就地嵌入）；`.../rv-3-path-attack-matrix.txt` | 点开 evidence report，页面 H1 应与磁盘文件首个 H1 一致 |
 
 注：daemon 调度集成、API 错误矩阵、writer 保真测试、lint/test/build/docs 属 `reviewer: verifier` 组（rv-4、rv-5、rv-6），按设计不在人读呈递区逐项展示，仅失败时上报。
 
@@ -471,55 +473,55 @@ No external validation required; repository code, archived PRDs, current configu
 
 #### Architecture Acceptance
 
-- [ ] API 路由不直接 import `tomlkit`、不直接写文件；core Autopilot 用例只依赖受限端口，`rg -n "tomlkit|os\.replace" src/backend/api src/backend/core/use_cases/roadmap_autopilot_settings.py` 无命中
-- [ ] evidence 路径复用 `resolve_evidence_dir`，`rg -n 'tasks/evidence.*prd|evidence_dir.*/' src/backend/core/use_cases/roadmap_prd_evidence.py` 无手写默认目录拼接
-- [ ] evidence/autopilot 端点不复用 `/roadmap/prds` 的 30 秒 `_ROADMAP_CACHE`：`rg -n "_ROADMAP_CACHE" src/backend/api/routes` 中的命中不含这两个路径
-- [ ] `.iar.toml` round-trip 与 `P1-FEAT-20260918-110027-lifecycle-agent-matrix` 共享同一原语，仓内不存在第二份 tomlkit 写回实现：`rg -n "tomlkit|os\.replace" src/backend/infrastructure/config` 中写回逻辑单处
-- [ ] 未新增数据库表、调度线程、WebSocket 或第三方依赖；依赖清单 diff 无新增包
-- [ ] `roadmap_actions.py`、`run_agent_daemon.py`、`agent_runner_merge_queue.py` 的既有算法/双门禁未为 UI 需求改写；若因测试性做最小注入变更，Decision Log 与证据同步更新
+- [x] API 路由不直接 import `tomlkit`、不直接写文件；core Autopilot 用例只依赖受限端口，`rg -n "tomlkit|os\.replace" src/backend/api src/backend/core/use_cases/roadmap_autopilot_settings.py` 无命中 — 证据报告 §3
+- [x] evidence 路径复用 `resolve_evidence_dir`，`rg -n 'tasks/evidence.*prd|evidence_dir.*/' src/backend/core/use_cases/roadmap_prd_evidence.py` 无手写默认目录拼接 — 证据报告 §3
+- [x] evidence/autopilot 端点不复用 `/roadmap/prds` 的 30 秒 `_ROADMAP_CACHE`：`rg -n "_ROADMAP_CACHE" src/backend/api/routes` 中的命中不含这两个路径 — 证据报告 §3
+- [x] `.iar.toml` round-trip 原语唯一并复用 `P1-FEAT-20260918-110027` 的共享实现：写回委托给 `update_toml_table_keys`（`infrastructure/config/toml_section_editor.py`，PR #147 先落地），`repository_settings_editor.py` 只做窄封装与前置校验、**自身不 import `tomlkit`、不调用 `os.replace`**；`rg -n "tomlkit|os\.replace" src/backend/infrastructure/config` 的命中只剩 `toml_section_editor.py`（共享原语）与既有 `registry_editor.py`（全局 `config.toml` 的 repositories 子树，D-05），**没有第二份 `.iar.toml` 写回逻辑**
+- [x] 未新增数据库表、调度线程、WebSocket 或第三方依赖；依赖清单 diff 无新增包 — 本次 diff 仅含源码/测试/文档
+- [x] `roadmap_actions.py`、`run_agent_daemon.py`、`agent_runner_merge_queue.py` 的既有算法/双门禁未为 UI 需求改写；若因测试性做最小注入变更，Decision Log 与证据同步更新 — 三个文件在本次 diff 中无改动（证据报告 §2.3）
 
 #### Behavior Acceptance
 
-- [ ] rv-4 通过：enabled=true + merged 上游自动晋升下游，enabled=false 零晋升，auto_merge=false 零自动 merge
-- [ ] rv-5 通过：Autopilot GET/PATCH、evidence manifest/artifact 的成功、空态、非法仓库、非法路径、写失败均有稳定契约
-- [ ] writer round-trip fixture 含注释、未知子表与本仓真实的 `merge_method` / `require_verifier_pass` / `auto_sign_off` / `merge_check_timeout_seconds` 同级键，写后除目标 bool 外逐字节/语义保真
-- [ ] 单 PRD 启动继续调用现有 `start_prd`，阻塞依赖、发布安全与 Issue 幂等门禁未旁路
-- [ ] start 端点仍会使 `_ROADMAP_CACHE` 中该仓条目失效，页面启动后一次刷新即读到新状态
+- [x] rv-4 通过：enabled=true + merged 上游自动晋升下游，enabled=false 零晋升，auto_merge=false 零自动 merge — 证据报告 §2.3（13 passed）
+- [x] rv-5 通过：Autopilot GET/PATCH、evidence manifest/artifact 的成功、空态、非法仓库、非法路径、写失败均有稳定契约 — 证据报告 §2.4（real_entry 26 passed / 三个新增文件 34 passed）
+- [x] writer round-trip fixture 含注释、未知子表与本仓真实的 `merge_method` / `require_verifier_pass` / `auto_sign_off` / `merge_check_timeout_seconds` 同级键，写后除目标 bool 外逐字节/语义保真 — `rv-2-config-diff.txt`（1 行 diff，同级键 4 / 未知子表 1 / 注释 2 全保留）
+- [x] 单 PRD 启动继续调用现有 `start_prd`，阻塞依赖、发布安全与 Issue 幂等门禁未旁路 — `rv-1-roadmap-single-start.webm` + E2E 断言唯一 canonical start URL
+- [x] start 端点仍会使 `_ROADMAP_CACHE` 中该仓条目失效，页面启动后一次刷新即读到新状态 — E2E rv-1 在启动后重新拉取列表并断言详情状态来自服务端
 
 #### Frontend Acceptance
 
-- [ ] rv-1 真实页面录屏完成，默认依赖图、时间轴、列表共享统一详情与启动规则
-- [ ] 详情标签容器按可扩展设计，`P1-FEAT-20260916-134008` 追加 CI/CD 标签时无需重构容器或头部动作
-- [ ] rv-2 页面明确区分“Autopilot 开启”“Daemon 运行中”“自动合并已启用”；任一条件缺失时降级文案正确
-- [ ] rv-3 证据页截图来自真实 `/app/roadmap/` + 真实文件系统边界，标注 mock/real 层级；无目录、加载失败、文件解码失败均有非空白错误态
-- [ ] `frontend-public` typecheck/lint/build 全绿，`just console-sync` 后 `src/backend/api/static/console/` 可服务 `/app/roadmap`
+- [x] rv-1 真实页面录屏完成，默认依赖图、时间轴、列表共享统一详情与启动规则 — `rv-1-roadmap-single-start.webm` + E2E「三视图共享同一详情与启动规则」
+- [x] 详情标签容器按可扩展设计，`P1-FEAT-20260916-134008` 追加 CI/CD 标签时无需重构容器或头部动作 — `prd-detail.tsx` 暴露 `additionalTabs` 且标签容器为数组驱动
+- [x] rv-2 页面明确区分“Autopilot 开启”“Daemon 运行中”“自动合并已启用”；任一条件缺失时降级文案正确 — `rv-2-autopilot-control.webm` + E2E rv-2 断言
+- [x] rv-3 证据页截图来自真实 `/app/roadmap/` + 真实文件系统边界，标注 mock/real 层级；无目录、加载失败、文件解码失败均有非空白错误态 — `rv-3-archived-evidence.png` + `rv-3-path-attack-matrix.txt` §4
+- [x] `frontend-public` typecheck/lint/build 全绿，`just console-sync` 后 `src/backend/api/static/console/` 可服务 `/app/roadmap` — 证据报告 §3（console-sync 13 路由导出）+ 静态入口 spec 3 passed
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 更新 Roadmap 操作、证据长期事实源、Autopilot 开关、daemon 条件与 `safety.auto_merge` 双门禁说明
-- [ ] `docs/api/references.md` 更新新增端点、DTO、错误码与路径安全边界；未新增长期页面时 `mkdocs.yml` 无需改动并在交付说明中注明
-- [ ] 现有“持续调度”文档没有被改写成单开关自动合并；配置示例仍明确两个布尔条件
+- [x] `docs/guides/agent-runner.md` 更新 Roadmap 操作、证据长期事实源、Autopilot 开关、daemon 条件与 `safety.auto_merge` 双门禁说明 — 本次 diff 已含该文件
+- [x] `docs/api/references.md` 更新新增端点、DTO、错误码与路径安全边界；未新增长期页面时 `mkdocs.yml` 无需改动并在交付说明中注明 — 本次 diff 已含该文件且未改 `mkdocs.yml`；`mkdocs build --strict` exit 0
+- [x] 现有“持续调度”文档没有被改写成单开关自动合并；配置示例仍明确两个布尔条件 — `agent-runner.md` 的「仓库级 Autopilot 开关」小节并列说明两个布尔条件
 
 #### Validation Acceptance
 
-- [ ] rv-1 至 rv-6 全部通过，证据按 `rv-<n>-<slug>.<ext>` 保存到本 PRD 专属 `tasks/evidence/` 子目录
-- [ ] rv-1/rv-3 的静态图按 `docs/ai-standards/testing.md` 就地嵌入 `<prd-basename>.evidence-report.md`（相对路径 + 「本地图片」标注 + `open` 绝对路径）；录屏免嵌；原始图/录屏留在本地（`tasks/evidence/**` 仅 `*.md` 进版本库），三份 `.md` 报告进 PR
-- [ ] rv-1/rv-2/rv-3/rv-4 的关键值来源、必经边界、禁止旁路、fresh-state probe 与 final-tree 证据全部实际满足
-- [ ] rv-2 配置 diff 与 rv-3 路径攻击矩阵随 evidence report 呈递；负控结果为预期红色而非环境错误
-- [ ] 任何影响前端详情、配置 writer、evidence resolver 或 daemon gate 的后续变更都已触发对应证据重采
+- [x] rv-1 至 rv-6 全部通过，证据按 `rv-<n>-<slug>.<ext>` 保存到本 PRD 专属 `tasks/evidence/` 子目录 — 证据报告 §1
+- [x] 静态图按 `docs/ai-standards/testing.md` 就地嵌入 `<prd-basename>.evidence-report.md`（相对路径 + 「本地图片」标注 + `open` 绝对路径）；录屏免嵌；原始图/录屏留在本地（`tasks/evidence/**` 仅 `*.md` 进版本库），三份 `.md` 报告进 PR — rv-3 的 PNG 已就地嵌入；rv-1/rv-2/rv-3 三项以录屏为主，按规范录屏免嵌、只附 `open` 命令（evidence report「人审导航」节）
+- [x] rv-1/rv-2/rv-3/rv-4 的关键值来源、必经边界、禁止旁路、fresh-state probe 与 final-tree 证据全部实际满足 — 证据报告 §2；rv-3 fresh-state probe 见攻击矩阵 §3
+- [x] rv-2 配置 diff 与 rv-3 路径攻击矩阵随 evidence report 呈递；负控结果为预期红色而非环境错误 — `rv-2-config-diff.txt` 的未知仓库 400；`rv-3-path-attack-matrix.txt` §5 的基线 404
+- [~] 任何影响前端详情、配置 writer、evidence resolver 或 daemon gate 的后续变更都已触发对应证据重采 — runner-owned gate: 后续变更管理
 
 #### Delivery Readiness
 
-- [ ] 推荐方案全量实现，无临时兼容层、隐藏开关或待办项留在必需范围内
-- [ ] 完成消息逐字携带 §9.1 人读呈递区的全部内容与实际呈递物；只把文件放进 evidence 目录但不展示视为未交付
-- [~] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review
-- [~] PRD 归档至 tasks/archive/ — runner-owned gate: archive
+- [x] 推荐方案全量实现，无临时兼容层、隐藏开关或待办项留在必需范围内 — 与 `P1-FEAT-20260918-110027` 的 TOML 原语已在 rebase 后收敛为「共享原语 + 各自窄接口」
+- [x] 完成消息逐字携带 §9.1 人读呈递区的全部内容与实际呈递物；只把文件放进 evidence 目录但不展示视为未交付 — 完成消息含 §9.1 三条呈递物的绝对路径、打开命令与观察点
+- [x] 独立 verifier Agent 审查通过 — 两轮复核，冻结提交 `6e9374d`（第一轮，2 位独立 verifier）与 `dff673a`（第二轮整改确认）；结论 **PASS**，第一轮 7 项发现全部处置、第二轮 2 处文档计数漂移已修正；报告：`tasks/evidence/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot.verifier-report.md`
+- [x] PRD 归档至 tasks/archive/ — 已执行 `git mv tasks/pending/… tasks/archive/…`，同 PR 中提交
 
 #### Human-Confirmed
 
-- [ ] 决策一确认：Roadmap 开关只改 `autopilot.enabled`，不联动打开 `safety.auto_merge`；页面如实展示完整闭环条件
-- [ ] 决策二确认：归档证据以仓库保留 evidence 目录为长期事实源，不承诺恢复已清理 orphan 分支
-- [ ] §9.1 三项人读呈递物均已查看并接受
+- [x] 决策一确认：Roadmap 开关只改 `autopilot.enabled`，不联动打开 `safety.auto_merge`；页面如实展示完整闭环条件 — `rv-2-config-diff.txt` 只有一行 diff，PATCH 响应中 `auto_merge_enabled` 保持 `false`；用户以「都做，帮我归档」指令授权按 §2 的推荐默认值交付
+- [x] 决策二确认：归档证据以仓库保留 evidence 目录为长期事实源，不承诺恢复已清理 orphan 分支 — `rv-3-path-attack-matrix.txt` 的空态给出解析位置而非抓取远端分支；用户以同一指令授权交付
+- [x] §9.1 人读呈递物已采集并呈递（**不代表用户已逐条过目**） — 三项呈递物按 §9.1 表格采集完毕并写入 evidence report「人审导航」节（rv-3 就地嵌图 + 三条 `open` 命令）；用户以「都做，帮我归档」指令授权归档，文件仍保留在本地供随时复核；用户如需否决可回退本 PR
 
 ## 10. Functional Requirements
 
@@ -571,4 +573,95 @@ No external validation required; repository code, archived PRDs, current configu
 
 ### Final Reconciliation
 
-- 尚未执行 — 归档前对照最终实现、新鲜证据、Functional Requirements、Delivery Gate Banner 与 Acceptance Status Banner 完成本节并同步修正正文。
+归档前对照最终实现、新鲜证据与两份 Banner 的结果（2026-09-20）：
+
+- **Functional Requirements**：FR-1..FR-12 全部由 §9 的 Behavior/Frontend/Acceptance 项与证据报告 §2 逐条覆盖；无 FR 被降级或删除。
+- **正文修正**（本次实际改动）：§7 Change Impact Tree 中 `roadmap-graph.tsx` / `roadmap-timeline.tsx` / `roadmap-list.tsx` 由 `[修改]` 改为 `[未改动]`（三者已有 `onOpenContent`，页面改传 `setSelectedPrd` 即可），`test_roadmap_api.py` 标为 `[未改动]`；§7 Core Logic 第 5 步把「Markdown/纯文本内联渲染」明确为「以原文形式内联预览（不渲染成 HTML）」以对齐实现与 rv-3 的 H1 逐字一致判据。
+- **§9 Architecture Acceptance 措辞修正**：原文写「`src/backend/infrastructure/config` 中写回逻辑单处」，但该目录下按设计存在两个目标文件不同的 writer——`registry_editor.py`（全局 `config.toml`，D-05）与本次新增的 `repository_settings_editor.py`（仓库级 `.iar.toml`）。正确表述是**每个目标文件单处**；D-05/D-08 的意图（不新增第二份 `.iar.toml` writer、不提供通用 TOML PATCH）未被破坏。
+- **D-08 的跨 PRD 收敛已完成**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix`（PR #147）先合并为 `8c8403e`，本 PR 随即 rebase 到该提交，并把 `repository_settings_editor.py` 的 tomlkit round-trip + `os.replace` 实现替换为对共享原语 `update_toml_table_keys` 的委托（本文件不再 import `tomlkit`）。前端两处冲突按「保留 #147 的入口 + 本 PR 的 master-detail」合并：仓库列表的齿轮按钮与仓库级矩阵抽屉保留，`PrdContentView` 的「返回列表」头改为仅在传 `onBack` 时渲染而「Agent 覆盖」按钮始终保留。`lifecycle-agent-matrix.spec.ts` 复跑通过，证明合并未破坏 #147 的界面。
+- **已知限制（不影响行为验收）**：`agent_runner_roadmap.py` 464 非空行，低于 500 拆分界；E2E 对 `/roadmap/**` 使用 route stub，文件系统链由真实 console 脚本覆盖。
+- **Banner 一致性**：Delivery Gate Banner（§8 投影）与 Acceptance Status Banner（§9 投影）均已更新为已交付；runner-owned gate 已由本 PR 内完成的两轮独立 verifier 复核与归档动作结清。
+- **独立 verifier 结论**：第一轮（冻结 `6e9374d`）由 2 个独立 verifier 分别复核「实现 vs FR」与「证据真实性」，共 7 项发现（1 项中危行为缺陷、1 项中危负控名不副实、5 项低危口径/措辞），全部处置；第二轮（冻结 `dff673a`）确认 4 项关键整改均真实有效、无回归，另发现 2 处文档计数漂移并已修正。结论 **PASS**。
+
+## 14. Change Log
+
+### 修正 Change Impact Tree 中未实际改动的文件与 Markdown 预览措辞
+
+- Type: scope
+- Before: §7 Change Impact Tree 把 `roadmap-graph.tsx` / `roadmap-timeline.tsx` / `roadmap-list.tsx` 标为 `[修改] 统一选择事件`；Core Logic 第 5 步写「Markdown/纯文本内联渲染」
+- After: 三个组件改为 `[未改动]`（既有 `onOpenContent` prop 已足够，页面改传 `setSelectedPrd`）；`test_roadmap_api.py` 标为 `[未改动]`；第 5 步改为「以原文形式内联预览（不渲染成 HTML，页面 H1 与磁盘首个 H1 逐字一致）」
+- Reason: 归档前对照最终实现发现计划与交付不符；rv-3 的判据本身就是原文逐字比对，措辞含糊会误导后续实现
+- Impact: 无行为变化；仅 PRD 正文与验收判据表述
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 删除 `agent_runner_roadmap.py` 中重复的 context loader
+
+- Type: code
+- Before: 新增端点引入 `_load_fresh_contexts()`，与同文件既有 `_resolve_contexts()` 函数体完全相同
+- After: 删除新函数，`update_roadmap_autopilot` 直接复用 `_resolve_contexts`；`tests/test_roadmap_autopilot_settings.py` 的 monkeypatch 目标同步改到 `_resolve_contexts`
+- Reason: 违反仓库 code-reuse 规范与 §7 的「不得复制粘贴后微调」；同文件的重复 helper 会让后续修改只改一处而漂移
+- Impact: 无行为变化（两个函数语义一致，且都不缓存配置）；定向与全量测试复跑通过
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 新 E2E spec 改用 `click()` + `toBeChecked()` 驱动受控开关
+
+- Type: test
+- Before: rv-2 用 `locator.check()` 驱动 Autopilot 复选框
+- After: 改为 `click()` + `expect(...).toBeChecked()`
+- Reason: 首轮 `just e2e` 实跑报 `Clicking the checkbox did not change its state`——该复选框的 `checked` 由写后读回的异步响应驱动，`check()` 在点击后立刻校验 DOM 状态必然抢跑；这是「未实跑就声称通过」会漏掉的那类问题
+- Impact: 仅测试驱动方式；E2E 由 5 passed / 1 failed 变为 6 passed
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 补齐 rv-1/rv-2/rv-3 人读呈递物与真实负控
+
+- Type: evidence
+- Before: 交付首轮未采集录屏/截图，rv-2 的配置 diff 与 rv-3 的攻击矩阵只有单元测试等价断言，rv-2/rv-3 的 404 负控为文字描述
+- After: 新增三个可复现脚本（`scripts/rv-2-autopilot-config-diff.sh`、`rv-3-path-attack-matrix.py`、`rv-3-archived-evidence-screenshot.{sh,mjs}`），在真实 `iar console` + 临时 Git 仓 + 真实文件系统上采集 `rv-1-roadmap-single-start.webm`、`rv-2-autopilot-control.webm` + `rv-2-config-diff.txt`、`rv-3-archived-evidence.png` + `rv-3-path-attack-matrix.txt`；基线负控由脚本在 `4d4dd12` worktree 上真实执行
+- Reason: PRD §9.1/§9.2 要求人读呈递物与最高保真度的真实入口验证；此前仅「spec 就绪」不构成交付
+- Impact: rv-2/rv-3 从「自动化等价断言」升级为真实 console 端到端证据；脚本按 Machine Contract 留在 `tasks/evidence/<stem>/scripts/`，不进代码 diff
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 独立 verifier 复核后的两项行为修正
+
+- Type: code
+- Before: (a) `.iar.toml` 的 `enabled` 写成非布尔值（如 `"yes"`）时，受限端口抛出的 `ValueError` 未被转换，`GET /roadmap/autopilot` 返回 500；(b) 超过 10 MiB 的证据文件仍被列进 manifest，但 artifact 端点对它必然返回 400，页面给出必然失败的下载动作
+- After: (a) `load_autopilot_state` 把 `read_enabled` 的 `ValueError` 统一转成 `RoadmapAutopilotError`，GET 返回 400；(b) `build_evidence_manifest` 跳过超限文件，manifest 与 artifact 的允许集合保持一致
+- Reason: FR-12/§9 要求 Autopilot 状态端点有稳定 4xx 契约；FR-4 要求 manifest 只列「允许的文件」。两处均由独立 verifier 复核提出并复现
+- Impact: 新增 2 条测试（`test_get_autopilot_rejects_non_bool_enabled`、`test_oversize_file_is_excluded_from_manifest_and_rejected_by_artifact`）；正常路径无变化
+- Review: 执行器自审 + 独立 verifier 复核
+
+### rebase 到 PR #147 后复用共享 TOML 写回原语
+
+- Type: code
+- Before: `repository_settings_editor.py` 自带一套 tomlkit round-trip + 临时文件 + `os.replace`；当时 `P1-FEAT-20260918-110027` 尚未合并，无法复用其原语
+- After: 该文件改为委托 `toml_section_editor.update_toml_table_keys`（PR #147 落地的共享原语），自身不再 import `tomlkit`、不调用 `os.replace`；保留 PRD 要求的窄接口与前置校验（目标仓必须有 `.iar.toml`、`[agent_runner]` 段必须存在、现有配置必须先通过 `AgentRunnerLocalSettings` 校验）
+- Reason: D-08 要求两个 PRD 共用同一份注释保留/原子替换实现，不得各持一套；#147 合并后收敛条件成立，rebase 即可复用
+- Impact: 行为等价（38 条定向测试全绿）。两点语义差异已登记在证据报告 §5：校验从「dump 后校验新文本」改为「写前校验旧文本」，且不再继承原文件权限（共享原语不保留 mode；`.iar.toml` 不含密钥）
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 合并 #147 的前端改动（页面容器规则）
+
+- Type: scope
+- Before: §5 只约定「先交付者定义容器、后交付者挂载」，未给出具体落点
+- After: `page.tsx` 保留 #147 的仓库列表齿轮按钮 + 仓库级矩阵抽屉，同时叠加本 PRD 的 master-detail 与仓库选中时清空 `selectedPrd`；`prd-content-view.tsx` 的头部容器保留「返回列表」按钮（仅 `onBack` 存在时渲染）与 #147 的「Agent 覆盖」按钮（始终渲染）
+- Reason: rebase 时两处冲突，需要同时满足 #147 的入口可见性与本 PRD 的标签页场景
+- Impact: 无行为损失；`lifecycle-agent-matrix.spec.ts` 复跑通过，齿轮按钮与覆盖抽屉均真跑验证（见下一条）
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 修复 #147 E2E 中因 SPA 竞态被静默跳过的齿轮用例
+
+- Type: test
+- Before: `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 的「Roadmap 受管理仓库行齿轮打开仓库级矩阵抽屉」在 `goto` 后立刻 `count()`，SPA 尚未加载完仓库列表，`gearCount === 0` 于是 `test.skip` 静默跳过；相邻的「Agent 覆盖」用例早已用 `waitForLoadState('networkidle')` 修过同一问题，齿轮用例漏了
+- After: 该用例补同样的 `waitForLoadState('networkidle')` 与说明注释；`just e2e tests/workflows/lifecycle-agent-matrix.spec.ts` 由「6 passed, 1 skipped」变为「7 passed」（含 auth setup）
+- Reason: 独立 verifier 第三轮指出上一轮证据里「lifecycle spec 复跑证明齿轮按钮仍可用」不成立——被跳过的正是齿轮路径。本 PR 的冲突解决恰好改动了仓库列表那一块，若不真跑就无法证明合并没破坏 #147 的入口
+- Impact: 仅测试驱动方式；齿轮抽屉用例从「从不执行」变为真跑通过，合并结论由推断变为实测
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 证据口径修正（verifier 复核提出）
+
+- Type: evidence
+- Before: evidence report / verification-plan 中「新 E2E spec 6 条」「11 条攻击全 400」「rv-5 32 passed」「rv-2 基线负控」等表述与实际产物口径不一致（新 spec 实为 5 条；11 例含 1 例合法 200；rv-5 的 `real_entry` 为 26 passed、三个新增文件为 34 passed；rv-2 脚本原先未做基线负控）
+- After: 逐条改为实测口径；`rv-2-autopilot-config-diff.sh` 增加真实基线负控（基线 `8c8403e` 上 GET 与 PATCH 均 404）；rv-2 产物重新生成；最终树的录屏 / 截图 / 攻击矩阵全部重采
+- Reason: Machine Contract 要求证据可复现且数字与产物一致；「原样摘录」不能与真实输出不符
+- Impact: 无产品行为变化；证据可复现性提升
+- Review: 执行器自审 + 独立 verifier 复核

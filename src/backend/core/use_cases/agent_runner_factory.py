@@ -37,6 +37,9 @@ create_planner_runner = _engines_factory_module.create_planner_runner
 create_process_runner = _engines_factory_module.create_process_runner
 create_process_supervisor = _engines_factory_module.create_process_supervisor
 create_registry_editor = _engines_factory_module.create_registry_editor
+create_repository_autopilot_settings_editor = (
+    _engines_factory_module.create_repository_autopilot_settings_editor
+)
 create_repl_command_executor = _engines_factory_module.create_repl_command_executor
 create_roadmap_store = _engines_factory_module.create_roadmap_store
 create_transcript_runner = _engines_factory_module.create_transcript_runner
@@ -68,6 +71,7 @@ __all__ = [
     "create_process_runner",
     "create_process_supervisor",
     "create_registry_editor",
+    "create_repository_autopilot_settings_editor",
     "create_repl_command_executor",
     "create_roadmap_store",
     "create_transcript_runner",

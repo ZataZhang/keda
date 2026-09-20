@@ -331,6 +331,59 @@ class IRepositoryRegistryEditor(ABC):
         ...
 
 
+class IRepositoryAutopilotSettingsEditor(ABC):
+    """仓库级 Autopilot 设置的受限读写端口。
+
+    Autopilot 的唯一持久事实源是仓库根目录的 ``.iar.toml``，因此本端口比
+    :class:`IRepositoryRegistryEditor` 更窄：只允许读写
+    ``[agent_runner.autopilot].enabled`` 这一个布尔键，其余配置节、键、子表
+    与注释必须逐字保留。
+
+    刻意不提供通用 TOML PATCH：它会把写权限扩大到全部配置键，突破
+    ``autopilot.enabled`` 与 ``safety.auto_merge`` 的双重危险动作门禁边界。
+    """
+
+    @abstractmethod
+    def config_source_path(self, repo_root_path: Path) -> Path:
+        """返回目标仓库的本地配置文件绝对路径（无论文件是否存在）。"""
+        ...
+
+    @abstractmethod
+    def read_enabled(self, repo_root_path: Path) -> bool | None:
+        """读取仓库本地配置中的 ``autopilot.enabled``。
+
+        Args:
+            repo_root_path: 目标仓库根目录。
+
+        Returns:
+            ``True`` / ``False`` 为配置中的显式值；``None`` 表示该文件不存在
+            或该键未设置（此时生效值等于全局配置的默认值）。
+
+        Raises:
+            ValueError: 本地配置存在但非法（TOML 语法错误或类型不符）。
+        """
+        ...
+
+    @abstractmethod
+    def set_enabled(self, repo_root_path: Path, enabled: bool) -> None:
+        """仅修改 ``[agent_runner.autopilot].enabled`` 并原子替换文件。
+
+        实现必须：保留注释与未知键/子表、只改这一个布尔键、失败时原文件保持
+        不变。原子替换与格式保留由共享原语 ``update_toml_table_keys`` 提供，
+        实现负责在委托前校验现有配置合法（详见
+        ``backend.infrastructure.config.repository_settings_editor``）。
+
+        Args:
+            repo_root_path: 目标仓库根目录。
+            enabled: 目标布尔值。
+
+        Raises:
+            ValueError: 配置非法（文件缺失、结构不符或模型校验不通过）。
+            OSError: 文件不可写。
+        """
+        ...
+
+
 @dataclass(frozen=True)
 class RoadmapQueueEntry:
     """roadmap 全局调度队列的一条记录（core 侧端口类型）。"""
