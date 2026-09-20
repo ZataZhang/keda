@@ -84,7 +84,7 @@ class TomlRepositoryAutopilotSettingsEditor:
         return value
 
     def set_enabled(self, repo_root_path: Path, enabled: bool) -> None:
-        """仅修改 ``[agent_runner.autopilot].enabled`` 并原子替换文件。"""
+        """仅修改 ``[agent_runner.autopilot].enabled``（写回由共享原语原子替换）。"""
         config_path = self.config_source_path(repo_root_path)
         if not config_path.is_file():
             raise RepositorySettingsEditError(

@@ -12,6 +12,7 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 |---|---|---|---|---|
 | 第一轮（实现与 FR 对照 / 证据真实性） | `6e9374d9c83730a93d0ac6743b2b53df1292fd08` | `77f06bb7f8a129a62ebfc97ba1d6369b93aef44b` | `c7f3909c628c4869d26f912c1a5da830628c04b5d720eab57da51e0a124d3647`（base `4d4dd12`） | 干净 |
 | 第二轮（整改确认 + 回归） | `dff673a9a24de102e54bfd7a33daa1949729a86b` | `2b1aa17abb537997cbaff798544c4525b8af5ac9` | `dd160edbf1e186f1c1eef70540372d63c87d00c9218a9be0ea75acc228eca3ac`（base `fc74576`） | 干净 |
+| 第三轮（rebase 到 PR #147 后的原语收敛与合并回归） | `aefad2eb55181148a6c2b2ba314c4f2672e057fb` | `ba26fde46a152a9c78aafd64df32cd1448b4dce6` | `45ee33161d1cab1a694e00b73ce4a657c541d51143bcbdd9d5e3e9c96c60f4fb`（base `8c8403e`） | 干净 |
 
 第二轮之后的收尾改动**只动文档**（evidence report / verification-plan / PRD 的计数与措辞），未触碰 `src/` 与 `tests/`，因此第二轮的 `src tests` 冻结哈希在归档时仍然有效。
 
@@ -48,10 +49,20 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 - **`src/backend/infrastructure/config` 下有两个 `tomlkit` writer**：`registry_editor.py` 管全局 `config.toml` 的 repositories 子树（既有，D-05），`repository_settings_editor.py` 管仓库级 `.iar.toml`（本次新增）。目标文件不同，符合 D-05/D-08 的意图；PRD §9 原措辞「写回逻辑单处」已按「每个目标文件单处」修正。
 - **与 `P1-FEAT-20260918-110027` 的 TOML 原语收敛未在本 PR 完成**：该 PRD 尚未合并，其分支另建了 `toml_section_editor.py`。属跨 PRD 协调，已在证据报告 §5 与本 PR 描述中登记，不构成本 PRD 的行为缺陷。
 
+## 第三轮发现与处置（rebase 到 PR #147 之后）
+
+第三轮独立复核的 5 项检查（行为等价性 / 失败路径 / 是否只剩一份写回 / 合并是否丢东西 / PRD 与证据是否对齐）全部 PASS，另有 2 项发现：
+
+| # | 级别 | 发现 | 处置 |
+|---|---|---|---|
+| G1 | 中 | `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 的齿轮用例在 `goto` 后立刻 `count()`，SPA 未加载完仓库列表时 `gearCount === 0` 会静默 `test.skip`——上一轮证据里「lifecycle spec 复跑证明齿轮按钮仍可用」因此不成立（跳过 1 条，且正是齿轮路径）。非本轮引入（spec 与 `8c8403e` 逐字节相同，属 #147 遗留） | 已整改：补 `waitForLoadState('networkidle')`（相邻的「Agent 覆盖」用例早就这样修过）；该 spec 由「6 passed, 1 skipped」变为 **7 passed**，齿轮抽屉真跑通过；证据口径同步修正 |
+| G2 | 低 | `repository_settings_editor.set_enabled` 的 docstring 仍写「并原子替换文件」，实际已委托共享原语 | 已整改：改为「写回由共享原语原子替换」 |
+
 ## 结论
 
-**PASS**（第二轮整改确认 + 回归检查通过；剩余 2 处文档计数漂移已在第二轮后修正，不涉及产品行为与证据产物）。
+**PASS**（第三轮整改确认 + 合并回归通过；全部遗留项已处置，不涉及产品行为与证据产物）。
 
 - 第一轮：`PASS with findings`（7 项，全部已处置）。
 - 第二轮：`PASS with findings` → 遗留 2 项文档计数漂移 → 已修正。
-- 冻结凭证：见上表；第二轮之后仅文档改动，`src tests` 冻结哈希 `dd160edb…` 保持有效。
+- 第三轮（rebase 到 PR #147 后）：`PASS with findings` → 1 项 E2E 静默跳过 + 1 项 docstring 措辞 → 均已修正。
+- 冻结凭证：见上表；第三轮之后仅文档与测试驱动方式的收尾改动，已随同一 PR 提交。

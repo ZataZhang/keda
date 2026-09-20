@@ -32,7 +32,7 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 
 ## 0. 一句话结论
 
-后端链条（受限 `.iar.toml` 写回、证据只读访问、Autopilot 状态聚合、API 契约、现有持续调度与双重合并门禁）与前端页面全部真实跑通：全量后端 **2368 passed**；E2E 两次运行合计 **17 passed**（新 spec 5 + 既有 PRD 原文 spec 3 + 合并进来的 lifecycle-agent-matrix spec 5 + console 静态入口 spec 3 + auth setup 1）；`just lint --reuse` / `pre-commit --all-files` / `just console-sync` / `uv run mkdocs build --strict` 全部退出 0。rv-1 / rv-2 / rv-3 的人读呈递物已在最终实现树采集。
+后端链条（受限 `.iar.toml` 写回、证据只读访问、Autopilot 状态聚合、API 契约、现有持续调度与双重合并门禁）与前端页面全部真实跑通：全量后端 **2368 passed**；E2E 两次运行合计 **18 passed**（新 spec 5 + 既有 PRD 原文 spec 3 + 合并进来的 lifecycle-agent-matrix spec 6 + console 静态入口 spec 3 + auth setup 1）；`just lint --reuse` / `pre-commit --all-files` / `just console-sync` / `uv run mkdocs build --strict` 全部退出 0。rv-1 / rv-2 / rv-3 的人读呈递物已在最终实现树采集。
 
 本轮修复了两处实跑才暴露的问题、以及两处独立 verifier 复核提出的问题（§4）：`agent_runner_roadmap.py` 中的重复 context loader、新 E2E spec 用 `check()` 驱动受控开关造成的假失败、`.iar.toml` 中 `enabled` 非布尔时 GET 漏成 500、以及超限文件被列进 manifest 却无法下载。
 
@@ -49,7 +49,7 @@ PRD：`tasks/archive/P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autop
 | rv-5（API / core / writer 契约） | `uv run pytest -o addopts="" tests/test_roadmap_api.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q`（PRD 的 `real_entry` 原样） | PASS 26 passed | 0 | §2.4 |
 | rv-5（三个新增测试文件合计） | `uv run pytest -o addopts="" tests/test_roadmap_autopilot_settings.py tests/test_roadmap_prd_evidence.py tests/test_repository_settings_editor.py -q` | PASS 34 passed | 0 | §2.4 |
 | rv-6（全仓质量） | `CI=true just test all`（强制全量、跳过 testmon 增量） | PASS 2368 passed in 84.88s | 0 | §3 |
-| rv-6（#147 页面回归） | `just e2e tests/workflows/lifecycle-agent-matrix.spec.ts` | PASS（含齿轮按钮与「Agent 覆盖」抽屉 5 条） | 0 | §3 |
+| rv-6（#147 页面回归） | `just e2e tests/workflows/lifecycle-agent-matrix.spec.ts` | PASS 7 passed（6 条用例 + auth setup；含齿轮抽屉与「Agent 覆盖」抽屉） | 0 | §3 |
 | rv-6（复用/架构/行数） | `just lint --reuse` | PASS（5 个 hook 全过） | 0 | §3 |
 | rv-6（全量 pre-commit） | `SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure` | PASS（17 个 hook 全过） | 0 | §3 |
 | rv-6（前端构建与静态同步） | `just console-sync` | PASS（13 个路由静态导出并同步） | 0 | §3 |
@@ -220,7 +220,7 @@ uv run mkdocs build --strict                 → exit 0
    manifest 与 artifact 的「允许集合」一致。
 5. **rebase 到 PR #147 后复用共享 TOML 原语**：`P1-FEAT-20260918-110027-lifecycle-agent-matrix` 先合并（`8c8403e`），本 PR 随之 rebase，并把
    `repository_settings_editor.py` 的 tomlkit round-trip + `os.replace` 实现改为委托
-   `toml_section_editor.update_toml_table_keys`。前端冲突（`page.tsx` 的仓库列表齿轮按钮与矩阵抽屉、`prd-content-view.tsx` 的「Agent 覆盖」按钮）按「保留 #147 的入口 + 本 PR 的 master-detail」合并。验证：全量 2368 passed；含 #147 的 `lifecycle-agent-matrix.spec.ts` 在内的 E2E 14 passed（齿轮按钮与「Agent 覆盖」抽屉均仍可用）；`repository_settings_editor.py` 现在 `import tomlkit` 计数为 0。
+   `toml_section_editor.update_toml_table_keys`。前端冲突（`page.tsx` 的仓库列表齿轮按钮与矩阵抽屉、`prd-content-view.tsx` 的「Agent 覆盖」按钮）按「保留 #147 的入口 + 本 PR 的 master-detail」合并。验证：全量 2368 passed；含 #147 的 `lifecycle-agent-matrix.spec.ts` 在内的 E2E 15 passed（齿轮抽屉与「Agent 覆盖」抽屉均真跑通过）；`repository_settings_editor.py` 现在 `import tomlkit` 计数为 0。独立 verifier 第三轮指出 `lifecycle-agent-matrix.spec.ts` 的齿轮用例因 SPA 竞态被静默跳过（`goto` 后立刻 `count()`，与相邻用例已修的同一问题），已补 `waitForLoadState('networkidle')` 使其真正执行——该用例此前不覆盖齿轮路径，属 #147 spec 的遗留竞态，本轮顺带修掉。
 
 ## 5. 已知限制
 

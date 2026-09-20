@@ -645,7 +645,16 @@ No external validation required; repository code, archived PRDs, current configu
 - Before: §5 只约定「先交付者定义容器、后交付者挂载」，未给出具体落点
 - After: `page.tsx` 保留 #147 的仓库列表齿轮按钮 + 仓库级矩阵抽屉，同时叠加本 PRD 的 master-detail 与仓库选中时清空 `selectedPrd`；`prd-content-view.tsx` 的头部容器保留「返回列表」按钮（仅 `onBack` 存在时渲染）与 #147 的「Agent 覆盖」按钮（始终渲染）
 - Reason: rebase 时两处冲突，需要同时满足 #147 的入口可见性与本 PRD 的标签页场景
-- Impact: 无行为损失；`lifecycle-agent-matrix.spec.ts` 复跑通过，证明齿轮按钮与覆盖抽屉仍可用
+- Impact: 无行为损失；`lifecycle-agent-matrix.spec.ts` 复跑通过，齿轮按钮与覆盖抽屉均真跑验证（见下一条）
+- Review: 执行器自审 + 独立 verifier 复核
+
+### 修复 #147 E2E 中因 SPA 竞态被静默跳过的齿轮用例
+
+- Type: test
+- Before: `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 的「Roadmap 受管理仓库行齿轮打开仓库级矩阵抽屉」在 `goto` 后立刻 `count()`，SPA 尚未加载完仓库列表，`gearCount === 0` 于是 `test.skip` 静默跳过；相邻的「Agent 覆盖」用例早已用 `waitForLoadState('networkidle')` 修过同一问题，齿轮用例漏了
+- After: 该用例补同样的 `waitForLoadState('networkidle')` 与说明注释；`just e2e tests/workflows/lifecycle-agent-matrix.spec.ts` 由「6 passed, 1 skipped」变为「7 passed」（含 auth setup）
+- Reason: 独立 verifier 第三轮指出上一轮证据里「lifecycle spec 复跑证明齿轮按钮仍可用」不成立——被跳过的正是齿轮路径。本 PR 的冲突解决恰好改动了仓库列表那一块，若不真跑就无法证明合并没破坏 #147 的入口
+- Impact: 仅测试驱动方式；齿轮抽屉用例从「从不执行」变为真跑通过，合并结论由推断变为实测
 - Review: 执行器自审 + 独立 verifier 复核
 
 ### 证据口径修正（verifier 复核提出）
