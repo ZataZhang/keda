@@ -212,14 +212,16 @@ def _build_roadmap_response(
 def _get_cached_roadmap_response(repo_id: str, include_archived: bool) -> dict:
     """Return cached roadmap response or rebuild it."""
     cache_key = f"{repo_id}:archived={include_archived}"
-    now = time.time()
     with _cache_lock:
         entry = _ROADMAP_CACHE.get(cache_key)
-        if entry and (now - entry["timestamp"]) < _ROADMAP_CACHE_TTL_SECONDS:
+        if entry and (time.time() - entry["timestamp"]) < _ROADMAP_CACHE_TTL_SECONDS:
             return entry["payload"]
     payload = _build_roadmap_response(repo_id, include_archived)
+    # 时间戳必须在构建完成之后再取：仓库级扫描要逐个 PRD 查 GitHub，慢仓库单次构建
+    # 就超过 TTL。若沿用构建前的时间戳，条目写进去就已经过期，缓存永远打不中——
+    # 表现为前端每轮 30 秒轮询都触发一次全量重扫，页面长期转圈。
     with _cache_lock:
-        _ROADMAP_CACHE[cache_key] = {"payload": payload, "timestamp": now}
+        _ROADMAP_CACHE[cache_key] = {"payload": payload, "timestamp": time.time()}
     return payload
 
 

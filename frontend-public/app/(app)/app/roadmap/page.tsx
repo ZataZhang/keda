@@ -84,22 +84,37 @@ export default function RoadmapPage() {
   // 打开仓库级生命周期 Agent 矩阵抽屉的仓库 id（null 表示关闭）。
   const [matrixRepoId, setMatrixRepoId] = useState<string | null>(null);
 
-  const loadData = useCallback(async (): Promise<RoadmapPrd[]> => {
-    if (!selectedRepoId) {
-      return [];
-    }
-    try {
-      const response = await fetchRoadmapPrds({
-        repoId: selectedRepoId,
-        includeArchived,
-      });
-      setPrds(response.prds);
-      return response.prds;
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载路线图失败。");
-      return [];
-    }
-  }, [selectedRepoId, includeArchived]);
+  const loadData = useCallback(
+    async (signal?: AbortSignal): Promise<RoadmapPrd[]> => {
+      if (!selectedRepoId) {
+        return [];
+      }
+      try {
+        const response = await fetchRoadmapPrds({
+          repoId: selectedRepoId,
+          includeArchived,
+          signal,
+        });
+        // 仓库级扫描要逐个 PRD 查 GitHub，慢响应可能在新仓库的响应之后才落地；
+        // 已中止说明这次结果属于上一个仓库，必须丢弃，否则依赖图会留下过期数据。
+        if (signal?.aborted) {
+          return [];
+        }
+        setPrds(response.prds);
+        return response.prds;
+      } catch (error) {
+        if (signal?.aborted) {
+          return [];
+        }
+        toast.error(error instanceof Error ? error.message : "加载路线图失败。");
+        // 失败时清空列表：否则上一次成功的结果会一直挂在依赖图上，冒充当前仓库
+        // 的 PRD（旧仓库停用后查询变 4xx，这个分支就会长期触发）。
+        setPrds([]);
+        return [];
+      }
+    },
+    [selectedRepoId, includeArchived],
+  );
 
   useEffect(() => {
     setReposLoading(true);
@@ -125,10 +140,19 @@ export default function RoadmapPage() {
     if (!selectedRepoId) {
       return;
     }
+    const controller = new AbortController();
     setLoading(true);
-    void loadData().finally(() => setLoading(false));
-    const timer = setInterval(() => void loadData(), POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
+    void loadData(controller.signal).finally(() => {
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
+    });
+    const timer = setInterval(() => void loadData(controller.signal), POLL_INTERVAL_MS);
+    return () => {
+      // 切换仓库或卸载时中止在途请求，旧仓库的慢响应不能再写回 prds。
+      controller.abort();
+      clearInterval(timer);
+    };
   }, [loadData, selectedRepoId]);
 
   const loadAutopilot = useCallback(async () => {

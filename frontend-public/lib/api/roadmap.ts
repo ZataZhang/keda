@@ -15,13 +15,14 @@ const BASE_PATH = "/v1/agent-runner/roadmap";
 export async function fetchRoadmapPrds(params: {
   repoId: string;
   includeArchived?: boolean;
+  signal?: AbortSignal;
 }): Promise<{ prds: RoadmapPrd[]; repo_id: string; include_archived: boolean; scanned_at: string }> {
   const searchParams = new URLSearchParams();
   searchParams.set("repo_id", params.repoId);
   if (params.includeArchived) {
     searchParams.set("include_archived", "true");
   }
-  return get(`${BASE_PATH}/prds?${searchParams.toString()}`);
+  return get(`${BASE_PATH}/prds?${searchParams.toString()}`, { signal: params.signal });
 }
 
 export async function fetchRoadmapSettings(repoId: string): Promise<RoadmapSettings> {
