@@ -258,6 +258,98 @@ def test_discover_iar_repositories_finds_local_repos(console_environment, tmp_pa
     assert all("already_registered" in entry for entry in discovered)
 
 
+def test_browse_repositories_lists_subdirectories(console_environment, tmp_path: Path) -> None:
+    """Browse endpoint must list non-hidden subdirectories with their flags."""
+    browse_root = tmp_path / "workspace"
+    alpha_dir = browse_root / "alpha"
+    alpha_dir.mkdir(parents=True)
+    (alpha_dir / ".git").mkdir()
+    _write_iar_toml(alpha_dir, "alpha", "Alpha Project")
+
+    beta_dir = browse_root / "beta"
+    beta_dir.mkdir()
+
+    (browse_root / ".hidden").mkdir()
+    (browse_root / "note.txt").write_text("not a directory", encoding="utf-8")
+
+    response = client.get(
+        "/api/v1/agent-runner/repositories/browse",
+        params={"path": str(browse_root)},
+    )
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+    resolved_root = browse_root.resolve()
+    assert body["path"] == str(resolved_root)
+    assert body["parent"] == str(resolved_root.parent)
+    assert body["suggested_repo_id"] == "workspace"
+    assert body["suggested_display_name"] == "workspace"
+
+    # 只列非隐藏目录：.hidden 与 note.txt 都不出现。
+    assert [entry["name"] for entry in body["directories"]] == ["alpha", "beta"]
+
+    alpha_entry = body["directories"][0]
+    assert alpha_entry["is_git_repo"] is True
+    assert alpha_entry["has_iar_config"] is True
+    assert alpha_entry["already_registered"] is False
+    assert alpha_entry["suggested_repo_id"] == "alpha"
+
+    beta_entry = body["directories"][1]
+    assert beta_entry["is_git_repo"] is False
+    assert beta_entry["has_iar_config"] is False
+
+
+def test_browse_repositories_marks_registered_directory(
+    console_environment, tmp_path: Path
+) -> None:
+    """已在 registry 中的目录必须被标记，供选择器提示用户。"""
+    response = client.get(
+        "/api/v1/agent-runner/repositories/browse",
+        params={"path": str(tmp_path)},
+    )
+    assert response.status_code == 200, response.text
+
+    entries_by_name = {entry["name"]: entry for entry in response.json()["directories"]}
+    # fixture 把 tmp_path/repo 注册成了 repo_id=keda-main。
+    assert entries_by_name["repo"]["already_registered"] is True
+
+
+def test_browse_repositories_rejects_missing_or_file_path(
+    console_environment, tmp_path: Path
+) -> None:
+    """路径不存在或不是目录时必须返回 400，而不是 500 或空列表。"""
+    missing_response = client.get(
+        "/api/v1/agent-runner/repositories/browse",
+        params={"path": str(tmp_path / "does-not-exist")},
+    )
+    assert missing_response.status_code == 400, missing_response.text
+
+    regular_file = tmp_path / "note.txt"
+    regular_file.write_text("not a directory", encoding="utf-8")
+    file_response = client.get(
+        "/api/v1/agent-runner/repositories/browse",
+        params={"path": str(regular_file)},
+    )
+    assert file_response.status_code == 400, file_response.text
+
+
+def test_browse_repositories_defaults_to_home(
+    console_environment, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """不传 path 时从用户主目录开始，供选择器首次打开时定位。"""
+    fake_home = tmp_path / "fake-home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    response = client.get("/api/v1/agent-runner/repositories/browse")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["path"] == str(fake_home.resolve())
+    assert body["home"] == str(fake_home.resolve())
+    assert body["directories"] == []
+
+
 def test_batch_add_repositories_skips_existing(console_environment, tmp_path: Path) -> None:
     """Batch add should add new repos and skip already-registered ones."""
     first_repo = tmp_path / "first"

@@ -269,6 +269,24 @@ export type DiscoveredRepositoryEntry = {
   already_registered: boolean;
 };
 
+export type BrowsableDirectoryEntry = {
+  name: string;
+  path: string;
+  is_git_repo: boolean;
+  has_iar_config: boolean;
+  already_registered: boolean;
+  suggested_repo_id: string;
+};
+
+export type DirectoryBrowseResult = {
+  path: string;
+  parent: string | null;
+  home: string;
+  suggested_repo_id: string;
+  suggested_display_name: string;
+  directories: BrowsableDirectoryEntry[];
+};
+
 export type BatchAddRepositoriesResult = {
   added: RegistryRepositoryEntry[];
   skipped: string[];

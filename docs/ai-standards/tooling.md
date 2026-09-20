@@ -22,7 +22,7 @@
 | `just run backend_port=8010 frontend_admin_port=13173 frontend_public_port=3001` | 使用指定端口运行主应用，并保存为当前 Git worktree 的默认端口 |
 | `just run frontend-public` | 只启动管理终端前端（Next.js，端口读取当前 run-state） |
 | `just frontend-public dev` | 委托 `just run frontend-public`，读取当前 run-state 端口 |
-| `just console-sync` | 重新构建 frontend-public 静态导出并同步到 `src/backend/api/static/console/`，让 `iar console`（8313）面板立即用上新构建；同步后硬刷新浏览器即可，无需重启进程 |
+| `just console-sync` | 重新构建 frontend-public 静态导出并同步到 `src/backend/api/static/console/`，让 `iar console`（8313）面板立即用上新构建；**仅前端改动**硬刷新浏览器即可、无需重启进程。若本次还改了后端路由/接口，静态前端是按请求读盘的、会立刻变新，但 FastAPI 路由在进程启动时就已固定——必须重启 `iar console`，否则新端点返回 404 而旧界面已被替换。 |
 | `just down` | 按当前 Git worktree 保存的端口停止本地开发服务 |
 | `just copy <new-dir>` | 派生新项目；随机分配三个互不重叠的端口避免多副本端口冲突，并根据新项目名自动生成独立 PostgreSQL 数据库 |
 | `just worktree <branch>` | 仅能从 Git primary worktree 创建；自动分配端口、创建专用 PostgreSQL 空库并执行迁移，开发与 E2E 共用该 Worktree 的数据库 |

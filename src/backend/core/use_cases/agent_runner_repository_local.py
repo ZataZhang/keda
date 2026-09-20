@@ -28,6 +28,7 @@ ensure_gitignore_entries = _engines_repository_local_module.ensure_gitignore_ent
 initialize_repository_local_config = (
     _engines_repository_local_module.initialize_repository_local_config
 )
+normalize_repository_id = _engines_repository_local_module.normalize_repository_id
 require_iar_repository_initialized = (
     _engines_repository_local_module.require_iar_repository_initialized
 )
@@ -45,5 +46,6 @@ __all__ = [
     "discover_iar_repositories",
     "ensure_gitignore_entries",
     "initialize_repository_local_config",
+    "normalize_repository_id",
     "require_iar_repository_initialized",
 ]

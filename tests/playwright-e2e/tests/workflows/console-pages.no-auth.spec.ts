@@ -161,6 +161,35 @@ const AUDITS = {
   ],
 }
 
+/** 目录选择器 mock 用的假目录树：根 → code → foo。 */
+const BROWSE_TREES: Record<string, string[]> = {
+  '/Users/me': ['code'],
+  '/Users/me/code': ['foo'],
+  '/Users/me/code/foo': [],
+}
+
+/** 按请求路径构造目录选择器的 mock 响应（不传 path 时从主目录开始）。 */
+function browseTreeFor(requestedPath: string | null) {
+  const resolvedPath = requestedPath ?? '/Users/me'
+  const parentIndex = resolvedPath.lastIndexOf('/')
+  const directoryName = resolvedPath.split('/').pop() ?? 'repository'
+  return {
+    path: resolvedPath,
+    parent: parentIndex > 0 ? resolvedPath.slice(0, parentIndex) : null,
+    home: '/Users/me',
+    suggested_repo_id: directoryName,
+    suggested_display_name: directoryName,
+    directories: (BROWSE_TREES[resolvedPath] ?? []).map((name) => ({
+      name,
+      path: `${resolvedPath}/${name}`,
+      is_git_repo: name === 'foo',
+      has_iar_config: name === 'foo',
+      already_registered: false,
+      suggested_repo_id: name,
+    })),
+  }
+}
+
 async function mockConsoleApi(page: Page): Promise<void> {
   await page.route('**/api/auth/me', (route) =>
     route.fulfill({ json: LOCAL_SESSION }),
@@ -188,6 +217,10 @@ async function mockConsoleApi(page: Page): Promise<void> {
   await page.route('**/api/v1/agent-runner/repositories', (route) =>
     route.fulfill({ json: REGISTRY }),
   )
+  await page.route('**/api/v1/agent-runner/repositories/browse**', (route) => {
+    const requestedPath = new URL(route.request().url()).searchParams.get('path')
+    return route.fulfill({ json: browseTreeFor(requestedPath) })
+  })
   await page.route('**/api/v1/agent-runner/console/audit**', (route) =>
     route.fulfill({ json: AUDITS }),
   )
@@ -263,5 +296,34 @@ test.describe('console pages smoke (mocked API)', () => {
     await expect(page.getByRole('heading', { name: '项目接入' })).toBeVisible()
     await expect(page.getByText('/Users/me/code/keda')).toBeVisible()
     await expect(page.getByText('retry_failed')).toBeVisible()
+  })
+
+  test('add repository picks a directory instead of typing a path', async ({
+    page,
+  }) => {
+    await mockConsoleApi(page)
+    await page.goto('/app/repositories')
+
+    await page.getByTestId('repositories-add-path-picker').click()
+    await expect(page.getByTestId('directory-picker-dialog')).toBeVisible()
+
+    // 逐级下钻：主目录 → code → foo。
+    await page.getByTestId('directory-picker-entry-code').click()
+    await page.getByTestId('directory-picker-entry-foo').click()
+    await expect(page.getByTestId('directory-picker-current-path')).toContainText(
+      '/Users/me/code/foo',
+    )
+
+    await page.getByTestId('directory-picker-confirm').click()
+
+    await expect(page.getByTestId('directory-picker-dialog')).toBeHidden()
+    await expect(
+      page.getByPlaceholder('本地路径，如 /Users/me/code/foo'),
+    ).toHaveValue('/Users/me/code/foo')
+    // repo_id 与显示名按目录名自动补全。
+    await expect(page.getByPlaceholder('repo_id（小写-连字符）')).toHaveValue(
+      'foo',
+    )
+    await expect(page.getByPlaceholder('显示名（可选）')).toHaveValue('foo')
   })
 })

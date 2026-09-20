@@ -55,6 +55,7 @@ from backend.core.use_cases.monitor_snapshots import (
     get_monitor_settings,
     update_monitor_settings,
 )
+from backend.core.use_cases.repository_browse import browse_directories
 from backend.core.use_cases.repository_registry import (
     RegistryValidationError,
     add_registry_repository,
@@ -350,6 +351,20 @@ def list_console_repositories() -> dict:
     """列出 registry 的全部仓库条目（含路径存在性）。"""
     entries = list_registry_repositories(create_registry_editor())
     return {"repositories": [_serialize(entry) for entry in entries]}
+
+
+@router.get("/agent-runner/repositories/browse")
+def browse_console_directories(path: str | None = None) -> dict:
+    """只读列举本机子目录，供控制台「选取仓库路径」使用。
+
+    ``path`` 缺省时从用户主目录开始。只返回目录名与路径，不返回任何文件内容。
+    """
+    target_path = Path(path) if path else Path.home()
+    try:
+        result = browse_directories(path=target_path, editor=create_registry_editor())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize(result)
 
 
 @router.get("/agent-runner/repositories/discover")

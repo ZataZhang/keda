@@ -108,6 +108,46 @@
 }
 ```
 
+### `GET /api/v1/agent-runner/repositories/browse`
+
+只读列举本机某个目录下的子目录，供控制台「选取仓库路径」的目录选择器使用。浏览器拿不到真实绝对路径，因此目录列举必须由本机后端完成。
+
+该端点与 `GET /api/v1/agent-runner/repositories/discover` 同级：控制台固定绑定 `127.0.0.1` 且为单用户部署，两处都不带鉴权。响应只含目录名与路径，**不返回任何文件内容**。
+
+查询参数：
+
+- `path`：要浏览的目录绝对路径，可含 `~`。省略时从用户主目录开始。路径不存在或不是目录时返回 `400`。
+
+只返回非隐藏子目录（跳过 `.` 开头项），跳过无权限读取的条目而不是让整次请求失败。
+
+响应示例：
+
+```json
+{
+  "path": "/Users/me/code",
+  "parent": "/Users/me",
+  "home": "/Users/me",
+  "suggested_repo_id": "code",
+  "suggested_display_name": "code",
+  "directories": [
+    {
+      "name": "foo",
+      "path": "/Users/me/code/foo",
+      "is_git_repo": true,
+      "has_iar_config": true,
+      "already_registered": false,
+      "suggested_repo_id": "foo"
+    }
+  ]
+}
+```
+
+字段说明：
+
+- `path` / `parent` / `home`：当前目录、上级目录（已是文件系统根时为 `null`）与用户主目录。
+- `suggested_repo_id` / `suggested_display_name`：用于回填「添加仓库」表单的建议值，`suggested_repo_id` 由后端按 `normalize_repository_id` 规则从目录名生成，与 `iar registry` 扫描保持一致。
+- `directories[].is_git_repo` / `has_iar_config` / `already_registered`：该子目录是否为 git 仓库、是否已 `iar init`、是否已在 registry 中注册。
+
 ### `GET /api/v1/agent-runner/roadmap/prds/{encoded_path}/content`
 
 返回单个 PRD 的 Markdown 原文（`text/plain; charset=utf-8`，与磁盘文件逐字节一致）。该端点为**只读**。

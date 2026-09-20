@@ -13,6 +13,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  DirectoryPickerDialog,
+  type DirectorySelection,
+} from "@/components/agent-runner/directory-picker-dialog";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   addRegistryRepository,
@@ -43,6 +47,10 @@ export default function RepositoriesPage() {
   );
   const [scanning, setScanning] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // 目录选择器当前要回填哪个输入框；null 表示未打开。
+  const [pickerTarget, setPickerTarget] = useState<"newRepo" | "scanRoot" | null>(
+    null,
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -190,6 +198,18 @@ export default function RepositoriesPage() {
     }
   }
 
+  /** 把目录选择器的结果回填到对应输入框。 */
+  function handleDirectorySelected(selection: DirectorySelection) {
+    if (pickerTarget === "scanRoot") {
+      setScanRoot(selection.path);
+      return;
+    }
+    setNewRepoPath(selection.path);
+    // 用户已手填过的值优先，选择器只补空缺，避免覆盖输入。
+    setNewRepoId((current) => current || selection.suggestedRepoId);
+    setNewDisplayName((current) => current || selection.suggestedDisplayName);
+  }
+
   return (
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <div>
@@ -283,6 +303,14 @@ export default function RepositoriesPage() {
               value={scanRoot}
               onChange={(event) => setScanRoot(event.target.value)}
             />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setPickerTarget("scanRoot")}
+              data-testid="repositories-scan-root-picker"
+            >
+              选择目录…
+            </Button>
             <Button size="sm" onClick={() => void handleScan()} disabled={scanning}>
               {scanning ? "扫描中…" : "扫描"}
             </Button>
@@ -389,6 +417,14 @@ export default function RepositoriesPage() {
             value={newRepoPath}
             onChange={(event) => setNewRepoPath(event.target.value)}
           />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPickerTarget("newRepo")}
+            data-testid="repositories-add-path-picker"
+          >
+            选择目录…
+          </Button>
           <Input
             className="w-40"
             placeholder="显示名（可选）"
@@ -436,6 +472,21 @@ export default function RepositoriesPage() {
           )}
         </CardContent>
       </Card>
+
+      <DirectoryPickerDialog
+        open={pickerTarget !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setPickerTarget(null);
+          }
+        }}
+        initialPath={
+          pickerTarget === "scanRoot"
+            ? scanRoot || undefined
+            : newRepoPath || undefined
+        }
+        onSelect={handleDirectorySelected}
+      />
     </div>
   );
 }

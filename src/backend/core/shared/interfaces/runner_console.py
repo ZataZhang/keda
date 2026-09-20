@@ -291,6 +291,30 @@ class DiscoveredRepositoryEntry:
     already_registered: bool
 
 
+@dataclass(frozen=True)
+class BrowsableDirectoryEntry:
+    """目录选择器中的一个子目录候选。"""
+
+    name: str
+    path: str
+    is_git_repo: bool
+    has_iar_config: bool
+    already_registered: bool
+    suggested_repo_id: str
+
+
+@dataclass(frozen=True)
+class DirectoryBrowseResult:
+    """目录选择器单次浏览的结果：当前目录自身 + 其子目录列表。"""
+
+    path: str
+    parent: str | None
+    home: str
+    suggested_repo_id: str
+    suggested_display_name: str
+    directories: list[BrowsableDirectoryEntry]
+
+
 class IRepositoryRegistryEditor(ABC):
     """对仓库 registry（config.toml）的受限读写端口。
 

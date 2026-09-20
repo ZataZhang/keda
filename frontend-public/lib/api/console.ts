@@ -11,6 +11,7 @@ import type {
   BatchAddRepositoriesResult,
   ConsoleActionResult,
   DailyRunTrendEntry,
+  DirectoryBrowseResult,
   DiscoveredRepositoryEntry,
   MonitorSettings,
   ProcessLogChunk,
@@ -172,6 +173,20 @@ export async function discoverRepositories(
     `${BASE_PATH}/repositories/discover?scan_root=${encodeURIComponent(scanRoot)}`,
   );
   return response.repositories;
+}
+
+/**
+ * 只读列举本机子目录，供「选取仓库路径」的选择器使用。
+ *
+ * 浏览器拿不到真实绝对路径，必须由本机后端列举。不传 path 时从用户主目录开始。
+ *
+ * @param path 要浏览的目录绝对路径；省略则从用户主目录开始。
+ */
+export async function browseDirectories(
+  path?: string,
+): Promise<DirectoryBrowseResult> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  return get<DirectoryBrowseResult>(`${BASE_PATH}/repositories/browse${query}`);
 }
 
 export async function batchAddRepositories(

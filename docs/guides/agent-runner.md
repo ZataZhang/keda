@@ -3046,6 +3046,13 @@ labels/comments/PR 与本地 worktree 仍是唯一事实来源；落库失败只
 且为 git 仓库。某个已注册路径失效时，监控与统计会跳过该仓库并在
 总览页给出醒目警示，不会拖死整个面板。
 
+「本地路径」和「扫描根目录」输入框都配有**目录选择器**：浏览器拿不到真实
+绝对路径（`showDirectoryPicker` 只给不透明 handle，`webkitdirectory` 只有
+相对路径），所以由本机后端列举子目录，前端弹窗逐级下钻。「选择此目录」选的是
+当前所在目录；选定后回填路径，`repo_id` 与显示名为空时按目录名自动补全
+（与 `iar registry` 扫描用的 `normalize_repository_id` 同一规则）。带
+`git 仓库` 标记的目录才能通过「校验并添加」。
+
 ### Console API 一览
 
 ```text
@@ -3060,7 +3067,10 @@ GET    /api/v1/agent-runner/console/stats/history?repo_id=&days=30
 GET    /api/v1/agent-runner/console/runs?repo_id=&limit=100
 GET    /api/v1/agent-runner/console/audit?limit=100
 GET    /api/v1/agent-runner/repositories
+GET    /api/v1/agent-runner/repositories/browse?path=          目录选择器（只读）
+GET    /api/v1/agent-runner/repositories/discover?scan_root=   扫描已初始化 IAR 的仓库
 POST   /api/v1/agent-runner/repositories                       {repo_id, path, display_name}
+POST   /api/v1/agent-runner/repositories/batch                 {repositories: [...]}
 PATCH  /api/v1/agent-runner/repositories/{repo_id}             {enabled}
 ```
 
