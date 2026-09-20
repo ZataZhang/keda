@@ -14,7 +14,9 @@ WORKDIR /app
 ENV CI=true
 
 # Install dependencies first to leverage Docker cache
-COPY package.json pnpm-workspace.yaml ./
+# frontend-public 不再是独立的 pnpm workspace（见 docs/architecture/frontend-architecture.md），
+# 镜像里没有仓根的 pnpm-workspace.yaml / lockfile，这里就是它自己的安装目录。
+COPY package.json ./
 RUN npm install -g pnpm && pnpm install
 
 # Copy source and build

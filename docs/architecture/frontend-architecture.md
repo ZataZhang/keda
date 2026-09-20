@@ -9,7 +9,9 @@
 | 管理终端 | `frontend-public/`（详见其目录下 README） | Next.js 16 App Router + React 19 + Tailwind v4 + shadcn/ui | Agent Runner 管理终端（静态导出产物随 wheel 分发，`iar console` 托管） |
 | 管理平台 | `frontend-admin/`（详见其目录下 README） | Vite + React 19 + TanStack Router + Zustand + shadcn/admin | admin 域登录与后台管理骨架 |
 
-两个前端互不依赖，各自维护 lockfile，与后端仅通过 `/api/*` HTTP 接口通信。包管理器为 pnpm，仓根 `pnpm-workspace.yaml` 声明两个 workspace。
+两个前端互不依赖，与后端仅通过 `/api/*` HTTP 接口通信。包管理器为 pnpm，仓根 `pnpm-workspace.yaml` 声明两个 workspace，**lockfile 与 `node_modules` 统一由仓根管理**：锁文件只有 `pnpm-lock.yaml` 一份，依赖装到仓根 `.pnpm` 虚拟 store，子目录只保留指过去的软链。
+
+> 历史：`frontend-public/` 与 `frontend-admin/` 曾各自保留一份 `pnpm-workspace.yaml` + `pnpm-lock.yaml`，等于让同一份 `package.json` 被两个锁文件独立解析——实测两者对 `@base-ui/react`、`@xyflow/react`、`eslint-config-next`、`prettier-plugin-tailwindcss` 的 peer 解析结果已经分叉，且子目录被识别为独立 workspace 会让 pnpm 与 Turbopack 各自认定不同的根目录。这两对文件已删除，装依赖只在仓根执行（`pnpm install --frozen-lockfile`）。
 
 ## 与后端四层的边界
 

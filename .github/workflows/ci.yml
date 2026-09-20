@@ -40,9 +40,14 @@ jobs:
         with:
           node-version: "22"
           cache: "pnpm"
-          cache-dependency-path: frontend-public/pnpm-lock.yaml
+          # lockfile 只有仓根一份（frontend-public 不再单独维护），
+          # 缓存键必须跟着指向它，否则缓存永远不命中。
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
+        # 显式回到仓根：frontend-public 已不是独立的 pnpm workspace，
+        # 装依赖的事实发生在仓根，写清楚免得后来者以为应在这里再装一次。
+        working-directory: .
         run: pnpm install --frozen-lockfile
 
       - name: Type check
