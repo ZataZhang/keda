@@ -77,9 +77,9 @@ def _seed_kimi_source(source_dir: Path) -> None:
 
 
 def test_supported_agent_specs_follow_builtin_registry() -> None:
-    """规格表由内置注册表派生：顺序与条目一致（codex/claude/kimi/pi）。"""
+    """规格表由内置注册表派生：顺序与条目一致（新增 agent 追加在末尾）。"""
     names = [spec.agent_name for spec in SUPPORTED_AGENT_SPECS]
-    assert names == ["codex", "claude", "kimi", "pi"]
+    assert names == ["codex", "claude", "kimi", "pi", "codebuddy", "qoder", "opencode"]
 
 
 def test_container_auth_dir_under_global_iar() -> None:

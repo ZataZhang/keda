@@ -187,10 +187,10 @@ def test_unregistered_agent_rejected_by_api(console_env: dict) -> None:
     config_before = console_env["config_path"].read_text(encoding="utf-8")
     response = client.put(
         "/api/v1/agent-runner/lifecycle-agents",
-        json={"scope": "global", "values": {"fix": "codebuddy"}},
+        json={"scope": "global", "values": {"fix": "no-such-agent"}},
     )
     assert response.status_code == 422
-    assert "codebuddy" in response.json()["detail"]
+    assert "no-such-agent" in response.json()["detail"]
     assert console_env["config_path"].read_text(encoding="utf-8") == config_before
 
 
@@ -320,10 +320,10 @@ def test_prd_override_rejects_unregistered_agent(console_env: dict) -> None:
     )
     response = client.patch(
         f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
-        json={"repo_id": "testrepo", "overrides": {"review": "codebuddy"}},
+        json={"repo_id": "testrepo", "overrides": {"review": "no-such-agent"}},
     )
     assert response.status_code == 422
-    assert "codebuddy" in response.json()["detail"]
+    assert "no-such-agent" in response.json()["detail"]
 
 
 def test_prd_override_view_excludes_planner(console_env: dict) -> None:

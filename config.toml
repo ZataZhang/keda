@@ -116,7 +116,8 @@ max_issues = 1
 # =============================================================================
 # 把"九个生命周期阶段各用哪个 agent"收敛成一张表。键名是闭集（写错键在配置
 # 加载期报错），取值可以是：
-#   - 已注册 agent 名（codex / claude / kimi / pi 或自定义注册的 agent）；
+#   - 已注册 agent 名（codex / claude / kimi / pi / codebuddy / qoder / opencode，
+#     或自定义注册的 agent）；
 #   - "auto"：按该阶段既有语义路由。只有实现了 auto 语义的阶段合法——
 #       实现=按 Issue 上的 agent/* 标签路由；校验=从 agent_fallback_order 里
 #       挑第一个 ≠ 实现者；审核=优先 ≠ 实现者（allow_same_agent 时沿用实现者）；
@@ -155,13 +156,14 @@ max_issues = 1
 # 容器认证目录、项目级 skills 目录，以及四种用途（run / deliberate /
 # generate / repl）各自的 argv 片段、提示词投递方式与输出协议。
 #
-# 本文件内的四个注册块与代码内置默认（BUILTIN_AGENT_SPECS）等价，写出仅为
+# 本文件内的七个注册块与代码内置默认（BUILTIN_AGENT_SPECS）等价，写出仅为
 # 便于发现与覆盖：未写出的字段逐字段回落内置默认。argv 元素是字面量，
 # 不做 shell 展开；占位符闭集：{cwd} / {prompt} / {worktree}；
 # 展开器闭集：git_writable_roots（写法 "git_writable_roots:--add-dir"）。
 #
 # 接入全新 agent 的最小步骤：写一段注册块（bin 与 label 必填，四种用途
-# 至少声明一种），然后运行 `iar agent doctor <name>` 自检。
+# 至少声明一种；某个用途两侧都不声明即视为该 agent 不提供该用途），
+# 然后运行 `iar agent doctor <name>` 自检。
 # 完整字段说明见 docs/guides/configuration.md。
 
 [agent_runner.agents.codex]
@@ -301,6 +303,111 @@ read_only = true
 [agent_runner.agents.pi.profiles.repl]
 args = ["--approve", "--print"]
 prompt_delivery = "stdin"
+output_protocol = "plain"
+
+# codebuddy 的注册块：内置默认已生效；下面照抄内置值作为"出厂注册块"参考。
+# 事实依据：CodeBuddy Code 与 Claude Code 同构，-p/--print、
+# --output-format stream-json、--include-partial-messages 与
+# -y/--dangerously-skip-permissions 均存在，故四用途照抄 claude 形态并复用
+# 内置 claude-stream-json 协议；配置与凭据在 ~/.codebuddy/；
+# 项目级 skills 目录 .codebuddy/skills/。
+[agent_runner.agents.codebuddy]
+bin = "codebuddy"
+label = "agent/codebuddy"
+label_color = "0052D9"
+label_description = "Use CodeBuddy Code for local runner execution."
+auth_home = "~/.codebuddy"
+auth_include = ["settings.json", "skills"]
+auth_exclude = ["history.jsonl", "file-history", "sessions", "logs", "plans", "plugins", "cache", "blobs", "traces", "shell-snapshots", "tasks", "teams", "projects", "local_storage", "jobs", "diagnostics", "skills-marketplace"]
+project_skills_dir = ".codebuddy/skills"
+
+[agent_runner.agents.codebuddy.profiles.run]
+args = ["--dangerously-skip-permissions", "--verbose", "-p", "--output-format", "stream-json", "--include-partial-messages"]
+prompt_delivery = "argv_tail"
+output_protocol = "claude-stream-json"
+
+[agent_runner.agents.codebuddy.profiles.deliberate]
+args = ["--dangerously-skip-permissions", "--verbose", "-p", "--output-format", "stream-json", "--include-partial-messages"]
+prompt_delivery = "argv_tail"
+output_protocol = "claude-stream-json"
+
+[agent_runner.agents.codebuddy.profiles.generate]
+args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.codebuddy.profiles.repl]
+args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+
+# qoder 的注册块：内置默认已生效；下面照抄内置值作为"出厂注册块"参考。
+# 事实依据：可执行文件名是 qodercn（qoder 只是 shell 别名）；
+# 无 --verbose / --include-partial-messages；-o/--output-format 接受
+# text / json / stream-json，且包内 schema 与 claude 同形
+# （type=stream_event / assistant / result），故 run 用途复用
+# claude-stream-json；deliberate 保留 -p 改走 stdin + plain（流式协议会剥离
+# -p，而 qoder 缺 -p 时的行为未经验证）；配置与凭据在 ~/.qoder-cn/；
+# 项目级 skills 目录 .qoder-cn/skills/。
+[agent_runner.agents.qoder]
+bin = "qodercn"
+label = "agent/qoder"
+label_color = "FF8C42"
+label_description = "Use Qoder for local runner execution."
+auth_home = "~/.qoder-cn"
+auth_include = ["settings.json", "skills"]
+auth_exclude = ["logs", "file-history", "projects", "tasks", "shell-snapshots", "cache", "plugins"]
+project_skills_dir = ".qoder-cn/skills"
+
+[agent_runner.agents.qoder.profiles.run]
+args = ["--dangerously-skip-permissions", "-p", "-o", "stream-json"]
+prompt_delivery = "argv_tail"
+output_protocol = "claude-stream-json"
+
+[agent_runner.agents.qoder.profiles.deliberate]
+args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+
+[agent_runner.agents.qoder.profiles.generate]
+args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.qoder.profiles.repl]
+args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+
+# opencode 的注册块：内置默认已生效；下面照抄内置值作为"出厂注册块"参考。
+# 事实依据：非交互入口是 run 子命令（消息为位置参数）；--format default 输出
+# 逐行文本（plain），--format json 是另一套事件形状、本项目无对应协议；
+# 它没有沙箱 / 只读开关，因此不声明 generate 用途（假只读声明会被只读决策
+# 入口的门禁采信）；配置在 ~/.config/opencode/（XDG 路径）。
+[agent_runner.agents.opencode]
+bin = "opencode"
+label = "agent/opencode"
+label_color = "0EA5E9"
+label_description = "Use OpenCode for local runner execution."
+auth_home = "~/.config/opencode"
+auth_include = ["opencode.json", "skills"]
+auth_exclude = ["node_modules", "package.json", "package-lock.json", "tui.jsonc", "plugins"]
+
+[agent_runner.agents.opencode.profiles.run]
+args = ["run", "--dangerously-skip-permissions"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+
+[agent_runner.agents.opencode.profiles.deliberate]
+args = ["run", "--dangerously-skip-permissions"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+
+[agent_runner.agents.opencode.profiles.repl]
+args = ["run", "--dangerously-skip-permissions"]
+prompt_delivery = "argv_tail"
 output_protocol = "plain"
 
 [agent_runner.labels]

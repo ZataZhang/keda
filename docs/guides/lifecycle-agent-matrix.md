@@ -1,7 +1,7 @@
 # 生命周期 Agent 矩阵
 
-keda 的流水线由九个生命周期阶段组成，每个阶段调用一个 agent（codex / claude /
-kimi / pi 或自定义注册的 agent）。**生命周期 Agent 矩阵**把"阶段 → agent"从
+keda 的流水线由九个生命周期阶段组成，每个阶段调用一个 agent（codex / claude / kimi /
+pi / codebuddy / qoder / opencode 或自定义注册的 agent）。**生命周期 Agent 矩阵**把"阶段 → agent"从
 散落的配置段收敛成一张表，并支持仓库级与 PRD 级覆盖。
 
 > 交互原型：`docs/prototypes/lifecycle-agent-matrix.html`（真实截图 + 覆盖层）。
@@ -24,7 +24,8 @@ kimi / pi 或自定义注册的 agent）。**生命周期 Agent 矩阵**把"阶�
 
 取值域：
 
-- **已注册 agent 名**（`codex` / `claude` / `kimi` / `pi`，或你在
+- **已注册 agent 名**（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` /
+  `opencode`，或你在
   `[agent_runner.agents.<name>]` 里注册的 agent）——未注册的名字在**该阶段开始前**
   fail-fast 报错并指名，不会静默回落到别的 agent；
 - **`auto`**——按该阶段**既有**语义路由（含义逐阶段不同，见上表），不做统一。

@@ -533,8 +533,8 @@
     <script>
       (() => {
         // ── 真实数据（取自 config.toml、内置默认与真实 registry） ──
-        const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi'];
-        const UNREGISTERED_AGENT = 'codebuddy';
+        const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi', 'codebuddy', 'qoder', 'opencode'];
+        const UNREGISTERED_AGENT = 'no-such-agent';
         // 本机已安装可用的 agent（用于回退链跳过未安装项）；'pi' 本机存在，这里按真实情况全部视为可用
         const DEFAULT_FALLBACK_ORDER = ['claude', 'kimi', 'codex'];
         const DEFAULT_MAX_AGENT_SWITCHES = 2;
@@ -544,6 +544,9 @@
           { agent: 'claude', label: 'agent/claude', color: 'BFDADC', description: 'Use Claude Code for local runner execution.' },
           { agent: 'kimi', label: 'agent/kimi', color: 'FF6B6B', description: 'Use Kimi for local runner execution.' },
           { agent: 'pi', label: 'agent/pi', color: '7C3AED', description: 'Use pi for local runner execution.' },
+          { agent: 'codebuddy', label: 'agent/codebuddy', color: '0052D9', description: 'Use CodeBuddy Code for local runner execution.' },
+          { agent: 'qoder', label: 'agent/qoder', color: 'FF8C42', description: 'Use Qoder for local runner execution.' },
+          { agent: 'opencode', label: 'agent/opencode', color: '0EA5E9', description: 'Use OpenCode for local runner execution.' },
         ];
         // 受管理仓库列表：repo_id / display_name 与真实 registry 一致，rowTop 是实测行位
         const REPOS = [

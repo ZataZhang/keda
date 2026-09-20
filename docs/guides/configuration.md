@@ -113,7 +113,7 @@ verification_commands = [
 
 agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 
-1. **内置默认**：代码内 `BUILTIN_AGENT_SPECS`（`codex` / `claude` / `kimi` / `pi`），是注册表唯一的代码内默认来源；
+1. **内置默认**：代码内 `BUILTIN_AGENT_SPECS`（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode`），是注册表唯一的代码内默认来源；
 2. **全局覆盖**：`config.toml` 顶层 `[agent_runner.agents.*]`；
 3. **仓库级覆盖**：`[agent_runner.repositories.<repo_id>.agents.*]`。
 
