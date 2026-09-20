@@ -432,3 +432,39 @@ def test_format_fallback_question_list_handles_fully_blank_sections() -> None:
     fallback = _format_fallback_question_list(result)
     assert "## 范围边界" in fallback
     assert "did not produce concrete questions" in fallback.lower()
+
+
+def test_process_deliberation_issues_honors_prd_override(tmp_path: Path) -> None:
+    """PRD 头部声明的 ``deliberate`` 覆盖在 daemon 队列路径同样生效。
+
+    这条入口不经过编排运行时，需自行 ``attach_prd_lifecycle_overrides``；
+    否则 PRD 级覆盖只在 ``iar run`` 路径有效、在这里静默失效。
+    """
+    prd_path = tmp_path / "tasks" / "pending" / "P1-FEAT-x.md"
+    prd_path.parent.mkdir(parents=True)
+    prd_path.write_text(
+        "# PRD: Demo\n\n"
+        "- GitHub Issue: （创建后回填）\n\n"
+        "- lifecycle_agents:\n  - deliberate: kimi\n\n"
+        "> ✅ 交付前置：无。\n\n"
+        "## 1. Intro\n正文\n",
+        encoding="utf-8",
+    )
+    fake_github = FakeGitHubClient()
+    issue = _make_deliberate_issue(
+        body="I want to build X.\n\n- PRD path: `tasks/pending/P1-FEAT-x.md`\n"
+    )
+    _set_deliberate_issues(fake_github, [issue])
+    runner = _StubTranscriptRunner()
+
+    process_deliberation_issues(
+        repo_path=tmp_path,
+        config=_build_config(),
+        github_client=fake_github,
+        transcript_runner_factory=lambda _: runner,
+    )
+
+    # 参与者轮次跑完后是 synthesizer（其 prompt 以 "Original request:" 开头）。
+    synth_calls = [call for call in runner.calls if call["prompt"].startswith("Original request:")]
+    assert synth_calls, "synthesizer should have been invoked"
+    assert synth_calls[-1]["agent_name"] == "kimi"

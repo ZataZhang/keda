@@ -37,7 +37,13 @@ export async function updateRoadmapSettings(params: {
   });
 }
 
-function encodePrdPath(prdPath: string): string {
+/**
+ * 把 PRD 相对路径编码为 URL-safe base64（后端按同样的方式解码）。
+ *
+ * @param prdPath - 相对仓库根目录的 PRD 路径。
+ * @returns 不带 padding 的 URL-safe base64 字符串。
+ */
+export function encodePrdPath(prdPath: string): string {
   const bytes = new TextEncoder().encode(prdPath);
   let binary = "";
   for (let i = 0; i < bytes.length; i++) {

@@ -73,3 +73,24 @@ def read_prd_content(repo_path: Path, relative_prd_path: str) -> str:
         return resolved_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise PrdContentError(f"PRD 文件读取失败: {exc}") from exc
+
+
+def write_prd_content(repo_path: Path, relative_prd_path: str, content: str) -> None:
+    """写回白名单目录内的 PRD 原文。
+
+    路径白名单与 :func:`read_prd_content` 完全一致（只允许 ``tasks/pending/`` /
+    ``tasks/archive/`` 下的 ``.md``），因此写回端点无法被扩成任意文件写入。
+
+    Args:
+        repo_path: 仓库根目录。
+        relative_prd_path: 相对仓库根目录的 PRD 路径。
+        content: 要写入的 UTF-8 Markdown 全文。
+
+    Raises:
+        PrdContentError: 路径校验失败，或文件写入失败。
+    """
+    resolved_path = resolve_prd_content_path(repo_path, relative_prd_path)
+    try:
+        resolved_path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        raise PrdContentError(f"PRD 文件写入失败: {exc}") from exc

@@ -15,6 +15,8 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
     RunnerProcessRecord,
 )
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
 from backend.engines.agent_runner.repository_local import (
     IARRepositoryNotInitializedError,
 )
@@ -2383,6 +2385,10 @@ def test_main_ask_plan_only_writes_audit(tmp_path, monkeypatch) -> None:
     mock_context.repo_path = repo_path
     mock_context.config = MagicMock()
     mock_context.config.interactive_decision.default_agent = "codex"
+    # 决策（planner）阶段现在经生命周期矩阵解析并对未注册 agent fail-fast，因此
+    # MagicMock 形态的 config 必须给出真实的矩阵声明与 agent 注册表默认值。
+    mock_context.config.lifecycle_agents = LifecycleAgentsConfig()
+    mock_context.config.agents = dict(BUILTIN_AGENT_SPECS)
     mock_context.config.interactive_decision.default_output_dir = str(tmp_path / "decisions")
     mock_context.config.labels = MagicMock()
     mock_context.config.git.remote = "origin"
@@ -2436,6 +2442,10 @@ def test_main_ask_rejects_unknown_action() -> None:
     mock_context.repo_path = Path("/tmp/repo")
     mock_context.config = MagicMock()
     mock_context.config.interactive_decision.default_agent = "codex"
+    # 决策（planner）阶段现在经生命周期矩阵解析并对未注册 agent fail-fast，因此
+    # MagicMock 形态的 config 必须给出真实的矩阵声明与 agent 注册表默认值。
+    mock_context.config.lifecycle_agents = LifecycleAgentsConfig()
+    mock_context.config.agents = dict(BUILTIN_AGENT_SPECS)
     mock_context.config.interactive_decision.default_output_dir = "logs/decisions"
     mock_context.config.labels = MagicMock()
 
@@ -2492,6 +2502,10 @@ def test_main_ask_run_once_dry_run_dispatches_existing_use_case() -> None:
     mock_context.display_name = "Repo"
     mock_context.config = MagicMock()
     mock_context.config.interactive_decision.default_agent = "codex"
+    # 决策（planner）阶段现在经生命周期矩阵解析并对未注册 agent fail-fast，因此
+    # MagicMock 形态的 config 必须给出真实的矩阵声明与 agent 注册表默认值。
+    mock_context.config.lifecycle_agents = LifecycleAgentsConfig()
+    mock_context.config.agents = dict(BUILTIN_AGENT_SPECS)
     mock_context.config.interactive_decision.default_output_dir = "logs/decisions"
     mock_context.config.labels = MagicMock()
     mock_context.config.prompts.default_phase = "execution"
@@ -2566,6 +2580,10 @@ def test_main_ask_execute_confirmation_required_for_write_action() -> None:
     mock_context.display_name = "Repo"
     mock_context.config = MagicMock()
     mock_context.config.interactive_decision.default_agent = "codex"
+    # 决策（planner）阶段现在经生命周期矩阵解析并对未注册 agent fail-fast，因此
+    # MagicMock 形态的 config 必须给出真实的矩阵声明与 agent 注册表默认值。
+    mock_context.config.lifecycle_agents = LifecycleAgentsConfig()
+    mock_context.config.agents = dict(BUILTIN_AGENT_SPECS)
     mock_context.config.interactive_decision.default_output_dir = "logs/decisions"
     mock_context.config.labels = MagicMock()
     mock_context.config.prompts.default_phase = "execution"
@@ -2629,6 +2647,10 @@ def test_main_ask_execute_confirmation_wrong_input_skips_action(monkeypatch) -> 
     mock_context.display_name = "Repo"
     mock_context.config = MagicMock()
     mock_context.config.interactive_decision.default_agent = "codex"
+    # 决策（planner）阶段现在经生命周期矩阵解析并对未注册 agent fail-fast，因此
+    # MagicMock 形态的 config 必须给出真实的矩阵声明与 agent 注册表默认值。
+    mock_context.config.lifecycle_agents = LifecycleAgentsConfig()
+    mock_context.config.agents = dict(BUILTIN_AGENT_SPECS)
     mock_context.config.interactive_decision.default_output_dir = "logs/decisions"
     mock_context.config.labels = MagicMock()
     mock_context.config.prompts.default_phase = "execution"

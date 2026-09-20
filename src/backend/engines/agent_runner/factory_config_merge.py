@@ -26,6 +26,11 @@ from backend.core.shared.models.agent_runner import (
     RepositoryIdentity,
 )
 from backend.core.shared.models.agent_spec import AgentSpec
+from backend.core.shared.models.lifecycle_agent import (
+    LIFECYCLE_AGENT_KEYS,
+    LifecycleAgentsConfig,
+    concrete_declared_agent,
+)
 from backend.engines.agent_runner.factory_config_builder import (
     build_agent_registry_from_settings,
 )
@@ -35,6 +40,7 @@ from backend.infrastructure.config.settings import (
     AgentRunnerGeneratedContentSettings,
     AgentRunnerGeneratedContentTargetSettings,
     AgentRunnerLabelSettings,
+    AgentRunnerLifecycleAgentsSettings,
     AgentRunnerPromptSettings,
     AgentRunnerRepositorySettings,
 )
@@ -241,6 +247,28 @@ def _merge_deliberation_config(
     )
 
 
+def _merge_lifecycle_agents_config(
+    base_config: LifecycleAgentsConfig,
+    override: AgentRunnerLifecycleAgentsSettings | None,
+) -> LifecycleAgentsConfig:
+    """合并仓库级 ``[agent_runner.lifecycle_agents]`` 声明。
+
+    全局层声明原样保留，仓库层只收录显式声明过的键；解析时仓库层同键赢过
+    全局层（由 :meth:`LifecycleAgentsConfig.declared_value` 保证）。
+    """
+    if override is None:
+        return base_config
+    repository_layer = {
+        lifecycle_key: getattr(override, lifecycle_key)
+        for lifecycle_key in LIFECYCLE_AGENT_KEYS
+        if getattr(override, lifecycle_key) is not None
+    }
+    return LifecycleAgentsConfig(
+        global_layer=base_config.global_layer,
+        repository_layer=repository_layer,
+    )
+
+
 def merge_repository_config(
     global_config: AppConfig,
     repo_settings: AgentRunnerRepositorySettings,
@@ -290,6 +318,14 @@ def merge_repository_config(
         global_config.deliberation, repo_settings.deliberation
     )
     repl = _merge_optional_model(global_config.repl, repo_settings.repl)
+    lifecycle_agents = _merge_lifecycle_agents_config(
+        global_config.lifecycle_agents, repo_settings.lifecycle_agents
+    )
+    # 内容生成阶段的有效默认 agent 由合并后的矩阵派生（仓库层赢全局层）。
+    generated_content = dataclasses.replace(
+        generated_content,
+        lifecycle_default_agent=concrete_declared_agent(lifecycle_agents, "content_generation"),
+    )
     repositories = (
         global_config.repositories
         if skip_identity
@@ -314,6 +350,7 @@ def merge_repository_config(
         interactive_decision=interactive_decision,
         repl=repl,
         deliberation=deliberation,
+        lifecycle_agents=lifecycle_agents,
         repositories=repositories,
     )
 

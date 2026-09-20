@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
@@ -63,6 +63,7 @@ from backend.core.use_cases.generated_content import (
     extract_prd_section,
     generate_issue_content,
 )
+from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
 
 _logger = logging.getLogger(__name__)
 
@@ -1078,6 +1079,22 @@ def create_issue_from_prd(
     title = fallback_title
     body = fallback_body
     gc_config = request.generated_content_config
+    if gc_config is not None:
+        # PRD 级 ``content_generation`` 覆盖：来源 PRD 文件头部声明的 agent 高于
+        # 矩阵 / 既有配置派生的 ``lifecycle_default_agent``。头部块非法时只告警，
+        # 与流水线里的 ``attach_prd_lifecycle_overrides`` 保持同一"最佳努力"语义。
+        try:
+            prd_lifecycle_overrides = parse_prd_lifecycle_overrides(
+                prd_text, prd_path=relative_prd_path
+            )
+        except ValueError as exc:
+            _logger.warning(
+                "Ignoring invalid lifecycle_agents block in '%s': %s", relative_prd_path, exc
+            )
+            prd_lifecycle_overrides = {}
+        prd_content_generation_agent = prd_lifecycle_overrides.get("content_generation")
+        if prd_content_generation_agent:
+            gc_config = replace(gc_config, lifecycle_default_agent=prd_content_generation_agent)
     if gc_config is not None and gc_config.enabled:
         gc_context = build_issue_context(
             issue_type=request.issue_type,

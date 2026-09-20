@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from backend.core.agent.memory import (
@@ -214,12 +214,23 @@ __all__ = [
 
 
 def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) -> str:
-    """Choose an AI agent for the Issue."""
+    """Choose an AI agent for the Issue.
+
+    优先级：显式 ``override_agent``（CLI / loop recipe）> Issue 上的 agent 标签
+    路由 > 生命周期矩阵 ``implementation`` 显式声明 > ``runner.default_agent`` >
+    内置默认（``claude``）。标签路由与 loop recipe 仍是更高优先级——矩阵只替换
+    ``default_agent`` 这一回落层。
+    """
     if override_agent != "auto":
         return override_agent
     for agent_name, label in config.labels.agent_labels.items():
         if label in issue.labels:
             return agent_name
+    declared_agent = _resolve_declared_lifecycle_agent(
+        "implementation", config, issue=issue, override_agent=override_agent
+    )
+    if declared_agent is not None:
+        return declared_agent
     return config.runner.default_agent if config.runner.default_agent != "auto" else "claude"
 
 
@@ -316,23 +327,35 @@ def resolve_supervisor_agent(
     override_agent: str,
     *,
     fallback_agent: str | None = None,
+    prd_overrides: Mapping[str, str] | None = None,
 ) -> str:
     """解析 post-PR supervisor：命令行 ``--agent`` > 配置 > 回落。
 
-    ``fallback_agent`` 描述"配置为 ``auto`` 时用谁"：发布路径传本次实现者
-    （保持历史行为），``iar review`` 不传，回落到按 Issue 标签路由。
+    生命周期矩阵（或 PRD 覆盖）显式声明了具体 agent 时用它；``fallback_agent``
+    描述"配置为 ``auto`` 时用谁"：发布路径传本次实现者（保持历史行为），
+    ``iar review`` 不传，回落到按 Issue 标签路由。
 
     Args:
         issue: 当前 Issue。
         config: 应用配置。
         override_agent: 命令行 ``--agent``；``"auto"`` 表示未指定。
         fallback_agent: 配置为 ``auto`` 时的回落 agent；``None`` 表示按标签路由。
+        prd_overrides: PRD 文件头部覆盖（最高优先级），可选。
 
     Returns:
         supervisor agent 名。
     """
     if override_agent != "auto":
         return override_agent
+    declared_agent = _resolve_declared_lifecycle_agent(
+        "supervisor",
+        config,
+        issue=issue,
+        selected_agent=fallback_agent,
+        prd_overrides=prd_overrides,
+    )
+    if declared_agent is not None:
+        return declared_agent
     configured_agent = config.post_pr_supervisor.supervisor_agent
     if configured_agent != "auto":
         return configured_agent
@@ -341,26 +364,83 @@ def resolve_supervisor_agent(
     return choose_agent(issue, config, "auto")
 
 
+def _resolve_declared_lifecycle_agent(
+    lifecycle: str,
+    config: AppConfig,
+    *,
+    issue: IssueSummary | None = None,
+    selected_agent: str | None = None,
+    override_agent: str = "auto",
+    prd_overrides: Mapping[str, str] | None = None,
+) -> str | None:
+    """返回矩阵 / PRD 覆盖**显式声明**的具体 agent；仅声明 ``auto`` 或未声明时返回 ``None``。
+
+    这是各阶段既有解析函数接入生命周期矩阵的统一入口：只有"显式换人"才短路，
+    声明 ``auto`` 时交回各函数原有的 auto 语义，绝不改变既有行为。
+
+    局部导入 :mod:`lifecycle_agent_resolution` 是为了打破它与本模块的循环依赖
+    （解析函数需要 ``choose_agent`` / ``resolve_registered_agents``）。
+    """
+    from backend.core.shared.models.lifecycle_agent import (
+        LIFECYCLE_AGENT_AUTO,
+        normalize_lifecycle_agent_value,
+    )
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        effective_prd_overrides,
+        resolve_lifecycle_agent,
+    )
+
+    merged_overrides = effective_prd_overrides(issue, prd_overrides)
+    declared_value = merged_overrides.get(lifecycle)
+    if declared_value is None:
+        declared_value = config.lifecycle_agents.declared_value(lifecycle)
+    if declared_value is None:
+        return None
+    if normalize_lifecycle_agent_value(declared_value) == LIFECYCLE_AGENT_AUTO:
+        return None
+    return resolve_lifecycle_agent(
+        lifecycle,
+        config,
+        issue=issue,
+        selected_agent=selected_agent,
+        override_agent=override_agent,
+        prd_overrides=merged_overrides,
+    )
+
+
 def resolve_reviewer_agent(
     issue: IssueSummary,
     config: AppConfig,
     selected_agent: str,
+    *,
+    prd_overrides: Mapping[str, str] | None = None,
 ) -> str:
     """解析 pre-PR review 的审核者。
 
-    显式 ``pre_pr_review.review_agent`` 优先；``auto`` 时在
-    ``allow_same_agent`` 为真时沿用实现者，为假时从 agent 注册表里取第一个
-    不等于实现者的 agent（不再硬编码 ``codex``）。注册表里只有实现者一个
-    agent 时保持实现者并 WARN。
+    生命周期矩阵（或 PRD 覆盖）显式声明了具体 agent 时用它；声明 ``auto`` 或
+    两层都未声明时沿用既有语义：显式 ``pre_pr_review.review_agent`` 优先；
+    ``auto`` 时在 ``allow_same_agent`` 为真时沿用实现者，为假时从 agent 注册表
+    里取第一个不等于实现者的 agent（不再硬编码 ``codex``）。注册表里只有实现者
+    一个 agent 时保持实现者并 WARN。
 
     Args:
         issue: 当前 Issue。
         config: 应用配置。
         selected_agent: 本次实现者。
+        prd_overrides: PRD 文件头部覆盖（最高优先级），可选。
 
     Returns:
         审核者 agent 名。
     """
+    declared_agent = _resolve_declared_lifecycle_agent(
+        "review",
+        config,
+        issue=issue,
+        selected_agent=selected_agent,
+        prd_overrides=prd_overrides,
+    )
+    if declared_agent is not None:
+        return declared_agent
     review_config = config.pre_pr_review
     if review_config.review_agent != "auto":
         return review_config.review_agent

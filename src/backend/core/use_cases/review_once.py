@@ -33,6 +33,7 @@ from backend.core.use_cases.agent_runner_git import (
     pop_worktree_stash,
     stash_worktree_changes,
 )
+from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.run_agent_once import (
     create_or_reuse_worktree,
     get_head_sha,
@@ -185,7 +186,11 @@ def _process_review_candidate(
         )
 
     worktree_path = create_or_reuse_worktree(repo_path, issue, config, process_runner)
-    # 命令行 --agent > post_pr_supervisor.supervisor_agent > Issue 标签路由，
+    # PRD 级覆盖随 Issue 流动：从该 Issue 引用的 PRD 文件头部解析 lifecycle_agents
+    # 并回填，使 `iar review` / review-daemon 这条路径也能读到 PRD 的 supervisor 覆盖
+    # （与发布路径共用同一解析规则）。
+    issue = attach_prd_lifecycle_overrides(issue, repo_path)
+    # 命令行 --agent > PRD 覆盖 > post_pr_supervisor.supervisor_agent > Issue 标签路由，
     # 与发布路径共用同一解析规则（此前这里只按标签走，配置的 supervisor 被忽略）。
     supervisor_agent = resolve_supervisor_agent(issue, config, agent)
     cycle = (last_marker.cycle + 1) if last_marker else 1
