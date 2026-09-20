@@ -44,6 +44,11 @@ reinstall-iar:
 run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _check-completion
     #!/usr/bin/env bash
     set -euo pipefail
+    # 启用作业控制：每个 `run_* &` 后台服务会成为独立进程组的组长，
+    # 因此 $! 既是子进程 PID 也是其 PGID。cleanup_processes 据此对整组
+    # 发信号，可终止 uv run -> uvicorn、pnpm -> next 等孙进程，
+    # 避免它们被 reparent 到 launchd 成为残留孤儿进程。
+    set -m
 
     # 进程数上限守护，兜住构建工具 fork 失控（背景与开关见脚本内注释）
     process_guard_script="{{justfile_directory()}}/scripts/shared/just/process_guard.sh"
@@ -227,11 +232,32 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
         )
     }
 
+    # 对单个服务的整棵进程树发信号。set -m 下 $! == PGID，对负 PID 发信号
+    # 即对整个进程组发信号，可杀掉该服务的全部孙进程（uv run -> uvicorn、
+    # pnpm -> next 等）。即使该服务的子 shell 已死、孙进程仍以原 PGID
+    # 残留为孤儿，只要组内还有成员，`kill -0 -- -$pid` 仍会成功并一并清理。
+    # 若 set -m 因故未生效（无独立进程组），组不存在，退化为只杀该 PID，
+    # 绝不会误伤 just 自身所在的父进程组。
+    kill_tree() {
+        local tree_pid="$1"
+        local tree_sig="${2:-TERM}"
+        [ -n "$tree_pid" ] || return 0
+        if kill -0 -- -"$tree_pid" 2>/dev/null; then
+            kill -"$tree_sig" -- -"$tree_pid" 2>/dev/null || true
+        else
+            kill -"$tree_sig" "$tree_pid" 2>/dev/null || true
+        fi
+    }
+
     cleanup_processes() {
+        # 先 SIGTERM 整组，给服务 graceful shutdown 的机会
         for process_pid in "$backend_pid" "$frontend_public_pid"; do
-            if [ -n "$process_pid" ] && kill -0 "$process_pid" 2>/dev/null; then
-                kill "$process_pid" 2>/dev/null || true
-            fi
+            kill_tree "$process_pid" TERM
+        done
+        # 留一点时间再对仍存活的组补 SIGKILL，确保孙进程不残留
+        sleep 0.5
+        for process_pid in "$backend_pid" "$frontend_public_pid"; do
+            kill_tree "$process_pid" KILL
         done
         wait 2>/dev/null || true
     }
