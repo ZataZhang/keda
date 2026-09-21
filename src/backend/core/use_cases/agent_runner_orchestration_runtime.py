@@ -48,6 +48,11 @@ from backend.core.use_cases.agent_runner_output_routing import (
 )
 from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
 from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
+from backend.core.use_cases.agent_runner_lifecycle import (
+    LifecycleEventType,
+    record_lifecycle_event,
+    record_lifecycle_terminal,
+)
 from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.agent_runner_worktree_probe import (
     _has_existing_local_commit_ready_for_publish,
@@ -68,6 +73,21 @@ RUNTIME_DEPENDENCY_NAMES = (
     "_worktree_needs_rebase_recovery",
     "_has_existing_local_commit_ready_for_publish",
 )
+
+
+def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
+    """从 Issue 正文解析其引用的 PRD 相对路径；解析失败返回空串。
+
+    返回空串表示 runner 无法定位该 PRD：此时 run id 仍由 Issue 编号决定，
+    run 行的 ``prd_path`` 保留 roadmap 启动侧已写入的真实路径，不会被空值
+    覆盖。观测失败绝不阻断 Issue 处理。
+    """
+    from backend.core.use_cases.agent_runner_feedback import extract_prd_path
+
+    try:
+        return extract_prd_path(issue.body) or ""
+    except Exception:  # noqa: BLE001 - observation must not break the run.
+        return ""
 
 
 @dataclass(frozen=True)
@@ -184,10 +204,37 @@ def _process_single_issue(
     # Issue 引用的 PRD 文件解析头部 lifecycle_agents 块并回填，使实现 / 审核 / 监督
     # 等阶段的解析函数无需额外参数即可读到 PRD 级覆盖（最高优先级）。
     issue = attach_prd_lifecycle_overrides(issue, repo_path)
+    lifecycle_prd_path = _resolve_lifecycle_prd_path(issue)
     selected_agent = choose_agent(issue, config, agent)
     output_view.register_issue(issue.number, selected_agent)
     run_started_at = datetime.now(timezone.utc)
     used_agent = selected_agent
+
+    # 生命周期观测（旁路）：本轮 runner 领到该 Issue，记为一次执行开始。
+    # run id 由 repo_id + Issue 编号确定性推导，与 roadmap 启动侧写入的 run
+    # 完全一致，因此这里不会新建重复 run。
+    record_lifecycle_event(
+        store=run_history_store,
+        repo_id=effective_repo_id,
+        prd_path=lifecycle_prd_path,
+        issue_number=issue.number,
+        trigger=run_trigger,
+        event_type=LifecycleEventType.STARTED,
+        actor="runner",
+        occurred_at=run_started_at.isoformat(timespec="seconds"),
+        detail={"agent": selected_agent, "issue_kind": issue_kind},
+    )
+    record_lifecycle_event(
+        store=run_history_store,
+        repo_id=effective_repo_id,
+        prd_path=lifecycle_prd_path,
+        issue_number=issue.number,
+        trigger=run_trigger,
+        event_type=LifecycleEventType.CLAIMED,
+        actor="runner",
+        occurred_at=run_started_at.isoformat(timespec="seconds"),
+        detail={"agent": selected_agent, "issue_kind": issue_kind},
+    )
 
     def _on_attempt_recorded(result: AttemptResult, attempt_results: list[AttemptResult]) -> None:
         _persist_attempt_result(
@@ -198,6 +245,53 @@ def _process_single_issue(
             github_client=github_client,
             run_history_store=run_history_store,
         )
+        # 生命周期观测（旁路）：每次 Agent attempt 落一条事件；重试与恢复作为
+        # 独立事件追加，后续成功不覆盖早先的失败历史。
+        attempt_detail = {
+            "agent": result.agent,
+            "attempt_number": result.attempt_number,
+            "failure_type": result.failure_type.value,
+            "recovered": result.recovered,
+            "duration_seconds": result.duration_seconds,
+        }
+        record_lifecycle_event(
+            store=run_history_store,
+            repo_id=effective_repo_id,
+            prd_path=lifecycle_prd_path,
+            issue_number=issue.number,
+            trigger=run_trigger,
+            event_type=LifecycleEventType.ATTEMPT,
+            actor="runner",
+            occurred_at=result.started_at or None,
+            event_key=f"attempt:{result.agent}:{result.attempt_number}:{result.started_at}",
+            detail=attempt_detail,
+        )
+        if result.attempt_number > 1:
+            record_lifecycle_event(
+                store=run_history_store,
+                repo_id=effective_repo_id,
+                prd_path=lifecycle_prd_path,
+                issue_number=issue.number,
+                trigger=run_trigger,
+                event_type=LifecycleEventType.RETRY,
+                actor="runner",
+                occurred_at=result.started_at or None,
+                event_key=f"retry:{result.agent}:{result.attempt_number}",
+                detail=attempt_detail,
+            )
+        if result.recovered:
+            record_lifecycle_event(
+                store=run_history_store,
+                repo_id=effective_repo_id,
+                prd_path=lifecycle_prd_path,
+                issue_number=issue.number,
+                trigger=run_trigger,
+                event_type=LifecycleEventType.RECOVERED,
+                actor="runner",
+                occurred_at=result.finished_at or None,
+                event_key=f"recovered:{result.agent}:{result.attempt_number}",
+                detail=attempt_detail,
+            )
 
     try:
         if issue_kind == "ready":
@@ -221,6 +315,19 @@ def _process_single_issue(
             if marker is None:
                 output_view.update_status(issue.number, "skipped")
                 return 0
+            # 生命周期观测：rework 标记未被消费说明这是同一 PRD 的一次重做。
+            record_lifecycle_event(
+                store=run_history_store,
+                repo_id=effective_repo_id,
+                prd_path=lifecycle_prd_path,
+                issue_number=issue.number,
+                trigger=run_trigger,
+                event_type=LifecycleEventType.RETRY,
+                actor="runner",
+                occurred_at=run_started_at.isoformat(timespec="seconds"),
+                event_key=f"rework:{issue.number}:{marker.phase}:{marker.cycle}",
+                detail={"marker_phase": marker.phase, "cycle": marker.cycle},
+            )
             used_agent = run_issue_with_agent_fallback(
                 issue=issue,
                 config=config,
@@ -248,6 +355,18 @@ def _process_single_issue(
                 )
                 output_view.update_status(issue.number, "skipped")
                 return 0
+            # 生命周期观测：阻塞 Issue 被重新领取，说明阻塞已解除并进入新一轮执行。
+            record_lifecycle_event(
+                store=run_history_store,
+                repo_id=effective_repo_id,
+                prd_path=lifecycle_prd_path,
+                issue_number=issue.number,
+                trigger=run_trigger,
+                event_type=LifecycleEventType.UNBLOCKED,
+                actor="runner",
+                occurred_at=run_started_at.isoformat(timespec="seconds"),
+                detail={"issue_kind": issue_kind},
+            )
             used_agent = run_issue_with_agent_fallback(
                 issue=issue,
                 config=config,
@@ -281,6 +400,16 @@ def _process_single_issue(
             )
         _logger.info("Completed Issue #%d: %s", issue.number, issue.title)
         output_view.update_status(issue.number, "completed")
+        record_lifecycle_event(
+            store=run_history_store,
+            repo_id=effective_repo_id,
+            prd_path=lifecycle_prd_path,
+            issue_number=issue.number,
+            trigger=run_trigger,
+            event_type=LifecycleEventType.IMPLEMENTATION_COMPLETED,
+            actor="runner",
+            detail={"agent": used_agent},
+        )
         _append_run_record_locked(
             run_history_store=run_history_store,
             repo_id=effective_repo_id,
@@ -302,6 +431,17 @@ def _process_single_issue(
         )
         _logger.error("Blocked Issue #%d: %s", issue.number, exc)
         output_view.update_status(issue.number, "blocked")
+        record_lifecycle_terminal(
+            store=run_history_store,
+            repo_id=effective_repo_id,
+            prd_path=lifecycle_prd_path,
+            issue_number=issue.number,
+            trigger=run_trigger,
+            event_type=LifecycleEventType.BLOCKED,
+            outcome="blocked",
+            actor="runner",
+            detail={"error_summary": str(exc)},
+        )
         _append_run_record_locked(
             run_history_store=run_history_store,
             repo_id=effective_repo_id,
@@ -331,6 +471,17 @@ def _process_single_issue(
         )
         _logger.error("Failed Issue #%d: %s", issue.number, exc)
         output_view.update_status(issue.number, "failed")
+        record_lifecycle_terminal(
+            store=run_history_store,
+            repo_id=effective_repo_id,
+            prd_path=lifecycle_prd_path,
+            issue_number=issue.number,
+            trigger=run_trigger,
+            event_type=LifecycleEventType.FAILED,
+            outcome="failed",
+            actor="runner",
+            detail={"error_summary": str(exc)},
+        )
         _append_run_record_locked(
             run_history_store=run_history_store,
             repo_id=effective_repo_id,
@@ -431,12 +582,32 @@ def run_once(request: RunOnceRequest) -> int:
     # label、重置过期签收并清理已关闭 Issue 的证据分支。
     # 与 Issue 领取相互独立，失败不影响本轮处理。
     if not dry_run:
+
+        def _on_validation(
+            validation_issue: IssueSummary,
+            event_type: LifecycleEventType,
+            event_key: str,
+            detail: dict,
+        ) -> None:
+            record_lifecycle_event(
+                store=run_history_store,
+                repo_id=effective_repo_id,
+                prd_path=_resolve_lifecycle_prd_path(validation_issue),
+                issue_number=validation_issue.number,
+                trigger=run_trigger,
+                event_type=event_type,
+                actor="validation_gate",
+                event_key=event_key,
+                detail=detail,
+            )
+
         try:
             process_validation_gate(
                 repo_path=repo_path,
                 config=config,
                 github_client=github_client,
                 process_runner=process_runner,
+                on_validation=_on_validation,
             )
         except Exception as gate_exc:  # noqa: BLE001 - gate must not break polling.
             _logger.error("Validation gate pass failed: %s", gate_exc)

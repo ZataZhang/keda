@@ -24,6 +24,7 @@ from backend.infrastructure.persistence.console_store import (
     RoadmapQueueEntry,
     RoadmapSettingsEntry,
     SqliteConsoleStore,
+    _SCHEMA_VERSION,
 )
 
 # v3 时代的建表语句：刻意与当前代码里的 CREATE 解耦，模拟用户磁盘上的旧库。
@@ -387,7 +388,7 @@ def test_schema_migration_from_version_1(tmp_path: Path) -> None:
 
 
 def test_v3_database_migrates_to_v4_and_keeps_history(tmp_path: Path) -> None:
-    """旧库打开新代码后自动升 v4，历史数据逐条保留且两张新表建成。"""
+    """旧库打开新代码后自动升到最新版本，历史数据逐条保留且新表建成。"""
     db_path = tmp_path / "console.db"
     _seed_v3_database(db_path, run_record_count=3)
 
@@ -395,7 +396,7 @@ def test_v3_database_migrates_to_v4_and_keeps_history(tmp_path: Path) -> None:
 
     probe = _fresh_connection(db_path)
     try:
-        assert probe.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
         assert probe.execute("SELECT COUNT(*) FROM run_records").fetchone()[0] == 3
         table_names = {
             row[0]
@@ -405,6 +406,8 @@ def test_v3_database_migrates_to_v4_and_keeps_history(tmp_path: Path) -> None:
         probe.close()
     assert "monitoring_snapshots" in table_names
     assert "monitor_settings" in table_names
+    assert "prd_lifecycle_runs" in table_names
+    assert "prd_lifecycle_events" in table_names
 
     reopened = SqliteConsoleStore(db_path)
     assert len(reopened.list_recent_runs()) == 3
@@ -419,11 +422,55 @@ def test_fresh_database_creates_monitor_tables(tmp_path: Path) -> None:
 
     probe = _fresh_connection(db_path)
     try:
-        assert probe.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
     finally:
         probe.close()
     assert store.list_monitor_snapshots() == []
     assert store.get_monitor_settings() is None
+    assert store.list_lifecycle_runs() == []
+
+
+def test_v4_database_migrates_to_latest_and_creates_lifecycle_tables(tmp_path: Path) -> None:
+    """v4 旧库（无 lifecycle 表）打开新代码后补齐 v5 表并保留运行历史。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+    store.append_run(
+        RunRecord(
+            repo_id="keda-main",
+            repo_path="/tmp/repo",
+            issue_number=1,
+            trigger="cli_run",
+            agent="claude",
+            outcome="completed",
+            error_summary=None,
+            started_at="2026-09-21T10:00:00+00:00",
+            finished_at="2026-09-21T10:05:00+00:00",
+            duration_seconds=300.0,
+        )
+    )
+
+    # 把库退回“v4 时代”形态：删掉 lifecycle 表并降回 user_version=4。
+    raw = sqlite3.connect(db_path)
+    raw.execute("DROP TABLE IF EXISTS prd_lifecycle_events")
+    raw.execute("DROP TABLE IF EXISTS prd_lifecycle_runs")
+    raw.execute("PRAGMA user_version = 4")
+    raw.commit()
+    raw.close()
+
+    migrated = SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+        table_names = {
+            row[0]
+            for row in probe.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+    finally:
+        probe.close()
+    assert {"prd_lifecycle_runs", "prd_lifecycle_events"} <= table_names
+    assert len(migrated.list_recent_runs()) == 1
+    assert migrated.list_lifecycle_runs() == []
 
 
 def test_monitor_snapshot_upsert_overwrites_same_repo(tmp_path: Path) -> None:

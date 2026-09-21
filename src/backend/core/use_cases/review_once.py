@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
+from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
@@ -14,6 +15,11 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.agent_runner_events import (
     parse_latest_event_marker,
+)
+from backend.core.use_cases.agent_runner_lifecycle import (
+    LifecycleEventType,
+    record_lifecycle_event,
+    record_lifecycle_terminal,
 )
 from backend.core.use_cases.agent_runner_merge_queue import (
     _autopilot_enabled,
@@ -41,6 +47,104 @@ from backend.core.use_cases.run_agent_once import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _lifecycle_prd_path(issue: IssueSummary) -> str:
+    """从 Issue 正文解析 PRD 相对路径；失败返回空串（观测降级，不阻断审核）。"""
+    from backend.core.use_cases.agent_runner_feedback import extract_prd_path
+
+    try:
+        return extract_prd_path(issue.body) or ""
+    except Exception:  # noqa: BLE001 - observation only.
+        return ""
+
+
+def _record_review_outcome(
+    *,
+    run_history_store: IRunHistoryStore | None,
+    repo_id: str,
+    issue: IssueSummary,
+    outcome: str,
+    actor: str,
+) -> None:
+    """把审核候选的单次结果映射为生命周期事件（旁路）。
+
+    只记录明确的阶段推进：通过、失败、仍在等待；``skipped_*`` / ``deferred_*``
+    不改变阶段，因此不写事件，避免用“没发生的事”制造时间线噪声。
+    """
+    if outcome.startswith(("skipped_", "deferred_")):
+        return
+    if outcome == "approved_for_human_review":
+        event_type = LifecycleEventType.REVIEW_PASSED
+    elif outcome.startswith("blocked_") or outcome == "marked_failed":
+        event_type = LifecycleEventType.REVIEW_FAILED
+    else:
+        event_type = LifecycleEventType.REVIEW_STARTED
+    record_lifecycle_event(
+        store=run_history_store,
+        repo_id=repo_id,
+        prd_path=_lifecycle_prd_path(issue),
+        issue_number=issue.number,
+        trigger="review_once",
+        event_type=event_type,
+        actor=actor,
+        event_key=f"{event_type.value}:{issue.number}:{outcome}",
+        detail={"outcome": outcome},
+    )
+
+
+def _record_merge_outcomes(
+    *,
+    run_history_store: IRunHistoryStore | None,
+    repo_id: str,
+    outcomes: list,
+    candidates_by_number: dict[int, IssueSummary],
+) -> None:
+    """把合并队列结果映射为生命周期事件（旁路）。"""
+    for outcome in outcomes:
+        issue = candidates_by_number.get(outcome.issue_number)
+        if issue is None:
+            continue
+        action = getattr(outcome, "action", "")
+        if action.startswith("skipped_"):
+            continue
+        detail = {"merge_action": action}
+        if action == "merged":
+            record_lifecycle_terminal(
+                store=run_history_store,
+                repo_id=repo_id,
+                prd_path=_lifecycle_prd_path(issue),
+                issue_number=issue.number,
+                trigger="review_once",
+                event_type=LifecycleEventType.MERGED,
+                outcome="completed",
+                actor="merge_queue",
+                detail=detail,
+            )
+        elif action == "blocked_forbidden":
+            record_lifecycle_terminal(
+                store=run_history_store,
+                repo_id=repo_id,
+                prd_path=_lifecycle_prd_path(issue),
+                issue_number=issue.number,
+                trigger="review_once",
+                event_type=LifecycleEventType.BLOCKED,
+                outcome="blocked",
+                actor="merge_queue",
+                detail=detail,
+            )
+        else:
+            record_lifecycle_event(
+                store=run_history_store,
+                repo_id=repo_id,
+                prd_path=_lifecycle_prd_path(issue),
+                issue_number=issue.number,
+                trigger="review_once",
+                event_type=LifecycleEventType.MERGE_STARTED,
+                actor="merge_queue",
+                event_key=f"merge_started:{issue.number}:{action}",
+                detail=detail,
+            )
 
 
 def _context_changed_wide(
@@ -308,6 +412,8 @@ def review_once(
     max_issues: int,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
+    run_history_store: IRunHistoryStore | None = None,
+    repo_id: str | None = None,
 ) -> int:
     """Run one review polling pass.
 
@@ -319,10 +425,15 @@ def review_once(
         max_issues: Maximum issues to process.
         github_client: Client for interacting with GitHub.
         process_runner: Runner for executing subprocess commands.
+        run_history_store: Optional PRD lifecycle side-channel store; ``None``
+            keeps the previous behaviour with no lifecycle events.
+        repo_id: Repository id recorded with lifecycle events; defaults to the
+            repository directory name.
 
     Returns:
         Exit code (0 on success, 1 if any issue failed).
     """
+    effective_repo_id = repo_id or repo_path.name
     candidates = github_client.list_review_candidate_issues(
         [config.labels.supervising, config.labels.review], max_issues
     )
@@ -358,6 +469,13 @@ def review_once(
                 outcome,
                 issue.title,
             )
+            _record_review_outcome(
+                run_history_store=run_history_store,
+                repo_id=effective_repo_id,
+                issue=issue,
+                outcome=outcome,
+                actor="review_once",
+            )
         except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
             exit_code = 1
             transition_issue_workflow_state(
@@ -368,6 +486,13 @@ def review_once(
                 f"## Agent Runner Review Failed\n\n```text\n{exc}\n```\n",
             )
             _logger.error("Review failed for Issue #%d: %s", issue.number, exc)
+            _record_review_outcome(
+                run_history_store=run_history_store,
+                repo_id=effective_repo_id,
+                issue=issue,
+                outcome="marked_failed",
+                actor="review_once",
+            )
 
     # Autopilot 快速档激活时（双开关同时为真），supervisor approve 的 PR 在
     # supervisor 循环结束后进入合并队列，由 ``process_merge_queue`` 串行
@@ -376,7 +501,7 @@ def review_once(
     # 严格档（任一开关为假）整段 no-op，现有行为零变化。
     if _autopilot_enabled(config) and not dry_run:
         try:
-            merge_exit_code, _outcomes = process_merge_queue(
+            merge_exit_code, merge_outcomes = process_merge_queue(
                 repo_path=repo_path,
                 config=config,
                 github_client=github_client,
@@ -385,6 +510,12 @@ def review_once(
             )
             if merge_exit_code != 0:
                 exit_code = merge_exit_code
+            _record_merge_outcomes(
+                run_history_store=run_history_store,
+                repo_id=effective_repo_id,
+                outcomes=list(merge_outcomes),
+                candidates_by_number={candidate.number: candidate for candidate in candidates},
+            )
         except Exception as exc:  # noqa: BLE001 - merge queue failures must not crash review.
             _logger.error("Merge queue crashed: %s", exc)
             exit_code = 1

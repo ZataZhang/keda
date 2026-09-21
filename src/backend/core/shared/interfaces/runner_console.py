@@ -271,6 +271,141 @@ class IRunHistoryStore(ABC):
 
 
 @dataclass(frozen=True)
+class PrdLifecycleRunRecord:
+    """一次 PRD 生命周期的稳定身份与终态（追加账本的 run 行）。
+
+    身份固定为 ``repo_id + prd_path + run_id``：``run_id`` 由 core 依据
+    ``repo_id`` 与 Issue 编号（无 Issue 时退化为 PRD 路径摘要）确定性推导，
+    因此 runner 与 roadmap 两侧无需显式传递就能写到同一行，重试与跨进程
+    恢复也不会新建重复 run。
+    """
+
+    run_id: str
+    repo_id: str
+    prd_path: str
+    issue_number: int | None
+    trigger: str
+    started_at: str  # ISO8601 UTC
+    finished_at: str | None
+    outcome: str | None  # completed / failed / blocked
+    history_complete: bool
+
+
+@dataclass(frozen=True)
+class PrdLifecycleEventRecord:
+    """一条追加式生命周期事件（账本事件行）。
+
+    ``event_key`` 在同一 ``run_id`` 内唯一，用于抵抗重试与并发重复写；
+    ``detail_json`` 只允许结构化非敏感摘要（不含 prompt / 终端原文 / 密钥）。
+    """
+
+    run_id: str
+    event_key: str
+    event_type: str
+    phase: str
+    actor: str
+    occurred_at: str  # ISO8601 UTC
+    detail_json: str
+
+
+class IPrdLifecycleStore(ABC):
+    """PRD 生命周期 run/event 追加账本的旁路存储端口。
+
+    与 :class:`IRunHistoryStore` 同库同族：run/event 只是观测账本，不参与
+    workflow 决策；写入失败必须降级为日志告警并把对应 run 标记为
+    ``history_complete=False``，绝不允许阻断 runner 主流程。
+    """
+
+    @abstractmethod
+    def upsert_lifecycle_run(self, run_record: PrdLifecycleRunRecord) -> None:
+        """创建或刷新一个 lifecycle run。
+
+        首次写入落 ``started_at``；已存在时只允许补齐 ``prd_path`` /
+        ``issue_number`` / ``finished_at`` / ``outcome`` / ``history_complete``，
+        不覆盖更早的 ``started_at``。失败时抛出异常，由 core 记录函数降级。
+        """
+        ...
+
+    @abstractmethod
+    def append_lifecycle_event(self, event_record: PrdLifecycleEventRecord) -> bool:
+        """追加一条生命周期事件。
+
+        Returns:
+            ``True`` 表示本次真实插入；``False`` 表示 ``event_key`` 已存在
+            （幂等命中，未产生重复事件）。
+
+        Raises:
+            Exception: 存储故障时抛出，由 core 记录函数捕获并标记 run 不完整。
+        """
+        ...
+
+    @abstractmethod
+    def mark_lifecycle_run_incomplete(self, run_id: str) -> None:
+        """把某个 run 标记为观测历史不完整（事件写入失败后的降级信号）。"""
+        ...
+
+    @abstractmethod
+    def finish_lifecycle_run(
+        self,
+        *,
+        run_id: str,
+        outcome: str,
+        finished_at: str,
+    ) -> None:
+        """写终态：设置 ``finished_at`` 与 ``outcome``，不改动已有事件。"""
+        ...
+
+    @abstractmethod
+    def reopen_lifecycle_run(self, run_id: str) -> None:
+        """重开一个已收口的 run（``finished_at`` 与 ``outcome`` 清空）。
+
+        同一个稳定 run id 在失败/阻塞后可能被再次执行（重试或解除阻塞），此时
+        该 run 仍是“进行中”。若不重开，``finished_at`` 会早于后续事件时间，
+        使端到端耗时与执行/等待/阻塞拆分互相矛盾。终态由事件历史保留，不因
+        重开而丢失（``failed`` / ``blocked`` 事件仍在时间线上）。
+        """
+        ...
+
+    @abstractmethod
+    def get_lifecycle_run(self, run_id: str) -> PrdLifecycleRunRecord | None:
+        """按 run id 读取单个 run；不存在时返回 ``None``。"""
+        ...
+
+    @abstractmethod
+    def get_latest_lifecycle_run(
+        self, *, repo_id: str, prd_path: str
+    ) -> PrdLifecycleRunRecord | None:
+        """按 ``repo_id + prd_path`` 读取最近一次 run；不存在时返回 ``None``。"""
+        ...
+
+    @abstractmethod
+    def list_lifecycle_events(self, *, run_id: str) -> list[PrdLifecycleEventRecord]:
+        """按发生顺序（occurred_at，再按写入顺序）列出某个 run 的全部事件。"""
+        ...
+
+    @abstractmethod
+    def list_lifecycle_runs(
+        self, *, repo_id: str | None = None, since: str | None = None
+    ) -> list[PrdLifecycleRunRecord]:
+        """列出 run，可按仓库与 ``since``（ISO8601 下界）过滤。
+
+        返回按 ``started_at`` 正序排列的 run；用于仓库级统计聚合。
+        """
+        ...
+
+    @abstractmethod
+    def count_legacy_runs_without_lifecycle(
+        self, *, repo_id: str | None = None, since: str | None = None
+    ) -> int:
+        """统计无法可靠关联 PRD 的旧 ``run_records`` 条数（降级披露用）。
+
+        旧记录只有 Issue 编号、没有稳定 run id，不能并入完整生命周期分位数；
+        本方法让统计显式披露被排除的条数，而不是静默丢弃。
+        """
+        ...
+
+
+@dataclass(frozen=True)
 class RegistryRepositoryEntry:
     """registry 中一个仓库条目的摘要视图。"""
 

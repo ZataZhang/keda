@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
+from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.shared.models.agent_runner import RepositoryRunContext
 from backend.core.use_cases.review_once import review_once
 
@@ -22,6 +23,7 @@ def run_review_daemon(
     max_issues: int,
     process_runner: IProcessRunner,
     github_client_factory: Callable[[Path], IGitHubClient],
+    run_history_store: IRunHistoryStore | None = None,
 ) -> None:
     """Run the review poller forever across all target repositories.
 
@@ -50,6 +52,8 @@ def run_review_daemon(
                     max_issues=max_issues,
                     github_client=github_client,
                     process_runner=process_runner,
+                    run_history_store=run_history_store,
+                    repo_id=context.repo_id,
                 )
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
                 _logger.error(

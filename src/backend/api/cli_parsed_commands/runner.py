@@ -168,6 +168,8 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
                 max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
                 github_client=github_client,
                 process_runner=ctx.process_runner,
+                run_history_store=_create_run_history_store_or_none(),
+                repo_id=context.repo_id,
             )
             if repo_exit_code != 0:
                 aggregated_exit_code = 1
@@ -205,6 +207,7 @@ def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
         max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
         process_runner=ctx.process_runner,
         github_client_factory=ctx.github_client_factory,
+        run_history_store=_create_run_history_store_or_none(),
     )
     return 0
 

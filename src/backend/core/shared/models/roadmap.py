@@ -144,3 +144,92 @@ class RoadmapAdvanceReport:
     started: list[RoadmapActionResult]
     queued: list[str]
     skipped: list[str]
+
+
+@dataclass(frozen=True)
+class PrdLifecycleDurations:
+    """单次 PRD 生命周期的耗时拆分（互斥口径，可由事件时间线复算）。
+
+    ``end_to_end_seconds`` 即从首次进入执行队列到归档（进行中则到当前时刻）
+    的端到端历时；``active`` / ``waiting`` / ``blocked`` 三者互斥且相加等于
+    端到端耗时。``end_to_end_seconds`` 为 ``None`` 表示尚无任何事件。
+    """
+
+    end_to_end_seconds: float | None
+    active_seconds: float
+    waiting_seconds: float
+    blocked_seconds: float
+
+
+@dataclass(frozen=True)
+class PrdLifecycleEventView:
+    """PRD 生命周期时间线中的单条事件（API 视图）。"""
+
+    event_type: str
+    phase: str
+    actor: str
+    occurred_at: str
+    detail: dict
+
+
+@dataclass(frozen=True)
+class PrdLifecycleDetail:
+    """单个 PRD 的生命周期详情（Roadmap 详情“执行过程”标签的数据源）。
+
+    ``has_data`` 为 ``False`` 表示该 PRD 还没有任何 lifecycle run/event；
+    ``history_complete`` 为 ``False`` 表示观测账本自身有缺口（事件写入失败），
+    页面必须显式告警而不是假装数据完整。
+    """
+
+    repo_id: str
+    prd_path: str
+    run_id: str | None
+    issue_number: int | None
+    trigger: str | None
+    current_phase: str
+    in_progress: bool
+    outcome: str | None
+    history_complete: bool
+    started_at: str | None
+    finished_at: str | None
+    durations: PrdLifecycleDurations
+    events: list[PrdLifecycleEventView]
+    has_data: bool
+
+
+@dataclass(frozen=True)
+class PrdLifecycleStatsRow:
+    """仓库级 PRD 生命周期统计中的单行 PRD 明细。"""
+
+    run_id: str
+    prd_path: str
+    issue_number: int | None
+    outcome: str | None
+    current_phase: str
+    in_progress: bool
+    history_complete: bool
+    started_at: str
+    finished_at: str | None
+    durations: PrdLifecycleDurations
+
+
+@dataclass(frozen=True)
+class PrdLifecycleStats:
+    """仓库级 PRD 端到端统计（Stats 页“PRD 执行分析”的数据源）。
+
+    ``unlinked_run_count`` 披露无法可靠关联 PRD 的旧 ``run_records`` 条数；
+    这些记录不进入完成分位数，也不被伪装成生命周期事件。
+    """
+
+    repo_id: str | None
+    window_days: int
+    completed_runs: int
+    average_end_to_end_seconds: float | None
+    median_end_to_end_seconds: float | None
+    p90_end_to_end_seconds: float | None
+    average_blocked_seconds: float | None
+    bottleneck_phase: str | None
+    bottleneck_phase_seconds: float | None
+    unlinked_run_count: int
+    incomplete_run_count: int
+    runs: list[PrdLifecycleStatsRow]

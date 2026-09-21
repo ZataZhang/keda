@@ -39,6 +39,11 @@ from backend.core.shared.models.roadmap import (
     RoadmapPrdState,
     RoadmapSettingsEntry,
 )
+from backend.core.use_cases.agent_runner_lifecycle import (
+    LifecycleEventType,
+    record_lifecycle_event,
+    record_lifecycle_terminal,
+)
 from backend.core.use_cases.console_processes import (
     ConsoleProcessError,
     start_runner_process,
@@ -114,6 +119,34 @@ def _audit(
         )
     except Exception as exc:  # noqa: BLE001 - audit must not break actions.
         _logger.warning("Failed to audit roadmap action %s: %s", action, exc)
+
+
+def _record_lifecycle(
+    store: IRoadmapStore,
+    *,
+    event_type: LifecycleEventType,
+    repo_id: str,
+    prd_path: str,
+    issue_number: int | None,
+    trigger: str,
+    detail: dict | None = None,
+) -> None:
+    """旁路记录 roadmap 侧的 PRD 生命周期事件（失败不阻断动作）。
+
+    roadmap 与 runner 共用同一个 console SQLite 文件，``store`` 同时具备
+    lifecycle 账本能力；这里只写“排队 / 启动 / 归档”等 roadmap 拥有语义的
+    事件，runner 执行内部事件由 runner 自己写，避免同一事实两处猜测。
+    """
+    record_lifecycle_event(
+        store=store,
+        repo_id=repo_id,
+        prd_path=prd_path,
+        issue_number=issue_number,
+        trigger=trigger,
+        event_type=event_type,
+        actor="roadmap",
+        detail=detail,
+    )
 
 
 def _create_issue_for_prd(
@@ -248,6 +281,15 @@ def start_prd(
             raise RoadmapActionError(f"添加 ready 标签失败: {exc}") from exc
         issue_number = prd.issue_number
 
+    _record_lifecycle(
+        store,
+        event_type=LifecycleEventType.QUEUED,
+        repo_id=repo_id,
+        prd_path=prd_path,
+        issue_number=issue_number,
+        trigger="console_start",
+        detail={"trigger": "manual"},
+    )
     try:
         _spawn_runner(repo_id, contexts, supervisor, runner_command, spawn_cwd)
     except ConsoleProcessError as exc:
@@ -262,6 +304,14 @@ def start_prd(
         )
         raise RoadmapActionError(f"启动 runner 失败: {exc}") from exc
 
+    _record_lifecycle(
+        store,
+        event_type=LifecycleEventType.STARTED,
+        repo_id=repo_id,
+        prd_path=prd_path,
+        issue_number=issue_number,
+        trigger="console_start",
+    )
     _audit(
         store,
         action="start_prd",
@@ -618,6 +668,24 @@ def advance_roadmap_queue(
                     status="completed",
                     finished_at=_now_iso(),
                 )
+                # 归档 / 合并是 roadmap 调度侧能可靠观测到的终态：PRD 已离开
+                # pending（归档）或已标记合并，属于既有 workflow 的真实事实，
+                # 不是从 label 猜历史。occurred_at 记观测时刻，不伪造精确合并时间。
+                record_lifecycle_terminal(
+                    store=store,
+                    repo_id=repo_id,
+                    prd_path=entry.prd_path,
+                    issue_number=prd.issue_number,
+                    trigger="autopilot_roadmap",
+                    event_type=(
+                        LifecycleEventType.ARCHIVED
+                        if prd.state is RoadmapPrdState.ARCHIVED
+                        else LifecycleEventType.MERGED
+                    ),
+                    outcome="completed",
+                    actor="roadmap",
+                    detail={"observed_state": prd.state.value},
+                )
         elif prd.state is RoadmapPrdState.FAILED:
             reconciled_failed.append(entry.prd_path)
             if not dry_run:
@@ -690,6 +758,15 @@ def advance_roadmap_queue(
                 started_at=_now_iso(),
                 finished_at=None,
                 error_detail=None,
+            )
+            _record_lifecycle(
+                store,
+                event_type=LifecycleEventType.QUEUED,
+                repo_id=repo_id,
+                prd_path=prd.prd_path,
+                issue_number=issue_number,
+                trigger="autopilot_roadmap",
+                detail={"trigger": "global"},
             )
             started.append(
                 RoadmapActionResult(

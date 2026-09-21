@@ -15,11 +15,13 @@ import { Button } from "@/components/ui/button";
 import { canStartRoadmapPrd, STATE_LABELS, STATE_VARIANTS } from "./prd-card";
 import { PrdContentView } from "./prd-content-view";
 import { PrdEvidenceView } from "./prd-evidence-view";
+import { PrdLifecycleView } from "./prd-lifecycle-view";
 import { cn } from "@/lib/utils";
 import type { RoadmapPrd } from "@/lib/api/types";
 
 export const PRD_CONTENT_TAB_ID = "content";
 export const PRD_EVIDENCE_TAB_ID = "evidence";
+export const PRD_LIFECYCLE_TAB_ID = "lifecycle";
 
 export type PrdDetailTab = {
   id: string;
@@ -64,6 +66,11 @@ export function PrdDetail({
       id: PRD_EVIDENCE_TAB_ID,
       label: "验收证据",
       render: () => <PrdEvidenceView key={prd.prd_path} repoId={repoId} prdPath={prd.prd_path} />,
+    },
+    {
+      id: PRD_LIFECYCLE_TAB_ID,
+      label: "执行过程",
+      render: () => <PrdLifecycleView key={prd.prd_path} repoId={repoId} prdPath={prd.prd_path} />,
     },
     ...additionalTabs,
   ];

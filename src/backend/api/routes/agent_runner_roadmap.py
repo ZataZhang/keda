@@ -37,6 +37,7 @@ from backend.core.use_cases.agent_runner_factory import (
     resolve_repository_targets_with_diagnostics,
 )
 from backend.core.use_cases.prd_content_reader import PrdContentError, read_prd_content
+from backend.core.use_cases.agent_runner_lifecycle import build_prd_lifecycle_detail
 from backend.core.use_cases.roadmap_actions import (
     RoadmapActionError,
     get_or_create_roadmap_settings,
@@ -337,6 +338,22 @@ def update_roadmap_autopilot(request: UpdateAutopilotRequest) -> dict:
         detail=f"autopilot.enabled={request.enabled}",
     )
     return _serialize(state)
+
+
+@router.get("/agent-runner/roadmap/prds/{encoded_path}/lifecycle")
+def get_roadmap_prd_lifecycle(encoded_path: str, repo_id: str) -> dict:
+    """返回单个 PRD 的生命周期详情（当前阶段、耗时拆分与有序事件）。
+
+    刻意不复用 ``_ROADMAP_CACHE``：生命周期账本必须在事件写入后 fresh 读回，
+    否则“运行中 → 刚失败”这种切换会被 30 秒缓存掩盖，页面显示陈旧进度。
+    无任何 lifecycle run/event 时返回 ``has_data=False`` 空态，而不是 404——
+    “还没开始执行”是正常状态，不是错误。
+    """
+    prd_path = _decode_prd_path(encoded_path)
+    _resolve_context(repo_id)
+    store = create_roadmap_store()
+    detail = build_prd_lifecycle_detail(store=store, repo_id=repo_id, prd_path=prd_path)
+    return _serialize(detail)
 
 
 @router.get("/agent-runner/roadmap/prds/{encoded_path}/evidence")

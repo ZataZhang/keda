@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
@@ -13,8 +14,13 @@ from backend.core.use_cases.agent_runner_events import (
     parse_latest_event_marker,
     parse_latest_event_marker_for_phases,
 )
+from backend.core.use_cases.agent_runner_lifecycle import LifecycleEventType
 
 _logger = logging.getLogger(__name__)
+
+#: 生命周期观测回调：``(issue, event_type, event_key, detail)``。
+#: 由 run 入口注入；缺省为 ``None`` 时验证门禁保持零行为变化。
+ValidationLifecycleCallback = Callable[[IssueSummary, LifecycleEventType, str, dict], None]
 
 
 def build_validation_passed_comment(*, head_sha: str, pr_url: str) -> str:
@@ -65,8 +71,28 @@ def _ensure_issue_validation_labels(
     github_client.edit_issue_labels(issue.number, add=[desired_label], remove=[obsolete_label])
 
 
+def _emit_validation_event(
+    on_validation: ValidationLifecycleCallback | None,
+    issue: IssueSummary,
+    event_type: LifecycleEventType,
+    event_key: str,
+    detail: dict,
+) -> None:
+    """安全调用生命周期观测回调；观测失败绝不影响验证门禁。"""
+    if on_validation is None:
+        return
+    try:
+        on_validation(issue, event_type, event_key, detail)
+    except Exception as exc:  # noqa: BLE001 - observation side channel only.
+        _logger.warning("Validation lifecycle callback failed for Issue #%d: %s", issue.number, exc)
+
+
 def _gate_single_issue(
-    *, issue: IssueSummary, config: AppConfig, github_client: IGitHubClient
+    *,
+    issue: IssueSummary,
+    config: AppConfig,
+    github_client: IGitHubClient,
+    on_validation: ValidationLifecycleCallback | None = None,
 ) -> None:
     """运行一个 ``agent/review`` Issue 的验证软门禁。"""
     from backend.core.use_cases.agent_runner_validation import (
@@ -86,9 +112,24 @@ def _gate_single_issue(
     checklist_state = parse_validation_checklist_state(pr_context.body)
     if checklist_state is None or checklist_state.total == 0:
         return
+    head_sha = pr_context.head_sha
+    _emit_validation_event(
+        on_validation,
+        issue,
+        LifecycleEventType.VALIDATION_STARTED,
+        f"validation_started:{head_sha}",
+        {"head_sha": head_sha, "total": checklist_state.total},
+    )
     if checklist_state.unchecked_count > 0:
         _ensure_issue_validation_labels(
             issue=issue, config=config, github_client=github_client, target_passed=False
+        )
+        _emit_validation_event(
+            on_validation,
+            issue,
+            LifecycleEventType.VALIDATION_FAILED,
+            f"validation_failed:{head_sha}",
+            {"head_sha": head_sha, "unchecked_count": checklist_state.unchecked_count},
         )
         return
 
@@ -109,6 +150,13 @@ def _gate_single_issue(
         )
         if config.labels.verifier_passed in issue.labels:
             github_client.edit_issue_labels(issue.number, remove=[config.labels.verifier_passed])
+        _emit_validation_event(
+            on_validation,
+            issue,
+            LifecycleEventType.VALIDATION_FAILED,
+            f"validation_failed:{head_sha}",
+            {"head_sha": head_sha, "reason": "evidence_stale"},
+        )
         return
 
     _ensure_issue_validation_labels(
@@ -127,6 +175,13 @@ def _gate_single_issue(
             issue.number,
             build_validation_passed_comment(head_sha=pr_context.head_sha, pr_url=pr_context.pr_url),
         )
+    _emit_validation_event(
+        on_validation,
+        issue,
+        LifecycleEventType.VALIDATION_PASSED,
+        f"validation_passed:{head_sha}",
+        {"head_sha": head_sha},
+    )
 
 
 def cleanup_closed_issue_evidence_branches(
@@ -176,14 +231,29 @@ def process_validation_gate(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     max_issues: int = 20,
+    on_validation: ValidationLifecycleCallback | None = None,
 ) -> None:
-    """跨 review 阶段 Issue 运行验证软门禁。"""
+    """跨 review 阶段 Issue 运行验证软门禁。
+
+    Args:
+        repo_path: 目标仓库路径。
+        config: 应用配置。
+        github_client: GitHub 客户端。
+        process_runner: 进程运行器。
+        max_issues: 单轮最多检查的 review Issue 数。
+        on_validation: 可选生命周期观测回调；``None`` 时保持既有行为。
+    """
     if not config.validation.enabled:
         return
     review_issues = github_client.list_review_candidate_issues([config.labels.review], max_issues)
     for review_issue in review_issues:
         try:
-            _gate_single_issue(issue=review_issue, config=config, github_client=github_client)
+            _gate_single_issue(
+                issue=review_issue,
+                config=config,
+                github_client=github_client,
+                on_validation=on_validation,
+            )
         except Exception as gate_exc:  # noqa: BLE001 - 单个 Issue 不应阻断其余轮询。
             _logger.error("Validation gate failed for Issue #%d: %s", review_issue.number, gate_exc)
     try:
