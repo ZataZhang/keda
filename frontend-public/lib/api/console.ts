@@ -14,6 +14,7 @@ import type {
   DirectoryBrowseResult,
   DiscoveredRepositoryEntry,
   MonitorSettings,
+  PrdLifecycleStats,
   ProcessLogChunk,
   RegistryRepositoryEntry,
   RepositoryCompletionStats,
@@ -104,6 +105,30 @@ export async function fetchRunHistoryTrend(params: {
     `${BASE_PATH}/console/stats/history?${searchParams.toString()}`,
   );
   return response.trend;
+}
+
+/**
+ * 读取 PRD 维度的端到端统计（含均值 / 中位数 / P90 / 阶段瓶颈与 PRD 明细）。
+ *
+ * 与 `fetchRunHistoryTrend`（单次 runner 调用口径）刻意分开；本接口直接返回
+ * 统计对象本身，不带 `{ trend }` 之类的外层包裹。
+ *
+ * @param params.repoId - 仓库标识；省略表示全部仓库。
+ * @param params.days - 时间窗口天数（7/30/90），默认 30。
+ * @returns 仓库级 PRD 生命周期统计。
+ */
+export async function fetchPrdLifecycleStats(params: {
+  repoId?: string;
+  days?: number;
+}): Promise<PrdLifecycleStats> {
+  const searchParams = new URLSearchParams();
+  if (params.repoId) {
+    searchParams.set("repo_id", params.repoId);
+  }
+  searchParams.set("days", String(params.days ?? 30));
+  return get<PrdLifecycleStats>(
+    `${BASE_PATH}/console/stats/prd-lifecycle?${searchParams.toString()}`,
+  );
 }
 
 export async function fetchRecentRuns(params: {

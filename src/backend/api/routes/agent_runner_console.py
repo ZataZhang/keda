@@ -41,6 +41,7 @@ from backend.core.use_cases.console_stats import (
     build_completion_stats_overview,
     build_run_history_trend,
 )
+from backend.core.use_cases.agent_runner_lifecycle import build_prd_lifecycle_stats
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
@@ -295,6 +296,18 @@ def get_console_stats_history(repo_id: str | None = None, days: int = 30) -> dic
         "days": days,
         "trend": [_serialize(entry) for entry in trend],
     }
+
+
+@router.get("/agent-runner/console/stats/prd-lifecycle")
+def get_console_prd_lifecycle_stats(repo_id: str | None = None, days: int = 30) -> dict:
+    """PRD 维度端到端统计（平均值 / 中位数 / P90 / 阻塞时长 / 阶段瓶颈 / 明细）。
+
+    与 ``stats/history``（单次 runner 调用口径）刻意分开：本端点是完整 PRD
+    生命周期口径，进行中记录与无法关联 PRD 的旧记录都明确披露、不进入完成
+    分位数。窗口与仓库过滤语义与既有 Stats 页面一致（7/30/90 天）。
+    """
+    stats = build_prd_lifecycle_stats(store=create_console_store(), repo_id=repo_id, days=days)
+    return _serialize(stats)
 
 
 @router.get("/agent-runner/console/runs")

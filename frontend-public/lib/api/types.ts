@@ -417,6 +417,89 @@ export type RoadmapPrdEvidenceManifest = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PRD 生命周期观测
+// Keep these aligned with the backend dataclasses under
+// `src/backend/core/shared/models/roadmap.py`（PrdLifecycle* 一族）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 单次 PRD 生命周期的耗时拆分（互斥口径）。
+ *
+ * `end_to_end_seconds` 为 null 表示尚无任何事件；`active` / `waiting` /
+ * `blocked` 三者互斥且相加等于端到端耗时。
+ */
+export type PrdLifecycleDurations = {
+  end_to_end_seconds: number | null;
+  active_seconds: number;
+  waiting_seconds: number;
+  blocked_seconds: number;
+};
+
+/** 生命周期时间线中的单条事件；`detail` 为结构化摘要（可能为空对象）。 */
+export type PrdLifecycleEventView = {
+  event_type: string;
+  phase: string;
+  actor: string;
+  occurred_at: string;
+  detail: Record<string, unknown>;
+};
+
+/** 单个 PRD 的生命周期详情（Roadmap 详情“执行过程”标签的数据源）。 */
+export type PrdLifecycleDetail = {
+  repo_id: string;
+  prd_path: string;
+  run_id: string | null;
+  issue_number: number | null;
+  trigger: string | null;
+  current_phase: string;
+  in_progress: boolean;
+  outcome: string | null;
+  history_complete: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  durations: PrdLifecycleDurations;
+  events: PrdLifecycleEventView[];
+  /** false 表示该 PRD 还没有任何 lifecycle run/event。 */
+  has_data: boolean;
+};
+
+/** 仓库级 PRD 生命周期统计中的单行 PRD 明细。 */
+export type PrdLifecycleStatsRow = {
+  run_id: string;
+  prd_path: string;
+  issue_number: number | null;
+  outcome: string | null;
+  current_phase: string;
+  in_progress: boolean;
+  history_complete: boolean;
+  started_at: string;
+  finished_at: string | null;
+  durations: PrdLifecycleDurations;
+};
+
+/**
+ * 仓库级 PRD 端到端统计（Stats 页“PRD 执行分析”的数据源）。
+ *
+ * 分位数/均值在没有已完成 run 时为 null；`unlinked_run_count` 为无法可靠
+ * 关联 PRD 的旧记录，`incomplete_run_count` 为账本不完整的 run，二者均不
+ * 进入分位数。
+ */
+export type PrdLifecycleStats = {
+  repo_id: string | null;
+  window_days: number;
+  completed_runs: number;
+  average_end_to_end_seconds: number | null;
+  median_end_to_end_seconds: number | null;
+  p90_end_to_end_seconds: number | null;
+  average_blocked_seconds: number | null;
+  bottleneck_phase: string | null;
+  bottleneck_phase_seconds: number | null;
+  unlinked_run_count: number;
+  incomplete_run_count: number;
+  runs: PrdLifecycleStatsRow[];
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Idea Inbox
 // Keep these aligned with the backend dataclasses under
 // `src/backend/core/shared/models/idea_inbox.py`.

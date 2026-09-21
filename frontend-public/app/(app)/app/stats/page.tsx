@@ -6,16 +6,22 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  formatLifecycleDuration,
+  PHASE_LABELS,
+} from "@/components/roadmap/prd-lifecycle-view";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   fetchCompletionStats,
+  fetchPrdLifecycleStats,
   fetchRecentRuns,
   fetchRunHistoryTrend,
 } from "@/lib/api/console";
 import type {
   DailyRunTrendEntry,
+  PrdLifecycleStats,
   RepositoryCompletionStats,
   RunRecordEntry,
 } from "@/lib/api/types";
@@ -26,6 +32,7 @@ export default function StatsPage() {
   const [trendDays, setTrendDays] = useState(30);
   const [trend, setTrend] = useState<DailyRunTrendEntry[]>([]);
   const [recentRuns, setRecentRuns] = useState<RunRecordEntry[]>([]);
+  const [lifecycleStats, setLifecycleStats] = useState<PrdLifecycleStats | null>(null);
 
   useEffect(() => {
     fetchCompletionStats()
@@ -49,6 +56,28 @@ export default function StatsPage() {
     fetchRecentRuns({ repoId: trendRepoId || undefined, limit: 30 })
       .then(setRecentRuns)
       .catch(() => setRecentRuns([]));
+  }, [trendRepoId, trendDays]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    setLifecycleStats(null);
+    fetchPrdLifecycleStats({ repoId: trendRepoId || undefined, days: trendDays })
+      .then((stats) => {
+        if (!isCancelled) {
+          setLifecycleStats(stats);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCancelled) {
+          return;
+        }
+        toast.error(
+          error instanceof Error ? error.message : "无法加载 PRD 生命周期统计。",
+        );
+      });
+    return () => {
+      isCancelled = true;
+    };
   }, [trendRepoId, trendDays]);
 
   const trendMax = useMemo(
@@ -260,6 +289,165 @@ export default function StatsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Card data-testid="stats-prd-lifecycle">
+        <CardHeader>
+          <CardTitle className="text-sm">PRD 执行分析（生命周期口径）</CardTitle>
+          <CardDescription>
+            以完整 PRD 生命周期为口径（非单次 runner 调用），共用上方的仓库与时间范围筛选；
+            进行中记录与无法关联 PRD 的旧记录不进入完成分位数。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {lifecycleStats === null ? (
+            <Skeleton className="h-24" />
+          ) : (
+            <div className="space-y-4">
+              <div
+                className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"
+                data-testid="stats-prd-lifecycle-metrics"
+              >
+                <LifecycleMetricTile
+                  label="已完成 PRD 数"
+                  value={String(lifecycleStats.completed_runs)}
+                />
+                <LifecycleMetricTile
+                  label="平均端到端"
+                  value={formatLifecycleDuration(lifecycleStats.average_end_to_end_seconds)}
+                />
+                <LifecycleMetricTile
+                  label="中位数"
+                  value={formatLifecycleDuration(lifecycleStats.median_end_to_end_seconds)}
+                />
+                <LifecycleMetricTile
+                  label="P90"
+                  value={formatLifecycleDuration(lifecycleStats.p90_end_to_end_seconds)}
+                />
+                <LifecycleMetricTile
+                  label="平均阻塞"
+                  value={formatLifecycleDuration(lifecycleStats.average_blocked_seconds)}
+                />
+                <LifecycleMetricTile
+                  label="阶段瓶颈"
+                  value={formatBottleneck(lifecycleStats)}
+                />
+              </div>
+
+              {lifecycleStats.runs.length === 0 ? (
+                <p className="text-sm text-slate-500" data-testid="stats-prd-lifecycle-empty">
+                  所选范围内暂无 PRD 生命周期记录。
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
+                        <th className="py-2 pr-3">PRD</th>
+                        <th className="py-2 pr-3">Issue</th>
+                        <th className="py-2 pr-3">当前阶段</th>
+                        <th className="py-2 pr-3">端到端</th>
+                        <th className="py-2 pr-3">执行</th>
+                        <th className="py-2 pr-3">等待</th>
+                        <th className="py-2 pr-3">阻塞</th>
+                        <th className="py-2 pr-3">完整性</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lifecycleStats.runs.map((run) => (
+                        <tr
+                          key={run.run_id}
+                          className="border-b border-slate-100 dark:border-slate-800"
+                        >
+                          <td
+                            className="py-2 pr-3 font-medium"
+                            title={run.prd_path}
+                          >
+                            {prdBasename(run.prd_path)}
+                          </td>
+                          <td className="py-2 pr-3 font-mono text-xs">
+                            {run.issue_number ? `#${run.issue_number}` : "—"}
+                          </td>
+                          <td className="py-2 pr-3 text-xs">
+                            {run.in_progress
+                              ? "进行中"
+                              : (PHASE_LABELS[run.current_phase] ?? run.current_phase)}
+                          </td>
+                          <td className="py-2 pr-3 text-xs">
+                            {formatLifecycleDuration(run.durations.end_to_end_seconds)}
+                          </td>
+                          <td className="py-2 pr-3 text-xs">
+                            {formatLifecycleDuration(run.durations.active_seconds)}
+                          </td>
+                          <td className="py-2 pr-3 text-xs">
+                            {formatLifecycleDuration(run.durations.waiting_seconds)}
+                          </td>
+                          <td className="py-2 pr-3 text-xs">
+                            {formatLifecycleDuration(run.durations.blocked_seconds)}
+                          </td>
+                          <td className="py-2 pr-3 text-xs">
+                            {run.history_complete ? (
+                              <span className="text-emerald-700 dark:text-emerald-400">完整</span>
+                            ) : (
+                              <Badge variant="warning" className="text-[10px]">
+                                不完整
+                              </Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <p
+                className="text-xs text-slate-500"
+                data-testid="stats-prd-lifecycle-disclosure"
+              >
+                未关联 PRD 的旧记录 {lifecycleStats.unlinked_run_count} 条（已排除出分位数）；
+                观测不完整的 run {lifecycleStats.incomplete_run_count} 条。
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * 把阶段瓶颈渲染为中文标签加耗时。
+ *
+ * @param stats - 生命周期统计（含可空的瓶颈阶段与耗时）。
+ * @returns 中文阶段标签与耗时；无瓶颈时为 ``—``。
+ */
+function formatBottleneck(stats: PrdLifecycleStats): string {
+  if (stats.bottleneck_phase === null) {
+    return "—";
+  }
+  const label = PHASE_LABELS[stats.bottleneck_phase] ?? stats.bottleneck_phase;
+  if (stats.bottleneck_phase_seconds === null) {
+    return label;
+  }
+  return `${label} · ${formatLifecycleDuration(stats.bottleneck_phase_seconds)}`;
+}
+
+/**
+ * 取 PRD 仓库相对路径的文件名用于表格展示。
+ *
+ * @param prdPath - PRD 的仓库相对路径。
+ * @returns 路径最后一段；路径为空时原样返回。
+ */
+function prdBasename(prdPath: string): string {
+  const segments = prdPath.split("/");
+  return segments[segments.length - 1] || prdPath;
+}
+
+function LifecycleMetricTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold">{value}</p>
     </div>
   );
 }

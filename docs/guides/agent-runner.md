@@ -3051,6 +3051,75 @@ SQLite 只是旁路记录，**不参与 workflow 状态机决策**——GitHub
 labels/comments/PR 与本地 worktree 仍是唯一事实来源；落库失败只产生
 日志警告，不会阻断 runner。
 
+### PRD 生命周期账本与执行分析（Lifecycle Ledger）
+
+上面的 `run_records` 记录的是**单次 Issue run**（一次 runner 调用），
+无法回答"一个 PRD 从排队到归档总共花了多久、卡在哪一步"。为此
+console SQLite 另加两张**追加式**账本表，把观测单位从"一次调用"提升到
+"一个 PRD 的完整生命周期"：
+
+- **`prd_lifecycle_runs`**：一次 PRD 执行的身份与结局。主身份是
+  `repo_id + prd_path + stable run_id`，Issue 编号只是外部关联；PRD
+  改名或多次重试都复用同一稳定 run id，避免互相覆盖。
+- **`prd_lifecycle_events`**：按发生时间追加的语义事件，`event_key`
+  在同一 run 内唯一，重复写（重试、崩溃重入）**不产生重复事件**；
+  后续成功也不覆盖先前的失败事件。
+
+两张表沿用现有旁路历史端口（`IRunHistoryStore` 族）的 WAL、迁移与
+错误策略，schema 通过 `PRAGMA user_version` 升级，不新增数据库或服务。
+现有 `run_records` / `attempt_records` 保持原 schema，仅按
+`repo_id + issue_number + 时间窗口` 做**展示关联**，不反向伪造
+lifecycle event。
+
+**耗时口径（core 计算，前端只格式化）**
+
+- 主指标是**端到端耗时**：从首次进入执行队列到归档的完整历时，而不是
+  `run_records.duration_seconds`（那是单次 runner 调用）。
+- 端到端拆成三类**互斥**时长：**有效执行**（Agent 实际工作）、
+  **等待**（等待外部结果，如审阅 / CI）、**阻塞**（明确 blocked）。
+  三者之和等于端到端，前端不得重新定义或聚合这些口径。
+- 进行中的 run 端到端**计算到当前时刻**并在界面显示"进行中 / 阻塞中"，
+  不伪造结束时间；失败事件与各次 attempt 耗时保留在时间线上。
+
+**`current_phase` 闭集**：
+`none | queued | executing | validating | reviewing | merging | blocked | failed | completed`。
+**`event_type` 闭集**：
+`queued | started | claimed | attempt | retry | recovered | implementation_completed |
+validation_started | validation_passed | validation_failed | review_started |
+review_passed | review_failed | merge_started | merged | archived | blocked |
+unblocked | failed`。
+
+**两个只读 API**
+
+```text
+GET /api/v1/agent-runner/roadmap/prds/{encoded_prd_path}/lifecycle
+    单 PRD 明细：repo_id / prd_path / run_id / issue_number / trigger /
+    current_phase / in_progress / outcome / history_complete / started_at /
+    finished_at / durations{end_to_end_seconds, active_seconds,
+    waiting_seconds, blocked_seconds} / events[] / has_data
+
+GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
+    仓库级统计：completed_runs / average_end_to_end_seconds /
+    median_end_to_end_seconds / p90_end_to_end_seconds /
+    average_blocked_seconds / bottleneck_phase / bottleneck_phase_seconds /
+    unlinked_run_count / incomplete_run_count / runs[]
+```
+
+**降级语义**
+
+- **观测旁路**：生命周期事件写入失败**不阻断 runner**——已完成的代码
+  交付照常收敛；失败只落日志（带 run/event 上下文，不含敏感 payload）。
+- **显式不完整**：对应的 run 标记 `history_complete=false`，明细 API 与
+  PRD 详情页据此显示"数据不完整"告警，而不是静默假装完整。
+- **旧记录降级**：只有 Issue 编号、无法可靠归属 PRD 的历史记录标为
+  **"未关联 PRD"**，仍可在最近运行列表查看，但**不纳入**完成分位数统计
+  （计入 `unlinked_run_count`）；不通过标题、模糊路径或当前 label 猜测归属。
+
+**存储边界**：生命周期账本只落在本机 `~/.iar/console.db`（与运行历史、
+审计同库，`history_db_path` 可配），**没有远程备份、不跨机器聚合**；
+删除该 SQLite 文件即丢失全部生命周期历史。`frontend-public` 的 Roadmap
+详情与 Stats 只消费上述两个 API 的聚合结果，不自行计算耗时或状态。
+
 ### 项目接入
 
 `config.toml` 的 `[agent_runner.repositories.*]` 仍是项目接入的唯一
@@ -3077,8 +3146,10 @@ POST   /api/v1/agent-runner/console/repositories/{repo}/actions             {act
 POST   /api/v1/agent-runner/console/repositories/{repo}/issues/{n}/actions  {action}
 GET    /api/v1/agent-runner/console/stats/overview
 GET    /api/v1/agent-runner/console/stats/history?repo_id=&days=30
+GET    /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=30
 GET    /api/v1/agent-runner/console/runs?repo_id=&limit=100
 GET    /api/v1/agent-runner/console/audit?limit=100
+GET    /api/v1/agent-runner/roadmap/prds/{encoded_prd_path}/lifecycle
 GET    /api/v1/agent-runner/repositories
 GET    /api/v1/agent-runner/repositories/browse?path=          目录选择器（只读）
 GET    /api/v1/agent-runner/repositories/discover?scan_root=   扫描已初始化 IAR 的仓库

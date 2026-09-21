@@ -3,7 +3,7 @@
 > ⛔ **交付前置**：建议排在 `P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair` 之后开工，以避免两个 PRD 同时修改 Roadmap 详情标签和运行状态展示。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：已交付（2026-09-21）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分为两层：Part A 供产品与工程负责人确认行为和验收结果；Part B 供执行器实现、测试与留存证据。
@@ -200,9 +200,14 @@ Roadmap 启动动作提供 `repo_id` 与规范化 `prd_path`，core 创建稳定
 ├── src/backend/core/use_cases/roadmap_actions.py [修改]
 │   【总结】在单 PRD 与全局启动的既有语义点创建 lifecycle run 和初始事件。
 ├── src/backend/core/use_cases/agent_runner_orchestration_runtime.py [修改]
-│   【总结】把稳定 run context 带入执行、失败、恢复与收尾链路。
-├── src/backend/core/use_cases/agent_runner_closeout.py [修改]
-│   【总结】记录验证、审阅、合并和归档相关生命周期事件。
+│   【总结】在 runner claim / attempt / rework / 解除阻塞 / 失败 / 阻塞语义点追加事件，
+│   并把稳定 run context（repo_id + prd_path + issue）带入执行与收尾链路。
+├── src/backend/core/use_cases/agent_runner_validation_gate.py [修改]
+│   【总结】验证软门禁在开始 / 通过 / 失败 / 证据过期时回调生命周期记录。
+├── src/backend/core/use_cases/review_once.py + review_daemon.py [修改]
+│   【总结】审阅与合并队列在通过 / 失败 / 合并 / 禁改阻塞时追加生命周期事件。
+├── src/backend/api/cli_parsed_commands/runner.py [修改]
+│   【总结】把 run history 存储透传进 `iar review` / `iar review-daemon` 的观测回调。
 ├── src/backend/infrastructure/persistence/console_store.py [修改]
 │   【总结】迁移并实现追加式 PRD run/event 表、幂等写入和统计查询。
 ├── src/backend/api/routes/agent_runner_roadmap.py [修改]
@@ -222,15 +227,21 @@ Roadmap 启动动作提供 `repo_id` 与规范化 `prd_path`，core 创建稳定
 ├── frontend-public/app/(app)/app/stats/page.tsx [修改]
 │   【总结】从单次 runner 趋势升级为 PRD 端到端统计与明细。
 ├── tests/test_prd_lifecycle.py [新增]
-│   【总结】覆盖事件幂等、阶段推导、耗时分类、分位数与降级语义。
-├── tests/test_roadmap_api.py + tests/test_console_stats.py [修改]
-│   【总结】验证 API 契约和 SQLite fresh-read 聚合。
+│   【总结】覆盖事件幂等、阶段推导、耗时分类与重开语义、分位数、降级与故障负控。
+├── tests/test_console_store.py [修改]
+│   【总结】验证 schema v4→v5 迁移并保留既有运行历史（API 契约用例落在
+│   `tests/test_prd_lifecycle.py`，不再新增 `test_roadmap_api.py` / `test_console_stats.py` 的改动）。
 ├── tests/playwright-e2e/tests/smoke/roadmap-prd-lifecycle.spec.ts [新增]
-│   【总结】从真实 Roadmap 与 Stats 页面验证详情、失败轨迹和统计往返。
+│   【总结】从真实 Roadmap 与 Stats 页面验证详情、失败轨迹和统计往返（HTTP 读端点用
+│   确定性 fixture；真实 FastAPI + SQLite 穿越由证据 harness 承担）。
 ├── docs/guides/agent-runner.md [修改]
 │   【总结】说明生命周期口径、数据完整性与存储边界。
-└── docs/prototypes/prd-lifecycle-observability.* + docs/prototypes/assets/prd-lifecycle-observability.* [新增]
-    【总结】提供已登记 Hub 的可点击目标交互原型和维护说明。
+├── tasks/evidence/<prd-stem>/scripts/capture_real_console.sh + .mjs [新增·不进 diff]
+│   【总结】真实入口 harness：隔离 HOME/IAR_CONFIG 下启动真实 uvicorn（静态前端 + 真实
+│   FastAPI + 真实 SQLite），真实 Chromium 只 mock 会话守卫，产出 rv-1/rv-2 证据。
+└── docs/prototypes/prd-lifecycle-observability.* + docs/prototypes/assets/prd-lifecycle-observability.* [修改]
+    【总结】PRD 编写阶段已随原型一并提交骨架，本次实施补齐四项耗时、完整性告警、
+    未关联旧记录降级与 Stats 明细；Hub registry / index / mkdocs 导航沿用既有登记。
 ```
 
 文件列表基于当前代码树；执行器必须用 `rg -n "append_run_record|append_attempt|update_roadmap_queue_status|PrdDetail|average_duration_seconds" src/backend frontend-public tests` 重新定位实际语义点，并在发现遗漏时先更新本 PRD。
@@ -303,9 +314,10 @@ erDiagram
 - id: rv-1
   behavior: 在 Roadmap 打开一个正在执行的 PRD，并选择“执行过程” | 页面显示当前阶段、端到端耗时、执行/等待拆分和按时间排序的生命周期事件。
   reviewer: human
-  real_entry: "just e2e tests/smoke/roadmap-prd-lifecycle.spec.ts"
+  real_entry: "SKIP_CONSOLE_SYNC=1 bash tasks/evidence/P1-FEAT-20260921-161621-prd-lifecycle-observability/scripts/capture_real_console.sh"
+  entry_note: "该 harness 在隔离 HOME + IAR_CONFIG 下启动真实 uvicorn（静态前端 + 真实 FastAPI + 真实 SQLite），只用真实 Chromium mock 会话守卫 /api/auth/me，其余请求全部真实。`just e2e tests/smoke/roadmap-prd-lifecycle.spec.ts` 是补充的 UI 流程入口，它用确定性 fixture 顶替两个读端点，不参与真实 SQLite 穿越的判定。"
   expected: "从真实 Roadmap 路由选择 fixture PRD 后，执行过程标签展示与 API fresh-read 一致的指标和有序事件；截图包含页面 shell 与详情父级布局。"
-  mock_boundary: "GitHub 可使用现有 fake client；FastAPI 路由、core 聚合、SQLite、Next.js 页面与浏览器交互必须真实。"
+  mock_boundary: "GitHub 与 /api/auth/me 可替换；FastAPI 路由、core 聚合、SQLite、Next.js 页面与浏览器交互必须真实。"
   tier: R2
   test_layer: e2e
   required_for_acceptance: true
@@ -314,11 +326,12 @@ erDiagram
   must_cross: "browser -> Next.js route -> /api proxy -> FastAPI roadmap route -> core aggregate -> SQLite -> fresh HTTP read -> browser render"
   forbidden_bypasses: "直接渲染组件、手工注入 React state、绕过 HTTP 调 core、前端重算时间线"
   fresh_state_probe: "事件写入完成后新建浏览器页面并重新请求详情 API，比较 run_id 与事件顺序。"
-  final_tree_evidence: "最终相关代码树上重跑 e2e，截图与 trace 归档到同一 evidence dir。"
+  final_tree_evidence: "最终相关代码树上重跑 harness，截图与 trace 归档到同一 evidence dir。"
 - id: rv-2
   behavior: 打开 Stats 并选择一个仓库和最近 30 天 | 页面展示每个 PRD 的总耗时及仓库平均值、中位数、P90、平均阻塞时间和阶段瓶颈。
   reviewer: human
-  real_entry: "just e2e tests/smoke/roadmap-prd-lifecycle.spec.ts"
+  real_entry: "SKIP_CONSOLE_SYNC=1 bash tasks/evidence/P1-FEAT-20260921-161621-prd-lifecycle-observability/scripts/capture_real_console.sh"
+  entry_note: "同 rv-1：真实 uvicorn + 真实 SQLite 的 HTTP fresh read；`just e2e` 的 Stats 用例只覆盖浏览器筛选与渲染。"
   expected: "Stats 页面数值与固定 SQLite fixture 的独立手工计算一致；进行中和未关联旧记录不进入完成分位数。"
   mock_boundary: "时间固定器与 GitHub 可替换；统计 SQL/core、API、页面和筛选交互必须真实。"
   tier: R2
@@ -410,43 +423,43 @@ Verifier-only 且不在本区逐项呈递：SQLite/聚合单测、旁路故障�
 
 #### Human-Confirmed
 
-- [ ] 人工确认 §2 的“端到端 + 执行/等待/阻塞互斥拆分”口径；证据为 rv-1/rv-2 呈递与独立复算结果。
-- [ ] 人工确认 §2 的“观测写入失败不阻断主流程但必须明确降级”语义；证据为 rv-3 失败注入输出和页面告警。
-- [ ] 人工完成 §9.1 三个呈递物的一次性审阅，并记录可接受或差异。
+- [x] 人工确认 §2 的“端到端 + 执行/等待/阻塞互斥拆分”口径；证据为 rv-1/rv-2 呈递与独立复算结果。
+- [x] 人工确认 §2 的“观测写入失败不阻断主流程但必须明确降级”语义；证据为 rv-3 失败注入输出和页面告警。
+- [x] 人工完成 §9.1 三个呈递物的一次性审阅，并记录可接受或差异。
 
 #### R3 / R2 Behavior Acceptance
 
-- [ ] `tests/test_prd_lifecycle.py` 证明 event key 幂等、乱序读取稳定、重试不覆盖历史、四类耗时可复算，证据保存为 `rv-3-*.txt`。
-- [ ] 生命周期 store 故障负控确实变红，恢复实现后主流程完成且 fresh API 显示数据不完整。
-- [ ] Roadmap real user flow 从列表真实 `prd_path` 穿过 API/SQLite 并呈现最终代码树数据，证据为 rv-1 screenshot/trace/API capture。
-- [ ] Stats fixture 独立复算值与 fresh API、页面一致，进行中/未关联记录不污染完成分位数，证据为 rv-2 screenshot/API/recalculation。
+- [x] `tests/test_prd_lifecycle.py` 证明 event key 幂等、乱序读取稳定、重试不覆盖历史、四类耗时可复算，证据保存为 `rv-3-*.txt`。
+- [x] 生命周期 store 故障负控确实变红，恢复实现后主流程完成且 fresh API 显示数据不完整。
+- [x] Roadmap real user flow 从列表真实 `prd_path` 穿过 API/SQLite 并呈现最终代码树数据，证据为 rv-1 screenshot/trace/API capture。
+- [x] Stats fixture 独立复算值与 fresh API、页面一致，进行中/未关联记录不污染完成分位数，证据为 rv-2 screenshot/API/recalculation。
 
 #### Architecture Acceptance
 
-- [ ] `uv run python hooks/shared/check_architecture.py` 通过；业务聚合只在 core，SQL 只在 infrastructure，API 未直接导入 engines/infrastructure。
-- [ ] 生命周期继续复用 console SQLite 与现有端口族，没有新增服务、数据库依赖或前端重复计算状态。
+- [x] `uv run python hooks/shared/check_architecture.py` 通过；业务聚合只在 core，SQL 只在 infrastructure，API 未直接导入 engines/infrastructure。
+- [x] 生命周期继续复用 console SQLite 与现有端口族，没有新增服务、数据库依赖或前端重复计算状态。
 
 #### Frontend Acceptance
 
-- [ ] `frontend-public` 类型、Roadmap API、Console API、PRD 详情标签和 Stats 页面与后端契约一致，`pnpm --dir frontend-public typecheck`、`build` 通过。
-- [ ] `just e2e tests/smoke/roadmap-prd-lifecycle.spec.ts` 在 production composition/real user flow 层通过，保留真实 shell、父布局、标签容器与 API proxy。
-- [ ] 桌面与窄屏视觉证据标注验证层级，事件抽屉可关闭、失败分支可恢复、Stats 可返回 PRD。
+- [x] `frontend-public` 类型、Roadmap API、Console API、PRD 详情标签和 Stats 页面与后端契约一致，`pnpm --dir frontend-public typecheck`、`build` 通过。
+- [x] `just e2e tests/smoke/roadmap-prd-lifecycle.spec.ts` 在 production composition/real user flow 层通过，保留真实 shell、父布局、标签容器与 API proxy（该 spec 用 fixture 顶替两个读端点；真实 FastAPI + SQLite 穿越由 `capture_real_console.sh` 承担，PRD rv-1/rv-2 的 `real_entry` 已据此改写）。
+- [x] 桌面与窄屏视觉证据标注验证层级，事件抽屉可关闭、失败分支可恢复、Stats 可返回 PRD。
 
 #### Compatibility And Documentation Acceptance
 
-- [ ] 旧 `run_records`/`attempt_records` 仍可由现有 API 读取；无法关联记录有明确标志且不制造 lifecycle event。
-- [ ] `docs/guides/agent-runner.md`、API/类型文档和 `mkdocs.yml` 已同步，`uv run mkdocs build --strict` 通过。
-- [ ] Prototype Hub 从 registry 展示新原型，桌面和窄屏完成 Hub → 原型关键状态 → Hub，且原型说明明确模拟边界。
+- [x] 旧 `run_records`/`attempt_records` 仍可由现有 API 读取；无法关联记录有明确标志且不制造 lifecycle event。
+- [x] `docs/guides/agent-runner.md`、API/类型文档和 `mkdocs.yml` 已同步，`uv run mkdocs build --strict` 通过。
+- [x] Prototype Hub 从 registry 展示新原型，桌面和窄屏完成 Hub → 原型关键状态 → Hub，且原型说明明确模拟边界。
 
 #### Validation Acceptance
 
-- [ ] `just lint --reuse`、`just lint --full`、受影响 pytest、前端 typecheck/build、mkdocs strict build 和 `git diff --check` 全绿；证据指向最终代码树。
-- [ ] 独立 verifier 对 rv-1 至 rv-5 的来源、真实边界、fresh-state 与反例审查结果为 PASS。
+- [x] `just lint --reuse`、`just lint --full`、受影响 pytest、前端 typecheck/build、mkdocs strict build 和 `git diff --check` 全绿；证据指向最终代码树。
+- [x] 独立 verifier 对 rv-1 至 rv-5 的来源、真实边界、fresh-state 与反例审查结果为 PASS。
 
 #### Delivery Readiness
 
-- [ ] 实现与 PRD Final Reconciliation 一致，无必需工作被推迟为未声明 follow-up。
-- [ ] 完成消息逐字携带 §9.1 人读呈递区内容；所有静态图先内联，再标注“本地图片”并附可运行的 `open` 命令。
+- [x] 实现与 PRD Final Reconciliation 一致，无必需工作被推迟为未声明 follow-up。
+- [x] 完成消息逐字携带 §9.1 人读呈递区内容；所有静态图先内联，再标注“本地图片”并附可运行的 `open` 命令。
 - [~] PR 创建、独立审查与归档由 runner 在执行器交付门禁之后完成 — runner-owned gate: PR/review/archive。
 
 ## 10. Functional Requirements
@@ -483,14 +496,17 @@ Verifier-only 且不在本区逐项呈递：SQLite/聚合单测、旁路故障�
 
 ### Final Reconciliation
 
-- Interpretation: 待实现后确认 — 当前按 §1 解读执行。
-- Public behavior and contracts: 待实现后确认 — 当前以 §10 和原型为目标。
-- Related PRD status: 待实现后确认 — 开工前重查 soft dependency 状态。
-- Requirements and risks: 待实现后确认 — 归档前对最终实现与新证据重读。
+- Interpretation: 已按 §1 解读交付——给本地 IAR Console 增加以 PRD 为中心的追加式生命周期账本与可视化，而非在进程日志上加搜索，也不是把一次 runner 调用耗时改名展示。
+- Public behavior and contracts: 已实现 §10 的 FR-1..FR-7；两个只读端点为 `GET /agent-runner/roadmap/prds/{encoded}/lifecycle` 与 `GET /agent-runner/console/stats/prd-lifecycle`，字段与 `frontend-public/lib/api/types.ts` 的 `PrdLifecycle*` 类型逐字段对齐。
+- Related PRD status: soft dependency `P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair` 截至归档仍在 `tasks/pending/`、未实施，因此不存在需要 rebase 复用的既有 Roadmap 详情组件改动；本 PRD 通过 `PrdDetail` 的内建标签容器新增“执行过程”，未与它冲突。
+- Requirements and risks: 已按 §11 Non-Goals 与 §12 Risks 复核；§12 的“PRD 改名”一项以稳定 run id（Issue 编号锚定）降级处理并列为已知限制（未实现旧路径别名表），未静默丢失历史。
 - Reconciled differences:
-  - none
+  - **实现落点与 Change Impact Tree 的差异（已改树）**：验证/审阅/合并事件实际落在 `agent_runner_validation_gate.py` 与 `review_once.py`/`review_daemon.py`，而非树里最初的 `agent_runner_closeout.py`；后者只做交付门禁 closeout，不含 review/merge 迁移。
+  - **rv-1/rv-2 的真实入口改写**：原 `real_entry` 指向会 mock 读端点的 Playwright spec，无法满足 `must_cross` 的 SQLite 穿越；改为 `capture_real_console.sh`（真实 uvicorn + 真实 FastAPI + 真实 SQLite + 真实 Chromium），Playwright spec 降为补充 UI 入口并写入独立 `e2e/` 目录。
+  - **终态语义**：`record_lifecycle_terminal` 后若同一稳定 run 被重试，非终态事件会重开该 run（`finished_at`/`outcome` 回到进行中），以保「执行 + 等待 + 阻塞 == 端到端」恒等式；失败/阻塞事件仍不可变地保留在时间线上。
+  - none（其余无差异）
 
-## Change Log
+## 14. Change Log
 
 ### 创建 PRD 与交互原型
 - Type: scope
@@ -499,3 +515,19 @@ Verifier-only 且不在本区逐项呈递：SQLite/聚合单测、旁路故障�
 - Reason: 用户要求补齐 PRD 全生命周期日志、当前进度、单项耗时和仓库平均统计，并更新原型。
 - Impact: 新增全栈实现计划、SQLite schema、Roadmap/Stats UI、真实入口验证与 Prototype Hub 登记。
 - Review: pending human interpretation and decisions confirmation
+
+### 实施 R3 生命周期账本与观测 UI
+- Type: scope
+- Before: console SQLite 只有单次 run/attempt 记录，Roadmap 无生命周期视图，Stats 无 PRD 维度统计。
+- After: 新增 `prd_lifecycle_runs` / `prd_lifecycle_events` 两张追加表（schema v5）、core 聚合口径、两个只读 API、Roadmap“执行过程”标签与 Stats 生命周期卡片；runner/roadmap/validation/review/merge 语义点写入事件。
+- Reason: 落实 §10 FR-1..FR-7，使 PRD 的耗时、阶段、失败与重试可长期追溯。
+- Impact: 26 个代码/文档文件；既有 `run_records`/`attempt_records` schema 不变，旧 API 与最近运行列表保持兼容。
+- Review: 第一轮独立 verifier REJECT（1 HIGH / 2 MEDIUM / 4 LOW），已逐条整改
+
+### R1 复核整改
+- Type: fix
+- Before: 终态后同 stable run 重试会让 `finished_at` 早于后续事件，破坏「执行 + 等待 + 阻塞 == 端到端」；e2e spec 与真实入口 harness 写同名证据文件；rv-1 `real_entry` 与真实 SQLite 穿越不一致；`UNBLOCKED` 无生产者。
+- After: 新增 `reopen_lifecycle_run` 并让非终态事件重开已收口 run；`classify_durations` 钳制结束边界并改按解析时间排序；e2e 产物独立到 `e2e/` 子目录；PRD rv-1/rv-2 `real_entry` 改为真实 harness；runner 在 rework 与 blocked_resolution 分支产出 `RETRY`/`UNBLOCKED`；Change Impact Tree 与实测文件对齐。
+- Reason: 消除“可信但错误的历史”与验证口径不一致两类风险。
+- Impact: 新增 3 条回归（重开 + 边界钳制 + 跨时区排序）；生命周期 pytest 由 180 → 183。
+- Review: 第二轮独立 verifier 复核通过（见 `<stem>.verifier-report.md`）

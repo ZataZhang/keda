@@ -2,6 +2,7 @@
 
 import { get, patch, post } from "./client";
 import type {
+  PrdLifecycleDetail,
   RoadmapGlobalStartResult,
   RoadmapPrd,
   RoadmapSettings,
@@ -135,6 +136,29 @@ export async function fetchPrdEvidence(
   return get(
     `${BASE_PATH}/prds/${encodedPath}/evidence?repo_id=${encodeURIComponent(repoId)}`,
   );
+}
+
+/**
+ * 读取某个 PRD 的生命周期详情（当前阶段、耗时拆分与追加事件时间线）。
+ *
+ * 无任何 lifecycle run/event 时后端仍返回 200，由 `has_data=false` 表达空态。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.prdPath - 列表响应给出的 PRD 仓库相对路径。
+ * @param params.signal - 可选的取消信号，用于组件卸载或切换 PRD 时中止请求。
+ * @returns 该 PRD 的生命周期详情快照。
+ */
+export async function fetchPrdLifecycle(params: {
+  repoId: string;
+  prdPath: string;
+  signal?: AbortSignal;
+}): Promise<PrdLifecycleDetail> {
+  const encodedPath = encodePrdPath(params.prdPath);
+  const searchParams = new URLSearchParams();
+  searchParams.set("repo_id", params.repoId);
+  return get(`${BASE_PATH}/prds/${encodedPath}/lifecycle?${searchParams.toString()}`, {
+    signal: params.signal,
+  });
 }
 
 /**
