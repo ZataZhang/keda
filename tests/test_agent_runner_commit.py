@@ -560,7 +560,9 @@ def test_commit_requested_changes_restages_tracked_verification_edits(
         if is_bash_wrapped_verification_call(command, ("just", "test"))
     )
     tracked_diff_index = commands.index(("git", "diff", "--quiet"))
-    tracked_restage_index = commands.index(("git", "add", "-u"))
+    # 补 stage 用的也是 ``git add -A``（与首次入索引同口径），所以要找 diff 探测
+    # 之后的那一次，不能用会命中首次 stage 的 ``commands.index``。
+    tracked_restage_index = commands.index(("git", "add", "-A"), tracked_diff_index)
     commit_index = commands.index(("git", "commit", "-m", "agent: implement example"))
     assert (
         initial_stage_index
@@ -569,6 +571,64 @@ def test_commit_requested_changes_restages_tracked_verification_edits(
         < tracked_restage_index
         < commit_index
     )
+
+
+def test_commit_requested_changes_stages_untracked_files_left_by_verification(
+    tmp_path: Path,
+) -> None:
+    """未跟踪的新产物也必须在提交前入索引，否则 check-test-flag 必然硬失败。
+
+    ``just test`` 写 ``.last_tested_commit`` 用的路径集包含「未跟踪且未 gitignore」
+    的文件，而 commit 钩子比对的是 staged 树。门禁跑出来的新快照 / golden 文件
+    只补 ``git add -u`` 时永远进不了索引，两棵树分叉，提交被钩子拒绝。
+    """
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    write_commit_request(worktree_path, "agent: implement example")
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-123\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout=" M tests/test_example.py\n",
+                stderr="",
+            ),
+            # 已跟踪文件全部干净：旧探测器到此为止，正是漏判发生的地方。
+            ("git", "diff", "--quiet"): CommandResult(
+                command=("git", "diff", "--quiet"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            ("git", "ls-files", "--others", "--exclude-standard"): CommandResult(
+                command=("git", "ls-files", "--others", "--exclude-standard"),
+                return_code=0,
+                stdout="tests/__snapshots__/new_case.json\n",
+                stderr="",
+            ),
+        }
+    )
+    config = AppConfig(runner=RunnerConfig(verification_commands=("just test",)))
+
+    commit_requested_changes(
+        make_ready_issue(),
+        worktree_path,
+        config,
+        fake_runner,
+        expected_branch="issue-123",
+    )
+
+    commands = [tuple(command) for command in fake_runner.calls]
+    untracked_probe_index = commands.index(("git", "ls-files", "--others", "--exclude-standard"))
+    untracked_restage_index = commands.index(("git", "add", "-A"), untracked_probe_index)
+    commit_index = commands.index(("git", "commit", "-m", "agent: implement example"))
+    assert untracked_probe_index < untracked_restage_index < commit_index
 
 
 class _PrecommitCommitRunner(FakeProcessRunner):
@@ -683,7 +743,11 @@ def test_commit_requested_changes_retries_after_precommit_autofix(
     ]
     assert len(proxy_commits) == 2
     assert proxy_commits[0] == ["git", "commit", "-m", "agent: implement example"]
-    assert ["git", "add", "-u"] in fake_runner.calls
+    commands = [tuple(command) for command in fake_runner.calls]
+    failed_commit_index = commands.index(("git", "commit", "-m", "agent: implement example"))
+    # 失败的 commit 之后必须重新 stage 一次，且口径与首次入索引一致（``-A``），
+    # 否则钩子生成的未跟踪文件会在重试时仍然缺席。
+    assert ("git", "add", "-A") in commands[failed_commit_index:]
 
 
 def test_commit_requested_changes_raises_on_persistent_precommit_failure(

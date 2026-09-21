@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PRD 生命周期观测 · 交互原型</title>
+    <link rel="stylesheet" href="./assets/prototype-chrome.css" />
+    <link rel="stylesheet" href="./assets/prd-lifecycle-observability.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="product-sidebar" aria-label="产品导航">
+        <a class="product-brand" href="#roadmap" data-view-link="roadmap"><span>◈</span><strong>IAR Console</strong></a>
+        <nav>
+          <button type="button"><span>⌂</span>总览</button>
+          <button class="is-active" type="button" data-view-link="roadmap"><span>◇</span>Roadmap</button>
+          <button type="button"><span>▤</span>托管进程</button>
+          <button type="button" data-view-link="stats"><span>▥</span>统计</button>
+          <button type="button"><span>⚙</span>设置</button>
+        </nav>
+        <div class="sidebar-foot"><span class="status-dot"></span>keda-main 已连接</div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div><span class="breadcrumb">Agent Runner /</span><strong id="page-title">Roadmap</strong></div>
+          <div class="simulation-label">交互原型 · 模拟数据</div>
+        </header>
+
+        <section class="page is-visible" id="roadmap-view" data-view="roadmap">
+          <div class="page-heading">
+            <div><h1>PRD Roadmap</h1><p>查看 PRD 的依赖、当前阶段与完整执行轨迹。</p></div>
+            <button class="primary-button" type="button" disabled>启动全局 Roadmap</button>
+          </div>
+          <div class="roadmap-layout">
+            <section class="prd-list" aria-label="PRD 列表">
+              <div class="list-toolbar"><strong>全部 PRD</strong><span>12 项</span></div>
+              <button class="prd-row" type="button">
+                <span class="priority p0">P0</span><span><strong>修复登录会话过期</strong><small>#381 · 已归档</small></span><span class="state done">已归档</span>
+              </button>
+              <button class="prd-row is-selected hotspot-target" type="button" data-select-prd>
+                <span class="priority">P1</span><span><strong>PRD 生命周期观测</strong><small>#417 · 执行中</small></span><span class="state running">执行中</span>
+              </button>
+              <button class="prd-row" type="button">
+                <span class="priority">P1</span><span><strong>CI/CD 自动修复</strong><small>#409 · 等待依赖</small></span><span class="state waiting">等待中</span>
+              </button>
+              <button class="prd-row" type="button">
+                <span class="priority p2">P2</span><span><strong>CLI 输出协议整理</strong><small>尚未创建 Issue</small></span><span class="state idle">未开始</span>
+              </button>
+            </section>
+
+            <section class="prd-detail">
+              <div class="detail-heading">
+                <div><div class="title-line"><span class="state running" id="detail-status">执行中</span><span>Issue #417</span></div><h2>PRD 生命周期观测与执行分析</h2><code>tasks/pending/P1-FEAT-20260921-161621-prd-lifecycle-observability.md</code></div>
+                <a href="#stats" class="outline-button hotspot-target" data-view-link="stats">查看统计</a>
+              </div>
+
+              <div class="summary-grid">
+                <article><span>当前阶段</span><strong id="current-phase">实现与验证</strong><small>已运行 1 小时 42 分</small></article>
+                <article><span>端到端耗时</span><strong>2 小时 18 分</strong><small>含等待 36 分钟</small></article>
+                <article><span>Agent 尝试</span><strong id="attempt-count">3 次</strong><small id="attempt-note">1 次失败后恢复</small></article>
+                <article><span>完成进度</span><strong>7 / 11</strong><small>Acceptance Checklist</small></article>
+              </div>
+
+              <div class="tabs" role="tablist" aria-label="PRD 详情">
+                <button type="button" role="tab">PRD 原文</button>
+                <button type="button" role="tab">验收证据</button>
+                <button class="is-active hotspot-target" type="button" role="tab" aria-selected="true">执行过程</button>
+              </div>
+
+              <div class="process-toolbar">
+                <div><strong>生命周期时间线</strong><span>状态变化实时追加，历史不会被覆盖</span></div>
+                <div class="scenario-switch" aria-label="演示场景">
+                  <button class="is-active hotspot-target" type="button" data-scenario="normal">正常轨迹</button>
+                  <button class="hotspot-target" type="button" data-scenario="failure">失败与重试</button>
+                </div>
+              </div>
+
+              <ol class="timeline" id="timeline"></ol>
+              <aside class="event-inspector" id="event-inspector" hidden aria-live="polite">
+                <button type="button" aria-label="关闭事件详情" data-close-inspector>×</button>
+                <span>事件详情</span><h3 id="inspector-title"></h3><p id="inspector-detail"></p><dl id="inspector-meta"></dl>
+              </aside>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" id="stats-view" data-view="stats">
+          <div class="page-heading">
+            <div><h1>PRD 执行统计</h1><p>统计口径为 PRD 的完整生命周期，而不是单次 runner 调用。</p></div>
+            <label class="range-select">时间范围<select><option>最近 30 天</option><option>最近 90 天</option></select></label>
+          </div>
+          <div class="metric-grid">
+            <article><span>已完成 PRD</span><strong>18</strong><small>较上期 +5</small></article>
+            <article><span>平均端到端耗时</span><strong>3 小时 26 分</strong><small>较上期 -18 分</small></article>
+            <article><span>中位耗时</span><strong>2 小时 51 分</strong><small>P90：7 小时 12 分</small></article>
+            <article><span>平均阻塞时间</span><strong>42 分</strong><small>占总耗时 20%</small></article>
+          </div>
+          <div class="stats-grid">
+            <article class="chart-card">
+              <div class="card-heading"><div><strong>阶段耗时分布</strong><span>最近 30 天 · 18 个已完成 PRD</span></div></div>
+              <div class="bar-chart" aria-label="阶段平均耗时柱状图">
+                <div><span style="--bar:34%"></span><strong>18 分</strong><small>排队</small></div>
+                <div><span style="--bar:52%"></span><strong>28 分</strong><small>规划</small></div>
+                <div><span style="--bar:100%"></span><strong>54 分</strong><small>实现</small></div>
+                <div><span style="--bar:76%"></span><strong>41 分</strong><small>验证</small></div>
+                <div><span style="--bar:46%"></span><strong>25 分</strong><small>审阅</small></div>
+                <div><span style="--bar:31%"></span><strong>17 分</strong><small>归档</small></div>
+              </div>
+            </article>
+            <article class="chart-card bottleneck-card">
+              <div class="card-heading"><div><strong>流程瓶颈</strong><span>等待时间最长的阶段</span></div></div>
+              <ol><li><span>人工审阅等待</span><strong>22 分钟</strong></li><li><span>CI 验证等待</span><strong>13 分钟</strong></li><li><span>依赖 PRD 等待</span><strong>7 分钟</strong></li></ol>
+            </article>
+          </div>
+          <article class="runs-card">
+            <div class="card-heading"><div><strong>每个 PRD 的执行记录</strong><span>点击名称返回对应生命周期详情</span></div><input type="search" placeholder="搜索 PRD 或 Issue" aria-label="搜索 PRD" /></div>
+            <div class="table-wrap"><table><thead><tr><th>PRD</th><th>状态</th><th>开始</th><th>结束 / 当前阶段</th><th>执行</th><th>等待</th><th>总耗时</th><th>重试</th></tr></thead><tbody>
+              <tr><td><button class="table-link hotspot-target" type="button" data-view-link="roadmap">PRD 生命周期观测 <small>#417</small></button></td><td><span class="state running">执行中</span></td><td>09-21 13:42</td><td>实现与验证</td><td>1h 42m</td><td>36m</td><td><strong>2h 18m</strong></td><td>1</td></tr>
+              <tr><td>Roadmap PRD 控制 <small>#402</small></td><td><span class="state done">已归档</span></td><td>09-20 09:18</td><td>09-20 12:02</td><td>2h 09m</td><td>35m</td><td><strong>2h 44m</strong></td><td>0</td></tr>
+              <tr><td>生命周期 Agent 矩阵 <small>#395</small></td><td><span class="state done">已归档</span></td><td>09-18 10:11</td><td>09-18 16:39</td><td>4h 51m</td><td>1h 37m</td><td><strong>6h 28m</strong></td><td>2</td></tr>
+              <tr><td>Dashboard 快照同步 <small>#371</small></td><td><span class="state failed">失败</span></td><td>09-16 14:08</td><td>验证失败</td><td>1h 06m</td><td>11m</td><td><strong>1h 17m</strong></td><td>3</td></tr>
+            </tbody></table></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具">
+      <span class="prototype-chrome__label">原型</span>
+      <a href="./hub.html">⌂ Hub</a>
+      <a href="./prd-lifecycle-observability.md">ⓘ 说明</a>
+      <button type="button" data-hotspot-toggle aria-pressed="true">◎ 可点击区域：开</button>
+      <button type="button" data-prototype-reset>↺ 重置</button>
+    </nav>
+    <script src="./assets/prd-lifecycle-observability.js"></script>
+    <script src="./assets/prototype-chrome.js"></script>
+  </body>
+</html>

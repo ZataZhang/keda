@@ -111,28 +111,61 @@ def remove_commit_request(worktree_path: Path) -> None:
         pass
 
 
-def _verification_left_tracked_worktree_changes(
+def _verification_left_unstaged_worktree_changes(
     worktree_path: Path,
     process_runner: IProcessRunner,
 ) -> bool:
-    """Return whether verification left *unstaged* edits on tracked files.
+    """Return whether anything ``git add -A`` would still stage survived a gate.
 
-    调用方只用它决定「提交前要不要补一次 ``git add -u``」，所以这里刻意只看未暂存
-    改动：钩子自行 stage 过的内容已经在索引里，无需再补。判断「门禁是否改写过文件」
-    另有 :func:`_tracked_change_fingerprint`，两者语义不同，不要互相替换。
+    调用方只用它决定「提交前要不要再补一次 ``git add -A``」，所以这里只看**尚未
+    进索引**的残留；钩子自行 stage 过的内容已经在索引里，无需再补。判定口径刻意
+    与 :func:`commit_requested_changes` 首次 ``git add -A`` 完全一致，覆盖两类：
+
+    - **已跟踪文件的未暂存改动**：formatter / autofix 钩子就地重写的内容。
+    - **未跟踪且未被 gitignore 的新文件**：门禁自己生成、又理应进仓库的产物
+      （新增快照、golden 文件等）；``git diff`` 对这类文件完全无感。
+
+    第二类是 ``check-test-flag`` 硬失败的根因：``just test`` 写 ``.last_tested_commit``
+    用的路径集含「未跟踪且未 ignore」的文件，而 commit 钩子比对的是 staged 树。
+    只补 ``git add -u`` 时这些新文件永远进不了索引，两棵树必然分叉，钩子给出的
+    「请 ``git add -A`` 归一」恰好是 runner 漏做的那一步。被 gitignore 的产物两边
+    都看不见，因此扩大口径不会把构建垃圾卷进提交。
+
+    判断「门禁是否改写过文件」另有 :func:`_tracked_change_fingerprint`，
+    两者语义不同，不要互相替换。
+
+    Args:
+        worktree_path: agent worktree 路径。
+        process_runner: 命令执行器。
+
+    Returns:
+        仍有未暂存改动或未跟踪新文件时为 ``True``。
+
+    Raises:
+        RuntimeError: 无法读取 worktree 的改动或未跟踪文件状态时。
     """
     diff_result = process_runner.run(
         ["git", "diff", "--quiet"],
         cwd=worktree_path,
         check=False,
     )
-    if diff_result.return_code == 0:
-        return False
     if diff_result.return_code == 1:
         return True
-    raise RuntimeError(
-        f"Unable to inspect worktree changes after verification: {diff_result.stderr.strip()}"
+    if diff_result.return_code != 0:
+        raise RuntimeError(
+            f"Unable to inspect worktree changes after verification: {diff_result.stderr.strip()}"
+        )
+    untracked_files_result = process_runner.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=worktree_path,
+        check=False,
     )
+    if untracked_files_result.return_code != 0:
+        raise RuntimeError(
+            "Unable to inspect untracked worktree files after verification: "
+            f"{untracked_files_result.stderr.strip()}"
+        )
+    return bool(untracked_files_result.stdout.strip())
 
 
 def _tracked_change_fingerprint(
@@ -192,12 +225,12 @@ def _commit_with_autofix_recovery(
     first_attempt = process_runner.run(commit_command, cwd=worktree_path, check=False)
     if first_attempt.return_code == 0:
         return
-    if _verification_left_tracked_worktree_changes(worktree_path, process_runner):
+    if _verification_left_unstaged_worktree_changes(worktree_path, process_runner):
         # Imported locally to avoid a circular dependency with agent_runner_publish.
         from backend.core.use_cases.agent_runner_publish import validate_safe_changes
 
         validate_safe_changes(worktree_path, config, process_runner)
-        process_runner.run(["git", "add", "-u"], cwd=worktree_path)
+        process_runner.run(["git", "add", "-A"], cwd=worktree_path)
     # 用 check=True 重试：重新 stage 解决格式问题则提交成功；否则由底层抛出
     # 带 pre-commit 输出的 CommandFailedError。
     process_runner.run(commit_command, cwd=worktree_path, check=True)
@@ -244,6 +277,10 @@ def _run_commit_gate_with_autofix_retry(
         # 非零但未改动任何跟踪文件：真实的 lint/检查失败，交由调用方判失败。
         return first_attempt_results
     # autofix 钩子重写了文件：校验禁改路径后重新 stage，再跑一次确认是否只是格式化。
+    # 这里刻意只用 ``-u``：本函数处理的是「autofix 就地重写已跟踪文件」，重跑门禁
+    # 才是目的。门禁自己生成的未跟踪新文件由 :func:`commit_requested_changes` 提交
+    # 前那道 :func:`_verification_left_unstaged_worktree_changes` 兜底补 ``-A``，
+    # 不在这里提前卷入、以免把尚未跑过门禁的产物混进重试。
     # Imported locally to avoid a circular dependency with agent_runner_publish.
     from backend.core.use_cases.agent_runner_publish import validate_safe_changes
 
@@ -334,12 +371,12 @@ def commit_requested_changes(
         )
         if failed_verification_results(pre_commit_results):
             raise VerificationFailedError(pre_commit_results)
-    if _verification_left_tracked_worktree_changes(worktree_path, process_runner):
+    if _verification_left_unstaged_worktree_changes(worktree_path, process_runner):
         # Imported locally to avoid a circular dependency with agent_runner_publish.
         from backend.core.use_cases.agent_runner_publish import validate_safe_changes
 
         validate_safe_changes(worktree_path, config, process_runner)
-        process_runner.run(["git", "add", "-u"], cwd=worktree_path)
+        process_runner.run(["git", "add", "-A"], cwd=worktree_path)
     _commit_with_autofix_recovery(worktree_path, commit_message, config, process_runner)
     return verification_results
 

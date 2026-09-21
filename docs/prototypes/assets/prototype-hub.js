@@ -1,6 +1,13 @@
 (() => {
   const prototypeRegistry = [
     {
+      id: 'prd-lifecycle-observability', title: 'PRD 生命周期观测与执行分析', project: 'keda', module: 'Roadmap / 统计',
+      form: 'code-native', version: 'v1.0', updatedAt: '2026-09-21', availability: 'available', validationLevel: '交互原型',
+      primaryFlow: '从 Roadmap 单 PRD 执行时间线查看事件详情、切换失败重试场景，并进入仓库级 PRD 耗时统计后返回',
+      description: '基于真实 Roadmap 与 Stats 信息架构设计的可点击原型，展示 PRD 当前阶段、完整生命周期事件、端到端耗时和仓库聚合统计。',
+      preview: '', entry: './prd-lifecycle-observability.html', source: './prd-lifecycle-observability.md',
+    },
+    {
       id: 'roadmap-cicd-repair', title: 'CI/CD 监控与自动修复', project: 'keda', module: 'Roadmap',
       form: 'image-state', version: 'v1.0', updatedAt: '2026-09-16', availability: 'available', validationLevel: '概念原型',
       primaryFlow: '查看全局默认与单 PRD 覆盖的界面方案', description: 'Roadmap 页面中 CI/CD 等待、问题呈现与自动修复控制的高保真界面草图。',
