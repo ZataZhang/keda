@@ -4,6 +4,9 @@
 与改造前逐字节一致是本 PRD 的硬验收线：任何 spec 数据、占位符展开或
 提示词投递语义的回归都会在这里直接变红。pi 的四条命令行是**新增**
 目标形态（无"改造前"可对照），一并锁定防止后续漂移。
+codebuddy / qoder / opencode 共 11 条同样是**新增**目标形态：codebuddy 与
+claude 同构；qoder 的可执行名是 qodercn、run 用 -o stream-json、deliberate
+保留 -p 并走 stdin；opencode 只有 run / deliberate / repl（缺 generate 是刻意的）。
 
 改动本文件的期望值前，先确认是有意的行为变更，并同步更新
 `docs/guides/agent-runner.md` 与 PRD 中的目标形态表。
@@ -16,6 +19,10 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.agent_spec import (
+    CLAUDE_STREAM_JSON_PROTOCOL_ID,
+    PLAIN_PROTOCOL_ID,
+)
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
     UnknownExpanderError,
@@ -320,6 +327,129 @@ def test_golden_codex_run_expands_commondir(app_config: AppConfig, tmp_path: Pat
 
 
 # ---------------------------------------------------------------------------
+# codebuddy / qoder / opencode：新增目标形态（无"改造前"可对照）
+#
+# 三者均为**新增**注册项，一并锁定防止后续漂移。codebuddy 与 claude 同构；
+# qoder 的可执行名是 qodercn、run 用 -o stream-json、deliberate 走 stdin；
+# opencode 只有 run / deliberate / repl 三个用途（缺 generate 是刻意的，
+# 它没有可验证的只读机制）。
+# ---------------------------------------------------------------------------
+
+
+def test_golden_codebuddy_run(app_config: AppConfig, plain_worktree: Path) -> None:
+    """codebuddy 主执行：与 claude 同构的流式形态。"""
+    invocation = build_agent_invocation("codebuddy", "run", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == (
+        "codebuddy",
+        "--dangerously-skip-permissions",
+        "--verbose",
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--include-partial-messages",
+        PROMPT,
+    )
+    assert invocation.output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID
+
+
+def test_golden_codebuddy_deliberate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """codebuddy 辩论：同一套流式形态。"""
+    invocation = build_agent_invocation(
+        "codebuddy", "deliberate", PROMPT, plain_worktree, app_config
+    )
+    assert invocation.argv == (
+        "codebuddy",
+        "--dangerously-skip-permissions",
+        "--verbose",
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--include-partial-messages",
+        PROMPT,
+    )
+
+
+def test_golden_codebuddy_generate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """codebuddy 生成：只读用途，提示词在 argv 尾部。"""
+    invocation = build_agent_invocation("codebuddy", "generate", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == ("codebuddy", "--dangerously-skip-permissions", "-p", PROMPT)
+    assert invocation.read_only is True
+
+
+def test_golden_codebuddy_repl(app_config: AppConfig, plain_worktree: Path) -> None:
+    """codebuddy REPL：可写形态。"""
+    invocation = build_agent_invocation("codebuddy", "repl", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == ("codebuddy", "--dangerously-skip-permissions", "-p", PROMPT)
+
+
+def test_golden_qoder_run(app_config: AppConfig, plain_worktree: Path) -> None:
+    """qoder 主执行：bin 是 qodercn，用 -o stream-json 走流式协议。"""
+    invocation = build_agent_invocation("qoder", "run", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == (
+        "qodercn",
+        "--dangerously-skip-permissions",
+        "-p",
+        "-o",
+        "stream-json",
+        PROMPT,
+    )
+    assert invocation.output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID
+
+
+def test_golden_qoder_deliberate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """qoder 辩论：保留 -p、提示词走 stdin（不依赖 qoder 缺 -p 时的行为）。"""
+    invocation = build_agent_invocation("qoder", "deliberate", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == ("qodercn", "--dangerously-skip-permissions", "-p")
+    assert invocation.prompt_delivery == "stdin"
+    assert invocation.output_protocol == PLAIN_PROTOCOL_ID
+
+
+def test_golden_qoder_generate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """qoder 生成：只读用途。"""
+    invocation = build_agent_invocation("qoder", "generate", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == ("qodercn", "--dangerously-skip-permissions", "-p", PROMPT)
+    assert invocation.read_only is True
+
+
+def test_golden_qoder_repl(app_config: AppConfig, plain_worktree: Path) -> None:
+    """qoder REPL：可写形态。"""
+    invocation = build_agent_invocation("qoder", "repl", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == ("qodercn", "--dangerously-skip-permissions", "-p", PROMPT)
+
+
+def test_golden_opencode_run(app_config: AppConfig, plain_worktree: Path) -> None:
+    """opencode 主执行：run 子命令 + 逐行文本输出。"""
+    invocation = build_agent_invocation("opencode", "run", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == ("opencode", "run", "--dangerously-skip-permissions", PROMPT)
+    assert invocation.output_protocol == PLAIN_PROTOCOL_ID
+
+
+def test_golden_opencode_deliberate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """opencode 辩论：同一形态。"""
+    invocation = build_agent_invocation(
+        "opencode", "deliberate", PROMPT, plain_worktree, app_config
+    )
+    assert invocation.argv == ("opencode", "run", "--dangerously-skip-permissions", PROMPT)
+
+
+def test_golden_opencode_repl(app_config: AppConfig, plain_worktree: Path) -> None:
+    """opencode REPL：同一形态。"""
+    invocation = build_agent_invocation("opencode", "repl", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == ("opencode", "run", "--dangerously-skip-permissions", PROMPT)
+
+
+def test_opencode_has_no_generate_profile(app_config: AppConfig, plain_worktree: Path) -> None:
+    """opencode 刻意不声明 generate：它没有可验证的只读机制，不放假只读声明。"""
+    with pytest.raises(UnknownProfileError) as exc_info:
+        build_agent_invocation("opencode", "generate", PROMPT, plain_worktree, app_config)
+    message = str(exc_info.value)
+    assert "opencode" in message
+    assert "generate" in message
+    # 报错必须列出已声明的用途，且不得回落到别的用途
+    assert "run" in message
+
+
+# ---------------------------------------------------------------------------
 # 失败路径：不降级、带上下文
 # ---------------------------------------------------------------------------
 
@@ -329,7 +459,7 @@ def test_unknown_agent_lists_registered(app_config: AppConfig, plain_worktree: P
     with pytest.raises(UnknownAgentError) as exc_info:
         build_agent_invocation("does-not-exist", "run", PROMPT, plain_worktree, app_config)
     message = str(exc_info.value)
-    for registered_name in ("codex", "claude", "kimi", "pi"):
+    for registered_name in ("codex", "claude", "kimi", "pi", "codebuddy", "qoder", "opencode"):
         assert registered_name in message
 
 

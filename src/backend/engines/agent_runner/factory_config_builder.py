@@ -272,12 +272,17 @@ def _merge_agent_settings(
     profiles: dict[str, AgentProfileSpec] = {}
     for profile_name in AGENT_PROFILES:
         profile_settings = agent_settings.profiles.get(profile_name)
-        # 全新 agent 只要求"四种用途至少声明一种"：未声明的用途直接跳过，
-        # 不触发"声明为空且无内置默认"的报错（那是显式写空段 `[...profiles.x]` 的情况）。
-        if base_spec is None and profile_settings is None:
+        base_profile = base_spec.profiles.get(profile_name) if base_spec is not None else None
+        # 两侧都没有该用途时直接跳过，不触发"声明为空且无内置默认"的报错。
+        # 这既覆盖"全新 agent 只声明部分用途"，也覆盖"内置 spec 本身就缺该用途"
+        # 的 agent（例如只提供 run / deliberate / repl 的 agent）——后者若被跳过条件
+        # 漏掉，它在 config.toml 里照抄出厂注册块时就会因为"缺某个用途"而无法加载。
+        # 显式写空段 `[agents.<name>.profiles.<p>]` 仍会走到下面并正确报错：
+        # 那种情况下 ``profile_settings`` 是"存在但为空"的对象，不是 ``None``。
+        if profile_settings is None and base_profile is None:
             continue
         merged_profile = _merge_profile_settings(
-            base_spec.profiles.get(profile_name) if base_spec is not None else None,
+            base_profile,
             profile_settings,
             agent_name=agent_name,
             profile_name=profile_name,

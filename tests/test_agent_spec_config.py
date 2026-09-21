@@ -356,6 +356,43 @@ def test_config_toml_agent_blocks_round_trip() -> None:
         assert registry[agent_name] == agent_spec
 
 
+def test_partial_profile_set_merges_without_error() -> None:
+    """内置 spec 与配置声明两侧都缺某用途时按"该 agent 不提供该用途"处理。
+
+    回归锁：合并曾把这种情况误判为"声明为空且无内置默认"并抛错，导致任何
+    profile 集合不全的 agent（例如只提供 run / deliberate / repl 的 opencode）
+    都无法写进 ``config.toml``，出厂注册块与内置 spec 的一致性守卫因此不可能满足。
+    """
+    registry = build_agent_registry_from_settings(
+        {
+            "opencode": AgentRunnerAgentSettings(
+                bin="opencode",
+                label="agent/opencode",
+                profiles={"run": _profile_settings(prompt_delivery="stdin")},
+            )
+        }
+    )
+    merged = registry["opencode"]
+    # 缺 generate 是两侧一致的结论——跳过而不是报错
+    assert set(merged.profiles) == {"run", "deliberate", "repl"}
+    # 配置声明的字段仍然覆盖生效
+    assert merged.profiles["run"].prompt_delivery == "stdin"
+
+
+def test_explicitly_empty_profile_segment_still_rejected() -> None:
+    """显式写空段仍然报错：跳过逻辑只针对"两侧都没有"，不吞掉真错误。"""
+    with pytest.raises(ValueError, match="prompt_delivery is required for a new profile"):
+        build_agent_registry_from_settings(
+            {
+                "opencode": AgentRunnerAgentSettings(
+                    bin="opencode",
+                    label="agent/opencode",
+                    profiles={"generate": AgentRunnerAgentProfileSettings()},
+                )
+            }
+        )
+
+
 def test_default_app_config_matches_builtin_registry() -> None:
     """AppConfig 默认注册表即内置 spec（无配置时行为等价）。"""
     config = AppConfig()

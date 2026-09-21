@@ -546,7 +546,7 @@ SKILL_INSTALL_TARGET_DIRS=()
 
 # 工具适配器是可变清单，不是同步契约。交互安装与非交互更新共用这份注册表，
 # 避免新增或删除工具时在两条路径里分别维护目录。
-SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy")
+SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy" "OpenCode")
 SKILL_ADAPTER_DIRS=(
     "$HOME/.codex/skills"
     "$HOME/.claude/skills"
@@ -554,8 +554,9 @@ SKILL_ADAPTER_DIRS=(
     "$HOME/.qoder-cn/skills"
     "$HOME/.kimi-code/skills"
     "$HOME/.codebuddy/skills"
+    "$HOME/.config/opencode/skills"
 )
-SKILL_ADAPTER_AUTO_DETECT_DIRS=("" "" "$HOME/.pi" "$HOME/.qoder-cn" "" "$HOME/.codebuddy")
+SKILL_ADAPTER_AUTO_DETECT_DIRS=("" "" "$HOME/.pi" "$HOME/.qoder-cn" "" "$HOME/.codebuddy" "$HOME/.config/opencode")
 
 _append_unique_skill_target() {
     local candidate_dir="$1"

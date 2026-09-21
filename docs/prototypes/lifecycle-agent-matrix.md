@@ -22,7 +22,7 @@ Settings 页在真实的「设置」标题与用户副标题下方，覆盖一�
 
 | 顺序 | Tab | 内容 | 写入 |
 |---|---|---|---|
-| ① 默认 | **Agent 标签设置** | 四个 agent 各自的路由标签：GitHub 标签名 / 标签颜色 / 标签描述 | `config.toml` 里各自的 `[agent_runner.agents.<name>]` 段（`label` / `label_color` / `label_description`） |
+| ① 默认 | **Agent 标签设置** | 每个 agent 各自的路由标签：GitHub 标签名 / 标签颜色 / 标签描述 | `config.toml` 里各自的 `[agent_runner.agents.<name>]` 段（`label` / `label_color` / `label_description`） |
 | ② | **生命周期 Agent 设置** | 九行生命周期矩阵 + 「agent 回退顺序」卡片 | `[agent_runner.lifecycle_agents]` 段 / `[agent_runner.runner]` 段 |
 
 - 「Agent 标签设置」说明 `auto` 的判定 = 运行时看 Issue 上挂着哪个 agent 标签，所以这张表就是 auto 的解析依据；并注明工作流标签（`agent/ready` 等，来自 `[agent_runner.labels]`）不在本表范围。
@@ -40,7 +40,7 @@ Settings 页在真实的「设置」标题与用户副标题下方，覆盖一�
 
 ## 下拉语义（三层共用）
 
-- 下拉里**只有真实取值**：已注册 agent（codex / claude / kimi / pi）、该阶段的 `auto`、fix 与 closeout 的 `跟随实现（executor）`。没有"未设置""跟随全局"之类的伪选项。
+- 下拉里**只有真实取值**：已注册 agent（codex / claude / kimi / pi / codebuddy / qoder / opencode）、该阶段的 `auto`、fix 与 closeout 的 `跟随实现（executor）`。没有"未设置""跟随全局"之类的伪选项。
 - **`auto` 的文案按阶段如实描述**（各阶段语义本来就不同，见下表）；没有实现 `auto` 的阶段（决策 / 内容生成）不给这个选项。
 - 下拉中**选中的就是当前生效值**，即优先级链上第一个被声明的值（本层声明 > 上一层声明 > 既有配置键 / 内置默认）；`executor` 不做二次解析，只在下方补一行"当前实现阶段：claude"。
 - 右侧「当前值来源」列说明这个值来自哪一层（本机 `config.toml` / 本仓库 `.iar.toml` / 既有配置键 / 内置默认），并在本层已显式设置时给出「不写本键（跟随既有配置）」或「跟随全局（删除本键）」的恢复入口。
@@ -69,7 +69,7 @@ Settings 页在真实的「设置」标题与用户副标题下方，覆盖一�
 
 ```text
 Settings · Agent 管理（默认视图，Tab 栏粘性）
-→ 默认停在「Agent 标签设置」：四个 agent 的标签 / 颜色 / 描述
+→ 默认停在「Agent 标签设置」：每个 agent 的标签 / 颜色 / 描述
 → 改任一字段 → 该行高亮、保存点亮；把标签改名（如 claude → agent/cc）
 → 演示：两个 agent 用同一标签 → 冲突行标红 + 保存被阻断
 → 保存更改 → config.toml 各 agent 注册块的写入预览（段内其余字段不变）+ toast
@@ -111,10 +111,10 @@ PRD 原文 · 覆盖抽屉
 - 侧栏 **Roadmap / Settings**：在三个画面之间切换（每个画面使用各自底图）。
 - Roadmap 仓库行右侧 **⚙**：打开该仓库的仓库级矩阵抽屉；抽屉标题带仓库名，右上角 ✕ 与 Esc 可关闭。
 - Roadmap 上**「生命周期 Agent 矩阵」PRD 卡片**：真实产品的直开入口，点击进入该 PRD 原文画面。
-- Settings 页矩阵行 **agent 下拉**：已注册 agent（codex、claude、kimi、pi）、`auto（按 agent 标签路由）`，fix 与 closeout 另含 `跟随实现（executor）`；选中的是当前生效值，改成别的值即视为"本层显式声明"。「当前值来源」列说明它来自哪一层。
+- Settings 页矩阵行 **agent 下拉**：已注册 agent（codex、claude、kimi、pi、codebuddy、qoder、opencode）、`auto（按 agent 标签路由）`，fix 与 closeout 另含 `跟随实现（executor）`；选中的是当前生效值，改成别的值即视为"本层显式声明"。「当前值来源」列说明它来自哪一层。
 - 来源列的 **不写本键（跟随既有配置）** / **跟随全局（删除本键）**：只在本层已显式声明时出现，点它即恢复继承。
 - 仓库抽屉矩阵行 **agent 下拉**：语义同上，作用范围是该仓库的 `.iar.toml`；来源列显示的值可能继承自全局层。
-- **演示：写入未注册 agent**（Settings 与仓库抽屉各一个）：把审核行置为未注册的 `codebuddy`，展示"阶段开始前报错、不静默回落"的界面形态。真实下拉里不会出现未注册值，它模拟的是"文件被手工改坏"。
+- **演示：写入未注册 agent**（Settings 与仓库抽屉各一个）：把审核行置为未注册的 `no-such-agent`，展示"阶段开始前报错、不静默回落"的界面形态。真实下拉里不会出现未注册值，它模拟的是"文件被手工改坏"。
 - Settings 页 **Tab 栏（Agent 标签设置 / 生命周期 Agent 设置）**：切换两个面板，Tab 栏在覆盖层滚动时保持钉在顶部。
 - **Agent 标签设置**的 **标签名 / 颜色 / 描述输入**：改任一字段即视为"本行已改"；标签名空或与其它 agent 重复时该行标红并阻断保存。
 - **演示：两个 agent 用同一标签**：把 kimi 的标签改成另一个 agent 正在用的值，展示冲突拦截。
@@ -126,8 +126,8 @@ PRD 原文 · 覆盖抽屉
 
 ## 演示数据说明
 
-- 九个生命周期键名、中文名、取值来自 PRD §1 与 §10 的闭集；已注册 agent 取自 `config.toml` 的四个注册块（codex / claude / kimi / pi）。
-- **Agent 标签设置**的四个标签取自真实 `config.toml`：`agent/codex`（#5319E7）、`agent/claude`（#BFDADC）、`agent/kimi`（#FF6B6B）、`agent/pi`（#7C3AED），描述也逐字来自各自的 `label_description`。
+- 九个生命周期键名、中文名、取值来自 PRD §1 与 §10 的闭集；已注册 agent 取自 `config.toml` 的七个注册块（codex / claude / kimi / pi / codebuddy / qoder / opencode）。
+- **Agent 标签设置**的七个标签取自真实 `config.toml`：`agent/codex`（#5319E7）、`agent/claude`（#BFDADC）、`agent/kimi`（#FF6B6B）、`agent/pi`（#7C3AED）、`agent/codebuddy`（#0052D9）、`agent/qoder`（#FF8C42）、`agent/opencode`（#0EA5E9），描述也逐字来自各自的 `label_description`。
 - 三个层级的初始值都是本机真实取值，来源列标注它来自哪一层：实现 `claude`（`runner.default_agent`）、校验 `auto`（`validation.verifier_agent` 缺省值）、审核 `auto`（`pre_pr_review.review_agent`）、监督 `auto`（`post_pr_supervisor.supervisor_agent`）、决策 `claude`（`interactive_decision.default_agent`）、内容生成 `claude`（`generated_content.default_agent`）、辩论 `auto`（`agent/deliberate` 标签路由）；fix / closeout 为内置默认 `executor`。
 - 受管理仓库列表与真实 registry 一致（`repo_id` / `display_name`），行位坐标实测自真实页面。
 - 保存与写回都是前端模拟，没有落到真实文件；PRD 原文与头部预览取自真实的 `tasks/pending/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md`。

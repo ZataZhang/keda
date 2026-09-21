@@ -255,12 +255,12 @@ def test_unregistered_agent_fails_fast_with_stage_name(config_toml: Path) -> Non
     """rv-5：未注册 agent 名阶段前 fail-fast，错误信息含阶段名与 agent 名。"""
     config = _global_config_from_toml(
         config_toml,
-        '[agent_runner]\n[agent_runner.lifecycle_agents]\nfix = "codebuddy"\n',
+        '[agent_runner]\n[agent_runner.lifecycle_agents]\nfix = "no-such-agent"\n',
     )
     with pytest.raises(UnknownAgentError) as exc_info:
         resolve_lifecycle_agent("fix", config, selected_agent="codex")
     assert "fix" in str(exc_info.value)
-    assert "codebuddy" in str(exc_info.value)
+    assert "no-such-agent" in str(exc_info.value)
 
 
 def test_unregistered_prd_override_fails_fast(config_toml: Path) -> None:

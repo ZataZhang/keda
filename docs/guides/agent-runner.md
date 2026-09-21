@@ -108,6 +108,10 @@ iar completion show --shell zsh
 | **工具路由** | `agent/codex` | 🟣 紫色 | 指定使用 Codex 执行 |
 | | `agent/claude` | 🩵 浅蓝 | 指定使用 Claude Code 执行 |
 | | `agent/kimi` | 🩷 粉色 | 指定使用 Kimi 执行 |
+| | `agent/pi` | 🟪 紫罗兰 | 指定使用 pi 执行 |
+| | `agent/codebuddy` | 🔷 蓝 | 指定使用 CodeBuddy Code 执行 |
+| | `agent/qoder` | 🟠 橙 | 指定使用 Qoder 执行 |
+| | `agent/opencode` | 🩵 天蓝 | 指定使用 OpenCode 执行 |
 | **来源标识** | `source/prd` | 🔵 深蓝 | Issue 关联了仓库内的 PRD 文件 |
 | **异步讨论** | `agent/deliberate` | 🩶 浅灰 | 复杂需求先走 Issue 评论区异步讨论，收敛后换 `agent/rework-prd` 落地 PRD |
 | **任务类型** | `type/feature` | 🔵 | 功能需求 |
@@ -2066,7 +2070,7 @@ uv run --project /path/to/keda iar issue create tasks/pending/feature-login.md \
   --ready
 ```
 
-> `--agent` 可选 `codex` / `claude` / `kimi` / `auto` / `none`。`auto` 按 Issue label 自动路由，`none` 不添加 agent 路由 label。推荐在交给 runner 前保持默认 PRD 发布并加 `--ready`，确保 runner 的 base branch 能读取到已回写 Issue URL 的 canonical PRD。
+> `--agent` 可选任一已注册 agent（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode`）以及 `auto` / `none`。`auto` 按 Issue label 自动路由，`none` 不添加 agent 路由 label。推荐在交给 runner 前保持默认 PRD 发布并加 `--ready`，确保 runner 的 base branch 能读取到已回写 Issue URL 的 canonical PRD。
 
 #### PRD 发布边界（`--publish-prd` / `--no-publish-prd`）
 
@@ -3381,7 +3385,7 @@ uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 - **白名单动作**：`show_status`、`run_deliberation`、`create_issue_from_prd`、`mark_issue_ready`、`run_once_dry_run`、`run_once`、`review_once_dry_run`、`review_once`、`needs_clarification`、`no_op`
 - **禁止动作**：`git_push`、`git_merge`、`git_reset`、`daemon`、`review-daemon`、任意 shell 命令、自动 merge、直接关闭 Issue、删除分支等
-- **Planner 安全**：只读 planner 必须通过可验证只读命令运行；目前仅 `codex` 被验证为安全（使用 `--sandbox read-only --ask-for-approval never`）。`claude` 和 `kimi` 会 fail fast。
+- **Planner 安全**：只读 planner / `iar ask` 的 agent 必须有**已声明的** `generate` 用途且该用途 `read_only = true`——门禁只读这个声明字段，不按 agent 名白名单判断（`factories/content_generators.py`）。当前内置注册表里 `codex`、`claude`、`kimi`、`pi`、`codebuddy`、`qoder` 都声明了 `read_only = true` 的 `generate`，因此都能作为 planner 启动；`opencode` 没有 `generate` 用途，会被拒绝并指名。注意这只校验**声明**：声明本身是否等于运行时真的只读，取决于各 agent 的 argv 是否带沙箱/只读开关（例如 `codex` 用 `--sandbox read-only`，而 `claude` / `codebuddy` / `qoder` 用的是 `--dangerously-skip-permissions`，不是沙箱级只读）。
 
 ### 确认策略
 
@@ -3640,7 +3644,7 @@ promoted_skills_dirs = ["~/.iar/memory/keda-main/skills"]
 
 ## 容器化运行（Containerized Runner）
 
-iar 默认跑在本机，需要本机预先安装 claude / codex / kimi 三个 agent CLI 以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
+iar 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（内置注册表提供 codex / claude / kimi / pi / codebuddy / qoder / opencode 的形态，但只有装了对应 CLI 才能真正跑起来）以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
 
 `iar container` 子命令组提供"把 runner 跑进 Docker 容器"的纯 opt-in 能力：
 
@@ -3657,7 +3661,7 @@ iar 默认跑在本机，需要本机预先安装 claude / codex / kimi 三个 a
 iar container auth import
 ```
 
-产出 `~/.iar/container-auth/{claude,codex,kimi-code}/`，每个子目录含：
+产出 `~/.iar/container-auth/<派生目录>/`，派生规则是去掉 `~` 与各段引导点：`claude`、`codex`、`kimi-code`、`pi/agent`（pi 的 `auth_home` 是 `~/.pi/agent`），以及内置注册表里其它声明了 `auth_home` 的 agent——`codebuddy`、`qoder-cn`、`config/opencode`（opencode 的 `auth_home` 是 XDG 路径 `~/.config/opencode`，所以派生结果有两段）。每个子目录含：
 
 - claude: `settings.json`（含 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`）+ `skills/`
 - codex: `auth.json`（`OPENAI_API_KEY`）+ `skills/`
@@ -3751,7 +3755,7 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 
 ## 接入一个新 agent（声明式注册表）
 
-一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` 的出厂默认已在代码注册表中生效）。
+一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` 的出厂默认已在代码注册表中生效）。
 
 ### 注册块字段表
 
@@ -3864,3 +3868,19 @@ pi · run
 ```
 
 接入后：`--agent` 参数、agent 路由标签、容器认证导入、live 面板协议渲染都会自动识别新 agent，无需任何代码改动。
+
+### 内置 agent 的形态速查（codebuddy / qoder / opencode）
+
+这三个 agent 与前面四个一样是内置默认，注册块见 `config.toml`。它们各自有一处**容易踩的点**，接入或排障前先看这里：
+
+| agent | bin | 形态要点 |
+|---|---|---|
+| `codebuddy` | `codebuddy` | 与 `claude` 完全同构（`-p` + `--output-format stream-json` + `--include-partial-messages`），四用途齐备，`run` / `deliberate` 复用内置 `claude-stream-json` 协议。配置与凭据在 `~/.codebuddy/`。 |
+| `qoder` | **`qodercn`** | 注册名与可执行名**不一致**：`qoder` 只是本机 shell 别名，`bin` 必须写 `qodercn`，否则 doctor 报 executable not found。它**没有** `--verbose` / `--include-partial-messages`；`run` 用 `-o stream-json`（包内 schema 与 claude 同形）走 `claude-stream-json`；`deliberate` 刻意保留 `-p` 并改用 `stdin` + `plain` —— 流式协议会把 `-p` 从 argv 剥离再经 stdin 投递，而 qoder 在缺 `-p` 时的行为未经验证，保留 `-p` 既不依赖未验证行为，也避免长 transcript 撑爆 argv。配置在 `~/.qoder-cn/`。 |
+| `opencode` | `opencode` | 非交互入口是 `run` 子命令（消息为位置参数）。**只声明 `run` / `deliberate` / `repl` 三个用途，刻意没有 `generate`**：它没有任何沙箱或只读开关，而 planner / `iar ask` 依赖 `generate` 用途上的只读声明做 fail-fast 门禁，声明一个无法验证的"只读"会让门禁形同虚设。需要 planner 时请选别的 agent。输出用 `--format default`（逐行文本）走 `plain`；`--format json` 是另一套事件形状，本项目没有对应协议。配置在 `~/.config/opencode/`（XDG 路径）。 |
+
+> 三者的容器支持不在本轮范围内：runner 镜像目前只预装 claude / codex / kimi，容器里选中它们会在启动子进程时报可执行文件不存在。
+
+### 未声明用途的行为
+
+一个 agent 不必声明全部四种用途。请求它未声明的用途时 `build_agent_invocation` 会抛 `UnknownProfileError` 并列出该 agent 已声明的用途名，**不会**回落到别的用途或别的 agent。`iar agent doctor <name> <profile>` 同样会以非零退出码指名报错。

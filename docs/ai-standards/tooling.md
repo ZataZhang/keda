@@ -228,7 +228,7 @@ uv run pre-commit run --show-diff-on-failure
 - 非交互的 `scripts/sync_template.sh --skill <name>` 只更新目标中**已存在**的同名 Skill，不会创建首次安装目录；没有可更新安装时明确失败。
 - 首次安装仍走交互式 `just sync-local-skills`；未检测到目标时才展示当前内置适配器供选择。
 
-内置适配器是随工具生命周期增删的便利清单，目前包含 Codex、Claude、Pi、Qoder、Kimi Code 与 CodeBuddy；它们不是永久支持承诺。交互安装与非交互更新必须共用 `scripts/shared/template/sync_template.sh` 中的同一份适配器注册表，守卫测试保护上述工具无关契约，不为单个适配器建立永久性断言。
+内置适配器是随工具生命周期增删的便利清单，目前包含 Codex、Claude、Pi、Qoder、Kimi Code、CodeBuddy 与 OpenCode；它们不是永久支持承诺。交互安装与非交互更新必须共用 `scripts/shared/template/sync_template.sh` 中的同一份适配器注册表，守卫测试保护上述工具无关契约，不为单个适配器建立永久性断言。
 
 ## Pre-commit Configuration Sync
 

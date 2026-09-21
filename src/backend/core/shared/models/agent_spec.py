@@ -135,8 +135,9 @@ class AgentSpec:
 # ---------------------------------------------------------------------------
 
 # 注意 dict 顺序即注册顺序：choose_agent 按标签匹配时先到先得，
-# 这里保持与旧 LabelConfig.agent_labels 一致的 codex -> claude -> kimi 顺序，
-# pi 作为新增 agent 追加在末尾。
+# 这里保持与旧 LabelConfig.agent_labels 一致的 codex -> claude -> kimi 顺序；
+# 后续新增的 agent（pi、codebuddy、qoder、opencode）一律追加在末尾，绝不插入
+# 既有条目之间——插入会改变既有 agent 的标签匹配优先级。
 BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
     "codex": AgentSpec(
         bin="codex",
@@ -347,6 +348,173 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             AGENT_PROFILE_REPL: AgentProfileSpec(
                 args=("--approve", "--print"),
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=False,
+            ),
+        },
+    ),
+    # CodeBuddy Code（@tencent-ai/codebuddy-code）与 Claude Code 同构：
+    # -p/--print、--output-format stream-json、--include-partial-messages、
+    # -y/--dangerously-skip-permissions 全部存在，因此四用途照抄 claude 形态，
+    # 输出复用内置 claude-stream-json 协议。配置与凭据在 ~/.codebuddy/。
+    "codebuddy": AgentSpec(
+        bin="codebuddy",
+        label="agent/codebuddy",
+        label_color="0052D9",
+        label_description="Use CodeBuddy Code for local runner execution.",
+        auth_home="~/.codebuddy",
+        auth_include=("settings.json", "skills"),
+        auth_exclude=(
+            "history.jsonl",
+            "file-history",
+            "sessions",
+            "logs",
+            "plans",
+            "plugins",
+            "cache",
+            "blobs",
+            "traces",
+            "shell-snapshots",
+            "tasks",
+            "teams",
+            "projects",
+            "local_storage",
+            "jobs",
+            "diagnostics",
+            "skills-marketplace",
+        ),
+        project_skills_dir=".codebuddy/skills",
+        profiles={
+            AGENT_PROFILE_RUN: AgentProfileSpec(
+                args=(
+                    "--dangerously-skip-permissions",
+                    "--verbose",
+                    "-p",
+                    "--output-format",
+                    "stream-json",
+                    "--include-partial-messages",
+                ),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
+                args=(
+                    "--dangerously-skip-permissions",
+                    "--verbose",
+                    "-p",
+                    "--output-format",
+                    "stream-json",
+                    "--include-partial-messages",
+                ),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_GENERATE: AgentProfileSpec(
+                args=("--dangerously-skip-permissions", "-p"),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=True,
+            ),
+            AGENT_PROFILE_REPL: AgentProfileSpec(
+                args=("--dangerously-skip-permissions", "-p"),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=False,
+            ),
+        },
+    ),
+    # Qoder CLI CN（@qodercn-ai/qoderclicn）。两点与 claude 不同，均以本机
+    # --help 与包内 schema 实测为准：
+    # 1. 可执行文件名是 ``qodercn``（``qoder`` 只是 shell 别名）；
+    # 2. 没有 ``--verbose`` / ``--include-partial-messages``，运行用途改用
+    #    ``-o stream-json``：其包内 schema 就是 claude 的信封形状
+    #    （type=stream_event / assistant / result），故复用 claude-stream-json。
+    # deliberate 走 stdin + plain 而非 claude 的 argv_tail + 流式：流式协议会把
+    # ``-p`` 从 argv 剥离再经 stdin 投递，而 qoder 在缺 ``-p`` 时的行为未经验证；
+    # 保留 ``-p`` 并用 stdin 投递，既避免依赖未验证行为，也避免长 transcript
+    # 撑爆 argv。配置与凭据在 ~/.qoder-cn/。
+    "qoder": AgentSpec(
+        bin="qodercn",
+        label="agent/qoder",
+        label_color="FF8C42",
+        label_description="Use Qoder for local runner execution.",
+        auth_home="~/.qoder-cn",
+        auth_include=("settings.json", "skills"),
+        auth_exclude=(
+            "logs",
+            "file-history",
+            "projects",
+            "tasks",
+            "shell-snapshots",
+            "cache",
+            "plugins",
+        ),
+        project_skills_dir=".qoder-cn/skills",
+        profiles={
+            AGENT_PROFILE_RUN: AgentProfileSpec(
+                args=("--dangerously-skip-permissions", "-p", "-o", "stream-json"),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
+                args=("--dangerously-skip-permissions", "-p"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_GENERATE: AgentProfileSpec(
+                args=("--dangerously-skip-permissions", "-p"),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=True,
+            ),
+            AGENT_PROFILE_REPL: AgentProfileSpec(
+                args=("--dangerously-skip-permissions", "-p"),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=False,
+            ),
+        },
+    ),
+    # OpenCode。非交互入口是 ``run`` 子命令（消息是位置参数），输出走
+    # ``--format default``（逐行文本）即 plain；``--format json`` 是另一套事件
+    # 形状，本项目没有对应协议，故不启用。**不声明 generate**：它没有任何
+    # 沙箱 / 只读开关，声明 read_only 会是无法验证的假声明，只读决策入口
+    # （planner / iar ask）需要该字段做门禁，故宁可缺用途也不做假声明。
+    # 配置在 ~/.config/opencode/（XDG 路径，容器认证导入会派生为 config/opencode）。
+    "opencode": AgentSpec(
+        bin="opencode",
+        label="agent/opencode",
+        label_color="0EA5E9",
+        label_description="Use OpenCode for local runner execution.",
+        auth_home="~/.config/opencode",
+        auth_include=("opencode.json", "skills"),
+        auth_exclude=(
+            "node_modules",
+            "package.json",
+            "package-lock.json",
+            "tui.jsonc",
+            "plugins",
+        ),
+        profiles={
+            AGENT_PROFILE_RUN: AgentProfileSpec(
+                args=("run", "--dangerously-skip-permissions"),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
+                args=("run", "--dangerously-skip-permissions"),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_REPL: AgentProfileSpec(
+                args=("run", "--dangerously-skip-permissions"),
+                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=False,
             ),

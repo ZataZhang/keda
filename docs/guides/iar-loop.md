@@ -45,7 +45,7 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 | `schedule` | ✅ | string | — | 5 字段 cron 表达式（本地时区），或 interval 简写 `10m` / `1h` / `1d`（`1d` 自动按 `0 0 * * *` 解析）。 |
 | `repo_id` | ✅ | string | — | 目标仓库在 `config.toml` 中的注册 ID。 |
 | `issue_type` |  | enum | `feature` | `feature` / `refactor` / `bug`，决定初始 `type/*` 标签。 |
-| `agent` |  | enum | `auto` | `auto` / `claude` / `codex` / `kimi`，决定 agent 路由标签。 |
+| `agent` |  | enum | `auto` | 合法值由 agent 注册表派生：`auto`（按标签路由）或任一已注册 agent 名（如 `claude` / `codex` / `kimi` / `pi`，以及 `[agent_runner.agents.<name>]` 里自定义注册的 agent）。 |
 | `labels` |  | list | `[]` | 除默认 `loop/<id>` 外附加的 GitHub labels。 |
 | `publish_prd` |  | bool | `true` | 创建 Issue 前是否 commit/push PRD。 |
 | `queue_ready` |  | bool | `true` | 是否贴 `agent/ready` 标签让 runner 认领。 |

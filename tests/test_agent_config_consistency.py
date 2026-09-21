@@ -351,13 +351,21 @@ def test_default_planner_agent_has_generate_profile() -> None:
 
 
 def test_planner_command_builders_for_supported_agents() -> None:
-    """All registered agents can build planner (generate-profile) invocations."""
+    """Every agent that declares a generate profile can build a planner invocation.
+
+    ``opencode`` is deliberately absent: it declares no ``generate`` profile
+    because it offers no verifiable read-only mode, and the read-only gate that
+    planner / ``iar ask`` rely on must not be satisfied by a false claim.
+    """
     config = CoreAppConfig()
-    for agent_name in ("claude", "codex", "kimi", "pi"):
+    for agent_name in ("claude", "codex", "kimi", "pi", "codebuddy", "qoder"):
         invocation = build_agent_invocation(
             agent_name, "generate", "test prompt", Path("/tmp/worktree"), config
         )
-        assert invocation.argv[0] == agent_name
+        # 首个 argv 元素是注册表声明的可执行文件名，未必等于 agent 注册名
+        # （例如 qoder 的 bin 是 qodercn）。
+        assert invocation.argv[0] == config.agents[agent_name].bin
+        assert invocation.read_only is True
 
 
 def test_unknown_planner_agent_fails_fast() -> None:
