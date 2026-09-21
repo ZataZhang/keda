@@ -69,8 +69,64 @@ def _ensure_global_config_toml() -> Path | None:
         return None
 
 
+def _is_iar_config_toml(candidate: Path) -> bool:
+    """判断 ``candidate`` 是否真的是 IAR 自己的 ``config.toml``。
+
+    从 keda 模板派生的项目会在仓库根放一份**应用级** ``config.toml``
+    （``[app]`` / ``[database]`` / ``[preview]`` …）。它与 IAR 的机器级配置同名、
+    共享同名段落之外的部分，但**不含** IAR 自己的 ``[agent_runner]`` 段；据此把它
+    挡在"机器级配置"之外，避免它整份顶掉 ``~/.iar/config.toml``。
+
+    Args:
+        candidate: 待判定的 ``config.toml`` 路径。
+
+    Returns:
+        文件可解析且含顶层 ``agent_runner`` 表时为 ``True``；读取或解析失败时
+        为 ``False``（发现阶段不该因为一个坏文件而崩溃）。
+    """
+    try:
+        with open(candidate, "rb") as config_file:
+            parsed_config: dict[str, Any] = tomllib.load(config_file)
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return isinstance(parsed_config.get("agent_runner"), dict)
+
+
+def _resolve_env_config_toml() -> Path | None:
+    """``IAR_CONFIG`` 指向的配置文件；未设置或不可达时返回 ``None``。
+
+    环境变量在两种解析里都是最高优先级，故提取共用。
+    """
+    env_config = os.environ.get("IAR_CONFIG")
+    if not env_config:
+        return None
+    env_path = Path(env_config).expanduser()
+    if env_path.is_file():
+        return env_path
+    if env_path.is_dir():
+        candidate = env_path / "config.toml"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _global_then_source_fallback() -> Path | None:
+    """cwd 向上查找落空时的两级回落：``~/.iar/config.toml`` → 源码根。"""
+    global_config = _ensure_global_config_toml()
+    if global_config is not None:
+        return global_config
+    fallback = _PROJECT_ROOT_PATH / "config.toml"
+    if fallback.is_file():
+        return fallback
+    return None
+
+
 def _find_config_toml() -> Path | None:
-    """Resolve the effective config.toml using the standard search order.
+    """Resolve the effective *project* config.toml using the standard search order.
+
+    宿主应用（含从 keda 模板派生的项目）把应用配置写在仓库根的 ``config.toml``
+    （``[app]`` / ``[database]`` / ``[preview]`` …），因此这里的 cwd 向上查找接受
+    任何同名文件；IAR 自己的机器级配置见 :func:`_find_iar_config_toml`。
 
     Search order:
     1. ``IAR_CONFIG`` environment variable, if set.
@@ -78,15 +134,9 @@ def _find_config_toml() -> Path | None:
     3. ``~/.iar/config.toml`` (seeded from the source root if missing).
     4. keda source root config.toml.
     """
-    env_config = os.environ.get("IAR_CONFIG")
-    if env_config:
-        env_path = Path(env_config).expanduser()
-        if env_path.is_file():
-            return env_path
-        if env_path.is_dir():
-            candidate = env_path / "config.toml"
-            if candidate.is_file():
-                return candidate
+    env_config = _resolve_env_config_toml()
+    if env_config is not None:
+        return env_config
 
     cwd = Path.cwd()
     for path in [cwd, *cwd.parents]:
@@ -94,19 +144,45 @@ def _find_config_toml() -> Path | None:
         if candidate.is_file():
             return candidate
 
-    global_config = _ensure_global_config_toml()
-    if global_config is not None:
-        return global_config
+    return _global_then_source_fallback()
 
-    fallback = _PROJECT_ROOT_PATH / "config.toml"
-    if fallback.is_file():
-        return fallback
-    return None
+
+def _find_iar_config_toml() -> Path | None:
+    """Resolve IAR's own machine-level config.toml.
+
+    与 :func:`_find_config_toml` 唯一差别在 cwd 向上查找：只接受带
+    ``[agent_runner]`` 段的文件，即 :func:`_is_iar_config_toml` 认得的 IAR 配置。
+    否则在目标仓库（cwd 就是该仓库）里运行的 runner 会拿该仓库的应用级
+    ``config.toml`` 当机器级配置，``~/.iar/config.toml`` 里的生命周期矩阵、
+    registry、超时等设置被整份顶掉。
+
+    Search order:
+    1. ``IAR_CONFIG`` environment variable, if set.
+    2. Walk upward from the current working directory (IAR-owned files only).
+    3. ``~/.iar/config.toml`` (seeded from the source root if missing).
+    4. keda source root config.toml.
+    """
+    env_config = _resolve_env_config_toml()
+    if env_config is not None:
+        return env_config
+
+    cwd = Path.cwd()
+    for path in [cwd, *cwd.parents]:
+        candidate = path / "config.toml"
+        if candidate.is_file() and _is_iar_config_toml(candidate):
+            return candidate
+
+    return _global_then_source_fallback()
 
 
 def resolve_config_toml_path() -> Path:
-    """解析当前生效的 config.toml 路径（找不到时回退到源码根目录）。"""
-    return _find_config_toml() or (_PROJECT_ROOT_PATH / "config.toml")
+    """解析当前生效的**机器级** config.toml 路径（找不到时回退到源码根目录）。
+
+    这是 IAR 自己那份配置（生命周期矩阵写回、托管进程的 ``IAR_CONFIG`` 注入都用
+    它），因此走 :func:`_find_iar_config_toml`：目标仓库的应用级 ``config.toml``
+    不会被误当成机器级配置。
+    """
+    return _find_iar_config_toml() or (_PROJECT_ROOT_PATH / "config.toml")
 
 
 def resolve_registry_config_toml_path() -> Path:
@@ -136,8 +212,18 @@ def resolve_project_root_path() -> Path:
     return _PROJECT_ROOT_PATH
 
 
+#: ``config.toml`` 里归 IAR 自己所有的段落。只有这些段必须从**机器级**配置读取
+#: （见 :func:`_find_iar_config_toml`）；其余段落属于宿主应用，继续按 cwd 向上查找
+#: 的项目 ``config.toml`` 读取——派生项目里的 ``preview_env.py`` 正是靠这一点读到
+#: 本仓的 ``[preview]``。
+_IAR_OWNED_TOML_SECTIONS = frozenset({"agent_runner"})
+
+
 def _load_toml_section_data(section_name: str) -> dict[str, Any]:
     """从 config.toml 加载指定 section 的配置。
+
+    ``agent_runner`` 段归 IAR 自己所有，走机器级配置解析（跳过应用级同名文件）；
+    其它段归宿主应用，沿用按 cwd 向上查找的项目 ``config.toml``。
 
     Args:
         section_name: TOML section 名称。
@@ -145,7 +231,9 @@ def _load_toml_section_data(section_name: str) -> dict[str, Any]:
     Returns:
         section 内容字典，文件不存在或 section 不存在时返回空 dict。
     """
-    toml_path = _find_config_toml()
+    toml_path = (
+        _find_iar_config_toml() if section_name in _IAR_OWNED_TOML_SECTIONS else _find_config_toml()
+    )
     if toml_path is None:
         return {}
     try:

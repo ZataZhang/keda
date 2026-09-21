@@ -478,6 +478,8 @@ verification_commands = [
 # - 跨副本累积由
 #   ``backend.engines.agent_runner.factory._anchor_memory_config``
 #   一次性绝对化；本节只关心值，不关心解析位置。
+agent_fallback_order = ["claude", "kimi", "codebuddy", "qoder"]
+max_agent_switches = 4
 [agent_runner.memory]
 enabled = true
 base_dir = ".iar/memory"
@@ -961,3 +963,12 @@ review_interval_seconds = 120
 run_interval_seconds = 120
 # Maximum `agent/deliberate` Issues to drive through Phase 0 per pass.
 max_deliberation_issues = 1
+
+[agent_runner.lifecycle_agents]
+implementation = "codebuddy"
+verifier = "qoder"
+review = "kimi"
+supervisor = "qoder"
+planner = "kimi"
+content_generation = "codebuddy"
+deliberate = "codebuddy"

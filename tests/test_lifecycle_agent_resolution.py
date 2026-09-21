@@ -96,8 +96,12 @@ def _issue(labels: tuple[str, ...] = ()) -> IssueSummary:
     )
 
 
-def test_zero_config_baseline_matches_pre_matrix_behavior() -> None:
-    """rv-1 基线：不写任何新配置时九键解析值与改动前逐阶段一致。"""
+def test_zero_config_baseline_matches_pre_matrix_behavior(config_toml: Path) -> None:
+    """rv-1 基线：不写任何新配置时九键解析值与改动前逐阶段一致。
+
+    必须走 ``config_toml`` 隔离 fixture：否则读到的是开发者本机（或 keda 源码根）
+    那份 ``config.toml``，一旦它声明了矩阵，这个"零配置"基线就不再是零配置。
+    """
     config = build_app_config_from_settings(AgentRunnerSettings())
     resolved = {
         lifecycle_key: resolve_lifecycle_agent(

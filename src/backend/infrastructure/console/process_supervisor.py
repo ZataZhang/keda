@@ -202,15 +202,25 @@ def _format_create_time(create_time: float | None) -> str:
 class PidfileProcessSupervisor:
     """``IRunnerProcessSupervisor`` 端口的 subprocess + JSON pidfile 实现（鸭子类型）。"""
 
-    def __init__(self, *, registry_path: str | Path, log_dir: str | Path) -> None:
+    def __init__(
+        self,
+        *,
+        registry_path: str | Path,
+        log_dir: str | Path,
+        config_path: str | Path | None = None,
+    ) -> None:
         """初始化监管器。
 
         Args:
             registry_path: JSON pidfile 路径，支持 ``~`` 展开。
             log_dir: 托管进程日志根目录。
+            config_path: 父进程当前生效的 ``config.toml``；给定后 spawn 子进程时
+                以 ``IAR_CONFIG`` 注入，保证托管进程与创建它的进程读到同一份
+                机器级配置。``None`` 表示不注入，子进程按自身 cwd 解析。
         """
         self._registry_path = Path(registry_path).expanduser()
         self._log_dir = Path(log_dir).expanduser()
+        self._config_path = Path(config_path).expanduser() if config_path is not None else None
 
     # ── registry 持久化 ────────────────────────────────────────────────
 
@@ -291,6 +301,12 @@ class PidfileProcessSupervisor:
         # IAR_CONSOLE 标记让子进程把运行记录的 trigger 记为 console_*。
         child_env = dict(os.environ)
         child_env["IAR_CONSOLE"] = "1"
+        # 托管子进程的 cwd 是目标仓库（见 ``resolve_console_spawn_cwd``），若让它
+        # 自行按 cwd 解析配置，会撞上该仓库自己的应用级 ``config.toml``，把机器级
+        # 配置（生命周期矩阵、registry、超时…）整份顶掉。``IAR_CONFIG`` 是配置
+        # 发现顺序里的最高优先级，显式注入即让父子两进程锁定同一份文件。
+        if self._config_path is not None:
+            child_env["IAR_CONFIG"] = str(self._config_path)
         with open(log_path, "ab") as log_file:
             child_process = subprocess.Popen(  # noqa: S603 - argv 由白名单枚举构建。
                 list(argv),
