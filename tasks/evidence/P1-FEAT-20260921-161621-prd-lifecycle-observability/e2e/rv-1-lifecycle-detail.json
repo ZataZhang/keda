@@ -1,0 +1,80 @@
+{
+  "repo_id": "keda-main",
+  "prd_path": "tasks/pending/P1-FEAT-20260921-161621-demo-lifecycle.md",
+  "run_id": "keda-main#161",
+  "issue_number": 161,
+  "trigger": "console_start",
+  "current_phase": "executing",
+  "in_progress": true,
+  "outcome": null,
+  "history_complete": true,
+  "started_at": "2026-09-21T10:00:00+00:00",
+  "finished_at": null,
+  "durations": {
+    "end_to_end_seconds": 3600,
+    "active_seconds": 1200,
+    "waiting_seconds": 1800,
+    "blocked_seconds": 600
+  },
+  "events": [
+    {
+      "event_type": "queued",
+      "phase": "queued",
+      "actor": "roadmap",
+      "occurred_at": "2026-09-21T10:00:00+00:00",
+      "detail": {
+        "trigger": "manual"
+      }
+    },
+    {
+      "event_type": "started",
+      "phase": "executing",
+      "actor": "roadmap",
+      "occurred_at": "2026-09-21T10:01:00+00:00",
+      "detail": {}
+    },
+    {
+      "event_type": "attempt",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T10:03:00+00:00",
+      "detail": {
+        "agent": "codex",
+        "attempt_number": 1,
+        "failure_type": "verification",
+        "recovered": false,
+        "duration_seconds": 90
+      }
+    },
+    {
+      "event_type": "retry",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T10:05:00+00:00",
+      "detail": {
+        "agent": "codex",
+        "attempt_number": 2
+      }
+    },
+    {
+      "event_type": "recovered",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T10:12:00+00:00",
+      "detail": {
+        "agent": "codex",
+        "attempt_number": 2
+      }
+    },
+    {
+      "event_type": "blocked",
+      "phase": "blocked",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T10:20:00+00:00",
+      "detail": {
+        "error_summary": "等待人工输入 Spec 澄清"
+      }
+    }
+  ],
+  "has_data": true
+}

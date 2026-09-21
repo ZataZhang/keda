@@ -1,0 +1,133 @@
+{
+  "repo_id": "keda-main",
+  "prd_path": "tasks/pending/P1-FEAT-20260921-161621-demo-lifecycle.md",
+  "run_id": "keda-main#161",
+  "issue_number": 161,
+  "trigger": "console_start",
+  "current_phase": "reviewing",
+  "in_progress": true,
+  "outcome": null,
+  "history_complete": true,
+  "started_at": "2026-09-21T06:00:00+00:00",
+  "finished_at": null,
+  "durations": {
+    "end_to_end_seconds": 13750.7,
+    "active_seconds": 1740,
+    "waiting_seconds": 11410.7,
+    "blocked_seconds": 600
+  },
+  "events": [
+    {
+      "event_type": "queued",
+      "phase": "queued",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:00:00+00:00",
+      "detail": {}
+    },
+    {
+      "event_type": "started",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:01:00+00:00",
+      "detail": {}
+    },
+    {
+      "event_type": "claimed",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:02:00+00:00",
+      "detail": {
+        "agent": "codex",
+        "issue_kind": "ready"
+      }
+    },
+    {
+      "event_type": "attempt",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:03:00+00:00",
+      "detail": {
+        "agent": "codex",
+        "attempt_number": 1,
+        "duration_seconds": 90,
+        "failure_type": "verification",
+        "recovered": false
+      }
+    },
+    {
+      "event_type": "retry",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:05:00+00:00",
+      "detail": {
+        "agent": "codex",
+        "attempt_number": 2
+      }
+    },
+    {
+      "event_type": "recovered",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:12:00+00:00",
+      "detail": {
+        "agent": "codex",
+        "attempt_number": 2
+      }
+    },
+    {
+      "event_type": "blocked",
+      "phase": "blocked",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:20:00+00:00",
+      "detail": {
+        "error_summary": "等待人工澄清 PRD 验收口径"
+      }
+    },
+    {
+      "event_type": "unblocked",
+      "phase": "executing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:30:00+00:00",
+      "detail": {
+        "reason": "人工已澄清"
+      }
+    },
+    {
+      "event_type": "implementation_completed",
+      "phase": "reviewing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:40:00+00:00",
+      "detail": {}
+    },
+    {
+      "event_type": "validation_started",
+      "phase": "validating",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:42:00+00:00",
+      "detail": {
+        "head_sha": "abc123",
+        "total": 6
+      }
+    },
+    {
+      "event_type": "validation_failed",
+      "phase": "validating",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:50:00+00:00",
+      "detail": {
+        "head_sha": "abc123",
+        "unchecked_count": 2
+      }
+    },
+    {
+      "event_type": "review_started",
+      "phase": "reviewing",
+      "actor": "runner",
+      "occurred_at": "2026-09-21T06:55:00+00:00",
+      "detail": {
+        "outcome": "waiting_for_checks"
+      }
+    }
+  ],
+  "has_data": true
+}

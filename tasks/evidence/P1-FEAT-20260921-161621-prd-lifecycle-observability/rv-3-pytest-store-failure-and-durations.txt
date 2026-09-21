@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/zata/code/keda-worktrees/prd-lifecycle-observability
+configfile: pyproject.toml
+plugins: anyio-4.12.1, timeout-2.4.0, langsmith-0.6.2, testmon-2.2.0
+collected 15 items / 8 deselected / 7 selected
+
+tests/test_prd_lifecycle.py .......                                      [100%]
+
+======================= 7 passed, 8 deselected in 0.23s ========================

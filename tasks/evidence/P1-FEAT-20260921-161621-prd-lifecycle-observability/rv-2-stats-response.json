@@ -1,0 +1,83 @@
+{
+  "repo_id": "keda-main",
+  "window_days": 30,
+  "completed_runs": 3,
+  "average_end_to_end_seconds": 1200,
+  "median_end_to_end_seconds": 1200,
+  "p90_end_to_end_seconds": 1680,
+  "average_blocked_seconds": 100,
+  "bottleneck_phase": "reviewing",
+  "bottleneck_phase_seconds": 1200,
+  "unlinked_run_count": 0,
+  "incomplete_run_count": 0,
+  "runs": [
+    {
+      "run_id": "keda-main#171",
+      "prd_path": "tasks/pending/P0-FEAT-20260918-1.md",
+      "issue_number": 171,
+      "outcome": "completed",
+      "current_phase": "completed",
+      "in_progress": false,
+      "history_complete": true,
+      "started_at": "2026-09-18T08:00:00+00:00",
+      "finished_at": "2026-09-18T08:10:00+00:00",
+      "durations": {
+        "end_to_end_seconds": 600,
+        "active_seconds": 240,
+        "waiting_seconds": 360,
+        "blocked_seconds": 0
+      }
+    },
+    {
+      "run_id": "keda-main#172",
+      "prd_path": "tasks/pending/P0-FEAT-20260919-1.md",
+      "issue_number": 172,
+      "outcome": "completed",
+      "current_phase": "completed",
+      "in_progress": false,
+      "history_complete": true,
+      "started_at": "2026-09-19T08:00:00+00:00",
+      "finished_at": "2026-09-19T08:20:00+00:00",
+      "durations": {
+        "end_to_end_seconds": 1200,
+        "active_seconds": 480,
+        "waiting_seconds": 420,
+        "blocked_seconds": 300
+      }
+    },
+    {
+      "run_id": "keda-main#173",
+      "prd_path": "tasks/pending/P0-FEAT-20260920-1.md",
+      "issue_number": 173,
+      "outcome": "completed",
+      "current_phase": "completed",
+      "in_progress": false,
+      "history_complete": true,
+      "started_at": "2026-09-20T08:00:00+00:00",
+      "finished_at": "2026-09-20T08:30:00+00:00",
+      "durations": {
+        "end_to_end_seconds": 1800,
+        "active_seconds": 1140,
+        "waiting_seconds": 660,
+        "blocked_seconds": 0
+      }
+    },
+    {
+      "run_id": "keda-main#161",
+      "prd_path": "tasks/pending/P1-FEAT-20260921-161621-demo-lifecycle.md",
+      "issue_number": 161,
+      "outcome": null,
+      "current_phase": "reviewing",
+      "in_progress": true,
+      "history_complete": true,
+      "started_at": "2026-09-21T06:00:00+00:00",
+      "finished_at": null,
+      "durations": {
+        "end_to_end_seconds": 13752.2,
+        "active_seconds": 1740,
+        "waiting_seconds": 11412.2,
+        "blocked_seconds": 600
+      }
+    }
+  ]
+}
