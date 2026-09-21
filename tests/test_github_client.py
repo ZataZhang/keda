@@ -706,6 +706,83 @@ def test_create_issue_does_not_retry_structured_400(tmp_path: Path) -> None:
     mock_sleep.assert_not_called()
 
 
+def test_create_issue_creates_missing_label_and_retries(tmp_path: Path) -> None:
+    """``gh issue create`` failure on a missing label should auto-create + retry.
+
+    Real-world scenario: a freshly registered repository whose GitHub label
+    set does not yet include the workflow labels (``type/feature`` etc.) makes
+    Issue creation crash with gh's raw ``could not add label: ... not found``
+    error. Instead of failing, iar should ``gh label create --force`` the
+    missing labels and retry the create, mirroring ``edit_issue_labels``.
+    """
+
+    class _MissingCreateLabelRunner(FakeProcessRunner):
+        """First ``gh issue create`` fails with a not-found stderr; the retry succeeds."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.create_attempts = 0
+
+        def run(self, command, *, cwd, check=True, **kwargs):  # type: ignore[override]
+            command_list = list(command)
+            if command_list[:3] == ["gh", "issue", "create"]:
+                self.create_attempts += 1
+                if self.create_attempts == 1:
+                    exc = subprocess.CalledProcessError(
+                        returncode=1,
+                        cmd=command_list,
+                        output="",
+                        stderr="could not add label: 'type/feature' not found",
+                    )
+                    if check:
+                        raise exc
+                result = super().run(command, cwd=cwd, check=check, **kwargs)
+                return CommandResult(
+                    command=result.command,
+                    return_code=0,
+                    stdout="https://github.com/org/repo/issues/42",
+                    stderr="",
+                )
+            return super().run(command, cwd=cwd, check=check, **kwargs)
+
+    fake_runner = _MissingCreateLabelRunner()
+    github_client = GitHubCliClient(tmp_path, fake_runner)
+
+    issue_url = github_client.create_issue(
+        title="title",
+        body="body",
+        labels=["type/feature", "status/backlog", "source/prd"],
+    )
+
+    assert issue_url == "https://github.com/org/repo/issues/42"
+    assert fake_runner.create_attempts == 2
+    created_labels = [
+        call[call.index("create") + 1]
+        for call in fake_runner.calls
+        if call[:3] == ["gh", "label", "create"]
+    ]
+    assert created_labels == ["type/feature", "status/backlog", "source/prd"]
+
+
+def test_create_issue_does_not_create_label_on_unrelated_error(tmp_path: Path) -> None:
+    """Non-missing-label failures must propagate without touching label state.
+
+    A 401 auth failure must not be masked by the missing-label fallback:
+    creating labels and retrying would hide the real cause.
+    """
+    runner = _FlakyProcessRunner(
+        fail_count=1,
+        error_text="HTTP 401: Bad credentials",
+    )
+    github_client = GitHubCliClient(tmp_path, runner)
+
+    with patch("backend.infrastructure.github_client.time.sleep"):
+        with pytest.raises(subprocess.CalledProcessError):
+            github_client.create_issue(title="title", body="body", labels=["type/feature"])
+
+    assert not any(call[:3] == ["gh", "label", "create"] for call in runner.calls)
+
+
 def test_list_pull_requests_for_issue_normalises_states(tmp_path: Path) -> None:
     """list_pull_requests_for_issue maps gh states to the 4-bucket view model."""
     command = (

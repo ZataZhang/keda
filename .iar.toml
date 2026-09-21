@@ -14,7 +14,7 @@ enabled = true
 display_name = "keda"
 # 可选：GitHub owner/name（``gh pr list --repo`` 使用）。
 # 缺省时 ``iar issue list`` 的 PR 列为空 + stderr 一次性 WARN。
-github_repo = "zata-zhangtao/keda"
+github_repo = "ZataZhang/keda"
 
 # GitHub labels 状态流转配置
 [agent_runner.labels]
