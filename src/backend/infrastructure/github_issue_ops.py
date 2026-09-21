@@ -344,7 +344,16 @@ def create_issue(
     body: str,
     labels: Sequence[str],
 ) -> str:
-    """Create a GitHub Issue and return its URL."""
+    """Create a GitHub Issue and return its URL.
+
+    On ``gh issue create`` failure caused by a missing repository label (a
+    fresh repository that never ran ``iar labels sync``), the missing labels
+    are created with ``gh label create --force`` and the create is retried.
+    This mirrors :func:`edit_issue_labels` so both Issue write paths survive
+    an unprovisioned label set instead of failing with gh's raw
+    ``could not add label: '...' not found`` error. Other failures (network,
+    auth, validation) bubble up unchanged.
+    """
     with tempfile.TemporaryDirectory(prefix="iar-issue-") as temp_dir:
         body_path = client._write_body_file(temp_dir, "issue.md", body)
         command = [
@@ -358,7 +367,21 @@ def create_issue(
         ]
         for label in labels:
             command.extend(["--label", label])
-        result = client._run_with_retry(command, cwd=client.repo_path)
+        try:
+            result = client._run_with_retry(command, cwd=client.repo_path)
+        except subprocess.CalledProcessError as exc:
+            if not _is_missing_label_error(exc) or not labels:
+                raise
+            _logger.info(
+                "gh issue create reported missing label(s); creating %s and retrying.",
+                ", ".join(labels),
+            )
+            for label in labels:
+                client._run_with_retry(
+                    _build_ensure_label_command(label),
+                    cwd=client.repo_path,
+                )
+            result = client._run_with_retry(command, cwd=client.repo_path)
     return result.stdout.strip().splitlines()[-1]
 
 
