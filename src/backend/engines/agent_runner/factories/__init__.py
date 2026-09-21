@@ -47,6 +47,7 @@ from backend.engines.agent_runner.persistence.loop_state_json import (
 )
 from backend.engines.agent_runner.scheduler.loop_clock import SystemClock
 from backend.engines.agent_runner.transcript_runner import create_transcript_runner
+from backend.infrastructure.config import settings_sources as _settings_sources
 from backend.infrastructure.config.registry_editor import TomlRegistryEditor
 from backend.infrastructure.config.repository_settings_editor import (
     TomlRepositoryAutopilotSettingsEditor,
@@ -217,7 +218,12 @@ def create_roadmap_store() -> IRoadmapStore:
 
 
 def create_process_supervisor() -> IRunnerProcessSupervisor:
-    """创建托管 runner 进程的监管器（pidfile + 日志目录已解析）。"""
+    """创建托管 runner 进程的监管器（pidfile + 日志目录已解析）。
+
+    同时把本进程当前生效的 ``config.toml`` 交给监管器注入子进程的
+    ``IAR_CONFIG``：托管子进程的 cwd 是目标仓库，若由它自行按 cwd 解析配置，
+    会读到该仓库自己的应用级 ``config.toml``，与面板展示的机器级配置失配。
+    """
     console_settings = get_agent_runner_settings().console
     log_dir = Path(console_settings.process_log_dir).expanduser()
     if not log_dir.is_absolute():
@@ -225,6 +231,7 @@ def create_process_supervisor() -> IRunnerProcessSupervisor:
     return PidfileProcessSupervisor(
         registry_path=console_settings.process_registry_path,
         log_dir=log_dir,
+        config_path=_settings_sources.resolve_config_toml_path(),
     )
 
 

@@ -279,6 +279,15 @@ uv run --project /path/to/keda iar init
 
 `iar init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `iar daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
+### 机器级 `config.toml` 的认定与托管进程继承
+
+`config.toml` 同时装两类配置：**IAR 自己的** `[agent_runner]`（含生命周期矩阵、registry、超时、验证命令等），以及**宿主应用的** `[app]` / `[database]` / `[preview]` 等。两类按不同规则解析：
+
+- `[agent_runner]`：`IAR_CONFIG` → 从 cwd 向上查找（**只接受带 `[agent_runner]` 表的文件**）→ `~/.iar/config.toml`（缺失时从源码根 seed）→ keda 源码根 `config.toml`。模板派生项目在仓库根也有一份同名 `config.toml`，但那是应用配置、不含 `[agent_runner]`，因此不会被当成机器级配置：否则在目标仓库内运行的 runner 会整份顶掉 `~/.iar/config.toml`，矩阵、registry、超时等设置全部静默失配（历史上表现为"面板显示实现用 codebuddy、实际领活却用了 claude"）。
+- 其它段（应用自己的配置）：仍按 cwd 向上查找最近的项目 `config.toml`，即目标仓库根那份——`preview_env.py` 等脚本依赖这个语义读到本仓的 `[preview]`。
+
+面板（`iar console`）托管或触发的 runner 子进程，cwd 就是目标仓库（见 `resolve_console_spawn_cwd`）；因此面板会把自己当前生效的机器级 `config.toml` 以 `IAR_CONFIG` 注入子进程，保证"界面上显示的配置"与"实际执行用的配置"是同一份。手动在目标仓库里直接执行 `iar run` / `iar daemon` 且未设 `IAR_CONFIG` 时，机器级配置取 `~/.iar/config.toml`——想让某个仓库的每个阶段都用指定 agent，写该仓库 `.iar.toml` 的 `[agent_runner.lifecycle_agents]` 是最稳的一层（仓库层覆盖机器层）。
+
 ### `.gitignore` 托管块与 prd skill 契约
 
 `iar init` 会在目标仓库 `.gitignore` 写入一个 `# >>> iar (managed by iar init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中除 `.iar/`、`.agent-runner/`、`.iar-worktrees/` 外还包含 `tasks/evidence` 白名单段：

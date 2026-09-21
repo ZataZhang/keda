@@ -43,6 +43,73 @@ def test_agent_runner_reads_root_config_toml() -> None:
     assert app_config.runner.inactivity_timeout_seconds == 1200
 
 
+def test_iar_config_resolution_skips_application_config_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """应用级同名 ``config.toml`` 不得被当成 IAR 的机器级配置。
+
+    模板派生项目的仓库根有一份应用配置（``[app]`` / ``[preview]`` …），而面板
+    托管 runner 的 cwd 正是目标仓库。若 IAR 自己的配置也命中它，
+    ``~/.iar/config.toml`` 里的生命周期矩阵等设置会被整份顶掉——这正是"面板显示
+    implementation=codebuddy、实际领活却是 claude"的根因。应用自己的段落仍要读
+    本仓这份文件（``preview_env.py`` 依赖）。
+    """
+    monkeypatch.delenv("IAR_CONFIG", raising=False)
+    iar_home = tmp_path / "iar-home"
+    iar_home.mkdir()
+    machine_config = iar_home / "config.toml"
+    machine_config.write_text(
+        '[agent_runner]\n[agent_runner.lifecycle_agents]\nimplementation = "codebuddy"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_sources, "_global_iar_dir", lambda: iar_home)
+
+    derived_repo = tmp_path / "derived-project"
+    derived_repo.mkdir()
+    app_config = derived_repo / "config.toml"
+    app_config.write_text(
+        '[app]\napp_name = "my-app"\n\n[preview]\nbase_domain = "example.com"\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(derived_repo)
+
+    # IAR 自己的配置：跳过应用级文件，落到机器级配置。
+    assert settings_sources._find_iar_config_toml() == machine_config
+    assert settings_sources.resolve_config_toml_path() == machine_config
+    # 行为层：矩阵声明必须真的从机器级配置读到，而不是被同名文件挤掉。
+    assert AgentRunnerSettings().lifecycle_agents.implementation == "codebuddy"
+    # 宿主应用自己的段落：仍然读本仓的 config.toml。
+    assert settings_sources._find_config_toml() == app_config
+
+
+def test_iar_config_resolution_accepts_iar_config_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cwd 树里真正的 IAR ``config.toml`` 仍然优先于 ``~/.iar/config.toml``。
+
+    源码树 / worktree 内开发依赖这条路径（根 config.toml 就是当前生效配置），
+    收紧查找时不能把它一起挡掉。
+    """
+    monkeypatch.delenv("IAR_CONFIG", raising=False)
+    iar_home = tmp_path / "iar-home"
+    iar_home.mkdir()
+    (iar_home / "config.toml").write_text("[agent_runner]\n", encoding="utf-8")
+    monkeypatch.setattr(settings_sources, "_global_iar_dir", lambda: iar_home)
+
+    project_root = tmp_path / "keda-checkout"
+    (project_root / "src").mkdir(parents=True)
+    project_config = project_root / "config.toml"
+    project_config.write_text(
+        '[agent_runner]\n[agent_runner.runner]\ndefault_agent = "codex"\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(project_root / "src")
+
+    assert settings_sources._find_iar_config_toml() == project_config
+
+
 def test_runner_timeout_settings_match_core() -> None:
     """AgentRunnerRunnerSettings timeout defaults must match RunnerConfig."""
     from backend.core.shared.models.agent_runner import RunnerConfig

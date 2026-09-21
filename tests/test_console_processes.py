@@ -111,6 +111,32 @@ def _sleeper_argv(seconds: float = 30) -> list[str]:
     ]
 
 
+def _print_env_argv(variable_name: str) -> list[str]:
+    """打印一个环境变量的子进程 argv（用于断言 spawn 注入的 env）。"""
+    return [
+        sys.executable,
+        "-c",
+        ("import os; " f"print(os.environ.get({variable_name!r}, '<unset>'), end='')"),
+    ]
+
+
+def _collect_log(
+    supervisor: PidfileProcessSupervisor, process_id: str, timeout_seconds: float = 10
+) -> str:
+    """轮询读到子进程写过内容为止，返回累计日志。"""
+    deadline = time.monotonic() + timeout_seconds
+    collected = ""
+    offset = 0
+    while time.monotonic() < deadline:
+        chunk = supervisor.read_log(process_id, offset=offset, max_bytes=4096)
+        collected += chunk.content
+        offset = chunk.next_offset
+        if collected:
+            break
+        time.sleep(0.05)
+    return collected
+
+
 def test_spawn_list_stop_real_process(tmp_path: Path) -> None:
     """A spawned process is listed as running and SIGTERM-stopped."""
     supervisor = _make_supervisor(tmp_path)
@@ -200,6 +226,46 @@ def test_exited_process_detected(tmp_path: Path) -> None:
         time.sleep(0.1)
     else:
         pytest.fail("process never reported as exited")
+
+
+def test_spawn_injects_parent_config_path(tmp_path: Path) -> None:
+    """托管子进程必须继承父进程生效的 ``config.toml``（注入 ``IAR_CONFIG``）。
+
+    子进程 cwd 是目标仓库，cwd 向上查找会命中该仓库自己的应用级
+    ``config.toml``；不注入就会与面板展示的机器级配置（生命周期矩阵等）失配——
+    面板显示 implementation=codebuddy、实际领活却是 claude 的根因。
+    """
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[agent_runner]\n", encoding="utf-8")
+    supervisor = PidfileProcessSupervisor(
+        registry_path=tmp_path / "processes.json",
+        log_dir=tmp_path / "logs",
+        config_path=config_path,
+    )
+    record = supervisor.spawn(
+        repo_id="zata-codes-template",
+        kind=RunnerProcessKind.RUN_ONCE,
+        argv=_print_env_argv("IAR_CONFIG"),
+        cwd=tmp_path,
+    )
+
+    assert _collect_log(supervisor, record.process_id) == str(config_path)
+
+
+def test_spawn_without_config_path_leaves_env_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """未给 ``config_path`` 时不注入 ``IAR_CONFIG``（子进程按自身 cwd 解析）。"""
+    monkeypatch.delenv("IAR_CONFIG", raising=False)
+    supervisor = _make_supervisor(tmp_path)
+    record = supervisor.spawn(
+        repo_id="keda-main",
+        kind=RunnerProcessKind.RUN_ONCE,
+        argv=_print_env_argv("IAR_CONFIG"),
+        cwd=tmp_path,
+    )
+
+    assert _collect_log(supervisor, record.process_id) == "<unset>"
 
 
 def test_read_log_offset_resume(tmp_path: Path) -> None:

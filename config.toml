@@ -478,6 +478,8 @@ verification_commands = [
 # - 跨副本累积由
 #   ``backend.engines.agent_runner.factory._anchor_memory_config``
 #   一次性绝对化；本节只关心值，不关心解析位置。
+agent_fallback_order = ["claude", "kimi", "codebuddy", "qoder"]
+max_agent_switches = 4
 [agent_runner.memory]
 enabled = true
 base_dir = ".iar/memory"
@@ -922,19 +924,19 @@ enabled = true
 display_name = "Keda Main"
 # GitHub owner/name used by `gh pr list --repo` for PR column population.
 # 缺省时 PR 列为空，并在 stderr 一次性打印 WARN。
-github_repo = "zata-zhangtao/keda"
+github_repo = "ZataZhang/keda"
 
 [agent_runner.repositories.zata-zhangtao-fsense]
 path = "/Users/zata/.iar/repos/zata-zhangtao/fsense"
 enabled = true
 display_name = "fsense"
-github_repo = "zata-zhangtao/fsense"
+github_repo = "ZataZhang/fsense"
 
 [agent_runner.repositories.zata-zhangtao-freshai]
 path = "/Users/zata/.iar/repos/zata-zhangtao/freshai"
 enabled = true
 display_name = "freshai"
-github_repo = "zata-zhangtao/freshai"
+github_repo = "ZataZhang/freshai"
 [agent_runner.console]
 # 运行历史与审计日志的 SQLite 文件路径（CLI 直跑与面板托管共用）。
 history_db_path = "~/.iar/console.db"
@@ -961,3 +963,12 @@ review_interval_seconds = 120
 run_interval_seconds = 120
 # Maximum `agent/deliberate` Issues to drive through Phase 0 per pass.
 max_deliberation_issues = 1
+
+[agent_runner.lifecycle_agents]
+implementation = "codebuddy"
+verifier = "qoder"
+review = "kimi"
+supervisor = "qoder"
+planner = "kimi"
+content_generation = "codebuddy"
+deliberate = "codebuddy"
