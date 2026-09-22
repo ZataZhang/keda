@@ -1,8 +1,10 @@
 # PRD: Tauri 桌面壳 —— 免签名本机构建的原生窗口
 
-> ⛔ **交付前置**：排在 `P1-FEAT-20260913-204530-console-prd-content-reader.md` 之后开工。
-> 构建上不依赖它（壳单独能跑），但先做壳只会得到一个读不了 PRD 的窗口。
-> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**；本行只为让人一眼看到，改动请以 §8 为准。
+> ✅ **交付前置**：无，可立即开工。上游 `P1-FEAT-20260913-204530-console-prd-content-reader.md` 已归档（`tasks/archive/`），本 PRD 立项动机所需的"读 PRD 原文"能力已在代码库可用。
+> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
+
+> ⬜ **验收状态**：未开工。
+> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**；只有全部验收项完成后才可改为 `✅ 可归档`。
 
 本 PRD 分两层阅读：**Part A（人审层）** 供人决定"做不做、怎么做才对"，不含实现细节；**Part B（执行器层）** 供执行者（人或 Agent）落地实现。人只需审 Part A，并按 Part A 的指引在需要时下钻 Part B。
 
@@ -106,7 +108,10 @@
 - **本机开发者（主要用户）：** 构建一次后 `~/Applications/kedacode.app` 双击即用；日常流程从"终端 → `iar console` → 浏览器"变成"热键呼出"。
 - **CLI / 浏览器控制台用户：** 完全不变。`iar console` 照旧启动并打开浏览器；桌面 App 与浏览器面板只是同一后端的两个客户端。
 - **分发维护者：** `install.sh` 增加一个可选分支，默认行为不变；发布流水线（PyPI + tap）不受影响，Release 产物不新增任何安装包。
-- **兼容性影响：** 无破坏性变更；不引入新的必填配置；不改动任何后端接口。
+
+### Impact On Existing Behavior
+
+- 无破坏性变更；不引入新的必填配置；不改动任何后端接口。`iar console` 的 CLI 语义（`--no-browser`、端口顺延、监听地址硬编码 `127.0.0.1`）保持原样，桌面 App 只是它的又一个 HTTP 客户端。
 
 ## 4. Requirement Shape
 
@@ -138,7 +143,7 @@
 
 - 已归档 `P1-FEAT-20260910-125248-iar-package-manager-distribution.md`：本 PRD **修订**其 D-01 的适用边界（该结论仅约束公开分发）。其 §7.10 关于签名/Gatekeeper/cask 的外部核实事实被继承引用，不重复核实。
 - 已归档 `P1-FEAT-20260910-111901-iar-console-bundled-web-terminal.md`：其交付的 `iar console`（wheel 内置控制台 + 一键启动）是本 PRD 的直接底座——sidecar 复用它，界面复用它服务的静态导出。
-- `tasks/pending/P1-FEAT-20260913-204530-console-prd-content-reader.md`：**上游**提案，§8 声明为 `hard` 门禁。需要分清两种依赖：**构建上不依赖**——壳同源加载控制台，对方没落地壳照样能跑通；**交付顺序上依赖**——本 PRD 的立项动机含「读 PRD 原文」，那块能力由对方交付，壳先落地会交出一个读不了 PRD 的窗口且本 PRD 验收仍全绿。故按交付顺序钉死为 hard。
+- 已归档 `P1-FEAT-20260913-204530-console-prd-content-reader.md`（`tasks/archive/`）：原 `hard` 交付顺序门禁已随其交付而满足。需要分清两种依赖：**构建上不依赖**——壳同源加载控制台，对方没落地壳照样能跑通；**交付顺序上曾依赖**——本 PRD 的立项动机含「读 PRD 原文」，那块能力由对方交付，壳先落地会交出一个读不了 PRD 的窗口且本 PRD 验收仍全绿。对方已归档，故 §8 现声明为 `none`。
 - 本 PRD 与原 `P1-FEAT-20260912-181533-tauri-desktop-gui.md` 是拆分关系：那份把"读 PRD 原文"与"做桌面壳"绑在一起，二者成本与价值差一个数量级且可独立交付，已按 Scope Cohesion 拆为两份，原文件删除。
 
 ## 6. Recommendation
@@ -201,9 +206,9 @@
 │   ├── src-tauri/tauri.conf.json
 │   │   [新增]
 │   │   【总结】应用标识、bundle 目标（macOS app）、窗口配置、安全策略仅允许 127.0.0.1 回环
-│   └── package.json / just 集成
+│   └── package.json
 │       [新增]
-│       【总结】tauri CLI 脚本（dev/build），遵循仓库既有前端工具链习惯
+│       【总结】tauri CLI 脚本（dev/build），并通过 just recipe 集成，遵循仓库既有前端工具链习惯
 ├── install.sh（仓库根，用户入口）
 │   [修改]
 │   【总结】新增可选 --app 分支：本机执行 tauri build 并拷贝产物到 ~/Applications
@@ -214,9 +219,15 @@
 ├── justfile
 │   [修改]
 │   【总结】新增 app 相关 recipe（如 just app build / dev），复用现有前端 recipe 风格
-├── docs/ + mkdocs.yml
+├── docs/
 │   [修改]
-│   【总结】新增桌面 App 使用与构建前置条件文档页并登记导航；README 安装段补一条本机构建说明
+│   【总结】新增桌面 App 使用与构建前置条件文档页
+├── mkdocs.yml
+│   [修改]
+│   【总结】登记新文档页导航
+├── README.md
+│   [修改]
+│   【总结】安装段补一条本机构建说明，并写明"仅限本机自用，公开分发仍需签名"
 └── roadmap.md
     [修改]
     【总结】把"不做原生 .app"修订为"不做签名安装包公开分发；允许本机构建自用"，并登记桌面壳能力
@@ -292,50 +303,50 @@ No data model changes in this PRD.
 ### Realistic Validation Plan
 
 ```yaml
-oracles:
-  - id: rv-1
-    behavior: 本机一条命令构建出免签名 .app，双击打开后窗口显示真实控制台数据（佐证决策一与决策二）
-    real_entry: "install.sh --app（或 just app build）构建并安装到 ~/Applications 后，在 Finder 中双击 ~/Applications/kedacode.app"
-    expected: "xattr ~/Applications/kedacode.app 无 com.apple.quarantine，双击无 Gatekeeper 拦截；窗口加载出与 iar console 浏览器版一致的控制台界面与真实数据"
-    mock_boundary: "构建、App、后端、tasks/ 与进程数据全部真实；不 stub 任何 HTTP"
-    tier: R2
-    test_layer: manual
-    required_for_acceptance: true
-    critical_value_source: "窗口中显示的任一 PRD 标题与进程条目，必须与对同一 sidecar 端口 curl /api/v1/agent-runner/roadmap/prds 及 /console/processes 的响应逐字比对一致；端口取自壳日志或 sidecar 的 'listening on' 输出"
-    must_cross: "Finder 双击 -> Tauri 壳 -> sidecar spawn -> uvicorn 监听 -> WebView 加载 -> 同源 /api 请求 -> 真实 tasks/ 与进程数据"
-    forbidden_bypasses: "禁止用 tauri dev 开发服务器代替正式构建产物；禁止手工 xattr -d 移除 quarantine 后声称免拦截；禁止从终端用 open 命令启动后冒充 Finder 双击（二者 PATH 环境不同，正是 rv-3 要覆盖的差异）"
-    fresh_state_probe: "完全退出 App 后重新双击打开，列表数据与当时磁盘 tasks/ 状态一致"
-    final_tree_evidence: "证据须来自最终 desktop/ 与 install.sh 代码树构建的产物；二者任一改动须重建重验"
-    negative_control: "把 tauri.conf.json 的窗口加载地址改为一个未监听端口后重建，窗口应显示错误页而非正常界面 —— 该对照必须实跑一次，证明'窗口显示真实数据'不是恒真"
-    expected_fail: "壳未正确配置加载地址或 CSP 时窗口白屏/错误页即红"
-  - id: rv-2
-    behavior: App 退出回收 sidecar 子进程，且与独立运行的 iar console 并存不抢端口
-    real_entry: "先独立运行 iar console（占用默认端口），再双击打开 kedacode.app；随后退出 App"
-    expected: "App 内功能正常且 sidecar 用了其它端口；退出 App 后 pgrep 查不到 App 拉起的 sidecar；独立 console 进程仍存活且 curl 可访问"
-    mock_boundary: "全部真实进程；不允许用 mock 进程代替 uvicorn"
-    tier: R2
-    test_layer: manual
-    required_for_acceptance: true
-    critical_value_source: "App 实际使用的端口须取自壳的端口分配日志或 sidecar 的 'listening on' 输出，不得靠猜；独立 console 的存活以 curl 返回 200 为准，不以 ps 输出为准"
-    must_cross: "壳端口探测 -> sidecar 绑定该端口 -> App 退出信号 -> 子进程 SIGTERM -> 进程表验证 -> 独立进程 curl 验活"
-    forbidden_bypasses: "禁止用 pkill 无差别清理后声称无残留；必须按 pid 区分 App 子进程与用户独立进程"
-    fresh_state_probe: "退出后新开一个 shell 执行 pgrep 验证；独立 console 另用 curl /api/v1/agent-runner/health 验活"
-    final_tree_evidence: "证据采集于最终 sidecar 生命周期代码；回收逻辑任何改动须重验"
-    negative_control: "临时注释掉退出回收逻辑后重建，退出 App 时 pgrep 应查到残留 sidecar —— 证明该判据能判负"
-  - id: rv-3
-    behavior: 在只有 Homebrew 路径装了 iar 的机器上从 Finder 双击，App 仍能定位并拉起 sidecar
-    real_entry: "确保 ~/.local/bin/iar 不存在（或临时移走）、仅 /opt/homebrew/bin/iar 可用，然后在 Finder 中双击 .app"
-    expected: "窗口正常加载控制台（不是'未找到 iar'引导页）；壳日志显示命中的是 Homebrew 路径"
-    mock_boundary: "真实安装、真实 Finder 启动；不得从终端启动"
-    tier: R2
-    test_layer: manual
-    required_for_acceptance: true
-    critical_value_source: "命中的可执行文件路径取自壳自身的定位日志，而非事后推断"
-    must_cross: "Finder 启动（最小 PATH）-> 壳的候选路径枚举 -> spawn 命中的 iar -> uvicorn 监听 -> 窗口加载"
-    forbidden_bypasses: "禁止从终端 open 或直接跑二进制来通过本条（那会继承 shell PATH，掩盖真实缺陷）；禁止在 .app 里写死单一绝对路径充数"
-    fresh_state_probe: "把 iar 从全部候选路径移走后重开 App，应显示'未找到 iar'引导页而非白屏 —— 同时验证正反两向"
-    final_tree_evidence: "证据采集于最终定位逻辑实现之后；候选路径列表改动须重验"
-    negative_control: "全部候选路径都无 iar 时必须出现引导页（见 fresh_state_probe），证明定位失败被正确识别而不是静默卡住"
+- id: rv-1
+  behavior: 本机一条命令构建出免签名 .app，双击打开后窗口显示真实控制台数据（佐证决策一与决策二）
+  real_entry: "install.sh --app（或 just app build）构建并安装到 ~/Applications 后，在 Finder 中双击 ~/Applications/kedacode.app"
+  expected: "xattr ~/Applications/kedacode.app 无 com.apple.quarantine，双击无 Gatekeeper 拦截；窗口加载出与 iar console 浏览器版一致的控制台界面与真实数据"
+  mock_boundary: "构建、App、后端、tasks/ 与进程数据全部真实；不 stub 任何 HTTP"
+  tier: R2
+  test_layer: manual
+  required_for_acceptance: true
+  presentation: "tasks/evidence/P1-FEAT-20260913-204531-tauri-desktop-shell/rv-1-build-and-double-click.webm；自检：双击直开、无 Gatekeeper 拦截、窗口内数据与浏览器版一致"
+  critical_value_source: "窗口中显示的任一 PRD 标题与进程条目，必须与对同一 sidecar 端口 curl /api/v1/agent-runner/roadmap/prds 及 /console/processes 的响应逐字比对一致；端口取自壳日志或 sidecar 的 'listening on' 输出"
+  must_cross: "Finder 双击 -> Tauri 壳 -> sidecar spawn -> uvicorn 监听 -> WebView 加载 -> 同源 /api 请求 -> 真实 tasks/ 与进程数据"
+  forbidden_bypasses: "禁止用 tauri dev 开发服务器代替正式构建产物；禁止手工 xattr -d 移除 quarantine 后声称免拦截；禁止从终端用 open 命令启动后冒充 Finder 双击（二者 PATH 环境不同，正是 rv-3 要覆盖的差异）"
+  fresh_state_probe: "完全退出 App 后重新双击打开，列表数据与当时磁盘 tasks/ 状态一致"
+  final_tree_evidence: "证据须来自最终 desktop/ 与 install.sh 代码树构建的产物；二者任一改动须重建重验"
+  negative_control: "把 tauri.conf.json 的窗口加载地址改为一个未监听端口后重建，窗口应显示错误页而非正常界面 —— 该对照必须实跑一次，证明'窗口显示真实数据'不是恒真"
+  expected_fail: "壳未正确配置加载地址或 CSP 时窗口白屏/错误页即红"
+- id: rv-2
+  behavior: App 退出回收 sidecar 子进程，且与独立运行的 iar console 并存不抢端口
+  real_entry: "先独立运行 iar console（占用默认端口），再双击打开 kedacode.app；随后退出 App"
+  expected: "App 内功能正常且 sidecar 用了其它端口；退出 App 后 pgrep 查不到 App 拉起的 sidecar；独立 console 进程仍存活且 curl 可访问"
+  mock_boundary: "全部真实进程；不允许用 mock 进程代替 uvicorn"
+  tier: R2
+  test_layer: manual
+  required_for_acceptance: true
+  critical_value_source: "App 实际使用的端口须取自壳的端口分配日志或 sidecar 的 'listening on' 输出，不得靠猜；独立 console 的存活以 curl 返回 200 为准，不以 ps 输出为准"
+  must_cross: "壳端口探测 -> sidecar 绑定该端口 -> App 退出信号 -> 子进程 SIGTERM -> 进程表验证 -> 独立进程 curl 验活"
+  forbidden_bypasses: "禁止用 pkill 无差别清理后声称无残留；必须按 pid 区分 App 子进程与用户独立进程"
+  fresh_state_probe: "退出后新开一个 shell 执行 pgrep 验证；独立 console 另用 curl /api/v1/agent-runner/health 验活"
+  final_tree_evidence: "证据采集于最终 sidecar 生命周期代码；回收逻辑任何改动须重验"
+  negative_control: "临时注释掉退出回收逻辑后重建，退出 App 时 pgrep 应查到残留 sidecar —— 证明该判据能判负"
+- id: rv-3
+  behavior: 在只有 Homebrew 路径装了 iar 的机器上从 Finder 双击，App 仍能定位并拉起 sidecar
+  real_entry: "确保 ~/.local/bin/iar 不存在（或临时移走）、仅 /opt/homebrew/bin/iar 可用，然后在 Finder 中双击 .app"
+  expected: "窗口正常加载控制台（不是'未找到 iar'引导页）；壳日志显示命中的是 Homebrew 路径"
+  mock_boundary: "真实安装、真实 Finder 启动；不得从终端启动"
+  tier: R2
+  test_layer: manual
+  required_for_acceptance: true
+  critical_value_source: "命中的可执行文件路径取自壳自身的定位日志，而非事后推断"
+  must_cross: "Finder 启动（最小 PATH）-> 壳的候选路径枚举 -> spawn 命中的 iar -> uvicorn 监听 -> 窗口加载"
+  forbidden_bypasses: "禁止从终端 open 或直接跑二进制来通过本条（那会继承 shell PATH，掩盖真实缺陷）；禁止在 .app 里写死单一绝对路径充数"
+  fresh_state_probe: "把 iar 从全部候选路径移走后重开 App，应显示'未找到 iar'引导页而非白屏 —— 同时验证正反两向"
+  final_tree_evidence: "证据采集于最终定位逻辑实现之后；候选路径列表改动须重验"
+  negative_control: "全部候选路径都无 iar 时必须出现引导页（见 fresh_state_probe），证明定位失败被正确识别而不是静默卡住"
 ```
 
 失败排查提示：rv-1 先查 sidecar 端口（壳日志或 `iar console listening on` 输出）与 `tauri.conf.json` 的加载地址；rv-2 先查退出信号是否真的送到了子进程组；rv-3 先打印壳启动时的实际 `PATH` 环境变量——从 Finder 启动时它与终端里完全不同。
@@ -352,13 +363,32 @@ No interactive prototype file changes in this PRD.
 
 - Group: none
 - Depends on tasks/issues:
-  - `tasks/pending/P1-FEAT-20260913-204530-console-prd-content-reader.md`
-- Gate type: hard
-- Notes: 这是**交付顺序依赖，不是构建依赖**。技术上本 PRD 不碰对方的任何产物——壳加载回环地址，控制台服务什么它就显示什么，先做壳也能跑通。但本 PRD 的立项动机（§1）原文是"双击打开、直接浏览 PRD 原文、看任务队列和执行状态"，而"读 PRD 原文"由对方交付；壳先落地而对方没有，等于交付一个读不了 PRD 的原生窗口——最想要的那件事恰好缺席，且本 PRD 的验收会全绿，掩盖这个缺口。两种写错的代价不对称：写 none 会让执行器先啃成本最大的壳（要首次引入 Rust）却没解决原始诉求；写 hard 若将来确实想先做壳，改这一行即可解开。底座 `iar console`（已归档 PRD `P1-FEAT-20260910-111901`）能力已在代码库可用，不构成额外依赖。
+  - none
+- Gate type: none
+- Notes: 曾声明对 `P1-FEAT-20260913-204530-console-prd-content-reader.md` 的 `hard` 交付顺序门禁；该上游已归档（`tasks/archive/`），门禁已满足，故现声明为 `none`。历史理由保留如下，供回溯：这是**交付顺序依赖，不是构建依赖**——技术上本 PRD 不碰对方的任何产物（壳加载回环地址，控制台服务什么它就显示什么，先做壳也能跑通），但本 PRD 的立项动机含"读 PRD 原文"，若壳先落地而对方没有，等于交付一个读不了 PRD 的原生窗口且本 PRD 验收仍全绿。底座 `iar console`（已归档 PRD `P1-FEAT-20260910-111901`）能力已在代码库可用，不构成额外依赖。
 
 ## 9. Acceptance Checklist
 
-验收证据包按风险排序呈现：人工确认项与高层级判据在前，普通门禁折叠在后。所有证据须在最终代码树上采集；相关代码后续改动使对应证据失效，须重验后方可归档。
+本节分两层读者：**9.1 是给人看的**——验收时只看这一层，目标是几分钟内看完；**9.2 起是给 verifier 和未来回溯用的机器证据**，默认不用打开，出问题再下钻。所有证据须在最终代码树上采集；相关代码后续改动使对应证据失效，须重验后方可归档。
+
+### 9.1 人读呈递区（Human Review Surface）
+
+| # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
+|---|---|---|---|
+| 1 | （决策一）修订后的分发边界已落 roadmap 与文档；本机构建的 `.app` 双击直开且 `xattr` 无 `com.apple.quarantine` | `<rv-1 构建与双击打开录屏 / 截图绝对路径>`；`roadmap.md` 修订段落链接 | 双击 `~/Applications/kedacode.app`，确认无 Gatekeeper 拦截 |
+| 2 | （决策二）窗口呈现与 `iar console` 浏览器版一致的控制台，数据与同端口 curl 响应逐字一致；`desktop/` 不含业务逻辑 | `<rv-1 窗口截图绝对路径>` | 对比窗口内某个 PRD 标题与 `curl /api/v1/agent-runner/roadmap/prds` 的响应 |
+| 3 | （决策二）负向对照**实跑记录**：加载地址改为未监听端口后窗口显示错误页 | `<负向对照截图绝对路径>`；对照命令记录 | 查看截图是错误页而非正常界面 |
+
+**以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：rv-2 端口共存与退出回收、rv-3 Finder 最小 PATH 定位、两类错误页文案区分、`iar console` 既有行为回归、`just lint` 与后端测试、文档构建。它们的证据在 §9.2。
+
+### 9.2 Acceptance Evidence Package（机器证据 · verifier 入口，人默认跳过）
+
+1. **人审项的 oracle 跑绿证据**：rv-1（manual，真实构建产物 + Finder 双击）逐项通过，附命令与观察记录。
+2. **verifier-only 项结果**：rv-2、rv-3 的正反两向记录；两份 `install.sh` 关系的结论。
+3. **风险地图对账 Predicted → Reconciled**：Finder 最小 PATH 定位、sidecar 孤儿进程两类已预测风险是否实际触发，如何处理。
+4. **对抗自检**：负向对照（未监听端口、注释掉回收逻辑）实际变红，证明判据非恒真。
+5. **对锁定契约的 diff**：`install.sh` 默认行为、`iar console` CLI 语义（`--no-browser` 与端口顺延）、后端/前端零改动（`git diff --stat src/backend frontend-public frontend-admin` 为空）。
+6. **低风险门禁结果（折叠）**：`just lint`、`uv run mkdocs build --strict`、后端测试。
 
 ### Human-Confirmed
 
@@ -398,8 +428,8 @@ No interactive prototype file changes in this PRD.
 ### Delivery Readiness
 
 - [ ] 推荐方案全部落地，无遗留临时兼容层或"二期再补"项
-- [ ] 独立 verifier Agent 审查通过
-- [ ] 归档前完成 Section 13 Final Reconciliation，正文无与最终实现矛盾的表述
+- [~] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review
+- [~] 归档前完成 Section 13 Final Reconciliation，正文无与最终实现矛盾的表述 — runner-owned gate: archive
 
 ## 10. Functional Requirements
 
@@ -447,8 +477,28 @@ No interactive prototype file changes in this PRD.
 | D-05 | 分发策略 | 本机构建 + `install.sh --app`，不签名不上 cask | 立即 $99 签名 + cask 公开分发 | 本机构建产物无 quarantine、零成本覆盖自用场景；将来补签名只是加流水线步骤 |
 | D-06 | 修订旧分发决策的方式 | 新 PRD 显式修订其适用边界 | 静默绕过旧决策 | 旧决策是正式记录，边界变化必须留痕，否则后人无法判断哪条有效 |
 | D-07 | sidecar 可执行文件如何定位 | 显式枚举候选路径 + `$PATH` 保底 | 只依赖 `$PATH` | Finder 启动的 App 只有最小 PATH，依赖 `$PATH` 在真实安装方式下基本命不中 |
-| D-08 | 与 PRD 原文浏览的关系 | 拆为两个 PRD，并把本 PRD 对其声明为 `hard` 交付门禁 | 合并为一个 PRD；拆开但不声明依赖（`none`） | 拆分理由：二者可独立实现、独立回滚，成本与价值差一个数量级，合并会让低成本高价值改动被高成本改动拖住。但拆开后仍须声明顺序——本 PRD 构建上不依赖对方，交付上依赖：壳先落地会交出一个读不了 PRD 的窗口而验收全绿。两种写错的代价不对称：`none` 会让执行器先啃需要引入 Rust 的壳却没解决原始诉求；`hard` 若将来确实想先做壳，改一行即可解开 |
+| D-08 | 与 PRD 原文浏览的关系 | 拆为两个 PRD；上游交付前声明为 `hard` 交付门禁，上游归档后 §8 已改为 `none` | 合并为一个 PRD；拆开但不声明依赖（`none`） | 拆分理由：二者可独立实现、独立回滚，成本与价值差一个数量级，合并会让低成本高价值改动被高成本改动拖住。拆开后仍曾声明顺序——本 PRD 构建上不依赖对方，交付上曾依赖：壳先落地会交出一个读不了 PRD 的窗口而验收全绿。两种写错的代价不对称：`none` 会让执行器先啃需要引入 Rust 的壳却没解决原始诉求；`hard` 若确需先做壳，改一行即可解开。上游已归档，门禁满足，故现为 `none` |
 
 ### Final Reconciliation
 
 - 待归档前填写。须按模板核对：Interpretation、Public behavior and contracts、Related PRD status、Requirements and risks，以及 `Feature Overview (功能一览)` 与 §10 的一致性。
+
+## 14. Change Log
+
+### 对齐 runner 解析契约与上游交付状态
+
+- Type: doc
+- Before: Realistic Validation 的 YAML oracle 用 `oracles:` 键包裹成 mapping，runner 的 `_extract_rv_oracle_entries` 要求顶层为 list，实测解析出 0 项；§8 的 `Depends on tasks/issues` 指向 `tasks/pending/P1-FEAT-20260913-204530-console-prd-content-reader.md`，该上游已归档到 `tasks/archive/`，含 `/` 的引用走 repo-relative 解析会抛 `ValueError`，建 Issue 即失败；banner 仍为 `⛔ 交付前置`；§9 无 9.1 人读呈递区 / 9.2 机器证据分层，§3 无 Impact On Existing Behavior，且缺 `验收状态` 横幅。
+- After: oracle 块改为顶层 `- id: rv-1` 列表并补 `presentation` 字段；§8 改为 `Depends on: none` / `Gate type: none` 并在 Notes 保留历史理由；banner 改为 `✅ 交付前置`，补 `⬜ 验收状态` 横幅；§9 增加 9.1/9.2 两层，verifier 与归档门禁改写为 `[~] ... — runner-owned gate`；§3 增补 Impact On Existing Behavior；§5 与 D-08 同步上游归档状态。
+- Reason: 上游 PRD 已交付归档，且现行 runner 对 RV oracle 与 Delivery Dependencies 的解析契约要求顶层 list 与字段直挂 §8；两处都会让本 PRD 开工即失败或在验收中静默失效。
+- Impact: RV oracle 恢复可解析（3 项），依赖解析不再抛错，验收清单结构与现行模板一致；不改变任何行为要求或验收判据内容。
+- Review: 自审通过；复跑 `extract_realistic_validation_items` 与 `parse_delivery_dependencies` 确认解析结果符合预期。
+
+### 修正 Change Impact Tree 两处错误路径
+
+- Type: doc
+- Before: §7 影响树有两处路径解析不到。① 节点写成 `├── docs/ + mkdocs.yml`：解析器按"目录节点 + 裸文件名"规则把两段一律按前缀拼接，得到 `docs/mkdocs.yml`；该路径**父目录存在因而被判为"讲得通"**，进分母却永远匹配不上真实文件（`mkdocs.yml` 在仓库根），会长期压低 FILES 触达率。② 节点写成 `└── package.json / just 集成`：被"一行多文件"规则按 ` / ` 拆开，生成假节点 `desktop/just 集成`。③ 该节点摘要提到的 README 安装段没有对应节点，改动不被 FILES 列统计。
+- After: 拆成三个独立顶层节点 `docs/`、`mkdocs.yml`、`README.md`，各自带 `[修改]【总结】`；`package.json` 的 `just 集成` 改为写进 `【总结】` 文案，不再冒充路径。复跑 `parse_impact_tree` 仍为 9 个节点：假节点消失、`docs/mkdocs.yml` 变为可命中的根 `mkdocs.yml`、新增 `README.md`；3 个 `desktop/...` 的 `[新增]` 节点按设计继续显示为"无法判定"（父目录尚未落盘，达标后自动计入）。
+- Reason: `docs/mkdocs.yml` 是"讲得通但永远匹配不上"的节点，是本仓库 FILES 列最隐蔽的失真来源；`just 集成` 与缺失的 README 节点则让分母不准。
+- Impact: FILES 触达列对本 PRD 的统计恢复准确；不改行为要求、验收判据或 RV oracle（仍为 3 项）。
+- Review: 自审通过；以 `parse_impact_tree` + `RepoPathIndex.is_plausible_path` 复跑确认节点集合与期望一致。

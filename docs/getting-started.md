@@ -46,6 +46,21 @@ just run frontend
 just run all frontend_dir=web frontend_cmd="pnpm dev"
 ```
 
+### 前端 dev server 的堆上限
+
+`frontend-public/package.json` 的 `dev` 脚本带了 `NODE_OPTIONS=--max-old-space-size=3072`，不要删。
+
+Next 的 `next dev` 在未显式指定 `max-old-space-size` 时，会把 V8 老生代上限设成**物理内存的一半**
+（见 `next/dist/cli/next-dev.js`，32G 机器上就是 16 GiB），而 dev server 的堆会随会话单调增长。
+实测在本机跑满 45 分钟后堆到 8.6 GB、峰值 12.6 GB，整机进入 swap thrash，
+Next 自带的熔断要到约 14 GB 才触发重启，那时早已拖垮其他进程。
+
+`next-dev.js` 里这个默认值只在 `NODE_OPTIONS` 未声明该参数时才生效，所以显式写上即可接管；
+需要更大堆时改这里的数值，临时放开整段逻辑可用 `NEXT_DISABLE_MEM_OVERRIDE=1`。
+
+排查时注意 `ps` 的 RSS 会骗人（堆被压缩换出后只报 1 GB 上下且剧烈抖动），
+真实值在 `frontend-public/.next/dev/trace` 的 `memory-usage` 事件里（`memory.heapUsed`）。
+
 ## 测试
 
 运行默认本地测试集：

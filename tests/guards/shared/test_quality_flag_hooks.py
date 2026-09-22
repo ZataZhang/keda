@@ -133,3 +133,60 @@ quality_write_flag "$git_dir/.last_tested_commit" "$branch_name" "$head_hash" "$
 
     assert hook_process.returncode == 0, hook_process.stderr
     assert "just test 标记有效" in hook_process.stdout
+
+
+def test_untracked_file_paths_lists_new_files_and_skips_ignored(tmp_path: Path) -> None:
+    """未跟踪文件清单必须含新文件、排除 gitignore 命中项。
+
+    这批文件是 ``just lint --full`` 喂给 ``pre-commit --files`` 的唯一来源：
+    ``pre-commit run --all-files`` 只覆盖 git 已知的文件，漏掉它们会让「新增
+    文件后的首次提交」必然在 ``check-test-flag`` 上判「标记已过期」。
+    而一旦 ``--exclude-standard`` 被去掉，构建产物与缓存就会被喂给钩子。
+    """
+
+    init_git_repo(tmp_path)
+    write_text_file(tmp_path, ".gitignore", "build/\n")
+    write_text_file(tmp_path, "scripts/shared/view/assets/viewer.js", "const a = 1\n")
+    write_text_file(tmp_path, "build/generated.js", "const b = 2\n")
+
+    untracked_process = run_quality_flag_snippet(tmp_path, "quality_untracked_file_paths")
+
+    assert untracked_process.returncode == 0, untracked_process.stderr
+    untracked_file_paths = untracked_process.stdout.split()
+    assert "scripts/shared/view/assets/viewer.js" in untracked_file_paths
+    assert "build/generated.js" not in untracked_file_paths
+
+
+def test_working_file_paths_still_covers_untracked_files(tmp_path: Path) -> None:
+    """working 口径必须继续包含未跟踪文件。
+
+    ``quality_working_file_paths`` 与 ``quality_untracked_file_paths`` 共用同一条
+    ``ls-files`` 调用；这里钉住提取后两者仍然一致，避免 working 树口径在重构中
+    悄悄丢掉未跟踪文件——``just test`` 的 flag 正是按这个口径写的。
+    """
+
+    init_git_repo(tmp_path)
+    write_text_file(tmp_path, "src/backend/api/app.py", "print('committed')\n")
+    add_process = run_command(["git", "add", "."], cwd_path=tmp_path)
+    assert add_process.returncode == 0, add_process.stderr
+    commit_process = run_command(
+        [
+            "git",
+            "-c",
+            "user.email=guard@example.com",
+            "-c",
+            "user.name=guard",
+            "commit",
+            "-m",
+            "init",
+        ],
+        cwd_path=tmp_path,
+    )
+    assert commit_process.returncode == 0, commit_process.stderr
+
+    write_text_file(tmp_path, "scripts/shared/view/server.py", "print('new')\n")
+
+    working_process = run_quality_flag_snippet(tmp_path, "quality_working_file_paths")
+
+    assert working_process.returncode == 0, working_process.stderr
+    assert "scripts/shared/view/server.py" in working_process.stdout.split()

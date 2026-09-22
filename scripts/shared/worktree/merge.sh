@@ -19,6 +19,12 @@ set -euo pipefail
 #                                  Default: auto-detect by <feature_branch>,
 #                                           fallback: $(dirname repo_root)/<feature_branch>
 #   8) -h, --help                  Show help and exit.
+#   9) --prune [--dry-run] [--yes] [--force] [--base <branch>]
+#                                  Batch cleanup mode: remove local branches already
+#                                  contained in <base branch> plus their worktrees.
+#                                  Upstream-gone branches with unique commits need --force.
+#  10) --doctor [<branch>] [--gc] [--yes]
+#                                  Worktree / orphan-database cleanup-check mode.
 #
 # Preconditions:
 #   - Must run inside a Git repository.
@@ -205,11 +211,235 @@ run_worktree_database_gc() {
     uv run python "$repo_root/scripts/shared/worktree/gc_worktree_databases.py" "${gc_arguments[@]}"
 }
 
+classify_prunable_branches() {
+    # 把本地分支按「默认可删 / 需 --force / 受保护」三组分类。
+    #
+    # 为什么要分三组：``git merge-base --is-ancestor`` 只能确认已合并的分支。
+    # squash merge 之后远端分支被删、本地提交却不在 base 的祖先链上，git 无法
+    # 区分「squash 合过了」和「PR 直接关掉没合」；后者强删会丢工作，因此这组必须
+    # 由人确认后再走 --force。
+    #
+    # 参数：1) base 分支名  2) 当前检出分支名
+    # 输出：全局数组 prune_candidates / force_candidates / protected_branches
+    local base_branch_name="$1"
+    local current_branch_name="$2"
+
+    local branch_name=""
+    local branch_upstream=""
+    local branch_track=""
+
+    while IFS=$'\t' read -r branch_name branch_upstream branch_track; do
+        [[ -n "$branch_name" ]] || continue
+
+        # 受保护：base 本身、主干分支、当前检出分支都不能删。
+        if [[ "$branch_name" == "$base_branch_name" ]]; then
+            protected_branches+=("$branch_name|base 分支")
+            continue
+        fi
+        if [[ "$branch_name" == "main" || "$branch_name" == "master" ]]; then
+            protected_branches+=("$branch_name|主干分支")
+            continue
+        fi
+        if [[ -n "$current_branch_name" && "$branch_name" == "$current_branch_name" ]]; then
+            protected_branches+=("$branch_name|当前检出分支")
+            continue
+        fi
+
+        if git merge-base --is-ancestor "$branch_name" "$base_branch_name" >/dev/null 2>&1; then
+            prune_candidates+=("$branch_name")
+            continue
+        fi
+
+        if [[ "$branch_track" == "[gone]" ]]; then
+            force_candidates+=("$branch_name")
+        fi
+    done < <(git for-each-ref --format='%(refname:short)%09%(upstream:short)%09%(upstream:track)' refs/heads)
+}
+
+prune_single_branch() {
+    # 清理单个分支：自我调用 ``-d`` / ``-D`` 删除流程。
+    #
+    # 逐分支起子进程而不是直接调用 ``cleanup_feature_branch``：后者内部用
+    # ``return 1`` 表示失败，在 ``set -euo pipefail`` 下会连带终止整个批量循环，
+    # 一个分支失败就让后面的分支一个都不处理。子进程把失败收敛成退出码，
+    # 调用方据此继续处理剩余分支并汇总。
+    local target_branch="$1"
+    local branch_delete_flag="$2"
+    local base_branch_name="$3"
+    local target_repo_root="$4"
+    local prune_script_path="$5"
+
+    echo
+    echo "── $target_branch"
+    cd "$target_repo_root"
+    bash "$prune_script_path" "$target_branch" "$base_branch_name" "$branch_delete_flag"
+}
+
+run_worktree_prune() {
+    # 批量清理已并入 base 的本地分支及其 worktree。
+    #
+    # 参数：1) dry-run 2) 跳过确认 3) 纳入 gone-but-unmerged 组 4) base 分支覆盖值
+    local prune_dry_run="$1"
+    local prune_auto_yes="$2"
+    local prune_force="$3"
+    local prune_base_branch="$4"
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "❌ Current directory is not inside a Git repository."
+        exit 1
+    fi
+
+    local repo_root=""
+    repo_root="$(git rev-parse --show-toplevel)"
+    cd "$repo_root"
+
+    local prune_script_path=""
+    prune_script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+    local base_branch="$prune_base_branch"
+    if [[ -z "$base_branch" ]]; then
+        base_branch="${KODA_WORKTREE_BASE_BRANCH:-main}"
+    fi
+
+    if ! git show-ref --verify --quiet "refs/heads/$base_branch"; then
+        echo "❌ Base branch not found: $base_branch"
+        exit 1
+    fi
+
+    local current_branch=""
+    current_branch="$(git symbolic-ref --short -q HEAD || true)"
+
+    echo "🧹 Worktree prune"
+    echo "   Repository root: $repo_root"
+    echo "   Base branch    : $base_branch"
+    echo
+
+    local prune_candidates=()
+    local force_candidates=()
+    local protected_branches=()
+
+    classify_prunable_branches "$base_branch" "$current_branch"
+
+    local branch_name=""
+    local worktree_path=""
+
+    if [[ ${#prune_candidates[@]} -gt 0 ]]; then
+        echo "待清理（已并入 ${base_branch}）："
+        for branch_name in "${prune_candidates[@]}"; do
+            worktree_path="$(resolve_worktree_path_by_branch "$branch_name")"
+            if [[ -n "$worktree_path" ]]; then
+                echo "   • $branch_name  (worktree: $worktree_path)"
+            else
+                echo "   • $branch_name"
+            fi
+        done
+        echo
+    fi
+
+    if [[ ${#force_candidates[@]} -gt 0 ]]; then
+        echo "需 --force 才清理（upstream 已删除，但本地仍有独有提交）："
+        for branch_name in "${force_candidates[@]}"; do
+            echo "   • $branch_name  (独有提交 $(git rev-list --count "$base_branch..$branch_name"))"
+        done
+        echo "   这类分支通常是 squash merge 后远端被删；git 无法自动确认内容已并入 base，"
+        echo "   请人工核对后再加 --force（--force 会强制删除，包括未合并的提交）。"
+        echo
+    fi
+
+    if [[ ${#protected_branches[@]} -gt 0 ]]; then
+        echo "受保护，不处理："
+        for branch_name in "${protected_branches[@]}"; do
+            echo "   • ${branch_name%%|*}  (${branch_name##*|})"
+        done
+        echo
+    fi
+
+    local has_default_target="false"
+    if [[ ${#prune_candidates[@]} -gt 0 ]]; then
+        has_default_target="true"
+    fi
+
+    local has_force_target="false"
+    if [[ "$prune_force" == "true" && ${#force_candidates[@]} -gt 0 ]]; then
+        has_force_target="true"
+    fi
+
+    if [[ "$has_default_target" == "false" && "$has_force_target" == "false" ]]; then
+        echo "✅ 没有可清理的分支。"
+        exit 0
+    fi
+
+    if [[ "$prune_dry_run" == "true" ]]; then
+        echo "🔍 --dry-run：仅列出计划，未做任何变更。"
+        exit 0
+    fi
+
+    if [[ "$prune_auto_yes" != "true" ]]; then
+        local confirmation_reply=""
+        printf '继续删除以上分支及其 worktree？[y/N] '
+        if ! read -r confirmation_reply; then
+            echo
+            echo "ℹ️ 未读取到确认输入，已取消。"
+            exit 0
+        fi
+        case "$confirmation_reply" in
+            y|Y|yes|YES) ;;
+            *)
+                echo "ℹ️ 已取消，未做任何变更。"
+                exit 0
+                ;;
+        esac
+    fi
+
+    local deleted_branches=()
+    local failed_branches=()
+
+    if [[ ${#prune_candidates[@]} -gt 0 ]]; then
+        for branch_name in "${prune_candidates[@]}"; do
+            if prune_single_branch "$branch_name" "-d" "$base_branch" "$repo_root" "$prune_script_path"; then
+                deleted_branches+=("$branch_name")
+            else
+                failed_branches+=("$branch_name")
+            fi
+        done
+    fi
+
+    if [[ "$prune_force" == "true" && ${#force_candidates[@]} -gt 0 ]]; then
+        for branch_name in "${force_candidates[@]}"; do
+            if prune_single_branch "$branch_name" "-D" "$base_branch" "$repo_root" "$prune_script_path"; then
+                deleted_branches+=("$branch_name")
+            else
+                failed_branches+=("$branch_name")
+            fi
+        done
+    fi
+
+    echo
+    echo "📦 Prune summary"
+    if [[ ${#deleted_branches[@]} -gt 0 ]]; then
+        echo "   ✅ 已清理 ${#deleted_branches[@]} 个分支：${deleted_branches[*]}"
+    fi
+    if [[ ${#failed_branches[@]} -gt 0 ]]; then
+        echo "   ❌ 失败 ${#failed_branches[@]} 个分支：${failed_branches[*]}"
+    fi
+    if [[ "$prune_force" != "true" && ${#force_candidates[@]} -gt 0 ]]; then
+        echo "   ⏭️  跳过 ${#force_candidates[@]} 个需 --force 的分支：${force_candidates[*]}"
+    fi
+
+    if [[ ${#failed_branches[@]} -gt 0 ]]; then
+        echo "❌ Prune flow finished with failures."
+        exit 1
+    fi
+
+    echo "✅ Prune flow completed successfully."
+}
+
 usage() {
     cat <<'EOF'
 Usage:
   git_worktree_merge.sh <feature_branch> [base_branch] [--remote <name>] [-d|--delete|--delete-only] [--cleanup] [--delete-remote] [--worktree-path <path>]
-  git_worktree_merge.sh --doctor [<feature_branch>]
+  git_worktree_merge.sh --doctor [<feature_branch>] [--gc] [--yes]
+  git_worktree_merge.sh --prune [--dry-run] [--yes] [--force] [--base <branch>]
 
 Arguments:
   <feature_branch>       Required. The feature branch to merge.
@@ -235,6 +465,16 @@ Options:
                          expected worktree path and its metadata under .git/worktrees.
                          Additionally scans for orphan worktree databases; add --gc to
                          interactively drop them (--yes skips per-database confirmation).
+  --prune                Batch cleanup mode. Scans local branches and removes the ones
+                         already contained in <base_branch>, together with their worktrees.
+                         Branches whose upstream was deleted but that still carry unique
+                         commits are only listed (likely squash-merged, but git cannot
+                         confirm) and require --force to be deleted.
+                         --dry-run  list the plan without touching anything
+                         --yes      skip the y/N confirmation
+                         --force    also delete upstream-gone branches with unique commits
+                         --base     base branch to compare against (default: main, or
+                                    KODA_WORKTREE_BASE_BRANCH when set)
   -h, --help             Show this help message.
 
 Checks before merge:
@@ -255,6 +495,9 @@ Examples:
   ./scripts/shared/worktree/merge.sh --doctor feature-login
   ./scripts/shared/worktree/merge.sh --doctor --gc
   ./scripts/shared/worktree/merge.sh --doctor --gc --yes
+  ./scripts/shared/worktree/merge.sh --prune --dry-run
+  ./scripts/shared/worktree/merge.sh --prune
+  ./scripts/shared/worktree/merge.sh --prune --yes --force
 EOF
 }
 
@@ -288,6 +531,47 @@ if [[ $# -ge 1 && ( "$1" == "--doctor" || "$1" == "--cleanup-check" ) ]]; then
     done
     run_worktree_doctor "$doctor_feature_branch"
     run_worktree_database_gc "$doctor_gc_enabled" "$doctor_auto_yes"
+    exit 0
+fi
+
+if [[ $# -ge 1 && "$1" == "--prune" ]]; then
+    shift
+    prune_dry_run="false"
+    prune_auto_yes="false"
+    prune_force="false"
+    prune_base=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)
+                prune_dry_run="true"
+                ;;
+            --yes)
+                prune_auto_yes="true"
+                ;;
+            --force)
+                prune_force="true"
+                ;;
+            --base)
+                if [[ $# -lt 2 ]]; then
+                    echo "❌ --base requires a branch name."
+                    exit 1
+                fi
+                prune_base="$2"
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo "❌ Unknown prune option: $1"
+                usage
+                exit 1
+                ;;
+        esac
+        shift
+    done
+    run_worktree_prune "$prune_dry_run" "$prune_auto_yes" "$prune_force" "$prune_base"
     exit 0
 fi
 

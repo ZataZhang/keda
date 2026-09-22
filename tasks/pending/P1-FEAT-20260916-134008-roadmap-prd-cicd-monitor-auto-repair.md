@@ -1,6 +1,6 @@
 # PRD: Roadmap PRD 完成后 CI/CD 监控与可选自动修复
 
-> ⛔ **交付前置**：排在 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 之后开工。后者先建立统一右侧 PRD 详情与仓库级设置写回边界；本 PRD 若先交付会重复创建详情容器和配置接口。
+> ✅ **交付前置**：无，可立即开工。上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档（`tasks/archive/`），统一右侧 PRD 详情容器（`prd-detail.tsx` 的 `additionalTabs` 扩展点）与受限 `.iar.toml` writer 已在代码库可用。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
 > ⬜ **验收状态**：未开工。
@@ -108,7 +108,7 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 
 ### 自动门禁，不需要逐项人工审阅
 
-失败 check 聚合、sign-off-only 排除、事件 marker 去重、未知状态降级、API 路径与前端渲染通过 core/API 测试和真实 Roadmap E2E 覆盖；配置写回复用上游 PRD 建立的受限原子 writer；GitHub 网络在常规测试中由 fake client 隔离，真实 GitHub sandbox 验证为 opt-in。
+失败 check 聚合、sign-off-only 排除、事件 marker 去重、未知状态降级、API 路径与前端渲染通过 core/API 测试和真实 Roadmap E2E 覆盖；配置写回复用上游已交付的受限原子 writer（`repository_settings_editor` / `toml_section_editor.update_toml_table_keys`）；GitHub 网络在常规测试中由 fake client 隔离，真实 GitHub sandbox 验证为 opt-in。
 
 **本次明确不涉及**：无数据库结构变化；不改 GitHub Actions workflow；不改 CI job 本身；不新增前端路由；不改 `frontend-admin/`。
 
@@ -142,18 +142,20 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 - `src/backend/infrastructure/github_pr_ops.py` 已把 GitHub `statusCheckRollup` 聚合为 `checks_state` 与 `checks_summary`。
 - `frontend-public/components/agent-runner/issue-detail.tsx` 已渲染 PR checks 与事件时间线，可复用状态标签语义，不复制 GitHub 状态翻译。
 - `frontend-public/app/(app)/app/roadmap/page.tsx`、`components/roadmap/`、`lib/api/roadmap.ts` 与 `lib/api/types.ts` 是 Roadmap UI/API 契约入口。
+- `frontend-public/components/roadmap/prd-detail.tsx` 是上游已交付的统一右侧详情容器，暴露 `PrdDetailTab` / `additionalTabs`，是本 PRD 追加 CI/CD tab 的扩展点。
+- `src/backend/infrastructure/config/repository_settings_editor.py`（白名单写回）与 `src/backend/infrastructure/config/toml_section_editor.py::update_toml_table_keys`（共享原语）是仓库 `.iar.toml` 设置的受限写入口。
 - `src/backend/core/shared/models/roadmap.py` 与 `src/backend/api/routes/agent_runner_roadmap.py` 负责 Roadmap PRD 状态及响应装配。
 - `src/backend/infrastructure/config/agent_runner_settings.py` 和 `engines/agent_runner/factory_config_builder.py` 已映射 `post_pr_supervisor`/runner 配置。
 
 **Existing Path**：daemon `review_once` → PR context → supervisor decision → `execute_repair` → push/review → 下一次 checks；展示路径为 Roadmap API → `RoadmapPrd` → 统一 PRD 右侧详情。
 
-**Reuse Candidates**：checks 聚合、sign-off-only 判定、`build_rework_intent_comment`/`iar:event` marker parser、repair loop 与 `max_repair_attempts`、上游 PRD 的受限 `.iar.toml` writer、Roadmap 30 秒刷新、Issue detail 的 checks badge/summary。
+**Reuse Candidates**：checks 聚合、sign-off-only 判定、`build_rework_intent_comment`/`iar:event` marker parser、repair loop 与 `max_repair_attempts`、上游已交付的 `repository_settings_editor`（白名单写回，底层为 `toml_section_editor.update_toml_table_keys`）、`prd-detail.tsx` 的 `additionalTabs` 详情扩展点、Roadmap 30 秒刷新、Issue detail 的 checks badge/summary。
 
 **Architecture Constraints**：自动修复策略和去重属于 core；GitHub 与 TOML 实现留在 infrastructure；API 只做 DTO/调用；前端只消费规范 API。不得让 core import FastAPI、tomlkit 或 concrete GitHub client。
 
 **Frontend Impact**：**Full-stack**，只改 `frontend-public` Roadmap 的统一右侧详情、API client 与类型；`frontend-admin` 无影响。运行命令 `just run frontend-public`，真实 UI 验证 `just e2e tests/workflows/roadmap-cicd-auto-repair.no-auth.spec.ts`。
 
-**Existing PRD Relationship**：本 PRD硬依赖 pending 的 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot`，因为它建立统一右侧详情、Autopilot 设置 writer 和 PRD 证据 tabs；实现时应在其结构上增加 CI/CD tab，而非并行造详情页。相关已归档 PRD：`P1-BUG-20260527-093356-agent-runner-ci-rework-state-recovery`（CI rework 崩溃恢复）、`P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile`（checks 等待/自动合并）、`P1-FEAT-20260824-133115-runner-delivery-closeout-agent`（交付尾段恢复）。本 PRD产品化并控制这些既有能力，不重写它们。
+**Existing PRD Relationship**：本 PRD 的硬依赖上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档（`tasks/archive/`），它建立了统一右侧详情（`frontend-public/components/roadmap/prd-detail.tsx`，暴露 `additionalTabs` 扩展点）、Autopilot 设置 writer 和 PRD 证据 tabs；实现时应在该结构上以 `additionalTabs` 增加 CI/CD tab，而非并行造详情页。受限 `.iar.toml` 写回复用上游交付的 `src/backend/infrastructure/config/repository_settings_editor.py`（其白名单写回复用共享原语 `src/backend/infrastructure/config/toml_section_editor.py::update_toml_table_keys`）。相关已归档 PRD：`P1-BUG-20260527-093356-agent-runner-ci-rework-state-recovery`（CI rework 崩溃恢复）、`P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile`（checks 等待/自动合并）、`P1-FEAT-20260824-133115-runner-delivery-closeout-agent`（交付尾段恢复）。本 PRD产品化并控制这些既有能力，不重写它们。
 
 **Potential Redundancy Risks**：不要新建 CI worker、repair Agent、轮询线程、数据库 round/override 表或第二套 event log；不要用 PRD path 作为长期 override key；不要把 `runner.fix_agent_enabled` 改名挪用；不要在前端自行计算 effective value。
 
@@ -163,7 +165,7 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 
 在既有 post-PR supervisor 前加一个窄的“CI repair policy”判断，并在 Roadmap 聚合一份只读 `ci_delivery` 视图：
 
-1. 给仓库配置 `post_pr_supervisor.auto_repair_ci` 增加默认 `false`，通过上游受限 writer 的白名单 PATCH 修改。
+1. 给仓库配置 `post_pr_supervisor.auto_repair_ci` 增加默认 `false`，通过 `repository_settings_editor` 的白名单 PATCH 修改（底层复用 `toml_section_editor.update_toml_table_keys`）。
 2. 从 Issue 评论解析最新 `iar:ci-auto-repair-policy`（`inherit/on/off`），与 fresh 全局配置合成唯一 effective bool；没有 marker 即 `inherit`。
 3. `review_once` 仍持续观察所有 checks；真实 `FAILURE` 时生成稳定 failure key（PR number/head SHA/失败摘要摘要值）并写现有 event marker。
 4. effective bool 打开且未超过上限时，继续走现有 `repair_pr_branch → execute_repair`；关闭/耗尽/未知状态时不执行 repair，只返回可观察 outcome。
@@ -232,8 +234,8 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 │   [修改]【总结】同步 CI 交付、问题和设置契约
 ├── frontend-public/lib/api/roadmap.ts
 │   [修改]【总结】封装 auto-repair PATCH 与单次 repair API
-├── frontend-public/components/roadmap/prd-detail-view.tsx
-│   [修改]【总结】在上游统一详情中增加 PRD 三态策略、effective value、CI/CD tab 和问题卡
+├── frontend-public/components/roadmap/prd-detail.tsx
+│   [修改]【总结】经上游已交付的 `additionalTabs` 扩展点增加 PRD 三态策略、effective value、CI/CD tab 和问题卡，不重构详情容器
 ├── frontend-public/app/(app)/app/roadmap/page.tsx
 │   [修改]【总结】在顶部接入当前仓库全局开关，并把轮询结果与 repair action 接入选中 PRD
 ├── tests/
@@ -246,7 +248,7 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
     └── prototypes/index.md / mkdocs.yml 保持 Hub 可发现
 ```
 
-文件名以实现时上游 PRD 最终落地结构为准；先运行：
+前端落点已按上游归档 PRD 的最终结构核实：统一详情是 `frontend-public/components/roadmap/prd-detail.tsx`，其 `PrdDetailProps.additionalTabs` 即为本 PRD 追加 CI/CD tab 的扩展点（上游归档 PRD §9 已明确该容器按可扩展设计）。实现前先运行：
 
 ```bash
 rg -n "checks_state|post_pr_rework_requested|execute_repair|max_repair_attempts|RoadmapPrd" src/backend frontend-public tests
@@ -266,7 +268,7 @@ rg -n "fix_agent_enabled|autopilot.enabled|auto_merge" src/backend docs config.t
 
 ### Executor Drift Guard
 
-上游 PRD 会新建/调整统一详情组件和配置 writer，Change Impact Tree 是起点而非完整文件清单。实现前用上述 `rg` 重定位最终 symbol；若上游已提供 `prd-detail-view`、仓库设置 DTO 或原子 writer，必须扩展它们。交付前用 `rg -n "auto_repair_ci|ci_delivery|ci_failed_manual|ci_repair_exhausted"` 检查契约贯通，并用 `rg -n "fix_agent_enabled.*CI|autopilot.*auto_repair"` 排除错误联动。
+上游 PRD 已交付并归档，统一详情组件（`prd-detail.tsx`，含 `additionalTabs`）与配置 writer（`repository_settings_editor`，底层 `toml_section_editor.update_toml_table_keys`）已在代码库落地，Change Impact Tree 是起点而非完整文件清单。实现前用上述 `rg` 重定位最终 symbol；这些既有扩展点必须复用而非另造。交付前用 `rg -n "auto_repair_ci|ci_delivery|ci_failed_manual|ci_repair_exhausted"` 检查契约贯通，并用 `rg -n "fix_agent_enabled.*CI|autopilot.*auto_repair"` 排除错误联动。
 
 ### Flow / Architecture Diagram
 
@@ -361,7 +363,7 @@ flowchart TD
   required_for_acceptance: true
 ```
 
-失败排查：重复 repair 先检查 failure key 与 `post_pr_rework_requested` marker；假绿先核对 head SHA 是否为最新；页面问题缺失先比较 GitHub adapter `checks_summary` 与 Roadmap `ci_delivery.problems`；设置漂移先检查上游受限 writer 的 allowlist 和 fresh load。
+失败排查：重复 repair 先检查 failure key 与 `post_pr_rework_requested` marker；假绿先核对 head SHA 是否为最新；页面问题缺失先比较 GitHub adapter `checks_summary` 与 Roadmap `ci_delivery.problems`；设置漂移先检查 `repository_settings_editor` 的 allowlist 和 fresh load。
 
 ### Low-Fidelity Prototype
 
@@ -410,13 +412,11 @@ No external validation required; repository code and existing PRDs were sufficie
 
 ## 8. Delivery Dependencies
 
-### Delivery Dependencies
-
 - Group: roadmap-delivery-control
 - Depends on tasks/issues:
-  - P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot
-- Gate type: hard
-- Notes: 构建上可先实现独立 core policy，但完整交付必须等待上游统一 PRD 详情和受限仓库设置 writer；先发布会造成重复 UI/配置边界。
+  - none
+- Gate type: none
+- Notes: 原 `hard` 门禁指向 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot`（统一右侧 PRD 详情容器与受限仓库设置 writer）；该上游已归档（`tasks/archive/`），门禁已满足，故现声明为 `none`。历史理由保留：构建上本可先实现独立 core policy，但完整交付曾必须等待上游先建立详情与写回边界，否则会造成重复 UI/配置边界。上游交付后，本 PRD 复用 `prd-detail.tsx` 的 `additionalTabs` 与 `repository_settings_editor`/`toml_section_editor.update_toml_table_keys`。
 
 ## 9. Acceptance Checklist
 
@@ -539,7 +539,18 @@ No external validation required; repository code and existing PRDs were sufficie
 
 - Interpretation: pending — 实现完成后对照最终行为与用户原意复核。
 - Public behavior and contracts: pending — 对照最终 API/UI/config 复核。
-- Related PRD status: pending — 开工与归档前重查上游 PRD 状态。
+- Related PRD status: confirmed — 上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档（`tasks/archive/`），交付顺序门禁已解除；§8 已由 `hard` 改为 `none`。
 - Requirements and risks: pending — 对照最终实现与 fresh evidence 复核。
 - Reconciled differences:
   - none at creation time
+
+## 14. Change Log
+
+### 解除已满足的硬依赖并对齐上游实际落点
+
+- Type: doc
+- Before: §8 在 `## 8. Delivery Dependencies` 下嵌套了 `### Delivery Dependencies` 子标题，解析器 `parse_delivery_dependencies` 在下一个 `#{1,4}` 标题处截断小节，实测把声明的 `hard` 门禁静默降级为 `none` 且读不到 `Group`；banner 仍为 `⛔ 交付前置`；§5 称上游为"pending"；Change Impact Tree 与 Drift Guard 指向不存在的 `frontend-public/components/roadmap/prd-detail-view.tsx`；"受限 `.iar.toml` writer" 未点名具体实现；§13 `Related PRD status` 仍为 pending。
+- After: 删除嵌套子标题，`Depends on tasks/issues` 改为 `none`、`Gate type` 改为 `none`，Notes 保留历史理由与已满足事实；banner 改为 `✅ 交付前置`；§5 DRY 引用改为 `prd-detail.tsx` 的 `additionalTabs` 与 `repository_settings_editor` / `toml_section_editor.update_toml_table_keys`；Change Impact Tree 与 Drift Guard 同步为实际文件名与扩展点；§13 更新为 confirmed。
+- Reason: 上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档，交付顺序门禁已满足；同时该上游实际落地的是 `prd-detail.tsx`（`additionalTabs`）与 `repository_settings_editor`，与 PRD 写作时的假设文件名不同；嵌套子标题则使依赖声明对 runner 完全不可见。
+- Impact: 恢复依赖/分组字段可解析（现为 `none`），前端与配置落点与当前代码一致；不改变任何功能需求或验收判据。
+- Review: 自审通过；复跑 `parse_delivery_dependencies` 与 `extract_realistic_validation_items` 确认解析结果符合预期。

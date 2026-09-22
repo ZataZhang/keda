@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>失败上下文交接 · 概念原型</title>
+    <style>
+      :root {
+        --gh-fg: #1f2328;
+        --gh-muted: #59636e;
+        --gh-border: #d0d7de;
+        --gh-surface: #f6f8fa;
+        --gh-accent: #0969da;
+        --gh-ok: #1a7f37;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 32px 24px 56px;
+        background: #fff;
+        color: var(--gh-fg);
+        font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      }
+      .panel { max-width: 920px; margin: 0 auto 52px; }
+      .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+      .tag {
+        font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+        background: #ddf4ff; color: #0a3069; border: 1px solid #b6e3ff;
+      }
+      .panel-head h2 { font-size: 15px; margin: 0; font-weight: 600; }
+      .panel-head .hint { font-size: 12px; color: var(--gh-muted); }
+
+      .box { border: 1px solid var(--gh-border); border-radius: 8px; overflow: hidden; }
+      .box-head {
+        background: var(--gh-surface); border-bottom: 1px solid var(--gh-border);
+        padding: 9px 14px; font-size: 12px; color: var(--gh-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      }
+      .box-head .author { font-weight: 600; color: var(--gh-fg); }
+      .box-head .pill { background: #fff; border: 1px solid var(--gh-border); border-radius: 999px; padding: 1px 7px; }
+      .box-body { padding: 16px 18px; }
+      .box-body h3 { font-size: 16px; margin: 0 0 12px; font-weight: 600; }
+
+      .marker {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+        background: var(--gh-surface); border: 1px solid var(--gh-border); border-radius: 6px;
+        padding: 8px 10px; margin: 0 0 14px; color: #57606a; white-space: pre-wrap; word-break: break-all;
+      }
+      .kv { display: grid; grid-template-columns: 92px 1fr; gap: 6px 12px; margin: 0; font-size: 13.5px; }
+      .kv dt { color: var(--gh-muted); }
+      .kv dd { margin: 0; }
+      .kv code { background: rgba(27, 31, 36, 0.06); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+      .pass { color: var(--gh-ok); }
+      .note {
+        margin: 14px 0 0; padding: 8px 12px; border-radius: 6px; font-size: 13px;
+        background: var(--gh-surface); border: 1px dashed var(--gh-border); color: #59636e;
+      }
+      .note b { color: var(--gh-fg); }
+
+      .repo-line { color: var(--gh-muted); font-size: 13px; margin-bottom: 6px; }
+      .repo-line b { color: var(--gh-accent); font-weight: 600; }
+      .pr-title-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .pr-title { font-size: 20px; font-weight: 400; margin: 0; }
+      .pr-number { color: var(--gh-muted); font-size: 20px; }
+      .badge {
+        display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500;
+        color: var(--gh-muted); border: 1px solid var(--gh-border); border-radius: 999px; padding: 2px 9px; background: #fff;
+      }
+      .badge .dot { width: 8px; height: 8px; border: 1.5px dashed var(--gh-muted); border-radius: 50%; }
+      .labels { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 16px; align-items: center; }
+      .label { font-size: 12px; font-weight: 500; padding: 2px 9px; border-radius: 999px; border: 1px solid transparent; }
+      .label-neutral { background: #eff2f5; color: #59636e; border-color: #d0d7de; }
+      .label-absent { background: #fff; color: #8c959f; border: 1px dashed #d0d7de; }
+      .caption { font-size: 12px; color: var(--gh-muted); margin: 10px 0 0; }
+      .flow { text-align: center; font-size: 12px; color: var(--gh-muted); margin: 0 0 12px; }
+    </style>
+  </head>
+  <body>
+    <!-- 面板 A：Issue 交接评论（持久载体） -->
+    <section class="panel" id="shot-handoff-comment">
+      <div class="panel-head">
+        <span class="tag">概念原型 · design intent</span>
+        <h2>面板 A：Issue 交接评论（持久载体，下一轮 agent 读它）</h2>
+        <span class="hint">非运行时证据</span>
+      </div>
+
+      <div class="box">
+        <div class="box-head">
+          <span class="author">keda-runner</span> commented on example-org/sandbox#128
+          <span class="pill">marker 可确定性定位</span>
+        </div>
+        <div class="box-body">
+          <p class="marker">&lt;!-- iar:failure-context checkpoint=a1b2c3d attempts=3 verifier=red evidence=issue-128 --&gt;</p>
+          <h3>本轮未能通过验收 —— 交接记录</h3>
+          <dl class="kv">
+            <dt>快照性质</dt><dd><b>WIP checkpoint（中途进度，不是完成品）</b></dd>
+            <dt>卡在哪</dt><dd><code>rv-3</code> —— 点击 PRD 卡片后右侧详情仍为空白；期望渲染 PRD 原文</dd>
+            <dt>verifier</dt><dd>red（marker 存在，明确判定）；未通过项仅 <code>rv-3</code></dd>
+            <dt>尝试历史</dt><dd>本 claim 共 3 轮；第 3 轮后 agent 自述"已改渲染分支，但未复跑取证脚本"</dd>
+            <dt>缺什么</dt><dd><code>rv-3-prd-content-render.png</code> —— 行为未成立，无法产出该呈递物</dd>
+            <dt>原始诊断</dt><dd><code>tasks/evidence/issue-128/rv-3-*.txt</code>；verifier response log</dd>
+            <dt>快照 SHA</dt><dd><code>a1b2c3d</code>（由既有 <code>checkpoint_uncommitted_progress</code> 建立）</dd>
+            <dt>下一步</dt><dd>在这份快照上续作：先补 <code>rv-3</code> 的行为，再产出该呈递物</dd>
+          </dl>
+          <p class="note">
+            这条评论是<b>事实转述</b>：它记录上一轮说了什么、做了什么、缺了什么，不判定"这算产品失败还是审核事故"。
+            下一轮 claim 会读取<b>最近一条</b>带此 marker 的记录并注入 continuation prompt；更早的历史记录不会进入 prompt。
+          </p>
+        </div>
+      </div>
+      <p class="caption">原型说明：布局为设计意图示意，不是运行时截图，也不构成验收证据。</p>
+    </section>
+
+    <!-- 面板 B：Draft PR 正文（同源人读表面） -->
+    <section class="panel" id="shot-draft-pr-body">
+      <div class="panel-head">
+        <span class="tag">概念原型 · design intent</span>
+        <h2>面板 B：Draft PR 正文（同一 payload 的人读表面）</h2>
+        <span class="hint">非运行时证据</span>
+      </div>
+
+      <p class="flow">↑ 同一份 payload，两个出口 ↑</p>
+
+      <div class="repo-line">example-org / <b>sandbox</b></div>
+      <div class="pr-title-row">
+        <h1 class="pr-title">feat(console): 增加 PRD 原文浏览</h1>
+        <span class="pr-number">#14</span>
+        <span class="badge"><span class="dot"></span>Draft</span>
+      </div>
+      <div class="labels">
+        <span class="label label-neutral">agent/review</span>
+        <span class="label label-absent">validation/verifier-passed（不存在）</span>
+        <span style="font-size:12px;color:#59636e">← 既有门禁据此拒绝签核与合并，本 PRD 未新增任何门禁</span>
+      </div>
+
+      <div class="box">
+        <div class="box-head">
+          <span class="author">keda-runner</span> · PR 正文（由既有只读 content generator 生成，与交接记录同源）
+        </div>
+        <div class="box-body">
+          <h3>本轮未能通过验收，成果已推到本 PR</h3>
+          <dl class="kv">
+            <dt>做到哪</dt><dd>渲染分支已改；结构化证据清单 <code>rv-1</code>/<code>rv-2</code> 通过，<span class="pass">rv-4</span> 静态门禁通过</dd>
+            <dt>卡在哪</dt><dd><code>rv-3</code> —— 点击 PRD 卡片后右侧详情仍为空白；期望渲染 PRD 原文</dd>
+            <dt>缺什么</dt><dd><code>rv-3-prd-content-render.png</code> —— 行为未成立，无法产出</dd>
+            <dt>快照性质</dt><dd><b>WIP 中途快照</b>（<code>a1b2c3d</code>），不是"做完但没过验收"</dd>
+            <dt>下一步</dt><dd>补 <code>rv-3</code> 的行为后重跑独立 verifier；成功后本 PR 转为可正常审阅，不新建 PR</dd>
+            <dt>原始诊断</dt><dd><code>tasks/evidence/issue-128/rv-3-*.txt</code>；verifier response log</dd>
+          </dl>
+          <p class="note">
+            <b>本 PR 不可合并</b>：未获得 <code>validation/verifier-passed</code>。该判定由既有门禁给出——上面这段文字不改变任何状态。
+          </p>
+        </div>
+      </div>
+      <p class="caption">原型说明：布局为设计意图示意，不是运行时截图，也不构成验收证据。此 PR 无新标签、无稳定 marker 评论、无结构化状态字段。</p>
+    </section>
+  </body>
+</html>

@@ -1,6 +1,13 @@
 (() => {
   const prototypeRegistry = [
     {
+      id: 'blocked-draft-pr-surface', title: '失败上下文交接与失败 Draft PR', project: 'keda', module: 'Agent Runner / 跨 claim 交接',
+      form: 'image-state', version: 'v2.0', updatedAt: '2026-09-23', availability: 'available', validationLevel: '概念原型',
+      primaryFlow: '看两层表面：面板 A 是带 iar:failure-context marker 的 Issue 交接评论（下一轮 agent 读它），面板 B 是同一 payload 渲染出的 Draft PR 正文（人读）',
+      description: '复刻 GitHub 上的两层呈现：交接评论含快照性质、卡在哪、verifier 判定摘要、尝试历史摘要、缺失呈递物与快照 SHA；PR 正文同源，且不可合并归因给既有 validation/verifier-passed 门禁。无新标签、无状态码、无判定器。',
+      preview: './assets/blocked-draft-pr-01-failure-context-comment.png', entry: './blocked-draft-pr-surface.html', source: './blocked-draft-pr-surface.md',
+    },
+    {
       id: 'prd-lifecycle-observability', title: 'PRD 生命周期观测与执行分析', project: 'keda', module: 'Roadmap / 统计',
       form: 'code-native', version: 'v1.0', updatedAt: '2026-09-21', availability: 'available', validationLevel: '交互原型',
       primaryFlow: '从 Roadmap 单 PRD 执行时间线查看事件详情、切换失败重试场景，并进入仓库级 PRD 耗时统计后返回',

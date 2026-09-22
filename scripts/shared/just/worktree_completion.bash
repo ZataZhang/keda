@@ -20,7 +20,7 @@ _just_worktree_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     recipe_name="${COMP_WORDS[1]:-}"
     branch_candidates="$(_just_worktree_branch_candidates)"
-    option_candidates="-o -d -D -m -r --doctor"
+    option_candidates="-o -d -D -m -r --doctor --prune"
 
     case "$recipe_name" in
         worktree)

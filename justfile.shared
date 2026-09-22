@@ -159,6 +159,20 @@ lint mode="": _check-completion
             echo "🔍 staged archive PRD detected; running full lint checks."
         fi
 
+        # `--all-files` 只覆盖 git 已知的文件，未跟踪的新文件对 pre-commit 完全
+        # 不可见。不先喂一遍，「新增文件后的首次提交」必然踩坑:全量 lint 放行 →
+        # flag 写在未定型的内容上 → `git add -A` 后 commit 钩子才第一次看到这些
+        # 文件并 autofix → 内容变了 → check-test-flag 判「标记已过期」，人和
+        # runner 都只能回头重跑一遍 just test。放在 `--all-files` 之前,让格式化
+        # 在写 flag 之前定型。
+        untracked_file_paths="$(quality_untracked_file_paths)"
+        if [ -n "$untracked_file_paths" ]; then
+            echo "🔍 Running pre-commit on untracked files (invisible to --all-files)..."
+            printf '%s\n' "$untracked_file_paths" \
+                | tr '\n' '\0' \
+                | xargs -0 uv run pre-commit run --show-diff-on-failure --files
+        fi
+
         uv run pre-commit run --all-files --show-diff-on-failure
 
         if quality_skip_is_empty_or_only "check-test-flag"; then
@@ -224,6 +238,45 @@ lint mode="": _check-completion
 # Serve MkDocs site locally with live reload (configurable port, default 8000)
 docs-serve port="8000": _check-completion
     WATCHDOG_USE_POLLING=1 uv run mkdocs serve -a 127.0.0.1:{{port}}
+
+# Open the local read-only file & diff viewer (see docs/guides/file-viewer.md).
+# The service binds the loopback address only, serves read requests only, and
+# never writes to the repository being viewed. It stays resident for a fast
+# second launch and recycles itself after an idle timeout.
+# Usage:
+#   just view                    # open straight into the diff (改动) view at the repo root
+#   just view <path>             # open into the diff view, focused on a changed file
+#   just view --files            # open into the files view instead
+#   just view --diff             # diff view (already the default; kept as an explicit flag)
+#   just view --stop             # recycle this repository's resident instance
+#
+# The diff view always lists all three sections (已暂存 / 未暂存 / 未跟踪); there is no
+# CLI switch for picking one, and no baseline selector — the working tree is the only
+# comparison, divided by the git index.
+#
+# 这两条 recipe 刻意写成普通单行而不是 `#!/usr/bin/env bash` shebang：`just` 执行
+# shebang recipe 每次要多花约 200ms 起一个临时脚本，而 `just view` 的复用命中路径
+# 有 150ms 的耗时预算（见 docs/guides/file-viewer.md 的性能承诺）。
+#
+# 同理，解释器优先直连项目 venv 而不是走 `uv run`：`uv run --no-sync` 每次仍要做一遍
+# 项目解析，本机实测多花 20–37ms。解释器还没建出来（尚未 `just sync`）时退回 `uv run`，
+# 由 uv 负责建环境。
+#
+# `-S`（跳过 site 初始化）同样是冲着这 150ms 去的：site 初始化要扫一堆路径与 .pth
+# 文件，本机实测空载只省约 1.5ms，但在 CPU 被别的进程挤占时省约 30ms（2026-09-21 实测：
+# 空载 `python -c pass` 9.4ms、加 -S 7.9ms；负载约 17 时约 50–100ms、加 -S 约 20–30ms）。
+# 预算真正吃紧的正是机器忙的时候，所以这个开关留着。
+# 代价是这条入口进程里没有 site-packages，因此它只能 import 标准库与同目录的
+# instance.py——由 tests/guards/shared/test_view_launch_entry.py 守住。
+# 服务进程由 launch.py 以不带 `-S` 的方式单独拉起，语法高亮依赖照常可用。
+_view_python := if os_family() == "windows" { justfile_directory() / ".venv/Scripts/python.exe" } else { justfile_directory() / ".venv/bin/python" }
+
+view *args:
+    exec {{ if path_exists(_view_python) == "true" { quote(_view_python) } else { "uv run --no-sync python" } }} -S "{{justfile_directory()}}/scripts/shared/view/launch.py" {{args}}
+
+# Thin alias: open the viewer in the diff view (already the default).
+diff *args:
+    exec just view --diff {{args}}
 
 # Remove cache files and build artifacts
 clean:
@@ -322,6 +375,8 @@ staged_changes:
 #   just worktree -m [<feature>] [base=main] [flags]  # merge worktree (current branch if omitted)
 #   just worktree -r [<feature>] [base=main] [flags]  # rebase-merge（线性历史，无 merge commit）
 #   just worktree --doctor [branch] [--gc] [--yes]    # doctor / 孤儿库盘点与回收
+#   just worktree --prune [--dry-run] [--yes] [--force] [--base <branch>]
+#                                                     # 批量清理已并入 base 的分支及其 worktree
 worktree arg1 arg2="" arg3="" arg4="" arg5="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -442,6 +497,19 @@ worktree arg1 arg2="" arg3="" arg4="" arg5="":
         exit 0
     fi
 
+    # --prune: 批量清理已并入 base 的分支及其 worktree
+    #          （--dry-run 只列计划，--yes 跳过确认，--force 纳入远端已删但有独有提交的分支）
+    if [ "{{arg1}}" = "--prune" ]; then
+        prune_args=(./scripts/shared/worktree/merge.sh --prune)
+        for raw_arg in "{{arg2}}" "{{arg3}}" "{{arg4}}" "{{arg5}}"; do
+            if [ -n "$raw_arg" ]; then
+                prune_args+=("$raw_arg")
+            fi
+        done
+        "${prune_args[@]}"
+        exit 0
+    fi
+
     # Default: create/enter worktree
     branch_name="{{arg1}}"
     worktree_command=(./scripts/shared/worktree/create.sh "$branch_name")
@@ -534,9 +602,11 @@ worktree arg1 arg2="" arg3="" arg4="" arg5="":
                 echo "  just worktree -o <worktree-name> [--cmd editor]"
                 echo "      <worktree-name>: branch, branch basename, PRD slug, or PRD filename/path"
                 echo "  just worktree -d <branch>"
+                echo "  just worktree -D <branch>"
                 echo "  just worktree -m [<feature>] [base=main] [flags]"
                 echo "  just worktree -r [<feature>] [base=main] [flags]"
                 echo "  just worktree --doctor [branch] [--gc] [--yes]"
+                echo "  just worktree --prune [--dry-run] [--yes] [--force] [--base <branch>]"
                 exit 1
                 ;;
         esac

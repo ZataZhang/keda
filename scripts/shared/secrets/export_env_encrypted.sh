@@ -47,7 +47,11 @@ fi
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-OUTPUT_ZIP="$PROJECT_ROOT/${PROJECT_NAME}.zip"
+# 产物必须落在仓库外：写在 PROJECT_ROOT 时，加密备份会被 git 跟踪并推到公开远端。
+SECRETS_DIR="$(dirname "$PROJECT_ROOT")/mysecrets"
+mkdir -p "$SECRETS_DIR"
+chmod 700 "$SECRETS_DIR"
+OUTPUT_ZIP="$SECRETS_DIR/${PROJECT_NAME}.zip"
 
 cd "$PROJECT_ROOT"
 

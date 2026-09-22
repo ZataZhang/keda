@@ -46,11 +46,18 @@ quality_staged_file_paths() {
     git -c core.quotepath=false diff --cached --name-only
 }
 
+# 未跟踪且未被 .gitignore 排除的文件。`pre-commit run --all-files` 只覆盖 git
+# 已知的文件，这批文件对它完全不可见，必须显式用 `--files` 喂进去。
+# `--exclude-standard` 不可省：少了它，构建产物与缓存会被一并喂给钩子。
+quality_untracked_file_paths() {
+    git -c core.quotepath=false ls-files --others --exclude-standard
+}
+
 quality_working_file_paths() {
     if quality_has_head; then
         {
             git -c core.quotepath=false diff --name-only HEAD
-            git -c core.quotepath=false ls-files --others --exclude-standard
+            quality_untracked_file_paths
         } | awk 'NF && !seen[$0]++'
         return 0
     fi
