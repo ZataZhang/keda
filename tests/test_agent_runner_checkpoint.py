@@ -508,3 +508,130 @@ def test_run_once_recovers_running_issue_with_existing_local_commit(
     assert ("git", "push", "-u", "origin", "issue-123") in commands
     label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
     assert any(config.labels.review in c.get("add", []) for c in label_calls)
+
+
+def test_next_claim_reflows_latest_handoff_record_into_continuation_prompt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """rv-2 真实链路：Issue 评论 → marker 解析 → latest-wins → 截断 → continuation prompt。
+
+    本 PRD 的主要收益跨的就是这条 claim 边界，所以取证必须走 ``_process_ready_issue``
+    的真实入口，而不是直接调用 prompt 构造函数：上一轮耗尽时写下的交接记录，要能被
+    接手的新 claim 从 Issue 上读回并注入 prompt；同时过期记录与 agent 的 claim 评论
+    都不能混进来。
+    """
+    from backend.core.shared.models.agent_runner import AgentCommitResult
+    from backend.core.use_cases import agent_runner_issue_handlers as handlers
+    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases.run_agent_once import PrdDeliveryError
+
+    issue = make_prd_issue("tasks/pending/example.md")
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    latest_handoff = "\n".join(
+        [
+            "<!-- iar:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red "
+            "evidence=tasks/evidence/example -->",
+            "## Agent Runner Handoff — Recovery Budget Exhausted",
+            "- Checkpoint commit: `a1b2c3d4`",
+            "rv-3 not satisfied: the PRD detail panel stays blank.",
+        ]
+    )
+    stale_handoff = (
+        "<!-- iar:failure-context checkpoint=deadbee attempts=9 verifier=red -->\n"
+        "rv-1 not satisfied: the legacy export path was never wired."
+    )
+
+    fake_client = FakeGitHubClient()
+    # 顺序即时间序：过期记录在前，最近一条在后，另有人类评论夹在中间。
+    fake_client.comment_issue(issue.number, stale_handoff)
+    fake_client.comment_issue(issue.number, "human: 先放一放，等我确认")
+    fake_client.comment_issue(issue.number, latest_handoff)
+
+    def _raise_not_ready(*_args: object, **_kwargs: object) -> None:
+        raise PrdDeliveryError("Acceptance Checklist has unchecked items")
+
+    monkeypatch.setattr(handlers, "_reuse_existing_local_commit", _raise_not_ready)
+    monkeypatch.setattr(handlers, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
+    monkeypatch.setattr(handlers, "get_head_sha", lambda *a, **k: "partial-sha")
+    monkeypatch.setattr(handlers, "get_current_branch", lambda *a, **k: "issue-123")
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_agent_until_committed(**kwargs: object) -> AgentCommitResult:
+        captured["prompt_override"] = kwargs.get("prompt_override")
+        return AgentCommitResult(verification_results=[], attempt_results=[])
+
+    monkeypatch.setattr(
+        run_agent_once, "run_agent_until_committed", _fake_run_agent_until_committed
+    )
+    monkeypatch.setattr(handlers, "_finish_implementation_publication", lambda **k: None)
+
+    handlers._process_ready_issue(
+        issue=issue,
+        repo_path=Path("."),
+        config=config_with_review_disabled(worktree_path),
+        agent="auto",
+        github_client=fake_client,
+        process_runner=FakeProcessRunner(),
+    )
+
+    continuation_prompt = captured["prompt_override"]
+    assert isinstance(continuation_prompt, str)
+    assert "rv-3 not satisfied: the PRD detail panel stays blank." in continuation_prompt
+    assert "Checkpoint commit: `a1b2c3d4`" in continuation_prompt
+    # 限量：过期记录的关键断言不得出现。
+    assert "rv-1 not satisfied" not in continuation_prompt
+    assert "the legacy export path was never wired" not in continuation_prompt
+
+
+def test_next_claim_without_any_handoff_record_continues_without_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Issue 上从未写过交接记录时，续作照常进行、不报错，prompt 里也不伪造上下文。"""
+    from backend.core.shared.models.agent_runner import AgentCommitResult
+    from backend.core.use_cases import agent_runner_issue_handlers as handlers
+    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases.run_agent_once import PrdDeliveryError
+
+    issue = make_prd_issue("tasks/pending/example.md")
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    fake_client = FakeGitHubClient()
+    fake_client.comment_issue(issue.number, "human: 加油")
+
+    def _raise_not_ready(*_args: object, **_kwargs: object) -> None:
+        raise PrdDeliveryError("Acceptance Checklist has unchecked items")
+
+    monkeypatch.setattr(handlers, "_reuse_existing_local_commit", _raise_not_ready)
+    monkeypatch.setattr(handlers, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
+    monkeypatch.setattr(handlers, "get_head_sha", lambda *a, **k: "partial-sha")
+    monkeypatch.setattr(handlers, "get_current_branch", lambda *a, **k: "issue-123")
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_agent_until_committed(**kwargs: object) -> AgentCommitResult:
+        captured["prompt_override"] = kwargs.get("prompt_override")
+        return AgentCommitResult(verification_results=[], attempt_results=[])
+
+    monkeypatch.setattr(
+        run_agent_once, "run_agent_until_committed", _fake_run_agent_until_committed
+    )
+    monkeypatch.setattr(handlers, "_finish_implementation_publication", lambda **k: None)
+
+    handlers._process_ready_issue(
+        issue=issue,
+        repo_path=Path("."),
+        config=config_with_review_disabled(worktree_path),
+        agent="auto",
+        github_client=fake_client,
+        process_runner=FakeProcessRunner(),
+    )
+
+    continuation_prompt = captured["prompt_override"]
+    assert isinstance(continuation_prompt, str)
+    assert "already contains committed progress" in continuation_prompt
+    assert "Recovery Budget Exhausted" not in continuation_prompt
+    assert "handoff record" not in continuation_prompt.lower()

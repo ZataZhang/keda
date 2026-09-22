@@ -4,7 +4,7 @@
 
 > ✅ **交付前置**：无。此横幅是 §8 Delivery Dependencies 的投影。
 >
-> ⬜ **验收状态**：未开工。此横幅是 §9 Acceptance Checklist 的投影；只有全部验收项完成后才可改为 `✅ 可归档`。
+> 🧍 **验收状态**：待人工验收 — 机器门禁 rv-1…rv-4 已全绿并绑定最终树，仅剩 §9.1 第 1、2 行与 §9.2 Human-Confirmed 共 4 项需 PRD 作者本人执行/确认。本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 >
 > 本 PRD 分为 **Part A · 人审层**与 **Part B · 执行器层**。Part A 决定行为是否符合预期；Part B 提供实现、验证与交付细节。
 
@@ -267,19 +267,25 @@ checkpoint 安全筛选、forbidden paths、分支/remote 校验、PR 幂等复�
 │   [修改]【总结】耗尽路径以 require_prd_archived=False 复用既有 publish_changes / push_changes，原语本身不改
 ├── tests/
 │   ├── test_agent_runner_recovery.py
-│   │   [修改]【总结】耗尽时写交接记录、有安全 commit 时发布或复用 Draft PR
+│   │   [修改]【总结】rv-1：耗尽时写交接记录、有安全 commit 时发布 Draft PR 并回链，以及限流/中断零副作用的正反断言
 │   ├── test_agent_runner_feedback.py
-│   │   [修改]【总结】续作 prompt 注入上一轮上下文，且无记录时不注入、超长时截断
-│   ├── test_agent_runner_orchestrate.py
-│   │   [修改]【总结】失败处理分叉、marker 解析与 publish 失败不掩盖原始异常
-│   └── test_agent_runner_publish.py
-│       [修改]【总结】require_prd_archived=False 仅限耗尽路径，其余安全检查不退化
+│   │   [修改]【总结】rv-2：续作 prompt 注入上一轮上下文，且无记录时不注入、超长时截断、latest-wins 限量
+│   ├── test_agent_runner_checkpoint.py
+│   │   [修改]【总结】rv-2 真实入口：下一个 claim 从 Issue 读回最近一条记录并注入 continuation prompt
+│   ├── test_agent_runner_publish.py
+│   │   [修改]【总结】require_prd_archived 默认值与落点白名单，以及"无新标签/无失败判定器"静态审计
+│   ├── test_agent_runner_run_once.py
+│   │   [修改]【总结】失败评论计数按 marker 排除交接记录，并单独断言交接记录被写出
+│   └── test_agent_runner_run_once_commit.py
+│       [修改]【总结】同上：交接记录会原样引用门禁报告文本，需从既有失败报告计数中排除
 └── docs/
     ├── guides/agent-runner.md
     │   [修改]【总结】跨 claim 交接与失败 Draft PR 的行为、边界与人工验证方式
     └── ai-standards/testing.md
         [修改]【总结】失败呈现与交接类验证的取证和人工验证边界
 ```
+
+`src/backend/core/use_cases/agent_runner_publish.py` 在实测中**未被修改**：本 PRD 只以 `require_prd_archived=False` 调用它的既有原语（见"实现发现一"），因此从影响树移除。
 
 文件名以实现时实测为准；先运行：
 
@@ -492,19 +498,18 @@ verifier **未形成结论**时，两层的结构完全相同，差别只在措�
 
 #### R2 Behavior
 
-- [ ] rv-1 证明耗尽时写出带 marker 的交接记录、有安全 commit 时发布/复用 Draft PR、PR 正文回链该评论且不含 `validation/verifier-passed`，`require_prd_archived=False` 未泄漏到正常成功路径；并证明 `ProviderCapacityError` / `KeyboardInterrupt` **不**触发交接与发布、原异常按既有语义上抛。
-- [ ] rv-2 证明下一轮 continuation prompt 注入了最近一条交接记录且限量、截断；无记录时不注入也不报错。
-
+- [x] rv-1 证明耗尽时写出带 marker 的交接记录、有安全 commit 时发布/复用 Draft PR、PR 正文回链该评论且不含 `validation/verifier-passed`，`require_prd_archived=False` 未泄漏到正常成功路径；并证明 `ProviderCapacityError` / `KeyboardInterrupt` **不**触发交接与发布、原异常按既有语义上抛。证据：`tasks/evidence/<prd-stem>/rv-1-handoff-and-draft-pr.txt`（`tests/test_agent_runner_recovery.py` 的 4 条用例：判红 / 未形成结论两参数化 + 限流与中断零副作用两参数化 + 发布失败不掩盖原始异常）。
+- [x] rv-2 证明下一轮 continuation prompt 注入了最近一条交接记录且限量、截断；无记录时不注入也不报错。证据：`tasks/evidence/<prd-stem>/rv-2-context-reflow.txt`（`tests/test_agent_runner_feedback.py` 4 条 + `tests/test_agent_runner_checkpoint.py` 走 `_process_ready_issue` 真实入口的 2 条）。
 #### R1/R0 Regression And Documentation
 
-- [ ] rv-3 证明无安全 commit 或只含 forbidden paths 时不创建任何 PR，但交接记录仍然写出。
-- [ ] rv-4 的 `uv run mkdocs build --strict`、`just lint --repo`、`just test` 全绿，文档同步。
-- [ ] `rg` 审计确认全仓未出现新增的 blocked 标签或失败判定器，且 `require_prd_archived=False` 只出现在耗尽路径。
+- [x] rv-3 证明无安全 commit 或只含 forbidden paths 时不创建任何 PR，但交接记录仍然写出。证据：`tasks/evidence/<prd-stem>/rv-3-no-safe-commit.txt`。
+- [x] rv-4 的 `uv run mkdocs build --strict`、`just lint --repo`、`just test` 全绿，文档同步。证据：`tasks/evidence/<prd-stem>/rv-4-static-gates.txt`。
+- [x] `rg` 审计确认全仓未出现新增的 blocked 标签或失败判定器，且 `require_prd_archived=False` 只出现在耗尽路径。证据：已固化为 `tests/test_agent_runner_publish.py` 的两条常驻断言（`test_no_new_blocked_label_or_failure_classifier_was_introduced`、`test_require_prd_archived_false_appears_only_on_the_exhaustion_path`），后者用白名单同时钉住既有的 `create_prd_from_issue.py` 允许点。
 
 #### Delivery Readiness
 
 - [ ] 完成回复已原样携带 9.1 三行内容（含两行手动验证记录）。
-- [ ] 相关实现最后一次变更后已重采 rv-1、rv-2；证据绑定最终树。
+- [x] 相关实现最后一次变更后已重采 rv-1、rv-2；证据绑定最终树（见 `<prd-stem>.evidence-report.md` 的 verified tree）。
 - [~] 独立 verifier 审查通过 — runner-owned gate: verifier review
 - [~] 归档前完成 §13 Final Reconciliation — runner-owned gate: archive
 
@@ -642,3 +647,48 @@ verifier **未形成结论**时，两层的结构完全相同，差别只在措�
 - Reason: 对抗式复审时验证了两个前提——"verifier 判定在耗尽时仍可用"**成立**（`_classify_and_record_gate_failure(detail=format_validation_evidence_detail(str(exc)))` → `_record_attempt` → `AttemptResult.detail`，随 `MaxRetriesExceededError.attempt_results` 上抛）；"hook 只覆盖耗尽"**不成立**（`except` 元组同时含 `ProviderCapacityError` 与 `KeyboardInterrupt`）。后者若不修，一次 Ctrl-C 就会发出一份"本轮未能通过验收"的记录并推送一个 Draft PR。
 - Impact: 触发边界与两个出口的事实源关系被写死，消除了"误伤中断/限流"与"PR 正文与交接记录各说各话"两类缺陷；不改变任何门禁与行为要求的实质，只补精确性。`ProviderCapacityError` 是否也应写交接记录经确认按**不写**处理，已作为显式决策记入 D-11、并把"限流后下一轮仍无上下文"这一代价记入 §12，避免后人当成漏写而改宽。
 - Review: 自审通过；复跑 `extract_realistic_validation_items`（4 项，连续）、`parse_delivery_dependencies`（`gate=none` / group 可解析）、`parse_impact_tree`（11/11 可判定）、`parse_prd_change_log`（8 条、六字段完整），并核对 FR-1…FR-13 无重复编号、Part A 无悬空 FR 引用。
+
+### 实现发现一：PR 正文回链改由发布后补写，而非喂给内容生成器
+
+- Type: scope / design
+- Before: §6 与 §7.1 第 5 步写"PR 正文由既有 `IContentGenerator` 生成（把交接 payload 作为上下文喂进去）"，同时 §7.2 影响树规定 `agent_runner_publish.py` 的"原语本身不改"。
+- After: 保留 `publish_changes(..., require_prd_archived=False)` 原语不变，交接 payload 与回链由发布**之后**的一次正文补写落到 PR 尾部（`_attach_handoff_ref_to_draft_pr`，用既有 `get_pull_request_context` 读正文 + `update_pull_request_body` 写回，按 `<!-- iar:failure-context-ref -->` 锚点替换而非叠加）。
+- Reason: 两条要求在既有实现下不能同时成立——`create_draft_pr` 内部自己调 `build_pr_context(issue, branch, ...)` 组装上下文，不接受外部注入；且 `generated_content.enabled=false` 时它直接用 `fallback_body`、**根本不调用** generator。FR-6 明确要求"即使内容生成被关闭"回链也必须在，所以喂 generator 这条路覆盖不了自己要求的场景。
+- Impact: 不新增发布模式、不改发布原语签名，只在 core 的耗尽 handler 内多一次 best-effort 正文补写；`update_pull_request_body` 是既有端口方法，未扩接口。PR 正文仍是"发布那一刻的快照"，交接评论仍是唯一事实源（FR-7 不变）。
+- Review: 自审通过；`tests/test_agent_runner_recovery.py` 断言 PR 正文含 `#issuecomment-` 回链且保留原正文，`test_pr_handoff_ref_block_replaces_instead_of_stacking` 断言重复耗尽时替换而非叠加。
+
+### 实现发现二：一次 claim 可留下多条交接记录（agent fallback 阶梯）
+
+- Type: evidence / doc
+- Before: §7.1 与行为样例把耗尽描述成"产出**一份**交接记录"，隐含一次 claim 一条。
+- After: 明确一次 claim 可能留下多条记录。`run_issue_with_agent_fallback` 为每个候选 agent 各调一次 `_process_ready_issue`，而交接挂在其中每次耗尽的 `except` 分支上（默认 `max_agent_switches=2` → 最多 3 条）。每条对应一次真实 WIP 快照（SHA 与进度都不同），下一轮按 latest-wins 只读最近一条，Draft PR 按分支复用同一个。
+- Reason: 这不是漏写而是落点选择的必然结果——同时握有异常、`attempt_results` 与 `checkpoint_sha` 的唯一位置就是这个 `except` 分支（§5 的原有判断），而 per-agent checkpoint 本就是既有语义。写宽会丢快照、抑制中间记录需要在阶梯与 handler 之间新增状态传递，收益不及代价。
+- Impact: 行为要求不变（FR-2/FR-6/FR-10 原样成立，PR 仍唯一）；`docs/guides/agent-runner.md` 新增边界说明；两条既有 `run_once` 测试的评论计数从"恰好一条失败报告"改为"失败报告一条 + 交接记录 ≥1"，并按 marker 排除交接记录（它会原样引用门禁报告文本，含 `commit request` / `no git commits` 字样）。
+- Review: 自审通过；latest-wins 的限量语义由 `rv-2` 的过期记录负断言覆盖。
+
+### 实现发现三：marker 的 checkpoint 取值放宽为单 token
+
+- Type: test / doc
+- Before: `iar:failure-context` 的 `checkpoint=` 仿 `iar:event` 的 `head=` 写成 `[a-f0-9]+|none`。
+- After: 改为 `[^\s>]+`，并在 `agent_runner_events.py` 注明理由。
+- Reason: marker 解析失败时回灌按"没有上一轮上下文"处理（fail-closed），也就是说一次取值形状不符就会**静默退回本 PRD 要消除的"从零反推"**。定位能力比取值校验更重要，且该 marker 只由本仓库自己写出、不被外部输入污染。
+- Impact: 真实 git SHA 均命中；`test_failure_context_marker_round_trips_without_a_shared_contract_object` 覆盖 `checkpoint=none` 与 `iar:failure-context-ref` 不被误认两种边界。
+- Review: 自审通过；该缺陷由 `rv-1` 首次跑红暴露（回链退化成 Issue URL），不是事后补写。
+
+### 测试落点调整：不增大已超 1000 行的 orchestrate 测试文件
+
+- Type: test
+- Before: §7.2 影响树把交接分叉与 marker 解析的测试放在 `tests/test_agent_runner_orchestrate.py`。
+- After: rv-1 / rv-3 / 发布失败不掩盖 → `tests/test_agent_runner_recovery.py`；rv-2 的 prompt 侧 → `tests/test_agent_runner_feedback.py`，跨 claim 真实入口侧 → `tests/test_agent_runner_checkpoint.py`；`require_prd_archived` 默认值与落点白名单、"无新标签/无判定器"静态审计 → `tests/test_agent_runner_publish.py`。
+- Reason: `test_agent_runner_orchestrate.py` 实测已有 1195 个非空行，超过仓库"单文件非空行 ≤1000"的约定（`just lint` 会告警），再往里加会把告警固化；checkpoint 与 cross-claim 续作测试本就集中在 `test_agent_runner_checkpoint.py`，放那里主题也更贴。
+- Impact: 覆盖的 oracle 与 §7.6 逐条对应，只换文件位置；未新增测试目录或框架。
+- Review: 自审通过；`just lint --repo` 的 `Check max file lines (non-empty)` 通过。
+
+### 独立 verifier 审查轮：修掉一个 FR-11 缺口与一条零判别力的 oracle
+
+- Type: test / evidence
+- Before: `_record_failure_handoff` 只把评论 / 发布 / 回链三步包进 try，渲染（`attempt_results` 取值、证据路径解析、`format_failure_context_comment` 及其对 `parse_verifier_verdict` 的延迟导入）留在守卫之外；rv-2 场景③的测试拿改动后的同一个函数跟自己比；verifier 结论只从 `attempt_results[-1]` 解析；"缺失呈递物"无独立字段；rv-3 把 `checkpoint_uncommitted_progress` 直接 patch 成 `None`，未走 PRD 自己声明的"安全筛选…真实"；"PR 不含 `validation/verifier-passed`"只断言了正文文字。
+- After: ① `_record_failure_handoff` 改为整层守卫，实际步骤移入 `_write_failure_handoff`，三步各自仍吞异常以保留部分成功的日志粒度；② 空 `handoff_section` 改为整个不插入，并把该测试改钉**改动前实现实跑采集的 prompt 金标准**，加反向断言"给了记录就必须变内容"；③ verdict 从最近 attempt 往前找**第一个真正形成的判定**，判定轮次与末轮不同时在正文写明；④ 新增 `_extract_named_deliverables`，原样摘出门禁点名的 `rv-<n>` 项并声明不判断其真伪；⑤ 新增在真实 git 仓上只改 `.env` 的一例，让真实 checkpoint 安全筛选自己判定；⑥ 新增对 `edit_issue_labels` add 列表的负向断言。另修 PRD 两处失效措辞（`agent_runner_commit.py` 的"checkpoint 永远不会被推送"不变量、handler 内"其余安全检查全部照旧生效"对已提交内容实为空转），并让评论写入失败时 PR 回链措辞如实降级而非宣称一条不存在的"权威记录"。
+- Reason: 独立 verifier 实证证明第①项可复现：让渲染器抛 `RuntimeError` 会直接从 `_process_ready_issue` 逃出，`MaxRetriesExceededError` 降级为 `__context__`，且因异常类型不符，agent fallback 阶梯也接不住，最终由 runtime 通用 handler 拿渲染错误去 `_mark_issue_failed`——把"验证没过"变成"报告写挂了"，正是 FR-11 禁止的形态。第②项属同义反复：实现即便注入任意文本也照样通过，该 oracle 格子原本零判别力。第③项会把上一轮真实的 RED 误写成"没有形成结论"，恰是本 PRD 要消除的那类误导。
+- Impact: 新增 6 个测试函数（累计 20 个），全量由 2488 升至 **2493 passed**；`mkdocs --strict` 与 `just lint --repo` 仍 EXIT=0；rv-1…rv-4 全部证据在同一最终树（变更集 `8a3dc39acad9`）重采。行为要求不变，未新增门禁、标签或状态。
+- Review: 独立 verifier 首轮判 PASS WITH FINDINGS，8 项发现中 1 MAJOR + 4 MINOR + 2 NIT 已处置，1 项（marker 派生对 4000 字符截断的脆弱性）确认为只降级措辞、不会误报 PASS，作为残余风险记账；处置后结论为 PASS。详见 `tasks/evidence/<prd-stem>/<prd-stem>.verifier-report.md`。

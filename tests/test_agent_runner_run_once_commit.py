@@ -527,12 +527,22 @@ def test_run_once_uncommitted_changes_missing_request_fails(tmp_path: Path) -> N
         if c["method"] == "comment_issue" and "<!-- iar-attempt-history -->" in c.get("body", "")
     ]
     assert len(history_comment_calls) >= 1
+    # 交接记录会原样引用门禁报告文本（这里含 "commit request"），因此按 marker 把它
+    # 从"既有失败报告"的计数里排除；数量 >=1 是因为 agent fallback 阶梯会为每个候选
+    # agent 各写一份，下一轮按 latest-wins 只读最近一条。
+    handoff_comment_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "comment_issue" and "iar:failure-context" in c.get("body", "")
+    ]
+    assert len(handoff_comment_calls) >= 1
     failure_comment_calls = [
         c
         for c in fake_client.calls
         if c["method"] == "comment_issue"
         and "commit request" in c.get("body", "")
         and "<!-- iar-attempt-history -->" not in c.get("body", "")
+        and "iar:failure-context" not in c.get("body", "")
     ]
     assert len(failure_comment_calls) == 1
 

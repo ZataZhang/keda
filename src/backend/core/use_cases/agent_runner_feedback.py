@@ -49,6 +49,30 @@ _MAX_RECOVERY_OUTPUT_LENGTH = 12000
 # can raise or lower the ceiling without forking this helper.
 _DEFAULT_PRD_INLINE_MAX_CHARS = 20000
 
+# 跨 claim 回灌时内联"上一轮交接记录"的上限。交接记录含 attempt 历史，容易很长，
+# 而 prompt 是有限资源；只取头部即可，因为记录的关键字段（快照性质、checkpoint
+# SHA、verifier 结论、证据目录）都排在前面，超限时显式标注截断而非静默丢弃。
+_MAX_FAILURE_CONTEXT_INLINE_CHARS = 8000
+
+
+def truncate_failure_context_for_prompt(failure_context: str) -> str:
+    """把上一轮交接记录限量内联进续作 prompt。
+
+    超过 :data:`_MAX_FAILURE_CONTEXT_INLINE_CHARS` 时保留头部并显式追加截断说明，
+    使接手方知道自己看到的是片段而不是全文——交接记录是唯一事实源，prompt 里只放
+    它的节选。
+    """
+    if len(failure_context) <= _MAX_FAILURE_CONTEXT_INLINE_CHARS:
+        return failure_context
+    return "\n".join(
+        [
+            failure_context[:_MAX_FAILURE_CONTEXT_INLINE_CHARS].rstrip(),
+            "",
+            "[handoff record truncated; the full text is the "
+            "`iar:failure-context` Issue comment]",
+        ]
+    )
+
 
 class VerificationFailedError(RuntimeError):
     """Raised when configured verification commands do not pass."""
@@ -973,6 +997,7 @@ def build_progress_continuation_prompt(
     *,
     failure_summary: str = "",
     verification_results: list[CommandResult] | None = None,
+    previous_failure_context: str = "",
 ) -> str:
     """构造"在已提交进度上继续"的 prompt，用于跨 claim 续作。
 
@@ -980,6 +1005,11 @@ def build_progress_continuation_prompt(
     不应从零开始。本 prompt 告知 agent 工作树已有既有提交，要先检视现状再补齐
     剩余工作，避免重复劳动或回退已完成内容。同时附带上一次失败的 verification
     上下文，让续作 agent 直接针对未通过的检查继续修复。
+
+    ``previous_failure_context`` 是上一轮 recovery 耗尽时写到 Issue 上的交接记录
+    （``iar:failure-context`` 评论）正文，由调用方按 latest-wins 只取最近一条传入。
+    它是"上一轮的陈述"而非事实裁定，因此措辞要求接手方自行对照 PRD 复核；无记录时
+    不注入本段，prompt 与不带本功能时逐字一致。
     """
     prd_path = extract_prd_path(issue.body)
     if prd_path:
@@ -998,6 +1028,21 @@ def build_progress_continuation_prompt(
     if failure_summary:
         failure_section = f"The previous attempt failed with:\n{failure_summary}\n"
 
+    handoff_section = ""
+    if previous_failure_context:
+        handoff_section = "\n".join(
+            [
+                "The previous claim handed off this record when it exhausted its "
+                "recovery budget. It is the previous round's **statement**, not a "
+                "ruling: re-verify it against the PRD and the code before acting on "
+                "it, and note that any commit it mentions is a WIP mid-progress "
+                "snapshot rather than a finished implementation.",
+                "",
+                truncate_failure_context_for_prompt(previous_failure_context),
+                "",
+            ]
+        )
+
     verification_section = ""
     if verification_results:
         failed_results = failed_verification_results(verification_results)
@@ -1011,19 +1056,27 @@ def build_progress_continuation_prompt(
                 f"{formatted_failures}\n"
             )
 
-    return "\n".join(
+    prompt_parts = [
+        f"Continue GitHub Issue #{issue.number}: {issue.title}",
+        "",
+        f"Issue URL: {issue.url}",
+        f"Worktree: {worktree_path}",
+        "",
+        "This worktree already contains committed progress from earlier runner "
+        "attempts. Do not restart from scratch and do not revert existing "
+        "commits. Inspect the current state first (`git log`, existing files, "
+        "and the PRD Acceptance Checklist), then implement only what remains.",
+        prd_line,
+        "",
+    ]
+    # 交接段为空时**整个不插入**，而不是插一个空串：多插一个空串会让没有交接记录的
+    # claim 也多出一个空行，于是"无记录时 prompt 与本功能不存在时逐字一致"这条判据
+    # 就不成立了。（failure_section / verification_section 保持原有的插空串写法，
+    # 那两者是本功能之前就有的形态，改了会动到既有输出。）
+    if handoff_section:
+        prompt_parts.append(handoff_section)
+    prompt_parts.extend(
         [
-            f"Continue GitHub Issue #{issue.number}: {issue.title}",
-            "",
-            f"Issue URL: {issue.url}",
-            f"Worktree: {worktree_path}",
-            "",
-            "This worktree already contains committed progress from earlier runner "
-            "attempts. Do not restart from scratch and do not revert existing "
-            "commits. Inspect the current state first (`git log`, existing files, "
-            "and the PRD Acceptance Checklist), then implement only what remains.",
-            prd_line,
-            "",
             failure_section,
             verification_section,
             "Execution rules:",
@@ -1037,3 +1090,4 @@ def build_progress_continuation_prompt(
             "- Finish with a concise summary, tests run, and remaining risk.",
         ]
     )
+    return "\n".join(prompt_parts)

@@ -415,8 +415,12 @@ def checkpoint_uncommitted_progress(
       staged 的删除在工作区和 index 里都不存在,``git add`` 会因此整条失败,把在途
       代码一并丢掉。这些内容已在 index 中,``git commit`` 仍会带上。
 
-    发布门禁（``_reuse_existing_local_commit`` / publication）仍会拦截未完成的
-    工作，因此 checkpoint 永远不会被推送或合入；它只让进度可续作。
+    正常发布门禁（``_reuse_existing_local_commit`` / publication）仍会拦截未完成的
+    工作，所以 checkpoint 不会经由成功路径被推送。**唯一的例外**是 recovery 耗尽后的
+    失败交接（``agent_runner_issue_handlers._record_failure_handoff``）：它会带着这个
+    WIP 快照发布一个 Draft PR 供人审阅，并为此显式放宽归档那一项检查。该例外不放松任何
+    其它安全检查，也不给 PR 任何验收态——缺 ``validation/verifier-passed`` 时既有签核 /
+    合并 / 归档门禁照常拒绝，因此快照仍然**永远不会被合入**。
 
     Args:
         issue: 当前处理的 Issue。
