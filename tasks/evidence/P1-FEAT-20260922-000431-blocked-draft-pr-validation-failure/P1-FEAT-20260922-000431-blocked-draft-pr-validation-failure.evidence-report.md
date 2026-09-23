@@ -22,9 +22,13 @@ continuation prompt 与 marker 解析）。因此本目录没有静态图需要�
 | 项 | 值 |
 |---|---|
 | 分支 | `blocked-draft-pr-validation-failure` |
+| 首版实现提交 | `9b362669a176ba272bc948ff0fd2fac1bbbad561`（含全部生产代码改动） |
+| 追加回归断言提交 | `18fecbea36fe2d69c3d231e4a457e7c48220d9ca`（**仅测试文件**） |
 | base commit | `87ab96ee149eae7240f7ecd16eb1de81d7ef4dae` |
 | base tree | `07efe13a172eeea10067645abdbfdde3347bae22` |
 | 变更集指纹 | `8a3dc39acad9c78c5d6a34a5a0138a1a538e7627`（15 文件，含 3 份证据报告） |
+
+行为证据绑定到代码提交 `18fecbea`（tree `454a1e5f`）；其后的提交只动证据与文档文件、不改代码树，故 rv 证据无需重采。
 
 最后一次实现变更来自**独立 verifier 审查轮**（报告见
 `<prd-stem>.verifier-report.md`）：修掉 1 个 MAJOR（渲染步骤未受守卫，可掩盖原始异常）、

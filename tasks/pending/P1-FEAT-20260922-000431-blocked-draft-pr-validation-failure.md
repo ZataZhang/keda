@@ -672,8 +672,8 @@ verifier **未形成结论**时，两层的结构完全相同，差别只在措�
 - Before: `iar:failure-context` 的 `checkpoint=` 仿 `iar:event` 的 `head=` 写成 `[a-f0-9]+|none`。
 - After: 改为 `[^\s>]+`，并在 `agent_runner_events.py` 注明理由。
 - Reason: marker 解析失败时回灌按"没有上一轮上下文"处理（fail-closed），也就是说一次取值形状不符就会**静默退回本 PRD 要消除的"从零反推"**。定位能力比取值校验更重要，且该 marker 只由本仓库自己写出、不被外部输入污染。
-- Impact: 真实 git SHA 均命中；`test_failure_context_marker_round_trips_without_a_shared_contract_object` 覆盖 `checkpoint=none` 与 `iar:failure-context-ref` 不被误认两种边界。
-- Review: 自审通过；该缺陷由 `rv-1` 首次跑红暴露（回链退化成 Issue URL），不是事后补写。
+- Impact: 真实 git SHA 均命中。补 `test_failure_context_marker_round_trips_without_a_shared_contract_object` 覆盖 `checkpoint=none`、`iar:failure-context-ref` 不被误认，以及**非 16 进制取值仍可定位**三种边界。
+- Review: 自审通过；该缺陷由 `rv-1` 首次跑红暴露（回链退化成 Issue URL），不是事后补写。**二次复核发现首版修法当时并未真正守住**：正则放宽了，但全部测试 fixture 用的是 hex 或 `none`，把正则收紧回 `[a-f0-9]+` 不会让任何测试变红——即该 bug 可静默回归。已追加非 16 进制断言，并用"临时收紧正则 → 该断言转红"验证其判别力（在仓库外的副本上比对两条正则，未改动生产代码）。
 
 ### 测试落点调整：不增大已超 1000 行的 orchestrate 测试文件
 
