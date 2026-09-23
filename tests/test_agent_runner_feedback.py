@@ -459,6 +459,7 @@ def test_failure_context_marker_round_trips_without_a_shared_contract_object() -
     快照"与"marker 不带这个键"。
     """
     from backend.core.use_cases.agent_runner_events import (
+        find_latest_failure_context_comment,
         format_failure_context_marker,
         has_failure_context_marker,
     )
@@ -478,3 +479,15 @@ def test_failure_context_marker_round_trips_without_a_shared_contract_object() -
     assert not has_failure_context_marker("<!-- iar:event version=1 phase=x cycle=0 -->")
     # PR 正文尾部的回链段带 ``iar:failure-context-ref`` 前缀，不能被误认成交接记录。
     assert not has_failure_context_marker("<!-- iar:failure-context-ref -->")
+    # checkpoint 取值**不能**只认 16 进制：marker 解析失败时回灌按"没有上下文"处理，
+    # 于是取值形状不符会静默退回到本功能要消除的"从零反推"。这条曾真实红过一次
+    # （正则照抄 iar:event 的 head= 写法时，非 hex 取值让 PR 回链退化成 Issue URL）。
+    non_hex_marker = format_failure_context_marker(
+        checkpoint_sha="refs-wip-001",
+        attempt_count=1,
+        verifier_state="red",
+        evidence_dir="tasks/evidence/issue-128",
+    )
+
+    assert has_failure_context_marker(non_hex_marker)
+    assert find_latest_failure_context_comment([non_hex_marker]) == non_hex_marker
