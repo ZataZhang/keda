@@ -146,12 +146,24 @@ def test_run_once_no_new_commits_fails() -> None:
         if c["method"] == "comment_issue" and "<!-- iar-attempt-history -->" in c.get("body", "")
     ]
     assert len(history_comment_calls) >= 1
+    # 耗尽时 Issue 上有三类评论：实时的 attempt 历史、交接记录、以及既有的失败报告。
+    # 交接记录会原样引用门禁报告文本，因此按 marker 排除它，才能继续数"失败报告只有一
+    # 条"这件事。数量用 >=1 而非 ==1：agent fallback 阶梯会为每个候选 agent 各耗尽一次
+    # （默认 max_agent_switches=2 → 3 个候选），每轮的 checkpoint SHA 与进度都不同，所以
+    # 一份记录对应一次真实快照；下一轮按 latest-wins 只读最近一条。
+    handoff_comment_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "comment_issue" and "iar:failure-context" in c.get("body", "")
+    ]
+    assert len(handoff_comment_calls) >= 1
     failure_comment_calls = [
         c
         for c in fake_client.calls
         if c["method"] == "comment_issue"
         and "no git commits" in c.get("body", "")
         and "<!-- iar-attempt-history -->" not in c.get("body", "")
+        and "iar:failure-context" not in c.get("body", "")
     ]
     assert len(failure_comment_calls) == 1
 

@@ -520,6 +520,30 @@ runner **不在 publish 前对 WIP checkpoint 做 squash**：
 
 checkpoint 的 `git add` 只使用 git 仍能匹配的路径（非禁改、且在工作区或 index 中存在）。这一点对**归档之后才失败**的尝试尤其关键：PRD 交付门禁（`ensure_prd_delivery_ready`）会用 `git mv` 把 PRD 从 `tasks/pending/` 移到 `tasks/archive/`，此后 `git status` 仍报告 `tasks/pending/` 源路径，但它在工作区和 index 里都已不存在——把它塞进 pathspec 会让整条 `git add` 以 `fatal: pathspec ... did not match any files`（exit 128）失败，连 agent 真正的在途代码一起丢掉，而 checkpoint 失败只记 warning，很容易被忽略。已 staged 的重命名与删除本身仍在 index 中，`git commit` 会照常带上，因此剔除这些 pathspec 不会丢内容。
 
+### 跨 claim 失败交接与失败 Draft PR
+
+recovery 预算耗尽不是终点，而是**交班点**。此前只有同一个 claim 内的重试带着失败上下文（`run_agent_execution_loop` 每轮把 `recovery_failure_summary` 拼进 recovery prompt）；跨 claim 的唯一入口 `build_progress_continuation_prompt` 既不读 Issue 评论、也不读 attempt 历史与 agent 自述，而 `_reuse_existing_local_commit` 又**不跑 verifier gate**——于是"上一轮 verifier 为什么判红"没有任何路径跨过 claim 边界，接手的新 claim 只能从 WIP 快照与 PRD 反推，同一个坑反复踩。
+
+现在耗尽路径补上三步（全部在 `agent_runner_issue_handlers._process_ready_issue` 的耗尽 `except` 分支里）：
+
+1. **写交接记录**：一条带 `<!-- iar:failure-context checkpoint=… attempts=… verifier=… evidence=… -->` marker 的 Issue 评论，正文由 `format_failure_context_comment` 渲染，复用既有的 `format_attempt_history`，verifier 结论取自 `MaxRetriesExceededError.attempt_results[*].detail`。
+2. **发布同源的人读表面**：`checkpoint_sha` 非空时调用既有的 `publish_changes(..., require_prd_archived=False)`，发布或按分支复用同一个 Draft PR，并在 PR 正文尾部固定附一段指向该交接评论的回链（`<!-- iar:failure-context-ref -->`，重复耗尽时替换而非叠加）。
+3. **回灌下一轮**：新 claim 构造 continuation prompt 时按 latest-wins 读回**最近一条**交接记录（`find_latest_failure_context_comment`），经 `truncate_failure_context_for_prompt` 限量截断后注入。
+
+必须知道的边界：
+
+- **触发条件只有 `MaxRetriesExceededError`**。`ProviderCapacityError`（限流/容量）不代表本轮工作未通过，`KeyboardInterrupt` 是用户主动中断且没有 `attempt_results`，二者保持既有行为：不写交接记录、不发布 PR。
+- **没有安全 commit 时不发布任何 PR**（干净工作树 / 分支不符 / 改动全为禁改路径 → `checkpoint_sha is None`），但交接记录仍然写出——"无 commit 也要交班"是刻意覆盖的一格。
+- **交接评论是唯一事实源**。Draft PR 正文只是"发布那一刻的快照"：`create_draft_pr` 命中已开 PR 时直接返回、不改写正文，所以正文可能落后。回灌和人的回溯都以交接评论为准。
+- **`require_prd_archived=False` 是本功能唯一放宽的安全检查**，只在耗尽路径显式传入，默认值仍是 `True`；forbidden paths、evidence 泄漏、remote 与 branch 校验全部照旧。`tests/test_agent_runner_publish.py` 用白名单钉住允许点，新增泄漏会让测试失败。
+- **不新增标签、状态枚举、失败判定器或门禁**。失败 Draft PR 拿不到 `validation/verifier-passed`，签核、合并与归档由**既有**门禁拒绝——包括有人手动把 Draft 标志取消之后仍然如此。
+- **失败性质不进机器状态**：产品失败还是审核事故，只由 Agent 在正文里陈述，机器不核对。缓解是正文回链原始诊断（证据目录、verifier response log）供人自行对照，且无论正文怎么写都改不了标签与合并态。
+- **交接记录可能把下一轮带偏**：回灌的是上一轮的结论，若它本身就错，错误会被继承。因此 prompt 明确标注这是"上一轮的陈述而非裁定"，且只取最近一条。
+- **快照是 WIP 中途进度**，可能连编译都不过，不是"实现做完了但没过验收"。交接记录与 PR 正文都显式写明这一点。
+- agent fallback 阶梯会为每个候选 agent 各耗尽一次，因此一次 claim 可能留下多条记录；每条对应一次真实快照，下一轮按 latest-wins 只读最近一条，PR 仍按分支复用同一个。
+
+人工验证方式（runner 不产出这类证据，需人实际执行）：把一个 PRD 打到 recovery 耗尽，然后在 Issue 上找 `iar:failure-context` 评论、在 PR 列表找该分支的 Draft PR，确认 `gh pr view <N> --json labels,mergeable` 里没有 `validation/verifier-passed` 且签核/合并被拒、PRD 仍在 `tasks/pending/`；再重新 claim 同一个 Issue，确认续作 prompt 里出现了上一轮的结论。
+
 ### 非 claude agent 的实时输出（PTY）
 
 `claude` 用 `--output-format stream-json` 显式吐增量事件，所以一直能实时看到进度。`kimi` / `codex` 没有这种流式协议，而且很多 CLI 在发现 stdout 是管道（非终端）时会把输出从行缓冲切成**块缓冲**——结果就是运行中只看到几个点、最后才一次性打印，期间只有 watchdog 的 `still running after Ns` 心跳。

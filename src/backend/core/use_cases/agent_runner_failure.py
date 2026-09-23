@@ -13,6 +13,7 @@ from backend.core.shared.models.agent_runner import (
     FailureType,
     PublishFailureCategory,
 )
+from backend.core.use_cases.agent_runner_events import format_failure_context_marker
 from backend.core.use_cases.agent_runner_feedback import (
     failed_verification_results,
     format_result_for_recovery,
@@ -34,6 +35,7 @@ __all__ = [
     "format_attempt_history",
     "format_blocked_failure_comment",
     "format_failure_comment",
+    "format_failure_context_comment",
     "format_minimal_failure_comment",
     "format_publish_failure_comment",
     "format_recovery_failure_summary",
@@ -599,6 +601,191 @@ def format_failure_comment(
                     "",
                 ]
             )
+    return "\n".join(lines)
+
+
+_DELIVERABLE_NAME_PATTERN = re.compile(r"rv-\d+(?:-[A-Za-z0-9_.-]+)?(?:\.[A-Za-z0-9]+)?")
+
+
+def _extract_named_deliverables(attempt_results: list[AttemptResult]) -> list[str]:
+    """从 attempt 历史里原样摘出门禁点名的 ``rv-<n>`` 呈递物名。
+
+    FR-2 要求记录含"缺失呈递物"。这里只做**文本转述**——把门禁报告自己写出来的
+    ``rv-3`` / ``rv-3-prd-render.png`` 这类名字收集起来，不判断它到底缺没缺、也不
+    为它建枚举；判断仍留在门禁原文里，由人或下一轮自己读。
+    """
+    named: list[str] = []
+    seen: set[str] = set()
+    for result in attempt_results:
+        for match in _DELIVERABLE_NAME_PATTERN.findall(result.detail):
+            if match not in seen:
+                seen.add(match)
+                named.append(match)
+    return named
+
+
+def format_failure_context_comment(
+    exc: BaseException,
+    attempt_results: list[AttemptResult],
+    *,
+    issue_number: int,
+    checkpoint_sha: str | None,
+    evidence_dir: str,
+) -> str:
+    """渲染 recovery 耗尽时写到 Issue 上的交接记录。
+
+    耗尽不是终点而是交班点：本轮"做到哪、卡在哪、缺什么、快照在哪个 SHA"必须落成
+    一份下一轮能读回、人能定位的记录。本函数只做**事实转述**——verifier 说过什么、
+    agent 试过几轮、最后一道门禁的报告原文、快照 SHA——不新增"产品失败 / 审核事故"
+    的机器判定，因此也不产出任何标签或状态。
+
+    正文刻意写清快照性质：耗尽时可发布的只是 :func:`checkpoint_uncommitted_progress`
+    建的 WIP 中途快照，它可能连编译都不过，不是"实现完成但没过验收"。
+
+    Args:
+        exc: 触发耗尽的异常（``MaxRetriesExceededError``）。
+        attempt_results: 本轮的 attempt 历史，来自异常携带的 attempt 列表。
+        issue_number: 目标 Issue 编号。
+        checkpoint_sha: WIP 快照 commit SHA；``None`` 表示本轮没有留下可安全推送的
+            快照（干净工作树、分支不符或改动全为禁改路径）。
+        evidence_dir: 该 Issue 的证据目录相对路径，供人自行核对原始诊断。
+
+    Returns:
+        以 ``iar:failure-context`` marker 开头的 Markdown 评论正文。
+    """
+    # Local import: run_verifier_agent 依赖 run_agent_once，而后者又导入本模块，
+    # 模块级导入会成环。verdict 的解析沿用既有确定性 parser，不另起一套判定。
+    from backend.core.use_cases.run_verifier_agent import parse_verifier_verdict
+
+    last_gate_report = attempt_results[-1].detail if attempt_results else str(exc)
+    # verdict 从最近一次 attempt 往前找**第一个真正形成的判定**，而不是只看最后一跳：
+    # 耗尽时最后一轮常见的是更早某道门禁（验证命令 / PRD 交付 / 证据）拦住的，它会把
+    # verifier 那句真 RED 挤出末位。只读末位会把"上一轮明确判红"误写成"没有形成结论",
+    # 误导接手方去查一个并不存在的问题。
+    verdict = parse_verifier_verdict(last_gate_report)
+    verdict_attempt_number = attempt_results[-1].attempt_number if attempt_results else None
+    if not verdict.marker_found:
+        for earlier_result in reversed(attempt_results):
+            earlier_verdict = parse_verifier_verdict(earlier_result.detail)
+            if earlier_verdict.marker_found:
+                verdict = earlier_verdict
+                verdict_attempt_number = earlier_result.attempt_number
+                break
+    marker_state = verdict.risk if verdict.marker_found else "no-verdict"
+    missing_deliverables = _extract_named_deliverables(attempt_results)
+
+    lines = [
+        format_failure_context_marker(
+            checkpoint_sha=checkpoint_sha,
+            attempt_count=len(attempt_results),
+            verifier_state=marker_state,
+            evidence_dir=evidence_dir,
+        ),
+        "",
+        "## Agent Runner Handoff — Recovery Budget Exhausted",
+        "",
+        "This Issue's runner exhausted its recovery attempts without clearing the "
+        "delivery gates. The record below is a **factual handoff** for the next "
+        "claim, not an acceptance result: it transcribes what the gates reported "
+        "and does not judge whether that is a product defect or a review incident.",
+        "",
+        "",
+    ]
+    if checkpoint_sha is None:
+        # 没有快照时不能把上一行那句"WIP checkpoint"照抄下来，否则读者会以为工作树上
+        # 有个半成品提交可以续作——恰好是"WIP 快照 ≠ 完成品"这条边界最容易被误读的方向。
+        lines.extend(
+            [
+                "- Snapshot nature: none — this round left no commit at all, so the "
+                "next claim continues from whatever the working tree holds, not from a "
+                "WIP snapshot.",
+                "- Checkpoint commit: none — this round left no safely publishable "
+                "snapshot (clean worktree, branch mismatch, or only forbidden paths).",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- Snapshot nature: `WIP checkpoint` — a mid-progress commit, "
+                "**not** a finished implementation.",
+                f"- Checkpoint commit: `{checkpoint_sha}`",
+            ]
+        )
+    lines.append(f"- Attempts this claim: {len(attempt_results)}")
+
+    if verdict.marker_found and verdict.risk == "red":
+        lines.append(
+            "- Verifier: formed an explicit **red** verdict; its findings are quoted "
+            "in the gate report below."
+        )
+    elif verdict.marker_found:
+        lines.append(
+            f"- Verifier: formed a `{verdict.risk}` verdict, but a later gate still "
+            "blocked the run; see the gate report below."
+        )
+    else:
+        lines.append(
+            "- Verifier: **no verdict was formed** this round. The run stopped before "
+            "the independent verifier produced a parseable decision, so nothing here "
+            "says the implementation is wrong — and nothing says it is right either."
+        )
+    if verdict_attempt_number is not None and attempt_results:
+        last_attempt_number = attempt_results[-1].attempt_number
+        if verdict_attempt_number != last_attempt_number:
+            lines.append(
+                f"  - That verdict was recorded on attempt {verdict_attempt_number}; "
+                f"the run then continued to attempt {last_attempt_number}, whose gate "
+                "report is the one quoted below."
+            )
+    if missing_deliverables:
+        rendered_deliverables = ", ".join(f"`{name}`" for name in missing_deliverables)
+        lines.append(
+            f"- Deliverables named by the gate reports: {rendered_deliverables} "
+            "(transcribed from the reports below — this record does not judge whether "
+            "each one is actually missing)."
+        )
+    else:
+        lines.append(
+            "- Deliverables: no `rv-<n>` artifact was named in the recorded gate "
+            "reports; read them below to see what the last round actually lacked."
+        )
+
+    lines.append(f"- Evidence directory: `{evidence_dir}`")
+    lines.extend(
+        [
+            "- Acceptance label: `validation/verifier-passed` is **absent**, so the "
+            "existing sign-off, merge and archive gates keep refusing this work. "
+            "That is the gate doing its job, not a new gate introduced here.",
+            "",
+            "### Last gate report",
+            "",
+            "```text",
+            truncate_recovery_output(last_gate_report),
+            "```",
+            "",
+        ]
+    )
+
+    if attempt_results:
+        lines.append(format_attempt_history(attempt_results))
+        lines.append("")
+
+    lines.extend(
+        [
+            "### What The Next Claim Should Do",
+            "",
+            "Continue **from the checkpoint commit** instead of restarting: inspect "
+            "`git log`, the PRD Acceptance Checklist, and the gate report above, then "
+            "implement only what remains and produce the missing deliverables.",
+            "Treat everything on this line as the previous round's *statement*, not a "
+            "ruling — re-verify against the PRD before acting on it.",
+            "",
+            "```bash",
+            f"gh issue edit {issue_number} " "--add-label agent/ready --remove-label agent/failed",
+            "```",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 

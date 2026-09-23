@@ -219,6 +219,18 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 
 人工终点审查时，按风险地图顺序查看证据包，重点抽查高风险 oracle 结果、前端截图/录屏和 verifier report。
 
+### 失败呈现与跨 claim 交接类改动的取证边界
+
+（`P1-FEAT-20260922-000431-blocked-draft-pr-validation-failure` 归纳，供同类 PRD 参考）
+
+"把失败交班给下一轮"这类改动，判别力来自**同一份 payload 穿过两个出口与一条 claim 边界**，因此取证边界与普通功能改动不同：
+
+- **记录是事实转述，不是判定**：交接内容由 verifier 判定文本、attempt 历史、缺失呈递物与快照 SHA 组装，**没有**失败分类器。因此不存在"分类矩阵"式 oracle，也不该去补一个——判据仍是既有的 `validation/verifier-passed` 标签与当前 tree 的证据。想为"失败性质"写机器断言，等于把被否决的脚手架再搬回来。
+- **正反断言成对出现**：交接挂在的 `except` 元组往往同时覆盖限流与用户中断。只断言"耗尽时写了记录"不构成判别力——必须同时断言 `ProviderCapacityError` / `KeyboardInterrupt` 走同一条分支时**零副作用**（无评论、无 PR、原异常照常上抛）。
+- **放宽的安全检查用白名单钉住**：形如 `require_prd_archived=False` 的唯一放宽项，要用一条静态审计断言列出全部允许点。默认值断言（仍为 `True`）与落点白名单是两件事，都要写。
+- **"不能通过"依赖既有门禁时不要新写 oracle**：若改动刻意不碰门禁，则签核/合并/归档被拒属既有测试的射程；另写一套门禁测试会造出第二个事实源。这类"组合行为"要显式标为人工手动验证，并说明 runner 不因缺该证据而拦下交付。
+- **回灌限量要有负断言**：跨 claim 注入的 prompt 必须断言"过期记录的关键内容不出现"和"无记录时 prompt 与基线逐字相等"，否则"只取最近一条"退化成一句注释。
+
 ### 完成度判定加固类改动的 oracle 示例
 
 （`P1-FEAT-20260705-161739-completeness-judgment-hardening` 归纳的写法，供同类 PRD 参考）
