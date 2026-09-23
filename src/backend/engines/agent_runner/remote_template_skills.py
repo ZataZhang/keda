@@ -46,6 +46,45 @@ class RemoteTemplateSkillInstallError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class PackagedSkillInstallResult:
+    """随 IAR 发行包安装的本地 Skill 计划结果。"""
+
+    target_path: Path
+    action: str
+    dry_run: bool
+
+
+def install_packaged_operator_skill(
+    *, target_skills_root: Path, dry_run: bool, force: bool
+) -> PackagedSkillInstallResult:
+    """安装随 IAR 发行的 operator Skill，并保护同名用户文件。"""
+    skill_name = "iar-operator"
+    source_path = Path(__file__).with_name("templates") / "skills" / skill_name
+    source_contract_path = source_path / _REMOTE_SKILL_PROTECTED_FILENAME
+    if not source_contract_path.is_file():
+        raise RemoteTemplateSkillInstallError(f"Packaged skill is missing {source_contract_path}")
+    target_path = target_skills_root / skill_name
+    if target_path.is_symlink():
+        raise RemoteTemplateSkillInstallError(
+            f"Refusing to write skill through symlink: {target_path}"
+        )
+    action = "install"
+    if target_path.exists():
+        local_contract = _read_remote_skill_contract(target_path)
+        if local_contract == source_contract_path.read_bytes():
+            return PackagedSkillInstallResult(target_path, "up-to-date", dry_run)
+        if not force:
+            return PackagedSkillInstallResult(target_path, "preserve-conflict", dry_run)
+        action = "overwrite"
+    if not dry_run:
+        target_skills_root.mkdir(parents=True, exist_ok=True)
+        if action == "overwrite":
+            shutil.rmtree(target_path)
+        shutil.copytree(source_path, target_path)
+    return PackagedSkillInstallResult(target_path, action, dry_run)
+
+
+@dataclass(frozen=True)
 class RemoteTemplateSkillInstallOptions:
     """控制远程模板 Skill 同步的选项。
 

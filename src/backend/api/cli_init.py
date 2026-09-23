@@ -15,6 +15,7 @@ from backend.core.use_cases.agent_runner_factory import (
 )
 from backend.core.use_cases.agent_runner_init_assets import (
     RemoteTemplateSkillInstallOptions,
+    install_packaged_operator_skill,
     install_remote_template_skills,
 )
 from backend.core.use_cases.agent_runner_repository_local import (
@@ -76,6 +77,12 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             f"{remote_skill_result.target_skills_root}",
             markup=False,
         )
+        operator_skill_result = install_packaged_operator_skill(
+            target_skills_root=remote_skill_result.target_skills_root,
+            dry_run=True,
+            force=parsed.force,
+        )
+        _print_operator_skill_plan(operator_skill_result)
         return 0
     if init_result.wrote_file:
         console.print(f"[green]Wrote IAR local config:[/] {init_result.config_path}")
@@ -89,6 +96,11 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
     except Exception as exc:  # noqa: BLE001 - remote availability is required by iar init.
         error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
         return 1
+    operator_skill_result = install_packaged_operator_skill(
+        target_skills_root=remote_skill_result.target_skills_root,
+        dry_run=False,
+        force=parsed.force,
+    )
     remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
     overwritten_names = ", ".join(remote_skill_result.overwritten_skill_names)
     skipped_names = ", ".join(remote_skill_result.skipped_skill_names)
@@ -102,6 +114,7 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
         )
     if skipped_names:
         console.print(f"[dim]Remote template skills already up to date:[/] {skipped_names}")
+    _print_operator_skill_plan(operator_skill_result)
     if init_result.repo_id:
         try:
             registry_result = upsert_repository(
@@ -129,6 +142,33 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
     except Exception as exc:  # noqa: BLE001
         error_console.print(f"[yellow]Label sync failed:[/] {exc}")
     return 0
+
+
+def _print_operator_skill_plan(result) -> None:
+    """呈现内置 operator Skill 的安装、冲突保护或覆盖结果。"""
+    if result.action == "preserve-conflict":
+        prefix = (
+            "Would preserve existing user skill"
+            if result.dry_run
+            else "Preserved existing user skill"
+        )
+        print(f"{prefix} (conflict; use --force to replace): {result.target_path}")
+    elif result.action == "up-to-date":
+        print(f"IAR operator skill already up to date: {result.target_path}")
+    else:
+        if result.action == "overwrite":
+            prefix = (
+                "Would overwrite packaged IAR operator skill"
+                if result.dry_run
+                else "Overwrote packaged IAR operator skill"
+            )
+        else:
+            prefix = (
+                "Would install packaged IAR operator skill"
+                if result.dry_run
+                else "Installed IAR operator skill"
+            )
+        print(f"{prefix}: {result.target_path}")
 
 
 def _print_gitignore_plan(result: GitignoreSyncResult) -> None:

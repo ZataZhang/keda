@@ -29,6 +29,9 @@ RemoteTemplateSkillInstallOptions = (
 install_remote_template_skills = (
     _engines_remote_template_skills_module.install_remote_template_skills
 )
+install_packaged_operator_skill = (
+    _engines_remote_template_skills_module.install_packaged_operator_skill
+)
 ExistingFileRefusedError = _engines_workflow_install_module.ExistingFileRefusedError
 UnknownWorkflowError = _engines_workflow_install_module.UnknownWorkflowError
 WorkflowInstallOptions = _engines_workflow_install_module.WorkflowInstallOptions
@@ -40,5 +43,6 @@ __all__ = [
     "UnknownWorkflowError",
     "WorkflowInstallOptions",
     "install_remote_template_skills",
+    "install_packaged_operator_skill",
     "install_workflow",
 ]

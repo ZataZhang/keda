@@ -199,13 +199,13 @@ def test_run_once_dry_run_continues_after_dependency_blocked_ready_issue(
                 5,
                 "Issue #5",
                 "<!-- iar:depends-on #3 -->",
-                ("agent/ready",),
+                ("agent/ready", "priority/P0"),
             ),
             _make_ready_issue(
                 4,
                 "Issue #4",
                 "PRD path: `tasks/example.md`",
-                ("agent/ready",),
+                ("agent/ready", "priority/P1"),
             ),
         ]
 
@@ -231,6 +231,105 @@ def test_run_once_dry_run_continues_after_dependency_blocked_ready_issue(
     assert ready_query_limits == [_READY_DISCOVERY_LIMIT]
     assert "Issue #5 blocked by dependencies" in caplog.text
     assert "would process Issue #4 (ready)" in caplog.text
+
+
+def test_run_once_dry_run_orders_ready_issues_by_priority_then_number(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """CLI use case candidate path orders labels consistently and reports the default."""
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(11, "P1 later", "", ("agent/ready", "priority/P1")),
+        _make_ready_issue(10, "P1 first", "", ("agent/ready", "priority/P1")),
+        _make_ready_issue(9, "Unset", "", ("agent/ready",)),
+        _make_ready_issue(8, "P3", "", ("agent/ready", "priority/P3")),
+        _make_ready_issue(7, "P0", "", ("agent/ready", "priority/P0")),
+    ]
+    caplog.set_level(logging.INFO, logger="backend.core.use_cases.agent_runner_orchestrate")
+
+    assert (
+        run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=5,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+        )
+        == 0
+    )
+
+    selected_issue_numbers = [
+        int(line.split("Issue #", 1)[1].split(" ", 1)[0])
+        for line in caplog.text.splitlines()
+        if "would process Issue #" in line
+    ]
+    assert selected_issue_numbers == [7, 10, 11, 8, 9]
+    assert "priority=unset (after P3)" in caplog.text
+    assert f"covers the {_READY_DISCOVERY_LIMIT} candidates" in caplog.text
+
+
+def test_run_once_execution_uses_the_same_priority_order_as_dry_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real execution selection path passes sorted issues to the worker."""
+    from backend.core.use_cases import agent_runner_orchestration_runtime as runtime
+
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(11, "P1 later", "", ("agent/ready", "priority/P1")),
+        _make_ready_issue(9, "Unset", "", ("agent/ready",)),
+        _make_ready_issue(10, "P1 first", "", ("agent/ready", "priority/P1")),
+        _make_ready_issue(8, "P3", "", ("agent/ready", "priority/P3")),
+        _make_ready_issue(7, "P0", "", ("agent/ready", "priority/P0")),
+    ]
+    selected_issue_numbers: list[int] = []
+
+    def capture_selected_issue(issue: IssueSummary, _issue_kind: str, **_kwargs: object) -> int:
+        selected_issue_numbers.append(issue.number)
+        return 0
+
+    monkeypatch.setattr(runtime, "_process_single_issue", capture_selected_issue)
+
+    assert (
+        run_once(
+            repo_path=tmp_path,
+            config=AppConfig(),
+            dry_run=False,
+            agent="auto",
+            max_issues=5,
+            github_client=fake_client,
+            process_runner=_preflight_ok_runner(),
+        )
+        == 0
+    )
+
+    assert selected_issue_numbers == [7, 10, 11, 8, 9]
+
+
+def test_run_once_unknown_machine_contract_performs_no_github_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unknown Skill contract must fail before the runner mutates GitHub."""
+    skill_path = tmp_path / "SKILL.md"
+    skill_path.write_text("Machine-Contract-Version: 99\n", encoding="utf-8")
+    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(skill_path))
+    fake_client = FakeGitHubClient()
+
+    exit_code = run_once(
+        repo_path=tmp_path,
+        config=AppConfig(),
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=_preflight_ok_runner(),
+    )
+
+    assert exit_code == 1
+    assert fake_client.calls == []
 
 
 def test_run_once_dry_run_processes_unblocked_ready_issue() -> None:

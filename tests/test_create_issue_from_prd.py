@@ -19,12 +19,26 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.create_issue_from_prd import (
     IssueFromPrdRequest,
+    build_issue_labels,
     build_issue_body,
     create_issue_from_prd,
     extract_title,
 )
 from backend.infrastructure.process_runner import SubprocessRunner
 from tests.conftest import FakeContentGenerator, FakeGitHubClient, FakeProcessRunner
+
+
+def test_build_issue_labels_carries_prd_filename_priority(tmp_path: Path) -> None:
+    """PRD priority labels carry the same explicit priority used by Roadmap."""
+    request = IssueFromPrdRequest(
+        repo_path=tmp_path,
+        prd_path=Path("tasks/P0-FEAT-20260924-example.md"),
+        issue_type="feature",
+    )
+
+    labels = build_issue_labels(request, LabelConfig())
+
+    assert "priority/P0" in labels
 
 
 def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:

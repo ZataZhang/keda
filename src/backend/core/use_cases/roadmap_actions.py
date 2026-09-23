@@ -39,6 +39,7 @@ from backend.core.shared.models.roadmap import (
     RoadmapPrdState,
     RoadmapSettingsEntry,
 )
+from backend.core.shared.priority import priority_rank
 from backend.core.use_cases.agent_runner_lifecycle import (
     LifecycleEventType,
     record_lifecycle_event,
@@ -353,8 +354,7 @@ def _roadmap_sort_key(prd: RoadmapPrd) -> tuple[int, str]:
         A tuple ordered by ``P0 > P1 > P2 > P3`` and then by ``updated_at``
         ascending (oldest first, matching the historical console behaviour).
     """
-    priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
-    return (priority_order.get(prd.priority, 99), prd.updated_at)
+    return (priority_rank(prd.priority), prd.updated_at)
 
 
 def _select_eligible_prds(resolved_prds: Sequence[RoadmapPrd]) -> list[RoadmapPrd]:
