@@ -6,9 +6,15 @@
 （DEPS 列）与执行锁运行态（ACTIVITY 列），供开工前判断哪些尚未交付、哪些被上游
 依赖挡住、哪些正被其他会话执行。
 
+``tasks/pending`` 进一步拆成两段：默认的 ``PENDING``（未开工 / 进行中）与
+``AWAITING HUMAN``（验收状态横幅已翻成 ``🧍 待人工验收``，机器证据齐备、只等人工
+确认）。后者仍留在 ``tasks/pending``——规范只允许 ``✅ 可归档`` 移入 archive，分区
+只做呈现，不搬文件。
+
 进度与证据按**分支副本优先**读取：执行发生在 worktree 里，主仓库的
 ``tasks/pending`` 副本与证据目录要等合并回主线才更新；存在分支名匹配的 worktree
 时取它内部的 ``tasks/archive`` → ``tasks/pending`` 副本，无匹配时回落主仓库副本。
+横幅同源，同样读分支副本。
 
 用法::
 
@@ -69,6 +75,20 @@ STANDALONE_VERDICT_PATTERN = re.compile(
 )
 ANY_VERDICT_PATTERN = re.compile(r"\b(PASS|REJECT)\b")
 
+# 验收状态横幅（Acceptance Status Banner）：PRD 头部紧接交付前置横幅的引用块，
+# 是 §9 验收清单的投影，只有 ⬜ 未开工 / 🧍 待人工验收 / ✅ 可归档 三个状态。
+ACCEPTANCE_STATUS_BANNER_PATTERN = re.compile(
+    r"^\s*>\s*.*?(?:验收状态|Acceptance Status)", re.IGNORECASE
+)
+ACCEPTANCE_STATUS_NOT_STARTED = "not_started"
+ACCEPTANCE_STATUS_AWAITING_HUMAN = "awaiting_human"
+ACCEPTANCE_STATUS_ARCHIVE_READY = "archive_ready"
+ACCEPTANCE_STATUS_TOKENS = (
+    (ACCEPTANCE_STATUS_NOT_STARTED, "未开工"),
+    (ACCEPTANCE_STATUS_AWAITING_HUMAN, "待人工验收"),
+    (ACCEPTANCE_STATUS_ARCHIVE_READY, "可归档"),
+)
+
 
 @dataclass
 class PrdRecord:
@@ -93,6 +113,9 @@ class PrdRecord:
             原始引用 token（``none`` 会被解析阶段剔除）。
         impact_progress (prd_impact_tree.ImpactProgress | None): Change Impact Tree
             的分支触达进度；无分支 worktree 可比对或 PRD 没写影响树时为 ``None``。
+        acceptance_status (str): 验收状态横幅的投影值，``"not_started"`` /
+            ``"awaiting_human"`` / ``"archive_ready"``；无横幅或状态词无法识别时
+            为空串。
         title (str): PRD 一级标题（首个 ``# `` 行），无标题时为空串。
         summary_lines (tuple[str, ...]): ``--detail`` 摘要行（已截断）；与清单进度
             同源的分支副本正文，无可用正文时为空元组。
@@ -113,6 +136,7 @@ class PrdRecord:
     dependency_gate: str
     dependency_refs: tuple[str, ...]
     impact_progress: prd_impact_tree.ImpactProgress | None
+    acceptance_status: str
     title: str
     summary_lines: tuple[str, ...]
 
@@ -120,6 +144,11 @@ class PrdRecord:
     def checklist_complete(self) -> bool:
         """验收清单是否已全部勾选；无清单时视为不完整。"""
         return self.checklist_total > 0 and self.checklist_checked == self.checklist_total
+
+    @property
+    def awaits_human_review(self) -> bool:
+        """验收状态横幅是否为 ``🧍 待人工验收``。"""
+        return self.acceptance_status == ACCEPTANCE_STATUS_AWAITING_HUMAN
 
 
 def parse_prd_filename(prd_path: Path) -> tuple[str, str, str, str]:
@@ -182,6 +211,42 @@ def count_checklist_items(prd_text: str) -> tuple[int, int]:
             unchecked_item_count += 1
 
     return checked_item_count, checked_item_count + unchecked_item_count
+
+
+def parse_acceptance_status(prd_text: str) -> str:
+    """解析 PRD 头部验收状态横幅的三态。
+
+    横幅是 §9 验收清单的投影，只有 ``⬜ 未开工`` / ``🧍 待人工验收`` /
+    ``✅ 可归档`` 三个状态，且带可 grep 的字面量 ``验收状态``（或
+    ``Acceptance Status``）。只在引用块行（``>`` 开头）里查找，避免把正文或
+    决策日志里对该横幅的讨论误当成状态声明；命中首行横幅后取标记之后**最先
+    出现**的状态词，模板自带的括号说明（``未开工（…改为 🧍 待人工验收…）``）
+    因此不会把默认态误判成待人工。看板只认这一处显式声明：PRD 没写横幅或
+    状态词无法识别时返回空串，不按 §9 未勾项的结构反推——真实的待人工项常挂在
+    ``Human-Confirmed`` 之外的小节下（手动执行的 probe、交付回复要求），
+    结构推断会漏判，也会把尚未完工的 PRD 误报成"等你验收"。
+
+    Args:
+        prd_text (str): PRD 文件全文。
+
+    Returns:
+        str: ``"not_started"`` / ``"awaiting_human"`` / ``"archive_ready"``；
+        无横幅或状态词无法识别时返回空串。
+    """
+    for raw_line_text in prd_text.splitlines():
+        banner_match = ACCEPTANCE_STATUS_BANNER_PATTERN.match(raw_line_text)
+        if banner_match is None:
+            continue
+        raw_remainder_text = raw_line_text[banner_match.end() :]
+        matched_state_offsets_list = [
+            (raw_remainder_text.find(raw_token_text), raw_state_text)
+            for raw_state_text, raw_token_text in ACCEPTANCE_STATUS_TOKENS
+            if raw_token_text in raw_remainder_text
+        ]
+        if not matched_state_offsets_list:
+            return ""
+        return min(matched_state_offsets_list)[1]
+    return ""
 
 
 def parse_delivery_dependencies(prd_text: str) -> tuple[str, tuple[str, ...]]:
@@ -476,6 +541,7 @@ def collect_prd_record(
     source_prd_path = resolve_branch_prd_path(worktree_path, prd_path.name) or prd_path
     raw_prd_text = source_prd_path.read_text(encoding="utf-8")
     checked_item_count, checklist_item_count = count_checklist_items(raw_prd_text)
+    acceptance_status_text = parse_acceptance_status(raw_prd_text)
     raw_gate_text, raw_dependency_refs_tuple = parse_delivery_dependencies(raw_prd_text)
     parsed_title_text, parsed_summary_lines = prd_detail.extract_prd_title_and_summary(raw_prd_text)
 
@@ -515,6 +581,7 @@ def collect_prd_record(
         dependency_gate=raw_gate_text,
         dependency_refs=raw_dependency_refs_tuple,
         impact_progress=impact_progress,
+        acceptance_status=acceptance_status_text,
         title=parsed_title_text,
         summary_lines=parsed_summary_lines,
     )
@@ -1152,6 +1219,12 @@ def main() -> int:
         collect_prd_record(prd_path, evidence_root_path, worktree_branches_list)
         for prd_path in sorted(pending_dir_path.glob("*.md"))
     ]
+    awaiting_review_records_list = [
+        prd_record for prd_record in pending_records_list if prd_record.awaits_human_review
+    ]
+    actionable_pending_records_list = [
+        prd_record for prd_record in pending_records_list if not prd_record.awaits_human_review
+    ]
     archive_records_list = [
         collect_prd_record(prd_path, evidence_root_path, worktree_branches_list)
         for prd_path in sorted(archive_dir_path.glob("*.md"), reverse=True)
@@ -1160,18 +1233,32 @@ def main() -> int:
     raw_scope_text = raw_parsed_arguments.scope
     print()
     if raw_scope_text in ("status", "pending"):
-        print_bucket_section(
-            "PENDING",
-            pending_records_list,
-            "tasks/pending",
-            palette,
-            collapsed_months=False,
-            main_repo_root=main_repo_root_path,
-            evidence_root=evidence_root_path,
-            pending_dir=pending_dir_path,
-            archive_dir=archive_dir_path,
-            show_detail=raw_parsed_arguments.detail,
-        )
+        # tasks/pending 下按验收状态横幅分两段：待人工验收的记录仍留在 pending
+        # （规范只允许 ✅ 可归档 移入 archive），分区只做呈现——把「等你看」从
+        # 「等你做」里摘出来，完成态不再淹没可开工项。空分区不打印，免得每次
+        # 多出一段没有信息量的 (无)。
+        pending_sections_list = [("PENDING", actionable_pending_records_list, "tasks/pending")]
+        if awaiting_review_records_list:
+            pending_sections_list.append(
+                (
+                    "AWAITING HUMAN",
+                    awaiting_review_records_list,
+                    "tasks/pending · 🧍 待人工验收（确认后归档）",
+                )
+            )
+        for raw_title_text, bucket_records_list, raw_relative_dir_text in pending_sections_list:
+            print_bucket_section(
+                raw_title_text,
+                bucket_records_list,
+                raw_relative_dir_text,
+                palette,
+                collapsed_months=False,
+                main_repo_root=main_repo_root_path,
+                evidence_root=evidence_root_path,
+                pending_dir=pending_dir_path,
+                archive_dir=archive_dir_path,
+                show_detail=raw_parsed_arguments.detail,
+            )
     if raw_scope_text in ("status", "archive", "all"):
         print_bucket_section(
             "ARCHIVE",

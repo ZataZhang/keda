@@ -41,6 +41,14 @@ DEPS 列。核心不变量：
 7. **``--detail`` 摘要与清单进度同源。** 摘要解析必须吃与 CHECKLIST 相同的
    分支副本正文，且只做有界截断——看板定位是"快速定位，最终判断以 PRD 原文
    为准"，摘要是行下定位辅助而非正文替代。
+8. **AWAITING HUMAN 分区只认 PRD 头部的验收状态横幅。** 横幅是 §9 验收清单的
+   唯一投影，看板读它同样走分支副本（执行方在 worktree 里翻的状态才算数）。
+   只接受引用块行（``>`` 开头）里带 ``验收状态`` / ``Acceptance Status`` 的声明，
+   并取标记之后**最先出现**的状态词——模板括号里的"完成时改为 🧍 待人工验收"
+   不得抢占行首的 ``⬜ 未开工``。没有横幅或认不出状态词时按未开工处理、留在
+   PENDING：按 §9 未勾项结构反推会漏判真实的人工项（常挂在 ``Human-Confirmed``
+   之外的小节下），也会把尚未完工的 PRD 误报成"等你验收"。待人工记录仍留在
+   ``tasks/pending``（规范只允许 ``✅ 可归档`` 移入 archive），分区只做呈现。
 """
 
 from __future__ import annotations
@@ -728,3 +736,140 @@ def test_render_prd_table_with_detail_prints_summary_under_row(tmp_path: Path, c
     plain_output_text = capsys.readouterr().out
 
     assert "为头像上传引入分片上传。" not in plain_output_text
+
+
+_AWAITING_PRD_NAME = "P2-FEAT-20260101-000002-awaiting-review"
+_AWAITING_PRD_SLUG = "awaiting-review"
+
+
+def _prd_text_with_acceptance_banner(banner_line: str) -> str:
+    """生成带指定验收状态横幅行的 fixture PRD 正文。
+
+    横幅行只给状态本身，第二行沿用规范要求的"§9 投影"说明；清单里机器项已勾、
+    Human-Confirmed 项未勾，即 ``🧍 待人工验收`` 的真实形态。
+    """
+    return (
+        "# fixture PRD\n"
+        "\n"
+        f"> {banner_line}\n"
+        "> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。\n"
+        "\n"
+        "## 9. Acceptance Checklist\n"
+        "\n"
+        "#### Human-Confirmed\n"
+        "\n"
+        "- [x] machine item\n"
+        "- [ ] human item\n"
+    )
+
+
+def test_acceptance_status_banner_reads_first_state_after_marker() -> None:
+    """三态各取标记之后最先出现的状态词；模板括号里的备注不得抢占行首状态。"""
+    assert (
+        prd_status.parse_acceptance_status(
+            _prd_text_with_acceptance_banner(
+                "🧍 **验收状态**：待人工验收 — 仅剩 4 项 Human-Confirmed 未确认。"
+            )
+        )
+        == prd_status.ACCEPTANCE_STATUS_AWAITING_HUMAN
+    )
+    assert (
+        prd_status.parse_acceptance_status(
+            _prd_text_with_acceptance_banner(
+                "⬜ **验收状态**：未开工。（实现与自动验证完成、仅剩 Human-Confirmed 项时"
+                "改为 🧍 待人工验收；§9 全部勾选后改为 ✅ 可归档）"
+            )
+        )
+        == prd_status.ACCEPTANCE_STATUS_NOT_STARTED
+    )
+    assert (
+        prd_status.parse_acceptance_status(
+            _prd_text_with_acceptance_banner(
+                "✅ **Acceptance Status**：可归档 — 验收清单已全部完成。"
+            )
+        )
+        == prd_status.ACCEPTANCE_STATUS_ARCHIVE_READY
+    )
+
+
+def test_acceptance_status_ignores_mentions_outside_banner_line() -> None:
+    """正文与决策日志里对该横幅的讨论不是状态声明：非引用块行一律不认。"""
+    raw_decision_log_text = (
+        "# fixture PRD\n"
+        "\n"
+        "## 13. Decision Log\n"
+        "\n"
+        "- 收尾时把验收状态横幅翻成 🧍 待人工验收。\n"
+    )
+
+    assert prd_status.parse_acceptance_status(raw_decision_log_text) == ""
+    assert prd_status.parse_acceptance_status(_DEFAULT_FIXTURE_PRD_TEXT) == ""
+
+
+def test_awaiting_human_banner_moves_prd_into_own_section(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """横幅 🧍 的 pending PRD 移出 PENDING：单独成段，未开工的那条仍留在 PENDING。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    (main_repo_path / "tasks" / "pending" / f"{_AWAITING_PRD_NAME}.md").write_text(
+        _prd_text_with_acceptance_banner("🧍 **验收状态**：待人工验收 — 仅剩 1 项未确认。"),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(main_repo_path)
+    monkeypatch.setattr(sys, "argv", ["prd_status.py", "status"])
+
+    prd_status.main()
+    raw_output_text = capsys.readouterr().out
+
+    pending_section_index = raw_output_text.index("PENDING (1)")
+    awaiting_section_index = raw_output_text.index("AWAITING HUMAN (1)")
+    assert raw_output_text.index("avatar-upload") < awaiting_section_index
+    assert (
+        pending_section_index < awaiting_section_index < raw_output_text.index(_AWAITING_PRD_SLUG)
+    )
+
+
+def test_pending_prd_without_banner_is_not_inferred_as_awaiting(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """没有横幅时不按 §9 结构反推：只剩 Human-Confirmed 未勾也留在 PENDING。"""
+    main_repo_path = _init_main_repo(
+        tmp_path / "repo",
+        prd_text=(
+            "# fixture PRD\n"
+            "\n"
+            "## Acceptance Checklist\n"
+            "\n"
+            "#### Human-Confirmed\n"
+            "\n"
+            "- [x] machine item\n"
+            "- [ ] human item\n"
+        ),
+    )
+    monkeypatch.chdir(main_repo_path)
+    monkeypatch.setattr(sys, "argv", ["prd_status.py", "status"])
+
+    prd_status.main()
+    raw_output_text = capsys.readouterr().out
+
+    assert "PENDING (1)" in raw_output_text
+    assert "AWAITING HUMAN" not in raw_output_text
+
+
+def test_acceptance_status_banner_prefers_branch_copy(tmp_path: Path) -> None:
+    """横幅同样取分支副本：主仓库副本还是 ⬜，分支上已翻 🧍 的记录按待人工判定。"""
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-review")
+    (linked_worktree_path / _FIXTURE_PRD_RELATIVE_PATH).write_text(
+        _prd_text_with_acceptance_banner("🧍 **验收状态**：待人工验收 — 仅剩 1 项未确认。"),
+        encoding="utf-8",
+    )
+
+    assert _collect_fixture_record(main_repo_path).awaits_human_review
+    # 主仓库副本（未开工）不该被分支副本污染判断之外的东西：同一条记录只认一个来源。
+    assert (
+        prd_status.parse_acceptance_status(
+            (main_repo_path / _FIXTURE_PRD_RELATIVE_PATH).read_text(encoding="utf-8")
+        )
+        == ""
+    )

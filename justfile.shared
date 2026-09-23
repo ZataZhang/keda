@@ -239,7 +239,7 @@ lint mode="": _check-completion
 docs-serve port="8000": _check-completion
     WATCHDOG_USE_POLLING=1 uv run mkdocs serve -a 127.0.0.1:{{port}}
 
-# Open the local read-only file & diff viewer (see docs/guides/file-viewer.md).
+# Open the local read-only file & diff viewer.
 # The service binds the loopback address only, serves read requests only, and
 # never writes to the repository being viewed. It stays resident for a fast
 # second launch and recycles itself after an idle timeout.
@@ -256,7 +256,7 @@ docs-serve port="8000": _check-completion
 #
 # 这两条 recipe 刻意写成普通单行而不是 `#!/usr/bin/env bash` shebang：`just` 执行
 # shebang recipe 每次要多花约 200ms 起一个临时脚本，而 `just view` 的复用命中路径
-# 有 150ms 的耗时预算（见 docs/guides/file-viewer.md 的性能承诺）。
+# 有 150ms 的进程侧耗时预算。
 #
 # 同理，解释器优先直连项目 venv 而不是走 `uv run`：`uv run --no-sync` 每次仍要做一遍
 # 项目解析，本机实测多花 20–37ms。解释器还没建出来（尚未 `just sync`）时退回 `uv run`，
@@ -1542,8 +1542,11 @@ test type="local": _check-completion
 
 
 # Install E2E dependencies and Playwright browsers (first time only).
+# tests/playwright-e2e 位于仓库根 pnpm workspace 之内但不是其成员，必须用
+# --ignore-workspace 让 pnpm 把该目录当作项目根；否则 pnpm 去装 workspace 成员包，
+# 这里一个依赖都不会落地，且退出码仍为 0。
 e2e-install:
-    cd "{{justfile_directory()}}/tests/playwright-e2e" && pnpm install
+    cd "{{justfile_directory()}}/tests/playwright-e2e" && pnpm install --ignore-workspace
     cd "{{justfile_directory()}}/tests/playwright-e2e" && pnpm exec playwright install chromium
 
 # Run E2E tests locally, starting services with `just run` if not already running.

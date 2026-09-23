@@ -24,7 +24,11 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace    # 自动删除行尾多余的空格
+        # 第三方压缩产物保持与上游逐字节一致（校验和写在 assets/viewer.js 顶部），
+        # 不让文件卫生钩子改写它——改写之后那份校验和就只是一句无人能复核的话了。
+        exclude: ^scripts/shared/view/assets/mermaid\.min\.js$
       - id: end-of-file-fixer      # 确保文件以一个空行结尾 (POSIX标准)
+        exclude: ^scripts/shared/view/assets/mermaid\.min\.js$
       - id: check-yaml             # 检查 .yaml/.yml 文件的语法合法性
         args: ['--unsafe']         # 允许 PyYAML 特殊标签（如 !!python/name:）
       - id: check-toml             # 检查 .toml 文件的语法合法性

@@ -540,12 +540,16 @@ _ensure_fzf() {
     esac
 }
 
-CC_SWITCH_SKILLS_DIR="${CC_SWITCH_SKILLS_DIR:-}"
 AI_SKILLS_DIRS="${AI_SKILLS_DIRS:-}"
 SKILL_INSTALL_TARGET_DIRS=()
 
 # 工具适配器是可变清单，不是同步契约。交互安装与非交互更新共用这份注册表，
 # 避免新增或删除工具时在两条路径里分别维护目录。
+#
+# AUTO_DETECT 列填「工具配置目录」，留空表示该适配器不参与默认探测（首次安装仍
+# 可在交互菜单里显式选中）。默认探测只认工具自己读取的技能目录：把 Skill 装进
+# 某个中间层目录（如 ~/.cc-switch/skills）看似能覆盖多个工具，实际依赖其转发，
+# 转发一停就变成「中间层更新了、工具看不见」——Codex / Claude 因此改为直连。
 SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy")
 SKILL_ADAPTER_DIRS=(
     "$HOME/.codex/skills"
@@ -555,7 +559,14 @@ SKILL_ADAPTER_DIRS=(
     "$HOME/.kimi-code/skills"
     "$HOME/.codebuddy/skills"
 )
-SKILL_ADAPTER_AUTO_DETECT_DIRS=("" "" "$HOME/.pi" "$HOME/.qoder-cn" "" "$HOME/.codebuddy")
+SKILL_ADAPTER_AUTO_DETECT_DIRS=(
+    "$HOME/.codex"
+    "$HOME/.claude"
+    "$HOME/.pi"
+    "$HOME/.qoder-cn"
+    ""
+    "$HOME/.codebuddy"
+)
 
 _append_unique_skill_target() {
     local candidate_dir="$1"
@@ -568,8 +579,6 @@ _append_unique_skill_target() {
 }
 
 _collect_configured_skill_targets() {
-    [ -n "$CC_SWITCH_SKILLS_DIR" ] && _append_unique_skill_target "$CC_SWITCH_SKILLS_DIR"
-
     if [ -n "$AI_SKILLS_DIRS" ]; then
         local configured_dir
         local -a configured_dirs=()
@@ -586,10 +595,6 @@ _resolve_skill_install_target_dirs() {
     fi
 
     _collect_configured_skill_targets
-
-    if [ -z "$CC_SWITCH_SKILLS_DIR" ] && [ -d "$HOME/.cc-switch" ]; then
-        _append_unique_skill_target "$HOME/.cc-switch/skills"
-    fi
 
     local adapter_index
     for adapter_index in "${!SKILL_ADAPTER_NAMES[@]}"; do
@@ -649,7 +654,6 @@ _install_one_skill_noninteractive() {
 
     SKILL_INSTALL_TARGET_DIRS=()
     _collect_configured_skill_targets
-    [ -d "$HOME/.cc-switch/skills" ] && _append_unique_skill_target "$HOME/.cc-switch/skills"
 
     local adapter_dir
     for adapter_dir in "${SKILL_ADAPTER_DIRS[@]}"; do

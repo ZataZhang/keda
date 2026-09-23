@@ -181,8 +181,13 @@ install_frontend_dependencies_in_current_directory() {
             echo "⚠️ 检测到 pnpm-lock.yaml，但未找到 pnpm，跳过前端依赖安装。"
             return 0
         fi
-        echo "📦 检测到 pnpm-lock.yaml，正在执行 pnpm install --ignore-scripts ..."
-        if ! pnpm install --ignore-scripts; then
+        # --ignore-workspace：当前目录可能落在某个 pnpm workspace 里但不是它的成员
+        # （典型：tests/playwright-e2e 位于仓库根 pnpm-workspace.yaml 之下，却只声明了
+        # frontend-admin / frontend-public）。不加该 flag 时 pnpm 会把 workspace 根
+        # 当作项目来装：它会去装 workspace 的成员包，当前目录的 node_modules 一个都不建，
+        # 而退出码仍为 0——表现为“安装成功但依赖缺失”。
+        echo "📦 检测到 pnpm-lock.yaml，正在执行 pnpm install --ignore-scripts --ignore-workspace ..."
+        if ! pnpm install --ignore-scripts --ignore-workspace; then
             echo "❌ pnpm install 失败。"
             return 1
         fi
