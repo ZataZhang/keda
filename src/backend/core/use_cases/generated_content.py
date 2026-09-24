@@ -777,9 +777,10 @@ def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> 
         )
         raise PrdSkillPreflightError(
             f"prd skill at {skill_path} declares {declared_version_text}, but this "
-            f"runner supports Machine Contract v{SUPPORTED_MACHINE_CONTRACT_VERSION}. "
-            "Run `iar init --force` to update the installed prd skill, or point "
-            "IAR_PRD_SKILL_PATH at a compatible SKILL.md."
+            f"runner supports only the current Machine Contract v{SUPPORTED_MACHINE_CONTRACT_VERSION}; "
+            "older and unknown versions are unsupported. Use `iar init` only after its dry-run "
+            "shows the intended Skill plan, or select a current prd skill "
+            "without overwriting user-owned files, or point IAR_PRD_SKILL_PATH at its SKILL.md."
         )
     return skill_path
 

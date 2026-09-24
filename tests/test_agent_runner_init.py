@@ -11,8 +11,10 @@ from pydantic import BaseModel
 
 from backend.api.cli import main
 from backend.engines.agent_runner.remote_template_skills import (
+    PackagedSkillInstallResult,
     RemoteTemplateSkillInstallOptions,
     RemoteTemplateSkillInstallResult,
+    install_packaged_operator_skill,
 )
 from backend.engines.agent_runner.repository_local import (
     GITIGNORE_BLOCK_FOOTER,
@@ -39,6 +41,14 @@ def _stub_remote_template_skill_install(monkeypatch: pytest.MonkeyPatch) -> None
             target_skills_root=Path("/test/user-skills"),
             installed_skill_names=("prd", "code-reviewer"),
             dry_run=options.dry_run,
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_init.install_packaged_operator_skill",
+        lambda **options: PackagedSkillInstallResult(
+            target_path=options["target_skills_root"] / "iar-operator",
+            action="install",
+            dry_run=options["dry_run"],
         ),
     )
 
@@ -1043,10 +1053,48 @@ def test_iar_init_dry_run_emits_gitignore_block_lines(
 
     out = capsys.readouterr().out
     assert GITIGNORE_BLOCK_HEADER in out
+    assert "Would install packaged IAR operator skill:" in out
+    assert "Would overwrite packaged IAR operator skill:" not in out
+    assert "Would install packaged IAR operator skill:" in out
+    assert "Would overwrite packaged IAR operator skill:" not in out
     assert ".iar/" in out
     assert ".agent-runner/" in out
     assert ".iar-worktrees/" in out
     assert GITIGNORE_BLOCK_FOOTER in out
+
+
+def test_iar_init_dry_run_reports_packaged_operator_skill_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The real init handler reports a user-owned packaged Skill conflict."""
+    repo_path = _init_git_repository(tmp_path, "target")
+    skills_root = tmp_path / "isolated-home" / ".codex" / "skills"
+    user_skill = skills_root / "iar-operator" / "SKILL.md"
+    user_skill.parent.mkdir(parents=True)
+    user_skill.write_text("user version\n", encoding="utf-8")
+    monkeypatch.chdir(repo_path)
+    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setattr(
+        "backend.api.cli_init.install_remote_template_skills",
+        lambda options: RemoteTemplateSkillInstallResult(
+            target_skills_root=skills_root,
+            installed_skill_names=("prd", "code-reviewer"),
+            dry_run=options.dry_run,
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_init.install_packaged_operator_skill",
+        install_packaged_operator_skill,
+    )
+
+    assert main(["init", "--dry-run"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Would preserve existing user skill (conflict" in output
+    assert str(user_skill.parent) in " ".join(output.split())
+    assert user_skill.read_text(encoding="utf-8") == "user version\n"
 
 
 def test_iar_init_idempotent_does_not_rewrite_gitignore(

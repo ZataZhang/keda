@@ -46,6 +46,7 @@ from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_GENERATE,
     BUILTIN_AGENT_SPECS,
 )
+from backend.core.shared.priority import priority_from_prd_filename
 from backend.core.use_cases.agent_runner_dependencies import (
     format_dependency_marker,
     parse_dependency_marker,
@@ -344,6 +345,9 @@ def build_issue_labels(
     """
 
     labels = [f"type/{request.issue_type}", "status/backlog", "source/prd"]
+    prd_priority = priority_from_prd_filename(request.prd_path.name)
+    if prd_priority is not None:
+        labels.append(f"priority/{prd_priority}")
     # 仅在用户显式要求且本次命令不发布 PRD 时才添加 "ready"。
     # 当 publish_prd=True 时，ready 在 push 成功*之后*再添加，
     # 避免在未发布的 PRD 上就开始工作。

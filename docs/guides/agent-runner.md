@@ -300,7 +300,11 @@ tasks/evidence/**
 
 这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），`git add -A` 天然只把 `.md` 文本报告（verification-plan / evidence-report / verifier-report）带进 commit，截图、录屏、oracle 脚本等原始产物不进 git 历史；发布前拦截（`ensure_no_evidence_paths_in_changes`）再兜底拒绝被 `git add -f` 强制加入的非 `.md` 证据产物。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
 
-同时 `iar init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (v1)` 章节；iar 各 prompt 只注入一行指向该契约的指针，不复述教学。**daemon 在每轮执行循环前预检** prd skill 可解析且其 `Machine-Contract-Version` 主版本与 runner 支持的版本一致，缺失或不匹配即 fail fast，报错含 `iar init` / `iar init --force` 修复指引（可用 `IAR_PRD_SKILL_PATH` 显式指定 skill 路径）。
+同时 `iar init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (v3)` 章节；iar 各 prompt 只注入一行指向该契约的指针，不复述教学。**daemon 在每轮执行循环前预检** prd skill 可解析且只接受当前 v3，缺失、v1 或未知版本均 fail fast。错误指出只支持 v3，并建议安全更新或设置 `IAR_PRD_SKILL_PATH` 指向符合契约的 `SKILL.md`，不建议盲目运行可能覆盖用户级 Skill 的 `iar init --force`。
+
+IAR 自带的 `iar-operator` Skill 随 Python 发行包安装，无需联网下载。`iar init --dry-run` 会显示目标路径；目标下已有不同内容的同名 Skill 时默认保留并报告冲突，只有显式 `--force` 才覆盖。
+
+ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`priority/P3` 识别优先级，按 P0→P3 排序，同级按 Issue number 升序；缺少这些标签的 Issue 排在显式 P3 之后。`iar run --dry-run` 与实际执行共用排序，并在预览中显示 priority；每轮排序范围是 GitHub 返回的最多 100 条 ready Issue 候选，不能据此承诺候选窗口以外的全局排序。`iar issue list --state`、`--label` 与 PR 筛选分别由公开参数应用。
 
 ### 提交前验证命令自动探测
 
@@ -1482,6 +1486,9 @@ iar labels sync
 # 同步单个配置仓库
 iar labels sync --repo-id keda
 
+# 按 priority/P0 → P3、同级 Issue 编号升序预览 ready 队列；不运行 Agent
+iar run --dry-run --max-issues 3
+
 # 从 PRD 创建 ready Issue（默认发布 PRD）
 iar issue create tasks/pending/example.md --repo-id keda --type feature --agent codex --ready
 
@@ -2611,10 +2618,10 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
                         git 历史之外；发布前拦截仍是双保险。
                         PRD 格式约定（Change Log 条目结构、验收复选框语法、
                         rv-id 证据命名、证据目录布局）不在 prompt 里复述，
-                        唯一出处是 prd skill 的 Machine Contract v1 章节；
+                        唯一出处是 prd skill 的 Machine Contract v3 章节；
                         prompt 只注入一行契约指针。daemon 起执行循环前会
-                        预检 prd skill 可解析且契约主版本匹配，缺失或
-                        版本不符即 fail fast 并提示 iar init 修复。
+                        预检 prd skill 可解析且契约主版本为当前 v3；缺失、
+                        旧版或未知版本均 fail fast 并提示安全修复方式。
                         所有 RV 脚本——截图采集、临时 server、探针，以及被
                         evidence.json command 引用的可复跑 oracle——一律留在
                         <证据目录>/scripts/，没有例外，任何 RV 脚本都不得

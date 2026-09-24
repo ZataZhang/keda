@@ -4,7 +4,7 @@
 四类 prompt + validation 行 + Issue body 区块），断言：
 
 1. 格式教学片段（Change Log 六字段示例、rv-id 命名/截图分工教学）**零命中**——
-   它们已并入 prd skill 的 Machine Contract v1；
+   它们已并入 prd skill 的 Machine Contract v3；
 2. 契约指针 :data:`PRD_MACHINE_CONTRACT_POINTER` 恰好出现一次；
 3. runner 私有语义（归档归属、``[~]`` 出口规则、manifest 规范）仍在且单源。
 """
@@ -321,5 +321,5 @@ def test_prompt_contract_issue_body_section() -> None:
 
 def test_prompt_contract_pointer_single_source() -> None:
     """指针文本只在一处定义，各构建函数引用同一常量（不可复述变体）。"""
-    assert "Machine Contract v1" in PRD_MACHINE_CONTRACT_POINTER
+    assert "Machine Contract v3" in PRD_MACHINE_CONTRACT_POINTER
     assert "prd skill" in PRD_MACHINE_CONTRACT_POINTER

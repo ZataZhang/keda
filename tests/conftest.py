@@ -40,7 +40,7 @@ def _ensure_project_root_on_path() -> None:
 
 _ensure_project_root_on_path()
 
-_PRD_SKILL_FIXTURE_PATH = Path(__file__).parent / "support" / "prd_skill_fixtures" / "SKILL_v1.md"
+_PRD_SKILL_FIXTURE_PATH = Path(__file__).parent / "support" / "prd_skill_fixtures" / "SKILL_v3.md"
 
 
 @pytest.fixture(autouse=True, scope="session")

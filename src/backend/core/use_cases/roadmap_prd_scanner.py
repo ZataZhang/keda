@@ -23,6 +23,7 @@ from backend.core.shared.models.roadmap import (
     RoadmapPrdState,
 )
 from backend.core.shared.prd_checklist import parse_prd_checklist
+from backend.core.shared.priority import priority_from_prd_filename
 from backend.core.use_cases.agent_runner_dependencies import (
     parse_delivery_dependencies,
 )
@@ -33,9 +34,6 @@ from backend.core.use_cases.create_issue_from_prd import (
 )
 
 _logger = logging.getLogger(__name__)
-
-#: PRD filenames usually start with a priority token such as ``P1-FEAT-...``.
-_PRIORITY_RE = re.compile(r"^(P\d+)-")
 
 #: Default directories to scan, relative to the repository root.
 _DEFAULT_PRD_DIRS = ("tasks/pending", "tasks/archive")
@@ -90,8 +88,7 @@ def _resolve_prd_directories(repo_path: Path, dirs: Sequence[str] | None) -> lis
 
 def _extract_priority(filename: str) -> str:
     """Return the P0/P1/P2/P3 token from a PRD filename, or empty string."""
-    match = _PRIORITY_RE.match(filename)
-    return match.group(1) if match else ""
+    return priority_from_prd_filename(filename) or ""
 
 
 def _extract_issue_url(prd_text: str) -> str | None:

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
 from backend.api.cli_parser import build_parser
+from backend.api.cli import main
 from backend.api.cli_typer import app
 from backend.core.shared.models.agent_runner import (
     AppConfig,
@@ -23,6 +25,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.issue_pr_status import (
     IssueListRequest,
+    IssueListResult,
     list_issues_with_prs,
     render_pr_column,
 )
@@ -458,3 +461,98 @@ def test_typer_issue_list_help_renders() -> None:
     result = runner.invoke(app, ["issue", "list", "--help"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "List Issues" in result.stdout
+
+
+def test_issue_list_real_cli_maps_state_and_label_into_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Typer CLI arguments reach the existing IssueListRequest fields."""
+    captured_requests: list[IssueListRequest] = []
+
+    def capture_request(request: IssueListRequest, **_dependencies: object) -> IssueListResult:
+        captured_requests.append(request)
+        return IssueListResult()
+
+    monkeypatch.setattr("backend.api.cli.get_agent_runner_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr("backend.api.cli.create_process_runner", lambda: object())
+    monkeypatch.setattr(
+        "backend.core.use_cases.issue_pr_status.list_issues_with_prs", capture_request
+    )
+
+    assert (
+        main(
+            [
+                "issue",
+                "list",
+                "--state",
+                "open",
+                "--label",
+                "agent/ready",
+                "--with-pr",
+                "--output",
+                "json",
+            ]
+        )
+        == 0
+    )
+
+    assert len(captured_requests) == 1
+    assert captured_requests[0].state_filter == "open"
+    assert captured_requests[0].label_filter == "agent/ready"
+    assert captured_requests[0].with_pr is True
+
+
+def test_issue_list_real_cli_filters_fixture_results_by_state_and_label(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Typer entry point + real use case return only matching fixture Issues."""
+
+    class FilteringGitHubClient(FakeGitHubClient):
+        def list_issues_by_label(self, label: str, limit: int, state: str = "all"):
+            self.calls.append(
+                {"method": "list_issues_by_label", "label": label, "limit": limit, "state": state}
+            )
+            candidates = [
+                _make_issue(41, "Open ready", labels=("agent/ready",)),
+                _make_issue(42, "Open unrelated", labels=("triage",)),
+                _make_issue(43, "Closed ready", state="CLOSED", labels=("agent/ready",)),
+            ]
+            return [
+                issue
+                for issue in candidates
+                if (state == "all" or issue.state.lower() == state) and label in issue.labels
+            ][:limit]
+
+    client = FilteringGitHubClient()
+    context = _make_context("fixture-repo", tmp_path, github_repo="example/repo")
+    monkeypatch.setattr("backend.api.cli.get_agent_runner_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr("backend.api.cli.create_process_runner", lambda: object())
+    monkeypatch.setattr(
+        "backend.api.cli.create_github_client", lambda _repo_path, _process_runner: client
+    )
+    monkeypatch.setattr(
+        "backend.api.cli.resolve_repository_targets", lambda *_args, **_kwargs: [context]
+    )
+
+    exit_code = main(
+        [
+            "issue",
+            "list",
+            "--repo",
+            str(tmp_path),
+            "--state",
+            "open",
+            "--label",
+            "agent/ready",
+            "--output",
+            "json",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert '"number": 41' in output
+    assert '"number": 42' not in output
+    assert '"number": 43' not in output
+    assert client.calls[0]["label"] == "agent/ready"
+    assert client.calls[0]["state"] == "open"

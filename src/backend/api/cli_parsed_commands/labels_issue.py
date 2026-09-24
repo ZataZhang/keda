@@ -185,25 +185,28 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
         repo_id=ctx.repo_id,
         repo_path_override=ctx.repo_override,
         all_repositories=getattr(ctx.parsed, "all_registered", False),
-        state=ctx.parsed.state,
-        label=ctx.parsed.label,
-        with_pr=ctx.parsed.with_pr,
-        without_pr=ctx.parsed.without_pr,
+        state_filter=ctx.parsed.state,
+        label_filter=ctx.parsed.label,
+        with_pr=(True if ctx.parsed.with_pr else False if ctx.parsed.without_pr else None),
         limit=ctx.parsed.limit,
-        target_resolver=_resolve_targets,
-        has_local_iar_repo=make_default_has_local_iar_repo(),
-        github_client_factory=ctx.github_client_factory,
-        process_runner=ctx.process_runner,
     )
     try:
-        result = list_issues_with_prs(request)
+        result = list_issues_with_prs(
+            request,
+            cwd=Path.cwd(),
+            github_client_factory=ctx.github_client_factory,
+            resolve_targets=_resolve_targets,
+            has_local_iar_repo=make_default_has_local_iar_repo(),
+        )
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
         logger.error("iar issue list failed: %s", exc)
         error_console.print(f"[red]iar issue list failed:[/] {exc}")
         return 1
 
     if ctx.parsed.output == "json":
-        render_issue_with_pulls_json(result, console)
+        console.print_json(
+            data=[render_issue_with_pulls_json(issue_row) for issue_row in result.rows]
+        )
         return 1 if result.errors else 0
 
     render_console = Console()

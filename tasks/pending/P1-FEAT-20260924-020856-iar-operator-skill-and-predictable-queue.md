@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：实现与自动门禁已完成，等待 PR 中的人审确认和合并验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两层阅读：**Part A · 人审层**（§1–§4）用于确认目标和可见结果；**Part B · 执行器层**（§5–§13）记录仓库现状、实现边界与可复核证据。
@@ -34,7 +34,7 @@ IAR 已有覆盖面很广的 `docs/guides/agent-runner.md`，但没有一份面�
 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|
 | 用户要求“把这个 PRD 加入执行队列” | 操作 Skill 说明如何创建 Issue、是否立即标记 ready，以及如何先预览将处理的任务；不会把创建、运行或启动后台服务混为一步 |
-| 在当前 PRD Skill 声明 v3 的环境运行 PRD 任务预检 | 若 v3 被明确列为支持版本，预检通过；用户级 Skill 不会被覆盖 |
+| 在当前 PRD Skill 声明 v3 的环境运行 PRD 任务预检 | v3 通过；已淘汰的 v1 和未知版本 fail closed；用户级 Skill 不会被覆盖 |
 | 运行 `iar issue list --state open --label agent/ready` | CLI 正常返回满足状态和标签条件的列表，不因请求参数名不匹配而报错 |
 | P0 和 P1 Issue 都带 ready 标签，执行器请求处理一个 Issue | dry-run 与真实执行都选择 P0；同一优先级按 Issue 编号从小到大稳定排序 |
 | ready Issue 缺少优先级标签 | 按 §2 确认的缺省规则排队；预览中清楚显示该规则，不隐式提升其优先级 |
@@ -45,7 +45,7 @@ IAR 已有覆盖面很广的 `docs/guides/agent-runner.md`，但没有一份面�
 
 - 操作 Skill 是 Keda/IAR 自有内容，与通用 `prd` 和 `code-reviewer` Skill 分开维护；沿用现有用户级 Skill 安装和冲突保护机制，不在本项目复制维护远程通用 Skill。
 - Skill 应以任务意图路由命令，并简述副作用和停止/恢复方式；它不重复抄写 `agent-runner.md` 的完整参考手册，而是链接并定位到相关章节。
-- 队列排序优先级沿用 Roadmap 的 P0→P3 规则；同级按 Issue 编号升序以保证稳定性。未带优先级的行为列入 §2 请确认。
+- 队列排序优先级沿用 Roadmap 的 P0→P3 规则；同级按 Issue 编号升序以保证稳定性。用户已确认未带优先级的 Issue 排在显式 P3 之后。
 - 真实 GitHub 服务不作为默认自动验收前提；用隔离的 CLI fixture 覆盖真实参数解析、排序与 dry-run 输出，另提供可选的真实仓库 smoke 流程。
 
 **我理解为不做**：
@@ -73,17 +73,17 @@ IAR 已有覆盖面很广的 `docs/guides/agent-runner.md`，但没有一份面�
 
 ### 决策一：Machine Contract 的兼容窗口
 
-当前 runner 精确要求 v1，而已发布的共享 PRD Skill 是 v3；当前 fail-fast 提示建议使用 `iar init --force`。如果把 runner 直接升至 v3，历史 v1 Skill 是否仍可运行会影响旧仓库和既有 daemon；如果仍只支持 v1，当前 Skill 使用者会持续被拦截。建议明确支持当前已发布的 v3，并为已部署的 v1 保留有界兼容解析；其他未知版本在任何远程状态修改前失败。错误信息应先告诉用户版本不兼容和兼容范围；只有确认需要更新安装文件时，才解释安全的更新操作。
+当前 runner 精确要求 v1，而已发布的共享 PRD Skill 是 v3；当前 fail-fast 提示建议使用 `iar init --force`。用户确认只支持当前最新的 v3，历史 v1 视为淘汰，与未知版本一样 fail closed。错误信息应指出只支持 v3，并给出不覆盖用户自有 Skill 的更新建议；不得推荐盲目执行覆盖式 `--force`。
 
-**请确认：** 是否同时支持已发布的 v3 与历史 v1，未知版本 fail closed，并在兼容窗口变化时明确更新版本策略？
+**已确认：** 只支持当前最新的 v3；历史 v1 与未知版本均 fail closed。后续契约升级时显式调整受支持版本。
 
-**验收：** v1、v3 在各自契约规则下通过预检；未知版本在 GH 状态写入前失败，提示准确且不要求盲目执行覆盖式 `--force`。
+**验收：** v3 通过预检；v1 与未知版本在 GitHub 状态写入前失败，错误指出仅支持 v3 且不要求盲目执行覆盖式 `--force`。
 
 ### 决策二：无优先级 Issue 的位置
 
-现有 Roadmap 只排序显式的 P0–P3；普通 ready Issue 由 GitHub API 返回顺序决定。建议将缺少优先级标签的 Issue 放在 P3 之后，并在 dry-run 中标明缺省优先级；不从标题或 Issue 正文临时猜测优先级。
+现有 Roadmap 只排序显式的 P0–P3；普通 ready Issue 由 GitHub API 返回顺序决定。将缺少优先级标签的 Issue 放在 P3 之后，并在 dry-run 中标明缺省优先级；不从标题或 Issue 正文临时猜测优先级。
 
-**请确认：** 未带 `priority/P0`…`priority/P3` 标签的 ready Issue 排在显式 P3 之后，是否符合预期？
+**已确认：** 未带 `priority/P0`…`priority/P3` 标签的 ready Issue 排在显式 P3 之后。
 
 **验收：** 缺少优先级的 Issue 不会抢在任何显式 P0–P3 任务前面；dry-run 明确展示其未设置优先级。
 
@@ -131,7 +131,7 @@ IAR 已有覆盖面很广的 `docs/guides/agent-runner.md`，但没有一份面�
 
 ### Recommended Approach
 
-为 Keda/IAR 新增一个短小、任务路由式的 `iar-operator` Skill，并使用现有 Skill 资源打包和安全安装机制；先修复该 Skill 会调用到的 `issue list` 参数接线与操作说明，同时让 ready Issue 读取结果进入可复用的优先级排序规则。普通队列与 Roadmap 共用 P0→P3 语义。Machine Contract 由明确的支持版本解析代替单一常量相等比较；保留已发布版本的兼容窗口，并在无法理解版本时于写操作前拒绝。
+为 Keda/IAR 新增一个短小、任务路由式的 `iar-operator` Skill，并使用现有 Skill 资源打包和安全安装机制；先修复该 Skill 会调用到的 `issue list` 参数接线与操作说明，同时让 ready Issue 读取结果进入可复用的优先级排序规则。普通队列与 Roadmap 共用 P0→P3 语义。Machine Contract 明确只支持最新 v3，并在旧版、缺失或未知版本时于写操作前拒绝。
 
 ### Design Challenge
 
@@ -165,7 +165,7 @@ IAR 已有覆盖面很广的 `docs/guides/agent-runner.md`，但没有一份面�
 #### PRD Machine Contract
 
 - 搜索版本解析、生成 prompt 和所有预检调用点，集中定义一份支持策略，避免 CLI 与 daemon 判断不同。
-- 明确 v1/v3 的兼容实现策略和未知版本拒绝规则。若两个版本的契约不可安全并行解释，兼容器应按版本选择准确解析器或返回可操作的拒绝；不得仅删除检查。
+- 明确只支持最新 v3；历史 v1、缺失及未知版本均拒绝，并给出当前支持版本和不覆盖用户文件的修复建议。
 - 修正错误信息：分别说明缺失 Skill、不可读 Skill、未知/不兼容版本；只有确实要刷新安装资源时才推荐 init 安装流程，且不得默认建议覆盖。
 - 用 spy/fake GitHub client 证明拒绝发生时没有写操作；生产代码禁止新增仅用于测试的故障开关。
 
@@ -196,7 +196,7 @@ IAR 操作 Skill 与可预期的 PRD 队列
 │   └── 如现有列表需要，分页获取足够候选供全局排序
 ├── tests
 │   ├── 操作 Skill 打包/安装、冲突保护、dry-run
-│   ├── PRD Skill v1/v3/unknown 真实预检顺序
+│   ├── PRD Skill v3/v1/unknown 真实预检顺序
 │   ├── issue list real CLI 参数映射
 │   └── mixed-priority queue: dry-run 与执行共享顺序
 └── docs
@@ -269,15 +269,15 @@ oracles:
     required_for_acceptance: true
 
   - id: rv-3
-    behavior: "PRD Skill v1 和 v3 按确认的兼容规则通过真实预检；未知版本在 GitHub 写操作前失败，错误建议不误导执行覆盖式 init。"
+    behavior: "当前 PRD Skill v3 通过真实预检；淘汰的 v1 和未知版本在 GitHub 写操作前失败，错误建议不误导执行覆盖式 init。"
     reviewer: verifier
-    real_entry: "通过真实 PRD runner preflight 入口启动隔离 fixture run，分别提供 v1、v3 和未知 Machine-Contract-Version Skill 文本。"
-    expected: "受支持版本可到达后续执行阶段；未知版本给出支持集合并在任何 gh label/comment/PRD 写命令前失败。"
+    real_entry: "通过真实 PRD runner preflight 入口启动隔离 fixture run，分别提供 v3、v1 和未知 Machine-Contract-Version Skill 文本。"
+    expected: "仅 v3 可到达后续执行阶段；v1 与未知版本提示仅支持 v3，并在任何 gh label/comment/PRD 写命令前失败。"
     mock_boundary: "隔离 GitHub 子进程并记录调用；预检、Skill 解析、启动编排走真实实现。"
     tier: R2
     test_layer: real_entry
     required_for_acceptance: true
-    critical_value_source: "每个 fixture SKILL.md 的 Machine-Contract-Version marker；确认后的支持版本规则。"
+    critical_value_source: "每个 fixture SKILL.md 的 Machine-Contract-Version marker；仅支持 v3 的确认规则。"
     must_cross: "daemon/PRD run composition root → Skill path resolution → parser → preflight → GitHub client boundary。"
     forbidden_bypasses: "不得只测试 parser；不得 mock preflight 本身；不得在测试中跳过启动流程或对未知版本静默放行。"
     fresh_state_probe: "为每个版本新建空仓库与独立 Skill 文件，重新启动 runner 进程，并检查 GH 调用记录。"
@@ -332,8 +332,10 @@ oracles:
 
 | Oracle | 呈递内容 | 完成时的呈递动作 |
 |---|---|---|
-| rv-4 | 安装计划与 Skill 冲突保护 | 在最终回复中展示两种隔离 HOME 下 `iar init --dry-run` 的计划结果 |
-| rv-5 | 操作 Skill 的任务路由与 daemon 生命周期说明 | 在最终回复中直接呈现 `skills/iar-operator/SKILL.md` 的最终内容或关键完整段落 |
+| rv-4 | 安装计划与 Skill 冲突保护 | PR evidence comment 展示干净 HOME 与同名冲突 HOME 两次 `iar init --dry-run` 的计划输出 |
+| rv-5 | 操作 Skill 的任务路由与 daemon 生命周期说明 | PR body/evidence comment 链接完整 Skill 文件，并摘录关键任务路由与后台生命周期段落 |
+
+人工验收导航见 `tasks/evidence/P1-FEAT-20260924-020856-iar-operator-skill-and-predictable-queue/human-review-checklist.md`；PR 页面会直接呈递 Skill 全文及安装计划，无需本地 checkout。
 
 verifier-only 的 rv-1、rv-2、rv-3 不进入人工呈递区。
 
@@ -341,26 +343,26 @@ verifier-only 的 rv-1、rv-2、rv-3 不进入人工呈递区。
 
 #### Human-Confirmed
 
-- [ ] **Contract 兼容策略**：确认支持 v1 与 v3、未知版本 fail closed；证据见 rv-3。
+- [ ] **Contract 版本策略**：确认仅支持当前 v3，淘汰 v1 与未知版本均 fail closed；证据见 rv-3。
 - [ ] **无 priority 标签的顺序**：确认无优先级 Issue 排在显式 P3 之后；证据见 rv-1。
 - [ ] **操作 Skill 与安装体验**：阅读呈递的 Skill 内容和安装计划，确认其能准确指导 IAR 操作且清楚说明后台副作用；证据见 rv-4、rv-5。
 
 #### Behavior and compatibility
 
-- [ ] `iar issue list` state/label 参数通过真实 CLI 入口并产生正确筛选结果（rv-2）。
-- [ ] P0–P3 与同级稳定次序在 dry-run 和真实执行选择中一致（rv-1）。
-- [ ] 合法旧版/当前版 contract 通过，未知版本写入前失败（rv-3）。
+- [x] `iar issue list` state/label 参数通过真实 CLI 入口并产生正确筛选结果（rv-2）。证据见 evidence report 与全量测试。
+- [x] P0–P3 与同级稳定次序在 dry-run 和真实执行选择中一致（rv-1）。证据见 evidence report 与全量测试。
+- [x] 当前 v3 contract 通过，v1 与未知版本写入前失败（rv-3）。证据见 evidence report 与全量测试。
 
 #### Packaging and documentation
 
-- [ ] IAR 自有 Skill 随发行资源可用，经 init dry-run 正确规划；冲突默认保留用户文件（rv-4）。
-- [ ] Skill 命令和副作用说明与真实 CLI、`agent-runner.md` 一致（rv-5）。
-- [ ] 操作指南同步更新，优先级来源、未设置标签规则和预览语义清楚。
+- [x] IAR 自有 Skill 随发行资源可用，经 init dry-run 正确规划；冲突默认保留用户文件（rv-4）。证据见 evidence report。
+- [x] Skill 命令和副作用说明与真实 CLI、`agent-runner.md` 一致（rv-5）。证据见 verifier report。
+- [x] 操作指南同步更新，优先级来源、未设置标签规则和预览语义清楚。
 
 #### Delivery readiness
 
-- [ ] PRD §7.6 指定的 oracle 在最终实现树通过，并保存可复核证据。
-- [ ] Keda 对应 targeted tests、架构检查和文档构建通过；外部 GitHub live smoke 若没有凭据则记录为未运行且不替代离线真实入口验证。
+- [x] PRD §7.6 指定的自动化 oracle 在当前实现树通过，并保存可复核证据；rv-4/rv-5 的人审呈递待 PR 发布。
+- [x] Keda 对应测试、架构检查和文档构建通过；外部 GitHub live smoke 未运行，不替代离线真实入口验证。
 
 ## 10. Functional Requirements
 
@@ -381,7 +383,7 @@ verifier-only 的 rv-1、rv-2、rv-3 不进入人工呈递区。
 
 ## 12. Risks And Follow-Ups
 
-- **版本漂移**：v1 与 v3 契约差异可能不止 marker；需按完整语义分析兼容器，不能只忽略额外段落或字段。
+- **版本漂移**：升级 Machine Contract 时显式变更唯一受支持版本，并同步更新安装 Skill 与预检测试。
 - **priority 数据来源**：如果 GitHub label 配置允许自定义名称，标签映射必须从配置解析；PRD 文件名优先级和 Issue 标签不得无提示冲突。
 - **候选截断**：现有 `gh issue list --limit N` 在排序前截断会遗漏更高优先级任务。实现者必须验证分页/limit 契约；无法完整排序时不得宣称全局确定性。
 - **并发 Runner**：稳定排序约束的是每次候选选择顺序，不保证多个并发 worker 的完成顺序；文档需避免承诺完成顺序。
@@ -392,8 +394,8 @@ verifier-only 的 rv-1、rv-2、rv-3 不进入人工呈递区。
 | ID | 决策 | 状态 | 说明 |
 |---|---|---|---|
 | D-01 | 操作 Skill 是 Keda 自有发行资源，通用 Skill 保持现有远程安装 | Proposed | 避免复制通用内容，离线可用 IAR 操作说明 |
-| D-02 | Machine Contract 建议支持已发布 v1 与 v3，拒绝未知版本 | Human-Confirmed | §2 决策一待用户确认；实现前固定语义 |
-| D-03 | 未标优先级的 ready Issue 建议排在显式 P3 之后 | Human-Confirmed | §2 决策二待用户确认；不得从文本猜测 |
+| D-02 | 仅支持当前最新 Machine Contract v3，v1 与未知版本 fail closed | Human-Confirmed | 用户确认只跟进最新 Skill；实现前固定语义 |
+| D-03 | 未标优先级的 ready Issue 排在显式 P3 之后 | Human-Confirmed | 用户确认按 PRD 建议执行；不得从文本猜测 |
 | D-04 | 同级 ready Issue 按 issue number 升序；dry-run/执行共享 selector | Proposed | 稳定性规则，减少预览与执行偏差 |
 
 ## Change Log
@@ -406,3 +408,12 @@ verifier-only 的 rv-1、rv-2、rv-3 不进入人工呈递区。
 - **Reason**: 让 Keda/IAR 的操作方式更容易被 Agent 正确使用，并修复已观察到的操作错误与队列次序偏差。
 - **Impact**: 新增一份 pending P1 PRD；无实现代码、数据库和前端改动。
 - **Review**: 请先确认 §2 两项规则与 §9.1 呈递面，再进入实现。
+
+### Change 2 — 实施与独立验收
+
+- **Type**: Implementation
+- **Before**: 缺少 IAR 自有 Operator Skill，Issue 列表参数映射错误，普通 runner 不稳定按 priority 选择，Machine Contract 接受策略落后于当前 v3。
+- **After**: 增加随包 Skill 与安全安装规划，修复 CLI 筛选接线，统一 Roadmap/runner 的 priority 顺序，仅支持 v3，并补齐版本拒绝副作用、真实 CLI 过滤和安装 dry-run 验收。
+- **Reason**: 执行已确认的 D-02/D-03，并满足 FR-1 至 FR-6。
+- **Impact**: 无 schema/API/frontend 变更；Issue 创建会写入从 PRD 文件名读取的 priority label；普通 ready Issue 执行次序改变为 P0→P3→unset。
+- **Review**: 自动验收通过，独立 verifier PASS；D-02/D-03 与 Skill 人审仍待 PR 合并事件确认。

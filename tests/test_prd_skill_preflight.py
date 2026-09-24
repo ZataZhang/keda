@@ -59,14 +59,26 @@ def test_skill_preflight_fails_fast_when_skill_missing(
 def test_skill_preflight_fails_fast_on_version_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """契约主版本不符（v0 fixture）→ fail fast，报错含版本与修复指引。"""
-    stale_skill = _skill_fixture(tmp_path, "# prd\n\nMachine-Contract-Version: 0\n")
+    """旧契约 v1 → fail fast，错误指出当前支持 v3，不建议盲目覆盖。"""
+    stale_skill = _skill_fixture(tmp_path, "# prd\n\nMachine-Contract-Version: 1\n")
     monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(stale_skill))
 
     with pytest.raises(PrdSkillPreflightError) as exc_info:
         ensure_prd_machine_contract_available()
-    assert "v0" in str(exc_info.value)
-    assert "iar init" in str(exc_info.value)
+    assert "v1" in str(exc_info.value)
+    assert "v3" in str(exc_info.value)
+    assert "--force" not in str(exc_info.value)
+
+
+def test_skill_preflight_fails_closed_on_unknown_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """未知的未来契约版本也 fail closed。"""
+    future_skill = _skill_fixture(tmp_path, "# prd\n\nMachine-Contract-Version: 99\n")
+    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(future_skill))
+
+    with pytest.raises(PrdSkillPreflightError, match="v99"):
+        ensure_prd_machine_contract_available()
 
 
 def test_skill_preflight_fails_fast_without_version_marker(

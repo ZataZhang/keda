@@ -46,6 +46,7 @@ from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
     issue_output_routing,
 )
+from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
 from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
 from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
 from backend.core.use_cases.agent_runner_lifecycle import (
@@ -620,7 +621,7 @@ def run_once(request: RunOnceRequest) -> int:
     processed_count = 0
     issues_to_process: list[tuple[IssueSummary, str]] = []
 
-    for issue in ready_issues:
+    for issue in sort_ready_issues(ready_issues):
         if processed_count >= effective_max_issues:
             break
         declaration = parse_dependency_marker(issue.body)
@@ -710,14 +711,19 @@ def run_once(request: RunOnceRequest) -> int:
 
     # DRY RUN：仅列出将处理的 Issue，不实际处理（串行、零副作用）。
     if dry_run:
+        _logger.info(
+            "DRY RUN: ready Issue ordering covers the %d candidates returned by GitHub.",
+            ready_discovery_limit,
+        )
         for issue, issue_kind in issues_to_process:
             selected_agent = choose_agent(issue, config, agent)
             _logger.info(
-                "DRY RUN: would process Issue #%d (%s) with %s: %s",
+                "DRY RUN: would process Issue #%d (%s) with %s: %s [priority=%s]",
                 issue.number,
                 issue_kind,
                 selected_agent,
                 issue.title,
+                issue_priority(issue) or "unset (after P3)",
             )
             if issue_kind == "blocked_resolution":
                 marker = _guard_blocked_issue_has_resolution(issue, github_client)
