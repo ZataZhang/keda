@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：实现与自动门禁已完成，等待 PR 中的人审确认和合并验收。
+> ✅ **验收状态**：已交付（2026-09-28）。实现经 PR #155 合并入 main，自动门禁与独立 verifier 通过，§9.2 Human-Confirmed 已全部确认。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两层阅读：**Part A · 人审层**（§1–§4）用于确认目标和可见结果；**Part B · 执行器层**（§5–§13）记录仓库现状、实现边界与可复核证据。
@@ -343,9 +343,9 @@ verifier-only 的 rv-1、rv-2、rv-3 不进入人工呈递区。
 
 #### Human-Confirmed
 
-- [ ] **Contract 版本策略**：确认仅支持当前 v3，淘汰 v1 与未知版本均 fail closed；证据见 rv-3。
-- [ ] **无 priority 标签的顺序**：确认无优先级 Issue 排在显式 P3 之后；证据见 rv-1。
-- [ ] **操作 Skill 与安装体验**：阅读呈递的 Skill 内容和安装计划，确认其能准确指导 IAR 操作且清楚说明后台副作用；证据见 rv-4、rv-5。
+- [x] **Contract 版本策略**：确认仅支持当前 v3，淘汰 v1 与未知版本均 fail closed；证据见 rv-3。人审于 2026-09-28 确认（合并 PR #155 即接受该决策）。
+- [x] **无 priority 标签的顺序**：确认无优先级 Issue 排在显式 P3 之后；证据见 rv-1。人审于 2026-09-28 确认。
+- [x] **操作 Skill 与安装体验**：阅读呈递的 Skill 内容和安装计划，确认其能准确指导 IAR 操作且清楚说明后台副作用；证据见 rv-4、rv-5。人审于 2026-09-28 确认。
 
 #### Behavior and compatibility
 
@@ -416,4 +416,4 @@ verifier-only 的 rv-1、rv-2、rv-3 不进入人工呈递区。
 - **After**: 增加随包 Skill 与安全安装规划，修复 CLI 筛选接线，统一 Roadmap/runner 的 priority 顺序，仅支持 v3，并补齐版本拒绝副作用、真实 CLI 过滤和安装 dry-run 验收。
 - **Reason**: 执行已确认的 D-02/D-03，并满足 FR-1 至 FR-6。
 - **Impact**: 无 schema/API/frontend 变更；Issue 创建会写入从 PRD 文件名读取的 priority label；普通 ready Issue 执行次序改变为 P0→P3→unset。
-- **Review**: 自动验收通过，独立 verifier PASS；D-02/D-03 与 Skill 人审仍待 PR 合并事件确认。
+- **Review**: 自动验收通过，独立 verifier PASS；PR #155 已于 2026-09-24 合入 main，D-02/D-03 与 Skill 人审项于 2026-09-28 确认，据此归档。
