@@ -135,7 +135,7 @@ checks 展示、Agent repair action 策略、事件 marker 去重、未知状态
 
 **当前相关路径**：
 
-- `src/backend/core/use_cases/review_once.py` 已按 `checks_state` 变化触发 supervisor，并为 `PENDING` 返回 `waiting_for_checks`。
+- `src/backend/core/use_cases/review_once.py` 已按 `checks_state` 变化触发 supervisor；当 Supervisor Agent 选择 `wait_for_checks` 时返回 `waiting_for_checks` outcome，`PENDING` 本身不触发动作改写。
 - `src/backend/core/use_cases/pr_supervisor.py` 在 Agent-led Post-PR CI Decision PRD 交付后不再按 `FAILURE`/`PENDING` 强制改写动作；`execute_repair` 和 repair loop 已有次数上限。
 - `src/backend/core/use_cases/agent_runner_merge_queue.py::_wait_for_checks_green` 已轮询 PR context，但面向自动合并，不是 Roadmap 状态或可选修复控制面。
 - `src/backend/core/use_cases/agent_runner_events.py` 已提供 `iar:event` marker 的格式化/解析与最新事件读取，是单 PRD 策略 marker 的复用模式。
