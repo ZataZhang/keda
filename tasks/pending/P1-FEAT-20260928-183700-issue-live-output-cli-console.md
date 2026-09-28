@@ -1,5 +1,7 @@
 # PRD: 按 Issue 在 CLI 与控制台查看 Agent 实时输出
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/157
+
 > ✅ **交付前置**：无硬依赖；§8 是唯一依赖事实源。
 >
 > ⬜ **验收状态**：未开工；§9 是唯一验收事实源。
