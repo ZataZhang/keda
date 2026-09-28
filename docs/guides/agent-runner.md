@@ -2879,11 +2879,11 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
    - `build_progress_continuation_prompt()` 在跨 claim 续作时附带上一次失败的 failure summary 和 verification 输出，并提醒检查项目规范。
 2. **提交前 Delivery Gate**：runner 在 `publish_changes()` 之前执行 PRD delivery gate：
    - 无 PRD path：跳过 gate，保持现有行为。
-   - PRD 仍在 `tasks/pending/`：若 `Acceptance Checklist` 还有未勾选项，将失败原因交回 recovery prompt；若本轮 PRD 内容相较执行开始时发生变更，必须有完整结构化 `Change Log`，否则同样打回。两项均通过后，runner 自动执行 `git mv tasks/pending/<name>.md tasks/archive/<name>.md`。
-   - PRD 已在 `tasks/archive/`：校验 `Acceptance Checklist` 全部完成。
+   - PRD 仍在 `tasks/pending/`：未勾选的执行项继续阻塞提交；`Human-Confirmed` 小节里只有人能在 PR 中确认的条目保留空框（已有 `[~]` 后置门禁标记同样视为待人审），允许发布 PR，PRD 保持 pending。本轮 PRD 内容若相较执行开始时发生变更，仍须有完整结构化 `Change Log`。全部验收项完成后，runner 才执行 `git mv tasks/pending/<name>.md tasks/archive/<name>.md`。
+   - PRD 已在 `tasks/archive/`：校验执行项与人审项全部完成；仍有人审空框的归档文件不能发布。
    - PRD 文件不存在、archive 目录缺失或 `Acceptance Checklist` section 缺失：进入 recovery loop，重试耗尽后标记 `agent/failed`。
-3. **归档纳入同一 Commit**：`git mv` 发生在 `git add -A` 之前，因此 PRD 归档变更会随 Agent 的代码变更一起进入同一个 commit，并包含在随后创建的 Draft PR 中，不需要 publish 后再追加 commit。
-4. **Pre-PR Review 与归档的关系**：delivery gate 排在 pre-PR review **之前**，因此 reviewer 看到的 worktree 里 PRD 已经在 `tasks/archive/`，而 Issue body 记录的仍是归档前的 `tasks/pending/` 路径（`git mv` 不回写 Issue）。`build_prd_review_reference()` 因此把 review packet 的 canonical 路径解析成 worktree 里的**实际**位置，并显式声明归档不可回滚。若 reviewer 把 PRD 挪回 `tasks/pending/`，推送前的 `assert_prd_archived_for_publish()` 会以 `Archived PRD not found in worktree` 硬失败，两道门禁互相打架、每轮来回搬运文件且永不收敛（实证：freshai Issue #99）。
+3. **归档时机**：无人审待办时，`git mv` 发生在 `git add -A` 之前，归档随实现一起提交；有人审待办时，PRD 保持 pending。审阅者确认并留下证据后，须在同一个 PR 的后续提交中勾选人审项并归档 PRD，再合并。合并队列不会自动合并仍在 pending 的 PRD。
+4. **Pre-PR Review 与归档的关系**：`build_prd_review_reference()` 读取 worktree 中实际存在的 pending 或 archive 路径。runner 已归档的 PRD 不得被 reviewer 挪回 pending；等待人审的 PRD 则必须继续留在 pending。
 
 > **注意**：runner 不会只因 PRD 的 checkbox 而信任业务完成度；Realistic Validation 与独立 verifier 仍需提供实际证据。Change Log 解释需求为何演进，不能替代任何验收项或证据。
 

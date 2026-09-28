@@ -231,6 +231,45 @@ def test_verifier_missing_label_skips_issue(tmp_path, worktree_path, monkeypatch
     assert body_calls == []
 
 
+@pytest.mark.parametrize(
+    ("review_mark", "expected_action"),
+    [(" ", "skipped_human_review"), ("x", "skipped_prd_pending")],
+)
+def test_pending_prd_prevents_auto_merge(
+    tmp_path, worktree_path, review_mark: str, expected_action: str
+) -> None:
+    """待人审或已人审但尚未归档的 PRD 都不能自动合并。"""
+    github = FakeGitHubClient()
+    runner = FakeProcessRunner()
+    issue = IssueSummary(
+        number=70,
+        title="Human review",
+        url="https://github.com/example/repo/issues/70",
+        body="PRD path: `tasks/pending/review.md`",
+        labels=("agent/review",),
+    )
+    prd_path = worktree_path / "tasks" / "pending" / "review.md"
+    prd_path.parent.mkdir(parents=True)
+    prd_path.write_text(
+        f"## Acceptance Checklist\n### Human-Confirmed\n- [{review_mark}] Review screenshots\n",
+        encoding="utf-8",
+    )
+    github.set_pr_context("issue-70", _make_pr_context(branch="issue-70", number=70))
+    github._issue_comments[70] = ["PR Branch: `issue-70`"]
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+
+    assert outcome.action == expected_action
+    assert not any(call.get("method") == "merge_pull_request" for call in github.calls)
+
+
 def test_verifier_passed_then_full_path_merges(tmp_path, worktree_path, monkeypatch) -> None:
     """Full happy path: verifier green → tick sign-off → rebase ok → verify green
     → forbidden path clean → checks green → squash merge + audit comment."""
