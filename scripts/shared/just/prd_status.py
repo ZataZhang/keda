@@ -535,7 +535,7 @@ def collect_prd_record(
     raw_priority_text, raw_kind_text, formatted_created_date, raw_slug_text = parse_prd_filename(
         prd_path
     )
-    matched_worktree = match_worktree_by_slug(worktree_branches_list, raw_slug_text)
+    matched_worktree = match_worktree_for_prd(worktree_branches_list, raw_slug_text, prd_path)
     worktree_path = matched_worktree[1] if matched_worktree is not None else None
 
     source_prd_path = resolve_branch_prd_path(worktree_path, prd_path.name) or prd_path
@@ -766,6 +766,27 @@ def match_worktree_by_slug(
     return None
 
 
+def match_worktree_for_prd(
+    worktree_branches_list: list[tuple[str, Path]], slug_text: str, prd_path: Path
+) -> tuple[str, Path] | None:
+    """按 PRD slug 或其明确关联的 Issue 编号定位 worktree。"""
+    slug_match = match_worktree_by_slug(worktree_branches_list, slug_text)
+    if slug_match is not None:
+        return slug_match
+    try:
+        prd_text = prd_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    issue_matches = re.findall(
+        r"(?im)^\s*[-*]?\s*GitHub Issue:\s*https://[^\s]+/issues/(\d+)\s*$",
+        prd_text,
+    )
+    if len(set(issue_matches)) != 1:
+        return None
+    issue_branch_name = f"issue-{issue_matches[0]}"
+    return match_worktree_by_slug(worktree_branches_list, issue_branch_name)
+
+
 def resolve_lock_location_text(
     worktree_branches_list: list[tuple[str, Path]],
     main_repo_root: Path,
@@ -895,7 +916,9 @@ def format_activity_cell(
     # 需要完整列表来判断锁里的分支是否真的检出在某处，PrdRecord 只该承载单条 PRD 的
     # 事实。看板一次渲染只有个位数 pending 行，多一次 git 调用的代价可忽略。
     linked_worktree_branches_list = prd_lock.list_linked_worktree_branches(main_repo_root)
-    matched_worktree = match_worktree_by_slug(linked_worktree_branches_list, prd_record.slug)
+    matched_worktree = match_worktree_for_prd(
+        linked_worktree_branches_list, prd_record.slug, prd_record.prd_path
+    )
     if matched_worktree is not None:
         branch_name_text, worktree_path = matched_worktree
         worktree_archive_prd_path = worktree_path / "tasks" / "archive" / prd_record.prd_path.name

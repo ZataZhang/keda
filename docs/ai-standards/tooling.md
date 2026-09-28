@@ -144,7 +144,7 @@ python scripts/check_prd_acceptance_checklist.py --repo-root "$PWD" --all
 - 明细列：优先级与类型（取自文件名前缀）、创建日期、验收清单 `已勾/总数`、影响树触达进度（FILES 列）、证据包 `plan` / `report` / `verifier` 三个槽位。
 - archive 概览：每月 PRD 条数、清单全完成的条数、有证据包的条数与 verifier `REJECT` 条数；月份下出现 `⚠ 有未勾完的清单` 时，会列出具体是哪几条。
 
-**进度与证据取分支副本**：执行发生在 worktree 里，主仓库的 `tasks/pending` 副本与证据目录要等合并回主线才更新。因此存在分支名匹配的 worktree 时，清单进度取该 worktree 内 `tasks/archive` → `tasks/pending` 的 PRD 副本，证据包按 `plan` / `report` / `verifier` 每个槽位单独「分支目录先查、主仓库目录后查」；没有匹配 worktree（例如直接在主仓库开工）时读主仓库副本。只认 slug 匹配到的那个 worktree——每个 worktree 都带一份未改动的同名 pending 副本。
+**进度与证据取分支副本**：执行发生在 worktree 里，主仓库的 `tasks/pending` 副本与证据目录要等合并回主线才更新。因此存在匹配的 worktree 时，清单进度取该 worktree 内 `tasks/archive` → `tasks/pending` 的 PRD 副本，证据包按 `plan` / `report` / `verifier` 每个槽位单独「分支目录先查、主仓库目录后查」；没有匹配 worktree（例如直接在主仓库开工）时读主仓库副本。优先按 PRD slug 匹配分支；PRD 有唯一的 `GitHub Issue: .../issues/<N>` 行时，也可匹配 `issue-<N>` 分支。普通 Issue 无 PRD 关联时仍使用 Issue 命名，不会被错配到别的 PRD。
 
 **FILES 列 = 影响树触达进度（弱信号）**：验收清单要到收尾才勾，从开工到验收之间看板原本没有任何进度粒度。FILES 列解析 PRD 的 `Change Impact Tree`，把其中的文件节点与**分支上实际改动过的文件集**求交，形如 `~7/12?2`。
 
@@ -159,6 +159,8 @@ python scripts/check_prd_acceptance_checklist.py --repo-root "$PWD" --all
 **看板是启发式视图，不是门禁**：清单进度按 `Acceptance Checklist` / `验收清单` 小节内的 `- [ ]` 与 `- [x]` 计数，`- [~]`（runner-owned gate）不计入总数；verifier 结论取报告中最后一次出现的显式结论行（`verdict:`、`结论：` 或整行独立的 `PASS`/`REJECT`），只能从散文推断时会加 `?` 标记。真正的把关仍由 `check_prd_acceptance_checklist.py` 与独立 verifier 完成，看板只用于快速定位。
 
 ### PRD 执行锁
+
+IAR 处理带 `PRD path:` 锚点的 Issue 时，复用仓库的 PRD 执行锁：开始时领锁、执行期间每分钟续期、结束后释放。若目标仓库未提供 `scripts/shared/just/prd_lock.py` 或 PRD 文件不存在，则跳过此集成；已有锁或领锁冲突会阻止该 Issue 并行执行，须先核实持锁者并按既有 `just prd release` 流程处理。IAR 继续使用 `issue-<N>` 分支名，看板通过上述 Issue 关联读取其分支副本。
 
 执行 `tasks/pending/` 下的 PRD 前必须先领锁：`just prd start <prd-file>`（知道工具名就 `--tool` 自报）。锁语义：
 
