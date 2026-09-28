@@ -1,6 +1,6 @@
 # PRD: Roadmap PRD 完成后 CI/CD 监控与可选自动修复
 
-> ✅ **交付前置**：无，可立即开工。上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档（`tasks/archive/`），统一右侧 PRD 详情容器（`prd-detail.tsx` 的 `additionalTabs` 扩展点）与受限 `.iar.toml` writer 已在代码库可用。
+> ⛔ **交付前置**：硬依赖 Agent-led Post-PR CI Decision PRD `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md`；必须先完成 Supervisor 的 CI 决策契约，再将其产品化。前端上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档，统一右侧详情容器和受限 `.iar.toml` writer 已可用。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
 > ⬜ **验收状态**：未开工。
@@ -13,9 +13,9 @@
 > 本块是 §10 Functional Requirements 的通俗投影，不是第二事实源；行为验收以 §1 行为样例表为准。
 
 - **PRD 完成后必须等待真实 CI/CD**（FR-1、FR-2）：有 PR 的任务不能从“实现完成”直接进入交付完成；系统持续读取同一 PR 的 GitHub checks，直到通过或出现可见问题。
-- **当前仓库的全局自动修复**（FR-3、FR-4）：Roadmap 顶部提供“全局自动修复 CI/CD”开关，统一控制当前仓库所有 PRD；打开后失败轮次复用既有 repair Agent 和同一 PR 分支进行修复。
+- **当前仓库的全局自动修复**（FR-3、FR-4）：Roadmap 顶部提供“全局自动修复 CI/CD”开关，统一控制当前仓库所有 PRD；它只约束 Agent 选出的自动 repair 动作，不把 checks 状态映射成动作。
 - **每个 PRD 可继承或覆盖**（FR-13、FR-14）：右侧提供 `跟随全局 / 强制开启 / 强制关闭` 三态控制；未设置时继承仓库全局值，并始终显示最终生效值。
-- **允许多轮失败与复检**（FR-5、FR-6）：每次修复推送后重新等待新 head SHA 的 checks；后续再次失败时继续下一轮，直到通过或达到既有修复上限。
+- **允许多轮 repair 与复检**（FR-5、FR-6）：Supervisor Agent 根据 checks 详情与 PRD 要求决定是否 repair；每次获准的修复推送后重新读取新 head SHA，直到 Agent 选择其它动作或达到既有修复上限。
 - **关闭时失败成为右侧问题**（FR-7、FR-8）：开关关闭不触发 Agent；失败 check 以问题卡显示原始名称、摘要、轮次和 GitHub 链接，保持可见直到状态改变。
 - **崩溃重入不重复修复**（FR-9、FR-10）：状态从 PR checks 与既有事件 marker 重建，同一 head SHA/失败轮次只触发一次自动修复，不新增数据库事实源。
 - **人工仍可发起单次修复**（FR-11）：自动修复关闭或耗尽时，操作者可从问题卡显式请求一次修复；该动作仍受 worktree、修复上限与安全门禁约束。
@@ -27,7 +27,7 @@
 
 ### Problem Statement
 
-当前 runner 已能读取 PR 的 `checks_state`/`checks_summary`，`review_once` 会在 checks 状态变化时触发 supervisor，`pr_supervisor` 也会把真实 CI 失败判为 `repair_pr_branch`；merge queue 还会轮询 checks 是否成功。但这些能力没有形成“每个 PRD 完成后都等待 CI/CD”的统一产品状态，也没有一个用户可控的自动修复开关。Roadmap 当前 `RoadmapPrd` 契约只暴露 PRD 状态、验收计数和 next action，无法在选中 PRD 的右侧区分“checks 仍在跑”“第几轮失败”“自动修复是否会启动”或“关闭时有哪些问题”。
+当前 runner 已能读取 PR 的 `checks_state`/`checks_summary`，`review_once` 会在 PR 上下文变化时触发 supervisor。独立的 Agent-led Post-PR CI Decision PRD 将让 Supervisor Agent 结合原始 checks 与 PRD 验收要求决定等待、修复或交人审；本 PRD 在其上产品化 CI/CD 状态和用户可控的自动修复策略。Roadmap 当前 `RoadmapPrd` 契约只暴露 PRD 状态、验收计数和 next action，无法在选中 PRD 的右侧区分 checks、repair 轮次、策略与问题。
 
 仓库另有 `runner.fix_agent_enabled`，但它只处理提交前 staged verification 失败，不是 GitHub PR checks 开关；直接复用其语义会把两个时点和两类副作用混为一谈。
 
@@ -38,9 +38,9 @@
 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|
 | PRD 实现已完成并已推送 PR，GitHub checks 为 `PENDING` | Roadmap 右侧显示“等待 CI/CD”、当前 head SHA 与轮询状态；任务不得显示为可归档或已交付 |
-| 当前仓库的“全局自动修复 CI/CD”已打开，某个 PRD 当前 head SHA 的 checks 第 1 轮变为 `FAILURE` | 系统只为该 head SHA 创建一次 repair 轮次，复用既有 repair Agent；修复提交推送后等待新 head SHA 的 checks |
-| 自动修复后新 head 再次 `FAILURE`，直至达到 repair 上限（多轮/边界情况） | 每个新 head 各记录并修复一轮；达到 `max_repair_attempts` 后停止自动动作，右侧保留耗尽原因，不无限循环 |
-| 当前仓库的全局开关未打开，任一 PRD checks 变为 `FAILURE` | 不启动 repair Agent、不产生修复提交；右侧 `CI/CD` 标签显示问题数，详情展示失败 check 名称、摘要、轮次和 GitHub 链接 |
+| 全局自动修复已打开，checks 为 `FAILURE`，Supervisor Agent 根据已执行测试失败选择 `repair_pr_branch` | 对该 head SHA 至多启动一次获准的 repair；push 新 head 后重新获取 checks。`FAILURE` 本身不触发 repair |
+| 自动 repair 后新 head 再次 `FAILURE`，Agent 再次选择 repair，直至达到 repair 上限 | 每个新 head 各记录至多一轮获准 repair；达到 `max_repair_attempts` 后停止自动动作并保留耗尽原因 |
+| 全局自动修复未打开，checks 为 `FAILURE`，Agent 将零 job/账单限制判断为未执行且选择人审 | 不启动 repair、不产生修复提交；问题详情明确显示 CI 未运行/未验证，不得标成代码失败、通过或已验收 |
 | 全局关闭，但选中 PRD 设置为“强制开启” | 仅该 PRD 的真实 CI 失败自动进入 repair；详情同时显示“强制开启”和“当前生效：开启”，其他未覆盖 PRD 仍关闭 |
 | PRD 从“强制关闭”改回“跟随全局” | 清除显式覆盖并立即按当前仓库全局值计算；不得把当时的全局布尔值复制成永久 per-PRD 设置 |
 | daemon 重启，或 GitHub 暂时不可达（失败/恢复情况） | 重启后从 checks 与 markers 恢复且同一 head 不重复修复；不可达时显示最近成功同步时间，不得当作通过或启动修复 |
@@ -51,7 +51,7 @@
 - 每个 PRD 的策略是三态：`inherit`（默认/未设置）、`on`、`off`；最终生效值按“显式 `on/off` 优先，否则全局值”计算。
 - 单 PRD 覆盖以对应 GitHub Issue 的最新 `iar:ci-auto-repair-policy` marker 为事实源；没有 Issue 的 PRD 只能跟随全局，控制项禁用并说明原因。
 - “PRD 完成”指实现、提交、PR 创建与 runner 本地验证已结束，但交付仍需等待远端 checks；无 PR 的任务保持原有流程。
-- 自动修复只处理真实失败的 CI checks；`PENDING`、未知/不可达和只剩 `Realistic Validation sign-off` 人工门禁时不启动修复。
+- `checks_state` 本身不触发动作。Supervisor Agent 判断真实执行失败、未运行/基础设施不可用或信息不足；自动修复开关和次数上限只约束 Agent 选择的自动 `repair_pr_branch` 动作。
 - 轮次事实源使用 GitHub PR head SHA、checks 和现有 `iar:event` marker，不新增数据库表或前端自造历史。
 - 多轮上限复用 `post_pr_supervisor.max_repair_attempts`，不再增加第二个次数配置。
 - 手动“立即修复”是一次性请求，不会暗中打开仓库级自动修复。
@@ -67,14 +67,14 @@
 
 ### What The User Gets
 
-Roadmap 操作者能在顶部为当前仓库统一开关自动修复，并看到每个已完成实现的 PRD 正在等待哪一轮 CI/CD、失败在哪里以及下一次何时同步。需要无人值守时打开“全局自动修复 CI/CD”，该仓库所有 PRD 的失败会沿现有修复链处理并重新等待；希望人工控制时保持关闭，问题仍留在右侧详情，不会悄悄产生修复提交。
+Roadmap 操作者能在顶部为当前仓库统一开关自动修复，并看到每个 PRD 的原始 CI 状态、Supervisor Agent 决定、未验证说明和下一次同步时间。开关只控制 Agent 选择的 repair 是否能自动执行；它不会将账单/零 job 的失败状态误当成代码失败。
 
 ### Measurable Objectives
 
 - 有 PR 的任务在 checks 未 `SUCCESS` 前不会被展示为 CI/CD 已完成或进入最终完成态。
 - 同一 PR head SHA 的同一失败观察最多触发一次自动修复；新修复 commit 产生新 SHA 后才允许下一轮。
-- 开关关闭时，模拟 `FAILURE` 后 repair Agent 调用数和新提交数均为 0，右侧问题数与 GitHub 失败摘要一致。
-- 开关打开时至少验证两轮 `FAILURE → repair → new SHA → FAILURE → repair → SUCCESS`，最终页面只显示当前成功态且历史轮次仍可追溯。
+- 开关关闭时，Agent 选择的自动 repair 不执行、不产生修复提交；Supervisor 仍会收到 checks 状态并能选择其它合法动作。
+- 开关打开时至少验证两轮 `Agent selects repair → new SHA → Agent selects repair → new SHA → checks SUCCESS`；零 job/账单导致 workflow 未运行时不得由 FAILURE 自动触发 repair。
 - daemon 重启、GitHub 暂时不可达和修复次数耗尽均不会造成重复修复、无限循环或假绿。
 - 三态矩阵全部可判定：`inherit` 随全局实时变化，`on/off` 不受全局变化影响；清除覆盖后恢复 `inherit`。
 
@@ -86,15 +86,15 @@ Roadmap 操作者能在顶部为当前仓库统一开关自动修复，并看到
 
 **请确认：** 接受“自动修复 CI/CD”默认关闭，且不与 Autopilot、自动合并或提交前 Fix Agent 联动？
 
-**验收：** 新仓库/缺省配置显示关闭；切换前后配置 diff 只有目标布尔值变化；关闭态失败时零 Agent/零 commit，问题在右侧可见。
+**验收：** 新仓库/缺省配置显示关闭；切换前后配置 diff 只有目标布尔值变化；关闭态不执行 repair、不产生修复 commit，Supervisor 仍可判断并呈递问题。
 
-### 决策二：多轮自动修复复用既有 supervisor 上限，耗尽后停下并显错
+### 决策二：多轮 Agent repair 复用既有 supervisor 上限，耗尽后停下并显错
 
-CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可能反复改坏代码。推荐每个 PR 延续现有 `post_pr_supervisor.max_repair_attempts` 上限；以 `head SHA + checks failure` 去重，每次修复成功推送后才进入新一轮。达到上限、worktree 不可恢复或 repair 失败时，停止自动动作，把原因作为问题保留给人。
+Agent 可能多轮选择 repair，但无限循环会持续消耗资源并可能反复改坏代码。推荐每个 PR 延续现有 `post_pr_supervisor.max_repair_attempts` 上限；仅 Agent 选择 repair 后，以 `head SHA + failure summary` 去重，每次修复成功推送后才进入新一轮。达到上限、worktree 不可恢复或 repair 失败时，停止自动动作，把原因作为问题保留给人。
 
 **请确认：** 接受多轮自动修复受既有 repair attempts 上限约束，耗尽后不再自动重试，必须人工处理或显式发起单次修复？
 
-**验收：** 连续失败场景严格执行配置轮数；最后一次耗尽后轮询仍继续、Agent 调用停止，右侧显示“修复次数已用尽”和失败 check。
+**验收：** Agent 连续选择 repair 的场景严格执行配置轮数；最后一次耗尽后轮询仍继续、repair 副作用停止，右侧显示“修复次数已用尽”和当前问题。
 
 ### 决策三：单 PRD 使用三态覆盖，并随 Issue 保存
 
@@ -108,17 +108,17 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 
 ### 自动门禁，不需要逐项人工审阅
 
-失败 check 聚合、sign-off-only 排除、事件 marker 去重、未知状态降级、API 路径与前端渲染通过 core/API 测试和真实 Roadmap E2E 覆盖；配置写回复用上游已交付的受限原子 writer（`repository_settings_editor` / `toml_section_editor.update_toml_table_keys`）；GitHub 网络在常规测试中由 fake client 隔离，真实 GitHub sandbox 验证为 opt-in。
+checks 展示、Agent repair action 策略、事件 marker 去重、未知状态降级、API 路径与前端渲染通过 core/API 测试和真实 Roadmap E2E 覆盖；配置写回复用上游已交付的受限原子 writer（`repository_settings_editor` / `toml_section_editor.update_toml_table_keys`）；GitHub 网络在常规测试中由 fake client 隔离，真实 GitHub sandbox 验证为 opt-in。
 
 **本次明确不涉及**：无数据库结构变化；不改 GitHub Actions workflow；不改 CI job 本身；不新增前端路由；不改 `frontend-admin/`。
 
 ## 3. Usage And Impact After Implementation
 
-**Roadmap 操作者**：仍从 `/app/roadmap/` 选择仓库和 PRD。顶部提供仓库全局默认值；右侧提供当前 PRD 的“跟随全局 / 强制开启 / 强制关闭”和最终生效值。`PENDING` 时看到等待状态，`FAILURE` 时看到问题卡，`SUCCESS` 时看到通过状态与轮次数。任何层级关闭自动修复都不会停止监控。
+**Roadmap 操作者**：仍从 `/app/roadmap/` 选择仓库和 PRD。顶部提供仓库全局默认值；右侧提供当前 PRD 的“跟随全局 / 强制开启 / 强制关闭”和最终生效值。CI 状态卡展示 GitHub 原始状态；动作和原因展示 Supervisor Agent 的决定。Agent 判为未运行/基础设施不可用时，问题卡明确写“未验证”，而非“代码失败”或“通过”。关闭自动修复不会停止监控。
 
 **代码审阅者/验收者**：从问题卡跳转到对应 GitHub check；可分辨机器 CI 失败、人工 sign-off 门禁和 GitHub 不可达。已有 PR 审阅、verifier 与 sign-off 流程保持不变。
 
-**daemon 运维者**：daemon 的既有 review pass 继续承担 checks 轮询。打开自动修复后，失败触发同一 supervisor repair 路径；重启不需要恢复新数据库，marker 与 PR head 足以重建状态。达到上限后持续观测但停止自动副作用。
+**daemon 运维者**：daemon 的既有 review pass 继续刷新 checks 并唤起 Supervisor。打开自动修复后，Agent 选择 repair 才进入既有修复路径；重启不需要恢复新数据库，marker 与 PR head 足以重建状态。达到上限后持续观测并禁止新的自动 repair。
 
 **CLI/API 调用方**：既有 issue monitor 与 Roadmap 列表保持兼容；Roadmap PRD 响应增加结构化 CI 状态，另提供仓库级设置更新与显式单次修复动作。
 
@@ -136,7 +136,7 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 **当前相关路径**：
 
 - `src/backend/core/use_cases/review_once.py` 已按 `checks_state` 变化触发 supervisor，并为 `PENDING` 返回 `waiting_for_checks`。
-- `src/backend/core/use_cases/pr_supervisor.py` 已排除仅人工 sign-off 的失败，并把其他 `FAILURE` 决定为 `repair_pr_branch`；`execute_repair` 和 repair loop 已有次数上限。
+- `src/backend/core/use_cases/pr_supervisor.py` 在 Agent-led Post-PR CI Decision PRD 交付后不再按 `FAILURE`/`PENDING` 强制改写动作；`execute_repair` 和 repair loop 已有次数上限。
 - `src/backend/core/use_cases/agent_runner_merge_queue.py::_wait_for_checks_green` 已轮询 PR context，但面向自动合并，不是 Roadmap 状态或可选修复控制面。
 - `src/backend/core/use_cases/agent_runner_events.py` 已提供 `iar:event` marker 的格式化/解析与最新事件读取，是单 PRD 策略 marker 的复用模式。
 - `src/backend/infrastructure/github_pr_ops.py` 已把 GitHub `statusCheckRollup` 聚合为 `checks_state` 与 `checks_summary`。
@@ -149,13 +149,13 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 
 **Existing Path**：daemon `review_once` → PR context → supervisor decision → `execute_repair` → push/review → 下一次 checks；展示路径为 Roadmap API → `RoadmapPrd` → 统一 PRD 右侧详情。
 
-**Reuse Candidates**：checks 聚合、sign-off-only 判定、`build_rework_intent_comment`/`iar:event` marker parser、repair loop 与 `max_repair_attempts`、上游已交付的 `repository_settings_editor`（白名单写回，底层为 `toml_section_editor.update_toml_table_keys`）、`prd-detail.tsx` 的 `additionalTabs` 详情扩展点、Roadmap 30 秒刷新、Issue detail 的 checks badge/summary。
+**Reuse Candidates**：checks 聚合、`build_rework_intent_comment`/`iar:event` marker parser、repair loop 与 `max_repair_attempts`、上游已交付的 `repository_settings_editor`（白名单写回，底层为 `toml_section_editor.update_toml_table_keys`）、`prd-detail.tsx` 的 `additionalTabs` 详情扩展点、Roadmap 30 秒刷新、Issue detail 的 checks badge/summary。
 
 **Architecture Constraints**：自动修复策略和去重属于 core；GitHub 与 TOML 实现留在 infrastructure；API 只做 DTO/调用；前端只消费规范 API。不得让 core import FastAPI、tomlkit 或 concrete GitHub client。
 
 **Frontend Impact**：**Full-stack**，只改 `frontend-public` Roadmap 的统一右侧详情、API client 与类型；`frontend-admin` 无影响。运行命令 `just run frontend-public`，真实 UI 验证 `just e2e tests/workflows/roadmap-cicd-auto-repair.no-auth.spec.ts`。
 
-**Existing PRD Relationship**：本 PRD 的硬依赖上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档（`tasks/archive/`），它建立了统一右侧详情（`frontend-public/components/roadmap/prd-detail.tsx`，暴露 `additionalTabs` 扩展点）、Autopilot 设置 writer 和 PRD 证据 tabs；实现时应在该结构上以 `additionalTabs` 增加 CI/CD tab，而非并行造详情页。受限 `.iar.toml` 写回复用上游交付的 `src/backend/infrastructure/config/repository_settings_editor.py`（其白名单写回复用共享原语 `src/backend/infrastructure/config/toml_section_editor.py::update_toml_table_keys`）。相关已归档 PRD：`P1-BUG-20260527-093356-agent-runner-ci-rework-state-recovery`（CI rework 崩溃恢复）、`P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile`（checks 等待/自动合并）、`P1-FEAT-20260824-133115-runner-delivery-closeout-agent`（交付尾段恢复）。本 PRD产品化并控制这些既有能力，不重写它们。
+**Existing PRD Relationship**：硬前置 `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md` 定义 Supervisor Agent 对原始 checks 与 PRD 验收要求的决策契约，并移除 checks→动作改写；本文仅在其上增加 Roadmap 展示、repair 策略控制和轮次产品化。此前端硬前置 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档，建立统一右侧详情、`additionalTabs`、Autopilot 设置 writer 与 PRD 证据 tabs。受限 `.iar.toml` 写回复用 `repository_settings_editor` / `toml_section_editor.update_toml_table_keys`。相关已归档 PRD：`P1-BUG-20260527-093356-agent-runner-ci-rework-state-recovery`（恢复）、`P1-FEAT-20260703-105322-autopilot-merge-queue-fast-profile`（checks 等待/自动合并）、`P1-FEAT-20260824-133115-runner-delivery-closeout-agent`（交付尾段）。
 
 **Potential Redundancy Risks**：不要新建 CI worker、repair Agent、轮询线程、数据库 round/override 表或第二套 event log；不要用 PRD path 作为长期 override key；不要把 `runner.fix_agent_enabled` 改名挪用；不要在前端自行计算 effective value。
 
@@ -163,12 +163,12 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 
 ### Recommended Approach
 
-在既有 post-PR supervisor 前加一个窄的“CI repair policy”判断，并在 Roadmap 聚合一份只读 `ci_delivery` 视图：
+在 Agent-led Post-PR CI Decision PRD 交付后，为 Supervisor 已选的 repair 动作增加策略约束，并在 Roadmap 聚合一份只读 `ci_delivery` 视图：
 
 1. 给仓库配置 `post_pr_supervisor.auto_repair_ci` 增加默认 `false`，通过 `repository_settings_editor` 的白名单 PATCH 修改（底层复用 `toml_section_editor.update_toml_table_keys`）。
 2. 从 Issue 评论解析最新 `iar:ci-auto-repair-policy`（`inherit/on/off`），与 fresh 全局配置合成唯一 effective bool；没有 marker 即 `inherit`。
-3. `review_once` 仍持续观察所有 checks；真实 `FAILURE` 时生成稳定 failure key（PR number/head SHA/失败摘要摘要值）并写现有 event marker。
-4. effective bool 打开且未超过上限时，继续走现有 `repair_pr_branch → execute_repair`；关闭/耗尽/未知状态时不执行 repair，只返回可观察 outcome。
+3. `review_once` 仍持续观察所有 checks；Supervisor Agent 根据原始 checks 与 PRD 验收要求选择动作。仅 Agent 选择 repair 且服务端准备执行时才生成 failure key。
+4. Agent 选择 `repair_pr_branch` 且 effective bool 打开、未超过上限时，走现有 repair；关闭/耗尽时拒绝自动副作用并返回可观察 outcome。不得由 checks 状态单独触发 repair/wait/blocked。
 5. 从 PR context 与 markers 组装 `ci_delivery`：状态、当前轮次、问题列表、最近同步、stored/global/effective policy、耗尽原因；不持久化派生视图。
 6. Roadmap 顶部保留全局开关；右侧新增三态策略、effective value、CI/CD tab 和一次性手动 repair；策略 PATCH 写 marker 后 fresh 读取 Issue 评论回显。
 
@@ -191,9 +191,9 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 ### Core Logic
 
 1. PRD 对应 Issue/PR 进入 review 阶段后，daemon 获取 fresh PR context。
-2. `PENDING`/`None` 只记录等待或不可用，不修复；`SUCCESS` 结束 CI 等待；仅 sign-off check 失败仍交给人工签核语义。
-3. 真实 `FAILURE` 计算 failure key，检查现有 marker 和 repair 次数。
-4. auto repair 关闭：写/保留观察 marker，返回 `ci_failed_manual`；打开且有预算：走现有 repair；耗尽：返回 `ci_repair_exhausted`。
+2. 将原始 checks 状态/摘要与 PRD 验收要求交给 Supervisor Agent；不从 `PENDING`/`FAILURE`/`SUCCESS` 推导动作。
+3. Agent 选择 `repair_pr_branch` 后才计算 failure key，检查 marker、自动修复策略与 repair 次数。
+4. 自动修复关闭或次数耗尽时不产生自动副作用，持续展示问题；Agent 选择 wait、人审或请求输入等其它合法动作时保留其结论，并如实呈递未验证项。
 5. repair push 后以新 head 为新轮，后续 daemon pass 重新等待 checks。
 6. Roadmap API 每次 fresh 读取 PR + marker，返回派生 `ci_delivery`；前端不缓存成功覆盖新失败。
 
@@ -209,8 +209,8 @@ CI 错误可能多轮出现，但无限 Agent 循环会持续消耗资源并可�
 │   ├── CiDeliveryStatus / CiCheckProblem
 │   └── RoadmapPrd 增加 ci_delivery
 ├── src/backend/core/use_cases/review_once.py
-│   [修改]【总结】持续监控 checks，并按开关/上限决定观察、修复或耗尽
-│   ├── 复用 sign-off-only 排除
+│   [修改]【总结】持续监控 checks，并只对 Agent 选择的 repair 应用策略与上限
+│   ├── 复用 Agent-led CI 决策，不根据 checks 状态自行分类
 │   ├── 用 head SHA + failure digest 去重
 │   └── 保留明确 outcome/marker
 ├── src/backend/core/use_cases/roadmap_ci_delivery.py
@@ -276,14 +276,12 @@ rg -n "fix_agent_enabled|autopilot.enabled|auto_merge" src/backend docs config.t
 flowchart TD
     A["PRD 实现完成并推送 PR"] --> B["daemon review_once 获取 fresh PR context"]
     B --> C{"checks_state"}
-    C -->|PENDING / unknown| D["继续监控；Roadmap 显示等待或不可用"]
-    C -->|SUCCESS| E["CI/CD 通过；继续既有 sign-off / merge / archive"]
-    C -->|FAILURE| F{"只有 sign-off gate?"}
-    F -->|是| G["等待人工签核，不自动修复"]
-    F -->|否| H{"auto_repair_ci 且仍有预算?"}
-    F -->|否| H["读取 PRD inherit/on/off + 仓库全局值"]
-    H --> M{"effective policy 且仍有预算?"}
-    M -->|否| I["记录问题；右侧详情持续显示"]
+    C --> D["Supervisor Agent 结合 checks 证据与 PRD 要求选择动作"]
+    D --> E{"Agent 选择 repair?"}
+    E -->|否| G["执行 Agent 选择；披露 CI 未验证/问题"]
+    E -->|是| H["读取 PRD inherit/on/off + 仓库全局值"]
+    H --> M{"策略开启且仍有预算?"}
+    M -->|否| I["拒绝自动副作用；问题持续呈现"]
     M -->|是| J["既有 execute_repair 修复同一 PR 分支"]
     J --> K["推送新 head SHA"]
     K --> B
@@ -295,10 +293,10 @@ flowchart TD
 
 ```yaml
 - id: rv-1
-  behavior: 自动修复打开时，PRD 完成后等待真实 CI/CD；失败可跨两个新 head SHA 连续修复，成功后结束等待；同一失败重入不重复修复
+  behavior: Supervisor Agent 根据执行失败证据选择 repair 后，自动修复策略允许时跨新 head 重试；同一 Agent repair 决定重入不重复修复
   reviewer: human
   real_entry: "在 GitHub sandbox 仓库运行 daemon：为测试 PR 依次产生 FAILURE(head A) -> repair/head B -> FAILURE -> repair/head C -> SUCCESS，并在 /app/roadmap 查看状态"
-  expected: "两次且仅两次 repair；每次都在新 head 后等待 checks；daemon 重启后同一 failure key 不重复；最终 UI 显示 CI/CD 通过和两轮历史"
+  expected: "每次 repair 都对应 Agent 合法 repair action；每个新 head 至多一次且最多两轮；零 job/billing 场景不因 FAILURE 自动 repair；重启后同一 action/failure key 不重复"
   mock_boundary: "opt-in sandbox 使用真实 GitHub PR/checks、真实 daemon/worktree/repair Agent；默认 CI 用 fake GitHub 状态机覆盖相同序列，不要求生产凭据"
   tier: R2
   test_layer: sandbox
@@ -315,7 +313,7 @@ flowchart TD
   behavior: 自动修复默认关闭；PRD 可跟随全局、强制开启或强制关闭，六种组合的 effective value 正确；关闭态零自动副作用，耗尽后停止副作用并保持问题
   reviewer: human
   real_entry: "真实 console + 临时仓库 .iar.toml，在 /app/roadmap 切换自动修复，刷新并运行 FAILURE/耗尽场景"
-  expected: "缺省全局关闭且 PRD=inherit；六种组合全部正确；切回 inherit 会跟随全局变化；配置 diff 只有 auto_repair_ci，override 只产生 latest policy marker；关闭态零 Agent/零 commit；耗尽后显错"
+  expected: "缺省全局关闭且 PRD=inherit；六种组合全部正确；切回 inherit 会跟随全局变化；配置 diff 只有 auto_repair_ci，override 只产生 latest policy marker；关闭态可以运行 Supervisor 判断但不执行自动 repair/commit；耗尽后显错"
   mock_boundary: "真实 FastAPI、真实临时配置文件和真实浏览器；GitHub/Agent 用记录副作用的 fake，配置 writer 不 mock"
   tier: R2
   test_layer: e2e
@@ -329,10 +327,10 @@ flowchart TD
   negative_control: "临时测试边界把 auto_repair_ci=false 改为 true 后重跑关闭场景"
   expected_fail: "出现 repair 调用/新 commit，零副作用断言变红"
 - id: rv-3
-  behavior: 自动修复关闭时，CI/CD 标签和右侧详情显示与当前 GitHub 失败摘要一致的一个或多个问题；未知/PENDING/sign-off-only 状态不伪装失败或成功
+  behavior: Roadmap 同时呈现 GitHub 原始 checks 状态与 Supervisor 决定/未验证说明；全局/单 PRD effective repair policy 在刷新后稳定
   reviewer: human
   real_entry: "just e2e tests/playwright-e2e/tests/workflows/roadmap-cicd-auto-repair.no-auth.spec.ts"
-  expected: "FAILURE 显示问题数、check 名称/摘要/轮次/GitHub 链接；PENDING 显示轮询；unknown 显示最近同步失败；sign-off-only 显示等待人工签核"
+  expected: "原始状态、check 摘要与 Agent outcome 分开呈现；零 job 场景明确未验证；策略显示刷新稳定，不把 aggregate FAILURE 呈现成代码失败或通过"
   mock_boundary: "真实 console/FastAPI/Next.js 页面；GitHub adapter 在 API 边界提供确定性 PR context，Roadmap under-test path 不 mock"
   tier: R1
   test_layer: e2e
@@ -342,7 +340,7 @@ flowchart TD
   behavior: 自动修复关闭或耗尽时，操作者可显式请求一次修复；重复点击/重试对同一 failure key 幂等且仍受修复上限、worktree 和禁止路径门禁
   reviewer: verifier
   real_entry: "uv run pytest -o addopts=\"\" tests/test_roadmap_ci_delivery.py tests/test_roadmap_api.py -k 'manual_repair or idempotent or exhausted' -v"
-  expected: "首次合法请求进入既有 repair；重复请求不重复 commit；耗尽、无 worktree、sign-off-only、unknown checks 均 4xx/明确 no-op"
+  expected: "首次合法请求进入既有 repair；重复请求不重复 commit；耗尽、无 worktree 或无法 fresh-read 当前 PR/checks 时返回明确冲突/no-op"
   mock_boundary: "FastAPI TestClient 和 core policy 真实；GitHub/Agent/process runner 使用记录副作用 fake"
   tier: R2
   test_layer: integration
@@ -414,9 +412,9 @@ No external validation required; repository code and existing PRDs were sufficie
 
 - Group: roadmap-delivery-control
 - Depends on tasks/issues:
-  - none
-- Gate type: none
-- Notes: 原 `hard` 门禁指向 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot`（统一右侧 PRD 详情容器与受限仓库设置 writer）；该上游已归档（`tasks/archive/`），门禁已满足，故现声明为 `none`。历史理由保留：构建上本可先实现独立 core policy，但完整交付曾必须等待上游先建立详情与写回边界，否则会造成重复 UI/配置边界。上游交付后，本 PRD 复用 `prd-detail.tsx` 的 `additionalTabs` 与 `repository_settings_editor`/`toml_section_editor.update_toml_table_keys`。
+  - tasks/pending/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md
+- Gate type: hard
+- Notes: 先交付 Agent-led CI 决策契约，确保 Roadmap 的 repair 策略只限制 Agent 选择的动作，而不是新增 checks→动作映射。前端容器与设置 writer 的历史依赖已由归档上游满足。
 
 ## 9. Acceptance Checklist
 
@@ -424,15 +422,13 @@ No external validation required; repository code and existing PRDs were sufficie
 
 | 要看的结果 | 呈递物 | 10 秒自检 |
 |---|---|---|
-| 打开自动修复后，两轮 CI 失败各触发一次修复，新 head 重新等待并最终通过 | `.../rv-1-multiround-ci-repair.webm`（交付时填实际路径/链接） | 时间线只有两次 repair，最终 head 的 checks 为 SUCCESS |
-| 默认/关闭态零自动副作用；配置只改单一键；耗尽后停止修复并显错 | `.../rv-2-toggle-off-and-exhausted.webm` + `.../rv-2-config-diff.txt` | 关闭态失败后 worktree HEAD 不变，问题仍显示 |
-| 右侧 CI/CD tab 准确显示失败问题、等待、不可用和人工签核态 | `.../rv-3-roadmap-ci-problems.png` | 标签数字与问题卡数量一致 |
+| 右侧 CI/CD tab 分开显示原始状态与 Agent 决定/未验证说明 | `.../rv-3-roadmap-ci-problems.png` | 零 job 场景未被标为代码失败或 CI 通过 |
 
-注：手动 repair 幂等/安全门禁和全仓 lint/test/build/docs（rv-4、rv-5）属于 `reviewer: verifier`，不在人读呈递区逐项展示，仅失败时上报。
+注：rv-1、rv-2、rv-4、rv-5 属于 `reviewer: verifier`，不在人读呈递区逐项展示，仅失败时上报。
 
 ### 9.2 Acceptance Evidence Package
 
-1. **Human-Confirmed / R2**：rv-1 多轮自动修复、重启去重与最终通过；rv-2 默认关闭、配置隔离、耗尽停止。
+1. **Human-Confirmed / R2**：rv-1 由 Agent 选择的多轮自动修复、重启去重和零 job 不触发 repair；rv-2 默认关闭、配置隔离、耗尽停止。
 2. **R2 verifier**：rv-4 手动 repair 的 server-side 解析、幂等与安全门禁。
 3. **R1 human**：rv-3 真实 Roadmap 入口的状态/问题呈现。
 4. **R0 verifier**：rv-5 架构、复用、测试、构建与文档。
@@ -447,9 +443,9 @@ No external validation required; repository code and existing PRDs were sufficie
 
 #### Behavior Acceptance
 
-- [ ] rv-1 通过：两轮失败在两个新 head 上各修复一次；同一 head 重入与 daemon 重启零重复；最终 SUCCESS
-- [ ] rv-2 通过：默认/关闭态零 Agent、零 commit；写回只改单一键；达到既有上限后停止修复并持续显错
-- [ ] `PENDING`、unknown/unreachable、sign-off-only 不启动 repair；unknown 不当成功，sign-off-only 仍等待人工
+- [ ] rv-1 通过：Agent 选择的两轮 repair 在两个新 head 上各执行一次；同一 action/head 重入与 daemon 重启零重复；零 job/账单问题不因 FAILURE 自动 repair
+- [ ] rv-2 通过：默认/关闭态不执行 repair、不产生 commit；写回只改单一键；达到既有上限后停止修复并持续显错
+- [ ] `PENDING`、unknown/unreachable、sign-off-only 均作为原始观察展示；wait/repair/human-review 等动作来自 Agent，状态展示不得伪造通过
 - [ ] `inherit/on/off × global on/off` 六种组合全通过；无 marker 等同 inherit；latest marker 胜出；恢复 inherit 后全局变化立即影响 effective value
 - [ ] 每个问题来自当前 `checks_summary` 或明确的汇总失败；实现未伪造不存在的 job 名、日志或根因
 
@@ -491,17 +487,17 @@ No external validation required; repository code and existing PRDs were sufficie
 ## 10. Functional Requirements
 
 - **FR-1**：有对应 PR 的 PRD 在实现/本地验证完成后必须进入 CI/CD waiting 状态；最新 head 的 checks 未 `SUCCESS` 前不得显示 CI/CD 已完成。
-- **FR-2**：daemon 必须在既有 review pass 中持续刷新 PR context；`PENDING`、`FAILURE`、`SUCCESS`、unknown/unreachable 和 sign-off-only 必须有互斥、明确语义。
+- **FR-2**：daemon 必须在既有 review pass 中持续刷新 PR context，并将原始 checks 状态/摘要及 PRD 验收要求交给 Supervisor Agent；checks 状态本身不得映射为 repair、wait、blocked 或 approval。Roadmap 分开呈现原始状态与 Agent outcome。
 - **FR-3**：Roadmap 顶部仓库控制条必须提供当前仓库级“全局自动修复 CI/CD”开关，统一控制该仓库所有 PRD，持久化到 `post_pr_supervisor.auto_repair_ci`，默认 `false`；切换仓库必须读取各自值。
 - **FR-4**：该开关不得修改或继承 `autopilot.enabled`、`safety.auto_merge` 或 `runner.fix_agent_enabled`；配置响应必须来自写后 fresh load。
-- **FR-5**：开关打开且最新 checks 为真实 `FAILURE` 时，系统必须复用既有 `repair_pr_branch`/`execute_repair` 流程；修复 push 后必须等待新 head checks。
+- **FR-5**：Supervisor Agent 选择 `repair_pr_branch`、effective 策略开启且未超过上限时，系统必须复用既有 repair 流程；修复 push 后读取新 head checks。`FAILURE` 本身不能触发 repair。
 - **FR-6**：自动修复允许多轮，但必须受 `post_pr_supervisor.max_repair_attempts` 限制；达到上限、repair 失败或 worktree 不可恢复时停止自动副作用并保留失败状态。
-- **FR-7**：开关关闭时，FAILURE 不得启动 Agent、创建 commit 或 push；持续监控不得停止。
+- **FR-7**：开关关闭时，不执行 Agent 选择的自动 repair、不创建修复 commit、不 push；checks 监控与 Agent 对其它合法动作的执行继续。Agent 判断 CI 未运行且选择人审时，界面不得错误标成代码失败或通过。
 - **FR-8**：右侧 `CI/CD` 标签与详情必须显示当前状态、问题数、轮次、最近同步、失败 check 名称/摘要和 GitHub URL；信息不足时标记汇总/不可用，不得推断根因。
-- **FR-9**：每次真实失败必须以 server-side 当前 PR number、head SHA 和失败摘要生成稳定 failure key；同一 key 的 daemon 重入、页面重试或重复动作不得重复 repair。
+- **FR-9**：Agent 选择 repair 后，服务端以当前 PR number、head SHA 和失败摘要生成稳定 failure key；同一 key 的 daemon 重入、页面重试或重复动作不得重复 repair。
 - **FR-10**：CI 状态与轮次必须从 GitHub PR context 和既有 `iar:event` markers 重建，不新增数据库表或浏览器持久事实源。
 - **FR-11**：关闭/耗尽态的问题卡可显式请求一次 repair；服务端必须重新解析当前 PR/head/failure，执行幂等、上限、worktree、禁止路径与现有安全门禁。
-- **FR-12**：本地 verification、verifier、Realistic Validation sign-off、rebase、merge queue、auto merge 双门禁与 PRD archive 验收流程保持兼容且不可被本开关绕过。
+- **FR-12**：本地 verification、verifier、Realistic Validation sign-off、mergeability/rebase、merge queue、auto merge 双门禁与 PRD archive 验收流程保持兼容且不可被本开关绕过；进入 human review 不等于验收通过。
 - **FR-13**：每个有对应 Issue 的 PRD 必须支持 `inherit / on / off` 三态，对应 UI 文案为“跟随全局 / 强制开启 / 强制关闭”；无显式 marker 必须解释为 `inherit`。
 - **FR-14**：服务端必须按 `on → true`、`off → false`、`inherit → fresh repository global` 计算并返回 effective value；覆盖使用对应 Issue 的 latest-wins marker 持久化，清除覆盖写回 `inherit`，不得由前端自行计算或按 PRD path 保存。
 
@@ -519,7 +515,7 @@ No external validation required; repository code and existing PRDs were sufficie
 
 - **GitHub 汇总粒度**：当前 `checks_summary` 可能只有聚合文本，问题卡不能承诺完整日志。若未来需要 job log 深链/全文，另立 CI provider PRD。
 - **并发状态变化**：手动 repair 点击时 head 可能已变化；服务端必须 fresh resolve 并对 stale failure 返回明确冲突，不能修复旧 head。
-- **成本控制**：自动修复会调用 Agent；既有 attempts 上限是本 PRD必须执行的硬边界。更细的额度/成本预算不在本范围。
+- **成本控制**：监督判断与自动修复会调用 Agent；repair attempts 上限约束副作用轮次，不把 checks 聚合状态当作触发条件。更细的额度/成本预算不在本范围。
 - **live sandbox 可用性**：真实 GitHub CI 多轮验证需要 opt-in 仓库与凭据；无凭据时必须完成 deterministic fake 状态机证据，但归档前仍应尽最高可行保真度补一条 live 演练或记录不可执行原因。
 
 ## 13. Decision Log
@@ -554,3 +550,12 @@ No external validation required; repository code and existing PRDs were sufficie
 - Reason: 上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档，交付顺序门禁已满足；同时该上游实际落地的是 `prd-detail.tsx`（`additionalTabs`）与 `repository_settings_editor`，与 PRD 写作时的假设文件名不同；嵌套子标题则使依赖声明对 runner 完全不可见。
 - Impact: 恢复依赖/分组字段可解析（现为 `none`），前端与配置落点与当前代码一致；不改变任何功能需求或验收判据。
 - Review: 自审通过；复跑 `parse_delivery_dependencies` 与 `extract_realistic_validation_items` 确认解析结果符合预期。
+
+### 修复 §8 依赖目标的解析可见性
+
+- Type: doc
+- Before: `Depends on tasks/issues:` 下的 PRD 路径是顶层列表项（无缩进），`parse_delivery_dependencies` 的 `_DELIVERY_LIST_ITEM_RE` 要求嵌套列表项，导致 `depends_on_prds` 解析为空——hard 门禁的目标文件对 runner 不可见。
+- After: 将该路径缩进为 `Depends on tasks/issues:` 的嵌套列表项；复跑解析确认 `gate=hard`、`depends_on_prds=('tasks/pending/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md',)`。
+- Reason: §8 自称唯一事实源，但解析器读不到依赖目标时无法执行交付顺序门禁。
+- Impact: 不改变任何功能需求或验收判据，仅修复结构化声明的机器可读性。
+- Review: 2026-09-28 复核中发现；用 `parse_delivery_dependencies` 验证通过。

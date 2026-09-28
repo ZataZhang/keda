@@ -1379,16 +1379,16 @@ checks 状态：
 - 所有 check/status 成功、skipped 或 neutral 时，`checks_state=SUCCESS`
 - 无 CI/check rollup 时，`checks_state` 为空，不阻断人工 review
 
-即使 supervisor 返回 `approve_for_human_review`，runner 仍会执行确定性门禁：
+平台不再按 checks 聚合状态改写 supervisor 动作：`checks_state`/`checks_summary` 是 Agent 的观察事实，不是动作指令。Supervisor Agent 结合 checks 摘要（可见的失败/进行中 check 名称、结论与链接）、PRD 验收要求、本地验证与其它证据，自行在合法动作中选择——真实执行的代码/测试失败可请求 `repair_pr_branch`，checks 仍在运行可选择 `wait_for_checks`，CI 未运行或基础设施不可用（如账单受限）且 PRD 未把该远端检查列为硬性验收项时可进入人工 review，但必须明确披露远端 CI 未验证，不得当作通过。runner 仍执行与 CI 分类无关的确定性安全门：
 
-- PR 当前不可合并或存在冲突时，approval 会被改写为 `rebase_pr_branch`
-- PR checks 已失败时，approval 会被改写为 `repair_pr_branch`
-- PR checks 仍在进行中（`checks_state=PENDING`）时，approval 会被改写为 `wait_for_checks`，Issue 保持 `agent/supervising` 继续等待 checks 完成，不会消耗 repair 次数
+- PR 当前不可合并或存在冲突（`mergeable=false`）且 Agent 选择 approve、wait 或 request_human_input 时，动作会被改写为 `rebase_pr_branch`；该守卫不读取 checks 状态
 - open PR 存在但完整 PR context 暂时无法读取时，本轮 supervision 会 defer 并保留待观察状态；发布、rework 后续评审和循环内再次评审都不会使用不完整 context 批准进入 review
-- supervisor 输出无法解析、返回未知 action，或返回空 summary 的 `request_human_input` 时，本轮会进入 `agent/failed`，不会生成无原因的 `agent/blocked`
+- supervisor 输出无法解析、返回未知 action，或返回空 summary 的 `request_human_input` 时，本轮会进入 `agent/failed`，不会生成无原因的 `agent/blocked`；平台不得根据 checks 状态猜测替代动作
 - supervisor agent 进程非零退出且 stdout 中识别不到任何 JSON 决策（如 claude CLI 遇到 API / 网络错误崩溃）时，视为基础设施级失败，会在同一 cycle 内重试至多 `max_agent_crash_retries` 次；重试之间指数退避（从 `crash_retry_initial_backoff_seconds` 起每次翻倍，单次等待封顶 `crash_retry_max_backoff_seconds`，默认 30s 起、上限 10 分钟），以扛住分钟级的 API 提供方中断。重试仍失败才进入 `agent/failed`，summary 会标明是 agent infrastructure failure。非零退出但 stdout 中仍能识别出 JSON 决策时直接使用该决策，不消耗重试次数
 
 这样可以避免 `agent/review` label 覆盖仍需 `iar run` 消费的 rework/rebase 状态。
+
+注意：merge queue 的自动合并仍会在合并前等待 checks 全绿（见下文"Autopilot 快速档（合并队列）"），这与 supervisor 的动作选择相互独立——进入人工 review 不代表验收完成，也不产生自动合并或归档资格。
 
 `iar review` 的 CLI 日志会打印本轮 outcome，例如 `queued_rebase_pr_branch`、
 `approved_for_human_review` 或 `deferred_pr_context_unavailable`。被 queue 的
