@@ -70,6 +70,27 @@
 - 非 GitHub 平台适配层。
 - autopilot fast-lane 的发布说明：`safety.auto_merge` 语义已从死开关激活（双开关同时为真才生效），需要显式提示升级影响，发布渠道（README / release notes / daemon 启动日志）待定。
 
+## 路线更新（2026-09-28 复核增补）
+
+> 上方正文是 2026-09-17 快照，历史条目未逐条重写；本节记录自该快照以来的交付与当前 pending PRD 顺序。各 PRD 的结构化交付依赖以对应 PRD §8 Delivery Dependencies 为唯一事实源，本节是阅读视图。
+
+### 自 2026-09-17 快照以来已交付
+
+- **Roadmap 单 PRD 控制、归档证据与仓库级 Autopilot 开关**（#148，`P1-FEAT-20260916-122645` 已归档）：统一右侧详情容器（`prd-detail.tsx` 的 `additionalTabs`）与受限 `.iar.toml` writer 落地。
+- **PRD 生命周期台账与可观测 UI**（#153）：console SQLite schema v5（`prd_lifecycle_runs` / `prd_lifecycle_events`）+ `frontend-public` 执行过程 tab 与 Stats 生命周期口径。
+- **Operator Skill 与可预期队列**（`P1-FEAT-20260924-020856` 已归档）。
+
+### 当前 pending PRD 与交付顺序
+
+1. `P1-FEAT-20260922-000431`（失败上下文交接 + 失败 Draft PR）：机器门禁 rv-1…rv-4 已全绿，待人工验收。
+2. `P1-BUG-20260924-100212`（Post-PR CI 决策契约，Agent-led）：无前置，可立即开工。要点：`checks_state`/`checks_summary` 作为 Agent 观察事实输入，不再按聚合状态强制改写 Supervisor 动作；仅保留 `mergeable=false` 等非 CI 确定性安全门。该契约取代上方 Near-Term Delivery Order 第 6 条中由归档 PRD `P1-BUG-20260527-093356` 建立的 FAILURE/PENDING 自动改写策略的相应部分；崩溃恢复、repair 次数上限与 mergeability 守卫不受影响。
+3. `P1-FEAT-20260916-134008`（Roadmap CI/CD 监控与可选自动修复）：⛔ hard 依赖第 2 项，其 §8 已机器声明该依赖（`Gate type: hard`）。
+4. `P1-FEAT-20260913-204531`（Tauri 桌面壳）：独立，可与上述并行。
+
+### 已知漂移（下次大更新时校准）
+
+- 上方快照的若干"未完成"条目已被后续归档 PRD 交付覆盖（如 rebase detached HEAD branch guard、发布恢复后的 supervisor 安全闭环等，见 `tasks/archive/` 2026-05 至 2026-07 条目），正文未逐条回写。
+
 ## Target Workflow
 
 1. 用户可以直接创建 GitHub Issue，也可以先写 PRD 后通过 `iar issue-from-prd` 发布 Issue；直接创建 Issue 时，用户应尽量写清需求、问题、复现路径、期望结果和约束，并可上传图片附件补充说明。

@@ -228,7 +228,7 @@
 ├── README.md
 │   [修改]
 │   【总结】安装段补一条本机构建说明，并写明"仅限本机自用，公开分发仍需签名"
-└── roadmap.md
+└── ROADMAP.md
     [修改]
     【总结】把"不做原生 .app"修订为"不做签名安装包公开分发；允许本机构建自用"，并登记桌面壳能力
 ```
@@ -375,7 +375,7 @@ No interactive prototype file changes in this PRD.
 
 | # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | （决策一）修订后的分发边界已落 roadmap 与文档；本机构建的 `.app` 双击直开且 `xattr` 无 `com.apple.quarantine` | `<rv-1 构建与双击打开录屏 / 截图绝对路径>`；`roadmap.md` 修订段落链接 | 双击 `~/Applications/kedacode.app`，确认无 Gatekeeper 拦截 |
+| 1 | （决策一）修订后的分发边界已落 roadmap 与文档；本机构建的 `.app` 双击直开且 `xattr` 无 `com.apple.quarantine` | `<rv-1 构建与双击打开录屏 / 截图绝对路径>`；`ROADMAP.md` 修订段落链接 | 双击 `~/Applications/kedacode.app`，确认无 Gatekeeper 拦截 |
 | 2 | （决策二）窗口呈现与 `iar console` 浏览器版一致的控制台，数据与同端口 curl 响应逐字一致；`desktop/` 不含业务逻辑 | `<rv-1 窗口截图绝对路径>` | 对比窗口内某个 PRD 标题与 `curl /api/v1/agent-runner/roadmap/prds` 的响应 |
 | 3 | （决策二）负向对照**实跑记录**：加载地址改为未监听端口后窗口显示错误页 | `<负向对照截图绝对路径>`；对照命令记录 | 查看截图是错误页而非正常界面 |
 
@@ -392,7 +392,7 @@ No interactive prototype file changes in this PRD.
 
 ### Human-Confirmed
 
-- [ ] （决策一）roadmap.md 与文档记录修订后边界——"不做签名安装包公开分发；允许本机构建自用"；rv-1 证据显示本机构建 `.app` 双击直开、`xattr` 无 `com.apple.quarantine`
+- [ ] （决策一）ROADMAP.md 与文档记录修订后边界——"不做签名安装包公开分发；允许本机构建自用"；rv-1 证据显示本机构建 `.app` 双击直开、`xattr` 无 `com.apple.quarantine`
 - [ ] （决策二）rv-1 证据显示窗口呈现与 `iar console` 浏览器版一致的控制台，且数据与同端口 curl 响应逐字一致；`desktop/` 不含任何业务逻辑
 - [ ] （决策二）rv-1 负向对照**实跑记录**：把加载地址改为未监听端口后窗口显示错误页 —— 证明"窗口显示真实数据"不是恒真
 
@@ -415,7 +415,7 @@ No interactive prototype file changes in this PRD.
 
 - [ ] docs/ 新增桌面 App 使用页（含 Rust + Xcode CLT 前置条件）并登记 `mkdocs.yml` 导航；`uv run mkdocs build --strict` 通过
 - [ ] README 安装段补充本机构建说明，并写明"仅限本机自用，公开分发仍需签名"
-- [ ] roadmap.md 完成决策修订表述更新
+- [ ] ROADMAP.md 完成决策修订表述更新
 - [ ] 两份 install.sh 的关系已在本 PRD 中给出结论并按结论落地
 
 ### Validation Acceptance
@@ -439,7 +439,7 @@ No interactive prototype file changes in this PRD.
 - FR-4: App 提供菜单栏托盘图标与全局热键呼出窗口。
 - FR-5: 两类失败必须有可区分的可视反馈：未找到 `iar` 时显示安装引导页；sidecar 启动失败或健康探测超时时显示"后端未运行"错误页。任何情况下不得白屏或永久加载。
 - FR-6: 桌面 App 与浏览器控制台共享同一后端与数据，互不干扰；`iar console` 既有行为不变；后端与前端代码零改动。
-- FR-7: 文档（docs/、mkdocs.yml、README、roadmap.md）同步记录桌面 App 用法、构建前置条件与修订后的分发决策边界。
+- FR-7: 文档（docs/、mkdocs.yml、README、ROADMAP.md）同步记录桌面 App 用法、构建前置条件与修订后的分发决策边界。
 
 ## 11. Non-Goals
 
