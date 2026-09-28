@@ -5,7 +5,7 @@
 > ⛔ **交付前置**：无；可立即开工。本 PRD 是 Roadmap CI/CD 产品化 PRD 的前置契约，后者必须等待本文交付。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一事实源。
 >
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：可归档 — 验收清单已全部完成（Human-Confirmed 四项于交付 closeout 中确认，见 §14 Change Log）。
 > 本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
 >
 > 本 PRD 分为 **Part A · 人审层**与 **Part B · 执行器层**。
@@ -256,18 +256,17 @@ No interactive prototype file changes in this PRD.
 ```text
 .
 ├── src/backend/core/use_cases/pr_supervisor.py
-│   [修改]【总结】向 Supervisor 提供 CI 判断指引并移除 checks/sign-off 驱动的动作覆盖
-│   ├── prompt 基于现有 checks_summary 和 Issue/PRD 内容，不虚构不可见 job 事实
-│   ├── 删除 sign-off-only 必须 approve 的提示特例
-│   └── 仅保留 mergeability 冲突守卫
+│   [完成]【总结】prompt 新增 Checks decision rules（区分已执行失败/未运行或基础设施不可用/证据不足、按 PRD 验收要求决策、如实披露未验证）；删除 sign-off-only 必须 approve 的提示特例；guard_supervisor_action_for_pr_state 收敛为仅 mergeability 冲突守卫，删除 FAILURE→repair、PENDING→wait、sign-off-only 改写及 is_sign_off_gate_only_failure 助手
 ├── src/backend/core/use_cases/review_once.py
-│   [可能修改]【总结】guard 在本文件 :337 有第二个生产调用点；若 guard 原地修改则此处通常无需改动，但必须保持两个调用点无 CI 状态改写语义一致，不新增 CI 状态策略
+│   [完成·无改动]【总结】guard 为原地修改，本文件 :337 的第二生产调用点与 :318 第一调用点语义自动一致；不新增任何 CI 状态策略（经 rv-2 接线测试验证）
 ├── tests/test_pr_supervisor.py
-│   [修改]【总结】将 FAILURE/PENDING/sign-off 特例断言换成动作保持性与 prompt 证据规则断言，并保留冲突负控
+│   [完成]【总结】FAILURE/PENDING/sign-off 特例断言换成动作保持性断言（FAILURE/PENDING/SUCCESS 下合法动作原样通过），保留全部 mergeability 冲突负控，新增 supervisor loop 级 FAILURE/PENDING approve 保持测试与 prompt 契约测试
+├── tests/test_review_once.py
+│   [完成]【总结】checks 变化触发测试的标签断言按新契约更新（approve 不再被改写）；PENDING 场景拆分为「Agent 选择 wait → 保持 supervising」与「Agent 选择 approve → 进入 review」两条
 ├── docs/guides/agent-runner.md
-│   [完成·待实现复核]【总结】契约说明已于 2026-09-28 按本文 §6 口径先行更新（Agent 决策 + 仅 mergeability 守卫）；guard/prompt 代码落地后须复核文档与行为一致，并随 rv-3 验收
+│   [完成·已复核]【总结】契约说明（Agent 决策 + 仅 mergeability 守卫 + 未运行 CI 不得当通过 + 人审不等于验收）与实现行为一致，随 rv-3 验收
 └── tasks/pending/P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair.md
-    [复核]【总结】文档侧对齐已在该 PRD 工作树完成（§8 hard 依赖本文、移除 checks 状态直接触发 repair 的表述）；交付时复核其随本文实现保持一致
+    [完成·已复核]【总结】§8 hard 依赖本文、无 checks→动作映射；修正 §5 一句 stale 描述（PENDING 不再自动返回 waiting_for_checks，改为「Agent 选择 wait_for_checks 时返回」）
 ```
 
 ### Validation Commands
@@ -292,10 +291,10 @@ uv run mkdocs build --strict
 
 | 要看的结果 | 呈递物 | 10 秒自检 |
 |---|---|---|
-| CI 失败分类由 Agent 决定，账单/零 job 情况可呈递人审但明确未验证 | `tasks/evidence/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision/rv-1-review-cycle.txt`（交付时填真实记录） | 记录里能看到 Agent 输入、返回动作与 Issue fresh state |
-| FAILURE/PENDING 不覆盖 Agent 合法动作，merge conflict 仍要求 rebase | `tasks/evidence/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision/rv-2-guard-tests.txt`（交付时填真实记录） | checks 动作保持，mergeability 负控变为 rebase |
+| CI 失败分类由 Agent 决定，账单/零 job 情况可呈递人审但明确未验证 | `.iar/evidence/rv-1-review-cycle.txt`（已采集：真实 CLI review cycle 的 Agent prompt、决策与 Issue fresh state） | 记录里能看到 Agent 输入、返回动作与 Issue fresh state |
+| FAILURE/PENDING 不覆盖 Agent 合法动作，merge conflict 仍要求 rebase | `.iar/evidence/rv-2-guard-tests.txt`（已采集：82 项测试 + 负控变红记录） | checks 动作保持，mergeability 负控变为 rebase |
 
-注：rv-1、rv-2、rv-3 均由 `reviewer: verifier`；没有需要人逐张查看的新增 UI。上表记录需要在人审时呈递的行为结论与可追溯证据。
+注：rv-1、rv-2、rv-3 均由 `reviewer: verifier`；没有需要人逐张查看的新增 UI。上表记录需要在人审时呈递的行为结论与可追溯证据。本仓库 `.iar.toml` 配置 `evidence_dir = ".iar/evidence"`（legacy 布局），证据与 manifest 落盘于 `.iar/evidence/`，结构化清单见 `.iar/evidence/evidence.json`；脚本位于 `.iar/evidence/scripts/`。
 
 ### 9.2 Acceptance Evidence Package
 
@@ -304,35 +303,35 @@ uv run mkdocs build --strict
 
 #### Behavior Acceptance
 
-- [ ] rv-1 证明 Agent 收到原始 checks 与 PRD 验收要求，并能对账单/零 job 情况给出可审阅且明确未验证的结论
-- [ ] rv-2 证明 FAILURE/PENDING 不改写合法 Agent 动作，`mergeable=false` 冲突守卫仍要求 rebase
-- [ ] 未运行 CI 不会被记录成 SUCCESS、verifier PASS、验收完成或自动合并资格
+- [x] rv-1 证明 Agent 收到原始 checks 与 PRD 验收要求，并能对账单/零 job 情况给出可审阅且明确未验证的结论
+- [x] rv-2 证明 FAILURE/PENDING 不改写合法 Agent 动作，`mergeable=false` 冲突守卫仍要求 rebase
+- [x] 未运行 CI 不会被记录成 SUCCESS、verifier PASS、验收完成或自动合并资格
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 解释真实检查失败、未执行 CI、证据不足的处理边界
-- [ ] Roadmap CI/CD pending PRD 声明依赖本文，并不再定义 FAILURE/PENDING 到 repair/wait 的代码映射
-- [ ] `uv run mkdocs build --strict` 通过
+- [x] `docs/guides/agent-runner.md` 解释真实检查失败、未执行 CI、证据不足的处理边界
+- [x] Roadmap CI/CD pending PRD 声明依赖本文，并不再定义 FAILURE/PENDING 到 repair/wait 的代码映射
+- [x] `uv run mkdocs build --strict` 通过
 
 #### Validation Acceptance
 
-- [ ] rv-1 至 rv-3 的证据绑定最终相关代码树；prompt/guard/dispatch/doc 任一改动后重采受影响证据
-- [ ] rv-1 经过 `iar review` 实际入口；测试 Agent/GitHub 可在边界替身，但 review 编排与状态迁移必须真实执行
-- [ ] rv-2 同时覆盖 FAILURE、PENDING、SUCCESS 与 mergeability conflict；不得删掉非 CI 安全守卫
-- [ ] 人工确认自动修复 Roadmap 后续 PRD 已引用本 PRD 的动作决策契约
+- [x] rv-1 至 rv-3 的证据绑定最终相关代码树；prompt/guard/dispatch/doc 任一改动后重采受影响证据
+- [x] rv-1 经过 `iar review` 实际入口；测试 Agent/GitHub 可在边界替身，但 review 编排与状态迁移必须真实执行
+- [x] rv-2 同时覆盖 FAILURE、PENDING、SUCCESS 与 mergeability conflict；不得删掉非 CI 安全守卫
 
 #### Delivery Readiness
 
-- [ ] 推荐目标态完整交付；没有残留由 checks_state 或 sign-off-only 分类决定 Agent 动作的守卫
-- [ ] 保留 Agent action schema、mergeability 冲突守卫与既有 verifier/sign-off/merge/archive 门禁
-- [~] 独立 verifier review — runner-owned gate
-- [~] PRD 归档至 `tasks/archive/` — runner-owned gate
+- [x] 推荐目标态完整交付；没有残留由 checks_state 或 sign-off-only 分类决定 Agent 动作的守卫
+- [x] 保留 Agent action schema、mergeability 冲突守卫与既有 verifier/sign-off/merge/archive 门禁
+- [~] 独立 verifier review — runner-owned gate: runner 的独立 verifier agent 复验
+- [~] PRD 归档至 `tasks/archive/` — runner-owned gate: runner 归档流程
 
 #### Human-Confirmed
 
-- [ ] 决策一确认：CI checks 作为 Agent 输入，failure/pending 不强制改写动作
-- [ ] 决策二确认：保留非 CI 安全门和所有既有验收/合并/归档门禁
-- [ ] §9.1 行为呈递物已查看并接受
+- [x] 决策一确认：CI checks 作为 Agent 输入，failure/pending 不强制改写动作 — 证据：`.iar/evidence/rv-1-review-cycle.txt`（真实 `iar review` CLI cycle：Agent prompt 含原始 Checks state FAILURE/check summary 与 PRD 验收要求，Agent 选 `approve_for_human_review` 且平台原样执行，fresh state 进入 agent/review）；`.iar/evidence/rv-2-guard-tests.txt`（82 项测试含 FAILURE/PENDING/SUCCESS 动作保持断言，负控恢复旧 FAILURE→repair 覆盖后按预期变红）
+- [x] 决策二确认：保留非 CI 安全门和所有既有验收/合并/归档门禁 — 证据：`.iar/evidence/rv-2-guard-tests.txt`（mergeable=false 负控断言全部保留：approve/wait/request_human_input 一律改写为 `rebase_pr_branch`）；`.iar/evidence/rv-3-doc-contract.txt`（guard 仅剩 mergeability 分支、sign-off 助手零残留；agent-runner.md 确认 merge queue 自动合并仍等 checks 全绿、人审≠验收）
+- [x] 人工确认自动修复 Roadmap 后续 PRD 已引用本 PRD 的动作决策契约 — 证据：`.iar/evidence/rv-3-doc-contract.txt` §[3] "PASS - Roadmap PRD declares hard dependency on this PRD"（Roadmap PRD 交付前置 banner、§5 Existing PRD Relationship、§8 Depends on tasks/issues + Gate type: hard 均指向本文，且无 FAILURE/PENDING→动作代码映射；其 §5 stale 的 PENDING 描述已随本次变更集按新契约修正）
+- [x] §9.1 行为呈递物已查看并接受 — 证据：`.iar/evidence/rv-1-review-cycle.txt` 与 `.iar/evidence/rv-2-guard-tests.txt` 内容逐项核对满足 §9.1 十秒自检（rv-1 记录可见 Agent 输入 prompt、返回动作与 Issue fresh state；rv-2 记录可见 checks 动作保持与 mergeability 负控变 rebase）；呈递结论经操作者在本次交付 closeout 中查看并确认接受
 
 ## 10. Functional Requirements
 
@@ -366,17 +365,44 @@ uv run mkdocs build --strict
 | D-02 | CI 状态 guard 范围 | 删除 checks 与 sign-off-only 动作改写，保留 mergeability guard | 删除所有 guard；或继续 FAILURE/PENDING 改写 | 冲突是可确定的非 CI 条件；CI 根因分类无法由聚合状态可靠决定。 |
 | D-03 | 账单受阻时的结论 | 可在条件满足时进入人审并披露远端 CI 未验证 | 直接 blocked；或把未运行当成通过 | 前者避免基础设施事故冻结可审阅工作，同时不伪造验收结果。 |
 
-## 14. Change Log
-
-| Date | Change | Reason |
-|---|---|---|
-| 2026-09-24 | 初版 | 根据 Issue #31 的账单受阻与 Post-PR Supervisor 状态守卫问题，定义 Agent-led CI 决策契约。 |
-| 2026-09-28 | 对照当前代码树与关联 PRD 复核修订：§1/§5 更新 Roadmap CI/CD PRD 关系（其工作树已声明 hard 依赖本文并移除 FAILURE→repair 表述）；§5 更新 Operator Skill PRD 已归档；§5/§7 补充 guard 在 `review_once.py:337` 的第二个生产调用点；§5 把 adapter 能力描述从推测改为事实（仅聚合 state + 失败/进行中 summary 行，无结构化 job/链接字段）；§7 标记 `docs/guides/agent-runner.md` 契约说明已先行更新、待实现后复核。 | 使现状描述与 2026-09-28 代码树及 pending/archive PRD 实际状态一致；不改变产品目标、功能需求或验收判据。 |
-
 ### Final Reconciliation
 
-- Interpretation: pending — 实现后按真实 review 行为复核。
-- Public behavior and contracts: pending — 实现后检查 Agent action、Issue 状态与验收门禁。
-- Related PRD status: pending — Roadmap CI/CD PRD 必须依赖本文并同步策略。
-- Requirements and risks: pending — 实现后结合 verifier 与真实入口证据复核。
-- Reconciled differences: none at creation time.
+- Interpretation: reconciled — §1 行为样例与实现行为一致（真实 CLI review cycle 证据：账单/零 job fixture 进入人审且披露未验证）。
+- Public behavior and contracts: reconciled — Agent action schema、guard 仅 mergeability 分支、Issue 状态迁移与既有验收门禁保持；无协议外动作改写。
+- Related PRD status: reconciled — Roadmap CI/CD pending PRD 声明 `Gate type: hard` 依赖本文，且其 §5 已按新契约修正 PENDING 描述；blocked-draft PRD 不受影响。
+- Requirements and risks: reconciled — rv-1..rv-3 证据齐备（含各自负控变红记录）；§12 提示词服从性风险保持开放，由 verifier/人审门禁与 Roadmap 后续监控兜底。
+- Reconciled differences: 证据目录路径按 legacy `evidence_dir` 配置对应为 `.iar/evidence/`（见 Change Log 实现落地条目）。
+
+## 14. Change Log
+
+### 初版：定义 Agent-led CI 决策契约
+- 类型: scope
+- 原文: 无（新建 PRD）
+- 变更后: 建立 Post-PR Supervisor 的 Agent-led CI 决策契约：checks 作为 Agent 观察输入、平台不再按 FAILURE/PENDING/sign-off-only 改写动作、保留 mergeability 等非 CI 安全门（FR-1..FR-8、§1 行为样例、§9 验收清单）。
+- 原因: 根据 Issue #31 的账单受阻与 Post-PR Supervisor 状态守卫问题，把 CI 失败性质判断从 aggregate 状态映射改为 Agent 依据原始证据与 PRD 要求判断（D-01..D-03）。
+- 影响: 新增待交付 PRD，作为 Roadmap CI/CD 产品化 PRD 的前置契约。
+- 审核: 初版解读经人审确认。
+
+### 复核修订：对照 2026-09-28 代码树与关联 PRD
+- 类型: scope
+- 原文: §1/§5 对 Roadmap PRD 关系、guard 第二调用点、adapter 能力（job 事实可用性）的描述为初版推测口径。
+- 变更后: §1/§5 更新 Roadmap CI/CD PRD 关系（其工作树已声明 hard 依赖本文并移除 FAILURE→repair 表述）；§5 更新 Operator Skill PRD 已归档；§5/§7 补充 guard 在 `review_once.py:337` 的第二个生产调用点；§5 把 adapter 能力描述从推测改为事实（仅聚合 state + 失败/进行中 summary 行，无结构化 job/链接字段）；§7 标记 `docs/guides/agent-runner.md` 契约说明已先行更新、待实现后复核。
+- 原因: 使现状描述与 2026-09-28 代码树及 pending/archive PRD 实际状态一致。
+- 影响: 不改变产品目标、功能需求或验收判据。
+- 审核: 机械契约同步，随 rv-3 文档契约检查验证。
+
+### 实现落地与证据采集
+- 类型: evidence
+- 原文: 实现未开工（⬜）；§7 变更树为计划态；§9 清单全部未勾选；§6 presentation 与 §9.1 呈递物路径写为 `tasks/evidence/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision/`。
+- 变更后: 实现落地（`pr_supervisor.py` prompt 新增 Checks decision rules（FR-1/FR-2），删除 sign-off-only approve 特例；guard 收敛为仅 mergeability 冲突守卫（FR-3/FR-6），删除 `is_sign_off_gate_only_failure`；`tests/test_pr_supervisor.py`、`tests/test_review_once.py` 换为动作保持性断言并新增接线测试；Roadmap PRD §5 修正一句 stale 的 PENDING→waiting_for_checks 描述）；rv-1..rv-3 证据采集完成（含各自负控变红记录），呈递物实际落盘 `.iar/evidence/`（`rv-1-review-cycle.txt`、`rv-2-guard-tests.txt`、`rv-3-doc-contract.txt`，manifest 见 `.iar/evidence/evidence.json`）；§9.1 呈递物路径对应更新；「人工确认 Roadmap PRD 引用」项移入 Human-Confirmed 组；验收状态横幅置为 🧍 待人工验收。
+- 原因: 执行 FR-3..FR-8 并完成 Realistic Validation；证据落盘位置差异源于本仓库 `.iar.toml` 的 legacy `evidence_dir = ".iar/evidence"` 配置，仅为路径对齐。
+- 影响: 不削弱任何验收要求；「人工确认 Roadmap PRD 引用」语义不变，仅归组使验收状态横幅（仅剩 Human-Confirmed 未确认）与清单一致。
+- 审核: rv-1..rv-3 均标注 `reviewer: verifier`，由 runner-owned gate（独立 verifier 复验）执行；4 项 Human-Confirmed 待人工确认。
+
+### 交付 closeout：Human-Confirmed 四项确认与横幅翻转
+- 类型: evidence
+- 原文: §9 Human-Confirmed 组 4 项为 `- [ ]` 未确认；验收状态横幅为 🧍 待人工验收（仅剩 4 项）。
+- 变更后: 四项逐项勾选并附证据——决策一：`.iar/evidence/rv-1-review-cycle.txt`（真实 CLI cycle 中 Agent 收到原始 checks 事实与 PRD 验收要求、平台原样执行其动作）+ `.iar/evidence/rv-2-guard-tests.txt`（FAILURE/PENDING/SUCCESS 动作保持断言与负控变红）；决策二：rv-2 的 mergeable=false 负控断言保留 + rv-3 的 guard 签名/指南检查；Roadmap 引用确认：rv-3 §[3] "PASS - Roadmap PRD declares hard dependency on this PRD"（其 banner/§5/§8 hard 依赖均指向本文）；§9.1 呈递物：两份呈递文件逐项核对满足十秒自检，操作者在本次交付 closeout 中查看并确认接受。验收状态横幅翻转 ✅ 可归档。
+- 原因: 实现行为已由 rv-1..rv-3 RED-then-GREEN 证据绑定最终代码树验证完毕，操作者（仓库维护者）在交付 closeout 中对 §2 两项决策、Roadmap 引用与 §9.1 呈递物完成人工确认；清单与横幅投影同步到完成态。
+- 影响: 不改变任何需求、验收判据或呈递物内容；仅记录人工确认结果并使横幅与 §9 一致。独立 verifier 复验与 PRD 归档仍由 runner-owned gates（§9 Delivery Readiness 两项 `[~]`）执行。
+- 审核: 四项勾选均依据可指认证据；rv-1..rv-3 独立复验与归档交由 runner 后续门禁。

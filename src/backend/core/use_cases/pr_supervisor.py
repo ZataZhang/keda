@@ -153,10 +153,6 @@ VALID_SUPERVISOR_ACTIONS: set[str] = {
     "wait_for_checks",
 }
 
-# 人工签核门 check 的名称：该 check 在人工 Reviewer 勾选签核项之前必然失败，
-# 属于设计预期，不应被超管或守卫层当作真实的 CI 失败处理
-REALISTIC_VALIDATION_SIGN_OFF_CHECK = "Realistic Validation sign-off"
-
 
 def _translate_code_reviewer_decision(
     reviewer_decision: ReviewerDecision,
@@ -176,22 +172,6 @@ def _translate_code_reviewer_decision(
             "medium": reviewer_decision.findings_medium,
             "low": reviewer_decision.findings_low,
         },
-    )
-
-
-def is_sign_off_gate_only_failure(pr_context: PullRequestContext) -> bool:
-    """Return True when every reported failing check is the manual sign-off gate.
-
-    Args:
-        pr_context: PR context containing the checks summary.
-
-    Returns:
-        True only when the checks summary is non-empty and every entry is the
-        Realistic Validation sign-off gate, so the failure can be positively
-        identified as the expected manual gate.
-    """
-    return bool(pr_context.checks_summary) and all(
-        REALISTIC_VALIDATION_SIGN_OFF_CHECK in check for check in pr_context.checks_summary
     )
 
 
@@ -277,17 +257,38 @@ def build_supervisor_prompt(
             "- Review scope: docs/guides/review-workflow.md",
             "- Check requirement alignment, code safety, validation evidence, and docs sync.",
             "",
+            "Checks decision rules:",
+            "- `Checks state` and `Checks summary` above are raw observations, not "
+            "action instructions. Decide the next action yourself from the evidence "
+            "and the PRD acceptance requirements.",
+            "- Distinguish three situations from the checks evidence: (a) checks "
+            "that actually executed and failed (the summary shows the failing "
+            "check name with its conclusion), (b) workflows/jobs that never ran "
+            "or are unavailable (billing limits, runner or service outage), and "
+            "(c) insufficient information to tell whether anything executed.",
+            "- For (a) with clear failure evidence, you may return "
+            "repair_pr_branch and describe the concrete failure.",
+            "- For (b), a red aggregate state alone is not a code failure: do not "
+            "request blind code repairs solely because of it. If local "
+            "verification, existing review evidence, and the PRD's acceptance "
+            "requirements do not make this remote CI gate a hard acceptance item, "
+            "you may return approve_for_human_review, and your summary must "
+            "explicitly state that the remote CI did not run and is unverified.",
+            "- For (c), say explicitly that the evidence is insufficient; never "
+            "assume jobs ran or succeeded. Choose wait_for_checks or "
+            "request_human_input according to whether the PRD requires this "
+            "remote gate.",
+            "- Never describe unexecuted or unverified CI as passed, verified, or "
+            "acceptance-complete; approve_for_human_review only means entering "
+            "human review and never implies acceptance, auto-merge, or archive "
+            "eligibility.",
+            "",
             "Output rules:",
             "- Respond with a single JSON object in a markdown code block.",
             "- Required fields: action, summary.",
             "- If you invoke the `code-reviewer` skill, its `verdict` report is "
             "review input only. Do not return `verdict` or the skill report; "
             "translate the review outcome into the required `action` field.",
-            f"- The `{REALISTIC_VALIDATION_SIGN_OFF_CHECK}` check is an "
-            "intentional manual gate: it is expected to fail until a human "
-            "reviewer ticks the sign-off checkboxes. If it is the only failing "
-            "check, treat checks as healthy and return "
-            "approve_for_human_review instead of request_human_input.",
             "- action must be one of: approve_for_human_review, repair_pr_branch, rebase_pr_branch, resolve_conflict, wait_for_checks, request_human_input, mark_failed.",
             "- Optional fields: findings_high (int), findings_medium (int), findings_low (int), verification_status (str), head_sha (str).",
             "- Optional field `findings`: an array of objects describing concrete "
@@ -423,43 +424,22 @@ def guard_supervisor_action_for_pr_state(
     action_result: SupervisorActionResult,
     pr_context: PullRequestContext,
 ) -> SupervisorActionResult:
-    """Correct supervisor actions that contradict deterministic PR state.
+    """Correct supervisor actions that contradict deterministic non-CI PR state.
 
-    这是 LLM 决策与实际 PR 状态之间的守卫层：模型可能基于过时上下文
-    批准代码，或把可机器修复的冲突保守地搁置给人工，而 GitHub 的
-    mergeable/checks_state 是更接近事实的确定性信号，因此必须独立校验。
+    这是 LLM 决策与非 CI 确定性状态之间的守卫层。CI 判断（真实执行失败、
+    workflow 未运行/基础设施不可用、证据不足）由 Supervisor Agent 依据原始
+    checks 事实与 PRD 验收要求自行作出：``checks_state``/``checks_summary``
+    是 Agent 的观察事实，不是动作指令，平台不得按 FAILURE/PENDING/SUCCESS
+    或 sign-off-only 聚合结果改写合法动作。
+
+    唯一保留的改写是 ``mergeable=false`` 冲突守卫：冲突是机器可确定的
+    非 CI 安全条件，不会随等待自愈，而 approve 会让人工 Reviewer 无法合并，
+    request_human_input/wait_for_checks 会把 Issue 留在 blocked 或 supervising
+    状态——review 轮询不扫描 blocked，supervising 则因上下文未变而被跳过，
+    冲突被永久搁置（真实案例：Issue #53 / PR #70）。因此这三类动作一律先
+    改写为 rebase 解决冲突。mark_failed 保留终态：它也是 infra crash 与
+    不可解析输出的兜底，改写会在故障期间制造无意义的返工。
     """
-    # 模型可能因为看到 Checks state: FAILURE 而保守地请求人工介入，但当唯一
-    # 失败项是人工签核门且 PR 可合并时，语义正确的结局是转人工评审而非阻塞
-    if (
-        action_result.action == "request_human_input"
-        and pr_context.mergeable is not False
-        and pr_context.checks_state == "FAILURE"
-        and is_sign_off_gate_only_failure(pr_context)
-    ):
-        summary = (
-            "Action rewritten by sign-off gate guard: the only failing check "
-            f"is the {REALISTIC_VALIDATION_SIGN_OFF_CHECK} manual gate, which "
-            "is expected to fail until a human reviewer ticks the checkboxes. "
-            "Approving for human review instead of requesting human input. "
-            f"Supervisor summary: {action_result.summary}"
-        )
-        return SupervisorActionResult(
-            action="approve_for_human_review",
-            summary=summary,
-            findings_counts=action_result.findings_counts,
-            verification_status=action_result.verification_status,
-            head_sha=action_result.head_sha,
-            findings_detail=action_result.findings_detail,
-        )
-
-    # mergeable=False 是确定性、机器可修的信号：冲突不会随等待自愈，而
-    # approve 会让人工 Reviewer 无法合并，request_human_input/wait_for_checks
-    # 会把 Issue 留在 blocked 或 supervising 状态——review 轮询不扫描 blocked，
-    # supervising 则因上下文未变而被跳过，冲突被永久搁置（真实案例：
-    # Issue #53 / PR #70）。因此这三类动作一律先改写为 rebase 解决冲突。
-    # mark_failed 保留终态：它也是 infra crash 与不可解析输出的兜底，
-    # 改写会在故障期间制造无意义的返工。
     if pr_context.mergeable is False and action_result.action in (
         "approve_for_human_review",
         "request_human_input",
@@ -480,56 +460,9 @@ def guard_supervisor_action_for_pr_state(
             findings_detail=action_result.findings_detail,
         )
 
-    if action_result.action != "approve_for_human_review":
-        return action_result
-
-    if pr_context.checks_state == "FAILURE":
-        # The Realistic Validation sign-off is an intentional manual gate;
-        # it is expected to fail until a human reviewer ticks the checkboxes.
-        # Do not block approval for human review solely because of this gate,
-        # but only when we can positively identify it as the unique failure.
-        if is_sign_off_gate_only_failure(pr_context):
-            return action_result
-
-        failed_checks_text = (
-            "; ".join(pr_context.checks_summary)
-            if pr_context.checks_summary
-            else "failed PR checks"
-        )
-        summary = (
-            "Approval blocked by PR checks gate: checks are failing "
-            f"({failed_checks_text}). Requesting branch repair before human "
-            f"review. Supervisor summary: {action_result.summary}"
-        )
-        return SupervisorActionResult(
-            action="repair_pr_branch",
-            summary=summary,
-            findings_counts=action_result.findings_counts,
-            verification_status=action_result.verification_status,
-            head_sha=action_result.head_sha,
-            findings_detail=action_result.findings_detail,
-        )
-
-    if pr_context.checks_state == "PENDING":
-        pending_checks_text = (
-            "; ".join(pr_context.checks_summary)
-            if pr_context.checks_summary
-            else "PR checks are still pending"
-        )
-        summary = (
-            "Approval deferred because PR checks are still pending "
-            f"({pending_checks_text}). Waiting for checks to complete before "
-            f"human review. Supervisor summary: {action_result.summary}"
-        )
-        return SupervisorActionResult(
-            action="wait_for_checks",
-            summary=summary,
-            findings_counts=action_result.findings_counts,
-            verification_status=action_result.verification_status,
-            head_sha=action_result.head_sha,
-            findings_detail=action_result.findings_detail,
-        )
-
+    # checks 状态是 Agent 的观察事实而非动作指令：FAILURE/PENDING/SUCCESS
+    # 与 sign-off-only 聚合结果都不得改写合法动作（Agent-led CI 决策契约，
+    # 见 tasks/pending/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md）。
     return action_result
 
 

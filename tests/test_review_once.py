@@ -109,9 +109,9 @@ def test_review_once_detects_checks_state_change_and_triggers_supervisor() -> No
 
     assert mock_cycle.called is True
     label_calls = [c for c in client.calls if c["method"] == "edit_issue_labels"]
-    # Failed checks block approval and request branch repair.
+    # Agent-led CI 决策契约：FAILURE 不再改写 approve，Issue 进入 review。
     assert len(label_calls) == 1
-    assert label_calls[0]["add"] == ["agent/running"]
+    assert label_calls[0]["add"] == ["agent/review"]
     assert label_calls[0]["remove"] == ["agent/supervising"]
 
 
@@ -762,7 +762,61 @@ def test_review_once_cleans_dirty_workflow_labels() -> None:
 
 
 def test_review_once_waits_for_pending_checks() -> None:
-    """Pending checks must keep the Issue in supervising, not move to review."""
+    """An agent-chosen wait must keep the Issue in supervising, not move to review."""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="B",
+        labels=(config.labels.supervising,),
+    )
+    client = FakeGitHubClient()
+    client._issue_labels[issue.number] = issue.labels
+    client._remote_base_sha = "def456"
+    client._issue_comments[1] = [
+        _marker_comment(checks_state="PENDING", issue_comments_count=1, pr_comments_count=0)
+    ]
+    client._pr_contexts["issue-1"] = _make_pr_context(checks_state="PENDING")
+    client._pr_comments[1] = ["new pr comment"]
+    agent_wait = _supervisor_approve()
+    agent_wait.action = "wait_for_checks"
+
+    with (
+        patch(
+            "backend.core.use_cases.review_once.create_or_reuse_worktree",
+            return_value=Path("."),
+        ),
+        patch(
+            "backend.core.use_cases.review_once.resolve_supervisor_agent",
+            return_value="codex",
+        ),
+        patch(
+            "backend.core.use_cases.review_once.run_post_pr_supervisor_cycle",
+            return_value=agent_wait,
+        ),
+    ):
+        outcome = _process_review_candidate(
+            issue=issue,
+            repo_path=Path("."),
+            config=config,
+            agent="auto",
+            github_client=client,
+            process_runner=FakeProcessRunner(),
+        )
+
+    assert outcome == "waiting_for_checks"
+    final_labels = set(client._issue_labels[issue.number])
+    workflow_labels = set(workflow_state_labels(config))
+    assert final_labels.intersection(workflow_labels) == {config.labels.supervising}
+
+
+def test_review_once_keeps_agent_approval_under_pending_checks() -> None:
+    """PENDING checks must not rewrite an agent approval into wait_for_checks.
+
+    Agent-led CI 决策契约：PENDING 是观察事实而非动作指令，平台保留
+    approve_for_human_review，既有更高层验收/合并门禁仍按原规则生效。
+    """
     config = AppConfig()
     issue = IssueSummary(
         number=1,
@@ -803,10 +857,10 @@ def test_review_once_waits_for_pending_checks() -> None:
             process_runner=FakeProcessRunner(),
         )
 
-    assert outcome == "waiting_for_checks"
+    assert outcome == "approved_for_human_review"
     final_labels = set(client._issue_labels[issue.number])
     workflow_labels = set(workflow_state_labels(config))
-    assert final_labels.intersection(workflow_labels) == {config.labels.supervising}
+    assert final_labels.intersection(workflow_labels) == {config.labels.review}
 
 
 def test_review_once_skips_running_issue_with_pending_rework() -> None:

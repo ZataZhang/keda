@@ -174,11 +174,15 @@ def test_supervisor_action_gate_blocks_conflicting_pr_approval() -> None:
     assert "mergeability gate" in gated_result.summary
 
 
-def test_supervisor_action_gate_blocks_failed_check_approval() -> None:
-    """Failed checks should request repair instead of human review."""
+def test_supervisor_action_gate_keeps_approval_when_checks_fail() -> None:
+    """FAILURE checks must not rewrite an agent approval into repair.
+
+    Agent-led CI 决策契约：checks_state 是观察事实而非动作指令，真实执行
+    失败与未执行/基础设施不可用由 Agent 依据摘要与 PRD 要求区分。
+    """
     action_result = SupervisorActionResult(
         action="approve_for_human_review",
-        summary="LGTM",
+        summary="Local verification passed; remote CI unverified.",
     )
     pr_context = PullRequestContext(
         pr_url="https://github.com/example/repo/pull/1",
@@ -192,12 +196,12 @@ def test_supervisor_action_gate_blocks_failed_check_approval() -> None:
 
     gated_result = guard_supervisor_action_for_pr_state(action_result, pr_context)
 
-    assert gated_result.action == "repair_pr_branch"
-    assert "lint" in gated_result.summary
+    assert gated_result.action == "approve_for_human_review"
+    assert gated_result.summary == "Local verification passed; remote CI unverified."
 
 
-def test_supervisor_action_gate_allows_approval_for_validation_sign_off_only() -> None:
-    """The intentional manual Realistic Validation gate alone must not block approval."""
+def test_supervisor_action_gate_keeps_approval_for_sign_off_only_failure() -> None:
+    """Sign-off-only FAILURE must not rewrite the agent action either."""
     action_result = SupervisorActionResult(
         action="approve_for_human_review",
         summary="LGTM",
@@ -218,8 +222,8 @@ def test_supervisor_action_gate_allows_approval_for_validation_sign_off_only() -
     assert gated_result.summary == "LGTM"
 
 
-def test_supervisor_action_gate_blocks_when_validation_and_other_checks_fail() -> None:
-    """If other checks fail alongside the validation gate, repair is still required."""
+def test_supervisor_action_gate_keeps_approval_when_sign_off_and_other_checks_fail() -> None:
+    """Mixed sign-off plus real check failure must not trigger any rewrite."""
     action_result = SupervisorActionResult(
         action="approve_for_human_review",
         summary="LGTM",
@@ -239,13 +243,38 @@ def test_supervisor_action_gate_blocks_when_validation_and_other_checks_fail() -
 
     gated_result = guard_supervisor_action_for_pr_state(action_result, pr_context)
 
+    assert gated_result.action == "approve_for_human_review"
+    assert gated_result.summary == "LGTM"
+
+
+def test_supervisor_action_gate_keeps_repair_under_failed_checks() -> None:
+    """A real executed-failure repair decision from the agent must pass through."""
+    action_result = SupervisorActionResult(
+        action="repair_pr_branch",
+        summary="Fix the failing lint rule.",
+    )
+    pr_context = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-1",
+        head_sha="abc123",
+        base_sha="def456",
+        mergeable=True,
+        checks_state="FAILURE",
+        checks_summary=("lint (conclusion=FAILURE)",),
+    )
+
+    gated_result = guard_supervisor_action_for_pr_state(action_result, pr_context)
+
     assert gated_result.action == "repair_pr_branch"
-    assert "lint" in gated_result.summary
+    assert gated_result.summary == "Fix the failing lint rule."
 
 
-def test_supervisor_action_gate_rewrites_human_input_for_sign_off_only() -> None:
-    """A conservative human-input request must become approval when only the
-    Realistic Validation sign-off gate is failing (real case: Issue #72 / PR #76)."""
+def test_supervisor_action_gate_keeps_human_input_for_sign_off_only() -> None:
+    """Human-input requests must survive sign-off-only failures (no rewrite).
+
+    旧的 sign-off gate 守卫会把 request_human_input 强制改写成 approve；
+    Agent-led 契约下平台不再按 checks 状态代选动作。
+    """
     action_result = SupervisorActionResult(
         action="request_human_input",
         summary="Checks are failing; needs a human to look.",
@@ -262,9 +291,8 @@ def test_supervisor_action_gate_rewrites_human_input_for_sign_off_only() -> None
 
     gated_result = guard_supervisor_action_for_pr_state(action_result, pr_context)
 
-    assert gated_result.action == "approve_for_human_review"
-    assert "sign-off gate guard" in gated_result.summary
-    assert "Checks are failing; needs a human to look." in gated_result.summary
+    assert gated_result.action == "request_human_input"
+    assert gated_result.summary == "Checks are failing; needs a human to look."
 
 
 def test_supervisor_action_gate_keeps_human_input_with_other_failed_checks() -> None:
@@ -399,8 +427,12 @@ def test_supervisor_action_gate_keeps_human_input_when_checks_pass() -> None:
     assert gated_result.summary == "Requirement ambiguity needs a product decision."
 
 
-def test_supervisor_action_gate_defers_approval_when_checks_pending() -> None:
-    """Pending checks must not be approved into human review."""
+def test_supervisor_action_gate_keeps_approval_when_checks_pending() -> None:
+    """Pending checks must not rewrite an agent approval into wait_for_checks.
+
+    PRD 行为样例：Agent 依据可见事实先交人审并披露 CI 仍在运行时，平台
+    保留 approve_for_human_review；更高层验收/合并门禁仍按原规则生效。
+    """
     action_result = SupervisorActionResult(
         action="approve_for_human_review",
         summary="LGTM",
@@ -417,8 +449,32 @@ def test_supervisor_action_gate_defers_approval_when_checks_pending() -> None:
 
     gated_result = guard_supervisor_action_for_pr_state(action_result, pr_context)
 
-    assert gated_result.action == "wait_for_checks"
-    assert "pending" in gated_result.summary.lower()
+    assert gated_result.action == "approve_for_human_review"
+    assert gated_result.summary == "LGTM"
+
+
+def test_supervisor_action_gate_keeps_approval_when_checks_success() -> None:
+    """SUCCESS checks must not rewrite any legal agent action (FR-3)."""
+    pr_context = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-1",
+        head_sha="abc123",
+        base_sha="def456",
+        mergeable=True,
+        checks_state="SUCCESS",
+        checks_summary=(),
+    )
+
+    for action in (
+        "approve_for_human_review",
+        "repair_pr_branch",
+        "wait_for_checks",
+        "request_human_input",
+    ):
+        action_result = SupervisorActionResult(action=action, summary="Agent decision.")
+        gated_result = guard_supervisor_action_for_pr_state(action_result, pr_context)
+        assert gated_result.action == action
+        assert gated_result.summary == "Agent decision."
 
 
 def test_build_rework_intent_comment_has_marker() -> None:
@@ -479,13 +535,21 @@ def test_build_supervisor_prompt_includes_context() -> None:
     assert "wait_for_checks" in prompt
 
 
-def test_build_supervisor_prompt_explains_sign_off_gate() -> None:
-    """Prompt must tell the model the sign-off check is an expected manual gate."""
+def test_build_supervisor_prompt_requires_ci_execution_distinction() -> None:
+    """Prompt must require distinguishing executed failures from not-run CI.
+
+    Agent-led CI 决策契约（rv-1）：prompt 提供原始 checks 事实与 PRD 要求，
+    要求 Agent 区分已执行失败、未运行/基础设施不可用与证据不足，并如实
+    保留未验证项；不再包含 sign-off-only 直接要求 approve 的固定规则。
+    """
     issue = IssueSummary(
         number=72,
         title="Test",
         url="https://github.com/example/repo/issues/72",
-        body="Do something.",
+        body=(
+            "Canonical PRD: `tasks/pending/example.md`\n"
+            "Acceptance: remote CI must be unverified-disclosed if not run."
+        ),
         labels=(),
     )
     pr_context = PullRequestContext(
@@ -494,7 +558,7 @@ def test_build_supervisor_prompt_explains_sign_off_gate() -> None:
         head_sha="abc123",
         base_sha="def456",
         checks_state="FAILURE",
-        checks_summary=("Realistic Validation sign-off (status=COMPLETED, conclusion=FAILURE)",),
+        checks_summary=("ci/build (status=COMPLETED, conclusion=FAILURE)",),
     )
     prompt = build_supervisor_prompt(
         issue=issue,
@@ -506,8 +570,20 @@ def test_build_supervisor_prompt_explains_sign_off_gate() -> None:
         pr_comments=[],
         base_sha_remote="remote-sha",
     )
-    assert "intentional manual gate" in prompt
-    assert "approve_for_human_review instead of request_human_input" in prompt
+    # 原始 checks 事实进入 prompt（FR-1）
+    assert "Checks state: FAILURE" in prompt
+    assert "ci/build (status=COMPLETED, conclusion=FAILURE)" in prompt
+    # 决策指导：区分已执行失败 / 未运行 / 证据不足（FR-2）
+    assert "Checks decision rules:" in prompt
+    assert "actually executed and failed" in prompt
+    assert "never ran" in prompt
+    assert "insufficient information" in prompt
+    # 未运行/未验证必须如实披露，不得当作通过（FR-4/FR-5）
+    assert "did not run and is unverified" in prompt
+    assert "Never describe unexecuted or unverified CI as passed" in prompt
+    # 旧 sign-off-only 动作特例已移除
+    assert "intentional manual gate" not in prompt
+    assert "approve_for_human_review instead of request_human_input" not in prompt
 
 
 def test_execute_rebase_safety_checks() -> None:
@@ -1646,7 +1722,170 @@ def test_dirty_worktree_after_approve_blocks_review(tmp_path: Path) -> None:
 
 
 def test_supervisor_loop_waits_for_pending_checks_once(tmp_path: Path) -> None:
-    """Pending checks should stay supervising and write one audit comment."""
+    """An agent-chosen wait_for_checks keeps supervising and writes one audit comment."""
+    from backend.core.use_cases.agent_runner_supervisor import (
+        _run_supervisor_with_repair_loop,
+    )
+
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="B",
+        labels=("agent/supervising",),
+    )
+    worktree_path = tmp_path / "wt"
+    worktree_path.mkdir()
+
+    class _WaitRunner(FakeProcessRunner):
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            check=True,
+            timeout=None,
+            capture_output=True,
+            label=None,
+            output_protocol=None,
+        ):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple == ("git", "status", "--porcelain"):
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple[:1] == ("codex",):
+                return CommandResult(
+                    command_tuple,
+                    0,
+                    '{"action": "wait_for_checks", "summary": "checks still running"}',
+                    "",
+                )
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+            )
+
+    fake_runner = _WaitRunner()
+    fake_client = FakeGitHubClient()
+    fake_client._issue_labels[issue.number] = issue.labels
+    pr_context = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-1",
+        head_sha="abc123",
+        base_sha="def456",
+        checks_state="PENDING",
+        checks_summary=("ci/build (status=IN_PROGRESS)",),
+    )
+
+    _run_supervisor_with_repair_loop(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=AppConfig(),
+        github_client=fake_client,
+        process_runner=fake_runner,
+        pr_context=pr_context,
+        supervisor_agent="codex",
+    )
+
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    assert len(comment_calls) == 1
+    assert "Action: wait_for_checks" in comment_calls[0]["body"]
+    assert "checks still running" in comment_calls[0]["body"]
+
+    label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
+    assert label_calls == []
+
+
+def test_supervisor_loop_keeps_agent_approval_under_failed_checks(tmp_path: Path) -> None:
+    """FAILURE checks must not stop an agent approval from entering review.
+
+    rv-2 端到端接线：agent JSON 决策 -> 生产守卫 -> review_once/repair loop
+    动作分发，全程不得按 checks 状态改写。
+    """
+    from backend.core.use_cases.agent_runner_supervisor import (
+        _run_supervisor_with_repair_loop,
+    )
+
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="B",
+        labels=("agent/supervising",),
+    )
+    worktree_path = tmp_path / "wt"
+    worktree_path.mkdir()
+
+    class _ApproveRunner(FakeProcessRunner):
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            check=True,
+            timeout=None,
+            capture_output=True,
+            label=None,
+            output_protocol=None,
+        ):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple == ("git", "status", "--porcelain"):
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple[:1] == ("codex",):
+                return CommandResult(
+                    command_tuple,
+                    0,
+                    '{"action": "approve_for_human_review", '
+                    '"summary": "remote CI did not run; unverified"}',
+                    "",
+                )
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+            )
+
+    fake_runner = _ApproveRunner()
+    fake_client = FakeGitHubClient()
+    fake_client._issue_labels[issue.number] = issue.labels
+    pr_context = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-1",
+        head_sha="abc123",
+        base_sha="def456",
+        mergeable=True,
+        checks_state="FAILURE",
+        checks_summary=("ci/build (status=COMPLETED, conclusion=FAILURE)",),
+    )
+
+    _run_supervisor_with_repair_loop(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=AppConfig(),
+        github_client=fake_client,
+        process_runner=fake_runner,
+        pr_context=pr_context,
+        supervisor_agent="codex",
+    )
+
+    review_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and AppConfig().labels.review in c.get("add", [])
+    ]
+    assert len(review_calls) == 1
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    assert any("Action: approve_for_human_review" in c["body"] for c in comment_calls)
+
+
+def test_supervisor_loop_keeps_agent_approval_under_pending_checks(tmp_path: Path) -> None:
+    """PENDING checks must not rewrite an agent approval into wait_for_checks."""
     from backend.core.use_cases.agent_runner_supervisor import (
         _run_supervisor_with_repair_loop,
     )
@@ -1700,6 +1939,7 @@ def test_supervisor_loop_waits_for_pending_checks_once(tmp_path: Path) -> None:
         branch="issue-1",
         head_sha="abc123",
         base_sha="def456",
+        mergeable=True,
         checks_state="PENDING",
         checks_summary=("ci/build (status=IN_PROGRESS)",),
     )
@@ -1714,13 +1954,12 @@ def test_supervisor_loop_waits_for_pending_checks_once(tmp_path: Path) -> None:
         supervisor_agent="codex",
     )
 
-    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
-    assert len(comment_calls) == 1
-    assert "Action: wait_for_checks" in comment_calls[0]["body"]
-    assert "ci/build" in comment_calls[0]["body"]
-
-    label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
-    assert label_calls == []
+    review_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and AppConfig().labels.review in c.get("add", [])
+    ]
+    assert len(review_calls) == 1
 
 
 def test_execute_rebase_allows_detached_head_when_active_rebase_target_matches(
