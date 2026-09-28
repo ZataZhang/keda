@@ -1,6 +1,6 @@
 # Idea Inbox — 总结（AI 派生，可重写；事实以 ideas.md 为准）
 
-_最后更新：2026-07-09_
+_最后更新：2026-09-28_
 
 ## 主题聚类
 
@@ -63,4 +63,4 @@ _最后更新：2026-07-09_
 
 ## 已升级
 
-- （暂无）
+- **Agent Runner 子进程环境净化（child env sanitize）** → 已升级为正式 PRD：`tasks/pending/P1-BUG-20260928-232844-agent-runner-child-env-sanitize.md`（2026-09-28 用户拍板三项决策：8 变量名单硬编码、无配置覆盖、process_supervisor 不纳入）。根因、方案与 RV oracle 详见该 PRD。（来源：2026-09-28 23:17）

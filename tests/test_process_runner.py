@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -1169,3 +1170,119 @@ def test_command_result_records_duration(tmp_path: Path) -> None:
 
     assert result.return_code == 0
     assert result.duration_seconds >= 0.05
+
+
+# ---------------------------------------------------------------------------
+# Agent 子进程环境净化（PRD: P1-BUG-20260928-232844-agent-runner-child-env-sanitize）
+# ---------------------------------------------------------------------------
+
+_SANITIZE_DENYLIST_VARS = {
+    "SERVER__PORT": "56469",
+    "CODEBUDDY_SERVICE_PROXY_URL": "http://127.0.0.1:56469/internal/hooks/services/invoke",
+    "CODEBUDDY_SESSION_ID": "session-abc",
+    "CODEBUDDY_CONVERSATION_REQUEST_ID": "conv-abc",
+    "CODEBUDDY_ROOT_REQUEST_ID": "root-abc",
+    "CODEBUDDY_CONVERSATION_MESSAGE_ID": "msg-abc",
+    "CODEBUDDY_PROJECT_DIR": "/Users/someone/code/keda",
+    "CODEBUDDY_CURRENT_MODEL_ID": "glm-5.3-flash",
+}
+
+_SANITIZE_PASSTHROUGH_VARS = {
+    "IAR_SANITIZE_PROBE_KEEP_ME": "keep-value-1",
+    "IAR_SANITIZE_PROBE_API_KEY": "sk-probe-key",
+}
+
+
+def _inject_sanitize_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把名单变量与透传探针变量写入当前测试进程环境。"""
+    for key, value in {**_SANITIZE_DENYLIST_VARS, **_SANITIZE_PASSTHROUGH_VARS}.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_build_sanitized_child_env_removes_denylisted_vars_and_keeps_rest(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """净化函数剔除全部名单变量、原样透传其余变量，并对每次剔除记 WARNING。"""
+    from backend.infrastructure.child_env import (
+        AGENT_CHILD_ENV_DENYLIST,
+        build_sanitized_child_env,
+    )
+
+    assert set(AGENT_CHILD_ENV_DENYLIST) == set(_SANITIZE_DENYLIST_VARS)
+    _inject_sanitize_env(monkeypatch)
+
+    with caplog.at_level(logging.WARNING, logger="backend.infrastructure.child_env"):
+        child_env = build_sanitized_child_env()
+
+    for key in _SANITIZE_DENYLIST_VARS:
+        assert key not in child_env, f"denylisted var {key} leaked into child env"
+    for key, value in _SANITIZE_PASSTHROUGH_VARS.items():
+        assert child_env.get(key) == value, f"passthrough var {key} was altered"
+    # 原环境不受影响（返回副本而非原地修改）。
+    assert os.environ["SERVER__PORT"] == "56469"
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    warned_names = set(
+        re.search(r"removed (\S+)", r.getMessage()).group(1)
+        for r in warnings
+        if re.search(r"removed (\S+)", r.getMessage())
+    )
+    assert warned_names == set(_SANITIZE_DENYLIST_VARS)
+    for record in warnings:
+        message = record.getMessage()
+        # 日志只含变量名与值长度摘要，不得记录完整值。
+        for value in _SANITIZE_DENYLIST_VARS.values():
+            assert value not in message
+
+
+def test_run_filtered_claude_stream_child_env_is_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """经公开派发函数启动的真实子进程，其环境必须已被净化（rv-1 主断言）。"""
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env.txt"
+
+    completed = run_filtered_claude_stream(
+        ["/bin/sh", "-c", f"env > {probe_file}"],
+        cwd=tmp_path,
+        timeout=60,
+        collect_stdout=True,
+    )
+
+    assert completed.returncode == 0
+    child_env_text = probe_file.read_text(encoding="utf-8")
+    for key in _SANITIZE_DENYLIST_VARS:
+        assert f"{key}=" not in child_env_text, f"denylisted var {key} reached child env"
+    for key, value in _SANITIZE_PASSTHROUGH_VARS.items():
+        assert f"{key}={value}" in child_env_text, f"passthrough var {key} missing"
+    assert "PATH=" in child_env_text
+    assert "HOME=" in child_env_text
+
+
+def test_run_filtered_claude_stream_without_sanitizer_leaks_poison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """负控：绕过净化（模拟旧行为）时，同一探针必须观测到致毒变量。"""
+    from unittest.mock import patch
+
+    from backend.infrastructure import process_runner
+
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_unsanitized.txt"
+
+    with patch(
+        "backend.infrastructure.process_runner.build_sanitized_child_env",
+        side_effect=lambda: dict(os.environ),
+    ):
+        completed = process_runner.run_filtered_claude_stream(
+            ["/bin/sh", "-c", f"env > {probe_file}"],
+            cwd=tmp_path,
+            timeout=60,
+            collect_stdout=True,
+        )
+
+    assert completed.returncode == 0
+    child_env_text = probe_file.read_text(encoding="utf-8")
+    assert "SERVER__PORT=56469" in child_env_text

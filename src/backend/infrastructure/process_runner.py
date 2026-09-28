@@ -20,6 +20,7 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
     PLAIN_PROTOCOL_ID,
 )
+from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
 
 try:
@@ -675,6 +676,7 @@ def run_filtered_claude_stream(
     process = subprocess.Popen(
         list(command),
         cwd=cwd,
+        env=build_sanitized_child_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE if capture_stderr else None,
         stdin=subprocess.PIPE,
@@ -814,6 +816,7 @@ def _run_pty_stream(
         process = subprocess.Popen(
             list(command),
             cwd=cwd,
+            env=build_sanitized_child_env(),
             stdin=subprocess.DEVNULL,
             stdout=slave_fd,
             stderr=slave_fd,

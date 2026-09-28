@@ -21,6 +21,7 @@ from backend.core.shared.interfaces.agent_output_protocol import (
 )
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import PROMPT_DELIVERY_STDIN
+from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
 from backend.infrastructure.process_runner import _format_timestamped_line
 
@@ -36,6 +37,7 @@ class PiJsonLinesOutputProtocol:
         process = subprocess.Popen(
             list(request.argv),
             cwd=request.cwd,
+            env=build_sanitized_child_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE if write_stdin else subprocess.DEVNULL,

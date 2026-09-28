@@ -244,3 +244,14 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 ## 2026-09-20 00:28 · prd-multi-agent-split-and-verify
 
 > 我有一个想法，就是把PRD是不是可以拆分成若干个任务，让不同的Agent去做，然后有一个组的Agent去验收。
+
+## 2026-09-28 23:17 · iar-child-env-sanitize
+
+> 起草 runner 子进程 env sanitize 提案
+
+**AI 派生背景**（2026-09-28 Issue #156 事故复盘，事实来源为当日排查记录）：
+
+- 现象：`iar run` 派发的 headless codebuddy 子进程在 OTLP 初始化后、第一个模型请求前永久卡死，stdout 零输出，20 分钟后被 inactivity watchdog（`process_runner.py` 的 `_ProcessWatchdog`）杀掉；Issue #156 连续 3 次尝试全部同因失败（attempt history 见 Issue #156 评论）。
+- 根因（已用 env 二分法单变量复现确认）：操作者的交互式 CodeBuddy 会话向 shell 注入 `SERVER__PORT=56469`（会话 daemon 正监听该端口）；runner 从该 shell 启动后，子进程继承该变量并尝试监听同一端口，日志出现 `listen EADDRINUSE: address already in use 127.0.0.1:56469`（unhandledRejection），随后卡死。仅 `SERVER__PORT=56469` 一个变量即可复现零输出；去掉即恢复正常。
+- 代码事实：`src/backend/infrastructure/process_runner.py` 的多处 `subprocess.Popen(...)`（约 :273/:365/:675/:814）以及 `src/backend/engines/agent_runner/output_protocols/plain.py:35`、`pi_json_lines.py:36` 均未传 `env=`，子进程原样继承父进程完整环境。
+- 临时规避：以 `env -u SERVER__PORT uv run iar run ...` 启动 runner；卡死 Issue 需手工把 `agent/running` 换回 `agent/ready` 重排队。
