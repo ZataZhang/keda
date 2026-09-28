@@ -1,5 +1,7 @@
 # PRD: 生命周期 Agent 矩阵按触发入口分组展示
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/159
+
 > ✅ **交付前置**：无硬依赖；§8 是唯一依赖事实源。
 >
 > ⬜ **验收状态**：未开工；§9 是唯一验收事实源。
