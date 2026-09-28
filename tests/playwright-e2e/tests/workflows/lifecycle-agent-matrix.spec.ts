@@ -32,6 +32,20 @@ const LIFECYCLE_KEYS = [
 ] as const
 
 /**
+ * 触发入口分组（后端 core 常量声明的展示顺序）：九个阶段不在同一条流水线上，
+ * 界面按组切块，组文案与归属一律来自后端只读视图响应。
+ */
+const ENTRY_GROUPS = [
+  {
+    entry: 'pipeline',
+    label: '实现流水线',
+    keys: ['implementation', 'fix', 'closeout', 'verifier', 'review', 'supervisor'],
+  },
+  { entry: 'discussion_content', label: '讨论与内容生成', keys: ['deliberate', 'content_generation'] },
+  { entry: 'standalone', label: '独立入口', keys: ['planner'] },
+] as const
+
+/**
  * PRD 覆盖抽屉只呈递有 PRD 消费点的键：`planner` 的唯一消费点是 `iar ask`，
  * 既没有 Issue 也没有 PRD 上下文，PRD 级覆盖对它无效，因此后端不下发该行。
  */
@@ -72,6 +86,40 @@ test.describe('生命周期 Agent 矩阵 (lifecycle-agent)', () => {
 
     // 原有页面内容保持在区块下方。
     await expect(page.getByRole('heading', { name: '关于 iar 管理终端' })).toBeVisible()
+  })
+
+  test('全局矩阵按触发入口分组：三组标题可见，九行归属正确且行内可见触发时机', async ({
+    page,
+  }) => {
+    await openAgentManagementTab(page, 'lifecycles')
+
+    for (const group of ENTRY_GROUPS) {
+      const groupBlock = page.getByTestId(`lifecycle-matrix-entry-${group.entry}`)
+      await expect(groupBlock).toBeVisible()
+      await expect(groupBlock.getByText(group.label, { exact: true })).toBeVisible()
+      // 组内行数与归属：每组恰好含自己那批行。
+      await expect(groupBlock.locator('[data-testid^="lifecycle-matrix-row-"]')).toHaveCount(
+        group.keys.length
+      )
+      for (const lifecycleKey of group.keys) {
+        await expect(
+          groupBlock.getByTestId(`lifecycle-matrix-row-${lifecycleKey}`)
+        ).toBeVisible()
+      }
+    }
+
+    // 每行附近可见触发时机文案（取自后端下发，不为空）。
+    for (const lifecycleKey of LIFECYCLE_KEYS) {
+      const trigger = page.getByTestId(`lifecycle-matrix-trigger-${lifecycleKey}`)
+      await expect(trigger).toBeVisible()
+      await expect(trigger).not.toBeEmpty()
+    }
+    // 「独立入口」组只含决策行，决策不混入实现流水线组。
+    await expect(
+      page
+        .getByTestId('lifecycle-matrix-entry-pipeline')
+        .getByTestId('lifecycle-matrix-row-planner')
+    ).toHaveCount(0)
   })
 
   test('全局矩阵九行齐全，下拉只给真实取值', async ({ page }) => {
@@ -150,6 +198,10 @@ test.describe('生命周期 Agent 矩阵 (lifecycle-agent)', () => {
       await expect(page.getByTestId(`lifecycle-matrix-row-${lifecycleKey}`)).toBeVisible()
       await expect(page.getByTestId(`lifecycle-matrix-source-${lifecycleKey}`)).toBeVisible()
     }
+    // 仓库级抽屉与全局矩阵是同一分组（同一组件、同一只读视图下发）。
+    for (const group of ENTRY_GROUPS) {
+      await expect(page.getByTestId(`lifecycle-matrix-entry-${group.entry}`)).toBeVisible()
+    }
     // 未在本层声明的键不出现恢复入口（「跟随全局（删除本键）」只在已声明时出现）。
     await expect(page.getByTestId('lifecycle-matrix-restore-verifier')).toHaveCount(0)
   })
@@ -176,6 +228,23 @@ test.describe('生命周期 Agent 矩阵 (lifecycle-agent)', () => {
     }
     // planner 没有 PRD 消费点，不出现在覆盖抽屉里。
     await expect(page.getByTestId('prd-agent-override-row-planner')).toHaveCount(0)
+
+    // 覆盖抽屉沿用同一分组：有行的组标题出现，「独立入口」组（只有 planner）整组缺席。
+    await expect(page.getByTestId('prd-agent-override-entry-pipeline')).toBeVisible()
+    await expect(page.getByTestId('prd-agent-override-entry-discussion_content')).toBeVisible()
+    await expect(page.getByTestId('prd-agent-override-entry-standalone')).toHaveCount(0)
+    // 辩论与内容生成落在「讨论与内容生成」组，不混入实现流水线组。
+    const discussionGroup = page.getByTestId('prd-agent-override-entry-discussion_content')
+    await expect(discussionGroup.getByTestId('prd-agent-override-row-deliberate')).toBeVisible()
+    await expect(
+      discussionGroup.getByTestId('prd-agent-override-row-content_generation')
+    ).toBeVisible()
+    await expect(
+      page
+        .getByTestId('prd-agent-override-entry-pipeline')
+        .getByTestId('prd-agent-override-row-deliberate')
+    ).toHaveCount(0)
+
     // 未勾选的行仍显示"当前生效值"，但下拉被禁用（未勾选 = 沿用仓库/全局层）。
     await expect(page.getByTestId('prd-agent-override-select-verifier')).toBeDisabled()
     // 勾选「校验」后该行下拉变为可编辑，代表声明了本 PRD 的覆盖。

@@ -261,6 +261,9 @@ def get_prd_agent_overrides(encoded_path: str, repo_id: str) -> dict:
         overrides = parse_prd_lifecycle_overrides(prd_text, prd_path=prd_path)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    inherited_view = build_lifecycle_agents_view(
+        context.config, scope=SCOPE_REPOSITORY, repo_id=repo_id
+    )
     return {
         "repo_id": repo_id,
         "prd_path": prd_path,
@@ -268,11 +271,11 @@ def get_prd_agent_overrides(encoded_path: str, repo_id: str) -> dict:
         "agents": list(context.config.agents),
         "lifecycles": [
             lifecycle_row
-            for lifecycle_row in build_lifecycle_agents_view(
-                context.config, scope=SCOPE_REPOSITORY, repo_id=repo_id
-            )["lifecycles"]
+            for lifecycle_row in inherited_view["lifecycles"]
             if lifecycle_row["key"] in LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
         ],
+        # 与矩阵视图同源的分组：PRD 覆盖抽屉沿用同一分组渲染（仍不提供 planner 行）。
+        "entry_groups": inherited_view["entry_groups"],
     }
 
 

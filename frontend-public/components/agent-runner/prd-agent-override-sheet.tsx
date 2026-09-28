@@ -19,7 +19,9 @@ import {
 } from "@/components/ui/sheet";
 import {
   buildLifecycleOptions,
+  groupLifecycleEntriesByEntry,
   LIFECYCLE_AGENT_AUTO,
+  LifecycleEntryGroupHeader,
   lifecycleBaselineValue,
   lifecycleDisplayName,
 } from "@/components/agent-runner/lifecycle-agent-matrix";
@@ -164,58 +166,83 @@ export function PrdAgentOverrideSheet({
             />
           ) : view ? (
             <div className="space-y-2" data-testid="prd-agent-override-list">
-              {view.lifecycles.map((entry) => {
-                const draft = drafts[entry.key] ?? {
-                  enabled: false,
-                  value: defaultOverrideValue(entry),
-                };
-                const options = buildLifecycleOptions(entry, view.agents);
-                return (
-                  <div
-                    key={entry.key}
-                    data-testid={`prd-agent-override-row-${entry.key}`}
-                    className="flex items-center gap-3 rounded-md border px-3 py-2"
-                  >
-                    <Checkbox
-                      checked={draft.enabled}
-                      onCheckedChange={(checked: boolean) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [entry.key]: {
-                            enabled: checked,
-                            // 取当前状态里的取值，不用渲染期快照，避免同一次
-                            // 交互里勾选与选择相互覆盖。
-                            value: current[entry.key]?.value ?? draft.value,
-                          },
-                        }))
-                      }
-                      data-testid={`prd-agent-override-toggle-${entry.key}`}
-                      aria-label={`覆盖 ${lifecycleDisplayName(entry.key)}`}
-                    />
-                    <span className="w-20 text-sm">
-                      {lifecycleDisplayName(entry.key)}
-                    </span>
-                    <LifecycleAgentSelect
-                      lifecycleKey={entry.key}
-                      options={options}
-                      value={draft.value}
-                      onValueChange={(value) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [entry.key]: {
-                            enabled: current[entry.key]?.enabled ?? draft.enabled,
-                            value,
-                          },
-                        }))
-                      }
-                      placeholder="—"
-                      testIdPrefix="prd-agent-override"
-                      disabled={!draft.enabled}
-                      className="flex-1"
-                    />
-                  </div>
-                );
-              })}
+              {groupLifecycleEntriesByEntry(
+                view.lifecycles,
+                view.entry_groups,
+              ).map((block) => (
+                <div
+                  key={block.group ? block.group.entry : "ungrouped"}
+                  data-testid={
+                    block.group
+                      ? `prd-agent-override-entry-${block.group.entry}`
+                      : "prd-agent-override-entry-ungrouped"
+                  }
+                  className="space-y-2"
+                >
+                  {block.group ? (
+                    <LifecycleEntryGroupHeader group={block.group} />
+                  ) : null}
+                  {block.rows.map((entry) => {
+                    const draft = drafts[entry.key] ?? {
+                      enabled: false,
+                      value: defaultOverrideValue(entry),
+                    };
+                    const options = buildLifecycleOptions(entry, view.agents);
+                    return (
+                      <div
+                        key={entry.key}
+                        data-testid={`prd-agent-override-row-${entry.key}`}
+                        className="flex items-center gap-3 rounded-md border px-3 py-2"
+                      >
+                        <Checkbox
+                          checked={draft.enabled}
+                          onCheckedChange={(checked: boolean) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [entry.key]: {
+                                enabled: checked,
+                                // 取当前状态里的取值，不用渲染期快照，避免同一次
+                                // 交互里勾选与选择相互覆盖。
+                                value: current[entry.key]?.value ?? draft.value,
+                              },
+                            }))
+                          }
+                          data-testid={`prd-agent-override-toggle-${entry.key}`}
+                          aria-label={`覆盖 ${lifecycleDisplayName(entry.key)}`}
+                        />
+                        <span className="w-40 text-sm">
+                          {lifecycleDisplayName(entry.key)}
+                          <span
+                            className="block text-xs text-slate-400 dark:text-slate-500"
+                            data-testid={`prd-agent-override-trigger-${entry.key}`}
+                          >
+                            {entry.trigger}
+                          </span>
+                        </span>
+                        <LifecycleAgentSelect
+                          lifecycleKey={entry.key}
+                          options={options}
+                          value={draft.value}
+                          onValueChange={(value) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [entry.key]: {
+                                enabled:
+                                  current[entry.key]?.enabled ?? draft.enabled,
+                                value,
+                              },
+                            }))
+                          }
+                          placeholder="—"
+                          testIdPrefix="prd-agent-override"
+                          disabled={!draft.enabled}
+                          className="flex-1"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           ) : null}
 

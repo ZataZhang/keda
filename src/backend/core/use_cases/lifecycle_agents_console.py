@@ -14,9 +14,12 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_AUTO,
     LIFECYCLE_AGENT_AUTO_DESCRIPTIONS,
     LIFECYCLE_AGENT_AUTO_KEYS,
+    LIFECYCLE_AGENT_ENTRY_BY_KEY,
+    LIFECYCLE_AGENT_ENTRY_GROUPS,
     LIFECYCLE_AGENT_EXECUTOR,
     LIFECYCLE_AGENT_EXECUTOR_KEYS,
     LIFECYCLE_AGENT_KEYS,
+    LIFECYCLE_AGENT_TRIGGERS,
     LIFECYCLE_SOURCE_BUILTIN,
     LIFECYCLE_SOURCE_GLOBAL,
     LIFECYCLE_SOURCE_LEGACY,
@@ -84,9 +87,15 @@ def build_lifecycle_agents_view(
         follows_executor = (
             normalize_lifecycle_agent_value(declared_or_legacy) == LIFECYCLE_AGENT_EXECUTOR
         )
+        entry_group = LIFECYCLE_AGENT_ENTRY_BY_KEY[lifecycle_key]
         lifecycles.append(
             {
                 "key": lifecycle_key,
+                # 触发入口分组（纯新增展示字段）：组 id / 组中文名 / 每行触发时机，
+                # 全部取自 core 分组常量，前端只渲染、不持有第二份映射。
+                "entry": entry_group.entry,
+                "entry_label": entry_group.label,
+                "trigger": LIFECYCLE_AGENT_TRIGGERS[lifecycle_key],
                 "auto_allowed": lifecycle_key in LIFECYCLE_AGENT_AUTO_KEYS,
                 "executor_allowed": lifecycle_key in LIFECYCLE_AGENT_EXECUTOR_KEYS,
                 "auto_description": LIFECYCLE_AGENT_AUTO_DESCRIPTIONS.get(lifecycle_key),
@@ -107,6 +116,16 @@ def build_lifecycle_agents_view(
         "repo_id": repo_id,
         "agents": list(config.agents),
         "lifecycles": lifecycles,
+        # 触发入口分组按展示顺序下发（组 id / 中文名 / 一行说明）；前端只按行上的
+        # ``entry`` 聚块渲染，组文案一律取自这里，不在前端拼第二份。
+        "entry_groups": [
+            {
+                "entry": entry_group.entry,
+                "label": entry_group.label,
+                "summary": entry_group.summary,
+            }
+            for entry_group in LIFECYCLE_AGENT_ENTRY_GROUPS
+        ],
         # 只列矩阵视图真会返回的来源层：``prd_override`` 只存在于 PRD 覆盖抽屉的
         # 语义里（矩阵视图只读 config 层），放进来只会让图例与数据对不上。
         "source_layers": {

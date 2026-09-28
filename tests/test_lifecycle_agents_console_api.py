@@ -17,6 +17,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.app import app
+from backend.core.shared.models.lifecycle_agent import (
+    LIFECYCLE_AGENT_ENTRY_GROUPS,
+    LIFECYCLE_AGENT_KEYS,
+    LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS,
+)
 from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
 
 _PRD_TEXT = (
@@ -89,6 +94,81 @@ def test_get_global_and_repository_views(console_env: dict) -> None:
     ).json()
     assert repo_view["repo_id"] == "testrepo"
     assert _lifecycle_entry(repo_view, "verifier")["auto_allowed"] is True
+
+
+def test_view_rows_carry_entry_group_and_trigger(console_env: dict) -> None:
+    """每行带非空 entry / entry_label / trigger，键序与既有字段保持兼容。"""
+    client = console_env["client"]
+    global_view = client.get(
+        "/api/v1/agent-runner/lifecycle-agents", params={"scope": "global"}
+    ).json()
+
+    # 键序契约：lifecycles 仍按 LIFECYCLE_AGENT_KEYS 原序（分组只影响前端呈现）。
+    assert [row["key"] for row in global_view["lifecycles"]] == list(LIFECYCLE_AGENT_KEYS)
+    for row in global_view["lifecycles"]:
+        assert row["entry"]
+        assert row["entry_label"]
+        assert row["trigger"]
+
+    # 组并集恰好覆盖九键、不重不漏，与 core 分组常量一一对应。
+    expected_groups = {group.entry: group for group in LIFECYCLE_AGENT_ENTRY_GROUPS}
+    assert [group["entry"] for group in global_view["entry_groups"]] == [
+        group.entry for group in LIFECYCLE_AGENT_ENTRY_GROUPS
+    ]
+    grouped_keys: dict[str, list[str]] = {}
+    for row in global_view["lifecycles"]:
+        group = expected_groups[row["entry"]]
+        assert row["entry_label"] == group.label
+        grouped_keys.setdefault(row["entry"], []).append(row["key"])
+    # 组归属与常量一一对应（集合语义）；组内展示顺序即 lifecycles 数组相对顺序，
+    # 与 LIFECYCLE_AGENT_KEYS 键序一致，不由常量重复声明。
+    assert set(grouped_keys) == {group.entry for group in LIFECYCLE_AGENT_ENTRY_GROUPS}
+    for group in LIFECYCLE_AGENT_ENTRY_GROUPS:
+        assert sorted(grouped_keys[group.entry]) == sorted(group.keys)
+
+    # 既有字段名与含义未变（抽样既有键）。
+    planner_row = _lifecycle_entry(global_view, "planner")
+    assert planner_row["entry"] == "standalone"
+    assert planner_row["auto_allowed"] is False
+    assert planner_row["follows_executor"] is False
+
+    # repository 视角带同一分组与键序。
+    repo_view = client.get(
+        "/api/v1/agent-runner/lifecycle-agents",
+        params={"scope": "repository", "repo_id": "testrepo"},
+    ).json()
+    assert [row["key"] for row in repo_view["lifecycles"]] == list(LIFECYCLE_AGENT_KEYS)
+    assert [row["entry"] for row in repo_view["lifecycles"]] == [
+        row["entry"] for row in global_view["lifecycles"]
+    ]
+    assert repo_view["entry_groups"] == global_view["entry_groups"]
+
+
+def test_prd_override_view_carries_same_entry_groups(console_env: dict) -> None:
+    """PRD 覆盖视图沿用同一分组：行上带 entry，entry_groups 与矩阵视图一致。"""
+    client = console_env["client"]
+    import base64
+
+    encoded = base64.urlsafe_b64encode(console_env["prd_relative_path"].encode("utf-8")).decode(
+        "ascii"
+    )
+    override_view = client.get(
+        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        params={"repo_id": "testrepo"},
+    ).json()
+    assert [row["key"] for row in override_view["lifecycles"]] == list(
+        LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
+    )
+    for row in override_view["lifecycles"]:
+        assert row["entry"]
+        assert row["entry_label"]
+        assert row["trigger"]
+
+    repo_view = client.get(
+        "/api/v1/agent-runner/lifecycle-agents",
+        params={"scope": "repository", "repo_id": "testrepo"},
+    ).json()
+    assert override_view["entry_groups"] == repo_view["entry_groups"]
 
 
 def test_global_write_only_touches_config_toml(console_env: dict) -> None:
