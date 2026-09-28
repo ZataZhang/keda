@@ -462,7 +462,7 @@ def guard_supervisor_action_for_pr_state(
 
     # checks 状态是 Agent 的观察事实而非动作指令：FAILURE/PENDING/SUCCESS
     # 与 sign-off-only 聚合结果都不得改写合法动作（Agent-led CI 决策契约，
-    # 见 tasks/pending/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md）。
+    # 见 tasks/archive/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md）。
     return action_result
 
 
