@@ -1,0 +1,24 @@
+# rv-1/rv-3: sanitize + guard tests（rv-1 spawn 路径 oracle；守卫含构造性违规负控）
+# bound to commit: 842820df696e0a54ad2d500620f18bc6c6c2bbc5
+# collected: 2026-09-28T16:58:17Z
+
+platform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0 -- /Users/zata/code/keda-worktrees/fix/agent-child-env-sanitize/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/zata/code/keda-worktrees/fix/agent-child-env-sanitize
+configfile: pyproject.toml
+plugins: anyio-4.12.1, timeout-2.4.0, langsmith-0.6.2, testmon-2.2.0
+collecting ... collected 5 items
+
+tests/test_process_runner.py::test_build_sanitized_child_env_removes_denylisted_vars_and_keeps_rest PASSED [ 20%]
+tests/test_process_runner.py::test_run_filtered_claude_stream_child_env_is_sanitized PASSED [ 40%]
+tests/test_process_runner.py::test_run_filtered_claude_stream_without_sanitizer_leaks_poison PASSED [ 60%]
+tests/guards/test_agent_spawn_env_guard.py::test_agent_spawn_sites_pass_sanitized_env PASSED [ 80%]
+tests/guards/test_agent_spawn_env_guard.py::test_guard_detects_bare_popen_regression PASSED [100%]
+
+============================== 5 passed in 0.87s ===============================
+
+# 守卫扫描到的 4 个真实 agent 派发点（function line has_sanitized_env）:
+process_runner.py run_filtered_claude_stream 676 True
+process_runner.py _run_pty_stream 816 True
+pi_json_lines.py relay 37 True
+plain.py relay 36 True

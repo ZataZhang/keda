@@ -1,0 +1,42 @@
+# rv-2: 真实 iar run 周期（父环境注入 SERVER__PORT=56469，假 claude 探针 + 真 kimi 兜底完成周期）
+# bound to commit: 842820df696e0a54ad2d500620f18bc6c6c2bbc5
+# collected: 2026-09-28T16:58:53Z
+# harness: /tmp/iar-rv-sanitize（本地 bare origin + demo-repo + fake gh + fake claude）
+
+## 启动命令（注意 SERVER__PORT=56469 在 runner 父环境中）:
+SERVER__PORT=56469 PATH="/tmp/iar-rv-sanitize/bin:$PATH" RV_HARNESS_DIR=/tmp/iar-rv-sanitize IAR_CONFIG=/tmp/iar-rv-sanitize/iar-config.toml uv run iar run --repo-id harness
+
+## 关键 transcript（iar run 输出尾部）:
+2026-09-29 00:32:12 - process_runner.py:552 - Command (Issue #1 ...) still running after 60s: kimi --prompt Pre-PR Review for Issue #1 ...
+2026-09-29 00:32:22 - run_agent_once.py:644 - Agent finished for Issue #1 (exit_code=0)
+2026-09-29 00:32:22 - agent_review.py:673 - Pre-PR review cycle 1/2 for Issue #1: parsed verdict=approved (inner attempt 1/2, stdout_parseable=True, findings=0)
+2026-09-29 00:32:22 - agent_review.py:931 - Pre-PR review approved Issue #1 after 1 cycle(s)
+2026-09-29 00:32:23 - agent_runner_publication.py:710 - Published Issue #1 from issue-1 at 4f66a208... after implementation head 4f66a208...
+2026-09-29 00:32:23 - agent_runner_orchestration_runtime.py:407 - Completed Issue #1: rv-2 harness issue
+
+## 假 agent 探针（logs/agent.log 共 6 条：1 次实现 + 5 次 repair；全部 SERVER__PORT 缺席）:
+probe=rv2-sanitize-probe SERVER__PORT_present=False value=None PATH_present=True argv0_tail=--dangerously-skip-permissions
+probe=rv2-sanitize-probe SERVER__PORT_present=False value=None PATH_present=True argv0_tail=--dangerously-skip-permissions
+probe=rv2-sanitize-probe SERVER__PORT_present=False value=None PATH_present=True argv0_tail=--dangerously-skip-permissions
+probe=rv2-sanitize-probe SERVER__PORT_present=False value=None PATH_present=True argv0_tail=--dangerously-skip-permissions
+probe=rv2-sanitize-probe SERVER__PORT_present=False value=None PATH_present=True argv0_tail=--dangerously-skip-permissions
+probe=rv2-sanitize-probe SERVER__PORT_present=False value=None PATH_present=True argv0_tail=--dangerously-skip-permissions
+probe=rv2-sanitize-probe SERVER__PORT_present=True value='56469' PATH_present=True argv0_tail=--probe-negative-control
+
+## 负控（绕过 runner 直接以污染环境启动同一假 agent）:
+SERVER__PORT=56469 RV_HARNESS_DIR=/tmp/iar-rv-sanitize /tmp/iar-rv-sanitize/bin/claude --probe-negative-control
+NEGATIVE CONTROL -> SERVER__PORT_present: True value: 56469（探针能区分，rv-2 oracle 有效）
+
+## workflow label 迁移（fake gh 状态终态）+ Issue 事件:
+final labels: ['type/bug', 'priority/P1', 'agent/supervising']
+comments: 13
+ - ## Agent Runner Claimed
+ - ## Agent Runner Claimed
+ - <!-- iar:event version=1 phase=implementation_complete cycle=1 head=4f66a208d44eee7a0b9594b0e92a46b9176c30a1 -->
+ - <!-- iar:event version=1 phase=pre_pr_review cycle=1 head=4f66a208d44eee7a0b9594b0e92a46b9176c30a1 -->
+ - <!-- iar:event version=1 phase=draft_pr_created cycle=1 head=4f66a208d44eee7a0b9594b0e92a46b9176c30a1 pr_branch=issue-1 -->
+
+## demo-repo issue-1 分支最终提交:
+4f66a20 docs: document rv-2 harness purpose and issue #1 resolution
+
+## 披露：PATH 仅 shim 了 claude；review/supervisor 阶段解析到真实 kimi CLI 并消耗了真实额度（1 次审核 + 1 次实现兜底）。
