@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ✅ **验收状态**：已交付（2026-09-20，分支 `builtin-agent-coverage-codebuddy-qoder-opencode`）——实施 + 自动化验证（`CI=true just test all` 2394 passed、`just lint --full` 通过）+ 一轮独立 verifier 复核（PASS-with-caveats，1 major + 4 minor 全部整改）+ §2 三个人工决策获人确认 + rv-3 / rv-7 两项真实入口呈递物齐备（`tasks/evidence/<prd-stem>/`）。PR 待开。
+> ✅ **验收状态**：已交付（2026-09-20，分支 `builtin-agent-coverage-codebuddy-qoder-opencode`）——实施 + 自动化验证（`CI=true just test all` 2394 passed、`just lint --full` 通过）+ 一轮独立 verifier 复核（PASS-with-caveats，1 major + 4 minor 全部整改）+ §2 三个人工决策获人确认 + rv-3 / rv-7 两项真实入口呈递物齐备（`tasks/evidence/<prd-stem>/`）。PR 见 https://github.com/ZataZhang/keda/pull/150。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制与命令；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -650,3 +650,11 @@ flowchart TD
 - Reason: 复核价值就在于抓出"自称通过但实际没过"的门禁与"把声明说成保证"的措辞；这些不修就会把假绿和过度承诺带进归档。
 - Impact: 归档前提从"看起来绿"变成"真绿且措辞与事实对齐"。新增的相邻文档修正不改变任何行为，仅让三处既有描述与代码一致。
 - Review: 待第二轮（或人工）复核。
+
+### 归档与开 PR
+- Type: doc
+- Before: PRD 处置于 `tasks/pending/`，Acceptance Status Banner 为"未开工"，`## Change Log` 未编号，§13 末尾无归档对账。
+- After: PRD `git mv` 至 `tasks/archive/`；§9 全部勾选（含人工确认项，依据如实标注）；§13 末尾补 `### Final Reconciliation`；标题改为 `## 14. Change Log`；Banner 更新为"已交付"并写上 PR 链接（https://github.com/ZataZhang/keda/pull/150）；证据三件套 `.md` 随提交入库；执行锁已释放。
+- Reason: 交付完成后的标准归档动作：任务全部完成后生成验证计划、收集证据、经独立 verifier 复核、完成 Acceptance Checklist，再归档。
+- Impact: `tasks/pending/` 不再含本 PRD；`tasks/evidence/<prd-stem>/` 只跟踪三份 `.md`（与仓库既有 43 个 md / 0 png / 0 script 的惯例一致），两张截图与两份文本产物留在本机同目录并已内嵌进 evidence-report；执行锁释放后该 PRD 可被其它会话重新领取。
+- Review: 用户指令归档提交并开 PR。
