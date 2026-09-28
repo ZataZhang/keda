@@ -160,6 +160,10 @@ button, input, select { font: inherit; color: inherit; }
 }
 .node .caret { width: 12px; flex: none; color: var(--muted-foreground); font-size: 10px; }
 .node .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node .rename-source {
+  min-width: 0; overflow: hidden; color: var(--muted-foreground); font-size: 10.5px;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .node .stat { margin-left: auto; display: inline-flex; gap: 5px; font-family: var(--mono); font-size: 11px; }
 .stat .add { color: var(--add-mark); }
 .stat .del { color: var(--del-mark); }

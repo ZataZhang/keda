@@ -59,6 +59,7 @@ AI 代理默认不会设置该变量，因此会被 hook 拦下——这是"指�
 | `shared/test_check_schema_conventions.py` | schema convention hook（`hooks/shared/check_schema_conventions.py`）：迁移脚本命名校验、分隔符与 revision 一致性 |
 | `shared/test_duplication_check_utils.py` | duplication-check 共享 git helper（`hooks/shared/duplication_check_utils.py`） |
 | `shared/test_gc_worktree_databases.py` | Worktree 数据库 GC 脚本（`scripts/shared/worktree/gc_worktree_databases.py`） |
+| `shared/test_migration_foreign_key_index_drop_order.py` | 迁移文件里"索引/唯一约束删除先于同表外键约束删除"的顺序缺陷（MySQL 1553 风险，仅 MySQL 方言适用，`docs/ai-standards/alembic.md`），静态 AST 检查，只覆盖表存活（列级手术）场景；仓库尚无任何迁移时跳过 |
 | `shared/test_open_worktree.py` | `just worktree -o` 的名称解析（`scripts/shared/worktree/open.sh`）：PRD slug / 文件名 / `tasks/pending` 路径与分支末段等价、精确分支优先、歧义报错列候选、不回退旧约定目录、未命中列可用 worktree |
 | `shared/test_prd_impact_tree.py` | 影响树触达进度（`scripts/shared/just/prd_impact_tree.py` 与看板 FILES 列）：触达判据必须是「本次分支改动过」而非「文件存在」、未提交与未 `git add` 的改动都要计入、目录节点下任一文件被改即算触达、可判定性只认 git 真实路径（大小写严格、不吃 gitignore 残留）、无法判定的节点排除出分母并用 `?n` 披露、裸文件名不得回退仓库根、FILES 列永不转绿 |
 | `shared/test_prd_lock.py` | PRD 执行锁脚本（`scripts/shared/just/prd_lock.py`）：锁落主仓库、并发领锁唯一、过期接管留档、worktree 活性佐证的存活判定 |

@@ -571,7 +571,7 @@
         return;
       }
       viewState.changedSections = changesResponse.body.sections;
-      elements.diffCount.textContent = String(changesResponse.body.totals.files);
+      elements.diffCount.textContent = String(countVisibleChangedFiles());
       elements.diffCount.hidden = false;
       // 增删合计只跟在能提供它的那一段后面：`Changes` 里混着未跟踪文件，它们的增删数 git 的
       // 列表命令不报，就不把一个只覆盖一部分文件的 `+N -M` 混进看起来覆盖全部的数字里。
@@ -761,6 +761,39 @@
   }
 
   /**
+   * 去掉已被重命名消费掉的删除行。
+   *
+   * 未暂存区里的「删除」与未跟踪区里的「新文件」可以是同一处工作区重命名（普通 `mv`）：服务端
+   * 把目的地认成 `R` 并给出旧路径之后，那条删除行再单列一次就会让人以为文件被删了。只在同一
+   * 显示段内折叠——跨段折叠会把别处的同名删除也顺带藏起来。
+   * @param {Array<object>} changedFiles 合并后的改动条目。
+   * @returns {Array<object>} 去掉重命名来源后的条目。
+   */
+  function dropRowsConsumedByRenames(changedFiles) {
+    const renameSourcePaths = new Set(
+      changedFiles.map((changedFile) => changedFile.rename_from).filter(Boolean)
+    );
+    return changedFiles.filter(
+      (changedFile) => !(changedFile.status === "D" && renameSourcePaths.has(changedFile.path))
+    );
+  }
+
+  /**
+   * 数出改动列表里**能看到的**条目数。
+   *
+   * 与服务端的分区合计不同：一处工作区重命名在服务端是「未暂存的删除 + 未跟踪的新文件」两条，
+   * 显示上折叠成一条 `R`，照搬服务端那个数就会和树对不上。已暂存的重命名本来就是一条 `R`，
+   * 这个口径与它一致。
+   * @returns {number} 可见改动条目数。
+   */
+  function countVisibleChangedFiles() {
+    return buildDisplayGroups().reduce(
+      (fileCount, displayGroup) => fileCount + displayGroup.files.length,
+      0
+    );
+  }
+
+  /**
    * 把服务端给的三段整理成界面上显示的两段。
    *
    * 每个文件条目都带上它**底层**的分区取值（`section`）：单文件 diff 与暂存动作都要靠它，
@@ -777,12 +810,14 @@
         key: changedGroup.key,
         label: changedGroup.label,
         canStage: changedGroup.canStage,
-        files: memberSections.flatMap((changedSection) =>
-          changedSection.files.map((changedFile) => ({
-            ...changedFile,
-            section: changedSection.section,
-            statsAvailable: changedSection.stats_available,
-          }))
+        files: dropRowsConsumedByRenames(
+          memberSections.flatMap((changedSection) =>
+            changedSection.files.map((changedFile) => ({
+              ...changedFile,
+              section: changedSection.section,
+              statsAvailable: changedSection.stats_available,
+            }))
+          )
         ),
         // 「这一段能不能给出完整的增删合计」= 成员段都提供统计。`Changes` 里混着未跟踪文件，
         // git 的列表命令不为它们报增删（逐文件去取在 800 个文件时会让页面卡住），只把其中
@@ -929,7 +964,7 @@
    *
    * 行本身是一个 `<button>`，因此那个加号**不能**嵌在它里面（按钮套按钮不是合法 HTML，键盘
    * 用户也分不出两者）。它作为兄弟节点放在外层容器里，各点各的。
-   * @param {{path: string, status: string, add: number|null, del: number|null, section: string, statsAvailable: boolean}} changedFile 改动文件（含底层分区与统计可用性）。
+   * @param {{path: string, status: string, rename_from?: string|null, add: number|null, del: number|null, section: string, statsAvailable: boolean}} changedFile 改动文件（含底层分区与统计可用性）。
    * @param {number} depth 缩进层级。
    * @returns {HTMLElement} 条目节点。
    */
@@ -938,7 +973,9 @@
     rowButton.type = "button";
     rowButton.className = "node";
     rowButton.style.paddingLeft = `${8 + depth * 14}px`;
-    rowButton.title = changedFile.path;
+    rowButton.title = changedFile.rename_from
+      ? `${changedFile.path}\n重命名自 ${changedFile.rename_from}`
+      : changedFile.path;
     rowButton.setAttribute(
       "aria-selected",
       String(
@@ -960,7 +997,19 @@
       lastSlashIndex >= 0 ? changedFile.path.slice(lastSlashIndex + 1) : changedFile.path;
     rowButton.append(nameNode);
 
-    if (changedFile.statsAvailable) {
+    if (changedFile.rename_from) {
+      const renameSourceNode = document.createElement("span");
+      renameSourceNode.className = "rename-source";
+      renameSourceNode.textContent = `← ${changedFile.rename_from}`;
+      renameSourceNode.setAttribute("aria-label", `重命名自 ${changedFile.rename_from}`);
+      rowButton.append(renameSourceNode);
+    }
+
+    // 统计列的显示口径：这一条自己有可信的增删数就显示。段级的 `statsAvailable` 不够用——未跟踪
+    // 那一段普通文件没有统计（`add`/`del` 为 null 表示「本轮不提供」），但其中被认作重命名目的地
+    // 的那一条，两个数是服务端在一次性索引上单独算出来的。`rename_from` 非空即为后者：它的数不是
+    // 「不提供」，`null` 在这里只可能是二进制。
+    if (changedFile.statsAvailable || changedFile.rename_from) {
       const statNode = document.createElement("span");
       statNode.className = "stat";
       if (changedFile.add === null || changedFile.del === null) {
@@ -1136,7 +1185,7 @@
 
   /**
    * 判断节点是否命中过滤条件；目录在本目录自身或任一后代命中时保留。
-   * @param {{name: string, path: string, isDirectory: boolean, children: Map}} treeNode 待判定节点。
+   * @param {{name: string, path: string, isDirectory: boolean, children: Map, payload: object|null}} treeNode 待判定节点。
    * @param {string} filterText 小写过滤词。
    * @returns {boolean} 是否应当显示。
    */
@@ -1148,7 +1197,10 @@
       return true;
     }
     if (!treeNode.isDirectory) {
-      return false;
+      // 重命名那一行还要能按**旧路径**搜到：消费掉的那条删除行已经不在树里，只按新路径匹配的话，
+      // 用户照旧路径搜索会得到一片空白。
+      const renameSource = treeNode.payload ? treeNode.payload.rename_from : null;
+      return Boolean(renameSource && renameSource.toLowerCase().includes(filterText));
     }
     return [...treeNode.children.values()].some((childNode) =>
       matchesFilter(childNode, filterText)

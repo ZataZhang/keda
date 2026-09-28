@@ -60,6 +60,12 @@
     带查询串的、以及解析后跑出仓库根的一律原样保留——猜错比不改更糟。手写的 raw HTML 标签
     与 markdown 语法走同一条路，因此不能只照顾其中一种。改写出来的地址必须真的能取回字节，
     只断言字符串会让「改成了另一个取不到的东西」也通过。
+15. **普通 ``mv`` 的重命名要配出来，而且只能靠一次性索引。** ``-M`` 对 ``git diff`` 收在眼里的
+    路径才有效，而它从不收录未跟踪文件，「工作区删除 + 未跟踪新文件」因此在真实索引上永远配不出
+    对。补齐手段是在仓库之外的一个临时 ``GIT_INDEX_FILE`` 上跑 ``git add -N``：真实索引一个字节
+    都不许改（查看器只有一个写口，就是 ``POST /api/stage``），临时目录用完必须清掉。配对只改
+    **呈现**——未跟踪那一段列出的路径集合、段级的 ``stats_available``、以及未暂存段里那条删除，
+    全都与终端逐项一致；一个删除配多个相似候选时也只能出一条 ``R``。
 
 用例全部打在真实进程与真实 HTTP 上：被测的是绑定、路由分发与 ``git`` 子进程这条
 完整链路，桩掉其中任何一段都测不到本文列出的不变量。
@@ -79,6 +85,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -385,6 +393,65 @@ def fixture_repository(tmp_path: Path) -> Path:
     return _build_fixture_repository(tmp_path / "fixture-repo")
 
 
+#: 普通 ``mv`` 夹具里每个受控文件的行数。够长才让「改两行」远低于 git 的重命名判定阈值以上，
+#: 也才能让「整篇新增」与「改动两行」在断言里判然有别。
+_PLAIN_MOVE_FILE_LINE_COUNT = 40
+
+
+def _build_plain_move_repository(repository_root: Path) -> Path:
+    """建一个只造「普通 ``mv``」的小仓库。
+
+    刻意只放三种形态，且都不与 :func:`_build_fixture_repository` 共用——那边每加一个文件都会
+    牵动其余用例的集合断言，而这里要验的是「删除 + 未跟踪新文件」这一种配对：
+
+    - ``tasks/pending/note.md`` 被普通 ``mv`` 到 ``tasks/archive/note.md`` 并改了两行：这是主
+      用例，验「一条 ``R`` + 真实增删 + 正文只有改动 hunk」。它的目的地**没有**进过索引，因此
+      在真实索引上永远配不出对。
+    - ``tasks/pending/twin.md`` 被同样搬到 ``tasks/archive/twin-a.md``，同时另有一份相似的
+      ``twin-b.md``：一个删除配两个候选，必须只配出一条 ``R``，另一个老实留在 ``A``。
+    - ``solo-untracked.txt`` 是从未受控的普通未跟踪文件：它必须保持 ``A`` 且不带统计，用来钉
+      「不能因为同段里有一条配对成功就把整段都说成重命名」。
+    """
+    repository_root.mkdir(parents=True, exist_ok=True)
+    _run_git(repository_root, "init", "-b", "main")
+    _run_git(repository_root, "config", "user.email", "guard@example.com")
+    _run_git(repository_root, "config", "user.name", "guard-test")
+
+    (repository_root / "tasks" / "pending").mkdir(parents=True)
+    (repository_root / "tasks" / "pending" / "note.md").write_text(
+        _build_numbered_lines("note"), encoding="utf-8"
+    )
+    (repository_root / "tasks" / "pending" / "twin.md").write_text(
+        _build_numbered_lines("twin"), encoding="utf-8"
+    )
+    _run_git(repository_root, "add", ".")
+    _run_git(repository_root, "commit", "-m", "init")
+
+    archive_directory = repository_root / "tasks" / "archive"
+    archive_directory.mkdir()
+    (repository_root / "tasks" / "pending" / "note.md").rename(archive_directory / "note.md")
+    (archive_directory / "note.md").write_text(
+        _build_numbered_lines("note")
+        .replace("note-10\n", "NOTE-10-CHANGED\n")
+        .replace("note-30\n", "NOTE-30-CHANGED\n"),
+        encoding="utf-8",
+    )
+    (repository_root / "tasks" / "pending" / "twin.md").rename(archive_directory / "twin-a.md")
+    (archive_directory / "twin-b.md").write_text(
+        _build_numbered_lines("twin").replace("twin-20\n", "TWIN-20-CHANGED\n"), encoding="utf-8"
+    )
+    (repository_root / "solo-untracked.txt").write_text("solo\n", encoding="utf-8")
+    return repository_root
+
+
+def _build_numbered_lines(line_prefix: str) -> str:
+    """造出 ``<前缀>-01`` 起、每行一条的正文；改动某一行的断言因此能一眼指出改在哪。"""
+    return "".join(
+        f"{line_prefix}-{line_number:02d}\n"
+        for line_number in range(1, _PLAIN_MOVE_FILE_LINE_COUNT + 1)
+    )
+
+
 def _wait_until_port_is_listening(port: int) -> bool:
     """轮询端口直到可连接。"""
     deadline_monotonic = time.monotonic() + _SERVER_START_TIMEOUT_SECONDS
@@ -397,20 +464,32 @@ def _wait_until_port_is_listening(port: int) -> bool:
     return False
 
 
-@pytest.fixture
-def running_view_server(fixture_repository: Path) -> RunningViewServer:
-    """拉起一个真实服务进程，并在用例结束后确认它已被收掉。
+@contextmanager
+def _serving_view_server(
+    repository_root: Path, extra_environment: dict[str, str] | None = None
+) -> Iterator[RunningViewServer]:
+    """拉一个真实服务进程，退出时收掉它。
 
     清理走「终止进程 + 清登记」，与 ``just view --stop`` 同一条路径：守卫测试自己
     不能变成孤儿进程的来源，这正是 PRD 记录过的那条教训。
+
+    Args:
+        repository_root (Path): 要查看的仓库根。
+        extra_environment (dict[str, str] | None): 追加到服务进程环境上的变量。未跟踪重命名那
+            组用例靠它把 ``TMPDIR`` 指到用例自己的目录里，好确定性地断言服务端没有把一次性
+            索引留在系统临时目录（全局扫临时目录会看到别的用例正在用的那一个，必然间歇变红）。
+
+    Yields:
+        RunningViewServer: 已在监听的服务。
     """
     port = _find_free_port()
+    server_environment = None if extra_environment is None else {**os.environ, **extra_environment}
     server_process = subprocess.Popen(
         [
             sys.executable,
             str(_SERVER_SCRIPT_PATH),
             "--repo-root",
-            str(fixture_repository),
+            str(repository_root),
             "--port",
             str(port),
             "--idle-timeout",
@@ -420,13 +499,14 @@ def running_view_server(fixture_repository: Path) -> RunningViewServer:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        env=server_environment,
     )
     assert _wait_until_port_is_listening(
         port
     ), f"查看器服务在 {_SERVER_START_TIMEOUT_SECONDS:.0f} 秒内没有开始监听端口 {port}"
     try:
         yield RunningViewServer(
-            repository_root=fixture_repository,
+            repository_root=repository_root,
             port=port,
             process_id=server_process.pid,
         )
@@ -437,6 +517,40 @@ def running_view_server(fixture_repository: Path) -> RunningViewServer:
         except subprocess.TimeoutExpired:
             server_process.kill()
             server_process.wait(timeout=_STOP_TIMEOUT_SECONDS)
+
+
+@pytest.fixture
+def running_view_server(fixture_repository: Path) -> Iterator[RunningViewServer]:
+    """提供一个跑在真实端口上的查看器服务，服务的是通用夹具仓库。"""
+    with _serving_view_server(fixture_repository) as running_server:
+        yield running_server
+
+
+@pytest.fixture
+def moved_file_repository(tmp_path: Path) -> Path:
+    """提供一个只造了「普通 ``mv``」的小仓库（见 :func:`_build_plain_move_repository`）。"""
+    return _build_plain_move_repository(tmp_path / "plain-move-repo")
+
+
+@pytest.fixture
+def moved_file_view_server(
+    moved_file_repository: Path, tmp_path: Path
+) -> Iterator[RunningViewServer]:
+    """服务普通 ``mv`` 仓库，并把服务进程的 ``TMPDIR`` 圈在用例自己的目录里。
+
+    Args:
+        moved_file_repository (Path): 被服务的仓库。
+        tmp_path (Path): 用来放隔离出来的服务端临时目录。
+
+    Yields:
+        RunningViewServer: 已在监听的服务。
+    """
+    isolated_temporary_directory = tmp_path / "server-tmp"
+    isolated_temporary_directory.mkdir()
+    with _serving_view_server(
+        moved_file_repository, {"TMPDIR": str(isolated_temporary_directory)}
+    ) as running_server:
+        yield running_server
 
 
 def _run_launch(repository_root: Path, *launch_arguments: str) -> subprocess.CompletedProcess[str]:
@@ -1359,6 +1473,148 @@ def test_plain_edit_reports_no_rename_source(running_view_server: RunningViewSer
     )
     assert status_code == 200
     assert response_body["rename_from"] is None
+
+
+def test_plain_move_is_reported_as_one_rename_with_real_stats(
+    moved_file_view_server: RunningViewServer,
+) -> None:
+    """普通 ``mv``（工作区删除 + 未跟踪新文件）要显示成一条带真实增删的 ``R``。
+
+    ``-M`` 只对 ``git diff`` 收在眼里的路径有效，而它从不收录未跟踪文件。没有那套一次性索引，
+    同一个文件会以「删除 40 行」与「整篇新增」两条出现，真正改动的那两行反而看不见。
+    """
+    repository_root = moved_file_view_server.repository_root
+    status_code, response_body = moved_file_view_server.request("/api/changes")
+    assert status_code == 200
+    section_by_name = {
+        changed_section["section"]: changed_section for changed_section in response_body["sections"]
+    }
+    entry_by_path = {
+        changed_file["path"]: changed_file for changed_file in section_by_name["untracked"]["files"]
+    }
+
+    assert entry_by_path["tasks/archive/note.md"] == {
+        "path": "tasks/archive/note.md",
+        "status": "R",
+        "rename_from": "tasks/pending/note.md",
+        "add": 2,
+        "del": 2,
+    }
+    # 同段里那条无关的未跟踪文件照旧是 ``A`` 且不报统计：不能因为同段有一条配对成功，就把整段
+    # 都说成重命名，也不能凭空给它两个数。
+    assert entry_by_path["solo-untracked.txt"] == {
+        "path": "solo-untracked.txt",
+        "status": "A",
+        "rename_from": None,
+        "add": None,
+        "del": None,
+    }
+    # 配对只改**呈现**，没搬动分区归属：未跟踪那一段列出的路径仍与终端逐项一致。
+    terminal_untracked_paths = set(
+        _run_git(repository_root, "ls-files", "--others", "--exclude-standard").stdout.split()
+    )
+    assert set(entry_by_path) == terminal_untracked_paths
+    # 段级口径也不动：同段的普通未跟踪文件确实没有可信的增删数。
+    assert section_by_name["untracked"]["stats_available"] is False
+    # 删除仍留在未暂存段，与终端 ``git diff --name-only`` 逐项一致。
+    assert {
+        entry["path"]: (entry["status"], entry["add"], entry["del"])
+        for entry in section_by_name["unstaged"]["files"]
+    } == {
+        "tasks/pending/note.md": ("D", 0, _PLAIN_MOVE_FILE_LINE_COUNT),
+        "tasks/pending/twin.md": ("D", 0, _PLAIN_MOVE_FILE_LINE_COUNT),
+    }
+
+
+def test_one_deletion_with_two_similar_candidates_pairs_exactly_once(
+    moved_file_view_server: RunningViewServer,
+) -> None:
+    """一个删除配两个相似候选时只能出一条 ``R``，另一个老实留在 ``A``。
+
+    配对结果是一份「新路径 -> 旧路径」的表；若写成「让每个候选各自去自证」，同一次删除会被算成
+    多次重命名，界面上多出来的那条既指不出旧路径、又白占一行。
+    """
+    status_code, response_body = moved_file_view_server.request("/api/changes")
+    assert status_code == 200
+    untracked_section = next(
+        changed_section
+        for changed_section in response_body["sections"]
+        if changed_section["section"] == "untracked"
+    )
+    entry_by_path = {
+        changed_file["path"]: changed_file for changed_file in untracked_section["files"]
+    }
+    candidate_paths = ("tasks/archive/twin-a.md", "tasks/archive/twin-b.md")
+    rename_entries = [
+        entry_by_path[candidate_path]
+        for candidate_path in candidate_paths
+        if entry_by_path[candidate_path]["status"] == "R"
+    ]
+    assert len(rename_entries) == 1, entry_by_path
+    assert rename_entries[0]["rename_from"] == "tasks/pending/twin.md"
+
+    unpaired_candidate_path = next(
+        candidate_path
+        for candidate_path in candidate_paths
+        if entry_by_path[candidate_path] is not rename_entries[0]
+    )
+    assert entry_by_path[unpaired_candidate_path] == {
+        "path": unpaired_candidate_path,
+        "status": "A",
+        "rename_from": None,
+        "add": None,
+        "del": None,
+    }
+
+
+def test_plain_move_diff_shows_only_the_changed_hunks(
+    moved_file_view_server: RunningViewServer,
+) -> None:
+    """认出配对之后，未跟踪新文件的正文只含真正改动的 hunk，并标出旧路径。
+
+    配对失败时这个文件整篇对着 ``/dev/null`` 求 diff，40 行全算新增——用户看不到「改了哪两行」。
+    """
+    status_code, response_body = moved_file_view_server.request(
+        "/api/diff?path=tasks/archive/note.md&section=untracked"
+    )
+    assert status_code == 200
+    assert response_body["rename_from"] == "tasks/pending/note.md"
+    assert _added_row_texts(response_body) == ["NOTE-10-CHANGED", "NOTE-30-CHANGED"]
+    assert [row["text"] for row in response_body["rows"] if row["kind"] == "del"] == [
+        "note-10",
+        "note-30",
+    ]
+    # 整篇新增会把每一个未改动的行也算成新增行；正文里出现离改动处足够远的一行就说明配对失败。
+    assert "note-01" not in [row["text"] for row in response_body["rows"]]
+
+
+def test_rename_detection_never_writes_the_real_index_or_leaks_its_scratch_index(
+    moved_file_view_server: RunningViewServer, tmp_path: Path
+) -> None:
+    """一次性索引只用来查配对：真实索引一个字节都不许改，临时目录也必须清干净。
+
+    查看器的写边界只有一个「暂存」口子（``POST /api/stage``）。这套探测在索引上跑的确实是
+    ``git add -N``，环境变量一旦指错，改动列表就会**顺手把用户的文件加进索引**——越界得最安静，
+    也最难事后发现。服务进程的 ``TMPDIR`` 被圈在用例目录里，所以「没留下东西」是可判定的。
+    """
+    repository_root = moved_file_view_server.repository_root
+    index_path = repository_root / ".git" / "index"
+    staged_paths_before = _staged_paths(repository_root)
+    index_bytes_before = index_path.read_bytes()
+
+    status_code, response_body = moved_file_view_server.request("/api/changes")
+    assert status_code == 200
+    untracked_entries = next(
+        changed_section["files"]
+        for changed_section in response_body["sections"]
+        if changed_section["section"] == "untracked"
+    )
+    # 先证明这次请求真的走了那套一次性索引：只有它跑过，下面几条断言才有意义。
+    assert any(entry["rename_from"] for entry in untracked_entries), untracked_entries
+
+    assert _staged_paths(repository_root) == staged_paths_before
+    assert index_path.read_bytes() == index_bytes_before
+    assert list((tmp_path / "server-tmp").iterdir()) == []
 
 
 def test_second_launch_reuses_the_resident_instance(fixture_repository: Path) -> None:
