@@ -1,5 +1,7 @@
 # PRD: 由 Post-PR Supervisor Agent 判断 CI 状态与下一步
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/156
+
 > ⛔ **交付前置**：无；可立即开工。本 PRD 是 Roadmap CI/CD 产品化 PRD 的前置契约，后者必须等待本文交付。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一事实源。
 >
