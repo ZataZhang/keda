@@ -59,6 +59,7 @@ from backend.core.use_cases.agent_runner_worktree_probe import (
     _has_existing_local_commit_ready_for_publish,
     _worktree_needs_rebase_recovery,
 )
+from backend.core.use_cases.agent_runner_prd_activity import PrdActivityLease
 from backend.core.use_cases.create_prd_from_issue import (
     CreatePrdFromIssueRequest,
     create_prd_from_issue,
@@ -294,7 +295,11 @@ def _process_single_issue(
                 detail=attempt_detail,
             )
 
+    prd_activity_lease = PrdActivityLease(
+        repo_path, lifecycle_prd_path, issue.number, selected_agent
+    )
     try:
+        prd_activity_lease.start()
         if issue_kind == "ready":
             used_agent = run_issue_with_agent_fallback(
                 issue=issue,
@@ -455,6 +460,7 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 1
+
     except BlockedWorktreeClaimedError as exc:
         _logger.info(
             "Issue #%d worktree already claimed by another runner, skipping: %s",
@@ -495,6 +501,9 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 1
+
+    finally:
+        prd_activity_lease.close()
 
 
 @dataclass(frozen=True)
