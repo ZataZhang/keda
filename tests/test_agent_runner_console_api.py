@@ -436,3 +436,181 @@ def test_auth_me_returns_local_session() -> None:
     payload = response.json()
     assert payload["user_id"] == "local-operator"
     assert "display_name" in payload
+
+
+# ── Issue 实时输出（按仓库 + Issue 号的只读日志） ────────────────────────────
+
+
+def _write_issue_attempt(repo_dir: Path, repo_id: str, issue_number: int, text: str) -> Path:
+    """在测试仓库下写一个符合命名约定的 Issue 尝试日志。"""
+    log_dir = repo_dir / "logs" / "agent-runner" / "issues" / repo_id
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"issue-{issue_number}-20260929-120000.log"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _write_named_issue_attempt(
+    repo_dir: Path, repo_id: str, issue_number: int, timestamp: str, text: str
+) -> Path:
+    """在测试仓库下写一个指定时间戳的 Issue 尝试日志。"""
+    log_dir = repo_dir / "logs" / "agent-runner" / "issues" / repo_id
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"issue-{issue_number}-{timestamp}.log"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_issue_log_requires_registered_repo(console_environment) -> None:
+    """未知仓库必须返回 404，且不能读到任何文件。"""
+    response = client.get("/api/v1/agent-runner/console/repositories/ghost/issues/1/logs")
+    assert response.status_code == 404
+    assert "not registered" in response.json()["detail"]
+
+
+def test_issue_log_rejects_invalid_issue_number(console_environment) -> None:
+    """非法 Issue 编号必须返回 400。"""
+    response = client.get("/api/v1/agent-runner/console/repositories/keda-main/issues/0/logs")
+    assert response.status_code == 400
+    assert "positive integer" in response.json()["detail"]
+
+
+def test_issue_log_empty_state_for_missing_attempt(console_environment) -> None:
+    """没有日志文件时返回明确的空态，而不是回退到别的 Issue 或进程日志。"""
+    response = client.get("/api/v1/agent-runner/console/repositories/keda-main/issues/42/logs")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "no_attempt"
+    assert payload["attempt_id"] is None
+    assert payload["content"] == ""
+
+
+def test_issue_log_reads_registered_repo_issue(console_environment) -> None:
+    """命中注册仓库 + Issue 的日志文件，返回内容、尝试标识与续读偏移。"""
+    repo_dir = console_environment["tmp_path"] / "repo"
+    _write_issue_attempt(repo_dir, "keda-main", 42, "agent started\nagent finished\n")
+
+    response = client.get("/api/v1/agent-runner/console/repositories/keda-main/issues/42/logs")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["repo_id"] == "keda-main"
+    assert payload["issue_number"] == 42
+    assert payload["attempt_id"] == "issue-42-20260929-120000.log"
+    assert payload["latest_attempt_id"] == "issue-42-20260929-120000.log"
+    assert "agent started" in payload["content"]
+    assert payload["next_offset"] > 0
+    assert payload["eof"] is True
+
+
+def test_issue_log_offset_pagination(console_environment) -> None:
+    """按字节偏移续读不重复、不丢内容。"""
+    repo_dir = console_environment["tmp_path"] / "repo"
+    _write_issue_attempt(repo_dir, "keda-main", 7, "line-1\nline-2\nline-3\n")
+
+    first = client.get(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/7/logs?offset=0"
+    ).json()
+    assert first["status"] == "ok"
+    assert first["eof"] is True
+
+    # 从中间偏移续读，只读后半段。
+    second = client.get(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/7/logs?offset=7"
+    ).json()
+    assert second["status"] == "ok"
+    assert second["content"] == "line-2\nline-3\n"
+    assert second["next_offset"] == first["next_offset"]
+
+
+def test_issue_log_attempt_switch_and_truncation(console_environment) -> None:
+    """新尝试出现、旧尝试消失、文件截断都返回明确状态。"""
+    import os
+
+    repo_dir = console_environment["tmp_path"] / "repo"
+    first_path = _write_issue_attempt(repo_dir, "keda-main", 9, "first attempt\n")
+    first = client.get("/api/v1/agent-runner/console/repositories/keda-main/issues/9/logs").json()
+    first_attempt = first["attempt_id"]
+
+    # 新尝试出现：latest_attempt_id 应指向新文件（按 mtime 排序）。
+    second_path = first_path.with_name("issue-9-20260929-120001.log")
+    second_path.write_text("second attempt\n", encoding="utf-8")
+    # 确保两个尝试的 mtime 可区分，避免同秒写入导致排序不稳定。
+    os.utime(first_path, (1_700_000_000, 1_700_000_000))
+    os.utime(second_path, (1_700_000_100, 1_700_000_100))
+    poll = client.get(
+        f"/api/v1/agent-runner/console/repositories/keda-main/issues/9/logs"
+        f"?attempt_id={first_attempt}&offset=0"
+    ).json()
+    assert poll["status"] == "ok"
+    assert poll["attempt_id"] == first_attempt
+    assert poll["latest_attempt_id"] == "issue-9-20260929-120001.log"
+
+    # 旧尝试被清理：显式 gone，不静默改读。
+    first_path.unlink()
+    gone = client.get(
+        f"/api/v1/agent-runner/console/repositories/keda-main/issues/9/logs"
+        f"?attempt_id={first_attempt}&offset=0"
+    ).json()
+    assert gone["status"] == "attempt_gone"
+    assert gone["latest_attempt_id"] == "issue-9-20260929-120001.log"
+
+    # 文件被截断（offset 越过当前大小）：显式 truncated。
+    second_path.write_text("x\n", encoding="utf-8")
+    truncated = client.get(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/9/logs"
+        "?attempt_id=issue-9-20260929-120001.log&offset=9999"
+    ).json()
+    assert truncated["status"] == "truncated"
+
+
+def test_issue_log_tail_window_returns_last_bytes(console_environment) -> None:
+    """``tail=true`` 忽略偏移，返回末尾窗口并把 next_offset 对齐到文件末尾。"""
+    repo_dir = console_environment["tmp_path"] / "repo"
+    content = "old-line\n" * 5000 + "tail-marker\n"
+    path = _write_named_issue_attempt(repo_dir, "keda-main", 11, "20260929-130000", content)
+
+    response = client.get(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/11/logs?tail=true"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert "tail-marker" in payload["content"]
+    assert "old-line" in payload["content"]  # 尾部窗口内仍有历史行
+    assert payload["eof"] is True
+    # next_offset 对齐到文件末尾，调用方原地转入增量续读。
+    assert payload["next_offset"] == path.stat().st_size
+
+    # 非 tail 的小窗口从头读：只能看到头部，看不到尾部标记。
+    head = client.get(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/11/logs?max_bytes=200"
+    ).json()
+    assert "tail-marker" not in head["content"]
+    assert head["eof"] is False
+
+
+def test_issue_log_tail_window_with_explicit_attempt(console_environment) -> None:
+    """``tail=true`` 可与显式 ``attempt_id`` 组合，定位到指定尝试的尾部。"""
+    import os
+
+    repo_dir = console_environment["tmp_path"] / "repo"
+    first_path = _write_named_issue_attempt(
+        repo_dir, "keda-main", 13, "20260929-130000", "first attempt tail\n"
+    )
+    second_path = _write_named_issue_attempt(
+        repo_dir, "keda-main", 13, "20260929-130001", "second attempt tail\n"
+    )
+    os.utime(first_path, (1_700_000_000, 1_700_000_000))
+    os.utime(second_path, (1_700_000_100, 1_700_000_100))
+
+    response = client.get(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/13/logs"
+        "?attempt_id=issue-13-20260929-130000.log&tail=true"
+    )
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["attempt_id"] == "issue-13-20260929-130000.log"
+    assert payload["latest_attempt_id"] == "issue-13-20260929-130001.log"
+    assert "first attempt tail" in payload["content"]
+    assert payload["eof"] is True

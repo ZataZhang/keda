@@ -108,6 +108,14 @@ def logs_command(
         int,
         typer.Option("--lines", "-n", help="Number of recent lines to print."),
     ] = 200,
+    issue: Annotated[
+        int | None,
+        typer.Option(
+            "--issue",
+            help="Read the per-Issue agent output log for the given Issue number "
+            "(mutually exclusive with --kind).",
+        ),
+    ] = None,
     follow: Annotated[
         bool,
         typer.Option("-f", "--follow", help="Follow log output continuously."),
@@ -120,15 +128,22 @@ def logs_command(
 
     By default the command targets the daemon for the repository inferred
     from the current working directory.  Pass --kind review_daemon to tail
-    the review-daemon log instead.
+    the review-daemon log instead.  Pass --issue <N> to read the per-Issue
+    agent output log for one Issue instead of a process log.
     """
     selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
+    # Typer 的默认值与显式传参无法区分；``--issue`` 与 ``--kind`` 互斥，
+    # 用 ``--issue is not None`` 结合 ``kind != default`` 判断是否冲突，
+    # 避免把默认 ``daemon`` 当成用户显式选择。
+    kind_explicit = kind != LogsKindChoice.daemon
     return _run_typer_command(
         "logs",
         **selector_options,
         kind=_enum_value(kind),
         lines=lines,
         follow=follow,
+        issue=issue,
+        kind_explicit=kind_explicit,
     )
 
 

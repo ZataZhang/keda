@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import CLAUDE_STREAM_JSON_PROTOCOL_ID
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
@@ -113,6 +114,61 @@ def test_output_routed_runner_respects_explicit_sink(tmp_path: Path) -> None:
     assert base.output_sinks[-1] is explicit_sink
 
 
+def test_output_routed_runner_forwards_full_run_contract(tmp_path: Path) -> None:
+    """The wrapper forwards every ``IProcessRunner.run`` keyword, not just sink.
+
+    串行与并行路径都把包装器注入全部下游调用；少转发 ``input_text`` 或
+    ``output_protocol`` 会在精简签名的运行器上炸 TypeError，或静默丢掉
+    协议路由。
+    """
+    base = FakeProcessRunner()
+    wrapped = _OutputRoutedProcessRunner(base, lambda _c: None)
+
+    wrapped.run(
+        ["git", "mktree"],
+        cwd=tmp_path,
+        check=False,
+        timeout=5,
+        inactivity_timeout=3,
+        capture_output=True,
+        input_text="tree entries\n",
+        label="mktree",
+        output_protocol="plain",
+    )
+    assert base.input_texts[-1] == "tree entries\n"
+    assert base.timeouts[-1] == 5
+    assert base.inactivity_timeouts[-1] == 3
+    assert base.labels[-1] == "mktree"
+
+
+def test_output_routed_runner_tolerates_partial_fake_signature(tmp_path: Path) -> None:
+    """精简签名的运行器不认识的参数必须被过滤，而不是炸 TypeError。
+
+    测试 fake / 自定义 runner 常只声明 ``cwd`` 等少数字段；包装器按
+    ``inspect.signature`` 过滤后再委托。
+    """
+
+    class _MinimalRunner:
+        def __init__(self) -> None:
+            self.calls: list[list[str]] = []
+
+        def run(self, command, *, cwd, check=True, capture_output=True, label=None):
+            self.calls.append(list(command))
+            return CommandResult(tuple(command), 0, "", "")
+
+    base = _MinimalRunner()
+    wrapped = _OutputRoutedProcessRunner(base, lambda _c: None)
+    result = wrapped.run(
+        ["git", "status"],
+        cwd=tmp_path,
+        timeout=5,
+        input_text="ignored\n",
+        output_protocol="plain",
+    )
+    assert result.return_code == 0
+    assert base.calls == [["git", "status"]]
+
+
 # --- issue_output_routing ---------------------------------------------------
 
 
@@ -128,6 +184,28 @@ def test_issue_output_routing_writes_file_and_view(tmp_path: Path) -> None:
     assert len(log_files) == 1
     assert "agent says hi" in log_files[0].read_text(encoding="utf-8")
     assert (7, "agent says hi\n") in view.appended
+
+
+def test_issue_output_routing_serial_mirror_writes_file_and_console(tmp_path: Path, capsys) -> None:
+    """串行路径的 sink 同时落盘并把可读文本镜像回原终端。
+
+    这覆盖「单次 ``iar run`` 之后，第二终端仍能按 Issue 找到输出」的核心
+    机制：文件与原 stdout 必须同时有内容，且互不替代。
+    """
+    mirrored: list[str] = []
+    with issue_output_routing(
+        repo_id="repo",
+        issue_number=11,
+        log_base=tmp_path,
+        output_view=NoOpRunnerLiveView(),
+        console_sink=mirrored.append,
+    ) as sink:
+        sink("agent progress line\n")
+
+    log_files = list((tmp_path / "agent-runner" / "issues" / "repo").glob("issue-11-*.log"))
+    assert len(log_files) == 1
+    assert "agent progress line" in log_files[0].read_text(encoding="utf-8")
+    assert mirrored == ["agent progress line\n"]
 
 
 def test_issue_output_routing_captures_worker_thread_logs(tmp_path: Path) -> None:

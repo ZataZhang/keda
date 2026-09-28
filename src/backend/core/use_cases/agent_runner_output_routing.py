@@ -17,6 +17,7 @@ imports), so the layering rule ``core -> engines -> infrastructure`` holds:
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 from collections.abc import Callable, Iterator
@@ -45,6 +46,13 @@ class _OutputRoutedProcessRunner:
     def __init__(self, wrapped: object, sink: Callable[[str], None]) -> None:
         self._wrapped = wrapped
         self._sink = sink
+        # 测试 fake 与自定义 runner 常用精简签名（缺 output_sink /
+        # output_protocol 等新参数）。预先探测被包装 run 接受的参数集，
+        # 委托时只传它声明得起的部分，避免包装器比接口「多嘴」炸 TypeError。
+        try:
+            self._accepted_params = set(inspect.signature(wrapped.run).parameters)
+        except (TypeError, ValueError):
+            self._accepted_params = set()
 
     def run(
         self,
@@ -58,19 +66,30 @@ class _OutputRoutedProcessRunner:
         input_text: str | None = None,
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
+        output_protocol: str | None = None,
     ) -> CommandResult:
-        """Delegate to the wrapped runner, defaulting ``output_sink`` per Issue."""
-        return self._wrapped.run(
-            command,
-            cwd=cwd,
-            check=check,
-            timeout=timeout,
-            inactivity_timeout=inactivity_timeout,
-            capture_output=capture_output,
-            input_text=input_text,
-            label=label,
-            output_sink=output_sink if output_sink is not None else self._sink,
-        )
+        """Delegate to the wrapped runner, defaulting ``output_sink`` per Issue.
+
+        签名与 :class:`IProcessRunner` 逐参数对齐，但只把被包装运行器实际
+        声明的关键字参数继续下传；未声明的保持缺省语义（等价于历史行为里
+        根本不存在该参数）。
+        """
+        run_kwargs: dict[str, object] = {
+            "cwd": cwd,
+            "check": check,
+            "timeout": timeout,
+            "inactivity_timeout": inactivity_timeout,
+            "capture_output": capture_output,
+            "input_text": input_text,
+            "label": label,
+            "output_sink": output_sink if output_sink is not None else self._sink,
+            "output_protocol": output_protocol,
+        }
+        if self._accepted_params:
+            run_kwargs = {
+                name: value for name, value in run_kwargs.items() if name in self._accepted_params
+            }
+        return self._wrapped.run(command, **run_kwargs)
 
 
 class _IssueLogWriter:
@@ -127,6 +146,7 @@ def issue_output_routing(
     issue_number: int,
     log_base: Path,
     output_view: IRunnerLiveView,
+    console_sink: Callable[[str], None] | None = None,
 ) -> Iterator[Callable[[str], None]]:
     """Route one Issue's output to its own log file and live-view panel.
 
@@ -141,6 +161,10 @@ def issue_output_routing(
         issue_number: Issue number (log filename + panel key).
         log_base: Base directory for logs (typically ``<repo_path>/logs``).
         output_view: Live view receiving each chunk for the Issue's panel.
+        console_sink: 可选的「原终端镜像」回调。串行 ``iar run`` 传入它，
+            让 sink 同时把可读文本写回启动终端（保持原有前台输出），并行
+            daemon 则保持 ``None``（面板已承担展示）。只传**可读文本**，
+            避免 Rich 控制字符污染日志文件。
     """
     file_path = per_issue_log_path(log_base, repo_id, issue_number)
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,6 +173,8 @@ def issue_output_routing(
     def sink(chunk: str) -> None:
         writer.write(chunk)
         output_view.append(issue_number, chunk)
+        if console_sink is not None:
+            console_sink(chunk)
 
     handler = logging.StreamHandler(stream=writer)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))

@@ -202,6 +202,25 @@ export type ProcessLogChunk = {
   eof: boolean;
 };
 
+// Issue 实时输出（与后端 `issue_logs` 用例的读取状态对齐）。
+export type IssueLogStatus =
+  | "ok"
+  | "no_attempt"
+  | "attempt_gone"
+  | "truncated"
+  | "repo_not_found";
+
+export type IssueLogChunk = {
+  repo_id: string;
+  issue_number: number;
+  status: IssueLogStatus;
+  attempt_id: string | null;
+  latest_attempt_id: string | null;
+  content: string;
+  next_offset: number;
+  eof: boolean;
+};
+
 export type ConsoleActionResult = {
   action: string;
   result: "accepted" | "rejected" | "error";

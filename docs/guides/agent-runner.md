@@ -1096,6 +1096,28 @@ iar logs --kind review_daemon -f
 - 无 running 进程时，打印回退指引（最近进程日志路径或全局 `logs/app-YYYY-MM-DD.log`），退出码 0。
 - 仓库目标推断逻辑与 `iar daemon` 一致：未指定 `--repo-id` 时从当前工作目录推断唯一 enabled 注册仓。
 
+#### 查看单个 Issue 的实时输出（`iar logs --issue`）
+
+单次 `iar run` 或 daemon 处理某个 Issue 时，Agent 的可见输出会即时落到
+`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`。用 `--issue`
+可以在**另一个终端**按 Issue 号查看这条流，无需知道进程 ID 或日志目录：
+
+```bash
+# 查看 Issue #42 最近一次尝试的最近输出（尾部窗口）
+iar logs --repo-id keda-main --issue 42
+
+# 持续跟随 Issue #42 的输出（重试时自动切换尝试，Ctrl-C 退出）
+iar logs --repo-id keda-main --issue 42 --follow
+```
+
+行为说明：
+
+- `--issue <N>` 与 `--kind` 互斥；不带 `--issue` 时保持原有进程日志语义。
+- 首次输出给**尾部窗口**（默认最近 64 KiB，再按 `--lines` 截行），不会从头倾泻整份日志；之后按字节偏移增量续读。
+- 默认跟随该 Issue 的**最新尝试**；重试产生新文件时 CLI 会提示并切换。
+- Issue 尚未开始、日志已清理或仓库未注册时，显示明确的空态 / 不可用提示，不会回退到别的 Issue 或进程日志。
+- 单次 `iar run`（串行）与并行 daemon 使用同一归属规则；原启动终端的可读输出不受影响。
+
 `iar daemon` 本身继续作为启动 daemon 的快捷命令，等效于 `iar daemon run`。例如：
 
 ```bash
@@ -1755,6 +1777,7 @@ iar daemon --concurrency 3
 
 - **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。
 - **实时看板**（前台 TTY）：在交互终端直接 `iar daemon --concurrency 3` 时，会显示一个仿 `iar deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`iar registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。
+- **按 Issue 从第二终端 / Console 查看**：`iar logs --repo-id <repo> --issue <N> [--follow]` 或 Console 的 PRD 详情「实时输出」标签，都读取同一份 per-Issue 日志文件；单次 `iar run`（串行）也走同一路径，只是不显示多列看板。
 
 ### 进度落盘与跨 claim 续作（checkpoint）
 
@@ -3173,6 +3196,7 @@ GET    /api/v1/agent-runner/console/processes
 POST   /api/v1/agent-runner/console/processes                  {repo_id, kind}
 POST   /api/v1/agent-runner/console/processes/{id}/stop
 GET    /api/v1/agent-runner/console/processes/{id}/logs?offset=0
+GET    /api/v1/agent-runner/console/repositories/{repo}/issues/{n}/logs?offset=0&attempt_id=&tail=  Issue 实时输出（只读；tail=1 取尾部窗口）
 POST   /api/v1/agent-runner/console/repositories/{repo}/actions             {action}
 POST   /api/v1/agent-runner/console/repositories/{repo}/issues/{n}/actions  {action}
 GET    /api/v1/agent-runner/console/stats/overview

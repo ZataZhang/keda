@@ -11,6 +11,7 @@ console 能力：托管进程启停与日志、白名单动作、完成度统计
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
@@ -25,6 +26,7 @@ from backend.core.shared.interfaces.runner_console import (
     IMonitorSnapshotStore,
     RunnerProcessKind,
 )
+from backend.core.shared.models.agent_runner import RepositoryRunContext
 from backend.core.use_cases.console_actions import (
     ConsoleActionError,
     execute_issue_action,
@@ -40,6 +42,11 @@ from backend.core.use_cases.console_processes import (
 from backend.core.use_cases.console_stats import (
     build_completion_stats_overview,
     build_run_history_trend,
+)
+from backend.core.use_cases.issue_logs import (
+    DEFAULT_TAIL_BYTES,
+    create_issue_log_reader,
+    read_issue_log,
 )
 from backend.core.use_cases.agent_runner_lifecycle import build_prd_lifecycle_stats
 from backend.core.use_cases.agent_runner_factory import (
@@ -170,6 +177,71 @@ def read_console_process_log(process_id: str, offset: int = 0) -> dict:
     except ConsoleProcessError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _serialize(chunk)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Issue 实时输出（只读，按仓库 + Issue 号）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _issue_log_repo_path_resolver(
+    contexts: Sequence[RepositoryRunContext],
+) -> Callable[[str], Path | None]:
+    """把已解析的仓库上下文列表适配为 Issue 日志读取器的解析回调。"""
+    by_repo_id = {context.repo_id: context.repo_path for context in contexts}
+    return by_repo_id.get
+
+
+@router.get("/agent-runner/console/repositories/{repo_id}/issues/{issue_number}/logs")
+def read_console_issue_log(
+    repo_id: str,
+    issue_number: int,
+    offset: int = 0,
+    attempt_id: str | None = None,
+    max_bytes: int = DEFAULT_TAIL_BYTES,
+    tail: bool = False,
+) -> dict:
+    """按仓库 + Issue 号续读该 Issue 的 Agent 可见输出。
+
+    与托管进程日志端点刻意分开：Issue 日志不属于托管进程 registry，读取
+    范围被限制在该注册仓库的固定日志子树内，不接受客户端传入的文件路径。
+    ``tail=true`` 时忽略 ``offset``，返回末尾 ``max_bytes`` 字节的窗口，
+    ``next_offset`` 对齐到文件末尾，便于前端「先尾部后增量」。
+    """
+    if issue_number <= 0:
+        raise HTTPException(status_code=400, detail="issue_number must be a positive integer.")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    contexts = _resolve_contexts()
+    known_repo_ids = {context.repo_id for context in contexts}
+    if repo_id not in known_repo_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Repository '{repo_id}' is not registered or not enabled.",
+        )
+    reader = create_issue_log_reader(_issue_log_repo_path_resolver(contexts))
+    # 上限收敛：单次读取不得超过默认尾部窗口，避免客户端用大 max_bytes
+    # 一次拉走整份日志。
+    bounded_max_bytes = min(max(max_bytes, 1), DEFAULT_TAIL_BYTES)
+    selection = read_issue_log(
+        reader=reader,
+        repo_id=repo_id,
+        issue_number=issue_number,
+        attempt_id=attempt_id,
+        offset=offset,
+        max_bytes=bounded_max_bytes,
+        tail=tail,
+    )
+    return {
+        "repo_id": repo_id,
+        "issue_number": issue_number,
+        "status": selection.status.value,
+        "attempt_id": selection.attempt_id,
+        "latest_attempt_id": selection.latest_attempt_id,
+        "content": selection.content,
+        "next_offset": selection.next_offset,
+        "eof": selection.eof,
+    }
 
 
 def _audit_process_action(*, action: str, repo_id: str, detail: str) -> None:

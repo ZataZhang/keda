@@ -13,6 +13,7 @@ import type {
   DailyRunTrendEntry,
   DirectoryBrowseResult,
   DiscoveredRepositoryEntry,
+  IssueLogChunk,
   MonitorSettings,
   PrdLifecycleStats,
   ProcessLogChunk,
@@ -55,6 +56,46 @@ export async function fetchProcessLog(
 ): Promise<ProcessLogChunk> {
   return get<ProcessLogChunk>(
     `${BASE_PATH}/console/processes/${processId}/logs?offset=${offset}`,
+  );
+}
+
+// ── Issue 实时输出 ──────────────────────────────────────────────────────────
+
+/**
+ * 按仓库 + Issue 号续读该 Issue 的 Agent 可见输出。
+ *
+ * 与托管进程日志端点刻意分开：Issue 日志不属于托管进程 registry，读取范围
+ * 被限制在该注册仓库的固定日志子树内，不接受客户端传入的文件路径。
+ *
+ * @param params.repoId - 已注册仓库 ID。
+ * @param params.issueNumber - Issue 编号（正整数）。
+ * @param params.offset - 字节偏移；``0`` 表示从头读。
+ * @param params.attemptId - 显式指定的尝试；省略表示读最新尝试。
+ * @param params.tail - 为真时忽略 ``offset``，返回末尾窗口并对齐
+ *   ``next_offset`` 到文件末尾（用于「先尾部后增量」的首次拉取）。
+ * @returns 带尝试标识与续读偏移的日志块。
+ */
+export async function fetchIssueLog(params: {
+  repoId: string;
+  issueNumber: number;
+  offset?: number;
+  attemptId?: string | null;
+  tail?: boolean;
+}): Promise<IssueLogChunk> {
+  const searchParams = new URLSearchParams();
+  if (params.offset !== undefined) {
+    searchParams.set("offset", String(params.offset));
+  }
+  if (params.attemptId) {
+    searchParams.set("attempt_id", params.attemptId);
+  }
+  if (params.tail) {
+    searchParams.set("tail", "true");
+  }
+  const query = searchParams.toString();
+  return get<IssueLogChunk>(
+    `${BASE_PATH}/console/repositories/${encodeURIComponent(params.repoId)}` +
+      `/issues/${params.issueNumber}/logs${query ? `?${query}` : ""}`,
   );
 }
 

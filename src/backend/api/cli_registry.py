@@ -37,6 +37,14 @@ from backend.core.use_cases.console_processes import (
     stop_runner_process,
     tail_runner_log,
 )
+from backend.core.use_cases.issue_logs import (
+    DEFAULT_TAIL_BYTES,
+    IssueLogSelection,
+    IssueLogStatus,
+    create_issue_log_reader,
+    describe_issue_log_status,
+    read_issue_log,
+)
 from backend.core.use_cases.repository_registry import remove_registry_repository
 
 # ``ProcessSupervisor`` stores ``kind`` as the string value of the enum member
@@ -584,6 +592,183 @@ def _print_logs_fallback(repo_id: str, kind: str) -> int:
     return 0
 
 
+def _print_issue_log_selection(selection: IssueLogSelection, *, issue_number: int) -> None:
+    """把一次 Issue 日志读取结果写到原始终端。"""
+    notice = describe_issue_log_status(selection, issue_number=issue_number)
+    if notice:
+        console.print(f"[yellow]{notice}[/]")
+    if selection.content:
+        # 内容本身可能跨多次 read 拼出，避免 Rich 把 Agent 文本当 markup 解析。
+        print(selection.content, end="")
+
+
+def _follow_issue_log(
+    *,
+    repo_id: str,
+    issue_number: int,
+    lines: int,
+    follow: bool,
+    contexts: list[Any],
+) -> int:
+    """读取一个 Issue 的输出；``follow`` 为真时持续跟随直到结束或 Ctrl-C。
+
+    首次给尾部窗口；之后按字节偏移轮询。重试产生新尝试时提示并切换；
+    尝试被清理、日志被截断、Issue 结束且日志稳定后退出。
+    """
+    repo_path_by_id = {context.repo_id: context.repo_path for context in contexts}
+    reader = create_issue_log_reader(repo_path_by_id.get)
+
+    # 首次读取：默认跟随最新尝试，给尾部窗口（tail=True 忽略偏移，起点由
+    # 文件大小回推，大于窗口的历史内容不会被从头倾泻出来）。
+    selection = read_issue_log(
+        reader=reader,
+        repo_id=repo_id,
+        issue_number=issue_number,
+        attempt_id=None,
+        offset=0,
+        max_bytes=DEFAULT_TAIL_BYTES,
+        tail=True,
+    )
+    if selection.status is IssueLogStatus.REPO_NOT_FOUND:
+        console.print(f"[yellow]Repository '{repo_id}' 未注册或已禁用。[/]")
+        return 1
+    if selection.status is IssueLogStatus.NO_ATTEMPT:
+        console.print(f"[yellow]Issue #{issue_number} 暂无可用输出（尚未开始或日志已清理）。[/]")
+        return 0
+
+    current_attempt_id = selection.attempt_id
+    if selection.content:
+        _print_issue_log_selection(
+            IssueLogSelection(
+                status=selection.status,
+                attempt_id=selection.attempt_id,
+                latest_attempt_id=selection.latest_attempt_id,
+                content=_trim_to_last_lines(selection.content, lines),
+                next_offset=selection.next_offset,
+                eof=selection.eof,
+            ),
+            issue_number=issue_number,
+        )
+    next_offset = selection.next_offset
+
+    if not follow:
+        # 不带 --follow：打印尾部窗口即退出，绝不进入轮询。
+        return 0
+
+    while True:
+        try:
+            time.sleep(_LOGS_POLL_INTERVAL_SECONDS)
+        except KeyboardInterrupt:
+            return 0
+
+        selection = read_issue_log(
+            reader=reader,
+            repo_id=repo_id,
+            issue_number=issue_number,
+            attempt_id=current_attempt_id,
+            offset=next_offset,
+            max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
+        )
+
+        if selection.status is IssueLogStatus.ATTEMPT_GONE:
+            console.print(
+                f"[yellow]Issue #{issue_number} 的尝试 {current_attempt_id} 已不可用；"
+                "切换至最新尝试。[/]"
+            )
+            # 重新定位到最新尝试（偏移重置，避免把旧偏移拼到新文件）。
+            selection = read_issue_log(
+                reader=reader,
+                repo_id=repo_id,
+                issue_number=issue_number,
+                attempt_id=None,
+                offset=0,
+                max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
+            )
+            if selection.status is not IssueLogStatus.OK:
+                _print_issue_log_selection(selection, issue_number=issue_number)
+                return 0
+            current_attempt_id = selection.attempt_id
+            next_offset = selection.next_offset
+            _print_issue_log_selection(selection, issue_number=issue_number)
+            continue
+
+        if selection.status is IssueLogStatus.TRUNCATED:
+            console.print(
+                f"[yellow]Issue #{issue_number} 的日志已轮转或截断，已从最新位置续读。[/]"
+            )
+            selection = read_issue_log(
+                reader=reader,
+                repo_id=repo_id,
+                issue_number=issue_number,
+                attempt_id=current_attempt_id,
+                offset=0,
+                max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
+            )
+            if selection.status is not IssueLogStatus.OK:
+                _print_issue_log_selection(selection, issue_number=issue_number)
+                return 0
+            next_offset = selection.next_offset
+            _print_issue_log_selection(selection, issue_number=issue_number)
+            continue
+
+        if selection.status is IssueLogStatus.NO_ATTEMPT:
+            _print_issue_log_selection(selection, issue_number=issue_number)
+            return 0
+
+        if selection.status is IssueLogStatus.REPO_NOT_FOUND:
+            _print_issue_log_selection(selection, issue_number=issue_number)
+            return 1
+
+        # 检测是否出现了新尝试（重试/新执行）。
+        if (
+            selection.latest_attempt_id is not None
+            and selection.attempt_id is not None
+            and selection.latest_attempt_id != selection.attempt_id
+        ):
+            console.print(
+                f"[dim](new attempt detected: {selection.attempt_id} -> "
+                f"{selection.latest_attempt_id})[/]"
+            )
+            selection = read_issue_log(
+                reader=reader,
+                repo_id=repo_id,
+                issue_number=issue_number,
+                attempt_id=selection.latest_attempt_id,
+                offset=0,
+                max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
+            )
+            current_attempt_id = selection.attempt_id
+            next_offset = selection.next_offset
+            _print_issue_log_selection(selection, issue_number=issue_number)
+            continue
+
+        if selection.content:
+            print(selection.content, end="")
+        next_offset = selection.next_offset
+        if selection.eof:
+            # Issue 结束且日志稳定：再确认没有新尝试后退出。
+            latest = read_issue_log(
+                reader=reader,
+                repo_id=repo_id,
+                issue_number=issue_number,
+                attempt_id=None,
+                offset=0,
+                max_bytes=1,
+            )
+            if latest.status is not IssueLogStatus.OK or latest.attempt_id == current_attempt_id:
+                print(
+                    f"\n[dim](Issue #{issue_number} attempt {current_attempt_id} "
+                    "reached end of log; tail ends here)[/]"
+                )
+                return 0
+            # 新尝试出现：切过去继续跟随。
+            console.print(
+                f"[dim](new attempt detected: {current_attempt_id} -> " f"{latest.attempt_id})[/]"
+            )
+            current_attempt_id = latest.attempt_id
+            next_offset = latest.next_offset
+
+
 def _run_logs_command(
     parsed: argparse.Namespace,
     process_runner: IProcessRunner,
@@ -591,7 +776,11 @@ def _run_logs_command(
     repo_id: str,
     repo_override: str | None,
 ) -> int:
-    """Print the recent log of a managed daemon / review-daemon process."""
+    """Print the recent log of a managed daemon / review-daemon process.
+
+    With ``--issue <N>``, read the per-Issue agent output log instead of a
+    managed process log. The two modes are mutually exclusive.
+    """
     del process_runner  # Unused; kept for dispatch signature parity with sibling handlers.
 
     supervisor = create_process_supervisor()
@@ -610,7 +799,7 @@ def _run_logs_command(
         return 1
     context = contexts[0]
 
-    kind = getattr(parsed, "kind", _DAEMON_KIND) or _DAEMON_KIND
+    kind = getattr(parsed, "kind", None) or _DAEMON_KIND
     if kind not in (_DAEMON_KIND, _REVIEW_DAEMON_KIND):
         error_console.print(
             f"[red]Unsupported --kind value:[/] {kind!r}. "
@@ -618,8 +807,31 @@ def _run_logs_command(
         )
         return 1
 
+    issue_number = getattr(parsed, "issue", None)
+    if issue_number is not None:
+        # ``--kind`` 缺省为 daemon；只有用户显式传了非默认 kind 才与
+        # ``--issue`` 冲突（Typer 路径靠 ``kind_explicit``，argparse 路径靠
+        # ``parsed.kind is not None``）。
+        kind_explicit = bool(getattr(parsed, "kind_explicit", False)) or (
+            getattr(parsed, "kind", None) is not None and kind != _DAEMON_KIND
+        )
+        if kind_explicit:
+            error_console.print(
+                "[red]--issue and --kind are mutually exclusive; use one or the other.[/]"
+            )
+            return 2
+
     lines = int(getattr(parsed, "lines", _LOGS_DEFAULT_LINES) or _LOGS_DEFAULT_LINES)
     follow = bool(getattr(parsed, "follow", False))
+
+    if issue_number is not None:
+        return _follow_issue_log(
+            repo_id=context.repo_id,
+            issue_number=issue_number,
+            lines=lines,
+            follow=follow,
+            contexts=contexts,
+        )
 
     records = supervisor.list_processes()
     selected = _select_logs_record(records, context.repo_id, kind)

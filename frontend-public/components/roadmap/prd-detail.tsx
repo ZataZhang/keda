@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { canStartRoadmapPrd, STATE_LABELS, STATE_VARIANTS } from "./prd-card";
 import { PrdContentView } from "./prd-content-view";
 import { PrdEvidenceView } from "./prd-evidence-view";
+import { PrdIssueOutputView } from "./prd-issue-output-view";
 import { PrdLifecycleView } from "./prd-lifecycle-view";
 import { cn } from "@/lib/utils";
 import type { RoadmapPrd } from "@/lib/api/types";
@@ -22,6 +23,7 @@ import type { RoadmapPrd } from "@/lib/api/types";
 export const PRD_CONTENT_TAB_ID = "content";
 export const PRD_EVIDENCE_TAB_ID = "evidence";
 export const PRD_LIFECYCLE_TAB_ID = "lifecycle";
+export const PRD_ISSUE_OUTPUT_TAB_ID = "issue-output";
 
 export type PrdDetailTab = {
   id: string;
@@ -72,6 +74,23 @@ export function PrdDetail({
       label: "执行过程",
       render: () => <PrdLifecycleView key={prd.prd_path} repoId={repoId} prdPath={prd.prd_path} />,
     },
+    // 仅对有关联 Issue 的 PRD 展示「实时输出」标签；无 Issue 的 PRD 不产生
+    // 可跟随的 Agent 输出流。
+    ...(prd.issue_number
+      ? [
+          {
+            id: PRD_ISSUE_OUTPUT_TAB_ID,
+            label: "实时输出",
+            render: () => (
+              <PrdIssueOutputView
+                key={`${repoId}-${prd.issue_number}`}
+                repoId={repoId}
+                issueNumber={prd.issue_number as number}
+              />
+            ),
+          },
+        ]
+      : []),
     ...additionalTabs,
   ];
   const [activeTabId, setActiveTabId] = useState<string>(tabs[0]?.id ?? PRD_CONTENT_TAB_ID);

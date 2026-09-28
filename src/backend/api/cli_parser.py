@@ -257,7 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
     logs_parser.add_argument(
         "--kind",
         choices=("daemon", "review_daemon"),
-        default="daemon",
+        default=None,
         help="Process kind (default: daemon).",
     )
     logs_parser.add_argument(
@@ -266,6 +266,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=200,
         help="Number of lines to show from the tail (default: 200).",
+    )
+    logs_parser.add_argument(
+        "--issue",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Read the per-Issue agent output log for the given Issue number "
+            "(mutually exclusive with --kind)."
+        ),
     )
     logs_parser.add_argument(
         "--follow",
