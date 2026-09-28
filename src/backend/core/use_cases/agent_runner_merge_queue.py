@@ -38,6 +38,8 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     PullRequestContext,
 )
+from backend.core.shared.prd_checklist import parse_prd_checklist
+from backend.core.use_cases.agent_runner_feedback import extract_prd_path
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
     parse_latest_event_marker,
@@ -382,6 +384,15 @@ def _process_one(
     except Exception as exc:  # noqa: BLE001 - worktree failure is a soft skip.
         _logger.warning("Could not prepare worktree for Issue #%d: %s", issue.number, exc)
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_no_worktree")
+
+    prd_relative_path = extract_prd_path(issue.body)
+    if prd_relative_path is not None:
+        pending_prd_path = worktree_path / prd_relative_path
+        if pending_prd_path.is_file():
+            checklist = parse_prd_checklist(pending_prd_path.read_text(encoding="utf-8"))
+            if checklist.human_pending_items:
+                return MergeQueueOutcome(issue_number=issue.number, action="skipped_human_review")
+            return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_pending")
 
     # Step 3: rebase
     head_before = _safe_head_sha(worktree_path, process_runner)

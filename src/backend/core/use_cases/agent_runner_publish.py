@@ -172,10 +172,10 @@ def push_changes(
         process_runner: Command runner.
         expected_branch: Optional explicit branch to publish from. When set, the
             worktree's current branch must match or the call is rejected.
-        require_prd_archived: When ``True`` (default), assert that the canonical
-            PRD has been archived before pushing. PRD rework publishes new
-            proposal PRDs in ``tasks/pending/`` (not yet archived) and must opt
-            out by passing ``False``.
+        require_prd_archived: When ``True`` (default), enforce the canonical
+            PRD delivery gate before pushing. A PRD with only Human-Confirmed
+            items outstanding may remain pending for PR review; PRD rework
+            proposals bypass this gate by passing ``False``.
 
     Returns:
         The branch that was pushed.

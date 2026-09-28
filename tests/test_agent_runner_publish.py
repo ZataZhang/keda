@@ -84,6 +84,45 @@ def test_publish_changes_no_git_commit() -> None:
     assert ("git", "push", "-u", "origin", "issue-1") in commands
 
 
+def test_push_changes_accepts_pending_prd_waiting_for_human_review(tmp_path: Path) -> None:
+    """真实发布原语保留默认门禁，同时允许待人审 PRD 进入 PR。"""
+    issue = IssueSummary(
+        number=1,
+        title="Review",
+        url="https://github.com/example/repo/issues/1",
+        body="PRD path: `tasks/pending/review.md`",
+        labels=(),
+    )
+    pending_path = tmp_path / "tasks" / "pending" / "review.md"
+    pending_path.parent.mkdir(parents=True)
+    pending_path.write_text(
+        "## Acceptance Checklist\n### Validation Acceptance\n- [x] tests passed\n"
+        "### Human-Confirmed\n- [ ] Review the PR screenshots\n",
+        encoding="utf-8",
+    )
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            git_remote_command(): git_remote_result("origin"),
+        }
+    )
+
+    assert push_changes(issue, tmp_path, AppConfig(), fake_runner) == "issue-1"
+    assert ("git", "push", "-u", "origin", "issue-1") in map(tuple, fake_runner.calls)
+    assert pending_path.exists()
+
+
 def test_publish_changes_reuses_existing_open_pr() -> None:
     """publish_changes should reuse an existing open PR instead of recreating it."""
     issue = IssueSummary(

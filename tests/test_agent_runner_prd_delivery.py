@@ -20,6 +20,7 @@ from backend.core.use_cases.run_agent_once import (
     ensure_prd_delivery_ready,
     resolve_prd_archive_path,
 )
+from backend.core.use_cases.agent_runner_feedback import assert_prd_archived_for_publish
 from tests.conftest import FakeProcessRunner
 from tests.support.agent_runner import (
     create_commit,
@@ -76,6 +77,73 @@ def test_ensure_prd_delivery_ready_raises_when_pending_incomplete(
     fake_runner = FakeProcessRunner()
     with pytest.raises(PrdDeliveryError, match="unchecked items"):
         ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+
+
+def test_human_review_stays_pending_and_can_be_published(tmp_path: Path) -> None:
+    """提交前允许待人审 PRD，但不能替人勾选或提前归档。"""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    pending_path = tmp_path / "tasks" / "pending" / "example.md"
+    pending_path.parent.mkdir(parents=True)
+    pending_path.write_text(
+        "## Acceptance Checklist\n### Validation Acceptance\n- [x] tests passed\n"
+        "### Human-Confirmed\n- [ ] Review screenshots in the PR\n",
+        encoding="utf-8",
+    )
+    fake_runner = FakeProcessRunner()
+
+    ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+    assert_prd_archived_for_publish(issue, tmp_path)
+
+    assert pending_path.exists()
+    assert fake_runner.calls == []
+
+
+def test_deferred_human_review_gate_stays_pending(tmp_path: Path) -> None:
+    """兼容已把人审写成 `[~]` 的 PRD，仍不能提前归档。"""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    pending_path = tmp_path / "tasks" / "pending" / "example.md"
+    pending_path.parent.mkdir(parents=True)
+    pending_path.write_text(
+        "## Acceptance Checklist\n### Human-Confirmed\n"
+        "- [~] 截图已审阅 — runner-owned gate: PR review\n",
+        encoding="utf-8",
+    )
+
+    ensure_prd_delivery_ready(issue, tmp_path, FakeProcessRunner())
+    assert_prd_archived_for_publish(issue, tmp_path)
+    assert pending_path.exists()
+
+
+def test_archived_prd_cannot_claim_unreviewed_human_item(tmp_path: Path) -> None:
+    """已有归档文件若仍有人审空框，发布门禁必须拒绝。"""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    archive_path = tmp_path / "tasks" / "archive" / "example.md"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_text(
+        "## Acceptance Checklist\n### Human-Confirmed\n- [ ] Review screenshots\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PrdDeliveryError, match="awaits human review"):
+        assert_prd_archived_for_publish(issue, tmp_path)
 
 
 def test_ensure_prd_delivery_ready_requires_change_log_for_prd_change(

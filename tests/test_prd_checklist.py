@@ -6,6 +6,35 @@ from __future__ import annotations
 from backend.core.shared.prd_checklist import PrdChecklistResult, parse_prd_checklist
 
 
+def test_human_confirmed_items_remain_unchecked_without_blocking_executor() -> None:
+    """人审项保留原样，后续执行项仍由提交前门禁检查。"""
+    checklist = parse_prd_checklist(
+        "\n".join(
+            [
+                "## 9. Acceptance Checklist",
+                "### Human-Confirmed",
+                "- [ ] Review the PR screenshots",
+                "### Validation Acceptance",
+                "- [ ] Run the integration test",
+            ]
+        )
+    )
+
+    assert len(checklist.human_pending_items) == 1
+    assert checklist.execution_unchecked_items == [(5, "- [ ] Run the integration test")]
+
+
+def test_deferred_human_review_gate_is_still_pending() -> None:
+    """旧收尾流程写成 `[~]` 的 PR 人审项也不能被误判为可归档。"""
+    checklist = parse_prd_checklist(
+        "## Acceptance Checklist\n### Human-Confirmed\n"
+        "- [~] 截图已审阅 — runner-owned gate: PR review\n"
+    )
+
+    assert len(checklist.human_pending_items) == 1
+    assert checklist.is_complete is False
+
+
 class TestParsePrdChecklist:
     """Tests for parse_prd_checklist."""
 
