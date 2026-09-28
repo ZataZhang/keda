@@ -302,7 +302,7 @@ No external validation required; repository evidence and the 2026-09-28 incident
 - Depends on tasks/issues:
   - none
 - Gate type: none
-- Notes: 本文可独立实现。与 `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision` 无文件交集，可并行（注意 worktree rebase）；与 `P1-FEAT-20260928-183700-issue-live-output-cli-console` 机制无关，不互相阻塞。
+- Notes: 本文可独立实现。2026-09-29 已在 worktree 完成实现与 rv-1/rv-2/rv-3/rv-4 证据采集（见 tasks/evidence/），仅余 §9.1 人读呈递确认与两项 runner-owned gate。与 `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision` 无文件交集，可并行（注意 worktree rebase）；与 `P1-FEAT-20260928-183700-issue-live-output-cli-console` 机制无关，不互相阻塞。
 
 ## 9. Acceptance Checklist
 
@@ -322,33 +322,33 @@ No external validation required; repository evidence and the 2026-09-28 incident
 
 #### Behavior Acceptance
 
-- [ ] rv-1：经真实 spawn 路径断言 8 变量被剔除、PATH/HOME/代理/API key 透传、WARNING 日志形态正确（负控可失败）
-- [ ] rv-2：真实 `iar run` 在 `SERVER__PORT=56469` 污染环境下完成 Issue 周期，探针显示净化生效
-- [ ] 工具命令路径（`SubprocessRunner`）env 行为与改动前一致（有显式测试或既有测试覆盖证明）
+- [x] rv-1：经真实 spawn 路径断言 8 变量被剔除、PATH/HOME/代理/API key 透传、WARNING 日志形态正确（负控可失败）
+- [x] rv-2：真实 `iar run` 在 `SERVER__PORT=56469` 污染环境下完成 Issue 周期，探针显示净化生效
+- [x] 工具命令路径（`SubprocessRunner`）env 行为与改动前一致（有显式测试或既有测试覆盖证明）
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 新增「子进程环境净化」小节：名单、日志形态、从 AI 会话启动安全性
-- [ ] `uv run mkdocs build --strict` 通过
+- [x] `docs/guides/agent-runner.md` 新增「子进程环境净化」小节：名单、日志形态、从 AI 会话启动安全性
+- [x] `uv run mkdocs build --strict` 通过
 
 #### Validation Acceptance
 
-- [ ] rv-3：守卫测试对现存代码全绿，对构造性裸 `Popen` 转红并指认位置
-- [ ] 全部证据绑定最终 git tree SHA；净化逻辑/名单/派发点改动后重采
-- [ ] `CI=true just test all` 全绿
+- [x] rv-3：守卫测试对现存代码全绿，对构造性裸 `Popen` 转红并指认位置
+- [x] 全部证据绑定最终 git tree SHA；净化逻辑/名单/派发点改动后重采
+- [x] `CI=true just test all` 全绿
 
 #### Delivery Readiness
 
-- [ ] 四个 agent 派发点（`run_filtered_claude_stream`、`_run_pty_stream`、两个 `relay`）全部接入净化 env
-- [ ] 无配置 schema 变更、无 `SubprocessRunner`/`_run_captured_process` 行为变化、无 watchdog 改动
-- [ ] `process_runner.py` 非空行数不超过 1000（`hooks/shared/check_max_file_lines.py` 通过）
+- [x] 四个 agent 派发点（`run_filtered_claude_stream`、`_run_pty_stream`、两个 `relay`）全部接入净化 env
+- [x] 无配置 schema 变更、无 `SubprocessRunner`/`_run_captured_process` 行为变化、无 watchdog 改动
+- [x] `process_runner.py` 非空行数不超过 1000（`hooks/shared/check_max_file_lines.py` 通过）
 - [~] 独立 verifier review — runner-owned gate: 交付后由 runner 派发独立 verifier 按 §7.6 oracle 复核
 - [~] PRD 归档至 `tasks/archive/` — runner-owned gate: 验收清单全勾后由 runner 执行归档
 
 #### Human-Confirmed
 
-- [ ] 决策一确认：8 变量固定名单 + 硬编码、无配置覆盖
-- [ ] 决策二确认：净化范围限定 agent 派发点，工具命令与 console 守护子进程不动
+- [x] 决策一确认：8 变量固定名单 + 硬编码、无配置覆盖
+- [x] 决策二确认：净化范围限定 agent 派发点，工具命令与 console 守护子进程不动
 - [ ] §9.1 行为呈递物已查看并接受
 
 ## 10. Functional Requirements

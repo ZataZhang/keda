@@ -831,6 +831,17 @@ uv run iar workflow install preview --force
 
 注意模板脚本**不要在原地执行**：`__pycache__` 会落进模板目录，而安装时逐个以 UTF-8 读取模板文件，撞上字节码即 `UnicodeDecodeError`。测试里已通过 `sys.dont_write_bytecode` 规避。
 
+## 子进程环境净化（child env sanitize）
+
+runner 派发 agent 子进程时**不会**原样继承父环境：派发点（Claude 流式路径、PTY 路径、`plain` / `pi-json-lines` 协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传。
+
+- 名单（8 个，硬编码于 `src/backend/infrastructure/child_env.py`）：`SERVER__PORT` 与 `CODEBUDDY_SERVICE_PROXY_URL`、`CODEBUDDY_SESSION_ID`、`CODEBUDDY_CONVERSATION_REQUEST_ID`、`CODEBUDDY_ROOT_REQUEST_ID`、`CODEBUDDY_CONVERSATION_MESSAGE_ID`、`CODEBUDDY_PROJECT_DIR`、`CODEBUDDY_CURRENT_MODEL_ID`
+- 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，20 分钟后被 inactivity watchdog 杀掉，见 2026-09-28 Issue #156 事故）
+- 每剔除一个变量，runner 日志记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值）；若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
+- 因此**从交互式 AI 会话的 shell 里直接启动 `iar run` / `iar review` 是安全的**，无需手工 `env -u SERVER__PORT`
+- git、gh、pytest 等工具命令类子进程与 console 守护子进程不在此净化范围内
+- 守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 保证新增的 agent 派发点必须接入净化环境
+
 ## worktree 中的本地 env 文件
 
 `git worktree add` 只会物化被 Git 跟踪的文件，gitignored 的 `.env*`（密钥、本地配置）不会自动出现在新 worktree 里。为此 runner 在 worktree 创建/复用后会自动补齐缺失的 env 文件：
