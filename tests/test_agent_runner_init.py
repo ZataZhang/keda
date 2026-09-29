@@ -38,7 +38,7 @@ def _stub_remote_template_skill_install(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(
         "backend.api.cli_init.install_remote_template_skills",
         lambda options: RemoteTemplateSkillInstallResult(
-            target_skills_root=Path("/test/user-skills"),
+            target_skills_roots=(Path("/test/user-skills"),),
             installed_skill_names=("prd", "code-reviewer"),
             dry_run=options.dry_run,
         ),
@@ -190,7 +190,7 @@ def test_iar_init_requests_remote_user_skill_install(
     ) -> RemoteTemplateSkillInstallResult:
         requested_options.append(options)
         return RemoteTemplateSkillInstallResult(
-            target_skills_root=tmp_path / "user-skills",
+            target_skills_roots=(tmp_path / "user-skills",),
             installed_skill_names=("prd", "code-reviewer"),
             dry_run=options.dry_run,
         )
@@ -1079,7 +1079,7 @@ def test_iar_init_dry_run_reports_packaged_operator_skill_conflict(
     monkeypatch.setattr(
         "backend.api.cli_init.install_remote_template_skills",
         lambda options: RemoteTemplateSkillInstallResult(
-            target_skills_root=skills_root,
+            target_skills_roots=(skills_root,),
             installed_skill_names=("prd", "code-reviewer"),
             dry_run=options.dry_run,
         ),

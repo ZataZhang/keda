@@ -62,8 +62,10 @@ iar init
 `prd` 与 `code-reviewer` 不随 wheel 分发。`iar init` 会从远程
 [`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 下载且仅下载这两个
 Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`.codex/skills` 或
-`.kimi-code/skills`。它优先使用 `CC_SWITCH_SKILLS_DIR`，随后选择已有的 cc-switch、Codex、Claude、
-Kimi Code 配置目录；都不存在时创建 `~/.codex/skills`。因此该步骤需要能够访问 GitHub。
+`.kimi-code/skills`。安装目标由 agent 注册表（各 agent 的 `auth_home`）派生：所有**已存在
+配置目录**的 agent（如 `~/.codex`、`~/.claude`、`~/.kimi-code`）的 `skills/` 子目录都会各装
+一份；全部缺失时回退到注册表首个 agent。设置 `CC_SWITCH_SKILLS_DIR` 可显式覆盖为单一目录。
+因此该步骤需要能够访问 GitHub。
 
 ## 容器化运行（可选）
 

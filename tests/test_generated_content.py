@@ -870,12 +870,10 @@ def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.M
     assert resolve_prd_skill_path() == configured_skill_path
     monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
 
-    cc_switch_skill_path = tmp_path / ".cc-switch" / "skills" / "prd" / "SKILL.md"
     codex_skill_path = tmp_path / ".codex" / "skills" / "prd" / "SKILL.md"
     claude_skill_path = tmp_path / ".claude" / "skills" / "prd" / "SKILL.md"
     kimi_code_skill_path = tmp_path / ".kimi-code" / "skills" / "prd" / "SKILL.md"
     for skill_path in (
-        cc_switch_skill_path,
         codex_skill_path,
         claude_skill_path,
         kimi_code_skill_path,
@@ -883,15 +881,14 @@ def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.M
         skill_path.parent.mkdir(parents=True, exist_ok=True)
         skill_path.write_text(skill_path.parent.parent.parent.name, encoding="utf-8")
 
-    assert resolve_prd_skill_path() == cc_switch_skill_path
-    cc_switch_skill_path.unlink()
     assert resolve_prd_skill_path() == codex_skill_path
     codex_skill_path.unlink()
     assert resolve_prd_skill_path() == claude_skill_path
     claude_skill_path.unlink()
     assert resolve_prd_skill_path() == kimi_code_skill_path
     kimi_code_skill_path.unlink()
-    assert resolve_prd_skill_path() == cc_switch_skill_path
+    # 全部缺失时回落到注册表首个 agent 的候选路径。
+    assert resolve_prd_skill_path() == codex_skill_path
 
 
 def test_generate_prd_content_agent_fallback_to_template() -> None:

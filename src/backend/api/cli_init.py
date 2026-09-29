@@ -72,17 +72,21 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             )
         )
         remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
+        remote_skill_roots = ", ".join(
+            str(root_path) for root_path in remote_skill_result.target_skills_roots
+        )
         console.print(
             f"[cyan]Would install remote template skills:[/] {remote_skill_names} -> "
-            f"{remote_skill_result.target_skills_root}",
+            f"{remote_skill_roots}",
             markup=False,
         )
-        operator_skill_result = install_packaged_operator_skill(
-            target_skills_root=remote_skill_result.target_skills_root,
-            dry_run=True,
-            force=parsed.force,
-        )
-        _print_operator_skill_plan(operator_skill_result)
+        for skills_root in remote_skill_result.target_skills_roots:
+            operator_skill_result = install_packaged_operator_skill(
+                target_skills_root=skills_root,
+                dry_run=True,
+                force=parsed.force,
+            )
+            _print_operator_skill_plan(operator_skill_result)
         return 0
     if init_result.wrote_file:
         console.print(f"[green]Wrote IAR local config:[/] {init_result.config_path}")
@@ -96,17 +100,15 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
     except Exception as exc:  # noqa: BLE001 - remote availability is required by iar init.
         error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
         return 1
-    operator_skill_result = install_packaged_operator_skill(
-        target_skills_root=remote_skill_result.target_skills_root,
-        dry_run=False,
-        force=parsed.force,
-    )
     remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
     overwritten_names = ", ".join(remote_skill_result.overwritten_skill_names)
     skipped_names = ", ".join(remote_skill_result.skipped_skill_names)
+    remote_skill_roots = ", ".join(
+        str(root_path) for root_path in remote_skill_result.target_skills_roots
+    )
     console.print(
         f"[green]Installed remote template skills:[/] {remote_skill_names} -> "
-        f"{remote_skill_result.target_skills_root}"
+        f"{remote_skill_roots}"
     )
     if overwritten_names:
         console.print(
@@ -114,7 +116,13 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
         )
     if skipped_names:
         console.print(f"[dim]Remote template skills already up to date:[/] {skipped_names}")
-    _print_operator_skill_plan(operator_skill_result)
+    for skills_root in remote_skill_result.target_skills_roots:
+        operator_skill_result = install_packaged_operator_skill(
+            target_skills_root=skills_root,
+            dry_run=False,
+            force=parsed.force,
+        )
+        _print_operator_skill_plan(operator_skill_result)
     if init_result.repo_id:
         try:
             registry_result = upsert_repository(

@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from backend.core.shared.interfaces.agent_runner import IProcessRunner
 
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+
 
 REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL = "https://github.com/ZataZhang/zata-codes-template.git"
 """用户级 Skill 的唯一远程内容来源。
@@ -29,13 +31,6 @@ REMOTE_TEMPLATE_SKILL_NAMES: tuple[str, ...] = ("prd", "code-reviewer")
 """IAR 安装且仅安装的远程模板 Skills。"""
 
 _CC_SWITCH_SKILLS_DIR_ENV_VAR = "CC_SWITCH_SKILLS_DIR"
-_USER_SKILLS_ROOT_RELATIVE_PATHS: tuple[Path, ...] = (
-    Path(".cc-switch") / "skills",
-    Path(".codex") / "skills",
-    Path(".claude") / "skills",
-    Path(".kimi-code") / "skills",
-)
-_FALLBACK_USER_SKILLS_ROOT_RELATIVE_PATH = Path(".codex") / "skills"
 
 _REMOTE_SKILL_PROTECTED_FILENAME = "SKILL.md"
 """用于识别用户同名 Skill 是否被改动的最小契约文件。"""
@@ -107,48 +102,58 @@ class RemoteTemplateSkillInstallResult:
     """远程模板 Skill 同步结果。
 
     Attributes:
-        target_skills_root: 写入 ``prd`` 与 ``code-reviewer`` 的用户级根目录。
+        target_skills_roots: 写入 ``prd`` 与 ``code-reviewer`` 的用户级根目录
+            列表（每个检测到的 agent 一个）。
         installed_skill_names: 实际或计划写入的 Skill 白名单名称。
         skipped_skill_names: 与远程模板一致因而无需再次覆盖的 Skill 名称,
-            可避免重复写入误触更新 ``mtime``。
+            可避免重复写入误触更新 ``mtime``；按目录聚合去重。
         overwritten_skill_names: 本次确实替换为远程模板副本的 Skill 名称,
-            含 ``force=True`` 下被覆盖的用户自有副本。
+            含 ``force=True`` 下被覆盖的用户自有副本；按目录聚合去重。
         dry_run: 是否没有执行任何网络或文件系统写入。
     """
 
-    target_skills_root: Path
+    target_skills_roots: tuple[Path, ...]
     installed_skill_names: tuple[str, ...]
     skipped_skill_names: tuple[str, ...] = ()
     overwritten_skill_names: tuple[str, ...] = ()
     dry_run: bool = False
 
 
-def resolve_user_skill_install_root(user_home_path: Path | None = None) -> Path:
-    """解析 ``iar init`` 的用户级 Skill 安装目标。
+def resolve_user_skill_install_roots(user_home_path: Path | None = None) -> tuple[Path, ...]:
+    """解析 ``iar init`` 的用户级 Skill 安装目标（可多于一个）。
 
-    优先尊重 ``CC_SWITCH_SKILLS_DIR``；否则选择第一个已经存在的
-    cc-switch、Codex、Claude 或 Kimi Code 配置目录。全都不存在时回退到
-    ``~/.codex/skills``，避免初始化流程依赖交互式选择。
+    优先尊重 ``CC_SWITCH_SKILLS_DIR``（显式覆盖，单目录）；否则从 agent
+    注册表（:data:`BUILTIN_AGENT_SPECS` 的 ``auth_home``）派生每个 agent
+    的用户级 skills 目录，并保留其中**已存在配置目录**的 agent——安装器
+    不为未安装的 agent 凭空创建配置目录。全部缺失时回退到注册表首个
+    声明了 ``auth_home`` 的 agent，避免初始化流程依赖交互式选择。
 
     Args:
         user_home_path: 可选的用户主目录覆盖，主要供测试使用。
 
     Returns:
-        用户级 Skill 根目录；函数本身不创建目录。
+        用户级 Skill 根目录元组（注册顺序、去重）；函数本身不创建目录。
     """
     configured_skills_root = os.environ.get(_CC_SWITCH_SKILLS_DIR_ENV_VAR)
     if configured_skills_root:
-        return Path(configured_skills_root).expanduser()
+        return (Path(configured_skills_root).expanduser(),)
 
     effective_home_path = Path.home() if user_home_path is None else user_home_path
-    candidate_skill_roots = tuple(
-        effective_home_path / relative_skills_root
-        for relative_skills_root in _USER_SKILLS_ROOT_RELATIVE_PATHS
-    )
-    for candidate_skills_root in candidate_skill_roots:
-        if candidate_skills_root.parent.is_dir():
-            return candidate_skills_root
-    return effective_home_path / _FALLBACK_USER_SKILLS_ROOT_RELATIVE_PATH
+    candidate_roots: list[Path] = []
+    fallback_skills_root: Path | None = None
+    for agent_spec in BUILTIN_AGENT_SPECS.values():
+        agent_skills_root = agent_spec.user_skills_dir(effective_home_path)
+        if agent_skills_root is None:
+            continue
+        if agent_skills_root.parent.is_dir():
+            if agent_skills_root not in candidate_roots:
+                candidate_roots.append(agent_skills_root)
+        elif fallback_skills_root is None:
+            fallback_skills_root = agent_skills_root
+    if candidate_roots:
+        return tuple(candidate_roots)
+    assert fallback_skills_root is not None  # 内置注册表保证至少 codex 声明了 auth_home
+    return (fallback_skills_root,)
 
 
 def install_remote_template_skills(
@@ -157,22 +162,25 @@ def install_remote_template_skills(
     """从远程模板仓库安装 IAR 需要的两个用户级 Skill。
 
     仅通过 sparse checkout 下载 ``skills/prd`` 与 ``skills/code-reviewer``，
-    不执行远程仓库脚本，也不会读取或写入目标项目的 Skill 目录。
+    不执行远程仓库脚本，也不会读取或写入目标项目的 Skill 目录。远程只
+    下载一次，随后写入 :func:`resolve_user_skill_install_roots` 返回的
+    全部用户级目录（每个检测到的 agent 各一份）。
 
     Args:
         options: Git 执行端口、dry-run 标记和可选用户主目录。
 
     Returns:
-        实际或计划写入的用户级目录与 Skill 名称。
+        实际或计划写入的用户级目录列表与 Skill 名称。
 
     Raises:
         RemoteTemplateSkillInstallError: 远程仓库缺少所需目录，目录包含符号链接，
-            或目标存在 ``SKILL.md`` 与远程不同的同名 Skill 且 ``force`` 为 False。
+            或任一目标存在 ``SKILL.md`` 与远程不同的同名 Skill 且 ``force`` 为
+            False。
     """
-    target_skills_root = resolve_user_skill_install_root(options.user_home_path)
+    target_skills_roots = resolve_user_skill_install_roots(options.user_home_path)
     if options.dry_run:
         return RemoteTemplateSkillInstallResult(
-            target_skills_root=target_skills_root,
+            target_skills_roots=target_skills_roots,
             installed_skill_names=REMOTE_TEMPLATE_SKILL_NAMES,
             dry_run=True,
         )
@@ -216,17 +224,33 @@ def install_remote_template_skills(
             REMOTE_TEMPLATE_SKILL_NAMES, source_skill_paths, strict=True
         ):
             _validate_remote_skill_directory(source_skill_path, skill_name)
-        overwritten_skill_names, skipped_skill_names = _write_remote_skills_into_user_root(
-            source_skill_paths=source_skill_paths,
-            target_skills_root=target_skills_root,
-            force=options.force,
-        )
+        overwritten_skill_names: set[str] = set()
+        for target_skills_root in target_skills_roots:
+            root_overwritten_names, _root_skipped_names = _write_remote_skills_into_user_root(
+                source_skill_paths=source_skill_paths,
+                target_skills_root=target_skills_root,
+                force=options.force,
+            )
+            overwritten_skill_names.update(root_overwritten_names)
+
+    # 白名单顺序稳定输出；任一目录发生覆盖的 Skill 记为已覆盖，
+    # 其余（含部分目录跳过的）按未覆盖处理。
+    ordered_overwritten_names = tuple(
+        skill_name
+        for skill_name in REMOTE_TEMPLATE_SKILL_NAMES
+        if skill_name in overwritten_skill_names
+    )
+    ordered_skipped_names = tuple(
+        skill_name
+        for skill_name in REMOTE_TEMPLATE_SKILL_NAMES
+        if skill_name not in overwritten_skill_names
+    )
 
     return RemoteTemplateSkillInstallResult(
-        target_skills_root=target_skills_root,
+        target_skills_roots=target_skills_roots,
         installed_skill_names=REMOTE_TEMPLATE_SKILL_NAMES,
-        skipped_skill_names=skipped_skill_names,
-        overwritten_skill_names=overwritten_skill_names,
+        skipped_skill_names=ordered_skipped_names,
+        overwritten_skill_names=ordered_overwritten_names,
         dry_run=False,
     )
 
