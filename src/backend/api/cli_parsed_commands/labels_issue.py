@@ -210,29 +210,28 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
         return 1 if result.errors else 0
 
     render_console = Console()
+    # Only list multiple repositories in one table when the rows actually span
+    # more than one repo; a single-repo listing stays narrow.
     multi_repo = len({row.repo for row in result.rows if row.repo}) > 1
-    output_format = ctx.parsed.output
-    if output_format == "table":
-        render_pr_column(result, render_console, multi_repo=multi_repo)
-        if result.errors:
-            return 1
-        return 0
     table = Table(show_header=True, header_style="bold")
-    table.add_column("Repo")
+    if multi_repo:
+        table.add_column("Repo")
     table.add_column("Issue")
     table.add_column("Title")
     table.add_column("State")
     table.add_column("Labels")
     table.add_column("PR")
     for row in result.rows:
-        table.add_row(
-            row.repo or "-",
-            f"#{row.issue_number}",
+        cells = [
+            f"#{row.number}",
             row.title,
             row.state,
-            ",".join(row.labels),
-            ",".join(row.pr_urls) if row.pr_urls else "-",
-        )
+            ", ".join(row.labels),
+            render_pr_column(row.pulls),
+        ]
+        if multi_repo:
+            cells.insert(0, row.repo or "-")
+        table.add_row(*cells)
     render_console.print(table)
     for repo_label, error_message in result.errors:
         error_console.print(f"[red]Error fetching {repo_label}:[/] {error_message}")
