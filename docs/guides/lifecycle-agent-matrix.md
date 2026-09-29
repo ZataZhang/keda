@@ -44,17 +44,38 @@ pi / codebuddy / qoder / opencode 或自定义注册的 agent）。**生命周�
 上一张表回答"这个键能配什么"，这一张回答"配了之后什么时候被读"。九个键分布在
 三个互相独立的 CLI 入口，外加一个横跨全程的内容生成阶段。
 
-| 键 | 触发入口 | 代码消费点 |
+console 的三处矩阵入口（Settings 全局层、Roadmap 仓库行齿轮、PRD 覆盖抽屉）
+**按同一分组呈现**：组标题与每行触发时机来自只读视图下发，分组事实的唯一代码
+定义是 `src/backend/core/shared/models/lifecycle_agent.py` 的
+`LIFECYCLE_AGENT_ENTRY_GROUPS`（前端不持有第二份映射），与本表的三组一一对应：
+
+> **两份手写副本，需人工同步。** `docs/prototypes/lifecycle-agent-matrix.html` 与
+> `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 各手写了一份
+> `ENTRY_GROUPS`（前者是自包含原型、不能 import 后端常量；后者是独立 TS 包，
+> 只能自己声明）。两份都不含 `LIFECYCLE_AGENT_ENTRY*` / `LIFECYCLE_AGENT_KEYS`
+> 字面量，因此 `rg -n 'LIFECYCLE_AGENT_ENTRY|LIFECYCLE_AGENT_KEYS' src tests frontend-public`
+> 这道"分组只有一份定义"的门禁扫不到它们。改动 core 常量（组顺序、组 id、组名、
+> 组内含哪些键及组内顺序、组说明）时，必须同轮手工核对这两份副本。
+
+| 触发入口分组 | 组内阶段 | 组说明 |
 |---|---|---|
-| `deliberate` | **Phase 0**：每轮先扫 `agent/deliberate` Issue（此时 PRD 尚不存在） | `agent_runner_deliberation_issues.py::_process_single_deliberation_issue` |
-| `content_generation` | **横切三个 target**，见下文 | `generated_content.py::generate_prd_content` / `generate_issue_content` / `generate_pr_content` |
-| `implementation` | **Phase 2**：认领 `agent/ready` Issue | `run_agent_once.py::choose_agent` |
-| `verifier` | Phase 2，同一次认领内 | `run_verifier_agent.py::_choose_verifier_agent` |
-| `fix` | Phase 2，同一次认领内（verification 失败时） | `run_agent_execution_loop.py::run_agent_until_committed` |
-| `closeout` | Phase 2，同一次认领内（交付门禁失败时） | `run_agent_execution_loop.py::_attempt_delivery_closeout` |
-| `review` | Phase 2，同一次认领内（开 Draft PR 前） | `run_agent_once.py::resolve_reviewer_agent` |
-| `supervisor` | Phase 2 发布路径**或** `iar review` / `iar review-daemon` | `run_agent_once.py::resolve_supervisor_agent` |
-| `planner` | `iar ask`，不在任何 Issue 流水线上 | `cli_parsed_commands/agent.py::run_ask_command` |
+| **实现流水线**（`pipeline`） | 实现 / 修复 / 收尾 / 校验 / 审核 / 监督 | `iar run` / `daemon` 认领后，在同一 worktree 的同一次 claim 内依次触发 |
+| **讨论与内容生成**（`discussion_content`） | 辩论 / 内容生成 | 辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 `iar issue create`、Phase 1 与开 Draft PR 三处 |
+| **独立入口**（`standalone`） | 决策 | `iar ask`，不在任何 Issue 流水线上（无 Issue / PRD 上下文） |
+
+逐键消费点（"实现流水线"组的六个阶段都在同一次 claim 内）：
+
+| 键 | 组 | 触发入口 | 代码消费点 |
+|---|---|---|---|
+| `implementation` | 实现流水线 | **Phase 2**：认领 `agent/ready` Issue | `run_agent_once.py::choose_agent` |
+| `fix` | 实现流水线 | Phase 2，同一次认领内（verification 失败时） | `run_agent_execution_loop.py::run_agent_until_committed` |
+| `closeout` | 实现流水线 | Phase 2，同一次认领内（交付门禁失败时） | `run_agent_execution_loop.py::_attempt_delivery_closeout` |
+| `verifier` | 实现流水线 | Phase 2，同一次认领内 | `run_verifier_agent.py::_choose_verifier_agent` |
+| `review` | 实现流水线 | Phase 2，同一次认领内（开 Draft PR 前） | `run_agent_once.py::resolve_reviewer_agent` |
+| `supervisor` | 实现流水线 | Phase 2 发布路径**或** `iar review` / `iar review-daemon` | `run_agent_once.py::resolve_supervisor_agent` |
+| `deliberate` | 讨论与内容生成 | **Phase 0**：每轮先扫 `agent/deliberate` Issue（此时 PRD 尚不存在） | `agent_runner_deliberation_issues.py::_process_single_deliberation_issue` |
+| `content_generation` | 讨论与内容生成 | **横切三个 target**，见下文 | `generated_content.py::generate_prd_content` / `generate_issue_content` / `generate_pr_content` |
+| `planner` | 独立入口 | `iar ask`，不在任何 Issue 流水线上 | `cli_parsed_commands/agent.py::run_ask_command` |
 
 ### 三个入口
 
@@ -164,10 +185,13 @@ Settings 的「Agent 管理」区块用粘性 Tab 分两页：**Tab ①「Agent 
 解析 Issue 标签的依据；**Tab ②「生命周期 Agent 设置」**放九行矩阵与
 **agent 回退顺序**。
 
-矩阵行的交互口径（三层一致）：下拉里**只有真实取值**（已注册 agent / 该阶段的
+矩阵行的交互口径（三层一致）：九行按上表的三组**触发入口分组**呈现，组标题
+旁有一行组说明，每行生命周期名下再带一行触发时机；下拉里**只有真实取值**
+（已注册 agent / 该阶段的
 `auto` / fix-closeout 的 `executor`），**当前生效值直接选中**；「当前值来源」列
 说明它来自哪一层，本层已显式设置时给出恢复入口（全局层「不写本键（跟随既有
 配置）」/ 仓库层「跟随全局（删除本键）」）；**只有改动过的行会写进本层文件**。
+分组只是呈现：下拉取值、来源标注、恢复动作与写回载荷与分组前完全一致。
 写入一律保留式——只动点名的那几个键，文件其余内容与格式（含注释）不变。
 
 > 只有生命周期矩阵是三层可写的。**「Agent 标签设置」与「agent 回退顺序」是机器级
@@ -194,5 +218,7 @@ agent 由矩阵 / 标签路由决定；本机未安装的 agent 在运行时跳�
   一节——那是**标签状态**的流转，与本页的**阶段 → agent**是两个正交维度。
 - `[agent_runner.generated_content]` 的三个 target 与模板字段：见
   [Agent Runner](agent-runner.md) 的「Generated Content 配置」一节。
-- 代码内权威定义：`src/backend/core/shared/models/lifecycle_agent.py`；
+- 代码内权威定义：`src/backend/core/shared/models/lifecycle_agent.py`（含
+  「触发入口」分组常量 `LIFECYCLE_AGENT_ENTRY_GROUPS`，console 三处矩阵的
+  分组标题与行归属都由它下发）；
   解析函数：`src/backend/core/use_cases/lifecycle_agent_resolution.py`。

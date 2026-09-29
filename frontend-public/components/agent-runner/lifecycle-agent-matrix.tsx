@@ -23,6 +23,7 @@ import {
 } from "@/lib/api/lifecycleAgents";
 import type {
   LifecycleAgentEntry,
+  LifecycleAgentEntryGroup,
   LifecycleAgentScope,
   LifecycleAgentsView,
 } from "@/lib/api/types";
@@ -56,6 +57,72 @@ export const LIFECYCLE_DISPLAY_NAMES: Record<string, string> = {
  */
 export function lifecycleDisplayName(key: string): string {
   return LIFECYCLE_DISPLAY_NAMES[key] ?? key;
+}
+
+/** 一个触发入口分组的渲染块：组元信息（可能为 null 表示兜底未分组块）+ 组内行。 */
+export type LifecycleEntryGroupBlock = {
+  group: LifecycleAgentEntryGroup | null;
+  rows: LifecycleAgentEntry[];
+};
+
+/**
+ * 把矩阵行按后端下发的触发入口分组切成渲染块。
+ *
+ * 分组事实的唯一来源是后端 `entry_groups`（前端不持有第二份 key→group 映射）；
+ * 组内行保持 `lifecycles` 数组的相对顺序（即 `LIFECYCLE_AGENT_KEYS` 键序）。
+ * 当后端未下发分组（或下发的组没有匹配到任何行）时，退化为单个未分组块，
+ * 保证行始终渲染、不会因分组缺失而丢行。
+ *
+ * @param lifecycles - 矩阵行（按 `LIFECYCLE_AGENT_KEYS` 键序）。
+ * @param entryGroups - 后端下发的触发入口分组（按展示顺序）。
+ * @returns 按展示顺序排列的分组渲染块。
+ */
+export function groupLifecycleEntriesByEntry(
+  lifecycles: LifecycleAgentEntry[],
+  entryGroups: LifecycleAgentEntryGroup[] | undefined,
+): LifecycleEntryGroupBlock[] {
+  if (!entryGroups || entryGroups.length === 0) {
+    return lifecycles.length > 0 ? [{ group: null, rows: lifecycles }] : [];
+  }
+  const blocks: LifecycleEntryGroupBlock[] = [];
+  const matchedKeys = new Set<string>();
+  for (const group of entryGroups) {
+    const rows = lifecycles.filter((entry) => entry.entry === group.entry);
+    if (rows.length > 0) {
+      blocks.push({ group, rows });
+      for (const row of rows) {
+        matchedKeys.add(row.key);
+      }
+    }
+  }
+  const unmatched = lifecycles.filter((entry) => !matchedKeys.has(entry.key));
+  if (unmatched.length > 0) {
+    blocks.push({ group: null, rows: unmatched });
+  }
+  return blocks;
+}
+
+/**
+ * 触发入口分组的标题行（组中文名 + 一行组说明），三处矩阵共用。
+ *
+ * @param props - 组元信息。
+ * @returns 组标题行；`group` 为 null（兜底未分组块）时不渲染。
+ */
+export function LifecycleEntryGroupHeader({
+  group,
+}: {
+  group: LifecycleAgentEntryGroup;
+}) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 border-b border-slate-200 pb-1 pt-1 dark:border-slate-700">
+      <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+        {group.label}
+      </span>
+      <span className="text-[11px] text-slate-400 dark:text-slate-500">
+        {group.summary}
+      </span>
+    </div>
+  );
 }
 
 /**
@@ -240,70 +307,95 @@ export function LifecycleAgentMatrix({
         <span>当前值来源</span>
       </div>
 
-      {view.lifecycles.map((entry) => {
-        const options = buildLifecycleOptions(entry, view.agents);
-        const pendingDelete = Boolean(pendingDeletes[entry.key]);
-        const selectedValue = draftValues[entry.key] ?? lifecycleBaselineValue(entry);
-        const sourceLabel = view.source_layers[entry.source] ?? entry.source;
-        const rowChanged =
-          pendingDelete ||
-          selectedValue !== lifecycleBaselineValue(entry);
-        return (
+      {groupLifecycleEntriesByEntry(view.lifecycles, view.entry_groups).map(
+        (block) => (
           <div
-            key={entry.key}
-            data-testid={`lifecycle-matrix-row-${entry.key}`}
-            className={cn(
-              "grid grid-cols-[minmax(5rem,0.8fr)_minmax(9rem,1.2fr)_minmax(9rem,1.4fr)] items-center gap-2 rounded-md px-1 py-1",
-              rowChanged && "bg-amber-50 dark:bg-amber-950/30",
-            )}
+            key={block.group ? block.group.entry : "ungrouped"}
+            data-testid={
+              block.group
+                ? `lifecycle-matrix-entry-${block.group.entry}`
+                : "lifecycle-matrix-entry-ungrouped"
+            }
+            className="space-y-1"
           >
-            <span className="text-sm">{lifecycleDisplayName(entry.key)}</span>
-
-            <LifecycleAgentSelect
-              lifecycleKey={entry.key}
-              options={options}
-              value={selectedValue}
-              onValueChange={(value) => {
-                setDraftValues((current) => ({
-                  ...current,
-                  [entry.key]: value,
-                }));
-              }}
-              placeholder={pendingDelete ? "待删除本层键" : "—"}
-              testIdPrefix="lifecycle-matrix"
-              disabled={pendingDelete}
-            />
-
-            <span className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-              <span data-testid={`lifecycle-matrix-source-${entry.key}`}>
-                {sourceLabel}
-              </span>
-              {entry.declared_in_scope ? (
-                <Badge variant="ready" className="text-[10px]">
-                  本层设置
-                </Badge>
-              ) : null}
-              {entry.declared_in_scope ? (
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className="h-auto px-0 text-xs"
-                  onClick={() => {
-                    setPendingDeletes((current) => ({
-                      ...current,
-                      [entry.key]: !current[entry.key],
-                    }));
-                  }}
-                  data-testid={`lifecycle-matrix-restore-${entry.key}`}
+            {block.group ? (
+              <LifecycleEntryGroupHeader group={block.group} />
+            ) : null}
+            {block.rows.map((entry) => {
+              const options = buildLifecycleOptions(entry, view.agents);
+              const pendingDelete = Boolean(pendingDeletes[entry.key]);
+              const selectedValue =
+                draftValues[entry.key] ?? lifecycleBaselineValue(entry);
+              const sourceLabel = view.source_layers[entry.source] ?? entry.source;
+              const rowChanged =
+                pendingDelete || selectedValue !== lifecycleBaselineValue(entry);
+              return (
+                <div
+                  key={entry.key}
+                  data-testid={`lifecycle-matrix-row-${entry.key}`}
+                  className={cn(
+                    "grid grid-cols-[minmax(5rem,0.8fr)_minmax(9rem,1.2fr)_minmax(9rem,1.4fr)] items-center gap-2 rounded-md px-1 py-1",
+                    rowChanged && "bg-amber-50 dark:bg-amber-950/30",
+                  )}
                 >
-                  {pendingDelete ? "取消删除" : view.restore_hint}
-                </Button>
-              ) : null}
-            </span>
+                  <span className="text-sm">
+                    {lifecycleDisplayName(entry.key)}
+                    <span
+                      className="block text-xs text-slate-400 dark:text-slate-500"
+                      data-testid={`lifecycle-matrix-trigger-${entry.key}`}
+                    >
+                      {entry.trigger}
+                    </span>
+                  </span>
+
+                  <LifecycleAgentSelect
+                    lifecycleKey={entry.key}
+                    options={options}
+                    value={selectedValue}
+                    onValueChange={(value) => {
+                      setDraftValues((current) => ({
+                        ...current,
+                        [entry.key]: value,
+                      }));
+                    }}
+                    placeholder={pendingDelete ? "待删除本层键" : "—"}
+                    testIdPrefix="lifecycle-matrix"
+                    disabled={pendingDelete}
+                  />
+
+                  <span className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span data-testid={`lifecycle-matrix-source-${entry.key}`}>
+                      {sourceLabel}
+                    </span>
+                    {entry.declared_in_scope ? (
+                      <Badge variant="ready" className="text-[10px]">
+                        本层设置
+                      </Badge>
+                    ) : null}
+                    {entry.declared_in_scope ? (
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="h-auto px-0 text-xs"
+                        onClick={() => {
+                          setPendingDeletes((current) => ({
+                            ...current,
+                            [entry.key]: !current[entry.key],
+                          }));
+                        }}
+                        data-testid={`lifecycle-matrix-restore-${entry.key}`}
+                      >
+                        {pendingDelete ? "取消删除" : view.restore_hint}
+                      </Button>
+                    ) : null}
+                  </span>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        ),
+      )}
 
       {changedKeys.length > 0 ? (
         <div

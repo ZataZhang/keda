@@ -624,6 +624,14 @@ export type LifecycleAgentScope = "global" | "repository";
 /** 单个生命周期键在某视角下的生效视图。 */
 export type LifecycleAgentEntry = {
   key: LifecycleAgentKey;
+  /**
+   * 行所属的触发入口分组 id（pipeline / discussion_content / standalone）。
+   * 与 `entry_groups[].entry` 配对使用，**不是行自身的 id**；分组中文名与组说明
+   * 只在 `LifecycleAgentEntryGroup` 上携带一份。
+   */
+  entry: string;
+  /** 该阶段「何时被读」的一句话触发时机（后端下发）。 */
+  trigger: string;
   /** 是否允许取值为 `auto`。 */
   auto_allowed: boolean;
   /** 是否允许取值为 `executor`（仅 fix / closeout）。 */
@@ -644,12 +652,24 @@ export type LifecycleAgentEntry = {
   source: LifecycleAgentSource;
 };
 
+/** 触发入口分组（后端按展示顺序下发，前端只渲染、不持有第二份映射）。 */
+export type LifecycleAgentEntryGroup = {
+  /** 组 id（pipeline / discussion_content / standalone）。 */
+  entry: string;
+  /** 组中文名（组标题）。 */
+  label: string;
+  /** 一行组说明（组标题旁的触发入口描述）。 */
+  summary: string;
+};
+
 /** 生命周期矩阵某视角的完整视图。 */
 export type LifecycleAgentsView = {
   scope: LifecycleAgentScope;
   repo_id: string | null;
   agents: string[];
   lifecycles: LifecycleAgentEntry[];
+  /** 触发入口分组，按展示顺序排列。 */
+  entry_groups: LifecycleAgentEntryGroup[];
   /** 来源层 key -> 中文标签。 */
   source_layers: Record<string, string>;
   /** 本层「恢复/删除本键」操作的提示文案。 */
@@ -683,6 +703,8 @@ export type PrdAgentOverrideView = {
   overrides: Record<string, string>;
   agents: string[];
   lifecycles: LifecycleAgentEntry[];
+  /** 触发入口分组，按展示顺序排列（PRD 覆盖抽屉沿用同一分组渲染）。 */
+  entry_groups: LifecycleAgentEntryGroup[];
 };
 
 /** PRD 级覆盖写回后的响应。 */
