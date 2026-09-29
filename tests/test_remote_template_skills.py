@@ -8,13 +8,14 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import CommandResult
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.engines.agent_runner.remote_template_skills import (
     REMOTE_TEMPLATE_SKILL_NAMES,
     REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL,
     RemoteTemplateSkillInstallError,
     RemoteTemplateSkillInstallOptions,
     install_remote_template_skills,
-    resolve_user_skill_install_root,
+    resolve_user_skill_install_roots,
 )
 
 
@@ -55,21 +56,61 @@ class FakeRemoteTemplateProcessRunner:
         )
 
 
-def test_resolve_user_skill_install_root_supports_kimi_code(
+def _first_registry_skills_root(user_home_path: Path) -> Path:
+    """返回注册表首个声明 ``auth_home`` 的 agent 的用户级 skills 目录。"""
+    agent_spec = next(spec for spec in BUILTIN_AGENT_SPECS.values() if spec.auth_home)
+    skills_root = agent_spec.user_skills_dir(user_home_path)
+    assert skills_root is not None
+    return skills_root
+
+
+def test_resolve_user_skill_install_roots_keeps_detected_agents_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Kimi Code 是缺少 cc-switch、Codex 与 Claude 时的用户级安装目标。"""
+    """只有已存在配置目录的 agent 才成为安装目标，且保持注册顺序。"""
     user_home_path = tmp_path / "home"
+    (user_home_path / ".claude").mkdir(parents=True)
+    (user_home_path / ".codex").mkdir(parents=True)
     (user_home_path / ".kimi-code").mkdir(parents=True)
     monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
 
-    assert (
-        resolve_user_skill_install_root(user_home_path) == user_home_path / ".kimi-code" / "skills"
+    assert resolve_user_skill_install_roots(user_home_path) == (
+        user_home_path / ".codex" / "skills",
+        user_home_path / ".claude" / "skills",
+        user_home_path / ".kimi-code" / "skills",
     )
 
 
-def test_resolve_user_skill_install_root_prefers_configured_directory(
+def test_resolve_user_skill_install_roots_ignores_cc_switch_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``~/.cc-switch`` 不再是安装目标；仅存在它时回退到注册表首个 agent。"""
+    user_home_path = tmp_path / "home"
+    (user_home_path / ".cc-switch").mkdir(parents=True)
+    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
+
+    assert resolve_user_skill_install_roots(user_home_path) == (
+        _first_registry_skills_root(user_home_path),
+    )
+
+
+def test_resolve_user_skill_install_roots_falls_back_to_first_registry_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没有任何 agent 配置目录时回退到注册表首个声明 ``auth_home`` 的 agent。"""
+    user_home_path = tmp_path / "home"
+    user_home_path.mkdir(parents=True)
+    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
+
+    assert resolve_user_skill_install_roots(user_home_path) == (
+        _first_registry_skills_root(user_home_path),
+    )
+
+
+def test_resolve_user_skill_install_roots_prefers_configured_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -77,7 +118,7 @@ def test_resolve_user_skill_install_root_prefers_configured_directory(
     configured_skills_path = tmp_path / "configured-skills"
     monkeypatch.setenv("CC_SWITCH_SKILLS_DIR", str(configured_skills_path))
 
-    assert resolve_user_skill_install_root(tmp_path / "home") == configured_skills_path
+    assert resolve_user_skill_install_roots(tmp_path / "home") == (configured_skills_path,)
 
 
 def test_install_remote_template_skills_downloads_only_required_user_skills(tmp_path: Path) -> None:
@@ -94,7 +135,7 @@ def test_install_remote_template_skills_downloads_only_required_user_skills(tmp_
     )
 
     target_skills_root = user_home_path / ".kimi-code" / "skills"
-    assert install_result.target_skills_root == target_skills_root
+    assert install_result.target_skills_roots == (target_skills_root,)
     assert install_result.installed_skill_names == REMOTE_TEMPLATE_SKILL_NAMES
     assert not install_result.dry_run
     for skill_name in REMOTE_TEMPLATE_SKILL_NAMES:
@@ -140,7 +181,40 @@ def test_install_remote_template_skills_rejects_missing_remote_skill(tmp_path: P
                 user_home_path=tmp_path / "home",
             )
         )
-    assert not (tmp_path / "home" / ".codex" / "skills").exists()
+    assert not _first_registry_skills_root(tmp_path / "home").exists()
+
+
+def test_install_remote_template_skills_writes_into_every_detected_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """每个检测到配置目录的 agent 都拿到同一份远程 Skill 副本。"""
+    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
+    user_home_path = tmp_path / "home"
+    (user_home_path / ".codex").mkdir(parents=True)
+    (user_home_path / ".claude").mkdir(parents=True)
+    codex_skills_root = user_home_path / ".codex" / "skills"
+    claude_skills_root = user_home_path / ".claude" / "skills"
+    fake_process_runner = FakeRemoteTemplateProcessRunner()
+
+    install_result = install_remote_template_skills(
+        RemoteTemplateSkillInstallOptions(
+            process_runner=fake_process_runner,
+            user_home_path=user_home_path,
+        )
+    )
+
+    assert install_result.target_skills_roots == (codex_skills_root, claude_skills_root)
+    # 远程仓库只克隆一次，随后写入全部目标目录。
+    clone_command_count = sum(
+        1 for command in fake_process_runner.command_tuples if command[:2] == ("git", "clone")
+    )
+    assert clone_command_count == 1
+    for skills_root in (codex_skills_root, claude_skills_root):
+        for skill_name in REMOTE_TEMPLATE_SKILL_NAMES:
+            assert (skills_root / skill_name / "SKILL.md").read_text(encoding="utf-8") == (
+                f"remote {skill_name}"
+            )
 
 
 def _build_process_runner_for_remote_skill_payload(
@@ -275,4 +349,4 @@ def test_install_remote_template_skills_dry_run_skips_remote_commands(tmp_path: 
 
     assert install_result.dry_run
     assert not fake_process_runner.command_tuples
-    assert not install_result.target_skills_root.exists()
+    assert all(not root_path.exists() for root_path in install_result.target_skills_roots)

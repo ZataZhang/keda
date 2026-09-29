@@ -17,6 +17,7 @@ argv 片段、提示词投递方式、输出协议）都沉淀为纯数据
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # 输出协议 id（叶子常量：interfaces 与 models 都从这里取，避免循环导入）
@@ -128,6 +129,27 @@ class AgentSpec:
     auth_exclude: tuple[str, ...] = ()
     project_skills_dir: str | None = None
     profiles: dict[str, AgentProfileSpec] = field(default_factory=dict)
+
+    def user_skills_dir(self, user_home_path: Path) -> Path | None:
+        """派生该 agent 的用户级 skills 目录（唯一派生规则）。
+
+        ``auth_home`` 去掉 ``~`` 前缀后锚定到 ``user_home_path``，再拼接
+        ``skills`` 子目录（与 ``auth_include`` 白名单里的 ``skills`` 条目
+        一致）。安装器（``iar init``）与读取器（prd skill 解析）都必须
+        经由此方法取目录，禁止各自写死路径。
+
+        Args:
+            user_home_path: 用户主目录（生产传 ``Path.home()``，测试注入临时目录）。
+
+        Returns:
+            用户级 skills 目录；未声明 ``auth_home`` 的 agent 返回 ``None``。
+        """
+        if not self.auth_home:
+            return None
+        relative_home = self.auth_home
+        if relative_home.startswith("~"):
+            relative_home = relative_home[1:].lstrip("/")
+        return user_home_path / relative_home / "skills"
 
 
 # ---------------------------------------------------------------------------

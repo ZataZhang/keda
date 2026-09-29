@@ -667,23 +667,29 @@ def _validate_prd_output(text: str) -> bool:
 _PRD_SKILL_PATH_ENV_VAR = "IAR_PRD_SKILL_PATH"
 _CC_SWITCH_SKILLS_DIR_ENV_VAR = "CC_SWITCH_SKILLS_DIR"
 _PRD_SKILL_RELATIVE_PATH = Path("prd") / "SKILL.md"
-_DEFAULT_PRD_SKILL_ROOT_RELATIVE_PATHS: tuple[Path, ...] = (
-    Path(".cc-switch") / "skills",
-    *(
-        Path(agent_spec.project_skills_dir)
+
+
+def _default_prd_skill_candidate_paths() -> tuple[Path, ...]:
+    """按 agent 注册表派生 prd skill 的用户级候选路径。
+
+    与 ``iar init`` 的安装目标同源（:meth:`AgentSpec.user_skills_dir`，
+    即各 agent ``auth_home`` 下的 ``skills/``），注册顺序即优先级；
+    不再包含已废弃的 ``~/.cc-switch/skills`` 固定候选。
+    """
+    user_home_path = Path.home()
+    return tuple(
+        skills_dir / _PRD_SKILL_RELATIVE_PATH
         for agent_spec in BUILTIN_AGENT_SPECS.values()
-        if agent_spec.project_skills_dir is not None
-    ),
-)
+        if (skills_dir := agent_spec.user_skills_dir(user_home_path)) is not None
+    )
 
 
 def resolve_prd_skill_path(explicit_path: Path | None = None) -> Path:
     """解析模板安装器管理的 ``prd`` skill 路径。
 
     解析优先级：显式入参 → ``IAR_PRD_SKILL_PATH`` 环境变量 →
-    ``CC_SWITCH_SKILLS_DIR`` → 模板安装器的用户级目录
-    （``~/.cc-switch/skills`` 与 agent 注册表各 agent 的
-    ``project_skills_dir`` 用户级目录）。
+    ``CC_SWITCH_SKILLS_DIR`` → agent 注册表各 agent 的用户级 skills 目录
+    （``auth_home`` 派生，与 ``iar init`` 安装目标同源）。
     默认候选中优先返回存在的 ``SKILL.md``；全部缺失时返回第一个候选，
     由调用方保留现有 fallback 行为。
 
@@ -704,11 +710,7 @@ def resolve_prd_skill_path(explicit_path: Path | None = None) -> Path:
         candidate_skill_paths.append(
             Path(configured_skills_root).expanduser() / _PRD_SKILL_RELATIVE_PATH
         )
-    user_home_path = Path.home()
-    candidate_skill_paths.extend(
-        user_home_path / relative_skills_root / _PRD_SKILL_RELATIVE_PATH
-        for relative_skills_root in _DEFAULT_PRD_SKILL_ROOT_RELATIVE_PATHS
-    )
+    candidate_skill_paths.extend(_default_prd_skill_candidate_paths())
     for candidate_skill_path in candidate_skill_paths:
         if candidate_skill_path.is_file():
             return candidate_skill_path
