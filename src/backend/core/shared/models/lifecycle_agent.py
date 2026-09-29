@@ -102,7 +102,7 @@ LIFECYCLE_AGENT_ENTRY_GROUPS: tuple[LifecycleAgentEntryGroup, ...] = (
             "辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；"
             "内容生成横切 iar issue create、Phase 1 与开 Draft PR 三处。"
         ),
-        keys=("deliberate", "content_generation"),
+        keys=("content_generation", "deliberate"),
     ),
     LifecycleAgentEntryGroup(
         entry="standalone",
