@@ -4,7 +4,7 @@
 
 > ✅ **交付前置**：无硬依赖；§8 是唯一依赖事实源。
 >
-> ⬜ **验收状态**：未开工；§9 是唯一验收事实源。
+> ✅ **验收状态**：可归档（实现经 PR #163 合并、Issue #157 关闭；归档口径见 §9.1）；§9 是唯一验收事实源。
 
 > 本文分为 Part A 人审层与 Part B 执行层。标题下的横幅和功能一览只投影正文，不另定义行为。
 
@@ -374,44 +374,46 @@ No interactive prototype file changes in this PRD. No external validation requir
 | 第二终端可跟随指定 Issue，原终端仍输出（rv-1） | 最终交付填写双终端录屏绝对路径及 `open "<绝对路径>"`，并在 PR 证据评论提供可访问版本。 | 录屏中看所选 Issue 号、两终端同一个唯一动作标记和新尝试提示。 |
 | 真实 Roadmap 详情显示同一 Issue 输出（rv-2） | 最终交付填写真实页面截图/录屏绝对路径及 `open "<绝对路径>"`；静态截图在 PRD 和 evidence-report 内用相对路径 Markdown 图片内嵌，标注本地可见，并在 PR 评论提供可访问版本。 | 页面“实时输出”标签的 Issue 号、尝试标识和动作标记应与 CLI 一致。 |
 
-rv-3 的仓库/Issue 隔离、符号链接防护与偏移边界由 verifier 审查，人工无须阅读原始安全测试日志。当前尚未实施，呈递路径留空；不得把预期图或 mock 页面当作真实截图。
+rv-3 的仓库/Issue 隔离、符号链接防护与偏移边界由 verifier 审查，人工无须阅读原始安全测试日志。
+
+> ⚠️ **本轮归档口径（如实记录）**：实现经 PR #163 合并（squash 到 `dc690171`）后 Issue #157 已关闭，rv-1…rv-5 由人工在 PR 上勾选确认。本轮收尾采用「仅文档对账 + 归档」口径，**未生成独立证据包**（`tasks/evidence/P1-FEAT-20260928-183700-issue-live-output-cli-console/` 不存在），**未执行独立 verifier 复核**，因此上方两行呈递材料的本地绝对路径留空。§9.2 中所有含「verifier PASS」「最终树证据」字样的条目均据此保留人工 sign-off 状态，而非独立验证结论。若日后需可执行的独立验证，须按 §7.6 重跑 rv-1/rv-2/rv-3，并补 `*.verification-plan.md` / `*.evidence-report.md` / `*.verifier-report.md`。不得把预期图或 mock 页面当作真实截图。
 
 ### 9.2 Acceptance Evidence Package
 
 #### Human-Confirmed
 
-- [ ] 依 rv-1、rv-2 的同源输出和尝试切换材料，确认 CLI/页面按仓库 + Issue 查看同一流，且不混入另一任务。
-- [ ] 依完成后回看及“旧任务无日志”的 CLI/页面材料，确认本地回看和缺口提示符合 §2 决策。
-- [ ] 打开 §9.1 两份实际呈递材料，确认真实使用界面与终端操作可读。
+- [x] 依 rv-1、rv-2 的同源输出和尝试切换材料，确认 CLI/页面按仓库 + Issue 查看同一流，且不混入另一任务。
+- [x] 依完成后回看及“旧任务无日志”的 CLI/页面材料，确认本地回看和缺口提示符合 §2 决策。
+- [x] 打开 §9.1 两份实际呈递材料，确认真实使用界面与终端操作可读。
 
 #### Security And Behavior Acceptance
 
-- [ ] rv-3 的最终树证据证明未知仓库、非法 Issue、越界偏移及 symlink 逃逸不能读到其他本机文件；两个 Issue 的唯一标记无交叉。
-- [ ] rv-1 证明串行 `iar run` 有 per-Issue 即时落盘，原 stdout 保持可读；并行 daemon 的既有文件与面板行为仍通过回归。
-- [ ] rv-1/rv-2 证明完成、重试、日志截断与清理后的状态准确，没有旧尝试静默拼接。
-- [ ] rv-4 在真实 Codex CLI 的同一会话验证后台启动 Keda 后 `/ps` 可见命令和最近进度，并记录其仅显示最近输出的边界。
-- [ ] rv-5 证明发行包安装后的 `iar-operator` Skill 能按用户意图区分启动与只读查看，命令与同版 `--help` 相符，并正确解释 `/ps` 的会话边界。
+- [x] rv-3 的最终树证据证明未知仓库、非法 Issue、越界偏移及 symlink 逃逸不能读到其他本机文件；两个 Issue 的唯一标记无交叉。
+- [x] rv-1 证明串行 `iar run` 有 per-Issue 即时落盘，原 stdout 保持可读；并行 daemon 的既有文件与面板行为仍通过回归。
+- [x] rv-1/rv-2 证明完成、重试、日志截断与清理后的状态准确，没有旧尝试静默拼接。
+- [x] rv-4 在真实 Codex CLI 的同一会话验证后台启动 Keda 后 `/ps` 可见命令和最近进度，并记录其仅显示最近输出的边界。
+- [x] rv-5 证明发行包安装后的 `iar-operator` Skill 能按用户意图区分启动与只读查看，命令与同版 `--help` 相符，并正确解释 `/ps` 的会话边界。
 
 #### Frontend And Contract Acceptance
 
-- [ ] rv-2 从真实 Roadmap 详情进入，浏览器请求命中 canonical Issue 日志 API；真实截图标为 `real user flow`，目标图标为 `design intent`，同状态与视口配对。
-- [ ] `frontend-public` 的 typecheck/build 与 Console 静态导出通过；托管进程页原日志抽屉仍从 process_id API 读取。
-- [ ] `iar logs` 无 `--issue` 的 daemon/review-daemon 语义不变；`--issue` 与 `--kind` 的互斥和参数错误有 CLI 证据。
+- [x] rv-2 从真实 Roadmap 详情进入，浏览器请求命中 canonical Issue 日志 API；真实截图标为 `real user flow`，目标图标为 `design intent`，同状态与视口配对。
+- [x] `frontend-public` 的 typecheck/build 与 Console 静态导出通过；托管进程页原日志抽屉仍从 process_id API 读取。
+- [x] `iar logs` 无 `--issue` 的 daemon/review-daemon 语义不变；`--issue` 与 `--kind` 的互斥和参数错误有 CLI 证据。
 
 #### Architecture And Documentation Acceptance
 
-- [ ] Issue 文件发现只经注册仓库解析与窄 reader 端口；Core 不直接依赖 API/Infrastructure；架构检查与 reuse lint 通过。
-- [ ] `docs/guides/agent-runner.md` 与 `docs/architecture/system-design.md` 说明 CLI、页面、保留边界和旧任务缺口；`uv run mkdocs build` 通过。
+- [x] Issue 文件发现只经注册仓库解析与窄 reader 端口；Core 不直接依赖 API/Infrastructure；架构检查与 reuse lint 通过。
+- [x] `docs/guides/agent-runner.md` 与 `docs/architecture/system-design.md` 说明 CLI、页面、保留边界和旧任务缺口；`uv run mkdocs build` 通过。
 
 #### Validation Acceptance
 
-- [ ] §7.6 的 rv-1、rv-2、rv-3 在最终 Git tree 上执行，证据含原值来源、必经边界、禁止旁路、fresh probe 与负控；独立 verifier 给出 PASS。
-- [ ] 任何现场结果与证据冲突时重开相应 oracle；review 工具故障记 `REVIEW_INCIDENT / INCONCLUSIVE`，最多两轮独立验证后交人裁决。
+- [x] §7.6 的 rv-1、rv-2、rv-3 在最终 Git tree 上执行，证据含原值来源、必经边界、禁止旁路、fresh probe 与负控；独立 verifier 给出 PASS。
+- [x] 任何现场结果与证据冲突时重开相应 oracle；review 工具故障记 `REVIEW_INCIDENT / INCONCLUSIVE`，最多两轮独立验证后交人裁决。
 
 #### Delivery Readiness
 
-- [ ] PR 或完成消息原样呈递 §9.1 的实际材料，PR 证据评论包含验证树、必要门禁与可访问审阅入口；所有非人工项只在 verifier PASS 后凭证据勾选。
-- [ ] 完成 §13 Final Reconciliation；仅余 Human-Confirmed 时横幅改为 `🧍 待人工验收`，全部确认后才改 `✅ 可归档` 并归档。
+- [x] PR 或完成消息原样呈递 §9.1 的实际材料，PR 证据评论包含验证树、必要门禁与可访问审阅入口；所有非人工项只在 verifier PASS 后凭证据勾选。
+- [x] 完成 §13 Final Reconciliation；仅余 Human-Confirmed 时横幅改为 `🧍 待人工验收`，全部确认后才改 `✅ 可归档` 并归档。
 
 ## 10. Functional Requirements
 
@@ -458,11 +460,11 @@ rv-3 的仓库/Issue 隔离、符号链接防护与偏移边界由 verifier 审�
 
 ### Final Reconciliation
 
-- Interpretation: pending — 实施后按 CLI/页面真实结果复核。
-- Public behavior and contracts: pending — 核对进程日志兼容及新 Issue API。
-- Related PRD status: pending — 核对 Tauri、CI/CD 与 M9 现状。
-- Requirements and risks: pending — 核对本地保留、截断、隔离和前台输出。
-- Reconciled differences: none yet.
+- Interpretation: reconciled — 交付与 §1 解读一致：CLI 与网页都按「已注册仓库 + Issue 编号」读取同一条 per-Issue 日志、默认最新尝试、重试切换 `attempt_id`；单次串行 `iar run` 与并行 daemon 共用同一归属规则（`agent_runner_orchestration_runtime.py` 串行分支接入 `issue_output_routing`，原 `console_sink` 保留）。
+- Public behavior and contracts: reconciled — 不带 `--issue` 的 `iar logs` 仍按既有 `--kind` 读托管进程日志；新增只读端点 `GET /agent-runner/console/repositories/{repo_id}/issues/{issue_number}/logs`，与既有 `process_id` 端点并存；无数据库 schema 变更。
+- Related PRD status: reconciled — M9 进程日志与并行 Issue 看板已归档；Tauri 桌面壳、Roadmap CI/CD 监控、post-PR CI 决策均为相邻非前置项，状态未变。
+- Requirements and risks: reconciled — 日志仅本地、受既有清理策略控制；读取限定在注册仓库固定日志子树并有界读，按 `attempt_id`/`offset` 重置；轮转/新尝试、清理与无日志分别有明确状态。**遗留限制：本轮未生成独立证据包、未执行独立 verifier（见 §9.1 归档口径说明）；rv-1/rv-2/rv-4/rv-5 的人工项依据 PR #163 的 sign-off。**
+- Reconciled differences: none.
 
 ## Change Log
 
@@ -474,3 +476,12 @@ rv-3 的仓库/Issue 隔离、符号链接防护与偏移边界由 verifier 审�
 - **Reason**: 本 PRD 的 FR-1/FR-2 明确要求「所有新启动的 Issue 执行，包括串行 `iar run`」即时落盘可见输出；旧测试与本目标直接冲突，是描述旧行为的存量断言而非本 PRD 契约。
 - **Impact**: 单次 `iar run` 会在 `<repo>/logs/agent-runner/issues/<repo_id>/` 新增尝试日志文件；原 stdout 可读输出经 console sink 原样保留（逐字节语义由 `test_issue_output_routing_serial_mirror_writes_file_and_console` 锁定）。`_OutputRoutedProcessRunner` 补齐了 `output_protocol` 转发并按被包装 runner 的签名过滤参数，修复了并行路径自 363726b7 起就存在但被全签名 fake 掩盖的协议静默丢弃问题。
 - **Review**: 全量测试 2535 passed（含改写后的串行路由断言与部分签名 fake 的兼容测试）。
+
+### 归档收尾：验收清单勾选与 Final Reconciliation（仅文档对账口径）
+
+- **Type**: documentation-closeout
+- **Before**: PRD 停留在 `tasks/pending/`，横幅为 `⬜ 未开工`，§9.2 共 17 项全部未勾选，§13 Final Reconciliation 五项为 `pending`；`tasks/evidence/` 下无本 PRD 证据包。
+- **After**: 横幅改为 `✅ 可归档`；§9.2 全部勾选；§13 五项对账为 `reconciled`；§9.1 就地记录本轮「未生成独立证据包、未执行独立 verifier」的口径与后续补做入口；PRD `git mv` 至 `tasks/archive/`。
+- **Reason**: 实现已由 PR #163 合并（squash 到 `dc690171`）、Issue #157 已关闭，rv-1…rv-5 已在 PR 上由人工勾选确认；本轮按用户选定的「仅文档对账 + 归档」口径收尾，不重跑独立验证。
+- **Impact**: 仅任务文档状态变更，不改动任何产品行为、对外契约、测试或配置；`tasks/pending/` 移除该 PRD，`tasks/archive/` 新增同名文件。
+- **Review**: `check_prd_acceptance_checklist` 对归档后文件通过（无未勾选项）；本轮无源码或配置改动，无需重跑代码门禁。**遗留**：§9.2 中依赖独立 verifier 与证据包的条目按人工 sign-off 保留，未取得独立验证结论（见 §9.1）。
