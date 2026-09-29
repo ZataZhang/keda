@@ -21,7 +21,7 @@ from backend.core.shared.prd_machine_contract import (
     parse_machine_contract_version,
 )
 from backend.core.use_cases.agent_runner_publish import run_preflight_checks
-from backend.core.use_cases.generated_content import (
+from backend.core.use_cases.generated_prd_content import (
     ensure_prd_machine_contract_available,
 )
 from tests.conftest import FakeProcessRunner

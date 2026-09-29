@@ -30,7 +30,7 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.use_cases.agent_runner_commit import commit_runner_authored_paths
 from backend.core.use_cases.agent_runner_feedback import extract_prd_path
 from backend.core.use_cases.agent_runner_publish import publish_changes
-from backend.core.use_cases.generated_content import (
+from backend.core.use_cases.generated_prd_content import (
     build_prd_context,
     generate_prd_content,
 )

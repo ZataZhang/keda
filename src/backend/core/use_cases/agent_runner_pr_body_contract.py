@@ -31,7 +31,7 @@ import re
 from pathlib import Path
 
 from backend.core.use_cases.agent_runner_feedback import extract_prd_path
-from backend.core.use_cases.generated_content import resolve_prd_skill_path
+from backend.core.use_cases.generated_prd_content import resolve_prd_skill_path
 
 # "合并即接受"声明必须携带的 hidden marker（prompt 教学与校验共用同一常量）。
 MERGE_ACCEPTANCE_MARKER_TEXT = "<!-- iar:merge-acceptance version=1 -->"

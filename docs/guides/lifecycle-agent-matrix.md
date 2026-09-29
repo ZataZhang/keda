@@ -74,7 +74,7 @@ console 的三处矩阵入口（Settings 全局层、Roadmap 仓库行齿轮、P
 | `review` | 实现流水线 | Phase 2，同一次认领内（开 Draft PR 前） | `run_agent_once.py::resolve_reviewer_agent` |
 | `supervisor` | 实现流水线 | Phase 2 发布路径**或** `iar review` / `iar review-daemon` | `run_agent_once.py::resolve_supervisor_agent` |
 | `deliberate` | 讨论与内容生成 | **Phase 0**：每轮先扫 `agent/deliberate` Issue（此时 PRD 尚不存在） | `agent_runner_deliberation_issues.py::_process_single_deliberation_issue` |
-| `content_generation` | 讨论与内容生成 | **横切三个 target**，见下文 | `generated_content.py::generate_prd_content` / `generate_issue_content` / `generate_pr_content` |
+| `content_generation` | 讨论与内容生成 | **横切三个 target**，见下文 | `generated_prd_content.py::generate_prd_content` / `generated_content.py::generate_issue_content` / `generate_pr_content` |
 | `planner` | 独立入口 | `iar ask`，不在任何 Issue 流水线上 | `cli_parsed_commands/agent.py::run_ask_command` |
 
 ### 三个入口

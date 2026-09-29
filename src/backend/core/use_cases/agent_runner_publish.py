@@ -28,9 +28,9 @@ from backend.core.use_cases.agent_runner_validation import (
 )
 from backend.core.use_cases.generated_content import (
     build_pr_context,
-    ensure_prd_machine_contract_available,
     generate_pr_content,
 )
+from backend.core.use_cases.generated_prd_content import ensure_prd_machine_contract_available
 from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
 from backend.core.use_cases.agent_runner_pr_body_contract import (
     append_missing_contract_anchors,
