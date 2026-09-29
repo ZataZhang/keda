@@ -161,6 +161,26 @@ const AUDITS = {
   ],
 }
 
+/** 带关联 Issue 的 Roadmap PRD fixture（实时输出标签只对这类 PRD 出现）。 */
+const ROADMAP_PRD = {
+  prd_path: 'tasks/pending/demo-prd.md',
+  title: 'Demo PRD',
+  status: 'pending',
+  priority: 'P1',
+  issue_url: 'https://example.test/issues/42',
+  issue_number: 42,
+  state: 'ready',
+  acceptance_total: 1,
+  acceptance_checked: 0,
+  delivery_dependencies: [],
+  updated_at: '2026-09-29T10:00:00+00:00',
+  block_reason: null,
+  next_action: null,
+}
+
+const ISSUE_LOG_URL_PATTERN =
+  '**/api/v1/agent-runner/console/repositories/keda-main/issues/42/logs**'
+
 /** 目录选择器 mock 用的假目录树：根 → code → foo。 */
 const BROWSE_TREES: Record<string, string[]> = {
   '/Users/me': ['code'],
@@ -325,5 +345,198 @@ test.describe('console pages smoke (mocked API)', () => {
       'foo',
     )
     await expect(page.getByPlaceholder('显示名（可选）')).toHaveValue('foo')
+  })
+})
+
+/**
+ * Roadmap PRD 详情「实时输出」标签（mock Issue 日志 API）。
+ *
+ * 经真实 Roadmap 页 → 选中 PRD → 切到「实时输出」标签的路径验证：
+ * 首次拉尾部窗口、按 offset 增量轮询、新尝试提示与切换、空态。
+ */
+
+/** 打开带 Issue 的 PRD 详情并切到「实时输出」标签。 */
+async function openIssueOutputTab(page: Page): Promise<void> {
+  await page.route('**/api/v1/agent-runner/roadmap/prds?**', (route) =>
+    route.fulfill({
+      json: {
+        prds: [ROADMAP_PRD],
+        repo_id: 'keda-main',
+        include_archived: false,
+        scanned_at: '2026-09-29T10:00:00+00:00',
+      },
+    }),
+  )
+  // 其余标签的数据源给最小可用响应，避免加载错误干扰断言。
+  await page.route('**/api/v1/agent-runner/roadmap/prds/*/content**', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: '# Demo PRD' }),
+  )
+  await page.route('**/api/v1/agent-runner/roadmap/settings**', (route) =>
+    route.fulfill({
+      json: {
+        repo_id: 'keda-main',
+        max_parallel: 2,
+        default_view: 'list',
+        updated_at: '2026-09-29T10:00:00+00:00',
+      },
+    }),
+  )
+  await page.route('**/api/v1/agent-runner/roadmap/autopilot**', (route) =>
+    route.fulfill({
+      json: {
+        repo_id: 'keda-main',
+        enabled: false,
+        auto_merge_enabled: false,
+        daemon_running: false,
+        max_parallel: 2,
+        config_source: '.iar.toml',
+        persisted_enabled: false,
+      },
+    }),
+  )
+
+  await page.goto('/app/roadmap')
+  await page.getByText('Demo PRD').first().click()
+  await expect(page.getByTestId('prd-detail')).toBeVisible()
+  await page.getByRole('button', { name: '实时输出' }).click()
+  await expect(page.getByTestId('prd-issue-output')).toBeVisible()
+}
+
+test.describe('roadmap PRD issue live output (mocked API)', () => {
+  test('loads tail window then polls by offset', async ({ page }) => {
+    await mockConsoleApi(page)
+
+    const seenRequests: string[] = []
+    let pollCount = 0
+    await page.route(ISSUE_LOG_URL_PATTERN, (route) => {
+      const url = route.request().url()
+      seenRequests.push(url)
+      pollCount += 1
+      const isFirst = !url.includes('attempt_id=')
+      const payload = isFirst
+        ? {
+            repo_id: 'keda-main',
+            issue_number: 42,
+            status: 'ok',
+            attempt_id: 'issue-42-20260929-100000.log',
+            latest_attempt_id: 'issue-42-20260929-100000.log',
+            content: 'agent started\n',
+            next_offset: 100,
+            eof: true,
+          }
+        : {
+            repo_id: 'keda-main',
+            issue_number: 42,
+            status: 'ok',
+            attempt_id: 'issue-42-20260929-100000.log',
+            latest_attempt_id: 'issue-42-20260929-100000.log',
+            content: pollCount === 2 ? 'agent finished\n' : '',
+            next_offset: 200,
+            eof: true,
+          }
+      return route.fulfill({ json: payload })
+    })
+
+    await openIssueOutputTab(page)
+
+    // 首次请求：尾部窗口（tail=true，无 attempt_id）。
+    await expect
+      .poll(() => seenRequests.length, { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(1)
+    expect(seenRequests[0]).toContain('tail=true')
+    expect(seenRequests[0]).not.toContain('attempt_id=')
+
+    // 增量轮询到达：内容拼接，attempt_id 与 offset 续传。
+    await expect(
+      page.getByTestId('prd-issue-output-content'),
+    ).toContainText('agent started', { timeout: 10_000 })
+    await expect(
+      page.getByTestId('prd-issue-output-content'),
+    ).toContainText('agent finished', { timeout: 15_000 })
+    const followUp = seenRequests.find((url) => url.includes('attempt_id='))
+    expect(followUp).toBeTruthy()
+    expect(followUp).toContain('attempt_id=issue-42-20260929-100000.log')
+    expect(followUp).toContain('offset=100')
+
+    // 暂停后继续：请求计数应停止增长再恢复。
+    await page.getByTestId('prd-issue-output-toggle').click()
+    const countAfterPause = seenRequests.length
+    await page.waitForTimeout(3_000)
+    expect(seenRequests.length).toBe(countAfterPause)
+    await page.getByTestId('prd-issue-output-toggle').click()
+    await expect
+      .poll(() => seenRequests.length, { timeout: 10_000 })
+      .toBeGreaterThan(countAfterPause)
+  })
+
+  test('shows attempt switch notice when a newer attempt appears', async ({
+    page,
+  }) => {
+    await mockConsoleApi(page)
+
+    let pollCount = 0
+    await page.route(ISSUE_LOG_URL_PATTERN, (route) => {
+      pollCount += 1
+      const isFirst = !route.request().url().includes('attempt_id=')
+      // 首轮：旧尝试；第二轮：同 attempt 但 latest 已指向新尝试。
+      const payload = isFirst
+        ? {
+            repo_id: 'keda-main',
+            issue_number: 42,
+            status: 'ok',
+            attempt_id: 'issue-42-20260929-100000.log',
+            latest_attempt_id: 'issue-42-20260929-100000.log',
+            content: 'first attempt\n',
+            next_offset: 50,
+            eof: true,
+          }
+        : {
+            repo_id: 'keda-main',
+            issue_number: 42,
+            status: 'ok',
+            attempt_id: 'issue-42-20260929-100000.log',
+            latest_attempt_id: 'issue-42-20260929-100001.log',
+            content: '',
+            next_offset: 50,
+            eof: true,
+          }
+      return route.fulfill({ json: payload })
+    })
+
+    await openIssueOutputTab(page)
+
+    await expect(
+      page.getByTestId('prd-issue-output-notice'),
+    ).toContainText('检测到新尝试', { timeout: 15_000 })
+    expect(pollCount).toBeGreaterThanOrEqual(2)
+  })
+
+  test('shows explicit empty state when the issue has no output yet', async ({
+    page,
+  }) => {
+    await mockConsoleApi(page)
+    await page.route(ISSUE_LOG_URL_PATTERN, (route) =>
+      route.fulfill({
+        json: {
+          repo_id: 'keda-main',
+          issue_number: 42,
+          status: 'no_attempt',
+          attempt_id: null,
+          latest_attempt_id: null,
+          content: '',
+          next_offset: 0,
+          eof: true,
+        },
+      }),
+    )
+
+    await openIssueOutputTab(page)
+
+    await expect(
+      page.getByTestId('prd-issue-output-notice'),
+    ).toContainText('暂无可用输出', { timeout: 10_000 })
+    await expect(
+      page.getByTestId('prd-issue-output-content'),
+    ).toContainText('（暂无输出）')
   })
 })

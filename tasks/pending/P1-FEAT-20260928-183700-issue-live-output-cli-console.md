@@ -463,3 +463,14 @@ rv-3 的仓库/Issue 隔离、符号链接防护与偏移边界由 verifier 审�
 - Related PRD status: pending — 核对 Tauri、CI/CD 与 M9 现状。
 - Requirements and risks: pending — 核对本地保留、截断、隔离和前台输出。
 - Reconciled differences: none yet.
+
+## Change Log
+
+### 串行路径启用 per-Issue 路由（替换「串行零日志」旧假设）
+
+- **Type**: behavior-change
+- **Before**: 串行 `iar run`（concurrency<=1）绕过 `issue_output_routing`，原实现注释与 `test_run_once_sequential_default_writes_no_per_issue_logs` 都把「串行不写 per-Issue 日志」当作不变量。
+- **After**: 串行路径为每个 Issue 建立 `issue_output_routing`（含 `console_sink` 原终端镜像），落盘 per-Issue 尝试日志；原测试改写为 `test_run_once_sequential_default_writes_per_issue_logs` 锁定新语义。
+- **Reason**: 本 PRD 的 FR-1/FR-2 明确要求「所有新启动的 Issue 执行，包括串行 `iar run`」即时落盘可见输出；旧测试与本目标直接冲突，是描述旧行为的存量断言而非本 PRD 契约。
+- **Impact**: 单次 `iar run` 会在 `<repo>/logs/agent-runner/issues/<repo_id>/` 新增尝试日志文件；原 stdout 可读输出经 console sink 原样保留（逐字节语义由 `test_issue_output_routing_serial_mirror_writes_file_and_console` 锁定）。`_OutputRoutedProcessRunner` 补齐了 `output_protocol` 转发并按被包装 runner 的签名过滤参数，修复了并行路径自 363726b7 起就存在但被全签名 fake 掩盖的协议静默丢弃问题。
+- **Review**: 全量测试 2535 passed（含改写后的串行路由断言与部分签名 fake 的兼容测试）。

@@ -836,3 +836,140 @@ def test_daemon_status_table_includes_log_path_column(tmp_path: Path) -> None:
     assert "log_path" in rendered
     # Unmanaged record has empty log_path and must render as "-" placeholder.
     assert " - " in rendered or rendered.endswith("-")
+
+
+# ── `iar logs --issue`（按 Issue 读取实时输出） ──────────────────────────────
+
+
+def _make_issue_attempt(repo_dir: Path, repo_id: str, issue_number: int, text: str) -> Path:
+    """在测试仓库下写一个符合命名约定的 Issue 尝试日志。"""
+    log_dir = repo_dir / "logs" / "agent-runner" / "issues" / repo_id
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"issue-{issue_number}-20260929-120000.log"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_logs_command_issue_prints_tail_and_exits_without_follow(tmp_path: Path, capsys) -> None:
+    """`iar logs --issue N`（不带 --follow）打印尾部窗口后立即退出，不轮询。"""
+    repo_dir = tmp_path / "repo"
+    _make_issue_attempt(repo_dir, "fixture-repo", 42, "line-1\nline-2\nline-3\n")
+
+    context = MagicMock(repo_id="fixture-repo", repo_path=repo_dir)
+    parsed = _FakeArgs(
+        kind=None,
+        lines=2,
+        follow=False,
+        repo_id="fixture-repo",
+        issue=42,
+    )
+
+    with patch(
+        "backend.api.cli_registry.resolve_repository_targets",
+        return_value=[context],
+    ):
+        exit_code = _run_logs_command(
+            parsed=parsed,
+            process_runner=MagicMock(),
+            runner_settings=MagicMock(),
+            repo_id="fixture-repo",
+            repo_override=None,
+        )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    # 尾部窗口按 --lines 截行：只看到最后两行。
+    assert "line-2" in output
+    assert "line-3" in output
+    assert "line-1" not in output
+
+
+def test_logs_command_issue_tail_window_skips_large_history(tmp_path: Path, capsys) -> None:
+    """大于尾部窗口的历史内容不会被从头倾泻出来。"""
+    repo_dir = tmp_path / "repo"
+    content = "old-line\n" * 9000 + "tail-marker\n"
+    _make_issue_attempt(repo_dir, "fixture-repo", 7, content)
+
+    context = MagicMock(repo_id="fixture-repo", repo_path=repo_dir)
+    parsed = _FakeArgs(
+        kind=None,
+        lines=200,
+        follow=False,
+        repo_id="fixture-repo",
+        issue=7,
+    )
+
+    with patch(
+        "backend.api.cli_registry.resolve_repository_targets",
+        return_value=[context],
+    ):
+        exit_code = _run_logs_command(
+            parsed=parsed,
+            process_runner=MagicMock(),
+            runner_settings=MagicMock(),
+            repo_id="fixture-repo",
+            repo_override=None,
+        )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "tail-marker" in output
+    # 输出被限制在尾部窗口内，而不是整份 9000 行日志。
+    assert len(output.splitlines()) <= 200
+
+
+def test_logs_command_issue_no_attempt_is_clean_exit(tmp_path: Path, capsys) -> None:
+    """没有任何尝试日志时给明确空态并返回 0，不回退到进程日志。"""
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    context = MagicMock(repo_id="fixture-repo", repo_path=repo_dir)
+    parsed = _FakeArgs(
+        kind=None,
+        lines=50,
+        follow=False,
+        repo_id="fixture-repo",
+        issue=99,
+    )
+
+    with patch(
+        "backend.api.cli_registry.resolve_repository_targets",
+        return_value=[context],
+    ):
+        exit_code = _run_logs_command(
+            parsed=parsed,
+            process_runner=MagicMock(),
+            runner_settings=MagicMock(),
+            repo_id="fixture-repo",
+            repo_override=None,
+        )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Issue #99" in output
+    assert "暂无可用输出" in output
+
+
+def test_logs_command_issue_and_kind_are_mutually_exclusive(tmp_path: Path) -> None:
+    """`--issue` 与显式非默认 `--kind` 互斥，返回用法错误。"""
+    context = MagicMock(repo_id="fixture-repo", repo_path=tmp_path)
+    parsed = _FakeArgs(
+        kind="review_daemon",
+        lines=50,
+        follow=False,
+        repo_id="fixture-repo",
+        issue=3,
+    )
+
+    with patch(
+        "backend.api.cli_registry.resolve_repository_targets",
+        return_value=[context],
+    ):
+        exit_code = _run_logs_command(
+            parsed=parsed,
+            process_runner=MagicMock(),
+            runner_settings=MagicMock(),
+            repo_id="fixture-repo",
+            repo_override=None,
+        )
+
+    assert exit_code == 2

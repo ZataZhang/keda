@@ -3886,13 +3886,26 @@ def test_cli_parser_logs() -> None:
 
 
 def test_cli_parser_logs_defaults() -> None:
-    """`iar logs` should default --kind=daemon, --lines=200, --follow=False."""
+    """`iar logs` should default --kind=None (normalized to daemon downstream), --lines=200, --follow=False.
+
+    The parser keeps ``kind=None`` when the flag is absent so the logs handler
+    can distinguish "user explicitly passed --kind" (mutually exclusive with
+    --issue) from the daemon default.
+    """
     parser = build_parser()
     parsed = parser.parse_args(["logs", "--repo-id", "keda"])
     assert parsed.command == "logs"
-    assert parsed.kind == "daemon"
+    assert parsed.kind is None
     assert parsed.lines == 200
     assert parsed.follow is False
+
+
+def test_cli_parser_logs_issue_flag() -> None:
+    """`iar logs --issue N` should parse an issue number without touching --kind."""
+    parser = build_parser()
+    parsed = parser.parse_args(["logs", "--repo-id", "keda", "--issue", "42"])
+    assert parsed.issue == 42
+    assert parsed.kind is None
 
 
 def test_main_logs_prints_last_n_lines(capsys, monkeypatch) -> None:

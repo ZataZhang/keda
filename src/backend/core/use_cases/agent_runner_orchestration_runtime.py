@@ -1,6 +1,7 @@
 """Agent Runner 的单轮队列调度实现。"""
 
 from __future__ import annotations
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -754,19 +755,42 @@ def run_once(request: RunOnceRequest) -> int:
         "effective_repo_id": effective_repo_id,
     }
 
-    # 串行路径：concurrency<=1 时逐个处理，与历史行为逐字节一致——无线程池、
-    # 无每 Issue 日志文件、无实时看板（NoOp 视图把展示调用变为空操作）。
+    # 串行路径：concurrency<=1 时逐个处理。与历史行为的唯一差异是——每个
+    # Issue 的可见输出同时落到 ``logs/agent-runner/issues/<repo_id>/`` 下
+    # 的 per-Issue 文件（供第二终端 / Console 按 Issue 续读），原启动终端
+    # 的可读输出经 ``console_sink`` 原样保留（TTY 与重定向两种场景一致）。
     if concurrency <= 1:
         noop_view = NoOpRunnerLiveView()
+        log_base = repo_path / "logs"
+
+        def _console_mirror(chunk: str) -> None:
+            print(chunk, end="", flush=True, file=sys.stdout)
+
+        def _process_serial(item: tuple[IssueSummary, str]) -> int:
+            issue, issue_kind = item
+            try:
+                with issue_output_routing(
+                    repo_id=effective_repo_id,
+                    issue_number=issue.number,
+                    log_base=log_base,
+                    output_view=noop_view,
+                    console_sink=_console_mirror,
+                ) as sink:
+                    scoped_runner = _OutputRoutedProcessRunner(process_runner, sink)
+                    return _process_single_issue(
+                        issue,
+                        issue_kind,
+                        process_runner=scoped_runner,
+                        output_view=noop_view,
+                        **process_kwargs,
+                    )
+            except Exception as exc:  # noqa: BLE001 - 单个 Issue 的 I/O 不应中断本轮。
+                _logger.error("Serial routing failed for Issue #%d: %s", issue.number, exc)
+                return 1
+
         exit_code = 0
         for issue, issue_kind in issues_to_process:
-            exit_code |= _process_single_issue(
-                issue,
-                issue_kind,
-                process_runner=process_runner,
-                output_view=noop_view,
-                **process_kwargs,
-            )
+            exit_code |= _process_serial((issue, issue_kind))
         return exit_code
 
     # 并行路径：线程池同一轮并行处理多个 Issue。每个 Issue 的 agent 输出经

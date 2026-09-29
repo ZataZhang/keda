@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from backend.engines.agent_runner.remote_template_skills import install_packaged_operator_skill
+
+#: 随包发行的 SKILL.md 源（与安装产物同一份文件）。
+_PACKAGED_SKILL = (
+    Path(__file__).resolve().parents[1]
+    / "src"
+    / "backend"
+    / "engines"
+    / "agent_runner"
+    / "templates"
+    / "skills"
+    / "iar-operator"
+    / "SKILL.md"
+)
 
 
 def test_packaged_operator_skill_dry_run_reports_install_and_writes_nothing(tmp_path: Path) -> None:
@@ -42,3 +56,91 @@ def test_packaged_operator_skill_preserves_user_conflict_by_default(tmp_path: Pa
 
     assert preview.action == result.action == "preserve-conflict"
     assert user_skill.read_text(encoding="utf-8") == "user content\n"
+
+
+# ── SKILL.md 内容：四条查看路径、只读/执行分流、命令与 --help 一致 ────────────
+
+
+def _skill_text() -> str:
+    return _PACKAGED_SKILL.read_text(encoding="utf-8")
+
+
+def test_packaged_skill_documents_issue_output_paths() -> None:
+    """发行 Skill 必须覆盖按 Issue 查看、/ps 边界与网页查看三条路径。"""
+    text = _skill_text()
+    assert "iar logs --repo <path> --issue <N> --follow" in text
+    assert "iar logs --repo <path> --issue <N>`" in text or "--issue <N>" in text
+    assert "/ps" in text
+    # /ps 的同会话后台终端边界必须写清，不得暗示外部任务自动可见。
+    assert "same Codex session" in text
+    assert "never appears in `/ps`" in text
+    # 网页查看路径（Roadmap PRD 详情的实时输出标签）。
+    assert "实时输出" in text
+
+
+def _flags_of(tokens: list[str]) -> set[str]:
+    """提取命令 token 序列里的 flag 名（去掉 ``=值`` 部分）。"""
+    return {token.split("=")[0] for token in tokens if token.startswith("-")}
+
+
+def test_packaged_skill_command_examples_match_cli_help() -> None:
+    """Skill 中的命令示例所用的 flag 必须真实存在于当前 CLI。"""
+    text = _skill_text()
+    # 提取反引号内的 iar 命令示例。
+    examples = re.findall(r"`(iar [^`]+)`", text)
+    assert examples, "SKILL.md 应包含 iar 命令示例"
+
+    # 每个子命令的合法 flag 集合取自当前 ``iar <cmd> --help``（已逐一人工
+    # 核对）；示例中出现集合之外的 flag 即视为与 CLI 漂移。
+    allowed_flags = {
+        ("run",): {"--dry-run", "--max-issues", "--repo", "--repo-id", "--agent", "--all"},
+        ("logs",): {"--repo", "--repo-id", "--issue", "--follow", "--lines", "-n", "-f", "--kind"},
+        ("issue", "list"): {"--repo", "--repo-id", "--state", "--label", "--limit"},
+        ("issue", "create"): set(),
+        ("init",): {"--dry-run", "--force"},
+        ("registry", "start"): set(),
+        ("registry", "stop"): set(),
+        ("registry", "list"): set(),
+        ("daemon", "status"): set(),
+    }
+    for example in examples:
+        tokens = example.split()
+        subcommand = tuple(
+            token for token in tokens[1:] if not token.startswith("-") and token != "<path>"
+        )
+        # ``iar --help`` 这类纯 flag 形式没有子命令，跳过；``start|stop``
+        # 这类紧凑写法先按分隔符拆开再逐个匹配。
+        if not subcommand:
+            continue
+        subcommand = tuple(part for token in subcommand for part in token.split("|"))
+        key = next(
+            (
+                candidate
+                for candidate in allowed_flags
+                if list(subcommand[: len(candidate)]) == list(candidate)
+            ),
+            None,
+        )
+        assert key is not None, f"未收录的命令示例：{example}"
+        # ``--help`` 是所有子命令都支持的元 flag，不参与漂移判定。
+        unknown = _flags_of(tokens) - allowed_flags[key] - {"--help", "-h"}
+        assert not unknown, f"{example} 使用了 --help 中不存在的 flag：{unknown}"
+
+
+def test_packaged_skill_separates_read_only_from_execution() -> None:
+    """只读查看路径不得引导启动新任务；执行路径必须显式标注写副作用。"""
+    text = _skill_text()
+    # 只读意图的明确保护。
+    assert "never start" in text.lower() or "never starts" in text.lower()
+    # 执行路径仍然如实声明副作用。
+    assert "Runs configured Agents" in text
+    # 旧语义兼容：不带 --issue 时仍是托管进程日志。
+    assert "managed process" in text
+    assert "--issue` and `--kind` are mutually exclusive" in text
+
+
+def test_packaged_skill_keeps_conflict_protection_guidance() -> None:
+    """安装冲突保护语义仍在 Skill 中：默认保留用户自有 Skill。"""
+    text = _skill_text()
+    assert "preserved by default" in text
+    assert "--force" in text

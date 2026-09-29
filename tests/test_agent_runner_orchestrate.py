@@ -1517,8 +1517,13 @@ def test_run_once_parallel_writes_per_issue_logs(monkeypatch, tmp_path) -> None:
     assert list(issue_log_dir.glob("issue-2-*.log"))
 
 
-def test_run_once_sequential_default_writes_no_per_issue_logs(monkeypatch, tmp_path) -> None:
-    """concurrency<=1 keeps the sequential path with no per-Issue routing/logs."""
+def test_run_once_sequential_default_writes_per_issue_logs(monkeypatch, tmp_path) -> None:
+    """concurrency<=1 的串行路径同样为每个 Issue 建立 per-Issue 日志文件。
+
+    Issue #157：单次 ``iar run`` 的可见输出也要落到
+    ``logs/agent-runner/issues/<repo_id>/``，供第二终端 / Console 按 Issue
+    续读；原启动终端的可读输出经 console_sink 原样保留。
+    """
     from backend.core.use_cases import agent_runner_orchestrate as orchestrate
 
     fake_client = FakeGitHubClient()
@@ -1542,4 +1547,7 @@ def test_run_once_sequential_default_writes_no_per_issue_logs(monkeypatch, tmp_p
         concurrency=1,
     )
 
-    assert not (tmp_path / "logs" / "agent-runner" / "issues").exists()
+    issue_log_dir = tmp_path / "logs" / "agent-runner" / "issues" / "testrepo"
+    # 每个 Issue 各自一份尝试日志（文件名含 Issue 编号与时间戳）。
+    assert len(list(issue_log_dir.glob("issue-1-*.log"))) == 1
+    assert len(list(issue_log_dir.glob("issue-2-*.log"))) == 1

@@ -189,6 +189,15 @@ src/backend/api/ → src/backend/core/ → src/backend/engines/ → src/backend/
 6. `src/backend/composition/` 位于四层之外，只负责创建并连接对象；四层模块不得反向依赖它。
 7. agent 调用的**命令构造器落 `core/`**（`core/use_cases/agent_invocation.py`）：argv 组装是跨 `api` / `engines` 复用的领域规则（占位符替换、闭集展开器、提示词投递），纯函数实现、不依赖任何运行时能力。**输出协议实现落 `engines/`**（`engines/agent_runner/output_protocols/`）：流式渲染是平台能力，实现 `core/shared/interfaces/agent_output_protocol.py` 定义的注册契约，经 entry point 发现；`core/` 只引用协议 id 常量与接口，不 import 协议实现。
 
+### Issue 输出与进程日志的职责边界
+
+Agent Runner 有两类只读日志，刻意分开：
+
+- **托管进程日志**（`core/use_cases/console_processes.py`）：面向 `iar daemon` / `iar review-daemon` 这类登记在进程 registry 里的常驻进程，按 `process_id` 续读。用于排查「daemon 进程本身还在不在、为什么退出」。
+- **Issue 实时输出**（`core/use_cases/issue_logs.py` + `infrastructure/console/issue_log_reader.py`）：面向「某个 Issue 正在被 Agent 处理」的可见输出，按 `(repo_id, issue_number, attempt_id, offset)` 续读。单次 `iar run`（串行）与并行 daemon 都把每个 Issue 的可见输出落到 `logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，CLI（`iar logs --issue`）与 Console API 共享同一窄端口 `core/shared/interfaces/issue_log_reader.py`，读取范围被限制在已注册仓库的固定日志子树内，不接受客户端传入的任意路径。首次读取支持「尾部窗口」（`tail` 请求标记：忽略偏移、从文件末尾回推最多 `max_bytes` 字节），之后按返回的 `next_offset` 增量续读。
+
+Issue 日志不登记为托管进程，也不伪造 `process_id`；两者在 API 上是独立端点，避免把「进程还活着」误当成「任务有实时输出」。
+
 ## 认证与会话域
 
 系统采用**两套物理隔离的认证域**，互不穿透：
