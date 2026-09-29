@@ -7,6 +7,7 @@
 独立成层；``settings.py`` 在 ``AgentRunnerSettings`` / ``AppSettings`` 中聚合它们。
 """
 
+import logging
 import shutil
 import sys
 import tomllib
@@ -33,6 +34,8 @@ from backend.core.shared.models.lifecycle_agent import (
 from backend.infrastructure.config.settings_sources import (
     IAR_REPOSITORY_CONFIG_FILENAME,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AgentRunnerLifecycleAgentsSettings(BaseModel):
@@ -586,6 +589,8 @@ class AgentRunnerGeneratedContentTargetSettings(BaseModel):
     # 仅接受 template / agent；非法值（如手误 "agnet"）在配置加载期直接报错，
     # 而不是静默退回 fallback。默认 agent；agent 缺 prompt、超时、不可用或输出
     # 不合格时按 ``fallback`` 退回 template 渲染，所以未配置的机器同样能产出内容。
+    # 显式配成 template 已废弃（仍被接受，加载 ``.iar.toml`` 时会告警）：模板渲染的
+    # 长期用途是上面这条失败兜底。
     mode: Literal["template", "agent"] = "agent"
     output: str = "json"
     title_template: str | list[str] = ""
@@ -740,6 +745,44 @@ class AgentRunnerLocalSettings(_AgentRunnerRepositoryOverrideSettings):
     )
 
 
+# 已经提示过的 (配置路径, target 名)：daemon 每轮轮询都会重新加载 ``.iar.toml``，
+# 同一份配置在一个进程里只提示一次，避免刷屏。
+_WARNED_TEMPLATE_PINS: set[tuple[str, tuple[str, ...]]] = set()
+
+
+def _warn_deprecated_template_mode_pins(
+    agent_runner_section: dict[str, Any], local_config_path: Path
+) -> None:
+    """对显式钉成 ``mode = "template"`` 的 generated_content target 记弃用警告。
+
+    ``template`` 模式已废弃：agent 是默认值，模板渲染只保留为失败兜底。旧版
+    ``iar init`` 把当时的默认值 ``template`` 落盘成了显式配置，这类钉值会一直盖过
+    新的默认值，所以在加载时指出来，并提示用 ``iar config migrate`` 清理。
+    有意使用模板渲染的仓库（自定义了模板）配置仍被接受，只是同样会收到弃用提示。
+    """
+    generated_content_section = agent_runner_section.get("generated_content")
+    if not isinstance(generated_content_section, dict):
+        return
+    pinned_target_names = tuple(
+        target_name
+        for target_name in GENERATED_CONTENT_TARGET_NAMES
+        if isinstance(generated_content_section.get(target_name), dict)
+        and generated_content_section[target_name].get("mode") == "template"
+    )
+    warning_key = (str(local_config_path), pinned_target_names)
+    if not pinned_target_names or warning_key in _WARNED_TEMPLATE_PINS:
+        return
+    _WARNED_TEMPLATE_PINS.add(warning_key)
+    logger.warning(
+        '%s pins generated_content.<target>.mode = "template" for: %s. '
+        "template mode is deprecated: agent is the default and template rendering stays "
+        "only as the failure fallback. If the pin is a leftover of an older `iar init`, "
+        "run `iar config migrate` in this repository to drop it.",
+        local_config_path,
+        ", ".join(pinned_target_names),
+    )
+
+
 def load_agent_runner_local_settings(
     repo_root_path: Path,
 ) -> AgentRunnerRepositorySettings | None:
@@ -775,6 +818,8 @@ def load_agent_runner_local_settings(
         local_settings = AgentRunnerLocalSettings(**agent_runner_section)
     except ValidationError as exc:
         raise ValueError(f"Invalid IAR local config at {local_config_path}: {exc}") from exc
+
+    _warn_deprecated_template_mode_pins(agent_runner_section, local_config_path)
 
     repository_metadata = local_settings.repository
     return AgentRunnerRepositorySettings(

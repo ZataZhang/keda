@@ -2475,7 +2475,8 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
   `timeout_seconds`，默认 120 秒）。
 - `mode = "template"`（**已废弃**）：跳过 agent，直接用 `.format()` 渲染 `title_template` 和
   `body_template`。仍被接受，但将在后续版本移除；模板的长期用途是下面的失败兜底。
-  旧版 `iar init` 钉在 `.iar.toml` 里的 `mode = "template"` 用 `iar config migrate` 清理
+  仓库 `.iar.toml` 里钉成 `mode = "template"` 的 target，加载配置时会记一条弃用警告（同一进程里
+  每份配置只提示一次）；如果它是旧版 `iar init` 留下的，用 `iar config migrate` 清理
   （见「仓库本地配置」下的迁移小节）。
 
 `output` 必须与提示词要求的回复格式一致，并且**按 target 区分**，不是全局默认：
