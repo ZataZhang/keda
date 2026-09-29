@@ -307,7 +307,7 @@ uv run --project /path/to/keda iar init --dry-run
 uv run --project /path/to/keda iar init
 ```
 
-`iar init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.iar.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们。`.iar.toml` 已存在时，`iar init` 会拒绝覆盖；确认需要重建时显式传入 `--force`。
+`iar init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.iar.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `iar init` 写入」）。`.iar.toml` 已存在时，`iar init` 会拒绝覆盖；确认需要重建时显式传入 `--force`。
 
 `iar init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `iar daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
@@ -369,12 +369,13 @@ ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`pr
 >
 > Please open `.iar.toml` and review the commands against your actual test / lint / build workflow, or paste the list into your own AI tool for suggestions. This is the final gate before the runner commits, so make sure it can actually block broken changes.
 
-生成内容节选（完整且随版本演进的字段以 `iar init --dry-run` 输出为准；回归测试会校验所有仓库级配置字段均被渲染）：
+生成内容节选（完整且随版本演进的字段以 `iar init --dry-run` 输出为准；回归测试会校验除 `generated_content` 外的所有仓库级配置字段均被渲染）：
 
 ```toml
 # IAR 本地仓库配置
-# `iar init` 会写入全部仓库级配置的默认值；这些值随后显式覆盖全局默认值。
-# 没有默认值的可选字段未写入时，才继承 config.toml / 环境变量的全局默认值。
+# `iar init` 会写入仓库级配置的默认值（generated_content 除外，见文末示例）；这些值
+# 随后显式覆盖全局默认值。没有默认值的可选字段、以及未写入的 generated_content，
+# 才继承 config.toml / 环境变量 / 代码里的全局默认值。
 # 本文件在 daemon 启动时读取一次：改完要重启 daemon 才生效（`iar run` 这类单轮
 # 命令每次调用都重新读取，无需重启）。
 # 完整字段说明见 docs/guides/agent-runner.md。
@@ -701,63 +702,6 @@ previous_findings_injection_enabled = true
 # 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .iar/ gitignore 排除）
 findings_artifact_dir = ".iar/state"
 
-# GitHub Issue / PR 内容生成（面向人类阅读，不影响实现 Agent）
-[agent_runner.generated_content]
-# 是否启用 AI 生成 Issue / PR 正文
-enabled = true
-# 生成失败时的回退方式（当前仅支持 template）
-fallback = "template"
-# 生成 prompt 的最大字符数
-max_input_chars = 20000
-# 执行生成的默认 agent：auto / claude / codex / kimi
-default_agent = "auto"
-
-# 从 PRD 生成 GitHub Issue 的模板
-[agent_runner.generated_content.issue_from_prd]
-# 是否从 PRD 生成 Issue
-enabled = true
-# 生成模式：template（模板渲染）或 agent（调用 AI）
-mode = "template"
-# 输出格式：json / markdown
-output = "json"
-# Issue 标题模板
-title_template = ""
-# Issue 正文模板，支持字符串或字符串列表
-body_template = ""
-# 执行生成的 agent
-agent = "auto"
-# 生成超时秒数
-timeout_seconds = 60
-# agent 模式使用的 prompt
-prompt = ""
-# PR 生成时是否包含 commit log
-include_commit_log = true
-# PR 生成时是否包含 diff stat
-include_diff_stat = true
-
-# 从 commit 信息生成 Draft PR 的模板
-[agent_runner.generated_content.draft_pr]
-# 是否生成 Draft PR 正文
-enabled = true
-# 生成模式：template（模板渲染）或 agent（调用 AI）
-mode = "template"
-# 输出格式：json / markdown
-output = "json"
-# PR 标题模板
-title_template = ""
-# PR 正文模板，支持字符串或字符串列表
-body_template = ""
-# 执行生成的 agent
-agent = "auto"
-# 生成超时秒数
-timeout_seconds = 60
-# agent 模式使用的 prompt
-prompt = ""
-# PR 生成时是否包含 commit log
-include_commit_log = true
-# PR 生成时是否包含 diff stat
-include_diff_stat = true
-
 # 交互式决策（iar ask）配置
 [agent_runner.interactive_decision]
 # 是否启用 iar ask
@@ -803,6 +747,13 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 ```
 
 仓库本地 `.iar.toml` 可覆盖 `labels`、`git`、`worktree`、`runner`、`memory`、`safety`、`autopilot`、`validation`、`prompts`、`pre_pr_review`、`post_pr_supervisor`、`daemon`、`generated_content`、`interactive_decision`、`repl` 和 `deliberation`。`config.toml` 继续保存全局默认值、环境级设置和 legacy registry，不应保存 token、API key 或账号凭据。
+
+#### `generated_content` 不由 `iar init` 写入
+
+脚手架只在文末留一段注释示例，不写入 `[agent_runner.generated_content]` 任何键。写入等于把当时的
+代码默认值钉死在每个仓库里，之后默认值升级（例如 `mode` 从 `template` 改为 `agent`）就传不到
+已初始化的仓库。需要偏离默认值时取消注释，**只写要改的键**，其余继续继承（合并规则见
+下文「生成模式与回退」一节）。
 
 单仓库命令的目标解析规则：
 
