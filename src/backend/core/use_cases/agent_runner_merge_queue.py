@@ -49,6 +49,7 @@ from backend.core.use_cases.agent_runner_git import (
     run_verification,
 )
 from backend.core.use_cases.agent_runner_publish import is_forbidden_path
+from backend.core.use_cases.agent_runner_pr_body_contract import has_contract_annotation
 from backend.core.use_cases.agent_runner_validation import validation_required
 from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
 from backend.core.use_cases.pr_supervisor import execute_rebase
@@ -241,7 +242,7 @@ class MergeQueueOutcome:
     """Outcome of one Issue's merge-queue attempt."""
 
     issue_number: int
-    action: str  # "merged" | "skipped_no_pr" | "skipped_no_approval" | "skipped_verifier_missing" | "skipped_already_merged" | "blocked_forbidden" | "waiting_for_checks" | "rebase_failed" | "verification_failed"
+    action: str  # "merged" | "skipped_no_pr" | "skipped_no_approval" | "skipped_verifier_missing" | "skipped_pr_contract_missing" | "skipped_already_merged" | "blocked_forbidden" | "waiting_for_checks" | "rebase_failed" | "verification_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +357,18 @@ def _process_one(
                 config.labels.verifier_passed,
             )
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_verifier_missing")
+
+    # Step 1.5: prd skill 发布契约硬门。发布端软门已在 PR body 里写入
+    # ``iar:pr-contract`` 标注（缺失锚点清单），runner 自己声明过不合规的 PR
+    # 不自动合并。与 verifier 门同样走静默 skip：不合规状态本身已在 PR body
+    # 标注块中对人可见，逐轮评论只会刷屏。存量 PR（机制上线前发布）无标注，
+    # 不受影响。
+    if has_contract_annotation(pr_context.body or ""):
+        _logger.info(
+            "Issue #%d PR body carries a pr-contract violation marker; skipping.",
+            issue.number,
+        )
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_pr_contract_missing")
 
     # Step 2: auto sign-off (idempotent)
     if config.autopilot.auto_sign_off:

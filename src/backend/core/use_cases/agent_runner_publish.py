@@ -32,6 +32,12 @@ from backend.core.use_cases.generated_content import (
     generate_pr_content,
 )
 from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
+from backend.core.use_cases.agent_runner_pr_body_contract import (
+    build_contract_annotation_block,
+    build_contract_prompt_prefix,
+    find_pr_body_contract_violations,
+    load_prd_publish_contract,
+)
 
 
 class DraftPRCreationError(RuntimeError):
@@ -257,6 +263,22 @@ def create_draft_pr(
     prd_content_generation_agent = effective_prd_overrides(issue).get("content_generation")
     if prd_content_generation_agent:
         gc_config = replace(gc_config, lifecycle_default_agent=prd_content_generation_agent)
+    # prd skill 发布契约教学：agent 模式生成前把契约参考注入 prompt（调用侧包装
+    # config，generated_content 保持与 skill 解耦）。skill 不可达时静默跳过教学，
+    # 发布端软门仍会照常校验并标注。
+    if gc_config.enabled and gc_config.draft_pr.mode == "agent":
+        publish_contract_text = load_prd_publish_contract()
+        if publish_contract_text:
+            gc_config = replace(
+                gc_config,
+                draft_pr=replace(
+                    gc_config.draft_pr,
+                    prompt=(
+                        f"{build_contract_prompt_prefix(publish_contract_text)}\n\n"
+                        f"{gc_config.draft_pr.prompt}"
+                    ),
+                ),
+            )
     pr_title = fallback_title
     pr_body = fallback_body
     if gc_config.enabled:
@@ -284,6 +306,13 @@ def create_draft_pr(
         if validation_checklist_items:
             checklist_block = build_validation_checklist_block(validation_checklist_items)
             pr_body = f"{pr_body.rstrip()}\n\n{checklist_block}\n"
+
+    # prd skill 发布契约软门：缺锚点不阻断发布，改为在正文末尾追加显式标注，
+    # 供人工审阅与合并队列硬门（parse 该 marker）消费。
+    contract_violations = find_pr_body_contract_violations(pr_body, issue.body)
+    if contract_violations:
+        contract_block = build_contract_annotation_block(contract_violations)
+        pr_body = f"{pr_body.rstrip()}\n\n{contract_block}\n"
 
     try:
         pr_url = github_client.create_draft_pr(
