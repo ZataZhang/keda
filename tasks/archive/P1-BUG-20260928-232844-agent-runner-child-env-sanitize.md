@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 >
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：已交付并归档（实现 PR #161 合并于 `fd0658d3`；§9 验收清单全部完成）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 >
 > 本 PRD 分为 **Part A · 人审层**与 **Part B · 执行器层**。
@@ -302,7 +302,7 @@ No external validation required; repository evidence and the 2026-09-28 incident
 - Depends on tasks/issues:
   - none
 - Gate type: none
-- Notes: 本文可独立实现。2026-09-29 已在 worktree 完成实现与 rv-1/rv-2/rv-3/rv-4 证据采集（见 tasks/evidence/），仅余 §9.1 人读呈递确认与两项 runner-owned gate。与 `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision` 无文件交集，可并行（注意 worktree rebase）；与 `P1-FEAT-20260928-183700-issue-live-output-cli-console` 机制无关，不互相阻塞。
+- Notes: 本文可独立实现。实现经 PR #161 合并至 main（`fd0658d3`）；rv-1/rv-2/rv-3/rv-4 证据采集于 worktree 提交 `842820df`（见 tasks/evidence/ 的 `evidence/agent-child-env-sanitize` 分支）。src/tests 实现文件在 `842820df` 与 main 间逐字节一致；`docs/guides/agent-runner.md` 因其他 PR 变更发生行号漂移，但净化小节正文未变，rv-4 契约仍成立。§9.1 人读呈递已确认、独立 verifier 已复核、验收清单全部完成，现已归档。与 `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision` 无文件交集，可并行（注意 worktree rebase）；与 `P1-FEAT-20260928-183700-issue-live-output-cli-console` 机制无关，不互相阻塞。
 
 ## 9. Acceptance Checklist
 
@@ -342,14 +342,14 @@ No external validation required; repository evidence and the 2026-09-28 incident
 - [x] 四个 agent 派发点（`run_filtered_claude_stream`、`_run_pty_stream`、两个 `relay`）全部接入净化 env
 - [x] 无配置 schema 变更、无 `SubprocessRunner`/`_run_captured_process` 行为变化、无 watchdog 改动
 - [x] `process_runner.py` 非空行数不超过 1000（`hooks/shared/check_max_file_lines.py` 通过）
-- [~] 独立 verifier review — runner-owned gate: 交付后由 runner 派发独立 verifier 按 §7.6 oracle 复核
-- [~] PRD 归档至 `tasks/archive/` — runner-owned gate: 验收清单全勾后由 runner 执行归档
+- [x] 独立 verifier review — 独立 verifier 已按 §7.6 oracle 复核（rv-1/rv-3 spawn 路径与守卫、rv-4 文档与 mkdocs strict、rv-2 周期证据），无 REJECT 项
+- [x] PRD 归档至 `tasks/archive/` — 验收清单全勾后归档
 
 #### Human-Confirmed
 
 - [x] 决策一确认：8 变量固定名单 + 硬编码、无配置覆盖
 - [x] 决策二确认：净化范围限定 agent 派发点，工具命令与 console 守护子进程不动
-- [ ] §9.1 行为呈递物已查看并接受
+- [x] §9.1 行为呈递物已查看并接受
 
 ## 10. Functional Requirements
 
@@ -394,3 +394,11 @@ No external validation required; repository evidence and the 2026-09-28 incident
 - Reason: 用户确认三项拍板（8 变量名单硬编码、无配置覆盖、process_supervisor 不纳入）后要求升级为正式 PRD。
 - Impact: 草稿保留作溯源；后续实现以本 PRD 为唯一事实源。
 - Review: 待人工验收（Interpretation 与 §2 两项决策为首次人审目标）。
+
+### 交付归档
+- Type: status
+- Before: 实现已合并（PR #161 / `fd0658d3`），但 PRD 仍在 `tasks/pending/`，§9.1 人读呈递与两项 runner-owned gate（独立 verifier review、归档）未完成。
+- After: §9.1 人读呈递已确认；独立 verifier 按 §7.6 oracle 复核 rv-1/rv-3（spawn 路径净化 + 守卫负控）、rv-4（文档契约 + mkdocs strict）、rv-2（真实周期证据）均通过；验收清单全部勾选；PRD 移至 `tasks/archive/`。
+- Reason: PRD 生命周期收尾——实现与证据均已就绪，完成最后的人审确认与复核后归档。
+- Impact: 此前的 `[~]` runner-owned gate 与 `[ ]` 人审项全部转为完成态；不改变已合并的实现代码。
+- Review: 独立 verifier 复核通过（无 REJECT 项）；用户 2026-09-29 确认呈递物后授权归档。
