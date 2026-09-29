@@ -556,3 +556,82 @@ def test_issue_list_real_cli_filters_fixture_results_by_state_and_label(
     assert '"number": 43' not in output
     assert client.calls[0]["label"] == "agent/ready"
     assert client.calls[0]["state"] == "open"
+
+
+def _wire_real_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    client: FakeGitHubClient,
+    contexts: list[_FakeContext],
+) -> None:
+    """Point the real CLI dispatch at a fake GitHub client and fixed contexts."""
+    monkeypatch.setattr("backend.api.cli.get_agent_runner_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr("backend.api.cli.create_process_runner", lambda: object())
+    monkeypatch.setattr(
+        "backend.api.cli.create_github_client", lambda _repo_path, _process_runner: client
+    )
+    monkeypatch.setattr(
+        "backend.api.cli.resolve_repository_targets", lambda *_args, **_kwargs: contexts
+    )
+
+
+def test_issue_list_default_table_output_renders_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default output (table) renders rows instead of crashing.
+
+    Regression: the table branch used to call ``render_pr_column`` with the whole
+    result and a console, while the shared helper only formats one PR cell.
+    """
+    client = FakeGitHubClient()
+    client.set_list_issues_by_label_result(
+        [_make_issue(41, "Open with PR"), _make_issue(42, "Open without PR")]
+    )
+    client.set_prs_for_repo_issue("example/repo", 41, [_make_pr(7, "merged", merged=True)])
+    client.set_prs_for_repo_issue("example/repo", 42, [])
+    _wire_real_cli(
+        monkeypatch, client, [_make_context("fixture-repo", tmp_path, github_repo="example/repo")]
+    )
+
+    exit_code = main(
+        ["issue", "list", "--repo", str(tmp_path), "--state", "open", "--label", "agent/ready"]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "#41" in output
+    assert "#42" in output
+    # The PR cell is wired to the shared formatter (whose exact `#N [state]`
+    # format is pinned by test_render_pr_column_formats_pulls); Rich may clip
+    # the rendered cell, so only the stable prefix is asserted here.
+    assert "#7" in output
+    assert "—" in output
+    # A single-repo listing stays narrow: no Repo column.
+    assert "Repo" not in output
+
+
+def test_issue_list_table_adds_repo_column_for_multiple_repos(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rows spanning repositories gain a Repo column so they stay attributable."""
+    repo_a = tmp_path / "a"
+    repo_b = tmp_path / "b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    client = FakeGitHubClient()
+    client.set_list_issues_by_label_result([_make_issue(51, "Shared fixture")])
+    _wire_real_cli(
+        monkeypatch,
+        client,
+        [
+            _make_context("repo-a", repo_a, github_repo="owner-a/repo-a"),
+            _make_context("repo-b", repo_b, github_repo="owner-b/repo-b"),
+        ],
+    )
+
+    exit_code = main(["issue", "list", "--repo", str(tmp_path)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Repo" in output
+    assert "owner-a/repo-a" in output
+    assert "owner-b/repo-b" in output
