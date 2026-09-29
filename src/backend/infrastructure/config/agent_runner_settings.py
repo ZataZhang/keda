@@ -584,8 +584,9 @@ class AgentRunnerGeneratedContentTargetSettings(BaseModel):
 
     enabled: bool = True
     # 仅接受 template / agent；非法值（如手误 "agnet"）在配置加载期直接报错，
-    # 而不是静默退回 fallback。默认 template 避免未配置时调用 AI 超时。
-    mode: Literal["template", "agent"] = "template"
+    # 而不是静默退回 fallback。默认 agent；agent 缺 prompt、超时、不可用或输出
+    # 不合格时按 ``fallback`` 退回 template 渲染，所以未配置的机器同样能产出内容。
+    mode: Literal["template", "agent"] = "agent"
     output: str = "json"
     title_template: str | list[str] = ""
     body_template: str | list[str] = ""
@@ -620,16 +621,17 @@ class AgentRunnerGeneratedContentSettings(BaseModel):
     fallback: str = "template"
     max_input_chars: int = 20000
     default_agent: str = "auto"
+    # 三个 target 默认都是 agent 模式；``output`` 必须与各自提示词的回复格式一致：
+    # issue_from_prd 的提示词回 JSON（沿用类默认），draft_pr / prd_from_issue 回 Markdown。
+    # 与 core 的 ``GeneratedContentConfig`` 默认值保持一致（有测试守卫）。
     issue_from_prd: AgentRunnerGeneratedContentTargetSettings = Field(
         default_factory=AgentRunnerGeneratedContentTargetSettings
     )
     draft_pr: AgentRunnerGeneratedContentTargetSettings = Field(
-        default_factory=AgentRunnerGeneratedContentTargetSettings
+        default_factory=lambda: AgentRunnerGeneratedContentTargetSettings(output="markdown")
     )
     prd_from_issue: AgentRunnerGeneratedContentTargetSettings = Field(
-        # PRD 生成没有可用的内置 template，唯一有意义的模式是 agent；
-        # agent 不可用时 generate_prd_content 会优雅退回 fallback。
-        default_factory=lambda: AgentRunnerGeneratedContentTargetSettings(mode="agent")
+        default_factory=lambda: AgentRunnerGeneratedContentTargetSettings(output="markdown")
     )
 
 

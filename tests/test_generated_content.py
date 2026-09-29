@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -24,7 +27,7 @@ from backend.core.use_cases.generated_content import (
     generate_issue_content,
     generate_pr_content,
 )
-from tests.conftest import FakeContentGenerator, FakeProcessRunner
+from tests.conftest import FailingContentGenerator, FakeContentGenerator, FakeProcessRunner
 
 
 def test_validate_issue_body_passes_with_anchor() -> None:
@@ -460,15 +463,9 @@ def test_generate_pr_content_agent_fallback_to_template() -> None:
     assert result.source == "template"
 
 
-def _generate_agent_pr_content(agent_output: str, *, output: str):
-    """用 ``FakeContentGenerator`` 回放 ``agent_output``，走 agent 模式的 PR 内容生成。"""
-    config = GeneratedContentConfig(
-        enabled=True,
-        draft_pr=GeneratedContentTargetConfig(
-            enabled=True, mode="agent", output=output, prompt="Generate PR"
-        ),
-    )
-    context = PrContext(
+def _pr_context() -> PrContext:
+    """最小 PR 上下文：Issue #42，标题 ``Title``。"""
+    return PrContext(
         issue_number=42,
         issue_title="Title",
         issue_body="Body",
@@ -479,9 +476,35 @@ def _generate_agent_pr_content(agent_output: str, *, output: str):
         diff_stat="",
         git_diff_stat="",
     )
+
+
+def _issue_context() -> IssueContext:
+    """最小 Issue 上下文：PRD 路径 ``tasks/example.md``，标题 ``PRD Title``。"""
+    return IssueContext(
+        issue_type="feature",
+        title="Title",
+        prd_title="PRD Title",
+        relative_prd_path="tasks/example.md",
+        acceptance_items="",
+        prd_text="",
+        prd_introduction="",
+        prd_goals="",
+        prd_requirement_shape="",
+        prd_change_impact_tree="",
+    )
+
+
+def _generate_agent_pr_content(agent_output: str, *, output: str):
+    """用 ``FakeContentGenerator`` 回放 ``agent_output``，走 agent 模式的 PR 内容生成。"""
+    config = GeneratedContentConfig(
+        enabled=True,
+        draft_pr=GeneratedContentTargetConfig(
+            enabled=True, mode="agent", output=output, prompt="Generate PR"
+        ),
+    )
     return generate_pr_content(
         config=config,
-        context=context,
+        context=_pr_context(),
         fallback_title="Fallback",
         fallback_body="Fallback Body",
         generator=FakeContentGenerator(response=agent_output),
@@ -643,3 +666,174 @@ def test_resolve_generation_agent_auto_resolves_to_claude() -> None:
     assert _resolve_generation_agent("auto", "codex") == "codex"
     assert _resolve_generation_agent("kimi", "auto") == "kimi"
     assert _resolve_generation_agent("claude", "codex") == "claude"
+
+
+# ---------------------------------------------------------------------------
+# agent 是默认路径：失败必须落到 template / fallback，而不是抛出或静默丢弃
+# ---------------------------------------------------------------------------
+
+
+_AGENT_RUNTIME_ERRORS = pytest.mark.parametrize(
+    "runtime_error",
+    [subprocess.TimeoutExpired(cmd="claude", timeout=120), FileNotFoundError("claude")],
+    ids=["timeout", "cli-missing"],
+)
+
+
+@_AGENT_RUNTIME_ERRORS
+def test_generate_pr_content_agent_runtime_error_falls_back_to_template(
+    runtime_error: Exception, caplog: pytest.LogCaptureFixture
+) -> None:
+    """agent 超时或 CLI 缺失不得抛出：按 fallback=template 渲染模板并留下警告。"""
+    generator = FailingContentGenerator(runtime_error)
+    config = GeneratedContentConfig(
+        draft_pr=GeneratedContentTargetConfig(
+            mode="agent",
+            output="markdown",
+            prompt="Generate PR",
+            title_template="[Template] {issue_title}",
+            body_template="Closes #{issue_number}\n\nTemplate PR body.",
+        ),
+    )
+    with caplog.at_level(logging.WARNING, logger="backend.core.use_cases.generated_content"):
+        generated_pr_content = generate_pr_content(
+            config=config,
+            context=_pr_context(),
+            fallback_title="Fallback",
+            fallback_body="Fallback Body",
+            generator=generator,
+            cwd=Path("."),
+        )
+    assert len(generator.calls) == 1
+    assert generated_pr_content.source == "template"
+    assert generated_pr_content.title == "[Template] Title"
+    assert "did not finish" in caplog.text
+    assert "draft_pr: agent produced no usable content" in caplog.text
+
+
+@_AGENT_RUNTIME_ERRORS
+def test_generate_issue_content_agent_runtime_error_falls_back_to_template(
+    runtime_error: Exception,
+) -> None:
+    """Issue 生成同样吸收 agent 超时 / CLI 缺失，退回 template 渲染。"""
+    generator = FailingContentGenerator(runtime_error)
+    config = GeneratedContentConfig(
+        issue_from_prd=GeneratedContentTargetConfig(
+            mode="agent",
+            prompt="Generate Issue",
+            title_template="[Template] {prd_title}",
+            body_template="- PRD path: `{relative_prd_path}`\n\nTemplate body.",
+        ),
+    )
+    generated_issue_content = generate_issue_content(
+        config=config,
+        context=_issue_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=generator,
+        cwd=Path("."),
+    )
+    assert len(generator.calls) == 1
+    assert generated_issue_content.source == "template"
+    assert generated_issue_content.title == "[Template] PRD Title"
+
+
+def test_generate_pr_content_agent_without_prompt_never_runs_agent() -> None:
+    """prompt 为空（未配置也没播种）时不拉起 agent，直接走 template 兜底。"""
+    generator = FakeContentGenerator(response="Closes #42\n\nMust not be used.")
+    config = GeneratedContentConfig(
+        draft_pr=GeneratedContentTargetConfig(
+            mode="agent",
+            output="markdown",
+            prompt="",
+            title_template="[Template] {issue_title}",
+            body_template="Closes #{issue_number}\n\nTemplate PR body.",
+        ),
+    )
+    generated_pr_content = generate_pr_content(
+        config=config,
+        context=_pr_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=generator,
+        cwd=Path("."),
+    )
+    assert generator.calls == []
+    assert generated_pr_content.source == "template"
+    assert "Must not be used" not in generated_pr_content.body
+
+
+def test_generate_issue_content_agent_without_prompt_never_runs_agent() -> None:
+    """Issue 生成在 prompt 为空时同样不拉起 agent。"""
+    generator = FakeContentGenerator(response="{}")
+    config = GeneratedContentConfig(
+        issue_from_prd=GeneratedContentTargetConfig(
+            mode="agent",
+            prompt="",
+            title_template="[Template] {prd_title}",
+            body_template="- PRD path: `{relative_prd_path}`\n\nTemplate body.",
+        ),
+    )
+    generated_issue_content = generate_issue_content(
+        config=config,
+        context=_issue_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=generator,
+        cwd=Path("."),
+    )
+    assert generator.calls == []
+    assert generated_issue_content.source == "template"
+
+
+def test_default_config_generates_pr_with_agent_markdown() -> None:
+    """不写 mode / output：默认配置补上 prompt 就走 agent + markdown。"""
+    default_draft_pr = GeneratedContentConfig().draft_pr
+    config = GeneratedContentConfig(draft_pr=replace(default_draft_pr, prompt="Generate PR"))
+    generated_pr_content = generate_pr_content(
+        config=config,
+        context=_pr_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=FakeContentGenerator(response="# Add contract\n\nCloses #42\n\nDone."),
+        cwd=Path("."),
+    )
+    assert generated_pr_content.source == "agent"
+    assert generated_pr_content.title == "Add contract"
+
+
+def test_default_config_generates_issue_with_agent_json() -> None:
+    """issue_from_prd 默认 agent + json：与它的 JSON 提示词匹配，不需要额外配置 output。"""
+    default_issue_from_prd = GeneratedContentConfig().issue_from_prd
+    config = GeneratedContentConfig(
+        issue_from_prd=replace(default_issue_from_prd, prompt="Generate Issue")
+    )
+    agent_json_output = json.dumps(
+        {"title": "AI Title", "body": "- PRD path: `tasks/example.md`\n\nDetails."}
+    )
+    generated_issue_content = generate_issue_content(
+        config=config,
+        context=_issue_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=FakeContentGenerator(response=agent_json_output),
+        cwd=Path("."),
+    )
+    assert generated_issue_content.source == "agent"
+    assert generated_issue_content.title == "AI Title"
+
+
+def test_parse_json_output_warns_when_agent_replies_with_markdown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """output 与提示词格式错配（json 配 Markdown 回复）曾静默退回 template，必须留痕。"""
+    with caplog.at_level(logging.WARNING, logger="backend.core.use_cases.generated_content"):
+        assert _parse_json_output("# Add contract\n\nCloses #42") == ("", "")
+    assert "not a JSON object" in caplog.text
+
+
+def test_parse_json_output_is_quiet_for_empty_output(caplog: pytest.LogCaptureFixture) -> None:
+    """agent 没有输出时上游已记过失败原因，解析层不再重复告警。"""
+    with caplog.at_level(logging.WARNING, logger="backend.core.use_cases.generated_content"):
+        assert _parse_json_output("") == ("", "")
+    assert caplog.text == ""

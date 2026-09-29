@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,7 @@ from backend.core.use_cases.generated_prd_content import (
     load_prd_skill_spec,
     resolve_prd_skill_path,
 )
-from tests.conftest import FakeContentGenerator
+from tests.conftest import FailingContentGenerator, FakeContentGenerator
 
 
 def test_build_prd_context_collects_issue_and_comments() -> None:
@@ -343,3 +344,18 @@ def test_generate_prd_content_agent_fallback_to_template() -> None:
     )
     assert "- [ ] template item" in result.text
     assert result.source == "template"
+
+
+def test_generate_prd_content_agent_timeout_uses_fallback() -> None:
+    """agent 超时不得抛出：没有可用模板时退回 fallback PRD，而不是中断 rework-prd。"""
+    generator = FailingContentGenerator(subprocess.TimeoutExpired(cmd="claude", timeout=120))
+    result = generate_prd_content(
+        config=_agent_prd_config(),
+        context=_prd_context(),
+        fallback_prd_text="fallback",
+        generator=generator,
+        cwd=Path("."),
+    )
+    assert len(generator.calls) == 1
+    assert result.text == "fallback"
+    assert result.source == "fallback"

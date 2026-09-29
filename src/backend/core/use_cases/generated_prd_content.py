@@ -374,8 +374,8 @@ def generate_prd_content(
 
     1. 如果 ``generated_content`` 被禁用，直接返回 fallback。
     2. 根据 ``target.mode`` 选择生成策略：
-       - ``"template"``：使用 ``_render_template`` 渲染正文模板。
-       - ``"agent"``：调用 AI agent 生成内容。
+       - ``"agent"``（默认）：调用 AI agent 生成内容。
+       - ``"template"``（已废弃）：跳过 agent，直接用 ``_render_template`` 渲染正文模板。
     3. 验证输出是否满足 ``_validate_prd_output``。
     4. 验证通过则返回生成结果，source 标记为 ``target.mode``。
     5. 如果 agent 模式失败且 ``config.fallback == "template"``，尝试 template 兜底。

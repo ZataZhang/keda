@@ -7,14 +7,17 @@
 2. **PR 内容生成**（``generate_pr_content``）：根据 Issue 信息、提交日志和
    diff 统计生成 PR 标题和正文，用于 ``publish_changes`` 工作流。
 
-两条路径都遵循相同的三级级联策略：
+PRD 生成在 :mod:`backend.core.use_cases.generated_prd_content`，复用本模块的
+渲染、截断与 agent 运行 helper。
 
-- **Agent 模式**：调用本地 AI agent（如 Claude/Codex/Kimi）生成内容。
-- **Template 模式**：使用 ``.format()`` 模板渲染，变量来自上下文对象。
-- **Hard fallback**：当上述模式均失败或禁用时，返回调用方提供的 fallback 内容。
+两条路径都遵循相同的级联策略：
 
-特别地，当主模式为 agent 且 ``config.fallback == "template"`` 时，
-agent 失败后还会尝试 template 模式作为中间兜底，最后才退回 hard fallback。
+- **Agent 模式**（默认）：调用本地 AI agent（如 Claude/Codex/Kimi）生成内容。
+  agent 缺 prompt、超时、不可执行或输出不合格都不会抛出，而是落到下一级。
+- **Template 渲染**：使用 ``.format()`` 模板渲染，变量来自上下文对象。它是 agent
+  失败后的中间兜底（``config.fallback == "template"``）；``mode = "template"`` 已废弃，
+  只表示跳过 agent 这一步。
+- **Hard fallback**：当上述方式均失败或禁用时，返回调用方提供的 fallback 内容。
 
 所有模板渲染通过 ``_render_template`` 统一处理，支持 ``IssueContext``
 和 ``PrContext`` 两种上下文对象。
@@ -25,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -439,8 +443,9 @@ def _run_content_generator(
 ) -> str:
     """运行内容生成器并返回原始输出文本。
 
-    如果 agent 进程返回非零退出码，记录警告日志并返回空字符串，
-    让调用方可以回退到 fallback 内容。
+    prompt 为空（未配置也没有播种）、agent 进程返回非零退出码、超时或无法执行
+    （如 CLI 未安装）时，记录警告日志并返回空字符串，让调用方回退到 template /
+    fallback 内容——内容生成失败不能中断 Issue 创建或 PR 发布。
 
     Args:
         generator: 内容生成器接口实例。
@@ -450,14 +455,21 @@ def _run_content_generator(
         timeout_seconds: agent 执行超时时间（秒）。
 
     Returns:
-        agent 的标准输出（已去除首尾空白）。执行失败时返回空字符串。
+        agent 的标准输出（已去除首尾空白）。未执行或执行失败时返回空字符串。
     """
-    result = generator.generate(
-        agent_name=agent_name,
-        prompt=prompt,
-        cwd=cwd,
-        timeout=timeout_seconds,
-    )
+    if not prompt.strip():
+        _logger.warning("Content generator '%s' skipped: no prompt configured", agent_name)
+        return ""
+    try:
+        result = generator.generate(
+            agent_name=agent_name,
+            prompt=prompt,
+            cwd=cwd,
+            timeout=timeout_seconds,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        _logger.warning("Content generator '%s' did not finish: %s", agent_name, exc)
+        return ""
     if result.return_code != 0:
         _logger.warning(
             "Content generator exited with code %d: %s",
@@ -478,7 +490,8 @@ def _parse_json_output(output_text: str) -> tuple[str, str]:
         output_text: agent 输出的原始文本。
 
     Returns:
-        ``(title, body)`` 元组。解析失败时返回 ``("", "")``。
+        ``(title, body)`` 元组。解析失败时返回 ``("", "")``，并对非空输出记录警告
+        （``output`` 配成 json 而提示词回 Markdown 时，否则会静默退回 template）。
     """
     text = output_text.strip()
     # 处理被 Markdown 代码块包裹的情况（例如 ```json\n{...}\n```）
@@ -494,6 +507,8 @@ def _parse_json_output(output_text: str) -> tuple[str, str]:
             return title, body
     except json.JSONDecodeError:
         pass
+    if text:
+        _logger.warning("Agent output is not a JSON object with title/body: %.80r", text)
     return "", ""
 
 
@@ -541,8 +556,8 @@ def generate_issue_content(
 
     1. 如果 ``generated_content`` 被禁用，直接返回 fallback。
     2. 根据 ``target.mode`` 选择生成策略：
-       - ``"template"``：使用 ``_try_render_templates`` 渲染模板。
-       - ``"agent"``：调用 AI agent，然后根据 ``target.output`` 解析 JSON 或 Markdown。
+       - ``"agent"``（默认）：调用 AI agent，然后根据 ``target.output`` 解析 JSON 或 Markdown。
+       - ``"template"``（已废弃）：跳过 agent，直接用 ``_try_render_templates`` 渲染模板。
     3. 截断标题和正文至安全长度，验证正文是否包含 ``- PRD path:`` 锚点。
     4. 验证通过则返回生成结果，source 标记为 ``target.mode``。
     5. 如果 agent 模式失败且 ``config.fallback == "template"``，尝试 template 兜底。
@@ -602,6 +617,7 @@ def generate_issue_content(
 
     # Agent 失败：按配置尝试 template 中间兜底。
     if target.mode == "agent" and config.fallback == "template":
+        _logger.warning("issue_from_prd: agent produced no usable content, rendering templates")
         generated_title, generated_body = _try_render_templates(target, context)
         if generated_title:
             generated_title = generated_title[:_MAX_TITLE_LENGTH]
@@ -799,6 +815,7 @@ def generate_pr_content(
 
     # Agent 失败：按配置尝试 template 中间兜底。
     if target.mode == "agent" and config.fallback == "template":
+        _logger.warning("draft_pr: agent produced no usable content, rendering templates")
         generated_title, generated_body = _try_render_templates(target, context)
         if generated_title:
             generated_title = generated_title[:_MAX_TITLE_LENGTH]

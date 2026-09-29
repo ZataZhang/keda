@@ -544,10 +544,26 @@ def test_merge_repository_config_overrides_generated_content() -> None:
     assert merged.generated_content.issue_from_prd.mode == "agent"
 
 
-def test_generated_content_target_defaults_to_template_mode() -> None:
-    """Generated-content targets should default to template mode for reliability."""
-    target = AgentRunnerGeneratedContentTargetSettings()
-    assert target.mode == "template"
+def test_generated_content_targets_default_to_agent_mode() -> None:
+    """三个生成 target 默认都是 agent；output 必须与各自提示词的回复格式一致。
+
+    issue_from_prd 的提示词回 JSON，draft_pr / prd_from_issue 回 Markdown——
+    output 错配会让 agent 输出被静默丢弃并退回 template。
+    """
+    generated_content = AgentRunnerGeneratedContentSettings()
+    assert AgentRunnerGeneratedContentTargetSettings().mode == "agent"
+    assert {
+        target_name: (target.mode, target.output)
+        for target_name, target in (
+            ("issue_from_prd", generated_content.issue_from_prd),
+            ("draft_pr", generated_content.draft_pr),
+            ("prd_from_issue", generated_content.prd_from_issue),
+        )
+    } == {
+        "issue_from_prd": ("agent", "json"),
+        "draft_pr": ("agent", "markdown"),
+        "prd_from_issue": ("agent", "markdown"),
+    }
 
 
 def test_merge_repository_config_ignores_empty_template_overrides() -> None:

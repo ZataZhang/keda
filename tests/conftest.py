@@ -330,6 +330,25 @@ class FakeContentGenerator(IContentGenerator):
         )
 
 
+class FailingContentGenerator(FakeContentGenerator):
+    """``generate`` 直接抛出 ``error``，模拟 agent 超时或 CLI 未安装。"""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    def generate(
+        self,
+        agent_name: str,
+        prompt: str,
+        *,
+        cwd: Path,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        self.calls.append([agent_name, prompt[:50]])
+        raise self.error
+
+
 class FakeProcessRunner(IProcessRunner):
     """In-memory process runner for tests."""
 
