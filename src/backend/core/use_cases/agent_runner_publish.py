@@ -33,6 +33,7 @@ from backend.core.use_cases.generated_content import (
 )
 from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
 from backend.core.use_cases.agent_runner_pr_body_contract import (
+    append_missing_contract_anchors,
     build_contract_annotation_block,
     build_contract_prompt_prefix,
     find_pr_body_contract_violations,
@@ -281,6 +282,7 @@ def create_draft_pr(
             )
     pr_title = fallback_title
     pr_body = fallback_body
+    is_agent_authored_body = False
     if gc_config.enabled:
         gc_context = build_pr_context(
             issue=issue,
@@ -300,6 +302,12 @@ def create_draft_pr(
         )
         pr_title = generated.title
         pr_body = generated.body
+        is_agent_authored_body = generated.source == "agent"
+
+    # 确定性正文（fallback / body_template）没有 agent 可教，契约锚点由代码补齐；
+    # agent 撰写的正文缺锚点则交给下面的软门标注，暴露"agent 无视教学"。
+    if not is_agent_authored_body:
+        pr_body = append_missing_contract_anchors(pr_body, issue.body)
 
     if validation_required(issue.body, config):
         validation_checklist_items = extract_realistic_validation_items(issue.body)

@@ -269,7 +269,7 @@ prompt**（带长度上限，缺省 20 000 字符）。超过上限会尾部截�
 
 runner 发布的 draft PR 正文要对齐 prd skill `references/pr-evidence-and-merge-acceptance.md`
 要求的 PR-Native Acceptance 结构。契约只作用于 Issue body 带 `PRD path:` 锚点的
-PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分三层，全部落在
+PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分四层，全部落在
 `agent_runner_pr_body_contract.py`：
 
 1. **prompt 教学**：draft PR 正文以 agent 模式生成时，`create_draft_pr` 会把 skill
@@ -277,11 +277,19 @@ PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分三层，全部�
    与 skill 解耦）。教学要求 agent 在正文里写 `- PRD: <relative prd path>` 行和
    `<!-- iar:merge-acceptance version=1 -->`（"合并即接受"声明）hidden marker。
    skill 或参考文档不可达时静默跳过教学。
-2. **发布端软门**：正文生成后（含降级 fallback body）做可 grep 锚点校验；缺失
-   时**不阻断发布**，而是在正文末尾追加 `<!-- iar:pr-contract version=1 missing=... -->`
-   标注块，列出缺失锚点并说明合并队列将拒绝自动合并。降级产物从此"缺什么"
-   对人可见，而不是像历史 PR 那样静默缺件。
-3. **合并端硬门**：autopilot 合并队列在 verifier 门禁之后消费发布端写下的
+2. **确定性正文补锚点**：正文不是 agent 写的——`fallback` 兜底正文（生成关闭、
+   agent 失败，或产出不含 `Closes #N`）与 `template` 渲染出的 `body_template`
+   （含 `fallback = "template"` 的中间兜底）——教学无从谈起，由
+   `append_missing_contract_anchors` 在末尾直接补一个
+   `## Human Acceptance And PRD Archive` 小节：`- PRD: <path>` 行，加
+   merge-acceptance marker 与"合并即接受"声明句（形态取自 skill 参考文档，只指向
+   PRD，不内联决策与可见结果清单）。只补缺失的锚点，重复执行不变。
+3. **发布端软门**：正文（补锚点之后）做可 grep 锚点校验；缺失时**不阻断发布**，
+   而是在正文末尾追加 `<!-- iar:pr-contract version=1 missing=... -->` 标注块，列出
+   缺失锚点并说明合并队列将拒绝自动合并。经第 2 层之后仍缺锚点的只剩
+   **agent 撰写的正文无视了教学**——标注正好暴露这个信号，agent 正文不会被静默
+   补齐，"缺什么"对人可见，而不是像历史 PR 那样静默缺件。
+4. **合并端硬门**：autopilot 合并队列在 verifier 门禁之后消费发布端写下的
    `iar:pr-contract` 标注——带标注的 PR 走 `skipped_pr_contract_missing` 静默
    跳过（不合规状态已在 PR body 标注块对人可见，逐轮评论只会刷屏）。机制
    上线前发布的存量 PR 无标注，不受影响。
@@ -2502,6 +2510,9 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
 
 - Issue body 必须包含精确行：`- PRD path: \`<relative_prd_path>\``
 - PR body 必须包含：`Closes #<issue_number>`
+- PR 标题不能只是 `Closes #<issue_number>` 这类 closing 引用行：`output = "markdown"` 时
+  首个非空行会被解析成标题，而约定的首行恰是 `Closes #N`；这类标题作废，回退到
+  `[Agent] <issue 标题>`。
 
 ### 安全边界
 

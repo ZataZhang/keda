@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -417,7 +418,8 @@ def test_generate_pr_content_agent_mode_markdown() -> None:
         generator=generator,
         cwd=Path("."),
     )
-    assert result.title == "Closes #42"
+    # 首行 ``Closes #42`` 是正文锚点而非标题，标题落到 fallback_title。
+    assert result.title == "Fallback"
     assert "Closes #42" in result.body
     assert result.source == "agent"
 
@@ -460,6 +462,66 @@ def test_generate_pr_content_agent_fallback_to_template() -> None:
     assert "Closes #42" in result.body
     assert "Template PR body." in result.body
     assert result.source == "template"
+
+
+def _generate_agent_pr_content(agent_output: str, *, output: str):
+    """用 ``FakeContentGenerator`` 回放 ``agent_output``，走 agent 模式的 PR 内容生成。"""
+    config = GeneratedContentConfig(
+        enabled=True,
+        draft_pr=GeneratedContentTargetConfig(
+            enabled=True, mode="agent", output=output, prompt="Generate PR"
+        ),
+    )
+    context = PrContext(
+        issue_number=42,
+        issue_title="Title",
+        issue_body="Body",
+        branch="issue-42",
+        base_branch="main",
+        commit_log="",
+        commit_messages="",
+        diff_stat="",
+        git_diff_stat="",
+    )
+    return generate_pr_content(
+        config=config,
+        context=context,
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=FakeContentGenerator(response=agent_output),
+        cwd=Path("."),
+    )
+
+
+def test_generate_pr_content_markdown_keeps_real_title_before_closes() -> None:
+    """首行是真实标题（Closes 在后）时标题原样保留，只有纯 closing 引用行才作废。"""
+    generated_pr_content = _generate_agent_pr_content(
+        "# Add PR contract\n\nCloses #42\n\n## Summary\n\nDone.", output="markdown"
+    )
+    assert generated_pr_content.title == "Add PR contract"
+    assert generated_pr_content.source == "agent"
+
+
+@pytest.mark.parametrize(
+    ("agent_title", "expected_title"),
+    [
+        ("Closes #42", "Fallback"),
+        ("closes: #42.", "Fallback"),
+        ("Fixes #42", "Fallback"),
+        ("Resolved #42", "Fallback"),
+        ("Fix #42 crash on startup", "Fix #42 crash on startup"),
+        ("[Agent] Closes #42 follow-up", "[Agent] Closes #42 follow-up"),
+    ],
+)
+def test_generate_pr_content_closing_reference_title_uses_fallback_title(
+    agent_title: str, expected_title: str
+) -> None:
+    """只含 closing keyword + Issue 引用的标题作废，夹带其他文字的标题保留。"""
+    agent_json_output = json.dumps({"title": agent_title, "body": "Closes #42\n\nBody."})
+    generated_pr_content = _generate_agent_pr_content(agent_json_output, output="json")
+    assert generated_pr_content.title == expected_title
+    assert generated_pr_content.body == "Closes #42\n\nBody."
+    assert generated_pr_content.source == "agent"
 
 
 def test_build_issue_context_extracts_sections() -> None:
