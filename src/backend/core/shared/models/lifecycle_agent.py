@@ -8,7 +8,7 @@ pydantic 设置模型、core 的冻结配置模型、解析函数与 console API
 （``LIFECYCLE_AGENT_ENTRY_GROUPS``）：九个阶段不在同一条流水线上，分组
 常量声明"哪些阶段共享同一次 claim / 消费点"，console 只读视图逐行下发给
 界面，前端不持有第二份键 -> 组映射。导入期校验九键恰好各属一组、不重不漏、
-无空组。
+无空组、组内顺序沿用键序，且每键都有非空触发时机。
 
 矩阵把流水线的九个生命周期阶段映射到"该阶段用哪个 agent"，取值域是：
 
@@ -138,11 +138,17 @@ LIFECYCLE_AGENT_ENTRY_BY_KEY: Mapping[str, LifecycleAgentEntryGroup] = {
 def _validate_entry_groups() -> None:
     """导入期校验分组完整性：九键恰好各属一组，不重不漏、无未知键、无空组。
 
-    与闭集"写错键在配置加载期直接报错"的风格一致：分组写错在导入本模块时
-    立即抛错，不静默放行。
+    另外守卫两条写在文档里的展示契约，同样遵循"写错在导入本模块时立即抛错，
+    不静默放行"的闭集风格：
+
+    - 组内键顺序沿用 ``LIFECYCLE_AGENT_KEYS`` 的相对顺序（与
+      ``LifecycleAgentEntryGroup.keys`` 的 docstring 一致）；
+    - 每个键在 ``LIFECYCLE_AGENT_TRIGGERS`` 里都有非空触发时机（只读视图
+      逐行下发 ``trigger``，缺键不应等到视图构建期才 ``KeyError``）。
 
     Raises:
-        ValueError: 存在未知键、重复键、未分组的键或空组。
+        ValueError: 存在未知键、重复键、未分组的键、空组、组内键顺序漂移，
+            或缺失 / 为空的触发时机。
     """
     empty_groups = [
         entry_group.entry for entry_group in LIFECYCLE_AGENT_ENTRY_GROUPS if not entry_group.keys
@@ -174,6 +180,28 @@ def _validate_entry_groups() -> None:
     if missing_keys:
         raise ValueError(
             f"LIFECYCLE_AGENT_ENTRY_GROUPS 未给以下生命周期键分组: {', '.join(missing_keys)}。"
+        )
+    for entry_group in LIFECYCLE_AGENT_ENTRY_GROUPS:
+        expected_group_keys = tuple(
+            lifecycle_key
+            for lifecycle_key in LIFECYCLE_AGENT_KEYS
+            if lifecycle_key in entry_group.keys
+        )
+        if entry_group.keys != expected_group_keys:
+            raise ValueError(
+                "LIFECYCLE_AGENT_ENTRY_GROUPS 组内键顺序必须沿用 "
+                "LIFECYCLE_AGENT_KEYS 的相对顺序: "
+                f"{entry_group.entry} 现为 {entry_group.keys}，应为 {expected_group_keys}。"
+            )
+    triggers_missing = [
+        lifecycle_key
+        for lifecycle_key in LIFECYCLE_AGENT_KEYS
+        if not LIFECYCLE_AGENT_TRIGGERS.get(lifecycle_key)
+    ]
+    if triggers_missing:
+        raise ValueError(
+            "LIFECYCLE_AGENT_TRIGGERS 缺少以下生命周期键的非空触发时机: "
+            f"{', '.join(triggers_missing)}。"
         )
 
 
