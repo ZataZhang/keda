@@ -70,17 +70,21 @@ def _print_migration_report(migration_result: ConfigMigrationResult, *, dry_run:
         ):
             console.print(diff_line, markup=False, highlight=False, soft_wrap=True)
 
+    # 结尾几行带路径：soft_wrap 让长路径保持完整，方便复制。
     if not migration_result.changed and not migration_result.kept_pins:
         console.print(
             f"[dim]Nothing to migrate: {migration_result.config_path} has no values pinned "
-            "by an older `iar init`.[/]"
+            "by an older `iar init`.[/]",
+            soft_wrap=True,
         )
     elif not migration_result.changed:
         console.print("[dim]Nothing was changed.[/]")
     elif dry_run:
         console.print("[cyan]Dry run: nothing was written.[/]")
     else:
-        console.print(f"[green]Wrote migrated config:[/] {migration_result.config_path}")
+        console.print(
+            f"[green]Wrote migrated config:[/] {migration_result.config_path}", soft_wrap=True
+        )
 
 
 def run_config_migrate_command(ctx: ParsedCommandContext) -> int:

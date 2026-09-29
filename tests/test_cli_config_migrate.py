@@ -84,7 +84,8 @@ def test_config_migrate_rewrites_the_config_and_is_idempotent(
 
     first_output = capsys.readouterr().out
     assert "Removed 5 value(s)" in first_output
-    assert "Wrote migrated config:" in first_output
+    # 长路径不能被折行：测试临时目录本身就比 80 列宽。
+    assert f"Wrote migrated config: {config_path.resolve()}" in first_output
     assert config_path.read_text(encoding="utf-8") == CONFIG_WITHOUT_PINS
 
     assert main(["config", "migrate", "--repo", str(repo_path)]) == 0
