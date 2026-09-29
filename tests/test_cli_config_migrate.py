@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,6 +9,7 @@ import pytest
 from backend.api.cli import main
 from backend.api.cli_parser import build_parser
 from backend.api.cli_typer_app import app, config_app
+from tests.support.agent_runner import init_git_repo
 
 LEGACY_PINNED_CONFIG = """\
 [agent_runner.repository]
@@ -47,9 +47,7 @@ def _isolated_global_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def _init_git_repository(tmp_path: Path, name: str, config_text: str | None = None) -> Path:
-    repo_path = tmp_path / name
-    repo_path.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo_path, check=True)
+    repo_path = init_git_repo(tmp_path / name)
     if config_text is not None:
         (repo_path / ".iar.toml").write_text(config_text, encoding="utf-8")
     return repo_path
