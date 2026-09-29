@@ -52,6 +52,9 @@ _logger = logging.getLogger(__name__)
 # GitHub Issue 标题的最大长度限制。超过此长度会被截断并追加 "..."
 _MAX_TITLE_LENGTH = 256
 
+# 整行只有 GitHub closing keyword + Issue 引用（如 ``Closes #42``）是正文锚点，不是标题。
+_CLOSING_REFERENCE_TITLE = re.compile(r"(?:close|fix|resolve)(?:e?[sd])?:?\s*#\d+\.?", re.I)
+
 
 # ---------------------------------------------------------------------------
 # 上下文对象
@@ -1178,8 +1181,10 @@ def generate_pr_content(
         else:
             generated_title, generated_body = _parse_markdown_output(output_text)
 
-    if generated_title:
-        generated_title = generated_title[:_MAX_TITLE_LENGTH]
+    # markdown 首个非空行按约定是 ``Closes #N``，会被解析成标题；此类标题作废，落到 fallback_title。
+    if _CLOSING_REFERENCE_TITLE.fullmatch(generated_title):
+        generated_title = ""
+    generated_title = generated_title[:_MAX_TITLE_LENGTH]
     if generated_body:
         generated_body = generated_body[: config.max_input_chars]
 
