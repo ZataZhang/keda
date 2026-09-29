@@ -78,6 +78,9 @@ def test_packaged_skill_documents_issue_output_paths() -> None:
     assert "实时输出" in text
 
 
+_PLACEHOLDER = re.compile(r"<[^>]+>")
+
+
 def _flags_of(tokens: list[str]) -> set[str]:
     """提取命令 token 序列里的 flag 名（去掉 ``=值`` 部分）。"""
     return {token.split("=")[0] for token in tokens if token.startswith("-")}
@@ -102,11 +105,16 @@ def test_packaged_skill_command_examples_match_cli_help() -> None:
         ("registry", "stop"): set(),
         ("registry", "list"): set(),
         ("daemon", "status"): set(),
+        ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
+        ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
+        ("worktree", "path"): {"--branch"},
     }
     for example in examples:
         tokens = example.split()
         subcommand = tuple(
-            token for token in tokens[1:] if not token.startswith("-") and token != "<path>"
+            token
+            for token in tokens[1:]
+            if not token.startswith("-") and not _PLACEHOLDER.fullmatch(token)
         )
         # ``iar --help`` 这类纯 flag 形式没有子命令，跳过；``start|stop``
         # 这类紧凑写法先按分隔符拆开再逐个匹配。
@@ -144,3 +152,28 @@ def test_packaged_skill_keeps_conflict_protection_guidance() -> None:
     text = _skill_text()
     assert "preserved by default" in text
     assert "--force" in text
+
+
+def test_packaged_skill_documents_triage_paths() -> None:
+    """Triage 章节必须覆盖标签语义、卡住时的判读与恢复动作。"""
+    text = _skill_text()
+    # 标签语义：运维据此决定下一步，缺一个就会靠猜。
+    for label in (
+        "agent/ready",
+        "agent/waiting",
+        "agent/running",
+        "agent/supervising",
+        "agent/review",
+        "agent/failed",
+        "agent/blocked",
+        "validation/verifier-passed",
+    ):
+        assert label in text, f"SKILL.md 未说明 {label} 的含义"
+    # 无输出/卡住时必须能读出「重试 → 换 agent」这条链，而不是直接报结论。
+    assert "Attempt History" in text
+    assert "max_recovery_attempts" in text
+    assert "agent_fallback_order" in text
+    # 恢复动作：发布失败用 recover，回队列用标签，代码位置用 worktree path。
+    assert "iar recover --issue <N>" in text
+    assert "agent/ready --remove-label agent/failed" in text
+    assert "iar worktree path --branch issue-<N>" in text
