@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 from backend.core.shared.models.agent_runner import (
     AppConfig as CoreAppConfig,
+    GeneratedContentConfig as CoreGeneratedContentConfig,
     LabelConfig as CoreLabelConfig,
     PostPrSupervisorConfig,
     PrePrReviewConfig,
@@ -20,6 +22,7 @@ from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
     AgentRunnerDeliberationSettings,
+    AgentRunnerGeneratedContentSettings,
     AgentRunnerLabelSettings,
     AgentRunnerPostPrSupervisorSettings,
     AgentRunnerPrePrReviewSettings,
@@ -221,6 +224,36 @@ def test_iar_toml_key_table_documents_closeout_settings() -> None:
     assert "runner.closeout_agent_enabled" in _IAR_FIELD_COMMENTS
     assert "runner.closeout_timeout_seconds" in _IAR_FIELD_COMMENTS
     assert "runner.closeout_visual_timeout_seconds" in _IAR_FIELD_COMMENTS
+
+
+def test_generated_content_settings_defaults_match_core_defaults() -> None:
+    """生成内容的默认值在 pydantic settings、factory 映射、core dataclass 三处必须一致。
+
+    ``mode`` / ``output`` 按 target 区分（issue_from_prd 回 JSON，其余回 Markdown），
+    任何一处漏改都会让 agent 输出被静默丢弃。
+    """
+    from backend.engines.agent_runner.factory_config_builder import (
+        _build_generated_content_config,
+    )
+
+    settings_derived = _build_generated_content_config(AgentRunnerGeneratedContentSettings())
+    assert settings_derived == CoreGeneratedContentConfig()
+
+
+def test_root_config_toml_generated_content_matches_code_defaults() -> None:
+    """根 config.toml 播种给 ~/.iar/config.toml 的 mode / output 必须与代码默认值一致。"""
+    seed_config_path = Path(__file__).resolve().parents[1] / "config.toml"
+    seed_generated_content = tomllib.loads(seed_config_path.read_text(encoding="utf-8"))[
+        "agent_runner"
+    ]["generated_content"]
+    code_defaults = CoreGeneratedContentConfig()
+    for target_name in ("issue_from_prd", "draft_pr", "prd_from_issue"):
+        seed_target = seed_generated_content[target_name]
+        code_target = getattr(code_defaults, target_name)
+        assert (seed_target["mode"], seed_target["output"]) == (
+            code_target.mode,
+            code_target.output,
+        ), f"config.toml [{target_name}] 与代码默认值不一致"
 
 
 def test_settings_and_core_agent_labels_are_identical() -> None:

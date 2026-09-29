@@ -17,6 +17,7 @@ from backend.engines.agent_runner.remote_template_skills import (
     install_packaged_operator_skill,
 )
 from backend.engines.agent_runner.repository_local import (
+    _GENERATED_CONTENT_EXAMPLE_TOML,
     GITIGNORE_BLOCK_FOOTER,
     GITIGNORE_BLOCK_HEADER,
     GitignoreSyncOptions,
@@ -30,6 +31,9 @@ from backend.engines.agent_runner.repository_local import (
 from backend.infrastructure.config.settings import AgentRunnerLocalSettings
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+# 有意不写入脚手架的 section：写入会把代码默认值钉死在各仓库，之后默认值升级传不过去。
+SCAFFOLD_OMITTED_SECTIONS = frozenset({"generated_content"})
 
 
 @pytest.fixture(autouse=True)
@@ -681,8 +685,39 @@ def test_iar_init_renders_every_repository_level_config_field(
     rendered_settings = AgentRunnerLocalSettings(**rendered_agent_runner)
 
     for section_name in AgentRunnerLocalSettings.model_fields:
+        if section_name in SCAFFOLD_OMITTED_SECTIONS:
+            assert getattr(rendered_settings, section_name) is None
+            continue
         assert getattr(rendered_settings, section_name) is not None
     _assert_toml_includes_non_null_model_fields(rendered_agent_runner, rendered_settings)
+
+
+def test_iar_init_does_not_pin_generated_content(tmp_path: Path) -> None:
+    """脚手架不写 generated_content，只在文末留注释示例；默认值升级才能传到已初始化的仓库。"""
+    repo_path = _init_git_repository(tmp_path, "target")
+
+    _, config_text, _ = build_repository_local_config_text(
+        RepositoryInitOptions(cwd=repo_path, dry_run=True)
+    )
+
+    assert "generated_content" not in tomllib.loads(config_text)["agent_runner"]
+    assert "\n[agent_runner.generated_content" not in config_text
+    # 示例只以注释出现：取消注释前不生效
+    assert "# [agent_runner.generated_content.draft_pr]" in config_text
+
+
+def test_generated_content_scaffold_example_is_valid_repository_config() -> None:
+    """注释示例取消注释后必须被配置模型完整接受，避免字段改名后示例悄悄失效。"""
+    example_settings = AgentRunnerLocalSettings(
+        **tomllib.loads(_GENERATED_CONTENT_EXAMPLE_TOML)["agent_runner"]
+    )
+
+    assert example_settings.generated_content is not None
+    # 嵌套 target 模型忽略未知键，所以要看显式设置的字段集合才能发现改名。
+    assert example_settings.generated_content.draft_pr.model_fields_set == {
+        "agent",
+        "timeout_seconds",
+    }
 
 
 def test_detect_default_remote_falls_back_when_upstream_missing(

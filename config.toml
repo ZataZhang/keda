@@ -651,10 +651,11 @@ execution = [
 # `[agent_runner.generated_content]` is the single configuration entry.
 # Do not add `[agent_runner.content_generation]`.
 #
-# mode = "template" uses .format() rendering with documented variables.
-# mode = "agent" runs a local read-only agent and parses its output.
-# When generation is disabled, fails, or produces invalid output,
-# the runner falls back to deterministic templates.
+# mode = "agent" (the default) runs a local read-only agent and parses its output.
+# When the agent is unavailable, times out, has no prompt, or produces invalid
+# output, the runner falls back to rendering `title_template` / `body_template`
+# with .format() (documented variables only), then to a hard-coded body.
+# mode = "template" is deprecated: it only skips the agent step and will be removed.
 
 [agent_runner.generated_content]
 enabled = true
@@ -664,7 +665,7 @@ default_agent = "claude"
 
 [agent_runner.generated_content.issue_from_prd]
 enabled = true
-mode = "template"
+mode = "agent"
 output = "json"
 title_template = "{prd_title}"
 body_template = [

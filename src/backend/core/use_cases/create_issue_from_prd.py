@@ -4,17 +4,17 @@
 
 1. 读取本地 PRD Markdown 文件。
 2. 提取元数据（标题、验收清单、引言）。
-3. 可选：通过 AI 生成更丰富的 Issue 内容（agent/template 模式）。
+3. 可选：通过 AI 生成更丰富的 Issue 内容（默认 agent，失败时回退到模板）。
 4. 通过 ``IGitHubClient`` 创建 GitHub Issue。
 5. 将创建的 Issue URL 回写到 PRD 中。
 6. 可选：发布 PRD 文件（stage、commit、push），使 Issue 链接持久化到仓库。
 
 内容生成遵循三级级联策略：
 
-- **Agent 模式**（当 ``generated_content`` 启用且 ``mode="agent"`` 时）：
+- **Agent 模式**（``generated_content`` 启用时的默认，即 ``mode="agent"``）：
   AI agent 根据完整 PRD 上下文生成 Issue 标题和正文。
-- **Template 模式**（当 agent 失败且 ``fallback="template"``，或
-  直接设置 ``mode="template"`` 时）：
+- **Template 兜底**（当 agent 失败且 ``fallback="template"`` 时；直接设置
+  ``mode="template"`` 已废弃，只是跳过 agent 这一步）：
   使用类似 Jinja2 的 ``.format()`` 模板，通过 PRD 上下文变量
   （如 ``{prd_introduction}``、``{relative_prd_path}`` 等）渲染标题/正文。
 - **Hard fallback**（始终可用）：``build_issue_body()`` 构建一个确定的

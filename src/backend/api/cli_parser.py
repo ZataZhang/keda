@@ -891,4 +891,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_options(roadmap_advance_parser)
 
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Maintain the repository-local .iar.toml.",
+    )
+    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
+
+    config_migrate_parser = config_subparsers.add_parser(
+        "migrate",
+        help="Remove generated_content values an older `iar init` pinned into .iar.toml.",
+    )
+    config_migrate_parser.set_defaults(command="config migrate")
+    config_migrate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be removed (with a diff) without writing anything.",
+    )
+    add_common_options(config_migrate_parser)
+
     return parser

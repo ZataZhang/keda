@@ -7,14 +7,17 @@
 2. **PR 内容生成**（``generate_pr_content``）：根据 Issue 信息、提交日志和
    diff 统计生成 PR 标题和正文，用于 ``publish_changes`` 工作流。
 
-两条路径都遵循相同的三级级联策略：
+PRD 生成在 :mod:`backend.core.use_cases.generated_prd_content`，复用本模块的
+渲染、截断与 agent 运行 helper。
 
-- **Agent 模式**：调用本地 AI agent（如 Claude/Codex/Kimi）生成内容。
-- **Template 模式**：使用 ``.format()`` 模板渲染，变量来自上下文对象。
-- **Hard fallback**：当上述模式均失败或禁用时，返回调用方提供的 fallback 内容。
+两条路径都遵循相同的级联策略：
 
-特别地，当主模式为 agent 且 ``config.fallback == "template"`` 时，
-agent 失败后还会尝试 template 模式作为中间兜底，最后才退回 hard fallback。
+- **Agent 模式**（默认）：调用本地 AI agent（如 Claude/Codex/Kimi）生成内容。
+  agent 缺 prompt、超时、不可执行或输出不合格都不会抛出，而是落到下一级。
+- **Template 渲染**：使用 ``.format()`` 模板渲染，变量来自上下文对象。它是 agent
+  失败后的中间兜底（``config.fallback == "template"``）；``mode = "template"`` 已废弃，
+  只表示跳过 agent 这一步。
+- **Hard fallback**：当上述方式均失败或禁用时，返回调用方提供的 fallback 内容。
 
 所有模板渲染通过 ``_render_template`` 统一处理，支持 ``IssueContext``
 和 ``PrContext`` 两种上下文对象。
@@ -24,8 +27,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,13 +41,6 @@ from backend.core.shared.models.agent_runner import (
     GeneratedContentTargetConfig,
     GeneratedIssueContent,
     GeneratedPrContent,
-    IssueSummary,
-)
-from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
-from backend.core.shared.prd_machine_contract import (
-    PrdSkillPreflightError,
-    SUPPORTED_MACHINE_CONTRACT_VERSION,
-    parse_machine_contract_version,
 )
 
 _logger = logging.getLogger(__name__)
@@ -156,83 +152,6 @@ class PrdContext:
     issue_comments: str
     existing_prd_text: str
     repo_structure_summary: str
-
-
-_IGNORED_REPO_ENTRIES: frozenset[str] = frozenset(
-    {
-        ".git",
-        ".venv",
-        "venv",
-        "node_modules",
-        "__pycache__",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        ".tox",
-        ".iar",
-        ".agent-runner",
-        "dist",
-        "build",
-        ".DS_Store",
-    }
-)
-
-
-def _is_ignored_repo_entry(path: Path) -> bool:
-    """判断目录项是否应被排除在仓库结构摘要之外。"""
-    name = path.name
-    if name in _IGNORED_REPO_ENTRIES:
-        return True
-    if name.startswith(".") and name not in {".github", ".claude"}:
-        return True
-    return False
-
-
-def _build_repo_structure_summary(
-    repo_path: Path,
-    *,
-    max_depth: int = 3,
-    max_entries_per_dir: int = 30,
-) -> str:
-    """为 PRD prompt 构建仓库结构摘要。
-
-    遍历仓库根目录下有限深度的目录树，输出目录和文件列表。
-    用于给 agent 提供项目布局上下文，避免暴露大量无关细节。
-
-    Args:
-        repo_path: 仓库根目录。
-        max_depth: 最大遍历深度。
-        max_entries_per_dir: 每个目录最多列出的条目数。
-
-    Returns:
-        格式化的仓库结构摘要文本。
-    """
-    if not repo_path.exists():
-        return ""
-
-    summary_lines: list[str] = []
-
-    def _walk(current_path: Path, depth: int, prefix: str) -> None:
-        if depth > max_depth:
-            return
-        try:
-            entries = [
-                entry for entry in current_path.iterdir() if not _is_ignored_repo_entry(entry)
-            ]
-        except OSError:
-            return
-        entries.sort(key=lambda p: (p.is_file(), p.name.lower()))
-        visible_entries = entries[:max_entries_per_dir]
-        for entry in visible_entries:
-            suffix = "/" if entry.is_dir() else ""
-            summary_lines.append(f"{prefix}{entry.name}{suffix}")
-            if entry.is_dir():
-                _walk(entry, depth + 1, f"{prefix}  ")
-        if len(entries) > max_entries_per_dir:
-            summary_lines.append(f"{prefix}... ({len(entries) - max_entries_per_dir} more)")
-
-    _walk(repo_path, 1, "")
-    return "\n".join(summary_lines)
 
 
 # ---------------------------------------------------------------------------
@@ -368,34 +287,6 @@ def build_issue_context(
 # ---------------------------------------------------------------------------
 # 模板渲染辅助函数
 # ---------------------------------------------------------------------------
-
-
-def build_prd_context(
-    *,
-    issue: IssueSummary,
-    comments: list[str],
-    existing_prd_text: str,
-    repo_path: Path,
-) -> PrdContext:
-    """为 PRD 内容生成构建上下文变量。
-
-    Args:
-        issue: 关联的 GitHub Issue。
-        comments: Issue 评论列表。
-        existing_prd_text: 现有 PRD 文本（如有）。
-        repo_path: 仓库根目录路径。
-
-    Returns:
-        供模板渲染或 agent prompt 使用的 ``PrdContext`` 实例。
-    """
-    return PrdContext(
-        issue_number=issue.number,
-        issue_title=issue.title,
-        issue_body=issue.body,
-        issue_comments="\n\n".join(f"Comment:\n{c}" for c in comments),
-        existing_prd_text=existing_prd_text,
-        repo_structure_summary=_build_repo_structure_summary(repo_path),
-    )
 
 
 def _render_template(template: str, context: IssueContext | PrContext | PrdContext) -> str:
@@ -552,8 +443,9 @@ def _run_content_generator(
 ) -> str:
     """运行内容生成器并返回原始输出文本。
 
-    如果 agent 进程返回非零退出码，记录警告日志并返回空字符串，
-    让调用方可以回退到 fallback 内容。
+    prompt 为空（未配置也没有播种）、agent 进程返回非零退出码、超时或无法执行
+    （如 CLI 未安装）时，记录警告日志并返回空字符串，让调用方回退到 template /
+    fallback 内容——内容生成失败不能中断 Issue 创建或 PR 发布。
 
     Args:
         generator: 内容生成器接口实例。
@@ -563,14 +455,21 @@ def _run_content_generator(
         timeout_seconds: agent 执行超时时间（秒）。
 
     Returns:
-        agent 的标准输出（已去除首尾空白）。执行失败时返回空字符串。
+        agent 的标准输出（已去除首尾空白）。未执行或执行失败时返回空字符串。
     """
-    result = generator.generate(
-        agent_name=agent_name,
-        prompt=prompt,
-        cwd=cwd,
-        timeout=timeout_seconds,
-    )
+    if not prompt.strip():
+        _logger.warning("Content generator '%s' skipped: no prompt configured", agent_name)
+        return ""
+    try:
+        result = generator.generate(
+            agent_name=agent_name,
+            prompt=prompt,
+            cwd=cwd,
+            timeout=timeout_seconds,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        _logger.warning("Content generator '%s' did not finish: %s", agent_name, exc)
+        return ""
     if result.return_code != 0:
         _logger.warning(
             "Content generator exited with code %d: %s",
@@ -591,7 +490,8 @@ def _parse_json_output(output_text: str) -> tuple[str, str]:
         output_text: agent 输出的原始文本。
 
     Returns:
-        ``(title, body)`` 元组。解析失败时返回 ``("", "")``。
+        ``(title, body)`` 元组。解析失败时返回 ``("", "")``，并对非空输出记录警告
+        （``output`` 配成 json 而提示词回 Markdown 时，否则会静默退回 template）。
     """
     text = output_text.strip()
     # 处理被 Markdown 代码块包裹的情况（例如 ```json\n{...}\n```）
@@ -607,6 +507,8 @@ def _parse_json_output(output_text: str) -> tuple[str, str]:
             return title, body
     except json.JSONDecodeError:
         pass
+    if text:
+        _logger.warning("Agent output is not a JSON object with title/body: %.80r", text)
     return "", ""
 
 
@@ -634,291 +536,6 @@ def _parse_markdown_output(output_text: str) -> tuple[str, str]:
     return title, body
 
 
-def _validate_prd_output(text: str) -> bool:
-    """验证生成的 PRD 文本是否符合基本结构要求。
-
-    检查项：
-
-    1. 文本必须以 ``# PRD:`` 开头。
-    2. 必须包含至少一个 ``## `` 二级标题。
-    3. 必须包含 ``- GitHub Issue:`` 锚点行。
-
-    Args:
-        text: 待验证的 PRD 文本。
-
-    Returns:
-        符合基本要求时返回 ``True``，否则 ``False``。
-    """
-    if not text or not text.strip():
-        return False
-    stripped = text.strip()
-    if not stripped.startswith("# PRD:"):
-        return False
-    if "## " not in stripped:
-        return False
-    if "- GitHub Issue:" not in stripped:
-        return False
-    return True
-
-
-# ---------------------------------------------------------------------------
-# prd skill 规范来源（单一来源；禁止硬编码安装路径）
-# ---------------------------------------------------------------------------
-
-# 环境变量覆盖 prd skill 路径，便于全局工具 / 跨仓库运行（runner 在产品仓执行，
-# skill 在用户级目录）下显式指定，而非硬编码安装路径。
-_PRD_SKILL_PATH_ENV_VAR = "IAR_PRD_SKILL_PATH"
-_CC_SWITCH_SKILLS_DIR_ENV_VAR = "CC_SWITCH_SKILLS_DIR"
-_PRD_SKILL_RELATIVE_PATH = Path("prd") / "SKILL.md"
-
-
-def _default_prd_skill_candidate_paths() -> tuple[Path, ...]:
-    """按 agent 注册表派生 prd skill 的用户级候选路径。
-
-    与 ``iar init`` 的安装目标同源（:meth:`AgentSpec.user_skills_dir`，
-    即各 agent ``auth_home`` 下的 ``skills/``），注册顺序即优先级；
-    不再包含已废弃的 ``~/.cc-switch/skills`` 固定候选。
-    """
-    user_home_path = Path.home()
-    return tuple(
-        skills_dir / _PRD_SKILL_RELATIVE_PATH
-        for agent_spec in BUILTIN_AGENT_SPECS.values()
-        if (skills_dir := agent_spec.user_skills_dir(user_home_path)) is not None
-    )
-
-
-def resolve_prd_skill_path(explicit_path: Path | None = None) -> Path:
-    """解析模板安装器管理的 ``prd`` skill 路径。
-
-    解析优先级：显式入参 → ``IAR_PRD_SKILL_PATH`` 环境变量 →
-    ``CC_SWITCH_SKILLS_DIR`` → agent 注册表各 agent 的用户级 skills 目录
-    （``auth_home`` 派生，与 ``iar init`` 安装目标同源）。
-    默认候选中优先返回存在的 ``SKILL.md``；全部缺失时返回第一个候选，
-    由调用方保留现有 fallback 行为。
-
-    Args:
-        explicit_path: 调用方显式指定的路径；为 ``None`` 时回落到环境变量/默认。
-
-    Returns:
-        待读取的 skill 规范文件路径（不保证存在）。
-    """
-    if explicit_path is not None:
-        return explicit_path
-    env_value = os.environ.get(_PRD_SKILL_PATH_ENV_VAR)
-    if env_value:
-        return Path(env_value).expanduser()
-    configured_skills_root = os.environ.get(_CC_SWITCH_SKILLS_DIR_ENV_VAR)
-    candidate_skill_paths: list[Path] = []
-    if configured_skills_root:
-        candidate_skill_paths.append(
-            Path(configured_skills_root).expanduser() / _PRD_SKILL_RELATIVE_PATH
-        )
-    candidate_skill_paths.extend(_default_prd_skill_candidate_paths())
-    for candidate_skill_path in candidate_skill_paths:
-        if candidate_skill_path.is_file():
-            return candidate_skill_path
-    return candidate_skill_paths[0]
-
-
-def load_prd_skill_spec(explicit_path: Path | None = None) -> str | None:
-    """读取 ``prd`` skill 规范文本，不可达时安全返回 ``None``。
-
-    Args:
-        explicit_path: 显式 skill 路径；为 ``None`` 时按 :func:`resolve_prd_skill_path`
-            的优先级解析。
-
-    Returns:
-        skill 规范文本（已 strip）；文件缺失/不可读/为空时返回 ``None``，
-        由调用方回退到现有模板 prompt。
-    """
-    skill_path = resolve_prd_skill_path(explicit_path)
-    try:
-        skill_text = skill_path.read_text(encoding="utf-8")
-    except OSError:
-        _logger.warning(
-            "prd skill spec unreachable at %s; falling back to template prompt.",
-            skill_path,
-        )
-        return None
-    skill_text = skill_text.strip()
-    return skill_text or None
-
-
-def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> Path:
-    """启动预检：prd skill 必须可解析且 Machine Contract 主版本匹配。
-
-    daemon 起执行循环前调用（``run_preflight_checks``）。iar 的 prompt 只持有
-    指向 skill Machine Contract 的指针，skill 缺失或版本不符时执行 agent 将
-    拿不到格式约定，因此必须 fail fast 而不是跑到交付门禁才失败。
-
-    Args:
-        explicit_path: 显式 skill 路径；为 ``None`` 时按
-            :func:`resolve_prd_skill_path` 的优先级解析（含
-            ``IAR_PRD_SKILL_PATH`` 环境变量覆盖）。
-
-    Returns:
-        通过预检的 skill 路径。
-
-    Raises:
-        PrdSkillPreflightError: skill 不可读或契约主版本与
-            ``SUPPORTED_MACHINE_CONTRACT_VERSION`` 不一致；报错含修复指引。
-    """
-    skill_path = resolve_prd_skill_path(explicit_path)
-    try:
-        skill_text = skill_path.read_text(encoding="utf-8")
-    except OSError as read_error:
-        raise PrdSkillPreflightError(
-            f"prd skill is not readable at {skill_path}. The agent runner delegates "
-            "PRD format conventions to the prd skill's Machine Contract, so it "
-            "cannot run without the skill installed. Run `iar init` to install the "
-            "remote template skills, or point IAR_PRD_SKILL_PATH at a prd SKILL.md."
-        ) from read_error
-    contract_version = parse_machine_contract_version(skill_text)
-    if contract_version != SUPPORTED_MACHINE_CONTRACT_VERSION:
-        declared_version_text = (
-            f"v{contract_version}"
-            if contract_version is not None
-            else "no Machine-Contract-Version marker"
-        )
-        raise PrdSkillPreflightError(
-            f"prd skill at {skill_path} declares {declared_version_text}, but this "
-            f"runner supports only the current Machine Contract v{SUPPORTED_MACHINE_CONTRACT_VERSION}; "
-            "older and unknown versions are unsupported. Use `iar init` only after its dry-run "
-            "shows the intended Skill plan, or select a current prd skill "
-            "without overwriting user-owned files, or point IAR_PRD_SKILL_PATH at its SKILL.md."
-        )
-    return skill_path
-
-
-def _build_prd_agent_prompt(skill_spec: str, context: PrdContext, max_context_chars: int) -> str:
-    """用 ``prd`` skill 规范 + PRD 上下文组合 agent prompt。
-
-    skill 规范是方法论与输出契约的单一来源，始终完整注入（不截断）；
-    ``max_context_chars`` 只约束可变的输入上下文（Issue 正文/评论/现有 PRD/仓库
-    结构），避免超长 Issue 线程撑爆 prompt 而又不丢失规范本身。
-
-    Args:
-        skill_spec: ``prd`` skill ``SKILL.md`` 全文。
-        context: PRD 上下文变量。
-        max_context_chars: 可变上下文部分的最大字符数。
-
-    Returns:
-        发送给内容生成器的完整 prompt。
-    """
-    context_block = "\n".join(
-        [
-            f"GitHub Issue #{context.issue_number}: {context.issue_title}",
-            "",
-            "Issue Body:",
-            context.issue_body,
-            "",
-            "Issue Comments (chronological):",
-            context.issue_comments,
-            "",
-            "Existing PRD (rewrite if present, otherwise empty):",
-            context.existing_prd_text,
-            "",
-            "Repository Structure Summary:",
-            context.repo_structure_summary,
-        ]
-    )
-    context_block = _truncate_text(context_block, max_context_chars)
-    return "\n".join(
-        [
-            skill_spec,
-            "",
-            "---",
-            "",
-            "Follow the PRD methodology and output contract above. Apply it to the "
-            "GitHub Issue and repository context below.",
-            "",
-            context_block,
-            "",
-            "Output rules:",
-            "- Write the PRD in the same language as the Issue title.",
-            "- The PRD MUST start with `# PRD: <title>` and include a `- GitHub Issue:` line.",
-            "- Output only the PRD markdown, with no extra commentary.",
-        ]
-    )
-
-
-def generate_prd_content(
-    *,
-    config: GeneratedContentConfig,
-    context: PrdContext,
-    fallback_prd_text: str,
-    generator: IContentGenerator | None = None,
-    cwd: Path | None = None,
-    prd_skill_path: Path | None = None,
-) -> GeneratedPrdContent:
-    """生成 PRD markdown，支持多级回退。
-
-    执行流程：
-
-    1. 如果 ``generated_content`` 被禁用，直接返回 fallback。
-    2. 根据 ``target.mode`` 选择生成策略：
-       - ``"template"``：使用 ``_render_template`` 渲染正文模板。
-       - ``"agent"``：调用 AI agent 生成内容。
-    3. 验证输出是否满足 ``_validate_prd_output``。
-    4. 验证通过则返回生成结果，source 标记为 ``target.mode``。
-    5. 如果 agent 模式失败且 ``config.fallback == "template"``，尝试 template 兜底。
-    6. 最终仍失败则返回 ``fallback_prd_text``，source 标记为 ``"fallback"``。
-
-    Args:
-        config: 生成内容配置。
-        context: PRD 上下文。
-        fallback_prd_text: 当所有生成方式失败时使用的 PRD 文本。
-        generator: agent 模式所需的内容生成器。
-        cwd: agent 工作目录。
-        prd_skill_path: 可选的 ``prd`` skill ``SKILL.md`` 显式路径；为 ``None`` 时按
-            :func:`resolve_prd_skill_path` 解析。agent 模式优先用 skill 规范构建
-            prompt（单一来源），skill 不可达时回退到配置的 ``target.prompt`` 模板。
-
-    Returns:
-        包含 text 和 source 的 ``GeneratedPrdContent`` 实例。
-    """
-    target = config.prd_from_issue
-    if not config.enabled or not target.enabled:
-        return GeneratedPrdContent(text=fallback_prd_text, source="fallback")
-
-    generated_text = ""
-
-    if target.mode == "template" and target.body_template:
-        try:
-            generated_text = _render_template(target.body_template, context)
-        except (KeyError, ValueError):
-            pass
-    elif target.mode == "agent" and generator is not None and cwd is not None:
-        agent_name = _resolve_generation_agent(
-            target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
-        )
-        # PRD 规范单一来源：优先注入 prd skill 规范；不可达时回退到配置模板 prompt。
-        skill_spec = load_prd_skill_spec(prd_skill_path)
-        if skill_spec:
-            prompt = _build_prd_agent_prompt(skill_spec, context, config.max_input_chars)
-        else:
-            prompt = _truncate_text(
-                _render_template(target.prompt, context), config.max_input_chars
-            )
-        generated_text = _run_content_generator(
-            generator, agent_name, prompt, cwd, target.timeout_seconds
-        )
-
-    if generated_text and _validate_prd_output(generated_text):
-        return GeneratedPrdContent(text=generated_text, source=target.mode)
-
-    # Agent 失败：按配置尝试 template 中间兜底。
-    if target.mode == "agent" and config.fallback == "template" and target.body_template:
-        try:
-            generated_text = _render_template(target.body_template, context)
-        except (KeyError, ValueError):
-            pass
-        if generated_text and _validate_prd_output(generated_text):
-            return GeneratedPrdContent(text=generated_text, source="template")
-
-    return GeneratedPrdContent(text=fallback_prd_text, source="fallback")
-
-
 # ---------------------------------------------------------------------------
 # Issue 内容生成
 # ---------------------------------------------------------------------------
@@ -939,8 +556,8 @@ def generate_issue_content(
 
     1. 如果 ``generated_content`` 被禁用，直接返回 fallback。
     2. 根据 ``target.mode`` 选择生成策略：
-       - ``"template"``：使用 ``_try_render_templates`` 渲染模板。
-       - ``"agent"``：调用 AI agent，然后根据 ``target.output`` 解析 JSON 或 Markdown。
+       - ``"agent"``（默认）：调用 AI agent，然后根据 ``target.output`` 解析 JSON 或 Markdown。
+       - ``"template"``（已废弃）：跳过 agent，直接用 ``_try_render_templates`` 渲染模板。
     3. 截断标题和正文至安全长度，验证正文是否包含 ``- PRD path:`` 锚点。
     4. 验证通过则返回生成结果，source 标记为 ``target.mode``。
     5. 如果 agent 模式失败且 ``config.fallback == "template"``，尝试 template 兜底。
@@ -1000,6 +617,7 @@ def generate_issue_content(
 
     # Agent 失败：按配置尝试 template 中间兜底。
     if target.mode == "agent" and config.fallback == "template":
+        _logger.warning("issue_from_prd: agent produced no usable content, rendering templates")
         generated_title, generated_body = _try_render_templates(target, context)
         if generated_title:
             generated_title = generated_title[:_MAX_TITLE_LENGTH]
@@ -1197,6 +815,7 @@ def generate_pr_content(
 
     # Agent 失败：按配置尝试 template 中间兜底。
     if target.mode == "agent" and config.fallback == "template":
+        _logger.warning("draft_pr: agent produced no usable content, rendering templates")
         generated_title, generated_body = _try_render_templates(target, context)
         if generated_title:
             generated_title = generated_title[:_MAX_TITLE_LENGTH]

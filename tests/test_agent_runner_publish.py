@@ -696,7 +696,9 @@ def test_draft_pr_uses_prd_content_generation_override() -> None:
             enabled=True,
             default_agent="codex",
             lifecycle_default_agent="claude",
-            draft_pr=GeneratedContentTargetConfig(enabled=True, mode="agent", output="json"),
+            draft_pr=GeneratedContentTargetConfig(
+                enabled=True, mode="agent", output="json", prompt="Generate PR"
+            ),
         ),
     )
     generator_response = '{"title": "[Agent] Test Feature", "body": "Closes #42\\n\\nok"}'

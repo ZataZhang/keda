@@ -709,7 +709,7 @@ class GeneratedContentTargetConfig:
     """Configuration for a single generated-content target."""
 
     enabled: bool = True
-    mode: str = "template"
+    mode: str = "agent"
     output: str = "json"
     title_template: str = ""
     body_template: str = ""
@@ -732,14 +732,16 @@ class GeneratedContentConfig:
     # ``AppConfig.lifecycle_agents`` 派生）。非空时优先于 ``default_agent``，
     # 只影响内容生成阶段，target 级 ``agent`` 仍更优先。
     lifecycle_default_agent: str | None = None
+    # 三个 target 默认都是 agent 模式；``output`` 必须与各自提示词的回复格式一致：
+    # issue_from_prd 的提示词回 JSON（沿用类默认），draft_pr / prd_from_issue 回 Markdown。
     issue_from_prd: GeneratedContentTargetConfig = field(
         default_factory=GeneratedContentTargetConfig
     )
-    draft_pr: GeneratedContentTargetConfig = field(default_factory=GeneratedContentTargetConfig)
+    draft_pr: GeneratedContentTargetConfig = field(
+        default_factory=lambda: GeneratedContentTargetConfig(output="markdown")
+    )
     prd_from_issue: GeneratedContentTargetConfig = field(
-        # PRD 生成没有可用的内置 template，唯一有意义的模式是 agent；
-        # agent 不可用时 generate_prd_content 会优雅退回 fallback。
-        default_factory=lambda: GeneratedContentTargetConfig(mode="agent")
+        default_factory=lambda: GeneratedContentTargetConfig(output="markdown")
     )
 
 

@@ -23,7 +23,6 @@ from backend.infrastructure.config.settings import (
     AgentRunnerAutopilotSettings,
     AgentRunnerDaemonSettings,
     AgentRunnerDeliberationSettings,
-    AgentRunnerGeneratedContentSettings,
     AgentRunnerGitSettings,
     AgentRunnerInteractiveDecisionSettings,
     AgentRunnerLabelSettings,
@@ -154,8 +153,9 @@ def detect_git_repository_root(
 
 
 TOML_HEADER_COMMENT = """# IAR 本地仓库配置
-# `iar init` 会写入全部仓库级配置的默认值；这些值随后显式覆盖全局默认值。
-# 没有默认值的可选字段未写入时，才继承 config.toml / 环境变量的全局默认值。
+# `iar init` 会写入仓库级配置的默认值（generated_content 除外，见文末示例）；这些值
+# 随后显式覆盖全局默认值。没有默认值的可选字段、以及未写入的 generated_content，
+# 才继承 config.toml / 环境变量 / 代码里的全局默认值。
 # 本文件在 daemon 启动时读取一次：改完要重启 daemon 才生效（`iar run` 这类单轮
 # 命令每次调用都重新读取，无需重启）。
 # 完整字段说明见 docs/guides/agent-runner.md。
@@ -177,7 +177,6 @@ _IAR_SECTION_ORDER = (
     "pre_pr_review",
     "post_pr_supervisor",
     "daemon",
-    "generated_content",
     "interactive_decision",
     "repl",
     "deliberation",
@@ -200,7 +199,6 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
     "pre_pr_review": "Draft PR 创建前的 AI review 门禁（push 之后、PR 之前）",
     "post_pr_supervisor": "Draft PR 创建后的自动 supervisor 配置",
     "daemon": "Daemon 轮询与 reclaim 配置（覆盖全局 [agent_runner.daemon] 默认）",
-    "generated_content": "GitHub Issue / PR 内容生成（面向人类阅读，不影响实现 Agent）",
     "interactive_decision": "交互式决策（iar ask）配置：默认 agent、输出目录、执行确认等",
     "repl": "交互式 REPL（iar 无子命令）配置：默认 agent、审计目录与命令确认策略",
     "deliberation": "多 agent 审议（iar deliberate）配置：轮数、合成 agent、参与角色",
@@ -214,9 +212,6 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
 
 # 子表路径 -> 子表说明注释。
 _IAR_SUBTABLE_COMMENTS: dict[str, str] = {
-    "generated_content.issue_from_prd": "从 PRD 生成 GitHub Issue 的模板",
-    "generated_content.draft_pr": "从 commit 信息生成 Draft PR 的模板",
-    "generated_content.prd_from_issue": "从 GitHub Issue 生成 / 重写 PRD（rework-prd 流程）",
     "deliberation.profiles.architect": "审议角色：架构师，关注系统设计与可维护性",
     "deliberation.profiles.skeptic": "审议角色：质疑者，挑战假设与风险",
     "deliberation.profiles.implementer": "审议角色：实现者，关注可行性与落地步骤",
@@ -317,40 +312,6 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "daemon.max_deliberation_issues": "每轮 Phase 0 审议最大 Issue 数",
     "daemon.reclaim_stale_running": "是否在每轮开头 reclaim 卡死的 agent/running Issue",
     "daemon.reclaim_ttl_seconds": "TTL reclaim 阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale",
-    "generated_content.enabled": "是否启用 AI 生成 Issue / PR 正文",
-    "generated_content.fallback": "生成失败时的回退方式（当前仅支持 template）",
-    "generated_content.max_input_chars": "生成 prompt 的最大字符数",
-    "generated_content.default_agent": "执行生成的默认 agent：auto / claude / codex / kimi",
-    "generated_content.issue_from_prd.enabled": "是否从 PRD 生成 Issue",
-    "generated_content.issue_from_prd.mode": "生成模式：template（模板渲染）或 agent（调用 AI）",
-    "generated_content.issue_from_prd.output": "输出格式：json / markdown",
-    "generated_content.issue_from_prd.title_template": "Issue 标题模板",
-    "generated_content.issue_from_prd.body_template": "Issue 正文模板，支持字符串或字符串列表",
-    "generated_content.issue_from_prd.agent": "执行生成的 agent",
-    "generated_content.issue_from_prd.timeout_seconds": "生成超时秒数",
-    "generated_content.issue_from_prd.prompt": "agent 模式使用的 prompt",
-    "generated_content.issue_from_prd.include_commit_log": "PR 生成时是否包含 commit log",
-    "generated_content.issue_from_prd.include_diff_stat": "PR 生成时是否包含 diff stat",
-    "generated_content.draft_pr.enabled": "是否生成 Draft PR 正文",
-    "generated_content.draft_pr.mode": "生成模式：template（模板渲染）或 agent（调用 AI）",
-    "generated_content.draft_pr.output": "输出格式：json / markdown",
-    "generated_content.draft_pr.title_template": "PR 标题模板",
-    "generated_content.draft_pr.body_template": "PR 正文模板，支持字符串或字符串列表",
-    "generated_content.draft_pr.agent": "执行生成的 agent",
-    "generated_content.draft_pr.timeout_seconds": "生成超时秒数",
-    "generated_content.draft_pr.prompt": "agent 模式使用的 prompt",
-    "generated_content.draft_pr.include_commit_log": "PR 生成时是否包含 commit log",
-    "generated_content.draft_pr.include_diff_stat": "PR 生成时是否包含 diff stat",
-    "generated_content.prd_from_issue.enabled": "是否从 Issue 生成 / 重写 PRD",
-    "generated_content.prd_from_issue.mode": "生成模式：agent（调用 AI，推荐）或 template；PRD 无内置模板，template 会退回 fallback",
-    "generated_content.prd_from_issue.output": "输出格式：json / markdown",
-    "generated_content.prd_from_issue.title_template": "PRD 标题模板（template 模式用）",
-    "generated_content.prd_from_issue.body_template": "PRD 正文模板（template 模式用；留空则退回 fallback）",
-    "generated_content.prd_from_issue.agent": "执行生成的 agent",
-    "generated_content.prd_from_issue.timeout_seconds": "生成超时秒数",
-    "generated_content.prd_from_issue.prompt": "agent 模式 prompt（留空则用内置 prd skill 规范）",
-    "generated_content.prd_from_issue.include_commit_log": "（PRD 生成未使用）",
-    "generated_content.prd_from_issue.include_diff_stat": "（PRD 生成未使用）",
     "interactive_decision.enabled": "是否启用 iar ask 交互式决策",
     "interactive_decision.default_agent": "iar ask 默认使用的 agent：auto / claude / codex / kimi",
     "interactive_decision.default_output_dir": "决策日志与审计文件的默认输出目录",
@@ -425,6 +386,39 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 """
 
 
+# 脚手架不写入 generated_content（原因见 build_repository_local_config_text），文末只追加
+# 一段注释示例：需要偏离代码默认值时才取消注释，且只写要改的键。示例 TOML 单独成常量，
+# 既拼进注释，又能被测试直接按配置模型校验，避免字段改名后示例悄悄失效。
+_GENERATED_CONTENT_EXAMPLE_TOML = """\
+[agent_runner.generated_content.draft_pr]
+agent = "claude"
+timeout_seconds = 300
+"""
+
+_GENERATED_CONTENT_EXAMPLE_COMMENT = (
+    "\n".join(
+        [
+            "#",
+            "# =============================================================================",
+            "# Issue / PR 内容生成：[agent_runner.generated_content.<target>]（默认不写入）",
+            "# =============================================================================",
+            "# 三个 target：issue_from_prd（iar issue create）、draft_pr（Draft PR 正文）、",
+            "# prd_from_issue（rework-prd）。默认由 agent 生成；agent 失败或超时时回退到",
+            "# title_template / body_template，再回退到内置正文。默认值随 iar 升级，",
+            "# 不会被本文件钉死。需要偏离时取消注释，并只写要改的键（未写的键继续继承默认值）：",
+            "#",
+            *(
+                f"# {toml_line}" if toml_line else "#"
+                for toml_line in _GENERATED_CONTENT_EXAMPLE_TOML.splitlines()
+            ),
+            "#",
+            "# 完整字段与回退顺序见 docs/guides/agent-runner.md 的「生成模式与回退」。",
+        ]
+    )
+    + "\n"
+)
+
+
 def settings_to_toml_string(settings: AgentRunnerLocalSettings) -> str:
     """Serialize AgentRunnerLocalSettings to a commented .iar.toml string."""
 
@@ -433,7 +427,13 @@ def settings_to_toml_string(settings: AgentRunnerLocalSettings) -> str:
     wrapped = {"agent_runner": data}
     toml_body = tomli_w.dumps(wrapped)
     annotated_body = _annotate_iar_toml(toml_body)
-    return TOML_HEADER_COMMENT + "\n" + annotated_body + _AGENT_REGISTRY_EXAMPLE_COMMENT
+    return (
+        TOML_HEADER_COMMENT
+        + "\n"
+        + annotated_body
+        + _AGENT_REGISTRY_EXAMPLE_COMMENT
+        + _GENERATED_CONTENT_EXAMPLE_COMMENT
+    )
 
 
 def _annotate_iar_toml(toml_body: str) -> str:
@@ -486,8 +486,8 @@ def _annotate_iar_toml(toml_body: str) -> str:
 def _split_top_level_sections(toml_body: str) -> dict[str, list[str]]:
     """Split TOML body into top-level [agent_runner.<name>] blocks.
 
-    Nested tables such as [agent_runner.generated_content.issue_from_prd] are
-    kept inside the ``generated_content`` block.
+    Nested tables such as [agent_runner.deliberation.profiles.architect] are
+    kept inside the ``deliberation`` block.
     """
     blocks: dict[str, list[str]] = {}
     current_name: str | None = None
@@ -815,7 +815,8 @@ def build_repository_local_config_text(
         pre_pr_review=AgentRunnerPrePrReviewSettings(),
         post_pr_supervisor=AgentRunnerPostPrSupervisorSettings(),
         daemon=AgentRunnerDaemonSettings(),
-        generated_content=AgentRunnerGeneratedContentSettings(),
+        # 有意不传 generated_content：写入会把当时的代码默认值钉死在每个仓库里，之后
+        # 默认值升级（如 template → agent）就传不到已初始化的仓库。文末追加注释示例。
         interactive_decision=AgentRunnerInteractiveDecisionSettings(),
         repl=AgentRunnerReplSettings(),
         deliberation=AgentRunnerDeliberationSettings(),

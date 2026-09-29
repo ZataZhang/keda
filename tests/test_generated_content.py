@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -15,7 +18,6 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.use_cases.generated_content import (
     IssueContext,
     PrContext,
-    PrdContext,
     _parse_json_output,
     _parse_markdown_output,
     _validate_issue_body,
@@ -24,11 +26,8 @@ from backend.core.use_cases.generated_content import (
     extract_first_h2_section,
     generate_issue_content,
     generate_pr_content,
-    generate_prd_content,
-    load_prd_skill_spec,
-    resolve_prd_skill_path,
 )
-from tests.conftest import FakeContentGenerator, FakeProcessRunner
+from tests.conftest import FailingContentGenerator, FakeContentGenerator, FakeProcessRunner
 
 
 def test_validate_issue_body_passes_with_anchor() -> None:
@@ -464,15 +463,9 @@ def test_generate_pr_content_agent_fallback_to_template() -> None:
     assert result.source == "template"
 
 
-def _generate_agent_pr_content(agent_output: str, *, output: str):
-    """用 ``FakeContentGenerator`` 回放 ``agent_output``，走 agent 模式的 PR 内容生成。"""
-    config = GeneratedContentConfig(
-        enabled=True,
-        draft_pr=GeneratedContentTargetConfig(
-            enabled=True, mode="agent", output=output, prompt="Generate PR"
-        ),
-    )
-    context = PrContext(
+def _pr_context() -> PrContext:
+    """最小 PR 上下文：Issue #42，标题 ``Title``。"""
+    return PrContext(
         issue_number=42,
         issue_title="Title",
         issue_body="Body",
@@ -483,9 +476,35 @@ def _generate_agent_pr_content(agent_output: str, *, output: str):
         diff_stat="",
         git_diff_stat="",
     )
+
+
+def _issue_context() -> IssueContext:
+    """最小 Issue 上下文：PRD 路径 ``tasks/example.md``，标题 ``PRD Title``。"""
+    return IssueContext(
+        issue_type="feature",
+        title="Title",
+        prd_title="PRD Title",
+        relative_prd_path="tasks/example.md",
+        acceptance_items="",
+        prd_text="",
+        prd_introduction="",
+        prd_goals="",
+        prd_requirement_shape="",
+        prd_change_impact_tree="",
+    )
+
+
+def _generate_agent_pr_content(agent_output: str, *, output: str):
+    """用 ``FakeContentGenerator`` 回放 ``agent_output``，走 agent 模式的 PR 内容生成。"""
+    config = GeneratedContentConfig(
+        enabled=True,
+        draft_pr=GeneratedContentTargetConfig(
+            enabled=True, mode="agent", output=output, prompt="Generate PR"
+        ),
+    )
     return generate_pr_content(
         config=config,
-        context=context,
+        context=_pr_context(),
         fallback_title="Fallback",
         fallback_body="Fallback Body",
         generator=FakeContentGenerator(response=agent_output),
@@ -639,363 +658,6 @@ def test_build_pr_context_collects_git_info() -> None:
     assert context.git_diff_stat == "1 file changed, 10 insertions"
 
 
-def test_build_prd_context_collects_issue_and_comments() -> None:
-    """PRD context should include issue fields and formatted comments."""
-    from backend.core.use_cases.generated_content import build_prd_context
-    from backend.core.shared.models.agent_runner import IssueSummary
-
-    issue = IssueSummary(number=42, title="Test", url="https://example.com", body="Body", labels=())
-    context = build_prd_context(
-        issue=issue,
-        comments=["first", "second"],
-        existing_prd_text="old prd",
-        repo_path=Path("."),
-    )
-    assert context.issue_number == 42
-    assert context.issue_title == "Test"
-    assert context.issue_body == "Body"
-    assert "Comment:\nfirst" in context.issue_comments
-    assert "Comment:\nsecond" in context.issue_comments
-    assert context.existing_prd_text == "old prd"
-
-
-def test_generate_prd_content_disabled_uses_fallback() -> None:
-    """When generated content is disabled, fallback PRD should be returned."""
-    from backend.core.use_cases.generated_content import (
-        PrdContext,
-        generate_prd_content,
-    )
-
-    config = GeneratedContentConfig(enabled=False)
-    context = PrdContext(
-        issue_number=1,
-        issue_title="T",
-        issue_body="B",
-        issue_comments="",
-        existing_prd_text="",
-        repo_structure_summary="",
-    )
-    result = generate_prd_content(
-        config=config,
-        context=context,
-        fallback_prd_text="fallback",
-    )
-    assert result.text == "fallback"
-    assert result.source == "fallback"
-
-
-def test_generate_prd_content_template_mode() -> None:
-    """Template mode should render body_template as PRD."""
-    from backend.core.use_cases.generated_content import (
-        PrdContext,
-        generate_prd_content,
-    )
-
-    config = GeneratedContentConfig(
-        enabled=True,
-        prd_from_issue=GeneratedContentTargetConfig(
-            enabled=True,
-            mode="template",
-            body_template=(
-                "# PRD: {issue_title}\n\n"
-                "- GitHub Issue: #{issue_number}\n\n"
-                "## Acceptance Checklist\n\n"
-                "- [ ] item"
-            ),
-        ),
-    )
-    context = PrdContext(
-        issue_number=3,
-        issue_title="Feature",
-        issue_body="",
-        issue_comments="",
-        existing_prd_text="",
-        repo_structure_summary="",
-    )
-    result = generate_prd_content(
-        config=config,
-        context=context,
-        fallback_prd_text="fallback",
-    )
-    assert result.text == (
-        "# PRD: Feature\n\n" "- GitHub Issue: #3\n\n" "## Acceptance Checklist\n\n" "- [ ] item"
-    )
-    assert result.source == "template"
-
-
-def test_generate_prd_content_invalid_output_fallback() -> None:
-    """Template output missing required PRD structure should fallback."""
-    from backend.core.use_cases.generated_content import (
-        PrdContext,
-        generate_prd_content,
-    )
-
-    config = GeneratedContentConfig(
-        enabled=True,
-        prd_from_issue=GeneratedContentTargetConfig(
-            enabled=True,
-            mode="template",
-            body_template="No structure here.",
-        ),
-    )
-    context = PrdContext(
-        issue_number=1,
-        issue_title="T",
-        issue_body="",
-        issue_comments="",
-        existing_prd_text="",
-        repo_structure_summary="",
-    )
-    result = generate_prd_content(
-        config=config,
-        context=context,
-        fallback_prd_text="fallback",
-    )
-    assert result.text == "fallback"
-    assert result.source == "fallback"
-
-
-def test_generate_prd_content_agent_mode() -> None:
-    """Agent mode should use generator output when valid."""
-    from backend.core.use_cases.generated_content import (
-        PrdContext,
-        generate_prd_content,
-    )
-
-    generator = FakeContentGenerator(
-        response=(
-            "# PRD: AI Title\n\n"
-            "- GitHub Issue: #1\n\n"
-            "## Acceptance Checklist\n\n"
-            "- [ ] AI item\n"
-        )
-    )
-    config = GeneratedContentConfig(
-        enabled=True,
-        prd_from_issue=GeneratedContentTargetConfig(
-            enabled=True,
-            mode="agent",
-            output="markdown",
-            prompt="Generate PRD for {issue_title}",
-        ),
-    )
-    context = PrdContext(
-        issue_number=1,
-        issue_title="Title",
-        issue_body="Body",
-        issue_comments="",
-        existing_prd_text="",
-        repo_structure_summary="",
-    )
-    result = generate_prd_content(
-        config=config,
-        context=context,
-        fallback_prd_text="fallback",
-        generator=generator,
-        cwd=Path("."),
-    )
-    assert "# PRD: AI Title" in result.text
-    assert result.source == "agent"
-
-
-def test_generate_prd_content_agent_invalid_uses_fallback() -> None:
-    """Invalid agent output should fall back."""
-    from backend.core.use_cases.generated_content import (
-        PrdContext,
-        generate_prd_content,
-    )
-
-    generator = FakeContentGenerator(response="not a prd")
-    config = GeneratedContentConfig(
-        enabled=True,
-        prd_from_issue=GeneratedContentTargetConfig(
-            enabled=True,
-            mode="agent",
-            output="markdown",
-            prompt="Generate",
-        ),
-    )
-    context = PrdContext(
-        issue_number=1,
-        issue_title="Title",
-        issue_body="Body",
-        issue_comments="",
-        existing_prd_text="",
-        repo_structure_summary="",
-    )
-    result = generate_prd_content(
-        config=config,
-        context=context,
-        fallback_prd_text="fallback",
-        generator=generator,
-        cwd=Path("."),
-    )
-    assert result.text == "fallback"
-    assert result.source == "fallback"
-
-
-_VALID_AGENT_PRD = "# PRD: Generated\n\n- GitHub Issue: #1\n\n## 1. Goals\n\nbody\n"
-
-
-def _prd_context() -> PrdContext:
-    return PrdContext(
-        issue_number=1,
-        issue_title="Generated",
-        issue_body="Body",
-        issue_comments="",
-        existing_prd_text="",
-        repo_structure_summary="src/",
-    )
-
-
-def _agent_prd_config() -> GeneratedContentConfig:
-    return GeneratedContentConfig(
-        enabled=True,
-        prd_from_issue=GeneratedContentTargetConfig(
-            enabled=True,
-            mode="agent",
-            output="markdown",
-            agent="claude",
-            prompt="You are a technical product manager. PRD for {issue_title}",
-        ),
-    )
-
-
-def test_generate_prd_content_agent_prompt_uses_skill_spec(tmp_path: Path) -> None:
-    """Agent prompt should be built from the prd skill spec (single source)."""
-    skill_file = tmp_path / "SKILL.md"
-    skill_file.write_text(
-        "# PRD Generator (Architecture-First)\n\n## Output Contract\n"
-        "Follow the required PRD structure.\n",
-        encoding="utf-8",
-    )
-    generator = FakeContentGenerator(response=_VALID_AGENT_PRD)
-    result = generate_prd_content(
-        config=_agent_prd_config(),
-        context=_prd_context(),
-        fallback_prd_text="fallback",
-        generator=generator,
-        cwd=tmp_path,
-        prd_skill_path=skill_file,
-    )
-    assert result.source == "agent"
-    assert result.text == _VALID_AGENT_PRD.strip()
-    # The captured prompt embeds the skill spec, not the hardcoded template.
-    sent_prompt = generator.prompts[0]
-    assert "PRD Generator (Architecture-First)" in sent_prompt
-    assert "Output Contract" in sent_prompt
-    assert "technical product manager" not in sent_prompt
-    # And it still carries the PRD input context.
-    assert "GitHub Issue #1: Generated" in sent_prompt
-
-
-def test_generate_prd_content_agent_prompt_falls_back_when_skill_missing(
-    tmp_path: Path,
-) -> None:
-    """When the skill is unreachable, the agent prompt falls back to target.prompt."""
-    missing_skill = tmp_path / "nope" / "SKILL.md"
-    generator = FakeContentGenerator(response=_VALID_AGENT_PRD)
-    result = generate_prd_content(
-        config=_agent_prd_config(),
-        context=_prd_context(),
-        fallback_prd_text="fallback",
-        generator=generator,
-        cwd=tmp_path,
-        prd_skill_path=missing_skill,
-    )
-    assert result.source == "agent"
-    sent_prompt = generator.prompts[0]
-    assert "technical product manager" in sent_prompt
-    assert "PRD Generator (Architecture-First)" not in sent_prompt
-
-
-def test_load_prd_skill_spec_reads_and_handles_missing(tmp_path: Path) -> None:
-    """load_prd_skill_spec reads an explicit path and returns None when unreachable."""
-    skill_file = tmp_path / "SKILL.md"
-    skill_file.write_text("spec body", encoding="utf-8")
-    assert load_prd_skill_spec(skill_file) == "spec body"
-    assert load_prd_skill_spec(tmp_path / "missing.md") is None
-
-
-def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """显式覆盖、环境变量与模板用户级目录按优先级解析。"""
-    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
-    explicit = tmp_path / "explicit.md"
-    assert resolve_prd_skill_path(explicit) == explicit
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(tmp_path / "env.md"))
-    assert resolve_prd_skill_path() == tmp_path / "env.md"
-    monkeypatch.delenv("IAR_PRD_SKILL_PATH", raising=False)
-    configured_skill_path = tmp_path / "configured-skills" / "prd" / "SKILL.md"
-    configured_skill_path.parent.mkdir(parents=True)
-    configured_skill_path.write_text("configured", encoding="utf-8")
-    monkeypatch.setenv("CC_SWITCH_SKILLS_DIR", str(tmp_path / "configured-skills"))
-    assert resolve_prd_skill_path() == configured_skill_path
-    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
-
-    codex_skill_path = tmp_path / ".codex" / "skills" / "prd" / "SKILL.md"
-    claude_skill_path = tmp_path / ".claude" / "skills" / "prd" / "SKILL.md"
-    kimi_code_skill_path = tmp_path / ".kimi-code" / "skills" / "prd" / "SKILL.md"
-    for skill_path in (
-        codex_skill_path,
-        claude_skill_path,
-        kimi_code_skill_path,
-    ):
-        skill_path.parent.mkdir(parents=True, exist_ok=True)
-        skill_path.write_text(skill_path.parent.parent.parent.name, encoding="utf-8")
-
-    assert resolve_prd_skill_path() == codex_skill_path
-    codex_skill_path.unlink()
-    assert resolve_prd_skill_path() == claude_skill_path
-    claude_skill_path.unlink()
-    assert resolve_prd_skill_path() == kimi_code_skill_path
-    kimi_code_skill_path.unlink()
-    # 全部缺失时回落到注册表首个 agent 的候选路径。
-    assert resolve_prd_skill_path() == codex_skill_path
-
-
-def test_generate_prd_content_agent_fallback_to_template() -> None:
-    """Agent failure with fallback=template should render template before hard fallback."""
-    from backend.core.use_cases.generated_content import (
-        PrdContext,
-        generate_prd_content,
-    )
-
-    generator = FakeContentGenerator(response="invalid")
-    config = GeneratedContentConfig(
-        enabled=True,
-        fallback="template",
-        prd_from_issue=GeneratedContentTargetConfig(
-            enabled=True,
-            mode="agent",
-            output="markdown",
-            body_template=(
-                "# PRD: {issue_title}\n\n"
-                "- GitHub Issue: #{issue_number}\n\n"
-                "## Acceptance Checklist\n\n"
-                "- [ ] template item"
-            ),
-            prompt="Generate",
-        ),
-    )
-    context = PrdContext(
-        issue_number=1,
-        issue_title="Title",
-        issue_body="Body",
-        issue_comments="",
-        existing_prd_text="",
-        repo_structure_summary="",
-    )
-    result = generate_prd_content(
-        config=config,
-        context=context,
-        fallback_prd_text="fallback",
-        generator=generator,
-        cwd=Path("."),
-    )
-    assert "- [ ] template item" in result.text
-    assert result.source == "template"
-
-
 def test_resolve_generation_agent_auto_resolves_to_claude() -> None:
     """auto/auto 收敛到 claude；显式 target / 默认值按优先级生效。"""
     from backend.core.use_cases.generated_content import _resolve_generation_agent
@@ -1004,3 +666,174 @@ def test_resolve_generation_agent_auto_resolves_to_claude() -> None:
     assert _resolve_generation_agent("auto", "codex") == "codex"
     assert _resolve_generation_agent("kimi", "auto") == "kimi"
     assert _resolve_generation_agent("claude", "codex") == "claude"
+
+
+# ---------------------------------------------------------------------------
+# agent 是默认路径：失败必须落到 template / fallback，而不是抛出或静默丢弃
+# ---------------------------------------------------------------------------
+
+
+_AGENT_RUNTIME_ERRORS = pytest.mark.parametrize(
+    "runtime_error",
+    [subprocess.TimeoutExpired(cmd="claude", timeout=120), FileNotFoundError("claude")],
+    ids=["timeout", "cli-missing"],
+)
+
+
+@_AGENT_RUNTIME_ERRORS
+def test_generate_pr_content_agent_runtime_error_falls_back_to_template(
+    runtime_error: Exception, caplog: pytest.LogCaptureFixture
+) -> None:
+    """agent 超时或 CLI 缺失不得抛出：按 fallback=template 渲染模板并留下警告。"""
+    generator = FailingContentGenerator(runtime_error)
+    config = GeneratedContentConfig(
+        draft_pr=GeneratedContentTargetConfig(
+            mode="agent",
+            output="markdown",
+            prompt="Generate PR",
+            title_template="[Template] {issue_title}",
+            body_template="Closes #{issue_number}\n\nTemplate PR body.",
+        ),
+    )
+    with caplog.at_level(logging.WARNING, logger="backend.core.use_cases.generated_content"):
+        generated_pr_content = generate_pr_content(
+            config=config,
+            context=_pr_context(),
+            fallback_title="Fallback",
+            fallback_body="Fallback Body",
+            generator=generator,
+            cwd=Path("."),
+        )
+    assert len(generator.calls) == 1
+    assert generated_pr_content.source == "template"
+    assert generated_pr_content.title == "[Template] Title"
+    assert "did not finish" in caplog.text
+    assert "draft_pr: agent produced no usable content" in caplog.text
+
+
+@_AGENT_RUNTIME_ERRORS
+def test_generate_issue_content_agent_runtime_error_falls_back_to_template(
+    runtime_error: Exception,
+) -> None:
+    """Issue 生成同样吸收 agent 超时 / CLI 缺失，退回 template 渲染。"""
+    generator = FailingContentGenerator(runtime_error)
+    config = GeneratedContentConfig(
+        issue_from_prd=GeneratedContentTargetConfig(
+            mode="agent",
+            prompt="Generate Issue",
+            title_template="[Template] {prd_title}",
+            body_template="- PRD path: `{relative_prd_path}`\n\nTemplate body.",
+        ),
+    )
+    generated_issue_content = generate_issue_content(
+        config=config,
+        context=_issue_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=generator,
+        cwd=Path("."),
+    )
+    assert len(generator.calls) == 1
+    assert generated_issue_content.source == "template"
+    assert generated_issue_content.title == "[Template] PRD Title"
+
+
+def test_generate_pr_content_agent_without_prompt_never_runs_agent() -> None:
+    """prompt 为空（未配置也没播种）时不拉起 agent，直接走 template 兜底。"""
+    generator = FakeContentGenerator(response="Closes #42\n\nMust not be used.")
+    config = GeneratedContentConfig(
+        draft_pr=GeneratedContentTargetConfig(
+            mode="agent",
+            output="markdown",
+            prompt="",
+            title_template="[Template] {issue_title}",
+            body_template="Closes #{issue_number}\n\nTemplate PR body.",
+        ),
+    )
+    generated_pr_content = generate_pr_content(
+        config=config,
+        context=_pr_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=generator,
+        cwd=Path("."),
+    )
+    assert generator.calls == []
+    assert generated_pr_content.source == "template"
+    assert "Must not be used" not in generated_pr_content.body
+
+
+def test_generate_issue_content_agent_without_prompt_never_runs_agent() -> None:
+    """Issue 生成在 prompt 为空时同样不拉起 agent。"""
+    generator = FakeContentGenerator(response="{}")
+    config = GeneratedContentConfig(
+        issue_from_prd=GeneratedContentTargetConfig(
+            mode="agent",
+            prompt="",
+            title_template="[Template] {prd_title}",
+            body_template="- PRD path: `{relative_prd_path}`\n\nTemplate body.",
+        ),
+    )
+    generated_issue_content = generate_issue_content(
+        config=config,
+        context=_issue_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=generator,
+        cwd=Path("."),
+    )
+    assert generator.calls == []
+    assert generated_issue_content.source == "template"
+
+
+def test_default_config_generates_pr_with_agent_markdown() -> None:
+    """不写 mode / output：默认配置补上 prompt 就走 agent + markdown。"""
+    default_draft_pr = GeneratedContentConfig().draft_pr
+    config = GeneratedContentConfig(draft_pr=replace(default_draft_pr, prompt="Generate PR"))
+    generated_pr_content = generate_pr_content(
+        config=config,
+        context=_pr_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=FakeContentGenerator(response="# Add contract\n\nCloses #42\n\nDone."),
+        cwd=Path("."),
+    )
+    assert generated_pr_content.source == "agent"
+    assert generated_pr_content.title == "Add contract"
+
+
+def test_default_config_generates_issue_with_agent_json() -> None:
+    """issue_from_prd 默认 agent + json：与它的 JSON 提示词匹配，不需要额外配置 output。"""
+    default_issue_from_prd = GeneratedContentConfig().issue_from_prd
+    config = GeneratedContentConfig(
+        issue_from_prd=replace(default_issue_from_prd, prompt="Generate Issue")
+    )
+    agent_json_output = json.dumps(
+        {"title": "AI Title", "body": "- PRD path: `tasks/example.md`\n\nDetails."}
+    )
+    generated_issue_content = generate_issue_content(
+        config=config,
+        context=_issue_context(),
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=FakeContentGenerator(response=agent_json_output),
+        cwd=Path("."),
+    )
+    assert generated_issue_content.source == "agent"
+    assert generated_issue_content.title == "AI Title"
+
+
+def test_parse_json_output_warns_when_agent_replies_with_markdown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """output 与提示词格式错配（json 配 Markdown 回复）曾静默退回 template，必须留痕。"""
+    with caplog.at_level(logging.WARNING, logger="backend.core.use_cases.generated_content"):
+        assert _parse_json_output("# Add contract\n\nCloses #42") == ("", "")
+    assert "not a JSON object" in caplog.text
+
+
+def test_parse_json_output_is_quiet_for_empty_output(caplog: pytest.LogCaptureFixture) -> None:
+    """agent 没有输出时上游已记过失败原因，解析层不再重复告警。"""
+    with caplog.at_level(logging.WARNING, logger="backend.core.use_cases.generated_content"):
+        assert _parse_json_output("") == ("", "")
+    assert caplog.text == ""
