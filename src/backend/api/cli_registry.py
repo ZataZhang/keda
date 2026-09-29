@@ -38,6 +38,7 @@ from backend.core.use_cases.console_processes import (
     tail_runner_log,
 )
 from backend.core.use_cases.issue_logs import (
+    ATTEMPT_END_MARKER,
     DEFAULT_TAIL_BYTES,
     IssueLogSelection,
     IssueLogStatus,
@@ -474,6 +475,10 @@ def _run_daemon_status_command(
 _LOGS_DEFAULT_LINES = 200
 _LOGS_POLL_INTERVAL_SECONDS = 1.0
 
+#: ``--follow`` 对**没有终态标记的旧日志**的兜底：日志连续这么久没有增长才退出，
+#: 避免对功能上线前产生的日志无限挂住。有新标记的日志不走这条路径。
+_FOLLOW_IDLE_EXIT_SECONDS = 900.0
+
 
 def _normalize_process_kind(record_kind: RunnerProcessKind | str) -> str:
     """Return the string value of a process kind, accepting enum or string."""
@@ -651,6 +656,15 @@ def _follow_issue_log(
         )
     next_offset = selection.next_offset
 
+    # ``--follow`` 只在读到 sink 写入的尝试终态标记时退出：裸 EOF 只说明这一刻没有
+    # 新字节（Agent 两次写入之间、重试间隔里都会出现），把它当成运行结束会提前退出
+    # 并丢掉后续输出。标记按**尝试**记录，切到新尝试后自然失效。
+    attempt_end_attempt_id = (
+        selection.attempt_id if ATTEMPT_END_MARKER in selection.content else None
+    )
+    last_progress_at = time.monotonic()
+    idle_notice_shown = False
+
     if not follow:
         # 不带 --follow：打印尾部窗口即退出，绝不进入轮询。
         return 0
@@ -744,29 +758,35 @@ def _follow_issue_log(
 
         if selection.content:
             print(selection.content, end="")
+            last_progress_at = time.monotonic()
+            idle_notice_shown = False
+            if ATTEMPT_END_MARKER in selection.content:
+                attempt_end_attempt_id = selection.attempt_id
         next_offset = selection.next_offset
         if selection.eof:
-            # Issue 结束且日志稳定：再确认没有新尝试后退出。
-            latest = read_issue_log(
-                reader=reader,
-                repo_id=repo_id,
-                issue_number=issue_number,
-                attempt_id=None,
-                offset=0,
-                max_bytes=1,
-            )
-            if latest.status is not IssueLogStatus.OK or latest.attempt_id == current_attempt_id:
+            # 读到**本尝试**的终态标记：运行确实结束了，正常退出。
+            if attempt_end_attempt_id == current_attempt_id:
                 print(
                     f"\n[dim](Issue #{issue_number} attempt {current_attempt_id} "
-                    "reached end of log; tail ends here)[/]"
+                    "finished; tail ends here)[/]"
                 )
                 return 0
-            # 新尝试出现：切过去继续跟随。
-            console.print(
-                f"[dim](new attempt detected: {current_attempt_id} -> " f"{latest.attempt_id})[/]"
-            )
-            current_attempt_id = latest.attempt_id
-            next_offset = latest.next_offset
+            # 旧日志（功能上线前产生、没有标记）的兜底：长时间无增长才收尾，
+            # 而不是一遇到 EOF 就把「这一刻没有新字节」当成运行结束。
+            idle_seconds = time.monotonic() - last_progress_at
+            if idle_seconds >= _FOLLOW_IDLE_EXIT_SECONDS:
+                print(
+                    f"\n[dim](Issue #{issue_number} attempt {current_attempt_id} log idle "
+                    f"for {int(idle_seconds)}s without an end marker; tail ends here. "
+                    "Logs written before the end marker existed cannot signal completion.)[/]"
+                )
+                return 0
+            if not idle_notice_shown:
+                print(
+                    f"[dim](no new output yet; still following attempt {current_attempt_id}, "
+                    "Ctrl-C to stop)[/]"
+                )
+                idle_notice_shown = True
 
 
 def _run_logs_command(

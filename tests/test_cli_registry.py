@@ -17,6 +17,7 @@ from backend.core.shared.interfaces.runner_console import (
     ProcessLogChunk,
     RunnerProcessKind,
 )
+from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
 
 
 class _FakeArgs:
@@ -973,3 +974,100 @@ def test_logs_command_issue_and_kind_are_mutually_exclusive(tmp_path: Path) -> N
         )
 
     assert exit_code == 2
+
+
+def _run_issue_follow(repo_dir: Path, issue_number: int):
+    """Run ``iar logs --issue N --follow`` against a fixture repo."""
+    context = MagicMock(repo_id="fixture-repo", repo_path=repo_dir)
+    parsed = _FakeArgs(
+        kind=None,
+        lines=200,
+        follow=True,
+        repo_id="fixture-repo",
+        issue=issue_number,
+    )
+    with patch(
+        "backend.api.cli_registry.resolve_repository_targets",
+        return_value=[context],
+    ):
+        return _run_logs_command(
+            parsed=parsed,
+            process_runner=MagicMock(),
+            runner_settings=MagicMock(),
+            repo_id="fixture-repo",
+            repo_override=None,
+        )
+
+
+def test_logs_command_issue_follow_does_not_exit_on_bare_eof(tmp_path: Path, capsys) -> None:
+    """回归：裸 EOF 不等于运行结束。
+
+    旧实现一遇到 EOF 就 ``return``，于是 Agent 两次写入之间或重试间隔里的正常
+    停顿会让 ``--follow`` 提前退出、丢掉后续输出。没有终态标记时它必须继续轮询，
+    只在长时间无增长（旧日志兜底）后才收尾。
+    """
+    repo_dir = tmp_path / "repo"
+    _make_issue_attempt(repo_dir, "fixture-repo", 42, "line-1\nline-2\n")
+
+    with (
+        patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 0.01),
+        patch("backend.api.cli_registry._FOLLOW_IDLE_EXIT_SECONDS", 0.05),
+    ):
+        exit_code = _run_issue_follow(repo_dir, 42)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "line-1" in output
+    # 关键断言：它没有在首次 EOF 就退出，而是明确表示仍在跟随。
+    assert "still following attempt" in output
+    assert "without an end marker" in output
+
+
+def test_logs_command_issue_follow_exits_on_attempt_end_marker(tmp_path: Path, capsys) -> None:
+    """读到本尝试的终态标记即收尾——而不是靠空闲超时，更不是靠 EOF。"""
+    repo_dir = tmp_path / "repo"
+    _make_issue_attempt(
+        repo_dir,
+        "fixture-repo",
+        42,
+        f"line-1\n{ATTEMPT_END_MARKER}\n",
+    )
+
+    with (
+        patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 0.01),
+        # 空闲兜底设得很短：若标记判定失效，退出会走兜底路径，下面的断言即失败。
+        patch("backend.api.cli_registry._FOLLOW_IDLE_EXIT_SECONDS", 0.2),
+    ):
+        exit_code = _run_issue_follow(repo_dir, 42)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "finished; tail ends here" in output
+    assert "without an end marker" not in output
+
+
+def test_logs_command_issue_follow_prints_content_written_while_polling(
+    tmp_path: Path, capsys
+) -> None:
+    """轮询期间新增的内容必须被送达，标记随后才结束跟随。"""
+    repo_dir = tmp_path / "repo"
+    attempt_path = _make_issue_attempt(repo_dir, "fixture-repo", 42, "early-line\n")
+    sleep_calls: list[float] = []
+
+    def _grow_then_return(_seconds: float) -> None:
+        sleep_calls.append(_seconds)
+        if len(sleep_calls) == 1:
+            with attempt_path.open("a", encoding="utf-8") as handle:
+                handle.write(f"late-line\n{ATTEMPT_END_MARKER}\n")
+
+    with (
+        patch("backend.api.cli_registry.time.sleep", side_effect=_grow_then_return),
+        patch("backend.api.cli_registry._FOLLOW_IDLE_EXIT_SECONDS", 0.2),
+    ):
+        exit_code = _run_issue_follow(repo_dir, 42)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "early-line" in output
+    assert "late-line" in output
+    assert "finished; tail ends here" in output

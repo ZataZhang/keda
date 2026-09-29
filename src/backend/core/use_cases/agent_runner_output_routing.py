@@ -28,6 +28,7 @@ from typing import Sequence
 
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import CommandResult
+from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
 
 # Logger namespace the per-Issue handler attaches to. All backend modules log
 # under this root (e.g. ``backend.core.use_cases.agent_runner_orchestrate``), so
@@ -185,4 +186,7 @@ def issue_output_routing(
         yield sink
     finally:
         backend_logger.removeHandler(handler)
+        # 追加显式尝试终态标记：``--follow`` 需要它把「运行结束」和「这一刻没有
+        # 新字节」区分开（后者在 Agent 两次写入之间与重试间隔里都会出现）。
+        writer.write(f"\n{ATTEMPT_END_MARKER}\n")
         writer.close()
