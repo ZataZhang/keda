@@ -49,6 +49,14 @@ console 的三处矩阵入口（Settings 全局层、Roadmap 仓库行齿轮、P
 定义是 `src/backend/core/shared/models/lifecycle_agent.py` 的
 `LIFECYCLE_AGENT_ENTRY_GROUPS`（前端不持有第二份映射），与本表的三组一一对应：
 
+> **两份手写副本，需人工同步。** `docs/prototypes/lifecycle-agent-matrix.html` 与
+> `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 各手写了一份
+> `ENTRY_GROUPS`（前者是自包含原型、不能 import 后端常量；后者是独立 TS 包，
+> 只能自己声明）。两份都不含 `LIFECYCLE_AGENT_ENTRY*` / `LIFECYCLE_AGENT_KEYS`
+> 字面量，因此 `rg -n 'LIFECYCLE_AGENT_ENTRY|LIFECYCLE_AGENT_KEYS' src tests frontend-public`
+> 这道"分组只有一份定义"的门禁扫不到它们。改动 core 常量（组顺序、组 id、组名、
+> 组内含哪些键及组内顺序、组说明）时，必须同轮手工核对这两份副本。
+
 | 触发入口分组 | 组内阶段 | 组说明 |
 |---|---|---|
 | **实现流水线**（`pipeline`） | 实现 / 修复 / 收尾 / 校验 / 审核 / 监督 | `iar run` / `daemon` 认领后，在同一 worktree 的同一次 claim 内依次触发 |

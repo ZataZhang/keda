@@ -66,7 +66,9 @@ class LifecycleAgentEntryGroup:
     """一个「触发入口」分组：组 id、中文组名、一行组说明与组内键（按展示顺序）。
 
     Attributes:
-        entry: 组 id（``pipeline`` / ``discussion_content`` / ``standalone``）。
+        entry: 触发入口 id（``pipeline`` / ``discussion_content`` / ``standalone``）。
+            注意这是**入口的身份**，不是某一行生命周期键的身份；只读视图的行上用
+            同名字段 ``entry`` 指回这里的 ``entry`` 做配对，命名沿用同一口径。
         label: 组中文名（界面组标题）。
         summary: 一行组说明（组标题旁的触发入口描述）。
         keys: 组内生命周期键，按 ``LIFECYCLE_AGENT_KEYS`` 中的相对顺序排列。

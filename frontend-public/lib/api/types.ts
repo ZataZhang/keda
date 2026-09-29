@@ -605,10 +605,12 @@ export type LifecycleAgentScope = "global" | "repository";
 /** 单个生命周期键在某视角下的生效视图。 */
 export type LifecycleAgentEntry = {
   key: LifecycleAgentKey;
-  /** 触发入口分组 id（pipeline / discussion_content / standalone）。 */
+  /**
+   * 行所属的触发入口分组 id（pipeline / discussion_content / standalone）。
+   * 与 `entry_groups[].entry` 配对使用，**不是行自身的 id**；分组中文名与组说明
+   * 只在 `LifecycleAgentEntryGroup` 上携带一份。
+   */
   entry: string;
-  /** 触发入口分组中文名（组标题，后端下发）。 */
-  entry_label: string;
   /** 该阶段「何时被读」的一句话触发时机（后端下发）。 */
   trigger: string;
   /** 是否允许取值为 `auto`。 */

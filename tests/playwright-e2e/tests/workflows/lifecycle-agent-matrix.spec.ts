@@ -41,7 +41,7 @@ const ENTRY_GROUPS = [
     label: '实现流水线',
     keys: ['implementation', 'fix', 'closeout', 'verifier', 'review', 'supervisor'],
   },
-  { entry: 'discussion_content', label: '讨论与内容生成', keys: ['deliberate', 'content_generation'] },
+  { entry: 'discussion_content', label: '讨论与内容生成', keys: ['content_generation', 'deliberate'] },
   { entry: 'standalone', label: '独立入口', keys: ['planner'] },
 ] as const
 

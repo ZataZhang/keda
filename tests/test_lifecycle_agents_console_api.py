@@ -97,7 +97,7 @@ def test_get_global_and_repository_views(console_env: dict) -> None:
 
 
 def test_view_rows_carry_entry_group_and_trigger(console_env: dict) -> None:
-    """每行带非空 entry / entry_label / trigger，键序与既有字段保持兼容。"""
+    """每行带非空 entry / trigger，键序与既有字段保持兼容。"""
     client = console_env["client"]
     global_view = client.get(
         "/api/v1/agent-runner/lifecycle-agents", params={"scope": "global"}
@@ -107,18 +107,18 @@ def test_view_rows_carry_entry_group_and_trigger(console_env: dict) -> None:
     assert [row["key"] for row in global_view["lifecycles"]] == list(LIFECYCLE_AGENT_KEYS)
     for row in global_view["lifecycles"]:
         assert row["entry"]
-        assert row["entry_label"]
         assert row["trigger"]
 
-    # 组并集恰好覆盖九键、不重不漏，与 core 分组常量一一对应。
-    expected_groups = {group.entry: group for group in LIFECYCLE_AGENT_ENTRY_GROUPS}
+    # 组并集恰好覆盖九键、不重不漏，与 core 分组常量一一对应；组中文名与一行说明
+    # 只在视图级 entry_groups 下发一份（行上不重复携带同名的 entry_label）。
     assert [group["entry"] for group in global_view["entry_groups"]] == [
         group.entry for group in LIFECYCLE_AGENT_ENTRY_GROUPS
     ]
+    assert [group["label"] for group in global_view["entry_groups"]] == [
+        group.label for group in LIFECYCLE_AGENT_ENTRY_GROUPS
+    ]
     grouped_keys: dict[str, list[str]] = {}
     for row in global_view["lifecycles"]:
-        group = expected_groups[row["entry"]]
-        assert row["entry_label"] == group.label
         grouped_keys.setdefault(row["entry"], []).append(row["key"])
     # 组归属与常量一一对应（集合语义）；组内展示顺序即 lifecycles 数组相对顺序，
     # 与 LIFECYCLE_AGENT_KEYS 键序一致，不由常量重复声明。
@@ -161,7 +161,6 @@ def test_prd_override_view_carries_same_entry_groups(console_env: dict) -> None:
     )
     for row in override_view["lifecycles"]:
         assert row["entry"]
-        assert row["entry_label"]
         assert row["trigger"]
 
     repo_view = client.get(

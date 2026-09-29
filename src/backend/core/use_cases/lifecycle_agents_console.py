@@ -91,10 +91,12 @@ def build_lifecycle_agents_view(
         lifecycles.append(
             {
                 "key": lifecycle_key,
-                # 触发入口分组（纯新增展示字段）：组 id / 组中文名 / 每行触发时机，
+                # 触发入口分组（纯新增展示字段）：``entry`` 是**行所属触发入口 id**
+                # （与视图级 ``entry_groups[].entry`` 同名的匹配键，不是行自身的
+                # id），``trigger`` 是该阶段的触发时机。组中文名与组说明只由视图级
+                # ``entry_groups`` 下发一份，行上不重复携带，避免同一事实两处出现。
                 # 全部取自 core 分组常量，前端只渲染、不持有第二份映射。
                 "entry": entry_group.entry,
-                "entry_label": entry_group.label,
                 "trigger": LIFECYCLE_AGENT_TRIGGERS[lifecycle_key],
                 "auto_allowed": lifecycle_key in LIFECYCLE_AGENT_AUTO_KEYS,
                 "executor_allowed": lifecycle_key in LIFECYCLE_AGENT_EXECUTOR_KEYS,

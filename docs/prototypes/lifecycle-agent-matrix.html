@@ -582,9 +582,14 @@
           { key: 'deliberate', name: '辩论', legacyRef: 'auto', legacyNote: '内置默认：按 agent/deliberate 标签路由', legacySource: 'builtin', autoLabel: 'auto（按 agent/deliberate 标签路由）', trigger: 'Phase 0 就该 Issue 在评论区讨论（此时 PRD 尚不存在）。' },
         ];
         // 触发入口分组（与 core LIFECYCLE_AGENT_ENTRY_GROUPS 同源；九个阶段不在同一条流水线上）
+        // 注意：本页是自包含原型，不能 import 后端常量，下面的 ENTRY_GROUPS 是 core 常量的副本——
+        // 组名 / 组说明 / 组内键（含顺序，需与 LIFECYCLE_AGENT_KEYS 相对顺序一致）任何一项改了，
+        // 都必须同轮回到 src/backend/core/shared/models/lifecycle_agent.py 对齐；
+        // docs/ 不在"单一份键→组映射"的 rg 门禁范围内，这份漂移由守卫测试
+        // tests/guards/test_lifecycle_entry_group_copies.py 逐组逐键比对兜住（含 E2E spec 的同名副本）。
         const ENTRY_GROUPS = [
           { entry: 'pipeline', label: '实现流水线', summary: 'iar run / daemon 认领后，在同一 worktree 的同一次 claim 内依次触发。', keys: ['implementation', 'fix', 'closeout', 'verifier', 'review', 'supervisor'] },
-          { entry: 'discussion_content', label: '讨论与内容生成', summary: '辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切三处 target。', keys: ['deliberate', 'content_generation'] },
+          { entry: 'discussion_content', label: '讨论与内容生成', summary: '辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 iar issue create、Phase 1 与开 Draft PR 三处。', keys: ['content_generation', 'deliberate'] },
           { entry: 'standalone', label: '独立入口', summary: 'iar ask，不在任何 Issue 流水线上（无 Issue / PRD 上下文）。', keys: ['planner'] },
         ];
         const SOURCE_BADGE = {
