@@ -51,6 +51,7 @@ __all__ = [
     "agent_app",
     "auth_app",
     "completion_app",
+    "config_app",
     "container_app",
     "console_app",
     "daemon_app",
@@ -178,6 +179,11 @@ roadmap_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+config_app = typer.Typer(
+    help="Maintain the repository-local .iar.toml (migrate values pinned by an older init).",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 container_app = typer.Typer(
     help="Manage the iar runner container (auth import, up, down, logs).",
     no_args_is_help=True,
@@ -209,6 +215,7 @@ app.add_typer(daemon_app, name="daemon")
 app.add_typer(workflow_app, name="workflow")
 app.add_typer(loop_app, name="loop")
 app.add_typer(roadmap_app, name="roadmap")
+app.add_typer(config_app, name="config")
 app.add_typer(container_app, name="container")
 app.add_typer(console_app, name="console")
 app.add_typer(agent_app, name="agent")
@@ -360,6 +367,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_takeover,
     cli_typer_loop,
     cli_typer_roadmap,
+    cli_typer_config,
     cli_typer_console,
 )
 

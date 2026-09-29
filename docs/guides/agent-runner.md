@@ -753,7 +753,50 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 脚手架只在文末留一段注释示例，不写入 `[agent_runner.generated_content]` 任何键。写入等于把当时的
 代码默认值钉死在每个仓库里，之后默认值升级（例如 `mode` 从 `template` 改为 `agent`）就传不到
 已初始化的仓库。需要偏离默认值时取消注释，**只写要改的键**，其余继续继承（合并规则见
-下文「生成模式与回退」一节）。
+下文「生成模式与回退」一节）。旧版脚手架已经写进去的钉子用 `iar config migrate` 清理，见下一小节。
+
+#### 迁移旧脚手架钉死的 `generated_content`（`iar config migrate`）
+
+早期的 `iar init` 会把整段 `generated_content`（含 `mode = "template"`、`output = "json"`）逐项
+写进 `.iar.toml`，这些仓库因此一直停在 template 模式，跟不上新的默认值。`iar config migrate`
+清掉这些旧钉子，让仓库重新继承当前默认值：
+
+```bash
+# 先预览：列出将清掉的键与完整 diff，不写文件
+iar config migrate --dry-run --repo /path/to/repo
+
+# 确认后执行（省略 --repo 则处理当前 Git 仓库）
+iar config migrate --repo /path/to/repo
+```
+
+规则偏保守，宁可漏清也不误清：
+
+- **只清值与旧脚手架写入过的值完全相等的键。** 值不同说明仓库主动改过，原样保留，也不出现在报告里。
+  旧脚手架写过的值：`mode` 为 `template` 或 `agent`，`timeout_seconds` 为 `60` 或 `120`，
+  `output` 为 `json`，`enabled` / `include_commit_log` / `include_diff_stat` 为 `true`，
+  `fallback` 为 `template`，`max_input_chars` 为 `20000`，`agent` / `default_agent` 为 `auto`，
+  `title_template` / `body_template` / `prompt` 为空串。
+- **`mode = "template"` 且配置了自定义 `title_template` / `body_template`**：视为有意使用模板渲染，
+  保留并在报告里说明原因。
+- **`output` 且配置了自定义 `prompt`**：输出格式必须与提示词要求的回复格式一致，保留
+  （除非它恰好等于该 target 现在的默认输出格式，那样清掉不改变任何行为）。
+- **逐行编辑，不重新序列化**：注释、排版、其余配置逐字节保留；被清掉的键连同紧贴其上的注释一起
+  删除，清空的表头随之删除。
+- **写回前用 `tomllib` 重新解析校验**：结果必须恰好等于"原配置去掉被清的键"，否则拒绝写入；
+  写入走同目录临时文件加原子替换。
+- **可重复执行**：没有可清的键时什么都不做。
+- **点分键、内联表、带引号表名写法的钉子**：定位不到"表头下的独立 `key = value` 语句"，只在报告里
+  列出并提示手动删除，不编辑。
+
+迁移后被清掉的键回到 `config.toml` / 代码默认值。默认 `mode` 是 `agent`，所以这些仓库的
+`iar issue create`、开 Draft PR、rework-prd 会**先调一次 agent**（失败或超时再回退到模板）；
+`default_agent` 与各 target 的 `agent` 也改为继承机器级配置。常驻的 `iar daemon` 需重启才会载入。
+
+`--repo-id` 不支持（迁移针对单个仓库的 `.iar.toml`）。批量预览可以用 shell 循环：
+
+```bash
+for repo in ~/code/*/; do [ -f "$repo/.iar.toml" ] && iar config migrate --dry-run --repo "$repo"; done
+```
 
 单仓库命令的目标解析规则：
 
@@ -1495,6 +1538,10 @@ JSON 输出每行一个 `IssueWithPulls` 对象，字段稳定：`repo?`、`numb
 ```bash
 # 初始化当前目标仓库配置
 iar init
+
+# 清掉旧版 iar init 钉死在 .iar.toml 里的 generated_content（先预览再执行）
+iar config migrate --dry-run
+iar config migrate
 
 # 同步当前仓库 Labels
 iar labels sync
@@ -2428,6 +2475,8 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
   `timeout_seconds`，默认 120 秒）。
 - `mode = "template"`（**已废弃**）：跳过 agent，直接用 `.format()` 渲染 `title_template` 和
   `body_template`。仍被接受，但将在后续版本移除；模板的长期用途是下面的失败兜底。
+  旧版 `iar init` 钉在 `.iar.toml` 里的 `mode = "template"` 用 `iar config migrate` 清理
+  （见「仓库本地配置」下的迁移小节）。
 
 `output` 必须与提示词要求的回复格式一致，并且**按 target 区分**，不是全局默认：
 

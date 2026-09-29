@@ -635,6 +635,15 @@ class AgentRunnerGeneratedContentSettings(BaseModel):
     )
 
 
+# ``generated_content`` 下的生成 target 名（TOML 子表名，同时是 settings / core 配置的
+# 字段名），直接取自模型字段，不另写一份清单。
+GENERATED_CONTENT_TARGET_NAMES: tuple[str, ...] = tuple(
+    field_name
+    for field_name, field_info in AgentRunnerGeneratedContentSettings.model_fields.items()
+    if field_info.annotation is AgentRunnerGeneratedContentTargetSettings
+)
+
+
 class AgentRunnerRepositoryMetadataSettings(BaseModel):
     """Repository identity stored in repository-local IAR config."""
 
