@@ -265,6 +265,30 @@ prompt**（带长度上限，缺省 20 000 字符）。超过上限会尾部截�
 - PRD/讨论沉淀的上下文一步到位地到达写代码阶段，避免"PRD 全在 Issue 评论里、实现阶段只剩几行指针"的丢失。
 - 内联受长度上限保护，且 PRD 文件缺失时优雅回退到原有指针文案。
 
+## PR body 契约（prd skill PR-Native Acceptance）
+
+runner 发布的 draft PR 正文要对齐 prd skill `references/pr-evidence-and-merge-acceptance.md`
+要求的 PR-Native Acceptance 结构。契约只作用于 Issue body 带 `PRD path:` 锚点的
+PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分三层，全部落在
+`agent_runner_pr_body_contract.py`：
+
+1. **prompt 教学**：draft PR 正文以 agent 模式生成时，`create_draft_pr` 会把 skill
+   的发布契约参考文本注入生成 prompt（调用侧包装 config，`generated_content`
+   与 skill 解耦）。教学要求 agent 在正文里写 `- PRD: <relative prd path>` 行和
+   `<!-- iar:merge-acceptance version=1 -->`（"合并即接受"声明）hidden marker。
+   skill 或参考文档不可达时静默跳过教学。
+2. **发布端软门**：正文生成后（含降级 fallback body）做可 grep 锚点校验；缺失
+   时**不阻断发布**，而是在正文末尾追加 `<!-- iar:pr-contract version=1 missing=... -->`
+   标注块，列出缺失锚点并说明合并队列将拒绝自动合并。降级产物从此"缺什么"
+   对人可见，而不是像历史 PR 那样静默缺件。
+3. **合并端硬门**：autopilot 合并队列在 verifier 门禁之后消费发布端写下的
+   `iar:pr-contract` 标注——带标注的 PR 走 `skipped_pr_contract_missing` 静默
+   跳过（不合规状态已在 PR body 标注块对人可见，逐轮评论只会刷屏）。机制
+   上线前发布的存量 PR 无标注，不受影响。
+
+设计原则是**发布端软、合并端硬**：正文格式问题永远不应阻止代码被推送和审阅
+（那会触发恢复循环烧预算），只应阻止"看起来合格"地被自动合并。
+
 ## 仓库本地配置
 
 `iar` 默认以当前 Git 仓库作为目标仓库。**首次在目标仓库使用前必须先执行 `iar init`**，否则除 `iar init` 外的所有命令都会失败并提示初始化。
