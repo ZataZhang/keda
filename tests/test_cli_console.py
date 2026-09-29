@@ -21,54 +21,74 @@ from backend.infrastructure.config.settings import (
 from backend.infrastructure.config import agent_runner_settings
 
 
-def _occupy_port(port: int, host: str = "127.0.0.1") -> socket.socket:
-    """Bind a real listening socket to simulate an occupied port."""
-    blocking_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    blocking_socket.bind((host, port))
-    blocking_socket.listen(1)
-    return blocking_socket
+def _stub_port_probe(monkeypatch: pytest.MonkeyPatch, *, occupied: set[int]) -> None:
+    """Make port probing deterministic instead of depending on real sockets.
+
+    Asserting against a fixed port band is inherently flaky: a second
+    ``iar console``, a worktree evidence run, or any unrelated local service can
+    hold one of those ports and turn this test file red. Tests that exercise the
+    *selection* logic stub the probe; ``test_real_probe_sees_a_bound_port`` keeps
+    a single real-socket check of the probe itself.
+    """
+    monkeypatch.setattr(cli_console, "_port_is_available", lambda host, port: port not in occupied)
+
+
+def _bind_ephemeral_port() -> tuple[socket.socket, int]:
+    """Bind a listening socket on an OS-assigned port; return it with its port."""
+    listening_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listening_socket.bind(("127.0.0.1", 0))
+    listening_socket.listen(1)
+    return listening_socket, int(listening_socket.getsockname()[1])
 
 
 class TestResolveConsolePort:
     """resolve_console_port 的顺延与显式端口语义。"""
 
-    def test_explicit_free_port_returned_as_is(self) -> None:
+    def test_explicit_free_port_returned_as_is(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A free explicit port is honored verbatim."""
+        _stub_port_probe(monkeypatch, occupied=set())
         assert (
             resolve_console_port(host="127.0.0.1", explicit_port=58321, default_port=8313) == 58321
         )
 
-    def test_explicit_occupied_port_raises(self) -> None:
+    def test_explicit_occupied_port_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An occupied explicit port must fail loudly instead of shifting."""
-        blocker = _occupy_port(58322)
-        try:
-            with pytest.raises(ConsolePortUnavailableError, match="already in use"):
-                resolve_console_port(host="127.0.0.1", explicit_port=58322, default_port=8313)
-        finally:
-            blocker.close()
+        _stub_port_probe(monkeypatch, occupied={58322})
+        with pytest.raises(ConsolePortUnavailableError, match="already in use"):
+            resolve_console_port(host="127.0.0.1", explicit_port=58322, default_port=8313)
 
-    def test_default_port_free_returned(self) -> None:
+    def test_default_port_free_returned(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Without --port the configured default port is used when free."""
+        _stub_port_probe(monkeypatch, occupied=set())
         assert (
             resolve_console_port(host="127.0.0.1", explicit_port=None, default_port=58323) == 58323
         )
 
-    def test_scans_forward_from_default_port(self) -> None:
+    def test_scans_forward_from_default_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Without --port, an occupied default port shifts to the next free one."""
-        blocker = _occupy_port(58324)
-        try:
-            resolved = resolve_console_port(
-                host="127.0.0.1", explicit_port=None, default_port=58324
-            )
-            assert resolved == 58325
-        finally:
-            blocker.close()
+        _stub_port_probe(monkeypatch, occupied={58324})
+        resolved = resolve_console_port(host="127.0.0.1", explicit_port=None, default_port=58324)
+        assert resolved == 58325
 
     def test_scan_window_exhausted_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No free port inside the scan window must raise, not bind blindly."""
         monkeypatch.setattr(cli_console, "_port_is_available", lambda host, port: False)
         with pytest.raises(ConsolePortUnavailableError, match="No free port"):
             resolve_console_port(host="127.0.0.1", explicit_port=None, default_port=8313)
+
+
+def test_real_probe_sees_a_bound_port() -> None:
+    """The production probe reports a port that is really being listened on.
+
+    One real-socket check is kept so the stubbed selection tests above cannot
+    drift away from actual socket behavior; the port is OS-assigned, so this
+    test never collides with a fixed port band.
+    """
+    listening_socket, occupied_port = _bind_ephemeral_port()
+    try:
+        assert cli_console._port_is_available("127.0.0.1", occupied_port) is False
+    finally:
+        listening_socket.close()
 
 
 class FakeTimer:
@@ -136,11 +156,8 @@ def test_console_command_reports_occupied_port(
         raise AssertionError("uvicorn.run must not be reached on a port error")
 
     monkeypatch.setattr(cli_console.uvicorn, "run", _fail_launch)
-    blocker = _occupy_port(58328)
-    try:
-        result = CliRunner().invoke(console_app, ["--port", "58328", "--no-browser"])
-    finally:
-        blocker.close()
+    _stub_port_probe(monkeypatch, occupied={58328})
+    result = CliRunner().invoke(console_app, ["--port", "58328", "--no-browser"])
     assert result.exit_code != 0
 
 
@@ -228,6 +245,7 @@ class TestListenHostIsNotConfigurable:
             )(),
         )
         launched: list[tuple[str, int]] = []
+        _stub_port_probe(monkeypatch, occupied=set())
         monkeypatch.setattr(
             cli_console,
             "launch_console",
