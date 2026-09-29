@@ -100,6 +100,24 @@ LEGACY_GENERATED_CONTENT = "\n".join(
 )
 
 
+# 最早的脚手架（2026-06-12）在 section 与各 target 上写的都是 `enabled = false`。
+OLDEST_SCAFFOLD_DISABLED_GENERATED_CONTENT = """\
+[agent_runner.generated_content]
+enabled = false
+fallback = "template"
+
+[agent_runner.generated_content.issue_from_prd]
+enabled = false
+mode = "template"
+output = "json"
+
+[agent_runner.generated_content.draft_pr]
+enabled = false
+mode = "template"
+output = "json"
+"""
+
+
 def _write_config(repo_root_path: Path, *config_parts: str) -> Path:
     """把若干段配置文本按空行拼接写成 ``.iar.toml``。"""
     config_path = repo_root_path / ".iar.toml"
@@ -289,6 +307,47 @@ prompt = "reply with a JSON object"
     generated_content = _effective_generated_content(tmp_path)
     assert generated_content.draft_pr.output == "json"
     assert generated_content.issue_from_prd.output == "json"
+
+
+def test_migration_reports_but_keeps_disabled_generation(tmp_path: Path) -> None:
+    """最早脚手架的 `enabled = false` 只报告不清：清掉会让仓库开始调用 AI，行为必须不变。"""
+    config_path = _write_config(
+        tmp_path,
+        '[agent_runner.repository]\nid = "target-local"\n',
+        OLDEST_SCAFFOLD_DISABLED_GENERATED_CONTENT,
+    )
+
+    migration_result = migrate_repository_local_config(tmp_path)
+
+    assert _kept_pin_keys(migration_result) == [
+        ("agent_runner.generated_content", "enabled"),
+        ("agent_runner.generated_content.issue_from_prd", "enabled"),
+        ("agent_runner.generated_content.draft_pr", "enabled"),
+    ]
+    assert all("generation stays off" in pin.reason for pin in migration_result.kept_pins)
+    expected_config_text = """\
+[agent_runner.repository]
+id = "target-local"
+
+[agent_runner.generated_content]
+enabled = false
+
+[agent_runner.generated_content.issue_from_prd]
+enabled = false
+
+[agent_runner.generated_content.draft_pr]
+enabled = false
+"""
+    assert config_path.read_text(encoding="utf-8") == expected_config_text
+    generated_content = _effective_generated_content(tmp_path)
+    assert not generated_content.enabled
+    assert not generated_content.issue_from_prd.enabled
+    assert not generated_content.draft_pr.enabled
+
+    second_result = migrate_repository_local_config(tmp_path)
+
+    assert not second_result.changed
+    assert len(second_result.kept_pins) == 3
 
 
 def test_migrated_scaffold_follows_the_current_defaults(tmp_path: Path) -> None:

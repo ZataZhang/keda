@@ -12,6 +12,8 @@
   有自定义模板说明仓库是有意使用模板渲染，不替它改行为。
 - ``output`` 只在没有自定义 ``prompt`` 时清：输出格式必须与提示词的回复格式一致，
   自定义提示词自己决定格式。
+- ``enabled = false`` 只报告不清：最早的脚手架写的就是它，但从值上分不清是遗留还是
+  有意关闭；清掉会让仓库开始调用 AI 生成，这个决定留给仓库自己。
 
 实现是逐行编辑而不是重新序列化，这样注释和排版都保留：只删钉子本身、紧贴在它上面的
 注释行，以及因此变空的表头。写回前用 ``tomllib`` 重新解析，结果必须恰好等于“原配置
@@ -42,14 +44,15 @@ _GENERATED_CONTENT_TABLE_NAME = "agent_runner.generated_content"
 # - mode：template 是各 target 曾经的默认；agent 在一天窗口（2026-07-01）里也曾被
 #   写入过，且与当前默认相同，删掉不改变行为。
 # - timeout_seconds：2026-06-15 前默认 60，之后 120。
+# - enabled：最早的脚手架（2026-06-12）写 false，随后改成 true。
 _LEGACY_SECTION_PIN_VALUES: dict[str, tuple[object, ...]] = {
-    "enabled": (True,),
+    "enabled": (True, False),
     "fallback": ("template",),
     "max_input_chars": (20000,),
     "default_agent": ("auto",),
 }
 _LEGACY_TARGET_PIN_VALUES: dict[str, tuple[object, ...]] = {
-    "enabled": (True,),
+    "enabled": (True, False),
     "mode": ("template", "agent"),
     "output": ("json",),
     "title_template": ("",),
@@ -224,6 +227,11 @@ def _keep_reason(
     table_name: str, key_name: str, pinned_value: object, table_values: dict[str, object]
 ) -> str | None:
     """旧脚手架值虽然可清，但清掉会改变仓库有意为之的行为时，返回保留原因。"""
+    if key_name == "enabled" and pinned_value is False:
+        return (
+            "generation stays off here; delete this line to follow the current default, "
+            "which is on"
+        )
     if key_name == "mode" and pinned_value == "template":
         has_custom_template = any(
             not _is_blank_text(table_values.get(template_key, ""))
