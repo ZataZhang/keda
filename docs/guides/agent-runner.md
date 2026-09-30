@@ -2826,7 +2826,7 @@ reexecute_commands = true          # keda 复跑每个证据项 command 确认�
 reexecute_timeout_seconds = 300    # 复跑单条命令的超时秒数（命令须为自终止的检查）
 reexecute_cache_enabled = true     # 工作区干净时按 HEAD^{tree} 缓存"已通过"，跳过重复复跑；脏则不缓存
 verifier_enabled = true            # 开 PR 前换一个 ≠builder 的 agent 对抗复验;red 自动打回 builder,yellow 贴警告评论,green 打 validation/verifier-passed label。仅对带 iar:structured-evidence marker 且要求验证的 issue 生效
-verifier_agent = "auto"            # verifier 用哪个 agent（auto=自动挑一个≠builder 的）
+verifier_agent = "auto"            # verifier 用哪个 agent（auto=自动挑一个≠builder 的；显式指定的那个跑不起来时按 agent_fallback_order 顺延，封顶 max_agent_switches）
 verifier_timeout_seconds = 1800    # verifier 运行墙钟上限；多条 RV + negative control 的 PRD 需要更大值
 verifier_inactivity_timeout_seconds = 1200  # 连续多少秒没有任何输出才判卡死；与墙钟并存，让墙钟能放宽而真卡死仍被及时杀掉
 frontend_visual_evidence_required = true   # 前端改动（git diff 命中 frontend_paths）强制证据含视觉文件(图片/视频);否则门禁失败。按 diff 判定,独立于 verifier
@@ -2847,6 +2847,19 @@ verifier 以 `capture_output` 运行，输出不进 stdout、也不逐行落日�
 - **两种阻断成因分开表述**：verdict marker 缺失时仍按 fail-safe 阻断（绝不静默放行），但它是 **verifier 侧的协议/可靠性故障**，不代表 builder 的改动有缺陷。此时 attempt Detail 与 recovery prompt 明确写"NO verdict marker / verifier-side protocol failure / do not invent fixes"，并指向上面那份原始响应；只有真判 `red` 才说"Fix what the verifier found"。
 - **为什么必须区分**：`ValidationVerdict.findings` 总会被填入响应文本，所以"findings 是否为空"无法用来判断有没有 verdict——唯一可靠信号是 `marker_found`。混在一起时，verifier 只是漏了最后那行 marker，builder 却被指使去修一个不存在的发现，白烧一轮 attempt。
 - **排查顺序**：daemon 被 verifier 挡下时，先读 `verifier-response.txt`；若里面没有任何实际发现，问题在 verifier agent（考虑用 `verifier_agent` 显式指定一个稳定的 agent，而不是 `auto`），不在被验的代码。
+
+### verifier agent 跑不起来：顺延候选，全失败才降级阻断
+
+`red`、"没吐 verdict"、**"agent 根本没跑起来"** 是第三种成因，三者都不能混。旧行为里 verifier 的 agent 调用没有任何兜底——agent CLI 缺失、额度耗尽或进程级失败都会把异常直接抛出 `run_verifier_gate`，整个 Issue 判 `agent/failed`。因为 verifier 是开 PR 前的必经步骤，一个被显式钉死的 verifier（如 `verifier = "codex"`）一旦额度耗尽，**所有** Issue 都会在这一步全灭，而失败信息里只有被截断的命令输出。
+
+现在的行为：
+
+- **顺延候选**：选定的 verifier agent 跑不起来时，按 `agent_fallback_order` 依次尝试下一个候选，封顶 `max_agent_switches`（与 builder 换 agent 共用同一套配置与预算，不新增开关）。候选池始终排除 builder——独立性靠"换 model 即换判定视角"保证，显式声明的 `verifier` 仍是首选，只在它跑不起来时才让位。每次候选都重新取证据快照，换 agent 重跑时起点干净。
+- **超时不参与顺延**：`TimeoutExpired` 仍按运行事故处理（不伪造 verdict、也不换 agent），与上一节语义一致。
+- **全失败才降级**：所有候选都跑不起来时抛 `ValidationEvidenceError`，消息明说这是 **runner/agent 侧故障、不是被证实的代码缺陷**（"do not invent fixes for findings that do not exist"），于是失败落进 builder 既有的 recovery 循环，而不是判死整个 Issue。
+- **额度措辞要认全**：provider-capacity 判定曾要求 `usage limit exceeded|reached`，认不出 codex 的 `You've hit your usage limit` —— 同一句额度耗尽因此既不算 capacity（builder 路径只重试不换 agent）也不触发顺延。现在裸 `usage limit` 与 `insufficient_quota` 都算，重置时刻同时支持 Claude 的 `resets at <ISO>` 与 codex 的 `try again at Oct 5th, 2026 10:24 AM`。
+
+**排查顺序**：daemon 报 "independent verifier could not run" 时看 `Tried agent(s)` 与 `Last failure`；若是额度问题，换一个有余量的 verifier agent（或改 `verifier = "auto"`）再重跑，不必怀疑被验代码。
 
 ### verifier 超时：墙钟与静默期两条线
 

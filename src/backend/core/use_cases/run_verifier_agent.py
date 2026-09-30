@@ -439,6 +439,74 @@ def _choose_verifier_agent(
     return builder_agent
 
 
+def _verifier_candidate_agents(
+    config: AppConfig,
+    builder_agent: str,
+    primary_agent: str,
+) -> tuple[str, ...]:
+    """返回本次 verifier 的候选 agent 序列（首选之后按 fallback 链补齐）。
+
+    显式声明的 ``verifier`` agent 仍然是首选——只有当它**根本跑不起来**（CLI
+    不存在 / 额度耗尽 / 进程级失败）时才顺延。候选池复用 ``agent_fallback_order``
+    与 ``max_agent_switches``，与 builder 换 agent 用同一套配置与预算，不新增开关；
+    独立性由"≠ builder"保证（换 model 即换判定视角）。
+
+    Args:
+        config: 应用配置。
+        builder_agent: 本次 builder 用的 agent，候选里必须排除。
+        primary_agent: 首选 verifier agent（显式声明或 auto 挑出的那个）。
+
+    Returns:
+        去重后的候选序列，长度最多 ``max_agent_switches + 1``；首选始终在首位。
+    """
+    candidates = [primary_agent]
+    max_switches = max(0, config.runner.max_agent_switches)
+    for candidate in config.runner.agent_fallback_order:
+        if len(candidates) - 1 >= max_switches:
+            break
+        if candidate != builder_agent and candidate not in candidates:
+            candidates.append(candidate)
+    return tuple(candidates)
+
+
+def _format_verifier_unavailable_message(
+    *,
+    issue_number: int,
+    tried_agents: tuple[str, ...],
+    failure: BaseException | None,
+) -> str:
+    """构造"所有候选 verifier agent 都跑不起来"的阻断消息。
+
+    与 :func:`_format_verifier_block_message` 同一条纪律：把"verifier 侧跑不起来"
+    与"verifier 判了 red"讲成两件不同的事，builder 才不会被指使去修一个不存在
+    的缺陷。措辞刻意不要求 agent 去"修"，因为这是 runner/agent 侧的问题。
+
+    Args:
+        issue_number: 当前 Issue 编号。
+        tried_agents: 依次尝试过的 agent 名。
+        failure: 最后一次失败。
+
+    Returns:
+        写进 attempt 历史与 recovery prompt 的阻断消息。
+    """
+    from backend.core.use_cases.agent_runner_failure import is_provider_capacity_failure
+
+    if failure is not None and is_provider_capacity_failure(failure):
+        reason = (
+            "every candidate agent's provider is out of quota or rate limited, so retrying "
+            "the same agents before the usage window resets cannot help"
+        )
+    else:
+        reason = "every candidate agent failed to run"
+    return (
+        f"The independent verifier could not run for issue #{issue_number}: {reason}. "
+        f"Tried agent(s): {', '.join(tried_agents) or '(none)'}. "
+        "This is a runner/agent-side failure, NOT a proven defect in the change: do not "
+        "invent fixes for findings that do not exist. Restore a working verifier agent "
+        f"(or quota) before re-running. Last failure: {failure}"
+    )
+
+
 def _format_verifier_block_message(
     *,
     verdict: ValidationVerdict,
@@ -503,13 +571,20 @@ def run_verifier_gate(
     先把部分输出落盘再让异常上抛。另外 verifier 复跑证据脚本会覆盖 builder 的
     ``rv-*`` 文件,因此这里对证据目录做快照并在结束后恢复。
 
+    选定的 verifier agent **跑不起来**时(CLI 缺失 / 额度耗尽 / 进程级失败)不再
+    判死整个 Issue:先按 ``agent_fallback_order``(封顶 ``max_agent_switches``、始终
+    ≠ builder)顺延下一个候选;全部失败才降级成 fail-safe 阻断,让失败落进 builder
+    既有的 recovery 循环。
+
     Returns:
         ``ValidationVerdict`` 当 verifier 实际运行(verdict 非 red 时返回,red
         时抛异常);``None`` 当 verifier 未启用 / issue 不要求验证 / 无结构化证据
         marker(调用方据此决定是否在 PR 上做 label/评论副作用)。
 
     Raises:
-        ValidationEvidenceError: verifier 判定 red(经 recovery 自动打回 builder)。
+        ValidationEvidenceError: verifier 判定 red(经 recovery 自动打回 builder),
+            或所有候选 verifier agent 都跑不起来(verifier 侧故障,同样经 recovery
+            打回,但消息明说不是被证实的代码缺陷)。
         subprocess.TimeoutExpired: verifier 超时被杀(部分输出已落盘、证据已恢复)。
     """
     if not config.validation.verifier_enabled:
@@ -538,27 +613,73 @@ def run_verifier_gate(
     response_log_path = (
         resolve_issue_evidence_dir(worktree_path, config, issue) / _VERIFIER_RESPONSE_FILENAME
     )
-    # verifier 复跑的正是 builder 的 capture 脚本,会把 rv-*.txt 覆盖成自己的
-    # (可能是 negative control 的)输出;快照 + 恢复保证发布出去的仍是通过门禁
-    # 的那份证据。恢复放在 finally:超时被杀时污染最严重。
-    evidence_snapshot = snapshot_evidence_dir(worktree_path, config, issue)
-    try:
-        verdict = run_verifier_agent(
-            issue,
-            worktree_path,
-            builder_sha,
-            manifest,
-            verifier_agent,
-            process_runner,
-            config=config,
-            timeout_seconds=config.validation.verifier_timeout_seconds,
-            inactivity_timeout_seconds=config.validation.verifier_inactivity_timeout_seconds,
-            response_log_path=response_log_path,
+    candidate_agents = _verifier_candidate_agents(config, builder_agent, verifier_agent)
+    chosen_agent = verifier_agent
+    verdict: ValidationVerdict | None = None
+    tried_agents: list[str] = []
+    last_failure: BaseException | None = None
+
+    for index, candidate_agent in enumerate(candidate_agents):
+        is_last_candidate = index == len(candidate_agents) - 1
+        # verifier 复跑的正是 builder 的 capture 脚本,会把 rv-*.txt 覆盖成自己的
+        # (可能是 negative control 的)输出;快照 + 恢复保证发布出去的仍是通过门禁
+        # 的那份证据。恢复放在 finally:超时被杀时污染最严重，逐个候选取快照则保证
+        # 换 agent 重跑时起点干净。
+        evidence_snapshot = snapshot_evidence_dir(worktree_path, config, issue)
+        try:
+            verdict = run_verifier_agent(
+                issue,
+                worktree_path,
+                builder_sha,
+                manifest,
+                candidate_agent,
+                process_runner,
+                config=config,
+                timeout_seconds=config.validation.verifier_timeout_seconds,
+                inactivity_timeout_seconds=config.validation.verifier_inactivity_timeout_seconds,
+                response_log_path=response_log_path,
+            )
+        except subprocess.TimeoutExpired:
+            # 超时按运行事故处理:不伪造 verdict、也不换 agent(与原文语义一致)。
+            raise
+        except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+            # agent 跑不起来（CLI 缺失 / 额度耗尽 / 进程级失败）不该判死整个 Issue:
+            # 顺延下一个候选,全部失败才降级成 fail-safe red 交回可恢复的 repair 循环。
+            tried_agents.append(candidate_agent)
+            last_failure = exc
+            if is_last_candidate:
+                break
+            _logger.warning(
+                "Independent verifier agent %r could not run for Issue #%d (%s); "
+                "trying the next candidate agent.",
+                candidate_agent,
+                issue.number,
+                exc,
+            )
+            continue
+        finally:
+            restore_evidence_snapshot(
+                evidence_snapshot,
+                keep_filenames=(_VERIFIER_RESPONSE_FILENAME,),
+            )
+        chosen_agent = candidate_agent
+        break
+
+    if verdict is None:
+        raise ValidationEvidenceError(
+            _format_verifier_unavailable_message(
+                issue_number=issue.number,
+                tried_agents=tuple(tried_agents),
+                failure=last_failure,
+            )
         )
-    finally:
-        restore_evidence_snapshot(
-            evidence_snapshot,
-            keep_filenames=(_VERIFIER_RESPONSE_FILENAME,),
+    if chosen_agent != verifier_agent:
+        _logger.warning(
+            "Independent verifier fell back to agent %r for Issue #%d; the configured "
+            "verifier agent %r could not run.",
+            chosen_agent,
+            issue.number,
+            verifier_agent,
         )
     if get_head_sha(worktree_path, process_runner) != builder_sha or has_changes(
         worktree_path, process_runner
@@ -571,7 +692,7 @@ def run_verifier_gate(
         raise ValidationEvidenceError(
             _format_verifier_block_message(
                 verdict=verdict,
-                verifier_agent=verifier_agent,
+                verifier_agent=chosen_agent,
                 issue_number=issue.number,
                 response_log_path=response_log_path,
             )
