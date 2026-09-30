@@ -11,6 +11,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
     IssueSummary,
+    RunnerConfig,
     ValidationConfig,
 )
 from backend.core.use_cases.agent_runner_structured_evidence import (
@@ -722,3 +723,89 @@ def test_run_verifier_gate_missing_marker_message_does_not_blame_the_builder(
     assert "do not invent fixes" in message
     assert "verifier-response.txt" in message
     assert "Fix what the verifier found" not in message
+
+
+#: codex 的真实额度耗尽输出（2026-09-30 实测原文）。旧判定只认
+#: "usage limit exceeded|reached"，认不出这句，于是 verifier 直接判死整个 Issue。
+_CODEX_USAGE_LIMIT_STDERR = (
+    "ERROR: You\u2019ve hit your usage limit. Upgrade to Pro "
+    "(https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage "
+    "to purchase more credits or try again at Oct 5th, 2026 10:24 AM.\n"
+)
+
+
+def test_verifier_candidate_agents_excludes_builder_and_respects_the_switch_cap() -> None:
+    """候选序列 = 首选 + fallback 链里 ≠ builder 的 agent，按 max_agent_switches 封顶。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    config = AppConfig(
+        validation=ValidationConfig(verifier_enabled=True),
+        runner=RunnerConfig(
+            agent_fallback_order=("claude", "kimi", "codex"),
+            max_agent_switches=2,
+        ),
+    )
+
+    assert rva._verifier_candidate_agents(config, "qoder", "codex") == ("codex", "claude", "kimi")
+    # builder 自己永远不进候选（独立性靠 ≠ builder 保证）。
+    assert "qoder" not in rva._verifier_candidate_agents(config, "qoder", "codex")
+
+
+def test_verifier_gate_falls_back_when_the_configured_agent_cannot_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """首选 verifier agent 跑不起来时顺延下一个候选，而不是判死整个 Issue。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    attempted: list[str] = []
+    monkeypatch.setattr(rva, "load_evidence_manifest", lambda *a, **k: _manifest())
+    monkeypatch.setattr(rva, "get_head_sha", lambda *a, **k: "abc1234")
+
+    def _fake_run(_issue, _worktree, _sha, _manifest, agent, _runner, **_kwargs):
+        attempted.append(agent)
+        if agent == "kimi":
+            raise subprocess.CalledProcessError(
+                1, ["codex"], output=_CODEX_USAGE_LIMIT_STDERR, stderr=""
+            )
+        return ValidationVerdict(risk="green")
+
+    monkeypatch.setattr(rva, "run_verifier_agent", _fake_run)
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    verdict = rva.run_verifier_gate(
+        _structured_issue(), tmp_path, config, FakeProcessRunner(), "claude"
+    )
+
+    assert verdict.risk == "green"
+    assert attempted == ["kimi", "codex"]
+
+
+def test_verifier_gate_blocks_rather_than_killing_the_issue_when_no_agent_can_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """所有候选都跑不起来时降级成 fail-safe red，让失败落进可恢复的 repair 循环。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    attempted: list[str] = []
+    monkeypatch.setattr(rva, "load_evidence_manifest", lambda *a, **k: _manifest())
+    monkeypatch.setattr(rva, "get_head_sha", lambda *a, **k: "abc1234")
+
+    def _fake_run(_issue, _worktree, _sha, _manifest, agent, _runner, **_kwargs):
+        attempted.append(agent)
+        raise subprocess.CalledProcessError(
+            1, ["codex"], output=_CODEX_USAGE_LIMIT_STDERR, stderr=""
+        )
+
+    monkeypatch.setattr(rva, "run_verifier_agent", _fake_run)
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        rva.run_verifier_gate(_structured_issue(), tmp_path, config, FakeProcessRunner(), "claude")
+
+    message = str(exc_info.value)
+    assert "could not run" in message
+    assert "out of quota or rate limited" in message
+    assert "runner/agent-side failure" in message
+    assert "do not invent fixes" in message
+    # 候选池被真正走完了，而不是第一次失败就放弃。
+    assert attempted == ["kimi", "codex"]

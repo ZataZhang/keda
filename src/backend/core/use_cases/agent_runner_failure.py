@@ -232,16 +232,28 @@ _ATTEMPT_NUMBER_SCOPE_NOTE = (
 )
 
 _USAGE_LIMIT_HINT_PATTERN = re.compile(
-    r"usage limit (?:exceeded|reached)|request rejected \(429\)",
+    r"usage limit|insufficient_quota|request rejected \(429\)",
     re.IGNORECASE,
 )
-_USAGE_LIMIT_RESET_AT_PATTERN = re.compile(r"resets at (\S+)")
+#: 两种重置时刻写法都要能取到：Claude 的 "resets at <ISO 时间戳>"（单个 token）
+#: 与 codex 的 "try again at Oct 5th, 2026 10:24 AM"（带空格的自然语言）。
+_USAGE_LIMIT_RESET_AT_PATTERN = re.compile(
+    r"resets\s+at\s+(?P<iso>\S+)" r"|try again\s+at\s+(?P<prose>[^\n]+)",
+    re.IGNORECASE,
+)
 
 #: Provider capacity / rate-limit signatures. A superset of the usage-limit
 #: hint above: these mean the same agent will keep failing until the provider
 #: window resets, so the runner should switch agents rather than retry.
+#:
+#: ``usage limit`` **不加** "exceeded/reached" 限定：codex 的原文是
+#: "You've hit your usage limit."，旧写法认不出它，于是同一句额度耗尽在 builder
+#: 路径里被判成普通 AGENT_ERROR（只重试不换 agent）、在 verifier 路径里直接把
+#: Issue 判死。判定只作用于 agent 调用的异常文本（``detect_provider_errors``
+#: 仅在该调用点开启），所以放宽到裸 "usage limit" 不会误伤验证输出。
 _PROVIDER_CAPACITY_HINT_PATTERN = re.compile(
-    r"usage limit (?:exceeded|reached)"
+    r"usage limit"
+    r"|insufficient_quota"
     r"|request rejected \(429\)"
     r"|\b429\b"
     r"|too many requests"
@@ -394,13 +406,14 @@ def detect_usage_limit_root_cause(failure_text: str) -> str | None:
         return None
     reset_match = _USAGE_LIMIT_RESET_AT_PATTERN.search(failure_text)
     if reset_match is not None:
-        reset_at = reset_match.group(1).rstrip(".,;)")
+        reset_at = (reset_match.group("iso") or reset_match.group("prose") or "").strip()
+        reset_at = reset_at.rstrip(".,;)")
         return (
-            "**Root cause:** Claude API usage limit reached (429). "
+            "**Root cause:** the agent provider's usage limit is exhausted. "
             f"The limit resets at `{reset_at}`; retries before then will fail the same way."
         )
     return (
-        "**Root cause:** Claude API usage limit reached (429). "
+        "**Root cause:** the agent provider's usage limit is exhausted. "
         "Retries will keep failing until the usage window resets."
     )
 

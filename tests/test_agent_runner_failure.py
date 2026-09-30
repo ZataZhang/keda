@@ -241,6 +241,13 @@ _USAGE_LIMIT_STDOUT = (
     "resets at 2026-06-10T15:00:00+08:00 (2056)\n"
 )
 
+#: codex 的真实额度耗尽输出（2026-09-30 实测原文）。
+_CODEX_USAGE_LIMIT_STDOUT = (
+    "ERROR: You\u2019ve hit your usage limit. Upgrade to Pro "
+    "(https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage "
+    "to purchase more credits or try again at Oct 5th, 2026 10:24 AM.\n"
+)
+
 
 def _usage_limit_agent_error() -> subprocess.CalledProcessError:
     return subprocess.CalledProcessError(
@@ -329,9 +336,20 @@ def test_detect_usage_limit_root_cause() -> None:
     """Usage-limit errors should yield a summary with the reset time."""
     summary = detect_usage_limit_root_cause(_USAGE_LIMIT_STDOUT)
     assert summary is not None
-    assert "429" in summary
+    assert "usage limit" in summary.lower()
     assert "2026-06-10T15:00:00+08:00" in summary
     assert detect_usage_limit_root_cause("just lint failed with exit code 1") is None
+
+
+def test_detect_usage_limit_root_cause_reads_codex_wording() -> None:
+    """codex 的措辞（"hit your usage limit" / "try again at …"）也要认得出。
+
+    旧判定要求 "usage limit exceeded|reached"，于是同一句额度耗尽在 builder 路径
+    只被判成普通 AGENT_ERROR（重试而不换 agent）、在 verifier 路径直接把 Issue 判死。
+    """
+    summary = detect_usage_limit_root_cause(_CODEX_USAGE_LIMIT_STDOUT)
+    assert summary is not None
+    assert "Oct 5th, 2026 10:24 AM" in summary
 
 
 def test_is_transient_failure_matches_400_invalid_params() -> None:
