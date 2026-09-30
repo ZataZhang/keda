@@ -69,8 +69,11 @@ curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | ba
 `prd` 与 `code-reviewer` 由远程
 [`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 仓库维护，不随 Keda
 wheel 分发。`iar init` 会仅下载这两个 Skill 并安装到用户级目录，绝不会写入项目目录；因此同一台
-机器上的所有项目共用同一份规范。安装目标依次为 `CC_SWITCH_SKILLS_DIR`、已有的 cc-switch、Codex、
-Claude、Kimi Code 配置目录；若都不存在则创建 `~/.codex/skills`。
+机器上的所有项目共用同一份规范。安装目标首位是 **keda 自有目录 `~/.iar/skills`**——runner
+解析 PRD 时优先取这份，所以用户删掉 agent 目录里的副本也不会让 `iar` 失去解析能力；其后
+是 Codex、Claude、Kimi Code 等已检测到的 agent 配置目录。可用 `IAR_SKILLS_DIR` 覆盖安装
+根目录（CI / 测试把安装落到临时目录时用），用 `IAR_PRD_SKILL_PATH` 直接指定某一份
+`SKILL.md`。
 
 ## 前置要求
 

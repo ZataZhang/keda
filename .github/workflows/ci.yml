@@ -127,7 +127,7 @@ jobs:
           init_repo="$(mktemp -d)"
           git -C "$init_repo" init -q
           cd "$init_repo"
-          CC_SWITCH_SKILLS_DIR="$skills_root" \
+          IAR_SKILLS_DIR="$skills_root" \
             uv run --project "$GITHUB_WORKSPACE" iar init
           test -f "$skills_root/prd/scripts/prd_contract.py"
           echo "IAR_PRD_SKILL_PATH=$skills_root/prd/SKILL.md" >> "$GITHUB_ENV"

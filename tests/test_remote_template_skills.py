@@ -9,6 +9,7 @@ import pytest
 
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.shared.prd_skill_location import keda_owned_skills_root
 from backend.engines.agent_runner.remote_template_skills import (
     REMOTE_TEMPLATE_SKILL_NAMES,
     REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL,
@@ -68,14 +69,15 @@ def test_resolve_user_skill_install_roots_keeps_detected_agents_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """只有已存在配置目录的 agent 才成为安装目标，且保持注册顺序。"""
+    """keda 自有目录恒在首位；其余只有已存在配置目录的 agent 才入选，保持注册顺序。"""
     user_home_path = tmp_path / "home"
     (user_home_path / ".claude").mkdir(parents=True)
     (user_home_path / ".codex").mkdir(parents=True)
     (user_home_path / ".kimi-code").mkdir(parents=True)
-    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
 
     assert resolve_user_skill_install_roots(user_home_path) == (
+        keda_owned_skills_root(user_home_path),
         user_home_path / ".codex" / "skills",
         user_home_path / ".claude" / "skills",
         user_home_path / ".kimi-code" / "skills",
@@ -86,12 +88,13 @@ def test_resolve_user_skill_install_roots_ignores_cc_switch_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``~/.cc-switch`` 不再是安装目标；仅存在它时回退到注册表首个 agent。"""
+    """``~/.cc-switch`` 不再是安装目标；仅存在它时只有 keda 自有目录 + 注册表首个 agent。"""
     user_home_path = tmp_path / "home"
     (user_home_path / ".cc-switch").mkdir(parents=True)
-    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
 
     assert resolve_user_skill_install_roots(user_home_path) == (
+        keda_owned_skills_root(user_home_path),
         _first_registry_skills_root(user_home_path),
     )
 
@@ -100,12 +103,13 @@ def test_resolve_user_skill_install_roots_falls_back_to_first_registry_agent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """没有任何 agent 配置目录时回退到注册表首个声明 ``auth_home`` 的 agent。"""
+    """没有任何 agent 配置目录时仍给出 keda 自有目录 + 注册表首个声明 ``auth_home`` 的 agent。"""
     user_home_path = tmp_path / "home"
     user_home_path.mkdir(parents=True)
-    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
 
     assert resolve_user_skill_install_roots(user_home_path) == (
+        keda_owned_skills_root(user_home_path),
         _first_registry_skills_root(user_home_path),
     )
 
@@ -114,15 +118,15 @@ def test_resolve_user_skill_install_roots_prefers_configured_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CC_SWITCH_SKILLS_DIR 必须覆盖所有自动探测到的用户目录。"""
+    """``IAR_SKILLS_DIR`` 必须覆盖所有自动探测到的目录（含 keda 自有目录）。"""
     configured_skills_path = tmp_path / "configured-skills"
-    monkeypatch.setenv("CC_SWITCH_SKILLS_DIR", str(configured_skills_path))
+    monkeypatch.setenv("IAR_SKILLS_DIR", str(configured_skills_path))
 
     assert resolve_user_skill_install_roots(tmp_path / "home") == (configured_skills_path,)
 
 
 def test_install_remote_template_skills_downloads_only_required_user_skills(tmp_path: Path) -> None:
-    """远程 sparse checkout 只把 prd 与 code-reviewer 写入用户级 Kimi Code 目录。"""
+    """远程 sparse checkout 把 prd 与 code-reviewer 写入 keda 自有目录与 Kimi Code 目录。"""
     user_home_path = tmp_path / "home"
     (user_home_path / ".kimi-code").mkdir(parents=True)
     fake_process_runner = FakeRemoteTemplateProcessRunner()
@@ -135,7 +139,10 @@ def test_install_remote_template_skills_downloads_only_required_user_skills(tmp_
     )
 
     target_skills_root = user_home_path / ".kimi-code" / "skills"
-    assert install_result.target_skills_roots == (target_skills_root,)
+    assert install_result.target_skills_roots == (
+        keda_owned_skills_root(user_home_path),
+        target_skills_root,
+    )
     assert install_result.installed_skill_names == REMOTE_TEMPLATE_SKILL_NAMES
     assert not install_result.dry_run
     for skill_name in REMOTE_TEMPLATE_SKILL_NAMES:
@@ -188,8 +195,8 @@ def test_install_remote_template_skills_writes_into_every_detected_agent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """每个检测到配置目录的 agent 都拿到同一份远程 Skill 副本。"""
-    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
+    """keda 自有目录 + 每个检测到配置目录的 agent 都拿到同一份远程 Skill 副本。"""
+    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
     user_home_path = tmp_path / "home"
     (user_home_path / ".codex").mkdir(parents=True)
     (user_home_path / ".claude").mkdir(parents=True)
@@ -204,13 +211,21 @@ def test_install_remote_template_skills_writes_into_every_detected_agent(
         )
     )
 
-    assert install_result.target_skills_roots == (codex_skills_root, claude_skills_root)
+    assert install_result.target_skills_roots == (
+        keda_owned_skills_root(user_home_path),
+        codex_skills_root,
+        claude_skills_root,
+    )
     # 远程仓库只克隆一次，随后写入全部目标目录。
     clone_command_count = sum(
         1 for command in fake_process_runner.command_tuples if command[:2] == ("git", "clone")
     )
     assert clone_command_count == 1
-    for skills_root in (codex_skills_root, claude_skills_root):
+    for skills_root in (
+        keda_owned_skills_root(user_home_path),
+        codex_skills_root,
+        claude_skills_root,
+    ):
         for skill_name in REMOTE_TEMPLATE_SKILL_NAMES:
             assert (skills_root / skill_name / "SKILL.md").read_text(encoding="utf-8") == (
                 f"remote {skill_name}"
@@ -263,6 +278,11 @@ def test_install_remote_template_skills_skips_when_skill_md_matches(tmp_path: Pa
     (target_skill_path / "SKILL.md").write_bytes(matching_payload)
     (target_skill_path / "user-extra-note.md").write_bytes(b"keep this")
     original_mtime_ns = target_skill_path.stat().st_mtime_ns
+    # keda 自有目录也在安装目标里：把它预置成与远程一致，跳过判定才不会被它带偏
+    # （聚合结果是"任一目录覆盖过就算覆盖"）。
+    keda_owned_prd_path = keda_owned_skills_root(user_home_path) / "prd"
+    keda_owned_prd_path.mkdir(parents=True)
+    (keda_owned_prd_path / "SKILL.md").write_bytes(matching_payload)
     fake_process_runner = _build_process_runner_for_remote_skill_payload(
         remote_skill_payload={"prd": matching_payload, "code-reviewer": b"remote code-reviewer"},
     )

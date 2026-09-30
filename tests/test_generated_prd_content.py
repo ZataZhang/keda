@@ -273,7 +273,7 @@ def test_load_prd_skill_spec_reads_and_handles_missing(tmp_path: Path) -> None:
 
 
 def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """显式覆盖、环境变量与模板用户级目录按优先级解析。"""
+    """显式覆盖 → IAR_PRD_SKILL_PATH → IAR_SKILLS_DIR → keda 自有 → agent 用户级目录。"""
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     explicit = tmp_path / "explicit.md"
     assert resolve_prd_skill_path(explicit) == explicit
@@ -283,14 +283,16 @@ def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.M
     configured_skill_path = tmp_path / "configured-skills" / "prd" / "SKILL.md"
     configured_skill_path.parent.mkdir(parents=True)
     configured_skill_path.write_text("configured", encoding="utf-8")
-    monkeypatch.setenv("CC_SWITCH_SKILLS_DIR", str(tmp_path / "configured-skills"))
+    monkeypatch.setenv("IAR_SKILLS_DIR", str(tmp_path / "configured-skills"))
     assert resolve_prd_skill_path() == configured_skill_path
-    monkeypatch.delenv("CC_SWITCH_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
 
+    keda_owned_skill_path = tmp_path / ".iar" / "skills" / "prd" / "SKILL.md"
     codex_skill_path = tmp_path / ".codex" / "skills" / "prd" / "SKILL.md"
     claude_skill_path = tmp_path / ".claude" / "skills" / "prd" / "SKILL.md"
     kimi_code_skill_path = tmp_path / ".kimi-code" / "skills" / "prd" / "SKILL.md"
     for skill_path in (
+        keda_owned_skill_path,
         codex_skill_path,
         claude_skill_path,
         kimi_code_skill_path,
@@ -298,14 +300,17 @@ def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.M
         skill_path.parent.mkdir(parents=True, exist_ok=True)
         skill_path.write_text(skill_path.parent.parent.parent.name, encoding="utf-8")
 
+    # keda 自有副本优先于任何 agent 目录：用户删掉 agent 里的 prd 不影响 runner。
+    assert resolve_prd_skill_path() == keda_owned_skill_path
+    keda_owned_skill_path.unlink()
     assert resolve_prd_skill_path() == codex_skill_path
     codex_skill_path.unlink()
     assert resolve_prd_skill_path() == claude_skill_path
     claude_skill_path.unlink()
     assert resolve_prd_skill_path() == kimi_code_skill_path
     kimi_code_skill_path.unlink()
-    # 全部缺失时回落到注册表首个 agent 的候选路径。
-    assert resolve_prd_skill_path() == codex_skill_path
+    # 全部缺失时回落到第一个候选（keda 自有目录）。
+    assert resolve_prd_skill_path() == keda_owned_skill_path
 
 
 def test_generate_prd_content_agent_fallback_to_template() -> None:
