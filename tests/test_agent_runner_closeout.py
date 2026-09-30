@@ -499,3 +499,30 @@ def test_build_closeout_allowed_scope_covers_the_archive_target() -> None:
     # 收尾 pass 可在证据目录（含按任务子目录）内补证据。
     assert scope.allows("tasks/evidence/example/scripts/rv-1-oracle.py") is True
     assert scope.allows("src/feature.py") is False
+
+
+def test_escalated_recovery_carries_the_rolled_back_closeout_record(
+    tmp_path: Path,
+) -> None:
+    """收尾改动仍整体回滚，但明细要随升级交给下一次 attempt。
+
+    回滚是安全属性（勾选门禁没有独立验证源，留着凭空的勾就成了既成事实），
+    但"上轮收尾到底做了什么"是 runner 自行比对得出的事实，丢掉它只会让重跑
+    从零猜起。实证：ai-assistant #53 的升级 prompt 里连"收尾已处理过 8 项"都看不到。
+    """
+    worktree_path = _write_fixture_worktree(tmp_path)
+    fake_runner = _CloseoutScenarioRunner(worktree_path, _tick_checklist_without_change_log)
+
+    with pytest.raises(MaxRetriesExceededError):
+        _run_loop(worktree_path, _closeout_config(max_recovery_attempts=1), fake_runner)
+
+    recovery_prompts = [
+        prompt
+        for prompt in fake_runner.agent_prompts
+        if "A delivery-closeout pass already ran" in prompt
+    ]
+    assert recovery_prompts
+    assert "item 2" in recovery_prompts[0]
+
+    prd_text = (worktree_path / _PRD_RELATIVE_PATH).read_text(encoding="utf-8")
+    assert "- [ ] item 2" in prd_text

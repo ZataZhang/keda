@@ -33,7 +33,7 @@ from backend.core.shared.prd_change_log import (
     extract_prd_change_log_entry_count,
     parse_prd_change_log,
 )
-from backend.core.shared.prd_checklist import parse_prd_checklist
+from backend.core.shared.prd_checklist import PrdChecklistResult, parse_prd_checklist
 from backend.core.shared.prd_machine_contract import PRD_MACHINE_CONTRACT_POINTER
 from backend.core.use_cases.agent_runner_structured_evidence import (
     build_structured_evidence_prompt_suffix,
@@ -423,6 +423,32 @@ def _format_unchecked_items(
     return "\n".join(f"  - L{line}: {text}" for line, text in unchecked_items)
 
 
+def _human_group_missing_hint(checklist_result: PrdChecklistResult) -> str:
+    """清单提到 Human-Confirmed 却没识别出该分组时，补一句可行动的诊断。
+
+    只在"提到过 Human-Confirmed 但分组没被识别"时追加：这两种信号同时成立，
+    说明这些条目多半本就属于人属项、只是分组写法没被解析，而不是 executor 漏勾。
+    把病因直接写进报错，agent 才可能去修结构，而不是在不可满足的指令之间空转
+    （实证：ai-assistant Issue #53 的 closeout/repair 循环）。
+
+    Args:
+        checklist_result: 本次清单解析结果。
+
+    Returns:
+        需要提示时返回以空行开头的诊断段落，否则返回空串。
+    """
+    if checklist_result.human_group_found or not checklist_result.human_confirmed_mentioned:
+        return ""
+    return (
+        "\n\nSuspected checklist-structure problem: this section mentions `Human-Confirmed` "
+        "but no Human-Confirmed group was recognized, so those items are being treated as "
+        "executor items. A human-owned item must stay `- [ ]` and must not be ticked or "
+        "rewritten as `- [~]` here. Fix the group label instead: write it as its own line, "
+        "either a markdown heading (`### Human-Confirmed`) or a whole-line bold label "
+        "(`**Human-Confirmed**`)."
+    )
+
+
 def _validate_prd_checklist(
     file_content: str,
     prd_relative_path: str,
@@ -447,7 +473,8 @@ def _validate_prd_checklist(
     if checklist_result.execution_unchecked_items:
         unchecked_summary = _format_unchecked_items(checklist_result.execution_unchecked_items)
         raise PrdDeliveryError(
-            f"Acceptance Checklist has unchecked items in {prd_relative_path}:\n{unchecked_summary}",
+            f"Acceptance Checklist has unchecked items in {prd_relative_path}:\n"
+            f"{unchecked_summary}{_human_group_missing_hint(checklist_result)}",
             kind=DeliveryGateFailureKind.CHECKLIST_UNCHECKED,
         )
     return bool(checklist_result.human_pending_items)

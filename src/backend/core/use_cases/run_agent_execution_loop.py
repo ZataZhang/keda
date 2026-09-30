@@ -132,6 +132,39 @@ class _DeliveryCloseoutContext:
         return self.record.request
 
 
+@dataclass(frozen=True)
+class _CloseoutAttemptResult:
+    """一次交付收尾 pass 的结果。
+
+    Attributes:
+        revalidated: 收尾 pass 未越界、且门禁链重跑通过时为 True。
+        discarded_detail: 收尾判失败时，被撤销掉的那一轮收尾改动明细（runner 自行
+            比对得出，非 agent 自述）。收尾改动一律回滚，但明细会转交给下一次
+            attempt——否则重跑只能从零猜起，既白做一遍又拿不到"上轮试过什么"。
+    """
+
+    revalidated: bool
+    discarded_detail: str = ""
+
+
+def _render_discarded_closeout_note(result: _CloseoutAttemptResult) -> str:
+    """把被撤销的收尾改动渲染成给下一次 attempt 的上下文。
+
+    Args:
+        result: 本次收尾 pass 的结果。
+
+    Returns:
+        需要提示时返回以空行开头的段落，否则返回空串。
+    """
+    if not result.discarded_detail:
+        return ""
+    return (
+        "\n\nA delivery-closeout pass already ran for this failure and its checklist edits "
+        "were rolled back (keep that in mind; do not assume they are still applied). "
+        "Runner-measured record of what it did:\n" + result.discarded_detail
+    )
+
+
 def _record_attempt(
     context: _AttemptRecordContext,
     *,
@@ -238,33 +271,34 @@ def _attempt_delivery_closeout(
     context: _DeliveryCloseoutContext,
     *,
     prd_overrides: Mapping[str, str] | None = None,
-) -> bool:
+) -> _CloseoutAttemptResult:
     """尝试用一次短命的收尾修复接住交付门禁失败。
 
-    只接住被抛出点标记为收尾类的失败；真失败与收尾层被关闭时立刻返回 ``False``，
-    调用方走本层落地前的整轮重跑路径。返回 ``True`` 表示收尾 pass 没有越界、
-    完整门禁链已重跑通过，本轮可以继续原流程。
+    只接住被抛出点标记为收尾类的失败；真失败与收尾层被关闭时立刻返回未通过，
+    调用方走本层落地前的整轮重跑路径。``revalidated`` 为 True 表示收尾 pass
+    没有越界、完整门禁链已重跑通过，本轮可以继续原流程。
 
     Args:
         context: 本次收尾的执行请求、attempt 计时与 PRD 基线。
         prd_overrides: PRD 文件头部 lifecycle_agents 覆盖（最高优先级）。
 
     Returns:
-        收尾成功且门禁链重跑通过时为 ``True``，其余一律 ``False``。
+        :class:`_CloseoutAttemptResult`；``revalidated`` 仅在门禁链重跑通过时为
+        True，其余一律 False，并尽量带上被回滚的收尾改动明细。
     """
     request = context.request
     config = request.config
     issue = request.issue
     gate_failure = context.gate_failure
     if not gate_failure.kind.is_closeout_eligible:
-        return False
+        return _CloseoutAttemptResult(revalidated=False)
     if not config.runner.closeout_agent_enabled:
         _logger.info(
             "Closeout Agent disabled for Issue #%d; escalating %s gate failure to full recovery.",
             issue.number,
             gate_failure.kind.value,
         )
-        return False
+        return _CloseoutAttemptResult(revalidated=False)
 
     worktree_path = request.worktree_path
     process_runner = request.process_runner
@@ -293,7 +327,7 @@ def _attempt_delivery_closeout(
     except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         _logger.warning("Closeout Agent failed for Issue #%d: %s", issue.number, exc)
         _revert_failed_closeout(context, before_snapshot)
-        return False
+        return _CloseoutAttemptResult(revalidated=False)
 
     after_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
     scope_violations = find_closeout_scope_violations(
@@ -307,7 +341,7 @@ def _attempt_delivery_closeout(
             ", ".join(scope_violations),
         )
         _revert_failed_closeout(context, before_snapshot)
-        return False
+        return _CloseoutAttemptResult(revalidated=False)
 
     try:
         ensure_prd_delivery_ready(
@@ -320,6 +354,10 @@ def _attempt_delivery_closeout(
         ensure_no_misplaced_evidence_helpers(worktree_path, config, process_runner)
         ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
     except DeliveryGateError as exc:
+        # 收尾改动一律回滚（勾选门禁没有独立验证源，留着凭空的勾就成了既成事实），
+        # 但它到底做了什么由 runner 自行比对得出，转交给下一次 attempt——
+        # 否则重跑只能从零猜起，白做一遍还拿不到"上轮试过什么"。
+        discarded_summary = summarize_closeout_changes(before_snapshot, after_snapshot)
         _logger.warning(
             "Delivery gates still fail after closeout for Issue #%d; "
             "escalating to full recovery: %s",
@@ -327,7 +365,10 @@ def _attempt_delivery_closeout(
             exc,
         )
         _revert_failed_closeout(context, before_snapshot)
-        return False
+        return _CloseoutAttemptResult(
+            revalidated=False,
+            discarded_detail=format_closeout_attempt_detail(discarded_summary),
+        )
 
     # 门禁链已在收尾流程内整体重跑，PRD 可能刚被归档，因此留痕用的"收尾后"快照
     # 必须重取一次，否则新归档路径下的 PRD 文本会被当成"消失了"。
@@ -344,7 +385,7 @@ def _attempt_delivery_closeout(
         gate_failure.kind.value,
         issue.number,
     )
-    return True
+    return _CloseoutAttemptResult(revalidated=True)
 
 
 def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResult:
@@ -579,7 +620,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     prd_baseline_content=prd_baseline_content,
                 )
         except PrdDeliveryError as exc:
-            delivery_gates_revalidated = _attempt_delivery_closeout(
+            closeout_result = _attempt_delivery_closeout(
                 _DeliveryCloseoutContext(
                     record=attempt_record_context,
                     gate_failure=exc,
@@ -587,6 +628,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 ),
                 prd_overrides=prd_overrides,
             )
+            delivery_gates_revalidated = closeout_result.revalidated
             if not delivery_gates_revalidated:
                 failure_type = _classify_and_record_gate_failure(
                     attempt_record_context,
@@ -597,6 +639,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 if attempt_index >= max_recovery_attempts:
                     raise MaxRetriesExceededError(attempt_results) from exc
                 recovery_failure_summary = format_prd_delivery_failure(str(exc))
+                recovery_failure_summary += _render_discarded_closeout_note(closeout_result)
                 recovery_failure_type = failure_type.value
                 _logger.warning(
                     "PRD delivery check failed for Issue #%d; asking agent to recover (%d/%d).",
@@ -609,6 +652,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # Phase 3.5: 提交前检查证据与脚本位置。RV 命令留到 commit proxy 后
         # 对固定的代码树运行一次，避免在脏工作区反复执行。
         evidence_gate_failure: ValidationEvidenceError | None = None
+        evidence_closeout_note = ""
         try:
             if not delivery_gates_revalidated:
                 with attempt_phases.measure("evidence"):
@@ -618,17 +662,19 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 # 取证脚本否则永远不可见。
                 warn_legacy_evidence_helpers(worktree_path, config, process_runner)
         except ValidationEvidenceError as exc:
-            if _attempt_delivery_closeout(
+            evidence_closeout_result = _attempt_delivery_closeout(
                 _DeliveryCloseoutContext(
                     record=attempt_record_context,
                     gate_failure=exc,
                     prd_baseline_content=prd_baseline_content,
                 ),
                 prd_overrides=prd_overrides,
-            ):
+            )
+            if evidence_closeout_result.revalidated:
                 delivery_gates_revalidated = True
             else:
                 evidence_gate_failure = exc
+                evidence_closeout_note = _render_discarded_closeout_note(evidence_closeout_result)
 
         if evidence_gate_failure is not None:
             exc = evidence_gate_failure
@@ -643,6 +689,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             recovery_failure_summary = format_validation_evidence_failure(
                 str(exc), resolve_issue_evidence_relpath(config, issue)
             )
+            recovery_failure_summary += evidence_closeout_note
             recovery_failure_type = failure_type.value
             _logger.warning(
                 "Validation evidence check failed for Issue #%d; asking agent to recover (%d/%d).",

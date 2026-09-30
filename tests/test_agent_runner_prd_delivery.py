@@ -658,3 +658,98 @@ def test_missing_archive_dir_stays_substantive(tmp_path: Path) -> None:
 
     assert "Archive directory does not exist" in str(exc_info.value)
     assert exc_info.value.kind is DeliveryGateFailureKind.SUBSTANTIVE
+
+
+def _write_pending_prd(tmp_path: Path, body: str) -> IssueSummary:
+    """把给定正文写进一个 pending PRD，返回引用它的 Issue。"""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    prd_path = tmp_path / "tasks" / "pending" / "example.md"
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(body, encoding="utf-8")
+    return issue
+
+
+def test_gate_error_names_an_unrecognized_human_group(tmp_path: Path) -> None:
+    """提到 Human-Confirmed 却没识别出分组时，报错本身要指出是结构问题。
+
+    否则 agent 只会看到"这几项未勾选"，而它的规则又要求人属项保持未勾，
+    于是一边是不可满足的指令、一边是看不见的病因（实证：ai-assistant #53）。
+    """
+    issue = _write_pending_prd(
+        tmp_path,
+        "\n".join(
+            [
+                "## Acceptance Checklist",
+                "",
+                "Human-Confirmed:",
+                "",
+                "- [ ] 决定一：人属项",
+                "",
+                "### Behavior Acceptance",
+                "",
+                "- [ ] rv-1 PASS",
+                "",
+            ]
+        ),
+    )
+
+    with pytest.raises(PrdDeliveryError, match="Suspected checklist-structure problem") as excinfo:
+        ensure_prd_delivery_ready(issue, tmp_path, FakeProcessRunner())
+
+    message = str(excinfo.value)
+    assert "no Human-Confirmed group was recognized" in message
+    assert "### Human-Confirmed" in message
+
+
+def test_gate_error_omits_the_hint_when_the_group_is_recognized(tmp_path: Path) -> None:
+    """分组已被正常识别时不要追加结构诊断，避免误导。"""
+    issue = _write_pending_prd(
+        tmp_path,
+        "\n".join(
+            [
+                "## Acceptance Checklist",
+                "",
+                "### Human-Confirmed",
+                "",
+                "- [ ] 决定一：人属项",
+                "",
+                "### Behavior Acceptance",
+                "",
+                "- [ ] rv-1 PASS",
+                "",
+            ]
+        ),
+    )
+
+    with pytest.raises(PrdDeliveryError, match="unchecked items") as excinfo:
+        ensure_prd_delivery_ready(issue, tmp_path, FakeProcessRunner())
+
+    assert "Suspected checklist-structure problem" not in str(excinfo.value)
+
+
+def test_gate_error_omits_the_hint_when_human_group_is_absent(tmp_path: Path) -> None:
+    """完全不涉及人属项的 PRD 不该被结构诊断干扰。"""
+    issue = _write_pending_prd(
+        tmp_path,
+        "\n".join(
+            [
+                "## Acceptance Checklist",
+                "",
+                "### Validation Acceptance",
+                "",
+                "- [ ] rv-1 PASS",
+                "",
+            ]
+        ),
+    )
+
+    with pytest.raises(PrdDeliveryError, match="unchecked items") as excinfo:
+        ensure_prd_delivery_ready(issue, tmp_path, FakeProcessRunner())
+
+    assert "Suspected checklist-structure problem" not in str(excinfo.value)
