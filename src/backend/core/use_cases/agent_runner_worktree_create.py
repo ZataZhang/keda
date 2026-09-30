@@ -43,6 +43,7 @@ from backend.core.use_cases.worktree_frontend import (
     ensure_frontend_node_modules,
     exclude_frontend_node_modules_from_git,
 )
+from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
 
 _logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ def create_or_reuse_worktree(
     # path_command runs with cwd=repo_path, so a relative output must be
     # anchored there too — bare resolve() would anchor it to the daemon
     # process cwd instead.
-    worktree_path_output = Path(path_result.stdout.strip())
+    worktree_path_output = parse_worktree_path_stdout(path_result.stdout)
     if not worktree_path_output.is_absolute():
         worktree_path_output = repo_path / worktree_path_output
     worktree_path = worktree_path_output.resolve()

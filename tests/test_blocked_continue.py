@@ -18,6 +18,7 @@ from backend.core.use_cases.blocked_continue import (
     _extract_blocked_paths_from_comments,
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
+from tests.support.agent_runner import default_worktree_path_response
 
 
 def _make_blocked_issue(number: int) -> IssueSummary:
@@ -72,6 +73,7 @@ def test_blocked_continue_dirty_worktree_fails() -> None:
     fake_client = FakeGitHubClient()
     fake_client.get_issue = lambda n: _make_blocked_issue(n)
     responses = {
+        **default_worktree_path_response(1),
         ("git", "status", "--porcelain"): CommandResult(
             ("git", "status", "--porcelain"), 0, " M foo.py\n", ""
         ),
@@ -96,6 +98,7 @@ def test_blocked_continue_wrong_branch_fails() -> None:
     fake_client = FakeGitHubClient()
     fake_client.get_issue = lambda n: _make_blocked_issue(n)
     responses = {
+        **default_worktree_path_response(1),
         ("git", "status", "--porcelain"): CommandResult(
             ("git", "status", "--porcelain"), 0, "", ""
         ),
@@ -136,6 +139,7 @@ def test_blocked_continue_already_claimed_returns_false() -> None:
 
     fake_client.get_issue = _get_issue
     responses = {
+        **default_worktree_path_response(99),
         ("git", "status", "--porcelain"): CommandResult(
             ("git", "status", "--porcelain"), 0, "", ""
         ),

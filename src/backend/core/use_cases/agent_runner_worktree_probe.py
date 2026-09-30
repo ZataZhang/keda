@@ -13,6 +13,7 @@ from backend.core.use_cases.agent_runner_git import (
     is_detached_head,
 )
 from backend.core.use_cases.run_agent_once import format_command
+from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
 
 _logger = logging.getLogger(__name__)
 
@@ -44,7 +45,16 @@ def _find_worktree_path_for_issue(
     # path_command runs with cwd=repo_path, so a relative output must be
     # anchored there too — bare resolve() would anchor it to the daemon
     # process cwd instead.
-    worktree_path_output = Path(path_result.stdout.strip())
+    try:
+        worktree_path_output = parse_worktree_path_stdout(path_result.stdout)
+    except ValueError as exc:
+        # 空 stdout 无法得到路径：统一归为「worktree 不存在」，让上游既有的
+        # FileNotFoundError 处理（如 issue_handlers 的 blocked 说明）继续生效。
+        raise FileNotFoundError(
+            "worktree path does not exist (path_command output): <empty>. "
+            f"path_command return_code={path_result.return_code}, "
+            f"stdout={path_result.stdout!r}."
+        ) from exc
     if not worktree_path_output.is_absolute():
         worktree_path_output = repo_path / worktree_path_output
     worktree_path = worktree_path_output.resolve()

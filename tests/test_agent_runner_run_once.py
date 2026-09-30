@@ -22,6 +22,7 @@ from backend.core.shared.models.agent_runner import (
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import (
     config_with_review_disabled,
+    default_worktree_path_response,
     git_remote_command,
     git_remote_result,
     make_prd_issue,
@@ -104,6 +105,7 @@ def test_run_once_no_new_commits_fails() -> None:
 
     fake_runner = FakeProcessRunner(
         responses={
+            **default_worktree_path_response(issue.number),
             ("git", "rev-parse", "HEAD"): CommandResult(
                 command=("git", "rev-parse", "HEAD"),
                 return_code=0,

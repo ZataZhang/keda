@@ -21,6 +21,7 @@ from backend.core.use_cases.review_once import (
     review_once,
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
+from tests.support.agent_runner import default_worktree_path_response
 
 
 def _marker_comment(
@@ -699,7 +700,7 @@ def test_review_once_recovers_branch_from_draft_pr_comment(tmp_path: Path) -> No
         agent="auto",
         max_issues=1,
         github_client=fake_client,
-        process_runner=FakeProcessRunner(),
+        process_runner=FakeProcessRunner(responses=default_worktree_path_response(issue.number)),
     )
 
     assert exit_code == 0

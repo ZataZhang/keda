@@ -48,6 +48,19 @@ def _make_process_runner_with_worktree(
 ) -> FakeProcessRunner:
     """Create a process runner that simulates a valid worktree."""
     responses = {
+        # Tests pair this runner with ``path_command=f"echo {worktree_path}"``;
+        # register the same argv -> stdout so path resolution reads the real
+        # worktree instead of failing on unregistered (empty) output.
+        ("echo", str(worktree_path)): type(
+            "R",
+            (),
+            {
+                "command": ("echo",),
+                "return_code": 0,
+                "stdout": f"{worktree_path}\n",
+                "stderr": "",
+            },
+        )(),
         ("git", "rev-parse", "--git-dir"): type(
             "R",
             (),

@@ -34,6 +34,7 @@ from backend.core.shared.models.agent_runner import (
     ReviewEventMarker,
 )
 from backend.core.use_cases.agent_runner_events import parse_latest_event_marker
+from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -243,23 +244,6 @@ def _resolve_worktree_path_command(
         return [rendered]
 
 
-def _parse_shell_quoted_path(command_line: str) -> str:
-    """Extract the last single-quoted path from a shell-style command line.
-
-    The default ``path_command`` uses ``bash -c 'echo \"...\"'``; the actual
-    path is double-quoted inside a single-quoted shell string. We only need
-    a coarse extraction good enough for monitoring — if parsing fails, the
-    caller treats it as "worktree not present".
-    """
-    quoted_double = re.findall(r'"([^"]+)"', command_line)
-    if quoted_double:
-        return quoted_double[-1]
-    quoted_single = re.findall(r"'([^']+)'", command_line)
-    if quoted_single:
-        return quoted_single[-1]
-    return command_line.strip().splitlines()[-1].strip()
-
-
 def _read_worktree_status(
     *,
     worktree_path_command: str,
@@ -287,9 +271,7 @@ def _read_worktree_status(
     if path_result.return_code != 0 or not path_result.stdout.strip():
         return WorktreeStatus(exists=False)
 
-    from pathlib import Path as _Path
-
-    worktree_path = _Path(_parse_shell_quoted_path(path_result.stdout))
+    worktree_path = parse_worktree_path_stdout(path_result.stdout)
     if not worktree_path.exists():
         return WorktreeStatus(exists=False, path=str(worktree_path))
 

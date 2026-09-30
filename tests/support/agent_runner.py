@@ -89,6 +89,29 @@ def worktree_path_response(
     )
 
 
+def default_worktree_path_response(
+    issue_number: int,
+) -> dict[tuple[str, ...], CommandResult]:
+    """Return a response for the default ``worktree.path_command`` template.
+
+    The default ``path_command`` is ``"iar worktree path --branch
+    issue-{issue_number}"``. Tests that keep the default config but still
+    resolve a worktree must register this response: path resolution now rejects
+    empty stdout instead of silently falling back to the process cwd. The
+    emitted ``"."`` anchors to the caller's ``repo_path`` (which the tests
+    control and which exists).
+    """
+    command = ("iar", "worktree", "path", "--branch", f"issue-{issue_number}")
+    return {
+        command: CommandResult(
+            command=command,
+            return_code=0,
+            stdout=".\n",
+            stderr="",
+        )
+    }
+
+
 def git_remote_command() -> tuple[str, ...]:
     """Return the argv the runner uses to probe configured git remotes."""
     return ("git", "remote")

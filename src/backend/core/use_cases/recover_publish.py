@@ -31,6 +31,7 @@ from backend.core.use_cases.agent_runner_validation import (
     publish_validation_evidence_best_effort,
     validation_required,
 )
+from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
 
 _logger = logging.getLogger(__name__)
 
@@ -95,7 +96,12 @@ def resolve_existing_worktree(
         format_command(config.worktree.path_command, issue_number=issue_number),
         cwd=repo_path,
     )
-    worktree_path = Path(path_result.stdout.strip()).resolve()
+    try:
+        worktree_path = parse_worktree_path_stdout(path_result.stdout).resolve()
+    except ValueError as exc:
+        raise PublishRecoveryError(
+            f"Could not resolve Issue worktree: path_command produced no usable output ({exc})."
+        ) from exc
 
     if not worktree_path.exists():
         raise PublishRecoveryError(
