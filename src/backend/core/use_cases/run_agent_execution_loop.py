@@ -403,7 +403,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
     recovery_failure_type: str = "verification_failed"
     final_verification_results: list[CommandResult] = []
     attempt_results: list[AttemptResult] = []
-    verifier_verdict = None  # set by Phase 3.6 when the independent verifier runs
+    verifier_verdict = None  # set after the commit proxy fixes the reviewed tree
 
     # Recovery 重试循环：第 0 次是正常执行，后续是 recovery
     for attempt_index in range(max_recovery_attempts + 1):
@@ -606,9 +606,8 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 )
                 continue
 
-        # Phase 3.5: Realistic Validation 证据门禁（要求验证且无豁免时）
-        # 收尾成功时门禁链已在收尾流程内整体重跑通过，这里不再跑第二遍：脏工作区
-        # 下 RV 复跑不走缓存，重复执行纯属浪费。
+        # Phase 3.5: 提交前检查证据与脚本位置。RV 命令留到 commit proxy 后
+        # 对固定的代码树运行一次，避免在脏工作区反复执行。
         evidence_gate_failure: ValidationEvidenceError | None = None
         try:
             if not delivery_gates_revalidated:
@@ -618,8 +617,6 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 # 存量违规只告警不阻塞：前瞻守卫只看本次变更，历史交付留在主干里的
                 # 取证脚本否则永远不可见。
                 warn_legacy_evidence_helpers(worktree_path, config, process_runner)
-                with attempt_phases.measure("rv_reexec"):
-                    ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
         except ValidationEvidenceError as exc:
             if _attempt_delivery_closeout(
                 _DeliveryCloseoutContext(
@@ -631,26 +628,6 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             ):
                 delivery_gates_revalidated = True
             else:
-                evidence_gate_failure = exc
-
-        # Phase 3.6: independent verifier (pre-PR; red -> this same recovery
-        # loop auto-repairs, bounded; escalates to a human only on exhaustion).
-        # 独立复验的红灯永远是真失败，因此刻意不经过收尾层。
-        if evidence_gate_failure is None:
-            try:
-                # Local import breaks the run_agent_once <-> run_verifier_agent cycle.
-                from backend.core.use_cases.run_verifier_agent import run_verifier_gate
-
-                with attempt_phases.measure("verifier"):
-                    verifier_verdict = run_verifier_gate(
-                        issue,
-                        worktree_path,
-                        config,
-                        process_runner,
-                        selected_agent,
-                        prd_overrides=prd_overrides,
-                    )
-            except ValidationEvidenceError as exc:
                 evidence_gate_failure = exc
 
         if evidence_gate_failure is not None:
@@ -837,6 +814,46 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     max_recovery_attempts,
                 )
                 continue
+
+        # Phase 4.5: commit proxy 已固定代码树，先重验 RV，再做独立复验。
+        # RED 仍回到同一条 bounded recovery 循环，避免把未提交工作树当作
+        # builder SHA 对应的交付物。
+        try:
+            from backend.core.use_cases.run_verifier_agent import run_verifier_gate
+
+            with attempt_phases.measure("rv_reexec"):
+                ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
+                ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
+            with attempt_phases.measure("verifier"):
+                verifier_verdict = run_verifier_gate(
+                    issue,
+                    worktree_path,
+                    config,
+                    process_runner,
+                    selected_agent,
+                    prd_overrides=prd_overrides,
+                )
+        except ValidationEvidenceError as exc:
+            failure_type = _classify_and_record_gate_failure(
+                attempt_record_context,
+                detail=format_validation_evidence_detail(str(exc)),
+                verification_results=final_verification_results,
+                exc=exc,
+            )
+            if attempt_index >= max_recovery_attempts:
+                raise MaxRetriesExceededError(attempt_results) from exc
+            recovery_failure_summary = format_validation_evidence_failure(
+                str(exc), resolve_issue_evidence_relpath(config, issue)
+            )
+            recovery_failure_type = failure_type.value
+            _logger.warning(
+                "Independent verifier failed for Issue #%d at committed HEAD; "
+                "asking agent to recover (%d/%d).",
+                issue.number,
+                attempt_index + 1,
+                max_recovery_attempts,
+            )
+            continue
 
         # Phase 5: 检查 agent 是否实际产生了 commit
         after_sha = get_head_sha(worktree_path, process_runner)

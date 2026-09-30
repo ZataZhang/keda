@@ -16,6 +16,11 @@
 时取它内部的 ``tasks/archive`` → ``tasks/pending`` 副本，无匹配时回落主仓库副本。
 横幅同源，同样读分支副本。
 
+**但主仓库已是归档副本时不看分支**：``tasks/archive`` 是终态，说明收尾早已在主线上
+完成，分支里那份 ``tasks/pending`` 只是合并前的残留快照。若继续让它遮蔽，一条已归档
+的 PRD 会被显示成合并前的进度（常见为 ``0/N``），ACTIVITY 还会报一个早已不存在的
+``awaiting merge``。
+
 用法::
 
     python3 scripts/shared/just/prd_status.py [all|pending|archive] [--detail]
@@ -64,6 +69,10 @@ DEPENDENCY_REFS_HEADING_PATTERN = re.compile(
 DEPENDENCY_NESTED_REF_PATTERN = re.compile(r"^\s+[-*]\s+(?P<ref>.+?)\s*$")
 
 DEPENDENCY_SLUG_MAX_WIDTH = 26
+
+# 两个 PRD 桶目录名：``pending`` 是执行态，``archive`` 是收尾态。
+ARCHIVE_BUCKET_DIR_NAME = "archive"
+PENDING_BUCKET_DIR_NAME = "pending"
 
 STRONG_VERDICT_PATTERN = re.compile(
     r"^\s*[-*>#\s]*(?:VERDICT|最终结论|结论)\s*[:：]\s*\**\s*(PASS|REJECT)\b",
@@ -423,12 +432,28 @@ def find_named_evidence_file(
     return None
 
 
+def is_main_repo_archived(prd_path: Path) -> bool:
+    """判断该 PRD 文件是否来自主仓库的 ``tasks/archive``。
+
+    主仓库已有归档副本即"这条 PRD 已在主线完成收尾"——归档是终态。此时分支上
+    残留的 ``tasks/pending`` 副本只是合并前的历史快照，不能再用它遮蔽主线事实。
+
+    Args:
+        prd_path (Path): 主仓库内的 PRD 文件路径。
+
+    Returns:
+        bool: 文件位于 ``tasks/archive`` 之下时为 ``True``。
+    """
+    return prd_path.parent.name == ARCHIVE_BUCKET_DIR_NAME
+
+
 def resolve_branch_prd_path(worktree_path: Path | None, prd_file_name: str) -> Path | None:
     """在 worktree 内定位该 PRD 的分支副本。
 
     执行发生在 worktree 里，主仓库的 ``tasks/pending`` 副本要等合并才会更新，
     因此进度与依赖都该读分支副本。归档副本是收尾态，优先于同一分支里可能残留的
-    pending 副本。
+    pending 副本。调用方需先用 ``is_main_repo_archived`` 排除"主仓库已归档"的情形
+    ——那时分支副本按定义已过时。
 
     Args:
         worktree_path (Path | None): 分支名匹配到的 worktree 目录；无匹配时为 ``None``。
@@ -440,7 +465,7 @@ def resolve_branch_prd_path(worktree_path: Path | None, prd_file_name: str) -> P
     if worktree_path is None:
         return None
 
-    for bucket_dir_name in ("archive", "pending"):
+    for bucket_dir_name in (ARCHIVE_BUCKET_DIR_NAME, PENDING_BUCKET_DIR_NAME):
         branch_prd_path = worktree_path / "tasks" / bucket_dir_name / prd_file_name
         if branch_prd_path.is_file():
             return branch_prd_path
@@ -522,6 +547,10 @@ def collect_prd_record(
     （``match_worktree_by_slug``）；每个 worktree 都带一份未改动的同名 pending
     副本，因此无匹配时绝不能拿别的 worktree 的副本充数。
 
+    例外是**本记录已经来自主仓库 ``tasks/archive``**：归档是终态，分支副本按定义
+    已过时（同名 worktree 往往还压着合并前的 pending 快照，继续采信会把它显示成
+    ``0/N``）。此时统一回主仓库副本，清单、横幅、依赖、证据与影响树同源。
+
     Args:
         prd_path (Path): 主仓库内的 PRD 文件路径。
         evidence_root (Path): 主仓库 ``tasks/evidence`` 目录。
@@ -537,6 +566,11 @@ def collect_prd_record(
     )
     matched_worktree = match_worktree_for_prd(worktree_branches_list, raw_slug_text, prd_path)
     worktree_path = matched_worktree[1] if matched_worktree is not None else None
+    # 主仓库已有归档副本 ⇒ 收尾已在主线完成，脏掉分支匹配，让下文所有取数统一
+    # 回主仓库副本。分支上残留的 pending 快照若继续遮蔽，看板会把一条已归档的
+    # PRD 显示成合并前的进度（真实案例：显示 0/24，实际 3/24）。
+    if is_main_repo_archived(prd_path):
+        worktree_path = None
 
     source_prd_path = resolve_branch_prd_path(worktree_path, prd_path.name) or prd_path
     raw_prd_text = source_prd_path.read_text(encoding="utf-8")
@@ -893,6 +927,9 @@ def format_activity_cell(
     ``✔ branch-archived @<branch> · awaiting merge``——收尾已在分支完成，缺的只是
     合并回主线，残留锁把已完成的 PRD 渲染成 RUNNING / STALE 会误导人重新执行。
     清单进度不在这里重复携带：它由 CHECKLIST 列呈现，那一列同样读分支副本。
+
+    **但记录本身已来自主仓库 ``tasks/archive`` 时不看分支**：合并早已完成，
+    ``awaiting merge`` 指向一个不存在的待办，``⚠ unlocked`` 也只是噪声。
     其余情况按锁状态渲染：新鲜锁 → 黄色
     ``RUNNING <tool> <时长> @<位置>``，位置由 ``resolve_lock_location_text`` 按实际
     状态解析（主仓库归属显示 ``主仓库``，归属 worktree 显示其当前实际检出的分支，
@@ -916,8 +953,12 @@ def format_activity_cell(
     # 需要完整列表来判断锁里的分支是否真的检出在某处，PrdRecord 只该承载单条 PRD 的
     # 事实。看板一次渲染只有个位数 pending 行，多一次 git 调用的代价可忽略。
     linked_worktree_branches_list = prd_lock.list_linked_worktree_branches(main_repo_root)
-    matched_worktree = match_worktree_for_prd(
-        linked_worktree_branches_list, prd_record.slug, prd_record.prd_path
+    matched_worktree = (
+        None
+        if is_main_repo_archived(prd_record.prd_path)
+        else match_worktree_for_prd(
+            linked_worktree_branches_list, prd_record.slug, prd_record.prd_path
+        )
     )
     if matched_worktree is not None:
         branch_name_text, worktree_path = matched_worktree

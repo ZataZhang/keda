@@ -37,7 +37,10 @@ DEPS 列。核心不变量：
    勾完、看板仍显示 0/21"长期挂着（keda 的真实案例）。worktree 内按
    ``tasks/archive`` → ``tasks/pending`` 取清单副本，证据每个槽位单独兜底。
    只认 slug 匹配到的那个 worktree——每个 worktree 都带一份未改动的同名 pending
-   副本，拿错副本会显示别的分支的陈旧进度。
+   副本，拿错副本会显示别的分支的陈旧进度。**例外：记录本身已来自主仓库
+   ``tasks/archive`` 时不看分支。** 归档是终态，分支副本按定义已过时；同名
+   worktree 往往还压着合并前的 pending 快照，继续采信会把一条已归档的 PRD
+   显示成合并前的进度，并给它报一个早已不存在的 "awaiting merge"。
 7. **``--detail`` 摘要与清单进度同源。** 摘要解析必须吃与 CHECKLIST 相同的
    分支副本正文，且只做有界截断——看板定位是"快速定位，最终判断以 PRD 原文
    为准"，摘要是行下定位辅助而非正文替代。
@@ -73,6 +76,7 @@ import prd_status  # noqa: E402
 
 _FIXTURE_PRD_NAME = "P2-FEAT-20260101-000000-avatar-upload"
 _FIXTURE_PRD_RELATIVE_PATH = f"tasks/pending/{_FIXTURE_PRD_NAME}.md"
+_FIXTURE_PRD_ARCHIVE_RELATIVE_PATH = f"tasks/archive/{_FIXTURE_PRD_NAME}.md"
 _PLAIN_PALETTE = prd_status.Palette(enabled=False)
 
 _DEFAULT_FIXTURE_PRD_TEXT = "# fixture PRD\n\n## Acceptance Checklist\n\n- [ ] item one\n"
@@ -155,28 +159,51 @@ def _write_lock(
     return lock_path
 
 
-def _render_activity_cell(repo_path: Path) -> str:
-    """读取 fixture PRD 并渲染 ACTIVITY 单元格（无颜色）。"""
+def _render_activity_cell(
+    repo_path: Path, prd_relative_path: str = _FIXTURE_PRD_RELATIVE_PATH
+) -> str:
+    """读取 fixture PRD 并渲染 ACTIVITY 单元格（无颜色）。
+
+    Args:
+        repo_path (Path): fixture 仓库根目录。
+        prd_relative_path (str): PRD 相对仓库根的路径；归档场景传 archive 下的那份。
+    """
     return prd_status.format_activity_cell(
-        _collect_fixture_record(repo_path),
+        _collect_fixture_record(repo_path, prd_relative_path),
         repo_path,
         repo_path / "tasks" / "evidence",
         _PLAIN_PALETTE,
     )
 
 
-def _collect_fixture_record(repo_path: Path) -> prd_status.PrdRecord:
-    """收集 fixture PRD 的看板记录，工作树列表按仓库现状实时获取。"""
+def _collect_fixture_record(
+    repo_path: Path, prd_relative_path: str = _FIXTURE_PRD_RELATIVE_PATH
+) -> prd_status.PrdRecord:
+    """收集 fixture PRD 的看板记录，工作树列表按仓库现状实时获取。
+
+    Args:
+        repo_path (Path): fixture 仓库根目录。
+        prd_relative_path (str): PRD 相对仓库根的路径；归档场景传 archive 下的那份。
+    """
     return prd_status.collect_prd_record(
-        repo_path / _FIXTURE_PRD_RELATIVE_PATH,
+        repo_path / prd_relative_path,
         repo_path / "tasks" / "evidence",
         prd_lock.list_linked_worktree_branches(repo_path),
     )
 
 
-def _render_checklist_cell(repo_path: Path) -> str:
-    """渲染 CHECKLIST 单元格（无颜色）。"""
-    return prd_status.format_checklist_cell(_collect_fixture_record(repo_path), _PLAIN_PALETTE)
+def _render_checklist_cell(
+    repo_path: Path, prd_relative_path: str = _FIXTURE_PRD_RELATIVE_PATH
+) -> str:
+    """渲染 CHECKLIST 单元格（无颜色）。
+
+    Args:
+        repo_path (Path): fixture 仓库根目录。
+        prd_relative_path (str): PRD 相对仓库根的路径；归档场景传 archive 下的那份。
+    """
+    return prd_status.format_checklist_cell(
+        _collect_fixture_record(repo_path, prd_relative_path), _PLAIN_PALETTE
+    )
 
 
 def _render_evidence_cell(repo_path: Path) -> str:
@@ -275,6 +302,30 @@ def test_branch_archived_copy_without_checklist_shows_dash_in_checklist(tmp_path
     assert not re.search(r"\d+/\d+", raw_activity_text)
     # 分支副本是执行现场的真相：归档副本没有清单小节时显示 -，不回退主仓库副本。
     assert _render_checklist_cell(main_repo_path) == "-"
+
+
+def test_main_archived_record_ignores_branch_for_activity(tmp_path: Path) -> None:
+    """记录本身已来自主仓库 ``tasks/archive`` 时，ACTIVITY 不看分支。
+
+    合并早已完成，「等合并」是假待办；分支上残留的 archive 副本不能把一条已归档
+    的 PRD 渲染成还要在分支收尾，也不能拿它报 ``⚠ unlocked``。
+    """
+    main_repo_path = _init_main_repo(tmp_path / "repo")
+    linked_worktree_path = _add_linked_worktree(
+        main_repo_path, "feat/avatar-upload", "wt-post-merge"
+    )
+    branch_archive_prd_path = linked_worktree_path / "tasks" / "archive" / f"{_FIXTURE_PRD_NAME}.md"
+    branch_archive_prd_path.parent.mkdir(parents=True, exist_ok=True)
+    branch_archive_prd_path.write_text(_checklist_prd_text(1, 1), encoding="utf-8")
+    main_archive_prd_path = main_repo_path / _FIXTURE_PRD_ARCHIVE_RELATIVE_PATH
+    main_archive_prd_path.parent.mkdir(parents=True, exist_ok=True)
+    main_archive_prd_path.write_text(_checklist_prd_text(1, 1), encoding="utf-8")
+
+    raw_activity_text = _render_activity_cell(main_repo_path, _FIXTURE_PRD_ARCHIVE_RELATIVE_PATH)
+
+    assert "branch-archived" not in raw_activity_text
+    assert "awaiting merge" not in raw_activity_text
+    assert "unlocked" not in raw_activity_text
 
 
 def test_stale_lock_with_archived_branch_renders_branch_archived(tmp_path: Path) -> None:
@@ -599,6 +650,26 @@ def test_checklist_progress_ignores_unrelated_worktree_copy(tmp_path: Path) -> N
     )
 
     assert _render_checklist_cell(main_repo_path) == "2/2"
+
+
+def test_checklist_progress_prefers_main_archive_over_branch_pending(tmp_path: Path) -> None:
+    """主仓库已归档、分支还压着合并前的 pending 副本：CHECKLIST 取主仓库归档副本。
+
+    真实踩过的坑：PR 已合并（PRD 已进主线 ``tasks/archive``），同名分支 worktree
+    还留着合并前那份未勾选的 pending 副本，归档汇总因此显示 ``0/24`` 而非真实的
+    ``3/24``。归档是终态，分支副本按定义已过时。
+    """
+    main_repo_path = _init_main_repo(tmp_path / "repo", prd_text=_checklist_prd_text(0, 4))
+    linked_worktree_path = _add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-merged")
+    # 分支副本停留在合并前：同一份 PRD 在这里仍是 0/4。
+    (linked_worktree_path / _FIXTURE_PRD_RELATIVE_PATH).write_text(
+        _checklist_prd_text(0, 4), encoding="utf-8"
+    )
+    main_archive_prd_path = main_repo_path / _FIXTURE_PRD_ARCHIVE_RELATIVE_PATH
+    main_archive_prd_path.parent.mkdir(parents=True, exist_ok=True)
+    main_archive_prd_path.write_text(_checklist_prd_text(3, 1), encoding="utf-8")
+
+    assert _render_checklist_cell(main_repo_path, _FIXTURE_PRD_ARCHIVE_RELATIVE_PATH) == "3/4"
 
 
 def test_evidence_cell_reads_branch_evidence_dir(tmp_path: Path) -> None:

@@ -251,6 +251,24 @@ def test_run_verifier_gate_passes_on_green(monkeypatch: pytest.MonkeyPatch, tmp_
     assert record.get("called") is True
 
 
+def test_run_verifier_gate_rejects_uncommitted_implementation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """独立复核不得把脏工作树当作 builder 提交来审。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    monkeypatch.setattr(rva, "has_changes", lambda *args: True)
+    monkeypatch.setattr(
+        rva,
+        "run_verifier_agent",
+        lambda *args, **kwargs: pytest.fail("dirty tree must not reach the verifier"),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    with pytest.raises(ValidationEvidenceError, match="clean committed worktree"):
+        rva.run_verifier_gate(_structured_issue(), tmp_path, config, FakeProcessRunner(), "claude")
+
+
 def test_run_verifier_gate_blocks_on_red(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """red verdict → raises ValidationEvidenceError (routes into recovery)."""
     from backend.core.use_cases import run_verifier_agent as rva

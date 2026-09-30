@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.agent.memory import (
@@ -42,6 +43,10 @@ from backend.core.shared.models.agent_runner import (
     PublishFailureCategory,
 )
 from backend.core.use_cases.agent_review import run_pre_pr_review
+from backend.core.use_cases.agent_runner_final_verification import (
+    FinalVerificationRequest,
+    ensure_final_verifier_verdict,
+)
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import PublishFailureError
 from backend.core.use_cases.agent_runner_publish import (
@@ -62,6 +67,10 @@ from backend.core.use_cases.run_agent_once import (
     has_changes,
     resolve_supervisor_agent,
     run_verification,
+)
+from backend.core.use_cases.run_verifier_agent import (
+    ValidationVerdict,
+    apply_verifier_verdict_to_pr,
 )
 
 _logger = logging.getLogger(__name__)
@@ -311,6 +320,97 @@ def _publish_validation_evidence_after_pr(
         process_runner=process_runner,
         pr_url=pr_url,
         head_sha=get_head_sha(worktree_path, process_runner),
+    )
+
+
+@dataclass(frozen=True)
+class _PublicationReviewRequest:
+    """两条发布路径共用的审核与最终复核上下文。"""
+
+    verification_request: FinalVerificationRequest
+    github_client: IGitHubClient
+    expected_branch: str
+    verification_results: list[CommandResult]
+    push_callback: Callable[[], None]
+    content_generator: IContentGenerator | None
+
+
+def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrPublication:
+    """审核、复核最终提交，随后创建 Draft PR。"""
+    verification_request = request.verification_request
+    run_pre_pr_review(
+        issue=verification_request.issue,
+        worktree_path=verification_request.worktree_path,
+        config=verification_request.config,
+        github_client=request.github_client,
+        process_runner=verification_request.process_runner,
+        selected_agent=verification_request.selected_agent,
+        head_sha_before=verification_request.verified_sha
+        or get_head_sha(verification_request.worktree_path, verification_request.process_runner),
+        expected_branch=request.expected_branch,
+        verification_results=request.verification_results,
+        push_callback=request.push_callback,
+    )
+    final_verdict = ensure_final_verifier_verdict(verification_request)
+    branch, pr_url = _create_draft_pr_with_recovery_context(
+        issue=verification_request.issue,
+        worktree_path=verification_request.worktree_path,
+        config=verification_request.config,
+        github_client=request.github_client,
+        process_runner=verification_request.process_runner,
+        expected_branch=request.expected_branch,
+        content_generator=request.content_generator,
+    )
+    return _VerifiedPrPublication(
+        verification_request=verification_request,
+        github_client=request.github_client,
+        branch=branch,
+        pr_url=pr_url,
+        verdict=final_verdict,
+    )
+
+
+@dataclass(frozen=True)
+class _VerifiedPrPublication:
+    """创建 PR 后发布最终复核结论和证据所需的上下文。"""
+
+    verification_request: FinalVerificationRequest
+    github_client: IGitHubClient
+    branch: str
+    pr_url: str
+    verdict: ValidationVerdict | None
+
+
+def _publish_verified_pr(request: _VerifiedPrPublication) -> None:
+    """统一发布 verifier 结论、Issue 回链和 RV 证据。"""
+    verification_request = request.verification_request
+    apply_verifier_verdict_to_pr(
+        pr_url=request.pr_url,
+        verdict=request.verdict,
+        issue_number=verification_request.issue.number,
+        verifier_passed_label=verification_request.config.labels.verifier_passed,
+        github_client=request.github_client,
+    )
+    publish_sha = get_head_sha(
+        verification_request.worktree_path, verification_request.process_runner
+    )
+    _comment_issue_after_publish(
+        issue_number=verification_request.issue.number,
+        comment_body=build_draft_pr_created_comment(
+            pr_url=request.pr_url,
+            branch=request.branch,
+            head_sha=publish_sha,
+        ),
+        worktree_path=verification_request.worktree_path,
+        github_client=request.github_client,
+    )
+    _publish_validation_evidence_after_pr(
+        issue=verification_request.issue,
+        worktree_path=verification_request.worktree_path,
+        config=verification_request.config,
+        github_client=request.github_client,
+        process_runner=verification_request.process_runner,
+        pr_url=request.pr_url,
     )
 
 
@@ -594,29 +694,25 @@ def _finish_implementation_publication(
         expected_branch=expected_branch,
     )
 
-    # 步骤 3: 运行 pre-PR code review（reviewer 修复会即时 push）
-    final_sha, _final_verification_results = run_pre_pr_review(
+    # 步骤 3: 审核后仅对改变的 HEAD 重新取 RV 与 verifier 结论。
+    final_verification_request = FinalVerificationRequest(
         issue=issue,
         worktree_path=worktree_path,
         config=config,
-        github_client=github_client,
         process_runner=process_runner,
         selected_agent=selected_agent,
-        head_sha_before=after_sha,
-        expected_branch=expected_branch,
-        verification_results=verification_results,
-        push_callback=push_callback,
+        verified_sha=after_sha,
+        verifier_verdict=commit_result.verifier_verdict,
     )
-
-    # 步骤 4: review 收敛后才创建 Draft PR
-    branch, pr_url = _create_draft_pr_with_recovery_context(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        github_client=github_client,
-        process_runner=process_runner,
-        expected_branch=expected_branch,
-        content_generator=content_generator,
+    reviewed_pr = _review_verify_create_pr(
+        _PublicationReviewRequest(
+            verification_request=final_verification_request,
+            github_client=github_client,
+            expected_branch=expected_branch,
+            verification_results=verification_results,
+            push_callback=push_callback,
+            content_generator=content_generator,
+        )
     )
 
     # 切换标签：running → supervising，并清理其他 workflow labels。
@@ -630,52 +726,19 @@ def _finish_implementation_publication(
         github_client=github_client,
     )
 
-    # Apply independent-verifier verdict as PR label / comment (pre-PR computed,
-    # post-PR applied). Green → sets ``validation/verifier-passed`` label;
-    # yellow → posts warning comment; None → no-op.
-    from backend.core.use_cases.run_verifier_agent import apply_verifier_verdict_to_pr
-
-    apply_verifier_verdict_to_pr(
-        pr_url=pr_url,
-        verdict=commit_result.verifier_verdict,
-        issue_number=issue.number,
-        verifier_passed_label=config.labels.verifier_passed,
-        github_client=github_client,
-    )
-
-    publish_sha = get_head_sha(worktree_path, process_runner)
-    _comment_issue_after_publish(
-        issue_number=issue.number,
-        comment_body=build_draft_pr_created_comment(
-            pr_url=pr_url,
-            branch=branch,
-            head_sha=publish_sha,
-        ),
-        worktree_path=worktree_path,
-        github_client=github_client,
-    )
-
-    # 证据上传与 PR 证据评论（要求验证的 Issue）
-    _publish_validation_evidence_after_pr(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        github_client=github_client,
-        process_runner=process_runner,
-        pr_url=pr_url,
-    )
+    _publish_verified_pr(reviewed_pr)
 
     # 步骤 4: PR 后监督（可选）
     supervisor_config = config.post_pr_supervisor
     if supervisor_config.enabled:
         # 获取 PR 上下文（如果已存在）
-        pr_context = github_client.get_pull_request_context(branch)
+        pr_context = github_client.get_pull_request_context(reviewed_pr.branch)
         if pr_context is None:
             _logger.warning(
                 "Deferring post-PR supervisor for Issue #%d branch %s: "
                 "complete PR context is unavailable.",
                 issue.number,
-                branch,
+                reviewed_pr.branch,
             )
         else:
             supervisor_agent = resolve_supervisor_agent(
@@ -710,8 +773,8 @@ def _finish_implementation_publication(
     _logger.info(
         "Published Issue #%d from %s at %s after implementation head %s.",
         issue.number,
-        branch,
-        final_sha,
+        reviewed_pr.branch,
+        get_head_sha(worktree_path, process_runner),
         after_sha,
     )
 
@@ -788,32 +851,26 @@ def _finish_existing_commit_publication(
         expected_branch=expected_branch,
     )
 
-    # 步骤 3: 运行 pre-PR code review（重要：确保复用的代码也经过评审；reviewer 修复会即时 push）
-    final_sha, _final_verification_results = run_pre_pr_review(
+    # 步骤 3: 复用提交也要审核，并在最终 HEAD 上取得复核结论。
+    final_verification_request = FinalVerificationRequest(
         issue=issue,
         worktree_path=worktree_path,
         config=config,
-        github_client=github_client,
         process_runner=process_runner,
         selected_agent=selected_agent,
-        head_sha_before=head_sha,
-        expected_branch=expected_branch,
-        verification_results=verification_results,
-        push_callback=push_callback,
+        verified_sha=None,
+        verifier_verdict=commit_result.verifier_verdict,
     )
-
-    # 步骤 4: review 收敛后才创建 Draft PR
-    branch, pr_url = _create_draft_pr_with_recovery_context(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        github_client=github_client,
-        process_runner=process_runner,
-        expected_branch=expected_branch,
-        content_generator=content_generator,
+    reviewed_pr = _review_verify_create_pr(
+        _PublicationReviewRequest(
+            verification_request=final_verification_request,
+            github_client=github_client,
+            expected_branch=expected_branch,
+            verification_results=verification_results,
+            push_callback=push_callback,
+            content_generator=content_generator,
+        )
     )
-    publish_sha = get_head_sha(worktree_path, process_runner)
-
     # 切换标签：从 workflow state labels → supervising
     _edit_issue_labels_after_publish(
         issue_number=issue.number,
@@ -822,37 +879,18 @@ def _finish_existing_commit_publication(
         worktree_path=worktree_path,
         github_client=github_client,
     )
-    _comment_issue_after_publish(
-        issue_number=issue.number,
-        comment_body=build_draft_pr_created_comment(
-            pr_url=pr_url,
-            branch=branch,
-            head_sha=publish_sha,
-        ),
-        worktree_path=worktree_path,
-        github_client=github_client,
-    )
-
-    # 证据上传与 PR 证据评论（要求验证的 Issue）
-    _publish_validation_evidence_after_pr(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        github_client=github_client,
-        process_runner=process_runner,
-        pr_url=pr_url,
-    )
+    _publish_verified_pr(reviewed_pr)
 
     # 步骤 4: PR 后监督（可选）
     supervisor_config = config.post_pr_supervisor
     if supervisor_config.enabled:
-        pr_context = github_client.get_pull_request_context(branch)
+        pr_context = github_client.get_pull_request_context(reviewed_pr.branch)
         if pr_context is None:
             _logger.warning(
                 "Deferring post-PR supervisor for Issue #%d branch %s: "
                 "complete PR context is unavailable.",
                 issue.number,
-                branch,
+                reviewed_pr.branch,
             )
         else:
             supervisor_agent = resolve_supervisor_agent(
@@ -885,6 +923,6 @@ def _finish_existing_commit_publication(
     _logger.info(
         "Recovered publication for Issue #%d from %s at %s.",
         issue.number,
-        branch,
-        final_sha,
+        reviewed_pr.branch,
+        get_head_sha(worktree_path, process_runner),
     )

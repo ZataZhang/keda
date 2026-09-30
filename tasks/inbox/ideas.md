@@ -255,3 +255,21 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 根因（已用 env 二分法单变量复现确认）：操作者的交互式 CodeBuddy 会话向 shell 注入 `SERVER__PORT=56469`（会话 daemon 正监听该端口）；runner 从该 shell 启动后，子进程继承该变量并尝试监听同一端口，日志出现 `listen EADDRINUSE: address already in use 127.0.0.1:56469`（unhandledRejection），随后卡死。仅 `SERVER__PORT=56469` 一个变量即可复现零输出；去掉即恢复正常。
 - 代码事实：`src/backend/infrastructure/process_runner.py` 的多处 `subprocess.Popen(...)`（约 :273/:365/:675/:814）以及 `src/backend/engines/agent_runner/output_protocols/plain.py:35`、`pi_json_lines.py:36` 均未传 `env=`，子进程原样继承父进程完整环境。
 - 临时规避：以 `env -u SERVER__PORT uv run iar run ...` 启动 runner；卡死 Issue 需手工把 `agent/running` 换回 `agent/ready` 重排队。
+
+## 2026-09-29 10:57 · iar-verifier-stdout-lost-and-codex-sandbox
+
+> 当前的这个prd issue  怎么一直失败， 我使用iar 去做的，你帮我看看为什么
+
+> 先记录到 ../keda 的 idea-inbox 里面吧，然后你直接接管这个issue  暂时不用keda去实现了
+
+**AI 派生背景**（2026-09-29 排查 ai-assistant Issue #39 反复失败得出，非用户原话）：
+
+- 现象：ai-assistant Issue #39 的 `iar` 任务连续多轮 recovery 耗尽（qoder 6 次 + claude 6 次），最大一类 failure detail 是 `No parseable verifier verdict marker found; treating as blocked (red).`
+- 根因一（marker 捕获丢失，与 builder 实现无关）：独立 verifier 走 `run_verifier_agent` → `capture_output=True` + `timeout=1800` + `inactivity_timeout=1200`（`verifier_inactivity_timeout_seconds` 默认 1200，非 None），命中 `process_runner.py:_run_captured_process` 的 `_communicate_with_activity_tracking` 分支。该函数（`process_runner.py:407-435`）两个 `join(timeout=5)` 后**直接 return 拼串**，不等进程结束；而 codex 的行为是「进度全走 stderr、最终答复只在最后一行写 stdout」，verifier 跑 6–10 分钟，于是 capture 到的 stdout 恒为 `""` → `parse_verifier_verdict` 找不到 marker → fail-safe 判 red。
+  - 实证：`.iar-worktrees/issue-39/.iar/evidence/verifier-response.txt` 记 `response chars: 0` / `verdict marker found: no`；而 `~/.codex/sessions/2026/09/29/` 里 5 次 issue-39 verifier 会话的最终 assistant 消息**全部**以 `<!-- iar:verifier-verdict risk=red -->` 结尾且 `task_complete=True`。用当前 HEAD（`947fd1e6`）的真实 `SubprocessRunner.run(..., timeout=1800, inactivity_timeout=1200, capture_output=True)` 复现 codex 行为 → `stdout: ''`。
+  - 代码事实：该函数由 `8c141421`（2026-06-25）引入后**从未被修改**（`git log -S` 仅此一条）；09-27 后唯一碰过 `process_runner.py` 的 `fd0658d3` 只做 child env sanitize，未动捕获逻辑；`run_verifier_agent.py` 自 09-27 无改动。`e8fd959e` 只加了 `verifier-response.txt` 诊断落盘，让问题可见但没修。
+- 根因二（即使修好捕获也仍判 red）：verifier agent 是 codex（`lifecycle_agents.verifier = "codex"`），codex 是**唯一**带 `--sandbox workspace-write`（macOS seatbelt）的 agent（qoder/claude 用 `--dangerously-skip-permissions`、kimi 无沙箱）。Seatbelt 随子进程继承，导致 Playwright/Chromium 启动被拒：`bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.<pid>: Permission denied (1100)`（见 `.iar-worktrees/issue-39/.iar/evidence/verifier-rv4-browser-incident.txt:84`）。因此 rv-4（浏览器 UI）与 rv-5（真实模型会话）**结构上不可能被 verifier 独立复现**，而协议规定「无法独立确认即 red」→ 永不收敛。同一 worktree 上 builder（qoder/claude/kimi）的同一脚本却 `verdict=pass`。
+- 已否定/非根因：不是 ai-assistant 侧实现缺陷；不是 verifier 未产出结论（它产出了）；不是机器/Chromium 安装问题（builder 同机可跑）。
+- 已知但未登记的伴生问题：v3 记录显示 keda 的 tasks/ 与 docs/ 中**零处**提及 MachPort/seatbelt 浏览器阻断，也未作为已知限制登记。
+- 收敛结论：这是 keda 侧两个独立缺陷。修复方向 = (1) 改 `_communicate_with_activity_tracking`：在 `process.wait()` 之后再 join 读取线程并收集，别提前定格 stdout；(2) 解决 verifier 的浏览器沙箱冲突（放开 codex 沙箱 / 换非沙箱 verifier agent / 或把浏览器类 RV 降级为「builder 产物 + verifier 文件级核验」并在 PRD 写明边界）。
+- 本次处置：用户决定**暂不使用 keda 实现**，#39 由交互式会话直接接管实现；此条目仅作 keda 待办登记。

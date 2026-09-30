@@ -16,6 +16,10 @@ const testResultOutputDirectory = process.env.PLAYWRIGHT_TEST_RESULTS_DIR ?? './
 const htmlReportOutputDirectory = process.env.PLAYWRIGHT_HTML_OUTPUT_DIR ?? 'playwright-report'
 const junitOutputFilePath =
   process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? `${testResultOutputDirectory}/junit.xml`
+// 本地录全程视频用于 demo 与验收证据；CI 只保留失败用例的视频，否则每次失败都会
+// 把全部用例的 video.webm 打进 playwright-report-* 制品，很快吃满 Actions 存储配额。
+// 与上面的 retries/workers 一样按 CI 分支，调用方无需额外传参。
+const videoMode = (process.env.CI ? 'retain-on-failure' : 'on') as 'on' | 'retain-on-failure'
 
 export default defineConfig({
   testDir: './tests',
@@ -41,7 +45,7 @@ export default defineConfig({
     baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    video: 'on',
+    video: videoMode,
     viewport: { width: 1440, height: 1200 },
     testIdAttribute: 'data-testid',
   },
@@ -77,13 +81,14 @@ export default defineConfig({
     // are also used to record demo / acceptance videos. Pair with a local
     // `humanPause(page, ms)` helper inside tests for extra dwell time on key
     // steps (e.g. after a form fill or before an assertion).
+    // CI 里没有人看录像，slowMo 只会白白拉长耗时，因此 CI 下取 0，本地保持 200。
     {
       name: 'no-auth',
       testMatch: /.*\.no-auth\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 1200 },
-        launchOptions: { slowMo: 200 },
+        launchOptions: { slowMo: process.env.CI ? 0 : 200 },
       },
     },
 

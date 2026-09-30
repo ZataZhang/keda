@@ -41,8 +41,8 @@ def test_run_once_uncommitted_changes_runner_commits(
     class _FallbackCommitRunner(FakeProcessRunner):
         def __init__(self) -> None:
             super().__init__()
-            self._sha_calls = 0
             self._status_calls = 0
+            self._committed = False
 
         def run(
             self,
@@ -57,10 +57,21 @@ def test_run_once_uncommitted_changes_runner_commits(
             output_protocol=None,
         ):
             command_tuple = tuple(command)
+            if command_tuple[:2] == ("git", "commit"):
+                commit_result = super().run(
+                    command,
+                    cwd=cwd,
+                    check=check,
+                    timeout=timeout,
+                    capture_output=capture_output,
+                    label=label,
+                )
+                if commit_result.return_code == 0:
+                    self._committed = True
+                return commit_result
             if command_tuple == ("git", "rev-parse", "HEAD"):
                 self.calls.append(list(command))
-                self._sha_calls += 1
-                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                sha = "after-sha" if self._committed else "before-sha"
                 return CommandResult(
                     command=command_tuple,
                     return_code=0,
@@ -71,11 +82,11 @@ def test_run_once_uncommitted_changes_runner_commits(
                 self.calls.append(list(command))
                 self._status_calls += 1
                 status_stdout = (
-                    " M file.txt\n?? .agent-runner/commit-request.json\n"
+                    ""
+                    if self._committed
+                    else " M file.txt\n?? .agent-runner/commit-request.json\n"
                     if self._status_calls == 1
                     else " M file.txt\n"
-                    if self._status_calls < 4
-                    else ""
                 )
                 return CommandResult(
                     command=command_tuple,

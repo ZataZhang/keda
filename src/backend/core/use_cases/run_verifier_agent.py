@@ -42,6 +42,7 @@ from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_over
 from backend.core.use_cases.run_agent_once import (
     extract_agent_response_text,
     get_head_sha,
+    has_changes,
     run_agent_with_prompt_resilient,
 )
 
@@ -517,6 +518,11 @@ def run_verifier_gate(
         return None
     if not has_structured_evidence_marker(issue.body):
         return None
+    if has_changes(worktree_path, process_runner):
+        raise ValidationEvidenceError(
+            "Independent verifier requires a clean committed worktree; "
+            "commit the final implementation before verification."
+        )
 
     manifest = load_evidence_manifest(
         worktree_path,
@@ -553,6 +559,13 @@ def run_verifier_gate(
         restore_evidence_snapshot(
             evidence_snapshot,
             keep_filenames=(_VERIFIER_RESPONSE_FILENAME,),
+        )
+    if get_head_sha(worktree_path, process_runner) != builder_sha or has_changes(
+        worktree_path, process_runner
+    ):
+        raise ValidationEvidenceError(
+            "Independent verifier changed the committed code tree; restore its "
+            "negative-control edits before accepting a verdict."
         )
     if verdict.blocks:
         raise ValidationEvidenceError(

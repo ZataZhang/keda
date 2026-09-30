@@ -535,7 +535,10 @@ Fix Agent 只挂在「提交前验证失败」这一个入口。代码写完、�
 2. **启动收尾 agent** —— 复用当前轮次已选定的 agent（不引入「收尾用哪个 agent」这个新配置维度），prompt 只含该门禁失败与收尾约束，超时按类别取 `closeout_timeout_seconds` 或 `closeout_visual_timeout_seconds`。
 3. **越界检查** —— 再取一次快照，比对内容摘要。收尾 pass 只被允许改 canonical PRD（含其归档目标路径）与证据目录；出现任何其他被改动的路径即判本次收尾失败。这条**不靠 prompt 约束**，靠 runner 自己比对强制。
 4. **完整门禁链重跑** —— PRD 交付 + 证据齐备 + RV 脚本位置 + RV 命令复跑，全过才算收尾成功。
+
 5. **留痕** —— runner 比对收尾前后的 PRD 文本与证据清单，算出「本轮勾了哪几项 / 追加了哪条 Change Log / 新增了哪些证据文件」，以 `delivery_closeout` + `recovered=true` 记一条 attempt，同步到 Issue 的尝试历史评论。**这份记录不采信 agent 自述**——agent 可以在总结里说谎，前后文本差异不会。
+
+runner 在 commit proxy 固定实现提交后复跑 RV，再启动要求工作树干净的独立 verifier。pre-PR review 若提交补丁，runner 在创建 Draft PR 前对新的 HEAD 重新执行 RV 和独立 verifier；复用已有本地提交的发布路径也执行这道最终复核。最终复核失败时不创建 PR，也不沿用旧提交的 verifier 结论。
 
 任一环节失败即升级为整轮重跑，与本层落地前的行为一致；同时 runner 会把收尾 pass 对 PRD 的编辑**原样撤销**。验收清单是这几道门禁里唯一没有独立验证源的一道（门禁只问「还有没有未勾项」），失败的收尾若把一个举不出证据的勾留在 worktree 里，随后的完整重跑会把它当成既成事实收下，「举证后才可勾选」就成了空话。越界写入的其他文件不撤销，按设计交给完整重跑重新处理。
 
