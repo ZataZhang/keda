@@ -15,7 +15,6 @@ helper 仍在 ``generated_content`` 中，本模块单向依赖它。
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IContentGenerator
@@ -23,12 +22,15 @@ from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
     IssueSummary,
 )
-from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.core.shared.prd_machine_contract import (
     PrdSkillPreflightError,
     format_supported_machine_contract_versions,
     is_supported_machine_contract_version,
     parse_machine_contract_version,
+)
+from backend.core.shared.prd_skill_location import (
+    resolve_prd_contract_script,
+    resolve_prd_skill_path,
 )
 from backend.core.use_cases.generated_content import (
     GeneratedPrdContent,
@@ -182,60 +184,8 @@ def _validate_prd_output(text: str) -> bool:
 # ---------------------------------------------------------------------------
 # prd skill 规范来源（单一来源；禁止硬编码安装路径）
 # ---------------------------------------------------------------------------
-
-# 环境变量覆盖 prd skill 路径，便于全局工具 / 跨仓库运行（runner 在产品仓执行，
-# skill 在用户级目录）下显式指定，而非硬编码安装路径。
-_PRD_SKILL_PATH_ENV_VAR = "IAR_PRD_SKILL_PATH"
-_CC_SWITCH_SKILLS_DIR_ENV_VAR = "CC_SWITCH_SKILLS_DIR"
-_PRD_SKILL_RELATIVE_PATH = Path("prd") / "SKILL.md"
-
-
-def _default_prd_skill_candidate_paths() -> tuple[Path, ...]:
-    """按 agent 注册表派生 prd skill 的用户级候选路径。
-
-    与 ``iar init`` 的安装目标同源（:meth:`AgentSpec.user_skills_dir`，
-    即各 agent ``auth_home`` 下的 ``skills/``），注册顺序即优先级；
-    不再包含已废弃的 ``~/.cc-switch/skills`` 固定候选。
-    """
-    user_home_path = Path.home()
-    return tuple(
-        skills_dir / _PRD_SKILL_RELATIVE_PATH
-        for agent_spec in BUILTIN_AGENT_SPECS.values()
-        if (skills_dir := agent_spec.user_skills_dir(user_home_path)) is not None
-    )
-
-
-def resolve_prd_skill_path(explicit_path: Path | None = None) -> Path:
-    """解析模板安装器管理的 ``prd`` skill 路径。
-
-    解析优先级：显式入参 → ``IAR_PRD_SKILL_PATH`` 环境变量 →
-    ``CC_SWITCH_SKILLS_DIR`` → agent 注册表各 agent 的用户级 skills 目录
-    （``auth_home`` 派生，与 ``iar init`` 安装目标同源）。
-    默认候选中优先返回存在的 ``SKILL.md``；全部缺失时返回第一个候选，
-    由调用方保留现有 fallback 行为。
-
-    Args:
-        explicit_path: 调用方显式指定的路径；为 ``None`` 时回落到环境变量/默认。
-
-    Returns:
-        待读取的 skill 规范文件路径（不保证存在）。
-    """
-    if explicit_path is not None:
-        return explicit_path
-    env_value = os.environ.get(_PRD_SKILL_PATH_ENV_VAR)
-    if env_value:
-        return Path(env_value).expanduser()
-    configured_skills_root = os.environ.get(_CC_SWITCH_SKILLS_DIR_ENV_VAR)
-    candidate_skill_paths: list[Path] = []
-    if configured_skills_root:
-        candidate_skill_paths.append(
-            Path(configured_skills_root).expanduser() / _PRD_SKILL_RELATIVE_PATH
-        )
-    candidate_skill_paths.extend(_default_prd_skill_candidate_paths())
-    for candidate_skill_path in candidate_skill_paths:
-        if candidate_skill_path.is_file():
-            return candidate_skill_path
-    return candidate_skill_paths[0]
+# 路径解析已搬到 ``backend.core.shared.prd_skill_location``：消费它的是 core/shared
+# 下的模块（如 PRD 格式解析客户端），留在 use_cases 会造成反向依赖。
 
 
 def load_prd_skill_spec(explicit_path: Path | None = None) -> str | None:
@@ -305,6 +255,36 @@ def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> 
             "unsupported. Use `iar init` only after its dry-run "
             "shows the intended Skill plan, or select a supported prd skill "
             "without overwriting user-owned files, or point IAR_PRD_SKILL_PATH at its SKILL.md."
+        )
+    return _ensure_prd_contract_script_present(skill_path)
+
+
+def _ensure_prd_contract_script_present(skill_path: Path) -> Path:
+    """预检第二关：skill 必须带 PRD 解析脚本（keda 已不自带解析实现）。
+
+    ``SKILL.md`` 与 ``scripts/prd_contract.py`` 是**一起安装**的一对：契约文本说
+    的格式、与真正被执行的解析实现必须同源。只检查 ``SKILL.md`` 会漏掉"装了半套"
+    ——例如手工只更新了 SKILL.md，解析却仍走不到脚本，于是 daemon 起得来、直到交付
+    门禁才失败。这里在启动时就把这条接线检查掉。
+
+    Args:
+        skill_path: 已通过版本预检的 ``SKILL.md`` 路径。
+
+    Returns:
+        通过预检的 skill 路径。
+
+    Raises:
+        PrdSkillPreflightError: 兄弟 ``scripts/`` 目录下缺 ``prd_contract.py``。
+    """
+    contract_script_path = resolve_prd_contract_script(skill_path)
+    if not contract_script_path.is_file():
+        raise PrdSkillPreflightError(
+            f"prd skill at {skill_path} has no parser script at {contract_script_path}. "
+            "The runner no longer implements PRD format parsing itself; it calls the "
+            "skill's scripts/prd_contract.py, so SKILL.md and scripts/ must be installed "
+            "together. Re-run `iar init` to reinstall the skill, or point "
+            "IAR_PRD_SKILL_PATH at a complete prd SKILL.md whose sibling scripts/ "
+            "directory is present."
         )
     return skill_path
 

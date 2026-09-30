@@ -1,41 +1,29 @@
-"""Shared pure helper for parsing PRD Acceptance Checklist state."""
+"""PRD Acceptance Checklist 的**适配层**。
+
+解析（章节边界、分组、复选框标记）由 prd skill 的 ``scripts/prd_contract.py``
+承担，本模块只把它的 JSON 映射成 keda 各处沿用的 :class:`PrdChecklistResult`：
+
+- 契约文本与真正执行的解析只有一份实现，不会再各自漂移；
+- 门禁语义（哪些未勾项该拦、人属项该放行）仍留在 keda，按契约取用结构字段。
+
+保留 :data:`CHECKBOX_RE` 是给"读一行、判断是不是复选框"这类**行级**判断用的
+（见 ``agent_runner_closeout`` 重写清单行的场景）；它不是章节解析的一部分。
+"""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
+from backend.core.shared.prd_contract_client import parse_prd_contract
 
-ACCEPTANCE_CHECKLIST_HEADING_RE = re.compile(
-    r"^##\s+(?:\d+\.\s+)?(?:Acceptance Checklist\b.*|验收清单.*)\s*$"
-)
-TOP_LEVEL_HEADING_RE = re.compile(r"^##\s+")
 CHECKBOX_RE = re.compile(r"^\s*[-*+]\s+\[(?P<mark>[ xX])\]\s*(?P<label>.*)$")
-CODE_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
-HEADING_RE = re.compile(r"^(#{3,6})\s+(.+?)\s*$")
-# 整行加粗的分组标签（如 `**Human-Confirmed**`）。要求整行只有加粗内容，
-# 因此行内强调（`**Human-Confirmed（2026-09-23）：** 用户确认…`）不会命中。
-BOLD_GROUP_LABEL_RE = re.compile(r"^\s*(?:\*\*|__)\s*(?P<label>.+?)\s*(?:\*\*|__)\s*$")
-HUMAN_CONFIRMED_LABEL_PREFIX = "human-confirmed"
-# 粗体分组标签没有标题层级，按三级处理，复用"遇到同级或更高级标题即关闭"的规则。
-BOLD_GROUP_DEPTH = 3
-# 清单区内是否"提到过" Human-Confirmed（不限定书写形式），用于诊断分组未被识别的情况。
-HUMAN_CONFIRMED_MENTION_RE = re.compile(r"human[-\s_]?confirmed", re.IGNORECASE)
+"""行级复选框匹配；``[~]`` 刻意不是复选框（见 Machine Contract §2）。"""
 
-
-def is_human_confirmed_group_label(label: str) -> bool:
-    """判断分组标签是否指代 Human-Confirmed 小节。
-
-    标题文本常带说明后缀（prd skill 模板写作
-    ``Human-Confirmed (来自 Part A 风险地图)``），因此按前缀匹配而不是精确相等。
-
-    Args:
-        label: 标题或粗体分组的标签文本（不含 ``#`` / ``**`` 标记）。
-
-    Returns:
-        标签归一化后以 ``human-confirmed`` 开头时为 True。
-    """
-    return label.strip().casefold().startswith(HUMAN_CONFIRMED_LABEL_PREFIX)
+_UNCHECKED_MARK = " "
+_CHECKED_MARK = "x"
+_RESOLVED_MARK = "~"
 
 
 @dataclass(frozen=True)
@@ -48,9 +36,9 @@ class PrdChecklistResult:
         checked_items: List of ticked items as (1-based line number, line text).
             用于区分"被勾上"与"被删掉"——只看 ``unchecked_items`` 变小的话，
             删除一个条目和勾上它无法区分。
-        human_pending_items: ``Human-Confirmed`` 小节里仍待人工确认的空框或后置门禁。
-            小节标题既可以是 ``### Human-Confirmed`` 这类标题，也可以是整行加粗的
-            ``**Human-Confirmed**`` 分组标签。
+        human_pending_items: ``Human-Confirmed`` 分组里仍待人回答的空框，以及组内
+            ``[~]`` 后置门禁。分组既可以是 ``### Human-Confirmed`` 这类标题，也可以
+            是整行加粗的 ``**Human-Confirmed**``（后者是契约外的兼容输入）。
         human_group_found: 是否识别出了 Human-Confirmed 分组（识别到即认定该分组存在，
             与组内是否残留待确认条目无关）。
         human_confirmed_mentioned: 清单区内是否出现过 ``Human-Confirmed`` 字样（不限定
@@ -77,91 +65,44 @@ class PrdChecklistResult:
         return self.section_found and not self.unchecked_items and not self.human_pending_items
 
 
+def _item_line_text(item: dict[str, Any]) -> tuple[int, str]:
+    """把解析脚本返回的单条条目映射成 ``(行号, 原文)``。"""
+    return int(item["line"]), str(item["text"])
+
+
 def parse_prd_checklist(file_content: str) -> PrdChecklistResult:
     """Parse a PRD markdown string and return its Acceptance Checklist state.
 
-    Only checkboxes inside the Acceptance Checklist section are considered.
-    Checkboxes inside fenced code blocks are ignored.  The section ends at
-    the next top-level ``##`` heading or end of file.
+    解析委托给 prd skill 的 ``prd_contract.py``（格式的唯一实现），本函数只做映射。
+    章节缺失、围栏代码块忽略、分组归属等规则都归那边定义。
 
     Args:
         file_content: Raw markdown content of the PRD file.
 
     Returns:
         PrdChecklistResult with section_found and unchecked_items.
+
+    Raises:
+        PrdContractError: prd skill 的解析脚本不可用（缺失 / 执行失败 / 输出非法）。
     """
-    lines = file_content.splitlines()
+    checklist = parse_prd_contract(file_content)["checklist"]
+    items: list[dict[str, Any]] = checklist.get("items", [])
 
-    start_index: int | None = None
-    for line_index, line in enumerate(lines):
-        if ACCEPTANCE_CHECKLIST_HEADING_RE.match(line):
-            start_index = line_index
-            break
-
-    if start_index is None:
-        return PrdChecklistResult(section_found=False, unchecked_items=[])
-
-    end_index = len(lines)
-    for line_index in range(start_index + 1, len(lines)):
-        if TOP_LEVEL_HEADING_RE.match(lines[line_index]):
-            end_index = line_index
-            break
-
-    unchecked_items: list[tuple[int, str]] = []
-    checked_items: list[tuple[int, str]] = []
-    human_pending_items: list[tuple[int, str]] = []
-    in_code_block = False
-    human_heading_depth: int | None = None
-    human_group_found = False
-    human_confirmed_mentioned = False
-
-    for line_index in range(start_index + 1, end_index):
-        line = lines[line_index]
-        if CODE_FENCE_RE.match(line):
-            in_code_block = not in_code_block
-            continue
-        if in_code_block:
-            continue
-
-        if HUMAN_CONFIRMED_MENTION_RE.search(line):
-            human_confirmed_mentioned = True
-
-        heading_match = HEADING_RE.match(line)
-        if heading_match:
-            heading_depth = len(heading_match.group(1))
-            if human_heading_depth is not None and heading_depth <= human_heading_depth:
-                human_heading_depth = None
-            if is_human_confirmed_group_label(heading_match.group(2)):
-                human_heading_depth = heading_depth
-                human_group_found = True
-            continue
-
-        bold_group_match = BOLD_GROUP_LABEL_RE.match(line)
-        if bold_group_match:
-            if human_heading_depth is not None and BOLD_GROUP_DEPTH <= human_heading_depth:
-                human_heading_depth = None
-            if is_human_confirmed_group_label(bold_group_match.group("label")):
-                human_heading_depth = BOLD_GROUP_DEPTH
-                human_group_found = True
-            continue
-
-        checkbox_match = CHECKBOX_RE.match(line)
-        if not checkbox_match:
-            if human_heading_depth is not None and re.match(r"^\s*[-*+]\s+\[~\]", line):
-                human_pending_items.append((line_index + 1, line.rstrip()))
-            continue
-        if checkbox_match.group("mark") == " ":
-            unchecked_items.append((line_index + 1, line.rstrip()))
-            if human_heading_depth is not None:
-                human_pending_items.append((line_index + 1, line.rstrip()))
-        else:
-            checked_items.append((line_index + 1, line.rstrip()))
+    unchecked_items = [
+        _item_line_text(item) for item in items if item.get("mark") == _UNCHECKED_MARK
+    ]
+    checked_items = [_item_line_text(item) for item in items if item.get("mark") == _CHECKED_MARK]
+    human_pending_items = [
+        _item_line_text(item)
+        for item in items
+        if item.get("in_human_group") and item.get("mark") in (_UNCHECKED_MARK, _RESOLVED_MARK)
+    ]
 
     return PrdChecklistResult(
-        section_found=True,
+        section_found=bool(checklist.get("section_found")),
         unchecked_items=unchecked_items,
         checked_items=checked_items,
         human_pending_items=human_pending_items,
-        human_group_found=human_group_found,
-        human_confirmed_mentioned=human_confirmed_mentioned,
+        human_group_found=bool(checklist.get("human_group_found")),
+        human_confirmed_mentioned=bool(checklist.get("human_confirmed_mentioned")),
     )

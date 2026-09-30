@@ -107,6 +107,31 @@ jobs:
           uv run python hooks/shared/check_max_file_lines.py \
             --max-lines 1000 --glob "*.py" src/backend "${allow_list_args[@]}"
 
+      # keda 不再自带 PRD 格式解析：验收清单的章节 / 分组 / 复选框由 prd skill 的
+      # scripts/prd_contract.py 提供，而该 skill 是**用户级安装**（`iar init` 从模板仓
+      # sparse checkout 拉取）。所以单测需要一个真实安装的 skill——仓库里那份只写
+      # 版本标记的桩 SKILL.md 已经解析不出任何结构，用它会让所有走门禁 / roadmap 的
+      # 用例失败。这里在一次性仓库里跑 `iar init` 把 skill 装到临时目录，并导出
+      # IAR_PRD_SKILL_PATH：安装路径与用户实际使用同源，顺带验证了"iar init 装出来的
+      # 契约确实带解析脚本"这条运行时依赖。
+      #
+      # 与 cd.yml 同一套调用：两个 workflow 都跑测试套件，改其一必须改另一个——本仓
+      # 曾只修 ci.yml 导致 tag 触发的 workflow 仍以同样原因失败。
+      #
+      # 注意：`iar init` 目前固定取模板仓 main 分支，因此这里会跟随模板契约的最新
+      # 版本。这是有意为之——契约不兼容时 keda CI 应当立刻变红（启动预检会点名），
+      # 而不是静默停在一份陈旧副本上。
+      - name: Install prd skill contract for tests
+        run: |
+          skills_root="$RUNNER_TEMP/user-skills"
+          init_repo="$(mktemp -d)"
+          git -C "$init_repo" init -q
+          cd "$init_repo"
+          CC_SWITCH_SKILLS_DIR="$skills_root" \
+            uv run --project "$GITHUB_WORKSPACE" iar init
+          test -f "$skills_root/prd/scripts/prd_contract.py"
+          echo "IAR_PRD_SKILL_PATH=$skills_root/prd/SKILL.md" >> "$GITHUB_ENV"
+
       # timeout-minutes 是诊断也是防护。基线：2026-07-28 的 eb75be4 用同一条命令
       # 跑完 1773 个测试只要 45 秒；2026-09-11 起同一步骤 25 分钟不结束——因为
       # 此前 max-file-lines 一直先失败、本步一直被 skip，某个在 CI 里会挂住的
