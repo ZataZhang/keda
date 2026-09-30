@@ -26,7 +26,8 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.core.shared.prd_machine_contract import (
     PrdSkillPreflightError,
-    SUPPORTED_MACHINE_CONTRACT_VERSION,
+    format_supported_machine_contract_versions,
+    is_supported_machine_contract_version,
     parse_machine_contract_version,
 )
 from backend.core.use_cases.generated_content import (
@@ -277,8 +278,8 @@ def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> 
         通过预检的 skill 路径。
 
     Raises:
-        PrdSkillPreflightError: skill 不可读或契约主版本与
-            ``SUPPORTED_MACHINE_CONTRACT_VERSION`` 不一致；报错含修复指引。
+        PrdSkillPreflightError: skill 不可读，或契约主版本不在
+            ``SUPPORTED_MACHINE_CONTRACT_VERSIONS`` 内；报错含修复指引。
     """
     skill_path = resolve_prd_skill_path(explicit_path)
     try:
@@ -291,7 +292,7 @@ def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> 
             "remote template skills, or point IAR_PRD_SKILL_PATH at a prd SKILL.md."
         ) from read_error
     contract_version = parse_machine_contract_version(skill_text)
-    if contract_version != SUPPORTED_MACHINE_CONTRACT_VERSION:
+    if not is_supported_machine_contract_version(contract_version):
         declared_version_text = (
             f"v{contract_version}"
             if contract_version is not None
@@ -299,9 +300,10 @@ def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> 
         )
         raise PrdSkillPreflightError(
             f"prd skill at {skill_path} declares {declared_version_text}, but this "
-            f"runner supports only the current Machine Contract v{SUPPORTED_MACHINE_CONTRACT_VERSION}; "
-            "older and unknown versions are unsupported. Use `iar init` only after its dry-run "
-            "shows the intended Skill plan, or select a current prd skill "
+            f"runner supports only Machine Contract "
+            f"{format_supported_machine_contract_versions()}; unknown versions are "
+            "unsupported. Use `iar init` only after its dry-run "
+            "shows the intended Skill plan, or select a supported prd skill "
             "without overwriting user-owned files, or point IAR_PRD_SKILL_PATH at its SKILL.md."
         )
     return skill_path

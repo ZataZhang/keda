@@ -238,3 +238,76 @@ class TestParsePrdChecklist:
         )
         result = parse_prd_checklist(content)
         assert result.unchecked_items == []
+
+
+class TestHumanConfirmedGroupFormatting:
+    """Human-Confirmed 分组的书写形式容错。
+
+    背景：``**Human-Confirmed**`` 这种整行加粗的写法曾让分组彻底不被识别，
+    人属项落入执行项集合，交付门禁报 checklist_unchecked 并触发
+    closeout/repair 死循环（实证：ai-assistant Issue #53）。
+    """
+
+    def test_bold_group_label_is_recognized_and_closed_by_sibling_bold_label(self) -> None:
+        """整行加粗的分组标签要能开组，并被下一个同级加粗标签关闭。"""
+        content = "\n".join(
+            [
+                "## 9. Acceptance Checklist",
+                "",
+                "### 9.2 Acceptance Evidence Package",
+                "",
+                "**Human-Confirmed**",
+                "",
+                "- [ ] 决定一：人属项",
+                "",
+                "**Behavior Acceptance**",
+                "",
+                "- [ ] rv-1 PASS：待独立 verifier",
+                "",
+            ]
+        )
+
+        result = parse_prd_checklist(content)
+
+        assert result.human_pending_items == [(7, "- [ ] 决定一：人属项")]
+        assert result.execution_unchecked_items == [(11, "- [ ] rv-1 PASS：待独立 verifier")]
+
+    def test_heading_label_with_suffix_is_recognized(self) -> None:
+        """带说明后缀的标题（prd skill 模板写法）也要被识别。"""
+        content = "\n".join(
+            [
+                "## 9. Acceptance Checklist",
+                "",
+                "### Human-Confirmed (来自 Part A 风险地图)",
+                "",
+                "- [ ] 人属项",
+                "",
+                "### Behavior Acceptance",
+                "",
+                "- [ ] 执行项",
+                "",
+            ]
+        )
+
+        result = parse_prd_checklist(content)
+
+        assert result.human_pending_items == [(5, "- [ ] 人属项")]
+        assert result.execution_unchecked_items == [(9, "- [ ] 执行项")]
+
+    def test_inline_bold_human_confirmed_is_not_a_group_marker(self) -> None:
+        """行内强调（加粗后还有正文）不得被当作分组标签。"""
+        content = "\n".join(
+            [
+                "## 9. Acceptance Checklist",
+                "",
+                "**Human-Confirmed（2026-09-23）：** 用户确认了该决定。",
+                "",
+                "- [ ] 执行项",
+                "",
+            ]
+        )
+
+        result = parse_prd_checklist(content)
+
+        assert result.human_pending_items == []
+        assert result.execution_unchecked_items == [(5, "- [ ] 执行项")]

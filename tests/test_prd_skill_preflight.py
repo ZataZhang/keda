@@ -16,7 +16,7 @@ import pytest
 
 from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.shared.prd_machine_contract import (
-    SUPPORTED_MACHINE_CONTRACT_VERSION,
+    SUPPORTED_MACHINE_CONTRACT_VERSIONS,
     PrdSkillPreflightError,
     parse_machine_contract_version,
 )
@@ -59,7 +59,7 @@ def test_skill_preflight_fails_fast_when_skill_missing(
 def test_skill_preflight_fails_fast_on_version_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """旧契约 v1 → fail fast，错误指出当前支持 v3，不建议盲目覆盖。"""
+    """旧契约 v1 → fail fast，错误列出受支持版本，不建议盲目覆盖。"""
     stale_skill = _skill_fixture(tmp_path, "# prd\n\nMachine-Contract-Version: 1\n")
     monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(stale_skill))
 
@@ -92,17 +92,37 @@ def test_skill_preflight_fails_fast_without_version_marker(
         ensure_prd_machine_contract_available()
 
 
-def test_skill_preflight_passes_with_matching_version(
+def test_skill_preflight_accepts_every_supported_version(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """skill 存在且主版本匹配 → 放行并返回 skill 路径。"""
-    good_skill = _skill_fixture(
-        tmp_path,
-        f"# prd\n\nMachine-Contract-Version: {SUPPORTED_MACHINE_CONTRACT_VERSION}\n",
-    )
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(good_skill))
+    """集合里的每个主版本都放行——这是两侧发版能错开的前提。
 
-    assert ensure_prd_machine_contract_available() == good_skill
+    契约规定"改这一节必须 bump 版本"，而 skill 与 keda 无法原子发版：skill 先
+    bump、keda 后跟进的那段时间里，硬相等 pin 会让所有 iar 起不来。因此受支持
+    版本必须是集合语义，且当前集合中的每一版都真的能过预检。
+    """
+    for version in SUPPORTED_MACHINE_CONTRACT_VERSIONS:
+        skill_path = _skill_fixture(
+            tmp_path / f"v{version}",
+            f"# prd\n\nMachine-Contract-Version: {version}\n",
+        )
+        monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(skill_path))
+
+        assert ensure_prd_machine_contract_available() == skill_path
+
+
+def test_skill_preflight_fails_closed_just_above_the_supported_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """集合之外的更高版本仍 fail closed：新契约必须先由 keda 表态支持。"""
+    unsupported_version = max(SUPPORTED_MACHINE_CONTRACT_VERSIONS) + 1
+    future_skill = _skill_fixture(
+        tmp_path, f"# prd\n\nMachine-Contract-Version: {unsupported_version}\n"
+    )
+    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(future_skill))
+
+    with pytest.raises(PrdSkillPreflightError, match=f"v{unsupported_version}"):
+        ensure_prd_machine_contract_available()
 
 
 def test_skill_preflight_via_run_preflight_checks(
