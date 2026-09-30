@@ -431,6 +431,11 @@ def _human_group_missing_hint(checklist_result: PrdChecklistResult) -> str:
     把病因直接写进报错，agent 才可能去修结构，而不是在不可满足的指令之间空转
     （实证：ai-assistant Issue #53 的 closeout/repair 循环）。
 
+    刻意**不给出具体写法**：分组该写成什么形式由 prd skill 的 Machine Contract
+    定义，runner 只负责报出"没识别到分组"这个事实并指向契约（见
+    ``_build_prd_closeout_instruction`` 的同一条纪律）。在这里复述写法会把格式
+    规则变成 keda 的第二出处——甚至可能发明契约里并不存在的变体。
+
     Args:
         checklist_result: 本次清单解析结果。
 
@@ -442,10 +447,9 @@ def _human_group_missing_hint(checklist_result: PrdChecklistResult) -> str:
     return (
         "\n\nSuspected checklist-structure problem: this section mentions `Human-Confirmed` "
         "but no Human-Confirmed group was recognized, so those items are being treated as "
-        "executor items. A human-owned item must stay `- [ ]` and must not be ticked or "
-        "rewritten as `- [~]` here. Fix the group label instead: write it as its own line, "
-        "either a markdown heading (`### Human-Confirmed`) or a whole-line bold label "
-        "(`**Human-Confirmed**`)."
+        "executor items. A human-owned item must stay `- [ ]` — do not tick it and do not "
+        "rewrite it as `- [~]` here. Re-read the group's formatting against the contract "
+        f"instead of guessing: {PRD_MACHINE_CONTRACT_POINTER}"
     )
 
 

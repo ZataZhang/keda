@@ -20,7 +20,10 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     PromptConfig,
 )
-from backend.core.shared.prd_machine_contract import PRD_MACHINE_CONTRACT_POINTER
+from backend.core.shared.prd_machine_contract import (
+    PRD_MACHINE_CONTRACT_POINTER,
+    SUPPORTED_MACHINE_CONTRACT_VERSIONS,
+)
 from backend.core.use_cases.agent_runner_closeout import (
     CloseoutPromptContext,
     build_closeout_allowed_scope,
@@ -321,5 +324,11 @@ def test_prompt_contract_issue_body_section() -> None:
 
 def test_prompt_contract_pointer_single_source() -> None:
     """指针文本只在一处定义，各构建函数引用同一常量（不可复述变体）。"""
-    assert "Machine Contract v3" in PRD_MACHINE_CONTRACT_POINTER
     assert "prd skill" in PRD_MACHINE_CONTRACT_POINTER
+    assert "Machine Contract" in PRD_MACHINE_CONTRACT_POINTER
+    # 刻意不写死版本号：指针没有 skill 读取上下文，写死会在两侧发版错开时
+    # 指向一个当前未安装的版本。运行期版本由启动预检判定。
+    assert not any(
+        f"v{version}" in PRD_MACHINE_CONTRACT_POINTER
+        for version in SUPPORTED_MACHINE_CONTRACT_VERSIONS
+    )

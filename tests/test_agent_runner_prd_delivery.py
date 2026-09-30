@@ -15,6 +15,7 @@ from backend.core.shared.models.agent_runner import (
     DeliveryGateFailureKind,
     IssueSummary,
 )
+from backend.core.shared.prd_machine_contract import PRD_MACHINE_CONTRACT_POINTER
 from backend.core.use_cases.run_agent_once import (
     PrdDeliveryError,
     ensure_prd_delivery_ready,
@@ -704,7 +705,11 @@ def test_gate_error_names_an_unrecognized_human_group(tmp_path: Path) -> None:
 
     message = str(excinfo.value)
     assert "no Human-Confirmed group was recognized" in message
-    assert "### Human-Confirmed" in message
+    # 只报事实 + 指向契约，不复述格式：分组写法由 prd skill 的 Machine Contract
+    # 定义，keda 里再写一份就成了第二出处（乃至发明契约没有的变体）。
+    assert PRD_MACHINE_CONTRACT_POINTER in message
+    assert "###" not in message
+    assert "**" not in message
 
 
 def test_gate_error_omits_the_hint_when_the_group_is_recognized(tmp_path: Path) -> None:
