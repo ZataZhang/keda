@@ -516,6 +516,33 @@ export type PrdLifecycleStats = {
   unlinked_run_count: number;
   incomplete_run_count: number;
   runs: PrdLifecycleStatsRow[];
+  token_usage: TokenUsageStats;
+};
+
+/**
+ * 一个分组（流程或 agent）的 token 用量累计。
+ *
+ * `total_tokens` 为四项之和（实际处理量口径，含缓存命中与写入）；
+ * `usage_count` 是计入汇总的用量条数。与后端 `TokenUsageTotals` 对齐。
+ */
+export type TokenUsageTotals = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  total_tokens: number;
+  usage_count: number;
+};
+
+/**
+ * 仓库窗口内的 token 用量汇总（Stats 页 Token 汇总区的数据源）。
+ *
+ * `by_flow` 按 agent 调用流程分组（implement / verify / supervise / fix /
+ * closeout）；`by_agent` 按 agent 名分组。与后端 `TokenUsageStats` 对齐。
+ */
+export type TokenUsageStats = {
+  by_flow: Record<string, TokenUsageTotals>;
+  by_agent: Record<string, TokenUsageTotals>;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

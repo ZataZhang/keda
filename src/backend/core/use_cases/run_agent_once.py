@@ -37,6 +37,7 @@ from backend.core.shared.models.agent_runner import (
     AttemptResult,
     CommandResult,
     IssueSummary,
+    TokenUsage,
 )
 from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_RUN,
@@ -871,6 +872,7 @@ def run_agent_until_committed(
     expected_branch: str,
     prompt_override: str | None = None,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
+    on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
 ) -> AgentCommitResult:
     """运行 Agent recovery 状态机并返回最终提交结果。"""
     from backend.core.use_cases.run_agent_execution_loop import (
@@ -889,6 +891,7 @@ def run_agent_until_committed(
             expected_branch=expected_branch,
             prompt_override=prompt_override,
             on_attempt_recorded=on_attempt_recorded,
+            on_agent_usage=on_agent_usage,
         )
     )
 

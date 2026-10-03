@@ -61,6 +61,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   blocked: "已阻塞",
   unblocked: "已解除阻塞",
   failed: "失败",
+  agent_token_usage: "Token 用量",
 };
 
 /** 生命周期 run 结果 -> 中文标签。 */
@@ -116,8 +117,9 @@ export function phaseBadgeVariant(phase: string): BadgeVariant {
 /**
  * 把事件 detail 渲染为一行短摘要。
  *
- * attempt 事件按 ``#N agent=... failure=... recovered=...`` 排列关键字段，
- * 其余事件退化为 ``key=value`` 拼接，便于在不打开抽屉时快速扫读。
+ * attempt 事件按 ``#N agent=... failure=... recovered=... tokens=...`` 排列
+ * 关键字段；用量观测事件按 ``flow=... agent=... tokens=...`` 排列；其余事件
+ * 退化为 ``key=value`` 拼接，便于在不打开抽屉时快速扫读。
  *
  * @param event - 单条生命周期事件。
  * @returns 供时间线行展示的摘要文本；detail 为空时为 ``—``。
@@ -132,6 +134,19 @@ function summarizeEventDetail(event: PrdLifecycleEventView): string {
       `failure=${formatDetailValue(detail.failure_type)}`,
       `recovered=${formatDetailValue(detail.recovered)}`,
     ];
+    const tokensSummary = summarizeTokenUsage(detail.token_usage);
+    if (tokensSummary !== null) {
+      parts.push(tokensSummary);
+    }
+    return parts.join(" ");
+  }
+  if (event.event_type === "agent_token_usage") {
+    const parts = [
+      `flow=${formatDetailValue(detail.flow)}`,
+      `agent=${formatDetailValue(detail.agent)}`,
+    ];
+    const tokensSummary = summarizeTokenUsage(detail.token_usage);
+    parts.push(tokensSummary ?? "tokens=—");
     return parts.join(" ");
   }
   const entries = Object.entries(detail);
@@ -141,6 +156,61 @@ function summarizeEventDetail(event: PrdLifecycleEventView): string {
   return entries
     .map(([key, value]) => `${key}=${formatDetailValue(value)}`)
     .join(" ");
+}
+
+/**
+ * 把 token 计数格式化为紧凑文本（``820`` / ``1.2k``）。
+ *
+ * @param count - token 数量。
+ * @returns 千位以上保留一位小数加 ``k``，否则原样数字。
+ */
+export function formatTokenCount(count: number): string {
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}k`;
+  }
+  return String(count);
+}
+
+/**
+ * 把事件 detail 里的 ``token_usage`` 对象渲染为总量 + 明细的可读文本。
+ *
+ * 总量为"实际处理量"口径（输入 + 输出 + 缓存读 + 缓存写）。
+ *
+ * @param value - detail 中的 ``token_usage`` 原始值。
+ * @returns 形如 ``tokens=2.5k（输入 1.2k · 输出 340 · 缓存读 800 · 缓存写 120）``
+ *   的文本；无可用用量时返回 ``null``（不显示该段，而不是显示 0）。
+ */
+function summarizeTokenUsage(value: unknown): string | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const usage = value as Record<string, unknown>;
+  const readCount = (key: string): number | null => {
+    const raw = usage[key];
+    return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? raw : null;
+  };
+  const inputTokens = readCount("input_tokens");
+  const outputTokens = readCount("output_tokens");
+  const cacheRead = readCount("cache_read_input_tokens");
+  const cacheCreation = readCount("cache_creation_input_tokens");
+  if (
+    inputTokens === null &&
+    outputTokens === null &&
+    cacheRead === null &&
+    cacheCreation === null
+  ) {
+    return null;
+  }
+  const inputSide =
+    (inputTokens ?? 0) + (cacheRead ?? 0) + (cacheCreation ?? 0);
+  const total = inputSide + (outputTokens ?? 0);
+  const detailParts = [
+    `输入 ${formatTokenCount(inputTokens ?? 0)}`,
+    `输出 ${formatTokenCount(outputTokens ?? 0)}`,
+    `缓存读 ${formatTokenCount(cacheRead ?? 0)}`,
+    `缓存写 ${formatTokenCount(cacheCreation ?? 0)}`,
+  ];
+  return `tokens=${formatTokenCount(total)}（${detailParts.join(" · ")}）`;
 }
 
 /**

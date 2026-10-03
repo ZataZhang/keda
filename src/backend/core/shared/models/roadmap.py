@@ -214,6 +214,34 @@ class PrdLifecycleStatsRow:
 
 
 @dataclass(frozen=True)
+class TokenUsageTotals:
+    """一个分组（流程或 agent）的 token 用量累计。
+
+    ``total_tokens`` 为四项之和（实际处理量口径，含缓存命中与写入）；
+    ``usage_count`` 是计入汇总的用量条数（缺 usage 的事件不计入）。
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    total_tokens: int = 0
+    usage_count: int = 0
+
+
+@dataclass(frozen=True)
+class TokenUsageStats:
+    """仓库窗口内的 token 用量汇总（Stats 页 Token 汇总区的数据源）。
+
+    ``by_flow`` 按 agent 调用流程分组（``implement`` / ``verify`` /
+    ``supervise`` / ``fix`` / ``closeout``）；``by_agent`` 按 agent 名分组。
+    """
+
+    by_flow: dict[str, TokenUsageTotals]
+    by_agent: dict[str, TokenUsageTotals]
+
+
+@dataclass(frozen=True)
 class PrdLifecycleStats:
     """仓库级 PRD 端到端统计（Stats 页“PRD 执行分析”的数据源）。
 
@@ -233,3 +261,4 @@ class PrdLifecycleStats:
     unlinked_run_count: int
     incomplete_run_count: int
     runs: list[PrdLifecycleStatsRow]
+    token_usage: TokenUsageStats

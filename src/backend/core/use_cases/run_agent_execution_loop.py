@@ -4,7 +4,7 @@ from __future__ import annotations
 import subprocess
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
@@ -16,6 +16,7 @@ from backend.core.shared.models.agent_runner import (
     DeliveryGateError,
     FailureType,
     IssueSummary,
+    TokenUsage,
 )
 from backend.core.use_cases.run_agent_once import (
     AttemptPhaseTimer,
@@ -98,6 +99,10 @@ class AgentExecutionRequest:
     expected_branch: str
     prompt_override: str | None = None
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None
+    #: 旁路观测回调：本 Issue 处理期间每次非 attempt 主体的 agent 调用
+    #: （fix / closeout / verifier）产出可用 usage 时以 ``(flow, agent, usage)``
+    #: 回调；agent 名允许与主 agent 不同（如 verifier 走了候选回退）。
+    on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +121,8 @@ class _AttemptRecordContext:
     attempt_started_iso: str
     attempt_results: list[AttemptResult]
     repo_id: str
+    #: Phase 1 agent 调用自报的 token 用量；调用失败（无结果对象）时为 None。
+    token_usage: TokenUsage | None = None
 
 
 @dataclass(frozen=True)
@@ -165,6 +172,21 @@ def _render_discarded_closeout_note(result: _CloseoutAttemptResult) -> str:
     )
 
 
+def _emit_agent_usage(
+    request: AgentExecutionRequest,
+    flow: str,
+    agent_name: str,
+    usage: TokenUsage | None,
+) -> None:
+    """旁路发出一次非 attempt 主体的 agent 调用用量；任何失败都不阻断主流程。"""
+    if request.on_agent_usage is None or usage is None:
+        return
+    try:
+        request.on_agent_usage(flow, agent_name, usage)
+    except Exception:  # noqa: BLE001 - observation must not break the main flow.
+        _logger.warning("Agent usage observation callback failed (flow=%s).", flow, exc_info=True)
+
+
 def _record_attempt(
     context: _AttemptRecordContext,
     *,
@@ -194,6 +216,7 @@ def _record_attempt(
             started_mono=context.attempt_started_mono,
             started_iso=context.attempt_started_iso,
             phase_durations=context.attempt_phases.snapshot(),
+            token_usage=context.token_usage,
         ),
         context.request.on_attempt_recorded,
     )
@@ -306,7 +329,7 @@ def _attempt_delivery_closeout(
     before_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
     try:
         with context.record.attempt_phases.measure("closeout"):
-            run_closeout_agent(
+            closeout_agent_result = run_closeout_agent(
                 resolve_lifecycle_agent(
                     "closeout",
                     config,
@@ -324,6 +347,20 @@ def _attempt_delivery_closeout(
                     allowed_scope=allowed_scope,
                 ),
             )
+        # 观测发射点的 agent 名与调用点同源：resolve_lifecycle_agent 是纯查找
+        # （幂等），重解析一次以保持调用点内联形态（AST 守卫约定）。
+        _emit_agent_usage(
+            request,
+            "closeout",
+            resolve_lifecycle_agent(
+                "closeout",
+                config,
+                issue=issue,
+                selected_agent=request.selected_agent,
+                prd_overrides=prd_overrides,
+            ),
+            closeout_agent_result.token_usage,
+        )
     except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         _logger.warning("Closeout Agent failed for Issue #%d: %s", issue.number, exc)
         _revert_failed_closeout(context, before_snapshot)
@@ -471,11 +508,12 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         )
 
         # Phase 1: 运行 agent 或 recovery prompt
+        agent_command_result: CommandResult | None = None
         try:
             if attempt_index == 0:
                 if prompt_override is not None:
                     with attempt_phases.measure("agent"):
-                        run_agent_with_prompt_resilient(
+                        agent_command_result = run_agent_with_prompt_resilient(
                             selected_agent,
                             prompt_override,
                             worktree_path,
@@ -491,7 +529,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         )
                 else:
                     with attempt_phases.measure("agent"):
-                        run_agent(
+                        agent_command_result = run_agent(
                             selected_agent,
                             issue,
                             worktree_path,
@@ -519,7 +557,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     config.runner.recovery_timeout_seconds or config.runner.timeout_seconds
                 )
                 with attempt_phases.measure("agent"):
-                    run_agent_with_prompt_resilient(
+                    agent_command_result = run_agent_with_prompt_resilient(
                         selected_agent,
                         recovery_prompt,
                         worktree_path,
@@ -575,6 +613,15 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 max_recovery_attempts,
             )
             continue
+
+        # Phase 1 成功结束：把 agent 自报的 token 用量回填进 attempt 记录上下文，
+        # 供后续任何分支（成功或失败）记录 attempt 时一并落账。
+        attempt_record_context = replace(
+            attempt_record_context,
+            token_usage=(
+                agent_command_result.token_usage if agent_command_result is not None else None
+            ),
+        )
 
         # Phase 2: 验证 agent 产出的代码（staging 之前）
         with attempt_phases.measure("verification"):
@@ -741,6 +788,20 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             process_runner,
                             verification_results=exc.verification_results,
                         )
+                        # 观测发射点的 agent 名与调用点同源（纯查找，幂等），
+                        # 重解析一次以保持调用点内联形态（AST 守卫约定）。
+                        _emit_agent_usage(
+                            request,
+                            "fix",
+                            resolve_lifecycle_agent(
+                                "fix",
+                                config,
+                                issue=issue,
+                                selected_agent=selected_agent,
+                                prd_overrides=prd_overrides,
+                            ),
+                            fix_agent_result.token_usage,
+                        )
                         if fix_agent_result.return_code != 0:
                             raise RuntimeError(
                                 f"Fix Agent exited with code {fix_agent_result.return_code}"
@@ -879,6 +940,10 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     process_runner,
                     selected_agent,
                     prd_overrides=prd_overrides,
+                )
+            if verifier_verdict is not None:
+                _emit_agent_usage(
+                    request, "verify", verifier_verdict.agent, verifier_verdict.token_usage
                 )
         except ValidationEvidenceError as exc:
             failure_type = _classify_and_record_gate_failure(

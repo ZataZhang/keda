@@ -19,11 +19,11 @@ import logging
 import re
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
-from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, TokenUsage
 from backend.core.use_cases.agent_runner_evidence_snapshot import (
     restore_evidence_snapshot,
     snapshot_evidence_dir,
@@ -67,11 +67,16 @@ class ValidationVerdict:
     ``marker_found`` 区分"verifier 真的判了 red"与"verifier 没吐出 verdict
     marker、被 fail-safe 当成 red"。两者都阻断,但成因完全不同:后者是 verifier
     侧的协议/可靠性故障,不代表 builder 的改动有缺陷。
+
+    ``agent`` 与 ``token_usage`` 由实际运行 verifier 的调用点回填：候选回退后
+    ``agent`` 是真正跑完的 agent；agent 未运行（parse-only 路径）时保持默认值。
     """
 
     risk: str
     findings: str = ""
     marker_found: bool = True
+    agent: str = ""
+    token_usage: "TokenUsage | None" = None
 
     @property
     def passed(self) -> bool:
@@ -359,7 +364,12 @@ def run_verifier_agent(
         )
         raise
     response_text = extract_agent_response_text(result)
-    verdict = parse_verifier_verdict(response_text, findings=response_text.strip()[:4000])
+    verdict = replace(
+        parse_verifier_verdict(response_text, findings=response_text.strip()[:4000]),
+        # 观测回填：真实跑完的 agent 名（候选回退后 ≠ 配置值）与其自报用量。
+        agent=verifier_agent,
+        token_usage=result.token_usage,
+    )
 
     saved_log_path: Path | None = None
     if response_log_path is not None:

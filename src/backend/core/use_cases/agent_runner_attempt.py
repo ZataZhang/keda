@@ -25,6 +25,7 @@ from backend.core.shared.models.agent_runner import (
     AttemptResult,
     FailureType,
     PhaseDuration,
+    TokenUsage,
 )
 
 _logger = logging.getLogger(__name__)
@@ -104,6 +105,7 @@ def _make_attempt_result(
     started_mono: float,
     started_iso: str,
     phase_durations: tuple[PhaseDuration, ...] = (),
+    token_usage: TokenUsage | None = None,
 ) -> AttemptResult:
     """Build an ``AttemptResult`` with wall-clock timing filled in now."""
     finished_mono = time.monotonic()
@@ -118,6 +120,7 @@ def _make_attempt_result(
         finished_at=finished_iso,
         duration_seconds=round(finished_mono - started_mono, 3),
         phase_durations=phase_durations,
+        token_usage=token_usage,
     )
 
 

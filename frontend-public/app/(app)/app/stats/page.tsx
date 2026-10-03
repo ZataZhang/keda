@@ -24,7 +24,9 @@ import type {
   PrdLifecycleStats,
   RepositoryCompletionStats,
   RunRecordEntry,
+  TokenUsageTotals,
 } from "@/lib/api/types";
+import { formatTokenCount } from "@/components/roadmap/prd-lifecycle-view";
 
 export default function StatsPage() {
   const [stats, setStats] = useState<RepositoryCompletionStats[] | null>(null);
@@ -407,6 +409,8 @@ export default function StatsPage() {
                 未关联 PRD 的旧记录 {lifecycleStats.unlinked_run_count} 条（已排除出分位数）；
                 观测不完整的 run {lifecycleStats.incomplete_run_count} 条。
               </p>
+
+              <TokenUsageSection stats={lifecycleStats} />
             </div>
           )}
         </CardContent>
@@ -448,6 +452,133 @@ function LifecycleMetricTile({ label, value }: { label: string; value: string })
     <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
       <p className="text-xs text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-semibold">{value}</p>
+    </div>
+  );
+}
+
+/** 流程标识 -> 中文标签；未识别的 flow 原样展示。 */
+const TOKEN_FLOW_LABELS: Record<string, string> = {
+  implement: "实现",
+  verify: "验证",
+  supervise: "评审",
+  fix: "修复",
+  closeout: "收尾",
+};
+
+/**
+ * 计算缓存命中率。
+ *
+ * 口径与后端一致：命中 ÷ 输入侧实际处理量（输入 + 缓存读 + 缓存写）。
+ *
+ * @param row - 单个分组的 token 累计。
+ * @returns 0–1 之间的比率；输入侧为 0（无缓存数据）时返回 null。
+ */
+function cacheHitRate(row: TokenUsageTotals): number | null {
+  const inputSide =
+    row.input_tokens + row.cache_read_input_tokens + row.cache_creation_input_tokens;
+  if (inputSide <= 0) {
+    return null;
+  }
+  return row.cache_read_input_tokens / inputSide;
+}
+
+/**
+ * PRD 生命周期卡片内的 Token 用量汇总区。
+ *
+ * 数据来自 lifecycle 事件 detail 的聚合（``token_usage``）；缺 usage 的事件
+ * 不计入。按流程与按 agent 两张小表分别给出总量、四项明细与缓存命中率。
+ *
+ * @param props.stats - 仓库级 PRD 生命周期统计。
+ * @returns Token 汇总区块；无数据时渲染明确空态。
+ */
+function TokenUsageSection({ stats }: { stats: PrdLifecycleStats }) {
+  const byFlow = Object.entries(stats.token_usage?.by_flow ?? {});
+  const byAgent = Object.entries(stats.token_usage?.by_agent ?? {});
+  const hasData = byFlow.length > 0 || byAgent.length > 0;
+  return (
+    <div data-testid="stats-token-usage" className="space-y-3">
+      <p className="text-sm font-medium">Token 用量</p>
+      {!hasData ? (
+        <p className="text-sm text-slate-500" data-testid="stats-token-usage-empty">
+          所选范围内暂无 token 用量数据（agent 未上报 usage 或为旧记录）。
+        </p>
+      ) : (
+        <>
+          <TokenUsageTable title="按流程" rows={byFlow} />
+          <TokenUsageTable title="按 agent" rows={byAgent} />
+          <p className="text-xs text-slate-500" data-testid="stats-token-usage-note">
+            总量为实际处理量口径（输入 + 输出 + 缓存读 + 缓存写）；缺 usage 的调用不计入，
+            展示为「—」而非 0。
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 渲染一张 Token 用量小表（按总量降序）。
+ *
+ * @param props.title - 表格标题（按流程 / 按 agent）。
+ * @param props.rows - 分组键到用量累计的条目列表。
+ * @returns 紧凑用量表格。
+ */
+function TokenUsageTable({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: [string, TokenUsageTotals][];
+}) {
+  const sorted = [...rows].sort(
+    ([, left], [, right]) => right.total_tokens - left.total_tokens,
+  );
+  return (
+    <div className="overflow-x-auto">
+      <p className="mb-1 text-xs text-slate-500">{title}</p>
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
+            <th className="py-2 pr-3">分组</th>
+            <th className="py-2 pr-3">总量</th>
+            <th className="py-2 pr-3">输入</th>
+            <th className="py-2 pr-3">输出</th>
+            <th className="py-2 pr-3">缓存读</th>
+            <th className="py-2 pr-3">缓存写</th>
+            <th className="py-2 pr-3">命中率</th>
+            <th className="py-2 pr-3">调用数</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(([key, row]) => {
+            const rate = cacheHitRate(row);
+            const label = TOKEN_FLOW_LABELS[key] ?? key;
+            return (
+              <tr
+                key={key}
+                className="border-b border-slate-100 dark:border-slate-800"
+              >
+                <td className="py-2 pr-3 font-medium">{label}</td>
+                <td className="py-2 pr-3 font-semibold">
+                  {formatTokenCount(row.total_tokens)}
+                </td>
+                <td className="py-2 pr-3 text-xs">{formatTokenCount(row.input_tokens)}</td>
+                <td className="py-2 pr-3 text-xs">{formatTokenCount(row.output_tokens)}</td>
+                <td className="py-2 pr-3 text-xs">
+                  {formatTokenCount(row.cache_read_input_tokens)}
+                </td>
+                <td className="py-2 pr-3 text-xs">
+                  {formatTokenCount(row.cache_creation_input_tokens)}
+                </td>
+                <td className="py-2 pr-3 text-xs">
+                  {rate === null ? "—" : `${Math.round(rate * 100)}%`}
+                </td>
+                <td className="py-2 pr-3 text-xs">{row.usage_count}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
