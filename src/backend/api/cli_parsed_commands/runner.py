@@ -31,6 +31,10 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         repo_id=ctx.repo_id,
         repo_override=ctx.repo_override,
     )
+    # CLI --preset 一次性锚定（implementation 阶段）；未传旗标时原样返回。
+    from backend.api.cli_model_preset_anchor import apply_cli_model_preset
+
+    contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage="implementation")
     for context in contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if contexts:
@@ -76,6 +80,10 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
         repo_id=ctx.repo_id,
         repo_override=ctx.repo_override,
     )
+    # CLI --preset 一次性锚定（implementation 阶段）；未传旗标时原样返回。
+    from backend.api.cli_model_preset_anchor import apply_cli_model_preset
+
+    contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage="implementation")
     for context in contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if contexts:
@@ -152,12 +160,16 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
         repo_id=ctx.repo_id,
         repo_override=ctx.repo_override,
     )
-    for context in contexts:
+    # CLI --preset 一次性锚定（supervisor 阶段）；未传旗标时原样返回。
+    from backend.api.cli_model_preset_anchor import apply_cli_model_preset
+
+    review_contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage="supervisor")
+    for context in review_contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
-    if contexts:
-        _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
+    if review_contexts:
+        _ensure_gh_auth_or_prompt(review_contexts[0].repo_path, ctx.process_runner)
     aggregated_exit_code = 0
-    for context in contexts:
+    for context in review_contexts:
         github_client = ctx.github_client_factory(context.repo_path)
         try:
             repo_exit_code = _cli.review_once(
@@ -191,6 +203,10 @@ def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
         repo_id=ctx.repo_id,
         repo_override=ctx.repo_override,
     )
+    # CLI --preset 一次性锚定（supervisor 阶段）；未传旗标时原样返回。
+    from backend.api.cli_model_preset_anchor import apply_cli_model_preset
+
+    contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage="supervisor")
     for context in contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if contexts:

@@ -310,6 +310,13 @@ class LifecycleAgentsConfig:
         return None
 
 
+#: 阶段 -> 预设 绑定层（``[agent_runner.lifecycle_presets]`` / PRD 头部
+#: ``lifecycle_presets`` 块）的两层声明视图与矩阵视图同构：键是九个生命周期
+#: 键的闭集，值是预设名；仓库层同键赢过全局层。复用同一实现避免第二份
+#: 两层合并语义漂移。
+LifecyclePresetsConfig = LifecycleAgentsConfig
+
+
 __all__ = [
     "LIFECYCLE_AGENT_AUTO",
     "LIFECYCLE_AGENT_AUTO_DESCRIPTIONS",
@@ -329,6 +336,7 @@ __all__ = [
     "LIFECYCLE_SOURCE_REPOSITORY",
     "LifecycleAgentEntryGroup",
     "LifecycleAgentsConfig",
+    "LifecyclePresetsConfig",
     "concrete_declared_agent",
     "normalize_lifecycle_agent_value",
 ]

@@ -12,9 +12,9 @@
   解析交给执行层的注册表；唯一的"环境读取"是 ``git_writable_roots``
   展开器读取 worktree 的 ``.git`` 指针文件（保留既有行为）。
 - **不做 shell 展开**——argv 元素是字面量，占位符是闭集
-  （``{cwd}`` / ``{worktree}`` / ``{prompt}``），展开器是代码内命名的
-  闭集（目前仅 ``git_writable_roots``），与本仓 ``verification_commands``
-  的既有信任边界一致。
+  （``{cwd}`` / ``{worktree}`` / ``{prompt}`` / ``{model}`` / ``{effort}``），
+  展开器是代码内命名的闭集（目前仅 ``git_writable_roots``），与本仓
+  ``verification_commands`` 的既有信任边界一致。
 - 任何一步失败（agent 未注册 / profile 未定义 / 未知展开器）抛带
   上下文的异常，不降级。
 """
@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.shared.models.agent_spec import (
     PROMPT_DELIVERY_ARGV_TAIL,
@@ -47,6 +48,13 @@ class UnknownProfileError(ValueError):
 
 class UnknownExpanderError(ValueError):
     """配置引用了未命名的展开器。"""
+
+
+class ModelNotSupportedError(ValueError):
+    """命中模型绑定、但该 agent 未声明对应的模型参数模板（fail-fast）。
+
+    静默忽略会让"切了模型"成为假象，因此模板缺失一律显式报错并指名 agent。
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +93,8 @@ class AgentInvocation:
 _PLACEHOLDER_CWD = "{cwd}"
 _PLACEHOLDER_WORKTREE = "{worktree}"
 _PLACEHOLDER_PROMPT = "{prompt}"
+_PLACEHOLDER_MODEL = "{model}"
+_PLACEHOLDER_EFFORT = "{effort}"
 
 
 def _expand_placeholders(
@@ -92,13 +102,24 @@ def _expand_placeholders(
     *,
     worktree_path: Path,
     prompt: str,
+    model_value: str | None = None,
+    effort_value: str | None = None,
 ) -> str:
-    """替换占位符为字面值；不认识的占位符原样保留（不猜测语义）。"""
-    return (
+    """替换占位符为字面值；不认识的占位符原样保留（不猜测语义）。
+
+    ``{model}`` / ``{effort}`` 只在对应值非空时替换——无模型绑定的调用
+    （``model_selection is None``）经过本函数时输出与旧版逐字节一致。
+    """
+    expanded_fragment = (
         argv_fragment.replace(_PLACEHOLDER_CWD, str(worktree_path))
         .replace(_PLACEHOLDER_WORKTREE, str(worktree_path))
         .replace(_PLACEHOLDER_PROMPT, prompt)
     )
+    if model_value is not None:
+        expanded_fragment = expanded_fragment.replace(_PLACEHOLDER_MODEL, model_value)
+    if effort_value is not None:
+        expanded_fragment = expanded_fragment.replace(_PLACEHOLDER_EFFORT, effort_value)
+    return expanded_fragment
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +218,65 @@ def resolve_registered_agents(config: AppConfig) -> list[str]:
     return list(config.agents)
 
 
+def _model_selection_argv(
+    agent_name: str,
+    model_selection: ModelSelection,
+    agent_spec: AgentSpec,
+    *,
+    worktree_path: Path,
+    prompt: str,
+) -> list[str]:
+    """按 agent 级模板把模型/推理档参数展开成 argv 片段。
+
+    模板缺失即 fail-fast（:class:`ModelNotSupportedError`），绝不静默忽略；
+    ``model`` / ``reasoning_effort`` 为 ``None`` 的字段各自跳过，不注入。
+    """
+    argv_fragment: list[str] = []
+    if model_selection.model is not None:
+        if not agent_spec.model_args:
+            raise ModelNotSupportedError(
+                f"agent '{agent_name}' has no model_args template, so the model binding "
+                f"(model='{model_selection.model}') cannot be applied. Declare "
+                f"[agent_runner.agents.{agent_name}].model_args "
+                '(e.g. ["--model", "{model}"]) in config.toml / .iar.toml.'
+            )
+        for template_entry in agent_spec.model_args:
+            argv_fragment.append(
+                _expand_placeholders(
+                    template_entry,
+                    worktree_path=worktree_path,
+                    prompt=prompt,
+                    model_value=model_selection.model,
+                )
+            )
+    if model_selection.reasoning_effort is not None:
+        if not agent_spec.reasoning_effort_args:
+            raise ModelNotSupportedError(
+                f"agent '{agent_name}' has no reasoning_effort_args template, so the "
+                f"reasoning effort binding (effort='{model_selection.reasoning_effort}') "
+                "cannot be applied. Declare "
+                f"[agent_runner.agents.{agent_name}].reasoning_effort_args in "
+                "config.toml / .iar.toml."
+            )
+        for template_entry in agent_spec.reasoning_effort_args:
+            argv_fragment.append(
+                _expand_placeholders(
+                    template_entry,
+                    worktree_path=worktree_path,
+                    prompt=prompt,
+                    effort_value=model_selection.reasoning_effort,
+                )
+            )
+    return argv_fragment
+
+
 def build_agent_invocation(
     agent_name: str,
     profile: str,
     prompt: str,
     worktree_path: Path,
     config: AppConfig,
+    model_selection: ModelSelection | None = None,
 ) -> AgentInvocation:
     """按声明式 spec 组装一次 agent 调用。
 
@@ -214,6 +288,8 @@ def build_agent_invocation(
         worktree_path: 子进程工作目录；``{cwd}`` / ``{worktree}`` 占位符
             与 ``git_writable_roots`` 展开器都以它为锚。
         config: 应用配置，注册表取自 ``config.agents``。
+        model_selection: 可选的模型选择（阶段预设绑定解析结果）；
+            ``None`` 表示不注入任何模型参数，argv 与未启用预设时逐字节一致。
 
     Returns:
         AgentInvocation: 组装结果；调用方把它交给执行层（进程执行器或
@@ -223,6 +299,7 @@ def build_agent_invocation(
         UnknownAgentError: agent 未注册。
         UnknownProfileError: agent 未声明该用途。
         UnknownExpanderError: ``expand`` 引用了未命名展开器。
+        ModelNotSupportedError: 命中模型绑定但该 agent 未声明对应模板。
         ValueError: ``prompt_delivery="flag"`` 但未声明 ``prompt_flag``。
     """
     agent_spec = resolve_agent_spec(agent_name, config)
@@ -232,6 +309,16 @@ def build_agent_invocation(
     argv: list[str] = [agent_spec.bin]
     for arg in profile_spec.args:
         argv.append(_expand_placeholders(arg, worktree_path=worktree_path, prompt=prompt))
+    if model_selection is not None:
+        argv.extend(
+            _model_selection_argv(
+                agent_name,
+                model_selection,
+                agent_spec,
+                worktree_path=worktree_path,
+                prompt=prompt,
+            )
+        )
     for expand_entry in profile_spec.expand:
         expander_name, separator, flag = expand_entry.partition(":")
         expander = _EXPANDERS.get(expander_name)
@@ -277,6 +364,7 @@ def build_agent_invocation(
 
 __all__ = [
     "AgentInvocation",
+    "ModelNotSupportedError",
     "UnknownAgentError",
     "UnknownExpanderError",
     "UnknownProfileError",

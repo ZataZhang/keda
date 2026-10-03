@@ -36,6 +36,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IContentGenerator,
     IProcessRunner,
 )
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
     GeneratedContentTargetConfig,
@@ -440,6 +441,7 @@ def _run_content_generator(
     prompt: str,
     cwd: Path,
     timeout_seconds: int,
+    model_selection: ModelSelection | None = None,
 ) -> str:
     """运行内容生成器并返回原始输出文本。
 
@@ -453,6 +455,7 @@ def _run_content_generator(
         prompt: 发送给 agent 的完整 prompt 文本。
         cwd: agent 工作目录。
         timeout_seconds: agent 执行超时时间（秒）。
+        model_selection: 阶段绑定的模型选择；``None`` 表示不注入模型参数。
 
     Returns:
         agent 的标准输出（已去除首尾空白）。未执行或执行失败时返回空字符串。
@@ -466,6 +469,7 @@ def _run_content_generator(
             prompt=prompt,
             cwd=cwd,
             timeout=timeout_seconds,
+            model_selection=model_selection,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         _logger.warning("Content generator '%s' did not finish: %s", agent_name, exc)
@@ -549,6 +553,7 @@ def generate_issue_content(
     fallback_body: str,
     generator: IContentGenerator | None = None,
     cwd: Path | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> GeneratedIssueContent:
     """生成 Issue 标题和正文，支持多级回退。
 
@@ -586,14 +591,24 @@ def generate_issue_content(
         generated_title, generated_body = _try_render_templates(target, context)
     elif target.mode == "agent" and generator is not None and cwd is not None:
         # 解析 agent：显式优先 → 全局默认 → 两者皆 auto 时收敛到 claude。
-        agent_name = _resolve_generation_agent(
-            target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
+        # 阶段绑定预设时预设整体决定该阶段的 agent（遮蔽矩阵同键声明）。
+        agent_name = (
+            model_selection.agent
+            if model_selection is not None
+            else _resolve_generation_agent(
+                target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
+            )
         )
         # 渲染 prompt 模板并截断，防止超出模型上下文限制。
         prompt = _render_template(target.prompt, context)
         prompt = _truncate_text(prompt, config.max_input_chars)
         output_text = _run_content_generator(
-            generator, agent_name, prompt, cwd, target.timeout_seconds
+            generator,
+            agent_name,
+            prompt,
+            cwd,
+            target.timeout_seconds,
+            model_selection=model_selection,
         )
         # 根据配置的输出格式解析 agent 返回内容。
         if target.output == "json":
@@ -756,6 +771,7 @@ def generate_pr_content(
     fallback_body: str,
     generator: IContentGenerator | None = None,
     cwd: Path | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> GeneratedPrContent:
     """生成 PR 标题和正文，支持多级回退。
 
@@ -786,13 +802,23 @@ def generate_pr_content(
     if target.mode == "template":
         generated_title, generated_body = _try_render_templates(target, context)
     elif target.mode == "agent" and generator is not None and cwd is not None:
-        agent_name = _resolve_generation_agent(
-            target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
+        # 阶段绑定预设时预设整体决定该阶段的 agent（遮蔽矩阵同键声明）。
+        agent_name = (
+            model_selection.agent
+            if model_selection is not None
+            else _resolve_generation_agent(
+                target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
+            )
         )
         prompt = _render_template(target.prompt, context)
         prompt = _truncate_text(prompt, config.max_input_chars)
         output_text = _run_content_generator(
-            generator, agent_name, prompt, cwd, target.timeout_seconds
+            generator,
+            agent_name,
+            prompt,
+            cwd,
+            target.timeout_seconds,
+            model_selection=model_selection,
         )
         if target.output == "json":
             generated_title, generated_body = _parse_json_output(output_text)

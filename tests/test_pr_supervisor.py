@@ -50,6 +50,7 @@ def _noop_run_agent(
     inactivity_timeout_seconds=None,
     issue=None,
     profile=None,
+    model_selection=None,
 ):
     """替换 ``run_agent_with_prompt`` 的空实现：不拉起进程，返回干净结果。"""
     return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")

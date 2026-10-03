@@ -22,6 +22,7 @@ from backend.core.shared.interfaces.agent_output_protocol import (
 from backend.core.shared.models.agent_deliberation import DeliberationEvent
 from backend.core.shared.models.agent_runner import AppConfig, CommandResult
 from backend.core.shared.models.agent_spec import AGENT_PROFILE_DELIBERATE
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.use_cases.agent_invocation import build_agent_invocation
 
 
@@ -49,6 +50,7 @@ class SubprocessTranscriptRunner:
         event_sink: "Callable[[DeliberationEvent], None]",
         output_sink: "Callable[[str], None] | None" = None,
         display_sink: "Callable[[str], None] | None" = None,
+        model_selection: ModelSelection | None = None,
     ) -> "CommandResult":
         """Run an agent and emit events.
 
@@ -61,12 +63,17 @@ class SubprocessTranscriptRunner:
         transcript.
         """
         _ = event_sink
+        # 换人（辩论参与者回退到别的 agent）时丢弃绑定并记日志。
+        from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
+
+        model_selection = drop_model_selection_for_agent(agent_name, model_selection)
         invocation = build_agent_invocation(
             agent_name,
             AGENT_PROFILE_DELIBERATE,
             prompt,
             cwd,
             self._config,
+            model_selection=model_selection,
         )
         protocol = self._protocol_registry.resolve(invocation.output_protocol)
         # 提示词全文始终交给协议：流式协议（claude-stream-json）会从 argv

@@ -26,7 +26,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
+
+if TYPE_CHECKING:
+    # 仅注解使用：避免 interfaces -> models 的运行时反向依赖。
+    from backend.core.shared.models.agent_model_preset import ModelSelection
 
 from backend.core.shared.models.agent_runner import (
     CommandResult,
@@ -190,8 +194,12 @@ class IAgentTranscriptRunner(ABC):
         event_sink: Callable[[DeliberationEvent], None],
         output_sink: Callable[[str], None] | None = None,
         display_sink: Callable[[str], None] | None = None,
+        model_selection: ModelSelection | None = None,
     ) -> CommandResult:
         """运行一个 Agent 并在过程中产出事件。
+
+        ``model_selection`` 为可选的模型选择（阶段预设绑定解析结果）；
+        执行 agent 与预设声明不一致时由实现层丢弃并记日志。
 
         本方法会阻塞直到 Agent 进程结束；在此期间，随着输出到达，
         会按顺序调用各回调（sink）。回调采用「推送」模式，调用方
@@ -240,6 +248,7 @@ class IContentGenerator(ABC):
         *,
         cwd: Path,
         timeout: int | None = None,
+        model_selection: ModelSelection | None = None,
     ) -> CommandResult:
         """运行一个只读的内容生成器并返回其输出。
 

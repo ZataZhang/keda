@@ -33,6 +33,9 @@ from backend.api.cli_typer_app import (
     DaemonIntervalOption,
     LogsKindChoice,
     MaxIssuesOption,
+    ModelIdOption,
+    ModelPresetOption,
+    ReasoningEffortOption,
     RepoIdOption,
     RepoOption,
     RunAgentChoice,
@@ -40,6 +43,7 @@ from backend.api.cli_typer_app import (
     _enum_value,
     _run_typer_command,
     _run_typer_repository_command,
+    _typer_preset_options,
     _typer_selector_options,
     app,
     daemon_app,
@@ -57,6 +61,9 @@ def _run_runner_command(
     repo_id: str | None,
     config: str | None,
     all_repositories: bool,
+    preset: str | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> int:
     """Run `run` or `review` through the shared dispatch path."""
     return _run_typer_repository_command(
@@ -68,6 +75,7 @@ def _run_runner_command(
         dry_run=dry_run,
         agent=_enum_value(agent),
         max_issues=max_issues,
+        **_typer_preset_options(preset=preset, model=model, reasoning_effort=reasoning_effort),
         all_repositories=all_repositories,
     )
 
@@ -78,6 +86,9 @@ def run_command(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview only.")] = False,
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
+    preset: ModelPresetOption = None,
+    model: ModelIdOption = None,
+    reasoning_effort: ReasoningEffortOption = None,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -94,6 +105,9 @@ def run_command(
         repo_id=repo_id,
         config=config,
         all_repositories=all_repositories,
+        preset=preset,
+        model=model,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -153,6 +167,9 @@ def review_command(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview only.")] = False,
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
+    preset: ModelPresetOption = None,
+    model: ModelIdOption = None,
+    reasoning_effort: ReasoningEffortOption = None,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -169,6 +186,9 @@ def review_command(
         repo_id=repo_id,
         config=config,
         all_repositories=all_repositories,
+        preset=preset,
+        model=model,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -184,6 +204,9 @@ def _run_daemon_command(
     config: str | None,
     all_repositories: bool,
     concurrency: int | None = None,
+    preset: str | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> int:
     """Run daemon or review-daemon through the shared dispatch path."""
     return _run_typer_repository_command(
@@ -197,6 +220,7 @@ def _run_daemon_command(
         max_issues=max_issues,
         all_repositories=all_repositories,
         concurrency=concurrency,
+        **_typer_preset_options(preset=preset, model=model, reasoning_effort=reasoning_effort),
     )
 
 
@@ -207,6 +231,9 @@ def daemon_callback(
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
     concurrency: ConcurrencyOption = None,
+    preset: ModelPresetOption = None,
+    model: ModelIdOption = None,
+    reasoning_effort: ReasoningEffortOption = None,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -226,6 +253,9 @@ def daemon_callback(
         config=config,
         all_repositories=all_repositories,
         concurrency=concurrency,
+        preset=preset,
+        model=model,
+        reasoning_effort=reasoning_effort,
     )
     raise typer.Exit(code=exit_code)
 
@@ -237,6 +267,9 @@ def daemon_run_command(
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
     concurrency: ConcurrencyOption = None,
+    preset: ModelPresetOption = None,
+    model: ModelIdOption = None,
+    reasoning_effort: ReasoningEffortOption = None,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -258,6 +291,9 @@ def daemon_run_command(
         config=config,
         all_repositories=all_repositories,
         concurrency=concurrency,
+        preset=preset,
+        model=model,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -285,6 +321,9 @@ def review_daemon_command(
     interval: DaemonIntervalOption = None,
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
+    preset: ModelPresetOption = None,
+    model: ModelIdOption = None,
+    reasoning_effort: ReasoningEffortOption = None,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -305,6 +344,9 @@ def review_daemon_command(
         repo_id=repo_id,
         config=config,
         all_repositories=all_repositories,
+        preset=preset,
+        model=model,
+        reasoning_effort=reasoning_effort,
     )
 
 

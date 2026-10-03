@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🟢 **验收状态**：已交付（9.1 决策页 6/6 按推荐确认；rv-12 opt-in 经人决定本轮不采，PR 标注已知限制）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制、文件路径、命令与排期信息；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。人只在 Part A 点名处下钻。
@@ -599,52 +599,52 @@ Failure triage:
 ### 9.2 Acceptance Evidence Package
 
 **Human-Confirmed（对应 §2 四个决策 + 呈递审阅）**
-- [ ] 决策一：预设解析与 argv 模型注入落在 core 单一出口、零回归为硬承诺 —— 人确认（`rv-1`、`rv-4` 为佐证）
-- [ ] 决策二：阶段绑定预设整体决定 (agent, 模型, 推理档)、遮蔽矩阵同键声明、CLI 显式 `--agent` 最高 —— 人确认（`rv-6`、`rv-9` 为佐证）
-- [ ] 决策三：换人（fallback / 显式 `--agent`）即丢弃模型绑定并标注，executor 继承不算换人 —— 人确认（`rv-7`、`rv-10` 为佐证）
-- [ ] 决策四：agent 未声明模型模板时 fail-fast（宁缺勿假）—— 人确认（`rv-5` 为佐证）
-- [ ] 9.1 呈递区呈递物已逐项过目并认可
+- [x] 决策一：预设解析与 argv 模型注入落在 core 单一出口、零回归为硬承诺 —— 人确认（`rv-1`、`rv-4` 为佐证）
+- [x] 决策二：阶段绑定预设整体决定 (agent, 模型, 推理档)、遮蔽矩阵同键声明、CLI 显式 `--agent` 最高 —— 人确认（`rv-6`、`rv-9` 为佐证）
+- [x] 决策三：换人（fallback / 显式 `--agent`）即丢弃模型绑定并标注，executor 继承不算换人 —— 人确认（`rv-7`、`rv-10` 为佐证）
+- [x] 决策四：agent 未声明模型模板时 fail-fast（宁缺勿假）—— 人确认（`rv-5` 为佐证）
+- [x] 9.1 呈递区呈递物已逐项过目并认可
 
 **Architecture Acceptance**
-- [ ] 模型/推理档 argv 注入只发生在 `src/backend/core/use_cases/agent_invocation.py`，无旁路拼接（`rg -n "argv\.append|argv\.extend" src/backend/core src/backend/engines` 佐证）
-- [ ] 预设与绑定解析分别收敛到单一模块（`agent_model_preset.py` / `lifecycle_agent_resolution.py`），未复制到 caller（`rg` 佐证）
-- [ ] 新增配置字段经 `infrastructure/config` 声明、由 factory merge 进 `AppConfig`，未在 engines/api 直接读原始配置
-- [ ] 九个阶段在无绑定时的解析路径与改动前一致（`rv-6` 负向控制）
+- [x] 模型/推理档 argv 注入只发生在 `src/backend/core/use_cases/agent_invocation.py`，无旁路拼接（`rg -n "argv\.append|argv\.extend" src/backend/core src/backend/engines` 佐证）
+- [x] 预设与绑定解析分别收敛到单一模块（`agent_model_preset.py` / `lifecycle_agent_resolution.py`），未复制到 caller（`rg` 佐证）
+- [x] 新增配置字段经 `infrastructure/config` 声明、由 factory merge 进 `AppConfig`，未在 engines/api 直接读原始配置
+- [x] 九个阶段在无绑定时的解析路径与改动前一致（`rv-6` 负向控制）
 
 **Dependency Acceptance**
-- [ ] 四层依赖方向不变：`api → core → engines → infrastructure`
-- [ ] 未新增第三方依赖
+- [x] 四层依赖方向不变：`api → core → engines → infrastructure`
+- [x] 未新增第三方依赖
 
 **Behavior Acceptance**
-- [ ] 命中预设/绑定时 argv 含对应 agent 的模型/推理档参数（rv-1、rv-9）
-- [ ] 未设预设/绑定/旗标时 argv 与改动前逐字节一致，九阶段路由零变化（rv-4、rv-6）
-- [ ] agent 未声明模型模板却命中模型绑定时 fail-fast 报错（不以静默忽略收场）（rv-5）
-- [ ] 换人（fallback / 显式 `--agent`）时丢弃模型绑定并在日志/attempt 记录标注（rv-7）
-- [ ] PRD 头部 `lifecycle_presets` 块覆盖仓库层；executor 阶段继承实现者绑定（rv-10）
-- [ ] `--model` / `--reasoning-effort` 覆盖预设/绑定同名字段（rv-3）
-- [ ] 预设清单可枚举且字段正确（rv-2）
-- [ ] console 视图字段与 attempt 账本列可用，v5→v6 迁移幂等（rv-11）
+- [x] 命中预设/绑定时 argv 含对应 agent 的模型/推理档参数（rv-1、rv-9）
+- [x] 未设预设/绑定/旗标时 argv 与改动前逐字节一致，九阶段路由零变化（rv-4、rv-6）
+- [x] agent 未声明模型模板却命中模型绑定时 fail-fast 报错（不以静默忽略收场）（rv-5）
+- [x] 换人（fallback / 显式 `--agent`）时丢弃模型绑定并在日志/attempt 记录标注（rv-7）
+- [x] PRD 头部 `lifecycle_presets` 块覆盖仓库层；executor 阶段继承实现者绑定（rv-10）
+- [x] `--model` / `--reasoning-effort` 覆盖预设/绑定同名字段（rv-3）
+- [x] 预设清单可枚举且字段正确（rv-2）
+- [x] console 视图字段与 attempt 账本列可用，v5→v6 迁移幂等（rv-11）
 
 **Frontend Acceptance**
-- [ ] `No frontend impact` 已记录并说明理由（CLI/配置层特性；console API 字段追加，前端渲染为后续跟进）
+- [x] `No frontend impact` 已记录并说明理由（CLI/配置层特性；console API 字段追加，前端渲染为后续跟进）
 
 **Documentation Acceptance**
-- [ ] `docs/guides/model-presets.md` 已新增并加入 `mkdocs.yml` 导航（rv-8）
-- [ ] `docs/guides/lifecycle-agent-matrix.md`、`docs/guides/configuration.md`、`docs/guides/agent-runner.md` 与最终设计一致
-- [ ] `iar-operator` skill 模板（`src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md`）已同步新 CLI 面（rv-8）
+- [x] `docs/guides/model-presets.md` 已新增并加入 `mkdocs.yml` 导航（rv-8）
+- [x] `docs/guides/lifecycle-agent-matrix.md`、`docs/guides/configuration.md`、`docs/guides/agent-runner.md` 与最终设计一致
+- [x] `iar-operator` skill 模板（`src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md`）已同步新 CLI 面（rv-8）
 
 **Validation Acceptance**
-- [ ] `uv run iar agent doctor codebuddy --json --preset plan` 通过真实 CLI 入口验证注入行为（rv-1）
-- [ ] `uv run iar agent doctor --lifecycle verifier --json` 通过真实 CLI 入口验证绑定行为与解绑回落（rv-9）
-- [ ] `uv run iar agent presets` 列出预设及字段（rv-2）
-- [ ] `uv run iar agent doctor claude --json` 零回归（rv-4）
-- [ ] `rg -n "model_args|reasoning_effort_args" src config.toml` 确认字段在 settings / agent_spec / invocation 成对存在
-- [ ] `rg -n "build_agent_invocation" src` 确认所有调用点已透传 model_selection（或显式 None）
+- [x] `uv run iar agent doctor codebuddy --json --preset plan` 通过真实 CLI 入口验证注入行为（rv-1）
+- [x] `uv run iar agent doctor --lifecycle verifier --json` 通过真实 CLI 入口验证绑定行为与解绑回落（rv-9）
+- [x] `uv run iar agent presets` 列出预设及字段（rv-2）
+- [x] `uv run iar agent doctor claude --json` 零回归（rv-4）
+- [x] `rg -n "model_args|reasoning_effort_args" src config.toml` 确认字段在 settings / agent_spec / invocation 成对存在
+- [x] `rg -n "build_agent_invocation" src` 确认所有调用点已透传 model_selection（或显式 None）
 
 **Delivery Readiness**
-- [ ] Recommended approach fully implemented；无未批准的平行抽象
-- [ ] 无未决回归或上线阻塞项
-- [ ] 完成消息逐字携带 9.1 呈递区内容（含 `open` 命令与本地 only 标注）
+- [x] Recommended approach fully implemented；无未批准的平行抽象
+- [x] 无未决回归或上线阻塞项
+- [x] 完成消息逐字携带 9.1 呈递区内容（含 `open` 命令与本地 only 标注）
 
 ## 10. Functional Requirements
 
@@ -696,6 +696,25 @@ Failure triage:
 | D-11 | CLI 一次性旗标的挂载范围 | 仅生命周期锚定入口（run/daemon/review/review-daemon/ask/issue create） | 全部命令含 repl | repl 不是生命周期阶段；缩小面即缩小回归面 |
 
 ## 14. Change Log
+
+### 2026-10-03 · 人读呈递区确认（decision-board）
+
+- Type/Scope: acceptance；仅本文档 §9.1/§9.2 勾选与本条记录。
+- Changed: decision-board 页面 6/6 按推荐确认（Q1–Q4 决策、Q5 呈递物认可、Q6 rv-12 本轮不采），无偏离、无备注。
+- Changed: §9.2 Human-Confirmed 五项与 Delivery Readiness 尾项随之勾选。
+- Invariant: rv-12 未采在 PR 与证据报告「已知限制」中如实标注。
+- Reason: 以 `.iar/decisions/answers.json`（2026-10-03T15:16:16Z 提交）为准，非口头印象。
+
+### 2026-10-03 · 实现交付（模型预设接入生命周期）
+
+- Type/Scope: feature；core/shared/models、core/use_cases、engines/agent_runner、infrastructure/config、infrastructure/persistence、api/CLI、config.toml、docs、SKILL。
+- Changed: 新增命名预设（`[agent_runner.presets.<name>]`）、阶段→预设绑定（`[agent_runner.lifecycle_presets]` 九键）、PRD 头部 `lifecycle_presets` 块（除 planner 八键）、agent 级 `model_args`/`reasoning_effort_args` 模板（{model}/{effort} 占位符，注入收敛在 `agent_invocation.py` 单一出口）。
+- Changed: CLI `run`/`daemon`/`review`/`review-daemon`/`ask`/`issue create` 增加可选 `--preset/--model/--reasoning-effort`；`iar agent presets` 新命令；`iar agent doctor` 新增 `--preset/--model/--reasoning-effort/--lifecycle` 视角。
+- Changed: attempt 账本 schema v5→v6（`attempt_records` 附加可空 `preset`/`model` 列，幂等迁移）；console 生命周期只读视图行追加 `preset`/`model`/`reasoning_effort`。
+- Invariant: 未定义预设 / 未绑定 / 未传旗标时 argv 与九阶段路由逐字节不变（黄金快照 34 例未改一行全绿）；换人（fallback / 显式 `--agent`）即丢弃模型绑定并记日志；模板缺失 fail-fast。
+- Reason: 按需求方"一条命令按阶段切换 agent+模型+推理档"的口径（D-02/D-06/D-08/D-09/D-10）。
+
+### 2026-09-30 · 按需求方口径改写：预设接入生命周期矩阵
 
 ### 2026-09-30 · 按需求方口径改写：预设接入生命周期矩阵
 - Type: feat（PRD 范围改写，未开工故无代码影响）

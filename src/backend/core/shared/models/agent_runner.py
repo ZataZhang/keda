@@ -13,11 +13,15 @@ from backend.core.shared.models.agent_decision import (
     ReplConfig,
 )
 from backend.core.shared.models.agent_deliberation import DeliberationConfig
+from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_spec import (
     BUILTIN_AGENT_SPECS,
     AgentSpec,
 )
-from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
+from backend.core.shared.models.lifecycle_agent import (
+    LifecycleAgentsConfig,
+    LifecyclePresetsConfig,
+)
 
 if TYPE_CHECKING:
     # `ValidationVerdict` lives in the use-cases layer; import it only for
@@ -199,6 +203,10 @@ class AttemptResult:
     finished_at: str = ""
     duration_seconds: float = 0.0
     phase_durations: tuple[PhaseDuration, ...] = ()
+    #: 绑定生效时实际使用的预设名（空串 = 未绑定或绑定被丢弃）。
+    preset: str = ""
+    #: 绑定生效时实际注入的模型 id（空串 = 未注入）。
+    model: str = ""
 
 
 @dataclass(frozen=True)
@@ -215,6 +223,9 @@ class IssueSummary:
     #: 编排入口拿到仓库路径后从 PRD 文件解析回填，使实现 / 审核 / 监督等阶段
     #: 的解析函数无需额外参数即可读到 PRD 级覆盖（PRD 级优先级最高）。
     lifecycle_overrides: tuple[tuple[str, str], ...] = ()
+    #: 该 Issue 所引用 PRD 的头部 ``lifecycle_presets`` 块（键值对元组）。
+    #: 与 ``lifecycle_overrides`` 同机制：随 Issue 流动，供模型绑定解析。
+    lifecycle_preset_overrides: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -823,6 +834,11 @@ class AppConfig:
     # 生命周期 Agent 矩阵的显式声明（含来源层）；未声明的键由
     # resolve_lifecycle_agent 回落到既有散落配置键与内置默认。
     lifecycle_agents: LifecycleAgentsConfig = field(default_factory=LifecycleAgentsConfig)
+    # 命名模型预设清单（[agent_runner.presets.<name>]）；绑定层经
+    # resolve_lifecycle_model_selection 消费。
+    agent_presets: dict[str, AgentModelPreset] = field(default_factory=dict)
+    # 阶段 -> 预设 绑定的两层声明视图（PRD 块随 Issue 流动，不在本视图内）。
+    lifecycle_presets: LifecyclePresetsConfig = field(default_factory=LifecyclePresetsConfig)
 
 
 @dataclass(frozen=True)

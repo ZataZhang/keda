@@ -344,7 +344,9 @@ def test_create_draft_pr_injects_contract_teaching_into_agent_prompt(
     captured_prompts: list[str] = []
 
     class RecordingGenerator:
-        def generate(self, agent_name: str, prompt: str, *, cwd, timeout=None):
+        def generate(
+            self, agent_name: str, prompt: str, *, cwd, timeout=None, model_selection=None
+        ):
             captured_prompts.append(prompt)
             return CommandResult(
                 command=("fake",),

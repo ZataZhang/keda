@@ -320,6 +320,8 @@ uv run --project /path/to/keda iar init
 
 面板（`iar console`）托管或触发的 runner 子进程，cwd 就是目标仓库（见 `resolve_console_spawn_cwd`）；因此面板会把自己当前生效的机器级 `config.toml` 以 `IAR_CONFIG` 注入子进程，保证"界面上显示的配置"与"实际执行用的配置"是同一份。手动在目标仓库里直接执行 `iar run` / `iar daemon` 且未设 `IAR_CONFIG` 时，机器级配置取 `~/.iar/config.toml`——想让某个仓库的每个阶段都用指定 agent，写该仓库 `.iar.toml` 的 `[agent_runner.lifecycle_agents]` 是最稳的一层（仓库层覆盖机器层）。
 
+在"选 agent"之上，还可以给阶段绑定**命名模型预设**（`[agent_runner.presets.<name>]` + `[agent_runner.lifecycle_presets]`）：绑定后该阶段整体由预设决定 (agent, 模型, 推理档)，遮蔽矩阵同键声明；换人（fallback / 显式 `--agent`）时模型绑定自动丢弃并在日志与 `attempt_records`（`preset` / `model` 列）中标注。完整语义、优先级与命令行一次性旗标见 [Agent 模型预设](model-presets.md)。
+
 ### `.gitignore` 托管块与 prd skill 契约
 
 `iar init` 会在目标仓库 `.gitignore` 写入一个 `# >>> iar (managed by iar init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中除 `.iar/`、`.agent-runner/`、`.iar-worktrees/` 外还包含 `tasks/evidence` 白名单段：

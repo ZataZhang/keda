@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IContentGenerator
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
     IssueSummary,
@@ -367,6 +368,7 @@ def generate_prd_content(
     generator: IContentGenerator | None = None,
     cwd: Path | None = None,
     prd_skill_path: Path | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> GeneratedPrdContent:
     """生成 PRD markdown，支持多级回退。
 
@@ -406,8 +408,13 @@ def generate_prd_content(
         except (KeyError, ValueError):
             pass
     elif target.mode == "agent" and generator is not None and cwd is not None:
-        agent_name = _resolve_generation_agent(
-            target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
+        # 阶段绑定预设时预设整体决定该阶段的 agent（遮蔽矩阵同键声明）。
+        agent_name = (
+            model_selection.agent
+            if model_selection is not None
+            else _resolve_generation_agent(
+                target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
+            )
         )
         # PRD 规范单一来源：优先注入 prd skill 规范；不可达时回退到配置模板 prompt。
         skill_spec = load_prd_skill_spec(prd_skill_path)
@@ -418,7 +425,12 @@ def generate_prd_content(
                 _render_template(target.prompt, context), config.max_input_chars
             )
         generated_text = _run_content_generator(
-            generator, agent_name, prompt, cwd, target.timeout_seconds
+            generator,
+            agent_name,
+            prompt,
+            cwd,
+            target.timeout_seconds,
+            model_selection=model_selection,
         )
 
     if generated_text and _validate_prd_output(generated_text):

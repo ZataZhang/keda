@@ -21,6 +21,7 @@ from backend.core.use_cases.agent_runner_failure import format_recovery_failure_
 from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
 )
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.use_cases.run_agent_once import (
     commit_requested_changes,
     ensure_verification_passed,
@@ -40,6 +41,7 @@ def execute_repair(
     expected_head: str,
     repair_agent: str,
     findings: tuple[FindingDetail, ...] = (),
+    model_selection: ModelSelection | None = None,
 ) -> list[CommandResult]:
     """在既有 PR 分支上运行修复 Agent 并提交变更。
 
@@ -88,6 +90,7 @@ def execute_repair(
             process_runner,
             config=config,
             issue=issue,
+            model_selection=model_selection,
         )
 
         request_path = worktree_path / ".agent-runner" / "commit-request.json"

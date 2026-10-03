@@ -130,7 +130,14 @@ class _CapturingFixAgent:
         self.captured_agent: str | None = None
 
     def __call__(
-        self, agent_name, issue, worktree_path, config, process_runner, verification_results
+        self,
+        agent_name,
+        issue,
+        worktree_path,
+        config,
+        process_runner,
+        verification_results,
+        model_selection=None,
     ):
         self.captured_agent = agent_name
         raise VerificationFailedError([])
@@ -142,7 +149,7 @@ class _CapturingCloseoutAgent:
     def __init__(self) -> None:
         self.captured_agent: str | None = None
 
-    def __call__(self, agent_name, config, process_runner, *, prompt_context):
+    def __call__(self, agent_name, config, process_runner, *, prompt_context, model_selection=None):
         self.captured_agent = agent_name
 
         class _Result:

@@ -127,6 +127,16 @@ agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 
 配置完成后用 `uv run iar agent doctor <name> --all-profiles` 自检，确认各用途 argv 与预期逐字节一致。
 
+### 模型参数模板与命名预设
+
+- 注册块新增 `model_args` / `reasoning_effort_args`：声明该 agent 的模型与推理档 flag 语法
+  （`{model}` / `{effort}` 占位符）。为空表示"未核实语法"，命中带模型/推理档的绑定时 fail-fast。
+- `config.toml` 的 `[agent_runner.presets.<name>]` 段定义命名预设（agent 必填，model /
+  reasoning_effort 可选）；`[agent_runner.lifecycle_presets]` 段把九个生命周期阶段各绑到一个
+  预设，绑定后该阶段整体由预设决定（agent + 模型 + 推理档），遮蔽矩阵同键声明。
+- 完整语义、优先级与命令行一次性旗标（`--preset` / `--model` / `--reasoning-effort`）见
+  [Agent 模型预设](model-presets.md)。
+
 ## Agent Runner Deliberation 配置
 
 `config.toml` 的 `[agent_runner.deliberation]` 段配置多 Agent 合议：

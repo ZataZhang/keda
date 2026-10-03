@@ -20,6 +20,7 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     OutputRelayRequest,
 )
 from backend.core.shared.interfaces.agent_runner import IContentGenerator
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import AppConfig, CommandResult
 from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_GENERATE,
@@ -65,6 +66,7 @@ class SubprocessContentGenerator(IContentGenerator):
         *,
         cwd: Path,
         timeout: int | None = None,
+        model_selection: ModelSelection | None = None,
     ) -> CommandResult:
         """Run a content generator and return its output.
 
@@ -76,7 +78,9 @@ class SubprocessContentGenerator(IContentGenerator):
         model.
         """
         profile = AGENT_PROFILE_REPL if not self._read_only else AGENT_PROFILE_GENERATE
-        invocation = build_agent_invocation(agent_name, profile, prompt, cwd, self._config)
+        invocation = build_agent_invocation(
+            agent_name, profile, prompt, cwd, self._config, model_selection=model_selection
+        )
         if invocation.output_protocol != PLAIN_PROTOCOL_ID:
             protocol = self._protocol_registry.resolve(invocation.output_protocol)
             return protocol.relay(
@@ -135,6 +139,7 @@ class SafePlannerContentGenerator(IContentGenerator):
         *,
         cwd: Path,
         timeout: int | None = None,
+        model_selection: ModelSelection | None = None,
     ) -> CommandResult:
         """Run a planner agent and return its output.
 
@@ -150,7 +155,12 @@ class SafePlannerContentGenerator(IContentGenerator):
                 f"decision planning. Declare read_only = true for this profile to allow it."
             )
         invocation = build_agent_invocation(
-            agent_name, AGENT_PROFILE_GENERATE, prompt, cwd, self._config
+            agent_name,
+            AGENT_PROFILE_GENERATE,
+            prompt,
+            cwd,
+            self._config,
+            model_selection=model_selection,
         )
         if invocation.output_protocol != PLAIN_PROTOCOL_ID:
             protocol = self._protocol_registry.resolve(invocation.output_protocol)

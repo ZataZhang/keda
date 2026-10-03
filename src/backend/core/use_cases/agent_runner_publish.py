@@ -292,6 +292,12 @@ def create_draft_pr(
             process_runner=process_runner,
             target_config=gc_config.draft_pr,
         )
+        # content_generation 阶段绑定的模型选择（发布路径按配置绑定解析；
+        # 预设整体决定该阶段 agent 与模型，未绑定为 None 时零变化）。
+        from backend.core.use_cases.lifecycle_agent_resolution import (
+            resolve_lifecycle_model_selection,
+        )
+
         generated = generate_pr_content(
             config=gc_config,
             context=gc_context,
@@ -299,6 +305,9 @@ def create_draft_pr(
             fallback_body=fallback_body,
             generator=content_generator,
             cwd=worktree_path,
+            model_selection=resolve_lifecycle_model_selection(
+                "content_generation", config, issue=issue
+            ),
         )
         pr_title = generated.title
         pr_body = generated.body

@@ -104,6 +104,8 @@ def _make_attempt_result(
     started_mono: float,
     started_iso: str,
     phase_durations: tuple[PhaseDuration, ...] = (),
+    preset: str = "",
+    model: str = "",
 ) -> AttemptResult:
     """Build an ``AttemptResult`` with wall-clock timing filled in now."""
     finished_mono = time.monotonic()
@@ -118,6 +120,8 @@ def _make_attempt_result(
         finished_at=finished_iso,
         duration_seconds=round(finished_mono - started_mono, 3),
         phase_durations=phase_durations,
+        preset=preset,
+        model=model,
     )
 
 

@@ -90,7 +90,8 @@ class AttemptRecord:
 
     与 :class:`backend.core.shared.models.agent_runner.AttemptResult` 同构，
     用于本地 SQLite 持久化，方便在 runner 崩溃或跨 agent fallback 后仍能
-    复盘每轮耗时与失败原因。
+    复盘每轮耗时与失败原因。``preset`` / ``model`` 是 schema v6 追加的
+    可空观测列（绑定生效时写入，未绑定 / 被丢弃为 ``None``）。
     """
 
     repo_id: str
@@ -103,6 +104,8 @@ class AttemptRecord:
     started_at: str  # ISO8601 UTC
     finished_at: str  # ISO8601 UTC
     duration_seconds: float
+    preset: str | None = None
+    model: str | None = None
 
 
 @dataclass(frozen=True)

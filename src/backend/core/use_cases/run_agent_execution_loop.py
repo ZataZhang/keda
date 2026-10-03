@@ -79,10 +79,15 @@ from backend.core.use_cases.agent_runner_validation import (
     warn_legacy_evidence_helpers,
 )
 from backend.core.use_cases.lifecycle_agent_resolution import (
+    PRD_OVERRIDE_BLOCK_PRESETS,
     effective_prd_overrides,
+    effective_prd_preset_overrides,
     parse_prd_lifecycle_overrides,
     resolve_lifecycle_agent,
+    resolve_lifecycle_model_selection,
 )
+from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,9 @@ class AgentExecutionRequest:
     expected_branch: str
     prompt_override: str | None = None
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None
+    #: 实现阶段绑定的模型选择（阶段 -> 预设解析结果）；``None`` 表示无绑定。
+    #: fix / closeout 未自绑预设时继承它（同一 agent，同一模型命名空间）。
+    model_selection: ModelSelection | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +124,8 @@ class _AttemptRecordContext:
     attempt_started_iso: str
     attempt_results: list[AttemptResult]
     repo_id: str
+    #: 本 attempt 生效的模型选择（已按执行 agent 校验；绑定被丢弃后为 ``None``）。
+    effective_model_selection: ModelSelection | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +160,7 @@ def _record_attempt(
     Returns:
         刚刚记录的 :class:`AttemptResult`。
     """
+    effective_selection = context.effective_model_selection
     _append_attempt_and_notify(
         context.attempt_results,
         _make_attempt_result(
@@ -161,6 +172,8 @@ def _record_attempt(
             started_mono=context.attempt_started_mono,
             started_iso=context.attempt_started_iso,
             phase_durations=context.attempt_phases.snapshot(),
+            preset=(effective_selection.preset_name if effective_selection is not None else ""),
+            model=effective_selection.model if effective_selection is not None else "",
         ),
         context.request.on_attempt_recorded,
     )
@@ -238,6 +251,7 @@ def _attempt_delivery_closeout(
     context: _DeliveryCloseoutContext,
     *,
     prd_overrides: Mapping[str, str] | None = None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
 ) -> bool:
     """尝试用一次短命的收尾修复接住交付门禁失败。
 
@@ -248,6 +262,7 @@ def _attempt_delivery_closeout(
     Args:
         context: 本次收尾的执行请求、attempt 计时与 PRD 基线。
         prd_overrides: PRD 文件头部 lifecycle_agents 覆盖（最高优先级）。
+        prd_preset_overrides: PRD 文件头部 / CLI 传入的阶段 -> 预设绑定。
 
     Returns:
         收尾成功且门禁链重跑通过时为 ``True``，其余一律 ``False``。
@@ -279,6 +294,7 @@ def _attempt_delivery_closeout(
                     issue=issue,
                     selected_agent=request.selected_agent,
                     prd_overrides=prd_overrides,
+                    prd_preset_overrides=prd_preset_overrides,
                 ),
                 config,
                 process_runner,
@@ -288,6 +304,16 @@ def _attempt_delivery_closeout(
                     gate_failure_message=str(gate_failure),
                     kind=gate_failure.kind,
                     allowed_scope=allowed_scope,
+                ),
+                # closeout 未自绑预设时继承实现者的绑定；换人丢弃在 resilient 层。
+                model_selection=(
+                    resolve_lifecycle_model_selection(
+                        "closeout",
+                        config,
+                        issue=issue,
+                        prd_preset_overrides=prd_preset_overrides,
+                    )
+                    or context.record.effective_model_selection
                 ),
             )
     except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
@@ -399,6 +425,18 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         prd_overrides = parse_prd_lifecycle_overrides(
             prd_baseline_content, prd_path=prd_relative_path
         )
+    # PRD 文件头部 lifecycle_presets 覆盖块（阶段 -> 预设绑定，PRD 级）。合并与
+    # 回退策略与上面同一套。
+    prd_preset_overrides = effective_prd_preset_overrides(issue, None)
+    if not prd_preset_overrides and prd_baseline_content is not None:
+        prd_preset_overrides = parse_prd_lifecycle_overrides(
+            prd_baseline_content,
+            prd_path=prd_relative_path,
+            block_name=PRD_OVERRIDE_BLOCK_PRESETS,
+        )
+    # 实现阶段绑定的模型选择：显式换人（CLI --agent / 回退候选）时在这里丢弃，
+    # 保证后续 fix / closeout 继承的一定是"执行 agent == 预设 agent"的有效选择。
+    model_selection = drop_model_selection_for_agent(selected_agent, request.model_selection)
     recovery_failure_summary = ""
     recovery_failure_type: str = "verification_failed"
     final_verification_results: list[CommandResult] = []
@@ -427,6 +465,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             attempt_started_iso=attempt_started_iso,
             attempt_results=attempt_results,
             repo_id=repo_id,
+            effective_model_selection=model_selection,
         )
 
         # Phase 1: 运行 agent 或 recovery prompt
@@ -447,6 +486,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             ),
                             timeout_seconds=config.runner.timeout_seconds,
                             inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
+                            model_selection=model_selection,
                         )
                 else:
                     with attempt_phases.measure("agent"):
@@ -458,6 +498,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             process_runner,
                             timeout_seconds=config.runner.timeout_seconds,
                             inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
+                            model_selection=model_selection,
                         )
             else:
                 long_term_store, skill_store = _resolve_memory_stores(worktree_path, config.memory)
@@ -489,6 +530,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         transient_retry_delay_seconds=(config.runner.transient_retry_delay_seconds),
                         timeout_seconds=recovery_timeout,
                         inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
+                        model_selection=model_selection,
                     )
         except AgentUnavailableError:
             # The agent CLI could not be launched; let the cross-agent fallback
@@ -586,6 +628,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     prd_baseline_content=prd_baseline_content,
                 ),
                 prd_overrides=prd_overrides,
+                prd_preset_overrides=prd_preset_overrides,
             )
             if not delivery_gates_revalidated:
                 failure_type = _classify_and_record_gate_failure(
@@ -625,6 +668,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     prd_baseline_content=prd_baseline_content,
                 ),
                 prd_overrides=prd_overrides,
+                prd_preset_overrides=prd_preset_overrides,
             ):
                 delivery_gates_revalidated = True
             else:
@@ -687,12 +731,24 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                                 issue=issue,
                                 selected_agent=selected_agent,
                                 prd_overrides=prd_overrides,
+                                prd_preset_overrides=prd_preset_overrides,
                             ),
                             issue,
                             worktree_path,
                             config,
                             process_runner,
                             verification_results=exc.verification_results,
+                            # fix 未自绑预设时继承实现者的绑定；执行 agent 与预设
+                            # 声明不一致时由 resilient 层丢弃并记日志。
+                            model_selection=(
+                                resolve_lifecycle_model_selection(
+                                    "fix",
+                                    config,
+                                    issue=issue,
+                                    prd_preset_overrides=prd_preset_overrides,
+                                )
+                                or model_selection
+                            ),
                         )
                         if fix_agent_result.return_code != 0:
                             raise RuntimeError(
@@ -832,6 +888,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     process_runner,
                     selected_agent,
                     prd_overrides=prd_overrides,
+                    prd_preset_overrides=prd_preset_overrides,
                 )
         except ValidationEvidenceError as exc:
             failure_type = _classify_and_record_gate_failure(

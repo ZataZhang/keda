@@ -335,6 +335,15 @@ def _commit_and_publish_prd(
     return pr_url
 
 
+def _resolve_content_generation_selection(config: AppConfig):
+    """content_generation 阶段绑定的模型选择；未绑定时返回 ``None``（零变化）。"""
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+
+    return resolve_lifecycle_model_selection("content_generation", config)
+
+
 def create_prd_from_issue(
     *,
     request: CreatePrdFromIssueRequest,
@@ -398,6 +407,7 @@ def create_prd_from_issue(
             fallback_prd_text=_build_fallback_prd(issue),
             generator=request.content_generator,
             cwd=gc_cwd,
+            model_selection=_resolve_content_generation_selection(request.config),
         )
         prd_text = generated.text
         prd_source = generated.source
