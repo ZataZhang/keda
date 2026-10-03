@@ -16,6 +16,7 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     OutputRelayRequest,
 )
 from backend.core.shared.models.agent_runner import CommandResult
+from backend.infrastructure.agent_stream_usage import StreamUsageCollector
 from backend.infrastructure.process_runner import run_filtered_claude_stream
 
 
@@ -32,6 +33,7 @@ class ClaudeStreamJsonOutputProtocol:
             argv = [arg for arg in argv if arg != "-p"]
             if argv and argv[-1] == prompt_text:
                 argv = argv[:-1]
+        usage_collector = StreamUsageCollector()
         completed = run_filtered_claude_stream(
             argv,
             cwd=request.cwd,
@@ -42,6 +44,7 @@ class ClaudeStreamJsonOutputProtocol:
             output_sink=request.output_sink,
             display_sink=request.display_sink,
             label=request.label,
+            usage_collector=usage_collector,
         )
         return CommandResult(
             command=tuple(argv),
@@ -49,6 +52,7 @@ class ClaudeStreamJsonOutputProtocol:
             stdout=completed.stdout,
             stderr=completed.stderr,
             output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+            token_usage=usage_collector.usage,
         )
 
 

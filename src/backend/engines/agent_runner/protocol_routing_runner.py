@@ -70,6 +70,9 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
                 input_text=input_text,
                 label=label,
                 output_sink=output_sink,
+                # plain agent 调用也把协议 id 传下去：内层据此区分"agent 调用"
+                # 与"普通命令"，只有前者才做 token 用量的事后解析。
+                output_protocol=output_protocol,
             )
         protocol = self._protocol_registry.resolve(output_protocol)
         started_mono = time.monotonic()

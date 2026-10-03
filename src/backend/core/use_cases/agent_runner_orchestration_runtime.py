@@ -43,6 +43,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     create_or_reuse_worktree,
     run_issue_with_agent_fallback,
 )
+from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
     issue_output_routing,
@@ -52,6 +53,7 @@ from backend.core.use_cases.agent_runner_validation_gate import process_validati
 from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
 from backend.core.use_cases.agent_runner_lifecycle import (
     LifecycleEventType,
+    build_attempt_event_detail,
     record_lifecycle_event,
     record_lifecycle_terminal,
 )
@@ -249,14 +251,9 @@ def _process_single_issue(
             run_history_store=run_history_store,
         )
         # 生命周期观测（旁路）：每次 Agent attempt 落一条事件；重试与恢复作为
-        # 独立事件追加，后续成功不覆盖早先的失败历史。
-        attempt_detail = {
-            "agent": result.agent,
-            "attempt_number": result.attempt_number,
-            "failure_type": result.failure_type.value,
-            "recovered": result.recovered,
-            "duration_seconds": result.duration_seconds,
-        }
+        # 独立事件追加，后续成功不覆盖早先的失败历史。detail 形状唯一事实源
+        # 见 :func:`build_attempt_event_detail`（含 token_usage，如可用）。
+        attempt_detail = build_attempt_event_detail(result)
         record_lifecycle_event(
             store=run_history_store,
             repo_id=effective_repo_id,
@@ -296,6 +293,33 @@ def _process_single_issue(
                 detail=attempt_detail,
             )
 
+    def _emit_agent_usage_event(flow: str, agent_name: str, usage: TokenUsage) -> None:
+        """生命周期观测（旁路）：非 attempt 主体的 agent 调用用量落一条观测事件。
+
+        观测事件不推进阶段、不占时长（lifecycle 侧过滤）；写入失败不阻断主流程
+        （record_lifecycle_event 内部容错）。
+        """
+        record_lifecycle_event(
+            store=run_history_store,
+            repo_id=effective_repo_id,
+            prd_path=lifecycle_prd_path,
+            issue_number=issue.number,
+            trigger=run_trigger,
+            event_type=LifecycleEventType.AGENT_TOKEN_USAGE,
+            actor="runner",
+            event_key=(f"agent-token-usage:{flow}:{datetime.now(timezone.utc).isoformat()}"),
+            detail={
+                "flow": flow,
+                "agent": agent_name,
+                "token_usage": {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "cache_read_input_tokens": usage.cache_read_input_tokens,
+                    "cache_creation_input_tokens": usage.cache_creation_input_tokens,
+                },
+            },
+        )
+
     prd_activity_lease = PrdActivityLease(
         repo_path, lifecycle_prd_path, issue.number, selected_agent
     )
@@ -316,6 +340,7 @@ def _process_single_issue(
                     content_generator=content_generator,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
+                on_agent_usage=_emit_agent_usage_event,
             )
         elif issue_kind == "running_rework":
             _, marker = _guard_running_issue_is_rework(issue, config, github_client)
@@ -389,6 +414,7 @@ def _process_single_issue(
                     marker=marker,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
+                on_agent_usage=_emit_agent_usage_event,
             )
         else:
             used_agent = run_issue_with_agent_fallback(

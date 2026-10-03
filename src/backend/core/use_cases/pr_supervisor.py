@@ -7,6 +7,7 @@ import logging
 import re
 import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
@@ -946,6 +947,9 @@ def run_post_pr_supervisor_cycle(
         raw_action_result,
         pr_context,
     )
+    # 观测回填：本 cycle 的 supervisor agent 调用用量。守卫层的改写分支新建
+    # 结果对象、不携带 usage，因此在守卫之后统一附加一次。
+    action_result = replace(action_result, token_usage=result.token_usage)
     # 本 cycle 结论落盘：resolved 的 finding 出列，未解决的带进下一轮 prompt。
     _persist_findings(
         worktree_path,

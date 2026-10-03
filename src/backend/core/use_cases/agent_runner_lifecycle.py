@@ -30,13 +30,16 @@ from backend.core.shared.interfaces.runner_console import (
     PrdLifecycleEventRecord,
     PrdLifecycleRunRecord,
 )
+from backend.core.shared.models.agent_runner import AttemptResult
 from backend.core.shared.models.roadmap import (
     PrdLifecycleDetail,
     PrdLifecycleDurations,
     PrdLifecycleEventView,
     PrdLifecycleStats,
     PrdLifecycleStatsRow,
+    TokenUsageStats,
 )
+from backend.core.use_cases.agent_runner_token_stats import aggregate_token_usage
 
 _logger = logging.getLogger(__name__)
 
@@ -44,6 +47,7 @@ __all__ = [
     "ACTIVE_PHASES",
     "LifecycleEventType",
     "LifecyclePhase",
+    "build_attempt_event_detail",
     "build_prd_lifecycle_detail",
     "build_prd_lifecycle_stats",
     "classify_durations",
@@ -81,6 +85,9 @@ class LifecycleEventType(str, Enum):
     BLOCKED = "blocked"
     UNBLOCKED = "unblocked"
     FAILED = "failed"
+    # 观测事件：只携带旁路指标（token 用量），不推进生命周期阶段。刻意不进
+    # _EVENT_PHASE（记为 NONE），并被时长归属与当前阶段推导过滤。
+    AGENT_TOKEN_USAGE = "agent_token_usage"
 
 
 class LifecyclePhase(str, Enum):
@@ -133,6 +140,15 @@ _TERMINAL_EVENT_TYPES = frozenset(
         LifecycleEventType.FAILED,
         LifecycleEventType.BLOCKED,
     }
+)
+
+#: 观测事件种类：只承载旁路指标，不参与阶段推导与时长归属——否则插入一条
+#: 观测事件会把"当前阶段"拉成 NONE，并把执行时长错算成 waiting。
+_OBSERVATION_ONLY_EVENT_TYPES = frozenset({LifecycleEventType.AGENT_TOKEN_USAGE})
+
+#: 观测事件种类的字符串值集合（事件记录里存的是字符串，过滤按值比较）。
+_OBSERVATION_ONLY_EVENT_TYPE_VALUES = frozenset(
+    {event_type.value for event_type in _OBSERVATION_ONLY_EVENT_TYPES}
 )
 
 
@@ -192,6 +208,30 @@ def _safe_store_call(store: IPrdLifecycleStore, run_id: str, action: str, call: 
         except Exception as mark_exc:  # noqa: BLE001 - incomplete marker is best effort too.
             _logger.warning("Failed to mark lifecycle run %s incomplete: %s", run_id, mark_exc)
         return None
+
+
+def build_attempt_event_detail(result: AttemptResult) -> dict[str, Any]:
+    """构造 attempt 族事件（attempt/retry/recovered）的 detail 摘要。
+
+    编排层的 ``_on_attempt_recorded`` 与测试侧共用本函数，保证账本里的
+    attempt detail 形状只有一份事实源；``token_usage`` 仅在该次调用产出
+    可用 usage 时出现。
+    """
+    detail: dict[str, Any] = {
+        "agent": result.agent,
+        "attempt_number": result.attempt_number,
+        "failure_type": result.failure_type.value,
+        "recovered": result.recovered,
+        "duration_seconds": result.duration_seconds,
+    }
+    if result.token_usage is not None:
+        detail["token_usage"] = {
+            "input_tokens": result.token_usage.input_tokens,
+            "output_tokens": result.token_usage.output_tokens,
+            "cache_read_input_tokens": result.token_usage.cache_read_input_tokens,
+            "cache_creation_input_tokens": result.token_usage.cache_creation_input_tokens,
+        }
+    return detail
 
 
 def record_lifecycle_event(
@@ -395,7 +435,12 @@ def classify_durations(
     可以完全由时间线重新算出，不需要额外口径。
     """
     reference_now = now or datetime.now(timezone.utc)
-    parsed_events = _ordered_events(events)
+    # 观测事件不占时间区间：过滤后再切段，保证时长归属与无观测事件时逐位一致。
+    parsed_events = [
+        (event, timestamp)
+        for event, timestamp in _ordered_events(events)
+        if event.event_type not in _OBSERVATION_ONLY_EVENT_TYPE_VALUES
+    ]
     if not parsed_events:
         return _DurationBreakdown(
             end_to_end_seconds=None,
@@ -448,11 +493,17 @@ def derive_current_phase(
 ) -> LifecyclePhase:
     """由事件聚合出当前阶段；无事件时按 run 终态降级。"""
     if events:
-        last_event = max(events, key=_event_sort_key)
-        try:
-            return LifecyclePhase(last_event.phase)
-        except ValueError:
-            return LifecyclePhase.NONE
+        # 观测事件不推进阶段：若最后一条恰是观测事件，取它之前最近的一条
+        # 阶段事件；全部是观测事件时按 run 终态降级。
+        phase_events = [
+            event for event in events if event.event_type not in _OBSERVATION_ONLY_EVENT_TYPE_VALUES
+        ]
+        if phase_events:
+            last_event = max(phase_events, key=_event_sort_key)
+            try:
+                return LifecyclePhase(last_event.phase)
+            except ValueError:
+                return LifecyclePhase.NONE
     if run_record.outcome == "completed":
         return LifecyclePhase.COMPLETED
     if run_record.outcome == "failed":
@@ -602,6 +653,7 @@ def build_prd_lifecycle_stats(
             unlinked_run_count=0,
             incomplete_run_count=0,
             runs=[],
+            token_usage=TokenUsageStats(by_flow={}, by_agent={}),
         )
 
     try:
@@ -615,11 +667,13 @@ def build_prd_lifecycle_stats(
     completed_blocked: list[float] = []
     phase_totals: dict[str, float] = {}
     incomplete_count = 0
+    window_events: list[object] = []
     for run_record in run_records:
         try:
             stored_events = lifecycle_store.list_lifecycle_events(run_id=run_record.run_id)
         except Exception:  # noqa: BLE001 - one run must not break the whole stats page.
             stored_events = []
+        window_events.extend(stored_events)
         breakdown = classify_durations(
             stored_events, finished_at=run_record.finished_at, now=reference_now
         )
@@ -695,4 +749,5 @@ def build_prd_lifecycle_stats(
         unlinked_run_count=unlinked_count,
         incomplete_run_count=incomplete_count,
         runs=rows,
+        token_usage=aggregate_token_usage(window_events),
     )

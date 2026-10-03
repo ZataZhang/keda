@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
@@ -12,6 +13,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
     PullRequestContext,
+    TokenUsage,
 )
 from backend.core.use_cases.agent_runner_events import (
     parse_latest_event_marker,
@@ -57,6 +59,42 @@ def _lifecycle_prd_path(issue: IssueSummary) -> str:
         return extract_prd_path(issue.body) or ""
     except Exception:  # noqa: BLE001 - observation only.
         return ""
+
+
+def _record_agent_usage_event(
+    *,
+    run_history_store: IRunHistoryStore | None,
+    repo_id: str,
+    issue: IssueSummary,
+    flow: str,
+    agent_name: str,
+    usage: TokenUsage,
+) -> None:
+    """把一次 agent 调用的 token 用量落成生命周期观测事件（旁路）。
+
+    观测事件（``agent_token_usage``）不推进阶段、不占时长；无账本能力时静默
+    跳过，写入失败由 :func:`record_lifecycle_event` 内部容错。
+    """
+    record_lifecycle_event(
+        store=run_history_store,
+        repo_id=repo_id,
+        prd_path=_lifecycle_prd_path(issue),
+        issue_number=issue.number,
+        trigger="review_once",
+        event_type=LifecycleEventType.AGENT_TOKEN_USAGE,
+        actor="supervisor",
+        event_key=f"agent-token-usage:{flow}:{datetime.now(timezone.utc).isoformat()}",
+        detail={
+            "flow": flow,
+            "agent": agent_name,
+            "token_usage": {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cache_read_input_tokens": usage.cache_read_input_tokens,
+                "cache_creation_input_tokens": usage.cache_creation_input_tokens,
+            },
+        },
+    )
 
 
 def _record_review_outcome(
@@ -210,6 +248,8 @@ def _process_review_candidate(
     agent: str,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
+    run_history_store: IRunHistoryStore | None = None,
+    repo_id: str = "",
 ) -> str:
     """Run supervisor cycle for a single review candidate."""
     comments = github_client.list_issue_comments(issue.number)
@@ -335,6 +375,17 @@ def _process_review_candidate(
             )
         raise
     action_result = guard_supervisor_action_for_pr_state(action_result, pr_context)
+    # 生命周期观测（旁路）：supervisor agent 调用的 token 用量落一条观测事件；
+    # 不推进阶段、不占时长，写入失败不阻断审核。
+    if action_result.token_usage is not None:
+        _record_agent_usage_event(
+            run_history_store=run_history_store,
+            repo_id=repo_id,
+            issue=issue,
+            flow="supervise",
+            agent_name=supervisor_agent,
+            usage=action_result.token_usage,
+        )
 
     if action_result.action == "approve_for_human_review":
         if stashed:
@@ -462,6 +513,8 @@ def review_once(
                 agent=agent,
                 github_client=github_client,
                 process_runner=process_runner,
+                run_history_store=run_history_store,
+                repo_id=effective_repo_id,
             )
             _logger.info(
                 "Review outcome for Issue #%d: %s (%s)",
