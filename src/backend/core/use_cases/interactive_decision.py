@@ -20,6 +20,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_decision import (
     DecisionAction,
     DecisionActionType,
@@ -878,6 +879,7 @@ def run_interactive_decision(
     content_generator: IContentGenerator | None,
     github_client_factory: Callable[[Path], IGitHubClient],
     deliberation_deps: Mapping[str, Any] | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> int:
     """Run the full interactive decision flow.
 
@@ -907,6 +909,7 @@ def run_interactive_decision(
         prompt=planner_prompt,
         cwd=context.repo_path,
         timeout=config.planner_timeout_seconds,
+        model_selection=model_selection,
     )
     if planner_result.return_code != 0:
         _logger.error("Planner agent failed with exit code %d", planner_result.return_code)

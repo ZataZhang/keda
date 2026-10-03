@@ -348,6 +348,7 @@ class FakeContentGenerator(IContentGenerator):
         *,
         cwd: Path,
         timeout: int | None = None,
+        model_selection: object = None,
     ) -> CommandResult:
         self.calls.append([agent_name, prompt[:50]])
         self.prompts.append(prompt)
@@ -373,6 +374,7 @@ class FailingContentGenerator(FakeContentGenerator):
         *,
         cwd: Path,
         timeout: int | None = None,
+        model_selection: object = None,
     ) -> CommandResult:
         self.calls.append([agent_name, prompt[:50]])
         raise self.error

@@ -153,6 +153,47 @@ max_issues = 1
 # deliberate = "claude"
 
 # =============================================================================
+# 命名模型预设（agent + 模型 + 推理档 三元组）
+# =============================================================================
+# 一个预设声明"用哪个 agent、什么模型、什么推理深度"；阶段可以在下面的
+# [agent_runner.lifecycle_presets] 里绑定一个预设，绑定后该阶段整体改用
+# 预设声明（遮蔽上方矩阵的同键 agent 声明）。预设完全可选：
+# 不定义 / 不绑定时行为与过去逐字节一致。
+#
+# 模型 id 以各 agent CLI 实际支持列表为准；agent 必须已注册，且只有声明了
+# 模型参数模板（见 agents.claude / agents.codebuddy 的 model_args 与
+# reasoning_effort_args）的 agent 才能命中带模型/推理档的预设——未声明模板
+# 的 agent 命中绑定时直接报错（宁缺勿假，绝不静默忽略）。
+#
+# 用 `iar agent presets` 枚举全部预设；`iar agent doctor <agent> --preset <名>`
+# 预览将被执行的完整命令行。
+
+[agent_runner.presets.plan]
+agent = "codebuddy"
+model = "glm-5.3-flash"
+reasoning_effort = "max"
+
+[agent_runner.presets.work]
+agent = "codebuddy"
+model = "deepseek-v4.1-flash"
+reasoning_effort = "high"
+
+# =============================================================================
+# 阶段 -> 预设 绑定（九键闭集，与生命周期矩阵同键）
+# =============================================================================
+# 绑定后该阶段由预设整体决定 (agent, 模型, 推理档)。覆盖优先级（高到低）：
+#   命令行 --agent > 命令行 --preset/--model/--reasoning-effort（一次性）
+#   > PRD 头部 lifecycle_presets 块（除 planner 外八键）
+#   > 仓库 .iar.toml > 本文件（全局层）。
+# fix / closeout 未自绑预设时跟随实现者并继承实现的模型绑定（同一 agent）。
+# 回退换人 / 显式换 agent 时丢弃模型绑定并在日志与 attempt 记录中标注。
+# 下面是注释模板：取消注释即生效。
+#
+# [agent_runner.lifecycle_presets]
+# verifier = "plan"
+# implementation = "work"
+
+# =============================================================================
 # Agent 注册表（声明式 agent 调用形态）
 # =============================================================================
 # 每个 agent 的全部调用差异沉淀为一段显式数据：可执行文件、路由标签、
@@ -161,8 +202,13 @@ max_issues = 1
 #
 # 本文件内的七个注册块与代码内置默认（BUILTIN_AGENT_SPECS）等价，写出仅为
 # 便于发现与覆盖：未写出的字段逐字段回落内置默认。argv 元素是字面量，
-# 不做 shell 展开；占位符闭集：{cwd} / {prompt} / {worktree}；
+# 不做 shell 展开；占位符闭集：{cwd} / {prompt} / {worktree} / {model} / {effort}；
 # 展开器闭集：git_writable_roots（写法 "git_writable_roots:--add-dir"）。
+#
+# 模型参数模板（本 PRD 新增）：model_args / reasoning_effort_args 声明该 agent
+# 的模型与推理档 flag 语法（{model} / {effort} 占位符）；为空表示未核实语法，
+# 命中模型绑定时 fail-fast。claude（--model）与 codebuddy（--model +
+# --settings reasoningEffort）已核实并以内置默认播种；下方注册块写出仅为示例。
 #
 # 接入全新 agent 的最小步骤：写一段注册块（bin 与 label 必填，四种用途
 # 至少声明一种；某个用途两侧都不声明即视为该 agent 不提供该用途），
@@ -212,6 +258,7 @@ label = "agent/claude"
 label_color = "BFDADC"
 label_description = "Use Claude Code for local runner execution."
 auth_home = "~/.claude"
+model_args = ["--model", "{model}"]
 auth_include = ["settings.json", "skills"]
 auth_exclude = ["history.jsonl", "file-history", "paste-cache", "plans", "plugins", "cache", "ide", "backups", "telemetry", "todos"]
 project_skills_dir = ".claude/skills"
@@ -320,6 +367,8 @@ label = "agent/codebuddy"
 label_color = "0052D9"
 label_description = "Use CodeBuddy Code for local runner execution."
 auth_home = "~/.codebuddy"
+model_args = ["--model", "{model}"]
+reasoning_effort_args = ["--settings", "{\"reasoningEffort\":\"{effort}\"}"]
 auth_include = ["settings.json", "skills"]
 auth_exclude = ["history.jsonl", "file-history", "sessions", "logs", "plans", "plugins", "cache", "blobs", "traces", "shell-snapshots", "tasks", "teams", "projects", "local_storage", "jobs", "diagnostics", "skills-marketplace"]
 project_skills_dir = ".codebuddy/skills"

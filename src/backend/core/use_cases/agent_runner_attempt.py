@@ -106,6 +106,8 @@ def _make_attempt_result(
     started_iso: str,
     phase_durations: tuple[PhaseDuration, ...] = (),
     token_usage: TokenUsage | None = None,
+    preset: str = "",
+    model: str = "",
 ) -> AttemptResult:
     """Build an ``AttemptResult`` with wall-clock timing filled in now."""
     finished_mono = time.monotonic()
@@ -121,6 +123,8 @@ def _make_attempt_result(
         duration_seconds=round(finished_mono - started_mono, 3),
         phase_durations=phase_durations,
         token_usage=token_usage,
+        preset=preset,
+        model=model,
     )
 
 

@@ -28,6 +28,7 @@ from backend.core.shared.models.lifecycle_agent import (
 from backend.core.use_cases.lifecycle_agent_resolution import (
     legacy_configured_agent,
     resolve_lifecycle_agent,
+    resolve_lifecycle_model_selection,
 )
 
 SCOPE_GLOBAL = "global"
@@ -88,6 +89,15 @@ def build_lifecycle_agents_view(
             normalize_lifecycle_agent_value(declared_or_legacy) == LIFECYCLE_AGENT_EXECUTOR
         )
         entry_group = LIFECYCLE_AGENT_ENTRY_BY_KEY[lifecycle_key]
+        # 阶段 -> 预设 绑定与生效模型（本 PRD 新增的只读展示字段）：绑定名
+        # 取两层显式声明（仓库层 > 全局层），解析结果给出生效的模型/推理档；
+        # 未绑定时三项均为 ``None``（前端渲染为空，行为与过去一致）。
+        bound_preset_name = config.lifecycle_presets.declared_value(lifecycle_key)
+        bound_selection = (
+            resolve_lifecycle_model_selection(lifecycle_key, config)
+            if bound_preset_name is not None
+            else None
+        )
         lifecycles.append(
             {
                 "key": lifecycle_key,
@@ -111,6 +121,12 @@ def build_lifecycle_agents_view(
                 ),
                 "follows_executor": follows_executor,
                 "source": _resolve_source_layer(lifecycle_key, config),
+                # 预设绑定视图（纯新增）：绑定的预设名 + 解析后的模型/推理档。
+                "preset": bound_preset_name,
+                "model": bound_selection.model if bound_selection is not None else None,
+                "reasoning_effort": (
+                    bound_selection.reasoning_effort if bound_selection is not None else None
+                ),
             }
         )
     return {

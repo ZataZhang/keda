@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_deliberation import (
     DeliberationAgentProfile,
     DeliberationConfig,
 )
+from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     GeneratedContentConfig,
@@ -29,6 +30,7 @@ from backend.core.shared.models.agent_spec import AgentSpec
 from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_KEYS,
     LifecycleAgentsConfig,
+    LifecyclePresetsConfig,
     concrete_declared_agent,
 )
 from backend.engines.agent_runner.factory_config_builder import (
@@ -41,6 +43,8 @@ from backend.infrastructure.config.settings import (
     AgentRunnerGeneratedContentTargetSettings,
     AgentRunnerLabelSettings,
     AgentRunnerLifecycleAgentsSettings,
+    AgentRunnerLifecyclePresetsSettings,
+    AgentRunnerPresetSettings,
     AgentRunnerPromptSettings,
     AgentRunnerRepositorySettings,
 )
@@ -269,6 +273,49 @@ def _merge_lifecycle_agents_config(
     )
 
 
+def _merge_lifecycle_presets_config(
+    base_config: LifecyclePresetsConfig,
+    override: AgentRunnerLifecyclePresetsSettings | None,
+) -> LifecyclePresetsConfig:
+    """合并仓库级 ``[agent_runner.lifecycle_presets]`` 绑定。
+
+    全局层绑定原样保留，仓库层只收录显式声明过的键；解析时仓库层同键赢过
+    全局层（由 ``declared_value`` 保证，与矩阵绑定同一套两层语义）。
+    """
+    if override is None:
+        return base_config
+    repository_layer = {
+        lifecycle_key: getattr(override, lifecycle_key)
+        for lifecycle_key in LIFECYCLE_AGENT_KEYS
+        if getattr(override, lifecycle_key) is not None
+    }
+    return LifecyclePresetsConfig(
+        global_layer=base_config.global_layer,
+        repository_layer=repository_layer,
+    )
+
+
+def _merge_agent_presets(
+    base_presets: dict[str, AgentModelPreset],
+    override: dict[str, AgentRunnerPresetSettings] | None,
+) -> dict[str, AgentModelPreset]:
+    """合并仓库级 ``[agent_runner.presets.<name>]`` 声明。
+
+    仓库层同键整体替换全局层预设（预设是一个原子声明，不做字段级混合），
+    仓库层新预设追加在末尾。
+    """
+    if not override:
+        return base_presets
+    merged_presets = dict(base_presets)
+    for preset_name, preset_setting in override.items():
+        merged_presets[preset_name] = AgentModelPreset(
+            agent=preset_setting.agent,
+            model=preset_setting.model,
+            reasoning_effort=preset_setting.reasoning_effort,
+        )
+    return merged_presets
+
+
 def merge_repository_config(
     global_config: AppConfig,
     repo_settings: AgentRunnerRepositorySettings,
@@ -321,6 +368,10 @@ def merge_repository_config(
     lifecycle_agents = _merge_lifecycle_agents_config(
         global_config.lifecycle_agents, repo_settings.lifecycle_agents
     )
+    agent_presets = _merge_agent_presets(global_config.agent_presets, repo_settings.presets)
+    lifecycle_presets = _merge_lifecycle_presets_config(
+        global_config.lifecycle_presets, repo_settings.lifecycle_presets
+    )
     # 内容生成阶段的有效默认 agent 由合并后的矩阵派生（仓库层赢全局层）。
     generated_content = dataclasses.replace(
         generated_content,
@@ -351,6 +402,8 @@ def merge_repository_config(
         repl=repl,
         deliberation=deliberation,
         lifecycle_agents=lifecycle_agents,
+        agent_presets=agent_presets,
+        lifecycle_presets=lifecycle_presets,
         repositories=repositories,
     )
 

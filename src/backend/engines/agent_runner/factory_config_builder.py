@@ -13,6 +13,7 @@ from backend.core.shared.models.agent_deliberation import (
     DeliberationAgentProfile,
     DeliberationConfig,
 )
+from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     AutopilotConfig,
@@ -39,6 +40,7 @@ from backend.core.shared.models.agent_spec import (
 from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_KEYS,
     LifecycleAgentsConfig,
+    LifecyclePresetsConfig,
     concrete_declared_agent,
 )
 from backend.infrastructure.config.settings import (
@@ -48,7 +50,9 @@ from backend.infrastructure.config.settings import (
     AgentRunnerGeneratedContentSettings,
     AgentRunnerGeneratedContentTargetSettings,
     AgentRunnerLifecycleAgentsSettings,
+    AgentRunnerLifecyclePresetsSettings,
     AgentRunnerMemorySettings,
+    AgentRunnerPresetSettings,
     AgentRunnerReplSettings,
     AgentRunnerSettings,
 )
@@ -332,6 +336,17 @@ def _merge_agent_settings(
             if agent_settings.project_skills_dir is not None
             else (base_spec.project_skills_dir if base_spec else None)
         ),
+        # 模型参数模板：未声明时逐字段回落内置默认（如 claude/codebuddy 的种子模板）。
+        model_args=tuple(
+            agent_settings.model_args
+            if agent_settings.model_args is not None
+            else (base_spec.model_args if base_spec else ())
+        ),
+        reasoning_effort_args=tuple(
+            agent_settings.reasoning_effort_args
+            if agent_settings.reasoning_effort_args is not None
+            else (base_spec.reasoning_effort_args if base_spec else ())
+        ),
         profiles=profiles,
     )
 
@@ -406,6 +421,43 @@ def build_lifecycle_agents_config_from_settings(
         if getattr(lifecycle_settings, lifecycle_key) is not None
     }
     return LifecycleAgentsConfig(global_layer=global_layer)
+
+
+def build_agent_presets_from_settings(
+    preset_settings: dict[str, AgentRunnerPresetSettings],
+) -> dict[str, AgentModelPreset]:
+    """从 ``[agent_runner.presets.<name>]`` 配置构建核心层预设清单。
+
+    Args:
+        preset_settings: 配置段声明（预设名 -> 字段）。
+
+    Returns:
+        预设名 -> :class:`AgentModelPreset`（保持配置声明顺序）。
+    """
+    return {
+        preset_name: AgentModelPreset(
+            agent=preset_setting.agent,
+            model=preset_setting.model,
+            reasoning_effort=preset_setting.reasoning_effort,
+        )
+        for preset_name, preset_setting in preset_settings.items()
+    }
+
+
+def build_lifecycle_presets_config_from_settings(
+    lifecycle_preset_settings: AgentRunnerLifecyclePresetsSettings,
+) -> LifecyclePresetsConfig:
+    """从 ``[agent_runner.lifecycle_presets]`` 配置构建**全局层**绑定视图。
+
+    只收录显式声明的键；仓库层绑定由 ``merge_repository_config`` 另行合并，
+    因此 ``repository_layer`` 恒为空。
+    """
+    global_layer = {
+        lifecycle_key: getattr(lifecycle_preset_settings, lifecycle_key)
+        for lifecycle_key in LIFECYCLE_AGENT_KEYS
+        if getattr(lifecycle_preset_settings, lifecycle_key) is not None
+    }
+    return LifecyclePresetsConfig(global_layer=global_layer)
 
 
 def build_app_config_from_settings(
@@ -549,6 +601,10 @@ def build_app_config_from_settings(
         repl=repl,
         deliberation=deliberation,
         lifecycle_agents=lifecycle_agents,
+        agent_presets=build_agent_presets_from_settings(agent_runner_settings.presets),
+        lifecycle_presets=build_lifecycle_presets_config_from_settings(
+            agent_runner_settings.lifecycle_presets
+        ),
     )
 
 

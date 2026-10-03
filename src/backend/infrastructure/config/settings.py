@@ -34,10 +34,12 @@ from backend.infrastructure.config.agent_runner_settings import (
     AgentRunnerInteractiveDecisionSettings,
     AgentRunnerLabelSettings,
     AgentRunnerLifecycleAgentsSettings,
+    AgentRunnerLifecyclePresetsSettings,
     AgentRunnerLocalSettings,
     AgentRunnerMemorySettings,
     AgentRunnerPostPrSupervisorSettings,
     AgentRunnerPrePrReviewSettings,
+    AgentRunnerPresetSettings,
     AgentRunnerPromptSettings,
     AgentRunnerReplSettings,
     AgentRunnerRepositoryMetadataSettings,
@@ -271,6 +273,14 @@ class AgentRunnerSettings(BaseSettings):
     lifecycle_agents: AgentRunnerLifecycleAgentsSettings = Field(
         default_factory=AgentRunnerLifecycleAgentsSettings
     )
+    # 命名模型预设：[agent_runner.presets.<name>]，声明 (agent, model, effort)。
+    # 完全可选；绑定层见 lifecycle_presets。
+    presets: dict[str, AgentRunnerPresetSettings] = Field(default_factory=dict)
+    # 阶段 -> 预设 绑定（九键闭集）：绑定的阶段由预设整体决定 agent 与模型。
+    # 完全可选；未绑定阶段行为与今天逐字节一致。
+    lifecycle_presets: AgentRunnerLifecyclePresetsSettings = Field(
+        default_factory=AgentRunnerLifecyclePresetsSettings
+    )
     repositories: dict[str, AgentRunnerRepositorySettings] = Field(default_factory=dict)
     # agent 声明式注册表的配置覆盖层：[agent_runner.agents.<name>] 段。
     # 内置默认在 core.shared.models.agent_spec.BUILTIN_AGENT_SPECS；
@@ -467,6 +477,8 @@ __all__ = [
     "AgentRunnerPromptSettings",
     "AgentRunnerReplSettings",
     "AgentRunnerLifecycleAgentsSettings",
+    "AgentRunnerLifecyclePresetsSettings",
+    "AgentRunnerPresetSettings",
     "AgentRunnerRepositorySettings",
     "AgentRunnerRunnerSettings",
     "AgentRunnerSafetySettings",

@@ -304,6 +304,13 @@ def _process_single_deliberation_issue(
     def _record_event(event) -> None:
         emitted_events.append(event)
 
+    # deliberate 阶段绑定的模型选择（辩论参与者按各自 profile 的 agent 运行；
+    # 命中绑定的 agent 注入，其余在 transcript runner 内丢弃并记日志）。
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+
+    deliberate_selection = resolve_lifecycle_model_selection("deliberate", config, issue=issue)
     result = run_agent_deliberation(
         request=request,
         config=deliberation_config,
@@ -312,6 +319,7 @@ def _process_single_deliberation_issue(
         target_repo_path=_repo_path_from_config(config),
         output_view=None,
         synthesis_prompt_builder=_build_question_list_synthesis_prompt,
+        model_selection=deliberate_selection,
     )
 
     include_soft_hint = next_cycle >= stale_rounds_before_hint

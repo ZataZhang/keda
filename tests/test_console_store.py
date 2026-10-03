@@ -547,3 +547,94 @@ def test_monitor_snapshot_write_failure_propagates(tmp_path: Path) -> None:
                 scanned_at="2026-09-16T01:00:00+00:00",
             )
         )
+
+
+def test_v5_database_migrates_to_v6_and_adds_attempt_preset_columns(
+    tmp_path: Path,
+) -> None:
+    """v5 旧库打开新代码后自动补 attempt_records.preset / model 列，旧记录两列为 NULL。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda-main",
+            issue_number=1,
+            agent="claude",
+            attempt_number=1,
+            failure_type="success",
+            recovered=False,
+            detail="pre-migration attempt",
+            started_at="2026-09-28T10:00:00+00:00",
+            finished_at="2026-09-28T10:01:00+00:00",
+            duration_seconds=60.0,
+        )
+    )
+
+    # 把库退回 v5 形态：去掉 v6 追加的列并降回 user_version=5。
+    raw = sqlite3.connect(str(db_path))
+    raw.execute("ALTER TABLE attempt_records DROP COLUMN preset")
+    raw.execute("ALTER TABLE attempt_records DROP COLUMN model")
+    raw.execute("PRAGMA user_version = 5")
+    raw.commit()
+    raw.close()
+
+    migrated = SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+        attempt_columns = {
+            row[1] for row in probe.execute("PRAGMA table_info(attempt_records)").fetchall()
+        }
+        assert {"preset", "model"} <= attempt_columns
+    finally:
+        probe.close()
+
+    attempts = migrated.list_issue_attempts(repo_id="keda-main", issue_number=1)
+    assert len(attempts) == 1
+    assert attempts[0].preset is None
+    assert attempts[0].model is None
+
+
+def test_attempt_preset_and_model_roundtrip(tmp_path: Path) -> None:
+    """绑定生效的 attempt 写入 preset / model；未绑定写入 None（零回归）。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda-main",
+            issue_number=7,
+            agent="codebuddy",
+            attempt_number=1,
+            failure_type="success",
+            recovered=False,
+            detail="bound",
+            started_at="2026-09-30T10:00:00+00:00",
+            finished_at="2026-09-30T10:02:00+00:00",
+            duration_seconds=120.0,
+            preset="plan",
+            model="glm-5.3-flash",
+        )
+    )
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda-main",
+            issue_number=7,
+            agent="claude",
+            attempt_number=1,
+            failure_type="success",
+            recovered=False,
+            detail="unbound",
+            started_at="2026-09-30T10:03:00+00:00",
+            finished_at="2026-09-30T10:04:00+00:00",
+            duration_seconds=60.0,
+        )
+    )
+
+    attempts = store.list_issue_attempts(repo_id="keda-main", issue_number=7)
+    by_detail = {attempt.detail: attempt for attempt in attempts}
+    assert by_detail["bound"].preset == "plan"
+    assert by_detail["bound"].model == "glm-5.3-flash"
+    assert by_detail["unbound"].preset is None
+    assert by_detail["unbound"].model is None

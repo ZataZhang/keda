@@ -108,6 +108,17 @@ def test_packaged_skill_command_examples_match_cli_help() -> None:
         ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
         ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
         ("worktree", "path"): {"--branch"},
+        ("agent", "presets"): set(),
+        ("agent", "doctor"): {
+            "--all-profiles",
+            "--json",
+            "--protocols",
+            "--prompt",
+            "--preset",
+            "--model",
+            "--reasoning-effort",
+            "--lifecycle",
+        },
     }
     for example in examples:
         tokens = example.split()

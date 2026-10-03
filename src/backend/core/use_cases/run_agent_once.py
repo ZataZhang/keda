@@ -31,6 +31,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
     AgentCommitResult,
     AppConfig,
@@ -217,13 +218,17 @@ __all__ = [
 def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) -> str:
     """Choose an AI agent for the Issue.
 
-    优先级：显式 ``override_agent``（CLI / loop recipe）> Issue 上的 agent 标签
-    路由 > 生命周期矩阵 ``implementation`` 显式声明 > ``runner.default_agent`` >
-    内置默认（``claude``）。标签路由与 loop recipe 仍是更高优先级——矩阵只替换
-    ``default_agent`` 这一回落层。
+    优先级：显式 ``override_agent``（CLI / loop recipe）> 阶段预设绑定
+    （``lifecycle_presets``，预设整体决定 agent）> Issue 上的 agent 标签路由
+    > 生命周期矩阵 ``implementation`` 显式声明 > ``runner.default_agent`` >
+    内置默认（``claude``）。未绑定预设时标签路由与 loop recipe 仍是更高
+    优先级——矩阵只替换 ``default_agent`` 这一回落层。
     """
     if override_agent != "auto":
         return override_agent
+    bound_agent = _resolve_bound_lifecycle_agent("implementation", config, issue=issue)
+    if bound_agent is not None:
+        return bound_agent
     for agent_name, label in config.labels.agent_labels.items():
         if label in issue.labels:
             return agent_name
@@ -365,6 +370,35 @@ def resolve_supervisor_agent(
     return choose_agent(issue, config, "auto")
 
 
+def _resolve_bound_lifecycle_agent(
+    lifecycle: str,
+    config: AppConfig,
+    *,
+    issue: IssueSummary | None = None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
+) -> str | None:
+    """返回阶段预设绑定声明的 agent；未绑定时返回 ``None``。
+
+    绑定整体决定 (agent, 模型, 推理档)，因此 agent 也取预设声明值；未知
+    预设名 / 未注册 agent 的 fail-fast 语义与 :func:`resolve_lifecycle_agent`
+    一致。局部导入 :mod:`lifecycle_agent_resolution` 以打破循环依赖。
+    """
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        declared_lifecycle_preset,
+    )
+
+    bound_preset_name = declared_lifecycle_preset(
+        lifecycle, config, issue=issue, prd_preset_overrides=prd_preset_overrides
+    )
+    if bound_preset_name is None:
+        return None
+    from backend.core.shared.models.agent_model_preset import resolve_model_selection
+    from backend.core.use_cases.lifecycle_agent_resolution import _validate_registered
+
+    bound_selection = resolve_model_selection(bound_preset_name, config)
+    return _validate_registered(bound_selection.agent, lifecycle=lifecycle, config=config)
+
+
 def _resolve_declared_lifecycle_agent(
     lifecycle: str,
     config: AppConfig,
@@ -373,11 +407,13 @@ def _resolve_declared_lifecycle_agent(
     selected_agent: str | None = None,
     override_agent: str = "auto",
     prd_overrides: Mapping[str, str] | None = None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
 ) -> str | None:
-    """返回矩阵 / PRD 覆盖**显式声明**的具体 agent；仅声明 ``auto`` 或未声明时返回 ``None``。
+    """返回矩阵 / PRD 覆盖 / 预设绑定**显式声明**的具体 agent；纯 auto 或全未声明时返回 ``None``。
 
-    这是各阶段既有解析函数接入生命周期矩阵的统一入口：只有"显式换人"才短路，
-    声明 ``auto`` 时交回各函数原有的 auto 语义，绝不改变既有行为。
+    这是各阶段既有解析函数接入生命周期矩阵与预设绑定的统一入口：只有"显式
+    换人"才短路，声明 ``auto`` 且无绑定时交回各函数原有的 auto 语义，绝不改变
+    既有行为。阶段绑定预设时预设整体声明该阶段的 agent（遮蔽矩阵同键声明）。
 
     局部导入 :mod:`lifecycle_agent_resolution` 是为了打破它与本模块的循环依赖
     （解析函数需要 ``choose_agent`` / ``resolve_registered_agents``）。
@@ -387,6 +423,7 @@ def _resolve_declared_lifecycle_agent(
         normalize_lifecycle_agent_value,
     )
     from backend.core.use_cases.lifecycle_agent_resolution import (
+        declared_lifecycle_preset,
         effective_prd_overrides,
         resolve_lifecycle_agent,
     )
@@ -395,9 +432,14 @@ def _resolve_declared_lifecycle_agent(
     declared_value = merged_overrides.get(lifecycle)
     if declared_value is None:
         declared_value = config.lifecycle_agents.declared_value(lifecycle)
-    if declared_value is None:
+    bound_preset_name = declared_lifecycle_preset(
+        lifecycle, config, issue=issue, prd_preset_overrides=prd_preset_overrides
+    )
+    if declared_value is None and bound_preset_name is None:
         return None
-    if normalize_lifecycle_agent_value(declared_value) == LIFECYCLE_AGENT_AUTO:
+    if bound_preset_name is None and normalize_lifecycle_agent_value(declared_value) == (
+        LIFECYCLE_AGENT_AUTO
+    ):
         return None
     return resolve_lifecycle_agent(
         lifecycle,
@@ -406,6 +448,7 @@ def _resolve_declared_lifecycle_agent(
         selected_agent=selected_agent,
         override_agent=override_agent,
         prd_overrides=merged_overrides,
+        prd_preset_overrides=prd_preset_overrides,
     )
 
 
@@ -513,6 +556,7 @@ def run_agent(
     *,
     timeout_seconds: int | None = None,
     inactivity_timeout_seconds: int | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> CommandResult:
     """Run Codex or Claude Code in non-interactive mode."""
     long_term_store, skill_store = _resolve_memory_stores(worktree_path, config.memory)
@@ -540,6 +584,7 @@ def run_agent(
         transient_retry_delay_seconds=config.runner.transient_retry_delay_seconds,
         timeout_seconds=timeout_seconds,
         inactivity_timeout_seconds=inactivity_timeout_seconds,
+        model_selection=model_selection,
     )
 
 
@@ -550,6 +595,7 @@ def run_fix_agent(
     config: AppConfig,
     process_runner: IProcessRunner,
     verification_results: list[CommandResult],
+    model_selection: ModelSelection | None = None,
 ) -> CommandResult:
     """Run a focused Fix Agent for simple local verification failures.
 
@@ -564,6 +610,8 @@ def run_fix_agent(
         config: Agent Runner configuration.
         process_runner: Command executor.
         verification_results: Failed verification results to repair.
+        model_selection: 阶段绑定的模型选择（fix 自身绑定或继承实现者）；
+            执行 agent 与预设 agent 不一致时在 resilient 层丢弃并记日志。
 
     Returns:
         The Fix Agent command result.
@@ -591,6 +639,7 @@ def run_fix_agent(
         transient_retry_delay_seconds=config.runner.transient_retry_delay_seconds,
         timeout_seconds=fix_timeout,
         inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
+        model_selection=model_selection,
     )
 
 
@@ -606,13 +655,15 @@ def run_agent_with_prompt(
     inactivity_timeout_seconds: int | None = None,
     issue: IssueSummary | None = None,
     profile: str = AGENT_PROFILE_RUN,
+    model_selection: ModelSelection | None = None,
 ) -> CommandResult:
     """Run an agent with a prepared prompt.
 
     命令行与输出协议全部来自 :func:`build_agent_invocation`（``profile``
     默认 ``"run"``）；调用方传入的 ``process_runner`` 只负责执行与中继。
     只读审核等场景可传 ``profile="deliberate"``，让支持沙箱的 agent 走声明式
-    只读形态。
+    只读形态。``model_selection`` 非空时按该 agent 的声明式模板把模型/推理档
+    参数注入 argv；agent 未声明模板时 fail-fast（绝不静默忽略）。
     """
     if issue is not None:
         _logger.info(
@@ -626,6 +677,7 @@ def run_agent_with_prompt(
         prompt,
         worktree_path,
         config or AppConfig(),
+        model_selection=model_selection,
     )
     label = f"Issue #{issue.number}: {issue.url}" if issue is not None else None
     run_kwargs: dict[str, object] = {
@@ -651,6 +703,33 @@ def run_agent_with_prompt(
     return result
 
 
+def drop_model_selection_for_agent(
+    agent_name: str,
+    model_selection: ModelSelection | None,
+) -> ModelSelection | None:
+    """执行 agent 与预设声明 agent 不一致时丢弃模型绑定并记日志。
+
+    不同 CLI 的模型命名空间不同（codebuddy 的 ``--settings`` 对 claude 无意义），
+    绝不把 A CLI 的模型参数塞给 B CLI。回退换人与显式 ``--agent`` 换人都走
+    这里——两种情形都表现为"执行 agent != 预设 agent"。
+
+    Returns:
+        匹配时原样返回 ``model_selection``；不匹配（或入参为空）时返回 ``None``。
+    """
+    if model_selection is None:
+        return None
+    if model_selection.agent == agent_name:
+        return model_selection
+    _logger.warning(
+        "model binding dropped on agent switch: preset declares agent '%s' but this "
+        "attempt runs '%s'; the model/effort flags are NOT applied (each CLI has its "
+        "own model namespace).",
+        model_selection.agent,
+        agent_name,
+    )
+    return None
+
+
 def run_agent_with_prompt_resilient(
     agent_name: str,
     prompt: str,
@@ -670,6 +749,10 @@ def run_agent_with_prompt_resilient(
     layer can skip to the next agent; every other error propagates unchanged so
     the recovery loop or the cross-agent fallback can handle it.
 
+    ``model_selection``（若传入）先经 :func:`drop_model_selection_for_agent`
+    校验：跨 agent 回退或显式 ``--agent`` 换人时丢弃绑定并记日志，本函数内
+    的原地瞬态重试不换 agent，绑定保持有效。
+
     Args:
         agent_name: Agent to invoke (claude / codex / kimi).
         prompt: Prepared prompt text.
@@ -679,8 +762,9 @@ def run_agent_with_prompt_resilient(
         transient_retry_delay_seconds: Backoff between transient retries.
         agent_call_options: 原样透传给 :func:`run_agent_with_prompt` 的关键字参数
             （`config` / `capture_output` / `timeout_seconds` /
-            `inactivity_timeout_seconds` / `issue` / `profile`），两个入口共用同一份
-            参数契约，避免逐字段重复声明而漂移。
+            `inactivity_timeout_seconds` / `issue` / `profile` /
+            `model_selection`），两个入口共用同一份参数契约，避免逐字段重复
+            声明而漂移。
 
     Returns:
         The successful :class:`CommandResult`.
@@ -691,7 +775,14 @@ def run_agent_with_prompt_resilient(
             exhausted.
     """
     max_retries = max(0, transient_retry_attempts)
-    agent_call_issue = agent_call_options.get("issue")
+    forwarded_options = dict(agent_call_options)
+    raw_model_selection = forwarded_options.get("model_selection")
+    if raw_model_selection is not None:
+        forwarded_options["model_selection"] = drop_model_selection_for_agent(
+            agent_name,
+            raw_model_selection if isinstance(raw_model_selection, ModelSelection) else None,
+        )
+    agent_call_issue = forwarded_options.get("issue")
     issue_number = agent_call_issue.number if isinstance(agent_call_issue, IssueSummary) else 0
     for retry_index in range(max_retries + 1):
         try:
@@ -700,7 +791,7 @@ def run_agent_with_prompt_resilient(
                 prompt,
                 worktree_path,
                 process_runner,
-                **agent_call_options,
+                **forwarded_options,
             )
         except FileNotFoundError as exc:
             raise AgentUnavailableError(agent_name) from exc
@@ -873,6 +964,7 @@ def run_agent_until_committed(
     prompt_override: str | None = None,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> AgentCommitResult:
     """运行 Agent recovery 状态机并返回最终提交结果。"""
     from backend.core.use_cases.run_agent_execution_loop import (
@@ -892,6 +984,7 @@ def run_agent_until_committed(
             prompt_override=prompt_override,
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
+            model_selection=model_selection,
         )
     )
 

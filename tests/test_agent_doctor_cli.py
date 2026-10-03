@@ -234,3 +234,160 @@ def test_parser_rejects_unregistered_agent_name(
     with pytest.raises(SystemExit):
         build_parser().parse_args(["agent", "doctor", ghost_name])
     assert "invalid choice" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# 模型预设视角（--preset / --lifecycle / agent presets）
+# ---------------------------------------------------------------------------
+
+
+def _preset_app_config(monkeypatch: pytest.MonkeyPatch) -> AppConfig:
+    """带 ``plan`` 预设（codebuddy + glm + max）的隔离配置。"""
+    from backend.core.shared.models.agent_model_preset import AgentModelPreset
+
+    config = AppConfig(
+        agent_presets={
+            "plan": AgentModelPreset(
+                agent="codebuddy", model="glm-5.3-flash", reasoning_effort="max"
+            ),
+        }
+    )
+    monkeypatch.setattr("backend.api.cli_parsed_commands.agent.build_app_config", lambda: config)
+    return config
+
+
+def test_doctor_preset_view_injects_model_and_effort_args(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """rv-1：doctor --preset 打印的 argv 同时含模型与推理档参数。"""
+    _preset_app_config(monkeypatch)
+    exit_code = run_agent_doctor_command(
+        _make_context(agent_names=["codebuddy"], json_output=True, preset="plan")
+    )
+    assert exit_code == 0
+    entries = json.loads(capsys.readouterr().out)
+    argv = entries[0]["argv"]
+    assert "--model" in argv
+    assert "glm-5.3-flash" in argv
+    assert "--settings" in argv
+    assert '{"reasoningEffort":"max"}' in argv
+    assert entries[0]["preset"] == "plan"
+
+
+def test_doctor_preset_missing_template_fails_fast(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """rv-5：未声明模型模板的 agent 命中带模型的预设时指名报错、非零退出。"""
+    _preset_app_config(monkeypatch)
+    exit_code = run_agent_doctor_command(
+        _make_context(agent_names=["kimi"], json_output=True, preset="plan")
+    )
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "kimi" in captured.err
+
+
+def test_doctor_preset_unknown_name_fails_fast(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _preset_app_config(monkeypatch)
+    exit_code = run_agent_doctor_command(
+        _make_context(agent_names=["claude"], json_output=True, preset="ghost")
+    )
+    assert exit_code == 1
+    assert "ghost" in capsys.readouterr().err
+
+
+def test_doctor_preset_requires_preset_for_model_flags(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _preset_app_config(monkeypatch)
+    exit_code = run_agent_doctor_command(
+        _make_context(agent_names=["claude"], json_output=True, model="glm-5.3-flash")
+    )
+    assert exit_code == 1
+    assert "--preset" in capsys.readouterr().err
+
+
+def test_doctor_lifecycle_view_reports_bound_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """rv-9：doctor --lifecycle verifier 打印绑定的 agent 与模型参数。"""
+    from backend.core.shared.models.agent_model_preset import AgentModelPreset
+    from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
+
+    config = AppConfig(
+        agent_presets={
+            "plan": AgentModelPreset(
+                agent="codebuddy", model="glm-5.3-flash", reasoning_effort="max"
+            ),
+        },
+        lifecycle_presets=LifecycleAgentsConfig(global_layer={"verifier": "plan"}),
+    )
+    monkeypatch.setattr("backend.api.cli_parsed_commands.agent.build_app_config", lambda: config)
+    exit_code = run_agent_doctor_command(_make_context(json_output=True, lifecycle="verifier"))
+    assert exit_code == 0
+    entries = json.loads(capsys.readouterr().out)
+    entry = entries[0]
+    assert entry["agent"] == "codebuddy"
+    assert "--model" in entry["argv"]
+    assert "glm-5.3-flash" in entry["argv"]
+
+
+def test_doctor_lifecycle_view_unbound_stage_has_no_model_args(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """未绑定阶段：doctor --lifecycle 回落既有 agent，argv 不含模型参数。"""
+    _preset_app_config(monkeypatch)
+    exit_code = run_agent_doctor_command(_make_context(json_output=True, lifecycle="verifier"))
+    assert exit_code == 0
+    entry = json.loads(capsys.readouterr().out)[0]
+    assert "--model" not in entry["argv"]
+
+
+def test_doctor_lifecycle_rejects_unknown_key(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _preset_app_config(monkeypatch)
+    exit_code = run_agent_doctor_command(_make_context(json_output=True, lifecycle="not-a-stage"))
+    assert exit_code == 1
+
+
+def test_parser_accepts_doctor_preset_and_lifecycle_flags() -> None:
+    namespace = build_parser().parse_args(
+        ["agent", "doctor", "codebuddy", "--json", "--preset", "plan", "--lifecycle", "verifier"]
+    )
+    assert namespace.preset == "plan"
+    assert namespace.lifecycle == "verifier"
+    assert namespace.reasoning_effort is None
+
+
+def test_parser_accepts_runner_model_preset_flags() -> None:
+    namespace = build_parser().parse_args(
+        [
+            "run",
+            "--preset",
+            "plan",
+            "--model",
+            "glm-5.3-flash",
+            "--reasoning-effort",
+            "max",
+        ]
+    )
+    assert namespace.preset == "plan"
+    assert namespace.model == "glm-5.3-flash"
+    assert namespace.reasoning_effort == "max"

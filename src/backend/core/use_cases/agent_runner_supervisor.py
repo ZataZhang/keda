@@ -88,6 +88,19 @@ def _run_supervisor_with_repair_loop(
         reviewing_agent=supervisor_agent,
         executor_agent=executor_agent,
     )
+    # supervisor 阶段绑定的模型选择：换人（repair 交给 executor / 别人）即丢弃。
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
+
+    supervisor_model_selection = drop_model_selection_for_agent(
+        supervisor_agent,
+        resolve_lifecycle_model_selection("supervisor", config, issue=issue),
+    )
+    repair_model_selection = drop_model_selection_for_agent(
+        repair_agent, supervisor_model_selection
+    )
     current_pr_context = pr_context
 
     # 循环：最多 max_repair + 1 次修复尝试
@@ -142,6 +155,7 @@ def _run_supervisor_with_repair_loop(
                 pr_context=current_pr_context,
                 supervisor_agent=supervisor_agent,
                 cycle=cycle,
+                model_selection=supervisor_model_selection,
             )
         except Exception:
             # Supervisor cycle 异常时先恢复 stash，避免变更丢失在 worktree 里。
@@ -248,6 +262,7 @@ def _run_supervisor_with_repair_loop(
                 expected_head=current_pr_context.head_sha,
                 repair_agent=repair_agent,
                 findings=action_result.findings_detail,
+                model_selection=repair_model_selection,
             )
             repair_sha = get_head_sha(worktree_path, process_runner)
             github_client.comment_issue(
@@ -319,6 +334,7 @@ def _run_supervisor_with_repair_loop(
                 pr_branch=current_pr_context.branch,
                 expected_head=current_pr_context.head_sha,
                 supervisor_agent=supervisor_agent,
+                model_selection=repair_model_selection,
             )
             rebase_sha = get_head_sha(worktree_path, process_runner)
             github_client.comment_issue(

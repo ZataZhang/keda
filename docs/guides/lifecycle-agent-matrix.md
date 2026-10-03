@@ -209,6 +209,9 @@ agent 由矩阵 / 标签路由决定；本机未安装的 agent 在运行时跳�
 
 ## 相关
 
+- **阶段 → 预设 绑定（`[agent_runner.lifecycle_presets]`）**：在"选 agent"之上再绑定
+  (模型, 推理档)，绑定后该阶段整体改用预设声明（遮蔽矩阵同键声明）。见
+  [Agent 模型预设](model-presets.md)。
 - Agent 注册表（`[agent_runner.agents.<name>]`）与调用形态：见
   [配置说明](configuration.md) 与 [Agent Runner](agent-runner.md)。
 - Phase 0 异步讨论与 Phase 0 / 1 / 2 三段式：见 [Agent Runner](agent-runner.md)

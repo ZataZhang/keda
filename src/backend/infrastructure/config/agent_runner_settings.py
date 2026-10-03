@@ -160,6 +160,9 @@ class AgentRunnerAgentSettings(BaseModel):
 
     覆盖既有 agent 时全部字段可选（逐字段回落内置默认）；注册全新
     agent 时 ``bin`` 与 ``label`` 必填，四种用途 profile 至少声明一种。
+    ``model_args`` / ``reasoning_effort_args`` 是模型参数 argv 模板
+    （含 ``{model}`` / ``{effort}`` 占位符）；为空表示该 agent 未声明
+    模型选择语法，命中模型绑定时 fail-fast。
     """
 
     bin: str | None = None
@@ -170,7 +173,67 @@ class AgentRunnerAgentSettings(BaseModel):
     auth_include: list[str] | None = None
     auth_exclude: list[str] | None = None
     project_skills_dir: str | None = None
+    model_args: list[str] | None = None
+    reasoning_effort_args: list[str] | None = None
     profiles: dict[str, AgentRunnerAgentProfileSettings] = Field(default_factory=dict)
+
+
+class AgentRunnerPresetSettings(BaseModel):
+    """`[agent_runner.presets.<name>]` 段：一个命名预设。
+
+    ``agent`` 必填；``model`` / ``reasoning_effort`` 可选。预设名是否唯一由
+    TOML 表键天然保证；预设引用的 agent 是否已注册由解析期校验，配置层只校验
+    形状（非空字符串）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str
+    model: str | None = None
+    reasoning_effort: str | None = None
+
+    @field_validator("agent", "model", "reasoning_effort")
+    @classmethod
+    def _reject_blank_values(cls, value: str | None) -> str | None:
+        """拒绝空字符串；``None`` 表示未声明。"""
+        if value is None:
+            return None
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("preset field must be a non-empty string")
+        return normalized_value
+
+
+class AgentRunnerLifecyclePresetsSettings(BaseModel):
+    """``[agent_runner.lifecycle_presets]`` 段：九个生命周期各绑一个预设。
+
+    键是闭集（与矩阵同键，见 :data:`LIFECYCLE_AGENT_KEYS`），未知键在加载期
+    报错；取值是预设名（是否已定义由解析期校验，配置层只校验形状）。
+    完全可选：不写本段时所有阶段都不注入模型参数，行为与今天逐字节一致。
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    implementation: str | None = None
+    fix: str | None = None
+    closeout: str | None = None
+    verifier: str | None = None
+    review: str | None = None
+    supervisor: str | None = None
+    planner: str | None = None
+    content_generation: str | None = None
+    deliberate: str | None = None
+
+    @field_validator("*")
+    @classmethod
+    def _reject_blank_values(cls, value: str | None) -> str | None:
+        """拒绝空字符串；``None`` 表示未声明。"""
+        if value is None:
+            return None
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("lifecycle preset binding must be a non-empty string")
+        return normalized_value
 
 
 class AgentRunnerGitSettings(BaseModel):
@@ -703,6 +766,8 @@ class _AgentRunnerRepositoryOverrideSettings(BaseModel):
     deliberation: AgentRunnerDeliberationSettings | None = None
     repl: AgentRunnerReplSettings | None = None
     lifecycle_agents: AgentRunnerLifecycleAgentsSettings | None = None
+    presets: dict[str, AgentRunnerPresetSettings] = Field(default_factory=dict)
+    lifecycle_presets: AgentRunnerLifecyclePresetsSettings | None = None
     agents: dict[str, AgentRunnerAgentSettings] = Field(default_factory=dict)
 
 
@@ -845,4 +910,6 @@ def load_agent_runner_local_settings(
         deliberation=local_settings.deliberation,
         repl=local_settings.repl,
         lifecycle_agents=local_settings.lifecycle_agents,
+        presets=local_settings.presets,
+        lifecycle_presets=local_settings.lifecycle_presets,
     )

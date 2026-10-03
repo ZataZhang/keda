@@ -50,6 +50,24 @@ def ask_command(
         str | None,
         typer.Option("--output", help="Output directory for decision audit."),
     ] = None,
+    preset: Annotated[
+        str | None,
+        typer.Option(
+            "--preset",
+            help="Anchor the planner stage to a named model preset (one-shot).",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="One-shot model id override for the preset / binding."),
+    ] = None,
+    reasoning_effort: Annotated[
+        str | None,
+        typer.Option(
+            "--reasoning-effort",
+            help="One-shot reasoning effort override for the preset / binding.",
+        ),
+    ] = None,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -65,6 +83,9 @@ def ask_command(
         execute=execute,
         yes=yes,
         output=output,
+        preset=preset,
+        model=model,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -142,6 +163,12 @@ def agent_list_command() -> int:
     return _run_typer_command("agent list")
 
 
+@agent_app.command("presets")
+def agent_presets_command() -> int:
+    """List defined model presets and their (agent, model, reasoning effort)."""
+    return _run_typer_command("agent presets")
+
+
 @agent_app.command("doctor")
 def agent_doctor_command(
     agent_names: Annotated[
@@ -170,6 +197,28 @@ def agent_doctor_command(
             help="Sentinel prompt used when expanding argv (default: golden-prompt).",
         ),
     ] = "golden-prompt",
+    preset: Annotated[
+        str | None,
+        typer.Option(
+            "--preset",
+            help="Resolve argv as if a named model preset were applied.",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="One-shot model id override for --preset."),
+    ] = None,
+    reasoning_effort: Annotated[
+        str | None,
+        typer.Option("--reasoning-effort", help="One-shot reasoning effort override for --preset."),
+    ] = None,
+    lifecycle: Annotated[
+        str | None,
+        typer.Option(
+            "--lifecycle",
+            help="Print the resolved agent + argv for a lifecycle stage (nine-key closed set).",
+        ),
+    ] = None,
 ) -> int:
     """Parse and print each profile's full argv for the given agents."""
     return _run_typer_command(
@@ -179,6 +228,10 @@ def agent_doctor_command(
         json_output=json_output,
         protocols=protocols,
         prompt=prompt,
+        preset=preset,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        lifecycle=lifecycle,
     )
 
 

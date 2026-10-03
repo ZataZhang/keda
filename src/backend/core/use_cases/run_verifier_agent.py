@@ -38,6 +38,7 @@ from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_dir,
     validation_required,
 )
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
 from backend.core.use_cases.run_agent_once import (
     extract_agent_response_text,
@@ -317,6 +318,7 @@ def run_verifier_agent(
     timeout_seconds: int | None = None,
     inactivity_timeout_seconds: int | None = None,
     response_log_path: Path | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> ValidationVerdict:
     """Run the independent verifier agent and return its parsed verdict.
 
@@ -353,6 +355,7 @@ def run_verifier_agent(
             timeout_seconds=timeout_seconds,
             inactivity_timeout_seconds=inactivity_timeout_seconds,
             issue=issue,
+            model_selection=model_selection,
         )
     except subprocess.TimeoutExpired as timeout_error:
         _save_timed_out_verifier_response(
@@ -412,33 +415,47 @@ def _choose_verifier_agent(
     config: AppConfig,
     builder_agent: str,
     *,
+    issue: IssueSummary | None = None,
     prd_overrides: Mapping[str, str] | None = None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
 ) -> str:
     """Pick an agent for the verifier, preferring one different from the builder.
 
-    生命周期矩阵（或 PRD 覆盖）显式声明了具体 agent 时用它；声明 ``auto`` 或
-    两层都未声明时沿用既有语义：``verifier_agent`` 配成具体 agent 则用它;
-    ``auto`` 时从 fallback 链里挑第一个 ≠ builder 的(独立性来自换 model);
-    都没有再退回 builder。
+    生命周期矩阵（或 PRD 覆盖）显式声明了具体 agent 时用它；阶段绑定预设时
+    用预设声明的 agent（绑定整体决定 agent）；声明 ``auto`` 或两层都未声明时
+    沿用既有语义：``verifier_agent`` 配成具体 agent 则用它；``auto`` 时从
+    fallback 链里挑第一个 ≠ builder 的（独立性来自换人）；都没有再退回 builder。
     """
     from backend.core.shared.models.lifecycle_agent import (
         LIFECYCLE_AGENT_AUTO,
         normalize_lifecycle_agent_value,
     )
-    from backend.core.use_cases.lifecycle_agent_resolution import resolve_lifecycle_agent
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        declared_lifecycle_preset,
+        resolve_lifecycle_agent,
+    )
 
     merged_overrides = dict(prd_overrides or {})
     declared_value = merged_overrides.get("verifier")
     if declared_value is None:
         declared_value = config.lifecycle_agents.declared_value("verifier")
-    if declared_value is not None and (
-        normalize_lifecycle_agent_value(declared_value) != LIFECYCLE_AGENT_AUTO
+    bound_preset_name = declared_lifecycle_preset(
+        "verifier",
+        config,
+        issue=issue,
+        prd_preset_overrides=prd_preset_overrides,
+    )
+    if bound_preset_name is not None or (
+        declared_value is not None
+        and normalize_lifecycle_agent_value(declared_value) != LIFECYCLE_AGENT_AUTO
     ):
         return resolve_lifecycle_agent(
             "verifier",
             config,
+            issue=issue,
             selected_agent=builder_agent,
             prd_overrides=merged_overrides,
+            prd_preset_overrides=prd_preset_overrides,
         )
     configured = config.validation.verifier_agent
     if configured and configured != "auto":
@@ -561,6 +578,7 @@ def run_verifier_gate(
     builder_agent: str,
     *,
     prd_overrides: Mapping[str, str] | None = None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
 ) -> ValidationVerdict | None:
     """Pre-PR independent-verifier gate (PR#2 T3 integration).
 
@@ -617,7 +635,26 @@ def run_verifier_gate(
     verifier_agent = _choose_verifier_agent(
         config,
         builder_agent,
+        issue=issue,
         prd_overrides=effective_prd_overrides(issue, prd_overrides),
+        prd_preset_overrides=prd_preset_overrides,
+    )
+    # 校验阶段的模型选择：只认 verifier 自己的绑定（不继承实现者，继承仅限
+    # executor 语义的 fix/closeout）；verifier_agent 与预设声明不一致
+    # （既有键 / fallback 选了别人）时丢弃并记日志。
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
+
+    verifier_model_selection = drop_model_selection_for_agent(
+        verifier_agent,
+        resolve_lifecycle_model_selection(
+            "verifier",
+            config,
+            issue=issue,
+            prd_preset_overrides=prd_preset_overrides,
+        ),
     )
     builder_sha = get_head_sha(worktree_path, process_runner)
     response_log_path = (
@@ -648,6 +685,10 @@ def run_verifier_gate(
                 timeout_seconds=config.validation.verifier_timeout_seconds,
                 inactivity_timeout_seconds=config.validation.verifier_inactivity_timeout_seconds,
                 response_log_path=response_log_path,
+                # 候选回退换了 agent 就丢弃模型绑定（每个 CLI 模型命名空间不同）。
+                model_selection=drop_model_selection_for_agent(
+                    candidate_agent, verifier_model_selection
+                ),
             )
         except subprocess.TimeoutExpired:
             # 超时按运行事故处理:不伪造 verdict、也不换 agent(与原文语义一致)。
