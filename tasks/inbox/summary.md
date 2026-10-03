@@ -1,6 +1,6 @@
 # Idea Inbox — 总结（AI 派生，可重写；事实以 ideas.md 为准）
 
-_最后更新：2026-09-28_
+_最后更新：2026-09-30_
 
 ## 主题聚类
 
@@ -60,6 +60,10 @@ _最后更新：2026-09-28_
 ## 待 PRD
 
 - **iar init 不写 `[agent_runner.autopilot]` 段** → 建议 PRD：修复 init 生成路径。已复现：dry-run 输出仅在 safety 注释里出现 1 次 autopilot，整段缺失；freshai 等历史初始化过的仓库必须手动补段才能用快速档。根因：`AgentRunnerLocalSettings` 继承自 `_AgentRunnerRepositoryOverrideSettings`，所有字段是 `| None = None` → `settings.autopilot` 是 None → `model_dump()` 写 None → `_filter_none_dict` 过滤掉。修复范围限于 init 写出端，不能破坏老 TOML 加载路径的向后兼容（保留 `Optional`，让 init 路径显式填工厂默认）。（来源：2026-07-09）
+
+## 待 PRD
+
+- **`LOG_DIR` 与 `log_file` 是两套日志目录来源** → 建议 PRD：让日文件落点与 `log_dir` 一致（或由 `log_dir` 派生 `log_file` 默认值）。现状：`config.log_dir` 只被 `ensure_log_directory()` 消费，日文件写在 `Path(config.log_file).parent`，单独设 `LOG_DIR` 不移动日文件（已实测）。Issue #175 已把"两处消费点之间"收敛成单点并文档化该边界，合并两字段会挪走已有部署的落点，需单独决策。（来源：2026-09-30）
 
 ## 已升级
 

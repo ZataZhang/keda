@@ -43,6 +43,7 @@ create_repository_autopilot_settings_editor = (
 create_repl_command_executor = _engines_factory_module.create_repl_command_executor
 create_roadmap_store = _engines_factory_module.create_roadmap_store
 create_transcript_runner = _engines_factory_module.create_transcript_runner
+daily_log_path = _engines_factory_module.daily_log_path
 find_repository_match_for_path = _engines_factory_module.find_repository_match_for_path
 get_agent_runner_settings = _engines_factory_module.get_agent_runner_settings
 get_agent_runner_status_data = _engines_factory_module.get_agent_runner_status_data
@@ -75,6 +76,7 @@ __all__ = [
     "create_repl_command_executor",
     "create_roadmap_store",
     "create_transcript_runner",
+    "daily_log_path",
     "find_repository_match_for_path",
     "get_agent_runner_settings",
     "get_agent_runner_status_data",

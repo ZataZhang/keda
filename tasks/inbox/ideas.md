@@ -273,3 +273,31 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 已知但未登记的伴生问题：v3 记录显示 keda 的 tasks/ 与 docs/ 中**零处**提及 MachPort/seatbelt 浏览器阻断，也未作为已知限制登记。
 - 收敛结论：这是 keda 侧两个独立缺陷。修复方向 = (1) 改 `_communicate_with_activity_tracking`：在 `process.wait()` 之后再 join 读取线程并收集，别提前定格 stdout；(2) 解决 verifier 的浏览器沙箱冲突（放开 codex 沙箱 / 换非沙箱 verifier agent / 或把浏览器类 RV 降级为「builder 产物 + verifier 文件级核验」并在 PRD 写明边界）。
 - 本次处置：用户决定**暂不使用 keda 实现**，#39 由交互式会话直接接管实现；此条目仅作 keda 待办登记。
+
+## 2026-09-30 15:55 · logging-capability-upgrade-deferred
+
+> ## 明确不做
+>
+> 结构化 JSON 日志、correlation / run_id 关联键、统一两套 logger 惯例、改 uvicorn 访问日志、事件溯源重构；不改日志格式、默认级别与文件命名约定。
+
+（原话来源：GitHub Issue #175 正文「明确不做」小节，逐字引用；不是聊天原话。）
+
+**AI 派生背景**（2026-09-30 实现 Issue #175 时整理，非用户原话）：
+
+- 本条是"暂缓登记"，不是新需求：Issue #175 / PRD `tasks/pending/P0-BUG-20260930-145323-logging-config-robustness.md` 只修日志配置路径上的三个健壮性缺陷（坏级别不崩、daemon 跨天切文件、handler 幂等正确）+ 日文件路径单点，明确把下列能力留在范围外。
+- 暂缓清单：① 结构化 JSON 日志与人类可读双通道；② `run_id` / `trace_id` 关联键，以及把文本日志与 SQLite 生命周期账本打通；③ 统一 `logging.getLogger(__name__)`（约 90 个模块）与共享 `logger` 单例两种惯例；④ 把每 Issue 日志路由的线程过滤器改成 `contextvar`（`core/use_cases/agent_runner_output_routing.py`）；⑤ uvicorn 访问日志；⑥ 事件溯源式重写。
+- 后续如要启动其中任一项，应另开 PRD，并复用本 Issue 建立的 `daily_log_path()`（日文件路径唯一产出点）与 handler 私有标记 `_keda_handler`（幂等只认自己）两个约定，不要另起平行抽象。
+
+## 2026-09-30 19:59 · logging-log-dir-single-source
+
+> - 日志目录的单点只到"消费方取自 `daily_log_dir()`"这一层：`log_dir` 与 `log_file` 仍是两个配置字段，单独设置 `LOG_DIR` 不会移动日文件（既有行为，改动它会挪走已有部署的日志落点，不在本 PRD 范围）。文档已显式提醒运维。
+
+（原话来源：Issue #175 的 PRD `tasks/pending/P0-BUG-20260930-145323-logging-config-robustness.md` §12 Risks And Follow-Ups，逐字引用；不是聊天原话。）
+
+**AI 派生背景**（2026-09-30 实现 Issue #175 并由独立 verifier 复核时确认，非用户原话）：
+
+- 现象：`config.log_dir`（env `LOG_DIR`）在全仓只有一个消费者 `AppSettings.ensure_log_directory()`（`infrastructure/config/settings.py`），只负责"把目录建出来"；日文件的实际落点是 `Path(config.log_file).parent`（`infrastructure/logging/logger.py` 的 `daily_log_dir()`）。因此单独设置 `LOG_DIR=/tmp/x` 时 `/tmp/x` 被创建，但日文件仍写在 `log_file` 的父目录里。
+- 实测：`LOG_DIR=/tmp/x LOG_FILE=/tmp/y/app.log uv run iar ...` → 日志落在 `/tmp/y/app-<今天>.log`，`/tmp/x` 只被创建（独立 verifier 第 2 轮复核记录，摘要与出处见 `tasks/evidence/P0-BUG-20260930-145323-logging-config-robustness/P0-BUG-20260930-145323-logging-config-robustness.verifier-report.md`）。
+- Issue #175 已修的是"文件名 + 目录都只由日志模块产出、消费方不再自己推导"（`daily_log_path()` / `daily_log_dir()` + `iar logs` 回退提示改取无参 `daily_log_path()`），所以两处消费点之间不再漂移。
+- 剩下的一致性问题：`log_dir` 与 `log_file` 这两个字段本身仍是两套来源。让 `log_file` 默认由 `log_dir` 派生（或让日文件直接写 `log_dir`）会改变已有部署的日志落点，属于需要单独决策的行为变更，因此本次只做文档披露（`docs/guides/configuration.md` 明确写了"单独设置 `LOG_DIR` 不会把日文件挪走"）。
+- 后续如要开工，需要一并决定：`iar logs` 回退提示、`agent_runner` 的托管进程日志目录（`[agent_runner.console].process_log_dir`）、以及派生项目里已经写了 `LOG_DIR` 的 `.env` 是否要迁移。
