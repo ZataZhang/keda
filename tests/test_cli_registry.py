@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +19,10 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
 )
 from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
+
+#: 日文件名由日志实现模块的时钟产出；``backend.infrastructure.logging`` 包的 ``logger``
+#: 属性已被重绑成 ``Logger`` 单例，所以按模块对象取。
+logger_impl_module = import_module("backend.infrastructure.logging.logger")
 
 
 class _FakeArgs:
@@ -474,7 +479,11 @@ def test_logs_command_prints_tail_lines(tmp_path: Path, capsys) -> None:
 
 
 def test_logs_command_fallback_when_no_records(tmp_path: Path) -> None:
-    """No managed records prints the global app log fallback path."""
+    """No managed records prints the global app log fallback path.
+
+    回退提示里的日文件名来自日志模块共享的 ``daily_log_path``，因此测试拨动的是
+    日志模块的时钟而不是 CLI 自己的时间串。
+    """
     context = MagicMock(repo_id="no-process-repo")
     supervisor = MagicMock()
     supervisor.list_processes.return_value = []
@@ -502,10 +511,10 @@ def test_logs_command_fallback_when_no_records(tmp_path: Path) -> None:
             return_value=supervisor,
         ),
         patch("backend.api.cli_registry.tail_runner_log") as tail_mock,
-        patch("backend.api.cli_registry.datetime") as datetime_mock,
+        patch.object(logger_impl_module, "datetime") as daily_clock_mock,
         patch("backend.api.cli_registry.console.print", side_effect=_capture_console_print),
     ):
-        datetime_mock.now.return_value.strftime.return_value = "2026-06-24"
+        daily_clock_mock.now.return_value.strftime.return_value = "2026-06-24"
         exit_code = _run_logs_command(
             parsed=parsed,
             process_runner=MagicMock(),
@@ -560,10 +569,10 @@ def test_logs_command_fallback_when_log_file_missing(tmp_path: Path) -> None:
             return_value=supervisor,
         ),
         patch("backend.api.cli_registry.tail_runner_log") as tail_mock,
-        patch("backend.api.cli_registry.datetime") as datetime_mock,
+        patch.object(logger_impl_module, "datetime") as daily_clock_mock,
         patch("backend.api.cli_registry.console.print", side_effect=_capture_console_print),
     ):
-        datetime_mock.now.return_value.strftime.return_value = "2026-06-24"
+        daily_clock_mock.now.return_value.strftime.return_value = "2026-06-24"
         exit_code = _run_logs_command(
             parsed=parsed,
             process_runner=MagicMock(),

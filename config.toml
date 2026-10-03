@@ -16,6 +16,9 @@
 [app]
 name = "keda"
 log_level = "INFO"
+# 日志保留天数：跨天切换日志文件时按此天数清理旧日文件（也可用 LOG_RETENTION_DAYS 覆盖）。
+# 非正数会被回退到默认值 14，避免一次写错就把历史日志清空。
+# log_retention_days = 14
 
 [template_sync]
 # Project-specific paths skipped by default by `just sync-template`.

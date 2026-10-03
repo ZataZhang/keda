@@ -13,6 +13,7 @@ from urllib.parse import quote_plus
 from pydantic import (
     Field,
     SecretStr,
+    field_validator,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -75,6 +76,10 @@ from backend.infrastructure.config.settings_sources import (
     resolve_project_root_path as resolve_project_root_path,
     resolve_registry_config_toml_path as resolve_registry_config_toml_path,
 )
+
+
+#: 日志保留天数默认值：与既有硬编码保持一致，未配置时行为不变。
+_DEFAULT_LOG_RETENTION_DAYS = 14
 
 
 class DatabaseSettings(BaseSettings):
@@ -351,6 +356,24 @@ class AppSettings(BaseSettings):
     base_dir: Path = _PROJECT_ROOT_PATH
     log_dir: Path = Field(default_factory=lambda: _PROJECT_ROOT_PATH / "logs")
     log_file: Path = Field(default_factory=lambda: _PROJECT_ROOT_PATH / "logs" / "app.log")
+    log_retention_days: int = Field(default=_DEFAULT_LOG_RETENTION_DAYS)
+
+    @field_validator("log_retention_days", mode="before")
+    @classmethod
+    def _fallback_unparsable_retention(cls, raw_retention_days: object) -> object:
+        """把无法解析的保留天数交回默认值：日志配置的手误不该让进程起不来。"""
+        if isinstance(raw_retention_days, int) and not isinstance(raw_retention_days, bool):
+            return raw_retention_days
+        try:
+            return int(str(raw_retention_days).strip())
+        except (TypeError, ValueError):
+            return _DEFAULT_LOG_RETENTION_DAYS
+
+    @field_validator("log_retention_days")
+    @classmethod
+    def _fallback_invalid_retention(cls, retention_days: int) -> int:
+        """把非正数的保留天数回退到默认值，避免一次写错就清空全部历史日志。"""
+        return retention_days if retention_days > 0 else _DEFAULT_LOG_RETENTION_DAYS
 
     @property
     def resolved_database_url(self) -> str:

@@ -1136,6 +1136,7 @@ iar logs --kind review_daemon -f
 - `-n / --lines N` 控制初始回看行数（默认 200）。
 - `-f / --follow` 在初始回看后持续输出新增内容，直到 Ctrl-C 或进程退出。
 - 无 running 进程时，打印回退指引（最近进程日志路径或全局 `logs/app-YYYY-MM-DD.log`），退出码 0。
+- 全局日文件名只由 `infrastructure/logging/logger.py` 的 `daily_log_path()` 产出，回退提示与真正在写的文件因此不会漂移；跨午夜的长驻进程（`iar loop-daemon`、`iar registry start` 拉起的 runner / review-daemon）会在下一次写日志时自动切到当天文件，并在切换时按 `log_retention_days`（默认 14）清理过期日志。
 - 仓库目标推断逻辑与 `iar daemon` 一致：未指定 `--repo-id` 时从当前工作目录推断唯一 enabled 注册仓。
 
 #### 查看单个 Issue 的实时输出（`iar logs --issue`）
@@ -3551,7 +3552,7 @@ ls -la logs/app-*.log | head -7
 ### 日志特性
 
 - **按日期命名**：每天生成一个独立的日志文件，便于按日期排查问题
-- **14 天保留期**：自动清理超过 14 天的旧日志文件
+- **可配置保留期**：自动清理超过 `log_retention_days`（默认 14，可用 `LOG_RETENTION_DAYS` 覆盖）天的旧日志文件；长驻进程跨天时也会顺带清理一次
 - **时间戳格式**：日志条目使用 `YYYY-MM-DD HH:MM:SS` 格式
 - **终端同步**：终端输出同时带有 `HH:MM:SS` 时间戳前缀，便于实时观察
 

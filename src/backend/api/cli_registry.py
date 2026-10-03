@@ -8,7 +8,6 @@ managed process logs.
 from __future__ import annotations
 
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -20,8 +19,8 @@ from backend.core.shared.interfaces.runner_console import (
 from backend.core.use_cases.agent_runner_factory import (
     create_process_supervisor,
     create_registry_editor,
+    daily_log_path,
     load_fresh_agent_runner_settings,
-    resolve_project_root_path,
     resolve_registry_config_toml_path,
     resolve_repository_targets,
     resolve_repository_targets_with_diagnostics,
@@ -582,13 +581,10 @@ def _print_logs_fallback(repo_id: str, kind: str) -> int:
             f"Most recent process log: [cyan]{recent_with_log.log_path}[/]"
         )
     else:
-        # Resolve the daily app-log path through the engines layer
-        # (resolve_project_root_path keeps api→core→engines→infra direction
-        # intact). The format mirrors infrastructure/logging/logger.py:
-        # ``<log_dir>/app-YYYY-MM-DD.log`` where ``log_dir`` defaults to
-        # ``<project_root>/logs``.
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        app_log_path = resolve_project_root_path() / "logs" / f"app-{today_str}.log"
+        # ``daily_log_path()`` 经 api→core→engines→infrastructure 的既有转出链拿到，
+        # 不传参数时返回的就是日志模块此刻真正在写的那个文件，所以即使 ``LOG_FILE``
+        # 指到 ``<root>/logs`` 之外，这条提示也不会再指向没人写的文件。
+        app_log_path = daily_log_path()
         console.print(
             f"[yellow]No running {kind} process for '{repo_id}' "
             "and no process log records found.[/]\n"

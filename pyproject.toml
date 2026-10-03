@@ -121,6 +121,11 @@ dev = [
 # 要改用模板版本,必须同时删掉这里的对应段落并重跑全量测试确认行为一致。
 [tool.pytest.ini_options]
 addopts = "--testmon"
+# 被测代码必须来自本工作树，不能来自继承来的 PYTHONPATH。装打包版 CLI 时留下的
+# `PYTHONPATH=/tmp/keda-cli-src/src` 这类会话级污染会排在 editable 安装路径之前，
+# 让整套测试静默地跑在一份改动前的源码副本上（只有导入新增符号时才炸出来）。
+# `pythonpath` 由 pytest 在加载任何 conftest 之前插入 sys.path[0]，因此压得住它。
+pythonpath = ["src"]
 # 上游模板同步下来的守卫测试会用 @pytest.mark.slow；不注册会每次跑出
 # PytestUnknownMarkWarning。描述与上游 pytest.ini 保持一致。
 # 注意 addopts 是**有意的下游分歧**（上游是 `-m '...' -n auto --dist=loadgroup`），
