@@ -21,6 +21,7 @@ from backend.core.shared.interfaces.agent_output_protocol import (
 )
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import PROMPT_DELIVERY_STDIN
+from backend.infrastructure.agent_stream_usage import StreamUsageCollector
 from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
 from backend.infrastructure.process_runner import _format_timestamped_line
@@ -62,10 +63,12 @@ class PiJsonLinesOutputProtocol:
             target=_pump_stderr, args=(process, request.display_sink), daemon=True
         )
         stderr_thread.start()
+        usage_collector = StreamUsageCollector()
         stdout_text = _relay_events(
             process,
             collect_stdout=request.collect_stdout,
             output_sink=request.output_sink,
+            usage_collector=usage_collector,
         )
         stderr_thread.join(timeout=5)
         return_code = process.returncode if process.returncode is not None else -1
@@ -75,6 +78,7 @@ class PiJsonLinesOutputProtocol:
             stdout=stdout_text,
             stderr="",
             output_protocol=PI_JSON_LINES_PROTOCOL_ID,
+            token_usage=usage_collector.usage,
         )
 
 
@@ -114,12 +118,15 @@ def _relay_events(
     *,
     collect_stdout: bool,
     output_sink: "Callable[[str], None] | None",
+    usage_collector: StreamUsageCollector,
 ) -> str:
     """逐行读取事件流，渲染后交给 sink；返回收集的渲染文本。"""
     rendered_parts: list[str] = []
     try:
         if process.stdout is not None:
             for line in process.stdout:
+                # 原始行先交给用量采集器（渲染文本不是事件流，无法事后解析）。
+                usage_collector.observe_line(line)
                 rendered_text = _render_line(line)
                 if rendered_text:
                     rendered_parts.append(rendered_text)

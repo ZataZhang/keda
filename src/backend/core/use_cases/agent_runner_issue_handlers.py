@@ -34,6 +34,7 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
     ReviewEventMarker,
+    TokenUsage,
 )
 from backend.core.use_cases.agent_runner_blocked_claim import (
     _acquire_blocked_claim_lock,
@@ -159,6 +160,7 @@ def _process_blocked_resolution(
     content_generator: IContentGenerator | None = None,
     marker: ReviewEventMarker,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
+    on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
 ) -> None:
     """处理带 blocked_resolution marker 的 blocked Issue。
 
@@ -222,6 +224,7 @@ def _process_blocked_resolution(
             expected_branch=current_branch,
             prompt_override=continuation_prompt,
             on_attempt_recorded=on_attempt_recorded,
+            on_agent_usage=on_agent_usage,
         )
 
         # 完成发布流程
@@ -527,6 +530,7 @@ def _process_ready_issue(
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None = None,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
+    on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
 ) -> None:
     """处理 ready 状态的 Issue（完整实现路径）。
 
@@ -638,6 +642,7 @@ def _process_ready_issue(
             expected_branch=expected_branch,
             prompt_override=continuation_prompt,
             on_attempt_recorded=on_attempt_recorded,
+            on_agent_usage=on_agent_usage,
         )
     except (
         MaxRetriesExceededError,

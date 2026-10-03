@@ -20,6 +20,11 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
     PLAIN_PROTOCOL_ID,
 )
+from backend.core.shared.models.agent_runner import TokenUsage
+from backend.infrastructure.agent_stream_usage import (
+    StreamUsageCollector,
+    parse_usage_from_plain_stdout,
+)
 from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
 
@@ -143,6 +148,7 @@ class CommandResult:
     stderr: str
     duration_seconds: float = 0.0
     output_protocol: str = PLAIN_PROTOCOL_ID
+    token_usage: TokenUsage | None = None
 
 
 class CommandFailedError(subprocess.CalledProcessError):
@@ -208,7 +214,9 @@ class SubprocessRunner:
                 ``"plain"`` 走通用路径。
         """
         started_mono: float = time.monotonic()
+        usage_collector: StreamUsageCollector | None = None
         if output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID:
+            usage_collector = StreamUsageCollector()
             completed = run_filtered_claude_stream(
                 command,
                 cwd=cwd,
@@ -217,6 +225,7 @@ class SubprocessRunner:
                 collect_stdout=True,
                 label=label,
                 output_sink=output_sink,
+                usage_collector=usage_collector,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -336,6 +345,16 @@ class SubprocessRunner:
                 stdout=stdout,
                 stderr=stderr,
             )
+        token_usage = usage_collector.usage if usage_collector is not None else None
+        if (
+            token_usage is None
+            and output_protocol is not None
+            and output_protocol != CLAUDE_STREAM_JSON_PROTOCOL_ID
+        ):
+            # agent 调用走通用执行路径（kimi / codex 等 plain / PTY）：stdout
+            # 未被渲染改写，事后容错解析；普通命令（output_protocol=None，
+            # git / gh / 验证命令）不解析，避免无谓扫描。
+            token_usage = parse_usage_from_plain_stdout(stdout)
         result = CommandResult(
             command=tuple(command),
             return_code=completed.returncode,
@@ -343,6 +362,7 @@ class SubprocessRunner:
             stderr=stderr,
             duration_seconds=round(time.monotonic() - started_mono, 3),
             output_protocol=output_protocol or PLAIN_PROTOCOL_ID,
+            token_usage=token_usage,
         )
         if check and completed.returncode != 0:
             raise CommandFailedError(
@@ -647,6 +667,7 @@ def run_filtered_claude_stream(
     output_sink: Callable[[str], None] | None = None,
     display_sink: Callable[[str], None] | None = None,
     label: str | None = None,
+    usage_collector: StreamUsageCollector | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Claude stream-json and print a filtered live view.
 
@@ -662,6 +683,10 @@ def run_filtered_claude_stream(
         display_sink: Optional callback for stderr lines (display only).
             When provided, stderr is drained on a background thread and
             routed here instead of leaking raw onto the terminal.
+        label: Optional label for heartbeat/timeout logs.
+        usage_collector: Optional token 用量采集器。提供时，每行原始事件
+            在渲染前先交给它观察（原始行只有此处可靠可得；渲染后的
+            stdout 重解析会静默丢行）。
 
     Returns:
         CompletedProcess with collected stdout if requested.
@@ -726,6 +751,8 @@ def run_filtered_claude_stream(
         if process.stdout is not None:
             for output_line in process.stdout:
                 watchdog.note_output()
+                if usage_collector is not None:
+                    usage_collector.observe_line(output_line)
                 rendered_text = renderer.render_line(output_line)
                 if collect_stdout and rendered_text:
                     stdout_lines.append(rendered_text)

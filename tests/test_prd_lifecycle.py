@@ -524,3 +524,184 @@ def test_console_prd_lifecycle_stats_endpoint(api_environment) -> None:
     assert payload["unlinked_run_count"] == 1
     assert payload["completed_runs"] == 0
     assert payload["runs"] == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Token 用量观测（agent_token_usage）：不污染相位/时长 + 汇总口径
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_observation_events_do_not_change_duration_classification(tmp_path: Path) -> None:
+    """用量观测事件不占时间区间：插入前后耗时分类逐位一致。"""
+    usage_detail = {
+        "flow": "verify",
+        "agent": "codex",
+        "token_usage": {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+        },
+    }
+    store = _store(tmp_path)
+    _record(store, LifecycleEventType.QUEUED, "2026-09-21T10:00:00+00:00", event_key="q")
+    _record(store, LifecycleEventType.CLAIMED, "2026-09-21T10:01:00+00:00", event_key="c")
+    _record(store, LifecycleEventType.REVIEW_STARTED, "2026-09-21T10:06:00+00:00", event_key="r")
+
+    run = store.get_latest_lifecycle_run(repo_id=_REPO_ID, prd_path=_PRD_PATH)
+    assert run is not None
+    base_events = store.list_lifecycle_events(run_id=run.run_id)
+    base_breakdown = classify_durations(
+        base_events,
+        finished_at="2026-09-21T10:14:00+00:00",
+        now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
+    )
+
+    # 在事件序列中段插入观测事件（执行区间内），再比较分类结果。
+    _record(
+        store,
+        LifecycleEventType.AGENT_TOKEN_USAGE,
+        "2026-09-21T10:03:00+00:00",
+        event_key="u1",
+        detail=usage_detail,
+    )
+    _record(
+        store,
+        LifecycleEventType.AGENT_TOKEN_USAGE,
+        "2026-09-21T10:08:00+00:00",
+        event_key="u2",
+        detail=usage_detail,
+    )
+    with_usage_events = store.list_lifecycle_events(run_id=run.run_id)
+    with_usage_breakdown = classify_durations(
+        with_usage_events,
+        finished_at="2026-09-21T10:14:00+00:00",
+        now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
+    )
+    assert with_usage_breakdown == base_breakdown
+    assert base_breakdown.end_to_end_seconds == 840.0
+
+
+def test_observation_events_do_not_change_current_phase(tmp_path: Path) -> None:
+    """观测事件不推进阶段：取它之前最近的一条阶段事件；全观测时按终态降级。"""
+    from backend.core.shared.interfaces.runner_console import (
+        PrdLifecycleEventRecord,
+        PrdLifecycleRunRecord,
+    )
+
+    store = _store(tmp_path)
+    _record(store, LifecycleEventType.STARTED, "2026-09-21T10:01:00+00:00", event_key="s")
+    _record(
+        store,
+        LifecycleEventType.AGENT_TOKEN_USAGE,
+        "2026-09-21T10:02:00+00:00",
+        event_key="u1",
+        detail={"flow": "verify", "agent": "codex"},
+    )
+    run = store.get_latest_lifecycle_run(repo_id=_REPO_ID, prd_path=_PRD_PATH)
+    assert run is not None
+    events = store.list_lifecycle_events(run_id=run.run_id)
+    assert derive_current_phase(run, events).value == "executing"
+
+    # 只有观测事件的 run：回落到 run 终态语义，而不是把阶段拉成 NONE。
+    observation_only = [
+        PrdLifecycleEventRecord(
+            run_id="r#9",
+            event_key="u",
+            event_type="agent_token_usage",
+            phase="none",
+            actor="runner",
+            occurred_at="2026-09-21T10:02:00+00:00",
+            detail_json="{}",
+        )
+    ]
+    failed_run = PrdLifecycleRunRecord(
+        run_id="r#9",
+        repo_id="r",
+        prd_path="p.md",
+        issue_number=9,
+        trigger="t",
+        started_at="2026-09-21T10:00:00+00:00",
+        finished_at="2026-09-21T10:05:00+00:00",
+        outcome="failed",
+        history_complete=True,
+    )
+    assert derive_current_phase(failed_run, observation_only).value == "failed"
+
+
+def test_prd_lifecycle_stats_includes_token_usage(tmp_path: Path) -> None:
+    """Stats 聚合：attempt 与观测事件的 usage 按流程/agent 汇总，缺失排除。"""
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cache_read_input_tokens": 30,
+        "cache_creation_input_tokens": 0,
+    }
+    store = _store(tmp_path)
+    _record(
+        store,
+        LifecycleEventType.ATTEMPT,
+        "2026-09-21T10:01:00+00:00",
+        event_key="a1",
+        detail={"agent": "claude", "token_usage": usage},
+    )
+    _record(
+        store,
+        LifecycleEventType.AGENT_TOKEN_USAGE,
+        "2026-09-21T10:02:00+00:00",
+        event_key="u1",
+        detail={"flow": "verify", "agent": "codex", "token_usage": usage},
+    )
+    _record(
+        store,
+        LifecycleEventType.AGENT_TOKEN_USAGE,
+        "2026-09-21T10:03:00+00:00",
+        event_key="u2",
+        detail={"flow": "verify", "agent": "codex"},
+    )
+
+    stats = build_prd_lifecycle_stats(
+        store=store,
+        repo_id=_REPO_ID,
+        days=30,
+        now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
+    )
+    implement = stats.token_usage.by_flow["implement"]
+    verify = stats.token_usage.by_flow["verify"]
+    assert implement.usage_count == 1
+    assert verify.usage_count == 1
+    assert implement.total_tokens == 150
+    assert implement.input_tokens == 100
+    assert implement.cache_read_input_tokens == 30
+    assert stats.token_usage.by_agent["claude"].usage_count == 1
+    assert stats.token_usage.by_agent["codex"].usage_count == 1
+
+
+def test_stats_endpoint_transparently_exposes_token_usage(api_environment) -> None:
+    """端点零改动断言：HTTP 响应自动透出 token_usage（dataclass 序列化）。"""
+    store = api_environment
+    _record(
+        store,
+        LifecycleEventType.ATTEMPT,
+        "2026-09-21T10:01:00+00:00",
+        event_key="a1",
+        detail={
+            "agent": "claude",
+            "token_usage": {
+                "input_tokens": 10,
+                "output_tokens": 2,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        },
+    )
+    console_routes._STATS_CACHE = console_routes.TTLResponseCache(ttl_seconds=0)
+    response = client.get(
+        "/api/v1/agent-runner/console/stats/prd-lifecycle",
+        params={"repo_id": _REPO_ID, "days": 30},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["token_usage"]["by_flow"]["implement"]["input_tokens"] == 10
+    assert payload["token_usage"]["by_flow"]["implement"]["total_tokens"] == 12
+    assert payload["token_usage"]["by_agent"]["claude"]["usage_count"] == 1

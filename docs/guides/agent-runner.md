@@ -3234,7 +3234,21 @@ lifecycle event。
 `queued | started | claimed | attempt | retry | recovered | implementation_completed |
 validation_started | validation_passed | validation_failed | review_started |
 review_passed | review_failed | merge_started | merged | archived | blocked |
-unblocked | failed`。
+unblocked | failed | agent_token_usage`。
+
+**Token 用量统计（agent_token_usage 观测维度）**
+
+每次 agent 子进程调用的官方 usage（claude stream-json 的 `result.usage`）
+在子进程执行层**渲染前**捕获并挂进事件 `detail_json`：
+
+- 实现/修复主调用记入 attempt 族事件的 `detail.token_usage`；验证
+  （verifier）、评审（supervisor）等旁路调用发独立的 `agent_token_usage`
+  观测事件（`detail.flow` ∈ `verify / supervise / fix / closeout`）。
+- **口径**：总量 = 输入 + 输出 + 缓存读 + 缓存写（实际处理量，缓存命中
+  计入）；缓存命中率 = 缓存读 ÷ 输入侧。agent 未上报 usage（部分协议、
+  超时被杀、旧记录）时**不估算**，展示为「—」且不进入汇总。
+- **不干扰**：`agent_token_usage` 不参与阶段推导与时长归属（推导时被
+  过滤），写入失败与其它观测事件一样只落日志。
 
 **两个只读 API**
 
@@ -3249,7 +3263,9 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
     仓库级统计：completed_runs / average_end_to_end_seconds /
     median_end_to_end_seconds / p90_end_to_end_seconds /
     average_blocked_seconds / bottleneck_phase / bottleneck_phase_seconds /
-    unlinked_run_count / incomplete_run_count / runs[]
+    unlinked_run_count / incomplete_run_count / runs[] /
+    token_usage{by_flow, by_agent}（每行含 input/output/cache_read/
+    cache_creation/total_tokens 与 usage_count）
 ```
 
 **降级语义**
