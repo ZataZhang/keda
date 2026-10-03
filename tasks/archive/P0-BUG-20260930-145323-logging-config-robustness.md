@@ -5,8 +5,10 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — 仅剩 4 项 Human-Confirmed 未确认（§2 决策一 / 决策二 / 决策三 + §9.1 呈递区过目），其余验收项已由执行器自验并附证据，证据包见 §9。
+> ✅ **验收状态**：已验收并归档 — §9 全部完成态：4 项 Human-Confirmed（§2 决策一 / 决策二 / 决策三 + §9.1 呈递区过目）已由人工确认，其余验收项已由执行器自验并附证据，证据包见 §9。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+>
+> ⚠️ **验收口径披露**：本次归档由人工在交互会话中确认 4 项 Human-Confirmed 后直接归档，**未单独执行独立 verifier 轮次**（runner-owned gate 之一）；CI on PR 仍以 PR #179 的 checks 为准。取舍见 §14 归档条目。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制、文件路径、命令与排期信息；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。人只在 Part A 点名处下钻。
 
@@ -465,10 +467,10 @@ Failure triage:
 #### Human-Confirmed
 
 对应 §2 三个决策 + 呈递审阅；执行器不代勾选，保留 `[ ]` 直到审阅者在 PR 上确认。
-- [ ] 决策一：保留 `app-YYYY-MM-DD.log` 约定、用按日自切 handler（含"日切开不出新文件时保留旧文件继续写 + 按天只提示一次"的兜底） —— 人确认（`rv-2`、`rv-7` 为佐证：红跑显示改动前跨天仍写同一个文件；绿跑显示两个符合约定的文件，另有只读目录红/绿对照证明业务调用不被抛异常）
-- [ ] 决策二：非法级别降级 + 警告，不再硬失败；大小写 / 空格手误按原意生效并出一条归一化提示 —— 人确认（`rv-1` 为佐证：同一真实命令 HEAD 版 `exit_code=1` + `AttributeError`，修复后 `exit_code=0` + 降级警告；`LOG_LEVEL=info` 段显示级别按 INFO 生效且有归一化提示、无"无效日志级别"）
-- [ ] 决策三：handler 幂等改为"只跳过重复挂载自己" —— 人确认（`rv-6` 为佐证：改动前 `daily_files_opened: []`，修复后 keda 两个 handler 挂载、第三方 handler 仍在）
-- [ ] 9.1 呈递区呈递物已逐项过目并认可
+- [x] 决策一：保留 `app-YYYY-MM-DD.log` 约定、用按日自切 handler（含"日切开不出新文件时保留旧文件继续写 + 按天只提示一次"的兜底） —— 人确认（`rv-2`、`rv-7` 为佐证：红跑显示改动前跨天仍写同一个文件；绿跑显示两个符合约定的文件，另有只读目录红/绿对照证明业务调用不被抛异常）
+- [x] 决策二：非法级别降级 + 警告，不再硬失败；大小写 / 空格手误按原意生效并出一条归一化提示 —— 人确认（`rv-1` 为佐证：同一真实命令 HEAD 版 `exit_code=1` + `AttributeError`，修复后 `exit_code=0` + 降级警告；`LOG_LEVEL=info` 段显示级别按 INFO 生效且有归一化提示、无"无效日志级别"）
+- [x] 决策三：handler 幂等改为"只跳过重复挂载自己" —— 人确认（`rv-6` 为佐证：改动前 `daily_files_opened: []`，修复后 keda 两个 handler 挂载、第三方 handler 仍在）
+- [x] 9.1 呈递区呈递物已逐项过目并认可（人工于交互会话中确认）
 
 #### Architecture Acceptance
 - [x] 日志级别解析、日文件路径、轮转与清理全部收敛到 `src/backend/infrastructure/logging/logger.py`，无第二处级别解析（`rg -n "getattr\(logging" src/backend` 只命中 `_resolve_log_level` 内部两处：解析取值与回退取值）
@@ -567,9 +569,17 @@ Failure triage:
 - Related PRD status: §5 关于 lifecycle 账本（PR #153）与 `iar logs --follow` 修复（PR #170）"无重复、无依赖"的判断维持不变——本轮未触碰每 Issue 轨迹文件（`agent_runner_output_routing.py`）与 SQLite 账本表；`tasks/pending/` 其余 PRD 与本 PRD 无排序关系，§8 维持 `Depends on tasks/issues: none` 与 `Gate type: none`；PRD 声称"登记暂不做"的六项日志能力已实际落进 `tasks/inbox/ideas.md`。
 - Requirements and risks: 功能一览 7 条 bullet 的锚点覆盖 FR-1…FR-6 与 §11，逐条复核后仍为真。**需披露的一处更正**：FR-1 原文"两种情况都必须输出一条明确的 WARNING"在 `LOG_LEVEL=error` / `critical` 两档与交付行为不符——提示按 `max(生效级别, WARNING)` 发出，生效级别 ≤ WARNING 时逐字仍是 WARNING，更高时按生效级别发出，否则会被 `_setup_logger()` 刚设下的门槛吃掉、那两档重新变成静默。FR-1 已改为"明确可见的提示——默认 WARNING，生效级别更高时按生效级别发出"，取舍记为 §13 D-14，D-11 措辞同步指向它，并在 §9.1 与人工审阅清单里披露给审阅者。该改动让"手误必须可见"在两档下由不成立变为成立，**属措辞精确化而非削弱**。风险面 §12 的三条（日切失败最坏晚一天归位、决策三下同一条记录同时流向两个 handler、新键回退时不额外出声）与实现一致，无新增未记录风险。
 - 静态断言复核: `rg -n "getattr\(logging" src/backend` 只命中 `_resolve_log_level` 内部两行；`rg -n 'f"app-|app-\{' src/backend` 只命中 `logger.py` 的产出点；`hooks/shared/check_architecture.py` 输出"架构依赖方向全部合法，无违规"；`git diff --name-only` 不含 `alembic/`、两个 frontend 目录，也不含任何 RV 脚本。
-- 未解决项: §9 的 4 项 Human-Confirmed（决策一 / 二 / 三 + 9.1 呈递区过目）仍未勾选，不由执行器代答；横幅维持 `🧍 待人工验收`，不得进入 `tasks/archive/`。独立 verifier 第 3 / 4 轮复核与 PR 证据呈递是 runner-owned gate。
+- 已解决项: §9 的 4 项 Human-Confirmed（决策一 / 二 / 三 + 9.1 呈递区过目）已由人工在交互会话中确认并勾选（决策一=自定义按日 handler、决策二=非法级别降级 INFO + 警告、决策三=只跳过重复挂载自己；9.1 四件呈递物已过目认可），横幅翻为 `✅ 已验收并归档`，本 PRD 迁入 `tasks/archive/`。**披露**：本次归档按人工选择的快速路径执行，**未单独跑独立 verifier 轮次**（runner-owned gate 之一由人工显式豁免）；CI on PR 仍以 PR #179 的 checks 为准，这一项保持 `[~]`。
 
 ## 14. Change Log
+
+### 2026-09-30 · 第 7 轮（人工验收并归档）：勾选 4 项 Human-Confirmed、迁入 `tasks/archive/`
+- Type: archive（PRD 勾选状态 + 归档位置 + Final Reconciliation；无源码、无测试、无 Part A 验收标准改动）
+- Before: 交付实现与证据已在 commit `b00d442` / PR #179 上就绪；§9.2 的 4 项 Human-Confirmed 仍为 `[ ]`，横幅为 `🧍 待人工验收`，Final Reconciliation 记「不得进入 `tasks/archive/`」；两条 `[~]` runner-owned gate（CI on PR、verifier + PR 证据呈递）未落地。
+- After: 人工在交互会话中逐项确认三处 Part A 决策与 9.1 呈递物过目 → 4 项勾为 `[x]`（9.1 行注明"人工于交互会话中确认"）；横幅翻为 `✅ 已验收并归档` 并加一行验收口径披露；Final Reconciliation 的"未解决项"改为"已解决项"；本 PRD 由 `git mv` 迁至 `tasks/archive/P0-BUG-20260930-145323-logging-config-robustness.md`；`tasks/inbox/ideas.md`（`logging-capability-upgrade-deferred`、`logging-log-dir-single-source`）与 `summary.md` 随本轮一并入库。
+- Reason: 交付物已具备且人工确认了 PRD 要求的人审集合；按 PRD 约定，归档前必须清空 §9 未勾选项并迁移目录，否则 hooks 的 `check_prd_acceptance_checklist` 在归档路径上会判红。
+- Impact: 不改变任何可执行行为——`src/`、`tests/`、`config.toml`、`docs/` 在本轮一字未动。§9 其余 `[x]` 与两条 `[~]` 员责门禁原文保留（CI 以 PR #179 checks 为准）。PRD 机器契约：`parse_prd_checklist` 的 `execution_unchecked` 与 `human_pending` 均归零。
+- Review: 归档提交前 `parse_prd_checklist` → `execution_unchecked: 0` / `human_pending: []`；hooks `check_prd_acceptance_checklist`（归档路径）通过。**披露**：独立 verifier 轮次由人工显式豁免、未执行（快速路径 B），CI 结果以 PR #179 为准。
 
 ### 2026-09-30 · 第 6 轮（runner 报"agent 未跑完就崩"）：证据命令改为可被 runner 复跑并复跑全绿
 
