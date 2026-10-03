@@ -10,7 +10,7 @@
 - `rv-1-agent-doctor-preset.txt`：真实 CLI 入口 `iar agent doctor codebuddy --json --preset plan`。argv 数组中 `--model` 后一项为 `glm-5.3-flash`，`--settings` 后一项为 `{"reasoningEffort":"max"}`，注入位置在 profile args 之后、提示词之前；条目额外携带 `preset` / `model` / `reasoning_effort` 三个观测字段。
 - `rv-4-agent-doctor-claude.txt`：同一入口未传 `--preset` 时 argv 与改造前逐字节一致（无任何模型参数）。
 - `tests/test_agent_invocation_golden.py` 34 条黄金快照**未改动任何期望值**且全部通过——零回归为硬承诺的直接证据。
-- `architecture-rg-gates.txt` §1：`argv.append|argv.extend` 在 core/engines 的全部命中位于 `agent_invocation.py`（含既有 tail/prompt 组装），无旁路拼接。
+- `architecture-rg-gates.txt` §1：`argv.append|argv.extend` 在 core/engines 的命中中，**本 PRD 新增的注入点全部位于 `agent_invocation.py`**；既有的 `container_ops.py:174` 命中属容器命令组装（本次未改动，与 main 逐字节一致），不在模型注入路径上。
 
 ### 决策二 / Behavior：绑定整体决定、遮蔽矩阵、显式 --agent 最高（rv-6、rv-9）
 
