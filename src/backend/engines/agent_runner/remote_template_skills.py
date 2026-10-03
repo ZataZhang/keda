@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from backend.core.shared.interfaces.agent_runner import IProcessRunner
 
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.shared.prd_skill_location import keda_owned_skills_root
 
 
 REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL = "https://github.com/ZataZhang/zata-codes-template.git"
@@ -30,7 +31,7 @@ REMOTE_TEMPLATE_SKILLS_REF = "main"
 REMOTE_TEMPLATE_SKILL_NAMES: tuple[str, ...] = ("prd", "code-reviewer")
 """IAR 安装且仅安装的远程模板 Skills。"""
 
-_CC_SWITCH_SKILLS_DIR_ENV_VAR = "CC_SWITCH_SKILLS_DIR"
+_SKILLS_DIR_ENV_VAR = "IAR_SKILLS_DIR"
 
 _REMOTE_SKILL_PROTECTED_FILENAME = "SKILL.md"
 """用于识别用户同名 Skill 是否被改动的最小契约文件。"""
@@ -102,8 +103,8 @@ class RemoteTemplateSkillInstallResult:
     """远程模板 Skill 同步结果。
 
     Attributes:
-        target_skills_roots: 写入 ``prd`` 与 ``code-reviewer`` 的用户级根目录
-            列表（每个检测到的 agent 一个）。
+        target_skills_roots: 写入 ``prd`` 与 ``code-reviewer`` 的根目录列表——
+            首位是 keda 自有目录 ``~/.iar/skills``，其后每个检测到的 agent 各一个。
         installed_skill_names: 实际或计划写入的 Skill 白名单名称。
         skipped_skill_names: 与远程模板一致因而无需再次覆盖的 Skill 名称,
             可避免重复写入误触更新 ``mtime``；按目录聚合去重。
@@ -120,40 +121,50 @@ class RemoteTemplateSkillInstallResult:
 
 
 def resolve_user_skill_install_roots(user_home_path: Path | None = None) -> tuple[Path, ...]:
-    """解析 ``iar init`` 的用户级 Skill 安装目标（可多于一个）。
+    """解析 ``iar init`` 的 Skill 安装目标（可多于一个）。
 
-    优先尊重 ``CC_SWITCH_SKILLS_DIR``（显式覆盖，单目录）；否则从 agent
-    注册表（:data:`BUILTIN_AGENT_SPECS` 的 ``auth_home``）派生每个 agent
-    的用户级 skills 目录，并保留其中**已存在配置目录**的 agent——安装器
-    不为未安装的 agent 凭空创建配置目录。全部缺失时回退到注册表首个
-    声明了 ``auth_home`` 的 agent，避免初始化流程依赖交互式选择。
+    优先尊重 ``IAR_SKILLS_DIR``（显式覆盖，单目录；CI / 测试用它把安装落到临时
+    目录，不再探测任何用户目录）。否则**首位是 keda 自有目录**
+    ``~/.iar/skills``，其后才依次是各 agent 的用户级 skills 目录。
+
+    自有目录排在前面是有意的：PRD 解析是 runner 自身的能力，用户删掉 agent 目录里
+    的 prd skill 不应让 runner 失去解析能力（见
+    :func:`backend.core.shared.prd_skill_location.resolve_prd_skill_path` 的优先序）。
+
+    Agent 目录按注册表（:data:`BUILTIN_AGENT_SPECS` 的 ``auth_home``）派生，并只
+    保留其中**已存在配置目录**的 agent——安装器不为未安装的 agent 凭空创建配置
+    目录。一个 agent 目录都没探测到时，回退到注册表首个声明了 ``auth_home`` 的
+    agent，避免初始化流程依赖交互式选择。
 
     Args:
         user_home_path: 可选的用户主目录覆盖，主要供测试使用。
 
     Returns:
-        用户级 Skill 根目录元组（注册顺序、去重）；函数本身不创建目录。
+        安装目标根目录元组（keda 自有目录在前；注册顺序、去重）。函数本身不创建目录。
     """
-    configured_skills_root = os.environ.get(_CC_SWITCH_SKILLS_DIR_ENV_VAR)
+    configured_skills_root = os.environ.get(_SKILLS_DIR_ENV_VAR)
     if configured_skills_root:
         return (Path(configured_skills_root).expanduser(),)
 
     effective_home_path = Path.home() if user_home_path is None else user_home_path
-    candidate_roots: list[Path] = []
+    detected_agent_roots: list[Path] = []
     fallback_skills_root: Path | None = None
     for agent_spec in BUILTIN_AGENT_SPECS.values():
         agent_skills_root = agent_spec.user_skills_dir(effective_home_path)
         if agent_skills_root is None:
             continue
         if agent_skills_root.parent.is_dir():
-            if agent_skills_root not in candidate_roots:
-                candidate_roots.append(agent_skills_root)
+            if agent_skills_root not in detected_agent_roots:
+                detected_agent_roots.append(agent_skills_root)
         elif fallback_skills_root is None:
             fallback_skills_root = agent_skills_root
-    if candidate_roots:
-        return tuple(candidate_roots)
-    assert fallback_skills_root is not None  # 内置注册表保证至少 codex 声明了 auth_home
-    return (fallback_skills_root,)
+
+    candidate_roots: list[Path] = [keda_owned_skills_root(effective_home_path)]
+    if detected_agent_roots:
+        candidate_roots.extend(detected_agent_roots)
+    elif fallback_skills_root is not None:
+        candidate_roots.append(fallback_skills_root)
+    return tuple(candidate_roots)
 
 
 def install_remote_template_skills(
@@ -163,8 +174,9 @@ def install_remote_template_skills(
 
     仅通过 sparse checkout 下载 ``skills/prd`` 与 ``skills/code-reviewer``，
     不执行远程仓库脚本，也不会读取或写入目标项目的 Skill 目录。远程只
-    下载一次，随后写入 :func:`resolve_user_skill_install_roots` 返回的
-    全部用户级目录（每个检测到的 agent 各一份）。
+    下载一次，随后写入 :func:`resolve_user_skill_install_roots` 返回的全部目录
+    —— keda 自有目录 ``~/.iar/skills`` 一份（runner 解析 PRD 时优先取它），
+    每个检测到的 agent 再各一份。
 
     Args:
         options: Git 执行端口、dry-run 标记和可选用户主目录。

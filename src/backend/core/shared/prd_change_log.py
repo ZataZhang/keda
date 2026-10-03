@@ -1,25 +1,16 @@
-"""解析并校验 PRD 中与验收状态分离的结构化变更记录。"""
+"""PRD 结构化变更记录（Change Log）的**适配层**。
+
+解析由 prd skill 的 ``scripts/prd_contract.py`` 承担（Machine Contract §1：章节
+标题、``###`` 条目、六个必填字段），本模块只把它的 JSON 映射成 keda 各处沿用的
+:class:`PrdChangeLogResult`，使"契约文本 vs 执行实现"不会再各自漂移。
+"""
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+from typing import Any
 
-
-CHANGE_LOG_HEADING_RE = re.compile(
-    r"^##\s+(?:\d+\.\s+)?(?:Change Log\b.*|变更记录.*)\s*$",
-    re.IGNORECASE,
-)
-TOP_LEVEL_HEADING_RE = re.compile(r"^##\s+")
-CHANGE_ENTRY_HEADING_RE = re.compile(r"^###\s+.+")
-REQUIRED_FIELD_PATTERNS: dict[str, re.Pattern[str]] = {
-    "类型": re.compile(r"^\s*[-*+]\s+(?:类型|Type)\s*[:：]", re.IGNORECASE),
-    "原文": re.compile(r"^\s*[-*+]\s+(?:原文|Before)\s*[:：]", re.IGNORECASE),
-    "变更后": re.compile(r"^\s*[-*+]\s+(?:变更后|After)\s*[:：]", re.IGNORECASE),
-    "原因": re.compile(r"^\s*[-*+]\s+(?:原因|Reason)\s*[:：]", re.IGNORECASE),
-    "影响": re.compile(r"^\s*[-*+]\s+(?:影响|Impact)\s*[:：]", re.IGNORECASE),
-    "审核": re.compile(r"^\s*[-*+]\s+(?:审核|Review)\s*[:：]", re.IGNORECASE),
-}
+from backend.core.shared.prd_contract_client import parse_prd_contract
 
 
 @dataclass(frozen=True)
@@ -57,53 +48,22 @@ def parse_prd_change_log(file_content: str) -> PrdChangeLogResult:
 
     Returns:
         Change Log 的章节、条目数和字段完整性信息。
+
+    Raises:
+        PrdContractError: prd skill 的解析脚本不可用（缺失 / 执行失败 / 输出非法）。
     """
-    prd_lines = file_content.splitlines()
-    section_start_index = next(
-        (
-            line_index
-            for line_index, line in enumerate(prd_lines)
-            if CHANGE_LOG_HEADING_RE.match(line)
-        ),
-        None,
-    )
-    if section_start_index is None:
-        return PrdChangeLogResult(False, 0, {})
-
-    section_end_index = next(
-        (
-            line_index
-            for line_index in range(section_start_index + 1, len(prd_lines))
-            if TOP_LEVEL_HEADING_RE.match(prd_lines[line_index])
-        ),
-        len(prd_lines),
-    )
-    change_entries: list[list[str]] = []
-    entry_titles: list[str] = []
-    active_entry_lines: list[str] | None = None
-    for line in prd_lines[section_start_index + 1 : section_end_index]:
-        if CHANGE_ENTRY_HEADING_RE.match(line):
-            active_entry_lines = []
-            change_entries.append(active_entry_lines)
-            entry_titles.append(line.lstrip("#").strip())
-            continue
-        if active_entry_lines is not None:
-            active_entry_lines.append(line)
-
-    incomplete_entry_fields: dict[int, tuple[str, ...]] = {}
-    for entry_number, entry_lines in enumerate(change_entries, start=1):
-        missing_fields = tuple(
-            field_name
-            for field_name, field_pattern in REQUIRED_FIELD_PATTERNS.items()
-            if not any(field_pattern.match(entry_line) for entry_line in entry_lines)
-        )
-        if missing_fields:
-            incomplete_entry_fields[entry_number] = missing_fields
+    change_log = parse_prd_contract(file_content)["change_log"]
+    entries: list[dict[str, Any]] = change_log.get("entries", [])
+    incomplete_entry_fields = {
+        entry_number: tuple(str(field) for field in entry.get("missing_fields", ()))
+        for entry_number, entry in enumerate(entries, start=1)
+        if entry.get("missing_fields")
+    }
     return PrdChangeLogResult(
-        section_found=True,
-        entry_count=len(change_entries),
+        section_found=bool(change_log.get("section_found")),
+        entry_count=int(change_log.get("entry_count", len(entries))),
         incomplete_entry_fields=incomplete_entry_fields,
-        entry_titles=tuple(entry_titles),
+        entry_titles=tuple(str(entry.get("title", "")) for entry in entries),
     )
 
 
@@ -115,5 +75,8 @@ def extract_prd_change_log_entry_count(file_content: str) -> int:
 
     Returns:
         ``## Change Log`` 中的三级标题条目数；没有章节时返回 0。
+
+    Raises:
+        PrdContractError: prd skill 的解析脚本不可用（缺失 / 执行失败 / 输出非法）。
     """
     return parse_prd_change_log(file_content).entry_count

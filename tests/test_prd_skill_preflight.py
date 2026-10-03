@@ -28,10 +28,20 @@ from tests.conftest import FakeProcessRunner
 from backend.core.shared.models.agent_runner import CommandResult
 
 
-def _skill_fixture(tmp_path: Path, text: str) -> Path:
+def _skill_fixture(tmp_path: Path, text: str, *, with_contract_script: bool = True) -> Path:
+    """造一个 prd skill fixture；默认连兄弟解析脚本一起造。
+
+    预检现在要求 ``SKILL.md`` 与 ``scripts/prd_contract.py`` 成对存在（keda 不自带
+    解析实现），因此"合法 skill"的 fixture 必须带上脚本文件；脚本内容不参与这里的
+    断言（预检只检查它存在，不执行它）。
+    """
     skill_path = tmp_path / "prd" / "SKILL.md"
     skill_path.parent.mkdir(parents=True, exist_ok=True)
     skill_path.write_text(text, encoding="utf-8")
+    if with_contract_script:
+        contract_script_path = skill_path.parent / "scripts" / "prd_contract.py"
+        contract_script_path.parent.mkdir(parents=True, exist_ok=True)
+        contract_script_path.write_text("# test fixture placeholder\n", encoding="utf-8")
     return skill_path
 
 
@@ -122,6 +132,24 @@ def test_skill_preflight_fails_closed_just_above_the_supported_range(
     monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(future_skill))
 
     with pytest.raises(PrdSkillPreflightError, match=f"v{unsupported_version}"):
+        ensure_prd_machine_contract_available()
+
+
+def test_skill_preflight_fails_fast_when_parser_script_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """只有 SKILL.md、缺 scripts/prd_contract.py → fail fast。
+
+    keda 不再自带 PRD 解析：解析由 skill 的脚本提供。只装半套（例如手工更新了
+    SKILL.md 而脚本没跟上）时，daemon 起得来、却会在第一次解析时报错——那是中途
+    失败，不是启动失败。预检把这条接线检查提前到启动时，并点名缺的是哪个文件。
+    """
+    half_installed_skill = _skill_fixture(
+        tmp_path, "# prd\n\nMachine-Contract-Version: 4\n", with_contract_script=False
+    )
+    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(half_installed_skill))
+
+    with pytest.raises(PrdSkillPreflightError, match="prd_contract.py"):
         ensure_prd_machine_contract_available()
 
 

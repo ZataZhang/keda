@@ -320,7 +320,7 @@ _ensure_fzf() {
     esac
 }
 
-CC_SWITCH_SKILLS_DIR="${CC_SWITCH_SKILLS_DIR:-}"
+IAR_SKILLS_DIR="${IAR_SKILLS_DIR:-}"
 SKILL_INSTALL_TARGET_DIR=""
 
 _resolve_skill_install_target_dir() {
@@ -328,17 +328,17 @@ _resolve_skill_install_target_dir() {
         return 0
     fi
 
-    if [ -n "$CC_SWITCH_SKILLS_DIR" ]; then
-        SKILL_INSTALL_TARGET_DIR="$CC_SWITCH_SKILLS_DIR"
+    if [ -n "$IAR_SKILLS_DIR" ]; then
+        SKILL_INSTALL_TARGET_DIR="$IAR_SKILLS_DIR"
         return 0
     fi
 
-    if [ -d "$HOME/.cc-switch" ]; then
-        SKILL_INSTALL_TARGET_DIR="$HOME/.cc-switch/skills"
+    if [ -d "$HOME/.iar/skills" ]; then
+        SKILL_INSTALL_TARGET_DIR="$HOME/.iar/skills"
         return 0
     fi
 
-    echo "No ~/.cc-switch directory found."
+    echo "No ~/.iar/skills directory found."
     echo "Choose a skill install target:"
     echo "  [1] Codex  -> $HOME/.codex/skills"
     echo "  [2] Claude -> $HOME/.claude/skills"

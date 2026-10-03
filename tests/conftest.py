@@ -40,24 +40,53 @@ def _ensure_project_root_on_path() -> None:
 
 _ensure_project_root_on_path()
 
-_PRD_SKILL_FIXTURE_PATH = Path(__file__).parent / "support" / "prd_skill_fixtures" / "SKILL_v3.md"
+_PRD_CONTRACT_SCRIPT_RELATIVE_PATH = Path("scripts") / "prd_contract.py"
+
+
+def _find_usable_prd_skill() -> Path | None:
+    """找出本会话可用的 prd skill（**必须**带解析脚本），找不到返回 ``None``。
+
+    keda 不再自带 PRD 格式解析：章节/分组/复选框由 prd skill 的
+    ``scripts/prd_contract.py`` 解析。因此仓库内那份只写版本标记的桩 SKILL.md
+    已经不够用了——桩文件解析不出任何结构，会让所有走门禁/roadmap 的用例失败。
+    这里要求一个**真实安装**的 skill（含解析脚本）。
+
+    Returns:
+        可用的 ``SKILL.md`` 路径；已显式设置的 ``IAR_PRD_SKILL_PATH`` 优先于
+        用户级安装（``iar init``）解析结果。
+    """
+    from backend.core.shared.prd_skill_location import resolve_prd_skill_path
+
+    candidate_skill_paths: list[Path] = []
+    ambient_skill_path = os.environ.get("IAR_PRD_SKILL_PATH")
+    if ambient_skill_path:
+        candidate_skill_paths.append(Path(ambient_skill_path).expanduser())
+    candidate_skill_paths.append(resolve_prd_skill_path())
+    for candidate_skill_path in candidate_skill_paths:
+        if (candidate_skill_path.parent / _PRD_CONTRACT_SCRIPT_RELATIVE_PATH).is_file():
+            return candidate_skill_path
+    return None
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _prd_skill_contract_env() -> Iterator[Path]:
-    """会话级 prd skill 桩：让 Machine Contract 启动预检在测试里确定性通过。
+def _prd_skill_contract_env() -> Iterator[Path | None]:
+    """把会话级 ``IAR_PRD_SKILL_PATH`` 指向真实安装的 prd skill。
 
-    daemon 开跑前的预检（``run_preflight_checks``）要求能解析到带
-    ``Machine-Contract-Version`` 标记的 prd skill；本 fixture 用优先级最高的
-    ``IAR_PRD_SKILL_PATH`` 环境变量把解析指向仓库内的 fixture 文件，与执行机器
-    上是否安装了真实 skill 解耦。要触发预检失败路径的用例用
-    ``monkeypatch.setenv("IAR_PRD_SKILL_PATH", ...)`` 覆盖即可——monkeypatch 在
-    用例结束后会还原到这里的会话级取值。
+    解析到真实 skill 时固定为会话级取值，让依赖 PRD 解析的用例确定性地走同一份
+    契约实现；解析不到时不设置变量（保持环境原样），让运行时按用户级安装解析——
+    缺失会由 ``prd_contract_client`` 报出可行动的错，而不是在这里静默跳过用例。
+
+    要触发预检失败路径的用例照旧用 ``monkeypatch.setenv("IAR_PRD_SKILL_PATH", ...)``
+    覆盖，用例结束后会还原到这里的会话级取值。
     """
+    usable_skill_path = _find_usable_prd_skill()
+    if usable_skill_path is None:
+        yield None
+        return
     previous_value = os.environ.get("IAR_PRD_SKILL_PATH")
-    os.environ["IAR_PRD_SKILL_PATH"] = str(_PRD_SKILL_FIXTURE_PATH)
+    os.environ["IAR_PRD_SKILL_PATH"] = str(usable_skill_path)
     try:
-        yield _PRD_SKILL_FIXTURE_PATH
+        yield usable_skill_path
     finally:
         if previous_value is None:
             os.environ.pop("IAR_PRD_SKILL_PATH", None)

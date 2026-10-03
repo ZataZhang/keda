@@ -31,7 +31,7 @@ import re
 from pathlib import Path
 
 from backend.core.use_cases.agent_runner_feedback import extract_prd_path
-from backend.core.use_cases.generated_prd_content import resolve_prd_skill_path
+from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 
 # "合并即接受"声明必须携带的 hidden marker（prompt 教学与校验共用同一常量）。
 MERGE_ACCEPTANCE_MARKER_TEXT = "<!-- iar:merge-acceptance version=1 -->"
@@ -71,8 +71,9 @@ _CONTRACT_ANCHOR_DESCRIPTIONS: dict[str, str] = {
 def load_prd_publish_contract(explicit_skill_path: Path | None = None) -> str | None:
     """读取 prd skill 的发布契约参考文本；不可达时安全返回 ``None``。
 
-    解析逻辑复用 :func:`resolve_prd_skill_path`（含 ``CC_SWITCH_SKILLS_DIR``
-    覆盖），在其 ``SKILL.md`` 同级的 ``references/`` 下定位参考文档。文件缺失
+    解析逻辑复用 :func:`resolve_prd_skill_path`（``IAR_PRD_SKILL_PATH`` /
+    ``IAR_SKILLS_DIR`` 覆盖，且优先取 keda 自有 ``~/.iar/skills``），在其
+    ``SKILL.md`` 同级的 ``references/`` 下定位参考文档。文件缺失
     只意味着教学缺失——发布端会照常校验锚点并标注，调用方无需特殊处理。
 
     Args:
