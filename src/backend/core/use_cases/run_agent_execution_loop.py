@@ -108,8 +108,7 @@ class AgentExecutionRequest:
     #: （fix / closeout / verifier）产出可用 usage 时以 ``(flow, agent, usage)``
     #: 回调；agent 名允许与主 agent 不同（如 verifier 走了候选回退）。
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None
-    #: 实现阶段绑定的模型选择（阶段 -> 预设解析结果）；``None`` 表示无绑定。
-    #: fix / closeout 未自绑预设时继承它（同一 agent，同一模型命名空间）。
+    #: 实现阶段绑定的模型选择；``None`` 表示无绑定。fix / closeout 未自绑时继承它（同一 agent）。
     model_selection: ModelSelection | None = None
 
 
@@ -373,8 +372,7 @@ def _attempt_delivery_closeout(
                     or context.record.effective_model_selection
                 ),
             )
-        # 观测发射点的 agent 名与调用点同源：resolve_lifecycle_agent 是纯查找
-        # （幂等），重解析一次以保持调用点内联形态（AST 守卫约定）。
+        # 发射点 agent 名与调用点同源（resolve_lifecycle_agent 纯查找、幂等；AST 守卫要求内联形态）。
         _emit_agent_usage(
             request,
             "closeout",
@@ -503,8 +501,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         prd_overrides = parse_prd_lifecycle_overrides(
             prd_baseline_content, prd_path=prd_relative_path
         )
-    # PRD 文件头部 lifecycle_presets 覆盖块（阶段 -> 预设绑定，PRD 级）。合并与
-    # 回退策略与上面同一套。
+    # PRD 头部 lifecycle_presets 覆盖块（阶段 -> 预设，PRD 级）；合并/回退同上面一套。
     prd_preset_overrides = effective_prd_preset_overrides(issue, None)
     if not prd_preset_overrides and prd_baseline_content is not None:
         prd_preset_overrides = parse_prd_lifecycle_overrides(
@@ -512,8 +509,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             prd_path=prd_relative_path,
             block_name=PRD_OVERRIDE_BLOCK_PRESETS,
         )
-    # 实现阶段绑定的模型选择：显式换人（CLI --agent / 回退候选）时在这里丢弃，
-    # 保证后续 fix / closeout 继承的一定是"执行 agent == 预设 agent"的有效选择。
+    # 实现阶段绑定的模型选择：显式换人（CLI --agent / 回退）时在此丢弃，保证 fix/closeout 继承有效选择。
     model_selection = drop_model_selection_for_agent(selected_agent, request.model_selection)
     recovery_failure_summary = ""
     recovery_failure_type: str = "verification_failed"
@@ -832,8 +828,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             config,
                             process_runner,
                             verification_results=exc.verification_results,
-                            # fix 未自绑预设时继承实现者的绑定；执行 agent 与预设
-                            # 声明不一致时由 resilient 层丢弃并记日志。
+                            # fix 未自绑时继承实现者绑定；不一致由 resilient 层丢弃并记日志。
                             model_selection=(
                                 resolve_lifecycle_model_selection(
                                     "fix",
