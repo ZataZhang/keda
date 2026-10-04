@@ -366,6 +366,8 @@ def _persist_attempt_result(
                     started_at=result.started_at,
                     finished_at=result.finished_at,
                     duration_seconds=result.duration_seconds,
+                    preset=result.preset or None,
+                    model=result.model or None,
                 )
             )
         except Exception:  # noqa: BLE001 - side-channel must not break runs

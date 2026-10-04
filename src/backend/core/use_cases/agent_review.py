@@ -562,6 +562,17 @@ def run_pre_pr_review(
         return head_sha_before, verification_results
 
     reviewer_agent = resolve_reviewer_agent(issue, config, selected_agent)
+    # review 阶段绑定的模型选择：只认 review 自己的绑定；换人（repair 交给
+    # 别人 / 回退换 reviewer）即丢弃。
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
+
+    reviewer_model_selection = drop_model_selection_for_agent(
+        reviewer_agent,
+        resolve_lifecycle_model_selection("review", config, issue=issue),
+    )
     split_repair = not repair_agent_is_self(review_config.repair_agent)
     # 解析在循环之前：未注册的 repair_agent 必须在阶段开始前 fail-fast。
     repair_agent = resolve_repair_agent(
@@ -649,6 +660,7 @@ def run_pre_pr_review(
                     transient_retry_attempts=(config.runner.transient_retry_attempts),
                     transient_retry_delay_seconds=(config.runner.transient_retry_delay_seconds),
                     profile=reviewer_profile,
+                    model_selection=reviewer_model_selection,
                 )
             except (subprocess.CalledProcessError, OSError) as exc:
                 # Transient blips are already retried inside the resilient

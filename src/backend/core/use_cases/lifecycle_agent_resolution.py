@@ -34,6 +34,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+from backend.core.shared.models.agent_model_preset import ModelSelection, resolve_model_selection
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_AUTO,
@@ -42,6 +43,7 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_EXECUTOR,
     LIFECYCLE_AGENT_EXECUTOR_KEYS,
     LIFECYCLE_AGENT_KEYS,
+    LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS,
     LIFECYCLE_SOURCE_LEGACY,
     LIFECYCLE_SOURCE_PRD_OVERRIDE,
     normalize_lifecycle_agent_value,
@@ -49,7 +51,23 @@ from backend.core.shared.models.lifecycle_agent import (
 
 _logger = logging.getLogger(__name__)
 
-_PRD_OVERRIDE_BLOCK_PATTERN = re.compile(r"^\s*[-*]\s*lifecycle_agents\s*:\s*$", re.IGNORECASE)
+#: PRD 头部覆盖块名闭集：``lifecycle_agents``（阶段 -> agent）与
+#: ``lifecycle_presets``（阶段 -> 预设，本 PRD 新增）。两个块共用同一套
+#: 头部 bullet 区解析骨架，仅取值校验不同。
+PRD_OVERRIDE_BLOCK_AGENTS = "lifecycle_agents"
+PRD_OVERRIDE_BLOCK_PRESETS = "lifecycle_presets"
+
+_PRD_OVERRIDE_BLOCK_NAMES: tuple[str, ...] = (PRD_OVERRIDE_BLOCK_AGENTS, PRD_OVERRIDE_BLOCK_PRESETS)
+
+
+def _prd_block_pattern(block_name: str) -> re.Pattern[str]:
+    """构建指定块名的头部块匹配模式（整行 ``- <block_name>:``）。"""
+    return re.compile(rf"^\s*[-*]\s*{re.escape(block_name)}\s*:\s*$", re.IGNORECASE)
+
+
+_PRD_OVERRIDE_BLOCK_PATTERNS: dict[str, re.Pattern[str]] = {
+    block_name: _prd_block_pattern(block_name) for block_name in _PRD_OVERRIDE_BLOCK_NAMES
+}
 # 取值允许为空：空值交给 :func:`_validate_prd_override_entry` 显式报错，而不是因为
 # 模式匹配失败把整块解析提前截断（那会静默丢掉块里后续的条目）。
 _PRD_OVERRIDE_ENTRY_PATTERN = re.compile(
@@ -61,8 +79,9 @@ def parse_prd_lifecycle_overrides(
     prd_text: str,
     *,
     prd_path: str | Path | None = None,
+    block_name: str = PRD_OVERRIDE_BLOCK_AGENTS,
 ) -> dict[str, str]:
-    """解析 PRD markdown 头部的 ``lifecycle_agents`` 覆盖块。
+    """解析 PRD markdown 头部的生命周期覆盖块。
 
     覆盖块形如（落在标题下的 bullet 区，与 §8 依赖声明的嵌套 bullet 同型）::
 
@@ -70,30 +89,33 @@ def parse_prd_lifecycle_overrides(
           - implementation: claude
           - review: codex
 
-    只扫描**头部 bullet 区**（H1 之后到第一个非 bullet 行之前，见
-    :func:`_prd_header_bounds`）——正文里引用该语法的段落不会被误当成覆盖块。
+    ``block_name`` 参数化块名：``lifecycle_agents``（阶段 -> agent）或
+    ``lifecycle_presets``（阶段 -> 预设名）。只扫描**头部 bullet 区**
+    （H1 之后到第一个非 bullet 行之前，见 :func:`_prd_header_bounds`）——
+    正文里引用该语法的段落不会被误当成覆盖块。
 
-    未知键名、非法取值（``executor`` 用在非 fix/closeout、``auto`` 用在无
-    auto 语义的阶段、空值）都立即报错并带上 PRD 路径，不静默忽略。
+    未知键名、非法取值、空值都立即报错并带上 PRD 路径，不静默忽略。
 
     Args:
         prd_text: PRD markdown 全文。
         prd_path: 报错信息里引用的 PRD 路径（可选）。
+        block_name: 块名（``lifecycle_agents`` | ``lifecycle_presets``）。
 
     Returns:
         生命周期键 -> 覆盖值；没有覆盖块时返回空 dict。
 
     Raises:
-        ValueError: 覆盖块里的键名或取值非法。
+        ValueError: 覆盖块里的键名或取值非法，或块名不在闭集内。
     """
     lines = prd_text.splitlines()
     header_start, header_end = _prd_header_bounds(lines)
     overrides: dict[str, str] = {}
     in_block = False
     location_suffix = f" (PRD: {prd_path})" if prd_path is not None else ""
+    block_pattern = _require_block_pattern(block_name)
     for raw_line in lines[header_start:header_end]:
         if not in_block:
-            if _PRD_OVERRIDE_BLOCK_PATTERN.match(raw_line):
+            if block_pattern.match(raw_line):
                 in_block = True
             continue
         entry_match = _PRD_OVERRIDE_ENTRY_PATTERN.match(raw_line)
@@ -104,18 +126,28 @@ def parse_prd_lifecycle_overrides(
             break
         lifecycle_key = entry_match.group("key")
         raw_value = entry_match.group("value").strip()
-        _validate_prd_override_entry(lifecycle_key, raw_value, location_suffix=location_suffix)
-        overrides[lifecycle_key] = normalize_lifecycle_agent_value(raw_value)
+        _validate_prd_override_entry(
+            lifecycle_key,
+            raw_value,
+            location_suffix=location_suffix,
+            block_name=block_name,
+        )
+        overrides[lifecycle_key] = _normalize_prd_override_value(block_name, raw_value)
     return overrides
 
 
-def render_prd_lifecycle_overrides_block(overrides: Mapping[str, str]) -> list[str]:
+def render_prd_lifecycle_overrides_block(
+    overrides: Mapping[str, str],
+    *,
+    block_name: str = PRD_OVERRIDE_BLOCK_AGENTS,
+) -> list[str]:
     """把覆盖映射渲染成 PRD 头部 bullet 块的行列表。
 
     条目按 :data:`LIFECYCLE_AGENT_KEYS` 的固定顺序输出，保证同样的覆盖集合
     总是产生逐字节相同的文本（避免 UI 反复保存导致无意义 diff）。
     """
-    block_lines = ["- lifecycle_agents:"]
+    _require_block_pattern(block_name)
+    block_lines = [f"- {block_name}:"]
     for lifecycle_key in LIFECYCLE_AGENT_KEYS:
         if lifecycle_key in overrides:
             block_lines.append(f"  - {lifecycle_key}: {overrides[lifecycle_key]}")
@@ -125,8 +157,10 @@ def render_prd_lifecycle_overrides_block(overrides: Mapping[str, str]) -> list[s
 def upsert_prd_lifecycle_overrides(
     prd_text: str,
     overrides: Mapping[str, str],
+    *,
+    block_name: str = PRD_OVERRIDE_BLOCK_AGENTS,
 ) -> str:
-    """写入 / 替换 PRD 头部的 ``lifecycle_agents`` 覆盖块，保留其余内容。
+    """写入 / 替换 PRD 头部的生命周期覆盖块，保留其余内容。
 
     ``overrides`` 是**完整的期望集合**（不是增量）：块被整体重写，块之外的
     头部内容与正文一律不动。空集合表示删除该块。只识别头部 bullet 区里的块
@@ -136,23 +170,38 @@ def upsert_prd_lifecycle_overrides(
     Args:
         prd_text: PRD markdown 全文。
         overrides: 生命周期键 -> 覆盖值（完整期望集合）。
+        block_name: 块名（``lifecycle_agents`` | ``lifecycle_presets``）。
 
     Returns:
         写回后的 PRD 全文。
 
     Raises:
-        ValueError: 键名或取值非法。
+        ValueError: 键名或取值非法，或块名不在闭集内。
     """
+    block_pattern = _require_block_pattern(block_name)
     for lifecycle_key, raw_value in overrides.items():
-        _validate_prd_override_entry(lifecycle_key, raw_value, location_suffix="")
-    new_block = render_prd_lifecycle_overrides_block(overrides) if overrides else []
+        _validate_prd_override_entry(
+            lifecycle_key,
+            raw_value,
+            location_suffix="",
+            block_name=block_name,
+        )
+    normalized_overrides = {
+        lifecycle_key: _normalize_prd_override_value(block_name, raw_value)
+        for lifecycle_key, raw_value in overrides.items()
+    }
+    new_block = (
+        render_prd_lifecycle_overrides_block(normalized_overrides, block_name=block_name)
+        if normalized_overrides
+        else []
+    )
     lines = prd_text.splitlines()
     header_start, header_end = _prd_header_bounds(lines)
 
     block_start: int | None = None
     block_end: int | None = None
     for index in range(header_start, header_end):
-        if _PRD_OVERRIDE_BLOCK_PATTERN.match(lines[index]):
+        if block_pattern.match(lines[index]):
             block_start = index
             block_end = index + 1
             while block_end < header_end and _PRD_OVERRIDE_ENTRY_PATTERN.match(lines[block_end]):
@@ -204,34 +253,66 @@ def _prd_header_bounds(lines: list[str]) -> tuple[int, int]:
     return start, end
 
 
+def _require_block_pattern(block_name: str) -> re.Pattern[str]:
+    """返回块名的匹配模式；块名不在闭集时抛 ``ValueError``。"""
+    block_pattern = _PRD_OVERRIDE_BLOCK_PATTERNS.get(block_name)
+    if block_pattern is None:
+        raise ValueError(
+            f"Unknown PRD override block name '{block_name}'. "
+            f"Valid block names: {', '.join(_PRD_OVERRIDE_BLOCK_NAMES)}."
+        )
+    return block_pattern
+
+
+def _normalize_prd_override_value(block_name: str, raw_value: str) -> str:
+    """按块名规范化条目取值。
+
+    ``lifecycle_agents`` 的取值域是 ``auto`` / ``executor`` / agent 名，
+    沿用矩阵的规范化（去空白、小写）；``lifecycle_presets`` 的取值是预设名
+    （自由命名空间，区分大小写），只去首尾空白。
+    """
+    if block_name == PRD_OVERRIDE_BLOCK_PRESETS:
+        return raw_value.strip()
+    return normalize_lifecycle_agent_value(raw_value)
+
+
 def _validate_prd_override_entry(
     lifecycle_key: str,
     raw_value: str,
     *,
     location_suffix: str,
+    block_name: str,
 ) -> None:
     """校验单条 PRD 覆盖条目，非法时抛 ``ValueError``。"""
-    if lifecycle_key not in LIFECYCLE_AGENT_KEYS:
+    valid_keys = (
+        LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
+        if block_name == PRD_OVERRIDE_BLOCK_PRESETS
+        else LIFECYCLE_AGENT_KEYS
+    )
+    if lifecycle_key not in valid_keys:
         raise ValueError(
-            f"PRD lifecycle_agents: unknown lifecycle key '{lifecycle_key}'"
-            f"{location_suffix}. Valid keys: {', '.join(LIFECYCLE_AGENT_KEYS)}."
+            f"PRD {block_name}: unknown lifecycle key '{lifecycle_key}'"
+            f"{location_suffix}. Valid keys: {', '.join(valid_keys)}."
         )
     normalized = normalize_lifecycle_agent_value(raw_value)
     if not normalized:
         raise ValueError(
-            f"PRD lifecycle_agents.{lifecycle_key}: value must not be empty{location_suffix}."
+            f"PRD {block_name}.{lifecycle_key}: value must not be empty{location_suffix}."
         )
+    if block_name == PRD_OVERRIDE_BLOCK_PRESETS:
+        # 预设名是否存在留给解析期校验（与 agent 注册同口径），这里只校验形状。
+        return
     if (
         normalized == LIFECYCLE_AGENT_EXECUTOR
         and lifecycle_key not in LIFECYCLE_AGENT_EXECUTOR_KEYS
     ):
         raise ValueError(
-            f"PRD lifecycle_agents.{lifecycle_key}: 'executor' is only valid for "
+            f"PRD {block_name}.{lifecycle_key}: 'executor' is only valid for "
             f"{', '.join(sorted(LIFECYCLE_AGENT_EXECUTOR_KEYS))}{location_suffix}."
         )
     if normalized == LIFECYCLE_AGENT_AUTO and lifecycle_key not in LIFECYCLE_AGENT_AUTO_KEYS:
         raise ValueError(
-            f"PRD lifecycle_agents.{lifecycle_key}: 'auto' is not a valid value for this "
+            f"PRD {block_name}.{lifecycle_key}: 'auto' is not a valid value for this "
             f"stage{location_suffix}."
         )
 
@@ -293,6 +374,59 @@ def effective_prd_overrides(
     return merged_overrides
 
 
+def effective_prd_preset_overrides(
+    issue: IssueSummary | None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """合并「Issue 携带的 PRD ``lifecycle_presets`` 块」与调用方显式传入的绑定。
+
+    与 :func:`effective_prd_overrides` 同机制：Issue 上的
+    ``lifecycle_preset_overrides`` 由编排入口随 PRD 解析回填；调用方显式传入
+    （CLI ``--preset`` 锚定阶段的虚拟绑定）优先于 Issue 携带的版本。
+
+    Args:
+        issue: 当前 Issue；``None`` 表示无上下文。
+        prd_preset_overrides: 调用方显式传入的阶段 -> 预设名绑定。
+
+    Returns:
+        合并后的 PRD 级预设绑定；两者都为空时返回空 dict。
+    """
+    merged_bindings: dict[str, str] = {}
+    if issue is not None:
+        merged_bindings.update(dict(getattr(issue, "lifecycle_preset_overrides", ()) or ()))
+    if prd_preset_overrides:
+        merged_bindings.update(prd_preset_overrides)
+    return merged_bindings
+
+
+def declared_lifecycle_preset(
+    lifecycle: str,
+    config: AppConfig,
+    *,
+    issue: IssueSummary | None = None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
+) -> str | None:
+    """返回该阶段显式绑定的预设名（PRD 块 > 仓库层 > 全局层）；无绑定返回 ``None``。
+
+    Raises:
+        ValueError: 生命周期键非法。
+    """
+    if lifecycle not in LIFECYCLE_AGENT_KEYS:
+        raise ValueError(
+            f"Unknown lifecycle key '{lifecycle}'. Valid keys: {', '.join(LIFECYCLE_AGENT_KEYS)}."
+        )
+    merged_bindings = effective_prd_preset_overrides(issue, prd_preset_overrides)
+    bound_preset = merged_bindings.get(lifecycle)
+    if isinstance(bound_preset, str) and bound_preset:
+        return bound_preset
+    configured_binding = config.lifecycle_presets.declared_value(lifecycle)
+    # isinstance 防御：测试替身（MagicMock config）的 attribute 链会返回非字符串，
+    # 与"未声明"同口径处理，保证未配置路径零行为变化。
+    if isinstance(configured_binding, str) and configured_binding:
+        return configured_binding
+    return None
+
+
 def attach_prd_lifecycle_overrides(
     issue: IssueSummary,
     repo_path: Path | None,
@@ -300,14 +434,16 @@ def attach_prd_lifecycle_overrides(
     """从该 Issue 引用的 PRD 文件解析头部覆盖，回填到 ``IssueSummary``。
 
     最佳努力：PRD 路径缺失、文件不存在或解析失败时原样返回该 Issue（记一条 warning），
-    绝不让"读 PRD 头部"这一步打断流水线。
+    绝不让"读 PRD 头部"这一步打断流水线。同时解析 ``lifecycle_agents`` 与
+    ``lifecycle_presets`` 两个块，分别回填到 ``lifecycle_overrides`` 与
+    ``lifecycle_preset_overrides``。
 
     Args:
         issue: 待处理的 Issue。
         repo_path: 目标仓库主检出根（PRD 随仓库存在，worktree 尚未创建时也可读）。
 
     Returns:
-        回填了 ``lifecycle_overrides`` 的 Issue；无覆盖或读取失败时返回原对象。
+        回填了覆盖字段的 Issue；无覆盖或读取失败时返回原对象。
     """
     if repo_path is None:
         return issue
@@ -328,19 +464,29 @@ def attach_prd_lifecycle_overrides(
             exc,
         )
         return issue
-    try:
-        overrides = parse_prd_lifecycle_overrides(prd_text, prd_path=prd_relative_path)
-    except ValueError as exc:
-        _logger.warning(
-            "Issue #%d: invalid lifecycle_agents block in '%s': %s",
-            issue.number,
-            prd_file_path,
-            exc,
-        )
+    updated_fields: dict[str, object] = {}
+    for block_name, field_name in (
+        (PRD_OVERRIDE_BLOCK_AGENTS, "lifecycle_overrides"),
+        (PRD_OVERRIDE_BLOCK_PRESETS, "lifecycle_preset_overrides"),
+    ):
+        try:
+            block_overrides = parse_prd_lifecycle_overrides(
+                prd_text, prd_path=prd_relative_path, block_name=block_name
+            )
+        except ValueError as exc:
+            _logger.warning(
+                "Issue #%d: invalid %s block in '%s': %s",
+                issue.number,
+                block_name,
+                prd_file_path,
+                exc,
+            )
+            return issue
+        if block_overrides:
+            updated_fields[field_name] = tuple(sorted(block_overrides.items()))
+    if not updated_fields:
         return issue
-    if not overrides:
-        return issue
-    return dataclasses.replace(issue, lifecycle_overrides=tuple(sorted(overrides.items())))
+    return dataclasses.replace(issue, **updated_fields)
 
 
 def resolve_lifecycle_agent(
@@ -351,29 +497,47 @@ def resolve_lifecycle_agent(
     selected_agent: str | None = None,
     override_agent: str = "auto",
     prd_overrides: Mapping[str, str] | None = None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
 ) -> str:
     """解析某个生命周期阶段实际使用的 agent。
+
+    阶段绑定预设（PRD ``lifecycle_presets`` 块 > 仓库层 > 全局层）时，预设
+    整体决定该阶段的 (agent, 模型, 推理档)——本函数返回预设声明的 agent
+    （遮蔽矩阵同键声明）；显式 ``override_agent``（CLI ``--agent``）仍然最高，
+    此时绑定让位、模型绑定由调用方按 agent 匹配规则丢弃。
 
     Args:
         lifecycle: 九个生命周期键之一。
         config: 已按"仓库层 > 全局层"合并好的应用配置。
-        issue: 当前 Issue；``auto`` 标签路由（实现 / 辩论）需要。
+        issue: 当前 Issue；``auto`` 标签路由（实现 / 辩论）与 PRD 级覆盖需要。
         selected_agent: 实现阶段选中的 agent；``executor`` 与多数 ``auto``
             语义需要它。
         override_agent: 命令行 ``--agent`` 覆盖；``auto`` 表示未指定。
-        prd_overrides: PRD 文件头部覆盖（最高优先级）。
+        prd_overrides: PRD 文件头部 ``lifecycle_agents`` 块（agent 覆盖）。
+        prd_preset_overrides: 显式传入的阶段 -> 预设名绑定（CLI ``--preset``
+            锚定阶段的虚拟绑定也走这里），优先于 Issue 携带的 PRD 块。
 
     Returns:
         该阶段使用的 agent 名。
 
     Raises:
-        ValueError: 生命周期键非法，或矩阵 / 覆盖里的取值违反阶段约束。
+        ValueError: 生命周期键非法，或矩阵 / 覆盖 / 绑定里的取值违反阶段约束，
+            或绑定的预设名未定义。
         UnknownAgentError: 解析结果是未注册的 agent 名（fail-fast）。
     """
     if lifecycle not in LIFECYCLE_AGENT_KEYS:
         raise ValueError(
             f"Unknown lifecycle key '{lifecycle}'. Valid keys: {', '.join(LIFECYCLE_AGENT_KEYS)}."
         )
+
+    # 显式 CLI --agent 最高：绑定让位（模型绑定由调用方按 agent 匹配规则丢弃）。
+    if override_agent == LIFECYCLE_AGENT_AUTO:
+        bound_preset_name = declared_lifecycle_preset(
+            lifecycle, config, issue=issue, prd_preset_overrides=prd_preset_overrides
+        )
+        if bound_preset_name is not None:
+            bound_selection = resolve_model_selection(bound_preset_name, config)
+            return _validate_registered(bound_selection.agent, lifecycle=lifecycle, config=config)
 
     merged_prd_overrides = effective_prd_overrides(issue, prd_overrides)
     if lifecycle in merged_prd_overrides:
@@ -408,6 +572,58 @@ def resolve_lifecycle_agent(
         selected_agent=selected_agent,
         override_agent=override_agent,
     )
+
+
+def resolve_lifecycle_model_selection(
+    lifecycle: str,
+    config: AppConfig,
+    *,
+    issue: IssueSummary | None = None,
+    prd_preset_overrides: Mapping[str, str] | None = None,
+    model_override: str | None = None,
+    effort_override: str | None = None,
+) -> ModelSelection | None:
+    """解析某个生命周期阶段的模型绑定；无绑定时返回 ``None``（零注入）。
+
+    解析优先级（高到低）：显式 ``prd_preset_overrides``（CLI ``--preset``
+    锚定阶段的虚拟绑定）> Issue 携带的 PRD ``lifecycle_presets`` 块 >
+    仓库层 ``[agent_runner.lifecycle_presets]`` > 全局层。命中绑定时解析预设
+    （命令行 ``--model`` / ``--reasoning-effort`` 覆盖同名字段），并校验预设
+    声明的 agent 已注册。
+
+    与 :func:`resolve_lifecycle_agent` 的协作约定：命中绑定的阶段，agent 解析
+    也走绑定（预设声明的 agent）；调用方在**执行 agent 确定后**必须校验
+    ``model_selection.agent == agent_name``，不等（显式 ``--agent`` 换人 /
+    回退）则置 ``None`` 并记日志，绝不把 A CLI 的模型参数塞给 B CLI。
+
+    Args:
+        lifecycle: 九个生命周期键之一。
+        config: 已按"仓库层 > 全局层"合并好的应用配置。
+        issue: 当前 Issue（PRD 级绑定随它流动）。
+        prd_preset_overrides: 显式传入的阶段 -> 预设名绑定。
+        model_override: 命令行 ``--model`` 覆盖；``None`` 表示未覆盖。
+        effort_override: 命令行 ``--reasoning-effort`` 覆盖；同上。
+
+    Returns:
+        解析后的 :class:`ModelSelection`；该阶段无绑定时返回 ``None``。
+
+    Raises:
+        ValueError: 生命周期键非法，或绑定的预设名未定义（fail-fast）。
+        UnknownAgentError: 预设声明的 agent 未注册。
+    """
+    bound_preset_name = declared_lifecycle_preset(
+        lifecycle, config, issue=issue, prd_preset_overrides=prd_preset_overrides
+    )
+    if bound_preset_name is None:
+        return None
+    model_selection = resolve_model_selection(
+        bound_preset_name,
+        config,
+        model_override=model_override,
+        effort_override=effort_override,
+    )
+    _validate_registered(model_selection.agent, lifecycle=lifecycle, config=config)
+    return model_selection
 
 
 def _materialize(
@@ -575,9 +791,16 @@ def _resolve_auto(
 
 
 __all__ = [
+    "PRD_OVERRIDE_BLOCK_AGENTS",
+    "PRD_OVERRIDE_BLOCK_PRESETS",
+    "attach_prd_lifecycle_overrides",
+    "declared_lifecycle_preset",
+    "effective_prd_overrides",
+    "effective_prd_preset_overrides",
     "legacy_configured_agent",
     "parse_prd_lifecycle_overrides",
     "render_prd_lifecycle_overrides_block",
     "resolve_lifecycle_agent",
+    "resolve_lifecycle_model_selection",
     "upsert_prd_lifecycle_overrides",
 ]

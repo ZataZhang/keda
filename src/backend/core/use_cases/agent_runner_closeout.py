@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
@@ -509,18 +510,21 @@ def run_closeout_agent(
     process_runner: IProcessRunner,
     *,
     prompt_context: CloseoutPromptContext,
+    model_selection: ModelSelection | None = None,
 ) -> CommandResult:
     """运行一次受限的收尾 agent。
 
     复用当前轮次已选定的 agent 与既有的 :func:`run_agent_with_prompt_resilient`
     调用链（含瞬时错误就地重试），只替换 prompt 与超时预算——收尾层刻意不引入
-    "收尾用哪个 agent"这个新的配置维度。
+    "收尾用哪个 agent"这个新的配置维度（阶段绑定的整体换 agent 由绑定解析层
+    决定，模型参数则经 ``model_selection`` 透传，换人时由 resilient 层丢弃）。
 
     Args:
         agent_name: 当前轮次使用的 agent 名。
         config: Agent Runner 配置，提供超时与重试参数。
         process_runner: 命令执行器。
         prompt_context: 本次收尾的上下文。
+        model_selection: 收尾阶段生效的模型选择（自绑或继承实现者）。
 
     Returns:
         收尾 agent 的命令结果。
@@ -543,4 +547,5 @@ def run_closeout_agent(
         transient_retry_delay_seconds=config.runner.transient_retry_delay_seconds,
         timeout_seconds=closeout_timeout_seconds,
         inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
+        model_selection=model_selection,
     )

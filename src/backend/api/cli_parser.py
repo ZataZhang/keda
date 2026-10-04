@@ -46,6 +46,54 @@ def _agent_choices_with(
     return (*prefix, *registered_agent_names(), *suffix)
 
 
+def registered_preset_names() -> tuple[str, ...]:
+    """按配置声明顺序返回已定义的模型预设名（``--preset`` choices 的来源）。
+
+    与 :func:`registered_agent_names` 同口径：choices 只影响输入校验，
+    未定义预设名时 choices 为空（允许任何自由字符串会在解析期 fail-fast，
+    因此这里放宽为不做 choices 校验——``None`` 表示不限制）。
+    """
+    try:
+        from backend.core.use_cases.agent_runner_factory import (
+            build_app_config_from_settings,
+            load_fresh_agent_runner_settings,
+        )
+
+        return tuple(
+            build_app_config_from_settings(load_fresh_agent_runner_settings()).agent_presets
+        )
+    except Exception:  # noqa: BLE001 - choices 必须在任何配置状态下可用
+        return ()
+
+
+def add_model_preset_options(parser: argparse.ArgumentParser) -> None:
+    """给生命周期锚定的入口加 ``--preset`` / ``--model`` / ``--reasoning-effort``。
+
+    三个旗标都是可选的一次性覆盖：绑定打底，命令行微调同名字段；
+    完全不传时行为与今天逐字节一致。
+    """
+    preset_group = parser.add_argument_group("model preset")
+    preset_group.add_argument(
+        "--preset",
+        default=None,
+        help=(
+            "Anchor this command's lifecycle stage to a named model preset "
+            "(overrides the stage binding for this run). See `iar agent presets`."
+        ),
+    )
+    preset_group.add_argument(
+        "--model",
+        default=None,
+        help="One-shot model id override for the preset / binding (same field).",
+    )
+    preset_group.add_argument(
+        "--reasoning-effort",
+        dest="reasoning_effort",
+        default=None,
+        help="One-shot reasoning effort override for the preset / binding (same field).",
+    )
+
+
 def add_common_options(parser: argparse.ArgumentParser) -> None:
     """Allow global options before or after the effective subcommand."""
     parser.add_argument("--repo", default=argparse.SUPPRESS, help="Target repository path.")
@@ -156,6 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Upstream group label this Issue depends on (repeatable).",
     )
+    add_model_preset_options(issue_create_parser)
     add_common_options(issue_create_parser)
 
     issue_list_parser = issue_subparsers.add_parser(
@@ -210,6 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
     run_parser.add_argument("--max-issues", type=int)
+    add_model_preset_options(run_parser)
     add_common_options(run_parser)
     add_all_repositories_option(run_parser)
 
@@ -219,6 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
     daemon_run_options.add_argument("--max-issues", type=int)
+    add_model_preset_options(daemon_run_options)
     daemon_run_options.add_argument(
         "--concurrency",
         type=int,
@@ -291,6 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
     review_parser.add_argument("--max-issues", type=int)
+    add_model_preset_options(review_parser)
     add_common_options(review_parser)
     add_all_repositories_option(review_parser)
 
@@ -306,6 +358,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
     review_daemon_parser.add_argument("--max-issues", type=int)
+    add_model_preset_options(review_daemon_parser)
     add_common_options(review_daemon_parser)
     add_all_repositories_option(review_daemon_parser)
 
@@ -374,6 +427,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output directory for decision audit.",
     )
+    add_model_preset_options(ask_parser)
     add_common_options(ask_parser)
 
     repl_parser = subparsers.add_parser(
@@ -456,6 +510,38 @@ def build_parser() -> argparse.ArgumentParser:
         default="golden-prompt",
         help="Sentinel prompt used when expanding argv (default: golden-prompt).",
     )
+    agent_doctor_parser.add_argument(
+        "--preset",
+        default=None,
+        help=(
+            "Resolve argv as if a named model preset were applied "
+            "(injects the preset's model / reasoning effort args)."
+        ),
+    )
+    agent_doctor_parser.add_argument(
+        "--model",
+        default=None,
+        help="One-shot model id override for --preset.",
+    )
+    agent_doctor_parser.add_argument(
+        "--reasoning-effort",
+        dest="reasoning_effort",
+        default=None,
+        help="One-shot reasoning effort override for --preset.",
+    )
+    agent_doctor_parser.add_argument(
+        "--lifecycle",
+        default=None,
+        help=(
+            "Print the resolved agent + argv for a lifecycle stage "
+            "(nine-key closed set), applying any stage -> preset binding."
+        ),
+    )
+    agent_presets_parser = agent_subparsers.add_parser(
+        "presets",
+        help="List defined model presets and their (agent, model, reasoning effort).",
+    )
+    agent_presets_parser.set_defaults(command="agent presets")
 
     worktree_parser = subparsers.add_parser(
         "worktree",

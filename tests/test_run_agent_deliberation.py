@@ -47,6 +47,7 @@ class FakeTranscriptRunner(IAgentTranscriptRunner):
         event_sink: Callable[[DeliberationEvent], None],
         output_sink: Callable[[str], None] | None = None,
         display_sink: Callable[[str], None] | None = None,
+        model_selection: object = None,
     ) -> CommandResult:
         self.calls.append({"agent_name": agent_name, "prompt": prompt, "cwd": cwd})
         output = self.responses.get(agent_name, "default output")
@@ -300,6 +301,7 @@ class _DisplayEmittingRunner(IAgentTranscriptRunner):
         event_sink: Callable[[DeliberationEvent], None],
         output_sink: Callable[[str], None] | None = None,
         display_sink: Callable[[str], None] | None = None,
+        model_selection: object = None,
     ) -> CommandResult:
         if display_sink is not None:
             display_sink(f"reasoning:{agent_name}")

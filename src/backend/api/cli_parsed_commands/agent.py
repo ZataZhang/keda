@@ -63,9 +63,25 @@ def run_ask_command(ctx: ParsedCommandContext) -> int:
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     planner_runner = _cli.create_planner_runner(ctx.process_runner, config=context.config)
     content_generator = _cli.create_content_generator(ctx.process_runner, config=context.config)
+    # CLI --preset 一次性锚定（planner 阶段）：把预设 + --model/--reasoning-effort
+    # 覆盖折叠进本轮配置，后续解析链零改动。
+    from backend.api.cli_model_preset_anchor import apply_cli_model_preset_to_config
+
+    anchored_config = apply_cli_model_preset_to_config(
+        context.config, ctx.parsed, anchored_stage="planner"
+    )
+    # planner 阶段绑定的模型选择：换人（显式 --agent）时丢弃并记日志。
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
+
     agent = ctx.parsed.agent
     if agent == "auto":
-        agent = resolve_lifecycle_agent("planner", context.config)
+        agent = resolve_lifecycle_agent("planner", anchored_config)
+    planner_model_selection = drop_model_selection_for_agent(
+        agent, resolve_lifecycle_model_selection("planner", anchored_config)
+    )
     output_dir = None
     if ctx.parsed.output:
         output_dir = Path(ctx.parsed.output)
@@ -96,6 +112,7 @@ def run_ask_command(ctx: ParsedCommandContext) -> int:
             "event_sink": event_sink,
             "output_view": output_view,
         },
+        model_selection=planner_model_selection,
     )
 
 
@@ -273,13 +290,14 @@ def _doctor_entry(
     prompt: str,
     cwd: Path,
     config,  # AppConfig（避免再引入 core 模型的运行时导入开销）
+    model_selection=None,  # ModelSelection | None
 ) -> tuple[dict[str, object] | None, list[str]]:
     """构造单个 agent/profile 的 doctor 记录与告警列表。
 
     Returns:
         ``(entry, warnings)``。任何失败（未注册 agent / 缺 profile /
-        未知展开器 / 协议未注册或加载失败）由调用方统一转成报错，
-        这里以 ``entry=None`` 表达。
+        未知展开器 / 协议未注册或加载失败 / 模板缺失的模型绑定）由调用方
+        统一转成报错，这里以 ``entry=None`` 表达。
     """
     warnings: list[str] = []
     try:
@@ -303,8 +321,10 @@ def _doctor_entry(
         )
         return None, warnings
     try:
-        invocation = build_agent_invocation(agent_name, profile, prompt, cwd, config)
-    except ValueError as exc:  # 未知展开器 / flag 缺失等构造错误
+        invocation = build_agent_invocation(
+            agent_name, profile, prompt, cwd, config, model_selection=model_selection
+        )
+    except ValueError as exc:  # 未知展开器 / flag 缺失 / 模型绑定模板缺失
         error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
         return None, warnings
     registry = get_output_protocol_registry()
@@ -327,6 +347,65 @@ def _doctor_entry(
         "argv": list(invocation.argv),
         "prompt_delivery": invocation.prompt_delivery,
     }
+    if model_selection is not None:
+        entry["preset"] = model_selection.preset_name or None
+        entry["model"] = model_selection.model
+        entry["reasoning_effort"] = model_selection.reasoning_effort
+    return entry, warnings
+
+
+def _doctor_lifecycle_profile(lifecycle: str) -> str:
+    """生命周期阶段 -> doctor 打印用的用途名（与真实运行路径一致）。"""
+    if lifecycle == "deliberate":
+        return "deliberate"
+    if lifecycle in ("planner", "content_generation"):
+        return "generate"
+    return "run"
+
+
+def _doctor_lifecycle_entry(
+    lifecycle: str,
+    prompt: str,
+    cwd: Path,
+    config,
+) -> tuple[dict[str, object] | None, list[str]]:
+    """按生命周期阶段视角构造 doctor 记录：解析 agent + 绑定的模型参数。
+
+    fix / closeout 没有实现者上下文时如实返回 ``follows_implementation``
+    标记（不打 argv，与 console 只读视图口径一致）。
+    """
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_agent,
+        resolve_lifecycle_model_selection,
+    )
+    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
+
+    warnings: list[str] = []
+    agent_name = resolve_lifecycle_agent(lifecycle, config)
+    model_selection = drop_model_selection_for_agent(
+        agent_name, resolve_lifecycle_model_selection(lifecycle, config)
+    )
+    if lifecycle in ("fix", "closeout"):
+        return {
+            "lifecycle": lifecycle,
+            "agent": agent_name,
+            "follows_implementation": True,
+            "model_selection": (
+                {
+                    "preset": model_selection.preset_name or None,
+                    "model": model_selection.model,
+                    "reasoning_effort": model_selection.reasoning_effort,
+                }
+                if model_selection is not None
+                else None
+            ),
+        }, warnings
+    profile_name = _doctor_lifecycle_profile(lifecycle)
+    entry, warnings = _doctor_entry(
+        agent_name, profile_name, prompt, cwd, config, model_selection=model_selection
+    )
+    if entry is not None:
+        entry = {"lifecycle": lifecycle, **entry}
     return entry, warnings
 
 
@@ -337,18 +416,89 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
         for protocol_id in get_output_protocol_registry().list_ids():
             print(protocol_id)
         return 0
+    config = build_app_config()
+    prompt = getattr(parsed, "prompt", None) or GOLDEN_SNAPSHOT_PROMPT
+    cwd = Path.cwd()
+    lifecycle_key = getattr(parsed, "lifecycle", None)
+
+    # --lifecycle 视角：按阶段解析 agent 与绑定并打印。
+    if lifecycle_key is not None:
+        from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_KEYS
+
+        if lifecycle_key not in LIFECYCLE_AGENT_KEYS:
+            error_console.print(
+                f"[red]doctor failed:[/] unknown lifecycle key '{lifecycle_key}'. "
+                f"Valid keys: {', '.join(LIFECYCLE_AGENT_KEYS)}.",
+                markup=False,
+            )
+            return 1
+        entry, warnings = _doctor_lifecycle_entry(lifecycle_key, prompt, cwd, config)
+        if entry is None:
+            return 1
+        for warning in warnings:
+            error_console.print(f"[yellow]WARN:[/] {warning}", markup=False)
+        if getattr(parsed, "json_output", False):
+            print(json.dumps([entry], indent=2, ensure_ascii=False))
+            return 0
+        console.print(f"[cyan]{entry['lifecycle']}[/] · {entry.get('agent')}")
+        if entry.get("follows_implementation"):
+            console.print("  follows implementation agent (no standalone argv)", markup=False)
+        else:
+            console.print(f"  argv: {shlex.join(str(arg) for arg in entry['argv'])}", markup=False)
+            console.print(
+                f"  prompt_delivery: {entry['prompt_delivery']}",
+                markup=False,
+            )
+        if entry.get("preset") or entry.get("model"):
+            console.print(
+                f"  preset: {entry.get('preset') or '(inline)'} · "
+                f"model: {entry.get('model') or '-'} · "
+                f"reasoning_effort: {entry.get('reasoning_effort') or '-'}",
+                markup=False,
+            )
+        return 0
+
+    preset_name = getattr(parsed, "preset", None)
+    if preset_name:
+        # --preset 视角：按预设注入模型参数（doctor 是 what-if 工具，
+        # 不做"执行 agent == 预设 agent"的丢弃判定，模板缺失时如实报错）。
+        from backend.core.shared.models.agent_model_preset import resolve_model_selection
+
+        try:
+            preset_selection = resolve_model_selection(
+                preset_name,
+                config,
+                model_override=getattr(parsed, "model", None),
+                effort_override=getattr(parsed, "reasoning_effort", None),
+            )
+        except ValueError as exc:
+            error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
+            return 1
+    else:
+        if getattr(parsed, "model", None) or getattr(parsed, "reasoning_effort", None):
+            error_console.print(
+                "[red]doctor failed:[/] --model / --reasoning-effort require --preset.",
+                markup=False,
+            )
+            return 1
+        preset_selection = None
+
     agent_names: list[str] = list(parsed.agent_names)
     if not agent_names:
         error_console.print("[red]doctor failed:[/] no agent name given.", markup=False)
         return 1
-    config = build_app_config()
-    prompt = getattr(parsed, "prompt", None) or GOLDEN_SNAPSHOT_PROMPT
-    cwd = Path.cwd()
     profile_names = list(AGENT_PROFILES) if getattr(parsed, "all_profiles", False) else ["run"]
     entries: list[dict[str, object]] = []
     for agent_name in agent_names:
         for profile_name in profile_names:
-            entry, warnings = _doctor_entry(agent_name, profile_name, prompt, cwd, config)
+            entry, warnings = _doctor_entry(
+                agent_name,
+                profile_name,
+                prompt,
+                cwd,
+                config,
+                model_selection=preset_selection,
+            )
             if entry is None:
                 return 1
             for warning in warnings:
@@ -369,9 +519,30 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
     return 0
 
 
+def run_agent_presets_command(ctx: ParsedCommandContext) -> int:
+    """``iar agent presets``: list defined model presets (read-only)."""
+    del ctx  # 只读全局配置，不需要命令上下文
+    config = build_app_config()
+    if not config.agent_presets:
+        console.print(
+            "No model presets defined. Declare [agent_runner.presets.<name>] in "
+            "config.toml / .iar.toml (fields: agent / model / reasoning_effort).",
+            markup=False,
+        )
+        return 0
+    for preset_name, preset in config.agent_presets.items():
+        console.print(
+            f"[cyan]{preset_name}[/] · agent: {preset.agent} · "
+            f"model: {preset.model or '-'} · reasoning_effort: {preset.reasoning_effort or '-'}",
+            markup=False,
+        )
+    return 0
+
+
 __all__ = [
     "run_agent_doctor_command",
     "run_agent_list_command",
+    "run_agent_presets_command",
     "run_ask_command",
     "run_deliberate_command",
     "run_repl_command",

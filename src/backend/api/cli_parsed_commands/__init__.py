@@ -14,6 +14,7 @@ from __future__ import annotations
 from backend.api.cli_parsed_commands.agent import (
     run_agent_doctor_command,
     run_agent_list_command,
+    run_agent_presets_command,
     run_ask_command,
     run_deliberate_command,
     run_repl_command,
@@ -87,6 +88,7 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "deliberate": run_deliberate_command,
     "agent list": run_agent_list_command,
     "agent doctor": run_agent_doctor_command,
+    "agent presets": run_agent_presets_command,
     "logs": run_logs_command,
     "loop create": run_loop_command,
     "loop list": run_loop_command,

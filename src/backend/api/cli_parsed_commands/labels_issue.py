@@ -71,6 +71,18 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     gc_config = context.config.generated_content
+    # content_generation 阶段：CLI --preset 一次性锚定 + 配置绑定解析。
+    from backend.api.cli_model_preset_anchor import apply_cli_model_preset_to_config
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+
+    anchored_config = apply_cli_model_preset_to_config(
+        context.config, ctx.parsed, anchored_stage="content_generation"
+    )
+    content_generation_selection = resolve_lifecycle_model_selection(
+        "content_generation", anchored_config
+    )
     content_generator = None
     if gc_config.enabled and gc_config.issue_from_prd.enabled:
         if gc_config.issue_from_prd.mode == "agent":
@@ -104,6 +116,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                     validation_language=context.config.validation.language,
                     structured_evidence=context.config.validation.structured_evidence,
                     evidence_dir=context.config.validation.evidence_dir,
+                    model_selection=content_generation_selection,
                 ),
                 github_client=github_client,
                 process_runner=ctx.process_runner,

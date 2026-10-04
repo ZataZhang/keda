@@ -4175,6 +4175,7 @@ def test_main_run_phase0_deliberation_real_entry_point(monkeypatch, tmp_path: Pa
             event_sink,
             output_sink=None,
             display_sink=None,
+            model_selection=None,
         ) -> CommandResult:
             return CommandResult(
                 command=(agent_name,),

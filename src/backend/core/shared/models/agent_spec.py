@@ -118,6 +118,10 @@ class AgentSpec:
         project_skills_dir: 项目级 skills 目录（相对仓库根，如 pi 的
             ``".pi/skills"``）。
         profiles: 用途名 -> 调用形态。四种用途键见 ``AGENT_PROFILES``。
+        model_args: 模型参数 argv 模板（含 ``{model}`` 占位符）；为空表示
+            该 agent 未声明模型选择语法，命中模型绑定时 fail-fast。
+        reasoning_effort_args: 推理档参数 argv 模板（含 ``{effort}`` 占位符）；
+            为空表示未声明推理档语法。
     """
 
     bin: str
@@ -129,6 +133,8 @@ class AgentSpec:
     auth_exclude: tuple[str, ...] = ()
     project_skills_dir: str | None = None
     profiles: dict[str, AgentProfileSpec] = field(default_factory=dict)
+    model_args: tuple[str, ...] = ()
+    reasoning_effort_args: tuple[str, ...] = ()
 
     def user_skills_dir(self, user_home_path: Path) -> Path | None:
         """派生该 agent 的用户级 skills 目录（唯一派生规则）。
@@ -253,6 +259,9 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             "todos",
         ),
         project_skills_dir=".claude/skills",
+        # 模型选择：`claude --model <id>` 已核实；推理档 flag 语法未核实，
+        # 保持为空 → 命中带推理档的绑定时 fail-fast（宁缺勿假）。
+        model_args=("--model", "{model}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=(
@@ -406,6 +415,10 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             "skills-marketplace",
         ),
         project_skills_dir=".codebuddy/skills",
+        # 模型选择（已核实，见 PRD External Validation）：`codebuddy --model <id>`
+        # 与推理档 `--settings '{"reasoningEffort":"<档>"}'`。
+        model_args=("--model", "{model}"),
+        reasoning_effort_args=("--settings", '{"reasoningEffort":"{effort}"}'),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=(

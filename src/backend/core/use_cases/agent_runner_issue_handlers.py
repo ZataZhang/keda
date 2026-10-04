@@ -183,6 +183,17 @@ def _process_blocked_resolution(
     )
 
     selected_agent = choose_agent(issue, config, agent)
+    # implementation 阶段绑定的模型选择：换人（CLI --agent 显式指定 / 回退链
+    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入。
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
+
+    implementation_model_selection = drop_model_selection_for_agent(
+        selected_agent,
+        resolve_lifecycle_model_selection("implementation", config, issue=issue),
+    )
 
     # 定位 worktree 并确认分支
     worktree_path = _find_worktree_path_for_issue(repo_path, issue, config, process_runner)
@@ -225,6 +236,7 @@ def _process_blocked_resolution(
             prompt_override=continuation_prompt,
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
+            model_selection=implementation_model_selection,
         )
 
         # 完成发布流程
@@ -561,6 +573,17 @@ def _process_ready_issue(
     )
 
     selected_agent = choose_agent(issue, config, agent)
+    # implementation 阶段绑定的模型选择：换人（CLI --agent 显式指定 / 回退链
+    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入。
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        resolve_lifecycle_model_selection,
+    )
+    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
+
+    implementation_model_selection = drop_model_selection_for_agent(
+        selected_agent,
+        resolve_lifecycle_model_selection("implementation", config, issue=issue),
+    )
 
     # 步骤 1: 声明 Issue
     transition_issue_workflow_state(github_client, issue.number, config, config.labels.running)
@@ -643,6 +666,7 @@ def _process_ready_issue(
             prompt_override=continuation_prompt,
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
+            model_selection=implementation_model_selection,
         )
     except (
         MaxRetriesExceededError,

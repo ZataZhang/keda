@@ -53,6 +53,7 @@ from backend.core.use_cases.agent_runner_verification_recovery import (
     ensure_verification_passed_with_recovery,
 )
 from backend.core.use_cases.agent_review import ReviewerDecision, parse_reviewer_decision
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.use_cases.run_agent_once import (
     extract_agent_response_text,
     get_current_branch,
@@ -606,6 +607,7 @@ def execute_rebase(
     pr_branch: str,
     expected_head: str,
     supervisor_agent: str,
+    model_selection: ModelSelection | None = None,
 ) -> list[CommandResult]:
     """Rebase the PR branch onto the latest remote base safely.
 
@@ -705,6 +707,7 @@ def execute_rebase(
                 process_runner,
                 config=config,
                 issue=issue,
+                model_selection=model_selection,
             )
 
             # Agent 通过 commit-request.json 显式表达提交意图
@@ -813,6 +816,7 @@ def run_post_pr_supervisor_cycle(
     pr_context: PullRequestContext,
     supervisor_agent: str,
     cycle: int,
+    model_selection: ModelSelection | None = None,
 ) -> SupervisorActionResult:
     """Run a single post-PR supervisor cycle.
 
@@ -880,6 +884,7 @@ def run_post_pr_supervisor_cycle(
                 config=config,
                 capture_output=True,
                 issue=issue,
+                model_selection=model_selection,
             )
         except subprocess.CalledProcessError as exc:
             result = CommandResult(

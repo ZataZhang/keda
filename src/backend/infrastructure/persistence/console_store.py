@@ -5,8 +5,9 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``iar run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 5：v5 新增
-  ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表）。
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 6：v5 新增
+  ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
+  v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -45,7 +46,11 @@ class RunRecord:
 
 @dataclass(frozen=True)
 class AttemptRecord:
-    """一次 agent execution attempt 的本地记录（与 core 同构）。"""
+    """一次 agent execution attempt 的本地记录（与 core 同构）。
+
+    ``preset`` / ``model`` 是 schema v6 追加的可空观测列：绑定生效时写入
+    实际生效的预设名与模型 id，未绑定 / 绑定被丢弃时为 ``None``。
+    """
 
     repo_id: str
     issue_number: int
@@ -57,6 +62,8 @@ class AttemptRecord:
     started_at: str
     finished_at: str
     duration_seconds: float
+    preset: str | None = None
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,7 +119,7 @@ class PrdLifecycleEventRecord:
     detail_json: str
 
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 
 _CREATE_RUN_RECORDS = """
 CREATE TABLE IF NOT EXISTS run_records (
@@ -146,6 +153,11 @@ CREATE TABLE IF NOT EXISTS attempt_records (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )
 """
+
+# schema v5 -> v6（附加式）：attempt_records 追加可空 preset / model 列。
+# 仅 ALTER 既有表；新库由 _CREATE_ATTEMPT_RECORDS 建表后再补列亦可（幂等）。
+_ATTEMPT_V6_ADD_PRESET = "ALTER TABLE attempt_records ADD COLUMN preset TEXT"
+_ATTEMPT_V6_ADD_MODEL = "ALTER TABLE attempt_records ADD COLUMN model TEXT"
 
 _CREATE_AUDIT_LOGS = """
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -284,6 +296,17 @@ class SqliteConsoleStore:
             connection.execute(_CREATE_PRD_LIFECYCLE_EVENTS)
             for index_statement in _CREATE_PRD_LIFECYCLE_INDEXES:
                 connection.execute(index_statement)
+        if current_version < 6:
+            # 附加式迁移：attempt_records 补 preset / model 可空列。新库在本轮
+            # 迁移前刚由 _CREATE_ATTEMPT_RECORDS 建表，PRAGMA 探测保证幂等。
+            existing_attempt_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(attempt_records)").fetchall()
+            }
+            if "preset" not in existing_attempt_columns:
+                connection.execute(_ATTEMPT_V6_ADD_PRESET)
+            if "model" not in existing_attempt_columns:
+                connection.execute(_ATTEMPT_V6_ADD_MODEL)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 
@@ -320,8 +343,9 @@ class SqliteConsoleStore:
                 connection.execute(
                     "INSERT INTO attempt_records "
                     "(repo_id, issue_number, agent, attempt_number, failure_type, "
-                    " recovered, detail, started_at, finished_at, duration_seconds) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " recovered, detail, started_at, finished_at, duration_seconds, "
+                    " preset, model) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         attempt_record.repo_id,
                         attempt_record.issue_number,
@@ -333,6 +357,8 @@ class SqliteConsoleStore:
                         attempt_record.started_at,
                         attempt_record.finished_at,
                         attempt_record.duration_seconds,
+                        attempt_record.preset,
+                        attempt_record.model,
                     ),
                 )
                 connection.commit()
@@ -402,7 +428,8 @@ class SqliteConsoleStore:
             with self._connect() as connection:
                 attempt_rows = connection.execute(
                     "SELECT repo_id, issue_number, agent, attempt_number, failure_type, "
-                    "recovered, detail, started_at, finished_at, duration_seconds "
+                    "recovered, detail, started_at, finished_at, duration_seconds, "
+                    "preset, model "
                     "FROM attempt_records WHERE repo_id = ? AND issue_number = ? "
                     "ORDER BY id DESC LIMIT ?",
                     (repo_id, issue_number, limit),
@@ -422,6 +449,8 @@ class SqliteConsoleStore:
                 started_at=attempt_row["started_at"],
                 finished_at=attempt_row["finished_at"],
                 duration_seconds=float(attempt_row["duration_seconds"]),
+                preset=attempt_row["preset"],
+                model=attempt_row["model"],
             )
             for attempt_row in reversed(attempt_rows)
         ]

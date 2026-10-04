@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from backend.core.shared.interfaces.agent_runner import (
     IAgentTranscriptRunner,
 )
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_deliberation import (
     DeliberationAgentFailure,
     DeliberationAgentProfile,
@@ -196,6 +197,7 @@ def _run_single_agent(
     output_view: IAgentOutputView,
     output_sink: Callable[[str], None] | None = None,
     display_sink: Callable[[str], None] | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> "AgentRunOutcome":
     _emit(
         event_sink,
@@ -213,6 +215,7 @@ def _run_single_agent(
         event_sink=event_sink,
         output_sink=output_sink,
         display_sink=display_sink,
+        model_selection=model_selection,
     )
     output_text = result.stdout.strip()
     if output_sink is None:
@@ -247,6 +250,7 @@ def _run_round(
     output_view: IAgentOutputView,
     config: DeliberationConfig,
     resolver: "Callable[[DeliberationAgentProfile, str], DeliberationAgentProfile | None] | None" = None,
+    model_selection: ModelSelection | None = None,
 ) -> tuple[dict[str, str], list[DeliberationAgentFailure]]:
     outputs: dict[str, str] = {}
     failed_agents: list[DeliberationAgentFailure] = []
@@ -275,6 +279,7 @@ def _run_round(
             output_view=output_view,
             output_sink=streaming_sink,
             display_sink=display_sink,
+            model_selection=model_selection,
         )
 
     outcomes: list[AgentRunOutcome] = []
@@ -387,6 +392,7 @@ def run_agent_deliberation(
     output_view: IAgentOutputView | None = None,
     resolver: "Callable[[DeliberationAgentProfile, str], DeliberationAgentProfile | None] | None" = None,
     synthesis_prompt_builder: Callable[[DeliberationRequest, str], str] | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> DeliberationResult:
     """Run a multi-agent deliberation session.
 
@@ -467,6 +473,7 @@ def run_agent_deliberation(
             output_view=output_view,
             config=config,
             resolver=resolver,
+            model_selection=model_selection,
         )
         session_failed_agents.extend(isolation_failures)
         round_outputs[1] = isolation_outputs
@@ -489,6 +496,7 @@ def run_agent_deliberation(
                 output_view=output_view,
                 config=config,
                 resolver=resolver,
+                model_selection=model_selection,
             )
             session_failed_agents.extend(discussion_failures)
             round_outputs[round_number] = discussion_outputs
@@ -533,6 +541,7 @@ def run_agent_deliberation(
             event_sink=_record_event,
             output_sink=synthesis_sink,
             display_sink=synthesis_display_sink,
+            model_selection=model_selection,
         )
         synthesis_output = synthesis_result.stdout.strip()
         synthesis_status = "finished" if synthesis_result.return_code == 0 else "failed"

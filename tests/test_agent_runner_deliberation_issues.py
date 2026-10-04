@@ -77,6 +77,7 @@ class _StubTranscriptRunner(IAgentTranscriptRunner):
         event_sink: Callable[[DeliberationEvent], None],
         output_sink: Callable[[str], None] | None = None,
         display_sink: Callable[[str], None] | None = None,
+        model_selection: object = None,
     ) -> CommandResult:
         self.calls.append({"agent_name": agent_name, "prompt": prompt})
         if self.raise_on_call:

@@ -27,6 +27,7 @@ from backend.infrastructure.config.settings import (
     AgentRunnerInteractiveDecisionSettings,
     AgentRunnerLabelSettings,
     AgentRunnerLifecycleAgentsSettings,
+    AgentRunnerLifecyclePresetsSettings,
     AgentRunnerLocalSettings,
     AgentRunnerMemorySettings,
     AgentRunnerPostPrSupervisorSettings,
@@ -823,6 +824,8 @@ def build_repository_local_config_text(
         # 渲染为空段（不写入任何键）：仓库级矩阵默认全部未声明，继续回落全局层与
         # 既有配置键；在此段下新增键即生效。
         lifecycle_agents=AgentRunnerLifecycleAgentsSettings(),
+        # 预设绑定段同理渲染为空段（不写入任何键）。
+        lifecycle_presets=AgentRunnerLifecyclePresetsSettings(),
     )
 
     return repo_root_path, settings_to_toml_string(settings), verification_commands

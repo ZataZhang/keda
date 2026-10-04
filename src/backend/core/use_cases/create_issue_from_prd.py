@@ -36,6 +36,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
     DEFAULT_VALIDATION_EVIDENCE_DIR,
     GeneratedContentConfig,
@@ -139,6 +140,9 @@ class IssueFromPrdRequest:
     validation_language: str = "zh-CN"
     structured_evidence: bool = True
     evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR
+    #: content_generation 阶段绑定的模型选择（CLI ``--preset`` 锚定或配置绑定
+    #: 的解析结果）；``None`` 表示不注入模型参数、agent 走既有解析。
+    model_selection: ModelSelection | None = None
 
 
 @dataclass(frozen=True)
@@ -1115,6 +1119,7 @@ def create_issue_from_prd(
             fallback_body=fallback_body,
             generator=content_generator,
             cwd=gc_cwd,
+            model_selection=request.model_selection,
         )
         title = generated.title
         body = generated.body

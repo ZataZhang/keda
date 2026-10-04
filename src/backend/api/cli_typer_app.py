@@ -38,6 +38,9 @@ __all__ = [
     "LogsKindChoice",
     "MaxIssuesOption",
     "RepoIdOption",
+    "ModelIdOption",
+    "ModelPresetOption",
+    "ReasoningEffortOption",
     "RepoOption",
     "RunAgentChoice",
     "RunAgentOption",
@@ -45,6 +48,7 @@ __all__ = [
     "_app_callback",
     "_enum_value",
     "_run_typer_command",
+    "_typer_preset_options",
     "_run_typer_repository_command",
     "_typer_selector_options",
     "app",
@@ -242,6 +246,37 @@ RunAgentOption = Annotated[
     RunAgentChoice,
     typer.Option("--agent", help="Agent runner to use."),
 ]
+#: 生命周期锚定入口共享的模型预设一次性覆盖旗标（--preset/--model/--reasoning-effort）。
+ModelPresetOption = Annotated[
+    str | None,
+    typer.Option(
+        "--preset",
+        help="Anchor this command's lifecycle stage to a named model preset (one-shot).",
+    ),
+]
+ModelIdOption = Annotated[
+    str | None,
+    typer.Option("--model", help="One-shot model id override for the preset / binding."),
+]
+ReasoningEffortOption = Annotated[
+    str | None,
+    typer.Option(
+        "--reasoning-effort",
+        help="One-shot reasoning effort override for the preset / binding.",
+    ),
+]
+
+
+def _typer_preset_options(
+    *,
+    preset: str | None,
+    model: str | None,
+    reasoning_effort: str | None,
+) -> dict[str, str | None]:
+    """把模型预设覆盖旗标组装成 dispatch kwargs（未传时全 ``None``）。"""
+    return {"preset": preset, "model": model, "reasoning_effort": reasoning_effort}
+
+
 MaxIssuesOption = Annotated[
     int | None,
     typer.Option("--max-issues", help="Maximum number of issues to process."),
