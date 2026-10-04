@@ -332,7 +332,7 @@ tasks/evidence/**
 
 这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），`git add -A` 天然只把 `.md` 文本报告（verification-plan / evidence-report / verifier-report）带进 commit，截图、录屏、oracle 脚本等原始产物不进 git 历史；发布前拦截（`ensure_no_evidence_paths_in_changes`）再兜底拒绝被 `git add -f` 强制加入的非 `.md` 证据产物。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
 
-同时 `iar init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：iar 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 iar 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重跑 `iar init`，或设置 `IAR_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `iar init --force`。**安装目标首位是 keda 自有目录 `~/.iar/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `iar` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `IAR_SKILLS_DIR` 把安装根覆盖到临时目录。
+同时 `iar init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：iar 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 iar 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重跑 `iar init`，或设置 `IAR_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `iar init --force`。**安装目标首位是 keda 自有目录 `~/.iar/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `iar` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `IAR_SKILLS_DIR` 把安装根覆盖到临时目录。
 
 IAR 自带的 `iar-operator` Skill 随 Python 发行包安装，无需联网下载。`iar init --dry-run` 会显示目标路径；目标下已有不同内容的同名 Skill 时默认保留并报告冲突，只有显式 `--force` 才覆盖。
 
@@ -2722,7 +2722,7 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
                         的 scripts/prd_contract.py；验收清单与 Change Log 由
                         iar 把文本交给该脚本、取回 JSON，iar 不再自带解析。
                         daemon 起执行循环前预检 prd skill 可解析、契约主版本在
-                        受支持集合内（当前 v3/v4），且该脚本与 SKILL.md 成套
+                        受支持集合内（当前 v3/v4/v5），且该脚本与 SKILL.md 成套
                         存在；缺失、不支持版本或只装半套均 fail fast 并提示
                         安全修复方式。
                         所有 RV 脚本——截图采集、临时 server、探针，以及被

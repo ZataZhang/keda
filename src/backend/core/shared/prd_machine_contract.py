@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-SUPPORTED_MACHINE_CONTRACT_VERSIONS: tuple[int, ...] = (3, 4)
+SUPPORTED_MACHINE_CONTRACT_VERSIONS: tuple[int, ...] = (3, 4, 5)
 """iar 能读懂的 prd skill Machine Contract 主版本号（升序）。
 
 契约自身规定「改这一节的内容必须 bump 版本」，而两侧发版无法原子完成：skill
