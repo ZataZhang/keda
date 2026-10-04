@@ -14,6 +14,13 @@ Design decisions:
   ``.env*.example`` files are already materialized by git and stay
   untouched, and a worktree-local ``.env`` edited by a previous run is
   never overwritten — re-running on an existing worktree only heals gaps.
+- ``.env.run-state`` is never copied (see
+  :data:`ENV_COPY_EXCLUDED_FILE_NAMES`). It records the main checkout's
+  ``just run`` port assignments, so inheriting it would point the worktree
+  at the main repo's ports. The target repo's shared-database guard then
+  sees a listener on that port and refuses to run tests, and ``just run``
+  inside the worktree would clash with the main dev server. The worktree
+  writes its own run-state (or none) instead.
 - Unlike the legacy script there is no ``.env.example -> .env`` fallback:
   silently running an agent against example values is worse than a clear
   missing-config failure.
@@ -32,6 +39,15 @@ from pathlib import Path
 _logger = logging.getLogger(__name__)
 
 ENV_FILE_NAME_PREFIX = ".env"
+
+# Env files that must never propagate into a worktree even though they match
+# :data:`ENV_FILE_NAME_PREFIX`. ``.env.run-state`` holds the main checkout's
+# ``just run`` backend/frontend port assignments: copying it would make the
+# worktree reuse the main repo's ports, so the target repo's shared-database
+# guard would see a listener there and block ``just test`` (false positive),
+# and ``just run`` inside the worktree would clash with the main dev server.
+# The worktree writes its own run-state (or none) instead.
+ENV_COPY_EXCLUDED_FILE_NAMES = frozenset({".env.run-state"})
 
 # Directories that must never contribute env files: VCS internals, package
 # caches, build output, and — critically — embedded worktree containers,
@@ -53,6 +69,7 @@ ENV_COPY_PRUNED_DIR_NAMES = frozenset(
 )
 
 __all__ = [
+    "ENV_COPY_EXCLUDED_FILE_NAMES",
     "ENV_COPY_PRUNED_DIR_NAMES",
     "ENV_FILE_NAME_PREFIX",
     "copy_missing_env_files",
@@ -77,7 +94,9 @@ def copy_missing_env_files(
     Walks ``repo_root_path`` (pruning :data:`ENV_COPY_PRUNED_DIR_NAMES` and
     anything inside ``worktree_path`` itself), and copies every ``.env*``
     file whose relative path does not yet exist under ``worktree_path``.
-    Existing files in the worktree are never overwritten.
+    Existing files in the worktree are never overwritten, and names in
+    :data:`ENV_COPY_EXCLUDED_FILE_NAMES` (``.env.run-state``) are skipped
+    entirely.
 
     Args:
         repo_root_path: Absolute path to the main repository checkout that
@@ -104,6 +123,8 @@ def copy_missing_env_files(
         ]
         for child_file_name in child_file_names:
             if not child_file_name.startswith(ENV_FILE_NAME_PREFIX):
+                continue
+            if child_file_name in ENV_COPY_EXCLUDED_FILE_NAMES:
                 continue
             source_env_file_path = current_dir_path / child_file_name
             relative_env_file_path = source_env_file_path.relative_to(repo_root_path)

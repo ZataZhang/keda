@@ -63,6 +63,27 @@ def test_never_overwrites_existing_worktree_files(tmp_path: Path) -> None:
     assert (worktree_path / ".env.example").read_text(encoding="utf-8") == "EXAMPLE=tracked\n"
 
 
+def test_never_copies_run_state_file(tmp_path: Path) -> None:
+    """``.env.run-state`` must not leak the main checkout's ports.
+
+    Copying it would point the worktree at the main repo's ``just run``
+    ports, so the target repo's shared-database guard would see a listener
+    there and block ``just test`` (false positive), and ``just run`` inside
+    the worktree would clash with the main dev server. The worktree writes
+    its own run-state instead.
+    """
+    repo_path = tmp_path / "repo"
+    worktree_path = tmp_path / "worktree"
+    worktree_path.mkdir()
+    _write_file(repo_path / ".env", "ROOT=1\n")
+    _write_file(repo_path / ".env.run-state", "BACKEND_PORT=8000\n")
+
+    copied_relative_paths = copy_missing_env_files(repo_path, worktree_path)
+
+    assert [str(path) for path in copied_relative_paths] == [".env"]
+    assert not (worktree_path / ".env.run-state").exists()
+
+
 def test_prunes_vcs_cache_and_worktree_container_dirs(tmp_path: Path) -> None:
     """Env files under pruned directories must never be copied.
 
