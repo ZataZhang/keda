@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from backend.core.shared.models.agent_model_preset import (
     resolve_model_selection,
 )
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
 from backend.core.use_cases.agent_invocation import (
     ModelNotSupportedError,
@@ -119,14 +121,17 @@ def test_build_agent_invocation_without_selection_is_unchanged() -> None:
 
 
 def test_build_agent_invocation_fails_fast_without_template() -> None:
-    selection = ModelSelection(agent="kimi", model="glm-5.3-flash")
-    with pytest.raises(ModelNotSupportedError, match="kimi"):
+    # 七个内置 agent 现在都声明了 model_args；构造一个显式清空模板的 agent 来守护 fail-fast。
+    no_template_agents = dict(BUILTIN_AGENT_SPECS)
+    no_template_agents["codex"] = replace(BUILTIN_AGENT_SPECS["codex"], model_args=())
+    selection = ModelSelection(agent="codex", model="glm-5.3-flash")
+    with pytest.raises(ModelNotSupportedError, match="codex"):
         build_agent_invocation(
-            "kimi",
+            "codex",
             "generate",
             "PROMPT",
             PRESET_WORKTREE,
-            AppConfig(),
+            AppConfig(agents=no_template_agents),
             model_selection=selection,
         )
 

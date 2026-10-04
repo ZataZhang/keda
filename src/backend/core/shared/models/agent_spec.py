@@ -184,6 +184,9 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             "history.jsonl",
         ),
         project_skills_dir=".codex/skills",
+        # 模型选择：`codex -m/--model <id>`（本机 --help 确认）。推理档需
+        # `-c model_reasoning_effort=...`，未核实，保持为空 → 带推理档的绑定 fail-fast。
+        model_args=("--model", "{model}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=(
@@ -318,6 +321,8 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             "tmp",
         ),
         project_skills_dir=".kimi-code/skills",
+        # 模型选择：`kimi -m/--model <alias>`（本机 --help 确认）。推理档 flag 未核实，保持为空。
+        model_args=("--model", "{model}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=(),
@@ -357,6 +362,9 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         auth_include=("auth.json", "settings.json", "models.json", "skills"),
         auth_exclude=("sessions", "pi-crash.log", "models-store.json"),
         project_skills_dir=".pi/skills",
+        # 模型选择 `pi --model <pattern>` 与思考档 `pi --thinking <level>`（本机 --help 确认）。
+        model_args=("--model", "{model}"),
+        reasoning_effort_args=("--thinking", "{effort}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=("--approve", "--mode", "json"),
@@ -539,6 +547,8 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             "tui.jsonc",
             "plugins",
         ),
+        # 模型选择：`opencode -m/--model provider/model`（本机 --help 确认）。推理档 flag 未核实。
+        model_args=("--model", "{model}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=("run", "--dangerously-skip-permissions"),
