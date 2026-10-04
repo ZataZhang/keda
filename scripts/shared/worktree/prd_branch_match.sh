@@ -5,7 +5,7 @@
 # justfile.shared 的 implement recipe（从 PRD 文件名推导分支名）共同 source，
 # 禁止在调用方复制粘贴这套规则后微调。
 #
-# PRD 文件名规范（与 scripts/shared/just/prd_status.py 的 PRD_FILENAME_PATTERN
+# PRD 文件名规范（与 scripts/shared/just/prd_locator.py 的 PRD_FILENAME_PATTERN
 # 保持一致，任一端改动必须同步另一端）：
 #   [P<n>-][KIND-]YYYYMMDD[-HHMMSS]-<slug>.md
 # 分支匹配规则：slug 与分支全名相等，或与分支最后一段（basename）相等——

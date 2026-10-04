@@ -2,7 +2,7 @@
 """打开 PRD 的人工审查清单。
 
 交付收尾的人工审查入口：定位 PRD 对应的证据目录（分支副本优先，解析规则与
-看板 ``prd_status.py`` 一致——执行发生在 worktree 里，证据要等合并回主线才
+看板 ``prd_status.py`` 同源（共用 ``prd_locator.py``）——执行发生在 worktree 里，证据要等合并回主线才
 出现在主仓库），打开 ``human-review-checklist.html`` 交互版（逐步按钮作答、
 内嵌截图；不存在时回退打开静态 ``human-review-checklist.md``）——未完成
 Human-Confirmed 项、9.1 人读呈递区与人工待决事项的集中审查页。清单尚不存在
@@ -23,8 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import prd_locator
 import prd_lock
-import prd_status
 
 # 人工审查的打开目标槽位，按优先级排列：清单优先，证据报告兜底。清单槽位内
 # 交互 HTML（逐步按钮作答、内嵌截图）又优先于静态 Markdown——两者内容一致，
@@ -73,8 +73,8 @@ def resolve_evidence_candidate_dirs(
     Returns:
         list[Path]: 证据目录候选，按查找优先级排列。
     """
-    _, _, _, raw_slug_text = prd_status.parse_prd_filename(prd_path)
-    matched_worktree = prd_status.match_worktree_by_slug(worktree_branches_list, raw_slug_text)
+    _, _, _, raw_slug_text = prd_locator.parse_prd_filename(prd_path)
+    matched_worktree = prd_locator.match_worktree_by_slug(worktree_branches_list, raw_slug_text)
     worktree_path = matched_worktree[1] if matched_worktree is not None else None
 
     main_evidence_dir = repo_root / "tasks" / "evidence" / prd_path.stem
@@ -109,7 +109,7 @@ def resolve_review_target(
     )
     for stem_suffix_text, suffix_extensions_tuple in _REVIEW_TARGET_SLOTS:
         for candidate_dir_path in candidate_dirs_list:
-            matched_target_path = prd_status.find_named_evidence_file(
+            matched_target_path = prd_locator.find_named_evidence_file(
                 candidate_dir_path,
                 stem_suffix_text,
                 suffix_extensions=suffix_extensions_tuple,
@@ -169,7 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     argument_parser.add_argument(
         "prd_file",
-        help="PRD 文件路径，例如 tasks/pending/P1-FEAT-20260916-212206-<slug>.md",
+        help=(
+            "PRD 文件路径，例如 tasks/archive/P1-FEAT-20260916-212206-<slug>.md"
+            "（交付收尾即归档；仍在执行中的 PRD 在 tasks/pending/）"
+        ),
     )
     argument_parser.add_argument(
         "--print",
@@ -179,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parsed_arguments = argument_parser.parse_args(argv)
 
-    repo_root_path = prd_status.resolve_repo_root()
+    repo_root_path = prd_locator.resolve_repo_root()
     # 锁与 worktree 的唯一事实源在主仓库：worktree 内执行时仍能看到全部分支。
     main_repo_root_path = prd_lock.resolve_main_repo_root()
     worktree_branches_list = prd_lock.list_linked_worktree_branches(main_repo_root_path)

@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Check that active PRD acceptance checklists are fully completed."""
+"""Check that the executor-owed items of PRD acceptance checklists are completed.
+
+归档只代表执行侧交付完成：``Human-Confirmed`` 分组内的空框是留给人的待答项，不拦
+提交；其余空框照旧拦截。分组识别语义与 prd skill 的 ``prd_contract.parse_checklist``
+一致（标题 ``###``–``######`` 或整行加粗的分组标签、嵌套分组按"包含它的任一层是否
+人属"判定、前缀匹配且大小写不敏感）。skill 是可选安装的，本 hook 随模板同步，二者
+不能互相 import，所以这里自带一份轻量实现；模板仓库的守卫测试会逐例校验两者等价，
+改动分组语义时必须两处一起改。
+"""
 
 from __future__ import annotations
 
@@ -19,6 +27,10 @@ ACCEPTANCE_CHECKLIST_HEADING_RE = re.compile(
 TOP_LEVEL_HEADING_RE = re.compile(r"^##\s+")
 CHECKBOX_RE = re.compile(r"^\s*[-*+]\s+\[(?P<mark>[ xX])\]\s*(?P<label>.*)$")
 CODE_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+GROUP_HEADING_RE = re.compile(r"^(#{3,6})\s+(.+?)\s*$")
+BOLD_GROUP_LABEL_RE = re.compile(r"^\s*(?:\*\*|__)\s*(?P<label>.+?)\s*(?:\*\*|__)\s*$")
+BOLD_GROUP_DEPTH = 3
+HUMAN_CONFIRMED_GROUP_PREFIX = "human-confirmed"
 
 
 def _repo_root() -> Path:
@@ -155,8 +167,24 @@ def _section_bounds(lines: list[str]) -> tuple[int, int] | None:
     return start_index + 1, end_index
 
 
+def _enter_group(group_stack: list[tuple[int, bool]], depth: int, label: str) -> None:
+    """Open a checklist group, closing every group of the same or a deeper level.
+
+    栈元素是 ``(层级, 是否人属组)``：条目归属"包含它的所有分组"，所以人属判定看整条栈，
+    嵌套的子标题不会把人属项踢出人属组。
+    """
+
+    while group_stack and depth <= group_stack[-1][0]:
+        group_stack.pop()
+    is_human_group = label.strip().casefold().startswith(HUMAN_CONFIRMED_GROUP_PREFIX)
+    group_stack.append((depth, is_human_group))
+
+
 def _unchecked_items_in_acceptance_section(file_content: str) -> list[tuple[int, str]]:
-    """Return unchecked checklist items found in the acceptance section."""
+    """Return unchecked checklist items the executing agent still owes.
+
+    ``Human-Confirmed`` 分组作用范围内的空框不计入：它们是人的待答项，执行侧不得代勾。
+    """
 
     lines = file_content.splitlines()
     section_bounds = _section_bounds(lines)
@@ -166,6 +194,7 @@ def _unchecked_items_in_acceptance_section(file_content: str) -> list[tuple[int,
     start_index, end_index = section_bounds
     unchecked_items: list[tuple[int, str]] = []
     in_code_block = False
+    group_stack: list[tuple[int, bool]] = []
 
     for line_index in range(start_index, end_index):
         line = lines[line_index]
@@ -175,9 +204,20 @@ def _unchecked_items_in_acceptance_section(file_content: str) -> list[tuple[int,
         if in_code_block:
             continue
 
+        heading_match = GROUP_HEADING_RE.match(line)
+        if heading_match:
+            _enter_group(group_stack, len(heading_match.group(1)), heading_match.group(2))
+            continue
+
+        bold_group_match = BOLD_GROUP_LABEL_RE.match(line)
+        if bold_group_match:
+            _enter_group(group_stack, BOLD_GROUP_DEPTH, bold_group_match.group("label"))
+            continue
+
         checkbox_match = CHECKBOX_RE.match(line)
         if checkbox_match and checkbox_match.group("mark") == " ":
-            unchecked_items.append((line_index + 1, line.rstrip()))
+            if not any(is_human_group for _, is_human_group in group_stack):
+                unchecked_items.append((line_index + 1, line.rstrip()))
 
     return unchecked_items
 
@@ -219,10 +259,13 @@ def main() -> int:
         print()
 
     if has_errors:
-        print("⚠️  One or more active PRD acceptance checklists still contain unchecked items.")
+        print(
+            "⚠️  One or more PRD acceptance checklists still contain unchecked items the "
+            "executor owes (Human-Confirmed items may stay open)."
+        )
         return 1
 
-    print("\n🎉 All active PRD acceptance checklists are complete.")
+    print("\n🎉 All PRD acceptance checklists are complete (Human-Confirmed items excluded).")
     return 0
 
 

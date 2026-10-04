@@ -426,14 +426,16 @@ def _print_holder_info(lock_metadata: dict, prd_file_name: str) -> None:
 def _print_checklist_progress(prd_file_path: Path) -> None:
     """顺带输出该 PRD 的验收清单进度，提供开工上下文。"""
     try:
-        from prd_status import count_checklist_items  # 延迟 import，避免与看板脚本循环依赖
+        # 延迟 import：进度只是开工提示，``prd_acceptance.py`` 缺席（本脚本被单独拷走
+        # 使用）时静默跳过，不能让领锁这条互斥主路径在 import 期失败。
+        import prd_acceptance
     except ImportError:
         return
     try:
         raw_prd_text = prd_file_path.read_text(encoding="utf-8")
     except OSError:
         return
-    checked_item_count, checklist_item_count = count_checklist_items(raw_prd_text)
+    checked_item_count, checklist_item_count = prd_acceptance.count_checklist_items(raw_prd_text)
     if checklist_item_count > 0:
         print(f"   清单进度: {checked_item_count}/{checklist_item_count}")
 

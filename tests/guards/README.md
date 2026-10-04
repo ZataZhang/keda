@@ -55,6 +55,8 @@ AI 代理默认不会设置该变量，因此会被 hook 拦下——这是"指�
 |---|---|
 | `shared/test_archive_tasks.py` | PRD 归档 hook（`hooks/shared/archive_tasks.py`） |
 | `shared/test_check_max_file_lines.py` | 单文件行数上限 hook（`hooks/shared/check_max_file_lines.py`） |
+| `shared/test_check_prd_acceptance_checklist.py` | PRD 验收清单 pre-commit hook（`hooks/shared/check_prd_acceptance_checklist.py`）：归档只代表执行侧交付完成，`Human-Confirmed` 分组内的空框不拦提交、其余空框照旧拦截；分组作用范围（嵌套子标题不脱离、同级或更高级关闭、前缀匹配且大小写不敏感、整行加粗标签、围栏代码块、`[~]`）逐形态钉死；缺清单章节要点名；检查范围只含根目录活跃 PRD 与本次暂存的新入归档（`tasks/pending/` 与未暂存的归档不查） |
+| `shared/prd_checklist_scope_cases.py` | **测试辅助数据，非测试文件**（pytest 不收集）：清单作用域的用例表，上一行的 hook 守卫测试与 模板仓库的 `test_prd_skill_checker.py` 共用这一份，保证 hook 与 skill 契约解析按同一张表读 |
 | `shared/test_check_prd_evidence.py` | PRD 证据门禁（`scripts/shared/just/check_prd_evidence.sh`）：证据目录里的静态图必须在证据报告里用 `![](…)` 就地嵌入（`open` 命令不算呈递），失败要点名漏嵌文件；无报告、无图片、录屏均不得误伤 |
 | `shared/test_check_schema_conventions.py` | schema convention hook（`hooks/shared/check_schema_conventions.py`）：迁移脚本命名校验、分隔符与 revision 一致性 |
 | `shared/test_duplication_check_utils.py` | duplication-check 共享 git helper（`hooks/shared/duplication_check_utils.py`） |
@@ -63,7 +65,9 @@ AI 代理默认不会设置该变量，因此会被 hook 拦下——这是"指�
 | `shared/test_open_worktree.py` | `just worktree -o` 的名称解析（`scripts/shared/worktree/open.sh`）：PRD slug / 文件名 / `tasks/pending` 路径与分支末段等价、精确分支优先、歧义报错列候选、不回退旧约定目录、未命中列可用 worktree |
 | `shared/test_prd_impact_tree.py` | 影响树触达进度（`scripts/shared/just/prd_impact_tree.py` 与看板 FILES 列）：触达判据必须是「本次分支改动过」而非「文件存在」、未提交与未 `git add` 的改动都要计入、目录节点下任一文件被改即算触达、可判定性只认 git 真实路径（大小写严格、不吃 gitignore 残留）、无法判定的节点排除出分母并用 `?n` 披露、裸文件名不得回退仓库根、FILES 列永不转绿 |
 | `shared/test_prd_lock.py` | PRD 执行锁脚本（`scripts/shared/just/prd_lock.py`）：锁落主仓库、并发领锁唯一、过期接管留档、worktree 活性佐证的存活判定 |
-| `shared/test_prd_status.py` | PRD 状态看板（`scripts/shared/just/prd_status.py`）：清单进度与证据包取分支副本（archive → pending → 主仓库兜底、只认 slug 匹配的 worktree）、分支归档优先于锁信号（branch-archived）、无锁 worktree 的 `⚠ unlocked` 警告、活性 RUNNING / STALE 渲染，以及锁位置不冒充并不存在的分支（`@主仓库` / 归属标签） |
+| `shared/prd_status_fixtures.py` | **测试辅助模块，非测试文件**（pytest 不收集）：看板两份守卫测试共用的真实 git 仓库 fixture 构造（主仓库、linked worktree、锁、归档 PRD、回拨提交时间）与单元格渲染辅助，只在此维护一份 |
+| `shared/test_prd_status.py` | PRD 状态看板的 worktree / 依赖 / 证据信号（`scripts/shared/just/prd_status.py` 及其拆出的 `prd_activity.py`、`prd_deps.py`、`prd_locator.py`）：清单进度与证据包取分支副本（archive → pending → 主仓库兜底、只认 slug 匹配的 worktree）、分支归档优先于锁信号（branch-archived）、无锁 worktree 的 `⚠ unlocked` 警告、活性 RUNNING / STALE 渲染，锁位置不冒充并不存在的分支（`@主仓库` / 归属标签）、DEPS 列的 hard / soft gate 与无法判定引用、`--detail` 摘要与清单进度同源 |
+| `shared/test_prd_status_acceptance.py` | PRD 状态看板的验收轴（`prd_acceptance.py` 的横幅读法、`prd_status.py` 的 AWAITING HUMAN 分区与归档月视图、`prd_activity.py` 的 waiting 渲染）：横幅取标记后首个状态词、不吃正文讨论、无横幅不做结构推断、旧称 `✅ 可归档` 按已验收读；**只有已归档的副本（主仓库归档，或分支里已归档、只差合并）且横幅为 `🧍 待人工验收` 才进该分区**，pending 里残留的 🧍 留在 PENDING，同名并存以 pending 为准、一个 PRD 只出现一次；归档月视图的 `⚠ 有未勾完的清单` 只表示异常；已归档待人工的记录 ACTIVITY 显示 `🧍 waiting <时长>`（从归档落地提交起算，有活跃锁时仍显示锁状态，过期锁只附 `· stale lock` 提示） |
 | `shared/test_quality_flag_hooks.py` | quality / test flag hook 行为（`scripts/shared/hooks/`） |
 | `shared/test_release_script.py` | release 归档排除规则（`scripts/shared/release.py`） |
 | `shared/test_run_jscpd_duplication_check.py` | jscpd 增量重复检查 hook 逻辑（`hooks/shared/run_jscpd_duplication_check.py`） |

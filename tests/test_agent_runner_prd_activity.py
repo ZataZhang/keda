@@ -17,20 +17,23 @@ from backend.core.use_cases.agent_runner_prd_activity import (
 )
 
 
-def _load_status_module():
+def _load_locator_module():
+    # worktree 匹配规则随模板拆分从 prd_status.py 移到了 prd_locator.py。
     script_dir = Path(__file__).resolve().parents[1] / "scripts/shared/just"
     sys.path.insert(0, str(script_dir))
-    module_spec = importlib.util.spec_from_file_location("prd_status", script_dir / "prd_status.py")
+    module_spec = importlib.util.spec_from_file_location(
+        "prd_locator", script_dir / "prd_locator.py"
+    )
     assert module_spec is not None and module_spec.loader is not None
-    status_module = importlib.util.module_from_spec(module_spec)
-    sys.modules[module_spec.name] = status_module
-    module_spec.loader.exec_module(status_module)
-    return status_module
+    locator_module = importlib.util.module_from_spec(module_spec)
+    sys.modules[module_spec.name] = locator_module
+    module_spec.loader.exec_module(locator_module)
+    return locator_module
 
 
 def test_issue_branch_matches_explicit_prd_link(tmp_path: Path) -> None:
     """PRD 的唯一 Issue 锚点可定位 IAR worktree，slug 分支仍优先。"""
-    status_module = _load_status_module()
+    locator_module = _load_locator_module()
     prd_path = tmp_path / "P1-FEAT-20260928-example.md"
     prd_path.write_text(
         "# Example\n- GitHub Issue: https://github.com/acme/repo/issues/39\n",
@@ -38,13 +41,13 @@ def test_issue_branch_matches_explicit_prd_link(tmp_path: Path) -> None:
     )
     issue_worktree = tmp_path / "issue-39"
     issue_branches = [("issue-39", issue_worktree)]
-    assert status_module.match_worktree_for_prd(issue_branches, "example", prd_path) == (
+    assert locator_module.match_worktree_for_prd(issue_branches, "example", prd_path) == (
         "issue-39",
         issue_worktree,
     )
     slug_worktree = tmp_path / "example"
     both_branches = [("issue-39", issue_worktree), ("feat/example", slug_worktree)]
-    assert status_module.match_worktree_for_prd(both_branches, "example", prd_path) == (
+    assert locator_module.match_worktree_for_prd(both_branches, "example", prd_path) == (
         "feat/example",
         slug_worktree,
     )

@@ -6,7 +6,7 @@
 #   或直接执行:
 #   ./scripts/shared/worktree/create.sh <新分支名> [--base <base_branch>] [--cmd [code_cmd]]
 
-# 分支名 ↔ pending PRD 匹配规则的唯一事实源（与 prd_status.py 文件名解析一致）。
+# 分支名 ↔ pending PRD 匹配规则的唯一事实源（与 prd_locator.py 文件名解析一致）。
 _CREATE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$_CREATE_SCRIPT_DIR/prd_branch_match.sh"
 
@@ -693,7 +693,7 @@ resolve_worktree_creation_plan() {
 }
 
 # 分支名与某条 pending PRD 匹配时，先领取该 PRD 的执行锁。
-# 匹配规则的唯一事实源在 prd_branch_match.sh（与 prd_status.py 的文件名解析一致）：
+# 匹配规则的唯一事实源在 prd_branch_match.sh（与 prd_locator.py 的文件名解析一致）：
 # slug 与分支全名或分支最后一段相等即命中。不匹配时完全不干预
 # （worktree 是通用工具，不能假设每次创建都对应 PRD）。
 # 领锁成功时把 PRD 文件路径写入 CLAIMED_PRD_FILE_PATH，供创建完成后的归属移交使用。
