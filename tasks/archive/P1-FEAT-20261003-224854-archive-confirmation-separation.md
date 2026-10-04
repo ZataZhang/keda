@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无上游 PRD/Issue（§8 声明为 none）；但有一条**跨仓发版顺序**约束，不是编译依赖：本仓必须先能读懂新版 PRD skill 契约（v5）、并同步新版模板清单钩子，再交付本 PRD——否则 daemon 起执行循环前的预检会对新 skill 直接失败，或新归档的 PRD 被旧钩子拒绝提交。顺序 (a)→(d) 见 §8 Notes。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
+> ✅ **验收状态**：已验收 — 验收清单已全部完成；验收事件为 ZataZhang/keda#186 的合并，记录见 §14。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -533,9 +533,9 @@ Failure triage:
 > 本组条目归**人**回答：在你回复之前它们一直保持 `- [ ]`，执行工具不得代勾、也不得改写成 `[~]`（`[~]` 只用于"等 runner 门禁"的项，见 Machine Contract §2）。
 > 本组**不拦归档**：归档只要求本组之外的条目全部 `[x]`/`[~]`；本组仍有空框时 PRD 带着 🧍 归档，人确认后才勾选并把横幅改为 ✅ 已验收。
 
-- [ ] 决策一：归档只看执行侧条目是否全部完成，含待人工验收条目也照常在交付时归档，人审空框与 🧍 横幅保留，横幅不一致则不归档、不发布 —— 人确认
-- [ ] 决策二：自动合并只在人审组全部回答后才合并，已归档但仍待人工验收的 PR 一律跳过等人 —— 人确认
-- [ ] §9.1 呈递区各项已亲眼看过（截图 / 自验，二选一或都做）
+- [x] 决策一：归档只看执行侧条目是否全部完成，含待人工验收条目也照常在交付时归档，人审空框与 🧍 横幅保留，横幅不一致则不归档、不发布 —— 人确认（证据：ZataZhang/keda#186 正文声明合并即接受本组 3 项，该 PR 已合并且合并树核对通过；审计字段见 §14「回填验收记录」）
+- [x] 决策二：自动合并只在人审组全部回答后才合并，已归档但仍待人工验收的 PR 一律跳过等人 —— 人确认（证据：同上）
+- [x] §9.1 呈递区各项已亲眼看过（截图 / 自验，二选一或都做）（证据：同上）
 
 ### Architecture Acceptance
 
@@ -720,3 +720,18 @@ Failure triage:
 - Reason: 满足 v5 归档门禁——执行侧条目全部 `[x]` 或 `[~]`、verifier `PASS`、Final Reconciliation 完成、横幅与 §9 一致。归档只代表执行侧交付完成，不等人工验收。
 - Impact: record-excluded tree 仍为 `81b833554c9c8be9481f21fa7d80a88a2c204468`，本提交只改 delivery-record 路径，证据不过期。PRD 带 🧍 留在 archive，等人回答。
 - Review: Human-Confirmed 3 项待人回答，可通过 `just prd review` 查看汇总清单；人确认后只回填验收记录：勾选这 3 项、横幅改为 ✅ 已验收、追加 Change Log。
+
+### 2026-10-04 · 回填验收记录：ZataZhang/keda#186 合并即验收
+- Type: acceptance（只写验收记录：勾选 Human-Confirmed 3 项、横幅改为 ✅ 已验收、追加本条；PRD 不移动，不改其他内容）
+- Before:
+  - PRD 带 🧍 归档在 `tasks/archive/`，Human-Confirmed 3 项未勾。
+  - ZataZhang/keda#186 正文带 `<!-- iar:merge-acceptance version=1 -->` 声明，写明合并即接受这 3 项；该 PR 唯一关联本 PRD，并在正文呈递了 §9.1 与证据包。
+- After:
+  - 合并事件：[ZataZhang/keda#186](https://github.com/ZataZhang/keda/pull/186) 由 ZataZhang 于 2026-10-04T09:22:03Z 以 squash 合并为 `eef98bca3cccd247c865edef1909a292a87b9c6e`（单父提交 `c2fcc4b5`）。
+  - 验证身份：head `2648ab1704b3f7f099aa157fc52216ef0bd7a1c9`，record-excluded tree `81b833554c9c8be9481f21fa7d80a88a2c204468`（即 `verified_tree_sha`）。
+  - 合并树：`eef98bca` 的完整 tree 为 `0c7d057978117b0aa1c34a1de4c42b6926d30a3a`，与 head 的完整 tree 相同。在 `2648ab17` 的检出上，以 `eef98bca` 为 `<commit>` 跑 Evidence Identity 命令（`git rm -f`、`&&` 串联），得到 record-excluded tree `81b833554c9c8be9481f21fa7d80a88a2c204468`，与 `verified_tree_sha` 一致。
+  - 门禁：独立 verifier 第 1 轮（kimi）`PASS`；PR 上 12 项检查中 11 项 SUCCESS、1 项 SKIPPED（Install from public PyPI + console probe），无失败；PR 无评论、无 review、无"有差异"回复。
+  - 以该合并事件为证据勾选 Human-Confirmed 3 项；横幅改为 ✅ 已验收。
+- Reason: 按 PRD skill v5 Machine Contract §8 与 `pr-evidence-and-merge-acceptance.md` 的 Post-Merge Reconciliation：声明过的 PR 合并是人工验收事件，合并树与验证树等价后只回填验收记录。
+- Impact: 验收轴完成；本提交只改本 PRD 文件（delivery-record 路径），不改代码与证据。
+- Review: 无待人回答项。
