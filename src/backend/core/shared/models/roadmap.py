@@ -242,6 +242,21 @@ class TokenUsageStats:
 
 
 @dataclass(frozen=True)
+class PrdTokenUsageEntry:
+    """单个 PRD（Issue）维度的 token 用量累计（CLI ``iar tokens`` 按 PRD 表的数据源）。
+
+    同一 PRD 的多次 run 合并累计；``run_count`` 是参与累计的 run 条数，
+    ``usage_count`` 是计入的用量条数（缺 usage 的事件不计入）。
+    """
+
+    repo_id: str | None
+    prd_path: str | None
+    issue_number: int | None
+    run_count: int
+    totals: TokenUsageTotals
+
+
+@dataclass(frozen=True)
 class PrdLifecycleStats:
     """仓库级 PRD 端到端统计（Stats 页“PRD 执行分析”的数据源）。
 

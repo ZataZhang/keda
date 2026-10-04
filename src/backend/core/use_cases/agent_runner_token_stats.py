@@ -15,8 +15,17 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Iterable
+from datetime import datetime, timedelta, timezone
 
-from backend.core.shared.models.roadmap import TokenUsageStats, TokenUsageTotals
+from backend.core.shared.models.roadmap import (
+    PrdTokenUsageEntry,
+    TokenUsageStats,
+    TokenUsageTotals,
+)
+
+_logger = logging.getLogger(__name__)
 
 #: attempt 族事件里携带 usage 的事件类型值；其 flow 统一归为实现主调用。
 _ATTEMPT_FLOW_EVENT_TYPES = frozenset({"attempt", "retry", "recovered"})
@@ -135,4 +144,144 @@ def aggregate_token_usage(events: list[object]) -> TokenUsageStats:
     return TokenUsageStats(by_flow=by_flow, by_agent=by_agent)
 
 
-__all__ = ["aggregate_token_usage"]
+def _combine_totals(left: TokenUsageTotals, right: TokenUsageTotals) -> TokenUsageTotals:
+    """把两份汇总逐字段相加（分组累计与跨 run 合并共用）。"""
+    return TokenUsageTotals(
+        input_tokens=left.input_tokens + right.input_tokens,
+        output_tokens=left.output_tokens + right.output_tokens,
+        cache_read_input_tokens=(left.cache_read_input_tokens + right.cache_read_input_tokens),
+        cache_creation_input_tokens=(
+            left.cache_creation_input_tokens + right.cache_creation_input_tokens
+        ),
+        total_tokens=left.total_tokens + right.total_tokens,
+        usage_count=left.usage_count + right.usage_count,
+    )
+
+
+def _sum_totals(values: Iterable[TokenUsageTotals]) -> TokenUsageTotals:
+    """把若干份汇总合并为一份；空序列返回全零。"""
+    result = TokenUsageTotals()
+    for value in values:
+        result = _combine_totals(result, value)
+    return result
+
+
+def _window_since(days: int, now: datetime | None) -> str:
+    """把天数窗口换算成 ``since`` 时间戳（与 build_prd_lifecycle_stats 同一规则）。"""
+    reference_now = now or datetime.now(timezone.utc)
+    bounded_days = min(max(days, 1), 365)
+    return (reference_now - timedelta(days=bounded_days)).isoformat(timespec="seconds")
+
+
+def _list_window_runs(
+    store: object, *, repo_id: str | None, days: int, now: datetime | None
+) -> list[object]:
+    """列出窗口内的 run 记录；读取失败降级为空列表（与 Stats 构建口径一致）。"""
+    if store is None:
+        return []
+    try:
+        return list(store.list_lifecycle_runs(repo_id=repo_id, since=_window_since(days, now)))
+    except Exception as exc:  # noqa: BLE001 - one broken ledger must not break the CLI.
+        _logger.warning("Failed to list lifecycle runs: %s", exc)
+        return []
+
+
+def _run_events(store: object, run_id: str) -> list[object]:
+    """读取单个 run 的事件；失败按空列表容错（单 run 不拖垮整体）。"""
+    try:
+        return list(store.list_lifecycle_events(run_id=run_id))
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("Failed to list events for run %s: %s", run_id, exc)
+        return []
+
+
+def build_token_usage_by_prd(
+    *,
+    store: object,
+    repo_id: str | None,
+    days: int,
+    now: datetime | None = None,
+    issue_number: int | None = None,
+) -> list[PrdTokenUsageEntry]:
+    """把窗口内的 token 用量按 PRD（Issue）维度汇总。
+
+    同一 PRD 的多次 run 合并累计；口径与 :func:`aggregate_token_usage`
+    单源（每条用量先经它同款提取规则校验，再并入 PRD 分组）。
+
+    Args:
+        store: 生命周期账本（鸭子类型：只需 ``list_lifecycle_runs`` /
+            ``list_lifecycle_events`` 两个读方法）。
+        repo_id: 仓库过滤；``None`` 表示全部仓库。
+        days: 时间窗口天数（内部钳制 1–365）。
+        now: 统计基准时间；缺省取当前 UTC 时间。
+        issue_number: 只统计该 Issue 的 run；``None`` 表示不过滤。
+
+    Returns:
+        按 ``total_tokens`` 降序的 :class:`PrdTokenUsageEntry` 列表；无数据
+        返回空列表。
+    """
+    run_records = _list_window_runs(store, repo_id=repo_id, days=days, now=now)
+    if issue_number is not None:
+        run_records = [record for record in run_records if record.issue_number == issue_number]
+
+    grouped: dict[tuple, tuple[int, TokenUsageTotals]] = {}
+    for run_record in run_records:
+        events = _run_events(store, run_record.run_id)
+        # 复用 aggregate_token_usage 的单条提取与校验规则：对单 run 事件
+        # 聚合后把各 flow 份合并成该 run 的总量，再并入 PRD 分组。
+        run_stats = aggregate_token_usage(events)
+        run_totals = _sum_totals(run_stats.by_flow.values())
+        if run_totals.usage_count == 0:
+            # 整个 run 无可用用量（agent 未上报 / 全部畸形）：按"缺失排除"
+            # 口径跳过，不为它制造全零行。
+            continue
+        key = (run_record.repo_id, run_record.prd_path, run_record.issue_number)
+        previous_count, previous_totals = grouped.get(key, (0, TokenUsageTotals()))
+        grouped[key] = (previous_count + 1, _combine_totals(previous_totals, run_totals))
+
+    entries = [
+        PrdTokenUsageEntry(
+            repo_id=group_repo_id,
+            prd_path=group_prd_path,
+            issue_number=group_issue_number,
+            run_count=group_run_count,
+            totals=group_totals,
+        )
+        for (
+            group_repo_id,
+            group_prd_path,
+            group_issue_number,
+        ), (group_run_count, group_totals) in grouped.items()
+    ]
+    entries.sort(
+        key=lambda entry: (-entry.totals.total_tokens, entry.repo_id or "", entry.issue_number or 0)
+    )
+    return entries
+
+
+def build_token_usage_stats_for_issue(
+    *,
+    store: object,
+    repo_id: str | None,
+    days: int,
+    issue_number: int,
+    now: datetime | None = None,
+) -> TokenUsageStats:
+    """构建单个 Issue（PRD）视角的按流程 / 按 agent 汇总。
+
+    事件提取与分组规则完全复用 :func:`aggregate_token_usage`；本函数只
+    负责把 run 范围收窄到该 Issue。
+    """
+    collected: list[object] = []
+    for run_record in _list_window_runs(store, repo_id=repo_id, days=days, now=now):
+        if run_record.issue_number != issue_number:
+            continue
+        collected.extend(_run_events(store, run_record.run_id))
+    return aggregate_token_usage(collected)
+
+
+__all__ = [
+    "aggregate_token_usage",
+    "build_token_usage_by_prd",
+    "build_token_usage_stats_for_issue",
+]
