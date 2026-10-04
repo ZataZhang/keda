@@ -284,3 +284,71 @@ class TestBuildTokenUsageByPrd:
         assert set(scoped.by_flow) == {"implement"}
         assert set(scoped.by_agent) == {"claude"}
         assert scoped.by_flow["implement"].usage_count == 1
+
+    def test_same_prd_multiple_runs_merge(self, tmp_path) -> None:
+        """同一 PRD 的多次 run 合并为一行：run_count 累加、四字段求和（LOW-3 直接断言）。"""
+        from datetime import datetime, timezone
+
+        from backend.core.shared.interfaces.runner_console import (
+            PrdLifecycleEventRecord,
+            PrdLifecycleRunRecord,
+        )
+        from backend.core.use_cases.agent_runner_token_stats import build_token_usage_by_prd
+        from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+
+        store = SqliteConsoleStore(tmp_path / "console.db")
+        usages = [
+            {
+                "input_tokens": 100,
+                "output_tokens": 10,
+                "cache_read_input_tokens": 40,
+                "cache_creation_input_tokens": 0,
+            },
+            {
+                "input_tokens": 200,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 60,
+                "cache_creation_input_tokens": 5,
+            },
+        ]
+        for index, usage in enumerate(usages, start=1):
+            run_id = f"keda-main#7r{index}"
+            store.upsert_lifecycle_run(
+                PrdLifecycleRunRecord(
+                    run_id=run_id,
+                    repo_id="keda-main",
+                    prd_path="tasks/a.md",
+                    issue_number=7,
+                    trigger="cli_run",
+                    started_at="2026-10-04T10:00:00+00:00",
+                    finished_at="2026-10-04T10:05:00+00:00",
+                    outcome="completed",
+                    history_complete=True,
+                )
+            )
+            store.append_lifecycle_event(
+                PrdLifecycleEventRecord(
+                    run_id=run_id,
+                    event_key=f"attempt:{index}",
+                    event_type="attempt",
+                    phase="executing",
+                    actor="runner",
+                    occurred_at="2026-10-04T10:01:00+00:00",
+                    detail_json=json.dumps({"agent": "claude", "token_usage": usage}),
+                )
+            )
+
+        entries = build_token_usage_by_prd(
+            store=store,
+            repo_id="keda-main",
+            days=30,
+            now=datetime(2026, 10, 5, tzinfo=timezone.utc),
+        )
+        assert len(entries) == 1
+        assert entries[0].run_count == 2
+        assert entries[0].issue_number == 7
+        assert entries[0].totals.input_tokens == 300
+        assert entries[0].totals.cache_read_input_tokens == 100
+        assert entries[0].totals.cache_creation_input_tokens == 5
+        assert entries[0].totals.total_tokens == 435
+        assert entries[0].totals.usage_count == 2

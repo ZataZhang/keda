@@ -94,3 +94,39 @@
 交付实现了顶级 `iar tokens` 只读查询命令：口径单源（复用 `build_prd_lifecycle_stats`/`aggregate_token_usage`，零新口径）、架构合法、8 列两张表与「—」降级与前端规则一致、`--json` 与端点同构、空态与参数边界健壮，单测 6/6 + 抽跑 8/8 全绿，真实入口（含宽列与 JSON）复验通过。唯一实质缺陷为 M-1（坏库时 traceback 逃逸，一行可修），另有 3 条 PRD 文案/落位类 LOW。
 
 verifier-verdict: PASS-with-notes
+
+## Delta Review (ea705e9, per-PRD scope)
+
+对 PR #188 在旧 verified tree（c6e2bec）之后的增量提交 ea705e9（「按 PRD（Issue）粒度 + `--issue` 下钻」scope 增补）做独立 delta 复核。全部为只读命令；原报告内容未改动。
+
+### 凭证核对
+
+- `git rev-parse HEAD` = `ea705e98ce769dfb9af3f9c616477b4362e090c5` ✅
+- `git diff HEAD~1 HEAD -- src tests | sha256sum` = `94e98b9237b15e612f…`，与冻结凭证前缀 `94e98b9237b15e61` 一致 ✅
+- delta 规模与预期一致：9 文件（roadmap.py / agent_runner_token_stats.py / cli_typer_tokens.py / 两个测试文件 / docs / PRD / 证据报告 / 验证计划）✅
+
+### 逐项核验结论
+
+1. **实跑**：`uv run pytest tests/test_agent_token_stats.py tests/test_cli_tokens.py -o addopts="" -q` → **22 passed**（新增 3 聚合 + 4 CLI 用例在内）。抽跑 `tests/test_prd_lifecycle.py` → 19 passed，无回归。旧 M-1 的修复（`create_console_store()` 纳入 try + 坏库用例）仍在位，坏库用例随 22 例通过。✅
+2. **口径单源（关键项）**：`build_token_usage_by_prd`（agent_runner_token_stats.py:198）对每个 run 先调 `aggregate_token_usage(events)`，再 `_sum_totals(by_flow.values())` 并入 PRD 分组——四字段校验/求和零重写；`build_token_usage_stats_for_issue`（:262）直接以 `aggregate_token_usage` 收口。CLI 层唯一的算术是 `_cache_hit_rate` 的输入侧命中率展示式（HEAD~1 已存在、非本轮新增），无任何四字段聚合算术。✅
+3. **FR-6 语义**：分组键 `(repo_id, prd_path, issue_number)`，`run_count` = 参与累计的可用 run 条数；`usage_count == 0` 的 run 按「缺失排除」`continue` 跳过，不制造全零行（agent_runner_token_stats.py:234-237）；按 `total_tokens` 降序 + 确定性 tie-break 排序（:256-258）。✅（覆盖缺口见 L-D3）
+4. **FR-7 语义**：`--issue` 下 `usage` 经 `build_token_usage_stats_for_issue` 收窄、`prd_entries` 经 `issue_number` 参数收窄，三张表同步；`--json` 顶层落 `issue_number` 字段、`by_prd` 同步收窄（cli_typer_tokens.py:168-193）。测试 `test_tokens_issue_drilldown_scopes_all_tables` 双 PRD 种子负向断言（#9 / codex 不出现），`test_tokens_json_includes_by_prd` 断言 json 收窄。✅
+5. **层依赖**：`rg -n "agent_runner_lifecycle" src/backend/core/use_cases/agent_runner_token_stats.py` 无命中；`uv run python hooks/shared/check_architecture.py` → 283 文件全部合法。✅
+6. **行为样例一致性**：§1 新行「显式上报缓存读为 0 → 命中率 0%；仅输入侧信息全零显『—』」与 `_cache_hit_rate` 实现一致（实现本轮未改，PRD 行系对齐实现修正）；`test_tokens_prd_table_lists_each_issue` 以显式零缓存读用例断言 `0%` 出现。✅（FR-2 措辞滞后见 L-D2）
+7. **PRD 合规**：§14 新 Change Log 条目六字段（Type/Before/After/Reason/Impact/Review）bullet 齐全；`**Human-Confirmed**` 组标题行保持纯文本格式（:295，钩子豁免依赖项未破坏）；`uv run python hooks/shared/check_prd_acceptance_checklist.py --check-provided --archive-ready …` 退出码 0。§7.6 rv-4 六元组齐全且 real_entry 与本轮实跑命令一致；§9 rv-4 勾选带证据注记。✅
+8. **证据链**：`rv4_output_byprd.txt` / `rv4_output_issue_drilldown.txt` 已落位证据目录；证据报告 §rv-4 含真实入口 verbatim 与交叉自检（8.1k = 8080 = 三 flow 之和；60% = 4400÷7330）；验证计划补 rv-4 行。✅
+
+### 问题分级
+
+- **HIGH**：无。
+- **MEDIUM**：无。
+- **LOW**：
+  - **L-D1 §7.6 rv-2 的 `real_entry` 仍写不存在的 `tests/test_cli_console_tokens.py`**（:236）。本轮 Change Log 只声称修正 rv-3 笔误（已修正），rv-2 同型笔误残留；属旧 L-2① 未清干净，非本轮引入。
+  - **L-D2 FR-2 措辞滞后于新 oracle 行**：FR-2 仍写「无缓存数据时显示『—』」，而 §1 新行为行（验收 oracle）已细化为「显式缓存读 0 且输入侧 >0 显 0%；仅输入侧全零显『—』」，实现与 §1 一致。建议后续把 FR-2 措辞对齐 §1。
+  - **L-D3 「同 PRD 多 run 合并」缺直接断言**：现有用例每个 PRD 只种一条 run（`run_count == 1` 三处），`run_count ≥ 2` 的跨 run 合并路径（`previous_count + 1` / `_combine_totals` 累计）无直接测试。实现逻辑直白且分组/排除已被测，属覆盖缺口非缺陷。
+
+### 结论
+
+delta 完整满足 PRD 增补口径（FR-6/FR-7、§1 三行、rv-4、D-04、§14 scope 条目），口径单源未被破坏，旧 verified 行为（含 M-1 修复）无回归，架构与 PRD 门禁全过。问题仅 3 条 LOW（1 条旧笔误残留 + 2 条文案/覆盖建议），不阻塞合并。
+
+delta-verifier-verdict: PASS

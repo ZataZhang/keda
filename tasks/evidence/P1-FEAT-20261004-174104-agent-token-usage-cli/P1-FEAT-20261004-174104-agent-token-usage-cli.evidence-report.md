@@ -74,5 +74,5 @@ PASS-with-notes（0 HIGH / 1 MEDIUM）。MEDIUM（create_console_store 构造在
 
 `--issue 212` 下钻（`rv4_output_issue_drilldown.txt`）：标题行注明 `Issue #212`，三张表与默认输出在该 Issue 上逐值一致（该账本仅一个 Issue，收窄语义由 `test_tokens_issue_drilldown_scopes_all_tables` 以双 PRD 种子负向断言：#9 与 codex 不出现）。
 
-- 复现（机器侧）：`uv run pytest tests/test_agent_token_stats.py tests/test_cli_tokens.py -o addopts=""`（22 例：新增 3 例聚合分组/过滤 + 4 例 CLI 按 PRD 表/下钻/json by_prd/空态边界）
+- 复现（机器侧）：`uv run pytest tests/test_agent_token_stats.py tests/test_cli_tokens.py -o addopts=""`（23 例：新增 4 例聚合分组/过滤/多 run 合并 + 4 例 CLI 按 PRD 表/下钻/json by_prd/空态边界；delta verifier 3 项 LOW 已修复——rv-2 路径笔误、FR-2 措辞对齐、run_count≥2 直接断言）
 - 口径单源：`build_token_usage_by_prd` 每 run 先经 `aggregate_token_usage` 同款提取再合并；零用量 run 按"缺失排除"跳过（`test_groups_by_prd_and_excludes_missing_usage` 断言 issue 11 无全零行）

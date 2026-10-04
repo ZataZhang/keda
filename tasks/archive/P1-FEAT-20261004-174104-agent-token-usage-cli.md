@@ -233,7 +233,7 @@ No data model changes in this PRD.
 - id: rv-2
   behavior: 空账本 / 无匹配数据 / 非法天数时输出空态或收敛结果，不产生 traceback
   reviewer: verifier
-  real_entry: "uv run pytest tests/test_cli_console_tokens.py -o addopts=\"\"（空库 fixture + 参数边界用例）"
+  real_entry: "uv run pytest tests/test_cli_tokens.py -o addopts=\"\"（空库 fixture + 参数边界用例）"
   expected: "空态文案出现且退出码 0；--days 0/9999 收敛到 1/365；不存在的 repo-id 输出空表"
   mock_boundary: "真实 SQLite 空 fixture；被测边界是命令本身"
   tier: R1
@@ -302,7 +302,7 @@ No external validation required; repository evidence was sufficient.
 
 **Behavior Acceptance**
 - [x] rv-1/rv-2/rv-3 全部 PASS（7 例 CLI 测试 + 全链路 oracle），证据见证据目录 `*.evidence-report.md` 与 `*.verifier-report.md`
-- [x] rv-4（按 PRD 粒度 + --issue 下钻）PASS（新增 4 例 CLI 测试 + 3 例聚合测试），证据同上
+- [x] rv-4（按 PRD 粒度 + --issue 下钻）PASS（新增 4 例 CLI 测试 + 4 例聚合测试，含同 PRD 多 run 合并的 run_count 直接断言），证据同上
 
 **Documentation Acceptance**
 - [x] `docs/guides/agent-runner.md` Token 用量章节已补 CLI 命令说明
@@ -318,7 +318,7 @@ No external validation required; repository evidence was sufficient.
 ## 10. Functional Requirements
 
 - **FR-1**：`iar tokens` 输出按流程与按 agent 两张汇总表（FR-6 增补后默认共三张），列含分组、总量、输入、输出、缓存读、缓存写、命中率、调用数；数值与 `build_prd_lifecycle_stats` 聚合逐字段一致。
-- **FR-2**：命中率口径 = 缓存读 ÷ 输入侧实际处理量（input + 缓存读 + 缓存写）；无缓存数据时显示「—」。
+- **FR-2**：命中率口径 = 缓存读 ÷ 输入侧实际处理量（input + 缓存读 + 缓存写）；仅输入侧信息全零时显示「—」，agent 显式上报的缓存 0 是真实数据、显示 0%（与 §1 行为样例一致）。
 - **FR-3**：`--repo-id` 过滤仓库；`--days` 默认 30、钳制 1–365；语义与 stats 端点一致。
 - **FR-4**：`--json` 输出 `{"repo_id", "days", "token_usage": {"by_flow", "by_agent"}}`，结构与 stats 端点 `token_usage` 同构。
 - **FR-5**：空数据输出明确空态文案（退出码 0）；账本不可用以非零码 + 单行错误文案退出；全程不产生 traceback。
