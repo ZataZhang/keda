@@ -404,6 +404,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_roadmap,
     cli_typer_config,
     cli_typer_console,
+    cli_typer_tokens,
 )
 
 
