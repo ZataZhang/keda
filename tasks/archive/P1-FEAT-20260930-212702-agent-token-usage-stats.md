@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜🧍 **验收状态**：待人工验收（实现完成、verifier PASS、机器验收项已勾；Human-Confirmed 三项随合并即验收事件勾选）。
+> ✅ **验收状态**：已验收 — 验收清单已全部完成（验收记录：PR #182 合并事件，见 §14 Change Log 2026-10-04 条目）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 采用两个高度：Part A（人审层，§1–4）供人快速理解与决策，不含实现机制；Part B（执行器层，§5–13）承载全部实现细节。三个投影块（交付前置横幅、验收状态横幅、功能一览）不是事实源。
@@ -504,10 +504,10 @@ No external validation required; repository evidence was sufficient.
 
 **Human-Confirmed**
 
-（保持未勾：合并即验收事件写入后由 post-merge reconciliation 勾选）
-- [ ] 决策一（记录与汇总口径）已获人工确认，对应 §2 决策一与 rv-1/rv-5 证据
-- [ ] 决策二（缺失降级「—」不做估算）已获人工确认，对应 §2 决策二与 rv-6 证据
-- [ ] 9.1 人读呈递区已由人工过目（三张截图与自检结论）
+（三项均以 PR #182 合并事件为验收记录勾选——2026-10-04 由 ZataZhang squash merge `6fd39c63`，见 §14 Change Log）
+- [x] 决策一（记录与汇总口径）已获人工确认，对应 §2 决策一与 rv-1/rv-5 证据
+- [x] 决策二（缺失降级「—」不做估算）已获人工确认，对应 §2 决策二与 rv-6 证据
+- [x] 9.1 人读呈递区已由人工过目（三张截图与自检结论）
 
 **Architecture Acceptance**
 - [x] `src/backend/infrastructure/agent_stream_usage.py`、`src/backend/core/use_cases/agent_runner_token_stats.py` 存在且含声明的函数/收集器；`rg -n "class CommandResult" src/backend` 确认全部镜像 dataclass 均含 `token_usage` 字段（verifier 报告 §Architecture）
@@ -636,3 +636,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 遵循 prd skill 发布契约（PR-Native Acceptance，Machine Contract §8）：PRD 在交付 PR 内归档，合并即验收
 - Impact: PR 正文按 skill 模板重写为 Human Acceptance And PRD Record 形态；证据三件套（verification-plan / evidence-report / verifier-report）落在 tasks/evidence/<stem>/，原始截图与 SHA-256 清单在证据分支 iar-evidence/prd-agent-token-usage-stats
 - Review: verifier 报告由独立 agent 产出（冻结凭证核对通过）；人工验收待合并事件
+
+### 2026-10-04 · 验收记录：PR #182 合并即验收
+- Type: acceptance
+- Before: 横幅 🧍 待人工验收，Human-Confirmed 三项未勾
+- After: 横幅 ✅ 已验收；Human-Confirmed 三项以合并事件勾选
+- Reason: 需求方 ZataZhang 于 2026-10-04 09:35 squash merge PR #182（merge commit `6fd39c63`），合并即验收事件成立——PR 正文含 Human Acceptance And PRD Record 声明与稳定证据评论，verifier 与必要门禁绿
+- Impact: 合并树（排除本 PRD 记录路径）`484b1353` ≠ verified tree `219b3932`，差异经逐文件比对**全部**来自另一并发交付 PRD（`archive-confirmation-separation`）的 tasks/ 记录文件，本交付产品面（src/frontend-public/docs/hooks/tests）逐字节未动；token 相关 oracle（27 例）在最终主树复跑通过后记录本验收
+- Review: post-merge reconciliation 由 agent 按 prd skill 契约执行（Machine Contract §8）
