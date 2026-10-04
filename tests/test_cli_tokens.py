@@ -48,7 +48,14 @@ def _store(tmp_path: Path) -> SqliteConsoleStore:
     return SqliteConsoleStore(tmp_path / "console.db")
 
 
-def _seed_attempt(store: SqliteConsoleStore, *, issue_number: int = 7) -> None:
+def _seed_attempt(
+    store: SqliteConsoleStore,
+    *,
+    issue_number: int = 7,
+    prd_path: str = _PRD_PATH,
+    agent: str = "claude",
+    usage_tokens: dict | None = None,
+) -> None:
     """经真实写入路径落一条带 usage 的 attempt 事件（rv 链路的账本侧）。"""
     from backend.core.shared.models.agent_runner import AttemptResult, FailureType, TokenUsage
 
@@ -57,21 +64,16 @@ def _seed_attempt(store: SqliteConsoleStore, *, issue_number: int = 7) -> None:
         failure_type=FailureType.SUCCESS,
         recovered=False,
         detail="seed",
-        agent="claude",
+        agent=agent,
         started_at="2026-10-04T10:00:00+00:00",
         finished_at="2026-10-04T10:01:00+00:00",
         duration_seconds=60.0,
-        token_usage=TokenUsage(
-            input_tokens=1200,
-            output_tokens=340,
-            cache_read_input_tokens=800,
-            cache_creation_input_tokens=120,
-        ),
+        token_usage=TokenUsage(**(usage_tokens or _FIXED_USAGE)),
     )
     record_lifecycle_event(
         store=store,
         repo_id=_REPO_ID,
-        prd_path=_PRD_PATH,
+        prd_path=prd_path,
         issue_number=issue_number,
         trigger="cli_run",
         event_type=LifecycleEventType.ATTEMPT,
@@ -185,3 +187,74 @@ def test_tokens_broken_store_construction_degrades_gracefully(tmp_path: Path) ->
     assert "账本不可用" in result.output
     assert "cannot open database file" in result.output
     assert "Traceback" not in result.output
+
+
+_PRD_PATH_B = "tasks/archive/P1-FEAT-20260930-212702-agent-token-usage-stats.md"
+_ISSUE_9_USAGE = {
+    "input_tokens": 500,
+    "output_tokens": 100,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+}
+
+
+def _seed_two_prds(store: SqliteConsoleStore) -> None:
+    """落两个 PRD（Issue #7 claude / Issue #9 codex）各一条带 usage 的 attempt。"""
+    _seed_attempt(store)
+    _seed_attempt(
+        store,
+        issue_number=9,
+        prd_path=_PRD_PATH_B,
+        agent="codex",
+        usage_tokens=_ISSUE_9_USAGE,
+    )
+
+
+def test_tokens_prd_table_lists_each_issue(cli_env: SqliteConsoleStore) -> None:
+    """默认输出含「按 PRD」表：每个 Issue 一行，总量/命中率与明细一致（FR-6）。"""
+    _seed_two_prds(cli_env)
+    result = _invoke(["--repo-id", _REPO_ID, "--days", "30"])
+    assert result.exit_code == 0
+    assert "按 PRD（Issue）" in result.output
+    assert "#7" in result.output and "#9" in result.output
+    # Issue #9 显式上报缓存读 0：命中率 0% 是真实数据，不是「—」降级。
+    assert "2.5k" in result.output and "600" in result.output
+    assert "0%" in result.output
+
+
+def test_tokens_issue_drilldown_scopes_all_tables(cli_env: SqliteConsoleStore) -> None:
+    """--issue 下钻：三张表全部收窄到该 Issue，其他 Issue 不出现（FR-7）。"""
+    _seed_two_prds(cli_env)
+    result = _invoke(["--repo-id", _REPO_ID, "--days", "30", "--issue", "7"])
+    assert result.exit_code == 0
+    assert "Issue #7" in result.output
+    assert "#9" not in result.output
+    assert "codex" not in result.output
+    assert "claude" in result.output and "2.5k" in result.output
+
+
+def test_tokens_json_includes_by_prd(cli_env: SqliteConsoleStore) -> None:
+    """--json 输出 by_prd 维度；--issue 时三张表口径同步收窄（FR-6/FR-7）。"""
+    _seed_two_prds(cli_env)
+    result = _invoke(["--repo-id", _REPO_ID, "--days", "30", "--json"])
+    payload = json.loads(result.output)
+    assert len(payload["by_prd"]) == 2
+    entry_by_issue = {entry["issue_number"]: entry for entry in payload["by_prd"]}
+    assert entry_by_issue[7]["totals"]["total_tokens"] == 2460
+    assert entry_by_issue[9]["totals"]["total_tokens"] == 600
+    assert entry_by_issue[7]["prd_path"].endswith("agent-token-usage-cli.md")
+    assert entry_by_issue[7]["run_count"] == 1
+
+    scoped = _invoke(["--repo-id", _REPO_ID, "--days", "30", "--issue", "9", "--json"])
+    scoped_payload = json.loads(scoped.output)
+    assert scoped_payload["issue_number"] == 9
+    assert [entry["issue_number"] for entry in scoped_payload["by_prd"]] == [9]
+    assert set(scoped_payload["token_usage"]["by_agent"]) == {"codex"}
+
+
+def test_tokens_issue_without_usage_renders_empty_state(cli_env: SqliteConsoleStore) -> None:
+    """--issue 指向无数据 Issue：空态文案退出码 0（FR-7 边界）。"""
+    _seed_attempt(cli_env)
+    result = _invoke(["--repo-id", _REPO_ID, "--days", "30", "--issue", "999"])
+    assert result.exit_code == 0
+    assert "暂无 token 用量数据" in result.output

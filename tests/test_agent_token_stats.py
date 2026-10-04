@@ -145,3 +145,142 @@ class TestAggregateTokenUsage:
         stats = aggregate_token_usage([])
         assert stats.by_flow == {}
         assert stats.by_agent == {}
+
+
+class TestBuildTokenUsageByPrd:
+    """按 PRD（Issue）维度分组；口径与 aggregate_token_usage 单源。"""
+
+    @staticmethod
+    def _seed(store, *, issue_number: int, prd_path: str, usage: dict) -> None:
+        """经真实写入路径落一条带 usage 的 attempt 事件。"""
+        from backend.core.shared.models.agent_runner import (
+            AttemptResult,
+            FailureType,
+            TokenUsage,
+        )
+        from backend.core.use_cases.agent_runner_lifecycle import (
+            LifecycleEventType,
+            build_attempt_event_detail,
+            record_lifecycle_event,
+        )
+
+        result = AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.SUCCESS,
+            recovered=False,
+            detail="seed",
+            agent="claude",
+            started_at="2026-10-04T10:00:00+00:00",
+            finished_at="2026-10-04T10:01:00+00:00",
+            duration_seconds=60.0,
+            token_usage=TokenUsage(**usage),
+        )
+        record_lifecycle_event(
+            store=store,
+            repo_id="keda-main",
+            prd_path=prd_path,
+            issue_number=issue_number,
+            trigger="cli_run",
+            event_type=LifecycleEventType.ATTEMPT,
+            actor="runner",
+            occurred_at=result.started_at,
+            event_key=f"attempt:{issue_number}:1",
+            detail=build_attempt_event_detail(result),
+        )
+
+    def _store(self, tmp_path):
+        from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+
+        return SqliteConsoleStore(tmp_path / "console.db")
+
+    def test_groups_by_prd_and_excludes_missing_usage(self, tmp_path) -> None:
+        """两个 PRD 各成一组；缺 usage 的 run 不计入且不报错。"""
+        from datetime import datetime, timezone
+
+        from backend.core.use_cases.agent_runner_token_stats import build_token_usage_by_prd
+
+        store = self._store(tmp_path)
+        self._seed(store, issue_number=7, prd_path="tasks/a.md", usage=_FIXED_USAGE)
+        self._seed(
+            store,
+            issue_number=9,
+            prd_path="tasks/b.md",
+            usage={
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        )
+        # 无 usage 的事件：不产生任何分组。
+        from backend.core.use_cases.agent_runner_lifecycle import (
+            LifecycleEventType,
+            record_lifecycle_event,
+        )
+
+        record_lifecycle_event(
+            store=store,
+            repo_id="keda-main",
+            prd_path="tasks/c.md",
+            issue_number=11,
+            trigger="cli_run",
+            event_type=LifecycleEventType.ATTEMPT,
+            actor="runner",
+            occurred_at="2026-10-04T10:00:00+00:00",
+            event_key="attempt:11:1",
+            detail={"agent": "claude"},
+        )
+
+        entries = build_token_usage_by_prd(
+            store=store,
+            repo_id="keda-main",
+            days=30,
+            now=datetime(2026, 10, 5, tzinfo=timezone.utc),
+        )
+        assert [entry.issue_number for entry in entries] == [7, 9]
+        assert entries[0].totals.total_tokens == 2460
+        assert entries[0].run_count == 1
+        assert entries[1].totals.total_tokens == 120
+
+    def test_issue_filter_scopes_entries(self, tmp_path) -> None:
+        """issue_number 过滤：只返回该 Issue 的分组。"""
+        from datetime import datetime, timezone
+
+        from backend.core.use_cases.agent_runner_token_stats import build_token_usage_by_prd
+
+        store = self._store(tmp_path)
+        self._seed(store, issue_number=7, prd_path="tasks/a.md", usage=_FIXED_USAGE)
+        self._seed(store, issue_number=9, prd_path="tasks/b.md", usage=_FIXED_USAGE)
+
+        entries = build_token_usage_by_prd(
+            store=store,
+            repo_id="keda-main",
+            days=30,
+            now=datetime(2026, 10, 5, tzinfo=timezone.utc),
+            issue_number=9,
+        )
+        assert [entry.issue_number for entry in entries] == [9]
+        assert entries[0].totals.total_tokens == 2460
+
+    def test_stats_for_issue_scopes_dimensions(self, tmp_path) -> None:
+        """build_token_usage_stats_for_issue：by_flow/by_agent 只含该 Issue 的事件。"""
+        from datetime import datetime, timezone
+
+        from backend.core.use_cases.agent_runner_token_stats import (
+            build_token_usage_stats_for_issue,
+        )
+
+        store = self._store(tmp_path)
+        self._seed(store, issue_number=7, prd_path="tasks/a.md", usage=_FIXED_USAGE)
+        self._seed(store, issue_number=9, prd_path="tasks/b.md", usage=_FIXED_USAGE)
+
+        scoped = build_token_usage_stats_for_issue(
+            store=store,
+            repo_id="keda-main",
+            days=30,
+            issue_number=9,
+            now=datetime(2026, 10, 5, tzinfo=timezone.utc),
+        )
+        assert set(scoped.by_flow) == {"implement"}
+        assert set(scoped.by_agent) == {"claude"}
+        assert scoped.by_flow["implement"].usage_count == 1

@@ -3259,9 +3259,11 @@ unblocked | failed | agent_token_usage`。
 - **口径**：总量 = 输入 + 输出 + 缓存读 + 缓存写（实际处理量，缓存命中
   计入）；缓存命中率 = 缓存读 ÷ 输入侧。agent 未上报 usage（部分协议、
   超时被杀、旧记录）时**不估算**，展示为「—」且不进入汇总。
-- **CLI 查询**：`iar tokens [--repo-id <id>] [--days <N>] [--json]`
-  在终端直接输出按流程 / 按 agent 的汇总表（与 Stats 端点同源同口径），
-  `--json` 供脚本消费；空数据显示「—」或明确空态文案。
+- **CLI 查询**：`iar tokens [--repo-id <id>] [--days <N>] [--issue <n>] [--json]`
+  在终端输出按流程 / 按 agent / 按 PRD（Issue）三张汇总表（与 Stats 端点
+  同源同口径）；`--issue <n>` 把三张表收窄到单个 Issue，回答"这个 PRD 烧了
+  多少"；`--json` 额外携带 `by_prd` 维度供脚本消费；空数据显示「—」或明确
+  空态文案。
 - **不干扰**：`agent_token_usage` 不参与阶段推导与时长归属（推导时被
   过滤），写入失败与其它观测事件一样只落日志。
 

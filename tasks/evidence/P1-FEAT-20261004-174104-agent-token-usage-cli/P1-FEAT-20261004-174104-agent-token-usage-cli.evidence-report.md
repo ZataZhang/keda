@@ -56,3 +56,23 @@ PASS-with-notes（0 HIGH / 1 MEDIUM）。MEDIUM（create_console_store 构造在
 ## 证据文件 SHA-256
 
 见证据分支 `SHA256SUMS.txt`（随 PR 证据评论更新）。
+
+## rv-4 按 PRD（Issue）粒度与 --issue 下钻（2026-10-04 scope 增补）
+
+真实入口 verbatim（命令：`COLUMNS=150 IAR_CONFIG=/tmp/token-usage-rv/iar.toml uv run iar tokens --repo-id keda-main --days 30`，完整输出见 `rv4_output_byprd.txt`）：
+
+```text
+                                                    按 PRD（Issue）
+┏━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━┓
+┃ Issue ┃ PRD                                                ┃ 总量 ┃ 输入 ┃ 输出 ┃ 缓存读 ┃ 缓存写 ┃ 命中率 ┃ 调用数 ┃
+┡━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━┩
+│  #212 │ P1-FEAT-20260930-212702-agent-token-usage-stats.md │ 8.1k │ 2.7k │ 750  │ 4.4k   │ 210    │ 60%    │      3 │
+└───────┴────────────────────────────────────────────────────┴──────┴──────┴──────┴────────┴────────┴────────┴────────┘
+```
+
+**交叉自检**：#212 总量 8.1k = 8080（json `by_prd[0].totals.total_tokens`）= 按流程表 验证 2.9k + 评审 2.7k + 实现 2.5k 之和 ✓；命中率 60% = 4400 ÷ (2720+4400+210) ✓。
+
+`--issue 212` 下钻（`rv4_output_issue_drilldown.txt`）：标题行注明 `Issue #212`，三张表与默认输出在该 Issue 上逐值一致（该账本仅一个 Issue，收窄语义由 `test_tokens_issue_drilldown_scopes_all_tables` 以双 PRD 种子负向断言：#9 与 codex 不出现）。
+
+- 复现（机器侧）：`uv run pytest tests/test_agent_token_stats.py tests/test_cli_tokens.py -o addopts=""`（22 例：新增 3 例聚合分组/过滤 + 4 例 CLI 按 PRD 表/下钻/json by_prd/空态边界）
+- 口径单源：`build_token_usage_by_prd` 每 run 先经 `aggregate_token_usage` 同款提取再合并；零用量 run 按"缺失排除"跳过（`test_groups_by_prd_and_excludes_missing_usage` 断言 issue 11 无全零行）

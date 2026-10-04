@@ -16,6 +16,8 @@
 - **仓库与时间窗过滤**（FR-3）：`--repo-id` / `--days` 与既有 Stats 语义一致（天数越界收敛到 1–365）。
 - **JSON 机器可读输出**（FR-4）：`--json` 输出与 stats 端点 `token_usage` 同构的结构，供脚本消费。
 - **空态与降级**（FR-5）：无数据显示明确空态文案；无缓存数据时命中率显示「—」；任何读取失败不抛异常退出码污染（以非零码 + 明确错误文案表达）。
+- **按 PRD（Issue）粒度**（FR-6）：默认输出追加「按 PRD（Issue）」第三张表——每个 Issue 一行（Issue 号 + PRD 文件名 + 同列口径），同一 PRD 多次 run 合并；无可用用量的 run 不制造全零行。
+- **单 Issue 下钻**（FR-7）：`--issue <n>` 把按流程 / 按 agent / 按 PRD 三张表全部收窄到该 Issue，供"这个 PRD 烧了多少"的直接回答。
 
 # Part A · 人审层 (Review Layer)
 
@@ -31,24 +33,26 @@ Token 用量统计（前置 PRD）把每次 agent 调用的消耗落进了生命
 
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
-| 👀 人审 + 自动验证 | 账本含 token 数据时执行 `iar tokens --repo-id keda-main --days 30` | 终端输出两张汇总表（按流程 / 按 agent），列含总量、输入、输出、缓存读、缓存写、命中率、调用数；数值与 Stats 端点同源一致 |
-| 🤖 自动验证 | 同命令加 `--json` | 输出 JSON 的 `token_usage` 结构与 stats 端点响应同构（`by_flow` / `by_agent`，字段名一致），可直接被脚本解析 |
+| 👀 人审 + 自动验证 | 账本含 token 数据时执行 `iar tokens --repo-id keda-main --days 30` | 终端输出三张汇总表（按流程 / 按 agent / 按 PRD），列含分组、总量、输入、输出、缓存读、缓存写、命中率、调用数；数值与 Stats 端点同源一致 |
+| 👀 人审 + 自动验证 | 「按 PRD（Issue）」表 | 每个 Issue 一行（Issue 号 + PRD 文件名），同一 PRD 多次 run 合并累计；无可用用量的 run 不出现全零行 |
+| 👀 人审 + 自动验证 | `iar tokens --issue 182` | 三张表全部收窄到 Issue #182：其他 Issue 的行与 agent 不出现；标题行注明 `Issue #182` |
+| 🤖 自动验证 | 同命令加 `--json` | 输出 JSON 的 `token_usage` 结构与 stats 端点响应同构（`by_flow` / `by_agent`，字段名一致），并含 `by_prd` 维度（`--issue` 时同步收窄），可直接被脚本解析 |
 | 🤖 自动验证 | `--days 0` 或 `--days 9999` | 天数收敛到合法区间（1–365）后正常输出，不抛参数错误 |
 | 👀 人审 + 自动验证 | 空账本（或过滤条件下无数据）执行同命令 | 输出明确空态文案（"暂无 token 用量数据"类），退出码 0，不显示 0 假数据 |
-| 🤖 自动验证 | 某分组无缓存数据 | 该行命中率显示「—」而非 0% |
+| 🤖 自动验证 | 某分组显式上报缓存读为 0 | 该行命中率显示 0%（真实数据）；仅输入侧信息全零时命中率显示「—」 |
 
 > 此表的"当前、仍被接受"行为行将逐字成为 §7.6 的验收 oracle：修正表中一格，即修正对应验收标准。
 
 #### 我默默定了这些
 
-- 命令挂在既有 `iar console` 命令组之下（`iar tokens`）：token 数据属 console 账本域（`history_db_path` 指向的 SQLite），与 `iar console` 服务的面板同源，命令分组随之。
+- 命令为顶级 `iar tokens`（新模块 `cli_typer_tokens.py`）：需求方确认使用者心智模型是"查我的 agent 消耗"，`iar console` 保持"启动面板服务"语义（见 §13 D-01）。
 - 表格输出走既有 CLI 输出风格（Typer/Rich），不引入新的渲染依赖。
 - 聚合逻辑**直接复用**前置 PRD 的 `build_prd_lifecycle_stats` / `aggregate_token_usage`，CLI 内禁止重算口径。
 - 默认天数 30、默认全部仓库，与 Stats 页默认一致。
 
 #### 我理解为不做
 
-- 不做 CSV/Excel 导出、不做按 PRD 明细分页展示（事件明细已有账本与「执行过程」承载）。
+- 不做按 PRD 的事件明细分页展示（事件明细已有账本与「执行过程」承载；按 PRD 的**汇总行**属 FR-6 范围，是聚合不是明细）。
 - 不做美元成本（延续前置 PRD 的 D-05）。
 - 不做写入类操作（CLI 只读）。
 
@@ -239,9 +243,18 @@ No data model changes in this PRD.
 - id: rv-3
   behavior: --json 输出结构与 stats 端点 token_usage 同构，可直接被脚本解析
   reviewer: verifier
-  real_entry: "uv run pytest tests/test_cli_console_tokens.py -o addopts=\"\""
-  expected: "json.loads 成功；顶层含 repo_id/days/token_usage；token_usage.by_flow/by_agent 的字段名与 PrdLifecycleStats 序列化一致"
+  real_entry: "uv run pytest tests/test_cli_tokens.py -o addopts=\"\""
+  expected: "json.loads 成功；顶层含 repo_id/days/issue_number/token_usage/by_prd；token_usage.by_flow/by_agent 的字段名与 PrdLifecycleStats 序列化一致"
   mock_boundary: "真实 SQLite fixture；不 mock 聚合函数"
+  tier: R1
+  test_layer: integration
+  required_for_acceptance: true
+- id: rv-4
+  behavior: 按 PRD（Issue）表逐 Issue 分组且同一 PRD 多 run 合并；--issue 下钻后三张表只含该 Issue
+  reviewer: verifier
+  real_entry: "uv run pytest tests/test_agent_token_stats.py tests/test_cli_tokens.py -o addopts=\"\""
+  expected: "build_token_usage_by_prd 每 PRD 一组、缺 usage 的 run 排除；CLI 默认输出含按 PRD 表；--issue 后其他 Issue 的行与 agent 不出现；json 的 by_prd 同步收窄"
+  mock_boundary: "真实 SQLite fixture 经真实写入路径种子；不 mock 聚合函数"
   tier: R1
   test_layer: integration
   required_for_acceptance: true
@@ -289,12 +302,13 @@ No external validation required; repository evidence was sufficient.
 
 **Behavior Acceptance**
 - [x] rv-1/rv-2/rv-3 全部 PASS（7 例 CLI 测试 + 全链路 oracle），证据见证据目录 `*.evidence-report.md` 与 `*.verifier-report.md`
+- [x] rv-4（按 PRD 粒度 + --issue 下钻）PASS（新增 4 例 CLI 测试 + 3 例聚合测试），证据同上
 
 **Documentation Acceptance**
 - [x] `docs/guides/agent-runner.md` Token 用量章节已补 CLI 命令说明
 
 **Validation Acceptance**
-- [x] `CI=true just test all` 全绿（2825 passed / 1 skipped）
+- [x] `CI=true just test all` 全绿（2865 passed / 1 skipped，含 scope 增补后的复跑）
 
 **Delivery Readiness**
 - [x] 命令进入 `iar --help` 帮助输出
@@ -303,11 +317,13 @@ No external validation required; repository evidence was sufficient.
 
 ## 10. Functional Requirements
 
-- **FR-1**：`iar tokens` 输出按流程与按 agent 两张汇总表，列含分组、总量、输入、输出、缓存读、缓存写、命中率、调用数；数值与 `build_prd_lifecycle_stats` 聚合逐字段一致。
+- **FR-1**：`iar tokens` 输出按流程与按 agent 两张汇总表（FR-6 增补后默认共三张），列含分组、总量、输入、输出、缓存读、缓存写、命中率、调用数；数值与 `build_prd_lifecycle_stats` 聚合逐字段一致。
 - **FR-2**：命中率口径 = 缓存读 ÷ 输入侧实际处理量（input + 缓存读 + 缓存写）；无缓存数据时显示「—」。
 - **FR-3**：`--repo-id` 过滤仓库；`--days` 默认 30、钳制 1–365；语义与 stats 端点一致。
 - **FR-4**：`--json` 输出 `{"repo_id", "days", "token_usage": {"by_flow", "by_agent"}}`，结构与 stats 端点 `token_usage` 同构。
 - **FR-5**：空数据输出明确空态文案（退出码 0）；账本不可用以非零码 + 单行错误文案退出；全程不产生 traceback。
+- **FR-6**：默认输出追加「按 PRD（Issue）」第三张表：每个 Issue 一行（Issue 号、PRD 文件名、总量/输入/输出/缓存读/缓存写/命中率/调用数），同一 PRD 的多次 run 合并累计；整个 run 无可用用量（agent 未上报或全部畸形）时不制造全零行；聚合由 `build_token_usage_by_prd` 提供并与 `aggregate_token_usage` 口径单源。
+- **FR-7**：`--issue <n>` 下钻：按流程 / 按 agent（经 `build_token_usage_stats_for_issue` 收窄）与按 PRD 三张表全部只含该 Issue 的数据，标题行注明 `Issue #n`；`--json` 的 `token_usage` 与 `by_prd` 同步收窄。
 
 ## 11. Non-Goals
 
@@ -330,6 +346,7 @@ No external validation required; repository evidence was sufficient.
 | D-01 | 命令挂载位置 | 顶级 `iar tokens`（新模块 `cli_typer_tokens.py`） | `iar console tokens`（console 命令组子命令）；扩展现有 issue/roadmap 命令 | 初版按数据域归属选 console 子命令；需求方质疑后反转（2026-10-04）：使用者心智模型是"查我的 agent 消耗"而非"console 的数据"，且 `iar console` 既有语义是启动面板服务（长驻阻塞），不应混入秒级只读查询；账本存哪是实现细节，不决定命令名 |
 | D-02 | 聚合实现 | 直接复用 `build_prd_lifecycle_stats` / `aggregate_token_usage` | CLI 内重写聚合或直写 SQL | 口径必须单源（前置 PRD D-01/D-07）；复用使 CLI 与端点/前端天然一致 |
 | D-03 | 输出形态 | 默认 Rich 表格 + `--json` 开关 | 仅 JSON；或引入导出文件 | 人工巡检要可读表，脚本要稳定结构；导出属 Non-Goals |
+| D-04 | PRD 粒度视图形态 | 默认输出追加「按 PRD（Issue）」汇总表 + `--issue` 过滤下钻 | 仅 `--issue`（默认表不含 PRD 维度）；或 TOP-N 截断 | 需求方 2026-10-04 明确"要具体到对应的 PRD 也就是 Issue"：先总览再下钻是巡检自然顺序；窗口内 PRD 数量级小（每 Issue 至多一个活动 run），全量列出无可读性风险；TOP-N 会隐藏数据违背巡检用途；汇总行 ≠ 事件明细分页（后者仍是 Non-Goal） |
 
 ## 14. Change Log
 
@@ -348,6 +365,14 @@ No external validation required; repository evidence was sufficient.
 - Reason: 需求方质疑挂载位置后确认反转；数据存哪是实现细节，不决定命令名
 - Impact: §2/§6/§13 D-01/Change Impact Tree（挂载点改为 cli_typer_app.py + 新模块）/行为样例表同步；§9 呈递物命令行更新
 - Review: 需求方 2026-10-04 会话选择「iar tokens」
+
+### 2026-10-04 · scope 增补：按 PRD（Issue）粒度与 --issue 下钻
+- Type: scope
+- Before: `iar tokens` 只有按流程 / 按 agent 两维汇总，回答不了"某个 PRD（Issue）烧了多少"
+- After: 新增 FR-6（默认输出追加「按 PRD（Issue）」第三张表，同 PRD 多 run 合并、无用量 run 不制造全零行）与 FR-7（`--issue` 下钻，三张表 + `--json` 同步收窄）；核心聚合新增 `build_token_usage_by_prd` / `build_token_usage_stats_for_issue`（复用 `aggregate_token_usage` 口径单源）；rv-4 oracle 加入验收
+- Reason: 需求方 2026-10-04 反馈"应该要具体到对应的 PRD 也就是那个 Issue"；PR #188 尚未合并、人工 sign-off 未发生，按 living statement 在原 PR 内增补（重跑门禁 + verifier 复核 delta + 证据重绑新树）
+- Impact: §1 行为样例表 / Feature Overview / §7.6（rv-3 路径笔误一并修正）/ §9.2 / §10 / §13 D-04 同步；CLI 输出与 `--json` 结构向后兼容地增列（`by_prd` 为新增字段）
+- Review: 需求方 2026-10-04 会话提出增补方向，形态（表 + 过滤下钻，不做 TOP-N）由 AI 按巡检场景推导并记录于 D-04
 
 
 ### 2026-10-04 · 实施完成：iar tokens 交付并随 PR 归档

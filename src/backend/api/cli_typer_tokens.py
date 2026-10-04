@@ -1,8 +1,9 @@
 """Token 用量 CLI 查询（``iar tokens``）。
 
 只读命令：读取 console 账本（``history_db_path`` 指向的 SQLite），复用
-``build_prd_lifecycle_stats`` 的既有聚合口径输出按流程 / 按 agent 的 token
-汇总。CLI 内不做任何口径换算——口径唯一事实源在聚合模块（前置 PRD：
+既有聚合口径输出按流程 / 按 agent / 按 PRD（Issue）的 token 汇总，并支持
+``--issue`` 下钻到单个 Issue。CLI 内不做任何口径换算——口径唯一事实源在
+聚合模块（前置 PRD：
 ``tasks/archive/P1-FEAT-20260930-212702-agent-token-usage-stats.md``）。
 """
 
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from pathlib import PurePosixPath
 from typing import Annotated
 
 import typer
@@ -19,6 +21,10 @@ from rich.table import Table
 from backend.api.cli_typer_app import app
 from backend.core.use_cases.agent_runner_factory import create_console_store
 from backend.core.use_cases.agent_runner_lifecycle import build_prd_lifecycle_stats
+from backend.core.use_cases.agent_runner_token_stats import (
+    build_token_usage_by_prd,
+    build_token_usage_stats_for_issue,
+)
 
 #: 表格渲染专用 Rich Console（CliRunner 场景下随 sys.stdout 重定向）。
 _rich_console = Console()
@@ -88,6 +94,43 @@ def _render_group_table(title: str, group_totals: dict) -> Table:
     return table
 
 
+def _render_prd_table(entries: list) -> Table:
+    """渲染「按 PRD（Issue）」汇总表（按总量降序，与分组表同列口径）。
+
+    PRD 路径只显示文件名（全路径过宽）；未关联 PRD 的 run 显示「—」。
+    """
+    table = Table(title="按 PRD（Issue）", show_lines=False)
+    table.add_column("Issue", justify="right")
+    table.add_column("PRD")
+    table.add_column("总量", style="bold")
+    table.add_column("输入")
+    table.add_column("输出")
+    table.add_column("缓存读")
+    table.add_column("缓存写")
+    table.add_column("命中率")
+    table.add_column("调用数", justify="right")
+    for entry in entries:
+        totals = entry.totals
+        issue_label = "—" if entry.issue_number is None else f"#{entry.issue_number}"
+        prd_label = "—" if not entry.prd_path else PurePosixPath(entry.prd_path).name
+        table.add_row(
+            issue_label,
+            prd_label,
+            _format_token_count(totals.total_tokens),
+            _format_token_count(totals.input_tokens),
+            _format_token_count(totals.output_tokens),
+            _format_token_count(totals.cache_read_input_tokens),
+            _format_token_count(totals.cache_creation_input_tokens),
+            _cache_hit_rate(
+                totals.input_tokens,
+                totals.cache_read_input_tokens,
+                totals.cache_creation_input_tokens,
+            ),
+            str(totals.usage_count),
+        )
+    return table
+
+
 @app.command(name="tokens")
 def tokens(
     repo_id: Annotated[
@@ -98,12 +141,19 @@ def tokens(
         int,
         typer.Option("--days", help="时间窗口天数（钳制到 1–365），默认 30。"),
     ] = 30,
+    issue: Annotated[
+        int | None,
+        typer.Option(
+            "--issue",
+            help="只看某个 Issue（PRD）的消耗：按流程/按 agent 表收窄到该 Issue。",
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="输出与 stats 端点同构的 JSON（供脚本消费）。"),
     ] = False,
 ) -> None:
-    """查看 agent 调用的 token 消耗汇总（按流程 / 按 agent，与 Stats 页同源同口径）。"""
+    """查看 agent 调用的 token 消耗汇总（按流程 / 按 agent / 按 PRD，与 Stats 页同源同口径）。"""
     bounded_days = _clamp_days(days)
     # 可用性探针：建库与裸读都放进保护块——build_prd_lifecycle_stats 对读取
     # 失败静默降级为空数据，这里负责把"账本不可用"与"真的没数据"区分开
@@ -115,8 +165,17 @@ def tokens(
         typer.secho(f"token 查询失败：账本不可用（{exc}）", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
-    stats = build_prd_lifecycle_stats(store=store, repo_id=repo_id, days=bounded_days)
-    usage = stats.token_usage
+    if issue is not None:
+        usage = build_token_usage_stats_for_issue(
+            store=store, repo_id=repo_id, days=bounded_days, issue_number=issue
+        )
+    else:
+        usage = build_prd_lifecycle_stats(
+            store=store, repo_id=repo_id, days=bounded_days
+        ).token_usage
+    prd_entries = build_token_usage_by_prd(
+        store=store, repo_id=repo_id, days=bounded_days, issue_number=issue
+    )
 
     if json_output:
         typer.echo(
@@ -124,7 +183,9 @@ def tokens(
                 {
                     "repo_id": repo_id,
                     "days": bounded_days,
+                    "issue_number": issue,
                     "token_usage": asdict(usage),
+                    "by_prd": [asdict(entry) for entry in prd_entries],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -132,17 +193,19 @@ def tokens(
         )
         return
 
-    if not usage.by_flow and not usage.by_agent:
+    if not usage.by_flow and not usage.by_agent and not prd_entries:
         typer.echo("暂无 token 用量数据（agent 未上报 usage 或所选范围无记录）。")
         return
 
     typer.echo(
         f"Token 用量汇总（最近 {bounded_days} 天"
         + (f"，仓库 {repo_id}" if repo_id else "，全部仓库")
+        + (f"，Issue #{issue}" if issue is not None else "")
         + "；总量 = 输入 + 输出 + 缓存读 + 缓存写）"
     )
     _rich_console.print(_render_group_table("按流程", usage.by_flow))
     _rich_console.print(_render_group_table("按 agent", usage.by_agent))
+    _rich_console.print(_render_prd_table(prd_entries))
 
 
 __all__ = ["tokens"]
