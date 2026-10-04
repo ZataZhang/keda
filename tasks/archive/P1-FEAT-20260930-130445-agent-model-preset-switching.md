@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ✅ **验收状态**：已交付并归档（两轮独立 verifier PASS；9.1 决策页 6/6 按推荐确认；rv-12 opt-in 经人决定本轮不采，PR 标注已知限制）。
+> 🧍 **验收状态**：待人工验收（执行侧已完成，两轮独立 verifier PASS，机器验收项已勾；Human-Confirmed 五项随合并即验收事件勾选）。rv-12 opt-in 本轮不采，已知限制见 §12 与 PR。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制、文件路径、命令与排期信息；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。人只在 Part A 点名处下钻。
@@ -599,11 +599,13 @@ Failure triage:
 ### 9.2 Acceptance Evidence Package
 
 **Human-Confirmed（对应 §2 四个决策 + 呈递审阅）**
-- [x] 决策一：预设解析与 argv 模型注入落在 core 单一出口、零回归为硬承诺 —— 人确认（`rv-1`、`rv-4` 为佐证）
-- [x] 决策二：阶段绑定预设整体决定 (agent, 模型, 推理档)、遮蔽矩阵同键声明、CLI 显式 `--agent` 最高 —— 人确认（`rv-6`、`rv-9` 为佐证）
-- [x] 决策三：换人（fallback / 显式 `--agent`）即丢弃模型绑定并标注，executor 继承不算换人 —— 人确认（`rv-7`、`rv-10` 为佐证）
-- [x] 决策四：agent 未声明模型模板时 fail-fast（宁缺勿假）—— 人确认（`rv-5` 为佐证）
-- [x] 9.1 呈递区呈递物已逐项过目并认可
+
+（保持未勾：随本交付 PR 合并即验收事件，由 post-merge reconciliation 勾选）
+- [ ] 决策一：预设解析与 argv 模型注入落在 core 单一出口、零回归为硬承诺 —— 人确认（`rv-1`、`rv-4` 为佐证）
+- [ ] 决策二：阶段绑定预设整体决定 (agent, 模型, 推理档)、遮蔽矩阵同键声明、CLI 显式 `--agent` 最高 —— 人确认（`rv-6`、`rv-9` 为佐证）
+- [ ] 决策三：换人（fallback / 显式 `--agent`）即丢弃模型绑定并标注，executor 继承不算换人 —— 人确认（`rv-7`、`rv-10` 为佐证）
+- [ ] 决策四：agent 未声明模型模板时 fail-fast（宁缺勿假）—— 人确认（`rv-5` 为佐证）
+- [ ] 9.1 呈递区呈递物已逐项过目并认可
 
 **Architecture Acceptance**
 - [x] 模型/推理档 argv 注入只发生在 `src/backend/core/use_cases/agent_invocation.py`，无旁路拼接（`rg -n "argv\.append|argv\.extend" src/backend/core src/backend/engines` 佐证）
@@ -696,6 +698,14 @@ Failure triage:
 | D-11 | CLI 一次性旗标的挂载范围 | 仅生命周期锚定入口（run/daemon/review/review-daemon/ask/issue create） | 全部命令含 repl | repl 不是生命周期阶段；缩小面即缩小回归面 |
 
 ## 14. Change Log
+
+### 2026-10-04 · 重定基到 v5 归档语义 + PR 接管
+
+- Type/Scope: delivery；仅本 PRD 记录路径（横幅、§9.2 人审组、本 Change Log）与分支重定基。
+- Changed: 分支 `feat/agent-model-presets` 重定基到 `zata/main`（含 #182 token 账本、#184/#185 PRD v5 归档语义、#186），解决 `agent_runner_attempt` / `run_agent_execution_loop` / `run_verifier_agent` 等六文件的账本列、usage 观测与 verifier 候选回退三方冲突；全量门禁 `CI=true just test all` → 2849 passed / 1 skipped。
+- Changed: 按 v5 归档语义对齐——横幅由「已交付并归档」改为 `🧍 待人工验收`，§9.2 Human-Confirmed 五项保持 `- [ ]`（原 decision-board 6/6 确认作为 9.1 呈递记录保留），验收记录改由合并即验收事件的 post-merge reconciliation 写入。
+- Invariant: 未定义预设 / 未绑定 / 未传旗标时 argv 与九阶段路由逐字节不变（黄金快照零 diff）；账本 schema v5→v6 迁移对既有库幂等（与 #182 增列共存）。
+- Reason: main 已切到「归档只代表执行侧完成、验收独立记录」的契约；原 PRD 在旧语义下勾满人审框，与合并即验收的 PR 契约冲突。
 
 ### 2026-10-03 · 人读呈递区确认（decision-board）
 
