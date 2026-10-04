@@ -60,9 +60,10 @@ def resolve_evidence_candidate_dirs(
 ) -> list[Path]:
     """解析该 PRD 的证据目录候选：分支副本在前、主仓库副本兜底。
 
-    worktree 按 PRD slug 与分支名匹配；执行发生在 worktree 里，证据要等合并回
-    主线才出现在主仓库，因此分支副本必须优先——与看板 EVIDENCE 列同一套定位
-    规则，两处不得分叉。
+    worktree 定位与看板 EVIDENCE 列同一套规则（``match_worktree_for_prd``）：
+    分支名等于 PRD slug，或分支名等于 PRD 正文 ``GitHub Issue:`` 行指向的
+    ``issue-<编号>``（iar runner 的分支命名）。执行发生在 worktree 里，证据要等
+    合并回主线才出现在主仓库，因此分支副本必须优先——两处不得分叉。
 
     Args:
         prd_path (Path): PRD 文件路径。
@@ -74,7 +75,9 @@ def resolve_evidence_candidate_dirs(
         list[Path]: 证据目录候选，按查找优先级排列。
     """
     _, _, _, raw_slug_text = prd_locator.parse_prd_filename(prd_path)
-    matched_worktree = prd_locator.match_worktree_by_slug(worktree_branches_list, raw_slug_text)
+    matched_worktree = prd_locator.match_worktree_for_prd(
+        worktree_branches_list, raw_slug_text, prd_path
+    )
     worktree_path = matched_worktree[1] if matched_worktree is not None else None
 
     main_evidence_dir = repo_root / "tasks" / "evidence" / prd_path.stem

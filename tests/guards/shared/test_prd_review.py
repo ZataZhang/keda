@@ -42,6 +42,9 @@ import prd_review  # noqa: E402
 _PRD_FILENAME = "P1-FEAT-20260916-212206-demo-feature.md"
 _PRD_STEM = "P1-FEAT-20260916-212206-demo-feature"
 _BRANCH_NAME = "demo-feature"
+# iar runner 的分支名是 ``issue-<编号>``，不等于 PRD slug；定位必须靠 PRD 正文的
+# ``GitHub Issue:`` 行兜底，否则从主仓库跑 `just prd review` 找不到 worktree 副本。
+_ISSUE_BRANCH_NAME = "issue-53"
 
 
 def _build_fake_repo(tmp_path: Path) -> tuple[Path, Path]:
@@ -108,6 +111,63 @@ def test_worktree_without_evidence_dir_falls_back_to_main_repo(tmp_path: Path) -
     )
 
     assert resolved_target_path == main_checklist_path
+
+
+def _write_prd_body(prd_path: Path, body_text: str) -> None:
+    """覆写假 PRD 正文，用于构造带 / 不带 ``GitHub Issue:`` 行的用例。"""
+    prd_path.write_text(body_text, encoding="utf-8")
+
+
+def test_checklist_resolves_from_issue_number_branch(tmp_path: Path) -> None:
+    """分支名等于 PRD 关联 Issue（``issue-<N>``）时同样命中 worktree，而非只认 slug。"""
+    repo_root_path, prd_path = _build_fake_repo(tmp_path)
+    _write_prd_body(
+        prd_path,
+        "# Demo PRD\n\n- GitHub Issue: https://github.com/example/repo/issues/53\n",
+    )
+    _write_evidence_file(repo_root_path, "human-review-checklist.md", "# 主仓库旧副本\n")
+    worktree_root_path = tmp_path / "worktrees" / _ISSUE_BRANCH_NAME
+    branch_checklist_path = _write_evidence_file(
+        worktree_root_path, "human-review-checklist.md", "# 分支新副本\n"
+    )
+    worktree_branches_list = [(_ISSUE_BRANCH_NAME, worktree_root_path)]
+
+    assert (
+        prd_review.resolve_review_target(prd_path, repo_root_path, worktree_branches_list)
+        == branch_checklist_path
+    )
+    assert prd_review.resolve_evidence_candidate_dirs(
+        prd_path, repo_root_path, worktree_branches_list
+    ) == [
+        worktree_root_path / "tasks" / "evidence" / _PRD_STEM,
+        repo_root_path / "tasks" / "evidence" / _PRD_STEM,
+    ]
+
+
+def test_issue_number_lookup_requires_a_unique_issue_line(tmp_path: Path) -> None:
+    """无 ``GitHub Issue:`` 行、或其编号不唯一时保守回退主仓库，不猜 worktree。"""
+    repo_root_path, prd_path = _build_fake_repo(tmp_path)
+    main_checklist_path = _write_evidence_file(repo_root_path, "human-review-checklist.md")
+    worktree_root_path = tmp_path / "worktrees" / _ISSUE_BRANCH_NAME
+    _write_evidence_file(worktree_root_path, "human-review-checklist.md", "# 分支副本\n")
+    worktree_branches_list = [(_ISSUE_BRANCH_NAME, worktree_root_path)]
+
+    # 正文没有 GitHub Issue 行。
+    assert (
+        prd_review.resolve_review_target(prd_path, repo_root_path, worktree_branches_list)
+        == main_checklist_path
+    )
+
+    # 两个不同编号 -> 不唯一 -> 不匹配。
+    _write_prd_body(
+        prd_path,
+        "# Demo PRD\n\n- GitHub Issue: https://github.com/example/repo/issues/53\n"
+        "- GitHub Issue: https://github.com/example/repo/issues/54\n",
+    )
+    assert (
+        prd_review.resolve_review_target(prd_path, repo_root_path, worktree_branches_list)
+        == main_checklist_path
+    )
 
 
 def test_review_target_prefers_checklist_and_falls_back_to_report(tmp_path: Path) -> None:
