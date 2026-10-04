@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无剩余前置——原硬依赖 `tasks/archive/P1-FEAT-20260930-212702-agent-token-usage-stats.md`（PR #182）已于 2026-10-04 合并（`6fd39c63`），聚合事实源与账本格式已在主干。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 1 项 Human-Confirmed 未确认（9.1 呈递过目），证据包见 §9。
+> ✅ **验收状态**：已验收 — 验收清单已全部完成（验收记录：PR #188 合并事件，见 §14 Change Log 2026-10-04 条目）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 采用两个高度：Part A（人审层，§1–4）供人快速理解与决策，不含实现机制；Part B（执行器层，§5–13）承载全部实现细节。
@@ -294,8 +294,8 @@ No external validation required; repository evidence was sufficient.
 
 **Human-Confirmed**
 
-（保持未勾：合并即验收事件写入后由 post-merge reconciliation 勾选）
-- [ ] 9.1 人读呈递区已由人工过目（rv-1 verbatim 输出与自检结论，见证据报告 §rv-1）
+（该项以 PR #188 合并事件为验收记录勾选——2026-10-04 由需求方确认四项 RV 清单后 squash merge `36a00988`，见 §14 Change Log）
+- [x] 9.1 人读呈递区已由人工过目（rv-1 verbatim 输出与自检结论，见证据报告 §rv-1）
 
 **Architecture Acceptance**
 - [x] `rg -n "aggregate_token_usage" src/backend/api/cli_typer_tokens.py` 存在调用，且 CLI 内无重复聚合实现（`rg -n "by_flow" src/backend/api` 仅命中呈现层取值；架构检查 PASS）
@@ -391,3 +391,11 @@ No external validation required; repository evidence was sufficient.
 - Requirements and risks: confirmed — FR-1..FR-5 全部落地，§12 风险无新增
 - Reconciled differences:
   - none
+
+### 2026-10-04 · 验收记录：PR #188 合并即验收
+- Type: acceptance
+- Before: 横幅 🧍 待人工验收，Human-Confirmed 一项（9.1 呈递过目）未勾
+- After: 横幅 ✅ 已验收；Human-Confirmed 以合并事件勾选
+- Reason: 需求方于 PR #188 勾选全部 4 项 RV 清单（rv-1..rv-4）后执行 squash merge（merge commit `36a00988`），合并即验收事件成立——PR 正文含 Human Acceptance And PRD Record 声明与稳定证据评论 v2（绑定 verified tree `621b4300`），首审与 delta 复核双 PASS、必要门禁绿
+- Impact: 合并树（排除本 PRD 记录路径）与 verified tree `621b4300` **逐字节相等**（分支 rebase 基已含 main 全部前置提交，squash 合并不引入第三方差异），Evidence Identity 直接满足、无需 oracle 复跑
+- Review: post-merge reconciliation 由 agent 按 prd skill 契约执行（Machine Contract §8）
