@@ -1,9 +1,13 @@
-"""PRD delivery gating: acceptance-checklist and change-log validation.
+"""PRD delivery gating: acceptance checklist, acceptance status banner and change log.
 
 Extracted from :mod:`backend.core.use_cases.agent_runner_feedback` to keep that
-module under the repository's 1000-non-empty-line hard limit. Behavior is
-unchanged: the helpers are imported back into ``agent_runner_feedback`` so the
-existing call sites and the public ``PrdDeliveryError`` re-export keep working.
+module under the repository's 1000-non-empty-line hard limit. The helpers are
+imported back into ``agent_runner_feedback`` so the existing call sites and the
+public ``PrdDeliveryError`` re-export keep working.
+
+归档语义遵循 prd skill Machine Contract v5：归档只代表执行侧交付完成。
+Human-Confirmed 组的空框归人回答，既不阻止归档也不阻止发布；它们是否还开着，
+由验收状态横幅如实呈现——横幅与清单对不上，就不归档、不发布。
 """
 
 from __future__ import annotations
@@ -65,22 +69,60 @@ def _human_group_missing_hint(checklist_result: PrdChecklistResult) -> str:
     )
 
 
+def _validate_acceptance_banner(
+    checklist_result: PrdChecklistResult,
+    prd_relative_path: str,
+) -> None:
+    """核对验收状态横幅与验收清单是否一致。
+
+    横幅文本由 prd skill 解析，这里只比对状态值，keda 不另写横幅解析。公式与
+    skill 检查器同口径：Human-Confirmed 组仍有 ``[ ]`` 时必须是 ``awaiting_human``，
+    一个都没有时必须是 ``accepted``；``not_started`` 与缺失 / 认不出（``""``）一律
+    算不一致。``acceptance_status is None`` 说明本机 skill 是 v3/v4、根本不报告
+    横幅，此时跳过——不因"读不出"拦下交付。
+
+    Args:
+        checklist_result: 本次清单解析结果。
+        prd_relative_path: Relative path used in error messages.
+
+    Raises:
+        PrdDeliveryError: 横幅与清单不一致（``ACCEPTANCE_BANNER_MISMATCH``，可进收尾）。
+    """
+    current_status = checklist_result.acceptance_status
+    if current_status is None:
+        return
+    open_human_item_count = len(checklist_result.human_unchecked_items)
+    expected_status = "awaiting_human" if open_human_item_count else "accepted"
+    if current_status == expected_status:
+        return
+    raise PrdDeliveryError(
+        "Acceptance status banner does not match the Acceptance Checklist in "
+        f"{prd_relative_path}: the banner state is "
+        f"`{current_status or 'missing or unrecognized'}` but must be `{expected_status}`, "
+        f"because {open_human_item_count} Human-Confirmed item(s) are still `- [ ]`. "
+        "Change only the banner line; never tick or rewrite a checklist item to make "
+        "the two agree.",
+        kind=DeliveryGateFailureKind.ACCEPTANCE_BANNER_MISMATCH,
+    )
+
+
 def _validate_prd_checklist(
     file_content: str,
     prd_relative_path: str,
-) -> bool:
-    """Validate executor items and report whether human review remains.
+) -> None:
+    """Validate the executor-owned checklist items and the acceptance status banner.
+
+    只有执行侧条目会拦：Human-Confirmed 组的空框归人回答，不阻止归档与发布，
+    但横幅必须如实反映它们（见 :func:`_validate_acceptance_banner`）。
 
     Args:
         file_content: PRD file text.
         prd_relative_path: Relative path used in error messages.
 
-    Returns:
-        ``True`` 表示执行项已完成，但 PR 仍需人工确认。
-
     Raises:
-        PrdDeliveryError: When the checklist section is missing or has
-            unchecked items.
+        PrdDeliveryError: When the checklist section is missing, executor items
+            are unchecked, or the acceptance status banner disagrees with the
+            checklist.
     """
     checklist_result = parse_prd_checklist(file_content)
     if not checklist_result.section_found:
@@ -93,7 +135,7 @@ def _validate_prd_checklist(
             f"{unchecked_summary}{_human_group_missing_hint(checklist_result)}",
             kind=DeliveryGateFailureKind.CHECKLIST_UNCHECKED,
         )
-    return bool(checklist_result.human_pending_items)
+    _validate_acceptance_banner(checklist_result, prd_relative_path)
 
 
 def _validate_prd_change_log(

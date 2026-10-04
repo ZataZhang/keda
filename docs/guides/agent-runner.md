@@ -276,15 +276,22 @@ PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分四层，全部�
    的发布契约参考文本注入生成 prompt（调用侧包装 config，`generated_content`
    与 skill 解耦）。教学要求 agent 在正文里写 `- PRD: <relative prd path>` 行和
    `<!-- iar:merge-acceptance version=1 -->`（"合并即接受"声明）hidden marker。
-   skill 或参考文档不可达时静默跳过教学。
+   PRD 由 runner 在本 PR 里归档，所以 PRD 行指向 `tasks/archive/` 下的位置（文件名取自
+   Issue 的 `PRD path:` 锚点）；声明句说的是"合并即接受所列人审决策与可见结果，并授权
+   合并后在该 PRD 上补记验收记录"（authorizes post-merge acceptance recording），
+   不再是"授权合并后归档"。skill 或参考文档不可达时静默跳过教学。
 2. **确定性正文补锚点**：正文不是 agent 写的——`fallback` 兜底正文（生成关闭、
    agent 失败，或产出不含 `Closes #N`）与 `template` 渲染出的 `body_template`
    （含 `fallback = "template"` 的中间兜底）——教学无从谈起，由
    `append_missing_contract_anchors` 在末尾直接补一个
-   `## Human Acceptance And PRD Archive` 小节：`- PRD: <path>` 行，加
-   merge-acceptance marker 与"合并即接受"声明句（形态取自 skill 参考文档，只指向
-   PRD，不内联决策与可见结果清单）。只补缺失的锚点，重复执行不变。
-3. **发布端软门**：正文（补锚点之后）做可 grep 锚点校验；缺失时**不阻断发布**，
+   `## Human Acceptance And PRD Archive` 小节：`- PRD: <归档路径>` 行（Issue 路径不在
+   `tasks/pending/` 下、换算不出归档路径时原样写 Issue 路径），加 merge-acceptance
+   marker 与"合并即接受"声明句——合并者接受 PRD 记录的人审决策与可见结果，并授权合并后
+   补记验收记录（勾选 Human-Confirmed 项、横幅改为 ✅ 已验收），前提是门禁保持全绿且合并
+   树与验证树一致。形态取自 skill 参考文档，只指向 PRD，不内联决策与可见结果清单。小节
+   标题与 marker 被合并队列与测试钉住，沿用旧名不改。只补缺失的锚点，重复执行不变。
+3. **发布端软门**：正文（补锚点之后）做可 grep 锚点校验（`prd-link` 认 PRD 的归档
+   路径，也认 Issue 记录的 pending 路径，存量 PR 与人手写的正文不会因此被标注）；缺失时**不阻断发布**，
    而是在正文末尾追加 `<!-- iar:pr-contract version=1 missing=... -->` 标注块，列出
    缺失锚点并说明合并队列将拒绝自动合并。经第 2 层之后仍缺锚点的只剩
    **agent 撰写的正文无视了教学**——标注正好暴露这个信号，agent 正文不会被静默
@@ -2984,11 +2991,13 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
    - `build_progress_continuation_prompt()` 在跨 claim 续作时附带上一次失败的 failure summary 和 verification 输出，并提醒检查项目规范。
 2. **提交前 Delivery Gate**：runner 在 `publish_changes()` 之前执行 PRD delivery gate：
    - 无 PRD path：跳过 gate，保持现有行为。
-   - PRD 仍在 `tasks/pending/`：未勾选的执行项继续阻塞提交；`Human-Confirmed` 小节里只有人能在 PR 中确认的条目保留空框（已有 `[~]` 后置门禁标记同样视为待人审），允许发布 PR，PRD 保持 pending。本轮 PRD 内容若相较执行开始时发生变更，仍须有完整结构化 `Change Log`。全部验收项完成后，runner 才执行 `git mv tasks/pending/<name>.md tasks/archive/<name>.md`。
-   - PRD 已在 `tasks/archive/`：校验执行项与人审项全部完成；仍有人审空框的归档文件不能发布。
+   - PRD 仍在 `tasks/pending/`：归档只看**执行侧**条目（`Human-Confirmed` 组之外的条目，prd skill Machine Contract v5）。执行侧有未勾条目即阻塞提交（`CHECKLIST_UNCHECKED`，报错点名条目）；本轮 PRD 内容若相较执行开始时发生变更，须有完整结构化 `Change Log`；验收状态横幅须与清单一致（见下）。全部满足后 runner 执行 `git add -- tasks/pending/<name>.md` 与 `git mv tasks/pending/<name>.md tasks/archive/<name>.md`——**不论 `Human-Confirmed` 组是否还有空框**。归档不改 PRD 内容：人审空框与 🧍 横幅原样保留，留给人在 PR 上回答。
+   - PRD 已在 `tasks/archive/`：同样校验 Change Log、执行侧条目与横幅；人审空框不拦交付与发布。
+   - **横幅一致性**：skill（v5 起）在契约 JSON 里报告横幅状态。`Human-Confirmed` 组仍有 `- [ ]` 时横幅必须是 `🧍 **验收状态**：待人工验收`（`awaiting_human`），一个都没有时必须是 `✅ **验收状态**：已验收`（`accepted`）；`⬜ 未开工` 与横幅缺失都算不一致。不一致时不归档、不发布，抛 `ACCEPTANCE_BANNER_MISMATCH`，可交给 Closeout Agent：只改横幅这一行并追加一条 Change Log，不得勾选、取消或改写任何复选框。本机 skill 仍是 v3/v4（不报告横幅）时跳过这项检查，只按执行侧判据归档。横幅文本由 skill 解析，keda 不另写横幅解析。
+   - **发布前检查**（`push_changes(require_prd_archived=True)`，正常交付路径）：PRD 必须已在 `tasks/archive/`，且执行侧条目与横幅校验通过；仍在 pending（包括带人审空框的情形）一律拒绝。两条既有例外不变：recovery 耗尽后的失败 Draft PR 与 PRD rework 提案传 `require_prd_archived=False`，二者都不调用交付检查，也都不归档——失败交付永不归档。
    - PRD 文件不存在、archive 目录缺失或 `Acceptance Checklist` section 缺失：进入 recovery loop，重试耗尽后标记 `agent/failed`。
-3. **归档时机**：无人审待办时，`git mv` 发生在 `git add -A` 之前，归档随实现一起提交；有人审待办时，PRD 保持 pending。审阅者确认并留下证据后，须在同一个 PR 的后续提交中勾选人审项并归档 PRD，再合并。合并队列不会自动合并仍在 pending 的 PRD。
-4. **Pre-PR Review 与归档的关系**：`build_prd_review_reference()` 读取 worktree 中实际存在的 pending 或 archive 路径。runner 已归档的 PRD 不得被 reviewer 挪回 pending；等待人审的 PRD 则必须继续留在 pending。
+3. **归档时机**：`git mv` 发生在 `git add -A` 之前，归档随实现一起提交，包括仍待人工验收的 PRD。**已归档 ≠ 已验收**：归档只记录执行侧交付完成，验收与否看横幅与 `Human-Confirmed` 组。人在 PR 上确认后勾选人审项、把横幅改为 ✅ 已验收（同一个 PR 的后续提交，或合并后补记；合并时自动补记是后续 PRD）。合并队列对人审未答的 PRD（不论在 pending 还是 archive）一律跳过等人，见"7 步门禁链"下的 PRD hold。
+4. **Pre-PR Review 与归档的关系**：`build_prd_review_reference()` 读取 worktree 中实际存在的 pending 或 archive 路径。runner 已归档的 PRD 不得被 agent 或 reviewer 挪回 pending；人工验收驳回后是否重开 PRD 由人决定。
 
 > **注意**：runner 不会只因 PRD 的 checkbox 而信任业务完成度；Realistic Validation 与独立 verifier 仍需提供实际证据。Change Log 解释需求为何演进，不能替代任何验收项或证据。
 
@@ -3535,6 +3544,14 @@ enabled = true               # 新键：仓库级显式打开
 6. **等 checks**：轮询 `get_pull_request_context` 直到 checks 全绿（自动签核后 sign-off check 应翻绿），超时上限 `autopilot.merge_check_timeout_seconds`。
 7. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `iar:event (auto-merged)` 评论、摘除 `agent/review` 标签。
 
+**PRD hold（自动签核之后、rebase 之前）**：PRD-backed Issue 在 rebase 前先读该 Issue worktree 里的 PRD——按实际位置定位（先 `tasks/pending/`，再 `tasks/archive/`）：
+
+- `Human-Confirmed` 组仍有未回答的项（`- [ ]`，以及老 PRD 误标的 `- [~]`，保守口径）→ `skipped_human_review`，本轮不 rebase、不重跑验证、不合并，等人验收。PRD 在交付时就已归档，所以这一判断**不论 PRD 在 pending 还是 archive** 都生效；只看 pending 路径会让自动合并替人行使验收权。
+- PRD 仍在 `tasks/pending/` 且无人审待办 → `skipped_prd_pending`（执行侧没交付完）。
+- PRD 已在 `tasks/archive/` 且人审已全部回答 → 继续 rebase 及后续门禁。
+
+人在 PR 分支上勾选人审项并把横幅改为 ✅ 已验收后，下一轮读到最新 PRD 即放行（worktree 需同步到 PR 最新 head，沿用既有行为）。
+
 ### 崩溃重入幂等
 
 - **勾选幂等**：解析 `ValidationChecklistState`，已全勾则不改 body、不发评论。
@@ -3671,7 +3688,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 | 失败 | `agent/failed` |
 | 阻塞 | `agent/blocked` |
 | 已合并 | Issue 关闭且 PR 已合并 |
-| 已归档 | PRD 位于 `tasks/archive/` |
+| 已归档 | PRD 位于 `tasks/archive/`：执行侧交付已完成，**不等于已验收**——验收状态看 PRD 顶部横幅（🧍 待人工验收 / ✅ 已验收） |
 | 等待中 | 依赖未满足 |
 
 ### 单个开始
@@ -3763,7 +3780,7 @@ uv run iar roadmap advance --repo <repo-id>
 PRD 的 `Delivery Dependencies` 小节会解析为三种依赖边：
 
 - `Depends on tasks/issues: #42`：等待上游 Issue 关闭。
-- `Depends on tasks/issues: tasks/pending/xxx.md`：等待上游 PRD 合并或归档。
+- `Depends on tasks/issues: tasks/pending/xxx.md`：等待上游 PRD 合并或归档。归档随交付 PR 一起合并进主线，解锁时机就是该 PR 合并；上游 PRD 可能带着 🧍 待人工验收归档（已归档 ≠ 已验收），下游照常解锁。
 - `Depends on tasks/issues: tasks/archive/xxx.md`：视为已完成上游；默认 pending 视图不展示 archived PRD，但仍会用它们解析依赖。
 - `Depends on groups: infra`：等待该 group 下所有 Issue 关闭。
 

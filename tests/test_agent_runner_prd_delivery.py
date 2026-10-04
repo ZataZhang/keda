@@ -1,16 +1,20 @@
 """Tests for PRD delivery readiness gating.
 
 Covers ``resolve_prd_archive_path`` and ``ensure_prd_delivery_ready``:
-acceptance checklist completeness, Change Log format enforcement and the
-pending -> archive ``git mv`` transition."""
+acceptance checklist completeness, the acceptance status banner, Change Log
+format enforcement and the pending -> archive ``git mv`` transition (archive
+once the executor side is done, open Human-Confirmed items included)."""
 
 from __future__ import annotations
 
+import copy
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from backend.core.shared import prd_checklist
 from backend.core.shared.models.agent_runner import (
     DeliveryGateFailureKind,
     IssueSummary,
@@ -24,9 +28,24 @@ from backend.core.use_cases.run_agent_once import (
 from backend.core.use_cases.agent_runner_feedback import assert_prd_archived_for_publish
 from tests.conftest import FakeProcessRunner
 from tests.support.agent_runner import (
+    ACCEPTED_BANNER,
+    AWAITING_HUMAN_BANNER,
+    NOT_STARTED_BANNER,
+    build_acceptance_prd,
     create_commit,
     init_git_repo,
+    make_prd_issue,
+    require_banner_aware_prd_skill,
+    run_git,
 )
+
+_PENDING_RELATIVE_PATH = "tasks/pending/example.md"
+_ARCHIVE_RELATIVE_PATH = "tasks/archive/example.md"
+_ARCHIVE_RENAME_STATUS = f"R  {_PENDING_RELATIVE_PATH} -> {_ARCHIVE_RELATIVE_PATH}"
+_ARCHIVE_CALLS = [
+    ["git", "add", "--", _PENDING_RELATIVE_PATH],
+    ["git", "mv", _PENDING_RELATIVE_PATH, _ARCHIVE_RELATIVE_PATH],
+]
 
 
 def test_resolve_prd_archive_path_converts_pending() -> None:
@@ -80,71 +99,56 @@ def test_ensure_prd_delivery_ready_raises_when_pending_incomplete(
         ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
 
 
-def test_human_review_stays_pending_and_can_be_published(tmp_path: Path) -> None:
-    """提交前允许待人审 PRD，但不能替人勾选或提前归档。"""
-    issue = IssueSummary(
-        number=1,
-        title="T",
-        url="U",
-        body="PRD path: `tasks/pending/example.md`",
-        labels=(),
-    )
-    pending_path = tmp_path / "tasks" / "pending" / "example.md"
+def test_open_human_item_no_longer_keeps_prd_pending(tmp_path: Path) -> None:
+    """人审空框不再让 PRD 滞留 pending：执行侧完成即 ``git add`` + ``git mv`` 归档。
+
+    归档不替人回答——runner 不改 PRD 内容，空框与 🧍 横幅原样留给人。
+    """
+    pending_path = tmp_path / _PENDING_RELATIVE_PATH
     pending_path.parent.mkdir(parents=True)
+    (tmp_path / "tasks" / "archive").mkdir()
+    prd_text = build_acceptance_prd(AWAITING_HUMAN_BANNER, human_marks=(" ",))
+    pending_path.write_text(prd_text, encoding="utf-8")
+    fake_runner = FakeProcessRunner()
+
+    ensure_prd_delivery_ready(make_prd_issue(), tmp_path, fake_runner)
+
+    assert fake_runner.calls == _ARCHIVE_CALLS
+    assert pending_path.read_text(encoding="utf-8") == prd_text
+
+
+def test_deferred_human_review_gate_no_longer_blocks_archive(tmp_path: Path) -> None:
+    """老 PRD 把人审项写成 ``[~]`` 也照常归档；合并队列会按保守口径继续等人。"""
+    pending_path = tmp_path / _PENDING_RELATIVE_PATH
+    pending_path.parent.mkdir(parents=True)
+    (tmp_path / "tasks" / "archive").mkdir()
     pending_path.write_text(
-        "## Acceptance Checklist\n### Validation Acceptance\n- [x] tests passed\n"
-        "### Human-Confirmed\n- [ ] Review screenshots in the PR\n",
-        encoding="utf-8",
+        build_acceptance_prd(ACCEPTED_BANNER, human_marks=("~",)), encoding="utf-8"
     )
+    fake_runner = FakeProcessRunner()
+
+    ensure_prd_delivery_ready(make_prd_issue(), tmp_path, fake_runner)
+
+    assert fake_runner.calls == _ARCHIVE_CALLS
+
+
+def test_archived_prd_with_open_human_item_passes_both_gates(tmp_path: Path) -> None:
+    """已归档、横幅为 🧍、只剩人审空框的 PRD 两道门禁都放行，且不再移动。
+
+    旧语义在这里以 "awaits human review" 拒绝；v5 下人审空框不拦交付与发布。
+    """
+    archive_path = tmp_path / _ARCHIVE_RELATIVE_PATH
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_text(
+        build_acceptance_prd(AWAITING_HUMAN_BANNER, human_marks=(" ",)), encoding="utf-8"
+    )
+    issue = make_prd_issue()
     fake_runner = FakeProcessRunner()
 
     ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
     assert_prd_archived_for_publish(issue, tmp_path)
 
-    assert pending_path.exists()
     assert fake_runner.calls == []
-
-
-def test_deferred_human_review_gate_stays_pending(tmp_path: Path) -> None:
-    """兼容已把人审写成 `[~]` 的 PRD，仍不能提前归档。"""
-    issue = IssueSummary(
-        number=1,
-        title="T",
-        url="U",
-        body="PRD path: `tasks/pending/example.md`",
-        labels=(),
-    )
-    pending_path = tmp_path / "tasks" / "pending" / "example.md"
-    pending_path.parent.mkdir(parents=True)
-    pending_path.write_text(
-        "## Acceptance Checklist\n### Human-Confirmed\n"
-        "- [~] 截图已审阅 — runner-owned gate: PR review\n",
-        encoding="utf-8",
-    )
-
-    ensure_prd_delivery_ready(issue, tmp_path, FakeProcessRunner())
-    assert_prd_archived_for_publish(issue, tmp_path)
-    assert pending_path.exists()
-
-
-def test_archived_prd_cannot_claim_unreviewed_human_item(tmp_path: Path) -> None:
-    """已有归档文件若仍有人审空框，发布门禁必须拒绝。"""
-    issue = IssueSummary(
-        number=1,
-        title="T",
-        url="U",
-        body="PRD path: `tasks/pending/example.md`",
-        labels=(),
-    )
-    archive_path = tmp_path / "tasks" / "archive" / "example.md"
-    archive_path.parent.mkdir(parents=True)
-    archive_path.write_text(
-        "## Acceptance Checklist\n### Human-Confirmed\n- [ ] Review screenshots\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(PrdDeliveryError, match="awaits human review"):
-        assert_prd_archived_for_publish(issue, tmp_path)
 
 
 def test_ensure_prd_delivery_ready_requires_change_log_for_prd_change(
@@ -277,7 +281,7 @@ def test_ensure_prd_delivery_ready_accepts_bullet_change_log(tmp_path: Path) -> 
     prd_path = tmp_path / "tasks" / "pending" / "example.md"
     prd_path.parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / "tasks" / "archive").mkdir(parents=True, exist_ok=True)
-    baseline_content = "# PRD\n\n## Acceptance Checklist\n\n- [x] done\n"
+    baseline_content = f"# PRD\n\n{ACCEPTED_BANNER}\n\n## Acceptance Checklist\n\n- [x] done\n"
     prd_path.write_text(
         baseline_content
         + "\n## Change Log\n\n"
@@ -346,19 +350,7 @@ def test_ensure_prd_delivery_ready_git_mv_when_pending_complete(
     archive_dir = tmp_path / "tasks" / "archive"
     prd_path.parent.mkdir(parents=True, exist_ok=True)
     archive_dir.mkdir(parents=True, exist_ok=True)
-    prd_path.write_text(
-        "\n".join(
-            [
-                "# PRD",
-                "",
-                "## Acceptance Checklist",
-                "",
-                "- [x] done",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    prd_path.write_text(build_acceptance_prd(ACCEPTED_BANNER), encoding="utf-8")
     fake_runner = FakeProcessRunner()
     ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
     # The on-disk PRD is staged before the move so ``git mv`` cannot abort with
@@ -389,19 +381,7 @@ def test_ensure_prd_delivery_ready_passes_when_archive_complete(
     )
     archive_path = tmp_path / "tasks" / "archive" / "example.md"
     archive_path.parent.mkdir(parents=True, exist_ok=True)
-    archive_path.write_text(
-        "\n".join(
-            [
-                "# PRD",
-                "",
-                "## Acceptance Checklist",
-                "",
-                "- [x] done",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    archive_path.write_text(build_acceptance_prd(ACCEPTED_BANNER), encoding="utf-8")
     fake_runner = FakeProcessRunner()
     ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
     assert fake_runner.calls == []
@@ -455,19 +435,7 @@ def test_ensure_prd_delivery_ready_raises_when_archive_dir_missing(
     )
     prd_path = tmp_path / "tasks" / "pending" / "example.md"
     prd_path.parent.mkdir(parents=True, exist_ok=True)
-    prd_path.write_text(
-        "\n".join(
-            [
-                "# PRD",
-                "",
-                "## Acceptance Checklist",
-                "",
-                "- [x] done",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    prd_path.write_text(build_acceptance_prd(ACCEPTED_BANNER), encoding="utf-8")
     fake_runner = FakeProcessRunner()
     with pytest.raises(PrdDeliveryError, match="Archive directory does not exist"):
         ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
@@ -491,7 +459,7 @@ def test_ensure_prd_delivery_ready_archives_untracked_prd_real_git(
     pending_path.parent.mkdir(parents=True, exist_ok=True)
     archive_dir.mkdir(parents=True, exist_ok=True)
     (archive_dir / ".gitkeep").write_text("", encoding="utf-8")
-    prd_body = "\n".join(["# PRD", "", "## Acceptance Checklist", "", "- [x] done", ""])
+    prd_body = build_acceptance_prd(ACCEPTED_BANNER)
     pending_path.write_text(prd_body, encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(repo), "add", "-A"],
@@ -533,11 +501,202 @@ def test_ensure_prd_delivery_ready_archives_untracked_prd_real_git(
     assert tracked == "tasks/archive/example.md"
 
 
+def _print_delivery_record(stage_label: str, repo_path: Path) -> None:
+    """打印交付前后的 git 状态与目录列表；``pytest -rP`` 收进证据报告。"""
+    print(f"== {stage_label} ==")
+    print("$ git status --short")
+    print(run_git(repo_path, "status", "--short").rstrip() or "(clean)")
+    for directory_name in ("pending", "archive"):
+        listed_names = sorted(
+            entry_path.name for entry_path in (repo_path / "tasks" / directory_name).iterdir()
+        )
+        print(f"$ ls -A tasks/{directory_name}")
+        print("\n".join(listed_names) or "(empty)")
+
+
+def _commit_pending_prd(repo_path: Path, prd_text: str) -> Path:
+    """在真实 git 仓库里提交一份 pending PRD（archive 目录已存在），返回 pending 路径。"""
+    init_git_repo(repo_path)
+    pending_path = repo_path / _PENDING_RELATIVE_PATH
+    archive_dir = repo_path / "tasks" / "archive"
+    pending_path.parent.mkdir(parents=True)
+    archive_dir.mkdir(parents=True)
+    (archive_dir / ".gitkeep").write_text("", encoding="utf-8")
+    pending_path.write_text(prd_text, encoding="utf-8")
+    run_git(repo_path, "add", "-A")
+    create_commit(repo_path, "publish prd")
+    return pending_path
+
+
+def _assert_prd_not_moved(repo_path: Path) -> None:
+    """PRD 仍在 pending、archive 下没有它，git 索引也没有 rename。"""
+    assert (repo_path / _PENDING_RELATIVE_PATH).exists()
+    assert not (repo_path / _ARCHIVE_RELATIVE_PATH).exists()
+    assert run_git(repo_path, "status", "--porcelain") == ""
+
+
+def test_delivery_archives_prd_awaiting_human_review_real_git(tmp_path: Path) -> None:
+    """rv-1：执行侧完成、只剩人审空框的 PRD 在交付时就归档，空框与横幅原样保留。
+
+    与 runner 成功路径同一调用顺序（交付检查 → 发布前检查）；git 走真实
+    ``SubprocessRunner``，PRD 解析走本机安装的 prd skill，不打桩。
+    """
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    pending_path = _commit_pending_prd(
+        tmp_path,
+        build_acceptance_prd(AWAITING_HUMAN_BANNER, execution_marks=("x", "~"), human_marks=(" ",)),
+    )
+    archive_path = tmp_path / _ARCHIVE_RELATIVE_PATH
+    pending_bytes = pending_path.read_bytes()
+    issue = make_prd_issue()
+    _print_delivery_record("before delivery", tmp_path)
+
+    ensure_prd_delivery_ready(issue, tmp_path, SubprocessRunner())
+    assert_prd_archived_for_publish(issue, tmp_path)
+
+    _print_delivery_record("after delivery", tmp_path)
+    archived_text = archive_path.read_text(encoding="utf-8")
+    print("== archived PRD: banner line and Human-Confirmed group ==")
+    print(next(line for line in archived_text.splitlines() if line.startswith("> ")))
+    print(archived_text[archived_text.index("### Human-Confirmed") :].rstrip())
+    # fresh-state probe：另起 git 进程读索引，并从磁盘重新读归档文件比对字节。
+    status_lines = run_git(tmp_path, "status", "--porcelain").splitlines()
+    assert _ARCHIVE_RENAME_STATUS in status_lines
+    assert run_git(tmp_path, "ls-files", _ARCHIVE_RELATIVE_PATH).strip() == _ARCHIVE_RELATIVE_PATH
+    assert run_git(tmp_path, "ls-files", _PENDING_RELATIVE_PATH).strip() == ""
+    assert not pending_path.exists()
+    assert archive_path.read_bytes() == pending_bytes
+
+
+def test_delivery_keeps_prd_pending_while_an_executor_item_is_open_real_git(
+    tmp_path: Path,
+) -> None:
+    """rv-2：执行侧还有 1 项未勾时不归档，失败信息点名该条目；横幅一致也不例外。"""
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    _commit_pending_prd(
+        tmp_path,
+        build_acceptance_prd(AWAITING_HUMAN_BANNER, execution_marks=("x", " "), human_marks=(" ",)),
+    )
+
+    with pytest.raises(PrdDeliveryError) as exc_info:
+        ensure_prd_delivery_ready(make_prd_issue(), tmp_path, SubprocessRunner())
+
+    assert exc_info.value.kind is DeliveryGateFailureKind.CHECKLIST_UNCHECKED
+    assert "- [ ] rv-2: executor-owned item 2" in str(exc_info.value)
+    # 人审空框不算执行侧未勾，不能被点名成"漏勾"。
+    assert "decision 1" not in str(exc_info.value)
+    _assert_prd_not_moved(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("banner_line", "human_marks", "current_state", "expected_state"),
+    (
+        pytest.param(NOT_STARTED_BANNER, (" ",), "not_started", "awaiting_human", id="not-started"),
+        pytest.param(None, (" ",), "missing or unrecognized", "awaiting_human", id="missing"),
+        pytest.param(ACCEPTED_BANNER, (" ",), "accepted", "awaiting_human", id="accepted-but-open"),
+        pytest.param(
+            AWAITING_HUMAN_BANNER, ("x",), "awaiting_human", "accepted", id="awaiting-but-answered"
+        ),
+    ),
+)
+def test_banner_mismatch_blocks_archive_and_publish_real_git(
+    tmp_path: Path,
+    banner_line: str | None,
+    human_marks: tuple[str, ...],
+    current_state: str,
+    expected_state: str,
+) -> None:
+    """rv-3：横幅与清单不一致时不归档、也不发布；失败种类可交给收尾回合。
+
+    交付入口用真实 git；随后模拟 agent 违规自行 ``git mv``，发布前检查同样拦下。
+    """
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    require_banner_aware_prd_skill()
+    _commit_pending_prd(tmp_path, build_acceptance_prd(banner_line, human_marks=human_marks))
+    issue = make_prd_issue()
+
+    with pytest.raises(PrdDeliveryError) as delivery_error:
+        ensure_prd_delivery_ready(issue, tmp_path, SubprocessRunner())
+
+    assert delivery_error.value.kind is DeliveryGateFailureKind.ACCEPTANCE_BANNER_MISMATCH
+    assert delivery_error.value.kind.is_closeout_eligible
+    assert f"the banner state is `{current_state}`" in str(delivery_error.value)
+    assert f"must be `{expected_state}`" in str(delivery_error.value)
+    _assert_prd_not_moved(tmp_path)
+
+    run_git(tmp_path, "mv", _PENDING_RELATIVE_PATH, _ARCHIVE_RELATIVE_PATH)
+    with pytest.raises(PrdDeliveryError) as publish_error:
+        assert_prd_archived_for_publish(issue, tmp_path)
+
+    assert publish_error.value.kind is DeliveryGateFailureKind.ACCEPTANCE_BANNER_MISMATCH
+    assert f"must be `{expected_state}`" in str(publish_error.value)
+
+
+def test_prd_without_human_items_archives_exactly_as_before_real_git(tmp_path: Path) -> None:
+    """rv-7 第一组：没有人审项、横幅为 ✅ 的 PRD，归档时机与提交内容与改动前一致。
+
+    同一用例在未修改的 src 上的输出留作基线（见证据报告），两边的暂存区与字节必须相同。
+    """
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    pending_path = _commit_pending_prd(tmp_path, build_acceptance_prd(ACCEPTED_BANNER))
+    pending_bytes = pending_path.read_bytes()
+    issue = make_prd_issue()
+
+    ensure_prd_delivery_ready(issue, tmp_path, SubprocessRunner())
+    assert_prd_archived_for_publish(issue, tmp_path)
+
+    status_lines = run_git(tmp_path, "status", "--porcelain").splitlines()
+    print("$ git status --porcelain")
+    print("\n".join(status_lines))
+    assert status_lines == [_ARCHIVE_RENAME_STATUS]
+    assert (tmp_path / _ARCHIVE_RELATIVE_PATH).read_bytes() == pending_bytes
+
+
+def _pre_v5_contract_parser(original_parser: Any) -> Any:
+    """把真实 skill 的契约 JSON 剥成 v3/v4 形状（无横幅状态、无人审空框列表）。"""
+
+    def parse_like_pre_v5_skill(file_content: str) -> dict[str, Any]:
+        contract_payload = copy.deepcopy(original_parser(file_content))
+        contract_payload.pop("acceptance_status", None)
+        contract_payload.get("checklist", {}).pop("human_unchecked", None)
+        return contract_payload
+
+    return parse_like_pre_v5_skill
+
+
+def test_pre_v5_skill_skips_the_banner_check_real_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """rv-7 第二组：skill 读不出横幅（v3/v4）时不触发横幅检查，只按执行侧判据归档。
+
+    打桩只发生在测试边界的 ``parse_prd_contract``：保留真实 skill 的其余输出，
+    只删掉 v5 新增的两个键，模拟本机仍装着旧版 skill。
+    """
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    monkeypatch.setattr(
+        prd_checklist,
+        "parse_prd_contract",
+        _pre_v5_contract_parser(prd_checklist.parse_prd_contract),
+    )
+    _commit_pending_prd(tmp_path, build_acceptance_prd(NOT_STARTED_BANNER, human_marks=(" ",)))
+    issue = make_prd_issue()
+
+    ensure_prd_delivery_ready(issue, tmp_path, SubprocessRunner())
+    assert_prd_archived_for_publish(issue, tmp_path)
+
+    assert run_git(tmp_path, "status", "--porcelain").splitlines() == [_ARCHIVE_RENAME_STATUS]
+
+
 # ---------------------------------------------------------------------------
 # 门禁失败分类：收尾类 vs 真失败类
 # ---------------------------------------------------------------------------
 
-_CHECKLIST_BASELINE = "# PRD\n\n## Acceptance Checklist\n\n- [x] done\n"
+_CHECKLIST_BASELINE = f"# PRD\n\n{ACCEPTED_BANNER}\n\n## Acceptance Checklist\n\n- [x] done\n"
 _COMPLETE_CHANGE_LOG_ENTRY = "\n".join(
     [
         "",

@@ -2,7 +2,8 @@
 
 修复阶梯的第三层。前两层是 Fix Agent（提交前验证失败）与完整 Recovery Agent；
 本层只接住"代码已经正确、只差交付收尾动作"的那一桶门禁失败：验收清单未勾、
-PRD 改了没写 Change Log、证据清单字段格式非法、前端改了没截图。
+PRD 改了没写 Change Log、证据清单字段格式非法、前端改了没截图、验收状态横幅
+与清单不一致。
 
 本层的两条硬约束**都不靠 prompt 保证**：
 
@@ -424,6 +425,18 @@ _CLOSEOUT_KIND_INSTRUCTIONS: dict[DeliveryGateFailureKind, str] = {
         "entry point, and save a real screenshot or screen recording into the evidence "
         "directory. A hand-drawn image, a text log, or a screenshot of unrelated UI does "
         "not satisfy this."
+    ),
+    DeliveryGateFailureKind.ACCEPTANCE_BANNER_MISMATCH: (
+        "The PRD's acceptance status banner disagrees with its Acceptance Checklist. Change "
+        "only that banner line so it states the state the gate asked for: `awaiting_human` "
+        "is written `> 🧍 **验收状态**：待人工验收` followed by how many Human-Confirmed "
+        "items are still open, and `accepted` is written `> ✅ **验收状态**：已验收`. If the "
+        "PRD has no banner, insert that line right after the delivery gate banner, or "
+        "directly under the title when there is none. Do not tick, untick, or rewrite any "
+        "checklist item — Human-Confirmed items stay exactly as they are — and do not edit "
+        "any other part of the PRD. Changing the banner edits the PRD, so the same pass "
+        "must also append one `## Change Log` entry recording the banner change — the "
+        "delivery gate rejects a modified PRD without one."
     ),
 }
 

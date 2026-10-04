@@ -21,14 +21,18 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.agent_runner_publish import create_draft_pr, push_changes
 from backend.core.use_cases.run_agent_once import (
+    PrdDeliveryError,
     get_head_sha,
     publish_changes,
     validate_safe_changes,
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import (
+    AWAITING_HUMAN_BANNER,
+    build_acceptance_prd,
     git_remote_command,
     git_remote_result,
+    make_prd_issue,
 )
 
 
@@ -84,28 +88,19 @@ def test_publish_changes_no_git_commit() -> None:
     assert ("git", "push", "-u", "origin", "issue-1") in commands
 
 
-def test_push_changes_accepts_pending_prd_waiting_for_human_review(tmp_path: Path) -> None:
-    """真实发布原语保留默认门禁，同时允许待人审 PRD 进入 PR。"""
-    issue = IssueSummary(
-        number=1,
-        title="Review",
-        url="https://github.com/example/repo/issues/1",
-        body="PRD path: `tasks/pending/review.md`",
-        labels=(),
-    )
-    pending_path = tmp_path / "tasks" / "pending" / "review.md"
-    pending_path.parent.mkdir(parents=True)
-    pending_path.write_text(
-        "## Acceptance Checklist\n### Validation Acceptance\n- [x] tests passed\n"
-        "### Human-Confirmed\n- [ ] Review the PR screenshots\n",
-        encoding="utf-8",
-    )
-    fake_runner = FakeProcessRunner(
+# ── rv-4 / rv-7：发布前检查要求 PRD 已归档；两条 ``require_prd_archived=False`` 例外不变 ──
+
+_PUSH_CALL = ("git", "push", "-u", "origin", "issue-123")
+
+
+def _clean_branch_runner() -> FakeProcessRunner:
+    """``push_changes`` 前置检查需要的三条 git 应答：分支 issue-123、工作区干净、远端 origin。"""
+    return FakeProcessRunner(
         responses={
             ("git", "branch", "--show-current"): CommandResult(
                 command=("git", "branch", "--show-current"),
                 return_code=0,
-                stdout="issue-1\n",
+                stdout="issue-123\n",
                 stderr="",
             ),
             ("git", "status", "--porcelain"): CommandResult(
@@ -118,9 +113,91 @@ def test_push_changes_accepts_pending_prd_waiting_for_human_review(tmp_path: Pat
         }
     )
 
-    assert push_changes(issue, tmp_path, AppConfig(), fake_runner) == "issue-1"
-    assert ("git", "push", "-u", "origin", "issue-1") in map(tuple, fake_runner.calls)
-    assert pending_path.exists()
+
+def _write_worktree_prd(worktree_path: Path, prd_relative_path: str, prd_text: str) -> Path:
+    """把 PRD 写到 worktree 的给定位置（Issue 里记录的仍是 pending 路径）。"""
+    prd_path = worktree_path / prd_relative_path
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(prd_text, encoding="utf-8")
+    return prd_path
+
+
+_PUBLISH_GATE_CASES = (
+    # (PRD 所在位置, PRD 正文, require_prd_archived=True 时的拒绝信息；None 表示放行)
+    pytest.param(
+        "tasks/archive/example.md",
+        build_acceptance_prd(AWAITING_HUMAN_BANNER, human_marks=(" ",)),
+        None,
+        id="archived-only-human-open",
+    ),
+    pytest.param(
+        "tasks/pending/example.md",
+        build_acceptance_prd(AWAITING_HUMAN_BANNER, human_marks=(" ",)),
+        "has not been archived yet",
+        id="still-pending",
+    ),
+    pytest.param(
+        "tasks/archive/example.md",
+        build_acceptance_prd(AWAITING_HUMAN_BANNER, execution_marks=("x", " "), human_marks=(" ",)),
+        "- [ ] rv-2: executor-owned item 2",
+        id="archived-executor-open",
+    ),
+)
+
+
+@pytest.mark.parametrize(("prd_relative_path", "prd_text", "rejection_text"), _PUBLISH_GATE_CASES)
+def test_push_changes_requires_an_archived_prd(
+    tmp_path: Path, prd_relative_path: str, prd_text: str, rejection_text: str | None
+) -> None:
+    """rv-4：正常交付路径发布前 PRD 必须已归档；仍在 pending 的待人审 PRD 不再放行。
+
+    已归档且只剩人审空框 → 推送；仍在 pending → 拒绝并说明尚未归档；已归档但执行侧
+    未完成 → 拒绝并点名条目。被拒时一条 ``git push`` 都不能发出。
+    """
+    _write_worktree_prd(tmp_path, prd_relative_path, prd_text)
+    fake_runner = _clean_branch_runner()
+
+    if rejection_text is None:
+        assert push_changes(make_prd_issue(), tmp_path, AppConfig(), fake_runner) == "issue-123"
+        assert _PUSH_CALL in map(tuple, fake_runner.calls)
+        return
+
+    with pytest.raises(PrdDeliveryError) as exc_info:
+        push_changes(make_prd_issue(), tmp_path, AppConfig(), fake_runner)
+
+    assert rejection_text in str(exc_info.value)
+    assert _PUSH_CALL not in map(tuple, fake_runner.calls)
+
+
+@pytest.mark.parametrize(("prd_relative_path", "prd_text", "rejection_text"), _PUBLISH_GATE_CASES)
+def test_failure_draft_publication_skips_the_archive_gate_and_never_archives(
+    tmp_path: Path, prd_relative_path: str, prd_text: str, rejection_text: str | None
+) -> None:
+    """rv-4 例外 + rv-7 第三组：``require_prd_archived=False``（失败 Draft PR）三种都不拦。
+
+    这条路径不调用交付检查：PRD 原地不动、不发 ``git add`` / ``git mv``，pending 的 PRD
+    仍留在 pending——失败交付永不归档。
+    """
+    del rejection_text  # 例外路径对三种情形一视同仁。
+    prd_path = _write_worktree_prd(tmp_path, prd_relative_path, prd_text)
+    fake_runner = _clean_branch_runner()
+
+    branch, _pr_url = publish_changes(
+        make_prd_issue(),
+        tmp_path,
+        AppConfig(),
+        FakeGitHubClient(),
+        fake_runner,
+        require_prd_archived=False,
+    )
+
+    assert branch == "issue-123"
+    issued_commands = [tuple(call) for call in fake_runner.calls]
+    assert _PUSH_CALL in issued_commands
+    assert not [
+        command for command in issued_commands if command[:2] in {("git", "mv"), ("git", "add")}
+    ]
+    assert prd_path.read_text(encoding="utf-8") == prd_text
 
 
 def test_publish_changes_reuses_existing_open_pr() -> None:

@@ -110,6 +110,8 @@ class DeliveryGateFailureKind(Enum):
         CHANGE_LOG_INCOMPLETE: PRD 已改动但 Change Log 缺失、为零、未追加或字段不全。
         EVIDENCE_MANIFEST_FORMAT: 结构化证据清单文件的字段格式非法。
         FRONTEND_VISUAL_EVIDENCE_MISSING: 前端有改动但证据目录缺少截图 / 录屏。
+        ACCEPTANCE_BANNER_MISMATCH: PRD 验收状态横幅与验收清单不一致（例如人审组仍有
+            空框却没写待人工验收）。
     """
 
     SUBSTANTIVE = "substantive"
@@ -117,6 +119,7 @@ class DeliveryGateFailureKind(Enum):
     CHANGE_LOG_INCOMPLETE = "change_log_incomplete"
     EVIDENCE_MANIFEST_FORMAT = "evidence_manifest_format"
     FRONTEND_VISUAL_EVIDENCE_MISSING = "frontend_visual_evidence_missing"
+    ACCEPTANCE_BANNER_MISMATCH = "acceptance_banner_mismatch"
 
     @property
     def is_closeout_eligible(self) -> bool:

@@ -293,6 +293,25 @@ def test_prompt_contract_closeout_prompt(tmp_path: Path) -> None:
     assert prompt.count(RUNNER_OWNED_CHECKLIST_ITEM_RULE) == 1
 
 
+def test_archive_rules_teach_executor_side_archiving_and_the_banner_formula() -> None:
+    """FR-6：两条规则教的是 v5 语义——交付时归档（人审未答也归档）、人审项留空、按公式写横幅。
+
+    旧语义（"待人审的 PRD 留在 pending、合并前补提交归档"）一旦回流，agent 就会把
+    PRD 搬回 pending 或替人勾选，和交付门禁互相打架。
+    """
+    assert "archives the PRD at delivery" in PRD_ARCHIVE_OWNERSHIP_RULE
+    assert "even while `Human-Confirmed` items are still open" in PRD_ARCHIVE_OWNERSHIP_RULE
+    assert "never `git mv` it into `tasks/archive/` yourself" in PRD_ARCHIVE_OWNERSHIP_RULE
+    assert "once archived never move it back to `tasks/pending/`" in PRD_ARCHIVE_OWNERSHIP_RULE
+    assert "keep them `- [ ]`, never tick them" in RUNNER_OWNED_CHECKLIST_ITEM_RULE
+    assert "never rewrite them as `- [~]`" in RUNNER_OWNED_CHECKLIST_ITEM_RULE
+    assert "`🧍 **验收状态**：待人工验收` (awaiting_human)" in RUNNER_OWNED_CHECKLIST_ITEM_RULE
+    assert "`✅ **验收状态**：已验收` (accepted)" in RUNNER_OWNED_CHECKLIST_ITEM_RULE
+    for retired_fragment in ("stays pending for the PR", "without archiving it", "before merge"):
+        assert retired_fragment not in PRD_ARCHIVE_OWNERSHIP_RULE
+        assert retired_fragment not in RUNNER_OWNED_CHECKLIST_ITEM_RULE
+
+
 def test_prompt_contract_validation_line() -> None:
     """validation 行：门禁语义保留、rv 命名教学消失、指针不复述（单源纪律）。"""
     config = AppConfig()
