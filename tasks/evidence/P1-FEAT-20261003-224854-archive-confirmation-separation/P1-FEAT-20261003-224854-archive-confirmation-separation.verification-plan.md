@@ -1,6 +1,6 @@
 # 验证计划：归档与确认语义分离——执行侧完成即归档、人工验收独立记录
 
-> 本文件是 `tasks/pending/P1-FEAT-20261003-224854-archive-confirmation-separation.md` §7.6
+> 本文件是 `tasks/archive/P1-FEAT-20261003-224854-archive-confirmation-separation.md` §7.6
 > Realistic Validation Plan 的执行副本。**判据以 PRD §7.6 为唯一事实源**，本文件只记录
 > "怎么跑、跑在哪棵树上、用的哪份 skill、结果落在哪个文件"。
 
@@ -9,18 +9,21 @@
 | 项 | 值 |
 |---|---|
 | worktree | `/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation` |
-| 分支 | `feat/archive-confirmation-separation` |
-| base commit | `1b8afed9c0da6b7128ea346e9363b9c38a7e4513`（= ZataZhang/keda#184 的 head，叠在 ZataZhang/keda#183 之上） |
-| base 与 `main` 的 `src/` 差异 | 只有 `prd_machine_contract.py` 一行（§8 Notes (a) 的 `(3, 4)` → `(3, 4, 5)`）；本次改动的 8 个模块在 base 上与 `main` 逐字相同 |
-| 被测 PRD skill | 模板仓 `skills/prd/SKILL.md` @ `2bf2de8`（`Machine-Contract-Version: 5`，即 ZataZhang/zata-codes-template#27 的 head），经 `IAR_PRD_SKILL_PATH` 指定 |
-| 本机已安装的 skill | `~/.iar/skills/prd/SKILL.md`，`Machine-Contract-Version: 4`——#27 未合并、`iar init` 未重跑，见下文"依赖 (b) 的部分" |
+| 分支 | 首轮：`feat/archive-confirmation-separation`（head `a59ddd16`，已随 ZataZhang/keda#185 以 `c2fcc4b5` squash 合入 main）。归档这一轮：`docs/archive-confirmation-separation`，从 main 的 `c2fcc4b5` 开出 |
+| base commit | `1b8afed9c0da6b7128ea346e9363b9c38a7e4513`（= ZataZhang/keda#184 的 head，叠在 ZataZhang/keda#183 之上）。#184 之后以 `ed30c170` squash 合入 main，tree 与 `1b8afed9` 相同 |
+| base 与当时 `main` 的 `src/` 差异 | 只有 `prd_machine_contract.py` 一行（§8 Notes (a) 的 `(3, 4)` → `(3, 4, 5)`）；本次改动的 8 个模块在 base 上与当时的 `main` 逐字相同 |
+| 被测 PRD skill | 首轮：模板仓 `skills/prd/SKILL.md` @ `2bf2de8`（`Machine-Contract-Version: 5`，即 ZataZhang/zata-codes-template#27 的 head），经 `IAR_PRD_SKILL_PATH` 指定。归档这一轮：本机已安装的 `~/.iar/skills/prd/`，与模板 main `2646b48d` 的 `skills/prd` 逐字相同，不设 `IAR_PRD_SKILL_PATH` |
+| 本机已安装的 skill | 首轮时是 `Machine-Contract-Version: 4`（#27 未合并）。归档这一轮之前已装 v5：用 keda 的 `install_remote_template_skills(force=True)` 安装模板 main 的 skill，与 `iar init` 装的是同一份；本机 `.iar.toml` 有定制，`iar init` 会拒绝 |
 | Python | 工作树 `.venv`（CPython 3.13.13） |
 
 定向命令统一为：
 
 ```bash
+# 首轮：本机当时仍装 v4，经 IAR_PRD_SKILL_PATH 指向模板的 v5
 IAR_PRD_SKILL_PATH=/Users/zata/code/zata_code_template/skills/prd/SKILL.md \
   .venv/bin/python -m pytest -o addopts='' -p no:cacheprovider --no-header -v <targets>
+# 归档这一轮：本机已安装 v5，不设 IAR_PRD_SKILL_PATH
+.venv/bin/python -m pytest -o addopts='' -p no:cacheprovider --no-header -v <targets>
 ```
 
 `-o addopts=''` 必须带：仓库默认 `addopts = "--testmon"` 会按改动增量选择，取证时必须强制真跑。
@@ -29,6 +32,8 @@ IAR_PRD_SKILL_PATH=/Users/zata/code/zata_code_template/skills/prd/SKILL.md \
 `parse_prd_contract` 打桩**，唯一例外是 rv-7 第二组按 oracle 要求在测试边界模拟旧版 skill。
 
 ## Oracle 与执行入口
+
+证据文件一列是首轮的日志。归档这一轮的同名日志在 `raw/installed-v5/` 下。
 
 | id | 判据（摘要） | 实际执行（真实入口 / mock 边界） | 证据文件（`raw/` 下，不进提交） |
 |---|---|---|---|
@@ -65,26 +70,36 @@ IAR_PRD_SKILL_PATH=/Users/zata/code/zata_code_template/skills/prd/SKILL.md \
 
 | 门禁 | 命令 | 证据文件 |
 |---|---|---|
-| 全量 pytest（v5 skill） | `IAR_PRD_SKILL_PATH=<v5> uv run pytest -o addopts='' -p no:cacheprovider tests/ -q` | `raw/full-suite-v5.log` |
-| 全量 pytest（本机已安装的 v4 skill，披露用） | 同上但 `env -u IAR_PRD_SKILL_PATH` | `raw/full-suite-installed-v4.log` |
-| Drift Guard 10 行 | PRD §7.3 原命令（第 8 行加 `-g '!tasks/**'`，第 10 行补文件参数，原因见证据报告） | `raw/drift-guard.log` |
-| 架构 / ruff / mkdocs / 依赖面 | `check_architecture.py`、pre-commit 锁定的 ruff 0.7.4、`mkdocs build --strict`、`git diff --name-only` | `raw/static-gates.log` |
-| 提交门禁 | `just test`（`IAR_PRD_SKILL_PATH` 指向 v5）+ `just lint` | 证据报告"提交门禁"一节 |
+| 全量 pytest（首轮，v5 skill） | `IAR_PRD_SKILL_PATH=<v5> uv run pytest -o addopts='' -p no:cacheprovider tests/ -q` | `raw/full-suite-v5.log` |
+| 全量 pytest（首轮，本机当时安装的 v4 skill，披露用） | 同上但 `env -u IAR_PRD_SKILL_PATH` | `raw/full-suite-installed-v4.log` |
+| 全量 pytest（归档这一轮，本机已安装的 v5 skill） | `env -u IAR_PRD_SKILL_PATH uv run pytest -o addopts='' -p no:cacheprovider tests/ -q -rfE` | `raw/installed-v5/full-suite.log` |
+| Drift Guard 10 行 | PRD §7.3 原命令（第 8 行加 `-g '!tasks/**'`，第 10 行补文件参数，原因见证据报告） | 首轮 `raw/drift-guard.log`；归档这一轮 `raw/installed-v5/drift-guard.log` |
+| 架构 / ruff / mkdocs / 依赖面 | `check_architecture.py`、pre-commit 锁定的 ruff 0.7.4、`mkdocs build --strict`、`git diff --name-only` | 首轮 `raw/static-gates.log`；归档这一轮 `raw/installed-v5/static-gates.log` |
+| 提交门禁 | 首轮：`just test`（`IAR_PRD_SKILL_PATH` 指向 v5）+ `just lint`。归档这一轮：`just test` + `just lint --repo`，都不设 `IAR_PRD_SKILL_PATH` | 证据报告"提交门禁"一节；归档这一轮 `raw/installed-v5/commit-gate-just-test.log`、`raw/installed-v5/lint-repo.log` |
 
-## 归档那一轮要补的验证
+## 归档这一轮的验证
 
-本轮 PRD 一项都没勾：独立 verifier 第 1 轮中途被中断，用户 2026-10-04 决定推迟到归档那一轮再跑。
-归档那一轮按顺序做两件事：
+首轮时 PRD 一项都没勾：独立 verifier 第 1 轮中途被中断，用户 2026-10-04 决定推迟到归档这一轮再跑。
+归档这一轮按顺序做了三件事：
 
-1. 在 ZataZhang/zata-codes-template#27 合并、`iar init` 安装 v5 之后，**不设** `IAR_PRD_SKILL_PATH`，
-   重跑本计划的同一批命令。
-2. 运行独立 verifier，结论写入同目录的 `….verifier-report.md`；拿到 `PASS` 才勾选。
+1. **已完成。** ZataZhang/zata-codes-template#27 合并、本机安装 v5 之后，在 main 的 `c2fcc4b5` 上
+   **不设** `IAR_PRD_SKILL_PATH`，重跑了本计划的同一批命令。各 oracle 结果与首轮逐条相同，
+   Drift Guard 10 行全部符合，全量 pytest `2786 passed, 1 skipped`，`just test` 与 `just lint --repo`
+   通过。详见证据报告「归档这一轮：已安装 v5 复跑」。
+2. **已完成。** 独立 verifier 第 1 轮（kimi，只读）结论为 `PASS`，无 BLOCKER、无 SECURITY，报告在同目录的
+   `….verifier-report.md`。verifier 运行前后工作区一致，只多出它写的这份报告。
+3. **已完成。** 勾选 Human-Confirmed 之外的 29 项、完成 §13 Final Reconciliation、横幅改为 🧍、PRD 移到
+   `tasks/archive/`，然后复核：
+   - `.venv/bin/python ~/.iar/skills/prd/scripts/check_prd_acceptance_checklist.py --check-provided --archive-ready tasks/archive/<prd>.md`
+     → `PASS`。系统自带的 `python3` 太旧，跑不了这个脚本，所以用工作树的 `.venv`。
+   - 用 keda 自己的 `resolve_prd_worktree_path` → `parse_prd_checklist` → `assert_prd_archived_for_publish`
+     只读地读归档后的本 PRD：发布前检查放行，人审空框 3 项，见 `raw/installed-v5/archive-dogfood.log`。
 
-本机已安装的 skill 仍是 v4，下列条目必须等第 1 步的结果才能勾：
+第 1 步补齐了首轮时只能等待的条目：
 
-- Dependency Acceptance："§8 Notes (a)–(c) 已在本 PRD 交付前完成"（Drift Guard 第 3 行）。
+- Dependency Acceptance："§8 Notes (a)–(c) 已在本 PRD 交付前完成"（Drift Guard 前三行）。
 - Validation Acceptance："rv-1 … 真实安装的 v5 skill"、"Drift Guard 全部检查符合"、
   "`uv run pytest -o addopts='' tests/ -q` 全绿"、"`just lint` 与 `just test` 通过"。
 
-在已安装 v4 的机器上，全量 pytest 恰有 8 个用例按设计失败——它们先调用
+在仍装 v4 的机器上，全量 pytest 恰有 8 个用例按设计失败——它们先调用
 `require_banner_aware_prd_skill()`，以可行动的信息提示安装 v5，而不是静默跳过横幅断言。

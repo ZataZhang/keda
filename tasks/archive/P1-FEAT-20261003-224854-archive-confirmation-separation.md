@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无上游 PRD/Issue（§8 声明为 none）；但有一条**跨仓发版顺序**约束，不是编译依赖：本仓必须先能读懂新版 PRD skill 契约（v5）、并同步新版模板清单钩子，再交付本 PRD——否则 daemon 起执行循环前的预检会对新 skill 直接失败，或新归档的 PRD 被旧钩子拒绝提交。顺序 (a)→(d) 见 §8 Notes。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。（归档时与 §9 对齐：Human-Confirmed 仍有空框 → 🧍 待人工验收，全部由人确认后 → ✅ 已验收；⬜ 不可归档）
+> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -244,7 +244,7 @@ This section is a living implementation guide based on current repository analys
 - **横幅判据（只消费 skill 契约）**：`PrdChecklistResult` 新增 `acceptance_status: str | None`（取 `contract.get("acceptance_status")`；键缺失即 `None`，表示本机 skill 读不出横幅）与 `human_unchecked_items`（取 `checklist.get("human_unchecked", [])`）。新函数 `_validate_acceptance_banner(checklist_result, prd_relative_path)`：`acceptance_status is None` → 跳过；`human_unchecked_items` 非空 → 期望 `awaiting_human`；为空 → 期望 `accepted`；不相等（含 `not_started` 与 `""`）→ 抛 `PrdDeliveryError(kind=ACCEPTANCE_BANNER_MISMATCH)`，信息给出现状态、应有状态与人审空框数。横幅判据用 `human_unchecked_items`（只算 `[ ]`），与 skill 检查器的 `open_human_count` 同口径；`human_pending_items`（`[ ]` + `[~]`）只用于合并队列 hold。
 - **交付检查**：pending 分支依次为 Change Log 校验 → 执行侧校验（`CHECKLIST_UNCHECKED`，不变）→ 横幅校验 → `git add -- <pending>` + `git mv <pending> <archive>`，不再因人审待办提前返回。archive 分支为 Change Log 校验 → 执行侧校验 → 横幅校验，删除 `Archived PRD still awaits human review`。两处都不存在仍抛 `Canonical PRD not found`。
 - **发布前检查**（`require_prd_archived=True`）：archive 不存在 → 拒绝，信息说明 PRD 尚未归档（删除"pending 有人审待办即放行"分支）；pending 与 archive 并存 → 拒绝（不变）；archive 存在 → 执行侧校验 + 横幅校验，删除 `Archived PRD still awaits human review`。`require_prd_archived=False` 的两处调用不变，也不调用交付检查，因此失败交付永不归档。
-- **合并队列 hold**：`_process_one` 用 `resolve_prd_worktree_path(issue, worktree_path)` 定位；找到后 `parse_prd_checklist`：`human_pending_items` 非空 → `skipped_human_review`；位于 pending 且无人审待办 → `skipped_prd_pending`（不变）；位于 archive 且无人审待办 → 继续 rebase 及后续门禁。位置判断在 hold 内完成，不另写路径换算。
+- **合并队列 hold**：`_process_one` 用 `resolve_prd_worktree_path(issue, worktree_path)` 定位；找到后 `parse_prd_checklist`：`human_pending_items` 非空 → `skipped_human_review`；位于 pending 且无人审待办 → `skipped_prd_pending`（不变）；位于 archive 且无人审待办 → 继续 rebase 及后续门禁。位置判断在 hold 内完成，复用 feedback 模块的 `is_prd_archive_path`（发布前检查同用），不另写路径换算。
 - **收尾**：`ACCEPTANCE_BANNER_MISMATCH` 沿用 `is_closeout_eligible`（非 `SUBSTANTIVE` 即可收尾）。`_CLOSEOUT_KIND_INSTRUCTIONS` 新条目：只改 PRD 的验收状态横幅这一行，按失败信息给出的应有状态书写（横幅缺失时补在交付前置横幅之后，没有交付前置横幅则补在标题下）；不得改动任何复选框与其他正文；追加一条结构化 Change Log。可写范围沿用既有规则（规范 PRD 的 pending / archive 路径与证据目录）。
 - **提示词**：`PRD_ARCHIVE_OWNERSHIP_RULE` 改为"runner 在交付时归档，含未答 Human-Confirmed 项也归档；归档后 agent 与 reviewer 不得把 PRD 挪回 pending；人工验收驳回时的重开由人决定"。`RUNNER_OWNED_CHECKLIST_ITEM_RULE` 末句改为"Human-Confirmed 项保持 `- [ ]`，不代勾、不改 `[~]`；最终复核时按公式设置验收状态横幅（有空框 → 🧍 待人工验收，否则 → ✅ 已验收）"。`build_prd_review_reference` 因嵌入前者而同步变化，无需单独改。
 - **PR 正文契约**：`prd-link` 在正文含 pending 路径或其 `resolve_prd_archive_path` 结果时即满足；`append_missing_contract_anchors` 写 `- PRD: <archive path>`（无法换算时回落 pending 路径）；`_DETERMINISTIC_ACCEPTANCE_STATEMENT`、`_CONTRACT_ANCHOR_DESCRIPTIONS["prd-link"]` 与 `build_contract_prompt_prefix` 第 1、2 条改为归档路径与 "authorizes post-merge acceptance recording"。小节标题与 marker 不变。
@@ -279,7 +279,8 @@ This section is a living implementation guide based on current repository analys
 │   │   ├── ensure_prd_delivery_ready：pending 分支去掉人审待办提前返回；archive 分支删除 "awaits human review" 拒绝；两分支加横幅校验
 │   │   ├── assert_prd_archived_for_publish：删除"archive 缺失 + pending 有人审待办 → 放行"与 "awaits human review" 拒绝；docstring 同步
 │   │   ├── PRD_ARCHIVE_OWNERSHIP_RULE：交付时归档含未答人审项；归档后不得挪回 pending
-│   │   └── RUNNER_OWNED_CHECKLIST_ITEM_RULE：人审项保持 - [ ]、不代勾、不改 [~]；最终复核时设置横幅
+│   │   ├── RUNNER_OWNED_CHECKLIST_ITEM_RULE：人审项保持 - [ ]、不代勾、不改 [~]；最终复核时设置横幅
+│   │   └── is_prd_archive_path：新增，判断 PRD 相对路径是否位于 tasks/archive/；发布前检查与合并队列 hold 共用
 │   │
 │   ├── src/backend/core/use_cases/agent_runner_closeout.py
 │   │   [修改]
@@ -517,7 +518,7 @@ Failure triage:
 
 ### 9.2 Acceptance Evidence Package（机器证据 · verifier 入口，人默认跳过）
 
-证据包入口：`tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/` 下的 `….evidence-report.md`（证据报告）与 `….verification-plan.md`（怎么跑）。原始日志在同目录 `raw/`，按 `.gitignore` 只留本机。独立 verifier 尚未给出结论：第 1 轮中途被中断，用户 2026-10-04 决定推迟到归档那一轮，结论届时写入同目录的 `….verifier-report.md`。
+证据包入口：`tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/` 下的 `….evidence-report.md`（证据报告）与 `….verification-plan.md`（怎么跑）。原始日志在同目录 `raw/`，按 `.gitignore` 只留本机。独立 verifier 结论为 **`PASS`**：归档这一轮的第 1 轮（2026-10-04，kimi），无 BLOCKER、无 SECURITY，3 条 NON-BLOCKING 都是证据报告已披露的事项；首轮那次中途中断、没有结论，不计数。报告见同目录的 `….verifier-report.md`。人审项的汇总清单见同目录的 `human-review-checklist.md`，可用 `just prd review tasks/archive/P1-FEAT-20261003-224854-archive-confirmation-separation.md` 打开。
 
 1. **人审项的 oracle 跑绿证据**：rv-1、rv-5 的命令输出、负控红跑记录与最终 tree id → 证据报告「rv-1：交付前后的真实 git 记录」「rv-5：自动合并两轮记录」「负控与判别矩阵」「绑定最终树」。
 2. **verifier-only 项结果**：rv-2、rv-3、rv-4、rv-6、rv-7 的测试输出 → 证据报告「Oracle 结果」，每行都标了原始日志。
@@ -538,55 +539,55 @@ Failure triage:
 
 ### Architecture Acceptance
 
-- [ ] 归档移动只在 `ensure_prd_delivery_ready` 一处，经 `resolve_prd_archive_path`；`rg -n -F '"mv"' src/backend` 输出作证
-- [ ] 横幅判据只消费 skill 契约 JSON 的 `acceptance_status` / `human_unchecked`，keda 无横幅文本解析代码
-- [ ] 合并队列 hold 复用 `resolve_prd_worktree_path`，无新增路径拼接；`env -u PYTHONPATH uv run python hooks/shared/check_architecture.py` 无违规
-- [ ] 本次触及的 `.py` 文件无超限：`git diff --name-only --diff-filter=AM <base> -- '*.py' | xargs uv run python hooks/shared/check_max_file_lines.py --max-lines 1000`（脚本必须带文件参数；仓库另有存量超限文件，与本次无关）
+- [x] 归档移动只在 `ensure_prd_delivery_ready` 一处，经 `resolve_prd_archive_path`；`rg -n -F '"mv"' src/backend` 输出作证（证据：`raw/installed-v5/drift-guard.log` 第 4 行，唯一命中 `agent_runner_feedback.py:476`，位于 `ensure_prd_delivery_ready`；证据报告「Executor Drift Guard」）
+- [x] 横幅判据只消费 skill 契约 JSON 的 `acceptance_status` / `human_unchecked`，keda 无横幅文本解析代码（证据：Drift Guard 第 7 行，命中只在 docstring、提示词与 closeout 指令文本中，横幅状态只来自 `contract.get("acceptance_status")`；证据报告「Executor Drift Guard」「锁定契约 diff」）
+- [x] 合并队列 hold 复用 `resolve_prd_worktree_path`，无新增路径拼接；`env -u PYTHONPATH uv run python hooks/shared/check_architecture.py` 无违规（证据：Drift Guard 第 6 行只命中 `resolve_prd_worktree_path`，没有 `pending_prd_path`；架构守卫无违规，见 `raw/installed-v5/static-gates.log`）
+- [x] 本次触及的 `.py` 文件无超限：`git diff --name-only --diff-filter=AM <base> -- '*.py' | xargs uv run python hooks/shared/check_max_file_lines.py --max-lines 1000`（脚本必须带文件参数；仓库另有存量超限文件，与本次无关）（证据：Drift Guard 第 10 行，对 `ed30c170` 求出的 16 个 `.py` 全部通过，`agent_runner_feedback.py` 为 920 行非空行；存量超限清单见 `raw/drift-guard.log` 的 10b 段）
 
 ### Dependency Acceptance
 
-- [ ] 未新增第三方依赖（`uv.lock` 无改动）
-- [ ] 未新增数据库、schema 或前端改动（`git diff --name-only` 无 `alembic/`、`frontend-admin/`、`frontend-public/`）
-- [ ] §8 Notes (a)–(c) 已在本 PRD 交付前完成（Drift Guard 前三行输出作证）
+- [x] 未新增第三方依赖（`uv.lock` 无改动）（证据：`raw/installed-v5/static-gates.log`，`git diff --name-only ed30c170 HEAD -- uv.lock pyproject.toml alembic frontend-admin frontend-public` 为空）
+- [x] 未新增数据库、schema 或前端改动（`git diff --name-only` 无 `alembic/`、`frontend-admin/`、`frontend-public/`）（证据：同上一项的同一条命令）
+- [x] §8 Notes (a)–(c) 已在本 PRD 交付前完成（Drift Guard 前三行输出作证）（证据：`raw/installed-v5/drift-guard.log` 前三行全部 ✓；合并顺序 ZataZhang/keda#183 → ZataZhang/zata-codes-template#27 → ZataZhang/keda#184 → ZataZhang/keda#185，见证据报告「归档这一轮：已安装 v5 复跑」。本机安装 v5 晚于 #185 合并、早于本归档提交，已在该节披露）
 
 ### Behavior Acceptance
 
-- [ ] rv-1：执行侧完成、只剩人审空框的 PRD 交付即归档，空框与横幅原样保留，发布前检查放行
-- [ ] rv-2：执行侧未完成时不归档，失败信息点名条目
-- [ ] rv-3：四种横幅不一致情形均不归档、不发布，失败种类为 `ACCEPTANCE_BANNER_MISMATCH` 且可进 closeout
-- [ ] rv-4：发布前检查三种情形符合预期，`require_prd_archived=False` 两处例外不变
-- [ ] rv-5：合并队列对已归档 🧍 PRD 输出 `skipped_human_review` 且零 rebase、零合并；人回答后继续
-- [ ] rv-6：PR 正文接受归档路径，补锚点写归档路径，声明句为 post-merge acceptance recording
-- [ ] rv-7：无人审项 PRD 零回归；旧版 skill 不触发横幅检查；失败交付不归档
+- [x] rv-1：执行侧完成、只剩人审空框的 PRD 交付即归档，空框与横幅原样保留，发布前检查放行（证据：`raw/installed-v5/rv-1-delivery-archives-awaiting-human.log`，4 passed；证据报告「rv-1：交付前后的真实 git 记录」，after 段为 `R  tasks/pending/example.md -> tasks/archive/example.md`，pending 为 `(empty)`，横幅与 `- [ ]` 原样保留）
+- [x] rv-2：执行侧未完成时不归档，失败信息点名条目（证据：`raw/installed-v5/rv-2-executor-open-stays-pending.log`，1 passed：`CHECKLIST_UNCHECKED` 点名 `- [ ] rv-2: executor-owned item 2`，PRD 未移动）
+- [x] rv-3：四种横幅不一致情形均不归档、不发布，失败种类为 `ACCEPTANCE_BANNER_MISMATCH` 且可进 closeout（证据：`raw/installed-v5/rv-3-banner-mismatch.log`，9 passed：四种横幅在交付与发布两道门禁都抛 `ACCEPTANCE_BANNER_MISMATCH`；closeout 经 `run_agent_until_committed` 修复后归档）
+- [x] rv-4：发布前检查三种情形符合预期，`require_prd_archived=False` 两处例外不变（证据：`raw/installed-v5/rv-4-publish-requires-archive.log`，3 passed；两处例外见证据报告「对抗自检」第 1、2 条）
+- [x] rv-5：合并队列对已归档 🧍 PRD 输出 `skipped_human_review` 且零 rebase、零合并；人回答后继续（证据：`raw/installed-v5/rv-5-merge-queue-hold.log`，6 passed；证据报告「rv-5：自动合并两轮记录」：第一轮 `outcomes=['skipped_human_review']`、`process calls: []`、没有 `merge_pull_request`，第二轮 `outcomes=['merged']` 且含 `git rebase origin/main`）
+- [x] rv-6：PR 正文接受归档路径，补锚点写归档路径，声明句为 post-merge acceptance recording（证据：`raw/installed-v5/rv-6-pr-body-contract.log`，29 passed；marker 与小节标题未变，见证据报告「锁定契约 diff」）
+- [x] rv-7：无人审项 PRD 零回归；旧版 skill 不触发横幅检查；失败交付不归档（证据：`raw/installed-v5/rv-7-compat.log`，5 passed：无人审项 PRD 恰为一条 rename 且字节相同；v4 形状 JSON 下 ⬜ 照常归档；`require_prd_archived=False` 三例都没有发出 `git add` / `git mv`）
 
 ### Frontend Acceptance (When A Frontend App Changes)
 
-- [ ] `No frontend impact` 已记录并说明理由（只改 runner 判据、提示词与 PR 正文文本）
+- [x] `No frontend impact` 已记录并说明理由（只改 runner 判据、提示词与 PR 正文文本）（证据：§5 Frontend impact 与 §7.2 的 Frontend 分支；`raw/installed-v5/static-gates.log` 中对 `ed30c170` 的 diff 不含任何前端路径）
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 的强制 Closeout 第 2–4 条、PR body 契约第 1–2 条、7 步门禁链、依赖等待与路线图"已归档"行已改为新语义（已归档 ≠ 已验收）
-- [ ] `uv run mkdocs build --strict` 通过
+- [x] `docs/guides/agent-runner.md` 的强制 Closeout 第 2–4 条、PR body 契约第 1–2 条、7 步门禁链、依赖等待与路线图"已归档"行已改为新语义（已归档 ≠ 已验收）（证据：Drift Guard 第 5 行，旧语义短语在 `src/backend` 与 `docs` 无命中；改动范围见证据报告「交付内容」的 `docs/guides/agent-runner.md` 一行）
+- [x] `uv run mkdocs build --strict` 通过（证据：`raw/installed-v5/static-gates.log`，exit 0；`raw/installed-v5/lint-repo.log` 中的 `mkdocs build` 也通过）
 
 ### Validation Acceptance
 
-- [ ] rv-1 在真实 git fixture 上经交付入口运行（真实 `SubprocessRunner` + 真实安装的 v5 skill），rv-5 经 `process_merge_queue` 运行，均非只测私有 helper
-- [ ] rv-1、rv-5 的负控已在实现前于未修改的 main 上红跑并留存输出
-- [ ] 证据记录最终实现提交的 tree id，且在最后一次影响 oracle 链的改动之后重新收集
-- [ ] Drift Guard 全部检查符合 Expected Result
-- [ ] `uv run pytest -o addopts='' tests/ -q` 全绿
-- [ ] `just lint` 与 `just test` 通过
+- [x] rv-1 在真实 git fixture 上经交付入口运行（真实 `SubprocessRunner` + 真实安装的 v5 skill），rv-5 经 `process_merge_queue` 运行，均非只测私有 helper（证据：`raw/installed-v5/rv-1-delivery-archives-awaiting-human.log` 与 `raw/installed-v5/rv-5-merge-queue-hold.log` 首行都写明 `IAR_PRD_SKILL_PATH unset` 与已安装 skill 的 `Machine-Contract-Version: 5`；rv-5 中 `resolve_prd_worktree_path` 与 `parse_prd_checklist` 都没有打桩，见证据报告「Oracle 结果」）
+- [x] rv-1、rv-5 的负控已在实现前于未修改的 main 上红跑并留存输出（证据：`raw/negative-control-rv1-rv5.log` 为 `2 failed`，失败形态与 `expected_fail` 一致；`raw/baseline-discrimination.log` 判别矩阵为 `27 failed, 123 passed`。红跑在 base `1b8afed9` 上，被测 8 个模块与当时的 main 逐字相同，只多认 v5；原因见证据报告「负控与判别矩阵」）
+- [x] 证据记录最终实现提交的 tree id，且在最后一次影响 oracle 链的改动之后重新收集（证据：证据报告「绑定最终树」：record-excluded tree `81b833554c9c8be9481f21fa7d80a88a2c204468`，在 main 的 `c2fcc4b5` 上复算一致，verifier 独立复算一致）
+- [x] Drift Guard 全部检查符合 Expected Result（证据：`raw/installed-v5/drift-guard.log`，10 行全部 ✓；证据报告「Executor Drift Guard」）
+- [x] `uv run pytest -o addopts='' tests/ -q` 全绿（证据：`raw/installed-v5/full-suite.log`，不设 `IAR_PRD_SKILL_PATH`，`2786 passed, 1 skipped`）
+- [x] `just lint` 与 `just test` 通过（证据：`raw/installed-v5/commit-gate-just-test.log` exit 0，其中 `just lint --full` 通过，testmon 增量档的 pytest 为 `no tests ran`，全量覆盖见上一项；`raw/installed-v5/lint-repo.log` 中 `just lint --repo` exit 0；见证据报告「提交门禁」）
 - [~] 独立 verifier 审查结论与 PR 证据呈递 — runner-owned gate: verifier + PR
 - [~] 全量 CI 在 PR 上复跑 — runner-owned gate: CI on PR
 
 ### Delivery Readiness
 
-- [ ] Recommended approach fully implemented；无未批准的平行抽象（未新建验收服务、账本、表或第二个 PRD 解析器）
-- [ ] 无未决回归或上线阻塞项
-- [ ] 完成 §13 Final Reconciliation；按公式设置横幅（Human-Confirmed 仍有空框 → 🧍 待人工验收）
-- [ ] §9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容（只给 evidence 目录链接不算交付）
-- [ ] 每个呈递物都带可直接执行的打开方式（绝对路径 + `open` 命令或可点 URL）与逐项期望值
-- [ ] 证据报告首节是同一份「人审导航」，含打开命令、逐项期望值、PR/CI 链接与"已替你核对过什么"
+- [x] Recommended approach fully implemented；无未批准的平行抽象（未新建验收服务、账本、表或第二个 PRD 解析器）（证据：证据报告「交付内容」逐文件对应 §7.2；「风险地图对账：Predicted → Reconciled」中没有新增抽象，新 helper 只有 `is_prd_archive_path`，已补入 §7.2）
+- [x] 无未决回归或上线阻塞项（证据：main 上 `c2fcc4b5` 的 CI run `37188292685` 全绿；本机已安装 v5 下全量 `2786 passed, 1 skipped`；独立 verifier `PASS`，无 BLOCKER）
+- [x] 完成 §13 Final Reconciliation；按公式设置横幅（Human-Confirmed 仍有空框 → 🧍 待人工验收）（证据：§13「Final Reconciliation」；横幅为 🧍 待人工验收，Human-Confirmed 3 项仍为空框；`check_prd_acceptance_checklist.py --check-provided --archive-ready` 通过）
+- [x] §9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容（只给 evidence 目录链接不算交付）（证据：§9.1 两行均为证据报告的绝对路径 `open` 命令；归档 PR 正文与归档这一轮的完成回复原样带上 §9.1 呈递表）
+- [x] 每个呈递物都带可直接执行的打开方式（绝对路径 + `open` 命令或可点 URL）与逐项期望值（证据：§9.1 与证据报告「人审导航」表，每行都有 `open` 命令与逐项期望值）
+- [x] 证据报告首节是同一份「人审导航」，含打开命令、逐项期望值、PR/CI 链接与"已替你核对过什么"（证据：证据报告首节「人审导航」）
 
 ---
 
@@ -649,12 +650,17 @@ Failure triage:
 
 ### Final Reconciliation (Archive Only)
 
-- Interpretation: [confirmed / corrected — summary]
-- Public behavior and contracts: [confirmed / corrected — summary]
-- Related PRD status: [confirmed / corrected — summary]
-- Requirements and risks: [confirmed / corrected — summary]
+- Interpretation: confirmed — §1 解读回显的 7 行样例逐条对应 rv-1…rv-7，在本机已安装的 v5 skill 上全部通过；"我默默定了这些"与"我理解为不做"没有被实现推翻：没有做一次性迁移，下游解锁时机不变，合并时补记仍列为后续 PRD。
+- Public behavior and contracts: confirmed — 新增失败种类 `ACCEPTANCE_BANNER_MISMATCH`，可进 closeout；发布前检查要求 PRD 已归档，两处 `require_prd_archived=False` 例外不变；合并队列 outcome 字符串不变；PR 正文 marker 与小节标题逐字不变，只改声明句与 `prd-link` 口径；`PrdChecklistResult` 的两个新字段带默认值，向后兼容；私有函数 `_validate_prd_checklist` 删去返回值，3 个调用点已同步。横幅校验放在 `_validate_prd_checklist` 末尾，交付检查两个分支与发布前检查因此同时生效，顺序仍是先执行侧、后横幅。
+- Related PRD status: confirmed — blocked-draft-pr-validation-failure 与 roadmap-prd-cicd-monitor-auto-repair 仍在 pending，关系仍为 independent，前者措辞会过时一事已列入 §12；§5 引用的 3 份 archive PRD 与 keda PR #162 / #168 / #178 / #180 的关系不变；§8 Notes (a)–(d) 已按顺序完成：ZataZhang/keda#183 → ZataZhang/zata-codes-template#27 → ZataZhang/keda#184 → ZataZhang/keda#185。
+- Requirements and risks: confirmed — FR-1…FR-8 均按原文交付；Feature Overview 每条仍成立，并锚定了全部 FR；§12 中首轮发现的两条边仍成立，Decision Log D-01…D-08 没有变化。本 PRD 自身按 v5 归档：代码先随 ZataZhang/keda#185 合入 main，归档在随后的独立 PR 中完成，两者之间 delivery-record 路径之外的代码树没有变化。
 - Reconciled differences:
-  - [none，或列出已经反向修正到正文的差异]
+  - 首轮交付时已修正、记在 Change Log 第三条的：Drift Guard 第 7 行期望值、第 8 行命令、第 10 行与 Architecture Acceptance 第 4 项的命令；§12 新增两条后续。
+  - 本轮修正：§7.2 Change Impact Tree 的 `agent_runner_feedback.py` 补上实现中新增的 `is_prd_archive_path`；§7.1 合并队列 hold 一条写明复用它。
+  - 执行与计划的偏差，不改正文、已在证据报告披露：
+    - §8 Notes (c) 的本机 skill 安装晚于 ZataZhang/keda#185 合并、早于本归档提交；用的是 keda 的 `install_remote_template_skills(force=True)`，不是 `iar init`，因为本机 `.iar.toml` 有定制，`iar init` 会拒绝。CI 从模板 main 安装 skill，#185 合并时已是 v5。
+    - 独立 verifier 在代码合入 main 之后才运行，结论 `PASS`。
+    - 负控红跑在 base `1b8afed9` 上，而不是字面上的 main：当时 main 的契约版本集合不认 v5，红的原因就不是被测行为了。
 
 ---
 
@@ -699,3 +705,18 @@ Failure triage:
   - 归档那一轮：不设 `IAR_PRD_SKILL_PATH` 复跑同一批命令并运行独立 verifier；`PASS` 后勾选执行侧条目、完成 §13 Final Reconciliation、按公式设横幅，并在同一个 PR 内归档。
   - 行为、范围与 oracle 都没有变。
 - Review: Human-Confirmed 3 项待人回答；独立 verifier 本轮未运行，推迟到归档那一轮。
+
+### 2026-10-04 · 归档这一轮：已安装 v5 复跑、verifier PASS、带 🧍 归档
+- Type: archive（勾选执行侧条目、Final Reconciliation、横幅、归档移动；不改代码、行为、范围与 oracle）
+- Before:
+  - 代码已随 ZataZhang/keda#185 以 `c2fcc4b5` squash 合入 main。
+  - PRD 留在 `tasks/pending/`，§9 一项未勾，横幅 ⬜，独立 verifier 没有结论。
+- After:
+  - 在 `c2fcc4b5` 上不设 `IAR_PRD_SKILL_PATH`、用本机已安装的 v5 重跑全部验证：各 oracle 结果与首轮逐条相同，Drift Guard 10 行全部 ✓，全量 `2786 passed, 1 skipped`，`just test` 与 `just lint --repo` 通过；日志在 `raw/installed-v5/`。
+  - 独立 verifier 第 1 轮（kimi）给出 `PASS`，无 BLOCKER、无 SECURITY。
+  - 勾选 Human-Confirmed 之外的 29 项并逐项写明证据；两项 `[~]` runner-owned gate 不变。
+  - 完成 §13 Final Reconciliation，§7.1、§7.2 补记 `is_prd_archive_path`；横幅改为 🧍 待人工验收。
+  - PRD 移到 `tasks/archive/`；证据目录留在原处，新增 verifier 报告与 `human-review-checklist.md`。
+- Reason: 满足 v5 归档门禁——执行侧条目全部 `[x]` 或 `[~]`、verifier `PASS`、Final Reconciliation 完成、横幅与 §9 一致。归档只代表执行侧交付完成，不等人工验收。
+- Impact: record-excluded tree 仍为 `81b833554c9c8be9481f21fa7d80a88a2c204468`，本提交只改 delivery-record 路径，证据不过期。PRD 带 🧍 留在 archive，等人回答。
+- Review: Human-Confirmed 3 项待人回答，可通过 `just prd review` 查看汇总清单；人确认后只回填验收记录：勾选这 3 项、横幅改为 ✅ 已验收、追加 Change Log。
