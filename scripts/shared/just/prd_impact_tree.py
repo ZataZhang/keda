@@ -347,7 +347,7 @@ def parse_impact_tree(prd_text: str) -> tuple[ImpactNode, ...]:
     return tuple(impact_nodes_list)
 
 
-def _run_git_lines(worktree_path: Path, *git_arguments: str) -> tuple[str, ...]:
+def run_git_lines(worktree_path: Path, *git_arguments: str) -> tuple[str, ...]:
     """在指定 worktree 内执行 git 命令并按行返回标准输出。
 
     Args:
@@ -388,7 +388,7 @@ def resolve_base_commit(worktree_path: Path) -> str | None:
         str | None: 分叉点 commit；没有任何主线候选分支时返回 ``None``。
     """
     for base_branch_name in BASE_BRANCH_CANDIDATES:
-        merge_base_lines_tuple = _run_git_lines(
+        merge_base_lines_tuple = run_git_lines(
             worktree_path, "merge-base", "HEAD", base_branch_name
         )
         if merge_base_lines_tuple:
@@ -413,10 +413,10 @@ def collect_branch_touched_paths(worktree_path: Path) -> frozenset[str]:
         return frozenset()
 
     # ``git diff <base>`` 比较基准与**工作区**，因此已提交与未提交的改动一并覆盖。
-    tracked_changed_paths_tuple = _run_git_lines(
+    tracked_changed_paths_tuple = run_git_lines(
         worktree_path, "diff", "--name-only", base_commit_text
     )
-    untracked_paths_tuple = _run_git_lines(
+    untracked_paths_tuple = run_git_lines(
         worktree_path, "ls-files", "--others", "--exclude-standard"
     )
     return frozenset(tracked_changed_paths_tuple) | frozenset(untracked_paths_tuple)
@@ -431,8 +431,8 @@ def collect_repo_file_paths(worktree_path: Path) -> frozenset[str]:
     Returns:
         frozenset[str]: 仓库相对路径集合。
     """
-    return frozenset(_run_git_lines(worktree_path, "ls-files")) | frozenset(
-        _run_git_lines(worktree_path, "ls-files", "--others", "--exclude-standard")
+    return frozenset(run_git_lines(worktree_path, "ls-files")) | frozenset(
+        run_git_lines(worktree_path, "ls-files", "--others", "--exclude-standard")
     )
 
 

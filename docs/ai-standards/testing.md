@@ -216,7 +216,7 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 - 前端流程必须断言浏览器实际请求的 canonical path、method 与 contract；已知 legacy/重复前缀需有负断言。
 - 影响入口、关键值构造、代理/路由、事务、存储、消费者或断言的相关改动会使旧证据失效，必须在最终代码树重新收集。
 - runner 的独立 verifier 只审已提交且干净的工作树。pre-PR review 若产生新提交，创建 PR 前须在新 HEAD 上复跑 RV 并重新取得 verifier 结论；旧提交的绿灯或黄灯不得用于新提交。
-- 真实运行或现场报告反驳已归档的 verifier `PASS` 时，旧验收立即失效；重开或创建关联回归 PRD，修复并重新独立验收后才能再次归档。
+- 真实运行或现场报告反驳已归档的 verifier `PASS` 时，旧验收立即失效；重开或创建关联回归 PRD，修复并重新独立验收后才能再次归档。人工验收时发现 PRD 自身的 oracle / 范围未达成同属此类：把 PRD 移回 `tasks/pending/` 重开（横幅 `⬜ 未开工`、Change Log 记录发现了什么）；交付与 PRD 一致但需求本身变了，则保留已归档 PRD 作交付记录、新开关联 PRD。归档后只允许写验收记录，不原地修补。
 
 人工终点审查时，按风险地图顺序查看证据包，重点抽查高风险 oracle 结果、前端截图/录屏和 verifier report。
 

@@ -10,13 +10,13 @@
 
 1. **人工审查清单按分支副本优先解析。** 审查发生在 PRD 合并回主线之前，证据
    目录此时只存在于 worktree 里；按主仓库路径找会扑空或读到旧副本（与看板
-   EVIDENCE 列同一理由）。worktree 按 PRD slug 与分支名匹配，解析必须与
-   ``prd_status`` 共用同一套规则，两处不得分叉。
+   EVIDENCE 列同一理由）。worktree 按 PRD slug 与分支名匹配，解析必须与看板
+   ``prd_status`` 共用同一套规则（二者都走 ``prd_locator``），两处不得分叉。
 2. **清单槽位优先于证据报告，且两个槽位独立兜底。** 清单缺失不应连带丢弃
    分支上已有的报告，反之亦然；命中顺序必须是清单 → 报告。
 3. **清单槽位内交互 HTML 优先于静态 Markdown。** 两者内容一致，HTML（逐步
    按钮作答、内嵌截图）是人审会话的首选呈现面；扩展名优先级由调用方传入
-   ``prd_status.find_named_evidence_file``，命名模式仍由后者单一事实源维护，
+   ``prd_locator.find_named_evidence_file``，命名模式仍由后者单一事实源维护，
    两处不得分叉。
 4. **没有可打开文件时必须非零退出。** 静默成功（退出 0 却没打开任何东西）会
    让人以为"没有待人工审查的事"，而实际可能只是证据目录还没建——本地审查
@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# prd_review.py / prd_status.py / prd_lock.py 不是包的一部分，import 前需把
+# prd_review.py / prd_locator.py / prd_lock.py 不是包的一部分，import 前需把
 # 它们所在目录放到 sys.path。
 _JUST_SCRIPTS_PATH = Path(__file__).resolve().parents[3] / "scripts" / "shared" / "just"
 if str(_JUST_SCRIPTS_PATH) not in sys.path:

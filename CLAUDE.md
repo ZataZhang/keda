@@ -51,7 +51,7 @@
 - 提交信息统一用英文并遵循 Conventional Commits（`type(scope): subject`，标题 ≤ 72 字符，正文解释 why），详见 `docs/ai-standards/tooling.md` 的 Commit Messages 小节
 - 单代码文件非空行不超过 1000 行；`just lint` 会对此发出警告
 - 随手想法先落 `tasks/inbox/`：只在**想法边界**捕获（用户明确要求，或话题收敛到可开 PRD 的状态），条目 = 用户原话逐字**引用** + 标注为 `AI 派生` 的背景块，**只追加**到 `tasks/inbox/ideas.md`（禁止改写已有条目）；AI 维护 `tasks/inbox/summary.md` 做总结；想法成熟后用 PRD 流程升级到 `tasks/pending/`。详见 `docs/guides/idea-inbox.md`
-- PRD 对应任务全部完成后：生成验证计划、收集证据、经独立 verifier Agent 审查通过并完成 Acceptance Checklist，所有条目达到完成态后，再将 PRD 从 `tasks/pending/` 归档到 `tasks/archive/`
+- PRD 对应任务全部完成后：生成验证计划、收集证据；独立 verifier `PASS` 后，executor 必须勾选证据充分支持的非人工 Acceptance Checklist 项并标注证据、完成 Final Reconciliation、让验收状态横幅与 §9 对齐，随交付改动一并将 PRD 从 `tasks/pending/` 归档到 `tasks/archive/`。**归档只代表执行侧交付完成**，不等人工验收：`Human-Confirmed` 空框带着 `🧍 待人工验收` 归档，人确认后（对话/审查清单，或一个明确声明“合并即验收”、唯一关联该 PRD 且已发布证据的 PR merge——含 squash，须核对最终 Git tree）只回填验收记录（勾选 `Human-Confirmed`、横幅改 `✅ 已验收`、追加 Change Log）；人工验收若发现 PRD 自身 oracle/范围未达成，把 PRD 移回 `tasks/pending/` 重开，需求本身变了则新开关联 PRD
 - PRD 必须包含 Realistic Validation Plan，验收清单需覆盖最高可行保真度的真实入口验证，或说明无可执行行为变更
 - 变更代码时同步更新 `docs/` 与 `mkdocs.yml`
 - 新增给密钥类的配置变量（如 `api_key_env`、密钥别名、provider 注册信息）应放到 `config.toml`，实际密钥值仍由 `.env/.env.local` 注入；默认 env 未填写时，配置加载仍须正常完成

@@ -699,7 +699,7 @@ implement prd_file ai_tool prompt="":
         exit 1
     fi
 
-    # 分支名 / 展示名的推导规则与 prd_status.py 文件名解析一致，
+    # 分支名 / 展示名的推导规则与 prd_locator.py 文件名解析一致，
     # 唯一事实源在 scripts/shared/worktree/prd_branch_match.sh。
     source ./scripts/shared/worktree/prd_branch_match.sh
 
@@ -978,13 +978,16 @@ ai subcommand arg1="" arg2="" arg3="" :
 # tasks/pending 时亮 ⛔ blocked by，已交付显示 ✔ deps ok）与运行态（ACTIVITY 列）。
 # 清单进度、依赖满足与 verifier 结论均为从文件内容推断的启发式结果，看板只用于
 # 快速定位，最终判断以 PRD 正文与证据文件原文为准。
+# 归档只代表执行侧交付完成，人工验收是另一条轴线：已归档（含分支里已归档、只差合并）
+# 且验收状态横幅为 🧍 待人工验收的 PRD 单列为 AWAITING HUMAN 段并附等待时长，不再
+# 混进 PENDING / ARCHIVE；pending 里残留的 🧍 是重开后没复位的陈旧横幅，仍留在 PENDING。
 # 执行锁：开工前必须先领锁（just prd start），他人新鲜锁会被拒绝；锁的唯一事实
 # 源在主仓库 tasks/evidence/<prd-stem>/active.lock，各 worktree 共享同一视图。
 # Usage:
-#   just prd status            # pending 逐条列出，archive 按月折叠
+#   just prd status            # pending 逐条列出，archive 按月折叠，AWAITING HUMAN 单列
 #   just prd status all        # 展开 archive 每条
-#   just prd status pending    # 只看 pending
-#   just prd status archive    # 只看 archive（按月折叠）
+#   just prd status pending    # 只看 pending（有待人工验收项时仍附上 AWAITING HUMAN）
+#   just prd status archive    # 只看 archive（按月折叠，同样附上 AWAITING HUMAN）
 #   just prd status <scope> --detail   # 在每个 PRD 行下追加标题与描述摘要
 #   just prd start <prd-file> [--tool <名称>] [--branch <名称>]   # 领取执行锁
 #   just prd heartbeat <prd-file>                                 # 续期自己的锁
@@ -1041,10 +1044,10 @@ prd subcommand scope="" *extra_args:
             ;;
         *)
             echo "Usage:"
-            echo "  just prd status          # dashboard: pending rows + archive grouped by month"
+            echo "  just prd status          # dashboard: pending rows + AWAITING HUMAN + archive grouped by month"
             echo "  just prd status all      # expand every archived PRD"
-            echo "  just prd status pending  # only tasks/pending"
-            echo "  just prd status archive  # only tasks/archive"
+            echo "  just prd status pending  # only tasks/pending (plus AWAITING HUMAN when non-empty)"
+            echo "  just prd status archive  # only tasks/archive (plus AWAITING HUMAN when non-empty)"
             echo "  just prd status <scope> --detail   # append title + summary under each PRD row"
             echo "  just prd start <prd-file> [--tool <名称>] [--branch <名称>]  # claim execution lock"
             echo "  just prd heartbeat <prd-file>                              # renew own lock"
