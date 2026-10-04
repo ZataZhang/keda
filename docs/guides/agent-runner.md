@@ -890,6 +890,7 @@ runner 派发 agent 子进程时**不会**原样继承父环境：派发点（Cl
 - 只复制 worktree 中**缺失**的文件：被跟踪的 `.env*.example` 与 worktree 内已修改的 `.env` 永远不会被覆盖
 - 复用已有 worktree 时同样补齐（旧 worktree 缺 `.env` 的，下一次 `iar run` 会自动治愈）
 - 扫描会跳过 `.git`、`.iar-worktrees`、`.venv`、`node_modules` 等目录，避免把其他 worktree 的 env 文件复制串
+- **不会**复制 `.env.run-state`：它记录主仓库 `just run` 分配的端口，拷进 worktree 会让 worktree 指向主仓库端口——目标仓的共享库守卫据此认为有 dev server 在写本库而拒绝跑测试（假阳性），worktree 内 `just run` 也会与主仓库 dev server 抢端口；worktree 会自行生成自己的 run-state（`just worktree` 路径走随机端口）
 - 与旧的 `just worktree` 脚本不同，这里**不会**用 `.env.example` 兜底生成 `.env`：用示例值静默跑测试比明确的缺配置失败更危险
 - 复制是 best effort：单个文件失败（如悬空 symlink）只记日志，不会中断 agent run
 - 复制过来的文件保持 gitignored 状态，不会让 worktree 变脏，也不影响 `iar worktree cleanup` 的默认清理判定
