@@ -178,6 +178,11 @@ agent = "codebuddy"
 model = "deepseek-v4.1-flash"
 reasoning_effort = "high"
 
+[agent_runner.presets.qwen_flash_max]
+agent = "qoder"
+model = "Qwen3.8-Flash"
+reasoning_effort = "max"
+
 # =============================================================================
 # 阶段 -> 预设 绑定（九键闭集，与生命周期矩阵同键）
 # =============================================================================
@@ -192,6 +197,9 @@ reasoning_effort = "high"
 # [agent_runner.lifecycle_presets]
 # verifier = "plan"
 # implementation = "work"
+
+[agent_runner.lifecycle_presets]
+verifier = "qwen_flash_max"
 
 # =============================================================================
 # Agent 注册表（声明式 agent 调用形态）
@@ -411,6 +419,11 @@ auth_home = "~/.qoder-cn"
 auth_include = ["settings.json", "skills"]
 auth_exclude = ["logs", "file-history", "projects", "tasks", "shell-snapshots", "cache", "plugins"]
 project_skills_dir = ".qoder-cn/skills"
+# 模型 / 推理档参数模板：qodercn 用 -m/--model 与 --reasoning-effort
+# （合法档位：auto / none / low / medium / high / xhigh / max / ultracode）。
+# 声明后该 agent 才能命中带模型 / 推理档的预设绑定（见 lifecycle_presets）。
+model_args = ["--model", "{model}"]
+reasoning_effort_args = ["--reasoning-effort", "{effort}"]
 
 [agent_runner.agents.qoder.profiles.run]
 args = ["--dangerously-skip-permissions", "-p", "-o", "stream-json"]

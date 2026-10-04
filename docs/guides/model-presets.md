@@ -42,8 +42,9 @@ model_args = ["--model", "{model}"]
 reasoning_effort_args = ["--settings", "{\"reasoningEffort\":\"{effort}\"}"]
 ```
 
-- `claude`（`--model <id>`）与 `codebuddy`（`--model` + `--settings reasoningEffort`）的语法已
-  核实并作为内置默认播种；其余 agent（kimi / codex / pi / qoder / opencode）保持为空。
+- `claude`（`--model <id>`）、`codebuddy`（`--model` + `--settings reasoningEffort`）与
+  `qoder`（`--model` + `--reasoning-effort`）的语法已核实并作为内置默认播种；
+  其余 agent（kimi / codex / pi / opencode）保持为空。
 - **为空表示"未核实语法"**：该 agent 命中带模型/推理档的绑定时直接报错
   （`ModelNotSupportedError`，指名 agent 与缺失模板），绝不静默忽略。
 - 注入位置：profile `args` 之后、展开器与 `tail_args` 之前；占位符闭集扩为

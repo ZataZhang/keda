@@ -487,6 +487,11 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             "plugins",
         ),
         project_skills_dir=".qoder-cn/skills",
+        # 模型选择与推理档（已实测，见 qodercn --help 与 --list-models）：
+        # `qodercn --model <模型名>` 与 `--reasoning-effort <档>`；合法档位为
+        # auto / none / low / medium / high / xhigh / max / ultracode。
+        model_args=("--model", "{model}"),
+        reasoning_effort_args=("--reasoning-effort", "{effort}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=("--dangerously-skip-permissions", "-p", "-o", "stream-json"),
