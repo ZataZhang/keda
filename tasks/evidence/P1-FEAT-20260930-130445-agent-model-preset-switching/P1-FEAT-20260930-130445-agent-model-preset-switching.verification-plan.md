@@ -1,7 +1,7 @@
 # Verification Plan — P1-FEAT-20260930-130445-agent-model-preset-switching
 
-> 交付基线：worktree `keda-worktrees/feat/agent-model-presets`，分支 `feat/agent-model-presets`，HEAD `d5ec78ca` + 未提交交付改动。
-> 全量门禁：`CI=true just test all` = **2697 passed, 1 skipped**（skip 为既有 alembic 迁移守卫：本仓 `alembic/versions` 为空，环境性跳过，与本 PRD 无关）。
+> 交付基线：worktree `keda-worktrees/feat/agent-model-presets`，分支 `feat/agent-model-presets`，重定基后冻结 HEAD `04361e3d`（记录路径排除口径树 `63c7d85a`）。
+> 全量门禁：`CI=true just test all` = **2849 passed, 1 skipped**（skip 为既有 alembic 迁移守卫：本仓 `alembic/versions` 为空，环境性跳过，与本 PRD 无关）。重定基后的独立 verifier（REBASE 复核轮）在冻结 HEAD 上独立复跑一致，报告见 `P1-FEAT-20260930-130445-agent-model-preset-switching.verifier-report-rebase.md`。
 
 ## rv 对应验证命令
 

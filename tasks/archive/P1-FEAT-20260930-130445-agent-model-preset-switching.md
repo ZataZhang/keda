@@ -475,7 +475,7 @@ flowchart TD
 - id: rv-6
   behavior: 阶段绑定预设后该阶段 agent 与模型整体切换，未绑定阶段零变化
   reviewer: verifier
-  real_entry: "uv run pytest -o addopts='' tests/test_lifecycle_agent_resolution.py -q -k preset"
+  real_entry: "uv run pytest -o addopts='' tests/test_agent_model_presets.py -q -k 'binding or preset or executor' && uv run pytest -o addopts='' tests/test_lifecycle_agent_resolution.py -q -k 'prd_override or executor'"
   expected: "绑定 verifier->plan 后该阶段解析为 codebuddy + ModelSelection（遮蔽矩阵同键声明）；删除绑定后恢复矩阵/既有键 agent 且 ModelSelection 为 None；implementation 等未绑定阶段解析结果与改动前一致"
   mock_boundary: "不 mock；真实配置合并路径"
   tier: R2
@@ -485,7 +485,7 @@ flowchart TD
 - id: rv-7
   behavior: fallback / 显式换人时丢弃模型绑定并标注
   reviewer: verifier
-  real_entry: "uv run pytest -o addopts='' tests/test_agent_invocation.py tests/test_lifecycle_agent_resolution.py -q -k 'fallback or dropped'"
+  real_entry: "uv run pytest -o addopts='' tests/test_agent_model_presets.py -q -k 'drop or fallback or executor'"
   expected: "命中绑定的 agent 启动失败回退到链上下一个 agent（或显式 --agent 指定不同 agent）后，构造的 argv 不含被丢弃的模型参数，日志/attempt 记录含 'model binding dropped'"
   mock_boundary: "under-test 的 fallback 与 argv 组装不 mock；失败由测试替身在启动边界注入"
   tier: R1
@@ -533,7 +533,7 @@ flowchart TD
 - id: rv-11
   behavior: 观测链路：console 视图字段 + attempt 账本 preset/model 列与 v5→v6 迁移
   reviewer: verifier
-  real_entry: "uv run pytest -o addopts='' tests/test_console_store.py tests/test_lifecycle_agents_console.py -q"
+  real_entry: "uv run pytest -o addopts='' tests/test_console_store.py tests/test_lifecycle_agents_console_api.py -q"
   expected: "v5 既有库打开后自动补列且旧记录 preset/model 为 NULL；绑定生效的 attempt 写入 preset/model；build_lifecycle_agents_view 行含 preset 与 model 字段且未绑定时为 null"
   mock_boundary: "不 mock；真实 SQLite 文件与真实视图构建"
   tier: R1
@@ -704,6 +704,7 @@ Failure triage:
 - Type/Scope: delivery；仅本 PRD 记录路径（横幅、§9.2 人审组、本 Change Log）与分支重定基。
 - Changed: 分支 `feat/agent-model-presets` 重定基到 `zata/main`（含 #182 token 账本、#184/#185 PRD v5 归档语义、#186），解决 `agent_runner_attempt` / `run_agent_execution_loop` / `run_verifier_agent` 等六文件的账本列、usage 观测与 verifier 候选回退三方冲突；全量门禁 `CI=true just test all` → 2849 passed / 1 skipped。
 - Changed: 按 v5 归档语义对齐——横幅由「已交付并归档」改为 `🧍 待人工验收`，§9.2 Human-Confirmed 五项保持 `- [ ]`（原 decision-board 6/6 确认作为 9.1 呈递记录保留），验收记录改由合并即验收事件的 post-merge reconciliation 写入。
+- Changed: 重定基后补跑独立 verifier（冻结 HEAD `04361e3d`，REBASE 复核轮）→ PASS；全量套件 2849 passed / 1 skipped；六文件冲突解决经逐项语义核验（#182 token 账本与预设两套特性共存、无丢分支、无双注入）。并按其 R-01 发现更正 rv-6/7/11 的 `real_entry` 测试路径漂移（行为不变，仅恢复字面可复现性）。
 - Invariant: 未定义预设 / 未绑定 / 未传旗标时 argv 与九阶段路由逐字节不变（黄金快照零 diff）；账本 schema v5→v6 迁移对既有库幂等（与 #182 增列共存）。
 - Reason: main 已切到「归档只代表执行侧完成、验收独立记录」的契约；原 PRD 在旧语义下勾满人审框，与合并即验收的 PR 契约冲突。
 
