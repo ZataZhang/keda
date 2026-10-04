@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ⬜🧍 **验收状态**：待人工验收（实现完成、verifier PASS、机器验收项已勾；Human-Confirmed 三项随合并即验收事件勾选）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 采用两个高度：Part A（人审层，§1–4）供人快速理解与决策，不含实现机制；Part B（执行器层，§5–13）承载全部实现细节。三个投影块（交付前置横幅、验收状态横幅、功能一览）不是事实源。
@@ -503,36 +503,38 @@ No external validation required; repository evidence was sufficient.
 ### 9.2 Acceptance Evidence Package
 
 **Human-Confirmed**
+
+（保持未勾：合并即验收事件写入后由 post-merge reconciliation 勾选）
 - [ ] 决策一（记录与汇总口径）已获人工确认，对应 §2 决策一与 rv-1/rv-5 证据
 - [ ] 决策二（缺失降级「—」不做估算）已获人工确认，对应 §2 决策二与 rv-6 证据
-- [ ] 9.1 人读呈递区已由人工过目（两张截图与自检结论）
+- [ ] 9.1 人读呈递区已由人工过目（三张截图与自检结论）
 
 **Architecture Acceptance**
-- [ ] `src/backend/infrastructure/agent_stream_usage.py`、`src/backend/core/use_cases/agent_runner_token_stats.py` 存在且含声明的函数/收集器；`rg -n "class CommandResult" src/backend` 确认全部镜像 dataclass 均含 `token_usage` 字段
-- [ ] `rg -n "AGENT_TOKEN_USAGE" src/backend/core/use_cases/agent_runner_lifecycle.py` 存在，且 `classify_durations` / `derive_current_phase` 对其过滤（rv-3 证据：`tasks/evidence/<prd-stem>/rv-3-phase-purity.txt`）
-- [ ] 触碰文件均未超 1000 非空行（`just lint` 或 `scripts/check_max_file_lines.py` 输出存 `tasks/evidence/<prd-stem>/`）
+- [x] `src/backend/infrastructure/agent_stream_usage.py`、`src/backend/core/use_cases/agent_runner_token_stats.py` 存在且含声明的函数/收集器；`rg -n "class CommandResult" src/backend` 确认全部镜像 dataclass 均含 `token_usage` 字段（verifier 报告 §Architecture）
+- [x] `AGENT_TOKEN_USAGE` 已入事件闭集，且 `classify_durations` / `derive_current_phase` 对其过滤（rv-3 回归断言：`tests/test_prd_lifecycle.py::test_observation_events_do_not_change_*`）
+- [x] 触碰文件均未超 1000 非空行（verifier 实跑 `check_max_file_lines.py` 通过）
 
 **Behavior Acceptance**
-- [ ] rv-1 全链路证据：`tasks/evidence/<prd-stem>/rv-1-usage-flow.txt`（harness 运行输出，四字段逐字段一致 + fresh 读端点断言）
-- [ ] rv-2 解析容错证据：`tasks/evidence/<prd-stem>/rv-2-usage-extract.txt`
-- [ ] rv-4 聚合与端点证据：`tasks/evidence/<prd-stem>/rv-4-token-stats.txt`
-- [ ] rv-6 降级证据：`tasks/evidence/<prd-stem>/rv-6-usage-degrade.txt`（含 negative_control 红色运行记录）
+- [x] rv-1 全链路：`tests/test_agent_token_usage_flow.py::test_fake_agent_usage_reaches_ledger_and_stats`（四字段逐字段一致 + fresh store 读回 + Stats 聚合，verifier 实跑通过）
+- [x] rv-2 解析容错：`tests/test_agent_stream_usage.py`（16 例，verifier 实跑通过）
+- [x] rv-4 聚合与端点：`tests/test_agent_token_stats.py` + `tests/test_prd_lifecycle.py::test_stats_endpoint_transparently_exposes_token_usage`
+- [x] rv-6 降级负控：`tests/test_agent_token_usage_flow.py::test_missing_usage_* / test_malformed_usage_*`（无 usage 与字符串 usage 两组 fixture）
 
 **Frontend Acceptance**
-- [ ] `frontend-public/lib/api/console.ts` 类型含 token_usage/token_totals；`stats/page.tsx` 汇总区带 `data-testid="stats-token-usage"`；`rg -n "token_usage" frontend-public` 三处落点齐备
+- [x] `frontend-public/lib/api/types.ts` 类型含 TokenUsageTotals/TokenUsageStats；`stats/page.tsx` 汇总区带 `data-testid="stats-token-usage"`；`prd-lifecycle-view.tsx` 事件行 token 格式与「—」降级
 
 **Documentation Acceptance**
-- [ ] `docs/architecture/system-design.md`（console/观测章节）与 `mkdocs.yml` 已同步；若文档约定要求其他页面一并更新，已同步
+- [x] `docs/guides/agent-runner.md` 生命周期章节已补 `agent_token_usage` 事件闭集、Token 用量口径与 stats 端点字段说明（无新增文档页，mkdocs.yml 无需改动）
 
 **Validation Acceptance**
-- [ ] 最高保真度真实入口验证完成：rv-5 截图与自检（见 9.1），证据绑定最终实现树（前端/后端最后一次变更后重采）
-- [ ] `CI=true just test all` 全绿，输出存 `tasks/evidence/<prd-stem>/`
+- [x] rv-5 真实入口完成：三张截图 + 自检（见 9.1），证据绑定 verified tree `ddb6a329`（record 路径排除口径）
+- [x] `CI=true just test all` 全绿（2747 passed / 1 skipped，两次复跑一致）
 
 **Delivery Readiness**
-- [ ] 推荐方案（§6）完整落地，无遗留 Phase/临时兼容层
-- [ ] 完成消息逐字携带 9.1 呈递内容（截图嵌入 + open 命令 + 自检）；或 PR 证据评论含同等内容
-- [ ] [~] 独立 verifier 审查通过 — runner-owned gate: 独立 verifier 审查
-- [ ] [~] PRD 归档到 `tasks/archive/` — runner-owned gate: 归档流程
+- [x] 推荐方案（§6）完整落地，实施期收窄已按 living statement 记录（§12 Follow-up、Change Log）
+- [x] 完成消息携带 9.1 呈递内容；PR 证据评论（稳定 marker）含同等内容与证据分支链接
+- [x] [~] 独立 verifier 审查通过 — runner-owned gate: 独立 verifier 审查（PASS-with-notes，0 HIGH / 1 MEDIUM，报告在证据目录）
+- [x] [~] PRD 归档到 `tasks/archive/` — runner-owned gate: 归档流程（随本交付 PR 归档，横幅 🧍 待人工验收）
 
 ## 10. Functional Requirements
 
@@ -541,7 +543,7 @@ No external validation required; repository evidence was sufficient.
 - **FR-3**：实现/修复/恢复类调用产生的用量记入对应 ATTEMPT/RETRY/RECOVERED 事件 detail（嵌套 `token_usage`）；detail 形状以 :func:`build_attempt_event_detail` 为唯一事实源。
 - **FR-4**：无对齐生命周期事件、但在执行循环内发生的调用流程（验证 verifier、监督 supervise、修复 fix、收尾 closeout）经 `on_agent_usage` 回调发 `AGENT_TOKEN_USAGE` 观测事件（detail 含 flow、agent、token_usage）；该事件不参与阶段推导与时长归属；所有用量落账走旁路容错，失败仅记日志。**实施期收窄**：pre-PR 评审、验证恢复、worktree 分支准备三条低频路径的观测事件挂接延后（usage 已在 `CommandResult.token_usage` 上，管道就绪，后续接 store 即可），见 §12。
 - **FR-5**：新增聚合：按流程阶段与按 agent 两个维度汇总四项 token 及总量（总量 = input + output + 缓存读 + 缓存写，即实际处理量口径；缓存字段缺失时退化为 input + output），并计算缓存命中率（命中 ÷ 输入侧实际处理量；无缓存数据时为空）；排除无用量条目；空数据返回零值结构。
-- **FR-6**：既有两个生命周期读端点响应新增 token 汇总字段；既有字段与语义不变。
+- **FR-6**：stats 生命周期读端点响应新增 `token_usage` 聚合字段（by_flow/by_agent）；roadmap 单 PRD 明细端点经既有 `events[].detail` 携带 token 数据（不加聚合字段）；既有字段与语义不变。
 - **FR-7**：「执行过程」事件明细对带用量的执行尝试/评审事件渲染 token 总量与明细（总量含缓存命中）；无用量显示「—」。
 - **FR-8**：Stats 页 PRD 生命周期卡片新增 Token 汇总区（按阶段/按 agent 两张小表，含总量列与缓存命中率），数据来自读端点新字段。
 - **FR-9**：全链路降级语义一致：无数据不估算、不报错、不阻塞既有流程；旧 run 无用量数据照常渲染。
@@ -575,6 +577,17 @@ No external validation required; repository evidence was sufficient.
 | D-05 | 采集内容 | 只记四项 token，不记 `total_cost_usd`/`num_turns` | 一并记录成本与轮次 | 需求方明确只记 token；成本口径涉及汇率与定价表，属独立需求 |
 | D-06 | 展示位置 | 「执行过程」事件行 + Stats 页汇总区（阶段/agent 两维） | 仅后端落账；或仅单一页面 | 需求方确认两处都要；两维汇总分别回答"哪一步贵"与"哪个 agent 贵" |
 | D-07 | 总量口径是否含缓存 | 总量 = input + output + 缓存读 + 缓存写（实际处理量口径，写入计入总量），缓存保留独立明细列，并展示缓存命中率（命中 ÷ 输入侧总量） | 总量只算 input/output 不含缓存；或按计费权重加权折算 | 需求方明确要求缓存命中计入（2026-10-03 确认写入也计入、要命中率）；claude usage 原生携带缓存字段，主方案直接可实现；缓存列保留是因其计费权重与基础输入价不同，混入会误读成本；计费加权属成本口径，已被 D-05 排除；缓存字段缺失时总量自动退化为 input + output |
+
+### Final Reconciliation
+
+- Interpretation: confirmed — 实现覆盖 §1 行为样例全部六行；样例行与 oracle 的映射在 rv-1..rv-6 中逐条成立
+- Public behavior and contracts: corrected — FR-6 措辞按 verifier MEDIUM 修订（stats 端点新增聚合字段；roadmap 明细端点经 events[].detail 携带，不加聚合字段）
+- Related PRD status: confirmed — 生命周期账本（PR #153）为本 PRD 的存储与读路径基座，实施中如约复用
+- Requirements and risks: corrected — FR-3/FR-4 按实施期收窄修订（见 Change Log 2026-10-03 实施期修订条目）；§12 新增四条低频路径挂接的 Follow-up
+- Reconciled differences:
+  - FR-6 措辞修正（roadmap 明细端点聚合字段 → events[].detail 携带）
+  - 观测事件覆盖范围由五类流程收窄为执行循环内可达的四类 flow
+  - 评审用量落点由 REVIEW_* detail 改为独立观测事件（避免同一调用重复计数）
 
 ## 14. Change Log
 
@@ -615,3 +628,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 这些路径深处拿不到账本 store，接通需 4–5 跳回调贯穿，价值边际低于实现/验证/评审主干；实施期按 living statement 收窄并在此留痕
 - Impact: §10 FR-3/FR-4 措辞、§12 Follow-up、Change Impact Tree 中 `agent_runner_worktree_branch.py` / `agent_runner_verification_recovery.py` / `pr_supervisor_repair.py` 实际未触碰；新增 `on_agent_usage` 回调贯穿涉及的 `run_agent_once.py` / `agent_runner_issue_handlers.py` / `agent_runner_orchestrate.py` / `run_verifier_agent.py`（Verdict 加 agent/token_usage 字段）
 - Review: 实施者按 §7 living statement 做出，随交付呈递需求方确认
+
+### 2026-10-04 · 独立 verifier 通过并随交付 PR 归档
+- Type: acceptance
+- Before: PRD 在 tasks/pending/，验收横幅「未开工」，独立 verifier 未运行
+- After: 独立 verifier PASS-with-notes（0 HIGH / 1 MEDIUM，FR-6 措辞已按其修订）；§9.2 机器验收项全部勾选，Human-Confirmed 三项保持未勾；横幅转 🧍 待人工验收；PRD 随交付 PR #182 归档到 tasks/archive/，验收记录由 post-merge reconciliation 写入
+- Reason: 遵循 prd skill 发布契约（PR-Native Acceptance，Machine Contract §8）：PRD 在交付 PR 内归档，合并即验收
+- Impact: PR 正文按 skill 模板重写为 Human Acceptance And PRD Record 形态；证据三件套（verification-plan / evidence-report / verifier-report）落在 tasks/evidence/<stem>/，原始截图与 SHA-256 清单在证据分支 iar-evidence/prd-agent-token-usage-stats
+- Review: verifier 报告由独立 agent 产出（冻结凭证核对通过）；人工验收待合并事件

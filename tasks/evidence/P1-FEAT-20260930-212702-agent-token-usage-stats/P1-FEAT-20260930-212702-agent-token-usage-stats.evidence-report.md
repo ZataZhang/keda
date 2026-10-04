@@ -39,3 +39,20 @@ negative_control 说明：rv-1/rv-6 的负控均为 tests 侧 fixture 变体（�
 
 - codex/kimi/pi 真机 usage 形状：未实测（实施机无对应 CLI 登录态）；plain 路径解析已就绪，形状确认后只需扩展字段映射
 - claude `result.usage` 会话累计语义：与决策一（单次调用合计）自洽，待真机一次运行核对
+
+## 独立 verifier 结论
+
+- 结论：**PASS-with-notes**（0 HIGH / 1 MEDIUM）；报告见同目录 `*.verifier-report.md`
+- MEDIUM：FR-6 字面口径在 roadmap 单 PRD 端点未以聚合字段满足（token 经 `events[].detail` 透传，PRD §7 机制描述措辞不准，功能无缺口）——已按 record 路径修订 PRD 措辞
+
+## 证据身份（Evidence Identity）
+
+- verified_head_sha: `44f685c8`（完整值见 `git rev-parse 44f685c8`）
+- verified_tree_sha（排除记录路径 tasks/pending|archive/<prd>、tasks/evidence/<stem>）: `ddb6a329e8843897210ea0ac9ea72eed62ea04c9`
+- 冻结凭证：`git diff HEAD -- src tests frontend-public docs | sha256sum` = 空树哈希（工作区与 HEAD 一致）
+
+## 证据文件 SHA-256
+
+```text
+（由发布脚本填充，见证据分支同名文件旁 sha256 清单）
+```
