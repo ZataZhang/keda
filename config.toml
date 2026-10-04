@@ -168,12 +168,12 @@ max_issues = 1
 # 用 `iar agent presets` 枚举全部预设；`iar agent doctor <agent> --preset <名>`
 # 预览将被执行的完整命令行。
 
-[agent_runner.presets.plan]
+[agent_runner.presets.codebuddy-glm5_3-flash-max]
 agent = "codebuddy"
 model = "glm-5.3-flash"
 reasoning_effort = "max"
 
-[agent_runner.presets.work]
+[agent_runner.presets.codebuddy-deepseek-v4_1-flash]
 agent = "codebuddy"
 model = "deepseek-v4.1-flash"
 reasoning_effort = "high"
@@ -192,14 +192,13 @@ reasoning_effort = "max"
 #   > 仓库 .iar.toml > 本文件（全局层）。
 # fix / closeout 未自绑预设时跟随实现者并继承实现的模型绑定（同一 agent）。
 # 回退换人 / 显式换 agent 时丢弃模型绑定并在日志与 attempt 记录中标注。
-# 下面是注释模板：取消注释即生效。
-#
-# [agent_runner.lifecycle_presets]
-# verifier = "plan"
-# implementation = "work"
-
+# 下面是当前生效的阶段 -> 预设绑定；未列出的阶段继续走生命周期矩阵 /
+# 既有散落键 / 内置默认（fix、closeout 未绑时默认跟随实现者并继承其模型）。
 [agent_runner.lifecycle_presets]
+implementation = "codebuddy-deepseek-v4_1-flash"
 verifier = "qwen_flash_max"
+fix = "codebuddy-glm5_3-flash-max"
+closeout = "codebuddy-glm5_3-flash-max"
 
 # =============================================================================
 # Agent 注册表（声明式 agent 调用形态）
