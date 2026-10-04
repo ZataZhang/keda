@@ -301,3 +301,21 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - Issue #175 已修的是"文件名 + 目录都只由日志模块产出、消费方不再自己推导"（`daily_log_path()` / `daily_log_dir()` + `iar logs` 回退提示改取无参 `daily_log_path()`），所以两处消费点之间不再漂移。
 - 剩下的一致性问题：`log_dir` 与 `log_file` 这两个字段本身仍是两套来源。让 `log_file` 默认由 `log_dir` 派生（或让日文件直接写 `log_dir`）会改变已有部署的日志落点，属于需要单独决策的行为变更，因此本次只做文档披露（`docs/guides/configuration.md` 明确写了"单独设置 `LOG_DIR` 不会把日文件挪走"）。
 - 后续如要开工，需要一并决定：`iar logs` 回退提示、`agent_runner` 的托管进程日志目录（`[agent_runner.console].process_log_dir`）、以及派生项目里已经写了 `LOG_DIR` 的 `.env` 是否要迁移。
+
+## 2026-09-30 14:53 · keda 日志升级（P1/P2）暂时不做
+
+> 那么 当下keda 的日志 有什么修改建议
+
+> 继续， 然后其他的几个可以记录到文档里面，标注暂时不做
+
+**AI 派生背景**（本次会话对 keda 日志做了一次对照体检，结论与依据如下；P0 已整理为 `tasks/pending/P0-BUG-20260930-145323-logging-config-robustness.md`，以下为**暂不做**的其余项）：
+
+- **状态**：以下均为"已识别、暂不做"，不是缺陷修复（P0 那三条是缺陷）。启动前应先确认是否仍有需求，并注意它们会与 P0 建立的 `daily_log_path()` 与 handler 私有标记约定发生关系。
+- **P1-关联键（不做）**：给每个 Issue/run 一个稳定 ID 注入日志 `extra`，让 app 日志与 SQLite 生命周期账本（`console_store.py` 的 `prd_lifecycle_runs.run_id`）能对上。现状是两套线（纯文本 app 日志 / 结构化账本）**无共同关联键**，只能靠时间戳人肉对齐。落点：`agent_runner_output_routing.py` 的 context manager 天然是注入点。
+- **P1-结构化输出（不做）**：stdout 保留人类可读，文件/独立 sink 加 JSON lines 双通道。现状无 structlog/loguru/JSON formatter。
+- **P1-logger 惯例统一（不做）**：`logging.getLogger(__name__)`（约 90 个模块）与 infra/engines 的共享 `logger` 单例两套惯例并存。建议保留标准 `getLogger(__name__)`，把单例降级为薄封装。
+- **P1-线程过滤器加固（不做）**：`output_routing.py` 的 `_ThreadLogFilter` 按线程号分流，在"一线程一 Issue"假设下工作，线程池/异步一上来就失真；中期应改为按 `run_id` 的 `contextvar` 过滤。
+- **P2-Model-visible means logged（不做）**：DSH 风格的第一性约束——组装模型请求的函数出口加断言，确保 prompt/messages 已落账本或轨迹文件。起步一条 `assert` 即可。
+- **P2-访问日志（不做）**：uvicorn 未开 `--access-log`（`main.py:19` / `start.sh:9`），HTTP 层无应用级日志；至少显式配置并接到同一格式。
+- **P2-事件下沉（不做）**：生命周期事件现在只有 phase 级（`agent_runner_lifecycle.py:58`），可逐步补 `step/*` / `tool/*` 细粒度事件，先覆盖最长、最易出问题的执行段。
+- **背景参照（2026-09-30 会话）**：以上判断对照了 DeepSeek Harness（`dsh`，2026-08 Developer Preview）的日志观——Session 是其 7 个核心包之一、append-only 可重放、每步都是可订阅事件点、"Model-visible means logged" 由运行时不变量强制。keda 已有账本这只脚接近该设计，但 app 日志仍停在"运维输出"形态，两条线未打通。
