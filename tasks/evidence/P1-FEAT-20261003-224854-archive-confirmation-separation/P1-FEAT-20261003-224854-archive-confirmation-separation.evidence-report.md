@@ -1,26 +1,35 @@
 # 证据报告：归档与确认语义分离——执行侧完成即归档、人工验收独立记录
 
-> PRD：`tasks/pending/P1-FEAT-20261003-224854-archive-confirmation-separation.md`，判据以 PRD §7.6 为准。
+> PRD：`tasks/archive/P1-FEAT-20261003-224854-archive-confirmation-separation.md`（归档这一轮从 `tasks/pending/` 移入），判据以 PRD §7.6 为准。
 > 同目录的 `….verification-plan.md` 说明怎么跑。
 > 原始日志放在同目录的 `raw/` 下。`.gitignore` 规定它们只留在本机、不进提交。下文引用的记录都从这些日志原样摘出。
 >
-> **独立 verifier 本轮没有结论。** 第 1 轮复核中途被中断，用户 2026-10-04 决定推迟到归档那一轮再跑，结论届时写入同目录的 `….verifier-report.md`。因此本报告目前只是**执行者自证**，PRD 里一项都还没勾。
+> **代码已随 ZataZhang/keda#185 合入 main（`c2fcc4b5`），本报告服务于随后的归档这一轮。** 归档这一轮在 main 上、用本机已安装的 v5 skill 复跑了全部验证，见「归档这一轮：已安装 v5 复跑」一节。
+>
+> **独立 verifier 结论：`PASS`。** 这是归档这一轮的第 1 轮（kimi）；上一次的第 1 轮中途被中断、没有结论，不计数。报告在同目录的 `….verifier-report.md`：无 BLOCKER、无 SECURITY，3 条 NON-BLOCKING 都是本报告已披露的事项。之后 PRD 勾选了 29 项执行侧条目，横幅改为 🧍 待人工验收，并移入 `tasks/archive/`。Human-Confirmed 的 3 项等你回答，汇总在同目录的 `human-review-checklist.md`。
 
 ## 人审导航
 
-你只需要看 PRD §9.1 的两项：rv-1 和 rv-5。两份记录的原文已经嵌在下文，不用另开文件。想看原始日志的话，下表里的命令可以直接执行。
+你只需要看 PRD §9.1 的两项：rv-1 和 rv-5。两份记录的原文已经嵌在下文，不用另开文件。想看原始日志的话，下表里的命令可以直接执行。表中原始日志是归档这一轮用本机已安装 v5 复跑的那份；首轮经 `IAR_PRD_SKILL_PATH` 跑的同名日志在 `raw/` 下，记录逐字相同，只差时间戳。
+
+要你回答的 3 项 Human-Confirmed，连同每项的 PRD 原文、证据和回复格式，汇总在同目录的 `human-review-checklist.md`。可以这样打开：
+
+```bash
+cd /Users/zata/code/keda-worktrees/feat/archive-confirmation-separation && just prd review tasks/archive/P1-FEAT-20261003-224854-archive-confirmation-separation.md
+```
 
 | # | 看什么 | 打开方式 | 逐项期望值 | 状态 |
 |---|---|---|---|---|
-| 1 | rv-1：PRD 只剩人审空框、横幅为 🧍，交付时就进了 archive，空框和横幅都原样保留 | 本报告「rv-1：交付前后的真实 git 记录」一节；原始日志：`open "/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation/tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/raw/rv-1-delivery-archives-awaiting-human.log"` | ① after 段的 `git status --short` 为 `R  tasks/pending/example.md -> tasks/archive/example.md`<br>② `ls -A tasks/pending` 为 `(empty)`<br>③ 归档后的横幅行以 `> 🧍 **验收状态**：待人工验收` 开头<br>④ `### Human-Confirmed` 下仍是 `- [ ] decision 1: answered by a human` | ✅ 4 passed |
-| 2 | rv-5：自动合并遇到已归档、人审未答的 PR，只会"等人验收"；人回答后才继续 | 本报告「rv-5：自动合并两轮记录」一节；原始日志：`open "/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation/tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/raw/rv-5-merge-queue-hold.log"` | ① 第一轮 `outcomes=['skipped_human_review']`<br>② github calls 里没有 `merge_pull_request`<br>③ `process calls: []`<br>④ 第二轮前，PRD 横幅为 ✅、人审项为 `[x]`<br>⑤ 第二轮 `outcomes=['merged']`，process calls 含 `git rebase origin/main` | ✅ 6 passed |
+| 1 | rv-1：PRD 只剩人审空框、横幅为 🧍，交付时就进了 archive，空框和横幅都原样保留 | 本报告「rv-1：交付前后的真实 git 记录」一节；原始日志：`open "/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation/tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/raw/installed-v5/rv-1-delivery-archives-awaiting-human.log"` | ① after 段的 `git status --short` 为 `R  tasks/pending/example.md -> tasks/archive/example.md`<br>② `ls -A tasks/pending` 为 `(empty)`<br>③ 归档后的横幅行以 `> 🧍 **验收状态**：待人工验收` 开头<br>④ `### Human-Confirmed` 下仍是 `- [ ] decision 1: answered by a human` | ✅ 4 passed |
+| 2 | rv-5：自动合并遇到已归档、人审未答的 PR，只会"等人验收"；人回答后才继续 | 本报告「rv-5：自动合并两轮记录」一节；原始日志：`open "/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation/tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/raw/installed-v5/rv-5-merge-queue-hold.log"` | ① 第一轮 `outcomes=['skipped_human_review']`<br>② github calls 里没有 `merge_pull_request`<br>③ `process calls: []`<br>④ 第二轮前，PRD 横幅为 ✅、人审项为 `[x]`<br>⑤ 第二轮 `outcomes=['merged']`，process calls 含 `git rebase origin/main` | ✅ 6 passed |
 | 3 | 负控：同一批用例在未修改的源码上是红的 | 本报告「负控与判别矩阵」一节；原始日志：`open "/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation/tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/raw/negative-control-rv1-rv5.log"` 与 `open "/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation/tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/raw/baseline-discrimination.log"` | ① 实现前红跑结果为 `2 failed`<br>② rv-1 读归档文件时报 `FileNotFoundError`<br>③ rv-5 的断言 `['merged'] == ['skipped_human_review']` 失败<br>④ 判别矩阵为 `27 failed, 123 passed`：应变的 27 条全红，应保持不变的全绿 | ✅ |
-| 4 | PR 与 CI | PR：<https://github.com/ZataZhang/keda/pulls?q=is%3Apr+head%3Afeat%2Farchive-confirmation-separation><br>CI：<https://github.com/ZataZhang/keda/actions?query=branch%3Afeat%2Farchive-confirmation-separation> | ① PR 叠在 ZataZhang/keda#184 之上（#184 又叠在 ZataZhang/keda#183 之上）<br>② ZataZhang/zata-codes-template#27 合并前，CI 有 8 个横幅用例**按设计失败**：CI 从模板 main 安装 skill，当前仍是 v4。其余用例全绿 | ⏳ 等 (b) |
+| 4 | PR 与 CI | 代码 PR：ZataZhang/keda#185，已以 `c2fcc4b5` squash 合入 main<br>main 上 `c2fcc4b5` 的 CI：<https://github.com/ZataZhang/keda/actions/runs/37188292685><br>归档这一轮的 PR：<https://github.com/ZataZhang/keda/pulls?q=is%3Apr+head%3Adocs%2Farchive-confirmation-separation><br>它的 CI：<https://github.com/ZataZhang/keda/actions?query=branch%3Adocs%2Farchive-confirmation-separation> | ① main 上 `c2fcc4b5` 的 push CI 全绿，含 Validate Template<br>② #185 在 PR 上最后一次 CI 恰好红 8 个横幅用例：当时模板 ZataZhang/zata-codes-template#27 还没合并，CI 装的 skill 仍是 v4，**按设计失败**<br>③ 归档这一轮的 PR 只改 delivery-record 路径，CI 在含归档提交的 head 上重跑 | ✅ main 的 CI；⏳ 归档 PR 的 CI 见链接 |
+| 5 | 独立 verifier | `open "/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation/tasks/evidence/P1-FEAT-20261003-224854-archive-confirmation-separation/P1-FEAT-20261003-224854-archive-confirmation-separation.verifier-report.md"` | ① 首行为 `PASS`<br>② 没有 `## BLOCKER` 与 `## SECURITY` 小节<br>③ `## NON-BLOCKING` 下 3 条：testmon 档的 `no tests ran`、首轮日志经 `IAR_PRD_SKILL_PATH` 收集、归档 PR 的 CI 当时仍为 ⏳。本报告都已披露 | ✅ PASS（归档这一轮第 1 轮，kimi） |
 
-自己复跑 rv-1、rv-5 的命令（打印的记录与下文一致）：
+自己复跑 rv-1、rv-5 的命令（打印的记录与下文一致）。本机已安装 v5，不用再设 `IAR_PRD_SKILL_PATH`；在仍装 v4 的机器上复跑，需要在命令前加 `IAR_PRD_SKILL_PATH=<v5 的 SKILL.md>`：
 
 ```bash
-cd /Users/zata/code/keda-worktrees/feat/archive-confirmation-separation && IAR_PRD_SKILL_PATH=/Users/zata/code/zata_code_template/skills/prd/SKILL.md .venv/bin/python -m pytest -o addopts='' -p no:cacheprovider --no-header -v -rP tests/test_agent_runner_prd_delivery.py::test_delivery_archives_prd_awaiting_human_review_real_git tests/test_agent_runner_merge_queue.py::test_archived_prd_awaiting_human_holds_until_the_human_answers
+cd /Users/zata/code/keda-worktrees/feat/archive-confirmation-separation && .venv/bin/python -m pytest -o addopts='' -p no:cacheprovider --no-header -v -rP tests/test_agent_runner_prd_delivery.py::test_delivery_archives_prd_awaiting_human_review_real_git tests/test_agent_runner_merge_queue.py::test_archived_prd_awaiting_human_holds_until_the_human_answers
 ```
 
 **已替你核对过的内容**
@@ -38,20 +47,24 @@ cd /Users/zata/code/keda-worktrees/feat/archive-confirmation-separation && IAR_P
   - ⬜ 永远不可归档。
 - **锁定契约未变。** PR 正文的 marker 与小节标题逐字未变；`DeliveryGateFailureKind` 只新增了一个成员。
 - **门禁全部通过。**
-  - 全量 pytest（v5 skill）：`2786 passed, 1 skipped`。
+  - 全量 pytest：首轮（`IAR_PRD_SKILL_PATH` 指向 v5）与归档这一轮（本机已安装 v5、不设该变量）都是 `2786 passed, 1 skipped`。
   - 架构守卫、ruff、`mkdocs build --strict` 通过。
   - 本次触及文件的行数上限通过。
+  - 归档这一轮的 `just test` 与 `just lint --repo` 通过。
   - 没有依赖、schema 或前端改动。
-- **证据绑定同一棵最终代码树**，见「绑定最终树」一节。证据收集完之后，`src/`、`tests/`、`docs/`、`hooks/` 都没有再改。
+- **证据绑定同一棵最终代码树**，见「绑定最终树」一节。证据收集完之后，`src/`、`tests/`、`docs/`、`hooks/` 都没有再改；合入 main 后的 `c2fcc4b5` 仍是这棵树。
+- **§8 Notes (a)–(c) 都已完成**，合并顺序与规定一致，见「归档这一轮：已安装 v5 复跑」一节。
+- **独立 verifier 给出 `PASS`。** 它独立复算了 record-excluded tree，核对了 rv-1、rv-5 的记录、负控、Drift Guard 和全量结果，还在 GitHub 上确认了 main 的 CI 为绿。
+- **归档后的 PRD 能过 keda 自己的门禁。**
+  - PRD 技能的归档检查 `check_prd_acceptance_checklist.py --check-provided --archive-ready` 输出 `PASS`。
+  - keda 自己的发布前检查 `assert_prd_archived_for_publish` 也放行这份 PRD。
+  - 它读到的状态：横幅为 `awaiting_human`，执行侧未勾 0 项，人审空框 3 项。按 FR-5，自动合并队列会对它停在"等人验收"。
+  - 见「归档这一轮：已安装 v5 复跑」。
 
-**还没做完、需要你推进的**（详见「尚未完成」一节）：
+**还没做完的**（都要你来，详见「勾选与归档」一节）：
 
-1. 按 §8 Notes 的顺序合并：先 ZataZhang/keda#183，再 ZataZhang/zata-codes-template#27，再 ZataZhang/keda#184。
-2. 执行 `iar init`，安装 v5 skill。
-3. 在不设 `IAR_PRD_SKILL_PATH` 的环境下复跑同一批命令。
-4. 运行独立 verifier，拿到 PASS。
-5. 勾选证据充分支持的执行侧条目（本轮一项未勾），在本 PR 里把 PRD 带着 🧍 归档。
-6. 最后合并本 PR。
+1. 合并归档这一轮的 PR。PR 正文带"合并即接受"声明：合并即表示接受正文列出的两项决策与 §9.1 结果，并授权之后补记验收记录。
+2. 回答 Human-Confirmed 的 3 项，回复格式见 `human-review-checklist.md`。之后只回填验收记录：勾选这 3 项，横幅改为 ✅ 已验收，追加 Change Log。
 
 ## 绑定最终树
 
@@ -68,7 +81,9 @@ cd /Users/zata/code/keda-worktrees/feat/archive-confirmation-separation && tmp_i
 
 收集证据时，PRD 与证据目录都还没被跟踪，所以这个值就是暂存区的 `git write-tree`。
 
-补充记录 4 棵代码子树的 id。提交后 `git rev-parse HEAD:src` 等命令的结果必须与下表逐一相等：
+归档这一轮在 main 的 `c2fcc4b5`（ZataZhang/keda#185 的 squash 合并）上用上面的命令复算，结果仍是 `81b833554c9c8be9481f21fa7d80a88a2c204468`。`c2fcc4b5` 的根 tree `7738abeca269227209dc3a33c0ecc5d70b9b955f` 也与原 PR head `a59ddd16` 的根 tree 相同：squash 只换了提交，没有换内容。
+
+补充记录 4 棵代码子树的 id。提交后 `git rev-parse HEAD:src` 等命令的结果必须与下表逐一相等（`c2fcc4b5` 上已核对）：
 
 | 子树 | 最终 id（全部证据所在的树） | base `1b8afed9` 上的 id |
 |---|---|---|
@@ -77,9 +92,55 @@ cd /Users/zata/code/keda-worktrees/feat/archive-confirmation-separation && tmp_i
 | `docs/` | `dd1b2326b459c2a4619051ceb61f94c3a18c79a8` | `19083c03b7d61a8216c48c5921d90515ae7e4d4c` |
 | `hooks/` | `540b06dc0c27f0f93259dbbd2c93c6389b3c7023` | `6f18c7c09ad28bc579e0f51a10b6b8dfacab2e55` |
 
-- **base** 是 `1b8afed9c0da6b7128ea346e9363b9c38a7e4513`，即 ZataZhang/keda#184 的 head。它的 `src/` 与 `main`（`b14573b4`）只差 `prd_machine_contract.py` 一行，即 §8 Notes (a)。本次改动的 8 个模块在 base 上与 `main` 逐字相同。
-- **被测 skill** 是模板仓 `skills/prd/SKILL.md` @ `2bf2de8`（`Machine-Contract-Version: 5`），即 ZataZhang/zata-codes-template#27 的 head。这份工作副本与该提交逐字一致（`prd_contract.py` 的 sha256 相同）。它经 `IAR_PRD_SKILL_PATH` 指定，测试照样执行真实的 `prd_contract.py --json`。
+- **base** 是 `1b8afed9c0da6b7128ea346e9363b9c38a7e4513`，即 ZataZhang/keda#184 的 head。收集证据时，它的 `src/` 与当时的 `main`（`b14573b4`）只差 `prd_machine_contract.py` 一行，即 §8 Notes (a)。本次改动的 8 个模块在 base 上与当时的 `main` 逐字相同。#184 之后以 `ed30c170` squash 合入 main，tree 与 `1b8afed9` 相同（`74fc66ee87ae46b924d8b667808a7c3fb482218c`），所以上表 base 一列同样是 `ed30c170` 上的 id。
+- **被测 skill**，首轮是模板仓 `skills/prd/SKILL.md` @ `2bf2de8`（`Machine-Contract-Version: 5`），即 ZataZhang/zata-codes-template#27 的 head。这份工作副本与该提交逐字一致（`prd_contract.py` 的 sha256 相同）。它经 `IAR_PRD_SKILL_PATH` 指定，测试照样执行真实的 `prd_contract.py --json`。归档这一轮用本机已安装的 `~/.iar/skills/prd/`，与模板 main（`2646b48d`）的 `skills/prd` 逐字相同，不设 `IAR_PRD_SKILL_PATH`。
 - **每份原始日志的首行**都写有当次运行的 `src/` 与 `tests/` 子树 id，并标明暂存区与工作区一致。
+
+## 归档这一轮：已安装 v5 复跑
+
+首轮证据是在本机仍装 v4 skill 时收集的，靠 `IAR_PRD_SKILL_PATH` 指向模板的 v5。归档这一轮在 main 上、用本机已安装的 v5、不设该变量，把同一批验证全部重跑了一遍（2026-10-04）。
+
+**环境**
+
+| 项 | 值 |
+|---|---|
+| worktree | 同首轮：`/Users/zata/code/keda-worktrees/feat/archive-confirmation-separation` |
+| 分支 | `docs/archive-confirmation-separation`，从 main 的 `c2fcc4b5` 开出。复跑时 HEAD 与 `zata/main` 相同，工作区干净 |
+| 根 tree / record-excluded tree | `7738abec…` / `81b83355…`，与首轮证据所在的树相同 |
+| PRD skill | 本机已安装的 `/Users/zata/.iar/skills/prd/SKILL.md`，`Machine-Contract-Version: 5`，`resolve_prd_skill_path()` 解析到的就是它。与模板 main `2646b48d` 的 `skills/prd` 逐字相同（`diff -rq` 无差异） |
+| `IAR_PRD_SKILL_PATH` | 未设置，每份日志首行都写明 |
+
+安装方式：本机 8 个 skill 目录都用 keda 的 `install_remote_template_skills(force=True)` 装了模板 main 的 skill，与 `iar init` 装的是同一份，旧版本已备份。没有直接跑 `iar init`：本机 `.iar.toml` 有定制，`iar init` 会拒绝，加 `--force` 又会覆盖它。
+
+**§8 Notes (a)–(d) 的实际顺序**（2026-10-04，UTC）
+
+| 步骤 | PR | 合并提交 | 合并时间 |
+|---|---|---|---|
+| (a) 契约版本 `(3, 4)` → `(3, 4, 5)` | ZataZhang/keda#183 | `bd735e85` | 04:29:11 |
+| (b) 模板 PRD skill v5 | ZataZhang/zata-codes-template#27 | `a14654ed` | 08:10:46 |
+| (c) 同步模板清单钩子 | ZataZhang/keda#184 | `ed30c170` | 08:13:03 |
+| (d) 本 PRD 的代码 | ZataZhang/keda#185 | `c2fcc4b5` | 08:14:46 |
+
+(c) 的后半句"重新执行 `iar init` 安装 v5 skill"，在本机是 #185 合并之后才做的，早于归档这一轮的复跑与归档提交。它只决定本机 daemon 与本机测试读到哪份 skill。CI 每次从模板 main 安装 skill，而 #27 先于 #185 合并，所以 main 上 `c2fcc4b5` 的 CI 用的已经是 v5：8 个横幅用例在 v4 下必然失败，它们在那次 CI 里是绿的。
+
+**复跑结果**（日志都在 `raw/installed-v5/` 下）
+
+| 内容 | 结果 | 日志 |
+|---|---|---|
+| rv-1 … rv-7 与 FR-6 的定向命令，与「Oracle 结果」是同一批 | 依次 4 / 1 / 9 / 3 / 6 / 29 / 5 / 11 passed，都是 exit 0，与首轮逐条相同。rv-1、rv-5、rv-7 的 `-rP` 记录与首轮逐字相同，只差日志时间戳 | 与首轮同名，如 `rv-1-delivery-archives-awaiting-human.log` |
+| 全量 pytest：`env -u IAR_PRD_SKILL_PATH uv run pytest -o addopts='' -p no:cacheprovider tests/ -q -rfE` | `2786 passed, 1 skipped in 165.84s`，exit 0。首轮在本机 v4 下按设计失败的 8 个横幅用例全绿 | `full-suite.log` |
+| Executor Drift Guard 10 行 | 全部 ✓。第 3 行由首轮的 ✗ 变为 ✓ | `drift-guard.log` |
+| 静态门禁：架构守卫、ruff 0.7.4、`mkdocs build --strict`、依赖面（改为对 `ed30c170` 求 diff） | 全部通过，结果与首轮相同 | `static-gates.log` |
+| `just test` | exit 0，详见「提交门禁」 | `commit-gate-just-test.log` |
+| `just lint --repo` | exit 0，详见「提交门禁」 | `lint-repo.log` |
+| 独立 verifier 第 1 轮（kimi，只读；verifier 运行前后工作区一致，只多出它写的报告） | `PASS`，无 BLOCKER、无 SECURITY，3 条 NON-BLOCKING | 同目录的 `….verifier-report.md`（进提交） |
+| 勾选与归档之后，PRD 技能的归档检查：`.venv/bin/python ~/.iar/skills/prd/scripts/check_prd_acceptance_checklist.py --check-provided --archive-ready tasks/archive/<prd>.md` | `PASS`。`prd_contract.py --json` 读到 `acceptance_status=awaiting_human`、29 项 `[x]`、2 项 `[~]`、执行侧未勾 0 项、人审空框 3 项 | 命令可复跑，结果见 PR 正文「门禁」一节 |
+| 勾选与归档之后，keda 自己的门禁读归档后的本 PRD：Issue 正文写 pending 路径 → `resolve_prd_worktree_path` → `parse_prd_checklist` → `assert_prd_archived_for_publish`，都是只读调用 | 定位到 `tasks/archive/…`，`is_prd_archive_path` 为真；`awaiting_human`，执行侧未勾 0 项，人审空框 3 项，`human_pending_items` 3 项；发布前检查放行，没有异常。没有实际跑合并队列：按 FR-5，`human_pending_items` 非空时它会输出 `skipped_human_review` | `archive-dogfood.log` |
+
+**CI**
+
+- ZataZhang/keda#185 在 PR 上的最后一次 CI（Validate Template，08:01–08:03 UTC，run `37187568255`）结果是 `8 failed, 2778 passed, 1 skipped`。失败的 8 条正是横幅用例，失败信息都是 ``the prd skill used by this test run does not report `acceptance_status` (Machine Contract < 5); …``：当时 #27 还没合并，CI 装的是 v4。
+- #27 合并后，main 上 `c2fcc4b5` 的 push CI（run `37188292685`，08:14:49 UTC 创建）全绿，包括 Validate Template 与 Frontend Build。同一提交的 Install smoke（run `37188292686`）除了按条件跳过的 public PyPI 一项，其余全部成功。
 
 ## Oracle 结果
 
@@ -94,17 +155,22 @@ cd /Users/zata/code/keda-worktrees/feat/archive-confirmation-separation && tmp_i
 | rv-7 | R1 | verifier | 第一组：真实 git，`git status --porcelain` 恰为一条 rename 且字节相同。第二组：在测试边界把 `parse_prd_contract` 打桩成去掉 `acceptance_status` / `human_unchecked` 的 v4 形状，横幅为 ⬜ 也照常归档。第三组：`publish_changes(require_prd_archived=False)` 参数化 3 例（与 rv-4 同一组情形）：`git add` 与 `git mv` 都没有发出，PRD 留在原处、内容逐字不变，推送照常发出 | 5 passed | `raw/rv-7-compat.log` |
 | FR-6 | — | verifier | `tests/test_agent_runner_prompt_contract.py` 整文件，包括新增的提示词语义断言与旧措辞负断言 | 11 passed | `raw/fr-6-prompt-contract.log` |
 
+上表的结果与日志是首轮的。归档这一轮用本机已安装的 v5 重跑，结果逐条相同，日志在 `raw/installed-v5/` 下同名文件，见「归档这一轮：已安装 v5 复跑」。
+
 各 oracle 的定向命令统一为：
 
 ```bash
+# 首轮：本机当时仍装 v4，经 IAR_PRD_SKILL_PATH 指向模板的 v5
 IAR_PRD_SKILL_PATH=/Users/zata/code/zata_code_template/skills/prd/SKILL.md .venv/bin/python -m pytest -o addopts='' -p no:cacheprovider --no-header -v <targets>
+# 归档这一轮：本机已安装 v5，不设 IAR_PRD_SKILL_PATH
+.venv/bin/python -m pytest -o addopts='' -p no:cacheprovider --no-header -v <targets>
 ```
 
 `-o addopts=''` 关掉仓库默认的 `--testmon`，保证每条用例真的执行，不被增量选择跳过。
 
 ## rv-1：交付前后的真实 git 记录
 
-摘自 `raw/rv-1-delivery-archives-awaiting-human.log`，`-rP` 输出原文。fixture PRD 的执行侧条目是 `[x]` 与 `[~]`，Human-Confirmed 组有 1 个 `[ ]`，横幅为 🧍：
+摘自 `raw/rv-1-delivery-archives-awaiting-human.log`，`-rP` 输出原文；归档这一轮的 `raw/installed-v5/` 同名日志与它逐字相同。fixture PRD 的执行侧条目是 `[x]` 与 `[~]`，Human-Confirmed 组有 1 个 `[ ]`，横幅为 🧍：
 
 ```text
 == before delivery ==
@@ -139,7 +205,7 @@ example.md
 
 ## rv-5：自动合并两轮记录
 
-摘自 `raw/rv-5-merge-queue-hold.log`，`-rP` 输出原文。fixture 是一条已带 `validation/verifier-passed`、签核已全勾的 PR，Issue worktree 里只有 `tasks/archive/<prd>.md`：
+摘自 `raw/rv-5-merge-queue-hold.log`，`-rP` 输出原文；归档这一轮的 `raw/installed-v5/` 同名日志与它只差日志时间戳。fixture 是一条已带 `validation/verifier-passed`、签核已全勾的 PR，Issue worktree 里只有 `tasks/archive/<prd>.md`：
 
 ```text
 PRD before round 1:
@@ -262,8 +328,9 @@ process calls: [..., 'git fetch origin main', 'git rebase origin/main', ...]
 
 | 运行 | 命令 | 结果 | 原始日志 |
 |---|---|---|---|
-| v5 skill | `IAR_PRD_SKILL_PATH=<v5> uv run pytest -o addopts='' -p no:cacheprovider tests/ -q` | `2786 passed, 1 skipped in 152.06s`，exit 0 | `raw/full-suite-v5.log` |
-| 本机已安装的 v4 skill（披露用） | 同上，但用 `env -u IAR_PRD_SKILL_PATH` | `8 failed, 2778 passed, 1 skipped` | `raw/full-suite-installed-v4.log`、`raw/installed-v4-failure-reasons.log` |
+| 首轮，v5 skill | `IAR_PRD_SKILL_PATH=<v5> uv run pytest -o addopts='' -p no:cacheprovider tests/ -q` | `2786 passed, 1 skipped in 152.06s`，exit 0 | `raw/full-suite-v5.log` |
+| 首轮，本机当时安装的 v4 skill（披露用） | 同上，但用 `env -u IAR_PRD_SKILL_PATH` | `8 failed, 2778 passed, 1 skipped` | `raw/full-suite-installed-v4.log`、`raw/installed-v4-failure-reasons.log` |
+| 归档这一轮，本机已安装的 v5 skill（main `c2fcc4b5`） | `env -u IAR_PRD_SKILL_PATH uv run pytest -o addopts='' -p no:cacheprovider tests/ -q -rfE` | `2786 passed, 1 skipped in 165.84s`，exit 0 | `raw/installed-v5/full-suite.log` |
 
 v4 下失败的 8 条全部是横幅用例：
 
@@ -279,7 +346,7 @@ the prd skill used by this test run does not report `acceptance_status` (Machine
 install the v5 prd skill (`iar init`) or point IAR_PRD_SKILL_PATH at it before running banner assertions
 ```
 
-跳过会让 CI 在横幅断言一条没跑的情况下仍然显示全绿；失败则把"环境还没升级"摆到明面上。这也是本 PR 在 ZataZhang/zata-codes-template#27 合并前 CI 会红这 8 条的原因。
+跳过会让 CI 在横幅断言一条没跑的情况下仍然显示全绿；失败则把"环境还没升级"摆到明面上。这也是代码 PR 在 ZataZhang/zata-codes-template#27 合并前 CI 会红这 8 条的原因。实际情况与此一致：ZataZhang/keda#185 在 PR 上的最后一次 CI 恰好红这 8 条，#27 合并后 main 上的 CI 全绿，见「归档这一轮：已安装 v5 复跑」。
 
 ## 发版窗口检查
 
@@ -301,15 +368,17 @@ install the v5 prd skill (`iar init`) or point IAR_PRD_SKILL_PATH at it before r
 
 反过来，如果先合 #27、`main` 仍是 `(3, 4)`，CI 安装 v5 后会在 PRD 契约预检处失败。这就是 §8 Notes 要求 (a) 先于 (b) 的原因。
 
+实际顺序与此一致，见「归档这一轮：已安装 v5 复跑」：窗口里的 `main` 依次是 `bd735e85` 与 `ed30c170`，后者是 #184 的 squash 合并，tree 与 `1b8afed9` 相同。`ed30c170` 的 push CI 被取消、没有结论，这一状态的"绿"由上表 `1b8afed9` 那一行的本地全量证明。窗口在 #185 以 `c2fcc4b5` 合入时结束，`c2fcc4b5` 的 push CI 全绿。
+
 ## Executor Drift Guard
 
-PRD §7.3 的 10 行检查，输出原文见 `raw/drift-guard.log`。
+PRD §7.3 的 10 行检查。首轮输出原文见 `raw/drift-guard.log`；归档这一轮在 `c2fcc4b5` 上、不设 `IAR_PRD_SKILL_PATH` 重跑，输出见 `raw/installed-v5/drift-guard.log`，10 行全部 ✓。下表是归档这一轮的结果，与首轮唯一的不同是第 3 行。
 
 | # | 检查 | 结果 |
 |---|---|---|
 | 1 | 契约版本 | ✓ `SUPPORTED_MACHINE_CONTRACT_VERSIONS: tuple[int, ...] = (3, 4, 5)` |
 | 2 | 清单钩子 | ✓ `HUMAN_CONFIRMED_GROUP_PREFIX = "human-confirmed"`（第 33、179 行） |
-| 3 | 已安装 skill | **✗** `/Users/zata/.iar/skills/prd/SKILL.md` 为 `Machine-Contract-Version: 4`。全部 oracle 用的是模板 `2bf2de8` 的 v5，经 `IAR_PRD_SKILL_PATH` 指定。等 (b) 合并后执行 `iar init` |
+| 3 | 已安装 skill | ✓ `resolve_prd_skill_path()` 解析到 `/Users/zata/.iar/skills/prd/SKILL.md`，其中 `Machine-Contract-Version: 5`，与模板 main `2646b48d` 的 `skills/prd` 逐字相同。首轮时这里是 **✗**：本机还装着 v4，全部 oracle 当时经 `IAR_PRD_SKILL_PATH` 指向模板 `2bf2de8` 的 v5 |
 | 4 | 归档移动唯一 | ✓ 只有 `agent_runner_feedback.py:476`，位于 `ensure_prd_delivery_ready`，目标经 `resolve_prd_archive_path` 计算 |
 | 5 | 旧语义残留 | ✓ 无命中（exit 1） |
 | 6 | hold 复用定位函数 | ✓ 只命中 `resolve_prd_worktree_path`（导入行 45、调用行 409），没有 `pending_prd_path` |
@@ -318,7 +387,7 @@ PRD §7.3 的 10 行检查，输出原文见 `raw/drift-guard.log`。
 | 9 | marker 与标题不变 | ✓ `agent_runner_pr_body_contract.py:40` 的 marker，`:55` 的小节标题 |
 | 10 | 导入无环与行数上限 | ✓ `import backend.core.use_cases.agent_runner_merge_queue` 成功。本次触及的每个 `.py` 都过了 `check_max_file_lines.py --max-lines 1000`，`agent_runner_feedback.py` 为 920 行非空行 |
 
-第 10 行的补充说明：仓库里另有 10 个存量超限文件。它们本次未触及，base 与最终行数逐一相同，清单见 `raw/drift-guard.log` 的 10b 段。
+第 10 行的补充说明：仓库里另有 10 个存量超限文件。它们本次未触及，base 与最终行数逐一相同，清单见 `raw/drift-guard.log` 的 10b 段。归档这一轮对 `ed30c170` 求"本次触及的 `.py`"，同样是 16 个，全部通过。
 
 ## 风险地图对账、对抗自检、锁定契约 diff
 
@@ -375,21 +444,27 @@ PRD §7.3 的 10 行检查，输出原文见 `raw/drift-guard.log`。
 | 依赖 / schema / 前端 | ✓ `git diff --cached --name-only 1b8afed9 -- uv.lock pyproject.toml alembic frontend-admin frontend-public` 为空 | `raw/static-gates.log` |
 | 提交门禁 `just test` / `just lint` | 见下方「提交门禁」 | — |
 
+上表是首轮的结果。归档这一轮在 `c2fcc4b5` 上重跑了同一组门禁，依赖面改为对 `ed30c170` 求 diff，结果相同，见 `raw/installed-v5/static-gates.log`。
+
 </details>
 
 ### 提交门禁
 
 | 门禁 | 结果 | 证据 |
 |---|---|---|
-| `IAR_PRD_SKILL_PATH=<v5> just test`。本地档先跑 `just lint --full`（包括对未跟踪的本 PRD 与报告执行 pre-commit），再跑 `uv run pytest tests/ -q --no-header`。仓库 addopts 带 `--testmon`，但本 worktree 运行前没有 `.testmondata`，所以等于全量 | ✓ `✅ Lint passed. Proceeding to tests...`；`2786 passed, 1 skipped in 161.71s`，exit 0。用例数与「全量测试」的 v5 全量相同 | `raw/commit-gate-just-test.log` |
-| 写入的提交标记 | `.last_tested_commit` = `feat/archive-confirmation-separation` @ `1b8afed9…`，有效 tree `72b615e5…`。有效 tree 只含会进入测试的文件，`.md`、`.log` 不计入，所以之后改报告与 PRD 不会让标记失效 | 同上 |
-| `just lint`（暂存区模式，与提交钩子是同一组 hook） | 在最终 `git add -A` 之后、提交之前执行；提交钩子再跑一遍同一组 hook。结果写在 PR 正文「门禁」一节 | — |
+| 首轮：`IAR_PRD_SKILL_PATH=<v5> just test`。本地档先跑 `just lint --full`（包括对未跟踪的本 PRD 与报告执行 pre-commit），再跑 `uv run pytest tests/ -q --no-header`。仓库 addopts 带 `--testmon`，但本 worktree 运行前没有 `.testmondata`，所以等于全量 | ✓ `✅ Lint passed. Proceeding to tests...`；`2786 passed, 1 skipped in 161.71s`，exit 0。用例数与「全量测试」的 v5 全量相同 | `raw/commit-gate-just-test.log` |
+| 首轮写入的提交标记 | `.last_tested_commit` = `feat/archive-confirmation-separation` @ `1b8afed9…`，有效 tree `72b615e5…`。有效 tree 只含会进入测试的文件，`.md`、`.log` 不计入，所以之后改报告与 PRD 不会让标记失效 | 同上 |
+| 归档这一轮：`just test`，不设 `IAR_PRD_SKILL_PATH`，本机已安装 v5 | ✓ exit 0。`just lint --full` 完整重跑并通过（`✅ Lint passed`）。随后的本地档 pytest 按 testmon 增量选择：代码树与上一次 testmon 记录相同，所以 `no tests ran`。**实质的全量覆盖由「全量测试」里关掉 testmon 的那次运行提供**（`2786 passed`）。标记写入 `docs/archive-confirmation-separation` @ `c2fcc4b5` | `raw/installed-v5/commit-gate-just-test.log` |
+| 归档这一轮：`just lint --repo`（testing.md 规定归档 PRD 前必跑） | ✓ exit 0。`--full` 部分走上一步刚写入的有效标记；`--reuse` 部分的 jscpd、pylint duplicate-code、架构依赖、规范一致性、行数上限全部 `Passed`；`mkdocs build` 通过 | `raw/installed-v5/lint-repo.log` |
+| 归档这一轮：`just lint`（暂存区模式，与提交钩子是同一组 hook） | ✓ exit 0。在归档提交 `git add` 之后、提交之前执行，不设 `IAR_PRD_SKILL_PATH`。`Check PRD acceptance checklist`、`Archive task markdown files`、`Check just test flag`、`Check guard test modification`、`Check PRD execution lock conflict` 都是 `Passed`，其余是无文件可查的 `Skipped`。提交钩子随后在同一份暂存内容上再跑一遍。暂存区去掉 delivery-record 路径后的 tree 仍是 `81b83355…` | 命令可复跑，结果也写在 PR 正文「门禁」一节 |
 
-这里的 `just test` 同样设了 `IAR_PRD_SKILL_PATH`。在本机已安装 v4 skill 的环境下不设它，会有 8 个横幅用例失败（见「全量测试」）。所以 PRD 里"`just lint` 与 `just test` 通过"这一项留到 `iar init` 之后再勾。
+首轮的 `just test` 设了 `IAR_PRD_SKILL_PATH`：当时本机还装着 v4，不设它会有 8 个横幅用例失败（见「全量测试」）。归档这一轮本机已安装 v5，两个提交门禁都在不设该变量的环境下通过。
 
 ## 交付内容
 
-相对 base `1b8afed9`，共 18 个文件，+930 / −406。另有本 PRD，以及本目录的 2 份 `.md` 报告：证据报告与验证计划。verifier 报告要到归档那一轮才有。
+相对 base `1b8afed9`，共 18 个文件，+930 / −406。另有本 PRD，以及本目录的 2 份 `.md` 报告：证据报告与验证计划。这些改动随 ZataZhang/keda#185 以 `c2fcc4b5` squash 合入 main；相对 `ed30c170` 也是同样的 18 个文件，因为 `ed30c170` 与 `1b8afed9` 的 tree 相同。
+
+归档这一轮的 PR 只改 delivery-record 路径：PRD 的勾选、Final Reconciliation、横幅与 Change Log，PRD 移到 `tasks/archive/`，更新本报告与验证计划，新增 verifier 报告与人工审查清单。
 
 | 文件 | 改动 |
 |---|---|
@@ -416,41 +491,50 @@ PRD §7.3 的 10 行检查，输出原文见 `raw/drift-guard.log`。
   - 失败 Draft PR / 返工 PR 的 PRD 链接指向还不存在的归档路径。
   - 升级时在途 Issue 的复用路径。
 
-## 尚未完成
+## 勾选与归档
 
-**本轮 PRD 一项都没勾。** 横幅保持 ⬜，PRD 留在 `tasks/pending/`；按 v5 规范，⬜ 也涵盖"进行中"。原因有两层：
+**执行侧已全部完成。** 独立 verifier 在归档这一轮的第 1 轮给出 `PASS` 之后，归档提交勾选了 Human-Confirmed 之外的 29 项，每项都写明了证据。它还完成了 §13 Final Reconciliation，把横幅改为 🧍 待人工验收，并把 PRD 从 `tasks/pending/` 移到 `tasks/archive/`。
 
-1. **独立 verifier 还没有结论。** 第 1 轮复核中途被中断，用户 2026-10-04 决定先开 Draft PR，把 verifier 推迟到归档那一轮。没有 verifier `PASS`，执行侧条目一项都不勾。
-2. **另有 8 项本来就要等。** 其中 6 项依赖 (b) 合并和 `iar init`（本机安装的 skill 仍是 v4），2 项只能在归档那一轮做。即使 verifier `PASS`，它们也要等到那时才能勾。
+首轮时 PRD 一项都没勾，因为当时独立 verifier 没有结论：第 1 轮中途被中断，用户 2026-10-04 决定把它推迟到归档这一轮。首轮时另有 8 项要等 (b)、`iar init` 或归档这一轮。其中 6 项由「归档这一轮：已安装 v5 复跑」补齐了证据，见下表标注"归档这一轮"的行；另外 2 项在归档提交里完成。
 
-### 证据已备齐、等 verifier `PASS` 再勾的 21 项
+### verifier `PASS` 后勾选的 27 项
 
 | PRD 小节 | 条目 | 证据在哪 |
 |---|---|---|
 | Architecture | 全部 4 项 | 「Executor Drift Guard」第 4、6、7、10 行；「低风险门禁（折叠）」的架构守卫 |
 | Dependency | 第 1、2 项：没有新依赖；没有数据库、schema 或前端改动 | 「低风险门禁（折叠）」 |
+| Dependency | 第 3 项："§8 Notes (a)–(c) 已在本 PRD 交付前完成"（归档这一轮） | 「归档这一轮：已安装 v5 复跑」的合并顺序表；Drift Guard 前三行全部 ✓，见 `raw/installed-v5/drift-guard.log`。本机安装 v5 晚于 #185 合并、早于归档提交，已在该节披露 |
 | Behavior | rv-1 … rv-7，共 7 项 | 「Oracle 结果」「rv-1：交付前后的真实 git 记录」「rv-5：自动合并两轮记录」 |
 | Frontend | `No frontend impact` 已记录 | PRD §5、§7.2；diff 不含任何前端路径 |
 | Documentation | 全部 2 项 | 「Executor Drift Guard」第 5 行；「低风险门禁（折叠）」的 `mkdocs build --strict` |
+| Validation | 第 1 项："rv-1 … 真实安装的 v5 skill"（归档这一轮） | `raw/installed-v5/rv-1-delivery-archives-awaiting-human.log`、`raw/installed-v5/rv-5-merge-queue-hold.log`，首行均为 `IAR_PRD_SKILL_PATH unset` 与已安装 skill 的 `Machine-Contract-Version: 5` |
 | Validation | 第 2、3 项：负控；最终 tree id | 「负控与判别矩阵」「绑定最终树」 |
+| Validation | 第 4 项："Drift Guard 全部检查符合"（归档这一轮） | `raw/installed-v5/drift-guard.log`，10 行全部 ✓ |
+| Validation | 第 5 项："`uv run pytest -o addopts='' tests/ -q` 全绿"（归档这一轮） | `raw/installed-v5/full-suite.log`：`2786 passed, 1 skipped` |
+| Validation | 第 6 项："`just lint` 与 `just test` 通过"（归档这一轮） | `raw/installed-v5/commit-gate-just-test.log`、`raw/installed-v5/lint-repo.log`，见「提交门禁」 |
 | Delivery Readiness | 第 1、5、6 项：方案落地；打开方式与期望值；人审导航 | 「交付内容」；PRD §9.1；本报告首节 |
+| Delivery Readiness | 第 2 项："无未决回归或上线阻塞项"（归档这一轮） | (b) 已合并；main 上 `c2fcc4b5` 的 CI 全绿；本机已安装 v5 下全量 pytest 全绿 |
 
-### 还要等 (b)、`iar init` 或归档那一轮的 8 项
+### 在归档提交里完成的 2 项
 
-| 条目 | 现状 | 什么时候能勾 |
-|---|---|---|
-| Dependency："§8 Notes (a)–(c) 已在本 PRD 交付前完成" | (a)、(c) 的代码在本分支的祖先里（ZataZhang/keda#183、#184，均未合并）；(b) ZataZhang/zata-codes-template#27 未合并；`iar init` 未重跑；Drift Guard 第 3 行为 ✗ | 三个 PR 合并、`iar init` 之后 |
-| Validation："rv-1 … 真实安装的 v5 skill" | 已在 v5 skill 上跑绿，但用的是 `IAR_PRD_SKILL_PATH`，不是安装件 | `iar init` 后，不设 `IAR_PRD_SKILL_PATH` 复跑 rv-1、rv-5 |
-| Validation："Drift Guard 全部检查符合" | 第 3 行 ✗ | 同上 |
-| Validation："`uv run pytest -o addopts='' tests/ -q` 全绿" | v5 下全绿；本机 v4 下 8 条按设计失败 | 同上 |
-| Validation："`just lint` 与 `just test` 通过" | 设了 `IAR_PRD_SKILL_PATH` 时的结果见「提交门禁」 | 同上 |
-| Delivery Readiness："无未决回归或上线阻塞项" | 上线依赖 (b)，CI 在 #27 合并前红 8 条 | 同上 |
-| Delivery Readiness："完成 §13 Final Reconciliation" | 归档时才做 | 归档那一轮 |
-| Delivery Readiness："完成回复已原样带上呈递表内容" | 归档那一轮的完成回复会带上 | 归档那一轮 |
+| 条目 | 怎么完成 |
+|---|---|
+| Delivery Readiness："完成 §13 Final Reconciliation；按公式设置横幅" | 归档提交填写了 §13 Final Reconciliation，横幅改为 🧍。§7.1、§7.2 补记了实现中新增的 `is_prd_archive_path`，这是本轮唯一的正文修正 |
+| Delivery Readiness："§9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容" | 路径在首轮已回填；归档 PR 正文与归档这一轮的完成回复都原样带上 §9.1 呈递表 |
 
-### 归档那一轮
+### 归档这一轮做了什么
 
-verifier `PASS`、上表前 6 项也都满足之后，在本 PR 分支上追加一个提交：勾选上面两组共 29 项执行侧条目并逐项写明证据，做 Final Reconciliation，把横幅按公式改为 🧍，再把 PRD 移到 `tasks/archive/`。之后由人合并。Human-Confirmed 的 3 项始终由人回答。
+verifier `PASS` 之后，在 `docs/archive-confirmation-separation` 上只做了一个提交：
+
+- 勾选上面两组共 29 项执行侧条目，逐项写明证据；
+- 完成 Final Reconciliation，把横幅按公式改为 🧍；
+- 把 PRD 移到 `tasks/archive/`；
+- 新增 verifier 报告与 `human-review-checklist.md`。
+
+这个提交只改 delivery-record 路径，record-excluded tree 仍是 `81b833554c9c8be9481f21fa7d80a88a2c204468`。之后由人合并。
+
+- Human-Confirmed 的 3 项始终由人回答，执行工具不代勾。
+- Validation 组里的两项 `[~]` 保持不变：独立 verifier 与 PR 证据呈递、PR 上的全量 CI，它们是 runner-owned gate。
 
 ## 残留风险
 
@@ -458,3 +542,4 @@ verifier `PASS`、上表前 6 项也都满足之后，在本 PR 分支上追加�
 - **代勾人审项只靠提示词约束。** 这是既有状况：agent 若把人审项直接勾成 `[x]`，合并队列无法区分是人勾还是 agent 勾。若改写成 `[~]`，会被保守口径拦下。合并时的树比对与补记属于后续 PRD。
 - **合并后的验收补记暂时没有自动化。** 合并带声明的 PR 之后，PRD 会以 🧍 留在 archive，直到有人手动补记（PRD §12）。
 - **合并队列读的是 Issue worktree。** 人在 PR 分支上勾选后，worktree 要同步到最新 head 才能看到。这是既有行为（PRD §12）。
+- **代码先于独立复核合入了 main。** ZataZhang/keda#185 在独立 verifier 给出结论之前就合并了，这是用户 2026-10-04 的决定。归档这一轮的 verifier 审的是 main 上已有的代码，结论为 `PASS`，所以不需要另开代码 PR。这个顺序本身仍是一项流程偏差：在 verifier 给出结论之前，main 上有一段时间的代码没有经过独立复核。
