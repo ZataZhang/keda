@@ -36,7 +36,12 @@ from backend.core.use_cases.run_agent_once import (
 )
 from tests.conftest import FakeProcessRunner
 from tests.support.agent_runner import (
+    ACCEPTED_BANNER,
+    AWAITING_HUMAN_BANNER,
+    NOT_STARTED_BANNER,
+    build_acceptance_prd,
     is_bash_wrapped_verification_call,
+    require_banner_aware_prd_skill,
     write_commit_request,
 )
 
@@ -75,6 +80,8 @@ def _prd_text(*, second_item_checked: bool) -> str:
     return "\n".join(
         [
             "# PRD: Closeout fixture",
+            "",
+            ACCEPTED_BANNER,
             "",
             "## 9. Acceptance Checklist",
             "",
@@ -316,6 +323,51 @@ def test_closeout_layer_is_skipped_when_disabled(
     assert "PRD delivery check failed" in error_info.value.attempt_results[0].detail
     prd_text = (worktree_path / _PRD_RELATIVE_PATH).read_text(encoding="utf-8")
     assert "- [ ] item 2" in prd_text
+
+
+def _rewrite_banner_with_change_log(worktree_path: Path) -> None:
+    """收尾 agent 的合规横幅修复：只把 ⬜ 改成 🧍 并追加一条 Change Log，复选框不动。"""
+    prd_path = worktree_path / _PRD_RELATIVE_PATH
+    prd_text = prd_path.read_text(encoding="utf-8")
+    prd_path.write_text(
+        prd_text.replace(NOT_STARTED_BANNER, AWAITING_HUMAN_BANNER) + _CHANGE_LOG_BLOCK,
+        encoding="utf-8",
+    )
+
+
+def test_banner_mismatch_is_repaired_by_a_banner_only_closeout(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """rv-3 收尾段：横幅不一致进收尾回合，指令只许改横幅并补 Change Log，修好即归档。
+
+    执行侧条目全部完成、人审组 1 个空框、横幅却还是 ⬜：交付门禁抛
+    ``ACCEPTANCE_BANNER_MISMATCH``，收尾 agent 只改横幅，门禁重跑通过后照常归档，
+    人审空框原样留给人。
+    """
+    require_banner_aware_prd_skill()
+    worktree_path = _write_fixture_worktree(tmp_path)
+    (worktree_path / _PRD_RELATIVE_PATH).write_text(
+        build_acceptance_prd(NOT_STARTED_BANNER, human_marks=(" ",)), encoding="utf-8"
+    )
+    fake_runner = _CloseoutScenarioRunner(worktree_path, _rewrite_banner_with_change_log)
+
+    with caplog.at_level(logging.INFO, logger="backend.core.use_cases.agent_runner_closeout"):
+        result = _run_loop(worktree_path, _closeout_config(), fake_runner)
+
+    assert DeliveryGateFailureKind.ACCEPTANCE_BANNER_MISMATCH.is_closeout_eligible
+    assert "kind=acceptance_banner_mismatch" in caplog.text
+    assert len(fake_runner.agent_prompts) == 2
+    closeout_prompt = fake_runner.agent_prompts[1]
+    assert "Finish the delivery closeout" in closeout_prompt
+    assert "the banner state is `not_started` but must be `awaiting_human`" in closeout_prompt
+    assert "Change only that banner line" in closeout_prompt
+    assert "Do not tick, untick, or rewrite any checklist item" in closeout_prompt
+    assert "append one `## Change Log` entry recording the banner change" in closeout_prompt
+    assert result.attempt_results[-1].failure_type == FailureType.SUCCESS
+    archived_text = (worktree_path / "tasks" / "archive" / "example.md").read_text(encoding="utf-8")
+    assert AWAITING_HUMAN_BANNER in archived_text
+    assert "- [ ] decision 1: answered by a human" in archived_text
+    assert not (worktree_path / _PRD_RELATIVE_PATH).exists()
 
 
 def test_visual_evidence_closeout_uses_its_own_timeout() -> None:

@@ -30,7 +30,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from backend.core.use_cases.agent_runner_feedback import extract_prd_path
+from backend.core.use_cases.agent_runner_feedback import (
+    extract_prd_path,
+    resolve_prd_archive_path,
+)
 from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 
 # "合并即接受"声明必须携带的 hidden marker（prompt 教学与校验共用同一常量）。
@@ -47,11 +50,14 @@ _PR_CONTRACT_MARKER_PATTERN = re.compile(
 
 # 确定性正文补锚点时写入的"合并即接受"声明：形态取自 skill 参考文档的 PR body
 # 模板，但只指向 PRD、不内联决策与可见结果清单（那是 agent 撰写正文的职责）。
+# PRD 已在本 PR 里归档（Machine Contract v5），合并授权的是事后补记验收结论，
+# 不是归档。小节标题被合并队列消费方与测试钉住，沿用旧名不改。
 _DETERMINISTIC_ACCEPTANCE_HEADING = "## Human Acceptance And PRD Archive"
 _DETERMINISTIC_ACCEPTANCE_STATEMENT = (
     "Merging this PR means that the merger accepts the human decisions and "
     "human-visible outcomes recorded in the linked PRD and authorizes post-merge "
-    "archival of that PRD, provided the required gates remain green and the "
+    "acceptance recording on that PRD (its Human-Confirmed items are ticked and its "
+    "banner becomes ✅ 已验收), provided the required gates remain green and the "
     "merged Git tree matches the verified tree."
 )
 
@@ -60,7 +66,7 @@ _PUBLISH_CONTRACT_REFERENCE_RELPATH = Path("references") / "pr-evidence-and-merg
 
 # 锚点标识 → 人读含义（标注块与错误信息共用，避免两处文案漂移）。
 _CONTRACT_ANCHOR_DESCRIPTIONS: dict[str, str] = {
-    "prd-link": "body does not reference the Issue's pending PRD path",
+    "prd-link": "body references neither the archived PRD path nor the Issue's pending PRD path",
     "merge-acceptance": (
         "body is missing the `<!-- iar:merge-acceptance version=1 -->` "
         "merge-means-acceptance declaration"
@@ -107,12 +113,14 @@ def build_contract_prompt_prefix(contract_text: str) -> str:
             "",
             "In addition to the instructions below:",
             "1. Include a line `- PRD: <relative prd path>` pointing at the "
-            "pending PRD referenced by the Issue (copy the exact path from the "
-            "Issue body's `PRD path:` anchor).",
+            "archived PRD: the runner archives it inside this PR, so take the file "
+            "name from the Issue body's `PRD path:` anchor and use its "
+            "`tasks/archive/` location.",
             "2. Include the hidden marker `" + MERGE_ACCEPTANCE_MARKER_TEXT + "` "
             "in the body, immediately followed by a sentence stating that "
             "merging this PR constitutes acceptance of the listed human "
-            "decisions and visible outcomes and authorizes post-merge archival.",
+            "decisions and visible outcomes and authorizes post-merge acceptance "
+            "recording on the linked PRD.",
             "3. Never pre-tick the Realistic Validation sign-off checklist; "
             "those items are for human review.",
             "",
@@ -129,14 +137,20 @@ def find_pr_body_contract_violations(pr_body: str, issue_body: str) -> list[str]
     仅当 Issue body 携带 ``PRD path:`` 锚点（即 PRD 交付）时才校验；无 PRD 的
     Issue 返回空列表。当前锚点：
 
-    - ``prd-link``：正文未引用 Issue 指向的 pending PRD 路径。
+    - ``prd-link``：正文既未引用 PRD 的归档路径，也未引用 Issue 指向的 pending
+      路径。PRD 在本 PR 里归档，归档路径是首选写法；pending 路径照样认，存量
+      PR 与人手写的正文不会因此被标注。
     - ``merge-acceptance``：正文缺少 "合并即接受" hidden marker。
     """
     prd_relative_path = extract_prd_path(issue_body)
     if prd_relative_path is None:
         return []
     violations: list[str] = []
-    if prd_relative_path not in pr_body:
+    accepted_prd_paths = [prd_relative_path]
+    archive_relative_path = resolve_prd_archive_path(prd_relative_path)
+    if archive_relative_path is not None:
+        accepted_prd_paths.append(archive_relative_path)
+    if not any(accepted_prd_path in pr_body for accepted_prd_path in accepted_prd_paths):
         violations.append("prd-link")
     if not _MERGE_ACCEPTANCE_MARKER_PATTERN.search(pr_body):
         violations.append("merge-acceptance")
@@ -149,6 +163,8 @@ def append_missing_contract_anchors(pr_body: str, issue_body: str) -> str:
     fallback body 与 ``body_template`` 渲染结果由代码而非 agent 产出，缺锚点
     只能由代码补。只补 PRD 引用与"合并即接受"声明（marker + 指向 PRD 的声明句），
     不内联 PRD 的决策与可见结果清单，避免确定性正文冒充 agent 撰写的证据呈现。
+    PRD 引用写归档路径（PRD 在本 PR 里归档）；Issue 路径不在 ``tasks/pending/``
+    下、换算不出归档路径时，原样写 Issue 路径。
 
     agent 撰写的正文不应经过本函数：agent 无视教学时应由发布端软门标注暴露，
     而不是被静默补齐。
@@ -166,7 +182,8 @@ def append_missing_contract_anchors(pr_body: str, issue_body: str) -> str:
         return pr_body
     anchor_section_lines = [_DETERMINISTIC_ACCEPTANCE_HEADING, ""]
     if "prd-link" in missing_anchors:
-        anchor_section_lines.extend([f"- PRD: {prd_relative_path}", ""])
+        linked_prd_path = resolve_prd_archive_path(prd_relative_path) or prd_relative_path
+        anchor_section_lines.extend([f"- PRD: {linked_prd_path}", ""])
     if "merge-acceptance" in missing_anchors:
         anchor_section_lines.extend(
             [MERGE_ACCEPTANCE_MARKER_TEXT, _DETERMINISTIC_ACCEPTANCE_STATEMENT]

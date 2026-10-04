@@ -44,6 +44,12 @@ class PrdChecklistResult:
         human_confirmed_mentioned: 清单区内是否出现过 ``Human-Confirmed`` 字样（不限定
             书写形式）。``human_confirmed_mentioned`` 为真而 ``human_group_found`` 为假，
             说明分组写法没被识别，调用方据此给出可行动的诊断而不是让 agent 自己猜。
+        human_unchecked_items: ``Human-Confirmed`` 分组里仍是 ``[ ]`` 的空框（不含
+            ``[~]``），与 skill 检查器决定横幅应有状态时的口径一致。v3/v4 skill 不报告
+            该字段，此时为空。
+        acceptance_status: 验收状态横幅的状态（``not_started`` / ``awaiting_human`` /
+            ``accepted``；横幅缺失或认不出时为 ``""``），由 skill 解析。``None`` 表示
+            本机 skill 是 v3/v4、根本不报告横幅，调用方应跳过横幅检查。
     """
 
     section_found: bool
@@ -52,6 +58,8 @@ class PrdChecklistResult:
     human_pending_items: list[tuple[int, str]] = field(default_factory=list)
     human_group_found: bool = False
     human_confirmed_mentioned: bool = False
+    human_unchecked_items: list[tuple[int, str]] = field(default_factory=list)
+    acceptance_status: str | None = None
 
     @property
     def execution_unchecked_items(self) -> list[tuple[int, str]]:
@@ -80,12 +88,14 @@ def parse_prd_checklist(file_content: str) -> PrdChecklistResult:
         file_content: Raw markdown content of the PRD file.
 
     Returns:
-        PrdChecklistResult with section_found and unchecked_items.
+        PrdChecklistResult with section_found, unchecked_items and the
+        acceptance status banner reported by the skill.
 
     Raises:
         PrdContractError: prd skill 的解析脚本不可用（缺失 / 执行失败 / 输出非法）。
     """
-    checklist = parse_prd_contract(file_content)["checklist"]
+    contract = parse_prd_contract(file_content)
+    checklist = contract["checklist"]
     items: list[dict[str, Any]] = checklist.get("items", [])
 
     unchecked_items = [
@@ -105,4 +115,8 @@ def parse_prd_checklist(file_content: str) -> PrdChecklistResult:
         human_pending_items=human_pending_items,
         human_group_found=bool(checklist.get("human_group_found")),
         human_confirmed_mentioned=bool(checklist.get("human_confirmed_mentioned")),
+        human_unchecked_items=[
+            _item_line_text(item) for item in checklist.get("human_unchecked", [])
+        ],
+        acceptance_status=contract.get("acceptance_status"),
     )

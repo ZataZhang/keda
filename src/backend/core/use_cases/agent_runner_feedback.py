@@ -157,13 +157,17 @@ def _read_prd_text(prd_path: Path) -> str | None:
 # ``ensure_prd_delivery_ready`` 里合法完成的归档判成越权并回滚，紧接着推送前的
 # ``assert_prd_archived_for_publish`` 又硬要求 PRD 位于 archive，两道门禁互相打架，
 # reviewer 每轮来回搬运文件、永不收敛（实证：freshai Issue #99）。
+# 归档只代表执行侧交付完成（prd skill Machine Contract v5）：仍有 Human-Confirmed
+# 空框的 PRD 也在交付时归档，人审项留给人在 PR 上回答，agent 不得代勾。
 PRD_ARCHIVE_OWNERSHIP_RULE = (
     "During automated execution, archiving the PRD is the runner's job alone: "
     "never `git mv` it into `tasks/archive/` yourself, and once archived never "
-    "move it back to `tasks/pending/`. A PRD awaiting `Human-Confirmed` review "
-    "stays pending for the PR; do not tick those items on the reviewer's behalf. "
-    "After the reviewer confirms them, a follow-up PR commit may tick the items "
-    "and archive the PRD before merge."
+    "move it back to `tasks/pending/` (reopening a PRD after a rejected human "
+    "acceptance is a human decision). The runner archives the PRD at delivery as "
+    "soon as every executor-owned Acceptance Checklist item is resolved, even while "
+    "`Human-Confirmed` items are still open: archiving records that the executor's "
+    "work is done, not that a human accepted it. Never tick `Human-Confirmed` items "
+    "on the reviewer's behalf."
 )
 
 # 归档门禁（:func:`ensure_prd_delivery_ready`，执行循环 Phase 3）跑在 runner 自己的
@@ -179,9 +183,12 @@ RUNNER_OWNED_CHECKLIST_ITEM_RULE = (
     "is unsatisfiable at this point. Rewrite those items as "
     "`- [~] <original text> — runner-owned gate: <which gate>` (a `[~]` item counts as "
     "resolved, not unchecked) and leave the gate itself to the runner. Never tick an item "
-    "whose evidence you did not actually produce. Human-Confirmed items that "
-    "need the reviewer to inspect the PR should remain `- [ ]`; the runner "
-    "can publish that PRD from `tasks/pending/` without archiving it."
+    "whose evidence you did not actually produce. Human-Confirmed items belong to a "
+    "human: keep them `- [ ]`, never tick them and never rewrite them as `- [~]`. In the "
+    "final review set the PRD's acceptance status banner by the formula — any "
+    "Human-Confirmed item still `- [ ]` → `🧍 **验收状态**：待人工验收` (awaiting_human), "
+    "none → `✅ **验收状态**：已验收` (accepted); the runner neither archives nor "
+    "publishes a PRD whose banner disagrees with its checklist."
 )
 
 
@@ -375,6 +382,12 @@ def resolve_prd_archive_path(prd_relative_path: str) -> str | None:
     return None
 
 
+def is_prd_archive_path(prd_relative_path: str) -> bool:
+    """Return True when a repository-relative PRD path is under ``tasks/archive/``."""
+    path_parts = Path(prd_relative_path).parts
+    return len(path_parts) >= 2 and path_parts[0] == "tasks" and path_parts[1] == "archive"
+
+
 def build_prd_review_reference(issue: IssueSummary, worktree_path: Path) -> str:
     """构建 pre-PR review packet 里的 canonical PRD 引用行。
 
@@ -413,7 +426,12 @@ def ensure_prd_delivery_ready(
     *,
     prd_baseline_content: str | None = None,
 ) -> None:
-    """Validate canonical PRD state and auto-archive if complete.
+    """Validate canonical PRD state and archive it once the executor side is done.
+
+    归档只看执行侧条目（prd skill Machine Contract v5）：执行侧全部 ``[x]`` / ``[~]``
+    且验收状态横幅与清单一致，就把 PRD 从 ``tasks/pending/`` 移到 ``tasks/archive/``，
+    随实现一起提交——不论 Human-Confirmed 组是否还有空框。归档不改 PRD 内容，
+    人审空框与横幅原样保留，留给人回答。
 
     Raises:
         PrdDeliveryError: When the PRD is not ready for delivery.
@@ -430,9 +448,7 @@ def ensure_prd_delivery_ready(
             baseline_content=prd_baseline_content,
             prd_relative_path=prd_relative_path,
         )
-        if _validate_prd_checklist(file_content, prd_relative_path):
-            # 人审只能在 PR 呈递后完成；保持 pending，供审阅者逐项确认。
-            return
+        _validate_prd_checklist(file_content, prd_relative_path)
 
         archive_relative_path = resolve_prd_archive_path(prd_relative_path)
         if archive_relative_path:
@@ -480,10 +496,7 @@ def ensure_prd_delivery_ready(
                 baseline_content=prd_baseline_content,
                 prd_relative_path=archive_relative_path,
             )
-            if _validate_prd_checklist(file_content, archive_relative_path):
-                raise PrdDeliveryError(
-                    f"Archived PRD still awaits human review: {archive_relative_path}"
-                )
+            _validate_prd_checklist(file_content, archive_relative_path)
             return
 
     raise PrdDeliveryError(f"Canonical PRD not found: {prd_relative_path}")
@@ -496,10 +509,11 @@ def assert_prd_archived_for_publish(
     """Read-only PRD delivery gate used immediately before ``git push``.
 
     Unlike :func:`ensure_prd_delivery_ready`, this helper does **not** move
-    files. A PRD with only ``Human-Confirmed`` items outstanding may stay in
-    ``tasks/pending/`` for PR review; otherwise the canonical PRD must already
-    be archived with a complete checklist. This is the final hard gate before
-    the runner creates a PR.
+    files. The canonical PRD must already be archived, with every
+    executor-owned Acceptance Checklist item resolved and an acceptance status
+    banner that matches the checklist. Open ``Human-Confirmed`` items do not
+    block publishing — the human answers them on the PR. This is the final hard
+    gate before the runner creates a PR.
 
     The Issue body may still reference the original ``tasks/pending/`` path,
     because ``git mv`` only moves the file and does not rewrite the Issue.
@@ -511,8 +525,9 @@ def assert_prd_archived_for_publish(
         worktree_path: The agent worktree path.
 
     Raises:
-        PrdDeliveryError: When executor items remain unchecked, or an archived
-            PRD still claims to await human review.
+        PrdDeliveryError: When the PRD is not archived yet, is still present at
+            the pending path, has unchecked executor items, or its acceptance
+            status banner disagrees with its checklist.
     """
 
     prd_relative_path = extract_prd_path(issue.body)
@@ -521,22 +536,19 @@ def assert_prd_archived_for_publish(
 
     archive_relative_path = resolve_prd_archive_path(prd_relative_path)
     if archive_relative_path is None:
-        path_parts = Path(prd_relative_path).parts
-        if len(path_parts) >= 2 and path_parts[0] == "tasks" and path_parts[1] == "archive":
-            archive_relative_path = prd_relative_path
-        else:
+        if not is_prd_archive_path(prd_relative_path):
             raise PrdDeliveryError(
                 f"Canonical PRD must be archived before publishing: {prd_relative_path}"
             )
+        archive_relative_path = prd_relative_path
 
     archive_path = worktree_path / archive_relative_path
     if not archive_path.exists():
-        pending_path = worktree_path / prd_relative_path
-        if pending_path.exists() and _validate_prd_checklist(
-            pending_path.read_text(encoding="utf-8"), prd_relative_path
-        ):
-            return
-        raise PrdDeliveryError(f"Archived PRD not found in worktree: {archive_relative_path}")
+        raise PrdDeliveryError(
+            f"Archived PRD not found in worktree: {archive_relative_path} — the PRD has not "
+            "been archived yet; the delivery gate archives it once every executor-owned "
+            "Acceptance Checklist item is resolved"
+        )
 
     # If the Issue still points at the pending path, ensure the pending file is
     # gone so the archive copy is unambiguously the canonical one.
@@ -546,8 +558,7 @@ def assert_prd_archived_for_publish(
             raise PrdDeliveryError(f"PRD is still present at pending path: {prd_relative_path}")
 
     file_content = archive_path.read_text(encoding="utf-8")
-    if _validate_prd_checklist(file_content, archive_relative_path):
-        raise PrdDeliveryError(f"Archived PRD still awaits human review: {archive_relative_path}")
+    _validate_prd_checklist(file_content, archive_relative_path)
 
 
 def format_prd_delivery_detail(message: str) -> str:

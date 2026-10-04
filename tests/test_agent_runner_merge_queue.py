@@ -7,6 +7,7 @@ import pytest
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     AutopilotConfig,
+    CommandResult,
     IssueSummary,
     LabelConfig,
     PullRequestContext,
@@ -19,6 +20,11 @@ from backend.core.use_cases.agent_runner_merge_queue import (
     process_merge_queue,
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
+from tests.support.agent_runner import (
+    ACCEPTED_BANNER,
+    AWAITING_HUMAN_BANNER,
+    build_acceptance_prd,
+)
 
 # A PR checklist block as produced by build_validation_checklist_block().
 _UNTICKED_BODY = (
@@ -232,15 +238,24 @@ def test_verifier_missing_label_skips_issue(tmp_path, worktree_path, monkeypatch
 
 
 @pytest.mark.parametrize(
-    ("review_mark", "expected_action"),
-    [(" ", "skipped_human_review"), ("x", "skipped_prd_pending")],
+    ("prd_directory", "review_mark", "expected_action"),
+    [
+        ("pending", " ", "skipped_human_review"),
+        ("pending", "x", "skipped_prd_pending"),
+        # PRD 在交付时就归档（Machine Contract v5）：hold 必须按 PRD 实际位置判断。
+        ("archive", " ", "skipped_human_review"),
+        # 老 PRD 把人审项写成 ``[~]``：按保守口径一样等人。
+        ("archive", "~", "skipped_human_review"),
+        # 已归档、人审已答：hold 放行，交给后续 rebase 与门禁。
+        ("archive", "x", None),
+    ],
 )
-def test_pending_prd_prevents_auto_merge(
-    tmp_path, worktree_path, review_mark: str, expected_action: str
+def test_prd_hold_prevents_auto_merge_until_the_human_answers(
+    tmp_path, worktree_path, prd_directory: str, review_mark: str, expected_action: str | None
 ) -> None:
-    """待人审或已人审但尚未归档的 PRD 都不能自动合并。"""
+    """人审未答（pending 或 archive）与未归档的 PRD 都不能自动合并；归档且已答才继续。"""
     github = FakeGitHubClient()
-    runner = FakeProcessRunner()
+    runner = FakeProcessRunner(responses=_git_state_responses("issue-70", "abc1234"))
     issue = IssueSummary(
         number=70,
         title="Human review",
@@ -248,7 +263,7 @@ def test_pending_prd_prevents_auto_merge(
         body="PRD path: `tasks/pending/review.md`",
         labels=("agent/review",),
     )
-    prd_path = worktree_path / "tasks" / "pending" / "review.md"
+    prd_path = worktree_path / "tasks" / prd_directory / "review.md"
     prd_path.parent.mkdir(parents=True)
     prd_path.write_text(
         f"## Acceptance Checklist\n### Human-Confirmed\n- [{review_mark}] Review screenshots\n",
@@ -266,8 +281,104 @@ def test_pending_prd_prevents_auto_merge(
         supervisor_agent="auto",
     )
 
+    if expected_action is None:
+        assert ["git", "rebase", "origin/main"] in runner.calls
+        assert outcome.action == "merged"
+        return
     assert outcome.action == expected_action
     assert not any(call.get("method") == "merge_pull_request" for call in github.calls)
+    assert runner.calls == []
+
+
+def _git_state_responses(branch: str, head_sha: str) -> dict[tuple[str, ...], CommandResult]:
+    """Fake git 的最小状态：HEAD、当前分支与 PR diff，让真实 rebase 与禁改扫描能跑通。"""
+    command_outputs = {
+        ("git", "rev-parse", "HEAD"): f"{head_sha}\n",
+        ("git", "branch", "--show-current"): f"{branch}\n",
+        ("git", "diff", "--name-only", f"origin/main...{head_sha}"): "src/main.py\n",
+    }
+    return {
+        command: CommandResult(command=command, return_code=0, stdout=stdout_text, stderr="")
+        for command, stdout_text in command_outputs.items()
+    }
+
+
+def test_archived_prd_awaiting_human_holds_until_the_human_answers(tmp_path, worktree_path) -> None:
+    """rv-5：已归档但人审未答的 PRD 让自动合并停在"等人验收"，人回答后下一轮才继续。
+
+    PRD 在交付时就归档，hold 若只看 pending 路径，verifier 通过、签核完成的 PR
+    会被直接合并——等于由自动化代替人行使验收权。两轮都走 ``process_merge_queue``，
+    PRD 是 worktree 里的真实文件，解析走本机安装的 prd skill。
+    """
+    branch = "issue-88"
+    head_sha = "deadbeef"
+    issue = IssueSummary(
+        number=88,
+        title="Archived PRD awaiting human review",
+        url="https://github.com/example/repo/issues/88",
+        body="PRD path: `tasks/pending/review.md`",
+        labels=("agent/review", "validation/verifier-passed"),
+    )
+    github = FakeGitHubClient()
+    github.set_list_issues_by_label_result([issue])
+    github._issue_labels[88] = issue.labels
+    github.set_pr_context(
+        branch,
+        PullRequestContext(
+            pr_url="https://github.com/example/repo/pull/88",
+            branch=branch,
+            head_sha=head_sha,
+            base_sha="base1234",
+            mergeable=True,
+            checks_state="SUCCESS",
+            number=88,
+            body=_TICKED_BODY,
+        ),
+    )
+    branch_comment = f"Build complete on PR Branch: `{branch}`."
+    github._issue_comments[88] = [branch_comment]
+    github._issue_comment_entries[88] = [(1, branch_comment)]
+    archive_path = worktree_path / "tasks" / "archive" / "review.md"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_text(
+        build_acceptance_prd(AWAITING_HUMAN_BANNER, human_marks=(" ",)), encoding="utf-8"
+    )
+    config = _make_config(require_verifier_pass=True)
+
+    def run_merge_queue_pass(pass_label: str):
+        """跑一轮真实入口，返回本轮 outcome 与 fake 客户端的调用记录。"""
+        process_runner = FakeProcessRunner(responses=_git_state_responses(branch, head_sha))
+        github_calls_before = len(github.calls)
+        exit_code, outcomes = process_merge_queue(
+            repo_path=tmp_path,
+            config=config,
+            github_client=github,
+            process_runner=process_runner,
+            supervisor_agent="auto",
+        )
+        github_methods = [call["method"] for call in github.calls[github_calls_before:]]
+        print(f"== {pass_label} ==")
+        print(f"exit_code={exit_code} outcomes={[outcome.action for outcome in outcomes]}")
+        print(f"github calls: {github_methods}")
+        print(f"process calls: {[' '.join(command) for command in process_runner.calls]}")
+        return [outcome.action for outcome in outcomes], github_methods, process_runner.calls
+
+    print("PRD before round 1:", archive_path.read_text(encoding="utf-8"), sep="\n")
+    first_actions, first_github_methods, first_process_calls = run_merge_queue_pass("round 1")
+    assert first_actions == ["skipped_human_review"]
+    assert "merge_pull_request" not in first_github_methods
+    assert first_process_calls == []  # 零 rebase、零验证命令
+
+    # 人在 PR 分支上回答：勾上人审项、横幅改为已验收；下一轮从磁盘重新读到。
+    archive_path.write_text(
+        build_acceptance_prd(ACCEPTED_BANNER, human_marks=("x",)), encoding="utf-8"
+    )
+    print("PRD before round 2:", archive_path.read_text(encoding="utf-8"), sep="\n")
+    second_actions, second_github_methods, second_process_calls = run_merge_queue_pass("round 2")
+    assert second_actions != ["skipped_human_review"]
+    assert ["git", "rebase", "origin/main"] in second_process_calls
+    assert second_actions == ["merged"]
+    assert second_github_methods.count("merge_pull_request") == 1
 
 
 def test_verifier_passed_then_full_path_merges(tmp_path, worktree_path, monkeypatch) -> None:

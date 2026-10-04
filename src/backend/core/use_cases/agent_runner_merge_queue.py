@@ -5,7 +5,9 @@
 Issue 号 FIFO **串行**处理所有带 ``agent/review`` 标签的开放 Issue，每条
 走 7 步门禁链：verifier 门禁 → 自动签核 → rebase → 全量验证 → 禁改终扫 →
 checks 全绿 → squash 合并。任一步失败则该 PR 转入既有失败/修复路径并
-``continue`` 下一条，不阻塞其余 PR。
+``continue`` 下一条，不阻塞其余 PR。rebase 之前还有一道 PRD hold：PRD 的
+Human-Confirmed 组仍有未回答的项就跳过等人（不论 PRD 已归档还是仍在 pending），
+PRD 仍在 pending 也跳过——自动合并不替人验收。
 
 双开关语义：本文件被调用前由 :func:`review_once` 检查 ``autopilot.enabled``
 *AND* ``safety.auto_merge`` 同时为真，任一为假则本段 no-op。
@@ -26,6 +28,7 @@ PR 状态 + marker 查重"即可。
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import time
@@ -39,7 +42,8 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
 )
 from backend.core.shared.prd_checklist import parse_prd_checklist
-from backend.core.use_cases.agent_runner_feedback import extract_prd_path
+from backend.core.use_cases.agent_runner_closeout import resolve_prd_worktree_path
+from backend.core.use_cases.agent_runner_feedback import is_prd_archive_path
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
     parse_latest_event_marker,
@@ -398,13 +402,16 @@ def _process_one(
         _logger.warning("Could not prepare worktree for Issue #%d: %s", issue.number, exc)
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_no_worktree")
 
-    prd_relative_path = extract_prd_path(issue.body)
-    if prd_relative_path is not None:
-        pending_prd_path = worktree_path / prd_relative_path
-        if pending_prd_path.is_file():
-            checklist = parse_prd_checklist(pending_prd_path.read_text(encoding="utf-8"))
-            if checklist.human_pending_items:
-                return MergeQueueOutcome(issue_number=issue.number, action="skipped_human_review")
+    # PRD hold：归档只代表执行侧交付完成（prd skill Machine Contract v5），人审项
+    # 会带着空框一起归档。所以必须按 PRD 的实际位置（pending 或 archive）读清单——
+    # 只看 pending 的话，已归档但人还没回答的 PR 会被照常 rebase 并合并，等于自动化
+    # 替人验收。人审组的 ``[ ]`` 与误标成 ``[~]`` 的人审项都算没回答（保守口径）。
+    prd_worktree_path = resolve_prd_worktree_path(issue, worktree_path)
+    if prd_worktree_path is not None:
+        checklist = parse_prd_checklist(prd_worktree_path.read_text(encoding="utf-8"))
+        if checklist.human_pending_items:
+            return MergeQueueOutcome(issue_number=issue.number, action="skipped_human_review")
+        if not is_prd_archive_path(os.path.relpath(prd_worktree_path, worktree_path)):
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_pending")
 
     # Step 3: rebase

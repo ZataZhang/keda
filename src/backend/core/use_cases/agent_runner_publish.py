@@ -180,9 +180,10 @@ def push_changes(
         expected_branch: Optional explicit branch to publish from. When set, the
             worktree's current branch must match or the call is rejected.
         require_prd_archived: When ``True`` (default), enforce the canonical
-            PRD delivery gate before pushing. A PRD with only Human-Confirmed
-            items outstanding may remain pending for PR review; PRD rework
-            proposals bypass this gate by passing ``False``.
+            PRD delivery gate before pushing: the PRD must already be archived
+            (open Human-Confirmed items are fine — they are answered on the PR).
+            Only the exhausted-retries Draft PR and PRD rework proposals pass
+            ``False``; neither archives the PRD.
 
     Returns:
         The branch that was pushed.

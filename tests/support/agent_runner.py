@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
+import pytest
+
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
@@ -20,6 +22,7 @@ from backend.core.shared.models.agent_runner import (
     RunnerConfig,
     WorktreeConfig,
 )
+from backend.core.shared.prd_checklist import parse_prd_checklist
 from backend.infrastructure.process_runner import CommandFailedError
 
 
@@ -138,6 +141,64 @@ def write_commit_request(worktree_path: Path, commit_message: str) -> None:
     )
 
 
+# 验收状态横幅（prd skill Machine Contract v5）三种状态的原文行。交付与发布门禁会
+# 核对横幅与清单是否一致，所以凡是期望"能归档 / 能发布"的夹具都要带上对的那一行。
+NOT_STARTED_BANNER = "> ⬜ **验收状态**：未开工。"
+AWAITING_HUMAN_BANNER = (
+    "> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 1 项 Human-Confirmed 未确认，证据包见 §9。"
+)
+ACCEPTED_BANNER = "> ✅ **验收状态**：已验收 — 验收清单已全部完成。"
+
+
+def build_acceptance_prd(
+    banner_line: str | None,
+    *,
+    execution_marks: Sequence[str] = ("x",),
+    human_marks: Sequence[str] = (),
+) -> str:
+    """Build a PRD with an acceptance status banner and a grouped Acceptance Checklist.
+
+    Args:
+        banner_line: 横幅原文行；``None`` 表示不写横幅。
+        execution_marks: 执行侧分组里每个条目的复选框标记（``"x"`` / ``" "`` / ``"~"``）。
+        human_marks: Human-Confirmed 分组里每个条目的标记；为空时不写该分组。
+
+    Returns:
+        PRD 全文。
+    """
+    prd_lines = ["# PRD: Example", ""]
+    if banner_line is not None:
+        prd_lines += [banner_line, ""]
+    prd_lines += ["## 9. Acceptance Checklist", "", "### Validation Acceptance", ""]
+    prd_lines += [
+        f"- [{item_mark}] rv-{item_number}: executor-owned item {item_number}"
+        for item_number, item_mark in enumerate(execution_marks, start=1)
+    ]
+    if human_marks:
+        prd_lines += ["", "### Human-Confirmed", ""]
+        prd_lines += [
+            f"- [{item_mark}] decision {item_number}: answered by a human"
+            for item_number, item_mark in enumerate(human_marks, start=1)
+        ]
+    prd_lines.append("")
+    return "\n".join(prd_lines)
+
+
+def require_banner_aware_prd_skill() -> None:
+    """横幅类断言的前置：测试进程读到的 prd skill 必须报告验收状态横幅（v5 起）。
+
+    v3/v4 skill 不报告 ``acceptance_status``，门禁会按设计跳过横幅检查，横幅类断言
+    要么莫名变红、要么没跨过横幅判据就变绿。这里直接以可行动的信息失败，指明该先
+    装 v5 skill（发版顺序见归档语义 PRD 的 §8 Notes (c)）。
+    """
+    if parse_prd_checklist(build_acceptance_prd(ACCEPTED_BANNER)).acceptance_status is None:
+        pytest.fail(
+            "the prd skill used by this test run does not report `acceptance_status` "
+            "(Machine Contract < 5); install the v5 prd skill (`iar init`) or point "
+            "IAR_PRD_SKILL_PATH at it before running banner assertions"
+        )
+
+
 def write_complete_prd(worktree_path: Path, relative_path: str = "tasks/example.md") -> None:
     """Write a PRD whose Acceptance Checklist is fully checked."""
     prd_path = worktree_path / relative_path
@@ -146,6 +207,8 @@ def write_complete_prd(worktree_path: Path, relative_path: str = "tasks/example.
         "\n".join(
             [
                 "# PRD: Example",
+                "",
+                ACCEPTED_BANNER,
                 "",
                 "## 7. Acceptance Checklist",
                 "",

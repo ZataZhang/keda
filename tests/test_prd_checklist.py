@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import Any
 
+import pytest
+
+from backend.core.shared import prd_checklist
 from backend.core.shared.prd_checklist import PrdChecklistResult, parse_prd_checklist
+from tests.support.agent_runner import (
+    AWAITING_HUMAN_BANNER,
+    NOT_STARTED_BANNER,
+    build_acceptance_prd,
+    require_banner_aware_prd_skill,
+)
 
 
 def test_human_confirmed_items_remain_unchecked_without_blocking_executor() -> None:
@@ -41,13 +52,18 @@ class TestParsePrdChecklist:
     def test_empty_file_returns_no_section(self) -> None:
         """Empty content should report section not found."""
         result = parse_prd_checklist("")
-        assert result == PrdChecklistResult(section_found=False, unchecked_items=[])
+        # 横幅状态随 skill 版本不同（v5 为 ""，v3/v4 为 None），由 TestAcceptanceStatusBanner 覆盖。
+        assert replace(result, acceptance_status=None) == PrdChecklistResult(
+            section_found=False, unchecked_items=[]
+        )
 
     def test_no_acceptance_section_returns_not_found(self) -> None:
         """Content without acceptance heading should report section not found."""
         content = "# PRD\n\n## Some Other Section\n\n- [ ] item\n"
         result = parse_prd_checklist(content)
-        assert result == PrdChecklistResult(section_found=False, unchecked_items=[])
+        assert replace(result, acceptance_status=None) == PrdChecklistResult(
+            section_found=False, unchecked_items=[]
+        )
 
     def test_all_checked_items_are_complete(self) -> None:
         """When all items are checked, unchecked_items should be empty."""
@@ -311,3 +327,65 @@ class TestHumanConfirmedGroupFormatting:
 
         assert result.human_pending_items == []
         assert result.execution_unchecked_items == [(5, "- [ ] 执行项")]
+
+
+class TestAcceptanceStatusBanner:
+    """横幅状态与人审空框直接取自 skill 契约 JSON（v5 起），keda 不读横幅文本。"""
+
+    def test_banner_state_and_open_human_items_come_from_the_skill(self) -> None:
+        """🧍 横幅读成 awaiting_human；人审空框只算 ``[ ]``，误标的 ``[~]`` 不算。"""
+        require_banner_aware_prd_skill()
+        content = build_acceptance_prd(
+            AWAITING_HUMAN_BANNER, execution_marks=("x", "~"), human_marks=(" ", "~")
+        )
+
+        result = parse_prd_checklist(content)
+
+        assert result.acceptance_status == "awaiting_human"
+        assert result.human_unchecked_items == [(14, "- [ ] decision 1: answered by a human")]
+        # 合并队列 hold 用的保守口径仍把误标成 [~] 的人审项算作没回答。
+        assert [line for line, _ in result.human_pending_items] == [14, 15]
+        assert result.execution_unchecked_items == []
+
+    @pytest.mark.parametrize(
+        ("banner_line", "expected_status"),
+        [(NOT_STARTED_BANNER, "not_started"), (None, "")],
+        ids=["not-started", "missing"],
+    )
+    def test_unarchivable_banner_states_are_reported_verbatim(
+        self, banner_line: str | None, expected_status: str
+    ) -> None:
+        """未开工与缺横幅原样上报（缺失为空串），由交付门禁判不一致。"""
+        require_banner_aware_prd_skill()
+
+        result = parse_prd_checklist(build_acceptance_prd(banner_line))
+
+        assert result.acceptance_status == expected_status
+        assert result.human_unchecked_items == []
+
+    def test_pre_v5_skill_payload_reports_no_banner_state(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """v3/v4 skill 的 JSON 没有横幅字段：状态为 None（门禁据此跳过），人审空框为空。"""
+        legacy_item = {
+            "line": 9,
+            "mark": " ",
+            "group": "Human-Confirmed",
+            "in_human_group": True,
+            "text": "- [ ] decision 1",
+        }
+        legacy_payload: dict[str, Any] = {
+            "checklist": {
+                "section_found": True,
+                "human_group_found": True,
+                "human_confirmed_mentioned": True,
+                "items": [legacy_item],
+            }
+        }
+        monkeypatch.setattr(prd_checklist, "parse_prd_contract", lambda _content: legacy_payload)
+
+        result = parse_prd_checklist("ignored: the payload above stands in for the skill")
+
+        assert result.acceptance_status is None
+        assert result.human_unchecked_items == []
+        assert result.human_pending_items == [(9, "- [ ] decision 1")]
