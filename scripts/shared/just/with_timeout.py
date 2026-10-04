@@ -69,18 +69,29 @@ def is_signalable_group(process_group_id: int) -> bool:
 
 
 def group_alive(process_group_id: int) -> bool:
-    """Report whether any member of a process group is still alive.
+    """Report whether a process group still has at least one member.
+
+    ``PermissionError`` must not be folded into "gone". It means the group still
+    has a member that merely refuses signals, and it is the answer macOS gives
+    for a group whose only remaining member is a zombie — never ``ESRCH``.
+    Reading that as "empty" let :func:`reap_group` return while the group still
+    had a member, and would equally make it skip a live process owned by another
+    uid.
 
     Args:
         process_group_id: Process group to probe with signal 0.
 
     Returns:
-        bool: True when at least one member survives.
+        bool: True when the group still has a member (zombies included).
     """
     try:
         os.killpg(process_group_id, 0)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
         return False
+    except PermissionError:
+        # EPERM 是「组里仍有成员、只是不允许发信号」，不是「组不存在」。
+        # macOS 上「组里只剩僵尸」走的就是这条分支；当成已清空会让回收提前返回。
+        return True
     return True
 
 

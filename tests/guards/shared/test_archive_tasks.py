@@ -129,3 +129,33 @@ def test_staged_task_paths_ignore_non_markdown_root_files(tmp_path: Path) -> Non
     )
 
     assert staged_task_paths == []
+
+
+def test_staged_task_paths_exclude_non_prd_root_markdown(tmp_path: Path) -> None:
+    """Root-level pages that are not PRDs (e.g. README) must not be archived."""
+
+    archive_tasks_module = load_archive_tasks_module()
+    init_git_repository(tmp_path)
+
+    tasks_dir = tmp_path / "tasks"
+    archive_dir = tasks_dir / "archive"
+    pending_dir = tasks_dir / "pending"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    pending_dir.mkdir(parents=True, exist_ok=True)
+
+    readme_path = tasks_dir / "README.md"
+    readme_path.write_text("# tasks router\n", encoding="utf-8")
+    active_prd_path = tasks_dir / "P0-FEAT-20260923-155738-auto-mode-agent-access-routing.md"
+    active_prd_path.write_text("# prd\n", encoding="utf-8")
+
+    add_process = run_command(["git", "add", "tasks"], cwd_path=tmp_path)
+    assert add_process.returncode == 0
+
+    staged_task_paths = archive_tasks_module._staged_task_paths(
+        repo_root=tmp_path,
+        tasks_dir=tasks_dir,
+        archive_dir=archive_dir,
+        pending_dir=pending_dir,
+    )
+
+    assert staged_task_paths == [active_prd_path]

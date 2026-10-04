@@ -1,17 +1,23 @@
 """Archive active task markdown files before commit.
 
-Moves root-level Markdown files from the tasks directory into tasks/archive
+Moves root-level PRD markdown files from the tasks directory into tasks/archive
 and stages the resulting changes for commit. Files under tasks/pending or any
-other tasks subdirectory are left in place.
+other tasks subdirectory are left in place, and root-level pages that are not
+PRDs (for example ``tasks/README.md``) stay put.
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Iterable, Sequence
+
+# 与 .pre-commit-config.yaml 的 PRD 文件名约定保持一致：只把 PRD 形状的
+# markdown 归档，避免把 ``tasks/README.md`` 之类路由页误搬进 archive。
+_TASK_PRD_NAME_PATTERN = re.compile(r"^(?:[^/]+-prd-[^/]+|P[0-3]-[A-Z]+-\d{8}-\d{6}-[^/]+)\.md$")
 
 
 def _repo_root() -> Path:
@@ -36,6 +42,8 @@ def _is_archivable_task_markdown(
     """
 
     if full_path.suffix.lower() != ".md":
+        return False
+    if not _TASK_PRD_NAME_PATTERN.match(full_path.name):
         return False
     if not full_path.exists() or not full_path.is_file():
         return False

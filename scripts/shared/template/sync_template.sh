@@ -331,6 +331,7 @@ _is_always_skipped() {
         # collection-time FileNotFoundError downstream. Keep these tests
         # template-internal by listing them here.
         tests/guards/test_prd_skill_checker.py) return 0 ;;
+        tests/test_prd_contract.py) return 0 ;;
     esac
     case "$p" in
         # Local state, build output, runtime artifacts
@@ -548,8 +549,8 @@ SKILL_INSTALL_TARGET_DIRS=()
 #
 # AUTO_DETECT 列填「工具配置目录」，留空表示该适配器不参与默认探测（首次安装仍
 # 可在交互菜单里显式选中）。默认探测只认工具自己读取的技能目录：把 Skill 装进
-# 某个中间层目录（如 ~/.cc-switch/skills）看似能覆盖多个工具，实际依赖其转发，
-# 转发一停就变成「中间层更新了、工具看不见」——Codex / Claude 因此改为直连。
+# 某个中间层目录（由一个工具统一转发到各工具目录）看似能覆盖多个工具，实际依赖
+# 其转发，转发一停就变成「中间层更新了、工具看不见」——Codex / Claude 因此改为直连。
 SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy")
 SKILL_ADAPTER_DIRS=(
     "$HOME/.codex/skills"
