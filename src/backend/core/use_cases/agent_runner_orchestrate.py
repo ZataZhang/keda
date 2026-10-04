@@ -40,6 +40,7 @@ from backend.core.shared.models.agent_runner import (
     AttemptResult,
     IssueSummary,
     ReviewEventMarker,
+    TokenUsage,
 )
 from backend.core.use_cases.agent_runner_events import (
     parse_latest_pending_rework_marker,
@@ -409,6 +410,7 @@ def run_issue_with_agent_fallback(
     agent: str,
     process_for_agent: Callable[..., None],
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
+    on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
 ) -> str:
     """Process an Issue across the configured agent fallback chain.
 
@@ -454,6 +456,7 @@ def run_issue_with_agent_fallback(
             process_for_agent(
                 agent=candidate_agent,
                 on_attempt_recorded=on_attempt_recorded,
+                on_agent_usage=on_agent_usage,
             )
             return candidate_agent
         except (UnrecoverableError, ForbiddenBlockedError):

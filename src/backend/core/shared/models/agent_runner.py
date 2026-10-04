@@ -55,6 +55,39 @@ class AgentCommitResult:
 
 
 @dataclass(frozen=True)
+class TokenUsage:
+    """单次 agent 子进程调用的官方 token 用量。
+
+    数据全部来自 agent 输出自报的 usage 统计（如 claude stream-json 的
+    ``result.usage``），系统只解析、不估算；拿不到时上层表达为 ``None``。
+    Anthropic 语义下 ``input_tokens`` 不含缓存部分，因此输入侧实际处理量
+    = input + cache_read + cache_creation，:attr:`total_tokens` 按此把缓存
+    计入总量（实际处理量口径）。
+
+    Attributes:
+        input_tokens: 未命中缓存的输入（上传）token 数。
+        output_tokens: 输出（下传）token 数。
+        cache_read_input_tokens: 缓存命中（复用已缓存前缀）的输入 token 数。
+        cache_creation_input_tokens: 首次写入缓存的输入 token 数。
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        """总量（实际处理量口径）= 输入侧（含缓存读写）+ 输出。"""
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_read_input_tokens
+            + self.cache_creation_input_tokens
+        )
+
+
+@dataclass(frozen=True)
 class CommandResult:
     """Captured subprocess result.
 
@@ -70,6 +103,8 @@ class CommandResult:
             ``iar.agent_output_protocols`` 注册表）。``"plain"`` 表示通用
             文本中继；agent 响应文本提取等消费方以此判断 stdout 是否为
             渲染后的结构化流，而不再嗅探命令行里的 agent 名。
+        token_usage: 输出自报的 token 用量；协议未提供或解析不出时为
+            ``None``（≠ 0，表示"无数据"而非"零消耗"）。
     """
 
     command: tuple[str, ...]
@@ -78,6 +113,7 @@ class CommandResult:
     stderr: str
     duration_seconds: float = 0.0
     output_protocol: str = PLAIN_PROTOCOL_ID
+    token_usage: TokenUsage | None = None
 
 
 class FailureType(Enum):
@@ -191,6 +227,8 @@ class AttemptResult:
         duration_seconds: Wall-clock seconds spent in the attempt.
         phase_durations: Per-phase breakdown of ``duration_seconds``；空元组表示
             本次 attempt 未打点（旧记录或未走执行循环的路径）。
+        token_usage: 本次 attempt 对应 agent 调用的 token 用量；来源调用
+            未产出可用 usage 时为 ``None``。
     """
 
     attempt_number: int
@@ -202,6 +240,7 @@ class AttemptResult:
     finished_at: str = ""
     duration_seconds: float = 0.0
     phase_durations: tuple[PhaseDuration, ...] = ()
+    token_usage: TokenUsage | None = None
 
 
 @dataclass(frozen=True)
@@ -705,6 +744,9 @@ class SupervisorActionResult:
     verification_status: str = ""
     head_sha: str | None = None
     findings_detail: tuple[FindingDetail, ...] = ()
+    #: 本 cycle 的 supervisor agent 调用自报用量；守卫层改写不携带它，由
+    #: cycle 末尾统一回填，供观测层发用量事件。
+    token_usage: TokenUsage | None = None
 
 
 @dataclass(frozen=True)
