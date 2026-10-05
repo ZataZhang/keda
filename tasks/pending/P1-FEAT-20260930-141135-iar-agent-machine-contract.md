@@ -1,5 +1,7 @@
 # PRD: iar 的 Agent 机读契约（结构化输出、语义退出码与运行时自省）
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/194
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
