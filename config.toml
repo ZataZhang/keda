@@ -178,7 +178,7 @@ agent = "codebuddy"
 model = "deepseek-v4.1-flash"
 reasoning_effort = "high"
 
-[agent_runner.presets.qwen_flash_max]
+[agent_runner.presets.qoder-qwen3_8-flash_max]
 agent = "qoder"
 model = "Qwen3.8-Flash"
 reasoning_effort = "max"
@@ -196,7 +196,7 @@ reasoning_effort = "max"
 # 既有散落键 / 内置默认（fix、closeout 未绑时默认跟随实现者并继承其模型）。
 [agent_runner.lifecycle_presets]
 implementation = "codebuddy-deepseek-v4_1-flash"
-verifier = "qwen_flash_max"
+verifier = "qoder-qwen3_8-flash_max"
 fix = "codebuddy-glm5_3-flash-max"
 closeout = "codebuddy-glm5_3-flash-max"
 

@@ -304,3 +304,9 @@ agent = "codex"
 role = "implementer"
 # 角色行为 prompt
 behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concrete steps, and implementation details. Highlight what can be built and what resources are needed."
+
+# 阶段 -> 模型预设绑定（仓库级覆盖，优先级高于全局 config.toml 的同段）
+# 将 implementation 阶段改用 qoder + Qwen3.8-Flash + max 推理档；
+# 预设 qoder-qwen3_8-flash_max 定义在全局 config.toml 的 [agent_runner.presets.qoder-qwen3_8-flash_max]。
+[agent_runner.lifecycle_presets]
+implementation = "qoder-qwen3_8-flash_max"
