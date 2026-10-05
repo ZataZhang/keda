@@ -597,8 +597,9 @@ def _resolve_dependencies(
         depends_on: CLI override issue numbers.
 
     Returns:
-        ``(gate_type, resolved_issues)``.
-        ``gate_type`` is the gate from the PRD section (``none`` if absent).
+        ``(gate_type, resolved_issues, sequence)``.
+        ``gate_type`` is the gate from the PRD section (``none`` if absent);
+        ``sequence`` is the PRD's ``Sequence`` field (``via-main`` if absent).
     """
     from_prd = parse_delivery_dependencies(prd_text)
 
@@ -629,6 +630,7 @@ def _resolve_dependencies(
     return (
         gate_type,
         tuple(deduped_issues),
+        from_prd.sequence,
     )
 
 
@@ -1015,7 +1017,7 @@ def create_issue_from_prd(
     # ------------------------------------------------------------------
     # 4.5 解析并物化依赖声明。
     # ------------------------------------------------------------------
-    gate_type, resolved_issues = _resolve_dependencies(
+    gate_type, resolved_issues, sequence = _resolve_dependencies(
         prd_text,
         repo_path=request.repo_path,
         current_prd_path=absolute_prd_path,
@@ -1025,6 +1027,7 @@ def create_issue_from_prd(
     if gate_type == "hard" and resolved_issues:
         dependency_marker = format_dependency_marker(
             issue_numbers=resolved_issues,
+            sequence=sequence,
         )
 
     # ------------------------------------------------------------------

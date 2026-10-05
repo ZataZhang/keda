@@ -113,6 +113,29 @@ def worktree_path(monkeypatch: pytest.MonkeyPatch, tmp_path):
     return path
 
 
+def test_stack_downstream_skipped_until_upstream_merged(tmp_path) -> None:
+    """A stack downstream PR must not be merged mid-chain."""
+    github = FakeGitHubClient()
+    runner = FakeProcessRunner()
+    config = _make_config(autopilot_enabled=True, auto_merge=True)
+    issue = IssueSummary(
+        number=7,
+        title="downstream",
+        url="https://github.com/example/repo/issues/7",
+        body='<!-- iar:depends-on #42 mode="stack" -->',
+        labels=("agent/review",),
+    )
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=config,
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+    assert outcome.action == "skipped_stack_pending"
+
+
 def test_kill_switch_off_returns_no_op(tmp_path, monkeypatch) -> None:
     """Both switches must be on; either off is a no-op."""
     github = FakeGitHubClient()

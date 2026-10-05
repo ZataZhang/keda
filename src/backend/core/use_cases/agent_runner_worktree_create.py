@@ -27,6 +27,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
 )
+from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
 from backend.core.use_cases.agent_runner_validation import (
     ensure_evidence_dir_excluded,
 )
@@ -89,6 +90,75 @@ def format_command(
 _SHARED_GIT_LOCK = threading.Lock()
 
 
+def _resolve_fork_base(
+    repo_path: Path,
+    issue: IssueSummary,
+    config: AppConfig,
+    process_runner: IProcessRunner,
+) -> str:
+    """Resolve the ref a new Issue worktree forks from.
+
+    - ``stack`` sequencing: fork from the upstream Issue's branch
+      (``issue-<N>``), preferring the local branch and falling back to the
+      fetched remote-tracking ref, so the downstream worktree is guaranteed to
+      contain the upstream (unmerged) changes.
+    - ``via-main`` (default): refresh the remote base and fork from the fetched
+      remote-tracking ref, so the worktree always contains the latest upstream
+      changes. This closes the silent-staleness gap where a downstream run
+      forks from a local base that lags the remote.
+    """
+    declaration = parse_dependency_marker(issue.body)
+    remote = config.git.remote
+    local_base = config.worktree.base_branch or config.git.base_branch
+
+    if declaration is not None and declaration.sequence == "stack" and declaration.issue_numbers:
+        upstream_branch = f"issue-{declaration.issue_numbers[0]}"
+        local_exists = process_runner.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{upstream_branch}"],
+            cwd=repo_path,
+            check=False,
+        )
+        if local_exists.return_code == 0:
+            return upstream_branch
+        fetch_result = process_runner.run(
+            [
+                "git",
+                "fetch",
+                remote,
+                f"+{upstream_branch}:refs/remotes/{remote}/{upstream_branch}",
+            ],
+            cwd=repo_path,
+            check=False,
+        )
+        if fetch_result.return_code == 0:
+            return f"{remote}/{upstream_branch}"
+        raise RuntimeError(
+            f"Stack sequencing requires upstream branch '{upstream_branch}' to exist "
+            f"on '{remote}' (or locally); fetch failed: {fetch_result.stderr.strip()}"
+        )
+
+    fetch_base = process_runner.run(
+        ["git", "fetch", remote, local_base],
+        cwd=repo_path,
+        check=False,
+    )
+    if fetch_base.return_code == 0:
+        remote_ref = f"{remote}/{local_base}"
+        verify = process_runner.run(
+            ["git", "rev-parse", "--verify", "--quiet", remote_ref],
+            cwd=repo_path,
+            check=False,
+        )
+        if verify.return_code == 0:
+            return remote_ref
+    _logger.warning(
+        "Could not refresh base '%s' from '%s'; forking from local base.",
+        local_base,
+        remote,
+    )
+    return local_base
+
+
 def create_or_reuse_worktree(
     repo_path: Path,
     issue: IssueSummary,
@@ -119,6 +189,7 @@ def create_or_reuse_worktree(
     install). Reused worktrees are healed the same way; existing files and
     ``node_modules`` are not touched.
     """
+    fork_base = _resolve_fork_base(repo_path, issue, config, process_runner)
     # Hold the shared-git lock only for the worktree-add writes; the agent run
     # (the long pole) happens later in the caller, outside this lock.
     with _SHARED_GIT_LOCK:
@@ -126,7 +197,7 @@ def create_or_reuse_worktree(
             format_command(
                 config.worktree.create_command,
                 issue_number=issue.number,
-                base_branch=config.worktree.base_branch,
+                base_branch=fork_base,
             ),
             cwd=repo_path,
             check=False,

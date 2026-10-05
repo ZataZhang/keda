@@ -73,6 +73,7 @@ from backend.infrastructure.github_pr_ops import (
     list_pr_comments,
     list_pull_requests_for_issue,
     merge_pull_request,
+    set_pull_request_base,
     update_pull_request_body,
 )
 from backend.infrastructure.process_runner import CommandResult, SubprocessRunner
@@ -300,6 +301,9 @@ class GitHubCliClient:
 
     def update_pull_request_body(self, pr_number: int, body: str) -> None:
         update_pull_request_body(self, pr_number, body)
+
+    def set_pull_request_base(self, pr_number: int, base_branch: str) -> None:
+        set_pull_request_base(self, pr_number, base_branch)
 
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
         merge_pull_request(self, pr_number, method=method)
