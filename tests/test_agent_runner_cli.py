@@ -1248,6 +1248,16 @@ def test_main_daemon_with_repo_id_does_not_default_to_all(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon"),
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch(
+            # This test uses the real ``keda`` repo id, whose single-instance
+            # lock is live whenever the project's own daemon runs. Isolate it
+            # like the cwd-resolution daemon tests so the assertion on repo-id
+            # routing stays deterministic; locking itself is covered by
+            # tests/test_daemon_single_instance.py.
+            "backend.api.cli.acquire_daemon_locks",
+            return_value=[],
+        ),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--repo-id", "keda"])
 

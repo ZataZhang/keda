@@ -592,3 +592,12 @@ backlog_settings (原 roadmap_settings)
 - Reason: 呈递物没有落到评审者真能读到的载体上，等于证据只在 executor 本机存在；PRD §9.1 的 10 秒自检要求人能在不打开本地目录的情况下看完命名结论。
 - Impact: 只新增 `tasks/evidence/` 下的文本报告与两处计数校正，不改变任何用户可见行为、对外契约、§10 FR 与 §11 范围，也不改动 rv-1..rv-4 的判据本身。`check_prd_evidence.sh` 的嵌图检查自本报告存在起才真正生效（此前因报告缺失而直接返回），后续新增静态图必须继续嵌图。
 - Review: 自记（呈递载体补齐；4 项 `Human-Confirmed` 仍保持空框，等 reviewer 回答，见 `human-review-checklist.md`）。
+
+### 返修复核（2026-10-05）：daemon 用例被本机在跑的 keda daemon 单实例锁判红
+
+- Type: test
+- Before: `tests/test_agent_runner_cli.py::test_main_daemon_with_repo_id_does_not_default_to_all` 直接跑 `main(["daemon", "--repo-id", "keda"])`，单实例锁落在真实 `~/.iar/daemon-locks/keda.lock`；本机只要有该仓库的 daemon 在跑（本轮即 runner 自己的 daemon，PID 存活），锁获取就被拒、`main` 返回 1，runner 门禁 `just test all` 判红（1 failed / 2887 passed）。这是上一轮"隔离改由测试自身完成"口径的同类漏网：受影响的恰好只有这一条用真实 repo_id `keda` 的用例。
+- After: 该用例沿用同文件既有先例（`test_main_daemon_cwd_matches_enabled_single_repo` 的做法），patch `backend.api.cli.acquire_daemon_locks` / `release_daemon_locks` 并注释说明理由——本用例断言的是 `--repo-id` 路由（不默认 `--all`），锁行为本身由 `tests/test_daemon_single_instance.py` 专项覆盖。未改动任何被测源码行为、未增删用例。修复后 runner 门禁命令 `just test all` 在本 worktree 真实环境复跑通过：`2888 passed, 1 skipped`。
+- Reason: 路由断言不应依赖"本机恰好没有在跑的 daemon"这一机器状态；否则每次自动执行轮到有 daemon 在跑就必红。
+- Impact: 仅测试隔离；对外契约、§10 FR、rv-1..rv-4 判据均不变。
+- Review: 自记（返修性质：修复门禁判红，未削弱任何用户可见、安全、范围或真实验证要求）。
