@@ -119,7 +119,6 @@ class AgentRunnerLabelSettings(BaseModel):
     validation_pending: str = "validation/pending"
     validation_passed: str = "validation/passed"
     verifier_passed: str = "validation/verifier-passed"
-    group_prefix: str = "task-group/"
     codex: str | None = None
     claude: str | None = None
     kimi: str | None = None

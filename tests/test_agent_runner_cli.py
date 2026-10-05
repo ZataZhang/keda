@@ -135,12 +135,9 @@ def test_cli_parser_issue_create_dependency_options() -> None:
             "42",
             "--depends-on",
             "43",
-            "--depends-on-group",
-            "upstream-a",
         ]
     )
     assert parsed.depends_on == [42, 43]
-    assert parsed.depends_on_group == ["upstream-a"]
 
 
 def test_cli_parser_issue_create_accepts_directory() -> None:

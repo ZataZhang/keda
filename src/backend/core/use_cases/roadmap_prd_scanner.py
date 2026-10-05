@@ -156,15 +156,6 @@ def _build_dependencies(
                 detail=f"Issue #{issue_number}",
             )
         )
-    for group_name in delivery_decl.depends_on_groups:
-        dependencies.append(
-            RoadmapDependency(
-                from_path=prd_path,
-                to_path=f"group:{group_name}",
-                kind=RoadmapDependencyKind.GROUP,
-                detail=f"Group {group_name}",
-            )
-        )
     for prd_ref in delivery_decl.depends_on_prds:
         resolved_path = _resolve_prd_ref(prd_ref, prd_path_to_issue_number)
         if resolved_path is None:

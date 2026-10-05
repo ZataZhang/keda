@@ -335,7 +335,6 @@ class LabelConfig:
     validation_pending: str = "validation/pending"
     validation_passed: str = "validation/passed"
     verifier_passed: str = "validation/verifier-passed"
-    group_prefix: str = "task-group/"
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
     # agent 路由标签由 agent 注册表派生（agent 名 -> spec.label），
@@ -939,16 +938,12 @@ class DeliveryDependencyDeclaration:
     """Structured dependency declaration parsed from a PRD.
 
     Attributes:
-        group: The task group this Issue belongs to, or empty string.
-        depends_on_groups: Group labels that must be fully closed.
         depends_on_issues: Specific Issue numbers that must be closed.
         depends_on_prds: PRD paths or filenames to resolve at Issue creation time.
         gate_type: One of ``"hard"``, ``"soft"``, ``"none"``.
         notes: Free-form operator notes.
     """
 
-    group: str = ""
-    depends_on_groups: tuple[str, ...] = ()
     depends_on_issues: tuple[int, ...] = ()
     depends_on_prds: tuple[str, ...] = ()
     gate_type: str = "none"
@@ -961,11 +956,9 @@ class DependencyDeclaration:
 
     Attributes:
         issue_numbers: Upstream Issue numbers this Issue depends on.
-        groups: Upstream group labels this Issue depends on.
     """
 
     issue_numbers: tuple[int, ...] = ()
-    groups: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -984,4 +977,3 @@ class DependencyVerdict:
     satisfied: bool
     blockers: tuple[DependencyBlocker, ...] = ()
     has_failed_or_blocked_upstream: bool = False
-    empty_group_names: tuple[str, ...] = ()

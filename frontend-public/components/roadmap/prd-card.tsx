@@ -122,7 +122,7 @@ export function PrdCard({ prd, onStart, onOpenContent, starting }: PrdCardProps)
                 className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                 title={dep.detail}
               >
-                {dep.kind === "prd" ? "→" : dep.kind === "issue" ? "#" : "G:"} {dep.to_path}
+                {dep.kind === "prd" ? "→" : dep.kind === "issue" ? "#" : "?"} {dep.to_path}
               </span>
             ))}
           </div>

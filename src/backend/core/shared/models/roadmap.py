@@ -31,7 +31,6 @@ class RoadmapDependencyKind(str, Enum):
 
     PRD = "prd"
     ISSUE = "issue"
-    GROUP = "group"
     UNRESOLVED = "unresolved"
 
 

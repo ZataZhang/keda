@@ -114,7 +114,6 @@ def test_parses_delivery_dependencies(tmp_path: Path) -> None:
             "# PRD: Deps\n\n"
             "## Delivery Dependencies\n"
             "- Depends on tasks/issues: #7, tasks/pending/P1-FEAT-20260101-upstream.md\n"
-            "- Depends on groups: infra\n"
             "- Gate type: soft\n"
         ),
     )
@@ -128,7 +127,6 @@ def test_parses_delivery_dependencies(tmp_path: Path) -> None:
     kinds = {dep.kind for dep in prd.delivery_dependencies}
     assert RoadmapDependencyKind.ISSUE in kinds
     assert RoadmapDependencyKind.PRD in kinds
-    assert RoadmapDependencyKind.GROUP in kinds
 
 
 def test_unresolved_prd_dependency_is_marked(tmp_path: Path) -> None:

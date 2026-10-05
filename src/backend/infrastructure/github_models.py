@@ -61,7 +61,6 @@ class LabelConfig:
     waiting: str = "agent/waiting"
     validation_pending: str = "validation/pending"
     validation_passed: str = "validation/passed"
-    group_prefix: str = "task-group/"
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
     # agent 路由标签由 agent 注册表派生（agent 名 -> spec.label）。

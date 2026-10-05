@@ -57,6 +57,9 @@ _DELIVERY_PRD_PATH_RE = re.compile(
 )
 _NONE_DEPENDENCY_VALUES = {"", "none", "n/a", "na", "-"}
 
+#: 旧版 ``Group`` / ``Depends on groups`` 字段的哨兵值：解析器接受但忽略这些字段。
+_LEGACY_IGNORED_DELIVERY_FIELD = "__legacy_ignored__"
+
 
 def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     """Parse the structured ``Delivery Dependencies`` section from a PRD.
@@ -86,8 +89,6 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
         section_text = prd_text[section_start:]
 
     field_values: dict[str, list[str]] = {
-        "group": [],
-        "depends_on_groups": [],
         "depends_on_issues": [],
         "gate_type": [],
         "notes": [],
@@ -102,6 +103,11 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
         if field_match:
             raw_key = field_match.group("key").strip()
             key = _normalize_delivery_field_key(raw_key)
+            if key == _LEGACY_IGNORED_DELIVERY_FIELD:
+                # 旧版 ``Group`` / ``Depends on groups`` 已废弃：接受但忽略，
+                # 使历史 PRD 仍可解析，不再产生任务组依赖。
+                current_key = ""
+                continue
             current_key = key
             value = field_match.group("value").strip()
             if value:
@@ -110,7 +116,6 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
 
         list_item_match = _DELIVERY_LIST_ITEM_RE.match(line)
         if list_item_match and current_key in (
-            "depends_on_groups",
             "depends_on_issues",
             "notes",
         ):
@@ -118,8 +123,6 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
             if value:
                 field_values[current_key].append(value)
 
-    group = _parse_optional_scalar(field_values["group"])
-    depends_on_groups = _parse_group_names(field_values["depends_on_groups"])
     depends_on_issues, depends_on_prds = _parse_issue_or_prd_refs(field_values["depends_on_issues"])
     gate_type = _parse_optional_scalar(field_values["gate_type"]) or "none"
     notes = " ".join(field_values["notes"]).strip()
@@ -132,8 +135,6 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
         )
 
     return DeliveryDependencyDeclaration(
-        group=group,
-        depends_on_groups=tuple(depends_on_groups),
         depends_on_issues=tuple(depends_on_issues),
         depends_on_prds=tuple(depends_on_prds),
         gate_type=normalized_gate or "none",
@@ -142,12 +143,14 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
 
 
 def _normalize_delivery_field_key(raw_key: str) -> str:
-    """Normalize a structured Delivery Dependencies field name."""
+    """Normalize a structured Delivery Dependencies field name.
+
+    旧版 ``Group`` / ``Depends on groups`` 字段返回
+    :data:`_LEGACY_IGNORED_DELIVERY_FIELD`，由调用方跳过，不再参与解析。
+    """
     key = raw_key.strip().lower().replace(" ", "_")
-    if key == "group":
-        return "group"
-    if key in ("depends_on_groups", "depends_on_group"):
-        return "depends_on_groups"
+    if key in ("group", "depends_on_groups", "depends_on_group"):
+        return _LEGACY_IGNORED_DELIVERY_FIELD
     if key in (
         "depends_on_tasks/issues",
         "depends_on_tasks",
@@ -160,8 +163,7 @@ def _normalize_delivery_field_key(raw_key: str) -> str:
         return "notes"
     raise ValueError(
         f"Unknown field in Delivery Dependencies: {raw_key!r}. "
-        "Expected one of: Group, Depends on groups, "
-        "Depends on tasks/issues, Gate type, Notes."
+        "Expected one of: Depends on tasks/issues, Gate type, Notes."
     )
 
 
@@ -173,23 +175,6 @@ def _parse_optional_scalar(values: list[str]) -> str:
             continue
         return item
     return ""
-
-
-def _split_dependency_values(values: list[str]) -> list[str]:
-    """Split comma/semicolon fields and Markdown list values."""
-    items: list[str] = []
-    for value in values:
-        for item in re.split(r"[,;]", value):
-            normalized_item = item.strip()
-            if normalized_item.lower() in _NONE_DEPENDENCY_VALUES:
-                continue
-            items.append(normalized_item)
-    return items
-
-
-def _parse_group_names(values: list[str]) -> list[str]:
-    """Parse dependency group names from scalar or Markdown list values."""
-    return _split_dependency_values(values)
 
 
 def _parse_issue_or_prd_refs(values: list[str]) -> tuple[list[int], list[str]]:
@@ -277,40 +262,36 @@ def _looks_like_issue_or_prd_ref(candidate_ref: str) -> bool:
 def parse_dependency_marker(issue_body: str) -> DependencyDeclaration | None:
     """Parse ``iar:depends-on`` hidden markers from an Issue body.
 
+    旧版 marker 中的 ``group:<name>`` token 会被忽略（任务组依赖已移除）；
+    只解析 ``#N`` Issue 引用。
+
     Args:
         issue_body: Full Issue body Markdown.
 
     Returns:
-        Parsed dependency declaration, or ``None`` if no markers found.
+        Parsed dependency declaration, or ``None`` if no Issue references found.
     """
     issue_numbers: list[int] = []
-    groups: list[str] = []
     for match in _DEPENDS_ON_MARKER_PATTERN.finditer(issue_body):
         body = match.group("body")
         # Issue references: #N
         for num_match in re.finditer(r"#(\d+)", body):
             issue_numbers.append(int(num_match.group(1)))
-        # Group references: group:X
-        for group_match in re.finditer(r"group:([^\s,;]+)", body):
-            groups.append(group_match.group(1).strip())
-    if not issue_numbers and not groups:
+    if not issue_numbers:
         return None
     return DependencyDeclaration(
         issue_numbers=tuple(sorted(set(issue_numbers))),
-        groups=tuple(sorted(set(groups))),
     )
 
 
 def format_dependency_marker(
     *,
     issue_numbers: tuple[int, ...] = (),
-    groups: tuple[str, ...] = (),
 ) -> str:
     """Format a materialised ``iar:depends-on`` hidden marker.
 
     Args:
         issue_numbers: Upstream Issue numbers.
-        groups: Upstream group names.
 
     Returns:
         Hidden HTML comment marker string.
@@ -318,8 +299,6 @@ def format_dependency_marker(
     parts: list[str] = []
     for number in issue_numbers:
         parts.append(f"#{number}")
-    for group in groups:
-        parts.append(f"group:{group}")
     if not parts:
         return ""
     return f"<!-- iar:depends-on {' '.join(parts)} -->"
@@ -373,20 +352,17 @@ def evaluate_dependencies(
     """Evaluate whether all dependencies in ``declaration`` are satisfied.
 
     An Issue dependency is satisfied when the target Issue is closed.
-    A group dependency is satisfied when all Issues with that group label are
-    closed **and** the group has at least one member.
 
     Args:
         declaration: Materialised dependency declaration from Issue body.
         github_client: GitHub client for live queries.
-        labels_config: Label configuration (for group prefix).
+        labels_config: Label configuration (for failure/blocked labels).
 
     Returns:
         Verdict including satisfaction flag and blocker details.
     """
     blockers: list[DependencyBlocker] = []
     has_failed_or_blocked = False
-    empty_group_names: list[str] = []
 
     # Issue dependencies
     for issue_number in declaration.issue_numbers:
@@ -414,51 +390,10 @@ def evaluate_dependencies(
         if any(label in upstream.labels for label in (labels_config.failed, labels_config.blocked)):
             has_failed_or_blocked = True
 
-    # Group dependencies
-    for group in declaration.groups:
-        group_label = f"{labels_config.group_prefix}{group}"
-        try:
-            members = github_client.list_issues_by_label(group_label, limit=1000, state="all")
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning("Failed to query group %s: %s", group_label, exc)
-            blockers.append(
-                DependencyBlocker(
-                    blocker_type="group",
-                    target=group,
-                    current_state="unknown",
-                )
-            )
-            continue
-        if not members:
-            empty_group_names.append(group)
-            blockers.append(
-                DependencyBlocker(
-                    blocker_type="group",
-                    target=group,
-                    current_state="empty",
-                )
-            )
-            continue
-        open_members = [m for m in members if m.state.upper() != "CLOSED"]
-        if open_members:
-            blockers.append(
-                DependencyBlocker(
-                    blocker_type="group",
-                    target=group,
-                    current_state=f"{len(open_members)} open",
-                )
-            )
-        for member in members:
-            if any(
-                label in member.labels for label in (labels_config.failed, labels_config.blocked)
-            ):
-                has_failed_or_blocked = True
-
     return DependencyVerdict(
         satisfied=not blockers,
         blockers=tuple(blockers),
         has_failed_or_blocked_upstream=has_failed_or_blocked,
-        empty_group_names=tuple(empty_group_names),
     )
 
 
@@ -495,14 +430,6 @@ def build_waiting_comment(
             else:
                 state_emoji = "❌" if blocker.current_state.upper() != "CLOSED" else "✅"
                 lines.append(f"- Issue #{blocker.target}: {state_emoji} {blocker.current_state}")
-        elif blocker.blocker_type == "group":
-            if blocker.current_state == "empty":
-                lines.append(
-                    f"- Group ``{blocker.target}``: ⚠️ empty group "
-                    f"(possible typo in ``{labels_config.group_prefix}{blocker.target}`` label)"
-                )
-            else:
-                lines.append(f"- Group ``{blocker.target}``: ❌ {blocker.current_state}")
 
     if verdict.has_failed_or_blocked_upstream:
         lines.extend(
@@ -532,46 +459,28 @@ def _build_resolution_guidance(
 ) -> list[str]:
     """Build actionable remediation bullets for a waiting verdict.
 
-    Each blocker category (empty group, still-open upstream, failed/blocked
-    upstream, unknown state) maps to a concrete fix so an operator reading the
-    comment knows what to do instead of only seeing the symptom.
+    Each blocker category (still-open upstream, failed/blocked upstream,
+    unknown state) maps to a concrete fix so an operator reading the comment
+    knows what to do instead of only seeing the symptom.
 
     Args:
         verdict: Dependency evaluation result.
-        labels_config: Label configuration (for label-prefix references).
+        labels_config: Label configuration (for label references).
 
     Returns:
         Markdown bullet lines, or an empty list when no guidance applies.
     """
-    group_prefix = labels_config.group_prefix
-    has_empty_group = any(
-        blocker.blocker_type == "group" and blocker.current_state == "empty"
-        for blocker in verdict.blockers
-    )
     has_open_blocker = any(
-        (
-            blocker.blocker_type == "issue"
-            and blocker.current_state.upper() not in ("CLOSED", "UNKNOWN")
-        )
-        or (blocker.blocker_type == "group" and blocker.current_state not in ("empty", "unknown"))
+        blocker.blocker_type == "issue"
+        and blocker.current_state.upper() not in ("CLOSED", "UNKNOWN")
         for blocker in verdict.blockers
     )
     has_unknown_blocker = any(blocker.current_state == "unknown" for blocker in verdict.blockers)
 
     guidance: list[str] = []
-    if has_empty_group:
-        guidance.append(
-            f"- **Empty group**: no Issue carries the ``{group_prefix}<group>`` label, "
-            "so the group can never be satisfied. Fix it one of three ways — "
-            f"(1) label the upstream Issues with ``{group_prefix}<group>`` and close "
-            "them; (2) correct the group name to match an existing "
-            f"``{group_prefix}*`` label if it is a typo; or (3) drop the group from "
-            "the Issue body ``<!-- iar:depends-on ... -->`` marker (and the PRD "
-            "``Depends on groups`` section) if the dependency is no longer needed."
-        )
     if has_open_blocker:
         guidance.append(
-            "- **Open upstream**: wait for the listed Issues/groups to close, or remove "
+            "- **Open upstream**: wait for the listed Issues to close, or remove "
             "them from the ``<!-- iar:depends-on ... -->`` marker if they are no longer "
             "required."
         )

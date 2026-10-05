@@ -303,7 +303,6 @@ def fire_loop(
             git_base_branch="main",
             generated_content_config=None,
             depends_on=(),
-            depends_on_group=(),
             parse_evidence_format_with_agent=False,
             validation_language="zh-CN",
             structured_evidence=True,

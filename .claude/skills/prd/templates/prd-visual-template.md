@@ -264,9 +264,6 @@ If no external validation was needed:
 
 工具中立的排期元数据，不是工具专属队列语法。无依赖时显式写 `none`。
 
-- Group: [logical-delivery-group-or-none]
-- Depends on groups:
-  - none
 - Depends on tasks/issues:
   - none
 - Gate type: none

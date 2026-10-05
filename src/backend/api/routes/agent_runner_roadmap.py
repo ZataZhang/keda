@@ -155,7 +155,6 @@ def _build_roadmap_response(
     block_reasons = evaluate_roadmap_dependencies(
         prds,
         github_client=github_client,
-        labels_config=context.config.labels,
     )
     resolved = resolve_roadmap_states(
         prds,

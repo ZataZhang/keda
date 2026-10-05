@@ -39,7 +39,7 @@
 - **rebase 冲突 agent 解决基础能力已落地**：post-PR supervisor 的 rebase 路径遇到冲突时可调用 agent 处理冲突、运行验证并用 `--force-with-lease` 推送。
 - **AI 生成 Issue / PR 内容已落地**：`[agent_runner.generated_content]` 支持 template 和只读 agent 两种模式，并对 Issue 的 PRD anchor 与 PR 的 `Closes #...` anchor 做 fallback 校验。
 - **只读多 agent 合议基础能力已落地**：`iar deliberate` 能运行 architect / skeptic / implementer 等 profile，输出 event stream、transcript、result、session metadata 和隔离 workspace 原始输出。
-- **Issue 依赖门禁已落地**：PRD `Delivery Dependencies` 小节在 `iar issue create` 时被物化为 `iar:depends-on` marker 和 `task-group/` label；runner 领取 `agent/ready` Issue 前实时判定依赖满足状态，未满足时叠加 `agent/waiting` label 并写去重 comment；支持 Issue 编号依赖和 group 依赖，空 group 防护，上游 failed/blocked 点名提示。
+- **Issue 依赖门禁已落地**：PRD `Delivery Dependencies` 小节在 `iar issue create` 时被物化为 `iar:depends-on` marker；runner 领取 `agent/ready` Issue 前实时判定依赖满足状态，未满足时叠加 `agent/waiting` label 并写去重 comment；仅支持 Issue 编号依赖，上游 failed/blocked 点名提示。
 - **Agent Runner 记忆持久化已落地**：runner 启动时检索长期记忆 / 草稿 / 已晋升 skill，短期记忆写入 worktree 局部目录、问题关闭后清理；skill 草稿按 usage_count 自动晋升阈值（默认 3）。
 - **Agent Runner 记忆锚点稳定化已落地**：所有记忆目录在 `factory` 构建 `RepositoryRunContext` 时被一次性绝对化到目标仓库主检出根，跨 worktree / 跨 Issue 持久化真实生效；共享目录写入采用 tmp + `os.replace` 原子落盘，并发场景 last-write-wins 不产生半写文件；原 PRD 验收降级为"同目录内部函数调用"的失真场景已被纠正，证据脚本强制 `git worktree add` 创建两个真实副本。
 - **`api → engines` 直连已迁移回 `core` 编排层**：`src/backend/api/` 对 11 个 `engines/agent_runner/` 能力的直连 import 全部清零，业务类能力在 `core/use_cases/` 补薄 facade 用例或复用既有用例；`live_terminal` / `runner_live_view` 等呈现模块从 engines 迁入 `api/`；`hooks/shared/check_architecture.py` 的 `FORBIDDEN_IMPORTS["api"]` 恢复严格态 `["infrastructure", "engines"]` 并稳定通过 `just lint --full`；`CLAUDE.md` 与 `docs/ai-standards/architecture.md`、`docs/architecture/system-design.md` 关于 `api/` 依赖方向的表述三处一致。
@@ -347,4 +347,3 @@ Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/back
 - 快速档是否允许只开"自动签核+rebase"但禁掉 squash 合并，或只禁合并保留自动签核；当前 PRD 锁 squash 是默认选择。
 - 持续调度的 `max_parallel` 与 daemon `--concurrency` 同时启用时，是否需要在启动时显式校验二者口径并提示用户。
 - 触碰面预测与并行撞车避让已在 2026-09-16 评估后**整体取消**（默认串行恒不触发 + 并发下发布竞态失效；触碰面本可从 PRD 自带的 `### Change Impact Tree` 静态解析，无需 agent 预测）。原"两个 Issue 几乎同时开工时互相看不见对方 touch-map 的漏网冲突"问题随之不再存在；若将来重启该方向，须先解决上述两个前提。冲突兜底仍由合并队列 rebase + 全量验证承担。
-- 跨 PRD 的 `task-group/` 依赖失败时是否需要在 queue 报告中聚合显示，避免单 PRD 错误信息淹没整组状态。

@@ -2,7 +2,7 @@
 
 This module takes the dependency edges produced by
 :mod:`roadmap_prd_scanner` and resolves them against the current GitHub
-state (Issue closed, group members closed, PRD refs merged/archived).
+state (Issue closed, PRD refs merged/archived).
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from collections import deque
 from collections.abc import Sequence
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
-from backend.core.shared.models.agent_runner import LabelConfig
 from backend.core.shared.models.roadmap import (
     RoadmapDependencyKind,
     RoadmapPrd,
@@ -33,25 +32,6 @@ def _is_issue_closed(
         _logger.info("Failed to look up dependency issue #%s: %s", issue_number, exc)
         return False
     return issue.state.upper() == "CLOSED"
-
-
-def _is_group_fully_closed(
-    group_name: str,
-    github_client: IGitHubClient,
-    labels_config: LabelConfig,
-) -> bool:
-    """Return ``True`` if every open issue with the group label is closed."""
-    group_label = f"{labels_config.group_prefix}{group_name}"
-    try:
-        issues = github_client.list_issues_by_label(label=group_label, limit=1000, state="all")
-    except Exception as exc:  # noqa: BLE001
-        _logger.info("Failed to list group %s issues: %s", group_label, exc)
-        return False
-    # If there are no issues at all, the group is considered unresolvable rather
-    # than closed so that typos do not silently pass.
-    if not issues:
-        return False
-    return all(issue.state.upper() == "CLOSED" for issue in issues)
 
 
 def _detect_cycles(prds: Sequence[RoadmapPrd]) -> set[str]:
@@ -92,14 +72,12 @@ def _detect_cycles(prds: Sequence[RoadmapPrd]) -> set[str]:
 def evaluate_roadmap_dependencies(
     prds: Sequence[RoadmapPrd],
     github_client: IGitHubClient,
-    labels_config: LabelConfig,
 ) -> dict[str, str | None]:
     """Evaluate dependency satisfaction for each PRD.
 
     Args:
         prds: PRDs from the scanner.
         github_client: GitHub client for live state.
-        labels_config: Label names configuration.
 
     Returns:
         Mapping from PRD path to block reason, or ``None`` if unblocked.
@@ -146,10 +124,6 @@ def evaluate_roadmap_dependencies(
                 issue_number = int(dep.to_path.lstrip("#"))
                 if not _is_issue_closed(issue_number, github_client):
                     blockers.append(f"上游 Issue #{issue_number} 未关闭")
-            elif dep.kind is RoadmapDependencyKind.GROUP:
-                group_name = dep.to_path.split(":", 1)[1]
-                if not _is_group_fully_closed(group_name, github_client, labels_config):
-                    blockers.append(f"任务组 {group_name} 仍有未关闭 Issue")
             elif dep.kind is RoadmapDependencyKind.PRD:
                 upstream = prd_by_path.get(dep.to_path)
                 if upstream is None:

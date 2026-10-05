@@ -225,8 +225,6 @@ def test_create_issue_from_prd_materializes_prd_ref_issue_link(
     downstream_prd.write_text(
         "# PRD: Downstream\n\n"
         "## Delivery Dependencies\n\n"
-        "- Group: downstream-group\n"
-        "- Depends on groups:\n"
         "- Depends on tasks/issues:\n"
         "  - P2-FEAT-20260527-190923-prd-from-issue\n"
         "- Gate type: hard\n",
@@ -243,13 +241,12 @@ def test_create_issue_from_prd_materializes_prd_ref_issue_link(
 
     create_calls = [c for c in fake_client.calls if c["method"] == "create_issue"]
     assert "<!-- iar:depends-on #77 -->" in create_calls[0]["body"]
-    assert "task-group/downstream-group" not in create_calls[0]["labels"]
 
 
-def test_create_issue_from_prd_materializes_prd_ref_group_fallback(
+def test_create_issue_from_prd_missing_issue_link_fails_fast(
     tmp_path: Path,
 ) -> None:
-    """PRD refs without Issue links should resolve to the upstream PRD group."""
+    """PRD refs without an Issue link must fail fast instead of falling back to a group."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_repo(repo)
@@ -261,8 +258,6 @@ def test_create_issue_from_prd_materializes_prd_ref_group_fallback(
     upstream_prd.write_text(
         "# PRD: Upstream\n\n"
         "## Delivery Dependencies\n\n"
-        "- Group: prd-from-issue-generation\n"
-        "- Depends on groups:\n"
         "- Depends on tasks/issues:\n"
         "- Gate type: none\n",
         encoding="utf-8",
@@ -271,23 +266,24 @@ def test_create_issue_from_prd_materializes_prd_ref_group_fallback(
     downstream_prd.write_text(
         "# PRD: Downstream\n\n"
         "## Delivery Dependencies\n\n"
-        "- Depends on groups:\n"
         "- Depends on tasks/issues:\n"
         "  - tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md\n"
         "- Gate type: hard\n",
         encoding="utf-8",
     )
 
-    create_issue_from_prd(
-        request=_request(
-            repo,
-            Path("tasks/pending/P2-FEAT-20260528-110730-prd-review.md"),
-        ),
-        github_client=fake_client,
-    )
+    with pytest.raises(ValueError) as exc_info:
+        create_issue_from_prd(
+            request=_request(
+                repo,
+                Path("tasks/pending/P2-FEAT-20260528-110730-prd-review.md"),
+            ),
+            github_client=fake_client,
+        )
 
-    create_calls = [c for c in fake_client.calls if c["method"] == "create_issue"]
-    assert "<!-- iar:depends-on group:prd-from-issue-generation -->" in create_calls[0]["body"]
+    message = str(exc_info.value)
+    assert "has no '- GitHub Issue" in message
+    assert [c for c in fake_client.calls if c["method"] == "create_issue"] == []
 
 
 def test_create_issue_from_prd_unresolved_prd_ref_is_actionable(

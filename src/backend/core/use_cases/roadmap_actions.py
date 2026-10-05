@@ -426,7 +426,6 @@ def start_global_roadmap(
     block_reasons = evaluate_roadmap_dependencies(
         prds,
         github_client=github_client,
-        labels_config=context.config.labels,
     )
     resolved_prds = resolve_roadmap_states(
         prds,
@@ -631,7 +630,6 @@ def advance_roadmap_queue(
     block_reasons = evaluate_roadmap_dependencies(
         scanned_prds,
         github_client=github_client,
-        labels_config=context.config.labels,
     )
     resolved_prds = resolve_roadmap_states(
         scanned_prds,

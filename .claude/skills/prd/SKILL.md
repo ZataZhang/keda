@@ -58,7 +58,7 @@ You must inspect existing PRDs before creating a new one:
 - search `tasks/pending/` first for duplicate, overlapping, prerequisite, or downstream work
 - search `tasks/archive/` when a completed PRD may define context, prior decisions, or reusable acceptance criteria
 - reuse or update an existing pending PRD when it clearly represents the same work instead of creating a duplicate
-- populate `Delivery Dependencies` from explicit pending PRD relationships when a task must wait for another task or group
+- populate `Delivery Dependencies` from explicit pending PRD relationships when a task must wait for another task
 - use `none` only after checking pending PRDs and finding no sequencing dependency
 - do not infer hard dependencies from vague topic similarity; record uncertain relationships as `soft` or ask the user when dependency choice changes scope or execution order
 
@@ -321,9 +321,6 @@ Use this shape:
 ```markdown
 ### Delivery Dependencies
 
-- Group: [logical-delivery-group-or-none]
-- Depends on groups:
-  - none
 - Depends on tasks/issues:
   - none
 - Gate type: none
@@ -331,8 +328,6 @@ Use this shape:
 ```
 
 Rules:
-- `Group` names the logical delivery group for this PRD, or `none`.
-- `Depends on groups` lists logical upstream groups, not tool-specific labels.
 - `Depends on tasks/issues` lists upstream task names, PRD slugs, issue numbers, or `none`.
 - `Gate type` must be `none`, `soft`, or `hard`.
 - `hard` means an execution tool may treat the dependency as a blocking gate when that repository has a deterministic adapter.

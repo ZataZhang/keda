@@ -92,7 +92,7 @@ iar completion show --shell zsh
 - 不会同时出现 `agent/supervising` + `agent/failed`
 - 历史脏状态（如同时贴有多个 workflow labels）会在下一次被处理时自动收敛到单一状态
 
-工具路由标签（`agent/codex`、`agent/claude`、`agent/kimi`）、任务组标签（`task-group/*`）等非 workflow labels 不会被清理。
+工具路由标签（`agent/codex`、`agent/claude`、`agent/kimi`）、类型标签（`type/*`）等非 workflow labels 不会被清理。
 
 ### 14 个标准标签
 
@@ -157,8 +157,6 @@ iar labels sync --repo-id keda
 ```markdown
 ## Delivery Dependencies
 
-- Group: my-group
-- Depends on groups: upstream-group-a, upstream-group-b
 - Depends on tasks/issues: #42, tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md
 - Gate type: hard
 - Notes: 等待上游 API 改造完成
@@ -168,8 +166,6 @@ iar labels sync --repo-id keda
 
 | 字段 | 说明 |
 |---|---|
-| `Group` | 本 Issue 所属的任务组；当其他 PRD 引用本 PRD 且本 PRD 尚未关联 Issue 时，可作为 fallback 物化为 `group:<name>` 依赖 marker |
-| `Depends on groups` | 上游任务组，该组下全部 Issue closed 后才满足 |
 | `Depends on tasks/issues` | 上游 Issue 编号或 PRD 引用；Issue 支持 `#N` / `N`，PRD 支持 repo-relative 路径或 `tasks/` 下唯一文件名/文件 stem，多个用逗号/分号或 Markdown 子列表分隔；引用后可以追加说明文字，解析器只提取引用 token |
 | `Gate type` | `hard` = 阻塞门禁；`soft` = 仅文档信息，不阻塞；`none` = 不生成依赖 marker |
 | `Notes` | 自由备注 |
@@ -177,9 +173,10 @@ iar labels sync --repo-id keda
 PRD 引用只在 `iar issue create` 发布时解析，不会原样写入 Issue body。解析规则：
 
 - 引用 PRD 已包含 `- GitHub Issue: .../issues/N` 时，物化为 `#N` 依赖 marker。
-- 引用 PRD 没有 Issue link 但包含 `Delivery Dependencies` 的 `Group` 时，物化为 `group:<group>` 依赖 marker。
-- 引用无法唯一匹配、引用 PRD 既没有 Issue link 也没有 `Group` 时，命令 fail fast，并提示改成 Issue 编号、repo-relative PRD 路径，或先补上游 PRD 的 Issue link / Group。
+- 引用 PRD 还没有 Issue link 时，命令 fail fast，并提示先创建上游 Issue（`iar issue create` 会把 Issue 链接回写进 PRD），或改成明确的 Issue 编号。
 - 无依赖时可以留空或写 `none`。
+
+> 历史 PRD 里可能残留旧版 `Group` / `Depends on groups` 字段；解析器接受但忽略它们，不再产生任务组依赖。
 
 ### CLI 参数覆盖
 
@@ -188,9 +185,6 @@ PRD 引用只在 `iar issue create` 发布时解析，不会原样写入 Issue b
 ```bash
 # 声明依赖上游 Issue #42 和 #43
 iar issue create tasks/pending/foo.md --depends-on 42 --depends-on 43
-
-# 声明依赖上游组 upstream-a
-iar issue create tasks/pending/foo.md --depends-on-group upstream-a
 ```
 
 CLI 参数与 PRD 声明会**合并去重**，CLI 参数优先级最高。
@@ -201,7 +195,6 @@ CLI 参数与 PRD 声明会**合并去重**，CLI 参数优先级最高。
 - 依赖未满足：`agent/ready` 保持，叠加 `agent/waiting`，写 comment 说明阻塞原因
 - 依赖满足：自动移除 `agent/waiting`（若有），正常进入领取流程
 - 上游出现 `agent/failed` 或 `agent/blocked`：等待 comment 中会点名该上游 Issue，提示 operator 干预
-- 空 group（无任何成员）：判定为不满足，comment 中提示疑似拼写错误
 - 连续多轮 blockers 不变时只有一条 comment（按 blockers 集合去重）
 - `--dry-run` 模式下打印等待原因但不写任何 GitHub 状态
 
@@ -1750,19 +1743,13 @@ If you want the runner to generate the PRD but **hold before implementing** (e.g
 <!-- iar:depends-on #<sentinel-issue> -->
 ```
 
-Group form (waits until every Issue labeled `task-group/<name>` is closed):
-
-```text
-<!-- iar:depends-on group:<name> -->
-```
-
 How it behaves:
 
 - The gate is evaluated in the ready-issue phase (`run_once`), **not** during PRD generation. The PRD is still generated, committed, and published as a draft PR; only implementation is held.
-- An unsatisfied dependency adds `agent/waiting` and the Issue is skipped. An Issue dependency is satisfied when the target Issue is **closed**; a group dependency when all members carrying the `task-group/<name>` label are closed. Close the sentinel Issue (or the group members) to release — the next pass clears `agent/waiting` and proceeds to implementation.
+- An unsatisfied dependency adds `agent/waiting` and the Issue is skipped. An Issue dependency is satisfied when the target Issue is **closed**. Close the sentinel Issue to release — the next pass clears `agent/waiting` and proceeds to implementation.
 - Add the marker to the Issue body **before** the rework pass. Removing `agent/ready` after generation is racy, because generation and the first claim can happen in the same pass; the body marker is evaluated up front and avoids that race. The rework step only edits the `PRD path:` line, so a pre-existing marker is preserved. See the "Issue 依赖门禁（Dependency Gate）" section above for full marker semantics.
 
-This reuses the inter-Issue ordering gate as a manual hold, so it needs a real sentinel Issue or group to point at. If you are fine reviewing the PRD and its implementation together, you do not need to block at all — nothing merges until the draft PR passes human review and validation sign-off.
+This reuses the inter-Issue ordering gate as a manual hold, so it needs a real sentinel Issue to point at. If you are fine reviewing the PRD and its implementation together, you do not need to block at all — nothing merges until the draft PR passes human review and validation sign-off.
 
 ### Configuration
 
@@ -3803,12 +3790,11 @@ uv run iar roadmap advance --repo <repo-id>
 
 ### 依赖等待
 
-PRD 的 `Delivery Dependencies` 小节会解析为三种依赖边：
+PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PRD 引用）：
 
 - `Depends on tasks/issues: #42`：等待上游 Issue 关闭。
 - `Depends on tasks/issues: tasks/pending/xxx.md`：等待上游 PRD 合并或归档。归档随交付 PR 一起合并进主线，解锁时机就是该 PR 合并；上游 PRD 可能带着 🧍 待人工验收归档（已归档 ≠ 已验收），下游照常解锁。
 - `Depends on tasks/issues: tasks/archive/xxx.md`：视为已完成上游；默认 pending 视图不展示 archived PRD，但仍会用它们解析依赖。
-- `Depends on groups: infra`：等待该 group 下所有 Issue 关闭。
 
 存在未满足依赖的 PRD 显示为「等待中」并给出阻塞原因；无法解析的 PRD 引用显示为「依赖未解析」；形成环的依赖会标红提示修正。
 

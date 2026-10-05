@@ -111,7 +111,6 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                     git_base_branch=context.config.git.base_branch,
                     generated_content_config=gc_config,
                     depends_on=tuple(getattr(ctx.parsed, "depends_on", []) or []),
-                    depends_on_group=tuple(getattr(ctx.parsed, "depends_on_group", []) or []),
                     parse_evidence_format_with_agent=context.config.validation.parse_evidence_format_with_agent,
                     validation_language=context.config.validation.language,
                     structured_evidence=context.config.validation.structured_evidence,

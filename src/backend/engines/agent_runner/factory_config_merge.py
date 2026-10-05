@@ -108,7 +108,6 @@ def _merge_label_config(
         validation_pending=override_data.get("validation_pending", base_config.validation_pending),
         validation_passed=override_data.get("validation_passed", base_config.validation_passed),
         verifier_passed=override_data.get("verifier_passed", base_config.verifier_passed),
-        group_prefix=override_data.get("group_prefix", base_config.group_prefix),
         rework_prd=override_data.get("rework_prd", base_config.rework_prd),
         deliberate=override_data.get("deliberate", base_config.deliberate),
         agent_labels=agent_labels,

@@ -30,14 +30,14 @@ def test_build_transition_labels_removes_other_workflow_labels() -> None:
         "agent/running",
         "agent/review",
         "agent/codex",
-        "task-group/foo",
+        "type/feature",
     )
     result = build_transition_labels(current, config, config.labels.supervising)
     assert config.labels.supervising in result
     assert config.labels.running not in result
     assert config.labels.review not in result
     assert "agent/codex" in result
-    assert "task-group/foo" in result
+    assert "type/feature" in result
 
 
 def test_find_latest_unconsumed_marker_finds_pending() -> None:

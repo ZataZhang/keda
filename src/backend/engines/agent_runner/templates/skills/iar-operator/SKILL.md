@@ -46,7 +46,7 @@ The viewing paths above tell you what an Agent is doing; the Issue's labels tell
 | Label | Meaning | Next step |
 |---|---|---|
 | `agent/ready` | Queued and eligible for the next pass. Priority order is defined under Safety and compatibility. | Nothing, or `iar run --dry-run` to preview the selection. |
-| `agent/waiting` | A declared dependency is unmet. | Resolve the upstream Issue or group; do not re-queue. |
+| `agent/waiting` | A declared dependency is unmet. | Resolve the upstream Issue; do not re-queue. |
 | `agent/running` | Claimed. The claim comment records host, PID, and the selected agent. | Use the viewing paths above. |
 | `agent/supervising` / `agent/review` | A PR exists and the supervisor is working or has asked for human review. | A Draft PR is **not** the end of the pipeline; read the supervisor's comment on the PR. |
 | `agent/failed` | The pass ended without a publishable result. | Read the `Attempt History` comment, fix the cause, then re-queue. |

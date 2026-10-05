@@ -41,15 +41,11 @@ class TestParseDeliveryDependencies:
         prd_text = """
 ## Delivery Dependencies
 
-- Group: my-group
-- Depends on groups: group-a, group-b
 - Depends on tasks/issues: #42, 43
 - Gate type: hard
 - Notes: wait for upstream
 """
         result = parse_delivery_dependencies(prd_text)
-        assert result.group == "my-group"
-        assert result.depends_on_groups == ("group-a", "group-b")
         assert result.depends_on_issues == (42, 43)
         assert result.depends_on_prds == ()
         assert result.gate_type == "hard"
@@ -59,10 +55,6 @@ class TestParseDeliveryDependencies:
         prd_text = """
 ## Delivery Dependencies
 
-- Group: my-group
-- Depends on groups:
-  - group-a
-  - group-b
 - Depends on tasks/issues:
   - #42
   - 43
@@ -73,8 +65,6 @@ class TestParseDeliveryDependencies:
   - publish order matters
 """
         result = parse_delivery_dependencies(prd_text)
-        assert result.group == "my-group"
-        assert result.depends_on_groups == ("group-a", "group-b")
         assert result.depends_on_issues == (42, 43)
         assert result.depends_on_prds == (
             "tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md",
@@ -86,18 +76,26 @@ class TestParseDeliveryDependencies:
         prd_text = """
 ## Delivery Dependencies
 
-- Group: no-deps
-- Depends on groups:
-  - none
 - Depends on tasks/issues: none
 - Gate type: none
 """
         result = parse_delivery_dependencies(prd_text)
-        assert result.group == "no-deps"
-        assert result.depends_on_groups == ()
         assert result.depends_on_issues == ()
         assert result.depends_on_prds == ()
         assert result.gate_type == "none"
+
+    def test_legacy_group_fields_are_accepted_and_ignored(self) -> None:
+        prd_text = """
+## Delivery Dependencies
+
+- Group: my-group
+- Depends on groups: group-a, group-b
+- Depends on tasks/issues: #42
+- Gate type: hard
+"""
+        result = parse_delivery_dependencies(prd_text)
+        assert result.depends_on_issues == (42,)
+        assert result.gate_type == "hard"
 
     def test_prd_filename_references_are_preserved(self) -> None:
         prd_text = """
@@ -151,14 +149,14 @@ class TestParseDeliveryDependencies:
         prd_text = """
 ## Delivery Dependencies
 
-- Group: g1
+- Notes: first
 
 ## Some Other Section
 
-- Group: g2
+- Notes: second
 """
         result = parse_delivery_dependencies(prd_text)
-        assert result.group == "g1"
+        assert result.notes == "first"
 
 
 # ---------------------------------------------------------------------------
@@ -175,18 +173,14 @@ class TestParseDependencyMarker:
         result = parse_dependency_marker(body)
         assert result == DependencyDeclaration(issue_numbers=(42, 99))
 
-    def test_parses_groups(self) -> None:
+    def test_legacy_group_token_only_returns_none(self) -> None:
         body = "<!-- iar:depends-on group:alpha group:beta -->"
-        result = parse_dependency_marker(body)
-        assert result == DependencyDeclaration(groups=("alpha", "beta"))
+        assert parse_dependency_marker(body) is None
 
-    def test_parses_mixed(self) -> None:
+    def test_mixed_marker_ignores_group_tokens(self) -> None:
         body = "<!-- iar:depends-on #7 group:gamma #12 -->"
         result = parse_dependency_marker(body)
-        assert result == DependencyDeclaration(
-            issue_numbers=(7, 12),
-            groups=("gamma",),
-        )
+        assert result == DependencyDeclaration(issue_numbers=(7, 12))
 
     def test_multiple_markers(self) -> None:
         body = "<!-- iar:depends-on #1 -->\n<!-- iar:depends-on #2 -->"
@@ -206,15 +200,6 @@ class TestFormatDependencyMarker:
     def test_issues_only(self) -> None:
         assert format_dependency_marker(issue_numbers=(42,)) == "<!-- iar:depends-on #42 -->"
 
-    def test_groups_only(self) -> None:
-        assert format_dependency_marker(groups=("g1",)) == "<!-- iar:depends-on group:g1 -->"
-
-    def test_mixed(self) -> None:
-        assert (
-            format_dependency_marker(issue_numbers=(1,), groups=("g2",))
-            == "<!-- iar:depends-on #1 group:g2 -->"
-        )
-
 
 # ---------------------------------------------------------------------------
 # comment deduplication helpers
@@ -224,7 +209,7 @@ class TestFormatDependencyMarker:
 class TestCommentDeduplication:
     def test_canonical_blockers_hash_stable(self) -> None:
         b1 = DependencyBlocker("issue", "42", "OPEN")
-        b2 = DependencyBlocker("group", "g1", "1 open")
+        b2 = DependencyBlocker("issue", "43", "OPEN")
         h1 = _canonical_blockers_hash((b1, b2))
         h2 = _canonical_blockers_hash((b1, b2))
         assert h1 == h2
@@ -251,7 +236,6 @@ class FakeGitHubClientForDeps:
 
     def __init__(self, issues: dict[int, IssueSummary] | None = None) -> None:
         self.issues = issues or {}
-        self.group_issues: dict[str, list[IssueSummary]] = {}
         self.calls: list[dict] = []
 
     def get_issue(self, issue_number: int) -> IssueSummary:
@@ -259,12 +243,6 @@ class FakeGitHubClientForDeps:
         if issue_number not in self.issues:
             raise RuntimeError(f"Issue #{issue_number} not found")
         return self.issues[issue_number]
-
-    def list_issues_by_label(
-        self, label: str, limit: int, state: str = "all"
-    ) -> list[IssueSummary]:
-        self.calls.append({"method": "list_issues_by_label", "label": label, "limit": limit})
-        return self.group_issues.get(label, [])
 
 
 class TestEvaluateDependencies:
@@ -312,33 +290,12 @@ class TestEvaluateDependencies:
             DependencyBlocker(blocker_type="issue", target="42", current_state="OPEN"),
         )
 
-    def test_group_dependency_all_closed(self) -> None:
+    def test_issue_dependency_unknown_state_blocked(self) -> None:
         client = FakeGitHubClientForDeps()
-        client.group_issues["task-group/g1"] = [
-            IssueSummary(number=1, title="A", url="", body="", labels=(), state="CLOSED"),
-        ]
-        decl = DependencyDeclaration(groups=("g1",))
-        verdict = evaluate_dependencies(decl, client, LabelConfig())
-        assert verdict.satisfied is True
-
-    def test_group_dependency_open_blocked(self) -> None:
-        client = FakeGitHubClientForDeps()
-        client.group_issues["task-group/g1"] = [
-            IssueSummary(number=1, title="A", url="", body="", labels=(), state="OPEN"),
-        ]
-        decl = DependencyDeclaration(groups=("g1",))
+        decl = DependencyDeclaration(issue_numbers=(404,))
         verdict = evaluate_dependencies(decl, client, LabelConfig())
         assert verdict.satisfied is False
-        assert verdict.blockers[0].blocker_type == "group"
-
-    def test_empty_group_blocked(self) -> None:
-        client = FakeGitHubClientForDeps()
-        client.group_issues["task-group/g1"] = []
-        decl = DependencyDeclaration(groups=("g1",))
-        verdict = evaluate_dependencies(decl, client, LabelConfig())
-        assert verdict.satisfied is False
-        assert verdict.empty_group_names == ("g1",)
-        assert verdict.blockers[0].current_state == "empty"
+        assert verdict.blockers[0].current_state == "unknown"
 
     def test_failed_upstream_detected(self) -> None:
         client = FakeGitHubClientForDeps(
@@ -474,36 +431,13 @@ class TestBuildWaitingComment:
             satisfied=False,
             blockers=(
                 DependencyBlocker("issue", "42", "OPEN"),
-                DependencyBlocker("group", "g1", "2 open"),
+                DependencyBlocker("issue", "43", "OPEN"),
             ),
         )
         comment = build_waiting_comment(verdict, 1, LabelConfig())
         assert "Issue #42" in comment
-        assert "Group ``g1``" in comment
+        assert "Issue #43" in comment
         assert "iar:dependency-wait" in comment
-
-    def test_empty_group_warning(self) -> None:
-        verdict = DependencyVerdict(
-            satisfied=False,
-            blockers=(DependencyBlocker("group", "g1", "empty"),),
-            empty_group_names=("g1",),
-        )
-        comment = build_waiting_comment(verdict, 1, LabelConfig())
-        assert "empty group" in comment
-        assert "possible typo" in comment
-
-    def test_empty_group_includes_resolution_guidance(self) -> None:
-        verdict = DependencyVerdict(
-            satisfied=False,
-            blockers=(DependencyBlocker("group", "g1", "empty"),),
-            empty_group_names=("g1",),
-        )
-        comment = build_waiting_comment(verdict, 1, LabelConfig())
-        assert "How to resolve" in comment
-        assert "Empty group" in comment
-        # Names all three concrete fixes.
-        assert "iar:depends-on" in comment
-        assert "Depends on groups" in comment
 
     def test_upstream_failure_warning(self) -> None:
         verdict = DependencyVerdict(
@@ -527,6 +461,15 @@ class TestBuildWaitingComment:
         # Open-issue blocker also produces guidance.
         assert "Open upstream" in comment
 
+    def test_unknown_state_includes_resolution_guidance(self) -> None:
+        verdict = DependencyVerdict(
+            satisfied=False,
+            blockers=(DependencyBlocker("issue", "42", "unknown"),),
+        )
+        comment = build_waiting_comment(verdict, 1, LabelConfig())
+        assert "How to resolve" in comment
+        assert "Unknown state" in comment
+
     def test_no_resolution_section_when_no_blockers(self) -> None:
         verdict = DependencyVerdict(satisfied=True, blockers=())
         comment = build_waiting_comment(verdict, 1, LabelConfig())
@@ -540,30 +483,26 @@ class TestBuildWaitingComment:
 
 class TestResolveDependencies:
     def test_no_dependencies(self) -> None:
-        gate, issues, groups = _resolve_dependencies("# PRD\n")
+        gate, issues = _resolve_dependencies("# PRD\n")
         assert gate == "none"
         assert issues == ()
-        assert groups == ()
 
     def test_prd_only(self) -> None:
         prd = """
 ## Delivery Dependencies
 
-- Group: g1
 - Depends on tasks/issues: #42
 - Gate type: hard
 """
-        gate, issues, groups = _resolve_dependencies(prd)
+        gate, issues = _resolve_dependencies(prd)
         assert gate == "hard"
         assert issues == (42,)
 
     def test_cli_overrides(self) -> None:
         prd = "# PRD\n"
-        gate, issues, groups = _resolve_dependencies(
-            prd, depends_on=(99,), depends_on_group=("extra",)
-        )
+        gate, issues = _resolve_dependencies(prd, depends_on=(99,))
+        assert gate == "none"
         assert issues == (99,)
-        assert groups == ("extra",)
 
     def test_merge_and_dedup(self) -> None:
         prd = """
@@ -572,14 +511,13 @@ class TestResolveDependencies:
 - Depends on tasks/issues: #1
 - Gate type: hard
 """
-        gate, issues, groups = _resolve_dependencies(prd, depends_on=(1, 2))
+        gate, issues = _resolve_dependencies(prd, depends_on=(1, 2))
         assert issues == (1, 2)
 
-    def test_explicit_marker_compat(self) -> None:
+    def test_explicit_marker_compat_ignores_group_token(self) -> None:
         prd = "<!-- iar:depends-on #5 group:g3 -->\n# PRD\n"
-        gate, issues, groups = _resolve_dependencies(prd)
+        gate, issues = _resolve_dependencies(prd)
         assert issues == (5,)
-        assert groups == ("g3",)
 
 
 # ---------------------------------------------------------------------------

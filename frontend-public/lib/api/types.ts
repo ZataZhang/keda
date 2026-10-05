@@ -338,7 +338,7 @@ export type RoadmapPrdState =
   | "unresolved_dependency"
   | "waiting";
 
-export type RoadmapDependencyKind = "prd" | "issue" | "group" | "unresolved";
+export type RoadmapDependencyKind = "prd" | "issue" | "unresolved";
 
 export type RoadmapDependency = {
   from_path: string;

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from backend.core.shared.models.agent_runner import LabelConfig
 from backend.core.shared.models.roadmap import (
     RoadmapDependency,
     RoadmapDependencyKind,
@@ -42,7 +41,7 @@ def test_unblocked_prd_has_no_block_reason() -> None:
     """A PRD with no dependencies should be unblocked."""
     prd = _make_prd("tasks/pending/P1-FEAT-20260101-a.md")
     client = FakeGitHubClient()
-    blockers = evaluate_roadmap_dependencies([prd], client, LabelConfig())
+    blockers = evaluate_roadmap_dependencies([prd], client)
     assert blockers[prd.prd_path] is None
 
 
@@ -60,11 +59,11 @@ def test_issue_dependency_blocks_until_closed() -> None:
     )
     client = FakeGitHubClient()
     client._issue_states[7] = "OPEN"
-    blockers = evaluate_roadmap_dependencies([prd], client, LabelConfig())
+    blockers = evaluate_roadmap_dependencies([prd], client)
     assert "未关闭" in (blockers[prd.prd_path] or "")
 
     client._issue_states[7] = "CLOSED"
-    blockers = evaluate_roadmap_dependencies([prd], client, LabelConfig())
+    blockers = evaluate_roadmap_dependencies([prd], client)
     assert blockers[prd.prd_path] is None
 
 
@@ -85,14 +84,14 @@ def test_prd_dependency_blocks_until_upstream_merged() -> None:
         ),
     )
     client = FakeGitHubClient()
-    blockers = evaluate_roadmap_dependencies([upstream, downstream], client, LabelConfig())
+    blockers = evaluate_roadmap_dependencies([upstream, downstream], client)
     assert "等待上游" in (blockers[downstream.prd_path] or "")
 
     upstream_merged = _make_prd(
         upstream.prd_path,
         state=RoadmapPrdState.MERGED,
     )
-    blockers = evaluate_roadmap_dependencies([upstream_merged, downstream], client, LabelConfig())
+    blockers = evaluate_roadmap_dependencies([upstream_merged, downstream], client)
     assert blockers[downstream.prd_path] is None
 
 
@@ -109,7 +108,7 @@ def test_archived_prd_dependency_is_satisfied_when_hidden() -> None:
         ),
     )
     client = FakeGitHubClient()
-    blockers = evaluate_roadmap_dependencies([downstream], client, LabelConfig())
+    blockers = evaluate_roadmap_dependencies([downstream], client)
 
     assert blockers[downstream.prd_path] is None
 
@@ -153,5 +152,5 @@ def test_unresolved_dependency_blocks() -> None:
         ),
     )
     client = FakeGitHubClient()
-    blockers = evaluate_roadmap_dependencies([prd], client, LabelConfig())
+    blockers = evaluate_roadmap_dependencies([prd], client)
     assert "无法解析" in (blockers[prd.prd_path] or "")

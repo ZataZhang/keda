@@ -113,7 +113,6 @@ class IssueFromPrdRequest:
         generated_content_config: 可选的 AI 内容生成配置。
             为 ``None`` 或 ``enabled=False`` 时使用确定性 fallback 正文。
         depends_on: 显式指定的上游 Issue 编号列表（与 PRD 声明合并去重）。
-        depends_on_group: 显式指定的上游 group 列表（与 PRD 声明合并去重）。
         parse_evidence_format_with_agent: 是否用 agent 解析 PRD 中的格式要求。
         validation_language: Realistic Validation 固定标签语言，如 ``zh-CN``。
         structured_evidence: 是否为该 Issue 物化 ``iar:structured-evidence`` marker。
@@ -135,7 +134,6 @@ class IssueFromPrdRequest:
     git_base_branch: str = "main"
     generated_content_config: GeneratedContentConfig | None = None
     depends_on: tuple[int, ...] = ()
-    depends_on_group: tuple[str, ...] = ()
     parse_evidence_format_with_agent: bool = True
     validation_language: str = "zh-CN"
     structured_evidence: bool = True
@@ -581,15 +579,14 @@ def _resolve_dependencies(
     repo_path: Path | None = None,
     current_prd_path: Path | None = None,
     depends_on: tuple[int, ...] = (),
-    depends_on_group: tuple[str, ...] = (),
-) -> tuple[str, tuple[int, ...], tuple[str, ...]]:
+) -> tuple[str, tuple[int, ...]]:
     """Merge PRD structured dependencies, explicit markers and CLI overrides.
 
     Three sources are merged with CLI taking highest precedence:
 
     1. ``Delivery Dependencies`` section in the PRD.
     2. Explicit ``iar:depends-on`` markers in the PRD body.
-    3. CLI arguments ``--depends-on`` and ``--depends-on-group``.
+    3. CLI ``--depends-on`` overrides.
 
     Args:
         prd_text: Full PRD Markdown text.
@@ -597,10 +594,9 @@ def _resolve_dependencies(
             dependencies in ``Depends on tasks/issues``.
         current_prd_path: Current PRD path, used to reject self-dependencies.
         depends_on: CLI override issue numbers.
-        depends_on_group: CLI override group names.
 
     Returns:
-        ``(gate_type, resolved_issues, resolved_groups)``.
+        ``(gate_type, resolved_issues)``.
         ``gate_type`` is the gate from the PRD section (``none`` if absent).
     """
     from_prd = parse_delivery_dependencies(prd_text)
@@ -608,36 +604,30 @@ def _resolve_dependencies(
     # Start with PRD section values
     gate_type = from_prd.gate_type
     resolved_issues = list(from_prd.depends_on_issues)
-    resolved_groups = list(from_prd.depends_on_groups)
     if gate_type == "hard" and from_prd.depends_on_prds:
-        prd_issues, prd_groups = _materialize_prd_dependencies(
-            repo_path=repo_path,
-            current_prd_path=current_prd_path,
-            prd_refs=from_prd.depends_on_prds,
+        resolved_issues.extend(
+            _materialize_prd_dependencies(
+                repo_path=repo_path,
+                current_prd_path=current_prd_path,
+                prd_refs=from_prd.depends_on_prds,
+            )
         )
-        resolved_issues.extend(prd_issues)
-        resolved_groups.extend(prd_groups)
 
     # Merge explicit markers in PRD body (compat path)
     explicit = parse_dependency_marker(prd_text)
     if explicit is not None:
         resolved_issues.extend(explicit.issue_numbers)
-        resolved_groups.extend(explicit.groups)
 
     # CLI overrides are additive
     resolved_issues.extend(depends_on)
-    resolved_groups.extend(depends_on_group)
 
     # Deduplicate while preserving order
     seen_issues: set[int] = set()
     deduped_issues = [n for n in resolved_issues if not (n in seen_issues or seen_issues.add(n))]
-    seen_groups: set[str] = set()
-    deduped_groups = [g for g in resolved_groups if not (g in seen_groups or seen_groups.add(g))]
 
     return (
         gate_type,
         tuple(deduped_issues),
-        tuple(deduped_groups),
     )
 
 
@@ -646,8 +636,13 @@ def _materialize_prd_dependencies(
     repo_path: Path | None,
     current_prd_path: Path | None,
     prd_refs: tuple[str, ...],
-) -> tuple[list[int], list[str]]:
-    """Resolve PRD path/name dependencies into Issue numbers or group names."""
+) -> list[int]:
+    """Resolve PRD path/name dependencies into Issue numbers.
+
+    A referenced PRD must carry a real ``- GitHub Issue: .../issues/N`` link;
+    otherwise the command fails fast with an actionable error rather than
+    falling back to an unsatisfiable task-group dependency.
+    """
     if repo_path is None:
         raise ValueError(
             "Cannot resolve PRD dependencies from 'Depends on tasks/issues' "
@@ -658,7 +653,6 @@ def _materialize_prd_dependencies(
     repo_root = repo_path.resolve()
     current_path = current_prd_path.resolve() if current_prd_path else None
     issue_numbers: list[int] = []
-    group_names: list[str] = []
 
     for prd_ref in prd_refs:
         referenced_prd_path = _resolve_dependency_prd_path(
@@ -679,31 +673,16 @@ def _materialize_prd_dependencies(
             issue_numbers.append(issue_number)
             continue
 
-        try:
-            referenced_dependencies = parse_delivery_dependencies(referenced_text)
-        except ValueError as exc:
-            relative_path = _format_repo_relative_path(repo_root, referenced_prd_path)
-            raise ValueError(
-                "Cannot parse Delivery Dependencies for referenced PRD "
-                f"{relative_path!r} from dependency {prd_ref!r}: {exc}"
-            ) from exc
-
-        if referenced_dependencies.group:
-            group_names.append(referenced_dependencies.group)
-            continue
-
         relative_path = _format_repo_relative_path(repo_root, referenced_prd_path)
         raise ValueError(
             "Cannot materialize PRD dependency "
             f"{prd_ref!r} resolved to {relative_path!r}: the referenced PRD "
-            "has no '- GitHub Issue: .../issues/N' link and no "
-            "'Delivery Dependencies' Group. Publish the upstream PRD first, "
-            "add its GitHub Issue link, or add '- Group: <group-name>' to "
-            "the referenced PRD so this dependency can be materialized as "
-            "'group:<group-name>'."
+            "has no '- GitHub Issue: .../issues/N' link. Create the upstream "
+            "Issue first (iar issue create writes its link back into the PRD), "
+            "or replace the dependency with a concrete Issue number such as '#42'."
         )
 
-    return issue_numbers, group_names
+    return issue_numbers
 
 
 def _extract_prd_issue_number(prd_text: str) -> int | None:
@@ -1035,18 +1014,16 @@ def create_issue_from_prd(
     # ------------------------------------------------------------------
     # 4.5 解析并物化依赖声明。
     # ------------------------------------------------------------------
-    gate_type, resolved_issues, resolved_groups = _resolve_dependencies(
+    gate_type, resolved_issues = _resolve_dependencies(
         prd_text,
         repo_path=request.repo_path,
         current_prd_path=absolute_prd_path,
         depends_on=request.depends_on,
-        depends_on_group=request.depends_on_group,
     )
     dependency_marker = ""
-    if gate_type == "hard" and (resolved_issues or resolved_groups):
+    if gate_type == "hard" and resolved_issues:
         dependency_marker = format_dependency_marker(
             issue_numbers=resolved_issues,
-            groups=resolved_groups,
         )
 
     # ------------------------------------------------------------------

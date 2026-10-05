@@ -37,7 +37,7 @@ def build_transition_labels(
     规则：
     - 添加 target_label
     - 移除所有其他 durable workflow labels
-    - 保留非 workflow labels（如 agent routing labels、task-group labels）
+    - 保留非 workflow labels（如 agent routing labels、type labels）
 
     Args:
         current_labels: 当前 Issue 的所有 labels

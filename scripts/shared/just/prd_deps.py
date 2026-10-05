@@ -39,8 +39,8 @@ DEPENDENCY_SLUG_MAX_WIDTH = 26
 def parse_delivery_dependencies(prd_text: str) -> tuple[str, tuple[str, ...]]:
     """解析 §8 Delivery Dependencies 的 gate 类型与任务/Issue 引用。
 
-    只消费 ``Gate type`` 与 ``Depends on tasks/issues`` 两个字段；组依赖
-    （``Depends on groups``）需要展开成员，不参与本地判定，直接忽略。
+    只消费 ``Gate type`` 与 ``Depends on tasks/issues`` 两个字段；旧版
+    ``Group`` / ``Depends on groups`` 字段不参与本地判定，直接忽略。
 
     Args:
         prd_text (str): PRD 文件全文。

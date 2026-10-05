@@ -393,7 +393,6 @@ def build_label_config_from_settings(
         validation_pending=label_settings.validation_pending,
         validation_passed=label_settings.validation_passed,
         verifier_passed=label_settings.verifier_passed,
-        group_prefix=label_settings.group_prefix,
         rework_prd=label_settings.rework_prd,
         deliberate=label_settings.deliberate,
         agent_labels=agent_labels,

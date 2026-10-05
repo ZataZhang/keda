@@ -297,20 +297,12 @@ def test_label_config_includes_waiting() -> None:
     assert InfraLabelConfig().waiting == "agent/waiting"
 
 
-def test_label_config_includes_group_prefix() -> None:
-    """All label configs must include the group prefix."""
-    assert CoreLabelConfig().group_prefix == "task-group/"
-    assert AgentRunnerLabelSettings().group_prefix == "task-group/"
-    assert InfraLabelConfig().group_prefix == "task-group/"
-
-
-def test_factory_build_app_config_maps_waiting_and_group_prefix() -> None:
-    """Factory must map waiting and group_prefix labels through to AppConfig."""
+def test_factory_build_app_config_maps_waiting() -> None:
+    """Factory must map the waiting label through to AppConfig."""
     from backend.engines.agent_runner.factory import build_app_config
 
     app_config = build_app_config()
     assert app_config.labels.waiting == "agent/waiting"
-    assert app_config.labels.group_prefix == "task-group/"
 
 
 def test_label_config_includes_deliberate() -> None:

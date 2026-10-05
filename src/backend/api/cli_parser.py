@@ -197,13 +197,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Upstream Issue number this Issue depends on (repeatable).",
     )
-    issue_create_parser.add_argument(
-        "--depends-on-group",
-        action="append",
-        type=str,
-        default=[],
-        help="Upstream group label this Issue depends on (repeatable).",
-    )
     add_model_preset_options(issue_create_parser)
     add_common_options(issue_create_parser)
 

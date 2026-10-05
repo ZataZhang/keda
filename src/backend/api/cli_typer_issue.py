@@ -41,7 +41,6 @@ def _run_issue_create_command(
     repo_id: str | None,
     config: str | None,
     depends_on: tuple[int, ...] = (),
-    depends_on_group: tuple[str, ...] = (),
     preset: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
@@ -64,7 +63,6 @@ def _run_issue_create_command(
         publish_prd=publish_prd,
         force=force,
         depends_on=depends_on,
-        depends_on_group=depends_on_group,
     )
 
 
@@ -102,10 +100,6 @@ def issue_create_command(
         list[int] | None,
         typer.Option("--depends-on", help="Upstream Issue number (repeatable)."),
     ] = None,
-    depends_on_group: Annotated[
-        list[str] | None,
-        typer.Option("--depends-on-group", help="Upstream group label (repeatable)."),
-    ] = None,
     preset: ModelPresetOption = None,
     model: ModelIdOption = None,
     reasoning_effort: ReasoningEffortOption = None,
@@ -124,7 +118,6 @@ def issue_create_command(
         publish_prd=publish_prd,
         force=force,
         depends_on=tuple(depends_on or ()),
-        depends_on_group=tuple(depends_on_group or ()),
         preset=preset,
         model=model,
         reasoning_effort=reasoning_effort,
