@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 5 项 Human-Confirmed 未确认，证据包见 §9。
+> ✅ **验收状态**：已验收（2026-10-05）— 交付 PR #201 合并（ab55374）即验收；§9 的 5 项 Human-Confirmed 经决策板 `.iar/decisions/human-acceptance-20261005/answers.json` 全数确认。本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制、文件路径、命令与排期信息；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。人只在 Part A 点名处下钻。
@@ -451,11 +451,11 @@ flowchart TD
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一：接受 stack 声明放在 PRD 自身、无新存储。
-- [ ] 决策二：接受 stack 链中途默认不自动合并，链末统一合并。
-- [ ] 决策三：接受 via-main 默认在 fork 前刷新 base。
-- [ ] 决策四：接受上游合并后下游自动 retarget + rebase 收敛。
-- [ ] 确认 §9.1 人读呈递区已审阅。
+- [x] 决策一：接受 stack 声明放在 PRD 自身、无新存储。 — 决策板 Q6=A（2026-10-05）
+- [x] 决策二：接受 stack 链中途默认不自动合并，链末统一合并。 — 决策板 Q7=A（2026-10-05）
+- [x] 决策三：接受 via-main 默认在 fork 前刷新 base。 — 决策板 Q8=A（2026-10-05）
+- [x] 决策四：接受上游合并后下游自动 retarget + rebase 收敛。 — 决策板 Q9=A（2026-10-05）
+- [x] 确认 §9.1 人读呈递区已审阅。 — 决策板 Q10=A（2026-10-05）
 
 ## 10. Functional Requirements
 
@@ -505,6 +505,15 @@ flowchart TD
 - 待人工项: §9.2 的 5 项 Human-Confirmed 保持 `[ ]`（决策一~四 + 9.1 呈递区过目），不由执行器代答；横幅为 `🧍 待人工验收`。rv-2 的真实 GitHub retarget 腿因本机无对目标仓库的写权限未端到端复跑，已在证据报告披露，留 verifier/人工。
 
 ## Change Log
+
+### 2026-10-05 · 人工验收：5 项 Human-Confirmed 经决策板确认，横幅置为已验收
+
+- Type: doc
+- Before: §9 的 5 项 Human-Confirmed（决策一~四 + §9.1 呈递区过目）未勾，横幅 🧍 待人工验收。
+- After: 五项勾选，横幅 ✅ 已验收。确认载体：决策板 `.iar/decisions/human-acceptance-20261005/answers.json`（14 项跨 4 PRD 全采纳推荐，无偏离、无备注）；交付 PR #201 合并即验收（squash ab55374，已核对最终 Git tree）。
+- Reason: 执行侧交付完成、PR 已合并，人工第二触点完成，验收闭环。
+- Impact: 仅验收记录回填；不改 FR / RV oracle / 验收判据 / 交付依赖。
+- Review: 人已确认（决策板 answers.json，2026-10-05）。
 
 ### 2026-10-05 · 交付：实现 + 证据 + verifier 两轮复核，横幅置为待人工验收并归档
 - Type: delivery（源码 + 测试 + docs + 证据包 + 本 PRD 勾选状态与归档位置）

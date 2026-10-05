@@ -37,9 +37,16 @@ from backend.infrastructure.config.toml_section_editor import update_toml_table_
 _AGENT_RUNNER_KEY = "agent_runner"
 _AUTOPILOT_KEY = "autopilot"
 _ENABLED_KEY = "enabled"
+_POST_PR_SUPERVISOR_KEY = "post_pr_supervisor"
+_AUTO_REPAIR_CI_KEY = "auto_repair_ci"
 
 #: 写回目标表路径；``enabled`` 是这张表里唯一允许被本端口触碰的键。
 _AUTOPILOT_TABLE_PATH: tuple[str, ...] = (_AGENT_RUNNER_KEY, _AUTOPILOT_KEY)
+#: CI/CD 自动修复策略的写回目标表路径；``auto_repair_ci`` 同样单键放行。
+_POST_PR_SUPERVISOR_TABLE_PATH: tuple[str, ...] = (
+    _AGENT_RUNNER_KEY,
+    _POST_PR_SUPERVISOR_KEY,
+)
 
 
 class RepositorySettingsEditError(ValueError):
@@ -93,6 +100,48 @@ class TomlRepositoryAutopilotSettingsEditor:
         # 写前校验：现有配置必须已经合法，因此"只改一个 bool"之后必然仍合法。
         self._validate_existing_config(config_path)
         update_toml_table_keys(config_path, _AUTOPILOT_TABLE_PATH, {_ENABLED_KEY: enabled})
+
+    def read_auto_repair_ci(self, repo_root_path: Path) -> bool | None:
+        """读取 ``post_pr_supervisor.auto_repair_ci``；文件缺失或键未设置返回 ``None``。"""
+        config_path = self.config_source_path(repo_root_path)
+        if not config_path.is_file():
+            return None
+        document = self._parse(config_path)
+        agent_runner_table = document.get(_AGENT_RUNNER_KEY, {})
+        if not isinstance(agent_runner_table, dict):
+            raise RepositorySettingsEditError(
+                f"{config_path} 的 [{_AGENT_RUNNER_KEY}] 段不是合法的表。"
+            )
+        supervisor_section = agent_runner_table.get(_POST_PR_SUPERVISOR_KEY, {})
+        if not isinstance(supervisor_section, dict):
+            raise RepositorySettingsEditError(
+                f"[{_AGENT_RUNNER_KEY}.{_POST_PR_SUPERVISOR_KEY}] 不是合法的表。"
+            )
+        value = supervisor_section.get(_AUTO_REPAIR_CI_KEY)
+        if value is None:
+            return None
+        if not isinstance(value, bool):
+            raise RepositorySettingsEditError(
+                f"{config_path} 的 [{_AGENT_RUNNER_KEY}.{_POST_PR_SUPERVISOR_KEY}]."
+                f"{_AUTO_REPAIR_CI_KEY} 不是布尔值。"
+            )
+        return value
+
+    def set_auto_repair_ci(self, repo_root_path: Path, enabled: bool) -> None:
+        """仅修改 ``[agent_runner.post_pr_supervisor].auto_repair_ci``（原子替换）。"""
+        config_path = self.config_source_path(repo_root_path)
+        if not config_path.is_file():
+            raise RepositorySettingsEditError(
+                f"目标仓库没有 {IAR_REPOSITORY_CONFIG_FILENAME}（{config_path}），"
+                "无法写回 CI/CD 自动修复设置。"
+            )
+        # 写前校验：现有配置必须已经合法，因此"只改一个 bool"之后必然仍合法。
+        self._validate_existing_config(config_path)
+        update_toml_table_keys(
+            config_path,
+            _POST_PR_SUPERVISOR_TABLE_PATH,
+            {_AUTO_REPAIR_CI_KEY: enabled},
+        )
 
     # ── 内部实现 ────────────────────────────────────────────────────────────
 

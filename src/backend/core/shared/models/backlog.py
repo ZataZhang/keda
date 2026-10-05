@@ -276,3 +276,69 @@ class PrdLifecycleStats:
     incomplete_run_count: int
     runs: list[PrdLifecycleStatsRow]
     token_usage: TokenUsageStats
+
+
+class CiRepairPolicy(str, Enum):
+    """单 PRD CI/CD 自动修复策略的三态覆盖值。"""
+
+    INHERIT = "inherit"
+    ON = "on"
+    OFF = "off"
+
+
+class CiDeliveryStatus(str, Enum):
+    """Backlog CI/CD 交付尾段的聚合状态。"""
+
+    #: 尚无 PR 或无法获取 PR context（无 PR 的 PRD 保持原有流程）。
+    NO_PR = "no_pr"
+    #: GitHub checks 处于 pending / 尚未完成。
+    PENDING = "pending"
+    #: checks 全部通过。
+    SUCCESS = "success"
+    #: checks 存在失败（原始观察，不代表会触发修复）。
+    FAILURE = "failure"
+    #: GitHub 不可达 / 状态未知，按未验证呈现而不是伪装成通过或失败。
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class CiCheckProblem:
+    """一条来自 GitHub ``checks_summary`` 的原始失败观察。"""
+
+    name: str
+    summary: str
+    url: str | None = None
+    round_number: int | None = None
+
+
+@dataclass(frozen=True)
+class BacklogCiDelivery:
+    """Backlog PRD 的 CI/CD 交付尾段投影（运行时派生，不持久化）。
+
+    Console API 与 ``iar backlog ci status --json`` 共用同一份 DTO 结构；
+    轮次事实源是 GitHub PR head SHA 与既有 ``iar:event`` marker。
+    """
+
+    prd_path: str
+    issue_number: int | None
+    status: CiDeliveryStatus
+    checks_state: str | None
+    checks_summary: tuple[str, ...]
+    pr_url: str | None
+    head_sha: str | None
+    #: 已发生的自动修复轮数（``post_pr_rework_requested`` 且 action=repair 的次数）。
+    round_count: int
+    #: 修复轮数上限（复用 ``post_pr_supervisor.max_repair_attempts``）。
+    max_rounds: int
+    problems: tuple[CiCheckProblem, ...]
+    #: 对应 Issue 最新 ``iar:ci-auto-repair-policy`` marker；无 marker 即 inherit。
+    stored_policy: CiRepairPolicy
+    #: 仓库全局 ``post_pr_supervisor.auto_repair_ci``（fresh 配置值）。
+    global_enabled: bool
+    #: 服务端计算的最终生效值：显式 on/off 优先，否则继承全局。
+    effective_enabled: bool
+    #: 自动修复预算耗尽（round_count >= max_rounds）。
+    exhausted: bool
+    exhausted_reason: str | None = None
+    #: 最近一次成功同步 PR context 的时间（ISO8601）；GitHub 不可达时保留旧值。
+    last_synced_at: str | None = None

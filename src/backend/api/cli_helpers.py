@@ -158,7 +158,7 @@ def require_single_repository_target(
     """取出唯一目标仓库上下文，不唯一时抛带语义退出码的 :class:`CliError`。
 
     只支持单目标的入口（``ask`` / ``repl`` / ``deliberate`` / ``recover`` /
-    ``blocked-continue`` / ``roadmap advance`` / ``worktree cleanup`` / ``logs``）
+    ``blocked-continue`` / ``backlog advance`` / ``worktree cleanup`` / ``logs``）
     在 ``--all`` 或 cwd 匹配出多个仓库时必须收敛到一个选择器。分类点集中在这里，
     人类与机器两条路径才能给出同一条可跑 ``suggestion``。
 

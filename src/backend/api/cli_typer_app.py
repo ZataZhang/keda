@@ -27,8 +27,13 @@ from typer import _click as typer_click
 
 from backend.api.cli import _run_parsed_command, error_console
 from backend.api.cli_completion import register_completion_commands
-from backend.api.cli_exit_codes import EXIT_CODE_HELP
-from backend.api.cli_output import OutputFormat
+from backend.api.cli_exit_codes import EXIT_CODE_HELP, ExitCode
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    CliError,
+    OutputFormat,
+    render_cli_error,
+)
 
 __all__ = [
     "AllRepositoriesOption",
@@ -426,6 +431,62 @@ from backend.api import (  # noqa: E402,F401
 )
 
 
+def _machine_output_requested(args: list[str]) -> bool:
+    """从原始参数探测是否声明了机器模式（解析失败时拿不到 Namespace）。
+
+    解析失败的命令无法走
+    :func:`backend.api.cli_output.resolve_output_format` 的正规判定，
+    只能扫描原始 token：出现 ``--json``、``--output json`` 或
+    ``--output=json``（取值大小写不敏感）即视为机器模式声明。
+
+    Args:
+        args: 传给 :func:`main` 的原始参数序列。
+
+    Returns:
+        真值表示调用方显式请求了机器输出。
+    """
+    for index, token in enumerate(args):
+        if token == "--json":
+            return True
+        if token.startswith("--output="):
+            if token.removeprefix("--output=").strip().lower() == OUTPUT_FORMAT_JSON:
+                return True
+        elif token == "--output" and index + 1 < len(args):
+            if args[index + 1].strip().lower() == OUTPUT_FORMAT_JSON:
+                return True
+    return False
+
+
+def _render_click_exception(exc: typer_click.exceptions.ClickException) -> int:
+    """把 click 解析/用法错误落成 FR-4 的结构化 envelope（机器模式）。
+
+    PRD oracle「任意命令在 JSON 模式下的失败」覆盖解析期失败：agent 把旗标
+    写错时恰恰最需要结构化错误。错误名按 click 的 ``exit_code`` 归位
+    （``UsageError`` 为 ``2`` → ``usage_error``，其余 click 错误未分类为
+    ``1`` → ``error``）；``UsageError`` 携带 ``ctx``，据此给出
+    ``iar <命令路径> --help`` 建议。
+
+    Args:
+        exc: click 抛出的异常（未知旗标、枚举拒绝、缺必填参数等）。
+
+    Returns:
+        click 自带的进程退出码，envelope 的 ``exit_code`` 与其一致。
+    """
+    exit_code = exc.exit_code if isinstance(exc.exit_code, int) else int(ExitCode.GENERAL)
+    code = ExitCode.USAGE if exit_code == int(ExitCode.USAGE) else ExitCode.GENERAL
+    context = getattr(exc, "ctx", None)
+    help_command = context.command_path if context is not None else "iar"
+    return render_cli_error(
+        CliError(
+            exc.format_message(),
+            code=code,
+            suggestion=f"{help_command} --help",
+            retryable=False,
+        ),
+        fmt=OUTPUT_FORMAT_JSON,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the Typer-powered CLI."""
     args = sys.argv[1:] if argv is None else argv
@@ -437,6 +498,10 @@ def main(argv: list[str] | None = None) -> int:
     except typer_click.exceptions.NoArgsIsHelpError:
         return 0
     except typer_click.exceptions.ClickException as exc:
+        # 解析期失败在机器模式下也必须落 FR-4 envelope（PRD「任意命令在
+        # JSON 模式下的失败」oracle）；人类模式保持 click 原文逐字节不变。
+        if _machine_output_requested(args):
+            return _render_click_exception(exc)
         exc.show()
         return exc.exit_code
     # Abort 必须走 typer 公开 API：typer 0.27 起私有 `_click.exceptions` 不再导出 Abort，

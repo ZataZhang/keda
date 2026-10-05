@@ -74,3 +74,23 @@
   verified head 更新为 `2229f736`，record-excluded verified tree 更新为
   `8fdf6935095e714942b294cf9301defb2c4fc5f2`。
 - 结论：增量复核 PASS，主结论不变。
+
+## 附录：增量复核（2026-10-05，72778653）
+
+- head：`72778653`（分支 feat/run-daemon-control-surface）。
+- 改动面确认：`2229f736..72778653` 仅含两个提交——d96e9011（证据报告
+  追加说明）与 72778653（`tests/test_agent_runner_run_targeting.py` 的
+  `test_typer_run_help_has_no_autopilot` 断言加固：先去除 ANSI 转义与
+  全部空白再做子串断言，使 `iar run --help` 断言与 CI 80 列终端宽度下
+  Rich 的着色/折行无关；import re 移入函数内）。src 无任何改动。
+  另核对 `d23edff4..2229f736` 的 src 改动仅为
+  `src/backend/api/cli_parser.py` 三处 help 文本压缩（3+/14-），无行为
+  变化，与上一节附录结论一致。
+- 复跑：`CI=true uv run pytest tests/test_agent_runner_run_targeting.py
+  -q -o addopts=""` → 20 passed。
+- record-excluded verified tree（临时 index 排除 tasks/pending、
+  tasks/archive 下同名 PRD 及 tasks/evidence/run-daemon-autopilot-
+  control-surface/ 后 write-tree）：
+  `e85ce3a4e333c1f3f4ec2baa8e1e1451f85e45e3`，与预期一致。
+- 结论：增量复核 **PASS**，主结论（2229f736 PASS）不变，verified head
+  推进至 `72778653`。

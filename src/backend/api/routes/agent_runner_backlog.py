@@ -50,6 +50,12 @@ from backend.core.use_cases.backlog_autopilot_settings import (
     load_autopilot_state,
     set_autopilot_enabled,
 )
+from backend.core.use_cases.backlog_ci_delivery import (
+    BacklogCiPolicyError,
+    build_ci_delivery,
+    request_manual_ci_repair,
+    set_prd_ci_policy,
+)
 from backend.core.use_cases.backlog_dependencies import evaluate_backlog_dependencies
 from backend.core.use_cases.backlog_prd_evidence import (
     BacklogPrdEvidenceError,
@@ -60,6 +66,7 @@ from backend.core.use_cases.backlog_prd_evidence import (
 )
 from backend.core.use_cases.backlog_prd_scanner import scan_backlog_prds
 from backend.core.use_cases.backlog_state_resolver import resolve_backlog_states
+from backend.core.use_cases.review_once import _extract_pr_branch_from_comments
 
 _logger = logging.getLogger(__name__)
 
@@ -420,6 +427,211 @@ def _artifact_headers(file_name: str, *, disposition: str) -> dict[str, str]:
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "no-store",
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD 交付尾段（状态投影 / 策略 / 单次手动修复）
+#
+# 与 Autopilot 端点同一原则：不复用 `_BACKLOG_CACHE`。ci_delivery 是从 GitHub
+# PR context 与 Issue marker 派生的运行时投影，必须 fresh 读取；策略与修复
+# 写回后也要 fresh 读回 Issue 评论流作为成功判据。
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _find_backlog_prd(repo_id: str, prd_path: str):
+    """fresh 扫描并返回目标 PRD（无缓存；找不到时抛 404）。"""
+    context = _resolve_context(repo_id)
+    scan_result = scan_backlog_prds(context.repo_path, include_archived=True)
+    for prd in scan_result.prds:
+        if prd.prd_path == prd_path:
+            return context, prd
+    raise HTTPException(status_code=404, detail=f"PRD '{prd_path}' 不在仓库 '{repo_id}' 中。")
+
+
+def _resolve_prd_ci_context(repo_id: str, prd_path: str):
+    """解析 PRD 的 Issue、评论流与 PR context（供状态投影与手动修复共用）。"""
+    context, prd = _find_backlog_prd(repo_id, prd_path)
+    if prd.issue_number is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"PRD '{prd_path}' 没有对应的 GitHub Issue，无法操作 CI/CD 交付尾段。",
+        )
+    github_client = create_github_client(context.repo_path)
+    issue_comments = github_client.list_issue_comments(prd.issue_number)
+    pr_branch = _extract_pr_branch_from_comments(issue_comments)
+    pr_context = None
+    if pr_branch is not None:
+        pr_context = github_client.get_pull_request_context(pr_branch)
+    return context, prd, github_client, issue_comments, pr_context
+
+
+@router.get("/agent-runner/backlog/prds/{encoded_path}/ci")
+def get_backlog_prd_ci(encoded_path: str, repo_id: str) -> dict:
+    """返回单个 PRD 的 CI/CD 交付尾段投影（每次请求 fresh 读取）。"""
+    prd_path = _decode_prd_path(encoded_path)
+    context, prd, _github_client, issue_comments, pr_context = _resolve_prd_ci_context(
+        repo_id, prd_path
+    )
+    delivery = build_ci_delivery(
+        prd_path=prd_path,
+        issue_number=prd.issue_number,
+        comments=issue_comments,
+        pr_context=pr_context,
+        global_enabled=bool(context.config.post_pr_supervisor.auto_repair_ci),
+        max_rounds=max(0, context.config.post_pr_supervisor.max_repair_attempts),
+    )
+    return _serialize(delivery)
+
+
+@router.get("/agent-runner/backlog/ci-repair-global")
+def get_backlog_ci_repair_global(repo_id: str) -> dict:
+    """读取当前仓库的全局 CI/CD 自动修复开关（fresh load）。"""
+    context = _resolve_context(repo_id)
+    return {
+        "repo_id": repo_id,
+        "global_enabled": bool(context.config.post_pr_supervisor.auto_repair_ci),
+        "max_rounds": max(0, context.config.post_pr_supervisor.max_repair_attempts),
+    }
+
+
+class UpdateCiRepairGlobalRequest(BaseModel):
+    """切换当前仓库的全局 CI/CD 自动修复开关。"""
+
+    repo_id: str = Field(min_length=1)
+    enabled: bool
+
+
+@router.patch("/agent-runner/backlog/ci-repair-global")
+def update_backlog_ci_repair_global(request: UpdateCiRepairGlobalRequest) -> dict:
+    """只修改目标仓库 `.iar.toml` 的 ``post_pr_supervisor.auto_repair_ci``。
+
+    成功响应体来自写后 fresh load 的生效配置；该开关与 ``autopilot.enabled``、
+    ``safety.auto_merge``、``runner.fix_agent_enabled`` 语义独立，互不联动。
+    """
+    editor = create_repository_autopilot_settings_editor()
+    contexts = _resolve_contexts()
+    target = next((context for context in contexts if context.repo_id == request.repo_id), None)
+    if target is None:
+        raise HTTPException(status_code=400, detail=f"仓库 '{request.repo_id}' 不存在或未启用。")
+    try:
+        editor.set_auto_repair_ci(target.repo_path, request.enabled)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    fresh_context = _resolve_context(request.repo_id)
+    if bool(fresh_context.config.post_pr_supervisor.auto_repair_ci) is not request.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="写回后重新加载的配置与请求值不一致，原文件可能未被正确替换。",
+        )
+    _audit(
+        create_backlog_store(),
+        action="ci_repair_global_toggle",
+        repo_id=request.repo_id,
+        prd_path="",
+        issue_number=None,
+        result="accepted",
+        detail=f"auto_repair_ci={request.enabled}",
+    )
+    return {
+        "repo_id": request.repo_id,
+        "global_enabled": bool(fresh_context.config.post_pr_supervisor.auto_repair_ci),
+        "max_rounds": max(0, fresh_context.config.post_pr_supervisor.max_repair_attempts),
+    }
+
+
+class UpdateCiPolicyRequest(BaseModel):
+    """设置单个 PRD 的 CI/CD 自动修复策略（三态覆盖）。"""
+
+    repo_id: str = Field(min_length=1)
+    value: str = Field(pattern="^(inherit|on|off)$")
+
+
+@router.patch("/agent-runner/backlog/prds/{encoded_path}/ci-policy")
+def update_backlog_prd_ci_policy(encoded_path: str, request: UpdateCiPolicyRequest) -> dict:
+    """写对应 Issue 的最新 ``iar:ci-auto-repair-policy`` marker 并 fresh 回读。"""
+    prd_path = _decode_prd_path(encoded_path)
+    _context, prd, github_client, issue_comments, pr_context = _resolve_prd_ci_context(
+        request.repo_id, prd_path
+    )
+    try:
+        set_prd_ci_policy(
+            github_client=github_client,
+            issue_number=prd.issue_number,
+            value=request.value,
+        )
+    except BacklogCiPolicyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # 写后 fresh 回读评论流，以 marker 而不是请求体作为成功判据。
+    fresh_comments = github_client.list_issue_comments(prd.issue_number)
+    delivery = build_ci_delivery(
+        prd_path=prd_path,
+        issue_number=prd.issue_number,
+        comments=fresh_comments,
+        pr_context=pr_context,
+        global_enabled=bool(_context.config.post_pr_supervisor.auto_repair_ci),
+        max_rounds=max(0, _context.config.post_pr_supervisor.max_repair_attempts),
+    )
+    if delivery.stored_policy.value != request.value:
+        raise HTTPException(
+            status_code=409,
+            detail="策略 marker 写回后 fresh 读取与请求值不一致。",
+        )
+    _audit(
+        create_backlog_store(),
+        action="ci_policy_set",
+        repo_id=request.repo_id,
+        prd_path=prd_path,
+        issue_number=prd.issue_number,
+        result="accepted",
+        detail=f"policy={request.value}",
+    )
+    return _serialize(delivery)
+
+
+class ManualCiRepairRequest(BaseModel):
+    """显式请求一次 CI/CD 修复。"""
+
+    repo_id: str = Field(min_length=1)
+
+
+@router.post("/agent-runner/backlog/prds/{encoded_path}/ci-repair")
+def request_backlog_prd_ci_repair(encoded_path: str, request: ManualCiRepairRequest) -> dict:
+    """问题卡「立即修复」：显式请求一次修复（幂等、受既有门禁约束）。"""
+    prd_path = _decode_prd_path(encoded_path)
+    _context, prd, github_client, _issue_comments, pr_context = _resolve_prd_ci_context(
+        request.repo_id, prd_path
+    )
+    if pr_context is None:
+        raise HTTPException(
+            status_code=409,
+            detail="无法获取当前 PR context，不能在旧 head 上发起修复。",
+        )
+    # 从扫描结果重建最小 IssueSummary（fresh，不缓存）。
+    from backend.core.shared.models.agent_runner import IssueSummary
+
+    issue = IssueSummary(
+        number=prd.issue_number,
+        title=prd.title,
+        body="",
+        url=prd.issue_url or "",
+        labels=(),
+    )
+    requested, detail = request_manual_ci_repair(
+        issue=issue,
+        pr_context=pr_context,
+        config=_context.config,
+        github_client=github_client,
+    )
+    _audit(
+        create_backlog_store(),
+        action="ci_manual_repair",
+        repo_id=request.repo_id,
+        prd_path=prd_path,
+        issue_number=prd.issue_number,
+        result="accepted" if requested else "noop",
+        detail=detail,
+    )
+    return {"requested": requested, "detail": detail, "head_sha": pr_context.head_sha}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

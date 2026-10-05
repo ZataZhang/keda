@@ -622,6 +622,7 @@ def build_app_config_from_settings(
             enabled=post_supervisor.enabled,
             supervisor_agent=post_supervisor.supervisor_agent,
             repair_agent=post_supervisor.repair_agent,
+            auto_repair_ci=post_supervisor.auto_repair_ci,
             max_repair_attempts=post_supervisor.max_repair_attempts,
             max_agent_crash_retries=post_supervisor.max_agent_crash_retries,
             crash_retry_initial_backoff_seconds=(

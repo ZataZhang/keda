@@ -406,6 +406,50 @@ export type BacklogAutopilotState = {
   persisted_enabled: boolean | null;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Backlog CI/CD 交付尾段
+// Keep these aligned with `backend.core.shared.models.backlog`
+// (`BacklogCiDelivery` / `CiCheckProblem` / `CiRepairPolicy` /
+// `CiDeliveryStatus`) — the Console API and `iar backlog ci status --json`
+// share the same DTO.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type CiRepairPolicy = "inherit" | "on" | "off";
+
+export type CiDeliveryStatus = "no_pr" | "pending" | "success" | "failure" | "unavailable";
+
+export type CiCheckProblem = {
+  name: string;
+  summary: string;
+  url: string | null;
+  round_number: number | null;
+};
+
+export type BacklogCiDelivery = {
+  prd_path: string;
+  issue_number: number | null;
+  status: CiDeliveryStatus;
+  checks_state: string | null;
+  checks_summary: string[];
+  pr_url: string | null;
+  head_sha: string | null;
+  round_count: number;
+  max_rounds: number;
+  problems: CiCheckProblem[];
+  stored_policy: CiRepairPolicy;
+  global_enabled: boolean;
+  effective_enabled: boolean;
+  exhausted: boolean;
+  exhausted_reason: string | null;
+  last_synced_at: string | null;
+};
+
+export type BacklogCiRepairGlobalState = {
+  repo_id: string;
+  global_enabled: boolean;
+  max_rounds: number;
+};
+
 export type BacklogEvidenceRole =
   | "evidence_report"
   | "verifier_report"

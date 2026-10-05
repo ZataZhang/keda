@@ -3967,6 +3967,41 @@ uv run iar backlog advance --repo <repo-id>
 - **开启持续调度后，`tasks/pending/` 的语义收紧为「放进去就会被自动执行」**。发现式入队会捡起任何满足条件的新 pending PRD，包括只是想先记下来的实验性草稿。不想被自动执行的草稿请放 `tasks/inbox/`（既有惯例），成熟后再由 PRD 流程升级到 `tasks/pending/`。
 - **状态解析依赖 GitHub 可达性**：`gh` 调用失败时 resolver 保守返回（依赖判定不通过），本轮会少晋升而不是误晋升，下一轮 pass 自愈；调度阶段自身的异常只记日志，不影响 daemon 后续阶段。
 
+### CI/CD 交付尾段与自动修复策略
+
+有 PR 的 PRD 在实现与本地验证结束后进入「等待真实 CI/CD」阶段：daemon 的 review pass 持续刷新 GitHub checks，Backlog 右侧 `CI/CD` 标签同时展示原始 checks 状态与 Agent 决定/未验证说明。**checks 状态本身从不映射为动作**——是否修复由 Supervisor Agent 依据 checks 证据与 PRD 验收要求决定，平台只按策略约束 Agent 选出的 `repair_pr_branch` 动作。
+
+#### 策略模型：全局默认 + 单 PRD 三态覆盖
+
+- **全局默认**：仓库级 `post_pr_supervisor.auto_repair_ci`（`.iar.toml`，默认 `false`），由 Backlog 顶部「全局自动修复 CI/CD」开关或 `iar backlog ci policy --global on|off` 控制；只改这一个布尔键，与 Autopilot、`safety.auto_merge`、提交前 Fix Agent 互不联动（Autopilot 的合并队列等 checks 全绿是合并门禁，不会因失败而触发自动修复）。
+- **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- iar:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
+- **最终生效值**由服务端按 `显式 on/off ?? fresh 全局值` 计算（`on → true`、`off → false`、`inherit → 全局值`），API/CLI 只回显，前端不得自行推断。
+
+#### 多轮修复与重入去重
+
+Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；推送新 head 后重新等待 checks，允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求（daemon 重入、页面重试、手动/自动路径）幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。
+
+#### CLI 一等入口：iar backlog ci
+
+```bash
+# 只读观察；--json 输出与 Console Backlog API 的 ci_delivery DTO 同构（stdout 纯 JSON）
+uv run iar backlog ci status --json --repo-id <repo>
+uv run iar backlog ci status --prd tasks/pending/xxx.md --repo-id <repo>
+
+# 仓库级默认 / 单 PRD 三态（两目标互斥）
+uv run iar backlog ci policy --global on --repo-id <repo>
+uv run iar backlog ci policy --prd tasks/pending/xxx.md inherit|on|off --repo-id <repo>
+
+# 显式单次修复（幂等、受门禁约束；--dry-run 零副作用报告）
+uv run iar backlog ci repair --prd tasks/pending/xxx.md --dry-run --repo-id <repo>
+```
+
+`status --json` 的数据只走 stdout，进度与警告走 stderr。全局 `--output json` 语义退出码契约由 `P1-FEAT-20260930-141135` 统一，本组命令保持前向兼容。CLI 与 Console API 共用同一批 core 用例与写回事实源：任一侧设置策略或请求修复，另一侧 fresh 读取后立即生效，两侧都不各自计算 effective 值。
+
+#### 失败语义
+
+`PENDING`、GitHub 不可达与零 job / billing 限制导致的 aggregate FAILURE 都按原始观察展示（`unavailable` / 未验证），不会标成代码失败或通过，也不会仅因 FAILURE 自动触发 repair；问题卡只呈递 `checks_summary` 的原始摘要，不伪造 job 名、日志或根因。
+
 ### 依赖等待
 
 PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PRD 引用）：
