@@ -54,6 +54,7 @@
 - PRD 对应任务全部完成后：生成验证计划、收集证据；独立 verifier `PASS` 后，executor 必须勾选证据充分支持的非人工 Acceptance Checklist 项并标注证据、完成 Final Reconciliation、让验收状态横幅与 §9 对齐，随交付改动一并将 PRD 从 `tasks/pending/` 归档到 `tasks/archive/`。**归档只代表执行侧交付完成**，不等人工验收：`Human-Confirmed` 空框带着 `🧍 待人工验收` 归档，人确认后（对话/审查清单，或一个明确声明“合并即验收”、唯一关联该 PRD 且已发布证据的 PR merge——含 squash，须核对最终 Git tree）只回填验收记录（勾选 `Human-Confirmed`、横幅改 `✅ 已验收`、追加 Change Log）；人工验收若发现 PRD 自身 oracle/范围未达成，把 PRD 移回 `tasks/pending/` 重开，需求本身变了则新开关联 PRD
 - PRD 必须包含 Realistic Validation Plan，验收清单需覆盖最高可行保真度的真实入口验证，或说明无可执行行为变更
 - 变更代码时同步更新 `docs/` 与 `mkdocs.yml`
+- 改动 `iar` CLI 表面（新增/改名子命令、旗标、退出码或机器可读输出）时，必须同步随包 `iar-operator` skill（`src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md`）与 `docs/`，避免 agent 侧知识漂移；详见 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync
 - 新增给密钥类的配置变量（如 `api_key_env`、密钥别名、provider 注册信息）应放到 `config.toml`，实际密钥值仍由 `.env/.env.local` 注入；默认 env 未填写时，配置加载仍须正常完成
 - `.env.example` 中非密钥类变量应保持 `# KEY=默认值` 的注释状态，仅作为示例；密钥类变量（含 API key、密码、token，以及可能携带凭据的连接字符串如 `DATABASE_URL`、`REDIS_URL`）保留未注释的空值（如 `OPENAI_API_KEY=`），确保变量名可见且不会误用默认值
 - `tests/playwright-e2e/` 是独立 TypeScript/Node 包，使用 `npm`，不强制套用 Python SSA 命名规范

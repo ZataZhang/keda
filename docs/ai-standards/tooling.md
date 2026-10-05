@@ -52,6 +52,17 @@
 
 这条约定是 `just ai commit` / `just ai push` 生成提交信息时的默认行为（见 `justfile.shared` 中 `_ai_commit` / `_ai_push` 的 prompt），也是人工提交与各 AI 入口的共同基准。仓库目前**没有** `commit-msg` hook 或 commitlint 强制校验，因此需要自觉遵守；`frontend-admin/cz.yaml` 只配置了 commitizen 的 Conventional Commits 模板，不做语言检查。
 
+## CLI Surface And Packaged Skill Sync
+
+`iar` CLI 是给 agent 的一等机读执行面（定位见 `ROADMAP.md`）。任何改动 CLI 表面——新增或改名子命令、增加/修改旗标、调整退出码或机器可读输出——**必须同步**以下随包资产，否则 agent 侧知识会与真实命令树漂移：
+
+- 随包 operator skill：`src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md`（命令表、不变量、退出码说明）。
+- 文档：`docs/`（CLI 参考与 guide），并保证 `uv run mkdocs build --strict` 通过。
+
+真实命令树是权威来源（`iar --help` / `iar schema --json`），skill 与文档是它的随包镜像；两者不一致时以真实命令树为准并修正镜像。该约定的机器化承接是 `tasks/pending/P1-FEAT-20260930-141135-iar-agent-machine-contract.md` 的 FR-6「知识随包发」。
+
+守卫测试 `tests/test_iar_operator_skill.py` 只覆盖随包 skill 的安装资源与冲突保护，**不校验命令表内容**——内容同步仍需人工与评审保证。
+
 ## Justfile Layering
 
 仓库根目录下的 `just` 入口被拆分为两层，分别由模板上游和派生项目自己拥有：

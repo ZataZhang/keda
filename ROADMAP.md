@@ -2,7 +2,7 @@
 
 ## Vision
 
-构建一个面向人工调度的 AI 工程交互终端。项目本身不自动决定哪些 issue 开始、哪些 issue 暂停，而是在人工选择任务后，辅助完成需求理解、代码修改、验证、code review、提交 pull request，并在主分支、CI、评论或 PR 状态变化后维护已提交 PR 的监督与 rebase 状态。
+构建一个面向人工调度的 AI 工程交互终端。项目本身不自动决定哪些 issue 开始、哪些 issue 暂停，而是在人工选择任务后，辅助完成需求理解、代码修改、验证、code review、提交 pull request，并在主分支、CI、评论或 PR 状态变化后维护已提交 PR 的监督与 rebase 状态。在这条链路里，`iar` CLI 是核心执行面：既供人操作，也是外部 agent（Claude / Codex / Kimi 等）经 shell 驱动这套基于 issue 的编排的一等机读接口。
 
 ## Product Boundary
 
@@ -12,6 +12,8 @@
 - 用户提交 Issue 时有义务尽量把需求、问题背景、复现信息、期望结果和已知约束描述清楚；如果描述不清楚，AI 必须先在 Issue 中反问用户，而不是自行补全关键需求。
 - 用户可以在 Issue 中上传图片作为需求上下文，例如界面截图、错误截图、流程图或设计稿；AI 在澄清、合议和 PRD 草稿生成时应把这些图片视为 Issue 上下文的一部分。
 - 终端可以展示 issue 信息、辅助分析任务和执行工程动作，但不会主动处理未标记的 issue。
+- `iar` CLI 是本项目的核心执行面，并把外部 agent（Claude / Codex / Kimi 等）视为一等消费者：命令输出、退出码与运行时能力自省应提供可机读契约，而不只是给人看的表格（由 `P1-FEAT-20260930-141135` 承接）。
+- 改动 `iar` CLI 表面（新增/改名子命令、旗标、退出码或机器可读输出）必须同步随包 `iar-operator` skill 与 `docs/`，保证 agent 侧知识与真实命令树不漂移；约定见 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync。
 - 一旦 PRD-backed issue 被标记为 `agent/ready`，后续执行链路（修改代码、验证、review、提交 PR、维护 PR 分支）应尽量自动完成；遇到需求不明确、安全门禁、验证失败、发布失败、冲突或高风险 review 发现时安全停止并报告。
 - 当前实现优先支持 GitHub Issues / Labels / Pull Requests；其他代码托管平台暂不在当前交付边界内。
 
@@ -70,7 +72,7 @@
 - 非 GitHub 平台适配层。
 - autopilot fast-lane 的发布说明：`safety.auto_merge` 语义已从死开关激活（双开关同时为真才生效），需要显式提示升级影响，发布渠道（README / release notes / daemon 启动日志）待定。
 
-## 路线更新（2026-09-28 复核增补）
+## 路线更新（2026-09-28 复核增补，2026-10-05 更新定位与 pending 清单）
 
 > 上方正文是 2026-09-17 快照，历史条目未逐条重写；本节记录自该快照以来的交付与当前 pending PRD 顺序。各 PRD 的结构化交付依赖以对应 PRD §8 Delivery Dependencies 为唯一事实源，本节是阅读视图。
 
@@ -83,11 +85,13 @@
 
 ### 当前 pending PRD 与交付顺序
 
-1. `P1-FEAT-20260922-000431`（失败上下文交接 + 失败 Draft PR）：机器门禁 rv-1…rv-4 已全绿，待人工验收。
-2. `P1-FEAT-20260916-134008`（Roadmap CI/CD 监控与可选自动修复）：前置已满足——原 hard 依赖的 `P1-BUG-20260924-100212` 已归档交付，其 §8 已由 `hard`（指向失效的 pending 路径）改为 `none`，可开工。
+1. `P1-FEAT-20260916-134008`（Roadmap CI/CD 监控与可选自动修复）：前置已满足——原 hard 依赖的 `P1-BUG-20260924-100212` 已归档交付，其 §8 已由 `hard`（指向失效的 pending 路径）改为 `none`，可开工。
+2. `P1-FEAT-20260930-141135`（`iar` 的 Agent 机读契约）：承接本页定位——把 CLI 做实为给 agent 的一等机读执行面，补 `--output json` / 语义退出码 / `iar schema` 运行时自省；独立，可直接开工。
 3. `P1-FEAT-20260930-225500`（浏览器 E2E 验证工具链）：独立，可与上述并行；归入下方 M3「Verification And Review」。
 4. `P1-FEAT-20260930-225000`（Daemon 崩溃对账与 Agent 会话续传）：独立，可与上述并行；归入下方 M3「Verification And Review」。
 5. `P1-FEAT-20260913-204531`（Tauri 桌面壳）：2026-10-05 已移入 `tasks/hold/`（暂缓，不参与当前排期）。
+
+> `P1-FEAT-20260922-000431`（失败上下文交接 + 失败 Draft PR）已于快照后归档交付（`tasks/archive/`），不再列在 pending 清单。
 
 ### 已知漂移（下次大更新时校准）
 
