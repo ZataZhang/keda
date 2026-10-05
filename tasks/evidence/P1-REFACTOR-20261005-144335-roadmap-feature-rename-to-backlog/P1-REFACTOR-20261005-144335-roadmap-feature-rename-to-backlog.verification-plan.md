@@ -1,6 +1,7 @@
 # 验证计划：Roadmap 功能正名为 Backlog——端到端硬改名与控制台 SQLite v7 迁移
 
-> 本文件是 `tasks/pending/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md`
+> 本文件是 `tasks/archive/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md`
+> （交付时由 runner 从 `tasks/pending/` 归档，下列判据引用不受影响）
 > §7「Realistic Validation Plan」的执行副本。**判据以 PRD §7 为唯一事实源**，本文件只记录
 > "怎么跑、跑在哪棵树上、结果落在哪个文件"。
 >
@@ -13,7 +14,7 @@
 | worktree | `/Users/zata/code/keda/.iar-worktrees/issue-196` |
 | 分支 | `issue-196` |
 | base commit | `2a1dd6aff786f191e53a81d99c02f4db750f4584`（改名前的树，同时是负控 rv-4「改名前零命中扫描」的对照组） |
-| 被测代码树 | base + 本 PRD 的 90 条未提交改动（其中 37 条为 rename，保留 `git mv` 历史） |
+| 被测代码树 | base + 本 PRD 的 90 条未提交改动（其中 37 条为 rename，保留 `git mv` 历史；证据采集后又有返修提交，最终交付树为 94 个文件 / 38 条 rename，见 PRD §14 计数校正） |
 | Python | 本 worktree `.venv`（CPython 3.13.13，pytest 9.0.2） |
 | 环境注入 | `IAR_CONFIG=/Users/zata/code/keda/config.toml`（IAR agent 注入，指向**另一个** worktree 的配置）。rv-4 与本轮门禁**不清洗**该变量，见下文「与 runner 门禁同源」 |
 | 控制台库 | rv-2/rv-3 在隔离 `HOME` 的 `tmp` 目录里造 v6 库并启动真实 `iar console`，不触碰用户 `~/.iar/console.db` |

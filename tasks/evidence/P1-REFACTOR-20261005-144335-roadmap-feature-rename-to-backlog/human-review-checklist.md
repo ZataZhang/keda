@@ -1,10 +1,10 @@
 # 人工验收清单 · Roadmap 功能正名为 Backlog——端到端硬改名与控制台 SQLite v7 迁移
 
-- PRD：`tasks/pending/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md`，横幅为 🧍 待人工验收。
+- PRD：`tasks/archive/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md`（交付时由 runner 从 `tasks/pending/` 归档），横幅为 🧍 待人工验收。
 - Issue：ZataZhang/keda#196。代码 PR 由 runner 创建；PR 正文带"合并即验收"声明，**合并就等于下面 4 项都同意**，不必再到对话里逐条回。
 - 状态：**执行侧已交付（rv-1..rv-4 全绿、各自负控全红），等你对 3 个决策和 1 项呈递物过目表态。** 这 4 项就是 PRD §9.2 `Human-Confirmed` 的 4 个空框。独立 verifier review 与归档仍是 runner-owned `[~]`，不由本清单代答。
 - 证据报告：`open "/Users/zata/code/keda/.iar-worktrees/issue-196/tasks/evidence/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.evidence-report.md"`
-- 也可以让工具打开交互版：`cd /Users/zata/code/keda/.iar-worktrees/issue-196 && just prd review tasks/pending/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md`
+- 也可以让工具打开交互版：`cd /Users/zata/code/keda/.iar-worktrees/issue-196 && just prd review tasks/archive/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md`
 
 **怎么回复**：每项只回 `同意`，或 `有差异：<你的说明>`。全部同意时一句"四项都同意"就够了。
 

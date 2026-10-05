@@ -1,6 +1,6 @@
 # 证据报告：Roadmap 功能正名为 Backlog——端到端硬改名与控制台 SQLite v7 迁移
 
-> PRD：`tasks/pending/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md`，判据以其 §7 Realistic Validation Plan 与 §9 Acceptance Checklist 为准。
+> PRD：`tasks/archive/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md`（交付时由 runner 从 `tasks/pending/` 归档），判据以其 §7 Realistic Validation Plan 与 §9 Acceptance Checklist 为准。
 > 同目录的 `….verification-plan.md` 说明怎么跑、跑在哪棵树上。
 > 原始日志（`rv-*.txt`、`rv-3-backlog-page.png`、`evidence.json`）在本 worktree 的 `.iar/evidence/` 下，并镜像到本目录；`.gitignore` 规定只有 `*.md` 进提交，其余只留在本机。**下文引用的记录都从这些日志原样摘出，不另开文件也能读完。**
 >
@@ -15,7 +15,7 @@
 要你拍板的 3 项决策 + 1 项呈递物过目（共 4 个 `Human-Confirmed` 空框）汇总在同目录 `human-review-checklist.md`，可以这样打开：
 
 ```bash
-cd /Users/zata/code/keda/.iar-worktrees/issue-196 && just prd review tasks/pending/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md
+cd /Users/zata/code/keda/.iar-worktrees/issue-196 && just prd review tasks/archive/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md
 ```
 
 | # | 看什么 | 打开方式 | 逐项期望值 | 状态 |
@@ -31,7 +31,7 @@ cd /Users/zata/code/keda/.iar-worktrees/issue-196 && just prd review tasks/pendi
 - 四个检查点都走**真实入口**：真实 `iar` 命令树、真实 argparse 解析器、真实 `uvicorn` + FastAPI 路由表、真实 `sqlite3` + 真实 `SqliteConsoleStore`、真实 `iar console` 进程 + 真实 Chromium。没有对被验证入口打桩。
 - **门禁证据与 runner 门禁同源**：rv-4 段 [4] 跑的就是 runner 的验证命令 `just test all`，且**没有**清洗 `IAR_CONFIG`。上一轮的证据是"清洗过环境才绿"，与门禁不同源——本轮已修（见 PRD §14）。
 - **每个检查点都证明了自己会红**：6 份负控见下节。没有任何命令用 `|| true` 之类兜底刷绿。
-- **改名是硬改名**：无 alias、无 redirect、无并行实现；`git mv` 保留文件历史（37 条 rename 记录）。
+- **改名是硬改名**：无 alias、无 redirect、无并行实现；`git mv` 保留文件历史（最终交付树 38 条 rename / 94 个文件；证据采集时为 37 条，见 PRD §14 计数校正）。
 - **残留命中都在白名单内且已逐行列出**：迁移必须读的 3 行旧表名字面量、战略文档 `ROADMAP.md`、`docs/prototypes/**` 历史原型资产。
 
 ## rv-3（人读呈递物）：真实控制台页面
@@ -173,12 +173,12 @@ GET /api/v1/agent-runner/roadmap/settings -> 404（旧前缀应 404）
 
 ## 绑定最终代码树
 
-- 证据采集树 = `HEAD 2a1dd6aff786f191e53a81d99c02f4db750f4584` + 本 worktree 的 90 条未提交改动（37 条 rename），即 `git status --porcelain` 的当前输出；证据采集之后 `src/`、`tests/`、`docs/`、`frontend-public/` 未再变更。
+- 证据采集树 = `HEAD 2a1dd6aff786f191e53a81d99c02f4db750f4584` + 本 worktree 的 90 条未提交改动（37 条 rename），即 `git status --porcelain` 的当前输出；证据采集之后 `src/`、`tests/`、`docs/`、`frontend-public/` 未再变更。最终交付树经 PRD §14 计数校正为 94 个文件 / 38 条 rename。
 - 提交由 runner 完成（executor 不碰 index），因此 PR head 的 tree 尚未存在。**PR 建好后**按 record-excluded tree 核对（排除三条 delivery-record 路径）：
 
 ```bash
 cd /Users/zata/code/keda/.iar-worktrees/issue-196
-P=tasks/pending/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md
+P=tasks/archive/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md
 tmp_index=$(mktemp)
 GIT_INDEX_FILE="$tmp_index" git read-tree <pr-head>
 GIT_INDEX_FILE="$tmp_index" git rm -r -q --cached --ignore-unmatch -- \
