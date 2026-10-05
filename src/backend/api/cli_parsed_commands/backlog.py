@@ -11,7 +11,7 @@ probe.
 
 from __future__ import annotations
 
-from backend.api.cli_console import console
+from backend.api.cli_console import console, error_console
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_helpers import _resolve_cli_repository_targets
 from backend.api.cli_output import CliError
@@ -188,8 +188,6 @@ def _find_ci_target_prd(context, prd_path: str | None):
 
 def run_backlog_ci_status_command(ctx: ParsedCommandContext) -> int:
     """``iar backlog ci status``：只读观察（``--json`` 与 Console DTO 同构）。"""
-    import json as _json
-
     context = _single_ci_context(ctx)
     if context is None:
         return 1
@@ -199,10 +197,11 @@ def run_backlog_ci_status_command(ctx: ParsedCommandContext) -> int:
     rows = _build_status_rows(prds, github_client, config, prd_filter)
     if as_json:
         from backend.api.routes.agent_runner_backlog import _serialize
+        from backend.api.cli_output import emit_json
 
-        payload = [_serialize(row) for row in rows]
-        # 机读输出必须走纯 stdout（无 Rich 装饰/折行）；进度与警告走 stderr。
-        print(_json.dumps(payload, ensure_ascii=False, indent=2))
+        # 机读输出走 cli_output 唯一数据出口（纯 stdout、无 Rich 折行）；
+        # 进度与警告仍走 stderr。
+        emit_json([_serialize(row) for row in rows])
         return 0
     _print_status_rows(rows)
     return 0
