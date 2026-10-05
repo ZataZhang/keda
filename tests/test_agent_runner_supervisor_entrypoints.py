@@ -345,3 +345,35 @@ def test_supervisor_loop_injects_previous_findings_into_cycle_2_prompt(
     assert "Previous unresolved" not in captured_prompts[0]
     assert "Previous unresolved findings from cycles 1..1:" in captured_prompts[1]
     assert "Missing error handling" in captured_prompts[1]
+
+
+def test_supervisor_loop_forwards_executor_agent_as_builder_for_fallback(
+    tmp_path: Path,
+) -> None:
+    """发布路径把本次实现者透传给 supervisor cycle，作为回退候选的排除对象。"""
+    github_client = FakeGitHubClient()
+    pr_context = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-1",
+        head_sha="abc123",
+        base_sha="base-sha",
+    )
+
+    with patch.object(
+        agent_runner_supervisor,
+        "run_post_pr_supervisor_cycle",
+        return_value=SupervisorActionResult(action="wait_for_checks"),
+    ) as supervisor_cycle:
+        agent_runner_supervisor._run_supervisor_with_repair_loop(
+            issue=_make_issue(),
+            worktree_path=tmp_path,
+            config=AppConfig(),
+            github_client=github_client,
+            process_runner=FakeProcessRunner(),
+            pr_context=pr_context,
+            supervisor_agent="kimi",
+            executor_agent="claude",
+        )
+
+    assert supervisor_cycle.call_count == 1
+    assert supervisor_cycle.call_args.kwargs["builder_agent"] == "claude"

@@ -1121,11 +1121,14 @@ def test_run_post_pr_supervisor_cycle_marks_failed_after_crash_retries(
     fake_client = FakeGitHubClient()
     fake_runner = _CrashingAgentRunner(crash_count=10)
     sleep_delays = _patch_supervisor_sleep(monkeypatch)
+    # 关掉跨 agent 回退，聚焦"同 agent 重试预算耗尽即 mark_failed"这一条语义；
+    # 换人行为由 test_run_post_pr_supervisor_cycle_advances_* 覆盖。
+    config = AppConfig(runner=RunnerConfig(agent_fallback_order=()))
 
     result = run_post_pr_supervisor_cycle(
         issue=issue,
         worktree_path=Path("."),
-        config=AppConfig(),
+        config=config,
         github_client=fake_client,
         process_runner=fake_runner,
         pr_context=_make_supervised_pr_context(),
@@ -1149,7 +1152,8 @@ def test_run_post_pr_supervisor_cycle_crash_backoff_caps_at_max(
     fake_client = FakeGitHubClient()
     fake_runner = _CrashingAgentRunner(crash_count=10)
     sleep_delays = _patch_supervisor_sleep(monkeypatch)
-    config = AppConfig()
+    # 单候选，隔离退避/封顶语义（换人不影响本用例的 codex 退避序列）。
+    config = AppConfig(runner=RunnerConfig(agent_fallback_order=()))
     config = replace(
         config,
         post_pr_supervisor=replace(
@@ -2952,3 +2956,176 @@ def test_parse_supervisor_action_extracts_findings() -> None:
         '{"action": "approve_for_human_review", "summary": "ok"}'
     )
     assert legacy_result.findings_detail == ()
+
+
+class _SupervisorDispatchRunner(FakeProcessRunner):
+    """按 agent 分派的假 runner：``crashing`` 里的 agent 抛基础设施错误，其余回 decision JSON。"""
+
+    _AGENT_BINS = ("codex", "claude", "kimi", "qoder", "codebuddy", "pi", "opencode")
+
+    def __init__(self, *, crashing: set[str], decision_stdout: str) -> None:
+        super().__init__()
+        self._crashing = crashing
+        self._decision_stdout = decision_stdout
+
+    def run(
+        self,
+        command,
+        *,
+        cwd,
+        check=True,
+        timeout=None,
+        capture_output=True,
+        label=None,
+        output_protocol=None,
+    ):  # type: ignore[override]
+        command_tuple = tuple(command)
+        agent = command_tuple[0] if command_tuple else ""
+        if agent in self._crashing:
+            self.calls.append(list(command))
+            raise subprocess.CalledProcessError(
+                returncode=1,
+                cmd=list(command),
+                output="API Error: 400 Invalid request Error",
+                stderr="",
+            )
+        if agent in self._AGENT_BINS:
+            self.calls.append(list(command))
+            return CommandResult(
+                command=command_tuple,
+                return_code=0,
+                stdout=self._decision_stdout,
+                stderr="",
+            )
+        return super().run(
+            command,
+            cwd=cwd,
+            check=check,
+            timeout=timeout,
+            capture_output=capture_output,
+        )
+
+
+def _supervisor_agent_calls(runner: FakeProcessRunner) -> list[str]:
+    bins = _SupervisorDispatchRunner._AGENT_BINS
+    return [call[0] for call in runner.calls if call and call[0] in bins]
+
+
+def test_run_post_pr_supervisor_cycle_advances_to_next_candidate_after_crash_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同 agent 崩溃重试预算耗尽后顺延下一个候选，而不是直接 mark_failed。"""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    runner = _SupervisorDispatchRunner(
+        crashing={"codex"},
+        decision_stdout='{"action": "approve_for_human_review", "summary": "LGTM"}',
+    )
+    _patch_supervisor_sleep(monkeypatch)
+    config = AppConfig(post_pr_supervisor=PostPrSupervisorConfig(max_agent_crash_retries=1))
+
+    result = run_post_pr_supervisor_cycle(
+        issue=issue,
+        worktree_path=Path("."),
+        config=config,
+        github_client=FakeGitHubClient(),
+        process_runner=runner,
+        pr_context=_make_supervised_pr_context(),
+        supervisor_agent="codex",
+        cycle=1,
+    )
+
+    assert result.action == "approve_for_human_review"
+    assert result.summary == "LGTM"
+    # codex 用满 2 次尝试预算后才换 claude。
+    assert _supervisor_agent_calls(runner) == ["codex", "codex", "claude"]
+
+
+def test_run_post_pr_supervisor_cycle_excludes_builder_from_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """回退候选排除本次 builder，保证监督独立性。"""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    runner = _SupervisorDispatchRunner(
+        crashing={"kimi"},
+        decision_stdout='{"action": "approve_for_human_review", "summary": "LGTM"}',
+    )
+    _patch_supervisor_sleep(monkeypatch)
+    config = AppConfig(post_pr_supervisor=PostPrSupervisorConfig(max_agent_crash_retries=0))
+
+    result = run_post_pr_supervisor_cycle(
+        issue=issue,
+        worktree_path=Path("."),
+        config=config,
+        github_client=FakeGitHubClient(),
+        process_runner=runner,
+        pr_context=_make_supervised_pr_context(),
+        supervisor_agent="kimi",
+        builder_agent="claude",
+        cycle=1,
+    )
+
+    assert result.action == "approve_for_human_review"
+    # 候选 = kimi（首选）+ codex（claude 因是 builder 被排除）。
+    assert _supervisor_agent_calls(runner) == ["kimi", "codex"]
+    assert "claude" not in _supervisor_agent_calls(runner)
+
+
+def test_run_post_pr_supervisor_cycle_does_not_switch_on_semantic_mark_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """agent 正常退出给出的真实 mark_failed 不触发换人。"""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    runner = _SupervisorDispatchRunner(
+        crashing=set(),
+        decision_stdout='{"action": "mark_failed", "summary": "real defect"}',
+    )
+    _patch_supervisor_sleep(monkeypatch)
+
+    result = run_post_pr_supervisor_cycle(
+        issue=issue,
+        worktree_path=Path("."),
+        config=AppConfig(),
+        github_client=FakeGitHubClient(),
+        process_runner=runner,
+        pr_context=_make_supervised_pr_context(),
+        supervisor_agent="codex",
+        cycle=1,
+    )
+
+    assert result.action == "mark_failed"
+    assert _supervisor_agent_calls(runner) == ["codex"]
+
+
+def test_run_post_pr_supervisor_cycle_drops_model_binding_on_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """换到另一个 agent 时丢弃模型/推理档绑定（各 CLI 模型命名空间不同）。"""
+    from backend.core.shared.models.agent_model_preset import ModelSelection
+
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    runner = _SupervisorDispatchRunner(
+        crashing={"codex"},
+        decision_stdout='{"action": "approve_for_human_review", "summary": "LGTM"}',
+    )
+    _patch_supervisor_sleep(monkeypatch)
+    config = AppConfig(post_pr_supervisor=PostPrSupervisorConfig(max_agent_crash_retries=0))
+
+    run_post_pr_supervisor_cycle(
+        issue=issue,
+        worktree_path=Path("."),
+        config=config,
+        github_client=FakeGitHubClient(),
+        process_runner=runner,
+        pr_context=_make_supervised_pr_context(),
+        supervisor_agent="codex",
+        # codex 只声明了 model_args（无 reasoning_effort_args），故绑定只用 model。
+        model_selection=ModelSelection(agent="codex", model="gpt-5-codex"),
+        cycle=1,
+    )
+
+    codex_calls = [call for call in runner.calls if call and call[0] == "codex"]
+    claude_calls = [call for call in runner.calls if call and call[0] == "claude"]
+    # codex 作为绑定 agent 带 --model；换到 claude 后被丢弃。
+    assert codex_calls and "--model" in codex_calls[0]
+    assert claude_calls
+    assert "--model" not in claude_calls[0]

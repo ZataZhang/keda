@@ -19,6 +19,7 @@ from backend.core.shared.models.agent_runner import (
     ReviewFinding,
 )
 from backend.core.shared.models.agent_spec import AGENT_PROFILE_RUN
+from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
 from backend.core.use_cases.agent_review_comment import (
     build_pre_pr_review_result_comment,
 )
@@ -30,6 +31,7 @@ from backend.core.use_cases.agent_review_repair import (
 )
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
+    AgentUnavailableError,
     ProviderCapacityError,
     format_agent_execution_failure,
     is_provider_capacity_failure,
@@ -564,16 +566,12 @@ def run_pre_pr_review(
 
     reviewer_agent = resolve_reviewer_agent(issue, config, selected_agent)
     # review 阶段绑定的模型选择：只认 review 自己的绑定；换人（repair 交给
-    # 别人 / 回退换 reviewer）即丢弃。
+    # 别人 / 回退换 reviewer）即丢弃。逐候选现算，见下方候选遍历。
     from backend.core.use_cases.lifecycle_agent_resolution import (
         resolve_lifecycle_model_selection,
     )
     from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
 
-    reviewer_model_selection = drop_model_selection_for_agent(
-        reviewer_agent,
-        resolve_lifecycle_model_selection("review", config, issue=issue),
-    )
     split_repair = not repair_agent_is_self(review_config.repair_agent)
     # 解析在循环之前：未注册的 repair_agent 必须在阶段开始前 fail-fast。
     repair_agent = resolve_repair_agent(
@@ -586,6 +584,13 @@ def run_pre_pr_review(
     reviewer_profile = (
         resolve_reviewer_profile(reviewer_agent, config) if split_repair else AGENT_PROFILE_RUN
     )
+    # 审核者候选链：主审核者"跑不起来"（CLI 缺失 / 额度耗尽 / 进程级失败 / 超时）
+    # 时顺延下一个候选，而不是把整条 Issue 判死。候选恒 ≠ 本次 builder，独立性靠
+    # 换人保证；游标跨 cycle 单调推进，避免每轮重锤已宕机的 agent。
+    reviewer_candidates = build_agent_candidates(
+        config, reviewer_agent, exclude_agent=selected_agent
+    )
+    reviewer_candidate_index = 0
 
     max_attempts = max(1, review_config.max_attempts)
     timeout_seconds = max(1, review_config.timeout_seconds)
@@ -648,38 +653,76 @@ def run_pre_pr_review(
                 inner_attempt + 1,
                 max_inner_attempts + 1,
             )
-            try:
-                review_result = run_agent_with_prompt_resilient(
-                    reviewer_agent,
-                    review_prompt,
-                    worktree_path,
-                    process_runner,
-                    config=config,
-                    capture_output=True,
-                    timeout_seconds=timeout_seconds,
-                    issue=issue,
-                    transient_retry_attempts=(config.runner.transient_retry_attempts),
-                    transient_retry_delay_seconds=(config.runner.transient_retry_delay_seconds),
-                    profile=reviewer_profile,
-                    model_selection=reviewer_model_selection,
+            candidate_agent = reviewer_candidates[reviewer_candidate_index]
+            while True:
+                candidate_profile = (
+                    resolve_reviewer_profile(candidate_agent, config)
+                    if split_repair
+                    else AGENT_PROFILE_RUN
                 )
-            except (
-                subprocess.CalledProcessError,
-                OSError,
-                subprocess.TimeoutExpired,
-            ) as exc:
-                # Transient blips are already retried inside the resilient
-                # wrapper. A provider-capacity failure here will keep failing on
-                # the same reviewer agent, so escalate to let the cross-agent
-                # fallback switch agents instead of failing the Issue.
-                if is_provider_capacity_failure(exc):
-                    raise ProviderCapacityError(format_agent_execution_failure(exc), []) from exc
-                # Every other execution-level failure (wall-clock/inactivity
-                # timeout from the process-runner watchdog, agent process crash,
-                # launch I/O error) is not accurately classifiable. Wrap it in a
-                # single general escalatable error so the fallback chain can
-                # switch agents rather than sinking the Issue (Issue #190).
-                raise AgentExecutionError(format_agent_execution_failure(exc), []) from exc
+                try:
+                    review_result = run_agent_with_prompt_resilient(
+                        candidate_agent,
+                        review_prompt,
+                        worktree_path,
+                        process_runner,
+                        config=config,
+                        capture_output=True,
+                        timeout_seconds=timeout_seconds,
+                        issue=issue,
+                        transient_retry_attempts=(config.runner.transient_retry_attempts),
+                        transient_retry_delay_seconds=(config.runner.transient_retry_delay_seconds),
+                        profile=candidate_profile,
+                        model_selection=drop_model_selection_for_agent(
+                            candidate_agent,
+                            resolve_lifecycle_model_selection("review", config, issue=issue),
+                        ),
+                    )
+                    break
+                except (
+                    AgentUnavailableError,
+                    subprocess.CalledProcessError,
+                    OSError,
+                    subprocess.TimeoutExpired,
+                ) as exc:
+                    # Transient blips are already retried inside the resilient
+                    # wrapper.剩下的都是该审核者跑不起来（CLI 缺失 / 额度耗尽 /
+                    # 墙钟或静默超时 / 进程级崩溃）：顺延下一个候选，而不是判死
+                    # 整个 Issue；候选耗尽才复刻今日的 escalate 行为交给外层阶梯。
+                    next_index = reviewer_candidate_index + 1
+                    if next_index >= len(reviewer_candidates):
+                        if isinstance(exc, AgentUnavailableError):
+                            raise
+                        if is_provider_capacity_failure(exc):
+                            raise ProviderCapacityError(
+                                format_agent_execution_failure(exc), []
+                            ) from exc
+                        raise AgentExecutionError(format_agent_execution_failure(exc), []) from exc
+                    next_agent = reviewer_candidates[next_index]
+                    _logger.warning(
+                        "Pre-PR review: reviewer '%s' could not run for Issue #%d (%s); "
+                        "switching to reviewer '%s'.",
+                        candidate_agent,
+                        issue.number,
+                        exc,
+                        next_agent,
+                    )
+                    # 崩溃的审核者可能残留提交请求，换人前清掉以免污染下一个候选。
+                    leftover_request = worktree_path / COMMIT_REQUEST_RELATIVE_PATH
+                    if leftover_request.is_file():
+                        leftover_request.unlink()
+                    reviewer_candidate_index = next_index
+                    candidate_agent = next_agent
+                    # repair 目标随实际审核者重算（"self" 模式下 repair == reviewer）。
+                    reviewer_agent = next_agent
+                    repair_agent = resolve_repair_agent(
+                        review_config.repair_agent,
+                        issue=issue,
+                        config=config,
+                        reviewing_agent=reviewer_agent,
+                        executor_agent=selected_agent,
+                    )
+                    continue
             reviewer_text = extract_agent_response_text(review_result)
             stdout_decision = parse_reviewer_decision(reviewer_text)
 

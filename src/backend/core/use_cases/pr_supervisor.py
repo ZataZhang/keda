@@ -19,6 +19,7 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     SupervisorActionResult,
 )
+from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
 )
@@ -35,6 +36,7 @@ from backend.core.use_cases.agent_runner_validation import (
 )
 from backend.core.use_cases.agent_runner_failure import (
     format_recovery_failure_summary,
+    is_provider_capacity_failure,
 )
 
 # 补丁 3 / 补丁 4 的实现按职责拆到同级子模块（整文件 1000 非空行硬上限）：
@@ -49,6 +51,7 @@ from backend.core.use_cases.pr_supervisor_findings import (
     _persist_findings,
 )
 from backend.core.use_cases.pr_supervisor_repair import execute_repair
+from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
 from backend.core.use_cases.agent_runner_verification_recovery import (
     ensure_verification_passed_with_recovery,
 )
@@ -816,6 +819,7 @@ def run_post_pr_supervisor_cycle(
     pr_context: PullRequestContext,
     supervisor_agent: str,
     cycle: int,
+    builder_agent: str | None = None,
     model_selection: ModelSelection | None = None,
 ) -> SupervisorActionResult:
     """Run a single post-PR supervisor cycle.
@@ -829,6 +833,8 @@ def run_post_pr_supervisor_cycle(
         pr_context: PR context.
         supervisor_agent: Agent to use for supervision.
         cycle: Cycle number for event markers.
+        builder_agent: 本次实现者（发布路径能拿到时传入）；回退候选里排除它以保证
+            监督独立性，``None`` 表示该入口拿不到 builder（如 ``iar review``）。
 
     Returns:
         Supervisor action result.
@@ -864,76 +870,123 @@ def run_post_pr_supervisor_cycle(
     )
 
     # agent 非零退出且 stdout 中识别不到任何 JSON 决策时，视为基础设施级
-    # 崩溃（API / 网络错误），在同一 cycle 内做有限重试；agent 正常退出但
-    # 输出不可解析仍保持 fail-closed 直接 mark_failed，不重试。
-    # 重试之间做指数退避（初始秒数每次翻倍并按上限封顶），以便扛住
-    # 分钟级的 API 提供方中断，而不仅是秒级抖动
+    # 崩溃（API / 网络错误）：先在**同一个 agent** 上做有限重试（指数退避扛分钟级
+    # 中断）；预算耗尽仍不可用才按 agent_fallback_order 顺延下一个候选（额度/限流
+    # 则立即顺延，重试无意义）。agent 正常退出但输出不可解析仍保持 fail-closed 直接
+    # mark_failed——那是真实判定缺失，不重试也不换人；所有候选都跑不起来才 mark_failed。
     max_crash_retries = max(0, config.post_pr_supervisor.max_agent_crash_retries)
     max_attempts = max_crash_retries + 1
     initial_backoff_seconds = max(0, config.post_pr_supervisor.crash_retry_initial_backoff_seconds)
     max_backoff_seconds = max(0, config.post_pr_supervisor.crash_retry_max_backoff_seconds)
+    # 候选恒 ≠ 本次 builder（拿得到时），监督独立性靠换人保证；换人时丢弃模型绑定。
+    supervisor_candidates = build_agent_candidates(
+        config, supervisor_agent, exclude_agent=builder_agent
+    )
     response_text = ""
     crash_exit_code: int | None = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            result = run_agent_with_prompt(
-                supervisor_agent,
-                supervisor_prompt,
-                worktree_path,
-                process_runner,
-                config=config,
-                capture_output=True,
-                issue=issue,
-                model_selection=model_selection,
-            )
-        except subprocess.CalledProcessError as exc:
-            result = CommandResult(
-                command=tuple(exc.cmd),
-                return_code=exc.returncode,
-                stdout=exc.output or "",
-                stderr=exc.stderr or "",
-            )
-            response_text = extract_agent_response_text(result)
-            # Claude stream-json may return non-zero exit code while still
-            # producing valid output in stdout; only treat the failure as an
-            # infrastructure crash when no JSON decision can be recognized.
-            if contains_supervisor_decision(response_text):
-                _logger.warning(
-                    "Supervisor agent exited with code %d for Issue #%d; "
-                    "using the JSON decision found in captured stdout.",
-                    exc.returncode,
-                    issue.number,
+    chosen_agent = supervisor_agent
+    result: CommandResult | None = None
+    for candidate_index, candidate_agent in enumerate(supervisor_candidates):
+        is_last_candidate = candidate_index == len(supervisor_candidates) - 1
+        candidate_model_selection = drop_model_selection_for_agent(candidate_agent, model_selection)
+        candidate_crash_exit_code: int | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = run_agent_with_prompt(
+                    candidate_agent,
+                    supervisor_prompt,
+                    worktree_path,
+                    process_runner,
+                    config=config,
+                    capture_output=True,
+                    issue=issue,
+                    model_selection=candidate_model_selection,
                 )
-                crash_exit_code = None
-                break
-            crash_exit_code = exc.returncode
-            _logger.warning(
-                "Supervisor agent exited with code %d for Issue #%d with no "
-                "JSON decision in stdout (attempt %d/%d); treating it as an "
-                "agent infrastructure crash.",
-                exc.returncode,
-                issue.number,
-                attempt,
-                max_attempts,
-            )
-            if attempt < max_attempts:
-                backoff_seconds = min(
-                    max_backoff_seconds,
-                    initial_backoff_seconds * (2 ** (attempt - 1)),
+            except subprocess.CalledProcessError as exc:
+                result = CommandResult(
+                    command=tuple(exc.cmd),
+                    return_code=exc.returncode,
+                    stdout=exc.output or "",
+                    stderr=exc.stderr or "",
                 )
-                if backoff_seconds > 0:
-                    _logger.info(
-                        "Waiting %d seconds before supervisor retry %d/%d for Issue #%d.",
-                        backoff_seconds,
-                        attempt + 1,
-                        max_attempts,
+                response_text = extract_agent_response_text(result)
+                # Claude stream-json may return non-zero exit code while still
+                # producing valid output in stdout; only treat the failure as an
+                # infrastructure crash when no JSON decision can be recognized.
+                if contains_supervisor_decision(response_text):
+                    _logger.warning(
+                        "Supervisor agent '%s' exited with code %d for Issue #%d; "
+                        "using the JSON decision found in captured stdout.",
+                        candidate_agent,
+                        exc.returncode,
                         issue.number,
                     )
-                    time.sleep(backoff_seconds)
-            continue
-        response_text = extract_agent_response_text(result)
-        crash_exit_code = None
-        break
+                    candidate_crash_exit_code = None
+                    break
+                candidate_crash_exit_code = exc.returncode
+                # 额度/限流在同一 agent 上重试无意义：直接顺延下一个候选。
+                if is_provider_capacity_failure(exc) and not is_last_candidate:
+                    _logger.warning(
+                        "Supervisor agent '%s' provider is out of capacity for Issue #%d; "
+                        "switching to the next candidate.",
+                        candidate_agent,
+                        issue.number,
+                    )
+                    break
+                _logger.warning(
+                    "Supervisor agent '%s' exited with code %d for Issue #%d with no "
+                    "JSON decision in stdout (attempt %d/%d); treating it as an "
+                    "agent infrastructure crash.",
+                    candidate_agent,
+                    exc.returncode,
+                    issue.number,
+                    attempt,
+                    max_attempts,
+                )
+                if attempt < max_attempts:
+                    backoff_seconds = min(
+                        max_backoff_seconds,
+                        initial_backoff_seconds * (2 ** (attempt - 1)),
+                    )
+                    if backoff_seconds > 0:
+                        _logger.info(
+                            "Waiting %d seconds before supervisor retry %d/%d for Issue #%d.",
+                            backoff_seconds,
+                            attempt + 1,
+                            max_attempts,
+                            issue.number,
+                        )
+                        time.sleep(backoff_seconds)
+                continue
+            except OSError as exc:
+                # CLI 缺失 / 进程启动 I/O 失败：同一个 agent 再试也不会好，直接换候选。
+                result = CommandResult(command=(), return_code=1, stdout="", stderr=str(exc))
+                response_text = ""
+                candidate_crash_exit_code = 1
+                _logger.warning(
+                    "Supervisor agent '%s' could not start for Issue #%d (%s).",
+                    candidate_agent,
+                    issue.number,
+                    exc,
+                )
+                break
+            response_text = extract_agent_response_text(result)
+            candidate_crash_exit_code = None
+            break
+
+        if candidate_crash_exit_code is None:
+            crash_exit_code = None
+            chosen_agent = candidate_agent
+            break
+        crash_exit_code = candidate_crash_exit_code
+        if is_last_candidate:
+            break
+        _logger.warning(
+            "Supervisor agent '%s' could not run for Issue #%d; switching to '%s'.",
+            candidate_agent,
+            issue.number,
+            supervisor_candidates[candidate_index + 1],
+        )
 
     if crash_exit_code is not None:
         raw_action_result = SupervisorActionResult(
@@ -954,7 +1007,10 @@ def run_post_pr_supervisor_cycle(
     )
     # 观测回填：本 cycle 的 supervisor agent 调用用量。守卫层的改写分支新建
     # 结果对象、不携带 usage，因此在守卫之后统一附加一次。
-    action_result = replace(action_result, token_usage=result.token_usage)
+    action_result = replace(
+        action_result,
+        token_usage=result.token_usage if result is not None else None,
+    )
     # 本 cycle 结论落盘：resolved 的 finding 出列，未解决的带进下一轮 prompt。
     _persist_findings(
         worktree_path,
@@ -966,7 +1022,7 @@ def run_post_pr_supervisor_cycle(
 
     comment_body = build_supervisor_result_comment(
         action=action_result.action,
-        supervisor=supervisor_agent,
+        supervisor=chosen_agent,
         summary=action_result.summary,
         findings_counts=action_result.findings_counts,
         verification_status=action_result.verification_status,
