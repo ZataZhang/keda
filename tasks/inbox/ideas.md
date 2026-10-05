@@ -319,3 +319,18 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - **P2-访问日志（不做）**：uvicorn 未开 `--access-log`（`main.py:19` / `start.sh:9`），HTTP 层无应用级日志；至少显式配置并接到同一格式。
 - **P2-事件下沉（不做）**：生命周期事件现在只有 phase 级（`agent_runner_lifecycle.py:58`），可逐步补 `step/*` / `tool/*` 细粒度事件，先覆盖最长、最易出问题的执行段。
 - **背景参照（2026-09-30 会话）**：以上判断对照了 DeepSeek Harness（`dsh`，2026-08 Developer Preview）的日志观——Session 是其 7 个核心包之一、append-only 可重放、每步都是可订阅事件点、"Model-visible means logged" 由运行时不变量强制。keda 已有账本这只脚接近该设计，但 app 日志仍停在"运维输出"形态，两条线未打通。
+
+## 2026-10-05 · iar-issue-db-reclaim
+
+> 顺带一个发现（供你参考，不用现在处理）：iar 的 worktree.py/源码里没有任何 drop database 逻辑，所以每个 iar worktree 的专用库（<repo>_iar_issue_<N>_<hash>）在 worktree 删除后都会永久残留——这次是手动清的，长期看值得在 keda 侧补一个随 issue 关闭/ worktree 删除的 DB 回收。要不要我记进 keda 的 idea inbox / 开个 issue？ 要不要补一个PRD？
+
+**AI 派生背景**（2026-10-05 核实仓库当前代码，非用户原话）：
+
+- 修正表述：并非"完全没有 drop database 逻辑"。keda 已有一套 worktree 孤儿库回收脚本 `scripts/shared/worktree/gc_worktree_databases.py`（由 `merge.sh --doctor` 在 `merge.sh:211` 调用，默认 dry-run，`--gc`/`--yes` 才删），但它的所有权正则只认 `create.sh` 那套命名 `^{repo_prefix}_wt_.+_[0-9a-f]{8}$`（`gc_worktree_databases.py:185`）。IAR 的 Issue 库命名是 `<repo>_iar_issue_<N>_<digest8>`，前缀是 `_iar_issue_` 而非 `_wt_`，**恰好落在 GC 的覆盖范围之外**，因此确实会永久残留。真正的缺陷是"两套建库命名 vs 单一回收模式"的错配，不是缺失回收机制。
+- 建库侧事实：`src/backend/core/use_cases/worktree_database.py:54-59`，Issue worktree 创建时（经 `agent_runner_worktree_create.py:177` 调用 `provision_worktree_database`）生成库名 `f"{repo_path.name}_iar_issue_{issue_number}_{sha256(str(repo_path.resolve()))[:8]}"`。注意摘要来源是**仓库绝对路径的 sha256 前 8 位**，与 `create.sh` 的 `git hash-object --stdin <branch>` 前 8 位是两套算法——即便扩展 GC 正则，也不能复用 `compute_branch_digest`，需另算 repo-path 摘要。
+- 删除侧事实：删除路径 `cli_parsed_commands/worktree.py:59 → WorktreeManager.remove()`（`infrastructure/git/worktree.py:148-172`）只做 `git worktree remove --force` + `git worktree prune`，无任何 DB drop。用户所说 "worktree.py 里没有 drop database" 在这一点上属实。
+- 触发/生命周期：建库是尽力而为（脚本缺失、建库失败均只 warning 并回退共享库，见 `worktree_database.py:46-52/73-80/89-97`），所以残留仅存在于成功建库且模板脚本存在的仓库。
+- 可能的落点（供后续 PRD 选型，非结论）：① 最小改动 = 扩 `gc_worktree_databases.py` 的所有权正则 + 增加 repo-path 摘要推导，把 `_iar_issue_` 纳入盘点；② 主动回收 = 在 Issue 关闭 / worktree 删除路径挂钩 DROP（但需处理并发运行中的 worktree、以及 daemon 崩溃后的终态判定）。②的风险高于①，前者可先做。
+- 严重度判断：低。孤儿库只占磁盘、不阻断流程，属长期卫生问题，适合 inbox → 成熟后再走 PRD，不必立即开 GitHub Issue。本次用户已手动清理。
+
+（原话来源：用户 2026-10-05 转述的排查结论，逐字引用。本条为待办登记，用户明确"不用现在处理"。）

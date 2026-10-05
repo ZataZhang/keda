@@ -1,6 +1,6 @@
 # Idea Inbox — 总结（AI 派生，可重写；事实以 ideas.md 为准）
 
-_最后更新：2026-09-30_
+_最后更新：2026-10-05_
 
 ## 主题聚类
 
@@ -23,6 +23,8 @@ _最后更新：2026-09-30_
 - **Token 消耗度量** — 缺少 agent 各环节 token 消耗的统计功能，无法了解成本分布。（来源：2026-06-26 15:59）
 
 - **测试与基准评估** — 预设若干 PRD，复制 `~/code/zata_code_template` 模板后在模板仓库完成 PRD，对比完成效果、完成度、是否使用 IAR 的差异以及人工介入耗时。（来源：2026-06-26 16:01）
+
+- **资源回收 / 卫生** — IAR Issue worktree 的专用库（`<repo>_iar_issue_<N>_<digest8>`）在 worktree 删除后无回收路径，会永久残留；已有 `gc_worktree_databases.py` 只覆盖 `create.sh` 的 `_wt_` 命名，两者命名错配。（来源：2026-10-05）
 
 ## 可执行候选
 
@@ -64,6 +66,8 @@ _最后更新：2026-09-30_
 ## 待 PRD
 
 - **`LOG_DIR` 与 `log_file` 是两套日志目录来源** → 建议 PRD：让日文件落点与 `log_dir` 一致（或由 `log_dir` 派生 `log_file` 默认值）。现状：`config.log_dir` 只被 `ensure_log_directory()` 消费，日文件写在 `Path(config.log_file).parent`，单独设 `LOG_DIR` 不移动日文件（已实测）。Issue #175 已把"两处消费点之间"收敛成单点并文档化该边界，合并两字段会挪走已有部署的落点，需单独决策。（来源：2026-09-30）
+
+- **IAR Issue 专用库无回收路径** → 建议 PRD：把 `{repo}_iar_issue_{N}_{digest8}` 纳入 worktree 孤儿库盘点（最小方案 = 扩 `gc_worktree_databases.py` 所有权正则 + 派生 repo-path 摘要；主动挂钩 Issue 关闭删除风险更高，需处理并发），或在 Issue 关闭/worktree 删除时主动 DROP。严重度低（只占磁盘），可等待成熟再立项。（来源：2026-10-05）
 
 ## 已升级
 
