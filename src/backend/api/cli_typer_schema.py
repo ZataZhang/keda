@@ -9,7 +9,13 @@ from __future__ import annotations
 
 
 from backend.api.cli_console import console
-from backend.api.cli_output import OutputFormat, emit, output_format_of
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    OutputFormat,
+    emit,
+    output_format_of,
+    route_logs_to_stderr,
+)
 from backend.api.cli_schema import build_command_schema, render_schema_human
 from backend.api.cli_typer_app import JsonOutputOption, OutputOption, app
 
@@ -21,6 +27,10 @@ def schema_command(
 ) -> int:
     """Introspect the real command tree: commands, options, types, enums, defaults."""
     fmt = output_format_of(output=output, as_json=as_json)
+    if fmt == OUTPUT_FORMAT_JSON:
+        # 本命令直接从 Typer app emit JSON，不经 cli.py 的中央改绑点，
+        # 必须在机器模式下自行把日志改绑到 stderr，否则一条日志就污染 stdout。
+        route_logs_to_stderr()
     schema = build_command_schema(app)
     emit(
         schema,

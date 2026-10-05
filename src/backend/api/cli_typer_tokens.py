@@ -24,6 +24,7 @@ from backend.api.cli_output import (
     emit,
     output_format_of,
     render_cli_error,
+    route_logs_to_stderr,
 )
 from backend.api.cli_typer_app import OutputFormat, OutputOption, _enum_value, app
 from backend.core.use_cases.agent_runner_factory import create_console_store
@@ -163,6 +164,10 @@ def tokens(
 ) -> None:
     """查看 agent 调用的 token 消耗汇总（按流程 / 按 agent / 按 PRD，与 Stats 页同源同口径）。"""
     fmt = output_format_of(output=_enum_value(output), as_json=as_json)
+    if fmt == OUTPUT_FORMAT_JSON:
+        # 本命令直接从 Typer app emit JSON，不经 cli.py 的中央改绑点，
+        # 必须在机器模式下自行把日志改绑到 stderr，否则一条日志就污染 stdout。
+        route_logs_to_stderr()
     bounded_days = _clamp_days(days)
     # 可用性探针：建库与裸读都放进保护块——build_prd_lifecycle_stats 对读取
     # 失败静默降级为空数据，这里负责把"账本不可用"与"真的没数据"区分开

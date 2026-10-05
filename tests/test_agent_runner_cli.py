@@ -1250,11 +1250,9 @@ def test_main_daemon_with_repo_id_does_not_default_to_all(monkeypatch) -> None:
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
         patch(
-            # This test uses the real ``keda`` repo id, whose single-instance
-            # lock is live whenever the project's own daemon runs. Isolate it
-            # like the cwd-resolution daemon tests so the assertion on repo-id
-            # routing stays deterministic; locking itself is covered by
-            # tests/test_daemon_single_instance.py.
+            # 隔离真实 ``~/.iar/daemon-locks``：本机常驻的 keda daemon 持有同
+            # 名锁，否则本测试结果随宿主机进程状态漂移。锁的获取/释放语义由
+            # daemon_single_instance 与单实例冲突测试覆盖，这里只断言仓库选择。
             "backend.api.cli.acquire_daemon_locks",
             return_value=[],
         ),

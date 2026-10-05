@@ -40,6 +40,14 @@ def _dry_run_preview(contexts: list, *, agent: str, max_issues: int) -> dict:
 
 def run_run_command(ctx: ParsedCommandContext) -> int:
     """``iar run``: run one agent-runner polling cycle."""
+    # 机器输出只定义在 --dry-run 预览组合下：真实执行的过程输出是流式文本，
+    # 混进 JSON 只会产出不可解析的垃圾。在解析任何仓库目标之前 fail fast。
+    if ctx.output_format == OUTPUT_FORMAT_JSON and not ctx.parsed.dry_run:
+        raise CliError(
+            "--json/--output json 只在 --dry-run 预览下有定义；真实执行的过程输出是流式文本。",
+            code=ExitCode.USAGE,
+            suggestion="iar run --dry-run --json",
+        )
     contexts = _resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,

@@ -9,6 +9,7 @@ False，这里的断言只依赖派生结果本身。
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -200,3 +201,72 @@ def test_schema_command_registered_on_root_app() -> None:
     result = runner.invoke(app, ["schema"])
     assert result.exit_code == 0
     assert "init" in result.stdout
+
+
+def _spy_route_logs_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    command_module: Any,
+    calls: list[str],
+) -> None:
+    """把命令模块内的 ``route_logs_to_stderr`` 换成记录调用的间谍。
+
+    命令经 ``from ... import route_logs_to_stderr`` 持有模块级名字，间谍必须
+    打在导入方模块（``cli_typer_schema`` / ``cli_typer_tokens``）上才会被命中；
+    间谍替换掉真实改绑不影响这里的断言目标（是否调用了改绑点本身）。
+    """
+    monkeypatch.setattr(
+        command_module,
+        "route_logs_to_stderr",
+        lambda: calls.append(command_module.__name__),
+    )
+
+
+@pytest.mark.parametrize("json_flags", [["--json"], ["--output", "json"]])
+def test_schema_json_routes_logs_to_stderr(
+    json_flags: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """回归：``iar schema`` 直接从 Typer app emit JSON、绕过中央 dispatcher，
+    机器模式下必须自行调用 ``route_logs_to_stderr()``，人类表格模式不得调用。"""
+    from backend.api import cli_typer_schema
+
+    calls: list[str] = []
+    _spy_route_logs_to_stderr(monkeypatch, cli_typer_schema, calls)
+    runner = CliRunner()
+
+    machine_result = runner.invoke(app, ["schema", *json_flags])
+    assert machine_result.exit_code == 0
+    assert calls == [cli_typer_schema.__name__]
+
+    table_result = runner.invoke(app, ["schema"])
+    assert table_result.exit_code == 0
+    assert calls == [cli_typer_schema.__name__]
+
+
+def test_tokens_json_routes_logs_to_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """回归：``iar tokens`` 同样绕过中央 dispatcher，机器模式必须自行改绑日志，
+    否则任何一条日志都会混进 stdout 上的 JSON 文档。"""
+    from backend.api import cli_typer_tokens
+    from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+
+    calls: list[str] = []
+    _spy_route_logs_to_stderr(monkeypatch, cli_typer_tokens, calls)
+    monkeypatch.setattr(
+        cli_typer_tokens,
+        "create_console_store",
+        lambda: SqliteConsoleStore(tmp_path / "console.db"),
+    )
+    runner = CliRunner()
+
+    machine_result = runner.invoke(app, ["tokens", "--json"])
+    assert machine_result.exit_code == 0
+    assert json.loads(machine_result.stdout)["token_usage"]["by_flow"] == {}
+    assert calls == [cli_typer_tokens.__name__]
+
+    table_result = runner.invoke(app, ["tokens"])
+    assert table_result.exit_code == 0
+    assert "暂无 token 用量数据" in table_result.stdout
+    assert calls == [cli_typer_tokens.__name__]
