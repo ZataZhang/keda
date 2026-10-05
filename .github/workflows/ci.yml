@@ -110,7 +110,7 @@ jobs:
       # keda 不再自带 PRD 格式解析：验收清单的章节 / 分组 / 复选框由 prd skill 的
       # scripts/prd_contract.py 提供，而该 skill 是**用户级安装**（`iar init` 从模板仓
       # sparse checkout 拉取）。所以单测需要一个真实安装的 skill——仓库里那份只写
-      # 版本标记的桩 SKILL.md 已经解析不出任何结构，用它会让所有走门禁 / roadmap 的
+      # 版本标记的桩 SKILL.md 已经解析不出任何结构，用它会让所有走门禁 / backlog 的
       # 用例失败。这里在一次性仓库里跑 `iar init` 把 skill 装到临时目录，并导出
       # IAR_PRD_SKILL_PATH：安装路径与用户实际使用同源，顺带验证了"iar init 装出来的
       # 契约确实带解析脚本"这条运行时依赖。

@@ -40,7 +40,7 @@ playwright-e2e/
 4. **`tests/setup/auth.setup.ts` / `tests/setup/admin-auth.setup.ts`** — 使用 `/api/auth/login` / `/api/admin/auth/login` 建立 session。
 5. **`tests/smoke/public-home.no-auth.spec.ts`** — public 首页冒烟测试。
 6. **`tests/smoke/admin-sign-in.admin.spec.ts`** — admin 前端表单登录冒烟测试（admin project，自行完成登录）。
-7. **控制台路由前缀** — 本项目控制台页面的 canonical 路径以 `app/` 段开头（如 `/app/dashboard`、`/app/roadmap`、`/app/stats`；权威来源见 `frontend-public/components/layout/app-sidebar.tsx` 的 `href`）。写 spec 时 `goto()` 不要漏掉 `app/` 段，否则页面 404。
+7. **控制台路由前缀** — 本项目控制台页面的 canonical 路径以 `app/` 段开头（如 `/app/dashboard`、`/app/backlog`、`/app/stats`；权威来源见 `frontend-public/components/layout/app-sidebar.tsx` 的 `href`）。写 spec 时 `goto()` 不要漏掉 `app/` 段，否则页面 404。
 
 ## 模板同步边界
 

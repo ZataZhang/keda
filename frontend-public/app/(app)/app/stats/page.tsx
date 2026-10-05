@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatLifecycleDuration,
   PHASE_LABELS,
-} from "@/components/roadmap/prd-lifecycle-view";
+} from "@/components/backlog/prd-lifecycle-view";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   fetchCompletionStats,
@@ -26,7 +26,7 @@ import type {
   RunRecordEntry,
   TokenUsageTotals,
 } from "@/lib/api/types";
-import { formatTokenCount } from "@/components/roadmap/prd-lifecycle-view";
+import { formatTokenCount } from "@/components/backlog/prd-lifecycle-view";
 
 export default function StatsPage() {
   const [stats, setStats] = useState<RepositoryCompletionStats[] | null>(null);

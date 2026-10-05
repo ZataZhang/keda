@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Callable, Sequence
 from backend.core.shared.interfaces.agent_output_view import IAgentOutputView
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.interfaces.runner_console import (
-    IRoadmapStore,
+    IBacklogStore,
     IRepositoryRegistryEditor,
     IRunHistoryStore,
     IRunnerProcessSupervisor,
@@ -82,7 +82,7 @@ __all__ = [
     "create_process_supervisor",
     "create_registry_editor",
     "create_repl_command_executor",
-    "create_roadmap_store",
+    "create_backlog_store",
     "create_transcript_runner",
     "get_agent_runner_settings",
     "get_agent_runner_status_data",
@@ -211,8 +211,8 @@ def create_console_store() -> IRunHistoryStore:
     return SqliteConsoleStore(console_settings.history_db_path)
 
 
-def create_roadmap_store() -> IRoadmapStore:
-    """创建 roadmap 队列 / 设置存储（与 console_store 共用同一个 SQLite 文件）。"""
+def create_backlog_store() -> IBacklogStore:
+    """创建 backlog 队列 / 设置存储（与 console_store 共用同一个 SQLite 文件）。"""
     console_settings = get_agent_runner_settings().console
     return SqliteConsoleStore(console_settings.history_db_path)
 

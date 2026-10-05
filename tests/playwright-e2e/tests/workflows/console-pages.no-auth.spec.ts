@@ -161,8 +161,8 @@ const AUDITS = {
   ],
 }
 
-/** 带关联 Issue 的 Roadmap PRD fixture（实时输出标签只对这类 PRD 出现）。 */
-const ROADMAP_PRD = {
+/** 带关联 Issue 的 Backlog PRD fixture（实时输出标签只对这类 PRD 出现）。 */
+const BACKLOG_PRD = {
   prd_path: 'tasks/pending/demo-prd.md',
   title: 'Demo PRD',
   status: 'pending',
@@ -349,18 +349,18 @@ test.describe('console pages smoke (mocked API)', () => {
 })
 
 /**
- * Roadmap PRD 详情「实时输出」标签（mock Issue 日志 API）。
+ * Backlog PRD 详情「实时输出」标签（mock Issue 日志 API）。
  *
- * 经真实 Roadmap 页 → 选中 PRD → 切到「实时输出」标签的路径验证：
+ * 经真实 Backlog 页 → 选中 PRD → 切到「实时输出」标签的路径验证：
  * 首次拉尾部窗口、按 offset 增量轮询、新尝试提示与切换、空态。
  */
 
 /** 打开带 Issue 的 PRD 详情并切到「实时输出」标签。 */
 async function openIssueOutputTab(page: Page): Promise<void> {
-  await page.route('**/api/v1/agent-runner/roadmap/prds?**', (route) =>
+  await page.route('**/api/v1/agent-runner/backlog/prds?**', (route) =>
     route.fulfill({
       json: {
-        prds: [ROADMAP_PRD],
+        prds: [BACKLOG_PRD],
         repo_id: 'keda-main',
         include_archived: false,
         scanned_at: '2026-09-29T10:00:00+00:00',
@@ -368,10 +368,10 @@ async function openIssueOutputTab(page: Page): Promise<void> {
     }),
   )
   // 其余标签的数据源给最小可用响应，避免加载错误干扰断言。
-  await page.route('**/api/v1/agent-runner/roadmap/prds/*/content**', (route) =>
+  await page.route('**/api/v1/agent-runner/backlog/prds/*/content**', (route) =>
     route.fulfill({ contentType: 'text/plain', body: '# Demo PRD' }),
   )
-  await page.route('**/api/v1/agent-runner/roadmap/settings**', (route) =>
+  await page.route('**/api/v1/agent-runner/backlog/settings**', (route) =>
     route.fulfill({
       json: {
         repo_id: 'keda-main',
@@ -381,7 +381,7 @@ async function openIssueOutputTab(page: Page): Promise<void> {
       },
     }),
   )
-  await page.route('**/api/v1/agent-runner/roadmap/autopilot**', (route) =>
+  await page.route('**/api/v1/agent-runner/backlog/autopilot**', (route) =>
     route.fulfill({
       json: {
         repo_id: 'keda-main',
@@ -395,14 +395,14 @@ async function openIssueOutputTab(page: Page): Promise<void> {
     }),
   )
 
-  await page.goto('/app/roadmap')
+  await page.goto('/app/backlog')
   await page.getByText('Demo PRD').first().click()
   await expect(page.getByTestId('prd-detail')).toBeVisible()
   await page.getByRole('button', { name: '实时输出' }).click()
   await expect(page.getByTestId('prd-issue-output')).toBeVisible()
 }
 
-test.describe('roadmap PRD issue live output (mocked API)', () => {
+test.describe('backlog PRD issue live output (mocked API)', () => {
   test('loads tail window then polls by offset', async ({ page }) => {
     await mockConsoleApi(page)
 

@@ -1,7 +1,7 @@
 /**
  * Realistic validation for the lifecycle-agent-matrix console surfaces (PRD rv-3/4/6/7).
  *
- * 验证层级：**真实入口**。Settings / Roadmap / PRD 原文页三个界面都走真实后端与
+ * 验证层级：**真实入口**。Settings / Backlog / PRD 原文页三个界面都走真实后端与
  * 真实配置（`config.toml` / 仓库 `.iar.toml` / PRD 文件头部），不做任何 stub。
  *
  * 覆盖范围与边界（刻意不写盘）：本 spec 只做**只读交互**——打开两个 Tab、展开九行
@@ -178,9 +178,9 @@ test.describe('生命周期 Agent 矩阵 (lifecycle-agent)', () => {
       .toBe(orderBefore[1])
   })
 
-  test('Roadmap 受管理仓库行齿轮打开仓库级矩阵抽屉', async ({ page }) => {
-    await page.goto('/app/roadmap/')
-    // Roadmap 是 SPA：仓库列表与 PRD 列表是两次独立请求，等网络静默再计数，
+  test('Backlog 受管理仓库行齿轮打开仓库级矩阵抽屉', async ({ page }) => {
+    await page.goto('/app/backlog/')
+    // Backlog 是 SPA：仓库列表与 PRD 列表是两次独立请求，等网络静默再计数，
     // 否则刚 goto 完就 count 会稳定拿到 0，把有仓库的情况误判成"没有受管理仓库"
     // 而跳过本用例（下方「Agent 覆盖」用例出于同一原因已经等待）。
     await page.waitForLoadState('networkidle')
@@ -207,8 +207,8 @@ test.describe('生命周期 Agent 矩阵 (lifecycle-agent)', () => {
   })
 
   test('PRD 原文页工具栏「Agent 覆盖」打开覆盖抽屉', async ({ page }) => {
-    await page.goto('/app/roadmap/')
-    // Roadmap 是 SPA：仓库列表与 PRD 列表是两次独立请求，等网络静默再计数，
+    await page.goto('/app/backlog/')
+    // Backlog 是 SPA：仓库列表与 PRD 列表是两次独立请求，等网络静默再计数，
     // 否则刚 goto 完就 count 会稳定拿到 0（把有 PRD 的仓库误判成"没有 PRD"）。
     await page.waitForLoadState('networkidle')
 

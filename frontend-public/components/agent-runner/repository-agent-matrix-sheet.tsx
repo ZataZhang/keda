@@ -2,7 +2,7 @@
 
 // 仓库级生命周期 Agent 矩阵抽屉。
 //
-// 从 Roadmap 仓库行的齿轮按钮打开，编辑的是该仓库 `.iar.toml` 里的
+// 从 Backlog 仓库行的齿轮按钮打开，编辑的是该仓库 `.iar.toml` 里的
 // `[agent_runner.lifecycle_agents]` 声明（仓库层），不影响全局 config.toml。
 
 import {

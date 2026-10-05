@@ -790,6 +790,9 @@ def test_iar_init_does_not_pollute_target_repo_config_toml(
     ``config.toml``. That polluted the target repo with
     ``[agent_runner.repositories.<repo_id>]`` entries.
     """
+    # 本用例的前提就是"没有 IAR_CONFIG"；IAR agent 会给测试进程注入父进程的
+    # ``IAR_CONFIG``，那样 registry 会落进那份外部配置而不是 fake home。
+    monkeypatch.delenv("IAR_CONFIG", raising=False)
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))

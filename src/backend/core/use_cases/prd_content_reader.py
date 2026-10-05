@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.core.use_cases.roadmap_prd_scanner import _DEFAULT_PRD_DIRS
+from backend.core.use_cases.backlog_prd_scanner import _DEFAULT_PRD_DIRS
 
 #: 只允许读取 Markdown 原文，避免把端点扩成任意文件读取。
 _ALLOWED_PRD_SUFFIX = ".md"

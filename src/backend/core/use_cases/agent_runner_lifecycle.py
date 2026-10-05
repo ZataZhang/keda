@@ -2,7 +2,7 @@
 
 本模块是 PRD 生命周期观测的唯一业务口径来源：
 
-- **身份**：``repo_id + prd_path + run_id``。``run_id`` 确定性推导，使 roadmap
+- **身份**：``repo_id + prd_path + run_id``。``run_id`` 确定性推导，使 backlog
   启动侧与 runner 执行侧无需互相传参就能写到同一 run，重试与跨进程恢复也不会
   新建重复 run。
 - **事件**：追加式闭集；``event_key`` 在同一 run 内唯一，重复写幂等。
@@ -31,7 +31,7 @@ from backend.core.shared.interfaces.runner_console import (
     PrdLifecycleRunRecord,
 )
 from backend.core.shared.models.agent_runner import AttemptResult
-from backend.core.shared.models.roadmap import (
+from backend.core.shared.models.backlog import (
     PrdLifecycleDetail,
     PrdLifecycleDurations,
     PrdLifecycleEventView,
@@ -172,7 +172,7 @@ def lifecycle_run_id(*, repo_id: str, issue_number: int | None, prd_path: str) -
 def resolve_lifecycle_store(store: object | None) -> IPrdLifecycleStore | None:
     """从任意旁路存储对象中识别 lifecycle 账本能力（鸭子类型，失败返回 ``None``）。
 
-    roadmap 与 runner 两侧传入的分别是 ``IRoadmapStore`` / ``IRunHistoryStore``，
+    backlog 与 runner 两侧传入的分别是 ``IBacklogStore`` / ``IRunHistoryStore``，
     但都由同一个 :class:`~backend.infrastructure.persistence.console_store.SqliteConsoleStore`
     实现。用能力探测而非新增端口参数，避免把生命周期观测泄漏进既有调用链。
     """
@@ -254,9 +254,9 @@ def record_lifecycle_event(
         repo_id: 目标仓库标识。
         prd_path: 规范化 PRD 相对路径。
         issue_number: 关联 Issue 编号；未知时为 ``None``。
-        trigger: run 首次写入时记录的触发来源（cli_run / console_daemon / roadmap ...）。
+        trigger: run 首次写入时记录的触发来源（cli_run / console_daemon / backlog ...）。
         event_type: 事件种类（闭集）。
-        actor: 事件来源标识（如 ``runner`` / ``roadmap`` / ``validation_gate``）。
+        actor: 事件来源标识（如 ``runner`` / ``backlog`` / ``validation_gate``）。
         occurred_at: 事件发生时间；缺省取当前 UTC 时间。
         event_key: run 内唯一键；缺省用 ``event_type@occurred_at``，可抵抗同秒重复写。
         detail: 结构化非敏感摘要。

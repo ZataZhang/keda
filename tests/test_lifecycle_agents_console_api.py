@@ -153,7 +153,7 @@ def test_prd_override_view_carries_same_entry_groups(console_env: dict) -> None:
         "ascii"
     )
     override_view = client.get(
-        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/agent-overrides",
         params={"repo_id": "testrepo"},
     ).json()
     assert [row["key"] for row in override_view["lifecycles"]] == list(
@@ -364,14 +364,14 @@ def test_prd_override_read_write_roundtrip(console_env: dict) -> None:
     encoded = base64.urlsafe_b64encode(prd_path.encode("utf-8")).decode("ascii")
 
     initial = client.get(
-        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/agent-overrides",
         params={"repo_id": "testrepo"},
     )
     assert initial.status_code == 200
     assert initial.json()["overrides"] == {}
 
     response = client.patch(
-        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/agent-overrides",
         json={"repo_id": "testrepo", "overrides": {"closeout": "pi", "implementation": "claude"}},
     )
     assert response.status_code == 200
@@ -398,7 +398,7 @@ def test_prd_override_rejects_unregistered_agent(console_env: dict) -> None:
         "ascii"
     )
     response = client.patch(
-        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/agent-overrides",
         json={"repo_id": "testrepo", "overrides": {"review": "no-such-agent"}},
     )
     assert response.status_code == 422
@@ -414,7 +414,7 @@ def test_prd_override_view_excludes_planner(console_env: dict) -> None:
         "ascii"
     )
     view = client.get(
-        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/agent-overrides",
         params={"repo_id": "testrepo"},
     ).json()
     override_keys = [row["key"] for row in view["lifecycles"]]
@@ -423,7 +423,7 @@ def test_prd_override_view_excludes_planner(console_env: dict) -> None:
     assert len(override_keys) == 8
 
     rejected = client.patch(
-        f"/api/v1/agent-runner/roadmap/prds/{encoded}/agent-overrides",
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/agent-overrides",
         json={"repo_id": "testrepo", "overrides": {"planner": "kimi"}},
     )
     assert rejected.status_code == 422

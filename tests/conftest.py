@@ -19,9 +19,9 @@ from backend.core.shared.interfaces.agent_runner import (
 )
 from backend.core.shared.interfaces.runner_console import (
     AuditEntry,
-    IRoadmapStore,
-    RoadmapQueueEntry,
-    RoadmapSettingsEntry,
+    IBacklogStore,
+    BacklogQueueEntry,
+    BacklogSettingsEntry,
 )
 from backend.core.shared.models.agent_runner import (
     CommandResult,
@@ -48,7 +48,7 @@ def _find_usable_prd_skill() -> Path | None:
 
     keda 不再自带 PRD 格式解析：章节/分组/复选框由 prd skill 的
     ``scripts/prd_contract.py`` 解析。因此仓库内那份只写版本标记的桩 SKILL.md
-    已经不够用了——桩文件解析不出任何结构，会让所有走门禁/roadmap 的用例失败。
+    已经不够用了——桩文件解析不出任何结构，会让所有走门禁/backlog 的用例失败。
     这里要求一个**真实安装**的 skill（含解析脚本）。
 
     Returns:
@@ -465,38 +465,38 @@ class FakeProcessRunner(IProcessRunner):
         return CommandResult(command=tuple(command), return_code=0, stdout="", stderr="")
 
 
-class FakeRoadmapStore(IRoadmapStore):
-    """In-memory roadmap queue store that records every write.
+class FakeBacklogStore(IBacklogStore):
+    """In-memory backlog queue store that records every write.
 
-    Shared by the roadmap tests so a scheduling pass can be asserted on both
+    Shared by the backlog tests so a scheduling pass can be asserted on both
     its resulting queue state and the exact number of writes it performed
     (idempotency and dry-run guarantees depend on the latter).
     """
 
     def __init__(self, *, repo_id: str = "keda-test", max_parallel: int = 1) -> None:
         self.repo_id = repo_id
-        self._entries: list[RoadmapQueueEntry] = []
+        self._entries: list[BacklogQueueEntry] = []
         self._next_entry_id = 1
-        self.settings = RoadmapSettingsEntry(
+        self.settings = BacklogSettingsEntry(
             repo_id=repo_id,
             max_parallel=max_parallel,
             default_view="list",
             updated_at="2026-01-01T00:00:00+00:00",
         )
-        self.enqueue_calls: list[RoadmapQueueEntry] = []
+        self.enqueue_calls: list[BacklogQueueEntry] = []
         self.update_calls: list[dict] = []
         self.clear_calls = 0
         self.audits: list[AuditEntry] = []
 
     # -- reads ---------------------------------------------------------------
-    def get_roadmap_settings(self, repo_id: str) -> RoadmapSettingsEntry | None:
+    def get_backlog_settings(self, repo_id: str) -> BacklogSettingsEntry | None:
         if repo_id != self.repo_id:
             return None
         return self.settings
 
-    def list_roadmap_queue(
+    def list_backlog_queue(
         self, *, repo_id: str | None = None, status: str | None = None
-    ) -> list[RoadmapQueueEntry]:
+    ) -> list[BacklogQueueEntry]:
         entries = list(self._entries)
         if repo_id is not None:
             entries = [entry for entry in entries if entry.repo_id == repo_id]
@@ -505,17 +505,17 @@ class FakeRoadmapStore(IRoadmapStore):
         return entries
 
     # -- writes --------------------------------------------------------------
-    def save_roadmap_settings(self, settings: RoadmapSettingsEntry) -> None:
+    def save_backlog_settings(self, settings: BacklogSettingsEntry) -> None:
         self.settings = settings
 
-    def enqueue_roadmap(self, entry: RoadmapQueueEntry) -> int:
+    def enqueue_backlog(self, entry: BacklogQueueEntry) -> int:
         self.enqueue_calls.append(entry)
         stored_entry = replace(entry, entry_id=self._next_entry_id)
         self._next_entry_id += 1
         self._entries.append(stored_entry)
         return int(stored_entry.entry_id)
 
-    def update_roadmap_queue_status(
+    def update_backlog_queue_status(
         self,
         *,
         entry_id: int,
@@ -545,7 +545,7 @@ class FakeRoadmapStore(IRoadmapStore):
                 return
         raise KeyError(f"unknown queue entry {entry_id}")
 
-    def clear_roadmap_queue(self, *, repo_id: str | None = None) -> None:
+    def clear_backlog_queue(self, *, repo_id: str | None = None) -> None:
         self.clear_calls += 1
         if repo_id is None:
             self._entries.clear()
@@ -561,7 +561,7 @@ class FakeRoadmapStore(IRoadmapStore):
         entry_id = self._next_entry_id
         self._next_entry_id += 1
         self._entries.append(
-            RoadmapQueueEntry(
+            BacklogQueueEntry(
                 repo_id=self.repo_id,
                 prd_path=prd_path,
                 status=status,
@@ -574,7 +574,7 @@ class FakeRoadmapStore(IRoadmapStore):
         )
         return entry_id
 
-    def entry_for(self, prd_path: str) -> RoadmapQueueEntry:
+    def entry_for(self, prd_path: str) -> BacklogQueueEntry:
         entry = next(
             (entry for entry in self._entries if entry.prd_path == prd_path),
             None,

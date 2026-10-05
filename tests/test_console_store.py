@@ -21,8 +21,8 @@ from backend.core.shared.interfaces.runner_console import (
 from backend.infrastructure.persistence.console_store import (
     MonitorSettingsEntry,
     MonitorSnapshotEntry,
-    RoadmapQueueEntry,
-    RoadmapSettingsEntry,
+    BacklogQueueEntry,
+    BacklogSettingsEntry,
     SqliteConsoleStore,
     _SCHEMA_VERSION,
 )
@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 )
 """
 
+# v3 时代的队列/设置表叫 roadmap_*：这里刻意保留旧表名，才能模拟用户磁盘上的
+# 旧库并验证 v7 迁移是否把表名与数据一起带过来。
 _V3_CREATE_ROADMAP_QUEUE = """
 CREATE TABLE IF NOT EXISTS roadmap_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +132,20 @@ def _seed_v3_database(db_path: Path, run_record_count: int = 3) -> None:
             "INSERT INTO roadmap_settings (repo_id, max_parallel, default_view, updated_at) "
             "VALUES (?, ?, ?, ?)",
             ("legacy-repo-0", 2, "list", "2026-01-01T00:00:00+00:00"),
+        )
+        connection.execute(
+            "INSERT INTO roadmap_queue "
+            "(repo_id, prd_path, status, trigger, started_at, finished_at, error_detail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-repo-0",
+                "tasks/pending/legacy-prd.md",
+                "completed",
+                "manual",
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:02:00+00:00",
+                None,
+            ),
         )
         connection.execute("PRAGMA user_version = 3")
         connection.commit()
@@ -319,31 +335,31 @@ def test_append_failure_degrades_to_warning(tmp_path: Path) -> None:
     store.append_run(_make_run_record())
 
 
-def test_roadmap_settings_round_trip(tmp_path: Path) -> None:
-    """Roadmap settings should be persisted and retrievable."""
+def test_backlog_settings_round_trip(tmp_path: Path) -> None:
+    """Backlog settings should be persisted and retrievable."""
     store = SqliteConsoleStore(tmp_path / "console.db")
-    settings = store.get_roadmap_settings("keda-main")
+    settings = store.get_backlog_settings("keda-main")
     assert settings is None
 
-    store.save_roadmap_settings(
-        RoadmapSettingsEntry(
+    store.save_backlog_settings(
+        BacklogSettingsEntry(
             repo_id="keda-main",
             max_parallel=3,
             default_view="timeline",
             updated_at="2026-06-14T12:00:00+00:00",
         )
     )
-    settings = store.get_roadmap_settings("keda-main")
+    settings = store.get_backlog_settings("keda-main")
     assert settings is not None
     assert settings.max_parallel == 3
     assert settings.default_view == "timeline"
 
 
-def test_roadmap_queue_round_trip(tmp_path: Path) -> None:
-    """Roadmap queue entries should be persisted and filterable."""
+def test_backlog_queue_round_trip(tmp_path: Path) -> None:
+    """Backlog queue entries should be persisted and filterable."""
     store = SqliteConsoleStore(tmp_path / "console.db")
-    entry_id = store.enqueue_roadmap(
-        RoadmapQueueEntry(
+    entry_id = store.enqueue_backlog(
+        BacklogQueueEntry(
             repo_id="keda-main",
             prd_path="tasks/pending/P1-FEAT-20260101-a.md",
             status="queued",
@@ -353,15 +369,15 @@ def test_roadmap_queue_round_trip(tmp_path: Path) -> None:
             error_detail=None,
         )
     )
-    queue = store.list_roadmap_queue(repo_id="keda-main")
+    queue = store.list_backlog_queue(repo_id="keda-main")
     assert len(queue) == 1
     assert queue[0].entry_id == entry_id
     assert queue[0].prd_path == "tasks/pending/P1-FEAT-20260101-a.md"
 
-    store.update_roadmap_queue_status(
+    store.update_backlog_queue_status(
         entry_id=entry_id, status="running", started_at="2026-06-14T12:00:00+00:00"
     )
-    running = store.list_roadmap_queue(repo_id="keda-main", status="running")
+    running = store.list_backlog_queue(repo_id="keda-main", status="running")
     assert len(running) == 1
     assert running[0].status == "running"
 
@@ -377,8 +393,8 @@ def test_schema_migration_from_version_1(tmp_path: Path) -> None:
         row[0]
         for row in raw.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
-    assert "roadmap_queue" in tables
-    assert "roadmap_settings" in tables
+    assert "backlog_queue" in tables
+    assert "backlog_settings" in tables
     raw.close()
 
 
@@ -411,7 +427,7 @@ def test_v3_database_migrates_to_v4_and_keeps_history(tmp_path: Path) -> None:
 
     reopened = SqliteConsoleStore(db_path)
     assert len(reopened.list_recent_runs()) == 3
-    assert reopened.get_roadmap_settings("legacy-repo-0") is not None
+    assert reopened.get_backlog_settings("legacy-repo-0") is not None
 
 
 def test_fresh_database_creates_monitor_tables(tmp_path: Path) -> None:
@@ -594,6 +610,101 @@ def test_v5_database_migrates_to_v6_and_adds_attempt_preset_columns(
     assert len(attempts) == 1
     assert attempts[0].preset is None
     assert attempts[0].model is None
+
+
+def test_backlog_migration_renames_roadmap_tables_and_keeps_rows(tmp_path: Path) -> None:
+    """v6 旧库（roadmap_* 表且有数据）打开新代码后改名为 backlog_*，行与列值无损保留。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+    store.save_backlog_settings(
+        BacklogSettingsEntry(
+            repo_id="keda-main",
+            max_parallel=3,
+            default_view="timeline",
+            updated_at="2026-10-05T10:00:00+00:00",
+        )
+    )
+    entry_id = store.enqueue_backlog(
+        BacklogQueueEntry(
+            repo_id="keda-main",
+            prd_path="tasks/pending/P1-FEAT-20261001-legacy.md",
+            status="running",
+            trigger="global",
+            started_at="2026-10-01T09:00:00+00:00",
+            finished_at=None,
+            error_detail=None,
+        )
+    )
+
+    # 把库退回 v6 形态：表名改回 roadmap_*，user_version 降回 6。
+    raw = sqlite3.connect(db_path)
+    raw.execute("ALTER TABLE backlog_queue RENAME TO roadmap_queue")
+    raw.execute("ALTER TABLE backlog_settings RENAME TO roadmap_settings")
+    raw.execute("PRAGMA user_version = 6")
+    raw.commit()
+    raw.close()
+
+    migrated = SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+        table_names = {
+            row[0]
+            for row in probe.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert {"backlog_queue", "backlog_settings"} <= table_names
+        assert "roadmap_queue" not in table_names
+        assert "roadmap_settings" not in table_names
+        assert probe.execute("SELECT COUNT(*) FROM backlog_queue").fetchone()[0] == 1
+        assert probe.execute(
+            "SELECT id, repo_id, prd_path, status, trigger, started_at "
+            "FROM backlog_queue WHERE id = ?",
+            (entry_id,),
+        ).fetchone() == (
+            entry_id,
+            "keda-main",
+            "tasks/pending/P1-FEAT-20261001-legacy.md",
+            "running",
+            "global",
+            "2026-10-01T09:00:00+00:00",
+        )
+        assert probe.execute(
+            "SELECT repo_id, max_parallel, default_view FROM backlog_settings"
+        ).fetchall() == [("keda-main", 3, "timeline")]
+    finally:
+        probe.close()
+
+    assert migrated.get_backlog_settings("keda-main") is not None
+    assert migrated.get_backlog_settings("keda-main").max_parallel == 3
+    assert [entry.entry_id for entry in migrated.list_backlog_queue(repo_id="keda-main")] == [
+        entry_id
+    ]
+
+
+def test_backlog_migration_creates_missing_legacy_tables(tmp_path: Path) -> None:
+    """v6 库缺少 roadmap_* 表（或完全空库）时迁移补齐 backlog_* 空表，不报错也不留空洞。"""
+    db_path = tmp_path / "console.db"
+    SqliteConsoleStore(db_path)
+
+    raw = sqlite3.connect(db_path)
+    raw.execute("DROP TABLE backlog_queue")
+    raw.execute("DROP TABLE backlog_settings")
+    raw.execute("PRAGMA user_version = 6")
+    raw.commit()
+    raw.close()
+
+    migrated = SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+        assert probe.execute("SELECT COUNT(*) FROM backlog_queue").fetchone()[0] == 0
+        assert probe.execute("SELECT COUNT(*) FROM backlog_settings").fetchone()[0] == 0
+    finally:
+        probe.close()
+    assert migrated.list_backlog_queue() == []
+    assert migrated.get_backlog_settings("keda-main") is None
 
 
 def test_attempt_preset_and_model_roundtrip(tmp_path: Path) -> None:

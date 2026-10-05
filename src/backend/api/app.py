@@ -18,7 +18,7 @@ from backend.api.routes import (
     agent_runner_console,
     agent_runner_idea_inbox,
     agent_runner_lifecycle_agents,
-    agent_runner_roadmap,
+    agent_runner_backlog,
     local_auth,
 )
 
@@ -42,7 +42,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="keda backend", lifespan=lifespan)
 app.include_router(agent_runner.router, prefix="/api/v1")
 app.include_router(agent_runner_console.router, prefix="/api/v1")
-app.include_router(agent_runner_roadmap.router, prefix="/api/v1")
+app.include_router(agent_runner_backlog.router, prefix="/api/v1")
 app.include_router(agent_runner_lifecycle_agents.router, prefix="/api/v1")
 app.include_router(agent_runner_idea_inbox.router, prefix="/api/v1")
 app.include_router(local_auth.router, prefix="/api")

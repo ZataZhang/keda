@@ -19,7 +19,7 @@ const outputDirectoryPath = resolve(
 const VIEWPORT = { width: 1440, height: 1200 }
 const LIFECYCLE_PRD_TITLE = '生命周期 Agent 矩阵'
 
-/** Roadmap 依赖图中本原型使用的样例 PRD 卡片。 */
+/** Backlog 依赖图中本原型使用的样例 PRD 卡片。 */
 function lifecyclePrdCard(page: import('@playwright/test').Page) {
   return page.locator('[data-testid="prd-open-content"]').filter({ hasText: LIFECYCLE_PRD_TITLE })
 }
@@ -38,15 +38,17 @@ test.describe('@visual 生命周期 Agent 矩阵原型底图', () => {
     await page.screenshot({ path: resolve(outputDirectoryPath, 'settings-real.png') })
   })
 
-  test('采集 Roadmap 依赖图底图', async ({ page }) => {
-    await page.goto('/app/roadmap/')
+  test('采集 Backlog 依赖图底图', async ({ page }) => {
+    await page.goto('/app/backlog/')
     await expect(page.getByText('受管理仓库')).toBeVisible()
     await expect(lifecyclePrdCard(page)).toBeVisible({ timeout: 30_000 })
+    // 文件名沿用历史原型资产名：docs/prototypes/lifecycle-agent-matrix.html 直接引用
+    // ./assets/lifecycle-agent-matrix/roadmap-real.png，原型资产按约定不改名。
     await page.screenshot({ path: resolve(outputDirectoryPath, 'roadmap-real.png') })
   })
 
   test('采集 PRD 原文底图', async ({ page }) => {
-    await page.goto('/app/roadmap/')
+    await page.goto('/app/backlog/')
     await expect(lifecyclePrdCard(page)).toBeVisible({ timeout: 30_000 })
     await lifecyclePrdCard(page).click()
     await expect(page.getByTestId('prd-content-body')).toBeVisible()

@@ -19,7 +19,7 @@ import logging
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
-from backend.core.shared.models.roadmap import (
+from backend.core.shared.models.backlog import (
     PrdTokenUsageEntry,
     TokenUsageStats,
     TokenUsageTotals,

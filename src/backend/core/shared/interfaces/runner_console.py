@@ -279,7 +279,7 @@ class PrdLifecycleRunRecord:
 
     身份固定为 ``repo_id + prd_path + run_id``：``run_id`` 由 core 依据
     ``repo_id`` 与 Issue 编号（无 Issue 时退化为 PRD 路径摘要）确定性推导，
-    因此 runner 与 roadmap 两侧无需显式传递就能写到同一行，重试与跨进程
+    因此 runner 与 backlog 两侧无需显式传递就能写到同一行，重试与跨进程
     恢复也不会新建重复 run。
     """
 
@@ -547,8 +547,8 @@ class IRepositoryAutopilotSettingsEditor(ABC):
 
 
 @dataclass(frozen=True)
-class RoadmapQueueEntry:
-    """roadmap 全局调度队列的一条记录（core 侧端口类型）。"""
+class BacklogQueueEntry:
+    """backlog 全局调度队列的一条记录（core 侧端口类型）。"""
 
     repo_id: str
     prd_path: str
@@ -561,8 +561,8 @@ class RoadmapQueueEntry:
 
 
 @dataclass(frozen=True)
-class RoadmapSettingsEntry:
-    """roadmap 用户设置（core 侧端口类型）。"""
+class BacklogSettingsEntry:
+    """backlog 用户设置（core 侧端口类型）。"""
 
     repo_id: str
     max_parallel: int
@@ -570,33 +570,33 @@ class RoadmapSettingsEntry:
     updated_at: str
 
 
-class IRoadmapStore(ABC):
-    """roadmap 调度队列与设置的旁路存储端口。"""
+class IBacklogStore(ABC):
+    """backlog 调度队列与设置的旁路存储端口。"""
 
     @abstractmethod
-    def get_roadmap_settings(self, repo_id: str) -> RoadmapSettingsEntry | None:
-        """读取指定仓库的 roadmap 设置；不存在时返回 ``None``。"""
+    def get_backlog_settings(self, repo_id: str) -> BacklogSettingsEntry | None:
+        """读取指定仓库的 backlog 设置；不存在时返回 ``None``。"""
         ...
 
     @abstractmethod
-    def save_roadmap_settings(self, settings: RoadmapSettingsEntry) -> None:
-        """保存或更新 roadmap 设置；失败时抛出异常。"""
+    def save_backlog_settings(self, settings: BacklogSettingsEntry) -> None:
+        """保存或更新 backlog 设置；失败时抛出异常。"""
         ...
 
     @abstractmethod
-    def enqueue_roadmap(self, entry: RoadmapQueueEntry) -> int:
-        """将 PRD 加入 roadmap 队列，返回自增 ID；失败时抛出异常。"""
+    def enqueue_backlog(self, entry: BacklogQueueEntry) -> int:
+        """将 PRD 加入 backlog 队列，返回自增 ID；失败时抛出异常。"""
         ...
 
     @abstractmethod
-    def list_roadmap_queue(
+    def list_backlog_queue(
         self, *, repo_id: str | None = None, status: str | None = None
-    ) -> list[RoadmapQueueEntry]:
-        """列出 roadmap 队列条目，支持按仓库与状态过滤。"""
+    ) -> list[BacklogQueueEntry]:
+        """列出 backlog 队列条目，支持按仓库与状态过滤。"""
         ...
 
     @abstractmethod
-    def update_roadmap_queue_status(
+    def update_backlog_queue_status(
         self,
         *,
         entry_id: int,
@@ -609,8 +609,8 @@ class IRoadmapStore(ABC):
         ...
 
     @abstractmethod
-    def clear_roadmap_queue(self, *, repo_id: str | None = None) -> None:
-        """清空 roadmap 队列；失败时抛出异常。"""
+    def clear_backlog_queue(self, *, repo_id: str | None = None) -> None:
+        """清空 backlog 队列；失败时抛出异常。"""
         ...
 
 

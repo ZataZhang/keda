@@ -129,7 +129,7 @@ export async function apiPatch<T>(url: string, data: unknown): Promise<T> {
   }
 }
 
-// keda/frontend 的 agentRunner/console/ideaInbox/roadmap 模块沿用 fetch 风格的
+// keda/frontend 的 agentRunner/console/ideaInbox/backlog 模块沿用 fetch 风格的
 // 动词命名（get/post/put/patch/del）。以下别名让这些吸收进来的模块无需逐个
 // 改写调用点，与本包 axios 风格的 apiGet/apiPost/apiPut/apiPatch/apiDelete 共存。
 export const get = apiGet

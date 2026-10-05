@@ -3261,7 +3261,7 @@ unblocked | failed | agent_token_usage`。
 **两个只读 API**
 
 ```text
-GET /api/v1/agent-runner/roadmap/prds/{encoded_prd_path}/lifecycle
+GET /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
     单 PRD 明细：repo_id / prd_path / run_id / issue_number / trigger /
     current_phase / in_progress / outcome / history_complete / started_at /
     finished_at / durations{end_to_end_seconds, active_seconds,
@@ -3288,7 +3288,7 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
 
 **存储边界**：生命周期账本只落在本机 `~/.iar/console.db`（与运行历史、
 审计同库，`history_db_path` 可配），**没有远程备份、不跨机器聚合**；
-删除该 SQLite 文件即丢失全部生命周期历史。`frontend-public` 的 Roadmap
+删除该 SQLite 文件即丢失全部生命周期历史。`frontend-public` 的 Backlog
 详情与 Stats 只消费上述两个 API 的聚合结果，不自行计算耗时或状态。
 
 ### 项目接入
@@ -3321,7 +3321,7 @@ GET    /api/v1/agent-runner/console/stats/history?repo_id=&days=30
 GET    /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=30
 GET    /api/v1/agent-runner/console/runs?repo_id=&limit=100
 GET    /api/v1/agent-runner/console/audit?limit=100
-GET    /api/v1/agent-runner/roadmap/prds/{encoded_prd_path}/lifecycle
+GET    /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
 GET    /api/v1/agent-runner/repositories
 GET    /api/v1/agent-runner/repositories/browse?path=          目录选择器（只读）
 GET    /api/v1/agent-runner/repositories/discover?scan_root=   扫描已初始化 IAR 的仓库
@@ -3667,16 +3667,16 @@ uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 - `execution.md`：执行摘要
 
 
-## 路线图（Roadmap）
+## Backlog（待办队列）
 
-管理终端提供 `/app/roadmap` 页面，以 PRD 文件为粒度展示 `tasks/pending/` 与 `tasks/archive/` 中的任务全景。
+管理终端提供 `/app/backlog` 页面，以 PRD 文件为粒度展示 `tasks/pending/` 与 `tasks/archive/` 中的任务全景。
 
 ### 视图说明
 
 - 页面为两栏布局：左侧是受管理仓库列表（含启用/路径状态点），右侧是当前仓库的 PRD 画布与工具条。
 - 默认只显示 `pending` PRD，勾选「显示已归档」后同时展示 `archived` PRD。
 - 提供三种视图：依赖图（默认，按 PRD 依赖做拓扑分层绘制节点与连线）、时间轴、列表。列表视图按优先级（P0 → P3）与更新时间排序。
-- 「时间轴」「列表」选择会通过 `PATCH /roadmap/settings` 回写 `default_view`；「依赖图」是纯前端默认视图，不回写后端（后端 `default_view` 仅接受 `timeline`/`list`）。
+- 「时间轴」「列表」选择会通过 `PATCH /backlog/settings` 回写 `default_view`；「依赖图」是纯前端默认视图，不回写后端（后端 `default_view` 仅接受 `timeline`/`list`）。
 - 每个 PRD 卡片展示：标题、当前状态、验收清单进度、关联 Issue、依赖关系与下一步操作。
 
 ### PRD 原文浏览
@@ -3684,9 +3684,9 @@ uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 在任一视图（依赖图 / 时间轴 / 列表）选中 PRD，右侧会以 **master-detail** 方式打开统一详情：左侧画布保持原样（依赖图的上下游关系因此不会丢失），详情头部展示标题、状态、路径与动作，下方是可扩展的标签容器。
 
 - 默认标签「PRD 原文」按需拉取该 PRD 的完整 Markdown 原文并渲染——标题层级、表格、代码块与验收清单的勾选状态都会保留。窄屏自动退化为上下堆叠，不引入 modal 或第二个路由。
-- 原文经只读端点 `GET /api/v1/agent-runner/roadmap/prds/{encoded_path}/content` 获取，路径编码与「开始此 PRD」按钮复用同一套 base64url 约定。
+- 原文经只读端点 `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/content` 获取，路径编码与「开始此 PRD」按钮复用同一套 base64url 约定。
 - 只有 `tasks/pending/` 与 `tasks/archive/` 下后缀为 `.md` 的文件可读；目录穿越、绝对路径、非 `.md` 后缀与符号链接逃逸一律返回 4xx，响应体不含任何文件内容。
-- 全文按需单独取，`GET /roadmap/prds` 列表响应仍只携带元数据，不随 PRD 篇幅膨胀。
+- 全文按需单独取，`GET /backlog/prds` 列表响应仍只携带元数据，不随 PRD 篇幅膨胀。
 - 读取失败（PRD 已被删除、后端不可达等）时详情视图显示明确错误态并提供「重试」，不会白屏或永久加载。
 
 ### 状态映射
@@ -3708,7 +3708,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 ### 单个开始
 
-三种视图都可以在详情头部「开始此 PRD」——包括默认视图依赖图里的节点（过去只有时间轴/列表有这个入口）。按钮的可见与禁用由同一个 `canStartRoadmapPrd` 规则决定：`state` 为 `not_started` / `failed` / `waiting` 且没有 `block_reason`。存在未满足依赖时按钮禁用并显示阻塞原因，不允许绕过依赖门禁。点击后后端会：
+三种视图都可以在详情头部「开始此 PRD」——包括默认视图依赖图里的节点（过去只有时间轴/列表有这个入口）。按钮的可见与禁用由同一个 `canStartBacklogPrd` 规则决定：`state` 为 `not_started` / `failed` / `waiting` 且没有 `block_reason`。存在未满足依赖时按钮禁用并显示阻塞原因，不允许绕过依赖门禁。点击后后端会：
 
 1. 若 PRD 无 Issue，调用 `create_issue_from_prd` 的安全路径（`publish_prd=True, queue_ready=True`），在 PRD 成功发布到 base branch 后添加 `agent/ready`。
 2. 若 PRD 已有 Issue，直接添加 `agent/ready` 并移除 `agent/failed`。
@@ -3720,7 +3720,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 ### 验收证据浏览（归档 PRD）
 
-勾选「显示已归档」并选中已归档 PRD，详情里会出现「验收证据」标签，展示该 PRD 在仓库中**当前仍保留**的报告与附件——不用离开 Roadmap 去编辑器里翻目录。
+勾选「显示已归档」并选中已归档 PRD，详情里会出现「验收证据」标签，展示该 PRD 在仓库中**当前仍保留**的报告与附件——不用离开 Backlog 去编辑器里翻目录。
 
 - 事实源是仓库里配置证据目录下该 PRD 的子目录（默认 `tasks/evidence/<prd-stem>/`，显式 legacy 目录沿用扁平语义），由既有的 `resolve_evidence_dir` 单一入口解析。
 - 清单只列一层普通非隐藏文件，带文件名、大小、类型与角色（证据报告 / 验收报告 / 验证计划 / 附件）；Markdown 与纯文本可内联预览，图片直接显示，其它类型可下载。数量与大小来自真实 `stat`，**不会**用验收清单的勾选数冒充文件数。
@@ -3729,7 +3729,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 ### 仓库级 Autopilot 开关
 
-Roadmap 顶部为当前选中仓库提供「Autopilot 自动推进」开关，写入该仓库根目录 `.iar.toml` 的 `[agent_runner.autopilot].enabled`。
+Backlog 顶部为当前选中仓库提供「Autopilot 自动推进」开关，写入该仓库根目录 `.iar.toml` 的 `[agent_runner.autopilot].enabled`。
 
 - 只改这一个布尔键：注释、顺序、同级键与未知子表在写回后逐字保留，写入采用同目录临时文件 + 完整加载校验 + 原子替换；写成功与否以**写后 fresh load 的生效配置**为判据，页面显示的值就是重新读出来的值。
 - 修改后不要求重启 console：daemon 每轮本来就读取对应仓库上下文，最迟下一轮生效；正在进行的那一轮不会被中断，页面文案写的是「将在下一轮生效」。
@@ -3746,18 +3746,18 @@ Roadmap 顶部为当前选中仓库提供「Autopilot 自动推进」开关，�
 
 - 系统扫描所有无依赖且可安全进入 ready 的 pending PRD。
 - 按优先级排序，同时启动最多 N 个 PRD。
-- 超出槽位的 PRD 进入 `roadmap_queue` 等待队列。
+- 超出槽位的 PRD 进入 `backlog_queue` 等待队列。
 - 点击「停止全局调度」可清空等待队列，已运行的进程不会被中断。
 
 ### 持续调度（Continuous Scheduling）
 
 「全局开始」是一次性动作：启动后即使有 PRD 跑完，空出来的槽位也不会自动补位。持续调度补的就是这一环——把「对账 → 释放槽位 → 晋升下一批」做成一个幂等的调度阶段，由 daemon 在每个 pass 开始时自动执行，也可以手动触发。
 
-调度阶段由 `core/use_cases/roadmap_actions.py::advance_roadmap_queue` 实现，一次 pass 分三步：
+调度阶段由 `core/use_cases/backlog_actions.py::advance_backlog_queue` 实现，一次 pass 分三步：
 
-1. **对账（reconcile）**：把 `roadmap_queue` 中 `queued`/`running` 的条目与 PRD 的真实 GitHub 状态对齐。
+1. **对账（reconcile）**：把 `backlog_queue` 中 `queued`/`running` 的条目与 PRD 的真实 GitHub 状态对齐。
    - MERGED / ARCHIVED → `completed`，槽位释放。
-   - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/roadmap` 页面处理后再回到调度。
+   - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/backlog` 页面处理后再回到调度。
    - BLOCKED → 保留为 `running`，但**不占槽也不晋升**，等人工解除阻塞。
    - WAITING → 不动，依赖未满足的 PRD 继续等待。
 2. **槽位核算**：`free_slots = max_parallel - RUNNING 条目数`。只有 RUNNING 计数，BLOCKED 不占槽；结果为负时按 0 处理。`max_parallel` **沿用控制台「全局调度」里持久化的并发数**（1–10，缺省 1），不是独立配置项——想调整在途数量就改控制台那个值，或用 `--dry-run` 先预检当前口径。
@@ -3765,16 +3765,16 @@ Roadmap 顶部为当前选中仓库提供「Autopilot 自动推进」开关，�
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
 
-daemon 路径下的晋升**只**做幂等的 Issue 创建/复用 + 打上 `agent/ready` label，**不 spawn 进程**；真正的进程拉起仍由 daemon 的 Phase 2 在消费 `agent/ready` 时统一完成。该阶段仅在 `autopilot.enabled` 时执行，任何异常都会被记录且不影响 daemon 后续阶段。这个已有的开关正是 Roadmap 顶部「Autopilot 自动推进」所控制的那个值（见上文「仓库级 Autopilot 开关」）；开关关闭后同一个场景零晋升，用 Roadmap 页面与其它配置入口改这个键的效果完全一致。
+daemon 路径下的晋升**只**做幂等的 Issue 创建/复用 + 打上 `agent/ready` label，**不 spawn 进程**；真正的进程拉起仍由 daemon 的 Phase 2 在消费 `agent/ready` 时统一完成。该阶段仅在 `autopilot.enabled` 时执行，任何异常都会被记录且不影响 daemon 后续阶段。这个已有的开关正是 Backlog 顶部「Autopilot 自动推进」所控制的那个值（见上文「仓库级 Autopilot 开关」）；开关关闭后同一个场景零晋升，用 Backlog 页面与其它配置入口改这个键的效果完全一致。
 
-#### 手动触发：iar roadmap advance
+#### 手动触发：iar backlog advance
 
 ```bash
 # 预演：输出完整调度计划，零副作用
-uv run iar roadmap advance --dry-run
+uv run iar backlog advance --dry-run
 
 # 实际执行
-uv run iar roadmap advance --repo <repo-id>
+uv run iar backlog advance --repo <repo-id>
 ```
 
 `--dry-run` 会打印对账结果（completed / failed 泊车）、`max_parallel` 与 `free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
@@ -3802,7 +3802,7 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 ## Idea Inbox（想法采集 + 草稿审阅）
 
-`/ideas` 页面把现有的 `tasks/inbox/ideas.md` 原话日志接入管理终端，作为 PRD 路线图的上游：用户先在 inbox 累积想法，AI 生成 PRD 草稿，人确认后才落入 `tasks/pending/`。该能力复用 `agent-runner` 命名空间下的仓库 registry 与 `IContentGenerator`，不引入第二个项目映射表。
+`/ideas` 页面把现有的 `tasks/inbox/ideas.md` 原话日志接入管理终端，作为 PRD 待办队列的上游：用户先在 inbox 累积想法，AI 生成 PRD 草稿，人确认后才落入 `tasks/pending/`。该能力复用 `agent-runner` 命名空间下的仓库 registry 与 `IContentGenerator`，不引入第二个项目映射表。
 
 ### 事实源与目录约定
 

@@ -44,7 +44,7 @@ pi / codebuddy / qoder / opencode 或自定义注册的 agent）。**生命周�
 上一张表回答"这个键能配什么"，这一张回答"配了之后什么时候被读"。九个键分布在
 三个互相独立的 CLI 入口，外加一个横跨全程的内容生成阶段。
 
-console 的三处矩阵入口（Settings 全局层、Roadmap 仓库行齿轮、PRD 覆盖抽屉）
+console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、PRD 覆盖抽屉）
 **按同一分组呈现**：组标题与每行触发时机来自只读视图下发，分组事实的唯一代码
 定义是 `src/backend/core/shared/models/lifecycle_agent.py` 的
 `LIFECYCLE_AGENT_ENTRY_GROUPS`（前端不持有第二份映射），与本表的三组一一对应：
@@ -177,7 +177,7 @@ PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`impl
 | 层 | 写入文件 | 入口 |
 |---|---|---|
 | 全局（机器级） | `config.toml` | **Settings → 「Agent 管理」→ Tab ②「生命周期 Agent 设置」** |
-| 仓库级 | 该仓库 `.iar.toml` | **Roadmap → 受管理仓库列表每行右侧的齿轮** |
+| 仓库级 | 该仓库 `.iar.toml` | **Backlog → 受管理仓库列表每行右侧的齿轮** |
 | PRD 级 | 该 PRD 文件头部 | **PRD 原文页工具栏「Agent 覆盖」** |
 
 Settings 的「Agent 管理」区块用粘性 Tab 分两页：**Tab ①「Agent 标签设置」**
