@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   allowedDevOrigins: ["127.0.0.1"],
   // 静态导出：产物由 `iar console` 内置的 FastAPI 直接托管（同源访问 /api）。
-  // trailingSlash 让产物是 out/app/roadmap/index.html 这种目录形态，
+  // trailingSlash 让产物是 out/app/backlog/index.html 这种目录形态，
   // 才能被 StaticFiles(html=True) 正确解析深层路由。
   output: "export",
   trailingSlash: true,

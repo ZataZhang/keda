@@ -2,12 +2,12 @@
 //
 // 三层各自只写自己的文件：
 // - 全局层（Settings 页）-> 机器级 config.toml；
-// - 仓库层（Roadmap 仓库行齿轮）-> 该仓库 .iar.toml；
+// - 仓库层（Backlog 仓库行齿轮）-> 该仓库 .iar.toml；
 // - PRD 层（PRD 原文页）-> 该 PRD 文件头部 lifecycle_agents 块。
 // 所有写操作都采用保留式语义：只发送用户显式改动的键，`null` 表示删除该键。
 
 import { get, patch, put } from "./client";
-import { encodePrdPath } from "./roadmap";
+import { encodePrdPath } from "./backlog";
 import type {
   AgentFallbackOrderView,
   AgentLabelEntry,
@@ -141,7 +141,7 @@ export async function fetchPrdAgentOverrides(params: {
   const searchParams = new URLSearchParams();
   searchParams.set("repo_id", params.repoId);
   return get(
-    `${BASE_PATH}/roadmap/prds/${encodedPath}/agent-overrides?${searchParams.toString()}`,
+    `${BASE_PATH}/backlog/prds/${encodedPath}/agent-overrides?${searchParams.toString()}`,
   );
 }
 
@@ -157,7 +157,7 @@ export async function updatePrdAgentOverrides(params: {
   overrides: Record<string, string | null>;
 }): Promise<PrdAgentOverrideUpdateResponse> {
   const encodedPath = encodePrdPath(params.prdPath);
-  return patch(`${BASE_PATH}/roadmap/prds/${encodedPath}/agent-overrides`, {
+  return patch(`${BASE_PATH}/backlog/prds/${encodedPath}/agent-overrides`, {
     repo_id: params.repoId,
     overrides: params.overrides,
   });

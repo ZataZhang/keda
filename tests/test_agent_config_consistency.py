@@ -33,8 +33,11 @@ from backend.infrastructure.github_client import LabelConfig as InfraLabelConfig
 import pytest
 
 
-def test_agent_runner_reads_root_config_toml() -> None:
+def test_agent_runner_reads_root_config_toml(monkeypatch: pytest.MonkeyPatch) -> None:
     """Agent runner settings should load the repository root config.toml."""
+    # ``IAR_CONFIG`` 优先于仓库根发现；IAR agent 注入的是别的 worktree 的配置，
+    # 会把本用例的"读仓库根 config.toml"前提整个顶掉。
+    monkeypatch.delenv("IAR_CONFIG", raising=False)
     repository_root = Path(__file__).resolve().parents[1]
     app_config = build_app_config()
 

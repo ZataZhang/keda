@@ -5,9 +5,10 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``iar run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 6：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 7：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
-  v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列）。
+  v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
+  v7 把队列与设置两张表按新功能名重建）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -119,7 +120,7 @@ class PrdLifecycleEventRecord:
     detail_json: str
 
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 
 _CREATE_RUN_RECORDS = """
 CREATE TABLE IF NOT EXISTS run_records (
@@ -173,8 +174,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 )
 """
 
-_CREATE_ROADMAP_QUEUE = """
-CREATE TABLE IF NOT EXISTS roadmap_queue (
+_CREATE_BACKLOG_QUEUE = """
+CREATE TABLE IF NOT EXISTS backlog_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id TEXT NOT NULL,
     prd_path TEXT NOT NULL,
@@ -186,14 +187,22 @@ CREATE TABLE IF NOT EXISTS roadmap_queue (
 )
 """
 
-_CREATE_ROADMAP_SETTINGS = """
-CREATE TABLE IF NOT EXISTS roadmap_settings (
+_CREATE_BACKLOG_SETTINGS = """
+CREATE TABLE IF NOT EXISTS backlog_settings (
     repo_id TEXT PRIMARY KEY,
     max_parallel INTEGER NOT NULL,
     default_view TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
 """
+
+# schema v6 -> v7（重命名）：roadmap 功能正名为 backlog，两张表用
+# ``ALTER TABLE ... RENAME TO`` 就地改名，行与列值原样保留。新库已由
+# ``_CREATE_BACKLOG_*`` 以新名建表，故仅在旧表存在且新表缺席时才改名，保持幂等。
+_BACKLOG_TABLE_RENAMES = (
+    ("roadmap_queue", "backlog_queue"),
+    ("roadmap_settings", "backlog_settings"),
+)
 
 _CREATE_MONITORING_SNAPSHOTS = """
 CREATE TABLE IF NOT EXISTS monitoring_snapshots (
@@ -251,7 +260,7 @@ _CREATE_PRD_LIFECYCLE_INDEXES = (
 
 
 class SqliteConsoleStore:
-    """``IRunHistoryStore`` / ``IRoadmapStore`` / ``IMonitorSnapshotStore`` 的 SQLite 实现。
+    """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` 的 SQLite 实现。
 
     三个端口都以鸭子类型实现：本类不 import core，仅保证方法签名与 core
     侧同名 dataclass 结构一致。
@@ -284,8 +293,8 @@ class SqliteConsoleStore:
             connection.execute(_CREATE_RUN_RECORDS)
             connection.execute(_CREATE_AUDIT_LOGS)
         if current_version < 2:
-            connection.execute(_CREATE_ROADMAP_QUEUE)
-            connection.execute(_CREATE_ROADMAP_SETTINGS)
+            connection.execute(_CREATE_BACKLOG_QUEUE)
+            connection.execute(_CREATE_BACKLOG_SETTINGS)
         if current_version < 3:
             connection.execute(_CREATE_ATTEMPT_RECORDS)
         if current_version < 4:
@@ -307,6 +316,20 @@ class SqliteConsoleStore:
                 connection.execute(_ATTEMPT_V6_ADD_PRESET)
             if "model" not in existing_attempt_columns:
                 connection.execute(_ATTEMPT_V6_ADD_MODEL)
+        if current_version < 7:
+            existing_tables = {
+                row["name"]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            for legacy_name, backlog_name in _BACKLOG_TABLE_RENAMES:
+                if legacy_name in existing_tables and backlog_name not in existing_tables:
+                    connection.execute(f"ALTER TABLE {legacy_name} RENAME TO {backlog_name}")
+            # 缺表兜底：旧库若从未建过这两张表（或只建了一张），补齐空表，
+            # 避免后续 SQL 命中 "no such table"。
+            connection.execute(_CREATE_BACKLOG_QUEUE)
+            connection.execute(_CREATE_BACKLOG_SETTINGS)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 
@@ -702,31 +725,31 @@ class SqliteConsoleStore:
         return int(legacy_row["legacy_count"] or 0)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Roadmap queue / settings (IRoadmapStore duck-type implementation)
+    # Backlog queue / settings (IBacklogStore duck-type implementation)
     # ─────────────────────────────────────────────────────────────────────────
 
-    def get_roadmap_settings(self, repo_id: str) -> RoadmapSettingsEntry | None:
-        """读取指定仓库的 roadmap 设置。"""
+    def get_backlog_settings(self, repo_id: str) -> BacklogSettingsEntry | None:
+        """读取指定仓库的 backlog 设置。"""
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT repo_id, max_parallel, default_view, updated_at "
-                "FROM roadmap_settings WHERE repo_id = ?",
+                "FROM backlog_settings WHERE repo_id = ?",
                 (repo_id,),
             ).fetchone()
         if row is None:
             return None
-        return RoadmapSettingsEntry(
+        return BacklogSettingsEntry(
             repo_id=row["repo_id"],
             max_parallel=int(row["max_parallel"]),
             default_view=row["default_view"],
             updated_at=row["updated_at"],
         )
 
-    def save_roadmap_settings(self, settings: RoadmapSettingsEntry) -> None:
-        """保存或更新 roadmap 设置；失败时抛出异常。"""
+    def save_backlog_settings(self, settings: BacklogSettingsEntry) -> None:
+        """保存或更新 backlog 设置；失败时抛出异常。"""
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO roadmap_settings (repo_id, max_parallel, default_view, updated_at) "
+                "INSERT INTO backlog_settings (repo_id, max_parallel, default_view, updated_at) "
                 "VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(repo_id) DO UPDATE SET "
                 "max_parallel=excluded.max_parallel, default_view=excluded.default_view, updated_at=excluded.updated_at",
@@ -739,11 +762,11 @@ class SqliteConsoleStore:
             )
             connection.commit()
 
-    def enqueue_roadmap(self, entry: RoadmapQueueEntry) -> int:
-        """将 PRD 加入 roadmap 队列，返回自增 ID；失败时抛出异常。"""
+    def enqueue_backlog(self, entry: BacklogQueueEntry) -> int:
+        """将 PRD 加入 backlog 队列，返回自增 ID；失败时抛出异常。"""
         with self._connect() as connection:
             cursor = connection.execute(
-                "INSERT INTO roadmap_queue (repo_id, prd_path, status, trigger, started_at, finished_at, error_detail) "
+                "INSERT INTO backlog_queue (repo_id, prd_path, status, trigger, started_at, finished_at, error_detail) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     entry.repo_id,
@@ -758,13 +781,13 @@ class SqliteConsoleStore:
             connection.commit()
             return int(cursor.lastrowid)
 
-    def list_roadmap_queue(
+    def list_backlog_queue(
         self, *, repo_id: str | None = None, status: str | None = None
-    ) -> list[RoadmapQueueEntry]:
-        """列出 roadmap 队列条目。"""
+    ) -> list[BacklogQueueEntry]:
+        """列出 backlog 队列条目。"""
         query = (
             "SELECT id, repo_id, prd_path, status, trigger, started_at, finished_at, error_detail "
-            "FROM roadmap_queue"
+            "FROM backlog_queue"
         )
         conditions: list[str] = []
         params: list[object] = []
@@ -780,7 +803,7 @@ class SqliteConsoleStore:
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
         return [
-            RoadmapQueueEntry(
+            BacklogQueueEntry(
                 entry_id=int(row["id"]),
                 repo_id=row["repo_id"],
                 prd_path=row["prd_path"],
@@ -793,7 +816,7 @@ class SqliteConsoleStore:
             for row in rows
         ]
 
-    def update_roadmap_queue_status(
+    def update_backlog_queue_status(
         self,
         *,
         entry_id: int,
@@ -805,19 +828,19 @@ class SqliteConsoleStore:
         """更新队列条目的状态；失败时抛出异常。"""
         with self._connect() as connection:
             connection.execute(
-                "UPDATE roadmap_queue SET status = ?, started_at = ?, finished_at = ?, error_detail = ? "
+                "UPDATE backlog_queue SET status = ?, started_at = ?, finished_at = ?, error_detail = ? "
                 "WHERE id = ?",
                 (status, started_at, finished_at, error_detail, entry_id),
             )
             connection.commit()
 
-    def clear_roadmap_queue(self, *, repo_id: str | None = None) -> None:
-        """清空 roadmap 队列；失败时抛出异常。"""
+    def clear_backlog_queue(self, *, repo_id: str | None = None) -> None:
+        """清空 backlog 队列；失败时抛出异常。"""
         with self._connect() as connection:
             if repo_id is None:
-                connection.execute("DELETE FROM roadmap_queue")
+                connection.execute("DELETE FROM backlog_queue")
             else:
-                connection.execute("DELETE FROM roadmap_queue WHERE repo_id = ?", (repo_id,))
+                connection.execute("DELETE FROM backlog_queue WHERE repo_id = ?", (repo_id,))
             connection.commit()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -886,8 +909,8 @@ class SqliteConsoleStore:
 
 
 @dataclass(frozen=True)
-class RoadmapQueueEntry:
-    """roadmap 队列条目（与 core 侧同构，供 SQLite 实现使用）。"""
+class BacklogQueueEntry:
+    """backlog 队列条目（与 core 侧同构，供 SQLite 实现使用）。"""
 
     repo_id: str
     prd_path: str
@@ -900,8 +923,8 @@ class RoadmapQueueEntry:
 
 
 @dataclass(frozen=True)
-class RoadmapSettingsEntry:
-    """roadmap 用户设置（与 core 侧同构，供 SQLite 实现使用）。"""
+class BacklogSettingsEntry:
+    """backlog 用户设置（与 core 侧同构，供 SQLite 实现使用）。"""
 
     repo_id: str
     max_parallel: int

@@ -119,6 +119,13 @@ def _run_script(
 ) -> subprocess.CompletedProcess[str]:
     """Run preview_env.py inside ``cwd`` so [preview] is read from there."""
     env = os.environ.copy()
+    # 脚本的配置解析把 ``IAR_CONFIG`` 排在 cwd 向上查找之前（见
+    # ``settings_sources._find_config_toml``）。继承调用方环境时，在 IAR agent
+    # 里跑测试就会拿到父进程注入的 ``IAR_CONFIG``，指向**另一个** worktree 的
+    # ``config.toml``，于是本用例写进 ``tmp_path/config.toml`` 的 [preview] 被整份
+    # 顶掉——只在 agent 环境复现、CI 与本地都看不见的假失败。这里显式丢弃它，
+    # 让脚本按 cwd 解析；需要指定配置的用例通过 extra_env 显式覆盖。
+    env.pop("IAR_CONFIG", None)
     # 脚本在 GITHUB_ENV 存在时会向该文件追加 PREVIEW_* 变量。继承调用方环境时，
     # 在 GitHub Actions 里这就是 runner 真实的 $GITHUB_ENV——等于每个没有显式
     # 覆盖它的用例都会把变量注入 job 的后续步骤。本地没有这个变量，所以这种

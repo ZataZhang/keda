@@ -70,7 +70,7 @@ flowchart TD
         end
 
         subgraph FE_PUBLIC["frontend-public/ Agent Runner 管理终端"]
-            FE_PUBLIC_APP["app/(app)/\nDashboard · Roadmap · Settings"]
+            FE_PUBLIC_APP["app/(app)/\nDashboard · Backlog · Settings"]
             FE_PUBLIC_AUTH["lib/auth.tsx"]
             FE_PUBLIC_API["lib/api.ts"]
             FE_PUBLIC_APP --> FE_PUBLIC_AUTH
@@ -149,7 +149,7 @@ flowchart TD
 
 | 层 | 路径 | 职责 |
 |---|---|---|
-| 应用页面 | `app/(app)/` | Agent Runner 管理终端：Dashboard、Roadmap、Processes、Stats、Settings |
+| 应用页面 | `app/(app)/` | Agent Runner 管理终端：Dashboard、Backlog、Processes、Stats、Settings |
 | 认证层 | `lib/auth.tsx` | 会话状态、受保护布局 |
 | API 层 | `lib/api.ts` | axios/fetch 封装、环境基址、错误处理 |
 

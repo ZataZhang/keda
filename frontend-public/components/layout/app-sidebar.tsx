@@ -20,7 +20,7 @@ const navItems = [
   { href: "/app/processes", label: "Processes", icon: Activity },
   { href: "/app/repositories", label: "Repositories", icon: GitBranch },
   { href: "/app/stats", label: "Stats", icon: BarChart3 },
-  { href: "/app/roadmap", label: "Roadmap", icon: Map },
+  { href: "/app/backlog", label: "Backlog", icon: Map },
   { href: "/app/ideas", label: "Ideas", icon: Lightbulb },
   { href: "/app/settings", label: "Settings", icon: Settings },
 ]

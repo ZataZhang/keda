@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.api.routes.agent_runner_console as console_routes
-import backend.api.routes.agent_runner_roadmap as roadmap_routes
+import backend.api.routes.agent_runner_backlog as backlog_routes
 from backend.api.app import app
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.use_cases.agent_runner_lifecycle import (
@@ -90,8 +90,8 @@ def test_run_id_is_deterministic_from_issue_number() -> None:
     assert first == second == "keda-main#7"
 
 
-def test_runner_events_do_not_overwrite_roadmap_prd_path(tmp_path: Path) -> None:
-    """runner 侧空 prd_path 不得覆盖 roadmap 侧已写入的真实路径。"""
+def test_runner_events_do_not_overwrite_backlog_prd_path(tmp_path: Path) -> None:
+    """runner 侧空 prd_path 不得覆盖 backlog 侧已写入的真实路径。"""
     store = _store(tmp_path)
     _record(store, LifecycleEventType.QUEUED, "2026-09-21T10:00:00+00:00", event_key="q")
     record_lifecycle_event(
@@ -459,21 +459,21 @@ def api_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             config=AppConfig(),
         )
     ]
-    monkeypatch.setattr(roadmap_routes, "create_roadmap_store", lambda: store)
-    monkeypatch.setattr(roadmap_routes, "_resolve_contexts", lambda: contexts)
+    monkeypatch.setattr(backlog_routes, "create_backlog_store", lambda: store)
+    monkeypatch.setattr(backlog_routes, "_resolve_contexts", lambda: contexts)
     monkeypatch.setattr(console_routes, "create_console_store", lambda: store)
     return store
 
 
-def test_roadmap_lifecycle_endpoint_returns_fresh_detail(api_environment) -> None:
-    """Roadmap 详情端点返回与账本一致的 run_id、有序事件与耗时拆分。"""
+def test_backlog_lifecycle_endpoint_returns_fresh_detail(api_environment) -> None:
+    """Backlog 详情端点返回与账本一致的 run_id、有序事件与耗时拆分。"""
     store = api_environment
     _record(store, LifecycleEventType.QUEUED, "2026-09-21T10:00:00+00:00", event_key="q")
     _record(store, LifecycleEventType.CLAIMED, "2026-09-21T10:01:00+00:00", event_key="c")
 
-    encoded = roadmap_routes._encode_prd_path(_PRD_PATH)
+    encoded = backlog_routes._encode_prd_path(_PRD_PATH)
     response = client.get(
-        f"/api/v1/agent-runner/roadmap/prds/{encoded}/lifecycle",
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/lifecycle",
         params={"repo_id": _REPO_ID},
     )
     assert response.status_code == 200
@@ -484,11 +484,11 @@ def test_roadmap_lifecycle_endpoint_returns_fresh_detail(api_environment) -> Non
     assert [event["event_type"] for event in payload["events"]] == ["queued", "claimed"]
 
 
-def test_roadmap_lifecycle_endpoint_empty_state(api_environment) -> None:
+def test_backlog_lifecycle_endpoint_empty_state(api_environment) -> None:
     """无任何 run 时返回 has_data=False 空态而不是 404。"""
-    encoded = roadmap_routes._encode_prd_path(_PRD_PATH)
+    encoded = backlog_routes._encode_prd_path(_PRD_PATH)
     response = client.get(
-        f"/api/v1/agent-runner/roadmap/prds/{encoded}/lifecycle",
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/lifecycle",
         params={"repo_id": _REPO_ID},
     )
     assert response.status_code == 200

@@ -84,7 +84,7 @@ def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
     """从 Issue 正文解析其引用的 PRD 相对路径；解析失败返回空串。
 
     返回空串表示 runner 无法定位该 PRD：此时 run id 仍由 Issue 编号决定，
-    run 行的 ``prd_path`` 保留 roadmap 启动侧已写入的真实路径，不会被空值
+    run 行的 ``prd_path`` 保留 backlog 启动侧已写入的真实路径，不会被空值
     覆盖。观测失败绝不阻断 Issue 处理。
     """
     from backend.core.use_cases.agent_runner_feedback import extract_prd_path
@@ -216,7 +216,7 @@ def _process_single_issue(
     used_agent = selected_agent
 
     # 生命周期观测（旁路）：本轮 runner 领到该 Issue，记为一次执行开始。
-    # run id 由 repo_id + Issue 编号确定性推导，与 roadmap 启动侧写入的 run
+    # run id 由 repo_id + Issue 编号确定性推导，与 backlog 启动侧写入的 run
     # 完全一致，因此这里不会新建重复 run。
     record_lifecycle_event(
         store=run_history_store,

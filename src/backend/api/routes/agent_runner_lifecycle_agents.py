@@ -3,7 +3,7 @@
 三层各自写各自的文件：
 
 - 全局层（Settings 页）-> ``config.toml``；
-- 仓库层（Roadmap 仓库行齿轮）-> 该仓库 ``.iar.toml``；
+- 仓库层（Backlog 仓库行齿轮）-> 该仓库 ``.iar.toml``；
 - PRD 层（PRD 原文页）-> 该 PRD 文件头部 ``lifecycle_agents`` 块。
 
 路由层只做 HTTP 映射与 4xx 转换，生效值计算与入参校验收敛在 core 用例
@@ -244,7 +244,7 @@ def update_agent_labels(request: UpdateAgentLabelsRequest) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@router.get("/agent-runner/roadmap/prds/{encoded_path}/agent-overrides")
+@router.get("/agent-runner/backlog/prds/{encoded_path}/agent-overrides")
 def get_prd_agent_overrides(encoded_path: str, repo_id: str) -> dict:
     """读取某 PRD 文件头部的 ``lifecycle_agents`` 覆盖。
 
@@ -286,7 +286,7 @@ class UpdatePrdOverridesRequest(BaseModel):
     overrides: dict[str, str | None] = Field(default_factory=dict)
 
 
-@router.patch("/agent-runner/roadmap/prds/{encoded_path}/agent-overrides")
+@router.patch("/agent-runner/backlog/prds/{encoded_path}/agent-overrides")
 def update_prd_agent_overrides(encoded_path: str, request: UpdatePrdOverridesRequest) -> dict:
     """把 PRD 头部覆盖块整体重写为请求里的期望集合（``null`` 表示移除该项）。"""
     prd_path = _decode_prd_path(encoded_path)

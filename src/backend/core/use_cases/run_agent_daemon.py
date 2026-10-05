@@ -13,7 +13,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.interfaces.runner_console import IRoadmapStore, IRunHistoryStore
+from backend.core.shared.interfaces.runner_console import IBacklogStore, IRunHistoryStore
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import RepositoryRunContext
 from backend.core.use_cases.agent_runner_orchestrate import (
@@ -23,7 +23,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
 from backend.core.use_cases.agent_runner_reclaim import (
     reclaim_stale_running_issues,
 )
-from backend.core.use_cases.roadmap_actions import advance_roadmap_queue
+from backend.core.use_cases.backlog_actions import advance_backlog_queue
 
 _logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def run_agent_daemon(
     output_view: IRunnerLiveView | None = None,
     reclaim_stale_running: bool = False,
     reclaim_ttl_seconds: int | None = None,
-    roadmap_store_factory: Callable[[], IRoadmapStore] | None = None,
+    backlog_store_factory: Callable[[], IBacklogStore] | None = None,
 ) -> None:
     """Run the queue poller forever across all target repositories.
 
@@ -76,8 +76,8 @@ def run_agent_daemon(
         reclaim_stale_running: Whether to run the Phase -1 stale-``agent/running``
             reclaim pass before polling.
         reclaim_ttl_seconds: Optional TTL override for the reclaim pass.
-        roadmap_store_factory: Optional factory returning an
-            :class:`IRoadmapStore`. When provided *and* the repository has
+        backlog_store_factory: Optional factory returning an
+            :class:`IBacklogStore`. When provided *and* the repository has
             ``autopilot.enabled``, each pass runs a continuous-scheduling stage
             before Phase 2 so finished PRDs release their slot and the next
             queued PRD is promoted in the same pass. When omitted, the stage is
@@ -156,18 +156,18 @@ def run_agent_daemon(
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
                 _logger.error("PRD rework phase failed: %s", exc)
 
-            # Scheduling phase: continuous roadmap scheduling, gated on the
+            # Scheduling phase: continuous backlog scheduling, gated on the
             # repository opting into the fast lane. Reconciles finished/failed
             # PRDs, then tops the queue back up to max_parallel and labels the
             # promoted PRDs agent/ready. Running it before Phase 2 means a PRD
             # promoted in this pass is picked up in the same pass. Failures are
             # logged and swallowed so a scheduling fault never kills the daemon.
-            if roadmap_store_factory is not None and context.config.autopilot.enabled:
+            if backlog_store_factory is not None and context.config.autopilot.enabled:
                 try:
-                    advance_report = advance_roadmap_queue(
+                    advance_report = advance_backlog_queue(
                         context=context,
                         github_client=github_client,
-                        store=roadmap_store_factory(),
+                        store=backlog_store_factory(),
                         process_runner=process_runner,
                     )
                     if (
@@ -177,7 +177,7 @@ def run_agent_daemon(
                         or advance_report.reconciled_failed
                     ):
                         _logger.info(
-                            "Roadmap advance for '%s': started=%s queued=%s completed=%s failed=%s",
+                            "Backlog advance for '%s': started=%s queued=%s completed=%s failed=%s",
                             context.repo_id,
                             [item.prd_path for item in advance_report.started],
                             advance_report.queued,
@@ -186,7 +186,7 @@ def run_agent_daemon(
                         )
                 except Exception as exc:  # noqa: BLE001 - daemon must survive scheduling faults.
                     _logger.error(
-                        "Roadmap advance phase failed for repository '%s': %s",
+                        "Backlog advance phase failed for repository '%s': %s",
                         context.repo_id,
                         exc,
                     )

@@ -29,7 +29,7 @@ from tests.conftest import FakeContentGenerator, FakeGitHubClient, FakeProcessRu
 
 
 def test_build_issue_labels_carries_prd_filename_priority(tmp_path: Path) -> None:
-    """PRD priority labels carry the same explicit priority used by Roadmap."""
+    """PRD priority labels carry the same explicit priority used by Backlog."""
     request = IssueFromPrdRequest(
         repo_path=tmp_path,
         prd_path=Path("tasks/P0-FEAT-20260924-example.md"),

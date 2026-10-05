@@ -952,23 +952,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the local path of the target repository.",
     )
 
-    roadmap_parser = subparsers.add_parser(
-        "roadmap",
-        help="Drive the roadmap scheduler manually.",
+    backlog_parser = subparsers.add_parser(
+        "backlog",
+        help="Drive the backlog scheduler manually.",
     )
-    roadmap_subparsers = roadmap_parser.add_subparsers(dest="roadmap_command", required=True)
+    backlog_subparsers = backlog_parser.add_subparsers(dest="backlog_command", required=True)
 
-    roadmap_advance_parser = roadmap_subparsers.add_parser(
+    backlog_advance_parser = backlog_subparsers.add_parser(
         "advance",
         help="Run one continuous-scheduling pass (reconcile + promote + discover).",
     )
-    roadmap_advance_parser.set_defaults(command="roadmap advance")
-    roadmap_advance_parser.add_argument(
+    backlog_advance_parser.set_defaults(command="backlog advance")
+    backlog_advance_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report the plan for this pass without writing anything.",
     )
-    add_common_options(roadmap_advance_parser)
+    add_common_options(backlog_advance_parser)
 
     config_parser = subparsers.add_parser(
         "config",

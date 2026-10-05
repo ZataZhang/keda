@@ -230,7 +230,7 @@ iar console --port 8600
 iar console --no-browser
 ```
 
-面板提供所有已注册仓库的队列状态、Issue 事件时间线、运行历史与完成度统计，并支持启停 daemon、重试 failed Issue、管理 roadmap 队列。默认只监听本机（`127.0.0.1`）；更多配置见 `docs/guides/agent-runner.md` 的「统一管理终端」一节。
+面板提供所有已注册仓库的队列状态、Issue 事件时间线、运行历史与完成度统计，并支持启停 daemon、重试 failed Issue、管理 backlog 队列。默认只监听本机（`127.0.0.1`）；更多配置见 `docs/guides/agent-runner.md` 的「统一管理终端」一节。
 
 ### 自然语言决策入口（`iar ask`）
 

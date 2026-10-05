@@ -320,12 +320,12 @@ export type UnreachableRepository = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Roadmap
+// Backlog
 // Keep these aligned with the backend dataclasses under
-// `src/backend/core/shared/models/roadmap.py`.
+// `src/backend/core/shared/models/backlog.py`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type RoadmapPrdState =
+export type BacklogPrdState =
   | "not_started"
   | "ready"
   | "running"
@@ -338,52 +338,52 @@ export type RoadmapPrdState =
   | "unresolved_dependency"
   | "waiting";
 
-export type RoadmapDependencyKind = "prd" | "issue" | "unresolved";
+export type BacklogDependencyKind = "prd" | "issue" | "unresolved";
 
-export type RoadmapDependency = {
+export type BacklogDependency = {
   from_path: string;
   to_path: string;
-  kind: RoadmapDependencyKind;
+  kind: BacklogDependencyKind;
   detail: string;
 };
 
-export type RoadmapNextAction = {
+export type BacklogNextAction = {
   label: string;
   url: string | null;
 };
 
-export type RoadmapPrd = {
+export type BacklogPrd = {
   prd_path: string;
   title: string;
   status: "pending" | "archived";
   priority: string;
   issue_url: string | null;
   issue_number: number | null;
-  state: RoadmapPrdState;
+  state: BacklogPrdState;
   acceptance_total: number;
   acceptance_checked: number;
-  delivery_dependencies: RoadmapDependency[];
+  delivery_dependencies: BacklogDependency[];
   updated_at: string;
   block_reason: string | null;
-  next_action: RoadmapNextAction | null;
+  next_action: BacklogNextAction | null;
 };
 
-export type RoadmapSettings = {
+export type BacklogSettings = {
   repo_id: string;
   max_parallel: number;
   default_view: "timeline" | "list";
   updated_at: string;
 };
 
-export type RoadmapActionResult = {
+export type BacklogActionResult = {
   prd_path: string;
   issue_number: number | null;
-  state: RoadmapPrdState;
+  state: BacklogPrdState;
   detail: string;
 };
 
-export type RoadmapGlobalStartResult = {
-  started: RoadmapActionResult[];
+export type BacklogGlobalStartResult = {
+  started: BacklogActionResult[];
   queued: string[];
   skipped: string[];
 };
@@ -396,7 +396,7 @@ export type RoadmapGlobalStartResult = {
  * `auto_merge_enabled` / `daemon_running` 必须分别展示——只有全部成立才是
  * 真正的全自动闭环。
  */
-export type RoadmapAutopilotState = {
+export type BacklogAutopilotState = {
   repo_id: string;
   enabled: boolean;
   auto_merge_enabled: boolean;
@@ -406,17 +406,17 @@ export type RoadmapAutopilotState = {
   persisted_enabled: boolean | null;
 };
 
-export type RoadmapEvidenceRole =
+export type BacklogEvidenceRole =
   | "evidence_report"
   | "verifier_report"
   | "verification_plan"
   | "artifact";
 
-export type RoadmapEvidenceFile = {
+export type BacklogEvidenceFile = {
   name: string;
   size_bytes: number;
   media_type: string;
-  role: RoadmapEvidenceRole;
+  role: BacklogEvidenceRole;
   artifact_token: string;
 };
 
@@ -427,18 +427,18 @@ export type RoadmapEvidenceFile = {
  * legacy 扁平目录）；`exists=false` 表示目录缺失，页面据此渲染明确空态，
  * 而不是用验收清单勾选数冒充文件数。
  */
-export type RoadmapPrdEvidenceManifest = {
+export type BacklogPrdEvidenceManifest = {
   prd_path: string;
   prd_stem: string;
   evidence_dir: string;
   exists: boolean;
-  files: RoadmapEvidenceFile[];
+  files: BacklogEvidenceFile[];
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRD 生命周期观测
 // Keep these aligned with the backend dataclasses under
-// `src/backend/core/shared/models/roadmap.py`（PrdLifecycle* 一族）。
+// `src/backend/core/shared/models/backlog.py`（PrdLifecycle* 一族）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -463,7 +463,7 @@ export type PrdLifecycleEventView = {
   detail: Record<string, unknown>;
 };
 
-/** 单个 PRD 的生命周期详情（Roadmap 详情“执行过程”标签的数据源）。 */
+/** 单个 PRD 的生命周期详情（Backlog 详情“执行过程”标签的数据源）。 */
 export type PrdLifecycleDetail = {
   repo_id: string;
   prd_path: string;

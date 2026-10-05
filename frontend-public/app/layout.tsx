@@ -15,7 +15,7 @@ const fontMono = Geist_Mono({
 export const metadata = {
   title: "iar — Agent Runner 管理终端",
   description:
-    "iar 统一管理终端：查看仓库队列、托管 runner 进程、跟踪 roadmap 与完成度统计。",
+    "iar 统一管理终端：查看仓库队列、托管 runner 进程、跟踪 backlog 与完成度统计。",
 }
 
 /** Root layout for the root section. */

@@ -1,5 +1,10 @@
 # Roadmap
 
+> 本文件是项目的**战略路线图**（方向、里程碑、边界）。管理终端里的 **Backlog**
+> 页面（`/app/backlog`、`iar backlog`、`/api/v1/agent-runner/backlog/*`）是执行侧的
+> PRD 待办队列工作台，二者不是同一事物；下文里程碑名中的 "Roadmap" 均指该功能在
+> 正名为 Backlog 之前的历史名称。
+
 ## Vision
 
 构建一个面向人工调度的 AI 工程交互终端。项目本身不自动决定哪些 issue 开始、哪些 issue 暂停，而是在人工选择任务后，辅助完成需求理解、代码修改、验证、code review、提交 pull request，并在主分支、CI、评论或 PR 状态变化后维护已提交 PR 的监督与 rebase 状态。在这条链路里，`iar` CLI 是核心执行面：既供人操作，也是外部 agent（Claude / Codex / Kimi 等）经 shell 驱动这套基于 issue 的编排的一等机读接口。

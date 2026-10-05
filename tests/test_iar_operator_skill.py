@@ -74,7 +74,7 @@ def test_packaged_skill_documents_issue_output_paths() -> None:
     # /ps 的同会话后台终端边界必须写清，不得暗示外部任务自动可见。
     assert "same Codex session" in text
     assert "never appears in `/ps`" in text
-    # 网页查看路径（Roadmap PRD 详情的实时输出标签）。
+    # 网页查看路径（Backlog PRD 详情的实时输出标签）。
     assert "实时输出" in text
 
 
