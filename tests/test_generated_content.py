@@ -20,6 +20,7 @@ from backend.core.use_cases.generated_content import (
     PrContext,
     _parse_json_output,
     _parse_markdown_output,
+    _strip_markdown_preamble,
     _validate_issue_body,
     _validate_pr_body,
     build_issue_context,
@@ -541,6 +542,56 @@ def test_generate_pr_content_closing_reference_title_uses_fallback_title(
     assert generated_pr_content.title == expected_title
     assert generated_pr_content.body == "Closes #42\n\nBody."
     assert generated_pr_content.source == "agent"
+
+
+def test_strip_markdown_preamble_removes_lead_and_horizontal_rule() -> None:
+    """开场白与水平分隔线被剥离，正文从 ``Closes`` 锚点开始。"""
+    raw_output = "Here is the draft PR description:\n\n---\n\nCloses #42\n\n## Summary\n\nDone."
+
+    assert _strip_markdown_preamble(raw_output) == "Closes #42\n\n## Summary\n\nDone."
+
+
+def test_strip_markdown_preamble_unwraps_outer_code_fence() -> None:
+    """开场白 + 外层 ```markdown 围栏被一起剥离。"""
+    raw_output = (
+        "Here is the draft PR body:\n\n```markdown\nCloses #42\n\n## Summary\n\nDone.\n```\n"
+    )
+
+    assert _strip_markdown_preamble(raw_output) == "Closes #42\n\n## Summary\n\nDone."
+
+
+def test_strip_markdown_preamble_keeps_real_title() -> None:
+    """首行是真实标题（无开场白）时原样保留，不受剥离逻辑影响。"""
+    raw_output = "Add PR contract\n\nCloses #42\n\n## Summary\n\nDone."
+
+    assert _strip_markdown_preamble(raw_output) == raw_output
+
+
+def test_generate_pr_content_markdown_preamble_uses_fallback_title() -> None:
+    """agent 以 ``Here is the draft PR description:`` 开场时，标题回落 fallback。"""
+    generated_pr_content = _generate_agent_pr_content(
+        "Here is the draft PR description:\n\n---\n\nCloses #42\n\n## Summary\n\nDone.",
+        output="markdown",
+    )
+
+    assert generated_pr_content.title == "Fallback"
+    assert generated_pr_content.source == "agent"
+    assert "Here is the draft PR description:" not in generated_pr_content.body
+    assert generated_pr_content.body.startswith("Closes #42")
+
+
+def test_generate_pr_content_markdown_preamble_with_fence_uses_fallback_title() -> None:
+    """开场白 + ```markdown 围栏时，标题回落 fallback，正文去掉开场白与围栏。"""
+    generated_pr_content = _generate_agent_pr_content(
+        "Here is the draft PR body:\n\n```markdown\nCloses #42\n\n## Summary\n\nDone.\n```\n",
+        output="markdown",
+    )
+
+    assert generated_pr_content.title == "Fallback"
+    assert generated_pr_content.source == "agent"
+    assert "Here is the draft PR body:" not in generated_pr_content.body
+    assert "```" not in generated_pr_content.body
+    assert generated_pr_content.body.startswith("Closes #42")
 
 
 def test_build_issue_context_extracts_sections() -> None:

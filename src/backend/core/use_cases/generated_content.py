@@ -540,6 +540,84 @@ def _parse_markdown_output(output_text: str) -> tuple[str, str]:
     return title, body
 
 
+# draft_pr 的 markdown 阶段只约定正文（首行必须是 ``Closes #N``），但 agent 常在正文前
+# 先说一句对话式开场白（如 ``Here is the draft PR body:``），并可能把整份正文包进一层
+# ```markdown 围栏。这类行既不是标题也不是正文，若不剥离会被 ``_parse_markdown_output``
+# 当成标题，导致开场白泄漏进 PR 元数据。
+_PREAMBLE_LEAD = re.compile(
+    r"^(?:here(?:'s| is)\b|sure\b|certainly\b|okay\b|of course\b|below is\b|"
+    r"the following\b|i(?:'ll| will)\b|as requested\b)",
+    re.I,
+)
+# 水平分隔线（``---`` / ``***`` / ``___`` / ``===``），常见于开场白与正文之间。
+_HORIZONTAL_RULE = re.compile(r"^(?:[-*_=]\s*){3,}$")
+# Markdown 代码围栏起始行（``` 或 ~~~，可带语言标记）。
+_CODE_FENCE = re.compile(r"^(`{3,}|~{3,})")
+
+
+def _is_markdown_preamble_line(line: str) -> bool:
+    """判断单行是否属于开场白/装饰，而非 PR 正文或标题。
+
+    Args:
+        line: Markdown 输出中的一行原始文本。
+
+    Returns:
+        属于空白、HTML 注释、水平分隔线、对话式开场白或以冒号结尾的引导语时返回
+        ``True``。
+    """
+    stripped = line.strip()
+    if not stripped:
+        return True
+    if stripped.startswith("<!--"):
+        return True
+    if _HORIZONTAL_RULE.match(stripped):
+        return True
+    if _PREAMBLE_LEAD.match(stripped):
+        return True
+    # 以冒号结尾的短句通常是引导语（``Here is the draft PR body:``），不是标题。
+    return stripped.endswith(":") and len(stripped) <= 120
+
+
+def _strip_markdown_preamble(output_text: str) -> str:
+    """剥离 draft_pr markdown 输出的开头开场白与最外层代码围栏。
+
+    agent 常以 ``Here is the draft PR body:`` 之类的开场白起头，并可能把整份正文包进
+    一层 ```markdown 围栏。这些内容不是标题也不是正文，若不剥离，首行会被当作 PR
+    标题、正文也会被围栏包住。最多迭代两轮：先剥开场白，再拆最外层围栏，并处理围栏
+    内仍残留开场白的情况。
+
+    Args:
+        output_text: agent 输出的原始 Markdown 文本。
+
+    Returns:
+        去掉开头开场白/分隔线/注释行与最外层代码围栏后的 Markdown 文本。
+    """
+    lines = output_text.splitlines()
+
+    for _ in range(2):
+        start = 0
+        while start < len(lines) and _is_markdown_preamble_line(lines[start]):
+            start += 1
+        lines = lines[start:]
+
+        if not lines:
+            return ""
+
+        fence_match = _CODE_FENCE.match(lines[0].strip())
+        if not fence_match:
+            break
+        fence = fence_match.group(1)
+        end = len(lines)
+        while end > 1 and not lines[end - 1].strip():
+            end -= 1
+        if end > 1 and lines[end - 1].strip().startswith(fence):
+            lines = lines[1 : end - 1]
+        else:
+            lines = lines[1:]
+
+    return "\n".join(lines).strip()
+
+
 # ---------------------------------------------------------------------------
 # Issue 内容生成
 # ---------------------------------------------------------------------------
@@ -823,7 +901,10 @@ def generate_pr_content(
         if target.output == "json":
             generated_title, generated_body = _parse_json_output(output_text)
         else:
-            generated_title, generated_body = _parse_markdown_output(output_text)
+            # 先剥离开场白与最外层代码围栏，避免 agent 的开场白被当成标题、正文被围栏包住。
+            generated_title, generated_body = _parse_markdown_output(
+                _strip_markdown_preamble(output_text)
+            )
 
     # markdown 首个非空行按约定是 ``Closes #N``，会被解析成标题；此类标题作废，落到 fallback_title。
     if _CLOSING_REFERENCE_TITLE.fullmatch(generated_title):
