@@ -39,6 +39,7 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
     TokenUsage,
+    describe_verification_command,
 )
 from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_RUN,
@@ -544,7 +545,7 @@ def _build_verification_commands_summary(
     commands = config.runner.verification_commands
     if not commands:
         return "No verification commands configured."
-    return "\n".join(f"- `{command}`" for command in commands)
+    return "\n".join(f"- `{describe_verification_command(command)}`" for command in commands)
 
 
 def run_agent(

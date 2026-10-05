@@ -17,6 +17,8 @@ from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     AutopilotConfig,
+    BrowserE2EVerificationCommand,
+    E2EVerificationArtifact,
     GeneratedContentConfig,
     GeneratedContentTargetConfig,
     GitConfig,
@@ -28,6 +30,7 @@ from backend.core.shared.models.agent_runner import (
     RunnerConfig,
     SafetyConfig,
     ValidationConfig,
+    VerificationCommand,
     WorktreeConfig,
 )
 from backend.core.shared.models.agent_spec import (
@@ -42,6 +45,9 @@ from backend.core.shared.models.lifecycle_agent import (
     LifecycleAgentsConfig,
     LifecyclePresetsConfig,
     concrete_declared_agent,
+)
+from backend.infrastructure.config.agent_runner_settings import (
+    AgentRunnerE2eVerificationCommandSettings,
 )
 from backend.infrastructure.config.settings import (
     AgentRunnerAgentProfileSettings,
@@ -124,6 +130,45 @@ def _build_deliberation_config(
         stale_rounds_before_hint=deliberation_settings.stale_rounds_before_hint,
         profiles=profiles,
     )
+
+
+def _build_verification_commands(
+    entries: list[str | AgentRunnerE2eVerificationCommandSettings],
+) -> tuple[VerificationCommand, ...]:
+    """Convert verification command settings to the frozen core view.
+
+    纯字符串条目原样透传（解析与执行行为逐字段不变）；E2E 结构化条目
+    转成 :class:`BrowserE2EVerificationCommand`，由验证管线分发执行。
+    """
+    built: list[VerificationCommand] = []
+    for entry in entries:
+        if isinstance(entry, str):
+            built.append(entry)
+            continue
+        built.append(
+            BrowserE2EVerificationCommand(
+                kind=entry.kind,
+                script=entry.script,
+                app_start=entry.app_start,
+                ready_url=entry.ready_url,
+                ready_timeout_seconds=entry.ready_timeout_seconds,
+                startup_wait_seconds=entry.startup_wait_seconds,
+                probe=entry.probe,
+                timeout_seconds=entry.timeout_seconds,
+                inactivity_timeout_seconds=entry.inactivity_timeout_seconds,
+                env_allow=tuple(entry.env_allow),
+                artifacts=tuple(
+                    E2EVerificationArtifact(
+                        path=artifact.path,
+                        mime=artifact.mime,
+                        min_size=artifact.min_size,
+                        key_claim=artifact.key_claim,
+                    )
+                    for artifact in entry.artifacts
+                ),
+            )
+        )
+    return tuple(built)
 
 
 def _build_memory_config(
@@ -520,7 +565,9 @@ def build_app_config_from_settings(
             closeout_timeout_seconds=runner_settings.closeout_timeout_seconds,
             closeout_visual_timeout_seconds=runner_settings.closeout_visual_timeout_seconds,
             inactivity_timeout_seconds=runner_settings.inactivity_timeout_seconds,
-            verification_commands=tuple(runner_settings.verification_commands),
+            verification_commands=_build_verification_commands(
+                runner_settings.verification_commands
+            ),
             pre_commit_verification_command=runner_settings.pre_commit_verification_command,
         ),
         memory=_build_memory_config(memory_settings),

@@ -2,6 +2,10 @@
 
 - GitHub Issue: https://github.com/ZataZhang/keda/issues/193
 
+> ✅ **交付前置**：无。此横幅是 §8 Delivery Dependencies 的投影。
+>
+> 🧍 **验收状态**：待人工验收 — rv-1…rv-5 证据已齐备且执行侧非人工项已勾，仅剩 §9 Human-Confirmed 两项（执行边界 rv-2 / 配置契约 rv-3）与 rv-1 人工走查需人工确认。本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
 >
 > - **Part A · 人审层 (Review Layer)** — 需求方 / 验收人读这部分，决定"该不该做、做得对不对"，并通过风险地图知道**哪些地方必须亲自确认**。Part A 不出现实现机制、文件路径、命令。
@@ -166,26 +170,36 @@ keda 的验证与 review 环节对"改了后端逻辑、跑测试能证明"的�
 │   └── src/backend/core/shared/models/agent_runner.py [修改]
 │   【总结】verification_commands 支持 E2E 形态结构化条目（kind / script / app_start / artifacts）
 │
+├── Backend (shared interfaces — 执行端口)
+│   └── src/backend/core/shared/interfaces/agent_runner.py [修改]
+│   【总结】IProcessRunner.run 新增 env_profile / env_allow_extra 参数与 E2E_CHILD_ENV_PROFILE 档名常量
+│
 ├── Backend (core — 验证管线)
 │   └── src/backend/core/use_cases/
-│       ├── agent_runner_validation.py         [修改]
-│       【总结】E2E 条目分发到浏览器执行路径；产物路径并入 evidence_files 门禁
+│       ├── agent_runner_git.py                [修改]
+│       【总结】run_verification 按条目分发：E2E 条目走浏览器执行路径；纯 shell 路径逐字段不变（原计划写在 agent_runner_validation.py，实现落在统一分发点）
 │       ├── agent_runner_e2e_browser.py        [新增]
 │       【总结】可用性预检、应用启停管理、产物收集、分类失败诊断
-│       └── agent_runner_failure.py            [修改]
-│       【总结】E2E 失败子分类（环境缺失 / 脚本失败 / 产物不健全）的渲染
+│       ├── run_agent_once.py                  [修改]
+│       【总结】prompt 注入的验证命令清单对 E2E 条目渲染可读描述（describe_verification_command）
+│       └── agent_runner_feedback.py           [修改]
+│       【总结】E2E 失败子分类（环境缺失 / 脚本失败 / 产物不健全）进入 recovery prompt 与失败评论渲染（原计划落在 agent_runner_failure.py，实现在其调用的渲染 helper）
 │
 ├── Backend (infrastructure — 进程与环境)
-│   └── src/backend/infrastructure/child_env.py [修改]
-│   【总结】E2E 子进程环境变量白名单（浏览器所需 display / home 缓存目录等）
+│   ├── src/backend/infrastructure/child_env.py [修改]
+│   │   【总结】E2E 子进程环境变量白名单（默认关闭；浏览器所需 display / home 缓存目录等；runner 凭据不可见）
+│   └── src/backend/infrastructure/process_runner.py [修改]
+│       【总结】env_profile 档实现：白名单环境 + 安全前提校验（无捕获 / 无超时必须响亮拒绝，不静默回退）
 │
-├── Backend (api — 配置解析)
-│   └── (验证命令配置解析入口)                  [修改]
-│   【总结】.iar.toml 中新形态的解析与错误诊断文案
+├── Backend (配置解析 — settings + factory)
+│   ├── src/backend/infrastructure/config/agent_runner_settings.py [修改]
+│   │   【总结】.iar.toml 中新形态的解析与字段级错误诊断（extra=forbid；就绪字段依赖校验）
+│   └── src/backend/engines/agent_runner/factory_config_builder.py [修改]
+│       【总结】settings 条目转 frozen core dataclass；纯字符串条目原样透传
 │
 ├── 仓库自身试点
-│   └── tasks/evidence/<prd-stem>/scripts/     [新增]
-│   【总结】frontend-admin / frontend-public 关键页面的 E2E 试点脚本（进证据脚本目录，不进代码 diff）
+│   └── .iar/evidence/scripts/                 [新增]
+│   【总结】frontend-admin 关键页面的 E2E 试点与 RV 脚本（进本仓证据脚本目录——原计划 `tasks/evidence/<prd-stem>/scripts/`，本仓 evidence_dir 实为 `.iar/evidence`；不进代码 diff）
 │
 └── Frontend (frontend-admin / frontend-public)   # No frontend impact
     被验证对象，本 PRD 不修改其代码。
@@ -197,7 +211,7 @@ keda 的验证与 review 环节对"改了后端逻辑、跑测试能证明"的�
 |---|---|---|---|
 | 既有 shell 验证命令路径未变 | `grep -rn "verification_commands" src/backend --include="*.py" -l` | 消费方仍集中于现有管线文件，无新旁路 | 是否有人绕过验证管线自行跑命令 |
 | E2E 逻辑未泄漏进 verifier prompt 生成 | `grep -rn "playwright\|chromium" src/backend --include="*.py" -l` | 仅 E2E 执行与预检文件命中 | verifier prompt 是否被塞入框架绑定 |
-| 环境隔离未被绕过 | `grep -rn "child_env" src/backend/core/use_cases/agent_runner_e2e_browser.py` | E2E 子进程创建点引用 child_env | 是否裸用 Popen / subprocess 直启浏览器 |
+| 环境隔离未被绕过 | `grep -rn "E2E_CHILD_ENV_PROFILE" src/backend/core/use_cases/agent_runner_e2e_browser.py` | E2E 全部子进程创建点都传 `env_profile=E2E_CHILD_ENV_PROFILE`（core 不得 import infrastructure，白名单策略本体在 `infrastructure/child_env.py` 按档名生效） | 是否裸用 Popen / subprocess 直启浏览器，或新增执行点漏传档名 |
 | 试点脚本不进代码 diff | `git status --porcelain frontend-admin frontend-public` | 无前端代码改动 | 是否有人把"修前端"误当"修验证" |
 
 ### 7.4 Flow Or Architecture Diagram
@@ -313,8 +327,8 @@ Failure triage:
 ### Acceptance Evidence Package（证据包 · 按风险地图排序，终点人审入口）
 
 1. **高风险 oracle 结果**（置顶）：rv-1 / rv-2 / rv-3 全链证据（真实 UI Issue 跑通 + 凭据隔离断言输出 + 三种配置错误诊断实录）。
-2. **风险地图对账 Predicted → Reconciled**：[实现中有无未预测到的高风险面被触发，如何处理]
-3. **对抗自检**：[对"未命中"项与关键断言的反方检查结论——特别是"验证脚本能否触碰 git 写操作"的边界测试结论]
+2. **风险地图对账 Predicted → Reconciled**：实现未触发新的未预测高风险面；四处落点偏差（分发点在 `agent_runner_git.py`、渲染点在 `agent_runner_feedback.py`、环境隔离经 core 常量跨层、试点脚本目录为本仓 legacy `.iar/evidence`）已全部对齐到 §7.2/§7.3 并记录于 §14 Change Log。
+3. **对抗自检**：E2E 脚本与既有纯 shell 验证命令同特权、同 worktree 执行，技术上可触碰 git 写操作——这不是本特性新增的攻击面（运营者配置命令本就有此能力），白名单挡掉的是一条更致命的凭据外泄路径（rv-2 实测：GitHub token / 模型 API key 全部不可见）；超时击杀、预检、分发路径经单测负例与 rv-3 红→绿双向判别未发现可静默绕过的通道。
 4. **对锁定契约的 diff**：既有纯 shell `verification_commands` 条目的解析与执行行为逐字段不变。
 5. **低风险门禁结果（折叠）**：`just lint --full`、`just test`、架构检查。
 
@@ -325,39 +339,39 @@ Failure triage:
 
 ### Architecture Acceptance
 
-- [ ] E2E 执行位于 core use case + infrastructure 进程层，未新建第二条验证管线
-- [ ] keda 本体无 Playwright 等浏览器框架硬依赖（可用性预检 + 指引模式）
+- [x] E2E 执行位于 core use case + infrastructure 进程层，未新建第二条验证管线（证据：`agent_runner_e2e_browser.py`（core）+ `child_env.py`/`process_runner.py`（infrastructure）；单一分发点 `run_verification`；pre-commit "Check architecture layer dependencies" Passed）
+- [x] keda 本体无 Playwright 等浏览器框架硬依赖（可用性预检 + 指引模式）（证据：无新增依赖；`grep -rn "playwright\|chromium" src/backend --include="*.py" -l` 仅命中执行层一个文件；rv-5 守卫 `runtime-mentions-confined`）
 
 ### Dependency Acceptance
 
-- [ ] E2E 子进程环境变量经 `child_env` 白名单过滤（rv-2 通过即为证据）
-- [ ] 证据脚本位于 `tasks/evidence/<prd-stem>/scripts/`，不进代码 diff（标准约定回归）
+- [x] E2E 子进程环境变量经 `child_env` 白名单过滤（rv-2 通过即为证据）（证据：rv-2 红/绿对照 `rv-2-red-control.txt`/`rv-2-pipeline-run.txt`，植入凭据 + 父进程真实凭据全部不可见）
+- [x] 证据脚本位于证据目录 `scripts/` 子目录，不进代码 diff（本仓为 legacy `.iar/evidence` 配置，等价落点 `.iar/evidence/scripts/`；证据：`git status` 变更集无任何 rv 脚本；见 §7.2 对齐与 §14 Change Log）
 
 ### Behavior Acceptance
 
-- [ ] rv-1 / rv-3 / rv-4 / rv-5 通过
-- [ ] 纯 shell 验证命令既有行为逐字段回归通过
+- [x] rv-1 / rv-3 / rv-4 / rv-5 通过（证据：`rv-1-pipeline-run.txt` RV1-GREEN、`rv-3-classified-failures.txt` RV3-GREEN + `rv-3-positive-control.txt`、`rv-4-pipeline-run.txt` RV4-GREEN、`rv-5-regression-run.txt` RV5-GREEN；各自红控见对应 red-control 文件）
+- [x] 纯 shell 验证命令既有行为逐字段回归通过（证据：`tests/test_agent_runner_e2e_browser.py` 逐字段 kwargs 断言 + shell 条目渲染不变性测试；全量套件 2896 passed）
 
 ### Frontend Acceptance
 
-- [ ] `No frontend impact` —— 记录理由：前端应用为被验证对象，代码零改动；试点脚本进证据脚本目录。
+- [x] `No frontend impact` —— 记录理由：前端应用为被验证对象，代码零改动；试点脚本进证据脚本目录。（证据：`git status --porcelain frontend-admin frontend-public` 为空）
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/` 验证配置说明补 E2E 形态章节（声明方式、产物声明、常见失败分类）
-- [ ] `docs/guides/prd-standard.md` RV 编写指引补浏览器类产物的 ArtifactSpec 示例
+- [x] `docs/guides/` 验证配置说明补 E2E 形态章节（声明方式、产物声明、常见失败分类）（证据：`docs/guides/agent-runner.md` 新增"浏览器 E2E 验证命令形态（browser_e2e）"节：TOML 声明、字段表、失败分类表、白名单说明、D-08 本机承诺）
+- [x] `docs/guides/prd-standard.md` RV 编写指引补浏览器类产物的 ArtifactSpec 示例（证据：新增"浏览器 E2E 产物（已落地）"条目，指向 agent-runner 指南）
 
 ### Validation Acceptance
 
-- [ ] `just test` passes
-- [ ] rv-1 的真实入口（真实 UI Issue 全流程）人工走查通过
-- [ ] `grep -rn "playwright\|chromium" src/backend --include="*.py" -l` 确认无框架绑定泄漏
-- [ ] `git status --porcelain frontend-admin frontend-public` 确认前端零改动
+- [x] `just test` passes（证据：2896 passed, 1 skipped in 148.64s @ 751056e）
+- [~] rv-1 的真实入口（真实 UI Issue 全流程）人工走查通过 —— 走查材料已备齐（`rv-1-admin-login.png` 真实渲染截图 + `rv-1-admin-login.trace.zip` 交互 trace），人工走查属验收第二触点，不由执行器代确认
+- [x] `grep -rn "playwright\|chromium" src/backend --include="*.py" -l` 确认无框架绑定泄漏（证据：输出仅 `agent_runner_e2e_browser.py` 一个文件；忽略大小写扩展扫描另命中 `child_env.py` 的 `PLAYWRIGHT_`/`CHROMEDRIVER_` 环境变量前缀白名单，属执行机制本体，见 rv-5 守卫）
+- [x] `git status --porcelain frontend-admin frontend-public` 确认前端零改动（证据：rv-5 guard `frontend-dirs-clean`）
 
 ### Delivery Readiness
 
-- [ ] Recommended approach fully implemented; no unapproved parallel abstraction introduced
-- [ ] No open regression or rollout blocker remains
+- [x] Recommended approach fully implemented; no unapproved parallel abstraction introduced（证据：FR-1..FR-7 全部落地于既有管线单一分发点；无新层/新服务/新依赖）
+- [x] No open regression or rollout blocker remains（证据：全量套件绿 + 全部 pre-commit hooks Passed + rv-5 漂移守卫绿）
 
 ---
 
@@ -426,4 +440,41 @@ Failure triage:
 - Before: §12 的「Roadmap 登记与排序」「与既有 E2E 资产的分工」两条为待决；浏览器运行时覆盖范围未定；§13 无对应决策记录。
 - After: §12 三条改为已决（Roadmap 已登记 M3、复用既有 E2E 资产、首版只承诺本机覆盖）；§13 新增 D-05 … D-09；同步更新 `ROADMAP.md`（本 PRD 登记进 M3「Verification And Review」与 pending 顺序视图，并标注 Tauri 项已移入 `tasks/hold/`），并更正 sibling daemon PRD 的过期 P0 引用。追加：daemon sibling `P1-FEAT-20260930-225000` 也登记进 Roadmap M3 与 pending 视图。
 - Reason: 用户经 decision board 就 7 项待决全部选择推荐项（Q1–Q7 = A），按结论回写；随后按用户指示补登记 daemon sibling。
+- Impact: 仅 §12 待决条目落定、§13 决策记录补齐与 `ROADMAP.md` 登记视图更新；不改产品目标、§10 FR、§7.6 RV oracle 判据、§11 Non-Goals 或任何验收判据，不新增 / 删除交付依赖。
 - Review: 读取 `.iar/decisions/answers.json`（`selection.answers` 全为 `A`、`changed` 为空）后回写；daemon sibling 已按用户后续指示登记，§12 与本条同步更新。
+
+### 实现对齐：分发/渲染落点、试点脚本路径与环境隔离守卫机制（2026-10-05）
+
+- Type: doc
+- Before: §7.2 把 E2E 条目分发写在 `agent_runner_validation.py`、子分类渲染写在 `agent_runner_failure.py`、配置解析入口为抽象的 "(api 层)"；试点脚本路径写作 `tasks/evidence/<prd-stem>/scripts/`；§7.3 环境隔离守卫的预期是"E2E 文件直接引用 child_env"。
+- After: §7.2 按实现实况更新——分发落在 `agent_runner_git.py` 的 `run_verification` 统一分发点（RV 复跑 `agent_runner_validation.py` 不改，FR-6 由证据脚本目录内容摘要自动覆盖）；渲染落在 `agent_runner_failure.py` 所调用的 `agent_runner_feedback.py` 的 `format_result_for_recovery` / `format_verification_failure`；配置解析入口具体化为 `infrastructure/config/agent_runner_settings.py` + `engines/agent_runner/factory_config_builder.py`，并补 `shared/interfaces`、`process_runner.py`、`run_agent_once.py` 三个实际改动文件；试点脚本路径更正为 `.iar/evidence/scripts/`（本仓 `evidence_dir` 实际值）；§7.3 守卫改为核查 E2E 全部子进程创建点传 `env_profile=E2E_CHILD_ENV_PROFILE`。
+- Reason: 与四层依赖方向和代码实况对齐：core 不得 import infrastructure，故环境隔离以档名参数（`env_profile`）跨层，白名单策略本体留在 `infrastructure/child_env.py`；验证命令的所有消费方统一经 `run_verification`，在其分发可保证纯 shell 路径逐字段不变；本仓证据目录为 `.iar/evidence` 而非 `tasks/evidence/`。
+- Impact: 仅 §7.2 / §7.3 living implementation guide 的校正；不改产品目标、§10 FR、§7.6 RV oracle、§11 Non-Goals 与任何验收判据，不增删交付依赖。
+- Review: 对照实现后的代码 grep（`run_verification` 分发点、`format_*` 渲染 helper、`load_agent_runner_local_settings` 解析入口、`.iar.toml` 的 `evidence_dir`）自审通过。
+
+### RV 证据闭环与 §9 执行侧勾选（2026-10-05）
+
+- Type: doc
+- Before: §9 全部复选框未勾；证据包第 2、3 项为占位括号；rv-5 守卫的运行时字样白名单语义未定。
+- After: rv-1..rv-5 全部经真实管线红→绿跑通并在 `.iar/evidence/` 落 12 份证据文件（含 rv-1 截图与 trace 过 FR-11a manifest 硬层），`evidence.json` 经真实 `validate_evidence_manifest` 与 `validate_evidence_artifacts` 校验通过；§9 非人工项按证据勾选（`just test` 2896 passed 复记），"rv-1 人工走查"因其人工属性勾为 `[~]` 并标注材料位置；Human-Confirmed 两项保持未勾待第二触点；证据包第 2、3 项占位符回填为对账/对抗结论；守卫扫描口径定案：大小写敏感 grep 只命中执行层，忽略大小写另放行 `child_env.py` 的运行时变量前缀白名单。
+- Reason: 交付收尾层要求执行器勾选证据充分支持的非人工项、完成 Final Reconciliation，并使 §9 与证据实况一致；人工项不代确认。
+- Impact: 仅 §9 勾选状态、证据包占位符回填与 Change Log 追加；不改 §10 FR、§7.6 RV oracle 判据、§11 Non-Goals 或交付依赖。
+- Review: 逐项对照 `.iar/evidence/` 证据文件与命令实际输出（RV*-GREEN / RV*-RED-CONTROL=ok / validate_evidence_manifest=PASS / just test 全绿）后自审通过。
+
+### 补齐验收状态横幅与 Change Log 条目结构（2026-10-05）
+
+- Type: doc
+- Before: PRD 头部无「交付前置 / 验收状态」横幅；§14 第二条（回填 decision board 的 7 项决定）缺 `Impact` 字段。
+- After: 头部补 `✅ 交付前置：无`（投影 §8 gate type: none）与 `🧍 验收状态：待人工验收`（投影 §9：Human-Confirmed 两项未勾 + rv-1 人工走查待第二触点）；第二条 Change Log 补 Impact 行（仅 §12/§13/ROADMAP 登记视图变化，不动 FR / RV oracle / 验收判据 / 交付依赖）。
+- Reason: 交付检查判定 Change Log 条目结构不完整；归档门禁要求横幅与 §9 清单一致，缺横幅不可归档。
+- Impact: 仅头部横幅与 Change Log 结构补齐；不改 §10 FR、§7.6 RV oracle 判据、§11 Non-Goals、§9 勾选项语义或交付依赖。
+- Review: 对照 `docs/ai-standards/tooling.md` 归档门禁（横幅三态与 §9 投影规则）与同类 pending PRD 横幅版式自审通过。
+
+### 修复 rv-2 证据断言不可复跑缺陷并补横幅（2026-10-05，恢复轮）
+
+- Type: doc
+- Before: `evidence.json` item 2 的 stdout 断言含 `GITHUB_TOKEN must_match=false`——但绿跑的 driver 日志会列出白名单丢弃的**变量名**（含 `GITHUB_TOKEN`），该断言在复跑时必然假红，检查点无法成立。
+- After: 断言改为可复跑判别——`rv2-phaseA=hidden` 必须出现、`RV2-FAILED`/`RV2-RED-CONTROL=FAILED` 不得出现；rv-2 红控与绿跑均重跑再生证据文件（`RV2-RED-CONTROL=ok`、`RV2-GREEN`，15 条断言对实录 stdout 全 PASS）；PRD 头部补「交付前置 / 验收状态」横幅（🧍 待人工验收，投影 §9 剩余人工项）。
+- Reason: 交付检查失败恢复时发现原断言把"子进程看不到凭据"误写成"任何输出不得出现变量名"，与执行机制日志语义冲突；按"命令退出码为 0 不等于检查点成立、断言必须可在复跑中稳定复现"的标准收敛。
+- Impact: 仅证据 manifest 断言修正与证据再生、PRD 横幅补齐；不改 §10 FR、§7.6 RV oracle 判据本体、§9 勾选项语义或交付依赖。
+- Review: 用真实 `load_evidence_manifest` 解析通过（5 items），逐条断言对照再生后的绿证据文件复核 PASS 后自审通过。

@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
-from backend.core.shared.models.agent_runner import AppConfig, CommandResult
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+    BrowserE2EVerificationCommand,
+    CommandResult,
+)
+from backend.core.use_cases.agent_runner_e2e_browser import run_browser_e2e_verification_command
 
 __all__ = [
     "expand_changed_path",
@@ -120,19 +125,27 @@ def run_verification(
     验证命令按配置顺序串行执行，第一个失败即短路停止，
     避免在已知失败的情况下继续执行后续耗时命令。
 
-    每条命令以 ``bash -lc <command>`` 形式执行，与
+    纯 shell 条目以 ``bash -lc <command>`` 形式执行，与
     :func:`backend.core.use_cases.agent_runner_validation.ensure_validation_commands_pass`
     的 RV 复跑行为保持一致，从而支持命令展开（``$(...)`` / 通配符 /
     管道 / 变量插值）。``-l`` 加载登录 shell 配置以复用用户环境；
     命令仍以单字符串形式传入，未改变 ``verification_commands`` 的语义。
+
+    浏览器 E2E 结构化条目（FR-1）分发到
+    :func:`backend.core.use_cases.agent_runner_e2e_browser.run_browser_e2e_verification_command`
+    ——受控启停应用、白名单环境、产物硬层门禁；失败语义仍是非零
+    ``CommandResult``，短路行为不变。
     """
     verification_results: list[CommandResult] = []
     for command in config.runner.verification_commands:
-        result = process_runner.run(
-            ["bash", "-lc", command],
-            cwd=worktree_path,
-            check=False,
-        )
+        if isinstance(command, BrowserE2EVerificationCommand):
+            result = run_browser_e2e_verification_command(command, worktree_path, process_runner)
+        else:
+            result = process_runner.run(
+                ["bash", "-lc", command],
+                cwd=worktree_path,
+                check=False,
+            )
         verification_results.append(result)
         # 短路：第一个验证失败就停止，节省后续验证时间
         if result.return_code != 0:

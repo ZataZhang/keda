@@ -8,11 +8,17 @@ inactivity watchdog 杀掉，见 2026-09-28 Issue #156 事故）。
 
 本模块提供统一的净化入口：按固定 denylist 剔除会话私有变量，其余变量
 （PATH、HOME、代理、API key 等）原样透传。
+
+浏览器 E2E 验证子进程走另一条更强的**白名单**路径
+（:func:`build_e2e_child_env`）：验证脚本来自 Issue 产出，不得看到 runner
+凭据（GitHub token、模型 API key、带凭据的连接串等），只放行运行浏览器
+与被测应用所需的最小变量集合。
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 
 from backend.infrastructure.logging.logger import logger
 
@@ -51,3 +57,110 @@ def build_sanitized_child_env() -> dict[str, str]:
             value = child_env.pop(key)
             logger.warning("child env sanitized: removed %s (value length %d)", key, len(value))
     return child_env
+
+
+# E2E 白名单：浏览器与被测应用运行所需的最小变量集合。
+# - 基础定位类：shell / node / 浏览器进程找到自身运行时与缓存目录所需；
+# - 浏览器相关：无头浏览器显示与缓存目录、Chromium/Playwright/Puppeteer
+#   的浏览器路径覆盖；
+# - Node 生态路径类：nvm / pnpm / npm 定位 node 与包缓存所需。
+# 凭据类变量（*_API_KEY、TOKEN、SECRET、带凭据的 DATABASE_URL、代理凭据等）
+# 一律不放行——白名单是默认关闭语义，漏配变量由脚本显式声明 env_allow 补。
+E2E_CHILD_ENV_BASE_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "SHELL",
+        "USER",
+        "LOGNAME",
+        "HOSTNAME",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "TERM",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+        "TZ",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "DISPLAY",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_RUNTIME_DIR",
+        "CI",
+        "NODE",
+        "NODE_PATH",
+        "NODE_OPTIONS",
+        "NVM_DIR",
+        "NVM_BIN",
+        "NVM_INC",
+        "PNPM_HOME",
+        "npm_config_cache",
+        "COREPACK_HOME",
+        "PLAYWRIGHT_BROWSERS_PATH",
+        "PLAYWRIGHT_SKIP_BROWSER_GC",
+        "CHROME_PATH",
+        "CHROME_BIN",
+        "PUPPETEER_CACHE_DIR",
+        "CYPRESS_CACHE_FOLDER",
+        "VITEST",
+    }
+)
+
+# 前缀放行：浏览器自动化框架的运行配置族（不含任何凭据语义的键族）。
+E2E_CHILD_ENV_PREFIX_ALLOWLIST: tuple[str, ...] = (
+    "PLAYWRIGHT_",
+    "PUPPETEER_",
+    "CHROMEDRIVER_",
+    "GECKODRIVER_",
+    "E2E_",
+)
+
+
+def build_e2e_child_env(extra_allowed: Iterable[str] = ()) -> dict[str, str]:
+    """构建浏览器 E2E 子进程的白名单过滤环境。
+
+    与 :func:`build_sanitized_child_env` 的"透传 + denylist"相反，本函数是
+    默认关闭的白名单：只保留 :data:`E2E_CHILD_ENV_BASE_ALLOWLIST`、命中
+    :data:`E2E_CHILD_ENV_PREFIX_ALLOWLIST` 前缀、或运营者在验证命令条目上
+    显式追加（``extra_allowed``，对应配置的 ``env_allow``）的变量。runner
+    注入的凭据（GitHub token、模型 API key 等）因不在白名单内而对验证脚本
+    不可见；如确有需要，必须由运营者在配置中逐名追加，白名单变化可在
+    配置 diff 中审计。
+
+    Args:
+        extra_allowed: 追加放行的变量名（来自 E2E 条目的 ``env_allow``）。
+
+    Returns:
+        仅含放行变量的环境副本（新 dict，不修改 ``os.environ``）。
+    """
+    allowed_names = set(E2E_CHILD_ENV_BASE_ALLOWLIST)
+    allowed_names.update(E2E_CHILD_ENV_PREFIX_ALLOWLIST)
+    allowed_names.update(name for name in extra_allowed if name)
+    filtered: dict[str, str] = {}
+    dropped_credentials: list[str] = []
+    for key, value in os.environ.items():
+        if key in allowed_names or key.startswith(E2E_CHILD_ENV_PREFIX_ALLOWLIST):
+            filtered[key] = value
+        elif _looks_like_credential(key):
+            dropped_credentials.append(key)
+    if dropped_credentials:
+        # 只记变量名不记值，提示运营者哪个凭据类变量被白名单挡住（预期行为）。
+        logger.info(
+            "E2E child env whitelist dropped credential-like vars: %s",
+            sorted(dropped_credentials),
+        )
+    return filtered
+
+
+def _looks_like_credential(env_key: str) -> bool:
+    """判断变量名是否携带凭据语义，仅用于诊断日志分类。"""
+    upper_key = env_key.upper()
+    return any(
+        token in upper_key
+        for token in ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "CREDENTIAL", "AUTH")
+    )

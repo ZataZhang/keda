@@ -92,6 +92,15 @@ class ReplExecOutcome:
     confirmation_granted: bool | None = None
 
 
+E2E_CHILD_ENV_PROFILE = "browser_e2e"
+"""浏览器 E2E 子进程的环境变量白名单档（child_env profile）名。
+
+core 层只声明档名并请求该档，白名单策略本体在 infrastructure 层
+``backend.infrastructure.child_env.build_e2e_child_env``——runner 凭据
+（GitHub token、模型 API key 等）默认不在白名单内，验证脚本不可见。
+"""
+
+
 class IProcessRunner(ABC):
     """运行外部命令的端口。
 
@@ -118,6 +127,8 @@ class IProcessRunner(ABC):
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
+        env_profile: str | None = None,
+        env_allow_extra: Sequence[str] = (),
     ) -> CommandResult:
         """运行一条命令并捕获其结果。
 
@@ -159,6 +170,14 @@ class IProcessRunner(ABC):
                 ``"plain"`` 表示通用命令，按既有路径执行；非 plain 值由
                 执行层经 ``iar.agent_output_protocols`` 注册表解析出中继
                 实现。通用命令（git/gh/验证命令）永远传 ``None``。
+            env_profile: 可选的子进程环境变量档名。``None`` 时子进程继承
+                runner 当前环境（默认行为，逐字段不变）；传
+                :data:`E2E_CHILD_ENV_PROFILE` 时实现端按 child_env 白名单
+                过滤子进程环境（runner 凭据默认不可见），并要求命令以
+                ``capture_output=True`` 且带 ``timeout`` 执行，否则实现端
+                直接报错，不做静默降级。
+            env_allow_extra: 启用 ``env_profile`` 时追加进白名单的变量名
+                （运营者显式声明的例外）；``env_profile`` 为 ``None`` 时无意义。
 
         Returns:
             CommandResult: 包含退出码与（按需）捕获到的 stdout/stderr

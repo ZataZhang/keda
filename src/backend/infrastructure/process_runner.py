@@ -20,13 +20,60 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
     PLAIN_PROTOCOL_ID,
 )
+from backend.core.shared.interfaces.agent_runner import E2E_CHILD_ENV_PROFILE
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.infrastructure.agent_stream_usage import (
     StreamUsageCollector,
     parse_usage_from_plain_stdout,
 )
-from backend.infrastructure.child_env import build_sanitized_child_env
+from backend.infrastructure.child_env import build_e2e_child_env, build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
+
+
+def _resolve_profiled_child_env(
+    env_profile: str,
+    env_allow_extra: Sequence[str],
+    *,
+    capture_output: bool,
+    timeout: int | None,
+    output_protocol: str | None,
+) -> dict[str, str]:
+    """按档名构造受控子进程环境，并校验该档的安全前提。
+
+    E2E 白名单档的前提是：输出被捕获、带 wall-clock 超时（超时才能走
+    进程组击杀兜底），且不混用 agent 流式协议。前提不成立时报错，
+    绝不静默回退到全量环境继承——那正是本档要防的凭据泄漏路径。
+
+    Args:
+        env_profile: 请求的档名，目前仅支持 :data:`E2E_CHILD_ENV_PROFILE`。
+        env_allow_extra: 追加放行的变量名。
+        capture_output: 调用是否捕获输出。
+        timeout: 调用传入的 wall-clock 超时。
+        output_protocol: 调用选择的输出协议。
+
+    Returns:
+        过滤后的子进程环境 dict。
+
+    Raises:
+        ValueError: 档名未知，或白名单档的安全前提不成立。
+    """
+    if env_profile != E2E_CHILD_ENV_PROFILE:
+        raise ValueError(f"Unknown process env profile: {env_profile!r}")
+    if not capture_output or timeout is None:
+        raise ValueError(
+            "env_profile='browser_e2e' requires capture_output=True and a "
+            "wall-clock timeout so hung browser/app processes are killed with "
+            "their whole process group; refusing to run with an unfiltered, "
+            "unbounded subprocess environment."
+        )
+    if output_protocol not in (None, PLAIN_PROTOCOL_ID):
+        raise ValueError(
+            f"env_profile='browser_e2e' cannot combine with output protocol "
+            f"{output_protocol!r}; the sanitized-env guarantee only holds on "
+            "the captured plain path."
+        )
+    return build_e2e_child_env(env_allow_extra)
+
 
 try:
     import pty
@@ -189,6 +236,8 @@ class SubprocessRunner:
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
+        env_profile: str | None = None,
+        env_allow_extra: Sequence[str] = (),
     ) -> CommandResult:
         """Run a subprocess and capture output.
 
@@ -212,8 +261,24 @@ class SubprocessRunner:
                 流式协议（当前 ``claude-stream-json``）路由到对应的流式
                 渲染执行器，取代旧版对命令行内容的嗅探；``None`` /
                 ``"plain"`` 走通用路径。
+            env_profile: 子进程环境变量档名。``None``（默认）保持原有的
+                环境继承行为逐字段不变；``E2E_CHILD_ENV_PROFILE`` 时按
+                child_env 白名单构造子进程环境（runner 凭据不可见），
+                并要求 ``capture_output=True`` 且 ``timeout`` 非空、
+                ``output_protocol`` 为 plain——否则白名单+进程树击杀的
+                安全前提不成立，直接报错而非静默降级。
+            env_allow_extra: E2E 档下追加放行的变量名（配置 ``env_allow``）。
         """
         started_mono: float = time.monotonic()
+        child_env: dict[str, str] | None = None
+        if env_profile is not None:
+            child_env = _resolve_profiled_child_env(
+                env_profile,
+                env_allow_extra,
+                capture_output=capture_output,
+                timeout=timeout,
+                output_protocol=output_protocol,
+            )
         usage_collector: StreamUsageCollector | None = None
         if output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID:
             usage_collector = StreamUsageCollector()
@@ -240,6 +305,7 @@ class SubprocessRunner:
                 errors="replace",
                 timeout=timeout,
                 input=input_text,
+                env=child_env,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -250,6 +316,7 @@ class SubprocessRunner:
                 timeout=timeout,
                 inactivity_timeout=inactivity_timeout,
                 label=label,
+                env=child_env,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -263,6 +330,7 @@ class SubprocessRunner:
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout,
+                env=child_env,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -381,6 +449,7 @@ def _run_captured_process(
     timeout: int,
     inactivity_timeout: int | None = None,
     label: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a captured subprocess with heartbeat and optional inactivity logging."""
     process = subprocess.Popen(
@@ -391,6 +460,7 @@ def _run_captured_process(
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
         **_OWN_PROCESS_GROUP_KWARGS,
     )
     watchdog = _ProcessWatchdog(
