@@ -120,6 +120,82 @@ class CommandResult:
     token_usage: TokenUsage | None = None
 
 
+@dataclass(frozen=True)
+class E2EVerificationArtifact:
+    """浏览器 E2E 验证命令声明的单个产物（FR-5）。
+
+    路径以 worktree 根为基准（POSIX 分隔符）。硬层检查（存在 / 非零字节 /
+    mime / min_size / 新鲜度）复用 FR-11a 的 ``validate_evidence_artifact``，
+    ``key_claim`` 与其他产物声明一样只喂 verifier，不做机检。
+
+    Attributes:
+        path: 产物相对 worktree 根的路径。
+        mime: 期望的 ``file --mime-type`` 精确值（如 ``image/png``）。
+        min_size: 期望的最小字节数；``None`` 表示只要求非空。
+        key_claim: 给 verifier 的软层关键断言文本，可为空。
+    """
+
+    path: str
+    mime: str
+    min_size: int | None = None
+    key_claim: str = ""
+
+
+@dataclass(frozen=True)
+class BrowserE2EVerificationCommand:
+    """``verification_commands`` 的浏览器 E2E 结构化条目（FR-1）。
+
+    与纯字符串条目共存、在同一队列按序执行；纯字符串条目的解析与执行
+    行为逐字段不变。声明语义：``script`` 是 ``bash -lc`` 执行的脚本入口
+    （相对 worktree 根），``app_start`` 声明如何后台拉起被测应用，产物
+    声明见 :class:`E2EVerificationArtifact`。keda 只负责"提供执行环境 +
+    收证据 + 门禁"，不绑定任何 E2E 断言框架（D-01）。
+
+    Attributes:
+        kind: 条目形态标记，固定为 ``"browser_e2e"``。
+        script: E2E 脚本入口（worktree 相对路径），执行前做存在性预检。
+        app_start: 被测应用的启动 shell 命令；``None`` 表示无应用管理层。
+        ready_url: 应用就绪的 HTTP 探测地址；未提供 ``app_start`` 时无意义。
+        ready_timeout_seconds: ``ready_url`` 探测的等待上限。
+        startup_wait_seconds: 无 ``ready_url`` 时的固定等待（回退形态）。
+        probe: 浏览器运行时可用性探测命令；``None`` 使用内置启发式探测。
+        timeout_seconds: E2E 运行的 wall-clock 超时，超时击杀整个进程组。
+        inactivity_timeout_seconds: 无输出超时；``None`` 不启用。
+        env_allow: 追加进子进程环境变量白名单的变量名（运营者显式声明）。
+        artifacts: 产物声明列表。
+    """
+
+    kind: str = "browser_e2e"
+    script: str = ""
+    app_start: str | None = None
+    ready_url: str | None = None
+    ready_timeout_seconds: int = 60
+    startup_wait_seconds: int | None = None
+    probe: str | None = None
+    timeout_seconds: int = 900
+    inactivity_timeout_seconds: int | None = None
+    env_allow: tuple[str, ...] = ()
+    artifacts: tuple[E2EVerificationArtifact, ...] = ()
+
+
+#: ``verification_commands`` 的条目联合：纯 shell 字符串或 E2E 结构化条目。
+VerificationCommand = str | BrowserE2EVerificationCommand
+
+
+def describe_verification_command(command: VerificationCommand) -> str:
+    """把一条验证命令配置渲染成给人 / agent 阅读的单行描述。
+
+    纯字符串条目返回原命令；E2E 结构化条目返回带形态标记的摘要，
+    保证 prompt 注入的命令清单对两类条目都有可读表示。
+    """
+    if isinstance(command, str):
+        return command
+    description = f"[browser_e2e] {command.script}"
+    if command.app_start:
+        description += f" (app: {command.app_start})"
+    return description
+
+
 class FailureType(Enum):
     """Categorized failure reason from an agent execution attempt."""
 
@@ -429,7 +505,7 @@ class RunnerConfig:
     closeout_timeout_seconds: int | None = 600
     closeout_visual_timeout_seconds: int | None = 1800
     inactivity_timeout_seconds: int = 1200
-    verification_commands: tuple[str, ...] = (
+    verification_commands: tuple[VerificationCommand, ...] = (
         "git diff --check",
         "uv run mkdocs build",
     )

@@ -342,7 +342,7 @@ ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`pr
 
 ### 提交前验证命令自动探测
 
-`iar init` 不会写死验证命令，而是按目标仓库实际情况探测 `[agent_runner.runner].verification_commands` 与 `pre_commit_verification_command`（实现见 `src/backend/engines/agent_runner/repository_local.py`）：
+`iar init` 不会写死验证命令，而是按目标仓库实际情况探测 `[agent_runner.runner].verification_commands` 与 `pre_commit_verification_command`（实现见 `src/backend/engines/agent_runner/repository_local.py`）。探测只生成纯 shell 字符串条目；浏览器 E2E 结构化条目（`kind = "browser_e2e"`）需运营者手工添加，形态与执行语义见下文"浏览器 E2E 验证命令形态"一节：
 
 - `verification_commands` 在 agent 请求 commit 后、staging 完成时运行；
   - 基线始终包含 `git diff --check`；
@@ -874,6 +874,55 @@ runner 派发 agent 子进程时**不会**原样继承父环境：派发点（Cl
 - 因此**从交互式 AI 会话的 shell 里直接启动 `iar run` / `iar review` 是安全的**，无需手工 `env -u SERVER__PORT`
 - git、gh、pytest 等工具命令类子进程与 console 守护子进程不在此净化范围内
 - 守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 保证新增的 agent 派发点必须接入净化环境
+
+## 浏览器 E2E 验证命令形态（browser_e2e）
+
+UI 类 Issue 的验证不能只看"测试绿了"——需要真实启动应用、真实操作页面、产出可门禁的浏览器产物。为此 `[agent_runner.runner].verification_commands` 在纯 shell 字符串之外支持**结构化 E2E 条目**（PRD：`tasks/pending/P1-FEAT-20260930-225500-browser-e2e-verification.md`）。两类条目在同一队列按序执行，任一失败短路进入既有 `VERIFICATION_FAILED` recovery 通道；**纯字符串条目的解析与执行行为逐字段不变**，未配置 E2E 条目的仓库零变化。
+
+### 配置形态
+
+TOML 数组中可与字符串混排 inline table（注意：TOML inline table 不能跨行，整条条目写在一行内）：
+
+```toml
+[agent_runner.runner]
+verification_commands = [
+    "git diff --check",
+    { kind = "browser_e2e", script = ".iar/evidence/scripts/admin-login-e2e.mjs", app_start = "just run frontend", ready_url = "http://localhost:5173/sign-in", ready_timeout_seconds = 60, timeout_seconds = 900, env_allow = ["E2E_APP_PORT"], artifacts = [ { path = ".iar/evidence/rv-1-admin-login.png", mime = "image/png", min_size = 50000, key_claim = "登录后的页面标题" }, { path = ".iar/evidence/rv-1-admin-login.trace.zip", mime = "application/zip" } ] },
+]
+```
+
+| 字段 | 默认 | 语义 |
+|---|---|---|
+| `kind` | 必填 | 固定 `"browser_e2e"`，形态标记。 |
+| `script` | 必填 | E2E 脚本入口（worktree 相对路径）。由脚本自身 shebang 选择解释器，需要执行位；keda 不绑定任何 E2E 框架（Playwright 等是目标仓库自己的 devDependency）。 |
+| `app_start` | `None` | 被测应用的启动 shell 命令；后台启动，正常结束或超时时进程树一并回收。 |
+| `ready_url` / `ready_timeout_seconds` | `None` / `60` | HTTP 就绪探测地址与等待上限（`curl -fsS`）；探测失败即分类 `app_not_ready` 并附应用日志尾部。 |
+| `startup_wait_seconds` | `None` | 无 `ready_url` 时的固定等待（回退形态），默认 10 秒。 |
+| `probe` | `None` | 浏览器运行时可用性探测命令，exit 0 视为可用；缺省用内置启发式（Playwright 浏览器缓存目录 / 常见浏览器可执行文件）。 |
+| `timeout_seconds` / `inactivity_timeout_seconds` | `900` / `None` | wall-clock 上限（超时击杀整个进程组，不留僵尸）与无输出超时。 |
+| `env_allow` | `[]` | **逐名**追加进子进程环境变量白名单的变量名。 |
+| `artifacts` | `[]` | 产物声明，脚本 exit 0 后逐个过 FR-11a artifact health 硬层（存在 / 非 0 字节 / mime / min_size / 新鲜度——以本轮验证开始时间为 mtime 下限）。 |
+
+字段级诊断：`extra="forbid"`，拼错/多余字段在配置加载期就报出；`ready_url` / `startup_wait_seconds` 没有 `app_start` 时同样加载期报错。
+
+### 执行管线与失败分类
+
+执行顺序：脚本入口预检 → 浏览器运行时预检 → 同一个受控子进程内（应用后台启动 → 就绪探测/固定等待 → 执行脚本 → EXIT trap 回收应用进程树）→ 声明产物过硬层。失败 stderr 携带 `BROWSER_E2E_FAILURE [category=<分类>]` 标记与修复指引，recovery prompt 与 Issue 评论渲染出子分类行，不会三类失败坍缩成一条裸 `VERIFICATION_FAILED`：
+
+| category | 含义 | 典型修复 |
+|---|---|---|
+| `script_missing` | 脚本入口不存在或缺执行位 | 补齐脚本 / `chmod +x` |
+| `browser_runtime_missing` | 浏览器运行时不可用 | 装浏览器（如 `pnpm exec playwright install chromium`）或自定义 `probe` |
+| `app_not_ready` | 应用启动失败或就绪探测超时 | 检查 `app_start` / `ready_url` 与实际端口约定 |
+| `script_failed` | 脚本非零退出（页面断言失败） | 这是真实功能失败，读脚本输出 |
+| `script_timeout` | wall-clock 超时 | 进程树已被击杀；调大 `timeout_seconds` 或修挂起 |
+| `artifact_unhealthy` | 脚本 exit 0 但产物过硬层失败 | 修产物声明或让脚本本轮真实产出 |
+
+### 环境隔离（默认关闭的白名单）
+
+E2E 条目预检与执行的所有子进程经 `backend.infrastructure.child_env.build_e2e_child_env()` 过滤：与 agent 派发的 denylist 净化相反，这是**默认关闭的白名单**——只保留基础运行变量（PATH/HOME/终端/locale/临时目录）、Node/pnpm 运行时位置、浏览器自动化框架配置族（`PLAYWRIGHT_*` / `PUPPETEER_*` 等前缀）与 `env_allow` 逐名追加项。runner 注入的凭据（GitHub token、模型 API key 等）因不在白名单内而对验证脚本不可见；白名单挡掉的凭据类变量名会记 INFO 日志（只记名不记值）。执行层（`IProcessRunner.run` 的 `env_profile`）拒绝无捕获/无超时的白名单档调用，绝不静默回退到全量环境继承。
+
+CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 runner 机器（D-08）。
 
 ## worktree 中的本地 env 文件
 

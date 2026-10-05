@@ -28,6 +28,7 @@ from backend.core.shared.models.agent_runner import (
     ReviewFinding,
 )
 from backend.core.shared.prd_machine_contract import PRD_MACHINE_CONTRACT_POINTER
+from backend.core.use_cases.agent_runner_e2e_browser import format_e2e_failure_classification
 from backend.core.use_cases.agent_runner_prd_delivery_gate import (
     PrdDeliveryError,
     _validate_prd_change_log,
@@ -330,10 +331,15 @@ def truncate_recovery_output(output_text: str) -> str:
 
 def format_result_for_recovery(result: CommandResult) -> str:
     """Format one command result for a recovery prompt."""
-    return "\n".join(
+    lines = [
+        f"Command: `{shlex.join(result.command)}`",
+        f"Exit code: {result.return_code}",
+    ]
+    e2e_classification = format_e2e_failure_classification(result)
+    if e2e_classification:
+        lines.append(e2e_classification)
+    lines.extend(
         [
-            f"Command: `{shlex.join(result.command)}`",
-            f"Exit code: {result.return_code}",
             "stdout:",
             "```text",
             truncate_recovery_output(result.stdout),
@@ -344,6 +350,7 @@ def format_result_for_recovery(result: CommandResult) -> str:
             "```",
         ]
     )
+    return "\n".join(lines)
 
 
 def failed_verification_results(
@@ -359,16 +366,22 @@ def format_verification_failure(verification_results: list[CommandResult]) -> st
     if not failed_results:
         return "Verification failed without a captured failing command."
     first_failed_result = failed_results[0]
-    return "\n".join(
+    lines = [
+        f"Command failed: {shlex.join(first_failed_result.command)}",
+        f"Exit code: {first_failed_result.return_code}",
+    ]
+    e2e_classification = format_e2e_failure_classification(first_failed_result)
+    if e2e_classification:
+        lines.append(e2e_classification)
+    lines.extend(
         [
-            f"Command failed: {shlex.join(first_failed_result.command)}",
-            f"Exit code: {first_failed_result.return_code}",
             "stdout:",
             truncate_recovery_output(first_failed_result.stdout),
             "stderr:",
             truncate_recovery_output(first_failed_result.stderr),
         ]
     )
+    return "\n".join(lines)
 
 
 def resolve_prd_archive_path(prd_relative_path: str) -> str | None:

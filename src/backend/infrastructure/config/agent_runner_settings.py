@@ -261,6 +261,72 @@ class AgentRunnerWorktreeSettings(BaseModel):
     provision_database: bool = True
 
 
+class AgentRunnerE2eArtifactSettings(BaseModel):
+    """``verification_commands`` E2E 条目中单个产物声明（FR-5）。
+
+    Attributes:
+        path: 产物相对 worktree 根的路径（POSIX 分隔符）。
+        mime: 期望的 ``file --mime-type`` 精确值，如 ``image/png``。
+        min_size: 期望最小字节数；省略时只要求非空。
+        key_claim: 给 verifier 的软层断言文本，不做机检。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    mime: str = Field(min_length=1)
+    min_size: int | None = Field(default=None, ge=0)
+    key_claim: str = ""
+
+
+class AgentRunnerE2eVerificationCommandSettings(BaseModel):
+    """``verification_commands`` 的浏览器 E2E 结构化条目（FR-1 配置契约）。
+
+    TOML 中与纯字符串条目混排在同一数组里（inline table 不能跨行，
+    整条条目写在一行内）::
+
+        verification_commands = [
+          "git diff --check",
+          { kind = "browser_e2e", script = "tests/e2e/smoke.sh", app_start = "just run frontend", ready_url = "http://127.0.0.1:5173", artifacts = [{ path = ".iar/evidence/x.png", mime = "image/png" }] },
+        ]
+
+    纯字符串条目的解析与执行行为逐字段不变；``extra="forbid"`` 保证配置
+    里的未知/拼错字段在加载期就报出字段级诊断，而不是运行期裸失败。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["browser_e2e"]
+    script: str = Field(min_length=1)
+    app_start: str | None = None
+    ready_url: str | None = None
+    ready_timeout_seconds: int = Field(default=60, ge=1)
+    startup_wait_seconds: int | None = Field(default=None, ge=0)
+    probe: str | None = None
+    timeout_seconds: int = Field(default=900, ge=1)
+    inactivity_timeout_seconds: int | None = Field(default=None, ge=1)
+    env_allow: list[str] = Field(default_factory=list)
+    artifacts: list[AgentRunnerE2eArtifactSettings] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_app_readiness_fields(self) -> "AgentRunnerE2eVerificationCommandSettings":
+        """校验应用管理层字段间的依赖关系，给出定向诊断。
+
+        Raises:
+            ValueError: ``ready_url`` / ``startup_wait_seconds`` 在没有
+                ``app_start`` 时无意义，视为配置错误。
+        """
+        if self.app_start is None:
+            if self.ready_url is not None:
+                raise ValueError(
+                    "ready_url has no effect without app_start: the runner only "
+                    "probes readiness of an app it started itself."
+                )
+            if self.startup_wait_seconds is not None:
+                raise ValueError("startup_wait_seconds has no effect without app_start.")
+        return self
+
+
 class AgentRunnerRunnerSettings(BaseModel):
     """Local runner behavior."""
 
@@ -300,7 +366,10 @@ class AgentRunnerRunnerSettings(BaseModel):
     # actually started, so it must not share the short text budget.
     closeout_visual_timeout_seconds: int | None = 1800
     inactivity_timeout_seconds: int = 1200
-    verification_commands: list[str] = Field(
+    # 提交验证命令队列：纯字符串条目按既有语义以 `bash -lc` 执行、行为逐字段
+    # 不变；结构化 dict 条目（kind = "browser_e2e"）声明浏览器 E2E 验证形态，
+    # 两类条目按配置顺序在同一队列串行执行。
+    verification_commands: list[str | AgentRunnerE2eVerificationCommandSettings] = Field(
         default_factory=lambda: [
             "git diff --check",
         ]
