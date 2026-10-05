@@ -1,5 +1,7 @@
 # PRD: Backlog PRD 完成后 CI/CD 监控与可选自动修复
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/197
+
 > ⛔ **交付前置**：`hard` — 本 PRD 按 Roadmap→Backlog 改名后的目标态书写（`iar backlog ci`、`agent_runner_backlog.py`、`/app/backlog` 等），硬依赖改名 PRD `P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md` 先交付。物化该依赖要求被依赖 PRD 先带 `- GitHub Issue: .../issues/N` 链接，故须**先对改名 PRD 执行 `iar issue-from-prd` 建 Issue**，再创建本 PRD 的 Issue。历史硬依赖的 Agent-led Post-PR CI Decision PRD `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md` 已归档交付（`tasks/archive/`）。结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
