@@ -250,6 +250,9 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
         return 1
     context = contexts[0]
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
+    # 恢复发布的 PR 复用正常发布的正文生成，因此需要内容生成器；缺失时正常发布
+    # 用例会退回配置的 template / fallback 正文。
+    content_generator = _cli.create_content_generator(ctx.process_runner, config=context.config)
     request = PublishRecoveryRequest(
         issue_number=ctx.parsed.issue,
         expected_branch=ctx.parsed.branch,
@@ -261,6 +264,7 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
             config=context.config,
             github_client=github_client,
             process_runner=ctx.process_runner,
+            content_generator=content_generator,
         )
         logger.info(
             "Publish recovered for Issue #%d: %s",

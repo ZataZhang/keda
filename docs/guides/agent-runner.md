@@ -2023,6 +2023,8 @@ agent/blocked ── 人工处理 + blocked-continue ──→ agent/running ─
 
 `iar recover` 只做发布收尾：校验 worktree 干净、校验分支、push、创建或复用 Draft PR、更新 Issue label 和 comment。它不会运行 pre-PR review（因为恢复路径要求本地 commit 已经由正常 runner 路径完成过 pre-PR review）。
 
+新建 Draft PR 时，正文复用正常发布路径的 `create_draft_pr` 用例，因此和正常发布一致：内容生成（LLM 正文）+ contract anchors + validation checklist + contract block。内容生成需要内容生成器（`run_recover_command` 装配），生成失败时按 `generated_content` 配置退回 template / fallback。仅当 `get_issue` 失败、拿不到 Issue 标题与正文上下文时才退回确定性极简正文（`Recovered by issue-agent-runner.`）。复用已存在的 PR 时不会改写其正文。
+
 **当 `post_pr_supervisor.enabled = true` 时**，成功恢复后会先进入 `agent/supervising` 并运行 post-PR supervisor；只有 supervisor `approve_for_human_review` 后，Issue 才会进入 `agent/review`。
 
 **当 `post_pr_supervisor.enabled = false` 时**，成功恢复后直接移除 `agent/failed` / `agent/running` / `agent/ready`，添加 `agent/review`。
@@ -2083,7 +2085,7 @@ uv run iar recover --issue 42 --branch issue-421
 3. 校验分支安全（非 base branch、分支名精确引用 issue 编号或显式 `--branch` 确认）
 4. 校验配置的 remote 存在
 5. Push 当前分支到配置 remote
-6. 检查是否已有 open PR，有则复用，无则创建 draft PR
+6. 检查是否已有 open PR，有则复用，无则创建 draft PR（正文复用正常发布路径生成；见上文）
 7. 发布成功 comment，记录分支、HEAD SHA、PR URL 和是否复用已有 PR
 8. 更新 Issue labels：
    - `post_pr_supervisor.enabled = true`：移除 `agent/failed` / `agent/running` / `agent/ready` / `agent/review`，添加 `agent/supervising`，然后运行 supervisor
@@ -2093,7 +2095,7 @@ uv run iar recover --issue 42 --branch issue-421
 
 `iar recover` **不会**执行以下操作：
 
-- 运行 implementation Agent 命令或 recovery prompt
+- 运行 implementation Agent 命令或 recovery prompt（新建 PR 时的正文**内容生成**是独立于实现阶段的一次 LLM 调用，不属于此列）
 - 执行 `git add` 或 `git commit`
 - 创建新的 worktree
 - 合并分支或删除分支

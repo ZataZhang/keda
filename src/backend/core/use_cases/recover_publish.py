@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
+    IContentGenerator,
     IGitHubClient,
     IProcessRunner,
 )
@@ -26,10 +27,7 @@ from backend.core.use_cases.agent_runner_failure import (
     build_publish_failure_comment_body,
 )
 from backend.core.use_cases.agent_runner_validation import (
-    build_validation_checklist_block,
-    extract_realistic_validation_items,
     publish_validation_evidence_best_effort,
-    validation_required,
 )
 from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
 
@@ -245,6 +243,82 @@ def _build_recovery_failure_comment(
     )
 
 
+def _create_recovery_draft_pr(
+    *,
+    issue_number: int,
+    branch: str,
+    recovered_issue: IssueSummary | None,
+    worktree_path: Path,
+    config: AppConfig,
+    github_client: IGitHubClient,
+    process_runner: IProcessRunner,
+    content_generator: IContentGenerator | None,
+) -> str:
+    """为恢复流程创建 Draft PR，失败时评论 Issue 并抛出 ``PublishRecoveryError``。
+
+    当 Issue 元数据可得时复用正常发布用例 :func:`create_draft_pr`，使恢复产出的
+    PR 正文与正常路径完全一致（内容生成 + contract anchors + validation checklist
+    + contract block）。只有 ``get_issue`` 失败、拿不到 Issue 上下文时才退回确定性
+    极简正文，因为内容生成依赖 Issue 标题与正文。
+
+    Args:
+        issue_number (int): GitHub Issue 编号。
+        branch (str): 已推送的分支名（用于失败评论）。
+        recovered_issue (IssueSummary | None): 已加载的 Issue；为 ``None`` 时走
+            确定性兜底。
+        worktree_path (Path): 工作树路径。
+        config (AppConfig): 应用配置（含 ``generated_content`` 设置）。
+        github_client (IGitHubClient): GitHub API 客户端。
+        process_runner (IProcessRunner): 进程执行器。
+        content_generator (IContentGenerator | None): 内容生成器；``None`` 时正常
+            发布用例会退回其配置的 template / fallback 正文。
+
+    Returns:
+        str: 新建 PR 的 URL。
+
+    Raises:
+        PublishRecoveryError: 当 PR 创建失败时抛出（此前已写入失败评论）。
+    """
+    try:
+        if recovered_issue is not None:
+            from backend.core.use_cases.agent_runner_publish import create_draft_pr
+
+            _, pr_url = create_draft_pr(
+                issue=recovered_issue,
+                worktree_path=worktree_path,
+                config=config,
+                github_client=github_client,
+                process_runner=process_runner,
+                content_generator=content_generator,
+            )
+            return pr_url
+
+        # Issue 元数据不可得：没有正文/标题上下文可供生成，退回极简正文，
+        # 保证发布仍能完成并带上 Closes 锚点。
+        return github_client.create_draft_pr(
+            title=f"[Agent] Issue #{issue_number}",
+            body=f"Closes #{issue_number}\n\nRecovered by issue-agent-runner.\n",
+            base_branch=config.git.base_branch,
+            cwd=worktree_path,
+        )
+    except Exception as create_exc:  # noqa: BLE001
+        exc = PublishRecoveryError(
+            f"Failed to create draft PR for branch '{branch}': {create_exc}",
+            worktree_path=worktree_path,
+            failure_category=PublishFailureCategory.PR_CREATE.value,
+        )
+        github_client.comment_issue(
+            issue_number,
+            _build_recovery_failure_comment(
+                issue_number=issue_number,
+                failure_category=PublishFailureCategory.PR_CREATE.value,
+                worktree_path=worktree_path,
+                exc=exc,
+            ),
+        )
+        raise exc
+
+
 def recover_publish_issue(
     *,
     request: PublishRecoveryRequest,
@@ -252,6 +326,7 @@ def recover_publish_issue(
     config: AppConfig,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
+    content_generator: IContentGenerator | None = None,
 ) -> PublishRecoveryResult:
     """恢复某个 Issue 此前失败的发布（publish）操作。
 
@@ -271,6 +346,9 @@ def recover_publish_issue(
         config (AppConfig): 应用配置。
         github_client (IGitHubClient): 用于 GitHub API 操作的客户端。
         process_runner (IProcessRunner): 用于执行 Git 命令的进程执行器。
+        content_generator (IContentGenerator | None): 可选的内容生成器。新建 PR 时
+            交给正常发布用例生成正文（LLM 正文 + contract anchors + checklist）；
+            为 ``None`` 时退回配置的 template / fallback 正文。
 
     Returns:
         PublishRecoveryResult: 包含分支名、HEAD SHA、PR 链接及是否复用 PR 的结果。
@@ -396,41 +474,19 @@ def recover_publish_issue(
             pr_url,
         )
     else:
-        # 不存在可复用 PR 时创建草稿 PR；正文中的 Closes #N 用于在合并后自动关闭
-        # 对应 Issue。优先使用 Issue 标题让 PR 标题更具可读性，取不到时回退到编号。
-        issue_title = recovered_issue.title if recovered_issue is not None else None
-        pr_title = f"[Agent] {issue_title}" if issue_title else f"[Agent] Issue #{issue_number}"
-        pr_body = f"Closes #{issue_number}\n\nRecovered by issue-agent-runner.\n"
-        if recovered_issue is not None and validation_required(recovered_issue.body, config):
-            validation_checklist_items = extract_realistic_validation_items(recovered_issue.body)
-            if validation_checklist_items:
-                checklist_block = build_validation_checklist_block(validation_checklist_items)
-                pr_body = f"{pr_body.rstrip()}\n\n{checklist_block}\n"
-
+        # 不存在可复用 PR 时创建草稿 PR；正文构建复用正常发布用例，避免恢复路径
+        # 产出只有 "Recovered by issue-agent-runner." 的极简正文（见 helper）。
         _logger.info("Creating draft PR for Issue #%d", issue_number)
-        try:
-            pr_url = github_client.create_draft_pr(
-                title=pr_title,
-                body=pr_body,
-                base_branch=config.git.base_branch,
-                cwd=worktree_path,
-            )
-        except Exception as create_exc:  # noqa: BLE001
-            exc = PublishRecoveryError(
-                f"Failed to create draft PR for branch '{branch}': {create_exc}",
-                worktree_path=worktree_path,
-                failure_category=PublishFailureCategory.PR_CREATE.value,
-            )
-            github_client.comment_issue(
-                issue_number,
-                _build_recovery_failure_comment(
-                    issue_number=issue_number,
-                    failure_category=PublishFailureCategory.PR_CREATE.value,
-                    worktree_path=worktree_path,
-                    exc=exc,
-                ),
-            )
-            raise exc
+        pr_url = _create_recovery_draft_pr(
+            issue_number=issue_number,
+            branch=branch,
+            recovered_issue=recovered_issue,
+            worktree_path=worktree_path,
+            config=config,
+            github_client=github_client,
+            process_runner=process_runner,
+            content_generator=content_generator,
+        )
 
     # 第 5.5 步：上传验证证据并发 PR 证据评论（要求验证且证据存在时）。
     # best-effort：见 publish_validation_evidence_best_effort docstring。

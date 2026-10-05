@@ -8,6 +8,8 @@ import pytest
 
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    GeneratedContentConfig,
+    GeneratedContentTargetConfig,
     LabelConfig,
     PostPrSupervisorConfig,
     PullRequestContext,
@@ -21,7 +23,7 @@ from backend.core.use_cases.recover_publish import (
     validate_branch_safety,
     validate_worktree_clean,
 )
-from tests.conftest import FakeGitHubClient, FakeProcessRunner
+from tests.conftest import FakeContentGenerator, FakeGitHubClient, FakeProcessRunner
 
 
 def _make_config(*, supervisor_enabled: bool = False) -> AppConfig:
@@ -383,6 +385,53 @@ class TestRecoverPublishIssue:
         assert "agent/review" in label_calls[0]["add"]
         assert "agent/failed" in label_calls[0]["remove"]
 
+    def test_success_uses_generated_pr_body_via_shared_publish_path(self, tmp_path: Path) -> None:
+        """新建 PR 时应复用正常发布的内容生成，而不是极简 "Recovered by" 正文。"""
+        config = _make_config(supervisor_enabled=False)
+        worktree_path = tmp_path / "issue-42"
+        worktree_path.mkdir()
+
+        config = AppConfig(
+            labels=LabelConfig(
+                ready="agent/ready",
+                running="agent/running",
+                supervising="agent/supervising",
+                review="agent/review",
+                failed="agent/failed",
+            ),
+            worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
+            post_pr_supervisor=PostPrSupervisorConfig(enabled=False),
+            generated_content=GeneratedContentConfig(
+                enabled=True,
+                draft_pr=GeneratedContentTargetConfig(
+                    enabled=True, mode="agent", output="markdown", prompt="Generate PR"
+                ),
+            ),
+        )
+
+        runner = _make_process_runner_with_worktree(worktree_path, branch="issue-42")
+        github_client = FakeGitHubClient()
+        github_client._open_prs["issue-42"] = None
+        github_client._issue_title = "Fix login timeout"
+        content_generator = FakeContentGenerator(
+            response="## Summary\n\nCloses #42\n\nGenerated body from agent.\n"
+        )
+
+        result = recover_publish_issue(
+            request=PublishRecoveryRequest(issue_number=42),
+            repo_path=tmp_path,
+            config=config,
+            github_client=github_client,
+            process_runner=runner,
+            content_generator=content_generator,
+        )
+
+        assert result.pr_url == "https://github.com/example/repo/pull/1"
+        pr_create_calls = [c for c in github_client.calls if c["method"] == "create_draft_pr"]
+        assert len(pr_create_calls) == 1
+        assert "Generated body from agent." in pr_create_calls[0]["body"]
+        assert "Recovered by issue-agent-runner" not in pr_create_calls[0]["body"]
+
     def test_success_uses_fallback_title_when_issue_lookup_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -428,6 +477,8 @@ class TestRecoverPublishIssue:
         pr_create_calls = [c for c in github_client.calls if c["method"] == "create_draft_pr"]
         assert len(pr_create_calls) == 1
         assert pr_create_calls[0]["title"] == "[Agent] Issue #42"
+        # Issue 元数据不可得时无法生成正文，退回确定性极简正文。
+        assert pr_create_calls[0]["body"] == "Closes #42\n\nRecovered by issue-agent-runner.\n"
 
     def test_success_supervisor_enabled_goes_to_supervising(self, tmp_path: Path) -> None:
         """Should move to supervising when supervisor is enabled."""
