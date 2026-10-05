@@ -23,6 +23,12 @@
    入口的失败必须显式。
 5. **``--print`` 只打印路径、绝不调用系统打开器。** 测试、CI 与脚本消费都
    依赖这条；破坏它会让无 GUI 环境下的调用挂起或弹窗。
+6. **PRD 参数接受文件名与 slug，并跨 pending / archive 与各 worktree 副本定位。**
+   PRD 在交付收尾时由 ``tasks/pending`` 归档到 ``tasks/archive``，归档只发生在
+   分支上，于是「该传 pending 还是 archive」随「在哪棵树、合并没合并」而变；从
+   主仓库跑时 archive 路径根本不存在。定位必须把它们归一化，否则用户要么记错
+   路径、要么被 ``PRD 文件不存在`` 挡住（这正是要修的真实痛点）。参数里点名的
+   桶优先，之后 archive 优先于 pending（收尾终态）。
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ _JUST_SCRIPTS_PATH = Path(__file__).resolve().parents[3] / "scripts" / "shared" 
 if str(_JUST_SCRIPTS_PATH) not in sys.path:
     sys.path.insert(0, str(_JUST_SCRIPTS_PATH))
 
+import prd_locator  # noqa: E402
 import prd_review  # noqa: E402
 
 _PRD_FILENAME = "P1-FEAT-20260916-212206-demo-feature.md"
@@ -284,3 +291,71 @@ def test_script_runs_standalone_via_subprocess(tmp_path: Path) -> None:
 
     assert completed_process.returncode == 0
     assert str(checklist_path) in completed_process.stdout
+
+
+def _write_bucket_prd(base_root: Path, bucket_dir_name: str, filename: str) -> Path:
+    """在 ``base_root/tasks/<bucket>/<filename>`` 写一份 PRD，返回其路径。"""
+    bucket_dir_path = base_root / "tasks" / bucket_dir_name
+    bucket_dir_path.mkdir(parents=True, exist_ok=True)
+    prd_path = bucket_dir_path / filename
+    prd_path.write_text("# Demo PRD\n", encoding="utf-8")
+    return prd_path
+
+
+def test_resolve_prd_path_accepts_filename_and_slug(tmp_path: Path) -> None:
+    """PRD 参数接受文件名与 slug（可省 .md），不必写全路径。"""
+    repo_root_path, prd_path = _build_fake_repo(tmp_path)
+
+    assert prd_review.resolve_prd_path(_PRD_FILENAME, repo_root_path) == prd_path
+    assert prd_review.resolve_prd_path(_PRD_STEM, repo_root_path) == prd_path
+    # 只传日期时间之后的短标识（slug）也唯一命中。
+    assert prd_review.resolve_prd_path(_BRANCH_NAME, repo_root_path) == prd_path
+
+
+def test_resolve_prd_path_finds_archive_copy_only_in_worktree(tmp_path: Path) -> None:
+    """从主仓库传 archive 路径（主仓没有、只在 worktree 有）也能解析到分支归档副本。"""
+    repo_root_path, _prd_path = _build_fake_repo(tmp_path)
+    worktree_root_path = tmp_path / "worktrees" / _BRANCH_NAME
+    archived_prd_path = _write_bucket_prd(
+        worktree_root_path, prd_locator.ARCHIVE_BUCKET_DIR_NAME, _PRD_FILENAME
+    )
+    worktree_branches_list = [(_BRANCH_NAME, worktree_root_path)]
+
+    # 传 archive 路径：主仓 archive 不存在，命中 worktree 的归档副本。
+    assert (
+        prd_review.resolve_prd_path(
+            f"tasks/{prd_locator.ARCHIVE_BUCKET_DIR_NAME}/{_PRD_FILENAME}",
+            repo_root_path,
+            worktree_branches_list,
+        )
+        == archived_prd_path
+    )
+    # 只给文件名：archive 优先于主仓仍残留的 pending 快照。
+    assert (
+        prd_review.resolve_prd_path(_PRD_FILENAME, repo_root_path, worktree_branches_list)
+        == archived_prd_path
+    )
+
+
+def test_resolve_prd_path_named_pending_bucket_wins(tmp_path: Path) -> None:
+    """参数点名 pending 桶时，优先该桶（不被 archive 优先规则抢走）。"""
+    repo_root_path, prd_path = _build_fake_repo(tmp_path)
+    worktree_root_path = tmp_path / "worktrees" / _BRANCH_NAME
+    _write_bucket_prd(worktree_root_path, prd_locator.ARCHIVE_BUCKET_DIR_NAME, _PRD_FILENAME)
+    worktree_branches_list = [(_BRANCH_NAME, worktree_root_path)]
+
+    assert (
+        prd_review.resolve_prd_path(
+            f"tasks/{prd_locator.PENDING_BUCKET_DIR_NAME}/{_PRD_FILENAME}",
+            repo_root_path,
+            worktree_branches_list,
+        )
+        == prd_path
+    )
+
+
+def test_resolve_prd_path_missing_returns_none(tmp_path: Path) -> None:
+    """任何桶、任何 root 都找不到时返回 None。"""
+    repo_root_path, _prd_path = _build_fake_repo(tmp_path)
+
+    assert prd_review.resolve_prd_path("nope.md", repo_root_path, []) is None

@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import prd_locator
@@ -35,16 +36,30 @@ _REVIEW_TARGET_SLOTS = (
 )
 
 
-def resolve_prd_path(prd_file_argument: str, repo_root: Path) -> Path | None:
+def resolve_prd_path(
+    prd_file_argument: str,
+    repo_root: Path,
+    worktree_branches_list: Sequence[tuple[str, Path]] = (),
+) -> Path | None:
     """把命令行参数解析为 PRD 文件路径。
 
+    参数可以是：绝对路径、相对当前目录/仓库根的路径、**PRD 文件名**，或**PRD slug**
+    （文件名里日期时间之后的短标识，例如 ``auto-mode-agent-access-routing``）。后两种
+    宽形态解决一个真实痛点：PRD 在交付收尾时由 ``tasks/pending`` 归档到
+    ``tasks/archive``，而归档只发生在分支上——于是「该传 pending 还是 archive」随
+    「在哪棵树、合并没合并」而变（从主仓库跑时 archive 路径根本不存在）。这里把它
+    归一化：只取参数的文件名，先在 ``repo_root``、再在各 linked worktree 的
+    ``tasks/pending``、``tasks/archive`` 下查找，调用方不必记住当前该传哪个桶。
+
     Args:
-        prd_file_argument (str): 命令行传入的 PRD 路径，可以是绝对路径、
-            相对当前目录的路径或相对仓库根的路径。
-        repo_root (Path): 仓库根目录。
+        prd_file_argument (str): 命令行传入的 PRD 路径、文件名或 slug。
+        repo_root (Path): 当前仓库根目录。
+        worktree_branches_list (Sequence[tuple[str, Path]]): ``(分支名,
+            worktree 路径)`` 列表，来自 ``prd_lock.list_linked_worktree_branches``；
+            缺省空元组时只在 ``repo_root`` 内查找（保持既有 2 参调用可用）。
 
     Returns:
-        Path | None: 命中的 PRD 文件路径；都不存在时为 ``None``。
+        Path | None: 命中的 PRD 文件路径；任何候选都不存在时为 ``None``。
     """
     direct_candidate_path = Path(prd_file_argument)
     if direct_candidate_path.is_file():
@@ -52,6 +67,47 @@ def resolve_prd_path(prd_file_argument: str, repo_root: Path) -> Path | None:
     rooted_candidate_path = repo_root / prd_file_argument
     if rooted_candidate_path.is_file():
         return rooted_candidate_path
+
+    # 归一成文件名：``tasks/archive/x.md``、``x.md``、``x`` 都归纳到 ``x.md``。
+    file_name_text = direct_candidate_path.name
+    if not file_name_text.endswith(".md"):
+        file_name_text = f"{file_name_text}.md"
+
+    search_root_paths = [repo_root, *(worktree_path for _, worktree_path in worktree_branches_list)]
+
+    # 桶顺序：参数里点名了 pending/archive 就先查该桶；否则 archive 优先——归档是
+    # 收尾终态，分支副本优先于主仓库里可能残留的 pending 快照。
+    argument_path_parts = direct_candidate_path.parts
+    if prd_locator.PENDING_BUCKET_DIR_NAME in argument_path_parts:
+        bucket_dir_names = (
+            prd_locator.PENDING_BUCKET_DIR_NAME,
+            prd_locator.ARCHIVE_BUCKET_DIR_NAME,
+        )
+    else:
+        bucket_dir_names = (
+            prd_locator.ARCHIVE_BUCKET_DIR_NAME,
+            prd_locator.PENDING_BUCKET_DIR_NAME,
+        )
+
+    # 桶在外、root 在内：点名 archive 时先在**所有** root 的 archive 里找，再退 pending，
+    # 而不是被主仓库那份 pending 抢先命中。
+    for bucket_dir_name in bucket_dir_names:
+        for search_root_path in search_root_paths:
+            candidate_prd_path = search_root_path / "tasks" / bucket_dir_name / file_name_text
+            if candidate_prd_path.is_file():
+                return candidate_prd_path
+
+    # 退一步：参数只给了 slug（非完整文件名）时，按 ``*-<slug>.md`` 后缀唯一匹配。
+    raw_slug_text = direct_candidate_path.stem
+    if raw_slug_text != file_name_text and raw_slug_text:
+        for bucket_dir_name in bucket_dir_names:
+            for search_root_path in search_root_paths:
+                bucket_dir_path = search_root_path / "tasks" / bucket_dir_name
+                if not bucket_dir_path.is_dir():
+                    continue
+                suffix_matched_paths = sorted(bucket_dir_path.glob(f"*-{raw_slug_text}.md"))
+                if len(suffix_matched_paths) == 1:
+                    return suffix_matched_paths[0]
     return None
 
 
@@ -173,8 +229,10 @@ def main(argv: list[str] | None = None) -> int:
     argument_parser.add_argument(
         "prd_file",
         help=(
-            "PRD 文件路径，例如 tasks/archive/P1-FEAT-20260916-212206-<slug>.md"
-            "（交付收尾即归档；仍在执行中的 PRD 在 tasks/pending/）"
+            "PRD 路径、文件名或 slug；例如 tasks/archive/P1-FEAT-20260916-212206-<slug>.md、"
+            "P1-FEAT-20260916-212206-<slug>.md 或 <slug>。（交付收尾即归档；仍在执行中的"
+            " PRD 在 tasks/pending/。传文件名/slug 时会自动在 pending、archive 及各 worktree"
+            " 副本间定位，不必记住当前该传哪个。）"
         ),
     )
     argument_parser.add_argument(
@@ -190,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     main_repo_root_path = prd_lock.resolve_main_repo_root()
     worktree_branches_list = prd_lock.list_linked_worktree_branches(main_repo_root_path)
 
-    prd_path = resolve_prd_path(parsed_arguments.prd_file, repo_root_path)
+    prd_path = resolve_prd_path(parsed_arguments.prd_file, repo_root_path, worktree_branches_list)
     if prd_path is None:
         print(f"ERROR: PRD 文件不存在：{parsed_arguments.prd_file}")
         print("Usage: just prd review <prd-file> [--print]")

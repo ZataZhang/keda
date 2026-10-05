@@ -332,6 +332,7 @@ _is_always_skipped() {
         # template-internal by listing them here.
         tests/guards/test_prd_skill_checker.py) return 0 ;;
         tests/test_prd_contract.py) return 0 ;;
+        tests/test_prd_human_review_checklist.py) return 0 ;;
     esac
     case "$p" in
         # Local state, build output, runtime artifacts
