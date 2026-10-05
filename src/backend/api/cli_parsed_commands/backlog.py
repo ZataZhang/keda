@@ -232,20 +232,17 @@ def run_backlog_ci_policy_command(ctx: ParsedCommandContext) -> int:
         except ValueError as exc:
             error_console.print(f"[red]{exc}[/]")
             return 1
+        # fresh 校验直接读目标仓库本地 .iar.toml（--repo 传入未注册路径时，
+        # 重新解析 registry 不会包含该仓库，不能作为 fresh 依据）；经受限端口
+        # 读取（``None`` = 键未设置 = 生效默认 False）。
         from backend.core.use_cases.agent_runner_factory import (
-            load_fresh_agent_runner_settings,
-            resolve_repository_targets_with_diagnostics,
+            create_repository_autopilot_settings_editor,
         )
 
-        fresh_settings = load_fresh_agent_runner_settings()
-        fresh_contexts, _failures = resolve_repository_targets_with_diagnostics(fresh_settings)
-        fresh_context = next(
-            (item for item in fresh_contexts if item.repo_id == context.repo_id), None
+        fresh_value = create_repository_autopilot_settings_editor().read_auto_repair_ci(
+            context.repo_path
         )
-        if (
-            fresh_context is None
-            or bool(fresh_context.config.post_pr_supervisor.auto_repair_ci) is not enabled
-        ):
+        if bool(fresh_value) is not enabled:
             error_console.print("[red]写回后 fresh load 与请求值不一致。[/]")
             return 1
         console.print(
