@@ -196,8 +196,6 @@ def test_packaged_skill_command_examples_match_cli_help() -> None:
 def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
     """白名单每个旗标都必须真实存在于当前命令树（防 skill ↔ CLI 漂移）。"""
     real_flags_by_path = _real_flags_by_path()
-    print("DEBUG ask flags:", sorted(real_flags_by_path.get(("ask",), set())))
-    print("DEBUG app id:", id(app))
     for subcommand, whitelist in _ALLOWED_FLAGS.items():
         assert subcommand in real_flags_by_path, f"schema 中不存在命令 {subcommand}"
         unknown = whitelist - real_flags_by_path[subcommand]

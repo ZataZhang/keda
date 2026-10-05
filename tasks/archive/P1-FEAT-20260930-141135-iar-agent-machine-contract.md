@@ -473,16 +473,16 @@ manifest：`.iar/evidence/evidence.json`（每个 item 带 `command`、`evidence
 
 - [x] `docs/guides/agent-runner.md` 含机读契约小节（旗标/退出码/自省）— 证据：`.iar/evidence/rv-7-skill-docs-sync.txt` `ok [docs] docs/guides/agent-runner.md 含机读契约小节`、`点名 dry_run_ok / permission_denied / iar schema`；退出码表的名称列已改为信封 `error` 取值，与 `iar schema --json` 的 `exit_codes.values` 一一对应。
 - [x] `docs/api/references.md` 含退出码表 — 证据：同上文件 `ok [docs] docs/api/references.md 含机读契约小节 / 点名 dry_run_ok / 点名 permission_denied / 点名 iar schema`；`mkdocs.yml` 未改动（Non-Goal 侧断言）。
-- [x] `iar-operator/SKILL.md` 含"机器消费一律 `--json`"、退出码表与 `iar schema` 入口 — 证据：`.iar/evidence/rv-7-skill-docs-sync.txt` 断言六条不变量文本 + 5 个 envelope 字段名 + 7 行退出码，并做「skill 的退出码取值与 `iar schema --json` 的 `exit_codes.values` 一一对应」「skill 示例旗标在运行时 schema 中真实存在」两项同源校验；`uv run pytest -o addopts="" tests/test_iar_operator_skill.py -q` 8 passed。
+- [x] `iar-operator/SKILL.md` 含"机器消费一律 `--json`"、退出码表与 `iar schema` 入口 — 证据：`.iar/evidence/rv-7-skill-docs-sync.txt` 断言六条不变量文本 + 5 个 envelope 字段名 + 7 行退出码，并做「skill 的退出码取值与 `iar schema --json` 的 `exit_codes.values` 一一对应」「skill 示例旗标在运行时 schema 中真实存在」两项同源校验；`uv run pytest -o addopts="" tests/test_iar_operator_skill.py -q` 9 passed。
 
 ### Validation Acceptance
 
-- [x] `uv run pytest -o addopts="" tests/test_cli_output_contract.py tests/test_cli_exit_codes.py tests/test_cli_schema.py -q` 通过 — 实测 `45 passed`。
+- [x] `uv run pytest -o addopts="" tests/test_cli_output_contract.py tests/test_cli_exit_codes.py tests/test_cli_schema.py -q` 通过 — 实测 `48 passed`。
 - [x] `uv run iar issue list --json --repo-id keda 2>/dev/null | jq -e 'type=="array"'` 通过（真实 CLI 入口，不绕过输出层）— rv-1 oracle 实跑，见 `.iar/evidence/rv-1-issue-list-json.txt`。
 - [x] `bash -c 'uv run iar logs --repo-id does-not-exist --issue 1; echo exit=$?'` 打印 `exit=3` — 见 `.iar/evidence/rv-3-exit-codes.txt` `ok [not_found 退出码] exit=3`。
 - [x] `uv run iar schema --json | jq -e '.commands | length > 0'` 通过 — 见 `.iar/evidence/rv-5-schema-introspection.txt`（实跑 46 条命令）。
 - [x] `rg -n "print_json|json\.dumps|json_output" src/backend/api` 仅命中 `cli_output.py` — 实测 4 行命中全在 `cli_output.py`。
-- [x] `rg -n "return 1" src/backend/api/cli_parsed_commands` 中 not_found/conflict 点已改用 `ExitCode.*` — 现存 `return 1` 共 11 处，逐处核对均为「未分类失败」并保持 1：`agent.py:251/253/257`（strict 模式下 agent 执行失败）、`labels_issue.py:216/276/312`（批量建 Issue 部分失败、`issue list` 兜底异常）、`config_migrate.py:116`（迁移校验 ValueError）、`runner.py:318/363`（发布恢复失败、blocked-continue 失败）、`worktree.py:105`（清理有失败项）、`init_workflow_takeover.py:80`（安装 ValueError）；not_found/conflict/usage/permission 点已改为抛 `CliError(code=ExitCode.*)`，例如 `init_workflow_takeover.py:70-74` 把 `ExistingFileRefusedError` 映射为 `ExitCode.CONFLICT` + `--force` 建议，`worktree.py:107` 未知子命令给 `ExitCode.USAGE`，真实退出码由 rv-3 逐项验证。
+- [x] `rg -n "return 1" src/backend/api/cli_parsed_commands` 中 not_found/conflict 点已改用 `ExitCode.*` — 现存 `return 1` 共 11 处，逐处核对均为「未分类失败」并保持 1：`agent.py:251/253/257`（strict 模式下 agent 执行失败）、`labels_issue.py:220/279/315`（批量建 Issue 部分失败、`issue list` 兜底异常）、`config_migrate.py:116`（迁移校验 ValueError）、`runner.py:318/363`（发布恢复失败、blocked-continue 失败）、`worktree.py:105`（清理有失败项）、`init_workflow_takeover.py:80`（安装 ValueError）；not_found/conflict/usage/permission 点已改为抛 `CliError(code=ExitCode.*)`，例如 `init_workflow_takeover.py:70-74` 把 `ExistingFileRefusedError` 映射为 `ExitCode.CONFLICT` + `--force` 建议，`worktree.py:107` 未知子命令给 `ExitCode.USAGE`，真实退出码由 rv-3 逐项验证。
 - [x] `uv run pytest -o addopts="" tests/test_iar_operator_skill.py -q` 通过 — 实测 `8 passed`。
 
 ### Delivery Readiness
@@ -576,7 +576,7 @@ manifest：`.iar/evidence/evidence.json`（每个 item 带 `command`、`evidence
 - rv-1…rv-7 全部通过真实入口采集，每项**先证明会红**再取正向结论：红路来自 `git archive HEAD` 解出的改造前提交树、同命令去掉 `--json`、虚构旗标 `--fields`/`--ndjson`/`--yaml`、以及刻意删行的 skill 副本。
 - 证据落盘 `.iar/evidence/`（15 个文件，命名 `rv-<n>-<slug>.txt`，每项只含自己的输出，无全局 `tee` 重定向）；脚本与共用断言库落 `.iar/evidence/scripts/`（`rv1.sh`…`rv7.sh`、`_rv_lib.sh`），**不进入代码 diff**（`.iar/` 由 gitignore 排除），脚本内不含任何凭据；fake `gh` 只替换外部认证探测，被验证的 CLI 输出/退出码链路仍是真实实现。
 - 清单 `.iar/evidence/evidence.json`（`version: 1`、`language: "zh-CN"`、7 个整数编号 item，各带 `negative_control`/`expected_fail`/`stdout_assertions`）；每项 `command` 是 keda 可用 `bash -lc` 原样复跑的自断言脚本，本地按同一门禁语义预检：7/7 exit 0 且断言全中。断言只认 stdout/stderr/退出码，无任何 `|| true`、`|| echo ok` 兜底。
-- 门禁数值：`uv run pytest -o addopts="" tests/test_cli_output_contract.py tests/test_cli_exit_codes.py tests/test_cli_schema.py -q` → 45 passed；rv-6 oracle 两文件 → 40 passed；rv-7 oracle `tests/test_iar_operator_skill.py` → 8 passed；全量 `uv run pytest tests/ -q -o addopts="" --ignore=tests/playwright-e2e` → 2920 passed, 1 skipped（131.61s）；`just lint --full` → 全部 hook Passed（ruff、ruff-format、架构分层守卫、文件行数、守卫测试改动、PRD 清单、guidelines 一致性）；`just test` → 通过并刷新 test/lint flag。
+- 门禁数值：`uv run pytest -o addopts="" tests/test_cli_output_contract.py tests/test_cli_exit_codes.py tests/test_cli_schema.py -q` → 48 passed；rv-6 oracle 两文件 → 40 passed；rv-7 oracle `tests/test_iar_operator_skill.py` → 9 passed；全量 `uv run pytest tests/ -q -o addopts="" --ignore=tests/playwright-e2e` → 2924 passed, 1 skipped（185.27s）；`just lint --full` → 全部 hook Passed（ruff、ruff-format、架构分层守卫、文件行数、守卫测试改动、PRD 清单、guidelines 一致性）；`just test` → 通过并刷新 test/lint flag。
 
 **D. §9 勾选与状态投影**
 
