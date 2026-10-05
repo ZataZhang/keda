@@ -986,10 +986,10 @@ enabled = false
 # =============================================================================
 # 管理终端的运行历史 / 审计落库与托管进程设置。
 
-[agent_runner.repositories.keda-main]
+[agent_runner.repositories.keda]
 path = "/Users/zata/code/keda"
 enabled = true
-display_name = "Keda Main"
+display_name = "keda"
 # GitHub owner/name used by `gh pr list --repo` for PR column population.
 # 缺省时 PR 列为空，并在 stderr 一次性打印 WARN。
 github_repo = "ZataZhang/keda"
@@ -1005,6 +1005,7 @@ path = "/Users/zata/.iar/repos/zata-zhangtao/freshai"
 enabled = true
 display_name = "freshai"
 github_repo = "ZataZhang/freshai"
+
 [agent_runner.console]
 # 运行历史与审计日志的 SQLite 文件路径（CLI 直跑与面板托管共用）。
 history_db_path = "~/.iar/console.db"
