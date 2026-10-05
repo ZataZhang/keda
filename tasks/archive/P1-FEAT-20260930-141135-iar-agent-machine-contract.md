@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：执行侧交付完成，待人工验收（§9 仅剩 3 项 Human-Confirmed）。
+> ✅ **验收状态**：已验收（2026-10-05）— PR #202 合并（7d9d9c2）即验收；§9 三项 Human-Confirmed 经决策板 `.iar/decisions/human-acceptance-20261005/answers.json` 全数确认；原始证据已发布至 orphan 分支 `evidence/issue-194-machine-contract`。本行是 §9 的投影，**那里是唯一事实源**。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 >
 > 证据根：`.iar/evidence/`（本仓库 `.iar.toml` 配置 `evidence_dir = ".iar/evidence"`，legacy 扁平布局，并被 `.gitignore` 排除，因此 RV 脚本与捕获永不进入代码 diff）。结构化清单 `.iar/evidence/evidence.json`（`version: 1`、`language: zh-CN`、7 个 item 各带 `negative_control` / `expected_fail` / `stdout_assertions`），可复跑脚本 `.iar/evidence/scripts/rv1.sh … rv7.sh` 与共用断言库 `_rv_lib.sh`。
@@ -445,9 +445,9 @@ manifest：`.iar/evidence/evidence.json`（每个 item 带 `command`、`evidence
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一（JSON 显式声明、默认人类输出、不做非 TTY 自动切换）已确认
-- [ ] 决策二（引入语义退出码 `3/4/5/10`、`1` 兜底、码表文档化）已确认
-- [ ] §9.1 呈递区各项已亲眼看过（截图/自验，二选一或都做）
+- [x] 决策一（JSON 显式声明、默认人类输出、不做非 TTY 自动切换）已确认 — 决策板 Q1=A（2026-10-05）
+- [x] 决策二（引入语义退出码 `3/4/5/10`、`1` 兜底、码表文档化）已确认 — 决策板 Q2=A（2026-10-05）
+- [x] §9.1 呈递区各项已亲眼看过（截图/自验，二选一或都做）— 决策板 Q3=A；走查材料为 orphan 分支 `evidence/issue-194-machine-contract`（已在浏览器打开走查）
 
 ### Architecture Acceptance
 
@@ -541,6 +541,15 @@ manifest：`.iar/evidence/evidence.json`（每个 item 带 `command`、`evidence
   - 零回归的度量方式：`--help` 的新增行会让 Rich 重排列宽，行级 diff 会报出假的删除行，因此改用「词元多重集不丢失 + 基线词序为子序列」度量，并以反向比对（实测丢失 171 词）证明该检查有判别力。
 
 ## 14. Change Log
+
+### 2026-10-05 · 人工验收：Human-Confirmed 三项经决策板确认，横幅置为已验收
+
+- Type: doc
+- Before: §9 三项 Human-Confirmed（决策一 JSON 显式声明 / 决策二 语义退出码 / §9.1 呈递区过目）未勾，横幅 🧍 待人工验收；PR #202 已合并待人工确认。
+- After: 三项勾选，横幅 ✅ 已验收。确认载体：决策板 `.iar/decisions/human-acceptance-20261005/answers.json`（14 项跨 4 PRD 全采纳推荐，无偏离、无备注）；PR #202 合并即验收（squash 7d9d9c2，已核对最终 Git tree）；原始证据按惯例发布到 orphan 分支 `evidence/issue-194-machine-contract`（rv-1…rv-7 + 负控 + 复跑脚本 + verifier-response.txt，verdict risk=green），链接已评论到 PR #202。
+- Reason: 执行侧交付完成、PR 已合并，人工第二触点（决策板确认 + 证据走查）完成，验收闭环。
+- Impact: 仅验收记录回填；不改 FR / RV oracle / 验收判据 / 交付依赖。
+- Review: 人已确认（决策板 answers.json，2026-10-05）。
 
 ### 2026-10-05 · 交付对账：实现落地、验证收紧披露与证据采集
 

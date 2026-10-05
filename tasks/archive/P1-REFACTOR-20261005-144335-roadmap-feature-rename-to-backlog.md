@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — §9 除 4 项 `Human-Confirmed`（决策一/二/三 + §9.1 呈递物过目）与 2 项 runner-owned `[~]` 门禁（verifier review、归档）外全部完成并附证据；rv-1..rv-4 均 `RESULT: PASS` 且各含负控变红，证据包见 `.iar/evidence/evidence.json`。
+> ✅ **验收状态**：已验收（2026-10-05）— 交付 PR #199（cc5dd64）与 PRD 发布（54ec13f）均已进 main，合并即验收；4 项 Human-Confirmed 经决策板 `.iar/decisions/human-acceptance-20261005/answers.json` 确认；独立 verifier PASS（报告见 `tasks/evidence/…/…verifier-report.md`）。已披露：本 PRD 原始 rv 证据文件（txt/PNG/evidence.json）因 `.iar/evidence` 被后续 PRD 覆盖且 worktree 已删而永久丢失，验收以 3 份 `.md` 报告逐字摘录 + verifier 独立复跑为准。本行是 §9 的投影，**那里是唯一事实源**。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人确认行为与风险，**Part B（§5–§13）** 给执行器实现和验证。
@@ -459,15 +459,15 @@ backlog_settings (原 roadmap_settings)
 
 - [x] 推荐目标态全量实现，无"先改一半、旧名留兼容"的拆分或隐藏兼容层 — 证据：旧 CLI 命令、旧 API 前缀、旧控制台路由均直接移除（rv-1/rv-3 探测为未知命令 / 404），迁移为一次性 `RENAME` 而非双写或并行表 → `.iar/evidence/rv-1-api-real.txt`、`.iar/evidence/rv-3-console-page-real.txt`
 - [x] 完成消息逐字携带 §9.1 人读呈递区的全部内容与实际呈递物 — 证据：交付说明逐字复述 §9.1 表格与 `tasks/evidence/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog/rv-3-backlog-page.png`；runner 的 commit proxy 把 `commit_message` 压成单行并截断至 200 字符（`sanitize_commit_message`），故 §9.1 全文载于交付说明与 `tasks/evidence/` 证据副本，commit 标题携带呈递物文件名 `rv-3-backlog-page.png` 与 `/app/backlog` 自检结论
-- [~] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review
-- [~] PRD 归档至 tasks/archive/ — runner-owned gate: archive
+- [x] 独立 verifier Agent 审查通过 — verifier PASS（2026-10-05，报告 `tasks/evidence/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.verifier-report.md`；交付提交校正为 cc5dd64=PR #199，94 文件/38 rename；当前 HEAD 全 oracle 复绿；披露原始证据丢失与 cli_helpers.py docstring 残留 minor）
+- [x] PRD 归档至 tasks/archive/ — runner-owned gate: archive
 
 #### Human-Confirmed
 
-- [ ] 决策一确认：功能整体正名为 Backlog，`ROADMAP.md` 战略文档仅加消歧说明、内容与里程碑命名不变
-- [ ] 决策二确认：硬改名、旧 CLI 命令/API 路径/控制台路由直接移除（破坏性对外变更），不留兼容别名
-- [ ] 决策三确认：控制台 SQLite 新增 v7 迁移重命名 `roadmap_queue`/`roadmap_settings` 为 `backlog_*` 且保留数据
-- [ ] §9.1 人读呈递物均已查看并接受
+- [x] 决策一确认：功能整体正名为 Backlog，`ROADMAP.md` 战略文档仅加消歧说明、内容与里程碑命名不变 — 决策板 Q11=A（2026-10-05）
+- [x] 决策二确认：硬改名、旧 CLI 命令/API 路径/控制台路由直接移除（破坏性对外变更），不留兼容别名 — 决策板 Q12=A（2026-10-05）
+- [x] 决策三确认：控制台 SQLite 新增 v7 迁移重命名 `roadmap_queue`/`roadmap_settings` 为 `backlog_*` 且保留数据 — 决策板 Q13=A（2026-10-05）
+- [x] §9.1 人读呈递物均已查看并接受 — 决策板 Q14=A（2026-10-05）；原始 PNG 已丢失（见横幅披露），呈递以 evidence-report 逐字摘录 + verifier 复跑为准
 
 ## 10. Functional Requirements
 
@@ -511,6 +511,15 @@ backlog_settings (原 roadmap_settings)
 | D-06 | 历史资产处置 | 原型文件与归档 PRD 文本不改 | 全量改历史引用 | 历史记录改了会破坏可追溯性与既有链接。 |
 
 ## 14. Change Log
+
+### 2026-10-05 · 人工验收：4 项 Human-Confirmed + verifier 门禁经决策板/verifier 确认，横幅置为已验收
+
+- Type: doc
+- Before: §9 的 4 项 Human-Confirmed 未勾，verifier review 与归档两项 runner-owned 门禁为 `[~]`，横幅 🧍 待人工验收。
+- After: 全部勾选，横幅 ✅ 已验收。确认载体：决策板 `.iar/decisions/human-acceptance-20261005/answers.json`（14 项跨 4 PRD 全采纳推荐，无偏离、无备注）；独立 verifier 两轮复核 PASS（交付提交校正为 cc5dd64=PR #199，`cc5dd64^..cc5dd64` 实测 94 文件/38 rename，与 §14 校正口径一致；§14 所写命令 `2a1dd6a..HEAD` 表述有误，当前 HEAD 实测 158/40，但校正数字本身正确）。已披露 blocker 级缺口：本 PRD 原始 rv 证据（txt/PNG/evidence.json）因 `.iar/evidence` 被后续 PRD 覆盖且 worktree 删除而永久丢失，§9.1 呈递 PNG 无法再出示；人工验收以 3 份 `.md` 报告逐字摘录 + verifier 在当前 HEAD 独立复跑全 oracle 全绿为准。遗留 minor：HEAD 的 `cli_helpers.py:161` docstring 残留「roadmap advance」（交付树无此问题），待后续顺手清理。
+- Reason: 执行侧交付完成、PR 已合并，verifier 独立复核 PASS，人工第二触点完成，验收闭环。
+- Impact: 仅验收记录回填与披露登记；不改 FR / RV oracle / 验收判据 / 交付依赖。
+- Review: 人已确认（决策板 answers.json，2026-10-05）；verifier PASS（verifier-report.md，2026-10-05）。
 
 ### 初始创建：Roadmap 功能正名为 Backlog
 

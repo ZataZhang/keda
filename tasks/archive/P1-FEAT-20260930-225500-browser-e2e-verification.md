@@ -4,7 +4,7 @@
 
 > ✅ **交付前置**：无。此横幅是 §8 Delivery Dependencies 的投影。
 >
-> 🧍 **验收状态**：待人工验收 — rv-1…rv-5 证据已齐备且执行侧非人工项已勾，仅剩 §9 Human-Confirmed 两项（执行边界 rv-2 / 配置契约 rv-3）与 rv-1 人工走查需人工确认。本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收（2026-10-05）— 交付 PR #198 合并（f74ea6c）即验收；§9 Human-Confirmed 两项与 rv-1 人工走查经决策板 `.iar/decisions/human-acceptance-20261005/answers.json` 确认。本行是 §9 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
 >
@@ -334,8 +334,8 @@ Failure triage:
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] E2E 子进程执行边界（环境变量白名单、进程树回收）已人工确认，rv-2 证据通过
-- [ ] 新验证命令配置契约（形态声明与错误诊断）已人工确认，rv-3 证据通过
+- [x] E2E 子进程执行边界（环境变量白名单、进程树回收）已人工确认，rv-2 证据通过 — 决策板 Q4=A（2026-10-05）
+- [x] 新验证命令配置契约（形态声明与错误诊断）已人工确认，rv-3 证据通过 — 决策板 Q5=A（2026-10-05）
 
 ### Architecture Acceptance
 
@@ -364,7 +364,7 @@ Failure triage:
 ### Validation Acceptance
 
 - [x] `just test` passes（证据：2896 passed, 1 skipped in 148.64s @ 751056e）
-- [~] rv-1 的真实入口（真实 UI Issue 全流程）人工走查通过 —— 走查材料已备齐（`rv-1-admin-login.png` 真实渲染截图 + `rv-1-admin-login.trace.zip` 交互 trace），人工走查属验收第二触点，不由执行器代确认
+- [x] rv-1 的真实入口（真实 UI Issue 全流程）人工走查通过 —— 走查材料已备齐（`rv-1-admin-login.png` 真实渲染截图 + `rv-1-admin-login.trace.zip` 交互 trace），人工走查属验收第二触点，不由执行器代确认 — 决策板 Q5=A 附带确认（2026-10-05）
 - [x] `grep -rn "playwright\|chromium" src/backend --include="*.py" -l` 确认无框架绑定泄漏（证据：输出仅 `agent_runner_e2e_browser.py` 一个文件；忽略大小写扩展扫描另命中 `child_env.py` 的 `PLAYWRIGHT_`/`CHROMEDRIVER_` 环境变量前缀白名单，属执行机制本体，见 rv-5 守卫）
 - [x] `git status --porcelain frontend-admin frontend-public` 确认前端零改动（证据：rv-5 guard `frontend-dirs-clean`）
 
@@ -424,6 +424,15 @@ Failure triage:
 ---
 
 ## 14. Change Log
+
+### 2026-10-05 · 人工验收：Human-Confirmed 两项与 rv-1 走查经决策板确认，横幅置为已验收
+
+- Type: doc
+- Before: §9 Human-Confirmed 两项（E2E 子进程执行边界 / 新验证命令配置契约）与 rv-1 人工走查 `[~]` 未确认，横幅 🧍 待人工验收。
+- After: 三项勾选，横幅 ✅ 已验收。确认载体：决策板 `.iar/decisions/human-acceptance-20261005/answers.json`（14 项跨 4 PRD 全采纳推荐，无偏离、无备注）；交付 PR #198 合并即验收（squash f74ea6c，已核对最终 Git tree）。
+- Reason: 执行侧交付完成、PR 已合并，人工第二触点完成，验收闭环。
+- Impact: 仅验收记录回填；不改 FR / RV oracle / 验收判据 / 交付依赖。
+- Review: 人已确认（决策板 answers.json，2026-10-05）。
 
 ### 校正过期引用、补齐相关 PRD 与既有 E2E 资产
 

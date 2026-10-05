@@ -351,3 +351,18 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - **可能根因（待复现确认，非结论）**：无 `IAR_CONFIG` 时，注册表落点解析可能沿某锚点命中真实仓库 `config.toml`；pytest 进程的 `HOME`/`cwd` 隔离对该解析路径不生效（或某次运行外部 `IAR_CONFIG` 被设置）。需按该测试的实际调用链复现。
 - **建议修法（供后续选型）**：① 让该测试显式隔离（设 `IAR_CONFIG` 到 tmp）；② 加守卫——跑 `iar init` 后断言"真实仓库 config.toml 未被改动"；③ 排查无 `IAR_CONFIG` 时的注册落点解析路径。严重度低（一次性污染、已清理），但会污染工作区且难察觉。
 - **来源**：用户 2026-10-05 会话发现并授权登记（原话逐字引用如上）。
+
+## 2026-10-05 · 坏 PR 标题：agent 开场白被当成 PR 标题
+
+> 那个坏标题缺陷是系统性 bug —— 刚出现的 PR #199（issue-196，非我这条线）标题是 Here is the draft PR body:，与 #198 的 Here is the draft PR description: 同一模式。即：keda 发布路径把生成 agent 的开场白当成了 PR 标题，多个 PR 都中招（#198、#199），不只是偶发。
+
+> 这条建议单开一个 Issue/PRD 修根因（剥离 agent 开场白 / 从正文首行取真标题 + 加回归测试）。
+
+**AI 派生背景**（2026-10-05 会话核实仓库当前代码，非用户原话）：
+
+- **根因落点**：`src/backend/core/use_cases/generated_content.py:519-540` 的 `_parse_markdown_output` 无条件把 agent 输出的**第一个非空行**当标题。`draft_pr` 配置为 `mode="agent"` + `output="markdown"`（`config.toml:779-780`），prompt 要求"首行必须是 `Closes #N`"（`config.toml:793`），但 agent 常先吐一句对话式开场白（`Here is the draft PR body:`），于是那句话成了标题。
+- **唯一守卫未覆盖**：`generated_content.py:828-830` 只作废**精确匹配** `Closes #N`（`_CLOSING_REFERENCE_TITLE`，定义在 `:53`）的标题；`Here is the draft PR body:` 不匹配 → 标题保留。随后 `_validate_pr_body`（`:386-402`）只检查 body 是否含 `Closes #<n>`，而 body = 完整原始输出（含 `Closes #196`）→ 校验通过 → 坏标题被采用。
+- **发布接线**：`agent_runner_publish.py:313-337`，`pr_title = generated.title` 直接透传给 `github_client.create_draft_pr(title=pr_title, ...)`，无二次清洗。
+- **可见产物**：PR #198（`Here is the draft PR description:`）、PR #199（`Here is the draft PR body:`）；同一模式在不同 issue 线上复现，故为系统性缺陷而非偶然。
+- **可能修法（供后续选型，非结论）**：① 最小改动 = 标题无效化守卫从"精确匹配 `Closes #N`"扩展为"跳过 `Closes #N` 行取下一非空行"或"对 `Here is…`/`Sure…`/以 `:` 结尾的对话式开场白判废并回退 `fallback_title`"，并加回归测试；② 更彻底 = `draft_pr` 改 `output="json"`，走 `_parse_json_output`（`:506-516`）结构化解析，天然不会把开场白当标题（但需确认 agent 侧稳定产出合法 JSON）。严重度中（污染 PR 元数据、影响可读性与检索，但不阻断合并）。
+- **来源**：用户 2026-10-05 会话发现（原话逐字引用如上），当时明确"等你一句话"再决定是否开 Issue/PRD；本条目为待办登记。

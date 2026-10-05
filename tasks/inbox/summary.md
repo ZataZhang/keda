@@ -73,6 +73,8 @@ _最后更新：2026-10-05_
 
 - **iar init 测试隔离失效（污染真实 config.toml）** → 建议 PRD（或直接修复 + 守卫测试）：`test_iar_init_does_not_pollute_target_repo_config_toml` 显式隔离（设 `IAR_CONFIG` 到 tmp），并加守卫断言"跑 `iar init` 后真实仓库 config.toml 未被改动"；同时排查"无 `IAR_CONFIG` 时注册表落点解析"为何会命中真实仓库 config。严重度低（一次性污染、已清理），但会污染工作区且难察觉，值得修。（来源：2026-10-05）
 
+- **坏 PR 标题：agent 开场白被当成 PR 标题** → 建议 PRD（或最小修复 + 回归测试）：`_parse_markdown_output` 无条件取首个非空行当标题，agent 的对话式开场白（`Here is the draft PR body:`）泄漏进 PR 标题（PR #198/#199 复现，系统性）。最小修法 = 扩展标题无效化守卫（跳过 `Closes #N` 取下一行 / 判废对话式开场白回退 `fallback_title`）；更彻底 = `draft_pr` 改 `output="json"`。严重度中（污染 PR 元数据，不阻断合并）。（来源：2026-10-05）
+
 ## 已升级
 
 - **Agent Runner 子进程环境净化（child env sanitize）** → 已升级为正式 PRD：`tasks/pending/P1-BUG-20260928-232844-agent-runner-child-env-sanitize.md`（2026-09-28 用户拍板三项决策：8 变量名单硬编码、无配置覆盖、process_supervisor 不纳入）。根因、方案与 RV oracle 详见该 PRD。（来源：2026-09-28 23:17）
