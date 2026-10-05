@@ -19,7 +19,8 @@
 - **显式接管**（FR-5）：`iar run --takeover` 在强警告 + 二次确认下**优雅停掉 daemon 并接管**——因为手动 run 代表"人已介入"；复用既有进程监管与 reclaim 收尾在途 Issue。
 - **手动调度走既有入口**（FR-6）：需要手动补位时用既有 `iar roadmap advance`，而不是给 `iar run` 加 autopilot 旗标。
 - **迁移而非报废**（FR-7）：旧"不带目标=捞队列"用法改为显式 `--all-ready`，**行为等价**；默认行为变更（无目标报用法错误）在 release note 标注——这是本 PRD 唯一的有意 breaking change。
-- **明确不做**（§11）：不给 run 加 `--autopilot`、不默认接管、不用 SIGKILL 停 daemon、不给 run 加并行、不改 HTTP/前端。
+- **daemon 可按次覆盖 autopilot**（FR-8）：`iar daemon --autopilot` / `--no-autopilot` 显式覆盖配置里的开关（**只关调度**），优先级 `flag > repo .iar.toml > 全局` 且**锁定本次常驻进程**；不传则跟随配置（每轮热读）。该旗标**不能**单独打开自动合并——合并仍归配置双开关。
+- **明确不做**（§11）：不给 run 加 `--autopilot`、不让 `daemon --autopilot` arm 自动合并、不默认接管、不用 SIGKILL 停 daemon、不给 run 加并行、不改 HTTP/前端。
 
 ---
 
@@ -33,7 +34,7 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 
 1. **`iar run` 没有"目标"概念**。现状不传参数就是"按优先级捞 ready 队列"，无法表达"就跑这一个 PRD/Issue"。Console 有「开始此 PRD」，CLI 没有对应物。
 2. **run 与 daemon 的互斥缺失**。daemon 启动前有单实例锁（`cli_parsed_commands/runner.py` 的 `acquire_daemon_locks`），而 `iar run` 没有任何互斥，同仓手动 run 会和 daemon 抢同一 ready 队列——这是双 claim 的来源。单纯"拒绝"又让人手动介入很别扭（还得自己去停 daemon）。
-3. **autopilot 曾被误当作 run 的开关**。autopilot 的调度阶段只存在于 daemon（`run_agent_daemon.py:165`），"自动合并"属于 review 侧（`process_merge_queue`）。给 run 加 autopilot 会横跨两个阶段；"手动触发一次调度"其实已有专门入口 `iar roadmap advance`。
+3. **autopilot 曾被误当作 run 的开关**。autopilot 的调度阶段只存在于 daemon（`run_agent_daemon.py:165`），"自动合并"属于 review 侧（`process_merge_queue`）。给 run 加 autopilot 会横跨两个阶段；"手动触发一次调度"其实已有专门入口 `iar roadmap advance`。而且 daemon 侧目前**也没有启动覆盖旗标**——想临时开/关 autopilot 只能改 `.iar.toml`。
 
 后果：运维者既无法"手动只跑某条 PRD"，也无法在 daemon 在跑时顺畅地手动接管；run 的"自动捞一批"行为还与 daemon 的职责重叠。run/daemon/autopilot 的关系需要一份契约。
 
@@ -53,18 +54,25 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 | 🤖 自动验证 | `iar run --help` | **不存在** `--autopilot`；存在 `--issue` / `--all-ready` / `--takeover`（与 `--yes`） |
 | 🤖 自动验证 | 需要手动补位时执行 `iar roadmap advance --repo <id> [--dry-run]` | 触发一次调度（晋升 pending PRD），与 run 解耦 |
 | 🤖 自动验证 | `iar run` 的并行能力 | 保持串行（无 `--concurrency`）；并行仍只由 `iar daemon --concurrency` 提供 |
+| 🤖 自动验证 | `iar daemon --autopilot`（配置 `autopilot.enabled=false`） | 本次 daemon 启用**调度阶段**（发现/晋升 pending PRD、补槽）；review 侧合并行为**不变** |
+| 🤖 自动验证 | `iar daemon --no-autopilot`（配置 `autopilot.enabled=true`） | 本次 daemon 关闭调度阶段（等同 autopilot 关闭） |
+| 🤖 自动验证 | 不传 `--autopilot`/`--no-autopilot` 起 daemon | 跟随配置，每轮热读（与改动前一致） |
+| 🤖 自动验证 | `iar daemon --autopilot` 且 `safety.auto_merge=false` | **不**触发自动合并；`process_merge_queue` 仍 no-op（旗标不足以 arm 合并） |
 
 **我默默定了这些**（未提问、直接选定的）：
 
 - **目标必填**：`--issue N` 或 PRD 路径；PRD 路径解析其头部回链的 Issue（`- GitHub Issue:`），没有则报错要求先 `iar issue create`。
 - **旧"捞队列"行为改为显式 `--all-ready`**，行为等价，避免破坏既有脚本/文档/Console（一处改名迁移）。
 - **不给 `iar run` 加 `--autopilot`**：调度归 daemon，手动调度归 `iar roadmap advance`，合并归 review。
+- **`iar daemon --autopilot` / `--no-autopilot` 只覆盖调度类 autopilot**（`autopilot.enabled` 的调度阶段）；启动锁定本次进程；优先级 `flag > repo .iar.toml > 全局`；不传则每轮热读配置。
+- **该旗标不能单独 arm 自动合并**：合并仍由 `safety.auto_merge` + `autopilot.enabled` 的**配置双开关**决定，临时的启动旗标不足以解除它。
 - **`--takeover` 是显式 opt-in**：默认拒绝，只有显式传该旗标才停 daemon 接管；接管必须优雅停并终止 agent 树，停后先 reclaim 再执行。
 - **不给 `iar run` 加 `--concurrency`**：并行继续是 daemon 的职责。
 
 **我理解为不做**：
 
 - 不给 `iar run` 加 `--autopilot`。
+- 不让 `iar daemon --autopilot` 打开 review 侧自动合并（危险双开关不可被临时旗标绕过）。
 - 不保留"无目标即隐式捞队列"：要旧行为请显式 `--all-ready`。
 - 不默认接管：`iar run` 绝不静默杀掉一个正在干活的 daemon。
 - 不用 `SIGKILL` 作为接管首手段（会留孤儿 agent）。
@@ -75,7 +83,7 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 
 ### What The User Gets
 
-运维者用 `iar run --issue <N>`（或 `iar run <prd 路径>`）精确地手动跑某一条 PRD；要跑整批时显式 `iar run --all-ready`。daemon 在跑时，`iar run` 默认安全拒绝并给出下一步；当人确实要手动接管时，`iar run --takeover` 会在强警告与确认后优雅停掉 daemon、清理在途 Issue、再执行。需要手动补位时用 `iar roadmap advance`。
+运维者用 `iar run --issue <N>`（或 `iar run <prd 路径>`）精确地手动跑某一条 PRD；要跑整批时显式 `iar run --all-ready`。daemon 在跑时，`iar run` 默认安全拒绝并给出下一步；当人确实要手动接管时，`iar run --takeover` 会在强警告与确认后优雅停掉 daemon、清理在途 Issue、再执行。想临时开/关 autopilot 时不必改 `.iar.toml`——用 `iar daemon --autopilot` / `--no-autopilot`（只影响调度；自动合并仍归配置双开关）。需要手动补位时用 `iar roadmap advance`。
 
 ### Measurable Objectives
 
@@ -83,6 +91,7 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 - `iar run --all-ready` 行为与改动前的 `iar run` 等价（黄金对照）。
 - 同仓存在 daemon 时，默认 `iar run` 拒绝且不产生双 claim；`--takeover` 下 daemon 被优雅停、无孤儿 agent、在途 Issue 被 reclaim，随后 run 正常执行（有可判别用例）。
 - `iar run --help` 出现 `--issue`/`--all-ready`/`--takeover` 但**不**出现 `--autopilot`。
+- `iar daemon --autopilot` 在配置为关时启用调度阶段、且**不** arm 自动合并；`--no-autopilot` 在配置为开时关闭调度；不传则跟随配置（有可判别用例）。
 - CLI 表面变更同步进 `docs/` 与 `iar-operator` skill；release note 标注 breaking change；守卫测试通过。
 
 ## 2. Human Review Map (介入与风险地图)
@@ -93,7 +102,9 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 
 **决策三：`iar run` 是否保持串行、不引入并行？** 并行归 daemon（`--concurrency`），run 保持串行才能让"单次=手动一件事"成立。**请确认：** 接受"run 保持串行，并行归 daemon"，还是要求"给 run 也加 `--concurrency`"？**验收：** `iar run --help` 无 `--concurrency`；`iar daemon --concurrency N` 仍可并行。
 
-**自动门禁，不需要逐项人工审阅**：目标必填的用法错误测试、PRD 路径→Issue 解析（有/无 Issue 两态）测试、`--all-ready` 与旧行为黄金对照、候选收窄与依赖门禁交互测试、默认拒绝的可断言测试（双 claim 不可能）、接管后"daemon 已退 + 无孤儿 agent + 在途 Issue reclaim 完成"的集成测试、`--autopilot` 不存在于 run 的断言、`--help` 快照、`just lint` 与 `just test all`、文档与 `iar-operator` skill 同步守卫。
+**决策四：接受"`iar daemon --autopilot` 只覆盖调度类 autopilot、且不能单独 arm 自动合并"吗？** autopilot 含两半：调度（daemon 跑）与合并（review 跑）。本 PRD 让 daemon 的启动旗标只覆盖**调度**那一半；合并仍由 `safety.auto_merge` + `autopilot.enabled` 的**配置双开关**决定——临时的启动旗标不足以解除这个"防呆"。**请确认：** 接受"旗标只关调度、合并不被旗标 arm"，还是要求"`--autopilot` 同时放开合并"（会拆掉双开关防呆）？**验收：** 配置 `autopilot.enabled=false` 时 `iar daemon --autopilot` 启用调度但 `process_merge_queue` 仍 no-op；`--no-autopilot` 在配置为开时关闭调度；不传则跟随配置。
+
+**自动门禁，不需要逐项人工审阅**：目标必填的用法错误测试、PRD 路径→Issue 解析（有/无 Issue 两态）测试、`--all-ready` 与旧行为黄金对照、候选收窄与依赖门禁交互测试、默认拒绝的可断言测试（双 claim 不可能）、接管后"daemon 已退 + 无孤儿 agent + 在途 Issue reclaim 完成"的集成测试、daemon `--autopilot/--no-autopilot` 覆盖调度的可判别测试、`--autopilot` 不 arm 合并的断言、flag/config/global 优先级测试、`--autopilot` 不存在于 run 的断言、`--help` 快照、`just lint` 与 `just test all`、文档与 `iar-operator` skill 同步守卫。
 
 **本次明确不涉及**：不给 run 加 autopilot 或并行；不改 review 侧合并；不做 run 的托管化；不改 HTTP API 与前端；**本次无数据库结构变化**。
 
@@ -104,6 +115,7 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 - 手动只跑一条：`iar run --issue <N> --repo-id <repo>`，或 `iar run tasks/pending/<foo>.md`（PRD 需已有回链 Issue）。
 - 要跑整批（等同旧的 `iar run`）：`iar run --all-ready`（显式）。
 - daemon 在跑、但你想手动接管：`iar run --issue <N> --takeover`（强警告 + 确认；`--yes` 免确认）。**注意：会中断 daemon 当前所有在途 Issue，它们会被 reclaim 后重跑。**
+- 临时开/关 autopilot（不改配置）：`iar daemon --autopilot`（本次常驻启用调度）或 `iar daemon --no-autopilot`。**只影响调度；自动合并仍由 `.iar.toml` 的双开关决定。**
 - 更常规做法：`iar registry stop --repo-id <id>` 停 daemon，或让 daemon 处理。
 - 手动补位（晋升 pending PRD）：`iar roadmap advance --repo <id> [--dry-run]`。
 
@@ -123,7 +135,7 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 ### Impact On Existing Behavior
 
 - **有意 breaking**：`iar run`（无目标）从"捞 ready 队列"变为用法错误；迁移到 `iar run --all-ready`（行为等价），release note 标注。
-- 新增 `--issue` / `--all-ready` / `--takeover` / `--yes`；`--autopilot` 不引入。
+- 新增 `--issue` / `--all-ready` / `--takeover` / `--yes`（run）与 `--autopilot` / `--no-autopilot`（daemon，仅调度）；run 侧仍不引入 `--autopilot`。
 - 默认行为另有一处变化：同仓已有 daemon 时手动 run 从"无保护"变为"拒绝"。
 - 不含目标、不含 `--all-ready` 且无 daemon 的旧调用：唯一需要改脚本的点。
 
@@ -131,8 +143,8 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 
 - **actor**：运维者 / 外部 agent（手动驱动 run）；daemon（常驻）。
 - **trigger**：`iar run` 携带目标（`--issue` / PRD 路径），或显式 `--all-ready`；可叠加 `--takeover`。
-- **expected behavior**：按目标定向执行（或 `--all-ready` 走旧行为）；默认与 daemon 互斥（拒绝）；显式 `--takeover` 时优雅停 daemon + reclaim 在途 Issue 后接管；不涉及 autopilot。
-- **explicit scope boundary**：目标必填（breaking，有迁移路径）；run 保持串行；无 `--autopilot`；接管非默认、非 SIGKILL；不改前端。
+- **expected behavior**：按目标定向执行（或 `--all-ready` 走旧行为）；默认与 daemon 互斥（拒绝）；显式 `--takeover` 时优雅停 daemon + reclaim 在途 Issue 后接管；daemon 可用 `--autopilot`/`--no-autopilot` 按次覆盖**调度类** autopilot（不 arm 合并）。
+- **explicit scope boundary**：目标必填（breaking，有迁移路径）；run 保持串行；run 侧无 `--autopilot`（autopilot 旗标只在 daemon）；接管非默认、非 SIGKILL；不改前端。
 
 # Part B · 执行器层 (Build Layer)
 
@@ -140,8 +152,9 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 
 ### 现有相关模块
 
-- CLI 定义：`src/backend/api/cli_typer_runner.py`（`run_command` 等）。
+- CLI 定义：`src/backend/api/cli_typer_runner.py`（`run_command` / `daemon_run_command` / `daemon_callback` 等）。
 - dispatch：`src/backend/api/cli_parsed_commands/runner.py`（`run_run_command`；`run_daemon_command`）。
+- daemon 选项现状：`daemon_run_command` / `daemon_callback` 现有 `--interval/--agent/--max-issues/--concurrency/...`，**无 autopilot 旗标**；autopilot 现仅由 `context.config.autopilot.enabled` 每轮读取（`run_agent_daemon.py`）。
 - 单次执行：`src/backend/core/use_cases/run_agent_repositories_once.py`。
 - daemon 循环与调度阶段：`src/backend/core/use_cases/run_agent_daemon.py`。
 - 单实例锁：`src/backend/core/use_cases/daemon_single_instance.py`（`DaemonAlreadyRunningError`）。
@@ -183,7 +196,8 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 4. **默认互斥 = 拒绝**：同仓已有 daemon 时直接失败并提示（停 daemon 的方式 / `--takeover`）。
 5. **显式接管**：`iar run --takeover` 在强警告 + 确认（`--yes` 免确认）下：优雅停 daemon → 终止其 agent 子进程 → `reclaim_stale_running_issues` → 执行定向 run。
 6. Console「开始此 PRD」路径改为传 `--issue`。
-7. 文档化边界与迁移；release note 标注 breaking；同步 `iar-operator` skill。
+7. **daemon 启动覆盖**：`iar daemon` 新增 `--autopilot` / `--no-autopilot`，按 `flag > repo .iar.toml > 全局` 只覆盖 `autopilot.enabled` 的**调度阶段**并锁定本次进程；**不** arm 自动合并（合并仍归配置双开关）。
+8. 文档化边界与迁移；release note 标注 breaking；同步 `iar-operator` skill。
 
 ### 为什么最贴合现有架构
 
@@ -194,6 +208,7 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 ### rationale：拒绝冗余抽象
 
 - 不加 `iar run --autopilot`：跨阶段、与 `iar roadmap advance` 冗余。
+- daemon 的 autopilot 覆盖只做"读配置前套一层 override"，与既有 `--concurrency` 同构，不新造调度。
 - 不给 run 加并行：并行归 daemon。
 - 接管不新造进程管理：复用 supervisor 与 killpg 整树清理。
 
@@ -211,6 +226,7 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 - **目标仍可选**：零破坏但 run 仍能"自动捞一批"，语义不纯；拒绝（改为 `--all-ready` 显式）。
 - **默认自动接管 / 排队**：破坏面大 / 长时间阻塞；拒绝为默认。
 - **给 run 加 `--autopilot` / `--concurrency`**：跨阶段 / 与 daemon 重叠；拒绝。
+- **让 daemon `--autopilot` 同时放开合并**：会拆掉 `safety.auto_merge` 双开关防呆；拒绝——合并侧仍只认配置。
 
 ## 7. Implementation Guide
 
@@ -224,6 +240,7 @@ keda 有 `iar run`（单次轮询）与 `iar daemon`（常驻循环）两个入�
 4. **接管**（仅 `--takeover`）：警告（点名目标仓库、daemon、将中断的在途 Issue 数量）→（非 `--yes` 时确认）→ 优雅停（托管走 `process_supervisor`；未托管按 PID）→ 终止 agent 树（复用 `_terminate_process_tree`；必要时为 daemon 补 SIGTERM 优雅停机钩子）→ `reclaim_stale_running_issues` → 执行定向 run。
 5. **Console 路径**：把「开始此 PRD」的后端 spawn 从通用 `iar run` 改为 `iar run --issue <N>`。
 6. **手动调度**：不新增 run 侧入口；用既有 `iar roadmap advance`。
+7. **daemon autopilot 覆盖**：`daemon_run_command` 计算 `autopilot_override`（`--autopilot`→True / `--no-autopilot`→False / 缺省→None）并传入 `run_agent_daemon`；调度门控由 `context.config.autopilot.enabled` 改为 `override if override is not None else config.autopilot.enabled`。合并侧（`agent_runner_merge_queue.py`）不受影响。
 
 ### Change Impact Tree
 
@@ -258,6 +275,7 @@ tests/
 | 默认拒绝（互斥） | R2 | 并发（双 claim） | 自动门禁 + 负控制 | rv-2 |
 | 显式接管（优雅停 + reclaim） | R3 | 破坏性（中断在途、孤儿 agent） | 人工确认 + 强警告 + 负控制 | rv-6 |
 | 不引入 run 侧 autopilot | R1 | 职责边界 | 静态断言（--help） | rv-4 |
+| daemon autopilot 覆盖（仅调度） | R2 | 行为/契约（不得 arm 合并） | 自动门禁 + 断言 | rv-8 |
 | 无 daemon 的定向 run 零回归 | R1 | 兼容 | 黄金对照 | rv-1 |
 
 ### Executor Drift Guard
@@ -266,6 +284,7 @@ tests/
 - 复用点用 `rg -n "process_supervisor|acquire_daemon_locks|reclaim_stale_running_issues|_terminate_process_tree|GitHub Issue:" src/` 定位，避免复制 PRD↔Issue 解析或锁逻辑。
 - 确认 daemon 优雅停机钩子：`rg -n "SIGTERM|signal\.|finally" src/backend/core/use_cases/run_agent_daemon.py`；缺则补齐。
 - Console spawn 路径：`rg -n "iar run|run_agent|spawn" src/backend/api/routes src/backend/api/agent_runner_views` 定位并改传 `--issue`。
+- daemon autopilot 门控点：`rg -n "autopilot.enabled|advance_roadmap_queue" src/backend/core/use_cases/run_agent_daemon.py`；改动只应落在调度门控，确认未触碰 review 侧 `agent_runner_merge_queue.py`。
 
 ### Flow / Architecture Diagram
 
@@ -284,6 +303,8 @@ flowchart TD
     F --> H[reclaim 在途 Issue]
     H --> G
     I[iar roadmap advance] --> J[手动调度]
+    P[iar daemon --autopilot / --no-autopilot] --> Q[调度门控: override else config]
+    Q --> RG[合并仍在 review 侧，由 safety.auto_merge + autopilot.enabled 决定]
 ```
 
 ### Realistic Validation Plan
@@ -374,6 +395,20 @@ flowchart TD
   tier: R1
   test_layer: unit
   required_for_acceptance: true
+- id: rv-8
+  behavior: iar daemon --autopilot/--no-autopilot 只覆盖调度类 autopilot，且不 arm 自动合并
+  reviewer: verifier
+  real_entry: 真实 daemon + 配置 autopilot.enabled=false + --autopilot
+  expected: 调度阶段运行（晋升 pending PRD、补槽）；review 侧 process_merge_queue 仍 no-op；--no-autopilot 在配置为开时关闭调度；不传则跟随配置
+  mock_boundary: GitHub mock 可
+  tier: R2
+  test_layer: integration
+  required_for_acceptance: true
+  critical_value_source: 调度阶段是否运行与合并队列是否 no-op
+  must_cross: CLI flag -> daemon 调度门控；合并侧未变
+  forbidden_bypasses: 不得用 flag 绕过 safety.auto_merge 双开关
+  fresh_state_probe: 运行后检查 pending PRD 晋升与合并状态
+  final_tree_evidence: 绑定最终实现树
 ```
 
 ### ER Diagram
@@ -396,7 +431,7 @@ flowchart TD
   - none
 - Gate type: none
 - Sequence: via-main
-- Notes: 与 `P1-FEAT-20261005-161632-dependent-prd-sequencing-strategy.md` 为 soft 关系——两者可独立交付；本 PRD 不含 autopilot 旗标，接管与目标解析复用既有 `reclaim_stale_running`（默认开启）、进程监管与 PRD↔Issue 回链，不依赖 PRD-1。
+- Notes: 与 `P1-FEAT-20261005-161632-dependent-prd-sequencing-strategy.md` 为 soft 关系——两者可独立交付；本 PRD 只给 **daemon** 加 autopilot 调度覆盖旗标（run 侧仍不含），接管与目标解析复用既有 `reclaim_stale_running`（默认开启）、进程监管与 PRD↔Issue 回链，不依赖 PRD-1。
 
 ## 9. Acceptance Checklist
 
@@ -409,11 +444,11 @@ flowchart TD
 | daemon 在跑时默认 run 被拒绝（不停 daemon） | `tasks/evidence/<prd-stem>/rv-2-reject.png` | 看提示里给了停止命令与 --takeover |
 | `--takeover --yes` 后 daemon 优雅退出、无孤儿 agent、在途 Issue 被 reclaim | `tasks/evidence/<prd-stem>/rv-6-takeover.png` | 看 `ps` 无残留 agent、Issue label 回 ready |
 
-**刻意不展示（`reviewer: verifier`）**：rv-3、rv-4、rv-5 为可执行/静态断言组，除非失败否则不进人审。
+**刻意不展示（`reviewer: verifier`）**：rv-3、rv-4、rv-5、rv-8 为可执行/静态断言组，除非失败否则不进人审。
 
 ### 9.2 Acceptance Evidence Package
 
-先 R3/human-confirm（rv-6），再 R2（rv-1、rv-2、rv-7、rv-5），再折叠 R1（rv-4）与 CLI 契约 diff 与 release note。
+先 R3/human-confirm（rv-6），再 R2（rv-1、rv-2、rv-7、rv-5、rv-8），再折叠 R1（rv-4）与 CLI 契约 diff 与 release note。
 
 ### Behavior Acceptance
 
@@ -423,6 +458,7 @@ flowchart TD
 - [ ] rv-2：daemon 在跑时默认 run 拒绝、无双 claim（证据：rv-2 报告）。
 - [ ] rv-6：`--takeover` 优雅停 daemon、无孤儿 agent、在途 Issue 被 reclaim（证据：rv-6 报告）。
 - [ ] rv-4：run 不含 autopilot（证据：rv-4 报告）。
+- [ ] rv-8：daemon `--autopilot` 仅覆盖调度、不 arm 合并（证据：rv-8 报告）。
 
 ### Validation Acceptance
 
@@ -441,6 +477,7 @@ flowchart TD
 - [ ] 决策一：接受"目标必填 + `--all-ready` 迁移"这一有意 breaking change。
 - [ ] 决策二：接受"默认拒绝 + 显式 `--takeover`（强警告 + 二次确认，会中断在途 Issue）"。
 - [ ] 决策三：接受 run 保持串行、并行归 daemon。
+- [ ] 决策四：接受 daemon `--autopilot` 只覆盖调度、不 arm 合并（合并仍归配置双开关）。
 - [ ] 确认 §9.1 人读呈递区已审阅。
 
 ## 10. Functional Requirements
@@ -452,10 +489,12 @@ flowchart TD
 - **FR-5**：`iar run --takeover` 在强警告（点名将中断的在途 Issue 数量）与确认（`--yes` 免确认）下，优雅停 daemon、终止其 agent 子进程、reclaim 在途 Issue，再执行。
 - **FR-6**：手动调度复用既有 `iar roadmap advance`，不给 `iar run` 新增 autopilot 旗标。
 - **FR-7**：目标必填是有意 breaking change，但以 `--all-ready` 提供行为等价迁移并在 release note 标注；Console「开始此 PRD」路径改传 `--issue`。
+- **FR-8**：`iar daemon` 支持 `--autopilot` / `--no-autopilot`，仅覆盖**调度类** autopilot（`autopilot.enabled` 的调度阶段），优先级 `flag > repo .iar.toml > 全局` 并锁定本次常驻进程；缺省跟随配置（每轮热读）。该旗标**不**改变 review 侧自动合并——合并仍由 `safety.auto_merge` + `autopilot.enabled` 双开关决定。
 
 ## 11. Non-Goals
 
-- **不给 `iar run` 加 `--autopilot`**。
+- **不给 `iar run` 加 `--autopilot`**（autopilot 旗标只在 daemon）。
+- **不让 `iar daemon --autopilot` 打开自动合并**（危险双开关不可被临时旗标绕过）。
 - **不保留"无目标即隐式捞队列"**（改由 `--all-ready` 显式）。
 - **不默认接管**；**不用 SIGKILL 首手段停 daemon**。
 - 不给 `iar run` 加 `--concurrency` / 手动并行。
@@ -467,6 +506,7 @@ flowchart TD
 - **接管的破坏性**：`--takeover` 会中断 daemon 当前所有在途 Issue（不只目标）；强警告 + 确认 + release note；reclaim 后会重跑但有重复开销。
 - **优雅停依赖 daemon 终止子进程**：daemon 当前无显式 SIGTERM 钩子，本 PRD 需补一个；否则接管留孤儿 agent，列为交付门禁验证。
 - **未托管 daemon**：只能按锁/PID 定位，需与托管路径一致"优雅停 + reclaim"。
+- **flag 与配置生命周期不一致**：daemon 的 autopilot 配置每轮热读，而 `--autopilot` 是启动锁定；必须文档化 `flag > config`，并说明"传了 flag 后改 `.iar.toml` 不影响本次进程"。
 
 ## 13. Decision Log
 
@@ -479,8 +519,17 @@ flowchart TD
 | D-05 | 接管停机方式 | 优雅停（SIGTERM，超时升级），并终止 agent 树 | SIGKILL 首手段 | 避免孤儿 agent 与 worktree 撞车 |
 | D-06 | run 并行 | 保持串行 | 加 concurrency | 并行归 daemon |
 | D-07 | 手动调度入口 | 复用 iar roadmap advance | 新造 run 侧入口 | 已有入口 |
+| D-08 | daemon autopilot 覆盖 | 启动旗标只覆盖调度（flag>config，锁定本次） | 让 flag 同时 arm 合并 | 保住合并的危险双开关防呆 |
 
 ## Change Log
+
+### 2026-10-05 · 新增 daemon --autopilot（仅调度覆盖）
+- Type: behavior
+- Before: daemon 无 autopilot 旗标，想临时开/关只能改 `.iar.toml`。
+- After: `iar daemon --autopilot` / `--no-autopilot` 按 `flag > repo .iar.toml > 全局` 覆盖**调度类** autopilot，并锁定本次常驻进程；**不** arm 自动合并（合并仍归配置双开关）。
+- Reason: 想按次开/关 autopilot 不必改配置；同时保住合并的"双同意"防呆。
+- Impact: 新增 FR-8、Human Review Map 决策四、oracle rv-8；风险新增 flag/config 生命周期差异；Non-Goals 明确不让旗标 arm 合并。
+- Review: 用户要求新增（2026-10-05）。
 
 ### 2026-10-05 · §2 人审决策经决策板确认
 - Type: doc
