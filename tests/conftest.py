@@ -94,6 +94,26 @@ def _prd_skill_contract_env() -> Iterator[Path | None]:
             os.environ["IAR_PRD_SKILL_PATH"] = previous_value
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_ambient_iar_config() -> Iterator[None]:
+    """在 pytest 会话期间剥离宿主注入的 ``IAR_CONFIG``，保证默认配置解析可测。
+
+    agent runner 在 worktree 里托管执行 ``just test`` 时，会向子进程环境注入
+    ``IAR_CONFIG`` 指向主仓 ``config.toml``（面板托管 runner 读机器级配置的机制）。
+    而套件里有大量用例断言**未设置该变量时**的默认解析路径（cwd 向上查找仓库根
+    ``config.toml``、``iar init`` 回落 ``~/.iar/config.toml``、``preview_env.py``
+    读 tmp_path 下的 ``[preview]``），残留的 ``IAR_CONFIG`` 会顶掉整条查找链，
+    造成只在 runner 环境下失败、普通终端复现不了的污染。需要该变量的用例照旧用
+    ``monkeypatch.setenv("IAR_CONFIG", ...)`` 显式设置，不受这里剥离的影响。
+    """
+    previous_value = os.environ.pop("IAR_CONFIG", None)
+    try:
+        yield
+    finally:
+        if previous_value is not None:
+            os.environ["IAR_CONFIG"] = previous_value
+
+
 class FakeGitHubClient(IGitHubClient):
     """In-memory GitHub client for tests."""
 
