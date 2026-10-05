@@ -7,13 +7,20 @@ dispatcher.
 from __future__ import annotations
 
 import argparse
-import json
 import shlex
 import shutil
 from pathlib import Path
+from typing import Any
 
 from backend.api.cli_console import console, error_console
-
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_helpers import require_single_repository_target
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    CliError,
+    emit,
+    emit_json,
+)
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api import cli as _cli
 from backend.core.shared.models.agent_spec import AGENT_PROFILES
@@ -53,12 +60,7 @@ def run_ask_command(ctx: ParsedCommandContext) -> int:
     )
     for context in contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
-    if len(contexts) != 1:
-        logger.error(
-            "ask requires exactly one target repository. Use --repo or --repo-id to specify."
-        )
-        return 1
-    context = contexts[0]
+    context = require_single_repository_target("ask", contexts)
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     planner_runner = _cli.create_planner_runner(ctx.process_runner, config=context.config)
@@ -126,12 +128,7 @@ def run_repl_command(ctx: ParsedCommandContext) -> int:
     )
     for context in contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
-    if len(contexts) != 1:
-        logger.error(
-            "repl requires exactly one target repository. Use --repo or --repo-id to specify."
-        )
-        return 1
-    context = contexts[0]
+    context = require_single_repository_target("repl", contexts)
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     agent_override = getattr(ctx.parsed, "agent", None)
@@ -170,12 +167,7 @@ def run_deliberate_command(ctx: ParsedCommandContext) -> int:
         repo_id=ctx.repo_id,
         repo_override=ctx.repo_override,
     )
-    if len(contexts) != 1:
-        logger.error(
-            "deliberate requires exactly one target repository. Use --repo or --repo-id to specify."
-        )
-        return 1
-    context = contexts[0]
+    context = require_single_repository_target("deliberate", contexts)
     _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     deliberation_settings = context.config.deliberation
     output_dir = ctx.parsed.output or deliberation_settings.default_output_dir
@@ -268,19 +260,46 @@ def run_deliberate_command(ctx: ParsedCommandContext) -> int:
 
 def run_agent_list_command(ctx: ParsedCommandContext) -> int:
     """``iar agent list``: list registered agents and their profiles (read-only)."""
-    del ctx  # list 只读全局注册表，不需要命令上下文
     config = build_app_config()
+    entries: list[dict[str, Any]] = []
     for agent_name, agent_spec in config.agents.items():
-        console.print(f"[cyan]{agent_name}[/] (bin: {agent_spec.bin}, label: {agent_spec.label})")
-        for profile_name in AGENT_PROFILES:
-            profile_spec = agent_spec.profiles.get(profile_name)
-            if profile_spec is None:
-                continue
-            read_only_mark = "read-only" if profile_spec.read_only else "writable"
+        profiles = [
+            {
+                "profile": profile_name,
+                "prompt_delivery": profile_spec.prompt_delivery,
+                "output_protocol": profile_spec.output_protocol,
+                "read_only": bool(profile_spec.read_only),
+            }
+            for profile_name in AGENT_PROFILES
+            if (profile_spec := agent_spec.profiles.get(profile_name)) is not None
+        ]
+        entries.append(
+            {
+                "agent": agent_name,
+                "bin": agent_spec.bin,
+                "label": agent_spec.label,
+                "profiles": profiles,
+            }
+        )
+
+    def _render() -> None:
+        """按既有人类格式打印条目（与 JSON 共用同一份数据，避免两处各算各的）。"""
+        for entry in entries:
             console.print(
-                f"  {profile_name}: delivery={profile_spec.prompt_delivery}, "
-                f"protocol={profile_spec.output_protocol}, {read_only_mark}"
+                f"[cyan]{entry['agent']}[/] (bin: {entry['bin']}, label: {entry['label']})"
             )
+            for profile in entry["profiles"]:
+                read_only_mark = "read-only" if profile["read_only"] else "writable"
+                console.print(
+                    f"  {profile['profile']}: delivery={profile['prompt_delivery']}, "
+                    f"protocol={profile['output_protocol']}, {read_only_mark}"
+                )
+
+    emit(
+        entries if ctx.output_format == OUTPUT_FORMAT_JSON else None,
+        fmt=ctx.output_format,
+        human_renderer=_render,
+    )
     return 0
 
 
@@ -291,48 +310,60 @@ def _doctor_entry(
     cwd: Path,
     config,  # AppConfig（避免再引入 core 模型的运行时导入开销）
     model_selection=None,  # ModelSelection | None
-) -> tuple[dict[str, object] | None, list[str]]:
+) -> tuple[dict[str, object], list[str]]:
     """构造单个 agent/profile 的 doctor 记录与告警列表。
 
     Returns:
-        ``(entry, warnings)``。任何失败（未注册 agent / 缺 profile /
-        未知展开器 / 协议未注册或加载失败 / 模板缺失的模型绑定）由调用方
-        统一转成报错，这里以 ``entry=None`` 表达。
+        ``(entry, warnings)``。
+
+    Raises:
+        CliError: 任何无法给出 argv 的情况——未注册 agent / 可执行文件缺失 /
+            未声明该用途 / 展开器或模型模板缺失 / 协议未注册。类型分别为
+            ``NOT_FOUND(3)``（查不到东西）与 ``USAGE(2)``（参数组合不成立），
+            由中央调度点渲染，handler 不再自己打印后返回裸退出码。
     """
     warnings: list[str] = []
     try:
         agent_spec = resolve_agent_spec(agent_name, config)
     except UnknownAgentError as exc:
-        error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
-        return None, warnings
+        raise CliError(
+            str(exc),
+            code=ExitCode.NOT_FOUND,
+            suggestion="iar agent list",
+        ) from exc
     if shutil.which(agent_spec.bin) is None:
-        error_console.print(
-            f"[red]doctor failed:[/] executable '{agent_spec.bin}' "
-            f"(agent '{agent_name}') not found in PATH.",
-            markup=False,
+        raise CliError(
+            f"executable '{agent_spec.bin}' (agent '{agent_name}') not found in PATH.",
+            code=ExitCode.NOT_FOUND,
+            suggestion="iar agent list",
         )
-        return None, warnings
     profile_spec = agent_spec.profiles.get(profile)
     if profile_spec is None:
-        error_console.print(
-            f"[red]doctor failed:[/] agent '{agent_name}' has no '{profile}' profile "
+        raise CliError(
+            f"agent '{agent_name}' has no '{profile}' profile "
             f"(declared: {', '.join(agent_spec.profiles)}).",
-            markup=False,
+            code=ExitCode.NOT_FOUND,
+            suggestion=f"iar agent doctor {agent_name} --all-profiles",
         )
-        return None, warnings
     try:
         invocation = build_agent_invocation(
             agent_name, profile, prompt, cwd, config, model_selection=model_selection
         )
     except ValueError as exc:  # 未知展开器 / flag 缺失 / 模型绑定模板缺失
-        error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
-        return None, warnings
+        raise CliError(
+            str(exc),
+            code=ExitCode.USAGE,
+            suggestion="iar agent presets",
+        ) from exc
     registry = get_output_protocol_registry()
     try:
         registry.resolve(invocation.output_protocol)
     except Exception as exc:  # noqa: BLE001 - 协议加载失败必须显式失败，不降级
-        error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
-        return None, warnings
+        raise CliError(
+            str(exc),
+            code=ExitCode.NOT_FOUND,
+            suggestion="iar agent doctor --protocols",
+        ) from exc
     if not profile_spec.read_only and not any(
         marker in (*profile_spec.args, *profile_spec.tail_args)
         for marker in _SANDBOX_APPROVAL_MARKERS
@@ -368,7 +399,7 @@ def _doctor_lifecycle_entry(
     prompt: str,
     cwd: Path,
     config,
-) -> tuple[dict[str, object] | None, list[str]]:
+) -> tuple[dict[str, object], list[str]]:
     """按生命周期阶段视角构造 doctor 记录：解析 agent + 绑定的模型参数。
 
     fix / closeout 没有实现者上下文时如实返回 ``follows_implementation``
@@ -404,16 +435,18 @@ def _doctor_lifecycle_entry(
     entry, warnings = _doctor_entry(
         agent_name, profile_name, prompt, cwd, config, model_selection=model_selection
     )
-    if entry is not None:
-        entry = {"lifecycle": lifecycle, **entry}
-    return entry, warnings
+    return {"lifecycle": lifecycle, **entry}, warnings
 
 
 def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
     """``iar agent doctor <name>...``: print resolved invocations (read-only)."""
     parsed: argparse.Namespace = ctx.parsed
     if getattr(parsed, "protocols", False):
-        for protocol_id in get_output_protocol_registry().list_ids():
+        protocol_ids = list(get_output_protocol_registry().list_ids())
+        if ctx.output_format == OUTPUT_FORMAT_JSON:
+            emit_json(protocol_ids)
+            return 0
+        for protocol_id in protocol_ids:
             print(protocol_id)
         return 0
     config = build_app_config()
@@ -426,19 +459,17 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
         from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_KEYS
 
         if lifecycle_key not in LIFECYCLE_AGENT_KEYS:
-            error_console.print(
-                f"[red]doctor failed:[/] unknown lifecycle key '{lifecycle_key}'. "
+            raise CliError(
+                f"unknown lifecycle key '{lifecycle_key}'. "
                 f"Valid keys: {', '.join(LIFECYCLE_AGENT_KEYS)}.",
-                markup=False,
+                code=ExitCode.USAGE,
+                suggestion="iar agent doctor --lifecycle implementation",
             )
-            return 1
         entry, warnings = _doctor_lifecycle_entry(lifecycle_key, prompt, cwd, config)
-        if entry is None:
-            return 1
         for warning in warnings:
             error_console.print(f"[yellow]WARN:[/] {warning}", markup=False)
-        if getattr(parsed, "json_output", False):
-            print(json.dumps([entry], indent=2, ensure_ascii=False))
+        if ctx.output_format == OUTPUT_FORMAT_JSON:
+            emit_json([entry])
             return 0
         console.print(f"[cyan]{entry['lifecycle']}[/] · {entry.get('agent')}")
         if entry.get("follows_implementation"):
@@ -472,21 +503,27 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
                 effort_override=getattr(parsed, "reasoning_effort", None),
             )
         except ValueError as exc:
-            error_console.print(f"[red]doctor failed:[/] {exc}", markup=False)
-            return 1
+            raise CliError(
+                str(exc),
+                code=ExitCode.USAGE,
+                suggestion="iar agent presets",
+            ) from exc
     else:
         if getattr(parsed, "model", None) or getattr(parsed, "reasoning_effort", None):
-            error_console.print(
-                "[red]doctor failed:[/] --model / --reasoning-effort require --preset.",
-                markup=False,
+            raise CliError(
+                "--model / --reasoning-effort require --preset.",
+                code=ExitCode.USAGE,
+                suggestion="iar agent doctor --preset <name> --model <id>",
             )
-            return 1
         preset_selection = None
 
     agent_names: list[str] = list(parsed.agent_names)
     if not agent_names:
-        error_console.print("[red]doctor failed:[/] no agent name given.", markup=False)
-        return 1
+        raise CliError(
+            "no agent name given.",
+            code=ExitCode.USAGE,
+            suggestion="iar agent list",
+        )
     profile_names = list(AGENT_PROFILES) if getattr(parsed, "all_profiles", False) else ["run"]
     entries: list[dict[str, object]] = []
     for agent_name in agent_names:
@@ -499,15 +536,13 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
                 config,
                 model_selection=preset_selection,
             )
-            if entry is None:
-                return 1
             for warning in warnings:
                 # WARN 走 stderr：`--json` 的 stdout 重定向（黄金快照 diff）不能被污染。
                 error_console.print(f"[yellow]WARN:[/] {warning}", markup=False)
             entries.append(entry)
     entries.sort(key=lambda entry: (str(entry["agent"]), str(entry["profile"])))
-    if getattr(parsed, "json_output", False):
-        print(json.dumps(entries, indent=2, ensure_ascii=False))
+    if ctx.output_format == OUTPUT_FORMAT_JSON:
+        emit_json(entries)
         return 0
     for entry in entries:
         console.print(f"[cyan]{entry['agent']}[/] · {entry['profile']}")
@@ -521,21 +556,38 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
 
 def run_agent_presets_command(ctx: ParsedCommandContext) -> int:
     """``iar agent presets``: list defined model presets (read-only)."""
-    del ctx  # 只读全局配置，不需要命令上下文
     config = build_app_config()
-    if not config.agent_presets:
-        console.print(
-            "No model presets defined. Declare [agent_runner.presets.<name>] in "
-            "config.toml / .iar.toml (fields: agent / model / reasoning_effort).",
-            markup=False,
-        )
-        return 0
-    for preset_name, preset in config.agent_presets.items():
-        console.print(
-            f"[cyan]{preset_name}[/] · agent: {preset.agent} · "
-            f"model: {preset.model or '-'} · reasoning_effort: {preset.reasoning_effort or '-'}",
-            markup=False,
-        )
+    preset_entries = [
+        {
+            "preset": preset_name,
+            "agent": preset.agent,
+            "model": preset.model,
+            "reasoning_effort": preset.reasoning_effort,
+        }
+        for preset_name, preset in config.agent_presets.items()
+    ]
+
+    def _render() -> None:
+        if not preset_entries:
+            console.print(
+                "No model presets defined. Declare [agent_runner.presets.<name>] in "
+                "config.toml / .iar.toml (fields: agent / model / reasoning_effort).",
+                markup=False,
+            )
+            return
+        for entry in preset_entries:
+            console.print(
+                f"[cyan]{entry['preset']}[/] · agent: {entry['agent']} · "
+                f"model: {entry['model'] or '-'} · "
+                f"reasoning_effort: {entry['reasoning_effort'] or '-'}",
+                markup=False,
+            )
+
+    emit(
+        preset_entries if ctx.output_format == OUTPUT_FORMAT_JSON else None,
+        fmt=ctx.output_format,
+        human_renderer=_render,
+    )
     return 0
 
 

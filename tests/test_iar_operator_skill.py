@@ -109,6 +109,33 @@ def test_packaged_skill_command_examples_match_cli_help() -> None:
         ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
         ("worktree", "path"): {"--branch"},
         ("agent", "presets"): set(),
+        # ask / deliberate 的 --output 是输出目录，不是格式；取值集合取自
+        # ``iar schema --json`` 的运行时派生结果，而非人工记忆。
+        ("ask",): {
+            "--agent",
+            "--plan-only",
+            "--execute",
+            "--yes",
+            "--output",
+            "--preset",
+            "--model",
+            "--reasoning-effort",
+            "--repo",
+            "--repo-id",
+            "--config",
+        },
+        ("deliberate",): {
+            "--agents",
+            "--rounds",
+            "--synthesizer",
+            "--output",
+            "--session-id",
+            "--strict",
+            "--repo",
+            "--repo-id",
+            "--config",
+        },
+        ("schema",): {"--json", "--output"},
         ("agent", "doctor"): {
             "--all-profiles",
             "--json",
@@ -163,6 +190,35 @@ def test_packaged_skill_keeps_conflict_protection_guidance() -> None:
     text = _skill_text()
     assert "preserved by default" in text
     assert "--force" in text
+
+
+def test_packaged_skill_documents_machine_output_contract() -> None:
+    """机读契约（FR-1/FR-3/FR-5/FR-6）必须写进随包 Skill，agent 才不必猜。
+
+    断言的是「文档里有哪些可执行事实」：显式 ``--json``、默认仍是人类表格、
+    stdout 只承载数据、stderr envelope 字段、完整退出码表、``iar schema --json``
+    自省入口，以及 ``ask``/``deliberate`` 的 ``--output`` 目录例外。
+    """
+    text = _skill_text()
+    assert "`--json` is an alias of `--output json`" in text
+    assert "stdout carries data only" in text
+    for envelope_field in ('"error"', '"message"', '"suggestion"', '"retryable"', '"exit_code"'):
+        assert envelope_field in text, f"SKILL.md 未列出 envelope 字段 {envelope_field}"
+    # 表里的 Name 列必须是 envelope 的 ``error`` 取值本身：agent 靠它把 $? 和 stderr 对上。
+    for error_token in (
+        "`ok`",
+        "`usage_error`",
+        "`not_found`",
+        "`permission_denied`",
+        "`conflict`",
+        "`dry_run_ok`",
+    ):
+        assert error_token in text, f"SKILL.md 退出码表缺少 envelope 取值 {error_token}"
+    assert "exit_codes.values" in text
+    for code in ("`0`", "`1`", "`2`", "`3`", "`4`", "`5`", "`10`"):
+        assert code in text, f"SKILL.md 退出码表缺少 {code}"
+    assert "iar schema --json" in text
+    assert "output **directory**" in text
 
 
 def test_packaged_skill_documents_triage_paths() -> None:

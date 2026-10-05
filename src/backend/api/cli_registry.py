@@ -11,7 +11,19 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from rich.text import Text
+
 from backend.api.cli_console import console, error_console
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_helpers import repository_selector_error
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    OUTPUT_FORMAT_TABLE,
+    CliError,
+    emit,
+    emit_ndjson,
+    resolve_output_format,
+)
 from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
     RunnerProcessRecord,
@@ -65,6 +77,24 @@ def _run_registry_scan_command(parsed: argparse.Namespace) -> int:
     raise NotImplementedError("Use backend.api.cli for scan/sync dispatch.")
 
 
+def _registry_repo_not_found(repo_id: str) -> CliError:
+    """注册表里查无此仓库：语义退出码 3，并给出如何找到合法 repo-id 的命令。"""
+    return CliError(
+        f"Repository '{repo_id}' not found in registry.",
+        code=ExitCode.NOT_FOUND,
+        suggestion="iar registry list",
+    )
+
+
+def _registry_path_not_found(repo_path: Path) -> CliError:
+    """注册表指向的目录已不存在：语义退出码 3。"""
+    return CliError(
+        f"Repository path does not exist: {repo_path}",
+        code=ExitCode.NOT_FOUND,
+        suggestion="iar registry reinit --repo-id <id>",
+    )
+
+
 def _run_registry_reinit_command(parsed: argparse.Namespace, process_runner: IProcessRunner) -> int:
     """Re-initialize an already registered repository's local config."""
     editor = create_registry_editor()
@@ -72,14 +102,12 @@ def _run_registry_reinit_command(parsed: argparse.Namespace, process_runner: IPr
 
     entries = {entry.repo_id: entry for entry in editor.list_repositories()}
     if repo_id not in entries:
-        error_console.print(f"[red]Repository '{repo_id}' not found in registry.[/]")
-        return 1
+        raise _registry_repo_not_found(repo_id)
 
     entry = entries[repo_id]
     repo_path = Path(entry.path).expanduser()
     if not repo_path.exists():
-        error_console.print(f"[red]Repository path does not exist:[/] {repo_path}")
-        return 1
+        raise _registry_path_not_found(repo_path)
 
     try:
         initialize_repository_local_config(
@@ -115,8 +143,7 @@ def _run_registry_remove_command(parsed: argparse.Namespace, process_runner: IPr
 
     entries = {entry.repo_id: entry for entry in editor.list_repositories()}
     if repo_id not in entries:
-        error_console.print(f"[red]Repository '{repo_id}' not found in registry.[/]")
-        return 1
+        raise _registry_repo_not_found(repo_id)
 
     stop_result = stop_repository_persistent_processes(
         repo_id=repo_id,
@@ -139,7 +166,25 @@ def _run_registry_remove_command(parsed: argparse.Namespace, process_runner: IPr
     return 0
 
 
-def _run_registry_list_command(process_runner: IProcessRunner) -> int:
+def _machine_process_status(
+    running: dict[str, list[tuple[str, bool]]], kind: str
+) -> dict[str, Any]:
+    """``registry list`` 机器模式的进程状态：状态 + 受管 pid + 非受管计数。"""
+    entries = running.get(kind, [])
+    managed_ids = [process_id for process_id, is_managed in entries if is_managed]
+    return {
+        "status": "running" if entries else "stopped",
+        "process_ids": managed_ids,
+        "unmanaged_count": sum(1 for _, is_managed in entries if not is_managed),
+        "managed": bool(managed_ids),
+    }
+
+
+def _run_registry_list_command(
+    process_runner: IProcessRunner,
+    *,
+    fmt: str = OUTPUT_FORMAT_TABLE,
+) -> int:
     """List all registered repositories and their daemon status."""
     from rich.table import Table
 
@@ -170,26 +215,44 @@ def _run_registry_list_command(process_runner: IProcessRunner) -> int:
             (record.process_id, False)
         )
 
-    table = Table(title="Registered repositories")
-    table.add_column("repo_id", style="cyan")
-    table.add_column("display_name")
-    table.add_column("path", overflow="fold")
-    table.add_column("daemon", style="green")
-    table.add_column("review-daemon", style="green")
+    def _render_table() -> None:
+        table = Table(title="Registered repositories")
+        table.add_column("repo_id", style="cyan")
+        table.add_column("display_name")
+        table.add_column("path", overflow="fold")
+        table.add_column("daemon", style="green")
+        table.add_column("review-daemon", style="green")
 
-    for entry in registry_entries:
-        repo_running = running.get(entry.repo_id, {})
-        daemon = _format_process_status(repo_running, _DAEMON_KIND)
-        review_daemon = _format_process_status(repo_running, _REVIEW_DAEMON_KIND)
-        table.add_row(
-            entry.repo_id,
-            entry.display_name or "",
-            entry.path,
-            daemon,
-            review_daemon,
-        )
+        for entry in registry_entries:
+            repo_running = running.get(entry.repo_id, {})
+            table.add_row(
+                entry.repo_id,
+                entry.display_name or "",
+                entry.path,
+                _format_process_status(repo_running, _DAEMON_KIND),
+                _format_process_status(repo_running, _REVIEW_DAEMON_KIND),
+            )
 
-    console.print(table)
+        console.print(table)
+
+    emit(
+        [
+            {
+                "repo_id": entry.repo_id,
+                "display_name": entry.display_name or "",
+                "path": entry.path,
+                "daemon": _machine_process_status(running.get(entry.repo_id, {}), _DAEMON_KIND),
+                "review_daemon": _machine_process_status(
+                    running.get(entry.repo_id, {}), _REVIEW_DAEMON_KIND
+                ),
+            }
+            for entry in registry_entries
+        ]
+        if fmt == OUTPUT_FORMAT_JSON
+        else None,
+        fmt=fmt,
+        human_renderer=_render_table,
+    )
     return 0
 
 
@@ -209,12 +272,14 @@ def _run_registry_start_command(parsed: argparse.Namespace, process_runner: IPro
     else:
         repo_id = parsed.repo_id
         if repo_id not in settings.repositories:
-            error_console.print(f"[red]Repository '{repo_id}' not found in registry.[/]")
-            return 1
+            raise _registry_repo_not_found(repo_id)
         repo_entry = settings.repositories[repo_id]
         if not repo_entry.enabled:
-            error_console.print(f"[red]Repository '{repo_id}' is disabled.[/]")
-            return 1
+            raise CliError(
+                f"Repository '{repo_id}' is disabled.",
+                code=ExitCode.PERMISSION,
+                suggestion=f"iar registry reinit --repo-id {repo_id}",
+            )
         repo_ids = [repo_id]
 
     if not repo_ids:
@@ -406,14 +471,22 @@ def _run_daemon_status_command(
     """Show running daemon and review-daemon processes for selected repos."""
     from rich.table import Table
 
-    contexts = resolve_repository_targets(
-        runner_settings,
-        repo_id=repo_id,
-        repo_path_override=repo_override,
-        all_repositories=getattr(parsed, "all_repositories", False),
-    )
+    fmt = resolve_output_format(parsed)
+    try:
+        contexts = resolve_repository_targets(
+            runner_settings,
+            repo_id=repo_id,
+            repo_path_override=repo_override,
+            all_repositories=getattr(parsed, "all_repositories", False),
+        )
+    except ValueError as exc:
+        raise repository_selector_error(exc) from exc
     if not contexts:
-        console.print("[yellow]No repositories selected.[/]")
+        message = "No repositories selected."
+        if fmt == OUTPUT_FORMAT_JSON:
+            error_console.print(message)
+        else:
+            console.print(f"[yellow]{message}[/]")
         return 0
 
     target_repo_ids = {context.repo_id for context in contexts}
@@ -437,37 +510,63 @@ def _run_daemon_status_command(
             running_records.append((record, False))
 
     if not running_records:
+        if fmt == OUTPUT_FORMAT_JSON:
+            emit([], fmt=fmt)
+            return 0
         console.print("[yellow]No running daemon processes for the selected repositories.[/]")
         return 0
 
-    table = Table(title="Daemon status")
-    table.add_column("repo_id", style="cyan")
-    table.add_column("kind", style="green")
-    table.add_column("status")
-    table.add_column("pid", justify="right")
-    table.add_column("process_id")
-    table.add_column("started_at")
-    table.add_column("log_path", overflow="fold")
-    table.add_column("executable", overflow="fold")
-    table.add_column("command", overflow="fold")
+    def _render_table() -> None:
+        table = Table(title="Daemon status")
+        table.add_column("repo_id", style="cyan")
+        table.add_column("kind", style="green")
+        table.add_column("status")
+        table.add_column("pid", justify="right")
+        table.add_column("process_id")
+        table.add_column("started_at")
+        table.add_column("log_path", overflow="fold")
+        table.add_column("executable", overflow="fold")
+        table.add_column("command", overflow="fold")
 
-    for record, is_managed in running_records:
-        status_text = "[green]managed running[/]" if is_managed else "[yellow]unmanaged running[/]"
-        executable = _resolve_executable_from_command(record.command)
-        log_path_display = record.log_path or "-"
-        table.add_row(
-            record.repo_id,
-            record.kind,
-            status_text,
-            str(record.pid),
-            record.process_id,
-            record.started_at,
-            log_path_display,
-            executable,
-            " ".join(record.command),
-        )
+        for record, is_managed in running_records:
+            status_text = (
+                "[green]managed running[/]" if is_managed else "[yellow]unmanaged running[/]"
+            )
+            table.add_row(
+                record.repo_id,
+                record.kind,
+                status_text,
+                str(record.pid),
+                record.process_id,
+                record.started_at,
+                record.log_path or "-",
+                _resolve_executable_from_command(record.command),
+                " ".join(record.command),
+            )
 
-    console.print(table)
+        console.print(table)
+
+    emit(
+        [
+            {
+                "repo_id": record.repo_id,
+                "kind": record.kind,
+                "managed": is_managed,
+                "status": record.status,
+                "pid": record.pid,
+                "process_id": record.process_id,
+                "started_at": record.started_at,
+                "log_path": record.log_path,
+                "executable": _resolve_executable_from_command(record.command),
+                "command": list(record.command),
+            }
+            for record, is_managed in running_records
+        ]
+        if fmt == OUTPUT_FORMAT_JSON
+        else None,
+        fmt=fmt,
+        human_renderer=_render_table,
+    )
     return 0
 
 
@@ -540,6 +639,11 @@ def _trim_to_last_lines(content: str, lines: int) -> str:
     return "\n".join(split_lines[-lines:]) + "\n"
 
 
+def _log_rows_from_content(content: str) -> list[dict[str, str]]:
+    """把日志文本按行切成 NDJSON 记录（机器模式：stdout 每行一条 JSON）。"""
+    return [{"line": line} for line in content.splitlines()]
+
+
 def _format_logs_initial_payload(
     *,
     initial_chunk: Any,
@@ -558,7 +662,21 @@ def _format_logs_initial_payload(
     return "".join(pieces)
 
 
-def _print_logs_fallback(repo_id: str, kind: str) -> int:
+def _log_notice(message: str, *, fmt: str, style: str = "yellow", to_error: bool = False) -> None:
+    """日志提示分流：人类模式带样式，机器模式纯文本走 stderr。
+
+    机器模式 stdout 只承载数据，因此所有提示改绑 stderr；``to_error`` 保留人类模式下
+    原本就走 stderr 的那几条（流归属不随重构改变）。``soft_wrap=True`` 是刻意的：
+    这些提示含长路径与 attempt id，Rich 默认按 80 列折行会把一句话拆成多行。
+    """
+    if fmt == OUTPUT_FORMAT_JSON:
+        error_console.print(message, markup=False, soft_wrap=True)
+        return
+    target = error_console if to_error else console
+    target.print(Text.assemble((message, style)), soft_wrap=True)
+
+
+def _print_logs_fallback(repo_id: str, kind: str, *, fmt: str = OUTPUT_FORMAT_TABLE) -> int:
     """Print a fallback hint when no running or historical log is available."""
     supervisor = create_process_supervisor()
     all_records = supervisor.list_processes()
@@ -576,29 +694,35 @@ def _print_logs_fallback(repo_id: str, kind: str) -> int:
         None,
     )
     if recent_with_log:
-        console.print(
-            f"[yellow]No running {kind} process for '{repo_id}'.[/]\n"
-            f"Most recent process log: [cyan]{recent_with_log.log_path}[/]"
+        message = (
+            f"No running {kind} process for '{repo_id}'.\n"
+            f"Most recent process log: {recent_with_log.log_path}"
         )
     else:
         # ``daily_log_path()`` 经 api→core→engines→infrastructure 的既有转出链拿到，
         # 不传参数时返回的就是日志模块此刻真正在写的那个文件，所以即使 ``LOG_FILE``
         # 指到 ``<root>/logs`` 之外，这条提示也不会再指向没人写的文件。
         app_log_path = daily_log_path()
-        console.print(
-            f"[yellow]No running {kind} process for '{repo_id}' "
-            "and no process log records found.[/]\n"
-            f"Global app log: [cyan]{app_log_path}[/]"
+        message = (
+            f"No running {kind} process for '{repo_id}' "
+            "and no process log records found.\n"
+            f"Global app log: {app_log_path}"
         )
+    _log_notice(message, fmt=fmt)
     return 0
 
 
-def _print_issue_log_selection(selection: IssueLogSelection, *, issue_number: int) -> None:
-    """把一次 Issue 日志读取结果写到原始终端。"""
+def _print_issue_log_selection(
+    selection: IssueLogSelection, *, issue_number: int, fmt: str = OUTPUT_FORMAT_TABLE
+) -> None:
+    """把一次 Issue 日志读取结果写到终端：机器模式只把内容行输出到 stdout。"""
     notice = describe_issue_log_status(selection, issue_number=issue_number)
     if notice:
-        console.print(f"[yellow]{notice}[/]")
+        _log_notice(notice, fmt=fmt)
     if selection.content:
+        if fmt == OUTPUT_FORMAT_JSON:
+            emit_ndjson(_log_rows_from_content(selection.content))
+            return
         # 内容本身可能跨多次 read 拼出，避免 Rich 把 Agent 文本当 markup 解析。
         print(selection.content, end="")
 
@@ -610,12 +734,19 @@ def _follow_issue_log(
     lines: int,
     follow: bool,
     contexts: list[Any],
+    fmt: str = OUTPUT_FORMAT_TABLE,
 ) -> int:
     """读取一个 Issue 的输出；``follow`` 为真时持续跟随直到结束或 Ctrl-C。
 
     首次给尾部窗口；之后按字节偏移轮询。重试产生新尝试时提示并切换；
     尝试被清理、日志被截断、Issue 结束且日志稳定后退出。
     """
+    machine_mode = fmt == OUTPUT_FORMAT_JSON
+
+    def _notice(message: str, *, style: str = "yellow") -> None:
+        """进度/状态提示：人类模式带样式，机器模式纯文本走 stderr。"""
+        _log_notice(message, fmt=fmt, style=style)
+
     repo_path_by_id = {context.repo_id: context.repo_path for context in contexts}
     reader = create_issue_log_reader(repo_path_by_id.get)
 
@@ -631,10 +762,13 @@ def _follow_issue_log(
         tail=True,
     )
     if selection.status is IssueLogStatus.REPO_NOT_FOUND:
-        console.print(f"[yellow]Repository '{repo_id}' 未注册或已禁用。[/]")
-        return 1
+        raise CliError(
+            f"Repository '{repo_id}' is not registered or is disabled.",
+            code=ExitCode.NOT_FOUND,
+            suggestion="iar registry list",
+        )
     if selection.status is IssueLogStatus.NO_ATTEMPT:
-        console.print(f"[yellow]Issue #{issue_number} 暂无可用输出（尚未开始或日志已清理）。[/]")
+        _notice(f"Issue #{issue_number} 暂无可用输出（尚未开始或日志已清理）。")
         return 0
 
     current_attempt_id = selection.attempt_id
@@ -649,6 +783,7 @@ def _follow_issue_log(
                 eof=selection.eof,
             ),
             issue_number=issue_number,
+            fmt=fmt,
         )
     next_offset = selection.next_offset
 
@@ -681,10 +816,7 @@ def _follow_issue_log(
         )
 
         if selection.status is IssueLogStatus.ATTEMPT_GONE:
-            console.print(
-                f"[yellow]Issue #{issue_number} 的尝试 {current_attempt_id} 已不可用；"
-                "切换至最新尝试。[/]"
-            )
+            _notice(f"Issue #{issue_number} 的尝试 {current_attempt_id} 已不可用；切换至最新尝试。")
             # 重新定位到最新尝试（偏移重置，避免把旧偏移拼到新文件）。
             selection = read_issue_log(
                 reader=reader,
@@ -695,17 +827,15 @@ def _follow_issue_log(
                 max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
             )
             if selection.status is not IssueLogStatus.OK:
-                _print_issue_log_selection(selection, issue_number=issue_number)
+                _print_issue_log_selection(selection, issue_number=issue_number, fmt=fmt)
                 return 0
             current_attempt_id = selection.attempt_id
             next_offset = selection.next_offset
-            _print_issue_log_selection(selection, issue_number=issue_number)
+            _print_issue_log_selection(selection, issue_number=issue_number, fmt=fmt)
             continue
 
         if selection.status is IssueLogStatus.TRUNCATED:
-            console.print(
-                f"[yellow]Issue #{issue_number} 的日志已轮转或截断，已从最新位置续读。[/]"
-            )
+            _notice(f"Issue #{issue_number} 的日志已轮转或截断，已从最新位置续读。")
             selection = read_issue_log(
                 reader=reader,
                 repo_id=repo_id,
@@ -715,19 +845,23 @@ def _follow_issue_log(
                 max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
             )
             if selection.status is not IssueLogStatus.OK:
-                _print_issue_log_selection(selection, issue_number=issue_number)
+                _print_issue_log_selection(selection, issue_number=issue_number, fmt=fmt)
                 return 0
             next_offset = selection.next_offset
-            _print_issue_log_selection(selection, issue_number=issue_number)
+            _print_issue_log_selection(selection, issue_number=issue_number, fmt=fmt)
             continue
 
         if selection.status is IssueLogStatus.NO_ATTEMPT:
-            _print_issue_log_selection(selection, issue_number=issue_number)
+            _print_issue_log_selection(selection, issue_number=issue_number, fmt=fmt)
             return 0
 
         if selection.status is IssueLogStatus.REPO_NOT_FOUND:
-            _print_issue_log_selection(selection, issue_number=issue_number)
-            return 1
+            _print_issue_log_selection(selection, issue_number=issue_number, fmt=fmt)
+            raise CliError(
+                f"Repository '{repo_id}' is not registered or is disabled.",
+                code=ExitCode.NOT_FOUND,
+                suggestion="iar registry list",
+            )
 
         # 检测是否出现了新尝试（重试/新执行）。
         if (
@@ -735,9 +869,10 @@ def _follow_issue_log(
             and selection.attempt_id is not None
             and selection.latest_attempt_id != selection.attempt_id
         ):
-            console.print(
-                f"[dim](new attempt detected: {selection.attempt_id} -> "
-                f"{selection.latest_attempt_id})[/]"
+            _notice(
+                f"(new attempt detected: {selection.attempt_id} -> "
+                f"{selection.latest_attempt_id})",
+                style="dim",
             )
             selection = read_issue_log(
                 reader=reader,
@@ -749,11 +884,14 @@ def _follow_issue_log(
             )
             current_attempt_id = selection.attempt_id
             next_offset = selection.next_offset
-            _print_issue_log_selection(selection, issue_number=issue_number)
+            _print_issue_log_selection(selection, issue_number=issue_number, fmt=fmt)
             continue
 
         if selection.content:
-            print(selection.content, end="")
+            if machine_mode:
+                emit_ndjson(_log_rows_from_content(selection.content))
+            else:
+                print(selection.content, end="")
             last_progress_at = time.monotonic()
             idle_notice_shown = False
             if ATTEMPT_END_MARKER in selection.content:
@@ -762,25 +900,28 @@ def _follow_issue_log(
         if selection.eof:
             # 读到**本尝试**的终态标记：运行确实结束了，正常退出。
             if attempt_end_attempt_id == current_attempt_id:
-                print(
-                    f"\n[dim](Issue #{issue_number} attempt {current_attempt_id} "
-                    "finished; tail ends here)[/]"
+                _notice(
+                    f"\n(Issue #{issue_number} attempt {current_attempt_id} "
+                    "finished; tail ends here)",
+                    style="dim",
                 )
                 return 0
             # 旧日志（功能上线前产生、没有标记）的兜底：长时间无增长才收尾，
             # 而不是一遇到 EOF 就把「这一刻没有新字节」当成运行结束。
             idle_seconds = time.monotonic() - last_progress_at
             if idle_seconds >= _FOLLOW_IDLE_EXIT_SECONDS:
-                print(
-                    f"\n[dim](Issue #{issue_number} attempt {current_attempt_id} log idle "
+                _notice(
+                    f"\n(Issue #{issue_number} attempt {current_attempt_id} log idle "
                     f"for {int(idle_seconds)}s without an end marker; tail ends here. "
-                    "Logs written before the end marker existed cannot signal completion.)[/]"
+                    "Logs written before the end marker existed cannot signal completion.)",
+                    style="dim",
                 )
                 return 0
             if not idle_notice_shown:
-                print(
-                    f"[dim](no new output yet; still following attempt {current_attempt_id}, "
-                    "Ctrl-C to stop)[/]"
+                _notice(
+                    f"(no new output yet; still following attempt {current_attempt_id}, "
+                    "Ctrl-C to stop)",
+                    style="dim",
                 )
                 idle_notice_shown = True
 
@@ -799,29 +940,37 @@ def _run_logs_command(
     """
     del process_runner  # Unused; kept for dispatch signature parity with sibling handlers.
 
+    fmt = resolve_output_format(parsed)
+    machine_mode = fmt == OUTPUT_FORMAT_JSON
+
     supervisor = create_process_supervisor()
 
-    contexts = resolve_repository_targets(
-        runner_settings,
-        repo_id=repo_id,
-        repo_path_override=repo_override,
-        all_repositories=getattr(parsed, "all_repositories", False),
-    )
-    if len(contexts) != 1:
-        error_console.print(
-            "[red]iar logs requires exactly one target repository. "
-            "Use --repo or --repo-id to specify.[/]"
+    try:
+        contexts = resolve_repository_targets(
+            runner_settings,
+            repo_id=repo_id,
+            repo_path_override=repo_override,
+            all_repositories=getattr(parsed, "all_repositories", False),
         )
-        return 1
+    except ValueError as exc:
+        raise repository_selector_error(exc) from exc
+    if len(contexts) != 1:
+        raise CliError(
+            "iar logs requires exactly one target repository. "
+            "Use --repo or --repo-id to specify.",
+            code=ExitCode.USAGE,
+            suggestion="iar registry list",
+        )
     context = contexts[0]
 
     kind = getattr(parsed, "kind", None) or _DAEMON_KIND
     if kind not in (_DAEMON_KIND, _REVIEW_DAEMON_KIND):
-        error_console.print(
-            f"[red]Unsupported --kind value:[/] {kind!r}. "
-            f"Use '{_DAEMON_KIND}' or '{_REVIEW_DAEMON_KIND}'."
+        raise CliError(
+            f"Unsupported --kind value: {kind!r}. "
+            f"Use '{_DAEMON_KIND}' or '{_REVIEW_DAEMON_KIND}'.",
+            code=ExitCode.USAGE,
+            suggestion=f"iar logs --kind {_DAEMON_KIND}",
         )
-        return 1
 
     issue_number = getattr(parsed, "issue", None)
     if issue_number is not None:
@@ -832,10 +981,11 @@ def _run_logs_command(
             getattr(parsed, "kind", None) is not None and kind != _DAEMON_KIND
         )
         if kind_explicit:
-            error_console.print(
-                "[red]--issue and --kind are mutually exclusive; use one or the other.[/]"
+            raise CliError(
+                "--issue and --kind are mutually exclusive; use one or the other.",
+                code=ExitCode.USAGE,
+                suggestion="iar logs --issue 1",
             )
-            return 2
 
     lines = int(getattr(parsed, "lines", _LOGS_DEFAULT_LINES) or _LOGS_DEFAULT_LINES)
     follow = bool(getattr(parsed, "follow", False))
@@ -847,13 +997,14 @@ def _run_logs_command(
             lines=lines,
             follow=follow,
             contexts=contexts,
+            fmt=fmt,
         )
 
     records = supervisor.list_processes()
     selected = _select_logs_record(records, context.repo_id, kind)
 
     if selected is None or not selected.log_path or not Path(selected.log_path).exists():
-        return _print_logs_fallback(context.repo_id, kind)
+        return _print_logs_fallback(context.repo_id, kind, fmt=fmt)
 
     start_offset = _compute_tail_window_offset(selected.log_path, lines)
     initial_chunk = tail_runner_log(
@@ -863,15 +1014,18 @@ def _run_logs_command(
         max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
     )
 
-    print(
-        _format_logs_initial_payload(
-            initial_chunk=initial_chunk,
-            log_path=selected.log_path,
-            requested_start_offset=start_offset,
-            lines=lines,
-        ),
-        end="",
-    )
+    if machine_mode:
+        emit_ndjson(_log_rows_from_content(_trim_to_last_lines(initial_chunk.content, lines)))
+    else:
+        print(
+            _format_logs_initial_payload(
+                initial_chunk=initial_chunk,
+                log_path=selected.log_path,
+                requested_start_offset=start_offset,
+                lines=lines,
+            ),
+            end="",
+        )
 
     next_offset = initial_chunk.next_offset
     if not follow:
@@ -885,13 +1039,12 @@ def _run_logs_command(
         try:
             latest = supervisor.get_process(selected.process_id)
         except KeyError:
-            error_console.print(
-                f"[yellow]Process {selected.process_id} is no longer registered.[/]"
-            )
-            return 0
+            latest = None
         if latest is None:
-            error_console.print(
-                f"[yellow]Process {selected.process_id} is no longer registered.[/]"
+            _log_notice(
+                f"Process {selected.process_id} is no longer registered.",
+                fmt=fmt,
+                to_error=True,
             )
             return 0
         chunk = tail_runner_log(
@@ -901,11 +1054,16 @@ def _run_logs_command(
             max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
         )
         if chunk.content:
-            print(chunk.content, end="")
+            if machine_mode:
+                emit_ndjson(_log_rows_from_content(chunk.content))
+            else:
+                print(chunk.content, end="")
         next_offset = chunk.next_offset
         if latest.status != "running" and chunk.eof:
-            print(
-                f"\n[dim](process exited; status={latest.status}, "
-                f"exit_code={latest.exit_code}; tail ends here)[/]"
+            _log_notice(
+                f"\n(process exited; status={latest.status}, "
+                f"exit_code={latest.exit_code}; tail ends here)",
+                fmt=fmt,
+                style="dim",
             )
             return 0

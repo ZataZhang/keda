@@ -11,8 +11,10 @@ probe.
 
 from __future__ import annotations
 
-from backend.api.cli_console import console, error_console
+from backend.api.cli_console import console
+from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_helpers import _resolve_cli_repository_targets
+from backend.api.cli_output import CliError
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api import cli as _cli
 
@@ -64,9 +66,12 @@ def run_backlog_advance_command(ctx: ParsedCommandContext) -> int:
         repo_override=ctx.repo_override,
     )
     if len(contexts) != 1:
-        error_console.print("[red]backlog advance requires exactly one target repository.[/]")
-        error_console.print("Use --repo or --repo-id to select it.")
-        return 1
+        raise CliError(
+            "backlog advance requires exactly one target repository. "
+            "Use --repo or --repo-id to select it.",
+            code=ExitCode.USAGE,
+            suggestion="iar registry list",
+        )
 
     context = contexts[0]
     dry_run = bool(getattr(ctx.parsed, "dry_run", False))

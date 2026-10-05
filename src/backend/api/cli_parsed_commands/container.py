@@ -16,6 +16,8 @@ import subprocess
 from pathlib import Path
 
 from backend.api.cli_console import console
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import CliError
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.core.use_cases.agent_runner_container import (
     StartRunnerContainerOptions,
@@ -71,11 +73,12 @@ def _format_env_preview(env: dict[str, str]) -> str:
 def run_container_auth_import_command(ctx: ParsedCommandContext) -> int:
     """``iar container auth import``：把本机认证快照到容器专用目录。"""
     if ctx.repo_id is not None or ctx.repo_override is not None or ctx.parsed.config is not None:
-        console.print(
-            "[red]iar container auth import uses the host's current profile; "
-            "omit --repo/--repo-id/--config.[/]"
+        raise CliError(
+            "iar container auth import uses the host's current profile; "
+            "omit --repo/--repo-id/--config.",
+            code=ExitCode.USAGE,
+            suggestion="iar container auth import --help",
         )
-        return 1
 
     importer = create_default_container_auth_importer()
     result = import_container_auth(importer)
@@ -103,11 +106,12 @@ def run_container_up_command(ctx: ParsedCommandContext) -> int:
     parsed = ctx.parsed
     repo_path = _resolve_repo_path(parsed)
     if repo_path is None:
-        console.print(
-            "[red]Missing --repo (or REPO_PATH env). "
-            "Pass the absolute path of the Git repository to mount.[/]"
+        raise CliError(
+            "Missing --repo (or REPO_PATH env). "
+            "Pass the absolute path of the Git repository to mount.",
+            code=ExitCode.USAGE,
+            suggestion="iar container up --help",
         )
-        return 1
 
     repo_id = _resolve_repo_id(parsed)
     gh_token = _resolve_gh_token(parsed)
@@ -129,14 +133,17 @@ def run_container_up_command(ctx: ParsedCommandContext) -> int:
     try:
         result = start_runner_container(controller, options, runner=_dry_run_runner(dry_run))
     except DaemonAlreadyRunningError as exc:
-        console.print(
-            f"[red]{exc}[/] Stop the host daemon first "
-            "(`iar daemon stop --repo-id <id>`) before starting a container."
-        )
-        return 2
+        raise CliError(
+            f"{exc} Stop the host daemon first before starting a container.",
+            code=ExitCode.CONFLICT,
+            suggestion="iar daemon status",
+        ) from exc
     except FileNotFoundError as exc:
-        console.print(f"[red]{exc}[/]")
-        return 1
+        raise CliError(
+            str(exc),
+            code=ExitCode.NOT_FOUND,
+            suggestion="iar container up --help",
+        ) from exc
 
     plan = result.plan
     argv_text = " ".join(shlex.quote(part) for part in plan.argv)

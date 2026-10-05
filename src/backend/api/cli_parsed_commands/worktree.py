@@ -8,6 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    CliError,
+    emit,
+)
 from backend.api.cli_helpers import (
     _ensure_gh_auth_or_prompt,
     _print_worktree_cleanup_result,
@@ -33,12 +39,15 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
         repo_root_path = detect_git_repository_root(Path.cwd(), ctx.process_runner)
         require_iar_repository_initialized(repo_root_path, ctx.process_runner)
     except ValueError as exc:
-        _cli.logger.error("iar worktree failed: %s", exc)
-        return 1
+        raise CliError(
+            str(exc),
+            code=ExitCode.NOT_FOUND,
+            suggestion="iar registry list",
+        ) from exc
     except IARRepositoryNotInitializedError as exc:
         from backend.api.cli_helpers import _handle_not_initialized_error
 
-        return _handle_not_initialized_error(exc)
+        return _handle_not_initialized_error(exc, fmt=ctx.output_format)
     manager = build_worktree_manager(repo_root_path, ctx.process_runner)
     if ctx.parsed.worktree_command == "create":
         created_worktree_path = manager.create(
@@ -53,7 +62,14 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
             )
         return 0
     if ctx.parsed.worktree_command == "path":
-        print(str(manager.worktree_path(ctx.parsed.branch)))
+        worktree_path = str(manager.worktree_path(ctx.parsed.branch))
+        emit(
+            {"branch": ctx.parsed.branch, "path": worktree_path}
+            if ctx.output_format == OUTPUT_FORMAT_JSON
+            else None,
+            fmt=ctx.output_format,
+            human_renderer=lambda: print(worktree_path),
+        )
         return 0
     if ctx.parsed.worktree_command == "remove":
         manager.remove(branch=ctx.parsed.branch)
@@ -64,8 +80,11 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
             fallback_path=str(repo_root_path),
         )
         if len(contexts) != 1:
-            _cli.logger.error("iar worktree cleanup requires exactly one repository.")
-            return 1
+            raise CliError(
+                "iar worktree cleanup requires exactly one repository.",
+                code=ExitCode.USAGE,
+                suggestion="iar registry list",
+            )
         run_context = contexts[0]
         _ensure_gh_auth_or_prompt(run_context.repo_path, ctx.process_runner)
         github_client = _cli.create_github_client(run_context.repo_path, ctx.process_runner)
@@ -84,8 +103,11 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
         )
         _print_worktree_cleanup_result(cleanup_result)
         return 1 if cleanup_result.failed_count else 0
-    _cli.logger.error("iar worktree: unknown subcommand %r", ctx.parsed.worktree_command)
-    return 1
+    raise CliError(
+        f"iar worktree: unknown subcommand {ctx.parsed.worktree_command!r}.",
+        code=ExitCode.USAGE,
+        suggestion="iar worktree --help",
+    )
 
 
 __all__ = ["run_worktree_command"]

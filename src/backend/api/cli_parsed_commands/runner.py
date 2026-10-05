@@ -10,17 +10,32 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.api.cli_console import console
+from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_helpers import (
     _create_run_history_store_or_none,
     _ensure_gh_auth_or_prompt,
     _resolve_cli_repository_targets,
     _resolve_run_trigger,
 )
+from backend.api.cli_output import OUTPUT_FORMAT_JSON, CliError, emit
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_registry import _run_daemon_status_command
 from backend.api.agent_runner_views.runner_live_view import create_runner_live_view
 from backend.api import cli as _cli
 from backend.core.use_cases.agent_runner_factory import logger
+
+
+def _dry_run_preview(contexts: list, *, agent: str, max_issues: int) -> dict:
+    """组装 ``iar run --dry-run`` 的机读预览（本轮执行计划，逐 Issue 明细在 stderr 日志）。"""
+    return {
+        "dry_run": True,
+        "agent": agent,
+        "max_issues": max_issues,
+        "repositories": [
+            {"repo_id": context.repo_id, "repo_path": str(context.repo_path)}
+            for context in contexts
+        ],
+    }
 
 
 def run_run_command(ctx: ParsedCommandContext) -> int:
@@ -47,7 +62,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     def transcript_runner_factory(repo_path: Path) -> object:
         return _cli.create_transcript_runner(config=config_by_repo_path.get(repo_path))
 
-    return _cli.run_agent_repositories_once(
+    exit_code = _cli.run_agent_repositories_once(
         contexts=contexts,
         dry_run=ctx.parsed.dry_run,
         agent=ctx.parsed.agent,
@@ -61,6 +76,21 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         transcript_runner_factory=transcript_runner_factory,
         max_deliberation_issues=ctx.runner_settings.daemon.max_deliberation_issues,
     )
+    if not ctx.parsed.dry_run or ctx.output_format != OUTPUT_FORMAT_JSON:
+        return exit_code
+    # 机器模式的 dry-run：stdout 只放执行计划预览（逐 Issue 明细已由日志走
+    # stderr），dry-run 通过用退出码 10 与"真跑了并成功"的 0 区分开。
+    emit(
+        _dry_run_preview(
+            contexts,
+            agent=ctx.parsed.agent,
+            max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
+        ),
+        fmt=OUTPUT_FORMAT_JSON,
+    )
+    if exit_code:
+        return exit_code
+    return int(ExitCode.DRY_RUN_OK)
 
 
 def run_daemon_command(ctx: ParsedCommandContext) -> int:
@@ -120,10 +150,11 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
     try:
         acquired_daemon_locks = _cli.acquire_daemon_locks(daemon_locks_dir, daemon_repo_ids)
     except _cli.DaemonAlreadyRunningError as already_running:
-        from backend.api.cli_console import error_console
-
-        error_console.print(f"[red]{already_running}[/]")
-        return 1
+        raise CliError(
+            str(already_running),
+            code=ExitCode.CONFLICT,
+            suggestion="iar daemon status",
+        ) from already_running
     try:
         _cli.run_agent_daemon(
             contexts=contexts,
@@ -236,18 +267,21 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
         recover_publish_issue,
     )
 
-    contexts = _cli.resolve_repository_targets(
-        ctx.runner_settings,
+    contexts = _resolve_cli_repository_targets(
+        parsed=ctx.parsed,
+        runner_settings=ctx.runner_settings,
         repo_id=ctx.repo_id,
-        repo_path_override=ctx.repo_override,
+        repo_override=ctx.repo_override,
     )
     for context in contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if len(contexts) != 1:
-        logger.error(
-            "recover requires exactly one target repository. Use --repo or --repo-id to specify."
+        raise CliError(
+            "iar recover requires exactly one target repository. "
+            "Use --repo or --repo-id to specify.",
+            code=ExitCode.USAGE,
+            suggestion="iar registry list",
         )
-        return 1
     context = contexts[0]
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     # 恢复发布的 PR 复用正常发布的正文生成，因此需要内容生成器；缺失时正常发布
@@ -292,19 +326,21 @@ def run_blocked_continue_command(ctx: ParsedCommandContext) -> int:
     )
     from backend.api.cli_console import error_console
 
-    contexts = _cli.resolve_repository_targets(
-        ctx.runner_settings,
+    contexts = _resolve_cli_repository_targets(
+        parsed=ctx.parsed,
+        runner_settings=ctx.runner_settings,
         repo_id=ctx.repo_id,
-        repo_path_override=ctx.repo_override,
+        repo_override=ctx.repo_override,
     )
     for context in contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if len(contexts) != 1:
-        logger.error(
-            "blocked-continue requires exactly one target repository. "
-            "Use --repo or --repo-id to specify."
+        raise CliError(
+            "iar blocked-continue requires exactly one target repository. "
+            "Use --repo or --repo-id to specify.",
+            code=ExitCode.USAGE,
+            suggestion="iar registry list",
         )
-        return 1
     context = contexts[0]
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     try:

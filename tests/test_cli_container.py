@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_parser import build_parser
 from backend.api.cli_typer_app import app, auth_app, container_app
 
@@ -165,5 +166,5 @@ def test_non_container_command_still_enforces_repo_selector_mutex(
         repo_id="keda",
         config=None,
     )
-    # 互斥校验在 dispatch 之前，即便 dispatch 被模拟为 0 也应先返回 1。
-    assert cli_module._run_parsed_command(namespace) == 1
+    # 互斥校验在 dispatch 之前，即便 dispatch 被模拟为 0 也应先返回用法错误码。
+    assert cli_module._run_parsed_command(namespace) == int(ExitCode.USAGE)

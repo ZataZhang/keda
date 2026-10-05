@@ -18,7 +18,15 @@ from typing import Annotated
 
 import typer
 
-from backend.api.cli_typer_app import _run_typer_command, app, loop_app
+from backend.api.cli_typer_app import (
+    JsonOutputOption,
+    OutputFormat,
+    OutputOption,
+    _enum_value,
+    _run_typer_command,
+    app,
+    loop_app,
+)
 
 
 @loop_app.command("create")
@@ -63,9 +71,12 @@ def loop_create_command(
 
 
 @loop_app.command("list")
-def loop_list_command() -> int:
+def loop_list_command(
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
+) -> int:
     """List all registered loops with their schedules and next fires."""
-    return _run_typer_command("loop list")
+    return _run_typer_command("loop list", output=_enum_value(output), as_json=as_json)
 
 
 @loop_app.command("cancel")

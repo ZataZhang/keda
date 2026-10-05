@@ -14,8 +14,11 @@ from backend.api.cli_typer_app import (
     ConfigOption,
     IssueAgentChoice,
     IssueTypeChoice,
+    JsonOutputOption,
     ModelIdOption,
     ModelPresetOption,
+    OutputFormat,
+    OutputOption,
     ReasoningEffortOption,
     RepoIdOption,
     RepoOption,
@@ -44,6 +47,8 @@ def _run_issue_create_command(
     preset: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    output: str | None = None,
+    as_json: bool = False,
 ) -> int:
     """Run the shared PRD-to-Issue command."""
     return _run_typer_repository_command(
@@ -58,6 +63,8 @@ def _run_issue_create_command(
         preset=preset,
         model=model,
         reasoning_effort=reasoning_effort,
+        output=output,
+        as_json=as_json,
         ready=ready,
         agent=_enum_value(agent),
         publish_prd=publish_prd,
@@ -103,6 +110,8 @@ def issue_create_command(
     preset: ModelPresetOption = None,
     model: ModelIdOption = None,
     reasoning_effort: ReasoningEffortOption = None,
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -121,6 +130,8 @@ def issue_create_command(
         preset=preset,
         model=model,
         reasoning_effort=reasoning_effort,
+        output=_enum_value(output),
+        as_json=as_json,
         repo=repo,
         repo_id=repo_id,
         config=config,
@@ -158,7 +169,11 @@ def issue_list_command(
         int,
         typer.Option("--limit", help="Maximum Issues per repository (default: 100)."),
     ] = 100,
-    output: Annotated[str, typer.Option("--output", help="Render format: table|json.")] = "table",
+    output: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Render format: table|json."),
+    ] = OutputFormat.table,
+    as_json: JsonOutputOption = False,
 ) -> int:
     """List Issues with linked Pull Request status."""
     context_values = ctx.obj or {}
@@ -175,7 +190,8 @@ def issue_list_command(
         with_pr=with_pr,
         without_pr=without_pr,
         limit=limit,
-        output=output,
+        output=_enum_value(output),
+        as_json=as_json,
     )
 
 

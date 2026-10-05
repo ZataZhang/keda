@@ -11,6 +11,7 @@ import pytest
 
 import backend.api.cli_registry as cli_registry
 from backend.api.cli import _expand_prd_paths, main
+from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_parser import build_parser
 from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
@@ -852,11 +853,11 @@ def test_main_returns_error_on_abort(capsys, monkeypatch) -> None:
 
 
 def test_main_rejects_repo_and_repo_id_together() -> None:
-    """main should exit 1 when both --repo and --repo-id are given."""
+    """main should exit 2 (usage) when both --repo and --repo-id are given."""
     from backend.api.cli import main
 
     exit_code = main(["run", "--repo", "/tmp/repo", "--repo-id", "keda"])
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.USAGE)
 
 
 def test_main_rejects_unknown_repo_id() -> None:
@@ -1035,7 +1036,7 @@ def test_main_daemon_cwd_disabled_repo_rejected(monkeypatch) -> None:
     ):
         exit_code = main(["daemon"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.PERMISSION)
 
 
 def test_main_daemon_cwd_ambiguous_repo_rejected(monkeypatch) -> None:
@@ -1062,7 +1063,7 @@ def test_main_daemon_cwd_ambiguous_repo_rejected(monkeypatch) -> None:
     ):
         exit_code = main(["daemon"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.USAGE)
 
 
 def test_main_daemon_cwd_no_match_rejected(monkeypatch) -> None:
@@ -1094,7 +1095,7 @@ def test_main_daemon_cwd_no_match_rejected(monkeypatch) -> None:
     ):
         exit_code = main(["daemon"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     mock_resolve.assert_not_called()
 
 
@@ -1127,7 +1128,7 @@ def test_main_review_daemon_cwd_no_match_rejected(monkeypatch) -> None:
     ):
         exit_code = main(["review-daemon"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     mock_resolve.assert_not_called()
 
 
@@ -1149,7 +1150,7 @@ def test_main_daemon_cwd_not_git_rejected(monkeypatch) -> None:
     ):
         exit_code = main(["daemon"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     mock_resolve.assert_not_called()
 
 
@@ -1186,7 +1187,7 @@ def test_main_daemon_cwd_uninitialized_repo_rejected(monkeypatch) -> None:
     ):
         exit_code = main(["daemon"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     mock_resolve.assert_not_called()
 
 
@@ -1564,7 +1565,7 @@ def test_main_issue_create_multiple_prds_rejects_shared_title() -> None:
             ]
         )
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.USAGE)
     mock_client.assert_not_called()
     mock_create.assert_not_called()
 
@@ -2490,6 +2491,7 @@ def test_main_ask_rejects_unknown_action() -> None:
         ),
         patch("backend.api.cli_helpers.create_github_client"),
         patch("backend.api.cli.create_github_client"),
+        patch("backend.api.cli.require_iar_repository_initialized"),
         patch(
             "backend.api.cli.create_planner_runner",
             return_value=mock_planner,
@@ -2498,7 +2500,7 @@ def test_main_ask_rejects_unknown_action() -> None:
     ):
         exit_code = main(["ask", "push to main", "--plan-only", "--repo", "/tmp/repo"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.GENERAL)
 
 
 def test_main_ask_run_once_dry_run_dispatches_existing_use_case() -> None:
@@ -2627,6 +2629,7 @@ def test_main_ask_execute_confirmation_required_for_write_action() -> None:
         ),
         patch("backend.api.cli_helpers.create_github_client"),
         patch("backend.api.cli.create_github_client"),
+        patch("backend.api.cli.require_iar_repository_initialized"),
         patch(
             "backend.api.cli.create_planner_runner",
             return_value=mock_planner,
@@ -2643,7 +2646,7 @@ def test_main_ask_execute_confirmation_required_for_write_action() -> None:
             ]
         )
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.GENERAL)
 
 
 def test_main_ask_execute_confirmation_wrong_input_skips_action(monkeypatch) -> None:
@@ -2696,6 +2699,7 @@ def test_main_ask_execute_confirmation_wrong_input_skips_action(monkeypatch) -> 
         ),
         patch("backend.api.cli_helpers.create_github_client"),
         patch("backend.api.cli.create_github_client"),
+        patch("backend.api.cli.require_iar_repository_initialized"),
         patch(
             "backend.api.cli.create_planner_runner",
             return_value=mock_planner,
@@ -2713,7 +2717,7 @@ def test_main_ask_execute_confirmation_wrong_input_skips_action(monkeypatch) -> 
             ]
         )
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.GENERAL)
     mock_create.assert_not_called()
 
 
@@ -2768,7 +2772,7 @@ def test_main_labels_sync_fails_when_repository_not_initialized(
     captured = capsys.readouterr()
     combined = f"{captured.out}\n{captured.err}"
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     assert "Repository is not initialized for iar" in _strip_ansi(combined)
     assert "iar init" in _strip_ansi(combined)
     assert ".iar.toml" in _strip_ansi(combined)
@@ -2787,7 +2791,7 @@ def test_main_run_fails_when_repository_not_initialized(
     captured = capsys.readouterr()
     combined = f"{captured.out}\n{captured.err}"
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     assert "Repository is not initialized for iar" in _strip_ansi(combined)
     assert "iar init" in _strip_ansi(combined)
 
@@ -2808,7 +2812,7 @@ def test_main_issue_create_fails_when_repository_not_initialized(
     captured = capsys.readouterr()
     combined = f"{captured.out}\n{captured.err}"
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     assert "Repository is not initialized for iar" in _strip_ansi(combined)
     assert "iar init" in _strip_ansi(combined)
 
@@ -2826,7 +2830,7 @@ def test_main_worktree_create_fails_when_repository_not_initialized(
     captured = capsys.readouterr()
     combined = f"{captured.out}\n{captured.err}"
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     assert "Repository is not initialized for iar" in _strip_ansi(combined)
     assert "iar init" in _strip_ansi(combined)
 
@@ -2967,7 +2971,7 @@ def test_main_registry_reinit_missing_repo(
     exit_code = main(["registry", "reinit", "--repo-id", "no-such-repo"])
     captured = capsys.readouterr()
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     assert "not found in registry" in _strip_ansi(captured.out + captured.err)
 
 
@@ -3658,7 +3662,7 @@ def test_main_registry_start_rejects_disabled_repo(
         exit_code = main(["registry", "start", "--repo-id", "keda-main"])
         captured = capsys.readouterr()
 
-    assert exit_code == 1, captured.err
+    assert exit_code == int(ExitCode.PERMISSION), captured.err
     assert "disabled" in _strip_ansi(captured.out + captured.err)
 
 
@@ -3723,7 +3727,7 @@ def test_main_workflow_install_rejects_global_repo_flag(
 
     exit_code = main(["workflow", "install", "preview", "--repo", str(tmp_path)])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.USAGE)
     assert not (tmp_path / "deploy").exists()
     assert not (tmp_path / "scripts").exists()
 
@@ -3738,7 +3742,7 @@ def test_main_workflow_install_rejects_global_config_flag(
 
     exit_code = main(["workflow", "install", "preview", "--config", "/tmp/cfg"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.USAGE)
     assert not (tmp_path / "deploy").exists()
 
 
@@ -3752,7 +3756,7 @@ def test_main_workflow_install_rejects_global_repo_id_flag(
 
     exit_code = main(["workflow", "install", "preview", "--repo-id", "demo"])
 
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.USAGE)
     assert not (tmp_path / "deploy").exists()
 
 
@@ -4488,6 +4492,6 @@ def test_main_repl_requires_initialized_repo(monkeypatch, tmp_path: Path, capsys
             exit_code = main(["repl", "--repo", str(repo_path)])
 
     captured = capsys.readouterr()
-    assert exit_code == 1
+    assert exit_code == int(ExitCode.NOT_FOUND)
     combined = (captured.out + captured.err).lower()
     assert "init" in combined

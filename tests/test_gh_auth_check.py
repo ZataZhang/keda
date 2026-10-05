@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import CliError
 from pathlib import Path
 
 import pytest
@@ -80,7 +83,7 @@ def test_check_auth_status_not_logged_in(tmp_path: Path) -> None:
 
 
 def test_ensure_gh_auth_or_prompt_exits_on_failure(tmp_path: Path) -> None:
-    """_ensure_gh_auth_or_prompt should exit with code 1 on auth failure."""
+    """认证失败抛权限类命令错误（语义退出码 4），不再是裸 1。"""
     from backend.api.cli import _ensure_gh_auth_or_prompt
 
     command = ("gh", "auth", "status", "--hostname", "github.com")
@@ -94,9 +97,9 @@ def test_ensure_gh_auth_or_prompt_exits_on_failure(tmp_path: Path) -> None:
             )
         }
     )
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(CliError) as exc_info:
         _ensure_gh_auth_or_prompt(tmp_path, fake_runner)
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == ExitCode.PERMISSION
 
 
 def test_ensure_gh_auth_or_prompt_skips_with_env_var(tmp_path: Path) -> None:
@@ -130,7 +133,7 @@ def test_ensure_gh_auth_or_prompt_passes_when_authenticated(tmp_path: Path) -> N
 
 
 def test_main_labels_sync_exits_on_auth_failure(capsys) -> None:
-    """iar labels sync should exit 1 with friendly message when gh auth fails."""
+    """gh 认证失败时 `iar labels sync` 以权限码 4 退出，并给出可跑的下一步。"""
     from backend.api.cli import main
     from unittest.mock import MagicMock, patch
 
@@ -152,7 +155,7 @@ def test_main_labels_sync_exits_on_auth_failure(capsys) -> None:
         )
         exit_code = main(["labels", "sync"])
 
-    assert exit_code == 1
+    assert exit_code == 4
     captured = capsys.readouterr()
     combined = f"{captured.out}\n{captured.err}"
     assert "GitHub CLI 认证失败" in combined

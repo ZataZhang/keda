@@ -64,6 +64,64 @@ iar completion show --shell zsh
 `kedacode is<Tab>` 与 `iar is<Tab>` 行为一致；旧版本安装的补全重跑一次
 `iar completion install` 即可升级。
 
+## 面向 Agent 的机读契约
+
+`iar` 的另一类调用方是脚本和别的 agent。为此有三条对外契约：**显式声明的机器格式**、**语义退出码**、**运行时自省**。完整取值表与错误 envelope 字段定义见 [`docs/api/references.md`](../api/references.md)，`iar --help` 末尾也直接印出退出码表。
+
+### 机器格式必须显式声明
+
+数据类命令接受 `--json`，它是 `--output json` 的别名；不传任何旗标时输出仍是给人看的表格，**即使 stdout 是管道也不自动切换**（避免静默改变既有脚本的输入）。
+
+```bash
+iar issue list --json                 # 等价于 --output json
+iar run --dry-run --output json       # 计划以 JSON 给出
+iar daemon status --json
+```
+
+机器模式下 **stdout 只承载数据**：进度、警告、日志（含应用日志的 stdout handler）一律改绑到 stderr，`iar <cmd> --json > out.json` 拿到的就是可 `json.loads` 的单个文档。失败时 stderr 输出一个 envelope：
+
+```json
+{
+  "error": "not_found",
+  "message": "Repository 'keda' is not registered.",
+  "suggestion": "iar registry list",
+  "retryable": false,
+  "exit_code": 3
+}
+```
+
+`suggestion` 一定是一条可直接跑的下一步命令；调用方只该读 `$?` 与这个 envelope，不要 parse 英文句子。
+
+当前暴露机器格式的命令：`run`、`logs`、`tokens`、`schema`、`issue create`、`issue list`、`worktree path`、`registry list`、`daemon status`、`loop list`、`agent list`、`agent presets`、`agent doctor`（以 `iar schema --json` 的实际导出为准，新增命令无需改本文）。
+
+**例外**：`iar ask` 与 `iar deliberate` 的 `--output` 是**输出目录**（文本型参数），不是格式；那里 `--output json` 表示名为 `json` 的目录，两者也都不接受 `--json`。
+
+### 语义退出码
+
+名称列就是失败 envelope 里 `error` 的取值，也与 `iar schema --json` 的 `exit_codes.values` 一一对应——`$?` 与 stderr 不会各说一套。
+
+| 码 | 名称（envelope `error`） | 含义 | 调用方动作 |
+|---|---|---|---|
+| `0` | `ok` | 请求完成（只读输出同样算成功） | 继续 |
+| `1` | `error` | 未归类失败，保持历史语义 | 读 stderr 后重试或升级 |
+| `2` | `usage_error` | 旗标/参数组合不成立（互斥、缺目标、非法 lifecycle key） | 修命令，原样重试必然再失败 |
+| `3` | `not_found` | 目标不存在：仓库、Issue、registry 条目、agent、可执行文件、日志 | 换目标或跑 `suggestion` |
+| `4` | `permission_denied` | 未授权：GitHub 未认证、仓库被禁用 | 提示人来认证或启用，别静默重试 |
+| `5` | `conflict` | 当前状态阻止：daemon 已在跑、workflow 模板文件已安装、loop 条目已存在 | 改名 / 用户明确要求时 `--force` / 先停掉冲突进程 |
+| `10` | `dry_run_ok` | 计划校验通过且未写入任何东西，可直接当 CI 门禁 | 仅在核对计划正文后视为绿灯 |
+
+`10` 只在机器模式下用于 dry-run 成功，人类模式仍是 `0`；`1` 保留给尚未归类的失败，新码只在有明确类别的失败点启用，因此只看「是否非零」的旧脚本行为不变。
+
+### 运行时自省：`iar schema --json`
+
+命令树是唯一事实源——`iar schema --json` 直接从已注册的 Typer/click 应用派生，不维护第二份清单：
+
+```bash
+iar schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | {name, type, required, enum, default}'
+```
+
+每个参数导出名称、类型、是否必填、枚举取值（`--output` 的 `["table","json"]` 即由此而来）、默认值与示例；顶层同时给出 `exit_codes` 与命令总数。给 agent 写调用代码前先跑它，而不是抄文档。
+
 ## labels sync 详解
 
 `iar labels sync` 会在目标 GitHub 仓库中创建或更新一套标准化的 issue 标签，作为整个 agent-runner 工作流的状态基础设施。

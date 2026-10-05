@@ -9,10 +9,11 @@ target repository and prints the report.
 from __future__ import annotations
 
 import difflib
-import json
 from pathlib import Path
 
 from backend.api.cli_console import console, error_console
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import CliError, json_literal
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.core.use_cases.agent_runner_config_migration import (
     ConfigMigrationResult,
@@ -32,7 +33,7 @@ def _format_pin_lines(pin_decisions: tuple[PinDecision, ...], *, with_reason: bo
     for table_name, table_pins in pins_by_table_name.items():
         pin_lines.append(f"  [{table_name}]")
         for pin in table_pins:
-            pinned_value_text = json.dumps(pin.pinned_value, ensure_ascii=False)
+            pinned_value_text = json_literal(pin.pinned_value)
             reason_suffix = f"  ({pin.reason})" if with_reason else ""
             pin_lines.append(f"    {pin.key_name} = {pinned_value_text}{reason_suffix}")
     return pin_lines
@@ -90,20 +91,25 @@ def _print_migration_report(migration_result: ConfigMigrationResult, *, dry_run:
 def run_config_migrate_command(ctx: ParsedCommandContext) -> int:
     """``iar config migrate``: drop scaffold-pinned generated_content values from ``.iar.toml``."""
     if ctx.repo_id is not None:
-        error_console.print(
-            "[red]iar config migrate edits one repository's .iar.toml; "
-            "use --repo <path> or run it inside the repository (--repo-id is not supported).[/]"
+        raise CliError(
+            "iar config migrate edits one repository's .iar.toml; use --repo <path> "
+            "or run it inside the repository (--repo-id is not supported).",
+            code=ExitCode.USAGE,
+            suggestion="iar config migrate --repo .",
         )
-        return 1
 
     dry_run = bool(getattr(ctx.parsed, "dry_run", False))
     start_path = Path(ctx.repo_override) if ctx.repo_override is not None else Path.cwd()
     try:
         repo_root_path = detect_git_repository_root(start_path, ctx.process_runner)
+    except ValueError as exc:
+        # 不在 Git 仓库里是"找不到目标"，不是用法错误：给 3 + 可跑的下一步。
+        raise CliError(str(exc), code=ExitCode.NOT_FOUND, suggestion="iar registry list") from exc
+    try:
         migration_result = migrate_repository_local_config(repo_root_path, dry_run=dry_run)
     except ValueError as exc:
-        # 非 Git 目录（detect_git_repository_root）与迁移校验失败（ConfigMigrationError）都是
-        # ValueError；未初始化（IARRepositoryNotInitializedError）不是，交给统一入口给出
+        # 迁移校验失败（ConfigMigrationError）是未分类失败；未初始化
+        # （IARRepositoryNotInitializedError）不是 ValueError，交给统一入口给
         # `iar init` 提示。错误正文可能含方括号，关闭 markup 单独打印。
         error_console.print("[red]iar config migrate failed:[/]")
         error_console.print(str(exc), markup=False)

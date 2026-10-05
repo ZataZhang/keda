@@ -14,13 +14,23 @@ handler; the helpers and the public ``main()`` entrypoint stay here.
 from __future__ import annotations
 
 import argparse
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.api.cli_console import error_console
+from backend.api.cli_exit_codes import ExitCode, translate_exit_code
 from backend.api.cli_helpers import (
     _handle_not_initialized_error,
     _resolve_default_daemon_target,
+    report_daemon_target_error,
+)
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    CliError,
+    render_cli_error,
+    resolve_output_format,
+    route_logs_to_stderr,
 )
 from backend.api.cli_parsed_commands import (
     ParsedCommandContext,
@@ -114,7 +124,10 @@ def _run_loop_command(parsed: argparse.Namespace, process_runner) -> int:
         return run_loop_create_command(parsed, state_store_factory=_state_store_factory)
 
     if command == "loop list":
-        return run_loop_list_command(state_store_factory=_state_store_factory)
+        return run_loop_list_command(
+            state_store_factory=_state_store_factory,
+            fmt=resolve_output_format(parsed),
+        )
 
     if command == "loop cancel":
         return run_loop_cancel_command(parsed, state_store_factory=_state_store_factory)
@@ -155,6 +168,12 @@ def _run_loop_command(parsed: argparse.Namespace, process_runner) -> int:
     return 1
 
 
+def _failure_diagnostic_command(repo_id: str | None) -> str:
+    """给未分类失败拼一条可直接跑的下一步命令（完整 traceback 在进程日志里）。"""
+    selector = f" --repo-id {shlex.quote(repo_id)}" if repo_id else ""
+    return f"iar logs{selector} --lines 200"
+
+
 def _run_parsed_command(parsed: argparse.Namespace) -> int:
     """Run a command after CLI arguments have been parsed.
 
@@ -163,8 +182,16 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
     daemon / review-daemon / logs), then the matching handler from
     :mod:`backend.api.cli_parsed_commands` is invoked through
     :func:`dispatch_parsed_command`.
+
+    机读契约也在这一个中央点成立：解析输出形态（handler 经 ``ctx.output_format``
+    读取）、机器模式把日志改绑到 stderr 保证 stdout 只含数据、并把
+    :class:`CliError` 翻译成语义退出码。
     """
     from backend.api.cli_utils import _format_cli_exception
+
+    output_format = resolve_output_format(parsed)
+    if output_format == OUTPUT_FORMAT_JSON:
+        route_logs_to_stderr()
 
     if parsed.config:
         logger.warning("The --config flag is deprecated. Use config.toml or env vars instead.")
@@ -177,8 +204,14 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
     # 不适用互斥校验；否则文档主路径 ``iar container up --repo <path>
     # --repo-id <id>`` 会被误拦。
     if repo_id is not None and repo_override is not None and parsed.command != "container up":
-        logger.error("--repo and --repo-id are mutually exclusive.")
-        return 1
+        return render_cli_error(
+            CliError(
+                "--repo and --repo-id are mutually exclusive.",
+                code=ExitCode.USAGE,
+                suggestion="iar registry list",
+            ),
+            fmt=output_format,
+        )
 
     # daemon / review-daemon 在未指定仓库时：
     # 1. cwd 命中唯一 enabled 注册仓 → 仅处理该仓（与 --repo-id 等价）
@@ -193,8 +226,7 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
         ):
             default_target = _resolve_default_daemon_target()
             if default_target.error:
-                logger.error(default_target.error)
-                return 1
+                return report_daemon_target_error(default_target.error, fmt=output_format)
             repo_id = default_target.repo_id
 
     process_runner = create_process_runner()
@@ -210,18 +242,32 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
         repo_id=repo_id,
         repo_override=repo_override,
         github_client_factory=github_client_factory,
+        output_format=output_format,
     )
 
     try:
         exit_code = dispatch_parsed_command(parsed_ctx)
     except IARRepositoryNotInitializedError as exc:
-        return _handle_not_initialized_error(exc)
+        return _handle_not_initialized_error(exc, fmt=output_format)
+    except CliError as exc:
+        return render_cli_error(exc, fmt=output_format)
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
         error_detail = _format_cli_exception(exc)
         logger.error("iar failed:\n%s", error_detail)
+        exit_code = translate_exit_code(exc)
+        if output_format == OUTPUT_FORMAT_JSON:
+            return render_cli_error(
+                CliError(
+                    str(exc) or exc.__class__.__name__,
+                    code=exit_code,
+                    suggestion=_failure_diagnostic_command(repo_id),
+                    retryable=exit_code == int(ExitCode.GENERAL),
+                ),
+                fmt=output_format,
+            )
         error_console.print("[red]iar failed:[/]")
         error_console.print(error_detail, markup=False)
-        return 1
+        return exit_code
 
     if exit_code is None:
         logger.error("Unsupported command: %s", parsed.command)

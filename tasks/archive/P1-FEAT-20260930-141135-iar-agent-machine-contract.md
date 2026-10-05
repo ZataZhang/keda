@@ -5,8 +5,10 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：执行侧交付完成，待人工验收（§9 仅剩 3 项 Human-Confirmed）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+>
+> 证据根：`.iar/evidence/`（本仓库 `.iar.toml` 配置 `evidence_dir = ".iar/evidence"`，legacy 扁平布局，并被 `.gitignore` 排除，因此 RV 脚本与捕获永不进入代码 diff）。结构化清单 `.iar/evidence/evidence.json`（`version: 1`、`language: zh-CN`、7 个 item 各带 `negative_control` / `expected_fail` / `stdout_assertions`），可复跑脚本 `.iar/evidence/scripts/rv1.sh … rv7.sh` 与共用断言库 `_rv_lib.sh`。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制、文件路径、命令与排期信息；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。人只在 Part A 点名处下钻。
 
@@ -304,7 +306,7 @@ flowchart TD
   tier: R2
   test_layer: integration
   required_for_acceptance: true
-  presentation: "tasks/evidence/iar-agent-machine-contract/rv-1-issue-list-json.txt（真实终端捕获）。约 10 秒自检：`... | jq -e 'type==\"array\"'` 是否为 true、stdout 首字符是否 `[`"
+  presentation: ".iar/evidence/rv-1-issue-list-json.txt（真实终端捕获；负控见 .iar/evidence/rv-1-negative-control.txt，复跑脚本 .iar/evidence/scripts/rv1.sh）。约 10 秒自检：`... | jq -e 'type==\"array\"'` 是否为 true、stdout 首字符是否 `[`"
   critical_value_source: "真实 `iar` 进程 stdout（经管道进入 jq），不是测试内重建的字符串"
   must_cross: "argparse/Typer 解析 -> resolve_output_format -> handler 取数 -> emit(JSON) -> 进程 stdout -> jq"
   forbidden_bypasses: "不直接调用 render_*_json 断言、不 mock emit、不把 handler 返回值当 stdout"
@@ -332,7 +334,7 @@ flowchart TD
   tier: R2
   test_layer: integration
   required_for_acceptance: true
-  presentation: "tasks/evidence/iar-agent-machine-contract/rv-3-exit-codes.txt（真实终端捕获）。约 10 秒自检：`exit=` 后是否为 3；用法错误行是否为 2"
+  presentation: ".iar/evidence/rv-3-exit-codes.txt（真实终端捕获；负控见 .iar/evidence/rv-3-negative-control.txt，复跑脚本 .iar/evidence/scripts/rv3.sh）。约 10 秒自检：`exit=` 后是否为 3；用法错误行是否为 2"
   critical_value_source: "真实进程 `$?`，不是测试内 catch 的异常码"
   must_cross: "handler 抛 CliError(NOT_FOUND) -> cli.py 中央翻译 -> 进程退出码 -> shell $?"
   forbidden_bypasses: "不在测试内直接断言 ExitCode.NOT_FOUND 常量、不 mock 翻译层"
@@ -425,19 +427,21 @@ Failure triage:
 
 | # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | rv-1：`iar issue list --json` 的 stdout 是纯 JSON | `tasks/evidence/iar-agent-machine-contract/rv-1-issue-list-json.txt` + `open` 命令 | 终端粘 `uv run iar issue list --json --repo-id keda \| jq -e 'type=="array"'`，看是否打印 `true` |
-| 2 | rv-3：未找到/用法错误返回可区分退出码 | `tasks/evidence/iar-agent-machine-contract/rv-3-exit-codes.txt` + `open` 命令 | 粘 `bash -c 'uv run iar logs --repo-id does-not-exist --issue 1; echo $?'`，看是否为 `3` |
+| 1 | rv-1：`iar issue list --json` 的 stdout 是纯 JSON | `.iar/evidence/rv-1-issue-list-json.txt`（打开：`open .iar/evidence/rv-1-issue-list-json.txt`）；负控 `.iar/evidence/rv-1-negative-control.txt`；复跑 `bash .iar/evidence/scripts/rv1.sh` | 终端粘 `uv run iar issue list --json --repo-id keda \| jq -e 'type=="array"'`，看是否打印 `true`；证据里 `ok [stdout 是 JSON 数组] …` 与 `ok [fresh_state_probe] 两次独立进程的 stdout 逐字节一致` 两行即结论 |
+| 2 | rv-3：未找到/用法错误返回可区分退出码 | `.iar/evidence/rv-3-exit-codes.txt`（打开：`open .iar/evidence/rv-3-exit-codes.txt`）；负控 `.iar/evidence/rv-3-negative-control.txt`；复跑 `bash .iar/evidence/scripts/rv3.sh` | 粘 `bash -c 'uv run iar logs --repo-id does-not-exist --issue 1; echo $?'`，看是否为 `3`；证据里 `not_found=3 usage=2 permission=4 conflict=5 dry_run=10 general=1` 一行即六码互不相同 |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：rv-2、rv-4、rv-5、rv-6、rv-7。它们的证据在 §9.2。
 
 ### 9.2 Acceptance Evidence Package（机器证据 · verifier 入口，人默认跳过）
 
-1. **人审项的 oracle 跑绿证据**（对应 §9.1 各行）：rv-1、rv-3 的终端捕获 + 命令证据。
-2. **verifier-only 项结果**：rv-2/4/5/6/7 的输出。
-3. **风险地图对账 Predicted → Reconciled**：是否出现未预测到的输出点/退出点被触发，如何处理。
-4. **对抗自检**：对"默认人类输出零回归""旧 `--output json` 兼容""非目标项确实未做"的反方检查。
-5. **对锁定契约的 diff**：新增旗标/退出码 vs 本 PRD §7.7 前置约定。
-6. **低风险门禁结果（折叠）**：`just lint`、`just test all`、守卫测试、`--help` 黄金快照。
+manifest：`.iar/evidence/evidence.json`（每个 item 带 `command`、`evidence_files`、`negative_control`、`expected_fail`、`stdout_assertions`；`command` 是 keda 可用 `bash -lc` 原样复跑并自断言的检查）。逐组对应：
+
+1. **人审项的 oracle 跑绿证据**（对应 §9.1 各行）：rv-1 `rv-1-issue-list-json.txt` + `rv-1-negative-control.txt`；rv-3 `rv-3-exit-codes.txt` + `rv-3-negative-control.txt`。
+2. **verifier-only 项结果**：rv-2 `rv-2-agent-doctor-json.txt` / `rv-2-run-dry-run-json.txt` / `rv-2-negative-control.txt`；rv-4 `rv-4-error-envelope.txt` / `rv-4-negative-control.txt`；rv-5 `rv-5-schema-introspection.txt` / `rv-5-negative-control.txt`；rv-6 `rv-6-zero-regression.txt` / `rv-6-negative-control.txt`；rv-7 `rv-7-skill-docs-sync.txt` / `rv-7-negative-control.txt`。
+3. **风险地图对账 Predicted → Reconciled**：见下方 Change Log「交付对账」条目——§7.3 预测的退出点全部按新码返回；额外出现并被披露的一处真实行为收紧是 `iar issue list --output` 由自由 TEXT 收为 `[table|json]`（非法取值从静默回落改为 `2`），其余未预测到的输出点为零。
+4. **对抗自检**：rv-6 用「基线提交树 vs 当前树」双侧快照逐字节比对人类输出与 `--help`（并把比对方向反过来，实测反向丢失 171 个词元，证明正向的 0 丢失不是恒真）；旧写法 `--output json` 与基线逐字节相同；非目标项由 rv-5 断言 `--fields` / `--ndjson` 不存在、rv-7 断言 `mkdocs.yml` 未改。
+5. **对锁定契约的 diff**：新增旗标 `--json` / `--output {table,json}`（13 条命令配 `--json`；`ask`/`deliberate` 的 `--output` 是目录型参数，故不并入）与退出码 `2/3/4/5/10`（`1` 保留兜底）与 §7.7 前置约定一致；`iar schema --json` 的 `exit_codes.values` 即码表导出源。
+6. **低风险门禁结果（折叠）**：`just lint`、`just test`（全量 pytest）、守卫测试、`--help` 黄金快照结果记于 Change Log「交付对账」条目。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -447,46 +451,46 @@ Failure triage:
 
 ### Architecture Acceptance
 
-- [ ] 新增代码仅落在 `src/backend/api/`，未新增跨层契约，四层依赖方向不变
-- [ ] `cli_output.py` 复用 `cli_console.py` 的 `console`/`error_console`，未新建第二套 Console
-- [ ] `cli_schema.build_command_schema` 从真实 Typer/click 命令树派生，未引入静态 schema 文件
+- [x] 新增代码仅落在 `src/backend/api/`，未新增跨层契约，四层依赖方向不变 — 证据：新增 Python 文件只有 `cli_output.py` / `cli_exit_codes.py` / `cli_schema.py` / `cli_typer_schema.py`（`git status` 的 `??` 项，其余为 `src/backend/api/cli*` 的既有文件修改）；唯一非 `src/backend/api/` 的改动是 FR-6 要求的 skill/markdown 资产 `src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md` 与 `docs/`，不含代码；守卫测试 `tests/guards/` 未改动且全绿（见 Change Log「交付对账」）。
+- [x] `cli_output.py` 复用 `cli_console.py` 的 `console`/`error_console`，未新建第二套 Console — 证据：`src/backend/api/cli_output.py:25` `from backend.api.cli_console import console, error_console`，全文再无 `Console(` 构造；stdout 直写只经 `_print_verbatim`，失败信封定向到 `error_console`（`cli_output.py:211`）。
+- [x] `cli_schema.build_command_schema` 从真实 Typer/click 命令树派生，未引入静态 schema 文件 — 证据：`rg "json.load|Path\(" src/backend/api/cli_schema.py` 无命中（不读任何文件）；`.iar/evidence/rv-5-schema-introspection.txt` 的「同源」段实测 `iar logs --help` 的长旗标集合与 schema `names[]` 逐条相同、`--kind` 取值域与 `enum` 一致，派生对象与帮助文本同源才可能如此。
 
 ### Dependency Acceptance
 
-- [ ] 未新增第三方依赖（`pyproject.toml` 无新增 runtime 依赖）
-- [ ] JSON 序列化收敛到单一出口；`rg -n "print_json|json\.dumps" src/backend/api` 只命中 `cli_output.py`
+- [x] 未新增第三方依赖（`pyproject.toml` 无新增 runtime 依赖）— 证据：`git diff --stat pyproject.toml uv.lock` 为空输出（两文件未改动）；序列化只用标准库 `json`。
+- [x] JSON 序列化收敛到单一出口；`rg -n "print_json|json\.dumps" src/backend/api` 只命中 `cli_output.py` — 证据：该 `rg` 当前仅 4 行命中，全在 `cli_output.py`（1 行注释 + `:95`/`:120`/`:152` 三处 `json.dumps`），`labels_issue.py` 原 `console.print_json` 与 `agent.py` 原 `print(json.dumps(...))` 两处分散实现已收编。
 
 ### Behavior Acceptance
 
-- [ ] 目标命令均接受 `--json` 与 `--output json` 且二者等价
-- [ ] JSON 模式 stdout 纯净（`jq -e .` 无条件通过），消息走 stderr
-- [ ] `3/4/5/10` 在对应场景返回；用法错误为 `2`；未分类失败仍为 `1`
-- [ ] JSON 模式失败落结构化错误 `{error,message,suggestion,retryable,exit_code}`
-- [ ] `iar schema --json` 输出与真实命令树一致
-- [ ] 不传新旗标时默认输出与 `--help` 与改动前逐字节一致；旧 `--output json` 行为不变
+- [x] 目标命令均接受 `--json` 与 `--output json` 且二者等价 — 证据：`.iar/evidence/rv-6-zero-regression.txt` 第四段对 `issue list` / `registry list` / `agent list` 三命令做 `--json` vs `--output json` 输出 `cmp`，逐字节相同；`.iar/evidence/rv-5-schema-introspection.txt` 断言「凡是有 `--json` 的命令必然也有 `--output`」并给出真实覆盖计数（13 条命令配 `--json`）。
+- [x] JSON 模式 stdout 纯净（`jq -e .` 无条件通过），消息走 stderr — 证据：rv-1 `ok [stdout 是 JSON 数组] stdout satisfies jq -e type=="array"`；rv-2 `ok [stdout 无进度日志] stdout has no INFO -` 与 `ok [应用进度日志落在 stderr] stderr contains backend.core`（同一进程双流对照，不是屏蔽 stderr 造成的假净）。所有 rv 命令的 stdout/stderr 都被重定向进普通文件，即全部证据天然在非 TTY 管道下取得，`--json` / `--output json` 从未触发交互提示（FR-8）。
+- [x] `3/4/5/10` 在对应场景返回；用法错误为 `2`；未分类失败仍为 `1` — 证据：`.iar/evidence/rv-3-exit-codes.txt` 六类各一行真实退出码（3/2/4/5/10/1），`.iar/evidence/rv-3-negative-control.txt` 记录 `not_found=3 usage=2 permission=4 conflict=5 dry_run=10 general=1`、六码两两不同、`baseline_exit_for_not_found=1（改造前）vs 3（改造后）`，以及人类模式 dry-run 仍为 `0`（`10` 只在机器模式生效）。
+- [x] JSON 模式失败落结构化错误 `{error,message,suggestion,retryable,exit_code}` — 证据：`.iar/evidence/rv-4-error-envelope.txt` 对 not_found / usage_error / permission_denied 三类断言 `(keys|sort) == ["error","exit_code","message","retryable","suggestion"]`、失败时 stdout 为空字节，并把 `suggestion` 反解出来真实执行成功（`ok [suggestion 是一条真能跑通的命令] exit=0`，stdout 含 `keda`）。
+- [x] `iar schema --json` 输出与真实命令树一致 — 证据：`.iar/evidence/rv-5-schema-introspection.txt`：`command_count == (.commands|length)` 且实测 46 条命令、option 条目键恰为 9 个元数据字段、`exit_codes.values` 覆盖 `0/1/2/3/4/5/10`；负控段证明改造前树根本没有 `schema` 命令。
+- [x] 不传新旗标时默认输出与 `--help` 与改动前逐字节一致；旧 `--output json` 行为不变 — 证据：`.iar/evidence/rv-6-zero-regression.txt` 基线提交树 vs 当前树双侧快照，8 条只读命令人类输出 stdout+stderr 逐字节 `cmp` 相同且退出码相同，`out-issue-list-output-json`（旧写法）逐字节相同；10 个 `--help` 页面以词元多重集 + 词序子序列证明未丢内容（反向比对丢失 171 词，证明检查有判别力）。**唯一已披露例外**：`iar issue list` 的 `--output` 取值域由自由 TEXT 收紧为 `[table|json]`，故 `--output bogus` 从基线的静默回落（exit 0）改为用法错误（exit 2），详见 §14 Change Log「交付对账」。
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 含机读契约小节（旗标/退出码/自省）
-- [ ] `docs/api/references.md` 含退出码表
-- [ ] `iar-operator/SKILL.md` 含"机器消费一律 `--json`"、退出码表与 `iar schema` 入口
+- [x] `docs/guides/agent-runner.md` 含机读契约小节（旗标/退出码/自省）— 证据：`.iar/evidence/rv-7-skill-docs-sync.txt` `ok [docs] docs/guides/agent-runner.md 含机读契约小节`、`点名 dry_run_ok / permission_denied / iar schema`；退出码表的名称列已改为信封 `error` 取值，与 `iar schema --json` 的 `exit_codes.values` 一一对应。
+- [x] `docs/api/references.md` 含退出码表 — 证据：同上文件 `ok [docs] docs/api/references.md 含机读契约小节 / 点名 dry_run_ok / 点名 permission_denied / 点名 iar schema`；`mkdocs.yml` 未改动（Non-Goal 侧断言）。
+- [x] `iar-operator/SKILL.md` 含"机器消费一律 `--json`"、退出码表与 `iar schema` 入口 — 证据：`.iar/evidence/rv-7-skill-docs-sync.txt` 断言六条不变量文本 + 5 个 envelope 字段名 + 7 行退出码，并做「skill 的退出码取值与 `iar schema --json` 的 `exit_codes.values` 一一对应」「skill 示例旗标在运行时 schema 中真实存在」两项同源校验；`uv run pytest -o addopts="" tests/test_iar_operator_skill.py -q` 8 passed。
 
 ### Validation Acceptance
 
-- [ ] `uv run pytest -o addopts="" tests/test_cli_output_contract.py tests/test_cli_exit_codes.py tests/test_cli_schema.py -q` 通过
-- [ ] `uv run iar issue list --json --repo-id keda 2>/dev/null | jq -e 'type=="array"'` 通过（真实 CLI 入口，不绕过输出层）
-- [ ] `bash -c 'uv run iar logs --repo-id does-not-exist --issue 1; echo exit=$?'` 打印 `exit=3`
-- [ ] `uv run iar schema --json | jq -e '.commands | length > 0'` 通过
-- [ ] `rg -n "print_json|json\.dumps|json_output" src/backend/api` 仅命中 `cli_output.py`
-- [ ] `rg -n "return 1" src/backend/api/cli_parsed_commands` 中 not_found/conflict 点已改用 `ExitCode.*`
-- [ ] `uv run pytest -o addopts="" tests/test_iar_operator_skill.py -q` 通过
+- [x] `uv run pytest -o addopts="" tests/test_cli_output_contract.py tests/test_cli_exit_codes.py tests/test_cli_schema.py -q` 通过 — 实测 `45 passed`。
+- [x] `uv run iar issue list --json --repo-id keda 2>/dev/null | jq -e 'type=="array"'` 通过（真实 CLI 入口，不绕过输出层）— rv-1 oracle 实跑，见 `.iar/evidence/rv-1-issue-list-json.txt`。
+- [x] `bash -c 'uv run iar logs --repo-id does-not-exist --issue 1; echo exit=$?'` 打印 `exit=3` — 见 `.iar/evidence/rv-3-exit-codes.txt` `ok [not_found 退出码] exit=3`。
+- [x] `uv run iar schema --json | jq -e '.commands | length > 0'` 通过 — 见 `.iar/evidence/rv-5-schema-introspection.txt`（实跑 46 条命令）。
+- [x] `rg -n "print_json|json\.dumps|json_output" src/backend/api` 仅命中 `cli_output.py` — 实测 4 行命中全在 `cli_output.py`。
+- [x] `rg -n "return 1" src/backend/api/cli_parsed_commands` 中 not_found/conflict 点已改用 `ExitCode.*` — 现存 `return 1` 共 11 处，逐处核对均为「未分类失败」并保持 1：`agent.py:251/253/257`（strict 模式下 agent 执行失败）、`labels_issue.py:216/276/312`（批量建 Issue 部分失败、`issue list` 兜底异常）、`config_migrate.py:116`（迁移校验 ValueError）、`runner.py:318/363`（发布恢复失败、blocked-continue 失败）、`worktree.py:105`（清理有失败项）、`init_workflow_takeover.py:80`（安装 ValueError）；not_found/conflict/usage/permission 点已改为抛 `CliError(code=ExitCode.*)`，例如 `init_workflow_takeover.py:70-74` 把 `ExistingFileRefusedError` 映射为 `ExitCode.CONFLICT` + `--force` 建议，`worktree.py:107` 未知子命令给 `ExitCode.USAGE`，真实退出码由 rv-3 逐项验证。
+- [x] `uv run pytest -o addopts="" tests/test_iar_operator_skill.py -q` 通过 — 实测 `8 passed`。
 
 ### Delivery Readiness
 
-- [ ] 推荐方案完整实现；未引入未获批的并行抽象
-- [ ] 无未解决的回归或发布阻塞
-- [ ] §9.1 呈递区路径已回填，完成回复已原样带上呈递表内容
-- [ ] 每个呈递物带可直接执行的打开方式与逐项期望值
+- [x] 推荐方案完整实现；未引入未获批的并行抽象 — FR-1…FR-8 全部落地并各有证据；序列化单一出口 `cli_output.py`、码表单一出口 `cli_exit_codes.py`、schema 单一出口 `cli_schema.py`，没有第二套实现；§11 Non-Goals 逐条核对未越界（`--fields`/`--ndjson` 不存在、无 MCP、无非 TTY 自动 JSON、HTTP/前端/Docker/DB/状态机零改动）。
+- [x] 无未解决的回归或发布阻塞 — 全量 `uv run pytest tests/ -q -o addopts="" --ignore=tests/playwright-e2e` 与 `just lint`、`just test` 结果记于 §14 Change Log「交付对账」条目；rv-6 的双侧快照已把唯一行为差异限定在一处刻意收紧并披露。
+- [x] §9.1 呈递区路径已回填，完成回复已原样带上呈递表内容 — 两行均改为 `.iar/evidence/` 实际路径并附 `open` 命令与逐项 10 秒自检要点。
+- [x] 每个呈递物带可直接执行的打开方式与逐项期望值 — §9.1 每行给出 `open` 路径 + 一行可直接粘贴的终端命令 + 证据内哪一行是结论；§9.2 给出 `evidence.json` 的 `command`（keda 可 `bash -lc` 复跑并自带 `stdout_assertions`）。
 
 ## 10. Functional Requirements
 
@@ -526,16 +530,67 @@ Failure triage:
 
 ### Final Reconciliation (Archive Only)
 
-- Interpretation: [pending]
-- Public behavior and contracts: [pending]
-- Related PRD status: [pending]
-- Requirements and risks: [pending]
+- Interpretation: reconciled — 解读锁定按 §3/§7.4 执行：机读输出必须显式声明（`--json` / `--output json`），默认永远是人类表格，不做非 TTY 自动切换；退出码只新增 `3/4/5/10` 并保持 `1` 为未分类兜底；`--output` 复用为目录型参数的 `ask`/`deliberate` 不并入机读契约（rv-5 以封闭例外清单 `["ask","deliberate"]` 与其 `--output type=="text"` 证实）。
+- Public behavior and contracts: reconciled — 对外新增面为：13 条命令的 `--json` 别名、`--output {table,json}` 枚举域、`2/3/4/5/10` 语义码、机器模式 stderr 信封 `{error,message,suggestion,retryable,exit_code}`、只读命令 `iar schema --json`。`iar --help` 与 `iar schema --json` 的 `exit_codes.values` 与 skill/guide 表为同一份 token 集（rv-7 做集合相等校验）。HTTP API、前端、Docker/部署、数据库 schema、业务状态机零改动；未新增第三方依赖。
+- Related PRD status: reconciled — §8 无交付前置（交付前置横幅仍为 ✅），本 PRD 无下游硬依赖 PRD；`--fields`/分页、MCP surface、输入硬化三项 Non-Goal 留在 §12 作为后续独立 PRD，本次未开工也未夹带。
+- Requirements and risks: reconciled — FR-1…FR-8 均有对应真实入口证据（rv-1…rv-7，各自先经负控变红）；§12「退出码是对外行为变更」风险以 `--help` 码表 + `docs/` + skill 三处披露，且未启用新码的 11 处 `return 1` 逐点核对为「未分类失败」保持原语义；「命令集边界」风险以 §9.2 第 5 条的封闭清单落实（不声称全部命令）。
 - Reconciled differences:
-  - [pending]
+  - 证据根路径：§7.7 `presentation` 与 §9.1 原写 `tasks/evidence/iar-agent-machine-contract/`，实际按本仓库 `.iar.toml` 的 `evidence_dir = ".iar/evidence"`（legacy 扁平布局）落盘并回填；`.iar/` 被 `.gitignore` 排除，RV 脚本因此永不进入代码 diff（详见 §14「证据采集与门禁」条目）。
+  - rv-2 oracle 的 jq 路径：PRD 原文 `.argv | type=="array"` 在数组根上不成立，实际命令为 `.[0].argv | type=="array"`（断言内容未弱化，仅修正取值路径）。
+  - 一处行为收紧：`iar issue list --output` 由自由 TEXT 收为 `[table|json]`，非法取值从静默回落（exit 0）改为用法错误（exit 2）；这是 FR-1 声明域的落实，已在 §9 Behavior Acceptance 与本节披露，详见 §14。
+  - 零回归的度量方式：`--help` 的新增行会让 Rich 重排列宽，行级 diff 会报出假的删除行，因此改用「词元多重集不丢失 + 基线词序为子序列」度量，并以反向比对（实测丢失 171 词）证明该检查有判别力。
 
 ## 14. Change Log
 
+### 2026-10-05 · 交付对账：实现落地、验证收紧披露与证据采集
+
+- 类型：evidence / scope（交付对账：实现落地 + §9 勾选 + rv-1…rv-7 证据采集；含 FR-7 唯一例外的验证收紧披露）
+- 原文：§7.2 改动树为"起点"预测；§9 各执行侧项未勾、呈递物路径为占位；§7.7 `presentation` 与 §9.1 证据根写为 legacy `tasks/evidence/...`；`iar issue list --output` 为自由 TEXT 取值、失败点普遍返回 `1`。
+- 变更后：见下方 A/B/C/D 四段——4 个新文件（`cli_output.py`/`cli_exit_codes.py`/`cli_schema.py`/`cli_typer_schema.py`）落地单一出口；退出码按类别迁移为 `2/3/4/5/10`（`1` 兜底）；证据根回填为 `.iar/evidence/`；§9.1 呈递物与执行侧项按真实证据勾选并标注路径。
+- 原因：执行侧交付完成，需将 PRD 从"计划"对账到"已实现 + 已验证"的最终事实，并按 Machine Contract §1 补全本条目的结构化字段，使交付门禁可解析。
+- 影响：不弱化任何需求——唯一对外行为收紧是 `iar issue list --output` 取值域由自由 TEXT 收为 `[table|json]`（非法取值 `2`），合法旧写法逐字节不变；详见 B 段。Human-Confirmed 三项保持未勾，归档由 runner 执行。
+- 审核：executor 自验 + rv-1…rv-7 真实入口证据（各项先经负控变红）；`just lint --full`、全量 pytest、守卫测试全绿；待独立 verifier 与人工验收（决策一/二、§9.1 过目）。
+
+**A. 实现落地（对 §7.2 改动树的补充与偏差）**
+
+- 单一出口落地为 4 个新文件，全部在 `src/backend/api/`：`cli_output.py`（`emit`/`emit_json`/`json_literal`/`route_logs_to_stderr`/`resolve_output_format` + `CliError`/`render_cli_error`）、`cli_exit_codes.py`（`ExitCode`、`ERROR_TOKEN_BY_EXIT_CODE`、`EXIT_CODE_HELP`、`translate_exit_code`）、`cli_schema.py`（`build_command_schema`）、`cli_typer_schema.py`（`iar schema` 注册）；`cli.py` 中央 dispatcher 负责异常→退出码与信封渲染，handler 只抛 `CliError`。
+- **Typer 0.26.7 vendored click**：`isinstance(x, click.Command)` 对本仓命令树恒为 `False`，`cli_schema` 因此改用属性探测的鸭子类型遍历（`commands`/`params`/`type`），否则 `iar schema` 会静默产出空命令表。
+- **`--json` 与 `--output` 的优先级**：Typer 侧无法区分 `--output table` 是默认值还是显式传入，故只有 `--output json` 能单独判定机器模式，`table` 不否决 `--json`（别名本身即显式声明）；两写法输出逐字节相同由 rv-6 第四段 `cmp` 证实。
+- **`--output` 的同名复用不是格式**：`iar ask` / `iar deliberate` 的 `--output` 是输出目录（文本型参数），`output_format_of` 只把 `table`/`json` 视为格式，其余值忽略；因此这两条命令不配 `--json`，schema 中记录为 `type=="text"`。
+- **退出码迁移点**（未列出的失败点保持 `1`）：旗标/参数组合不成立 `1→2`；gh 未鉴权 `1→4`、仓库被禁用 `1→4`；仓库/Issue/registry 条目/agent/可执行文件/日志缺失 `1→3`；daemon 已在跑 `1→5`、workflow 模板文件已存在 `1→5`、PRD 被锁 `1→5`；`iar run --dry-run` 校验通过在**机器模式**返回 `10`，人类模式仍 `0`（rv-3 负控第三段实测）。
+- **日志与 markup**：机器模式 `route_logs_to_stderr()` 把写向 stdout 的日志 handler 改绑 stderr；日志 notice 不再泄漏 Rich markup，原样输出走 `_print_verbatim(..., markup=False, highlight=False, soft_wrap=True)`（Rich 默认 80 列折行会把长 URL/argv 截成多行并破坏 JSON）。
+- **facade 与自省的边界**：旧 argparse facade 不暴露 `schema` 子命令与 token 表（对外承诺只挂在 Typer 真树上，避免两份事实源）。
+- **helper 收敛**：仓库选择错误统一为 `cli_helpers.repository_selector_error()`，不在各 handler 重复构造建议文本。
+- **文档准确性修正**：`conflict(5)` 的示例原先写「PRD 被锁 / locked PRD」，但 `src/backend/api/` 下并不存在该失败点（PRD 执行锁只在 pre-commit 的 warn-only hook 里，不经 CLI 退出码）。三处（skill、`docs/guides/agent-runner.md`、`docs/api/references.md`）统一改为已实现且已实测的冲突点：daemon 锁已被占（`runner.py:155`、`container.py:138`）、workflow 模板文件已安装（`init_workflow_takeover.py:73`）、loop 条目已存在（`cli_loop.py:200`），避免文档承诺一个未落地的类别。指南里 `iar schema --json` 的 jq 示例字段名 `param_type_name` 不存在（实测返回 `null`），改为导出的真实键 `type`。
+- **测试侧的真实化**：三个 `iar ask` 相关测试原先在假绿（断言未经 planner），改为真正驱动 planner；新增 `tests/test_cli_output_contract.py`、`tests/test_cli_exit_codes.py`、`tests/test_cli_schema.py`，并强化 `tests/test_iar_operator_skill.py`（要求 skill 退出码表名称列使用信封 `error` 取值并出现 `exit_codes.values`）。
+- **既有工具链发现（非本次引入）**：`just lint` 的 jscpd 手动 hook 报出的重复片段为仓库既有状态，本次未夹带清理。
+
+**B. 验证收紧披露（FR-7 的唯一例外）**
+
+- 原文：§9 Behavior「不传新旗标时默认输出与 `--help` 与改动前逐字节一致」。
+- 变更后：合法路径逐字节一致（8 条只读命令人类输出 stdout+stderr `cmp` 相同、退出码相同；旧写法 `iar issue list --output json` 与基线一致）；唯一差异是 `--output` 的**取值域**由自由 TEXT 收紧为 `[table|json]`，`iar issue list --output bogus` 从基线的静默回落表格（exit 0）改为用法错误（exit 2，见 rv-6 第二·C 段双侧实测）。
+- Impact：不弱化任何需求——收紧只作用于原先未定义行为的非法取值，且回落本身正是 §7.4 要防的「静默吞掉错误输入」；所有合法旧写法行为不变。skill/guide/schema 三处的枚举域与新行为一致（rv-5、rv-7 同源校验）。
+
+**C. 证据采集与门禁（§7.7 oracle 逐项）**
+
+- rv-1…rv-7 全部通过真实入口采集，每项**先证明会红**再取正向结论：红路来自 `git archive HEAD` 解出的改造前提交树、同命令去掉 `--json`、虚构旗标 `--fields`/`--ndjson`/`--yaml`、以及刻意删行的 skill 副本。
+- 证据落盘 `.iar/evidence/`（15 个文件，命名 `rv-<n>-<slug>.txt`，每项只含自己的输出，无全局 `tee` 重定向）；脚本与共用断言库落 `.iar/evidence/scripts/`（`rv1.sh`…`rv7.sh`、`_rv_lib.sh`），**不进入代码 diff**（`.iar/` 由 gitignore 排除），脚本内不含任何凭据；fake `gh` 只替换外部认证探测，被验证的 CLI 输出/退出码链路仍是真实实现。
+- 清单 `.iar/evidence/evidence.json`（`version: 1`、`language: "zh-CN"`、7 个整数编号 item，各带 `negative_control`/`expected_fail`/`stdout_assertions`）；每项 `command` 是 keda 可用 `bash -lc` 原样复跑的自断言脚本，本地按同一门禁语义预检：7/7 exit 0 且断言全中。断言只认 stdout/stderr/退出码，无任何 `|| true`、`|| echo ok` 兜底。
+- 门禁数值：`uv run pytest -o addopts="" tests/test_cli_output_contract.py tests/test_cli_exit_codes.py tests/test_cli_schema.py -q` → 45 passed；rv-6 oracle 两文件 → 40 passed；rv-7 oracle `tests/test_iar_operator_skill.py` → 8 passed；全量 `uv run pytest tests/ -q -o addopts="" --ignore=tests/playwright-e2e` → 2920 passed, 1 skipped（131.61s）；`just lint --full` → 全部 hook Passed（ruff、ruff-format、架构分层守卫、文件行数、守卫测试改动、PRD 清单、guidelines 一致性）；`just test` → 通过并刷新 test/lint flag。
+
+**D. §9 勾选与状态投影**
+
+- 执行侧 Owned 项（Architecture / Dependency / Behavior / Documentation / Validation / Delivery Readiness）按上述证据勾选并标注证据路径；§9.1 两行呈递物回填为 `.iar/evidence/` 实际路径并附 `open` 命令与逐项 10 秒自检；验收状态横幅投影为 `🧍 待人工验收（仅剩 3 项 Human-Confirmed）`。
+- 三项 `Human-Confirmed`（决策一、决策二、§9.1 呈递过目）**保持未勾选**，未代表审阅者确认；PRD 保持留在 `tasks/pending/`，归档由 runner 在交付门禁后执行。
+
 ### 2026-09-30 · 初稿：iar 的 Agent 机读契约
+
+- 类型：scope（新建 PRD，定义需求与验收范围）
+- 原文：无——本 PRD 由 GitHub Issue #194 首次创建，`tasks/pending/` 下此前不存在该文档。
+- 变更后：建立 Part A/Part B 两层结构，含 §7.7 rv-1…rv-7 oracle、§9 验收清单、§10 FR-1…FR-8 与 §13 决策 D-01…D-05。
+- 原因：外部 agent 通过 shell 操作 keda 时受"输出不可解析 + 失败原因不可判别 + 能力不可自省"三者拖累，这三项是 agent-facing CLI 的最低门槛。
+- 影响：范围仅 `src/backend/api/`、测试、`docs/` 与 `iar-operator` skill；不触碰 HTTP API、前端、数据库；关键决策见 D-01…D-05。
+- 审核：待人工验收——人审 2 项（决策一/二）+ verifier 5 项（rv-2/4/5/6/7）。
 
 - 目标行为：为 `iar` 的"产数据/产结果"命令集引入统一机读输出（`--json`/`--output json`，默认人类）、语义退出码（`3/4/5/10`）、结构化错误与 `iar schema` 运行时自省；默认输出与既有脚本零回归。
 - 变更动机：外部 agent 通过 shell 操作 keda 时，受"输出不可解析 + 失败原因不可判别 + 能力不可自省"三者拖累；这三项是 agent-facing CLI 的最低门槛。

@@ -13,8 +13,21 @@ from typing import Annotated
 
 import typer
 
-from backend.api.cli import error_console
-from backend.api.cli_typer_app import _run_typer_command, registry_app
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import CliError, render_cli_error
+from backend.api.cli_typer_app import (
+    JsonOutputOption,
+    OutputFormat,
+    OutputOption,
+    _enum_value,
+    _run_typer_command,
+    registry_app,
+)
+
+
+def _registry_selector_error(message: str, suggestion: str) -> int:
+    """registry start/stop 的旗标用法错误：envelope 或等价文本 + 语义退出码 2。"""
+    return render_cli_error(CliError(message, code=ExitCode.USAGE, suggestion=suggestion))
 
 
 @registry_app.command("scan")
@@ -78,9 +91,12 @@ def registry_remove_command(
 
 
 @registry_app.command("list")
-def registry_list_command() -> int:
+def registry_list_command(
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
+) -> int:
     """List registered repositories and their daemon status."""
-    return _run_typer_command("registry list")
+    return _run_typer_command("registry list", output=_enum_value(output), as_json=as_json)
 
 
 @registry_app.command("start")
@@ -103,11 +119,15 @@ def registry_start_command(
 ) -> int:
     """Start daemon and review-daemon for registered repositories."""
     if not repo_id and not all:
-        error_console.print("[red]Either --repo-id or --all is required for iar registry start.[/]")
-        return 1
+        return _registry_selector_error(
+            "Either --repo-id or --all is required for iar registry start.",
+            "iar registry start --all",
+        )
     if repo_id and all:
-        error_console.print("[red]--repo-id and --all are mutually exclusive.[/]")
-        return 1
+        return _registry_selector_error(
+            "--repo-id and --all are mutually exclusive for iar registry start.",
+            "iar registry start --repo-id <id>",
+        )
     return _run_typer_command(
         "registry start",
         repo_id=repo_id,
@@ -136,11 +156,15 @@ def registry_stop_command(
 ) -> int:
     """Stop daemon and review-daemon for registered repositories."""
     if not repo_id and not all:
-        error_console.print("[red]Either --repo-id or --all is required for iar registry stop.[/]")
-        return 1
+        return _registry_selector_error(
+            "Either --repo-id or --all is required for iar registry stop.",
+            "iar registry stop --all",
+        )
     if repo_id and all:
-        error_console.print("[red]--repo-id and --all are mutually exclusive.[/]")
-        return 1
+        return _registry_selector_error(
+            "--repo-id and --all are mutually exclusive for iar registry stop.",
+            "iar registry stop --repo-id <id>",
+        )
     return _run_typer_command(
         "registry stop",
         repo_id=repo_id,

@@ -26,15 +26,20 @@ from typing import Annotated
 
 import typer
 
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import CliError, output_format_of, render_cli_error
 from backend.api.cli_typer_app import (
     AllRepositoriesOption,
     ConfigOption,
     ConcurrencyOption,
     DaemonIntervalOption,
+    JsonOutputOption,
     LogsKindChoice,
     MaxIssuesOption,
     ModelIdOption,
     ModelPresetOption,
+    OutputFormat,
+    OutputOption,
     ReasoningEffortOption,
     RepoIdOption,
     RepoOption,
@@ -64,6 +69,8 @@ def _run_runner_command(
     preset: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    output: str | None = None,
+    as_json: bool = False,
 ) -> int:
     """Run `run` or `review` through the shared dispatch path."""
     return _run_typer_repository_command(
@@ -77,6 +84,8 @@ def _run_runner_command(
         max_issues=max_issues,
         **_typer_preset_options(preset=preset, model=model, reasoning_effort=reasoning_effort),
         all_repositories=all_repositories,
+        output=output,
+        as_json=as_json,
     )
 
 
@@ -89,6 +98,8 @@ def run_command(
     preset: ModelPresetOption = None,
     model: ModelIdOption = None,
     reasoning_effort: ReasoningEffortOption = None,
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -108,6 +119,8 @@ def run_command(
         preset=preset,
         model=model,
         reasoning_effort=reasoning_effort,
+        output=_enum_value(output),
+        as_json=as_json,
     )
 
 
@@ -134,6 +147,8 @@ def logs_command(
         bool,
         typer.Option("-f", "--follow", help="Follow log output continuously."),
     ] = False,
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -146,10 +161,21 @@ def logs_command(
     agent output log for one Issue instead of a process log.
     """
     selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
+    fmt = output_format_of(output=_enum_value(output), as_json=as_json)
     # Typer 的默认值与显式传参无法区分；``--issue`` 与 ``--kind`` 互斥，
     # 用 ``--issue is not None`` 结合 ``kind != default`` 判断是否冲突，
     # 避免把默认 ``daemon`` 当成用户显式选择。
     kind_explicit = kind != LogsKindChoice.daemon
+    if issue is not None and kind_explicit:
+        return render_cli_error(
+            CliError(
+                "--issue and --kind are mutually exclusive: --issue reads the per-Issue "
+                "agent output log, --kind selects a daemon process log.",
+                code=ExitCode.USAGE,
+                suggestion="iar logs --issue 1",
+            ),
+            fmt=fmt,
+        )
     return _run_typer_command(
         "logs",
         **selector_options,
@@ -158,6 +184,8 @@ def logs_command(
         follow=follow,
         issue=issue,
         kind_explicit=kind_explicit,
+        output=_enum_value(output),
+        as_json=as_json,
     )
 
 
@@ -300,6 +328,8 @@ def daemon_run_command(
 @daemon_app.command("status")
 def daemon_status_command(
     ctx: typer.Context,
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
     repo: RepoOption = None,
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
@@ -311,6 +341,8 @@ def daemon_status_command(
         "daemon",
         daemon_command="status",
         all_repositories=all_repositories,
+        output=_enum_value(output),
+        as_json=as_json,
         **selector_options,
     )
 

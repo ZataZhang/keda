@@ -27,6 +27,8 @@ from typer import _click as typer_click
 
 from backend.api.cli import _run_parsed_command, error_console
 from backend.api.cli_completion import register_completion_commands
+from backend.api.cli_exit_codes import EXIT_CODE_HELP
+from backend.api.cli_output import OutputFormat
 
 __all__ = [
     "AllRepositoriesOption",
@@ -35,8 +37,11 @@ __all__ = [
     "DaemonIntervalOption",
     "IssueAgentChoice",
     "IssueTypeChoice",
+    "JsonOutputOption",
     "LogsKindChoice",
     "MaxIssuesOption",
+    "OutputFormat",
+    "OutputOption",
     "RepoIdOption",
     "ModelIdOption",
     "ModelPresetOption",
@@ -135,7 +140,7 @@ _HELP_CONTEXT = {"help_option_names": ["-h", "--help"]}
 
 app = typer.Typer(
     name="iar",
-    help="Issue Agent Runner CLI.",
+    help=f"Issue Agent Runner CLI.\n\n{EXIT_CODE_HELP}",
     no_args_is_help=False,
     rich_markup_mode="rich",
     context_settings=_HELP_CONTEXT,
@@ -227,6 +232,16 @@ app.add_typer(agent_app, name="agent")
 RepoOption = Annotated[str | None, typer.Option("--repo", help="Target repository path.")]
 RepoIdOption = Annotated[
     str | None, typer.Option("--repo-id", help="Target configured repository ID.")
+]
+#: 机读契约共享旗标：``--output {table,json}`` 为主形态，``--json`` 为等价别名。
+#: 默认 ``table`` —— 机器模式必须显式声明（不做非 TTY 自动切 JSON）。
+OutputOption = Annotated[
+    OutputFormat,
+    typer.Option("--output", help="Output format: table|json."),
+]
+JsonOutputOption = Annotated[
+    bool,
+    typer.Option("--json", help="Alias of --output json (stdout carries data only)."),
 ]
 ConfigOption = Annotated[
     str | None,
@@ -387,7 +402,9 @@ def _app_callback(
 # order: init → registry → labels → issue → run/review/review-daemon/loop-daemon
 # → logs → recover/blocked-continue → ask/repl/deliberate → worktree/workflow
 # → takeover → loop. The modules below are imported in that exact order so
-# ``iar --help`` byte-output stays stable.
+# ``iar --help`` byte-output stays stable. ``cli_typer_schema`` is appended
+# last: the read-only introspection command only adds a trailing entry and must
+# not reorder the existing ones.
 from backend.api import (  # noqa: E402,F401
     cli_typer_init,
     cli_typer_registry,
@@ -405,6 +422,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_config,
     cli_typer_console,
     cli_typer_tokens,
+    cli_typer_schema,
 )
 
 
