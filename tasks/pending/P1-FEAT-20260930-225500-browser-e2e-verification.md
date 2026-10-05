@@ -15,7 +15,7 @@
 
 keda 的验证与 review 环节对"改了后端逻辑、跑测试能证明"的任务已经很扎实：配置化验证命令、独立 verifier、Realistic Validation 证据门禁。但 UI 类任务——改一个页面组件、调一个交互流程、修一个前端 bug——的验证目前是整个链路最弱的一环：
 
-- 配置的验证命令是纯 shell 命令，跑不了"把前端真实启动、打开浏览器、走一遍关键路径、断言页面行为"这类验证；前端构建通过不等于页面没坏。
+- 配置的验证命令是纯 shell 字符串：虽然可以 shell out 到自建的 E2E 入口（本仓即有 `just e2e` + `tests/playwright-e2e/`，见 `docs/ai-standards/testing.md:106-182`），但 runner 并未把"浏览器 E2E"作为**一等验证形态**提供——没有可用性预检、没有子进程环境隔离约定、产出的多模态产物也没有默认的证据通道；前端构建通过不等于页面没坏。
 - verifier 虽然能多模态读截图，但截图从哪来？现在要么靠实现 agent 自己补采（closeout 视觉证据补采路径），要么靠 verifier 自由发挥——**没有一个官方支持的、把"真实运行的应用"变成证据的通道**。同类项目（autonomous-dev-team 的 Review Agent）已经把"E2E 浏览器验证"作为合并前的标准动作。
 - 结果是：UI 类 Issue 的证据质量依赖 agent 自觉，"假绿"风险集中在人最不容易肉眼兜底的改动面上。
 
@@ -108,18 +108,20 @@ keda 的验证与 review 环节对"改了后端逻辑、跑测试能证明"的�
 - Existing path:
   - 验证命令执行：`src/backend/core/use_cases/agent_runner_validation.py`（RV 物化与证据门禁）、`src/backend/core/use_cases/agent_runner_feedback.py`（验证输出摘要）
   - 验证命令配置：`src/backend/core/shared/models/agent_runner.py`（`verification_commands` 元组、`pre_commit_verification_command`）
-  - 产物健全性：`validate_evidence_artifact` 硬层（stat / ffprobe / file --mime）、`validation.artifact_health_enabled` 开关、`expected_artifacts` 的 ArtifactSpec
+  - 产物健全性：`validate_evidence_artifact` 硬层（stat / ffprobe / file --mime，实现在 `src/backend/core/use_cases/agent_runner_structured_evidence.py`）、`validation.artifact_health_enabled` 开关、`expected_artifacts` 的 ArtifactSpec
   - 证据脚本目录约定：`tasks/evidence/<prd-stem>/scripts/`（标准见 `docs/guides/prd-standard.md`）
   - 子进程环境隔离：`src/backend/infrastructure/child_env.py`
-  - 前端应用：`frontend-admin/`、`frontend-public/`（runner 自身的 UI，可作 E2E 的第一个真实验证对象）
-- Reuse candidates: `IProcessRunner` 超时击杀、`child_env` 的环境变量隔离、artifact health 两层设计（硬层 ArtifactSpec + 软层 key_claim）、证据复跑缓存键机制。
+  - 已有 E2E 基础设施（本 PRD 自举试点的现成执行基础）：`tests/playwright-e2e/`（独立 Playwright 包，`@playwright/test ^1.50.0`）与单命令入口 `just e2e`（自动启停 backend + admin/public 前端、已在运行的服务直接复用；见 `docs/ai-standards/testing.md:106-182`）
+  - 前端应用：`frontend-admin/`、`frontend-public/`（`iar console` 服务的两个 UI，可作 E2E 的第一个真实验证对象）
+- Reuse candidates: `IProcessRunner` 超时击杀、`child_env` 的环境变量隔离、artifact health 两层设计（硬层 ArtifactSpec + 软层 key_claim）、证据复跑缓存键机制、`just e2e` 的应用启停编排与 `tests/playwright-e2e` 的 stack-control / session 夹具。
 - Architecture pattern to preserve: 验证命令的"配置声明 → 子进程执行 → 证据收集 → 门禁"管线不变；E2E 只是在命令形态与产物种类上扩展，不另起第二条验证管线。
 - Frontend impact: `No frontend impact`——`frontend-admin` / `frontend-public` 本身是被验证对象而非改动对象，本 PRD 不改任何前端代码。
 - Existing PRD relationship:
   - `tasks/pending/P1-FEAT-20260930-225000-daemon-crash-reconciliation-session-resume.md`：`independent`（不同子系统，可并行）。
-  - `tasks/pending/P0-BUG-20260930-145323-logging-config-robustness.md`：`independent`。
-  - `tasks/archive/`：FR-11a 产物健全性硬卡点 PRD 已交付，是本 PRD 的直接复用基础（`depends on` 其运行时行为，但其已交付，无排队依赖）。
-- Redundancy risks: 不得在 keda 内自建一套 E2E 断言框架（Playwright 等工具是仓库自己的 devDependency，keda 只负责"提供执行环境 + 收证据 + 门禁"）；不得让 verifier 与 E2E 脚本两套断言并行生效——E2E 脚本的断言结果作为证据输入 verifier，verifier 做对抗审查。
+  - `tasks/archive/P0-BUG-20260930-145323-logging-config-robustness.md`：`independent`（已归档交付；原文写作 `tasks/pending/…`，已按实际位置更正）。
+  - `tasks/archive/P1-FEAT-20260628-041733-realistic-validation-independent-verifier-gate.md`：交付 FR-11a 产物健全性硬卡点，是本 PRD 的直接复用基础（`depends on` 其运行时行为，但其已交付，无排队依赖）。
+  - `tasks/archive/P1-BUG-20260707-173613-runner-frontend-visual-evidence-gate.md`：已交付的前端改动**强制视觉证据 fail-closed 门禁**，其自述边界为**「只拦不产」**——只要求前端 diff 附带视觉文件，不负责产出证据。本 PRD 补的正是「产出」那一侧（真实启动应用 + 浏览器执行 + 收证据），二者互补、不重复。
+- Redundancy risks: 不得在 keda 内自建一套 E2E 断言框架（Playwright 等工具是仓库自己的 devDependency，keda 只负责"提供执行环境 + 收证据 + 门禁"）；不得让 verifier 与 E2E 脚本两套断言并行生效——E2E 脚本的断言结果作为证据输入 verifier，verifier 做对抗审查。与已交付的 `runner-frontend-visual-evidence-gate`（只拦不产）保持互补：本 PRD **不重做**该 fail-closed 门禁，只新增证据产出通道并复用现有 artifact health 硬层。
 
 ---
 
@@ -300,7 +302,7 @@ Failure triage:
 - Depends on tasks/issues:
   - none
 - Gate type: none
-- Notes: 与 `P1-FEAT-20260930-225000-daemon-crash-reconciliation-session-resume`、`P0-BUG-20260930-145323-logging-config-robustness` 均为 `independent`。运行时依赖已交付的 FR-11a artifact health 通道（已在代码中，无排队关系）。
+- Notes: 与 `P1-FEAT-20260930-225000-daemon-crash-reconciliation-session-resume` 均为 `independent`；`P0-BUG-20260930-145323-logging-config-robustness` 亦为 `independent`，且已归档交付（`tasks/archive/`，非 pending）。运行时依赖已交付的 FR-11a artifact health 通道（已在代码中，无排队关系）。
 
 ---
 
@@ -381,9 +383,11 @@ Failure triage:
 
 ## 12. Risks And Follow-Ups
 
-- 浏览器运行时在各平台 / CI 容器的安装差异较大，首次落地的预检与指引可能覆盖不全——按失败分类逐步补指引文案，遗留项进 follow-up。
+- 浏览器运行时在各平台 / CI 容器的安装差异较大，首次落地的预检与指引可能覆盖不全——按失败分类逐步补指引文案，遗留项进 follow-up。**（2026-10-05 决定：首版只承诺本机（本仓 macOS）预检 + 指引，CI 容器覆盖列 follow-up——见 D-08。）**
 - 应用"就绪探测"对非常规启动方式（非 HTTP 服务的前端、多进程应用）可能不适用——首版仅承诺 HTTP 可探测形态，其他形态回退为固定等待 + 脚本自测。
 - E2E 引入的验证耗时增长对 autopilot 吞吐的影响——E2E 仅在声明处生效，可观测后按仓库自行取舍。
+- **Roadmap 登记与排序（2026-10-05 决定：已登记）**：已在本 PRD 登记进 `ROADMAP.md` 的 M3「Verification And Review」小节与「当前 pending PRD 与交付顺序」小节中，并顺带把已被移入 `tasks/hold/` 的 Tauri 项标注为暂缓；daemon sibling `P1-FEAT-20260930-225000` 亦已于 2026-10-05 登记进同一 M3 与 pending 视图。
+- **与既有 E2E 资产的分工（2026-10-05 决定：复用）**：本仓已有 `just e2e` + `tests/playwright-e2e/`（见 §5）。决定**复用**该入口与夹具，不另起并行启停编排；试点脚本与产物接入其现有启停与就绪探测，产出走 RV `evidence_files` + artifact health。不得与其并行维护两套不一致的应用启停逻辑。（见 D-06）
 
 ---
 
@@ -395,3 +399,29 @@ Failure triage:
 | D-02 | 产物标准 | 复用 FR-11a artifact health 两层设计 | 为浏览器证据新建独立标准 | 硬层机检 + verifier 软层已验证有效，新标准必然漂移 |
 | D-03 | E2E 失败语义 | 进入现有 VERIFICATION_FAILED 可恢复通道 | 新增独立的"E2E 失败"终态 | recovery loop 已有修复-重试闭环，UI 失败同样适用；少一种状态机分支 |
 | D-04 | 首个试点对象 | keda 自仓 frontend-admin / frontend-public | 外部仓库 | 自举验证（吃自己的狗粮），且证据脚本天然有归宿 |
+| D-05 | 与已交付视觉证据门禁的边界 | 确认「拦 vs 产」互补，不合并 | 合并为一个端到端 PRD | 现有门禁已交付且只做 fail-closed 拦截；本 PRD 净新增产出通道，职责正交，合并会重开已交付范围 |
+| D-06 | 本仓试点的 E2E 执行编排 | 复用既有 `just e2e` + `tests/playwright-e2e/` | 另起独立编排 | 已有单命令启停与就绪探测；复用避免两套不一致的启停逻辑 |
+| D-07 | FR-11a 未收敛 follow-up | 不作前置，本 PRD 独立推进 | 先补齐 follow-up 再开工 | 硬层已在代码中可用，follow-up 属增强而非阻塞；绑入会扩大本 PRD 范围 |
+| D-08 | 浏览器运行时覆盖范围 | 首版只承诺本机 + 指引，CI 容器列 follow-up | 首版必须覆盖 CI 容器 | 现有 E2E 资产均为本机形态，无容器证据；承诺容器覆盖会引入无法验证的验收项 |
+| D-09 | 自举试点的验收定位 | 保留为验收证据，实现时必须真实跑通 | 降级为 follow-up | 自举是 D-04 核心价值，rv-1 依赖真实 UI Issue；降级会让产出侧缺端到端证据 |
+
+---
+
+## 14. Change Log
+
+### 校正过期引用、补齐相关 PRD 与既有 E2E 资产
+
+- Type: doc
+- Before: §1 把"验证命令是纯 shell 字符串"绝对化为"跑不了浏览器 E2E"，与仓内既有的 `just e2e` + `tests/playwright-e2e/` 事实不符；§5 / §8 把已归档的 `P0-BUG-20260930-145323-logging-config-robustness` 写作 `tasks/pending/…`；§5 未点名交付 FR-11a 的归档 PRD、未声明与已交付的前端视觉证据 fail-closed 门禁（自述"只拦不产"）的关系、未记录仓内既有 E2E 资产；全文无 §14 Change Log。
+- After: §1 改为"shell 可 shell out 到自建 E2E，但 runner 未把浏览器 E2E 作为一等形态（无预检 / 无环境隔离约定 / 无默认证据通道）"；§5 与 §8 将 P0 更正为 `tasks/archive/` 并注明已交付；§5 点名交付 FR-11a 的 `P1-FEAT-20260628-041733-realistic-validation-independent-verifier-gate.md`，补入 `P1-BUG-20260707-173613-runner-frontend-visual-evidence-gate.md`（只拦不产，与本 PRD 互补）及 `just e2e` / `tests/playwright-e2e/` 既有资产；§12 新增 Roadmap 登记与既有 E2E 资产分工两条待决；补 §14 本条。
+- Reason: 与本仓当前代码、交付态与文档对齐，避免执行器按过期路径找依赖、或把已交付的视觉证据门禁误判为重复范围；Roadmap 顺序视图已知过期，按规范只在 PRD 内记录、不改路线。
+- Impact: 仅文案与引用校正；不改产品目标、§10 FR、§7.6 RV oracle、§11 Non-Goals 或任何验收判据；不新增 / 删除交付依赖，不改变交付顺序。
+- Review: 逐条核对代码符号与文档位置（`agent_runner_structured_evidence.py:81,1037,149`、`agent_runner_settings.py:394`、`agent_runner.py:432,436`、`docs/ai-standards/testing.md:106-182`、`ROADMAP.md` 的路线更新 / pending 顺序视图 / M3 小节、`tasks/archive/` 实况）后自审通过。
+
+### 回填 decision board 的 7 项决定（2026-10-05）
+
+- Type: doc
+- Before: §12 的「Roadmap 登记与排序」「与既有 E2E 资产的分工」两条为待决；浏览器运行时覆盖范围未定；§13 无对应决策记录。
+- After: §12 三条改为已决（Roadmap 已登记 M3、复用既有 E2E 资产、首版只承诺本机覆盖）；§13 新增 D-05 … D-09；同步更新 `ROADMAP.md`（本 PRD 登记进 M3「Verification And Review」与 pending 顺序视图，并标注 Tauri 项已移入 `tasks/hold/`），并更正 sibling daemon PRD 的过期 P0 引用。追加：daemon sibling `P1-FEAT-20260930-225000` 也登记进 Roadmap M3 与 pending 视图。
+- Reason: 用户经 decision board 就 7 项待决全部选择推荐项（Q1–Q7 = A），按结论回写；随后按用户指示补登记 daemon sibling。
+- Review: 读取 `.iar/decisions/answers.json`（`selection.answers` 全为 `A`、`changed` 为空）后回写；daemon sibling 已按用户后续指示登记，§12 与本条同步更新。

@@ -6,6 +6,8 @@
 ```text
 tasks/inbox/              →   tasks/pending/   →   tasks/archive/
 随手想法：原话 + 总结            成形的 PRD          已交付的 PRD
+                                  ↕
+                          tasks/hold/  暂缓（已成形但不排期）
 ```
 
 > 注意区分同名概念：本页讲的是**开发流程**里的 `tasks/inbox/` 约定；

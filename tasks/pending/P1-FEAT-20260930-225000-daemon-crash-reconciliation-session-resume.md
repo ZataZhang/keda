@@ -116,7 +116,7 @@ keda 的自动恢复能力在**单次 attempt 内部**已经很强：commit requ
 - Frontend impact: `No frontend impact` —— 纯 runner 编排与 agent 执行层改动，不动 `frontend-admin` / `frontend-public`。
 - Existing PRD relationship:
   - `tasks/archive/20260521-143000-prd-surgical-failure-recovery.md`：已交付**attempt 内** recovery loop。本 PRD 是它的跨进程边界延伸，不重复其范围（surgical 管"runner 活着时如何修复错误"，本 PRD 管"runner / agent 死了之后如何找回现场"）。依赖关系：`independent`（实现上互不触碰对方路径，运行上互补）。
-  - `tasks/pending/P0-BUG-20260930-145323-logging-config-robustness.md`：日志配置健壮性，与本 PRD `independent`（对账日志受益于它，但不构成阻塞）。
+  - `tasks/archive/P0-BUG-20260930-145323-logging-config-robustness.md`：日志配置健壮性，与本 PRD `independent`（对账日志受益于它，但不构成阻塞）。已归档交付；原文写作 `tasks/pending/…`，已按实际位置更正。
   - `tasks/pending/` 其余 PRD 与 `tasks/archive/` 相关归档：无重复。
 - Redundancy risks: 不得在 GitHub 之外新增"对账状态库"——label + Issue comment 已是权威媒介，第二状态源必然漂移。不得为续传自建会话存储——session id 的持有方是 agent CLI，runner 只记录与回传。
 

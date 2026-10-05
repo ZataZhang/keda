@@ -79,13 +79,15 @@
 - **Roadmap 单 PRD 控制、归档证据与仓库级 Autopilot 开关**（#148，`P1-FEAT-20260916-122645` 已归档）：统一右侧详情容器（`prd-detail.tsx` 的 `additionalTabs`）与受限 `.iar.toml` writer 落地。
 - **PRD 生命周期台账与可观测 UI**（#153）：console SQLite schema v5（`prd_lifecycle_runs` / `prd_lifecycle_events`）+ `frontend-public` 执行过程 tab 与 Stats 生命周期口径。
 - **Operator Skill 与可预期队列**（`P1-FEAT-20260924-020856` 已归档）。
+- **Post-PR CI 决策契约（Agent-led）**（`P1-BUG-20260924-100212` 已归档）：`checks_state`/`checks_summary` 作为 Agent 观察事实输入，不再按聚合状态强制改写 Supervisor 动作，仅保留 `mergeable=false` 等非 CI 确定性安全门；它是 Roadmap CI/CD 监控与自动修复（`P1-FEAT-20260916-134008`）的前置契约。
 
 ### 当前 pending PRD 与交付顺序
 
 1. `P1-FEAT-20260922-000431`（失败上下文交接 + 失败 Draft PR）：机器门禁 rv-1…rv-4 已全绿，待人工验收。
-2. `P1-BUG-20260924-100212`（Post-PR CI 决策契约，Agent-led）：无前置，可立即开工。要点：`checks_state`/`checks_summary` 作为 Agent 观察事实输入，不再按聚合状态强制改写 Supervisor 动作；仅保留 `mergeable=false` 等非 CI 确定性安全门。该契约取代上方 Near-Term Delivery Order 第 6 条中由归档 PRD `P1-BUG-20260527-093356` 建立的 FAILURE/PENDING 自动改写策略的相应部分；崩溃恢复、repair 次数上限与 mergeability 守卫不受影响。
-3. `P1-FEAT-20260916-134008`（Roadmap CI/CD 监控与可选自动修复）：⛔ hard 依赖第 2 项，其 §8 已机器声明该依赖（`Gate type: hard`）。
-4. `P1-FEAT-20260913-204531`（Tauri 桌面壳）：独立，可与上述并行。
+2. `P1-FEAT-20260916-134008`（Roadmap CI/CD 监控与可选自动修复）：前置已满足——原 hard 依赖的 `P1-BUG-20260924-100212` 已归档交付，其 §8 已由 `hard`（指向失效的 pending 路径）改为 `none`，可开工。
+3. `P1-FEAT-20260930-225500`（浏览器 E2E 验证工具链）：独立，可与上述并行；归入下方 M3「Verification And Review」。
+4. `P1-FEAT-20260930-225000`（Daemon 崩溃对账与 Agent 会话续传）：独立，可与上述并行；归入下方 M3「Verification And Review」。
+5. `P1-FEAT-20260913-204531`（Tauri 桌面壳）：2026-10-05 已移入 `tasks/hold/`（暂缓，不参与当前排期）。
 
 ### 已知漂移（下次大更新时校准）
 
@@ -171,6 +173,8 @@ Status: Partially completed.
 - 未完成：把高风险 finding count 转换为稳定阻断规则或转人工规则。
 - 未完成：PR 正文实现摘要、验证详情和残余风险仍缺少强 schema 化校验。
 - 未完成：更细粒度的失败分类、恢复策略和面向 operator 的审计时间线视图。
+- 未完成：UI 类 Issue 的浏览器 E2E 验证通道（真实启动应用 + 浏览器执行 + 产物证据）——由 `P1-FEAT-20260930-225500`（浏览器 E2E 验证工具链）承接，2026-10-05 登记本里程碑。
+- 未完成：跨进程边界的恢复——daemon / host 崩溃后的僵尸 attempt 对账与 agent 会话续传——由 `P1-FEAT-20260930-225000`（Daemon 崩溃对账与 Agent 会话续传）承接，2026-10-05 登记本里程碑。
 
 ### M4: Pull Request Automation
 

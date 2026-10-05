@@ -1,6 +1,6 @@
 # PRD: Roadmap PRD 完成后 CI/CD 监控与可选自动修复
 
-> ⛔ **交付前置**：硬依赖 Agent-led Post-PR CI Decision PRD `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md`；必须先完成 Supervisor 的 CI 决策契约，再将其产品化。前端上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档，统一右侧详情容器和受限 `.iar.toml` writer 已可用。
+> ✅ **交付前置**：无；硬依赖的 Agent-led Post-PR CI Decision PRD `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md` 已归档交付（`tasks/archive/`），前置已满足（§8 由 `hard` 降为 `none`，见 Notes）。前端上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档，统一右侧详情容器和受限 `.iar.toml` writer 已可用。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
 > ⬜ **验收状态**：未开工。
@@ -412,9 +412,9 @@ No external validation required; repository code and existing PRDs were sufficie
 
 - Group: roadmap-delivery-control
 - Depends on tasks/issues:
-  - tasks/pending/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md
-- Gate type: hard
-- Notes: 先交付 Agent-led CI 决策契约，确保 Roadmap 的 repair 策略只限制 Agent 选择的动作，而不是新增 checks→动作映射。前端容器与设置 writer 的历史依赖已由归档上游满足。
+  - none
+- Gate type: none
+- Notes: 原硬依赖的 Agent-led CI 决策契约 `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md` 已归档交付（`tasks/archive/`），交付顺序门禁已满足，故降为 `none`（原 `tasks/pending/…` 路径已失效，会令 `iar issue-from-prd` 解析失败）。历史理由：先交付该契约，确保 Roadmap 的 repair 策略只限制 Agent 选择的动作，而不是新增 checks→动作映射。前端容器与设置 writer 的历史依赖已由归档上游满足。
 
 ## 9. Acceptance Checklist
 
@@ -559,3 +559,12 @@ No external validation required; repository code and existing PRDs were sufficie
 - Reason: §8 自称唯一事实源，但解析器读不到依赖目标时无法执行交付顺序门禁。
 - Impact: 不改变任何功能需求或验收判据，仅修复结构化声明的机器可读性。
 - Review: 2026-09-28 复核中发现；用 `parse_delivery_dependencies` 验证通过。
+
+### 上游归档后解除已满足的硬依赖（2026-10-05）
+
+- Type: doc
+- Before: §8 仍声明 `Depends on tasks/issues: tasks/pending/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md` + `Gate type: hard`，但该上游已于交付后归档到 `tasks/archive/`，`tasks/pending/…` 路径不存在；banner 仍为 `⛔ 交付前置`。
+- After: `Depends on tasks/issues` 改为 `none`、`Gate type` 改为 `none`，Notes 保留历史理由并说明门禁已满足；banner 改为 `✅ 交付前置`。
+- Reason: 路径失效 + `Gate type: hard` 会让 `iar issue-from-prd` 在解析该 PRD 依赖时抛 `ValueError`（missing PRD dependency），使本 PRD 开工即失败；上游已归档，顺序门禁本身也已满足。
+- Impact: 依赖声明恢复为 `none`，可正常建 Issue；不改变任何功能需求或验收判据。
+- Review: 核对 `tasks/archive/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md` 存在且已验收、`tasks/pending/` 下无该文件，并对照 `create_issue_from_prd._resolve_dependency_prd_path` 的失败路径确认。

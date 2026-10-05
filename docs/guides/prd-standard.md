@@ -18,6 +18,7 @@ PRD 的章节结构、Human Review Map（介入与风险地图）、Realistic Va
 - 草稿 / 进行中：`tasks/pending/`
 - 活跃：`tasks/` 根目录
 - 已交付：`tasks/archive/`
+- 暂缓（已成形但不排期）：`tasks/hold/` — 需求成立、结构完整，但当前没有紧迫场景，主动从待执行队列移出；**不被** `just prd status`、PRD 领锁与验收 hook 扫描（不出现于「待办」或「等验收」）。约定见 `tasks/hold/README.md`。
 - 文件名支持旧格式 `*-prd-*.md` 与优先级格式 `P0/P1/P2/P3-<TYPE>-YYYYMMDD-HHMMSS-<slug>.md`。
 
 ### Acceptance Checklist 门禁（pre-commit）

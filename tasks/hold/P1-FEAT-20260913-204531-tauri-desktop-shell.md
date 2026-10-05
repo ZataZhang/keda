@@ -1,6 +1,8 @@
 # PRD: Tauri 桌面壳 —— 免签名本机构建的原生窗口
 
-> ✅ **交付前置**：无，可立即开工。上游 `P1-FEAT-20260913-204530-console-prd-content-reader.md` 已归档（`tasks/archive/`），本 PRD 立项动机所需的"读 PRD 原文"能力已在代码库可用。
+> ⏸ **执行状态**：已暂缓（Hold，2026-10-05）——需求仍成立，但当前没有紧迫的使用场景，主动移出待执行队列、不参与本阶段排期。本 PRD 现位于 `tasks/hold/`（见同目录 `README.md`）；解除暂缓时移回 `tasks/pending/` 并把横幅恢复为 `⬜ 未开工`。理由见 §14 Change Log。
+
+> ✅ **交付前置**：无；构建上不依赖其它 PRD，解除暂缓后即可开工。上游 `P1-FEAT-20260913-204530-console-prd-content-reader.md` 已归档（`tasks/archive/`），本 PRD 立项动机所需的"读 PRD 原文"能力已在代码库可用。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
 > ⬜ **验收状态**：未开工。
@@ -502,3 +504,12 @@ No interactive prototype file changes in this PRD.
 - Reason: `docs/mkdocs.yml` 是"讲得通但永远匹配不上"的节点，是本仓库 FILES 列最隐蔽的失真来源；`just 集成` 与缺失的 README 节点则让分母不准。
 - Impact: FILES 触达列对本 PRD 的统计恢复准确；不改行为要求、验收判据或 RV oracle（仍为 3 项）。
 - Review: 自审通过；以 `parse_impact_tree` + `RepoPathIndex.is_plausible_path` 复跑确认节点集合与期望一致。
+
+### 暂缓执行（移入 tasks/hold/）
+
+- Type: doc
+- Before: PRD 位于 `tasks/pending/`，横幅为 `✅ 交付前置：无，可立即开工`，在待执行队列中参与排期。
+- After: `git mv` 至 `tasks/hold/`，顶部新增 `⏸ 执行状态：已暂缓（Hold，2026-10-05）` 横幅；`✅ 交付前置` 改为注明"构建上不依赖其它 PRD，解除暂缓后即可开工"。
+- Reason: 需求仍成立，但当前没有紧迫的使用场景，主动从待执行队列移出，避免占用排期与给人"待办"的错觉。`tasks/hold/` 有意不被 `just prd status`、PRD 领锁与验收 hook 扫描（见 `tasks/hold/README.md`）。
+- Impact: 本 PRD 不再出现在 PRD 看板的 `PENDING` 段；不改变任何行为要求、验收判据或 RV oracle。解除暂缓时移回 `tasks/pending/` 并把横幅恢复为 `⬜ 未开工`。
+- Review: 自审通过；确认移动后其余 `tasks/pending/` PRD 不受影响，且 `tasks/hold/` 不被现有工具识别为待办。
