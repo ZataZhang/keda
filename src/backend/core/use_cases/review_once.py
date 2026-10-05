@@ -16,6 +16,7 @@ from backend.core.shared.models.agent_runner import (
     TokenUsage,
 )
 from backend.core.use_cases.agent_runner_events import (
+    parse_event_markers,
     parse_latest_event_marker,
 )
 from backend.core.use_cases.agent_runner_lifecycle import (
@@ -40,6 +41,11 @@ from backend.core.use_cases.agent_runner_git import (
     has_changes,
     pop_worktree_stash,
     stash_worktree_changes,
+)
+from backend.core.use_cases.backlog_ci_delivery import (
+    REPAIR_ACTION,
+    evaluate_ci_repair_gate,
+    resolve_stored_ci_repair_policy,
 )
 from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.run_agent_once import (
@@ -435,6 +441,31 @@ def _process_review_candidate(
         "rebase_pr_branch",
         "resolve_conflict",
     ):
+        if action_result.action == REPAIR_ACTION:
+            # CI 自动修复门禁：只约束 Agent 选出的 repair 动作，checks 状态本身
+            # 不是触发条件。被拒时零自动副作用——不写意图评论、不改 label、不
+            # 产生提交，问题留在详情里由下一轮 checks 变化或人工处理。
+            gate = evaluate_ci_repair_gate(
+                pr_number=pr_context.number,
+                head_sha=pr_context.head_sha,
+                checks_summary=pr_context.checks_summary,
+                markers=parse_event_markers(comments),
+                stored_policy=resolve_stored_ci_repair_policy(comments),
+                global_auto_repair=bool(config.post_pr_supervisor.auto_repair_ci),
+                max_repair_attempts=int(config.post_pr_supervisor.max_repair_attempts),
+                manual=False,
+            )
+            if not gate.allowed:
+                _logger.info(
+                    "Issue #%d repair gated by CI auto-repair policy (%s); %s",
+                    issue.number,
+                    gate.decision.value,
+                    gate.detail,
+                )
+                return f"skipped_{gate.decision.value}"
+            repair_failure_digest = gate.failure_key
+        else:
+            repair_failure_digest = None
         if stashed:
             pop_worktree_stash(worktree_path, process_runner)
         head_sha = get_head_sha(worktree_path, process_runner)
@@ -444,6 +475,7 @@ def _process_review_candidate(
                 action=action_result.action,
                 pr_branch=pr_branch,
                 head_sha=head_sha,
+                failure_digest=repair_failure_digest,
             ),
         )
         transition_issue_workflow_state(github_client, issue.number, config, config.labels.running)

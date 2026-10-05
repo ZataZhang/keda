@@ -18,6 +18,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PrdDetail } from "@/components/backlog/prd-detail";
 import { BacklogAutopilotControl } from "@/components/backlog/backlog-autopilot-control";
+import { BacklogCiControl } from "@/components/backlog/backlog-ci-control";
+import { PrdCiView } from "@/components/backlog/prd-ci-view";
 import { BacklogGraph } from "@/components/backlog/backlog-graph";
 import { BacklogList } from "@/components/backlog/backlog-list";
 import { BacklogTimeline } from "@/components/backlog/backlog-timeline";
@@ -26,17 +28,20 @@ import { cn } from "@/lib/utils";
 import { fetchRegistryRepositories } from "@/lib/api/console";
 import {
   fetchBacklogAutopilot,
+  fetchBacklogCiSettings,
   fetchBacklogPrds,
   fetchBacklogSettings,
   startGlobalBacklog,
   startBacklogPrd,
   stopGlobalBacklog,
   updateBacklogAutopilot,
+  updateBacklogCiSettings,
   updateBacklogSettings,
 } from "@/lib/api/backlog";
 import type {
   RegistryRepositoryEntry,
   BacklogAutopilotState,
+  BacklogCiAutoRepairState,
   BacklogPrd,
   BacklogSettings,
 } from "@/lib/api/types";
@@ -81,6 +86,10 @@ export default function BacklogPage() {
   const [autopilot, setAutopilot] = useState<BacklogAutopilotState | null>(null);
   const [autopilotLoading, setAutopilotLoading] = useState(true);
   const [autopilotSaving, setAutopilotSaving] = useState(false);
+  // CI 自动修复是独立于 Autopilot 的第 4 个开关，状态与 Autopilot 各读各的。
+  const [ciSettings, setCiSettings] = useState<BacklogCiAutoRepairState | null>(null);
+  const [ciLoading, setCiLoading] = useState(true);
+  const [ciSaving, setCiSaving] = useState(false);
   // 打开仓库级生命周期 Agent 矩阵抽屉的仓库 id（null 表示关闭）。
   const [matrixRepoId, setMatrixRepoId] = useState<string | null>(null);
 
@@ -192,6 +201,54 @@ export default function BacklogPage() {
     const timer = setInterval(() => void loadAutopilot(), POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [loadAutopilot, selectedRepoId]);
+
+  const loadCiSettings = useCallback(async () => {
+    if (!selectedRepoId) {
+      return;
+    }
+    try {
+      setCiSettings(await fetchBacklogCiSettings(selectedRepoId));
+    } catch (error) {
+      // 与 Autopilot 同理：CI 设置读不到不应该让整个页面失效，保留旧值并提示一次。
+      toast.error(error instanceof Error ? error.message : "加载 CI 自动修复设置失败。");
+    }
+  }, [selectedRepoId]);
+
+  useEffect(() => {
+    if (!selectedRepoId) {
+      return;
+    }
+    setCiLoading(true);
+    void loadCiSettings().finally(() => setCiLoading(false));
+    // 生效值可能被 CLI 或 daemon 改掉，必须按同一节奏 fresh 读取，不读前端缓存。
+    const timer = setInterval(() => void loadCiSettings(), POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [loadCiSettings, selectedRepoId]);
+
+  /**
+   * 切换仓库级 CI 自动修复开关，并用服务端回写的生效快照覆盖本地状态。
+   *
+   * @param enabled - 目标开关值。
+   */
+  async function handleToggleCiAutoRepair(enabled: boolean) {
+    setCiSaving(true);
+    try {
+      // 写后返回的是服务端 fresh load 的生效配置，不做乐观 UI 覆盖。
+      setCiSettings(
+        await updateBacklogCiSettings({ repoId: selectedRepoId, autoRepairCi: enabled }),
+      );
+      toast.success(
+        enabled
+          ? "已保存：CI 自动修复开启，仅作用于 Supervisor 选出的 repair_pr_branch。"
+          : "已保存：CI 自动修复关闭，CI 问题只做展示与人工处理。",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存 CI 自动修复设置失败。");
+      await loadCiSettings();
+    } finally {
+      setCiSaving(false);
+    }
+  }
 
   async function handleToggleAutopilot(enabled: boolean) {
     setAutopilotSaving(true);
@@ -403,6 +460,13 @@ export default function BacklogPage() {
           onToggle={(enabled) => void handleToggleAutopilot(enabled)}
         />
 
+        <BacklogCiControl
+          state={ciSettings}
+          loading={ciLoading}
+          saving={ciSaving}
+          onToggle={(enabled) => void handleToggleCiAutoRepair(enabled)}
+        />
+
         {/* master-detail：左侧保留当前 Backlog 视图（含依赖图上下文），右侧是
             统一的 PRD 详情；窄屏自动退化为上下堆叠，不引入 modal 或新路由。 */}
         <div
@@ -456,6 +520,26 @@ export default function BacklogPage() {
                 prd={selectedPrd}
                 starting={startingPath === selectedPrd.prd_path}
                 onStart={(prd) => void handleStart(prd)}
+                additionalTabs={
+                  // CI/CD 只针对已有 Issue（因而可能有远端 PR）的 PRD；未启动的
+                  // PRD 没有可观察的 checks，不显示这个标签。
+                  selectedPrd.issue_number
+                    ? [
+                        {
+                          id: "ci",
+                          label: "CI/CD",
+                          render: () => (
+                            <PrdCiView
+                              key={selectedPrd.prd_path}
+                              repoId={selectedRepoId}
+                              prdPath={selectedPrd.prd_path}
+                              initialDelivery={selectedPrd.ci_delivery}
+                            />
+                          ),
+                        },
+                      ]
+                    : []
+                }
               />
             </aside>
           ) : null}

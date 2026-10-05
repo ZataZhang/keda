@@ -3,12 +3,16 @@
 import { get, patch, post } from "./client";
 import type {
   PrdLifecycleDetail,
+  BacklogCiAutoRepairState,
+  BacklogCiRepairPolicy,
+  BacklogCiRepairResult,
   BacklogGlobalStartResult,
   BacklogPrd,
   BacklogSettings,
   BacklogActionResult,
   BacklogAutopilotState,
   BacklogPrdEvidenceManifest,
+  CiDelivery,
 } from "./types";
 
 const BASE_PATH = "/v1/agent-runner/backlog";
@@ -119,6 +123,96 @@ export async function updateBacklogAutopilot(params: {
     repo_id: params.repoId,
     enabled: params.enabled,
   });
+}
+
+/**
+ * 读取当前仓库的 CI 自动修复设置（服务端每次 fresh load，不与 Autopilot 联动）。
+ *
+ * @param repoId - 仓库标识。
+ * @returns 生效值、持久值来源与既有修复上限的聚合快照。
+ */
+export async function fetchBacklogCiSettings(
+  repoId: string,
+): Promise<BacklogCiAutoRepairState> {
+  return get(`${BASE_PATH}/ci?repo_id=${encodeURIComponent(repoId)}`);
+}
+
+/**
+ * 切换当前仓库的 CI 自动修复全局值（只改 post_pr_supervisor.auto_repair_ci）。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.autoRepairCi - 目标开关值；Autopilot、auto merge、本地 Fix Agent 都不受影响。
+ * @returns 写后 fresh load 读回的状态快照（不是请求体回显）。
+ */
+export async function updateBacklogCiSettings(params: {
+  repoId: string;
+  autoRepairCi: boolean;
+}): Promise<BacklogCiAutoRepairState> {
+  return patch(`${BASE_PATH}/ci?repo_id=${encodeURIComponent(params.repoId)}`, {
+    repo_id: params.repoId,
+    auto_repair_ci: params.autoRepairCi,
+  });
+}
+
+/**
+ * 读取单个 PRD 的 fresh CI/CD 投影（策略三态、轮次、问题与生效值）。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.prdPath - PRD 仓库相对路径。
+ * @param params.signal - 可选取消信号。
+ * @returns `ci_delivery` 投影；该 PRD 尚无关联 Issue 时为 `null` 并附原因。
+ */
+export async function fetchPrdCiDelivery(params: {
+  repoId: string;
+  prdPath: string;
+  signal?: AbortSignal;
+}): Promise<{ ci_delivery: CiDelivery | null; reason: string }> {
+  const encodedPath = encodePrdPath(params.prdPath);
+  const searchParams = new URLSearchParams();
+  searchParams.set("repo_id", params.repoId);
+  return get(`${BASE_PATH}/prds/${encodedPath}/ci?${searchParams.toString()}`, {
+    signal: params.signal,
+  });
+}
+
+/**
+ * 设置单个 PRD 的 CI 自动修复三态策略（写成该 Issue 的最新 marker 并读回确认）。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.prdPath - PRD 仓库相对路径。
+ * @param params.policy - `inherit` 表示跟随仓库全局值，不是"关闭"。
+ * @returns 读回的持久策略与写后的 fresh CI 投影。
+ */
+export async function updatePrdCiPolicy(params: {
+  repoId: string;
+  prdPath: string;
+  policy: BacklogCiRepairPolicy;
+}): Promise<{ stored_policy: BacklogCiRepairPolicy; ci_delivery: CiDelivery | null }> {
+  const encodedPath = encodePrdPath(params.prdPath);
+  return patch(`${BASE_PATH}/prds/${encodedPath}/ci-policy`, {
+    repo_id: params.repoId,
+    policy: params.policy,
+  });
+}
+
+/**
+ * 显式发起一次手动 CI 修复（服务端重新解析当前 PR/head/failure）。
+ *
+ * 被上限、去重或门禁拦下时服务端返回 409，调用方据 `ApiRequestError` 展示原因；
+ * 前端不提交 head 或轮次，也不自行判定幂等。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.prdPath - PRD 仓库相对路径。
+ * @returns 修复请求的执行结论。
+ */
+export async function requestPrdCiRepair(params: {
+  repoId: string;
+  prdPath: string;
+}): Promise<BacklogCiRepairResult> {
+  const encodedPath = encodePrdPath(params.prdPath);
+  const searchParams = new URLSearchParams();
+  searchParams.set("repo_id", params.repoId);
+  return post(`${BASE_PATH}/prds/${encodedPath}/ci-repair?${searchParams.toString()}`);
 }
 
 /**

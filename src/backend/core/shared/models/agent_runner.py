@@ -778,6 +778,11 @@ class PostPrSupervisorConfig:
     # 来源）/ 任意已注册 agent 名。
     repair_agent: str = "self"
     max_repair_attempts: int = 2
+    # 是否允许自动执行 Supervisor Agent 选出的 ``repair_pr_branch``（远端 post-PR
+    # CI 自动修复）。默认关闭：它与 ``runner.fix_agent_enabled``（提交前本地
+    # staged verification）、``autopilot.enabled``（自动推进）、``safety.auto_merge``
+    # （合并门禁）四者语义独立，任何一条链路都不得从另一条推断。
+    auto_repair_ci: bool = False
     max_agent_crash_retries: int = 5
     crash_retry_initial_backoff_seconds: int = 30
     crash_retry_max_backoff_seconds: int = 600
@@ -820,6 +825,10 @@ class ReviewEventMarker:
     issue_comments_count: int | None = None
     pr_comments_count: int | None = None
     blocked_paths: tuple[str, ...] = ()
+    #: 修复请求所针对的失败指纹（PR number + head SHA + 失败摘要的稳定摘要）。
+    #: daemon 重启后据此判断"同一 failure key 是否已经获准过一次修复"，
+    #: 缺失表示该事件不是修复请求或未携带指纹。
+    failure_digest: str | None = None
 
 
 @dataclass(frozen=True)

@@ -10,17 +10,17 @@ import base64
 import logging
 import threading
 import time
-from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
+from backend.api.serialization import serialize_value
 from backend.core.shared.interfaces.runner_console import AuditEntry, IBacklogStore
 from backend.core.shared.models.backlog import (
+    BacklogCiRepairPolicy,
     BacklogDependency,
     BacklogDependencyKind,
     BacklogPrd,
@@ -50,6 +50,15 @@ from backend.core.use_cases.backlog_autopilot_settings import (
     load_autopilot_state,
     set_autopilot_enabled,
 )
+from backend.core.use_cases.backlog_ci_delivery import (
+    BacklogCiError,
+    build_prd_ci_delivery,
+    load_ci_auto_repair_state,
+    request_manual_ci_repair,
+    resolve_prd_issue_number,
+    set_ci_auto_repair_enabled,
+    set_prd_ci_repair_policy,
+)
 from backend.core.use_cases.backlog_dependencies import evaluate_backlog_dependencies
 from backend.core.use_cases.backlog_prd_evidence import (
     BacklogPrdEvidenceError,
@@ -71,16 +80,8 @@ _cache_lock = threading.Lock()
 
 
 def _serialize(value: Any) -> Any:
-    """递归地把 dataclass / Enum 转成 JSON 友好结构。"""
-    if is_dataclass(value) and not isinstance(value, type):
-        return {key: _serialize(item) for key, item in asdict(value).items()}
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, (list, tuple)):
-        return [_serialize(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _serialize(item) for key, item in value.items()}
-    return value
+    """本层 DTO 序列化入口（唯一实现见 :func:`backend.api.serialization.serialize_value`）。"""
+    return serialize_value(value)
 
 
 def _resolve_contexts():
@@ -198,6 +199,9 @@ def _build_backlog_response(
                 updated_at=prd.updated_at,
                 block_reason=prd.block_reason,
                 next_action=prd.next_action,
+                # 逐字段重建时最容易悄悄丢掉新字段：CI 投影必须原样透传，
+                # 否则列表响应里没有 ci_delivery，右侧标签只能拿到过期值。
+                ci_delivery=prd.ci_delivery,
             )
         )
     return {
@@ -337,6 +341,179 @@ def update_backlog_autopilot(request: UpdateAutopilotRequest) -> dict:
         detail=f"autopilot.enabled={request.enabled}",
     )
     return _serialize(state)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD 自动修复：仓库级开关、单 PRD 三态覆盖与一次性手动修复
+#
+# 三组端点都不读 ``_BACKLOG_CACHE``：设置必须是写后 fresh load，策略必须从 Issue
+# 评论读回，手动修复必须按当前 PR head 重新解析——任何一处走缓存都会让页面显示
+# 一个磁盘上并不存在的值。effective 值由 core 计算，本层不推断。
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/agent-runner/backlog/ci")
+def get_backlog_ci_settings(repo_id: str) -> dict:
+    """读取当前仓库的 CI 自动修复设置（生效值 + 持久值来源 + 修复上限）。"""
+    _resolve_context(repo_id)
+    try:
+        state = load_ci_auto_repair_state(
+            repo_id=repo_id,
+            contexts=_resolve_contexts(),
+            editor=create_repository_autopilot_settings_editor(),
+        )
+    except BacklogCiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize(state)
+
+
+class UpdateBacklogCiSettingsRequest(BaseModel):
+    """切换当前仓库的 CI 自动修复全局值。"""
+
+    repo_id: str = Field(min_length=1)
+    auto_repair_ci: bool
+
+
+@router.patch("/agent-runner/backlog/ci")
+def update_backlog_ci_settings(request: UpdateBacklogCiSettingsRequest) -> dict:
+    """只修改目标仓库 ``.iar.toml`` 的 ``post_pr_supervisor.auto_repair_ci``。
+
+    与 Autopilot、auto merge、本地 Fix Agent 互不联动：本端点不读写那三个开关，
+    响应体来自写后 fresh load 的生效配置。
+    """
+    contexts = _resolve_contexts()
+    if not any(context.repo_id == request.repo_id for context in contexts):
+        raise HTTPException(status_code=400, detail=f"仓库 '{request.repo_id}' 不存在或未启用。")
+    try:
+        state = set_ci_auto_repair_enabled(
+            repo_id=request.repo_id,
+            enabled=request.auto_repair_ci,
+            editor=create_repository_autopilot_settings_editor(),
+            contexts_loader=_resolve_contexts,
+        )
+    except BacklogCiError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(
+        create_backlog_store(),
+        action="ci_auto_repair_toggle",
+        repo_id=request.repo_id,
+        prd_path="",
+        issue_number=None,
+        result="accepted",
+        detail=f"post_pr_supervisor.auto_repair_ci={request.auto_repair_ci}",
+    )
+    return _serialize(state)
+
+
+@router.get("/agent-runner/backlog/prds/{encoded_path}/ci")
+def get_backlog_prd_ci(encoded_path: str, repo_id: str) -> dict:
+    """返回单个 PRD 的 fresh CI/CD 投影（策略三态、轮次、问题与生效值）。"""
+    prd_path = _decode_prd_path(encoded_path)
+    context = _resolve_context(repo_id)
+    issue_number = resolve_prd_issue_number(context.repo_path, prd_path)
+    if issue_number is None:
+        return {"ci_delivery": None, "reason": "该 PRD 还没有关联 Issue，只能跟随仓库全局策略。"}
+    delivery = build_prd_ci_delivery(
+        prd_path=prd_path,
+        issue_number=issue_number,
+        github_client=create_github_client(context.repo_path),
+        config=context.config,
+    )
+    return {"ci_delivery": _serialize(delivery), "reason": ""}
+
+
+class UpdateBacklogPrdCiPolicyRequest(BaseModel):
+    """设置单个 PRD 的 CI 自动修复三态策略。"""
+
+    repo_id: str = Field(min_length=1)
+    policy: str = Field(pattern="^(inherit|on|off)$")
+
+
+@router.patch("/agent-runner/backlog/prds/{encoded_path}/ci-policy")
+def update_backlog_prd_ci_policy(
+    encoded_path: str, request: UpdateBacklogPrdCiPolicyRequest
+) -> dict:
+    """把策略写成该 Issue 的 latest marker，并 fresh 读回 Issue 评论作为响应。"""
+    prd_path = _decode_prd_path(encoded_path)
+    context = _resolve_context(request.repo_id)
+    issue_number = resolve_prd_issue_number(context.repo_path, prd_path)
+    if issue_number is None:
+        raise HTTPException(
+            status_code=409,
+            detail="该 PRD 还没有关联 Issue，无法设置单 PRD 策略；只能跟随仓库全局值。",
+        )
+    try:
+        stored = set_prd_ci_repair_policy(
+            github_client=create_github_client(context.repo_path),
+            issue_number=issue_number,
+            policy=BacklogCiRepairPolicy(request.policy),
+        )
+    except BacklogCiError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(
+        create_backlog_store(),
+        action="ci_policy_set",
+        repo_id=request.repo_id,
+        prd_path=prd_path,
+        issue_number=issue_number,
+        result="accepted",
+        detail=f"policy={stored.value}",
+    )
+    delivery = build_prd_ci_delivery(
+        prd_path=prd_path,
+        issue_number=issue_number,
+        github_client=create_github_client(context.repo_path),
+        config=context.config,
+    )
+    return {
+        "stored_policy": stored.value,
+        "ci_delivery": _serialize(delivery),
+    }
+
+
+@router.post("/agent-runner/backlog/prds/{encoded_path}/ci-repair")
+def start_backlog_prd_ci_repair(encoded_path: str, repo_id: str) -> dict:
+    """显式发起一次修复：服务端重新解析当前 PR/head/failure 后进入既有修复路径。
+
+    被上限、去重或门禁拦下时返回 409 且没有任何副作用；调用方不能提交可信 SHA，
+    head 与 failure key 一律由服务端 fresh 解析。
+    """
+    prd_path = _decode_prd_path(encoded_path)
+    context = _resolve_context(repo_id)
+    issue_number = resolve_prd_issue_number(context.repo_path, prd_path)
+    if issue_number is None:
+        raise HTTPException(status_code=409, detail="该 PRD 还没有关联 Issue，无法发起修复。")
+    try:
+        result = request_manual_ci_repair(
+            issue_number=issue_number,
+            repo_path=context.repo_path,
+            config=context.config,
+            github_client=create_github_client(context.repo_path),
+            process_runner=create_process_runner(),
+        )
+    except BacklogCiError as exc:
+        _audit(
+            create_backlog_store(),
+            action="ci_manual_repair",
+            repo_id=repo_id,
+            prd_path=prd_path,
+            issue_number=issue_number,
+            result="rejected",
+            detail=str(exc),
+        )
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(
+        create_backlog_store(),
+        action="ci_manual_repair",
+        repo_id=repo_id,
+        prd_path=prd_path,
+        issue_number=issue_number,
+        result="accepted" if result.accepted else "rejected",
+        detail=f"{result.decision} digest={result.failure_key}",
+    )
+    if not result.accepted:
+        raise HTTPException(status_code=409, detail=result.detail)
+    return _serialize(result)
 
 
 @router.get("/agent-runner/backlog/prds/{encoded_path}/lifecycle")

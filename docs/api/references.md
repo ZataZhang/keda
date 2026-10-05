@@ -211,6 +211,54 @@ curl -sS \
 - 不会修改 `safety.auto_merge`，也不会自动启动或停止 daemon；
 - 未知仓库返回 `400`；目标仓缺 `.iar.toml`、配置非法、不可写或写后读回不一致返回 `409`，且原文件保持不变。
 
+### `GET /api/v1/agent-runner/backlog/ci`
+
+返回当前仓库的 CI 自动修复设置。每次调用都重新加载配置（**不复用** `GET /backlog/prds` 的 30 秒缓存）。
+
+查询参数：`repo_id`，必填。
+
+```json
+{
+  "repo_id": "keda-main",
+  "auto_repair_ci": false,
+  "max_repair_attempts": 2,
+  "config_source": ".iar.toml",
+  "persisted_auto_repair": null
+}
+```
+
+- `auto_repair_ci`：生效配置中的 `agent_runner.post_pr_supervisor.auto_repair_ci`；
+- `persisted_auto_repair`：目标仓库 `.iar.toml` 中的持久值；文件缺失或键未设置时为 `null`（"没设过"与"显式关闭"可区分）；
+- 该端点不读写 `autopilot.enabled` / `safety.auto_merge` / `runner.fix_agent_enabled`——四条门禁彼此独立。
+
+### `PATCH /api/v1/agent-runner/backlog/ci`
+
+只修改目标仓库 `.iar.toml` 的 `[agent_runner.post_pr_supervisor].auto_repair_ci`，与 `PATCH /backlog/autopilot` 共用同一个 writer 与同一套原子替换/读回校验。请求体：
+
+```json
+{ "repo_id": "keda-main", "auto_repair_ci": true }
+```
+
+成功响应体来自**写后 fresh load** 的生效配置，不回显请求体。未知仓库返回 `400`；目标仓缺 `.iar.toml`、配置非法或写后读回不一致返回 `409` 且不创建、不改动原文件。
+
+### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/ci`
+
+返回单个 PRD 的 fresh CI/CD 投影：
+
+```json
+{ "ci_delivery": { "prd_path": "…", "status": "failing", "stored_policy": "inherit", "global_auto_repair": false, "effective_auto_repair": false } , "reason": "" }
+```
+
+`ci_delivery.status` 取 `no_pr` / `unavailable` / `pending` / `not_run` / `failing` / `passing`；`problems[]` 是原始 checks 事实（名称、结论、链接），`effective_auto_repair` 由服务端从「单 PRD 持久策略 + 仓库全局值」合成，客户端不自行推断。PRD 还没关联 Issue 时 `ci_delivery` 为 `null` 并给出 `reason`。`GET /backlog/prds` 列表项同样携带 `ci_delivery`，首屏不必逐个再发请求。
+
+### `PATCH /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-policy`
+
+把三态策略写成该 Issue 上最新的 `iar:ci-auto-repair-policy` marker（latest-wins；`inherit` 是明确的"跟随全局"事件，不是删除评论）。请求体 `{ "repo_id": "…", "policy": "inherit|on|off" }`。响应为写后从 Issue 评论读回的 `stored_policy` 与 fresh 投影。PRD 未关联 Issue 或读回不一致返回 `409`。
+
+### `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-repair`
+
+显式发起**一次**手动 CI 修复，与自动路径共用同一门禁（上限、去重、worktree 必须存在、禁止路径检查）。查询参数 `repo_id`，请求体为空——head SHA 与轮次一律由服务端 fresh 解析，客户端无法伪造。接受时返回执行结论（`decision` / `failure_key` / `head_sha` / `detail`）；被拦下返回 `409` 且零副作用。
+
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/evidence`
 
 列出某个 PRD 在仓库中**当前仍保留**的验收证据文件。每次请求重新读盘，不复用任何缓存。

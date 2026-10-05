@@ -279,6 +279,8 @@ checks 展示、Agent repair action 策略、事件 marker 去重、未知状态
 │   └── POST 单次 repair，保留幂等/上限门禁
 ├── src/backend/api/cli_typer_backlog.py
 │   [修改]【总结】新增 `iar backlog ci` 子组（status / policy / repair），复用 `_run_typer_repository_command`
+├── src/backend/api/serialization.py
+│   [新增]【总结】`serialize_value`：Console 响应与 `status --json` 共用同一 DTO→JSON 路径，避免两套序列化导致 FR-15 同构漂移
 ├── src/backend/api/cli_parsed_commands/backlog.py
 │   [修改]【总结】实现三个 ci 子命令 handler：薄封装既有 core 用例，`status --json` 复用 `ci_delivery` DTO
 │   └── 不复制策略计算或 repair 实现；与 Console API 同源
@@ -286,12 +288,18 @@ checks 展示、Agent repair action 策略、事件 marker 去重、未知状态
 │   [修改]【总结】同步 CI 交付、问题和设置契约
 ├── frontend-public/lib/api/backlog.ts
 │   [修改]【总结】封装 auto-repair PATCH 与单次 repair API
+├── frontend-public/components/backlog/backlog-ci-control.tsx
+│   [新增]【总结】当前仓库的"全局自动修复 CI/CD"开关卡片（读/写 `POST /backlog/ci`，与 Autopilot 开关并列且互不联动）
+├── frontend-public/components/backlog/prd-ci-view.tsx
+│   [新增]【总结】CI/CD tab 内容：stored policy / global value / effective value、轮次、问题卡与一次性手动修复反馈
 ├── frontend-public/components/backlog/prd-detail.tsx
-│   [修改]【总结】经上游已交付的 `additionalTabs` 扩展点增加 PRD 三态策略、effective value、CI/CD tab 和问题卡，不重构详情容器
+│   [无需改动]【总结】上游已交付的 `additionalTabs` 扩展点足以承载 CI/CD tab，本 PRD 不重构详情容器
 ├── frontend-public/app/(app)/app/backlog/page.tsx
-│   [修改]【总结】在顶部接入当前仓库全局开关，并把轮询结果与 repair action 接入选中 PRD
+│   [修改]【总结】顶部接线已交付的仓库级开关组件，并把轮询结果与 repair action 接入选中 PRD
 ├── tests/
 │   [修改/新增]【总结】覆盖配置映射、关闭零副作用、多轮修复、重启去重和 API 契约
+├── tests/test_backlog_ci_cli.py
+│   [新增]【总结】FR-15/16/17 的 CLI 真实入口测试：真实 Typer/registry 解析/`.iar.toml` 写回/marker 往返/门禁，仅在 GitHub 与进程 runner 边界打 fake
 ├── tests/playwright-e2e/tests/workflows/backlog-cicd-auto-repair.no-auth.spec.ts
 │   [新增]【总结】从真实 Backlog 入口验证等待、关闭显错、开启多轮和耗尽态
 ├── src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md
@@ -720,3 +728,21 @@ decision-board 就本轮 4 项开工前待决收口，结论（Q1/Q2/Q4 采纳�
 - Reason: 消除“Autopilot 是否涉及 CI 自动修复”的歧义，明确分工是“Autopilot 等 CI（合并门禁）/ `auto_repair_ci` 修 CI”。
 - Impact: 不改变功能需求与验收判据；决策一/FR-4 的“不联动”语义不变，仅补充说明与一张组合表。
 - Review: 对照 `src/backend/core/use_cases/agent_runner_merge_queue.py:203,485,491-492`（等待 checks、无 `execute_repair`）与 `review_once.py:551`（合并队列在 supervisor cycle 之后）确认。
+
+### 执行对账：Change Impact Tree 补齐三个实际落地文件（2026-10-05）
+
+- Type: map
+- Before: Change Impact Tree 只列了 Console/CLI 两侧的消费方，未列出为了"两侧共用同一投影与同一序列化"而新增的三个实际落点：`src/backend/api/serialization.py`（`serialize_value`，Console 响应与 `status --json` 共用，避免 DTO→JSON 两套实现）、`frontend-public/components/backlog/backlog-ci-control.tsx`（仓库级"全局自动修复 CI/CD"开关，`page.tsx` 只做接线）、`tests/test_backlog_ci_cli.py`（FR-15/16/17 的 CLI 真实入口测试，原先只被 `tests/` 汇总节点覆盖）；同时 `prd-detail.tsx` 被标为 `[修改]`，实际实现一行未动（tab 由上游已交付的 `additionalTabs` 承载），CI/CD tab 的真实载体 `prd-ci-view.tsx` 未入树。
+- After: 在 §7 Change Impact Tree 增补上述四条，`prd-detail.tsx` 改为 `[无需改动]` 并写明理由，`page.tsx` 措辞收敛为"接线已交付组件"。功能需求、验收判据、oracle 均未改变。
+- Reason: FR-15 要求 `status --json` 与 Console `ci_delivery` DTO **同构**，这在实现上必然是"同一个投影对象 + 同一个序列化函数"，因此共享模块是被需求逼出来的落点，不是额外抽象；`tests/` 节点过于笼统，执行器容易只补单元测而漏掉 CLI 真实入口。
+- Impact: 不新增/删除功能需求，不改变 §9 任何判据；仅让 §7 与最终代码树一致，便于复核者按树定位。
+- Review: `git status` 的最终改动清单与补齐后的树逐条对照；`serialize_value` 的两处调用方见 `src/backend/api/routes/agent_runner_backlog.py` 与 `src/backend/api/cli_parsed_commands/backlog.py`。
+
+### 执行对账：设置参考、API 参考与随包 skill 的文档落点（2026-10-05）
+
+- Type: doc
+- Before: §7 的 `docs/` 节点只写了"同步 runner 配置、Backlog CI 流程与 API 文档"，未点名具体小节；`iar-operator` skill 的命令表也尚未包含 `iar backlog ci`。
+- After: `docs/guides/agent-runner.md` 在 `max_repair_attempts` 配置参考与完整示例处标注 `auto_repair_ci = false`，新增"远端 CI 失败的自动修复门控与多轮修复"与"远端 CI/CD 观察与控制：iar backlog ci"两小节；`docs/api/references.md` 新增 `GET/PATCH /backlog/ci`、`GET /backlog/prds/{enc}/ci`、`PATCH .../ci-policy`、`POST .../ci-repair` 五段契约；随包 `iar-operator/SKILL.md` 的 "Choose the operation" 命令表加入 `iar backlog ci status|policy|repair`。
+- Reason: AGENTS.md 的 CLI Surface And Packaged Skill Sync 要求 CLI 表面变化同步随包 skill 与 `docs/`；§9 Documentation Acceptance 逐项需要可定位的落点。
+- Impact: 不改变功能需求与验收判据；满足既有文档验收项。
+- Review: 对照 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync 小节与 `tests/test_iar_operator_skill.py`。

@@ -65,6 +65,7 @@ __all__ = [
     "main",
     "registry_app",
     "backlog_app",
+    "backlog_ci_app",
     "worktree_app",
     "workflow_app",
 ]
@@ -183,6 +184,11 @@ backlog_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+backlog_ci_app = typer.Typer(
+    help="Observe and control post-PR CI/CD for backlog PRDs.",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 config_app = typer.Typer(
     help="Maintain the repository-local .iar.toml (migrate values pinned by an older init).",
     no_args_is_help=True,
@@ -209,6 +215,7 @@ auth_app = typer.Typer(
     context_settings=_HELP_CONTEXT,
 )
 container_app.add_typer(auth_app, name="auth")
+backlog_app.add_typer(backlog_ci_app, name="ci")
 app.add_typer(labels_app, name="labels")
 app.add_typer(issue_app, name="issue")
 app.add_typer(completion_app, name="completion")

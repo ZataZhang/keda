@@ -109,6 +109,9 @@ def test_packaged_skill_command_examples_match_cli_help() -> None:
         ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
         ("worktree", "path"): {"--branch"},
         ("agent", "presets"): set(),
+        ("backlog", "ci", "status"): {"--prd", "--json", "--repo", "--repo-id"},
+        ("backlog", "ci", "policy"): {"--global", "--prd", "--repo", "--repo-id"},
+        ("backlog", "ci", "repair"): {"--prd", "--dry-run", "--repo", "--repo-id"},
         ("agent", "doctor"): {
             "--all-profiles",
             "--json",

@@ -654,6 +654,11 @@ supervisor_agent = "auto"
 #   其它     - 任意已注册 agent 名
 repair_agent = "self"
 max_repair_attempts = 2
+# 远端 post-PR CI 自动修复：只约束 Supervisor Agent 选出的 repair_pr_branch。
+# 默认关闭；它与 runner.fix_agent_enabled（提交前本地验证修复）、
+# autopilot.enabled（自动推进）、safety.auto_merge（合并门禁）是四条独立门禁，
+# 任何一条都不得从另一条推断。单 PRD 可用 Issue 上的策略 marker 覆盖三态。
+auto_repair_ci = false
 max_agent_crash_retries = 5
 crash_retry_initial_backoff_seconds = 30
 crash_retry_max_backoff_seconds = 600

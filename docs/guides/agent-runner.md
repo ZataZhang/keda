@@ -707,6 +707,12 @@ supervisor_agent = "auto"
 repair_agent = "self"
 # supervisor 要求修复时的最大修复 / rebase 次数
 max_repair_attempts = 2
+# 远端 post-PR CI 失败时，是否允许自动执行 Supervisor Agent 选出的 repair_pr_branch。
+# 默认 false：只观察、只上报，不自动跑修复 Agent。它只约束"选出了 repair 动作"这一条
+# 分支，不改变 wait_for_checks / rebase_pr_branch，也不与 autopilot.enabled、
+# safety.auto_merge、runner.fix_agent_enabled 互相推断——四条门禁彼此独立。
+# 单个 PRD 可用 Issue 上的 iar:ci-auto-repair-policy marker 覆盖为 inherit / on / off。
+auto_repair_ci = false
 # supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数
 max_agent_crash_retries = 5
 # 崩溃重试的初始退避秒数，之后每次重试翻倍
@@ -1463,6 +1469,18 @@ supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repa
 - `<agent 名>`：指定 agent；未注册时该阶段开始前 fail-fast。
 
 两个修复调用点（supervisor 修复循环、rework 路径）共用解析器 `resolve_repair_agent`，避免两条路径语义分叉。修复提示词由 `build_repair_prompt` 生成，带 Issue 上下文与本轮 findings 清单（rework 路径取 `.iar/state/issue-<N>/findings.json` 里未解决的累积 findings），修复者不必自己重新推断要改什么。
+
+#### 远端 CI 失败的自动修复门控与多轮修复
+
+Draft PR 之后 checks 还没跑完时，Issue 停在 `agent/supervising` 等 checks——这个等待是**可观察、可重入**的：`iar review` / review-daemon 每轮重新解析 PR context 与 checks 聚合状态，daemon 重启或人工重复执行都不会把同一轮失败再修一次。
+
+checks 失败后是否**自动**跑修复 Agent 由 `[agent_runner.post_pr_supervisor].auto_repair_ci` 决定，默认 `false`：
+
+- 关闭态只观察与上报：问题照常投影到 Console 与 CLI，但不写 rework intent、不打 `agent/running`、不启动修复 Agent，`wait_for_checks` 与 rebase 分支也不被连带阻塞。
+- 开启态只放行 Supervisor Agent **自己选出的** `repair_pr_branch` 动作；平台不会因为有失败就替 Agent 决定要修。
+- 单 PRD 可在对应 Issue 上写 `<!-- iar:ci-auto-repair-policy value=inherit|on|off -->` 覆盖仓库全局值（latest-wins，`inherit` 是明确的"跟随全局"事件而不是"没设置"）。生效值只在服务端计算，Console 与 CLI 都不重算。
+
+多轮修复以 `max_repair_attempts` 为上限（与 rebase 修复共用同一个既有配置项，不新增额度）。一轮 = 一个不同的 head SHA。去重指纹是 **PR number + 当前 head SHA + 失败摘要** 的稳定 digest，写进 `post_pr_rework_requested` marker 的 `failure_digest` 字段，因此 daemon 重启后同一轮失败不会被重复请求；没有 `failure_digest` 的历史 marker 退回按 head SHA 判定。达到上限后停止自动副作用、保留失败状态并提示需要人工处理。
 
 #### Rebase Conflict Recovery Branch Guard
 
@@ -2494,6 +2512,8 @@ enabled = true
 supervisor_agent = "auto"
 repair_agent = "self"
 max_repair_attempts = 2
+# 远端 post-PR CI 失败时是否自动执行 repair_pr_branch（默认 false，四条门禁彼此独立）
+auto_repair_ci = false
 max_agent_crash_retries = 5
 crash_retry_initial_backoff_seconds = 30
 crash_retry_max_backoff_seconds = 600
@@ -3853,6 +3873,34 @@ uv run iar backlog advance --repo <repo-id>
 
 - **开启持续调度后，`tasks/pending/` 的语义收紧为「放进去就会被自动执行」**。发现式入队会捡起任何满足条件的新 pending PRD，包括只是想先记下来的实验性草稿。不想被自动执行的草稿请放 `tasks/inbox/`（既有惯例），成熟后再由 PRD 流程升级到 `tasks/pending/`。
 - **状态解析依赖 GitHub 可达性**：`gh` 调用失败时 resolver 保守返回（依赖判定不通过），本轮会少晋升而不是误晋升，下一轮 pass 自愈；调度阶段自身的异常只记日志，不影响 daemon 后续阶段。
+
+#### 远端 CI/CD 观察与控制：iar backlog ci
+
+Post-PR 的 CI/CD 状态既是 Console Backlog 页面的一等信息（PRD 详情「CI/CD」标签 + 仓库级开关），也有一等 CLI 表面，三条命令都是同一批 core 用例的薄封装——CLI 不另算生效策略、不自己解析 marker、也不另存一份状态。
+
+```bash
+# 观察：整个仓库所有已发布 PR 的 PRD（带仓库级生效值）
+uv run iar backlog ci status
+
+# 观察单个 PRD，机读输出与 Console 的 ci_delivery DTO 同构
+uv run iar backlog ci status --prd tasks/pending/P1-FEAT-xxx.md --json
+
+# 策略：仓库级全局值，或单个 PRD 的三态覆盖（两个目标互斥，必须且只能给一个）
+uv run iar backlog ci policy --global on
+uv run iar backlog ci policy --prd tasks/pending/P1-FEAT-xxx.md off
+
+# 显式发起一次修复（与 Console 问题卡同一用例）
+uv run iar backlog ci repair --prd tasks/pending/P1-FEAT-xxx.md --dry-run
+uv run iar backlog ci repair --prd tasks/pending/P1-FEAT-xxx.md
+```
+
+- `--json` 是纯 JSON 走 stdout，人类可读提示与告警一律走 stderr，因此可以直接 `| jq`；不传 `--json` 时输出人读摘要（原始 checks 与策略结论分开呈现）。
+- head SHA 与修复轮次都由服务端解析，**任何子命令都不接受** `--head-sha` 之类的旗标，客户端无法伪造。
+- `repair` 与自动路径共用同一套门禁：上限、去重、worktree 必须存在、禁止路径检查。被拦下时退出码 1 并打印拒绝原因；`--dry-run` 给出同样结论但不写任何东西。
+- `policy --global` 写仓库 `.iar.toml` 的 `post_pr_supervisor.auto_repair_ci`（只动这一个键），`policy --prd` 写 Issue 上的策略 marker，两者与 Console 的写入口径一致。
+- PRD 还没有关联 Issue 时策略与状态都不适用：`status --prd` 在 `--json` 下输出 `null`（退出码 0），`policy` / `repair` 直接拒绝（退出码 1）。
+
+本地的验证、签核与合并门禁不因这套 CI/CD 观察与控制发生任何变化：远端 CI 自动修复只增加"是否自动跑一轮修复 Agent"这一个决定。
 
 ### 依赖等待
 

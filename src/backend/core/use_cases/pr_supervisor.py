@@ -524,27 +524,37 @@ def build_rework_intent_comment(
     action: str,
     pr_branch: str,
     head_sha: str,
+    failure_digest: str | None = None,
+    requested_by: str | None = None,
 ) -> str:
-    """Build the comment that marks a post-PR rework intent."""
+    """Build the comment that marks a post-PR rework intent.
+
+    ``failure_digest`` 让同一轮失败在 daemon 重启或重复请求后被识别为"已经请求过"，
+    自动与手动两条路径写同一个 phase，消费方（run pass）不需要分辨来源。
+    """
     marker = format_event_marker(
         phase="post_pr_rework_requested",
         cycle=1,
         head_sha=head_sha,
         pr_branch=pr_branch,
         action=action,
+        failure_digest=failure_digest,
     )
-    return "\n".join(
-        [
-            marker,
-            "",
-            "## Agent Runner Post-PR Rework Requested",
-            "",
-            f"- Action: {action}",
-            f"- PR Branch: `{pr_branch}`",
-            f"- Head SHA: `{head_sha}`",
-            "- A runner will pick this up on the next `iar run` pass.",
-        ]
-    )
+    lines = [
+        marker,
+        "",
+        "## Agent Runner Post-PR Rework Requested",
+        "",
+        f"- Action: {action}",
+        f"- PR Branch: `{pr_branch}`",
+        f"- Head SHA: `{head_sha}`",
+    ]
+    if failure_digest:
+        lines.append(f"- Failure Digest: `{failure_digest}`")
+    if requested_by:
+        lines.append(f"- Requested By: {requested_by}")
+    lines.append("- A runner will pick this up on the next `iar run` pass.")
+    return "\n".join(lines)
 
 
 def build_rebase_repair_complete_comment(

@@ -685,3 +685,81 @@ def test_every_agent_invocation_call_site_passes_config() -> None:
     assert offenders == [], "run_agent_with_prompt* call sites missing config=: " + ", ".join(
         offenders
     )
+
+
+# ── CI 自动修复开关：默认值、映射与门禁独立性 ──────────────────────────────
+
+
+def test_auto_repair_ci_defaults_match_core() -> None:
+    """配置层与领域层的 CI 自动修复默认值必须一致，且默认关闭。"""
+    from backend.core.shared.models.agent_runner import PostPrSupervisorConfig
+    from backend.infrastructure.config.agent_runner_settings import (
+        AgentRunnerPostPrSupervisorSettings,
+    )
+
+    assert AgentRunnerPostPrSupervisorSettings().auto_repair_ci is False
+    assert PostPrSupervisorConfig().auto_repair_ci is False
+
+
+def test_factory_maps_auto_repair_ci() -> None:
+    """用非默认值 True 验证 factory 没漏掉映射，否则两侧同为默认会掩盖丢失。"""
+    from backend.engines.agent_runner.factory import build_app_config_from_settings
+    from backend.infrastructure.config.agent_runner_settings import (
+        AgentRunnerPostPrSupervisorSettings,
+    )
+
+    settings = AgentRunnerSettings()
+    settings.post_pr_supervisor = AgentRunnerPostPrSupervisorSettings(auto_repair_ci=True)
+    assert build_app_config_from_settings(settings).post_pr_supervisor.auto_repair_ci is True
+
+
+def test_auto_repair_ci_is_not_derived_from_other_gates() -> None:
+    """四条门禁语义独立：其它三个开关怎么翻动都不改变 CI 自动修复的生效值。"""
+    from backend.engines.agent_runner.factory import build_app_config_from_settings
+    from backend.infrastructure.config.agent_runner_settings import (
+        AgentRunnerAutopilotSettings,
+        AgentRunnerRunnerSettings,
+        AgentRunnerSafetySettings,
+    )
+
+    for auto_merge in (False, True):
+        for fix_agent_enabled in (False, True):
+            settings = AgentRunnerSettings()
+            settings.autopilot = AgentRunnerAutopilotSettings(enabled=True)
+            settings.safety = AgentRunnerSafetySettings(auto_merge=auto_merge)
+            settings.runner = AgentRunnerRunnerSettings(fix_agent_enabled=fix_agent_enabled)
+            app_config = build_app_config_from_settings(settings)
+            assert app_config.autopilot.enabled is True
+            assert app_config.safety.auto_merge is auto_merge
+            assert app_config.runner.fix_agent_enabled is fix_agent_enabled
+            # 三条链路全开也不点亮 CI 自动修复
+            assert app_config.post_pr_supervisor.auto_repair_ci is False
+
+    # 反向：打开 CI 自动修复不点亮自动合并
+    settings = AgentRunnerSettings()
+    settings.post_pr_supervisor = AgentRunnerPostPrSupervisorSettings(auto_repair_ci=True)
+    opened = build_app_config_from_settings(settings)
+    assert opened.post_pr_supervisor.auto_repair_ci is True
+    assert opened.safety.auto_merge is False
+    assert opened.autopilot.enabled is False
+
+
+def test_root_config_toml_declares_auto_repair_ci() -> None:
+    """根 config.toml 必须登记该键，运营者才看得到这个开关的存在。"""
+    config_toml_text = (Path(__file__).resolve().parents[1] / "config.toml").read_text(
+        encoding="utf-8"
+    )
+    assert "auto_repair_ci = false" in config_toml_text
+
+
+def test_iar_toml_key_table_documents_auto_repair_ci() -> None:
+    """逐仓库 .iar.toml 的键说明表必须登记该键，否则 Console 写回的文件缺少注释。"""
+    from backend.engines.agent_runner.repository_local import _IAR_FIELD_COMMENTS
+
+    assert "post_pr_supervisor.auto_repair_ci" in _IAR_FIELD_COMMENTS
+
+
+def test_repository_config_toml_keeps_auto_repair_ci_unpersisted() -> None:
+    """本仓 .iar.toml 不得被测试写回污染：CI 自动修复应保持未显式设置。"""
+    iar_toml = (Path(__file__).resolve().parents[1] / ".iar.toml").read_text(encoding="utf-8")
+    assert "auto_repair_ci" not in iar_toml

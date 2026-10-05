@@ -970,6 +970,78 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_options(backlog_advance_parser)
 
+    backlog_ci_parser = backlog_subparsers.add_parser(
+        "ci",
+        help="Observe and control post-PR CI/CD for backlog PRDs.",
+    )
+    backlog_ci_subparsers = backlog_ci_parser.add_subparsers(
+        dest="backlog_ci_command",
+        required=True,
+    )
+
+    backlog_ci_status_parser = backlog_ci_subparsers.add_parser(
+        "status",
+        help="Read CI/CD status: raw checks, repair rounds and the three-state policy.",
+    )
+    backlog_ci_status_parser.set_defaults(command="backlog ci status")
+    backlog_ci_status_parser.add_argument(
+        "--prd",
+        dest="ci_prd_path",
+        default=None,
+        help="Only report this PRD (repository-relative path).",
+    )
+    backlog_ci_status_parser.add_argument(
+        "--json",
+        dest="ci_json",
+        action="store_true",
+        help="Emit the Console ci_delivery JSON on stdout (hints and warnings go to stderr).",
+    )
+    add_common_options(backlog_ci_status_parser)
+
+    backlog_ci_policy_parser = backlog_ci_subparsers.add_parser(
+        "policy",
+        help="Set the repo-wide global value or one PRD's inherit/on/off override.",
+    )
+    backlog_ci_policy_parser.set_defaults(command="backlog ci policy")
+    backlog_ci_policy_parser.add_argument(
+        "ci_policy_value",
+        nargs="?",
+        choices=["inherit", "on", "off"],
+        help="Override value, used together with --prd.",
+    )
+    backlog_ci_policy_parser.add_argument(
+        "--global",
+        dest="ci_global_policy",
+        choices=["on", "off"],
+        default=None,
+        help="Write post_pr_supervisor.auto_repair_ci for the target repository.",
+    )
+    backlog_ci_policy_parser.add_argument(
+        "--prd",
+        dest="ci_prd_path",
+        default=None,
+        help="Target PRD (repository-relative path).",
+    )
+    add_common_options(backlog_ci_policy_parser)
+
+    backlog_ci_repair_parser = backlog_ci_subparsers.add_parser(
+        "repair",
+        help="Request one manual CI repair through the existing single-repair path.",
+    )
+    backlog_ci_repair_parser.set_defaults(command="backlog ci repair")
+    backlog_ci_repair_parser.add_argument(
+        "--prd",
+        dest="ci_prd_path",
+        required=True,
+        help="Target PRD (repository-relative path).",
+    )
+    backlog_ci_repair_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report the decision that would be executed without any side effect.",
+    )
+    add_common_options(backlog_ci_repair_parser)
+
     config_parser = subparsers.add_parser(
         "config",
         help="Maintain the repository-local .iar.toml.",

@@ -366,6 +366,11 @@ export type BacklogPrd = {
   updated_at: string;
   block_reason: string | null;
   next_action: BacklogNextAction | null;
+  /**
+   * Post-PR CI/CD 投影，由服务端从 PR context 与 `iar:event` marker 重建。
+   * `null` 表示该 PRD 还没有关联 PR，本功能不适用（保持原有流程）。
+   */
+  ci_delivery: CiDelivery | null;
 };
 
 export type BacklogSettings = {
@@ -404,6 +409,82 @@ export type BacklogAutopilotState = {
   max_parallel: number;
   config_source: string;
   persisted_enabled: boolean | null;
+};
+
+export type BacklogCiRepairPolicy = "inherit" | "on" | "off";
+
+export type CiDeliveryStatus =
+  | "no_pr"
+  | "unavailable"
+  | "pending"
+  | "not_run"
+  | "failing"
+  | "passing";
+
+/** CI 问题条目 kind（服务端常量，前端只按值渲染标签，不推断根因）。 */
+export type CiProblemKind =
+  | "check_failure"
+  | "check_pending"
+  | "aggregate_summary"
+  | "not_run"
+  | "unavailable";
+
+export type CiCheckProblem = {
+  name: string;
+  detail: string;
+  kind: CiProblemKind;
+  url: string | null;
+  head_sha: string | null;
+  round_index: number | null;
+};
+
+/**
+ * 单个 PRD 的 CI/CD 交付投影。
+ *
+ * `stored_policy` / `global_auto_repair` / `effective_auto_repair` 三个值一起返回，
+ * effective 由 core 计算：前端不得自行推断，也不得把 `failing` 显示成"会自动修复"。
+ */
+export type CiDelivery = {
+  prd_path: string;
+  status: CiDeliveryStatus;
+  pr_number: number | null;
+  pr_url: string;
+  pr_branch: string;
+  head_sha: string;
+  checks_state: string | null;
+  problems: CiCheckProblem[];
+  repair_rounds: number;
+  max_repair_attempts: number;
+  repair_exhausted: boolean;
+  stored_policy: BacklogCiRepairPolicy;
+  global_auto_repair: boolean;
+  effective_auto_repair: boolean;
+  policy_source: string;
+  last_decision: string | null;
+  failure_key: string | null;
+  supervisor_action: string | null;
+  supervisor_summary: string | null;
+  last_synced_at: string;
+  detail: string;
+};
+
+/** 仓库级 CI 自动修复设置（写后由服务端 fresh load 读回）。 */
+export type BacklogCiAutoRepairState = {
+  repo_id: string;
+  auto_repair_ci: boolean;
+  max_repair_attempts: number;
+  config_source: string;
+  persisted_auto_repair: boolean | null;
+};
+
+/** 一次性手动修复的执行结论。 */
+export type BacklogCiRepairResult = {
+  prd_path: string;
+  accepted: boolean;
+  decision: string;
+  failure_key: string;
+  head_sha: string;
+  detail: string;
 };
 
 export type BacklogEvidenceRole =

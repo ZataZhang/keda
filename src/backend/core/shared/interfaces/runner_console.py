@@ -494,12 +494,13 @@ class IRepositoryRegistryEditor(ABC):
 
 
 class IRepositoryAutopilotSettingsEditor(ABC):
-    """仓库级 Autopilot 设置的受限读写端口。
+    """仓库级运行门禁设置的受限读写端口。
 
-    Autopilot 的唯一持久事实源是仓库根目录的 ``.iar.toml``，因此本端口比
+    仓库运行门禁的唯一持久事实源是仓库根目录的 ``.iar.toml``，因此本端口比
     :class:`IRepositoryRegistryEditor` 更窄：只允许读写
-    ``[agent_runner.autopilot].enabled`` 这一个布尔键，其余配置节、键、子表
-    与注释必须逐字保留。
+    ``[agent_runner.autopilot].enabled`` 与
+    ``[agent_runner.post_pr_supervisor].auto_repair_ci`` 两个布尔键，其余配置节、
+    键、子表与注释必须逐字保留。
 
     刻意不提供通用 TOML PATCH：它会把写权限扩大到全部配置键，突破
     ``autopilot.enabled`` 与 ``safety.auto_merge`` 的双重危险动作门禁边界。
@@ -534,6 +535,41 @@ class IRepositoryAutopilotSettingsEditor(ABC):
         不变。原子替换与格式保留由共享原语 ``update_toml_table_keys`` 提供，
         实现负责在委托前校验现有配置合法（详见
         ``backend.infrastructure.config.repository_settings_editor``）。
+
+        Args:
+            repo_root_path: 目标仓库根目录。
+            enabled: 目标布尔值。
+
+        Raises:
+            ValueError: 配置非法（文件缺失、结构不符或模型校验不通过）。
+            OSError: 文件不可写。
+        """
+        ...
+
+    @abstractmethod
+    def read_auto_repair_ci(self, repo_root_path: Path) -> bool | None:
+        """读取仓库本地配置中的 ``post_pr_supervisor.auto_repair_ci``。
+
+        Args:
+            repo_root_path: 目标仓库根目录。
+
+        Returns:
+            配置中的显式值；``None`` 表示文件缺失或该键未设置（此时生效值等于
+            全局配置默认值，即关闭）。
+
+        Raises:
+            ValueError: 本地配置存在但非法（TOML 语法错误或类型不符）。
+        """
+        ...
+
+    @abstractmethod
+    def set_auto_repair_ci(self, repo_root_path: Path, enabled: bool) -> None:
+        """仅修改 ``[agent_runner.post_pr_supervisor].auto_repair_ci`` 并原子替换文件。
+
+        该键只约束 Supervisor Agent 选出的自动 ``repair_pr_branch`` 动作，与
+        ``autopilot.enabled``、``safety.auto_merge``、``runner.fix_agent_enabled``
+        语义独立：实现不得联动修改其中任何一个，也不得从它们推断本值。
+        原子替换与格式保留同样委托共享原语 ``update_toml_table_keys``。
 
         Args:
             repo_root_path: 目标仓库根目录。

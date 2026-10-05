@@ -305,6 +305,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "post_pr_supervisor.supervisor_agent": "执行 supervisor 的 agent",
     "post_pr_supervisor.repair_agent": "谁执行 supervisor 判定后的代码修复：self（supervisor 自己修，默认）/ executor（交回实现者）/ 任意已注册 agent 名",
     "post_pr_supervisor.max_repair_attempts": "supervisor 要求修复时的最大修复 / rebase 次数",
+    "post_pr_supervisor.auto_repair_ci": "是否允许自动执行 supervisor 选出的 repair_pr_branch（远端 post-PR CI 自动修复）；默认关闭，与 autopilot / auto_merge / fix_agent 互不联动",
     "post_pr_supervisor.max_agent_crash_retries": "supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数",
     "post_pr_supervisor.crash_retry_initial_backoff_seconds": "崩溃重试的初始退避秒数，之后每次重试翻倍",
     "post_pr_supervisor.crash_retry_max_backoff_seconds": "崩溃重试单次退避等待的最大秒数",

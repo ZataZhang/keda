@@ -1,7 +1,11 @@
 """Resolve live GitHub state for backlog PRDs.
 
 Maps Issue labels, PR state, and dependency blockers onto the unified
-``BacklogPrdState`` and computes the next actionable item for each PRD.
+``BacklogPrdState`` and computes the next actionable item for each PRD. CI/CD
+delivery is projected in the same pass (see
+:func:`backend.core.use_cases.backlog_ci_delivery.build_ci_delivery`), reusing
+the issue, PR context and the single comment fetch already made here instead of
+opening a second round of GitHub calls.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from backend.core.use_cases.agent_runner_monitor import (
     _lookup_pr_context,
     _resolve_primary_label,
 )
+from backend.core.use_cases.backlog_ci_delivery import build_ci_delivery
 
 _logger = logging.getLogger(__name__)
 
@@ -51,13 +56,19 @@ def _is_pr_merged(
     issue_number: int,
     github_client: IGitHubClient,
     issue_body: str,
+    comments: list[str] | None = None,
 ) -> tuple[bool, str | None]:
-    """Return whether the associated PR has been merged and its URL."""
-    try:
-        comments = github_client.list_issue_comments(issue_number)
-    except Exception as exc:  # noqa: BLE001
-        _logger.info("Failed to list comments for issue #%s: %s", issue_number, exc)
-        comments = []
+    """Return whether the associated PR has been merged and its URL.
+
+    ``comments`` 由调用方传入时不再重复请求 GitHub：Backlog 每个 PRD 只允许读一次
+    评论（见 :func:`resolve_backlog_states`）。
+    """
+    if comments is None:
+        try:
+            comments = github_client.list_issue_comments(issue_number)
+        except Exception as exc:  # noqa: BLE001
+            _logger.info("Failed to list comments for issue #%s: %s", issue_number, exc)
+            comments = []
 
     # Reuse the monitor helper to resolve the PR branch from event markers.
     from backend.core.shared.models.agent_runner import IssueSummary
@@ -160,8 +171,18 @@ def resolve_backlog_states(
             )
             continue
 
-        pr_merged, merged_url = _is_pr_merged(prd.issue_number, github_client, issue.body)
-        pr_context = _lookup_pr_context(issue, github_client)
+        # 每个 PRD 只读一次 Issue 评论：merged 判定、PR 分支解析与 CI 投影共用它。
+        # 多读一次不会改变结果，但会让评论数在这一次响应里前后不一致，从而在下一轮
+        # supervisor 的 context-changed 判定里制造假变化。
+        try:
+            comments = github_client.list_issue_comments(prd.issue_number)
+        except Exception as exc:  # noqa: BLE001
+            _logger.info("Failed to list comments for issue #%s: %s", prd.issue_number, exc)
+            comments = []
+        pr_branch = _extract_pr_branch_from_issue(issue, github_client, comments)
+
+        pr_merged, merged_url = _is_pr_merged(prd.issue_number, github_client, issue.body, comments)
+        pr_context = _lookup_pr_context(issue, github_client, comments)
         state = _state_from_labels(issue.labels, labels_config, issue.state, pr_merged)
 
         # Override with dependency blocker if present, unless already merged/archived.
@@ -176,11 +197,25 @@ def resolve_backlog_states(
         if pr_merged and merged_url and pr_context is not None:
             pr_context = replace_pr_context_url(pr_context, merged_url)
 
+        ci_delivery = build_ci_delivery(
+            prd_path=prd.prd_path,
+            pr_context=pr_context,
+            comments=comments,
+            config=config,
+            pr_branch=pr_branch or "",
+            unavailable_reason=(
+                "PR 上下文不可用（GitHub 读取失败或 PR 状态异常）；" "不视为通过，也不启动修复。"
+                if pr_branch and pr_context is None and not pr_merged
+                else ""
+            ),
+        )
+
         resolved.append(
             replace(
                 prd,
                 state=state,
                 block_reason=block_reason,
+                ci_delivery=ci_delivery,
                 next_action=_compute_next_action(state, pr_context, issue.url),
             )
         )

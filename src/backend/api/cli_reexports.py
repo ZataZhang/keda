@@ -41,6 +41,18 @@ from backend.core.use_cases.daemon_single_instance import (
 )
 from backend.core.use_cases.run_agent_daemon import run_agent_daemon
 from backend.core.use_cases.backlog_actions import advance_backlog_queue
+from backend.core.use_cases.backlog_ci_delivery import (
+    BacklogCiError,
+    build_prd_ci_delivery,
+    load_ci_auto_repair_state,
+    request_manual_ci_repair,
+    resolve_prd_issue_number,
+    set_ci_auto_repair_enabled,
+    set_prd_ci_repair_policy,
+)
+from backend.core.use_cases.backlog_dependencies import evaluate_backlog_dependencies
+from backend.core.use_cases.backlog_prd_scanner import scan_backlog_prds
+from backend.core.use_cases.backlog_state_resolver import resolve_backlog_states
 from backend.core.use_cases.run_agent_repositories_once import (
     run_agent_repositories_once,
 )
@@ -77,8 +89,10 @@ from backend.core.use_cases.agent_runner_factory import (
     create_process_runner,
     create_repl_command_executor,
     create_backlog_store,
+    create_repository_autopilot_settings_editor,
     create_transcript_runner,
     get_agent_runner_settings,
+    load_fresh_agent_runner_settings,
     resolve_issue_from_prd_target,
     write_deliberation_outputs,
 )
@@ -87,6 +101,7 @@ from backend.core.use_cases.agent_runner_repository_local import (
 )
 
 __all__ = [
+    "BacklogCiError",
     "DaemonAlreadyRunningError",
     "DeliberationRequest",
     "IssueFromPrdRequest",
@@ -99,6 +114,7 @@ __all__ = [
     "_resolve_run_trigger",
     "acquire_daemon_locks",
     "advance_backlog_queue",
+    "build_prd_ci_delivery",
     "create_content_generator",
     "create_default_session_id",
     "create_event_sink",
@@ -110,14 +126,20 @@ __all__ = [
     "create_process_runner",
     "create_repl_command_executor",
     "create_backlog_store",
+    "create_repository_autopilot_settings_editor",
     "create_transcript_runner",
     "daemon_lock_dir",
+    "evaluate_backlog_dependencies",
     "get_agent_runner_settings",
+    "load_ci_auto_repair_state",
+    "load_fresh_agent_runner_settings",
     "release_daemon_locks",
+    "request_manual_ci_repair",
     "require_iar_repository_initialized",
     "resolve_issue_from_prd_target",
+    "resolve_prd_issue_number",
     "resolve_prd_paths",
-    "resolve_repository_targets",
+    "resolve_backlog_states",
     "resolve_repository_targets",
     "review_once",
     "run_agent_daemon",
@@ -130,6 +152,9 @@ __all__ = [
     "run_loop_run_now_command",
     "run_repl_session",
     "run_review_daemon",
+    "scan_backlog_prds",
+    "set_ci_auto_repair_enabled",
+    "set_prd_ci_repair_policy",
     "sync_labels",
     "write_deliberation_outputs",
 ]

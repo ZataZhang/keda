@@ -591,6 +591,10 @@ class AgentRunnerPostPrSupervisorSettings(BaseModel):
     # 回落并写日志）/ 任意已注册 agent 名。
     repair_agent: str = "self"
     max_repair_attempts: int = 2
+    # 远端 post-PR CI 自动修复：只约束 Supervisor Agent 选出的 repair_pr_branch。
+    # 默认关闭；它与 fix_agent_enabled（提交前本地验证修复）、autopilot.enabled、
+    # safety.auto_merge 是四条独立门禁，任何一条都不得从另一条推断。
+    auto_repair_ci: bool = False
     max_agent_crash_retries: int = 5
     crash_retry_initial_backoff_seconds: int = 30
     crash_retry_max_backoff_seconds: int = 600

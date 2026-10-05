@@ -61,6 +61,130 @@ class BacklogPrd:
     updated_at: str  # ISO8601
     block_reason: str | None
     next_action: dict | None
+    #: CI/CD 交付投影；仅有关联 PR 时有值，无 PR 或读取不到时保持 ``None``。
+    #: 这是运行时派生视图，不落库（见 tasks/archive 的 Data Model 约束）。
+    ci_delivery: CiDelivery | None = None
+
+
+class BacklogCiRepairPolicy(str, Enum):
+    """单个 PRD 的 CI 自动修复策略（三态）。
+
+    ``INHERIT`` 是"未单独设置"，不是"关闭"：它随仓库全局值实时变化，因此清除
+    覆盖必须写回 ``inherit`` 而不是把当时的全局布尔值复制成永久设置。
+    """
+
+    INHERIT = "inherit"
+    ON = "on"
+    OFF = "off"
+
+
+class CiDeliveryStatus(str, Enum):
+    """CI/CD 交付状态（只描述远端观察事实，不含修复决定）。
+
+    原始 checks 状态与 Supervisor/策略结论分开呈现：``FAILING`` 不等于"会自动
+    修复"，``NOT_RUN`` 也不得标成代码失败或 CI 通过。
+    """
+
+    NO_PR = "no_pr"  # 无关联 PR：本功能不适用，保持原有流程
+    UNAVAILABLE = "unavailable"  # 无法 fresh 读取 PR context / GitHub 不可达
+    PENDING = "pending"  # 有 PR，checks 尚未全部完成
+    NOT_RUN = "not_run"  # 零 job / 无 checks 记录：未执行、未验证
+    FAILING = "failing"  # 存在未通过的 check（原始观察，不推断根因）
+    PASSING = "passing"  # 最新 head 的 checks 全绿
+
+
+class CiRepairGateDecision(str, Enum):
+    """服务端对 repair 动作的放行结论（只约束修复，不改写 Agent 的其他动作）。
+
+    ``POLICY_OFF`` 与 ``BUDGET_EXHAUSTED`` 都必须零自动副作用，并把问题留在详情
+    里；两者靠不同结论码区分，界面与 CLI 不再各自解释。
+    """
+
+    ALLOWED = "ci_repair_allowed"
+    DUPLICATE = "ci_repair_duplicate"  # 同一 failure key 已获准过：重入不再修复
+    POLICY_OFF = "ci_failed_manual"  # 生效策略关闭：失败交人工处理
+    BUDGET_EXHAUSTED = "ci_repair_exhausted"  # 达到既有 max_repair_attempts
+    UNRESOLVED = "ci_unresolved"  # 无法解析当前 PR/head/failure，拒绝修复
+
+
+#: :class:`CiCheckProblem.kind` 的取值：问题只来自 ``checks_summary`` 或明确的
+#: 汇总失败，禁止伪造不存在的 job 名。
+CI_PROBLEM_KIND_CHECK_FAILURE = "check_failure"
+CI_PROBLEM_KIND_CHECK_PENDING = "check_pending"
+CI_PROBLEM_KIND_AGGREGATE = "aggregate_summary"
+CI_PROBLEM_KIND_NOT_RUN = "not_run"
+CI_PROBLEM_KIND_UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class CiCheckProblem:
+    """一条 CI/CD 问题（原始事实 + 可跳转出处，不含推断根因）。"""
+
+    name: str
+    detail: str
+    kind: str = CI_PROBLEM_KIND_CHECK_FAILURE
+    url: str | None = None
+    head_sha: str | None = None
+    round_index: int | None = None
+
+
+@dataclass(frozen=True)
+class CiDelivery:
+    """PRD 的 CI/CD 交付投影（从 PR context 与 ``iar:event`` markers 重建）。
+
+    ``stored_policy`` / ``global_auto_repair`` / ``effective_auto_repair`` 三个值
+    一起返回，effective 值由 core 计算，前端与 CLI 都不得自行推断。
+    """
+
+    prd_path: str
+    status: CiDeliveryStatus
+    pr_number: int | None = None
+    pr_url: str = ""
+    pr_branch: str = ""
+    head_sha: str = ""
+    checks_state: str | None = None
+    problems: tuple[CiCheckProblem, ...] = ()
+    repair_rounds: int = 0
+    max_repair_attempts: int = 0
+    repair_exhausted: bool = False
+    stored_policy: BacklogCiRepairPolicy = BacklogCiRepairPolicy.INHERIT
+    global_auto_repair: bool = False
+    effective_auto_repair: bool = False
+    policy_source: str = BacklogCiRepairPolicy.INHERIT.value
+    last_decision: str | None = None
+    failure_key: str | None = None
+    supervisor_action: str | None = None
+    supervisor_summary: str | None = None
+    last_synced_at: str = ""
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class BacklogCiAutoRepairState:
+    """仓库级 CI 自动修复设置快照（写后 fresh load 读回，不是请求体回显）。
+
+    ``persisted_auto_repair`` 为 ``None`` 表示仓库本地配置里没有这个键，生效值来自
+    全局配置默认值；它与 ``auto_repair_ci``（生效值）分开返回，页面才能如实区分
+    “没设置过”和“显式设为 off”。
+    """
+
+    repo_id: str
+    auto_repair_ci: bool
+    max_repair_attempts: int
+    config_source: str = ""
+    persisted_auto_repair: bool | None = None
+
+
+@dataclass(frozen=True)
+class BacklogCiRepairResult:
+    """一次性手动 repair 的执行结论。"""
+
+    prd_path: str
+    accepted: bool
+    decision: str
+    failure_key: str = ""
+    head_sha: str = ""
+    detail: str = ""
 
 
 @dataclass(frozen=True)
