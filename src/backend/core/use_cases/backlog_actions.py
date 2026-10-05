@@ -206,6 +206,7 @@ def _spawn_runner(
     supervisor: IRunnerProcessSupervisor,
     runner_command: Sequence[str],
     spawn_cwd: Path,
+    issue_number: int | None = None,
 ) -> None:
     """Spawn a one-shot runner for the repository."""
     start_runner_process(
@@ -215,6 +216,7 @@ def _spawn_runner(
         supervisor=supervisor,
         runner_command=runner_command,
         spawn_cwd=spawn_cwd,
+        issue_number=issue_number,
     )
 
 
@@ -292,7 +294,14 @@ def start_prd(
         detail={"trigger": "manual"},
     )
     try:
-        _spawn_runner(repo_id, contexts, supervisor, runner_command, spawn_cwd)
+        _spawn_runner(
+            repo_id,
+            contexts,
+            supervisor,
+            runner_command,
+            spawn_cwd,
+            issue_number=issue_number,
+        )
     except ConsoleProcessError as exc:
         _audit(
             store,

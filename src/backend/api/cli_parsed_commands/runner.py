@@ -25,12 +25,21 @@ from backend.api import cli as _cli
 from backend.core.use_cases.agent_runner_factory import logger
 
 
-def _dry_run_preview(contexts: list, *, agent: str, max_issues: int) -> dict:
+def _dry_run_preview(
+    contexts: list,
+    *,
+    agent: str,
+    max_issues: int,
+    target_issue: int | None = None,
+    all_ready: bool = False,
+) -> dict:
     """组装 ``iar run --dry-run`` 的机读预览（本轮执行计划，逐 Issue 明细在 stderr 日志）。"""
     return {
         "dry_run": True,
         "agent": agent,
         "max_issues": max_issues,
+        "target_issue": target_issue,
+        "all_ready": all_ready,
         "repositories": [
             {"repo_id": context.repo_id, "repo_path": str(context.repo_path)}
             for context in contexts
@@ -39,7 +48,13 @@ def _dry_run_preview(contexts: list, *, agent: str, max_issues: int) -> dict:
 
 
 def run_run_command(ctx: ParsedCommandContext) -> int:
-    """``iar run``: run one agent-runner polling cycle."""
+    """``iar run``: run one agent-runner polling cycle (a target is required).
+
+    目标必填（FR-1）：``--issue <N>``、PRD 路径（解析回链 Issue）或显式
+    ``--all-ready``（等价旧的"捞 ready 队列"行为，FR-2）。同仓已有 daemon
+    时默认拒绝（FR-4），``--takeover`` 在强警告 + 确认下优雅停 daemon、
+    终止其 agent 子进程树、reclaim 在途 Issue 后接管（FR-5）。
+    """
     # 机器输出只定义在 --dry-run 预览组合下：真实执行的过程输出是流式文本，
     # 混进 JSON 只会产出不可解析的垃圾。在解析任何仓库目标之前 fail fast。
     if ctx.output_format == OUTPUT_FORMAT_JSON and not ctx.parsed.dry_run:
@@ -48,8 +63,30 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             code=ExitCode.USAGE,
             suggestion="iar run --dry-run --json",
         )
+    parsed = ctx.parsed
+    prd_path = getattr(parsed, "prd_path", None)
+    target_issue = getattr(parsed, "issue", None)
+    all_ready = getattr(parsed, "all_ready", False)
+    takeover = getattr(parsed, "takeover", False)
+    assume_yes = getattr(parsed, "yes", False)
+
+    if target_issue is not None and prd_path:
+        raise CliError(
+            "--issue and a PRD path are mutually exclusive targets; pick one.",
+            code=ExitCode.USAGE,
+            suggestion="iar run --issue <N> --repo-id <repo>",
+        )
+    if target_issue is None and not prd_path and not all_ready:
+        raise CliError(
+            "iar run requires a target: pass --issue <N>, a PRD path, or --all-ready.",
+            code=ExitCode.USAGE,
+            suggestion=(
+                "iar run --issue <N> --repo-id <repo> · "
+                "iar run tasks/pending/<prd>.md · iar run --all-ready"
+            ),
+        )
     contexts = _resolve_cli_repository_targets(
-        parsed=ctx.parsed,
+        parsed=parsed,
         runner_settings=ctx.runner_settings,
         repo_id=ctx.repo_id,
         repo_override=ctx.repo_override,
@@ -57,11 +94,62 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     # CLI --preset 一次性锚定（implementation 阶段）；未传旗标时原样返回。
     from backend.api.cli_model_preset_anchor import apply_cli_model_preset
 
-    contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage="implementation")
+    contexts = apply_cli_model_preset(contexts, parsed, anchored_stage="implementation")
     for context in contexts:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if contexts:
         _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
+    # PRD 路径目标只在单仓语义下成立：多个仓库无法共享一份 PRD 回链。
+    if prd_path:
+        from backend.api.cli_helpers import require_single_repository_target
+        from backend.core.use_cases.run_target_resolve import (
+            RunTargetResolveError,
+            resolve_prd_target_issue_number,
+        )
+
+        target_context = require_single_repository_target("run", contexts)
+        try:
+            target_issue = resolve_prd_target_issue_number(
+                repo_path=target_context.repo_path, prd_path=prd_path
+            )
+        except RunTargetResolveError as exc:
+            raise CliError(
+                str(exc),
+                code=ExitCode.USAGE,
+                suggestion="iar issue create tasks/pending/<prd>.md",
+            ) from exc
+
+    # 默认互斥（FR-4）：同仓 daemon 在跑时拒绝；--takeover 显式接管。
+    # dry-run 预览保留互斥报错（无副作用），但不真正停 daemon。
+    if takeover and not parsed.dry_run:
+        _confirm_and_take_over_daemons(
+            ctx,
+            contexts=contexts,
+            assume_yes=assume_yes,
+        )
+    elif not takeover:
+        from backend.core.use_cases.daemon_single_instance import find_live_daemon_pid
+
+        lock_dir = _cli.daemon_lock_dir(ctx.runner_settings.console.process_registry_path)
+        for context in contexts:
+            live_daemon_pid = find_live_daemon_pid(lock_dir, context.repo_id)
+            if live_daemon_pid is not None:
+                raise CliError(
+                    f"A daemon for repository '{context.repo_id}' is already running "
+                    f"(PID {live_daemon_pid}); refusing to double-claim the ready queue.",
+                    code=ExitCode.CONFLICT,
+                    suggestion=(
+                        "iar registry stop --repo-id "
+                        f"{context.repo_id} (or stop the daemon), or rerun with "
+                        "--takeover to stop the daemon and take over."
+                    ),
+                )
+    else:
+        _confirm_and_take_over_daemons(
+            ctx,
+            contexts=contexts,
+            assume_yes=assume_yes,
+        )
     content_generator = _cli.create_content_generator(
         ctx.process_runner, config=contexts[0].config if contexts else None
     )
@@ -72,9 +160,9 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
 
     exit_code = _cli.run_agent_repositories_once(
         contexts=contexts,
-        dry_run=ctx.parsed.dry_run,
-        agent=ctx.parsed.agent,
-        max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
+        dry_run=parsed.dry_run,
+        agent=parsed.agent,
+        max_issues=parsed.max_issues or ctx.runner_settings.runner.max_issues,
         process_runner=ctx.process_runner,
         github_client_factory=ctx.github_client_factory,
         content_generator=content_generator,
@@ -83,22 +171,97 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         max_prd_issues=1,
         transcript_runner_factory=transcript_runner_factory,
         max_deliberation_issues=ctx.runner_settings.daemon.max_deliberation_issues,
+        target_issue=target_issue,
     )
-    if not ctx.parsed.dry_run or ctx.output_format != OUTPUT_FORMAT_JSON:
+    if not parsed.dry_run or ctx.output_format != OUTPUT_FORMAT_JSON:
         return exit_code
     # 机器模式的 dry-run：stdout 只放执行计划预览（逐 Issue 明细已由日志走
     # stderr），dry-run 通过用退出码 10 与"真跑了并成功"的 0 区分开。
     emit(
         _dry_run_preview(
             contexts,
-            agent=ctx.parsed.agent,
-            max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
+            agent=parsed.agent,
+            max_issues=parsed.max_issues or ctx.runner_settings.runner.max_issues,
+            target_issue=target_issue,
+            all_ready=all_ready,
         ),
         fmt=OUTPUT_FORMAT_JSON,
     )
     if exit_code:
         return exit_code
     return int(ExitCode.DRY_RUN_OK)
+
+
+def _confirm_and_take_over_daemons(
+    ctx: ParsedCommandContext,
+    *,
+    contexts: list,
+    assume_yes: bool,
+) -> None:
+    """执行 ``--takeover``：强警告 + 确认，然后逐仓优雅停 daemon 并 reclaim。
+
+    Raises:
+        CliError: 机器输出模式下未显式 ``--yes``（不可交互确认），或用户拒绝。
+    """
+    from backend.core.use_cases.daemon_single_instance import find_live_daemon_pid
+
+    lock_dir = _cli.daemon_lock_dir(ctx.runner_settings.console.process_registry_path)
+    targets: list[tuple[object, int]] = []
+    for context in contexts:
+        live_daemon_pid = find_live_daemon_pid(lock_dir, context.repo_id)
+        if live_daemon_pid is not None:
+            targets.append((context, live_daemon_pid))
+    if not targets:
+        return
+
+    # 机器模式没有交互确认的余地：必须显式 --yes。
+    if ctx.output_format == OUTPUT_FORMAT_JSON and not assume_yes:
+        raise CliError(
+            "--takeover in machine (--json) mode requires --yes: it stops the "
+            "daemon and interrupts all of its in-flight Issues.",
+            code=ExitCode.USAGE,
+            suggestion="iar run --issue <N> --takeover --yes --repo-id <repo>",
+        )
+
+    github_clients: dict[Path, object] = {}
+    for context, daemon_pid in targets:
+        github_client = github_clients.setdefault(
+            context.repo_path, ctx.github_client_factory(context.repo_path)
+        )
+        running_issues = github_client.list_issues_by_label(context.config.labels.running, limit=50)
+        console.print("[bold red]⚠️  TAKEOVER — destructive action[/]")
+        console.print(
+            f"- Repository: [bold]{context.repo_id}[/] · daemon PID [bold]{daemon_pid}[/] "
+            "will be stopped gracefully"
+        )
+        console.print(
+            f"- In-flight Issues that will be interrupted and reclaimed: "
+            f"[bold]{len(running_issues)}[/] ({', '.join(f'#{issue.number}' for issue in running_issues) or 'none'})"
+        )
+    if not assume_yes:
+        from rich.prompt import Confirm
+
+        if not Confirm.ask("Stop the daemon(s) and take over now?", default=False):
+            raise CliError(
+                "Takeover aborted by the user; the daemon was left untouched.",
+                code=ExitCode.USAGE,
+                suggestion="iar run --issue <N> --repo-id <repo> --takeover --yes",
+            )
+    from backend.api.cli_run_takeover import take_over_daemon
+
+    for context, daemon_pid in targets:
+        takeover_result = take_over_daemon(
+            repo_id=context.repo_id,
+            daemon_pid=daemon_pid,
+            config=context.config,
+            github_client=github_clients[context.repo_path],
+            process_registry_path=ctx.runner_settings.console.process_registry_path,
+            process_log_dir=ctx.runner_settings.console.process_log_dir,
+        )
+        console.print(
+            f"[green]Daemon stopped ({takeover_result.final_signal}); reclaimed "
+            f"{len(takeover_result.reclaimed_issues)} in-flight Issue(s).[/]"
+        )
 
 
 def run_daemon_command(ctx: ParsedCommandContext) -> int:
@@ -184,7 +347,9 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             # Continuous backlog scheduling: injected as a factory so core never
             # constructs infrastructure objects itself. Repositories that did not
             # opt into the fast lane (autopilot.enabled) skip the stage entirely.
+            # --autopilot/--no-autopilot 的按次覆盖（None = 未传，热读配置）。
             backlog_store_factory=_cli.create_backlog_store,
+            autopilot_override=getattr(ctx.parsed, "autopilot_override", None),
         )
     finally:
         _cli.release_daemon_locks(acquired_daemon_locks)

@@ -95,13 +95,38 @@ def _flags_of(tokens: list[str]) -> set[str]:
 #: ``test_packaged_skill_whitelist_matches_runtime_schema`` 对 ``iar schema --json``
 #: 的运行时派生结果断言），CLI 删掉 Skill 仍在用的旗标必须让守卫红。
 _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
-    ("run",): {"--dry-run", "--max-issues", "--repo", "--repo-id", "--agent", "--all"},
+    ("run",): {
+        "--dry-run",
+        "--max-issues",
+        "--repo",
+        "--repo-id",
+        "--agent",
+        "--all",
+        # 目标必填契约（run-daemon-autopilot-control-surface）：--issue / PRD
+        # 路径 / --all-ready 三选一；--takeover 显式接管（--yes 免确认）。
+        "--issue",
+        "--all-ready",
+        "--takeover",
+        "--yes",
+    },
+    ("daemon", "run"): {
+        "--autopilot",
+        "--no-autopilot",
+        "--interval",
+        "--agent",
+        "--max-issues",
+        "--concurrency",
+        "--repo",
+        "--repo-id",
+        "--all",
+    },
     ("logs",): {"--repo", "--repo-id", "--issue", "--follow", "--lines", "-n", "-f", "--kind"},
     ("issue", "list"): {"--repo", "--repo-id", "--state", "--label", "--limit"},
     ("issue", "create"): set(),
     ("init",): {"--dry-run", "--force"},
     ("registry", "start"): set(),
-    ("registry", "stop"): set(),
+    ("registry", "stop"): {"--repo-id", "--all"},
+    ("backlog", "advance"): {"--dry-run", "--repo", "--repo-id", "--config"},
     ("registry", "list"): set(),
     ("daemon", "status"): set(),
     ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
