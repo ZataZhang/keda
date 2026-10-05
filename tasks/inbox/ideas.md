@@ -334,3 +334,20 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 严重度判断：低。孤儿库只占磁盘、不阻断流程，属长期卫生问题，适合 inbox → 成熟后再走 PRD，不必立即开 GitHub Issue。本次用户已手动清理。
 
 （原话来源：用户 2026-10-05 转述的排查结论，逐字引用。本条为待办登记，用户明确"不用现在处理"。）
+
+## 2026-10-05 · iar init 测试隔离失效，污染真实仓库 config.toml
+
+> 为啥改这个， 这个干嘛的
+
+> 删掉这4行并复原 config.toml
+
+> 记录到 ideas.md 待跟进
+
+**AI 派生背景**（2026-10-05 会话核实仓库现状，非用户原话）：
+
+- **现象**：真实仓库 `config.toml` 里出现了 `[agent_runner.repositories.target]`，其 `path` 指向 pytest 临时目录 `.../pytest-of-zata/pytest-1260/test_iar_init_does_not_pollute0/target`（已被 pytest 清理、不存在）。工作区未提交 diff 仅此一处（+5 行）。**已按用户要求删除并复原，`git diff config.toml` 现为 clean。**
+- **来源测试**：`tests/test_agent_runner_init.py::test_iar_init_does_not_pollute_target_repo_config_toml`（`test_agent_runner_init.py:781`）。它**刻意不设 `IAR_CONFIG`**，只 monkeypatch `HOME` 到 fake_home，断言注册条目落在 `fake_home/.iar/config.toml` 且 tmp 目标仓自己的 config.toml 不变（:785-817）——但某次运行中隔离失效，条目写进了**真实的** `keda/config.toml`（既非 fake_home，也非 tmp 目标仓）。也就是说，这条"防污染"回归测试本身成了污染源，而它的断言没覆盖真实仓库 config.toml，所以静默通过。
+- **对照**：其余 init 测试用 `_create_isolated_config()`（`test_agent_runner_init.py:212`）显式设 `IAR_CONFIG` 到 tmp，不受影响；问题只出在唯一不设 `IAR_CONFIG` 的那条。
+- **可能根因（待复现确认，非结论）**：无 `IAR_CONFIG` 时，注册表落点解析可能沿某锚点命中真实仓库 `config.toml`；pytest 进程的 `HOME`/`cwd` 隔离对该解析路径不生效（或某次运行外部 `IAR_CONFIG` 被设置）。需按该测试的实际调用链复现。
+- **建议修法（供后续选型）**：① 让该测试显式隔离（设 `IAR_CONFIG` 到 tmp）；② 加守卫——跑 `iar init` 后断言"真实仓库 config.toml 未被改动"；③ 排查无 `IAR_CONFIG` 时的注册落点解析路径。严重度低（一次性污染、已清理），但会污染工作区且难察觉。
+- **来源**：用户 2026-10-05 会话发现并授权登记（原话逐字引用如上）。

@@ -26,6 +26,8 @@ _最后更新：2026-10-05_
 
 - **资源回收 / 卫生** — IAR Issue worktree 的专用库（`<repo>_iar_issue_<N>_<digest8>`）在 worktree 删除后无回收路径，会永久残留；已有 `gc_worktree_databases.py` 只覆盖 `create.sh` 的 `_wt_` 命名，两者命名错配。（来源：2026-10-05）
 
+- **测试隔离 / 配置污染** — `test_iar_init_does_not_pollute_target_repo_config_toml`（唯一不设 `IAR_CONFIG`、只靠 `HOME` 隔离的 init 测试）在某次 pytest 运行中隔离失效，把 `[agent_runner.repositories.target]` 注册条目写进了**真实仓库** `config.toml`，path 指向已清理的 pytest 临时目录；该测试的断言未覆盖真实仓库 config.toml，故静默通过。（来源：2026-10-05）
+
 ## 可执行候选
 
 - **PRD 路线图前端** → 建议 PRD：`P1-FEAT-20260626-160000-prd-roadmap-frontend.md`，理由：需求已比较完整，包含视图、状态流转、依赖关系、并行/串行执行策略，且与现有工作流是封装关系而非替代。（来源：2026-06-14 19:07, 2026-06-14 19:41, 2026-06-14 19:53, 2026-06-15 00:50）
@@ -68,6 +70,8 @@ _最后更新：2026-10-05_
 - **`LOG_DIR` 与 `log_file` 是两套日志目录来源** → 建议 PRD：让日文件落点与 `log_dir` 一致（或由 `log_dir` 派生 `log_file` 默认值）。现状：`config.log_dir` 只被 `ensure_log_directory()` 消费，日文件写在 `Path(config.log_file).parent`，单独设 `LOG_DIR` 不移动日文件（已实测）。Issue #175 已把"两处消费点之间"收敛成单点并文档化该边界，合并两字段会挪走已有部署的落点，需单独决策。（来源：2026-09-30）
 
 - **IAR Issue 专用库无回收路径** → 建议 PRD：把 `{repo}_iar_issue_{N}_{digest8}` 纳入 worktree 孤儿库盘点（最小方案 = 扩 `gc_worktree_databases.py` 所有权正则 + 派生 repo-path 摘要；主动挂钩 Issue 关闭删除风险更高，需处理并发），或在 Issue 关闭/worktree 删除时主动 DROP。严重度低（只占磁盘），可等待成熟再立项。（来源：2026-10-05）
+
+- **iar init 测试隔离失效（污染真实 config.toml）** → 建议 PRD（或直接修复 + 守卫测试）：`test_iar_init_does_not_pollute_target_repo_config_toml` 显式隔离（设 `IAR_CONFIG` 到 tmp），并加守卫断言"跑 `iar init` 后真实仓库 config.toml 未被改动"；同时排查"无 `IAR_CONFIG` 时注册表落点解析"为何会命中真实仓库 config。严重度低（一次性污染、已清理），但会污染工作区且难察觉，值得修。（来源：2026-10-05）
 
 ## 已升级
 
