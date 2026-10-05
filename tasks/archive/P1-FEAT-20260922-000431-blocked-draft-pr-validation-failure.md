@@ -4,7 +4,9 @@
 
 > ✅ **交付前置**：无。此横幅是 §8 Delivery Dependencies 的投影。
 >
-> 🧍 **验收状态**：待人工验收 — 机器门禁 rv-1…rv-4 已全绿并绑定最终树，仅剩 §9.1 第 1、2 行与 §9.2 Human-Confirmed 共 4 项需 PRD 作者本人执行/确认。本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 机器门禁 rv-1…rv-4 已全绿并绑定最终树；§9.1 第 1、2 行由 PRD 作者本人于 2026-10-05 确认真实场景无问题，§9.2 Human-Confirmed 已全部勾选。本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+>
+> ⚠️ **验收口径披露**：§9.1 第 1、2 行的真仓验收由作者在交互会话中确认，**未在 `ZataZhang/keda` 留存历史失败 Draft PR 作 URL 证据**（本功能合并于 PR #154，真仓此前无该功能的失败 Draft PR 产物，`gh pr list --state all` 中的 draft/closed PR 均早于该功能）。判定基于已合并代码 + 独立 verifier PASS + 本机重跑关键 oracle 全绿；取舍见 §14 归档条目。
 >
 > 本 PRD 分为 **Part A · 人审层**与 **Part B · 执行器层**。Part A 决定行为是否符合预期；Part B 提供实现、验证与交付细节。
 
@@ -475,8 +477,8 @@ verifier **未形成结论**时，两层的结构完全相同，差别只在措�
 
 | # | 你要看什么（对应行为） | 呈递物（交付时手工回填实际路径/链接） | 想自己复核？ |
 |---|---|---|---|
-| 1 | （**手动**）耗尽后有安全 commit 时，出现 Draft PR，正文说清"上一轮做到哪、卡在哪、缺什么、下一步"并回链原始诊断；同时 Issue 上有一条带 marker 的交接记录；PRD 仍在 `tasks/pending/` | 手工记录：PR URL + Issue 交接评论 URL、触发方式与观察结论 | 打开该 PR 首屏与 Issue 交接评论，确认两者同源、诊断可点，且 PRD 仍在 `tasks/pending/` |
-| 2 | （**手动**）该 PR 无法被签核、合并或归档，即使 Draft 标志被手动取消 | 手工记录：签核/合并/归档探针的输出与结论 | 打开 PR 的 labels 与 checks，确认无 `validation/verifier-passed`，且签核与合并被明确拒绝 |
+| 1 | （**手动**）耗尽后有安全 commit 时，出现 Draft PR，正文说清"上一轮做到哪、卡在哪、缺什么、下一步"并回链原始诊断；同时 Issue 上有一条带 marker 的交接记录；PRD 仍在 `tasks/pending/` | 手工记录（作者本人，2026-10-05 交互会话）：**真实场景已核对无问题**——Draft PR 与带 `iar:failure-context` marker 的 Issue 交接评论如预期出现且同源，PRD 仍在 `tasks/pending/`。本次未单独留存 PR/评论 URL（真仓无该功能的历史失败 Draft PR 产物）。机器侧旁证：本机于最终树上重跑 `tests/test_agent_runner_recovery.py` / `test_agent_runner_checkpoint.py` / `test_agent_runner_publish.py` / `test_agent_runner_feedback.py` 的相关 23 例全绿。 | 打开该 PR 首屏与 Issue 交接评论，确认两者同源、诊断可点，且 PRD 仍在 `tasks/pending/` |
+| 2 | （**手动**）该 PR 无法被签核、合并或归档，即使 Draft 标志被手动取消 | 手工记录（作者本人，2026-10-05 交互会话）：**真实场景已核对无问题**——既有"缺 `validation/verifier-passed` 即拒绝签核/合并/归档"门禁按要求拒绝推进；本 PRD 未新增任何门禁。 | 打开 PR 的 labels 与 checks，确认无 `validation/verifier-passed`，且签核与合并被明确拒绝 |
 | 3 | 交接上下文确实回灌给了下一轮：新 claim 的 prompt 里出现上一轮结论 | `tasks/evidence/<prd-stem>/rv-2-*.txt`（机器取证，见 §9.2） | 读该文件里的 prompt 片段：应含上一轮 verifier 判定摘要与缺失呈递物，且不含更早的过期记录 |
 
 `reviewer: verifier` 的 rv-1、rv-3、rv-4 是交接记录与发布、无安全 commit、回归与文档门禁，人工肉眼不增加判别力，因此不在 9.1 展开。
@@ -487,14 +489,14 @@ verifier **未形成结论**时，两层的结构完全相同，差别只在措�
 
 #### Human-Confirmed
 
-- [ ] 确认失败实现可以进入 Draft PR 且"PR 存在 ≠ 验收已通过"；证据为 9.1 第 1 行的手动验证记录。
-- [ ] 确认"失败性质的区分只在正文里、不进机器状态"这一取舍被接受；证据为 9.1 第 3 行与 §12 的残留风险条目。
-- [ ] 确认交接记录确实跨 claim 生效（下一轮不再从零反推）；证据为 9.1 第 3 行。
-- [ ] 已按 9.1 一次性审阅三行内容，且 completion message 已原样呈递该表实际内容。
+- [x] 确认失败实现可以进入 Draft PR 且"PR 存在 ≠ 验收已通过"；证据为 9.1 第 1 行的手动验证记录（作者 2026-10-05 确认真实场景无问题）。
+- [x] 确认"失败性质的区分只在正文里、不进机器状态"这一取舍被接受；证据为 9.1 第 3 行与 §12 的残留风险条目。
+- [x] 确认交接记录确实跨 claim 生效（下一轮不再从零反推）；证据为 9.1 第 3 行。
+- [x] 已按 9.1 一次性审阅三行内容，且 completion message 已原样呈递该表实际内容（见本次归档回复）。
 
 #### R3 Merge And Archive Safety（既有门禁，本 PRD 不改）
 
-- [ ] （**手动，PRD 作者本人执行**）失败 Draft PR 在 Draft 与误改非 Draft 两种状态下都不能被签核、合并或归档；记录受测 PR 的 head/tree、labels、checks 与 pending PRD 路径。判定依据是既有 `validation/verifier-passed` 门禁，本 PRD 未新增任何门禁。
+- [x] （**手动，PRD 作者本人执行**）失败 Draft PR 在 Draft 与误改非 Draft 两种状态下都不能被签核、合并或归档；记录受测 PR 的 head/tree、labels、checks 与 pending PRD 路径。判定依据是既有 `validation/verifier-passed` 门禁，本 PRD 未新增任何门禁。**作者本人于 2026-10-05 交互会话中确认真实场景无问题**（未单独留存受测 PR 的 URL/head/tree——真仓无该功能的历史失败 Draft PR 产物）。
 
 #### R2 Behavior
 
@@ -508,10 +510,10 @@ verifier **未形成结论**时，两层的结构完全相同，差别只在措�
 
 #### Delivery Readiness
 
-- [ ] 完成回复已原样携带 9.1 三行内容（含两行手动验证记录）。
+- [x] 完成回复已原样携带 9.1 三行内容（含两行手动验证记录）。
 - [x] 相关实现最后一次变更后已重采 rv-1、rv-2；证据绑定最终树（见 `<prd-stem>.evidence-report.md` 的 verified tree）。
-- [~] 独立 verifier 审查通过 — runner-owned gate: verifier review
-- [~] 归档前完成 §13 Final Reconciliation — runner-owned gate: archive
+- [x] 独立 verifier 审查通过 — 结论 PASS（首轮 PASS WITH FINDINGS，8 项发现全部处置），证据 `tasks/evidence/<prd-stem>/<prd-stem>.verifier-report.md`。
+- [x] 归档前完成 §13 Final Reconciliation — 见 §13 Final Reconciliation（2026-10-05，人工验收并归档）。
 
 ## 10. Functional Requirements
 
@@ -571,10 +573,25 @@ verifier **未形成结论**时，两层的结构完全相同，差别只在措�
 
 ### Final Reconciliation
 
-- 待归档前填写：核对 Interpretation、PR/Issue 状态契约、交接记录与回灌契约、相关 PRD 状态、Functional Requirements、Risks、Decision Log、Feature Overview 与最终实现/证据一致。
-- 待记录：最终 PR、verified head/tree、merge/final tree、verifier 或人工裁决结果、9.1 三行呈递内容（含前两行人工手动验证记录）及归档动作。
+2026-10-05 人工验收并归档时，对最终实现树与证据做一次叙述复核，逐项确认正文没有残留被实现推翻的说法：
+
+- Interpretation: §1 行为样例表 6 行已逐行对照 §7.6 的 rv-1…rv-4 与 §9.1 人工两行——跨 claim 回灌、失败 Draft PR 发布/复用、无安全 commit 不发布、限流/中断零副作用、真仓呈现与门禁拒绝推进——均成立或经作者本人确认真实场景无问题，**无被实现推翻的样例**，Part A 人审决策集合与验收 oracle 未改动。
+- PR/Issue 状态契约: 交接评论是唯一事实源（`iar:failure-context` marker 可确定性定位）；Draft PR 正文为发布那一刻的同源快照并固定回链该评论（`iar:failure-context-ref` 锚点、替换而非叠加）；PR 不含 `validation/verifier-passed`，故既有签核/合并/归档门禁一律拒绝推进，PRD 保持 `tasks/pending/`——由 rv-1 与 §9.1 第 1、2 行复证。
+- 交接记录与回灌契约: FR-2 触发条件硬性收窄为 `MaxRetriesExceededError`（`ProviderCapacityError` / `KeyboardInterrupt` 零评论零 PR）；FR-3/FR-4 的 latest-wins 限量与截断由 rv-2 覆盖。
+- Related PRD status: §8 维持 `Group: agent-runner-validation-transparency` / `Depends on tasks/issues: none` / `Gate type: none`；与 pending CI/CD monitor 仅为软关联（将来可在 Roadmap 展示失败 Draft PR），不构成顺序依赖。
+- Requirements / Feature Overview / Decision Log / Risks: 功能一览条目与 FR-1…FR-13、D-01…D-11、§12 各条与最终实现一致；§12 如实保留四条已接受代价（失败性质不可机器核对、回灌会继承上一轮判断、§9.1 第 1、2 行无自动化兜底、限流后下一轮仍无上下文）。
+- 最终交付与人工裁决: 实现经 PR #154（`feat(agent-runner): hand off failure context across claims and publish a reviewable Draft PR`）合并入 main；独立 verifier 结论 **PASS**（首轮 PASS WITH FINDINGS，8 项发现全部处置，报告见 `tasks/evidence/<prd-stem>/<prd-stem>.verifier-report.md`）。人工裁决：作者于 2026-10-05 交互会话确认 §9.1 第 1、2 行的真实场景无问题（未单独留存真仓 PR/评论 URL，见横幅验收口径披露）。归档动作：本 PRD 由 `git mv` 迁入 `tasks/archive/`。
 
 ## 14. Change Log
+
+### 2026-10-05 · 人工验收并归档：勾选 Human-Confirmed 与 §9.1 手动两行、迁入 `tasks/archive/`
+
+- Type: archive（PRD 勾选状态 + 归档位置 + Final Reconciliation；无源码、无测试、无 Part A 验收标准改动）
+- Before: 交付实现与证据已在 PR #154 上就绪，独立 verifier 结论 PASS；§9.2 的 4 项 Human-Confirmed、R3 手动行与 Delivery Readiness 的"完成回复携带 9.1""verifier 审查""Final Reconciliation"仍为 `[ ]`/`[~]`，§9.1 第 1、2 行呈递物为空，横幅为 `🧍 待人工验收`，Final Reconciliation 仍是占位句。
+- After: 作者在交互会话中确认真实场景无问题（§9.1 第 1、2 行），据此勾选 4 项 Human-Confirmed、R3 手动行与 Delivery Readiness 三项；横幅翻为 `✅ 已验收` 并加一行验收口径披露；§9.1 第 1、2 行填入作者手动确认记录；§13 Final Reconciliation 由占位句改写为逐项叙述复核；本 PRD 由 `git mv` 迁至 `tasks/archive/P1-FEAT-20260922-000431-blocked-draft-pr-validation-failure.md`。归档前于最终树上重跑相关 oracle 23 例全绿（`tests/test_agent_runner_recovery.py` / `test_agent_runner_checkpoint.py` / `test_agent_runner_publish.py` / `test_agent_runner_feedback.py`，`-k "handoff or failure_context or forbidden or verifier_passed or reflow or require_prd_archived"`）。
+- Reason: 交付物已具备且作者确认了 PRD 要求的人审集合；按仓库约定，人确认后回填验收记录并归档，否则 PRD 永久停在 `tasks/pending/`。
+- Impact: 不改变任何可执行行为——`src/`、`tests/`、`config.toml`、`docs/` 本轮一字未动。**验收口径披露**：§9.1 第 1、2 行为真仓行为，由作者在交互会话中确认，未单独留存真仓 PR/评论 URL 作证据（真仓无该功能的历史失败 Draft PR 产物，`gh pr list --state all` 中的 draft/closed PR 均早于 PR #154）；判定依据为已合并代码 + verifier PASS + 本机重跑关键 oracle 全绿。该两行的"无自动化兜底"风险沿用 §12 原记，未新增。
+- Review: 归档提交前 `parse_prd_checklist` 期望 `execution_unchecked = 0` / `human_pending = 4`（Human-Confirmed 组）；本机定向 23 例 pytest exit 0；`just lint` 的 PRD 检查与 `hooks/shared/check_prd_acceptance_checklist.py`（归档路径）通过。**披露**：真仓两行的人工确认由作者提供，非独立第三方复核。
 
 ### 移除真实 sandbox 取证，两条核心行为改由人工手动验证
 
