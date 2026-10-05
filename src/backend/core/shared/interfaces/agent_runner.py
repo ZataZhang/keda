@@ -101,6 +101,16 @@ core 层只声明档名并请求该档，白名单策略本体在 infrastructure
 """
 
 
+#: agent 调用失败时会话 id 的异常属性名。
+#:
+#: 正常结束的 agent 调用把自报的会话 id 放在 :class:`CommandResult.session_id`
+#: 里交回；失败的那几次只有异常。会话的持有方是 agent CLI，runner 只观测原始事件流，
+#: 因此实现端在抛出异常（超时击杀、非零退出）时把失败前看到的最后一个会话 id 挂在
+#: 这个属性上——否则"跑到一半死掉"这轮的断点就彻底丢了，跨进程续传无从谈起。调用方
+#: 一律用 ``getattr`` 宽容读取（旧实现端没有该属性时等价于"没拿到会话"）。
+AGENT_SESSION_ID_ATTR_NAME = "agent_session_id"
+
+
 class IProcessRunner(ABC):
     """运行外部命令的端口。
 
@@ -186,7 +196,10 @@ class IProcessRunner(ABC):
         Raises:
             Exception: 当 ``check`` 为 ``True`` 且命令以非零码退出，
                 或在 ``timeout`` / ``inactivity_timeout`` 内未完成时，
-                向上抛出相应异常。
+                向上抛出相应异常。超时被击杀的 agent 流式调用，实现端会
+                在 :data:`AGENT_SESSION_ID_ATTR_NAME` 属性上带上击杀前已
+                观测到的会话 id（``subprocess.TimeoutExpired`` 本身没有
+                这个字段），使调用方仍能把断点会话落盘供续传。
         """
         ...
 

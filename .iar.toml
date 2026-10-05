@@ -213,7 +213,7 @@ previous_findings_injection_enabled = true
 # 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .iar/ gitignore 排除）
 findings_artifact_dir = ".iar/state"
 
-# Daemon 轮询与 reclaim 配置（覆盖全局 [agent_runner.daemon] 默认）
+# Daemon 轮询与崩溃对账配置（覆盖全局 [agent_runner.daemon] 默认）
 [agent_runner.daemon]
 # review-daemon 轮询间隔秒数
 review_interval_seconds = 120
@@ -221,9 +221,9 @@ review_interval_seconds = 120
 run_interval_seconds = 120
 # 每轮 Phase 0 审议最大 Issue 数
 max_deliberation_issues = 1
-# 是否在每轮开头 reclaim 卡死的 agent/running Issue
-reclaim_stale_running = true
-# TTL reclaim 阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale
+# 是否在每轮开头对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）；关闭后僵尸不被触碰
+reconcile_stale_attempts = true
+# 对账的 claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale
 reclaim_ttl_seconds = 10800
 
 # 交互式决策（iar ask）配置：默认 agent、输出目录、执行确认等

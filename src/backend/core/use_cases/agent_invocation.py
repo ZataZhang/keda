@@ -75,6 +75,9 @@ class AgentInvocation:
         output_protocol: 输出协议 id，执行层据此从注册表取中继实现。
         cwd: 子进程工作目录。
         read_only: 该调用是否为声明的只读用途。
+        resumed_session_id: 本次调用实际注入的续传会话 id；``None`` 表示未续传
+            （agent 未声明能力、无会话记录，或调用方未请求）。调用侧据此判断
+            resume 是否真的生效（降级全新会话时该字段为 ``None``）。
     """
 
     agent_name: str
@@ -84,10 +87,11 @@ class AgentInvocation:
     output_protocol: str
     cwd: Path
     read_only: bool
+    resumed_session_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
-# 占位符（闭集，不可扩展）
+# 占位符（代码内闭集，配置侧不可自定义）
 # ---------------------------------------------------------------------------
 
 _PLACEHOLDER_CWD = "{cwd}"
@@ -95,6 +99,7 @@ _PLACEHOLDER_WORKTREE = "{worktree}"
 _PLACEHOLDER_PROMPT = "{prompt}"
 _PLACEHOLDER_MODEL = "{model}"
 _PLACEHOLDER_EFFORT = "{effort}"
+_PLACEHOLDER_SESSION_ID = "{session_id}"
 
 
 def _expand_placeholders(
@@ -104,11 +109,13 @@ def _expand_placeholders(
     prompt: str,
     model_value: str | None = None,
     effort_value: str | None = None,
+    session_value: str | None = None,
 ) -> str:
     """替换占位符为字面值；不认识的占位符原样保留（不猜测语义）。
 
-    ``{model}`` / ``{effort}`` 只在对应值非空时替换——无模型绑定的调用
-    （``model_selection is None``）经过本函数时输出与旧版逐字节一致。
+    ``{model}`` / ``{effort}`` / ``{session_id}`` 只在对应值非空时替换——无模型
+    绑定、无续传会话的调用（``model_selection is None`` /
+    ``resume_session_id is None``）经过本函数时输出与旧版逐字节一致。
     """
     expanded_fragment = (
         argv_fragment.replace(_PLACEHOLDER_CWD, str(worktree_path))
@@ -119,6 +126,8 @@ def _expand_placeholders(
         expanded_fragment = expanded_fragment.replace(_PLACEHOLDER_MODEL, model_value)
     if effort_value is not None:
         expanded_fragment = expanded_fragment.replace(_PLACEHOLDER_EFFORT, effort_value)
+    if session_value is not None:
+        expanded_fragment = expanded_fragment.replace(_PLACEHOLDER_SESSION_ID, session_value)
     return expanded_fragment
 
 
@@ -277,6 +286,7 @@ def build_agent_invocation(
     worktree_path: Path,
     config: AppConfig,
     model_selection: ModelSelection | None = None,
+    resume_session_id: str | None = None,
 ) -> AgentInvocation:
     """按声明式 spec 组装一次 agent 调用。
 
@@ -290,6 +300,10 @@ def build_agent_invocation(
         config: 应用配置，注册表取自 ``config.agents``。
         model_selection: 可选的模型选择（阶段预设绑定解析结果）；
             ``None`` 表示不注入任何模型参数，argv 与未启用预设时逐字节一致。
+        resume_session_id: 可选的会话续传 id（崩溃对账 / recovery 轮次回填上轮
+            session）。仅当该 agent 声明 ``supports_resume`` 且给出
+            ``resume_args`` 模板时注入；否则静默忽略，调用方经
+            ``AgentInvocation.resumed_session_id`` 判断是否真的续传。
 
     Returns:
         AgentInvocation: 组装结果；调用方把它交给执行层（进程执行器或
@@ -309,6 +323,20 @@ def build_agent_invocation(
     argv: list[str] = [agent_spec.bin]
     for arg in profile_spec.args:
         argv.append(_expand_placeholders(arg, worktree_path=worktree_path, prompt=prompt))
+    resumed_session_id: str | None = None
+    if resume_session_id and agent_spec.supports_resume and agent_spec.resume_args:
+        # 续传模板与模型模板共用同一套占位符展开；注入点固定在基础 args 之后、
+        # 模型参数之前，保证提示词的尾部投递位置不变。
+        resumed_session_id = resume_session_id
+        for resume_entry in agent_spec.resume_args:
+            argv.append(
+                _expand_placeholders(
+                    resume_entry,
+                    worktree_path=worktree_path,
+                    prompt=prompt,
+                    session_value=resume_session_id,
+                )
+            )
     if model_selection is not None:
         argv.extend(
             _model_selection_argv(
@@ -359,6 +387,7 @@ def build_agent_invocation(
         output_protocol=profile_spec.output_protocol,
         cwd=worktree_path,
         read_only=profile_spec.read_only,
+        resumed_session_id=resumed_session_id,
     )
 
 

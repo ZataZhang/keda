@@ -122,6 +122,11 @@ class AgentSpec:
             该 agent 未声明模型选择语法，命中模型绑定时 fail-fast。
         reasoning_effort_args: 推理档参数 argv 模板（含 ``{effort}`` 占位符）；
             为空表示未声明推理档语法。
+        supports_resume: 该 agent CLI 是否支持按会话 id 续传（PRD 声明式能力）。
+            ``False`` 的 agent 在恢复时一律走全新会话。
+        resume_args: 续传 argv 模板（含 ``{session_id}`` 占位符，如 claude 的
+            ``("--resume", "{session_id}")``）；仅在 ``supports_resume=True``
+            时被 ``build_agent_invocation`` 注入，未声明即不注入。
     """
 
     bin: str
@@ -135,6 +140,8 @@ class AgentSpec:
     profiles: dict[str, AgentProfileSpec] = field(default_factory=dict)
     model_args: tuple[str, ...] = ()
     reasoning_effort_args: tuple[str, ...] = ()
+    supports_resume: bool = False
+    resume_args: tuple[str, ...] = ()
 
     def user_skills_dir(self, user_home_path: Path) -> Path | None:
         """派生该 agent 的用户级 skills 目录（唯一派生规则）。
@@ -265,6 +272,10 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # 模型选择：`claude --model <id>` 已核实；推理档 flag 语法未核实，
         # 保持为空 → 命中带推理档的绑定时 fail-fast（宁缺勿假）。
         model_args=("--model", "{model}"),
+        # 会话续传：`claude -p --resume <session_id>` 已核实（本机 CLI 实测），
+        # session id 来自 stream-json 首行 system/init 事件。
+        supports_resume=True,
+        resume_args=("--resume", "{session_id}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=(

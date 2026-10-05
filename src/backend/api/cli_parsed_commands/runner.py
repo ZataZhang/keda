@@ -407,7 +407,7 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             max_deliberation_issues=ctx.runner_settings.daemon.max_deliberation_issues,
             concurrency=daemon_concurrency,
             output_view=daemon_output_view,
-            reclaim_stale_running=ctx.runner_settings.daemon.reclaim_stale_running,
+            reconcile_stale_attempts=ctx.runner_settings.daemon.reconcile_stale_attempts,
             reclaim_ttl_seconds=ctx.runner_settings.daemon.reclaim_ttl_seconds,
             # Continuous backlog scheduling: injected as a factory so core never
             # constructs infrastructure objects itself. Repositories that did not

@@ -20,7 +20,10 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
     PLAIN_PROTOCOL_ID,
 )
-from backend.core.shared.interfaces.agent_runner import E2E_CHILD_ENV_PROFILE
+from backend.core.shared.interfaces.agent_runner import (
+    AGENT_SESSION_ID_ATTR_NAME,
+    E2E_CHILD_ENV_PROFILE,
+)
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.infrastructure.agent_stream_usage import (
     StreamUsageCollector,
@@ -196,6 +199,7 @@ class CommandResult:
     duration_seconds: float = 0.0
     output_protocol: str = PLAIN_PROTOCOL_ID
     token_usage: TokenUsage | None = None
+    session_id: str | None = None
 
 
 class CommandFailedError(subprocess.CalledProcessError):
@@ -431,14 +435,19 @@ class SubprocessRunner:
             duration_seconds=round(time.monotonic() - started_mono, 3),
             output_protocol=output_protocol or PLAIN_PROTOCOL_ID,
             token_usage=token_usage,
+            session_id=usage_collector.session_id if usage_collector is not None else None,
         )
         if check and completed.returncode != 0:
-            raise CommandFailedError(
+            failure = CommandFailedError(
                 completed.returncode,
                 list(command),
                 output=stdout,
                 stderr=stderr,
             )
+            # 非零退出的 agent 调用同样可能已经聊出了一段会话（跑了一半才失败）。
+            # 把击杀/失败前的最后一个会话 id 一并挂在异常上，恢复轮次才有得可续。
+            _attach_captured_session_id(failure, usage_collector)
+            raise failure
         return result
 
 
@@ -726,6 +735,23 @@ class ClaudeStreamRenderer:
         return f"\n{prefix}{result_text}\n"
 
 
+def _attach_captured_session_id(
+    exc: BaseException,
+    usage_collector: StreamUsageCollector | None,
+) -> None:
+    """把 agent 自报的最后一个会话 id 挂到失败异常上。
+
+    超时击杀与非零退出都不返回 ``CommandResult``，而"这轮聊到哪儿了"恰恰要在失败的
+    那一刻留下——原始事件流只有本函数这一层可靠可见，会话的持有方仍是 agent CLI，
+    这里只做观测并把 id 交给上层落盘。没观察到会话 id 时什么都不挂，异常语义不变。
+    """
+    if usage_collector is None:
+        return
+    captured_session_id = usage_collector.session_id
+    if captured_session_id:
+        setattr(exc, AGENT_SESSION_ID_ATTR_NAME, captured_session_id)
+
+
 def run_filtered_claude_stream(
     command: Sequence[str],
     *,
@@ -857,7 +883,8 @@ def run_filtered_claude_stream(
                 logger.info("Agent output: %s", buffered)
         return_code = process.wait(timeout=timeout)
         watchdog.raise_if_timed_out(partial_stdout="".join(stdout_lines))
-    except BaseException:
+    except BaseException as exc:
+        _attach_captured_session_id(exc, usage_collector)
         _terminate_process_tree(process)
         process.wait()
         raise
