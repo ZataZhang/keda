@@ -542,6 +542,7 @@ def run_once(
     concurrency: int = 1,
     output_view: IRunnerLiveView | None = None,
     target_issue: int | None = None,
+    fast_merge: bool = False,
 ) -> int:
     """执行一次 Agent Runner 轮询。"""
     module = _orchestration_runtime_module()
@@ -561,5 +562,6 @@ def run_once(
             concurrency=concurrency,
             output_view=output_view,
             target_issue=target_issue,
+            fast_merge=fast_merge,
         )
     )

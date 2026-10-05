@@ -966,6 +966,7 @@ def run_agent_until_committed(
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
     model_selection: ModelSelection | None = None,
+    fast_merge: bool = False,
 ) -> AgentCommitResult:
     """运行 Agent recovery 状态机并返回最终提交结果。"""
     from backend.core.use_cases.run_agent_execution_loop import (
@@ -986,6 +987,7 @@ def run_agent_until_committed(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=model_selection,
+            fast_merge=fast_merge,
         )
     )
 

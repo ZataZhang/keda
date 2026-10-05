@@ -161,6 +161,7 @@ def _process_blocked_resolution(
     marker: ReviewEventMarker,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
+    fast_merge: bool = False,
 ) -> None:
     """处理带 blocked_resolution marker 的 blocked Issue。
 
@@ -175,6 +176,8 @@ def _process_blocked_resolution(
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
         marker: blocked_resolution_requested 事件标记
+        fast_merge: 快速通道（``iar run --fast-merge``）：本次运行跳过 Phase 4.5
+            验证门禁并在 PR 正文打未验证标注。
     """
     from backend.core.use_cases.agent_runner_publish import validate_safe_changes
     from backend.core.use_cases.run_agent_once import (
@@ -237,6 +240,7 @@ def _process_blocked_resolution(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=implementation_model_selection,
+            fast_merge=fast_merge,
         )
 
         # 完成发布流程
@@ -250,6 +254,7 @@ def _process_blocked_resolution(
             expected_branch=current_branch,
             commit_result=commit_result,
             content_generator=content_generator,
+            fast_merge=fast_merge,
         )
     finally:
         _release_blocked_claim_lock(lock_path)
@@ -534,6 +539,7 @@ def _write_failure_handoff(
 
 def _process_ready_issue(
     *,
+    fast_merge: bool = False,
     issue: IssueSummary,
     repo_path: Path,
     config: AppConfig,
@@ -554,6 +560,8 @@ def _process_ready_issue(
     5. 完成发布流程
 
     Args:
+        fast_merge: 快速通道旗标：builder 提交后不再重跑 rv_reexec、不启动独立
+            verifier，直接发布带未验证标注的 PR。
         issue: Issue 对象
         repo_path: 仓库根目录
         config: 应用配置
@@ -647,6 +655,7 @@ def _process_ready_issue(
             expected_branch=expected_branch,
             commit_result=commit_result,
             content_generator=content_generator,
+            fast_merge=fast_merge,
         )
         return
 
@@ -667,6 +676,7 @@ def _process_ready_issue(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=implementation_model_selection,
+            fast_merge=fast_merge,
         )
     except (
         MaxRetriesExceededError,
@@ -732,6 +742,7 @@ def _process_ready_issue(
         expected_branch=expected_branch,
         commit_result=new_commit_result,
         content_generator=content_generator,
+        fast_merge=fast_merge,
     )
 
 
@@ -896,6 +907,7 @@ def _process_running_publish_recovery(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None = None,
+    fast_merge: bool = False,
     **kwargs: object,
 ) -> None:
     """恢复 running Issue 的发布流程。
@@ -911,6 +923,8 @@ def _process_running_publish_recovery(
         github_client: GitHub 客户端
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
+        fast_merge: 快速通道（``iar run --fast-merge``）：跳过发布前的最终
+            RV / verifier 复核并在 PR 正文打未验证标注。
     """
     selected_agent = choose_agent(issue, config, agent)
 
@@ -945,6 +959,7 @@ def _process_running_publish_recovery(
             expected_branch=expected_branch,
             commit_result=commit_result,
             content_generator=content_generator,
+            fast_merge=fast_merge,
         )
     finally:
         _release_blocked_claim_lock(lock_path)

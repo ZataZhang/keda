@@ -1116,6 +1116,21 @@ iar run --issue 42 --takeover --yes
 
 接管流程：优雅停 daemon（SIGTERM → 等待超时 → 兜底 SIGKILL；**不会**把 SIGKILL 当首手段）→ 终止 daemon 的在途 agent 子进程树（不留孤儿 agent）→ 把在途 Issue reclaim 回 `agent/ready` → 执行定向 run。**接管会中断 daemon 当前所有在途 Issue**（不只是你指定的那个），它们会被 reclaim 后重跑——这是有意为之的破坏性动作，所以默认不发生。
 
+### 快速合并旗标 `--fast-merge`
+
+默认 run 在 builder 提交后会依次跑两道验证门禁——rv re-exec（重跑 PRD 声明的验证命令）与独立 verifier 复核——绿灯后才开 Draft PR。`--fast-merge` 是**本次 run 的一次性快速通道**：builder 提交后**跳过这两道门禁**，直接开 Draft PR，并在正文里显式标注该 PR **未经自动化验证**。
+
+```bash
+# 快速通道：完成即开 PR，跳过验证门禁（仅单一目标）
+iar run --issue 42 --fast-merge
+```
+
+- **PR 正文自我声明**：机器可读 marker `<!-- iar:fast-merge issued=<N> -->` + 人读说明"本 PR 经快速通道发布，未经过自动化验证门禁，合并前请人工验证"。无 marker 的 PR 才代表走了完整验证。
+- **只覆盖验证门禁本身**：发布路径（分支命名、push、PR 正文契约、pre-PR review）与"已提交干净工作树"的发布前提**照常执行**；builder 失败/恢复循环也不受影响——快速通道不会把失败掩盖成成功。
+- **单一目标限定**：与 `--all-ready` 组合是用法错误（退出码 2）——快速通道绝不能开启"整队未验证爆发"。
+- **stack 依赖拒绝（fail-closed）**：目标 Issue 若声明 `iar:depends-on ... mode="stack"` 顺序依赖，在启动任何 agent、乃至 `--takeover` 停 daemon 之前就报用法错误——未验证的上游会顺着 fork 基污染整条下游链；Issue 读不到时同样拒绝（无法证明不是 stack 就不走旁路）。
+- **不加旗标时零变化**：默认 run 与今天完全一致（门禁照常）。daemon 没有 `--fast-merge`，也没有对应配置项——旁路只作用于这一次显式调用，且不触碰自动合并。
+
 ### daemon 的 autopilot 按次覆盖
 
 ```bash
