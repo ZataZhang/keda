@@ -269,10 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         metavar="PRD_PATH",
-        help=(
-            "Target PRD path: runs the Issue linked via the PRD's "
-            "'- GitHub Issue:' line. Pass --issue, a PRD path, or --all-ready."
-        ),
+        help="Target PRD path (resolved via its '- GitHub Issue:' link).",
     )
     run_parser.add_argument("--dry-run", action="store_true")
     run_parser.add_argument(
@@ -292,11 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--takeover",
         action="store_true",
         default=False,
-        help=(
-            "When a daemon is already serving the repository, stop it "
-            "gracefully, reclaim its in-flight Issues, then run. Destructive: "
-            "interrupts ALL of the daemon's in-flight Issues."
-        ),
+        help="Stop a running daemon gracefully, reclaim its in-flight Issues, then run.",
     )
     run_parser.add_argument(
         "--yes",
@@ -335,11 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="autopilot_override",
         action="store_true",
         default=None,
-        help=(
-            "Enable the scheduling autopilot for this daemon run, overriding "
-            "autopilot.enabled. Scheduling only: it never arms auto-merge "
-            "(that stays behind the safety.auto_merge config switch)."
-        ),
+        help="Enable the scheduling autopilot for this run (never arms auto-merge).",
     )
     daemon_run_options.add_argument(
         "--no-autopilot",
