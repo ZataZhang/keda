@@ -113,6 +113,194 @@ def worktree_path(monkeypatch: pytest.MonkeyPatch, tmp_path):
     return path
 
 
+def test_stack_downstream_skipped_until_upstream_merged(tmp_path) -> None:
+    """A stack downstream PR must not be merged mid-chain."""
+    github = FakeGitHubClient()
+    runner = FakeProcessRunner()
+    config = _make_config(autopilot_enabled=True, auto_merge=True)
+    issue = IssueSummary(
+        number=7,
+        title="downstream",
+        url="https://github.com/example/repo/issues/7",
+        body='<!-- iar:depends-on #42 mode="stack" -->',
+        labels=("agent/review",),
+    )
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=config,
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+    assert outcome.action == "skipped_stack_pending"
+
+
+def test_stack_downstream_converges_after_upstream_merged(tmp_path, worktree_path) -> None:
+    """Once the upstream branch merged, a stack downstream retargets base to main and merges."""
+    branch = "issue-70"
+    head_sha = "abc1234"
+    github = FakeGitHubClient()
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, head_sha))
+    # Upstream branch issue-42 already has a merged PR.
+    github._merged_prs["issue-42"] = "https://github.com/example/repo/pull/42"
+    issue = IssueSummary(
+        number=70,
+        title="downstream",
+        url="https://github.com/example/repo/issues/70",
+        body='<!-- iar:depends-on #42 mode="stack" -->',
+        labels=("agent/review",),
+    )
+    github.set_pr_context(branch, _make_pr_context(branch=branch, number=70))
+    github._issue_comments[70] = [f"PR Branch: `{branch}`"]
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+
+    assert outcome.action == "merged"
+    base_calls = [c for c in github.calls if c.get("method") == "set_pull_request_base"]
+    assert len(base_calls) == 1
+    assert base_calls[0]["pr_number"] == 70
+    assert base_calls[0]["base_branch"] == "main"
+    assert ["git", "rebase", "origin/main"] in runner.calls
+
+
+def test_stack_convergence_retarget_failure_skips(tmp_path, worktree_path) -> None:
+    """A failed retarget blocks the merge instead of merging on the stale base."""
+    branch = "issue-70"
+    head_sha = "abc1234"
+    github = FakeGitHubClient()
+    github.set_set_pr_base_error(RuntimeError("gh pr edit failed"))
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, head_sha))
+    github._merged_prs["issue-42"] = "https://github.com/example/repo/pull/42"
+    issue = IssueSummary(
+        number=70,
+        title="downstream",
+        url="https://github.com/example/repo/issues/70",
+        body='<!-- iar:depends-on #42 mode="stack" -->',
+        labels=("agent/review",),
+    )
+    github.set_pr_context(branch, _make_pr_context(branch=branch, number=70))
+    github._issue_comments[70] = [f"PR Branch: `{branch}`"]
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+
+    assert outcome.action == "skipped_converge_failed"
+    assert not any(c.get("method") == "merge_pull_request" for c in github.calls)
+
+
+def test_convergence_refreshes_head_before_forbidden_scan(tmp_path, worktree_path) -> None:
+    """The forbidden-path scan must diff the post-rebase head, not the stale one.
+
+    Regression: after convergence the branch is rebased/force-pushed. If the
+    scan still uses the pre-rebase head, the diff range ``origin/main...<stale>``
+    still contains the upstream commits and can falsely block on an upstream
+    path (here ``.env.example``).
+    """
+    branch = "issue-70"
+    stale_sha = "stale000"
+    new_sha = "new00000"
+
+    class _TwoPhaseGitHub(FakeGitHubClient):
+        phase = 0
+
+        def get_pull_request_context(self, branch_name: str):
+            self.calls.append({"method": "get_pull_request_context", "branch": branch_name})
+            if self.phase == 0:
+                self.phase = 1
+                return _make_pr_context(branch=branch_name, head_sha=stale_sha, number=70)
+            return _make_pr_context(branch=branch_name, head_sha=new_sha, number=70)
+
+    github = _TwoPhaseGitHub()
+    github._merged_prs["issue-42"] = "https://github.com/example/repo/pull/42"
+    responses = {
+        ("git", "rev-parse", "HEAD"): CommandResult(
+            ("git", "rev-parse", "HEAD"), 0, f"{stale_sha}\n", ""
+        ),
+        ("git", "branch", "--show-current"): CommandResult(
+            ("git", "branch", "--show-current"), 0, f"{branch}\n", ""
+        ),
+        # Stale head's range still carries the upstream forbidden file...
+        ("git", "diff", "--name-only", f"origin/main...{stale_sha}"): CommandResult(
+            ("git", "diff", "--name-only"), 0, ".env.example\n", ""
+        ),
+        # ...the rebased head's range is clean.
+        ("git", "diff", "--name-only", f"origin/main...{new_sha}"): CommandResult(
+            ("git", "diff", "--name-only"), 0, "src/main.py\n", ""
+        ),
+    }
+    runner = FakeProcessRunner(responses=responses)
+    issue = IssueSummary(
+        number=70,
+        title="downstream",
+        url="https://github.com/example/repo/issues/70",
+        body='<!-- iar:depends-on #42 mode="stack" -->',
+        labels=("agent/review",),
+    )
+    github._issue_comments[70] = [f"PR Branch: `{branch}`"]
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+
+    assert outcome.action == "merged"
+    # The rebased head's diff was used, and no blocked label was applied.
+    assert ["git", "diff", "--name-only", f"origin/main...{new_sha}"] in runner.calls
+    blocked_adds = [
+        c
+        for c in github.calls
+        if c.get("method") == "edit_issue_labels" and "agent/blocked" in c.get("add", ())
+    ]
+    assert blocked_adds == []
+
+
+def test_via_main_issue_never_retargets_base(tmp_path, worktree_path) -> None:
+    """Negative control: a non-stack Issue never triggers stack convergence."""
+    branch = "issue-71"
+    head_sha = "abc1234"
+    github = FakeGitHubClient()
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, head_sha))
+    issue = IssueSummary(
+        number=71,
+        title="plain",
+        url="https://github.com/example/repo/issues/71",
+        body="",
+        labels=("agent/review",),
+    )
+    github.set_pr_context(branch, _make_pr_context(branch=branch, number=71))
+    github._issue_comments[71] = [f"PR Branch: `{branch}`"]
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+
+    assert outcome.action == "merged"
+    assert not any(c.get("method") == "set_pull_request_base" for c in github.calls)
+
+
 def test_kill_switch_off_returns_no_op(tmp_path, monkeypatch) -> None:
     """Both switches must be on; either off is a no-op."""
     github = FakeGitHubClient()

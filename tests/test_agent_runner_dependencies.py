@@ -234,8 +234,13 @@ class TestCommentDeduplication:
 class FakeGitHubClientForDeps:
     """Minimal fake for dependency evaluation tests."""
 
-    def __init__(self, issues: dict[int, IssueSummary] | None = None) -> None:
+    def __init__(
+        self,
+        issues: dict[int, IssueSummary] | None = None,
+        pushed_branches: set[str] | None = None,
+    ) -> None:
         self.issues = issues or {}
+        self.pushed_branches = pushed_branches or set()
         self.calls: list[dict] = []
 
     def get_issue(self, issue_number: int) -> IssueSummary:
@@ -243,6 +248,12 @@ class FakeGitHubClientForDeps:
         if issue_number not in self.issues:
             raise RuntimeError(f"Issue #{issue_number} not found")
         return self.issues[issue_number]
+
+    def find_open_pr_by_head(self, branch: str) -> str | None:
+        return "https://example.test/pr/1" if branch in self.pushed_branches else None
+
+    def find_merged_pr_by_head(self, branch: str) -> str | None:
+        return None
 
 
 class TestEvaluateDependencies:
@@ -312,6 +323,57 @@ class TestEvaluateDependencies:
         )
         decl = DependencyDeclaration(issue_numbers=(42,))
         verdict = evaluate_dependencies(decl, client, LabelConfig())
+        assert verdict.has_failed_or_blocked_upstream is True
+
+    def test_stack_satisfied_when_upstream_branch_pushed(self) -> None:
+        client = FakeGitHubClientForDeps(pushed_branches={"issue-42"})
+        decl = DependencyDeclaration(issue_numbers=(42,), sequence="stack")
+        verdict = evaluate_dependencies(decl, client, LabelConfig())
+        assert verdict.satisfied is True
+        assert verdict.blockers == ()
+
+    def test_stack_blocked_when_upstream_branch_not_pushed(self) -> None:
+        client = FakeGitHubClientForDeps()
+        decl = DependencyDeclaration(issue_numbers=(42,), sequence="stack")
+        verdict = evaluate_dependencies(decl, client, LabelConfig())
+        assert verdict.satisfied is False
+        assert verdict.blockers == (
+            DependencyBlocker(
+                blocker_type="branch",
+                target="issue-42",
+                current_state="NOT_PUSHED",
+            ),
+        )
+
+    def test_via_main_ignores_branch_readiness(self) -> None:
+        # via-main waits for the Issue to close, not the branch to be pushed.
+        client = FakeGitHubClientForDeps(
+            pushed_branches={"issue-42"},
+            issues={
+                42: IssueSummary(number=42, title="Open", url="", body="", labels=(), state="OPEN")
+            },
+        )
+        decl = DependencyDeclaration(issue_numbers=(42,), sequence="via-main")
+        verdict = evaluate_dependencies(decl, client, LabelConfig())
+        assert verdict.satisfied is False
+
+    def test_stack_upstream_failure_surfaces_warning(self) -> None:
+        # A failed/blocked upstream must not leave the downstream waiting silently.
+        client = FakeGitHubClientForDeps(
+            issues={
+                42: IssueSummary(
+                    number=42,
+                    title="Upstream",
+                    url="",
+                    body="",
+                    labels=(LabelConfig().failed,),
+                    state="OPEN",
+                )
+            }
+        )
+        decl = DependencyDeclaration(issue_numbers=(42,), sequence="stack")
+        verdict = evaluate_dependencies(decl, client, LabelConfig())
+        assert verdict.satisfied is False
         assert verdict.has_failed_or_blocked_upstream is True
 
 
@@ -475,6 +537,16 @@ class TestBuildWaitingComment:
         comment = build_waiting_comment(verdict, 1, LabelConfig())
         assert "How to resolve" not in comment
 
+    def test_branch_blocker_includes_stack_guidance(self) -> None:
+        verdict = DependencyVerdict(
+            satisfied=False,
+            blockers=(DependencyBlocker("branch", "issue-42", "NOT_PUSHED"),),
+        )
+        comment = build_waiting_comment(verdict, 1, LabelConfig())
+        assert "Upstream branch `issue-42`" in comment
+        assert "How to resolve" in comment
+        assert "Upstream branch not ready" in comment
+
 
 # ---------------------------------------------------------------------------
 # _resolve_dependencies (create_issue_from_prd helper)
@@ -483,9 +555,10 @@ class TestBuildWaitingComment:
 
 class TestResolveDependencies:
     def test_no_dependencies(self) -> None:
-        gate, issues = _resolve_dependencies("# PRD\n")
+        gate, issues, sequence = _resolve_dependencies("# PRD\n")
         assert gate == "none"
         assert issues == ()
+        assert sequence == "via-main"
 
     def test_prd_only(self) -> None:
         prd = """
@@ -494,13 +567,14 @@ class TestResolveDependencies:
 - Depends on tasks/issues: #42
 - Gate type: hard
 """
-        gate, issues = _resolve_dependencies(prd)
+        gate, issues, sequence = _resolve_dependencies(prd)
         assert gate == "hard"
         assert issues == (42,)
+        assert sequence == "via-main"
 
     def test_cli_overrides(self) -> None:
         prd = "# PRD\n"
-        gate, issues = _resolve_dependencies(prd, depends_on=(99,))
+        gate, issues, sequence = _resolve_dependencies(prd, depends_on=(99,))
         assert gate == "none"
         assert issues == (99,)
 
@@ -511,13 +585,66 @@ class TestResolveDependencies:
 - Depends on tasks/issues: #1
 - Gate type: hard
 """
-        gate, issues = _resolve_dependencies(prd, depends_on=(1, 2))
+        gate, issues, sequence = _resolve_dependencies(prd, depends_on=(1, 2))
         assert issues == (1, 2)
 
     def test_explicit_marker_compat_ignores_group_token(self) -> None:
         prd = "<!-- iar:depends-on #5 group:g3 -->\n# PRD\n"
-        gate, issues = _resolve_dependencies(prd)
+        gate, issues, sequence = _resolve_dependencies(prd)
         assert issues == (5,)
+
+    def test_stack_sequence_resolved(self) -> None:
+        prd = """
+## Delivery Dependencies
+
+- Depends on tasks/issues: #42
+- Gate type: hard
+- Sequence: stack
+"""
+        gate, issues, sequence = _resolve_dependencies(prd)
+        assert gate == "hard"
+        assert issues == (42,)
+        assert sequence == "stack"
+
+    def test_invalid_sequence_rejected(self) -> None:
+        prd = """
+## Delivery Dependencies
+
+- Depends on tasks/issues: #42
+- Gate type: hard
+- Sequence: sideways
+"""
+        with pytest.raises(ValueError):
+            _resolve_dependencies(prd)
+
+    def test_stack_multiple_upstreams_rejected(self) -> None:
+        prd = """
+## Delivery Dependencies
+
+- Depends on tasks/issues: #42, #43
+- Gate type: hard
+- Sequence: stack
+"""
+        with pytest.raises(ValueError, match="exactly one upstream"):
+            _resolve_dependencies(prd)
+
+    def test_stack_single_upstream_allowed(self) -> None:
+        prd = """
+## Delivery Dependencies
+
+- Depends on tasks/issues: #42
+- Gate type: hard
+- Sequence: stack
+"""
+        gate, issues, sequence = _resolve_dependencies(prd)
+        assert sequence == "stack"
+        assert issues == (42,)
+
+    def test_explicit_stack_marker_preserved_without_sequence_field(self) -> None:
+        prd = '<!-- iar:depends-on #5 mode="stack" -->\n# PRD\n'
+        gate, issues, sequence = _resolve_dependencies(prd)
+        assert issues == (5,)
+        assert sequence == "stack"
 
 
 # ---------------------------------------------------------------------------

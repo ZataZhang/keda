@@ -91,6 +91,7 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     field_values: dict[str, list[str]] = {
         "depends_on_issues": [],
         "gate_type": [],
+        "sequence": [],
         "notes": [],
     }
     current_key = ""
@@ -125,6 +126,7 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
 
     depends_on_issues, depends_on_prds = _parse_issue_or_prd_refs(field_values["depends_on_issues"])
     gate_type = _parse_optional_scalar(field_values["gate_type"]) or "none"
+    sequence = _parse_optional_scalar(field_values["sequence"]) or "via-main"
     notes = " ".join(field_values["notes"]).strip()
 
     normalized_gate = gate_type.lower()
@@ -134,10 +136,18 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
             "Expected one of: none, soft, hard."
         )
 
+    normalized_sequence = sequence.lower()
+    if normalized_sequence not in ("via-main", "stack"):
+        raise ValueError(
+            f"Invalid 'Sequence' in Delivery Dependencies: {sequence!r}. "
+            "Expected one of: via-main, stack."
+        )
+
     return DeliveryDependencyDeclaration(
         depends_on_issues=tuple(depends_on_issues),
         depends_on_prds=tuple(depends_on_prds),
         gate_type=normalized_gate or "none",
+        sequence=normalized_sequence,
         notes=notes,
     )
 
@@ -159,11 +169,13 @@ def _normalize_delivery_field_key(raw_key: str) -> str:
         return "depends_on_issues"
     if key in ("gate_type", "gate"):
         return "gate_type"
+    if key in ("sequence",):
+        return "sequence"
     if key in ("notes", "note"):
         return "notes"
     raise ValueError(
         f"Unknown field in Delivery Dependencies: {raw_key!r}. "
-        "Expected one of: Depends on tasks/issues, Gate type, Notes."
+        "Expected one of: Depends on tasks/issues, Gate type, Sequence, Notes."
     )
 
 
@@ -272,26 +284,35 @@ def parse_dependency_marker(issue_body: str) -> DependencyDeclaration | None:
         Parsed dependency declaration, or ``None`` if no Issue references found.
     """
     issue_numbers: list[int] = []
+    sequence = "via-main"
     for match in _DEPENDS_ON_MARKER_PATTERN.finditer(issue_body):
         body = match.group("body")
         # Issue references: #N
         for num_match in re.finditer(r"#(\d+)", body):
             issue_numbers.append(int(num_match.group(1)))
+        # Sequencing strategy: mode="stack" (absent ⇒ via-main).
+        mode_match = re.search(r'mode="(?P<mode>[^"]+)"', body)
+        if mode_match and mode_match.group("mode").strip().lower() == "stack":
+            sequence = "stack"
     if not issue_numbers:
         return None
     return DependencyDeclaration(
         issue_numbers=tuple(sorted(set(issue_numbers))),
+        sequence=sequence,
     )
 
 
 def format_dependency_marker(
     *,
     issue_numbers: tuple[int, ...] = (),
+    sequence: str = "via-main",
 ) -> str:
     """Format a materialised ``iar:depends-on`` hidden marker.
 
     Args:
         issue_numbers: Upstream Issue numbers.
+        sequence: ``"via-main"`` (default) or ``"stack"``; ``stack`` embeds a
+            ``mode="stack"`` token so the runner forks from the upstream branch.
 
     Returns:
         Hidden HTML comment marker string.
@@ -301,7 +322,10 @@ def format_dependency_marker(
         parts.append(f"#{number}")
     if not parts:
         return ""
-    return f"<!-- iar:depends-on {' '.join(parts)} -->"
+    body = " ".join(parts)
+    if sequence.strip().lower() == "stack":
+        body += ' mode="stack"'
+    return f"<!-- iar:depends-on {body} -->"
 
 
 def format_dependency_wait_marker(blockers: tuple[DependencyBlocker, ...]) -> str:
@@ -351,7 +375,14 @@ def evaluate_dependencies(
 ) -> DependencyVerdict:
     """Evaluate whether all dependencies in ``declaration`` are satisfied.
 
-    An Issue dependency is satisfied when the target Issue is closed.
+    The satisfaction rule depends on the declaration's ``sequence``:
+
+    - ``via-main`` (default): an Issue dependency is satisfied when the target
+      Issue is closed (i.e. the upstream PR merged into the base branch).
+    - ``stack``: a dependency is satisfied when the upstream branch
+      (``issue-<N>``) is ready on the remote (an open or merged PR exists for
+      it), since the downstream forks directly from that branch without waiting
+      for the merge.
 
     Args:
         declaration: Materialised dependency declaration from Issue body.
@@ -363,6 +394,48 @@ def evaluate_dependencies(
     """
     blockers: list[DependencyBlocker] = []
     has_failed_or_blocked = False
+
+    # Stack sequencing: the downstream starts on top of the upstream branch, so
+    # the dependency is satisfied when the upstream branch is pushed (an open or
+    # merged PR exists for ``issue-<N>``) rather than when the Issue closes.
+    if declaration.sequence == "stack":
+        has_stack_upstream_failure = False
+        for issue_number in declaration.issue_numbers:
+            branch = f"issue-{issue_number}"
+            try:
+                pushed = bool(
+                    github_client.find_open_pr_by_head(branch)
+                    or github_client.find_merged_pr_by_head(branch)
+                )
+            except Exception as exc:  # noqa: BLE001
+                _logger.warning("Failed to query branch '%s': %s", branch, exc)
+                pushed = False
+            if not pushed:
+                blockers.append(
+                    DependencyBlocker(
+                        blocker_type="branch",
+                        target=branch,
+                        current_state="NOT_PUSHED",
+                    )
+                )
+                # Best-effort: surface an upstream that already failed/blocked so
+                # the downstream does not wait forever on a branch that will
+                # never be pushed.
+                try:
+                    upstream = github_client.get_issue(issue_number)
+                except Exception as exc:  # noqa: BLE001
+                    _logger.warning("Failed to query Issue #%d: %s", issue_number, exc)
+                else:
+                    if any(
+                        label in upstream.labels
+                        for label in (labels_config.failed, labels_config.blocked)
+                    ):
+                        has_stack_upstream_failure = True
+        return DependencyVerdict(
+            satisfied=not blockers,
+            blockers=tuple(blockers),
+            has_failed_or_blocked_upstream=has_stack_upstream_failure,
+        )
 
     # Issue dependencies
     for issue_number in declaration.issue_numbers:
@@ -430,6 +503,11 @@ def build_waiting_comment(
             else:
                 state_emoji = "❌" if blocker.current_state.upper() != "CLOSED" else "✅"
                 lines.append(f"- Issue #{blocker.target}: {state_emoji} {blocker.current_state}")
+        elif blocker.blocker_type == "branch":
+            lines.append(
+                f"- Upstream branch `{blocker.target}`: ❌ not pushed to the remote yet "
+                "(stack sequencing)"
+            )
 
     if verdict.has_failed_or_blocked_upstream:
         lines.extend(
@@ -476,8 +554,16 @@ def _build_resolution_guidance(
         for blocker in verdict.blockers
     )
     has_unknown_blocker = any(blocker.current_state == "unknown" for blocker in verdict.blockers)
+    has_branch_blocker = any(blocker.blocker_type == "branch" for blocker in verdict.blockers)
 
     guidance: list[str] = []
+    if has_branch_blocker:
+        guidance.append(
+            "- **Upstream branch not ready** (stack sequencing): the upstream "
+            "Issue's ``issue-<N>`` branch has not been pushed to the remote yet. "
+            "Wait for the upstream run to open its PR, or change this PRD to "
+            "``Sequence: via-main`` if it should wait for the upstream merge instead."
+        )
     if has_open_blocker:
         guidance.append(
             "- **Open upstream**: wait for the listed Issues to close, or remove "

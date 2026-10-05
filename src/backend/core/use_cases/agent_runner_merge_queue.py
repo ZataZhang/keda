@@ -43,6 +43,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.prd_checklist import parse_prd_checklist
 from backend.core.use_cases.agent_runner_closeout import resolve_prd_worktree_path
+from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
 from backend.core.use_cases.agent_runner_feedback import is_prd_archive_path
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
@@ -339,6 +340,26 @@ def _process_one(
     if not _autopilot_enabled(config):
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
 
+    # Stack sequencing: never merge a downstream PR mid-chain — the queue's
+    # rebase-onto-remote-base step would overwrite the stacked base. Wait until
+    # the upstream branch has merged (convergence then retargets the downstream
+    # PR onto main).
+    declaration = parse_dependency_marker(issue.body)
+    if declaration is not None and declaration.sequence == "stack" and declaration.issue_numbers:
+        upstream_branch = f"issue-{declaration.issue_numbers[0]}"
+        try:
+            upstream_merged = bool(github_client.find_merged_pr_by_head(upstream_branch))
+        except Exception as exc:  # noqa: BLE001 - treat unknown as not merged (skip).
+            _logger.warning("Merge queue could not check upstream '%s': %s", upstream_branch, exc)
+            upstream_merged = False
+        if not upstream_merged:
+            _logger.info(
+                "Merge queue skipping Issue #%d: stack downstream of '%s' (upstream not merged).",
+                issue.number,
+                upstream_branch,
+            )
+            return MergeQueueOutcome(issue_number=issue.number, action="skipped_stack_pending")
+
     comments = github_client.list_issue_comments(issue.number)
     pr_branch = _extract_pr_branch_from_comments(comments)
     if pr_branch is None:
@@ -351,6 +372,21 @@ def _process_one(
     if not pr_number_match:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_no_pr")
     pr_number = int(pr_number_match.group(1))
+
+    # Stack convergence: once the upstream branch has merged, retarget the
+    # downstream PR's base onto the mainline so the rebase/merge steps below act
+    # on main instead of the (now merged/deleted) upstream branch.
+    if declaration is not None and declaration.sequence == "stack" and declaration.issue_numbers:
+        try:
+            github_client.set_pull_request_base(pr_number, config.git.base_branch)
+            _logger.info(
+                "Stack convergence: retargeted PR #%d base to '%s'.",
+                pr_number,
+                config.git.base_branch,
+            )
+        except Exception as exc:  # noqa: BLE001 - retarget is best-effort; skip on failure.
+            _logger.warning("Stack convergence retarget failed for PR #%d: %s", pr_number, exc)
+            return MergeQueueOutcome(issue_number=issue.number, action="skipped_converge_failed")
 
     # Step 1: verifier gate
     if config.autopilot.require_verifier_pass and validation_required(issue.body, config):
@@ -438,6 +474,15 @@ def _process_one(
             github_client, issue.number, config, config.labels.supervising
         )
         return MergeQueueOutcome(issue_number=issue.number, action="rebase_failed")
+
+    # The rebase force-pushes the branch, so the PR head moved. Refresh the
+    # context before the forbidden-path diff: otherwise Step 5's
+    # ``origin/base...<old-head>`` range still includes the commits the rebase
+    # just removed (e.g. an upstream stack's commits after convergence), which
+    # would falsely flag upstream paths as this PR's forbidden changes.
+    refreshed_context = github_client.get_pull_request_context(pr_branch)
+    if refreshed_context is not None:
+        pr_context = refreshed_context
 
     # Step 4: full verification re-run
     verification_results = run_verification(worktree_path, config, process_runner)

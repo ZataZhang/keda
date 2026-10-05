@@ -1017,12 +1017,14 @@ class DeliveryDependencyDeclaration:
         depends_on_issues: Specific Issue numbers that must be closed.
         depends_on_prds: PRD paths or filenames to resolve at Issue creation time.
         gate_type: One of ``"hard"``, ``"soft"``, ``"none"``.
+        sequence: One of ``"via-main"`` (default) or ``"stack"``.
         notes: Free-form operator notes.
     """
 
     depends_on_issues: tuple[int, ...] = ()
     depends_on_prds: tuple[str, ...] = ()
     gate_type: str = "none"
+    sequence: str = "via-main"
     notes: str = ""
 
 
@@ -1032,9 +1034,13 @@ class DependencyDeclaration:
 
     Attributes:
         issue_numbers: Upstream Issue numbers this Issue depends on.
+        sequence: Sequencing strategy carried from the PRD's ``Sequence`` field;
+            ``"via-main"`` waits for the upstream Issue to close, ``"stack"``
+            waits for the upstream branch to be ready and forks from it.
     """
 
     issue_numbers: tuple[int, ...] = ()
+    sequence: str = "via-main"
 
 
 @dataclass(frozen=True)

@@ -159,6 +159,7 @@ iar labels sync --repo-id keda
 
 - Depends on tasks/issues: #42, tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md
 - Gate type: hard
+- Sequence: via-main
 - Notes: 等待上游 API 改造完成
 ```
 
@@ -168,7 +169,21 @@ iar labels sync --repo-id keda
 |---|---|
 | `Depends on tasks/issues` | 上游 Issue 编号或 PRD 引用；Issue 支持 `#N` / `N`，PRD 支持 repo-relative 路径或 `tasks/` 下唯一文件名/文件 stem，多个用逗号/分号或 Markdown 子列表分隔；引用后可以追加说明文字，解析器只提取引用 token |
 | `Gate type` | `hard` = 阻塞门禁；`soft` = 仅文档信息，不阻塞；`none` = 不生成依赖 marker |
+| `Sequence` | `via-main`（默认）= 等上游合并进主线后再开工；`stack` = 不等合并，直接基于上游分支开工（需 `Gate type: hard`，且只允许**单个**上游） |
 | `Notes` | 自由备注 |
+
+#### 排序策略（`Sequence`）
+
+`Sequence` 是**工具无关**的排序意图；keda 的 runner 把它翻译成自己的行为，不使用 keda 的项目里该字段合法但惰性。
+
+- **`via-main`（默认）**：下游等上游 Issue 关闭（即上游已合并进 base），再从**刷新过的** base 分支 fork。为消除"本地 base 落后导致下游看不到上游改动"的静默缺口，runner 在建 worktree 前会 `git fetch <remote> <base_branch>`，并优先从 `remote/base_branch` 这个远端跟踪引用 fork；fetch 失败时保守回退到本地 base 并告警。
+- **`stack`**：下游在**上游分支就绪**（`issue-<上游>` 已有 open/merged PR）后即放行，worktree 从上游分支 `issue-<上游>` fork（**先 `git fetch` 刷新该上游分支**，取远端跟踪引用；仅当 fetch 失败但本地分支存在时才回退本地，两者都没有则 fail fast），从而保证下游包含上游尚未合并的改动。
+  - 依赖门禁据此改用"等待上游分支就绪"，与等待 Issue 关闭不同。
+  - 合并队列**不会**在中途合并 stack 链上的下游 PR（否则 rebase 到远端 base 会破坏"叠在上游"的基础）；等上游合并后，合并队列把下游 PR 的 base 重指到主线（收敛），再走既有 rebase + 合并。
+  - **前置条件**：`stack` 只在 `Gate type: hard` 时物化 marker（`Gate type: none`/`soft` 会被静默忽略，等同 via-main）；且只支持**单个**上游，声明多个上游时 `iar issue create` fail fast（DAG 不在范围内）。
+  - **收敛的已知代价**：keda 以 squash 合并上游，收敛时下游 `git rebase` 到 main 需要处理"上游提交已被 squash 进 main"的情况（多数被识别为空提交丢弃，但 base 同一区域被改动时仍可能冲突，冲突走既有 agent 解决路径）。这是被接受的复杂度，不是无代价的平移。
+
+> 依赖 marker 里以 `mode="stack"` 承载该策略（如 `<!-- iar:depends-on #42 mode="stack" -->`）；未声明时默认 `via-main`。
 
 PRD 引用只在 `iar issue create` 发布时解析，不会原样写入 Issue body。解析规则：
 

@@ -518,6 +518,27 @@ class IGitHubClient(ABC):
         """
         ...
 
+    def set_pull_request_base(self, pr_number: int, base_branch: str) -> None:
+        """Retarget a Pull Request's base branch.
+
+        Used by stack convergence: once the upstream branch merges into the
+        mainline, the downstream PR's base is moved from ``issue-<upstream>`` to
+        the mainline before it is rebased (by the merge queue) and merged.
+
+        This port is intentionally non-abstract (unlike the rest of this
+        interface): only stack sequencing needs it, so existing implementers and
+        test fakes stay valid, and callers that never declare ``stack`` are
+        unaffected. Implementations that support retargeting must override it.
+
+        Args:
+            pr_number: Target Pull Request number.
+            base_branch: New base branch name (e.g. ``main``).
+
+        Raises:
+            NotImplementedError: When the implementation cannot retarget bases.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def update_pull_request_body(self, pr_number: int, body: str) -> None:
         """整体替换某个 Pull Request 的描述正文。

@@ -152,6 +152,30 @@ def update_pull_request_body(client: _ClientProtocol, pr_number: int, body: str)
         )
 
 
+def set_pull_request_base(client: _ClientProtocol, pr_number: int, base_branch: str) -> None:
+    """Retarget a Pull Request's base branch.
+
+    Used by stack convergence: once the upstream branch merges into the
+    mainline, the downstream PR's base is moved from ``issue-<upstream>`` to the
+    mainline before it is rebased and merged.
+
+    Args:
+        pr_number: Target Pull Request number.
+        base_branch: New base branch name (e.g. ``main``).
+    """
+    client._run_with_retry(
+        [
+            "gh",
+            "pr",
+            "edit",
+            str(pr_number),
+            "--base",
+            base_branch,
+        ],
+        cwd=client.repo_path,
+    )
+
+
 def merge_pull_request(client: _ClientProtocol, pr_number: int, *, method: str = "squash") -> None:
     """Merge a Pull Request using ``gh pr merge`` with the requested method.
 

@@ -580,7 +580,7 @@ def _resolve_dependencies(
     repo_path: Path | None = None,
     current_prd_path: Path | None = None,
     depends_on: tuple[int, ...] = (),
-) -> tuple[str, tuple[int, ...]]:
+) -> tuple[str, tuple[int, ...], str]:
     """Merge PRD structured dependencies, explicit markers and CLI overrides.
 
     Three sources are merged with CLI taking highest precedence:
@@ -597,8 +597,9 @@ def _resolve_dependencies(
         depends_on: CLI override issue numbers.
 
     Returns:
-        ``(gate_type, resolved_issues)``.
-        ``gate_type`` is the gate from the PRD section (``none`` if absent).
+        ``(gate_type, resolved_issues, sequence)``.
+        ``gate_type`` is the gate from the PRD section (``none`` if absent);
+        ``sequence`` is the PRD's ``Sequence`` field (``via-main`` if absent).
     """
     from_prd = parse_delivery_dependencies(prd_text)
 
@@ -626,9 +627,29 @@ def _resolve_dependencies(
     seen_issues: set[int] = set()
     deduped_issues = [n for n in resolved_issues if not (n in seen_issues or seen_issues.add(n))]
 
+    # ``stack`` declared either in the Delivery Dependencies section or carried by
+    # an explicit ``iar:depends-on ... mode="stack"`` marker in the body. The
+    # latter is the compat path; honour it instead of regenerating a via-main
+    # marker that would silently drop the strategy.
+    sequence = from_prd.sequence
+    if sequence != "stack" and explicit is not None and explicit.sequence == "stack":
+        sequence = "stack"
+
+    # ``stack`` sequencing chains each downstream onto a *single* upstream
+    # branch. Multiple upstreams would need a DAG, which the runner does not
+    # model (it forks from ``issue-<first>`` only), so reject it loudly instead
+    # of silently ignoring every upstream but the first.
+    if sequence == "stack" and len(deduped_issues) > 1:
+        raise ValueError(
+            "Sequence: stack supports exactly one upstream Issue, but "
+            f"{len(deduped_issues)} were resolved: {deduped_issues}. "
+            "Use Sequence: via-main for multiple upstreams."
+        )
+
     return (
         gate_type,
         tuple(deduped_issues),
+        sequence,
     )
 
 
@@ -1015,7 +1036,7 @@ def create_issue_from_prd(
     # ------------------------------------------------------------------
     # 4.5 解析并物化依赖声明。
     # ------------------------------------------------------------------
-    gate_type, resolved_issues = _resolve_dependencies(
+    gate_type, resolved_issues, sequence = _resolve_dependencies(
         prd_text,
         repo_path=request.repo_path,
         current_prd_path=absolute_prd_path,
@@ -1025,6 +1046,7 @@ def create_issue_from_prd(
     if gate_type == "hard" and resolved_issues:
         dependency_marker = format_dependency_marker(
             issue_numbers=resolved_issues,
+            sequence=sequence,
         )
 
     # ------------------------------------------------------------------
