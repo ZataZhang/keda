@@ -1076,7 +1076,7 @@ git branch -d issue-<number>
 
 ## run 与 daemon 的执行语义与控制面
 
-`iar run` 与 `iar daemon` 的职责边界是显式契约：**run = 手动单次、串行、定向执行**，不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 autopilot 调度阶段的地方。
+`iar run` 与 `iar daemon` 的职责边界是显式契约：**run = 手动单次、定向执行**（一条命令只处理一个目标，但**多条 `--issue` 命令之间互不阻塞，可并发**，见下节），不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 autopilot 调度阶段的地方。
 
 ### run 目标必填（breaking change）
 
@@ -1095,7 +1095,7 @@ iar run --all-ready
 
 - `--issue` 与 PRD 路径互斥；三者（`--issue` / PRD 路径 / `--all-ready`）都不给时退出码 2（usage error）。
 - 定向 run 只处理目标 Issue（仍走依赖门禁与 claim）；队列里其他 ready Issue 原封不动。
-- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `iar backlog advance`，并行归 daemon 的 `--concurrency`。
+- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `iar backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `iar run --issue <N>`。
 
 **迁移**：旧脚本/文档里"无目标的 `iar run`"改为 `iar run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
 
@@ -1130,6 +1130,20 @@ iar run --issue 42 --fast-merge
 - **单一目标限定**：与 `--all-ready` 组合是用法错误（退出码 2）——快速通道绝不能开启"整队未验证爆发"。
 - **stack 依赖拒绝（fail-closed）**：目标 Issue 若声明 `iar:depends-on ... mode="stack"` 顺序依赖，在启动任何 agent、乃至 `--takeover` 停 daemon 之前就报用法错误——未验证的上游会顺着 fork 基污染整条下游链；Issue 读不到时同样拒绝（无法证明不是 stack 就不走旁路）。
 - **不加旗标时零变化**：默认 run 与今天完全一致（门禁照常）。daemon 没有 `--fast-merge`，也没有对应配置项——旁路只作用于这一次显式调用，且不触碰自动合并。
+### 多条 run 之间的并发边界
+
+只要**没有 daemon 服务该仓库**，不同 Issue 的 `iar run` 天然并发，不需要排队：
+
+```bash
+# 两个 Issue 各一条命令，同时推进；互不等待
+iar run --issue 42
+iar run --issue 43
+```
+
+- 前台 `run` **不获取 repo 级 daemon 锁**，只做"是否有 daemon 存活"的只读检查（互斥语义见上一节），所以 run 与 run 之间不互斥。
+- 每个 Issue 自带隔离资源：worktree 在 `.iar-worktrees/issue-<N>`，claim / blocked-claim 锁也按 worktree 独立；状态库走 WAL 容忍并发写。
+- **例外**：`--all-ready` 领的是同一份 ready 队列，两条 `--all-ready` 并发会双 claim，不要这么用。要并发多个 Issue，就给每个 Issue 各发一条 `--issue`。
+- 停止常驻进程没有 `iar daemon stop`：`iar daemon` 只暴露 `run` / `status`，托管进程用 `iar registry stop --repo-id <id>`（对未托管的手动 `iar daemon` 无效，需自行结束进程）。
 
 ### daemon 的 autopilot 按次覆盖
 
