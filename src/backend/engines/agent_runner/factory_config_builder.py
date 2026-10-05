@@ -392,6 +392,17 @@ def _merge_agent_settings(
             if agent_settings.reasoning_effort_args is not None
             else (base_spec.reasoning_effort_args if base_spec else ())
         ),
+        # 会话续传能力声明：未声明时回落内置默认（claude 出厂即支持）。
+        supports_resume=(
+            agent_settings.supports_resume
+            if agent_settings.supports_resume is not None
+            else (base_spec.supports_resume if base_spec else False)
+        ),
+        resume_args=tuple(
+            agent_settings.resume_args
+            if agent_settings.resume_args is not None
+            else (base_spec.resume_args if base_spec else ())
+        ),
         profiles=profiles,
     )
 

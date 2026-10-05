@@ -299,7 +299,56 @@ rebase 到最新 base 时进程退出），会把 Issue 的 worktree 留在 **de
   从而接管被中断的工作。
 
 > 局限：认领锁基于 PID 存活判断，对「进程仍在但已放弃该任务」的情形无法自动接管；
-> 此类需要 operator 介入或后续引入心跳/时间戳过期机制。
+> 这类现在由崩溃对账的 `reclaim_ttl_seconds`（claim 老化）兜住，见下一节。
+
+## 崩溃对账与 Agent 会话续传（daemon 死亡后的僵尸 attempt）
+
+硬中断（`kill -9`、OOM、机器重启）不会把 Issue 从 `agent/running` 退回，而 daemon 只认领
+`agent/ready`，所以"本机认领、进程已死"的僵尸 attempt 过去会永久卡死。现在 daemon 每轮 tick
+开头（Phase -1，早于审议与领取）先做一次崩溃对账。
+
+判定**只读四类现成事实**，不引入心跳表 / 租约库等第二状态源：
+
+| 证据源 | 取法 |
+|---|---|
+| 本机活跃 attempt 状态 | Issue 上最近一条 claim 标记（`<!-- iar:claim host= pid= started_at= agent= -->`）与该 PID 是否存活 |
+| Issue label | 是否仍是 `agent/running`（已关闭、已改别的状态一律不碰） |
+| comment attempt history | 该 Issue 此前已被对账处置的次数（决定恢复预算是否耗尽） |
+| worktree 现场文件状态 | `iar worktree path` 可得、目录存在且 `.git` 指针仍在 |
+
+处置出口**恰好三个**，每个都写一条 `## Stale Attempt Reconciled` comment，四要素齐全（中断时间 /
+中断原因分类 / 处置结论 / 依据），表格风格与既有 Attempt History 一致：
+
+1. `resume-session`（续传恢复）：worktree 完好 + 上轮 agent 声明了续传能力 + worktree 里留有
+   session 记录 → 回 `agent/ready`，下一轮 claim 直接续上原会话。
+2. `re-enqueue`（重新入队）：上述任一条件不满足（agent 不可识别 / 不支持续传 / 无会话记录）→ 回
+   `agent/ready`，全新会话重跑。
+3. `mark-failed`（判失败）：worktree 不可解析（路径不存在或 `.git` 指针丢失，重跑只会在坏目录上
+   白跑一轮），或跨进程恢复预算已耗尽（复用既有 `runner.max_recovery_attempts`，不新增预算键）。
+
+`skip` 不是出口而是"不触碰"：claim 来自别的机器、或进程仍存活且 claim 未过 `reclaim_ttl_seconds`，
+一律原样保留——宁可漏对账，也不把健康任务重新入队造成双跑。
+
+对账动作幂等：comment 末尾带隐藏标记 `<!-- iar:reconcile hash="<16hex>" seq="<n>" -->`，hash 覆盖
+Issue / 主机 / PID / 中断时间 / agent / 处置结论（不含 seq）。同一判定重放时零新增 comment；若上次
+是在"comment 已写、label 未改回"之间被打断（写序固定为**先 comment 后 label**），重放会补齐那次缺失
+的 label 写回而不再评论一次，因此不存在永久半完成态，也不会并发领取同一 worktree。
+
+会话续传的实现分工：session id 由 agent 输出协议解析（`engines/agent_runner/output_protocols/claude_stream_json.py`），
+core 侧 `agent_runner_session_store.py` 以 tmp + `os.replace` 原子写入 worktree 局部记录
+`.iar/agent-runner/sessions/<agent>.json`；recovery 轮次经 `agent_spec` 的声明式
+`supports_resume` / `resume_args` 模板拼出续传命令行（编排层不硬编码任何 CLI 的参数形态）。
+记录缺失或 agent 未声明能力时**静默降级为全新会话**，降级发生在同一次 attempt 内，不额外消耗
+recovery 轮次。
+
+```toml
+[agent_runner.daemon]
+reconcile_stale_attempts = true   # 主开关；设为 false 即回到本特性落地前的现状
+reclaim_ttl_seconds = 10800       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
+```
+
+`reconcile_stale_attempts = false` 时 Phase -1 整轮空转，僵尸 Issue 保持 `agent/running` 不被触碰、
+不留任何 comment（负控口径见 `.iar/evidence/`：rv-1 关掉开关后僵尸确实纹丝不动）。
 
 ## 复杂需求：异步 Issue 评论讨论（`agent/deliberate`）
 
@@ -576,6 +625,7 @@ Agent command failed for Issue #19; asking agent to recover (1/5).
    - 只有 Fix Agent 失败后，runner 才会启动完整的 Recovery Agent，基于更完整的上下文重规划实现。
    - Recovery Agent 的 prompt 包含格式化后的 failure summary，以及原始 verification 失败输出（命令、exit code、stdout/stderr），避免重复踩同样的坑。
    - Recovery Agent 使用 `recovery_timeout_seconds` 作为超时预算，未配置时回退到 `timeout_seconds`。
+   - 如果该 agent 在 `agent_spec` 里声明了 `supports_resume`，这一轮**优先续传原会话**（`--resume <session_id>`，session id 来自 worktree 局部记录）而不是把失败摘要塞进一个全新 prompt；没有会话记录或未声明能力时静默降级为全新会话。详见「崩溃对账与 Agent 会话续传」。
 
 这一分层修复的目的是把大量常见的 lint/类型错误（如 agent 遗漏 import、简单单测失败）用更短的超时和更聚焦的 prompt 解决，避免动辄调用一次完整的 recovery agent。
 
@@ -2615,13 +2665,14 @@ crash_retry_max_backoff_seconds = 600
 # daemon / review-daemon 的默认轮询间隔（秒），CLI --interval 可覆盖
 review_interval_seconds = 120
 run_interval_seconds = 120
-# 每轮 daemon pass 开头回收"卡在 agent/running 但 runner 进程已死"的 Issue。
-# 保守判定:仅当 claim 标记的 host 是本机、且记录的 PID 已不存活时才退回
-# agent/ready（绝不动别的机器或还活着的进程）。默认开。
-reclaim_stale_running = true
+# 每轮开头是否对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）。
+# 保守判定:仅当 claim 标记的 host 是本机、且记录的 PID 已死或 claim 已老化时才处置。默认开。
+reconcile_stale_attempts = true
+# claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值,即便 PID 仍活也视为 stale
+reclaim_ttl_seconds = 10800
 ```
 
-硬中断(SIGKILL / 崩溃 / 关机)不会把 Issue 从 `agent/running` 退回,而 daemon 只认领 `agent/ready`,任务会就此卡死。开启 `reclaim_stale_running` 后,daemon 每轮开头会把"本机认领、但 PID 已死"的 running Issue 退回 `agent/ready`,由正常流程复用 worktree 上的已提交进度(及 RV 复跑缓存)续作。跨机器的孤儿需在同一台机器上重启 daemon 才会被回收。
+硬中断(SIGKILL / 崩溃 / 关机)不会把 Issue 从 `agent/running` 退回,而 daemon 只认领 `agent/ready`,任务会就此卡死。开启 `reconcile_stale_attempts` 后,daemon 每轮开头会对本机认领、进程已死的 running Issue 做对账:worktree 完好且可续传时回 `agent/ready` 并续上原会话,否则回 `agent/ready` 全新重跑,worktree 不可解析或恢复预算耗尽时判 `agent/failed`,三种出口都留一条对账 comment。关闭该开关即回到本特性落地前的现状。跨机器的孤儿需在同一台机器上重启 daemon 才会被回收。判定细节、幂等机制与配置优先级见前面「崩溃对账与 Agent 会话续传」一节。
 
 配置优先级：目标仓库 `.iar.toml` 覆盖项 > 环境变量 > `config.toml` 全局默认值 > 代码默认值。目标仓库覆盖项只影响对应 repository context，不会改变 keda 全局设置。
 

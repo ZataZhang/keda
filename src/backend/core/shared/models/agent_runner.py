@@ -109,6 +109,9 @@ class CommandResult:
             渲染后的结构化流，而不再嗅探命令行里的 agent 名。
         token_usage: 输出自报的 token 用量；协议未提供或解析不出时为
             ``None``（≠ 0，表示"无数据"而非"零消耗"）。
+        session_id: agent CLI 自报的会话 id（如 claude stream-json 首行
+            ``system/init`` 事件里的 ``session_id``），供崩溃对账后的会话续传
+            回填给 ``--resume``。协议未解析到或未声明该能力时为 ``None``。
     """
 
     command: tuple[str, ...]
@@ -118,6 +121,7 @@ class CommandResult:
     duration_seconds: float = 0.0
     output_protocol: str = PLAIN_PROTOCOL_ID
     token_usage: TokenUsage | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +213,10 @@ class FailureType(Enum):
     UNRECOVERABLE = "unrecoverable"
     FORBIDDEN_BLOCKED = "forbidden_blocked"
     DELIVERY_CLOSEOUT = "delivery_closeout"
+    # 跨进程对账（daemon 崩溃 / 硬击杀后遗留的 ``agent/running`` 僵尸 attempt）。
+    # 该分类由 ``agent_runner_failure.py`` 的 ``StaleAttemptDisposition`` 渲染，
+    # 不来自 ``classify_failure`` 的 attempt 判定阶梯。
+    STALE_ATTEMPT = "stale_attempt"
 
 
 class DeliveryGateFailureKind(Enum):
@@ -926,6 +934,25 @@ class RepositoryIdentity:
 
 
 @dataclass(frozen=True)
+class DaemonConfig:
+    """Daemon 长驻轮询层的仓库级开关（``.iar.toml`` 的 ``[agent_runner.daemon]``）。
+
+    只承载**按仓库判定**才对账正确、且确实被消费的两个键；轮询间隔等仍由 CLI 边界
+    按全局设置与 ``--interval`` 旗标解析（daemon 一次服务多仓，间隔无法按仓取值），
+    因此这里刻意不镜像那些键，避免配置视图里出现没人消费的真值来源。
+
+    Attributes:
+        reconcile_stale_attempts: 崩溃对账主开关；``None`` 表示仓库未声明，沿用调用方
+            传入的全局默认。``False`` 时 Phase -1 整轮空转，僵尸保持 ``agent/running``
+            不被触碰（即本特性落地前的现状）。
+        reclaim_ttl_seconds: claim 老化阈值(秒)；``None`` 表示沿用调用方默认。
+    """
+
+    reconcile_stale_attempts: bool | None = None
+    reclaim_ttl_seconds: int | None = None
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """Application configuration."""
 
@@ -956,6 +983,8 @@ class AppConfig:
         default_factory=InteractiveDecisionConfig
     )
     repl: ReplConfig = field(default_factory=ReplConfig)
+    # daemon 层的仓库级对账开关（None = 未声明，沿用调用方全局默认）。
+    daemon: DaemonConfig = field(default_factory=DaemonConfig)
     deliberation: DeliberationConfig = field(default_factory=DeliberationConfig)
     # 生命周期 Agent 矩阵的显式声明（含来源层）；未声明的键由
     # resolve_lifecycle_agent 回落到既有散落配置键与内置默认。

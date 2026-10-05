@@ -174,6 +174,10 @@ class AgentRunnerAgentSettings(BaseModel):
     project_skills_dir: str | None = None
     model_args: list[str] | None = None
     reasoning_effort_args: list[str] | None = None
+    # 会话续传能力声明：``supports_resume`` 为真时，恢复轮次把 ``resume_args``
+    # 模板（含 ``{session_id}`` 占位符）注入 argv；未声明的 agent 自然走全新会话。
+    supports_resume: bool | None = None
+    resume_args: list[str] | None = None
     profiles: dict[str, AgentRunnerAgentProfileSettings] = Field(default_factory=dict)
 
 
@@ -516,10 +520,13 @@ class AgentRunnerDaemonSettings(BaseModel):
     review_interval_seconds: int = 120
     run_interval_seconds: int = 120
     max_deliberation_issues: int = 1
-    reclaim_stale_running: bool = True
-    # TTL reclaim 阈值(秒):claim marker 含 ``started_at`` 且距 now 超过此值
-    # 即便 PID 仍存活也视为 stale。仅当 ``reclaim_stale_running=True`` 时生效。
-    # 默认 3 小时,覆盖"daemon 自身持锁 claim 但已卡死"的死锁场景。
+    # 崩溃对账主开关：daemon 每轮开头（Phase -1）扫描本机认领、但认领进程已死的
+    # ``agent/running`` 僵尸 attempt，给出续传 / 重跑 / 判失败三出口留痕。关闭后
+    # Phase -1 整轮空转（僵尸保持 agent/running 不被触碰），即回退到本特性前的现状。
+    reconcile_stale_attempts: bool = True
+    # claim 老化阈值(秒):claim marker 含 ``started_at`` 且距 now 超过此值时,
+    # 即便 PID 仍存活也视为 stale（"daemon 自身持锁 claim 但已卡死"的死锁兜底）。
+    # 默认 3 小时。仅在 ``reconcile_stale_attempts=True`` 时生效。
     reclaim_ttl_seconds: int = 10800
 
 

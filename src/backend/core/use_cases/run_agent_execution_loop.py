@@ -70,6 +70,7 @@ from backend.core.use_cases.agent_runner_feedback import (
     format_prd_delivery_failure,
 )
 from backend.core.use_cases.agent_runner_structured_evidence import ValidationEvidenceError
+from backend.core.use_cases.agent_runner_session_store import resolve_resumable_session_id
 from backend.core.use_cases.agent_runner_validation import (
     ensure_no_misplaced_evidence_helpers,
     ensure_validation_commands_pass,
@@ -110,6 +111,9 @@ class AgentExecutionRequest:
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None
     #: 实现阶段绑定的模型选择；``None`` 表示无绑定。fix / closeout 未自绑时继承它（同一 agent）。
     model_selection: ModelSelection | None = None
+    #: 首轮要续传的原会话 id（崩溃对账判定为「可续传」时由领取侧从 worktree 局部
+    #: 会话记录读出并注入）；``None`` 表示全新会话。仅对声明了续传能力的 agent 生效。
+    resume_session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -449,6 +453,30 @@ def _attempt_delivery_closeout(
     return _CloseoutAttemptResult(revalidated=True)
 
 
+def _attempt_resume_session_id(
+    request: AgentExecutionRequest,
+    *,
+    attempt_index: int,
+) -> str | None:
+    """本轮该续传哪个会话 id；``None`` 表示按全新会话起跑。
+
+    - **首轮**只认领取侧注入的 :attr:`AgentExecutionRequest.resume_session_id`
+      （崩溃对账判定「可续传」后重新入队的那次领取才会给），因此健康的新任务
+      绝不会被一段历史会话污染。
+    - **recovery 轮次**读回 worktree 局部记录里上一条自报的会话：刚死掉的那轮
+      已经把进度聊在里面，续它才是断点续传。记录被删 / 从未写过 → ``None`` →
+      全新会话（PRD rv-4 的负控路径）。
+    """
+    if attempt_index == 0:
+        return request.resume_session_id
+    return resolve_resumable_session_id(
+        request.worktree_path,
+        config=request.config,
+        agent_name=request.selected_agent,
+        issue_number=request.issue.number,
+    )
+
+
 def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResult:
     """Run the agent, recover failed verification, and return final checks.
 
@@ -544,6 +572,9 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
 
         # Phase 1: 运行 agent 或 recovery prompt
         agent_command_result: CommandResult | None = None
+        # 本轮要续传的会话（None = 全新会话）。声明了续传能力的 agent 才拿得到，
+        # 其余一律 None，argv 与本特性之前逐字节一致。
+        resume_session_id = _attempt_resume_session_id(request, attempt_index=attempt_index)
         try:
             if attempt_index == 0:
                 if prompt_override is not None:
@@ -562,6 +593,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             timeout_seconds=config.runner.timeout_seconds,
                             inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
                             model_selection=model_selection,
+                            resume_session_id=resume_session_id,
                         )
                 else:
                     with attempt_phases.measure("agent"):
@@ -574,6 +606,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             timeout_seconds=config.runner.timeout_seconds,
                             inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
                             model_selection=model_selection,
+                            resume_session_id=resume_session_id,
                         )
             else:
                 long_term_store, skill_store = _resolve_memory_stores(worktree_path, config.memory)
@@ -606,6 +639,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         timeout_seconds=recovery_timeout,
                         inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
                         model_selection=model_selection,
+                        resume_session_id=resume_session_id,
                     )
         except AgentUnavailableError:
             # The agent CLI could not be launched; let the cross-agent fallback

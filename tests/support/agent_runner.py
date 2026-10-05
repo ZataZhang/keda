@@ -333,3 +333,28 @@ def transient_command_error() -> CommandFailedError:
         output=("[agent error] API Error: The socket connection was closed unexpectedly."),
         stderr="",
     )
+
+
+def worktree_site(root: Path, issue_number: int) -> Path:
+    """默认 ``iar worktree`` 布局下 Issue worktree 的落点（不创建目录）。"""
+    return root / ".iar-worktrees" / f"issue-{issue_number}"
+
+
+def worktree_site_response(root: Path, issue_number: int) -> dict[tuple[str, ...], CommandResult]:
+    """造一个真实存在的 worktree 现场（含 ``.git`` 指针）并返回 path_command 响应。
+
+    崩溃对账判"现场可解析"要求目录与 ``.git`` 都在（缺 ``.git`` 的目录不是可用
+    工作树），因此对账测试不能用 :func:`default_worktree_path_response` 的 ``"."``。
+    """
+    site = worktree_site(root, issue_number)
+    site.mkdir(parents=True, exist_ok=True)
+    (site / ".git").write_text("gitdir: /nonexistent/worktrees/issue-1/.git\n", encoding="utf-8")
+    command = ("iar", "worktree", "path", "--branch", f"issue-{issue_number}")
+    return {
+        command: CommandResult(
+            command=command,
+            return_code=0,
+            stdout=f"{site}\n",
+            stderr="",
+        )
+    }

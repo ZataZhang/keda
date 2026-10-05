@@ -597,7 +597,7 @@ def _process_ready_issue(
         f"- PID: `{claim_pid}`\n"
         f"- Agent: `{selected_agent}`\n"
         f"- Started at: `{claim_started_at.isoformat()}`\n\n"
-        f"{format_claim_marker(claim_host, claim_pid, started_at=claim_started_at)}",
+        f"{format_claim_marker(claim_host, claim_pid, started_at=claim_started_at, agent=selected_agent)}",
     )
 
     # 步骤 2: 准备 worktree

@@ -28,6 +28,7 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
 )
 from backend.core.shared.interfaces.agent_runner import (
+    AGENT_SESSION_ID_ATTR_NAME,
     IGitHubClient,
     IProcessRunner,
 )
@@ -115,6 +116,10 @@ from backend.core.use_cases.agent_runner_publish import (
     run_preflight_checks,
     validate_publish_remote,
     validate_safe_changes,
+)
+from backend.core.use_cases.agent_runner_session_store import (
+    resolve_resumable_session_id,
+    save_agent_session_record,
 )
 from backend.core.use_cases.agent_runner_validation import (
     build_validation_prompt_line,
@@ -558,6 +563,7 @@ def run_agent(
     timeout_seconds: int | None = None,
     inactivity_timeout_seconds: int | None = None,
     model_selection: ModelSelection | None = None,
+    resume_session_id: str | None = None,
 ) -> CommandResult:
     """Run Codex or Claude Code in non-interactive mode."""
     long_term_store, skill_store = _resolve_memory_stores(worktree_path, config.memory)
@@ -586,6 +592,7 @@ def run_agent(
         timeout_seconds=timeout_seconds,
         inactivity_timeout_seconds=inactivity_timeout_seconds,
         model_selection=model_selection,
+        resume_session_id=resume_session_id,
     )
 
 
@@ -657,6 +664,7 @@ def run_agent_with_prompt(
     issue: IssueSummary | None = None,
     profile: str = AGENT_PROFILE_RUN,
     model_selection: ModelSelection | None = None,
+    resume_session_id: str | None = None,
 ) -> CommandResult:
     """Run an agent with a prepared prompt.
 
@@ -665,6 +673,9 @@ def run_agent_with_prompt(
     只读审核等场景可传 ``profile="deliberate"``，让支持沙箱的 agent 走声明式
     只读形态。``model_selection`` 非空时按该 agent 的声明式模板把模型/推理档
     参数注入 argv；agent 未声明模板时 fail-fast（绝不静默忽略）。
+    ``resume_session_id`` 非空且该 agent 声明了会话续传能力时，按声明式
+    ``resume_args`` 模板注入续传参数；agent 未声明时**静默回落为全新会话**
+    （FR-4：续传失败不得丢失整轮 recovery）。
     """
     if issue is not None:
         _logger.info(
@@ -672,28 +683,106 @@ def run_agent_with_prompt(
             issue.number,
             issue.url,
         )
-    invocation = build_agent_invocation(
-        agent_name,
-        profile,
-        prompt,
-        worktree_path,
-        config or AppConfig(),
-        model_selection=model_selection,
-    )
     label = f"Issue #{issue.number}: {issue.url}" if issue is not None else None
-    run_kwargs: dict[str, object] = {
-        "command": list(invocation.argv),
-        "cwd": worktree_path,
-        "capture_output": capture_output,
-        "timeout": timeout_seconds,
-        "label": label,
-        "output_protocol": invocation.output_protocol,
-    }
-    if inactivity_timeout_seconds is not None:
-        run_kwargs["inactivity_timeout"] = inactivity_timeout_seconds
-    if invocation.prompt_delivery == PROMPT_DELIVERY_STDIN:
-        run_kwargs["input_text"] = prompt
-    result = process_runner.run(**run_kwargs)
+
+    def _persist_session_id(session_id: str | None) -> None:
+        """把本次调用自报的会话 id 落在 worktree 局部记录里。
+
+        只记 run 用途的会话：fix / closeout / verifier 是另一段独立对话，写进同一个
+        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。落盘是旁路，失败只记
+        日志——续传是增益路径，不能反过来把正常执行拖下水。
+        """
+        if not session_id or profile != AGENT_PROFILE_RUN:
+            return
+        try:
+            save_agent_session_record(
+                worktree_path,
+                agent_name=agent_name,
+                session_id=session_id,
+                issue_number=issue.number if issue is not None else None,
+            )
+        except (OSError, ValueError) as exc:
+            _logger.warning(
+                "Agent session record skipped at %s (agent '%s'): %s",
+                worktree_path,
+                agent_name,
+                exc,
+            )
+
+    def _invoke(resume_id: str | None) -> CommandResult:
+        """按给定的续传会话 id 组装并执行一次调用。"""
+        attempt_invocation = build_agent_invocation(
+            agent_name,
+            profile,
+            prompt,
+            worktree_path,
+            config or AppConfig(),
+            model_selection=model_selection,
+            resume_session_id=resume_id,
+        )
+        if resume_id is not None and attempt_invocation.resumed_session_id is None:
+            # 请求了续传但 agent 没声明这个能力：静默回落全新会话。
+            _logger.info(
+                "Session resume requested for agent '%s' but it declares no resume "
+                "capability; falling back to a fresh session.",
+                agent_name,
+            )
+        run_kwargs: dict[str, object] = {
+            "command": list(attempt_invocation.argv),
+            "cwd": worktree_path,
+            "capture_output": capture_output,
+            "timeout": timeout_seconds,
+            "label": label,
+            "output_protocol": attempt_invocation.output_protocol,
+        }
+        if inactivity_timeout_seconds is not None:
+            run_kwargs["inactivity_timeout"] = inactivity_timeout_seconds
+        if attempt_invocation.prompt_delivery == PROMPT_DELIVERY_STDIN:
+            run_kwargs["input_text"] = prompt
+        try:
+            attempt_result = process_runner.run(**run_kwargs)
+        except Exception as exc:  # noqa: BLE001 - 旁路落盘后原样抛出，不改变失败语义。
+            _persist_session_id(_session_id_from_exception(exc))
+            raise
+        _persist_session_id(attempt_result.session_id)
+        return attempt_result
+
+    def _invoke_resumable(resume_id: str) -> CommandResult:
+        """先按续传形态跑；确认 CLI 没认下这个会话时，同一轮内改跑全新会话。
+
+        判据只看"这轮到底起跑没有"：CLI 认下 ``--resume`` 就会先广播一个新的会话
+        id，因此**没观测到任何会话 id** 且以非零码收场（或抛出等价失败异常）才降级
+        重跑。起跑之后再失败（跑一半崩、超时被杀）必须原样交给上层 recovery，否则
+        白扔掉已经取得的进度——也不能把一次续传失败烧成一个废弃的 recovery 轮次
+        （PRD FR-4）。
+        """
+        failure_detail: str
+        try:
+            resumed_result = _invoke(resume_id)
+        except Exception as exc:  # noqa: BLE001 - 判据成立才降级，其余原样上抛。
+            if _session_id_from_exception(exc) is not None:
+                raise
+            exit_code = getattr(exc, "returncode", None)
+            if not isinstance(exit_code, int) or exit_code == 0:
+                raise
+            failure_detail = f"exit_code={exit_code} ({type(exc).__name__})"
+        else:
+            if not _resumed_run_never_started(resumed_result):
+                return resumed_result
+            failure_detail = f"exit_code={resumed_result.return_code}"
+        _logger.warning(
+            "Resume of session %s did not start (%s); re-running this attempt with a "
+            "fresh session.",
+            resume_id,
+            failure_detail,
+        )
+        return _invoke(None)
+
+    result = (
+        _invoke(resume_session_id)
+        if resume_session_id is None
+        else _invoke_resumable(resume_session_id)
+    )
     if issue is not None:
         _logger.info(
             "Agent finished for Issue #%d: %s (exit_code=%d)",
@@ -702,6 +791,22 @@ def run_agent_with_prompt(
             result.return_code,
         )
     return result
+
+
+def _session_id_from_exception(exc: BaseException) -> str | None:
+    """从执行端挂回的失败异常上读出抛错前观测到的会话 id。"""
+    captured = getattr(exc, AGENT_SESSION_ID_ATTR_NAME, None)
+    return captured if isinstance(captured, str) and captured else None
+
+
+def _resumed_run_never_started(result: CommandResult) -> bool:
+    """续传调用是否"根本没起跑"：非零退出且输出流里没自报过任何会话 id。
+
+    CLI 认下了 ``--resume`` 就会先广播一个新会话 id（claude 的 ``system/init``），
+    因此"无会话 id + 非零退出"是"参数没被接受 / 会话不存在"的可靠信号；反过来，
+    起跑后再失败（超时、跑到一半崩）不能重跑，否则会白扔掉已经取得的进度。
+    """
+    return result.return_code != 0 and result.session_id is None
 
 
 def drop_model_selection_for_agent(
@@ -986,6 +1091,14 @@ def run_agent_until_committed(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=model_selection,
+            # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"
+            # （崩溃对账重新入队 / 部分进度续作），而不是新任务被历史会话污染。
+            resume_session_id=resolve_resumable_session_id(
+                worktree_path,
+                config=config,
+                agent_name=selected_agent,
+                issue_number=issue.number,
+            ),
         )
     )
 

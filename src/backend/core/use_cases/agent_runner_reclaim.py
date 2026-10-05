@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import socket
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -33,13 +34,33 @@ from backend.core.use_cases.agent_runner_workflow import (
 
 _logger = logging.getLogger(__name__)
 
-# 兼容老 marker:`host` 必填,`pid`/`started_at` 可选;后者仅在 TTL 路径下使用。
+# 兼容老 marker:`host` 必填,`pid`/`started_at`/`agent` 可选;后两者分别供
+# TTL 路径与会话续传对账使用(老 marker 缺字段时按"无法判定"保守处理)。
 _CLAIM_MARKER_PATTERN = re.compile(
     r'<!--\s*iar:claim\s+host="(?P<host>[^"]*)"'
     r'(?:\s+pid="(?P<pid>\d+)")?'
     r'(?:\s+started_at="(?P<started_at>[^"]*)")?'
+    r'(?:\s+agent="(?P<agent>[^"]*)")?'
     r"\s*-->"
 )
+
+
+@dataclass(frozen=True)
+class ClaimMarkerDetail:
+    """一次 claim 标记的完整归属信息。
+
+    Attributes:
+        host: 认领该 Issue 的机器名。
+        pid: 认领进程 PID。
+        started_at: claim 起始时间（UTC）；老 marker 缺该字段时为 ``None``。
+        agent: 认领时选定的 agent 注册名；老 marker 缺该字段时为 ``None``
+            （对账据此判断会话续传能力，缺失即不续传）。
+    """
+
+    host: str
+    pid: int
+    started_at: datetime | None
+    agent: str | None
 
 
 def format_claim_marker(
@@ -47,6 +68,7 @@ def format_claim_marker(
     pid: int,
     *,
     started_at: datetime | None = None,
+    agent: str | None = None,
 ) -> str:
     """Hidden marker recording which host/PID owns an ``agent/running`` claim.
 
@@ -54,11 +76,15 @@ def format_claim_marker(
     tell whether the owning process is still alive (see
     :func:`reclaim_stale_running_issues`). ``started_at`` 字段可选;传入时写入
     comment 供 TTL reclaim 路径使用,不传则保持向后兼容的纯 ``host/pid`` marker。
+    ``agent`` 字段同样可选：崩溃对账需要知道上轮是哪个 agent 认领的，才能查它的
+    会话续传能力；不传时保持旧 marker 形态。
     """
-    if started_at is None:
-        return f'<!-- iar:claim host="{host}" pid="{pid}" -->'
-    iso_started_at = started_at.astimezone(timezone.utc).isoformat()
-    return f'<!-- iar:claim host="{host}" pid="{pid}" started_at="{iso_started_at}" -->'
+    marker_attributes = [f'host="{host}"', f'pid="{pid}"']
+    if started_at is not None:
+        marker_attributes.append(f'started_at="{started_at.astimezone(timezone.utc).isoformat()}"')
+    if agent:
+        marker_attributes.append(f'agent="{agent}"')
+    return "<!-- iar:claim " + " ".join(marker_attributes) + " -->"
 
 
 def parse_claim_marker(comment_body: str) -> tuple[str, int] | None:
@@ -81,6 +107,19 @@ def parse_claim_marker_body(
     ``started_at`` 为 ``None`` 时表示该 marker 不含时间戳,TTL reclaim 路径会
     跳过这种 issue。``pid`` 缺省时按"无法证明死亡"返回 ``None``。
     """
+    detail = parse_claim_marker_detail(comment_body)
+    if detail is None:
+        return None
+    return detail.host, detail.pid, detail.started_at
+
+
+def parse_claim_marker_detail(comment_body: str) -> ClaimMarkerDetail | None:
+    """Extract the full :class:`ClaimMarkerDetail` from the last claim marker.
+
+    对账路径需要 marker 上的 ``agent`` 字段来判断会话续传能力，因此比
+    :func:`parse_claim_marker_body` 多读一个属性。``pid`` 缺省或不可解析时
+    返回 ``None``（与旧解析器一致：拿不到 PID 就无法证明进程死亡）。
+    """
     last_match = None
     for last_match in _CLAIM_MARKER_PATTERN.finditer(comment_body):
         pass
@@ -101,7 +140,13 @@ def parse_claim_marker_body(
             started_at = datetime.fromisoformat(started_raw)
         except ValueError:
             started_at = None
-    return host, pid, started_at
+    agent_raw = last_match.group("agent")
+    return ClaimMarkerDetail(
+        host=host,
+        pid=pid,
+        started_at=started_at,
+        agent=agent_raw or None,
+    )
 
 
 def is_pid_alive(pid: int) -> bool:
@@ -172,7 +217,7 @@ def reclaim_stale_running_issues(
         claim_host, claim_pid, claim_started_at = claim
         if claim_host != this_host:
             continue
-        reclaim_reason = _classify_reclaim(
+        reclaim_reason = classify_claim_staleness(
             claim_pid=claim_pid,
             claim_started_at=claim_started_at,
             effective_now=effective_now,
@@ -209,7 +254,7 @@ def _latest_claim_full(
     return None
 
 
-def _classify_reclaim(
+def classify_claim_staleness(
     *,
     claim_pid: int,
     claim_started_at: datetime | None,
@@ -221,6 +266,9 @@ def _classify_reclaim(
 
     - 原行为路径(PID 死了):返回 ``"dead_pid"``
     - TTL 路径(PID 还活但 claim 太久):返回 ``"ttl_expired"``
+
+    崩溃对账引擎(:mod:`backend.core.use_cases.agent_runner_reconcile`)复用同一套
+    僵尸判定阶梯,避免两处各自演化出不同的"死了"定义。
     """
     if not pid_alive(claim_pid):
         return "dead_pid"

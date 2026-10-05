@@ -53,6 +53,7 @@ class ClaudeStreamJsonOutputProtocol:
             stderr=completed.stderr,
             output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
             token_usage=usage_collector.usage,
+            session_id=usage_collector.session_id,
         )
 
 

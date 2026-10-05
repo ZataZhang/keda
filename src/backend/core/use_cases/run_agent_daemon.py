@@ -18,13 +18,11 @@ from backend.core.shared.interfaces.agent_runner import (
 )
 from backend.core.shared.interfaces.runner_console import IBacklogStore, IRunHistoryStore
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
-from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+from backend.core.use_cases import agent_runner_reconcile
 from backend.core.use_cases.agent_runner_orchestrate import (
     process_prd_rework_issues,
     run_once,
-)
-from backend.core.use_cases.agent_runner_reclaim import (
-    reclaim_stale_running_issues,
 )
 from backend.core.use_cases.backlog_actions import advance_backlog_queue
 
@@ -122,7 +120,7 @@ def run_agent_daemon(
     max_deliberation_issues: int = 1,
     concurrency: int = 1,
     output_view: IRunnerLiveView | None = None,
-    reclaim_stale_running: bool = False,
+    reconcile_stale_attempts: bool = False,
     reclaim_ttl_seconds: int | None = None,
     backlog_store_factory: Callable[[], IBacklogStore] | None = None,
     autopilot_override: bool | None = None,
@@ -152,9 +150,11 @@ def run_agent_daemon(
         output_view: Optional live view for parallel runs; each Issue's agent
             output goes to its own panel. ``None`` shows no dashboard (per-Issue
             log files are still written).
-        reclaim_stale_running: Whether to run the Phase -1 stale-``agent/running``
-            reclaim pass before polling.
-        reclaim_ttl_seconds: Optional TTL override for the reclaim pass.
+        reconcile_stale_attempts: Whether to run the Phase -1 crash-reconciliation
+            pass before polling. Off (default) leaves the phase inert — a zombie
+            ``agent/running`` Issue stays untouched, which is the pre-feature
+            behaviour the PRD's negative control pins down.
+        reclaim_ttl_seconds: Optional claim-age threshold for the reconcile pass.
         backlog_store_factory: Optional factory returning an
             :class:`IBacklogStore`. When provided *and* the repository has
             ``autopilot.enabled``, each pass runs a continuous-scheduling stage
@@ -196,7 +196,7 @@ def run_agent_daemon(
             max_deliberation_issues=max_deliberation_issues,
             concurrency=concurrency,
             output_view=output_view,
-            reclaim_stale_running=reclaim_stale_running,
+            reconcile_stale_attempts=reconcile_stale_attempts,
             reclaim_ttl_seconds=reclaim_ttl_seconds,
             backlog_store_factory=backlog_store_factory,
             autopilot_override=autopilot_override,
@@ -206,6 +206,39 @@ def run_agent_daemon(
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
         except (ValueError, OSError):
             pass
+
+
+def _resolve_reconcile_settings(
+    config: AppConfig,
+    *,
+    default_enabled: bool,
+    default_ttl_seconds: int | None,
+) -> tuple[bool, int | None]:
+    """把仓库级 ``[agent_runner.daemon]`` 对账开关解析成生效值。
+
+    ``.iar.toml`` 显式写了某项时该仓单独生效（daemon 可同时服务多个仓库，
+    开关必须按仓判定）；没写时沿用调用方传入的全局默认，行为与本特性前一致。
+
+    Args:
+        config: 该仓库合并后的运行配置。
+        default_enabled: 调用方（CLI / 测试）传入的对账主开关默认值。
+        default_ttl_seconds: 调用方传入的 claim 老化阈值默认值。
+
+    Returns:
+        ``(是否对账, 生效的 TTL 秒数)``。
+    """
+    daemon_config = config.daemon
+    enabled = (
+        daemon_config.reconcile_stale_attempts
+        if daemon_config.reconcile_stale_attempts is not None
+        else default_enabled
+    )
+    ttl_seconds = (
+        daemon_config.reclaim_ttl_seconds
+        if daemon_config.reclaim_ttl_seconds is not None
+        else default_ttl_seconds
+    )
+    return enabled, ttl_seconds
 
 
 def _run_daemon_loop(
@@ -224,7 +257,7 @@ def _run_daemon_loop(
     max_deliberation_issues: int = 1,
     concurrency: int = 1,
     output_view: IRunnerLiveView | None = None,
-    reclaim_stale_running: bool = False,
+    reconcile_stale_attempts: bool = False,
     reclaim_ttl_seconds: int | None = None,
     backlog_store_factory: Callable[[], IBacklogStore] | None = None,
     autopilot_override: bool | None = None,
@@ -244,27 +277,41 @@ def _run_daemon_loop(
                 else None
             )
 
-            # Phase -1: reclaim Issues stuck at agent/running because their
-            # runner process died (hard kill / crash). Conservative — only
-            # same-host, provably-dead PIDs — so it never disturbs a live run.
-            # Reclaimed Issues become agent/ready and are picked up in Phase 2.
-            if reclaim_stale_running:
+            # Phase -1: 崩溃对账。daemon 被 SIGKILL / 崩溃 / 关机打断时，Issue 会
+            # 停在 agent/running 而无人回收。这里扫描本机认领、认领进程已死（或
+            # claim 超 TTL）的僵尸，逐个判成「续传恢复 / 重新入队 / 判失败」三出口
+            # 之一并留下对账 comment；前两个出口回到 agent/ready，正好被本轮
+            # Phase 2 领取（先对账后领取）。保守规则与原 reclaim 同源，因此绝不
+            # 打扰在途运行。开关关闭时整轮空转，僵尸保持 agent/running 不被触碰。
+            # 仓库层开关优先：``.iar.toml`` 的 [agent_runner.daemon] 显式写了这两个
+            # 键时按仓库生效，没写才沿用调用方传入的全局默认（daemon 可同时服务多仓）。
+            reconcile_enabled, reconcile_ttl_seconds = _resolve_reconcile_settings(
+                context.config,
+                default_enabled=reconcile_stale_attempts,
+                default_ttl_seconds=reclaim_ttl_seconds,
+            )
+            if reconcile_enabled:
                 try:
-                    reclaimed = reclaim_stale_running_issues(
+                    reconcile_outcomes = agent_runner_reconcile.reconcile_stale_attempts(
+                        repo_path=context.repo_path,
                         config=context.config,
                         github_client=github_client,
-                        ttl_seconds=reclaim_ttl_seconds,
+                        process_runner=process_runner,
+                        ttl_seconds=reconcile_ttl_seconds,
                     )
-                    if reclaimed:
+                    applied_numbers = [
+                        outcome.issue_number for outcome in reconcile_outcomes if outcome.applied
+                    ]
+                    if applied_numbers:
                         _logger.info(
-                            "Reclaimed %d stale agent/running Issue(s) for '%s': %s",
-                            len(reclaimed),
+                            "Reconciled %d stale attempt(s) for '%s': %s",
+                            len(applied_numbers),
                             context.repo_id,
-                            reclaimed,
+                            applied_numbers,
                         )
-                except Exception as exc:  # noqa: BLE001 - daemon must survive reclaim faults.
+                except Exception as exc:  # noqa: BLE001 - daemon must survive reconcile faults.
                     _logger.error(
-                        "Stale-running reclaim failed for repository '%s': %s",
+                        "Stale-attempt reconcile failed for repository '%s': %s",
                         context.repo_id,
                         exc,
                     )

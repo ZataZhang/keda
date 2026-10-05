@@ -20,6 +20,7 @@ from backend.core.shared.models.agent_deliberation import (
 from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    DaemonConfig,
     GeneratedContentConfig,
     GeneratedContentTargetConfig,
     LabelConfig,
@@ -38,6 +39,7 @@ from backend.engines.agent_runner.factory_config_builder import (
 )
 from backend.infrastructure.config.settings import (
     AgentRunnerAgentSettings,
+    AgentRunnerDaemonSettings,
     AgentRunnerDeliberationSettings,
     AgentRunnerGeneratedContentSettings,
     AgentRunnerGeneratedContentTargetSettings,
@@ -73,6 +75,25 @@ def _merge_optional_model(base_model, override_model):
         **_pydantic_override_dict(override_model),
     }
     return type(base_model)(**merged_data)
+
+
+def _merge_daemon_config(
+    base_config: DaemonConfig,
+    override: AgentRunnerDaemonSettings | None,
+) -> DaemonConfig:
+    """合并仓库级 daemon 对账开关，只取 :class:`DaemonConfig` 实际消费的键。
+
+    ``[agent_runner.daemon]`` 里还有轮询间隔等键，它们由 CLI 边界按全局设置解析
+    （daemon 一次服务多仓，间隔无法按仓取值），因此这里不能整段搬运，否则配置视图
+    会出现无人消费的字段。
+    """
+    if override is None:
+        return base_config
+    merged = _model_to_dict(base_config)
+    for key, value in _pydantic_override_dict(override).items():
+        if key in merged:
+            merged[key] = value
+    return DaemonConfig(**merged)
 
 
 def _merge_label_config(
@@ -364,6 +385,7 @@ def merge_repository_config(
         global_config.deliberation, repo_settings.deliberation
     )
     repl = _merge_optional_model(global_config.repl, repo_settings.repl)
+    daemon = _merge_daemon_config(global_config.daemon, repo_settings.daemon)
     lifecycle_agents = _merge_lifecycle_agents_config(
         global_config.lifecycle_agents, repo_settings.lifecycle_agents
     )
@@ -399,6 +421,7 @@ def merge_repository_config(
         generated_content=generated_content,
         interactive_decision=interactive_decision,
         repl=repl,
+        daemon=daemon,
         deliberation=deliberation,
         lifecycle_agents=lifecycle_agents,
         agent_presets=agent_presets,
