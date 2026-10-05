@@ -111,18 +111,25 @@ def test_argparse_daemon_autopilot_override_tristate() -> None:
 
 
 def test_typer_run_help_has_no_autopilot() -> None:
-    """``iar run --help`` 有目标旗标但绝不出现 --autopilot（rv-4）。"""
+    """``iar run --help`` 有目标旗标但绝不出现 --autopilot（rv-4）。
+
+    Rich 在窄终端（CI 80 列）会对旗标做 ANSI 着色与折行，子串断言前先
+    去除 ANSI 转义与全部空白，保证断言与终端宽度无关。
+    """
+    import re
+
     from typer.testing import CliRunner
 
     from backend.api.cli_typer_app import app
 
     result = CliRunner().invoke(app, ["run", "--help"])
     assert result.exit_code == 0
-    help_text = result.output
-    assert "--issue" in help_text
-    assert "--all-ready" in help_text
-    assert "--takeover" in help_text
-    assert "--autopilot" not in help_text
+    ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
+    compact_help = re.sub(r"\s+", "", ansi_pattern.sub("", result.output))
+    assert "--issue" in compact_help
+    assert "--all-ready" in compact_help
+    assert "--takeover" in compact_help
+    assert "--autopilot" not in compact_help
 
 
 # ─────────────────────────────────────────────────────────────────────────────
