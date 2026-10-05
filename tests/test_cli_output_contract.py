@@ -32,6 +32,7 @@ from backend.api.cli_output import (
     resolve_output_format,
     route_logs_to_stderr,
 )
+from backend.api.cli_typer_app import _machine_output_requested, main as typer_main
 
 
 def test_output_format_json_alias_equals_explicit_flag() -> None:
@@ -207,3 +208,41 @@ def test_json_serialization_stays_in_cli_output() -> None:
             if "json.dumps" in source_line or "print_json" in source_line:
                 offenders.append(f"{source_path.name}:{line_number}")
     assert offenders == []
+
+
+def test_machine_output_requested_detects_raw_tokens() -> None:
+    """解析失败时只能靠原始 token 探测机器模式：三种写法都算显式声明。"""
+    assert _machine_output_requested(["logs", "--json"])
+    assert _machine_output_requested(["logs", "--output", "json"])
+    assert _machine_output_requested(["logs", "--output=json"])
+    assert _machine_output_requested(["logs", "--output", "JSON"])
+    assert not _machine_output_requested(["logs", "--output", "table"])
+    assert not _machine_output_requested(["logs"])
+    assert not _machine_output_requested(["logs", "--output"])
+
+
+def test_parse_failure_in_machine_mode_renders_envelope(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """解析期失败（旗标写错）在机器模式也落 FR-4 envelope，而非 click 纯文本。"""
+    exit_code = typer_main(["logs", "--repo-id", "keda", "--issue", "1", "--json", "--bogus-flag"])
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert set(envelope) == {"error", "exit_code", "message", "retryable", "suggestion"}
+    assert envelope["error"] == "usage_error"
+    assert envelope["exit_code"] == 2
+    assert envelope["suggestion"] == "iar logs --help"
+    assert "--bogus-flag" in envelope["message"]
+
+
+def test_parse_failure_in_human_mode_keeps_click_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """人类模式的解析失败保持 click 原文，零回归。"""
+    exit_code = typer_main(["logs", "--repo-id", "keda", "--issue", "1", "--bogus-flag"])
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "No such option: --bogus-flag" in captured.err
