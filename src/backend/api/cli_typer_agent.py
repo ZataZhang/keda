@@ -14,6 +14,9 @@ import typer
 
 from backend.api.cli_typer_app import (
     ConfigOption,
+    JsonOutputOption,
+    OutputFormat,
+    OutputOption,
     RepoIdOption,
     RepoOption,
     RunAgentChoice,
@@ -158,15 +161,21 @@ def deliberate_command(
 
 
 @agent_app.command("list")
-def agent_list_command() -> int:
+def agent_list_command(
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
+) -> int:
     """List registered agents and their profiles."""
-    return _run_typer_command("agent list")
+    return _run_typer_command("agent list", output=_enum_value(output), as_json=as_json)
 
 
 @agent_app.command("presets")
-def agent_presets_command() -> int:
+def agent_presets_command(
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
+) -> int:
     """List defined model presets and their (agent, model, reasoning effort)."""
-    return _run_typer_command("agent presets")
+    return _run_typer_command("agent presets", output=_enum_value(output), as_json=as_json)
 
 
 @agent_app.command("doctor")
@@ -179,7 +188,8 @@ def agent_doctor_command(
         bool,
         typer.Option("--all-profiles", help="Print every declared profile instead of only run."),
     ] = False,
-    json_output: Annotated[
+    output: OutputOption = OutputFormat.table,
+    as_json: Annotated[
         bool,
         typer.Option(
             "--json",
@@ -225,7 +235,8 @@ def agent_doctor_command(
         "agent doctor",
         agent_names=agent_names,
         all_profiles=all_profiles,
-        json_output=json_output,
+        output=_enum_value(output),
+        as_json=as_json,
         protocols=protocols,
         prompt=prompt,
         preset=preset,

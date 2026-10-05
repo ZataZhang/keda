@@ -13,10 +13,19 @@ import argparse
 import logging
 import os
 import re
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    OUTPUT_FORMAT_TABLE,
+    CliError,
+    emit,
+    resolve_output_format,
+)
 from backend.core.shared.models.loop import LoopSchedule, LoopScheduleKind, LoopTask
 from backend.core.use_cases.loop_create import (
     LoopAlreadyExistsError,
@@ -143,32 +152,41 @@ def run_loop_create_command(
         state_store_factory: Callable returning a fresh state store.
 
     Returns:
-        Exit code (0 on success, 1 on validation error).
+        Exit code (0 on success).
+
+    Raises:
+        CliError: 参数不合法（USAGE）、recipe 与命令行 id 不一致（USAGE）、
+            同名 loop 已注册（CONFLICT，可用 ``--force`` 覆盖）。
     """
     loop_id = getattr(parsed, "loop_id", None)
     if not loop_id:
-        logger.error("loop id is required.")
-        return 1
-    if not _SLUG_PATTERN.match(loop_id):
-        logger.error(
-            "Loop id %r must be kebab-case (lowercase letters, digits, hyphens).",
-            loop_id,
+        raise CliError(
+            "loop id is required.",
+            code=ExitCode.USAGE,
+            suggestion="iar loop create <kebab-case-id> --recipe <path>",
         )
-        return 1
+    if not _SLUG_PATTERN.match(loop_id):
+        raise CliError(
+            f"Loop id {loop_id!r} must be kebab-case (lowercase letters, digits, hyphens).",
+            code=ExitCode.USAGE,
+            suggestion="iar loop create my-daily-triage --recipe tasks/loop/my-daily-triage.md",
+        )
     recipe_path = validate_recipe_path(getattr(parsed, "recipe", ""))
     recipe = parse_loop_recipe(recipe_path)
     if recipe.id != loop_id:
-        logger.error(
-            "Recipe frontmatter id %r does not match command-line id %r.",
-            recipe.id,
-            loop_id,
+        raise CliError(
+            f"Recipe frontmatter id {recipe.id!r} does not match command-line id {loop_id!r}.",
+            code=ExitCode.USAGE,
+            suggestion=f"iar loop create {recipe.id} --recipe {recipe_path}",
         )
-        return 1
     try:
         schedule_override = build_schedule_from_args(parsed)
     except ValueError as exc:
-        logger.error("%s", exc)
-        return 1
+        raise CliError(
+            str(exc),
+            code=ExitCode.USAGE,
+            suggestion="iar loop create --every 1d",
+        ) from exc
     state_store = state_store_factory()
     try:
         task = create_loop_from_recipe(
@@ -178,8 +196,11 @@ def run_loop_create_command(
             overwrite=bool(getattr(parsed, "force", False)),
         )
     except LoopAlreadyExistsError as exc:
-        logger.error("%s", exc)
-        return 1
+        raise CliError(
+            f"{exc} Use --force to replace the existing entry.",
+            code=ExitCode.CONFLICT,
+            suggestion=f"iar loop create {loop_id} --recipe {shlex.quote(str(recipe_path))} --force",
+        ) from exc
     except FileNotFoundError as exc:
         logger.error("%s", exc)
         return 1
@@ -194,18 +215,41 @@ def run_loop_create_command(
     return 0
 
 
-def run_loop_list_command(*, state_store_factory) -> int:
+def run_loop_list_command(
+    *,
+    state_store_factory,
+    fmt: str = OUTPUT_FORMAT_TABLE,
+) -> int:
     """Implement ``iar loop list``.
 
     Args:
         state_store_factory: Callable returning a fresh state store.
+        fmt: 输出形态（``table`` 人类表格 / ``json`` 机器行）。
 
     Returns:
         Exit code (always 0).
     """
     state_store = state_store_factory()
     tasks = list_loops(state_store=state_store)
-    _print_loop_table(tasks)
+    emit(
+        [
+            {
+                "id": task.id,
+                "repo_id": task.repo_id,
+                "schedule": {
+                    "kind": task.schedule.kind.value,
+                    "expression": task.schedule.expression,
+                },
+                "enabled": task.enabled,
+                "next_fire_at": task.next_fire_at,
+            }
+            for task in tasks
+        ]
+        if fmt == OUTPUT_FORMAT_JSON
+        else None,
+        fmt=fmt,
+        human_renderer=lambda: _print_loop_table(tasks),
+    )
     return 0
 
 
@@ -221,18 +265,27 @@ def run_loop_cancel_command(
         state_store_factory: Callable returning a fresh state store.
 
     Returns:
-        Exit code (0 on success, 1 when the loop does not exist).
+        Exit code (0 on success).
+
+    Raises:
+        CliError: loop id 缺失（USAGE）或该 loop 未注册（NOT_FOUND）。
     """
     loop_id = getattr(parsed, "loop_id", None)
     if not loop_id:
-        logger.error("loop id is required.")
-        return 1
+        raise CliError(
+            "loop id is required.",
+            code=ExitCode.USAGE,
+            suggestion="iar loop list",
+        )
     state_store = state_store_factory()
     if cancel_loop(loop_id, state_store=state_store):
         print(f"Cancelled loop '{loop_id}'.")
         return 0
-    logger.error("Loop '%s' is not registered.", loop_id)
-    return 1
+    raise CliError(
+        f"Loop '{loop_id}' is not registered.",
+        code=ExitCode.NOT_FOUND,
+        suggestion="iar loop list",
+    )
 
 
 def run_loop_run_now_command(
@@ -259,19 +312,28 @@ def run_loop_run_now_command(
         labels_config: Optional label config.
 
     Returns:
-        Exit code (0 on success, 1 on validation error).
+        Exit code (0 on success).
+
+    Raises:
+        CliError: loop id 缺失（USAGE）或该 loop 未注册（NOT_FOUND）。
     """
     loop_id = getattr(parsed, "loop_id", None)
     if not loop_id:
-        logger.error("loop id is required.")
-        return 1
+        raise CliError(
+            "loop id is required.",
+            code=ExitCode.USAGE,
+            suggestion="iar loop list",
+        )
     dry_run = bool(getattr(parsed, "dry_run", False))
     state_store = state_store_factory()
     state_store.load()
     task = state_store.get_task(loop_id)
     if task is None:
-        logger.error("Loop '%s' is not registered.", loop_id)
-        return 1
+        raise CliError(
+            f"Loop '{loop_id}' is not registered.",
+            code=ExitCode.NOT_FOUND,
+            suggestion="iar loop list",
+        )
     repo_path = repo_resolver(task)
     github_client = github_client_factory(repo_path)
     content_generator = content_generator_factory(repo_path) if content_generator_factory else None
@@ -456,7 +518,10 @@ def run_loop_command(parsed: argparse.Namespace) -> int:
     if sub == "create":
         return run_loop_create_command(parsed, state_store_factory=default_state_store)
     if sub == "list":
-        return run_loop_list_command(state_store_factory=default_state_store)
+        return run_loop_list_command(
+            state_store_factory=default_state_store,
+            fmt=resolve_output_format(parsed),
+        )
     if sub == "cancel":
         return run_loop_cancel_command(parsed, state_store_factory=default_state_store)
     if sub == "run":
@@ -481,5 +546,8 @@ def run_loop_command(parsed: argparse.Namespace) -> int:
             repo_resolver=deps["repo_resolver"],
             content_generator_factory=deps["content_generator_factory"],
         )
-    logger.error("Unknown loop subcommand: %r", sub)
-    return 1
+    raise CliError(
+        f"Unknown loop subcommand: {sub!r}.",
+        code=ExitCode.USAGE,
+        suggestion="iar loop --help",
+    )

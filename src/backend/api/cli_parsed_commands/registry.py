@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.api.cli_console import console
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import CliError
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_registry import (
     _run_registry_list_command,
@@ -21,6 +23,15 @@ from backend.core.use_cases.agent_runner_factory import create_registry_editor, 
 from backend.core.use_cases.agent_runner_repository_local import discover_iar_repositories
 
 
+def _scan_root_error(command: str, exc: ValueError) -> CliError:
+    """``registry scan/sync`` 的扫描根目录不存在：语义退出码 ``3``。"""
+    return CliError(
+        f"iar registry {command} failed: {exc}",
+        code=ExitCode.NOT_FOUND,
+        suggestion="iar registry list",
+    )
+
+
 def run_registry_scan_command(ctx: ParsedCommandContext) -> int:
     """``iar registry scan``: discover IAR-initialized repos under a path."""
     try:
@@ -29,8 +40,7 @@ def run_registry_scan_command(ctx: ParsedCommandContext) -> int:
             editor=create_registry_editor(),
         )
     except ValueError as exc:
-        logger.error("iar registry scan failed: %s", exc)
-        return 1
+        raise _scan_root_error("scan", exc) from exc
     if not entries:
         console.print("[yellow]No IAR repositories found.[/]")
         return 0
@@ -48,8 +58,7 @@ def run_registry_sync_command(ctx: ParsedCommandContext) -> int:
             editor=create_registry_editor(),
         )
     except ValueError as exc:
-        logger.error("iar registry sync failed: %s", exc)
-        return 1
+        raise _scan_root_error("sync", exc) from exc
     new_entries = [entry for entry in entries if not entry.already_registered]
     if not new_entries:
         console.print("[green]No new IAR repositories to register.[/]")
@@ -86,7 +95,7 @@ def run_registry_remove_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_registry_list_command(ctx: ParsedCommandContext) -> int:
-    return _run_registry_list_command(ctx.process_runner)
+    return _run_registry_list_command(ctx.process_runner, fmt=ctx.output_format)
 
 
 def run_registry_start_command(ctx: ParsedCommandContext) -> int:

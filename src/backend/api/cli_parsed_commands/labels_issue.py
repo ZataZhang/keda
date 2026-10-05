@@ -10,6 +10,13 @@ from pathlib import Path
 
 from backend.api.cli_console import console, error_console
 from backend.api.cli_helpers import _resolve_cli_repository_targets
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    CliError,
+    emit,
+    emit_json,
+)
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api import cli as _cli
 from backend.core.use_cases.agent_runner_factory import logger
@@ -42,6 +49,8 @@ def run_labels_command(ctx: ParsedCommandContext) -> int:
 def run_issue_create_command(ctx: ParsedCommandContext) -> int:
     """``iar issue create``: create GitHub Issues from one or more PRD files."""
     raw_prd_paths = getattr(ctx.parsed, "prd_paths", [])
+    machine_mode = ctx.output_format == OUTPUT_FORMAT_JSON
+    created_issues: list[dict[str, object]] = []
 
     context = _cli.resolve_issue_from_prd_target(
         ctx.runner_settings,
@@ -52,20 +61,39 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
     try:
         prd_paths, skipped_prd_paths = _cli._expand_prd_paths(context.repo_path, raw_prd_paths)
     except ValueError as exc:
-        logger.error("iar issue create failed: %s", exc)
-        return 1
+        raise CliError(
+            str(exc),
+            code=ExitCode.USAGE,
+            suggestion="iar issue create <prd-path>（文件或包含 PRD 的目录）",
+        ) from exc
 
     for skipped_prd_path in skipped_prd_paths:
-        console.print(f"[yellow]Skipped PRD with existing Issue:[/] {skipped_prd_path}")
+        if not machine_mode:
+            console.print(f"[yellow]Skipped PRD with existing Issue:[/] {skipped_prd_path}")
         logger.info("Skipped PRD with existing Issue: %s", skipped_prd_path)
 
     if not prd_paths:
-        console.print("[green]All PRDs in the requested directories already have GitHub Issues.[/]")
+        if machine_mode:
+            emit_json(
+                {
+                    "created": [],
+                    "skipped": list(skipped_prd_paths),
+                    "failed": [],
+                    "note": "所有请求的 PRD 都已存在对应 Issue。",
+                }
+            )
+        else:
+            console.print(
+                "[green]All PRDs in the requested directories already have GitHub Issues.[/]"
+            )
         return 0
 
     if len(prd_paths) > 1 and ctx.parsed.title is not None:
-        logger.error("--title cannot be used when creating Issues from multiple PRDs.")
-        return 1
+        raise CliError(
+            "--title cannot be used when creating Issues from multiple PRDs.",
+            code=ExitCode.USAGE,
+            suggestion="iar issue create <prd-path> --title <title>",
+        )
 
     _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
@@ -123,7 +151,14 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
             )
 
             published = False
-            if not ctx.parsed.publish_prd:
+            if not ctx.parsed.publish_prd and machine_mode:
+                # FR-8：机器模式不触发交互提示，PRD 保持未发布并如实回报。
+                logger.info(
+                    "Machine mode skips the interactive PRD publish prompt; "
+                    "PRD %s was not published.",
+                    relative_prd_path,
+                )
+            elif not ctx.parsed.publish_prd:
                 published = _cli._prompt_and_publish_prd_if_needed(
                     repo_path=context.repo_path,
                     relative_prd_path=relative_prd_path,
@@ -143,7 +178,18 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                     context.config.labels.ready,
                 )
             logger.info("Created GitHub Issue: %s", issue_url)
-            console.print(f"[green]Created GitHub Issue:[/] {issue_url}")
+            created_issues.append(
+                {
+                    "prd": prd_path_text,
+                    "issue_url": issue_url,
+                    # ready 报告生效状态而非请求旗标：--no-publish-prd 且未发布时
+                    # queue_ready 被压成 False，机器消费方不能读到与标签不符的 true。
+                    "ready": bool(ctx.parsed.ready and (ctx.parsed.publish_prd or published)),
+                    "prd_published": published if not ctx.parsed.publish_prd else True,
+                }
+            )
+            if not machine_mode:
+                console.print(f"[green]Created GitHub Issue:[/] {issue_url}")
         except Exception as exc:  # noqa: BLE001 - batch should continue.
             failed_prd_paths.append(prd_path_text)
             error_detail = _format_cli_exception(exc)
@@ -155,6 +201,16 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
             error_console.print(f"[red]Failed to create Issue from {prd_path_text}:[/]")
             error_console.print(error_detail, markup=False)
 
+    if machine_mode:
+        emit_json(
+            {
+                "created": created_issues,
+                "skipped": list(skipped_prd_paths),
+                "failed": failed_prd_paths,
+                # 与上方「全部已存在 Issue」早退路径保持同构：note 恒在，无说明时为 null。
+                "note": None,
+            }
+        )
     if failed_prd_paths:
         logger.error(
             "Issue creation failed for %d PRD(s): %s",
@@ -168,8 +224,11 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
 def run_issue_list_command(ctx: ParsedCommandContext) -> int:
     """``iar issue list``: list Issues with linked PR status."""
     if ctx.parsed.with_pr and ctx.parsed.without_pr:
-        logger.error("--with-pr and --without-pr are mutually exclusive.")
-        return 1
+        raise CliError(
+            "--with-pr and --without-pr are mutually exclusive.",
+            code=ExitCode.USAGE,
+            suggestion="iar issue list --with-pr",
+        )
     from backend.core.use_cases.issue_pr_status import (
         IssueListRequest,
         list_issues_with_prs,
@@ -210,41 +269,47 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
             resolve_targets=_resolve_targets,
             has_local_iar_repo=make_default_has_local_iar_repo(),
         )
+    except ValueError as exc:
+        from backend.api.cli_helpers import repository_selector_error
+
+        raise repository_selector_error(exc) from exc
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
         logger.error("iar issue list failed: %s", exc)
         error_console.print(f"[red]iar issue list failed:[/] {exc}")
         return 1
 
-    if ctx.parsed.output == "json":
-        console.print_json(
-            data=[render_issue_with_pulls_json(issue_row) for issue_row in result.rows]
-        )
-        return 1 if result.errors else 0
+    def _render_rows() -> list[dict[str, object]]:
+        return [render_issue_with_pulls_json(issue_row) for issue_row in result.rows]
 
-    render_console = Console()
-    # Only list multiple repositories in one table when the rows actually span
-    # more than one repo; a single-repo listing stays narrow.
-    multi_repo = len({row.repo for row in result.rows if row.repo}) > 1
-    table = Table(show_header=True, header_style="bold")
-    if multi_repo:
-        table.add_column("Repo")
-    table.add_column("Issue")
-    table.add_column("Title")
-    table.add_column("State")
-    table.add_column("Labels")
-    table.add_column("PR")
-    for row in result.rows:
-        cells = [
-            f"#{row.number}",
-            row.title,
-            row.state,
-            ", ".join(row.labels),
-            render_pr_column(row.pulls),
-        ]
+    def _render_table() -> None:
+        render_console = Console()
+        # Only list multiple repositories in one table when the rows actually span
+        # more than one repo; a single-repo listing stays narrow.
+        multi_repo = len({row.repo for row in result.rows if row.repo}) > 1
+        table = Table(show_header=True, header_style="bold")
         if multi_repo:
-            cells.insert(0, row.repo or "-")
-        table.add_row(*cells)
-    render_console.print(table)
+            table.add_column("Repo")
+        table.add_column("Issue")
+        table.add_column("Title")
+        table.add_column("State")
+        table.add_column("Labels")
+        table.add_column("PR")
+        for row in result.rows:
+            cells = [
+                f"#{row.number}",
+                row.title,
+                row.state,
+                ", ".join(row.labels),
+                render_pr_column(row.pulls),
+            ]
+            if multi_repo:
+                cells.insert(0, row.repo or "-")
+            table.add_row(*cells)
+        render_console.print(table)
+
+    # 机器模式：stdout 只有 JSON 数组（与旧 ``--output json`` 同构），逐仓错误走 stderr。
+    payload = _render_rows() if ctx.output_format == OUTPUT_FORMAT_JSON else None
+    emit(payload, fmt=ctx.output_format, human_renderer=_render_table)
     for repo_label, error_message in result.errors:
         error_console.print(f"[red]Error fetching {repo_label}:[/] {error_message}")
     return 1 if result.errors else 0

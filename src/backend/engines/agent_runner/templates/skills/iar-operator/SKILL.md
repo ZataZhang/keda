@@ -19,8 +19,28 @@ Use this skill when the user asks to operate the IAR CLI or its managed runner. 
 | Preview the next execution pass | `iar run --dry-run --max-issues 3` | Read-only preview. Shows the selected ready Issues and their priority; does not run an Agent or claim work. |
 | Execute one pass | `iar run --max-issues 1` | Runs configured Agents and may update GitHub, create branches/worktrees, and open or update PRs. |
 | Inspect or manage persistent runner processes | `iar registry start|stop`, `iar registry list`, `iar daemon status`, `iar logs`; see "启动与停止托管 daemon" in `docs/guides/agent-runner.md` | `registry start` launches persistent runner and review-daemon processes by default; `daemon status` and `logs` inspect them, `registry stop` terminates managed processes. |
+| Ask what a command actually accepts | `iar schema --json` | Read-only introspection derived from the live command tree: every command, flag, type, required flag, enum choices, default, and an example. |
 
 Use the repository guide as the authoritative command reference. Start with `iar --help` or the relevant subcommand `--help` when command details differ by IAR version. Do not claim `--dry-run` executes work.
+
+## Consuming `iar` from a script or another Agent
+
+Whenever the reader of the output is a program rather than a human, pass `--json` explicitly. `--json` is an alias of `--output json`; with neither flag the output stays the human table, **including when stdout is a pipe**, so never assume a machine format.
+
+- In JSON mode stdout carries data only. Progress, warnings, and errors go to stderr, so `command > out.json` cannot be polluted by log lines.
+- A failure in JSON mode writes one envelope to stderr: `{"error", "message", "suggestion", "retryable", "exit_code"}`. `suggestion` is a runnable command, and the only safe way to continue is `$?` — do not parse English.
+- `iar ask` and `iar deliberate` reuse `--output` for an output **directory**, so `--output json` there means a directory literally named `json`. Neither takes `--json`; read their human summary or the written session files instead.
+- Exit codes published by `iar --help` and by `iar schema --json` → `exit_codes.values`. The Name column is exactly the envelope's `error` value, so `$?` and stderr never disagree:
+
+| Code | Name | Meaning | What the caller does |
+|---|---|---|---|
+| `0` | `ok` | Requested work completed (read-only output counts as success). | Continue. |
+| `1` | `error` | Failure with no published category. | Read stderr, then retry or escalate. |
+| `2` | `usage_error` | Flags or arguments do not form a valid command. | Fix the invocation; retrying unchanged fails again. |
+| `3` | `not_found` | Target missing: repository, Issue, registry entry, agent, executable, or log. | Switch target, or run the `suggestion`. |
+| `4` | `permission_denied` | Not authorized: GitHub auth or a disabled repository. | Ask the human to authenticate or enable it; do not retry silently. |
+| `5` | `conflict` | Current state blocks the request: daemon already running, workflow template file already installed, loop entry already exists. | Rename, pass `--force` when the user asked for it, or stop the competing process. |
+| `10` | `dry_run_ok` | The plan is valid and nothing was written. Usable as a CI gate. | Treat as green only after checking the plan body. |
 
 ## Viewing agent live output
 

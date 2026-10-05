@@ -117,6 +117,27 @@ def add_all_repositories_option(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_machine_output_options(parser: argparse.ArgumentParser) -> None:
+    """给产出数据的入口加机读旗标（与 Typer 侧 ``OutputOption``/``JsonOutputOption`` 同口径）。
+
+    ``--output`` 是主形态、``--json`` 是等价别名；默认 ``table``——机器模式
+    必须显式声明。这里只声明取值域，序列化和 stdout 纯净度由
+    :mod:`backend.api.cli_output` 单点负责。
+    """
+    parser.add_argument(
+        "--output",
+        choices=("table", "json"),
+        default="table",
+        help="Output format: table|json.",
+    )
+    parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Alias of --output json (stdout carries data only).",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
     parser = argparse.ArgumentParser(prog="iar")
@@ -198,6 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Upstream Issue number this Issue depends on (repeatable).",
     )
     add_model_preset_options(issue_create_parser)
+    add_machine_output_options(issue_create_parser)
     add_common_options(issue_create_parser)
 
     issue_list_parser = issue_subparsers.add_parser(
@@ -238,12 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Maximum Issues to fetch per repository (default: 100).",
     )
-    issue_list_parser.add_argument(
-        "--output",
-        choices=("table", "json"),
-        default="table",
-        help="Render format (default: table).",
-    )
+    add_machine_output_options(issue_list_parser)
     add_common_options(issue_list_parser)
 
     run_parser = subparsers.add_parser("run")
@@ -253,6 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--max-issues", type=int)
     add_model_preset_options(run_parser)
+    add_machine_output_options(run_parser)
     add_common_options(run_parser)
     add_all_repositories_option(run_parser)
 
@@ -289,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_subparsers.add_parser("run", parents=[daemon_run_options])
 
     daemon_status_parser = daemon_subparsers.add_parser("status")
+    add_machine_output_options(daemon_status_parser)
     add_common_options(daemon_status_parser)
     add_all_repositories_option(daemon_status_parser)
 
@@ -327,6 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Follow the log in real time (Ctrl-C to stop).",
     )
+    add_machine_output_options(logs_parser)
     add_common_options(logs_parser)
 
     review_parser = subparsers.add_parser("review")
@@ -471,6 +491,7 @@ def build_parser() -> argparse.ArgumentParser:
         "list", help="List registered agents and their profiles."
     )
     agent_list_parser.set_defaults(command="agent list")
+    add_machine_output_options(agent_list_parser)
     agent_doctor_parser = agent_subparsers.add_parser(
         "doctor",
         help="Parse and print each profile's full argv for the given agents.",
@@ -488,8 +509,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print every declared profile instead of only the run profile.",
     )
     agent_doctor_parser.add_argument(
+        "--output",
+        choices=("table", "json"),
+        default="table",
+        help="Output format: table|json.",
+    )
+    agent_doctor_parser.add_argument(
         "--json",
-        dest="json_output",
+        dest="as_json",
         action="store_true",
         help="Emit stable sorted JSON (agent / profile / argv / prompt_delivery).",
     )
@@ -535,6 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="List defined model presets and their (agent, model, reasoning effort).",
     )
     agent_presets_parser.set_defaults(command="agent presets")
+    add_machine_output_options(agent_presets_parser)
 
     worktree_parser = subparsers.add_parser(
         "worktree",
@@ -552,6 +580,7 @@ def build_parser() -> argparse.ArgumentParser:
         "path", help="Print the absolute worktree path for a branch."
     )
     worktree_path_parser.add_argument("--branch", required=True, help="Branch name to resolve.")
+    add_machine_output_options(worktree_path_parser)
     worktree_remove_parser = worktree_subparsers.add_parser(
         "remove", help="Remove a worktree and prune Git metadata."
     )
@@ -642,10 +671,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Registry identifier of the repository to remove.",
     )
 
-    registry_subparsers.add_parser(
+    registry_list_parser = registry_subparsers.add_parser(
         "list",
         help="List registered repositories and their daemon status.",
     )
+    add_machine_output_options(registry_list_parser)
 
     registry_start_parser = registry_subparsers.add_parser(
         "start",
@@ -878,6 +908,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="List all registered loops with their schedules and next fires.",
     )
     loop_list_parser.set_defaults(command="loop list")
+    add_machine_output_options(loop_list_parser)
 
     loop_cancel_parser = loop_subparsers.add_parser(
         "cancel",

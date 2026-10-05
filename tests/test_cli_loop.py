@@ -11,6 +11,8 @@ import pytest
 from typer.testing import CliRunner
 
 from backend.api import cli_loop
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import CliError
 from backend.api.cli_parser import build_parser
 from backend.api.cli_typer import app as typer_app
 from backend.engines.agent_runner.persistence.loop_state_json import JsonLoopStateStore
@@ -169,8 +171,9 @@ def test_run_loop_create_command_rejects_id_mismatch(
         loop_repo_id=None,
         loop_repo=None,
     )
-    rc = cli_loop.run_loop_create_command(parsed, state_store_factory=lambda: state_store)
-    assert rc == 1
+    with pytest.raises(CliError) as exc_info:
+        cli_loop.run_loop_create_command(parsed, state_store_factory=lambda: state_store)
+    assert exc_info.value.code == ExitCode.USAGE
 
 
 def test_run_loop_list_command(
@@ -221,8 +224,9 @@ def test_run_loop_cancel_command(
     rc = cli_loop.run_loop_cancel_command(cancel_ns, state_store_factory=state_store_factory)
     assert rc == 0
     missing_ns = argparse.Namespace(command="loop cancel", loop_id="missing")
-    rc = cli_loop.run_loop_cancel_command(missing_ns, state_store_factory=state_store_factory)
-    assert rc == 1
+    with pytest.raises(CliError) as exc_info:
+        cli_loop.run_loop_cancel_command(missing_ns, state_store_factory=state_store_factory)
+    assert exc_info.value.code == ExitCode.NOT_FOUND
 
 
 def test_run_loop_run_now_dry_run(
@@ -275,15 +279,16 @@ def test_run_loop_run_now_missing_loop(tmp_path: Path) -> None:
         loop_repo_id=None,
         loop_repo=None,
     )
-    rc = cli_loop.run_loop_run_now_command(
-        run_ns,
-        state_store_factory=lambda: state_store,
-        github_client_factory=lambda path: FakeGitHubClient(),
-        process_runner=FakeProcessRunner(),
-        clock=FixedClock(datetime(2026, 6, 23, 7, 30, tzinfo=timezone.utc)),
-        repo_resolver=lambda task: tmp_path,
-    )
-    assert rc == 1
+    with pytest.raises(CliError) as exc_info:
+        cli_loop.run_loop_run_now_command(
+            run_ns,
+            state_store_factory=lambda: state_store,
+            github_client_factory=lambda path: FakeGitHubClient(),
+            process_runner=FakeProcessRunner(),
+            clock=FixedClock(datetime(2026, 6, 23, 7, 30, tzinfo=timezone.utc)),
+            repo_resolver=lambda task: tmp_path,
+        )
+    assert exc_info.value.code == ExitCode.NOT_FOUND
 
 
 def test_run_loop_daemon_command_dry_run(

@@ -10,11 +10,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.api.cli_console import console
+from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_helpers import _handle_not_initialized_error
 from backend.api.cli_init import (
     _print_workflow_config_plan,
     _run_init_command,
 )
+from backend.api.cli_output import CliError
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_takeover import _run_takeover_command
 from backend.core.use_cases.agent_runner_factory import logger
@@ -32,18 +34,23 @@ from backend.core.use_cases.agent_runner_repository_local import (
 def run_init_command(ctx: ParsedCommandContext) -> int:
     """``iar init``: create repository-local .iar.toml config."""
     if ctx.repo_id is not None or ctx.repo_override is not None:
-        logger.error("iar init uses the current Git repository; omit --repo/--repo-id.")
-        return 1
+        raise CliError(
+            "iar init uses the current Git repository; omit --repo/--repo-id.",
+            code=ExitCode.USAGE,
+            suggestion="iar init",
+        )
     return _run_init_command(ctx.parsed, ctx.process_runner)
 
 
 def run_workflow_install_command(ctx: ParsedCommandContext) -> int:
     """``iar workflow install``: bundle a workflow template into the repo."""
     if ctx.repo_id is not None or ctx.repo_override is not None or ctx.parsed.config is not None:
-        logger.error(
-            "iar workflow install uses the current Git repository; omit --repo/--repo-id/--config."
+        raise CliError(
+            "iar workflow install uses the current Git repository; "
+            "omit --repo/--repo-id/--config.",
+            code=ExitCode.USAGE,
+            suggestion="iar workflow install --help",
         )
-        return 1
     try:
         install_result = install_workflow(
             WorkflowInstallOptions(
@@ -55,13 +62,19 @@ def run_workflow_install_command(ctx: ParsedCommandContext) -> int:
             ctx.process_runner,
         )
     except UnknownWorkflowError as exc:
-        logger.error("%s", exc)
-        return 1
+        raise CliError(
+            str(exc),
+            code=ExitCode.NOT_FOUND,
+            suggestion="iar workflow install --help",
+        ) from exc
     except ExistingFileRefusedError as exc:
-        logger.error("%s", exc)
-        return 1
+        raise CliError(
+            str(exc),
+            code=ExitCode.CONFLICT,
+            suggestion=f"iar workflow install {ctx.parsed.name} --force",
+        ) from exc
     except IARRepositoryNotInitializedError as exc:
-        return _handle_not_initialized_error(exc)
+        return _handle_not_initialized_error(exc, fmt=ctx.output_format)
     except ValueError as exc:
         logger.error("iar workflow install failed: %s", exc)
         return 1

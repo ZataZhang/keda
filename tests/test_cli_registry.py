@@ -7,6 +7,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
+import pytest
+
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import CliError
 from backend.api.cli_registry import (
     _run_daemon_status_command,
     _run_logs_command,
@@ -960,7 +964,7 @@ def test_logs_command_issue_no_attempt_is_clean_exit(tmp_path: Path, capsys) -> 
 
 
 def test_logs_command_issue_and_kind_are_mutually_exclusive(tmp_path: Path) -> None:
-    """`--issue` 与显式非默认 `--kind` 互斥，返回用法错误。"""
+    """`--issue` 与显式非默认 `--kind` 互斥，抛用法错误的 :class:`CliError`。"""
     context = MagicMock(repo_id="fixture-repo", repo_path=tmp_path)
     parsed = _FakeArgs(
         kind="review_daemon",
@@ -970,11 +974,14 @@ def test_logs_command_issue_and_kind_are_mutually_exclusive(tmp_path: Path) -> N
         issue=3,
     )
 
-    with patch(
-        "backend.api.cli_registry.resolve_repository_targets",
-        return_value=[context],
+    with (
+        patch(
+            "backend.api.cli_registry.resolve_repository_targets",
+            return_value=[context],
+        ),
+        pytest.raises(CliError) as exc_info,
     ):
-        exit_code = _run_logs_command(
+        _run_logs_command(
             parsed=parsed,
             process_runner=MagicMock(),
             runner_settings=MagicMock(),
@@ -982,7 +989,7 @@ def test_logs_command_issue_and_kind_are_mutually_exclusive(tmp_path: Path) -> N
             repo_override=None,
         )
 
-    assert exit_code == 2
+    assert exc_info.value.code is ExitCode.USAGE
 
 
 def _run_issue_follow(repo_dir: Path, issue_number: int):

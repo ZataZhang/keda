@@ -15,7 +15,14 @@ from typing import Annotated
 
 import typer
 
-from backend.api.cli_typer_app import _run_typer_command, worktree_app
+from backend.api.cli_typer_app import (
+    JsonOutputOption,
+    OutputFormat,
+    OutputOption,
+    _enum_value,
+    _run_typer_command,
+    worktree_app,
+)
 
 
 @worktree_app.command("create")
@@ -40,6 +47,8 @@ def worktree_create_command(
 @worktree_app.command("path")
 def worktree_path_command(
     branch: Annotated[str, typer.Option("--branch", help="Branch name to resolve.")],
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
 ) -> int:
     """Print the absolute worktree path for a branch."""
     return _run_typer_command(
@@ -49,6 +58,8 @@ def worktree_path_command(
         config=None,
         worktree_command="path",
         branch=branch,
+        output=_enum_value(output),
+        as_json=as_json,
     )
 
 

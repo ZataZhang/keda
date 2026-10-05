@@ -137,10 +137,10 @@ timeout_seconds = 120
 def test_config_migrate_requires_an_initialized_repository(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """没有 .iar.toml：退出码 1，并给出统一的 `iar init` 提示。"""
+    """没有 .iar.toml：退出码 3（not_found），并给出统一的 `iar init` 提示。"""
     repo_path = _init_git_repository(tmp_path, "target")
 
-    assert main(["config", "migrate", "--repo", str(repo_path)]) == 1
+    assert main(["config", "migrate", "--repo", str(repo_path)]) == 3
 
     error_output = capsys.readouterr().err
     assert "not initialized" in error_output
@@ -150,18 +150,18 @@ def test_config_migrate_requires_an_initialized_repository(
 def test_config_migrate_fails_outside_a_git_repository(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """--repo 指向非 Git 目录：退出码 1，报出原因。"""
+    """--repo 指向非 Git 目录：退出码 3（找不到目标），报出原因。"""
     plain_directory = tmp_path / "plain"
     plain_directory.mkdir()
 
-    assert main(["config", "migrate", "--repo", str(plain_directory)]) == 1
+    assert main(["config", "migrate", "--repo", str(plain_directory)]) == 3
 
     assert "not inside a Git repository" in capsys.readouterr().err
 
 
 def test_config_migrate_rejects_repo_id(capsys: pytest.CaptureFixture[str]) -> None:
-    """迁移只针对单个仓库的 .iar.toml，不接受注册表 ID。"""
-    assert main(["config", "migrate", "--repo-id", "target"]) == 1
+    """迁移只针对单个仓库的 .iar.toml，不接受注册表 ID（用法错误 2）。"""
+    assert main(["config", "migrate", "--repo-id", "target"]) == 2
 
     assert "--repo-id is not supported" in capsys.readouterr().err
 

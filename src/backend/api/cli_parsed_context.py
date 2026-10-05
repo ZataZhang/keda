@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
+from backend.api.cli_output import OUTPUT_FORMAT_TABLE
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 
 if TYPE_CHECKING:
@@ -34,6 +35,8 @@ class ParsedCommandContext:
     repo_id: str | None
     repo_override: str | None
     github_client_factory: Callable[[Path], "IGitHubClient"]
+    #: 由中央 dispatcher 解析一次（``--output`` / ``--json``），handler 只读不猜。
+    output_format: str = OUTPUT_FORMAT_TABLE
 
 
 # The "SubprocessRunner" and "AgentRunnerSettings" type hints above are

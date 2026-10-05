@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
 from pathlib import PurePosixPath
 from typing import Annotated
@@ -18,7 +17,16 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from backend.api.cli_typer_app import app
+from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import (
+    OUTPUT_FORMAT_JSON,
+    CliError,
+    emit,
+    output_format_of,
+    render_cli_error,
+    route_logs_to_stderr,
+)
+from backend.api.cli_typer_app import OutputFormat, OutputOption, _enum_value, app
 from backend.core.use_cases.agent_runner_factory import create_console_store
 from backend.core.use_cases.agent_runner_lifecycle import build_prd_lifecycle_stats
 from backend.core.use_cases.agent_runner_token_stats import (
@@ -148,12 +156,18 @@ def tokens(
             help="只看某个 Issue（PRD）的消耗：按流程/按 agent 表收窄到该 Issue。",
         ),
     ] = None,
-    json_output: Annotated[
+    output: OutputOption = OutputFormat.table,
+    as_json: Annotated[
         bool,
         typer.Option("--json", help="输出与 stats 端点同构的 JSON（供脚本消费）。"),
     ] = False,
 ) -> None:
     """查看 agent 调用的 token 消耗汇总（按流程 / 按 agent / 按 PRD，与 Stats 页同源同口径）。"""
+    fmt = output_format_of(output=_enum_value(output), as_json=as_json)
+    if fmt == OUTPUT_FORMAT_JSON:
+        # 本命令直接从 Typer app emit JSON，不经 cli.py 的中央改绑点，
+        # 必须在机器模式下自行把日志改绑到 stderr，否则一条日志就污染 stdout。
+        route_logs_to_stderr()
     bounded_days = _clamp_days(days)
     # 可用性探针：建库与裸读都放进保护块——build_prd_lifecycle_stats 对读取
     # 失败静默降级为空数据，这里负责把"账本不可用"与"真的没数据"区分开
@@ -162,8 +176,15 @@ def tokens(
         store = create_console_store()
         store.list_lifecycle_runs(repo_id=repo_id, since="2000-01-01T00:00:00+00:00")
     except Exception as exc:  # noqa: BLE001 - CLI 需要单行错误而非 traceback。
-        typer.secho(f"token 查询失败：账本不可用（{exc}）", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        exit_code = render_cli_error(
+            CliError(
+                f"token 查询失败：账本不可用（{exc}）",
+                code=ExitCode.GENERAL,
+                suggestion="iar logs --lines 200",
+            ),
+            fmt=fmt,
+        )
+        raise typer.Exit(code=exit_code) from exc
 
     if issue is not None:
         usage = build_token_usage_stats_for_issue(
@@ -177,19 +198,16 @@ def tokens(
         store=store, repo_id=repo_id, days=bounded_days, issue_number=issue
     )
 
-    if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "repo_id": repo_id,
-                    "days": bounded_days,
-                    "issue_number": issue,
-                    "token_usage": asdict(usage),
-                    "by_prd": [asdict(entry) for entry in prd_entries],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+    if fmt == OUTPUT_FORMAT_JSON:
+        emit(
+            {
+                "repo_id": repo_id,
+                "days": bounded_days,
+                "issue_number": issue,
+                "token_usage": asdict(usage),
+                "by_prd": [asdict(entry) for entry in prd_entries],
+            },
+            fmt=fmt,
         )
         return
 

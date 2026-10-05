@@ -550,7 +550,7 @@ def _capture_fallback_hint() -> str:
     ):
         cli_registry._print_logs_fallback("evidence-repo", "daemon")
     printed_text = "\n".join(collector.chunks)
-    match = re.search(r"Global app log: \[cyan\](.+?)\[/\]", printed_text)
+    match = re.search(r"Global app log: (.+)", printed_text)
     assert match is not None, f"回退提示里没有 Global app log 行: {printed_text!r}"
     return match.group(1)
 
