@@ -54,6 +54,7 @@ from backend.core.use_cases.agent_runner_dependencies import (
     parse_delivery_dependencies,
 )
 from backend.core.use_cases.agent_runner_validation import (
+    assert_realistic_validation_oracle_valid,
     build_issue_validation_section,
     extract_evidence_format_waiver_reason,
     extract_realistic_validation_items,
@@ -1111,6 +1112,9 @@ def create_issue_from_prd(
     # 否则把 PRD 的验证清单复制为 Issue body 的未勾选清单，
     # 供 runner 的证据门禁与 PR 人工签收清单消费。
     # ------------------------------------------------------------------
+    # 物化前大声失败：oracle 块存在却不可解析会让清单为空、连带关掉整个证据
+    # 门禁，必须在此拦下，绝不静默产出一个「无验证」的 Issue（Issue #191）。
+    assert_realistic_validation_oracle_valid(prd_text)
     validation_checklist_items = extract_realistic_validation_items(prd_text)
     validation_waiver_reason = extract_validation_waiver_reason(prd_text)
     if validation_checklist_items or validation_waiver_reason is not None:

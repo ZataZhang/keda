@@ -65,6 +65,7 @@ from backend.core.use_cases.run_agent_once import (
     resolve_agent_fallback_order,
 )
 from backend.core.use_cases.agent_runner_failure import (
+    AgentExecutionError,
     AgentUnavailableError,
     ForbiddenBlockedError,
     MaxRetriesExceededError,
@@ -420,8 +421,10 @@ def run_issue_with_agent_fallback(
     keyword ``agent`` argument for each candidate agent resolved by
     :func:`resolve_agent_fallback_order`, capped at ``max_agent_switches``
     switches. The chain advances to the next agent when an agent exhausts its
-    recovery budget (:class:`MaxRetriesExceededError`) or hits a provider
-    capacity limit (:class:`ProviderCapacityError`), and skips an agent whose
+    recovery budget (:class:`MaxRetriesExceededError`), hits a provider
+    capacity limit (:class:`ProviderCapacityError`), or dies from an
+    unclassified execution accident (:class:`AgentExecutionError`, e.g. a
+    wall-clock timeout), and skips an agent whose
     CLI is unavailable (:class:`AgentUnavailableError`). Unrecoverable and
     forbidden-path failures are re-raised immediately because every agent would
     hit the same wall.
@@ -472,7 +475,7 @@ def run_issue_with_agent_fallback(
                 candidate_agent,
             )
             continue
-        except (ProviderCapacityError, MaxRetriesExceededError) as exc:
+        except (ProviderCapacityError, MaxRetriesExceededError, AgentExecutionError) as exc:
             combined_attempts.extend(
                 _stamp_attempts_with_agent(
                     getattr(exc, "attempt_results", None) or [],

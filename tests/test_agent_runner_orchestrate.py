@@ -22,6 +22,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import (
+    AgentExecutionError,
     AgentUnavailableError,
     ForbiddenBlockedError,
     MaxRetriesExceededError,
@@ -946,6 +947,29 @@ def test_fallback_switches_on_max_retries_exhausted() -> None:
             "claude": MaxRetriesExceededError([_attempt("no commits", FailureType.NO_COMMITS)]),
             "codex": None,
         }
+    )
+
+    used_agent = run_issue_with_agent_fallback(
+        issue=_fallback_issue("agent/claude"),
+        config=config,
+        agent="auto",
+        process_for_agent=process_for_agent,
+    )
+
+    assert used_agent == "codex"
+    assert calls == ["claude", "codex"]
+
+
+def test_fallback_switches_on_agent_execution_error() -> None:
+    """An unclassified execution accident (e.g. a timeout) switches agents.
+
+    Issue #190: review-stage timeouts surface as a general
+    ``AgentExecutionError`` and must reach the cross-agent fallback instead of
+    sinking the Issue.
+    """
+    config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
+    process_for_agent, calls = _agent_outcomes(
+        {"claude": AgentExecutionError("reviewer timed out after 1800s", []), "codex": None}
     )
 
     used_agent = run_issue_with_agent_fallback(

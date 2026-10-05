@@ -1313,6 +1313,8 @@ agent/ready
 
 review packet 现在是 **修复-再审查收敛模式**：轮数由 `[agent_runner.pre_pr_review].max_attempts` 控制，默认 2 轮。每一轮 reviewer 都可以通过 `commit-request.json` 自修复（runner 仅负责 commit proxy + verification 重新执行 + push callback 把修复推送到远程）。如果 reviewer 在一轮内报出了 findings 却未写 `commit-request.json`，runner 会追加一条提醒并把该轮内重新调用 reviewer 最多 `[agent_runner.pre_pr_review].commit_request_reminder_attempts` 次（默认 1 次），让 reviewer 有机会把 findings 落实为补丁，而不是直接放弃。最后一轮结束后若仍未 `approved` 但 reviewer 已写最终修复 commit request，runner 接受该最终修复并继续发布；否则写一条 findings 评论并走软失败路径（runner 不再抛出硬错误，但调用方会按 `agent/failed` 处理）。Reviewer 解析器会基于 findings 数组重新统计 `critical`/`high`/`medium`/`low` 计数，避免 reviewer 自填数字被信任；若 verdict 为 `approved` 但 findings 非空，verdict 会被降级为 `changes_requested` 以避免漏报。
 
+> **执行事故的换人回退**：reviewer **进程层面**的失败——墙钟/静默期超时（`pre_pr_review.timeout_seconds`，默认 1800s 被杀）、agent 进程非零退出、启动 I/O 错误——不是「review 未通过」，也不会把 Issue 判死。它们与 provider 容量失败（429/529）一样被升级为一个总的可换人错误 `AgentExecutionError`，交由跨 agent fallback 链换下一个候选 agent 重试。只有 `UnrecoverableError`（安全/分支违规）与 `ForbiddenBlockedError`（禁改路径）这类每个 agent 都会撞同一堵墙的失败才直接冒泡，不换人。此前这些异常（`subprocess.TimeoutExpired` 等）不在任何 except 白名单里，会一路冒到顶层 `except Exception` 直接落 `agent/failed`。
+
 当某一轮 reviewer 补丁在提交门禁上失败（`commit_requested_changes` 抛 `VerificationFailedError`，如 `verification_commands` 或 `pre_commit_verification_command` 复跑失败）时，runner 会做两件事再进入下一轮：(1) 把失败命令与截断后的 stdout/stderr（复用 `format_verification_failure`）写进下一轮 review packet 的 “Previous reviewer patch was REJECTED …” 段落，让 reviewer 针对真正的门禁失败调整做法，而不是蒙眼重复同一补丁；(2) 调用 `unstage_changes`（`git reset --mixed`）把失败补丁 unstage，改动仍留在工作区供下一轮修订，避免残留 staged 内容被 `git add -A` 原样重提、每轮撞同一堵墙。该反馈只投喂给紧接着的一轮；提交成功或首轮时不携带。
 
 #### 审-修分工（`repair_agent`）

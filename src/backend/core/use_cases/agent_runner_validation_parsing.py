@@ -100,12 +100,27 @@ def _iterate_validation_section_lines(markdown_text: str) -> list[str]:
     return section_lines
 
 
+class ValidationOracleBlockError(ValueError):
+    """Raised when the RV section carries a ```yaml fence that is not a valid oracle.
+
+    合法的 oracle 块必须是**顶层 YAML 序列**，每项为含非空 ``id`` 与
+    ``behavior`` 的 mapping。块存在却结构不符属于「不可解析」——按 prd skill
+    契约应当大声失败，绝不能静默退化成「无清单」（那会连带关掉整个证据门禁）。
+    """
+
+
 def _extract_rv_oracle_entries(section_lines: list[str]) -> list[dict[str, object]]:
     """Deterministically parse the structured YAML oracle block.
 
     在 Realistic Validation 小节内定位第一个 ```yaml 围栏，``yaml.safe_load``
-    后要求是一个非空的 mapping 列表且每项含 ``id`` 与 ``behavior``。无围栏、
-    解析失败或结构不符时返回空列表，由调用方回退到旧式 checkbox 解析。
+    后要求是一个非空的 mapping 列表且每项含 ``id`` 与 ``behavior``。
+
+    三态语义：
+    - 小节内**无** ```yaml 围栏 → 返回空列表（调用方回退旧式 checkbox 解析）；
+    - 围栏存在且结构合法 → 返回条目；
+    - 围栏存在但解析失败 / 顶层非序列 / 条目缺字段 → 抛
+      :class:`ValidationOracleBlockError`（不再静默返回空列表）。
+
     本函数不引入 LLM，纯确定性解析。
     """
     fence_open = False
@@ -124,16 +139,40 @@ def _extract_rv_oracle_entries(section_lines: list[str]) -> list[dict[str, objec
         return []
     try:
         parsed_block = yaml.safe_load("\n".join(yaml_lines))
-    except yaml.YAMLError:
-        _logger.warning("RV oracle YAML block present but failed to parse; ignoring.")
-        return []
+    except yaml.YAMLError as exc:
+        raise ValidationOracleBlockError(
+            "RV oracle YAML block is present but failed to parse."
+        ) from exc
     if not isinstance(parsed_block, list):
-        return []
+        raise ValidationOracleBlockError(
+            "RV oracle YAML block must be a top-level sequence of `id`/`behavior` "
+            f"mappings, got {type(parsed_block).__name__}. A global key such as a "
+            "`failure_triage:` note belongs *beneath* the block, outside the fence."
+        )
     oracle_entries: list[dict[str, object]] = []
-    for entry in parsed_block:
-        if isinstance(entry, dict) and entry.get("id") and entry.get("behavior"):
-            oracle_entries.append(entry)
+    for index, entry in enumerate(parsed_block, start=1):
+        if not isinstance(entry, dict) or not entry.get("id") or not entry.get("behavior"):
+            raise ValidationOracleBlockError(
+                f"RV oracle entry #{index} must be a mapping with non-empty `id`/`behavior`."
+            )
+        oracle_entries.append(entry)
     return oracle_entries
+
+
+def assert_realistic_validation_oracle_valid(markdown_text: str) -> None:
+    """Raise :class:`ValidationOracleBlockError` for a malformed RV oracle block.
+
+    供物化路径（PRD → Issue）大声失败用：块缺失不算错（合法回退），块存在却
+    不可解析才报错。运行期提取（:func:`extract_realistic_validation_items`）
+    不抛异常，只记 ERROR，避免把数据问题升级成在途 Issue 硬失败。
+
+    Args:
+        markdown_text: PRD 全文或 Issue body。
+
+    Raises:
+        ValidationOracleBlockError: 小节存在 ```yaml 围栏但内容不是合法 oracle。
+    """
+    _extract_rv_oracle_entries(_iterate_validation_section_lines(markdown_text))
 
 
 def extract_realistic_validation_items(markdown_text: str) -> list[str]:
@@ -150,7 +189,14 @@ def extract_realistic_validation_items(markdown_text: str) -> list[str]:
         规范化后的 Markdown 复选框行列表；无小节或无条目时为空列表。
     """
     section_lines = _iterate_validation_section_lines(markdown_text)
-    oracle_entries = _extract_rv_oracle_entries(section_lines)
+    try:
+        oracle_entries = _extract_rv_oracle_entries(section_lines)
+    except ValidationOracleBlockError as exc:
+        # 运行期不硬失败，但绝不静默：块存在却不可解析必须出现在日志里，
+        # 否则会退化成「无清单」并连带关掉证据门禁（Issue #191）。物化路径
+        # 用 assert_realistic_validation_oracle_valid 做大声失败。
+        _logger.error("RV oracle block present but invalid; falling back: %s", exc)
+        oracle_entries = []
     if oracle_entries:
         return [f"- [ ] {entry['id']}: {entry['behavior']}" for entry in oracle_entries]
     checklist_items: list[str] = []
