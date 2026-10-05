@@ -419,7 +419,7 @@ backlog_settings (原 roadmap_settings)
 
 #### Architecture Acceptance
 
-- [x] 重命名为同一批符号替换，未新增 alias/redirect/并行实现；`git mv` 保留文件历史 — 证据：`git status` 中 37 条 rename 条目（`git diff -M --name-only HEAD` 共 90 个文件）+ rv-4 白名单外零命中扫描（无别名层/无并行实现）→ `.iar/evidence/rv-4-zero-hit-and-gates.txt`
+- [x] 重命名为同一批符号替换，未新增 alias/redirect/并行实现；`git mv` 保留文件历史 — 证据：最终交付树 `git diff -M 2a1dd6a..HEAD` 共 94 个文件、其中 38 条 rename（原记 90/37 为提交前 worktree 测量，verifier 复核校正，见 §14 返修复核「计数校正」）+ rv-4 白名单外零命中扫描（无别名层/无并行实现）→ `.iar/evidence/rv-4-zero-hit-and-gates.txt`
 - [x] core 未 import `backend.infrastructure`/FastAPI/tomlkit；`just lint --full` 架构守卫通过 — 证据：rv-4 段 [3] `SKIP=check-test-flag just lint --full` 中 `Check architecture layer dependencies....Passed`（跳过 hook 的理由见 §14）→ `.iar/evidence/rv-4-zero-hit-and-gates.txt`
 - [x] 四层依赖方向未被破坏；未引入新层、新依赖或新抽象 — 证据：同一次架构守卫通过；改动仅为符号与路径替换，未新增模块或依赖 → `.iar/evidence/rv-4-zero-hit-and-gates.txt`
 
@@ -563,7 +563,7 @@ backlog_settings (原 roadmap_settings)
 
 - Type: reconciliation
 - Before: 验收清单全部为 `- [ ]`，banner 为「⬜ 未开工」；rv-4 尚未跑完最终门禁。
-- After: rv-1/rv-2/rv-3/rv-4 四份脚本在真实入口上均 `RESULT: PASS (failures=0, mode=real-entry)`，各自负控以 `RESULT: FAIL` 变红；清单中 21 项执行侧项逐条勾选并标注证据文件，剩余仅 4 项 `Human-Confirmed`（决策一/二/三 + §9.1 呈递物过目）与 2 项 runner-owned `[~]`（verifier review、归档）；banner 相应改为 🧍 待人工验收。证据清单 `.iar/evidence/evidence.json`（4 项，含 stdout 断言）与全部 `rv-*` 证据已镜像到 `tasks/evidence/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog/`。最终门禁实测（返修轮复测口径，见下一条 §14 条目）：`SKIP=check-test-flag just lint --full` 全 hook Passed、runner 门禁命令 `just test all` 在其真实环境 `2888 passed, 1 skipped`、`pnpm --dir frontend-public typecheck` + `just console-sync` + `uv run mkdocs build --strict` 均 exit 0。改动集为 `git diff -M --name-only HEAD` 的 90 个文件（其中 37 条 rename）；证据目录新增三份进提交的 `.md` 文本报告（验证计划、证据报告、人工验收清单），其余原始日志与图片按 `.gitignore` 只留本机。
+- After: rv-1/rv-2/rv-3/rv-4 四份脚本在真实入口上均 `RESULT: PASS (failures=0, mode=real-entry)`，各自负控以 `RESULT: FAIL` 变红；清单中 21 项执行侧项逐条勾选并标注证据文件，剩余仅 4 项 `Human-Confirmed`（决策一/二/三 + §9.1 呈递物过目）与 2 项 runner-owned `[~]`（verifier review、归档）；banner 相应改为 🧍 待人工验收。证据清单 `.iar/evidence/evidence.json`（4 项，含 stdout 断言）与全部 `rv-*` 证据已镜像到 `tasks/evidence/P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog/`。最终门禁实测（返修轮复测口径，见下一条 §14 条目）：`SKIP=check-test-flag just lint --full` 全 hook Passed、runner 门禁命令 `just test all` 在其真实环境 `2888 passed, 1 skipped`、`pnpm --dir frontend-public typecheck` + `just console-sync` + `uv run mkdocs build --strict` 均 exit 0。改动集按最终提交树实测为 `git diff -M 2a1dd6a..HEAD` 的 94 个文件（其中 38 条 rename；本条原记的 90/37 为提交前 worktree 测量，verifier 复核校正见 §14「返修复核（2026-10-05）：计数校正」）；证据目录新增三份进提交的 `.md` 文本报告（验证计划、证据报告、人工验收清单），其余原始日志与图片按 `.gitignore` 只留本机。
 - Reason: 归档只代表执行侧交付完成，人工验收由人确认；本轮不自行 `git mv` 到 `tasks/archive/`。
 - Impact: 文档状态与验收口径对齐；未削弱任何用户可见、安全、范围或真实验证要求（`check-test-flag` 单 hook 跳过与 testmon 补跑已在上一条目披露，e2e 规格未执行已记入 §12）。
 - Review: **待人工确认**（4 项 `Human-Confirmed` 未勾选，§14 两条实现期修订亦标记待确认）。
@@ -601,3 +601,12 @@ backlog_settings (原 roadmap_settings)
 - Reason: 路由断言不应依赖"本机恰好没有在跑的 daemon"这一机器状态；否则每次自动执行轮到有 daemon 在跑就必红。
 - Impact: 仅测试隔离；对外契约、§10 FR、rv-1..rv-4 判据均不变。
 - Review: 自记（返修性质：修复门禁判红，未削弱任何用户可见、安全、范围或真实验证要求）。
+
+### 返修复核（2026-10-05）：verifier 复核校正改动集计数
+
+- Type: documentation
+- Before: §9.2 Architecture Acceptance 首条与 Final Reconciliation 记录的改动集计数为"90 个文件 / 37 条 rename"，是提交前 worktree 测量值；最终提交树（含 runner 代理提交与 daemon 锁隔离返修）实测 `git diff -M 2a1dd6a..HEAD` 为 94 个文件、其中 38 条 rename。
+- After: 两处计数更新为最终树实测值 94/38，并注明原值为提交前测量。
+- Reason: 归档 PRD 的计数声明应与交付树一致，避免评审者按错误规模判断改动范围。
+- Impact: 仅文档数字与口径校正；对外契约、§10 FR、§11 范围、rv-1..rv-4 判据均不变。
+- Review: verifier 自记（Pre-PR review 轮次）。
