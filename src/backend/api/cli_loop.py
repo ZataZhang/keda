@@ -13,6 +13,7 @@ import argparse
 import logging
 import os
 import re
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -198,7 +199,7 @@ def run_loop_create_command(
         raise CliError(
             f"{exc} Use --force to replace the existing entry.",
             code=ExitCode.CONFLICT,
-            suggestion=f"iar loop create {loop_id} --recipe {recipe_path} --force",
+            suggestion=f"iar loop create {loop_id} --recipe {shlex.quote(str(recipe_path))} --force",
         ) from exc
     except FileNotFoundError as exc:
         logger.error("%s", exc)

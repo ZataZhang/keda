@@ -213,39 +213,41 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
             fmt=output_format,
         )
 
-    # daemon / review-daemon 在未指定仓库时：
-    # 1. cwd 命中唯一 enabled 注册仓 → 仅处理该仓（与 --repo-id 等价）
-    # 2. cwd 命中 disabled 注册仓 → 报错
-    # 3. cwd 命中多个 enabled 注册仓 → 报错，要求显式选择
-    # 4. cwd 未命中任何注册仓或未初始化 → 报错，不再回退到 --all
-    if parsed.command in ("daemon", "review-daemon", "logs"):
-        if (
-            repo_id is None
-            and repo_override is None
-            and not getattr(parsed, "all_repositories", False)
-        ):
-            default_target = _resolve_default_daemon_target()
-            if default_target.error:
-                return report_daemon_target_error(default_target.error, fmt=output_format)
-            repo_id = default_target.repo_id
-
-    process_runner = create_process_runner()
-    runner_settings = get_agent_runner_settings()
-
-    def github_client_factory(repo_path: Path) -> "IGitHubClient":
-        return create_github_client(repo_path, process_runner)
-
-    parsed_ctx = ParsedCommandContext(
-        parsed=parsed,
-        process_runner=process_runner,
-        runner_settings=runner_settings,
-        repo_id=repo_id,
-        repo_override=repo_override,
-        github_client_factory=github_client_factory,
-        output_format=output_format,
-    )
-
+    # 以下解析与工厂创建也纳入 try：机器模式下任何失败都必须落成 stderr
+    # envelope（PRD「任意命令在 JSON 模式下的失败」oracle），不能漏成裸 traceback。
     try:
+        # daemon / review-daemon 在未指定仓库时：
+        # 1. cwd 命中唯一 enabled 注册仓 → 仅处理该仓（与 --repo-id 等价）
+        # 2. cwd 命中 disabled 注册仓 → 报错
+        # 3. cwd 命中多个 enabled 注册仓 → 报错，要求显式选择
+        # 4. cwd 未命中任何注册仓或未初始化 → 报错，不再回退到 --all
+        if parsed.command in ("daemon", "review-daemon", "logs"):
+            if (
+                repo_id is None
+                and repo_override is None
+                and not getattr(parsed, "all_repositories", False)
+            ):
+                default_target = _resolve_default_daemon_target()
+                if default_target.error:
+                    return report_daemon_target_error(default_target.error, fmt=output_format)
+                repo_id = default_target.repo_id
+
+        process_runner = create_process_runner()
+        runner_settings = get_agent_runner_settings()
+
+        def github_client_factory(repo_path: Path) -> "IGitHubClient":
+            return create_github_client(repo_path, process_runner)
+
+        parsed_ctx = ParsedCommandContext(
+            parsed=parsed,
+            process_runner=process_runner,
+            runner_settings=runner_settings,
+            repo_id=repo_id,
+            repo_override=repo_override,
+            github_client_factory=github_client_factory,
+            output_format=output_format,
+        )
+
         exit_code = dispatch_parsed_command(parsed_ctx)
     except IARRepositoryNotInitializedError as exc:
         return _handle_not_initialized_error(exc, fmt=output_format)

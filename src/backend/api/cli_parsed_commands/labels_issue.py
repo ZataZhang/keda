@@ -92,7 +92,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             "--title cannot be used when creating Issues from multiple PRDs.",
             code=ExitCode.USAGE,
-            suggestion="iar issue create <单个 PRD 路径> --title <标题>",
+            suggestion="iar issue create <prd-path> --title <title>",
         )
 
     _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
@@ -182,7 +182,9 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                 {
                     "prd": prd_path_text,
                     "issue_url": issue_url,
-                    "ready": bool(ctx.parsed.ready),
+                    # ready 报告生效状态而非请求旗标：--no-publish-prd 且未发布时
+                    # queue_ready 被压成 False，机器消费方不能读到与标签不符的 true。
+                    "ready": bool(ctx.parsed.ready and (ctx.parsed.publish_prd or published)),
                     "prd_published": published if not ctx.parsed.publish_prd else True,
                 }
             )
@@ -205,6 +207,8 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                 "created": created_issues,
                 "skipped": list(skipped_prd_paths),
                 "failed": failed_prd_paths,
+                # 与上方「全部已存在 Issue」早退路径保持同构：note 恒在，无说明时为 null。
+                "note": None,
             }
         )
     if failed_prd_paths:
@@ -220,7 +224,6 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
 def run_issue_list_command(ctx: ParsedCommandContext) -> int:
     """``iar issue list``: list Issues with linked PR status."""
     if ctx.parsed.with_pr and ctx.parsed.without_pr:
-        logger.error("--with-pr and --without-pr are mutually exclusive.")
         raise CliError(
             "--with-pr and --without-pr are mutually exclusive.",
             code=ExitCode.USAGE,

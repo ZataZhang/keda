@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from backend.api import cli  # noqa: F401  先导入调度器，避免解析命令模块的循环导入
+from backend.api.cli_schema import build_command_schema
+from backend.api.cli_typer_app import app
 from backend.engines.agent_runner.remote_template_skills import install_packaged_operator_skill
 
 #: 随包发行的 SKILL.md 源（与安装产物同一份文件）。
@@ -69,7 +72,8 @@ def test_packaged_skill_documents_issue_output_paths() -> None:
     """发行 Skill 必须覆盖按 Issue 查看、/ps 边界与网页查看三条路径。"""
     text = _skill_text()
     assert "iar logs --repo <path> --issue <N> --follow" in text
-    assert "iar logs --repo <path> --issue <N>`" in text or "--issue <N>" in text
+    # 一次性查看（不带 --follow）是独立路径，不能用「其它行也含 --issue <N>」蒙混。
+    assert "iar logs --repo <path> --issue <N>`" in text
     assert "/ps" in text
     # /ps 的同会话后台终端边界必须写清，不得暗示外部任务自动可见。
     assert "same Codex session" in text
@@ -86,6 +90,73 @@ def _flags_of(tokens: list[str]) -> set[str]:
     return {token.split("=")[0] for token in tokens if token.startswith("-")}
 
 
+#: Skill 命令示例允许出现的旗标精选集。覆盖面以「能蒙住假阳性」为准，不与
+#: ``--help`` 全集对齐；但每个条目都必须真实存在于当前命令树（由
+#: ``test_packaged_skill_whitelist_matches_runtime_schema`` 对 ``iar schema --json``
+#: 的运行时派生结果断言），CLI 删掉 Skill 仍在用的旗标必须让守卫红。
+_ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
+    ("run",): {"--dry-run", "--max-issues", "--repo", "--repo-id", "--agent", "--all"},
+    ("logs",): {"--repo", "--repo-id", "--issue", "--follow", "--lines", "-n", "-f", "--kind"},
+    ("issue", "list"): {"--repo", "--repo-id", "--state", "--label", "--limit"},
+    ("issue", "create"): set(),
+    ("init",): {"--dry-run", "--force"},
+    ("registry", "start"): set(),
+    ("registry", "stop"): set(),
+    ("registry", "list"): set(),
+    ("daemon", "status"): set(),
+    ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
+    ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
+    ("worktree", "path"): {"--branch"},
+    ("agent", "presets"): set(),
+    # ask / deliberate 的 --output 是输出目录，不是格式；取值集合取自
+    # ``iar schema --json`` 的运行时派生结果，而非人工记忆。
+    ("ask",): {
+        "--agent",
+        "--plan-only",
+        "--execute",
+        "--yes",
+        "--output",
+        "--preset",
+        "--model",
+        "--reasoning-effort",
+        "--repo",
+        "--repo-id",
+        "--config",
+    },
+    ("deliberate",): {
+        "--agents",
+        "--rounds",
+        "--synthesizer",
+        "--output",
+        "--session-id",
+        "--strict",
+        "--repo",
+        "--repo-id",
+        "--config",
+    },
+    ("schema",): {"--json", "--output"},
+    ("agent", "doctor"): {
+        "--all-profiles",
+        "--json",
+        "--protocols",
+        "--prompt",
+        "--preset",
+        "--model",
+        "--reasoning-effort",
+        "--lifecycle",
+    },
+}
+
+
+def _real_flags_by_path() -> dict[tuple[str, ...], set[str]]:
+    """从真实 Typer 命令树派生「命令路径 → 全部旗标名（含短旗标与 secondary）」。"""
+    schema = build_command_schema(app)
+    return {
+        tuple(command["path"]): {name for option in command["options"] for name in option["names"]}
+        for command in schema["commands"]
+    }
+
+
 def test_packaged_skill_command_examples_match_cli_help() -> None:
     """Skill 中的命令示例所用的 flag 必须真实存在于当前 CLI。"""
     text = _skill_text()
@@ -93,60 +164,9 @@ def test_packaged_skill_command_examples_match_cli_help() -> None:
     examples = re.findall(r"`(iar [^`]+)`", text)
     assert examples, "SKILL.md 应包含 iar 命令示例"
 
-    # 每个子命令的合法 flag 集合取自当前 ``iar <cmd> --help``（已逐一人工
-    # 核对）；示例中出现集合之外的 flag 即视为与 CLI 漂移。
-    allowed_flags = {
-        ("run",): {"--dry-run", "--max-issues", "--repo", "--repo-id", "--agent", "--all"},
-        ("logs",): {"--repo", "--repo-id", "--issue", "--follow", "--lines", "-n", "-f", "--kind"},
-        ("issue", "list"): {"--repo", "--repo-id", "--state", "--label", "--limit"},
-        ("issue", "create"): set(),
-        ("init",): {"--dry-run", "--force"},
-        ("registry", "start"): set(),
-        ("registry", "stop"): set(),
-        ("registry", "list"): set(),
-        ("daemon", "status"): set(),
-        ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
-        ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
-        ("worktree", "path"): {"--branch"},
-        ("agent", "presets"): set(),
-        # ask / deliberate 的 --output 是输出目录，不是格式；取值集合取自
-        # ``iar schema --json`` 的运行时派生结果，而非人工记忆。
-        ("ask",): {
-            "--agent",
-            "--plan-only",
-            "--execute",
-            "--yes",
-            "--output",
-            "--preset",
-            "--model",
-            "--reasoning-effort",
-            "--repo",
-            "--repo-id",
-            "--config",
-        },
-        ("deliberate",): {
-            "--agents",
-            "--rounds",
-            "--synthesizer",
-            "--output",
-            "--session-id",
-            "--strict",
-            "--repo",
-            "--repo-id",
-            "--config",
-        },
-        ("schema",): {"--json", "--output"},
-        ("agent", "doctor"): {
-            "--all-profiles",
-            "--json",
-            "--protocols",
-            "--prompt",
-            "--preset",
-            "--model",
-            "--reasoning-effort",
-            "--lifecycle",
-        },
-    }
+    # 每个子命令的合法 flag 集合见模块级 ``_ALLOWED_FLAGS``：覆盖面是精选集，
+    # 示例中出现集合之外的 flag 即视为与 CLI 漂移。
+    allowed_flags = _ALLOWED_FLAGS
     for example in examples:
         tokens = example.split()
         subcommand = tuple(
@@ -171,6 +191,17 @@ def test_packaged_skill_command_examples_match_cli_help() -> None:
         # ``--help`` 是所有子命令都支持的元 flag，不参与漂移判定。
         unknown = _flags_of(tokens) - allowed_flags[key] - {"--help", "-h"}
         assert not unknown, f"{example} 使用了 --help 中不存在的 flag：{unknown}"
+
+
+def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
+    """白名单每个旗标都必须真实存在于当前命令树（防 skill ↔ CLI 漂移）。"""
+    real_flags_by_path = _real_flags_by_path()
+    print("DEBUG ask flags:", sorted(real_flags_by_path.get(("ask",), set())))
+    print("DEBUG app id:", id(app))
+    for subcommand, whitelist in _ALLOWED_FLAGS.items():
+        assert subcommand in real_flags_by_path, f"schema 中不存在命令 {subcommand}"
+        unknown = whitelist - real_flags_by_path[subcommand]
+        assert not unknown, f"{subcommand} 白名单旗标在真实命令树中不存在：{unknown}"
 
 
 def test_packaged_skill_separates_read_only_from_execution() -> None:

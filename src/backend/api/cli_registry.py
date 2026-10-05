@@ -484,7 +484,10 @@ def _run_daemon_status_command(
     if not contexts:
         message = "No repositories selected."
         if fmt == OUTPUT_FORMAT_JSON:
+            # 与下方「无运行中进程」的空态一致：机器模式 stdout 必须仍是合法
+            # JSON（空数组），消息只走 stderr，调用方才能区分「选中为空」与「进程为空」。
             error_console.print(message)
+            emit([], fmt=fmt)
         else:
             console.print(f"[yellow]{message}[/]")
         return 0
