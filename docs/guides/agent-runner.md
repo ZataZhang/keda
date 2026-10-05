@@ -877,7 +877,7 @@ runner 派发 agent 子进程时**不会**原样继承父环境：派发点（Cl
 
 ## 浏览器 E2E 验证命令形态（browser_e2e）
 
-UI 类 Issue 的验证不能只看"测试绿了"——需要真实启动应用、真实操作页面、产出可门禁的浏览器产物。为此 `[agent_runner.runner].verification_commands` 在纯 shell 字符串之外支持**结构化 E2E 条目**（PRD：`tasks/pending/P1-FEAT-20260930-225500-browser-e2e-verification.md`）。两类条目在同一队列按序执行，任一失败短路进入既有 `VERIFICATION_FAILED` recovery 通道；**纯字符串条目的解析与执行行为逐字段不变**，未配置 E2E 条目的仓库零变化。
+UI 类 Issue 的验证不能只看"测试绿了"——需要真实启动应用、真实操作页面、产出可门禁的浏览器产物。为此 `[agent_runner.runner].verification_commands` 在纯 shell 字符串之外支持**结构化 E2E 条目**（PRD：`tasks/archive/P1-FEAT-20260930-225500-browser-e2e-verification.md`，交付后归档于 `tasks/archive/`）。两类条目在同一队列按序执行，任一失败短路进入既有 `VERIFICATION_FAILED` recovery 通道；**纯字符串条目的解析与执行行为逐字段不变**，未配置 E2E 条目的仓库零变化。
 
 ### 配置形态
 

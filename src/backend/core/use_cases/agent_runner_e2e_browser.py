@@ -188,11 +188,16 @@ def run_browser_e2e_verification_command(
             env_allow_extra=e2e_command.env_allow,
         )
     except subprocess.TimeoutExpired as timeout_error:
+        # 执行层的看门狗对 wall-clock 与无输出超时抛同一种异常，但异常上的
+        # ``timeout`` 是实际生效的那条限值——据实渲染，别把静默超时报成 wall-clock。
+        effective_timeout = getattr(timeout_error, "timeout", None)
+        if effective_timeout is None:
+            effective_timeout = e2e_command.timeout_seconds
         return _failure_result(
             e2e_command,
             E2EFailureCategory.SCRIPT_TIMEOUT,
             (
-                f"E2E run timed out after {e2e_command.timeout_seconds}s and its "
+                f"E2E run hit its timeout after {effective_timeout}s and its "
                 f"process group was terminated: {timeout_error}"
             ),
             captured_output=_timeout_partial_output(timeout_error),
