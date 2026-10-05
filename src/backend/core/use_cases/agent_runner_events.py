@@ -145,6 +145,20 @@ def parse_latest_event_marker(comments: list[str]) -> ReviewEventMarker | None:
     return None
 
 
+def iter_event_markers(comments: list[str]) -> list[ReviewEventMarker]:
+    """Return every parsed iar:event marker in chronological order.
+
+    供派生视图统计轮次等场景使用（例如按 ``post_pr_rework_requested`` +
+    ``action=repair_pr_branch`` 计数 CI 修复轮数）；不做去重、不做 latest-wins。
+    """
+    markers: list[ReviewEventMarker] = []
+    for comment_body in comments:
+        marker = _parse_event_marker(comment_body)
+        if marker is not None:
+            markers.append(marker)
+    return markers
+
+
 def parse_latest_event_marker_for_phases(
     comments: list[str],
     phases: set[str],
@@ -182,6 +196,39 @@ def parse_latest_pending_rework_marker(
             return marker
         if marker.phase in _REWORK_COMPLETION_PHASES:
             rework_has_later_completion = True
+    return None
+
+
+# ── CI/CD 自动修复策略 marker（单 PRD 三态覆盖）────────────────────────────
+# 与 ``iar:event`` / ``iar:failure-context`` 同属 ``iar:*`` 隐藏 marker 约定：
+# 可确定性解析的键值元数据，写在对应 GitHub Issue 的评论里，latest-wins。
+# 合法取值 ``inherit``（未设置/清除覆盖）/ ``on``（强制开启）/ ``off``（强制关闭）。
+
+_CI_AUTO_REPAIR_POLICY_MARKER_PATTERN = re.compile(
+    r"<!--\s*iar:ci-auto-repair-policy\s+" r"value=(?P<value>inherit|on|off)" r"\s*-->"
+)
+
+VALID_CI_AUTO_REPAIR_POLICY_VALUES = ("inherit", "on", "off")
+
+
+def format_ci_auto_repair_policy_marker(value: str) -> str:
+    """格式化单 PRD CI/CD 自动修复策略的隐藏 marker。"""
+    if value not in VALID_CI_AUTO_REPAIR_POLICY_VALUES:
+        raise ValueError(f"非法的 CI 自动修复策略值: {value!r}")
+    return f"<!-- iar:ci-auto-repair-policy value={value} -->"
+
+
+def parse_latest_ci_auto_repair_policy(comments: list[str]) -> str | None:
+    """返回最近一条策略 marker 的值；无 marker 时返回 ``None``（等同 inherit）。
+
+    latest-wins 语义与 :func:`parse_latest_event_marker` 同构：按时间倒序取
+    第一条命中。写回 ``inherit`` 表示清除显式覆盖，marker 仍然存在但值等于
+    "跟随全局"。
+    """
+    for comment_body in reversed(comments):
+        match = _CI_AUTO_REPAIR_POLICY_MARKER_PATTERN.search(comment_body)
+        if match is not None:
+            return match.group("value")
     return None
 
 

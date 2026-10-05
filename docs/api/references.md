@@ -211,6 +211,36 @@ curl -sS \
 - 不会修改 `safety.auto_merge`，也不会自动启动或停止 daemon；
 - 未知仓库返回 `400`；目标仓缺 `.iar.toml`、配置非法、不可写或写后读回不一致返回 `409`，且原文件保持不变。
 
+### `GET /api/v1/agent-runner/backlog/ci-repair-global`
+
+读取当前仓库的全局 CI/CD 自动修复开关（`post_pr_supervisor.auto_repair_ci`，默认 `false`）。每次调用 fresh load 配置。该开关与 `autopilot.enabled`、`safety.auto_merge`、`runner.fix_agent_enabled` 语义独立，互不联动。
+
+```json
+{ "repo_id": "keda-main", "global_enabled": false, "max_rounds": 2 }
+```
+
+### `PATCH /api/v1/agent-runner/backlog/ci-repair-global`
+
+只修改目标仓库 `.iar.toml` 的 `[agent_runner.post_pr_supervisor].auto_repair_ci`。请求体 `{"repo_id": "...", "enabled": true}`；成功响应体来自写后 fresh load，字段与 `GET` 一致。写回复用受限配置编辑器（底层 `toml_section_editor.update_toml_table_keys` 原子替换），失败时原文件不变并返回 `409`。
+
+### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/ci`
+
+返回单个 PRD 的 CI/CD 交付尾段投影 `ci_delivery`（每次请求 fresh 读取 GitHub PR context 与 Issue marker，不持久化、不复用缓存）。该 DTO 同时是 `iar backlog ci status --json` 的机读输出，二者同构：
+
+- `status`：`no_pr` / `pending` / `success` / `failure` / `unavailable`；`unavailable` 表示 GitHub 不可达或状态未知，按「未验证」呈现而非通过或失败；
+- `round_count` / `max_rounds`：已发生的自动修复轮数与上限（复用 `post_pr_supervisor.max_repair_attempts`），轮次事实源是既有 `post_pr_rework_requested` marker 与 PR head SHA；
+- `problems`：来自 GitHub `checks_summary` 的原始失败观察，不推断 job 日志或根因；
+- `stored_policy` / `global_enabled` / `effective_enabled`：单 PRD 三态覆盖（`inherit/on/off`）、仓库全局值与服务端计算的最终生效值（`on → true`、`off → false`、`inherit → 全局值`）；
+- `exhausted` / `exhausted_reason`：修复预算耗尽时停止自动副作用并持续显错。
+
+### `PATCH /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-policy`
+
+设置单个 PRD 的策略覆盖，请求体 `{"repo_id": "...", "value": "inherit|on|off"}`。写入对应 GitHub Issue 的 latest-wins `iar:ci-auto-repair-policy` marker（`inherit` 表示清除显式覆盖），成功响应是**写后 fresh 回读评论流**得到的 `ci_delivery`。无关联 Issue 的 PRD 返回 `400`。
+
+### `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-repair`
+
+显式请求一次修复（问题卡「立即修复」与 `iar backlog ci repair` 共用语义）。服务端 fresh 解析当前 PR head 并以 `head SHA + repair action` 为幂等键：同一失败轮次的重复请求零新增副作用；修复仍走既有 run 侧 repair 路径，保留轮数上限、worktree 与禁止路径门禁。无法获取当前 PR context 时返回 `409`。
+
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/evidence`
 
 列出某个 PRD 在仓库中**当前仍保留**的验收证据文件。每次请求重新读盘，不复用任何缓存。

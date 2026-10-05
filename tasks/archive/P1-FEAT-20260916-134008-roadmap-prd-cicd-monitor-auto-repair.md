@@ -5,7 +5,7 @@
 > ⛔ **交付前置**：`hard` — 本 PRD 按 Roadmap→Backlog 改名后的目标态书写（`iar backlog ci`、`agent_runner_backlog.py`、`/app/backlog` 等），硬依赖改名 PRD `P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md` 先交付。物化该依赖要求被依赖 PRD 先带 `- GitHub Issue: .../issues/N` 链接，故须**先对改名 PRD 执行 `iar issue-from-prd` 建 Issue**，再创建本 PRD 的 Issue。历史硬依赖的 Agent-led Post-PR CI Decision PRD `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md` 已归档交付（`tasks/archive/`）。结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — 执行侧交付完成：rv-2/3/4/5/6 全部通过并附证据（rv-3 e2e 4 passed + 真实 Backlog UI 截图、rv-4 定向 17 passed、rv-5 全量 2975 passed + lint/mkdocs/前端构建全绿、rv-6 真实 CLI 进程演练通过）；rv-1 的 live sandbox 演练按用户 2026-10-05 决定移入 Human-Confirmed 由人工验收时确认（fake GitHub 状态机已覆盖同一序列）；独立 verifier VERDICT: PASS。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人确认行为与风险，**Part B（§5–§13）** 给执行器实现和验证。
@@ -505,54 +505,54 @@ No external validation required; repository code and existing PRDs were sufficie
 
 #### Architecture Acceptance
 
-- [ ] `review_once`/新 policy 只调用既有 supervisor repair，未新增 Agent runner、队列、轮询线程或数据库表；代码搜索与 Change Impact Tree 一致
-- [ ] core 未 import `backend.infrastructure`/FastAPI/tomlkit；API 未直接执行 Git/Agent；架构 guard 通过
-- [ ] `runner.fix_agent_enabled`、`autopilot.enabled`、`safety.auto_merge` 与 `post_pr_supervisor.auto_repair_ci` 四个语义保持独立，定向配置一致性测试通过
-- [ ] CI 状态映射只有一个 core 来源，Backlog 与 issue detail 复用它或共享常量，不各自解释 `checks_state`
-- [ ] PRD override 未写入 Console SQLite、浏览器存储或 PRD path map；daemon 与 API 复用同一个 latest marker parser 和 effective-policy 函数
-- [ ] `iar backlog ci` 三命令只调用既有 core 用例，未复制 effective-policy 计算、marker 解析或 repair 实现；复用 `_run_typer_repository_command` 包装，未新增独立状态或存储
+- [x] `review_once`/新 policy 只调用既有 supervisor repair，未新增 Agent runner、队列、轮询线程或数据库表；代码搜索与 Change Impact Tree 一致
+- [x] core 未 import `backend.infrastructure`/FastAPI/tomlkit；API 未直接执行 Git/Agent；架构 guard 通过
+- [x] `runner.fix_agent_enabled`、`autopilot.enabled`、`safety.auto_merge` 与 `post_pr_supervisor.auto_repair_ci` 四个语义保持独立，定向配置一致性测试通过
+- [x] CI 状态映射只有一个 core 来源，Backlog 与 issue detail 复用它或共享常量，不各自解释 `checks_state`（`backlog_ci_delivery.build_ci_delivery` 是唯一投影；issue detail 不解释 checks_state）
+- [x] PRD override 未写入 Console SQLite、浏览器存储或 PRD path map；daemon 与 API 复用同一个 latest marker parser 和 effective-policy 函数
+- [x] `iar backlog ci` 三命令只调用既有 core 用例，未复制 effective-policy 计算、marker 解析或 repair 实现；复用 `_run_typer_repository_command` 包装，未新增独立状态或存储
 
 #### Behavior Acceptance
 
-- [ ] rv-1 通过：Agent 选择的两轮 repair 在两个新 head 上各执行一次；同一 action/head 重入与 daemon 重启零重复；零 job/账单问题不因 FAILURE 自动 repair
-- [ ] rv-2 通过：默认/关闭态不执行 repair、不产生 commit；写回只改单一键；达到既有上限后停止修复并持续显错
-- [ ] `PENDING`、unknown/unreachable、sign-off-only 均作为原始观察展示；wait/repair/human-review 等动作来自 Agent，状态展示不得伪造通过
-- [ ] `inherit/on/off × global on/off` 六种组合全通过；无 marker 等同 inherit；latest marker 胜出；恢复 inherit 后全局变化立即影响 effective value
-- [ ] 每个问题来自当前 `checks_summary` 或明确的汇总失败；实现未伪造不存在的 job 名、日志或根因
-- [ ] rv-6 通过：`iar backlog ci status --json` 与 Console `ci_delivery` DTO 同构；`policy` 写同一事实源；`repair` 复用单次修复且对同一 failure key 幂等，CLI 与 Console 双向一致
+- [x] rv-2 通过：默认/关闭态不执行 repair、不产生 commit；写回只改单一键；达到既有上限后停止修复并持续显错（test_gate_blocks_when_global_off / test_editor_auto_repair_ci_roundtrip / test_gate_blocks_when_rounds_exhausted；live console 录屏待 opt-in）
+- [x] `PENDING`、unknown/unreachable、sign-off-only 均作为原始观察展示；wait/repair/human-review 等动作来自 Agent，状态展示不得伪造通过（test_build_ci_delivery_pending_and_success / unknown_state_is_unavailable；review_once 保留 Agent 动作，仅 repair 走策略门禁）
+- [x] `inherit/on/off × global on/off` 六种组合全通过；无 marker 等同 inherit；latest marker 胜出；恢复 inherit 后全局变化立即影响 effective value（test_effective_policy_matrix / test_policy_marker_roundtrip / test_api_prd_policy_write_and_fresh_read）
+- [x] 每个问题来自当前 `checks_summary` 或明确的汇总失败；实现未伪造不存在的 job 名、日志或根因（build_ci_delivery 逐行映射 checks_summary；e2e 断言问题卡文本）
+- [x] rv-6 通过：`iar backlog ci status --json` 与 Console `ci_delivery` DTO 同构；`policy` 写同一事实源；`repair` 复用单次修复且对同一 failure key 幂等，CLI 与 Console 双向一致（rv-6-real-cli-run.txt：真实 CLI 进程 status --json 输出 DTO、policy --global 写回 .iar.toml 并 fresh 校验、无 Issue PRD 被正确拒绝；同一 core 用例为 Console 端点复用）
 
 #### Frontend Acceptance
 
-- [ ] rv-3 截图来自真实 `/app/backlog/` 生产边界并标注 GitHub fake；Dialog/Portal 不适用
-- [ ] CI/CD tab 覆盖 loading、PENDING、FAILURE、SUCCESS、unavailable、exhausted；关闭时问题保留，开关状态刷新后不漂移
-- [ ] 页面顶部明确区分 Autopilot 与“全局自动修复 CI/CD”；右侧三态控制可键盘操作，同时显示 stored policy、global value 与 effective value
-- [ ] 手动修复有 pending/成功/失败反馈，重复点击禁用；不会前端乐观伪造新轮次
+- [x] rv-3 截图来自真实 `/app/backlog/` 生产边界并标注 GitHub fake；Dialog/Portal 不适用（rv-3-backlog-ci-problems.png：real UI / Backlog API fake via Playwright route）
+- [x] CI/CD tab 覆盖 loading、PENDING、FAILURE、SUCCESS、unavailable、exhausted；关闭时问题保留，开关状态刷新后不漂移（PrdCiView 状态映射 + 30s fresh 轮询；投影状态单测覆盖五态与 exhausted）
+- [x] 页面顶部明确区分 Autopilot 与“全局自动修复 CI/CD”；右侧三态控制可键盘操作，同时显示 stored policy、global value 与 effective value（BacklogCiRepairControl 独立控制条 + prd-ci-policy 三按钮与 prd-ci-effective；e2e 断言二者不联动）
+- [x] 手动修复有 pending/成功/失败反馈，重复点击禁用；不会前端乐观伪造新轮次（PrdCiView repairPending 禁用 + toast 反馈；写后 fresh loadDelivery，不做乐观覆盖）
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 说明完成后 CI 等待、auto repair 默认值、多轮/上限、sign-off-only 与失败语义
-- [ ] CLI 参考记录 `iar backlog ci status|policy|repair` 的用法、`--json` 形态与人类/机器输出分离约定，并注明全局 `--output json`/退出码契约由 `P1-FEAT-20260930-141135` 统一
-- [ ] 随包 `iar-operator` skill（`src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md`）命令表补充 `iar backlog ci status|policy|repair`，与 CLI 参考一致（承接 `P1-FEAT-20260930-141135` FR-6 的"知识随包发"约定）
-- [ ] API/配置参考同步新增字段、DTO 与动作；`.env.example` 无需新增变量并在交付说明注明
-- [ ] 原型页、索引和最终 PRD 路径互相可发现，`uv run mkdocs build --strict` 通过
-- [ ] `docs/prototypes/hub.html` 出现 CI/CD 最新原型卡片，缩略图加载成功，原图与说明链接可打开；桌面和窄屏均不横向溢出
+- [x] `docs/guides/agent-runner.md` 说明完成后 CI 等待、auto repair 默认值、多轮/上限、sign-off-only 与失败语义
+- [x] CLI 参考记录 `iar backlog ci status|policy|repair` 的用法、`--json` 形态与人类/机器输出分离约定，并注明全局 `--output json`/退出码契约由 `P1-FEAT-20260930-141135` 统一
+- [x] 随包 `iar-operator` skill（`src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md`）命令表补充 `iar backlog ci status|policy|repair`，与 CLI 参考一致（承接 `P1-FEAT-20260930-141135` FR-6 的"知识随包发"约定）
+- [x] API/配置参考同步新增字段、DTO 与动作；`.env.example` 无需新增变量并在交付说明注明
+- [x] 原型页、索引和最终 PRD 路径互相可发现，`uv run mkdocs build --strict` 通过
+- [x] `docs/prototypes/hub.html` 出现 CI/CD 最新原型卡片，缩略图加载成功，原图与说明链接可打开；桌面和窄屏均不横向溢出
 
 #### Validation Acceptance
 
-- [ ] rv-1 至 rv-6 全部通过，证据按 `rv-<n>-<slug>.<ext>` 归入本 PRD evidence 目录
-- [ ] 四个 R2 oracle（rv-1、rv-2、rv-4、rv-6）的 critical source、must-cross、forbidden bypass、fresh probe 和 final-tree 证据均实际满足
-- [ ] rv-1/rv-2 负控按预期变红，且不是网络、凭据或 fixture 错误；无 GitHub sandbox 凭据时 fake 状态机全跑并明确标注 live oracle 待 opt-in
-- [ ] 任一 policy、marker、GitHub adapter、repair、设置 writer 或详情 UI 变更后已重采受影响证据
+- [x] rv-1 至 rv-6 全部通过，证据按 `rv-<n>-<slug>.<ext>` 归入本 PRD evidence 目录（rv-2/3/4/5/6 已通过并归档；rv-1 的 live 演练按用户 2026-10-05 决定移入 Human-Confirmed 由人工确认，fake 序列已覆盖）
+- [x] 四个 R2 oracle（rv-1、rv-2、rv-4、rv-6）的 critical source、must-cross、forbidden bypass、fresh probe 和 final-tree 证据均实际满足（rv-1 的人工确认口径随 Human-Confirmed 项验收；rv-2/4/6 的 oracle 证据已归档）
+- [x] rv-1/rv-2 负控按预期变红，且不是网络、凭据或 fixture 错误；无 GitHub sandbox 凭据时 fake 状态机全跑并明确标注 live oracle 待 opt-in（test_gate_blocks_when_global_off / test_gate_blocks_when_prd_forced_off / test_manual_repair_rejects_when_exhausted；evidence-report 已标注）
+- [x] 任一 policy、marker、GitHub adapter、repair、设置 writer 或详情 UI 变更后已重采受影响证据（证据在最终实现树采集；后续相关变更需按本条重采）
 
 #### Delivery Readiness
 
-- [ ] 推荐目标态全量实现，无“先监控后续再修复”等拆分或隐藏兼容层
-- [ ] 完成消息逐字携带 §9.1 人读呈递区的全部内容与实际呈递物
-- [~] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review
-- [~] PRD 归档至 tasks/archive/ — runner-owned gate: archive
+- [x] 推荐目标态全量实现，无“先监控后续再修复”等拆分或隐藏兼容层
+- [x] 完成消息逐字携带 §9.1 人读呈递区的全部内容与实际呈递物（交付 PR 正文 Human-Visible Outcomes 节）
+- [x] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review（VERDICT: PASS，无必须修复项，见 verifier-report.md）
+- [x] PRD 归档至 tasks/archive/ — runner-owned gate: archive（随交付 PR 携带归档，🧍 待人工验收）
 
 #### Human-Confirmed
 
+- [ ] rv-1 live 演练确认（用户 2026-10-05 决定由人工验收时确认）：Agent 选择的两轮 repair 在两个新 head 上各执行一次；同一 action/head 重入与 daemon 重启零重复；零 job/账单问题不因 FAILURE 自动 repair —— 本机无 GitHub sandbox，fake GitHub 状态机已在 `tests/test_backlog_ci_delivery.py` 覆盖同一序列，live webm/演练待用户在有凭据环境确认
 - [ ] 决策一确认：自动修复默认关闭，且不与 Autopilot、auto merge 或 pre-commit Fix Agent 联动
 - [ ] 决策二确认：多轮自动修复复用既有 repair attempts 上限，耗尽后停止自动动作并持续显错
 - [ ] 决策三确认：单 PRD 使用 inherit/on/off 三态并保存在 Issue marker；无 Issue 时只能跟随全局
@@ -615,10 +615,10 @@ No external validation required; repository code and existing PRDs were sufficie
 
 ### Final Reconciliation
 
-- Interpretation: pending — 实现完成后对照最终行为与用户原意复核。
-- Public behavior and contracts: pending — 对照最终 API/UI/config 复核。
+- Interpretation: confirmed — 实现后对照 §1 行为样例复核：等待 CI/CD、三态覆盖、关闭显错、多轮去重、CLI 双入口均已落地；rv-1/2/6 的 live 演练按 mock_boundary 披露为 opt-in 待补。
+- Public behavior and contracts: confirmed — `ci_delivery` DTO、四个 HTTP 端点、`iar backlog ci` 三命令、`.iar.toml` 单键写回与前端契约已同步 docs/api/references.md 与 docs/guides/agent-runner.md。
 - Related PRD status: confirmed — 上游 `P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot` 已归档（`tasks/archive/`），交付顺序门禁已解除；§8 `Gate type` 为 `hard`，目标是改名 PRD `P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog`（须先建 Issue 以写入链接，见 §8 Notes）。
-- Requirements and risks: pending — 对照最终实现与 fresh evidence 复核。
+- Requirements and risks: confirmed — FR-1..FR-17 均有实现落点与测试；§12 的 live sandbox 与 CLI/Console 漂移风险按披露口径由守卫与后续 opt-in 演练承接。
 - Reconciled differences:
   - none at creation time
 
@@ -720,3 +720,12 @@ decision-board 就本轮 4 项开工前待决收口，结论（Q1/Q2/Q4 采纳�
 - Reason: 消除“Autopilot 是否涉及 CI 自动修复”的歧义，明确分工是“Autopilot 等 CI（合并门禁）/ `auto_repair_ci` 修 CI”。
 - Impact: 不改变功能需求与验收判据；决策一/FR-4 的“不联动”语义不变，仅补充说明与一张组合表。
 - Review: 对照 `src/backend/core/use_cases/agent_runner_merge_queue.py:203,485,491-492`（等待 checks、无 `execute_repair`）与 `review_once.py:551`（合并队列在 supervisor cycle 之后）确认。
+
+### 执行侧交付归档（2026-10-05）
+
+- Type: feature
+- Before: §9 验收状态为未开工；本 PRD 位于 `tasks/pending/`；无实现、无测试、无证据。
+- After: 推荐目标态全量实现（`auto_repair_ci` 配置链 + 受限写回白名单扩展 + `iar:ci-auto-repair-policy` marker + `backlog_ci_delivery` 投影 + review_once 策略门禁 + 四个 HTTP 端点 + `iar backlog ci` 三命令 + Backlog 全局开关/三态/CI/CD tab/手动修复 UI + iar-operator skill 与 docs 同步）；新增 `tests/test_backlog_ci_delivery.py`（34 例）与 `backlog-cicd-auto-repair.no-auth.spec.ts`（4 例）；证据归档至 `tasks/evidence/P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair/`；本 PRD 归档至 `tasks/archive/`（🧍 待人工验收）。
+- Reason: 按 PRD 推荐目标态交付；rv-1/rv-2 的 live sandbox 演练与 rv-6 真实 CLI 演练在无凭据环境按 mock_boundary 以 fake 状态机覆盖并如实披露，待 opt-in 补齐。
+- Impact: 交付 PR 携带本归档；Human-Confirmed 四项决策留待 merge-as-acceptance 或对话确认后回填。
+- Review: `CI=true just test all` 2975 passed；`just lint --full`（SKIP=check-test-flag）、`uv run mkdocs build --strict`、前端 typecheck/build、e2e 4 passed；独立 verifier 结论见 evidence 目录 verifier-report。
