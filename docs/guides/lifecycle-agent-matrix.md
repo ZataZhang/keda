@@ -200,12 +200,45 @@ Settings 的「Agent 管理」区块用粘性 Tab 分两页：**Tab ①「Agent 
 
 ## 跨 agent 回退顺序（与矩阵是两件事）
 
-矩阵只选**一个**主 agent；"主 agent 崩溃或额度受限时换下一个"由
-`[agent_runner.runner]` 的 `agent_fallback_order`（默认
+矩阵只选**一个**主 agent；"主 agent 跑不起来（CLI 缺失 / 额度限流 / 进程级崩溃 /
+超时）时换下一个"由 `[agent_runner.runner]` 的 `agent_fallback_order`（默认
 `["claude", "kimi", "codex"]`）与 `max_agent_switches`（默认 `2`，即最多试 3 个
-agent）驱动，**全阶段共用一条链**，不在矩阵里按阶段各排一条。第一个尝试的
-agent 由矩阵 / 标签路由决定；本机未安装的 agent 在运行时跳过。Settings 的
-「生命周期 Agent 设置」页给这一对键一个可排序编辑入口。
+agent）驱动。第一个尝试的 agent 仍由矩阵 / 标签路由 / 阶段预设决定；本机未安装的
+agent 在运行时跳过。Settings 的「生命周期 Agent 设置」页给这一对键一个可排序编辑入口。
+
+**哪些阶段接入了这条链：**
+
+| 阶段 | 本地候选链 | 候选口径 | 全部候选都跑不起来时 |
+|---|---|---|---|
+| implementation（整条执行流水线） | 是 | 首选 + 链，逐 Issue 换 builder | 落 `MaxRetriesExceededError`，判失败 |
+| verifier | 是 | 恒 ≠ 本次 builder | 降级成 fail-safe red，交回 builder 的 recovery 循环 |
+| review（pre-PR 审核者） | 是 | 恒 ≠ 本次 builder | 上抛给外层 builder 阶梯 |
+| supervisor（post-PR 监督者） | 是 | 恒 ≠ 本次 builder（拿得到时） | 合成 `mark_failed` |
+| fix / closeout | 跟随实现者 | 随 implementation 链 | 同 implementation |
+| content_generation / planner / deliberate | 否 | — | 各自的既有兜底 |
+
+**换人条件（载重语义）：** 只对"agent 跑不起来"的**基础设施失败**换人——CLI 缺失 /
+额度限流 / 进程级崩溃 / 超时包裹的执行失败，以及 supervisor 的进程启动 I/O 失败。
+**语义判定绝不换人**：reviewer 返回 `changes_requested`、supervisor 输出 `mark_failed`
+都是真实决定，不触发换人。换人时**丢弃模型 / 推理档绑定**（各 CLI 模型命名空间不同，
+继续套用会报错或误设模型）。
+
+**候选枚举口径：** `build_agent_candidates`
+（`src/backend/core/use_cases/agent_candidate_fallback.py`）统一构建"首选 + 回退链、
+去重、排除 builder、按 `max_agent_switches` 封顶"的序列；各阶段自己的"逐个候选尝试"
+遍历留在各自调用点（失败分类 / 状态清理 / 耗尽语义各不相同，强行统一更易出错）。
+
+**为什么 review / supervisor 要接、其余不接：**
+
+- review 与 supervisor 是**后期门禁 / 监督**：agent 偶发不可用不该把一条已通过实现的
+  Issue 判死，也不该强迫整条流水线换 builder 重跑；换一个审核者还顺带强化独立性。
+- content_generation 是纯文本生成，失败已有 agent → 模板 → 硬兜底三级，换 agent
+  无语义增益（artifact 契约不变）。
+- planner（`iar ask`）与 deliberate 是交互式 / 规划会话，价值在单一连续会话的上下文；
+  中途换人会丢上下文、产出不连贯；deliberate 另有角色感知的 fallback profile 机制。
+
+> 双层预算提示：review 本地候选链耗尽后仍会走外层 builder 阶梯，最坏出现
+> `(max_agent_switches + 1)²` 次 reviewer 调用（仅在同时宕机时发生，仍有界）。
 
 ## 相关
 

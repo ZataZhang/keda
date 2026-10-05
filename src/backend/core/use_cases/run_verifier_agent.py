@@ -24,6 +24,7 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, TokenUsage
+from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
 from backend.core.use_cases.agent_runner_evidence_snapshot import (
     restore_evidence_snapshot,
     snapshot_evidence_dir,
@@ -478,6 +479,9 @@ def _verifier_candidate_agents(
     与 ``max_agent_switches``，与 builder 换 agent 用同一套配置与预算，不新增开关；
     独立性由"≠ builder"保证（换 model 即换判定视角）。
 
+    具体枚举委托 :func:`build_agent_candidates`（review / supervisor 阶段共用同一
+    套候选口径）。
+
     Args:
         config: 应用配置。
         builder_agent: 本次 builder 用的 agent，候选里必须排除。
@@ -486,14 +490,7 @@ def _verifier_candidate_agents(
     Returns:
         去重后的候选序列，长度最多 ``max_agent_switches + 1``；首选始终在首位。
     """
-    candidates = [primary_agent]
-    max_switches = max(0, config.runner.max_agent_switches)
-    for candidate in config.runner.agent_fallback_order:
-        if len(candidates) - 1 >= max_switches:
-            break
-        if candidate != builder_agent and candidate not in candidates:
-            candidates.append(candidate)
-    return tuple(candidates)
+    return build_agent_candidates(config, primary_agent, exclude_agent=builder_agent)
 
 
 def _format_verifier_unavailable_message(

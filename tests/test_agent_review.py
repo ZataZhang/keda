@@ -1777,9 +1777,15 @@ def test_run_pre_pr_review_escalates_provider_capacity(tmp_path: Path) -> None:
             )
 
     fake_runner = _CapacityRunner()
+    # 关掉跨 agent 回退，聚焦"单候选耗尽即上抛"这一条语义；
+    # 换人行为由 test_run_pre_pr_review_switches_reviewer_* 覆盖。
     config = AppConfig(
         pre_pr_review=PrePrReviewConfig(enabled=True, max_attempts=1),
-        runner=RunnerConfig(transient_retry_attempts=2, transient_retry_delay_seconds=0),
+        runner=RunnerConfig(
+            transient_retry_attempts=2,
+            transient_retry_delay_seconds=0,
+            agent_fallback_order=(),
+        ),
     )
     worktree_path = tmp_path / "issue-1"
     worktree_path.mkdir()
@@ -1838,9 +1844,14 @@ def test_run_pre_pr_review_escalates_on_reviewer_timeout(tmp_path: Path) -> None
             )
 
     fake_runner = _TimeoutRunner()
+    # 关掉跨 agent 回退，聚焦"单候选超时即上抛"；换人由 switches_reviewer 覆盖。
     config = AppConfig(
         pre_pr_review=PrePrReviewConfig(enabled=True, max_attempts=1),
-        runner=RunnerConfig(transient_retry_attempts=2, transient_retry_delay_seconds=0),
+        runner=RunnerConfig(
+            transient_retry_attempts=2,
+            transient_retry_delay_seconds=0,
+            agent_fallback_order=(),
+        ),
     )
     worktree_path = tmp_path / "issue-1"
     worktree_path.mkdir()
@@ -2279,3 +2290,141 @@ def test_resolve_reviewer_agent_never_falls_back_to_codex() -> None:
         pre_pr_review=PrePrReviewConfig(enabled=True, review_agent="kimi", allow_same_agent=False)
     )
     assert resolve_reviewer_agent(issue, explicit_config, "codex") == "kimi"
+
+
+class _ReviewerFallbackRunner(FakeProcessRunner):
+    """按 agent 分派的假 runner：``failing`` 里的 agent 抛额度错误，其余返回 verdict。"""
+
+    _AGENT_BINS = ("codex", "claude", "kimi", "qoder", "codebuddy", "pi", "opencode")
+
+    def __init__(self, *, failing: set[str], verdict_json: str) -> None:
+        super().__init__()
+        self._failing = failing
+        self._verdict_json = verdict_json
+
+    def run(
+        self,
+        command,
+        *,
+        cwd,
+        check=True,
+        timeout=None,
+        capture_output=True,
+        label=None,
+        output_protocol=None,
+    ):  # type: ignore[override]
+        command_tuple = tuple(command)
+        agent_name = command_tuple[0] if command_tuple else ""
+        if agent_name in self._failing:
+            self.calls.append(list(command))
+            raise CommandFailedError(
+                1,
+                list(command),
+                output="API Error: Request rejected (429) usage limit reached",
+                stderr="",
+            )
+        if agent_name in self._AGENT_BINS:
+            self.calls.append(list(command))
+            return CommandResult(
+                command=command_tuple,
+                return_code=0,
+                stdout=self._verdict_json,
+                stderr="",
+            )
+        return super().run(
+            command,
+            cwd=cwd,
+            check=check,
+            timeout=timeout,
+            capture_output=capture_output,
+        )
+
+
+def _reviewer_calls(runner: FakeProcessRunner) -> list[str]:
+    """只取 agent 调用的 argv[0]，过滤掉 git 等宿主命令。"""
+    agent_bins = _ReviewerFallbackRunner._AGENT_BINS
+    return [call[0] for call in runner.calls if call and call[0] in agent_bins]
+
+
+def _run_review_with_config(config: AppConfig, tmp_path: Path, runner: FakeProcessRunner):
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    worktree_path = tmp_path / "issue-1"
+    worktree_path.mkdir()
+    return run_pre_pr_review(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=config,
+        github_client=FakeGitHubClient(),
+        process_runner=runner,
+        selected_agent="codex",
+        head_sha_before="abc123",
+        expected_branch="issue-1",
+        verification_results=[],
+    )
+
+
+def test_run_pre_pr_review_switches_reviewer_when_primary_cannot_run(tmp_path: Path) -> None:
+    """主审核者额度耗尽时顺延下一个候选，而不是判死整个 Issue。"""
+    runner = _ReviewerFallbackRunner(
+        failing={"codex"},
+        verdict_json='{"verdict": "approved", "summary": "LGTM", "findings": []}',
+    )
+    config = AppConfig(
+        pre_pr_review=PrePrReviewConfig(enabled=True, max_attempts=1),
+        runner=RunnerConfig(
+            transient_retry_attempts=2,
+            transient_retry_delay_seconds=0,
+            agent_fallback_order=("claude", "kimi", "codex"),
+            max_agent_switches=2,
+        ),
+    )
+
+    _run_review_with_config(config, tmp_path, runner)
+
+    # codex 跑不起来一次即换，claude 接手后批准；不重锤 codex。
+    assert _reviewer_calls(runner) == ["codex", "claude"]
+
+
+def test_run_pre_pr_review_does_not_switch_on_changes_requested(tmp_path: Path) -> None:
+    """审核者给出的真实判定（changes_requested）不触发换人。"""
+    runner = _ReviewerFallbackRunner(
+        failing=set(),
+        verdict_json='{"verdict": "changes_requested", "summary": "nope", "findings": []}',
+    )
+    config = AppConfig(
+        pre_pr_review=PrePrReviewConfig(enabled=True, max_attempts=1),
+        runner=RunnerConfig(
+            transient_retry_attempts=2,
+            transient_retry_delay_seconds=0,
+            agent_fallback_order=("claude", "kimi", "codex"),
+            max_agent_switches=2,
+        ),
+    )
+
+    with pytest.raises(RuntimeError):
+        _run_review_with_config(config, tmp_path, runner)
+
+    # 语义判定绝不换人：只调用首选审核者。
+    assert _reviewer_calls(runner) == ["codex"]
+
+
+def test_run_pre_pr_review_raises_after_all_reviewer_candidates_fail(tmp_path: Path) -> None:
+    """所有候选都跑不起来时保持今日行为：上抛 ProviderCapacityError 交给外层阶梯。"""
+    runner = _ReviewerFallbackRunner(
+        failing={"codex", "claude", "kimi"},
+        verdict_json='{"verdict": "approved", "summary": "LGTM", "findings": []}',
+    )
+    config = AppConfig(
+        pre_pr_review=PrePrReviewConfig(enabled=True, max_attempts=1),
+        runner=RunnerConfig(
+            transient_retry_attempts=2,
+            transient_retry_delay_seconds=0,
+            agent_fallback_order=("claude", "kimi", "codex"),
+            max_agent_switches=2,
+        ),
+    )
+
+    with pytest.raises(ProviderCapacityError):
+        _run_review_with_config(config, tmp_path, runner)
+
+    assert _reviewer_calls(runner) == ["codex", "claude", "kimi"]

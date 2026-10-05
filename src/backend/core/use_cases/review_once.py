@@ -363,6 +363,8 @@ def _process_review_candidate(
             process_runner=process_runner,
             pr_context=pr_context,
             supervisor_agent=supervisor_agent,
+            # `iar review` 入口拿不到本次实现者，回退候选不排除 builder。
+            builder_agent=None,
             cycle=cycle,
         )
     except Exception:

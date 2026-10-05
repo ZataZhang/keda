@@ -154,6 +154,7 @@ def _run_supervisor_with_repair_loop(
                 process_runner=process_runner,
                 pr_context=current_pr_context,
                 supervisor_agent=supervisor_agent,
+                builder_agent=executor_agent,
                 cycle=cycle,
                 model_selection=supervisor_model_selection,
             )
