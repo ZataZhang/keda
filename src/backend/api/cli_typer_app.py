@@ -99,7 +99,7 @@ def _resolve_keda_version() -> str:
 
 def _registered_agent_names() -> tuple[str, ...]:
     """已注册 agent 名（Typer 枚举的取值来源），配置加载失败回落内置默认。"""
-    from backend.api.cli_parser import registered_agent_names
+    from backend.api.cli_parser_options import registered_agent_names
 
     return registered_agent_names()
 

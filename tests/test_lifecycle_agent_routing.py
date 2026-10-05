@@ -23,6 +23,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
 from backend.core.use_cases import agent_review as agent_review_module
+from backend.core.use_cases import agent_runner_delivery_closeout as delivery_closeout_module
 from backend.core.use_cases import run_agent_execution_loop as execution_loop_module
 from backend.core.use_cases.agent_runner_feedback import (
     PrdDeliveryError,
@@ -367,16 +368,27 @@ def test_closeout_agent_uses_matrix_value(tmp_path: Path, monkeypatch: pytest.Mo
             )
         return None
 
-    monkeypatch.setattr(execution_loop_module, "ensure_prd_delivery_ready", _prd_gate)
-    monkeypatch.setattr(execution_loop_module, "run_closeout_agent", capture)
+    # 交付门禁与证据门禁在执行循环与收尾层各有一份模块引用：两处都要打桩，
+    # 否则跨模块拆分后会有一侧仍走真实实现。
+    for module in (execution_loop_module, delivery_closeout_module):
+        monkeypatch.setattr(module, "ensure_prd_delivery_ready", _prd_gate)
+        monkeypatch.setattr(module, "ensure_validation_evidence_ready", lambda *a, **k: None)
+        monkeypatch.setattr(module, "ensure_no_misplaced_evidence_helpers", lambda *a, **k: None)
+        monkeypatch.setattr(module, "ensure_validation_commands_pass", lambda *a, **k: None)
+    # 收尾专属的协作对象搬到了 agent_runner_delivery_closeout，桩点随之转移。
+    monkeypatch.setattr(delivery_closeout_module, "run_closeout_agent", capture)
     monkeypatch.setattr(
-        execution_loop_module, "capture_closeout_snapshot", lambda *a, **k: object()
+        delivery_closeout_module, "capture_closeout_snapshot", lambda *a, **k: object()
     )
-    monkeypatch.setattr(execution_loop_module, "find_closeout_scope_violations", lambda *a, **k: ())
     monkeypatch.setattr(
-        execution_loop_module, "summarize_closeout_changes", lambda *a, **k: "summary"
+        delivery_closeout_module, "find_closeout_scope_violations", lambda *a, **k: ()
     )
-    monkeypatch.setattr(execution_loop_module, "build_closeout_allowed_scope", lambda *a, **k: ())
+    monkeypatch.setattr(
+        delivery_closeout_module, "summarize_closeout_changes", lambda *a, **k: "summary"
+    )
+    monkeypatch.setattr(
+        delivery_closeout_module, "build_closeout_allowed_scope", lambda *a, **k: ()
+    )
     monkeypatch.setattr(execution_loop_module, "run_verification", lambda *a, **k: [])
     monkeypatch.setattr(execution_loop_module, "has_changes", lambda *a, **k: True)
 
@@ -386,15 +398,6 @@ def test_closeout_agent_uses_matrix_value(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(execution_loop_module, "commit_requested_changes", _raising_commit)
     monkeypatch.setattr(execution_loop_module, "run_fix_agent", lambda *a, **k: None)
     monkeypatch.setattr(execution_loop_module, "unstage_changes", lambda *a, **k: None)
-    monkeypatch.setattr(
-        execution_loop_module, "ensure_validation_evidence_ready", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        execution_loop_module, "ensure_no_misplaced_evidence_helpers", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        execution_loop_module, "ensure_validation_commands_pass", lambda *a, **k: None
-    )
     monkeypatch.setattr(
         "backend.core.use_cases.run_verifier_agent.run_verifier_gate", lambda *a, **k: None
     )
