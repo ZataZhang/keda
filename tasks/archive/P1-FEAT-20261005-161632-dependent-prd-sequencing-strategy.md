@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 5 项 Human-Confirmed 未确认，证据包见 §9。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制、文件路径、命令与排期信息；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。人只在 Part A 点名处下钻。
@@ -410,9 +410,11 @@ flowchart TD
 
 | 观察结果（plain language） | 呈递物 | ~10 秒自检 |
 |---|---|---|
-| 声明 stack 的下游基于上游分支 fork（含上游提交） | `tasks/evidence/<prd-stem>/rv-1-stack-fork.png` + `open` 命令 | 看 worktree 的 git 祖先关系：上游 tip 是下游 HEAD 祖先 |
-| 上游合并后下游 PR 自动收敛到 main | `tasks/evidence/<prd-stem>/rv-2-converge.png` | 看 `gh pr view` 的 base 字段=main |
-| via-main 场景 base 落后也被刷新 | `tasks/evidence/<prd-stem>/rv-3-base-refresh.png` | 看下游 worktree 是否出现上游新增文件 |
+| 声明 stack 的下游基于上游分支 fork（含上游提交） | `tasks/evidence/P1-FEAT-20261005-161632-dependent-prd-sequencing-strategy/P1-FEAT-20261005-161632-dependent-prd-sequencing-strategy.evidence-report.md`（rv-1 transcript；`open "tasks/evidence/P1-FEAT-20261005-161632-dependent-prd-sequencing-strategy/gen_evidence.py"` 可复跑） | 看 worktree HEAD 与上游 tip：`git merge-base --is-ancestor` 成功，且二者 sha 相同 |
+| 上游合并后下游 PR 自动收敛到 main | 同上报告的 rv-2 行（自动化等价 oracle：merge-queue 集成测试） | `set_pull_request_base(pr, "main")` 被调用且随后走既有 rebase |
+| via-main 场景 base 落后也被刷新 | 同上报告的 rv-3 transcript | 本地 main 仍停在被更新前，worktree HEAD == 远端 main 且能看到上游新增文件 |
+
+> rv-1/rv-3 的判别值是 git 祖先关系与文件内容，以文本 transcript 呈递（无 PNG）；`gen_evidence.py` 走真实 `iar worktree create` CLI + 真实 git，可在本地一键复跑。
 
 **刻意不展示（`reviewer: verifier`）**：rv-4、rv-5、rv-6、rv-7 为可执行/静态断言的 verifier 组，除非失败否则不进人审。
 
@@ -420,30 +422,32 @@ flowchart TD
 
 按 §7 风险分级排序：先 R3/human-confirm（rv-1、rv-2、rv-4），再 R2（rv-3、rv-5），再折叠 R1/R0（rv-6、rv-7）与契约 diff。
 
+证据报告：`tasks/evidence/P1-FEAT-20261005-161632-dependent-prd-sequencing-strategy/P1-FEAT-20261005-161632-dependent-prd-sequencing-strategy.evidence-report.md`（含 oracle→测试映射、negative control、verifier 两轮结论）。
+
 ### Behavior Acceptance
 
-- [ ] rv-1：stack 下游基于上游分支 fork，`git merge-base --is-ancestor` 可证（证据：rv-1 报告）。
-- [ ] rv-2：上游合并后下游 PR retarget 到 main 并收敛（证据：rv-2 报告）。
-- [ ] rv-3：via-main 场景 base 落后被刷新（证据：rv-3 报告）。
-- [ ] rv-4：stack 链中途合并队列不合并下游 PR（证据：rv-4 报告）。
-- [ ] rv-5：stack 下游等待态且不消耗配额（证据：rv-5 报告）。
-- [ ] rv-8：未声明 stack 的路径行为零回归（证据：黄金对照）。
+- [x] rv-1：stack 下游基于上游分支 fork，`git merge-base --is-ancestor` 可证（证据：`gen_evidence.py` rv-1 transcript；负控 `test_resolve_fork_base_via_main_refreshes_and_prefers_remote`）。
+- [x] rv-2：上游合并后下游 PR retarget 到 main 并收敛（证据：自动化等价 oracle `test_stack_downstream_converges_after_upstream_merged` + `test_convergence_refreshes_head_before_forbidden_scan`；真实 GitHub retarget 腿无本地写权限，已在证据报告披露，留 verifier/人工复核）。
+- [x] rv-3：via-main 场景 base 落后被刷新（证据：`gen_evidence.py` rv-3 transcript；`test_resolve_fork_base_via_main_refreshes_and_prefers_remote`）。
+- [x] rv-4：stack 链中途合并队列不合并下游 PR（证据：`test_stack_downstream_skipped_until_upstream_merged`）。
+- [x] rv-5：stack 下游等待态且不消耗配额（证据：等待态 `test_stack_blocked_when_upstream_branch_not_pushed`；配额 `test_run_once_dry_run_stack_waiting_does_not_consume_quota`——max_issues=1 下被阻塞的 stack 下游未占名额，同轮仍选中后续 Issue）。
+- [x] rv-8：未声明 stack 的路径行为零回归（证据：`test_via_main_ignores_branch_readiness`、`test_via_main_issue_never_retargets_base`、`test_resolve_fork_base_via_main_*`）。
 
 ### Validation Acceptance
 
-- [ ] 至少一个 oracle 走真实 CLI + git 入口（rv-1/rv-2），非仅单测。
-- [ ] 全部 oracle 的 negative control 按 §7.6 记录并可复现。
+- [x] 至少一个 oracle 走真实 CLI + git 入口（rv-1/rv-2），非仅单测。（rv-1 走真实 `iar worktree create` CLI + 真实 git 仓库；rv-2 真实 GitHub 腿不可本地复现，以自动化等价覆盖并披露。）
+- [x] 全部 oracle 的 negative control 按 §7.6 记录并可复现。（见证据报告 negative control 小节。）
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 的 Dependency Gate 小节新增 stack 语义与两轴说明。
-- [ ] 若涉及 CLI/契约表面，同步 `iar-operator` skill。
+- [x] `docs/guides/agent-runner.md` 的 Dependency Gate 小节新增 stack 语义与两轴说明（含 `Gate type: hard` 前置、单上游约束、收敛的 squash 代价）。
+- [x] 若涉及 CLI/契约表面，同步 `iar-operator` skill。（评估结论：`Sequence` 仅经 PRD→Issue marker 传递，不新增/改动 `iar` CLI 子命令、旗标、退出码或机器输出，无需同步 skill。）
 
 ### Delivery Readiness
 
-- [ ] `just lint` 与 `just test all` 通过。
-- [ ] 完成 Final Reconciliation（§13）。
-- [ ] 交付信息（或 PR 呈递）逐字携带 §9.1 的人读内容。
+- [x] `just lint` 与 `just test all` 通过。（证据：ruff 0.7.4 check + format 全绿（CI 同版本）；pytest 全量 `2903 passed, 1 skipped`；PR CI 13 项检查 pass。）
+- [x] 完成 Final Reconciliation（§13）。
+- [x] 交付信息（或 PR 呈递）逐字携带 §9.1 的人读内容。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -489,7 +493,26 @@ flowchart TD
 | D-05 | 上游合并后收敛 | 自动 retarget + rebase | 停在人工确认 | 让链式收口自动化，冲突时再停 |
 | D-06 | 上游数量 | 仅单上游 | 多上游 DAG | 无多上游证据，避免预置抽象 |
 
+### Final Reconciliation
+
+交付前对最终实现树与证据做一次叙述复核，逐项确认正文没有残留被实现推翻的说法：
+
+- Interpretation: §1 行为样例表 8 行逐行对照 §7.6 的 oracle 在最终树上复验成立——stack fork 含上游提交（rv-1，真实 `iar worktree create` + 真实 git）、收敛 retarget（rv-2，自动化等价 + 真实差异点见下）、via-main base 刷新（rv-3，真实 git）、合并队列跳过（rv-4）、等待态不占配额（rv-5）、非法声明 fail fast（rv-6）、非 stack 零回归（rv-7、rv-8）。表中没有被实现推翻、需要删除的样例。
+- Public behavior and contracts: 未声明 `Sequence` 的 PRD 行为与改动前一致（唯一差异是 fork 前多一次 base 刷新，属 FR-2 修复）；`iar issue create` 的 marker 物化格式向后兼容（无 `Sequence` 时 marker 与旧版逐字节相同）；未新增/改动 `iar` CLI 子命令、旗标、退出码或机器输出，故 `iar-operator` skill 无需同步。**一处实现偏差（更优方向）**：§7.3 说 via-main "fetch + 快进本地 base"，实现为 fetch 后直接从 `remote/<base>` fork——行为目标（worktree 含上游改动）一致，且不污染本地 base 分支；rv-3 oracle 仍成立。
+- Related PRD status: §8 维持与 control-surface PRD 的 soft 关系；`Sequence` 字段定义在模板仓共享 PRD 标准的判断不变，本 PR 只交付 keda 消费侧。
+- Requirements and risks: 功能一览 8 条 bullet 覆盖 FR-1…FR-8，逐条复核后仍为真。§12 风险三条与实现一致；**新增一条已披露的实现代价**：上游 squash 合并后，收敛 rebase 需要处理"上游提交已进 main"的情形（单提交通常被识别为已应用而跳过，多提交可能 add/add 冲突，走既有 agent 冲突解决路径），已在 docs 与证据报告披露；**verifier 第 1 轮发现的 blocker 已修复并带回归测试**（收敛 rebase 后禁改扫描改用刷新后的 PR head，否则 `origin/main...<stale>` 会把上游改动算进下游 diff）。
+- 静态断言复核: `parse_prd_checklist` → `execution_unchecked: []` / `human_pending: 5 项` / `awaiting_human`，与横幅一致；`check_max_file_lines.py` 无告警；ruff 0.7.4 check + format 全绿。
+- 待人工项: §9.2 的 5 项 Human-Confirmed 保持 `[ ]`（决策一~四 + 9.1 呈递区过目），不由执行器代答；横幅为 `🧍 待人工验收`。rv-2 的真实 GitHub retarget 腿因本机无对目标仓库的写权限未端到端复跑，已在证据报告披露，留 verifier/人工。
+
 ## Change Log
+
+### 2026-10-05 · 交付：实现 + 证据 + verifier 两轮复核，横幅置为待人工验收并归档
+- Type: delivery（源码 + 测试 + docs + 证据包 + 本 PRD 勾选状态与归档位置）
+- Before: PRD 为未开工状态；§9 全空；无证据包。
+- After: FR-1..FR-8 落地（stack 两态门禁、fork 源解析、合并队列跳过与收敛、fail fast）；rv-1/rv-3 真实入口证据 + rv-2/4/5/6/7/8 自动化 oracle；独立 verifier 第 1 轮 FAIL（发现收敛后禁改扫描用陈旧 head 的 blocker）→ 修复 + 回归测试 → 第 2 轮 PASS；§9 执行侧条目全部勾选并标注证据，Human-Confirmed 5 项保持 `[ ]`，横幅置 `🧍 待人工验收`；PRD 迁入 `tasks/archive/`。
+- Reason: 执行侧交付完成，按 PRD 约定 runner 在交付时归档（含未答 Human-Confirmed 项）。
+- Impact: 全量 pytest `2903 passed, 1 skipped`；ruff 0.7.4 全绿；PR CI 13 项检查 pass。§9.1 呈递物为文本 transcript + 可复跑脚本（判别值是 git 祖先关系，非截图）。
+- Review: verifier 第 2 轮 `VERDICT: PASS`（冻结树 sha256 `af7b6f51…`）；`parse_prd_checklist` → `execution_unchecked: []` / `human_pending: 5`。
 
 ### 2026-10-05 · §2 四项人审决策经决策板确认
 - Type: doc

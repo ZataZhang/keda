@@ -580,7 +580,7 @@ def _resolve_dependencies(
     repo_path: Path | None = None,
     current_prd_path: Path | None = None,
     depends_on: tuple[int, ...] = (),
-) -> tuple[str, tuple[int, ...]]:
+) -> tuple[str, tuple[int, ...], str]:
     """Merge PRD structured dependencies, explicit markers and CLI overrides.
 
     Three sources are merged with CLI taking highest precedence:
@@ -627,10 +627,29 @@ def _resolve_dependencies(
     seen_issues: set[int] = set()
     deduped_issues = [n for n in resolved_issues if not (n in seen_issues or seen_issues.add(n))]
 
+    # ``stack`` declared either in the Delivery Dependencies section or carried by
+    # an explicit ``iar:depends-on ... mode="stack"`` marker in the body. The
+    # latter is the compat path; honour it instead of regenerating a via-main
+    # marker that would silently drop the strategy.
+    sequence = from_prd.sequence
+    if sequence != "stack" and explicit is not None and explicit.sequence == "stack":
+        sequence = "stack"
+
+    # ``stack`` sequencing chains each downstream onto a *single* upstream
+    # branch. Multiple upstreams would need a DAG, which the runner does not
+    # model (it forks from ``issue-<first>`` only), so reject it loudly instead
+    # of silently ignoring every upstream but the first.
+    if sequence == "stack" and len(deduped_issues) > 1:
+        raise ValueError(
+            "Sequence: stack supports exactly one upstream Issue, but "
+            f"{len(deduped_issues)} were resolved: {deduped_issues}. "
+            "Use Sequence: via-main for multiple upstreams."
+        )
+
     return (
         gate_type,
         tuple(deduped_issues),
-        from_prd.sequence,
+        sequence,
     )
 
 

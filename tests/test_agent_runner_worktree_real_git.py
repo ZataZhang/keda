@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     WorktreeConfig,
 )
+from backend.core.use_cases.agent_runner_worktree_create import _resolve_fork_base
 from backend.core.use_cases.run_agent_once import (
     create_or_reuse_worktree,
     _reconcile_worktree_with_remote_branch,
@@ -26,6 +27,215 @@ from tests.support.agent_runner import (
     init_bare_git_repo,
     init_git_repo,
 )
+
+
+def _stack_issue(upstream_issue: int) -> IssueSummary:
+    """Return an Issue carrying a ``mode="stack"`` dependency marker."""
+    return IssueSummary(
+        number=999,
+        title="downstream",
+        url="https://github.com/example/repo/issues/999",
+        body=f'<!-- iar:depends-on #{upstream_issue} mode="stack" -->',
+        labels=(),
+    )
+
+
+def _push_branch_from_clone(
+    remote_path: Path,
+    tmp_path: Path,
+    branch: str,
+    message: str,
+) -> str:
+    """Push one new commit to ``branch`` on the remote from a fresh clone.
+
+    Returns the pushed commit sha. Used to advance a remote branch after the
+    local clone's copy of it has already gone stale.
+    """
+    clone_path = tmp_path / f"clone-{branch}"
+    clone_repo = init_git_repo(clone_path)
+    subprocess.run(
+        ["git", "-C", str(clone_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(clone_repo), "fetch", "origin"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(clone_repo),
+            "checkout",
+            "-b",
+            branch,
+            "--track",
+            f"origin/{branch}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    pushed_sha = create_commit(clone_repo, message)
+    subprocess.run(
+        ["git", "-C", str(clone_repo), "push", "origin", branch],
+        check=True,
+        capture_output=True,
+    )
+    return pushed_sha
+
+
+def test_resolve_fork_base_stack_prefers_fresh_remote(tmp_path: Path) -> None:
+    """Stack fork base refreshes the upstream branch instead of using a stale local copy."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+    init_bare_git_repo(remote_path)
+    local_repo = init_git_repo(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    create_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", "issue-42"],
+        check=True,
+        capture_output=True,
+    )
+    stale_sha = create_commit(local_repo, "upstream start")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "issue-42"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    remote_head = _push_branch_from_clone(remote_path, tmp_path, "issue-42", "upstream advance")
+    assert remote_head != stale_sha
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    fork_base = _resolve_fork_base(local_path, _stack_issue(42), AppConfig(), SubprocessRunner())
+    assert fork_base == "origin/issue-42"
+    refreshed = subprocess.run(
+        ["git", "-C", str(local_repo), "rev-parse", "origin/issue-42"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert refreshed == remote_head
+
+
+def test_resolve_fork_base_stack_falls_back_to_local_when_fetch_fails(tmp_path: Path) -> None:
+    """Stack fork base keeps the local branch when the remote fetch fails."""
+    repo_path = tmp_path / "repo"
+    repo = init_git_repo(repo_path)
+    create_commit(repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "-b", "issue-42"],
+        check=True,
+        capture_output=True,
+    )
+    create_commit(repo, "upstream start")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+    # No remote configured named "origin": the fetch fails.
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    fork_base = _resolve_fork_base(repo_path, _stack_issue(42), AppConfig(), SubprocessRunner())
+    assert fork_base == "issue-42"
+
+
+def test_resolve_fork_base_stack_raises_when_branch_absent(tmp_path: Path) -> None:
+    """Stack fork base fails loudly when neither remote nor local upstream exists."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+    init_bare_git_repo(remote_path)
+    local_repo = init_git_repo(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    create_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    with pytest.raises(RuntimeError, match="issue-42"):
+        _resolve_fork_base(local_path, _stack_issue(42), AppConfig(), SubprocessRunner())
+
+
+def test_resolve_fork_base_via_main_refreshes_and_prefers_remote(tmp_path: Path) -> None:
+    """via-main fork base refreshes the base and uses the remote-tracking ref."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+    init_bare_git_repo(remote_path)
+    local_repo = init_git_repo(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    create_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+    remote_head = _push_branch_from_clone(remote_path, tmp_path, "main", "base advance")
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    fork_base = _resolve_fork_base(
+        local_path,
+        IssueSummary(number=999, title="plain", url="U", body="no deps", labels=()),
+        AppConfig(),
+        SubprocessRunner(),
+    )
+    assert fork_base == "origin/main"
+    refreshed = subprocess.run(
+        ["git", "-C", str(local_repo), "rev-parse", "origin/main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert refreshed == remote_head
+
+
+def test_resolve_fork_base_via_main_falls_back_to_local_when_fetch_fails(tmp_path: Path) -> None:
+    """via-main fork base keeps the local base when the remote fetch fails."""
+    repo_path = tmp_path / "repo"
+    repo = init_git_repo(repo_path)
+    create_commit(repo, "initial")
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    fork_base = _resolve_fork_base(
+        repo_path,
+        IssueSummary(number=999, title="plain", url="U", body="no deps", labels=()),
+        AppConfig(),
+        SubprocessRunner(),
+    )
+    assert fork_base == "main"
 
 
 def test_worktree_reconcile_remote_ahead_real_git_fast_forwards(tmp_path: Path) -> None:

@@ -357,6 +357,25 @@ class TestEvaluateDependencies:
         verdict = evaluate_dependencies(decl, client, LabelConfig())
         assert verdict.satisfied is False
 
+    def test_stack_upstream_failure_surfaces_warning(self) -> None:
+        # A failed/blocked upstream must not leave the downstream waiting silently.
+        client = FakeGitHubClientForDeps(
+            issues={
+                42: IssueSummary(
+                    number=42,
+                    title="Upstream",
+                    url="",
+                    body="",
+                    labels=(LabelConfig().failed,),
+                    state="OPEN",
+                )
+            }
+        )
+        decl = DependencyDeclaration(issue_numbers=(42,), sequence="stack")
+        verdict = evaluate_dependencies(decl, client, LabelConfig())
+        assert verdict.satisfied is False
+        assert verdict.has_failed_or_blocked_upstream is True
+
 
 # ---------------------------------------------------------------------------
 # mark_dependency_waiting / clear_dependency_waiting
@@ -518,6 +537,16 @@ class TestBuildWaitingComment:
         comment = build_waiting_comment(verdict, 1, LabelConfig())
         assert "How to resolve" not in comment
 
+    def test_branch_blocker_includes_stack_guidance(self) -> None:
+        verdict = DependencyVerdict(
+            satisfied=False,
+            blockers=(DependencyBlocker("branch", "issue-42", "NOT_PUSHED"),),
+        )
+        comment = build_waiting_comment(verdict, 1, LabelConfig())
+        assert "Upstream branch `issue-42`" in comment
+        assert "How to resolve" in comment
+        assert "Upstream branch not ready" in comment
+
 
 # ---------------------------------------------------------------------------
 # _resolve_dependencies (create_issue_from_prd helper)
@@ -587,6 +616,35 @@ class TestResolveDependencies:
 """
         with pytest.raises(ValueError):
             _resolve_dependencies(prd)
+
+    def test_stack_multiple_upstreams_rejected(self) -> None:
+        prd = """
+## Delivery Dependencies
+
+- Depends on tasks/issues: #42, #43
+- Gate type: hard
+- Sequence: stack
+"""
+        with pytest.raises(ValueError, match="exactly one upstream"):
+            _resolve_dependencies(prd)
+
+    def test_stack_single_upstream_allowed(self) -> None:
+        prd = """
+## Delivery Dependencies
+
+- Depends on tasks/issues: #42
+- Gate type: hard
+- Sequence: stack
+"""
+        gate, issues, sequence = _resolve_dependencies(prd)
+        assert sequence == "stack"
+        assert issues == (42,)
+
+    def test_explicit_stack_marker_preserved_without_sequence_field(self) -> None:
+        prd = '<!-- iar:depends-on #5 mode="stack" -->\n# PRD\n'
+        gate, issues, sequence = _resolve_dependencies(prd)
+        assert issues == (5,)
+        assert sequence == "stack"
 
 
 # ---------------------------------------------------------------------------

@@ -234,6 +234,48 @@ def test_run_once_dry_run_continues_after_dependency_blocked_ready_issue(
     assert "would process Issue #4 (ready)" in caplog.text
 
 
+def test_run_once_dry_run_stack_waiting_does_not_consume_quota(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """rv-5: a stack downstream waiting on its upstream branch must not take a slot."""
+    fake_client = FakeGitHubClient()
+    # No open/merged PR for issue-3, so the stack downstream stays waiting.
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(
+            5,
+            "Issue #5",
+            '<!-- iar:depends-on #3 mode="stack" -->',
+            ("agent/ready", "priority/P0"),
+        ),
+        _make_ready_issue(
+            4,
+            "Issue #4",
+            "PRD path: `tasks/example.md`",
+            ("agent/ready", "priority/P1"),
+        ),
+    ]
+    caplog.set_level(
+        logging.INFO,
+        logger="backend.core.use_cases.agent_runner_orchestrate",
+    )
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=AppConfig(),
+        dry_run=True,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=FakeProcessRunner(),
+    )
+
+    # max_issues=1: only because the blocked stack downstream consumed no quota
+    # does the later actionable Issue #4 still get selected this same pass.
+    assert exit_code == 0
+    assert "Issue #5 blocked by dependencies" in caplog.text
+    assert "would process Issue #4 (ready)" in caplog.text
+
+
 def test_run_once_dry_run_orders_ready_issues_by_priority_then_number(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

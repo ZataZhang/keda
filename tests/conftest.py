@@ -109,6 +109,7 @@ class FakeGitHubClient(IGitHubClient):
         self._pr_contexts: dict[str, object | None] = {}
         self._open_prs: dict[str, str | None] = {}
         self._merged_prs: dict[str, str | None] = {}
+        self._set_pr_base_error: Exception | None = None
         self._remote_base_sha: str = "remote-base-sha"
         self._issue_states: dict[int, str] = {}
         self._issue_title: str | None = None
@@ -185,6 +186,21 @@ class FakeGitHubClient(IGitHubClient):
                 "body": body,
             }
         )
+
+    def set_pull_request_base(self, pr_number: int, base_branch: str) -> None:
+        self.calls.append(
+            {
+                "method": "set_pull_request_base",
+                "pr_number": pr_number,
+                "base_branch": base_branch,
+            }
+        )
+        if self._set_pr_base_error is not None:
+            raise self._set_pr_base_error
+
+    def set_set_pr_base_error(self, error: Exception | None) -> None:
+        """Inject a failure for ``set_pull_request_base`` (stack convergence tests)."""
+        self._set_pr_base_error = error
 
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
         self.calls.append(

@@ -99,9 +99,10 @@ def _resolve_fork_base(
     """Resolve the ref a new Issue worktree forks from.
 
     - ``stack`` sequencing: fork from the upstream Issue's branch
-      (``issue-<N>``), preferring the local branch and falling back to the
-      fetched remote-tracking ref, so the downstream worktree is guaranteed to
-      contain the upstream (unmerged) changes.
+      (``issue-<N>``), refreshed from the remote first so the downstream
+      worktree contains the upstream tip even when the local branch lags a
+      newer remote push. Falls back to the local branch only when the fetch
+      fails but the branch exists locally; raises when neither is available.
     - ``via-main`` (default): refresh the remote base and fork from the fetched
       remote-tracking ref, so the worktree always contains the latest upstream
       changes. This closes the silent-staleness gap where a downstream run
@@ -113,13 +114,10 @@ def _resolve_fork_base(
 
     if declaration is not None and declaration.sequence == "stack" and declaration.issue_numbers:
         upstream_branch = f"issue-{declaration.issue_numbers[0]}"
-        local_exists = process_runner.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{upstream_branch}"],
-            cwd=repo_path,
-            check=False,
-        )
-        if local_exists.return_code == 0:
-            return upstream_branch
+        remote_ref = f"{remote}/{upstream_branch}"
+        # Refresh the upstream branch from the remote *before* querying the
+        # local branch: a local copy can lag commits another daemon pushed, and
+        # forking from a stale upstream would silently omit upstream changes.
         fetch_result = process_runner.run(
             [
                 "git",
@@ -131,7 +129,25 @@ def _resolve_fork_base(
             check=False,
         )
         if fetch_result.return_code == 0:
-            return f"{remote}/{upstream_branch}"
+            verify_remote = process_runner.run(
+                ["git", "rev-parse", "--verify", "--quiet", remote_ref],
+                cwd=repo_path,
+                check=False,
+            )
+            if verify_remote.return_code == 0:
+                return remote_ref
+        local_exists = process_runner.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{upstream_branch}"],
+            cwd=repo_path,
+            check=False,
+        )
+        if local_exists.return_code == 0:
+            _logger.warning(
+                "Could not refresh stack upstream '%s' from '%s'; forking from local branch.",
+                upstream_branch,
+                remote,
+            )
+            return upstream_branch
         raise RuntimeError(
             f"Stack sequencing requires upstream branch '{upstream_branch}' to exist "
             f"on '{remote}' (or locally); fetch failed: {fetch_result.stderr.strip()}"

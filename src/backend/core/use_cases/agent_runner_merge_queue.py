@@ -475,6 +475,15 @@ def _process_one(
         )
         return MergeQueueOutcome(issue_number=issue.number, action="rebase_failed")
 
+    # The rebase force-pushes the branch, so the PR head moved. Refresh the
+    # context before the forbidden-path diff: otherwise Step 5's
+    # ``origin/base...<old-head>`` range still includes the commits the rebase
+    # just removed (e.g. an upstream stack's commits after convergence), which
+    # would falsely flag upstream paths as this PR's forbidden changes.
+    refreshed_context = github_client.get_pull_request_context(pr_branch)
+    if refreshed_context is not None:
+        pr_context = refreshed_context
+
     # Step 4: full verification re-run
     verification_results = run_verification(worktree_path, config, process_runner)
     if any(result.return_code != 0 for result in verification_results):

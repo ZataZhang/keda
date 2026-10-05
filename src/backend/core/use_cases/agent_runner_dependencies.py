@@ -375,7 +375,14 @@ def evaluate_dependencies(
 ) -> DependencyVerdict:
     """Evaluate whether all dependencies in ``declaration`` are satisfied.
 
-    An Issue dependency is satisfied when the target Issue is closed.
+    The satisfaction rule depends on the declaration's ``sequence``:
+
+    - ``via-main`` (default): an Issue dependency is satisfied when the target
+      Issue is closed (i.e. the upstream PR merged into the base branch).
+    - ``stack``: a dependency is satisfied when the upstream branch
+      (``issue-<N>``) is ready on the remote (an open or merged PR exists for
+      it), since the downstream forks directly from that branch without waiting
+      for the merge.
 
     Args:
         declaration: Materialised dependency declaration from Issue body.
@@ -392,6 +399,7 @@ def evaluate_dependencies(
     # the dependency is satisfied when the upstream branch is pushed (an open or
     # merged PR exists for ``issue-<N>``) rather than when the Issue closes.
     if declaration.sequence == "stack":
+        has_stack_upstream_failure = False
         for issue_number in declaration.issue_numbers:
             branch = f"issue-{issue_number}"
             try:
@@ -410,10 +418,23 @@ def evaluate_dependencies(
                         current_state="NOT_PUSHED",
                     )
                 )
+                # Best-effort: surface an upstream that already failed/blocked so
+                # the downstream does not wait forever on a branch that will
+                # never be pushed.
+                try:
+                    upstream = github_client.get_issue(issue_number)
+                except Exception as exc:  # noqa: BLE001
+                    _logger.warning("Failed to query Issue #%d: %s", issue_number, exc)
+                else:
+                    if any(
+                        label in upstream.labels
+                        for label in (labels_config.failed, labels_config.blocked)
+                    ):
+                        has_stack_upstream_failure = True
         return DependencyVerdict(
             satisfied=not blockers,
             blockers=tuple(blockers),
-            has_failed_or_blocked_upstream=False,
+            has_failed_or_blocked_upstream=has_stack_upstream_failure,
         )
 
     # Issue dependencies
@@ -533,8 +554,16 @@ def _build_resolution_guidance(
         for blocker in verdict.blockers
     )
     has_unknown_blocker = any(blocker.current_state == "unknown" for blocker in verdict.blockers)
+    has_branch_blocker = any(blocker.blocker_type == "branch" for blocker in verdict.blockers)
 
     guidance: list[str] = []
+    if has_branch_blocker:
+        guidance.append(
+            "- **Upstream branch not ready** (stack sequencing): the upstream "
+            "Issue's ``issue-<N>`` branch has not been pushed to the remote yet. "
+            "Wait for the upstream run to open its PR, or change this PRD to "
+            "``Sequence: via-main`` if it should wait for the upstream merge instead."
+        )
     if has_open_blocker:
         guidance.append(
             "- **Open upstream**: wait for the listed Issues to close, or remove "

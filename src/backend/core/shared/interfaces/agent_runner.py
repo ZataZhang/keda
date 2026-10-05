@@ -506,6 +506,11 @@ class IGitHubClient(ABC):
         mainline, the downstream PR's base is moved from ``issue-<upstream>`` to
         the mainline before it is rebased (by the merge queue) and merged.
 
+        This port is intentionally non-abstract (unlike the rest of this
+        interface): only stack sequencing needs it, so existing implementers and
+        test fakes stay valid, and callers that never declare ``stack`` are
+        unaffected. Implementations that support retargeting must override it.
+
         Args:
             pr_number: Target Pull Request number.
             base_branch: New base branch name (e.g. ``main``).
