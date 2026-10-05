@@ -57,6 +57,7 @@ def run_agent_repositories_once(
     transcript_runner_factory: Callable[[Path], IAgentTranscriptRunner] | None = None,
     max_deliberation_issues: int = 1,
     target_issue: int | None = None,
+    fast_merge: bool = False,
 ) -> int:
     """Run one polling pass across all target repositories.
 
@@ -80,6 +81,8 @@ def run_agent_repositories_once(
         target_issue: 定向目标 Issue 编号（``iar run --issue``）。非 ``None``
             时每仓只处理该 Issue（仍走依赖门禁与 claim），其余 ready Issue
             一律不动；``None`` 保持既有"按优先级捞队列"行为。
+        fast_merge: 快速通道（``iar run --fast-merge``）一次性旁路，仅本次运行
+            生效；默认 False 与今天完全一致。
 
     Returns:
         Exit code (0 on success, 1 if any repository failed).
@@ -152,6 +155,7 @@ def run_agent_repositories_once(
                 run_trigger=run_trigger,
                 repo_id=context.repo_id,
                 target_issue=target_issue,
+                fast_merge=fast_merge,
             )
             if repo_exit_code != 0:
                 aggregated_exit_code = 1

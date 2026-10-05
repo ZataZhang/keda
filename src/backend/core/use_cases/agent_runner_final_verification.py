@@ -31,6 +31,9 @@ class FinalVerificationRequest:
     selected_agent: str
     verified_sha: str | None
     verifier_verdict: ValidationVerdict | None
+    #: 快速通道（``iar run --fast-merge``）：HEAD 变化时不再重跑 RV 与独立
+    #: verifier，直接沿用（空的）初次结论；PR 正文由发布路径打未验证标注。
+    fast_merge: bool = False
 
 
 def ensure_final_verifier_verdict(request: FinalVerificationRequest) -> ValidationVerdict | None:
@@ -50,6 +53,16 @@ def ensure_final_verifier_verdict(request: FinalVerificationRequest) -> Validati
             "Final verification requires a clean committed worktree after pre-PR review."
         )
     final_sha = get_head_sha(request.worktree_path, request.process_runner)
+    if request.fast_merge:
+        # 快速通道的审计日志：跳过的是验证门禁，不是提交完整性前提（上方 clean-tree
+        # 检查照常），且旗标来源必须可事后追溯。
+        _logger.info(
+            "Fast-merge (origin: --fast-merge run flag): skipping final RV/verifier "
+            "re-check for Issue #%d at %s; the PR will carry the unverified annotation.",
+            request.issue.number,
+            final_sha,
+        )
+        return request.verifier_verdict
     if final_sha == request.verified_sha:
         return request.verifier_verdict
 

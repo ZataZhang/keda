@@ -198,6 +198,7 @@ def _create_draft_pr_with_recovery_context(
     process_runner: IProcessRunner,
     expected_branch: str,
     content_generator: IContentGenerator | None,
+    fast_merge: bool = False,
 ) -> tuple[str, str]:
     """Create the draft PR (or reuse an existing one) and preserve context.
 
@@ -213,6 +214,7 @@ def _create_draft_pr_with_recovery_context(
             process_runner,
             expected_branch=expected_branch,
             content_generator=content_generator,
+            fast_merge=fast_merge,
         )
     except DraftPRCreationError as exc:
         raise PublishFailureError(
@@ -338,6 +340,9 @@ class _PublicationReviewRequest:
 def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrPublication:
     """审核、复核最终提交，随后创建 Draft PR。"""
     verification_request = request.verification_request
+    # 发布路径本身不变（决策一）：pre-PR review 照常执行（其开关仍是
+    # config.pre_pr_review.enabled）；快速通道旁路的是 verification_request
+    # 携带的两道验证门禁与 PR 标注。
     run_pre_pr_review(
         issue=verification_request.issue,
         worktree_path=verification_request.worktree_path,
@@ -360,6 +365,7 @@ def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrP
         process_runner=verification_request.process_runner,
         expected_branch=request.expected_branch,
         content_generator=request.content_generator,
+        fast_merge=verification_request.fast_merge,
     )
     return _VerifiedPrPublication(
         verification_request=verification_request,
@@ -627,6 +633,7 @@ def _finish_implementation_publication(
     expected_branch: str,
     commit_result: AgentCommitResult,
     content_generator: IContentGenerator | None = None,
+    fast_merge: bool = False,
 ) -> None:
     """完成新实现的发布流程（完整路径）。
 
@@ -647,6 +654,8 @@ def _finish_implementation_publication(
         expected_branch: 预期的分支名
         commit_result: Agent 提交结果
         content_generator: 可选的 AI 内容生成器（用于 PR description）
+        fast_merge: 快速通道（``iar run --fast-merge``）：跳过发布前的最终 RV /
+            verifier 复核，PR 正文打未验证标注。
     """
     # 导入监督循环（避免循环导入）
     from backend.core.use_cases.agent_runner_supervisor import (
@@ -694,7 +703,7 @@ def _finish_implementation_publication(
         expected_branch=expected_branch,
     )
 
-    # 步骤 3: 审核后仅对改变的 HEAD 重新取 RV 与 verifier 结论。
+    # 步骤 3: 审核后仅对改变的 HEAD 重新取 RV 与 verifier 结论（快速通道跳过）。
     final_verification_request = FinalVerificationRequest(
         issue=issue,
         worktree_path=worktree_path,
@@ -703,6 +712,7 @@ def _finish_implementation_publication(
         selected_agent=selected_agent,
         verified_sha=after_sha,
         verifier_verdict=commit_result.verifier_verdict,
+        fast_merge=fast_merge,
     )
     reviewed_pr = _review_verify_create_pr(
         _PublicationReviewRequest(
@@ -781,6 +791,7 @@ def _finish_implementation_publication(
 
 def _finish_existing_commit_publication(
     *,
+    fast_merge: bool = False,
     issue: IssueSummary,
     worktree_path: Path,
     config: AppConfig,
@@ -804,6 +815,8 @@ def _finish_existing_commit_publication(
     5. 启动 PR 后监督循环（或直接进入 review 标签）
 
     Args:
+        fast_merge: 恢复发布路径下的快速通道：带旗标时同样跳过发布前 RV /
+            verifier 复核并打未验证标注。
         issue: Issue 对象
         worktree_path: worktree 目录
         config: 应用配置
@@ -851,7 +864,7 @@ def _finish_existing_commit_publication(
         expected_branch=expected_branch,
     )
 
-    # 步骤 3: 复用提交也要审核，并在最终 HEAD 上取得复核结论。
+    # 步骤 3: 复用提交也要审核，并在最终 HEAD 上取得复核结论（快速通道跳过）。
     final_verification_request = FinalVerificationRequest(
         issue=issue,
         worktree_path=worktree_path,
@@ -860,6 +873,7 @@ def _finish_existing_commit_publication(
         selected_agent=selected_agent,
         verified_sha=None,
         verifier_verdict=commit_result.verifier_verdict,
+        fast_merge=fast_merge,
     )
     reviewed_pr = _review_verify_create_pr(
         _PublicationReviewRequest(

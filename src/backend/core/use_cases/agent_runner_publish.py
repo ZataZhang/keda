@@ -12,6 +12,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.use_cases.agent_runner_dependencies import format_fast_merge_marker
 from backend.core.use_cases.agent_runner_feedback import (
     assert_prd_archived_for_publish,
 )
@@ -218,6 +219,7 @@ def create_draft_pr(
     *,
     expected_branch: str | None = None,
     content_generator: IContentGenerator | None = None,
+    fast_merge: bool = False,
 ) -> tuple[str, str]:
     """Create a draft PR for the current branch, or reuse an existing open PR.
 
@@ -235,6 +237,8 @@ def create_draft_pr(
         expected_branch: Optional explicit branch to verify before creating the
             PR. When set, the worktree's current branch must match.
         content_generator: Optional AI content generator for PR title/body.
+        fast_merge: 快速通道（``iar run --fast-merge``）标识；为 True 时在正文
+            末尾注入 ``iar:fast-merge`` 自我声明 marker 与人读未验证标注。
 
     Returns:
         ``(branch, pr_url)`` tuple.
@@ -331,6 +335,18 @@ def create_draft_pr(
     if contract_violations:
         contract_block = build_contract_annotation_block(contract_violations)
         pr_body = f"{pr_body.rstrip()}\n\n{contract_block}\n"
+
+    # 快速通道自我声明：机器可读 marker + 人读说明，避免未验证 PR 混入正常证据链。
+    if fast_merge:
+        fast_merge_block = "\n".join(
+            [
+                format_fast_merge_marker(issue.number),
+                "",
+                "> **快速通道发布**：本 PR 经快速通道发布，未经过自动化验证门禁，"
+                "合并前请人工验证。",
+            ]
+        )
+        pr_body = f"{pr_body.rstrip()}\n\n{fast_merge_block}\n"
 
     try:
         pr_url = github_client.create_draft_pr(

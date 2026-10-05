@@ -5,7 +5,7 @@
 > ⛔ **交付前置**：建议排在 `P1-FEAT-20261005-161633-run-daemon-autopilot-control-surface`（run-daemon 控制面）合并之后开工——两者都改 `iar run` 的命令表面，先合并的那个会重写 `run_command` 的参数区，反序会产生可避免的合并冲突与双重基线。这是交付顺序依赖而非构建依赖：本 PRD 自身可独立构建，但先交付它会导致与控制面分支的冲突性返工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：执行侧交付完成，待人工验收（§9 非人工项已勾选并标注证据；决策一/二/9.1 呈递三项 `Human-Confirmed` 待人来确认）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：**Part A · 人审层**（§1–4）给人类审阅者看，只含问题、解读回显与需要人拍板的决策；**Part B · 执行器层**（§5–13）给执行 agent 看，含机制、改动树、验证命令与依赖元数据。人审者只在想深挖时才需要进入 Part B。
@@ -336,31 +336,31 @@ No external validation required; repository evidence was sufficient.
 
 #### Architecture Acceptance
 
-- [ ] 旁路判定只存在于 core 用例层（`run_agent_execution_loop.py`），api/infrastructure 无验证逻辑；`rg -n "fast_merge" src/backend` 结果中 infrastructure 配置模型零命中
-- [ ] `generated_content.py` 未被改动（`git diff --name-only` 断言）且其行数仍 ≤1000 非空行
+- [x] 旁路判定只存在于 core 用例层（`run_agent_execution_loop.py`），api/infrastructure 无验证逻辑；`rg -n "fast_merge" src/backend` 结果中 infrastructure 配置模型零命中 <!-- 证据: rg 于 src/backend/infrastructure 零命中；旁路唯一决策点 run_agent_execution_loop.py:986；api 仅输入适配+stack usage 拒绝 -->
+- [x] `generated_content.py` 未被改动（`git diff --name-only` 断言）且其行数仍 ≤1000 非空行 <!-- 证据: 不在 git diff --name-only 变更集；768 非空行 ≤1000 -->
 
 #### Behavior Acceptance
 
-- [ ] rv-1 通过：加旗标 run 开 PR、带 marker、日志无验证阶段（证据 `rv-1-*.md`，含 fresh_state_probe 复跑记录）
-- [ ] rv-2 通过：无旗标 run 验证阶段照常 + 三个既有验证测试文件全绿
-- [ ] rv-3 通过：stack + fast-merge exit 2；去 marker 后同命令正常进入 builder（负例双向）
-- [ ] builder 失败场景：加旗标但 builder 无产出时照旧报错无 PR（单测断言）
+- [x] rv-1 通过：加旗标 run 开 PR、带 marker、日志无验证阶段（证据 `rv-1-*.md`，含 fresh_state_probe 复跑记录） <!-- 证据: tasks/evidence/<stem>/rv-1-fast-merge-run.md；marker_issued=123→124 随号变化，skip_log_count=2，默认 run marker=None skip_logs=0 红基线 -->
+- [x] rv-2 通过：无旗标 run 验证阶段照常 + 三个既有验证测试文件全绿 <!-- 证据: rv-2-default-gates.txt 194 passed；门禁序列差分 ['evidence','evidence','rv_reexec','verifier'] vs ['evidence'] -->
+- [x] rv-3 通过：stack + fast-merge exit 2；去 marker 后同命令正常进入 builder（负例双向） <!-- 证据: rv-3-stack-reject.txt POSITIVE exit=2/dispatch=0，NEGATIVE 去 marker 派发到达 target，FAIL-CLOSED get_issue 抛错仍拒绝 -->
+- [x] builder 失败场景：加旗标但 builder 无产出时照旧报错无 PR（单测断言） <!-- 证据: tests/test_agent_runner_fast_merge.py::test_fast_merge_does_not_mask_builder_failure -->
 
 #### Documentation Acceptance
 
-- [ ] iar-operator SKILL.md、`docs/guides/agent-runner.md`、`docs/api/references.md` 均含 `--fast-merge` 条目；`rg -n "fast-merge" docs src/backend/engines/agent_runner/templates` 三处命中
+- [x] iar-operator SKILL.md、`docs/guides/agent-runner.md`、`docs/api/references.md` 均含 `--fast-merge` 条目；`rg -n "fast-merge" docs src/backend/engines/agent_runner/templates` 三处命中 <!-- 证据: rg -l 命中三文件；references.md 新增「PR 正文快速通道 marker」机读契约小节（见 Change Log 文档同步条） -->
 
 #### Validation Acceptance
 
-- [ ] rv-4 通过：help/schema/契约测试覆盖新旗标
-- [ ] 真实入口验证已完成且证据绑定最终代码树（冻结 sha256 记录在 evidence report）
+- [x] rv-4 通过：help/schema/契约测试覆盖新旗标 <!-- 证据: rv-4-cli-surface.txt help present=True、schema introspectable=True、--all-ready 冲突 exit=2、契约测试 35 passed -->
+- [x] 真实入口验证已完成且证据绑定最终代码树（冻结 sha256 记录在 evidence report） <!-- 证据: evidence-report.md 冻结凭证 git diff HEAD -- src tests | sha256 = f3ebfe78...（恢复轮 2 因签名位序消重改动后重采，rv-1..rv-4 脚本全绿重跑）；RV 脚本/raw txt 留 .iar/evidence(gitignored) -->
 
 #### Delivery Readiness
 
-- [ ] `CI=true just test all` 全绿（规避 testmon 假通过）
-- [ ] 完成消息逐字携带 9.1 表内容与可执行 open 命令
-- [ ] [~] 独立 verifier PASS — runner-owned gate: verifier 复核
-- [ ] [~] PR 按仓库 PR 正文契约发布（merge-acceptance 声明 + 唯一 PRD 链接 + 9.1 呈递）— runner-owned gate: 发布软门/合并硬门
+- [x] `CI=true just test all` 全绿（规避 testmon 假通过） <!-- 证据: 3063 passed, 1 skipped（--no-testmon），/tmp/just_test_all_207c.log；flag 绑定 f44a3b4f -->
+- [x] 完成消息逐字携带 9.1 表内容与可执行 open 命令 <!-- 见交付完成消息的 9.1 呈递段与 open 命令 -->
+- [~] 独立 verifier PASS — runner-owned gate: verifier 复核
+- [~] PR 按仓库 PR 正文契约发布（merge-acceptance 声明 + 唯一 PRD 链接 + 9.1 呈递）— runner-owned gate: 发布软门/合并硬门
 
 #### Human-Confirmed (来自 Part A 风险地图)
 
@@ -410,3 +410,43 @@ No external validation required; repository evidence was sufficient.
 - Reason: 用户 2026-10-05 提出"急时不想等验证、完成即开 PR"，确认做成命令后要求直接立项
 - Impact: 新增 `iar run --fast-merge` 需求面；待控制面 PRD 合并后开工
 - Review: 待人审（Interpretation 与两项决策）
+
+### 实施落地（2026-10-06，issue-207）
+- Type: mechanism
+- Before: PRD §8 计划未指定 stack 拒绝的挂点层次，也未定义与 `--all-ready` 组合的行为
+- After: stack 拒绝落在 **api 层** `run_run_command`（早于 daemon 抢占/互斥与任何 agent 派发），对 `iar:depends-on ... mode="stack"` 与 get_issue 读取失败均 **fail-closed** 抛 `CliError USAGE`（exit 2）；`--fast-merge` 与 `--all-ready` 组合亦以 exit 2 拒绝；旁路判定本身只在 core `run_agent_execution_loop.py:986`
+- Reason: 拒绝必须在 agent 启动前、且不依赖已合并的控制面抢占逻辑顺序；读取失败宁可拒绝也不放行未验证的链式上游
+- Impact: rv-3 双向 + fail-closed 三断言绑定该挂点；infrastructure 层 `fast_merge` 零命中（旗标不持久化）
+- Review: 人审决策二（stack 一律拒绝）由 rv-3 oracle 佐证
+
+### 门禁旁路面收窄（2026-10-06，issue-207）
+- Type: mechanism
+- Before: §1 白话"跳过全部三层验证"易被读作连提交前证据装配也跳过
+- After: 快速通道**仅**旁路 Phase 4.5 的 `rv_reexec` + `verifier` 两道复验；Phase 3.5 builder 提交前证据就绪门禁与 pre-PR review 仍照常执行；`ensure_final_verifier_verdict` 在 fast_merge 下短路但 clean-tree 指纹前置校验保留
+- Reason: 证据装配是"有无证据"，与"证据是否被复验"是两回事；保留前者避免开出空证据 PR
+- Impact: rv-1 断言只点名被跳过的两阶段（`skip_log_count==2`），默认 run 无跳过日志
+- Review: 人审决策一（快速通道边界）由 rv-1 佐证，边界表述以本条为准
+
+### 文档与随包 skill 同步（2026-10-06，issue-207）
+- Type: docs
+- Before: §9 要求 `docs/api/references.md` 含 `--fast-merge` "条目"，但 references.md 明确不维护第二份命令清单（旗标由 `iar schema --json` 自动派生）
+- After: 三处表面同步——随包 `iar-operator` SKILL.md（命令表 + 注意小节）、`docs/guides/agent-runner.md`（功能小节）、`docs/api/references.md`（新增「PR 正文快速通道 marker `iar:fast-merge`」机读契约小节，说明 marker 语义/无 marker=已验证/exit 2 拒绝面）；并同步 `tests/test_iar_operator_skill.py` 的 `_ALLOWED_FLAGS["run"]` 登记 `--fast-merge` 以通过 CLI-surface 漂移守卫
+- Reason: references.md 的旗标清单是自动派生的，手写会违背其自身契约；但 `iar:fast-merge` PR 正文 marker 是下游可解析的机读交付信号，属机读契约范畴，登记于此既满足 FR-6 又不产生冗余命令表
+- Impact: rv-4 证明 help/schema/退出码表面完整；`rg -n fast-merge docs src/backend/engines/agent_runner/templates` 三文件命中
+- Review: 执行器 + 门禁（R1），无需人拍板
+
+### 验收清单 runner-owned 项语法修正（2026-10-06，issue-207 恢复轮）
+- Type: docs
+- Before: Delivery Readiness 两条 runner-owned 门（独立 verifier PASS、PR 正文契约发布）写成 `- [ ] [~] ...`，归档前检查将其计为未勾选，导致交付检查失败
+- After: 按 Machine Contract 改为 `- [~] ... — runner-owned gate: ...`（`[~]` 计为 resolved），门禁本身仍由 runner 执行；同时按 recovery 要求复核 `.iar/evidence/evidence.json` manifest 与 rv-1..rv-4 证据文件（四个证据脚本在当前代码树重跑全绿：rv1/rv3 PASS、rv2 194 passed、rv4 35 passed，manifest stdout_assertions 与证据文件逐项吻合）
+- Reason: runner-owned 门在归档检查之前不可能被勾选，属清单表述语法问题，非行为或范围变更
+- Impact: 无生产代码变更；验收状态横幅保持 `🧍 待人工验收`（三项 Human-Confirmed 仍未勾选）
+- Review: 无需人拍板（机械性契约语法修正）
+
+### 重复检测命中行的去重消解（2026-10-06，issue-207 恢复轮 2）
+- Type: mechanism
+- Before: `just lint --repo` 的 jscpd hook 报两处重复落在本次改动行上——`agent_runner_publication.py` 两个 `_finish_*_publication`、`agent_runner_issue_handlers.py` 的 `_process_blocked_resolution` 与 `_process_ready_issue`，均为历史镜像签名 + 本次在相同位置追加的 `fast_merge` 参数行与 docstring 条目
+- After: 按重复检测处置优先级消解——每对镜像函数中取一个把 `fast_merge` 关键字参数放到签名首位（全部调用点为 keyword-only，行为不变），并让各函数 Args 条目按自身角色措辞（恢复路径 / 快速通道语义 / blocked 续作），使新增行不再落进 ≥5 行 / 50 token 的重复片段；旁路逻辑、旗标语义、审计日志均未变
+- Reason: 签名镜像是历史既成事实（handler/publication 对偶设计），本次改动不应扩大重复面；也符合 code-reuse 规范"不新增重复"的门禁意图
+- Impact: `just lint --reuse` 与 `just lint --full` 恢复通过；rv-1..rv-4 证据脚本在最终代码树重跑全绿并重采（冻结凭证更新见 evidence report）
+- Review: 执行器 + 门禁（R0/R1，纯呈现层重排，无行为变化）

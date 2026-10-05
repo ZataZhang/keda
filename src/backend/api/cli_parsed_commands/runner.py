@@ -32,6 +32,7 @@ def _dry_run_preview(
     max_issues: int,
     target_issue: int | None = None,
     all_ready: bool = False,
+    fast_merge: bool = False,
 ) -> dict:
     """组装 ``iar run --dry-run`` 的机读预览（本轮执行计划，逐 Issue 明细在 stderr 日志）。"""
     return {
@@ -40,6 +41,7 @@ def _dry_run_preview(
         "max_issues": max_issues,
         "target_issue": target_issue,
         "all_ready": all_ready,
+        "fast_merge": fast_merge,
         "repositories": [
             {"repo_id": context.repo_id, "repo_path": str(context.repo_path)}
             for context in contexts
@@ -69,6 +71,16 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     all_ready = getattr(parsed, "all_ready", False)
     takeover = getattr(parsed, "takeover", False)
     assume_yes = getattr(parsed, "yes", False)
+    fast_merge = getattr(parsed, "fast_merge", False)
+
+    if fast_merge and all_ready:
+        raise CliError(
+            "--fast-merge is defined for a single targeted Issue; it does not combine "
+            "with --all-ready (a queue-wide unverified burst is exactly what the flag "
+            "must not enable).",
+            code=ExitCode.USAGE,
+            suggestion="iar run --issue <N> --fast-merge · iar run <PRD_PATH> --fast-merge",
+        )
 
     if target_issue is not None and prd_path:
         raise CliError(
@@ -118,6 +130,12 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
                 code=ExitCode.USAGE,
                 suggestion="iar issue create tasks/pending/<prd>.md",
             ) from exc
+
+    # 快速通道 stack 门禁（决策二）：声明了 stack 顺序依赖的 Issue 在启动任何
+    # agent（乃至 takeover 停 daemon）之前以用法错误拒绝——未验证的上游会顺着
+    # fork 基污染整条下游链，检查失败时一律拒绝放行（fail-closed）。
+    if fast_merge and target_issue is not None:
+        _reject_fast_merge_on_stack_issue(ctx, contexts=contexts, target_issue=target_issue)
 
     # 默认互斥（FR-4）：同仓 daemon 在跑时拒绝；--takeover 显式接管。
     # dry-run 预览保留互斥报错（无副作用），但不真正停 daemon。
@@ -172,6 +190,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         transcript_runner_factory=transcript_runner_factory,
         max_deliberation_issues=ctx.runner_settings.daemon.max_deliberation_issues,
         target_issue=target_issue,
+        fast_merge=fast_merge,
     )
     if not parsed.dry_run or ctx.output_format != OUTPUT_FORMAT_JSON:
         return exit_code
@@ -184,12 +203,58 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             max_issues=parsed.max_issues or ctx.runner_settings.runner.max_issues,
             target_issue=target_issue,
             all_ready=all_ready,
+            fast_merge=fast_merge,
         ),
         fmt=OUTPUT_FORMAT_JSON,
     )
     if exit_code:
         return exit_code
     return int(ExitCode.DRY_RUN_OK)
+
+
+def _reject_fast_merge_on_stack_issue(
+    ctx: ParsedCommandContext,
+    *,
+    contexts: list,
+    target_issue: int,
+) -> None:
+    """快速通道 stack 门禁：目标 Issue 声明 ``mode="stack"`` 依赖时拒绝放行。
+
+    检查发生在任何 agent 启动与 daemon 接管之前；Issue 取不到时同样拒绝
+    （无法证明不是 stack 就不走旁路，fail-closed）。
+
+    Raises:
+        CliError: 目标 Issue 声明 stack 顺序依赖，或 Issue 无法读取。
+    """
+    from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
+
+    checked_paths: set[Path] = set()
+    for context in contexts:
+        if context.repo_path in checked_paths:
+            continue
+        checked_paths.add(context.repo_path)
+        github_client = ctx.github_client_factory(context.repo_path)
+        try:
+            issue_detail = github_client.get_issue(target_issue)
+        except Exception as exc:  # noqa: BLE001 - 无法证明非 stack 即拒绝旁路
+            raise CliError(
+                f"--fast-merge requires reading Issue #{target_issue} to check its "
+                f"dependency declaration, but the lookup failed: {exc}",
+                code=ExitCode.USAGE,
+                suggestion="Verify the Issue number and repository access, "
+                "or rerun without --fast-merge.",
+            ) from exc
+        declaration = parse_dependency_marker(issue_detail.body)
+        if declaration is not None and declaration.sequence == "stack":
+            upstream = ", ".join(f"#{number}" for number in declaration.issue_numbers)
+            raise CliError(
+                f"Issue #{target_issue} declares a stack dependency (upstream: {upstream}); "
+                "--fast-merge is rejected because an unverified upstream would poison "
+                "every fork on the chain.",
+                code=ExitCode.USAGE,
+                suggestion=f"Run Issue #{target_issue} without --fast-merge, or "
+                "fast-merge the upstream Issue first.",
+            )
 
 
 def _confirm_and_take_over_daemons(

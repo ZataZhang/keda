@@ -131,6 +131,17 @@ def run_command(
         bool,
         typer.Option("--yes", help="Skip the takeover confirmation prompt (required with --json)."),
     ] = False,
+    fast_merge: Annotated[
+        bool,
+        typer.Option(
+            "--fast-merge",
+            help="Fast track for THIS run only: after the builder commits, skip the "
+            "validation gates (rv re-exec + independent verifier) and publish the "
+            "Draft PR annotated as unverified. Requires a single target "
+            "(--issue or a PRD path); Issues with a declared stack dependency "
+            "are rejected.",
+        ),
+    ] = False,
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
     preset: ModelPresetOption = None,
@@ -164,6 +175,7 @@ def run_command(
         all_ready=all_ready,
         takeover=takeover,
         yes=yes,
+        fast_merge=fast_merge,
     )
 
 
