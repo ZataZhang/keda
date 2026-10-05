@@ -573,3 +573,11 @@ Failure triage:
 - 原因: FR-1..6 交付；rv-1 用真实 `kill -9` daemon 后重启对账证明不再卡死，rv-4 用真实 claude CLI 证明 recovery 轮次续上原会话。
 - 影响: 引入**破坏性配置变更**（旧旗标失效）；关闭 `reconcile_stale_attempts` 即回到本特性落地前现状。
 - 审核: ⚠️ **独立 verifier 未运行**，rv 的 `[PASS]` 均为执行侧自证；全量 `just test` / `just lint --full` 交由 CI。2 项 Human-Confirmed 待人审。
+
+### 合并 main：解决与 #208 的冲突
+- 类型: delivery
+- 原文: 无
+- 变更后: 与 `main`（#208 `--fast-merge`）合并，两处文本冲突均**加性冲突**——`AgentExecutionRequest` dataclass 与 `run_agent_once` 调用点各被两个 PR 各加一个字段/kwarg，故两者并存（`resume_session_id` + `fast_merge`）。实测合并后定向套件 **1222 passed**（含 #208 的 fast_merge 用例），文档两侧内容均完整保留。
+- 原因: 交付前必须与前进的 main 对齐，否则 PR 长期 CONFLICTING。
+- 影响: 无行为变更，纯冲突解决；**但代码树因此变化，rv-1..rv-5 证据绑定的是合并前的 `84b3fd10`**，评审须按"证据来自合并前、行为断言不受本次合并影响"折算。
+- 审核: 仍无独立 verifier；`Human-Confirmed` 两项保持未勾。
