@@ -9,10 +9,10 @@ CLI 入口基于 Typer/Rich：`iar --help` 会展示分组命令、参数和别�
 - **init**：在目标 Git 仓库创建仓库本地 `.iar.toml` 配置
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
 - **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）
-- **run**：单次轮询 `agent/ready` 的 Issues，claim 后执行 AI Agent，验证、push、pre-PR review、创建 draft PR、进入 `agent/supervising` 并运行 post-PR supervisor（兼容旧命令 `run-once`）
+- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。同仓 daemon 在跑时默认拒绝（`--takeover` 显式接管）
 - **review**：单次检查 `agent/supervising` 和 `agent/review` 的 Issues，基于 PR 上下文变化运行 supervisor cycle（兼容旧命令 `review-once`）
 - **review-daemon**：常驻进程，按指定间隔循环执行 `review-once`
-- **daemon**：常驻进程，按指定间隔循环执行 `run-once`
+- **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 autopilot 调度阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
 - **ask**：受限自然语言决策入口，默认只生成计划，确认后执行白名单动作
 - **worktree cleanup**：清理 GitHub Issue 已关闭、远端分支已删除但本地仍残留的 `issue-<number>` 分支和 iAR worktree
 
@@ -38,7 +38,7 @@ iar init
 
 # 之后才能执行其他命令
 iar labels sync
-iar run --dry-run
+iar run --all-ready --dry-run
 ```
 
 `iar init` 本身不受门禁限制，包括 `--dry-run` 和 `--force` 形式。本 PRD 不提供 `--skip-init-check` 等绕过开关。
@@ -74,7 +74,7 @@ iar completion show --shell zsh
 
 ```bash
 iar issue list --json                 # 等价于 --output json
-iar run --dry-run --output json       # 计划以 JSON 给出
+iar run --all-ready --dry-run --output json   # 计划以 JSON 给出
 iar daemon status --json
 ```
 
@@ -411,7 +411,7 @@ tasks/evidence/**
 
 IAR 自带的 `iar-operator` Skill 随 Python 发行包安装，无需联网下载。`iar init --dry-run` 会显示目标路径；目标下已有不同内容的同名 Skill 时默认保留并报告冲突，只有显式 `--force` 才覆盖。
 
-ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`priority/P3` 识别优先级，按 P0→P3 排序，同级按 Issue number 升序；缺少这些标签的 Issue 排在显式 P3 之后。`iar run --dry-run` 与实际执行共用排序，并在预览中显示 priority；每轮排序范围是 GitHub 返回的最多 100 条 ready Issue 候选，不能据此承诺候选窗口以外的全局排序。`iar issue list --state`、`--label` 与 PR 筛选分别由公开参数应用。
+ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`priority/P3` 识别优先级，按 P0→P3 排序，同级按 Issue number 升序；缺少这些标签的 Issue 排在显式 P3 之后。`iar run --all-ready --dry-run` 与实际执行共用排序，并在预览中显示 priority；每轮排序范围是 GitHub 返回的最多 100 条 ready Issue 候选，不能据此承诺候选窗口以外的全局排序。`iar issue list --state`、`--label` 与 PR 筛选分别由公开参数应用。
 
 ### 提交前验证命令自动探测
 
@@ -1073,6 +1073,61 @@ iar worktree cleanup --yes --force
 git worktree remove /path/to/<repo>-worktrees/tasks/issue-<number>
 git branch -d issue-<number>
 ```
+
+## run 与 daemon 的执行语义与控制面
+
+`iar run` 与 `iar daemon` 的职责边界是显式契约：**run = 手动单次、串行、定向执行**，不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 autopilot 调度阶段的地方。
+
+### run 目标必填（breaking change）
+
+`iar run` **必须带目标**，不再"默认按优先级捞 ready 队列"：
+
+```bash
+# 定向只跑一个 Issue
+iar run --issue 42
+
+# 跑一个 PRD（解析其头部的 - GitHub Issue: 回链；没有回链会报错，先 iar issue create）
+iar run tasks/pending/P1-FEAT-xxx.md
+
+# 处理整个 ready 队列（等价旧的 iar run 行为，必须显式）
+iar run --all-ready
+```
+
+- `--issue` 与 PRD 路径互斥；三者（`--issue` / PRD 路径 / `--all-ready`）都不给时退出码 2（usage error）。
+- 定向 run 只处理目标 Issue（仍走依赖门禁与 claim）；队列里其他 ready Issue 原封不动。
+- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `iar backlog advance`，并行归 daemon 的 `--concurrency`。
+
+**迁移**：旧脚本/文档里"无目标的 `iar run`"改为 `iar run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
+
+### 与 daemon 的默认互斥与显式接管
+
+同仓已有 daemon 在跑时，`iar run` 默认**拒绝**（退出码 5 conflict），绝不与 daemon 双 claim 同一 ready 队列：
+
+```text
+usage_error/conflict: A daemon for repository '<repo_id>' is already running (PID <N>) ...
+next: iar registry stop --repo-id <repo_id> ... or rerun with --takeover ...
+```
+
+确认要手动接管时使用 `--takeover`（强警告 + 交互确认；脚本里加 `--yes`，`--json` 机器模式下必须 `--yes`）：
+
+```bash
+iar run --issue 42 --takeover --yes
+```
+
+接管流程：优雅停 daemon（SIGTERM → 等待超时 → 兜底 SIGKILL；**不会**把 SIGKILL 当首手段）→ 终止 daemon 的在途 agent 子进程树（不留孤儿 agent）→ 把在途 Issue reclaim 回 `agent/ready` → 执行定向 run。**接管会中断 daemon 当前所有在途 Issue**（不只是你指定的那个），它们会被 reclaim 后重跑——这是有意为之的破坏性动作，所以默认不发生。
+
+### daemon 的 autopilot 按次覆盖
+
+```bash
+# 配置 autopilot.enabled=false，但本次 daemon 临时开调度
+iar daemon --autopilot
+
+# 配置 autopilot.enabled=true，但本次 daemon 临时关调度
+iar daemon --no-autopilot
+```
+
+- 优先级：**flag > 仓库 `.iar.toml` > 全局**；传了旗标即锁定本次常驻进程（之后改 `.iar.toml` 不影响本次进程），不传则每轮热读配置。
+- 旗标**只覆盖调度类 autopilot**（发现/晋升 pending PRD、补槽）；它**不能**打开自动合并——合并仍由 `safety.auto_merge` + `autopilot.enabled` 配置双开关决定，`process_merge_queue` 在配置未开时保持 no-op。
 
 ## 多仓库 Registry 兼容
 

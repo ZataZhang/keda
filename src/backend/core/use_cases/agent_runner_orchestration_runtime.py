@@ -550,6 +550,9 @@ class RunOnceRequest:
     repo_id: str | None = None
     concurrency: int = 1
     output_view: IRunnerLiveView | None = None
+    #: 定向目标 Issue 编号（``iar run --issue``）。非 ``None`` 时只处理该
+    #: Issue（仍走依赖门禁与 claim）；``None`` 保持"按优先级捞队列"行为。
+    target_issue: int | None = None
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -651,9 +654,26 @@ def run_once(request: RunOnceRequest) -> int:
 
     # 发现 ready Issue。并行时单轮领取上限抬到 max(max_issues, concurrency)，
     # 使单独一个 --concurrency N 即可领到并跑 N 个，无需另调 --max-issues。
+    # 定向模式（target_issue 非 None）只保留目标 Issue：直接 get_issue 取最新
+    # 状态，按标签决定它进入哪条候选通道；其余 ready/running/blocked Issue
+    # 一律不动。
     effective_max_issues = max(max_issues, concurrency)
-    ready_discovery_limit = max(effective_max_issues, _READY_DISCOVERY_LIMIT)
-    ready_issues = github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
+    target_issue_number = request.target_issue
+    target_issue_summary: IssueSummary | None = None
+    if target_issue_number is not None:
+        try:
+            target_issue_summary = github_client.get_issue(target_issue_number)
+        except Exception as exc:  # noqa: BLE001 - 目标取不到即无候选可处理。
+            _logger.error("Targeted Issue #%d could not be fetched: %s", target_issue_number, exc)
+            return 1
+
+    if target_issue_summary is not None:
+        ready_issues = (
+            [target_issue_summary] if config.labels.ready in target_issue_summary.labels else []
+        )
+    else:
+        ready_discovery_limit = max(effective_max_issues, _READY_DISCOVERY_LIMIT)
+        ready_issues = github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
     processed_count = 0
     issues_to_process: list[tuple[IssueSummary, str]] = []
 
@@ -690,12 +710,19 @@ def run_once(request: RunOnceRequest) -> int:
         issues_to_process.append((issue, "ready"))
         processed_count += 1
 
-    # 发现 running Issue（使用剩余配额）
+    # 发现 running Issue（使用剩余配额）；定向模式只考虑目标 Issue。
     remaining = effective_max_issues - processed_count
     if remaining > 0:
-        running_candidates = github_client.list_review_candidate_issues(
-            [config.labels.running], remaining
-        )
+        if target_issue_summary is not None:
+            running_candidates = (
+                [target_issue_summary]
+                if config.labels.running in target_issue_summary.labels
+                else []
+            )
+        else:
+            running_candidates = github_client.list_review_candidate_issues(
+                [config.labels.running], remaining
+            )
         for issue in running_candidates:
             is_rework, marker = _guard_running_issue_is_rework(issue, config, github_client)
             if is_rework and marker is not None:
@@ -721,12 +748,19 @@ def run_once(request: RunOnceRequest) -> int:
                     config.labels.running,
                 )
 
-    # 发现 blocked Issue（使用剩余配额）
+    # 发现 blocked Issue（使用剩余配额）；定向模式只考虑目标 Issue。
     remaining = effective_max_issues - len(issues_to_process)
     if remaining > 0:
-        blocked_candidates = github_client.list_review_candidate_issues(
-            [config.labels.blocked], remaining
-        )
+        if target_issue_summary is not None:
+            blocked_candidates = (
+                [target_issue_summary]
+                if config.labels.blocked in target_issue_summary.labels
+                else []
+            )
+        else:
+            blocked_candidates = github_client.list_review_candidate_issues(
+                [config.labels.blocked], remaining
+            )
         for issue in blocked_candidates:
             marker = _guard_blocked_issue_has_resolution(issue, github_client)
             if marker is not None:

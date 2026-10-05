@@ -1,0 +1,56 @@
+[
+  {
+    "rv": "rv-5",
+    "check": "bare iar run is usage error",
+    "ok": true,
+    "detail": "exit=2 output='usage_error: iar run requires a target: pass --issue <N>, a PRD path, or --all-ready.\\nnext: iar run --issue <N> --repo-id <repo> · iar run tasks/pending/<prd>.m'"
+  },
+  {
+    "rv": "rv-4",
+    "check": "run --help has targets, no --autopilot",
+    "ok": true,
+    "detail": "flags present: --issue/--all-ready/--takeover; --autopilot absent"
+  },
+  {
+    "rv": "rv-8",
+    "check": "daemon run exposes --autopilot/--no-autopilot (schema)",
+    "ok": true,
+    "detail": "daemon run flags: '--interval --agent --max-issues --concurrency --autopilot --no-autopilot --preset --model --reasoning-effort --repo --repo-id --config --all'"
+  },
+  {
+    "rv": "rv-7",
+    "check": "PRD link two-state",
+    "ok": true,
+    "detail": "linked->#417; unlinked error mentions 'iar issue create': True"
+  },
+  {
+    "rv": "rv-2",
+    "check": "run rejected while daemon lock held",
+    "ok": true,
+    "detail": "exit=5 mentions takeover=True"
+  },
+  {
+    "rv": "rv-2",
+    "check": "negative control: daemon untouched by rejection",
+    "ok": true,
+    "detail": "holder pid 26169 still alive=True"
+  },
+  {
+    "rv": "rv-6",
+    "check": "takeover stops daemon gracefully (sigterm)",
+    "ok": true,
+    "detail": "final_signal=sigterm daemon exited=True"
+  },
+  {
+    "rv": "rv-6",
+    "check": "negative control: no orphan agent after takeover",
+    "ok": true,
+    "detail": "leftover descendant pid=None"
+  },
+  {
+    "rv": "rv-1",
+    "check": "targeted run dry-run preview carries target_issue",
+    "ok": true,
+    "detail": "exit=1 stdout head='{\\n  \"dry_run\": true,\\n  \"agent\": \"auto\",\\n  \"max_issues\": 1,\\n  \"target_issue\": 42,\\n  \"all_ready\": false,\\n  \"repositories\":'"
+  }
+]

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
+import signal
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from backend.core.shared.interfaces.agent_runner import (
     IAgentTranscriptRunner,
@@ -27,6 +30,81 @@ from backend.core.use_cases.backlog_actions import advance_backlog_queue
 
 _logger = logging.getLogger(__name__)
 
+#: SIGTERM 后等待在途 agent 进程组自行退出的秒数，超时升级 SIGKILL
+#: （与 :class:`PidfileProcessSupervisor` 的停止语义一致，禁止把 SIGKILL
+#: 当作停 daemon 的首手段）。
+_DESCENDANT_TERM_GRACE_SECONDS = 10.0
+
+
+def _import_psutil() -> Any:
+    """按需导入 psutil；缺失时返回 ``None``（清理降级为 no-op）。"""
+    try:
+        import psutil
+    except Exception:  # noqa: BLE001 - psutil 是可选依赖。
+        return None
+    return psutil
+
+
+def _collect_descendant_group_ids() -> set[int]:
+    """收集本进程全部后代进程的进程组 ID（排除自己的组与 init 组）。
+
+    agent 子进程由 ``process_group=0`` 放进独立进程组，向组发信号即可
+    整组回收（含 agent 派生的后台进程），不误伤 daemon 自己所在的组。
+
+    Returns:
+        可安全 kill 的进程组 ID 集合；psutil 不可用或扫描失败时为空集。
+    """
+    psutil = _import_psutil()
+    if psutil is None:
+        return set()
+    try:
+        own_group_id = os.getpgid(0)
+        descendants = psutil.Process().children(recursive=True)
+    except Exception:  # noqa: BLE001 - 扫描失败时放弃组收集，靠 reclaim 兜底。
+        return set()
+    group_ids: set[int] = set()
+    for descendant in descendants:
+        try:
+            descendant_group_id = os.getpgid(descendant.pid)
+        except OSError:
+            continue
+        if descendant_group_id > 1 and descendant_group_id != own_group_id:
+            group_ids.add(descendant_group_id)
+    return group_ids
+
+
+def _terminate_descendant_process_trees() -> None:
+    """SIGTERM 后清理在途 agent 子进程树（尽力而为）。
+
+    停止顺序与进程监管器一致：整组 SIGTERM → 等待宽限期 → 仍存活则
+    SIGKILL。任何一步失败都不抛出——shutdown 路径必须能走完。
+    """
+    group_ids = _collect_descendant_group_ids()
+    if not group_ids:
+        return
+    for group_id in group_ids:
+        try:
+            os.killpg(group_id, signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.monotonic() + _DESCENDANT_TERM_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        alive_group_ids: set[int] = set()
+        for group_id in group_ids:
+            try:
+                os.killpg(group_id, 0)  # 信号 0 只探活，不发送。
+            except OSError:
+                continue
+            alive_group_ids.add(group_id)
+        if not alive_group_ids:
+            break
+        time.sleep(0.1)
+    for group_id in group_ids:
+        try:
+            os.killpg(group_id, signal.SIGKILL)
+        except OSError:
+            pass
+
 
 def run_agent_daemon(
     *,
@@ -47,6 +125,7 @@ def run_agent_daemon(
     reclaim_stale_running: bool = False,
     reclaim_ttl_seconds: int | None = None,
     backlog_store_factory: Callable[[], IBacklogStore] | None = None,
+    autopilot_override: bool | None = None,
 ) -> None:
     """Run the queue poller forever across all target repositories.
 
@@ -82,7 +161,75 @@ def run_agent_daemon(
             before Phase 2 so finished PRDs release their slot and the next
             queued PRD is promoted in the same pass. When omitted, the stage is
             skipped entirely (zero regression for existing callers).
+        autopilot_override: ``iar daemon --autopilot / --no-autopilot`` 的按次
+            覆盖，只作用于**调度类** autopilot（``True``/``False``），优先级
+            ``flag > repo .iar.toml > 全局`` 并锁定本次常驻进程；``None`` 表示
+            未传旗标，每轮热读配置。该覆盖**不**影响 review 侧自动合并——
+            合并仍由 ``safety.auto_merge`` + ``autopilot.enabled`` 双开关决定。
     """
+    previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
+
+    def _handle_sigterm(signum: int, frame: Any) -> None:
+        """优雅停机：先整组终止在途 agent 子进程树，再退出主循环。"""
+        _logger.info("Daemon received SIGTERM; terminating in-flight agent trees before exit.")
+        _terminate_descendant_process_trees()
+        raise SystemExit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except (ValueError, OSError):  # noqa: BLE001 - 非主线程（如测试）时不装钩子。
+        _logger.debug("SIGTERM shutdown hook not installed (not main thread or no permission).")
+
+    try:
+        _run_daemon_loop(
+            contexts=contexts,
+            interval=interval,
+            agent=agent,
+            max_issues=max_issues,
+            process_runner=process_runner,
+            github_client_factory=github_client_factory,
+            content_generator_factory=content_generator_factory,
+            run_history_store=run_history_store,
+            run_trigger=run_trigger,
+            max_prd_issues=max_prd_issues,
+            transcript_runner_factory=transcript_runner_factory,
+            max_deliberation_issues=max_deliberation_issues,
+            concurrency=concurrency,
+            output_view=output_view,
+            reclaim_stale_running=reclaim_stale_running,
+            reclaim_ttl_seconds=reclaim_ttl_seconds,
+            backlog_store_factory=backlog_store_factory,
+            autopilot_override=autopilot_override,
+        )
+    finally:
+        try:
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
+        except (ValueError, OSError):
+            pass
+
+
+def _run_daemon_loop(
+    *,
+    contexts: list[RepositoryRunContext],
+    interval: int,
+    agent: str,
+    max_issues: int,
+    process_runner: IProcessRunner,
+    github_client_factory: Callable[[Path], IGitHubClient],
+    content_generator_factory: Callable[[Path], IContentGenerator] | None = None,
+    run_history_store: IRunHistoryStore | None = None,
+    run_trigger: str = "cli_daemon",
+    max_prd_issues: int = 1,
+    transcript_runner_factory: Callable[[Path], IAgentTranscriptRunner] | None = None,
+    max_deliberation_issues: int = 1,
+    concurrency: int = 1,
+    output_view: IRunnerLiveView | None = None,
+    reclaim_stale_running: bool = False,
+    reclaim_ttl_seconds: int | None = None,
+    backlog_store_factory: Callable[[], IBacklogStore] | None = None,
+    autopilot_override: bool | None = None,
+) -> None:
+    """daemon 主循环（由 :func:`run_agent_daemon` 包装信号钩子后调用）。"""
     while True:
         for context in contexts:
             _logger.info(
@@ -162,7 +309,14 @@ def run_agent_daemon(
             # promoted PRDs agent/ready. Running it before Phase 2 means a PRD
             # promoted in this pass is picked up in the same pass. Failures are
             # logged and swallowed so a scheduling fault never kills the daemon.
-            if backlog_store_factory is not None and context.config.autopilot.enabled:
+            # --autopilot/--no-autopilot 的按次覆盖优先于配置；未传旗标时每轮
+            # 热读配置（flag > repo .iar.toml > 全局，锁定本次常驻进程）。
+            autopilot_enabled = (
+                autopilot_override
+                if autopilot_override is not None
+                else context.config.autopilot.enabled
+            )
+            if backlog_store_factory is not None and autopilot_enabled:
                 try:
                     advance_report = advance_backlog_queue(
                         context=context,

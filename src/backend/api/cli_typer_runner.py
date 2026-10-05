@@ -22,7 +22,7 @@ command order is preserved.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -71,6 +71,7 @@ def _run_runner_command(
     reasoning_effort: str | None = None,
     output: str | None = None,
     as_json: bool = False,
+    **extra_kwargs: Any,
 ) -> int:
     """Run `run` or `review` through the shared dispatch path."""
     return _run_typer_repository_command(
@@ -86,13 +87,50 @@ def _run_runner_command(
         all_repositories=all_repositories,
         output=output,
         as_json=as_json,
+        **extra_kwargs,
     )
 
 
 @app.command("run")
 def run_command(
     ctx: typer.Context,
+    prd_path: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="[PRD_PATH]",
+            help="Target PRD path: runs the Issue linked via the PRD's "
+            "'- GitHub Issue:' line. Pass --issue, a PRD path, or --all-ready.",
+        ),
+    ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview only.")] = False,
+    issue: Annotated[
+        int | None,
+        typer.Option(
+            "--issue",
+            metavar="N",
+            help="Target Issue number: only that Issue is processed this pass.",
+        ),
+    ] = None,
+    all_ready: Annotated[
+        bool,
+        typer.Option(
+            "--all-ready",
+            help="Process the ready queue by priority (the historical iar run behavior).",
+        ),
+    ] = False,
+    takeover: Annotated[
+        bool,
+        typer.Option(
+            "--takeover",
+            help="When a daemon already serves the repository, stop it gracefully, "
+            "reclaim its in-flight Issues, then run. Destructive: interrupts ALL "
+            "of the daemon's in-flight Issues.",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Skip the takeover confirmation prompt (required with --json)."),
+    ] = False,
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
     preset: ModelPresetOption = None,
@@ -105,7 +143,7 @@ def run_command(
     config: ConfigOption = None,
     all_repositories: AllRepositoriesOption = False,
 ) -> int:
-    """Run one agent-runner polling cycle."""
+    """Run one agent-runner polling cycle (a target is required)."""
     return _run_runner_command(
         ctx,
         command="run",
@@ -121,6 +159,11 @@ def run_command(
         reasoning_effort=reasoning_effort,
         output=_enum_value(output),
         as_json=as_json,
+        prd_path=prd_path,
+        issue=issue,
+        all_ready=all_ready,
+        takeover=takeover,
+        yes=yes,
     )
 
 
@@ -232,6 +275,7 @@ def _run_daemon_command(
     config: str | None,
     all_repositories: bool,
     concurrency: int | None = None,
+    autopilot_override: bool | None = None,
     preset: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
@@ -248,6 +292,7 @@ def _run_daemon_command(
         max_issues=max_issues,
         all_repositories=all_repositories,
         concurrency=concurrency,
+        autopilot_override=autopilot_override,
         **_typer_preset_options(preset=preset, model=model, reasoning_effort=reasoning_effort),
     )
 
@@ -259,6 +304,15 @@ def daemon_callback(
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
     concurrency: ConcurrencyOption = None,
+    autopilot: Annotated[
+        bool | None,
+        typer.Option(
+            "--autopilot/--no-autopilot",
+            help="Enable/disable the scheduling autopilot for this daemon run, "
+            "overriding autopilot.enabled. Scheduling only: it never arms "
+            "auto-merge (that stays behind the safety.auto_merge config switch).",
+        ),
+    ] = None,
     preset: ModelPresetOption = None,
     model: ModelIdOption = None,
     reasoning_effort: ReasoningEffortOption = None,
@@ -281,6 +335,7 @@ def daemon_callback(
         config=config,
         all_repositories=all_repositories,
         concurrency=concurrency,
+        autopilot_override=autopilot,
         preset=preset,
         model=model,
         reasoning_effort=reasoning_effort,
@@ -295,6 +350,15 @@ def daemon_run_command(
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
     concurrency: ConcurrencyOption = None,
+    autopilot: Annotated[
+        bool | None,
+        typer.Option(
+            "--autopilot/--no-autopilot",
+            help="Enable/disable the scheduling autopilot for this daemon run, "
+            "overriding autopilot.enabled. Scheduling only: it never arms "
+            "auto-merge (that stays behind the safety.auto_merge config switch).",
+        ),
+    ] = None,
     preset: ModelPresetOption = None,
     model: ModelIdOption = None,
     reasoning_effort: ReasoningEffortOption = None,
@@ -319,6 +383,7 @@ def daemon_run_command(
         config=config,
         all_repositories=all_repositories,
         concurrency=concurrency,
+        autopilot_override=autopilot,
         preset=preset,
         model=model,
         reasoning_effort=reasoning_effort,

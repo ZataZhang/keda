@@ -61,7 +61,8 @@ def build_runner_argv(
         runner_command: 启动命令前缀（如 ``["uv", "run", "iar"]``）。
         kind: 进程类型枚举。
         repo_id: 目标仓库 ID（传给 ``--repo-id``）。
-        issue_number: 仅 ``BLOCKED_CONTINUE`` 需要的 Issue 编号。
+        issue_number: ``BLOCKED_CONTINUE`` 的目标 Issue；``RUN_ONCE`` 传它时
+            定向执行（``iar run --issue N``），缺省走 ``--all-ready``。
 
     Returns:
         完整 argv 元组。
@@ -78,7 +79,14 @@ def build_runner_argv(
     if kind is RunnerProcessKind.REVIEW_DAEMON:
         return (*command_prefix, "review-daemon", *selector)
     if kind is RunnerProcessKind.RUN_ONCE:
-        return (*command_prefix, "run", *selector)
+        # ``iar run`` 目标必填后的 Console 迁移（FR-7）：带 Issue 编号时定向
+        # 执行（开始此 PRD 路径），否则显式 ``--all-ready`` 保留旧的捞队列
+        # 行为（仓库级 run_once 动作），绝不发出无目标的 ``iar run``。
+        if issue_number is not None:
+            if issue_number <= 0:
+                raise ConsoleProcessError("run_once requires a positive issue_number.")
+            return (*command_prefix, "run", "--issue", str(issue_number), *selector)
+        return (*command_prefix, "run", "--all-ready", *selector)
     if kind is RunnerProcessKind.REVIEW_ONCE:
         return (*command_prefix, "review", *selector)
     if kind is RunnerProcessKind.BLOCKED_CONTINUE:

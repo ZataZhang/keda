@@ -868,7 +868,7 @@ def test_main_rejects_unknown_repo_id() -> None:
         "backend.api.cli_helpers.resolve_repository_targets",
         side_effect=ValueError("not found"),
     ):
-        exit_code = main(["run", "--repo-id", "nonexistent"])
+        exit_code = main(["run", "--all-ready", "--repo-id", "nonexistent"])
         assert exit_code == 1
 
 
@@ -891,7 +891,7 @@ def test_main_passes_all_repositories_selector() -> None:
         patch("backend.api.cli.create_github_client"),
         patch("backend.api.cli.require_iar_repository_initialized"),
     ):
-        exit_code = main(["run", "--all", "--dry-run"])
+        exit_code = main(["run", "--all-ready", "--all", "--dry-run"])
 
     assert exit_code == 0
     assert mock_resolve.call_args.kwargs["all_repositories"] is True
@@ -916,7 +916,7 @@ def test_main_run_passes_all_repositories_selector() -> None:
         patch("backend.api.cli.create_github_client"),
         patch("backend.api.cli.require_iar_repository_initialized"),
     ):
-        exit_code = main(["run", "--all", "--dry-run", "--agent", "codex"])
+        exit_code = main(["run", "--all-ready", "--all", "--dry-run", "--agent", "codex"])
 
     assert exit_code == 0
     assert mock_resolve.call_args.kwargs["all_repositories"] is True
@@ -1285,7 +1285,7 @@ def test_main_typer_top_level_repo_selector_is_honored() -> None:
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
     ):
-        exit_code = main(["--repo", "/tmp/repo", "run", "--dry-run"])
+        exit_code = main(["--repo", "/tmp/repo", "run", "--all-ready", "--dry-run"])
 
     assert exit_code == 0
     assert mock_resolve.call_args.kwargs["repo_path_override"] == "/tmp/repo"
@@ -2313,7 +2313,7 @@ def test_main_run_rebase_conflict_detached_head() -> None:
         patch("backend.api.cli.run_agent_repositories_once", return_value=0) as mock_run,
         patch("backend.api.cli.require_iar_repository_initialized"),
     ):
-        exit_code = main(["run", "--dry-run", "--agent", "claude"])
+        exit_code = main(["run", "--all-ready", "--dry-run", "--agent", "claude"])
 
     assert exit_code == 0
     mock_run.assert_called_once()
@@ -2785,7 +2785,7 @@ def test_main_run_fails_when_repository_not_initialized(
     repo_path = _init_bare_git_repository(tmp_path, "uninitialized")
     monkeypatch.chdir(repo_path)
 
-    exit_code = main(["run", "--dry-run"])
+    exit_code = main(["run", "--all-ready", "--dry-run"])
     captured = capsys.readouterr()
     combined = f"{captured.out}\n{captured.err}"
 
@@ -4092,7 +4092,7 @@ def test_main_run_passes_transcript_runner_factory(monkeypatch) -> None:
         patch("backend.api.cli.create_github_client"),
         patch("backend.api.cli.require_iar_repository_initialized"),
     ):
-        exit_code = main(["run", "--all"])
+        exit_code = main(["run", "--all-ready", "--all"])
 
     assert exit_code == 0
     factory = mock_run.call_args.kwargs["transcript_runner_factory"]
@@ -4206,7 +4206,7 @@ def test_main_run_phase0_deliberation_real_entry_point(monkeypatch, tmp_path: Pa
     ):
         # Exit code may be non-zero (downstream phases may fail in this
         # sandbox), but Phase 0 should still have posted its comment.
-        main(["run", "--all"])
+        main(["run", "--all-ready", "--all"])
 
     comments = fake_github.list_issue_comments(42)
     assert len(comments) >= 1, "Phase 0 should post at least one comment"
@@ -4269,7 +4269,7 @@ def test_main_run_dry_run_skips_deliberation_phase(monkeypatch, tmp_path: Path) 
         patch("backend.api.cli.create_transcript_runner"),
         patch("backend.api.cli.require_iar_repository_initialized"),
     ):
-        exit_code = main(["run", "--all", "--dry-run"])
+        exit_code = main(["run", "--all-ready", "--all", "--dry-run"])
 
     assert exit_code == 0
     comments = fake_github.list_issue_comments(77)

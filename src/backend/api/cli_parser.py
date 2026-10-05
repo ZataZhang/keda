@@ -264,7 +264,39 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_options(issue_list_parser)
 
     run_parser = subparsers.add_parser("run")
+    run_parser.add_argument(
+        "prd_path",
+        nargs="?",
+        default=None,
+        metavar="PRD_PATH",
+        help="Target PRD path (resolved via its '- GitHub Issue:' link).",
+    )
     run_parser.add_argument("--dry-run", action="store_true")
+    run_parser.add_argument(
+        "--issue",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Target Issue number: only that Issue is processed this pass.",
+    )
+    run_parser.add_argument(
+        "--all-ready",
+        action="store_true",
+        default=False,
+        help="Process the ready queue by priority (the historical iar run behavior).",
+    )
+    run_parser.add_argument(
+        "--takeover",
+        action="store_true",
+        default=False,
+        help="Stop a running daemon gracefully, reclaim its in-flight Issues, then run.",
+    )
+    run_parser.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Skip the takeover confirmation prompt (required with --json).",
+    )
     run_parser.add_argument(
         "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
@@ -290,6 +322,19 @@ def build_parser() -> argparse.ArgumentParser:
             "[agent_runner.runner].max_concurrent_issues (1 = sequential). "
             ">1 shows a per-Issue live view on a TTY and writes per-Issue logs."
         ),
+    )
+    daemon_run_options.add_argument(
+        "--autopilot",
+        dest="autopilot_override",
+        action="store_true",
+        default=None,
+        help="Enable the scheduling autopilot for this run (never arms auto-merge).",
+    )
+    daemon_run_options.add_argument(
+        "--no-autopilot",
+        dest="autopilot_override",
+        action="store_false",
+        help="Disable the scheduling autopilot for this daemon run.",
     )
     add_common_options(daemon_run_options)
     add_all_repositories_option(daemon_run_options)

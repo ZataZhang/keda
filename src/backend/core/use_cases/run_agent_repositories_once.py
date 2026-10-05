@@ -56,6 +56,7 @@ def run_agent_repositories_once(
     max_prd_issues: int = 1,
     transcript_runner_factory: Callable[[Path], IAgentTranscriptRunner] | None = None,
     max_deliberation_issues: int = 1,
+    target_issue: int | None = None,
 ) -> int:
     """Run one polling pass across all target repositories.
 
@@ -76,6 +77,9 @@ def run_agent_repositories_once(
             that do not assemble a runner).
         max_deliberation_issues: Maximum ``agent/deliberate`` Issues to process
             per Phase 0 pass.
+        target_issue: 定向目标 Issue 编号（``iar run --issue``）。非 ``None``
+            时每仓只处理该 Issue（仍走依赖门禁与 claim），其余 ready Issue
+            一律不动；``None`` 保持既有"按优先级捞队列"行为。
 
     Returns:
         Exit code (0 on success, 1 if any repository failed).
@@ -147,6 +151,7 @@ def run_agent_repositories_once(
                 run_history_store=run_history_store,
                 run_trigger=run_trigger,
                 repo_id=context.repo_id,
+                target_issue=target_issue,
             )
             if repo_exit_code != 0:
                 aggregated_exit_code = 1

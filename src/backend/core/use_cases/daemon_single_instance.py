@@ -92,6 +92,27 @@ def _read_lock_owner(lock_path: Path) -> int | None:
         return None
 
 
+def find_live_daemon_pid(lock_dir: Path, repo_id: str) -> int | None:
+    """Return the PID of the live daemon owning ``repo_id``'s lock, or ``None``.
+
+    Read-only probe used by ``iar run``'s default mutex: a live owner means a
+    daemon is currently serving the repository, so a manual run must refuse
+    (or take over explicitly) instead of double-claiming the ready queue.
+
+    Args:
+        lock_dir: Directory holding per-repository lock files.
+        repo_id: Repository identifier to probe.
+
+    Returns:
+        The live owner PID, or ``None`` when no lock exists, the recorded
+        owner is this process, or the recorded owner is dead.
+    """
+    owner_pid = _read_lock_owner(daemon_lock_path(lock_dir, repo_id))
+    if owner_pid is not None and owner_pid != os.getpid() and _is_process_alive(owner_pid):
+        return owner_pid
+    return None
+
+
 def acquire_daemon_lock(lock_path: Path, repo_id: str) -> None:
     """Acquire the single-instance daemon lock for one repository.
 
