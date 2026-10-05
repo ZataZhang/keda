@@ -62,3 +62,15 @@
 ## 结论依据
 
 冻结凭证匹配；PRD §7.6 全部 7 个 oracle（rv-1/2/4/5/6/7/8）均被真实证据独立支持，negative control 齐备且实跑可复现；Non-Goals 与 FR-1..FR-8 的代码事实核对全部通过；全量 3012 passed 复现；文档与 skill 同步到位。三项披露/缺口见问题清单，均不构成 oracle 失败或阻塞合并的阻塞项。
+
+
+## 附录：增量复核（2026-10-05，2229f736）
+
+- 变更：`src/backend/api/cli_parser.py` 三处新增 argparse help 文本压缩
+  （CI 硬行数上限 1007 → 996 非空行），另将 rv_real_entry.py /
+  rv-real-entry-results.json 从证据分支回补到代码分支。无行为变化。
+- 复核：定向测试 190 passed（test_agent_runner_cli / run_targeting /
+  iar_operator_skill / cli_schema）；rv_real_entry.py 复跑 9/9 PASS；
+  verified head 更新为 `2229f736`，record-excluded verified tree 更新为
+  `8fdf6935095e714942b294cf9301defb2c4fc5f2`。
+- 结论：增量复核 PASS，主结论不变。
