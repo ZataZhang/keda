@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收（执行侧交付完成，已随交付 PR 归档；Human-Confirmed 空框待人工勾选）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制、文件路径、命令与排期信息；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。人只在 Part A 点名处下钻。
@@ -452,25 +452,25 @@ flowchart TD
 
 ### Behavior Acceptance
 
-- [ ] rv-1：目标定向只处理指定 Issue（证据：rv-1 报告）。
-- [ ] rv-7：PRD 路径解析回链 Issue / 无 Issue 报错（证据：rv-7 报告）。
-- [ ] rv-5：无目标报用法错误；`--all-ready` 与旧行为等价（证据：rv-5 报告 + 黄金对照）。
-- [ ] rv-2：daemon 在跑时默认 run 拒绝、无双 claim（证据：rv-2 报告）。
-- [ ] rv-6：`--takeover` 优雅停 daemon、无孤儿 agent、在途 Issue 被 reclaim（证据：rv-6 报告）。
-- [ ] rv-4：run 不含 autopilot（证据：rv-4 报告）。
-- [ ] rv-8：daemon `--autopilot` 仅覆盖调度、不 arm 合并（证据：rv-8 报告）。
+- [x] rv-1：目标定向只处理指定 Issue（证据：`tests/test_agent_runner_run_targeting.py` 定向收窄单测 + rv-real-entry 定向 dry-run 预览携带 `"target_issue": 42`）。
+- [x] rv-7：PRD 路径解析回链 Issue / 无 Issue 报错（证据：两态单测 + rv-real-entry 真实文件解析）。
+- [x] rv-5：无目标报用法错误；`--all-ready` 与旧行为等价（证据：真实 CLI exit 2 + 9 处旧用例迁移到 `--all-ready` 全绿）。
+- [x] rv-2：daemon 在跑时默认 run 拒绝、无双 claim（证据：真实持锁进程 + 真实 CLI exit 5；negative control：持锁进程不受影响）。
+- [x] rv-6：`--takeover` 优雅停 daemon、无孤儿 agent、在途 Issue 被 reclaim（证据：真实 SIGTERM/进程组接管编排 `final_signal=sigterm`；negative control：后代 agent 组被清扫）。
+- [x] rv-4：run 不含 autopilot（证据：真实 `iar run --help` 断言 + CliRunner 快照单测）。
+- [x] rv-8：daemon `--autopilot` 仅覆盖调度、不 arm 合并（证据：门控三态单测 + verifier 核对 `agent_runner_merge_queue.py` 不在本提交 diff）。
 
 ### Validation Acceptance
 
-- [ ] 至少一个 oracle 走真实 CLI + 真实进程入口（rv-1/rv-6）。
-- [ ] 全部 negative control 按 §7.6 记录并可复现（如 rv-2/rv-6 的默认拒绝不停 daemon、rv-5 的无目标不得静默捞队列）。
-- [ ] CLI 表面变更同步 `docs/` 与 `iar-operator` skill；release note 标注目标必填的 breaking change（守卫测试）。
+- [x] 至少一个 oracle 走真实 CLI + 真实进程入口（rv-1/rv-6）（证据：`rv_real_entry.py` 9/9——真实 CLI 进程 + 真实 SIGTERM/进程组接管；披露：rv-1 真实入口为 dry-run 预览，GitHub 边界按 PRD 允许 mock，完整定向执行由单测覆盖）。
+- [x] 全部 negative control 按 §7.6 记录并可复现（证据：rv-2 持锁进程存活、rv-6 无孤儿组、rv-5 无目标不静默捞队列；复跑 `rv_real_entry.py`）。
+- [x] CLI 表面变更同步 `docs/` 与 `iar-operator` skill；release note 标注目标必填的 breaking change（证据：`test_iar_operator_skill.py` 漂移守卫全绿；migration 说明见交付 PR 正文与 docs/guides/agent-runner.md）。
 
 ### Delivery Readiness
 
-- [ ] `just lint` 与 `just test all` 通过。
-- [ ] 完成 Final Reconciliation（§13）。
-- [ ] 交付信息（或 PR 呈递）逐字携带 §9.1 人读内容，并附 migration 说明（旧 `iar run` → `iar run --all-ready`）。
+- [x] `just lint` 与 `just test all` 通过（证据：CI=true just test all → 3012 passed, 1 skipped；lint --full PASS）。
+- [x] 完成 Final Reconciliation（见下方 Final Reconciliation 节）。
+- [x] 交付信息（或 PR 呈递）逐字携带 §9.1 人读内容，并附 migration 说明（旧 `iar run` → `iar run --all-ready`）（证据：交付 PR 正文 Human-Visible Outcomes + Breaking Change & Migration 节）。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -507,6 +507,16 @@ flowchart TD
 - **优雅停依赖 daemon 终止子进程**：daemon 当前无显式 SIGTERM 钩子，本 PRD 需补一个；否则接管留孤儿 agent，列为交付门禁验证。
 - **未托管 daemon**：只能按锁/PID 定位，需与托管路径一致"优雅停 + reclaim"。
 - **flag 与配置生命周期不一致**：daemon 的 autopilot 配置每轮热读，而 `--autopilot` 是启动锁定；必须文档化 `flag > config`，并说明"传了 flag 后改 `.iar.toml` 不影响本次进程"。
+
+## 12.1 Final Reconciliation
+
+- 交付分支：`feat/run-daemon-control-surface`（verified head `d23edff4`，record-excluded verified tree `4546d8fca13685df5a4821da40ab11cb45671691`）。
+- FR 覆盖：FR-1..FR-8 全部实现；§11 Non-Goals 全部遵守（verifier 逐项核对）。
+- 证据包：`tasks/evidence/run-daemon-autopilot-control-surface/`（verification-plan / evidence-report / verifier-report / rv_real_entry.py / rv-real-entry-results.json）。
+- 独立 verifier：PASS（冻结凭证 `git diff HEAD~1 -- src tests` sha256 前 16 位 `35708f1555cc1242` 匹配）。
+- 门禁：`CI=true just test all` 3012 passed / 1 skipped；`just lint --full` PASS。
+- 遗留披露：§9.1 要求的 rv-1/rv-6 PNG 呈递图未生成（以真实进程入口文本证据 + 单测呈递，复跑 `rv_real_entry.py` 可在交互终端补截屏）；交付期勘误一条（`iar roadmap advance` → `iar backlog advance`，见 Change Log）。
+- Human-Confirmed 四项决策已由决策板（2026-10-05）确认，勾选留待合并即验收。
 
 ## 13. Decision Log
 

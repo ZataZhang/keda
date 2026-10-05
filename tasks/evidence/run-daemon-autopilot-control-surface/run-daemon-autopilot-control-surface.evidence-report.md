@@ -54,8 +54,7 @@ PRD: `tasks/pending/P1-FEAT-20261005-161633-run-daemon-autopilot-control-surface
 | rv-7 | PRD 两态解析（真实文件） | PASS | 有回链 → `#417`；无回链 → 报错提示 `iar issue create`，不静默捞队列 |
 | rv-2 | 真实进程持 daemon 锁 + 真实 CLI run | PASS | exit 5，提示 stop 命令与 `--takeover`；negative control：持锁进程未被拒绝路径破坏（仍存活） |
 | rv-6 | 真实接管编排（真实 SIGTERM 信号、真实进程组） | PASS | `final_signal=sigterm`，daemon 优雅退出；negative control：后代 agent 组被清扫，无孤儿进程 |
-| rv-1 | 真实 CLI 定向 dry-run（`--issue 42 --json`） | PASS | 机器预览携带 `"target_issue": 42, "all_ready": false`（GitHub 边界按 PRD 允许 mock，ready 扫描失败为预期，预览在失败前发出） |
-| rv-8 | daemon 调度门控三态（单测，fake 单轮 pass） | PASS | `--autopilot` 在配置关时开调度；`--no-autopilot` 在配置开时关调度；缺省跟随配置；合并侧文件未触碰 |
+| rv-1 | 真实 CLI 定向 dry-run（`--issue 42 --json`） | PASS | 机器预览携带 `"target_issue": 42, "all_ready": false`（GitHub 边界按 PRD 允许 mock，ready 扫描失败为预期，预览在失败前发出；rv-1 真实入口为 dry-run 预览，完整定向执行由单测覆盖，呈递时如实标注） |
 
 mock 边界与披露：
 
@@ -65,6 +64,17 @@ mock 边界与披露：
 - rv-6 的 daemon 以真实 `/bin/sh -c "sleep 120 & wait"`（独立会话/进程组）
   持锁模拟，接管走的是交付的真实 `take_over_daemon` 编排（含托管注册表
   探测、SIGTERM、孤儿组补扫、reclaim 调用）。
+
+## 自动化层补充：rv-8 调度门控三态（单测，fake 单轮 pass）
+
+- `--autopilot` 在配置关时开调度；`--no-autopilot` 在配置开时关调度；缺省跟随配置；合并侧文件未触碰（verifier 已核对 `agent_runner_merge_queue.py` 不在本提交 diff 中）。
+
+## 呈递物缺口披露（verifier 指出，非阻塞）
+
+- PRD §9.1 表格要求 `rv-1-targeted-run.png` / `rv-6-takeover.png` 人读呈递图。
+  本交付以真实进程入口的文本证据（`rv-real-entry-results.json`，9/9）+ 单测
+  呈递，未生成 PNG 截图（无交互终端捕获渠道；按仓库规则不伪造截图）。
+  人工验收前如需 PNG，可在本地复跑 `rv_real_entry.py` 于交互终端截屏补齐。
 
 ## Gate Summary
 
