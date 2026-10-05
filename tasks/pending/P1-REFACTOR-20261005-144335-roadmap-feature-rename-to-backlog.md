@@ -1,5 +1,7 @@
 # PRD: Roadmap 功能正名为 Backlog
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/196
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
