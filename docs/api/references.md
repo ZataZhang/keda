@@ -332,4 +332,16 @@ curl -sS \
 
 ### 运行时自省 `backend.api.cli_schema`
 
-`iar schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`iar ask` 与 `iar deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。
+`iar schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`iar ask` 与 `iar deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`iar run --fast-merge` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
+
+### PR 正文快速通道 marker `iar:fast-merge`
+
+`iar run --fast-merge` 开出的 Draft PR 正文末尾带一条机器可读 marker（同族于 `iar:ci-auto-repair-policy` / `post_pr_rework_requested` 等 latest-wins marker）：
+
+```html
+<!-- iar:fast-merge issued=<Issue 编号> -->
+```
+
+- 语义：该 PR 经快速通道发布，builder 提交后**跳过了 Phase 4.5 的 rv re-exec 与独立 verifier 两道验证门禁**，未经自动化验证；正文同时附人读「合并前请人工验证」说明。
+- 判别：**无此 marker 的 PR 才代表走了完整验证**。下游工具（merge queue / CI）可据此拦截或降级处理未验证 PR。
+- 拒绝面：`--fast-merge` 与 `--all-ready` 组合、或目标 Issue 声明 `stack` 顺序依赖（`iar:depends-on ... mode="stack"`）时，以 `USAGE`（退出码 `2`）拒绝，不启动 agent、不产生 PR。该旗标不进入 daemon、无配置项，仅作用于当次显式调用。

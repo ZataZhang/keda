@@ -298,6 +298,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the takeover confirmation prompt (required with --json).",
     )
     run_parser.add_argument(
+        "--fast-merge",
+        action="store_true",
+        default=False,
+        help=(
+            "One-shot fast track for this run: skip the validation gates (rv "
+            "re-exec + independent verifier) after the builder commits and "
+            "publish the Draft PR with an unverified self-declaration. "
+            "Rejected for stack-dependency Issues; requires a targeted run."
+        ),
+    )
+    run_parser.add_argument(
         "--agent", choices=_agent_choices_with(prefix=("auto",)), default="auto"
     )
     run_parser.add_argument("--max-issues", type=int)

@@ -328,6 +328,42 @@ def format_dependency_marker(
     return f"<!-- iar:depends-on {body} -->"
 
 
+# ---------------------------------------------------------------------------
+# fast-merge 自我声明 marker（PR 正文；与 iar:depends-on 同族）
+# ---------------------------------------------------------------------------
+
+_FAST_MERGE_MARKER_PATTERN = re.compile(r"<!--\s*iar:fast-merge\s+issued=(?P<issued>\d+)\s*-->")
+
+
+def format_fast_merge_marker(issue_number: int) -> str:
+    """Format the ``iar:fast-merge`` hidden self-declaration marker.
+
+    经快速通道（``iar run --fast-merge``）发布的 PR 用它机器可读地声明
+    "本 PR 未过验证门禁"；``issued`` 记录目标 Issue 编号，便于审计与
+    负例判定（普通 PR 不含该 marker）。
+
+    Args:
+        issue_number: 本次快速发布针对的 Issue 编号。
+
+    Returns:
+        Hidden HTML comment marker string.
+    """
+    return f"<!-- iar:fast-merge issued={issue_number} -->"
+
+
+def parse_fast_merge_marker(text: str) -> int | None:
+    """Parse the ``iar:fast-merge`` marker from a PR body or other text.
+
+    Args:
+        text: 待扫描的正文（通常为 PR body）。
+
+    Returns:
+        marker 中的 Issue 编号；不含 marker 时返回 ``None``。
+    """
+    match = _FAST_MERGE_MARKER_PATTERN.search(text)
+    return int(match.group("issued")) if match is not None else None
+
+
 def format_dependency_wait_marker(blockers: tuple[DependencyBlocker, ...]) -> str:
     """Format a hidden ``iar:dependency-wait`` marker for comment deduplication.
 

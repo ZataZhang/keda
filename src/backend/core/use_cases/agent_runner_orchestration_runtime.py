@@ -194,6 +194,7 @@ def _process_single_issue(
     run_trigger: str,
     effective_repo_id: str,
     output_view: IRunnerLiveView,
+    fast_merge: bool = False,
 ) -> int:
     """Process one discovered Issue end-to-end.
 
@@ -338,6 +339,7 @@ def _process_single_issue(
                     github_client=github_client,
                     process_runner=process_runner,
                     content_generator=content_generator,
+                    fast_merge=fast_merge,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
                 on_agent_usage=_emit_agent_usage_event,
@@ -412,6 +414,7 @@ def _process_single_issue(
                     process_runner=process_runner,
                     content_generator=content_generator,
                     marker=marker,
+                    fast_merge=fast_merge,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
                 on_agent_usage=_emit_agent_usage_event,
@@ -429,6 +432,7 @@ def _process_single_issue(
                     github_client=github_client,
                     process_runner=process_runner,
                     content_generator=content_generator,
+                    fast_merge=fast_merge,
                 ),
             )
         _logger.info("Completed Issue #%d: %s", issue.number, issue.title)
@@ -553,6 +557,10 @@ class RunOnceRequest:
     #: 定向目标 Issue 编号（``iar run --issue``）。非 ``None`` 时只处理该
     #: Issue（仍走依赖门禁与 claim）；``None`` 保持"按优先级捞队列"行为。
     target_issue: int | None = None
+    #: 快速通道（``iar run --fast-merge``）一次性旁路：本次运行的 Issue 跳过
+    #: Phase 4.5 验证门禁与发布前最终复核，PR 正文打未验证标注。daemon 与
+    #: 其余调用方恒为 False（默认值），行为与今天完全一致。
+    fast_merge: bool = False
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -813,6 +821,7 @@ def run_once(request: RunOnceRequest) -> int:
         "run_history_store": run_history_store,
         "run_trigger": run_trigger,
         "effective_repo_id": effective_repo_id,
+        "fast_merge": request.fast_merge,
     }
 
     # 串行路径：concurrency<=1 时逐个处理。与历史行为的唯一差异是——每个

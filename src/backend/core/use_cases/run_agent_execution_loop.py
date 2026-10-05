@@ -110,6 +110,10 @@ class AgentExecutionRequest:
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None
     #: 实现阶段绑定的模型选择；``None`` 表示无绑定。fix / closeout 未自绑时继承它（同一 agent）。
     model_selection: ModelSelection | None = None
+    #: 快速通道（``iar run --fast-merge``）一次性旁路：为 True 时跳过 Phase 4.5 的
+    #: rv_reexec 与 verifier 两道验证门禁（builder 失败 / 恢复循环不受影响）；
+    #: 发布路径据此在 PR 正文打未验证标注。默认 False = 与今天完全一致。
+    fast_merge: bool = False
 
 
 @dataclass(frozen=True)
@@ -977,47 +981,59 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # Phase 4.5: commit proxy 已固定代码树，先重验 RV，再做独立复验。
         # RED 仍回到同一条 bounded recovery 循环，避免把未提交工作树当作
         # builder SHA 对应的交付物。
-        try:
-            from backend.core.use_cases.run_verifier_agent import run_verifier_gate
-
-            with attempt_phases.measure("rv_reexec"):
-                ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
-                ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
-            with attempt_phases.measure("verifier"):
-                verifier_verdict = run_verifier_gate(
-                    issue,
-                    worktree_path,
-                    config,
-                    process_runner,
-                    selected_agent,
-                    prd_overrides=prd_overrides,
-                    prd_preset_overrides=prd_preset_overrides,
-                )
-            if verifier_verdict is not None:
-                _emit_agent_usage(
-                    request, "verify", verifier_verdict.agent, verifier_verdict.token_usage
-                )
-        except ValidationEvidenceError as exc:
-            failure_type = _classify_and_record_gate_failure(
-                attempt_record_context,
-                detail=format_validation_evidence_detail(str(exc)),
-                verification_results=final_verification_results,
-                exc=exc,
-            )
-            if attempt_index >= max_recovery_attempts:
-                raise MaxRetriesExceededError(attempt_results) from exc
-            recovery_failure_summary = format_validation_evidence_failure(
-                str(exc), resolve_issue_evidence_relpath(config, issue)
-            )
-            recovery_failure_type = failure_type.value
-            _logger.warning(
-                "Independent verifier failed for Issue #%d at committed HEAD; "
-                "asking agent to recover (%d/%d).",
+        # 快速通道（iar run --fast-merge）：本次运行跳过这两道验证门禁，builder
+        # 失败 / 恢复循环照常；跳过必须留一行含旗标来源的审计日志。
+        if request.fast_merge:
+            verifier_verdict = None
+            _logger.info(
+                "Fast-merge (origin: --fast-merge run flag): skipping rv_reexec and "
+                "verifier gates for Issue #%d at attempt %d; the PR will carry the "
+                "unverified fast-track annotation.",
                 issue.number,
                 attempt_index + 1,
-                max_recovery_attempts,
             )
-            continue
+        else:
+            try:
+                from backend.core.use_cases.run_verifier_agent import run_verifier_gate
+
+                with attempt_phases.measure("rv_reexec"):
+                    ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
+                    ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
+                with attempt_phases.measure("verifier"):
+                    verifier_verdict = run_verifier_gate(
+                        issue,
+                        worktree_path,
+                        config,
+                        process_runner,
+                        selected_agent,
+                        prd_overrides=prd_overrides,
+                        prd_preset_overrides=prd_preset_overrides,
+                    )
+                if verifier_verdict is not None:
+                    _emit_agent_usage(
+                        request, "verify", verifier_verdict.agent, verifier_verdict.token_usage
+                    )
+            except ValidationEvidenceError as exc:
+                failure_type = _classify_and_record_gate_failure(
+                    attempt_record_context,
+                    detail=format_validation_evidence_detail(str(exc)),
+                    verification_results=final_verification_results,
+                    exc=exc,
+                )
+                if attempt_index >= max_recovery_attempts:
+                    raise MaxRetriesExceededError(attempt_results) from exc
+                recovery_failure_summary = format_validation_evidence_failure(
+                    str(exc), resolve_issue_evidence_relpath(config, issue)
+                )
+                recovery_failure_type = failure_type.value
+                _logger.warning(
+                    "Independent verifier failed for Issue #%d at committed HEAD; "
+                    "asking agent to recover (%d/%d).",
+                    issue.number,
+                    attempt_index + 1,
+                    max_recovery_attempts,
+                )
+                continue
 
         # Phase 5: 检查 agent 是否实际产生了 commit
         after_sha = get_head_sha(worktree_path, process_runner)
