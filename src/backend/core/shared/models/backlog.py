@@ -261,6 +261,9 @@ class PrdLifecycleStats:
 
     ``unlinked_run_count`` 披露无法可靠关联 PRD 的旧 ``run_records`` 条数；
     这些记录不进入完成分位数，也不被伪装成生命周期事件。
+    ``token_usage_by_prd`` 是同一窗口 / 同一批 run 上的 PRD（Issue）维度
+    token 汇总（按 ``total_tokens`` 降序，口径与 CLI ``iar tokens`` 的
+    「按 PRD」表同源）；账本不可用时降级为空列表。
     """
 
     repo_id: str | None
@@ -276,6 +279,7 @@ class PrdLifecycleStats:
     incomplete_run_count: int
     runs: list[PrdLifecycleStatsRow]
     token_usage: TokenUsageStats
+    token_usage_by_prd: list[PrdTokenUsageEntry]
 
 
 class CiRepairPolicy(str, Enum):

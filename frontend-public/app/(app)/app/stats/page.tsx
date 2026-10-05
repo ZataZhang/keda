@@ -22,6 +22,7 @@ import {
 import type {
   DailyRunTrendEntry,
   PrdLifecycleStats,
+  PrdTokenUsageEntry,
   RepositoryCompletionStats,
   RunRecordEntry,
   TokenUsageTotals,
@@ -485,8 +486,9 @@ function cacheHitRate(row: TokenUsageTotals): number | null {
 /**
  * PRD 生命周期卡片内的 Token 用量汇总区。
  *
- * 数据来自 lifecycle 事件 detail 的聚合（``token_usage``）；缺 usage 的事件
- * 不计入。按流程与按 agent 两张小表分别给出总量、四项明细与缓存命中率。
+ * 数据来自 lifecycle 事件 detail 的聚合（``token_usage`` 与
+ * ``token_usage_by_prd``）；缺 usage 的事件不计入。按流程、按 agent 与
+ * 按 PRD（Issue）三张小表分别给出总量、四项明细与缓存命中率。
  *
  * @param props.stats - 仓库级 PRD 生命周期统计。
  * @returns Token 汇总区块；无数据时渲染明确空态。
@@ -494,7 +496,8 @@ function cacheHitRate(row: TokenUsageTotals): number | null {
 function TokenUsageSection({ stats }: { stats: PrdLifecycleStats }) {
   const byFlow = Object.entries(stats.token_usage?.by_flow ?? {});
   const byAgent = Object.entries(stats.token_usage?.by_agent ?? {});
-  const hasData = byFlow.length > 0 || byAgent.length > 0;
+  const byPrd = stats.token_usage_by_prd ?? [];
+  const hasData = byFlow.length > 0 || byAgent.length > 0 || byPrd.length > 0;
   return (
     <div data-testid="stats-token-usage" className="space-y-3">
       <p className="text-sm font-medium">Token 用量</p>
@@ -506,11 +509,90 @@ function TokenUsageSection({ stats }: { stats: PrdLifecycleStats }) {
         <>
           <TokenUsageTable title="按流程" rows={byFlow} />
           <TokenUsageTable title="按 agent" rows={byAgent} />
+          <PrdTokenUsageTable rows={byPrd} />
           <p className="text-xs text-slate-500" data-testid="stats-token-usage-note">
             总量为实际处理量口径（输入 + 输出 + 缓存读 + 缓存写）；缺 usage 的调用不计入，
             展示为「—」而非 0。
           </p>
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 渲染「按 PRD（Issue）」Token 用量表（Token 用量区第三张表）。
+ *
+ * 与 CLI ``iar tokens`` 的按 PRD 表同源同口径：同一 PRD 的多次执行合并为
+ * 一行并标注累计执行次数；缺 usage 的行由后端按「缺失排除」口径剔除，
+ * 表为空时渲染明确空态而不是全零行。
+ *
+ * @param props.rows - PRD 维度用量条目（后端已按总量降序）。
+ * @returns 按 PRD 用量表，或空态文案。
+ */
+function PrdTokenUsageTable({ rows }: { rows: PrdTokenUsageEntry[] }) {
+  const sorted = [...rows].sort(
+    (left, right) => right.totals.total_tokens - left.totals.total_tokens,
+  );
+  return (
+    <div className="overflow-x-auto" data-testid="stats-token-usage-by-prd">
+      <p className="mb-1 text-xs text-slate-500">按 PRD</p>
+      {sorted.length === 0 ? (
+        <p className="text-sm text-slate-500" data-testid="stats-token-usage-by-prd-empty">
+          所选范围内暂无 token 用量数据。
+        </p>
+      ) : (
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
+              <th className="py-2 pr-3">Issue</th>
+              <th className="py-2 pr-3">PRD</th>
+              <th className="py-2 pr-3">总量</th>
+              <th className="py-2 pr-3">输入</th>
+              <th className="py-2 pr-3">输出</th>
+              <th className="py-2 pr-3">缓存读</th>
+              <th className="py-2 pr-3">缓存写</th>
+              <th className="py-2 pr-3">命中率</th>
+              <th className="py-2 pr-3">调用数</th>
+              <th className="py-2 pr-3">执行次数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((entry) => {
+              const totals = entry.totals;
+              const rate = cacheHitRate(totals);
+              return (
+                <tr
+                  key={`${entry.repo_id ?? ""}|${entry.prd_path ?? ""}|${entry.issue_number ?? ""}`}
+                  className="border-b border-slate-100 dark:border-slate-800"
+                >
+                  <td className="py-2 pr-3 font-mono text-xs">
+                    {entry.issue_number === null ? "—" : `#${entry.issue_number}`}
+                  </td>
+                  <td className="py-2 pr-3 font-medium" title={entry.prd_path ?? undefined}>
+                    {entry.prd_path ? prdBasename(entry.prd_path) : "—"}
+                  </td>
+                  <td className="py-2 pr-3 font-semibold">
+                    {formatTokenCount(totals.total_tokens)}
+                  </td>
+                  <td className="py-2 pr-3 text-xs">{formatTokenCount(totals.input_tokens)}</td>
+                  <td className="py-2 pr-3 text-xs">{formatTokenCount(totals.output_tokens)}</td>
+                  <td className="py-2 pr-3 text-xs">
+                    {formatTokenCount(totals.cache_read_input_tokens)}
+                  </td>
+                  <td className="py-2 pr-3 text-xs">
+                    {formatTokenCount(totals.cache_creation_input_tokens)}
+                  </td>
+                  <td className="py-2 pr-3 text-xs">
+                    {rate === null ? "—" : `${Math.round(rate * 100)}%`}
+                  </td>
+                  <td className="py-2 pr-3 text-xs">{totals.usage_count}</td>
+                  <td className="py-2 pr-3 text-xs">{entry.run_count}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       )}
     </div>
   );

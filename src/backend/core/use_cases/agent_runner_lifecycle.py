@@ -39,7 +39,10 @@ from backend.core.shared.models.backlog import (
     PrdLifecycleStatsRow,
     TokenUsageStats,
 )
-from backend.core.use_cases.agent_runner_token_stats import aggregate_token_usage
+from backend.core.use_cases.agent_runner_token_stats import (
+    aggregate_token_usage,
+    build_token_usage_by_prd,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -654,6 +657,7 @@ def build_prd_lifecycle_stats(
             incomplete_run_count=0,
             runs=[],
             token_usage=TokenUsageStats(by_flow={}, by_agent={}),
+            token_usage_by_prd=[],
         )
 
     try:
@@ -668,12 +672,14 @@ def build_prd_lifecycle_stats(
     phase_totals: dict[str, float] = {}
     incomplete_count = 0
     window_events: list[object] = []
+    events_by_run: dict[str, list[object]] = {}
     for run_record in run_records:
         try:
             stored_events = lifecycle_store.list_lifecycle_events(run_id=run_record.run_id)
         except Exception:  # noqa: BLE001 - one run must not break the whole stats page.
             stored_events = []
         window_events.extend(stored_events)
+        events_by_run[run_record.run_id] = list(stored_events)
         breakdown = classify_durations(
             stored_events, finished_at=run_record.finished_at, now=reference_now
         )
@@ -728,6 +734,21 @@ def build_prd_lifecycle_stats(
         bottleneck_phase = max(waiting_phase_totals, key=lambda name: waiting_phase_totals[name])
         bottleneck_seconds = waiting_phase_totals[bottleneck_phase]
 
+    # PRD 维度汇总复用已持有的 run_records 与 events_by_run（同一读集，
+    # 不做二次读库）；异常按账本降级语义收敛为空列表，不拖垮 Stats 页。
+    try:
+        token_usage_by_prd = build_token_usage_by_prd(
+            store=lifecycle_store,
+            repo_id=repo_id,
+            days=bounded_days,
+            now=reference_now,
+            run_records=run_records,
+            events_by_run=events_by_run,
+        )
+    except Exception as exc:  # noqa: BLE001 - degraded stats beat a broken page.
+        _logger.warning("Failed to build PRD-dimension token usage: %s", exc)
+        token_usage_by_prd = []
+
     return PrdLifecycleStats(
         repo_id=repo_id,
         window_days=bounded_days,
@@ -750,4 +771,5 @@ def build_prd_lifecycle_stats(
         incomplete_run_count=incomplete_count,
         runs=rows,
         token_usage=aggregate_token_usage(window_events),
+        token_usage_by_prd=token_usage_by_prd,
     )
