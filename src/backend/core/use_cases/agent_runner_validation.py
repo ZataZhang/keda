@@ -75,6 +75,8 @@ from backend.core.use_cases.agent_runner_validation_checklist import (
 )
 from backend.core.use_cases.agent_runner_validation_parsing import (
     EVIDENCE_ORACLE_SUBDIR,
+    ValidationOracleBlockError as ValidationOracleBlockError,
+    assert_realistic_validation_oracle_valid as assert_realistic_validation_oracle_valid,
     build_issue_validation_section as build_issue_validation_section,
     build_validation_prompt_line as build_validation_prompt_line,
     evidence_format_check_required as evidence_format_check_required,

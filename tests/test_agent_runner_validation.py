@@ -56,6 +56,8 @@ from backend.core.use_cases.agent_runner_validation import (
     publish_validation_evidence_best_effort,
     reset_validation_checklist,
     upload_evidence_branch,
+    ValidationOracleBlockError,
+    assert_realistic_validation_oracle_valid,
     validation_required,
     warn_legacy_evidence_helpers,
 )
@@ -182,6 +184,56 @@ def test_extract_items_from_oracle_block() -> None:
         "- [ ] rv-2: 行为 B 真实验证",
     ]
     assert validation_required(_PRD_WITH_ORACLE_BLOCK, AppConfig())
+
+
+_PRD_WITH_NON_LIST_ORACLE = """# PRD: Demo
+
+### 7.6 Realistic Validation Plan
+
+```yaml
+failure_triage: "先查 config，再查路径"
+oracles:
+  - id: rv-1
+    behavior: 行为 A 真实验证
+```
+"""
+
+_PRD_WITH_MALFORMED_ORACLE_ENTRY = """# PRD: Demo
+
+### 7.6 Realistic Validation Plan
+
+```yaml
+- id: rv-1
+  behavior: 行为 A 真实验证
+- id: rv-2
+```
+"""
+
+
+def test_non_list_oracle_block_does_not_silently_disable_gate() -> None:
+    """顶层非列表的 oracle 块不再静默退化成「无清单」（Issue #191）。
+
+    提取回退后清单为空（块内没有 ``- [ ]`` 行），因此运行时门禁判为「不要求
+    验证」——但物化路径的严格校验必须大声报错，拦住一个「无验证」的 Issue。
+    """
+    assert extract_realistic_validation_items(_PRD_WITH_NON_LIST_ORACLE) == []
+    assert not validation_required(_PRD_WITH_NON_LIST_ORACLE, AppConfig())
+
+    with pytest.raises(ValidationOracleBlockError, match="top-level sequence"):
+        assert_realistic_validation_oracle_valid(_PRD_WITH_NON_LIST_ORACLE)
+
+
+def test_malformed_oracle_entry_is_rejected() -> None:
+    """条目缺 ``behavior`` 的 oracle 块被严格校验拒绝。"""
+    with pytest.raises(ValidationOracleBlockError, match="entry #2"):
+        assert_realistic_validation_oracle_valid(_PRD_WITH_MALFORMED_ORACLE_ENTRY)
+
+
+def test_assert_oracle_valid_accepts_valid_and_absent_blocks() -> None:
+    """合法 oracle 块与「无 yaml 围栏」的旧式清单都不算错。"""
+    assert_realistic_validation_oracle_valid(_PRD_WITH_ORACLE_BLOCK)
+    legacy_checkbox_body = "### Realistic Validation\n\n- [ ] 行为 A 真实验证\n"
+    assert_realistic_validation_oracle_valid(legacy_checkbox_body)
 
 
 def test_extract_items_stops_at_next_section() -> None:

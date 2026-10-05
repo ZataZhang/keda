@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json as _json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,10 @@ from backend.core.use_cases.agent_runner_events import (
     parse_latest_event_marker,
     parse_latest_pending_rework_marker,
 )
-from backend.core.use_cases.agent_runner_failure import ProviderCapacityError
+from backend.core.use_cases.agent_runner_failure import (
+    AgentExecutionError,
+    ProviderCapacityError,
+)
 from backend.infrastructure.process_runner import CommandFailedError
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
@@ -1796,6 +1800,63 @@ def test_run_pre_pr_review_escalates_provider_capacity(tmp_path: Path) -> None:
     # Capacity is not retried in place: exactly one reviewer invocation.
     reviewer_calls = [c for c in fake_runner.calls if c[:1] == ["codex"]]
     assert len(reviewer_calls) == 1
+
+
+def test_run_pre_pr_review_escalates_on_reviewer_timeout(tmp_path: Path) -> None:
+    """A reviewer wall-clock timeout escalates instead of failing the Issue.
+
+    Regression guard for Issue #190: a timeout surfaces as
+    ``subprocess.TimeoutExpired`` (not ``CalledProcessError``), so the review
+    call site used to let it escape every except clause and sink the Issue to
+    ``agent/failed`` with no cross-agent fallback.
+    """
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    fake_client = FakeGitHubClient()
+
+    class _TimeoutRunner(FakeProcessRunner):
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            check=True,
+            timeout=None,
+            capture_output=True,
+            label=None,
+            output_protocol=None,
+        ):
+            command_tuple = tuple(command)
+            if command_tuple[:1] == ("codex",):
+                self.calls.append(list(command))
+                raise subprocess.TimeoutExpired(cmd=list(command), timeout=1800)
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+            )
+
+    fake_runner = _TimeoutRunner()
+    config = AppConfig(
+        pre_pr_review=PrePrReviewConfig(enabled=True, max_attempts=1),
+        runner=RunnerConfig(transient_retry_attempts=2, transient_retry_delay_seconds=0),
+    )
+    worktree_path = tmp_path / "issue-1"
+    worktree_path.mkdir()
+
+    with pytest.raises(AgentExecutionError):
+        run_pre_pr_review(
+            issue=issue,
+            worktree_path=worktree_path,
+            config=config,
+            github_client=fake_client,
+            process_runner=fake_runner,
+            selected_agent="codex",
+            head_sha_before="abc123",
+            expected_branch="issue-1",
+            verification_results=[],
+        )
 
 
 def test_build_review_packet_includes_previous_commit_failure() -> None:

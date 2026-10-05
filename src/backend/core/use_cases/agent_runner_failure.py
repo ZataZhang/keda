@@ -21,6 +21,7 @@ from backend.core.use_cases.agent_runner_feedback import (
 )
 
 __all__ = [
+    "AgentExecutionError",
     "AgentRunnerAttemptError",
     "AgentUnavailableError",
     "ForbiddenBlockedError",
@@ -95,6 +96,18 @@ class ProviderCapacityError(AgentRunnerAttemptError):
     Capacity failures (429 usage limit, 529 overloaded) keep failing on the
     same agent until the provider's usage window resets, so the escalation
     ladder switches to a different agent instead of retrying in place.
+    """
+
+
+class AgentExecutionError(AgentRunnerAttemptError):
+    """Raised when an agent attempt fails in a way another agent may survive.
+
+    Catch-all for execution-side accidents that cannot be classified more
+    precisely — wall-clock / inactivity timeouts, agent process crashes, and
+    launch I/O errors. The escalation ladder switches agents on this error
+    (same treatment as provider capacity) so a single flaky attempt cannot
+    sink the whole Issue. Security / branch violations stay
+    :class:`UnrecoverableError` and are never retried on another agent.
     """
 
 

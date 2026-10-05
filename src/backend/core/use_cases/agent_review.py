@@ -29,6 +29,7 @@ from backend.core.use_cases.agent_review_repair import (
     run_review_repair_agent,
 )
 from backend.core.use_cases.agent_runner_failure import (
+    AgentExecutionError,
     ProviderCapacityError,
     format_agent_execution_failure,
     is_provider_capacity_failure,
@@ -662,14 +663,23 @@ def run_pre_pr_review(
                     profile=reviewer_profile,
                     model_selection=reviewer_model_selection,
                 )
-            except (subprocess.CalledProcessError, OSError) as exc:
+            except (
+                subprocess.CalledProcessError,
+                OSError,
+                subprocess.TimeoutExpired,
+            ) as exc:
                 # Transient blips are already retried inside the resilient
                 # wrapper. A provider-capacity failure here will keep failing on
                 # the same reviewer agent, so escalate to let the cross-agent
                 # fallback switch agents instead of failing the Issue.
                 if is_provider_capacity_failure(exc):
                     raise ProviderCapacityError(format_agent_execution_failure(exc), []) from exc
-                raise
+                # Every other execution-level failure (wall-clock/inactivity
+                # timeout from the process-runner watchdog, agent process crash,
+                # launch I/O error) is not accurately classifiable. Wrap it in a
+                # single general escalatable error so the fallback chain can
+                # switch agents rather than sinking the Issue (Issue #190).
+                raise AgentExecutionError(format_agent_execution_failure(exc), []) from exc
             reviewer_text = extract_agent_response_text(review_result)
             stdout_decision = parse_reviewer_decision(reviewer_text)
 
