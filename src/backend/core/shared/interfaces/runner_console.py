@@ -545,6 +545,40 @@ class IRepositoryAutopilotSettingsEditor(ABC):
         """
         ...
 
+    @abstractmethod
+    def read_auto_repair_ci(self, repo_root_path: Path) -> bool | None:
+        """读取仓库本地配置中的 ``post_pr_supervisor.auto_repair_ci``。
+
+        Args:
+            repo_root_path: 目标仓库根目录。
+
+        Returns:
+            ``True`` / ``False`` 为配置中的显式值；``None`` 表示该文件不存在
+            或该键未设置（此时生效值等于全局配置的默认值 ``False``）。
+
+        Raises:
+            ValueError: 本地配置存在但非法（TOML 语法错误或类型不符）。
+        """
+        ...
+
+    @abstractmethod
+    def set_auto_repair_ci(self, repo_root_path: Path, enabled: bool) -> None:
+        """仅修改 ``[agent_runner.post_pr_supervisor].auto_repair_ci`` 并原子替换。
+
+        实现要求与 :meth:`set_enabled` 相同：保留注释与未知键、只改这一个布尔
+        键、失败时原文件保持不变；写回由共享原语
+        ``update_toml_table_keys`` 完成。
+
+        Args:
+            repo_root_path: 目标仓库根目录。
+            enabled: 目标布尔值。
+
+        Raises:
+            ValueError: 配置非法（文件缺失、结构不符或模型校验不通过）。
+            OSError: 文件不可写。
+        """
+        ...
+
 
 @dataclass(frozen=True)
 class BacklogQueueEntry:

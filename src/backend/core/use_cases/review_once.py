@@ -437,6 +437,39 @@ def _process_review_candidate(
     ):
         if stashed:
             pop_worktree_stash(worktree_path, process_runner)
+        if action_result.action == "repair_pr_branch":
+            # CI/CD 自动修复策略门禁：只约束 Agent 选择的 repair_pr_branch。
+            # checks 状态本身从未触发动作；这里在 Agent 已选择 repair 之后按
+            # 「单 PRD 覆盖 ?? 仓库全局」与修复轮数上限决定是否放行。关闭/耗尽
+            # 时零自动副作用（不写修复意图、不改 label、不 push），结论作为
+            # supervisor 评论已可见，问题保留在 Backlog CI/CD 视图中。
+            from backend.core.use_cases.backlog_ci_delivery import (
+                enqueue_approved_auto_repair,
+                gate_auto_repair_decision,
+            )
+
+            allowed, gate_reason = gate_auto_repair_decision(
+                config=config,
+                github_client=github_client,
+                issue_number=issue.number,
+                pr_context=pr_context,
+                pr_branch=pr_branch,
+            )
+            if not allowed:
+                _logger.info(
+                    "Issue #%d auto CI repair blocked by policy: %s",
+                    issue.number,
+                    gate_reason,
+                )
+                return "ci_repair_policy_blocked"
+            enqueue_approved_auto_repair(
+                issue=issue,
+                pr_context=pr_context,
+                config=config,
+                github_client=github_client,
+                pr_branch=pr_branch,
+            )
+            return f"queued_{action_result.action}"
         head_sha = get_head_sha(worktree_path, process_runner)
         github_client.comment_issue(
             issue.number,

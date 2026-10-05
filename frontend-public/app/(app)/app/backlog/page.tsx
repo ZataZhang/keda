@@ -17,7 +17,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PrdDetail } from "@/components/backlog/prd-detail";
+import { PRD_CI_TAB_ID, PrdCiView } from "@/components/backlog/prd-ci-view";
 import { BacklogAutopilotControl } from "@/components/backlog/backlog-autopilot-control";
+import { BacklogCiRepairControl } from "@/components/backlog/backlog-ci-repair-control";
 import { BacklogGraph } from "@/components/backlog/backlog-graph";
 import { BacklogList } from "@/components/backlog/backlog-list";
 import { BacklogTimeline } from "@/components/backlog/backlog-timeline";
@@ -26,17 +28,20 @@ import { cn } from "@/lib/utils";
 import { fetchRegistryRepositories } from "@/lib/api/console";
 import {
   fetchBacklogAutopilot,
+  fetchBacklogCiRepairGlobal,
   fetchBacklogPrds,
   fetchBacklogSettings,
   startGlobalBacklog,
   startBacklogPrd,
   stopGlobalBacklog,
   updateBacklogAutopilot,
+  updateBacklogCiRepairGlobal,
   updateBacklogSettings,
 } from "@/lib/api/backlog";
 import type {
   RegistryRepositoryEntry,
   BacklogAutopilotState,
+  BacklogCiRepairGlobalState,
   BacklogPrd,
   BacklogSettings,
 } from "@/lib/api/types";
@@ -81,6 +86,10 @@ export default function BacklogPage() {
   const [autopilot, setAutopilot] = useState<BacklogAutopilotState | null>(null);
   const [autopilotLoading, setAutopilotLoading] = useState(true);
   const [autopilotSaving, setAutopilotSaving] = useState(false);
+  // 全局 CI/CD 自动修复开关：与 Autopilot 并列、语义独立的仓库级偏好。
+  const [ciRepair, setCiRepair] = useState<BacklogCiRepairGlobalState | null>(null);
+  const [ciRepairLoading, setCiRepairLoading] = useState(true);
+  const [ciRepairSaving, setCiRepairSaving] = useState(false);
   // 打开仓库级生命周期 Agent 矩阵抽屉的仓库 id（null 表示关闭）。
   const [matrixRepoId, setMatrixRepoId] = useState<string | null>(null);
 
@@ -168,6 +177,31 @@ export default function BacklogPage() {
     }
   }, [selectedRepoId]);
 
+  const loadCiRepair = useCallback(async () => {
+    if (!selectedRepoId) {
+      return;
+    }
+    try {
+      const loaded = await fetchBacklogCiRepairGlobal(selectedRepoId);
+      setCiRepair(loaded);
+    } catch (error) {
+      // 全局修复开关读取失败不阻塞 Backlog 页：保留旧值并提示一次。
+      toast.error(error instanceof Error ? error.message : "加载 CI/CD 自动修复状态失败。");
+    }
+  }, [selectedRepoId]);
+
+  useEffect(() => {
+    if (!selectedRepoId) {
+      return;
+    }
+    setCiRepairLoading(true);
+    void loadCiRepair().finally(() => setCiRepairLoading(false));
+    // 与 PRD 列表共用 30 秒轮询节奏：配置在别处（CLI / 其他会话）被改动后，
+    // 页面必须在下一轮刷新里真实出现新值。
+    const timer = setInterval(() => void loadCiRepair(), POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [loadCiRepair, selectedRepoId]);
+
   useEffect(() => {
     if (!selectedRepoId) {
       return;
@@ -209,6 +243,25 @@ export default function BacklogPage() {
       await loadAutopilot();
     } finally {
       setAutopilotSaving(false);
+    }
+  }
+
+  async function handleToggleCiRepair(enabled: boolean) {
+    setCiRepairSaving(true);
+    try {
+      // 响应体是写后 fresh load 的生效配置，不做乐观 UI 覆盖。
+      const updated = await updateBacklogCiRepairGlobal({ repoId: selectedRepoId, enabled });
+      setCiRepair(updated);
+      toast.success(
+        enabled
+          ? "已保存：全局自动修复 CI/CD 开启，失败检查将按策略自动修复。"
+          : "已保存：全局自动修复 CI/CD 关闭，失败检查只作为问题展示。",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存 CI/CD 自动修复设置失败。");
+      await loadCiRepair();
+    } finally {
+      setCiRepairSaving(false);
     }
   }
 
@@ -403,6 +456,13 @@ export default function BacklogPage() {
           onToggle={(enabled) => void handleToggleAutopilot(enabled)}
         />
 
+        <BacklogCiRepairControl
+          state={ciRepair}
+          loading={ciRepairLoading}
+          saving={ciRepairSaving}
+          onToggle={(enabled) => void handleToggleCiRepair(enabled)}
+        />
+
         {/* master-detail：左侧保留当前 Backlog 视图（含依赖图上下文），右侧是
             统一的 PRD 详情；窄屏自动退化为上下堆叠，不引入 modal 或新路由。 */}
         <div
@@ -456,6 +516,19 @@ export default function BacklogPage() {
                 prd={selectedPrd}
                 starting={startingPath === selectedPrd.prd_path}
                 onStart={(prd) => void handleStart(prd)}
+                additionalTabs={[
+                  {
+                    id: PRD_CI_TAB_ID,
+                    label: "CI/CD",
+                    render: () => (
+                      <PrdCiView
+                        repoId={selectedRepoId}
+                        prdPath={selectedPrd.prd_path}
+                        issueNumber={selectedPrd.issue_number}
+                      />
+                    ),
+                  },
+                ]}
               />
             </aside>
           ) : null}

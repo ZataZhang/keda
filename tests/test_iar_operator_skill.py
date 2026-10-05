@@ -135,6 +135,11 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--config",
     },
     ("schema",): {"--json", "--output"},
+    # `iar backlog ci` 子组（P1-FEAT-20260916-134008）：policy 的 --global 与
+    # --prd 互斥；status 的 --json 复用 Console ci_delivery DTO。
+    ("backlog", "ci", "status"): {"--prd", "--json", "--repo", "--repo-id"},
+    ("backlog", "ci", "policy"): {"--global", "--prd", "--repo", "--repo-id"},
+    ("backlog", "ci", "repair"): {"--prd", "--dry-run", "--repo", "--repo-id"},
     ("agent", "doctor"): {
         "--all-profiles",
         "--json",

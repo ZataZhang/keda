@@ -9,6 +9,9 @@ import type {
   BacklogActionResult,
   BacklogAutopilotState,
   BacklogPrdEvidenceManifest,
+  BacklogCiDelivery,
+  BacklogCiRepairGlobalState,
+  CiRepairPolicy,
 } from "./types";
 
 const BASE_PATH = "/v1/agent-runner/backlog";
@@ -181,4 +184,89 @@ export function buildPrdEvidenceArtifactUrl(
   const searchParams = new URLSearchParams();
   searchParams.set("repo_id", repoId);
   return `/api${BASE_PATH}/prds/${encodedPath}/evidence/${artifactToken}?${searchParams.toString()}`;
+}
+
+/**
+ * 读取某个 PRD 的 CI/CD 交付尾段投影（后端每次 fresh 读取，前端不缓存）。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.prdPath - 列表响应给出的 PRD 仓库相对路径。
+ * @param params.signal - 可选的取消信号，用于组件卸载或切换 PRD 时中止请求。
+ * @returns 与 `iar backlog ci status --json` 同构的 ci_delivery DTO。
+ */
+export async function fetchPrdCiDelivery(params: {
+  repoId: string;
+  prdPath: string;
+  signal?: AbortSignal;
+}): Promise<BacklogCiDelivery> {
+  const encodedPath = encodePrdPath(params.prdPath);
+  const searchParams = new URLSearchParams();
+  searchParams.set("repo_id", params.repoId);
+  return get(`${BASE_PATH}/prds/${encodedPath}/ci?${searchParams.toString()}`, {
+    signal: params.signal,
+  });
+}
+
+/**
+ * 读取当前仓库的全局 CI/CD 自动修复开关（fresh load）。
+ *
+ * @param repoId - 仓库标识。
+ * @returns 全局开关值与修复轮数上限。
+ */
+export async function fetchBacklogCiRepairGlobal(repoId: string): Promise<BacklogCiRepairGlobalState> {
+  return get(`${BASE_PATH}/ci-repair-global?repo_id=${encodeURIComponent(repoId)}`);
+}
+
+/**
+ * 切换当前仓库的全局 CI/CD 自动修复（只改 post_pr_supervisor.auto_repair_ci）。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.enabled - 目标开关值；与 Autopilot / auto merge / Fix Agent 不联动。
+ * @returns 写后 fresh load 读回的全局状态（不是请求体回显）。
+ */
+export async function updateBacklogCiRepairGlobal(params: {
+  repoId: string;
+  enabled: boolean;
+}): Promise<BacklogCiRepairGlobalState> {
+  return patch(`${BASE_PATH}/ci-repair-global`, {
+    repo_id: params.repoId,
+    enabled: params.enabled,
+  });
+}
+
+/**
+ * 设置单个 PRD 的 CI 自动修复策略（跟随全局 / 强制开启 / 强制关闭）。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.prdPath - 目标 PRD 路径。
+ * @param params.value - 三态覆盖值；`inherit` 表示清除显式覆盖。
+ * @returns 写后 fresh 回读的 ci_delivery（含 stored/global/effective）。
+ */
+export async function updatePrdCiPolicy(params: {
+  repoId: string;
+  prdPath: string;
+  value: CiRepairPolicy;
+}): Promise<BacklogCiDelivery> {
+  const encodedPath = encodePrdPath(params.prdPath);
+  return patch(`${BASE_PATH}/prds/${encodedPath}/ci-policy`, {
+    repo_id: params.repoId,
+    value: params.value,
+  });
+}
+
+/**
+ * 显式请求一次 CI 修复（幂等；服务端 fresh 解析 head/failure 并保留门禁）。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.prdPath - 目标 PRD 路径。
+ * @returns requested=false 表示幂等跳过或被拒绝，detail 说明原因。
+ */
+export async function requestPrdCiRepair(params: {
+  repoId: string;
+  prdPath: string;
+}): Promise<{ requested: boolean; detail: string; head_sha: string | null }> {
+  const encodedPath = encodePrdPath(params.prdPath);
+  return post(`${BASE_PATH}/prds/${encodedPath}/ci-repair`, {
+    repo_id: params.repoId,
+  });
 }

@@ -590,6 +590,9 @@ class AgentRunnerPostPrSupervisorSettings(BaseModel):
     # 行为）/ ``executor``（交回本次实现者，拿不到本次实现者时按 Issue 标签
     # 回落并写日志）/ 任意已注册 agent 名。
     repair_agent: str = "self"
+    # CI/CD 自动修复策略（独立开关，默认关闭）：只约束 Supervisor Agent 选择的
+    # 自动 repair_pr_branch 动作，与 autopilot/safety/runner 开关语义独立。
+    auto_repair_ci: bool = False
     max_repair_attempts: int = 2
     max_agent_crash_retries: int = 5
     crash_retry_initial_backoff_seconds: int = 30
