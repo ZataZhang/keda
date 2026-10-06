@@ -149,7 +149,11 @@ def build_prompt_fallback_body(prompt_text: str) -> str:
 def strip_validation_section(markdown_text: str) -> str:
     """移除 ``Realistic Validation`` 小节（含其下所有内容，直到同级或更浅的标题）。
 
-    默认态用它保证「agent 自作主张写了验收段」不会把证据门禁打开。
+    默认态用它保证「agent 自作主张写了验收段」不会把证据门禁打开。围栏代码块
+    （```` ``` ````）内的行按内容处理、不当成标题——否则块内 YAML/shell 注释行
+    （``# ...``）会被误判为标题，既提前截断剥离、又可能把块外的 fenced 内容
+    切出未闭合的围栏（与 :func:`agent_runner_validation_parsing._iterate_validation_section_lines`
+    同一规则）。
 
     Args:
         markdown_text: 原始正文。
@@ -159,8 +163,15 @@ def strip_validation_section(markdown_text: str) -> str:
     """
     kept_lines: list[str] = []
     skip_until_level: int | None = None
+    in_code_fence = False
     for line in markdown_text.splitlines():
-        if line.startswith("#"):
+        stripped_line = line.strip()
+        if stripped_line.startswith("```"):
+            in_code_fence = not in_code_fence
+            if skip_until_level is None:
+                kept_lines.append(line)
+            continue
+        if not in_code_fence and line.startswith("#"):
             heading_level = len(line) - len(line.lstrip("#"))
             if skip_until_level is not None:
                 if heading_level <= skip_until_level:

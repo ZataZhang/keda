@@ -252,6 +252,28 @@ def test_strip_validation_section_keeps_sibling_sections() -> None:
     assert "gone" not in stripped
 
 
+def test_strip_validation_section_is_fenced_code_aware() -> None:
+    """围栏代码块内的 ``#`` 行是注释不是标题：不触发剥离，且围栏保持成对闭合。"""
+    body = (
+        "## Requirement\n\n保持我。\n\n"
+        "```bash\n# 部署前先跑迁移\nuv run alembic upgrade head\n```\n\n"
+        "## Realistic Validation\n\n- [ ] rv-1: 核对右对齐\n\n"
+        "```bash\n# 验证命令\njust test\n```\n\n"
+        "## Delivery Notes\n\n交接说明保留。\n"
+    )
+
+    stripped = strip_validation_section(body)
+
+    # 验收段连同其中的围栏块一起移除，后面的同级小节存活。
+    assert "Realistic Validation" not in stripped
+    assert "验证命令" not in stripped
+    assert "## Delivery Notes" in stripped
+    assert "交接说明保留" in stripped
+    # 需求段围栏内的 # 注释不被误判为标题，原样存活。
+    assert "# 部署前先跑迁移" in stripped
+    assert stripped.count("```") % 2 == 0
+
+
 # ---------------------------------------------------------------------------
 # FR-10：与 PRD 路径一致的标签与依赖行为
 # ---------------------------------------------------------------------------
@@ -389,7 +411,7 @@ def test_generate_cascade_disabled_target_returns_fallback() -> None:
 
 
 def test_require_validation_directive_reaches_the_prompt() -> None:
-    """要求验收时提示词里带上写验收段的指令。"""
+    """要求验收时提示词里带上写验收段的指令（点名门禁实际读取的小节标题）。"""
     context = build_issue_prompt_context(
         issue_type="feature",
         prompt_text=PROMPT,
@@ -397,8 +419,29 @@ def test_require_validation_directive_reaches_the_prompt() -> None:
         require_validation=True,
     )
 
-    assert "Acceptance Criteria" in context.validation_directive
+    assert "## Realistic Validation" in context.validation_directive
     assert PROMPT in _TARGET_PROMPT.format(**context.__dict__)
+
+
+def test_require_validation_directive_names_realistic_validation_section() -> None:
+    """提示词点名 ``## Realistic Validation``（证据门禁读的就是这个标题），默认态为空指令。"""
+    context = build_issue_prompt_context(
+        issue_type="feature",
+        prompt_text=PROMPT,
+        fallback_title="t",
+        require_validation=True,
+    )
+
+    assert "## Realistic Validation" in context.validation_directive
+    assert "Acceptance Criteria" not in context.validation_directive
+
+    default_context = build_issue_prompt_context(
+        issue_type="feature",
+        prompt_text=PROMPT,
+        fallback_title="t",
+        require_validation=False,
+    )
+    assert default_context.validation_directive == ""
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +510,14 @@ def test_cli_require_validation_without_from_prompt_is_usage_error() -> None:
     assert _run_issue_create(["issue", "create", "tasks/a.md", "--require-validation"]) == int(
         ExitCode.USAGE
     )
+
+
+def test_empty_from_prompt_is_usage_error() -> None:
+    """空需求文本（含纯空白）是用法错误：没有可执行内容，也不落到 agent。"""
+    for empty_prompt in ("", "   "):
+        assert _run_issue_create(["issue", "create", "--from-prompt", empty_prompt]) == int(
+            ExitCode.USAGE
+        )
 
 
 def test_cli_from_prompt_calls_the_prompt_use_case() -> None:

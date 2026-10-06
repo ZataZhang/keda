@@ -61,7 +61,7 @@
 - **review 能力**：pre-push review、post-PR supervisor、宽上下文 review-daemon、独立 verifier gate 已有闭环；高风险 finding 的稳定阻断规则、PR 正文 schema 校验和部分 supervisor 安全边界仍需补齐。
 - **PR 分支维护能力**：supervisor 可请求现有 PR branch repair/rebase/resolve-conflict，review-daemon 可感知 base、checks、comment 和 mergeability 变化；detached HEAD rebase 中间态识别、恢复后 supervisor 闭环和 CI rework 状态恢复仍不完整。
 - **前端能力**：已有基础前端结构和页面骨架；面向 agent runner 的可用操作台尚未完成。
-- **Issue-first 能力**：PRD -> Issue 已完成；**任意 Issue（含无 PRD）可执行**的运行侧路径已具备但从未被真实验证，由 `P1-FEAT-20261006-122336` 交付首次端到端实证；Issue -> PRD / PRD rewrite / PRD review deliberation 作为**按需**能力仍在 pending PRD 中（不再是执行前置）。
+- **Issue-first 能力**：PRD -> Issue 已完成；**任意 Issue（含无 PRD）可执行**的运行侧路径已具备，并已由 `P1-FEAT-20261006-122336` 完成首次真实端到端实证（Issue #216 → Draft PR #217，待人工验收）；Issue -> PRD / PRD rewrite / PRD review deliberation 作为**按需**能力仍在 pending PRD 中（不再是执行前置）。
 - **Autopilot fast-lane（产品仓"打开开关即无人值守"能力族）**：原三件中已交付两件——**合并队列快速档**（`P1-FEAT-20260703-105322`，已归档：`[autopilot]` + `safety.auto_merge` 双开关门控，verifier 绿灯 → 自动签核 → rebase 最新 base → 全量验证重跑 → 禁改路径终扫 → squash 合并，按 Issue 号 FIFO 串行）与 **roadmap 持续调度**（`P1-FEAT-20260703-105330`，已归档：daemon 内对账 + 补位 + 发现式入队，`iar roadmap advance [--dry-run]` 一次性入口）。第三件"执行前 re-grounding 与触碰面避让"已**取消独立阶段、取消 agent 侧触碰面预测、取消并行撞车避让**，收缩为默认 `execution` 提示模板内置的 `PRD map check` 核验指令并交付（`P1-FEAT-20260703-105340`；形态见 M2）。仍未完成的只剩 fast-lane 的发布说明（`auto_merge` 语义已从死开关激活，需显式提示升级影响）。
 
 ### Not Completed
@@ -110,7 +110,7 @@
 
 **pending（待执行）**
 
-1. `P1-FEAT-20261006-122336`（**任意 Issue 可执行**）：Issue-first 交付入口。运行侧路径已具备但从未真实验证，本 PRD 交付首次端到端实证、撤销文档边界、并补 `iar issue create --from-prompt`。归入 M1 与 M8。
+1. `P1-FEAT-20261006-122336`（**任意 Issue 可执行**）：执行侧已随本 PR 交付——首次真实端到端实证（Issue #216 → Draft PR #217）、文档边界撤销、`iar issue create --from-prompt` 与 `--direct-pr` 档位、daemon 互斥收窄与首次领取 CAS 全部落地；待人工验收与合并后从本清单移除。归入 M1 与 M8。
 2. `P1-FEAT-20261006-013227`（Stats 页 Token 用量补按 PRD 维度汇总）：执行侧已交付为 Draft PR #211，待人工验收与合并后从本清单移除。
 
 **hold（已成形但暂缓，不参与排期）**
@@ -314,7 +314,7 @@ Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/back
 9. **把多 agent deliberation 接入 PRD review**：生成结构化 verdict、finding、risk 和后续动作 comment，与 M8 协同。
 10. **高风险 review finding 的稳定阻断规则**：定义哪些风险必须转人工，哪些可以自动重试或自动合并。
 11. **PR 正文 schema 校验**：强制包含实现摘要、验证结果和残余风险；与 M3 验证门禁协同。
-12. **在 CLI、监控能力和 Issue-first PRD gate 稳定后**，再完善更完整的交互终端体验（M1 剩余项）。
+12. **在 CLI、监控能力和 Issue-first clarification / PRD（按需）稳定后**，再完善更完整的交互终端体验（M1 剩余项）。
 
 ## Acceptance Checklist
 

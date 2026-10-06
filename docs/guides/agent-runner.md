@@ -1156,8 +1156,8 @@ iar run --all-ready
 
 | 调用形态 | 同仓 daemon 存活时 |
 |---|---|
-| `iar run --all-ready`（或 PRD 路径目标走队列语义） | **拒绝**（退出码 5 conflict）：两个轮询者会双 claim 同一 ready 队列 |
-| `iar run --issue <N>`（显式单目标） | **照常执行**：单目标不轮询队列，领取冲突由认领状态单独把关（见下节） |
+| `iar run --all-ready`（队列轮询） | **拒绝**（退出码 5 conflict）：两个轮询者会双 claim 同一 ready 队列 |
+| `iar run --issue <N>` 或 `iar run <PRD_PATH>`（显式单目标） | **照常执行**：单目标不轮询队列，领取冲突由认领状态单独把关（见下节） |
 
 ```text
 conflict: A daemon for repository '<repo_id>' is already running (PID <N>) ...
@@ -1178,11 +1178,12 @@ iar run --issue 42 --takeover --yes
 
 | 目标状态 | 定向 run 的结果 |
 |---|---|
-| open、无 workflow 标签，或只带 `agent/ready` / `agent/review` 等非硬冲突状态 | 放行（走原有对应通道） |
+| open、无 workflow 标签，或只带 `agent/ready` | 放行，进入 ready 通道执行 |
 | `agent/running` 且最近一次认领的持有者仍存活 | 退出码 5 `conflict`，错误里点名持有者 `host` / `PID`；本机持有者提示 `iar run --issue <N> --takeover`，远端持有者只能等它结束（系统没有强制接管远端认领的入口） |
 | `agent/running` 但本机持有者 PID 已不存在 | 放行，交给 running 通道的恢复路径（rework / 发布恢复） |
 | `agent/blocked` 且没有未消费的解除请求 marker | 退出码 5 `conflict`，提示先 `iar blocked-continue --issue <N>` |
 | 读不到、或不是 open | 退出码 3 `not_found` |
+| `agent/review` / `agent/supervising` 等其他状态 | 准入层放行，但 `iar run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `iar review` / review-daemon |
 
 **跨机器的认领无法探测远端进程，一律按有效处理（fail-closed）**：抢跑别人正在执行的 Issue 是双跑，而拒绝一次定向只是让人等一等。
 

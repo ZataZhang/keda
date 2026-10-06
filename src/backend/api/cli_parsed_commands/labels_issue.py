@@ -61,7 +61,7 @@ def _require_issue_create_source(
         from_prompt: ``--from-prompt`` 的文本；未给出时为 ``None``。
 
     Raises:
-        CliError: 二者都不给、二者都给，或旗标与输入方式矛盾（退出码 2）。
+        CliError: 二者都不给、二者都给、需求文本为空，或旗标与输入方式矛盾（退出码 2）。
     """
     has_prd_paths = bool(raw_prd_paths)
     if has_prd_paths and from_prompt is not None:
@@ -85,6 +85,12 @@ def _require_issue_create_source(
                 suggestion='iar issue create --from-prompt "<需求>" --require-validation',
             )
         return
+    if not from_prompt.strip():
+        raise CliError(
+            "--from-prompt requires a non-empty requirement text.",
+            code=ExitCode.USAGE,
+            suggestion='iar issue create --from-prompt "<一句话需求>"',
+        )
     conflicting_flags = ", ".join(
         flag
         for flag, attr in (("--publish-prd", "publish_prd"), ("--force", "force"))

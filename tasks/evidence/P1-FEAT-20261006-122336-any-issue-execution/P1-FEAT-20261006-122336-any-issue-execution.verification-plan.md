@@ -2,7 +2,7 @@
 
 PRD: `tasks/pending/P1-FEAT-20261006-122336-any-issue-execution.md`
 Issue: <https://github.com/ZataZhang/keda/issues/215>
-分支: `issue-215` @ `2542ecbc`（实现未提交，由 runner 提交）
+分支: `issue-215` @ `e175c42856c68a0094f36f87e1f25603141ff6e1`（pre-PR review 修正与归档门禁结构修正仍在工作树未提交，由 runner 一并提交）
 采集日期: 2026-10-06 ~ 2026-10-07
 
 ## 验证目标
@@ -42,8 +42,8 @@ Issue: <https://github.com/ZataZhang/keda/issues/215>
 
 - 复现脚本在 `.iar/evidence/scripts/rv-*.{sh,py}`；每条目一份 `.iar/evidence/rv-*.txt` 与真实运行 `.log`；结构化 manifest 为 `.iar/evidence/evidence.json`（`version: 1`、`language: "zh-CN"`、11 个 item 块，每块含 `item_number/item_name/command/evidence_files/output_summary/explanation/risks/negative_control/expected_fail`）。原始证据（`.txt`/`.log`）不进代码 diff，本目录只提交 `.md` 报告；打开命令见各报告。
 - 冻结凭证（合并前这些路径若变更须重采）：
-  `git diff HEAD -- src tests ROADMAP.md docs config.toml | shasum -a 256 = ec409c84a7098a8102a3e84d263494cca0c5f57c100b9cb6ab13091ad8df3b2b`
-  新增未跟踪文件：`git ls-files --others --exclude-standard -- src tests | xargs shasum -a 256 | shasum -a 256 = 927e8e3fccc1f7b4858b4ddcca6f2a159326fc4d0481b50018d7c6c9adedd529`
+  `git diff HEAD -- src tests ROADMAP.md docs config.toml | shasum -a 256 = be9008d921d5a08d371f1350a75f60eb648e1f06d6aa1889efb425ae4e304368`（pre-PR review 修正后的最终工作树）
+  新增未跟踪文件：`git ls-files --others --exclude-standard -- src tests | xargs shasum -a 256 | shasum -a 256 = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`（空输入，即 `src`/`tests` 下无未跟踪文件）
 - 负控期间的临时源码注入（rv-6 归还路径、rv-7 档位嵌套、rv-9 回读校验、rv-10 单实例锁、rv-5 守卫副本）全部在采集脚本内还原并逐字节校验（`cmp -s` / numstat 前后一致 / 标记行计数归零），最终树不含任何验证期改动；rv-9/rv-10 的还原同时写在 `EXIT` trap 里，防止中途中断留下注入。
 
 ## 成本与保真度的取舍（如实披露）

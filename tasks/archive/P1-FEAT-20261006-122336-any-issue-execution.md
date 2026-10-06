@@ -2,7 +2,7 @@
 
 - GitHub Issue: https://github.com/ZataZhang/keda/issues/215
 
-> ✅ **交付前置**：无，可立即开工。
+> ✅ **交付前置**：可立即开工 —— 唯一上游 PR #212 已合并满足（行数红线余量），无阻塞。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
 > 🧍 **验收状态**：待人工验收（6 项 Human-Confirmed 仍未勾选）。
@@ -16,7 +16,7 @@
 
 - **`iar run` 对任意 Issue 通用**（FR-1）：不管 Issue 是人手写的、agent 建的、带不带 PRD 链接、有没有 Machine Contract 结构，只要带就绪标记（守护进程路径）或被人显式点名（`--issue N` / PRD 路径）就能被领取并端到端执行出 Draft PR。
 - **撤销「无 PRD 不得执行」的产品边界**（FR-2）：仓库路线图现在明文禁止把无 PRD 的 Issue 当作可执行任务；本次把这条从「禁止」改为「允许，由加就绪标记或显式点名的人决定」。
-- **一句话创建 Issue**（FR-3）：`iar issue create` 多一种输入方式——直接给一段自然语言，agent 把它写成自足的 Issue；这是「任意 Issue」的一个来源，不是本次的主题。
+- **一句话创建 Issue**（FR-3、FR-20）：`iar issue create` 多一种输入方式——直接给一段自然语言，agent 把它写成自足的 Issue；这是「任意 Issue」的一个来源，不是本次的主题。空需求文本（含纯空白）按输入校验报 usage error（退出码 2），不落到 agent。
 - **创建时就地决定要不要立刻进队列**（FR-5）：`--ready` 立刻打上就绪标记，**任何正在轮询该标记的守护进程**（本机或别的机器上的 keda / 其他 agent）都可以领，**先到先得**；`--no-ready`（默认）则**不进队列 —— 谁的守护进程都不会领它**，直到有人后续手动加上该标记。**系统中没有「指派给某台机器」的机制**：由哪台机器执行，取决于哪台在为该仓库跑守护进程、以及谁先轮询到。
 - **想「就我这台机器跑、别被抢」时走显式定向**（FR-6 / FR-21 / FR-23）：就绪标记只约束**守护进程的自主挑选** —— **不打标记、直接 `iar run --issue N`**，因无标记而不与任何守护进程竞争；同目标的排他由首次领取的真 CAS 保证。
 - **本机守护进程在跑时也能手动跑 Issue**（FR-24）：`iar run` 与正在运行的本机守护进程**不再互斥** —— 现状是只要本机守护进程在跑，任何 `iar run` 都被拒绝（要求 `--takeover` 先停掉守护进程），这让上一条的「零竞争路径」实际走不通。本次把互斥收窄为**只挡队列轮询**（`--all-ready` / 无显式 target）：显式单目标与守护进程共存，各跑各的 Issue（工作树按 Issue 隔离）。对守护进程**当前正持有**的 Issue 显式 run 仍会被拒 —— 依据认领状态而非 mutex。
@@ -596,6 +596,7 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
   real_entry: "真实入口：手工建 GitHub Issue（自由文本正文，无 PRD path 锚点）→ gh issue edit --add-label agent/ready → 真实 iar run --issue N"
   expected: 全链路无中止；产出 Draft PR；PR 正文合理反映该 Issue 的需求；Issue 正文被当作需求来源（verifier 从中取意图）；账本记录该 run 的 prd_path 为空串；证据目录若产生则落在 issue-<N>
   mock_boundary: none —— 真实 GitHub Issue + 真实 CLI 进程 + 真实账本 + 真实浏览器（若涉及前端）
+  critical_value_source: "Issue #216 的正文与标签（gh issue view 读回：无 PRD 锚点、带 agent/ready）与 Draft PR #217 的 GitHub 字段（isDraft=true、head=issue-216）"
   tier: R2
   test_layer: 真实端到端执行
   required_for_acceptance: true
@@ -628,6 +629,12 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
   tier: R2
   test_layer: 全文检索 + 人读
   required_for_acceptance: true
+  presentation: "ROADMAP.md 改动的 diff 与一致性检查输出（旧判据命中 5 次、新判据命中 0 次）"
+  critical_value_source: "ROADMAP.md 全文（Product Boundary / Target Workflow / M1 / M8 / Acceptance Checklist / Not Completed / Open Questions 各节）与 git show main:ROADMAP.md 的旧文本对照"
+  must_cross: 真实仓库文件 + 版本历史（main 基线对照）
+  forbidden_bypasses: 只检索改动段落而放过其他章节；用「撤销」上下文里的引述误判为残留禁令
+  fresh_state_probe: 采集前重新对现版本全文跑同一检索判据，并对 main 版本跑同一判据确认仍有命中
+  final_tree_evidence: 交付 PR 中的 ROADMAP.md diff 与一致性检查输出
   negative_control: 临时把 Product Boundary 改回旧禁令，一致性检查必须报出矛盾
   expected_fail: 存在相互矛盾的表述时检查失败
 
@@ -640,6 +647,11 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
   tier: R2
   test_layer: 真实运行时门禁判定对照（含前端改动的两态对照）
   required_for_acceptance: true
+  critical_value_source: "真实 Issue #220（默认态，无验收段）与 #222（--require-validation 态，带 ## Realistic Validation 段）的正文，及 validation_required(issue_body, config) 对两者的真实判定输出"
+  must_cross: 真实 GitHub Issue 正文 + 真实运行时门禁函数（非重实现）
+  forbidden_bypasses: 用重写的判据函数替代生产 validation_required；只看创建旗标不看正文
+  fresh_state_probe: 采集前重新 gh issue view 读回两篇正文并重新调用生产 validation_required 判定
+  final_tree_evidence: 判定探针的输出与相关单测结果记录在同一证据文件
   negative_control: 临时让默认路径也生成验收段，默认态断言必须失败
   expected_fail: 默认态下 validation_required 为 True 时断言失败
 
@@ -673,6 +685,7 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
   real_entry: "真实入口：对一个无 PRD 锚点的 Issue 跑 iar run --issue N --direct-pr；对照同一 Issue 跑 --fast-merge"
   expected: --direct-pr 运行的日志与产物中不出现 pre-PR review 阶段、不出现 runner 验证命令执行、不出现 verifier/rv_reexec；Draft PR 被创建且正文带 direct 档位的机器可读标注；与 --fast-merge 对照可见后者仍执行 pre-PR review；对带 PRD 锚点的 Issue 跑 --direct-pr 被拒绝（usage error，提示改用 --fast-merge）；同时给出两个旗标被拒绝
   mock_boundary: none —— 真实 CLI 进程 + 真实 GitHub Issue + 真实 PR
+  critical_value_source: "两次真实运行日志（rv-7-run-218-direct.log / rv-7-run-220-fastmerge.log）中 agent 启动与阶段标记行，及 Draft PR #221 / #225 正文的 iar:direct-pr / iar:fast-merge marker"
   tier: R2
   test_layer: 真实端到端执行 + 阶段级对照
   required_for_acceptance: true
@@ -690,9 +703,14 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
   real_entry: "真实 CLI：① 对一个无任何 workflow 标签的真实 Issue 跑 iar run --issue N ② 同一 Issue 交给守护进程轮询一轮 ③ 定向到一个已被活跃认领的 Issue"
   expected: ① 直接执行（不要求就绪标记、不报错）② 守护进程**不领取**该 Issue（仅 INFO 日志、退出 0）③ 被活跃认领 → 非零退出（CONFLICT）并指出持有者 host/PID；blocked 且无解除标记 → 拒绝并提示 iar blocked-continue；--all-ready 空队列仍返回 0 且静默
   mock_boundary: none —— 真实 CLI 进程 + 真实 GitHub Issue
+  critical_value_source: "真实 CLI 的退出码与错误输出（定向准入 / CONFLICT(5) 点名持有者 / blocked 提示 blocked-continue / NOT_FOUND(3)），以及守护进程轮询该无标记 Issue 时仅 INFO 的日志"
   tier: R2
   test_layer: 真实 CLI 与守护进程行为对照
   required_for_acceptance: true
+  must_cross: 真实 CLI 进程 + 真实 GitHub Issue 状态（标签 / 认领评论）
+  forbidden_bypasses: 用 TestClient 或直接调 use_case 代替真实 CLI；mock GitHub 客户端
+  fresh_state_probe: 采集前重新确认目标 Issue 的标签状态（无就绪标记 / 被活跃认领 / blocked）与断言前提一致
+  final_tree_evidence: 各次 CLI 调用的退出码与输出记录在同一证据文件
   negative_control: 临时让守护进程也领取无标记的 Issue，则 ② 的断言必须失败
   expected_fail: 守护进程越过就绪标记自主挑选时断言失败
 
@@ -702,6 +720,7 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
   real_entry: "真实入口：对一个已就绪的真实 Issue 同时启动两个真实 iar run 进程（或用两个真实 host 身份），观察谁真正进入执行"
   expected: 只有一个进程进入 Phase 1 执行；另一个检测到自己不是最早认领者并主动退出（不进入执行）；Issue 最终为 agent/running 且认领标记指向赢家；赢家跑完后 Issue 正常流转（未卡在 running）
   mock_boundary: none —— 两个真实进程 + 真实 GitHub
+  critical_value_source: "GitHub Issue #218 的认领评论线程（iar:claim / iar:claim-withdrawn marker 及其 host/pid/started_at 时间戳）与两个真实 iar run 进程（PID 2759 / 2760）的日志时间线"
   tier: R3
   test_layer: 真实并发双进程抢夺
   required_for_acceptance: true
@@ -743,10 +762,10 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 ### Delivery Dependencies
 
 - Depends on tasks/issues:
-  - PR #212（已合并 `866ddabc`）—— 行数红线清零；本 PRD 的 `--from-prompt` 要改 CLI parser，依赖它已清零的余量
+  - PR #212
 - Gate type: none
 - Sequence: via-main
-- Notes: 上游已满足。**本 PRD 与既有 PRD 的显著差异：运行时不产生功能改动** —— 逐条核查确认所有 PRD 相关门禁都是条件生效、无 PRD 的降级路径均已实现（§5 表），全仓也搜不到任何阻止无 PRD 执行的代码。因此本次的执行侧工作分为「证明既有路径真实可跑」（零代码，产出端到端证据，此前从未验证过）、「撤销文档中禁止它的产品边界」、以及「增加一个把一句话变成 Issue 的创建入口」三部分。
+- Notes: 上游已满足（PR #212 已合并 `866ddabc`：行数红线清零；本 PRD 的 `--from-prompt` 要改 CLI parser，依赖它已清零的余量）。**本 PRD 与既有 PRD 的显著差异：运行时不产生功能改动** —— 逐条核查确认所有 PRD 相关门禁都是条件生效、无 PRD 的降级路径均已实现（§5 表），全仓也搜不到任何阻止无 PRD 执行的代码。因此本次的执行侧工作分为「证明既有路径真实可跑」（零代码，产出端到端证据，此前从未验证过）、「撤销文档中禁止它的产品边界」、以及「增加一个把一句话变成 Issue 的创建入口」三部分。
 
 ## 9. Acceptance Checklist
 
@@ -849,7 +868,7 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 **Delivery Readiness**
 
 - [~] 交付 PR 正文按 `prd-evidence-and-merge-acceptance` 契约写：唯一链接本 PRD、明确声明「合并即验收」的含义、投影 §2 的人审决策、投影 §9.1 的人读呈递、给出 verified head 与 git tree。
-  ｜未达成部分：PR 正文/证据评论由 runner（执行侧之外的发布环节）创建，非本 worktree 产出；本次未推未开 PR（执行规则禁止）。契约要求已整理供 runner 使用：唯一链接本 PRD、声明「合并即验收」、投影 §2 决策与 §9.1 呈递、verified head 与 git tree（`git diff HEAD -- src tests ROADMAP.md docs config.toml | shasum -a 256` = `ec409c84…`，未跟踪摘要 `927e8e3f…`，见 verification-plan 冻结凭据节）。
+  ｜未达成部分：PR 正文/证据评论由 runner（执行侧之外的发布环节）创建，非本 worktree 产出；本次未推未开 PR（执行规则禁止）。契约要求已整理供 runner 使用：唯一链接本 PRD、声明「合并即验收」、投影 §2 决策与 §9.1 呈递、verified head 与 git tree（`git diff HEAD -- src tests ROADMAP.md docs config.toml | shasum -a 256` = `be9008d9…`，未跟踪摘要 `e3b0c442…`，见 verification-plan 冻结凭据节）。
 - [~] PR 证据评论包含 §9.1 呈递内容、verifier 结论、必跑门禁汇总、证据链接与可复现命令。
   ｜同上：归属 runner。可供贴入的材料已在 `tasks/evidence/P1-FEAT-…/evidence-report.md`（命令、真实转录、负控、可复现命令）与 `verifier-report.md`（两轮结论）。
 - [x] 原始证据（截图等非 .md 产物）不进入代码 diff；按需通过证据分支或 PR 评论发布。
@@ -878,6 +897,7 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 - **FR-17**：`--direct-pr` 与 `--fast-merge` 互斥——同时给出即 usage error（退出码 2），不隐式取更强者。
 - **FR-18**：`--direct-pr` 发布的 PR 正文带机器可读档位标注与一行人读说明（与 `iar:fast-merge` 同族、值不同）；PR 仍是 Draft，不自动合并。
 - **FR-19**：档位内部以一个「发布档位」字段表达（`normal` / `fast` / `direct`），而非在既有布尔之外再加布尔；`--fast-merge` 的 CLI 表面、退出码、PR 标注与跳过范围**逐字不变**。
+- **FR-20**：`--from-prompt` 的需求文本为空（含纯空白）时报 usage error（退出码 2）——没有可执行内容时不落到 agent，与「二者必居其一」同属输入校验。
 - **FR-21**：**显式定向**到一个不可领取状态的 Issue 时，报明确错误并返回非零退出码（**不静默返回 0**）：已被他人活跃认领（`agent/running` 且持有者存活）→ `CONFLICT (5)` 并指出持有者；`agent/blocked` 且无解除标记 → 拒绝并提示 `iar blocked-continue`；target 不存在 → `NOT_FOUND (3)`。
 - **FR-22**：守护进程轮询与 `--all-ready` 在无可领候选时**保持现状**（返回 0、仅 INFO 日志）—— 空队列是正常状态，不得因为 FR-21 而变成错误。
 - **FR-23**：**首次领取必须是原子 CAS**——两个并发领取者中只有一个真正进入执行，另一个检测到自己不是最早认领者后主动退出（释放并退出，不进入执行）；仲裁见证用认领评论里已有的 `host`/`pid` marker；**守护进程与显式定向共用同一条领取路径**，因此两种入口都受保护。
@@ -901,7 +921,7 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 - 让 `--direct-pr` 自动合并 PR（产物仍是 Draft，CI 是门禁而不是自动放行）。
 - **提供「指派给某台机器」的机制**（如机器预留标记 / host label）。想自己跑就不打标记自己跑；想让任意一台接手就打标记。机器定向会与「任一台都能接手」的高可用设计相悖（指定的那台挂了就卡住）。
 - **改动守护进程侧的自主挑选准入**：守护进程仍只领取带 `agent/ready` 的 Issue，这条不变。
-- **用标签本身做防双跑**（改为领取时的 CAS，见 FR-20）。
+- **用标签本身做防双跑**（改为领取时的 CAS，见 FR-23）。
 
 ## 12. Risks And Follow-Ups
 
@@ -945,6 +965,13 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 | D-19 | 是否提供机器定向 | 不提供 | host label / 机器预留标记 | 与「任一台都能接手」的可用性设计相悖；使用者的真实需求（别被抢）已由 D-17 更简单地满足 |
 | D-20 | 本机守护进程在跑时能否手动跑 Issue | **能**：daemon mutex 收窄为只挡队列轮询，显式单目标与守护进程共存 | 维持现状（任何 `iar run` 都要求先停守护进程或 `--takeover`） | 锁的唯一声明用途是防止「double-claim the ready queue」，而显式单目标不轮询队列；同仓多 Issue 并行本就是 daemon 一等能力（线程池），工作树按 Issue 隔离。维持现状会让 D-17 的「零竞争路径」实际被 mutex 堵死。同目标排他改由 CAS 承担，故本项与 D-18 同批约束 |
 | D-21 | 显式定向到不可领取状态的行为 | 报明确错误（CONFLICT / NOT_FOUND），不静默返回 0 | 保持现状静默返回 0 | 调用者明确点名了一个 Issue 却什么都没发生、还返回成功，会让人以为跑过了（本次评审中被实际指出）；守护进程/`--all-ready` 的空队列仍保持静默（那是常态） |
+
+### Final Reconciliation
+
+- Interpretation: 与最终实现一致 —— 运行器对任意 Issue 通用（含人手写、无 PRD 锚点的 Issue，已由 Issue #216 → Draft PR #217 首次真实端到端验证）；就绪标记只约束守护进程自主挑选、显式定向零竞争；daemon mutex 收窄为只挡队列轮询；首次领取为真 CAS；新增 `--from-prompt` 与 `--direct-pr` 档位。§5 引用的路径与符号已对照当前 worktree 逐一核对（`run_target_admission.py` 与 `agent_runner_claim_arbitration.py` 为本次新增文件，其余引用均在位）。
+- Public behavior and contracts: CLI 表面新增 `--from-prompt` / `--require-validation`（`iar issue create`）与 `--direct-pr`（`iar run`）；显式 target 不可领取时报 `CONFLICT(5)` / `NOT_FOUND(3)` 而不再静默返回 0；`--fast-merge` 与 PRD 路径的外部行为逐项不变；`iar schema --json`、随包 `iar-operator` skill 与 `docs/guides/agent-runner.md` 已同步。
+- Related PRD status: `tasks/pending/` 中无与本 PRD 重复的待办；`tasks/hold/P1-FEAT-20261006-024434-iar-run-quick-stage-skips.md` 保持搁置（方向被本 PRD 取代）；`tasks/archive/P1-FEAT-20261006-013227-stats-token-usage-by-prd.md`（Issue #209）为并行长参考，已于本 PRD 交付前归档。
+- Requirements and risks: §10 全部 FR 已逐条验证并留证（`.iar/evidence/evidence.json` 11 项，复跑校验脚本全绿）；§12 披露的残余风险（跨机领取仅单机双 PID 演练、rv-10 共存腿为 dry-run 级、TTL 回收与活持有者的冲突）已如实记录并给出缓解或后续方向。
 
 ## 14. Change Log
 
@@ -995,3 +1022,19 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 - Reason: 横幅必须是 §9 的投影；执行器侧交付完成后、人工验收完成前的正确状态是 awaiting_human，而非 not_started。
 - Impact: 无生产代码变更；不改变任何验收项的勾选状态。
 - Review: 无需人工确认（投影修正，与既有「Final Reconciliation 横幅翻转」先例一致）。
+
+### FR-10 `--depends-on` 一致性的已知差异（pre-PR review 记录）
+- Type: doc（记录既有差异，不改变任何承诺）
+- Before: FR-10 要求 `--depends-on` 在两种输入方式下行为一致；pre-PR review 发现差异实际存在。
+- After: 记录差异：**from-prompt 路径**在 `--depends-on` 解析出任何上游时即物化 `iar:depends-on` 标记（无 PRD 时它是依赖的唯一声明来源）；**PRD 路径**（`create_issue_from_prd.py`）沿用既有行为，仅在 PRD 声明 `Gate type: hard` 时才物化标记，CLI `--depends-on` 对无 hard gate 的 PRD 会被静默丢弃。
+- Reason: PRD 路径的行为是 main 上的既有实现，FR-7 要求本次逐字不变，因此不在本 PR 内改动；from-prompt 路径按 PRD §6 的规定实现（「Issue 级关系，与是否存在 PRD 无关」）。该差异是既有行为被 FR-10 的表述暴露，不是本次引入。
+- Impact: 无代码变更；后续若要对齐，应作为独立变更修改 PRD 路径（那时不受 FR-7 约束），而非在本 PR 内破例。
+- Review: 无需人工确认（如实披露限制）。
+
+### 归档门禁结构修正（横幅 / §8 依赖行 / Final Reconciliation / FR 编号 / oracle 证据链字段）
+- Type: doc（交付记录的结构补全，未改变任何产品承诺或验收口径）
+- Before: prd skill 的归档就绪检查器报多处：Delivery Gate Banner 未点名 §8 声明的上游 PR #212；Section 13 缺 Final Reconciliation 块；FR 编号不连续（FR-1..FR-19 之后直接 FR-21，缺 FR-20，Non-Goals 里的「见 FR-20」悬空）；rv-1 / rv-3 / rv-4 / rv-7 / rv-8 / rv-9 六个 R2/R3 oracle 缺 critical_value_source 等证据链字段（rv-3 另缺 presentation）。
+- After: 横幅改为点名「唯一上游 PR #212 已合并满足」；§8 的依赖行简写为 PR #212（理由并入 Notes）；§13 新增 Final Reconciliation 块（Interpretation / Public behavior and contracts / Related PRD status / Requirements and risks 四项均已填写）；补入 §10 缺失的 FR-20（`--from-prompt` 空需求文本报 usage error——pre-PR review 期间落地的输入校验，实现与单测已随代码交付，Feature Overview 的「一句话创建 Issue」条目同步挂上 FR-20），并把 Non-Goals 里悬空的「见 FR-20」改指到 CAS 所在的 FR-23；六个 oracle 补齐 critical_value_source（以及 rv-3 的 presentation、rv-3/rv-4/rv-8 的 must_cross / forbidden_bypasses / fresh_state_probe / final_tree_evidence）。
+- Reason: Machine Contract §8 的归档门槛要求横幅是 §8 的投影、Final Reconciliation 完整、R2/R3 oracle 具备完整证据链字段，且 §10 的 FR 编号从 FR-1 连续递增；这些是记录形态缺陷，不是行为或范围变化。
+- Impact: 无代码变更；§9 各验收项的勾选状态与证据指向不变；复跑校验脚本（rv-1 至 rv-11）不受影响，仍在交付前全绿。
+- Review: 无需人工确认（纯记录形态修正）。

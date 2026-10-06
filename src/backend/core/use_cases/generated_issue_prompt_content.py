@@ -92,8 +92,9 @@ def build_issue_prompt_context(
         可直接喂给模板渲染与 agent 提示词的上下文。
     """
     validation_directive = (
-        "Additionally, write a '## Acceptance Criteria' section listing 2-4 "
-        "concretely checkable outcomes of this requirement."
+        "Additionally, write a '## Realistic Validation' section listing 2-4 "
+        "concretely checkable outcomes of this requirement as '- [ ]' checklist "
+        "items. The runner's evidence gate reads that exact section heading."
         if require_validation
         else ""
     )

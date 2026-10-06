@@ -2,8 +2,8 @@
 
 - PRD：`tasks/pending/P1-FEAT-20261006-122336-any-issue-execution.md`
 - Issue：<https://github.com/ZataZhang/keda/issues/215>
-- 代码树：worktree `.iar-worktrees/issue-215`，分支 `issue-215` @ HEAD `2542ecbc`（实现未提交，由 runner 提交）
-- 冻结凭证：`git diff HEAD -- src tests ROADMAP.md docs config.toml | shasum -a 256` = `ec409c84a7098a8102a3e84d263494cca0c5f57c100b9cb6ab13091ad8df3b2b`；新增未跟踪文件摘要 = `927e8e3fccc1f7b4858b4ddcca6f2a159326fc4d0481b50018d7c6c9adedd529`
+- 代码树：worktree `.iar-worktrees/issue-215`，分支 `issue-215` @ HEAD `e175c42856c68a0094f36f87e1f25603141ff6e1`（pre-PR review 修正与归档门禁结构修正仍在工作树未提交，由 runner 一并提交）
+- 冻结凭证：`git diff HEAD -- src tests ROADMAP.md docs config.toml | shasum -a 256` = `be9008d921d5a08d371f1350a75f60eb648e1f06d6aa1889efb425ae4e304368`；新增未跟踪文件摘要 = `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`（空输入，即 `src`/`tests` 下无未跟踪文件）
 - 原始证据位置：`.iar/evidence/`（不进代码 diff）。打开：`open ".iar/evidence"`；结构化 manifest：`open ".iar/evidence/evidence.json"`
 - 结论：**rv-1..rv-11 全部 PASS**，每条都带**实测为红**的判别性负控。两条必须人工知悉的风险（rv-10 的 TTL 回收隐患、定向 `--dry-run` 崩溃已修）见文末与 Change Log。
 

@@ -452,6 +452,16 @@ def test_normal_pr_body_carries_no_stage_marker(
     assert "iar:direct-pr" not in pr_body
 
 
+def test_direct_pr_annotation_carries_human_readable_note(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """FR-18：直发档正文除了机器 marker 还带一行人读说明（CI 是唯一点）。"""
+    pr_body, _review_call_count = _publish_with_stage(monkeypatch, tmp_path, PublishStage.DIRECT)
+
+    assert "直发档发布" in pr_body
+    assert "CI" in pr_body
+
+
 # ---------------------------------------------------------------------------
 # PR 后监督：直发档不进监督循环
 # ---------------------------------------------------------------------------
@@ -472,6 +482,27 @@ def test_direct_pr_skips_post_pr_supervisor() -> None:
 
     disabled_config = _supervisor_config(enabled=False)
     assert _should_run_post_pr_supervisor(disabled_config, PublishStage.NORMAL, 7) is False
+
+
+def test_post_pr_supervisor_call_sites_pass_publish_stage() -> None:
+    """两个发布收尾函数都必须把 ``publish_stage`` 传进监督判定（调用点接线钉）。
+
+    只测判定函数本身不够：某个调用点漏传参数会静默回退成 NORMAL 档，直发档
+    在建完 Draft PR 之后又多跑一次监督 agent，违背「只剩机械步骤」。该断言钉住
+    两个调用点的源码形态，漏传即红。
+    """
+    import inspect
+
+    from backend.core.use_cases import agent_runner_publication as publication
+
+    for factory in (
+        publication._finish_implementation_publication,
+        publication._finish_existing_commit_publication,
+    ):
+        source = inspect.getsource(factory)
+        assert (
+            "_should_run_post_pr_supervisor(config, publish_stage" in source
+        ), f"{factory.__name__} 未把 publish_stage 传给 post-PR supervisor 判定"
 
 
 # ---------------------------------------------------------------------------
@@ -549,6 +580,96 @@ def test_publish_stage_resolution_matrix() -> None:
     assert _resolve_publish_stage(fast_merge=False, direct_pr=False) is PublishStage.NORMAL
     assert _resolve_publish_stage(fast_merge=True, direct_pr=False) is PublishStage.FAST
     assert _resolve_publish_stage(fast_merge=False, direct_pr=True) is PublishStage.DIRECT
+
+
+def _patched_run_command_dependencies(
+    monkeypatch: pytest.MonkeyPatch, repo_context: Any, dispatched: list
+) -> None:
+    """把 ``run_run_command`` 的外部依赖（仓库解析 / 初始化 / 鉴权 / 执行）全部打桩。
+
+    ``run_agent_repositories_once`` 用探针替换：真正进入执行会把 kwargs 记进
+    ``dispatched``，FR-16 门禁的断言靠它证明「被拒后没有开跑」。
+    """
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.runner._resolve_cli_repository_targets",
+        lambda **kwargs: [repo_context],
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.runner._cli.require_iar_repository_initialized",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.runner._ensure_gh_auth_or_prompt",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.runner._cli.run_agent_repositories_once",
+        lambda **kwargs: dispatched.append(kwargs) or 0,
+    )
+
+
+def _run_context_with_client(parsed_kwargs: dict[str, Any], fake_client: FakeGitHubClient) -> Any:
+    """构造带 GitHub 客户端工厂的命令上下文（``ParsedCommandContext`` 是 frozen dataclass）。"""
+    from dataclasses import replace
+
+    return replace(
+        _run_context(**parsed_kwargs),
+        github_client_factory=lambda repo_path: fake_client,
+    )
+
+
+def test_run_command_rejects_direct_pr_on_prd_anchored_issue(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """FR-16（调用点）：``run_run_command`` 对带 PRD 锚点的 --issue 目标拒绝放行。
+
+    负控锚点：删掉 ``runner.py`` 里对 ``_reject_direct_pr_on_prd_backed_issue`` 的
+    调用后，本条必须失败——单测私有函数本身证明不了命令入口真的挂了这道门禁。
+    """
+    from backend.api.cli_parsed_commands.runner import run_run_command
+
+    dispatched: list = []
+    repo_context = SimpleNamespace(repo_path=tmp_path, repo_id="demo", config=AppConfig())
+    _patched_run_command_dependencies(monkeypatch, repo_context, dispatched)
+    ctx = _run_context_with_client(
+        {"issue": 7, "direct_pr": True}, _client_returning(_PRD_ANCHORED_BODY)
+    )
+
+    with pytest.raises(CliError) as error:
+        run_run_command(ctx)
+
+    assert error.value.code == ExitCode.USAGE
+    assert "--fast-merge" in str(error.value.suggestion or "")
+    assert dispatched == []
+
+
+def test_run_command_rejects_direct_pr_with_prd_path_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """FR-16（PRD 路径分支）：PRD 文件目标本身就是 PRD-backed，不必读 Issue 即拒绝。"""
+    from backend.api.cli_parsed_commands.runner import run_run_command
+
+    dispatched: list = []
+    repo_context = SimpleNamespace(repo_path=tmp_path, repo_id="demo", config=AppConfig())
+    _patched_run_command_dependencies(monkeypatch, repo_context, dispatched)
+    monkeypatch.setattr(
+        "backend.api.cli_helpers.require_single_repository_target",
+        lambda *args, **kwargs: repo_context,
+    )
+    monkeypatch.setattr(
+        "backend.core.use_cases.run_target_resolve.resolve_prd_target_issue_number",
+        lambda **kwargs: 7,
+    )
+    ctx = _run_context_with_client(
+        {"prd_path": "tasks/pending/demo.md", "direct_pr": True}, FakeGitHubClient()
+    )
+
+    with pytest.raises(CliError) as error:
+        run_run_command(ctx)
+
+    assert error.value.code == ExitCode.USAGE
+    assert "PRD anchor" in str(error.value)
+    assert dispatched == []
 
 
 def _gate_context(fake_client: FakeGitHubClient) -> Any:

@@ -323,8 +323,12 @@ class _QueueGitHubClient(_TargetedGitHubClient):
         return list(self._issues)
 
 
-def test_run_once_targeted_requires_ready_label(tmp_path: Path) -> None:
-    """定向 Issue 不带 ready 标签时本轮无候选可处理。"""
+def test_run_once_targeted_with_durable_state_label_skips_ready_discovery(tmp_path: Path) -> None:
+    """定向到带 ``agent/running`` 的目标不进 ready 候选通道，也不触发 ready 全量扫描。
+
+    显式定向的放宽只覆盖「无状态 / 仅就绪」两类；已带 durable 状态标签的目标按
+    原通道处理（这里是 running 恢复通道），不被当作新 ready 任务重跑。
+    """
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     config = AppConfig()
@@ -343,6 +347,46 @@ def test_run_once_targeted_requires_ready_label(tmp_path: Path) -> None:
     # 走了定向路径：get_issue 被调用，且未触发全量 ready 扫描。
     assert {"method": "get_issue", "issue_number": 7} in client.calls
     assert not [call for call in client.calls if call["method"] == "list_ready_issues"]
+
+
+def test_run_once_claim_arbitration_lost_skips_without_marking_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """领取仲裁落败的 Issue 被安静跳过（返回 0），绝不标 failed、不改任何标签。
+
+    回归护点：``_process_single_issue`` 的 ``except ClaimArbitrationLost`` 处理器
+    排在兜底 ``except Exception``（会标 failed）之前——输掉竞争不是执行失败，
+    把赢家的 ``agent/running`` 覆盖成 ``agent/failed`` 会让该 Issue 被永久卡死。
+    """
+    import backend.core.use_cases.agent_runner_issue_handlers as issue_handlers
+    import backend.core.use_cases.agent_runner_orchestration_runtime as runtime
+    import backend.core.use_cases.run_agent_once as run_agent_once
+    from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    def _lose_arbitration(**_kwargs: object) -> object:
+        raise ClaimArbitrationLost("Issue #7 was claimed earlier by another runner")
+
+    monkeypatch.setattr(run_agent_once, "run_preflight_checks", lambda *a, **k: None)
+    monkeypatch.setattr(runtime, "process_validation_gate", lambda **k: None)
+    monkeypatch.setattr(issue_handlers, "arbitrate_first_claim", _lose_arbitration)
+
+    config = AppConfig()
+    client = _TargetedGitHubClient(_issue_summary(7, ()))
+    exit_code = run_once(
+        repo_path=tmp_path,
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=client,
+        process_runner=MagicMock(),
+        target_issue=7,
+    )
+
+    assert exit_code == 0
+    assert not [call for call in client.calls if call["method"] == "edit_issue_labels"]
+    assert not [call for call in client.calls if call["method"] == "comment_issue"]
 
 
 def test_run_once_targeted_dry_run_does_not_crash_on_missing_discovery_limit(

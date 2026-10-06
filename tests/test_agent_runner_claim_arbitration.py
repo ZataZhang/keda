@@ -164,6 +164,45 @@ def test_same_process_reentry_wins_over_its_own_earlier_bid() -> None:
     assert not [call for call in client.calls if call["method"] == "edit_issue_comment"]
 
 
+def test_rival_bid_inserted_during_grace_wins_and_loser_withdraws() -> None:
+    """宽限窗口内到达的更早投标（本方投递后才可见）胜出：本方判负、撤销、不碰标签。
+
+    这是裸 read-modify-write 负控的进程内近似：对手的评论在「投标之后、回读之前」
+    才进入线程，只有真 CAS（先投标、再回读全量投标仲裁）才会看到它；任何退回
+    「投递前看一眼就写标签」的实现都会让双方同时自以为赢。
+    """
+    client = FakeGitHubClient()
+    rival = _bid_comment("runner-b", 222, NOW - timedelta(seconds=5))
+    injected = False
+
+    def _sleeper(_seconds: float) -> None:
+        nonlocal injected
+        if not injected:
+            injected = True
+            client.comment_issue(42, rival)
+
+    with pytest.raises(ClaimArbitrationLost) as exc_info:
+        arbitrate_first_claim(
+            issue_number=42,
+            github_client=client,
+            config=AppConfig(),
+            selected_agent="claude",
+            grace_seconds=1.0,
+            host=HOST,
+            pid=111,
+            started_at=NOW,
+            sleeper=_sleeper,
+            pid_alive=lambda candidate: candidate == 111,
+            now=NOW,
+        )
+
+    assert exc_info.value.winner is not None
+    assert exc_info.value.winner.host == "runner-b"
+    assert not [call for call in client.calls if call["method"] == "edit_issue_labels"]
+    withdrawn = next(call for call in client.calls if call["method"] == "edit_issue_comment")
+    assert "iar:claim-withdrawn" in withdrawn["body"]
+
+
 def test_other_live_process_on_the_same_host_still_wins_the_earlier_bid() -> None:
     """同机的**另一个**存活进程（例如守护进程）先投标时，本方判负。"""
     client = FakeGitHubClient()
