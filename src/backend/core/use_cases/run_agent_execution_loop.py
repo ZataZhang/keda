@@ -25,7 +25,6 @@ from backend.core.use_cases.run_agent_once import (
     ProviderCapacityError,
     UnrecoverableError,
     _logger,
-    _resolve_memory_stores,
     _resolve_repo_id,
     build_recovery_prompt,
     classify_failure,
@@ -60,6 +59,7 @@ from backend.core.use_cases.agent_runner_failure import (
     ForbiddenBlockedError,
     is_recoverable_commit_request_error,
 )
+from backend.core.use_cases.agent_runner_memory import _resolve_memory_stores
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
     format_prd_delivery_detail,

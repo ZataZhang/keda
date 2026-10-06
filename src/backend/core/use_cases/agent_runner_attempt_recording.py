@@ -17,12 +17,12 @@ from backend.core.shared.models.agent_runner import (
     FailureType,
     TokenUsage,
 )
+from backend.core.use_cases.agent_runner_memory import _persist_short_term_memory
 from backend.core.use_cases.run_agent_once import (
     AttemptPhaseTimer,
     _append_attempt_and_notify,
     _logger,
     _make_attempt_result,
-    _persist_short_term_memory,
     classify_failure,
     get_head_sha,
 )
