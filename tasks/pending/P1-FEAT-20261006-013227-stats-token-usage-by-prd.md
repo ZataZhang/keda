@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：执行侧交付完成，待人工验收（§9 非人工项已勾选并标注证据；2 项 `Human-Confirmed`——行为样例五行逐行确认、响应新增字段的可接受性——待人来确认）。
+> 🧍 **验收状态**：执行侧交付完成，人审决策已确认，待合并验收（§9 非人工项已勾选并标注证据；2 项 `Human-Confirmed` 已于 2026-10-06 由用户「全部接受」确认）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 是给人审的行为与决策层，不含实现机制、文件路径与命令；Part B 是给执行器的实现层。两层都是投影，`§8` 与 `§9` 才是对应事实源。
@@ -386,8 +386,8 @@ rg -n '_render_prd_table|prd_entries' src/backend/api/cli_typer_tokens.py
 
 **Human-Confirmed (来自 Part A 风险地图)**
 
-- [ ] §1 行为样例表五行逐行确认（页面三张表；页面与 CLI 数字一致；≥2 次执行的 PRD 合并成一行并显示累计执行次数；无消耗 PRD 不出现且空态明确；另两张表数字不变）。对应 §9.1 的两行呈递物。回答方式：对每一行回复「符合」或指出哪一行与预期不符。
-- [ ] 确认 §3 中「`stats/prd-lifecycle` 响应新增一个字段」这一唯一破坏性面可接受（只增字段，既有消费者不受影响）。回答方式：「可接受」或列出你知道的外部消费者需要公告。
+- [x] §1 行为样例表五行逐行确认（页面三张表；页面与 CLI 数字一致；≥2 次执行的 PRD 合并成一行并显示累计执行次数；无消耗 PRD 不出现且空态明确；另两张表数字不变）。对应 §9.1 的两行呈递物。 <!-- 人审答案: 2026-10-06 用户逐项回复「全部接受」（五行均符合预期） -->
+- [x] 确认 §3 中「`stats/prd-lifecycle` 响应新增一个字段」这一唯一破坏性面可接受（只增字段，既有消费者不受影响）。 <!-- 人审答案: 2026-10-06 用户回复「可接受」，未列出需要公告的外部消费者 -->
 
 **Architecture Acceptance**
 
@@ -417,8 +417,8 @@ rg -n '_render_prd_table|prd_entries' src/backend/api/cli_typer_tokens.py
 
 - [x] 真实入口验证已执行：至少一条 oracle 走真实 FastAPI 路由 + 真实 SQLite 账本（rv-1/rv-2/rv-4 均满足），非仅单元测试。证据：`iar console --port 8477` 真实服务 + `~/.iar/console.db` 真实账本，见 `.iar/evidence/evidence.json` 五项。
 - [x] 前端真实入口验证已执行：rv-4 走 `tests/playwright-e2e` 的真实浏览器流程或等价的手工浏览器操作，产出可辨认的页面截图；不接受组件预览作为唯一证据。证据：rv-4 为真实浏览器对真实 `iar console` 静态站点（`/app/stats/`）的渲染结果截图；提交进仓库的 fixture spec 亦经 `just e2e` 真实浏览器 4 passed。
-- [ ] `CI=true just test all` 通过；`just lint` 通过。
-- [ ] 后端 `just prd review` 入口可用：证据目录下 `human-review-checklist.md`（含 HTML 伴生页，若含截图）已生成。
+- [x] `CI=true just test all` 通过；`just lint` 通过。 <!-- 证据: 重定基到 `866ddabc` 后复跑，3135 passed / 1 skipped；`just lint --full` 全 hook 通过（含架构与行数门禁） -->
+- [x] 后端 `just prd review` 入口可用：证据目录下 `human-review-checklist.md`（含 HTML 伴生页，若含截图）已生成。 <!-- 证据: `tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/human-review-checklist.md` + `.html` 均随本 PR 提交 -->
 
 **Delivery Readiness**
 
