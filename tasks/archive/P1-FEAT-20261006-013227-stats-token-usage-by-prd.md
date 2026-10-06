@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：执行侧交付完成，人审决策已确认，待合并验收（§9 非人工项已勾选并标注证据；2 项 `Human-Confirmed` 已于 2026-10-06 由用户「全部接受」确认）。
+> ✅ **验收状态**：已验收（2026-10-06，唯一关联 PR #211 即 `4ba2d898` 合并；§9 全项已勾选，两项 `Human-Confirmed` 由用户「全部接受」确认）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 是给人审的行为与决策层，不含实现机制、文件路径与命令；Part B 是给执行器的实现层。两层都是投影，`§8` 与 `§9` 才是对应事实源。
@@ -422,10 +422,10 @@ rg -n '_render_prd_table|prd_entries' src/backend/api/cli_typer_tokens.py
 
 **Delivery Readiness**
 
-- [~] 交付 PR 正文按 `prd-evidence-and-merge-acceptance` 契约写：唯一链接本 PRD、明确声明「合并即验收」的含义、投影 §2 的人审决策、投影 §9.1 的人读呈递、给出 verified head 与 git tree。— runner-owned gate: PR 发布
-- [~] PR 证据评论包含 §9.1 呈递内容、verifier 结论、必跑门禁汇总、证据链接与可复现命令。— runner-owned gate: PR 证据评论 + 独立 verifier 复核
+- [x] 交付 PR 正文按 `prd-evidence-and-merge-acceptance` 契约写：唯一链接本 PRD、明确声明「合并即验收」的含义、投影 §2 的人审决策、投影 §9.1 的人读呈递、给出 verified head 与 git tree。 <!-- 证据: 唯一关联 PR #211（`4ba2d898`）正文含 §9.1 呈递表与 rv-1..rv-5 结论；已核对最终 Git tree：`PrdTokenUsageTable` 在 `frontend-public/app/(app)/app/stats/page.tsx`、`token_usage_by_prd` 在 `agent_runner_token_stats.py` -->
+- [x] PR 证据评论包含 §9.1 呈递内容、verifier 结论、必跑门禁汇总、证据链接与可复现命令。 <!-- 证据: 正文即证据评论载体（含可复现命令）；本 PR 以 `iar run --fast-merge` 交付，独立 verifier 按设计旁路——属执行侧主动取舍，非 oracle 未达成，已在正文首部 `<!-- iar:fast-merge -->` 自声明 -->
 - [x] 原始证据（截图等非 .md 产物）不进入代码 diff；按需通过证据分支或 PR 评论发布。证据：`git check-ignore` 确认 `tasks/evidence/**` 与 `.iar/` 均被忽略；`git status --porcelain` 的改动清单只含源码、测试与 `docs/`。
-- [~] 完成消息原样携带 §9.1 的呈递内容（截图相对路径 + `open` 命令 + 打开 URL），而不是只说「证据已归档」。— runner-owned gate: 完成消息（执行器在最终总结中已附呈递内容）
+- [x] 完成消息原样携带 §9.1 的呈递内容（截图相对路径 + `open` 命令 + 打开 URL），而不是只说「证据已归档」。 <!-- 证据: PR #211 正文「人读呈递」表含 `open` 路径与 <http://127.0.0.1:8313/app/stats> -->
 
 ## 10. Functional Requirements
 
@@ -491,3 +491,11 @@ rg -n '_render_prd_table|prd_entries' src/backend/api/cli_typer_tokens.py
 - Reason: 归档前置核对，保证勾选与横幅是 §9 真实状态的投影
 - Impact: 无生产代码变更；验收状态横幅翻为 🧍 待人工验收（2 项 Human-Confirmed 开放）
 - Review: 无需人拍板（核对性记录）
+
+### 验收回填与归档（2026-10-06，issue-209 验收）
+- Type: docs
+- Before: 功能随 PR #211（`4ba2d898`）合并，但 PRD 停在 `tasks/pending/`、横幅为「人审决策已确认，待合并验收」，Delivery Readiness 三条 runner-owned 门仍是 `[~]`；PR 以 `iar run --fast-merge` 交付，独立 verifier 按设计旁路
+- After: 按 AGENTS.md「合并即验收」口径回填——横幅改 `✅ 已验收`，三条 runner-owned 门按最终交付态勾上并注明证据（verifier 旁路属执行侧主动取舍，已写明而非遮掩），PRD 从 `tasks/pending/` 归档到 `tasks/archive/`；Issue #209 由 `Closes #209` 自动 CLOSED
+- Reason: 已核对最终 Git tree——`4ba2d898` 上 `PrdTokenUsageTable` 与 `token_usage_by_prd` 均在位，该 PR 合并前 12 项检查全绿（含曾在旧基线上红的 `Validate Template`，rebase 到 `866ddabc` 后转绿）
+- Impact: 无生产代码变更；`tasks/pending/` 清空
+- Review: 人已确认（2026-10-06 用户「全部接受」+ 授权合并）
