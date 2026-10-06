@@ -479,7 +479,7 @@
 │        `agent/ready`，见第五步；守护进程侧判定不变，仅显式分支放开）
 ├── CLI 表面与随包 skill 同步义务（AGENTS.md 硬规则：改 CLI 表面 / 退出码 / 机器输出必须同步）
 │   ├── src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md
-│   │   ├── 【新增旗标】--from-prompt（issue create）；--direct-pr、--require-validation（run）
+│   │   ├── 【新增旗标】--from-prompt、--require-validation（issue create）；--direct-pr（run）
 │   │   ├── 【改写行为描述】删除/收窄所有「iar run never runs while a daemon serves the same
 │   │   │   repository」类**绝对**表述（现文第 25、103、106 行）→ 改为「只有队列轮询
 │   │   │   （--all-ready / 无显式 target）与守护进程互斥；显式单目标共存，同目标冲突
@@ -754,13 +754,15 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 
 | 看什么 | 呈递物 | ~10 秒自检 |
 |---|---|---|
-| **手工建的、没有 PRD 的 Issue 真的能跑出 PR** | 该 Issue 与其 Draft PR 的真实 URL：<br>Issue：`<填实际 URL>`<br>PR：`<填实际 URL>`<br>执行日志截图：`rv-1-run-log.png`（同目录） | 打开 Issue，确认它**没有** `PRD path:` 字样；打开 PR，确认它是从该 Issue 产出的 Draft PR |
-| 一句话能建出 Issue，且正文是人话、无 PRD 指针 | 真实 Issue 正文：`rv-2-issue-body.png`（同目录）<br>或直接看 <https://github.com/ZataZhang/keda/issues?q=is%3Aissue> 上该 Issue | 看正文：应是一段说得清「要什么」的人话；**不应**出现 `Canonical PRD` 或 `PRD path:` |
-| 路线图不再禁止无 PRD 执行，且全文无矛盾 | 路线图改动 diff：`rv-3-roadmap-diff.txt`（同目录）<br>打开：`open "tasks/evidence/P1-FEAT-20261006-122336-any-issue-execution/rv-3-roadmap-diff.txt"` | 看 diff：Product Boundary 那条应从「禁止执行」变为「允许，由就绪标记决定」；全文检索不应再有「不得被 runner 当作可执行」 |
-| 就绪标记是**守护进程**的唯一准入、且语义被如实呈现 | 两侧对照：① **未就绪** Issue 在多个守护进程运行时**不被任何一方领取**的日志 ② **已就绪** Issue 被正在跑的那台机器的守护进程领走、且认领标记含其 host/PID：`rv-ready-gate.png`（同目录） | 打开对照图：未就绪那份双方都没动它；已就绪那份的认领标记 host 是实际跑守护进程的那台机器。**注意：人显式定向不受该标记约束**，这不是矛盾 |
-| **`--direct-pr` 真的只剩机械步骤** | 两条运行日志的阶段序列对照（`--direct-pr` vs `--fast-merge`）：`rv-7-direct-pr.txt`（同目录） | 打开对照：`--direct-pr` 那侧**不应**出现 pre-PR review、verifier、rv_reexec、验证命令这些段落；`--fast-merge` 那侧应仍有 pre-PR review |
+| **手工建的、没有 PRD 的 Issue 真的能跑出 PR** | 真实 URL：Issue <https://github.com/ZataZhang/keda/issues/216> · Draft PR <https://github.com/ZataZhang/keda/pull/217><br>执行日志关键行（原文，非截图）：`.iar/evidence/rv-1-no-prd-issue-e2e-run.txt`，完整日志 `.iar/evidence/rv-1-run-216.log`<br>负向对照（人为加锚点后必须失败）：`.iar/evidence/rv-1-negative-control.txt` | 打开 Issue，确认它**没有** `PRD path:` 字样；打开 PR，确认它是 `isDraft=true`、`head=issue-216`、正文无旁路标注 |
+| 一句话能建出 Issue，且正文是人话、无 PRD 指针 | 三条真实 Issue 正文：<https://github.com/ZataZhang/keda/issues/220> · <https://github.com/ZataZhang/keda/issues/222> · <https://github.com/ZataZhang/keda/issues/224>（最后一条走的是生成失败后的模板回退）<br>断言与差分：`.iar/evidence/rv-2-from-prompt.txt` | 看正文：应是一段说得清「要什么」的人话；**不应**出现 `Canonical PRD` 或 `PRD path:` |
+| 路线图不再禁止无 PRD 执行，且全文无矛盾 | 路线图改动 diff：`open ".iar/evidence/rv-3-roadmap-diff.txt"`；一致性检查：`open ".iar/evidence/rv-3-roadmap-consistency.txt"` | 看 diff：Product Boundary 那条应从「禁止执行」变为「允许，由就绪标记决定」；全文检索不应再有「不得被 runner 当作可执行」（同一判据扫改动前版本命中 5 次，扫现版本命中 0 次） |
+| 就绪标记是**守护进程**的唯一准入、且语义被如实呈现 | ① 未就绪 Issue 的队列侧不领：`.iar/evidence/rv-8-targeted-admission.txt`（INFO + 退出 0）② 真实 daemon 整轮未启动任何 agent，以及已就绪 Issue 被**实际在跑的那台**领走且认领标记含其 host/PID：`.iar/evidence/rv-10-daemon-mutex-scope.txt` 与 `.iar/evidence/rv-9-first-claim-cas.txt`（真实线程见 <https://github.com/ZataZhang/keda/issues/218>） | 看两份日志：未就绪那份没人动它；已就绪那份的认领标记 host 是实际跑 daemon 的机器。**注意：人显式定向不受该标记约束**，这不是矛盾。**跨机为单机等效，限制见 §12** |
+| **`--direct-pr` 真的只剩机械步骤** | 阶段序列对照：`open ".iar/evidence/rv-7-direct-vs-fast-stages.txt"`（真实日志 `rv-7-run-218-direct.log` / `rv-7-run-220-fastmerge.log`）；两条真实 PR：<https://github.com/ZataZhang/keda/pull/221>（direct）· <https://github.com/ZataZhang/keda/pull/225>（fast）<br>被拒的三个真实调用：`open ".iar/evidence/rv-7-rejections.log"` | 打开对照：`--direct-pr` 那侧**不应**出现 pre-PR review、verifier、rv_reexec、验证命令这些段落；`--fast-merge` 那侧应仍有 pre-PR review（实测 direct 全档只有 1 个 agent 会话） |
 
 > 验证层级说明：以上均为**真实入口** —— Issue 与 PR 都是 GitHub 上真实存在的，路线图 diff 来自真实文件，跨机领取是真实守护进程的认领行为。都不是模拟或声明。
+>
+> **呈递物形态**：本条无截图（本次改动没有图形界面变化，证据面是真实 URL + 真实运行日志 + 文件 diff）；§9.1 原稿点名的 `.png` 已按实替换为上述 URL 与日志文件。逐条证据的实名映射见 `.iar/evidence/evidence.json`；本地一页呈递：`open ".iar/evidence/human-review-bundle.html"`（在 gitignored 的 `.iar/` 下，属**本地呈递物**；跨机可看的持久呈递面是各项 GitHub 直链）。
 >
 > 以下 `reviewer: verifier` 组**刻意不在上方呈递**，只在失败时需要人工介入：rv-2（工作区零 diff + 生成失败回退）、rv-4（证据门禁两态对照）、rv-5（既有 PRD 路径差分 + 守卫测试）、rv-6（跨机归还协议零改动）、rv-8（显式定向准入与报错）、rv-10（daemon mutex 共存）、rv-11（随包 skill 与 docs 行为同步）。
 
@@ -777,52 +779,83 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 
 **Architecture Acceptance**
 
-- [ ] 运行时**未新增任何功能分支**：无 PRD 的降级行为全部走既有实现（`agent_runner_feedback.py:452`、`agent_runner_validation.py:529`、`agent_runner_final_verification.py:76`、`agent_runner_pr_body_contract.py:145`）。
-- [ ] **就绪准入只改显式侧**：守护进程仍只领带 `agent/ready` 的 Issue（`agent_runner_orchestration_runtime.py:679` 的守护进程分支不变）；显式定向不再要求该标记。
-- [ ] `agent_runner_reclaim.py`（**归还**路径）与 `run_verifier_agent.py`（意图来源）均零改动；本次补的首次领取 CAS 落在 `agent_runner_workflow.py`，不重写归还路径。
-- [ ] **准入规则只改了两处且互相关联**：① 显式定向不再要求 `agent/ready`；② daemon mutex 收窄为只挡队列轮询（`runner.py:146-165`）。守护进程侧的自主挑选（仍只领带标记的 Issue）未被改动。
-- [ ] **daemon mutex 收窄未削弱同目标排他**：显式 run 与守护进程对同一 Issue 的冲突仍会被拒绝（由认领状态/CAS 判定）；`--all-ready` 仍被 mutex 拦。
-- [ ] `generated_content.py`（历史红线）未被改动。
-- [ ] 未另写第二条建 Issue 路径；`hooks/max_file_lines.allowlist.txt` 仍为空名单；无文件越过 1000 非空行。
-- [ ] 依赖方向合法（`just lint` 架构检查通过）。
+- [x] 运行时**未新增任何功能分支**：无 PRD 的降级行为全部走既有实现（`agent_runner_feedback.py:452`、`agent_runner_validation.py:529`、`agent_runner_final_verification.py:76`、`agent_runner_pr_body_contract.py:145`）。
+  ｜实测：`git diff main` 中四处降级点（feedback/validation/final_verification/pr_body_contract）只新增 `publish_stage` 派生判断，`git diff main -- …4 files | grep '^+.*if.*prd'` 命中 0；见 `rv-4-validation-toggle.txt`、`rv-7-direct-vs-fast-stages.txt`。
+- [x] **就绪准入只改显式侧**：守护进程仍只领带 `agent/ready` 的 Issue（`agent_runner_orchestration_runtime.py:679` 的守护进程分支不变）；显式定向不再要求该标记。
+  ｜实测：`agent_runner_orchestration_runtime.py` 的就绪过滤只在定向分支被替换（`config.labels.ready in …` → `has_non_ready_workflow_label(...)`），守护进程自主挑选分支无 diff；rv-8 负向侧确认无标记 Issue 队列不领。
+- [x] `agent_runner_reclaim.py`（**归还**路径）与 `run_verifier_agent.py`（意图来源）均零改动；本次补的首次领取 CAS 落在 `agent_runner_workflow.py`，不重写归还路径。
+  ｜实测：`git diff main -- agent_runner_reclaim.py run_verifier_agent.py generated_content.py` 输出为空；既有 reclaim 测试全绿（`rv-6-reclaim-intact.txt`）。
+- [x] **准入规则只改了两处且互相关联**：① 显式定向不再要求 `agent/ready`；② daemon mutex 收窄为只挡队列轮询（`runner.py:146-165`）。守护进程侧的自主挑选（仍只领带标记的 Issue）未被改动。
+  ｜实测：diff 面即 `runner.py` 的 `elif target_issue is None:` mutex 收窄分支 + 定向准入一处；见 `rv-10-daemon-mutex-scope.txt`（含移除锁判定的负控）与 `rv-8-targeted-admission.txt`。
+- [x] **daemon mutex 收窄未削弱同目标排他**：显式 run 与守护进程对同一 Issue 的冲突仍会被拒绝（由认领状态/CAS 判定）；`--all-ready` 仍被 mutex 拦。
+  ｜实测：daemon 持有 #222 时显式 run 同一 Issue → CONFLICT(5) 点名 PID；`--all-ready` → 5；对**另一个** Issue 显式 run 被接受（`rv-10-daemon-mutex-scope.txt`）。共存证据为 dry-run 级，已按窄口径披露。
+- [x] `generated_content.py`（历史红线）未被改动。
+  ｜实测：`git diff main -- …/generated_content.py` 为空。
+- [x] 未另写第二条建 Issue 路径；`hooks/max_file_lines.allowlist.txt` 仍为空名单；无文件越过 1000 非空行。
+  ｜实测：`hooks/max_file_lines.allowlist.txt` 去注释后 0 行；`check_max_file_lines.py` 对全部 41 个变更 .py 通过，唯一告警是既有 `tests/test_agent_runner_cli.py` 3771 非空行（main 已 3767，warn-only 非门禁）；新文件最大者 `create_issue_from_prd.py` 999 非空行（main 998，距上限 1 行，未越线）。
+- [x] 依赖方向合法（`just lint` 架构检查通过）。
+  ｜实测：`pre-commit run --files <41 个变更/新增 .py>` → 18 项 hooks 中 `Check architecture layer dependencies....Passed`，全部已执行项 Passed（`just lint` 对未暂存文件报 no files to check，故直接跑钩子本体）。
 
 **Behavior Acceptance**
 
-- [ ] **rv-1 PASS（本次首要）**：手工建的、无 PRD 锚点的 Issue 端到端跑出 Draft PR；并已跑负向对照（人为加锚点后必须失败）。证据：`tasks/evidence/P1-FEAT-20261006-122336-any-issue-execution/rv-1-any-issue-e2e.txt`
-- [ ] rv-2 PASS：`--from-prompt` 建出的 Issue 无 PRD 锚点、工作区零 diff、生成失败可回退。证据：`rv-2-from-prompt.txt`
-- [ ] rv-3 PASS：路线图全文与实现对齐，无残留矛盾表述。证据：`rv-3-roadmap-diff.txt`
-- [ ] rv-4 PASS：无验收要求确定不要求证据（含前端不要求截图）；显式要求时确定要求证据（含截图）。证据：`rv-4-validation-toggle.txt`
-- [ ] rv-5 PASS：既有 PRD 路径行为逐字不变；两者都不给退出码 2；新旗标已同步。证据：`rv-5-backward-compat.txt`
-- [ ] rv-6 PASS：跨机归还协议未被破坏（`agent_runner_reclaim.py` 无行为性 diff；既有 reclaim 测试全绿）。证据：`rv-6-reclaim-intact.txt`
-- [ ] **rv-8 PASS**：显式定向不打就绪标记也直接执行；守护进程对无标记 Issue 仍不领取；定向到被他人活跃认领 / blocked 无解除标记 / 不存在时分别给出 CONFLICT / 拒绝并提示 / NOT_FOUND，不静默返回 0。证据：`rv-8-targeted-admission.txt`
-- [ ] **rv-9 PASS（R3）**：真实双进程并发领取同一就绪 Issue 时只有一个进入执行、另一个主动退出、Issue 未被卡死；并已跑负控（退回裸 write 时断言必须失败）。证据：`rv-9-claim-cas.txt`
-- [ ] **rv-10 PASS**：daemon mutex 只挡队列轮询 —— 本机守护进程在跑时，对**另一个** Issue 的显式 `iar run --issue M` 不报错而直接执行；对守护进程**当前持有**的 Issue 显式 run 仍被拒（认领状态判定）；`--all-ready` 仍被 mutex 拦。证据：`rv-10-daemon-coexist.txt`
-- [ ] **rv-11 PASS**：随包 `iar-operator/SKILL.md` 与 `docs/guides/agent-runner.md` 已随行为反转同步 —— 不残留「iar run never runs while a daemon serves」类绝对表述；新旗标已进命令表与 `_ALLOWED_FLAGS`；`iar schema --json` 列出新旗标；并已跑负控（改回旧绝对表述则检索断言失败）。证据：`rv-11-skill-sync.txt`
-- [ ] **rv-7 PASS**：`--direct-pr` 下确无第二个 agent 调用、确不跑 runner 验证命令、仍创建 Draft PR；与 `--fast-merge` 的阶段序列可区分；PRD-backed Issue 被拒；两旗标互斥。证据：`rv-7-direct-pr.txt`
+- [x] **rv-1 PASS（本次首要）**：手工建的、无 PRD 锚点的 Issue 端到端跑出 Draft PR；并已跑负向对照（人为加锚点后必须失败）。证据：`.iar/evidence/rv-1-no-prd-issue-e2e-run.txt`（负控 `rv-1-negative-control.txt`）
+  ｜实测：#216（无锚点）→ Draft PR #217；负控 #219 加锚点后 PRD 交付门 1/5→2/5 且零交付物。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] rv-2 PASS：`--from-prompt` 建出的 Issue 无 PRD 锚点、工作区零 diff、生成失败可回退。证据：`rv-2-from-prompt.txt`
+  ｜实测：#220/#222/#224 正文锚点计数 0、创建零工作区写入、模板回退成立。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] rv-3 PASS：路线图全文与实现对齐，无残留矛盾表述。证据：`rv-3-roadmap-diff.txt`
+  ｜实测：现版本命中 0 / `git show main:ROADMAP.md` 命中 5。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] rv-4 PASS：无验收要求确定不要求证据（含前端不要求截图）；显式要求时确定要求证据（含截图）。证据：`rv-4-validation-toggle.txt`
+  ｜实测：默认态 False 且不要求证据（含前端）；`--require-validation` 态抛 ValidationEvidenceError 且前端要图片。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] rv-5 PASS：既有 PRD 路径行为逐字不变；两者都不给退出码 2；新旗标已同步。证据：`rv-5-backward-compat.txt`
+  ｜实测：`--fast-merge` 表面逐字相同、两者都不给仍 exit 2、守卫 11 项绿、schema 列三新旗标。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] rv-6 PASS：跨机归还协议未被破坏（`agent_runner_reclaim.py` 无行为性 diff；既有 reclaim 测试全绿）。证据：`rv-6-reclaim-intact.txt`
+  ｜实测：`git diff main -- …/agent_runner_reclaim.py` 为空；破坏归还路径 3 failed。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] **rv-8 PASS**：显式定向不打就绪标记也直接执行；守护进程对无标记 Issue 仍不领取；定向到被他人活跃认领 / blocked 无解除标记 / 不存在时分别给出 CONFLICT / 拒绝并提示 / NOT_FOUND，不静默返回 0。证据：`rv-8-targeted-admission.txt`
+  ｜实测：无标记显式定向准入、队列侧不领；blocked→5、不存在/已关闭→3、活跃认领→5 点名 PID。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] **rv-9 PASS（R3）**：真实双进程并发领取同一就绪 Issue 时只有一个进入执行、另一个主动退出、Issue 未被卡死；并已跑负控（退回裸 write 时断言必须失败）。证据：`.iar/evidence/rv-9-first-claim-cas.txt`
+  ｜实测：#218 真实双进程一赢一撤（iar:claim-withdrawn）；#226 直调生产仲裁 WIN/LOSE；裸 write 负控两个都 WIN。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] **rv-10 PASS**：daemon mutex 只挡队列轮询 —— 本机守护进程在跑时，对**另一个** Issue 的显式 `iar run --issue M` 不报错而直接执行；对守护进程**当前持有**的 Issue 显式 run 仍被拒（认领状态判定）；`--all-ready` 仍被 mutex 拦。证据：`.iar/evidence/rv-10-daemon-mutex-scope.txt`
+  ｜实测：daemon 存活时 --all-ready→5 点名 PID、显式 --issue 219 被接受、被持有的 #222→5 点名 PID；移除锁判定后 --all-ready 变 0。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] **rv-11 PASS**：随包 `iar-operator/SKILL.md` 与 `docs/guides/agent-runner.md` 已随行为反转同步 —— 不残留「iar run never runs while a daemon serves」类绝对表述；新旗标已进命令表与 `_ALLOWED_FLAGS`；`iar schema --json` 列出新旗标；并已跑负控（改回旧绝对表述则检索断言失败）。证据：`.iar/evidence/rv-11-skill-docs-sync.txt`
+  ｜实测：旧绝对表述命中 0（旧文本会被同一判据拒）、三旗标在 skill/docs/schema 三处齐备。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
+- [x] **rv-7 PASS**：`--direct-pr` 下确无第二个 agent 调用、确不跑 runner 验证命令、仍创建 Draft PR；与 `--fast-merge` 的阶段序列可区分；PRD-backed Issue 被拒；两旗标互斥。证据：`.iar/evidence/rv-7-direct-vs-fast-stages.txt`
+  ｜实测：direct=#218→PR #221，fast=#220→PR #225；三处 usage error 均为 exit 2。 负控与范围收窄见 `.iar/evidence/evidence.json` 对应块。
 
 **Documentation Acceptance**
 
-- [ ] `ROADMAP.md` 的 Product Boundary / Target Workflow / M1 / M8 / Not Completed / Near-Term / Acceptance Checklist / Open Questions 已按 §7 Change Impact Tree 逐节检查并保持一致；M8 改为按需能力而非强制前置。
-- [ ] `docs/guides/agent-runner.md` 记录「无 PRD 的 Issue 可执行」的语义与 `--from-prompt` 用法，并**准确描述就绪标记**（它是「要不要现在进队列」，不是机器定向；未就绪时任何守护进程都不会领）。
-- [ ] **随包 `iar-operator/SKILL.md` 已随行为反转同步**：命令表新增旗标；**改写**（非追加）「`iar run` never runs while a daemon serves」类绝对表述为「只对队列轮询成立、显式单目标与守护进程共存」；`agent/ready` 行改为「只约束守护进程」；exit code 5 说明补入「显式 target 不可领取」。**判据是「不残留相反表述」，不是「加了新句子」。**
-- [ ] `tests/test_iar_operator_skill.py` 的 `_ALLOWED_FLAGS` 登记全部新旗标，且含有「SKILL.md 不得残留旧绝对表述」的断言。
-- [ ] `uv run mkdocs build --strict` 通过。
+- [x] `ROADMAP.md` 的 Product Boundary / Target Workflow / M1 / M8 / Not Completed / Near-Term / Acceptance Checklist / Open Questions 已按 §7 Change Impact Tree 逐节检查并保持一致；M8 改为按需能力而非强制前置。
+  ｜实测：逐节核对并改写；残留旧表述检索命中 0，`git show main:ROADMAP.md` 同一判据命中 5（`rv-3-roadmap-diff.txt`）。
+- [x] `docs/guides/agent-runner.md` 记录「无 PRD 的 Issue 可执行」的语义与 `--from-prompt` 用法，并**准确描述就绪标记**（它是「要不要现在进队列」，不是机器定向；未就绪时任何守护进程都不会领）。
+  ｜实测：第 11 行 `--from-prompt` 语义、1177 行「`agent/ready` 只约束守护进程的自主挑选」、1218-1230 行 `--direct-pr` 边界与互斥；均写明「未就绪时任何守护进程都不领」「不存在指派到某台机器的机制」。
+- [x] **随包 `iar-operator/SKILL.md` 已随行为反转同步**：命令表新增旗标；**改写**（非追加）「`iar run` never runs while a daemon serves」类绝对表述为「只对队列轮询成立、显式单目标与守护进程共存」；`agent/ready` 行改为「只约束守护进程」；exit code 5 说明补入「显式 target 不可领取」。**判据是「不残留相反表述」，不是「加了新句子」。**
+  ｜实测：第 16/23/24/25/50/76 行改写完毕——旧绝对表述 `never runs while a daemon serves the same repository` 命中 0，队列轮询与显式单目标共存表述在位，exit 5 说明含「显式 target 不可领取」（`rv-11-skill-docs-sync.txt`）。
+- [x] `tests/test_iar_operator_skill.py` 的 `_ALLOWED_FLAGS` 登记全部新旗标，且含有「SKILL.md 不得残留旧绝对表述」的断言。
+  ｜实测：`--from-prompt` / `--direct-pr` / `--require-validation` 均已登记；新增断言 `test_packaged_skill_drops_retired_absolute_claims()`（第 252 行）在改回旧表述时必须失败——已跑该负控。
+- [x] `uv run mkdocs build --strict` 通过。
+  ｜实测：`uv run mkdocs build --strict` EXIT=0。
 
 **Validation Acceptance**
 
-- [ ] **rv-1 是本次的核心证据**：它是「任意 Issue 可执行」这条能力的首次真实验证（此前仅有单元测试与代码阅读支撑，账本中 29 条空 `prd_path` 记录全部来自测试夹具）。
-- [ ] 真实入口验证已执行：rv-1 / rv-4 走真实 CLI + 真实 GitHub；rv-6 走真实 CLI 观察。
-- [ ] 跨机行为已按**准确语义**验证：① 未就绪的 Issue 在多个守护进程同时运行时**没有任何一方领取它**；② 已就绪的 Issue 由实际运行守护进程的那台机器领走且认领标记 host 与之相符。若「另一台机器领走」只能在单机上用不同 host 身份模拟，必须如实披露限制。
-- [ ] `CI=true just test all` 通过；`just lint` 通过。
-- [ ] 负向对照已跑：rv-1 / rv-2 / rv-3 / rv-4 / rv-6 各自的负向对照均已实际执行并记录（不是只声明做过）。
-- [ ] 证据目录下 `human-review-checklist.md`（含 HTML 伴生页，若含截图）已生成。
+- [x] **rv-1 是本次的核心证据**：它是「任意 Issue 可执行」这条能力的首次真实验证（此前仅有单元测试与代码阅读支撑，账本中 29 条空 `prd_path` 记录全部来自测试夹具）。
+- [x] 真实入口验证已执行：rv-1 / rv-4 走真实 CLI + 真实 GitHub；rv-6 走真实 CLI 观察。
+- [x] 跨机行为已按**准确语义**验证：① 未就绪的 Issue 在多个守护进程同时运行时**没有任何一方领取它**；② 已就绪的 Issue 由实际运行守护进程的那台机器领走且认领标记 host 与之相符。若「另一台机器领走」只能在单机上用不同 host 身份模拟，必须如实披露限制。
+  ｜实测：① 未就绪 Issue 在守护进程轮询下不被领取（rv-8 队列侧，两个轮询者都跳过）；② 认领标记的 host 由**实际执行领取的那台机器上的进程自己写入**：`rv-9-first-claim-cas.txt` 里赢家的 `iar:claim host="ZataZhangdeMacBook-Air.local" pid="2759"` 与真跑它的进程一致，败家的撤销评论点名同一 host/PID。**限制披露（如实）**：两个进程跑在**同一台机器**上，hostname 相同，因此「另一台机器领走」没有被真实双机演练过；本条证明的是 host 归属机制（谁领谁署名）与先到先得排他，跨机差异只是部署事实。该限制同样写进 `evidence.json` 的 rv-9 块与 §12 风险。
+- [x] `CI=true just test all` 通过；`just lint` 通过。
+  ｜实测：`3223 passed, 1 skipped in 174.88s`，EXIT=0（首轮因 `| tail` 吞掉退出码暴露 `check-test-flag` 未更新，改为落盘取 `$?` 后复跑至绿）；lint 侧以 `pre-commit run --files …` 全 Passed 呈现。
+- [x] 负向对照已跑：rv-1 / rv-2 / rv-3 / rv-4 / rv-6 各自的负向对照均已实际执行并记录（不是只声明做过）。
+- [x] 证据目录下 `human-review-checklist.md`（含 HTML 伴生页，若含截图）已生成。
+  ｜实测：`tasks/evidence/P1-FEAT-20261006-122336-any-issue-execution/human-review-checklist.md` 已生成；无截图（本次为 CLI/runner 行为，无新增 UI 面），呈递改为本机一页 `open ".iar/evidence/human-review-bundle.html"` + 真实 GitHub 链接，已在 §9.1 与该文件内披露。
 
 **Delivery Readiness**
 
-- [ ] 交付 PR 正文按 `prd-evidence-and-merge-acceptance` 契约写：唯一链接本 PRD、明确声明「合并即验收」的含义、投影 §2 的人审决策、投影 §9.1 的人读呈递、给出 verified head 与 git tree。
-- [ ] PR 证据评论包含 §9.1 呈递内容、verifier 结论、必跑门禁汇总、证据链接与可复现命令。
-- [ ] 原始证据（截图等非 .md 产物）不进入代码 diff；按需通过证据分支或 PR 评论发布。
-- [ ] 完成消息原样携带 §9.1 的呈递内容（截图相对路径 + `open` 命令 + 打开 URL），而不是只说「证据已归档」。
+- [~] 交付 PR 正文按 `prd-evidence-and-merge-acceptance` 契约写：唯一链接本 PRD、明确声明「合并即验收」的含义、投影 §2 的人审决策、投影 §9.1 的人读呈递、给出 verified head 与 git tree。
+  ｜未达成部分：PR 正文/证据评论由 runner（执行侧之外的发布环节）创建，非本 worktree 产出；本次未推未开 PR（执行规则禁止）。契约要求已整理供 runner 使用：唯一链接本 PRD、声明「合并即验收」、投影 §2 决策与 §9.1 呈递、verified head 与 git tree（`git diff HEAD -- src tests ROADMAP.md docs config.toml | shasum -a 256` = `ec409c84…`，未跟踪摘要 `927e8e3f…`，见 verification-plan 冻结凭据节）。
+- [~] PR 证据评论包含 §9.1 呈递内容、verifier 结论、必跑门禁汇总、证据链接与可复现命令。
+  ｜同上：归属 runner。可供贴入的材料已在 `tasks/evidence/P1-FEAT-…/evidence-report.md`（命令、真实转录、负控、可复现命令）与 `verifier-report.md`（两轮结论）。
+- [x] 原始证据（截图等非 .md 产物）不进入代码 diff；按需通过证据分支或 PR 评论发布。
+  ｜实测：`.gitignore:90` 忽略 `.iar/`；`tasks/evidence/**` 仅 `!*.md` 放行——`git status` 中证据目录只出现 4 个 .md，原始日志/HTML 留在本地。
+- [x] 完成消息原样携带 §9.1 的呈递内容（截图相对路径 + `open` 命令 + 打开 URL），而不是只说「证据已归档」。
+  ｜完成消息将原样给出：本地一页呈递 `open ".iar/evidence/human-review-bundle.html"`、真实 URL（#216→PR #217、#218→PR #221、#220→PR #225、#222/#224、#219/#226）与证据目录路径，而非只说「证据已归档」。
 
 ## 10. Functional Requirements
 
@@ -911,4 +944,46 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 | D-18 | 首次领取的原子性 | **补真 CAS**（read-check-write-reread + 认领评论 marker 作仲裁见证） | 沿用裸 write，只把它写成「尽力而为」的已知限制 | 显式定向不再要求标记后，领取是**唯一**防双跑机制；裸 write 下两个并发领取者可双双得逞 → 双跑同一 Issue。这是既有缺陷，不该把它升格为唯一防线还留着 |
 | D-19 | 是否提供机器定向 | 不提供 | host label / 机器预留标记 | 与「任一台都能接手」的可用性设计相悖；使用者的真实需求（别被抢）已由 D-17 更简单地满足 |
 | D-20 | 本机守护进程在跑时能否手动跑 Issue | **能**：daemon mutex 收窄为只挡队列轮询，显式单目标与守护进程共存 | 维持现状（任何 `iar run` 都要求先停守护进程或 `--takeover`） | 锁的唯一声明用途是防止「double-claim the ready queue」，而显式单目标不轮询队列；同仓多 Issue 并行本就是 daemon 一等能力（线程池），工作树按 Issue 隔离。维持现状会让 D-17 的「零竞争路径」实际被 mutex 堵死。同目标排他改由 CAS 承担，故本项与 D-18 同批约束 |
-| D-20 | 显式定向到不可领取状态的行为 | 报明确错误（CONFLICT / NOT_FOUND），不静默返回 0 | 保持现状静默返回 0 | 调用者明确点名了一个 Issue 却什么都没发生、还返回成功，会让人以为跑过了（本次评审中被实际指出）；守护进程/`--all-ready` 的空队列仍保持静默（那是常态） |
+| D-21 | 显式定向到不可领取状态的行为 | 报明确错误（CONFLICT / NOT_FOUND），不静默返回 0 | 保持现状静默返回 0 | 调用者明确点名了一个 Issue 却什么都没发生、还返回成功，会让人以为跑过了（本次评审中被实际指出）；守护进程/`--all-ready` 的空队列仍保持静默（那是常态） |
+
+## 14. Change Log
+
+### --direct-pr 一并跳过 post-PR supervisor
+- Type: 实现细化（scope 内的门禁集合补齐，未改变产品承诺）
+- Before: PRD 列举 `--direct-pr` 的跳过点为「pre-PR review、`runner.verification_commands`、`pre_commit_verification_command`、Phase 4.5 rv_reexec/verifier、最终 RV/verifier 复核、证据门禁」，未提及 post-PR supervisor（`post_pr_supervisor.enabled`）。
+- After: 直发档同时跳过 post-PR supervisor，Draft PR 直接打 `agent/review`；判定收敛到 `agent_runner_publication.py::_should_run_post_pr_supervisor`。
+- Reason: FR-14 的规范性句子是「执行 agent 结束后**只保留机械步骤**，中间不再有任何别的 agent 调用」。本机 `.iar.toml` 里 `post_pr_supervisor.enabled = true`，不跳过它会在 PR 建好之后再起一个 agent，与「只留机械步骤」矛盾；而跳过列点里漏它是列举不全，不是取舍。
+- Impact: 直发档的 agent 调用数从「1（执行 agent）」保持不变；`--fast-merge` 与默认档行为逐项不变（该函数在 NORMAL/FAST 下仍返回 `config.post_pr_supervisor.enabled`）。门禁转移叙事不变：PR 上的 CI 是唯一点。
+- Review: 待人工验收（见 §9.2 rv-7 证据；直发档与快速档的阶段序列对照在同一条证据里）。
+
+### 决策日志 D-20 重复编号改为 D-21
+- Type: doc
+- Before: 表格末尾两行同用 `D-20`（daemon mutex 收窄与不可领取状态报错）。
+- After: 后者改为 `D-21`。
+- Reason: 编号重复会让「引用 D-20」产生歧义。
+- Impact: 仅标识符，无语义变更。
+- Review: 无需人工确认（排版修正）。
+
+### --require-validation 归属 issue create，而非 run
+- Type: doc（变更影响树与规范正文对齐，未改变产品承诺）
+- Before: 第六步正文写「显式旗标（形如 `--require-validation`）要求 agent 在正文里生成一段验收要求」，属 `--from-prompt` 建 Issue 路径；但变更影响树 CLI 同步小节把 `--require-validation` 与 `--direct-pr` 一起标在 `（run）` 下。
+- After: 该旗标实现在 `iar issue create` 上，与 `--from-prompt` 同时给出时生效；变更影响树的旗标行改为「--from-prompt、--require-validation（issue create）；--direct-pr（run）」。
+- Reason: 验收段必须在**建 Issue 时**进入正文，因为运行时门禁读的是 Issue 正文（`validation_required(issue_body, config)`）；`iar run` 阶段再打开门禁只能靠改写已发布的 Issue 或新增运行期分支，两者都是本次明确排除的（「本次不为这些门禁写任何新分支」）。
+- Impact: SKILL.md 与 `_ALLOWED_FLAGS` 的归属随之确定：`("issue","create")` 收 `--from-prompt`/`--require-validation`，`("run",)` 收 `--direct-pr`。rv-11 的表面清单不变（三个旗标都要出现），只是挂在哪个子命令下。
+- Review: 待人工验收（旗标语义见 §9.2 rv-2/rv-4 证据）。
+
+### PRD 路径下给出 --require-validation 报用法错误
+- Type: 实现细化（补齐 PRD 未列举的一侧矛盾判定）
+- Before: PRD 只规定「`--publish-prd` 与 `--force` 在 `--from-prompt` 下显式传入即报 usage error」，未规定反向矛盾（PRD 路径 + `--require-validation`）怎么处理。
+- After: PRD 路径（位置参数）下显式给出 `--require-validation` 同样报 usage error（退出码 2），提示 PRD 自带验收清单。
+- Reason: PRD-backed Issue 的验收清单由 PRD 的 Realistic Validation 小节物化，`--require-validation` 在那条路径上没有可作用的输入；静默忽略会让人以为额外加了一层要求。与 `--publish-prd`/`--force` 同一处理原则：矛盾旗标报错而非忽略。
+- Impact: 只增加一条拒绝分支，既有 PRD 路径的正常调用逐字不变；`--require-validation` 的 store_true 默认 False，因此「没提」与「显式给出」可区分。
+- Review: 无需人工确认（未削弱任何承诺；新增的拒绝面在 rv-2 证据里有真实 CLI 调用记录）。
+
+### 默认态剥掉 agent 自写的验收小节
+- Type: 实现细化（把「默认不生成验收要求」做成确定性判据）
+- Before: PRD 规定默认「不生成验收要求」、`--require-validation` 时「让证据门禁确定开启」，未规定 agent 无视提示词自己在正文里写了 `## Realistic Validation` 时怎么办。
+- After: 两种输入方式下，验收小节的存在与否由旗标决定，不由 agent 决定：默认路径先把正文里已有的该小节整段剥离（`create_issue_from_prompt.strip_validation_section`），`--require-validation` 时先取 agent 写的条目、再由代码统一物化小节（agent 没写条目时用需求原文兜一条）。
+- Reason: 门禁开关是 `validation_required(issue_body, config)` 这个对正文的纯函数结果；若放任 agent 的输出决定，同一句 `--from-prompt` 可能这次入门禁、那次不入门禁，FR-9 的「确定开启/默认关闭」就只是概率性的。
+- Impact: 默认路径产物可能比 agent 原始输出少一个小节（负控制见 rv-2：把剥离方向写反会让默认态测试失败）；PRD 路径不受影响，它的验收段来自 PRD 本身。
+- Review: 待人工验收（见 §9.2 rv-2 expected 断言 `validation_required` 默认 False）。

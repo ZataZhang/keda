@@ -33,13 +33,13 @@ from backend.api.cli_typer_app import (
 def _run_issue_create_command(
     ctx: typer.Context,
     *,
-    prd_paths: list[str],
+    prd_paths: list[str] | None,
     issue_type: IssueTypeChoice,
     title: str | None,
     ready: bool,
     agent: IssueAgentChoice,
-    publish_prd: bool,
-    force: bool,
+    publish_prd: bool | None,
+    force: bool | None,
     repo: str | None,
     repo_id: str | None,
     config: str | None,
@@ -49,6 +49,8 @@ def _run_issue_create_command(
     reasoning_effort: str | None = None,
     output: str | None = None,
     as_json: bool = False,
+    from_prompt: str | None = None,
+    require_validation: bool = False,
 ) -> int:
     """Run the shared PRD-to-Issue command."""
     return _run_typer_repository_command(
@@ -57,7 +59,9 @@ def _run_issue_create_command(
         repo=repo,
         repo_id=repo_id,
         config=config,
-        prd_paths=prd_paths,
+        prd_paths=prd_paths or [],
+        from_prompt=from_prompt,
+        require_validation=require_validation,
         type=_enum_value(issue_type),
         title=title,
         preset=preset,
@@ -77,9 +81,29 @@ def _run_issue_create_command(
 def issue_create_command(
     ctx: typer.Context,
     prd_paths: Annotated[
-        list[str],
+        list[str] | None,
         typer.Argument(help="One or more PRD Markdown files or directories containing PRD files."),
-    ],
+    ] = None,
+    from_prompt: Annotated[
+        str | None,
+        typer.Option(
+            "--from-prompt",
+            help=(
+                "Create one Issue directly from a natural-language requirement, with "
+                "no PRD file. Mutually exclusive with the PRD path arguments."
+            ),
+        ),
+    ] = None,
+    require_validation: Annotated[
+        bool,
+        typer.Option(
+            "--require-validation",
+            help=(
+                "With --from-prompt: put an acceptance checklist in the Issue body so "
+                "the runner's evidence gate is on."
+            ),
+        ),
+    ] = False,
     issue_type: Annotated[
         IssueTypeChoice,
         typer.Option("--type", help="Issue type label."),
@@ -96,13 +120,13 @@ def issue_create_command(
         typer.Option("--agent", help="Optional agent routing label."),
     ] = IssueAgentChoice.auto,
     publish_prd: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--publish-prd/--no-publish-prd",
             help="Publish the PRD before ready (default: on).",
         ),
-    ] = True,
-    force: Annotated[bool, typer.Option("--force", help="Bypass PRD checks.")] = False,
+    ] = None,
+    force: Annotated[bool | None, typer.Option("--force", help="Bypass PRD checks.")] = None,
     depends_on: Annotated[
         list[int] | None,
         typer.Option("--depends-on", help="Upstream Issue number (repeatable)."),
@@ -116,10 +140,12 @@ def issue_create_command(
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
 ) -> int:
-    """Create GitHub Issues from one or more PRD files."""
+    """Create GitHub Issues from PRD files or from a one-sentence requirement."""
     return _run_issue_create_command(
         ctx,
         prd_paths=prd_paths,
+        from_prompt=from_prompt,
+        require_validation=require_validation,
         issue_type=issue_type,
         title=title,
         ready=ready,

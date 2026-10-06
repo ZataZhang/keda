@@ -105,9 +105,11 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         # 目标必填契约（run-daemon-autopilot-control-surface）：--issue / PRD
         # 路径 / --all-ready 三选一；--takeover 显式接管（--yes 免确认）。
         # --fast-merge 为一次性快速通道旁路（issue-207），单次目标专用。
+        # --direct-pr 为无 PRD 锚点 Issue 的直发档（issue-215），同样单次目标专用。
         "--issue",
         "--all-ready",
         "--fast-merge",
+        "--direct-pr",
         "--takeover",
         "--yes",
     },
@@ -124,7 +126,9 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     },
     ("logs",): {"--repo", "--repo-id", "--issue", "--follow", "--lines", "-n", "-f", "--kind"},
     ("issue", "list"): {"--repo", "--repo-id", "--state", "--label", "--limit"},
-    ("issue", "create"): set(),
+    # issue-215：--from-prompt 与 PRD 路径互斥，--require-validation 是验收小节的
+    # 显式 opt-in（默认正文不带 PRD 锚点也不带验收清单）。
+    ("issue", "create"): {"--from-prompt", "--require-validation"},
     ("init",): {"--dry-run", "--force"},
     ("registry", "start"): set(),
     ("registry", "stop"): {"--repo-id", "--all"},
@@ -232,6 +236,38 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
         assert subcommand in real_flags_by_path, f"schema 中不存在命令 {subcommand}"
         unknown = whitelist - real_flags_by_path[subcommand]
         assert not unknown, f"{subcommand} 白名单旗标在真实命令树中不存在：{unknown}"
+
+
+def test_packaged_skill_documents_direct_pr_and_from_prompt_entries() -> None:
+    """任意 Issue 可执行（issue-215）新增的两个入口必须写进随包 Skill。"""
+    text = _skill_text()
+    # 直发档：无 PRD 锚点才可用，且跳过审核 Agent 与仓库验证命令。
+    assert "`iar run --issue <N> --direct-pr`" in text
+    assert "iar:direct-pr" in text
+    # 从一句话需求开 Issue：正文默认不带 PRD 锚点，验收小节是显式 opt-in。
+    assert "`iar issue create --from-prompt" in text
+    assert "--require-validation" in text
+
+
+def test_packaged_skill_drops_retired_absolute_claims() -> None:
+    """旧绝对说法必须消失，否则 agent 会继续按「run 与 daemon 互斥」拒绝合法调用。
+
+    断言成对写：先证明废止的措辞不在，再证明替代它的契约确实在，防止只删不加。
+    """
+    text = _skill_text()
+    for retired in (
+        "never runs while a daemon serves the same repository",
+        "so `iar run` refuses while it is alive",
+        "Only a live daemon blocks `run`",
+    ):
+        assert retired not in text, f"SKILL.md 仍保留已废止的绝对说法：{retired}"
+    # 替代表述①：互斥只挡队列轮询，显式单目标可与 daemon 共存。
+    assert "The daemon mutex covers queue polling only" in text
+    assert "an explicitly targeted `iar run --issue <N>` coexists with a live daemon" in text
+    # 替代表述②：显式定向不再要求就绪标签，但认领状态必须响亮回报。
+    assert "An explicit target does not need `agent/ready`" in text
+    # 替代表述③：首次领取由 marker 选举裁决，落败方不改标签。
+    assert "iar:claim-withdrawn" in text
 
 
 def test_packaged_skill_separates_read_only_from_execution() -> None:

@@ -43,6 +43,7 @@ from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_RUN,
     PROMPT_DELIVERY_STDIN,
 )
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
     build_agent_invocation,
@@ -1015,7 +1016,7 @@ def run_agent_until_committed(
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
     model_selection: ModelSelection | None = None,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> AgentCommitResult:
     """运行 Agent recovery 状态机并返回最终提交结果。"""
     from backend.core.use_cases.run_agent_execution_loop import (
@@ -1044,7 +1045,7 @@ def run_agent_until_committed(
                 agent_name=selected_agent,
                 issue_number=issue.number,
             ),
-            fast_merge=fast_merge,
+            publish_stage=publish_stage,
         )
     )
 

@@ -722,8 +722,9 @@ class AgentRunnerDeliberationSettings(BaseModel):
 class AgentRunnerGeneratedContentTargetSettings(BaseModel):
     """生成内容目标配置，支持 TOML 字符串列表语法。
 
-    用于 ``issue_from_prd``、``draft_pr``、``prd_from_issue`` 三类生成目标，
-    分别控制 Issue、PR、PRD 的标题/正文生成方式。
+    用于 ``issue_from_prd``、``issue_from_prompt``、``draft_pr``、
+    ``prd_from_issue`` 四类生成目标，
+    分别控制 Issue、无 PRD Issue、PR、PRD 的标题/正文生成方式。
     """
 
     enabled: bool = True
@@ -759,7 +760,7 @@ class AgentRunnerGeneratedContentTargetSettings(BaseModel):
 class AgentRunnerGeneratedContentSettings(BaseModel):
     """GitHub Issue 与 PR 的生成内容全局配置。
 
-    聚合三类生成目标（Issue、PR、PRD）的共享参数，如是否启用、
+    聚合各类生成目标（PRD→Issue、一句话→Issue、PR、PRD）的共享参数，如是否启用、
     失败回退策略、最大输入长度以及默认 agent。
     """
 
@@ -767,10 +768,15 @@ class AgentRunnerGeneratedContentSettings(BaseModel):
     fallback: str = "template"
     max_input_chars: int = 20000
     default_agent: str = "auto"
-    # 三个 target 默认都是 agent 模式；``output`` 必须与各自提示词的回复格式一致：
+    # 各 target 默认都是 agent 模式；``output`` 必须与各自提示词的回复格式一致：
     # issue_from_prd 的提示词回 JSON（沿用类默认），draft_pr / prd_from_issue 回 Markdown。
     # 与 core 的 ``GeneratedContentConfig`` 默认值保持一致（有测试守卫）。
     issue_from_prd: AgentRunnerGeneratedContentTargetSettings = Field(
+        default_factory=AgentRunnerGeneratedContentTargetSettings
+    )
+    # 一句话需求 → Issue 正文（``iar issue create --from-prompt``）。产物不含 PRD 锚点，
+    # 因此提示词与回退模板都不能写出 ``- PRD path:``。
+    issue_from_prompt: AgentRunnerGeneratedContentTargetSettings = Field(
         default_factory=AgentRunnerGeneratedContentTargetSettings
     )
     draft_pr: AgentRunnerGeneratedContentTargetSettings = Field(

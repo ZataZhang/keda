@@ -68,6 +68,19 @@ def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
             "Rejected for stack-dependency Issues; requires a targeted run."
         ),
     )
+    run_parser.add_argument(
+        "--direct-pr",
+        action="store_true",
+        default=False,
+        help=(
+            "One-shot direct tier for this run: after the execution agent commits, "
+            "only the mechanical steps remain (runner-controlled commit -> push -> "
+            "Draft PR). Skips the pre-PR review agent, the runner verification "
+            "commands and the validation gates; CI on the Draft PR becomes the gate. "
+            "Only for Issues without a PRD anchor; mutually exclusive with "
+            "--fast-merge; requires a targeted run."
+        ),
+    )
     run_parser.add_argument("--agent", choices=agent_choices_with(prefix=("auto",)), default="auto")
     run_parser.add_argument("--max-issues", type=int)
     add_model_preset_options(run_parser)

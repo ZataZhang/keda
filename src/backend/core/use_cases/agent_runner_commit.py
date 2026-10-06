@@ -19,6 +19,7 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
 )
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
     ensure_verification_passed,
@@ -297,6 +298,7 @@ def commit_requested_changes(
     process_runner: IProcessRunner,
     *,
     expected_branch: str,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> list[CommandResult]:
     """Commit agent changes through the runner's restricted commit proxy.
 
@@ -313,6 +315,8 @@ def commit_requested_changes(
         config: Agent Runner 配置。
         process_runner: 命令执行器。
         expected_branch: 期望的分支名。
+        publish_stage: 发布档位；仅 :attr:`PublishStage.DIRECT` 会跳过第 4 步的
+            staged 验证与 pre-commit 命令（安全门与受控提交本身照常执行），返回空结果。
 
     Returns:
         staging 后验证命令的结果列表。
@@ -337,6 +341,16 @@ def commit_requested_changes(
 
     validate_safe_changes(worktree_path, config, process_runner)
     process_runner.run(["git", "add", "-A"], cwd=worktree_path)
+    if publish_stage.skips_review_and_repo_verification:
+        # 直发档：commit proxy 仍是唯一提交路径，分支/禁改路径/干净度检查全部照常，
+        # 只是不再跑仓库配置的验证命令与 pre-commit 命令（门禁转移到 PR 上的 CI）。
+        _logger.info(
+            "Direct-pr (origin: --direct-pr run flag): skipping staged verification and "
+            "the pre-commit command for Issue #%d; the commit itself is still runner-made.",
+            issue.number,
+        )
+        _commit_with_autofix_recovery(worktree_path, commit_message, config, process_runner)
+        return []
     # 在 git commit 前再次运行验证，确保 staged 内容仍通过门禁。验证命令里常有
     # just test / just lint 这类会间接触发 pre-commit autofix 钩子的配方，因此与
     # 下面的 pre-commit 门禁一样先做一次重新 stage 重试；真实失败仍上抛，交由

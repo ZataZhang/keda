@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -308,6 +309,20 @@ def _issue_summary(number: int, labels: tuple[str, ...]) -> IssueSummary:
     )
 
 
+class _QueueGitHubClient(_TargetedGitHubClient):
+    """队列轮询模式（无 target）用的 Fake：ready 列表返回固定候选。"""
+
+    def __init__(self, issues: tuple[IssueSummary, ...]) -> None:
+        super().__init__(issues[0])
+        self._issues = issues
+
+    def list_ready_issues(self, ready_label: str, limit: int) -> list[IssueSummary]:
+        self.calls.append(
+            {"method": "list_ready_issues", "ready_label": ready_label, "limit": limit}
+        )
+        return list(self._issues)
+
+
 def test_run_once_targeted_requires_ready_label(tmp_path: Path) -> None:
     """定向 Issue 不带 ready 标签时本轮无候选可处理。"""
     from backend.core.use_cases.agent_runner_orchestrate import run_once
@@ -328,6 +343,59 @@ def test_run_once_targeted_requires_ready_label(tmp_path: Path) -> None:
     # 走了定向路径：get_issue 被调用，且未触发全量 ready 扫描。
     assert {"method": "get_issue", "issue_number": 7} in client.calls
     assert not [call for call in client.calls if call["method"] == "list_ready_issues"]
+
+
+def test_run_once_targeted_dry_run_does_not_crash_on_missing_discovery_limit(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """定向 + --dry-run 必须能预览：发现宽度变量在定向分支里也要有绑定。
+
+    回归：DRY RUN 汇总日志引用 ``ready_discovery_limit``，而它原先只在队列轮询
+    分支赋值，导致 ``iar run --issue N --dry-run``（文档推荐的预览入口）在目标
+    被准入时直接崩溃。
+    """
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    config = AppConfig()
+    client = _TargetedGitHubClient(_issue_summary(7, ()))
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=tmp_path,
+            config=config,
+            dry_run=True,
+            agent="auto",
+            max_issues=1,
+            github_client=client,
+            process_runner=MagicMock(),
+            target_issue=7,
+        )
+    assert exit_code == 0
+    preview_lines = [r.message for r in caplog.records if "DRY RUN" in r.getMessage()]
+    assert any("Issue #7" in line for line in preview_lines)
+    assert not any("candidates returned by GitHub" in line for line in preview_lines)
+
+
+def test_run_once_queue_mode_dry_run_reports_discovery_limit(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """守护进程侧（无 target）的 DRY RUN 措辞保持不变。"""
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    config = AppConfig()
+    client = _QueueGitHubClient((_issue_summary(8, (config.labels.ready,)),))
+    with caplog.at_level(logging.INFO):
+        run_once(
+            repo_path=tmp_path,
+            config=config,
+            dry_run=True,
+            agent="auto",
+            max_issues=1,
+            github_client=client,
+            process_runner=MagicMock(),
+        )
+    assert any("candidates returned by GitHub" in r.getMessage() for r in caplog.records)
 
 
 def test_run_once_targeted_passes_target_to_request(tmp_path: Path) -> None:

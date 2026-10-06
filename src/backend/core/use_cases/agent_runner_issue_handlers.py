@@ -17,10 +17,7 @@
 from __future__ import annotations
 
 import logging
-import os
-import socket
 from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
@@ -36,11 +33,13 @@ from backend.core.shared.models.agent_runner import (
     ReviewEventMarker,
     TokenUsage,
 )
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_blocked_claim import (
     _acquire_blocked_claim_lock,
     _release_blocked_claim_lock,
     worktree_claim_lock_path,
 )
+from backend.core.use_cases.agent_runner_claim_arbitration import arbitrate_first_claim
 from backend.core.use_cases.agent_runner_events import (
     find_latest_failure_context_comment,
     has_failure_context_marker,
@@ -59,7 +58,6 @@ from backend.core.use_cases.agent_runner_publication import (
     _reuse_existing_local_commit,
 )
 from backend.core.use_cases.agent_runner_publish import publish_changes
-from backend.core.use_cases.agent_runner_reclaim import format_claim_marker
 from backend.core.use_cases.agent_runner_rework import build_missing_worktree_comment
 from backend.core.use_cases.agent_runner_supervisor import _run_supervisor_with_repair_loop
 from backend.core.use_cases.agent_runner_validation import (
@@ -161,7 +159,7 @@ def _process_blocked_resolution(
     marker: ReviewEventMarker,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> None:
     """处理带 blocked_resolution marker 的 blocked Issue。
 
@@ -176,8 +174,8 @@ def _process_blocked_resolution(
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
         marker: blocked_resolution_requested 事件标记
-        fast_merge: 快速通道（``iar run --fast-merge``）：本次运行跳过 Phase 4.5
-            验证门禁并在 PR 正文打未验证标注。
+        publish_stage: 发布档位：非 ``NORMAL`` 时跳过 Phase 4.5 验证门禁并在 PR
+            正文打未验证标注；``DIRECT`` 再跳过审核 agent 与仓内验证命令。
     """
     from backend.core.use_cases.agent_runner_publish import validate_safe_changes
     from backend.core.use_cases.run_agent_once import (
@@ -240,7 +238,7 @@ def _process_blocked_resolution(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=implementation_model_selection,
-            fast_merge=fast_merge,
+            publish_stage=publish_stage,
         )
 
         # 完成发布流程
@@ -254,7 +252,7 @@ def _process_blocked_resolution(
             expected_branch=current_branch,
             commit_result=commit_result,
             content_generator=content_generator,
-            fast_merge=fast_merge,
+            publish_stage=publish_stage,
         )
     finally:
         _release_blocked_claim_lock(lock_path)
@@ -539,7 +537,7 @@ def _write_failure_handoff(
 
 def _process_ready_issue(
     *,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
     issue: IssueSummary,
     repo_path: Path,
     config: AppConfig,
@@ -560,8 +558,8 @@ def _process_ready_issue(
     5. 完成发布流程
 
     Args:
-        fast_merge: 快速通道旗标：builder 提交后不再重跑 rv_reexec、不启动独立
-            verifier，直接发布带未验证标注的 PR。
+        publish_stage: 发布档位：非 ``NORMAL`` 时 builder 提交后不再重跑
+            rv_reexec、不启动独立 verifier，直接发布带标注的 PR。
         issue: Issue 对象
         repo_path: 仓库根目录
         config: 应用配置
@@ -593,19 +591,14 @@ def _process_ready_issue(
         resolve_lifecycle_model_selection("implementation", config, issue=issue),
     )
 
-    # 步骤 1: 声明 Issue
-    transition_issue_workflow_state(github_client, issue.number, config, config.labels.running)
-    claim_host = socket.gethostname()
-    claim_pid = os.getpid()
-    claim_started_at = datetime.now(timezone.utc)
-    github_client.comment_issue(
-        issue.number,
-        "## Agent Runner Claimed\n\n"
-        f"- Host: `{claim_host}`\n"
-        f"- PID: `{claim_pid}`\n"
-        f"- Agent: `{selected_agent}`\n"
-        f"- Started at: `{claim_started_at.isoformat()}`\n\n"
-        f"{format_claim_marker(claim_host, claim_pid, started_at=claim_started_at, agent=selected_agent)}",
+    # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读仲裁确认自己是最早的
+    # 认领者之后才把标签切到 running。落败方（ClaimArbitrationLost）不碰标签、
+    # 不建 worktree、不起 agent，由派发层按 skip 处理。
+    arbitrate_first_claim(
+        issue_number=issue.number,
+        github_client=github_client,
+        config=config,
+        selected_agent=selected_agent,
     )
 
     # 步骤 2: 准备 worktree
@@ -655,7 +648,7 @@ def _process_ready_issue(
             expected_branch=expected_branch,
             commit_result=commit_result,
             content_generator=content_generator,
-            fast_merge=fast_merge,
+            publish_stage=publish_stage,
         )
         return
 
@@ -676,7 +669,7 @@ def _process_ready_issue(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=implementation_model_selection,
-            fast_merge=fast_merge,
+            publish_stage=publish_stage,
         )
     except (
         MaxRetriesExceededError,
@@ -742,7 +735,7 @@ def _process_ready_issue(
         expected_branch=expected_branch,
         commit_result=new_commit_result,
         content_generator=content_generator,
-        fast_merge=fast_merge,
+        publish_stage=publish_stage,
     )
 
 
@@ -907,7 +900,7 @@ def _process_running_publish_recovery(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None = None,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
     **kwargs: object,
 ) -> None:
     """恢复 running Issue 的发布流程。
@@ -923,8 +916,8 @@ def _process_running_publish_recovery(
         github_client: GitHub 客户端
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
-        fast_merge: 快速通道（``iar run --fast-merge``）：跳过发布前的最终
-            RV / verifier 复核并在 PR 正文打未验证标注。
+        publish_stage: 发布档位：非 ``NORMAL`` 时跳过发布前的最终 RV / verifier
+            复核并在 PR 正文打未验证标注。
     """
     selected_agent = choose_agent(issue, config, agent)
 
@@ -959,7 +952,7 @@ def _process_running_publish_recovery(
             expected_branch=expected_branch,
             commit_result=commit_result,
             content_generator=content_generator,
-            fast_merge=fast_merge,
+            publish_stage=publish_stage,
         )
     finally:
         _release_blocked_claim_lock(lock_path)

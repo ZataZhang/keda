@@ -33,6 +33,10 @@ from backend.core.use_cases.create_issue_from_prd import (
     create_issue_from_prd,
     resolve_prd_paths,
 )
+from backend.core.use_cases.create_issue_from_prompt import (
+    IssueFromPromptRequest,
+    create_issue_from_prompt,
+)
 from backend.core.use_cases.daemon_single_instance import (
     DaemonAlreadyRunningError,
     acquire_daemon_locks,
@@ -90,6 +94,7 @@ __all__ = [
     "DaemonAlreadyRunningError",
     "DeliberationRequest",
     "IssueFromPrdRequest",
+    "IssueFromPromptRequest",
     "ReplSessionDeps",
     "ReplSessionInputs",
     "_ensure_gh_auth_or_prompt",
@@ -104,6 +109,7 @@ __all__ = [
     "create_event_sink",
     "create_github_client",
     "create_issue_from_prd",
+    "create_issue_from_prompt",
     "create_loop_clock",
     "create_loop_state_store",
     "create_planner_runner",

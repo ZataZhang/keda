@@ -85,6 +85,7 @@ from backend.core.use_cases.lifecycle_agent_resolution import (
     resolve_lifecycle_model_selection,
 )
 from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
 
 
@@ -110,10 +111,19 @@ class AgentExecutionRequest:
     #: 首轮要续传的原会话 id（崩溃对账判定为「可续传」时由领取侧从 worktree 局部
     #: 会话记录读出并注入）；``None`` 表示全新会话。仅对声明了续传能力的 agent 生效。
     resume_session_id: str | None = None
-    #: 快速通道（``iar run --fast-merge``）一次性旁路：为 True 时跳过 Phase 4.5 的
-    #: rv_reexec 与 verifier 两道验证门禁（builder 失败 / 恢复循环不受影响）；
-    #: 发布路径据此在 PR 正文打未验证标注。默认 False = 与今天完全一致。
-    fast_merge: bool = False
+    #: 发布档位（normal / fast / direct）：决定 Phase 2 起各门禁是否旁路。默认 normal
+    #: = 与历史行为完全一致。
+    publish_stage: PublishStage = PublishStage.NORMAL
+    #: 兼容旧调用面的快速通道布尔：``iar run --fast-merge`` 的等价写法。唯一事实源是
+    #: :attr:`publish_stage`，本字段在 ``__post_init__`` 里被归一化为该档位的派生视图，
+    #: 因此不可能出现「stage=direct 且 fast_merge=True」这类矛盾状态。
+    fast_merge: bool | None = None
+
+    def __post_init__(self) -> None:
+        """把 ``fast_merge`` 布尔收进 :attr:`publish_stage`，并回填其派生视图。"""
+        if self.fast_merge and self.publish_stage is PublishStage.NORMAL:
+            object.__setattr__(self, "publish_stage", PublishStage.FAST)
+        object.__setattr__(self, "fast_merge", self.publish_stage is PublishStage.FAST)
 
 
 def _attempt_resume_session_id(
@@ -202,6 +212,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         )
     # 实现阶段绑定的模型选择：显式换人（CLI --agent / 回退）时在此丢弃，保证 fix/closeout 继承有效选择。
     model_selection = drop_model_selection_for_agent(selected_agent, request.model_selection)
+    publish_stage = request.publish_stage
     recovery_failure_summary = ""
     recovery_failure_type: str = "verification_failed"
     final_verification_results: list[CommandResult] = []
@@ -359,8 +370,19 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         )
 
         # Phase 2: 验证 agent 产出的代码（staging 之前）
-        with attempt_phases.measure("verification"):
-            verification_results = run_verification(worktree_path, config, process_runner)
+        # 直发档（--direct-pr）连 runner 自己的验证命令也不跑：结果恒为空，下面的
+        # 失败分支自然不触发，门禁转移到 PR 上的 CI。
+        if publish_stage.skips_review_and_repo_verification:
+            _logger.info(
+                "Direct-pr (origin: --direct-pr run flag): skipping runner verification "
+                "commands for Issue #%d at attempt %d; CI on the Draft PR is the gate.",
+                issue.number,
+                attempt_index + 1,
+            )
+            verification_results = []
+        else:
+            with attempt_phases.measure("verification"):
+                verification_results = run_verification(worktree_path, config, process_runner)
         final_verification_results = verification_results
         try:
             ensure_verification_passed(verification_results)
@@ -436,29 +458,39 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # 对固定的代码树运行一次，避免在脏工作区反复执行。
         evidence_gate_failure: ValidationEvidenceError | None = None
         evidence_closeout_note = ""
-        try:
-            if not delivery_gates_revalidated:
+        if publish_stage.skips_review_and_repo_verification:
+            # 直发档：即使 Issue 正文带了验收段，证据门禁也一并跳过（FR-15）。
+            _logger.info(
+                "Direct-pr (origin: --direct-pr run flag): skipping the validation "
+                "evidence gate for Issue #%d at attempt %d.",
+                issue.number,
+                attempt_index + 1,
+            )
+        elif not delivery_gates_revalidated:
+            try:
                 with attempt_phases.measure("evidence"):
                     ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
                     ensure_no_misplaced_evidence_helpers(worktree_path, config, process_runner)
                 # 存量违规只告警不阻塞：前瞻守卫只看本次变更，历史交付留在主干里的
                 # 取证脚本否则永远不可见。
                 warn_legacy_evidence_helpers(worktree_path, config, process_runner)
-        except ValidationEvidenceError as exc:
-            evidence_closeout_result = _attempt_delivery_closeout(
-                _DeliveryCloseoutContext(
-                    record=attempt_record_context,
-                    gate_failure=exc,
-                    prd_baseline_content=prd_baseline_content,
-                ),
-                prd_overrides=prd_overrides,
-                prd_preset_overrides=prd_preset_overrides,
-            )
-            if evidence_closeout_result.revalidated:
-                delivery_gates_revalidated = True
-            else:
-                evidence_gate_failure = exc
-                evidence_closeout_note = _render_discarded_closeout_note(evidence_closeout_result)
+            except ValidationEvidenceError as exc:
+                evidence_closeout_result = _attempt_delivery_closeout(
+                    _DeliveryCloseoutContext(
+                        record=attempt_record_context,
+                        gate_failure=exc,
+                        prd_baseline_content=prd_baseline_content,
+                    ),
+                    prd_overrides=prd_overrides,
+                    prd_preset_overrides=prd_preset_overrides,
+                )
+                if evidence_closeout_result.revalidated:
+                    delivery_gates_revalidated = True
+                else:
+                    evidence_gate_failure = exc
+                    evidence_closeout_note = _render_discarded_closeout_note(
+                        evidence_closeout_result
+                    )
 
         if evidence_gate_failure is not None:
             exc = evidence_gate_failure
@@ -497,6 +529,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         config,
                         process_runner,
                         expected_branch=expected_branch,
+                        publish_stage=publish_stage,
                     )
             except VerificationFailedError as exc:
                 # staging 后验证失败：runner autofix 已在 commit_requested_changes
@@ -566,6 +599,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                                 config,
                                 process_runner,
                                 expected_branch=expected_branch,
+                                publish_stage=publish_stage,
                             )
                         fix_succeeded = True
                     except (
@@ -674,16 +708,25 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # Phase 4.5: commit proxy 已固定代码树，先重验 RV，再做独立复验。
         # RED 仍回到同一条 bounded recovery 循环，避免把未提交工作树当作
         # builder SHA 对应的交付物。
-        # 快速通道（iar run --fast-merge）：本次运行跳过这两道验证门禁，builder
-        # 失败 / 恢复循环照常；跳过必须留一行含旗标来源的审计日志。
-        if request.fast_merge:
+        # 旁路档位：--fast-merge 跳过这两道验证门禁，--direct-pr 同样跳过（其跳过
+        # 范围严格更大）；builder 失败 / 恢复循环照常。跳过必须留一行含旗标来源的审计日志。
+        if publish_stage.skips_independent_verification:
             verifier_verdict = None
+            bypass_label = (
+                ("Fast-merge", "--fast-merge", "fast-track")
+                if publish_stage is PublishStage.FAST
+                else ("Direct-pr", "--direct-pr", "direct")
+            )
+            stage_name, flag_name, annotation_name = bypass_label
             _logger.info(
-                "Fast-merge (origin: --fast-merge run flag): skipping rv_reexec and "
-                "verifier gates for Issue #%d at attempt %d; the PR will carry the "
-                "unverified fast-track annotation.",
+                "%s (origin: %s run flag): skipping rv_reexec and verifier gates "
+                "for Issue #%d at attempt %d; the PR will carry the unverified "
+                "%s annotation.",
+                stage_name,
+                flag_name,
                 issue.number,
                 attempt_index + 1,
+                annotation_name,
             )
         else:
             try:

@@ -14,6 +14,7 @@ from backend.core.shared.interfaces.agent_runner import (
 )
 from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_orchestrate import run_once
 
 _logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def run_agent_repositories_once(
     transcript_runner_factory: Callable[[Path], IAgentTranscriptRunner] | None = None,
     max_deliberation_issues: int = 1,
     target_issue: int | None = None,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> int:
     """Run one polling pass across all target repositories.
 
@@ -81,8 +82,8 @@ def run_agent_repositories_once(
         target_issue: 定向目标 Issue 编号（``iar run --issue``）。非 ``None``
             时每仓只处理该 Issue（仍走依赖门禁与 claim），其余 ready Issue
             一律不动；``None`` 保持既有"按优先级捞队列"行为。
-        fast_merge: 快速通道（``iar run --fast-merge``）一次性旁路，仅本次运行
-            生效；默认 False 与今天完全一致。
+        publish_stage: 发布档位（``iar run --fast-merge`` / ``--direct-pr``），仅本次
+            运行生效；默认 ``NORMAL`` 与今天完全一致。
 
     Returns:
         Exit code (0 on success, 1 if any repository failed).
@@ -155,7 +156,7 @@ def run_agent_repositories_once(
                 run_trigger=run_trigger,
                 repo_id=context.repo_id,
                 target_issue=target_issue,
-                fast_merge=fast_merge,
+                publish_stage=publish_stage,
             )
             if repo_exit_code != 0:
                 aggregated_exit_code = 1

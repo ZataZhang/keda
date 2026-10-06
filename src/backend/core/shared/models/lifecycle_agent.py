@@ -86,7 +86,8 @@ class LifecycleAgentEntryGroup:
 #:
 #: - ``pipeline``：``iar run`` / ``daemon`` 认领后同一次 claim 内依次发生的六个阶段；
 #: - ``discussion_content``：Phase 0 讨论（``deliberate``）与横切的内容生成
-#:   （``content_generation``，``iar issue create`` / Phase 1 / 开 Draft PR 三个 target）；
+#:   （``content_generation``，``iar issue create`` / ``--from-prompt`` / Phase 1 /
+#:   开 Draft PR 四个 target）；
 #: - ``standalone``：``planner``，唯一消费点是 ``iar ask``，不在任何 Issue 流水线上。
 #:
 #: 语义出处与消费点对照见 ``docs/guides/lifecycle-agent-matrix.md`` 的
@@ -103,7 +104,7 @@ LIFECYCLE_AGENT_ENTRY_GROUPS: tuple[LifecycleAgentEntryGroup, ...] = (
         label="讨论与内容生成",
         summary=(
             "辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；"
-            "内容生成横切 iar issue create、Phase 1 与开 Draft PR 三处。"
+            "内容生成横切 iar issue create、--from-prompt 建 Issue、Phase 1 与开 Draft PR 四处。"
         ),
         keys=("content_generation", "deliberate"),
     ),
@@ -125,7 +126,9 @@ LIFECYCLE_AGENT_TRIGGERS: Mapping[str, str] = {
     "review": "同一次 claim 内，开 Draft PR 前审查。",
     "supervisor": "同一次 claim 的发布路径，或 iar review / review-daemon 单独一轮。",
     "planner": "iar ask 交互式决策，不在任何 Issue 流水线上。",
-    "content_generation": "横切 iar issue create、Phase 1 Issue→PRD 与开 Draft PR 三处。",
+    "content_generation": (
+        "横切 iar issue create、--from-prompt 建 Issue、Phase 1 Issue→PRD 与开 Draft PR 四处。"
+    ),
     "deliberate": "Phase 0 就该 Issue 在评论区讨论（此时 PRD 尚不存在）。",
 }
 

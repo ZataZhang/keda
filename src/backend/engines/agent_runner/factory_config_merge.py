@@ -220,6 +220,10 @@ def _merge_generated_content_config(
             base_config.issue_from_prd,
             override.issue_from_prd if "issue_from_prd" in override_data else None,
         ),
+        issue_from_prompt=_merge_generated_content_target_config(
+            base_config.issue_from_prompt,
+            override.issue_from_prompt if "issue_from_prompt" in override_data else None,
+        ),
         draft_pr=_merge_generated_content_target_config(
             base_config.draft_pr,
             override.draft_pr if "draft_pr" in override_data else None,

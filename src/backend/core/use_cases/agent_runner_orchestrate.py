@@ -42,11 +42,17 @@ from backend.core.shared.models.agent_runner import (
     ReviewEventMarker,
     TokenUsage,
 )
+from backend.core.shared.models.publish_stage import (
+    PublishStage,
+)
 from backend.core.use_cases.agent_runner_events import (
     parse_latest_pending_rework_marker,
 )
 from backend.core.use_cases.agent_runner_blocked_claim import (
     BlockedWorktreeClaimedError,
+)
+from backend.core.use_cases.agent_runner_claim_arbitration import (
+    ClaimArbitrationLost,
 )
 from backend.core.use_cases.agent_runner_publication import (
     _finish_existing_commit_publication,
@@ -464,8 +470,9 @@ def run_issue_with_agent_fallback(
                 on_agent_usage=on_agent_usage,
             )
             return candidate_agent
-        except (UnrecoverableError, ForbiddenBlockedError):
-            # Every agent would hit the same wall; do not switch.
+        except (UnrecoverableError, ForbiddenBlockedError, ClaimArbitrationLost):
+            # Every agent would hit the same wall; do not switch. 首次领取仲裁
+            # 落败同理：Issue 已归更早的认领者，换 agent 只会变成双跑。
             raise
         except AgentUnavailableError as exc:
             last_switch_exc = exc
@@ -542,7 +549,7 @@ def run_once(
     concurrency: int = 1,
     output_view: IRunnerLiveView | None = None,
     target_issue: int | None = None,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> int:
     """执行一次 Agent Runner 轮询。"""
     module = _orchestration_runtime_module()
@@ -562,6 +569,6 @@ def run_once(
             concurrency=concurrency,
             output_view=output_view,
             target_issue=target_issue,
-            fast_merge=fast_merge,
+            publish_stage=publish_stage,
         )
     )
