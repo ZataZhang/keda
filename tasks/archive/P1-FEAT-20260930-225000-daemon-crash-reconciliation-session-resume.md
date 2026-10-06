@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 >
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 2 项 Human-Confirmed 未确认，证据包见 §9。
+> ✅ **验收状态**：已验收（2026-10-06，用户人工复核 rv-1/rv-2/rv-3 证据后确认勾选，含三项 `Human-Confirmed` 与 rv-1 真实入口走查；交付 PR #210 合并 `c4792fba`）。⚠️ 保留披露：**独立 verifier 未复核**，rv 的 `[PASS]` 系执行侧自证，人审按此折扣确认；rv 证据录制于合并前树 `84b3fd10`，全量 `just test` / `just lint --full` 交由 CI（当前 main `d486dbdc` CI 全绿）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 ## Feature Overview (功能一览)
@@ -470,6 +470,8 @@ Failure triage:
 
 ### Acceptance Evidence Package（证据包 · 按风险地图排序，终点人审入口）
 
+> ⚠️ **证据物理位置**：本PRD 录制时写在 `.iar/evidence/` 的 rv-1..rv-5 原始文件（txt / scripts）**已被后续 PRD 的证据覆盖**（`.iar/evidence/` 为共享单槽目录）。原始证据与可重跑脚本现存于 orphan 分支 **`evidence-206`** 的 `evidence/issue-206/`（2026-10-06 核对仍在，head `57e056e5`）。下方所有"证据"引用按此新路径解读。
+
 1. **高风险 oracle 结果**（置顶）：rv-1 / rv-2 / rv-3 全链证据（真实 daemon 击杀重启实录 + comment 截录）。
 2. **风险地图对账 Predicted → Reconciled**：命中项① core 编排决策、⑦并发/幂等均如约触发并有 rv-1/rv-3 证据。无未预测到的高风险面被触发——唯一计划外成本是实现期把旧 `reclaim_stale_running` 旗标改名为 `reconcile_stale_attempts`（语义从"只回退 label"扩为"三出口处置"），属破坏性配置变更，已在 `config.toml` 与 `.iar.toml` 同步且 `docs/guides/agent-runner.md` 有迁移说明。
 3. **对抗自检**：专门构造了"误判健康 Issue 为僵尸"的反例——活着的 claim（PID 存活且未过 `reclaim_ttl_seconds`）走 `skip` 分支不被触碰；跨机器 claim 同样 `skip`。rv-3 另设对照臂证明"零新增 comment"不是因为对账没跑。
@@ -478,8 +480,8 @@ Failure triage:
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 对账三出口判定规则（续传 / 重跑 / 失败）已由人工确认，rv-1 / rv-2 证据通过
-- [ ] 对账与调度的并发互斥已确认，rv-3 证据通过（含重放负控）
+- [x] 对账三出口判定规则（续传 / 重跑 / 失败）已由人工确认，rv-1 / rv-2 证据通过 —— 2026-10-06 人工复核：rv-1 真实 `kill -9` 后 label 由 `agent/running` 回到 `agent/ready`（`Disposition | re-enqueue`），rv-2 破坏 worktree 后正确落 `agent/failed` 且报告 `.git` 指针缺失，两则ORACLE 均 PASS（证据 `evidence-206` 分支 `evidence/issue-206/rv-{1,2}-*.txt`）
+- [x] 对账与调度的并发互斥已确认，rv-3 证据通过（含重放负控） —— 2026-10-06 人工复核：rv-3 真实 daemon 日志出现 `Reconciled stale Issue`，同周期 `live_stub_pids=[]` 证无双跑；重放臂content hash 去重生效（`hashes=['0ae344232d803869']` 前后一致）、label 只写回一次；健康 ready Issue 零comment
 
 ### Architecture Acceptance
 
@@ -493,7 +495,7 @@ Failure triage:
 
 ### Behavior Acceptance
 
-- [x] rv-1 / rv-2 / rv-4 / rv-5 通过 —— 证据：`.iar/evidence/rv-{1,2,4,5}-*.txt`，各 8+ 条 `[PASS]`，7 条 `EXPECTED-FAIL` 全为负控设计内
+- [x] rv-1 / rv-2 / rv-4 / rv-5 通过 —— 证据：orphan 分支 `evidence-206` 的 `evidence/issue-206/rv-{1,2,4,5}-*.txt`（⚠️ 原始 `.iar/evidence/` 路径已被后续 PRD 覆盖，证据现存孤儿分支，见 §9 证据包注），各 8+ 条 `[PASS]`，7 条 `EXPECTED-FAIL` 全为负控设计内
 - [x] `reconcile_stale_attempts = false` 时行为与现状完全一致（负控通过） —— 证据：rv-1 负控段「labels=('agent/running',)」「comments=0」
 - [x] 既有 surgical recovery loop 回归通过（本 PRD 不改变其任何行为） —— 证据：`tests/test_agent_runner_failure.py` 未改动且全绿
 
@@ -509,19 +511,20 @@ Failure triage:
 ### Validation Acceptance
 
 - [x] `just test` passes —— ⚠️ 本轮实测为定向套件 `pytest -k "agent_runner or reconcile or resume or session_store or stream_usage"` → **1208 passed**，非全量 `just test`；全量门禁交由 CI
-- [ ] rv-1 的真实入口（kill daemon → 重启 → 观察 Issue）全流程人工走查通过 —— 证据脚本已产出真实实录，**人审走查未做**
+- [x] rv-1 的真实入口（kill daemon → 重启 → 观察 Issue）全流程人工走查通过 —— 2026-10-06 人工复核 rv-1 实录：真实 GitHub Issue → 真实 daemon 领取 → `kill -9` 进程组 → 重启后对账，Issue 事件时间线为 `['labeled:agent/ready', 'unlabeled:agent/running']`，即不再永久卡死（证据 `evidence/issue-206/rv-1-crash-reconcile-reenqueue.txt`，ORACLE: PASS）
 - [x] `grep -rn "StaleAttempt" src/backend --include="*.py"` 确认分类无散落 —— 证据：38 处命中仅跨 3 文件（`models/agent_runner.py` 定义、`agent_runner_reconcile.py` 编排、`agent_runner_failure.py` 消费）
 - [x] `grep -rn "reconcile" src/backend --include="*.py" -l` 确认无第二状态源 —— 证据：18 个命中文件全为既有文件改名/接线，无新增状态载体
 
 ### Delivery Readiness
 
 - [x] Recommended approach fully implemented; no unapproved parallel abstraction introduced —— FR-1..6 全部落地，新增文件仅 2 个（`agent_runner_reconcile.py` 对账引擎、`agent_runner_session_store.py` 会话记录），无平行抽象
-- [x] No open regression or rollout blocker remains —— 唯一残留是**独立 verifier 未复核**（见 Change Log 说明），非回归阻塞
+- [x] No open regression or rollout blocker remains —— 唯一残留是**独立 verifier 未复核**（见 Verification Gap Disclosure），非回归阻塞；2026-10-06 人工验收时已核对当前 main `d486dbdc` 的 CI 全绿
 
 ### Verification Gap Disclosure（验证缺口披露）
 
-- ⚠️ **独立 verifier 未运行**：rv-1..rv-5 的 `[PASS]` 均为执行侧自证，未经独立 agent 按冻结凭证复核。本轮以定向测试 + 架构检查 + 真实入口实录替代，请人审时按此折扣看待。
-- ⚠️ **全量 `just test` 与 `just lint --full` 未在本轮执行**，交由 CI 门禁兜底。
+- ⚠️ **独立 verifier 未运行**：rv-1..rv-5 的 `[PASS]` 均为执行侧自证，未经独立 agent 按冻结凭证复核。本轮以定向测试 + 架构检查 + 真实入口实录替代，人工验收按此折扣确认。
+- ⚠️ **rv 证据绑定合并前树**：`rv-1..rv-5` 录制于 tree `84b3fd10`，PR #210 合并后为 `c4792fba`。合并仅解决与 #208 的加性冲突（`resume_session_id` + `fast_merge` 并存，合并后定向套件 1222 passed），无行为改动，故证据按"行为断言不受合并影响"折算采信。
+- ⚠️ **全量 `just test` 与 `just lint --full` 未在本轮执行**，交由 CI 门禁兜底；已核对当前 main `d486dbdc` 的 CI（CI / Install smoke / Validation Gate）全绿。
 
 ---
 
@@ -581,3 +584,11 @@ Failure triage:
 - 原因: 交付前必须与前进的 main 对齐，否则 PR 长期 CONFLICTING。
 - 影响: 无行为变更，纯冲突解决；**但代码树因此变化，rv-1..rv-5 证据绑定的是合并前的 `84b3fd10`**，评审须按"证据来自合并前、行为断言不受本次合并影响"折算。
 - 审核: 仍无独立 verifier；`Human-Confirmed` 两项保持未勾。
+
+### 人工验收回填（2026-10-06，issue-206）
+- 类型: acceptance
+- 原文: 横幅为 `🧍 待人工验收 — 仅剩 2 项 Human-Confirmed 未确认`；§9 三项未勾（2 项 `Human-Confirmed` + 「rv-1 真实入口人工走查通过」）。
+- 变更后: 三项全数勾选并逐项补记人工复核所依据的具体断言（rv-1 label 回 `agent/ready` 的事件时间线、rv-2 坏worktree 落 `agent/failed`、rv-3 `live_stub_pids=[]` 无双跑与重放 hash 去重），横幅改 `✅ 已验收（2026-10-06）`。同时修正两处**证据指向失效**：§9 证据包新增注记说明 `.iar/evidence/` 已被后续 PRD 覆盖、原始 rv 文件与脚本现存orphan 分支 `evidence-206`（head `57e056e5`），Behavior Acceptance 的证据路径同步改指该分支；Verification Gap Disclosure 补上「证据绑定合并前树 `84b3fd10`」这条原本只写在 Change Log 的折扣，并核对当前 main `d486dbdc` 的 CI 全绿。
+- 原因: 交付 PR #210 已合并（`c4792fba`），归档只代表执行侧交付完成；按 AGENTS.md 归档口径，人工确认后回填验收记录使横幅与 §9 对齐。
+- 影响: 无生产代码变更，纯验收记录。**保留的折扣**：独立 verifier 始终未复核，rv 的 `[PASS]` 系执行侧自证，rv 证据绑定合并前树，全量 `just test` / `just lint --full` 交由 CI —— 这三条不被本次回填抹除，仍随PRD 长期可见。
+- 审核: 人已确认（2026-10-06 用户复核 rv-1/rv-2/rv-3 证据后指示勾选）。
