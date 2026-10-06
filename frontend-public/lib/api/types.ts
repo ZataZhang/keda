@@ -561,6 +561,25 @@ export type PrdLifecycleStats = {
   incomplete_run_count: number;
   runs: PrdLifecycleStatsRow[];
   token_usage: TokenUsageStats;
+  /**
+   * PRD（Issue）维度 token 汇总（按 `total_tokens` 降序），与 CLI
+   * `iar tokens` 的「按 PRD」表同源同口径。旧响应缺省该字段时按空数组处理。
+   */
+  token_usage_by_prd?: PrdTokenUsageEntry[];
+};
+
+/**
+ * 单个 PRD（Issue）维度的 token 用量累计。
+ *
+ * 同一 PRD 的多次 run 合并为一行；`run_count` 是参与累计的 run 条数。
+ * 与后端 `PrdTokenUsageEntry` 对齐。
+ */
+export type PrdTokenUsageEntry = {
+  repo_id: string | null;
+  prd_path: string | null;
+  issue_number: number | null;
+  run_count: number;
+  totals: TokenUsageTotals;
 };
 
 /**

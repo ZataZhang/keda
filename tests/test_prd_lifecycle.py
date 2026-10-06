@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,10 @@ from fastapi.testclient import TestClient
 import backend.api.routes.agent_runner_console as console_routes
 import backend.api.routes.agent_runner_backlog as backlog_routes
 from backend.api.app import app
+from backend.core.shared.interfaces.runner_console import (
+    PrdLifecycleEventRecord,
+    PrdLifecycleRunRecord,
+)
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.use_cases.agent_runner_lifecycle import (
     LifecycleEventType,
@@ -705,3 +710,195 @@ def test_stats_endpoint_transparently_exposes_token_usage(api_environment) -> No
     assert payload["token_usage"]["by_flow"]["implement"]["input_tokens"] == 10
     assert payload["token_usage"]["by_flow"]["implement"]["total_tokens"] == 12
     assert payload["token_usage"]["by_agent"]["claude"]["usage_count"] == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRD 维度 token 汇总挂载（Stats 页「按 PRD」表数据源）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_USAGE_A = {
+    "input_tokens": 100,
+    "output_tokens": 10,
+    "cache_read_input_tokens": 40,
+    "cache_creation_input_tokens": 0,
+}
+_USAGE_B = {
+    "input_tokens": 200,
+    "output_tokens": 20,
+    "cache_read_input_tokens": 60,
+    "cache_creation_input_tokens": 5,
+}
+_USAGE_SMALL = {
+    "input_tokens": 50,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+}
+
+
+def _seed_prd_runs(
+    store: SqliteConsoleStore, *, issue_number: int, prd_path: str, usages: list[dict]
+) -> None:
+    """经存储接口直接写入同一 PRD 的多条 run，每条带一条 attempt usage 事件。
+
+    run id 追加 rN 后缀：同一 Issue 重试 / 重执行在账本里各占一条 run 记录。
+    """
+    for index, usage in enumerate(usages, start=1):
+        run_id = f"{_REPO_ID}#{issue_number}r{index}"
+        store.upsert_lifecycle_run(
+            PrdLifecycleRunRecord(
+                run_id=run_id,
+                repo_id=_REPO_ID,
+                prd_path=prd_path,
+                issue_number=issue_number,
+                trigger="cli_run",
+                started_at="2026-09-21T10:00:00+00:00",
+                finished_at="2026-09-21T10:05:00+00:00",
+                outcome="completed",
+                history_complete=True,
+            )
+        )
+        store.append_lifecycle_event(
+            PrdLifecycleEventRecord(
+                run_id=run_id,
+                event_key=f"attempt:{index}",
+                event_type="attempt",
+                phase="executing",
+                actor="runner",
+                occurred_at="2026-09-21T10:01:00+00:00",
+                detail_json=json.dumps({"agent": "claude", "token_usage": usage}),
+            )
+        )
+
+
+class _LedgerReadCountingStore(SqliteConsoleStore):
+    """记录账本读方法调用次数，用于断言 PRD 维度复用同一读集、不二次读库。"""
+
+    def __init__(self, database_path: Path) -> None:
+        super().__init__(database_path)
+        self.run_list_calls = 0
+        self.event_list_calls = 0
+
+    def list_lifecycle_runs(self, **kwargs: object) -> list:
+        self.run_list_calls += 1
+        return super().list_lifecycle_runs(**kwargs)
+
+    def list_lifecycle_events(self, **kwargs: object) -> list:
+        self.event_list_calls += 1
+        return super().list_lifecycle_events(**kwargs)
+
+
+class _UnreadableLedgerStore(SqliteConsoleStore):
+    """所有账本读取都抛错：验证 PRD 维度与既有统计遵守同一降级语义。"""
+
+    def list_lifecycle_runs(self, **kwargs: object) -> list:
+        raise RuntimeError("ledger unreadable")
+
+    def list_lifecycle_events(self, **kwargs: object) -> list:
+        raise RuntimeError("ledger unreadable")
+
+
+def test_prd_lifecycle_stats_mounts_token_usage_by_prd(tmp_path: Path) -> None:
+    """Stats 聚合挂载 PRD 维度：多 run 合并、按总量降序、无用量 PRD 排除。"""
+    store = _store(tmp_path)
+    _seed_prd_runs(store, issue_number=7, prd_path=_PRD_PATH, usages=[_USAGE_A, _USAGE_B])
+    _seed_prd_runs(store, issue_number=9, prd_path="tasks/pending/other.md", usages=[_USAGE_SMALL])
+    _record(
+        store,
+        LifecycleEventType.ATTEMPT,
+        "2026-09-21T10:01:00+00:00",
+        issue_number=11,
+        event_key="a11",
+        detail={"agent": "claude"},
+    )
+
+    stats = build_prd_lifecycle_stats(
+        store=store,
+        repo_id=_REPO_ID,
+        days=30,
+        now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert [entry.issue_number for entry in stats.token_usage_by_prd] == [7, 9]
+    top = stats.token_usage_by_prd[0]
+    assert top.prd_path == _PRD_PATH
+    assert top.run_count == 2
+    assert top.totals.total_tokens == 435
+    assert stats.token_usage_by_prd[1].totals.total_tokens == 55
+
+
+def test_prd_lifecycle_stats_reuses_ledger_reads_for_by_prd(tmp_path: Path) -> None:
+    """同一请求内账本 run 只列一次、每 run 事件只读一次（PRD 维度复用调用方读集）。"""
+    store = _LedgerReadCountingStore(tmp_path / "console.db")
+    _seed_prd_runs(store, issue_number=7, prd_path=_PRD_PATH, usages=[_USAGE_A])
+
+    stats = build_prd_lifecycle_stats(
+        store=store,
+        repo_id=_REPO_ID,
+        days=30,
+        now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert stats.token_usage_by_prd, "by_prd 应已挂载（前置：确有用量数据）"
+    assert store.run_list_calls == 1
+    assert store.event_list_calls == 1
+
+
+def test_prd_lifecycle_stats_degrades_by_prd_on_read_failure(tmp_path: Path) -> None:
+    """账本不可用时 PRD 维度降级为空列表，既有字段按原规则降级，不抛异常。"""
+    stats = build_prd_lifecycle_stats(
+        store=_UnreadableLedgerStore(tmp_path / "console.db"),
+        repo_id=_REPO_ID,
+        days=30,
+        now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert stats.token_usage_by_prd == []
+    assert stats.token_usage.by_flow == {}
+    assert stats.runs == []
+
+
+def test_stats_endpoint_exposes_token_usage_by_prd(api_environment) -> None:
+    """端点契约：新字段随 _serialize 自动带出，既有 token_usage 字段不漂移。"""
+    store = api_environment
+    _seed_prd_runs(store, issue_number=7, prd_path=_PRD_PATH, usages=[_USAGE_A])
+    console_routes._STATS_CACHE = console_routes.TTLResponseCache(ttl_seconds=0)
+
+    response = client.get(
+        "/api/v1/agent-runner/console/stats/prd-lifecycle",
+        params={"repo_id": _REPO_ID, "days": 30},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    entries = payload["token_usage_by_prd"]
+    assert len(entries) == 1
+    assert entries[0]["issue_number"] == 7
+    assert entries[0]["prd_path"] == _PRD_PATH
+    assert entries[0]["run_count"] == 1
+    assert entries[0]["totals"]["total_tokens"] == 150
+    assert payload["token_usage"]["by_flow"]["implement"]["total_tokens"] == 150
+    assert payload["token_usage"]["by_agent"]["claude"]["usage_count"] == 1
+
+
+def test_stats_endpoint_degrades_when_ledger_unreadable(
+    api_environment, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """端点失败路径：账本读失败仍返回 200，PRD 维度降级为空数组。"""
+    monkeypatch.setattr(
+        console_routes,
+        "create_console_store",
+        lambda: _UnreadableLedgerStore(tmp_path / "broken-console.db"),
+    )
+    console_routes._STATS_CACHE = console_routes.TTLResponseCache(ttl_seconds=0)
+
+    response = client.get(
+        "/api/v1/agent-runner/console/stats/prd-lifecycle",
+        params={"repo_id": _REPO_ID, "days": 30},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["token_usage_by_prd"] == []
+    assert payload["token_usage"] == {"by_flow": {}, "by_agent": {}}

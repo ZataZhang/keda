@@ -1,7 +1,7 @@
 """agent token 用量聚合（Stats 页 Token 汇总区的数据源）。
 
 扫描窗口内的生命周期事件，把挂在事件 ``detail_json`` 里的 token 用量按
-**流程**与 **agent** 两个维度汇总。两类来源：
+**流程**、**agent** 与 **PRD（Issue）** 三个维度汇总。两类来源：
 
 - attempt 族事件（``attempt`` / ``retry`` / ``recovered``）的
   ``detail.token_usage`` —— 实现/修复主调用，flow 固定为 ``implement``；
@@ -202,6 +202,8 @@ def build_token_usage_by_prd(
     days: int,
     now: datetime | None = None,
     issue_number: int | None = None,
+    run_records: list[object] | None = None,
+    events_by_run: dict[str, list[object]] | None = None,
 ) -> list[PrdTokenUsageEntry]:
     """把窗口内的 token 用量按 PRD（Issue）维度汇总。
 
@@ -210,23 +212,35 @@ def build_token_usage_by_prd(
 
     Args:
         store: 生命周期账本（鸭子类型：只需 ``list_lifecycle_runs`` /
-            ``list_lifecycle_events`` 两个读方法）。
-        repo_id: 仓库过滤；``None`` 表示全部仓库。
-        days: 时间窗口天数（内部钳制 1–365）。
-        now: 统计基准时间；缺省取当前 UTC 时间。
+            ``list_lifecycle_events`` 两个读方法）；调用方自带
+            ``run_records`` 与 ``events_by_run`` 时不会被读取。
+        repo_id: 仓库过滤；``None`` 表示全部仓库（仅自读账本时生效）。
+        days: 时间窗口天数（内部钳制 1–365；仅自读账本时生效）。
+        now: 统计基准时间；缺省取当前 UTC 时间（仅自读账本时生效）。
         issue_number: 只统计该 Issue 的 run；``None`` 表示不过滤。
+        run_records: 调用方已持有的窗口内 run 记录；提供时不再
+            ``list_lifecycle_runs``，保证与调用方同一读集、不做二次读库。
+        events_by_run: run_id 到事件列表的映射；提供时单 run 事件直接取
+            用映射（缺失视为无事件），不再 ``list_lifecycle_events``。
 
     Returns:
         按 ``total_tokens`` 降序的 :class:`PrdTokenUsageEntry` 列表；无数据
         返回空列表。
     """
-    run_records = _list_window_runs(store, repo_id=repo_id, days=days, now=now)
+    window_runs = (
+        list(run_records)
+        if run_records is not None
+        else _list_window_runs(store, repo_id=repo_id, days=days, now=now)
+    )
     if issue_number is not None:
-        run_records = [record for record in run_records if record.issue_number == issue_number]
+        window_runs = [record for record in window_runs if record.issue_number == issue_number]
 
     grouped: dict[tuple, tuple[int, TokenUsageTotals]] = {}
-    for run_record in run_records:
-        events = _run_events(store, run_record.run_id)
+    for run_record in window_runs:
+        if events_by_run is not None:
+            events = events_by_run.get(run_record.run_id, [])
+        else:
+            events = _run_events(store, run_record.run_id)
         # 复用 aggregate_token_usage 的单条提取与校验规则：对单 run 事件
         # 聚合后把各 flow 份合并成该 run 的总量，再并入 PRD 分组。
         run_stats = aggregate_token_usage(events)

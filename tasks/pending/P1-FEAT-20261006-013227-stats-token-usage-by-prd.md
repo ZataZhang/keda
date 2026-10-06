@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：执行侧交付完成，人审决策已确认，待合并验收（§9 非人工项已勾选并标注证据；2 项 `Human-Confirmed` 已于 2026-10-06 由用户「全部接受」确认）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 是给人审的行为与决策层，不含实现机制、文件路径与命令；Part B 是给执行器的实现层。两层都是投影，`§8` 与 `§9` 才是对应事实源。
@@ -386,46 +386,46 @@ rg -n '_render_prd_table|prd_entries' src/backend/api/cli_typer_tokens.py
 
 **Human-Confirmed (来自 Part A 风险地图)**
 
-- [ ] §1 行为样例表五行逐行确认（页面三张表；页面与 CLI 数字一致；≥2 次执行的 PRD 合并成一行并显示累计执行次数；无消耗 PRD 不出现且空态明确；另两张表数字不变）。对应 §9.1 的两行呈递物。回答方式：对每一行回复「符合」或指出哪一行与预期不符。
-- [ ] 确认 §3 中「`stats/prd-lifecycle` 响应新增一个字段」这一唯一破坏性面可接受（只增字段，既有消费者不受影响）。回答方式：「可接受」或列出你知道的外部消费者需要公告。
+- [x] §1 行为样例表五行逐行确认（页面三张表；页面与 CLI 数字一致；≥2 次执行的 PRD 合并成一行并显示累计执行次数；无消耗 PRD 不出现且空态明确；另两张表数字不变）。对应 §9.1 的两行呈递物。 <!-- 人审答案: 2026-10-06 用户逐项回复「全部接受」（五行均符合预期） -->
+- [x] 确认 §3 中「`stats/prd-lifecycle` 响应新增一个字段」这一唯一破坏性面可接受（只增字段，既有消费者不受影响）。 <!-- 人审答案: 2026-10-06 用户回复「可接受」，未列出需要公告的外部消费者 -->
 
 **Architecture Acceptance**
 
-- [ ] `build_token_usage_by_prd` 复用调用方已持有的 `run_records`（未在同一请求内二次读账本）：`rg -n 'list_lifecycle_runs' src/backend/core/use_cases/agent_runner_token_stats.py` 的命中仅限 CLI 路径与函数自身，`build_prd_lifecycle_stats` 不为 PRD 维度再读一次账本。
-- [ ] 依赖方向合法：新增 import 只出现在 `core` → `core` 之间，无 `api/ -> engines/` 之类逆向依赖（`just lint` 的架构检查通过）。
-- [ ] `aggregate_token_usage` 函数体未被本次改动触碰（`git diff -- src/backend/core/use_cases/agent_runner_token_stats.py` 中该函数无 diff hunk）。
+- [x] `build_token_usage_by_prd` 复用调用方已持有的 `run_records`（未在同一请求内二次读账本）：`rg -n 'list_lifecycle_runs' src/backend/core/use_cases/agent_runner_token_stats.py` 的命中仅限 CLI 路径与函数自身，`build_prd_lifecycle_stats` 不为 PRD 维度再读一次账本。证据：rg 命中 3 处全部在 `_list_window_runs`（CLI 自读路径）与参数 docstring；`agent_runner_lifecycle.py` 挂载点以 `run_records=run_records, events_by_run=events_by_run` 传入同一读集；`test_prd_lifecycle_stats_reuses_ledger_reads_for_by_prd` 用读计数 store 断言 `run_list_calls == 1 && event_list_calls == 1`。
+- [x] 依赖方向合法：新增 import 只出现在 `core` → `core` 之间，无 `api/ -> engines/` 之类逆向依赖（`just lint` 的架构检查通过）。证据：唯一新增 import 为 `agent_runner_lifecycle.py` → `agent_runner_token_stats.py`；`CI=true just test all` 内部 `SKIP=check-test-flag just lint --full` 全 hook 通过（含架构检查）。
+- [x] `aggregate_token_usage` 函数体未被本次改动触碰（`git diff -- src/backend/core/use_cases/agent_runner_token_stats.py` 中该函数无 diff hunk）。证据：rv-5 函数体 HEAD vs 工作区 35 行逐字节一致（`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-5-no-regression.txt` §2）。
 
 **Behavior Acceptance**
 
-- [ ] rv-1 PASS：真实 `GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30` 响应含非空 PRD 维度数组，元素具备 `issue_number` / `prd_path` / `totals`；既有 `token_usage.by_flow` 与 `by_agent` 与改动前逐字一致。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-1-prd-lifecycle-contract.txt`
-- [ ] rv-2 PASS：页面按 PRD 表与 `iar tokens --days 30` 的同 PRD 行总量相等（四项明细与调用数亦抽样相等），且已跑过其负向对照（把页面值 ×2 时对照必须失败）。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-2-cli-vs-page.txt`
-- [ ] rv-3 PASS：账本不可用时端点仍返回 200，PRD 维度降级为空数组。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-3-degraded-store.txt`
-- [ ] rv-5 PASS：既有两表逐行数值不变；`aggregate_token_usage` 无 diff。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-5-no-regression.txt`
+- [x] rv-1 PASS：真实 `GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30` 响应含非空 PRD 维度数组，元素具备 `issue_number` / `prd_path` / `totals`；既有 `token_usage.by_flow` 与 `by_agent` 与改动前逐字一致。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-1-prd-lifecycle-contract.txt`（worktree 真实服务 8477 返回 9 条非空条目；负控 = 改动前 8313 实例同断言 RED）。
+- [x] rv-2 PASS：页面按 PRD 表与 `iar tokens --days 30` 的同 PRD 行总量相等（四项明细与调用数亦抽样相等），且已跑过其负向对照（把页面值 ×2 时对照必须失败）。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-2-cli-vs-page.txt`（真实浏览器 DOM 9 行 vs CLI vs fresh 端点三方逐格相等；×2 负控实测 RED：页面 14266.2k vs 期望 7133.1k，脚本非零退出）。
+- [x] rv-3 PASS：账本不可用时端点仍返回 200，PRD 维度降级为空数组。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-3-degraded-store.txt`（真实 `iar console` + `IAR_CONFIG` 临时副本账本注入；同注入下无保护端点 500 证明注入有效）。
+- [x] rv-5 PASS：既有两表逐行数值不变；`aggregate_token_usage` 无 diff。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-5-no-regression.txt`（改动前后真实端点 `token_usage` 规范化 JSON 逐字节一致 + 函数体源码对照）。
 
 **Frontend Acceptance**
 
-- [ ] rv-4 PASS：`just console-sync` 后真实 `/app/stats` 三张表同屏，按 PRD 表首行为最大消耗者，第一列可见 Issue 号，截图已存为 `rv-4-stats-token-by-prd.png` 并在 §9.1 内联嵌入。
-- [ ] 空态验证：所选范围内无 token 用量时，「按 PRD」表显示明确空态文案，且不出现总量为 0 的行。
-- [ ] `TokenUsageTable` 的现有签名与另两张表的调用未被修改（`git diff` 中无该组件签名行改动），PRD 表使用新增独立组件。
+- [x] rv-4 PASS：`just console-sync` 后真实 `/app/stats` 三张表同屏，按 PRD 表首行为最大消耗者，第一列可见 Issue 号，截图已存为 `rv-4-stats-token-by-prd.png` 并在 §9.1 内联嵌入。证据：`tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/rv-4-stats-token-by-prd.txt` + 同目录截图（三表 y 坐标 4149 < 4399 < 4575；负控 = 临时摘除第三张表重建后断言超时 RED）。
+- [x] 空态验证：所选范围内无 token 用量时，「按 PRD」表显示明确空态文案，且不出现总量为 0 的行。证据：`tests/playwright-e2e/tests/smoke/stats-token-usage-by-prd.spec.ts` 三个用例（缺字段旧响应 → 表级空态、窗口内无用量 → 区级空态、正常三表）经 `just e2e` 真实浏览器 4 passed；账本侧「缺 usage 不出行」由 `tests/test_agent_token_stats.py` 既有用例与 rv-2 页面行数=CLI 行数（9=9）共同佐证。
+- [x] `TokenUsageTable` 的现有签名与另两张表的调用未被修改（`git diff` 中无该组件签名行改动），PRD 表使用新增独立组件。证据：`git diff 'frontend-public/app/(app)/app/stats/page.tsx'` 中 `TokenUsageTable` 相关行零改动，唯一新增组件为 `PrdTokenUsageTable`。
 
 **Documentation Acceptance**
 
-- [ ] `stats/prd-lifecycle` 响应新增字段已在相关 API 文档中公告（`docs/` 下对应页面），含字段名与语义。
-- [ ] `aggregate_token_usage` 的 docstring 未被改动，因此 `core/use_cases/agent_runner_token_stats.py` 模块 docstring 里「按流程与按 agent 两个维度」的描述若已不准确，同步修正为包含 PRD 维度（`iar tokens` 帮助文本已宣称三维度）。
+- [x] `stats/prd-lifecycle` 响应新增字段已在相关 API 文档中公告（`docs/` 下对应页面），含字段名与语义。证据：`docs/guides/agent-runner.md` 端点块新增 `token_usage_by_prd[]`（含字段构成、降级为空数组、只增不改），并新增「Stats 页展示」三表口径小节。
+- [x] `aggregate_token_usage` 的 docstring 未被改动，因此 `core/use_cases/agent_runner_token_stats.py` 模块 docstring 里「按流程与按 agent 两个维度」的描述若已不准确，同步修正为包含 PRD 维度（`iar tokens` 帮助文本已宣称三维度）。证据：模块 docstring 已改为「按**流程**、**agent** 与 **PRD（Issue）** 三个维度汇总」；`aggregate_token_usage` docstring 与函数体均未动（rv-5 §2）。
 
 **Validation Acceptance**
 
-- [ ] 真实入口验证已执行：至少一条 oracle 走真实 FastAPI 路由 + 真实 SQLite 账本（rv-1/rv-2/rv-4 均满足），非仅单元测试。
-- [ ] 前端真实入口验证已执行：rv-4 走 `tests/playwright-e2e` 的真实浏览器流程或等价的手工浏览器操作，产出可辨认的页面截图；不接受组件预览作为唯一证据。
-- [ ] `CI=true just test all` 通过；`just lint` 通过。
-- [ ] 后端 `just prd review` 入口可用：证据目录下 `human-review-checklist.md`（含 HTML 伴生页，若含截图）已生成。
+- [x] 真实入口验证已执行：至少一条 oracle 走真实 FastAPI 路由 + 真实 SQLite 账本（rv-1/rv-2/rv-4 均满足），非仅单元测试。证据：`iar console --port 8477` 真实服务 + `~/.iar/console.db` 真实账本，见 `.iar/evidence/evidence.json` 五项。
+- [x] 前端真实入口验证已执行：rv-4 走 `tests/playwright-e2e` 的真实浏览器流程或等价的手工浏览器操作，产出可辨认的页面截图；不接受组件预览作为唯一证据。证据：rv-4 为真实浏览器对真实 `iar console` 静态站点（`/app/stats/`）的渲染结果截图；提交进仓库的 fixture spec 亦经 `just e2e` 真实浏览器 4 passed。
+- [x] `CI=true just test all` 通过；`just lint` 通过。 <!-- 证据: 重定基到 `866ddabc` 后复跑，3135 passed / 1 skipped；`just lint --full` 全 hook 通过（含架构与行数门禁） -->
+- [x] 后端 `just prd review` 入口可用：证据目录下 `human-review-checklist.md`（含 HTML 伴生页，若含截图）已生成。 <!-- 证据: `tasks/evidence/P1-FEAT-20261006-013227-stats-token-usage-by-prd/human-review-checklist.md` + `.html` 均随本 PR 提交 -->
 
 **Delivery Readiness**
 
-- [ ] 交付 PR 正文按 `prd-evidence-and-merge-acceptance` 契约写：唯一链接本 PRD、明确声明「合并即验收」的含义、投影 §2 的人审决策、投影 §9.1 的人读呈递、给出 verified head 与 git tree。
-- [ ] PR 证据评论包含 §9.1 呈递内容、verifier 结论、必跑门禁汇总、证据链接与可复现命令。
-- [ ] 原始证据（截图等非 .md 产物）不进入代码 diff；按需通过证据分支或 PR 评论发布。
-- [ ] 完成消息原样携带 §9.1 的呈递内容（截图相对路径 + `open` 命令 + 打开 URL），而不是只说「证据已归档」。
+- [~] 交付 PR 正文按 `prd-evidence-and-merge-acceptance` 契约写：唯一链接本 PRD、明确声明「合并即验收」的含义、投影 §2 的人审决策、投影 §9.1 的人读呈递、给出 verified head 与 git tree。— runner-owned gate: PR 发布
+- [~] PR 证据评论包含 §9.1 呈递内容、verifier 结论、必跑门禁汇总、证据链接与可复现命令。— runner-owned gate: PR 证据评论 + 独立 verifier 复核
+- [x] 原始证据（截图等非 .md 产物）不进入代码 diff；按需通过证据分支或 PR 评论发布。证据：`git check-ignore` 确认 `tasks/evidence/**` 与 `.iar/` 均被忽略；`git status --porcelain` 的改动清单只含源码、测试与 `docs/`。
+- [~] 完成消息原样携带 §9.1 的呈递内容（截图相对路径 + `open` 命令 + 打开 URL），而不是只说「证据已归档」。— runner-owned gate: 完成消息（执行器在最终总结中已附呈递内容）
 
 ## 10. Functional Requirements
 
@@ -465,3 +465,29 @@ rg -n '_render_prd_table|prd_entries' src/backend/api/cli_typer_tokens.py
 | D-04 | 表格组件复用方式 | 新增 `PrdTokenUsageTable`，保持既有 `TokenUsageTable` 签名不变 | 扩展 `TokenUsageTable` 加可选前缀标签参数 | PRD 行首列需要 Issue 号 + 文件名两个信息；改既有组件签名会给两张现有表引入不必要的回归面 |
 | D-05 | 是否顺带改 CLI | 不改 `iar tokens` | 同步调整 CLI 以「保持一致」 | CLI 已是正确消费者且与新页面同源；改它只会扩大回归面并需要同步 `iar-operator` skill |
 | D-06 | 无 token 数据的 PRD 是否显示 | 不显示（表空时给空态） | 显示为 0 行 | 与既有「缺 usage 的调用不计入，展示为『—』而非 0」的缺失排除口径一致；显示 0 行会把「没上报」误读为「零消耗」 |
+
+## Change Log
+
+### 初始生成（2026-10-06）
+- Type: scope
+- Before: 无本 PRD；Stats 页 Token 用量区只有两张表，`by_prd` 聚合只被 CLI 消费
+- After: 生成完整 PRD（Machine Contract v5），方案定型为「挂进既有端点 + 第三张表 + 复用同一读集」
+- Reason: CLI 帮助文本宣称与 Stats 页「同源同口径」但页面缺 PRD 维度，Issue #209 立项补齐通路
+- Impact: 后端 3 文件 + 前端 2 文件 + 端点响应新增 1 字段；CLI 与提取规则零改动
+- Review: 待人审（§1 行为样例五行与响应新增字段两项）
+
+### 实施落地（2026-10-06，issue-209）
+- Type: mechanism
+- Before: `PrdLifecycleStats` 无 PRD 维度字段；`build_token_usage_by_prd` 只能自读账本；Stats 页 Token 用量区两张表
+- After: `PrdLifecycleStats` 新增 `token_usage_by_prd`（必填，两处构造点均补齐）；`build_token_usage_by_prd` 增加可选 `run_records` / `events_by_run` 参数，由 `build_prd_lifecycle_stats` 传入同一读集（挂载点 try/except 降级空数组）；前端 `PrdTokenUsageTable` 作为第三张表渲染（Issue/PRD/总量/四项明细/命中率/调用数/执行次数，total 降序，空态文案），`TokenUsageTable` 签名与调用零改动；`types.ts` 字段声明为可选以容忍旧响应
+- Reason: D-01/D-02/D-04 定型的最小改动路径；复用读集保证「时长统计口径」与「token 汇总口径」必然同源且不二次读库
+- Impact: rv-1..rv-5 全绿、负控全红（见 §9.2 与证据报告）；`CI=true just test all` 与提交进仓库的 e2e spec 通过
+- Review: 执行器 + 自动门禁；人审两项保持 `Human-Confirmed` 空框
+
+### Final Reconciliation（2026-10-06，issue-209）
+- Type: docs
+- Before: PRD 计划与实现后现状需逐条核对（PRD map、行为样例、Drift 风险）
+- After: §6 改动树所列 5 个源码文件与 `git status` 实际改动一一对应，无计划外文件；§1 五行样例逐行映射到 rv-4/rv-2/合并单测/rv-2 空态用例/rv-5；§7 全部引用路径与符号（`build_token_usage_by_prd`、`TokenUsageSection`、端点路径、`stats/page.tsx` 锚点）在当前树复核仍存在；§12 行数风险复查为 670 非空行 < 1000；披露一项数据面限制：当前 30 天窗口无「同一 PRD 多次执行且都有用量」的真实样本，合并行为由单测与列在场共同支撑（见证据报告「披露与限制」）
+- Reason: 归档前置核对，保证勾选与横幅是 §9 真实状态的投影
+- Impact: 无生产代码变更；验收状态横幅翻为 🧍 待人工验收（2 项 Human-Confirmed 开放）
+- Review: 无需人拍板（核对性记录）

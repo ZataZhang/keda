@@ -3512,6 +3512,10 @@ unblocked | failed | agent_token_usage`。
   同源同口径）；`--issue <n>` 把三张表收窄到单个 Issue，回答"这个 PRD 烧了
   多少"；`--json` 额外携带 `by_prd` 维度供脚本消费；空数据显示「—」或明确
   空态文案。
+- **Stats 页展示**：Stats 页「Token 用量」区渲染同样三张表（按流程 / 按
+  agent / 按 PRD），由 `stats/prd-lifecycle` 端点的 `token_usage` 与
+  `token_usage_by_prd` 驱动，与 CLI 同源同口径；「按 PRD」表按总量降序，
+  同一 PRD 的多次执行合并为一行并显示累计执行次数（`run_count`）。
 - **不干扰**：`agent_token_usage` 不参与阶段推导与时长归属（推导时被
   过滤），写入失败与其它观测事件一样只落日志。
 
@@ -3530,7 +3534,11 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
     average_blocked_seconds / bottleneck_phase / bottleneck_phase_seconds /
     unlinked_run_count / incomplete_run_count / runs[] /
     token_usage{by_flow, by_agent}（每行含 input/output/cache_read/
-    cache_creation/total_tokens 与 usage_count）
+    cache_creation/total_tokens 与 usage_count）/
+    token_usage_by_prd[]（按 PRD（Issue）维度，total_tokens 降序；每条含
+    repo_id / prd_path / issue_number / run_count / totals{四项 + total +
+    usage_count}；账本不可用时降级为空数组。响应新增字段，只增不改，
+    既有消费者不受影响）
 ```
 
 **降级语义**
