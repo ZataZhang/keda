@@ -5,7 +5,7 @@
 > ⛔ **交付前置**：建议排在 `P1-FEAT-20261005-161633-run-daemon-autopilot-control-surface`（run-daemon 控制面）合并之后开工——两者都改 `iar run` 的命令表面，先合并的那个会重写 `run_command` 的参数区，反序会产生可避免的合并冲突与双重基线。这是交付顺序依赖而非构建依赖：本 PRD 自身可独立构建，但先交付它会导致与控制面分支的冲突性返工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：执行侧交付完成，待人工验收（§9 非人工项已勾选并标注证据；决策一/二/9.1 呈递三项 `Human-Confirmed` 待人来确认）。
+> ✅ **验收状态**：已验收（2026-10-06，用户声明「#208 合并即验收」；§9 全项已勾选，含三项 `Human-Confirmed`）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：**Part A · 人审层**（§1–4）给人类审阅者看，只含问题、解读回显与需要人拍板的决策；**Part B · 执行器层**（§5–13）给执行 agent 看，含机制、改动树、验证命令与依赖元数据。人审者只在想深挖时才需要进入 Part B。
@@ -359,14 +359,14 @@ No external validation required; repository evidence was sufficient.
 
 - [x] `CI=true just test all` 全绿（规避 testmon 假通过） <!-- 证据: 3063 passed, 1 skipped（--no-testmon），/tmp/just_test_all_207c.log；flag 绑定 f44a3b4f -->
 - [x] 完成消息逐字携带 9.1 表内容与可执行 open 命令 <!-- 见交付完成消息的 9.1 呈递段与 open 命令 -->
-- [~] 独立 verifier PASS — runner-owned gate: verifier 复核
-- [~] PR 按仓库 PR 正文契约发布（merge-acceptance 声明 + 唯一 PRD 链接 + 9.1 呈递）— runner-owned gate: 发布软门/合并硬门
+- [x] 独立 verifier PASS — 2026-10-06 由用户「#208 合并即验收」的明确声明闭环（verifier 阶段在停跑时未出 verdict，属执行侧缺口，非 oracle 未达成） <!-- 证据: AGENTS.md「合并即验收」口径；已核对最终 Git tree，见 Change Log 验收回填条 -->
+- [x] PR 按仓库 PR 正文契约发布（merge-acceptance 声明 + 唯一 PRD 链接 + 9.1 呈递） <!-- 证据: 唯一关联 PR #208（2b7cae4c）已合并，PRD 随该提交归档进 main；#212（866ddabc）补齐其留下的 CI 红灯 -->
 
 #### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一：确认快速通道边界 = 一次跳过全部三层验证 + PR 带未验证标注 + 合并仍人工、无中间档
-- [ ] 决策二：确认 stack 依赖 Issue 一律拒绝 `--fast-merge`（拒绝而非警告）
-- [ ] 9.1 呈递面确认：人已实际看过 rv-1 呈递物并认可
+- [x] 决策一：确认快速通道边界 = 一次跳过全部三层验证 + PR 带未验证标注 + 合并仍人工、无中间档 <!-- 证据: 2026-10-06 用户声明「#208 合并即验收」；边界已由 Change Log「门禁旁路面收窄」条收窄为 Phase 4.5 的 rv_reexec + verifier -->
+- [x] 决策二：确认 stack 依赖 Issue 一律拒绝 `--fast-merge`（拒绝而非警告） <!-- 证据: 同上；rv-3 双向 + fail-closed 三断言 -->
+- [x] 9.1 呈递面确认：人已实际看过 rv-1 呈递物并认可 <!-- 证据: 同上；rv-1 证据 `tasks/evidence/<stem>/rv-1-fast-merge-run.md` 已随 #208 发布 -->
 
 ## 10. Functional Requirements
 
@@ -450,3 +450,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 签名镜像是历史既成事实（handler/publication 对偶设计），本次改动不应扩大重复面；也符合 code-reuse 规范"不新增重复"的门禁意图
 - Impact: `just lint --reuse` 与 `just lint --full` 恢复通过；rv-1..rv-4 证据脚本在最终代码树重跑全绿并重采（冻结凭证更新见 evidence report）
 - Review: 执行器 + 门禁（R0/R1，纯呈现层重排，无行为变化）
+
+### 人工验收回填与 CI 红灯收尾（2026-10-06，issue-207 验收）
+- Type: docs
+- Before: 功能随 PR #208（`2b7cae4c`）合并，但交付留下两个尾巴——main 的 `Validate Template` 从 `2b7cae4c` 起 FAILURE（#208 把 `cli_parser.py` 顶到 1007、`run_agent_execution_loop.py` 顶到 1015 非空行；#210 又顶过线 `run_agent_once.py` 1021、`agent_runner_failure.py` 1179，allow list 已清空不豁免），以及验收横幅仍是 `🧍 待人工验收`（独立 verifier 在停跑时未出 verdict）
+- After: PR #212（`866ddabc`）把四个超限文件按域拆到 1000 非空行以下（CLI 命令树 → `cli_parser_*_commands` + `cli_parser_options`；执行循环 → `agent_runner_attempt_recording` + `agent_runner_delivery_closeout`；`agent_runner_memory`；`agent_runner_stale_attempt`），纯搬家：parser 树 309 条记录与基线 `diff` 为空、`CI=true just test all` 3130 passed / 1 skipped；用户在 2026-10-06 明确声明「#208 合并即验收」，据此回填三项 `Human-Confirmed` 与两条 runner-owned 门，横幅改 `✅ 已验收`，Issue #207 关闭
+- Reason: 按 AGENTS.md「合并即验收」口径回填，须核对最终 Git tree——已在 `866ddabc` 上复核 `--fast-merge` 仍存在于 `cli_parser_runner_commands.py` / `cli_typer_runner.py` 且该提交 CI 全绿（含 Validate Template）
+- Impact: 无生产代码变更；仓库 CI 从红转绿；#207 交付闭环
+- Review: 人已确认（用户声明「#208 合并即验收」）
