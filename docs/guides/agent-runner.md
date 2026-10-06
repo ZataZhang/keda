@@ -1844,6 +1844,9 @@ iar run --all
 # Daemon 模式（默认每 120 秒轮询一次，仅当前已初始化注册仓库；加 --all 才处理所有 enabled registry entries）
 iar daemon
 
+# 手动驱动一次 backlog 调度（一次 continuous-scheduling pass：reconcile + promote + discover，不用等 daemon 轮询）
+iar backlog advance
+
 # 单次 review 检查
 iar review
 
