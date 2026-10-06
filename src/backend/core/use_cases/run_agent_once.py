@@ -21,9 +21,6 @@ import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from backend.core.agent.memory import (
-    save_short_term_memory,
-)
 from backend.core.shared.interfaces.agent_output_protocol import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
 )
@@ -111,6 +108,7 @@ from backend.core.use_cases.agent_runner_git import (
     list_stageable_paths,
     run_verification,
 )
+from backend.core.use_cases.agent_runner_memory import _resolve_memory_stores
 from backend.core.use_cases.agent_runner_publish import (
     publish_changes,
     run_preflight_checks,
@@ -1002,60 +1000,6 @@ def _append_claude_assistant_text(
             continue
         if content_block.get("type") == "text":
             text_parts.append(str(content_block.get("text", "")))
-
-
-def _resolve_memory_stores(worktree_path: Path, memory_config):
-    """Construct the long-term + skill stores for prompt injection.
-
-    Returns ``(None, None)`` when memory is disabled so callers can fall
-    back to non-injecting behaviour without sprinkling the same guard
-    everywhere. The actual composition lives in
-    ``core/agent/memory/_composition.py`` which dynamically loads the
-    ``infrastructure/`` implementations, preserving the strict
-    ``core -> infrastructure`` ban.
-    """
-    from backend.core.agent.memory._composition import (
-        build_default_memory_services,
-    )
-
-    services = build_default_memory_services(worktree_path, memory_config)
-    return services.long_term, services.skill
-
-
-def _persist_short_term_memory(
-    *,
-    config: AppConfig,
-    issue: IssueSummary,
-    worktree_path: Path,
-    attempt: AttemptResult,
-    repo_id: str,
-) -> None:
-    """Best-effort save of a single attempt into the short-term memory store."""
-    if not config.memory.enabled:
-        return
-    try:
-        from backend.core.agent.memory._composition import (
-            build_default_memory_services,
-        )
-
-        services = build_default_memory_services(worktree_path, config.memory)
-        if services.short_term is None:
-            return
-        save_short_term_memory(
-            repo_id=repo_id,
-            issue=issue,
-            attempt_result=attempt,
-            worktree_path=worktree_path,
-            memory_config=config.memory,
-            store=services.short_term,
-        )
-    except Exception as exc:  # noqa: BLE001 - memory side-channel must not break runner.
-        _logger.warning(
-            "Failed to record short-term memory for Issue #%d attempt %d: %s",
-            issue.number,
-            attempt.attempt_number,
-            exc,
-        )
 
 
 def run_agent_until_committed(

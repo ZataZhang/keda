@@ -3,7 +3,7 @@
 from __future__ import annotations
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +13,6 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     AttemptResult,
     CommandResult,
-    DeliveryGateError,
     FailureType,
     IssueSummary,
     TokenUsage,
@@ -25,11 +24,7 @@ from backend.core.use_cases.run_agent_once import (
     PrdDeliveryError,
     ProviderCapacityError,
     UnrecoverableError,
-    _append_attempt_and_notify,
     _logger,
-    _make_attempt_result,
-    _persist_short_term_memory,
-    _resolve_memory_stores,
     _resolve_repo_id,
     build_recovery_prompt,
     classify_failure,
@@ -49,21 +44,22 @@ from backend.core.use_cases.run_agent_once import (
     unstage_changes,
     wait_before_recovery_attempt,
 )
-from backend.core.use_cases.agent_runner_closeout import (
-    CloseoutPromptContext,
-    CloseoutSnapshot,
-    build_closeout_allowed_scope,
-    capture_closeout_snapshot,
-    find_closeout_scope_violations,
-    format_closeout_attempt_detail,
-    restore_prd_from_snapshot,
-    run_closeout_agent,
-    summarize_closeout_changes,
+from backend.core.use_cases.agent_runner_attempt_recording import (
+    _AttemptRecordContext,
+    _classify_and_record_gate_failure,
+    _emit_agent_usage,
+    _record_attempt,
+)
+from backend.core.use_cases.agent_runner_delivery_closeout import (
+    _DeliveryCloseoutContext,
+    _attempt_delivery_closeout,
+    _render_discarded_closeout_note,
 )
 from backend.core.use_cases.agent_runner_failure import (
     ForbiddenBlockedError,
     is_recoverable_commit_request_error,
 )
+from backend.core.use_cases.agent_runner_memory import _resolve_memory_stores
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
     format_prd_delivery_detail,
@@ -118,343 +114,6 @@ class AgentExecutionRequest:
     #: rv_reexec 与 verifier 两道验证门禁（builder 失败 / 恢复循环不受影响）；
     #: 发布路径据此在 PR 正文打未验证标注。默认 False = 与今天完全一致。
     fast_merge: bool = False
-
-
-@dataclass(frozen=True)
-class _AttemptRecordContext:
-    """一次 attempt 的记录上下文。
-
-    执行循环里每个失败分支都要"记一条 attempt + 通知增量持久化 + 写短期记忆"，
-    这三步共用同一组 attempt 级状态；逐个参数展开会在每个分支复制一段二十多行的
-    样板，因此收敛成一个上下文对象由 :func:`_record_attempt` 消费。
-    """
-
-    request: AgentExecutionRequest
-    attempt_index: int
-    attempt_phases: AttemptPhaseTimer
-    attempt_started_mono: float
-    attempt_started_iso: str
-    attempt_results: list[AttemptResult]
-    repo_id: str
-    #: Phase 1 agent 调用自报的 token 用量；调用失败（无结果对象）时为 None。
-    token_usage: TokenUsage | None = None
-    #: 本 attempt 生效的模型选择（已按执行 agent 校验；绑定被丢弃后为 ``None``）。
-    effective_model_selection: ModelSelection | None = None
-
-
-@dataclass(frozen=True)
-class _DeliveryCloseoutContext:
-    """一次交付收尾所需的上下文：attempt 记录上下文 + 门禁失败 + PRD 基线。"""
-
-    record: _AttemptRecordContext
-    gate_failure: DeliveryGateError
-    prd_baseline_content: str | None
-
-    @property
-    def request(self) -> AgentExecutionRequest:
-        """Return the execution request this closeout belongs to."""
-        return self.record.request
-
-
-@dataclass(frozen=True)
-class _CloseoutAttemptResult:
-    """一次交付收尾 pass 的结果。
-
-    Attributes:
-        revalidated: 收尾 pass 未越界、且门禁链重跑通过时为 True。
-        discarded_detail: 收尾判失败时，被撤销掉的那一轮收尾改动明细（runner 自行
-            比对得出，非 agent 自述）。收尾改动一律回滚，但明细会转交给下一次
-            attempt——否则重跑只能从零猜起，既白做一遍又拿不到"上轮试过什么"。
-    """
-
-    revalidated: bool
-    discarded_detail: str = ""
-
-
-def _render_discarded_closeout_note(result: _CloseoutAttemptResult) -> str:
-    """把被撤销的收尾改动渲染成给下一次 attempt 的上下文。
-
-    Args:
-        result: 本次收尾 pass 的结果。
-
-    Returns:
-        需要提示时返回以空行开头的段落，否则返回空串。
-    """
-    if not result.discarded_detail:
-        return ""
-    return (
-        "\n\nA delivery-closeout pass already ran for this failure and its checklist edits "
-        "were rolled back (keep that in mind; do not assume they are still applied). "
-        "Runner-measured record of what it did:\n" + result.discarded_detail
-    )
-
-
-def _emit_agent_usage(
-    request: AgentExecutionRequest,
-    flow: str,
-    agent_name: str,
-    usage: TokenUsage | None,
-) -> None:
-    """旁路发出一次非 attempt 主体的 agent 调用用量；任何失败都不阻断主流程。"""
-    if request.on_agent_usage is None or usage is None:
-        return
-    try:
-        request.on_agent_usage(flow, agent_name, usage)
-    except Exception:  # noqa: BLE001 - observation must not break the main flow.
-        _logger.warning("Agent usage observation callback failed (flow=%s).", flow, exc_info=True)
-
-
-def _record_attempt(
-    context: _AttemptRecordContext,
-    *,
-    failure_type: FailureType,
-    detail: str,
-    recovered: bool = False,
-) -> AttemptResult:
-    """记一条 attempt，通知增量持久化回调，并写入短期记忆。
-
-    Args:
-        context: 当前 attempt 的记录上下文。
-        failure_type: 本次 attempt 的分类结果。
-        detail: 写进 attempt 历史与 Issue 评论的诊断文本。
-        recovered: 本次 attempt 是否从先前的失败中恢复。
-
-    Returns:
-        刚刚记录的 :class:`AttemptResult`。
-    """
-    effective_selection = context.effective_model_selection
-    _append_attempt_and_notify(
-        context.attempt_results,
-        _make_attempt_result(
-            attempt_number=context.attempt_index + 1,
-            failure_type=failure_type,
-            recovered=recovered,
-            detail=detail,
-            agent=context.request.selected_agent,
-            started_mono=context.attempt_started_mono,
-            started_iso=context.attempt_started_iso,
-            phase_durations=context.attempt_phases.snapshot(),
-            token_usage=context.token_usage,
-            preset=(effective_selection.preset_name if effective_selection is not None else ""),
-            model=effective_selection.model if effective_selection is not None else "",
-        ),
-        context.request.on_attempt_recorded,
-    )
-    recorded_attempt = context.attempt_results[-1]
-    _persist_short_term_memory(
-        config=context.request.config,
-        issue=context.request.issue,
-        worktree_path=context.request.worktree_path,
-        attempt=recorded_attempt,
-        repo_id=context.repo_id,
-    )
-    return recorded_attempt
-
-
-def _classify_and_record_gate_failure(
-    context: _AttemptRecordContext,
-    *,
-    detail: str,
-    verification_results: list[CommandResult],
-    exc: BaseException | None,
-) -> FailureType:
-    """给一次"代码已在 worktree、尚未提交"的失败分类并记一条 attempt。
-
-    Phase 2 验证、Phase 3 PRD 交付、Phase 3.5 证据门禁、Phase 4 暂存后验证四处的
-    失败形状完全一致（读一次 HEAD、按未提交状态分类、记一条 attempt），差别只在
-    诊断文本与传给分类器的上下文，因此共用本函数而不是各写一遍。
-
-    Args:
-        context: 当前 attempt 的记录上下文。
-        detail: 写进 attempt 历史的诊断文本。
-        verification_results: 传给分类器的验证结果。
-        exc: 触发本次失败的异常；``None`` 表示失败由验证结果本身表达。
-
-    Returns:
-        分类结果，供调用方决定 recovery 措辞与升级路径。
-    """
-    request = context.request
-    failure_type = classify_failure(
-        before_sha=request.before_sha,
-        after_sha=get_head_sha(request.worktree_path, request.process_runner),
-        has_uncommitted=False,
-        agent_result=CommandResult(("",), 0, "", ""),
-        verification_results=verification_results,
-        exc=exc,
-    )
-    _record_attempt(context, failure_type=failure_type, detail=detail)
-    return failure_type
-
-
-def _revert_failed_closeout(
-    context: _DeliveryCloseoutContext,
-    before_snapshot: CloseoutSnapshot,
-) -> None:
-    """收尾判失败后撤销它对 canonical PRD 的编辑。
-
-    失败的收尾一个字节都不该留下：它可能已经勾上了举不出证据的验收条目，而清单
-    这道门禁只问"还有没有未勾项"，留着就等于让随后的完整重跑把那个凭空的勾当成
-    既成事实收下。撤销只针对 PRD——证据目录不进代码 diff 且会被独立重判，越界写入
-    的其他文件按设计交给完整重跑处理。
-
-    Args:
-        context: 本次收尾的上下文。
-        before_snapshot: 收尾前采集的快照，提供还原用的 PRD 原文。
-    """
-    if restore_prd_from_snapshot(
-        context.request.issue, context.request.worktree_path, before_snapshot
-    ):
-        _logger.info(
-            "Reverted the failed closeout's PRD edits for Issue #%d.",
-            context.request.issue.number,
-        )
-
-
-def _attempt_delivery_closeout(
-    context: _DeliveryCloseoutContext,
-    *,
-    prd_overrides: Mapping[str, str] | None = None,
-    prd_preset_overrides: Mapping[str, str] | None = None,
-) -> _CloseoutAttemptResult:
-    """尝试用一次短命的收尾修复接住交付门禁失败。
-
-    只接住被抛出点标记为收尾类的失败；真失败与收尾层被关闭时立刻返回未通过，
-    调用方走本层落地前的整轮重跑路径。``revalidated`` 为 True 表示收尾 pass
-    没有越界、完整门禁链已重跑通过，本轮可以继续原流程。
-
-    Args:
-        context: 本次收尾的执行请求、attempt 计时与 PRD 基线。
-        prd_overrides: PRD 文件头部 lifecycle_agents 覆盖（最高优先级）。
-        prd_preset_overrides: PRD 文件头部 / CLI 传入的阶段 -> 预设绑定。
-
-    Returns:
-        :class:`_CloseoutAttemptResult`；``revalidated`` 仅在门禁链重跑通过时为
-        True，其余一律 False，并尽量带上被回滚的收尾改动明细。
-    """
-    request = context.request
-    config = request.config
-    issue = request.issue
-    gate_failure = context.gate_failure
-    if not gate_failure.kind.is_closeout_eligible:
-        return _CloseoutAttemptResult(revalidated=False)
-    if not config.runner.closeout_agent_enabled:
-        _logger.info(
-            "Closeout Agent disabled for Issue #%d; escalating %s gate failure to full recovery.",
-            issue.number,
-            gate_failure.kind.value,
-        )
-        return _CloseoutAttemptResult(revalidated=False)
-
-    worktree_path = request.worktree_path
-    process_runner = request.process_runner
-    allowed_scope = build_closeout_allowed_scope(issue, config)
-    before_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
-    try:
-        with context.record.attempt_phases.measure("closeout"):
-            closeout_agent_result = run_closeout_agent(
-                resolve_lifecycle_agent(
-                    "closeout",
-                    config,
-                    issue=issue,
-                    selected_agent=request.selected_agent,
-                    prd_overrides=prd_overrides,
-                    prd_preset_overrides=prd_preset_overrides,
-                ),
-                config,
-                process_runner,
-                prompt_context=CloseoutPromptContext(
-                    issue=issue,
-                    worktree_path=worktree_path,
-                    gate_failure_message=str(gate_failure),
-                    kind=gate_failure.kind,
-                    allowed_scope=allowed_scope,
-                ),
-                # closeout 未自绑预设时继承实现者的绑定；换人丢弃在 resilient 层。
-                model_selection=(
-                    resolve_lifecycle_model_selection(
-                        "closeout",
-                        config,
-                        issue=issue,
-                        prd_preset_overrides=prd_preset_overrides,
-                    )
-                    or context.record.effective_model_selection
-                ),
-            )
-        # 发射点 agent 名与调用点同源（resolve_lifecycle_agent 纯查找、幂等；AST 守卫要求内联形态）。
-        _emit_agent_usage(
-            request,
-            "closeout",
-            resolve_lifecycle_agent(
-                "closeout",
-                config,
-                issue=issue,
-                selected_agent=request.selected_agent,
-                prd_overrides=prd_overrides,
-            ),
-            closeout_agent_result.token_usage,
-        )
-    except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        _logger.warning("Closeout Agent failed for Issue #%d: %s", issue.number, exc)
-        _revert_failed_closeout(context, before_snapshot)
-        return _CloseoutAttemptResult(revalidated=False)
-
-    after_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
-    scope_violations = find_closeout_scope_violations(
-        before_snapshot, after_snapshot, allowed_scope
-    )
-    if scope_violations:
-        _logger.warning(
-            "Closeout Agent modified out-of-scope files for Issue #%d (%s); "
-            "escalating to full recovery.",
-            issue.number,
-            ", ".join(scope_violations),
-        )
-        _revert_failed_closeout(context, before_snapshot)
-        return _CloseoutAttemptResult(revalidated=False)
-
-    try:
-        ensure_prd_delivery_ready(
-            issue,
-            worktree_path,
-            process_runner,
-            prd_baseline_content=context.prd_baseline_content,
-        )
-        ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
-        ensure_no_misplaced_evidence_helpers(worktree_path, config, process_runner)
-        ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
-    except DeliveryGateError as exc:
-        # 收尾改动一律回滚（勾选门禁没有独立验证源，留着凭空的勾就成了既成事实），
-        # 但它到底做了什么由 runner 自行比对得出，转交给下一次 attempt——
-        # 否则重跑只能从零猜起，白做一遍还拿不到"上轮试过什么"。
-        discarded_summary = summarize_closeout_changes(before_snapshot, after_snapshot)
-        _logger.warning(
-            "Delivery gates still fail after closeout for Issue #%d; "
-            "escalating to full recovery: %s",
-            issue.number,
-            exc,
-        )
-        _revert_failed_closeout(context, before_snapshot)
-        return _CloseoutAttemptResult(
-            revalidated=False,
-            discarded_detail=format_closeout_attempt_detail(discarded_summary),
-        )
-
-    # 门禁链已在收尾流程内整体重跑，PRD 可能刚被归档，因此留痕用的"收尾后"快照
-    # 必须重取一次，否则新归档路径下的 PRD 文本会被当成"消失了"。
-    final_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
-    closeout_summary = summarize_closeout_changes(before_snapshot, final_snapshot)
-    _record_attempt(
-        context.record,
-        failure_type=FailureType.DELIVERY_CLOSEOUT,
-        detail=format_closeout_attempt_detail(closeout_summary),
-        recovered=True,
-    )
-    _logger.info(
-        "Closeout Agent repaired the %s gate failure for Issue #%d; continuing this attempt.",
-        gate_failure.kind.value,
-        issue.number,
-    )
-    return _CloseoutAttemptResult(revalidated=True)
 
 
 def _attempt_resume_session_id(

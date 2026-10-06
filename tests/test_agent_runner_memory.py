@@ -16,10 +16,8 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     MemoryConfig,
 )
-from backend.core.use_cases.run_agent_once import (
-    _persist_short_term_memory,
-    _resolve_repo_id,
-)
+from backend.core.use_cases.agent_runner_memory import _persist_short_term_memory
+from backend.core.use_cases.run_agent_once import _resolve_repo_id
 from backend.infrastructure.memory import (
     LongTermMemoryStore,
     ShortTermMemoryContext,

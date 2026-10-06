@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
-from backend.core.use_cases.agent_runner_failure import (
+from backend.core.use_cases.agent_runner_stale_attempt import (
     StaleAttemptDecision,
     StaleAttemptDisposition,
     StaleAttemptEvidence,

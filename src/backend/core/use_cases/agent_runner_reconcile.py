@@ -30,8 +30,14 @@ from typing import Callable
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
-from backend.core.use_cases.agent_runner_failure import (
-    ATTEMPT_HISTORY_HEADING,
+from backend.core.use_cases.agent_runner_failure import ATTEMPT_HISTORY_HEADING
+from backend.core.use_cases.agent_runner_reclaim import (
+    ClaimMarkerDetail,
+    classify_claim_staleness,
+    is_pid_alive,
+    parse_claim_marker_detail,
+)
+from backend.core.use_cases.agent_runner_stale_attempt import (
     StaleAttemptDecision,
     StaleAttemptDisposition,
     StaleAttemptEvidence,
@@ -39,12 +45,6 @@ from backend.core.use_cases.agent_runner_failure import (
     decide_stale_attempt_disposition,
     format_stale_attempt_comment,
     parse_reconcile_marker,
-)
-from backend.core.use_cases.agent_runner_reclaim import (
-    ClaimMarkerDetail,
-    classify_claim_staleness,
-    is_pid_alive,
-    parse_claim_marker_detail,
 )
 from backend.core.use_cases.agent_runner_session_store import load_agent_session_record
 from backend.core.use_cases.agent_runner_worktree_probe import _find_worktree_path_for_issue
