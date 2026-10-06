@@ -547,14 +547,14 @@ function PrdTokenUsageTable({ rows }: { rows: PrdTokenUsageEntry[] }) {
             <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
               <th className="py-2 pr-3">Issue</th>
               <th className="py-2 pr-3">PRD</th>
-              <th className="py-2 pr-3">总量</th>
-              <th className="py-2 pr-3">输入</th>
-              <th className="py-2 pr-3">输出</th>
-              <th className="py-2 pr-3">缓存读</th>
-              <th className="py-2 pr-3">缓存写</th>
-              <th className="py-2 pr-3">命中率</th>
-              <th className="py-2 pr-3">调用数</th>
-              <th className="py-2 pr-3">执行次数</th>
+              <th className="py-2 pl-3 text-right">总量</th>
+              <th className="py-2 pl-3 text-right">输入</th>
+              <th className="py-2 pl-3 text-right">输出</th>
+              <th className="py-2 pl-3 text-right">缓存读</th>
+              <th className="py-2 pl-3 text-right">缓存写</th>
+              <th className="py-2 pl-3 text-right">命中率</th>
+              <th className="py-2 pl-3 text-right">调用数</th>
+              <th className="py-2 pl-3 text-right">执行次数</th>
             </tr>
           </thead>
           <tbody>
@@ -572,22 +572,26 @@ function PrdTokenUsageTable({ rows }: { rows: PrdTokenUsageEntry[] }) {
                   <td className="py-2 pr-3 font-medium" title={entry.prd_path ?? undefined}>
                     {entry.prd_path ? prdBasename(entry.prd_path) : "—"}
                   </td>
-                  <td className="py-2 pr-3 font-semibold">
+                  <td className="py-2 pl-3 text-right font-semibold">
                     {formatTokenCount(totals.total_tokens)}
                   </td>
-                  <td className="py-2 pr-3 text-xs">{formatTokenCount(totals.input_tokens)}</td>
-                  <td className="py-2 pr-3 text-xs">{formatTokenCount(totals.output_tokens)}</td>
-                  <td className="py-2 pr-3 text-xs">
+                  <td className="py-2 pl-3 text-right text-xs">
+                    {formatTokenCount(totals.input_tokens)}
+                  </td>
+                  <td className="py-2 pl-3 text-right text-xs">
+                    {formatTokenCount(totals.output_tokens)}
+                  </td>
+                  <td className="py-2 pl-3 text-right text-xs">
                     {formatTokenCount(totals.cache_read_input_tokens)}
                   </td>
-                  <td className="py-2 pr-3 text-xs">
+                  <td className="py-2 pl-3 text-right text-xs">
                     {formatTokenCount(totals.cache_creation_input_tokens)}
                   </td>
-                  <td className="py-2 pr-3 text-xs">
+                  <td className="py-2 pl-3 text-right text-xs">
                     {rate === null ? "—" : `${Math.round(rate * 100)}%`}
                   </td>
-                  <td className="py-2 pr-3 text-xs">{totals.usage_count}</td>
-                  <td className="py-2 pr-3 text-xs">{entry.run_count}</td>
+                  <td className="py-2 pl-3 text-right text-xs">{totals.usage_count}</td>
+                  <td className="py-2 pl-3 text-right text-xs">{entry.run_count}</td>
                 </tr>
               );
             })}
@@ -622,13 +626,13 @@ function TokenUsageTable({
         <thead>
           <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
             <th className="py-2 pr-3">分组</th>
-            <th className="py-2 pr-3">总量</th>
-            <th className="py-2 pr-3">输入</th>
-            <th className="py-2 pr-3">输出</th>
-            <th className="py-2 pr-3">缓存读</th>
-            <th className="py-2 pr-3">缓存写</th>
-            <th className="py-2 pr-3">命中率</th>
-            <th className="py-2 pr-3">调用数</th>
+            <th className="py-2 pl-3 text-right">总量</th>
+            <th className="py-2 pl-3 text-right">输入</th>
+            <th className="py-2 pl-3 text-right">输出</th>
+            <th className="py-2 pl-3 text-right">缓存读</th>
+            <th className="py-2 pl-3 text-right">缓存写</th>
+            <th className="py-2 pl-3 text-right">命中率</th>
+            <th className="py-2 pl-3 text-right">调用数</th>
           </tr>
         </thead>
         <tbody>
@@ -641,21 +645,25 @@ function TokenUsageTable({
                 className="border-b border-slate-100 dark:border-slate-800"
               >
                 <td className="py-2 pr-3 font-medium">{label}</td>
-                <td className="py-2 pr-3 font-semibold">
+                <td className="py-2 pl-3 text-right font-semibold">
                   {formatTokenCount(row.total_tokens)}
                 </td>
-                <td className="py-2 pr-3 text-xs">{formatTokenCount(row.input_tokens)}</td>
-                <td className="py-2 pr-3 text-xs">{formatTokenCount(row.output_tokens)}</td>
-                <td className="py-2 pr-3 text-xs">
+                <td className="py-2 pl-3 text-right text-xs">
+                  {formatTokenCount(row.input_tokens)}
+                </td>
+                <td className="py-2 pl-3 text-right text-xs">
+                  {formatTokenCount(row.output_tokens)}
+                </td>
+                <td className="py-2 pl-3 text-right text-xs">
                   {formatTokenCount(row.cache_read_input_tokens)}
                 </td>
-                <td className="py-2 pr-3 text-xs">
+                <td className="py-2 pl-3 text-right text-xs">
                   {formatTokenCount(row.cache_creation_input_tokens)}
                 </td>
-                <td className="py-2 pr-3 text-xs">
+                <td className="py-2 pl-3 text-right text-xs">
                   {rate === null ? "—" : `${Math.round(rate * 100)}%`}
                 </td>
-                <td className="py-2 pr-3 text-xs">{row.usage_count}</td>
+                <td className="py-2 pl-3 text-right text-xs">{row.usage_count}</td>
               </tr>
             );
           })}
