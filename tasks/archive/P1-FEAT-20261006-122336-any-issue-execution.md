@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收（6 项 Human-Confirmed 仍未勾选）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 是给人审的行为与决策层，不含实现机制、文件路径与命令；Part B 是给执行器的实现层。两层都是投影，`§8` 与 `§9` 才是对应事实源。
@@ -987,3 +987,11 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 - Reason: 门禁开关是 `validation_required(issue_body, config)` 这个对正文的纯函数结果；若放任 agent 的输出决定，同一句 `--from-prompt` 可能这次入门禁、那次不入门禁，FR-9 的「确定开启/默认关闭」就只是概率性的。
 - Impact: 默认路径产物可能比 agent 原始输出少一个小节（负控制见 rv-2：把剥离方向写反会让默认态测试失败）；PRD 路径不受影响，它的验收段来自 PRD 本身。
 - Review: 待人工验收（见 §9.2 rv-2 expected 断言 `validation_required` 默认 False）。
+
+### 验收状态横幅翻为「待人工验收」
+- Type: docs
+- Before: 横幅为 `⬜ 未开工`，但 §9 Acceptance Checklist 中全部执行器验收项已勾选并附证据，仅 6 项 Human-Confirmed 保持空框。
+- After: 横幅改为 `🧍 待人工验收（6 项 Human-Confirmed 仍未勾选）`，其余内容（含全部清单项）未动。
+- Reason: 横幅必须是 §9 的投影；执行器侧交付完成后、人工验收完成前的正确状态是 awaiting_human，而非 not_started。
+- Impact: 无生产代码变更；不改变任何验收项的勾选状态。
+- Review: 无需人工确认（投影修正，与既有「Final Reconciliation 横幅翻转」先例一致）。
