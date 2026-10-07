@@ -3129,3 +3129,24 @@ def test_run_post_pr_supervisor_cycle_drops_model_binding_on_switch(
     assert codex_calls and "--model" in codex_calls[0]
     assert claude_calls
     assert "--model" not in claude_calls[0]
+
+
+@pytest.mark.parametrize(
+    "scope_value, expected_scope",
+    [
+        ("code_review", "code_review"),
+        ("ci", "ci"),
+        ("unknown", "ci"),
+        (None, "ci"),
+    ],
+)
+def test_parse_supervisor_repair_scope(scope_value: str | None, expected_scope: str) -> None:
+    """修复范围须明确声明，旧输出与未知范围保守归入 CI 策略。"""
+    decision_json = json.dumps(
+        {
+            "action": "repair_pr_branch",
+            "summary": "repair",
+            "repair_scope": scope_value,
+        }
+    )
+    assert parse_supervisor_action(decision_json).repair_scope == expected_scope

@@ -23,6 +23,7 @@ from backend.core.use_cases.agent_runner_events import (
     parse_latest_ci_auto_repair_policy,
 )
 from backend.core.use_cases.backlog_ci_delivery import (
+    AutoRepairDecisionContext,
     BacklogCiPolicyError,
     build_ci_delivery,
     compute_effective_auto_repair,
@@ -231,9 +232,10 @@ def test_gate_blocks_when_global_off() -> None:
     allowed, reason = gate_auto_repair_decision(
         config=_config(False),
         github_client=github,
-        issue_number=42,
-        pr_context=_pr_context("FAILURE"),
-        pr_branch="agent/issue-42",
+        context=AutoRepairDecisionContext(
+            issue_number=42,
+            pr_context=_pr_context("FAILURE"),
+        ),
     )
     assert allowed is False
     assert "未开启" in reason
@@ -245,9 +247,10 @@ def test_gate_blocks_when_prd_forced_off() -> None:
     allowed, _reason = gate_auto_repair_decision(
         config=_config(True),
         github_client=github,
-        issue_number=42,
-        pr_context=_pr_context("FAILURE"),
-        pr_branch="agent/issue-42",
+        context=AutoRepairDecisionContext(
+            issue_number=42,
+            pr_context=_pr_context("FAILURE"),
+        ),
     )
     assert allowed is False
 
@@ -258,9 +261,10 @@ def test_gate_allows_forced_on_despite_global_off() -> None:
     allowed, _reason = gate_auto_repair_decision(
         config=_config(False),
         github_client=github,
-        issue_number=42,
-        pr_context=_pr_context("FAILURE"),
-        pr_branch="agent/issue-42",
+        context=AutoRepairDecisionContext(
+            issue_number=42,
+            pr_context=_pr_context("FAILURE"),
+        ),
     )
     assert allowed is True
 
@@ -282,9 +286,10 @@ def test_gate_blocks_when_rounds_exhausted() -> None:
     allowed, reason = gate_auto_repair_decision(
         config=_config(True),
         github_client=github,
-        issue_number=42,
-        pr_context=_pr_context("FAILURE"),
-        pr_branch="agent/issue-42",
+        context=AutoRepairDecisionContext(
+            issue_number=42,
+            pr_context=_pr_context("FAILURE"),
+        ),
     )
     assert allowed is False
     assert "耗尽" in reason
@@ -597,3 +602,30 @@ def test_api_manual_repair_idempotent(ci_environment) -> None:
     assert second.status_code == 200
     assert second.json()["requested"] is False
     assert ci_environment["github"].list_issue_comments(42) == comments_after_first
+
+
+@pytest.mark.parametrize("repair_scope", ["ci", "code_review", "unknown"])
+def test_repair_scope_respects_policy_and_shared_budget(repair_scope: str) -> None:
+    """纯代码审查绕过 CI 开关，但不能绕过共同修复预算。"""
+    github = FakeGitHubClient()
+    allowed, _reason = gate_auto_repair_decision(
+        config=_config(False),
+        github_client=github,
+        context=AutoRepairDecisionContext(
+            issue_number=42,
+            pr_context=_pr_context("SUCCESS"),
+            repair_scope=repair_scope,
+        ),
+    )
+    assert allowed is (repair_scope == "code_review")
+    exhausted, reason = gate_auto_repair_decision(
+        config=_config(False, max_attempts=0),
+        github_client=github,
+        context=AutoRepairDecisionContext(
+            issue_number=42,
+            pr_context=_pr_context("SUCCESS"),
+            repair_scope="code_review",
+        ),
+    )
+    assert exhausted is False
+    assert "耗尽" in reason
