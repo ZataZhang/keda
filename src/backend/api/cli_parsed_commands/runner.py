@@ -1,5 +1,5 @@
-"""``iar run`` / ``iar daemon`` / ``iar review`` / ``iar review-daemon``
-/ ``iar recover`` / ``iar blocked-continue`` handlers.
+"""``kc run`` / ``kc daemon`` / ``kc review`` / ``kc review-daemon``
+/ ``kc recover`` / ``kc blocked-continue`` handlers.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
 dispatcher.
@@ -36,7 +36,7 @@ def _dry_run_preview(
     fast_merge: bool = False,
     publish_stage: str = PublishStage.NORMAL.value,
 ) -> dict:
-    """组装 ``iar run --dry-run`` 的机读预览（本轮执行计划，逐 Issue 明细在 stderr 日志）。"""
+    """组装 ``kc run --dry-run`` 的机读预览（本轮执行计划，逐 Issue 明细在 stderr 日志）。"""
     return {
         "dry_run": True,
         "agent": agent,
@@ -53,7 +53,7 @@ def _dry_run_preview(
 
 
 def run_run_command(ctx: ParsedCommandContext) -> int:
-    """``iar run``: run one agent-runner polling cycle (a target is required).
+    """``kc run``: run one agent-runner polling cycle (a target is required).
 
     目标必填（FR-1）：``--issue <N>``、PRD 路径（解析回链 Issue）或显式
     ``--all-ready``（等价旧的"捞 ready 队列"行为，FR-2）。同仓已有 daemon
@@ -66,7 +66,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             "--json/--output json 只在 --dry-run 预览下有定义；真实执行的过程输出是流式文本。",
             code=ExitCode.USAGE,
-            suggestion="iar run --dry-run --json",
+            suggestion="kc run --dry-run --json",
         )
     parsed = ctx.parsed
     prd_path = getattr(parsed, "prd_path", None)
@@ -84,7 +84,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             "with --all-ready (an unreviewed burst across the whole queue is exactly "
             "what the flag must not enable).",
             code=ExitCode.USAGE,
-            suggestion="iar run --issue <N> --direct-pr",
+            suggestion="kc run --issue <N> --direct-pr",
         )
     if fast_merge and all_ready:
         raise CliError(
@@ -92,22 +92,22 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             "with --all-ready (a queue-wide unverified burst is exactly what the flag "
             "must not enable).",
             code=ExitCode.USAGE,
-            suggestion="iar run --issue <N> --fast-merge · iar run <PRD_PATH> --fast-merge",
+            suggestion="kc run --issue <N> --fast-merge · kc run <PRD_PATH> --fast-merge",
         )
 
     if target_issue is not None and prd_path:
         raise CliError(
             "--issue and a PRD path are mutually exclusive targets; pick one.",
             code=ExitCode.USAGE,
-            suggestion="iar run --issue <N> --repo-id <repo>",
+            suggestion="kc run --issue <N> --repo-id <repo>",
         )
     if target_issue is None and not prd_path and not all_ready:
         raise CliError(
-            "iar run requires a target: pass --issue <N>, a PRD path, or --all-ready.",
+            "kc run requires a target: pass --issue <N>, a PRD path, or --all-ready.",
             code=ExitCode.USAGE,
             suggestion=(
-                "iar run --issue <N> --repo-id <repo> · "
-                "iar run tasks/pending/<prd>.md · iar run --all-ready"
+                "kc run --issue <N> --repo-id <repo> · "
+                "kc run tasks/pending/<prd>.md · kc run --all-ready"
             ),
         )
     contexts = _resolve_cli_repository_targets(
@@ -141,7 +141,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             raise CliError(
                 str(exc),
                 code=ExitCode.USAGE,
-                suggestion="iar issue create tasks/pending/<prd>.md",
+                suggestion="kc issue create tasks/pending/<prd>.md",
             ) from exc
 
     # 快速通道 stack 门禁（决策二）：声明了 stack 顺序依赖的 Issue 在启动任何
@@ -159,7 +159,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             "here is a PRD file, so the Issue is PRD-backed and must pass the PRD "
             "delivery gate (and archive its PRD).",
             code=ExitCode.USAGE,
-            suggestion="iar run <PRD_PATH> --fast-merge",
+            suggestion="kc run <PRD_PATH> --fast-merge",
         )
     if direct_pr and target_issue is not None:
         _reject_direct_pr_on_prd_backed_issue(ctx, contexts=contexts, target_issue=target_issue)
@@ -192,7 +192,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
                     f"(PID {live_daemon_pid}); refusing to double-claim the ready queue.",
                     code=ExitCode.CONFLICT,
                     suggestion=(
-                        "iar registry stop --repo-id "
+                        "kc registry stop --repo-id "
                         f"{context.repo_id} (or stop the daemon), or rerun with "
                         "--takeover to stop the daemon and take over."
                     ),
@@ -243,7 +243,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
 
 
 def _resolve_publish_stage(*, fast_merge: bool, direct_pr: bool) -> PublishStage:
-    """把 ``iar run`` 的两个旁路旗标折算成一个发布档位。
+    """把 ``kc run`` 的两个旁路旗标折算成一个发布档位。
 
     两个旗标刻意互斥而不「取更强者」：它们的存在感不同（一个跳独立验证，一个连
     reviewer 与仓库验证一起跳），静默升级会掩盖调用者的真实意图。
@@ -264,7 +264,7 @@ def _resolve_publish_stage(*, fast_merge: bool, direct_pr: bool) -> PublishStage
             "includes everything --fast-merge skips, so combining them is ambiguous "
             "rather than stronger.",
             code=ExitCode.USAGE,
-            suggestion="iar run --issue <N> --fast-merge · iar run --issue <N> --direct-pr",
+            suggestion="kc run --issue <N> --fast-merge · kc run --issue <N> --direct-pr",
         )
     if direct_pr:
         return PublishStage.DIRECT
@@ -434,7 +434,7 @@ def _reject_direct_pr_on_prd_backed_issue(
                 "is only defined for Issues without a PRD anchor, because a PRD-backed "
                 "Issue must pass the PRD delivery gate and archive its PRD.",
                 code=ExitCode.USAGE,
-                suggestion=f"iar run --issue {target_issue} --fast-merge (keeps the "
+                suggestion=f"kc run --issue {target_issue} --fast-merge (keeps the "
                 "reviewer and repository verification, and the PRD gate still applies) "
                 f"· or rerun --direct-pr without a PRD-anchored Issue.",
             )
@@ -468,7 +468,7 @@ def _confirm_and_take_over_daemons(
             "--takeover in machine (--json) mode requires --yes: it stops the "
             "daemon and interrupts all of its in-flight Issues.",
             code=ExitCode.USAGE,
-            suggestion="iar run --issue <N> --takeover --yes --repo-id <repo>",
+            suggestion="kc run --issue <N> --takeover --yes --repo-id <repo>",
         )
 
     github_clients: dict[Path, object] = {}
@@ -493,7 +493,7 @@ def _confirm_and_take_over_daemons(
             raise CliError(
                 "Takeover aborted by the user; the daemon was left untouched.",
                 code=ExitCode.USAGE,
-                suggestion="iar run --issue <N> --repo-id <repo> --takeover --yes",
+                suggestion="kc run --issue <N> --repo-id <repo> --takeover --yes",
             )
     from backend.api.cli_run_takeover import take_over_daemon
 
@@ -513,7 +513,7 @@ def _confirm_and_take_over_daemons(
 
 
 def run_daemon_command(ctx: ParsedCommandContext) -> int:
-    """``iar daemon``: run daemon continuously or report status."""
+    """``kc daemon``: run daemon continuously or report status."""
     daemon_command = getattr(ctx.parsed, "daemon_command", "run")
     if daemon_command == "status":
         return _run_daemon_status_command(
@@ -572,7 +572,7 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             str(already_running),
             code=ExitCode.CONFLICT,
-            suggestion="iar daemon status",
+            suggestion="kc daemon status",
         ) from already_running
     try:
         _cli.run_agent_daemon(
@@ -605,7 +605,7 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_review_command(ctx: ParsedCommandContext) -> int:
-    """``iar review``: one supervisor review polling cycle."""
+    """``kc review``: one supervisor review polling cycle."""
     contexts = _resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -648,7 +648,7 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
-    """``iar review-daemon``: run supervisor review continuously."""
+    """``kc review-daemon``: run supervisor review continuously."""
     contexts = _resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -681,7 +681,7 @@ def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_recover_command(ctx: ParsedCommandContext) -> int:
-    """``iar recover``: resume a failed publish operation for an Issue."""
+    """``kc recover``: resume a failed publish operation for an Issue."""
     from backend.core.use_cases.recover_publish import (
         PublishRecoveryError,
         PublishRecoveryRequest,
@@ -698,10 +698,10 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if len(contexts) != 1:
         raise CliError(
-            "iar recover requires exactly one target repository. "
+            "kc recover requires exactly one target repository. "
             "Use --repo or --repo-id to specify.",
             code=ExitCode.USAGE,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         )
     context = contexts[0]
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
@@ -740,7 +740,7 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_blocked_continue_command(ctx: ParsedCommandContext) -> int:
-    """``iar blocked-continue``: resume a blocked Issue after fixing paths."""
+    """``kc blocked-continue``: resume a blocked Issue after fixing paths."""
     from backend.core.use_cases.blocked_continue import (
         BlockedContinueError,
         blocked_continue_issue,
@@ -757,10 +757,10 @@ def run_blocked_continue_command(ctx: ParsedCommandContext) -> int:
         _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
     if len(contexts) != 1:
         raise CliError(
-            "iar blocked-continue requires exactly one target repository. "
+            "kc blocked-continue requires exactly one target repository. "
             "Use --repo or --repo-id to specify.",
             code=ExitCode.USAGE,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         )
     context = contexts[0]
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)

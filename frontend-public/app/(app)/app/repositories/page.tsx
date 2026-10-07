@@ -106,7 +106,7 @@ export default function RepositoriesPage() {
       const entries = await discoverRepositories(scanRoot);
       setDiscovered(entries);
       if (entries.length === 0) {
-        toast.info("未找到已初始化 IAR 的 git 仓库。");
+        toast.info("未找到已初始化 KedaCode 的 git 仓库。");
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "扫描失败。");
@@ -293,7 +293,7 @@ export default function RepositoriesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">扫描本地 IAR 仓库</CardTitle>
+          <CardTitle className="text-sm">扫描本地 KedaCode 仓库</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">

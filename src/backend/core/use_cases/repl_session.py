@@ -1,8 +1,8 @@
-"""REPL (Read-Eval-Print Loop) use case for the ``iar`` no-arg entrypoint.
+"""REPL (Read-Eval-Print Loop) use case for the ``kc`` no-arg entrypoint.
 
 The REPL drives a multi-turn conversation between the user and a configured
 agent, parsing ``<<IAR_EXEC>> ... <<END_IAR_EXEC>>`` markers in the agent
-reply to execute whitelisted IAR subcommands and feed the captured output
+reply to execute whitelisted KedaCode subcommands and feed the captured
 back into the conversation history.
 
 Architecture notes:
@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.core.shared.models import product_identity
 from backend.core.shared.interfaces.agent_runner import (
     IarExecRequest,
     IContentGenerator,
@@ -55,11 +56,12 @@ IAR_EXEC_RESULT_CLOSE_TAG = "[/IAR_EXEC_RESULT]"
 EXIT_COMMAND = "/exit"
 HELP_COMMAND = "/help"
 
-DEFAULT_PROMPT_SUFFIX = "iar> "
+DEFAULT_PROMPT_SUFFIX = f"{product_identity.PRIMARY_COMMAND_NAME}> "
 MAX_TURNS = 64
 
 _IAR_AVAILABLE_SUBCOMMAND_HINT = (
-    "Available `iar` subcommands: "
+    "Available `kc` subcommands (`kedacode` and the deprecated `iar` "
+    "alias run the same code): "
     "init, labels, issue, run, daemon, review, review-daemon, recover, "
     "blocked-continue, ask, deliberate, takeover, worktree, registry, "
     "workflow, completion."
@@ -81,7 +83,7 @@ class ReplSessionInputs:
     Attributes:
         context: Resolved repository target. ``context.repo_path`` is the
             REPL's working directory and must already be initialized with
-            ``iar init``.
+            ``kc init``.
         agent: The agent identifier to use. ``"auto"`` is rejected at the
             CLI layer; this use case trusts the caller.
         config: REPL configuration (defaults / timeouts / allowlist).
@@ -156,11 +158,10 @@ def parse_iar_exec_markers(text: str) -> tuple[IarExecRequest, ...]:
             continue
         if not argv:
             continue
-        # Strip a leading `iar` token so that the executor never sees a
-        # duplicate ``["iar", "iar", ...]``. The protocol is documented
-        # to include `iar` in the marker body, but it is redundant from
-        # the executor's perspective.
-        if argv[0] == "iar":
+        # 剥掉首个命令名 token，执行器才不会拿到 ``["kc", "kc", ...]``。
+        # 协议要求标记体内带命令名，而三个自有名字（kc / kedacode / 旧别名
+        # legacy-alias）都算，新旧 agent 混跑时任意一种写法都能解析。
+        if product_identity.is_own_command_name(argv[0]):
             argv = argv[1:]
         if not argv:
             continue
@@ -202,9 +203,9 @@ def _build_system_prompt(
 ) -> str:
     """Assemble the first system prompt for the REPL.
 
-    Reuses the planning-aware blocks from ``iar ask`` (pending PRD
+    Reuses the planning-aware blocks from ``kc ask`` (pending PRD
     summary, GitHub Issue summary) and layers REPL-only fields
-    (``.iar.toml`` summary, command-execution protocol, available
+    (``.kedacode.toml`` summary, command-execution protocol, available
     subcommand hint). When ``github_client`` is ``None`` (e.g. in unit
     tests or non-interactive auth-disabled mode), the Issue summary
     falls back to a friendly placeholder.
@@ -227,10 +228,10 @@ def _build_system_prompt(
 
     protocol = (
         "Command execution protocol:\n"
-        f"- To ask me to run an `iar` subcommand, wrap the full command "
-        f"(including `iar`) inside markers like:\n"
-        f"  {IAR_EXEC_OPEN_MARKER} iar labels sync {IAR_EXEC_CLOSE_MARKER}\n"
-        f"- Only whitelisted `iar` subcommands are allowed. Direct shell "
+        f"- To ask me to run a `kc` subcommand, wrap the full command "
+        f"(including `kc`) inside markers like:\n"
+        f"  {IAR_EXEC_OPEN_MARKER} kc labels sync {IAR_EXEC_CLOSE_MARKER}\n"
+        f"- Only whitelisted `kc` subcommands are allowed. Direct shell "
         f"commands, `git push` / `git merge` / `git reset`, and arbitrary "
         f"`rm` invocations are refused.\n"
         f"- I will execute read-only/dry-run commands automatically. "
@@ -243,20 +244,20 @@ def _build_system_prompt(
 
     parts: list[str] = []
     parts.append(
-        "You are the agent assistant for an interactive IAR REPL session.\n"
+        "You are the agent assistant for an interactive KedaCode REPL session.\n"
         f"Session ID: {session_id}\n"
         f"Repository: {context.repo_id} ({context.display_name})\n"
         f"Path: {context.repo_path}\n\n"
         "The user will type natural-language requests. Use the context "
         "below and your shell tooling to assist them. When you need to "
-        "invoke an `iar` subcommand on the user's behalf, follow the "
+        "invoke a `kc` subcommand on the user's behalf, follow the "
         "command-execution protocol strictly.\n\n"
         f"{protocol}\n\n"
         f"{_IAR_AVAILABLE_SUBCOMMAND_HINT}\n"
     )
-    parts.append(f"## Repository .iar.toml summary\n{config_summary}\n")
+    parts.append(f"## Repository .kedacode.toml summary\n{config_summary}\n")
     parts.append(
-        "## Decision context (carried over from `iar ask`)\n"
+        "## Decision context (carried over from `kc ask`)\n"
         f"- Pending PRDs:\n{pending_prd_summary}\n"
         f"- Relevant Issues:\n{issue_summary}\n"
     )
@@ -284,7 +285,7 @@ def _serialize_history(history: Sequence[ReplTurn]) -> str:
 
 def _format_exec_result_for_agent(outcome: ReplExecOutcome) -> str:
     """Render a :class:`ReplExecOutcome` as a tool-result block."""
-    cmd_text = "iar " + " ".join(outcome.argv)
+    cmd_text = f"{product_identity.PRIMARY_COMMAND_NAME} " + " ".join(outcome.argv)
     if outcome.rejected:
         body = (
             f"{IAR_EXEC_RESULT_OPEN_TAG}\n"

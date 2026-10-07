@@ -1,11 +1,11 @@
-"""``.gitignore`` sync for ``iar init``.
+"""``.gitignore`` sync for ``kc init``.
 
-``iar init`` 在写完 ``.iar.toml`` 之后,会确保 IAR 运行时的中间产物
+``kc init`` 在写完 ``.kedacode.toml`` 之后,会确保 KedaCode 运行时的中间产物
 (``.iar/``、``.agent-runner/``、``.iar-worktrees/``) 出现在
 ``.gitignore`` 中。新增的条目用 ``# >>> iar (managed by `iar init`) >>>``
 / ``# <<< iar <<<`` 块标记包裹,保证:
 
-1. 幂等 — 重跑 ``iar init`` 不会产生重复条目或与已有配置冲突。
+1. 幂等 — 重跑 ``kc init`` 不会产生重复条目或与已有配置冲突。
 2. 局部 — 块外的现有 ``.gitignore`` 内容(项目自定义规则)不会被修改。
 3. 可外部声明 — 如果用户已经在块外写了 ``.agent-runner/`` 之类,
    块内会跳过该条目,避免冗余。
@@ -20,10 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 GITIGNORE_BLOCK_HEADER = "# >>> iar (managed by `iar init`) >>>"
-"""``iar init`` 管理的 ``.gitignore`` 块的起始标记。"""
+"""``kc init`` 管理的 ``.gitignore`` 块的起始标记。"""
 
 GITIGNORE_BLOCK_FOOTER = "# <<< iar <<<"
-"""``iar init`` 管理的 ``.gitignore`` 块的结束标记。"""
+"""``kc init`` 管理的 ``.gitignore`` 块的结束标记。"""
 
 # 段注释 -> 该段包含的 ignore 模式。结构化便于幂等地构建块,
 # 也让用户能一眼看出每条规则的作用域。
@@ -41,7 +41,7 @@ IAR_GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
 )
-"""``iar init`` 需要写入 ``.gitignore`` 的所有条目,按段分组。"""
+"""``kc init`` 需要写入 ``.gitignore`` 的所有条目,按段分组。"""
 
 # 出现在 ``.git/info/exclude`` 中、且应被 ``.gitignore`` 块取代的
 # 历史条目。检测到时给用户打印提示,提示手动清理。
@@ -74,14 +74,14 @@ class GitignoreSyncResult:
 
     Attributes:
         gitignore_path: 仓库根下的 ``.gitignore`` 绝对路径(无论是否写入)。
-        block_inserted: 新建了 ``.gitignore`` 或新插入了 iar 块。
-        block_updated: iar 块已存在但内容需要更新(例如部分条目已
+        block_inserted: 新建了 ``.gitignore`` 或新插入了托管块。
+        block_updated: 托管块已存在但内容需要更新(例如部分条目已
             在块外声明,块需要同步收缩)。
         entries_added: 实际写入块的模式列表(顺序与
             :data:`IAR_GITIGNORE_SECTIONS` 一致)。
-        entries_skipped_external: 因已在 iar 块外的 ``.gitignore`` 中
+        entries_skipped_external: 因已在托管块外的 ``.gitignore`` 中
             声明而被跳过的模式列表。
-        info_exclude_hint: 检测到 ``.git/info/exclude`` 含历史 iar 条目,
+        info_exclude_hint: 检测到 ``.git/info/exclude`` 含历史遗留条目,
             应提示用户清理。
         dry_run: 透传 :class:`GitignoreSyncOptions` 的 ``dry_run``。
         skipped: 用户显式 opt-out(``--no-update-gitignore``)。
@@ -105,9 +105,9 @@ def _read_gitignore_text(gitignore_path: Path) -> str:
 
 
 def _parse_gitignore_blocks(text: str) -> tuple[str, str | None, str]:
-    """把 ``.gitignore`` 切成 ``(prelude, iar_block 或 None, postlude)``。
+    """把 ``.gitignore`` 切成 ``(prelude, 托管块 或 None, postlude)``。
 
-    仅识别 iar 自己管理的块;块外内容原样保留。若 header 存在但 footer
+    仅识别本产品自己管理的块;块外内容原样保留。若 header 存在但 footer
     缺失,视为损坏的块并返回 ``(text, None, "")``,避免误删用户内容。
     """
     if not text:
@@ -135,7 +135,7 @@ def _parse_gitignore_blocks(text: str) -> tuple[str, str | None, str]:
 
 
 def _block_patterns(block_text: str | None) -> set[str]:
-    """从 iar 块中提取非空、非注释的模式集合。"""
+    """从托管块中提取非空、非注释的模式集合。"""
     if not block_text:
         return set()
     patterns: set[str] = set()
@@ -148,7 +148,7 @@ def _block_patterns(block_text: str | None) -> set[str]:
 
 
 def _patterns_outside_block(text: str) -> set[str]:
-    """返回 ``.gitignore`` 中位于 iar 块外的非空、非注释模式集合。"""
+    """返回 ``.gitignore`` 中位于托管块外的非空、非注释模式集合。"""
     if not text:
         return set()
     _, block_text, _ = _parse_gitignore_blocks(text)
@@ -172,7 +172,7 @@ def _patterns_outside_block(text: str) -> set[str]:
 def _build_block_text(
     external_patterns: set[str],
 ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
-    """构造 iar 块文本。
+    """构造托管块文本。
 
     Args:
         external_patterns: 块外已存在的模式集合。块内不再重复出现。
@@ -206,7 +206,7 @@ def _build_block_text(
 
 
 def _info_exclude_has_iar_entries(repo_root_path: Path) -> bool:
-    """检测 ``.git/info/exclude`` 是否含历史 iar 条目。"""
+    """检测 ``.git/info/exclude`` 是否含历史遗留条目。"""
     info_exclude = repo_root_path / ".git" / "info" / "exclude"
     if not info_exclude.is_file():
         return False
@@ -228,7 +228,7 @@ def _info_exclude_has_iar_entries(repo_root_path: Path) -> bool:
 
 
 def _replace_iar_block(existing_text: str, new_block_text: str) -> str:
-    """用 ``new_block_text`` 替换 ``existing_text`` 中的 iar 块。
+    """用 ``new_block_text`` 替换 ``existing_text`` 中的托管块。
 
     块外(prelude / postlude)逐字符保留,包括空行与缩进。
     """
@@ -239,7 +239,7 @@ def _replace_iar_block(existing_text: str, new_block_text: str) -> str:
 def ensure_gitignore_entries(
     options: GitignoreSyncOptions,
 ) -> GitignoreSyncResult:
-    """确保 ``.gitignore`` 含 IAR 运行时中间产物的 ignore 条目。
+    """确保 ``.gitignore`` 含 KedaCode 运行时中间产物的 ignore 条目。
 
     行为契约:
     - 块外已有等价条目 → 块内不重复,只在结果里报告 ``skipped_external``。
@@ -248,7 +248,7 @@ def ensure_gitignore_entries(
       比较,避免段间空行差异触发误更新)。
     - 块已存在但需要同步 → 原地更新块。
     - 块损坏(header 在但 footer 缺失) → 拒绝修改,等用户手工修复。
-    - ``.git/info/exclude`` 含历史 iar 条目 → 返回 ``info_exclude_hint=True``,
+    - ``.git/info/exclude`` 含历史遗留条目 → 返回 ``info_exclude_hint=True``,
       由调用方负责打印提示。
 
     Args:

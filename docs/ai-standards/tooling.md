@@ -22,7 +22,7 @@
 | `just run backend_port=8010 frontend_admin_port=13173 frontend_public_port=3001` | 使用指定端口运行主应用，并保存为当前 Git worktree 的默认端口 |
 | `just run frontend-public` | 只启动管理终端前端（Next.js，端口读取当前 run-state） |
 | `just frontend-public dev` | 委托 `just run frontend-public`，读取当前 run-state 端口 |
-| `just console-sync` | 重新构建 frontend-public 静态导出并同步到 `src/backend/api/static/console/`，让 `iar console`（8313）面板立即用上新构建；**仅前端改动**硬刷新浏览器即可、无需重启进程。若本次还改了后端路由/接口，静态前端是按请求读盘的、会立刻变新，但 FastAPI 路由在进程启动时就已固定——必须重启 `iar console`，否则新端点返回 404 而旧界面已被替换。 |
+| `just console-sync` | 重新构建 frontend-public 静态导出并同步到 `src/backend/api/static/console/`，让 `kc console`（8313）面板立即用上新构建；**仅前端改动**硬刷新浏览器即可、无需重启进程。若本次还改了后端路由/接口，静态前端是按请求读盘的、会立刻变新，但 FastAPI 路由在进程启动时就已固定——必须重启 `kc console`，否则新端点返回 404 而旧界面已被替换。 |
 | `just down` | 按当前 Git worktree 保存的端口停止本地开发服务 |
 | `just copy <new-dir>` | 派生新项目；随机分配三个互不重叠的端口避免多副本端口冲突，并根据新项目名自动生成独立 PostgreSQL 数据库 |
 | `just worktree <branch>` | 仅能从 Git primary worktree 创建；自动分配端口、创建专用 PostgreSQL 空库并执行迁移，开发与 E2E 共用该 Worktree 的数据库 |
@@ -54,14 +54,14 @@
 
 ## CLI Surface And Packaged Skill Sync
 
-`iar` CLI 是给 agent 的一等机读执行面（定位见 `ROADMAP.md`）。任何改动 CLI 表面——新增或改名子命令、增加/修改旗标、调整退出码或机器可读输出——**必须同步**以下随包资产，否则 agent 侧知识会与真实命令树漂移：
+`kc` CLI 是给 agent 的一等机读执行面（定位见 `ROADMAP.md`）。任何改动 CLI 表面——新增或改名子命令、增加/修改旗标、调整退出码或机器可读输出——**必须同步**以下随包资产，否则 agent 侧知识会与真实命令树漂移：
 
-- 随包 operator skill：`src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md`（命令表、不变量、退出码说明）。
+- 随包 operator skill：`src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md`（命令表、不变量、退出码说明）。
 - 文档：`docs/`（CLI 参考与 guide），并保证 `uv run mkdocs build --strict` 通过。
 
-真实命令树是权威来源（`iar --help` / `iar schema --json`），skill 与文档是它的随包镜像；两者不一致时以真实命令树为准并修正镜像。该约定的机器化承接是 `tasks/pending/P1-FEAT-20260930-141135-iar-agent-machine-contract.md` 的 FR-6「知识随包发」。
+真实命令树是权威来源（`kc --help` / `kc schema --json`），skill 与文档是它的随包镜像；两者不一致时以真实命令树为准并修正镜像。该约定的机器化承接是 `tasks/pending/P1-FEAT-20260930-141135-iar-agent-machine-contract.md` 的 FR-6「知识随包发」。
 
-守卫测试 `tests/test_iar_operator_skill.py` 只覆盖随包 skill 的安装资源与冲突保护，**不校验命令表内容**——内容同步仍需人工与评审保证。
+守卫测试 `tests/test_kedacode_operator_skill.py` 只覆盖随包 skill 的安装资源与冲突保护，**不校验命令表内容**——内容同步仍需人工与评审保证。
 
 ## Justfile Layering
 
@@ -162,7 +162,7 @@ python scripts/check_prd_acceptance_checklist.py --repo-root "$PWD" --all
 - `--detail`：在每个 PRD 行下方追加该 PRD 的一级标题与描述摘要——优先取 `Introduction & Goals` 章节正文（兼容编号写法），缺章节时退化为标题后的引言；最多 4 行，单行超宽截断、仍有剩余正文时末行补省略号。摘要与清单进度同源，读分支副本优先的 PRD 正文；archive 折叠视图不展开行，该选项只在逐条列出的视图（`status` / `pending` / `all`）下生效。
 - archive 概览：每月 PRD 条数、清单全完成的条数、有证据包的条数与 verifier `REJECT` 条数；月份下出现 `⚠ 有未勾完的清单` 时，会列出具体是哪几条。待人工验收的记录已移到 `AWAITING HUMAN`，所以这个 `⚠` 只剩**异常**含义：归档记录既没有待人工横幅、清单又没勾完（例如横幅写着 `✅ 已验收` 却仍有空框，历史记录缺横幅或认不出状态词，或同名 PRD 在 `tasks/pending` 与 `tasks/archive` 并存——重开后遗留的归档副本以 pending 为准，不会被当成待验收）。
 
-**AWAITING HUMAN 只认验收状态横幅**：判定读 PRD 头部那行可 grep 的声明（`验收状态` / `Acceptance Status`），取标记之后**最先出现**的状态词——三态 `⬜ 未开工` / `🧍 待人工验收` / `✅ 已验收` 见 prd skill（`iar init` 安装）的 Acceptance Status Banner（旧名 `✅ 可归档` 仍按 `已验收` 读取），模板括号里的提示文字不会把 `⬜ 未开工` 误判成待人工。只看引用块行（`>` 开头），正文或决策日志里对该横幅的讨论不构成状态声明；横幅同样取分支副本，执行方在 worktree 里翻的状态才算数。没有横幅或认不出状态词时不入 `AWAITING HUMAN`：在 `tasks/pending` 里按未开工留在 `PENDING`，在 `tasks/archive` 里留在月视图（清单没勾完会被 `⚠` 标出）——按 §9 未勾项结构反推会漏判真实的人工项（常挂在 `Human-Confirmed` 之外的小节下，如手动执行的 probe），也会把尚未完工的 PRD 误报成「等你验收」。合并前的窗口也算数：分支里已归档且横幅为 `🧍` 而主线仍在 `tasks/pending` 时，该记录同样进 `AWAITING HUMAN`，ACTIVITY 显示 `✔ branch-archived @<branch> · awaiting merge`。
+**AWAITING HUMAN 只认验收状态横幅**：判定读 PRD 头部那行可 grep 的声明（`验收状态` / `Acceptance Status`），取标记之后**最先出现**的状态词——三态 `⬜ 未开工` / `🧍 待人工验收` / `✅ 已验收` 见 prd skill（`kc init` 安装）的 Acceptance Status Banner（旧名 `✅ 可归档` 仍按 `已验收` 读取），模板括号里的提示文字不会把 `⬜ 未开工` 误判成待人工。只看引用块行（`>` 开头），正文或决策日志里对该横幅的讨论不构成状态声明；横幅同样取分支副本，执行方在 worktree 里翻的状态才算数。没有横幅或认不出状态词时不入 `AWAITING HUMAN`：在 `tasks/pending` 里按未开工留在 `PENDING`，在 `tasks/archive` 里留在月视图（清单没勾完会被 `⚠` 标出）——按 §9 未勾项结构反推会漏判真实的人工项（常挂在 `Human-Confirmed` 之外的小节下，如手动执行的 probe），也会把尚未完工的 PRD 误报成「等你验收」。合并前的窗口也算数：分支里已归档且横幅为 `🧍` 而主线仍在 `tasks/pending` 时，该记录同样进 `AWAITING HUMAN`，ACTIVITY 显示 `✔ branch-archived @<branch> · awaiting merge`。
 
 **进度与证据取分支副本**：执行发生在 worktree 里，主仓库的 `tasks/pending` 副本与证据目录要等合并回主线才更新。因此存在匹配的 worktree 时，清单进度取该 worktree 内 `tasks/archive` → `tasks/pending` 的 PRD 副本，证据包按 `plan` / `report` / `verifier` 每个槽位单独「分支目录先查、主仓库目录后查」；没有匹配 worktree（例如直接在主仓库开工）时读主仓库副本。优先按 PRD slug 匹配分支；PRD 有唯一的 `GitHub Issue: .../issues/<N>` 行时，也可匹配 `issue-<N>` 分支。普通 Issue 无 PRD 关联时仍使用 Issue 命名，不会被错配到别的 PRD。例外是主线 `tasks/archive` 已有该 PRD 时一律读主线副本（归档是终态，分支上合并前的快照已过时）。副本取自哪个目录同时决定它属于哪一段，所以主线已把 PRD 重开回 `tasks/pending`、而匹配的 worktree 里还留着旧的归档副本时，看板会按那份旧副本判段；清理掉用完的 worktree 即可恢复。
 
@@ -180,7 +180,7 @@ python scripts/check_prd_acceptance_checklist.py --repo-root "$PWD" --all
 
 ### PRD 执行锁
 
-IAR 处理带 `PRD path:` 锚点的 Issue 时，复用仓库的 PRD 执行锁：开始时领锁、执行期间每分钟续期、结束后释放。若目标仓库未提供 `scripts/shared/just/prd_lock.py` 或 PRD 文件不存在，则跳过此集成；已有锁或领锁冲突会阻止该 Issue 并行执行，须先核实持锁者并按既有 `just prd release` 流程处理。IAR 继续使用 `issue-<N>` 分支名，看板通过上述 Issue 关联读取其分支副本。
+KedaCode 处理带 `PRD path:` 锚点的 Issue 时，复用仓库的 PRD 执行锁：开始时领锁、执行期间每分钟续期、结束后释放。若目标仓库未提供 `scripts/shared/just/prd_lock.py` 或 PRD 文件不存在，则跳过此集成；已有锁或领锁冲突会阻止该 Issue 并行执行，须先核实持锁者并按既有 `just prd release` 流程处理。KedaCode 继续使用 `issue-<N>` 分支名，看板通过上述 Issue 关联读取其分支副本。
 
 执行 `tasks/pending/` 下的 PRD 前必须先领锁：`just prd start <prd-file>`（知道工具名就 `--tool` 自报）。锁语义：
 

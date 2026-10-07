@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     GeneratedContentConfig,
@@ -618,11 +619,11 @@ id = "initialized"
 def test_require_iar_repository_initialized_rejects_missing_config(
     tmp_path: Path,
 ) -> None:
-    """Missing .iar.toml should raise IARRepositoryNotInitializedError."""
+    """仓库缺少 ``.kedacode.toml`` 时应抛 ``IARRepositoryNotInitializedError``。"""
     repo_path = _init_git_repository(tmp_path, "missing")
     with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
         require_iar_repository_initialized(repo_path)
-    assert str(repo_path / ".iar.toml") in str(exc_info.value)
+    assert str(repo_path / product_identity.REPOSITORY_CONFIG_FILENAME) in str(exc_info.value)
 
 
 def test_require_iar_repository_initialized_rejects_empty_repo_id(

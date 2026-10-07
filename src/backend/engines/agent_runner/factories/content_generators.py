@@ -110,7 +110,7 @@ class SafePlannerContentGenerator(IContentGenerator):
     """Generate decision plans via a local agent subprocess.
 
     The planner runs the agent's ``generate`` profile, which the registry
-    must declare ``read_only``——这是只读决策入口（planner / ``iar ask``）
+    must declare ``read_only``——这是只读决策入口（planner / ``kc ask``）
     的 fail-fast 门禁：spec 未声明只读时拒绝启动 agent。Callers are
     responsible for validating and sandboxing the resulting plan.
     """

@@ -179,7 +179,7 @@ export function buildLifecycleOptions(
 }
 
 interface LifecycleAgentMatrixProps {
-  /** 编辑视角：全局层（config.toml）或仓库层（.iar.toml）。 */
+  /** 编辑视角：全局层（config.toml）或仓库层（.kedacode.toml）。 */
   scope: LifecycleAgentScope;
   /** 仓库级视角必填。 */
   repoId?: string;

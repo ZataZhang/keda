@@ -1,6 +1,6 @@
-"""迁移旧版 ``iar init`` 写入的仓库级 ``.iar.toml``。
+"""迁移旧版脚手架写入的仓库本地配置。
 
-旧版 ``iar init`` 把全部默认值（含 ``generated_content``）逐项钉进 ``.iar.toml``。
+旧版 ``kc init`` 把全部默认值（含 ``generated_content``）逐项钉进仓库本地配置。
 被钉死的值不会跟随之后的默认值升级，早年初始化的仓库因此一直停在 template 模式。
 现在的脚手架不再写这一段；本模块把旧脚手架留下的钉子清掉，让这些仓库重新继承当前
 默认值。
@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import re
 import shutil
 import tomllib
@@ -35,7 +36,7 @@ from backend.infrastructure.config.agent_runner_settings import (
     GENERATED_CONTENT_TARGET_NAMES,
     AgentRunnerGeneratedContentSettings,
 )
-from backend.infrastructure.config.settings import IAR_REPOSITORY_CONFIG_FILENAME
+from backend.core.shared.models import product_identity
 
 _GENERATED_CONTENT_TABLE_NAME = "agent_runner.generated_content"
 
@@ -64,7 +65,7 @@ _LEGACY_TARGET_PIN_VALUES: dict[str, tuple[object, ...]] = {
     "include_diff_stat": (True,),
 }
 
-_REMOVED_REASON = "written by an older `iar init`"
+_REMOVED_REASON = "written by an older release"
 _UNLOCATED_REASON = (
     "written as dotted keys or an inline table, which this command does not edit; "
     "remove it by hand"
@@ -104,7 +105,7 @@ class ConfigMigrationResult:
     """一次迁移的结果。
 
     Attributes:
-        config_path: 被迁移的 ``.iar.toml`` 路径。
+        config_path: 被迁移的仓库本地配置路径。
         original_text: 迁移前的全文。
         migrated_text: 迁移后的全文；没有可清的钉子时与 ``original_text`` 相同。
         removed_pins: 已清掉的钉子。
@@ -140,7 +141,7 @@ class _Statement:
 def migrate_repository_local_config(
     repo_root_path: Path, *, dry_run: bool = False
 ) -> ConfigMigrationResult:
-    """清掉旧脚手架在 ``.iar.toml`` 里钉死的 generated_content 默认值。
+    """清掉旧脚手架在仓库本地配置里钉死的 generated_content 默认值。
 
     Args:
         repo_root_path: 目标 Git 仓库根目录。
@@ -150,10 +151,10 @@ def migrate_repository_local_config(
         迁移结果；``wrote_file`` 表示是否真的写了文件。
 
     Raises:
-        IARRepositoryNotInitializedError: 仓库根目录没有 ``.iar.toml``。
-        ConfigMigrationError: ``.iar.toml`` 不是合法 TOML，或迁移结果未通过写回前校验。
+        IARRepositoryNotInitializedError: 仓库根目录没有仓库本地配置。
+        ConfigMigrationError: 仓库本地配置不是合法 TOML，或迁移结果未通过写回前校验。
     """
-    config_path = repo_root_path / IAR_REPOSITORY_CONFIG_FILENAME
+    config_path = product_identity.effective_repository_config_path(repo_root_path)
     if not config_path.is_file():
         raise IARRepositoryNotInitializedError(repo_root_path, config_path)
 
@@ -511,9 +512,115 @@ def _skip_single_line_string(line_text: str, opening_quote_index: int) -> int:
     return column_index
 
 
+ConfigRenameOutcome = Literal["renamed", "already_named", "absent", "conflict", "move_failed"]
+"""仓库配置文件改名结论。"""
+
+
+@dataclass(frozen=True)
+class ConfigRenameResult:
+    """仓库配置文件（``.iar.toml`` → ``.kedacode.toml``，旧名为 legacy-alias）改名的结论。
+
+    Attributes:
+        outcome: 改名结论，见 :data:`ConfigRenameOutcome`。
+        source_path: 改名前的文件路径；无需改名时为 ``None``。
+        target_path: 改名后的文件路径（新名）。
+        wrote_file: 是否真的改了名（预演与无变化时为 ``False``）。
+        message: 面向用户的结论说明。
+    """
+
+    outcome: ConfigRenameOutcome
+    source_path: Path | None
+    target_path: Path
+    wrote_file: bool = False
+    message: str = ""
+
+
+def rename_repository_local_config_file(
+    repo_root_path: Path,
+    *,
+    dry_run: bool = False,
+) -> ConfigRenameResult:
+    """把仓库里旧名的本地配置改名为新名；只做改名，不做任何 git 操作。
+
+    预检与执行共用本函数：``dry_run`` 下结论与正式执行一致，只是不落盘。新旧两个
+    文件同时存在时判为冲突（``conflict``），由调用方决定如何报告，绝不自动删除或
+    合并任何一份。
+
+    Args:
+        repo_root_path: 仓库根目录。
+        dry_run: 为 True 时只判定，不改名。
+
+    Returns:
+        ConfigRenameResult: 改名结论与说明。
+    """
+    resolved_root_path = Path(repo_root_path)
+    new_config_path = resolved_root_path / product_identity.REPOSITORY_CONFIG_FILENAME
+    legacy_config_path = resolved_root_path / product_identity.LEGACY_REPOSITORY_CONFIG_FILENAME
+    new_config_exists = new_config_path.is_file()
+    legacy_config_exists = legacy_config_path.is_file()
+
+    if new_config_exists and legacy_config_exists:
+        return ConfigRenameResult(
+            outcome="conflict",
+            source_path=legacy_config_path,
+            target_path=new_config_path,
+            message=(
+                f"both {legacy_config_path.name} and {new_config_path.name} exist in "
+                f"{resolved_root_path}; refusing to choose. Keep the one you want and delete "
+                "the other, then run the command again."
+            ),
+        )
+    if new_config_exists:
+        return ConfigRenameResult(
+            outcome="already_named",
+            source_path=None,
+            target_path=new_config_path,
+            message=f"repository config is already named {new_config_path.name}.",
+        )
+    if not legacy_config_exists:
+        return ConfigRenameResult(
+            outcome="absent",
+            source_path=None,
+            target_path=new_config_path,
+            message=(
+                f"no repository-local config in {resolved_root_path}; "
+                "run `kc init` first if this repository is not managed yet."
+            ),
+        )
+    if dry_run:
+        return ConfigRenameResult(
+            outcome="renamed",
+            source_path=legacy_config_path,
+            target_path=new_config_path,
+            message=f"dry run: would rename {legacy_config_path.name} to {new_config_path.name}.",
+        )
+    try:
+        os.rename(legacy_config_path, new_config_path)
+    except OSError as exc:
+        return ConfigRenameResult(
+            outcome="move_failed",
+            source_path=legacy_config_path,
+            target_path=new_config_path,
+            message=f"could not rename {legacy_config_path.name} to {new_config_path.name}: {exc}",
+        )
+    return ConfigRenameResult(
+        outcome="renamed",
+        source_path=legacy_config_path,
+        target_path=new_config_path,
+        wrote_file=True,
+        message=(
+            f"renamed {legacy_config_path.name} to {new_config_path.name}; commit the rename "
+            "whenever you are ready."
+        ),
+    )
+
+
 __all__ = [
     "ConfigMigrationError",
     "ConfigMigrationResult",
+    "ConfigRenameOutcome",
+    "ConfigRenameResult",
     "PinDecision",
     "migrate_repository_local_config",
+    "rename_repository_local_config_file",
 ]

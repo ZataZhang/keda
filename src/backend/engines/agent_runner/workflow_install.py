@@ -1,7 +1,7 @@
 """Workflow template installation for issue-agent-runner.
 
 This module provides the engine-layer implementation of
-``iar workflow install <name>``. Templates are bundled with the Python
+``kc workflow install <name>``. Templates are bundled with the Python
 package as data files and copied into the current Git repository at install
 time. ``config.toml`` is appended with a ``[preview]`` placeholder section
 whose field names are derived from
@@ -131,7 +131,7 @@ def install_workflow(
         UnknownWorkflowError: When no bundled template matches ``options.name``.
         ExistingFileRefusedError: When existing files would be overwritten
             and ``options.force`` is ``False``.
-        IARRepositoryNotInitializedError: When ``.iar.toml`` is missing.
+        IARRepositoryNotInitializedError: When ``.kedacode.toml`` is missing.
         ValueError: When the cwd is not inside a Git repository.
     """
     repo_root_path = detect_git_repository_root(options.cwd, process_runner)

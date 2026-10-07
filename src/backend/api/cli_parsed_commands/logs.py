@@ -1,4 +1,4 @@
-"""``iar logs`` handler.
+"""``kc logs`` handler.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
 dispatcher.
@@ -11,7 +11,7 @@ from backend.api.cli_registry import _run_logs_command
 
 
 def run_logs_command(ctx: ParsedCommandContext) -> int:
-    """``iar logs``: tail the most recent log lines for a managed daemon."""
+    """``kc logs``: tail the most recent log lines for a managed daemon."""
     return _run_logs_command(
         parsed=ctx.parsed,
         process_runner=ctx.process_runner,

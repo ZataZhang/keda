@@ -240,7 +240,7 @@ def request_manual_ci_repair(
     config: AppConfig,
     github_client: IGitHubClient,
 ) -> tuple[bool, str]:
-    """显式请求一次修复（问题卡 / ``iar backlog ci repair`` 共用语义）。
+    """显式请求一次修复（问题卡 / ``kc backlog ci repair`` 共用语义）。
 
     服务端 fresh 解析当前 PR head 并以 ``head SHA + action`` 为幂等键：同一
     失败轮次的重复请求零新增副作用。修复本身仍由既有 run 侧

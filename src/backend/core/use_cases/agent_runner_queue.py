@@ -1,4 +1,4 @@
-"""IAR ready Issue 的稳定队列选择规则。"""
+"""KedaCode ready Issue 的稳定队列选择规则。"""
 
 from __future__ import annotations
 

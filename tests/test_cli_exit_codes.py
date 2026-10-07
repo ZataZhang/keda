@@ -93,7 +93,7 @@ def test_help_text_publishes_the_full_code_table() -> None:
         "5 conflict",
         "10 dry-run",
         "--json",
-        "iar schema --json",
+        "kc schema --json",
     ):
         assert fragment in EXIT_CODE_HELP
 

@@ -1,4 +1,4 @@
-"""``iar issue create --from-prompt``：一句话需求直接建出无 PRD 的 Issue。
+"""``kc issue create --from-prompt``：一句话需求直接建出无 PRD 的 Issue。
 
 与 :mod:`create_issue_from_prd` 的区别只有一处语义：**产物不指向任何 PRD**。
 正文就是需求的唯一来源，runner 侧的所有门禁（交付门、证据门禁、PRD 契约）都按
@@ -136,7 +136,7 @@ def build_prompt_fallback_body(prompt_text: str) -> str:
             "",
             "## Delivery Notes",
             "",
-            "- 本 Issue 由 ``iar issue create --from-prompt`` 创建：正文就是需求的",
+            "- 本 Issue 由 ``kc issue create --from-prompt`` 创建：正文就是需求的",
             "  唯一来源，仓库里没有对应的 PRD 文件。",
             "- Recommended branch: `task/<issue-number>-<slug>`",
             "- Worktree command: `just worktree --issue <issue-number>`",

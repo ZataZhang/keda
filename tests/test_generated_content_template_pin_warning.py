@@ -47,7 +47,7 @@ def test_local_config_warns_about_pinned_template_mode(
     assert "issue_from_prd, draft_pr" in caplog.text
     assert "prd_from_issue" not in caplog.text
     assert "template mode is deprecated" in caplog.text
-    assert "iar config migrate" in caplog.text
+    assert "kc config migrate" in caplog.text
 
 
 def test_local_config_without_template_pins_does_not_warn(

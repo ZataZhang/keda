@@ -3,7 +3,7 @@
 优先级（高到低）：
 
 1. PRD 文件头部 ``lifecycle_agents`` 覆盖块（PRD 级，只影响该 PRD）；
-2. ``[agent_runner.lifecycle_agents]`` 仓库层（``.iar.toml``）；
+2. ``[agent_runner.lifecycle_agents]`` 仓库层（``.kedacode.toml``）；
 3. ``[agent_runner.lifecycle_agents]`` 全局层（``config.toml``）；
 4. 既有散落配置键（``runner.default_agent`` / ``validation.verifier_agent`` /
    ``pre_pr_review.review_agent`` / ``post_pr_supervisor.supervisor_agent`` /

@@ -145,7 +145,7 @@ def test_blocked_issue_without_resolution_marker_is_rejected() -> None:
     """blocked 且无解除标记 → 拒绝并提示 iar blocked-continue。"""
     error = _error(_client(labels=(CONFIG.labels.blocked,)))
     assert error.reason == TARGET_UNCLAIMABLE_BLOCKED
-    assert "iar blocked-continue --issue 7" in error.suggestion
+    assert "kc blocked-continue --issue 7" in error.suggestion
 
 
 def test_blocked_issue_with_unconsumed_resolution_marker_is_claimable() -> None:

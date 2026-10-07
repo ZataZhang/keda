@@ -9,7 +9,7 @@
    不会落地的产物（``.env*``、前端 ``node_modules``）。
 
 ``_SHARED_GIT_LOCK`` 用于串行化共享仓库上的 ``git worktree add`` 写入：并行
-Issue worker（``iar daemon --concurrency``）会同时写主仓库的
+Issue worker（``kc daemon --concurrency``）会同时写主仓库的
 ``.git/worktrees`` 与 refs。默认顺序路径下无竞争、无开销。
 """
 
@@ -83,7 +83,7 @@ def format_command(
 
 
 # Serializes the shared-repository git mutation in worktree creation across
-# parallel Issue workers (``iar daemon --concurrency``). ``git worktree add``
+# parallel Issue workers (``kc daemon --concurrency``). ``git worktree add``
 # writes the main repo's ``.git/worktrees`` and refs, which can race when
 # several issues are set up at once. Uncontended (no overhead) in the default
 # sequential path. The long agent run happens after this lock is released.

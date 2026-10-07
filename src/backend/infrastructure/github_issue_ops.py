@@ -304,7 +304,7 @@ def list_issue_label_names(client: _ClientProtocol, issue_number: int) -> set[st
 
 def comment_issue(client: _ClientProtocol, issue_number: int, body: str) -> None:
     """Post a Markdown comment to an Issue."""
-    with tempfile.TemporaryDirectory(prefix="iar-comment-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="kc-comment-") as temp_dir:
         comment_path = client._write_body_file(temp_dir, "comment.md", body)
         client._run_with_retry(
             [
@@ -321,7 +321,7 @@ def comment_issue(client: _ClientProtocol, issue_number: int, body: str) -> None
 
 def edit_issue_body(client: _ClientProtocol, issue_number: int, body: str) -> None:
     """Replace the body of an Issue."""
-    with tempfile.TemporaryDirectory(prefix="iar-issue-body-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="kc-issue-body-") as temp_dir:
         body_path = Path(temp_dir) / "issue_body.md"
         body_path.write_text(body, encoding="utf-8")
         client._run_with_retry(
@@ -347,14 +347,14 @@ def create_issue(
     """Create a GitHub Issue and return its URL.
 
     On ``gh issue create`` failure caused by a missing repository label (a
-    fresh repository that never ran ``iar labels sync``), the missing labels
+    fresh repository that never ran ``kc labels sync``), the missing labels
     are created with ``gh label create --force`` and the create is retried.
     This mirrors :func:`edit_issue_labels` so both Issue write paths survive
     an unprovisioned label set instead of failing with gh's raw
     ``could not add label: '...' not found`` error. Other failures (network,
     auth, validation) bubble up unchanged.
     """
-    with tempfile.TemporaryDirectory(prefix="iar-issue-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="kc-issue-") as temp_dir:
         body_path = client._write_body_file(temp_dir, "issue.md", body)
         command = [
             "gh",
@@ -444,7 +444,7 @@ def list_issue_comment_entries(client: _ClientProtocol, issue_number: int) -> li
 def edit_issue_comment(client: _ClientProtocol, comment_id: int, body: str) -> None:
     """Edit an existing Issue comment."""
     owner_repo = client._get_owner_repo()
-    with tempfile.TemporaryDirectory(prefix="iar-comment-edit-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="kc-comment-edit-") as temp_dir:
         body_path = client._write_body_file(temp_dir, "comment.md", body)
         client._run_with_retry(
             [

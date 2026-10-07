@@ -179,7 +179,7 @@ def resolve_issue_from_prd_target(
     repo_path_override: str | None = None,
     cwd: Path,
 ) -> RepositoryRunContext:
-    """Resolve the single target repository for ``iar issue create``.
+    """Resolve the single target repository for ``kc issue create``.
 
     Defaults to the current Git repository and its repository-local config.
 
@@ -221,7 +221,7 @@ def create_process_supervisor() -> IRunnerProcessSupervisor:
     """创建托管 runner 进程的监管器（pidfile + 日志目录已解析）。
 
     同时把本进程当前生效的 ``config.toml`` 交给监管器注入子进程的
-    ``IAR_CONFIG``：托管子进程的 cwd 是目标仓库，若由它自行按 cwd 解析配置，
+    ``KEDACODE_CONFIG``（旧前缀同名注入）：托管子进程的 cwd 是目标仓库，若由它自行按 cwd 解析配置，
     会读到该仓库自己的应用级 ``config.toml``，与面板展示的机器级配置失配。
     """
     console_settings = get_agent_runner_settings().console
@@ -238,15 +238,15 @@ def create_process_supervisor() -> IRunnerProcessSupervisor:
 def create_registry_editor() -> IRepositoryRegistryEditor:
     """创建仓库 registry 的受限写回编辑器。
 
-    Registry 是全局共享的，必须固定写入 ``~/.iar/config.toml``，而不是
+    Registry 是全局共享的，必须固定写入 ``~/.kedacode/config.toml``，而不是
     当前工作目录下搜索到的某个项目级 config.toml。这避免了在目标
-    仓库内执行 ``iar init`` 时意外污染该仓库的应用配置。
+    仓库内执行 ``kc init`` 时意外污染该仓库的应用配置。
     """
     return TomlRegistryEditor(resolve_registry_config_toml_path())
 
 
 def create_repository_autopilot_settings_editor() -> TomlRepositoryAutopilotSettingsEditor:
-    """创建仓库本地 ``.iar.toml`` 的受限 Autopilot 写回编辑器。
+    """创建仓库本地 ``.kedacode.toml`` 的受限 Autopilot 写回编辑器。
 
     写回的 round-trip / 原子替换由共享原语
     :func:`backend.infrastructure.config.toml_section_editor.update_toml_table_keys`
@@ -267,7 +267,7 @@ def resolve_console_spawn_cwd(
     面板托管的 runner 必须在目标仓库内运行——读取该仓库的 ``.iar`` 状态
     与 git 上下文。全局安装场景下 keda 项目根与目标仓库无关，继续把
     cwd 指向它会让 daemon 在错误目录用一个不存在的 uv 项目启动。
-    （``iar registry start`` / ``iar takeover`` 仍以 registry config.toml
+    （``kc registry start`` / ``kc takeover`` 仍以 registry config.toml
     所在目录为 cwd，不经本函数。）
 
     Args:
@@ -400,7 +400,7 @@ def create_loop_state_store(state_path: Path | None = None) -> JsonLoopStateStor
 
     Args:
         state_path: Optional override for the on-disk JSON path. Defaults
-            to ``~/.iar/loop-state.json``.
+            to ``~/.kedacode/loop-state.json``.
 
     Returns:
         A :class:`JsonLoopStateStore` instance.

@@ -1,4 +1,4 @@
-"""Repository-local configuration helpers for issue-agent-runner."""
+"""Repository-local configuration helpers for the KedaCode agent runner."""
 
 from __future__ import annotations
 
@@ -39,13 +39,13 @@ from backend.infrastructure.config.settings import (
     AgentRunnerSafetySettings,
     AgentRunnerValidationSettings,
     AgentRunnerWorktreeSettings,
-    IAR_REPOSITORY_CONFIG_FILENAME,
     load_agent_runner_local_settings,
 )
 from backend.core.shared.interfaces.runner_console import (
     DiscoveredRepositoryEntry,
     IRepositoryRegistryEditor,
 )
+from backend.core.shared.models import product_identity
 from backend.infrastructure.process_runner import CommandResult, SubprocessRunner
 
 
@@ -55,13 +55,13 @@ _MAX_SCAN_DEPTH = 4
 
 
 class IARRepositoryNotInitializedError(Exception):
-    """Raised when a target repository has not run `iar init`."""
+    """Raised when a target repository has not run `kc init`."""
 
     def __init__(self, repo_root_path: Path, config_path: Path) -> None:
         self.repo_root_path = repo_root_path
         self.config_path = config_path
         super().__init__(
-            f"Repository '{repo_root_path}' is not initialized for iar. "
+            f"Repository '{repo_root_path}' is not initialized for KedaCode. "
             f"Expected local config: {config_path}"
         )
 
@@ -70,10 +70,10 @@ def require_iar_repository_initialized(
     repo_root_path: Path,
     process_runner: SubprocessRunner | None = None,  # noqa: ARG001
 ) -> None:
-    """Raise if the repository lacks a valid .iar.toml.
+    """Raise if the repository lacks a valid repository-local config.
 
     A valid local config means:
-    - `.iar.toml` exists as a regular file.
+    - The repository-local config exists as a regular file.
     - It is parseable TOML.
     - It contains an `[agent_runner]` section.
     - `repository.id` is non-empty.
@@ -86,7 +86,7 @@ def require_iar_repository_initialized(
     Raises:
         IARRepositoryNotInitializedError: If the repository is not initialized.
     """
-    config_path = repo_root_path / IAR_REPOSITORY_CONFIG_FILENAME
+    config_path = product_identity.effective_repository_config_path(repo_root_path)
     try:
         local_settings = load_agent_runner_local_settings(repo_root_path)
     except ValueError as exc:
@@ -98,7 +98,7 @@ def require_iar_repository_initialized(
 
 @dataclass(frozen=True)
 class RepositoryInitOptions:
-    """Options for creating repository-local IAR configuration."""
+    """Options for creating repository-local KedaCode configuration."""
 
     cwd: Path
     repo_id_override: str | None = None
@@ -111,7 +111,7 @@ class RepositoryInitOptions:
 
 @dataclass(frozen=True)
 class RepositoryInitResult:
-    """Result of rendering or writing repository-local IAR configuration."""
+    """Result of rendering or writing repository-local KedaCode configuration."""
 
     repo_root_path: Path
     config_path: Path
@@ -148,16 +148,16 @@ def detect_git_repository_root(
     if git_result.return_code != 0 or not git_root_text:
         raise ValueError(
             f"Path '{resolved_start_path}' is not inside a Git repository. "
-            "Run iar from a target repository or pass --repo/--repo-id."
+            "Run kc from a target repository or pass --repo/--repo-id."
         )
     return Path(git_root_text).resolve()
 
 
-TOML_HEADER_COMMENT = """# IAR 本地仓库配置
-# `iar init` 会写入仓库级配置的默认值（generated_content 除外，见文末示例）；这些值
+TOML_HEADER_COMMENT = """# KedaCode 本地仓库配置
+# `kc init` 会写入仓库级配置的默认值（generated_content 除外，见文末示例）；这些值
 # 随后显式覆盖全局默认值。没有默认值的可选字段、以及未写入的 generated_content，
 # 才继承 config.toml / 环境变量 / 代码里的全局默认值。
-# 本文件在 daemon 启动时读取一次：改完要重启 daemon 才生效（`iar run` 这类单轮
+# 本文件在 daemon 启动时读取一次：改完要重启 daemon 才生效（`kc run` 这类单轮
 # 命令每次调用都重新读取，无需重启）。
 # 完整字段说明见 docs/guides/agent-runner.md。
 """
@@ -190,9 +190,9 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
     "labels": "GitHub labels 状态流转配置",
     "agents": "agent 注册表：每个 agent 的调用形态（bin / 路由标签 / 容器认证 / 四种用途的 argv 与输出协议）",
     "git": "Git 发布配置：推送 remote、目标基础分支 base_branch",
-    "worktree": "Issue worktree 的创建与定位命令；默认使用 iar worktree，通常无需修改",
+    "worktree": "Issue worktree 的创建与定位命令；默认使用 kc worktree，通常无需修改",
     "runner": "Runner 行为配置：每轮处理 Issue 数量、默认 agent、提交前验证命令",
-    "memory": "IAR 任务记忆与 Skill 草稿存储配置",
+    "memory": "KedaCode 任务记忆与 Skill 草稿存储配置",
     "safety": "发布前安全边界：自动合并开关、禁止提交的路径模式",
     "autopilot": "Autopilot 快速档（合并队列）：supervisor 之后串行合并；需配合 safety.auto_merge = true 同时启用",
     "validation": "Realistic Validation 证据门禁配置",
@@ -200,9 +200,9 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
     "pre_pr_review": "Draft PR 创建前的 AI review 门禁（push 之后、PR 之前）",
     "post_pr_supervisor": "Draft PR 创建后的自动 supervisor 配置",
     "daemon": "Daemon 轮询与崩溃对账配置（覆盖全局 [agent_runner.daemon] 默认）",
-    "interactive_decision": "交互式决策（iar ask）配置：默认 agent、输出目录、执行确认等",
-    "repl": "交互式 REPL（iar 无子命令）配置：默认 agent、审计目录与命令确认策略",
-    "deliberation": "多 agent 审议（iar deliberate）配置：轮数、合成 agent、参与角色",
+    "interactive_decision": "交互式决策（kc ask）配置：默认 agent、输出目录、执行确认等",
+    "repl": "交互式 REPL（kc 无子命令）配置：默认 agent、审计目录与命令确认策略",
+    "deliberation": "多 agent 审议（kc deliberate）配置：轮数、合成 agent、参与角色",
     "lifecycle_agents": (
         "生命周期 Agent 矩阵（仓库级覆盖）：九键 implementation / fix / closeout / "
         "verifier / review / supervisor / planner / content_generation / deliberate，"
@@ -220,7 +220,7 @@ _IAR_SUBTABLE_COMMENTS: dict[str, str] = {
 
 # 字段路径 -> 字段说明注释（中文为主，关键术语保留英文）。
 _IAR_FIELD_COMMENTS: dict[str, str] = {
-    "repository.id": "仓库在 IAR 中的唯一标识，通常与远程仓库名一致",
+    "repository.id": "仓库在 KedaCode 中的唯一标识，通常与远程仓库名一致",
     "repository.enabled": "是否允许 runner 处理该仓库的 Issue",
     "repository.display_name": "管理终端 / 日志中显示的友好名称",
     "git.remote": "推送分支和创建 PR 时使用的 Git remote 名称",
@@ -236,7 +236,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "runner.max_issues": "每次轮询每个仓库最多处理多少个 Issue",
     "runner.max_concurrent_issues": (
         "单轮内并行处理的 Issue 数量：1 为串行（默认）；>1 时同一轮并行跑多个 "
-        "Issue，仅 iar daemon --concurrency 未指定时作为默认值"
+        "Issue，仅 kc daemon --concurrency 未指定时作为默认值"
     ),
     "runner.default_agent": "默认使用的 AI agent：auto / claude / codex / kimi",
     "runner.max_recovery_attempts": "Agent 失败后的最大重试次数",
@@ -313,12 +313,12 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "daemon.max_deliberation_issues": "每轮 Phase 0 审议最大 Issue 数",
     "daemon.reconcile_stale_attempts": "是否在每轮开头对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）；关闭后僵尸不被触碰",
     "daemon.reclaim_ttl_seconds": "对账的 claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale",
-    "interactive_decision.enabled": "是否启用 iar ask 交互式决策",
-    "interactive_decision.default_agent": "iar ask 默认使用的 agent：auto / claude / codex / kimi",
+    "interactive_decision.enabled": "是否启用 kc ask 交互式决策",
+    "interactive_decision.default_agent": "kc ask 默认使用的 agent：auto / claude / codex / kimi",
     "interactive_decision.default_output_dir": "决策日志与审计文件的默认输出目录",
     "interactive_decision.planner_timeout_seconds": "规划 agent 的最长运行秒数",
     "interactive_decision.max_context_chars": "输入 prompt 的最大字符数",
-    "interactive_decision.allow_execute_yes": "是否允许 `iar ask --yes` 跳过人工确认",
+    "interactive_decision.allow_execute_yes": "是否允许 `kc ask --yes` 跳过人工确认",
     "deliberation.default_rounds": "默认审议轮数",
     "deliberation.default_synthesizer": "汇总最终结论的默认 agent",
     "deliberation.default_output_dir": "审议会话输出目录",
@@ -334,7 +334,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
 }
 
 
-# `.iar.toml` 模板末尾追加的注释示例：以 pi 的注册块演示
+# 仓库本地配置模板末尾追加的注释示例：以 pi 的注册块演示
 # `[agent_runner.agents.<name>]` 的完整写法（pi 已内置，照抄即可用；
 # 接入全新 agent 时取消注释并按需修改）。
 _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
@@ -404,10 +404,10 @@ _GENERATED_CONTENT_EXAMPLE_COMMENT = (
             "# =============================================================================",
             "# Issue / PR 内容生成：[agent_runner.generated_content.<target>]（默认不写入）",
             "# =============================================================================",
-            "# 四个 target：issue_from_prd（iar issue create <prd>）、issue_from_prompt",
-            "# （iar issue create --from-prompt，产物不含 PRD 锚点）、draft_pr（Draft PR 正文）、",
+            "# 四个 target：issue_from_prd（kc issue create <prd>）、issue_from_prompt",
+            "# （kc issue create --from-prompt，产物不含 PRD 锚点）、draft_pr（Draft PR 正文）、",
             "# prd_from_issue（rework-prd）。draft_pr 默认 enabled=false，使用事实正文；其余由 agent 生成。",
-            "# agent 失败或超时回退 title_template / body_template，再回退内置正文。默认值随 iar 升级，",
+            "# agent 失败或超时回退 title_template / body_template，再回退内置正文。默认值随 kc 升级，",
             "# 不会被本文件钉死。需要偏离时取消注释，并只写要改的键（未写的键继续继承默认值）：",
             "#",
             *(
@@ -423,10 +423,10 @@ _GENERATED_CONTENT_EXAMPLE_COMMENT = (
 
 
 def settings_to_toml_string(settings: AgentRunnerLocalSettings) -> str:
-    """Serialize AgentRunnerLocalSettings to a commented .iar.toml string."""
+    """Serialize AgentRunnerLocalSettings to a commented repository config string."""
 
     data = _filter_none_dict(settings.model_dump())
-    # Wrap in [agent_runner] to match .iar.toml structure
+    # Wrap in [agent_runner] to match the repository config structure
     wrapped = {"agent_runner": data}
     toml_body = tomli_w.dumps(wrapped)
     annotated_body = _annotate_iar_toml(toml_body)
@@ -713,7 +713,7 @@ def detect_pre_commit_verification_command(repo_root_path: Path) -> str | None:
 def detect_verification_commands(repo_root_path: Path) -> list[str]:
     """Detect verification commands that actually run in the target repository.
 
-    ``iar init`` previously copied this tool's own defaults (such as
+    ``kc init`` previously copied this tool's own defaults (such as
     ``uv run mkdocs build``) into every repository, which fails in any project
     that does not install mkdocs by default. Detection keeps the safe
     ``git diff --check`` baseline and adds tool commands only when the target
@@ -771,7 +771,7 @@ def build_repository_local_config_text(
     options: RepositoryInitOptions,
     process_runner: SubprocessRunner | None = None,
 ) -> tuple[Path, str, list[str]]:
-    """Render repository-local IAR TOML for a Git repository.
+    """Render repository-local KedaCode TOML for a Git repository.
 
     Args:
         options: Init options, including cwd and explicit overrides.
@@ -837,7 +837,7 @@ def initialize_repository_local_config(
     options: RepositoryInitOptions,
     process_runner: SubprocessRunner | None = None,
 ) -> RepositoryInitResult:
-    """Render or write ``.iar.toml`` for the current Git repository.
+    """Render or write the repository-local config for the current Git repository.
 
     Args:
         options: Init options controlling overrides and write behavior.
@@ -847,12 +847,12 @@ def initialize_repository_local_config(
         Init result with generated TOML and write status.
 
     Raises:
-        ValueError: If ``.iar.toml`` already exists and overwrite was not forced.
+        ValueError: If the repository config already exists and overwrite was not forced.
     """
     repo_root_path, config_text, verification_commands = build_repository_local_config_text(
         options, process_runner
     )
-    config_path = repo_root_path / IAR_REPOSITORY_CONFIG_FILENAME
+    config_path = product_identity.effective_repository_config_path(repo_root_path)
     selected_remote = options.remote_override or _detect_default_remote(
         repo_root_path, process_runner
     )
@@ -875,7 +875,7 @@ def initialize_repository_local_config(
         existing_text = config_path.read_text(encoding="utf-8")
         if existing_text != config_text:
             raise ValueError(
-                f"IAR local config already exists at {config_path}. Use --force to overwrite it."
+                f"KedaCode local config already exists at {config_path}. Use --force to overwrite it."
             )
         return _make_result(wrote_file=False)
     if options.dry_run:
@@ -1006,10 +1006,10 @@ def discover_iar_repositories(
     scan_root: Path,
     editor: IRepositoryRegistryEditor,
 ) -> list[DiscoveredRepositoryEntry]:
-    """扫描本地目录，发现已初始化 IAR 的 git 仓库。
+    """扫描本地目录，发现已初始化 KedaCode 的 git 仓库。
 
     扫描 ``scan_root`` 下最多 ``_MAX_SCAN_DEPTH`` 层子目录，
-    对每个同时存在 ``.git`` 与 ``.iar.toml`` 的目录，读取本地配置
+    对每个同时存在 ``.git`` 与仓库本地配置的目录，读取本地配置
     生成候选条目，并标记是否已注册到 registry。
 
     Args:
@@ -1073,5 +1073,5 @@ def _walk_directories(root: Path, max_depth: int):
 
 
 def _is_iar_git_repository(directory: Path) -> bool:
-    """判断目录是否为带 IAR 配置的 git 仓库。"""
-    return (directory / ".git").exists() and (directory / IAR_REPOSITORY_CONFIG_FILENAME).is_file()
+    """判断目录是否为带 KedaCode 配置的 git 仓库。"""
+    return (directory / ".git").exists() and product_identity.has_repository_config(directory)

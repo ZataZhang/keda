@@ -4,7 +4,7 @@
 调用方点名的键。写入采用「同目录临时文件 + ``os.replace``」原子替换，避免写坏
 配置文件。
 
-``config.toml``（机器级）与 ``.iar.toml``（仓库级）共用本模块——两处写回语义
+``config.toml``（机器级）与 ``.kedacode.toml``（仓库级）共用本模块——两处写回语义
 必须一致：**只写请求里显式给出的键**（值为 ``None`` 表示删除该键），文件其余
 内容一字不动。
 """
@@ -71,7 +71,7 @@ def update_toml_table_keys(
     不产生 diff、也不凭空创建文件）。
 
     Args:
-        config_path: 目标 TOML 文件路径（``config.toml`` 或 ``.iar.toml``）。
+        config_path: 目标 TOML 文件路径（``config.toml`` 或 ``.kedacode.toml``）。
         table_path: 表路径，如 ``("agent_runner", "lifecycle_agents")``。
         values: 键 -> 新值；``None`` 表示删除该键。
 

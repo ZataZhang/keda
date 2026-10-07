@@ -25,6 +25,6 @@ def build_missing_worktree_comment(
             "To recover:",
             f"1. Create or restore the worktree for branch `{pr_branch}`.",
             "2. Ensure the branch HEAD matches the pending rework marker.",
-            "3. Re-run `iar run` to pick up the rework marker.",
+            "3. Re-run `kc run` to pick up the rework marker.",
         ]
     )

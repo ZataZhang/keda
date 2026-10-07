@@ -466,7 +466,7 @@ def browse_console_directories(path: str | None = None) -> dict:
 
 @router.get("/agent-runner/repositories/discover")
 def discover_console_repositories(scan_root: str) -> dict:
-    """扫描本地目录，发现已初始化 IAR 的 git 仓库候选。"""
+    """扫描本地目录，发现已初始化 KedaCode 的 git 仓库候选。"""
     try:
         entries = discover_iar_repositories(
             scan_root=Path(scan_root),

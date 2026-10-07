@@ -92,7 +92,7 @@ pre_command: "gh run list --limit 1 --json conclusion -q '.[0].conclusion // \"n
   gh issue edit <N> --add-label scope/<x>
   ```
   其中 `x ∈ {ci, refactor, docs, deps}`。`scope/<x>` 4 个 label 需先通过
-  `iar labels sync` 在仓库创建（详见 `docs/guides/iar-loop.md`）。
+  `kc labels sync` 在仓库创建（详见 `docs/guides/loop.md`）。
 
 ## Delivery Notes
 

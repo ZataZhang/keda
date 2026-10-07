@@ -1,4 +1,4 @@
-"""``iar run --takeover`` 编排的 api 侧入口（engines 实现的薄转发）。
+"""``kc run --takeover`` 编排的 api 侧入口（engines 实现的薄转发）。
 
 四层依赖方向要求 api 只直接依赖 core，而接管编排要同时触碰 core 用例
 （reclaim）与 infrastructure 监管器，因此实现在

@@ -1,19 +1,19 @@
-# IAR 本地仓库配置
-# `iar init` 会写入全部仓库级配置的默认值；这些值随后显式覆盖全局默认值。
+# KedaCode 本地仓库配置
+# `kc init` 会写入全部仓库级配置的默认值；这些值随后显式覆盖全局默认值。
 # 没有默认值的可选字段未写入时，才继承 config.toml / 环境变量的全局默认值。
 # 修改后无需重启 daemon，下一次轮询自动生效。
 # 完整字段说明见 docs/guides/agent-runner.md。
 
 # 仓库身份标识（用于多仓库管理时区分不同仓库）
 [agent_runner.repository]
-# 仓库在 IAR 中的唯一标识，通常与远程仓库名一致
+# 仓库在 KedaCode 中的唯一标识，通常与远程仓库名一致
 id = "keda"
 # 是否允许 runner 处理该仓库的 Issue
 enabled = true
 # 管理终端 / 日志中显示的友好名称
 display_name = "keda"
 # 可选：GitHub owner/name（``gh pr list --repo`` 使用）。
-# 缺省时 ``iar issue list`` 的 PR 列为空 + stderr 一次性 WARN。
+# 缺省时 ``kc issue list`` 的 PR 列为空 + stderr 一次性 WARN。
 github_repo = "ZataZhang/keda"
 
 # GitHub labels 状态流转配置
@@ -41,20 +41,20 @@ remote = "zata"
 # 创建 worktree 与 PR 的目标基础分支
 base_branch = "main"
 
-# Issue worktree 的创建与定位命令；默认使用 iar worktree，通常无需修改
+# Issue worktree 的创建与定位命令；默认使用 kc worktree，通常无需修改
 [agent_runner.worktree]
 # 创建新 worktree 的命令；{issue_number} 和 {base_branch} 会被替换
-create_command = "iar worktree create --branch issue-{issue_number} --base-branch {base_branch}"
+create_command = "kc worktree create --branch issue-{issue_number} --base-branch {base_branch}"
 # 复用已有 worktree 时定位路径的命令
-reuse_command = "iar worktree path --branch issue-{issue_number}"
+reuse_command = "kc worktree path --branch issue-{issue_number}"
 # 获取 worktree 绝对路径的命令
-path_command = "iar worktree path --branch issue-{issue_number}"
+path_command = "kc worktree path --branch issue-{issue_number}"
 
 # Runner 行为配置：每轮处理 Issue 数量、默认 agent、提交前验证命令
 [agent_runner.runner]
 # 每次轮询每个仓库最多处理多少个 Issue
 max_issues = 1
-# 单轮内并行处理的 Issue 数量：1 为串行（默认）；>1 时同一轮并行跑多个 Issue，仅 iar daemon --concurrency 未指定时作为默认值
+# 单轮内并行处理的 Issue 数量：1 为串行（默认）；>1 时同一轮并行跑多个 Issue，仅 kc daemon --concurrency 未指定时作为默认值
 max_concurrent_issues = 1
 # 默认使用的 AI agent：auto / claude / codex / kimi
 default_agent = "auto"
@@ -89,7 +89,7 @@ verification_commands = [
 # git add 后、git commit 前额外运行的 pre-commit 命令；失败转 Fix Agent
 pre_commit_verification_command = "SKIP=check-test-flag uv run pre-commit run --all-files"
 
-# IAR 任务记忆与 Skill 草稿存储配置
+# KedaCode 任务记忆与 Skill 草稿存储配置
 [agent_runner.memory]
 enabled = true
 base_dir = ".iar/memory"
@@ -230,11 +230,11 @@ reconcile_stale_attempts = true
 # 对账的 claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale
 reclaim_ttl_seconds = 10800
 
-# 交互式决策（iar ask）配置：默认 agent、输出目录、执行确认等
+# 交互式决策（kc ask）配置：默认 agent、输出目录、执行确认等
 [agent_runner.interactive_decision]
-# 是否启用 iar ask 交互式决策
+# 是否启用 kc ask 交互式决策
 enabled = true
-# iar ask 默认使用的 agent：auto / claude / codex / kimi
+# kc ask 默认使用的 agent：auto / claude / codex / kimi
 default_agent = "claude"
 # 决策日志与审计文件的默认输出目录
 default_output_dir = "logs/agent-runner/decisions"
@@ -242,10 +242,10 @@ default_output_dir = "logs/agent-runner/decisions"
 planner_timeout_seconds = 120
 # 输入 prompt 的最大字符数
 max_context_chars = 24000
-# 是否允许 `iar ask --yes` 跳过人工确认
+# 是否允许 `kc ask --yes` 跳过人工确认
 allow_execute_yes = true
 
-# 交互式 REPL（iar 无子命令）配置：默认 agent、审计目录与命令确认策略
+# 交互式 REPL（kc 无子命令）配置：默认 agent、审计目录与命令确认策略
 [agent_runner.repl]
 enabled = true
 default_agent = "claude"
@@ -270,7 +270,7 @@ confirm_commands = [
     "worktree remove",
 ]
 
-# 多 agent 审议（iar deliberate）配置：轮数、合成 agent、参与角色
+# 多 agent 审议（kc deliberate）配置：轮数、合成 agent、参与角色
 [agent_runner.deliberation]
 # 默认审议轮数
 default_rounds = 2

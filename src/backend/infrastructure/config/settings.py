@@ -67,7 +67,6 @@ from backend.infrastructure.config.agent_runner_settings import (
 )
 
 from backend.infrastructure.config.settings_sources import (
-    IAR_REPOSITORY_CONFIG_FILENAME,
     _PROJECT_ROOT_PATH,
     _RegistryRepositoriesSource,
     _TomlSectionSource,
@@ -488,7 +487,6 @@ __all__ = [
     "ChunkingSettings",
     "DatabaseSettings",
     "EmbeddingSettings",
-    "IAR_REPOSITORY_CONFIG_FILENAME",
     "MinioSettings",
     "PreviewSettings",
     "QdrantSettings",

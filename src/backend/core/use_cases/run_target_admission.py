@@ -1,4 +1,4 @@
-"""``iar run`` 显式定向的领取准入：目标 Issue 现在能不能被这个进程领走。
+"""``kc run`` 显式定向的领取准入：目标 Issue 现在能不能被这个进程领走。
 
 就绪标记（``agent/ready``）**只约束守护进程的自主挑选**：人显式点名一个 Issue
 时不再要求它带该标记。放宽准入的代价是「领不领得到」这件事从队列规则转移到
@@ -124,7 +124,7 @@ def require_explicit_target_claimable(
        错误里点名持有者 ``host``/``PID``；持有者已死（本机 PID 不在）则放行，
        交给 running 通道的恢复路径（rework / 发布恢复）。
     3. 带 ``agent/blocked`` 且没有未消费的解除请求 marker → ``blocked``，
-       提示先跑 ``iar blocked-continue``。
+       提示先跑 ``kc blocked-continue``。
     4. 其余情况一律放行 —— 包括**没有任何 workflow 标签**的 Issue，这正是本次
        放宽的入口（显式定向不要求就绪标记）。
 
@@ -147,7 +147,7 @@ def require_explicit_target_claimable(
             f"Issue #{issue_number} could not be read: {exc}",
             reason=TARGET_UNCLAIMABLE_NOT_FOUND,
             issue_number=issue_number,
-            suggestion="iar issue list  # 确认 Issue 编号与仓库访问",
+            suggestion="kc issue list  # 确认 Issue 编号与仓库访问",
         ) from exc
 
     if issue.state.upper() != "OPEN":
@@ -155,7 +155,7 @@ def require_explicit_target_claimable(
             f"Issue #{issue_number} is {issue.state}, not open; there is nothing to run.",
             reason=TARGET_UNCLAIMABLE_NOT_FOUND,
             issue_number=issue_number,
-            suggestion="iar issue list  # 选择一个 open 的 Issue，或重新开一个 Issue",
+            suggestion="kc issue list  # 选择一个 open 的 Issue，或重新开一个 Issue",
         )
 
     labels = set(issue.labels)
@@ -169,10 +169,10 @@ def require_explicit_target_claimable(
                 issue_number=issue_number,
                 holder=(claim.host, claim.pid),
                 suggestion=(
-                    f"iar run --issue {issue_number} --takeover  # 持有者在本机："
+                    f"kc run --issue {issue_number} --takeover  # 持有者在本机："
                     "停掉本机守护进程并回收其在途 Issue"
                     if claim.host == this_host
-                    else "iar issue list  # 持有者在另一台机器：等它结束，或换跑别的 Issue"
+                    else "kc issue list  # 持有者在另一台机器：等它结束，或换跑别的 Issue"
                     "（系统没有强制接管远端认领的入口）"
                 ),
             )
@@ -185,7 +185,7 @@ def require_explicit_target_claimable(
                 "blocked_resolution_requested marker; a runner may not resume it.",
                 reason=TARGET_UNCLAIMABLE_BLOCKED,
                 issue_number=issue_number,
-                suggestion=f"iar blocked-continue --issue {issue_number}",
+                suggestion=f"kc blocked-continue --issue {issue_number}",
             )
 
 

@@ -315,7 +315,7 @@ class UpdateAutopilotRequest(BaseModel):
 
 @router.patch("/agent-runner/backlog/autopilot")
 def update_backlog_autopilot(request: UpdateAutopilotRequest) -> dict:
-    """只修改目标仓库 `.iar.toml` 的 ``autopilot.enabled``。
+    """只修改目标仓库 `.kedacode.toml` 的 ``autopilot.enabled``。
 
     成功响应体来自写后 fresh load 的生效配置，不回显请求体；``safety.auto_merge``
     保持原样（第二道危险动作门禁，页面只读展示）。写回失败时不替换原文件。
@@ -503,7 +503,7 @@ class UpdateCiRepairGlobalRequest(BaseModel):
 
 @router.patch("/agent-runner/backlog/ci-repair-global")
 def update_backlog_ci_repair_global(request: UpdateCiRepairGlobalRequest) -> dict:
-    """只修改目标仓库 `.iar.toml` 的 ``post_pr_supervisor.auto_repair_ci``。
+    """只修改目标仓库 `.kedacode.toml` 的 ``post_pr_supervisor.auto_repair_ci``。
 
     成功响应体来自写后 fresh load 的生效配置；该开关与 ``autopilot.enabled``、
     ``safety.auto_merge``、``runner.fix_agent_enabled`` 语义独立，互不联动。

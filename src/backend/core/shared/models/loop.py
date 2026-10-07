@@ -157,7 +157,7 @@ class LoopRecipe:
 
 @dataclass(frozen=True)
 class LoopTask:
-    """A persisted loop entry stored in ``~/.iar/loop-state.json``.
+    """A persisted loop entry stored in ``~/.kedacode/loop-state.json``.
 
     Attributes:
         id: Loop identifier.

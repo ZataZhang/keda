@@ -13,9 +13,9 @@ const fontMono = Geist_Mono({
 })
 
 export const metadata = {
-  title: "iar — Agent Runner 管理终端",
+  title: "KedaCode — Agent Runner 管理终端",
   description:
-    "iar 统一管理终端：查看仓库队列、托管 runner 进程、跟踪 backlog 与完成度统计。",
+    "KedaCode 统一管理终端：查看仓库队列、托管 runner 进程、跟踪 backlog 与完成度统计。",
 }
 
 /** Root layout for the root section. */

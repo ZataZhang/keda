@@ -179,7 +179,7 @@ def stash_worktree_changes(
     Returns:
         True if changes were stashed and the worktree is now clean.
     """
-    stash_message = f"iar: auto-stash before supervisor cycle {cycle}"
+    stash_message = f"kc: auto-stash before supervisor cycle {cycle}"
     stash_result = process_runner.run(
         ["git", "stash", "push", "-u", "-m", stash_message],
         cwd=worktree_path,

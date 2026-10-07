@@ -1,8 +1,8 @@
 """Global repository takeover for the issue-agent-runner CLI.
 
-This module lets ``iar takeover`` discover GitHub repositories via the
+This module lets ``kc takeover`` discover GitHub repositories via the
 authenticated ``gh`` CLI, clone them into a managed directory, initialize each
-with ``iar init``, register them in the global registry, and optionally start
+with ``kc init``, register them in the global registry, and optionally start
 managed ``daemon`` and ``review-daemon`` processes.
 """
 
@@ -16,20 +16,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from backend.core.shared.models import product_identity
 from backend.engines.agent_runner.repository_local import (
     RepositoryInitOptions,
     initialize_repository_local_config,
     normalize_repository_id,
 )
-from backend.infrastructure.config.settings import IAR_REPOSITORY_CONFIG_FILENAME
 
 if TYPE_CHECKING:
     from backend.core.shared.interfaces.runner_console import IRepositoryRegistryEditor
     from backend.infrastructure.process_runner import SubprocessRunner
 
 _logger = logging.getLogger(__name__)
-
-_DEFAULT_CLONE_ROOT = Path.home() / ".iar" / "repos"
 
 
 @dataclass(frozen=True)
@@ -87,8 +85,8 @@ class TakeoverResult:
 
 
 def _default_clone_root() -> Path:
-    """Return the default managed clone root ``~/.iar/repos``."""
-    clone_root = _DEFAULT_CLONE_ROOT
+    """Return the default managed clone root ``<state home>/repos``."""
+    clone_root = product_identity.state_home() / "repos"
     clone_root.mkdir(parents=True, exist_ok=True)
     return clone_root
 
@@ -257,19 +255,19 @@ def ensure_repository_initialized(
     process_runner: SubprocessRunner,
     dry_run: bool = False,
 ) -> None:
-    """Ensure a repository has an ``.iar.toml`` config.
+    """Ensure a repository has a repository-local config.
 
     If the local config already exists, it is left untouched unless ``dry_run``
     is set, in which case nothing is written.
 
     Args:
         repo_path: Repository root path.
-        repo_id: Registry identifier to write into ``.iar.toml``.
-        display_name: Display name to write into ``.iar.toml``.
+        repo_id: Registry identifier to write into the repository config.
+        display_name: Display name to write into the repository config.
         process_runner: Subprocess runner for git operations.
         dry_run: When ``True``, skip actual writes.
     """
-    config_path = repo_path / IAR_REPOSITORY_CONFIG_FILENAME
+    config_path = product_identity.effective_repository_config_path(repo_path)
     if config_path.exists():
         _logger.info("Repository already initialized: %s", config_path)
         return
@@ -349,8 +347,8 @@ def upsert_repository(
     """Add or update a repository entry in the global registry.
 
     If ``repo_id`` already exists but points to a different resolved path, the
-    existing entry is replaced with the new path so that ``iar init`` in a new
-    location for the same logical repository keeps ``iar daemon`` working.
+    existing entry is replaced with the new path so that ``kc init`` in a new
+    location for the same logical repository keeps ``kc daemon`` working.
 
     Args:
         repo_id: Registry identifier.

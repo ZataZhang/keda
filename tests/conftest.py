@@ -52,16 +52,15 @@ def _find_usable_prd_skill() -> Path | None:
     这里要求一个**真实安装**的 skill（含解析脚本）。
 
     Returns:
-        可用的 ``SKILL.md`` 路径；已显式设置的 ``IAR_PRD_SKILL_PATH`` 优先于
-        用户级安装（``iar init``）解析结果。
+        可用的 ``SKILL.md`` 路径；先按生产解析器的新旧变量优先级解析，
+        再检查旧变量指定的兼容候选。
     """
     from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 
-    candidate_skill_paths: list[Path] = []
+    candidate_skill_paths: list[Path] = [resolve_prd_skill_path()]
     ambient_skill_path = os.environ.get("IAR_PRD_SKILL_PATH")
     if ambient_skill_path:
         candidate_skill_paths.append(Path(ambient_skill_path).expanduser())
-    candidate_skill_paths.append(resolve_prd_skill_path())
     for candidate_skill_path in candidate_skill_paths:
         if (candidate_skill_path.parent / _PRD_CONTRACT_SCRIPT_RELATIVE_PATH).is_file():
             return candidate_skill_path
@@ -77,41 +76,49 @@ def _prd_skill_contract_env() -> Iterator[Path | None]:
     缺失会由 ``prd_contract_client`` 报出可行动的错，而不是在这里静默跳过用例。
 
     要触发预检失败路径的用例照旧用 ``monkeypatch.setenv("IAR_PRD_SKILL_PATH", ...)``
-    覆盖，用例结束后会还原到这里的会话级取值。
+    覆盖，用例结束后会还原到这里的会话级取值。宿主的新变量仅用于找到真实
+    skill；进入测试会话后移除它，防止覆盖单测显式设置的旧变量。双名优先级
+    由专门的解析测试显式设置两名验证，会话结束恢复两名宿主取值。
     """
     usable_skill_path = _find_usable_prd_skill()
     if usable_skill_path is None:
         yield None
         return
-    previous_value = os.environ.get("IAR_PRD_SKILL_PATH")
+    previous_values = {
+        env_name: os.environ.get(env_name)
+        for env_name in ("KEDACODE_PRD_SKILL_PATH", "IAR_PRD_SKILL_PATH")
+    }
+    os.environ.pop("KEDACODE_PRD_SKILL_PATH", None)
     os.environ["IAR_PRD_SKILL_PATH"] = str(usable_skill_path)
     try:
         yield usable_skill_path
     finally:
-        if previous_value is None:
-            os.environ.pop("IAR_PRD_SKILL_PATH", None)
-        else:
-            os.environ["IAR_PRD_SKILL_PATH"] = previous_value
+        for env_name, previous_value in previous_values.items():
+            if previous_value is None:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = previous_value
 
 
 @pytest.fixture(autouse=True, scope="session")
 def _isolate_ambient_iar_config() -> Iterator[None]:
-    """在 pytest 会话期间剥离宿主注入的 ``IAR_CONFIG``，保证默认配置解析可测。
+    """在 pytest 会话期间剥离宿主注入的新旧 CONFIG，保证默认配置解析可测。
 
-    agent runner 在 worktree 里托管执行 ``just test`` 时，会向子进程环境注入
-    ``IAR_CONFIG`` 指向主仓 ``config.toml``（面板托管 runner 读机器级配置的机制）。
-    而套件里有大量用例断言**未设置该变量时**的默认解析路径（cwd 向上查找仓库根
-    ``config.toml``、``iar init`` 回落 ``~/.iar/config.toml``、``preview_env.py``
-    读 tmp_path 下的 ``[preview]``），残留的 ``IAR_CONFIG`` 会顶掉整条查找链，
-    造成只在 runner 环境下失败、普通终端复现不了的污染。需要该变量的用例照旧用
-    ``monkeypatch.setenv("IAR_CONFIG", ...)`` 显式设置，不受这里剥离的影响。
+    托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``IAR_CONFIG``，指向机器级
+    配置。默认解析测试需要从 cwd 查找或临时 HOME 回落，不能被宿主配置覆盖。
+    需要覆盖的用例仍用 ``monkeypatch.setenv`` 显式设置；结束恢复两名宿主取值。
     """
-    previous_value = os.environ.pop("IAR_CONFIG", None)
+    previous_values = {
+        env_name: os.environ.pop(env_name, None) for env_name in ("KEDACODE_CONFIG", "IAR_CONFIG")
+    }
     try:
         yield
     finally:
-        if previous_value is not None:
-            os.environ["IAR_CONFIG"] = previous_value
+        for env_name, previous_value in previous_values.items():
+            if previous_value is None:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = previous_value
 
 
 class FakeGitHubClient(IGitHubClient):

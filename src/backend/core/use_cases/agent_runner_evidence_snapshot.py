@@ -31,7 +31,7 @@ from backend.core.use_cases.agent_runner_validation import (
 
 _logger = logging.getLogger(__name__)
 
-_SNAPSHOT_DIR_PREFIX = "iar-evidence-snapshot-"
+_SNAPSHOT_DIR_PREFIX = "kc-evidence-snapshot-"
 
 
 @dataclass(frozen=True)

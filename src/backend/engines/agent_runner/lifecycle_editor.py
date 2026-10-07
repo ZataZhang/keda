@@ -4,7 +4,7 @@
 :mod:`backend.infrastructure.config.toml_section_editor`）：
 
 - 生命周期矩阵 -> ``[agent_runner.lifecycle_agents]``（``config.toml`` 或
-  仓库 ``.iar.toml``，由 scope 决定）；
+  仓库本地配置，由 scope 决定）；
 - agent 回退顺序 -> ``[agent_runner.runner]`` 的 ``agent_fallback_order`` /
   ``max_agent_switches``（``config.toml``）；
 - agent 标签 -> ``[agent_runner.agents.<name>]`` 的 ``label`` /
@@ -16,10 +16,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from backend.infrastructure.config.settings_sources import (
-    IAR_REPOSITORY_CONFIG_FILENAME,
-    resolve_config_toml_path,
-)
+from backend.core.shared.models import product_identity
+from backend.infrastructure.config.settings_sources import resolve_config_toml_path
 from backend.infrastructure.config.toml_section_editor import update_toml_table_keys
 
 _LIFECYCLE_AGENTS_TABLE_PATH: tuple[str, ...] = ("agent_runner", "lifecycle_agents")
@@ -34,7 +32,7 @@ class TomlLifecycleSettingsEditor:
         """初始化编辑器。
 
         Args:
-            config_path: ``config.toml`` 或仓库 ``.iar.toml`` 的路径。
+            config_path: ``config.toml`` 或仓库本地配置的路径。
         """
         self._config_path = Path(config_path).expanduser()
 
@@ -64,7 +62,7 @@ def create_lifecycle_settings_editor(
     scope: str,
     repo_path: str | Path | None = None,
 ) -> TomlLifecycleSettingsEditor:
-    """按 scope 构造编辑器：全局写 ``config.toml``，仓库写该仓库 ``.iar.toml``。
+    """按 scope 构造编辑器：全局写 ``config.toml``，仓库写该仓库 ``.kedacode.toml``。
 
     Args:
         scope: ``global`` 或 ``repository``。
@@ -79,7 +77,9 @@ def create_lifecycle_settings_editor(
     if scope == "repository":
         if repo_path is None:
             raise ValueError("repo_path is required for scope='repository'.")
-        return TomlLifecycleSettingsEditor(Path(repo_path) / IAR_REPOSITORY_CONFIG_FILENAME)
+        return TomlLifecycleSettingsEditor(
+            product_identity.effective_repository_config_path(Path(repo_path))
+        )
     if scope == "global":
         return TomlLifecycleSettingsEditor(resolve_config_toml_path())
     raise ValueError(f"Unknown scope '{scope}'. Valid scopes: global, repository.")

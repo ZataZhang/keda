@@ -5,7 +5,7 @@
 1. **物化解析** — 从 PRD / Issue body 解析 ``Realistic Validation`` 清单与
    ``Validation Waiver`` 豁免声明。
 2. **证据隔离** — 默认约定下证据落 ``tasks/evidence/<prd-stem>/``，由
-   ``iar init`` provision 的 ``.gitignore`` 白名单保证只有 ``*.md`` 报告进
+   ``kc init`` provision 的 ``.gitignore`` 白名单保证只有 ``*.md`` 报告进
    版本库；legacy ``.iar/evidence`` 配置仍用 ``info/exclude`` 整目录排除。
    发布前拒绝混入代码 diff 的证据产物（双保险）。
 3. **证据强制** — commit 前要求证据目录非空（``ValidationEvidenceError``
@@ -382,7 +382,7 @@ def ensure_evidence_dir_excluded(
 ) -> None:
     """Idempotently exclude the evidence dir (legacy only) and RV cache via git ``info/exclude``.
 
-    新约定（默认 ``tasks/evidence``）下证据目录的 git 语义由 ``iar init``
+    新约定（默认 ``tasks/evidence``）下证据目录的 git 语义由 ``kc init``
     provision 的 ``.gitignore`` 白名单保证（只放行 ``*.md`` 报告），这里不再对
     它写整目录 info/exclude；显式配置了其它目录（legacy ``.iar/evidence``）的
     仓库保持原有的整目录排除行为，逐字节不变。

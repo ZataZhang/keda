@@ -58,7 +58,7 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
 
     repl_parser = subparsers.add_parser(
         "repl",
-        help="Run the interactive REPL session (equivalent to `iar` with no subcommand).",
+        help="Run the interactive REPL session (equivalent to `kc` with no subcommand).",
     )
     repl_parser.add_argument(
         "--agent",

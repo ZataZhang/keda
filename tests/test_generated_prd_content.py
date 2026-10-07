@@ -273,18 +273,36 @@ def test_load_prd_skill_spec_reads_and_handles_missing(tmp_path: Path) -> None:
 
 
 def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """显式覆盖 → IAR_PRD_SKILL_PATH → IAR_SKILLS_DIR → keda 自有 → agent 用户级目录。"""
+    """显式覆盖优先；新变量胜过旧变量，旧变量与本机候选仍兼容。"""
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+    for env_name in (
+        "KEDACODE_PRD_SKILL_PATH",
+        "IAR_PRD_SKILL_PATH",
+        "KEDACODE_SKILLS_DIR",
+        "IAR_SKILLS_DIR",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
     explicit = tmp_path / "explicit.md"
     assert resolve_prd_skill_path(explicit) == explicit
     monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(tmp_path / "env.md"))
     assert resolve_prd_skill_path() == tmp_path / "env.md"
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(tmp_path / "new-env.md"))
+    assert resolve_prd_skill_path() == tmp_path / "new-env.md"
+    assert resolve_prd_skill_path(explicit) == explicit
+    monkeypatch.delenv("KEDACODE_PRD_SKILL_PATH")
     monkeypatch.delenv("IAR_PRD_SKILL_PATH", raising=False)
     configured_skill_path = tmp_path / "configured-skills" / "prd" / "SKILL.md"
     configured_skill_path.parent.mkdir(parents=True)
     configured_skill_path.write_text("configured", encoding="utf-8")
     monkeypatch.setenv("IAR_SKILLS_DIR", str(tmp_path / "configured-skills"))
     assert resolve_prd_skill_path() == configured_skill_path
+    new_skills_root = tmp_path / "new-configured-skills"
+    new_configured_skill_path = new_skills_root / "prd" / "SKILL.md"
+    new_configured_skill_path.parent.mkdir(parents=True)
+    new_configured_skill_path.write_text("new configured", encoding="utf-8")
+    monkeypatch.setenv("KEDACODE_SKILLS_DIR", str(new_skills_root))
+    assert resolve_prd_skill_path() == new_configured_skill_path
+    monkeypatch.delenv("KEDACODE_SKILLS_DIR")
     monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
 
     keda_owned_skill_path = tmp_path / ".iar" / "skills" / "prd" / "SKILL.md"

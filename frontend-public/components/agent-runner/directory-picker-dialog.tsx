@@ -78,7 +78,7 @@ function DirectoryBadges({ entry }: { entry: BrowsableDirectoryEntry }) {
       ) : null}
       {entry.has_iar_config ? (
         <Badge variant="ready" className="text-[10px]">
-          IAR 已初始化
+          KedaCode 已初始化
         </Badge>
       ) : null}
       {entry.already_registered ? (

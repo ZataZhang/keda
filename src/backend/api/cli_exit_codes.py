@@ -1,4 +1,4 @@
-"""iar 的语义退出码常量与「异常 → 退出码」翻译。
+"""kc 的语义退出码常量与「异常 → 退出码」翻译。
 
 POSIX 习惯只区分 ``0``（成功）/ ``1``（失败）/ ``2``（用法错误），调用方
 只能去 parse stderr 的自然语言才能知道失败原因。本模块在保持 ``0/1/2``
@@ -24,7 +24,7 @@ __all__ = [
 
 
 class ExitCode(IntEnum):
-    """``iar`` 对外的退出码契约。"""
+    """``kc`` 对外的退出码契约（三个入口同一套码）。"""
 
     SUCCESS = 0
     GENERAL = 1
@@ -45,13 +45,13 @@ ERROR_TOKEN_BY_EXIT_CODE: dict[ExitCode, str] = {
     ExitCode.DRY_RUN_OK: "dry_run_ok",
 }
 
-#: 公布在 ``iar --help`` 与各命令帮助里的码表（FR-3）。
+#: 公布在 ``kc --help`` 与各命令帮助里的码表（FR-3）。
 EXIT_CODE_HELP = (
     "Exit codes: 0 ok · 1 unclassified failure · 2 usage error · "
     "3 not found · 4 permission denied · 5 conflict · 10 dry-run passed. "
     "Machine output: pass --json (alias of --output json); stdout then "
     "carries data only and failures are reported as a JSON envelope on stderr. "
-    "Introspect flags with `iar schema --json`."
+    "Introspect flags with `kc schema --json`."
 )
 
 

@@ -13,10 +13,15 @@ from pathlib import Path
 import typer
 from typer.completion import get_completion_script
 
-# CLI 在 cli_typer_app 中固定以 prog_name="iar" 运行，补全协议环境变量随之固定；
-# 别名入口共享同一协议（协议解析会丢弃首词命令名，命令名不影响补全结果）。
-_PRIMARY_COMMAND_NAME = "iar"
-_COMPLETION_ENV_VAR = "_IAR_COMPLETE"
+from backend.core.shared.models import product_identity
+
+# 补全协议环境变量名是已安装补全脚本写死的跨版本契约，永久保留旧拼写，因此这里
+# 不随 prog_name 推导（legacy-alias）。别名入口共享同一协议：协议解析会丢弃首词
+# 命令名，命令名不影响补全结果。
+_PRIMARY_COMMAND_NAME = product_identity.PRIMARY_COMMAND_NAME
+_COMPLETION_ENV_VAR = product_identity.COMPLETION_ENV_VAR_NAME
+# bash 补全脚本的 XDG 配置目录名沿用长命令名（与 PyPI 发行名一致）。
+_USER_CONFIG_DIR_NAME = product_identity.LONG_COMMAND_NAME
 # 与主命令同 target 的 console script 即别名入口，单一事实源是 pyproject [project.scripts]。
 _CLI_ENTRY_POINT_TARGET = "backend.api.cli:main"
 
@@ -36,7 +41,7 @@ def alias_command_names() -> tuple[str, ...]:
     声明同一入口，按命令名去重后不受影响。
 
     Returns:
-        tuple[str, ...]: 别名命令名，例如 ``("kedacode",)``。
+        tuple[str, ...]: 别名命令名，例如 ``("iar", "kedacode")``。
     """
     alias_name_set = {
         entry_point.name
@@ -48,7 +53,7 @@ def alias_command_names() -> tuple[str, ...]:
 
 
 def _completion_script(shell: CompletionShellChoice) -> str:
-    """Return the shell completion script for the iAR command and its aliases."""
+    """Return the shell completion script for the kc command and its aliases."""
     script_sections = [
         get_completion_script(
             prog_name=command_name,
@@ -81,12 +86,12 @@ def _append_unique_line(file_path: Path, line: str) -> bool:
 def _install_completion_script(
     shell: CompletionShellChoice,
 ) -> tuple[Path, Path | None]:
-    """Install iAR shell completion and return the script/profile paths."""
+    """Install KedaCode shell completion and return the script/profile paths."""
     script_content = _completion_script(shell)
     home_path = Path.home()
     if shell is CompletionShellChoice.zsh:
         completion_dir = home_path / ".zsh" / "completions"
-        completion_path = completion_dir / "_iar"
+        completion_path = completion_dir / f"_{_PRIMARY_COMMAND_NAME}"
         completion_path.parent.mkdir(parents=True, exist_ok=True)
         completion_path.write_text(f"{script_content}\n", encoding="utf-8")
         zshrc_path = home_path / ".zshrc"
@@ -95,14 +100,17 @@ def _install_completion_script(
         _append_unique_line(zshrc_path, source_line)
         return completion_path, zshrc_path
     if shell is CompletionShellChoice.bash:
-        completion_path = home_path / ".config" / "iar" / "iar_completion.bash"
+        xdg_config_root_path = home_path / ".config" / _USER_CONFIG_DIR_NAME
+        completion_path = xdg_config_root_path / f"{_PRIMARY_COMMAND_NAME}_completion.bash"
         completion_path.parent.mkdir(parents=True, exist_ok=True)
         completion_path.write_text(f"{script_content}\n", encoding="utf-8")
         bashrc_path = home_path / ".bashrc"
         source_line = f'[ -f "{completion_path}" ] && source "{completion_path}"'
         _append_unique_line(bashrc_path, source_line)
         return completion_path, bashrc_path
-    completion_path = home_path / ".config" / "fish" / "completions" / "iar.fish"
+    completion_path = (
+        home_path / ".config" / "fish" / "completions" / f"{_PRIMARY_COMMAND_NAME}.fish"
+    )
     completion_path.parent.mkdir(parents=True, exist_ok=True)
     completion_path.write_text(f"{script_content}\n", encoding="utf-8")
     return completion_path, None

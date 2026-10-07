@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 # 分发包名的单一声明处（PRD FR-1）：PyPI/Homebrew 分发名是 kedacode，
-# CLI 主命令是 iar，另有同名别名 kedacode（见 [project.scripts]）。
+# CLI 主命令是 kc，另有同名长写 kedacode 与弃用别名 iar（见 [project.scripts]）。
 # 改名时穷举命令见 PRD 7.5 第 3 条。
 name = "kedacode"
 version = "0.2.1"
-description = "Issue Agent Runner (iar) — turn GitHub Issues into a local AI agent queue."
+description = "KedaCode (kc) — turn GitHub Issues into a local AI agent queue."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
@@ -55,16 +55,21 @@ dependencies = [
 ]
 
 [project.scripts]
-iar = "backend.api.cli:main"
-# 装的是 kedacode、敲的是 iar，这个落差让人装完不知道该敲什么，所以给安装名留一个
+# 三个入口指向同一实现：kc 是主命令，kedacode 是与分发名同名的长写，
+# iar 是永久保留的弃用别名（不设移除日期，直接敲它会收到一次改名提醒）。
+kc = "backend.api.cli:main"
+# 装的是 kedacode、敲的却是两个字母，这个落差让人装完不知道该敲什么，所以给安装名留一个
 # 同功能别名。刻意不提供 keda / keda-code 入口：bin/keda 会和 CNCF KEDA 将来可能
 # 进 homebrew-core 的同名 formula 抢符号链接（那时 brew install 直接失败），
 # 而带连字符的命令名没人会敲。
 kedacode = "backend.api.cli:main"
+iar = "backend.api.cli:main"
 
-[project.entry-points."iar.agent_output_protocols"]
+[project.entry-points."kedacode.agent_output_protocols"]
 # 内置输出协议与第三方插件走同一 entry point group 注册；
 # 实现位于 backend/engines/agent_runner/output_protocols/。
+# 旧分组 iar.agent_output_protocols 仍会被发现（同 id 时本分组优先），
+# legacy-alias: 已按旧分组注册的第三方包不需要重装。
 plain = "backend.engines.agent_runner.output_protocols.plain:PlainOutputProtocol"
 claude-stream-json = "backend.engines.agent_runner.output_protocols.claude_stream_json:ClaudeStreamJsonOutputProtocol"
 pi-json-lines = "backend.engines.agent_runner.output_protocols.pi_json_lines:PiJsonLinesOutputProtocol"

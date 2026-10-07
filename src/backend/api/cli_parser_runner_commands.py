@@ -43,7 +43,7 @@ def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
         "--all-ready",
         action="store_true",
         default=False,
-        help="Process the ready queue by priority (the historical iar run behavior).",
+        help="Process the ready queue by priority (the historical kc run behavior).",
     )
     run_parser.add_argument(
         "--takeover",

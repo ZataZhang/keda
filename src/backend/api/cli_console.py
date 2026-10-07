@@ -1,4 +1,4 @@
-"""Shared Rich console instances for the IAR CLI.
+"""Shared Rich console instances for the KedaCode CLI.
 
 Centralising ``Console`` instances avoids circular imports when CLI command
 implementations are split into separate modules.

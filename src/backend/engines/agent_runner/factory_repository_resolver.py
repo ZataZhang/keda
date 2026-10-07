@@ -23,10 +23,10 @@ from backend.engines.agent_runner.factory_config_builder import (
 )
 from backend.engines.agent_runner.factory_config_merge import merge_repository_config
 from backend.engines.agent_runner.repository_local import detect_git_repository_root
+from backend.core.shared.models import product_identity
 from backend.infrastructure.config.settings import (
     AgentRunnerRepositorySettings,
     AgentRunnerSettings,
-    IAR_REPOSITORY_CONFIG_FILENAME,
     load_agent_runner_local_settings,
 )
 from backend.infrastructure.logging.logger import logger
@@ -36,7 +36,7 @@ def _repository_identity_key(repo_settings: AgentRunnerRepositorySettings) -> st
     """Choose the dict key for a repository under ``AppConfig.repositories``.
 
     The registry key (when present) takes precedence so that
-    ``iar issue list --repo-id foo`` and ``--all-registered`` produce the
+    ``kc issue list --repo-id foo`` and ``--all-registered`` produce the
     same identity lookup; ad-hoc single-repo flows that only set ``path``
     fall back to the resolved path string.
     """
@@ -345,7 +345,7 @@ def _load_enabled_repository_local_settings(
     if local_settings is not None and not local_settings.enabled:
         raise ValueError(
             "Repository-local config at "
-            f"'{repo_root_path / IAR_REPOSITORY_CONFIG_FILENAME}' is disabled."
+            f"'{product_identity.effective_repository_config_path(repo_root_path)}' is disabled."
         )
     return local_settings
 
@@ -430,7 +430,7 @@ def _build_merged_repository_context(
             repo_key = registry_key
             skip_identity = False
         else:
-            # Subsequent entries (local .iar.toml overrides) merge
+            # Subsequent entries (local .kedacode.toml overrides) merge
             # sub-config fields but do not touch the identity view.
             repo_key = None
             skip_identity = True

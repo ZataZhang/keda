@@ -2,7 +2,7 @@
 
 Holds :func:`recover_command` and :func:`blocked_continue_command`. The
 log inspection command lives in :mod:`backend.api.cli_typer_logs` so the
-historical ``iar --help`` command order is preserved.
+historical ``kc --help`` command order is preserved.
 """
 
 from __future__ import annotations

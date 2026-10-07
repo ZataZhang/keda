@@ -17,6 +17,7 @@ called.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from enum import Enum
 from importlib import metadata as importlib_metadata
@@ -34,6 +35,7 @@ from backend.api.cli_output import (
     OutputFormat,
     render_cli_error,
 )
+from backend.core.shared.models import product_identity
 
 __all__ = [
     "AllRepositoriesOption",
@@ -83,7 +85,7 @@ __all__ = [
 def _resolve_keda_version() -> str:
     """Return the installed ``kedacode`` distribution version, falling back to ``0.0.0+unknown``.
 
-    The install-smoke workflow shells out to ``iar --version`` after a
+    The install-smoke workflow shells out to ``kc --version`` after a
     ``uv tool install --reinstall --editable .``; the editable install resolves
     to the metadata recorded in ``pyproject.toml``. If the distribution cannot
     be located (for example when running from an unpacked sdist), we still want
@@ -135,7 +137,7 @@ class IssueTypeChoice(str, Enum):
 
 
 class LogsKindChoice(str, Enum):
-    """Kind selector for ``iar logs``."""
+    """Kind selector for ``kc logs``."""
 
     daemon = "daemon"
     review_daemon = "review_daemon"
@@ -144,8 +146,8 @@ class LogsKindChoice(str, Enum):
 _HELP_CONTEXT = {"help_option_names": ["-h", "--help"]}
 
 app = typer.Typer(
-    name="iar",
-    help=f"Issue Agent Runner CLI.\n\n{EXIT_CODE_HELP}",
+    name=product_identity.PRIMARY_COMMAND_NAME,
+    help=f"{product_identity.PRODUCT_DISPLAY_NAME} CLI.\n\n{EXIT_CODE_HELP}",
     no_args_is_help=False,
     rich_markup_mode="rich",
     context_settings=_HELP_CONTEXT,
@@ -164,7 +166,7 @@ completion_app = typer.Typer(
     context_settings=_HELP_CONTEXT,
 )
 worktree_app = typer.Typer(
-    help="Manage iAR-owned Git worktrees for the current repository.",
+    help="Manage KedaCode-owned Git worktrees for the current repository.",
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
@@ -194,12 +196,12 @@ backlog_app = typer.Typer(
     context_settings=_HELP_CONTEXT,
 )
 config_app = typer.Typer(
-    help="Maintain the repository-local .iar.toml (migrate values pinned by an older init).",
+    help="Maintain local state: move ~/.iar, rename .iar.toml.",  # legacy-alias
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
 container_app = typer.Typer(
-    help="Manage the iar runner container (auth import, up, down, logs).",
+    help="Manage the KedaCode runner container (auth import, up, down, logs).",
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
@@ -371,7 +373,7 @@ def _app_callback(
         typer.Option(
             "--agent",
             help="Override the REPL default agent. "
-            "Accepts any registered agent name (see `iar agent list`); "
+            "Accepts any registered agent name (see `kc agent list`); "
             "'auto' falls back to [agent_runner.repl].default_agent.",
         ),
     ] = None,
@@ -407,7 +409,7 @@ def _app_callback(
 # order: init → registry → labels → issue → run/review/review-daemon/loop-daemon
 # → logs → recover/blocked-continue → ask/repl/deliberate → worktree/workflow
 # → takeover → loop. The modules below are imported in that exact order so
-# ``iar --help`` byte-output stays stable. ``cli_typer_schema`` is appended
+# ``kc --help`` byte-output stays stable. ``cli_typer_schema`` is appended
 # last: the read-only introspection command only adds a trailing entry and must
 # not reorder the existing ones.
 from backend.api import (  # noqa: E402,F401
@@ -464,7 +466,7 @@ def _render_click_exception(exc: typer_click.exceptions.ClickException) -> int:
     写错时恰恰最需要结构化错误。错误名按 click 的 ``exit_code`` 归位
     （``UsageError`` 为 ``2`` → ``usage_error``，其余 click 错误未分类为
     ``1`` → ``error``）；``UsageError`` 携带 ``ctx``，据此给出
-    ``iar <命令路径> --help`` 建议。
+    ``kc <命令路径> --help`` 建议。
 
     Args:
         exc: click 抛出的异常（未知旗标、枚举拒绝、缺必填参数等）。
@@ -475,7 +477,9 @@ def _render_click_exception(exc: typer_click.exceptions.ClickException) -> int:
     exit_code = exc.exit_code if isinstance(exc.exit_code, int) else int(ExitCode.GENERAL)
     code = ExitCode.USAGE if exit_code == int(ExitCode.USAGE) else ExitCode.GENERAL
     context = getattr(exc, "ctx", None)
-    help_command = context.command_path if context is not None else "iar"
+    help_command = (
+        context.command_path if context is not None else product_identity.PRIMARY_COMMAND_NAME
+    )
     return render_cli_error(
         CliError(
             exc.format_message(),
@@ -487,14 +491,42 @@ def _render_click_exception(exc: typer_click.exceptions.ClickException) -> int:
     )
 
 
+def _emit_legacy_command_notice(raw_args: list[str]) -> None:
+    """以弃用别名直接启动时，往 stderr 给一次改名提醒。
+
+    三个入口指向同一实现，只有旧名 ``iar`` 需要提醒，``kc`` 与 ``kedacode`` 保持
+    安静。两道静音闸门让非人类路径逐字节不变（PRD FR-2）：已安装补全脚本触发的
+    补全协议（补全环境变量存在），以及机器模式（``--json`` / ``--output json``）。
+    提醒必须走 stderr：人类模式的应用日志把 stdout 处理器挂在 root logger 上，
+    而配置加载早于机器模式的日志改绑，用 logger 会让提醒混进 stdout。
+
+    Args:
+        raw_args: 传给 :func:`main` 的原始参数，用于判定机器模式。
+    """
+    invocation_name = sys.argv[0] if sys.argv else ""
+    if not product_identity.is_legacy_command_name(invocation_name):
+        return
+    if product_identity.COMPLETION_ENV_VAR_NAME in os.environ:
+        return
+    if _machine_output_requested(raw_args):
+        return
+    product_identity.emit_notice_once(product_identity.LEGACY_COMMAND_HINT)
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Run the Typer-powered CLI."""
-    args = sys.argv[1:] if argv is None else argv
+    """Run the Typer-powered CLI (``kc``; also installed as ``kedacode`` / ``iar``)."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    _emit_legacy_command_notice(args)
     if "--version" in args or "-V" in args:
-        typer.echo(f"iar {_resolve_keda_version()}")
+        typer.echo(f"{product_identity.PRIMARY_COMMAND_NAME} {_resolve_keda_version()}")
         return 0
     try:
-        result = app(args=args, prog_name="iar", standalone_mode=False)
+        result = app(
+            args=args,
+            prog_name=product_identity.PRIMARY_COMMAND_NAME,
+            complete_var=product_identity.COMPLETION_ENV_VAR_NAME,
+            standalone_mode=False,
+        )
     except typer_click.exceptions.NoArgsIsHelpError:
         return 0
     except typer_click.exceptions.ClickException as exc:

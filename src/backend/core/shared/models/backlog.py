@@ -247,7 +247,7 @@ class TokenUsageStats:
 
 @dataclass(frozen=True)
 class PrdTokenUsageEntry:
-    """单个 PRD（Issue）维度的 token 用量累计（CLI ``iar tokens`` 按 PRD 表的数据源）。
+    """单个 PRD（Issue）维度的 token 用量累计（CLI ``kc tokens`` 按 PRD 表的数据源）。
 
     同一 PRD 的多次 run 合并累计；``run_count`` 是参与累计的 run 条数，
     ``usage_count`` 是计入的用量条数（缺 usage 的事件不计入）。
@@ -267,7 +267,7 @@ class PrdLifecycleStats:
     ``unlinked_run_count`` 披露无法可靠关联 PRD 的旧 ``run_records`` 条数；
     这些记录不进入完成分位数，也不被伪装成生命周期事件。
     ``token_usage_by_prd`` 是同一窗口 / 同一批 run 上的 PRD（Issue）维度
-    token 汇总（按 ``total_tokens`` 降序，口径与 CLI ``iar tokens`` 的
+    token 汇总（按 ``total_tokens`` 降序，口径与 CLI ``kc tokens`` 的
     「按 PRD」表同源）；账本不可用时降级为空列表。
     """
 
@@ -324,7 +324,7 @@ class CiCheckProblem:
 class BacklogCiDelivery:
     """Backlog PRD 的 CI/CD 交付尾段投影（运行时派生，不持久化）。
 
-    Console API 与 ``iar backlog ci status --json`` 共用同一份 DTO 结构；
+    Console API 与 ``kc backlog ci status --json`` 共用同一份 DTO 结构；
     轮次事实源是 GitHub PR head SHA 与既有 ``iar:event`` marker。
     """
 

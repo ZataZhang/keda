@@ -1,4 +1,4 @@
-"""Typer commands under ``iar workflow``.
+"""Typer commands under ``kc workflow``.
 
 Holds :func:`workflow_install_command`, the bundled template installer
 (GitHub Actions + preview deploy scripts).

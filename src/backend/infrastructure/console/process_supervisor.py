@@ -4,7 +4,7 @@
 
 - 子进程以 ``start_new_session=True`` 启动，脱离后端进程组：后端重启
   不会杀掉正在执行 Issue 的 runner。
-- 进程登记表是一个 JSON pidfile（默认 ``~/.iar/processes.json``），
+- 进程登记表是一个 JSON pidfile（默认落在本机状态目录下，见 ``[agent_runner.console]``），
   写入采用「临时文件 + ``os.replace``」原子替换；后端重启后据此复活
   记录并重新探活。
 - 探活使用 ``os.kill(pid, 0)``；进程不存在（``ProcessLookupError``）
@@ -36,9 +36,11 @@ try:
 except Exception:  # noqa: BLE001 - psutil 是可选依赖；不可用时降级为空扫描。
     psutil = None  # type: ignore[assignment]
 
+from backend.core.shared.models import product_identity  # noqa: E402
 
 # 以下数据类与 core/shared/interfaces/runner_console.py 中的同名类型
-# 结构一致（鸭子类型实现端口），infrastructure 层禁止导入 core。
+# 结构一致（鸭子类型实现端口）；infrastructure 只被允许导入 core.shared.interfaces
+# 与 core.shared.models，所以这里不引用 interfaces 里的类型。
 # ``kind`` 在本层为普通字符串；core 的 RunnerProcessKind 是 str Enum，
 # 与字符串比较兼容。
 
@@ -116,14 +118,13 @@ _UNMANAGED_KIND_PATTERNS = (
 _NON_RUNNER_NESTED_COMMANDS = frozenset({"status"})
 
 
-def _find_iar_command_index(cmdline: tuple[str, ...]) -> int | None:
-    """在命令行中定位 ``iar`` 可执行文件的位置。
+def _find_own_command_index(cmdline: tuple[str, ...]) -> int | None:
+    """在命令行中定位本产品可执行文件（``kc`` / ``kedacode`` / ``iar`` legacy-alias）的位置。
 
-    兼容 ``iar``、``uv run iar``、``/path/to/iar`` 等形态。
+    兼容 ``kc``、``uv run kc``、``/path/to/iar``（legacy-alias）等形态。
     """
     for index, arg in enumerate(cmdline):
-        basename = os.path.basename(arg)
-        if basename == "iar":
+        if product_identity.is_own_command_name(arg):
             return index
     return None
 
@@ -134,17 +135,17 @@ def _parse_unmanaged_kind(cmdline: tuple[str, ...]) -> str | None:
     Returns:
         ``"daemon"`` / ``"review_daemon"`` 或 ``None``。
     """
-    iar_index = _find_iar_command_index(cmdline)
-    if iar_index is None:
+    command_index = _find_own_command_index(cmdline)
+    if command_index is None:
         return None
-    candidate_args = cmdline[iar_index + 1 :]
+    candidate_args = cmdline[command_index + 1 :]
     # 跳过选项参数（如 --repo /path/to/repo），定位子命令。
     for index, arg in enumerate(candidate_args):
         if arg.startswith("-"):
             continue
         for pattern, kind in _UNMANAGED_KIND_PATTERNS:
             if arg == pattern:
-                # 检查是否是嵌套的非 runner 子命令（如 ``iar daemon status``）。
+                # 检查是否是嵌套的非 runner 子命令（如 ``kc daemon status``）。
                 for next_candidate in candidate_args[index + 1 :]:
                     if not next_candidate.startswith("-"):
                         if next_candidate in _NON_RUNNER_NESTED_COMMANDS:
@@ -217,7 +218,7 @@ class PidfileProcessSupervisor:
             registry_path: JSON pidfile 路径，支持 ``~`` 展开。
             log_dir: 托管进程日志根目录。
             config_path: 父进程当前生效的 ``config.toml``；给定后 spawn 子进程时
-                以 ``IAR_CONFIG`` 注入，保证托管进程与创建它的进程读到同一份
+                以配置环境变量（新旧名同时）注入，保证托管进程与创建它的进程读到同一份
                 机器级配置。``None`` 表示不注入，子进程按自身 cwd 解析。
         """
         self._registry_path = Path(registry_path).expanduser()
@@ -300,18 +301,17 @@ class PidfileProcessSupervisor:
         log_directory.mkdir(parents=True, exist_ok=True)
         log_path = log_directory / f"{kind_value}-{process_id}.log"
 
-        # IAR_CONSOLE 标记让子进程把运行记录的 trigger 记为 console_*。
-        # 基底用 denylist 净化档而非全量继承：托管 runner 还会派生 agent
-        # 与工具命令子进程，会话私有变量（SERVER__PORT 等）在这一跳即
-        # 截断，毒不再沿进程谱系下传（Issue #230）。
+        # CONSOLE 标记保持新旧变量兼容，基底使用净化档，避免会话私有变量下传。
         child_env = build_sanitized_child_env()
-        child_env["IAR_CONSOLE"] = "1"
+        child_env.update(product_identity.build_child_env_aliases({"CONSOLE": "1"}))
         # 托管子进程的 cwd 是目标仓库（见 ``resolve_console_spawn_cwd``），若让它
         # 自行按 cwd 解析配置，会撞上该仓库自己的应用级 ``config.toml``，把机器级
-        # 配置（生命周期矩阵、registry、超时…）整份顶掉。``IAR_CONFIG`` 是配置
-        # 发现顺序里的最高优先级，显式注入即让父子两进程锁定同一份文件。
+        # 配置（生命周期矩阵、registry、超时…）整份顶掉。配置环境变量是发现顺序里的
+        # 最高优先级，显式注入即让父子两进程锁定同一份文件。
         if self._config_path is not None:
-            child_env["IAR_CONFIG"] = str(self._config_path)
+            child_env.update(
+                product_identity.build_child_env_aliases({"CONFIG": str(self._config_path)})
+            )
         with open(log_path, "ab") as log_file:
             child_process = subprocess.Popen(  # noqa: S603 - argv 由白名单枚举构建。
                 list(argv),
@@ -382,7 +382,7 @@ class PidfileProcessSupervisor:
     def list_unmanaged_processes(
         self, registry_entries: Sequence[Any]
     ) -> list[RunnerProcessRecord]:
-        """扫描系统进程，返回未在 pidfile 中登记的 iar daemon / review-daemon。
+        """扫描系统进程，返回未在 pidfile 中登记的 kc daemon / review-daemon。
 
         仅返回当前用户拥有的进程；命令行无法解析或不属于 registry 的进程
         被忽略。结果仅用于观测，不参与 ``stop`` / ``read_log`` 等托管操作。

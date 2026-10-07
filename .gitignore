@@ -74,7 +74,7 @@ Thumbs.db
 # Realistic Validation evidence packages — local PRD flow (`just ai implement`).
 # Commit only the text reports (*.md: verification-plan / evidence-report /
 # verifier-report); keep raw artifacts (screenshots, recordings, captured
-# output, large logs) local-only. Same principle as the iar runner's
+# output, large logs) local-only. Same principle as the kc runner's
 # .iar/evidence/: raw evidence never enters code history (binary bloat + secret
 # leakage in permanent git history). The verifier and check_prd_evidence.sh
 # still run against the local files at implement time.

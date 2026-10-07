@@ -425,7 +425,7 @@ class RegistryRepositoryEntry:
 
 @dataclass(frozen=True)
 class DiscoveredRepositoryEntry:
-    """本地扫描发现的 IAR 仓库候选条目。"""
+    """本地扫描发现的 KedaCode 仓库候选条目。"""
 
     repo_id: str
     path: str
@@ -500,7 +500,7 @@ class IRepositoryRegistryEditor(ABC):
 class IRepositoryAutopilotSettingsEditor(ABC):
     """仓库级 Autopilot 设置的受限读写端口。
 
-    Autopilot 的唯一持久事实源是仓库根目录的 ``.iar.toml``，因此本端口比
+    Autopilot 的唯一持久事实源是仓库根目录的 ``.kedacode.toml``，因此本端口比
     :class:`IRepositoryRegistryEditor` 更窄：只允许读写
     ``[agent_runner.autopilot].enabled`` 这一个布尔键，其余配置节、键、子表
     与注释必须逐字保留。

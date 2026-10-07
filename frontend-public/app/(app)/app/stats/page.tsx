@@ -203,7 +203,7 @@ export default function StatsPage() {
         <CardContent>
           {trend.length === 0 ? (
             <p className="text-sm text-slate-500">
-              所选范围内暂无运行记录。运行 <code>iar run</code> 或通过面板触发
+              所选范围内暂无运行记录。运行 <code>kc run</code> 或通过面板触发
               执行后，这里会出现按天聚合的成功/失败曲线。
             </p>
           ) : (
@@ -523,7 +523,7 @@ function TokenUsageSection({ stats }: { stats: PrdLifecycleStats }) {
 /**
  * 渲染「按 PRD（Issue）」Token 用量表（Token 用量区第三张表）。
  *
- * 与 CLI ``iar tokens`` 的按 PRD 表同源同口径：同一 PRD 的多次执行合并为
+ * 与 CLI ``kc tokens`` 的按 PRD 表同源同口径：同一 PRD 的多次执行合并为
  * 一行并标注累计执行次数；缺 usage 的行由后端按「缺失排除」口径剔除，
  * 表为空时渲染明确空态而不是全零行。
  *

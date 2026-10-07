@@ -1,6 +1,6 @@
-"""Typer commands under ``iar backlog``.
+"""Typer commands under ``kc backlog``.
 
-Currently a single command — ``iar backlog advance`` — which runs one
+Currently a single command — ``kc backlog advance`` — which runs one
 continuous-scheduling pass (reconcile + promote + discover) for the target
 repository. The same logic runs automatically inside the fast-lane daemon.
 """
@@ -53,7 +53,7 @@ def backlog_advance_command(
 __all__ = ["backlog_advance_command", "ci_app"]
 
 
-# ── `iar backlog ci` 子命令组 ────────────────────────────────────────────────
+# ── `kc backlog ci` 子命令组 ────────────────────────────────────────────────
 # 与 Console 共用同一批 core 用例的薄封装；`status --json` 复用 Console
 # `ci_delivery` DTO，数据走 stdout、进度与警告走 stderr。
 ci_app = typer.Typer(

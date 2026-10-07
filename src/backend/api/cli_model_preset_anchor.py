@@ -101,7 +101,7 @@ def _anchor_context(
         ),
     )
     merged_presets = {**config.agent_presets, CLI_PRESET_NAME: synthesized_preset}
-    # 合成绑定写在**全局层**：仓库层 .iar.toml 的同键声明仍会赢过它——
+    # 合成绑定写在**全局层**：仓库层 .kedacode.toml 的同键声明仍会赢过它——
     # 这是既有的两层语义；CLI 一次性旗标的语义是"锚定并覆盖预设字段"，
     # 而不是压过仓库层的显式绑定。PRD 块（随 Issue 流动）仍为最高。
     merged_presets_config = dataclasses.replace(
@@ -119,7 +119,7 @@ def apply_cli_model_preset_to_config(
     *,
     anchored_stage: str,
 ) -> AppConfig:
-    """单配置变体：无仓库上下文列表的入口（如 ``iar ask``）使用。"""
+    """单配置变体：无仓库上下文列表的入口（如 ``kc ask``）使用。"""
     preset_name, model_override, effort_override = cli_preset_flag_values(parsed)
     if not preset_name:
         if model_override or effort_override:

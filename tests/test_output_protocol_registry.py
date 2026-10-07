@@ -13,6 +13,7 @@ import pytest
 
 from backend.engines.agent_runner.output_protocols import (
     ENTRY_POINT_GROUP,
+    LEGACY_ENTRY_POINT_GROUP,
     EntryPointProtocolRegistry,
     OutputProtocolLoadError,
     get_output_protocol_registry,
@@ -24,9 +25,9 @@ BUILTIN_PROTOCOL_IDS = ("plain", "claude-stream-json", "pi-json-lines")
 class _StubEntryPoint:
     """注册表契约只依赖 ``name`` / ``value`` 与 ``load()``，用桩对象隔离 importlib 细节。"""
 
-    def __init__(self, name: str, loader: Any) -> None:
+    def __init__(self, name: str, loader: Any, group: str = ENTRY_POINT_GROUP) -> None:
         self.name = name
-        self.value = f"{__name__}:{name}"
+        self.value = f"{group}:{name}"
         self._loader = loader
 
     def load(self) -> Any:
@@ -36,13 +37,32 @@ class _StubEntryPoint:
         return result
 
 
-def _fake_entry_points(entries: list[tuple[str, Any]]) -> Any:
-    """构造可 monkeypatch 的 entry points 假数据源。"""
+def _fake_entry_points(
+    entries: list[tuple[str, Any]],
+    group: str = ENTRY_POINT_GROUP,
+) -> Any:
+    """构造可 monkeypatch 的 entry points 假数据源（只命中指定分组）。"""
+    entries_by_group = {group: list(entries)}
 
     def list_entry_points(group: str) -> list[_StubEntryPoint]:
-        if group != ENTRY_POINT_GROUP:
-            return []
-        return [_StubEntryPoint(name=name, loader=loader) for name, loader in entries]
+        return [
+            _StubEntryPoint(name=name, loader=loader, group=group)
+            for name, loader in entries_by_group.get(group, [])
+        ]
+
+    return list_entry_points
+
+
+def _fake_grouped_entry_points(
+    entries_by_group: dict[str, list[tuple[str, Any]]],
+) -> Any:
+    """按分组返回假 entry points，用于验证新旧两个分组的双读发现。"""
+
+    def list_entry_points(group: str) -> list[_StubEntryPoint]:
+        return [
+            _StubEntryPoint(name=name, loader=loader, group=group)
+            for name, loader in entries_by_group.get(group, [])
+        ]
 
     return list_entry_points
 
@@ -82,6 +102,58 @@ def test_resolve_caches_protocol_instance() -> None:
     first = registry.resolve("plain")
     second = registry.resolve("plain")
     assert first is second
+
+
+def _relay_returning(marker: str) -> Any:
+    """构造 relay 返回固定标记的协议类，用于区分 entry point 来自哪个分组。"""
+
+    class _MarkerProtocol:
+        def relay(self, *args: object, **kwargs: object) -> str:
+            return marker
+
+    return _MarkerProtocol
+
+
+# ---------------------------------------------------------------------------
+# 新旧两个分组的双读发现
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_group_protocols_are_discovered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """只注册在旧分组里的第三方插件仍然被发现（改名不让既有插件消失）。"""
+    monkeypatch.setattr(
+        "backend.engines.agent_runner.output_protocols.entry_points",
+        _fake_grouped_entry_points(
+            {
+                ENTRY_POINT_GROUP: [],
+                LEGACY_ENTRY_POINT_GROUP: [("legacy-only", _relay_returning("legacy"))],
+            }
+        ),
+    )
+    registry = EntryPointProtocolRegistry()
+    assert "legacy-only" in registry.list_ids()
+    assert registry.resolve("legacy-only").relay() == "legacy"
+
+
+def test_new_group_wins_on_duplicate_protocol_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同一 id 在两个分组都注册时以新分组为准，且该 id 只枚举一次。"""
+    monkeypatch.setattr(
+        "backend.engines.agent_runner.output_protocols.entry_points",
+        _fake_grouped_entry_points(
+            {
+                ENTRY_POINT_GROUP: [("shared", _relay_returning("new"))],
+                LEGACY_ENTRY_POINT_GROUP: [
+                    ("shared", _relay_returning("legacy")),
+                    ("legacy-only", _relay_returning("legacy")),
+                ],
+            }
+        ),
+    )
+    registry = EntryPointProtocolRegistry()
+    listed_ids = list(registry.list_ids())
+    assert listed_ids.count("shared") == 1
+    assert registry.resolve("shared").relay() == "new"
+    assert "legacy-only" in listed_ids
 
 
 # ---------------------------------------------------------------------------

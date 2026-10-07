@@ -6,6 +6,7 @@ import codecs
 import json
 import os
 import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from backend.core.shared.interfaces.output_timestamps import (
     TimestampedStreamFormatter,
     format_timestamped_line,
 )
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.infrastructure.agent_stream_usage import (
     StreamUsageCollector,
@@ -181,6 +183,31 @@ class CommandFailedError(subprocess.CalledProcessError):
         return f"{base}\n\n--- stderr/stdout ---\n{detail}"
 
 
+def _with_available_own_command(command: Sequence[str]) -> Sequence[str]:
+    """自有命令名在当前 PATH 上不存在时，换成一个可用的自有名字。
+
+    覆盖「改动已合并、可编辑安装尚未重装」的窗口：仓库配置里写的是 ``kc``，
+    虚拟环境里却还只有 ``iar``。只替换 argv[0]，其余参数逐字不动；argv[0]
+    不是自有名字（``git`` / ``gh`` / agent CLI），或本来就能找到时原样返回。
+
+    Args:
+        command: 待执行的命令与参数。
+
+    Returns:
+        Sequence[str]: 可能被换名的命令列表。
+    """
+    command_parts = list(command)
+    if not command_parts or not product_identity.is_own_command_name(command_parts[0]):
+        return command_parts
+    if shutil.which(str(command_parts[0])) is not None:
+        return command_parts
+    for own_command_name in product_identity.OWN_COMMAND_NAMES:
+        if shutil.which(own_command_name) is not None:
+            command_parts[0] = own_command_name
+            return command_parts
+    return command_parts
+
+
 class SubprocessRunner:
     """Run commands using the subprocess module.
 
@@ -237,6 +264,7 @@ class SubprocessRunner:
                 白名单+进程树击杀的安全前提不成立，直接报错而非静默降级。
             env_allow_extra: E2E 档下追加放行的变量名（配置 ``env_allow``）。
         """
+        command = _with_available_own_command(command)
         started_mono: float = time.monotonic()
         if env_profile is not None:
             child_env: dict[str, str] = _resolve_profiled_child_env(

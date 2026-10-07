@@ -2,7 +2,7 @@
 
 职责：
 
-- 从白名单 ``RunnerProcessKind`` 枚举构建 ``iar`` argv —— 永不接受
+- 从白名单 ``RunnerProcessKind`` 枚举构建 ``kc`` argv —— 永不接受
   调用方传入的原始命令字符串，防注入且审计可枚举。
 - 校验目标仓库在 registry 中且 enabled。
 - 常驻类进程（daemon / review_daemon）按 ``(repo_id, kind)`` 去重。
@@ -58,11 +58,11 @@ def build_runner_argv(
     """从白名单枚举构建 runner 子进程的 argv。
 
     Args:
-        runner_command: 启动命令前缀（如 ``["uv", "run", "iar"]``）。
+        runner_command: 启动命令前缀（如 ``["uv", "run", "kc"]``）。
         kind: 进程类型枚举。
         repo_id: 目标仓库 ID（传给 ``--repo-id``）。
         issue_number: ``BLOCKED_CONTINUE`` 的目标 Issue；``RUN_ONCE`` 传它时
-            定向执行（``iar run --issue N``），缺省走 ``--all-ready``。
+            定向执行（``kc run --issue N``），缺省走 ``--all-ready``。
 
     Returns:
         完整 argv 元组。
@@ -79,9 +79,9 @@ def build_runner_argv(
     if kind is RunnerProcessKind.REVIEW_DAEMON:
         return (*command_prefix, "review-daemon", *selector)
     if kind is RunnerProcessKind.RUN_ONCE:
-        # ``iar run`` 目标必填后的 Console 迁移（FR-7）：带 Issue 编号时定向
+        # ``kc run`` 目标必填后的 Console 迁移（FR-7）：带 Issue 编号时定向
         # 执行（开始此 PRD 路径），否则显式 ``--all-ready`` 保留旧的捞队列
-        # 行为（仓库级 run_once 动作），绝不发出无目标的 ``iar run``。
+        # 行为（仓库级 run_once 动作），绝不发出无目标的 ``kc run``。
         if issue_number is not None:
             if issue_number <= 0:
                 raise ConsoleProcessError("run_once requires a positive issue_number.")

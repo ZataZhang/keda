@@ -216,14 +216,14 @@ def load_prd_skill_spec(explicit_path: Path | None = None) -> str | None:
 def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> Path:
     """启动预检：prd skill 必须可解析且 Machine Contract 主版本匹配。
 
-    daemon 起执行循环前调用（``run_preflight_checks``）。iar 的 prompt 只持有
+    daemon 起执行循环前调用（``run_preflight_checks``）。kc 的 prompt 只持有
     指向 skill Machine Contract 的指针，skill 缺失或版本不符时执行 agent 将
     拿不到格式约定，因此必须 fail fast 而不是跑到交付门禁才失败。
 
     Args:
         explicit_path: 显式 skill 路径；为 ``None`` 时按
             :func:`resolve_prd_skill_path` 的优先级解析（含
-            ``IAR_PRD_SKILL_PATH`` 环境变量覆盖）。
+            ``KEDACODE_PRD_SKILL_PATH`` 环境变量覆盖）。
 
     Returns:
         通过预检的 skill 路径。
@@ -239,8 +239,8 @@ def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> 
         raise PrdSkillPreflightError(
             f"prd skill is not readable at {skill_path}. The agent runner delegates "
             "PRD format conventions to the prd skill's Machine Contract, so it "
-            "cannot run without the skill installed. Run `iar init` to install the "
-            "remote template skills, or point IAR_PRD_SKILL_PATH at a prd SKILL.md."
+            "cannot run without the skill installed. Run `kc init` to install the "
+            "remote template skills, or point KEDACODE_PRD_SKILL_PATH at a prd SKILL.md."
         ) from read_error
     contract_version = parse_machine_contract_version(skill_text)
     if not is_supported_machine_contract_version(contract_version):
@@ -253,9 +253,9 @@ def ensure_prd_machine_contract_available(explicit_path: Path | None = None) -> 
             f"prd skill at {skill_path} declares {declared_version_text}, but this "
             f"runner supports only Machine Contract "
             f"{format_supported_machine_contract_versions()}; unknown versions are "
-            "unsupported. Use `iar init` only after its dry-run "
+            "unsupported. Use `kc init` only after its dry-run "
             "shows the intended Skill plan, or select a supported prd skill "
-            "without overwriting user-owned files, or point IAR_PRD_SKILL_PATH at its SKILL.md."
+            "without overwriting user-owned files, or point KEDACODE_PRD_SKILL_PATH at its SKILL.md."
         )
     return _ensure_prd_contract_script_present(skill_path)
 
@@ -283,8 +283,8 @@ def _ensure_prd_contract_script_present(skill_path: Path) -> Path:
             f"prd skill at {skill_path} has no parser script at {contract_script_path}. "
             "The runner no longer implements PRD format parsing itself; it calls the "
             "skill's scripts/prd_contract.py, so SKILL.md and scripts/ must be installed "
-            "together. Re-run `iar init` to reinstall the skill, or point "
-            "IAR_PRD_SKILL_PATH at a complete prd SKILL.md whose sibling scripts/ "
+            "together. Re-run `kc init` to reinstall the skill, or point "
+            "KEDACODE_PRD_SKILL_PATH at a complete prd SKILL.md whose sibling scripts/ "
             "directory is present."
         )
     return skill_path

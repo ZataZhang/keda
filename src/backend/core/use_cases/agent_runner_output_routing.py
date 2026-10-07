@@ -1,6 +1,6 @@
 """Per-Issue output routing for parallel daemon passes.
 
-When ``iar daemon`` processes Issues concurrently, each Issue's agent stream and
+When ``kc daemon`` processes Issues concurrently, each Issue's agent stream and
 log lines must be attributable instead of interleaving on one stdout. This
 module provides the core-side plumbing, depending only on ``core/shared``
 interfaces and the standard library (no ``engines`` / ``infrastructure``
@@ -172,7 +172,7 @@ def issue_output_routing(
         issue_number: Issue number (log filename + panel key).
         log_base: Base directory for logs (typically ``<repo_path>/logs``).
         output_view: Live view receiving each chunk for the Issue's panel.
-        console_sink: 可选的「原终端镜像」回调。串行 ``iar run`` 传入它，
+        console_sink: 可选的「原终端镜像」回调。串行 ``kc run`` 传入它，
             让 sink 将同一份（带行首时间戳的）文本写回启动终端，与未经路由
             时的终端实时视图逐行一致；并行 daemon 则保持 ``None``（面板已承担
             展示）。只传**可读文本**，避免 Rich 控制字符污染日志文件。

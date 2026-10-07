@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.6
 # -----------------------------------------------------------------------------
-# iar Runner Dockerfile
+# KedaCode Runner Dockerfile
 #
-# 为 ``iar container up`` 构建的 runner 镜像：预装 claude / codex / kimi 三个
-# agent CLI、gh CLI、Node.js、uv、just、git，并在镜像里安装 iar 自身。
+# 为 ``kc container up`` 构建的 runner 镜像：预装 claude / codex / kimi 三个
+# agent CLI、gh CLI、Node.js、uv、just、git，并在镜像里安装 KedaCode 自身。
 #
 # 构建参数：
-#   KEDA_VERSION   —— 安装的 keda / iar 版本；默认 latest；显式传 "editable"
+#   KEDA_VERSION   —— 安装的 KedaCode 版本；默认 latest；显式传 "editable"
 #                    时改走本地源码 editable 安装（开发模式）
 #   KEDA_LOCAL_SRC —— 仅在 KEDA_VERSION=editable 时使用，指向本地 keda 源码
 #                    根目录（绝对路径）
@@ -20,7 +20,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
     PATH="/home/runner/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH" \
-    LOG_DIR="/home/runner/.iar/logs"
+    LOG_DIR="/home/runner/.kedacode/logs"
 
 # 可调 agent CLI 版本；保持 ARG 化便于升级与重 build。
 ARG CLAUDE_VERSION=2.1.187
@@ -119,7 +119,7 @@ RUN groupadd -g 1000 runner || true \
     && useradd -m -u 1000 -g runner -s /bin/bash runner \
     && chmod 0755 /home/runner
 
-# 安装 iar 自身。默认从 GitHub 源码按 git tag 钉版本安装；开发模式
+# 安装 KedaCode 自身。默认从 GitHub 源码按 git tag 钉版本安装；开发模式
 # （KEDA_VERSION=editable + KEDA_LOCAL_SRC）走本地源码 editable 安装。
 #
 # 下面那条 git 安装串里有两处历史上都过期过，改动时请一并核对：
@@ -150,20 +150,23 @@ RUN set -eux; \
 
 # 复制 entrypoint（root 阶段：/usr/local/bin 必须 root 可写；后续 chmod 也在 root）。
 USER root
-COPY entrypoint.sh /usr/local/bin/iar-runner-entrypoint.sh
-RUN chmod +x /usr/local/bin/iar-runner-entrypoint.sh
+COPY kedacode-runner-entrypoint.sh /usr/local/bin/kedacode-runner-entrypoint.sh
+RUN chmod +x /usr/local/bin/kedacode-runner-entrypoint.sh
 
-# 预创建 runtime 目录。
-RUN mkdir -p /home/runner/.iar /home/runner/.iar/logs \
+# 预创建 runtime 目录：状态目录用新名 /home/runner/.kedacode；同时建一个相对
+# 符号链接 /home/runner/.iar -> .kedacode，让仍固定在旧路径的旧组件读到同一目录（legacy-alias）。
+RUN mkdir -p /home/runner/.kedacode/logs \
+    && ln -s .kedacode /home/runner/.iar \
     && chown -R runner:runner /home/runner
 
 ENV PATH="/opt/keda/.venv/bin:${PATH}" \
     HOME="/home/runner" \
-    IAR_HOME="/home/runner/.iar"
+    KEDACODE_HOME="/home/runner/.kedacode"
 
 WORKDIR /workspace/repo
 
-ENTRYPOINT ["/usr/local/bin/iar-runner-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/kedacode-runner-entrypoint.sh"]
 
 # 默认 CMD：daemon 模式轮询；compose 可在 command 段覆盖（保留 hook）。
-CMD ["iar", "daemon"]
+# 用等价长入口 kedacode（已发布 wheel 都带它），KEDA_VERSION 钉旧版本时也能启动。
+CMD ["kedacode", "daemon"]

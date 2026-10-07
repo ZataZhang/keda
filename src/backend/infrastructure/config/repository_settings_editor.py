@@ -1,14 +1,14 @@
-"""仓库本地配置（``.iar.toml``）的受限 Autopilot 写回实现。
+"""仓库本地配置（``.kedacode.toml``）的受限 Autopilot 写回实现。
 
 round-trip 与原子替换**不再在本模块实现**：写回一律委托给
 :func:`backend.infrastructure.config.toml_section_editor.update_toml_table_keys`
 ——它是仓库内唯一的 tomlkit round-trip / ``os.replace`` 原语，``config.toml``
-（机器级）与 ``.iar.toml``（仓库级）共用同一份语义（见该模块 docstring）。
+（机器级）与仓库本地配置（仓库级）共用同一份语义（见该模块 docstring）。
 
 本模块只负责把写回面收敛到 ``[agent_runner.autopilot].enabled`` 单个布尔键，
 并在委托前补上 PRD 要求的前置校验：
 
-- 目标仓库必须**已有** ``.iar.toml``：缺文件时拒绝，不凭空创建配置文件；
+- 目标仓库必须**已有**仓库本地配置文件：缺文件时拒绝，不凭空创建配置文件；
 - ``[agent_runner]`` 段必须存在，且**写前**就能通过 ``AgentRunnerLocalSettings``
   模型校验——只有写前合法，才能保证"只改一个布尔键之后仍然合法"，从而在不
   触碰原文件的前提下满足「完整加载校验、失败时原文件不变」；
@@ -28,10 +28,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from backend.infrastructure.config.agent_runner_settings import (
-    IAR_REPOSITORY_CONFIG_FILENAME,
-    AgentRunnerLocalSettings,
-)
+from backend.core.shared.models import product_identity
+from backend.infrastructure.config.agent_runner_settings import AgentRunnerLocalSettings
 from backend.infrastructure.config.toml_section_editor import update_toml_table_keys
 
 _AGENT_RUNNER_KEY = "agent_runner"
@@ -61,9 +59,12 @@ class TomlRepositoryAutopilotSettingsEditor:
     """
 
     def config_source_path(self, repo_root_path: Path) -> Path:
-        """返回目标仓库本地配置文件的绝对路径（文件不存在时也返回规范路径）。"""
+        """返回目标仓库本地配置文件的绝对路径（文件不存在时也返回规范路径）。
+
+        新旧两个文件名按「新名优先」解析，因此写回永远落在仓库当前实际使用的那份。
+        """
         resolved_repo_root = Path(repo_root_path).expanduser().resolve()
-        return resolved_repo_root / IAR_REPOSITORY_CONFIG_FILENAME
+        return product_identity.effective_repository_config_path(resolved_repo_root)
 
     def read_enabled(self, repo_root_path: Path) -> bool | None:
         """读取 ``autopilot.enabled``；文件缺失或键未设置时返回 ``None``。"""
@@ -95,7 +96,7 @@ class TomlRepositoryAutopilotSettingsEditor:
         config_path = self.config_source_path(repo_root_path)
         if not config_path.is_file():
             raise RepositorySettingsEditError(
-                f"目标仓库没有 {IAR_REPOSITORY_CONFIG_FILENAME}（{config_path}），无法写回 Autopilot 设置。"
+                f"目标仓库没有仓库本地配置（{config_path}），无法写回 Autopilot 设置。"
             )
         # 写前校验：现有配置必须已经合法，因此"只改一个 bool"之后必然仍合法。
         self._validate_existing_config(config_path)
@@ -132,8 +133,7 @@ class TomlRepositoryAutopilotSettingsEditor:
         config_path = self.config_source_path(repo_root_path)
         if not config_path.is_file():
             raise RepositorySettingsEditError(
-                f"目标仓库没有 {IAR_REPOSITORY_CONFIG_FILENAME}（{config_path}），"
-                "无法写回 CI/CD 自动修复设置。"
+                f"目标仓库没有仓库本地配置（{config_path}），" "无法写回 CI/CD 自动修复设置。"
             )
         # 写前校验：现有配置必须已经合法，因此"只改一个 bool"之后必然仍合法。
         self._validate_existing_config(config_path)
@@ -164,7 +164,7 @@ class TomlRepositoryAutopilotSettingsEditor:
         agent_runner_section = parsed_data.get(_AGENT_RUNNER_KEY)
         if not isinstance(agent_runner_section, dict):
             raise RepositorySettingsEditError(
-                f"{IAR_REPOSITORY_CONFIG_FILENAME} 缺少 [{_AGENT_RUNNER_KEY}] 段，无法写回 Autopilot 设置。"
+                f"{config_path} 缺少 [{_AGENT_RUNNER_KEY}] 段，无法写回 Autopilot 设置。"
             )
         try:
             AgentRunnerLocalSettings(**agent_runner_section)

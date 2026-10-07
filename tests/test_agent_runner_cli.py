@@ -705,7 +705,7 @@ def test_main_top_level_help_alias_h(capsys) -> None:
     combined_output = _strip_ansi(f"{captured.out}\n{captured.err}")
 
     assert exit_code == 0
-    assert "Usage: iar" in combined_output
+    assert "Usage: kc" in combined_output
     assert "Commands" in combined_output
 
 
@@ -718,7 +718,7 @@ def test_main_worktree_help_alias_h(capsys) -> None:
     combined_output = _strip_ansi(f"{captured.out}\n{captured.err}")
 
     assert exit_code == 0
-    assert "Usage: iar worktree" in combined_output
+    assert "Usage: kc worktree" in combined_output
     assert "create" in combined_output
 
 
@@ -731,7 +731,7 @@ def test_main_worktree_create_help_alias_h(capsys) -> None:
     combined_output = _strip_ansi(f"{captured.out}\n{captured.err}")
 
     assert exit_code == 0
-    assert "Usage: iar worktree create" in combined_output
+    assert "Usage: kc worktree create" in combined_output
     assert "--branch" in combined_output
 
 
@@ -768,7 +768,7 @@ def test_alias_command_names_derives_from_console_scripts(monkeypatch) -> None:
 
     monkeypatch.setattr(cli_completion, "entry_points", fake_entry_points)
 
-    assert cli_completion.alias_command_names() == ("kedacode",)
+    assert cli_completion.alias_command_names() == ("iar", "kedacode")
 
 
 def test_main_completion_show_zsh_outputs_script(capsys, monkeypatch) -> None:
@@ -796,7 +796,7 @@ def test_main_completion_install_zsh_writes_user_files(tmp_path, monkeypatch) ->
 
     exit_code = main(["completion", "install", "--shell", "zsh"])
 
-    completion_path = tmp_path / ".zsh" / "completions" / "_iar"
+    completion_path = tmp_path / ".zsh" / "completions" / "_kc"
     zshrc_path = tmp_path / ".zshrc"
     assert exit_code == 0
     completion_text = completion_path.read_text(encoding="utf-8")
@@ -2766,7 +2766,7 @@ def test_main_labels_sync_fails_when_repository_not_initialized(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar labels sync` should fail fast without .iar.toml."""
+    """`kc labels sync` should fail fast without .kedacode.toml."""
     repo_path = _init_bare_git_repository(tmp_path, "uninitialized")
     monkeypatch.chdir(repo_path)
 
@@ -2775,9 +2775,9 @@ def test_main_labels_sync_fails_when_repository_not_initialized(
     combined = f"{captured.out}\n{captured.err}"
 
     assert exit_code == int(ExitCode.NOT_FOUND)
-    assert "Repository is not initialized for iar" in _strip_ansi(combined)
-    assert "iar init" in _strip_ansi(combined)
-    assert ".iar.toml" in _strip_ansi(combined)
+    assert "Repository is not initialized for KedaCode" in _strip_ansi(combined)
+    assert "kc init" in _strip_ansi(combined)
+    assert ".kedacode.toml" in _strip_ansi(combined)
 
 
 def test_main_run_fails_when_repository_not_initialized(
@@ -2785,7 +2785,7 @@ def test_main_run_fails_when_repository_not_initialized(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar run --dry-run` should fail fast without .iar.toml."""
+    """`kc run --dry-run` should fail fast without .kedacode.toml."""
     repo_path = _init_bare_git_repository(tmp_path, "uninitialized")
     monkeypatch.chdir(repo_path)
 
@@ -2794,8 +2794,8 @@ def test_main_run_fails_when_repository_not_initialized(
     combined = f"{captured.out}\n{captured.err}"
 
     assert exit_code == int(ExitCode.NOT_FOUND)
-    assert "Repository is not initialized for iar" in _strip_ansi(combined)
-    assert "iar init" in _strip_ansi(combined)
+    assert "Repository is not initialized for KedaCode" in _strip_ansi(combined)
+    assert "kc init" in _strip_ansi(combined)
 
 
 def test_main_issue_create_fails_when_repository_not_initialized(
@@ -2803,7 +2803,7 @@ def test_main_issue_create_fails_when_repository_not_initialized(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar issue create` should fail fast without .iar.toml."""
+    """`kc issue create` should fail fast without .kedacode.toml."""
     repo_path = _init_bare_git_repository(tmp_path, "uninitialized")
     prd_path = repo_path / "tasks" / "pending" / "test.md"
     prd_path.parent.mkdir(parents=True)
@@ -2815,8 +2815,8 @@ def test_main_issue_create_fails_when_repository_not_initialized(
     combined = f"{captured.out}\n{captured.err}"
 
     assert exit_code == int(ExitCode.NOT_FOUND)
-    assert "Repository is not initialized for iar" in _strip_ansi(combined)
-    assert "iar init" in _strip_ansi(combined)
+    assert "Repository is not initialized for KedaCode" in _strip_ansi(combined)
+    assert "kc init" in _strip_ansi(combined)
 
 
 def test_main_worktree_create_fails_when_repository_not_initialized(
@@ -2824,7 +2824,7 @@ def test_main_worktree_create_fails_when_repository_not_initialized(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar worktree create` should fail fast without .iar.toml."""
+    """`kc worktree create` should fail fast without .kedacode.toml."""
     repo_path = _init_bare_git_repository(tmp_path, "uninitialized")
     monkeypatch.chdir(repo_path)
 
@@ -2833,8 +2833,8 @@ def test_main_worktree_create_fails_when_repository_not_initialized(
     combined = f"{captured.out}\n{captured.err}"
 
     assert exit_code == int(ExitCode.NOT_FOUND)
-    assert "Repository is not initialized for iar" in _strip_ansi(combined)
-    assert "iar init" in _strip_ansi(combined)
+    assert "Repository is not initialized for KedaCode" in _strip_ansi(combined)
+    assert "kc init" in _strip_ansi(combined)
 
 
 def test_main_init_succeeds_when_repository_not_initialized(

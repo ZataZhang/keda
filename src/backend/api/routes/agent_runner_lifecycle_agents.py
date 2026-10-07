@@ -3,7 +3,7 @@
 三层各自写各自的文件：
 
 - 全局层（Settings 页）-> ``config.toml``；
-- 仓库层（Backlog 仓库行齿轮）-> 该仓库 ``.iar.toml``；
+- 仓库层（Backlog 仓库行齿轮）-> 该仓库 ``.kedacode.toml``；
 - PRD 层（PRD 原文页）-> 该 PRD 文件头部 ``lifecycle_agents`` 块。
 
 路由层只做 HTTP 映射与 4xx 转换，生效值计算与入参校验收敛在 core 用例

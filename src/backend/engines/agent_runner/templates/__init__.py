@@ -1,1 +1,1 @@
-"""随 IAR Python 发行包发布的资源文件。"""
+"""随 KedaCode Python 发行包发布的资源文件。"""

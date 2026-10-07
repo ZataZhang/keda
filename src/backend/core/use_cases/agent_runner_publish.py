@@ -122,7 +122,7 @@ def validate_publish_remote(
         "Configured git remote "
         f"'{configured_remote_name}' does not exist. "
         f"Available remotes: {available_remotes_text}. "
-        "Update [agent_runner.git].remote in .iar.toml or config.toml before publishing."
+        "Update [agent_runner.git].remote in .kedacode.toml or config.toml before publishing."
     )
 
 
@@ -133,9 +133,9 @@ def run_preflight_checks(
 ) -> None:
     """Validate runner configuration before claiming any Issue.
 
-    除发布远端校验外，还预检 prd skill 的 Machine Contract：iar 的 prompt 只持有
+    除发布远端校验外，还预检 prd skill 的 Machine Contract：KedaCode 的 prompt 只持有
     契约指针，skill 缺失或主版本不符时执行 agent 拿不到格式约定，必须在开跑前
-    fail fast（报错含 ``iar init`` 修复指引）。
+    fail fast（报错含 ``kc init`` 修复指引）。
     """
     validate_publish_remote(repo_path, config, process_runner)
     ensure_prd_machine_contract_available()
@@ -276,9 +276,9 @@ def create_draft_pr(
         expected_branch: Optional explicit branch to verify before creating the
             PR. When set, the worktree's current branch must match.
         content_generator: Optional AI content generator for PR title/body.
-        publish_stage: 发布档位。``FAST``（``iar run --fast-merge``）在正文末尾注入
+        publish_stage: 发布档位。``FAST``（``kc run --fast-merge``）在正文末尾注入
             ``iar:fast-merge`` 自我声明 marker 与人读未验证标注；``DIRECT``
-            （``iar run --direct-pr``）注入同族的 ``iar:direct-pr`` marker 与直发说明；
+            （``kc run --direct-pr``）注入同族的 ``iar:direct-pr`` marker 与直发说明；
             ``NORMAL`` 不注入任何档位标注。
 
     Returns:

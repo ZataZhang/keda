@@ -34,7 +34,7 @@ test.describe('@visual 生命周期 Agent 矩阵原型底图', () => {
   test('采集设置页底图', async ({ page }) => {
     await page.goto('/app/settings/')
     await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
-    await expect(page.getByText('关于 iar 管理终端')).toBeVisible()
+    await expect(page.getByText('关于 KedaCode 管理终端')).toBeVisible()
     await page.screenshot({ path: resolve(outputDirectoryPath, 'settings-real.png') })
   })
 

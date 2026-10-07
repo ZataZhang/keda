@@ -1,8 +1,8 @@
-"""``iar run`` 的目标解析：PRD 路径 → 回链 GitHub Issue 编号。
+"""``kc run`` 的目标解析：PRD 路径 → 回链 GitHub Issue 编号。
 
-``iar run`` 目标必填（PRD：run-daemon-autopilot-control-surface FR-1）。
+``kc run`` 目标必填（PRD：run-daemon-autopilot-control-surface FR-1）。
 目标为 PRD 路径时，解析其头部的 ``- GitHub Issue: .../issues/N`` 回链行；
-没有回链则报错并提示先 ``iar issue create``，绝不静默回退为"捞队列"。
+没有回链则报错并提示先 ``kc issue create``，绝不静默回退为"捞队列"。
 复用 :mod:`backend.core.use_cases.create_issue_from_prd` 的既有回链正则。
 """
 
@@ -32,7 +32,7 @@ def resolve_prd_target_issue_number(*, repo_path: Path, prd_path: str | Path) ->
 
     Raises:
         RunTargetResolveError: PRD 文件不存在、回链格式非法，或 PRD 尚无
-            Issue 回链（提示先 ``iar issue create``）。
+            Issue 回链（提示先 ``kc issue create``）。
     """
     candidate_path = Path(prd_path)
     absolute_prd_path = (
@@ -54,7 +54,7 @@ def resolve_prd_target_issue_number(*, repo_path: Path, prd_path: str | Path) ->
 
     raise RunTargetResolveError(
         f"PRD {absolute_prd_path} has no '- GitHub Issue: .../issues/N' link. "
-        "Create the Issue first with `iar issue create`."
+        "Create the Issue first with `kc issue create`."
     )
 
 

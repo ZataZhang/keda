@@ -1,4 +1,4 @@
-"""Interactive repository selection for ``iar takeover``.
+"""Interactive repository selection for ``kc takeover``.
 
 Implements a simple terminal checkbox UI using ``rich`` (already a project
 dependency) so users can pick which GitHub repositories to take over.

@@ -133,7 +133,7 @@ def test_set_enabled_leaves_original_intact_on_invalid_toml(tmp_path: Path, edit
 
 
 def test_config_source_path_points_to_local_file(tmp_path: Path, editor) -> None:
-    """config_source_path 始终指向目标仓的 .iar.toml（存在与否都成立）。"""
+    """目标仓两个配置文件都不存在时，config_source_path 指向新的 .kedacode.toml。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    assert editor.config_source_path(repo_root) == (repo_root / ".iar.toml").resolve()
+    assert editor.config_source_path(repo_root) == (repo_root / ".kedacode.toml").resolve()

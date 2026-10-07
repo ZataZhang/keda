@@ -1,4 +1,4 @@
-"""Typer commands under ``iar container``.
+"""Typer commands under ``kc container``.
 
 本模块只负责 Typer 参数解析与命令分发，**不**直接 import ``backend.engines.*``
 （保持 ``api → core`` 依赖方向）；具体编排通过 ``_run_typer_command`` 进入
@@ -30,7 +30,7 @@ def container_auth_import_command(
     repo_id: RepoIdOption = None,
     config: ConfigOption = None,
 ) -> int:
-    """Snapshot host agent CLI auth + skills into ``~/.iar/container-auth/``."""
+    """Snapshot host agent CLI auth + skills into ``~/.kedacode/container-auth/``."""
     selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
     return _run_typer_command(
         "container auth import",
@@ -72,7 +72,7 @@ def container_up_command(
         ),
     ] = False,
 ) -> int:
-    """Start the iar runner container for the target repository."""
+    """Start the KedaCode runner container for the target repository."""
     selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
     return _run_typer_command(
         "container up",
@@ -94,7 +94,7 @@ def container_down_command(
         ),
     ] = False,
 ) -> int:
-    """Stop and remove the iar runner container."""
+    """Stop and remove the KedaCode runner container."""
     return _run_typer_command("container down", config=None, dry_run=dry_run)
 
 
@@ -109,7 +109,7 @@ def container_logs_command(
         ),
     ] = False,
 ) -> int:
-    """Stream the iar runner container's logs to the terminal."""
+    """Stream the KedaCode runner container's logs to the terminal."""
     return _run_typer_command("container logs", config=None, follow=not no_follow)
 
 

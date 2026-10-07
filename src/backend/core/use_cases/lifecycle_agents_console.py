@@ -61,7 +61,7 @@ def build_lifecycle_agents_view(
 
     Args:
         config: 该视角下的应用配置（``scope=global`` 传全局配置；
-            ``scope=repository`` 传"全局 + 该仓库 .iar.toml"合并后的配置）。
+            ``scope=repository`` 传"全局 + 该仓库 .kedacode.toml"合并后的配置）。
         scope: ``global`` 或 ``repository``。
         repo_id: 仓库级视图的仓库 id；全局视图为 ``None``。
 
@@ -147,7 +147,7 @@ def build_lifecycle_agents_view(
         # 只列矩阵视图真会返回的来源层：``prd_override`` 只存在于 PRD 覆盖抽屉的
         # 语义里（矩阵视图只读 config 层），放进来只会让图例与数据对不上。
         "source_layers": {
-            "repository": "仓库 .iar.toml",
+            "repository": "仓库 .kedacode.toml",
             "global": "全局 config.toml",
             "legacy": "既有配置键",
             "builtin": "内置默认",

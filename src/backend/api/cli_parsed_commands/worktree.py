@@ -1,4 +1,4 @@
-"""``iar worktree *`` handlers.
+"""``kc worktree *`` handlers.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
 dispatcher.
@@ -34,7 +34,7 @@ from backend.core.use_cases.worktree_env import copy_missing_env_files
 
 
 def run_worktree_command(ctx: ParsedCommandContext) -> int:
-    """``iar worktree <create|path|remove|cleanup>``."""
+    """``kc worktree <create|path|remove|cleanup>``."""
     try:
         repo_root_path = detect_git_repository_root(Path.cwd(), ctx.process_runner)
         require_iar_repository_initialized(repo_root_path, ctx.process_runner)
@@ -42,7 +42,7 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             str(exc),
             code=ExitCode.NOT_FOUND,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         ) from exc
     except IARRepositoryNotInitializedError as exc:
         from backend.api.cli_helpers import _handle_not_initialized_error
@@ -81,9 +81,9 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
         )
         if len(contexts) != 1:
             raise CliError(
-                "iar worktree cleanup requires exactly one repository.",
+                "kc worktree cleanup requires exactly one repository.",
                 code=ExitCode.USAGE,
-                suggestion="iar registry list",
+                suggestion="kc registry list",
             )
         run_context = contexts[0]
         _ensure_gh_auth_or_prompt(run_context.repo_path, ctx.process_runner)
@@ -104,9 +104,9 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
         _print_worktree_cleanup_result(cleanup_result)
         return 1 if cleanup_result.failed_count else 0
     raise CliError(
-        f"iar worktree: unknown subcommand {ctx.parsed.worktree_command!r}.",
+        f"kc worktree: unknown subcommand {ctx.parsed.worktree_command!r}.",
         code=ExitCode.USAGE,
-        suggestion="iar worktree --help",
+        suggestion="kc worktree --help",
     )
 
 

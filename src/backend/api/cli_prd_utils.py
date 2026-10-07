@@ -1,7 +1,7 @@
 """CLI helpers for PRD expansion and publishing.
 
 Keeps ``backend.api.cli`` compact by isolating PRD-path handling and the
-interactive publish prompt used by ``iar issue create``.
+interactive publish prompt used by ``kc issue create``.
 """
 
 from __future__ import annotations

@@ -42,7 +42,7 @@ agent runner 的归档动作（`ensure_prd_delivery_ready`,执行循环 Phase 3�
 
 keda 的 agent runner 会把 PRD 的 Realistic Validation oracle 物化到 Issue / PR 并做证据门禁（`extract_realistic_validation_items` / `agent_runner_validation.py`）：
 
-- runner **优先确定性解析** skill 产出的 **YAML oracle 块**；无则回退旧式 `### Realistic Validation` 复选框（向后兼容）。YAML 块**存在却不可解析**（顶层非序列、条目缺 `id`/`behavior`）**不静默回退**：物化路径（`iar issue create`）在出 Issue 前大声失败，运行期至少记 ERROR 日志——否则会退化成「无清单」并连带关掉整个证据门禁。注意 failure-triage 注记写在块**下方（fence 外）**，不要塞进同一个 ```yaml 块。
+- runner **优先确定性解析** skill 产出的 **YAML oracle 块**；无则回退旧式 `### Realistic Validation` 复选框（向后兼容）。YAML 块**存在却不可解析**（顶层非序列、条目缺 `id`/`behavior`）**不静默回退**：物化路径（`kc issue create`）在出 Issue 前大声失败，运行期至少记 ERROR 日志——否则会退化成「无清单」并连带关掉整个证据门禁。注意 failure-triage 注记写在块**下方（fence 外）**，不要塞进同一个 ```yaml 块。
 - 证据缺失 / 不达标会打回 runner 重跑（recovery 循环）。
 - 当 keda 配置 `validation.reexecute_commands = true` 时，runner 会复跑 `evidence.json` 中每个 item 的 `command`。为保证命令可维护、可复跑，agent 应把复杂验证逻辑落到独立脚本并在 `command` 中引用，而不是把多行内联 `python -c "..."` 写进 manifest。**所有 RV 脚本——取证的、临时 setup 的、被 `command` 引用的可复跑 oracle——一律放 `tasks/evidence/<prd-stem>/scripts/`（legacy `.iar/evidence` 配置的仓库则放 `.iar/evidence/scripts/`），不得进入代码 diff，没有例外。** 这些脚本会随证据一起上传到证据分支供审阅，因此同样不得含密钥；复跑缓存键并入其内容摘要，改写脚本必然触发真实重跑。每次复跑覆盖的是证据目录里的证据产物，不是脚本本身。
 - 进一步的"负控 + keda 复跑命令 + 独立 verifier agent"门禁,见 `tasks/pending/` 中对应的 Realistic Validation 门禁 PRD。
@@ -54,7 +54,7 @@ RV item 的 `evidence_files` 不仅是 stdout/JSON,UI/视觉/交互型 Issue 常
 - **当前 v1（未补）**:keda 不验产物健全性,UI 类 RV 的内容对错由 verifier 自由发挥 + 人工签收兜底。
 - **v1 prompt 接入（已落地）**:verifier 看到 `evidence_files` 会被 prompt 指引用原生多模态读图(支持的模型)/`ffmpeg` 抽视频帧/`stat`/`ffprobe`/`file --mime` 看元数据;不依赖 keda 装任何图像处理库。多模态维度已从"verifier 自由发挥"升级为"prompt 强制 + 模型自主选择感知通道"。
 - **FR-11a 健全性硬卡点（已落地,两层设计）**:`expected_artifacts` 拆**硬层**(`ArtifactSpec` 的 mime / min_size / min_duration_seconds,keda 端 `validate_evidence_artifact` 走 `IProcessRunner` 用 `stat` / `ffprobe` / `file --mime` 必验,任何 verifier 一视同仁,失败即 `ValidationEvidenceError` 阻断)+ **软层**(`key_claim`,prompt 注入,verifier 按模型能力自陈:多模态读图验证、纯文本声明"未视觉验证"鼓励自降 yellow;**禁止对纯文本 verifier 强行 red**——会把"消除假绿"反过来变成"制造假红")。开关 `validation.artifact_health_enabled` 默认 `true`,旧无字段证据走兼容。**编写多模态类 RV 时,显式在 oracle 块声明产物类型 + 最小阈值 + 关键断言**（例 `screenshot:login.png mime=image/png min_size=50KB key_claim="Welcome, Alice"`）;缺字段则按旧路径走 verifier 兜底(verifier 仍可能"看过了"敷衍,但至少硬层机器可验项拦得住 0 字节 / 旧产物 / mime 错配)。
-- **浏览器 E2E 产物（已落地,P1-FEAT-20260930-225500）**:UI 类 RV 可由 `.iar.toml` 的 `verification_commands` 结构化 `browser_e2e` 条目产出浏览器产物（截图 / 录屏 / trace）；其 `artifacts` 声明与 manifest `expected_artifacts` 走**同一套** FR-11a 硬层（mime 取 `file --mime-type -b` 精确值，如 `image/png` / `video/webm` / trace 的 `application/zip`；min_size 防空文件；mtime 以本轮验证开始时间为下限防上次残留），脚本 exit 0 但产物不健全同样阻断。浏览器产物写进 RV `evidence_files` 后 verifier 照旧按 key_claim 对抗审查。命令形态、就绪探测与环境白名单见 `docs/guides/agent-runner.md` 的"浏览器 E2E 验证命令形态"。
+- **浏览器 E2E 产物（已落地,P1-FEAT-20260930-225500）**:UI 类 RV 可由 `.kedacode.toml` 的 `verification_commands` 结构化 `browser_e2e` 条目产出浏览器产物（截图 / 录屏 / trace）；其 `artifacts` 声明与 manifest `expected_artifacts` 走**同一套** FR-11a 硬层（mime 取 `file --mime-type -b` 精确值，如 `image/png` / `video/webm` / trace 的 `application/zip`；min_size 防空文件；mtime 以本轮验证开始时间为下限防上次残留），脚本 exit 0 但产物不健全同样阻断。浏览器产物写进 RV `evidence_files` 后 verifier 照旧按 key_claim 对抗审查。命令形态、就绪探测与环境白名单见 `docs/guides/agent-runner.md` 的"浏览器 E2E 验证命令形态"。
 
 ### PRD ↔ 任务同步
 

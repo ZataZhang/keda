@@ -1,4 +1,4 @@
-"""Typer commands under ``iar issue``.
+"""Typer commands under ``kc issue``.
 
 Holds :func:`issue_create_command` (PRD-to-Issue creation) and
 :func:`issue_list_command` (cross-repo issue listing with PR linkage).

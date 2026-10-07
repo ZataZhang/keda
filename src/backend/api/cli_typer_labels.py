@@ -1,4 +1,4 @@
-"""Typer commands under ``iar labels``.
+"""Typer commands under ``kc labels``.
 
 Holds :func:`labels_sync_command`, the only labels subcommand.
 """

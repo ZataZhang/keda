@@ -175,7 +175,7 @@ def test_doctor_missing_executable_fails(
     assert exit_code == int(ExitCode.NOT_FOUND)
     captured = capsys.readouterr()
     assert "not found in PATH" in captured.err
-    assert "iar agent list" in captured.err
+    assert "kc agent list" in captured.err
 
 
 def test_doctor_missing_profile_fails(
@@ -194,7 +194,7 @@ def test_doctor_missing_profile_fails(
     assert exit_code == int(ExitCode.NOT_FOUND)
     captured = capsys.readouterr()
     assert "has no 'run' profile" in captured.err
-    assert "iar agent doctor partial --all-profiles" in captured.err
+    assert "kc agent doctor partial --all-profiles" in captured.err
 
 
 def test_doctor_unregistered_protocol_fails(
@@ -213,7 +213,7 @@ def test_doctor_unregistered_protocol_fails(
     assert exit_code == int(ExitCode.NOT_FOUND)
     captured = capsys.readouterr()
     assert "no-such-protocol" in captured.err
-    assert "iar agent doctor --protocols" in captured.err
+    assert "kc agent doctor --protocols" in captured.err
 
 
 def test_doctor_failure_json_envelope_on_stderr(
@@ -229,7 +229,7 @@ def test_doctor_failure_json_envelope_on_stderr(
     envelope = json.loads(captured.err)
     assert envelope["exit_code"] == int(ExitCode.NOT_FOUND)
     assert envelope["error"] == "not_found"
-    assert envelope["suggestion"] == "iar agent list"
+    assert envelope["suggestion"] == "kc agent list"
     assert envelope["retryable"] is False
 
 
@@ -239,7 +239,7 @@ def test_doctor_no_agent_name_fails() -> None:
         run_agent_doctor_command(_make_context())
 
     assert exc_info.value.code == ExitCode.USAGE
-    assert exc_info.value.suggestion == "iar agent list"
+    assert exc_info.value.suggestion == "kc agent list"
 
 
 def test_doctor_warns_writable_profile_without_sandbox(

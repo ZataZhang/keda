@@ -192,7 +192,7 @@ export function buildPrdEvidenceArtifactUrl(
  * @param params.repoId - 仓库标识。
  * @param params.prdPath - 列表响应给出的 PRD 仓库相对路径。
  * @param params.signal - 可选的取消信号，用于组件卸载或切换 PRD 时中止请求。
- * @returns 与 `iar backlog ci status --json` 同构的 ci_delivery DTO。
+ * @returns 与 `kc backlog ci status --json` 同构的 ci_delivery DTO。
  */
 export async function fetchPrdCiDelivery(params: {
   repoId: string;

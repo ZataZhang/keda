@@ -129,7 +129,7 @@ max_issues = 1
 #   - "executor"：跟随实现阶段选中的 agent（仅 fix / closeout 合法，默认值）。
 #
 # 覆盖优先级（高到低）：
-#   PRD 文件头部 lifecycle_agents 块 > 仓库 .iar.toml > 本文件（全局）
+#   PRD 文件头部 lifecycle_agents 块 > 仓库 .kedacode.toml > 本文件（全局）
 #   > 既有散落配置键（runner.default_agent / validation.verifier_agent /
 #     pre_pr_review.review_agent / post_pr_supervisor.supervisor_agent /
 #     interactive_decision.default_agent / generated_content.default_agent /
@@ -165,7 +165,7 @@ max_issues = 1
 # reasoning_effort_args）的 agent 才能命中带模型/推理档的预设——未声明模板
 # 的 agent 命中绑定时直接报错（宁缺勿假，绝不静默忽略）。
 #
-# 用 `iar agent presets` 枚举全部预设；`iar agent doctor <agent> --preset <名>`
+# 用 `kc agent presets` 枚举全部预设；`kc agent doctor <agent> --preset <名>`
 # 预览将被执行的完整命令行。
 
 [agent_runner.presets.codebuddy-glm5_3-flash-max]
@@ -189,7 +189,7 @@ reasoning_effort = "max"
 # 绑定后该阶段由预设整体决定 (agent, 模型, 推理档)。覆盖优先级（高到低）：
 #   命令行 --agent > 命令行 --preset/--model/--reasoning-effort（一次性）
 #   > PRD 头部 lifecycle_presets 块（除 planner 外八键）
-#   > 仓库 .iar.toml > 本文件（全局层）。
+#   > 仓库 .kedacode.toml > 本文件（全局层）。
 # fix / closeout 未自绑预设时跟随实现者并继承实现的模型绑定（同一 agent）。
 # 回退换人 / 显式换 agent 时丢弃模型绑定并在日志与 attempt 记录中标注。
 # 下面是当前生效的阶段 -> 预设绑定；未列出的阶段继续走生命周期矩阵 /
@@ -219,7 +219,7 @@ closeout = "codebuddy-glm5_3-flash-max"
 #
 # 接入全新 agent 的最小步骤：写一段注册块（bin 与 label 必填，四种用途
 # 至少声明一种；某个用途两侧都不声明即视为该 agent 不提供该用途），
-# 然后运行 `iar agent doctor <name>` 自检。
+# 然后运行 `kc agent doctor <name>` 自检。
 # 完整字段说明见 docs/guides/configuration.md。
 
 [agent_runner.agents.codex]
@@ -501,9 +501,7 @@ remote = "zata"
 base_branch = "main"
 
 [agent_runner.worktree]
-create_command = "iar worktree create --branch issue-{issue_number} --base-branch {base_branch}"
-reuse_command = "iar worktree path --branch issue-{issue_number}"
-path_command = "iar worktree path --branch issue-{issue_number}"
+# create/reuse/path 三条命令沿用内置默认值（kc worktree …），不再在此钉住。
 # daemon 在 worktree 准备完成后创建独立 PostgreSQL/MySQL 数据库并运行迁移。
 provision_database = true
 
@@ -525,7 +523,7 @@ closeout_timeout_seconds = 600
 # 不与文本类收尾共用同一个短超时。
 closeout_visual_timeout_seconds = 1800
 # 提交前自动运行的验证命令；任一命令失败会进入 recovery。
-# 与全局 ~/.iar/config.toml 的 [agent_runner.runner].verification_commands 对齐。
+# 与全局 ~/.kedacode/config.toml 的 [agent_runner.runner].verification_commands 对齐。
 verification_commands = [
   "git diff --check",
   "just test",
@@ -645,7 +643,7 @@ timeout_seconds = 1800
 # Review rules appended after the review packet. Empty list = use the
 # embedded default that calls the ``code-reviewer`` skill and asks the
 # reviewer to emit structured findings. Override line-by-line in
-# ``.iar.toml`` to customize without forking ``agent_review.py``.
+# ``.kedacode.toml`` to customize without forking ``agent_review.py``.
 review_prompt_template = []
 
 [agent_runner.post_pr_supervisor]
@@ -789,7 +787,7 @@ body_template = [
   "",
   "## Delivery Notes",
   "",
-  "- 本 Issue 由 `iar issue create --from-prompt` 创建：正文就是需求的唯一来源，",
+  "- 本 Issue 由 `kc issue create --from-prompt` 创建：正文就是需求的唯一来源，",
   "  仓库里没有对应的 PRD 文件。",
   "- Recommended branch: `task/<issue-number>-<slug>`",
   "- Worktree command: `just worktree --issue <issue-number>`",
@@ -871,7 +869,7 @@ body_template = [
   "- [ ] Run verification",
 ]
 # PRD 规范单一来源是由 zata_code_template 安装到用户级目录的 `prd` skill（可用
-# IAR_PRD_SKILL_PATH 覆盖；默认优先取 keda 自有 ~/.iar/skills/prd，其次依次识别
+# KEDACODE_PRD_SKILL_PATH 覆盖；默认优先取 keda 自有 ~/.kedacode/skills/prd，其次依次识别
 # ~/.codex/skills、~/.claude/skills、~/.kimi-code/skills 等 agent 用户级目录）。
 # agent 模式优先把该规范注入 prompt；仅当 skill 不可达时才回退到下面这份模板 prompt。请勿
 # 在此处与 skill 之间维护两份漂移的章节契约。
@@ -922,15 +920,15 @@ default_agent = "claude"
 default_output_dir = "logs/agent-runner/decisions"
 planner_timeout_seconds = 120
 max_context_chars = 24000
-# Whether `iar ask --yes` is allowed to skip interactive confirmation.
+# Whether `kc ask --yes` is allowed to skip interactive confirmation.
 allow_execute_yes = true
 
 # =============================================================================
-# Agent Runner REPL Configuration (`iar` with no subcommand)
+# Agent Runner REPL Configuration (`kc` with no subcommand)
 # =============================================================================
 # Controls the interactive REPL entrypoint. Default agent is `claude`;
 # `--agent codex|kimi` overrides it per invocation. `--agent auto` is
-# rejected here (use `iar run` for that).
+# rejected here (use `kc run` for that).
 [agent_runner.repl]
 enabled = true
 default_agent = "claude"
@@ -938,7 +936,7 @@ default_output_dir = "logs/agent-runner/repl"
 max_context_chars = 24000
 agent_timeout_seconds = 120
 # Commands the REPL executor may run without explicit confirmation.
-# Each entry is a prefix matched against the argv tail after `iar`.
+# Each entry is a prefix matched against the argv tail after `kc`.
 auto_confirm_commands = [
   "labels sync --dry-run",
   "run --dry-run",
@@ -991,7 +989,7 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 # or manage credentials for remote repositories.
 # Keep only lightweight selector metadata here. Repository-specific display,
 # git, runner, labels, safety, and prompt overrides live in each target
-# repository's .iar.toml.
+# repository's .kedacode.toml.
 
 # [agent_runner.repositories.keda-main]
 # path = "/Users/zata/code/keda"
@@ -1043,16 +1041,11 @@ display_name = "freshai"
 github_repo = "ZataZhang/freshai"
 
 [agent_runner.console]
-# 运行历史与审计日志的 SQLite 文件路径（CLI 直跑与面板托管共用）。
-history_db_path = "~/.iar/console.db"
-# 面板托管 runner 进程的注册表（JSON pidfile，后端重启后据此复活探活）。
-process_registry_path = "~/.iar/processes.json"
+# history_db_path / process_registry_path / runner_command 均沿用内置默认值
+# （落在当前生效的状态目录 ~/.kedacode 下，启动命令按 kc 解析），不再钉住。
 # 托管进程的 stdout/stderr 日志目录。全局安装时使用绝对路径，
 # 避免依赖 keda 项目根。
-process_log_dir = "~/.iar/process-logs"
-# 托管进程的启动命令前缀。全局安装后直接使用 `iar`；
-# 在 keda 源码树内开发时可覆盖为 ["uv", "run", "iar"]。
-runner_command = ["iar"]
+process_log_dir = "~/.kedacode/process-logs"
 # 停止进程时 SIGTERM 后等待多少秒升级为 SIGKILL。
 stop_timeout_seconds = 30
 

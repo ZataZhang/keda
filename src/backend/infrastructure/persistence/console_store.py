@@ -2,7 +2,7 @@
 
 设计要点：
 
-- 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``iar run``
+- 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
 - 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 8：v5 新增

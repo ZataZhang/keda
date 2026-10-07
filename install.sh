@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kedacode / iar CLI installer.
+# KedaCode CLI installer（PyPI 包名 kedacode，主命令 kc）.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | bash
@@ -12,9 +12,10 @@
 #   * Detects host OS (macOS / Linux) and Python >= 3.11.
 #   * Prefers `uv` (bootstrap if missing), then `pipx`, then `pip --user`.
 #   * Installs from the GitHub Release tarball by default (--source auto).
-#   * --source pypi installs the published PyPI package `kedacode`（命令名仍是 iar）；
+#   * --source pypi installs the published PyPI package `kedacode`（主命令 kc，
+#     长别名 kedacode，另有永久弃用别名 iar）；  # legacy-alias
 #     PyPI 不可达或版本不存在时直接报错，绝不静默回退到 tarball。
-#   * Verifies `iar --version` exits 0 and emits a clear PATH hint if needed.
+#   * Verifies `kc --version` exits 0 and emits a clear PATH hint if needed.
 #   * Refuses to use sudo; never touches system package managers.
 #
 # Environment overrides:
@@ -27,14 +28,19 @@ set -euo pipefail
 
 readonly REPO_SLUG="${KEDA_REPO:-ZataZhang/keda}"
 readonly PYPI_INDEX_URL="https://pypi.org/pypi"
-# 改名前的旧分发包名。它和 kedacode 都提供 iar 可执行文件，uv 拒绝让不同包
-# 覆盖同名 binary，因此装过旧包的用户必须先卸载（见 check_legacy_tool_conflict）。
+# 改名前的旧分发包名。它和新包 kedacode 都注册 iar 这个（如今的弃用）名字，  # legacy-alias
+# uv 拒绝让不同包覆盖同名 binary，因此装过旧包的用户必须先卸载
+# （见 check_legacy_tool_conflict）。  # legacy-alias
 readonly LEGACY_TOOL_NAME="keda"
 readonly PY_MIN_MAJOR=3
 readonly PY_MIN_MINOR=11
-# 分发包名的单一声明处（PRD FR-1）：PyPI 包名是 kedacode，命令名是 iar。
+# 分发包名的单一声明处（PRD FR-1）：PyPI 包名是 kedacode，主命令名是 kc。
 readonly DEFAULT_TOOL_NAME="kedacode"
-readonly TOOL_BIN_NAME="iar"
+readonly TOOL_BIN_NAME="kc"
+# wheel 实际装出来的全部 console script（pyproject [project.scripts] 的镜像）。
+# 卸载必须逐个清理：只删主名会在 ~/.local/bin 里留下指向已删环境的死链接。
+# kedacode 是长别名，iar 是永久弃用别名。  # legacy-alias
+readonly TOOL_BIN_NAMES="kc kedacode iar" # legacy-alias
 
 INSTALL_METHOD="${KEDA_INSTALL_METHOD:-}"
 VERSION_TAG="${KEDA_VERSION:-}"
@@ -52,14 +58,14 @@ log_err()  { printf '\033[31m[install]\033[0m %s\n' "$*" >&2; }
 
 show_help() {
     cat <<'EOF'
-kedacode / iar installer
+KedaCode (kc) installer
 
 Usage: install.sh [options]
   --version <tag>     Install a specific release tag (default: latest).
   --method uv|pipx|pip  Force a specific installer.
   --source auto|pypi|tarball  Install source (default: auto = GitHub tarball).
   --check             Dry-run; print the plan without writing anything.
-  --uninstall         Remove the kedacode tool environment and the iar binary.
+  --uninstall         Remove the kedacode tool environment and every installed binary.
   -h, --help          Show this help.
 
 Environment:
@@ -123,21 +129,22 @@ detect_python() {
     fi
 }
 
-# 旧包名 keda 与新包名 kedacode 都注册 iar，uv 会以
-#   error: Executable already exists: iar (use `--force` to overwrite)
+# 旧包名 keda 与新包名 kedacode 都注册 iar 这个（如今的弃用）名字，uv 会以  # legacy-alias
+#   error: Executable already exists: iar (use `--force` to overwrite)  # legacy-alias
 # 失败。那句报错既没说清冲突来自哪个包，也没说该怎么办，所以这里提前拦下
 # 并给出确切命令。--check 模式只告警不退出，让 dry-run 能完整打印计划。
+# 本函数处理的正是改名前的旧包，必须点名它注册的那个旧名字。  # legacy-alias
 check_legacy_tool_conflict() {
     [ "$INSTALL_METHOD" = "uv" ] || return 0
     command -v uv >/dev/null 2>&1 || return 0
     uv tool list 2>/dev/null | grep -q "^${LEGACY_TOOL_NAME} " || return 0
 
     if [ "$CHECK_ONLY" -eq 1 ]; then
-        log_warn "Legacy tool '${LEGACY_TOOL_NAME}' is installed and owns the 'iar' executable; the real install would fail until it is removed."
+        log_warn "Legacy tool '${LEGACY_TOOL_NAME}' is installed and owns the deprecated 'iar' executable; the real install would fail until it is removed."  # legacy-alias
         return 0
     fi
-    log_err "Legacy tool '${LEGACY_TOOL_NAME}' is installed and owns the 'iar' executable."
-    log_err "Both packages register 'iar', so uv refuses to overwrite it. Remove the old one first:"
+    log_err "Legacy tool '${LEGACY_TOOL_NAME}' is installed and owns the deprecated 'iar' executable."  # legacy-alias
+    log_err "Both packages register the same executable name, so uv refuses to overwrite it. Remove the old one first:"
     log_err "    uv tool uninstall ${LEGACY_TOOL_NAME}"
     log_err "    curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/install.sh | bash -s -- --source pypi"
     log_err "If that entry is your editable development install of this repository, keep it and skip this installer."
@@ -275,7 +282,7 @@ print_plan() {
   method:    ${INSTALL_METHOD}
   version:   ${VERSION_TAG:-<unset>}
   source:    $(source_label)
-  tool:      ${DEFAULT_TOOL_NAME} (binary: ${TOOL_BIN_NAME})
+  tool:      ${DEFAULT_TOOL_NAME} (binaries: ${TOOL_BIN_NAMES})
 EOF
 }
 
@@ -318,7 +325,7 @@ run_install() {
 
 run_uninstall() {
     if [ "$CHECK_ONLY" -eq 1 ]; then
-        log_info "[check] would remove tool env + iar binary"
+        log_info "[check] would remove tool env + these binaries: ${TOOL_BIN_NAMES}"
         return
     fi
     case "$INSTALL_METHOD" in
@@ -326,11 +333,13 @@ run_uninstall() {
         pipx)  pipx uninstall "$DEFAULT_TOOL_NAME" >/dev/null 2>&1 || true ;;
         pip)   "$PY_BIN" -m pip uninstall -y "$DEFAULT_TOOL_NAME" >/dev/null 2>&1 || true ;;
     esac
-    rm -f "$HOME/.local/bin/${TOOL_BIN_NAME}"
+    for bin_name in $TOOL_BIN_NAMES; do
+        rm -f "$HOME/.local/bin/${bin_name}"
+    done
     log_info "Uninstall complete."
 }
 
-verify_iar() {
+verify_kc() {
     if [ "$CHECK_ONLY" -eq 1 ]; then
         log_info "[check] would run: ${TOOL_BIN_NAME} --version"
         return
@@ -368,8 +377,8 @@ main() {
 
     log_info "Selected installer: ${INSTALL_METHOD}; source: $(source_label)"
     run_install
-    verify_iar
-    log_info "Done. Run \`iar init\` inside a Git repository to start."
+    verify_kc
+    log_info "Done. Run \`kc init\` inside a Git repository to start."
 }
 
 main "$@"

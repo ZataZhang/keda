@@ -191,7 +191,7 @@ def test_detect_anomalies_label_pr_mismatch() -> None:
     assert "label_pr_mismatch" in types
     warning = next(a for a in anomalies if a.type == "label_pr_mismatch")
     assert warning.severity == "warning"
-    assert "iar labels sync" in warning.suggested_cli
+    assert "kc labels sync" in warning.suggested_cli
 
 
 def test_detect_anomalies_pr_dirty_in_review() -> None:
@@ -210,7 +210,7 @@ def test_detect_anomalies_pr_dirty_in_review() -> None:
     )
     error = next(a for a in anomalies if a.type == "pr_dirty_in_review")
     assert error.severity == "error"
-    assert "iar review" in error.suggested_cli
+    assert "kc review" in error.suggested_cli
 
 
 def test_detect_anomalies_dirty_worktree_mismatch() -> None:
@@ -355,8 +355,8 @@ def test_build_issue_snapshot_collects_timeline_pr_and_worktree() -> None:
     types = {a.type for a in snapshot.anomalies}
     assert "pr_dirty_in_review" in types
     assert "event_label_mismatch" in types
-    assert "iar labels sync" in snapshot.suggested_cli_commands
-    assert "iar review" in snapshot.suggested_cli_commands
+    assert "kc labels sync" in snapshot.suggested_cli_commands
+    assert "kc review" in snapshot.suggested_cli_commands
 
 
 # ─────────────────────────────────────────────────────────────────────────────

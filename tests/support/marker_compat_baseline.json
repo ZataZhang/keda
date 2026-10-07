@@ -1,0 +1,1463 @@
+{
+  "entries": [
+    {
+      "claim_judgement": {
+        "cases": [
+          {
+            "case": "live_within_ttl",
+            "claim_detail": {
+              "agent": "claude",
+              "host": "runner-a",
+              "pid": 4242,
+              "started_at": "2026-01-02T03:04:05+00:00"
+            },
+            "inputs": {
+              "effective_now": {
+                "__datetime__": "2026-01-02T03:14:05+00:00"
+              },
+              "pid_alive": true,
+              "ttl_seconds": 3600
+            },
+            "result": null
+          },
+          {
+            "case": "live_past_ttl",
+            "claim_detail": {
+              "agent": "claude",
+              "host": "runner-a",
+              "pid": 4242,
+              "started_at": "2026-01-02T03:04:05+00:00"
+            },
+            "inputs": {
+              "effective_now": {
+                "__datetime__": "2026-01-02T05:04:05+00:00"
+              },
+              "pid_alive": true,
+              "ttl_seconds": 3600
+            },
+            "result": "ttl_expired"
+          },
+          {
+            "case": "dead_pid",
+            "claim_detail": {
+              "agent": "claude",
+              "host": "runner-a",
+              "pid": 4242,
+              "started_at": "2026-01-02T03:04:05+00:00"
+            },
+            "inputs": {
+              "effective_now": {
+                "__datetime__": "2026-01-02T03:14:05+00:00"
+              },
+              "pid_alive": false,
+              "ttl_seconds": 3600
+            },
+            "result": "dead_pid"
+          }
+        ],
+        "input": "comment"
+      },
+      "id": "claim",
+      "kind": "iar:claim",
+      "outputs": {
+        "comment": "## Agent Runner Claimed\n\n- Host: `runner-a`\n- PID: `4242`\n- Agent: `claude`\n- Started at: `2026-01-02T03:04:05+00:00`\n\n<!-- iar:claim host=\"runner-a\" pid=\"4242\" started_at=\"2026-01-02T03:04:05+00:00\" agent=\"claude\" -->",
+        "text": "<!-- iar:claim host=\"runner-a\" pid=\"4242\" started_at=\"2026-01-02T03:04:05+00:00\" agent=\"claude\" -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_reclaim:parse_claim_marker",
+          "result": [
+            "runner-a",
+            4242
+          ],
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_reclaim:parse_claim_marker_body",
+          "result": [
+            "runner-a",
+            4242,
+            "2026-01-02T03:04:05+00:00"
+          ],
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_reclaim:parse_claim_marker_detail",
+          "result": {
+            "agent": "claude",
+            "host": "runner-a",
+            "pid": 4242,
+            "started_at": "2026-01-02T03:04:05+00:00"
+          },
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_reclaim:parse_claim_marker",
+          "result": [
+            "runner-a",
+            4242
+          ],
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_reclaim:format_claim_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "agent": "claude",
+            "host": "runner-a",
+            "pid": 4242,
+            "started_at": {
+              "__datetime__": "2026-01-02T03:04:05+00:00"
+            }
+          },
+          "literal_in": null
+        },
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_claim_arbitration:format_claim_comment",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "bid": {
+              "__dataclass__": "backend.core.use_cases.agent_runner_claim_arbitration:ClaimBid",
+              "kwargs": {
+                "agent": "claude",
+                "comment_id": 101,
+                "host": "runner-a",
+                "pid": 4242,
+                "started_at": {
+                  "__datetime__": "2026-01-02T03:04:05+00:00"
+                }
+              }
+            }
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "claim-withdrawn",
+      "kind": "iar:claim-withdrawn",
+      "outputs": {
+        "comment": "## Agent Runner Claim Withdrawn\n\n- Host: `runner-b`\n- PID: `9292`\n- Agent: `codex`\n- Started at: `2026-01-02T03:04:35+00:00`\n\nLost first-claim arbitration to `runner-a` (PID 4242), which claimed this Issue earlier; this process did not run the Issue.\n\n<!-- iar:claim-withdrawn host=\"runner-b\" pid=\"9292\" started_at=\"2026-01-02T03:04:35+00:00\" -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_reclaim:parse_claim_marker",
+          "result": null,
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_reclaim:parse_claim_marker_detail",
+          "result": null,
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_reclaim:parse_claim_marker",
+          "result": null,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_claim_arbitration:format_withdrawn_claim_comment",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "loser": {
+              "__dataclass__": "backend.core.use_cases.agent_runner_claim_arbitration:ClaimBid",
+              "kwargs": {
+                "agent": "codex",
+                "comment_id": 102,
+                "host": "runner-b",
+                "pid": 9292,
+                "started_at": {
+                  "__datetime__": "2026-01-02T03:04:35+00:00"
+                }
+              }
+            },
+            "winner": {
+              "__dataclass__": "backend.core.use_cases.agent_runner_claim_arbitration:ClaimBid",
+              "kwargs": {
+                "agent": "claude",
+                "comment_id": 101,
+                "host": "runner-a",
+                "pid": 4242,
+                "started_at": {
+                  "__datetime__": "2026-01-02T03:04:05+00:00"
+                }
+              }
+            }
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "depends-on",
+      "kind": "iar:depends-on",
+      "outputs": {
+        "text": "<!-- iar:depends-on #7 #3 mode=\"stack\" -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_dependencies:parse_dependency_marker",
+          "result": {
+            "issue_numbers": [
+              3,
+              7
+            ],
+            "sequence": "stack"
+          },
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_dependencies:format_dependency_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "issue_numbers": {
+              "__tuple__": [
+                7,
+                3
+              ]
+            },
+            "sequence": "stack"
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "fast-merge",
+      "kind": "iar:fast-merge",
+      "outputs": {
+        "text": "<!-- iar:fast-merge issued=7 -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_dependencies:parse_fast_merge_marker",
+          "result": 7,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_dependencies:format_fast_merge_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "issue_number": 7
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "direct-pr",
+      "kind": "iar:direct-pr",
+      "outputs": {
+        "text": "<!-- iar:direct-pr issued=7 -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_dependencies:parse_direct_pr_marker",
+          "result": 7,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_dependencies:format_direct_pr_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "issue_number": 7
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "dependency-wait",
+      "kind": "iar:dependency-wait",
+      "outputs": {
+        "text": "<!-- iar:dependency-wait blockers=9fa3295260ed4c2a -->"
+      },
+      "parses": [
+        {
+          "as_list": true,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_dependencies:parse_latest_dependency_wait_marker",
+          "result": "9fa3295260ed4c2a",
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_dependencies:format_dependency_wait_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "blockers": {
+              "__tuple__": [
+                {
+                  "__dataclass__": "backend.core.shared.models.agent_runner:DependencyBlocker",
+                  "kwargs": {
+                    "blocker_type": "issue",
+                    "current_state": "open",
+                    "target": "#7"
+                  }
+                },
+                {
+                  "__dataclass__": "backend.core.shared.models.agent_runner:DependencyBlocker",
+                  "kwargs": {
+                    "blocker_type": "pull_request",
+                    "current_state": "draft",
+                    "target": "#8"
+                  }
+                }
+              ]
+            }
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "event",
+      "kind": "iar:event",
+      "outputs": {
+        "text": "<!-- iar:event version=1 phase=implementation_complete cycle=2 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb pr_branch=issue-7 action=push checks_state=green mergeable=true issue_comments_count=11 pr_comments_count=3 blocked_paths=src/backend/core/a.py,docs/b.md -->"
+      },
+      "parses": [
+        {
+          "as_list": true,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_events:parse_latest_event_marker",
+          "result": {
+            "action": "push",
+            "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "blocked_paths": [
+              "src/backend/core/a.py",
+              "docs/b.md"
+            ],
+            "checks_state": "green",
+            "cycle": 2,
+            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "issue_comments_count": 11,
+            "mergeable": true,
+            "phase": "implementation_complete",
+            "pr_branch": "issue-7",
+            "pr_comments_count": 3,
+            "version": 1
+          },
+          "text_kwarg": null
+        },
+        {
+          "as_list": true,
+          "input": "text",
+          "kwargs": {
+            "phases": {
+              "__tuple__": [
+                "implementation_complete",
+                "draft_pr_created"
+              ]
+            }
+          },
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_events:parse_latest_event_marker_for_phases",
+          "result": {
+            "action": "push",
+            "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "blocked_paths": [
+              "src/backend/core/a.py",
+              "docs/b.md"
+            ],
+            "checks_state": "green",
+            "cycle": 2,
+            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "issue_comments_count": 11,
+            "mergeable": true,
+            "phase": "implementation_complete",
+            "pr_branch": "issue-7",
+            "pr_comments_count": 3,
+            "version": 1
+          },
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_events:format_event_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "action": "push",
+            "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "blocked_paths": {
+              "__tuple__": [
+                "src/backend/core/a.py",
+                "docs/b.md"
+              ]
+            },
+            "checks_state": "green",
+            "cycle": 2,
+            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "issue_comments_count": 11,
+            "mergeable": true,
+            "phase": "implementation_complete",
+            "pr_branch": "issue-7",
+            "pr_comments_count": 3
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "failure-context",
+      "kind": "iar:failure-context",
+      "outputs": {
+        "text": "<!-- iar:failure-context checkpoint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa attempts=3 verifier=red evidence=.iar/evidence -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_events:has_failure_context_marker",
+          "result": true,
+          "text_kwarg": null
+        },
+        {
+          "as_list": true,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_events:find_latest_failure_context_comment",
+          "result": "<!-- iar:failure-context checkpoint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa attempts=3 verifier=red evidence=.iar/evidence -->",
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_events:format_failure_context_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "attempt_count": 3,
+            "checkpoint_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "evidence_dir": ".iar/evidence",
+            "verifier_state": "red"
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "failure-context-ref",
+      "kind": "iar:failure-context-ref",
+      "outputs": {
+        "comment": "<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Authoritative handoff record (latest round): <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {
+            "existing_pr_body": "## Draft PR\n\nbody"
+          },
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_issue_handlers:_with_pr_handoff_ref",
+          "result": "## Draft PR\n\nbody\n\n<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Authoritative handoff record (latest round): <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
+          "text_kwarg": "handoff_ref_block"
+        },
+        {
+          "as_list": false,
+          "input": null,
+          "kwargs": {
+            "attempt_count": 3,
+            "handoff_comment_posted": false,
+            "handoff_url": "https://github.com/example-org/example-repo/issues/7#issuecomment-999"
+          },
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_issue_handlers:_build_pr_handoff_ref_block",
+          "result": "<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Handoff record could not be posted to this Issue; see the Issue comment list for whatever the runner managed to report: <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_issue_handlers:_build_pr_handoff_ref_block",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "attempt_count": 3,
+            "handoff_comment_posted": true,
+            "handoff_url": "https://github.com/example-org/example-repo/issues/7#issuecomment-999"
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "ci-auto-repair-policy",
+      "kind": "iar:ci-auto-repair-policy",
+      "outputs": {
+        "text": "<!-- iar:ci-auto-repair-policy value=off -->"
+      },
+      "parses": [
+        {
+          "as_list": true,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_events:parse_latest_ci_auto_repair_policy",
+          "result": "off",
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_events:format_ci_auto_repair_policy_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "value": "off"
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "auto-sign-off",
+      "kind": "iar:auto-sign-off",
+      "outputs": {
+        "text": "<!-- iar:auto-sign-off"
+      },
+      "parses": [
+        {
+          "as_list": true,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_merge_queue:_has_auto_sign_off_marker",
+          "result": true,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": null,
+          "const": null,
+          "contains": "iar:auto-sign-off",
+          "kwargs": {},
+          "literal_in": "backend.core.use_cases.agent_runner_merge_queue"
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "merge-acceptance",
+      "kind": "iar:merge-acceptance",
+      "outputs": {
+        "text": "<!-- iar:merge-acceptance version=1 -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": "search",
+          "parser": "backend.core.use_cases.agent_runner_pr_body_contract:_MERGE_ACCEPTANCE_MARKER_PATTERN",
+          "result": {
+            "groups": {
+              "version": "1"
+            },
+            "match": "<!-- iar:merge-acceptance version=1 -->"
+          },
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": null,
+          "const": "backend.core.use_cases.agent_runner_pr_body_contract:MERGE_ACCEPTANCE_MARKER_TEXT",
+          "contains": null,
+          "kwargs": {},
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "pr-contract",
+      "kind": "iar:pr-contract",
+      "outputs": {
+        "comment": "<!-- iar:pr-contract version=1 missing=missing acceptance heading,missing merge-acceptance marker -->\n## PR Body Contract Violation (auto-generated)\n\nThis PR body does not satisfy the prd skill PR-Native Acceptance contract, so the autopilot merge queue will refuse to auto-merge it. Missing anchors:\n\n- `missing acceptance heading`: unknown anchor\n- `missing merge-acceptance marker`: unknown anchor\n\n<!-- iar:pr-contract-end -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_pr_body_contract:parse_contract_annotation",
+          "result": [],
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_pr_body_contract:has_contract_annotation",
+          "result": false,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_pr_body_contract:build_contract_annotation_block",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "violations": [
+              "missing acceptance heading",
+              "missing merge-acceptance marker"
+            ]
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "pr-contract-end",
+      "kind": "iar:pr-contract-end",
+      "outputs": {
+        "comment": "<!-- iar:pr-contract version=1 missing=missing acceptance heading,missing merge-acceptance marker -->\n## PR Body Contract Violation (auto-generated)\n\nThis PR body does not satisfy the prd skill PR-Native Acceptance contract, so the autopilot merge queue will refuse to auto-merge it. Missing anchors:\n\n- `missing acceptance heading`: unknown anchor\n- `missing merge-acceptance marker`: unknown anchor\n\n<!-- iar:pr-contract-end -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": "search",
+          "parser": "backend.core.use_cases.agent_runner_pr_body_contract:_PR_CONTRACT_MARKER_PATTERN",
+          "result": null,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_pr_body_contract:build_contract_annotation_block",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "violations": [
+              "missing acceptance heading",
+              "missing merge-acceptance marker"
+            ]
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "realistic-validation",
+      "kind": "iar:realistic-validation",
+      "outputs": {
+        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_validation_checklist:parse_validation_checklist_state",
+          "result": {
+            "checked_count": 0,
+            "total": 2,
+            "unchecked_count": 0
+          },
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_validation_checklist:reset_validation_checklist",
+          "result": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n<!-- iar:realistic-validation-end -->",
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_validation_checklist:build_validation_checklist_block",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "checklist_items": [
+              "Run `kc run --issue 7` and capture rv-1 evidence",
+              "Tick the checklist after evidence is attached"
+            ]
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "realistic-validation-end",
+      "kind": "iar:realistic-validation-end",
+      "outputs": {
+        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": "contains",
+          "parser": "backend.core.use_cases.agent_runner_validation_checklist:_CHECKLIST_END_MARKER",
+          "result": true,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_validation_checklist:build_validation_checklist_block",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "checklist_items": [
+              "Run `kc run --issue 7` and capture rv-1 evidence",
+              "Tick the checklist after evidence is attached"
+            ]
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "structured-evidence",
+      "kind": "iar:structured-evidence",
+      "outputs": {
+        "text": "<!-- iar:structured-evidence version=1 language=\"zh-CN\" -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_structured_evidence:parse_structured_evidence_marker",
+          "result": {
+            "language": "zh-CN",
+            "version": 1
+          },
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_structured_evidence:has_structured_evidence_marker",
+          "result": true,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_structured_evidence:format_structured_evidence_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "language": "zh-CN"
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "evidence-format",
+      "kind": "iar:evidence-format",
+      "outputs": {
+        "text": "<!-- iar:evidence-format item=1 kind=screenshot -->\n<!-- iar:evidence-format item=2 kind=log -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_evidence_format:extract_evidence_format_markers",
+          "result": {
+            "1": "screenshot"
+          },
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.create_issue_from_prd:_build_evidence_format_markers",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "parsed_formats": {
+              "__pairs__": [
+                [
+                  1,
+                  "screenshot"
+                ],
+                [
+                  2,
+                  "log"
+                ]
+              ]
+            }
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "evidence-format-waived",
+      "kind": "iar:evidence-format-waived",
+      "outputs": {
+        "text": "<!-- iar:evidence-format-waived reason=\"纯文档改动，无可执行行为\" -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_validation_parsing:has_evidence_format_waiver_marker",
+          "result": true,
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_validation_parsing:extract_evidence_format_waiver_reason",
+          "result": null,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_validation_parsing:format_evidence_format_waiver_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "reason": "纯文档改动，无可执行行为"
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "validation-waived",
+      "kind": "iar:validation-waived",
+      "outputs": {
+        "text": "<!-- iar:validation-waived reason=\"行为由守卫测试覆盖\" -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_validation_parsing:has_validation_waiver_marker",
+          "result": true,
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_validation_parsing:extract_validation_waiver_reason",
+          "result": null,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_validation_parsing:format_validation_waiver_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "reason": "行为由守卫测试覆盖"
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "validation-evidence",
+      "kind": "iar:validation-evidence",
+      "outputs": {
+        "comment": "<!-- iar:validation-evidence version=1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa branch=iar-evidence/7 count=1 -->\n\n## Realistic Validation Evidence\n\n- Evidence branch: `iar-evidence/7` (orphan; never merged; auto-deleted after the issue closes)\n- Code head at capture time: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\nReview the evidence below, then tick the Realistic Validation checklist in the PR description to sign off.\n\n### rv-1-demo.png\n![rv-1-demo.png](https://github.com/example-org/example-repo/blob/iar-evidence/7/rv-1-demo.png?raw=true)\n[Open image](https://github.com/example-org/example-repo/blob/iar-evidence/7/rv-1-demo.png)"
+      },
+      "parses": [
+        {
+          "as_list": true,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_validation_publication:parse_latest_evidence_marker",
+          "result": {
+            "branch": "iar-evidence/7",
+            "count": 1,
+            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_validation_publication:build_evidence_comment",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "config": {
+              "__dataclass__": "backend.core.shared.models.agent_runner:AppConfig",
+              "kwargs": {}
+            },
+            "evidence_dir": null,
+            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "issue_body": "",
+            "pr_url": "https://github.com/example-org/example-repo/pull/7",
+            "upload": {
+              "__dataclass__": "backend.core.use_cases.agent_runner_structured_evidence:EvidenceUpload",
+              "kwargs": {
+                "branch": "iar-evidence/7",
+                "commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+                "file_names": {
+                  "__tuple__": [
+                    "rv-1-demo.png"
+                  ]
+                }
+              }
+            },
+            "worktree_path": {
+              "__path__": "/worktree/example-repo"
+            }
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "verifier-verdict",
+      "kind": "iar:verifier-verdict",
+      "outputs": {
+        "text": "<!-- iar:verifier-verdict risk=yellow -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.run_verifier_agent:parse_verifier_verdict",
+          "result": {
+            "agent": "",
+            "findings": "",
+            "marker_found": true,
+            "risk": "yellow",
+            "token_usage": null
+          },
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {
+            "findings": "manual findings"
+          },
+          "method": null,
+          "parser": "backend.core.use_cases.run_verifier_agent:parse_verifier_verdict",
+          "result": {
+            "agent": "",
+            "findings": "manual findings",
+            "marker_found": true,
+            "risk": "yellow",
+            "token_usage": null
+          },
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.run_verifier_agent:format_verifier_verdict_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "risk": "yellow"
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "verifier-warning",
+      "kind": "iar:verifier-warning",
+      "outputs": {
+        "comment": "<!-- iar:verifier-warning risk=yellow -->\n\n## ⚠️ Independent verifier returned YELLOW\n\nThe independent verifier ran for issue #7 and found a non-blocking risk. Review the findings below before merging:\n\n<details>\n<summary>Verifier findings</summary>\n\nevidence for rv-3 is thin\n\n</details>"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.run_verifier_agent:parse_verifier_verdict",
+          "result": {
+            "agent": "",
+            "findings": "No parseable verifier verdict marker found; treating as blocked (red).",
+            "marker_found": false,
+            "risk": "red",
+            "token_usage": null
+          },
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.run_verifier_agent:build_verifier_yellow_comment",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "issue_number": 7,
+            "verdict": {
+              "__dataclass__": "backend.core.use_cases.run_verifier_agent:ValidationVerdict",
+              "kwargs": {
+                "agent": "codex",
+                "findings": "evidence for rv-3 is thin",
+                "marker_found": true,
+                "risk": "yellow",
+                "token_usage": null
+              }
+            }
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "reconcile",
+      "kind": "iar:reconcile",
+      "outputs": {
+        "comment": "## Stale Attempt Reconciled\n\n<!-- iar:reconcile hash=\"8bbac5de407ca274\" seq=\"1\" -->\n\n| Field | Value |\n|-------|-------|\n| Interrupted at (UTC) | 2026-01-02 03:04:05 |\n| Classification | stale_attempt |\n| Staleness detected by | dead_pid |\n| Disposition | re-enqueue |\n| Claim owner | `runner-a` / pid `4242` / agent `claude` |\n\n**Reason**: Re-enqueued for a fresh attempt after the crash.\n\n### Basis\n\n- claim pid is gone\n- no session record in the worktree\n\nThe Issue is back on `agent/ready` and will be picked up by the next poll.",
+        "text": "<!-- iar:reconcile hash=\"8bbac5de407ca274\" seq=\"1\" -->"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_stale_attempt:parse_reconcile_marker",
+          "result": [
+            "8bbac5de407ca274",
+            1
+          ],
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_stale_attempt:parse_reconcile_marker",
+          "result": [
+            "8bbac5de407ca274",
+            1
+          ],
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_stale_attempt:format_reconcile_marker",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "dedupe_hash": "8bbac5de407ca274",
+            "stale_attempt_seq": 1
+          },
+          "literal_in": null
+        },
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_stale_attempt:format_stale_attempt_comment",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "report": {
+              "__dataclass__": "backend.core.use_cases.agent_runner_stale_attempt:StaleAttemptReport",
+              "kwargs": {
+                "attempt_history_excerpt": null,
+                "claim": {
+                  "__dataclass__": "backend.core.use_cases.agent_runner_reclaim:ClaimMarkerDetail",
+                  "kwargs": {
+                    "agent": "claude",
+                    "host": "runner-a",
+                    "pid": 4242,
+                    "started_at": {
+                      "__datetime__": "2026-01-02T03:04:05+00:00"
+                    }
+                  }
+                },
+                "decision": {
+                  "__dataclass__": "backend.core.use_cases.agent_runner_stale_attempt:StaleAttemptDecision",
+                  "kwargs": {
+                    "basis": {
+                      "__tuple__": [
+                        "claim pid is gone",
+                        "no session record in the worktree"
+                      ]
+                    },
+                    "disposition": {
+                      "__attr__": "backend.core.use_cases.agent_runner_stale_attempt:StaleAttemptDisposition.REENQUEUE"
+                    },
+                    "reason": "Re-enqueued for a fresh attempt after the crash."
+                  }
+                },
+                "dedupe_hash": "8bbac5de407ca274",
+                "issue_number": 7,
+                "stale_attempt_seq": 1,
+                "stale_reason": "dead_pid"
+              }
+            }
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "attempt-history",
+      "kind": "iar-attempt-history",
+      "outputs": {
+        "comment": "<!-- iar-attempt-history -->\n### Attempt History (live)\n\n_(Older attempts omitted; showing the latest 50.)_\n\n| Attempt | Started (UTC) | Agent | Failure Type | Recovered | Duration | Detail |\n|---------|---------------|-------|-------------|-----------|----------|--------|\n| 1 | 2026-01-02 03:04Z | claude | verification_failed | No | 600.0s (agent 420.5s · verification 179.0s) | verification failed: just test exited 2 |\n\n_`Attempt` counts within one agent run: it restarts at 1 on every agent switch and every re-claim, so use `Started` to tell consecutive runs apart. Rows are ordered oldest-first._",
+        "text": "### Attempt History\n\n| Attempt | Started (UTC) | Agent | Failure Type | Recovered | Duration | Detail |\n|---------|---------------|-------|-------------|-----------|----------|--------|\n| 1 | 2026-01-02 03:04Z | claude | verification_failed | No | 600.0s (agent 420.5s · verification 179.0s) | verification failed: just test exited 2 |\n\n_`Attempt` counts within one agent run: it restarts at 1 on every agent switch and every re-claim, so use `Started` to tell consecutive runs apart. Rows are ordered oldest-first._"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "comment",
+          "kwargs": {},
+          "method": "contains",
+          "parser": "backend.core.use_cases.agent_runner_orchestrate:_ATTEMPT_HISTORY_MARKER",
+          "result": true,
+          "text_kwarg": null
+        },
+        {
+          "as_list": false,
+          "input": null,
+          "kwargs": {
+            "attempt_results": [
+              {
+                "__dataclass__": "backend.core.shared.models.agent_runner:AttemptResult",
+                "kwargs": {
+                  "agent": "claude",
+                  "attempt_number": 1,
+                  "detail": "verification failed: just test exited 2",
+                  "duration_seconds": 600.0,
+                  "failure_type": {
+                    "__attr__": "backend.core.shared.models.agent_runner:FailureType.VERIFICATION_FAILED"
+                  },
+                  "finished_at": "2026-01-02T03:14:05+00:00",
+                  "phase_durations": {
+                    "__tuple__": [
+                      {
+                        "__dataclass__": "backend.core.shared.models.agent_runner:PhaseDuration",
+                        "kwargs": {
+                          "name": "agent",
+                          "seconds": 420.5
+                        }
+                      },
+                      {
+                        "__dataclass__": "backend.core.shared.models.agent_runner:PhaseDuration",
+                        "kwargs": {
+                          "name": "verification",
+                          "seconds": 179.0
+                        }
+                      }
+                    ]
+                  },
+                  "recovered": false,
+                  "started_at": "2026-01-02T03:04:05+00:00",
+                  "token_usage": null
+                }
+              }
+            ],
+            "include_title": true
+          },
+          "method": null,
+          "parser": "backend.core.use_cases.agent_runner_failure:format_attempt_history",
+          "result": "### Attempt History\n\n| Attempt | Started (UTC) | Agent | Failure Type | Recovered | Duration | Detail |\n|---------|---------------|-------|-------------|-----------|----------|--------|\n| 1 | 2026-01-02 03:04Z | claude | verification_failed | No | 600.0s (agent 420.5s · verification 179.0s) | verification failed: just test exited 2 |\n\n_`Attempt` counts within one agent run: it restarts at 1 on every agent switch and every re-claim, so use `Started` to tell consecutive runs apart. Rows are ordered oldest-first._",
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "comment",
+          "call": "backend.core.use_cases.agent_runner_orchestrate:_build_attempt_history_comment",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "attempt_results": [
+              {
+                "__dataclass__": "backend.core.shared.models.agent_runner:AttemptResult",
+                "kwargs": {
+                  "agent": "claude",
+                  "attempt_number": 1,
+                  "detail": "verification failed: just test exited 2",
+                  "duration_seconds": 600.0,
+                  "failure_type": {
+                    "__attr__": "backend.core.shared.models.agent_runner:FailureType.VERIFICATION_FAILED"
+                  },
+                  "finished_at": "2026-01-02T03:14:05+00:00",
+                  "phase_durations": {
+                    "__tuple__": [
+                      {
+                        "__dataclass__": "backend.core.shared.models.agent_runner:PhaseDuration",
+                        "kwargs": {
+                          "name": "agent",
+                          "seconds": 420.5
+                        }
+                      },
+                      {
+                        "__dataclass__": "backend.core.shared.models.agent_runner:PhaseDuration",
+                        "kwargs": {
+                          "name": "verification",
+                          "seconds": 179.0
+                        }
+                      }
+                    ]
+                  },
+                  "recovered": false,
+                  "started_at": "2026-01-02T03:04:05+00:00",
+                  "token_usage": null
+                }
+              }
+            ],
+            "older_omitted": true
+          },
+          "literal_in": null
+        },
+        {
+          "as": "text",
+          "call": "backend.core.use_cases.agent_runner_failure:format_attempt_history",
+          "const": null,
+          "contains": null,
+          "kwargs": {
+            "attempt_results": [
+              {
+                "__dataclass__": "backend.core.shared.models.agent_runner:AttemptResult",
+                "kwargs": {
+                  "agent": "claude",
+                  "attempt_number": 1,
+                  "detail": "verification failed: just test exited 2",
+                  "duration_seconds": 600.0,
+                  "failure_type": {
+                    "__attr__": "backend.core.shared.models.agent_runner:FailureType.VERIFICATION_FAILED"
+                  },
+                  "finished_at": "2026-01-02T03:14:05+00:00",
+                  "phase_durations": {
+                    "__tuple__": [
+                      {
+                        "__dataclass__": "backend.core.shared.models.agent_runner:PhaseDuration",
+                        "kwargs": {
+                          "name": "agent",
+                          "seconds": 420.5
+                        }
+                      },
+                      {
+                        "__dataclass__": "backend.core.shared.models.agent_runner:PhaseDuration",
+                        "kwargs": {
+                          "name": "verification",
+                          "seconds": 179.0
+                        }
+                      }
+                    ]
+                  },
+                  "recovered": false,
+                  "started_at": "2026-01-02T03:04:05+00:00",
+                  "token_usage": null
+                }
+              }
+            ],
+            "include_title": true
+          },
+          "literal_in": null
+        }
+      ]
+    },
+    {
+      "claim_judgement": null,
+      "id": "attempt-end",
+      "kind": "iar-attempt-end",
+      "outputs": {
+        "text": "[iar-attempt-end]"
+      },
+      "parses": [
+        {
+          "as_list": false,
+          "input": "text",
+          "kwargs": {},
+          "method": "contains",
+          "parser": "backend.core.use_cases.issue_logs:ATTEMPT_END_MARKER",
+          "result": true,
+          "text_kwarg": null
+        }
+      ],
+      "writers": [
+        {
+          "as": "text",
+          "call": null,
+          "const": "backend.core.use_cases.issue_logs:ATTEMPT_END_MARKER",
+          "contains": null,
+          "kwargs": {},
+          "literal_in": null
+        }
+      ]
+    }
+  ],
+  "generated_by": ".iar/evidence/scripts/rv-3-marker-snapshot.py",
+  "generated_from_ref": "36c3f734bb9da19fd533c0242d3a9517b0a1feed",
+  "kinds": [
+    "iar-attempt-end",
+    "iar-attempt-history",
+    "iar:auto-sign-off",
+    "iar:ci-auto-repair-policy",
+    "iar:claim",
+    "iar:claim-withdrawn",
+    "iar:dependency-wait",
+    "iar:depends-on",
+    "iar:direct-pr",
+    "iar:event",
+    "iar:evidence-format",
+    "iar:evidence-format-waived",
+    "iar:failure-context",
+    "iar:failure-context-ref",
+    "iar:fast-merge",
+    "iar:merge-acceptance",
+    "iar:pr-contract",
+    "iar:pr-contract-end",
+    "iar:realistic-validation",
+    "iar:realistic-validation-end",
+    "iar:reconcile",
+    "iar:structured-evidence",
+    "iar:validation-evidence",
+    "iar:validation-waived",
+    "iar:verifier-verdict",
+    "iar:verifier-warning"
+  ],
+  "python": "3.13.13",
+  "version": 1
+}

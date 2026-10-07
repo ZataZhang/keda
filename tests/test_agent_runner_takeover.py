@@ -84,10 +84,16 @@ def _gh_list_response(repositories: list[dict]) -> CommandResult:
     )
 
 
-def test_build_takeover_options_defaults(tmp_path: Path) -> None:
-    """Default options should use ~/.iar/repos and enable daemon starts."""
+@pytest.mark.parametrize("state_directory", [".kedacode", ".iar"])
+def test_build_takeover_options_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state_directory: str
+) -> None:
+    """新家目录使用新状态名，只有旧目录时沿用旧目录，其他默认选项不变。"""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    if state_directory == ".iar":
+        (tmp_path / state_directory).mkdir()
     options = build_takeover_options()
-    assert options.clone_root == Path.home() / ".iar" / "repos"
+    assert options.clone_root == tmp_path / state_directory / "repos"
     assert options.owner is None
     assert options.limit == 100
     assert options.selected_repos == ()

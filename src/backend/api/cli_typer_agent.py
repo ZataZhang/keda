@@ -3,7 +3,7 @@
 Holds :func:`ask_command` (natural-language decision entrypoint),
 :func:`repl_command` (interactive REPL),
 :func:`deliberate_command` (multi-agent deliberation), and the
-read-only ``iar agent list`` / ``iar agent doctor`` inspection commands.
+read-only ``kc agent list`` / ``kc agent doctor`` inspection commands.
 """
 
 from __future__ import annotations

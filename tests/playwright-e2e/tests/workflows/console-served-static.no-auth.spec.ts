@@ -1,7 +1,7 @@
 /**
- * `iar console` 静态托管冒烟（真实入口，不做 API mock）。
+ * `kc console` 静态托管冒烟（真实入口，不做 API mock）。
  *
- * 对着一个由 `iar console` 起的本机服务（FastAPI + 内置静态导出产物）
+ * 对着一个由 `kc console` 起的本机服务（FastAPI + 内置静态导出产物）
  * 直接访问深层路由，验证静态导出目录形态被 StaticFiles(html=True)
  * 正确解析：刷新 /app/backlog、/app/stats 不 404，根路径落到 Backlog。
  *
@@ -12,7 +12,7 @@
  */
 import { expect, test } from '@playwright/test'
 
-test.describe('iar console 静态托管（真实入口）', () => {
+test.describe('kc console 静态托管（真实入口）', () => {
   test('根路径打开后落到 Backlog', async ({ page }) => {
     const response = await page.goto('/')
     expect(response?.status()).toBe(200)

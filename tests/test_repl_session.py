@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Iterator
 
+import pytest
 
 from backend.core.shared.interfaces.agent_runner import (
     IarExecRequest,
 )
 from backend.core.shared.models.agent_decision import ReplConfig
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
@@ -124,6 +127,34 @@ def test_parse_markers_skips_malformed_body() -> None:
     assert requests2 == ()
 
 
+def test_parse_markers_strips_all_own_command_names_only() -> None:
+    """REPL 用 is_own_command_name 判定自有命令：kc / kedacode / 旧别名 iar 都识别并剥离，git 不识别。"""
+    for own_command_name in (
+        product_identity.PRIMARY_COMMAND_NAME,
+        product_identity.LONG_COMMAND_NAME,
+        product_identity.LEGACY_COMMAND_NAME,
+    ):
+        marker_text = (
+            f"{IAR_EXEC_OPEN_MARKER} {own_command_name} labels sync --dry-run "
+            f"{IAR_EXEC_CLOSE_MARKER}"
+        )
+        requests = parse_iar_exec_markers(marker_text)
+        assert len(requests) == 1
+        # 首个自有名 token 被剥掉，执行器只拿到子命令，避免拼成 [kc, kc, ...]。
+        assert requests[0].argv == ("labels", "sync", "--dry-run")
+
+    # 非自有命令（git）不是 REPL 自有命令：不剥离首词，交给执行器时会被 allowlist 拒绝。
+    foreign_text = f"{IAR_EXEC_OPEN_MARKER} git status {IAR_EXEC_CLOSE_MARKER}"
+    foreign_requests = parse_iar_exec_markers(foreign_text)
+    assert len(foreign_requests) == 1
+    assert foreign_requests[0].argv == ("git", "status")
+
+    executor = ReplCommandExecutor(_make_process_runner(), _make_config())
+    rejected = executor.execute(foreign_requests[0], repo_path=Path("/tmp"))
+    assert rejected.rejected
+    assert "allowlist" in rejected.rejection_reason.lower()
+
+
 # ---------------------------------------------------------------------------
 # ReplCommandExecutor
 # ---------------------------------------------------------------------------
@@ -174,10 +205,13 @@ def test_executor_rejects_git_push() -> None:
     assert "forbidden" in outcome.rejection_reason.lower()
 
 
-def test_executor_runs_auto_confirm_command() -> None:
+def test_executor_runs_auto_confirm_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 执行器按 sys.argv[0] 解析自有命令名作为子进程 argv 前缀：REPL 由 kc 启动时
+    # 就应以 kc 调用真实 CLI，因此这里把 sys.argv[0] 固定成 kc，让调用可复现。
+    monkeypatch.setattr(sys, "argv", ["kc", "repl"])
     runner = _make_process_runner()
-    runner.responses[("iar", "labels", "sync", "--dry-run")] = CommandResult(
-        command=("iar", "labels", "sync", "--dry-run"),
+    runner.responses[("kc", "labels", "sync", "--dry-run")] = CommandResult(
+        command=("kc", "labels", "sync", "--dry-run"),
         return_code=0,
         stdout="Labels synced",
         stderr="",
@@ -193,7 +227,7 @@ def test_executor_runs_auto_confirm_command() -> None:
     assert outcome.return_code == 0
     assert outcome.stdout == "Labels synced"
     assert outcome.confirmation_prompted is False
-    assert runner.calls == [["iar", "labels", "sync", "--dry-run"]]
+    assert runner.calls == [["kc", "labels", "sync", "--dry-run"]]
 
 
 def test_executor_prompts_for_confirm_command_and_user_says_yes() -> None:
@@ -261,11 +295,14 @@ def test_executor_eoferror_during_confirm_is_rejected() -> None:
 
 def test_run_repl_executes_iar_command_from_agent_reply(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # 执行器以 sys.argv[0] 解析出的自有命令名作为子进程 argv 前缀；固定为 kc。
+    monkeypatch.setattr(sys, "argv", ["kc", "repl"])
     context = _make_context(tmp_path)
     process_runner = _make_process_runner()
-    process_runner.responses[("iar", "labels", "sync", "--dry-run")] = CommandResult(
-        command=("iar", "labels", "sync", "--dry-run"),
+    process_runner.responses[("kc", "labels", "sync", "--dry-run")] = CommandResult(
+        command=("kc", "labels", "sync", "--dry-run"),
         return_code=0,
         stdout="Labels synced.",
         stderr="",
@@ -297,9 +334,9 @@ def test_run_repl_executes_iar_command_from_agent_reply(
     assert len(content_generator.calls) == 1
     assert content_generator.calls[0][0] == "claude"
 
-    # The iar labels sync command was actually executed by the process runner.
-    assert [call for call in process_runner.calls if call[0] == "iar" and call[1] == "labels"] == [
-        ["iar", "labels", "sync", "--dry-run"]
+    # The kc labels sync command was actually executed by the process runner.
+    assert [call for call in process_runner.calls if call[0] == "kc" and call[1] == "labels"] == [
+        ["kc", "labels", "sync", "--dry-run"]
     ]
 
     # Audit directory contains the session files.

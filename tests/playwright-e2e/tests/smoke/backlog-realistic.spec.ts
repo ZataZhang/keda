@@ -83,8 +83,8 @@ const MOCK_PRDS_RESPONSE = {
       next_action: { label: '开始下一个', url: null },
     },
     {
-      prd_path: 'tasks/pending/P1-FEAT-20260612120000-prd-iar-init-check-gate.md',
-      title: 'iar 命令仓库初始化门禁',
+      prd_path: 'tasks/pending/P1-FEAT-20260612120000-prd-iar-init-check-gate.md', // legacy-alias
+      title: 'iar 命令仓库初始化门禁', // legacy-alias（历史归档 PRD 的真实标题）
       status: 'pending',
       priority: 'P1',
       issue_url: null,
@@ -155,7 +155,7 @@ test.describe('realistic: backlog page', () => {
     await saveScreenshot(page, 'backlog-list.png')
 
     await expect(page.getByText('Backlog E2E Review Highlight Test')).toBeVisible()
-    await expect(page.getByText('iar 命令仓库初始化门禁')).toBeVisible()
+    await expect(page.getByText('iar 命令仓库初始化门禁')).toBeVisible() // legacy-alias
     await expect(page.getByText('Issue Dependency Gate')).not.toBeVisible()
 
     await page.getByLabel('显示已归档').check()

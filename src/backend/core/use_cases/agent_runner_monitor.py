@@ -364,27 +364,27 @@ def _derive_suggested_cli(
             seen.add(command)
 
     if has_pr and primary_label in {"agent/ready", "agent/running"}:
-        _add("iar labels sync")
+        _add("kc labels sync")
     if event_label_mismatch:
-        _add("iar labels sync")
+        _add("kc labels sync")
     if has_pr and primary_label not in {
         "agent/supervising",
         "agent/review",
         "agent/blocked",
         "agent/failed",
     }:
-        _add("iar review --dry-run")
+        _add("kc review --dry-run")
     if pr_dirty:
-        _add("iar review")
-        _add("iar run --max-issues 1")
+        _add("kc review")
+        _add("kc run --max-issues 1")
     if worktree_dirty and primary_label != "agent/running":
-        _add("iar run --dry-run")
+        _add("kc run --dry-run")
     if primary_label == "agent/failed":
-        _add("iar run --dry-run")
+        _add("kc run --dry-run")
     if primary_label == "agent/blocked":
-        _add("iar review")
+        _add("kc review")
     if primary_label == "agent/ready":
-        _add("iar run --dry-run")
+        _add("kc run --dry-run")
     return tuple(suggested)
 
 
@@ -446,7 +446,7 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
                 type="label_pr_mismatch",
                 severity="warning",
                 message=("PR exists but Issue label does not reflect post-PR state."),
-                suggested_cli=("iar labels sync", "iar review --dry-run"),
+                suggested_cli=("kc labels sync", "kc review --dry-run"),
             )
         )
 
@@ -456,7 +456,7 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
                 type="pr_dirty_in_review",
                 severity="error",
                 message=("PR is dirty/conflicted while Issue is in review state."),
-                suggested_cli=("iar review", "iar run --max-issues 1"),
+                suggested_cli=("kc review", "kc run --max-issues 1"),
             )
         )
 
@@ -466,7 +466,7 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
                 type="dirty_worktree_mismatch",
                 severity="warning",
                 message=("Worktree has uncommitted changes but Issue is not in running state."),
-                suggested_cli=("iar run --dry-run", "git status"),
+                suggested_cli=("kc run --dry-run", "git status"),
             )
         )
 
@@ -482,7 +482,7 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
                     type="event_label_mismatch",
                     severity="warning",
                     message=("Latest event marker suggests a different state than current label."),
-                    suggested_cli=("iar labels sync",),
+                    suggested_cli=("kc labels sync",),
                 )
             )
 

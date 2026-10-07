@@ -1,4 +1,4 @@
-"""iar 的机读输出契约：格式解析、单一 emit 出口、结构化错误 envelope。
+"""kc 的机读输出契约：格式解析、单一 emit 出口、结构化错误 envelope。
 
 设计约束（Issue #194 / PRD `P1-FEAT-20260930-141135`）：
 
@@ -59,7 +59,7 @@ def output_format_of(*, output: Any = None, as_json: bool = False) -> str:
 
     Args:
         output: ``--output`` 的原始取值。仅 ``table`` / ``json`` 被视为格式；
-            其它值（例如 ``iar ask --output <目录>`` 复用同名旗标）忽略。
+            其它值（例如 ``kc ask --output <目录>`` 复用同名旗标）忽略。
         as_json: ``--json`` 布尔别名，为真时等价于 ``--output json``。
 
     Returns:
@@ -147,7 +147,7 @@ def json_literal(value: Any) -> str:
     """把单个值序列化成 JSON 字面量，供嵌入人类可读文本使用。
 
     存在本模块而非调用方，是为了让"JSON 序列化只出现在 `cli_output.py`"这条
-    守卫可被 ``rg`` 检查（例如 ``iar config migrate`` 打印被钉住的配置值）。
+    守卫可被 ``rg`` 检查（例如 ``kc config migrate`` 打印被钉住的配置值）。
     """
     return json.dumps(value, ensure_ascii=False, default=str)
 

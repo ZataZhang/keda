@@ -1,4 +1,4 @@
-"""Implementation of the ``iar takeover`` CLI command."""
+"""Implementation of the ``kc takeover`` CLI command."""
 
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def _run_takeover_command(parsed: argparse.Namespace, process_runner: IProcessRu
                 process_runner=process_runner,
             )
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
-        logger.error("iar takeover failed to list repositories: %s", exc)
+        logger.error("kc takeover failed to list repositories: %s", exc)
         error_console.print(f"[red]Failed to list repositories:[/] {exc}")
         return 1
 
@@ -129,7 +129,7 @@ def _run_takeover_command(parsed: argparse.Namespace, process_runner: IProcessRu
             progress_callback=_print_takeover_progress,
         )
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
-        logger.error("iar takeover failed: %s", exc)
+        logger.error("kc takeover failed: %s", exc)
         error_console.print(f"[red]Takeover failed:[/] {exc}")
         return 1
 

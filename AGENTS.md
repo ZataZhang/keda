@@ -23,7 +23,7 @@
 | `docs/ai-standards/comments-docstrings.md` | 新增/修改公共 Python API；写模块/类/函数 docstring；做文件 I/O 涉及编码问题 | 仅改私有实现细节且不涉及公共 docstring 时 |
 | `docs/ai-standards/documentation.md` | 改动公共函数签名、配置项、业务流程；新增长期文档页；更新 `mkdocs.yml` 导航 | 纯内部重构且无对外行为或文档变化 |
 | `docs/ai-standards/testing.md` | **任何代码变更开始前**；制定验证策略、收集证据或声称完成前必须重新核对；写 PRD 的 Realistic Validation Plan；**遇到测试失败或打算修改 `tests/guards/` 守卫测试时** | 仅改注释、纯文档排版或无可执行行为变化的纯配置 |
-| `docs/ai-standards/tooling.md` | 选择运行命令；改 `justfile` / `pre-commit` / `mkdocs` / Docker 配置；处理 PRD 归档流程；处理 lint flag 或重复检测 hooks；**改动 `iar` CLI 表面（子命令 / 旗标 / 退出码 / 机器输出）或随包 `iar-operator` skill**；撰写提交信息 | 在已熟悉常用 `just` 命令、且本次不动工具链配置与 CLI 表面时 |
+| `docs/ai-standards/tooling.md` | 选择运行命令；改 `justfile` / `pre-commit` / `mkdocs` / Docker 配置；处理 PRD 归档流程；处理 lint flag 或重复检测 hooks；**改动 `kc` CLI 表面（子命令 / 旗标 / 退出码 / 机器输出）或随包 `kedacode-operator` skill**；撰写提交信息 | 在已熟悉常用 `just` 命令、且本次不动工具链配置与 CLI 表面时 |
 | `docs/ai-standards/alembic.md` | 新增、重命名或修改 Alembic migration；检查迁移链或 `down_revision` | 不涉及 `alembic/versions/` 时 |
 
 `tests/playwright-e2e/` 是独立 TypeScript/Node 包，遵循该目录自己的 `README.md`，不强制套用 Python 规范。
@@ -49,7 +49,7 @@
 - PRD 必须包含 Realistic Validation Plan，验收清单需覆盖最高可行保真度的真实入口验证，或说明无可执行行为变更
 - 前端截图必须标注验证层级；临时预览页、直接渲染组件或手工注入状态仅属于 `component preview`，不得称为真实验证。涉及 Dialog、Portal、父级布局或用户流程时，验收证据必须保留对应生产边界；无法走真实入口时必须披露限制
 - 变更代码时同步更新 `docs/` 与 `mkdocs.yml`
-- 改动 `iar` CLI 表面（新增/改名子命令、旗标、退出码或机器可读输出）时，必须同步随包 `iar-operator` skill（`src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md`）与 `docs/`，避免 agent 侧知识漂移；详见 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync
+- 改动 `kc` CLI 表面（新增/改名子命令、旗标、退出码或机器可读输出）时，必须同步随包 `kedacode-operator` skill（`src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md`）与 `docs/`，避免 agent 侧知识漂移；详见 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync
 - 守卫测试（`tests/guards/`，文件头标注"守卫测试（guard test）"）失败时，修复触发它的源代码或配置，不要修改守卫测试本身让测试通过；仅当约定本身变更时才改守卫测试，并同步更新对应文档。修改 `tests/guards/**` 需 `GUARD_UPDATE_ACK=1 git commit`
 - 新增给密钥类的配置变量（如 `api_key_env`、密钥别名、provider 注册信息）应放到 `config.toml`，实际密钥值仍由 `.env/.env.local` 注入；默认 env 未填写时，配置加载仍须正常完成
 - `.env.example` 中非密钥类变量应保持 `# KEY=默认值` 的注释状态，仅作为示例；密钥类变量（含 API key、密码、token，以及可能携带凭据的连接字符串如 `DATABASE_URL`、`REDIS_URL`）保留未注释的空值（如 `OPENAI_API_KEY=`），确保变量名可见且不会误用默认值

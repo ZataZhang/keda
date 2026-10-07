@@ -167,7 +167,7 @@ def test_run_agent_repositories_once_hints_recovery_for_network_error(
 
     assert exit_code == 1
     assert any(
-        "Run `iar run` again to retry" in record.message
+        "Run `kc run` again to retry" in record.message
         for record in caplog.records
         if record.levelno == logging.ERROR
     )

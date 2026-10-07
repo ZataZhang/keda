@@ -1,90 +1,90 @@
 # Agent Runner 使用指南
 
-`iar`（issue-agent-runner）是一个将 GitHub Issues 转为本地 AI Agent 队列的 CLI 工具，已按照本仓库的四层架构迁移并集成。
+`kc`（issue-agent-runner）是一个将 GitHub Issues 转为本地 AI Agent 队列的 CLI 工具，已按照本仓库的四层架构迁移并集成。
 
-CLI 入口基于 Typer/Rich：`iar --help` 会展示分组命令、参数和别名；脚本可继续使用历史命令，日常人工操作优先使用更短的别名。
+CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别名；脚本可继续使用历史命令，日常人工操作优先使用更短的别名。
 
 ## 功能概述
 
-- **init**：在目标 Git 仓库创建仓库本地 `.iar.toml` 配置
+- **init**：在目标 Git 仓库创建仓库本地 `.kedacode.toml` 配置
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
 - **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
-- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`iar run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
+- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
 - **review**：单次检查 `agent/supervising` 和 `agent/review` 的 Issues，基于 PR 上下文变化运行 supervisor cycle（兼容旧命令 `review-once`）
 - **review-daemon**：常驻进程，按指定间隔循环执行 `review-once`
 - **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 autopilot 调度阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
 - **ask**：受限自然语言决策入口，默认只生成计划，确认后执行白名单动作
-- **worktree cleanup**：清理 GitHub Issue 已关闭、远端分支已删除但本地仍残留的 `issue-<number>` 分支和 iAR worktree
+- **worktree cleanup**：清理 GitHub Issue 已关闭、远端分支已删除但本地仍残留的 `issue-<number>` 分支和 KedaCode worktree
 
 ## 安装
 
-`iar` 已通过 `pyproject.toml` 的 `[project.scripts]` 注册：
+`kc` 已通过 `pyproject.toml` 的 `[project.scripts]` 注册：
 
 ```bash
 # 通过 uv 运行
-uv run iar --help
+uv run kc --help
 
 # 或安装后直接使用
-iar --help
+kc --help
 ```
 
 ### 初始化门禁
 
-除 `iar init` 外，所有 `iar` 子命令在执行前都会检查目标仓库是否已完成初始化（仓库根目录存在有效的 `.iar.toml`）。未初始化时命令会立即以非零退出码失败，并提示先运行 `iar init`：
+除 `kc init` 外，所有 `kc` 子命令在执行前都会检查目标仓库是否已完成初始化（仓库根目录存在有效的 `.kedacode.toml`）。未初始化时命令会立即以非零退出码失败，并提示先运行 `kc init`：
 
 ```bash
 # 首次在目标仓库使用前，必须先初始化
-iar init
+kc init
 
 # 之后才能执行其他命令
-iar labels sync
-iar run --all-ready --dry-run
+kc labels sync
+kc run --all-ready --dry-run
 ```
 
-`iar init` 本身不受门禁限制，包括 `--dry-run` 和 `--force` 形式。本 PRD 不提供 `--skip-init-check` 等绕过开关。
+`kc init` 本身不受门禁限制，包括 `--dry-run` 和 `--force` 形式。本 PRD 不提供 `--skip-init-check` 等绕过开关。
 
 ### Shell 自动补全
 
-`iar` 支持生成 shell completion。zsh 用户安装后，输入 `iar is<Tab>` 可补全到 `issue`：
+`kc` 支持生成 shell completion。zsh 用户安装后，输入 `kc is<Tab>` 可补全到 `issue`：
 
 ```bash
-iar completion install --shell zsh
+kc completion install --shell zsh
 source ~/.zshrc
 ```
 
 如需只查看脚本内容而不写入配置：
 
 ```bash
-iar completion show --shell zsh
+kc completion show --shell zsh
 ```
 
 `completion install` 同时支持 `--shell bash` 和 `--shell fish`。
 
 补全同时覆盖 `kedacode` 别名入口（别名清单从分发的 `[project.scripts]` 元数据派生），
-`kedacode is<Tab>` 与 `iar is<Tab>` 行为一致；旧版本安装的补全重跑一次
-`iar completion install` 即可升级。
+`kedacode is<Tab>` 与 `kc is<Tab>` 行为一致；旧版本安装的补全重跑一次
+`kc completion install` 即可升级。
 
 ## 面向 Agent 的机读契约
 
-`iar` 的另一类调用方是脚本和别的 agent。为此有三条对外契约：**显式声明的机器格式**、**语义退出码**、**运行时自省**。完整取值表与错误 envelope 字段定义见 [`docs/api/references.md`](../api/references.md)，`iar --help` 末尾也直接印出退出码表。
+`kc` 的另一类调用方是脚本和别的 agent。为此有三条对外契约：**显式声明的机器格式**、**语义退出码**、**运行时自省**。完整取值表与错误 envelope 字段定义见 [`docs/api/references.md`](../api/references.md)，`kc --help` 末尾也直接印出退出码表。
 
 ### 机器格式必须显式声明
 
 数据类命令接受 `--json`，它是 `--output json` 的别名；不传任何旗标时输出仍是给人看的表格，**即使 stdout 是管道也不自动切换**（避免静默改变既有脚本的输入）。
 
 ```bash
-iar issue list --json                 # 等价于 --output json
-iar run --all-ready --dry-run --output json   # 计划以 JSON 给出
-iar daemon status --json
+kc issue list --json                 # 等价于 --output json
+kc run --all-ready --dry-run --output json   # 计划以 JSON 给出
+kc daemon status --json
 ```
 
-机器模式下 **stdout 只承载数据**：进度、警告、日志（含应用日志的 stdout handler）一律改绑到 stderr，`iar <cmd> --json > out.json` 拿到的就是可 `json.loads` 的单个文档。失败时 stderr 输出一个 envelope：
+机器模式下 **stdout 只承载数据**：进度、警告、日志（含应用日志的 stdout handler）一律改绑到 stderr，`kc <cmd> --json > out.json` 拿到的就是可 `json.loads` 的单个文档。失败时 stderr 输出一个 envelope：
 
 ```json
 {
   "error": "not_found",
   "message": "Repository 'keda' is not registered.",
-  "suggestion": "iar registry list",
+  "suggestion": "kc registry list",
   "retryable": false,
   "exit_code": 3
 }
@@ -92,13 +92,13 @@ iar daemon status --json
 
 `suggestion` 一定是一条可直接跑的下一步命令；调用方只该读 `$?` 与这个 envelope，不要 parse 英文句子。
 
-当前暴露机器格式的命令：`run`、`logs`、`tokens`、`schema`、`issue create`、`issue list`、`worktree path`、`registry list`、`daemon status`、`loop list`、`agent list`、`agent presets`、`agent doctor`（以 `iar schema --json` 的实际导出为准，新增命令无需改本文）。
+当前暴露机器格式的命令：`run`、`logs`、`tokens`、`schema`、`issue create`、`issue list`、`worktree path`、`registry list`、`daemon status`、`loop list`、`agent list`、`agent presets`、`agent doctor`（以 `kc schema --json` 的实际导出为准，新增命令无需改本文）。
 
-**例外**：`iar ask` 与 `iar deliberate` 的 `--output` 是**输出目录**（文本型参数），不是格式；那里 `--output json` 表示名为 `json` 的目录，两者也都不接受 `--json`。
+**例外**：`kc ask` 与 `kc deliberate` 的 `--output` 是**输出目录**（文本型参数），不是格式；那里 `--output json` 表示名为 `json` 的目录，两者也都不接受 `--json`。
 
 ### 语义退出码
 
-名称列就是失败 envelope 里 `error` 的取值，也与 `iar schema --json` 的 `exit_codes.values` 一一对应——`$?` 与 stderr 不会各说一套。
+名称列就是失败 envelope 里 `error` 的取值，也与 `kc schema --json` 的 `exit_codes.values` 一一对应——`$?` 与 stderr 不会各说一套。
 
 | 码 | 名称（envelope `error`） | 含义 | 调用方动作 |
 |---|---|---|---|
@@ -107,32 +107,32 @@ iar daemon status --json
 | `2` | `usage_error` | 旗标/参数组合不成立（互斥、缺目标、非法 lifecycle key） | 修命令，原样重试必然再失败 |
 | `3` | `not_found` | 目标不存在：仓库、registry 条目、agent、可执行文件、日志；显式定向的 Issue 读不到或已关闭 | 换目标或跑 `suggestion` |
 | `4` | `permission_denied` | 未授权：GitHub 未认证、仓库被禁用 | 提示人来认证或启用，别静默重试 |
-| `5` | `conflict` | 当前状态阻止：`--all-ready` 时同仓 daemon 正在轮询队列、显式定向的 Issue 被存活持有者认领或处于未解除的 `agent/blocked`、workflow 模板文件已安装、loop 条目已存在 | 改名 / 用户明确要求时 `--force` / 先停掉冲突进程 / 按 `suggestion` 走 `iar blocked-continue`（活跃认领的错误会点名持有者 host 与 PID） |
+| `5` | `conflict` | 当前状态阻止：`--all-ready` 时同仓 daemon 正在轮询队列、显式定向的 Issue 被存活持有者认领或处于未解除的 `agent/blocked`、workflow 模板文件已安装、loop 条目已存在 | 改名 / 用户明确要求时 `--force` / 先停掉冲突进程 / 按 `suggestion` 走 `kc blocked-continue`（活跃认领的错误会点名持有者 host 与 PID） |
 | `10` | `dry_run_ok` | 计划校验通过且未写入任何东西，可直接当 CI 门禁 | 仅在核对计划正文后视为绿灯 |
 
 `10` 只在机器模式下用于 dry-run 成功，人类模式仍是 `0`；`1` 保留给尚未归类的失败，新码只在有明确类别的失败点启用，因此只看「是否非零」的旧脚本行为不变。
 
-### 运行时自省：`iar schema --json`
+### 运行时自省：`kc schema --json`
 
-命令树是唯一事实源——`iar schema --json` 直接从已注册的 Typer/click 应用派生，不维护第二份清单：
+命令树是唯一事实源——`kc schema --json` 直接从已注册的 Typer/click 应用派生，不维护第二份清单：
 
 ```bash
-iar schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | {name, type, required, enum, default}'
+kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | {name, type, required, enum, default}'
 ```
 
 每个参数导出名称、类型、是否必填、枚举取值（`--output` 的 `["table","json"]` 即由此而来）、默认值与示例；顶层同时给出 `exit_codes` 与命令总数。给 agent 写调用代码前先跑它，而不是抄文档。
 
 ## labels sync 详解
 
-`iar labels sync` 会在目标 GitHub 仓库中创建或更新一套标准化的 issue 标签，作为整个 agent-runner 工作流的状态基础设施。
+`kc labels sync` 会在目标 GitHub 仓库中创建或更新一套标准化的 issue 标签，作为整个 agent-runner 工作流的状态基础设施。
 
 ### 为什么需要同步标签？
 
-`iar` 依靠 GitHub labels 实现任务状态的自动流转：
+`kc` 依靠 GitHub labels 实现任务状态的自动流转：
 
 ```
 创建 Issue ─┬─（排队）贴上 agent/ready → daemon 自主挑选并认领（换成 agent/running）
-            └─（点名）iar run --issue <N> 直接认领：不要求任何状态标签
+            └─（点名）kc run --issue <N> 直接认领：不要求任何状态标签
                ↓
         AI 做完 → push → pre-PR review → Draft PR → agent/supervising
                ↓
@@ -141,7 +141,7 @@ iar schema --json | jq '.commands[] | select(.name=="issue list") | .options[] |
         出问题 → 换成 agent/failed 或 agent/blocked
 ```
 
-没有这些标签，`iar` 无法识别哪些 Issue 正在执行、哪些需要 review；**但"可以被执行"不再等于"带 `agent/ready`"**——就绪标签只是守护进程自主挑选的准入，人显式点名的 Issue 不需要它（定向 run 的把关条件是认领状态，见「显式定向的领取准入」）。
+没有这些标签，`kc` 无法识别哪些 Issue 正在执行、哪些需要 review；**但"可以被执行"不再等于"带 `agent/ready`"**——就绪标签只是守护进程自主挑选的准入，人显式点名的 Issue 不需要它（定向 run 的把关条件是认领状态，见「显式定向的领取准入」）。
 
 ### Workflow label 互斥
 
@@ -157,7 +157,7 @@ iar schema --json | jq '.commands[] | select(.name=="issue list") | .options[] |
 
 | 类别 | 标签 | 颜色 | 作用 |
 |---|---|---|---|
-| **AI 执行状态** | `agent/ready` | 🟢 绿色 | 已进入队列，等待 daemon 自主挑选认领；**不是执行的前置条件**——`iar run --issue <N>` 点名任何 open Issue 都不需要该标签 |
+| **AI 执行状态** | `agent/ready` | 🟢 绿色 | 已进入队列，等待 daemon 自主挑选认领；**不是执行的前置条件**——`kc run --issue <N>` 点名任何 open Issue 都不需要该标签 |
 | | `agent/running` | 🟡 黄色 | 代码正在被修改（首次实现或 PR branch rework）。首次认领由 claim marker 选举裁决，同一时刻只有一个持有者；被存活持有者占用的 Issue，定向 run 会报冲突而不是双跑 |
 | | `agent/supervising` | 🔵 浅蓝 | Draft PR 已创建，自动 post-PR supervisor 正在审查或重新处理 |
 | | `agent/review` | 🔵 蓝色 | 自动总控审查已通过，当前 PR 等待人类 review |
@@ -178,22 +178,22 @@ iar schema --json | jq '.commands[] | select(.name=="issue list") | .options[] |
 | | `type/bug` | 🔴 | Bug 修复 |
 | **队列状态** | `status/backlog` | 🩵 | 待办/未开始 |
 
-> 标签名称可在全局 `config.toml` 或目标仓库 `.iar.toml` 的 `[agent_runner.labels]` 段自定义。
+> 标签名称可在全局 `config.toml` 或目标仓库 `.kedacode.toml` 的 `[agent_runner.labels]` 段自定义。
 
 ### 使用示例
 
 ```bash
 # 同步当前目录对应的仓库
-iar labels sync
+kc labels sync
 
 # 同步指定路径的仓库
-iar labels sync --repo /path/to/target-repo
+kc labels sync --repo /path/to/target-repo
 
 # 同步指定配置仓库
-iar labels sync --repo-id keda
+kc labels sync --repo-id keda
 ```
 
-首次使用 `iar` 时只需执行一次，后续标签会自动复用。
+首次使用 `kc` 时只需执行一次，后续标签会自动复用。
 
 ## Issue 依赖门禁（Dependency Gate）
 
@@ -201,10 +201,10 @@ iar labels sync --repo-id keda
 
 ### 基本原理
 
-依赖门禁采用 **PRD 结构化依赖声明 + IAR materialized marker/label** 的无状态方案：
+依赖门禁采用 **PRD 结构化依赖声明 + KedaCode materialized marker/label** 的无状态方案：
 
 - PRD 中包含工具无关的 `Delivery Dependencies` 小节
-- `iar issue create` 将 `Gate type: hard` 的依赖物化为 Issue body 中的 `<!-- iar:depends-on ... -->` marker
+- `kc issue create` 将 `Gate type: hard` 的依赖物化为 Issue body 中的 `<!-- iar:depends-on ... -->` marker
 - runner 每次轮询时实时查询 GitHub 状态：依赖未满足时跳过领取、叠加 `agent/waiting` label 并写等待 comment
 - 依赖未满足的 ready Issue 不消耗 `max_issues` 的处理额度；runner 会继续扫描后续 ready Issue，直到找到可领取任务或扫描窗口耗尽
 - 上游 Issue 全部 closed 后，下一轮轮询自动移除 `agent/waiting` 并正常领取
@@ -239,26 +239,26 @@ iar labels sync --repo-id keda
 - **`stack`**：下游在**上游分支就绪**（`issue-<上游>` 已有 open/merged PR）后即放行，worktree 从上游分支 `issue-<上游>` fork（**先 `git fetch` 刷新该上游分支**，取远端跟踪引用；仅当 fetch 失败但本地分支存在时才回退本地，两者都没有则 fail fast），从而保证下游包含上游尚未合并的改动。
   - 依赖门禁据此改用"等待上游分支就绪"，与等待 Issue 关闭不同。
   - 合并队列**不会**在中途合并 stack 链上的下游 PR（否则 rebase 到远端 base 会破坏"叠在上游"的基础）；等上游合并后，合并队列把下游 PR 的 base 重指到主线（收敛），再走既有 rebase + 合并。
-  - **前置条件**：`stack` 只在 `Gate type: hard` 时物化 marker（`Gate type: none`/`soft` 会被静默忽略，等同 via-main）；且只支持**单个**上游，声明多个上游时 `iar issue create` fail fast（DAG 不在范围内）。
+  - **前置条件**：`stack` 只在 `Gate type: hard` 时物化 marker（`Gate type: none`/`soft` 会被静默忽略，等同 via-main）；且只支持**单个**上游，声明多个上游时 `kc issue create` fail fast（DAG 不在范围内）。
   - **收敛的已知代价**：keda 以 squash 合并上游，收敛时下游 `git rebase` 到 main 需要处理"上游提交已被 squash 进 main"的情况（多数被识别为空提交丢弃，但 base 同一区域被改动时仍可能冲突，冲突走既有 agent 解决路径）。这是被接受的复杂度，不是无代价的平移。
 
 > 依赖 marker 里以 `mode="stack"` 承载该策略（如 `<!-- iar:depends-on #42 mode="stack" -->`）；未声明时默认 `via-main`。
 
-PRD 引用只在 `iar issue create` 发布时解析，不会原样写入 Issue body。解析规则：
+PRD 引用只在 `kc issue create` 发布时解析，不会原样写入 Issue body。解析规则：
 
 - 引用 PRD 已包含 `- GitHub Issue: .../issues/N` 时，物化为 `#N` 依赖 marker。
-- 引用 PRD 还没有 Issue link 时，命令 fail fast，并提示先创建上游 Issue（`iar issue create` 会把 Issue 链接回写进 PRD），或改成明确的 Issue 编号。
+- 引用 PRD 还没有 Issue link 时，命令 fail fast，并提示先创建上游 Issue（`kc issue create` 会把 Issue 链接回写进 PRD），或改成明确的 Issue 编号。
 - 无依赖时可以留空或写 `none`。
 
 > 历史 PRD 里可能残留旧版 `Group` / `Depends on groups` 字段；解析器接受但忽略它们，不再产生任务组依赖。
 
 ### CLI 参数覆盖
 
-即使 PRD 中没有写依赖，也可以在 `iar issue create` 时显式指定：
+即使 PRD 中没有写依赖，也可以在 `kc issue create` 时显式指定：
 
 ```bash
 # 声明依赖上游 Issue #42 和 #43
-iar issue create tasks/pending/foo.md --depends-on 42 --depends-on 43
+kc issue create tasks/pending/foo.md --depends-on 42 --depends-on 43
 ```
 
 CLI 参数与 PRD 声明会**合并去重**，CLI 参数优先级最高。
@@ -315,7 +315,7 @@ rebase 到最新 base 时进程退出），会把 Issue 的 worktree 留在 **de
 | 本机活跃 attempt 状态 | Issue 上最近一条 claim 标记（`<!-- iar:claim host= pid= started_at= agent= -->`）与该 PID 是否存活 |
 | Issue label | 是否仍是 `agent/running`（已关闭、已改别的状态一律不碰） |
 | comment attempt history | 该 Issue 此前已被对账处置的次数（决定恢复预算是否耗尽） |
-| worktree 现场文件状态 | `iar worktree path` 可得、目录存在且 `.git` 指针仍在 |
+| worktree 现场文件状态 | `kc worktree path` 可得、目录存在且 `.git` 指针仍在 |
 
 处置出口**恰好三个**，每个都写一条 `## Stale Attempt Reconciled` comment，四要素齐全（中断时间 /
 中断原因分类 / 处置结论 / 依据），表格风格与既有 Attempt History 一致：
@@ -357,7 +357,7 @@ reclaim_ttl_seconds = 10800       # claim 含 started_at 且超过该时长，�
 对需要来回澄清才能定清楚的复杂 Issue（"先讨论清楚再写 PRD"），请改用 Issue 评论区异步多轮讨论：
 
 1. 创建 Issue 时打上 **`agent/deliberate`** 标签。系统不自动分诊，由人显式声明"这是需要讨论的复杂需求"。
-2. `iar run --once` / `iar daemon` 在 Phase 0 发现带 `agent/deliberate` 的开放 Issue，会复用 `run_agent_deliberation` 引擎（后台 NoOp 视图，不弹 TTY）跑多角色内部互辩，并把 synthesizer 的输出贴成一条结构化"澄清问题清单"评论，类别固定为 5 个：
+2. `kc run --once` / `kc daemon` 在 Phase 0 发现带 `agent/deliberate` 的开放 Issue，会复用 `run_agent_deliberation` 引擎（后台 NoOp 视图，不弹 TTY）跑多角色内部互辩，并把 synthesizer 的输出贴成一条结构化"澄清问题清单"评论，类别固定为 5 个：
    `## 范围边界` / `## 约束` / `## 验收标准` / `## 技术选型` / `## 风险`。
 3. 每条 AI 评论尾部追加一个隐藏的 `<!-- iar:event version=1 phase=deliberation_question_posted cycle=N issue_comments_count=K -->` marker；后续轮询靠它判断"轮到谁"。
 4. 人直接在 GitHub 上回复评论补充信息。下一次轮询发现 `当前评论数 > marker.issue_comments_count`，轮到 AI 续问，`cycle` 递增。
@@ -422,32 +422,32 @@ PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分四层，全部�
 
 ## 仓库本地配置
 
-`iar` 默认以当前 Git 仓库作为目标仓库。**首次在目标仓库使用前必须先执行 `iar init`**，否则除 `iar init` 外的所有命令都会失败并提示初始化。
+`kc` 默认以当前 Git 仓库作为目标仓库。**首次在目标仓库使用前必须先执行 `kc init`**，否则除 `kc init` 外的所有命令都会失败并提示初始化。
 
 ```bash
 cd /path/to/target-repo
-uv run --project /path/to/keda iar init --dry-run
-uv run --project /path/to/keda iar init
+uv run --project /path/to/keda kc init --dry-run
+uv run --project /path/to/keda kc init
 ```
 
-`iar init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.iar.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `iar init` 写入」）。`.iar.toml` 已存在时，`iar init` 会拒绝覆盖；确认需要重建时显式传入 `--force`。
+`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖；确认需要重建时显式传入 `--force`。
 
-`iar init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `iar daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
+`kc init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `kc daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
 ### 机器级 `config.toml` 的认定与托管进程继承
 
-`config.toml` 同时装两类配置：**IAR 自己的** `[agent_runner]`（含生命周期矩阵、registry、超时、验证命令等），以及**宿主应用的** `[app]` / `[database]` / `[preview]` 等。两类按不同规则解析：
+`config.toml` 同时装两类配置：**KedaCode 自己的** `[agent_runner]`（含生命周期矩阵、registry、超时、验证命令等），以及**宿主应用的** `[app]` / `[database]` / `[preview]` 等。两类按不同规则解析：
 
-- `[agent_runner]`：`IAR_CONFIG` → 从 cwd 向上查找（**只接受带 `[agent_runner]` 表的文件**）→ `~/.iar/config.toml`（缺失时从源码根 seed）→ keda 源码根 `config.toml`。模板派生项目在仓库根也有一份同名 `config.toml`，但那是应用配置、不含 `[agent_runner]`，因此不会被当成机器级配置：否则在目标仓库内运行的 runner 会整份顶掉 `~/.iar/config.toml`，矩阵、registry、超时等设置全部静默失配（历史上表现为"面板显示实现用 codebuddy、实际领活却用了 claude"）。
+- `[agent_runner]`：`KEDACODE_CONFIG` → 从 cwd 向上查找（**只接受带 `[agent_runner]` 表的文件**）→ `~/.kedacode/config.toml`（缺失时从源码根 seed）→ keda 源码根 `config.toml`。模板派生项目在仓库根也有一份同名 `config.toml`，但那是应用配置、不含 `[agent_runner]`，因此不会被当成机器级配置：否则在目标仓库内运行的 runner 会整份顶掉 `~/.kedacode/config.toml`，矩阵、registry、超时等设置全部静默失配（历史上表现为"面板显示实现用 codebuddy、实际领活却用了 claude"）。
 - 其它段（应用自己的配置）：仍按 cwd 向上查找最近的项目 `config.toml`，即目标仓库根那份——`preview_env.py` 等脚本依赖这个语义读到本仓的 `[preview]`。
 
-面板（`iar console`）托管或触发的 runner 子进程，cwd 就是目标仓库（见 `resolve_console_spawn_cwd`）；因此面板会把自己当前生效的机器级 `config.toml` 以 `IAR_CONFIG` 注入子进程，保证"界面上显示的配置"与"实际执行用的配置"是同一份。手动在目标仓库里直接执行 `iar run` / `iar daemon` 且未设 `IAR_CONFIG` 时，机器级配置取 `~/.iar/config.toml`——想让某个仓库的每个阶段都用指定 agent，写该仓库 `.iar.toml` 的 `[agent_runner.lifecycle_agents]` 是最稳的一层（仓库层覆盖机器层）。
+面板（`kc console`）托管或触发的 runner 子进程，cwd 就是目标仓库（见 `resolve_console_spawn_cwd`）；因此面板会把自己当前生效的机器级 `config.toml` 以 `KEDACODE_CONFIG` 注入子进程，保证"界面上显示的配置"与"实际执行用的配置"是同一份。手动在目标仓库里直接执行 `kc run` / `kc daemon` 且未设 `KEDACODE_CONFIG` 时，机器级配置取 `~/.kedacode/config.toml`——想让某个仓库的每个阶段都用指定 agent，写该仓库 `.kedacode.toml` 的 `[agent_runner.lifecycle_agents]` 是最稳的一层（仓库层覆盖机器层）。
 
 在"选 agent"之上，还可以给阶段绑定**命名模型预设**（`[agent_runner.presets.<name>]` + `[agent_runner.lifecycle_presets]`）：绑定后该阶段整体由预设决定 (agent, 模型, 推理档)，遮蔽矩阵同键声明；换人（fallback / 显式 `--agent`）时模型绑定自动丢弃并在日志与 `attempt_records`（`preset` / `model` 列）中标注。完整语义、优先级与命令行一次性旗标见 [Agent 模型预设](model-presets.md)。
 
 ### `.gitignore` 托管块与 prd skill 契约
 
-`iar init` 会在目标仓库 `.gitignore` 写入一个 `# >>> iar (managed by iar init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中除 `.iar/`、`.agent-runner/`、`.iar-worktrees/` 外还包含 `tasks/evidence` 白名单段：
+`kc init` 会在目标仓库 `.gitignore` 写入一个 `# >>> iar (managed by iar init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中除 `.iar/`、`.agent-runner/`、`.iar-worktrees/` 外还包含 `tasks/evidence` 白名单段：<!-- legacy-alias -->
 
 ```gitignore
 tasks/evidence/**
@@ -457,15 +457,15 @@ tasks/evidence/**
 
 这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），`git add -A` 天然只把 `.md` 文本报告（verification-plan / evidence-report / verifier-report）带进 commit，截图、录屏、oracle 脚本等原始产物不进 git 历史；发布前拦截（`ensure_no_evidence_paths_in_changes`）再兜底拒绝被 `git add -f` 强制加入的非 `.md` 证据产物。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
 
-同时 `iar init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：iar 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 iar 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重跑 `iar init`，或设置 `IAR_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `iar init --force`。**安装目标首位是 keda 自有目录 `~/.iar/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `iar` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `IAR_SKILLS_DIR` 把安装根覆盖到临时目录。
+同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重跑 `kc init`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `kc init --force`。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
 
-IAR 自带的 `iar-operator` Skill 随 Python 发行包安装，无需联网下载。`iar init --dry-run` 会显示目标路径；目标下已有不同内容的同名 Skill 时默认保留并报告冲突，只有显式 `--force` 才覆盖。
+KedaCode 自带的 `kedacode-operator` Skill 随 Python 发行包安装，无需联网下载。`kc init --dry-run` 会显示目标路径；目标下已有不同内容的同名 Skill 时默认保留并报告冲突，只有显式 `--force` 才覆盖。
 
-ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`priority/P3` 识别优先级，按 P0→P3 排序，同级按 Issue number 升序；缺少这些标签的 Issue 排在显式 P3 之后。`iar run --all-ready --dry-run` 与实际执行共用排序，并在预览中显示 priority；每轮排序范围是 GitHub 返回的最多 100 条 ready Issue 候选，不能据此承诺候选窗口以外的全局排序。`iar issue list --state`、`--label` 与 PR 筛选分别由公开参数应用。
+ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`priority/P3` 识别优先级，按 P0→P3 排序，同级按 Issue number 升序；缺少这些标签的 Issue 排在显式 P3 之后。`kc run --all-ready --dry-run` 与实际执行共用排序，并在预览中显示 priority；每轮排序范围是 GitHub 返回的最多 100 条 ready Issue 候选，不能据此承诺候选窗口以外的全局排序。`kc issue list --state`、`--label` 与 PR 筛选分别由公开参数应用。
 
 ### 提交前验证命令自动探测
 
-`iar init` 不会写死验证命令，而是按目标仓库实际情况探测 `[agent_runner.runner].verification_commands` 与 `pre_commit_verification_command`（实现见 `src/backend/engines/agent_runner/repository_local.py`）。探测只生成纯 shell 字符串条目；浏览器 E2E 结构化条目（`kind = "browser_e2e"`）需运营者手工添加，形态与执行语义见下文"浏览器 E2E 验证命令形态"一节：
+`kc init` 不会写死验证命令，而是按目标仓库实际情况探测 `[agent_runner.runner].verification_commands` 与 `pre_commit_verification_command`（实现见 `src/backend/engines/agent_runner/repository_local.py`）。探测只生成纯 shell 字符串条目；浏览器 E2E 结构化条目（`kind = "browser_e2e"`）需运营者手工添加，形态与执行语义见下文"浏览器 E2E 验证命令形态"一节：
 
 - `verification_commands` 在 agent 请求 commit 后、staging 完成时运行；
   - 基线始终包含 `git diff --check`；
@@ -474,47 +474,47 @@ ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`pr
   - 否则走通用回退：声明了 `pre-commit` 依赖且有 `.pre-commit-config.yaml` → 追加 `uv run pre-commit run --all-files`；声明了 `pytest` 且有 `tests/` → 追加 `uv run pytest -q`。
 - `pre_commit_verification_command` 在 `git add -A` 之后、`git commit` 之前单独运行。它的作用是把 `git commit` 时才会触发的 pre-commit 钩子提前到 runner 可控阶段执行：失败会转成 `VerificationFailedError`，由 Fix Agent 修复，而不是以裸 `CalledProcessError` 退出。只有仓库同时声明 `pre-commit` 依赖且存在 `.pre-commit-config.yaml` 时才会被写入；配置里包含 `check-test-flag` 时命令会带 `SKIP=check-test-flag` 前缀，避免在没有 `just test` 的仓库里死锁。
 
-代码层面的默认值只有 `git diff --check`（避免在未 `iar init` 的仓库里因缺少 mkdocs/pytest 而直接失败）。`iar init` 会按上述规则生成更完整的项目专属命令列表。
+代码层面的默认值只有 `git diff --check`（避免在未 `kc init` 的仓库里因缺少 mkdocs/pytest 而直接失败）。`kc init` 会按上述规则生成更完整的项目专属命令列表。
 
 > **autofix 钩子的一次幂等重试**：`ruff-format`、`trailing-whitespace`、`end-of-file-fixer` 这类钩子会**就地重写文件**再以非零码退出（`files were modified by this hook`），这是纯格式化、幂等可恢复的失败。`commit_requested_changes` 对**两道门禁都**做同一处理（`_run_commit_gate_with_autofix_retry`）：门禁非零时先看 `git diff --quiet` —— 若跟踪文件被改写过，就校验禁改路径、`git add -u` 重新 stage 并**再跑一次**；只有「非零但没改任何文件」（真实 lint/检查错误）或「重新 stage 后第二次仍非零」才判 `VerificationFailedError`。此处刻意只用 `-u`（本函数处理的是 autofix 就地重写已跟踪文件，重跑门禁才是目的）；门禁自己生成的未跟踪新文件由提交前那道 `_verification_left_unstaged_worktree_changes` 兜底补 `git add -A`。这一点对 `verification_commands` 尤其重要：它排在 `pre_commit_verification_command` 之前，而 `just test` / `just lint --full` 内部往往就是同一批 pre-commit 钩子，早期只给后者加容错时纯格式化失败会在更早的门被直接判死（实证：freshai Issue #96 的 pre-PR review 补丁）。注意 `just test` 一类配方常把 lint 输出重定向掉（`just lint --full >/dev/null 2>&1`），失败时 GitHub 评论里只剩 `ERROR: Lint failed`；判断是不是 autofix 可比对被改文件的 mtime 与失败时间戳，并在 worktree 里原地重跑一次同一条命令。
 
 探测出的命令列表会被 runner 写入首次实现 prompt、Fix Agent prompt 和 Recovery Agent prompt，让 Agent 在编码和修复阶段都能看到完整的交付门禁。所有 prompt 都会提醒 Agent 在请求 commit 前检查项目规范（AGENTS.md、命名、依赖方向、文件编码、行长度限制等）。
 
-> **check-test-flag 护栏**：若仓库装了 `check-test-flag` 钩子却没有可探测的 `just test` 配方，`iar init` 会**跳过** `verification_commands` 里的 `pre-commit run --all-files`（工作区级别的 bare pre-commit 会死锁）；而 `pre_commit_verification_command` 会带 `SKIP=check-test-flag` 前缀写入，这样 git add 后仍提前运行其余 lint/format 钩子，同时避免 check-test-flag 在 `just test` 标记未刷新时失败。`git commit` 本身仍会运行完整 pre-commit（含 check-test-flag）。这类仓库最佳做法仍是补一个 `just test` 配方或移除 check-test-flag。
+> **check-test-flag 护栏**：若仓库装了 `check-test-flag` 钩子却没有可探测的 `just test` 配方，`kc init` 会**跳过** `verification_commands` 里的 `pre-commit run --all-files`（工作区级别的 bare pre-commit 会死锁）；而 `pre_commit_verification_command` 会带 `SKIP=check-test-flag` 前缀写入，这样 git add 后仍提前运行其余 lint/format 钩子，同时避免 check-test-flag 在 `just test` 标记未刷新时失败。`git commit` 本身仍会运行完整 pre-commit（含 check-test-flag）。这类仓库最佳做法仍是补一个 `just test` 配方或移除 check-test-flag。
 >
-> 探测只在 `iar init` 时发生：已存在的 `.iar.toml` 不会自动更新，需重跑 `iar init --force` 或手改 `verification_commands` / `pre_commit_verification_command` 才会采用新探测结果。
+> 探测只在 `kc init` 时发生：已存在的 `.kedacode.toml` 不会自动更新，需重跑 `kc init --force` 或手改 `verification_commands` / `pre_commit_verification_command` 才会采用新探测结果。
 
 > **init 后务必复核 verification_commands / Please review verification_commands after init**
 >
-> `iar init`（含 `--dry-run`）完成后会打印一条黄色提示，列出当前生成的 `[agent_runner.runner].verification_commands`。规则探测只能识别常见技术栈，非 Python 仓库、自定义脚本或特殊结构可能只得到 `git diff --check`。
+> `kc init`（含 `--dry-run`）完成后会打印一条黄色提示，列出当前生成的 `[agent_runner.runner].verification_commands`。规则探测只能识别常见技术栈，非 Python 仓库、自定义脚本或特殊结构可能只得到 `git diff --check`。
 >
-> 看到提示后请打开 `.iar.toml`，根据项目真实的 test / lint / build 流程检查并调整这些命令；也可以把列表复制到自己的 AI 工具询问建议。这是交付门禁的最后防线，务必确认它确实能拦住未通过检查的代码。
+> 看到提示后请打开 `.kedacode.toml`，根据项目真实的 test / lint / build 流程检查并调整这些命令；也可以把列表复制到自己的 AI 工具询问建议。这是交付门禁的最后防线，务必确认它确实能拦住未通过检查的代码。
 >
-> After `iar init` (including `--dry-run`) a yellow reminder prints the detected `[agent_runner.runner].verification_commands`. Rule-based detection only covers common stacks; non-Python repos, custom scripts, or special layouts may receive only `git diff --check`.
+> After `kc init` (including `--dry-run`) a yellow reminder prints the detected `[agent_runner.runner].verification_commands`. Rule-based detection only covers common stacks; non-Python repos, custom scripts, or special layouts may receive only `git diff --check`.
 >
-> Please open `.iar.toml` and review the commands against your actual test / lint / build workflow, or paste the list into your own AI tool for suggestions. This is the final gate before the runner commits, so make sure it can actually block broken changes.
+> Please open `.kedacode.toml` and review the commands against your actual test / lint / build workflow, or paste the list into your own AI tool for suggestions. This is the final gate before the runner commits, so make sure it can actually block broken changes.
 
-生成内容节选（完整且随版本演进的字段以 `iar init --dry-run` 输出为准；回归测试会校验除 `generated_content` 外的所有仓库级配置字段均被渲染）：
+生成内容节选（完整且随版本演进的字段以 `kc init --dry-run` 输出为准；回归测试会校验除 `generated_content` 外的所有仓库级配置字段均被渲染）：
 
 ```toml
-# IAR 本地仓库配置
-# `iar init` 会写入仓库级配置的默认值（generated_content 除外，见文末示例）；这些值
+# KedaCode 本地仓库配置
+# `kc init` 会写入仓库级配置的默认值（generated_content 除外，见文末示例）；这些值
 # 随后显式覆盖全局默认值。没有默认值的可选字段、以及未写入的 generated_content，
 # 才继承 config.toml / 环境变量 / 代码里的全局默认值。
-# 本文件在 daemon 启动时读取一次：改完要重启 daemon 才生效（`iar run` 这类单轮
+# 本文件在 daemon 启动时读取一次：改完要重启 daemon 才生效（`kc run` 这类单轮
 # 命令每次调用都重新读取，无需重启）。
 # 完整字段说明见 docs/guides/agent-runner.md。
 
 # 仓库身份标识（用于多仓库管理时区分不同仓库）
 [agent_runner.repository]
-# 仓库在 IAR 中的唯一标识，通常与远程仓库名一致
+# 仓库在 KedaCode 中的唯一标识，通常与远程仓库名一致
 id = "target-repo"
 # 是否允许 runner 处理该仓库的 Issue
 enabled = true
 # 管理终端 / 日志中显示的友好名称
 display_name = "target-repo"
 # 可选：GitHub owner/name（``gh pr list --repo`` 使用）。
-# 缺省时 ``iar issue list`` 的 PR 列为空 + stderr 一次性 WARN。
+# 缺省时 ``kc issue list`` 的 PR 列为空 + stderr 一次性 WARN。
 github_repo = "owner/target-repo"
 
 # Git 发布配置：推送 remote、目标基础分支 base_branch
@@ -524,14 +524,14 @@ remote = "origin"
 # 创建 worktree 与 PR 的目标基础分支
 base_branch = "main"
 
-# Issue worktree 的创建与定位命令；默认使用 iar worktree，通常无需修改
+# Issue worktree 的创建与定位命令；默认使用 kc worktree，通常无需修改
 [agent_runner.worktree]
 # 创建新 worktree 的命令；{issue_number} 和 {base_branch} 会被替换
-create_command = "iar worktree create --branch issue-{issue_number} --base-branch {base_branch}"
+create_command = "kc worktree create --branch issue-{issue_number} --base-branch {base_branch}"
 # 复用已有 worktree 时定位路径的命令
-reuse_command = "iar worktree path --branch issue-{issue_number}"
+reuse_command = "kc worktree path --branch issue-{issue_number}"
 # 获取 worktree 绝对路径的命令
-path_command = "iar worktree path --branch issue-{issue_number}"
+path_command = "kc worktree path --branch issue-{issue_number}"
 # daemon 在 Agent 运行前为 worktree 配置独立 PostgreSQL/MySQL 数据库；
 # 需要 worktree 的 .env.local 包含 DATABASE_URL。
 provision_database = true
@@ -541,7 +541,7 @@ provision_database = true
 # 每次轮询每个仓库最多处理多少个 Issue
 max_issues = 1
 # 单轮内并行处理的 Issue 数量：1 为串行（默认）；>1 时同一轮并行跑多个 Issue。
-# 仅 `iar daemon --concurrency` 未指定时作为默认值。
+# 仅 `kc daemon --concurrency` 未指定时作为默认值。
 max_concurrent_issues = 1
 # 默认使用的 AI agent：auto / claude / codex / kimi
 default_agent = "auto"
@@ -579,7 +579,7 @@ verification_commands = [
     "git diff --check",
 ]
 # git add 后、git commit 前额外运行的 pre-commit 命令；失败转 Fix Agent
-# 仅当仓库声明 pre-commit 依赖且存在 .pre-commit-config.yaml 时 iar init 才会写入
+# 仅当仓库声明 pre-commit 依赖且存在 .pre-commit-config.yaml 时 kc init 才会写入
 pre_commit_verification_command = "uv run pre-commit run --all-files"
 
 ### Agent 执行超时
@@ -597,7 +597,7 @@ pre_commit_verification_command = "uv run pre-commit run --all-files"
 
 六类超时独立生效，满足任意一个都会终止子进程。`timeout_seconds` 是首次实现与默认 fallback 的基准；`fix_timeout_seconds` 与 `recovery_timeout_seconds` 分别覆盖 Fix Agent 与完整 Recovery Agent，`closeout_timeout_seconds` / `closeout_visual_timeout_seconds` 覆盖交付收尾层，未设置时自动回退到 `timeout_seconds`。
 
-如果某个任务确实需要更长时间，可以在目标仓库的 `.iar.toml` 或全局 `config.toml` 中调大对应值；如果某类任务经常静默运行（例如大型编译），可适当提高 `inactivity_timeout_seconds`。
+如果某个任务确实需要更长时间，可以在目标仓库的 `.kedacode.toml` 或全局 `config.toml` 中调大对应值；如果某类任务经常静默运行（例如大型编译），可适当提高 `inactivity_timeout_seconds`。
 
 超时后的日志示例：
 
@@ -674,7 +674,7 @@ runner 在 commit proxy 固定实现提交后复跑 RV，再启动要求工作�
 
 日志关键字：`Starting Closeout Agent` / `Closeout Agent repaired` / `Closeout Agent failed` / `Closeout Agent disabled` / `Closeout Agent modified out-of-scope files` / `Delivery gates still fail after closeout`。收尾耗时进入 attempt 的 phase 分解（`closeout`）。
 
-通过 `closeout_agent_enabled = false` 可以整层关掉，四类收尾失败回到整轮重跑。这个键走的是逐仓库配置路径，在目标仓库自己的 `.iar.toml` 里改完下一轮轮询即生效。
+通过 `closeout_agent_enabled = false` 可以整层关掉，四类收尾失败回到整轮重跑。这个键走的是逐仓库配置路径，在目标仓库自己的 `.kedacode.toml` 里改完下一轮轮询即生效。
 
 ### WIP checkpoint 不合并
 
@@ -833,9 +833,9 @@ previous_findings_injection_enabled = true
 # 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .iar/ gitignore 排除）
 findings_artifact_dir = ".iar/state"
 
-# 交互式决策（iar ask）配置
+# 交互式决策（kc ask）配置
 [agent_runner.interactive_decision]
-# 是否启用 iar ask
+# 是否启用 kc ask
 enabled = true
 # 默认 planner agent
 default_agent = "claude"
@@ -845,10 +845,10 @@ default_output_dir = "logs/agent-runner/decisions"
 planner_timeout_seconds = 120
 # 输入上下文最大字符数
 max_context_chars = 24000
-# 是否允许 iar ask --yes 跳过确认
+# 是否允许 kc ask --yes 跳过确认
 allow_execute_yes = true
 
-# 多 agent 审议（iar deliberate）配置
+# 多 agent 审议（kc deliberate）配置
 [agent_runner.deliberation]
 # 默认审议轮数
 default_rounds = 2
@@ -877,27 +877,27 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 
 ```
 
-仓库本地 `.iar.toml` 可覆盖 `labels`、`git`、`worktree`、`runner`、`memory`、`safety`、`autopilot`、`validation`、`prompts`、`pre_pr_review`、`post_pr_supervisor`、`daemon`、`generated_content`、`interactive_decision`、`repl` 和 `deliberation`。`config.toml` 继续保存全局默认值、环境级设置和 legacy registry，不应保存 token、API key 或账号凭据。
+仓库本地 `.kedacode.toml` 可覆盖 `labels`、`git`、`worktree`、`runner`、`memory`、`safety`、`autopilot`、`validation`、`prompts`、`pre_pr_review`、`post_pr_supervisor`、`daemon`、`generated_content`、`interactive_decision`、`repl` 和 `deliberation`。`config.toml` 继续保存全局默认值、环境级设置和 legacy registry，不应保存 token、API key 或账号凭据。
 
-#### `generated_content` 不由 `iar init` 写入
+#### `generated_content` 不由 `kc init` 写入
 
 脚手架只在文末留一段注释示例，不写入 `[agent_runner.generated_content]` 任何键。写入等于把当时的
 代码默认值钉死在每个仓库里，之后默认值升级（例如 `mode` 从 `template` 改为 `agent`）就传不到
 已初始化的仓库。需要偏离默认值时取消注释，**只写要改的键**，其余继续继承（合并规则见
-下文「生成模式与回退」一节）。旧版脚手架已经写进去的钉子用 `iar config migrate` 清理，见下一小节。
+下文「生成模式与回退」一节）。旧版脚手架已经写进去的钉子用 `kc config migrate` 清理，见下一小节。
 
-#### 迁移旧脚手架钉死的 `generated_content`（`iar config migrate`）
+#### 迁移旧脚手架钉死的 `generated_content`（`kc config migrate`）
 
-早期的 `iar init` 会把整段 `generated_content`（含 `mode = "template"`、`output = "json"`）逐项
-写进 `.iar.toml`，这些仓库因此一直停在 template 模式，跟不上新的默认值。`iar config migrate`
+早期的 `kc init` 会把整段 `generated_content`（含 `mode = "template"`、`output = "json"`）逐项
+写进 `.kedacode.toml`，这些仓库因此一直停在 template 模式，跟不上新的默认值。`kc config migrate`
 清掉这些旧钉子，让仓库重新继承当前默认值：
 
 ```bash
 # 先预览：列出将清掉的键与完整 diff，不写文件
-iar config migrate --dry-run --repo /path/to/repo
+kc config migrate --dry-run --repo /path/to/repo
 
 # 确认后执行（省略 --repo 则处理当前 Git 仓库）
-iar config migrate --repo /path/to/repo
+kc config migrate --repo /path/to/repo
 ```
 
 规则偏保守，宁可漏清也不误清：
@@ -922,33 +922,33 @@ iar config migrate --repo /path/to/repo
   列出并提示手动删除，不编辑。
 
 迁移后被清掉的键回到 `config.toml` / 代码默认值。默认 `mode` 是 `agent`，所以这些仓库的
-`iar issue create`（含 `--from-prompt`）、开 Draft PR、rework-prd 会**先调一次 agent**（失败或超时再回退到模板）；
-`default_agent` 与各 target 的 `agent` 也改为继承机器级配置。常驻的 `iar daemon` 需重启才会载入。
+`kc issue create`（含 `--from-prompt`）、开 Draft PR、rework-prd 会**先调一次 agent**（失败或超时再回退到模板）；
+`default_agent` 与各 target 的 `agent` 也改为继承机器级配置。常驻的 `kc daemon` 需重启才会载入。
 
-`--repo-id` 不支持（迁移针对单个仓库的 `.iar.toml`）。批量预览可以用 shell 循环：
+`--repo-id` 不支持（迁移针对单个仓库的 `.kedacode.toml`）。批量预览可以用 shell 循环：
 
 ```bash
-for repo in ~/code/*/; do [ -f "$repo/.iar.toml" ] && iar config migrate --dry-run --repo "$repo"; done
+for repo in ~/code/*/; do [ -f "$repo/.kedacode.toml" ] && kc config migrate --dry-run --repo "$repo"; done
 ```
 
 单仓库命令的目标解析规则：
 
 | 命令形态 | 目标解析 |
 |---|---|
-| `iar run` / `iar labels sync` / `iar review` / `iar issue create ...` | 当前 Git 仓库，合并当前仓库 `.iar.toml` |
-| `iar run --repo /path/to/repo` | 指定 Git 仓库，合并 `/path/to/repo/.iar.toml` |
-| `iar --repo /path/to/repo run` | 等价的顶层 selector 写法，适合把目标仓库放在命令前 |
-| `iar run --repo-id keda` | 从 legacy registry 找到路径，再合并目标仓库 `.iar.toml` |
-| `iar run --all` | 显式处理 `config.toml` 中所有 enabled registry entries |
-| `iar daemon` / `iar review-daemon` | 当前已初始化注册仓库；未命中、未初始化或匹配多个时报错 |
-| `iar daemon --repo-id keda` | 仅处理指定仓库 |
-| `iar daemon --all` | 显式处理 `config.toml` 中所有 enabled registry entries |
+| `kc run` / `kc labels sync` / `kc review` / `kc issue create ...` | 当前 Git 仓库，合并当前仓库 `.kedacode.toml` |
+| `kc run --repo /path/to/repo` | 指定 Git 仓库，合并 `/path/to/repo/.kedacode.toml` |
+| `kc --repo /path/to/repo run` | 等价的顶层 selector 写法，适合把目标仓库放在命令前 |
+| `kc run --repo-id keda` | 从 legacy registry 找到路径，再合并目标仓库 `.kedacode.toml` |
+| `kc run --all` | 显式处理 `config.toml` 中所有 enabled registry entries |
+| `kc daemon` / `kc review-daemon` | 当前已初始化注册仓库；未命中、未初始化或匹配多个时报错 |
+| `kc daemon --repo-id keda` | 仅处理指定仓库 |
+| `kc daemon --all` | 显式处理 `config.toml` 中所有 enabled registry entries |
 
-历史命令 `iar run-once`、`iar review-once`、`iar issue-from-prd` 和 `iar recover-publish` 已被删除；请改用 `iar run` / `iar review` / `iar issue create` / `iar recover`。
+历史命令 `kc run-once`、`kc review-once`、`kc issue-from-prd` 和 `kc recover-publish` 已被删除；请改用 `kc run` / `kc review` / `kc issue create` / `kc recover`。
 
-## Workflow Templates（`iar workflow install`）
+## Workflow Templates（`kc workflow install`）
 
-`iar workflow install <name>` 把 IAR 内嵌的 workflow 模板复制到当前 Git 仓库，并写入最小的 `[preview]` 占位段。当前 v1 只支持 `preview` 工作流，会复制下列 7 个文件（相对仓库根）：
+`kc workflow install <name>` 把 KedaCode 内嵌的 workflow 模板复制到当前 Git 仓库，并写入最小的 `[preview]` 占位段。当前 v1 只支持 `preview` 工作流，会复制下列 7 个文件（相对仓库根）：
 
 - `.github/workflows/deploy-preview.yml`
 - `deploy/vps-traefik/README.md`
@@ -961,14 +961,14 @@ for repo in ~/code/*/; do [ -f "$repo/.iar.toml" ] && iar config migrate --dry-r
 典型用法：
 
 ```bash
-# 在目标仓库里（必须先 `iar init`）：
-uv run iar workflow install preview
+# 在目标仓库里（必须先 `kc init`）：
+uv run kc workflow install preview
 
 # 只看将要写哪些路径与字节数，不实际落盘：
-uv run iar workflow install preview --dry-run
+uv run kc workflow install preview --dry-run
 
 # 已存在同名文件会被拒绝（非零退出），需要重建时显式加 --force。
-uv run iar workflow install preview --force
+uv run kc workflow install preview --force
 ```
 
 行为约定：
@@ -977,10 +977,10 @@ uv run iar workflow install preview --force
 - `--dry-run` 全程不写盘，只打印 `would write` / `would overwrite` 清单
 - `config.toml` 末尾追加最小 `[preview]` 段；已存在时默认跳过，`--force` 用占位段整体替换
 - 占位段字段名直接派生自 `backend.infrastructure.config.settings.PreviewSettings.model_fields`，避免硬编码字段清单；字段值统一为 `<set-me>`（`enabled` 保留 schema 默认值以保证 pydantic-settings 可解析）
-- 缺 `.iar.toml` 时拒绝并提示 `iar init`
-- 接收 `--repo` / `--repo-id` / `--config` 时拒绝并不落盘（与 `iar init` 行为一致）
+- 缺 `.kedacode.toml` 时拒绝并提示 `kc init`
+- 接收 `--repo` / `--repo-id` / `--config` 时拒绝并不落盘（与 `kc init` 行为一致）
 
-模板维护说明：模板文件随 IAR Python 包一起发布，路径在 `src/backend/engines/agent_runner/templates/<name>/`，**直接在那里修改**。
+模板维护说明：模板文件随 KedaCode Python 包一起发布，路径在 `src/backend/engines/agent_runner/templates/<name>/`，**直接在那里修改**。
 
 早先 keda 自己也跑预览部署，仓库根下因此存在一份同名副本，`just check-template-drift` 逐字节比对两边。keda 的预览部署已下线、根下副本随之删除，模板成为唯一副本，那组比对也就没有了比对对象。改由以下机制保证质量：
 
@@ -996,10 +996,10 @@ uv run iar workflow install preview --force
 
 - 名单（8 个，硬编码于 `src/backend/infrastructure/child_env.py`）：`SERVER__PORT` 与 `CODEBUDDY_SERVICE_PROXY_URL`、`CODEBUDDY_SESSION_ID`、`CODEBUDDY_CONVERSATION_REQUEST_ID`、`CODEBUDDY_ROOT_REQUEST_ID`、`CODEBUDDY_CONVERSATION_MESSAGE_ID`、`CODEBUDDY_PROJECT_DIR`、`CODEBUDDY_CURRENT_MODEL_ID`
 - 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，最终被 inactivity/timeout watchdog 杀掉，见 2026-09-28 Issue #156 事故）
-- 为什么默认档也要净化：2026-10-07 Issue #229 事故确认，内容生成路径（`iar issue create --from-prompt` 派发的 `codebuddy -p ...`）走 `SubprocessRunner.run()` 且不传环境，当时的默认「全量继承」让 `SERVER__PORT` 原样透传，Issue 正文退化为模板渲染（修复：Issue #230）。环境构造收敛到 `run()` 一处后，**新增 denylist 变量无需改动任何执行层调用点**
+- 为什么默认档也要净化：2026-10-07 Issue #229 事故确认，内容生成路径（`kc issue create --from-prompt` 派发的 `codebuddy -p ...`）走 `SubprocessRunner.run()` 且不传环境，当时的默认「全量继承」让 `SERVER__PORT` 原样透传，Issue 正文退化为模板渲染（修复：Issue #230）。环境构造收敛到 `run()` 一处后，**新增 denylist 变量无需改动任何执行层调用点**
 - 已知例外（不经执行层的直接调用）：`core/use_cases/agent_runner_prd_activity.py` 的 PRD 活动锁命令（`git worktree list`、`scripts/shared/just/prd_lock.py`）与 `core/shared/prd_contract_client.py` 的 `prd_contract.py` 调用仍直接 `subprocess.run`，完整继承 `os.environ`。这三处都不监听端口，今日不会复现 `SERVER__PORT` 事故，但「新增名单变量无需改动调用点」只对上面列出的执行层路径成立；把它们接入执行层要改 core 的注入签名（core 不得直接 import infrastructure），动之前按 Issue #230 的口径重新审计
 - 剔除按变量名去重告警：某变量在本进程内**首次**被剔除时记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值），之后同一变量再被剔除只记 DEBUG——默认档净化覆盖每一次 `SubprocessRunner.run()`，工具命令单轮可达数十次，逐次 WARNING 会把这条排障信号淹掉。若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
-- 因此**从交互式 AI 会话的 shell 里直接启动 `iar run` / `iar review` / `iar issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
+- 因此**从交互式 AI 会话的 shell 里直接启动 `kc run` / `kc review` / `kc issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
 - 白名单档（浏览器 E2E 验证子进程）的 fail-fast 前提校验不因默认档净化而改变：前提不成立时依旧报错，绝不静默回退到任何继承形态
 - 净化约定分两层守护：默认档「`run()` 一处构造、全分支透传」由 `tests/test_process_runner.py` 直接断言；守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 只钉住可以被 `run()` **之外直接调用**的派发点（`run_filtered_claude_stream`、`_run_pty_stream` 与 `output_protocols/` 全目录），新增这类派发点必须自行接入净化环境。Issue #230 之前「工具命令路径不净化」的旧约定已废止
 
@@ -1056,14 +1056,14 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 `git worktree add` 只会物化被 Git 跟踪的文件，gitignored 的 `.env*`（密钥、本地配置）不会自动出现在新 worktree 里。为此 runner 在 worktree 创建/复用后会自动补齐缺失的 env 文件：
 
-- `iar worktree create` 和 `iar run` 的 create/reuse 流程都会把主仓库目录下的 `.env*` 文件按相对路径复制到 worktree（含子目录，如 `tests/playwright-e2e/.env`）
+- `kc worktree create` 和 `kc run` 的 create/reuse 流程都会把主仓库目录下的 `.env*` 文件按相对路径复制到 worktree（含子目录，如 `tests/playwright-e2e/.env`）
 - 只复制 worktree 中**缺失**的文件：被跟踪的 `.env*.example` 与 worktree 内已修改的 `.env` 永远不会被覆盖
-- 复用已有 worktree 时同样补齐（旧 worktree 缺 `.env` 的，下一次 `iar run` 会自动治愈）
+- 复用已有 worktree 时同样补齐（旧 worktree 缺 `.env` 的，下一次 `kc run` 会自动治愈）
 - 扫描会跳过 `.git`、`.iar-worktrees`、`.venv`、`node_modules` 等目录，避免把其他 worktree 的 env 文件复制串
 - **不会**复制 `.env.run-state`：它记录主仓库 `just run` 分配的端口，拷进 worktree 会让 worktree 指向主仓库端口——目标仓的共享库守卫据此认为有 dev server 在写本库而拒绝跑测试（假阳性），worktree 内 `just run` 也会与主仓库 dev server 抢端口；worktree 会自行生成自己的 run-state（`just worktree` 路径走随机端口）
 - 与旧的 `just worktree` 脚本不同，这里**不会**用 `.env.example` 兜底生成 `.env`：用示例值静默跑测试比明确的缺配置失败更危险
 - 复制是 best effort：单个文件失败（如悬空 symlink）只记日志，不会中断 agent run
-- 复制过来的文件保持 gitignored 状态，不会让 worktree 变脏，也不影响 `iar worktree cleanup` 的默认清理判定
+- 复制过来的文件保持 gitignored 状态，不会让 worktree 变脏，也不影响 `kc worktree cleanup` 的默认清理判定
 
 ## worktree 中的前端依赖（node_modules）
 
@@ -1079,17 +1079,17 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 行为约束：
 
 - 只处理 worktree 中**缺失**的 `node_modules`：worktree 内已有的真实目录或软链（例如已 `npm install` 过）永远不会被覆盖
-- 复用已有 worktree 时同样补齐：旧 worktree 缺 `node_modules` 的，下一次 `iar run` 会自动治愈
+- 复用已有 worktree 时同样补齐：旧 worktree 缺 `node_modules` 的，下一次 `kc run` 会自动治愈
 - 真实安装优先是为了兼容所有前端工具链（包括 Next.js/Turbopack 等不允许跨根目录软链的工具）；pnpm 等内容可寻址存储会复用本机缓存，通常不会明显慢于软链
 - 主仓库该项目缺 `node_modules` 且无法安装时**无法软链**，会记一条 `warning`（而非静默跳过），方便把后续 `vite: command not found` 追溯到"主仓库没装依赖"或"安装失败"
 - 处理是 best effort：单个项目失败（权限、竞态、网络）只记日志，不会中断 agent run
 - 软链同样保持 gitignored 状态，不会让 worktree 变脏
 
-> 守护进程路径（`iar worktree create` / `iar run`）不读 `WORKTREE_FRONTEND_STRATEGY` 环境变量——该变量只对手动 `just worktree`（`scripts/shared/worktree/create.sh`）生效。daemon 路径固定采用上面的"先安装、后软链回退"策略。
+> 守护进程路径（`kc worktree create` / `kc run`）不读 `WORKTREE_FRONTEND_STRATEGY` 环境变量——该变量只对手动 `just worktree`（`scripts/shared/worktree/create.sh`）生效。daemon 路径固定采用上面的"先安装、后软链回退"策略。
 
 ## worktree 分支安全与自动修复
 
-`iar run` 在把 agent 放入 worktree 前会执行两项准备：
+`kc run` 在把 agent 放入 worktree 前会执行两项准备：
 
 1. **远程分支对齐**：如果 `refs/remotes/<remote>/issue-<number>` 存在，则 fetch 并仅当本地分支是其祖先、且 worktree 干净时做 fast-forward；dirty、diverged 或本地领先场景会保留本地状态并失败/继续，不会 destructive reset。
 2. **分支状态自愈**：如果 worktree 处于 detached HEAD（例如 post-PR supervisor 正在 rebase 或被人工 checkout 到某个 commit），runner 会尝试自动恢复：
@@ -1100,29 +1100,29 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 ## 清理 stale issue worktree
 
-当 Issue 对应的 PR 合并并删除远端分支后，本地可能仍保留 `issue-<number>` 分支和 `.iar-worktrees/issue-<number>`。可以用 `iar worktree cleanup` 做一次安全清理：
+当 Issue 对应的 PR 合并并删除远端分支后，本地可能仍保留 `issue-<number>` 分支和 `.iar-worktrees/issue-<number>`。可以用 `kc worktree cleanup` 做一次安全清理：
 
 ```bash
 # 只预览，不删除
-iar worktree cleanup --dry-run
+kc worktree cleanup --dry-run
 
-# 真正删除满足条件的本地分支和 iAR worktree
-iar worktree cleanup --yes
+# 真正删除满足条件的本地分支和 KedaCode worktree
+kc worktree cleanup --yes
 
 # 谨慎：允许删除脏 worktree 或未合入远端 base branch 的分支
-iar worktree cleanup --yes --force
+kc worktree cleanup --yes --force
 ```
 
 没有传 `--yes` 时，命令会按 dry-run 处理。执行删除前会先 `git fetch <remote> --prune`，然后只清理同时满足以下条件的分支：
 
-- 本地分支名匹配默认 iAR 模式 `issue-<number>`
+- 本地分支名匹配默认 KedaCode 模式 `issue-<number>`
 - GitHub Issue 状态为 `CLOSED`
 - `refs/remotes/<remote>/issue-<number>` 已不存在
 - worktree 位于当前仓库的 `.iar-worktrees/` 下
 - 默认模式下 worktree 没有未提交或未跟踪文件
 - 默认模式下分支已经合入 `<remote>/<base_branch>`，或者 GitHub 上存在以该分支 head 的已合并 PR（覆盖 squash / rebase merge 场景）
 
-历史 `<repo>-worktrees/tasks/issue-<number>` worktree 是旧 `just worktree`/`just implement` 路径，不会被 `iar worktree cleanup` 自动删除。确认安全后可手动执行：
+历史 `<repo>-worktrees/tasks/issue-<number>` worktree 是旧 `just worktree`/`just implement` 路径，不会被 `kc worktree cleanup` 自动删除。确认安全后可手动执行：
 
 ```bash
 git worktree remove /path/to/<repo>-worktrees/tasks/issue-<number>
@@ -1131,28 +1131,28 @@ git branch -d issue-<number>
 
 ## run 与 daemon 的执行语义与控制面
 
-`iar run` 与 `iar daemon` 的职责边界是显式契约：**run = 手动单次、定向执行**（一条命令只处理一个目标，但**多条 `--issue` 命令之间互不阻塞，可并发**，见下节），不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 autopilot 调度阶段的地方。
+`kc run` 与 `kc daemon` 的职责边界是显式契约：**run = 手动单次、定向执行**（一条命令只处理一个目标，但**多条 `--issue` 命令之间互不阻塞，可并发**，见下节），不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 autopilot 调度阶段的地方。
 
 ### run 目标必填（breaking change）
 
-`iar run` **必须带目标**，不再"默认按优先级捞 ready 队列"：
+`kc run` **必须带目标**，不再"默认按优先级捞 ready 队列"：
 
 ```bash
 # 定向只跑一个 Issue
-iar run --issue 42
+kc run --issue 42
 
-# 跑一个 PRD（解析其头部的 - GitHub Issue: 回链；没有回链会报错，先 iar issue create）
-iar run tasks/pending/P1-FEAT-xxx.md
+# 跑一个 PRD（解析其头部的 - GitHub Issue: 回链；没有回链会报错，先 kc issue create）
+kc run tasks/pending/P1-FEAT-xxx.md
 
-# 处理整个 ready 队列（等价旧的 iar run 行为，必须显式）
-iar run --all-ready
+# 处理整个 ready 队列（等价旧的 kc run 行为，必须显式）
+kc run --all-ready
 ```
 
 - `--issue` 与 PRD 路径互斥；三者（`--issue` / PRD 路径 / `--all-ready`）都不给时退出码 2（usage error）。
 - 定向 run 只处理目标 Issue（仍走依赖门禁与 claim）；队列里其他 ready Issue 原封不动。
-- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `iar backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `iar run --issue <N>`。
+- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。
 
-**迁移**：旧脚本/文档里"无目标的 `iar run`"改为 `iar run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
+**迁移**：旧脚本/文档里"无目标的 `kc run`"改为 `kc run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
 
 ### 与 daemon 的互斥范围：只挡队列轮询
 
@@ -1160,38 +1160,38 @@ iar run --all-ready
 
 | 调用形态 | 同仓 daemon 存活时 |
 |---|---|
-| `iar run --all-ready`（队列轮询） | **拒绝**（退出码 5 conflict）：两个轮询者会双 claim 同一 ready 队列 |
-| `iar run --issue <N>` 或 `iar run <PRD_PATH>`（显式单目标） | **照常执行**：单目标不轮询队列，领取冲突由认领状态单独把关（见下节） |
+| `kc run --all-ready`（队列轮询） | **拒绝**（退出码 5 conflict）：两个轮询者会双 claim 同一 ready 队列 |
+| `kc run --issue <N>` 或 `kc run <PRD_PATH>`（显式单目标） | **照常执行**：单目标不轮询队列，领取冲突由认领状态单独把关（见下节） |
 
 ```text
 conflict: A daemon for repository '<repo_id>' is already running (PID <N>) ...
-next: iar registry stop --repo-id <repo_id> ... or rerun with --takeover ...
+next: kc registry stop --repo-id <repo_id> ... or rerun with --takeover ...
 ```
 
 确认要手动接管时使用 `--takeover`（强警告 + 交互确认；脚本里加 `--yes`，`--json` 机器模式下必须 `--yes`）：
 
 ```bash
-iar run --issue 42 --takeover --yes
+kc run --issue 42 --takeover --yes
 ```
 
 接管流程：优雅停 daemon（SIGTERM → 等待超时 → 兜底 SIGKILL；**不会**把 SIGKILL 当首手段）→ 终止 daemon 的在途 agent 子进程树（不留孤儿 agent）→ 把在途 Issue reclaim 回 `agent/ready` → 执行定向 run。**接管会中断 daemon 当前所有在途 Issue**（不只是你指定的那个），它们会被 reclaim 后重跑——这是有意为之的破坏性动作，所以默认不发生。`--takeover` 跳过下节的准入判定：显式接管本身就是"强制回收在途 Issue"的入口，能不能领由 reclaim 决定。
 
 ### 显式定向的领取准入
 
-`agent/ready` **只约束守护进程的自主挑选**。人显式点名一条 Issue 时不再要求它带就绪标签——手工开的、没有 PRD 锚点的 Issue 同样可以直接 `iar run --issue <N>`。放宽的代价是"领不领得到"必须响亮回报，而不是像守护进程那样把不合条件的 Issue 静默跳过：
+`agent/ready` **只约束守护进程的自主挑选**。人显式点名一条 Issue 时不再要求它带就绪标签——手工开的、没有 PRD 锚点的 Issue 同样可以直接 `kc run --issue <N>`。放宽的代价是"领不领得到"必须响亮回报，而不是像守护进程那样把不合条件的 Issue 静默跳过：
 
 | 目标状态 | 定向 run 的结果 |
 |---|---|
 | open、无 workflow 标签，或只带 `agent/ready` | 放行，进入 ready 通道执行 |
-| `agent/running` 且最近一次认领的持有者仍存活 | 退出码 5 `conflict`，错误里点名持有者 `host` / `PID`；本机持有者提示 `iar run --issue <N> --takeover`，远端持有者只能等它结束（系统没有强制接管远端认领的入口） |
+| `agent/running` 且最近一次认领的持有者仍存活 | 退出码 5 `conflict`，错误里点名持有者 `host` / `PID`；本机持有者提示 `kc run --issue <N> --takeover`，远端持有者只能等它结束（系统没有强制接管远端认领的入口） |
 | `agent/running` 但本机持有者 PID 已不存在 | 放行，交给 running 通道的恢复路径（rework / 发布恢复） |
-| `agent/blocked` 且没有未消费的解除请求 marker | 退出码 5 `conflict`，提示先 `iar blocked-continue --issue <N>` |
+| `agent/blocked` 且没有未消费的解除请求 marker | 退出码 5 `conflict`，提示先 `kc blocked-continue --issue <N>` |
 | 读不到、或不是 open | 退出码 3 `not_found` |
-| `agent/review` / `agent/supervising` 等其他状态 | 准入层放行，但 `iar run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `iar review` / review-daemon |
+| `agent/review` / `agent/supervising` 等其他状态 | 准入层放行，但 `kc run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `kc review` / review-daemon |
 
 **跨机器的认领无法探测远端进程，一律按有效处理（fail-closed）**：抢跑别人正在执行的 Issue 是双跑，而拒绝一次定向只是让人等一等。
 
-守护进程侧不受本节影响：空队列仍是正常状态，`--all-ready` 与 `iar daemon` 挑不到合条件的 Issue 时依然静默返回 0。
+守护进程侧不受本节影响：空队列仍是正常状态，`--all-ready` 与 `kc daemon` 挑不到合条件的 Issue 时依然静默返回 0。
 
 ### 首次领取的仲裁（claim marker 选举）
 
@@ -1211,7 +1211,7 @@ GitHub 的标签写入没有 compare-and-swap，所以"谁先领走这条 Issue"
 
 ```bash
 # 快速通道：完成即开 PR，跳过验证门禁（仅单一目标）
-iar run --issue 42 --fast-merge
+kc run --issue 42 --fast-merge
 ```
 
 - **PR 正文自我声明**：机器可读 marker `<!-- iar:fast-merge issued=<N> -->` + 人读说明"本 PR 经快速通道发布，未经过自动化验证门禁，合并前请人工验证"。无 marker 的 PR 才代表走了完整验证。
@@ -1226,7 +1226,7 @@ iar run --issue 42 --fast-merge
 
 ```bash
 # 无 PRD 锚点的 Issue：做完就直接开 Draft PR
-iar run --issue 42 --direct-pr
+kc run --issue 42 --direct-pr
 ```
 
 - **适用边界（fail-closed）**：目标必须**没有 `- PRD path:` 锚点**。传 PRD 路径作为目标本身就是 PRD-backed，直接用法错误；`--issue <N>` 目标会读 Issue 正文证明无锚点，**读不到同样拒绝**——旁路不能留下一份未归档、未校验的 PRD。
@@ -1236,30 +1236,30 @@ iar run --issue 42 --direct-pr
 
 ### 多条 run 之间的并发边界
 
-不同 Issue 的 `iar run --issue <N>` 天然并发，不需要排队——**同仓有 daemon 在跑也一样**（daemon 的互斥只挡队列轮询，见上两节）：
+不同 Issue 的 `kc run --issue <N>` 天然并发，不需要排队——**同仓有 daemon 在跑也一样**（daemon 的互斥只挡队列轮询，见上两节）：
 
 ```bash
 # 两个 Issue 各一条命令，同时推进；互不等待
-iar run --issue 42
-iar run --issue 43
+kc run --issue 42
+kc run --issue 43
 ```
 
 - 前台 `run` **不获取 repo 级 daemon 锁**：`--all-ready` 只做"是否有 daemon 存活"的只读检查（互斥语义见上文），显式单目标连这个检查都不做。所以 run 与 run 之间、定向 run 与 daemon 之间都不互斥。
 - 每个 Issue 自带隔离资源：worktree 在 `.iar-worktrees/issue-<N>`，claim / blocked-claim 锁也按 worktree 独立；状态库走 WAL 容忍并发写。两条命令撞向**同一条 Issue** 时，由首次领取选举裁决归属（见上节），落败方安静跳过。
 - **例外**：`--all-ready` 领的是同一份 ready 队列，两条 `--all-ready` 并发会双 claim，不要这么用。要并发多个 Issue，就给每个 Issue 各发一条 `--issue`。
-- 停止常驻进程没有 `iar daemon stop`：`iar daemon` 只暴露 `run` / `status`，托管进程用 `iar registry stop --repo-id <id>`（对未托管的手动 `iar daemon` 无效，需自行结束进程）。
+- 停止常驻进程没有 `kc daemon stop`：`kc daemon` 只暴露 `run` / `status`，托管进程用 `kc registry stop --repo-id <id>`（对未托管的手动 `kc daemon` 无效，需自行结束进程）。
 
 ### daemon 的 autopilot 按次覆盖
 
 ```bash
 # 配置 autopilot.enabled=false，但本次 daemon 临时开调度
-iar daemon --autopilot
+kc daemon --autopilot
 
 # 配置 autopilot.enabled=true，但本次 daemon 临时关调度
-iar daemon --no-autopilot
+kc daemon --no-autopilot
 ```
 
-- 优先级：**flag > 仓库 `.iar.toml` > 全局**；传了旗标即锁定本次常驻进程（之后改 `.iar.toml` 不影响本次进程），不传则每轮热读配置。
+- 优先级：**flag > 仓库 `.kedacode.toml` > 全局**；传了旗标即锁定本次常驻进程（之后改 `.kedacode.toml` 不影响本次进程），不传则每轮热读配置。
 - 旗标**只覆盖调度类 autopilot**（发现/晋升 pending PRD、补槽）；它**不能**打开自动合并——合并仍由 `safety.auto_merge` + `autopilot.enabled` 配置双开关决定，`process_merge_queue` 在配置未开时保持 no-op。
 
 ## 多仓库 Registry 兼容
@@ -1274,7 +1274,7 @@ max_issues = 1
 path = "/Users/zata/code/keda"
 enabled = true
 # Optional ``owner/name`` for ``gh pr list --repo`` (PR column on
-# ``iar issue list``). 缺省时 PR 列为空 + stderr 一次性 WARN。
+# ``kc issue list``). 缺省时 PR 列为空 + stderr 一次性 WARN。
 github_repo = "ZataZhang/keda"
 
 [agent_runner.repositories.backend_service]
@@ -1285,9 +1285,9 @@ github_repo = "owner/backend-service"
 
 - 每个仓库必须有 `path`（本地绝对路径）。
 - `enabled = false` 可临时禁用某个仓库。
-- `github_repo` 是可选的 `owner/name` 字符串；缺省时 `iar issue list` 不会调用 `gh pr list --repo <repo_id>`，PR 列留空、stderr 一次性打印 WARN 指引用户去 `config.toml` 或 `.iar.toml` 补字段。**该字段不参与目录名推断**——iar 不做 `git remote` 解析，必须由用户显式声明。
-- registry 通常只保留 `path` 和 `enabled`；仓库级 overrides 仍兼容，但建议迁移到目标仓库的 `.iar.toml`。
-- 未指定 `--repo`、`--repo-id` 或 `--all` 时，单仓库命令（如 `iar run`、`iar review`）只处理当前 Git 仓库；`iar daemon` 和 `iar review-daemon` 同样只处理当前已初始化注册仓库，未命中、未初始化或匹配多个时报错。如需监控所有 enabled registry entries，请显式使用 `--all`。
+- `github_repo` 是可选的 `owner/name` 字符串；缺省时 `kc issue list` 不会调用 `gh pr list --repo <repo_id>`，PR 列留空、stderr 一次性打印 WARN 指引用户去 `config.toml` 或 `.kedacode.toml` 补字段。**该字段不参与目录名推断**——kc 不做 `git remote` 解析，必须由用户显式声明。
+- registry 通常只保留 `path` 和 `enabled`；仓库级 overrides 仍兼容，但建议迁移到目标仓库的 `.kedacode.toml`。
+- 未指定 `--repo`、`--repo-id` 或 `--all` 时，单仓库命令（如 `kc run`、`kc review`）只处理当前 Git 仓库；`kc daemon` 和 `kc review-daemon` 同样只处理当前已初始化注册仓库，未命中、未初始化或匹配多个时报错。如需监控所有 enabled registry entries，请显式使用 `--all`。
 
 迁移示例：
 
@@ -1318,7 +1318,7 @@ enabled = true
 把仓库细节放到目标仓库：
 
 ```toml
-# /Users/zata/code/backend-service/.iar.toml
+# /Users/zata/code/backend-service/.kedacode.toml
 [agent_runner.repository]
 id = "backend_service"
 enabled = true
@@ -1334,40 +1334,40 @@ verification_commands = ["git diff --check", "uv run pytest"]
 
 ### Registry 生命周期管理
 
-已注册仓库可以通过 `iar registry` 子命令重新初始化或取消托管，无需手动编辑 `config.toml` 或进目录改 `.iar.toml`。
+已注册仓库可以通过 `kc registry` 子命令重新初始化或取消托管，无需手动编辑 `config.toml` 或进目录改 `.kedacode.toml`。
 
-#### 重新初始化（`iar registry reinit`）
+#### 重新初始化（`kc registry reinit`）
 
-当已接管仓库的 `.iar.toml` 配置（如 `git.remote`）与实际情况不一致时，可以重新初始化：
+当已接管仓库的 `.kedacode.toml` 配置（如 `git.remote`）与实际情况不一致时，可以重新初始化：
 
 ```bash
-# 默认把 remote 重置为 origin，覆盖现有 .iar.toml
-iar registry reinit --repo-id ZataZhang-fsense
+# 默认把 remote 重置为 origin，覆盖现有 .kedacode.toml
+kc registry reinit --repo-id ZataZhang-fsense
 
 # 显式指定 remote 和 base_branch
-iar registry reinit --repo-id ZataZhang-fsense --remote upstream --base-branch develop
+kc registry reinit --repo-id ZataZhang-fsense --remote upstream --base-branch develop
 
 # 重新初始化后立刻重启 daemon 和 review-daemon
-iar registry reinit --repo-id ZataZhang-fsense --start-daemons
+kc registry reinit --repo-id ZataZhang-fsense --start-daemons
 ```
 
-#### 取消托管（`iar registry remove`）
+#### 取消托管（`kc registry remove`）
 
 停止 daemon/review-daemon 并从 registry 移除条目：
 
 ```bash
-iar registry remove --repo-id ZataZhang-fsense
+kc registry remove --repo-id ZataZhang-fsense
 ```
 
 该命令只删除 `config.toml` 中的注册条目，**永不删除本地仓库目录**：托管 clone 与开发工作区都只能由人工在外部自行处理。管理终端「项目接入」页的「移除」按钮走同一条语义。
 
-#### 查看已注册仓库与运行状态（`iar registry list`）
+#### 查看已注册仓库与运行状态（`kc registry list`）
 
 ```bash
-iar registry list
+kc registry list
 ```
 
-输出会列出 `~/.iar/config.toml` 中所有已注册仓库，并显示每个仓库的 `daemon` / `review-daemon` 是否在运行，以及对应的进程 ID：
+输出会列出 `~/.kedacode/config.toml` 中所有已注册仓库，并显示每个仓库的 `daemon` / `review-daemon` 是否在运行，以及对应的进程 ID：
 
 ```
                             Registered repositories
@@ -1383,27 +1383,27 @@ iar registry list
 这可以帮助你确认哪些仓库当前正在后台跑 agent，以及是否重复启动了 daemon。
 
 > **Managed vs Unmanaged**：
-> - 通过 `iar registry start` / console / `iar takeover` 启动的 daemon 是**托管进程**，会写入 `~/.iar/processes.json`，状态显示为 `running (<process_id>)`，可用 `iar registry stop` 停止。
-> - 直接在命令行执行 `iar daemon` / `iar review-daemon` 启动的进程是**未托管进程**。`iar registry list` 会通过扫描系统进程把它们识别出来，状态显示为 `running (unmanaged)`，但**不会**被 `iar registry stop` 停止，也没有独立的日志文件被 `registry` 命令管理。
+> - 通过 `kc registry start` / console / `kc takeover` 启动的 daemon 是**托管进程**，会写入 `~/.kedacode/processes.json`，状态显示为 `running (<process_id>)`，可用 `kc registry stop` 停止。
+> - 直接在命令行执行 `kc daemon` / `kc review-daemon` 启动的进程是**未托管进程**。`kc registry list` 会通过扫描系统进程把它们识别出来，状态显示为 `running (unmanaged)`，但**不会**被 `kc registry stop` 停止，也没有独立的日志文件被 `registry` 命令管理。
 > - 同时存在托管与未托管进程时，列表优先显示托管状态。
 
-> **不要混用**：同一时间、同一仓库，建议要么只使用 `iar registry start` 管理 daemon，要么只手动运行 `iar daemon`。混用可能导致两个进程同时 claim 同一仓库的 Issues，且 `registry stop` 不会清理手动启动的进程。
+> **不要混用**：同一时间、同一仓库，建议要么只使用 `kc registry start` 管理 daemon，要么只手动运行 `kc daemon`。混用可能导致两个进程同时 claim 同一仓库的 Issues，且 `registry stop` 不会清理手动启动的进程。
 
-> **单实例保护（self-guard）**：`iar daemon` / `iar daemon run` 启动时会按 `repo_id` 获取单实例锁（`~/.iar/daemon-locks/<repo_id>.lock`）。若该仓库已有存活的 daemon（无论托管还是手动启动），新进程会**直接拒绝启动并返回非零退出码**，而不会与既有 daemon 并发轮询、重复 claim 同一仓库的 Issues。不同 `repo_id` 的 daemon 互不影响、可并行运行。被 `kill -9` 等异常终止后残留的过期锁，会在下次启动时自动回收（按记录的 PID 判活，死进程的锁可被抢占）。该保护用于防止反复执行 `iar daemon` 堆积出大量并发实例、成倍消耗 agent 调用与 token 预算。
+> **单实例保护（self-guard）**：`kc daemon` / `kc daemon run` 启动时会按 `repo_id` 获取单实例锁（`~/.kedacode/daemon-locks/<repo_id>.lock`）。若该仓库已有存活的 daemon（无论托管还是手动启动），新进程会**直接拒绝启动并返回非零退出码**，而不会与既有 daemon 并发轮询、重复 claim 同一仓库的 Issues。不同 `repo_id` 的 daemon 互不影响、可并行运行。被 `kill -9` 等异常终止后残留的过期锁，会在下次启动时自动回收（按记录的 PID 判活，死进程的锁可被抢占）。该保护用于防止反复执行 `kc daemon` 堆积出大量并发实例、成倍消耗 agent 调用与 token 预算。
 
-#### 查看 daemon 进程明细（`iar daemon status`）
+#### 查看 daemon 进程明细（`kc daemon status`）
 
-`iar registry list` 只显示每个仓库 daemon / review-daemon 的汇总状态。如果你需要查看具体进程的 PID、启动时间、可执行路径、命令行、日志文件路径，以及该进程是托管还是未托管，使用：
+`kc registry list` 只显示每个仓库 daemon / review-daemon 的汇总状态。如果你需要查看具体进程的 PID、启动时间、可执行路径、命令行、日志文件路径，以及该进程是托管还是未托管，使用：
 
 ```bash
 # 在当前仓库目录下查看当前仓库
-iar daemon status
+kc daemon status
 
 # 查看指定仓库
-iar daemon status --repo-id keda-main
+kc daemon status --repo-id keda-main
 
 # 查看所有 enabled 注册仓库
-iar daemon status --all
+kc daemon status --all
 ```
 
 输出示例：
@@ -1413,57 +1413,57 @@ iar daemon status --all
 ┏━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ repo_id ┃ kind          ┃ status        ┃  pid ┃ process_id ┃ started_at ┃ log_path ┃ executable           ┃ command              ┃
 ┡━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
-│ keda-m… │ daemon        │ managed run…  │ 1234 │ abc123def  │ 2026-06-2… │ …/proce… │ iar                  │ iar daemon --repo-i… │
-│ keda-m… │ review_daemon │ unmanaged r…  │ 5678 │ unmanaged… │ 2026-06-2… │ -        │ /usr/bin…            │ /usr/bin/iar review… │
+│ keda-m… │ daemon        │ managed run…  │ 1234 │ abc123def  │ 2026-06-2… │ …/proce… │ kc                  │ kc daemon --repo-i… │
+│ keda-m… │ review_daemon │ unmanaged r…  │ 5678 │ unmanaged… │ 2026-06-2… │ -        │ /usr/bin…            │ /usr/bin/kc review… │
 └─────────┴───────────────┴───────────────┴──────┴────────────┴────────────┴──────────┴──────────────────────┴──────────────────────┘
 ```
 
-- `managed running`：通过 `iar registry start` / `iar takeover` / console 启动的托管进程。
-- `unmanaged running`：直接在命令行执行 `iar daemon` / `iar review-daemon` 启动的进程。
+- `managed running`：通过 `kc registry start` / `kc takeover` / console 启动的托管进程。
+- `unmanaged running`：直接在命令行执行 `kc daemon` / `kc review-daemon` 启动的进程。
 - `log_path`：托管进程的真实日志文件路径；`-` 表示未托管进程（无独立日志文件）。
 
-#### 查看进程日志（`iar logs`）
+#### 查看进程日志（`kc logs`）
 
-`iar logs` 让你直接从命令行查看 daemon / review-daemon 的进程日志，无需拼接文件路径或打开 Web 管理终端。
+`kc logs` 让你直接从命令行查看 daemon / review-daemon 的进程日志，无需拼接文件路径或打开 Web 管理终端。
 
 ```bash
 # 查看当前仓库 daemon 的最近 200 行日志
-iar logs
+kc logs
 
 # 指定仓库和进程类型
-iar logs --repo-id keda-main --kind review_daemon
+kc logs --repo-id keda-main --kind review_daemon
 
 # 查看最近 50 行
-iar logs --lines 50
+kc logs --lines 50
 
 # 实时跟随日志（Ctrl-C 退出）
-iar logs -f
+kc logs -f
 
 # 跟随 review-daemon 日志
-iar logs --kind review_daemon -f
+kc logs --kind review_daemon -f
 ```
 
 行为说明：
 
-- `iar logs` 默认查看 `daemon` 进程；`--kind review_daemon` 可切换到 review-daemon。
+- `kc logs` 默认查看 `daemon` 进程；`--kind review_daemon` 可切换到 review-daemon。
 - `-n / --lines N` 控制初始回看行数（默认 200）。
 - `-f / --follow` 在初始回看后持续输出新增内容，直到 Ctrl-C 或进程退出。
 - 无 running 进程时，打印回退指引（最近进程日志路径或全局 `logs/app-YYYY-MM-DD.log`），退出码 0。
-- 全局日文件名只由 `infrastructure/logging/logger.py` 的 `daily_log_path()` 产出，回退提示与真正在写的文件因此不会漂移；跨午夜的长驻进程（`iar loop-daemon`、`iar registry start` 拉起的 runner / review-daemon）会在下一次写日志时自动切到当天文件，并在切换时按 `log_retention_days`（默认 14）清理过期日志。
-- 仓库目标推断逻辑与 `iar daemon` 一致：未指定 `--repo-id` 时从当前工作目录推断唯一 enabled 注册仓。
+- 全局日文件名只由 `infrastructure/logging/logger.py` 的 `daily_log_path()` 产出，回退提示与真正在写的文件因此不会漂移；跨午夜的长驻进程（`kc loop-daemon`、`kc registry start` 拉起的 runner / review-daemon）会在下一次写日志时自动切到当天文件，并在切换时按 `log_retention_days`（默认 14）清理过期日志。
+- 仓库目标推断逻辑与 `kc daemon` 一致：未指定 `--repo-id` 时从当前工作目录推断唯一 enabled 注册仓。
 
-#### 查看单个 Issue 的实时输出（`iar logs --issue`）
+#### 查看单个 Issue 的实时输出（`kc logs --issue`）
 
-单次 `iar run` 或 daemon 处理某个 Issue 时，Agent 的可见输出会即时落到
+单次 `kc run` 或 daemon 处理某个 Issue 时，Agent 的可见输出会即时落到
 `logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`。用 `--issue`
 可以在**另一个终端**按 Issue 号查看这条流，无需知道进程 ID 或日志目录：
 
 ```bash
 # 查看 Issue #42 最近一次尝试的最近输出（尾部窗口）
-iar logs --repo-id keda-main --issue 42
+kc logs --repo-id keda-main --issue 42
 
 # 持续跟随 Issue #42 的输出（重试时自动切换尝试，Ctrl-C 退出）
-iar logs --repo-id keda-main --issue 42 --follow
+kc logs --repo-id keda-main --issue 42 --follow
 ```
 
 行为说明：
@@ -1472,59 +1472,59 @@ iar logs --repo-id keda-main --issue 42 --follow
 - 首次输出给**尾部窗口**（默认最近 64 KiB，再按 `--lines` 截行），不会从头倾泻整份日志；之后按字节偏移增量续读。
 - 默认跟随该 Issue 的**最新尝试**；重试产生新文件时 CLI 会提示并切换。
 - Issue 尚未开始、日志已清理或仓库未注册时，显示明确的空态 / 不可用提示，不会回退到别的 Issue 或进程日志。
-- 单次 `iar run`（串行）与并行 daemon 使用同一归属规则；串行时启动终端收到的就是这条 per-Issue 流的镜像，因此**同样带行首时间戳**——与未经路由时终端实时视图的显示一致（TTY 与重定向都一样），不是「无前缀的原始输出」。
+- 单次 `kc run`（串行）与并行 daemon 使用同一归属规则；串行时启动终端收到的就是这条 per-Issue 流的镜像，因此**同样带行首时间戳**——与未经路由时终端实时视图的显示一致（TTY 与重定向都一样），不是「无前缀的原始输出」。
 - Agent 流式输出的每个物理行在写入 per-Issue 日志、实时看板与前台镜像时带 `[HH:MM:SS]` 行首时间戳，可与心跳行的完整日期时间前缀对照时间线。时间戳由**输出路由 sink** 统一添加（`core/use_cases/agent_runner_output_routing.py`）：agent 生产者交给 sink 的始终是可读原文，所以合议的 `workspaces/**/*.md` 等原文产物不会被塞进时间线。文本增量只在行首加一次时间戳，不会切断同一行；`[iar-attempt-end]` 终态标记不经 sink，保持裸行，`--follow` 仍能精确匹配它。
 
-`iar daemon` 本身继续作为启动 daemon 的快捷命令，等效于 `iar daemon run`。例如：
+`kc daemon` 本身继续作为启动 daemon 的快捷命令，等效于 `kc daemon run`。例如：
 
 ```bash
-iar daemon --repo-id keda-main --interval 300
+kc daemon --repo-id keda-main --interval 300
 # 等效于
-iar daemon run --repo-id keda-main --interval 300
+kc daemon run --repo-id keda-main --interval 300
 ```
 
-#### 启动与停止托管 daemon（`iar registry start` / `iar registry stop`）
+#### 启动与停止托管 daemon（`kc registry start` / `kc registry stop`）
 
-对于已经在 registry 中注册且已 init 的本地仓库（例如你手动 `iar init` 过的 `keda-main`），可以直接用 `start` / `stop` 管理 daemon 生命周期，无需 `reinit --start-daemons`（后者会重置 `.iar.toml`）：
+对于已经在 registry 中注册且已 init 的本地仓库（例如你手动 `kc init` 过的 `keda-main`），可以直接用 `start` / `stop` 管理 daemon 生命周期，无需 `reinit --start-daemons`（后者会重置 `.kedacode.toml`）：
 
 ```bash
 # 启动单个仓库的 daemon + review-daemon
-iar registry start --repo-id keda-main
+kc registry start --repo-id keda-main
 
 # 只启动 daemon（不启动 review-daemon）
-iar registry start --repo-id keda-main --no-review-daemon
+kc registry start --repo-id keda-main --no-review-daemon
 
 # 启动所有 enabled 注册仓的 daemon + review-daemon
-iar registry start --all
+kc registry start --all
 
 # 停止单个仓库的 daemon + review-daemon
-iar registry stop --repo-id keda-main
+kc registry stop --repo-id keda-main
 
 # 停止所有 running 的 daemon + review-daemon
-iar registry stop --all
+kc registry stop --all
 ```
 
-`start` 会把进程登记到 `~/.iar/processes.json`，因此 `iar registry list` 会显示 `running`；`stop` 会从 processes.json 读取 running 记录并优雅停止对应进程。连续两次 `start --repo-id` 会因"已存在 running 进程"失败，需先 `stop`。
+`start` 会把进程登记到 `~/.kedacode/processes.json`，因此 `kc registry list` 会显示 `running`；`stop` 会从 processes.json 读取 running 记录并优雅停止对应进程。连续两次 `start --repo-id` 会因"已存在 running 进程"失败，需先 `stop`。
 
-> **与 `reinit --start-daemons` / `takeover` 的区别**：`registry start` 不修改 `.iar.toml`，不重新初始化仓库配置，仅负责 spawn / stop 托管进程。适合本地开发目录或已经 init 过的仓库。
+> **与 `reinit --start-daemons` / `takeover` 的区别**：`registry start` 不修改 `.kedacode.toml`，不重新初始化仓库配置，仅负责 spawn / stop 托管进程。适合本地开发目录或已经 init 过的仓库。
 
-> **重启后恢复**：`iar` 不会自动复活重启前的 daemon。把 `iar registry start --repo-id <id>` 写进 macOS `launchd` plist 或 Linux systemd service，可实现开机自启。
+> **重启后恢复**：`kc` 不会自动复活重启前的 daemon。把 `kc registry start --repo-id <id>` 写进 macOS `launchd` plist 或 Linux systemd service，可实现开机自启。
 
-## 全局多仓库接管（`iar takeover`）
+## 全局多仓库接管（`kc takeover`）
 
-全局安装 `iar` 后，你可以从任意目录直接接管 GitHub 仓库，无需手动 `git clone`、`iar init` 和编辑 registry。
+全局安装 `kc` 后，你可以从任意目录直接接管 GitHub 仓库，无需手动 `git clone`、`kc init` 和编辑 registry。
 
 ### 前置条件
 
-- 已全局安装 `iar`（见上文"安装"）。
+- 已全局安装 `kc`（见上文"安装"）。
 - 已登录 GitHub CLI：`gh auth login -h github.com`。
-- `iar` 会在首次需要时自动把默认配置复制到 `~/.iar/config.toml`，作为全局配置源。
+- `kc` 会在首次需要时自动把默认配置复制到 `~/.kedacode/config.toml`，作为全局配置源。
 
 ### 交互式接管
 
 ```bash
 # 列出当前 gh 用户可见的仓库，勾选后自动接管
-iar takeover
+kc takeover
 ```
 
 流程：
@@ -1534,41 +1534,41 @@ iar takeover
 3. 过滤掉已经注册且本地路径存在的仓库。
 4. 在终端展示 checkbox 多选界面，输入编号 toggle、`all` 全选、`none` 清空、`done` 确认、`quit` 取消。
 5. 对每个选中的仓库：
-   - `gh repo clone <owner>/<repo> ~/.iar/repos/<owner>/<repo>`
-   - 在新 clone 的仓库执行 `iar init`
-   - 写入 `~/.iar/config.toml` 的 `[agent_runner.repositories.<repo_id>]`
-6. 默认启动 `iar daemon` 和 `iar review-daemon` 两个托管子进程（在目标仓库路径下启动，因此只监控该仓库）。
+   - `gh repo clone <owner>/<repo> ~/.kedacode/repos/<owner>/<repo>`
+   - 在新 clone 的仓库执行 `kc init`
+   - 写入 `~/.kedacode/config.toml` 的 `[agent_runner.repositories.<repo_id>]`
+6. 默认启动 `kc daemon` 和 `kc review-daemon` 两个托管子进程（在目标仓库路径下启动，因此只监控该仓库）。
 
-> 克隆目标目录 `~/.iar/repos/<owner>/<repo>` 已存在时不会被复用：该仓库直接判失败并报错，需人工先改名或移走那个目录（或改 `--clone-root`）再重试。
+> 克隆目标目录 `~/.kedacode/repos/<owner>/<repo>` 已存在时不会被复用：该仓库直接判失败并报错，需人工先改名或移走那个目录（或改 `--clone-root`）再重试。
 
 ### 非交互式与批量接管
 
 ```bash
 # 直接指定仓库，适合脚本
-iar takeover --repos owner/repo-a owner/repo-b
+kc takeover --repos owner/repo-a owner/repo-b
 
 # 指定组织或用户
-iar takeover --owner myorg --limit 200
+kc takeover --owner myorg --limit 200
 
-# 指定 clone 根目录（默认 ~/.iar/repos）
-iar takeover --clone-root ~/iar-repos
+# 指定 clone 根目录（默认 ~/.kedacode/repos）
+kc takeover --clone-root ~/kc-repos
 
 # 只接管，不启动 daemon
-iar takeover --repos owner/repo-a --no-start
+kc takeover --repos owner/repo-a --no-start
 
 # 预览将要执行的操作，不写入任何文件
-iar takeover --repos owner/repo-a --dry-run
+kc takeover --repos owner/repo-a --dry-run
 ```
 
 ### 全局配置与进程日志
 
-接管后的仓库注册在 `~/.iar/config.toml` 中，托管进程使用：
+接管后的仓库注册在 `~/.kedacode/config.toml` 中，托管进程使用：
 
-- `~/.iar/console.db`：运行历史与审计日志。
-- `~/.iar/processes.json`：托管进程 pidfile registry。
-- `~/.iar/process-logs/<repo_id>/`：daemon / review-daemon 的 stdout/stderr 日志。
+- `~/.kedacode/console.db`：运行历史与审计日志。
+- `~/.kedacode/processes.json`：托管进程 pidfile registry。
+- `~/.kedacode/process-logs/<repo_id>/`：daemon / review-daemon 的 stdout/stderr 日志。
 
-你可以通过 `iar console` 启动管理终端查看、停止、重启这些进程；已运行的 FastAPI 服务也可以直接访问同一组 console API。
+你可以通过 `kc console` 启动管理终端查看、停止、重启这些进程；已运行的 FastAPI 服务也可以直接访问同一组 console API。
 
 ### 接管后的日常命令
 
@@ -1584,7 +1584,7 @@ curl -X POST http://localhost:8000/api/v1/agent-runner/console/processes/<proces
 curl 'http://localhost:8000/api/v1/agent-runner/console/processes/<process-id>/logs?offset=0'
 
 # 手动对某个接管的仓库跑一次
-iar run --repo-id owner-repo-a
+kc run --repo-id owner-repo-a
 ```
 
 ## 状态流转与两阶段审查
@@ -1610,7 +1610,7 @@ agent/ready
 
 ### Pre-PR Review
 
-`iar run` 在实现 agent 完成并提交后会先 `git push` 推送到远程分支，再在 Draft PR 创建之前执行一次 pre-PR AI code review：
+`kc run` 在实现 agent 完成并提交后会先 `git push` 推送到远程分支，再在 Draft PR 创建之前执行一次 pre-PR AI code review：
 
 1. Runner 写 Issue comment `Implementation Complete`
 2. Runner 立即调用 `push_changes()` 把当前 feature branch 推送到配置 remote（push 不再被 review 阻塞）
@@ -1653,7 +1653,7 @@ Issue 评论结构随之增加 `- Repairer: <agent>` 一行（仅非 `self` 模�
 同一批改动顺带修掉了三处静默失效的路由缺陷：
 
 1. `allow_same_agent = false` 时审核者不再硬编码回落到 `codex`，而是从 agent 注册表里取第一个不等于实现者的 agent；注册表里只有实现者一个 agent 时保持原样并打 WARNING。
-2. `iar review` 入口解析 supervisor 的优先级改为「命令行 `--agent` > `[agent_runner.post_pr_supervisor].supervisor_agent` > Issue 标签路由」，与发布路径共用 `resolve_supervisor_agent`。此前该入口完全不读配置里的 supervisor。
+2. `kc review` 入口解析 supervisor 的优先级改为「命令行 `--agent` > `[agent_runner.post_pr_supervisor].supervisor_agent` > Issue 标签路由」，与发布路径共用 `resolve_supervisor_agent`。此前该入口完全不读配置里的 supervisor。
 3. 审核 / 修复 / 收尾 / 校验 / 恢复 / 冲突解决等**二级调用点**此前都没有把运行时配置传下去，导致注册表里的自定义 agent 与内置 agent 的参数覆盖在这些阶段被静默忽略（自定义 agent 作审核者会直接报未注册）。现在 `src/backend` 内每个 `run_agent_with_prompt*` 调用点都传 `config`，并由 `tests/test_agent_config_consistency.py::test_every_agent_invocation_call_site_passes_config` 用 AST 守卫防止回退。**已显式配置过 agent 覆盖的仓库，这些阶段第一次会真正按配置执行。**
 
 
@@ -1684,7 +1684,7 @@ Draft PR 创建后，Issue 先进入 `agent/supervising`，并立即运行至少
    - `mark_failed` → 恢复 stash 后进入 `agent/failed`
 
 5. 需要代码修改时，runner 先写 `post_pr_rework_requested` event marker，再切到 `agent/running`
-6. 后续 `iar run` 检测到该 pending marker 和 open PR 后，在现有 PR branch 上执行 rework
+6. 后续 `kc run` 检测到该 pending marker 和 open PR 后，在现有 PR branch 上执行 rework
 7. rework 成功后写 `rebase_repair_complete` marker，再进入后续 supervision/review 流程
 
 #### Supervisor diff 分层注入与跨 cycle finding 累积
@@ -1699,14 +1699,14 @@ max_diff_chars = 6000
 
 prompt 结构变为：`Changed files (N)` 清单 → `--- Key files (full diff) ---` → `--- Other files (truncated to N chars) ---`。`key_paths` 为空时退化为原来的整体截断。若配置的路径前缀一个文件都没命中，日志会打 WARNING 提示前缀写错。
 
-Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决策里附带 `findings[]`（每项含 `title`，以及可选的 `severity` / `file` / `line` / `description` / `status`）。iar 把它们合并进 `<worktree>/.iar/state/issue-<N>/findings.json`（已被 `.iar/` gitignore 排除），下一个 cycle 的 prompt 会带上 `Previous unresolved findings from cycles X..Y:` 段。已在后续 cycle 修好的 finding 用 `status: "resolved"` 上报即可出列。用 `previous_findings_injection_enabled = false` 关闭注入。
+Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决策里附带 `findings[]`（每项含 `title`，以及可选的 `severity` / `file` / `line` / `description` / `status`）。kc 把它们合并进 `<worktree>/.iar/state/issue-<N>/findings.json`（已被 `.iar/` gitignore 排除），下一个 cycle 的 prompt 会带上 `Previous unresolved findings from cycles X..Y:` 段。已在后续 cycle 修好的 finding 用 `status: "resolved"` 上报即可出列。用 `previous_findings_injection_enabled = false` 关闭注入。
 
 #### PR 后修复的审-修分工（`post_pr_supervisor.repair_agent`）
 
 supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repair_agent` 只决定**判定需要改代码之后由谁动手**，取值语义与 pre-PR 那一段同名同义：
 
 - `self`（默认）：supervisor 自己执行修复，与历史行为一致。
-- `executor`：交回本次实现者。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `iar review`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。
+- `executor`：交回本次实现者。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `kc review`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。
 - `<agent 名>`：指定 agent；未注册时该阶段开始前 fail-fast。
 
 两个修复调用点（supervisor 修复循环、rework 路径）共用解析器 `resolve_repair_agent`，避免两条路径语义分叉。修复提示词由 `build_repair_prompt` 生成，带 Issue 上下文与本轮 findings 清单（rework 路径取 `.iar/state/issue-<N>/findings.json` 里未解决的累积 findings），修复者不必自己重新推断要改什么。
@@ -1725,13 +1725,13 @@ supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repa
 
 ```bash
 # 单次检查所有 supervising/review Issues
-uv run iar review
+uv run kc review
 
 # 常驻 review daemon（默认每 120 秒轮询，可在 config.toml [agent_runner.daemon] 调整）
-uv run iar review-daemon
+uv run kc review-daemon
 ```
 
-`iar review` / `iar review-daemon` 会：
+`kc review` / `kc review-daemon` 会：
 - 扫描 `agent/supervising` 和 `agent/review` 的 open Issues
 - 加载 linked PR context、Issue comments、PR comments 和最新 `iar:event` marker
 - 检测以下维度变化：
@@ -1767,17 +1767,17 @@ checks 状态：
 - supervisor 输出无法解析、返回未知 action，或返回空 summary 的 `request_human_input` 时，本轮会进入 `agent/failed`，不会生成无原因的 `agent/blocked`；平台不得根据 checks 状态猜测替代动作
 - supervisor agent 进程非零退出且 stdout 中识别不到任何 JSON 决策（如 claude CLI 遇到 API / 网络错误崩溃）时，视为基础设施级失败，会在同一 cycle 内重试至多 `max_agent_crash_retries` 次；重试之间指数退避（从 `crash_retry_initial_backoff_seconds` 起每次翻倍，单次等待封顶 `crash_retry_max_backoff_seconds`，默认 30s 起、上限 10 分钟），以扛住分钟级的 API 提供方中断。重试仍失败才进入 `agent/failed`，summary 会标明是 agent infrastructure failure。非零退出但 stdout 中仍能识别出 JSON 决策时直接使用该决策，不消耗重试次数
 
-这样可以避免 `agent/review` label 覆盖仍需 `iar run` 消费的 rework/rebase 状态。
+这样可以避免 `agent/review` label 覆盖仍需 `kc run` 消费的 rework/rebase 状态。
 
 注意：merge queue 的自动合并仍会在合并前等待 checks 全绿（见下文"Autopilot 快速档（合并队列）"），这与 supervisor 的动作选择相互独立——进入人工 review 不代表验收完成，也不产生自动合并或归档资格。
 
-`iar review` 的 CLI 日志会打印本轮 outcome，例如 `queued_rebase_pr_branch`、
+`kc review` 的 CLI 日志会打印本轮 outcome，例如 `queued_rebase_pr_branch`、
 `approved_for_human_review` 或 `deferred_pr_context_unavailable`。被 queue 的
-rebase/repair 仍由下一次 `iar run` 在 PR branch worktree 中执行。
+rebase/repair 仍由下一次 `kc run` 在 PR branch worktree 中执行。
 
 ### Rework Guard
 
-`iar run` 遇到 `agent/running` Issue 时，不会自动视为 rework。只有同时满足以下条件才会进入现有 PR branch rework 路径：
+`kc run` 遇到 `agent/running` Issue 时，不会自动视为 rework。只有同时满足以下条件才会进入现有 PR branch rework 路径：
 
 1. Issue comments 中存在尚未被 `rebase_repair_complete`、`draft_pr_created`、`implementation_complete` 或 `publish_recovered` 消费的 `phase=post_pr_rework_requested` marker
 2. 该 marker 包含 PR branch
@@ -1787,17 +1787,17 @@ rebase/repair 仍由下一次 `iar run` 在 PR branch worktree 中执行。
 
 如果 pending rework 存在但对应 worktree 路径已不存在（例如被手动删除），runner 会将 Issue 转入 `agent/blocked` 并写评论说明缺失路径与恢复步骤，而不是在错误的目录上执行 repair/rebase。
 
-否则 `iar run` 会跳过该 Issue，避免抢占另一个 runner 正在首次执行的任务。
+否则 `kc run` 会跳过该 Issue，避免抢占另一个 runner 正在首次执行的任务。
 
-## iar issue list
+## kc issue list
 
-`iar issue list` 是一个**只读**视图命令，用于回答"哪些 issue 已经提交了 PR、哪些还在排队"。它拉取每个目标仓库的 Issue 列表，并补齐每个 Issue 关联的 Pull Request 状态。
+`kc issue list` 是一个**只读**视图命令，用于回答"哪些 issue 已经提交了 PR、哪些还在排队"。它拉取每个目标仓库的 Issue 列表，并补齐每个 Issue 关联的 Pull Request 状态。
 
 ### CWD 自动检测
 
-不传 `--repo` / `--repo-id` / `--all-registered` 时，命令根据 `Path.cwd() / ".iar.toml"` 是否存在自动决定单仓 / 全仓模式：
+不传 `--repo` / `--repo-id` / `--all-registered` 时，命令根据 `Path.cwd() / ".kedacode.toml"` 是否存在自动决定单仓 / 全仓模式：
 
-- 存在 `.iar.toml`（即 `IAR_REPOSITORY_CONFIG_FILENAME`）→ 等价 `--repo Path.cwd()`，只列当前仓
+- 存在 `.kedacode.toml`（即 `REPOSITORY_CONFIG_FILENAME`）→ 等价 `--repo Path.cwd()`，只列当前仓
 - 不存在 → 等价 `--all-registered`，跨 `config.toml` 中所有 enabled 注册仓
 
 ### Flag 表
@@ -1806,7 +1806,7 @@ rebase/repair 仍由下一次 `iar run` 在 PR branch worktree 中执行。
 |---|---|
 | `--repo <path>` | 强制单仓模式，指向任意本地仓库路径 |
 | `--repo-id <id>` | 强制单仓模式，指向 `config.toml` 注册项 |
-| `--all-registered` | 强制多仓扫描，即使 cwd 是 iAR 项目仓 |
+| `--all-registered` | 强制多仓扫描，即使 cwd 是 KedaCode 项目仓 |
 | `--state <open\|closed\|all>` | Issue 状态过滤（默认 `all`） |
 | `--label <name>` | 仅显示带该 label 的 Issue |
 | `--with-pr` | 仅显示至少有一个 PR 的 Issue |
@@ -1814,22 +1814,22 @@ rebase/repair 仍由下一次 `iar run` 在 PR branch worktree 中执行。
 | `--limit <n>` | 每仓最多拉取 Issue 数（默认 100） |
 | `--output <table\|json>` | 渲染格式（默认 `table`） |
 
-### 示例：单仓（cwd 是 iAR 项目仓）
+### 示例：单仓（cwd 是 KedaCode 项目仓）
 
 ```bash
 $ cd ~/code/keda
-$ iar issue list
+$ kc issue list
   #     TITLE                              LABELS              STATE   PRS
-  42    Add issue list command              iar-agent-ready     open    #143 [draft]
-  41    Fix label sync                      iar-bug, urgent     open    #140 [merged]
-  40    Update docs                          iar-docs            closed  —
+  42    Add issue list command              kc-agent-ready     open    #143 [draft]
+  41    Fix label sync                      kc-bug, urgent     open    #140 [merged]
+  40    Update docs                          kc-docs            closed  —
 ```
 
-### 示例：全仓扫描（cwd 不是 iAR 项目仓）
+### 示例：全仓扫描（cwd 不是 KedaCode 项目仓）
 
 ```bash
 $ cd /tmp
-$ iar issue list
+$ kc issue list
   REPO              #     TITLE                              STATE   PRS
   owner/repo-a      12    Refactor init                       open    #55 [open]
   owner/repo-a      11    Add tests                            open    —
@@ -1839,7 +1839,7 @@ $ iar issue list
 ### 示例：JSON 输出（脚本消费）
 
 ```bash
-$ iar issue list --with-pr --output json | jq -c '.number, .pulls[0].state'
+$ kc issue list --with-pr --output json | jq -c '.number, .pulls[0].state'
 12
 open
 7
@@ -1859,102 +1859,102 @@ JSON 输出每行一个 `IssueWithPulls` 对象，字段稳定：`repo?`、`numb
 
 ```bash
 # 初始化当前目标仓库配置
-iar init
+kc init
 
-# 清掉旧版 iar init 钉死在 .iar.toml 里的 generated_content（先预览再执行）
-iar config migrate --dry-run
-iar config migrate
+# 清掉旧版 kc init 钉死在 .kedacode.toml 里的 generated_content（先预览再执行）
+kc config migrate --dry-run
+kc config migrate
 
 # 同步当前仓库 Labels
-iar labels sync
+kc labels sync
 
 # 同步单个配置仓库
-iar labels sync --repo-id keda
+kc labels sync --repo-id keda
 
 # 按 priority/P0 → P3、同级 Issue 编号升序预览 ready 队列；不运行 Agent
-iar run --all-ready --dry-run --max-issues 3
+kc run --all-ready --dry-run --max-issues 3
 
 # 从 PRD 创建 ready Issue（默认发布 PRD）
-iar issue create tasks/pending/example.md --repo-id keda --type feature --agent codex --ready
+kc issue create tasks/pending/example.md --repo-id keda --type feature --agent codex --ready
 
 # 一次从多个 PRD 创建 ready Issue（支持 shell glob）
-iar issue create tasks/pending/*.md --repo-id keda --type feature --agent codex --ready
+kc issue create tasks/pending/*.md --repo-id keda --type feature --agent codex --ready
 
 # 直接传文件夹，自动展开其中所有 *.md PRD
-iar issue create tasks/pending --repo-id keda --type feature --agent codex --ready
+kc issue create tasks/pending --repo-id keda --type feature --agent codex --ready
 
 # 多个 PRD 时不能共用 --title（每个 PRD 仍从自身的 H1 标题生成 Issue 标题）
-# iar issue create tasks/pending/*.md --title "Shared"   # 会报错
-# iar issue create tasks/pending --title "Shared"        # 同样会报错
+# kc issue create tasks/pending/*.md --title "Shared"   # 会报错
+# kc issue create tasks/pending --title "Shared"        # 同样会报错
 
 # 一句话需求直接开 Issue（不产生也不引用任何 PRD；与 PRD 路径参数互斥）
-iar issue create --from-prompt "登录页在 token 过期时应当跳转到 SSO 而不是白屏"
+kc issue create --from-prompt "登录页在 token 过期时应当跳转到 SSO 而不是白屏"
 
-# 同上，但进队列由 daemon 挑；默认只建 Issue，等人显式 iar run --issue <N>
-iar issue create --from-prompt "给 CLI 的 logs 命令补一个 --json 输出" --ready
+# 同上，但进队列由 daemon 挑；默认只建 Issue，等人显式 kc run --issue <N>
+kc issue create --from-prompt "给 CLI 的 logs 命令补一个 --json 输出" --ready
 
 # 需要该 Issue 自带验收清单时显式开启（默认正文没有 Realistic Validation 小节）
-iar issue create --from-prompt "重排 ready 队列的排序规则" --require-validation
+kc issue create --from-prompt "重排 ready 队列的排序规则" --require-validation
 
 # 单次执行（dry-run 预览；目标必填）
-iar run --issue 42 --dry-run
-iar run --all-ready --dry-run
+kc run --issue 42 --dry-run
+kc run --all-ready --dry-run
 
 # 单次执行（当前仓库的某个 Issue）
-iar run --issue 42
+kc run --issue 42
 
-# 处理整个 ready 队列（等价删除前的无目标 `iar run`）
-iar run --all-ready
+# 处理整个 ready 队列（等价删除前的无目标 `kc run`）
+kc run --all-ready
 
 # 显式处理所有 enabled registry entries
-iar run --all --all-ready
+kc run --all --all-ready
 
 # Daemon 模式（默认每 120 秒轮询一次，仅当前已初始化注册仓库；加 --all 才处理所有 enabled registry entries）
-iar daemon
+kc daemon
 
 # 手动驱动一次 backlog 调度（一次 continuous-scheduling pass：reconcile + promote + discover，不用等 daemon 轮询）
 iar backlog advance
 
 # 单次 review 检查
-iar review
+kc review
 
 # Review daemon 模式（默认每 120 秒轮询一次，仅当前已初始化注册仓库；加 --all 才处理所有 enabled registry entries）
-iar review-daemon
+kc review-daemon
 
 # 恢复发布失败（仅用于已完成审查后的 push/PR 收尾失败）
-iar recover --issue 5
+kc recover --issue 5
 
 # 恢复发布失败（显式确认分支名）
-iar recover --issue 5 --branch issue-5
+kc recover --issue 5 --branch issue-5
 ```
 
 ## REPL 入口
 
-直接运行 `iar`（不带任何子命令）会进入交互式 REPL 入口。底层调用
+直接运行 `kc`（不带任何子命令）会进入交互式 REPL 入口。底层调用
 [`claude` / `codex` / `kimi`](#repl-agent-command-protocol) 等本地
-agent，把仓库上下文与自然语言指令直接转成 IAR 子命令并执行。
+agent，把仓库上下文与自然语言指令直接转成 KedaCode 子命令并执行。
 
 ### 行为差异
 
 | 触发方式 | 行为 |
 |---|---|
-| `iar`（TTY） | 启动 REPL，循环读取用户输入，调用 agent，把 agent 标注的 `<<IAR_EXEC>>` 命令翻译成 `iar <subcommand>` 并执行 |
-| `iar`（非 TTY） | 打印 Typer 帮助文本并以非零退出码失败，避免 CI / pipe 脚本 hang 住 |
-| `iar --help` / `iar -h` | 仍然打印帮助（不进入 REPL） |
-| `iar repl` | 显式启动 REPL 的子命令形式 |
-| `iar repl --agent codex` | 显式覆盖 REPL 默认 agent |
+| `kc`（TTY） | 启动 REPL，循环读取用户输入，调用 agent，把 agent 标注的 `<<IAR_EXEC>>` 命令翻译成 `kc <subcommand>` 并执行 |
+| `kc`（非 TTY） | 打印 Typer 帮助文本并以非零退出码失败，避免 CI / pipe 脚本 hang 住 |
+| `kc --help` / `kc -h` | 仍然打印帮助（不进入 REPL） |
+| `kc repl` | 显式启动 REPL 的子命令形式 |
+| `kc repl --agent codex` | 显式覆盖 REPL 默认 agent |
 
-非 TTY 行为保证现有脚本（如 `cd repo && iar --help`）继续工作。
+非 TTY 行为保证现有脚本（如 `cd repo && kc --help`）继续工作。
 
 ### REPL Agent & Command Protocol
 
 - 默认 agent 来自 `[agent_runner.repl].default_agent`（默认 `claude`）。
 - `--agent codex|kimi` 可覆盖；`--agent auto` 在 REPL 入口被拒绝并回退
-  到 `[agent_runner.repl].default_agent`（auto 仅用于 `iar run`）。
-- agent 的回复里通过标记协议请求执行 IAR 子命令：
+  到 `[agent_runner.repl].default_agent`（auto 仅用于 `kc run`）。
+- agent 的回复里通过标记协议请求执行 KedaCode 子命令：
 
   ```
-  <<IAR_EXEC>> iar labels sync --dry-run <<END_IAR_EXEC>>
+  <<IAR_EXEC>> kc labels sync --dry-run <<END_IAR_EXEC>>
   ```
 
   REPL 把标记里的命令交给命令执行器，执行器按白名单与确认策略运行：
@@ -1982,11 +1982,11 @@ agent，把仓库上下文与自然语言指令直接转成 IAR 子命令并执�
   覆盖。
 - REPL 内部最大 64 轮（防御性封顶），防止 agent 卡在循环里无限增长。
 
-### 与 `iar ask` 的边界
+### 与 `kc ask` 的边界
 
-- `iar ask <prompt>` 是单次决策入口：要求 agent 输出结构化 JSON
+- `kc ask <prompt>` 是单次决策入口：要求 agent 输出结构化 JSON
   DecisionPlan + 受控执行；适合 CI / 一次性自动执行场景。
-- `iar`（REPL）是持续多轮对话入口：agent 可以反复请求执行 IAR 子命令，
+- `kc`（REPL）是持续多轮对话入口：agent 可以反复请求执行 KedaCode 子命令，
   每轮都把结果反馈回对话；适合本地探索与人工协作场景。
 - 二者共享 `[agent_runner.interactive_decision]` 与
   `[agent_runner.repl]` 配置段，但 settings 完全独立（默认 agent、
@@ -1996,28 +1996,28 @@ agent，把仓库上下文与自然语言指令直接转成 IAR 子命令并执�
 
 ```bash
 $ cd /path/to/repo
-$ iar
-iar> sync the labels for me, then start the daemon.
+$ kc
+kc> sync the labels for me, then start the daemon.
 I'll sync the labels.
-<<IAR_EXEC>> iar labels sync <<END_IAR_EXEC>>
-[Executed] iar labels sync
+<<IAR_EXEC>> kc labels sync <<END_IAR_EXEC>>
+[Executed] kc labels sync
 stdout: ✅ labels synced
 
 Now I'll start the daemon.
-<<IAR_EXEC>> iar daemon <<END_IAR_EXEC>>
+<<IAR_EXEC>> kc daemon <<END_IAR_EXEC>>
 This command starts a long-running daemon. Execute? [y/N] y
-[Executed] iar daemon
+[Executed] kc daemon
 stdout: Daemon started with PID 12345
 
-iar> /exit
+kc> /exit
 ```
 
 ## PRD Rework Workflow
 
-`iar` supports the reverse of `iar issue create`: automatically generating or rewriting a PRD from an existing GitHub Issue. This is useful when an Issue is created directly on GitHub and later needs a canonical PRD, or when an existing Issue receives new comments that require updating its PRD.
+`kc` supports the reverse of `kc issue create`: automatically generating or rewriting a PRD from an existing GitHub Issue. This is useful when an Issue is created directly on GitHub and later needs a canonical PRD, or when an existing Issue receives new comments that require updating its PRD.
 
-> **PRD 不是执行的前置条件。** 没有 `- PRD path:` 锚点的 Issue 一样可以跑：`iar run --issue <N>`
-> 直接领取（见「显式定向的领取准入」），需要连审核与仓库验证一起省掉时用 `iar run --issue <N> --direct-pr`。
+> **PRD 不是执行的前置条件。** 没有 `- PRD path:` 锚点的 Issue 一样可以跑：`kc run --issue <N>`
+> 直接领取（见「显式定向的领取准入」），需要连审核与仓库验证一起省掉时用 `kc run --issue <N> --direct-pr`。
 > 本节是**按需增强**路径——想让这条 Issue 事后拥有规范 PRD（可归档、有验收清单）时才打
 > `agent/rework-prd`。注意锚点一旦写入，`--direct-pr` 就不再适用于该 Issue：PRD-backed 的交付必须走
 > PRD 交付门禁并归档其 PRD。
@@ -2030,9 +2030,9 @@ To trigger the workflow, add the `agent/rework-prd` label to an open Issue:
 gh issue edit <issue-number> --add-label agent/rework-prd
 ```
 
-> **Note:** The `agent/rework-prd` label is provisioned automatically by `iar init` and `iar labels sync`. If your repository was initialized before this label was added, run `iar labels sync` once so the label exists before you apply it.
+> **Note:** The `agent/rework-prd` label is provisioned automatically by `kc init` and `kc labels sync`. If your repository was initialized before this label was added, run `kc labels sync` once so the label exists before you apply it.
 
-The next daemon pass or `iar run` will detect the label and process the Issue before normal ready-issue execution.
+The next daemon pass or `kc run` will detect the label and process the Issue before normal ready-issue execution.
 
 ### What Happens During PRD Rework
 
@@ -2042,7 +2042,7 @@ The next daemon pass or `iar run` will detect the label and process the Issue be
 4. **Resolve Path** (inside the worktree):
    - If the Issue body already contains a `- PRD path: \`...\`` anchor, the runner rewrites that same file.
    - If no anchor exists, the runner generates a new filename under `tasks/pending/` using the pattern `P<priority>-<TYPE>-YYYYMMDD-HHMMSS-prd-<slug>.md` (priority/type are inferred from `priority/<p>` and `type/<t>` labels, or the `[Type]` title prefix).
-5. **Generate**: It calls the configured content generator. In agent mode the prompt is built from the user-level `prd` skill that `iar init` fetched from remote `zata-codes-template` (the single source of the PRD methodology and output contract); if the skill is unreachable it falls back to the configured `prompt` template, then to a minimal fallback PRD.
+5. **Generate**: It calls the configured content generator. In agent mode the prompt is built from the user-level `prd` skill that `kc init` fetched from remote `zata-codes-template` (the single source of the PRD methodology and output contract); if the skill is unreachable it falls back to the configured `prompt` template, then to a minimal fallback PRD.
 6. **Write**: The PRD file is written inside the worktree (overwriting existing or creating new).
 7. **Commit + Publish**: The PRD is committed to the `issue-<N>` branch and published via `publish_changes` — pushed to the remote and opened (or reused) as a **draft PR**. A regenerated-but-identical PRD that produces no new commit skips PR creation.
 8. **Update Issue**:
@@ -2070,7 +2070,7 @@ A failure comment is posted with the error and instructions to re-add `agent/rew
 
 ### Stopping at the PRD (skip auto-implementation)
 
-By default, generation does **not** stop at the PRD. Step 8 adds `agent/ready`, and within the **same** `iar run` / daemon pass the PRD-rework phase (`process_prd_rework_issues`) runs *before* the ready-issue phase (`run_once`). So the freshly generated Issue can be claimed and implemented in that same pass; the implementation commits land on the same `issue-<N>` branch and accumulate in the same draft PR as the PRD.
+By default, generation does **not** stop at the PRD. Step 8 adds `agent/ready`, and within the **same** `kc run` / daemon pass the PRD-rework phase (`process_prd_rework_issues`) runs *before* the ready-issue phase (`run_once`). So the freshly generated Issue can be claimed and implemented in that same pass; the implementation commits land on the same `issue-<N>` branch and accumulate in the same draft PR as the PRD.
 
 If you want the runner to generate the PRD but **hold before implementing** (e.g. to review the PRD on its own first), use the dependency gate. Add an `iar:depends-on` marker to the **Issue body**, pointing at a sentinel Issue you keep open until you are ready:
 
@@ -2100,9 +2100,9 @@ body_template = "..."
 prompt = "..."   # fallback only — used when the prd skill spec is unreachable
 ```
 
-In `mode = "agent"`, the PRD prompt is built from the `prd` skill spec rather than the inline `prompt`. The skill path is resolved as: explicit override → `IAR_PRD_SKILL_PATH` → keda's own `~/.iar/skills/prd` → per-agent user-level skills directories derived from each agent's `auth_home` in the agent registry（如 `~/.codex/skills`、`~/.claude/skills`、`~/.kimi-code/skills`）. `IAR_SKILLS_DIR` overrides the install root (CI and tests use it to land the install in a temporary directory). `iar init` fetches only `prd` and `code-reviewer` from the remote `ZataZhang/zata-codes-template` repository and installs them into keda's own skills root first, then into every detected agent's user-level skills root; Keda does not ship their contents in its wheel. Keda's own copy is resolved first on purpose: the agent directories belong to the agents and their user, so deleting the copy there must not cost the runner its ability to parse PRDs. The skill is the single source of the PRD methodology/output contract, so the inline `prompt` is kept only as a fallback for when the skill file cannot be read.
+In `mode = "agent"`, the PRD prompt is built from the `prd` skill spec rather than the inline `prompt`. The skill path is resolved as: explicit override → `KEDACODE_PRD_SKILL_PATH` → keda's own `~/.kedacode/skills/prd` → per-agent user-level skills directories derived from each agent's `auth_home` in the agent registry（如 `~/.codex/skills`、`~/.claude/skills`、`~/.kimi-code/skills`）. `KEDACODE_SKILLS_DIR` overrides the install root (CI and tests use it to land the install in a temporary directory). `kc init` fetches only `prd` and `code-reviewer` from the remote `ZataZhang/zata-codes-template` repository and installs them into keda's own skills root first, then into every detected agent's user-level skills root; Keda does not ship their contents in its wheel. Keda's own copy is resolved first on purpose: the agent directories belong to the agents and their user, so deleting the copy there must not cost the runner its ability to parse PRDs. The skill is the single source of the PRD methodology/output contract, so the inline `prompt` is kept only as a fallback for when the skill file cannot be read.
 
-The skill is also the single source of PRD **parsing**: Acceptance Checklist and Change Log structure come from the skill's `scripts/prd_contract.py`, which the runner invokes as a subprocess and consumes as JSON. Keda carries no parser of its own, so the skill must be installed as a whole — `iar init` copies the full `skills/prd` directory, `scripts/` included. The startup preflight checks both the contract version and the presence of that sibling script, which means **the unit test suite needs a real installed skill too**: CI installs one (`iar init` with `IAR_SKILLS_DIR` pointing at a temporary skills root, exported as `IAR_PRD_SKILL_PATH`) and local runs need the skill installed (`iar init`) or `IAR_PRD_SKILL_PATH` set.
+The skill is also the single source of PRD **parsing**: Acceptance Checklist and Change Log structure come from the skill's `scripts/prd_contract.py`, which the runner invokes as a subprocess and consumes as JSON. Keda carries no parser of its own, so the skill must be installed as a whole — `kc init` copies the full `skills/prd` directory, `scripts/` included. The startup preflight checks both the contract version and the presence of that sibling script, which means **the unit test suite needs a real installed skill too**: CI installs one (`kc init` with `KEDACODE_SKILLS_DIR` pointing at a temporary skills root, exported as `KEDACODE_PRD_SKILL_PATH`) and local runs need the skill installed (`kc init`) or `KEDACODE_PRD_SKILL_PATH` set.
 
 See the "Generated Content 配置" section above for the full template variable list and example.
 
@@ -2120,7 +2120,7 @@ After fixing the root cause, manually re-add `agent/rework-prd` to retry.
 
 Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处理。以下是将失败 Issue 重新置为可执行状态的完整流程。
 
-> 非 publish 阶段失败的 `Agent Runner Failed` 评论末尾自带 `How To Recover` 段，包含可直接复制的 relabel 命令和本章节指向；publish 阶段失败的评论则提示 `iar recover`。两类评论的指引与本章节命令保持一致。
+> 非 publish 阶段失败的 `Agent Runner Failed` 评论末尾自带 `How To Recover` 段，包含可直接复制的 relabel 命令和本章节指向；publish 阶段失败的评论则提示 `kc recover`。两类评论的指引与本章节命令保持一致。
 
 ### 错误分级与 fallback 链（escalation ladder）
 
@@ -2135,30 +2135,30 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 
 配置示例见上文 `[agent_runner.runner]`：`agent_fallback_order` / `max_agent_switches` / `transient_retry_attempts` / `transient_retry_delay_seconds`。
 
-### 并行处理 Issue（`iar daemon --concurrency`）
+### 并行处理 Issue（`kc daemon --concurrency`）
 
-默认 `iar daemon` **逐个串行**处理 Issue。机器空闲、队列较多时，可以让同一轮并行跑多个 Issue：
+默认 `kc daemon` **逐个串行**处理 Issue。机器空闲、队列较多时，可以让同一轮并行跑多个 Issue：
 
 ```bash
 # 本轮最多并行处理 3 个 Issue（自动领取至多 3 个）
-iar daemon --concurrency 3
+kc daemon --concurrency 3
 ```
 
 - **取值来源**：未传 `--concurrency` 时回退到 `[agent_runner.runner].max_concurrent_issues`（默认 `1` = 串行，行为与改动前逐字节一致）。
 - **领取上限**：并行时单轮领取上限抬到 `max(max_issues, concurrency)`，所以单独一个 `--concurrency N` 即可领到并跑 N 个，无需再调 `--max-issues`。
 - **隔离**：每个 Issue 仍各自 worktree / 分支；共享仓库的 worktree 创建被串行化以避开 `.git` 竞争，真正耗时的 agent 执行阶段全程并行。
-- **作用范围**：仅 `iar daemon`（含 `iar daemon run`）。多仓库（`--all`）仍逐仓库串行、仓库内 Issue 并行。
+- **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）仍逐仓库串行、仓库内 Issue 并行。
 - **成本提醒**：`--concurrency N` 即 N 路 agent 同时烧 token，请按额度与机器资源设定。
 
-> “本次优先某个 agent”无需新参数：`iar daemon --agent claude` 已把该 agent 放到 fallback 链首位（见上文 escalation ladder）。
+> “本次优先某个 agent”无需新参数：`kc daemon --agent claude` 已把该 agent 放到 fallback 链首位（见上文 escalation ladder）。
 
 #### 并行时查看每个 Issue 的日志
 
 并行时多个 agent 的输出若都打到同一个终端会交错成乱码，因此 runner 会按 Issue 分流：
 
 - **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。agent 流式输出的每行行首带 `[HH:MM:SS]` 时间戳，与心跳行的时间前缀对得上。
-- **实时看板**（前台 TTY）：在交互终端直接 `iar daemon --concurrency 3` 时，会显示一个仿 `iar deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`iar registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。看板与纯文本视图收到的都是路由 sink 那份文本，因此每行顺序是 `[issue #N status=...] [HH:MM:SS] 原文`。
-- **按 Issue 从第二终端 / Console 查看**：`iar logs --repo-id <repo> --issue <N> [--follow]` 或 Console 的 PRD 详情「实时输出」标签，都读取同一份 per-Issue 日志文件；单次 `iar run`（串行）也走同一路径，只是不显示多列看板。
+- **实时看板**（前台 TTY）：在交互终端直接 `kc daemon --concurrency 3` 时，会显示一个仿 `kc deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`kc registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。看板与纯文本视图收到的都是路由 sink 那份文本，因此每行顺序是 `[issue #N status=...] [HH:MM:SS] 原文`。
+- **按 Issue 从第二终端 / Console 查看**：`kc logs --repo-id <repo> --issue <N> [--follow]` 或 Console 的 PRD 详情「实时输出」标签，都读取同一份 per-Issue 日志文件；单次 `kc run`（串行）也走同一路径，只是不显示多列看板。
 
 ### 进度落盘与跨 claim 续作（checkpoint）
 
@@ -2227,7 +2227,7 @@ iar daemon --concurrency 3
 
    ```bash
    # 单次轮询（立即执行）
-   iar run
+   kc run
 
    # 或等待 daemon 下次轮询
    ```
@@ -2273,7 +2273,7 @@ agent/running ── forbidden path 拦截 ──→ agent/blocked ── blocke
    进入对应 worktree，根据业务需求选择提交、修改或撤销这些文件：
 
    ```bash
-   cd $(iar worktree path --branch issue-<number>)
+   cd $(kc worktree path --branch issue-<number>)
    git status
    # 处理 forbidden 文件后确保 worktree 干净
    git add -A && git commit -m "resolve forbidden paths"
@@ -2282,7 +2282,7 @@ agent/running ── forbidden path 拦截 ──→ agent/blocked ── blocke
 3. **运行 blocked-continue 继续执行**
 
    ```bash
-   uv run iar blocked-continue --issue <number>
+   uv run kc blocked-continue --issue <number>
    ```
 
    CLI 会依次执行：
@@ -2295,11 +2295,11 @@ agent/running ── forbidden path 拦截 ──→ agent/blocked ── blocke
 
 ### 竞争安全
 
-多个 runner 同时处理同一个 blocked Issue 时，只有第一个成功执行 label CAS 的 runner 会继续。其他 runner 会收到明确提示并跳过。即使 `iar blocked-continue` 只写了 marker 但 CAS 被其他进程抢占，后续 `iar run` 轮询时也会检测到该 marker 并完成认领。
+多个 runner 同时处理同一个 blocked Issue 时，只有第一个成功执行 label CAS 的 runner 会继续。其他 runner 会收到明确提示并跳过。即使 `kc blocked-continue` 只写了 marker 但 CAS 被其他进程抢占，后续 `kc run` 轮询时也会检测到该 marker 并完成认领。
 
 ### 与 run 兜底路径的关系
 
-`iar run` 在消耗完 `agent/ready` 和 `agent/running` 配额后，也会扫描 `agent/blocked` Issue。对带有 `blocked_resolution_requested` marker 的 Issue，它会执行同样的 CAS 竞争认领。这意味着：
+`kc run` 在消耗完 `agent/ready` 和 `agent/running` 配额后，也会扫描 `agent/blocked` Issue。对带有 `blocked_resolution_requested` marker 的 Issue，它会执行同样的 CAS 竞争认领。这意味着：
 
 - 你可以只写 marker（通过脚本或评论），不运行 `blocked-continue`，由 daemon 自动认领
 - 也可以运行 `blocked-continue` 立即触发 continuation
@@ -2322,13 +2322,13 @@ agent/blocked ── 人工处理 + blocked-continue ──→ agent/running ─
 
 当 Agent 已完成代码修改、生成本地 commit，并且 runner 已经走到发布阶段（push、PR 创建、label 更新等）后失败时，Issue 会被标记为 `agent/failed`。此时重新运行 Agent 是浪费且可能引入不必要代码变更的。
 
-`iar recover` 命令用于安全、幂等地完成发布收尾，无需重新启动 Agent。
+`kc recover` 命令用于安全、幂等地完成发布收尾，无需重新启动 Agent。
 
 ### 何时使用 recover
 
 - Agent 已执行完毕，本地 commit 已存在
 - 发布阶段因网络错误、GitHub CLI 认证过期、API 限流等原因失败
-- Issue 失败 comment 中包含 `iar recover --issue <number>` 提示
+- Issue 失败 comment 中包含 `kc recover --issue <number>` 提示
 - 该本地 commit 已经由正常 runner 路径完成过配置启用的 pre-PR review，失败点只在 push、PR 创建或 label/comment 更新等发布收尾阶段
 
 ### 不适用的情况
@@ -2339,11 +2339,11 @@ agent/blocked ── 人工处理 + blocked-continue ──→ agent/running ─
 - 当前分支是 base branch
 - forbidden path 在 commit 阶段拦截后，由人工整理并提交了 worktree，但这些提交还没有经过 pre-PR review
 
-> **注意**：`iar labels sync` 只同步 GitHub labels，**不**校验发布环境。`iar run` 在领取 Issue 前会检查 `[agent_runner.git].remote` 是否存在。
+> **注意**：`kc labels sync` 只同步 GitHub labels，**不**校验发布环境。`kc run` 在领取 Issue 前会检查 `[agent_runner.git].remote` 是否存在。
 
 ### 与 pre-PR review 和 post-PR supervisor 的关系
 
-`iar recover` 只做发布收尾：校验 worktree 干净、校验分支、push、创建或复用 Draft PR、更新 Issue label 和 comment。它不会运行 pre-PR review（因为恢复路径要求本地 commit 已经由正常 runner 路径完成过 pre-PR review）。
+`kc recover` 只做发布收尾：校验 worktree 干净、校验分支、push、创建或复用 Draft PR、更新 Issue label 和 comment。它不会运行 pre-PR review（因为恢复路径要求本地 commit 已经由正常 runner 路径完成过 pre-PR review）。
 
 新建 Draft PR 时，正文复用正常发布路径的 `create_draft_pr` 用例，因此和正常发布一致：内容生成（LLM 正文）+ contract anchors + validation checklist + contract block。内容生成需要内容生成器（`run_recover_command` 装配），生成失败时按 `generated_content` 配置退回 template / fallback。仅当 `get_issue` 失败、拿不到 Issue 标题与正文上下文时才退回确定性极简正文（`Recovered by issue-agent-runner.`）。复用已存在的 PR 时不会改写其正文。
 
@@ -2351,7 +2351,7 @@ agent/blocked ── 人工处理 + blocked-continue ──→ agent/running ─
 
 **当 `post_pr_supervisor.enabled = false` 时**，成功恢复后直接移除 `agent/failed` / `agent/running` / `agent/ready`，添加 `agent/review`。
 
-如果失败发生在 `Refusing to publish forbidden paths: ...` 这类 forbidden path 拦截处，并且人工已经确认这些文件可以提交、手动创建了本地 commit，应改走 `agent/running` 的本地 commit 复用路径，让 `iar run` 执行完整的 verification、pre-PR review、publish 和 post-PR supervisor：
+如果失败发生在 `Refusing to publish forbidden paths: ...` 这类 forbidden path 拦截处，并且人工已经确认这些文件可以提交、手动创建了本地 commit，应改走 `agent/running` 的本地 commit 复用路径，让 `kc run` 执行完整的 verification、pre-PR review、publish 和 post-PR supervisor：
 
 ```bash
 # 1. 在对应 issue worktree 中确认已有本地 commit，且工作区干净
@@ -2362,7 +2362,7 @@ git log -1 --oneline
 gh issue edit <number> --add-label agent/running --remove-label agent/failed,agent/ready
 
 # 3. 触发一次 runner 轮询；run 没有 --issue 参数，会扫描可处理的 Issues
-uv run iar run
+uv run kc run
 ```
 
 这条恢复路径要求 worktree 相对配置的 `{remote}/{base_branch}` 有本地 commit，且 `git status --short` 为空。若当前还有 `agent/ready` backlog，runner 会先消耗 ready 配额；必要时提高 `--max-issues`，或在没有 ready backlog 时执行。
@@ -2371,15 +2371,15 @@ uv run iar run
 
 ```bash
 # 恢复 Issue #5 的发布
-uv run iar recover --issue 5
+uv run kc recover --issue 5
 
 # 如果当前分支名不包含 issue 编号，需要显式确认分支
-uv run iar recover --issue 5 --branch feature-xyz
+uv run kc recover --issue 5 --branch feature-xyz
 ```
 
 ### 分支安全与 Issue number 边界
 
-`iar recover` 默认要求当前分支名把 Issue number 当作**完整 token 或路径 segment** 包含在内。以下分支在恢复 Issue #42 时会被**拒绝**：
+`kc recover` 默认要求当前分支名把 Issue number 当作**完整 token 或路径 segment** 包含在内。以下分支在恢复 Issue #42 时会被**拒绝**：
 
 - `issue-421`（42 不是完整 segment）
 - `feature/issue-420`（420 ≠ 42）
@@ -2395,7 +2395,7 @@ uv run iar recover --issue 5 --branch feature-xyz
 如果当前分支确实不匹配但你想强制恢复，使用 `--branch` 显式确认：
 
 ```bash
-uv run iar recover --issue 42 --branch issue-421
+uv run kc recover --issue 42 --branch issue-421
 ```
 
 此时 runner 会精确比较当前分支与 `--branch` 参数，完全相等才放行。
@@ -2415,7 +2415,7 @@ uv run iar recover --issue 42 --branch issue-421
 
 ### 安全边界
 
-`iar recover` **不会**执行以下操作：
+`kc recover` **不会**执行以下操作：
 
 - 运行 implementation Agent 命令或 recovery prompt（新建 PR 时的正文**内容生成**是独立于实现阶段的一次 LLM 调用，不属于此列）
 - 执行 `git add` 或 `git commit`
@@ -2423,11 +2423,11 @@ uv run iar recover --issue 42 --branch issue-421
 - 合并分支或删除分支
 - 推送到非配置 remote
 
-当 `post_pr_supervisor.enabled = true` 时，`iar recover` 会复用现有 supervisor repair loop，但 supervisor 本身仍然是只读审阅；需要代码修改时由现有 repair/rebase commit proxy 处理，不会由 supervisor 直接提交文件。
+当 `post_pr_supervisor.enabled = true` 时，`kc recover` 会复用现有 supervisor repair loop，但 supervisor 本身仍然是只读审阅；需要代码修改时由现有 repair/rebase commit proxy 处理，不会由 supervisor 直接提交文件。
 
 ### 手动恢复回退
 
-当无法使用 `iar recover` 命令、需要人工兜底时，可手动执行以下命令完成恢复。
+当无法使用 `kc recover` 命令、需要人工兜底时，可手动执行以下命令完成恢复。
 
 **如果 `post_pr_supervisor.enabled = true`：**
 
@@ -2467,14 +2467,14 @@ gh issue edit <number> --add-label agent/review --remove-label agent/failed,agen
 
 ## 多机部署与操作指南
 
-`iar` 支持在单台或多台电脑上运行。以下介绍两种典型部署方式：
+`kc` 支持在单台或多台电脑上运行。以下介绍两种典型部署方式：
 
 ### 角色分工
 
 | 电脑 | 角色 | 做什么 |
 |------|------|--------|
 | **A 电脑** | 任务管理端 | 写 PRD → 创建 GitHub Issue → 查看 AI 生成的 PR |
-| **B 电脑** | Agent 执行端 | 常驻运行 `iar daemon`，轮询 Issue、执行 AI、提交代码 |
+| **B 电脑** | Agent 执行端 | 常驻运行 `kc daemon`，轮询 Issue、执行 AI、提交代码 |
 | **同一台电脑** | 混合 | A 和 B 的操作都在这台机器上执行 |
 
 ### A 电脑操作（任务管理端）
@@ -2498,11 +2498,11 @@ gh auth login
 
 ```bash
 cd /path/to/target-repo
-uv run --project /path/to/keda iar init
-uv run --project /path/to/keda iar labels sync
+uv run --project /path/to/keda kc init
+uv run --project /path/to/keda kc labels sync
 ```
 
-> `target-repo` 是你要 AI 改代码的目标仓库（不是 keda 本身）。如果已经安装了 `iar` 脚本，也可以在目标仓库中直接运行 `iar init` 和 `iar labels sync`。
+> `target-repo` 是你要 AI 改代码的目标仓库（不是 keda 本身）。如果已经安装了 `kc` 脚本，也可以在目标仓库中直接运行 `kc init` 和 `kc labels sync`。
 
 #### 3. 写 PRD 并创建 Issue
 
@@ -2510,7 +2510,7 @@ uv run --project /path/to/keda iar labels sync
 # 写 PRD 文件，例如 tasks/pending/feature-login.md
 # 然后创建 GitHub Issue
 cd /path/to/target-repo
-uv run --project /path/to/keda iar issue create tasks/pending/feature-login.md \
+uv run --project /path/to/keda kc issue create tasks/pending/feature-login.md \
   --type feature \
   --agent codex \
   --ready
@@ -2520,7 +2520,7 @@ uv run --project /path/to/keda iar issue create tasks/pending/feature-login.md \
 
 #### PRD 发布边界（`--publish-prd` / `--no-publish-prd`）
 
-`iar issue create` 默认发布 PRD（`--publish-prd` 默认开启）。传入 `--no-publish-prd` 时只创建 Issue 并本地回写 PRD，不执行 `git add`、`git commit` 或 `git push`，转而通过交互式 prompt 询问是否发布。
+`kc issue create` 默认发布 PRD（`--publish-prd` 默认开启）。传入 `--no-publish-prd` 时只创建 Issue 并本地回写 PRD，不执行 `git add`、`git commit` 或 `git push`，转而通过交互式 prompt 询问是否发布。
 
 发布 PRD 时，命令会在 Issue URL 回写到目标 PRD 后执行 PRD-only 发布：只 `git add` 传入的 PRD 文件，只提交该 PRD 文件，然后 push 到 `config.toml` 中 `[agent_runner.git]` 配置的 remote。工作区其他未跟踪或已修改文件不会被加入这个 commit；如果 Git index 里已经 staged 了非目标 PRD 文件，命令会失败，避免把用户已有 staged changes 混入 PRD 发布 commit。
 
@@ -2528,7 +2528,7 @@ uv run --project /path/to/keda iar issue create tasks/pending/feature-login.md \
 
 Ready 发布要求当前分支等于 `[agent_runner.git].base_branch`，因为 runner 默认从 base branch 创建 worktree。若当前分支不是 base branch，命令会失败并提示切换到 base branch 或改用 `--no-ready`。
 
-如果 PRD 发布阶段的 Git 命令失败，例如 `git commit` 被 pre-commit hook 拦截，`iar issue create` 会在终端和日志中展示失败命令、退出码以及捕获到的 stdout/stderr，便于直接看到 hook 或 Git 返回的原始错误。
+如果 PRD 发布阶段的 Git 命令失败，例如 `git commit` 被 pre-commit hook 拦截，`kc issue create` 会在终端和日志中展示失败命令、退出码以及捕获到的 stdout/stderr，便于直接看到 hook 或 Git 返回的原始错误。
 
 Runner 新建 issue worktree 时，默认会同步 base branch 的远程 tracking ref 作为起点，使新分支基于最新远程提交，而非可能过期的本地 base branch。复用已存在的 worktree 时，runner 会在 agent 执行前自动将当前 worktree 分支与配置的远程同名分支做安全对齐：仅当 worktree 干净且本地分支是远程分支的祖先时执行 fast-forward；本地已有未发布 commit 时保留本地状态；worktree 脏或分支已分叉时显式失败，要求人工处理，而不是自动 rebase、merge 或 reset。
 
@@ -2545,7 +2545,7 @@ Runner 新建 issue worktree 时，默认会同步 base branch 的远程 trackin
 git clone <target-repo-url>
 cd target-repo
 
-# 安装 keda 项目依赖（需要 iar CLI）
+# 安装 keda 项目依赖（需要 kc CLI）
 git clone <keda-repo-url> ~/keda
 cd ~/keda && just sync
 ```
@@ -2581,8 +2581,8 @@ export ANTHROPIC_API_KEY="sk-ant-your-anthropic-key"
 kimi --help
 ```
 
-> 也可以把 API Key 写到 `.env` 文件里，iar 会自动加载。
-> `iar` 以无人值守方式调用 Claude Code，会使用 `--dangerously-skip-permissions` 跳过文件编辑权限确认，并启用 verbose `stream-json`。runner 会过滤原始 JSON，只显示工具调用摘要、assistant 文本和最终错误。
+> 也可以把 API Key 写到 `.env` 文件里，kc 会自动加载。
+> `kc` 以无人值守方式调用 Claude Code，会使用 `--dangerously-skip-permissions` 跳过文件编辑权限确认，并启用 verbose `stream-json`。runner 会过滤原始 JSON，只显示工具调用摘要、assistant 文本和最终错误。
 
 #### 3. 单次执行（测试用）
 
@@ -2590,10 +2590,10 @@ kimi --help
 cd /path/to/target-repo
 
 # Dry run 预览（不实际执行）
-uv run --project ~/keda iar run --dry-run
+uv run --project ~/keda kc run --dry-run
 
 # 真正执行一次（当前仓库）
-uv run --project ~/keda iar run --agent codex
+uv run --project ~/keda kc run --agent codex
 ```
 
 #### 4. Daemon 常驻模式（生产用）
@@ -2602,7 +2602,7 @@ uv run --project ~/keda iar run --agent codex
 cd /path/to/target-repo
 
 # 每 120 秒轮询一次（当前仓库）
-uv run --project ~/keda iar daemon --agent auto
+uv run --project ~/keda kc daemon --agent auto
 ```
 
 > 建议用 `tmux`、`screen` 或 `systemd` 保持后台运行。
@@ -2610,8 +2610,8 @@ uv run --project ~/keda iar daemon --agent auto
 **用 tmux 保持后台：**
 
 ```bash
-tmux new -s iar-daemon
-cd /path/to/target-repo && uv run --project ~/keda iar daemon
+tmux new -s kc-daemon
+cd /path/to/target-repo && uv run --project ~/keda kc daemon
 # 按 Ctrl+B 再按 D  detach
 ```
 
@@ -2623,7 +2623,7 @@ cd /path/to/target-repo && uv run --project ~/keda iar daemon
 cd /path/to/target-repo
 
 # 每 120 秒检查一次 supervising/review Issues
-uv run --project ~/keda iar review-daemon
+uv run --project ~/keda kc review-daemon
 ```
 
 ### 同一台电脑运行
@@ -2642,14 +2642,14 @@ export OPENAI_API_KEY="sk-xxx"
 
 # 3. 在目标仓库初始化并同步 labels（首次）
 cd /path/to/target-repo
-uv run --project /path/to/keda iar init
-uv run --project /path/to/keda iar labels sync
+uv run --project /path/to/keda kc init
+uv run --project /path/to/keda kc labels sync
 
 # 4. 创建 Issue
-uv run --project /path/to/keda iar issue create tasks/pending/xxx.md --agent codex --ready
+uv run --project /path/to/keda kc issue create tasks/pending/xxx.md --agent codex --ready
 
 # 5. 启动 daemon 自动执行
-uv run --project /path/to/keda iar daemon
+uv run --project /path/to/keda kc daemon
 ```
 
 ### 运行前检查清单
@@ -2663,16 +2663,16 @@ uv run --project /path/to/keda iar daemon
 | API Key 已设置？ | `echo $OPENAI_API_KEY` / `echo $ANTHROPIC_API_KEY` |
 | 目标仓库路径正确？ | `ls /path/to/target-repo/.git` |
 
-> **自动认证检测**：执行 `iar labels sync`、`iar issue create`、`iar run`、`iar daemon`、`iar review`、`iar review-daemon` 等需要 GitHub API 的命令前，`iar` 会自动检测 `gh` 认证状态。如果认证失效，会提示运行 `gh auth login -h github.com` 并以退出码 1 退出，避免暴露原始异常。
+> **自动认证检测**：执行 `kc labels sync`、`kc issue create`、`kc run`、`kc daemon`、`kc review`、`kc review-daemon` 等需要 GitHub API 的命令前，`kc` 会自动检测 `gh` 认证状态。如果认证失效，会提示运行 `gh auth login -h github.com` 并以退出码 1 退出，避免暴露原始异常。
 >
 > 在 CI 或脚本环境中，可设置环境变量跳过该检查：
 > ```bash
-> IAR_SKIP_GH_AUTH_CHECK=1 iar labels sync
+> KEDACODE_SKIP_GH_AUTH_CHECK=1 kc labels sync
 > ```
 
 ## 配置
 
-Agent Runner 的默认配置来自 keda 的 `config.toml`，目标仓库细节优先来自目标仓库 `.iar.toml`。两者使用相同的 `[agent_runner.*]` section shape；通常把通用默认值放在 `config.toml`，把仓库特定的 `git`、`runner`、`labels` 等覆盖项放在 `.iar.toml`。
+Agent Runner 的默认配置来自 keda 的 `config.toml`，目标仓库细节优先来自目标仓库 `.kedacode.toml`。两者使用相同的 `[agent_runner.*]` section shape；通常把通用默认值放在 `config.toml`，把仓库特定的 `git`、`runner`、`labels` 等覆盖项放在 `.kedacode.toml`。
 
 ```toml
 [agent_runner]
@@ -2694,9 +2694,9 @@ remote = "origin"
 base_branch = "main"
 
 [agent_runner.worktree]
-create_command = "iar worktree create --branch issue-{issue_number} --base-branch {base_branch}"
-reuse_command = "iar worktree path --branch issue-{issue_number}"
-path_command = "iar worktree path --branch issue-{issue_number}"
+create_command = "kc worktree create --branch issue-{issue_number} --base-branch {base_branch}"
+reuse_command = "kc worktree path --branch issue-{issue_number}"
+path_command = "kc worktree path --branch issue-{issue_number}"
 provision_database = true
 
 [agent_runner.runner]
@@ -2780,7 +2780,7 @@ reclaim_ttl_seconds = 10800
 
 硬中断(SIGKILL / 崩溃 / 关机)不会把 Issue 从 `agent/running` 退回,而 daemon 只认领 `agent/ready`,任务会就此卡死。开启 `reconcile_stale_attempts` 后,daemon 每轮开头会对本机认领、进程已死的 running Issue 做对账:worktree 完好且可续传时回 `agent/ready` 并续上原会话,否则回 `agent/ready` 全新重跑,worktree 不可解析或恢复预算耗尽时判 `agent/failed`,三种出口都留一条对账 comment。关闭该开关即回到本特性落地前的现状。跨机器的孤儿需在同一台机器上重启 daemon 才会被回收。判定细节、幂等机制与配置优先级见前面「崩溃对账与 Agent 会话续传」一节。
 
-配置优先级：目标仓库 `.iar.toml` 覆盖项 > 环境变量 > `config.toml` 全局默认值 > 代码默认值。目标仓库覆盖项只影响对应 repository context，不会改变 keda 全局设置。
+配置优先级：目标仓库 `.kedacode.toml` 覆盖项 > 环境变量 > `config.toml` 全局默认值 > 代码默认值。目标仓库覆盖项只影响对应 repository context，不会改变 keda 全局设置。
 
 Prompt 模板支持以下变量占位符：
 
@@ -2814,13 +2814,13 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
 ### 生成模式与回退
 
 - `mode = "agent"`（**默认**）：用 `.format()` 渲染配置的 `prompt`，调用本地只读 agent，解析输出。
-  `iar issue create`（从 PRD）、`iar issue create --from-prompt`（无 PRD）、开 Draft PR、rework-prd
+  `kc issue create`（从 PRD）、`kc issue create --from-prompt`（无 PRD）、开 Draft PR、rework-prd
   其中 Draft PR 正文默认 `draft_pr.enabled = false`，直接使用确定性正文；其余三处默认调一次 agent（超时上限
   `timeout_seconds`，默认 120 秒）。
 - `mode = "template"`（**已废弃**）：跳过 agent，直接用 `.format()` 渲染 `title_template` 和
   `body_template`。仍被接受，但将在后续版本移除；模板的长期用途是下面的失败兜底。
-  仓库 `.iar.toml` 里钉成 `mode = "template"` 的 target，加载配置时会记一条弃用警告（同一进程里
-  每份配置只提示一次）；如果它是旧版 `iar init` 留下的，用 `iar config migrate` 清理
+  仓库 `.kedacode.toml` 里钉成 `mode = "template"` 的 target，加载配置时会记一条弃用警告（同一进程里
+  每份配置只提示一次）；如果它是旧版 `kc init` 留下的，用 `kc config migrate` 清理
   （见「仓库本地配置」下的迁移小节）。
 
 `output` 必须与提示词要求的回复格式一致，并且**按 target 区分**，不是全局默认：
@@ -3045,7 +3045,7 @@ Marker 是幂等 cursor，不依赖本地状态文件。可读正文用于人类
 PRD 的 Realistic Validation 默认**必须由执行 agent 实跑**，并由人工基于真实证据（截图/输出）签收后才允许合并 PR。完整链路：
 
 ```text
-iar issue create        PRD 含 Realistic Validation 清单
+kc issue create        PRD 含 Realistic Validation 清单
                         → 物化为 <!-- iar:structured-evidence version=1 language="zh-CN" --> marker
                         → agent 解析每个 item 的格式要求（截图/pdf/txt等）
                         → 物化为 <!-- iar:evidence-format item=N kind=xxx --> marker
@@ -3056,7 +3056,7 @@ iar issue create        PRD 含 Realistic Validation 清单
 
 agent 执行              prompt 强制要求实跑验证计划，证据写入 worktree 的
                         tasks/evidence/<prd-stem>/（无 PRD 的 Issue 兜底到
-                        tasks/evidence/issue-<N>/）。git 语义由 iar init
+                        tasks/evidence/issue-<N>/）。git 语义由 kc init
                         provision 的 .gitignore 白名单保证：只有 *.md 文本
                         报告随 PR 进版本库，截图/录屏等原始产物被排除在
                         git 历史之外；发布前拦截仍是双保险。
@@ -3065,7 +3065,7 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
                         里复述，唯一出处是 prd skill 的 Machine Contract 章节；
                         prompt 只注入一行契约指针。解析实现也只有一份——skill
                         的 scripts/prd_contract.py；验收清单与 Change Log 由
-                        iar 把文本交给该脚本、取回 JSON，iar 不再自带解析。
+                        kc 把文本交给该脚本、取回 JSON，kc 不再自带解析。
                         daemon 起执行循环前预检 prd skill 可解析、契约主版本在
                         受支持集合内（当前 v3/v4/v5），且该脚本与 SKILL.md 成套
                         存在；缺失、不支持版本或只装半套均 fail fast 并提示
@@ -3082,7 +3082,7 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
 
 #### evidence.json 的 stdout_assertions（防假绿灯）
 
-命令 exit 0 不等于检查点成立：agent 只要写 `[ -d x ] || true`、`grep ... || echo ok` 之类兜底，就能让 iar 复跑时看到绿灯，而真实断言从未执行。manifest 的每个 item 可以**可选**声明 `stdout_assertions`，由 iar 在自己复跑该命令后对真实 stdout/stderr 做子串断言：
+命令 exit 0 不等于检查点成立：agent 只要写 `[ -d x ] || true`、`grep ... || echo ok` 之类兜底，就能让 kc 复跑时看到绿灯，而真实断言从未执行。manifest 的每个 item 可以**可选**声明 `stdout_assertions`，由 kc 在自己复跑该命令后对真实 stdout/stderr 做子串断言：
 
 ```json
 {
@@ -3160,7 +3160,7 @@ publish                 - diff 混入证据产物（.md 报告以外的证据路
 | `iar:event phase=validation_passed` | Issue comment | 人工签收完成审计（按 head 去重） |
 | `iar:event phase=validation_reset` | PR comment | 签收因新 push 失效被重置 |
 
-配置（`config.toml` 或 `.iar.toml`）：
+配置（`config.toml` 或 `.kedacode.toml`）：
 
 ```toml
 [agent_runner.validation]
@@ -3189,7 +3189,7 @@ validation_pending = "validation/pending"
 validation_passed = "validation/passed"
 ```
 
-语言配置只使用现有 TOML 配置体系（`config.toml` / `.iar.toml` 的 `[agent_runner.validation]`），不引入新的 `.iar/config` 文件，避免配置漂移。项目级默认语言写在 `config.toml`，单个仓库可通过 `.iar.toml` 覆盖。
+语言配置只使用现有 TOML 配置体系（`config.toml` / `.kedacode.toml` 的 `[agent_runner.validation]`），不引入新的 `.iar/config` 文件，避免配置漂移。项目级默认语言写在 `config.toml`，单个仓库可通过 `.kedacode.toml` 覆盖。
 
 ### verifier 判定的可诊断性：`red` 与"没吐 verdict"是两件事
 
@@ -3240,7 +3240,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 
 - **判定按 diff，不按清单文本**：即使某条 Realistic Validation 条目文字没写"截图/png"，只要改动碰了前端目录就要求视觉证据——覆盖"前端条目文本不含格式关键字导致逐项检查漏判"的盲区。
 - **独立于 verifier**：`verifier_enabled = false` 的仓库也照样受本门禁保护；它是确定性机械门禁，与对抗复验互补。
-- **默认开、可按仓关**：新键默认 `true`，既有 `.iar.toml`（无此键）升级后自动获得该门禁；确需关闭在 `[agent_runner.validation]` 写 `frontend_visual_evidence_required = false`，前端目录命名不同则用 `frontend_paths` 覆盖。
+- **默认开、可按仓关**：新键默认 `true`，既有 `.kedacode.toml`（无此键）升级后自动获得该门禁；确需关闭在 `[agent_runner.validation]` 写 `frontend_visual_evidence_required = false`，前端目录命名不同则用 `frontend_paths` 覆盖。
 - **只拦不产**：本门禁只保证"缺视觉证据即拦下"，不负责替你把证据跑出来；让 runner 环境能跑前端 e2e 属容器化能力。
 
 ### Structured evidence manifest 格式
@@ -3293,12 +3293,12 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 - 私有仓库中证据评论的内联图片可能不渲染，点击评论中的 `Open image` / `Open file` 链接进入 blob 页查看。
 - 证据分支与代码历史零共同祖先（`git log iar-evidence/issue-<N>` 只有一个无父提交），永不合并；Issue 关闭后由 daemon 轮询清理。
 - 其他目标仓库使用该能力时，需要把 `validation-gate.yml` 复制到该仓库的 `.github/workflows/` 并配置 required check。
-- PRD 侧规范：Realistic Validation 默认必做；只有 operator 确认的 PRD 才允许在 `### Realistic Validation` 小节写 `Validation Waiver: <理由>` 行，`iar issue create` 会将其物化为豁免 marker。同一小节写 `Evidence Format Waiver: <理由>` 行则只关闭该任务的逐项格式对账（证据仍必须存在），物化为 `iar:evidence-format-waived` marker。
+- PRD 侧规范：Realistic Validation 默认必做；只有 operator 确认的 PRD 才允许在 `### Realistic Validation` 小节写 `Validation Waiver: <理由>` 行，`kc issue create` 会将其物化为豁免 marker。同一小节写 `Evidence Format Waiver: <理由>` 行则只关闭该任务的逐项格式对账（证据仍必须存在），物化为 `iar:evidence-format-waived` marker。
 
 ## 安全边界
 
 - `auto_merge` 固定为 `false`，不会自动合并 PR
-- `iar labels sync` 只同步 GitHub labels，不校验发布 remote；`iar run` 在领取 Issue 前会校验 `[agent_runner.git].remote` 必须存在，不存在时直接失败并列出当前可用 remote
+- `kc labels sync` 只同步 GitHub labels，不校验发布 remote；`kc run` 在领取 Issue 前会校验 `[agent_runner.git].remote` 必须存在，不存在时直接失败并列出当前可用 remote
 - 发布变更前会检查 `forbidden_path_patterns`，拒绝匹配的文件变更
 - Agent 执行在隔离 worktree 中进行，不影响主工作区
 - Agent 不直接执行 `git add` 或 `git commit`；完成修改后写入 `.agent-runner/commit-request.json` 请求 runner 在 host 侧提交
@@ -3393,13 +3393,13 @@ Dashboard 首屏与轮询读的是第三个端点，见下节：
 ### 本地快照与后台定时同步
 
 Dashboard 的数据源是**本地快照**而不是现场扫描：打开页面先读 `GET /overview/snapshots`，
-数据来自 `~/.iar/console.db` 的 `monitoring_snapshots` 表（每个仓库一行，存整份
+数据来自 `~/.kedacode/console.db` 的 `monitoring_snapshots` 表（每个仓库一行，存整份
 per-repo overview JSON 与 `scanned_at`），因此即使 `gh` 慢或断网也能秒开并继续
 显示最近一次同步的结果。页面每 15 秒轻量轮询一次该端点，后台同步一写回界面就自动跟上。
 
 快照由一个后台同步循环维护：
 
-- 循环由 `iar console` 的 FastAPI lifespan 启动与回收（进程内唯一），导入路由模块不会产生任何线程。
+- 循环由 `kc console` 的 FastAPI lifespan 启动与回收（进程内唯一），导入路由模块不会产生任何线程。
 - 每个周期对当前启用仓库做一次全量扫描（仍走 `GET /overview` 的同一套构建逻辑），把**已经构建好的** payload 直接写回快照，不为写库重复扫描。
 - 同一仓库同一时刻只允许一次扫描：周期同步与手动刷新共用一个按仓库协调器，不同仓库可并行。
 - 全新环境没有快照时，由后端幂等触发一次首扫，前端只显示"尚未同步/正在同步"并轮询结果，不会重复创建扫描任务。
@@ -3426,10 +3426,10 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 
 | 异常类型 | 触发条件 | severity | 推荐 CLI |
 |---|---|---|---|
-| `label_pr_mismatch` | PR 已创建但 Issue label 不在 `agent/supervising` / `agent/review` / `agent/blocked` / `agent/failed` 中 | warning | `iar labels sync`、`iar review --dry-run` |
-| `pr_dirty_in_review` | PR `mergeable_state` 为 dirty/conflicted 且 label 是 `agent/review` | error | `iar review`、`iar run --max-issues 1` |
-| `dirty_worktree_mismatch` | worktree 有未提交变更但 label 不是 `agent/running` | warning | `iar run --dry-run`、`git status` |
-| `event_label_mismatch` | 最新 `iar:event` phase 隐含的状态与当前 label 不一致 | warning | `iar labels sync` |
+| `label_pr_mismatch` | PR 已创建但 Issue label 不在 `agent/supervising` / `agent/review` / `agent/blocked` / `agent/failed` 中 | warning | `kc labels sync`、`kc review --dry-run` |
+| `pr_dirty_in_review` | PR `mergeable_state` 为 dirty/conflicted 且 label 是 `agent/review` | error | `kc review`、`kc run --max-issues 1` |
+| `dirty_worktree_mismatch` | worktree 有未提交变更但 label 不是 `agent/running` | warning | `kc run --dry-run`、`git status` |
+| `event_label_mismatch` | 最新 `iar:event` phase 隐含的状态与当前 label 不一致 | warning | `kc labels sync` |
 
 Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warning` / `error`），并把 `has_anomaly` 标在对应 Issue 行上。
 
@@ -3439,7 +3439,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 ### 建议 CLI 文本
 
-每个 Issue 详情区都会列出当前状态推荐的 `iar` 命令文本（如 `iar review`）。命令旁有**复制**按钮，但**不直接执行**——所有恢复动作仍走 CLI，保留操作审计、避免 UI 端任意 shell。
+每个 Issue 详情区都会列出当前状态推荐的 `kc` 命令文本（如 `kc review`）。命令旁有**复制**按钮，但**不直接执行**——所有恢复动作仍走 CLI，保留操作审计、避免 UI 端任意 shell。
 
 ### 显式非目标
 
@@ -3447,7 +3447,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 - 不暴露任何修改 label、comment、PR、worktree 的 API。
 - 不执行任意 shell 命令、不能从 UI 改 label 或触发 agent。
-- 不替代 `iar run` / `iar review` / `iar labels sync` 等恢复命令。
+- 不替代 `kc run` / `kc review` / `kc labels sync` 等恢复命令。
 - Dashboard 展示的是本地快照（见「本地快照与后台定时同步」），不再每次进入页面现场扫描；但除快照表与同步设置表外不新增数据库表，也不引入 WebSocket 或独立调度服务；GitHub label/comment/PR 和本地 worktree 仍是事实来源。
 - 不实现自动 rebase 冲突解决；冲突的 Issue 会带 `agent/blocked` 状态出现在监控面板，由人类决定下一步。
 
@@ -3489,25 +3489,25 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 该端点用 `status` 字段表达落空原因（`not_git_repo` / `not_registered` /
 `disabled` / `ambiguous`），**不返回 4xx** —— cwd 匹配不上是正常状态，不是故障。
 
-### 启动方式（`iar console`）
+### 启动方式（`kc console`）
 
-管理终端的前端静态产物随 wheel 打包。装好 `iar` 后在任意目录一条命令即可启动，无需 clone keda、无需 Node / pnpm / just：
+管理终端的前端静态产物随 wheel 打包。装好 `kc` 后在任意目录一条命令即可启动，无需 clone keda、无需 Node / pnpm / just：
 
 ```bash
 # 启动 API + 内置面板并自动打开浏览器（前台运行）
-iar console
+kc console
 
 # 指定端口（省略时从 [agent_runner.console].port 起自动挑选空闲端口）
-iar console --port 8600
+kc console --port 8600
 
 # 只启动服务，不自动开浏览器
-iar console --no-browser
+kc console --no-browser
 ```
 
 - 服务固定监听 `127.0.0.1`（见下文信任边界）；端口缺省值来自
   `config.toml` 的 `[agent_runner.console].port`，被占用时自动顺延挑选
   空闲端口，显式指定的端口不顺延、占用即报错退出。
-- 源码开发模式（wheel 里没有静态产物）时，`iar console` 仍可启动并只
+- 源码开发模式（wheel 里没有静态产物）时，`kc console` 仍可启动并只
   提供 API，日志会提示先构建前端：`pnpm --filter frontend-public build`，
   再把 `frontend-public/out/` 复制到 `src/backend/api/static/console/`；
   或直接沿用 `just run` / `pnpm --filter frontend-public dev` 的开发双端口。
@@ -3527,7 +3527,7 @@ iar console --no-browser
 | `run_once` / `review_once` | 启动一次性托管子进程 |
 | `stop_process` | SIGTERM 停止托管进程，超时升级 SIGKILL |
 | `retry_failed` | 把 failed Issue 的 label 翻转回 ready（与手工操作等价） |
-| `blocked_continue` | 启动一次性 `iar blocked-continue` 托管子进程 |
+| `blocked_continue` | 启动一次性 `kc blocked-continue` 托管子进程 |
 | `registry_add` / `registry_set_enabled` | registry 写回（路径必须存在、为 git 仓库，且未被其他 repo_id 占用） |
 | `registry_remove` | 停该仓库常驻进程后删除 registry 条目；只删注册，不删本地仓库目录 |
 
@@ -3542,16 +3542,16 @@ iar console --no-browser
 
 管理终端按 `(repo_id, kind)` 托管 runner 子进程。**每个仓库一个
 daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行，互不阻塞
-（CLI 的 `iar daemon` 在 cwd 命中唯一已初始化注册仓时只监控该仓，未命中、未初始化或匹配多个时报错；显式 `--all` 时才监控所有 enabled registry entries，但在单个进程内串行轮询）。
+（CLI 的 `kc daemon` 在 cwd 命中唯一已初始化注册仓时只监控该仓，未命中、未初始化或匹配多个时报错；显式 `--all` 时才监控所有 enabled registry entries，但在单个进程内串行轮询）。
 
 - 子进程以 `start_new_session` 脱离后端进程组：后端重启不影响执行中
-  的 runner；重启后从 pidfile registry（`~/.iar/processes.json`）复活
+  的 runner；重启后从 pidfile registry（`~/.kedacode/processes.json`）复活
   记录并重新探活。
-- 子进程以 `<iar> <command> --repo-id <id>` 启动，cwd 为**目标仓库自身
+- 子进程以 `<kc> <command> --repo-id <id>` 启动，cwd 为**目标仓库自身
   路径**：托管的 daemon 必须在目标仓库内读取该仓的 `.iar` 状态与 git
   上下文；全局安装场景下 keda 项目根与目标仓库无关。
-- 默认启动命令运行时解析：`iar console` 入口直接取 `sys.argv[0]`（与
-  当前安装态完全同源），否则从 PATH 解析 `iar`，兜底 `uv run iar`（源码
+- 默认启动命令运行时解析：`kc console` 入口直接取 `sys.argv[0]`（与
+  当前安装态完全同源），否则从 PATH 解析 `kc`，兜底 `uv run kc`（源码
   树内的 uv 项目场景）。可用 `[agent_runner.console] runner_command`
   显式覆盖。
 - 进程 stdout/stderr 写入 `logs/agent-runner/processes/<repo_id>/`，
@@ -3565,7 +3565,7 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   响应标记 `truncated: true`。
 - **历史口径（本地 SQLite）**：`run_once` 编排在每个 Issue 处理收尾时
   写入一条运行记录（outcome：completed / failed / blocked），CLI 直跑
-  与面板托管共用 `~/.iar/console.db`（`history_db_path` 可配）。
+  与面板托管共用 `~/.kedacode/console.db`（`history_db_path` 可配）。
   `GET .../console/stats/history` 返回按天聚合趋势。
 
 SQLite 只是旁路记录，**不参与 workflow 状态机决策**——GitHub
@@ -3637,7 +3637,7 @@ blocked | unblocked | failed`，其中 `merged` 收成 `completed`（已完成�
 - **口径**：总量 = 输入 + 输出 + 缓存读 + 缓存写（实际处理量，缓存命中
   计入）；缓存命中率 = 缓存读 ÷ 输入侧。agent 未上报 usage（部分协议、
   超时被杀、旧记录）时**不估算**，展示为「—」且不进入汇总。
-- **CLI 查询**：`iar tokens [--repo-id <id>] [--days <N>] [--issue <n>] [--json]`
+- **CLI 查询**：`kc tokens [--repo-id <id>] [--days <N>] [--issue <n>] [--json]`
   在终端输出按流程 / 按 agent / 按 PRD（Issue）三张汇总表（与 Stats 端点
   同源同口径）；`--issue <n>` 把三张表收窄到单个 Issue，回答"这个 PRD 烧了
   多少"；`--json` 额外携带 `by_prd` 维度供脚本消费；空数据显示「—」或明确
@@ -3682,7 +3682,7 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
   **"未关联 PRD"**，仍可在最近运行列表查看，但**不纳入**完成分位数统计
   （计入 `unlinked_run_count`）；不通过标题、模糊路径或当前 label 猜测归属。
 
-**存储边界**：生命周期账本只落在本机 `~/.iar/console.db`（与运行历史、
+**存储边界**：生命周期账本只落在本机 `~/.kedacode/console.db`（与运行历史、
 审计同库，`history_db_path` 可配），**没有远程备份、不跨机器聚合**；
 删除该 SQLite 文件即丢失全部生命周期历史。`frontend-public` 的 Backlog
 详情与 Stats 只消费上述两个 API 的聚合结果，不自行计算耗时或状态。
@@ -3699,7 +3699,7 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
 绝对路径（`showDirectoryPicker` 只给不透明 handle，`webkitdirectory` 只有
 相对路径），所以由本机后端列举子目录，前端弹窗逐级下钻。「选择此目录」选的是
 当前所在目录；选定后回填路径，`repo_id` 与显示名为空时按目录名自动补全
-（与 `iar registry` 扫描用的 `normalize_repository_id` 同一规则）。带
+（与 `kc registry` 扫描用的 `normalize_repository_id` 同一规则）。带
 `git 仓库` 标记的目录才能通过「校验并添加」。
 
 ### Console API 一览
@@ -3720,7 +3720,7 @@ GET    /api/v1/agent-runner/console/audit?limit=100
 GET    /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
 GET    /api/v1/agent-runner/repositories
 GET    /api/v1/agent-runner/repositories/browse?path=          目录选择器（只读）
-GET    /api/v1/agent-runner/repositories/discover?scan_root=   扫描已初始化 IAR 的仓库
+GET    /api/v1/agent-runner/repositories/discover?scan_root=   扫描已初始化 KedaCode 的仓库
 POST   /api/v1/agent-runner/repositories                       {repo_id, path, display_name}
 POST   /api/v1/agent-runner/repositories/batch                 {repositories: [...]}
 PATCH  /api/v1/agent-runner/repositories/{repo_id}             {enabled}
@@ -3730,37 +3730,37 @@ PATCH  /api/v1/agent-runner/repositories/{repo_id}             {enabled}
 
 ```toml
 [agent_runner.console]
-history_db_path = "~/.iar/console.db"            # 运行历史与审计 SQLite
-process_registry_path = "~/.iar/processes.json"  # 托管进程 pidfile
+history_db_path = "~/.kedacode/console.db"            # 运行历史与审计 SQLite
+process_registry_path = "~/.kedacode/processes.json"  # 托管进程 pidfile
 process_log_dir = "logs/agent-runner/processes"  # 进程日志目录（相对 keda 根）
-runner_command = ["uv", "run", "iar"]            # 托管进程启动命令前缀（缺省运行时解析，见上文）
+runner_command = ["uv", "run", "kc"]            # 托管进程启动命令前缀（缺省运行时解析，见上文）
 stop_timeout_seconds = 30                        # SIGTERM → SIGKILL 等待秒数
 monitor_sync_interval_seconds = 300              # dashboard 后台自动同步的静态默认间隔（秒，60–3600）
 host = "127.0.0.1"                               # 监听地址（固定本机，不开放配置其它网卡）
-port = 8600                                      # iar console 缺省端口（被占用时自动顺延）
+port = 8600                                      # kc console 缺省端口（被占用时自动顺延）
 ```
 
 `monitor_sync_interval_seconds` 只是**从来没有保存过界面设置**时的回落值；用户在
-dashboard 上改过的间隔存在 `~/.iar/console.db` 的 `monitor_settings` 表里，优先于配置。
+dashboard 上改过的间隔存在 `~/.kedacode/console.db` 的 `monitor_settings` 表里，优先于配置。
 
 ## deliberate 多 Agent 合议
 
-`iar deliberate` 启动一次只读的多 Agent 合议会话，适合在编码前对复杂需求做多视角推演。
+`kc deliberate` 启动一次只读的多 Agent 合议会话，适合在编码前对复杂需求做多视角推演。
 
 ### 基本用法
 
 ```bash
 # 使用默认 3 个 agent（architect、skeptic、implementer）合议 2 轮
-uv run iar deliberate "实现一个用户认证系统"
+uv run kc deliberate "实现一个用户认证系统"
 
 # 指定参与 agent 和轮数
-uv run iar deliberate "优化数据库查询性能" \
+uv run kc deliberate "优化数据库查询性能" \
   --agents architect,implementer \
   --rounds 3 \
   --synthesizer claude
 
 # 指定输出目录和 session ID（便于复现或测试）
-uv run iar deliberate "设计缓存策略" \
+uv run kc deliberate "设计缓存策略" \
   --output /tmp/deliberations \
   --session-id cache-strategy-001
 ```
@@ -3799,7 +3799,7 @@ uv run iar deliberate "设计缓存策略" \
 
 #### 交互式 TTY Live 视图
 
-在交互式终端（TTY）中运行时，`iar deliberate` 会显示实时 live view，并**按终端宽度自适应版式**：
+在交互式终端（TTY）中运行时，`kc deliberate` 会显示实时 live view，并**按终端宽度自适应版式**：
 
 - **宽终端并排分栏**：当 `终端宽度 / 当前并发 agent 数 ≥ 40 列` 时，每个 agent 占一栏并排显示，栏数等于当前并发运行的 agent 数量（默认 `architect`、`skeptic`、`implementer` 为三栏）。
 - **窄终端竖向堆叠**：当每栏宽度不足以容纳可读文本时，自动改为整宽面板上下堆叠，避免文字被压得过窄。
@@ -3850,7 +3850,7 @@ uv run iar deliberate "设计缓存策略" \
 
 ```bash
 # 运行合议
-uv run iar deliberate "test prompt" --rounds 1 --session-id test-001
+uv run kc deliberate "test prompt" --rounds 1 --session-id test-001
 
 # 检查输出文件
 ls logs/agent-runner/deliberations/test-001/workspaces/
@@ -3865,7 +3865,7 @@ cat logs/agent-runner/deliberations/test-001/workspaces/synthesizer/synthesis-ou
 
 若任一参与 agent 或 synthesizer 子进程返回非 0 退出码，默认行为不再整体失败，而是记录失败并继续；`--strict` 可恢复为失败即非 0。
 
-> **失败隔离与回退**：从本 PRD 起，`iar deliberate` 对单个 agent 失败默认隔离并继续。
+> **失败隔离与回退**：从本 PRD 起，`kc deliberate` 对单个 agent 失败默认隔离并继续。
 > - 失败 agent 的 `workspaces/<profile_id>/round-<n>-output.md` 保留 partial 输出。
 > - TTY 下会提示选择回退模型，5 分钟无选择自动切换到下一个可用模型。
 > - 非 TTY / CI 下直接自动切换，不阻塞。
@@ -3876,7 +3876,7 @@ cat logs/agent-runner/deliberations/test-001/workspaces/synthesizer/synthesis-ou
 
 ### 安全边界
 
-- `iar deliberate` 不执行 `git add`、`git commit`、`git push`、`gh issue` 或 `gh pr`
+- `kc deliberate` 不执行 `git add`、`git commit`、`git push`、`gh issue` 或 `gh pr`
 - 每个 agent 在 `logs/agent-runner/deliberations/<session_id>/workspaces/<profile_id>/` 下获得独立工作目录
 - 每次 agent 运行前后检查目标仓库 `git status --porcelain`；若发生变化，会话失败并写入 error event
 - 合议 prompt 明确禁止文件修改、提交、推送、创建 PR 和触碰真实业务数据
@@ -3972,7 +3972,7 @@ enabled = true               # 新键：仓库级显式打开
 
 ### 串行与 FIFO
 
-合并队列在同一 `iar review` / `iar review-daemon` pass 内按 **Issue 号升序** 串行处理；后一条的 rebase 天然基于前一条合并后的 base 推进。Repository 内没有并发合并——符合 GitHub 的 fast-forward 假设，单 PR 失败不外溢。
+合并队列在同一 `kc review` / `kc review-daemon` pass 内按 **Issue 号升序** 串行处理；后一条的 rebase 天然基于前一条合并后的 base 推进。Repository 内没有并发合并——符合 GitHub 的 fast-forward 假设，单 PR 失败不外溢。
 
 ### 不在范围内
 
@@ -3983,7 +3983,7 @@ enabled = true               # 新键：仓库级显式打开
 
 ## 运行日志
 
-`iar` 命令的运行日志按日期存放在 `logs/` 目录下，文件名格式为 `app-YYYY-MM-DD.log`：
+`kc` 命令的运行日志按日期存放在 `logs/` 目录下，文件名格式为 `app-YYYY-MM-DD.log`：
 
 ```bash
 # 查看今天的日志
@@ -4014,34 +4014,34 @@ ls -la logs/app-*.log | head -7
 - Agent 输出文本（按消息边界汇总）
 - 子进程输出（非 Claude agent 如 Codex/Kimi 的输出）
 
-## `iar ask` 自然语言决策入口
+## `kc ask` 自然语言决策入口
 
-`iar ask` 是受限自然语言决策入口，默认只生成计划并写入审计文件，不产生任何副作用。
+`kc ask` 是受限自然语言决策入口，默认只生成计划并写入审计文件，不产生任何副作用。
 
 ### 基本用法
 
 ```bash
 # 默认只输出计划
-uv run iar ask "帮我判断现在应该创建 issue 还是启动任务"
+uv run kc ask "帮我判断现在应该创建 issue 还是启动任务"
 
 # 显式选择 planner agent（默认 codex）
-uv run iar ask "从 pending PRD 中挑一个最适合创建 issue 的任务" --agent codex
+uv run kc ask "从 pending PRD 中挑一个最适合创建 issue 的任务" --agent codex
 
 # 只打印计划，适合 CI 或脚本验证
-uv run iar ask "现在可以跑一个 ready issue 吗" --plan-only
+uv run kc ask "现在可以跑一个 ready issue 吗" --plan-only
 
 # 进入确认执行流程（TTY 中要求输入 decision_id）
-uv run iar ask "从 tasks/pending/example.md 创建 issue" --execute
+uv run kc ask "从 tasks/pending/example.md 创建 issue" --execute
 
 # 非交互执行（仅允许 low/medium 风险动作）
-uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
+uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 ```
 
 ### 权限边界
 
 - **白名单动作**：`show_status`、`run_deliberation`、`create_issue_from_prd`、`mark_issue_ready`、`run_once_dry_run`、`run_once`、`review_once_dry_run`、`review_once`、`needs_clarification`、`no_op`
 - **禁止动作**：`git_push`、`git_merge`、`git_reset`、`daemon`、`review-daemon`、任意 shell 命令、自动 merge、直接关闭 Issue、删除分支等
-- **Planner 安全**：只读 planner / `iar ask` 的 agent 必须有**已声明的** `generate` 用途且该用途 `read_only = true`——门禁只读这个声明字段，不按 agent 名白名单判断（`factories/content_generators.py`）。当前内置注册表里 `codex`、`claude`、`kimi`、`pi`、`codebuddy`、`qoder` 都声明了 `read_only = true` 的 `generate`，因此都能作为 planner 启动；`opencode` 没有 `generate` 用途，会被拒绝并指名。注意这只校验**声明**：声明本身是否等于运行时真的只读，取决于各 agent 的 argv 是否带沙箱/只读开关（例如 `codex` 用 `--sandbox read-only`，而 `claude` / `codebuddy` / `qoder` 用的是 `--dangerously-skip-permissions`，不是沙箱级只读）。
+- **Planner 安全**：只读 planner / `kc ask` 的 agent 必须有**已声明的** `generate` 用途且该用途 `read_only = true`——门禁只读这个声明字段，不按 agent 名白名单判断（`factories/content_generators.py`）。当前内置注册表里 `codex`、`claude`、`kimi`、`pi`、`codebuddy`、`qoder` 都声明了 `read_only = true` 的 `generate`，因此都能作为 planner 启动；`opencode` 没有 `generate` 用途，会被拒绝并指名。注意这只校验**声明**：声明本身是否等于运行时真的只读，取决于各 agent 的 argv 是否带沙箱/只读开关（例如 `codex` 用 `--sandbox read-only`，而 `claude` / `codebuddy` / `qoder` 用的是 `--dangerously-skip-permissions`，不是沙箱级只读）。
 
 ### 确认策略
 
@@ -4108,7 +4108,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 1. 若 PRD 无 Issue，调用 `create_issue_from_prd` 的安全路径（`publish_prd=True, queue_ready=True`），在 PRD 成功发布到 base branch 后添加 `agent/ready`。
 2. 若 PRD 已有 Issue，直接添加 `agent/ready` 并移除 `agent/failed`。
-3. 启动一次 `iar run` 托管进程。
+3. 启动一次 `kc run` 托管进程。
 
 启动成功后页面会立刻重新拉取该仓的 PRD 列表，并把详情头部状态刷新为服务端返回的最新状态——不是本地乐观值，也不是只弹一个 toast。
 
@@ -4125,7 +4125,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 ### 仓库级 Autopilot 开关
 
-Backlog 顶部为当前选中仓库提供「Autopilot 自动推进」开关，写入该仓库根目录 `.iar.toml` 的 `[agent_runner.autopilot].enabled`。
+Backlog 顶部为当前选中仓库提供「Autopilot 自动推进」开关，写入该仓库根目录 `.kedacode.toml` 的 `[agent_runner.autopilot].enabled`。
 
 - 只改这一个布尔键：注释、顺序、同级键与未知子表在写回后逐字保留，写入采用同目录临时文件 + 完整加载校验 + 原子替换；写成功与否以**写后 fresh load 的生效配置**为判据，页面显示的值就是重新读出来的值。
 - 修改后不要求重启 console：daemon 每轮本来就读取对应仓库上下文，最迟下一轮生效；正在进行的那一轮不会被中断，页面文案写的是「将在下一轮生效」。
@@ -4133,8 +4133,8 @@ Backlog 顶部为当前选中仓库提供「Autopilot 自动推进」开关，�
   - **Autopilot 是否开启**（自动发现、依赖解锁、队列补位）；
   - **daemon 是否运行中**（状态来自既有 process supervisor 记录；daemon 没跑时显示「自动推进暂不执行」，开关值仍可保存，可用 Processes 页面启动 daemon）；
   - **自动合并是否启用**（`safety.auto_merge`）。
-- **开关不会联动打开 `safety.auto_merge`**。自动合并需要 `autopilot.enabled` 与 `safety.auto_merge` 同时为真（既有的双重危险动作门禁）；只有前者为真时流程会停在「待审阅」，人工合并后再由持续调度自动推进下游。想放开自动合并必须自己改 `.iar.toml`，UI 不会替你做这个决定。
-- 目标仓没有 `.iar.toml`、配置非法或不可写时返回 409，原文件保持不变。
+- **开关不会联动打开 `safety.auto_merge`**。自动合并需要 `autopilot.enabled` 与 `safety.auto_merge` 同时为真（既有的双重危险动作门禁）；只有前者为真时流程会停在「待审阅」，人工合并后再由持续调度自动推进下游。想放开自动合并必须自己改 `.kedacode.toml`，UI 不会替你做这个决定。
+- 目标仓没有 `.kedacode.toml`、配置非法或不可写时返回 409，原文件保持不变。
 
 ### 全局调度
 
@@ -4163,14 +4163,14 @@ Backlog 顶部为当前选中仓库提供「Autopilot 自动推进」开关，�
 
 daemon 路径下的晋升**只**做幂等的 Issue 创建/复用 + 打上 `agent/ready` label，**不 spawn 进程**；真正的进程拉起仍由 daemon 的 Phase 2 在消费 `agent/ready` 时统一完成。该阶段仅在 `autopilot.enabled` 时执行，任何异常都会被记录且不影响 daemon 后续阶段。这个已有的开关正是 Backlog 顶部「Autopilot 自动推进」所控制的那个值（见上文「仓库级 Autopilot 开关」）；开关关闭后同一个场景零晋升，用 Backlog 页面与其它配置入口改这个键的效果完全一致。
 
-#### 手动触发：iar backlog advance
+#### 手动触发：kc backlog advance
 
 ```bash
 # 预演：输出完整调度计划，零副作用
-uv run iar backlog advance --dry-run
+uv run kc backlog advance --dry-run
 
 # 实际执行
-uv run iar backlog advance --repo <repo-id>
+uv run kc backlog advance --repo <repo-id>
 ```
 
 `--dry-run` 会打印对账结果（completed / failed 泊车）、`max_parallel` 与 `free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
@@ -4192,7 +4192,7 @@ uv run iar backlog advance --repo <repo-id>
 
 #### 策略模型：全局默认 + 单 PRD 三态覆盖
 
-- **全局默认**：仓库级 `post_pr_supervisor.auto_repair_ci`（`.iar.toml`，默认 `false`），由 Backlog 顶部「全局自动修复 CI/CD」开关或 `iar backlog ci policy --global on|off` 控制；只改这一个布尔键，与 Autopilot、`safety.auto_merge`、提交前 Fix Agent 互不联动（Autopilot 的合并队列等 checks 全绿是合并门禁，不会因失败而触发自动修复）。
+- **全局默认**：仓库级 `post_pr_supervisor.auto_repair_ci`（`.kedacode.toml`，默认 `false`），由 Backlog 顶部「全局自动修复 CI/CD」开关或 `kc backlog ci policy --global on|off` 控制；只改这一个布尔键，与 Autopilot、`safety.auto_merge`、提交前 Fix Agent 互不联动（Autopilot 的合并队列等 checks 全绿是合并门禁，不会因失败而触发自动修复）。
 - **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- iar:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
 - **最终生效值**由服务端按 `显式 on/off ?? fresh 全局值` 计算（`on → true`、`off → false`、`inherit → 全局值`），API/CLI 只回显，前端不得自行推断。
 
@@ -4202,19 +4202,19 @@ Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码�
 
 Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；推送新 head 后重新等待 checks，允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求（daemon 重入、页面重试、手动/自动路径）幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。
 
-#### CLI 一等入口：iar backlog ci
+#### CLI 一等入口：kc backlog ci
 
 ```bash
 # 只读观察；--json 输出与 Console Backlog API 的 ci_delivery DTO 同构（stdout 纯 JSON）
-uv run iar backlog ci status --json --repo-id <repo>
-uv run iar backlog ci status --prd tasks/pending/xxx.md --repo-id <repo>
+uv run kc backlog ci status --json --repo-id <repo>
+uv run kc backlog ci status --prd tasks/pending/xxx.md --repo-id <repo>
 
 # 仓库级默认 / 单 PRD 三态（两目标互斥）
-uv run iar backlog ci policy --global on --repo-id <repo>
-uv run iar backlog ci policy --prd tasks/pending/xxx.md inherit|on|off --repo-id <repo>
+uv run kc backlog ci policy --global on --repo-id <repo>
+uv run kc backlog ci policy --prd tasks/pending/xxx.md inherit|on|off --repo-id <repo>
 
 # 显式单次修复（幂等、受门禁约束；--dry-run 零副作用报告）
-uv run iar backlog ci repair --prd tasks/pending/xxx.md --dry-run --repo-id <repo>
+uv run kc backlog ci repair --prd tasks/pending/xxx.md --dry-run --repo-id <repo>
 ```
 
 `status --json` 的数据只走 stdout，进度与警告走 stderr。全局 `--output json` 语义退出码契约由 `P1-FEAT-20260930-141135` 统一，本组命令保持前向兼容。CLI 与 Console API 共用同一批 core 用例与写回事实源：任一侧设置策略或请求修复，另一侧 fresh 读取后立即生效，两侧都不各自计算 effective 值。
@@ -4272,7 +4272,7 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 安全要求：
 
-1. 请求必须携带 `X-IAR-Signature` header，值为 `sha256=<HMAC_SHA256(secret, raw_body)>`。secret 来自环境变量 `IAR_IDEA_INBOX_INBOUND_SECRET`，**不写入** `config.toml` / `.iar.toml`。
+1. 请求必须携带 `X-IAR-Signature` header，值为 `sha256=<HMAC_SHA256(secret, raw_body)>`。secret 来自环境变量 `KEDACODE_IDEA_INBOX_INBOUND_SECRET`，**不写入** `config.toml` / `.kedacode.toml`。
 2. `repo_id` 必须显式给出并能在 registry 中解析；缺少或被禁用则返回 `400`。
 3. Feishu 等 provider adapter 只做 payload 转换：消息永远先写入 `ideas.md`（不会被猜项目路由到默认仓库，也不会直接创建 pending PRD）。如果消息只携带 `@项目名` 而没有 `repo_id`，adapter 应当返回明确错误或把消息放进 `unassigned` 队列；当前实现要求 `repo_id` 显式。
 
@@ -4280,7 +4280,7 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 ### 安全边界与已知限制
 
-- secrets 不进 `config.toml` / `.iar.toml`；inbound secret 走环境变量。
+- secrets 不进 `config.toml` / `.kedacode.toml`；inbound secret 走环境变量。
 - 草稿 AI 生成复用 `IContentGenerator` / `generated_content.py` 模式，不新增 LLM SDK；当 generator 不可用时草稿退化为带原话摘录的 fallback 模板，待人补全。
 - Idea → Draft → Pending 三段是单向流：草稿不会自动跑 runner，必须等人在 `/ideas` 确认才进入 pending。
 - 飞书自定义机器人 webhook 主要用于向群发送消息，不应被当作入站通道；事件订阅或自建通用 inbound 才是正确路径。
@@ -4307,9 +4307,9 @@ Agent Runner 默认开启两层**本地**记忆与 skill 蒸馏循环，用于�
 
 ```toml
 [agent_runner.memory]
-base_dir = "~/.iar/memory/keda-main"
-skill_drafts_dir = "~/.iar/memory/keda-main/skills/drafts"
-promoted_skills_dirs = ["~/.iar/memory/keda-main/skills"]
+base_dir = "~/.kedacode/memory/keda-main"
+skill_drafts_dir = "~/.kedacode/memory/keda-main/skills/drafts"
+promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 ```
 
 - 共享锚点下三个 store 的写入统一为 ``tmp + os.replace`` 原子替换；并发场景是 ``last-write-wins``，不会出现半写损坏文件。
@@ -4317,7 +4317,7 @@ promoted_skills_dirs = ["~/.iar/memory/keda-main/skills"]
 
 ### 触发点
 
-- `iar run <issue>` 启动：`build_prompt` 通过 `core/agent/memory/memory_loader.load_relevant_memory` 检索与当前 Issue 标签/标题/正文相关的长期记忆和已晋升 skills，以**目录形式**（name / description / 路径，不含全文）注入 prompt。
+- `kc run <issue>` 启动：`build_prompt` 通过 `core/agent/memory/memory_loader.load_relevant_memory` 检索与当前 Issue 标签/标题/正文相关的长期记忆和已晋升 skills，以**目录形式**（name / description / 路径，不含全文）注入 prompt。
 - `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 写入 `context.json`，记录尝试序号、失败类型、详情摘要。
 - `run_agent_until_committed` 成功返回、`_finish_implementation_publication` 开头：调用 `core/agent/memory/skill_distillation.distill_skill` 与 `save_skill_draft`。**蒸馏失败不阻塞**后续 push / pre-PR review / Draft PR 创建。
 - 草稿满足 `usage_count >= auto_promote_threshold` 且 `success_rate >= auto_promote_min_success_rate` 时，runner 自动移动草稿到 `promoted_skills_dirs` 并清除 `draft` 标记。
@@ -4336,13 +4336,13 @@ promoted_skills_dirs = ["~/.iar/memory/keda-main/skills"]
 
 ## 容器化运行（Containerized Runner）
 
-iar 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（内置注册表提供 codex / claude / kimi / pi / codebuddy / qoder / opencode 的形态，但只有装了对应 CLI 才能真正跑起来）以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
+kc 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（内置注册表提供 codex / claude / kimi / pi / codebuddy / qoder / opencode 的形态，但只有装了对应 CLI 才能真正跑起来）以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
 
-`iar container` 子命令组提供"把 runner 跑进 Docker 容器"的纯 opt-in 能力：
+`kc container` 子命令组提供"把 runner 跑进 Docker 容器"的纯 opt-in 能力：
 
-- 容器内预装全套工具链（claude / codex / kimi / gh / Node / uv / just / git + iar 自身）。
-- 认证通过 `iar container auth import` 一次性快照到 `~/.iar/container-auth/`，与本机 cc-switch 当前 profile 隔离；本机 cc-switch 后续切换不影响容器。
-- 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `iar worktree open` 接管。
+- 容器内预装全套工具链（claude / codex / kimi / gh / Node / uv / just / git + kc 自身）。
+- 认证通过 `kc container auth import` 一次性快照到 `~/.kedacode/container-auth/`，与本机 cc-switch 当前 profile 隔离；本机 cc-switch 后续切换不影响容器。
+- 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
 - 单仓库先跑通（一个容器跑一个仓库的 daemon）。
 
 ### 一次性导入认证
@@ -4350,10 +4350,10 @@ iar 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（
 在 cc-switch 切到要给容器用的账号后：
 
 ```bash
-iar container auth import
+kc container auth import
 ```
 
-产出 `~/.iar/container-auth/<派生目录>/`，派生规则是去掉 `~` 与各段引导点：`claude`、`codex`、`kimi-code`、`pi/agent`（pi 的 `auth_home` 是 `~/.pi/agent`），以及内置注册表里其它声明了 `auth_home` 的 agent——`codebuddy`、`qoder-cn`、`config/opencode`（opencode 的 `auth_home` 是 XDG 路径 `~/.config/opencode`，所以派生结果有两段）。每个子目录含：
+产出 `~/.kedacode/container-auth/<派生目录>/`，派生规则是去掉 `~` 与各段引导点：`claude`、`codex`、`kimi-code`、`pi/agent`（pi 的 `auth_home` 是 `~/.pi/agent`），以及内置注册表里其它声明了 `auth_home` 的 agent——`codebuddy`、`qoder-cn`、`config/opencode`（opencode 的 `auth_home` 是 XDG 路径 `~/.config/opencode`，所以派生结果有两段）。每个子目录含：
 
 - claude: `settings.json`（含 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`）+ `skills/`
 - codex: `auth.json`（`OPENAI_API_KEY`）+ `skills/`
@@ -4361,37 +4361,37 @@ iar container auth import
 
 运行时状态（`history.jsonl`、`sessions/`、`cache/`、`paste-cache/`、`file-history/` 等）**不会**复制进容器。目标根目录权限 0700，仅宿主用户可读。
 
-想换容器用的账号？本机 cc-switch 切过去再跑一次 `iar container auth import`（覆盖）。
+想换容器用的账号？本机 cc-switch 切过去再跑一次 `kc container auth import`（覆盖）。
 
 ### 准备 GitHub Token
 
-`gh` 在 macOS 用 keychain 存 token，容器读不到。`iar container up` 从当前 shell 环境变量（或 `--gh-token`）读取 `GH_TOKEN` 并注入容器，因此需在启动容器前导出：
+`gh` 在 macOS 用 keychain 存 token，容器读不到。`kc container up` 从当前 shell 环境变量（或 `--gh-token`）读取 `GH_TOKEN` 并注入容器，因此需在启动容器前导出：
 
 ```bash
 export GH_TOKEN="$(gh auth token)"
-iar container up --repo /absolute/path/to/your-repo --repo-id keda
+kc container up --repo /absolute/path/to/your-repo --repo-id keda
 ```
 
-> 注意：写入目标仓库 `.env.local` 不会生效--`iar container up` 不加载仓库级 dotenv，只读 shell 环境变量与 `--gh-token` 参数。若希望持久化，把 `export GH_TOKEN=...` 放进 shell rc 或用 `--gh-token` 显式传参。
+> 注意：写入目标仓库 `.env.local` 不会生效--`kc container up` 不加载仓库级 dotenv，只读 shell 环境变量与 `--gh-token` 参数。若希望持久化，把 `export GH_TOKEN=...` 放进 shell rc 或用 `--gh-token` 显式传参。
 
 ### 启动容器 Runner
 
 ```bash
-iar container up --repo /absolute/path/to/your-repo --repo-id keda
+kc container up --repo /absolute/path/to/your-repo --repo-id keda
 ```
 
 - `--repo` 指定目标仓库绝对路径（也可用环境变量 `REPO_PATH`）
-- `--repo-id` 是 `config.toml` 里 `[agent_runner.repositories.<id>]` 的 id；传入后 iar 会先检查同 id 的本机 daemon lock，若已有活 daemon 则拒绝启动并提示先停本机 daemon（避免两个 daemon 抢同一个 `agent/running` Issue）
+- `--repo-id` 是 `config.toml` 里 `[agent_runner.repositories.<id>]` 的 id；传入后 kc 会先检查同 id 的本机 daemon lock，若已有活 daemon 则拒绝启动并提示先停本机 daemon（避免两个 daemon 抢同一个 `agent/running` Issue）
 - `GH_TOKEN` 自动从环境变量（或 `--gh-token`）注入到容器内 `gh` CLI
 
-容器内 `iar daemon` 走与本机完全一致的执行路径：轮询 Issue → 建 worktree → 调 agent CLI → 验证 → commit → push → 开 PR。
+容器内 `kc daemon` 走与本机完全一致的执行路径：轮询 Issue → 建 worktree → 调 agent CLI → 验证 → commit → push → 开 PR。
 
 ### 本机可见 Worktree
 
 agent 在容器内建的 worktree 落在挂载目录的 `<repo>/.iar-worktrees/issue-<N>/`，宿主 IDE 可直接打开：
 
 ```bash
-iar worktree open
+kc worktree open
 ls /path/to/your-repo/.iar-worktrees/
 ```
 
@@ -4401,15 +4401,15 @@ ls /path/to/your-repo/.iar-worktrees/
 
 ```bash
 # streaming 容器日志
-iar container logs
+kc container logs
 
 # 停止容器（保留容器外的工作目录、container-auth 快照）
-iar container down
+kc container down
 ```
 
 ### 容器资产定位
 
-runner 容器资产（`Dockerfile.runner`、`docker-compose.runner.yml`、`.env.example`、`entrypoint.sh`）随 keda 包发布在 `backend.engines.agent_runner.templates.runner_container/`，由 `iar container up` 通过 `importlib.resources` 自动定位。无需克隆 keda 源码，全局安装 `iar` 后即可使用。
+runner 容器资产（`Dockerfile.runner`、`docker-compose.runner.yml`、`.env.example`、`kedacode-runner-entrypoint.sh`）随 keda 包发布在 `backend.engines.agent_runner.templates.runner_container/`，由 `kc container up` 通过 `importlib.resources` 自动定位。无需克隆 keda 源码，全局安装 `kc` 后即可使用。
 
 资产路径解析：
 
@@ -4417,7 +4417,7 @@ runner 容器资产（`Dockerfile.runner`、`docker-compose.runner.yml`、`.env.
 uv run python -c "from importlib.resources import files; print(files('backend.engines.agent_runner.templates').joinpath('runner_container/docker-compose.runner.yml'))"
 ```
 
-> **entrypoint.sh**：容器以 root 启动（不在 compose 顶层设 user），entrypoint 把 `/home/runner` chown 到 `RUNNER_UID:RUNNER_GID`，再用 `gosu` 切到目标 UID 跑 `CMD`。`gosu` 切用户时会按 `/etc/passwd` 重置 `HOME`（无对应记录时回退到 `/`）；宿主映射的 UID（macOS 501）在容器内通常没有 passwd 记录，entrypoint 会用 `gosu UID:GID env HOME=/home/runner IAR_HOME=... PATH=... "$@"` 显式注入关键环境变量，让 `gh` / `claude` / `codex` / `kimi` 在 `RUNNER_UID != 1000` 的宿主机（如 macOS 当前用户 UID 通常是 501）上也能正常创建 `~/.config` / `~/.cache` 子目录。
+> **kedacode-runner-entrypoint.sh**：容器以 root 启动（不在 compose 顶层设 user），entrypoint 把 `/home/runner` chown 到 `RUNNER_UID:RUNNER_GID`，再用 `gosu` 切到目标 UID 跑 `CMD`。`gosu` 切用户时会按 `/etc/passwd` 重置 `HOME`（无对应记录时回退到 `/`）；宿主映射的 UID（macOS 501）在容器内通常没有 passwd 记录，entrypoint 会用 `gosu UID:GID env HOME=/home/runner KEDACODE_HOME=... PATH=... "$@"` 显式注入关键环境变量，让 `gh` / `claude` / `codex` / `kimi` 在 `RUNNER_UID != 1000` 的宿主机（如 macOS 当前用户 UID 通常是 501）上也能正常创建 `~/.config` / `~/.cache` 子目录。
 
 ### 排障速查
 
@@ -4427,13 +4427,13 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 | 容器内 `claude --version` 失败 | kimi 安装脚本不可达 / npm 包镜像问题 | `docker compose -f <compose> run --rm iar-runner sh -c 'which claude; echo $PATH'` |
 | 容器内 `gh auth status` 401 | `GH_TOKEN` 未传或过期 | `.env.local` 里确认 `GH_TOKEN=<有效 token>` |
 | worktree 属主变 root | `RUNNER_UID`/`RUNNER_GID` 未对齐宿主 | `id -u` / `id -g` 与 `.env.local` 校对 |
-| `iar container up` 拒绝启动 | 同 repo_id 的本机 daemon 已活 | `iar daemon stop --repo-id <id>` 后重试 |
-| `iar run --dry-run` 在容器内失败 | 挂载仓库未 `iar init` | 进容器：`docker compose exec iar-runner iar init` |
-| 目标仓库缺失 `agent/*` 标签：`iar` 无法识别可执行 Issue、贴不上目标状态标签，典型表现是 `gh issue edit` 报 label 不存在、Issue 卡在无法流转的状态 | 该仓库从未运行过 `iar labels sync`，或仓库初始化时间早于某些后加的标签（例如 `agent/rework-prd`） | 在目标仓库运行 `iar labels sync` 补齐缺失的 `agent/*` 标签（幂等，可重复执行；仓库根需已有有效 `.iar.toml`，否则先 `iar init`） |
+| `kc container up` 拒绝启动 | 同 repo_id 的本机 daemon 已活 | `kc daemon stop --repo-id <id>` 后重试 |
+| `kc run --dry-run` 在容器内失败 | 挂载仓库未 `kc init` | 进容器：`docker compose exec iar-runner kc init` |
+| 目标仓库缺失 `agent/*` 标签：`kc` 无法识别可执行 Issue、贴不上目标状态标签，典型表现是 `gh issue edit` 报 label 不存在、Issue 卡在无法流转的状态 | 该仓库从未运行过 `kc labels sync`，或仓库初始化时间早于某些后加的标签（例如 `agent/rework-prd`） | 在目标仓库运行 `kc labels sync` 补齐缺失的 `agent/*` 标签（幂等，可重复执行；仓库根需已有有效 `.kedacode.toml`，否则先 `kc init`） |
 
 ### 架构边界
 
-`iar container` 子命令严格遵循 `api → core → engines` 依赖方向：
+`kc container` 子命令严格遵循 `api → core → engines` 依赖方向：
 
 - `cli_typer_container.py` 只做 Typer 参数解析；不直接 import `backend.engines.*`。
 - `core/use_cases/agent_runner_container.py` 作为薄 facade，编排 daemon lock 互斥、env 注入、engines 调用。
@@ -4441,10 +4441,10 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 
 未引入 docker SDK 依赖；`container_ops` 仅通过 `subprocess.run(["docker", "compose", ...])` 调用 docker CLI。`dry-run` 模式完全跳过 docker 调用，便于 CI 验证。
 
-### 与已有 `iar daemon` 的关系
+### 与已有 `kc daemon` 的关系
 
-- `iar container up` 与 `iar daemon` 是**互斥**选项：同一仓库不能同时跑本机 daemon 和容器 daemon。
-- 不装 Docker 的用户零影响：`iar container` 全部子命令都是 opt-in。
+- `kc container up` 与 `kc daemon` 是**互斥**选项：同一仓库不能同时跑本机 daemon 和容器 daemon。
+- 不装 Docker 的用户零影响：`kc container` 全部子命令都是 opt-in。
 
 ## 接入一个新 agent（声明式注册表）
 
@@ -4472,29 +4472,29 @@ profile 级字段（`profiles.<profile>`，用途为 4 种闭集：`run` / `deli
 | `args` | 字面量 argv 片段 | 支持 `{cwd}` / `{worktree}` / `{prompt}` 占位符；**不做 shell 展开** |
 | `prompt_flag` | 参数名 | 仅 `prompt_delivery = "flag"` 时使用（如 kimi 的 `--prompt`） |
 | `prompt_delivery` | `argv_tail` / `flag` / `stdin` | 提示词投递方式 |
-| `output_protocol` | 已注册协议 id（默认 `plain`） | 经 `iar.agent_output_protocols` entry point 注册表解析；内置 `plain` / `claude-stream-json` / `pi-json-lines` |
+| `output_protocol` | 已注册协议 id（默认 `plain`） | 经 `kedacode.agent_output_protocols` entry point 注册表解析；内置 `plain` / `claude-stream-json` / `pi-json-lines` |
 | `tail_args` | 字面量 argv 片段 | 追加在展开器之后、提示词之前（如 codex 的 `["exec"]`） |
 | `expand` | `"<展开器>:<flag>"` | 运行期参数注入；展开器为**闭集**（当前仅 `git_writable_roots`），如 codex 的 `"git_writable_roots:--add-dir"` |
-| `read_only` | bool，默认 `false` | 是否为可验证的只读调用；只读决策入口（planner / `iar ask`）以此做 fail-fast 门禁 |
+| `read_only` | bool，默认 `false` | 是否为可验证的只读调用；只读决策入口（planner / `kc ask`）以此做 fail-fast 门禁 |
 
 argv 组装顺序：`[bin] + args(占位符替换) + expanders + tail_args`，再按 `prompt_delivery` 决定提示词落在 argv 尾部、指定 flag 后还是 stdin。字段的三层合并语义与 shell 展开边界详见 [配置说明](configuration.md#agent-runner-agent-注册表配置)。
 
-### 自检流程（`iar agent doctor`）
+### 自检流程（`kc agent doctor`）
 
 配置写完后用 doctor 做只读自检，它按**与真实执行完全相同的路径**打印各用途的完整 argv：
 
 ```bash
 # 列出全部已注册 agent 及各自声明的用途
-uv run iar agent list
+uv run kc agent list
 
 # 打印某个 agent 全部用途的命令行（含沙箱告警）
-uv run iar agent doctor pi --all-profiles
+uv run kc agent doctor pi --all-profiles
 
 # 机读快照（agent / profile / argv / prompt_delivery，稳定排序，可入 golden diff）
-uv run iar agent doctor pi --all-profiles --json
+uv run kc agent doctor pi --all-profiles --json
 
 # 列出全部已注册输出协议 id
-uv run iar agent doctor --protocols
+uv run kc agent doctor --protocols
 ```
 
 doctor 对三类坏输入分别非零退出并在 stderr 指名原因：agent 未注册、`bin` 不在 `PATH`、引用未注册协议。改完配置后先跑 doctor，再考虑投真实任务。
@@ -4570,10 +4570,10 @@ pi · run
 |---|---|---|
 | `codebuddy` | `codebuddy` | 与 `claude` 完全同构（`-p` + `--output-format stream-json` + `--include-partial-messages`），四用途齐备，`run` / `deliberate` 复用内置 `claude-stream-json` 协议。配置与凭据在 `~/.codebuddy/`。 |
 | `qoder` | **`qodercn`** | 注册名与可执行名**不一致**：`qoder` 只是本机 shell 别名，`bin` 必须写 `qodercn`，否则 doctor 报 executable not found。它**没有** `--verbose` / `--include-partial-messages`；`run` 用 `-o stream-json`（包内 schema 与 claude 同形）走 `claude-stream-json`；`deliberate` 刻意保留 `-p` 并改用 `stdin` + `plain` —— 流式协议会把 `-p` 从 argv 剥离再经 stdin 投递，而 qoder 在缺 `-p` 时的行为未经验证，保留 `-p` 既不依赖未验证行为，也避免长 transcript 撑爆 argv。配置在 `~/.qoder-cn/`。 |
-| `opencode` | `opencode` | 非交互入口是 `run` 子命令（消息为位置参数）。**只声明 `run` / `deliberate` / `repl` 三个用途，刻意没有 `generate`**：它没有任何沙箱或只读开关，而 planner / `iar ask` 依赖 `generate` 用途上的只读声明做 fail-fast 门禁，声明一个无法验证的"只读"会让门禁形同虚设。需要 planner 时请选别的 agent。输出用 `--format default`（逐行文本）走 `plain`；`--format json` 是另一套事件形状，本项目没有对应协议。配置在 `~/.config/opencode/`（XDG 路径）。 |
+| `opencode` | `opencode` | 非交互入口是 `run` 子命令（消息为位置参数）。**只声明 `run` / `deliberate` / `repl` 三个用途，刻意没有 `generate`**：它没有任何沙箱或只读开关，而 planner / `kc ask` 依赖 `generate` 用途上的只读声明做 fail-fast 门禁，声明一个无法验证的"只读"会让门禁形同虚设。需要 planner 时请选别的 agent。输出用 `--format default`（逐行文本）走 `plain`；`--format json` 是另一套事件形状，本项目没有对应协议。配置在 `~/.config/opencode/`（XDG 路径）。 |
 
 > 三者的容器支持不在本轮范围内：runner 镜像目前只预装 claude / codex / kimi，容器里选中它们会在启动子进程时报可执行文件不存在。
 
 ### 未声明用途的行为
 
-一个 agent 不必声明全部四种用途。请求它未声明的用途时 `build_agent_invocation` 会抛 `UnknownProfileError` 并列出该 agent 已声明的用途名，**不会**回落到别的用途或别的 agent。`iar agent doctor <name> <profile>` 同样会以非零退出码指名报错。
+一个 agent 不必声明全部四种用途。请求它未声明的用途时 `build_agent_invocation` 会抛 `UnknownProfileError` 并列出该 agent 已声明的用途名，**不会**回落到别的用途或别的 agent。`kc agent doctor <name> <profile>` 同样会以非零退出码指名报错。

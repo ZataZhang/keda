@@ -564,10 +564,10 @@ class RunOnceRequest:
     repo_id: str | None = None
     concurrency: int = 1
     output_view: IRunnerLiveView | None = None
-    #: 定向目标 Issue 编号（``iar run --issue``）。非 ``None`` 时只处理该
+    #: 定向目标 Issue 编号（``kc run --issue``）。非 ``None`` 时只处理该
     #: Issue（仍走依赖门禁与 claim）；``None`` 保持"按优先级捞队列"行为。
     target_issue: int | None = None
-    #: 发布档位（``iar run --fast-merge`` / ``--direct-pr``）：本次运行执行 agent
+    #: 发布档位（``kc run --fast-merge`` / ``--direct-pr``）：本次运行执行 agent
     #: 之后还剩多少门禁与第二个 agent。``NORMAL`` 即默认全量路径；daemon 与其余
     #: 调用方恒为 ``NORMAL``（默认值），行为与今天完全一致。
     publish_stage: PublishStage = PublishStage.NORMAL

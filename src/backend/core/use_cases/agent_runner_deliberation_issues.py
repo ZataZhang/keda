@@ -1,7 +1,7 @@
 """Phase 0 deliberation queue — async Issue-comment discussion before PRD.
 
-For Issues labelled ``agent/deliberate`` the daemon / ``iar run --once`` polls
-run a third party (``iar deliberate``'s multi-agent engine, reused with no
+For Issues labelled ``agent/deliberate`` the daemon / ``kc run --once`` polls
+run a third party (``kc deliberate``'s multi-agent engine, reused with no
 live output view) and post a structured clarifying-question list as an Issue
 comment, then wait for the human to reply. Turn state is carried entirely by
 an ``iar:event`` marker written into the trailing HTML comment of the AI's

@@ -96,11 +96,11 @@ class InteractiveDecisionConfig:
 
 @dataclass(frozen=True)
 class ReplConfig:
-    """Core configuration for the ``iar`` REPL entrypoint.
+    """Core configuration for the ``kc`` REPL entrypoint.
 
     Mirrors :class:`InteractiveDecisionConfig` but isolates the REPL's
     risk surface (default agent, timeout, audit directory, command
-    allow / confirm lists) so that ``iar ask`` and ``iar`` (no args)
+    allow / confirm lists) so that ``kc ask`` and ``kc`` (no args)
     can evolve independently.
 
     Attributes:
@@ -116,7 +116,7 @@ class ReplConfig:
         agent_timeout_seconds: Per-turn timeout for agent subprocess
             calls. Non-zero exit (including timeout) is appended back
             to the conversation history so the agent can react.
-        auto_confirm_commands: Prefix list (after ``iar``) of command
+        auto_confirm_commands: Prefix list (after ``kc``) of command
             argv tails that the executor may run without confirmation.
         confirm_commands: Prefix list of command argv tails that must be
             confirmed interactively before execution.

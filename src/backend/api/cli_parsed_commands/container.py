@@ -1,4 +1,4 @@
-"""``iar container ...`` 命令的 core 命令入口（dispatch handler）。
+"""``kc container ...`` 命令的 core 命令入口（dispatch handler）。
 
 每个 handler 接收 :class:`ParsedCommandContext`，经
 :mod:`backend.core.use_cases.agent_runner_container` 的默认装配函数取得
@@ -19,6 +19,7 @@ from backend.api.cli_console import console
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_output import CliError
 from backend.api.cli_parsed_context import ParsedCommandContext
+from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_runner_container import (
     StartRunnerContainerOptions,
     create_default_container_auth_importer,
@@ -43,11 +44,11 @@ def _resolve_repo_path(parsed) -> Path | None:
 
 
 def _resolve_repo_id(parsed) -> str:
-    """从 ``--repo-id`` / ``IAR_REPO_ID`` 解析仓库 id。"""
+    """从 ``--repo-id`` / 产品环境变量 ``REPO_ID`` 解析仓库 id。"""
     raw = getattr(parsed, "repo_id", None)
     if raw:
         return raw
-    env_value = os.environ.get("IAR_REPO_ID")
+    env_value = product_identity.read_product_env_value("REPO_ID")
     return env_value or ""
 
 
@@ -71,13 +72,13 @@ def _format_env_preview(env: dict[str, str]) -> str:
 
 
 def run_container_auth_import_command(ctx: ParsedCommandContext) -> int:
-    """``iar container auth import``：把本机认证快照到容器专用目录。"""
+    """``kc container auth import``：把本机认证快照到容器专用目录。"""
     if ctx.repo_id is not None or ctx.repo_override is not None or ctx.parsed.config is not None:
         raise CliError(
-            "iar container auth import uses the host's current profile; "
+            "kc container auth import uses the host's current profile; "
             "omit --repo/--repo-id/--config.",
             code=ExitCode.USAGE,
-            suggestion="iar container auth import --help",
+            suggestion="kc container auth import --help",
         )
 
     importer = create_default_container_auth_importer()
@@ -95,14 +96,14 @@ def run_container_auth_import_command(ctx: ParsedCommandContext) -> int:
         )
     if not result.gitignore_protected:
         console.print(
-            "[yellow]Note: ~/.iar is not a git repo; container-auth is still protected "
+            "[yellow]Note: ~/.kedacode is not a git repo; container-auth is still protected "
             "by filesystem permissions (0700) but cannot be marked via gitignore.[/]"
         )
     return 0
 
 
 def run_container_up_command(ctx: ParsedCommandContext) -> int:
-    """``iar container up``：启动 runner 容器。"""
+    """``kc container up``：启动 runner 容器。"""
     parsed = ctx.parsed
     repo_path = _resolve_repo_path(parsed)
     if repo_path is None:
@@ -110,7 +111,7 @@ def run_container_up_command(ctx: ParsedCommandContext) -> int:
             "Missing --repo (or REPO_PATH env). "
             "Pass the absolute path of the Git repository to mount.",
             code=ExitCode.USAGE,
-            suggestion="iar container up --help",
+            suggestion="kc container up --help",
         )
 
     repo_id = _resolve_repo_id(parsed)
@@ -136,13 +137,13 @@ def run_container_up_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             f"{exc} Stop the host daemon first before starting a container.",
             code=ExitCode.CONFLICT,
-            suggestion="iar daemon status",
+            suggestion="kc daemon status",
         ) from exc
     except FileNotFoundError as exc:
         raise CliError(
             str(exc),
             code=ExitCode.NOT_FOUND,
-            suggestion="iar container up --help",
+            suggestion="kc container up --help",
         ) from exc
 
     plan = result.plan
@@ -163,7 +164,7 @@ def run_container_up_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_container_down_command(ctx: ParsedCommandContext) -> int:
-    """``iar container down``：停止容器。"""
+    """``kc container down``：停止容器。"""
     parsed = ctx.parsed
     dry_run = bool(getattr(parsed, "dry_run", False))
     controller = create_default_container_ops_controller()
@@ -178,7 +179,7 @@ def run_container_down_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_container_logs_command(ctx: ParsedCommandContext) -> int:
-    """``iar container logs``：streaming 容器日志。"""
+    """``kc container logs``：streaming 容器日志。"""
     parsed = ctx.parsed
     follow = bool(getattr(parsed, "follow", True))
     controller = create_default_container_ops_controller()

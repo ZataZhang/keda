@@ -547,7 +547,7 @@ def build_rework_intent_comment(
             f"- Action: {action}",
             f"- PR Branch: `{pr_branch}`",
             f"- Head SHA: `{head_sha}`",
-            "- A runner will pick this up on the next `iar run` pass.",
+            "- A runner will pick this up on the next `kc run` pass.",
         ]
     )
 
@@ -839,7 +839,7 @@ def run_post_pr_supervisor_cycle(
         supervisor_agent: Agent to use for supervision.
         cycle: Cycle number for event markers.
         builder_agent: 本次实现者（发布路径能拿到时传入）；回退候选里排除它以保证
-            监督独立性，``None`` 表示该入口拿不到 builder（如 ``iar review``）。
+            监督独立性，``None`` 表示该入口拿不到 builder（如 ``kc review``）。
 
     Returns:
         Supervisor action result.
