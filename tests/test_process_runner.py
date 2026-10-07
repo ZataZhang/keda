@@ -1202,7 +1202,8 @@ def _inject_sanitize_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_build_sanitized_child_env_removes_denylisted_vars_and_keeps_rest(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """净化函数剔除全部名单变量、原样透传其余变量，并对每次剔除记 WARNING。"""
+    """净化函数剔除全部名单变量、原样透传其余变量，并对每个被剔变量名告警一次。"""
+    from backend.infrastructure import child_env as child_env_module
     from backend.infrastructure.child_env import (
         AGENT_CHILD_ENV_DENYLIST,
         build_sanitized_child_env,
@@ -1210,6 +1211,8 @@ def test_build_sanitized_child_env_removes_denylisted_vars_and_keeps_rest(
 
     assert set(AGENT_CHILD_ENV_DENYLIST) == set(_SANITIZE_DENYLIST_VARS)
     _inject_sanitize_env(monkeypatch)
+    # 去重告警状态是进程级的，清空后才可断言「首次剔除即 WARNING」。
+    monkeypatch.setattr(child_env_module, "_WARNED_DENYLIST_REMOVALS", set())
 
     with caplog.at_level(logging.WARNING, logger="backend.infrastructure.child_env"):
         child_env = build_sanitized_child_env()
@@ -1233,6 +1236,41 @@ def test_build_sanitized_child_env_removes_denylisted_vars_and_keeps_rest(
         # 日志只含变量名与值长度摘要，不得记录完整值。
         for value in _SANITIZE_DENYLIST_VARS.values():
             assert value not in message
+
+
+def test_build_sanitized_child_env_warns_once_per_key_per_process(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """同一变量名只在首次剔除时 WARNING，后续剔除降为 DEBUG。
+
+    默认净化档自 Issue #230 起覆盖每一次 ``SubprocessRunner.run()``（git/gh
+    等工具命令单轮可达数十次），逐次 WARNING 会淹没「名单误剔」排障信号。
+    """
+    from backend.infrastructure import child_env as child_env_module
+
+    _inject_sanitize_env(monkeypatch)
+    monkeypatch.setattr(child_env_module, "_WARNED_DENYLIST_REMOVALS", set())
+
+    with caplog.at_level(logging.DEBUG, logger=child_env_module.logger.name):
+        first_env = child_env_module.build_sanitized_child_env()
+        second_env = child_env_module.build_sanitized_child_env()
+
+    # 净化本身逐次照常发生，降级的只是告警频次。
+    for env in (first_env, second_env):
+        for key in _SANITIZE_DENYLIST_VARS:
+            assert key not in env
+
+    sanitized_records = [r for r in caplog.records if "child env sanitized" in r.getMessage()]
+    warning_records = [r for r in sanitized_records if r.levelno == logging.WARNING]
+    debug_records = [r for r in sanitized_records if r.levelno == logging.DEBUG]
+    assert {record.getMessage() for record in warning_records} == {
+        f"child env sanitized: removed {key} (value length {len(value)})"
+        for key, value in _SANITIZE_DENYLIST_VARS.items()
+    }
+    assert len(debug_records) == len(_SANITIZE_DENYLIST_VARS)
+    assert {record.getMessage() for record in debug_records} == {
+        record.getMessage() for record in warning_records
+    }
 
 
 def test_run_filtered_claude_stream_child_env_is_sanitized(

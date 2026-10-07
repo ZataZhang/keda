@@ -990,12 +990,13 @@ uv run iar workflow install preview --force
 
 ## 子进程环境净化（child env sanitize）
 
-runner 派发的**所有**子进程都不再原样继承父环境：`SubprocessRunner.run()` 的默认档（agent 内容生成的 plain 路径、git/gh/pytest 等工具命令、验证命令）与 agent 流式派发点（Claude 流式路径、PTY 路径、`plain` / `pi-json-lines` 协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传；`env=None` 不再等于「全量继承 `os.environ`」。console 托管 runner 子进程（`process_supervisor.spawn`）与 `iar container up` 传给 docker compose 的环境（`container_ops._build_compose_env`）同样以净化档为基底，会话私有变量不会沿进程谱系下传。
+凡经 runner **执行层**派发的子进程都不再原样继承父环境：`SubprocessRunner.run()` 的默认档（agent 内容生成的 plain 路径、git/gh/pytest 等工具命令、验证命令）与 agent 流式派发点（Claude 流式路径、PTY 路径、`plain` / `pi-json-lines` 协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传；`env=None` 不再等于「全量继承 `os.environ`」。console 托管 runner 子进程（`process_supervisor.spawn`）与 `iar container up` 传给 docker compose 的环境（`container_ops._build_compose_env`）同样以净化档为基底，会话私有变量不会沿进程谱系下传。
 
 - 名单（8 个，硬编码于 `src/backend/infrastructure/child_env.py`）：`SERVER__PORT` 与 `CODEBUDDY_SERVICE_PROXY_URL`、`CODEBUDDY_SESSION_ID`、`CODEBUDDY_CONVERSATION_REQUEST_ID`、`CODEBUDDY_ROOT_REQUEST_ID`、`CODEBUDDY_CONVERSATION_MESSAGE_ID`、`CODEBUDDY_PROJECT_DIR`、`CODEBUDDY_CURRENT_MODEL_ID`
 - 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，最终被 inactivity/timeout watchdog 杀掉，见 2026-09-28 Issue #156 事故）
-- 为什么默认档也要净化：2026-10-07 Issue #229 事故确认，内容生成路径（`iar issue create --from-prompt` 派发的 `codebuddy -p ...`）走 `SubprocessRunner.run()` 且不传环境，当时的默认「全量继承」让 `SERVER__PORT` 原样透传，Issue 正文退化为模板渲染（修复记录：`tasks/` Issue #230）。环境构造收敛到 `run()` 一处后，**新增 denylist 变量无需改动任何调用点**
-- 每剔除一个变量，runner 日志记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值）；若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
+- 为什么默认档也要净化：2026-10-07 Issue #229 事故确认，内容生成路径（`iar issue create --from-prompt` 派发的 `codebuddy -p ...`）走 `SubprocessRunner.run()` 且不传环境，当时的默认「全量继承」让 `SERVER__PORT` 原样透传，Issue 正文退化为模板渲染（修复：Issue #230）。环境构造收敛到 `run()` 一处后，**新增 denylist 变量无需改动任何执行层调用点**
+- 已知例外（不经执行层的直接调用）：`core/use_cases/agent_runner_prd_activity.py` 的 PRD 活动锁命令（`git worktree list`、`scripts/shared/just/prd_lock.py`）与 `core/shared/prd_contract_client.py` 的 `prd_contract.py` 调用仍直接 `subprocess.run`，完整继承 `os.environ`。这三处都不监听端口，今日不会复现 `SERVER__PORT` 事故，但「新增名单变量无需改动调用点」只对上面列出的执行层路径成立；把它们接入执行层要改 core 的注入签名（core 不得直接 import infrastructure），动之前按 Issue #230 的口径重新审计
+- 剔除按变量名去重告警：某变量在本进程内**首次**被剔除时记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值），之后同一变量再被剔除只记 DEBUG——默认档净化覆盖每一次 `SubprocessRunner.run()`，工具命令单轮可达数十次，逐次 WARNING 会把这条排障信号淹掉。若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
 - 因此**从交互式 AI 会话的 shell 里直接启动 `iar run` / `iar review` / `iar issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
 - 白名单档（浏览器 E2E 验证子进程）的 fail-fast 前提校验不因默认档净化而改变：前提不成立时依旧报错，绝不静默回退到任何继承形态
 - 净化约定分两层守护：默认档「`run()` 一处构造、全分支透传」由 `tests/test_process_runner.py` 直接断言；守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 只钉住可以被 `run()` **之外直接调用**的派发点（`run_filtered_claude_stream`、`_run_pty_stream` 与 `output_protocols/` 全目录），新增这类派发点必须自行接入净化环境。Issue #230 之前「工具命令路径不净化」的旧约定已废止

@@ -40,25 +40,37 @@ AGENT_CHILD_ENV_DENYLIST: frozenset[str] = frozenset(
     }
 )
 
+# 本进程内已经 WARNING 过的被剔变量名。默认净化档自 Issue #230 起覆盖每一次
+# ``SubprocessRunner.run()``（git/gh/pytest 等工具命令单轮操作可达数十次），
+# 逐次 WARNING 会把「名单误剔」这一排障信号淹没在噪声里，故每个变量名只在
+# 首次命中时 WARNING，后续降为 DEBUG。并发调用最坏情况是重复一条 WARNING。
+_WARNED_DENYLIST_REMOVALS: set[str] = set()
+
 
 def build_sanitized_child_env() -> dict[str, str]:
     """构建子进程的默认净化环境（透传 + denylist 档）。
 
     从当前进程环境剔除 :data:`AGENT_CHILD_ENV_DENYLIST` 中的会话私有变量，
-    其余变量原样透传。每剔除一个变量记录一条 WARNING（只含变量名与值长度
-    摘要，不记录完整值，避免泄密）；误剔变量可从该日志立即发现。
-    调用面覆盖 :meth:`SubprocessRunner.run` 的全部子进程（agent 内容与
-    工具命令）、agent 流式派发点、console 托管 runner 与 docker compose
-    基底——环境构造只有这一处事实源，新增名单变量无需改动调用点。
+    其余变量原样透传。剔除动作按变量名去重告警：某变量在本进程内**首次**
+    被剔除时记录一条 WARNING（只含变量名与值长度摘要，不记录完整值，避免
+    泄密），之后同一变量再被剔除（每次子进程调用都会重算环境）只记 DEBUG，
+    以免工具命令高频路径刷爆日志。调用面覆盖 :meth:`SubprocessRunner.run`
+    的全部子进程（agent 内容与工具命令）、agent 流式派发点、console 托管
+    runner 与 docker compose 基底——环境构造只有这一处事实源，新增名单变量
+    无需改动调用点。
 
     Returns:
         剔除名单变量后的环境副本（新 dict，不修改 ``os.environ``）。
     """
     child_env = dict(os.environ)
     for key in sorted(AGENT_CHILD_ENV_DENYLIST):
-        if key in child_env:
-            value = child_env.pop(key)
-            logger.warning("child env sanitized: removed %s (value length %d)", key, len(value))
+        if key not in child_env:
+            continue
+        value = child_env.pop(key)
+        already_warned = key in _WARNED_DENYLIST_REMOVALS
+        _WARNED_DENYLIST_REMOVALS.add(key)
+        report_removal = logger.debug if already_warned else logger.warning
+        report_removal("child env sanitized: removed %s (value length %d)", key, len(value))
     return child_env
 
 
