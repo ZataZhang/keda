@@ -3,7 +3,7 @@
 ## Review map
 
 - rv-1: independent CLI and daemon discover Issue labels, preserve DIRECT marker, consume label; neighboring NORMAL remains NORMAL; PRD negative dispatches no builder or PR.
-- rv-2: durable GitHub adapter writes PR before lost response; reconstruct a fresh client and recover without a second PR. Cover deletion failure, successful deletion followed by workflow crash, success response without deletion, same-head historical PR, identity mismatch and claimant loser.
+- rv-2: durable GitHub adapter writes PR before lost response; reconstruct a fresh client and recover without a second PR. Cover deletion failure, successful deletion followed by workflow crash, success response without deletion, same-head historical PR, identity mismatch and claimant loser. Initial publication and cleanup recovery must finish in review with inline supervisor enabled or disabled; final transition failure must leave the checkpoint pending.
 - rv-3: actual configuration loading/sync, custom and disabled label, workflow preservation; read final hub/run/daemon/guide semantics against actual stage behavior.
 
 ## Commands and identity
@@ -23,5 +23,6 @@
 - Read-only discovery association is rechecked after acquiring claim/local ownership; arbitrary marker/history cannot grant cleanup or new work.
 - Human semantic review is not reduced to keyword tests. Existing skill tests check packaging contracts; final full-text review checks obligations.
 - No new UI: fresh API text and real URLs replace requested screenshot ceremony under the user's explicit preference. API evidence is not browser user-flow evidence.
+- Standalone `kc recover` retains its existing requirement for a local clean worktree. Cross-machine Issue selection is supported; the evidence does not claim recovery on a machine without the worktree.
 - GitHub PR creation/label deletion are not atomic. Concurrent re-addition of the same label within cleanup is unsupported and documented. All potential claimants need upgrading/restarting.
 - Failures stay failures; credentials/network failure blocks rv-1 and archive. Owned test PRs are closed and fixture repo archived, never merged or deleted.

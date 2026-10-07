@@ -58,7 +58,7 @@ def test_actual_dispatch_handoffs_published_round_despite_new_dependency(
     assert result == 0
     record = read_direct_pr_round(client, client.get_issue(_NUMBER))
     assert record is not None and record.handoff_complete and record.pr_url == _URL
-    assert "agent/supervising" in client.get_issue(_NUMBER).labels
+    assert "agent/review" in client.get_issue(_NUMBER).labels
     assert client.create_count == 0
     assert not any(list(command)[:2] == ["git", "push"] for command in process_runner.calls)
     assert not any(command and command[0] == "just" for command in process_runner.calls)
@@ -137,4 +137,4 @@ def test_cleanup_discovery_cannot_turn_into_new_publication(tmp_path, monkeypatc
     assert client.create_count == 0
     assert not any(list(command)[:2] == ["git", "push"] for command in process_runner.calls)
     assert not any(command and command[0] == "just" for command in process_runner.calls)
-    assert "agent/supervising" not in client.get_issue(_NUMBER).labels
+    assert "agent/review" not in client.get_issue(_NUMBER).labels

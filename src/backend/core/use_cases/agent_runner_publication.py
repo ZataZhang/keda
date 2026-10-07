@@ -816,20 +816,21 @@ def _finish_implementation_publication(
         )
     )
 
-    # 切换标签：running → supervising，并清理其他 workflow labels。
-    _edit_issue_labels_after_publish(
-        issue_number=issue.number,
-        add_labels=[config.labels.supervising],
-        remove_labels=[
-            label for label in workflow_state_labels(config) if label != config.labels.supervising
-        ],
-        worktree_path=worktree_path,
-        github_client=github_client,
-    )
+    # NORMAL/FAST 先进入 supervising；DIRECT 留在当前状态直到最终 review 交接成功。
+    if publish_stage is not PublishStage.DIRECT:
+        _edit_issue_labels_after_publish(
+            issue_number=issue.number,
+            add_labels=[config.labels.supervising],
+            remove_labels=[
+                label
+                for label in workflow_state_labels(config)
+                if label != config.labels.supervising
+            ],
+            worktree_path=worktree_path,
+            github_client=github_client,
+        )
 
     _publish_verified_pr(reviewed_pr)
-    if direct_pr_label is not None:
-        complete_direct_pr_round(github_client, issue)
 
     # 步骤 4: PR 后监督（可选；直发档不进监督）
     if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
@@ -871,6 +872,9 @@ def _finish_implementation_publication(
             worktree_path=worktree_path,
             github_client=github_client,
         )
+
+    if direct_pr_label is not None:
+        complete_direct_pr_round(github_client, issue)
 
     _logger.info(
         "Published Issue #%d from %s at %s after implementation head %s.",
@@ -994,17 +998,16 @@ def _finish_existing_commit_publication(
         )
     )
 
-    # 切换标签：从 workflow state labels → supervising
-    _edit_issue_labels_after_publish(
-        issue_number=issue.number,
-        add_labels=[config.labels.supervising],
-        remove_labels=workflow_state_labels(config),
-        worktree_path=worktree_path,
-        github_client=github_client,
-    )
+    # NORMAL/FAST 恢复先进入 supervising；DIRECT 直接完成最终 review 交接。
+    if publish_stage is not PublishStage.DIRECT:
+        _edit_issue_labels_after_publish(
+            issue_number=issue.number,
+            add_labels=[config.labels.supervising],
+            remove_labels=workflow_state_labels(config),
+            worktree_path=worktree_path,
+            github_client=github_client,
+        )
     _publish_verified_pr(reviewed_pr)
-    if direct_pr_label is not None:
-        complete_direct_pr_round(github_client, issue)
 
     # 步骤 4: PR 后监督（可选；直发档不进监督）
     if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
@@ -1043,6 +1046,9 @@ def _finish_existing_commit_publication(
             worktree_path=worktree_path,
             github_client=github_client,
         )
+
+    if direct_pr_label is not None:
+        complete_direct_pr_round(github_client, issue)
 
     _logger.info(
         "Recovered publication for Issue #%d from %s at %s.",

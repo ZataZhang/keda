@@ -179,7 +179,7 @@ def _resume_direct_pr_handoff(
             decision,
             candidate,
             lambda: transition_issue_workflow_state(
-                github_client, decision.issue.number, config, config.labels.supervising
+                github_client, decision.issue.number, config, config.labels.review
             ),
         )
     )

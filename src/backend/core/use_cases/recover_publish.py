@@ -609,12 +609,10 @@ def _recover_publish_issue_owned(
         )
         raise exc
 
-    # 第七步：根据 supervisor 配置决定标签流转。
+    # 第七步：DIRECT 直接进入 review；其他档位按 supervisor 配置决定标签流转。
     supervisor_action: str | None = None
     if stage_decision.publish_stage is PublishStage.DIRECT:
-        transition_issue_workflow_state(
-            github_client, issue_number, config, config.labels.supervising
-        )
+        transition_issue_workflow_state(github_client, issue_number, config, config.labels.review)
         complete_direct_pr_round(github_client, recovered_issue)
         supervisor_action = "direct_pr_supervisor_skipped"
     elif config.post_pr_supervisor.enabled:

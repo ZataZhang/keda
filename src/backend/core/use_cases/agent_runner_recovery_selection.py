@@ -82,7 +82,7 @@ class DirectPrHandoffRequest:
         github_client: GitHub 评论及标签端口。
         decision: 当前 fresh Issue 与已冻结的轮次选择。
         candidate: 当前分支与提交。
-        transition: 切换 supervising workflow 的既有操作。
+        transition: 切换最终 review workflow 的既有操作。
     """
 
     github_client: IGitHubClient

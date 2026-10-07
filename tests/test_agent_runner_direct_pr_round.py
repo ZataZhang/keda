@@ -14,6 +14,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
     IssueSummary,
+    PostPrSupervisorConfig,
     PublishRecoveryRequest,
     PullRequestContext,
     ReviewEventMarker,
@@ -363,15 +364,22 @@ def _forbid_builder(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-@pytest.mark.parametrize("entry", ["ready", "running", "blocked"])
-@pytest.mark.parametrize("label_present", [True, False])
+@pytest.mark.parametrize(
+    "case",
+    [
+        (entry, label, enabled)
+        for entry in ("ready", "running", "blocked")
+        for label in (True, False)
+        for enabled in (True, False)
+    ],
+)
 def test_claim_entries_only_handoff_published_round_after_body_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    entry: str,
-    label_present: bool,
+    case: tuple[str, bool, bool],
 ) -> None:
     """三个实际 handler 都恢复同轮 PR，当前 PRD 或已删除标签不触发新门禁。"""
+    entry, label_present, supervisor_enabled = case
     client = _published_storage(tmp_path / "github.json", label_present=label_present)
     _forbid_builder(monkeypatch)
     monkeypatch.setattr(handlers, "create_or_reuse_worktree", lambda *args: tmp_path)
@@ -382,7 +390,7 @@ def test_claim_entries_only_handoff_published_round_after_body_change(
     arguments = {
         "issue": current_issue,
         "repo_path": tmp_path,
-        "config": AppConfig(),
+        "config": AppConfig(post_pr_supervisor=PostPrSupervisorConfig(enabled=supervisor_enabled)),
         "agent": "auto",
         "github_client": client,
         "process_runner": process_runner,
@@ -403,17 +411,20 @@ def test_claim_entries_only_handoff_published_round_after_body_change(
     assert completed.round == "501" and completed.pr_url == _URL
     final_labels = set(fresh_client.get_issue(_NUMBER).labels)
     assert "direct-pr" not in final_labels and "test/preserve" in final_labels
-    assert "agent/supervising" in final_labels
+    assert "agent/review" in final_labels
     assert fresh_client.create_count == 0
     assert not any(list(command)[:2] == ["git", "push"] for command in process_runner.calls)
     assert not any(command and command[0] == "just" for command in process_runner.calls)
 
 
-@pytest.mark.parametrize("label_present", [True, False])
+@pytest.mark.parametrize(
+    "case", [(label, enabled) for label in (True, False) for enabled in (True, False)]
+)
 def test_standalone_recover_only_handoffs_published_round(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label_present: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: tuple[bool, bool]
 ) -> None:
     """真实 recover 用例遇正文新增 PRD 或已删标签，只交接同轮 PR。"""
+    label_present, supervisor_enabled = case
     client = _published_storage(tmp_path / "github.json", label_present=label_present)
     _forbid_builder(monkeypatch)
     process_runner = _runner()
@@ -421,7 +432,7 @@ def test_standalone_recover_only_handoffs_published_round(
     process_runner.responses[path_command] = CommandResult(
         command=path_command, return_code=0, stdout=str(tmp_path), stderr=""
     )
-    config = AppConfig()
+    config = AppConfig(post_pr_supervisor=PostPrSupervisorConfig(enabled=supervisor_enabled))
     config = replace(config, worktree=replace(config.worktree, path_command=f"echo {tmp_path}"))
     result = recover_publish_issue(
         request=PublishRecoveryRequest(issue_number=_NUMBER, expected_branch=_BRANCH),
@@ -436,6 +447,8 @@ def test_standalone_recover_only_handoffs_published_round(
     completed = read_direct_pr_round(fresh_client, fresh_client.get_issue(_NUMBER))
     assert completed is not None and completed.handoff_complete
     assert "direct-pr" not in fresh_client.get_issue(_NUMBER).labels
+    assert "agent/review" in fresh_client.get_issue(_NUMBER).labels
+    assert "agent/supervising" not in fresh_client.get_issue(_NUMBER).labels
     assert fresh_client.create_count == 0
     assert not any(list(command)[:2] == ["git", "push"] for command in process_runner.calls)
 

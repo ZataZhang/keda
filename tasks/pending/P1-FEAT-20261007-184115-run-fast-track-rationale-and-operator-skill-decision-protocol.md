@@ -157,7 +157,7 @@ No frontend impact：本期使用 GitHub 原生标签界面和现有 CLI，不�
 
 ### 7.1 Core Logic
 
-发现阶段只读识别已发布同轮 PR → 认领仲裁与本地锁 → fresh Issue 与关联重核 → 已发布者只补交接；其余每 Issue 档位、准入及依赖 → 执行 → 创建前候选检查点 → 确认 Draft PR → 消费 label 并 fresh 回读 → 原 workflow 状态迁移 → 检查点完成。
+发现阶段只读识别已发布同轮 PR → 认领仲裁与本地锁 → fresh Issue 与关联重核 → 已发布者只补交接；其余每 Issue 档位、准入及依赖 → 执行 → 创建前候选检查点 → 确认 Draft PR → 消费 label 并 fresh 回读 → DIRECT 移交到 review → 检查点完成。初次发布与 cleanup-only 恢复使用相同终态，不随内联 supervisor 配置改变；最终切换失败保留未完成检查点。
 
 ### 7.2 Change Impact Tree
 
