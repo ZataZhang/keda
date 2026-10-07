@@ -23,6 +23,7 @@ from backend.core.shared.interfaces.runner_console import (
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.use_cases.agent_runner_lifecycle import (
     LifecycleEventType,
+    LifecycleStatus,
     build_prd_lifecycle_detail,
     build_prd_lifecycle_stats,
     classify_durations,
@@ -31,6 +32,7 @@ from backend.core.use_cases.agent_runner_lifecycle import (
     record_lifecycle_event,
     record_lifecycle_terminal,
     resolve_lifecycle_store,
+    status_for_event_type,
 )
 from backend.infrastructure.persistence.console_store import (
     RunRecord,
@@ -902,3 +904,165 @@ def test_stats_endpoint_degrades_when_ledger_unreadable(
     payload = response.json()
     assert payload["token_usage_by_prd"] == []
     assert payload["token_usage"] == {"by_flow": {}, "by_agent": {}}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 事件语义状态（status）：写入、序列化、历史回落与徽章事实源
+#
+# 时间线状态徽章从粗粒度 phase 改为按 event_type 语义 status 渲染。判别力在于
+# 「开始执行 / 已被领取 / 重试 / 已恢复」在 status 轴上各自可辨（phase 轴上它们
+# 都塌缩成 executing），且「已进入队列」仍显示「排队中」的既有正确行为不被破坏。
+# 关键负控：历史行 status 为空时序列化必须回落 event_type 派生，而不是取 run 当前状态。
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _detail_status(store: SqliteConsoleStore) -> dict[str, str]:
+    """把当前 run 的 ``event_type -> 序列化 status`` 抽成映射，便于逐行断言。"""
+    detail = build_prd_lifecycle_detail(store=store, repo_id=_REPO_ID, prd_path=_PRD_PATH)
+    return {event.event_type: event.status for event in detail.events}
+
+
+def test_status_written_per_event_distinguishes_exec_substates(tmp_path: Path) -> None:
+    """写入：STARTED / CLAIMED / RETRY / RECOVERED 各自落不同 status（phase 却相同）。"""
+    store = _store(tmp_path)
+    _record(store, LifecycleEventType.QUEUED, "2026-09-21T10:00:00+00:00", event_key="q")
+    _record(store, LifecycleEventType.STARTED, "2026-09-21T10:01:00+00:00", event_key="s")
+    _record(store, LifecycleEventType.CLAIMED, "2026-09-21T10:02:00+00:00", event_key="c")
+    _record(store, LifecycleEventType.RETRY, "2026-09-21T10:03:00+00:00", event_key="r")
+    _record(store, LifecycleEventType.RECOVERED, "2026-09-21T10:04:00+00:00", event_key="rc")
+
+    run = store.get_latest_lifecycle_run(repo_id=_REPO_ID, prd_path=_PRD_PATH)
+    assert run is not None
+    events = store.list_lifecycle_events(run_id=run.run_id)
+    stored = {event.event_type: event for event in events}
+
+    # status 逐行可辨：这正是 phase 塌缩成 executing 后丢失的信息。
+    assert stored["queued"].status == LifecycleStatus.QUEUED.value
+    assert stored["started"].status == LifecycleStatus.STARTED.value
+    assert stored["claimed"].status == LifecycleStatus.CLAIMED.value
+    assert stored["retry"].status == LifecycleStatus.RETRY.value
+    assert stored["recovered"].status == LifecycleStatus.RECOVERED.value
+    assert len({stored[t].status for t in ("started", "claimed", "retry", "recovered")}) == 4
+
+    # 对照：这四条的 phase 全是 executing——status 才带来区分度。
+    assert {stored[t].phase for t in ("started", "claimed", "retry", "recovered")} == {"executing"}
+
+    # 序列化后的视图 status 与落库一致，且「已进入队列」映射到排队中语义。
+    status_by_type = _detail_status(store)
+    assert status_by_type["queued"] == LifecycleStatus.QUEUED.value
+
+
+def test_status_terminal_and_observation_mapping(tmp_path: Path) -> None:
+    """终态与观测：merged 收成 completed、archived 保留、失败记 failed、观测记 none。"""
+    store = _store(tmp_path)
+    _record(store, LifecycleEventType.MERGED, "2026-09-21T10:00:00+00:00", event_key="m")
+    _record(store, LifecycleEventType.ARCHIVED, "2026-09-21T10:01:00+00:00", event_key="a")
+    _record(store, LifecycleEventType.FAILED, "2026-09-21T10:02:00+00:00", event_key="f")
+    _record(
+        store,
+        LifecycleEventType.AGENT_TOKEN_USAGE,
+        "2026-09-21T10:03:00+00:00",
+        event_key="u",
+        detail={"flow": "verify", "agent": "codex"},
+    )
+
+    status_by_type = _detail_status(store)
+    assert status_by_type["merged"] == LifecycleStatus.COMPLETED.value
+    assert status_by_type["archived"] == LifecycleStatus.ARCHIVED.value
+    assert status_by_type["failed"] == LifecycleStatus.FAILED.value
+    # 观测事件不参与语义状态：记为 none，前端据此不渲染误导徽章。
+    assert status_by_type["agent_token_usage"] == LifecycleStatus.NONE.value
+
+
+def test_status_for_event_type_is_pure_fallback() -> None:
+    """派生纯函数：与写入映射一致，未知/观测种类回落 none。"""
+    assert status_for_event_type("started") is LifecycleStatus.STARTED
+    assert status_for_event_type("claimed") is LifecycleStatus.CLAIMED
+    assert status_for_event_type("merged") is LifecycleStatus.COMPLETED
+    assert status_for_event_type("agent_token_usage") is LifecycleStatus.NONE
+    assert status_for_event_type("not_a_real_event") is LifecycleStatus.NONE
+
+
+def test_legacy_row_without_status_falls_back_to_event_type(tmp_path: Path) -> None:
+    """历史行（v8 前 status 为空串）序列化回落 event_type 派生，不取 run 当前状态。
+
+    核心负控：同 run 里先写一条 status="" 的 queued 旧行，再写一条正常 merged
+    终态事件把当前阶段推到 completed。若序列化改用 run.current_phase，queued 历史
+    行会被错误标成 completed，丢失「排队中」当时语义；回落 event_type 才逐行保真。
+    """
+    store = _store(tmp_path)
+    # 模拟旧库行：绕过 record_lifecycle_event，直接写一条 status="" 的 queued 事件。
+    run_id = lifecycle_run_id(repo_id=_REPO_ID, issue_number=7, prd_path=_PRD_PATH)
+    store.upsert_lifecycle_run(
+        PrdLifecycleRunRecord(
+            run_id=run_id,
+            repo_id=_REPO_ID,
+            prd_path=_PRD_PATH,
+            issue_number=7,
+            trigger="console_start",
+            started_at="2026-09-21T10:00:00+00:00",
+            finished_at=None,
+            outcome=None,
+            history_complete=True,
+        )
+    )
+    store.append_lifecycle_event(
+        PrdLifecycleEventRecord(
+            run_id=run_id,
+            event_key="q-legacy",
+            event_type="queued",
+            phase="queued",
+            actor="backlog",
+            occurred_at="2026-09-21T10:00:00+00:00",
+            detail_json="{}",
+            # status 故意留空（默认 ""），复刻 v8 之前的历史行。
+        )
+    )
+    # 正常写入一条 merged 终态事件（带 status），把 run 当前阶段推到 completed。
+    _record(store, LifecycleEventType.MERGED, "2026-09-21T10:30:00+00:00", event_key="m")
+
+    detail = build_prd_lifecycle_detail(store=store, repo_id=_REPO_ID, prd_path=_PRD_PATH)
+    assert detail.current_phase == "completed"  # run 当前阶段已是 completed
+    status_by_type = {event.event_type: event.status for event in detail.events}
+    # 旧 queued 行仍回落自身语义，不被 run 当前状态覆盖。
+    assert status_by_type["queued"] == LifecycleStatus.QUEUED.value
+    # 正常写入的 merged 行带出 completed 语义。
+    assert status_by_type["merged"] == LifecycleStatus.COMPLETED.value
+
+
+def test_event_status_covers_every_phase_carrying_event_type() -> None:
+    """契约守卫：凡进入 _EVENT_PHASE 的 event_type 都必须有可区分 status。
+
+    新增事件种类若只补 phase 忘了 status，徽章会缺省成 none——本用例把这条
+    隐性约定钉成断言，防止时间线重新出现「无法分辨每行发生了什么」。
+    """
+    from backend.core.use_cases.agent_runner_lifecycle import _EVENT_PHASE, _EVENT_STATUS
+
+    for event_type in _EVENT_PHASE:
+        status = _EVENT_STATUS.get(event_type)
+        assert status is not None, f"{event_type} 缺 _EVENT_STATUS 映射"
+        assert status is not LifecycleStatus.NONE, f"{event_type} status 不应为 none"
+
+    # 观测类事件刻意不进 status 闭集（记 none）。
+    assert LifecycleEventType.AGENT_TOKEN_USAGE not in _EVENT_STATUS
+
+
+def test_lifecycle_endpoint_exposes_status_per_event(api_environment) -> None:
+    """真实入口：HTTP 响应每条事件带 status，started 与 claimed 值不同。"""
+    store = api_environment
+    _record(store, LifecycleEventType.QUEUED, "2026-09-21T10:00:00+00:00", event_key="q")
+    _record(store, LifecycleEventType.STARTED, "2026-09-21T10:01:00+00:00", event_key="s")
+    _record(store, LifecycleEventType.CLAIMED, "2026-09-21T10:02:00+00:00", event_key="c")
+
+    encoded = backlog_routes._encode_prd_path(_PRD_PATH)
+    response = client.get(
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/lifecycle",
+        params={"repo_id": _REPO_ID},
+    )
+    assert response.status_code == 200
+    by_type = {event["event_type"]: event for event in response.json()["events"]}
+    assert by_type["queued"]["status"] == "queued"
+    assert by_type["started"]["status"] == "started"
+    assert by_type["claimed"]["status"] == "claimed"
+    # 三条 phase 相同（queued 之外都 executing），区分度只来自 status。
+    assert by_type["started"]["phase"] == by_type["claimed"]["phase"] == "executing"

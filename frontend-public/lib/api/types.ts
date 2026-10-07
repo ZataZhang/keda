@@ -516,6 +516,8 @@ export type PrdLifecycleDurations = {
 export type PrdLifecycleEventView = {
   event_type: string;
   phase: string;
+  /** 事件自身的语义状态（按 event_type 写入时冻结），状态徽章的事实源。 */
+  status: string;
   actor: string;
   occurred_at: string;
   detail: Record<string, unknown>;
