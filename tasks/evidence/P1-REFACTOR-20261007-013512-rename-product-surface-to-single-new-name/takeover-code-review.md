@@ -26,3 +26,9 @@
 - mounted 旧状态目录时 dry-run 未提前报告 EXDEV；正式迁移拒绝且不会跨盘复制或删除数据。
 - 新安装器需与包含 kc 的新版 wheel 同步发布，当前旧发布包不含 kc 的安装校验会失败。
 - 前端本轮保留生产首页边界及已有 E2E 断言，未重新运行浏览器流程。
+
+## 首轮 CI 后的精准修复
+
+首轮 CI 的 12 个测试失败已在 fresh HOME、外部新名 PRD skill 路径下原样复现。会话 fixture 统一隔离/恢复双名变量；状态路径测试分别精确覆盖新机器与仅旧目录兼容，路径优先级测试保留新名优先及显式最优先。包含双名 CONFIG 污染的相关 207 项测试通过。未改生产逻辑或弱化失败契约。
+
+stock-python 安装 CI 在非发布事件安装当前 checkout 并保留低版本 ambient Python；release 继续经真实 PyPI installer 安装对应 tag。之前用旧公共 wheel 验证新 kc 的版本错位已修正，真实 Ubuntu/macOS 档仍由新 HEAD CI 判定。

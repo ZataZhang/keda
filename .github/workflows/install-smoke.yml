@@ -430,7 +430,8 @@ jobs:
 
       # 本档原先完全没有这道等待，0.2.1 发布时直接撞上传播竞态：
       # install.sh 自己查 PyPI 得到 404，报"PyPI 上不存在版本 0.2.1"而退出。
-      # release 事件下才需要等（其余事件装的是早已存在的版本）。
+      # release 事件下才需要等；其余事件安装当前 checkout，避免改名尚未发布时
+      # 用旧 PyPI wheel 验证新命令入口。
       - name: Wait for the version to appear on PyPI
         if: github.event_name == 'release'
         uses: ./.github/actions/wait-for-pypi
@@ -439,9 +440,25 @@ jobs:
           version: ${{ github.event.release.tag_name }}
 
       - name: Real install from PyPI with the old ambient python
+        if: github.event_name == 'release'
         run: |
-          bash install.sh --source pypi --method uv
+          bash install.sh --source pypi --method uv --version "${{ github.event.release.tag_name }}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Set up uv for the current checkout install
+        if: github.event_name != 'release'
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      # PR / push 验证当前代码的真实安装与 managed Python，installer 的低版本
+      # 选择/拒绝逻辑由前面的 --check 覆盖；完整 PyPI installer 路径留给 release。
+      - name: Real install from current checkout with uv-managed Python
+        if: github.event_name != 'release'
+        run: |
+          uv tool install --reinstall --editable . --python 3.12 --managed-python
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python3 -c 'import sys; assert sys.version_info < (3, 11), sys.version'
 
       - name: Probe the installed console
         run: |
