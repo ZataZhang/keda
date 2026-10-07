@@ -50,6 +50,7 @@ __all__ = [
     "ACTIVE_PHASES",
     "LifecycleEventType",
     "LifecyclePhase",
+    "LifecycleStatus",
     "build_attempt_event_detail",
     "build_prd_lifecycle_detail",
     "build_prd_lifecycle_stats",
@@ -59,6 +60,7 @@ __all__ = [
     "record_lifecycle_event",
     "record_lifecycle_terminal",
     "resolve_lifecycle_store",
+    "status_for_event_type",
 ]
 
 
@@ -107,6 +109,39 @@ class LifecyclePhase(str, Enum):
     COMPLETED = "completed"
 
 
+class LifecycleStatus(str, Enum):
+    """PRD 生命周期事件自身的语义状态（按 event_type 记入，供时间线逐行呈现）。
+
+    与粗粒度 :class:`LifecyclePhase` 分工不同：phase 用于耗时归属与「当前阶段」
+    推导，会把 STARTED / CLAIMED / ATTEMPT / RETRY / RECOVERED 一并收成 executing；
+    status 保留每条事件「当时发生了什么」的可区分语义，是前端状态徽章的事实源，
+    也是「历史事件不因 run 当前状态而失去当时语义」这一约束的落点。新增
+    event_type 时必须同步扩展 :data:`_EVENT_STATUS`，否则徽章会缺省。观测类事件
+    （agent_token_usage）刻意不进入 :data:`_EVENT_STATUS`，记为 ``NONE``。
+    """
+
+    NONE = "none"
+    QUEUED = "queued"
+    STARTED = "started"
+    CLAIMED = "claimed"
+    ATTEMPT = "attempt"
+    RETRY = "retry"
+    RECOVERED = "recovered"
+    IMPLEMENTATION_COMPLETED = "implementation_completed"
+    VALIDATION_STARTED = "validation_started"
+    VALIDATION_PASSED = "validation_passed"
+    VALIDATION_FAILED = "validation_failed"
+    REVIEW_STARTED = "review_started"
+    REVIEW_PASSED = "review_passed"
+    REVIEW_FAILED = "review_failed"
+    MERGE_STARTED = "merge_started"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
+    BLOCKED = "blocked"
+    UNBLOCKED = "unblocked"
+    FAILED = "failed"
+
+
 #: 计入“有效执行”的阶段：只有 Agent 真正在跑的时间。
 ACTIVE_PHASES = frozenset({LifecyclePhase.EXECUTING})
 
@@ -133,6 +168,31 @@ _EVENT_PHASE: dict[LifecycleEventType, LifecyclePhase] = {
     LifecycleEventType.BLOCKED: LifecyclePhase.BLOCKED,
     LifecycleEventType.UNBLOCKED: LifecyclePhase.EXECUTING,
     LifecycleEventType.FAILED: LifecyclePhase.FAILED,
+}
+
+#: 事件种类 -> 事件语义状态（写入时按当时 event_type 冻结，与 phase 一样落库）。
+#: 刻意比 :data:`_EVENT_PHASE` 更细，让「开始执行」「已被领取」「重试」「已恢复」
+#: 在时间线上各自可辨；MERGED 收成 ``COMPLETED``（已完成），ARCHIVED 保留「已归档」。
+_EVENT_STATUS: dict[LifecycleEventType, LifecycleStatus] = {
+    LifecycleEventType.QUEUED: LifecycleStatus.QUEUED,
+    LifecycleEventType.STARTED: LifecycleStatus.STARTED,
+    LifecycleEventType.CLAIMED: LifecycleStatus.CLAIMED,
+    LifecycleEventType.ATTEMPT: LifecycleStatus.ATTEMPT,
+    LifecycleEventType.RETRY: LifecycleStatus.RETRY,
+    LifecycleEventType.RECOVERED: LifecycleStatus.RECOVERED,
+    LifecycleEventType.IMPLEMENTATION_COMPLETED: LifecycleStatus.IMPLEMENTATION_COMPLETED,
+    LifecycleEventType.VALIDATION_STARTED: LifecycleStatus.VALIDATION_STARTED,
+    LifecycleEventType.VALIDATION_PASSED: LifecycleStatus.VALIDATION_PASSED,
+    LifecycleEventType.VALIDATION_FAILED: LifecycleStatus.VALIDATION_FAILED,
+    LifecycleEventType.REVIEW_STARTED: LifecycleStatus.REVIEW_STARTED,
+    LifecycleEventType.REVIEW_PASSED: LifecycleStatus.REVIEW_PASSED,
+    LifecycleEventType.REVIEW_FAILED: LifecycleStatus.REVIEW_FAILED,
+    LifecycleEventType.MERGE_STARTED: LifecycleStatus.MERGE_STARTED,
+    LifecycleEventType.MERGED: LifecycleStatus.COMPLETED,
+    LifecycleEventType.ARCHIVED: LifecycleStatus.ARCHIVED,
+    LifecycleEventType.BLOCKED: LifecycleStatus.BLOCKED,
+    LifecycleEventType.UNBLOCKED: LifecycleStatus.UNBLOCKED,
+    LifecycleEventType.FAILED: LifecycleStatus.FAILED,
 }
 
 #: 终态事件：写入后 run 收口，之后只允许追加不改变阶段的观测事件。
@@ -270,6 +330,7 @@ def record_lifecycle_event(
     timestamp = occurred_at or now_iso()
     run_id = lifecycle_run_id(repo_id=repo_id, issue_number=issue_number, prd_path=prd_path)
     phase = _EVENT_PHASE.get(event_type, LifecyclePhase.NONE)
+    status = _EVENT_STATUS.get(event_type, LifecycleStatus.NONE)
     run_record = PrdLifecycleRunRecord(
         run_id=run_id,
         repo_id=repo_id,
@@ -292,6 +353,7 @@ def record_lifecycle_event(
         event_key=event_key or f"{event_type.value}@{timestamp}",
         event_type=event_type.value,
         phase=phase.value,
+        status=status.value,
         actor=actor,
         occurred_at=timestamp,
         detail_json=_json_detail(detail),
@@ -368,6 +430,25 @@ def is_terminal_event(event_type: str) -> bool:
         return LifecycleEventType(event_type) in _TERMINAL_EVENT_TYPES
     except ValueError:
         return False
+
+
+def status_for_event_type(event_type: str) -> LifecycleStatus:
+    """由 event_type 反查事件语义状态，供未落 status 列的历史行序列化兜底。
+
+    status 正常在写入时按当时 event_type 冻结落库；本函数只在读到空 status
+    （v8 之前的旧库行）时派生，保证「已进入队列」等历史事件仍显示当时语义，
+    而不是取 run 的当前状态。未知或观测类（agent_token_usage）返回 ``NONE``。
+
+    Args:
+        event_type: 事件种类字符串（闭集）。
+
+    Returns:
+        LifecycleStatus: 该事件种类对应的语义状态；无法识别时为 ``NONE``。
+    """
+    try:
+        return _EVENT_STATUS.get(LifecycleEventType(event_type), LifecycleStatus.NONE)
+    except ValueError:
+        return LifecycleStatus.NONE
 
 
 @dataclass(frozen=True)
@@ -620,6 +701,7 @@ def build_prd_lifecycle_detail(
             PrdLifecycleEventView(
                 event_type=event.event_type,
                 phase=event.phase,
+                status=event.status or status_for_event_type(event.event_type).value,
                 actor=event.actor,
                 occurred_at=event.occurred_at,
                 detail=_parse_detail(event.detail_json),

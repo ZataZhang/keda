@@ -3597,6 +3597,22 @@ validation_started | validation_passed | validation_failed | review_started |
 review_passed | review_failed | merge_started | merged | archived | blocked |
 unblocked | failed | agent_token_usage`。
 
+**`status` 闭集（事件语义状态，时间线状态徽章的事实源）**：
+每条事件在**写入时**按当时 `event_type` 冻结一个 `status`，落 `prd_lifecycle_events`
+的 `status` 列（schema v8 追加，非空默认空串）。它与粗粒度 `phase` 分工不同：`phase`
+只用于耗时归属与「当前阶段」推导，会把 `started / claimed / attempt / retry / recovered`
+一并塌缩成 `executing`；`status` 保留每行「当时发生了什么」的可区分语义，避免
+「开始执行」与「已被领取」在时间线上都显示「执行中」。闭集为
+`none | queued | started | claimed | attempt | retry | recovered |
+implementation_completed | validation_started | validation_passed | validation_failed |
+review_started | review_passed | review_failed | merge_started | completed | archived |
+blocked | unblocked | failed`，其中 `merged` 收成 `completed`（已完成）、`archived`
+保留「已归档」、「已进入队列」保持既有的「排队中」显示。观测类 `agent_token_usage`
+记为 `none`，前端据此不渲染误导徽章。v8 之前的历史行 `status` 为空串，序列化时回落
+按 `event_type` 派生（`status_for_event_type`），**绝不取 run 的当前状态**——否则
+历史事件会失去当时语义。`frontend-public` 的 Backlog「执行过程」标签据此渲染逐行
+状态徽章，抽屉「状态」行同源。
+
 **Token 用量统计（agent_token_usage 观测维度）**
 
 每次 agent 子进程调用的官方 usage（claude stream-json 的 `result.usage`）
@@ -3627,7 +3643,8 @@ GET /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
     单 PRD 明细：repo_id / prd_path / run_id / issue_number / trigger /
     current_phase / in_progress / outcome / history_complete / started_at /
     finished_at / durations{end_to_end_seconds, active_seconds,
-    waiting_seconds, blocked_seconds} / events[] / has_data
+    waiting_seconds, blocked_seconds} / events[]（每条含 event_type / phase /
+    status / actor / occurred_at / detail，status 为逐行状态徽章事实源）/ has_data
 
 GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
     仓库级统计：completed_runs / average_end_to_end_seconds /

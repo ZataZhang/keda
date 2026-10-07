@@ -5,10 +5,11 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``iar run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 7：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 8：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
-  v7 把队列与设置两张表按新功能名重建）。
+  v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
+  非空 ``status`` 列，记录每条事件写入时冻结的语义状态）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -118,9 +119,10 @@ class PrdLifecycleEventRecord:
     actor: str
     occurred_at: str
     detail_json: str
+    status: str = ""
 
 
-_SCHEMA_VERSION = 7
+_SCHEMA_VERSION = 8
 
 _CREATE_RUN_RECORDS = """
 CREATE TABLE IF NOT EXISTS run_records (
@@ -245,9 +247,16 @@ CREATE TABLE IF NOT EXISTS prd_lifecycle_events (
     actor TEXT NOT NULL,
     occurred_at TEXT NOT NULL,
     detail_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT '',
     UNIQUE (run_id, event_key)
 )
 """
+
+# schema v7 -> v8：prd_lifecycle_events 追加非空 status 列（事件写入时冻结的语义
+# 状态）。旧库行回落空串，由 core 序列化按 event_type 派生；新库由建表直接带上。
+_LIFECYCLE_EVENT_V8_ADD_STATUS = (
+    "ALTER TABLE prd_lifecycle_events ADD COLUMN status TEXT NOT NULL DEFAULT ''"
+)
 
 _CREATE_PRD_LIFECYCLE_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_prd_lifecycle_runs_repo "
@@ -330,6 +339,15 @@ class SqliteConsoleStore:
             # 避免后续 SQL 命中 "no such table"。
             connection.execute(_CREATE_BACKLOG_QUEUE)
             connection.execute(_CREATE_BACKLOG_SETTINGS)
+        if current_version < 8:
+            # 附加式迁移：prd_lifecycle_events 补非空 status 列。新库本轮已由
+            # _CREATE_PRD_LIFECYCLE_EVENTS 建表并带该列，PRAGMA 探测保证幂等。
+            existing_event_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(prd_lifecycle_events)").fetchall()
+            }
+            if "status" not in existing_event_columns:
+                connection.execute(_LIFECYCLE_EVENT_V8_ADD_STATUS)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 
@@ -581,8 +599,8 @@ class SqliteConsoleStore:
         with self._connect() as connection:
             cursor = connection.execute(
                 "INSERT OR IGNORE INTO prd_lifecycle_events "
-                "(run_id, event_key, event_type, phase, actor, occurred_at, detail_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(run_id, event_key, event_type, phase, actor, occurred_at, detail_json, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     event_record.run_id,
                     event_record.event_key,
@@ -591,6 +609,7 @@ class SqliteConsoleStore:
                     event_record.actor,
                     event_record.occurred_at,
                     event_record.detail_json,
+                    getattr(event_record, "status", ""),
                 ),
             )
             connection.commit()
@@ -661,7 +680,8 @@ class SqliteConsoleStore:
         """按发生顺序列出某个 run 的全部事件。"""
         with self._connect() as connection:
             event_rows = connection.execute(
-                "SELECT run_id, event_key, event_type, phase, actor, occurred_at, detail_json "
+                "SELECT run_id, event_key, event_type, phase, actor, occurred_at, "
+                "detail_json, status "
                 "FROM prd_lifecycle_events WHERE run_id = ? "
                 "ORDER BY occurred_at ASC, id ASC",
                 (run_id,),
@@ -675,6 +695,7 @@ class SqliteConsoleStore:
                 actor=event_row["actor"],
                 occurred_at=event_row["occurred_at"],
                 detail_json=event_row["detail_json"],
+                status=event_row["status"],
             )
             for event_row in event_rows
         ]

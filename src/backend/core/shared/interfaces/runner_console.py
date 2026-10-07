@@ -300,6 +300,9 @@ class PrdLifecycleEventRecord:
 
     ``event_key`` 在同一 ``run_id`` 内唯一，用于抵抗重试与并发重复写；
     ``detail_json`` 只允许结构化非敏感摘要（不含 prompt / 终端原文 / 密钥）。
+    ``status`` 是写入时按当时 event_type 冻结的事件语义状态（时间线状态徽章的
+    事实源），与粗粒度 ``phase`` 分工不同；v8 之前的旧库行为空串，由序列化侧
+    回落到 event_type 派生。
     """
 
     run_id: str
@@ -309,6 +312,7 @@ class PrdLifecycleEventRecord:
     actor: str
     occurred_at: str  # ISO8601 UTC
     detail_json: str
+    status: str = ""
 
 
 class IPrdLifecycleStore(ABC):

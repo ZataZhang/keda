@@ -88,6 +88,7 @@ const MOCK_LIFECYCLE_DETAIL = {
     {
       event_type: 'queued',
       phase: 'queued',
+      status: 'queued',
       actor: 'backlog',
       occurred_at: '2026-09-21T10:00:00+00:00',
       detail: { trigger: 'manual' },
@@ -95,13 +96,23 @@ const MOCK_LIFECYCLE_DETAIL = {
     {
       event_type: 'started',
       phase: 'executing',
+      status: 'started',
       actor: 'backlog',
       occurred_at: '2026-09-21T10:01:00+00:00',
       detail: {},
     },
     {
+      event_type: 'claimed',
+      phase: 'executing',
+      status: 'claimed',
+      actor: 'runner',
+      occurred_at: '2026-09-21T10:02:00+00:00',
+      detail: {},
+    },
+    {
       event_type: 'attempt',
       phase: 'executing',
+      status: 'attempt',
       actor: 'runner',
       occurred_at: '2026-09-21T10:03:00+00:00',
       detail: {
@@ -115,6 +126,7 @@ const MOCK_LIFECYCLE_DETAIL = {
     {
       event_type: 'retry',
       phase: 'executing',
+      status: 'retry',
       actor: 'runner',
       occurred_at: '2026-09-21T10:05:00+00:00',
       detail: { agent: 'codex', attempt_number: 2 },
@@ -122,6 +134,7 @@ const MOCK_LIFECYCLE_DETAIL = {
     {
       event_type: 'recovered',
       phase: 'executing',
+      status: 'recovered',
       actor: 'runner',
       occurred_at: '2026-09-21T10:12:00+00:00',
       detail: { agent: 'codex', attempt_number: 2 },
@@ -129,6 +142,7 @@ const MOCK_LIFECYCLE_DETAIL = {
     {
       event_type: 'blocked',
       phase: 'blocked',
+      status: 'blocked',
       actor: 'runner',
       occurred_at: '2026-09-21T10:20:00+00:00',
       detail: { error_summary: '等待人工输入 Spec 澄清' },
@@ -268,6 +282,14 @@ test.describe('PRD lifecycle observability', () => {
     const queuedBox = await queuedRow.boundingBox()
     const blockedBox = await blockedRow.boundingBox()
     expect(queuedBox!.y).toBeLessThan(blockedBox!.y)
+
+    // 状态徽章按 event_type 语义渲染：started 与 claimed 虽同属 executing phase，
+    // 徽章文案必须区分（回归 #229：此前两者都显示粗粒度 phase「执行中」）。
+    await expect(page.getByTestId('prd-lifecycle-event-status-queued')).toContainText('排队中')
+    await expect(page.getByTestId('prd-lifecycle-event-status-started')).toContainText('开始执行')
+    await expect(page.getByTestId('prd-lifecycle-event-status-claimed')).toContainText('已被领取')
+    await expect(page.getByTestId('prd-lifecycle-event-status-retry')).toContainText('重试')
+    await expect(page.getByTestId('prd-lifecycle-event-status-recovered')).toContainText('已恢复')
 
     // 点击一个事件打开抽屉，显示 run id / 时间 / Agent / 原因
     await page.getByTestId('prd-lifecycle-event-attempt').first().click()
