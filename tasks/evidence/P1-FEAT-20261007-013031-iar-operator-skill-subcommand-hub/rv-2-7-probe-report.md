@@ -1,0 +1,13 @@
+# Issue234 rv2 / rv7 independent probe
+
+rv2: PASS for existing command-example guard and invalid-flag negative control. Disposable external snapshot contains final current source and the unchanged real test file, using source venv with snapshot PYTHONPATH. `-o addopts=` disables testmon. Full test file clean run exit0; appended `kc issue create --definitely-not-a-real-flag` in copied references/create-issue.md produces exit1, explicitly naming `references/create-issue.md` and the invalid flag; exact bytes restored and full test file exit0. Source worktree untouched. Outputs: issue-234-rv2/{clean,negative,restored}.txt plus result.json.
+
+rv7: INCONCLUSIVE (review incident), not PASS. Actual installed final skill from successful real-entry fixture copied into a new isolated HOME `.claude/skills/kedacode-operator`; actual Claude headless stream-json process attempted tool-based loading with a read-only instruction. Process exits1 with `Not logged in · Please run /login`, after one turn; no creation route/precheck tool trace or status route execution trace established. No credential files copied and no GH mutations. Authentication failure is sufficient to use PRD's stated fallback; further agent calls would repeat unavailable credentials.
+
+Fallback actually established: real Claude initialization event includes `kedacode-operator` in its skills inventory; installed Skill description includes all eight oral keywords. Full trace: issue-234-rv7/availability.txt; fallback-result.json explicitly keeps route/precheck booleans false. Root must combine this with human reading of all eight final references per §9.1. This fallback is installed-artifact/real inventory evidence, not a claim that behavioral route tests passed.
+
+No PRD, commit or repository edits; no final verifier PASS asserted. Root final-tree metadata and semantic review remain necessary for final reconciliation.
+
+## Final resource rebind after last docs correction
+
+Both probes rerun after create-issue.md documented default PRD commit/push. rv2 remains clean0 / invalid-flag1 / restored0; snapshot and per-resource SHA256 now in issue-234-rv2/result.json. rv7 rerun from installed v2 real-entry fixture under issue-234-rv-final-v2; actual new-HOME Claude again reports Not logged in, so INCONCLUSIVE unchanged. Real inventory + eight description keywords established anew; full output and SHA256 mapping in issue-234-rv7-v2/{availability.txt,result.json}. Fingerprints bind the final resource bytes despite source HEAD still being base before root commit; compare these hashes with final committed resources rather than calling base HEAD the final tree.

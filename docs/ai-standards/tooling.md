@@ -56,12 +56,12 @@
 
 `kc` CLI 是给 agent 的一等机读执行面（定位见 `ROADMAP.md`）。任何改动 CLI 表面——新增或改名子命令、增加/修改旗标、调整退出码或机器可读输出——**必须同步**以下随包资产，否则 agent 侧知识会与真实命令树漂移：
 
-- 随包 operator skill：`src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md`（命令表、不变量、退出码说明）。
+- 随包 operator skill：`src/backend/engines/agent_runner/templates/skills/kedacode-operator/`（主文件 `SKILL.md` 保留共享基线与 Safety 不变量、退出码说明，子命令流程移入 `references/*.md`，命令示例随各 reference 更新）。
 - 文档：`docs/`（CLI 参考与 guide），并保证 `uv run mkdocs build --strict` 通过。
 
 真实命令树是权威来源（`kc --help` / `kc schema --json`），skill 与文档是它的随包镜像；两者不一致时以真实命令树为准并修正镜像。该约定的机器化承接是 `tasks/pending/P1-FEAT-20260930-141135-iar-agent-machine-contract.md` 的 FR-6「知识随包发」。
 
-守卫测试 `tests/test_kedacode_operator_skill.py` 只覆盖随包 skill 的安装资源与冲突保护，**不校验命令表内容**——内容同步仍需人工与评审保证。
+守卫测试 `tests/test_kedacode_operator_skill.py` 覆盖随包 skill 的安装资源与冲突保护，并抽取主文件与全部 `references/*.md` 中的反引号 `kc` 命令示例，逐项与真实命令树（`kc schema --json`）及允许旗标白名单比对——失败会点名来源文件与旗标；命令表内容漂移不再只靠人工与评审发现。
 
 ## Justfile Layering
 

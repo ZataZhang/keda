@@ -37,6 +37,9 @@ _SKILLS_DIR_ENV_SUFFIX = "SKILLS_DIR"
 _REMOTE_SKILL_PROTECTED_FILENAME = "SKILL.md"
 """用于识别用户同名 Skill 是否被改动的最小契约文件。"""
 
+_SKILL_REFERENCES_SUBDIR = "references"
+"""子命令说明所在子目录；目录内递归的 ``.md`` 与主文件同属发行包受管集合。"""
+
 _LEGACY_ACTION_ABSENT = "absent"
 _LEGACY_ACTION_REMOVE = "remove"
 _LEGACY_ACTION_PRESERVE = "preserve"
@@ -98,11 +101,13 @@ def install_packaged_operator_skill(
 ) -> PackagedSkillInstallResult:
     """安装随发行包发行的 operator Skill，并清理旧名下的历史随包副本。
 
-    新名安装语义不变：同名用户 Skill 的 ``SKILL.md`` 与随包不一致时默认保留，
-    ``force=True`` 才覆盖。旧名副本按安装根逐个判定（``kc init`` 会为每个安装根
-    各调用一次本函数）：目录里只有已知随包文件、且 ``SKILL.md`` 的 sha256 命中
-    :data:`_LEGACY_OPERATOR_SKILL_DIGESTS`（用户从未改动过）时才删除；改动过的
-    副本保留，判定结果与提示路径通过返回值的 ``legacy_*`` 字段交给调用方展示。
+    新名安装语义不变：同名用户 Skill 的**受管文件**（主文件 + ``references/`` 下
+    全部 ``.md``）与随包不一致时默认保留，``force=True`` 才覆盖；用户自己放进
+    Skill 目录的非受管文件不参与比对、不触发冲突。旧名副本按安装根逐个判定
+    （``kc init`` 会为每个安装根各调用一次本函数）：目录里只有已知随包文件、且
+    ``SKILL.md`` 的 sha256 命中 :data:`_LEGACY_OPERATOR_SKILL_DIGESTS`（用户从未
+    改动过）时才删除；改动过的副本保留，判定结果与提示路径通过返回值的
+    ``legacy_*`` 字段交给调用方展示。
 
     Args:
         target_skills_root: 本次安装写入的 skills 根目录。
@@ -128,8 +133,10 @@ def install_packaged_operator_skill(
         )
     action = "install"
     if target_path.exists():
-        local_contract = _read_remote_skill_contract(target_path)
-        if local_contract == source_contract_path.read_bytes():
+        if _is_managed_skill_up_to_date(
+            target_path=target_path,
+            source_path=source_path,
+        ):
             action = "up-to-date"
         elif not force:
             action = "preserve-conflict"
@@ -156,6 +163,37 @@ def install_packaged_operator_skill(
         legacy_action=legacy_action,
         legacy_notice=legacy_notice,
     )
+
+
+def _managed_packaged_skill_relative_paths(source_path: Path) -> tuple[str, ...]:
+    """枚举发行包**受管**的 Skill 文件（相对路径，POSIX 分隔，主文件在前）。
+
+    受管集合 = 主文件 ``SKILL.md`` + ``references/`` 子目录下递归的全部 ``.md``。
+    目标目录里不属于该集合的文件（用户自加的笔记等）既不参与同步判定，也不触发
+    冲突，与 :func:`_packaged_relative_file_paths`（旧名副本清理用的全量枚举）
+    是两种口径。
+    """
+    managed_relative_paths = [_REMOTE_SKILL_PROTECTED_FILENAME]
+    references_root = source_path / _SKILL_REFERENCES_SUBDIR
+    if references_root.is_dir():
+        managed_relative_paths.extend(
+            reference_file_path.relative_to(source_path).as_posix()
+            for reference_file_path in sorted(references_root.rglob("*.md"))
+            if reference_file_path.is_file()
+        )
+    return tuple(managed_relative_paths)
+
+
+def _is_managed_skill_up_to_date(*, target_path: Path, source_path: Path) -> bool:
+    """目标 Skill 目录的受管文件是否逐一与发行包逐字节一致（任一缺失或不同即否）。"""
+    for managed_relative_path in _managed_packaged_skill_relative_paths(source_path):
+        packaged_file_bytes = (source_path / managed_relative_path).read_bytes()
+        local_file_path = target_path / managed_relative_path
+        if not local_file_path.is_file():
+            return False
+        if local_file_path.read_bytes() != packaged_file_bytes:
+            return False
+    return True
 
 
 def _packaged_relative_file_paths(source_path: Path) -> frozenset[str]:
