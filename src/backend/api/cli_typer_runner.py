@@ -142,6 +142,18 @@ def run_command(
             "are rejected.",
         ),
     ] = False,
+    direct_pr: Annotated[
+        bool,
+        typer.Option(
+            "--direct-pr",
+            help="Direct tier for THIS run only: after the execution agent commits, "
+            "only the mechanical steps remain (runner-controlled commit -> push -> "
+            "Draft PR). Skips the pre-PR review agent, the runner verification "
+            "commands and the validation gates, so CI on the Draft PR becomes the "
+            "gate. Only for Issues without a PRD anchor; mutually exclusive with "
+            "--fast-merge; requires a single target.",
+        ),
+    ] = False,
     agent: RunAgentOption = RunAgentChoice.auto,
     max_issues: MaxIssuesOption = None,
     preset: ModelPresetOption = None,
@@ -176,6 +188,7 @@ def run_command(
         takeover=takeover,
         yes=yes,
         fast_merge=fast_merge,
+        direct_pr=direct_pr,
     )
 
 

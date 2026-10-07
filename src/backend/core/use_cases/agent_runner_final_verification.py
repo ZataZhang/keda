@@ -8,6 +8,7 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_structured_evidence import ValidationEvidenceError
 from backend.core.use_cases.agent_runner_validation import (
     ensure_no_misplaced_evidence_helpers,
@@ -31,9 +32,18 @@ class FinalVerificationRequest:
     selected_agent: str
     verified_sha: str | None
     verifier_verdict: ValidationVerdict | None
-    #: 快速通道（``iar run --fast-merge``）：HEAD 变化时不再重跑 RV 与独立
-    #: verifier，直接沿用（空的）初次结论；PR 正文由发布路径打未验证标注。
-    fast_merge: bool = False
+    #: 兼容旧调用面的快速通道布尔。唯一事实源是 :attr:`publish_stage`，本字段在
+    #: ``__post_init__`` 里归一化为该档位的派生视图（不会出现矛盾组合）。
+    fast_merge: bool | None = None
+    #: 发布档位：``FAST`` / ``DIRECT`` 都不再重跑 RV 与独立 verifier；``DIRECT``
+    #: 额外意味着上游连 pre-PR review 与仓库验证命令都没跑。
+    publish_stage: PublishStage = PublishStage.NORMAL
+
+    def __post_init__(self) -> None:
+        """把 ``fast_merge`` 布尔收进 :attr:`publish_stage`，并回填其派生视图。"""
+        if self.fast_merge and self.publish_stage is PublishStage.NORMAL:
+            object.__setattr__(self, "publish_stage", PublishStage.FAST)
+        object.__setattr__(self, "fast_merge", self.publish_stage is PublishStage.FAST)
 
 
 def ensure_final_verifier_verdict(request: FinalVerificationRequest) -> ValidationVerdict | None:
@@ -53,12 +63,19 @@ def ensure_final_verifier_verdict(request: FinalVerificationRequest) -> Validati
             "Final verification requires a clean committed worktree after pre-PR review."
         )
     final_sha = get_head_sha(request.worktree_path, request.process_runner)
-    if request.fast_merge:
-        # 快速通道的审计日志：跳过的是验证门禁，不是提交完整性前提（上方 clean-tree
+    if request.publish_stage.skips_independent_verification:
+        # 旁路档位的审计日志：跳过的是验证门禁，不是提交完整性前提（上方 clean-tree
         # 检查照常），且旗标来源必须可事后追溯。
+        stage_name, flag_name = (
+            ("Fast-merge", "--fast-merge")
+            if request.publish_stage is PublishStage.FAST
+            else ("Direct-pr", "--direct-pr")
+        )
         _logger.info(
-            "Fast-merge (origin: --fast-merge run flag): skipping final RV/verifier "
+            "%s (origin: %s run flag): skipping final RV/verifier "
             "re-check for Issue #%d at %s; the PR will carry the unverified annotation.",
+            stage_name,
+            flag_name,
             request.issue.number,
             final_sha,
         )

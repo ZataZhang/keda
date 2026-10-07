@@ -364,6 +364,38 @@ def parse_fast_merge_marker(text: str) -> int | None:
     return int(match.group("issued")) if match is not None else None
 
 
+_DIRECT_PR_MARKER_PATTERN = re.compile(r"<!--\s*iar:direct-pr\s+issued=(?P<issued>\d+)\s*-->")
+
+
+def format_direct_pr_marker(issue_number: int) -> str:
+    """Format the ``iar:direct-pr`` hidden self-declaration marker.
+
+    经直发档（``iar run --direct-pr``）发布的 PR 用它机器可读地声明「本 PR 未经
+    任何 runner 侧门禁」；与 ``iar:fast-merge`` 同族但**值不同**，两个档位因此可
+    被下游区分（fast 仍跑 reviewer 与仓库验证，direct 连它们一起跳过）。
+
+    Args:
+        issue_number: 本次直发针对的 Issue 编号。
+
+    Returns:
+        Hidden HTML comment marker string.
+    """
+    return f"<!-- iar:direct-pr issued={issue_number} -->"
+
+
+def parse_direct_pr_marker(text: str) -> int | None:
+    """Parse the ``iar:direct-pr`` marker from a PR body or other text.
+
+    Args:
+        text: 待扫描的正文（通常为 PR body）。
+
+    Returns:
+        marker 中的 Issue 编号；不含 marker 时返回 ``None``。
+    """
+    match = _DIRECT_PR_MARKER_PATTERN.search(text)
+    return int(match.group("issued")) if match is not None else None
+
+
 def format_dependency_wait_marker(blockers: tuple[DependencyBlocker, ...]) -> str:
     """Format a hidden ``iar:dependency-wait`` marker for comment deduplication.
 

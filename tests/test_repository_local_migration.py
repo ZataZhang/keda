@@ -360,6 +360,8 @@ def test_migrated_scaffold_follows_the_current_defaults(tmp_path: Path) -> None:
     )
     assert _mode_and_output_by_target(_effective_generated_content(tmp_path)) == {
         "issue_from_prd": ("template", "json"),
+        # issue_from_prompt 在旧脚手架里根本没有这一段，迁移前后都取打包默认值。
+        "issue_from_prompt": ("agent", "json"),
         "draft_pr": ("template", "json"),
         "prd_from_issue": ("agent", "json"),
     }
@@ -368,6 +370,7 @@ def test_migrated_scaffold_follows_the_current_defaults(tmp_path: Path) -> None:
 
     assert _mode_and_output_by_target(_effective_generated_content(tmp_path)) == {
         "issue_from_prd": ("agent", "json"),
+        "issue_from_prompt": ("agent", "json"),
         "draft_pr": ("agent", "markdown"),
         "prd_from_issue": ("agent", "markdown"),
     }

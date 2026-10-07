@@ -50,13 +50,31 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
     issue_parser = subparsers.add_parser("issue", help="Create and manage GitHub Issues.")
     issue_subparsers = issue_parser.add_subparsers(dest="issue_command", required=True)
     issue_create_parser = issue_subparsers.add_parser(
-        "create", help="Create GitHub Issues from one or more PRD files."
+        "create",
+        help="Create GitHub Issues from PRD files or from a one-sentence requirement.",
     )
     issue_create_parser.set_defaults(command="issue create")
     issue_create_parser.add_argument(
         "prd_paths",
-        nargs="+",
+        nargs="*",
         help="One or more PRD Markdown files or directories containing PRD files.",
+    )
+    issue_create_parser.add_argument(
+        "--from-prompt",
+        default=None,
+        help=(
+            "Create one Issue directly from a natural-language requirement, with no "
+            "PRD file. Mutually exclusive with the PRD path arguments; exactly one of "
+            "the two must be given."
+        ),
+    )
+    issue_create_parser.add_argument(
+        "--require-validation",
+        action="store_true",
+        help=(
+            "With --from-prompt: put an acceptance checklist in the Issue body so the "
+            "runner's evidence gate is on. Off by default (gate deterministically off)."
+        ),
     )
     issue_create_parser.add_argument(
         "--type", choices=("feature", "refactor", "bug"), default="feature"
@@ -77,14 +95,17 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
     issue_create_parser.add_argument(
         "--publish-prd",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        # 三态：None = 未给出（按默认开启），True / False = 用户显式给出。
+        # `--from-prompt` 需要区分「没提」和「提了 --no-publish-prd」，前者合法、
+        # 后者是要拒绝的矛盾指令，所以不能再用普通 bool 默认值。
+        default=None,
         help=(
             "Commit and push only the target PRD before adding the ready label "
             "(default: on; pass --no-publish-prd to defer publishing to the "
             "interactive prompt)."
         ),
     )
-    issue_create_parser.add_argument("--force", action="store_true")
+    issue_create_parser.add_argument("--force", action="store_true", default=None)
     issue_create_parser.add_argument(
         "--depends-on",
         action="append",

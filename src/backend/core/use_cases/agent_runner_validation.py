@@ -221,6 +221,25 @@ def resolve_evidence_relpath(
     ).as_posix()
 
 
+def resolve_pending_issue_evidence_relpath(evidence_dir: str) -> str:
+    """建 Issue 时尚知编号：给出运行期会解析到的证据目录（编号用占位符）。
+
+    无 PRD 锚点的 Issue 在运行期按 ``issue-<编号>`` 归目录，创建时编号还不存在，
+    所以正文里只能写占位形式；这与交付说明里的 ``task/<issue-number>-<slug>``
+    同一表达约定 —— runner 侧读取的是配置解析出的真实目录，不依赖这段文本。
+
+    Args:
+        evidence_dir: 配置的证据目录根（仓库相对）。
+
+    Returns:
+        证据目录文本；配置指向 legacy 根目录时原样返回，不含占位段。
+    """
+    root = evidence_dir.strip("/")
+    if not evidence_dir_uses_task_subdirs(root):
+        return root
+    return f"{root}/issue-<issue-number>"
+
+
 def resolve_issue_evidence_dir(worktree_path: Path, config: AppConfig, issue: IssueSummary) -> Path:
     """按 Issue 的 canonical PRD（或编号兜底）解析证据目录。"""
     prd_relative_path = extract_prd_path(issue.body)

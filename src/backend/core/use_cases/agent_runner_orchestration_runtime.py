@@ -9,6 +9,7 @@ from functools import partial
 from pathlib import Path
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
+from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_dependencies import (
     clear_dependency_waiting,
     evaluate_dependencies,
@@ -44,6 +45,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     run_issue_with_agent_fallback,
 )
 from backend.core.shared.models.agent_runner import TokenUsage
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
     issue_output_routing,
@@ -67,6 +69,7 @@ from backend.core.use_cases.create_prd_from_issue import (
     CreatePrdFromIssueRequest,
     create_prd_from_issue,
 )
+from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
 
 RUNTIME_DEPENDENCY_NAMES = (
     "_process_ready_issue",
@@ -194,7 +197,7 @@ def _process_single_issue(
     run_trigger: str,
     effective_repo_id: str,
     output_view: IRunnerLiveView,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> int:
     """Process one discovered Issue end-to-end.
 
@@ -339,7 +342,7 @@ def _process_single_issue(
                     github_client=github_client,
                     process_runner=process_runner,
                     content_generator=content_generator,
-                    fast_merge=fast_merge,
+                    publish_stage=publish_stage,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
                 on_agent_usage=_emit_agent_usage_event,
@@ -414,7 +417,7 @@ def _process_single_issue(
                     process_runner=process_runner,
                     content_generator=content_generator,
                     marker=marker,
-                    fast_merge=fast_merge,
+                    publish_stage=publish_stage,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
                 on_agent_usage=_emit_agent_usage_event,
@@ -432,7 +435,7 @@ def _process_single_issue(
                     github_client=github_client,
                     process_runner=process_runner,
                     content_generator=content_generator,
-                    fast_merge=fast_merge,
+                    publish_stage=publish_stage,
                 ),
             )
         _logger.info("Completed Issue #%d: %s", issue.number, issue.title)
@@ -491,6 +494,13 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 1
+
+    except ClaimArbitrationLost as exc:
+        # 首次领取仲裁落败：Issue 归更早的认领者。这里既不能标 failed 也不能改
+        # 标签（会把赢家的 running 覆盖掉），按 skip 返回 0。
+        _logger.info("Issue #%d claim arbitration lost, skipping: %s", issue.number, exc)
+        output_view.update_status(issue.number, "skipped")
+        return 0
 
     except BlockedWorktreeClaimedError as exc:
         _logger.info(
@@ -557,10 +567,10 @@ class RunOnceRequest:
     #: 定向目标 Issue 编号（``iar run --issue``）。非 ``None`` 时只处理该
     #: Issue（仍走依赖门禁与 claim）；``None`` 保持"按优先级捞队列"行为。
     target_issue: int | None = None
-    #: 快速通道（``iar run --fast-merge``）一次性旁路：本次运行的 Issue 跳过
-    #: Phase 4.5 验证门禁与发布前最终复核，PR 正文打未验证标注。daemon 与
-    #: 其余调用方恒为 False（默认值），行为与今天完全一致。
-    fast_merge: bool = False
+    #: 发布档位（``iar run --fast-merge`` / ``--direct-pr``）：本次运行执行 agent
+    #: 之后还剩多少门禁与第二个 agent。``NORMAL`` 即默认全量路径；daemon 与其余
+    #: 调用方恒为 ``NORMAL``（默认值），行为与今天完全一致。
+    publish_stage: PublishStage = PublishStage.NORMAL
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -666,6 +676,7 @@ def run_once(request: RunOnceRequest) -> int:
     # 状态，按标签决定它进入哪条候选通道；其余 ready/running/blocked Issue
     # 一律不动。
     effective_max_issues = max(max_issues, concurrency)
+    ready_discovery_limit = max(effective_max_issues, _READY_DISCOVERY_LIMIT)
     target_issue_number = request.target_issue
     target_issue_summary: IssueSummary | None = None
     if target_issue_number is not None:
@@ -676,11 +687,16 @@ def run_once(request: RunOnceRequest) -> int:
             return 1
 
     if target_issue_summary is not None:
+        # 显式定向不再要求就绪标记：人点名即准入，没标记的 Issue 直接进 ready 通道
+        # （也正因为没标记，别的机器的守护进程不会来抢）。已经带有其他 durable
+        # workflow 状态（review / failed / supervising 等）的目标仍按原通道处理，
+        # 不被放宽成「当新任务重跑」。守护进程侧（无 target）判定逐字不变。
         ready_issues = (
-            [target_issue_summary] if config.labels.ready in target_issue_summary.labels else []
+            [target_issue_summary]
+            if not has_non_ready_workflow_label(target_issue_summary.labels, config)
+            else []
         )
     else:
-        ready_discovery_limit = max(effective_max_issues, _READY_DISCOVERY_LIMIT)
         ready_issues = github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
     processed_count = 0
     issues_to_process: list[tuple[IssueSummary, str]] = []
@@ -789,10 +805,18 @@ def run_once(request: RunOnceRequest) -> int:
 
     # DRY RUN：仅列出将处理的 Issue，不实际处理（串行、零副作用）。
     if dry_run:
-        _logger.info(
-            "DRY RUN: ready Issue ordering covers the %d candidates returned by GitHub.",
-            ready_discovery_limit,
-        )
+        # 定向模式的候选来自 get_issue（单个目标），不是 ready 列表的 limit 宽度，
+        # 因此不能套用同一句「覆盖 N 个候选」的措辞。
+        if target_issue_summary is not None:
+            _logger.info(
+                "DRY RUN: targeted mode covers Issue #%d only (no ready-list discovery).",
+                target_issue_number,
+            )
+        else:
+            _logger.info(
+                "DRY RUN: ready Issue ordering covers the %d candidates returned by GitHub.",
+                ready_discovery_limit,
+            )
         for issue, issue_kind in issues_to_process:
             selected_agent = choose_agent(issue, config, agent)
             _logger.info(
@@ -821,7 +845,7 @@ def run_once(request: RunOnceRequest) -> int:
         "run_history_store": run_history_store,
         "run_trigger": run_trigger,
         "effective_repo_id": effective_repo_id,
-        "fast_merge": request.fast_merge,
+        "publish_stage": request.publish_stage,
     }
 
     # 串行路径：concurrency<=1 时逐个处理。与历史行为的唯一差异是——每个

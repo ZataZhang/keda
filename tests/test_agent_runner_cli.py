@@ -89,8 +89,12 @@ def test_cli_parser_issue_create_defaults() -> None:
     assert parsed.type == "feature"
     assert parsed.ready is False
     assert parsed.agent == "auto"
-    assert parsed.publish_prd is True
-    assert parsed.force is False
+    # --publish-prd / --force 是三态：None 表示「未给出」，由 handler 归一为默认值。
+    # `--from-prompt` 需要区分「没提」与「显式给出」（后者是矛盾指令，必须报错）。
+    assert parsed.publish_prd is None
+    assert parsed.force is None
+    assert parsed.from_prompt is None
+    assert parsed.require_validation is False
 
 
 def test_cli_parser_issue_create_multiple_paths() -> None:

@@ -12,7 +12,11 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
-from backend.core.use_cases.agent_runner_dependencies import format_fast_merge_marker
+from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_runner_dependencies import (
+    format_direct_pr_marker,
+    format_fast_merge_marker,
+)
 from backend.core.use_cases.agent_runner_feedback import (
     assert_prd_archived_for_publish,
 )
@@ -210,6 +214,39 @@ def push_changes(
     return branch
 
 
+def _format_publish_stage_annotation(
+    issue_number: int,
+    publish_stage: PublishStage,
+) -> str | None:
+    """渲染发布档位的自我声明段（marker + 人读说明）。
+
+    两个旁路档位在 PR 正文里留下同族但值不同的 marker，让 reviewer 与下游机器
+    判定都能区分「跳了哪一层」；默认档位不产生任何标注。
+
+    Args:
+        issue_number: 本次发布针对的 Issue 编号。
+        publish_stage: 本次运行的发布档位。
+
+    Returns:
+        自我声明段落文本；``PublishStage.NORMAL`` 时返回 ``None``。
+    """
+    if publish_stage is PublishStage.FAST:
+        marker = format_fast_merge_marker(issue_number)
+        human_note = (
+            "> **快速通道发布**：本 PR 经快速通道发布，未经过自动化验证门禁，" "合并前请人工验证。"
+        )
+    elif publish_stage is PublishStage.DIRECT:
+        marker = format_direct_pr_marker(issue_number)
+        human_note = (
+            "> **直发档发布**：本 PR 经 ``--direct-pr`` 发布，runner 侧未运行审核 "
+            "Agent 与仓库验证命令，质量门禁转移到本 PR 上的 CI；"
+            "合并前请确认 CI 变绿并人工验证。"
+        )
+    else:
+        return None
+    return "\n".join([marker, "", human_note])
+
+
 def create_draft_pr(
     issue: IssueSummary,
     worktree_path: Path,
@@ -219,7 +256,7 @@ def create_draft_pr(
     *,
     expected_branch: str | None = None,
     content_generator: IContentGenerator | None = None,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> tuple[str, str]:
     """Create a draft PR for the current branch, or reuse an existing open PR.
 
@@ -237,8 +274,10 @@ def create_draft_pr(
         expected_branch: Optional explicit branch to verify before creating the
             PR. When set, the worktree's current branch must match.
         content_generator: Optional AI content generator for PR title/body.
-        fast_merge: 快速通道（``iar run --fast-merge``）标识；为 True 时在正文
-            末尾注入 ``iar:fast-merge`` 自我声明 marker 与人读未验证标注。
+        publish_stage: 发布档位。``FAST``（``iar run --fast-merge``）在正文末尾注入
+            ``iar:fast-merge`` 自我声明 marker 与人读未验证标注；``DIRECT``
+            （``iar run --direct-pr``）注入同族的 ``iar:direct-pr`` marker 与直发说明；
+            ``NORMAL`` 不注入任何档位标注。
 
     Returns:
         ``(branch, pr_url)`` tuple.
@@ -336,17 +375,10 @@ def create_draft_pr(
         contract_block = build_contract_annotation_block(contract_violations)
         pr_body = f"{pr_body.rstrip()}\n\n{contract_block}\n"
 
-    # 快速通道自我声明：机器可读 marker + 人读说明，避免未验证 PR 混入正常证据链。
-    if fast_merge:
-        fast_merge_block = "\n".join(
-            [
-                format_fast_merge_marker(issue.number),
-                "",
-                "> **快速通道发布**：本 PR 经快速通道发布，未经过自动化验证门禁，"
-                "合并前请人工验证。",
-            ]
-        )
-        pr_body = f"{pr_body.rstrip()}\n\n{fast_merge_block}\n"
+    # 档位自我声明：机器可读 marker + 人读说明，避免未验证 PR 混入正常证据链。
+    stage_annotation = _format_publish_stage_annotation(issue.number, publish_stage)
+    if stage_annotation is not None:
+        pr_body = f"{pr_body.rstrip()}\n\n{stage_annotation}\n"
 
     try:
         pr_url = github_client.create_draft_pr(

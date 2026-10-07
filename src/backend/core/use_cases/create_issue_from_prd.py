@@ -66,6 +66,7 @@ from backend.core.use_cases.generated_content import (
     extract_prd_section,
     generate_issue_content,
 )
+from backend.core.use_cases.issue_labels import apply_routing_labels
 from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
 
 _logger = logging.getLogger(__name__)
@@ -354,13 +355,13 @@ def build_issue_labels(
     # 仅在用户显式要求且本次命令不发布 PRD 时才添加 "ready"。
     # 当 publish_prd=True 时，ready 在 push 成功*之后*再添加，
     # 避免在未发布的 PRD 上就开始工作。
-    if request.queue_ready and not request.publish_prd:
-        labels.append(effective_labels_config.ready)
-    if request.issue_agent in effective_labels_config.agent_labels:
-        labels.append(effective_labels_config.agent_labels[request.issue_agent])
-    elif request.issue_agent not in {"auto", "none"}:
-        allowed = ", ".join([*effective_labels_config.agent_labels.keys(), "auto", "none"])
-        raise ValueError(f"issue_agent must be one of: {allowed}")
+    apply_routing_labels(
+        labels,
+        queue_ready=request.queue_ready,
+        ready_deferred_until_publish=request.publish_prd,
+        issue_agent=request.issue_agent,
+        labels_config=effective_labels_config,
+    )
     return labels
 
 

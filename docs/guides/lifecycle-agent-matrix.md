@@ -60,7 +60,7 @@ console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、P
 | 触发入口分组 | 组内阶段 | 组说明 |
 |---|---|---|
 | **实现流水线**（`pipeline`） | 实现 / 修复 / 收尾 / 校验 / 审核 / 监督 | `iar run` / `daemon` 认领后，在同一 worktree 的同一次 claim 内依次触发 |
-| **讨论与内容生成**（`discussion_content`） | 辩论 / 内容生成 | 辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 `iar issue create`、Phase 1 与开 Draft PR 三处 |
+| **讨论与内容生成**（`discussion_content`） | 辩论 / 内容生成 | 辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 `iar issue create`、`iar issue create --from-prompt`、Phase 1 与开 Draft PR 四处 |
 | **独立入口**（`standalone`） | 决策 | `iar ask`，不在任何 Issue 流水线上（无 Issue / PRD 上下文） |
 
 逐键消费点（"实现流水线"组的六个阶段都在同一次 claim 内）：
@@ -74,7 +74,7 @@ console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、P
 | `review` | 实现流水线 | Phase 2，同一次认领内（开 Draft PR 前） | `run_agent_once.py::resolve_reviewer_agent` |
 | `supervisor` | 实现流水线 | Phase 2 发布路径**或** `iar review` / `iar review-daemon` | `run_agent_once.py::resolve_supervisor_agent` |
 | `deliberate` | 讨论与内容生成 | **Phase 0**：每轮先扫 `agent/deliberate` Issue（此时 PRD 尚不存在） | `agent_runner_deliberation_issues.py::_process_single_deliberation_issue` |
-| `content_generation` | 讨论与内容生成 | **横切三个 target**，见下文 | `generated_prd_content.py::generate_prd_content` / `generated_content.py::generate_issue_content` / `generate_pr_content` |
+| `content_generation` | 讨论与内容生成 | **横切四个 target**，见下文 | `generated_prd_content.py::generate_prd_content` / `generated_content.py::generate_issue_content` / `generated_issue_prompt_content.py::generate_issue_prompt_content` / `generate_pr_content` |
 | `planner` | 独立入口 | `iar ask`，不在任何 Issue 流水线上 | `cli_parsed_commands/agent.py::run_ask_command` |
 
 ### 三个入口
@@ -114,9 +114,11 @@ Issue 单独跑一轮），因此 `supervisor` 是唯一跨 A / B 两个入口�
 - **`supervisor` 跨入口，同键不同义**：发布路径显式把本次实现者传给
   `resolve_supervisor_agent`，所以那里的 `auto` 沿用实现者；独立跑 `iar review` /
   `iar review-daemon` 时拿不到实现者，`auto` 回落成按 Issue 标签路由。
-- **`content_generation` 是横切阶段，不是"流水线之外"**：三个 target 分别落在
-  `iar issue create`（`issue_from_prd`）、Phase 1（`prd_from_issue`）和 Phase 2 开
-  Draft PR 时（`draft_pr`，生成 PR 标题与正文）。三者都以矩阵派生的
+- **`content_generation` 是横切阶段，不是"流水线之外"**：四个 target 分别落在
+  `iar issue create`（`issue_from_prd`）、`iar issue create --from-prompt`
+  （`issue_from_prompt`，产物**不含 PRD 锚点**，因此提示词与回退模板都不能写出
+  `- PRD path:`）、Phase 1（`prd_from_issue`）和 Phase 2 开
+  Draft PR 时（`draft_pr`，生成 PR 标题与正文）。四者都以矩阵派生的
   `lifecycle_default_agent` 兜底，target 级显式 `agent` 更优先；
   `generated_content.enabled`（或该 target 自己的 `enabled`）为 `false` 时退回
   fallback 模板，不调用任何 agent。
@@ -252,7 +254,7 @@ agent 在运行时跳过。Settings 的「生命周期 Agent 设置」页给这�
 - Issue 状态机与两阶段审查（`agent/ready` → `agent/running` → `agent/supervising`
   → `agent/review`）：见 [Agent Runner](agent-runner.md) 的「状态流转与两阶段审查」
   一节——那是**标签状态**的流转，与本页的**阶段 → agent**是两个正交维度。
-- `[agent_runner.generated_content]` 的三个 target 与模板字段：见
+- `[agent_runner.generated_content]` 的四个 target 与模板字段：见
   [Agent Runner](agent-runner.md) 的「Generated Content 配置」一节。
 - 代码内权威定义：`src/backend/core/shared/models/lifecycle_agent.py`（含
   「触发入口」分组常量 `LIFECYCLE_AGENT_ENTRY_GROUPS`，console 三处矩阵的

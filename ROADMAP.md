@@ -12,14 +12,14 @@
 ## Product Boundary
 
 - 当前项目提供交互终端和本地 runner 能力，不提供全自动 issue 调度系统。
-- 是否开始处理某个代码任务由人工通过 label 控制（添加 `agent/ready` label，并可结合 `agent/claude`、`agent/codex` 或 `agent/kimi` 指定执行终端）。
-- 用户可以直接提交没有 PRD 的 Issue，但这类 Issue 只能进入需求澄清、合议和 PRD 审批流程；在管理员确认前不得被 runner 当作可执行代码任务领取。
-- 用户提交 Issue 时有义务尽量把需求、问题背景、复现信息、期望结果和已知约束描述清楚；如果描述不清楚，AI 必须先在 Issue 中反问用户，而不是自行补全关键需求。
+- 是否开始处理某个代码任务由人工控制：**守护进程的自主挑选**以 `agent/ready` label 为唯一准入（并可结合 `agent/claude`、`agent/codex` 或 `agent/kimi` 指定执行终端）；**人的显式定向**（`iar run --issue N` / 给 PRD 路径）不受该 label 约束——不打标记即直接执行，因而也不会与任何守护进程竞争。系统不提供「指派给某台机器」的机制：打标记即先到先得，不打标记则自行显式执行。
+- 用户可以直接提交没有 PRD 的 Issue。**PRD 不是执行前置**：这类 Issue 只要被人工打上 `agent/ready`，就可以直接被 runner 当作可执行代码任务领取。需求澄清、多 agent 合议与 PRD 审批是**按需能力**（需求复杂、涉及多方或表述含糊时使用），不是每次都必经的强制链。
+- 用户提交 Issue 时有义务尽量把需求、问题背景、复现信息、期望结果和已知约束描述清楚。**没有 PRD 时，Issue 正文就是唯一的需求来源**，因此描述质量直接决定交付质量；澄清是可选的增强手段，不是执行前的强制闸门。
 - 用户可以在 Issue 中上传图片作为需求上下文，例如界面截图、错误截图、流程图或设计稿；AI 在澄清、合议和 PRD 草稿生成时应把这些图片视为 Issue 上下文的一部分。
 - 终端可以展示 issue 信息、辅助分析任务和执行工程动作，但不会主动处理未标记的 issue。
 - `iar` CLI 是本项目的核心执行面，并把外部 agent（Claude / Codex / Kimi 等）视为一等消费者：命令输出、退出码与运行时能力自省应提供可机读契约，而不只是给人看的表格（由 `P1-FEAT-20260930-141135` 承接）。
 - 改动 `iar` CLI 表面（新增/改名子命令、旗标、退出码或机器可读输出）必须同步随包 `iar-operator` skill 与 `docs/`，保证 agent 侧知识与真实命令树不漂移；约定见 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync。
-- 一旦 PRD-backed issue 被标记为 `agent/ready`，后续执行链路（修改代码、验证、review、提交 PR、维护 PR 分支）应尽量自动完成；遇到需求不明确、安全门禁、验证失败、发布失败、冲突或高风险 review 发现时安全停止并报告。
+- 一旦 Issue 被标记为 `agent/ready`（无论是否 PRD-backed），后续执行链路（修改代码、验证、review、提交 PR、维护 PR 分支）应尽量自动完成；遇到需求不明确、安全门禁、验证失败、发布失败、冲突或高风险 review 发现时安全停止并报告。
 - 当前实现优先支持 GitHub Issues / Labels / Pull Requests；其他代码托管平台暂不在当前交付边界内。
 
 ## Current Status
@@ -61,12 +61,12 @@
 - **review 能力**：pre-push review、post-PR supervisor、宽上下文 review-daemon、独立 verifier gate 已有闭环；高风险 finding 的稳定阻断规则、PR 正文 schema 校验和部分 supervisor 安全边界仍需补齐。
 - **PR 分支维护能力**：supervisor 可请求现有 PR branch repair/rebase/resolve-conflict，review-daemon 可感知 base、checks、comment 和 mergeability 变化；detached HEAD rebase 中间态识别、恢复后 supervisor 闭环和 CI rework 状态恢复仍不完整。
 - **前端能力**：已有基础前端结构和页面骨架；面向 agent runner 的可用操作台尚未完成。
-- **Issue-first PRD 能力**：PRD -> Issue 已完成，Issue -> PRD / PRD rewrite / PRD review deliberation 仍在 pending PRD 中。
+- **Issue-first 能力**：PRD -> Issue 已完成；**任意 Issue（含无 PRD）可执行**的运行侧路径已具备，并已由 `P1-FEAT-20261006-122336` 完成首次真实端到端实证（Issue #216 → Draft PR #217，待人工验收）；Issue -> PRD / PRD rewrite / PRD review deliberation 作为**按需**能力仍在 pending PRD 中（不再是执行前置）。
 - **Autopilot fast-lane（产品仓"打开开关即无人值守"能力族）**：原三件中已交付两件——**合并队列快速档**（`P1-FEAT-20260703-105322`，已归档：`[autopilot]` + `safety.auto_merge` 双开关门控，verifier 绿灯 → 自动签核 → rebase 最新 base → 全量验证重跑 → 禁改路径终扫 → squash 合并，按 Issue 号 FIFO 串行）与 **roadmap 持续调度**（`P1-FEAT-20260703-105330`，已归档：daemon 内对账 + 补位 + 发现式入队，`iar roadmap advance [--dry-run]` 一次性入口）。第三件"执行前 re-grounding 与触碰面避让"已**取消独立阶段、取消 agent 侧触碰面预测、取消并行撞车避让**，收缩为默认 `execution` 提示模板内置的 `PRD map check` 核验指令并交付（`P1-FEAT-20260703-105340`；形态见 M2）。仍未完成的只剩 fast-lane 的发布说明（`auto_merge` 语义已从死开关激活，需显式提示升级影响）。
 
 ### Not Completed
 
-- 无 PRD Issue 的 intake 候选识别、需求澄清、PRD 审批、PRD 落盘和 ready label 闭环。
+- 无 PRD Issue 的**按需**澄清链路：合议候选识别、需求澄清、PRD 审批与落盘。澄清与 PRD 生成不是执行前置，仅在需求复杂或表述含糊时使用。
 - `agent/rework-prd` 驱动的 Issue -> PRD 自动生成、已有 PRD 重写和多 agent PRD review。
 - 将只读多 agent 合议接入 GitHub Issue intake、PRD 草稿生成和 review 流程。
 - 面向 operator 的 Agent Runner 监控面板、异常检测和 Issue 时间线 API。
@@ -77,26 +77,46 @@
 - 非 GitHub 平台适配层。
 - autopilot fast-lane 的发布说明：`safety.auto_merge` 语义已从死开关激活（双开关同时为真才生效），需要显式提示升级影响，发布渠道（README / release notes / daemon 启动日志）待定。
 
-## 路线更新（2026-09-28 复核增补，2026-10-05 更新定位与 pending 清单）
+## 路线更新（2026-09-28 复核增补，2026-10-06 更新产品边界与 pending 清单）
 
 > 上方正文是 2026-09-17 快照，历史条目未逐条重写；本节记录自该快照以来的交付与当前 pending PRD 顺序。各 PRD 的结构化交付依赖以对应 PRD §8 Delivery Dependencies 为唯一事实源，本节是阅读视图。
+
+### 2026-10-06 产品边界调整：无 PRD 的 Issue 可直接执行
+
+- **撤销**「没有 PRD 的 Issue 只能进入需求澄清、合议和 PRD 审批流程；在管理员确认前不得被 runner 当作可执行代码任务领取」这条边界。**PRD 不再是执行前置**：无 PRD 的 Issue 只要人工打上 `agent/ready` 即可被领取并端到端执行，Issue 正文即需求来源。同步更新的章节：Product Boundary、Target Workflow 第 3–9 步与第 21 步、Partially/Not Completed、M1、M8、Acceptance Checklist、Near-Term Delivery Order、Open Questions。
+- **澄清、合议与 PRD 生成改为按需能力**：需求复杂、涉及多方决策或表述含糊时使用；简单需求不经过这些环节。M8 由「Issue-First PRD Gate」改名为「Issue-First Clarification And PRD (On Demand)」，能力**不删除**，只是不再作为执行前闸门。
+- **配套后果（已披露并接受）**：这类 Issue 没有自动化质量锚——证据门禁整体关闭（`validation_required` 读 Issue body 的验收小节，默认不生成则该门禁连同前端视觉证据要求一并跳过）；原「描述不清时 AI 必须先反问用户」的规则失去强制力，澄清成为可选。
+- **事实依据**：代码中从未实现这条强制链——全仓检索 `intake` / `needs-prd` / `requires_prd` 零命中；所有 PRD 相关门禁（交付门、PR body 契约、证据门禁、最终复核）都是「有 PRD 锚点才生效，没有即提前返回」；独立 verifier 的意图来源本就是 Issue body。**撤销边界是让文档与实现对齐，不是放宽一个真实存在的门禁。** 撤销前的状态是「文档承诺了一个代码里不存在的保护」，比明确放开更危险。
+- **未验证项（已在 PRD 中登记）**：无 PRD 的 Issue 能跑，此前只有单元测试与代码阅读支撑，从未在真实生产 run 上验证过（账本中 29 条空 `prd_path` 记录全部来自测试夹具）。首次真实端到端验证是承接 PRD 的首要交付。
+- **新增 `--direct-pr` 档位（同一 PRD）**：实测确认 `--fast-merge` **不等于**「agent 干完就出 PR」——它之后仍挂着一个默认开启的 `pre_pr_review`（第二个 agent，最多 2 轮、单轮 1800s，且能改代码再 push）与两处会打回 agent 的验证命令。`--direct-pr` 让执行 agent 结束后**只剩机械步骤**（runner 受控提交 → push → 建 Draft PR），把门禁从 runner 侧转移到 PR 上的 CI。**代价已显式接受**：runner 侧不再有任何质量检查（可推出连测试都不过的 PR），唯一门禁是该仓库的 CI。该档位刻意限定为只对**无 PRD 锚点**的 Issue 有效，且与 `--fast-merge` 互斥；`--fast-merge` 的既有行为逐字不变。
+- **准入规则调整（同一 PRD）**：`agent/ready` 从「唯一准入」收窄为「**守护进程自主挑选的准入**」——人的显式定向（`iar run --issue N` / PRD 路径）不再要求该标记。这疏通了一条此前不存在的能力：「**我想让我这台机器跑，别被别的机器抢走**」——不打标记、直接显式执行，零竞争（此前只能「打标记 + 抢」，而守护进程默认 120 秒轮询，人抢不过）。**随之必须补一处并发正确性**：显式定向不再要求标记后，领取时的原子性成为唯一防双跑机制，而首次领取当前是裸的 read-modify-write（`agent_runner_workflow.py` 无回读校验），两个并发领取者可双跑同一 Issue —— 本次补真 CAS（`R3`，需可执行负控）。同时显式定向到不可领取状态（被他人持有 / blocked 无解除标记 / 不存在）改为报明确错误而非静默成功。
+- **daemon 互斥收窄（同一 PRD 同一条决策）**：`iar run` 与正在运行的本机守护进程**不再互斥**——现状是本机有守护进程在跑时任何 `iar run` 都被拒绝（CONFLICT，要求 `--takeover` 先停掉守护进程），这让上一条的「零竞争路径」实际被堵死。互斥收窄为**只挡队列轮询**（`--all-ready` / 无显式 target）：显式单目标与守护进程共存，各跑各的 Issue（工作树按 Issue 隔离；同仓多 Issue 并行本就是守护进程的既有能力，线程池）。**同目标的排他因此完全落在首次领取 CAS 上**，故该收窄必须与 CAS 同批或更晚落地。`--takeover` 语义不变（仍用于显式停守护进程）。
+- 承接 PRD：`P1-FEAT-20261006-122336`（任意 Issue 可执行；含首次真实验证、`iar issue create --from-prompt` 入口、`--direct-pr` 档位、以及 daemon 互斥收窄）。
 
 ### 自 2026-09-17 快照以来已交付
 
 - **Roadmap 单 PRD 控制、归档证据与仓库级 Autopilot 开关**（#148，`P1-FEAT-20260916-122645` 已归档）：统一右侧详情容器（`prd-detail.tsx` 的 `additionalTabs`）与受限 `.iar.toml` writer 落地。
 - **PRD 生命周期台账与可观测 UI**（#153）：console SQLite schema v5（`prd_lifecycle_runs` / `prd_lifecycle_events`）+ `frontend-public` 执行过程 tab 与 Stats 生命周期口径。
 - **Operator Skill 与可预期队列**（`P1-FEAT-20260924-020856` 已归档）。
-- **Post-PR CI 决策契约（Agent-led）**（`P1-BUG-20260924-100212` 已归档）：`checks_state`/`checks_summary` 作为 Agent 观察事实输入，不再按聚合状态强制改写 Supervisor 动作，仅保留 `mergeable=false` 等非 CI 确定性安全门；它是 Roadmap CI/CD 监控与自动修复（`P1-FEAT-20260916-134008`）的前置契约。
+- **Post-PR CI 决策契约（Agent-led）**（`P1-BUG-20260924-100212` 已归档）：`checks_state`/`checks_summary` 作为 Agent 观察事实输入，不再按聚合状态强制改写 Supervisor 动作，仅保留 `mergeable=false` 等非 CI 确定性安全门。
+- **Roadmap CI/CD 监控与可选自动修复**（`P1-FEAT-20260916-134008` 已归档）：前置契约已满足后交付。
+- **`iar` 的 Agent 机读契约**（`P1-FEAT-20260930-141135` 已归档）：`--output json` / 语义退出码 / `iar schema` 运行时自省。
+- **浏览器 E2E 验证工具链**（`P1-FEAT-20260930-225500` 已归档）。
+- **Daemon 崩溃对账与 Agent 会话续传**（`P1-FEAT-20260930-225000`，PR #210 已合并 `c4792fba`）：Phase -1 对账 + 三出口处置 + 声明式会话续传。
+- **`iar run --fast-merge` 快速通道**（`P1-FEAT-20261005-215933`，PR #208 已合并 `2b7cae4c`）：per-run 旗标，builder 提交后旁路 Phase 4.5 的 rv_reexec 与独立 verifier。
+- **行数红线清零**（PR #212 已合并 `866ddabc`）：4 个超 1000 非空行的源文件拆分完毕，`main` 的 CI 恢复绿色。
 
-### 当前 pending PRD 与交付顺序
+### 当前 pending / hold
 
-1. `P1-FEAT-20260916-134008`（Roadmap CI/CD 监控与可选自动修复）：前置已满足——原 hard 依赖的 `P1-BUG-20260924-100212` 已归档交付，其 §8 已由 `hard`（指向失效的 pending 路径）改为 `none`，可开工。
-2. `P1-FEAT-20260930-141135`（`iar` 的 Agent 机读契约）：承接本页定位——把 CLI 做实为给 agent 的一等机读执行面，补 `--output json` / 语义退出码 / `iar schema` 运行时自省；独立，可直接开工。
-3. `P1-FEAT-20260930-225500`（浏览器 E2E 验证工具链）：独立，可与上述并行；归入下方 M3「Verification And Review」。
-4. `P1-FEAT-20260930-225000`（Daemon 崩溃对账与 Agent 会话续传）：独立，可与上述并行；归入下方 M3「Verification And Review」。执行侧交付完成（实现 + rv-1..rv-5 证据 + 文档同步），待人工验收与归档后从本清单移除。
-5. `P1-FEAT-20260913-204531`（Tauri 桌面壳）：2026-10-05 已移入 `tasks/hold/`（暂缓，不参与当前排期）。
+**pending（待执行）**
 
-> `P1-FEAT-20260922-000431`（失败上下文交接 + 失败 Draft PR）已于快照后归档交付（`tasks/archive/`），不再列在 pending 清单。
+1. `P1-FEAT-20261006-122336`（**任意 Issue 可执行**）：执行侧已随本 PR 交付——首次真实端到端实证（Issue #216 → Draft PR #217）、文档边界撤销、`iar issue create --from-prompt` 与 `--direct-pr` 档位、daemon 互斥收窄与首次领取 CAS 全部落地；待人工验收与合并后从本清单移除。归入 M1 与 M8。
+2. `P1-FEAT-20261006-013227`（Stats 页 Token 用量补按 PRD 维度汇总）：执行侧已交付为 Draft PR #211，待人工验收与合并后从本清单移除。
+
+**hold（已成形但暂缓，不参与排期）**
+
+- `P1-FEAT-20260913-204531`（Tauri 桌面壳）：2026-10-05 移入。
+- `P1-FEAT-20261006-024434`（`iar run --quick` 轻量档）：2026-10-06 移入。方向被「任意 Issue 可执行」取代——它优化「出了 PRD 之后跑得慢」，而后者消除「必须出 PRD」这个前提；其识别出的行数债已由 PR #212 承接。
 
 ### 已知漂移（下次大更新时校准）
 
@@ -106,13 +126,13 @@
 
 1. 用户可以直接创建 GitHub Issue，也可以先写 PRD 后通过 `iar issue-from-prd` 发布 Issue；直接创建 Issue 时，用户应尽量写清需求、问题、复现路径、期望结果和约束，并可上传图片附件补充说明。
 2. `iar` 读取 Issue 正文、评论和图片附件等上下文，判断任务是否已有足够信息进入后续流程。
-3. 如果 Issue 描述不清楚，AI 先在 Issue 中反问用户，等待用户补充关键需求；在关键问题未回答前，不创建 PRD、不添加 `agent/ready`。
-4. 如果 Issue 已有关联 PRD 且需求明确，管理员通过添加 `agent/ready` label（可结合 `agent/claude`、`agent/codex` 或 `agent/kimi` 指定终端）标记 AI 介入。
-5. 如果 Issue 没有关联 PRD 但描述已足够进入分析，`iar` 将其视为 intake candidate，只允许进入需求澄清和合议流程，不允许直接执行代码任务。
-6. `iar` 调用多 agent 合议能力，对 Issue 背景、目标、风险、实现边界、验收标准和图片上下文进行讨论；公开 transcript、synthesis 和建议动作写回 Issue comment。
-7. 管理员在 Issue 中决定是否需要创建 PRD；若不需要 PRD，则明确关闭、转人工或按轻量任务规则处理。
+3. 如果 Issue 描述不清楚，AI 可以在 Issue 中反问用户并等待补充。澄清是**可选增强**，不是执行前置——是否在信息不完整时开工，由打 `agent/ready` 的人决定，AI 不代劳。
+4. 如果 Issue 需求已足够明确（无论是否关联 PRD），管理员通过添加 `agent/ready` label（可结合 `agent/claude`、`agent/codex` 或 `agent/kimi` 指定终端）标记 AI 介入。
+5. 如果 Issue 没有关联 PRD，`iar` 可以（但不强制）把它视为待澄清候选：需求足够清楚时，人工直接打 `agent/ready` 即可进入执行；需求含糊或涉及多方决策时，才走需求澄清与合议流程。**没有 PRD 不构成执行障碍**。
+6. （按需）`iar` 调用多 agent 合议能力，对 Issue 背景、目标、风险、实现边界、验收标准和图片上下文进行讨论；公开 transcript、synthesis 和建议动作写回 Issue comment。
+7. 管理员在 Issue 中决定是否需要创建 PRD。**选择「不需要 PRD」是正常路径**（简单的需求直接打 `agent/ready` 即可执行），不是例外处理。
 8. 管理员决定创建 PRD 后，`iar` 根据 Issue 与合议结果生成 PRD 草稿，并把草稿内容或草稿链接写回 Issue，等待管理员确认。
-9. 管理员确认 PRD 后，`iar` 才把 PRD 真实写入仓库 `tasks/pending/`，在 PRD 与 Issue 之间建立双向链接，并把 Issue label 更新为 `agent/ready`。
+9. 若决定创建 PRD，管理员确认后 `iar` 把 PRD 真实写入仓库 `tasks/pending/`，并在 PRD 与 Issue 之间建立双向链接。若决定不创建，则直接进入下一步。
 10. runner 基于仓库现有架构与规范创建隔离 worktree，并把 issue、PRD 和执行规则传给 agent。
 11. 执行 agent 在动代码之前先做一次 PRD 引用核验（由默认 `execution` 提示模板内置的 `PRD map check` 规则提供；所有仓库通用，非快速档专属，**不是**独立流水线阶段）：核对 PRD 点名的文件路径 / 符号 / 配置键是否仍存在于当前 worktree；已变更则以当前代码为准调整路线、不重建已不存在的旧结构；PRD 计划新增的按计划实施；收尾总结固定带一行 `PRD map check:` 结论（无过期引用写 `none`）。该指令是**增益而非门禁**——agent 未执行或核不出结论时不阻塞交付。**不做** agent 侧触碰面预测、**不做**并行撞车避让（原设计的该半边整体取消，理由与决策记录见 `tasks/archive/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance.md`）。
 12. agent 修改代码、测试和必要文档；runner 通过受限 commit proxy 完成本地提交。
@@ -124,7 +144,7 @@
 18. `review-once` / `review-daemon` 持续观察已进入 `agent/supervising` 或 `agent/review` 的 Issue；当 PR head/base、CI/check、Issue/PR comment 或 mergeability 变化时重新运行 supervisor cycle。
 19. **快速档仓库**的 `iar daemon run` 在每轮 pass 头部执行 roadmap 持续调度：对账 running 队列条目（merged/archived → completed、failed → failed 泊车不重试）、按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD，幂等建 Issue / 打 ready 标签交 Phase 2 消费；`iar roadmap advance [--dry-run]` 作为一次性入口。
 20. 发布阶段失败但本地 commit 已存在时，operator 可用 `iar recover-publish` 完成发布收尾；目标状态应与普通 Draft PR 发布一致，进入 supervisor 闭环后再交给人工 review。
-21. 在需求不明确、PRD 未确认、rebase 冲突无法安全确认、发布失败、验证失败或高风险 review 发现时安全停止，并输出明确的人工处理建议。
+21. 在需求不明确、rebase 冲突无法安全确认、发布失败、验证失败或高风险 review 发现时安全停止，并输出明确的人工处理建议。
 
 ## Milestones
 
@@ -145,11 +165,12 @@ Status: Partially completed.
 - 已完成：通过 `agent/ready` label 和 agent 路由 label 控制 issue 是否进入 runner。
 - 已完成：从 PRD 创建 Issue，并在 Issue body 中保留 canonical PRD 路径和验收摘要。
 - 已完成：`issue-from-prd --ready` 在 PRD 未发布前不会提前添加 ready label。
+- 未完成（本次登记）：**`iar run` 对任意 Issue 通用**——人手写的、无 PRD 锚点的、正文自由文本的 Issue 只要带 `agent/ready` 就能被领取并端到端执行。运行侧代码路径已具备（各门禁对无 PRD 条件生效），但**从未被真实验证**；由 `P1-FEAT-20261006-122336` 交付，含首次端到端实证与文档边界对齐。
+- 未完成（本次登记）：`iar issue create --from-prompt "<一句需求>"` —— 直接从自然语言建出不含 PRD 指针的 Issue，并可选择**立刻进队列**（`--ready`：打上就绪标记，任何为该仓库轮询的守护进程先到先得，**与哪台机器无关**）或**先不进队列**（默认：谁的守护进程都不领，由人显式 `iar run --issue N` 执行）。系统不提供「指派给某台机器」的机制。由 `P1-FEAT-20261006-122336` 交付。
+- 未完成（本次登记）：**显式定向不受就绪标记约束 + `iar run` 与守护进程共存** —— `agent/ready` 从「唯一准入」收窄为「**守护进程自主挑选的准入**」，人的显式 `iar run --issue N` / PRD 路径不再要求该标记；daemon mutex 收窄为只挡队列轮询，本机守护进程在跑时也能手动跑**另一个** Issue（对守护进程正持有的 Issue 仍拒绝，依据认领状态）。同目标的排他改由首次领取的真 CAS 承担，故两项须同批落地。由 `P1-FEAT-20261006-122336` 交付。
 - 未完成：完整交互终端中浏览 issue、选择任务、追问需求和展示状态。
-- 未完成：直接输入自然语言任务后生成可追踪 PRD / Issue 的完整闭环。
-- 未完成：没有 PRD 的用户 Issue 自动进入 intake 候选池，并通过管理员决策转换为 PRD 草稿或转人工结论。
-- 未完成：PRD 草稿在管理员确认前只写回 Issue，不落盘到仓库、不触发 `agent/ready`。
-- 未完成：在 Issue 描述不清楚时自动生成面向用户的澄清问题，并等待用户补充后再继续。
+- 未完成（**按需能力，非执行前置**）：无 PRD 的 Issue 进入澄清候选池、经管理员决策转换为 PRD 草稿；以及 PRD 草稿在管理员确认前只写回 Issue、不落盘。这些能力对复杂需求仍有价值，但不再是执行前的强制链。
+- 未完成（**按需能力**）：在 Issue 描述不清楚时自动生成面向用户的澄清问题并等待补充。
 - 未完成：读取和引用 Issue 图片附件，将截图、设计稿或流程图纳入澄清、合议和 PRD 草稿上下文。
 
 ### M2: Code Change Agent
@@ -197,6 +218,7 @@ Status: Partially completed.
 - 已完成：发布前会校验 remote、branch 和 forbidden paths，降低错误发布风险。
 - 已完成：`iar recover-publish` 支持发布阶段失败后的显式恢复命令，并可复用已有 open Draft PR。
 - 已完成（新增）：快速档合并队列（verifier 绿灯 → 自动签核 → rebase → 全量验证 → 禁改终扫 → squash 合并）作为 `agent/review` 阶段的延伸，已随 `P1-FEAT-20260703-105322` 交付归档（实现：`src/backend/core/use_cases/agent_runner_merge_queue.py`；测试：`tests/test_agent_runner_merge_queue.py`；门控：`config.toml` 的 `[agent_runner.autopilot]` + `[agent_runner.safety].auto_merge`）。
+- 未完成（本次登记）：`--direct-pr` per-run 档位——执行 agent 结束后只保留机械步骤（runner 受控提交 → push → 建 Draft PR），跳过 pre-PR review 与 runner 验证命令，把门禁转移到 PR 上的 CI。仅限无 PRD 锚点的 Issue，与 `--fast-merge` 互斥。由 `P1-FEAT-20261006-122336` 交付。
 - 未完成：发布恢复成功后仍需与普通 Draft PR 发布保持同样的 post-PR supervisor 安全闭环。
 - 未完成：默认分支 token 匹配、发布失败阶段分类和只读 supervisor dirty guard 仍在 pending PRD 中。
 
@@ -231,19 +253,19 @@ Status: Partially completed.
 - 未完成：把面向 Issue 的合议 transcript、关键分歧、推荐结论和后续动作写回 Issue comment。
 - 未完成：把合议结果接入 task intake、PRD 草稿生成、PRD review 或 code review，但不暴露隐藏思维链。
 
-### M8: Issue-First PRD Gate
+### M8: Issue-First Clarification And PRD (On Demand)
 
-Status: Not completed.
+Status: Not completed. **本里程碑是「按需增强」而非「执行前置」**（2026-10-06 定位调整）：无 PRD 的 Issue 可以直接执行，本节的澄清与 PRD 生成能力服务于需求复杂、涉及多方决策或表述含糊的场景；简单需求不需要经过本里程碑任一环节。
 
-- 支持用户直接提交没有 PRD 的 GitHub Issue，并由 `iar` 识别为不可直接执行的 intake candidate。
-- 要求无 PRD Issue 在进入合议前具备基本需求描述；如果关键信息缺失，AI 先写入澄清问题并等待用户回复。
+- 支持用户直接提交没有 PRD 的 GitHub Issue；这类 Issue **可直接被执行**（人工打 `agent/ready` 即可），也可按需进入澄清与 PRD 流程。
+- 需求含糊或涉及多方决策时，支持先写入澄清问题并等待用户回复；澄清是可选增强，不构成执行前闸门。
 - 支持读取 Issue 中的图片附件，并在合议与 PRD 草稿中引用这些图片所表达的界面状态、错误信息或设计约束。
-- 对无 PRD Issue 启动多 agent 合议，讨论需求清晰度、实现边界、验收标准、风险和是否需要 PRD。
-- 将公开讨论 transcript、最终 synthesis、PRD 建议和待管理员决策项写入 Issue comment，形成可审计记录。
-- 管理员在 Issue 中决定是否创建 PRD；管理员未确认前，Issue 不得被自动加上 `agent/ready`。
+- （按需）对无 PRD Issue 启动多 agent 合议，讨论需求清晰度、实现边界、验收标准、风险和是否需要 PRD。
+- （按需）将公开讨论 transcript、最终 synthesis、PRD 建议和待管理员决策项写入 Issue comment，形成可审计记录。
+- 管理员在 Issue 中决定是否创建 PRD。**选择不创建是正常路径**：简单需求直接打 `agent/ready` 执行，不必先补 PRD。
 - 管理员决定创建 PRD 后，`iar` 先生成 PRD 草稿并写回 Issue，等待管理员确认草稿内容。
-- 管理员确认后，`iar` 把 PRD 落盘到 `tasks/pending/`，在 PRD 中记录关联 Issue，在 Issue 中记录 PRD 路径，并将 label 更新为 `agent/ready`。
-- runner 只在 PRD 已确认且 Issue 进入 `agent/ready` 后开始执行代码任务。
+- 管理员确认后，`iar` 把 PRD 落盘到 `tasks/pending/`，在 PRD 中记录关联 Issue，在 Issue 中记录 PRD 路径。
+- runner 在 Issue 进入 `agent/ready` 后开始执行代码任务，**不要求 PRD 已存在**。
 
 ### M9: Operations Console
 
@@ -288,11 +310,11 @@ Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/back
 5. **rebase detached HEAD branch guard**：确保 active rebase target 可确认时允许继续，无法确认时安全停止并输出可诊断错误。
 6. **CI rework state recovery、blocked/forbidden resolution 与 process runner 错误可诊断性增强**：从 supervisor 修复回路单点补齐。
 7. **Agent Runner operator 监控面板、异常检测和 Issue 时间线 API**（M9）：已交付，并升级为统一管理终端 + `iar console` 随 wheel 分发一键启动。
-8. **基于现有 generated content 和合议能力补齐 Issue -> PRD / PRD rewrite**：`agent/rework-prd`、管理员 PRD gate、确认后落盘 PRD 并添加 `agent/ready`；M8 全闭环。
+8. **基于现有 generated content 和合议能力补齐 Issue -> PRD / PRD rewrite（按需）**：`agent/rework-prd`、管理员 PRD gate、确认后落盘 PRD；M8 全闭环。**注意本项已从「执行前置」改为「按需增强」**——无 PRD 的 Issue 可直接执行，本项不再阻塞任何交付。
 9. **把多 agent deliberation 接入 PRD review**：生成结构化 verdict、finding、risk 和后续动作 comment，与 M8 协同。
 10. **高风险 review finding 的稳定阻断规则**：定义哪些风险必须转人工，哪些可以自动重试或自动合并。
 11. **PR 正文 schema 校验**：强制包含实现摘要、验证结果和残余风险；与 M3 验证门禁协同。
-12. **在 CLI、监控能力和 Issue-first PRD gate 稳定后**，再完善更完整的交互终端体验（M1 剩余项）。
+12. **在 CLI、监控能力和 Issue-first clarification / PRD（按需）稳定后**，再完善更完整的交互终端体验（M1 剩余项）。
 
 ## Acceptance Checklist
 
@@ -325,13 +347,17 @@ Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/back
 - [ ] 能够在发布恢复后进入与普通 Draft PR 相同的 supervisor 安全闭环。
 - [ ] 能够在 rebase detached HEAD 中间态正确识别 active rebase target。
 - [ ] 能够通过完整交互终端浏览、选择 issue 或输入明确任务。
-- [ ] 能够在需求不明确时主动追问，而不是直接启动任务。
-- [ ] 能够接收没有 PRD 的用户 Issue，并将其限制在 intake / 合议 / 审批流程中。
+- [ ] 能够在需求不明确时主动追问（**按需增强**，非执行前置：信息不完整时是否开工由打标记的人决定，AI 不代劳）。
+- [ ] 能够接收没有 PRD 的用户 Issue，并**直接执行**它（人工打 `agent/ready` 即可），也可按需将其纳入澄清 / 合议 / 审批流程。
 - [ ] 能够在用户 Issue 缺少关键需求、问题背景或复现信息时，在 Issue 中提出澄清问题并等待用户补充。
 - [ ] 能够读取用户上传到 Issue 的图片附件，并把图片上下文纳入澄清、合议和 PRD 草稿生成。
 - [ ] 能够把无 PRD Issue 的合议 transcript、synthesis 和建议动作写回 Issue comment。
 - [ ] 能够在管理员确认前只生成 PRD 草稿，不把 PRD 落盘到仓库。
-- [ ] 能够在管理员确认后把 PRD 写入 `tasks/pending/`、双向链接 Issue，并把 Issue 标记为 `agent/ready`。
+- [ ] 能够在管理员确认后把 PRD 写入 `tasks/pending/` 并双向链接 Issue（PRD 是可选产物；无 PRD 的 Issue 也能直接执行）。
+- [ ] 能够对任意 Issue（含人手写的、无 PRD 锚点的、正文自由文本的）在打上 `agent/ready` 后领取并端到端执行出 Draft PR，且已通过真实端到端验证（`P1-FEAT-20261006-122336`）。
+- [ ] 能够从一句自然语言创建不含 PRD 指针的 Issue，并可选择立刻进队列（任何守护进程先到先得）或先不进队列、留给人显式执行（`P1-FEAT-20261006-122336`）。
+- [ ] 能够显式定向执行任意可领取的 Issue 而不必先打就绪标记；`iar run` 与本机守护进程共存（互斥只挡队列轮询），同目标的排他由首次领取的真 CAS 承担（`P1-FEAT-20261006-122336`）。
+- [ ] 能够对无 PRD 锚点的 Issue 用 `--direct-pr` 直接出 Draft PR：执行 agent 之后只剩机械步骤，runner 侧不再有第二个 agent 与验证命令，门禁转移到 PR 上的 CI（`P1-FEAT-20261006-122336`）。
 - [ ] 能够从 Issue 生成或重写 PRD，并在多 agent PRD review 后等待人类确认。
 - [ ] 能够用稳定规则阻止带有高风险问题的 PR 自动发布或自动转人工。
 - [ ] 能够强校验 PR 正文包含完整实现摘要、验证结果和残余风险。
@@ -349,7 +375,7 @@ Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/back
 - 何种风险级别必须转人工 review。
 - 多仓库 daemon 是否始终顺序轮询，还是允许受限并发。
 - 交互终端和前端 Dashboard 的边界如何划分。
-- 无 PRD Issue 的 intake 状态使用哪些 label 表达，例如 `agent/needs-triage`、`agent/needs-prd`、`agent/rework-prd` 或仅依赖 comment command。
+- 无 PRD Issue 在**选择走按需澄清**时，其中间状态使用哪些 label 表达，例如 `agent/needs-triage`、`agent/needs-prd`、`agent/rework-prd` 或仅依赖 comment command。（注意：无 PRD 本身不再是需要标注的状态——它可以直接执行。）
 - 管理员确认 PRD 草稿的交互方式是 Issue comment command、label、CLI 选择，还是三者都支持。
 - 合议 transcript 写入 Issue 时的长度限制、摘要策略和敏感信息过滤规则。
 - Issue 图片附件需要支持哪些格式、大小限制、下载缓存策略和隐私处理规则。

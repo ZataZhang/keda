@@ -307,9 +307,9 @@ curl -sS \
 | `0` | `SUCCESS` | `ok` | 请求完成 |
 | `1` | `GENERAL` | `error` | 未归类失败（历史行为，只看非零的脚本不受影响） |
 | `2` | `USAGE` | `usage_error` | 旗标或参数组合不成立 |
-| `3` | `NOT_FOUND` | `not_found` | 目标不存在：仓库 / Issue / registry 条目 / agent / 可执行文件 / 日志 |
+| `3` | `NOT_FOUND` | `not_found` | 目标不存在：仓库 / Issue（含显式定向时读不到或已关闭）/ registry 条目 / agent / 可执行文件 / 日志 |
 | `4` | `PERMISSION` | `permission_denied` | 未授权：GitHub 未认证、registry 条目被禁用 |
-| `5` | `CONFLICT` | `conflict` | 当前状态阻止：daemon 已在运行、workflow 模板文件已安装、loop 条目已存在 |
+| `5` | `CONFLICT` | `conflict` | 当前状态阻止：`--all-ready` 时同仓 daemon 正在轮询队列、显式定向的 Issue 被存活持有者认领或处于未解除的 `agent/blocked`、workflow 模板文件已安装、loop 条目已存在 |
 | `10` | `DRY_RUN_OK` | `dry_run_ok` | 机器模式下 dry-run 校验通过且未写入任何东西 |
 
 同一份表由 `EXIT_CODE_HELP` 印在 `iar --help` 与 `iar schema --json` 的顶层 `exit_codes.help` 中，`exit_codes.values` 则是「码 → 上表 `error` 名」的映射（与 envelope 同名，消费方不需要再翻译一次）；`translate_exit_code` 是「异常 → 退出码」的唯一落点（`FileNotFoundError` / `PermissionError` / `FileExistsError` 按语义归位，其余为 `1`）。

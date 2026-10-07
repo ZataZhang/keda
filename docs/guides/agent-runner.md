@@ -8,8 +8,8 @@ CLI 入口基于 Typer/Rich：`iar --help` 会展示分组命令、参数和别�
 
 - **init**：在目标 Git 仓库创建仓库本地 `.iar.toml` 配置
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
-- **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）
-- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。同仓 daemon 在跑时默认拒绝（`--takeover` 显式接管）
+- **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
+- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`iar run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
 - **review**：单次检查 `agent/supervising` 和 `agent/review` 的 Issues，基于 PR 上下文变化运行 supervisor cycle（兼容旧命令 `review-once`）
 - **review-daemon**：常驻进程，按指定间隔循环执行 `review-once`
 - **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 autopilot 调度阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
@@ -105,9 +105,9 @@ iar daemon status --json
 | `0` | `ok` | 请求完成（只读输出同样算成功） | 继续 |
 | `1` | `error` | 未归类失败，保持历史语义 | 读 stderr 后重试或升级 |
 | `2` | `usage_error` | 旗标/参数组合不成立（互斥、缺目标、非法 lifecycle key） | 修命令，原样重试必然再失败 |
-| `3` | `not_found` | 目标不存在：仓库、Issue、registry 条目、agent、可执行文件、日志 | 换目标或跑 `suggestion` |
+| `3` | `not_found` | 目标不存在：仓库、registry 条目、agent、可执行文件、日志；显式定向的 Issue 读不到或已关闭 | 换目标或跑 `suggestion` |
 | `4` | `permission_denied` | 未授权：GitHub 未认证、仓库被禁用 | 提示人来认证或启用，别静默重试 |
-| `5` | `conflict` | 当前状态阻止：daemon 已在跑、workflow 模板文件已安装、loop 条目已存在 | 改名 / 用户明确要求时 `--force` / 先停掉冲突进程 |
+| `5` | `conflict` | 当前状态阻止：`--all-ready` 时同仓 daemon 正在轮询队列、显式定向的 Issue 被存活持有者认领或处于未解除的 `agent/blocked`、workflow 模板文件已安装、loop 条目已存在 | 改名 / 用户明确要求时 `--force` / 先停掉冲突进程 / 按 `suggestion` 走 `iar blocked-continue`（活跃认领的错误会点名持有者 host 与 PID） |
 | `10` | `dry_run_ok` | 计划校验通过且未写入任何东西，可直接当 CI 门禁 | 仅在核对计划正文后视为绿灯 |
 
 `10` 只在机器模式下用于 dry-run 成功，人类模式仍是 `0`；`1` 保留给尚未归类的失败，新码只在有明确类别的失败点启用，因此只看「是否非零」的旧脚本行为不变。
@@ -131,7 +131,8 @@ iar schema --json | jq '.commands[] | select(.name=="issue list") | .options[] |
 `iar` 依靠 GitHub labels 实现任务状态的自动流转：
 
 ```
-创建 Issue → 贴上 agent/ready → AI 认领（换成 agent/running）
+创建 Issue ─┬─（排队）贴上 agent/ready → daemon 自主挑选并认领（换成 agent/running）
+            └─（点名）iar run --issue <N> 直接认领：不要求任何状态标签
                ↓
         AI 做完 → push → pre-PR review → Draft PR → agent/supervising
                ↓
@@ -140,7 +141,7 @@ iar schema --json | jq '.commands[] | select(.name=="issue list") | .options[] |
         出问题 → 换成 agent/failed 或 agent/blocked
 ```
 
-没有这些标签，`iar` 无法识别哪些 Issue 可以执行、哪些正在执行、哪些需要 review。
+没有这些标签，`iar` 无法识别哪些 Issue 正在执行、哪些需要 review；**但"可以被执行"不再等于"带 `agent/ready`"**——就绪标签只是守护进程自主挑选的准入，人显式点名的 Issue 不需要它（定向 run 的把关条件是认领状态，见「显式定向的领取准入」）。
 
 ### Workflow label 互斥
 
@@ -156,8 +157,8 @@ iar schema --json | jq '.commands[] | select(.name=="issue list") | .options[] |
 
 | 类别 | 标签 | 颜色 | 作用 |
 |---|---|---|---|
-| **AI 执行状态** | `agent/ready` | 🟢 绿色 | Issue 已准备好，等待 AI runner 认领 |
-| | `agent/running` | 🟡 黄色 | 代码正在被修改（首次实现或 PR branch rework） |
+| **AI 执行状态** | `agent/ready` | 🟢 绿色 | 已进入队列，等待 daemon 自主挑选认领；**不是执行的前置条件**——`iar run --issue <N>` 点名任何 open Issue 都不需要该标签 |
+| | `agent/running` | 🟡 黄色 | 代码正在被修改（首次实现或 PR branch rework）。首次认领由 claim marker 选举裁决，同一时刻只有一个持有者；被存活持有者占用的 Issue，定向 run 会报冲突而不是双跑 |
 | | `agent/supervising` | 🔵 浅蓝 | Draft PR 已创建，自动 post-PR supervisor 正在审查或重新处理 |
 | | `agent/review` | 🔵 蓝色 | 自动总控审查已通过，当前 PR 等待人类 review |
 | | `agent/failed` | 🔴 红色 | AI runner 执行失败 |
@@ -919,7 +920,7 @@ iar config migrate --repo /path/to/repo
   列出并提示手动删除，不编辑。
 
 迁移后被清掉的键回到 `config.toml` / 代码默认值。默认 `mode` 是 `agent`，所以这些仓库的
-`iar issue create`、开 Draft PR、rework-prd 会**先调一次 agent**（失败或超时再回退到模板）；
+`iar issue create`（含 `--from-prompt`）、开 Draft PR、rework-prd 会**先调一次 agent**（失败或超时再回退到模板）；
 `default_agent` 与各 target 的 `agent` 也改为继承机器级配置。常驻的 `iar daemon` 需重启才会载入。
 
 `--repo-id` 不支持（迁移针对单个仓库的 `.iar.toml`）。批量预览可以用 shell 循环：
@@ -1149,12 +1150,17 @@ iar run --all-ready
 
 **迁移**：旧脚本/文档里"无目标的 `iar run`"改为 `iar run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
 
-### 与 daemon 的默认互斥与显式接管
+### 与 daemon 的互斥范围：只挡队列轮询
 
-同仓已有 daemon 在跑时，`iar run` 默认**拒绝**（退出码 5 conflict），绝不与 daemon 双 claim 同一 ready 队列：
+互斥保护的对象是**同一份 ready 队列**，不是"这个仓库有没有人在跑"。因此：
+
+| 调用形态 | 同仓 daemon 存活时 |
+|---|---|
+| `iar run --all-ready`（队列轮询） | **拒绝**（退出码 5 conflict）：两个轮询者会双 claim 同一 ready 队列 |
+| `iar run --issue <N>` 或 `iar run <PRD_PATH>`（显式单目标） | **照常执行**：单目标不轮询队列，领取冲突由认领状态单独把关（见下节） |
 
 ```text
-usage_error/conflict: A daemon for repository '<repo_id>' is already running (PID <N>) ...
+conflict: A daemon for repository '<repo_id>' is already running (PID <N>) ...
 next: iar registry stop --repo-id <repo_id> ... or rerun with --takeover ...
 ```
 
@@ -1164,7 +1170,36 @@ next: iar registry stop --repo-id <repo_id> ... or rerun with --takeover ...
 iar run --issue 42 --takeover --yes
 ```
 
-接管流程：优雅停 daemon（SIGTERM → 等待超时 → 兜底 SIGKILL；**不会**把 SIGKILL 当首手段）→ 终止 daemon 的在途 agent 子进程树（不留孤儿 agent）→ 把在途 Issue reclaim 回 `agent/ready` → 执行定向 run。**接管会中断 daemon 当前所有在途 Issue**（不只是你指定的那个），它们会被 reclaim 后重跑——这是有意为之的破坏性动作，所以默认不发生。
+接管流程：优雅停 daemon（SIGTERM → 等待超时 → 兜底 SIGKILL；**不会**把 SIGKILL 当首手段）→ 终止 daemon 的在途 agent 子进程树（不留孤儿 agent）→ 把在途 Issue reclaim 回 `agent/ready` → 执行定向 run。**接管会中断 daemon 当前所有在途 Issue**（不只是你指定的那个），它们会被 reclaim 后重跑——这是有意为之的破坏性动作，所以默认不发生。`--takeover` 跳过下节的准入判定：显式接管本身就是"强制回收在途 Issue"的入口，能不能领由 reclaim 决定。
+
+### 显式定向的领取准入
+
+`agent/ready` **只约束守护进程的自主挑选**。人显式点名一条 Issue 时不再要求它带就绪标签——手工开的、没有 PRD 锚点的 Issue 同样可以直接 `iar run --issue <N>`。放宽的代价是"领不领得到"必须响亮回报，而不是像守护进程那样把不合条件的 Issue 静默跳过：
+
+| 目标状态 | 定向 run 的结果 |
+|---|---|
+| open、无 workflow 标签，或只带 `agent/ready` | 放行，进入 ready 通道执行 |
+| `agent/running` 且最近一次认领的持有者仍存活 | 退出码 5 `conflict`，错误里点名持有者 `host` / `PID`；本机持有者提示 `iar run --issue <N> --takeover`，远端持有者只能等它结束（系统没有强制接管远端认领的入口） |
+| `agent/running` 但本机持有者 PID 已不存在 | 放行，交给 running 通道的恢复路径（rework / 发布恢复） |
+| `agent/blocked` 且没有未消费的解除请求 marker | 退出码 5 `conflict`，提示先 `iar blocked-continue --issue <N>` |
+| 读不到、或不是 open | 退出码 3 `not_found` |
+| `agent/review` / `agent/supervising` 等其他状态 | 准入层放行，但 `iar run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `iar review` / review-daemon |
+
+**跨机器的认领无法探测远端进程，一律按有效处理（fail-closed）**：抢跑别人正在执行的 Issue 是双跑，而拒绝一次定向只是让人等一等。
+
+守护进程侧不受本节影响：空队列仍是正常状态，`--all-ready` 与 `iar daemon` 挑不到合条件的 Issue 时依然静默返回 0。
+
+### 首次领取的仲裁（claim marker 选举）
+
+GitHub 的标签写入没有 compare-and-swap，所以"谁先领走这条 Issue"不能靠先到先得的标签写。首次领取改为**认领 marker 选举**：
+
+1. 每个候选进程先在自己的认领评论里投标（`iar:claim` marker 带 `started_at`、host、PID、agent）；
+2. 等一个短暂 grace 窗口后**回读评论线程**，筛出同一轮的投标（有 `started_at`、落在并发窗口内、本机已死 PID 的投标剔除；远端投标按存活处理）；
+3. 按 `(started_at, host, PID)` 的全序取最小者。**只有赢家**把 Issue 切到 `agent/running`；
+4. 落败方把自己那条评论改写成 `iar:claim-withdrawn`（解析器认不出它，因此不会被后续轮询误读成认领），并**跳过该 Issue 而不写任何标签**——输掉竞争不是执行失败，不该把赢家的 running 覆盖成 failed。
+
+历史 marker（没有 `started_at` 的旧格式）与并发窗口外的投标都不算投标，所以 rework / 重新认领不会被自己过去的评论永久锁死。同一进程在 agent fallback 换 agent 时会再走一遍领取：读到的是**自己更早的那次投标**，按重入处理并继续执行。
+
 
 ### 快速合并旗标 `--fast-merge`
 
@@ -1180,9 +1215,24 @@ iar run --issue 42 --fast-merge
 - **单一目标限定**：与 `--all-ready` 组合是用法错误（退出码 2）——快速通道绝不能开启"整队未验证爆发"。
 - **stack 依赖拒绝（fail-closed）**：目标 Issue 若声明 `iar:depends-on ... mode="stack"` 顺序依赖，在启动任何 agent、乃至 `--takeover` 停 daemon 之前就报用法错误——未验证的上游会顺着 fork 基污染整条下游链；Issue 读不到时同样拒绝（无法证明不是 stack 就不走旁路）。
 - **不加旗标时零变化**：默认 run 与今天完全一致（门禁照常）。daemon 没有 `--fast-merge`，也没有对应配置项——旁路只作用于这一次显式调用，且不触碰自动合并。
+
+### 直发档旗标 `--direct-pr`
+
+`--fast-merge` 只跳验证门禁，发布路径（review agent、仓库验证命令、supervisor）照常。`--direct-pr` 是**面向没有 PRD 的 Issue 的更粗档位**：builder 提交后，除了 rv re-exec 与独立 verifier，**再跳过 pre-PR review agent 与 runner 侧的验证命令**，并跳过开 PR 后的 supervisor 轮次，直接开 Draft PR——质量门禁转移到该 PR 上的 CI。
+
+```bash
+# 无 PRD 锚点的 Issue：做完就直接开 Draft PR
+iar run --issue 42 --direct-pr
+```
+
+- **适用边界（fail-closed）**：目标必须**没有 `- PRD path:` 锚点**。传 PRD 路径作为目标本身就是 PRD-backed，直接用法错误；`--issue <N>` 目标会读 Issue 正文证明无锚点，**读不到同样拒绝**——旁路不能留下一份未归档、未校验的 PRD。
+- **PR 正文自我声明**：marker `<!-- iar:direct-pr issued=<N> -->` + 人读说明"runner 侧未运行审核 Agent 与仓库验证命令，合并前请确认 CI 变绿并人工验证"。
+- **两个旁路旗标互斥**：`--fast-merge` 与 `--direct-pr` 同时给出是用法错误（退出码 2）。两者存在感不同（一个跳独立验证，一个连审核与仓库验证一起跳），所以刻意不"取更强者"，避免静默升级掩盖调用者的真实意图。
+- **单一目标限定**：与 `--all-ready` 组合是用法错误——直发档绝不能开启"整队未审核爆发"。daemon 没有 `--direct-pr`，也没有对应配置项；不触碰自动合并。
+
 ### 多条 run 之间的并发边界
 
-只要**没有 daemon 服务该仓库**，不同 Issue 的 `iar run` 天然并发，不需要排队：
+不同 Issue 的 `iar run --issue <N>` 天然并发，不需要排队——**同仓有 daemon 在跑也一样**（daemon 的互斥只挡队列轮询，见上两节）：
 
 ```bash
 # 两个 Issue 各一条命令，同时推进；互不等待
@@ -1190,8 +1240,8 @@ iar run --issue 42
 iar run --issue 43
 ```
 
-- 前台 `run` **不获取 repo 级 daemon 锁**，只做"是否有 daemon 存活"的只读检查（互斥语义见上一节），所以 run 与 run 之间不互斥。
-- 每个 Issue 自带隔离资源：worktree 在 `.iar-worktrees/issue-<N>`，claim / blocked-claim 锁也按 worktree 独立；状态库走 WAL 容忍并发写。
+- 前台 `run` **不获取 repo 级 daemon 锁**：`--all-ready` 只做"是否有 daemon 存活"的只读检查（互斥语义见上文），显式单目标连这个检查都不做。所以 run 与 run 之间、定向 run 与 daemon 之间都不互斥。
+- 每个 Issue 自带隔离资源：worktree 在 `.iar-worktrees/issue-<N>`，claim / blocked-claim 锁也按 worktree 独立；状态库走 WAL 容忍并发写。两条命令撞向**同一条 Issue** 时，由首次领取选举裁决归属（见上节），落败方安静跳过。
 - **例外**：`--all-ready` 领的是同一份 ready 队列，两条 `--all-ready` 并发会双 claim，不要这么用。要并发多个 Issue，就给每个 Issue 各发一条 `--issue`。
 - 停止常驻进程没有 `iar daemon stop`：`iar daemon` 只暴露 `run` / `status`，托管进程用 `iar registry stop --repo-id <id>`（对未托管的手动 `iar daemon` 无效，需自行结束进程）。
 
@@ -1817,7 +1867,7 @@ iar labels sync
 iar labels sync --repo-id keda
 
 # 按 priority/P0 → P3、同级 Issue 编号升序预览 ready 队列；不运行 Agent
-iar run --dry-run --max-issues 3
+iar run --all-ready --dry-run --max-issues 3
 
 # 从 PRD 创建 ready Issue（默认发布 PRD）
 iar issue create tasks/pending/example.md --repo-id keda --type feature --agent codex --ready
@@ -1832,14 +1882,27 @@ iar issue create tasks/pending --repo-id keda --type feature --agent codex --rea
 # iar issue create tasks/pending/*.md --title "Shared"   # 会报错
 # iar issue create tasks/pending --title "Shared"        # 同样会报错
 
-# 单次执行（dry-run 预览）
-iar run --dry-run
+# 一句话需求直接开 Issue（不产生也不引用任何 PRD；与 PRD 路径参数互斥）
+iar issue create --from-prompt "登录页在 token 过期时应当跳转到 SSO 而不是白屏"
 
-# 单次执行（当前仓库）
-iar run
+# 同上，但进队列由 daemon 挑；默认只建 Issue，等人显式 iar run --issue <N>
+iar issue create --from-prompt "给 CLI 的 logs 命令补一个 --json 输出" --ready
+
+# 需要该 Issue 自带验收清单时显式开启（默认正文没有 Realistic Validation 小节）
+iar issue create --from-prompt "重排 ready 队列的排序规则" --require-validation
+
+# 单次执行（dry-run 预览；目标必填）
+iar run --issue 42 --dry-run
+iar run --all-ready --dry-run
+
+# 单次执行（当前仓库的某个 Issue）
+iar run --issue 42
+
+# 处理整个 ready 队列（等价删除前的无目标 `iar run`）
+iar run --all-ready
 
 # 显式处理所有 enabled registry entries
-iar run --all
+iar run --all --all-ready
 
 # Daemon 模式（默认每 120 秒轮询一次，仅当前已初始化注册仓库；加 --all 才处理所有 enabled registry entries）
 iar daemon
@@ -1944,6 +2007,12 @@ iar> /exit
 ## PRD Rework Workflow
 
 `iar` supports the reverse of `iar issue create`: automatically generating or rewriting a PRD from an existing GitHub Issue. This is useful when an Issue is created directly on GitHub and later needs a canonical PRD, or when an existing Issue receives new comments that require updating its PRD.
+
+> **PRD 不是执行的前置条件。** 没有 `- PRD path:` 锚点的 Issue 一样可以跑：`iar run --issue <N>`
+> 直接领取（见「显式定向的领取准入」），需要连审核与仓库验证一起省掉时用 `iar run --issue <N> --direct-pr`。
+> 本节是**按需增强**路径——想让这条 Issue 事后拥有规范 PRD（可归档、有验收清单）时才打
+> `agent/rework-prd`。注意锚点一旦写入，`--direct-pr` 就不再适用于该 Issue：PRD-backed 的交付必须走
+> PRD 交付门禁并归档其 PRD。
 
 ### Triggering PRD Rework
 
@@ -2737,7 +2806,8 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
 ### 生成模式与回退
 
 - `mode = "agent"`（**默认**）：用 `.format()` 渲染配置的 `prompt`，调用本地只读 agent，解析输出。
-  `iar issue create`、开 Draft PR、rework-prd 三处因此默认都会调一次 agent（超时上限
+  `iar issue create`（从 PRD）、`iar issue create --from-prompt`（无 PRD）、开 Draft PR、rework-prd
+  四处因此默认都会调一次 agent（超时上限
   `timeout_seconds`，默认 120 秒）。
 - `mode = "template"`（**已废弃**）：跳过 agent，直接用 `.format()` 渲染 `title_template` 和
   `body_template`。仍被接受，但将在后续版本移除；模板的长期用途是下面的失败兜底。
@@ -2750,6 +2820,7 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
 | target | 默认 `mode` | 默认 `output` | 提示词要求的回复 |
 |---|---|---|---|
 | `issue_from_prd` | `agent` | `json` | 带 `title` / `body` 的 JSON |
+| `issue_from_prompt` | `agent` | `json` | 带 `title` / `body` 的 JSON；产物**不含** `- PRD path:` 锚点，提示词与回退模板都不能写出它 |
 | `draft_pr` | `agent` | `markdown` | Markdown，首个非空行 `Closes #N` |
 | `prd_from_issue` | `agent` | `markdown` | 完整 PRD Markdown（不读取 `output`） |
 

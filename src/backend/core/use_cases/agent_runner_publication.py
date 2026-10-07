@@ -42,6 +42,7 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     PublishFailureCategory,
 )
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_review import run_pre_pr_review
 from backend.core.use_cases.agent_runner_final_verification import (
     FinalVerificationRequest,
@@ -198,7 +199,7 @@ def _create_draft_pr_with_recovery_context(
     process_runner: IProcessRunner,
     expected_branch: str,
     content_generator: IContentGenerator | None,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> tuple[str, str]:
     """Create the draft PR (or reuse an existing one) and preserve context.
 
@@ -214,7 +215,7 @@ def _create_draft_pr_with_recovery_context(
             process_runner,
             expected_branch=expected_branch,
             content_generator=content_generator,
-            fast_merge=fast_merge,
+            publish_stage=publish_stage,
         )
     except DraftPRCreationError as exc:
         raise PublishFailureError(
@@ -342,20 +343,29 @@ def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrP
     verification_request = request.verification_request
     # 发布路径本身不变（决策一）：pre-PR review 照常执行（其开关仍是
     # config.pre_pr_review.enabled）；快速通道旁路的是 verification_request
-    # 携带的两道验证门禁与 PR 标注。
-    run_pre_pr_review(
-        issue=verification_request.issue,
-        worktree_path=verification_request.worktree_path,
-        config=verification_request.config,
-        github_client=request.github_client,
-        process_runner=verification_request.process_runner,
-        selected_agent=verification_request.selected_agent,
-        head_sha_before=verification_request.verified_sha
-        or get_head_sha(verification_request.worktree_path, verification_request.process_runner),
-        expected_branch=request.expected_branch,
-        verification_results=request.verification_results,
-        push_callback=request.push_callback,
-    )
+    # 携带的两道验证门禁与 PR 标注。直发档再往前一步，连 reviewer agent 也不跑。
+    if verification_request.publish_stage.skips_review_and_repo_verification:
+        _logger.info(
+            "Direct-pr (origin: --direct-pr run flag): skipping the pre-PR review agent "
+            "for Issue #%d; CI on the Draft PR is the gate.",
+            verification_request.issue.number,
+        )
+    else:
+        run_pre_pr_review(
+            issue=verification_request.issue,
+            worktree_path=verification_request.worktree_path,
+            config=verification_request.config,
+            github_client=request.github_client,
+            process_runner=verification_request.process_runner,
+            selected_agent=verification_request.selected_agent,
+            head_sha_before=verification_request.verified_sha
+            or get_head_sha(
+                verification_request.worktree_path, verification_request.process_runner
+            ),
+            expected_branch=request.expected_branch,
+            verification_results=request.verification_results,
+            push_callback=request.push_callback,
+        )
     final_verdict = ensure_final_verifier_verdict(verification_request)
     branch, pr_url = _create_draft_pr_with_recovery_context(
         issue=verification_request.issue,
@@ -365,7 +375,7 @@ def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrP
         process_runner=verification_request.process_runner,
         expected_branch=request.expected_branch,
         content_generator=request.content_generator,
-        fast_merge=verification_request.fast_merge,
+        publish_stage=verification_request.publish_stage,
     )
     return _VerifiedPrPublication(
         verification_request=verification_request,
@@ -622,6 +632,38 @@ def _build_skill_store(worktree_path: Path, memory_config):
     return services.skill
 
 
+def _should_run_post_pr_supervisor(
+    config: AppConfig,
+    publish_stage: PublishStage,
+    issue_number: int,
+) -> bool:
+    """判断本次发布是否进入 PR 后监督循环。
+
+    直发档（``--direct-pr``）不进监督：那是 Draft PR 之后的又一次 agent 调用，而该
+    档位的承诺是「建完 PR 只剩机械状态」，因此与未启用监督走同一分支（直接落到
+    ``agent/review``），并留下旗标来源可追溯的审计日志。
+
+    Args:
+        config: 应用配置（提供 ``post_pr_supervisor.enabled`` 与 workflow 标签）。
+        publish_stage: 本次运行的发布档位。
+        issue_number: 目标 Issue 编号（仅用于日志）。
+
+    Returns:
+        是否启动 PR 后监督循环。
+    """
+    if not config.post_pr_supervisor.enabled:
+        return False
+    if publish_stage.skips_review_and_repo_verification:
+        _logger.info(
+            "Direct-pr (origin: --direct-pr run flag): skipping the post-PR supervisor "
+            "for Issue #%d; the Draft PR goes straight to %s and CI on it is the gate.",
+            issue_number,
+            config.labels.review,
+        )
+        return False
+    return True
+
+
 def _finish_implementation_publication(
     *,
     issue: IssueSummary,
@@ -633,7 +675,7 @@ def _finish_implementation_publication(
     expected_branch: str,
     commit_result: AgentCommitResult,
     content_generator: IContentGenerator | None = None,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> None:
     """完成新实现的发布流程（完整路径）。
 
@@ -654,8 +696,8 @@ def _finish_implementation_publication(
         expected_branch: 预期的分支名
         commit_result: Agent 提交结果
         content_generator: 可选的 AI 内容生成器（用于 PR description）
-        fast_merge: 快速通道（``iar run --fast-merge``）：跳过发布前的最终 RV /
-            verifier 复核，PR 正文打未验证标注。
+        publish_stage: 发布档位：非 ``NORMAL`` 时跳过发布前的最终 RV / verifier
+            复核，PR 正文打未验证标注；``DIRECT`` 连 pre-PR review agent 也不跑。
     """
     # 导入监督循环（避免循环导入）
     from backend.core.use_cases.agent_runner_supervisor import (
@@ -712,7 +754,7 @@ def _finish_implementation_publication(
         selected_agent=selected_agent,
         verified_sha=after_sha,
         verifier_verdict=commit_result.verifier_verdict,
-        fast_merge=fast_merge,
+        publish_stage=publish_stage,
     )
     reviewed_pr = _review_verify_create_pr(
         _PublicationReviewRequest(
@@ -738,9 +780,8 @@ def _finish_implementation_publication(
 
     _publish_verified_pr(reviewed_pr)
 
-    # 步骤 4: PR 后监督（可选）
-    supervisor_config = config.post_pr_supervisor
-    if supervisor_config.enabled:
+    # 步骤 4: PR 后监督（可选；直发档不进监督）
+    if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
         # 获取 PR 上下文（如果已存在）
         pr_context = github_client.get_pull_request_context(reviewed_pr.branch)
         if pr_context is None:
@@ -769,7 +810,7 @@ def _finish_implementation_publication(
                 executor_agent=selected_agent,
             )
     else:
-        # 未启用监督时直接进入 review 标签
+        # 未启用监督（或直发档旁路）时直接进入 review 标签
         _edit_issue_labels_after_publish(
             issue_number=issue.number,
             add_labels=[config.labels.review],
@@ -791,7 +832,7 @@ def _finish_implementation_publication(
 
 def _finish_existing_commit_publication(
     *,
-    fast_merge: bool = False,
+    publish_stage: PublishStage = PublishStage.NORMAL,
     issue: IssueSummary,
     worktree_path: Path,
     config: AppConfig,
@@ -815,7 +856,7 @@ def _finish_existing_commit_publication(
     5. 启动 PR 后监督循环（或直接进入 review 标签）
 
     Args:
-        fast_merge: 恢复发布路径下的快速通道：带旗标时同样跳过发布前 RV /
+        publish_stage: 恢复发布路径下的发布档位：非 ``NORMAL`` 时同样跳过发布前 RV /
             verifier 复核并打未验证标注。
         issue: Issue 对象
         worktree_path: worktree 目录
@@ -873,7 +914,7 @@ def _finish_existing_commit_publication(
         selected_agent=selected_agent,
         verified_sha=None,
         verifier_verdict=commit_result.verifier_verdict,
-        fast_merge=fast_merge,
+        publish_stage=publish_stage,
     )
     reviewed_pr = _review_verify_create_pr(
         _PublicationReviewRequest(
@@ -895,9 +936,8 @@ def _finish_existing_commit_publication(
     )
     _publish_verified_pr(reviewed_pr)
 
-    # 步骤 4: PR 后监督（可选）
-    supervisor_config = config.post_pr_supervisor
-    if supervisor_config.enabled:
+    # 步骤 4: PR 后监督（可选；直发档不进监督）
+    if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
         pr_context = github_client.get_pull_request_context(reviewed_pr.branch)
         if pr_context is None:
             _logger.warning(

@@ -103,6 +103,7 @@ def _build_generated_content_config(
         default_agent=gc_settings.default_agent,
         lifecycle_default_agent=lifecycle_default_agent,
         issue_from_prd=_build_generated_content_target_config(gc_settings.issue_from_prd),
+        issue_from_prompt=_build_generated_content_target_config(gc_settings.issue_from_prompt),
         draft_pr=_build_generated_content_target_config(gc_settings.draft_pr),
         prd_from_issue=_build_generated_content_target_config(gc_settings.prd_from_issue),
     )
