@@ -998,7 +998,7 @@ runner 派发的**所有**子进程都不再原样继承父环境：`SubprocessR
 - 每剔除一个变量，runner 日志记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值）；若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
 - 因此**从交互式 AI 会话的 shell 里直接启动 `iar run` / `iar review` / `iar issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
 - 白名单档（浏览器 E2E 验证子进程）的 fail-fast 前提校验不因默认档净化而改变：前提不成立时依旧报错，绝不静默回退到任何继承形态
-- 守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 保证新增的 agent 派发点必须接入净化环境
+- 净化约定分两层守护：默认档「`run()` 一处构造、全分支透传」由 `tests/test_process_runner.py` 直接断言；守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 只钉住可以被 `run()` **之外直接调用**的派发点（`run_filtered_claude_stream`、`_run_pty_stream` 与 `output_protocols/` 全目录），新增这类派发点必须自行接入净化环境。Issue #230 之前「工具命令路径不净化」的旧约定已废止
 
 ## 浏览器 E2E 验证命令形态（browser_e2e）
 

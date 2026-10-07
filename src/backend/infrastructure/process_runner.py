@@ -469,7 +469,19 @@ def _run_captured_process(
     label: str | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a captured subprocess with heartbeat and optional inactivity logging."""
+    """Run a captured subprocess with heartbeat and optional inactivity logging.
+
+    Args:
+        command: Command and arguments to execute.
+        cwd: Working directory for the subprocess.
+        timeout: Wall-clock timeout in seconds.
+        inactivity_timeout: Optional no-output timeout in seconds.
+        label: Optional label for heartbeat/timeout logs.
+        env: 已构造好的子进程环境，正常由 :meth:`SubprocessRunner.run` 的
+            默认净化档或 E2E 白名单档传入（避免同一环境重复构造）；``None``
+            时沿用 ``subprocess`` 的父环境继承语义，绕过 ``run()`` 直接调用
+            本函数的调用方需自行保证环境已净化。
+    """
     process = subprocess.Popen(
         list(command),
         cwd=cwd,
