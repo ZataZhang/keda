@@ -30,6 +30,7 @@
 
 ## Critical Summary
 
+- 项目以 AI Agent 理解并执行指令为核心；不为追求 100% 规范遵守率而逐条增加程序校验或硬门禁。指令执行偏差先修正执行结果、指令与上下文，不默认转成校验器开发；详见 `docs/ai-standards/index.md` 的「Agent 指令与程序边界」。
 - 后端必须遵守四层依赖方向：
   `src/backend/api/ -> src/backend/core/ -> src/backend/engines/ -> src/backend/infrastructure/`
 - Python 项目优先使用 `uv` 和 `just`
