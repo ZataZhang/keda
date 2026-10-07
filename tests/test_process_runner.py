@@ -21,9 +21,7 @@ from backend.infrastructure.process_runner import (
     ClaudeStreamRenderer,
     CommandFailedError,
     SubprocessRunner,
-    _format_timestamped_line,
     _terminate_process_tree,
-    _TimestampedStreamFormatter,
     run_filtered_claude_stream,
 )
 
@@ -237,43 +235,6 @@ def test_transcript_runner_builds_codex_command() -> None:
     assert Path(cmd[cmd.index("--cd") + 1]).is_absolute()
 
 
-def test_format_timestamped_line_adds_timestamp_prefix() -> None:
-    """_format_timestamped_line should add [HH:MM:SS] prefix to each line."""
-    result = _format_timestamped_line("test output\n")
-    assert result.startswith("[")
-    assert "] " in result
-    assert "test output" in result
-
-
-def test_format_timestamped_line_handles_leading_newline() -> None:
-    """_format_timestamped_line should handle leading newlines correctly."""
-    result = _format_timestamped_line("\n[agent tool] Read\n")
-    # Should have timestamp on the second line (after the empty line)
-    assert result.startswith("\n[")
-    assert "[agent tool] Read" in result
-
-
-def test_format_timestamped_line_empty_string() -> None:
-    """_format_timestamped_line should handle empty string."""
-    result = _format_timestamped_line("")
-    assert result == ""
-
-
-def test_timestamped_stream_formatter_keeps_chunks_on_same_line() -> None:
-    """Streaming chunks should not receive timestamps inside one physical line."""
-    formatter = _TimestampedStreamFormatter()
-
-    first_line = "".join(
-        formatter.format_chunk(chunk) for chunk in ("{", '"action"', ": true", "\n")
-    )
-    second_line = formatter.format_chunk('"next"')
-
-    assert first_line.count("[") == 1
-    assert first_line.endswith('{"action": true\n')
-    assert second_line.count("[") == 1
-    assert second_line.endswith('"next"')
-
-
 def test_run_filtered_claude_stream_logs_structured_events(tmp_path: Path) -> None:
     """run_filtered_claude_stream should log tool/result/error events."""
     from backend.infrastructure.process_runner import run_filtered_claude_stream
@@ -426,7 +387,7 @@ def test_run_filtered_claude_stream_buffers_text_delta(tmp_path: Path) -> None:
 def test_run_filtered_claude_stream_output_sink_preserves_newlines(
     tmp_path: Path,
 ) -> None:
-    """Rendered Claude newlines should reach the live output sink."""
+    """Rendered Claude newlines reach the sink as raw text, unprefixed."""
     from backend.infrastructure.process_runner import run_filtered_claude_stream
 
     text_event = _json_line(
@@ -455,8 +416,51 @@ def test_run_filtered_claude_stream_output_sink_preserves_newlines(
             output_sink=streamed_output_chunks.append,
         )
 
+    # 生产者交出的必须是可读原文：行首时间戳属于消费侧（per-Issue 路由 sink），
+    # 否则合议 workspace 文件等原文消费方会被动带上时间线。
     assert streamed_output_chunks == ["hello", "\n"]
     assert completed_process.stdout == "hello\n"
+
+
+def test_run_filtered_claude_stream_output_sink_keeps_tool_lines_raw(
+    tmp_path: Path,
+) -> None:
+    """sink 中的工具调用行必须是渲染原文，不带 ``[HH:MM:SS]`` 前缀。"""
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    tool_event = _json_line(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "Bash",
+                        "input": {"command": "ls"},
+                    }
+                ]
+            },
+        }
+    )
+
+    mock_process = MagicMock()
+    mock_process.stdout = iter([tool_event])
+    mock_process.wait.return_value = 0
+    mock_process.stdin = MagicMock()
+    streamed_output_chunks: list[str] = []
+
+    with patch("subprocess.Popen", return_value=mock_process):
+        completed_process = run_filtered_claude_stream(
+            ["claude", "--output-format", "stream-json"],
+            cwd=tmp_path,
+            timeout=None,
+            collect_stdout=True,
+            output_sink=streamed_output_chunks.append,
+        )
+
+    assert "".join(streamed_output_chunks) == "\n[agent tool] Bash: ls\n"
+    assert completed_process.stdout == "\n[agent tool] Bash: ls\n"
 
 
 def test_relay_process_stdout_output_sink_preserves_line_boundaries() -> None:
@@ -475,6 +479,7 @@ def test_relay_process_stdout_output_sink_preserves_line_boundaries() -> None:
     )
 
     assert stdout_text == "first\nsecond\n"
+    # 每块是一整行原文：行首时间戳由消费侧添加，生产者不得抢先格式化。
     assert streamed_output_chunks == ["first\n", "second\n"]
 
 
@@ -534,6 +539,51 @@ def test_subprocess_runner_pty_routes_output_to_sink(tmp_path: Path) -> None:
         output_sink=chunks.append,
     )
     assert any("via-sink" in chunk for chunk in chunks)
+
+
+def test_subprocess_runner_pty_sink_chunks_are_raw_lines(tmp_path: Path) -> None:
+    """PTY 路径交给 sink 的是原文行，时间戳由消费侧（路由 sink）添加。"""
+    import sys
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    chunks: list[str] = []
+    SubprocessRunner().run(
+        [sys.executable, "-c", "print('timed-line')"],
+        cwd=tmp_path,
+        capture_output=False,
+        check=False,
+        output_sink=chunks.append,
+    )
+    joined = "".join(chunks)
+    assert "timed-line" in joined
+    assert not re.search(r"\[\d{2}:\d{2}:\d{2}\]", joined)
+
+
+def test_pi_relay_events_sink_delivers_raw_chunks() -> None:
+    """pi 事件流的 sink 收到渲染原文：行中 delta 不被切断，也不加时间戳。"""
+    from backend.engines.agent_runner.output_protocols.pi_json_lines import _relay_events
+    from backend.infrastructure.agent_stream_usage import StreamUsageCollector
+
+    event_lines = [
+        _json_line({"type": "tool_execution", "tool": "Bash"}),
+        _json_line({"type": "message_update", "delta": {"text": "he"}}),
+        _json_line({"type": "message_update", "delta": {"text": "llo\n"}}),
+    ]
+    mock_process = MagicMock()
+    mock_process.stdout = iter(event_lines)
+    mock_process.wait.return_value = 0
+    streamed_output_chunks: list[str] = []
+
+    collected = _relay_events(
+        mock_process,
+        collect_stdout=True,
+        output_sink=streamed_output_chunks.append,
+        usage_collector=StreamUsageCollector(),
+    )
+
+    assert "".join(streamed_output_chunks) == collected
+    assert collected == "\n[agent tool] Bash\nhello\n"
 
 
 def test_subprocess_runner_claude_capture_uses_filtered_stream(
@@ -873,18 +923,27 @@ def test_subprocess_runner_keeps_active_process_alive(
     from backend.infrastructure.process_runner import SubprocessRunner
 
     runner = SubprocessRunner()
-    script = "import time\n" "for _ in range(5):\n" "    print('tick')\n" "    time.sleep(0.1)\n"
+    # 逐行 flush：stdout 接到管道时 Python 默认块缓冲，不 flush 的话子进程要等退出
+    # 才把 tick 一次性倒出来，观测到的"静默"时长就由解释器启动速度决定——慢机器上
+    # 光启动就逼近 1s，1s 阈值会被直接击杀，测试变成测机器快慢。flush 后留 2s 阈值
+    # （脚本持续输出 2s > 2s 检查周期），断言仍是在测"持续输出能否续命"。
+    script = (
+        "import time\n"
+        "for _ in range(20):\n"
+        "    print('tick', flush=True)\n"
+        "    time.sleep(0.1)\n"
+    )
 
     result = runner.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
         capture_output=True,
         timeout=10,
-        inactivity_timeout=1,
+        inactivity_timeout=2,
     )
 
     assert result.return_code == 0
-    assert result.stdout.count("tick") == 5
+    assert result.stdout.count("tick") == 20
 
 
 def test_subprocess_runner_replaces_invalid_utf8_in_captured_output(

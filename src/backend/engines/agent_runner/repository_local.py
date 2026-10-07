@@ -392,6 +392,7 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # 既拼进注释，又能被测试直接按配置模型校验，避免字段改名后示例悄悄失效。
 _GENERATED_CONTENT_EXAMPLE_TOML = """\
 [agent_runner.generated_content.draft_pr]
+enabled = true
 agent = "claude"
 timeout_seconds = 300
 """
@@ -405,8 +406,8 @@ _GENERATED_CONTENT_EXAMPLE_COMMENT = (
             "# =============================================================================",
             "# 四个 target：issue_from_prd（iar issue create <prd>）、issue_from_prompt",
             "# （iar issue create --from-prompt，产物不含 PRD 锚点）、draft_pr（Draft PR 正文）、",
-            "# prd_from_issue（rework-prd）。默认由 agent 生成；agent 失败或超时时回退到",
-            "# title_template / body_template，再回退到内置正文。默认值随 iar 升级，",
+            "# prd_from_issue（rework-prd）。draft_pr 默认 enabled=false，使用事实正文；其余由 agent 生成。",
+            "# agent 失败或超时回退 title_template / body_template，再回退内置正文。默认值随 iar 升级，",
             "# 不会被本文件钉死。需要偏离时取消注释，并只写要改的键（未写的键继续继承默认值）：",
             "#",
             *(

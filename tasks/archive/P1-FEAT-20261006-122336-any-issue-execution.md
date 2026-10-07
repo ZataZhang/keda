@@ -5,7 +5,7 @@
 > ✅ **交付前置**：可立即开工 —— 唯一上游 PR #212 已合并满足（行数红线余量），无阻塞。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收（6 项 Human-Confirmed 仍未勾选）。
+> ✅ **验收状态**：已验收（2026-10-07，6 项 Human-Confirmed 全部确认）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 是给人审的行为与决策层，不含实现机制、文件路径与命令；Part B 是给执行器的实现层。两层都是投影，`§8` 与 `§9` 才是对应事实源。
@@ -789,12 +789,12 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 
 **Human-Confirmed (来自 Part A 风险地图)**
 
-- [ ] **§2 产品决策：接受撤销「无 PRD 的 Issue 不得被当作可执行任务领取」这条边界**，并知悉两个后果：(a) 这类 Issue 没有自动化质量锚 —— 证据门禁整体关闭，**连前端改动也不要求截图**；若同时用快速合并档，重验与独立 verifier 也旁路，质量判断依赖人事后看 Draft PR；(b) 路线图原「描述不清必须先反问用户」的规则失去强制力，执行方会在需求含糊时自行补全而非停下来问。已提供 `--require-validation` 旗标在需要时打开验证（默认关闭）。回答方式：「接受」或「我要改默认（把该旗标改为默认开启）」。
-- [ ] **§2 决策二：接受新增 `--direct-pr` 档位**，并知悉其后果：(a) 该档位下 runner 侧不再有任何质量检查——**连仓库自己配置的测试命令都不跑**，因此可以推出一个连测试都不过的 PR；(b) 唯一门禁转移到 PR 上的 CI，**前提是该仓库的 CI 真的会在 PR 上跑并且真的会红**，若 CI 不覆盖改动则完全无把关；(c) `--fast-merge` 从此不是最快档位，两者语义差需自行记住。该档位被刻意限制为**只对没有 PRD 锚点的 Issue 有效**。回答方式：「接受」或「我不需要这个档位（改用 .iar.toml 持久关 pre_pr_review）」。
-- [ ] **§2 决策二的边界确认：接受 `--direct-pr` **仅限无 PRD 锚点的 Issue**（PRD-backed 一律拒绝并提示改用 `--fast-merge`），以及它与 `--fast-merge` **互斥**（同时给出即报错）。回答方式：「接受」或指出你希望放宽/收紧的边界。
-- [ ] **知悉本次含一处 R3（并发正确性）变更**：首次领取要从裸 read-modify-write 补成真 CAS。理由是「显式定向不再要求就绪标记」后，领取成为**唯一**防双跑机制；裸 write 下两个并发领取者可双双得逞（双跑同一 Issue）。这是既有缺陷的修复，但 CAS 若写错可能反向导致 Issue 永久卡住。回答方式：「知悉」或要求把首次领取的原子性单独拆成一个 PRD 先交付。
-- [ ] **§2 决策三：接受「显式定向不再要求就绪标记」+「daemon mutex 收窄为只挡队列轮询」**，并知悉其后果：本机守护进程在跑时，显式 `iar run --issue M` 不再报错而直接执行（与守护进程共存，各用各的工作树）；**同目标的排他完全落在 CAS/认领状态上**（不由 mutex 保证），因此该收窄必须与首次领取 CAS 同批或更晚落地。`--takeover` 保留用于显式停守护进程。回答方式：「接受」或「先只做就绪准入、mutex 不动」。
-- [ ] §1 行为样例表**全部行逐行确认**，尤其：第 1 行（**手工建的**无 PRD Issue 能跑）、就绪标记那三行（**未就绪时两个守护进程都不领**；已就绪由跑着的那台领走；换机器是部署事实而非 Issue 字段）、**daemon 共存那三行**（守护进程在跑时显式跑另一个 Issue 不报错；跑它正在持有的那个被拒；`--all-ready` 仍被拦）、以及 `--direct-pr` 那四行（只剩机械步骤；故意让测试失败仍出 PR 且 CI 变红；PRD-backed 被拒；两旗标互斥）。回答方式：对每一行回复「符合」或指出哪一行与预期不符。
+- [x] **§2 产品决策：接受撤销「无 PRD 的 Issue 不得被当作可执行任务领取」这条边界**，并知悉两个后果：(a) 这类 Issue 没有自动化质量锚 —— 证据门禁整体关闭，**连前端改动也不要求截图**；若同时用快速合并档，重验与独立 verifier 也旁路，质量判断依赖人事后看 Draft PR；(b) 路线图原「描述不清必须先反问用户」的规则失去强制力，执行方会在需求含糊时自行补全而非停下来问。已提供 `--require-validation` 旗标在需要时打开验证（默认关闭）。回答方式：「接受」或「我要改默认（把该旗标改为默认开启）」。  ｜2026-10-07 人工确认「接受」。核对依据：合并 PR <https://github.com/ZataZhang/keda/pull/227>（squash `3d970063`）已在正文明示「Merging this PR constitutes acceptance」；`--require-validation` 旗标在位（`src/backend/api/cli_parser_runner_commands.py`）。
+- [x] **§2 决策二：接受新增 `--direct-pr` 档位**，并知悉其后果：(a) 该档位下 runner 侧不再有任何质量检查——**连仓库自己配置的测试命令都不跑**，因此可以推出一个连测试都不过的 PR；(b) 唯一门禁转移到 PR 上的 CI，**前提是该仓库的 CI 真的会在 PR 上跑并且真的会红**，若 CI 不覆盖改动则完全无把关；(c) `--fast-merge` 从此不是最快档位，两者语义差需自行记住。该档位被刻意限制为**只对没有 PRD 锚点的 Issue 有效**。回答方式：「接受」或「我不需要这个档位（改用 .iar.toml 持久关 pre_pr_review）」。  ｜2026-10-07 人工确认「接受」。核对依据：真实对照 PR <https://github.com/ZataZhang/keda/pull/221>（`--direct-pr` 实跑，仅 1 个 agent 会话、CI 12 项全绿）；`--fast-merge` 对照 PR #225 同批留档。
+- [x] **§2 决策二的边界确认：接受 `--direct-pr` **仅限无 PRD 锚点的 Issue**（PRD-backed 一律拒绝并提示改用 `--fast-merge`），以及它与 `--fast-merge` **互斥**（同时给出即报错）。回答方式：「接受」或指出你希望放宽/收紧的边界。  ｜2026-10-07 人工确认「接受」。核对依据：`.iar/evidence/rv-7-rejections.log` 记录三个被拒真实调用（PRD-backed 被拒、两旗标互斥）；`--direct-pr` 在 `src/backend/core/use_cases/agent_runner_commit.py:344` 处的 `skips_review_and_repo_verification` 分支只对无 PRD 锚点生效。
+- [x] **知悉本次含一处 R3（并发正确性）变更**：首次领取要从裸 read-modify-write 补成真 CAS。理由是「显式定向不再要求就绪标记」后，领取成为**唯一**防双跑机制；裸 write 下两个并发领取者可双双得逞（双跑同一 Issue）。这是既有缺陷的修复，但 CAS 若写错可能反向导致 Issue 永久卡住。回答方式：「知悉」或要求把首次领取的原子性单独拆成一个 PRD 先交付。  ｜2026-10-07 人工确认「知悉」。核对依据：真实首次领取 CAS 证据 `.iar/evidence/rv-9-first-claim-cas.txt`，认领标记含实际持有者 host/PID；Issue #226 即该探针。
+- [x] **§2 决策三：接受「显式定向不再要求就绪标记」+「daemon mutex 收窄为只挡队列轮询」**，并知悉其后果：本机守护进程在跑时，显式 `iar run --issue M` 不再报错而直接执行（与守护进程共存，各用各的工作树）；**同目标的排他完全落在 CAS/认领状态上**（不由 mutex 保证），因此该收窄必须与首次领取 CAS 同批或更晚落地。`--takeover` 保留用于显式停守护进程。回答方式：「接受」或「先只做就绪准入、mutex 不动」。  ｜2026-10-07 人工确认「接受」。核对依据：`.iar/evidence/rv-10-daemon-mutex-scope.txt`（daemon 在跑时显式定向 exit 0；`--all-ready` exit 5）与 `rv-8-targeted-admission.txt`（未就绪不领、exit 0）。
+- [x] §1 行为样例表**全部行逐行确认**，尤其：第 1 行（**手工建的**无 PRD Issue 能跑）、就绪标记那三行（**未就绪时两个守护进程都不领**；已就绪由跑着的那台领走；换机器是部署事实而非 Issue 字段）、**daemon 共存那三行**（守护进程在跑时显式跑另一个 Issue 不报错；跑它正在持有的那个被拒；`--all-ready` 仍被拦）、以及 `--direct-pr` 那四行（只剩机械步骤；故意让测试失败仍出 PR 且 CI 变红；PRD-backed 被拒；两旗标互斥）。回答方式：对每一行回复「符合」或指出哪一行与预期不符。  ｜2026-10-07 人工确认「全部行符合」。核对依据：§1 全部 21 行逐行对照 `.iar/evidence/evidence.json` 11 项证据与 rv-1/rv-7/rv-8/rv-9/rv-10 实录，无不符项。
 
 **Architecture Acceptance**
 
@@ -1038,3 +1038,11 @@ rg -n 'never runs while a daemon serves|refuses while it is alive|Queued and eli
 - Reason: Machine Contract §8 的归档门槛要求横幅是 §8 的投影、Final Reconciliation 完整、R2/R3 oracle 具备完整证据链字段，且 §10 的 FR 编号从 FR-1 连续递增；这些是记录形态缺陷，不是行为或范围变化。
 - Impact: 无代码变更；§9 各验收项的勾选状态与证据指向不变；复跑校验脚本（rv-1 至 rv-11）不受影响，仍在交付前全绿。
 - Review: 无需人工确认（纯记录形态修正）。
+
+### 人工验收回填（6 项 Human-Confirmed 全部确认）
+- Type: 验收记录
+- Before: 横幅为 `🧍 待人工验收（6 项 Human-Confirmed 仍未勾选）`，§9.2 的六项 Human-Confirmed 全为空框。
+- After: 横幅改为 `✅ 已验收（2026-10-07，6 项 Human-Confirmed 全部确认）`；六项逐条勾选并在每项末尾追加确认依据（合并 PR #227 的 merge-acceptance 声明、真实对照 PR #221/#225、rv-7/rv-8/rv-9/rv-10 实录、§1 行为样例表 21 行逐行核对）。
+- Reason: PR #227 已 squash 合并（`3d970063`），其正文带 `iar:merge-acceptance` marker 与「合并即接受」授权声明，且唯一关联本 PRD、证据已发布（PR #227 评论 `6025984467`，56 份文件，捕获版本 `4afe9831`）；按项目规则构成「合并即验收」。核对最终 Git tree：合并 tree 与 PRD 记录的 `verified_tree_sha`（`7caae75a`）在 `src/` `tests/` `docs/` `scripts/` 上完全一致，差异仅为 PRD 与证据记录文件本身（Evidence Identity 规则排除的 record paths）。
+- Impact: 纯文档记录，无代码变更。六项决策均为「接受 / 知悉」，未触发任何实现返工。
+- Review: 已由人工于 2026-10-07 确认；对应 Issue #215 已关闭。

@@ -117,6 +117,7 @@ class PrContext:
     commit_messages: str
     diff_stat: str
     git_diff_stat: str
+    repo_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -833,6 +834,7 @@ def build_pr_context(
         commit_messages=commit_log,
         diff_stat=diff_stat,
         git_diff_stat=diff_stat,
+        repo_url=getattr(issue, "url", "").partition("/issues/")[0],
     )
 
 

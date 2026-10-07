@@ -7,7 +7,8 @@
  *
  * 覆盖：按流程 / 按 agent / 按 PRD 三张表同屏、按 PRD 表按总量降序且首列
  * 显示 Issue 号、同一 PRD 多 run 合并为一行并显示执行次数、旧响应缺省新
- * 字段时显示明确空态而不是全零行。
+ * 字段时显示明确空态而不是全零行、数值列（总量起）表头与单元格右对齐且
+ * 文本列保持左对齐（issue-216）。
  */
 
 import { expect, test } from '../../fixtures/session.fixture'
@@ -139,6 +140,43 @@ test.describe('Stats token usage by PRD', () => {
 
     // 同一 PRD 多 run 合并为一行并显示累计执行次数。
     await expect(rows.nth(0).locator('td').nth(9)).toHaveText('2')
+  })
+
+  test('numeric columns are right-aligned in header and body, label columns stay left', async ({
+    page,
+  }) => {
+    await page.route('/api/v1/agent-runner/console/stats/prd-lifecycle*', (route) =>
+      fulfillJson(route, MOCK_STATS_WITH_BY_PRD),
+    )
+    await openStatsPage(page)
+
+    // 按流程 / 按 agent 表：分组列左对齐，总量起的数值列右对齐。
+    const flowTable = page.getByTestId('stats-token-usage').locator('table').first()
+    const flowHeaderCells = flowTable.locator('thead th')
+    await expect(flowHeaderCells.nth(0)).toHaveCSS('text-align', 'left')
+    for (let index = 1; index <= 7; index += 1) {
+      await expect(flowHeaderCells.nth(index)).toHaveCSS('text-align', 'right')
+    }
+    const flowRow = flowTable.locator('tbody tr').first().locator('td')
+    await expect(flowRow.nth(0)).toHaveCSS('text-align', 'left')
+    for (let index = 1; index <= 7; index += 1) {
+      await expect(flowRow.nth(index)).toHaveCSS('text-align', 'right')
+    }
+
+    // 按 PRD 表：Issue / PRD 列左对齐，总量起的数值列右对齐。
+    const prdTable = page.getByTestId('stats-token-usage-by-prd').locator('table')
+    const prdHeaderCells = prdTable.locator('thead th')
+    await expect(prdHeaderCells.nth(0)).toHaveCSS('text-align', 'left')
+    await expect(prdHeaderCells.nth(1)).toHaveCSS('text-align', 'left')
+    for (let index = 2; index <= 9; index += 1) {
+      await expect(prdHeaderCells.nth(index)).toHaveCSS('text-align', 'right')
+    }
+    const prdRow = prdTable.locator('tbody tr').first().locator('td')
+    await expect(prdRow.nth(0)).toHaveCSS('text-align', 'left')
+    await expect(prdRow.nth(1)).toHaveCSS('text-align', 'left')
+    for (let index = 2; index <= 9; index += 1) {
+      await expect(prdRow.nth(index)).toHaveCSS('text-align', 'right')
+    }
   })
 
   test('legacy response without by-PRD field shows explicit empty state', async ({ page }) => {

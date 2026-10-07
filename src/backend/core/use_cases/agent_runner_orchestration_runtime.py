@@ -848,10 +848,12 @@ def run_once(request: RunOnceRequest) -> int:
         "publish_stage": request.publish_stage,
     }
 
-    # 串行路径：concurrency<=1 时逐个处理。与历史行为的唯一差异是——每个
+    # 串行路径：concurrency<=1 时逐个处理。与历史行为的差异有二——每个
     # Issue 的可见输出同时落到 ``logs/agent-runner/issues/<repo_id>/`` 下
-    # 的 per-Issue 文件（供第二终端 / Console 按 Issue 续读），原启动终端
-    # 的可读输出经 ``console_sink`` 原样保留（TTY 与重定向两种场景一致）。
+    # 的 per-Issue 文件（供第二终端 / Console 按 Issue 续读），且原启动终端
+    # 经 ``console_sink`` 收到的是路由 sink 的那一份文本，因此每行行首带
+    # ``[HH:MM:SS]``：与未经路由时的终端实时视图逐行一致（Issue #223），
+    # TTY 与重定向两种场景相同。
     if concurrency <= 1:
         noop_view = NoOpRunnerLiveView()
         log_base = repo_path / "logs"

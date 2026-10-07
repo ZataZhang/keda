@@ -609,6 +609,36 @@ def ensure_verification_passed(verification_results: list[CommandResult]) -> Non
         raise VerificationFailedError(verification_results)
 
 
+# 失败定位指令由局部修复与完整恢复共用，不改变 runner 的验证门禁。
+_VERIFICATION_TRIAGE_RULES: tuple[str, ...] = (
+    (
+        "- First identify the exact failing command, test/check name, first actionable "
+        "error, and affected files from the captured output; inspect a wrapper command's "
+        "underlying failing check when its output is only a summary."
+    ),
+    (
+        "- Diagnose whether the failure is an environment/setup problem, a pre-existing "
+        "failure, or a regression from this branch. Support that diagnosis with evidence; "
+        "do not label a failure pre-existing merely because it looks unrelated."
+    ),
+    (
+        "- For environment failures, repair the relevant setup when authorized, or report "
+        "the exact blocker. For suspected pre-existing failures, reproduce safely on the "
+        "base revision in an isolated worktree when feasible; never reset this worktree."
+    ),
+    (
+        "- Reproduce with the smallest relevant check, apply a focused fix, and run the "
+        "affected checks before the existing final verification commands. Do not restart "
+        "the whole implementation to fix a local failure."
+    ),
+    (
+        "- A diagnosis is not a waiver: do not skip, cache, weaken, or replace required "
+        "verification commands, relax guard tests, fabricate test flags, or treat an "
+        "unresolved failure as passed. Preserve the existing final-tree delivery gates."
+    ),
+)
+
+
 def build_fix_prompt(
     issue: IssueSummary,
     worktree_path: Path,
@@ -656,6 +686,7 @@ def build_fix_prompt(
             "",
             commands_section,
             "Fix rules:",
+            *_VERIFICATION_TRIAGE_RULES,
             "- Only modify files inside the current worktree.",
             "- Only fix the code or tests that caused the verification failure above.",
             "- Before requesting a commit, re-check project conventions "
@@ -739,6 +770,10 @@ def build_repair_prompt(
             *findings_section,
             "",
             "Repair rules:",
+            "- Inspect all listed findings before editing; group related root causes "
+            "and address the complete set in one focused repair pass.",
+            "- Summarize each finding as fixed or disputed with evidence, and list the "
+            "affected checks run. Preserve required verification and final-tree evidence.",
             "- Only modify files inside the current worktree.",
             "- Do not switch branches, merge main, push, or create PRs.",
             "- Do not run `git add`, `git commit`, `git reset`, or `git checkout`; the "
@@ -934,6 +969,7 @@ def build_recovery_prompt(
             structured_evidence_line,
             memory_section,
             "Recovery rules:",
+            *_VERIFICATION_TRIAGE_RULES,
             "- Inspect the current worktree and fix the failure.",
             "- Only modify files inside the current worktree.",
             "- Before requesting a commit, re-check project conventions "

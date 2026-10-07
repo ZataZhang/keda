@@ -1,5 +1,7 @@
 # PRD: Operator Skill 子命令化（hub + references 结构）
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/234
+
 > ⛔ **交付前置**：`tasks/pending/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md`（产品表面改名为 KedaCode / `kc`）必须先合并落地。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
@@ -428,128 +430,127 @@ flowchart TD
 以下 YAML 为结构化验收 oracle。CLI 与安装入口使用真实进程与真实 Typer 命令树；GitHub 交互不进入本 PRD 的验证范围（子命令说明是文档，验证对象是文档内容与安装产物，不是 GitHub 行为）。rv-7 需要真实 agent 会话，标记为可失败降级并写明降级形态。
 
 ```yaml
-oracles:
-  - id: rv-1
-    behavior: "真实 kc init 把随包 Skill 装进隔离 HOME 时，安装产物含主文件与 8 份子命令说明，且全部与发行包资源逐字节相同。"
-    reviewer: verifier
-    real_entry: "在隔离 HOME（临时目录）上执行 uv run kc init，指向隔离仓库路径，然后枚举安装目录树并逐文件比对字节。"
-    expected: "目标 Skill 目录下 SKILL.md 存在，references/ 下恰好 8 个 .md；逐文件 sha256 与发行包模板目录一致；--dry-run 变体不产生任何写入。"
-    mock_boundary: "隔离 HOME 与隔离仓库路径；kc init 的真实 Typer 入口、安装编排、copytree 与冲突判定均不替换。"
-    tier: R1
-    test_layer: real_entry
-    required_for_acceptance: true
+- id: rv-1
+  behavior: "真实 kc init 把随包 Skill 装进隔离 HOME 时，安装产物含主文件与 8 份子命令说明，且全部与发行包资源逐字节相同。"
+  reviewer: verifier
+  real_entry: "在隔离 HOME（临时目录）上执行 uv run kc init，指向隔离仓库路径，然后枚举安装目录树并逐文件比对字节。"
+  expected: "目标 Skill 目录下 SKILL.md 存在，references/ 下恰好 8 个 .md；逐文件 sha256 与发行包模板目录一致；--dry-run 变体不产生任何写入。"
+  mock_boundary: "隔离 HOME 与隔离仓库路径；kc init 的真实 Typer 入口、安装编排、copytree 与冲突判定均不替换。"
+  tier: R1
+  test_layer: real_entry
+  required_for_acceptance: true
 
-  - id: rv-2
-    behavior: "守卫测试对主文件与全部 8 份子命令说明生效：任一份说明里出现真实命令树中不存在的旗标时，测试失败并指名该文件与该旗标。"
-    reviewer: verifier
-    real_entry: "uv run pytest tests/test_kedacode_operator_skill.py，并额外执行一次负向运行：向某一份子命令说明注入一个真实命令树里不存在的旗标后重跑。"
-    expected: "负向运行失败，失败信息指名被注入的文件与旗标；移除注入后恢复通过。"
-    mock_boundary: "无 mock；测试读真实发行包文件与真实 Typer 命令树派生结果。"
-    tier: R1
-    test_layer: real_entry
-    required_for_acceptance: true
-    negative_control: "在 references/ 下任一份说明里临时注入一个真实命令树不存在的旗标（如 --definitely-not-a-real-flag）。"
-    expected_fail: "守卫测试失败并指名该文件与该旗标。注入不触碰生产代码，只改随包文档资源。"
+- id: rv-2
+  behavior: "守卫测试对主文件与全部 8 份子命令说明生效：任一份说明里出现真实命令树中不存在的旗标时，测试失败并指名该文件与该旗标。"
+  reviewer: verifier
+  real_entry: "uv run pytest tests/test_kedacode_operator_skill.py，并额外执行一次负向运行：向某一份子命令说明注入一个真实命令树里不存在的旗标后重跑。"
+  expected: "负向运行失败，失败信息指名被注入的文件与旗标；移除注入后恢复通过。"
+  mock_boundary: "无 mock；测试读真实发行包文件与真实 Typer 命令树派生结果。"
+  tier: R1
+  test_layer: real_entry
+  required_for_acceptance: true
+  negative_control: "在 references/ 下任一份说明里临时注入一个真实命令树不存在的旗标（如 --definitely-not-a-real-flag）。"
+  expected_fail: "守卫测试失败并指名该文件与该旗标。注入不触碰生产代码，只改随包文档资源。"
 
-  - id: rv-3
-    behavior: "安装完整性比对覆盖发行包管理的全部文件：用户改动受管文件后 kc init 不再报 up-to-date；用户在 Skill 目录里自加的非受管文件不触发冲突。"
-    reviewer: verifier
-    real_entry: "隔离 HOME 下先执行一次 uv run kc init（得到 up-to-date 基线），再分别做两种扰动后重跑。"
-    expected: "扰动一：改 references/ 下任一份说明的字节 → 结果不再是 up-to-date，且 force=False 时报告 preserve-conflict 并保留用户内容。扰动二：在 Skill 目录内新增一个不属于受管集合的文件 → 结果仍为 up-to-date。"
-    mock_boundary: "隔离 HOME；真实安装编排与真实比较逻辑；不替换比较函数。"
-    tier: R2
-    test_layer: real_entry
-    required_for_acceptance: true
-    critical_value_source: "发行包 Skill 目录内主文件与 references/**/*.md 的实际字节；目标目录同名文件字节。"
-    must_cross: "真实 kc init 入口 → 安装编排 → install_packaged_operator_skill 的 up-to-date 判定 → 实际文件写入/保留决策。"
-    forbidden_bypasses: "不得直接调用比较函数替代 kc init 入口；不得只在 dry-run 上断言；不得为了让扰动一通过而放宽为「主文件相同即 up-to-date」。"
-    fresh_state_probe: "每种扰动从全新隔离 HOME 起步，先建立干净的 up-to-date 基线再施加扰动。"
-    final_tree_evidence: "记录最终 git tree、两种扰动下 kc init 的完整输出、目标目录文件列表与被保留的用户内容。"
-    negative_control: "把比较范围临时收窄回仅主文件。"
-    expected_fail: "扰动一重新报 up-to-date，rv-3 失败。"
+- id: rv-3
+  behavior: "安装完整性比对覆盖发行包管理的全部文件：用户改动受管文件后 kc init 不再报 up-to-date；用户在 Skill 目录里自加的非受管文件不触发冲突。"
+  reviewer: verifier
+  real_entry: "隔离 HOME 下先执行一次 uv run kc init（得到 up-to-date 基线），再分别做两种扰动后重跑。"
+  expected: "扰动一：改 references/ 下任一份说明的字节 → 结果不再是 up-to-date，且 force=False 时报告 preserve-conflict 并保留用户内容。扰动二：在 Skill 目录内新增一个不属于受管集合的文件 → 结果仍为 up-to-date。"
+  mock_boundary: "隔离 HOME；真实安装编排与真实比较逻辑；不替换比较函数。"
+  tier: R2
+  test_layer: real_entry
+  required_for_acceptance: true
+  critical_value_source: "发行包 Skill 目录内主文件与 references/**/*.md 的实际字节；目标目录同名文件字节。"
+  must_cross: "真实 kc init 入口 → 安装编排 → install_packaged_operator_skill 的 up-to-date 判定 → 实际文件写入/保留决策。"
+  forbidden_bypasses: "不得直接调用比较函数替代 kc init 入口；不得只在 dry-run 上断言；不得为了让扰动一通过而放宽为「主文件相同即 up-to-date」。"
+  fresh_state_probe: "每种扰动从全新隔离 HOME 起步，先建立干净的 up-to-date 基线再施加扰动。"
+  final_tree_evidence: "记录最终 git tree、两种扰动下 kc init 的完整输出、目标目录文件列表与被保留的用户内容。"
+  negative_control: "把比较范围临时收窄回仅主文件。"
+  expected_fail: "扰动一重新报 up-to-date，rv-3 失败。"
 
-  - id: rv-4
-    behavior: "Skill 自我描述覆盖全部 8 条子命令的口语关键词，因此使用者的任何常见 IAR 意图都能触发自动选中；路由表在主文件中可见。"
-    reviewer: verifier
-    real_entry: "读取随包 SKILL.md 的 frontmatter description 与路由表；对每条子命令，用其定义的触发词断言 description 或路由表中存在对应表达。"
-    expected: "八条子命令各自至少一个触发词可在 description 中找到；八行路由表齐全且每行指向一个实际存在的子命令说明文件；指向的文件名全部存在于 references/ 下。"
-    mock_boundary: "无 mock；读真实随包文件与真实目录。"
-    tier: R1
-    test_layer: real_entry
-    required_for_acceptance: true
+- id: rv-4
+  behavior: "Skill 自我描述覆盖全部 8 条子命令的口语关键词，因此使用者的任何常见 IAR 意图都能触发自动选中；路由表在主文件中可见。"
+  reviewer: verifier
+  real_entry: "读取随包 SKILL.md 的 frontmatter description 与路由表；对每条子命令，用其定义的触发词断言 description 或路由表中存在对应表达。"
+  expected: "八条子命令各自至少一个触发词可在 description 中找到；八行路由表齐全且每行指向一个实际存在的子命令说明文件；指向的文件名全部存在于 references/ 下。"
+  mock_boundary: "无 mock；读真实随包文件与真实目录。"
+  tier: R1
+  test_layer: real_entry
+  required_for_acceptance: true
 
-  - id: rv-5
-    behavior: "共享底线仍在主文件且可读：瘦身后主文件的非空行数不超过 70，且退出码表的 7 个错误名与 7 个退出码、只读禁令、自省入口均在主文件中。"
-    reviewer: verifier
-    real_entry: "统计随包 SKILL.md 非空行数；对其内容断言退出码名与码值、只读禁令关键句、自省入口命令全部存在。"
-    expected: "非空行数 ≤ 70；`ok` `usage_error` `not_found` `permission_denied` `conflict` `dry_run_ok` 与 0/1/2/3/4/5/10 全部可断言；'never start' 类只读禁令句存在；'kc schema --json' 存在。"
-    mock_boundary: "无 mock；读真实随包文件。"
-    tier: R1
-    test_layer: real_entry
-    required_for_acceptance: true
+- id: rv-5
+  behavior: "共享底线仍在主文件且可读：瘦身后主文件的非空行数不超过 70，且退出码表的 7 个错误名与 7 个退出码、只读禁令、自省入口均在主文件中。"
+  reviewer: verifier
+  real_entry: "统计随包 SKILL.md 非空行数；对其内容断言退出码名与码值、只读禁令关键句、自省入口命令全部存在。"
+  expected: "非空行数 ≤ 70；`ok` `usage_error` `not_found` `permission_denied` `conflict` `dry_run_ok` 与 0/1/2/3/4/5/10 全部可断言；'never start' 类只读禁令句存在；'kc schema --json' 存在。"
+  mock_boundary: "无 mock；读真实随包文件。"
+  tier: R1
+  test_layer: real_entry
+  required_for_acceptance: true
 
-  - id: rv-6
-    behavior: "CLI 表面未被本次改动改变：交付前后的 kc --help 与 kc schema --json 输出逐字一致。"
-    reviewer: verifier
-    real_entry: "在最终实现树上执行 uv run kc --help 与 uv run kc schema --json，与交付前捕获的基线输出做逐字 diff。"
-    expected: "两份输出与基线无差异。"
-    mock_boundary: "无 mock；真实命令树。"
-    tier: R1
-    test_layer: real_entry
-    required_for_acceptance: true
+- id: rv-6
+  behavior: "CLI 表面未被本次改动改变：交付前后的 kc --help 与 kc schema --json 输出逐字一致。"
+  reviewer: verifier
+  real_entry: "在最终实现树上执行 uv run kc --help 与 uv run kc schema --json，与交付前捕获的基线输出做逐字 diff。"
+  expected: "两份输出与基线无差异。"
+  mock_boundary: "无 mock；真实命令树。"
+  tier: R1
+  test_layer: real_entry
+  required_for_acceptance: true
 
-  - id: rv-7
-    behavior: "真实 agent 会话中，agent 按使用者意图读到对应的子命令说明，且只读请求没有变成执行。"
-    reviewer: verifier
-    real_entry: "把随包 Skill 安装到隔离 HOME，用真实 agent CLI 会话（headless）分别发出两类请求：一类'把某个 PRD 建成 issue'，一类'看看某个 Issue 现在什么情况'；采集 agent 的工具调用轨迹。"
-    expected: "第一类：轨迹中出现对建 issue 子命令说明的读取，且执行前发生了 PRD 存在性/已有 Issue/在飞 PR/是否进队列的检查。第二类：轨迹中无任何 kc run / registry start 之类的执行类调用。"
-    mock_boundary: "GitHub 交互可用受控替身；agent 会话、Skill 加载、工具调用轨迹采集均为真实。"
-    tier: R2
-    test_layer: real_entry
-    required_for_acceptance: true
-    critical_value_source: "agent 实际读取的子命令说明文件路径；agent 实际发出的 CLI 命令序列。"
-    must_cross: "真实 agent 会话 → Skill 加载主文件 → 路由表命中 → 读取子命令说明 → 真实工具调用。"
-    forbidden_bypasses: "不得用提示词直接塞入子命令说明内容来替代加载；不得把轨迹断言替换为『说明文件里写了这句话』；不得只看最终回复文本。"
-    fresh_state_probe: "每类请求在全新隔离 HOME 与全新会话中发起。"
-    final_tree_evidence: "记录最终 git tree、两类请求的完整 agent 轨迹、实际读取的文件路径与实际发出的 CLI 命令。"
-    negative_control: "把路由表中的建 issue 行指向一份不含前置检查的说明。"
-    expected_fail: "第一类轨迹中不再出现四项前置检查的调用，rv-7 失败。"
+- id: rv-7
+  behavior: "真实 agent 会话中，agent 按使用者意图读到对应的子命令说明，且只读请求没有变成执行。"
+  reviewer: verifier
+  real_entry: "把随包 Skill 安装到隔离 HOME，用真实 agent CLI 会话（headless）分别发出两类请求：一类'把某个 PRD 建成 issue'，一类'看看某个 Issue 现在什么情况'；采集 agent 的工具调用轨迹。"
+  expected: "第一类：轨迹中出现对建 issue 子命令说明的读取，且执行前发生了 PRD 存在性/已有 Issue/在飞 PR/是否进队列的检查。第二类：轨迹中无任何 kc run / registry start 之类的执行类调用。"
+  mock_boundary: "GitHub 交互可用受控替身；agent 会话、Skill 加载、工具调用轨迹采集均为真实。"
+  tier: R2
+  test_layer: real_entry
+  required_for_acceptance: true
+  critical_value_source: "agent 实际读取的子命令说明文件路径；agent 实际发出的 CLI 命令序列。"
+  must_cross: "真实 agent 会话 → Skill 加载主文件 → 路由表命中 → 读取子命令说明 → 真实工具调用。"
+  forbidden_bypasses: "不得用提示词直接塞入子命令说明内容来替代加载；不得把轨迹断言替换为『说明文件里写了这句话』；不得只看最终回复文本。"
+  fresh_state_probe: "每类请求在全新隔离 HOME 与全新会话中发起。"
+  final_tree_evidence: "记录最终 git tree、两类请求的完整 agent 轨迹、实际读取的文件路径与实际发出的 CLI 命令。"
+  negative_control: "把路由表中的建 issue 行指向一份不含前置检查的说明。"
+  expected_fail: "第一类轨迹中不再出现四项前置检查的调用，rv-7 失败。"
 
-  - id: rv-8
-    behavior: "子命令说明与真实命令树一致：八份说明里出现的全部 CLI 命令旗标都真实存在；说明中引用的 docs/guides/agent-runner.md 章节标题在该文件中真实存在。"
-    reviewer: human
-    real_entry: "PR evidence comment 展示随包 SKILL.md 与八份子命令说明的全文，并对每份说明给出它声明的前置检查顺序摘要。"
-    expected: "人读后能判断：每份说明的前置检查顺序合理、禁止事项没有被削弱成模糊措辞、路由表八条覆盖了常见的 CLI 操作意图。"
-    mock_boundary: "无 mock；展示真实文件全文与真实守卫结果。"
-    tier: R2
-    test_layer: real_entry
-    required_for_acceptance: true
-    presentation: "PR evidence comment 内嵌 SKILL.md 与八份子命令说明全文的阅读视图，并给出守卫测试 rv-2、rv-4、rv-5 的实际输出；本地可读视图用 open 打开 PR 上的 evidence 目录。判读方式：对着「建 issue」那份说明，确认它要求做的四项前置检查都在，缺一项就会说明白缺了会怎样。"
-    critical_value_source: "八份子命令说明的全文文本。"
-    must_cross: "真实安装产物 / 真实发行包文件 → 守卫校验 → 人读判读。"
-    forbidden_bypasses: "不得用摘要替代全文呈递；不得把路由表呈递成图片而看不到子命令说明正文。"
-    fresh_state_probe: "呈递内容取自最终实现树，不是设计稿。"
-    final_tree_evidence: "记录最终 git tree、呈递的文件全文来源、守卫输出。"
-    negative_control: "把某份子命令说明的禁止事项改写成模糊措辞（如『通常不要直接执行』）。"
-    expected_fail: "人审能看出该措辞没有界定何时例外，rv-8 的判读不成立。"
+- id: rv-8
+  behavior: "子命令说明与真实命令树一致：八份说明里出现的全部 CLI 命令旗标都真实存在；说明中引用的 docs/guides/agent-runner.md 章节标题在该文件中真实存在。"
+  reviewer: human
+  real_entry: "PR evidence comment 展示随包 SKILL.md 与八份子命令说明的全文，并对每份说明给出它声明的前置检查顺序摘要。"
+  expected: "人读后能判断：每份说明的前置检查顺序合理、禁止事项没有被削弱成模糊措辞、路由表八条覆盖了常见的 CLI 操作意图。"
+  mock_boundary: "无 mock；展示真实文件全文与真实守卫结果。"
+  tier: R2
+  test_layer: real_entry
+  required_for_acceptance: true
+  presentation: "PR evidence comment 内嵌 SKILL.md 与八份子命令说明全文的阅读视图，并给出守卫测试 rv-2、rv-4、rv-5 的实际输出；本地可读视图用 open 打开 PR 上的 evidence 目录。判读方式：对着「建 issue」那份说明，确认它要求做的四项前置检查都在，缺一项就会说明白缺了会怎样。"
+  critical_value_source: "八份子命令说明的全文文本。"
+  must_cross: "真实安装产物 / 真实发行包文件 → 守卫校验 → 人读判读。"
+  forbidden_bypasses: "不得用摘要替代全文呈递；不得把路由表呈递成图片而看不到子命令说明正文。"
+  fresh_state_probe: "呈递内容取自最终实现树，不是设计稿。"
+  final_tree_evidence: "记录最终 git tree、呈递的文件全文来源、守卫输出。"
+  negative_control: "把某份子命令说明的禁止事项改写成模糊措辞（如『通常不要直接执行』）。"
+  expected_fail: "人审能看出该措辞没有界定何时例外，rv-8 的判读不成立。"
 
-  - id: rv-9
-    behavior: "安装冲突保护的既有语义未变：干净 HOME 报告安装、同名不同内容报告保留冲突、--force 才覆盖、--dry-run 不落盘。"
-    reviewer: human
-    real_entry: "隔离 HOME 上执行 kc init --dry-run 的干净场景与同名冲突场景各一次，以及一次 --force 场景；在 PR evidence comment 展示三次的完整输出。"
-    expected: "干净 dry-run：报告安装且目录未被创建。冲突 dry-run 与冲突实装：报告保留冲突，用户文件内容逐字未变。--force：覆盖成功。"
-    mock_boundary: "隔离 HOME 与隔离仓库；真实安装编排。"
-    tier: R2
-    test_layer: real_entry
-    required_for_acceptance: true
-    presentation: "PR evidence comment 内展示三次 kc init 的完整终端输出（干净 dry-run / 冲突 / --force），并在 conflict 一栏附目标文件的实际字节内容。判读方式：确认冲突场景下用户文件内容确实未被改写。"
-    critical_value_source: "隔离 HOME 中目标 Skill 目录的实际文件内容与 kc init 的输出。"
-    must_cross: "真实 kc init 入口 → 冲突判定 → 目标目录实际内容。"
-    forbidden_bypasses: "不得用 install_packaged_operator_skill 的直接调用替代 kc init 入口；不得省略 --dry-run 那一档。"
-    fresh_state_probe: "三个场景各自使用全新隔离 HOME。"
-    final_tree_evidence: "记录最终 git tree、三次命令与完整输出、目标目录文件内容。"
-    negative_control: "临时把 preserve-conflict 分支改为默认 overwrite。"
-    expected_fail: "冲突场景不再报告保留冲突、用户文件被覆盖，rv-9 失败。"
+- id: rv-9
+  behavior: "安装冲突保护的既有语义未变：干净 HOME 报告安装、同名不同内容报告保留冲突、--force 才覆盖、--dry-run 不落盘。"
+  reviewer: human
+  real_entry: "隔离 HOME 上执行 kc init --dry-run 的干净场景与同名冲突场景各一次，以及一次 --force 场景；在 PR evidence comment 展示三次的完整输出。"
+  expected: "干净 dry-run：报告安装且目录未被创建。冲突 dry-run 与冲突实装：报告保留冲突，用户文件内容逐字未变。--force：覆盖成功。"
+  mock_boundary: "隔离 HOME 与隔离仓库；真实安装编排。"
+  tier: R2
+  test_layer: real_entry
+  required_for_acceptance: true
+  presentation: "PR evidence comment 内展示三次 kc init 的完整终端输出（干净 dry-run / 冲突 / --force），并在 conflict 一栏附目标文件的实际字节内容。判读方式：确认冲突场景下用户文件内容确实未被改写。"
+  critical_value_source: "隔离 HOME 中目标 Skill 目录的实际文件内容与 kc init 的输出。"
+  must_cross: "真实 kc init 入口 → 冲突判定 → 目标目录实际内容。"
+  forbidden_bypasses: "不得用 install_packaged_operator_skill 的直接调用替代 kc init 入口；不得省略 --dry-run 那一档。"
+  fresh_state_probe: "三个场景各自使用全新隔离 HOME。"
+  final_tree_evidence: "记录最终 git tree、三次命令与完整输出、目标目录文件内容。"
+  negative_control: "临时把 preserve-conflict 分支改为默认 overwrite。"
+  expected_fail: "冲突场景不再报告保留冲突、用户文件被覆盖，rv-9 失败。"
 ```
 
 **rv-7 的降级形态**：若真实 headless agent 会话在当前环境不可用（无可用凭据或无可用 agent CLI），rv-7 必须记为 `REVIEW_INCISION / INCONCLUSIVE`（review incident，不是产品失败），并改用下述替代证据后才可交付：**在隔离 HOME 安装随包 Skill，用真实 agent CLI 会话只做路由验证**——若连这个也不可用，则退回为「加载真实安装产物、断言 Skill 工具清单中存在 `kedacode-operator` 且其 description 含全部触发词」+ 人工按 §9.1 阅读八份说明。降级形态必须写进 evidence report 并在 §9 勾选时注明，不得静默按通过处理。
@@ -560,8 +561,8 @@ oracles:
 
 - Depends on tasks/issues:
   - `tasks/pending/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md`（产品表面改名为 KedaCode / `kc`）
-- Gate type: via-main
-- Sequence: after `P1-REFACTOR-20261007-013512`
+- Gate type: hard
+- Sequence: via-main
 - Notes: **硬前置**。改名 PRD 把产品表面、Skill 目录名（`iar-operator` → `kedacode-operator`）、守卫测试文件名、命令示例提取前缀（`iar …` → `kc …`）一并改完，并把旧名字面量的残留守卫纳入其验收；本 PRD 的全部路径与命令名都建立在那些改动之上，且它的历史摘要集与残留守卫要求目录内容在改名那批里保持可判定的形态。若本 PRD 先落地，改名 PRD 的摘要集立刻失配。因此本 PRD 在其合并之后 rebase 开工，开工前按§7.3 第一条核对两个文件路径。与 `tasks/pending/P1-FEAT-20261006-122336-any-issue-execution.md`（命令名与文档文本）只有软重叠，不构成先后依赖，后落地者 rebase。
 
 ## 9. Acceptance Checklist

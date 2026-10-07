@@ -16,6 +16,8 @@ import pytest
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
     AuditEntry,
+    PrdLifecycleEventRecord,
+    PrdLifecycleRunRecord,
     RunRecord,
 )
 from backend.infrastructure.persistence.console_store import (
@@ -610,6 +612,81 @@ def test_v5_database_migrates_to_v6_and_adds_attempt_preset_columns(
     assert len(attempts) == 1
     assert attempts[0].preset is None
     assert attempts[0].model is None
+
+
+def test_v7_database_migrates_to_v8_and_adds_lifecycle_status_column(
+    tmp_path: Path,
+) -> None:
+    """v7 旧库打开新代码后自动补 prd_lifecycle_events.status 列，旧行回落空串。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+    # 先按当前 schema 写一条带 status 的事件，稍后回退到 v7 形态再迁移验证。
+    store.upsert_lifecycle_run(
+        PrdLifecycleRunRecord(
+            run_id="keda-main#7",
+            repo_id="keda-main",
+            prd_path="tasks/pending/a.md",
+            issue_number=7,
+            trigger="console_start",
+            started_at="2026-09-21T10:00:00+00:00",
+            finished_at=None,
+            outcome=None,
+            history_complete=True,
+        )
+    )
+    store.append_lifecycle_event(
+        PrdLifecycleEventRecord(
+            run_id="keda-main#7",
+            event_key="q",
+            event_type="queued",
+            phase="queued",
+            actor="backlog",
+            occurred_at="2026-09-21T10:00:00+00:00",
+            detail_json="{}",
+            status="queued",
+        )
+    )
+
+    # 把库退回 v7 形态：删掉 v8 追加的 status 列并降回 user_version=7。
+    raw = sqlite3.connect(str(db_path))
+    raw.execute("ALTER TABLE prd_lifecycle_events DROP COLUMN status")
+    raw.execute("PRAGMA user_version = 7")
+    raw.commit()
+    raw.close()
+
+    migrated = SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+        event_columns = {
+            row[1] for row in probe.execute("PRAGMA table_info(prd_lifecycle_events)").fetchall()
+        }
+        assert "status" in event_columns
+    finally:
+        probe.close()
+
+    # 迁移前写入的旧行 status 回落空串（不伪造），读取不报错。
+    legacy_events = migrated.list_lifecycle_events(run_id="keda-main#7")
+    assert len(legacy_events) == 1
+    assert legacy_events[0].status == ""
+
+    # 迁移后写入的新事件把 status 落库并按值读回。
+    migrated.append_lifecycle_event(
+        PrdLifecycleEventRecord(
+            run_id="keda-main#7",
+            event_key="s",
+            event_type="started",
+            phase="executing",
+            actor="runner",
+            occurred_at="2026-09-21T10:01:00+00:00",
+            detail_json="{}",
+            status="started",
+        )
+    )
+    fresh_events = migrated.list_lifecycle_events(run_id="keda-main#7")
+    started = next(event for event in fresh_events if event.event_type == "started")
+    assert started.status == "started"
 
 
 def test_backlog_migration_renames_roadmap_tables_and_keeps_rows(tmp_path: Path) -> None:
