@@ -2,10 +2,10 @@
 
 - GitHub Issue: https://github.com/ZataZhang/keda/issues/234
 
-> ⛔ **交付前置**：`tasks/pending/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md`（产品表面改名为 KedaCode / `kc`）必须先合并落地。
+> ✅ **交付前置**：已满足；`tasks/pending/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md`（产品表面改名为 KedaCode / `kc`）已由 PR #238 合并落地（主线 `23f5abf6`）。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。执行侧已完成；rv-7 按 §7.6 允许降级，Human-Confirmed 四项待确认。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 是给人审的行为与决策层，不含实现机制、文件路径与命令；Part B 是给执行器的实现层。两层都是投影，`§8` 与 `§9` 才是对应事实源。
@@ -18,7 +18,7 @@
 - **路由表按人说的词命名，不按命令树复刻**（FR-2）：路由表里的名字是「建issue / 查 issue / 跑一下 / 看进度 / 卡住了 / 后台跑 / CI / 装环境」，而不是 `kc issue create` 的原样复刻。原样复刻等于没做抽象。
 - **每条子命令先讲前置检查，再讲命令**（FR-3）：子命令说明不重复 CLI 手册（真实命令树由 `kc schema --json` 自省），只写自省说不了的东西：动手前必须先确认什么、写操作前必须征得同意什么、绝对不能做什么、出问题怎么回滚。
 - **「只看一眼」永远不等于「跑起来」**（FR-4）：这条禁令以及退出码表留在常驻部分，不进按需加载的子命令文件。理由很直接——它们是所有子命令共享的底线，按需加载意味着最需要它的那次恰好没有它。
-- **安装完整性从「只比一个文件」升级为「比所有受管文件」**（FR-5）：随包 Skill 的同步判定目前只比对 `SKILL.md` 字节。拆成多文件后，用户改过某份子命令说明时安装器仍会报「已是最新」并把用户的改动留下。这条修掉，比对范围限定在发行包实际管理的文件（主文件 + 子命令说明），用户自己丢进去的额外文件不触发冲突。
+- **安装完整性从「只比一个文件」升级为「比所有受管文件」**（FR-5）：随包 Skill 的同步判定在改动前只比对 `SKILL.md` 字节。拆成多文件后，用户改过某份子命令说明时安装器仍会报「已是最新」并把用户的改动留下。这条修掉，比对范围限定在发行包实际管理的文件（主文件 + 子命令说明），用户自己丢进去的额外文件不触发冲突。
 - **子命令文档同样受命令漂移守卫**（FR-6）：现在这道守卫只扫主文件。子命令说明里的命令示例若不被扫描，CLI 删掉仍在使用的旗标时守卫不会变红，文档会静默腐烂。本次把守卫扩展到全部子命令说明。
 - **Skill 的自我描述覆盖全部子命令关键词**（FR-7）：自动触发只认自我描述，路由表对模型不可见。描述里必须包含全部八条子命令的口语关键词，否则新子命令永远不会被自动选中。
 - **随包安装、冲突保护、安装计划三项既有行为逐字不变**（FR-8）：目录结构变化不改变安装目标、不改变同名冲突默认保留、不改变 `--dry-run` 不落盘。
@@ -29,7 +29,7 @@
 
 ### Problem Statement
 
-KedaCode 随包的 `kedacode-operator` Skill 是 agent 操作 CLI 的唯一随包说明书。它的现状是一个 **115 行、2795 词的单文件**（`src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md`），结构上是「一张 20 行的意图表 + 若干散段」。
+KedaCode 随包的 `kedacode-operator` Skill 是 agent 操作 CLI 的唯一随包说明书。需求提出时的基线是一个 **115 行、2795 词的单文件**（`src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md`），结构上是「一张 20 行的意图表 + 若干散段」。
 
 这份文件已经长成了自己的问题，有三处可核查的事实：
 
@@ -573,8 +573,8 @@ flowchart TD
 
 | Oracle | 你要看什么 | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| rv-8 | 瘦身后的 SKILL.md 与八份子命令说明全文 | 交付时填：`tasks/evidence/P1-FEAT-20261007-013031-iar-operator-skill-subcommand-hub/rv-8-skill-and-references/` 下的全文阅读视图与 `just prd review` 生成的本地页面 | 对着「建 issue」那份，确认它要求做的四项前置检查都在，且每项都写明了不查的具体后果；任一项缺失或其后果被写成空话，即判不通过 |
-| rv-9 | 安装与冲突保护三次真实输出 | 交付时填：`tasks/evidence/P1-FEAT-20261007-013031-iar-operator-skill-subcommand-hub/rv-9-init-conflict.txt` | 「冲突」那一栏：确认用户文件内容确实未被改写；「dry-run」那一栏：确认目录未被创建 |
+| rv-8 | 瘦身后的 SKILL.md 与八份子命令说明全文 | 实际全文阅读视图：`tasks/evidence/P1-FEAT-20261007-013031-iar-operator-skill-subcommand-hub/rv-8-skill-reading-view.md`；[PR 证据评论](https://github.com/ZataZhang/keda/pull/240#issuecomment-6044718286)，用户豁免本地 HTML 呈递 | 对着「建 issue」那份，确认它要求做的四项前置检查都在，且每项都写明了不查的具体后果；任一项缺失或其后果被写成空话，即判不通过 |
+| rv-9 | 安装与冲突保护三次真实输出 | 实际完整输出：同一 evidence 目录内 `rv9-conflict-dry-run.txt`、`rv3-conflict-preserved.txt`、`rv9-force.txt` | 「冲突」那一栏：确认用户文件内容确实未被改写；「dry-run」那一栏：确认目录未被创建 |
 
 呈递物要可直接打开：本地产物给绝对路径 + 一行 `open "<绝对路径>"`。PR 与 CI 给可点URL。
 
@@ -591,26 +591,26 @@ flowchart TD
 
 #### Behavior and compatibility
 
-- [ ] 真实 `kc init` 把随包 Skill 装进隔离 HOME，产物含主文件与 8 份子命令说明且逐字节与发行包一致；`--dry-run` 变体零写入（rv-1）。
-- [ ] 守卫对全部 9 份文件生效：注入一个真实命令树不存在的旗标后必须变红并指名文件（rv-2）。
-- [ ] 安装完整性比对覆盖受管文件：改受管文件后不再报 `up-to-date`，用户自加非受管文件不触发冲突（rv-3）。
-- [ ] `description` 覆盖八条子命令关键词、八行路由表齐全且指向的文件都存在（rv-4）。
-- [ ] 主文件非空行 ≤ 70，退出码表、只读禁令、自省入口仍在其中（rv-5）。
-- [ ] `kc --help` 与 `kc schema --json` 输出与交付前基线逐字一致（rv-6）。
-- [ ] 真实 agent 会话中，agent 读到对应子命令说明且只读请求未变成执行；若 rv-7 降级，按 §7.6 写明的降级形态取证并在证据报告注明（rv-7）。
+- [x] 真实 `kc init` 把随包 Skill 装进隔离 HOME，产物含主文件与 8 份子命令说明且逐字节与发行包一致；`--dry-run` 变体零写入（rv-1）。 — 证据：rv-1；见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] 守卫对全部 9 份文件生效：注入一个真实命令树不存在的旗标后必须变红并指名文件（rv-2）。 — 证据：rv-2；见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] 安装完整性比对覆盖受管文件：改受管文件后不再报 `up-to-date`，用户自加非受管文件不触发冲突（rv-3）。 — 证据：rv-3；见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] `description` 覆盖八条子命令关键词、八行路由表齐全且指向的文件都存在（rv-4）。 — 证据：rv-4；见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] 主文件非空行 ≤ 70，退出码表、只读禁令、自省入口仍在其中（rv-5）。 — 证据：rv-5；见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] `kc --help` 与 `kc schema --json` 输出与交付前基线逐字一致（rv-6）。 — 证据：rv-6；见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] 真实 agent 会话中，agent 读到对应子命令说明且只读请求未变成执行；若 rv-7 降级，按 §7.6 写明的降级形态取证并在证据报告注明（rv-7）。 — 证据：rv-7；见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。 rv-7 为 INCONCLUSIVE，使用真实安装产物/Skill inventory/全文终审降级，未声称行为执行通过。
 
 #### Packaging and documentation
 
-- [ ] 随包安装、冲突默认保留用户文件、`--force` 才覆盖、`--dry-run` 不落盘四项既有行为逐字未变（rv-9）。
-- [ ] `docs/ai-standards/tooling.md` 中「守卫测试不校验命令表内容」这句过期陈述已更正为事实，且 `uv run mkdocs build --strict` 通过。
-- [ ] `docs/guides/agent-runner.md` 说明了 Skill 的主文件 + 子命令说明结构，并说清与该文档的分工。
+- [x] 随包安装、冲突默认保留用户文件、`--force` 才覆盖、`--dry-run` 不落盘四项既有行为逐字未变（rv-9）。 — 证据：rv-9；见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] `docs/ai-standards/tooling.md` 中「守卫测试不校验命令表内容」这句过期陈述已更正为事实，且 `uv run mkdocs build --strict` 通过。 — 见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] `docs/guides/agent-runner.md` 说明了 Skill 的主文件 + 子命令说明结构，并说清与该文档的分工。 — 见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
 
 #### Delivery readiness
 
-- [ ] §8 的硬前置已合并；开工路径核对通过（§7.3 第一条）。
-- [ ] PRD §7.6 指定的自动化 oracle 在最终实现树上通过，证据文件与最终 Git tree 绑定。
-- [ ] 仓库自带门禁通过：`just test`（`CI=true just test all`）与 `just lint`；`tests/test_kedacode_operator_skill.py` 全绿。
-- [ ] PR 正文含本 PRD 归档路径与「合并即接受所列决策与结果」的明确声明；evidence comment 含 §9.1 两行呈递与 verifier 结论。
+- [x] §8 的硬前置已合并；开工路径核对通过（§7.3 第一条）。 — 见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] PRD §7.6 指定的自动化 oracle 在最终实现树上通过，证据文件与最终 Git tree 绑定。 — 见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] 仓库自带门禁通过：`just test`（`CI=true just test all`）与 `just lint`；`tests/test_kedacode_operator_skill.py` 全绿。 — 见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。
+- [x] PR 正文含本 PRD 归档路径与「合并即接受所列决策与结果」的明确声明；evidence comment 含 §9.1 两行呈递与 verifier 结论。 — 见 evidence-report.md 与独立 verifier-report.md（PASS，产品提交 `61249377`）。 PR #240 与评论6044718286；用户授权按代码审查合并并豁免原始工件/HTML呈递，正文明确执行侧接受且不替人工确认。
 
 ## 10. Functional Requirements
 
@@ -660,6 +660,15 @@ flowchart TD
 | D-07 | 以产品改名 PRD 为硬前置（via-main），不设并行 | Human-Confirmed | 改名 PRD 的历史摘要集与残留守卫要求目录内容在改名那批里保持可判定形态；并行改动会使摘要失配，也让本 PRD 的路径与命令名全线错误 |
 | D-08 | 旧命令名残留检查由改名 PRD 拥有，本 PRD 不新增也不放宽 | Proposed | 两个问题正交：改名治的是名字，本 PRD 治的是内容组织；同时维护两份残留守卫会产生「谁负责」的歧义 |
 
+### Final Reconciliation
+
+- Outcome：57 非空行 hub + 八份 references；完整受管文件比较与命令漂移检查交付，CLI 表面不变，默认保护用户文件。
+- Design：不新增加载器；变量不可用时以实际安装 SKILL.md 的父目录定位。Machine Contract 实际支持 v3/v4/v5；确认检查延续既有授权。创建 PRD Issue 的本地回写/默认发布副作用与 CI 原值恢复均按实际 CLI 校正。
+- Dependency：硬前置 PR #238 已于主线 `23f5abf6` 落地；本任务基于该主线实施。
+- Evidence：全量3445 passed / 1 skipped / 173.44s，full lint/reuse/mkdocs通过；最终资源目标测试24 passed；实际init矩阵、非法旗标与安装保护负控通过。独立verifier PASS审查干净产品提交 `612493776dd7e74de5aa583968629b5992b8f529`（tree `ed18aa290429aaeaf7af0d85c942b9ac747aab29`）；报告/归档提交不改产品字节。
+- Deviation：rv-7因隔离Claude未登录为INCONCLUSIVE，按§7.6明示降级；用户允许按代码审查直接合并并豁免原始工件及HTML呈递。没有虚构路由行为或人审通过，没有新增状态机或补充硬门禁。
+- Delivery：PR #240，证据评论 https://github.com/ZataZhang/keda/pull/240#issuecomment-6044718286。执行侧勾选仅覆盖已支持项目，四项Human-Confirmed保持空框；归档只表示执行侧交付完成，等待人工验收。
+
 ## Change Log
 
 ### Change 1 — 创建 Operator Skill 子命令化 PRD
@@ -677,3 +686,11 @@ flowchart TD
 - **After**: §5.1/§5.2 的路径、文件名、环境变量与命令名全部改为 `kedacode-operator` / `tests/test_kedacode_operator_skill.py` / `kc …`；§8 改为 `Depends on` 改名 PRD、`Gate type: via-main`、§1 与 §2 加硬前置横幅；§5.5 明确它是硬前置并说明为何不能并行（摘要集与残留守卫要求目录内容在改名那批里保持可判定形态）；§7.1 新增「与改名 PRD 的守卫分工」，§7.3 新增开工第一条路径核对；新增 D-07、D-08；§11 补入「不新增或修改产品名字面量、不触碰旧名残留治理」。
 - **Reason**: 用户指定改名为前置条件。原「软重叠」的判断低估了耦合深度——改名 PRD 的历史摘要集与残留守卫都以目录内容可判定为前提，两者并行会使摘要失配；且本 PRD 的全部落点都建立在改名后的路径与提取前缀之上，先写等于先写错。
 - **Impact**: 只改表述与依赖声明，不改 §6 实现机制、不改 §7.6 oracle 集合、不改 §10 功能需求的技术内容；新增 2 条决策与 2 条实施指引。
+
+### Change 3 — 完成 hub 与受管文件交付并归档
+
+- **Type**: Delivery
+- **Before**: 单文件流程、仅主文件同步比较，验收未执行。
+- **After**: hub + 八说明、全受管比较与守卫、最终门禁和真实安装/负控完成，独立verifier PASS后归档；横幅为待人工验收。
+- **Reason**: 已交付本PRD范围，避免用户说明改动被误判最新；按明确授权直接合并，保留rv-7降级和人工确认边界。
+- **Impact**: 仅交付记录与PRD路径迁移；未代勾Human-Confirmed，原始CLI输出本地留存、文本报告随PR发布。
