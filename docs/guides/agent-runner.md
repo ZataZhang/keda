@@ -4367,6 +4367,7 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 | worktree 属主变 root | `RUNNER_UID`/`RUNNER_GID` 未对齐宿主 | `id -u` / `id -g` 与 `.env.local` 校对 |
 | `iar container up` 拒绝启动 | 同 repo_id 的本机 daemon 已活 | `iar daemon stop --repo-id <id>` 后重试 |
 | `iar run --dry-run` 在容器内失败 | 挂载仓库未 `iar init` | 进容器：`docker compose exec iar-runner iar init` |
+| 目标仓库缺失 `agent/*` 标签：`iar` 无法识别可执行 Issue、贴不上目标状态标签，典型表现是 `gh issue edit` 报 label 不存在、Issue 卡在无法流转的状态 | 该仓库从未运行过 `iar labels sync`，或仓库初始化时间早于某些后加的标签（例如 `agent/rework-prd`） | 在目标仓库运行 `iar labels sync` 补齐缺失的 `agent/*` 标签（幂等，可重复执行；仓库根需已有有效 `.iar.toml`，否则先 `iar init`） |
 
 ### 架构边界
 
