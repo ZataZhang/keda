@@ -2,9 +2,9 @@
 
 - GitHub Issue: https://github.com/ZataZhang/keda/issues/235
 
-> ⛔ **交付前置**：改名与 operator hub 两份 PRD 经主线合并后开工。§8 是依赖唯一事实源。
+> ✅ **交付前置**：改名 PR #233 与 operator hub PR #240 已主线合并；§8 是依赖唯一事实源。
 >
-> 🚧 **验收状态**：实现与验证中，尚未取得最终独立验收。此横幅投影 §9，那里是唯一事实源。
+> 🧍 **验收状态**：执行侧交付完成，独立 verifier PASS；待人工验收。此横幅投影 §9，那里是唯一事实源。
 >
 > Part A 为人审层，Part B 为执行器层；功能一览投影 §10。
 
@@ -310,8 +310,9 @@ No interactive prototype file changes in this PRD.
 ## 8. Delivery Dependencies
 
 - Depends on tasks/issues:
-  - tasks/pending/P1-FEAT-20261007-013031-iar-operator-skill-subcommand-hub.md
-  - tasks/pending/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md
+  - tasks/archive/P1-FEAT-20261007-013031-iar-operator-skill-subcommand-hub.md
+  - tasks/archive/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md
+- Merged: PR #233 (`e6f647be`) 与 PR #240 (`8f8642d8`) 已核对主线目标路径。
 - Gate type: hard
 - Sequence: via-main
 - Notes: 合并后采用 kc/kedacode-operator；允许修改 Safety、run 和 daemon references，不改变 hub 分层与安装比对。旧归档 PRD 的 daemon 禁止直发是本功能明确取代的行为边界，不修改其历史记录。
@@ -324,9 +325,9 @@ No interactive prototype file changes in this PRD.
 
 | Oracle | 你要看什么 | 呈递物（交付填） | 自己复核 |
 |---|---|---|---|
-| rv-1 | 标签跨执行器直发、其他任务正常 | [真实 Issue/PR URL、截图、拒绝矩阵] | PR 有原直发声明，未标记任务无旁路 |
-| rv-2 | 成功消费和清理恢复不重复发布 | [标签前后、故障时序与唯一 PR 报告] | 创建失败保留；创建后删除失败下一轮只补清理 |
-| rv-3 | 配置与最终决策协议 | [配置/全文与场景审查入口] | daemon 可消费标记，义务与生命周期准确 |
+| rv-1 | 标签跨执行器直发、其他任务正常 | [CLI PR #5](https://github.com/ZataZhang/keda-direct-probe-20261008-054041-410/pull/5)、[daemon PR #6](https://github.com/ZataZhang/keda-direct-probe-20261008-054041-410/pull/6)、[NORMAL PR #7](https://github.com/ZataZhang/keda-direct-probe-20261008-054041-410/pull/7)、[PRD 拒绝 Issue #4](https://github.com/ZataZhang/keda-direct-probe-20261008-054041-410/issues/4)、[报告](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.evidence-report.md) | PR 有原直发声明，未标记任务无旁路 |
+| rv-2 | 成功消费和清理恢复不重复发布 | [故障矩阵](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.evidence-report.md)、[独立复核](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.verifier-report.md) | 创建失败保留；创建后删除失败下一轮只补清理 |
+| rv-3 | 配置与最终决策协议 | [验证计划](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.verification-plan.md)、[配置与全文审查](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.evidence-report.md) | daemon 可消费标记，义务与生命周期准确 |
 
 通用 lint/test/docs 门禁由 verifier 审查，人不逐项阅读日志。
 
@@ -348,39 +349,41 @@ No interactive prototype file changes in this PRD.
 
 ### Architecture Acceptance
 
-- [ ] core 统一 Issue 级档位与准入，复用 PublishStage/GitHub 端口，无逐入口重复规则。
-- [ ] 复用既有认领与 PR 恢复机制，无 label 锁、独立授权状态机或跨机器数据库。
-- [ ] 四层依赖、文件行数与复用规范符合；新增 config 同步加载/示例。
+- [x] core 统一 Issue 级档位与准入，复用 PublishStage/GitHub 端口，无逐入口重复规则。
+- [x] 复用既有认领与 PR 恢复机制，无 label 锁、独立授权状态机或跨机器数据库。
+- [x] 四层依赖、复用与新增模块行数符合；新增 config 同步加载/示例。历史 handlers 999 / publication 953 非空行的兼容例外与风险见报告。
 
 ### Dependency Acceptance
 
-- [ ] 两前置主线合并与目标路径核对，hub 路由/行数/安装机制保持。
+- [x] 两前置主线合并与目标路径核对，hub 路由/行数/安装机制保持。
 
 ### Behavior Acceptance
 
-- [ ] run/batch/daemon 三入口及 Issue 隔离、fresh read、冲突/PRD/不可读拒绝通过（rv-1）。
-- [ ] 真 GitHub 独立执行进程从标记到 PR 与标签消费通过（rv-1）。
-- [ ] 失败保留、成功移除、崩溃/删除失败恢复和历史 PR 不误消费通过（rv-2）。
-- [ ] 认领赢家才执行/消费，已有 PR 不重复建，其他标签保持（rv-2）。
-- [ ] 原 CLI 单目标限制、无标签 NORMAL、原 DIRECT marker/质量声明兼容。
+- [x] run/batch/daemon 三入口及 Issue 隔离、fresh read、冲突/PRD/不可读拒绝通过（rv-1）。
+- [x] 真 GitHub 独立执行进程从标记到 PR 与标签消费通过（rv-1）。
+- [x] 失败保留、成功移除、崩溃/删除失败恢复和历史 PR 不误消费通过（rv-2）。
+- [x] 认领赢家才执行/消费，已有 PR 不重复建，其他标签保持（rv-2）。
+- [x] 原 CLI 单目标限制、无标签 NORMAL、原 DIRECT marker/质量声明兼容。
 
 ### Documentation Acceptance
 
-- [ ] config、guide、Safety/run/daemon references 同步两档判据与生命周期（rv-3）。
-- [ ] 旧 daemon 一概禁止直发的当前文档已修正；历史归档记录保留。
-- [ ] 沿用原导航，新增文档页才同步 mkdocs.yml。
+- [x] config、guide、Safety/run/daemon references 同步两档判据与生命周期（rv-3）。
+- [x] 旧 daemon 一概禁止直发的当前文档已修正；历史归档记录保留。
+- [x] 沿用原导航，新增文档页才同步 mkdocs.yml。
 
 ### Validation Acceptance
 
-- [ ] 相关 CLI/daemon/labels/claim/publication/recovery 集成与合法负控通过。
-- [ ] `CI=true just test all`、`just lint --full`、`just lint --reuse`、`uv run mkdocs build --strict` 通过。
-- [ ] 无凭据 fallback 不替代真实流程；来源、边界、fresh read、最后相关改动后的最终树证据齐全。
+- [x] 相关 CLI/daemon/labels/claim/publication/recovery 集成与合法负控通过。
+- [x] `CI=true just test all`、`just lint --full`、`just lint --reuse`、`uv run mkdocs build --strict` 通过。
+- [x] 无凭据 fallback 不替代真实流程；来源、边界、fresh read、最后相关改动后的最终树证据齐全。
 
 ### Delivery Readiness
 
-- [ ] 独立 verifier PASS，非人工项证据充分，产品/恢复缺口已解决。
-- [ ] §9.1 实际链接/嵌图/打开方式回填，完成回复呈递。
-- [ ] Final Reconciliation 完成，交付归档；人工空框保留并投影 🧍 待人工验收。
+- [x] 独立 verifier PASS，非人工项证据充分，产品/恢复缺口已解决。
+- [x] §9.1 实际链接/嵌图/打开方式回填，完成回复呈递。
+- [x] Final Reconciliation 完成，交付归档；人工空框保留并投影 🧍 待人工验收。
+
+证据：以上执行侧项目由 [验证报告](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.evidence-report.md)、[独立 verifier PASS](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.verifier-report.md) 支持；3578 passed / 1 skipped，全量 lint/reuse/docs 通过。Human-Confirmed 四项保持空框。
 
 ## 10. Functional Requirements
 
@@ -421,11 +424,11 @@ No interactive prototype file changes in this PRD.
 
 ### Final Reconciliation (Archive Only)
 
-- Interpretation: [confirmed / corrected — summary]
-- Public behavior and contracts: [confirmed / corrected — summary]
-- Related PRD status: [confirmed / corrected — summary]
-- Requirements and risks: [confirmed / corrected — summary]
-- Reconciled differences: [none，或正文已修正差异]
+- Interpretation: confirmed — Issue 级 direct-pr label 跨认领端生效；不恢复理由参数、FAST 标签或全局旁路。
+- Public behavior and contracts: confirmed — fresh 准入/依赖、当轮固定档位、确认同次 PR 后消费、仅清理恢复最终 review；原 CLI 和 marker 兼容。
+- Related PRD status: confirmed — 改名与 hub 已主线合并并归档；本 PRD 执行侧完成，四项 Human-Confirmed 待确认。
+- Requirements and risks: confirmed — 评论检查点需可信作者，评论/PR 权威查询失败拒绝；历史 PR、删除假成功及最终 workflow 写失败已覆盖。并发重加标签、手工相同 PR 创建需协调，各认领端须升级重启，recover 需本地干净工作树。
+- Reconciled differences: 最小现有 Issue 评论检查点及严格查询修复已回填正文/影响树/协议；live 混合 daemon 负例曾在认领后中断，最终独立 CLI 实际拒绝补齐，未把中断冒充通过。用户豁免截图呈递，不豁免真实行为取证。
 
 ## Change Log
 
@@ -474,3 +477,10 @@ No interactive prototype file changes in this PRD.
 - Review: 实现已完成，最终门禁、真实探针与独立 verifier 进行中。
 
 Machine-Contract-Version: 5
+
+### 2026-10-08 执行侧交付归档
+
+- Type: delivery
+- After: 产品 d59ff9cc、指纹 405228cd8106a962071adfd3438b3c4182f9f2c240210ac3ac2a808dfafca704；全量 3578 passed / 1 skipped，真实 GitHub CLI/daemon/对照/PRD 拒绝及独立 verifier PASS。
+- Reason: 所有已确认发布/终态/可信检查点/权威 PR 查询缺陷均修复；证据和最终对账完成。
+- Review: 执行侧完成并归档，Human-Confirmed 四项不代勾，待人工验收。
