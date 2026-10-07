@@ -183,12 +183,13 @@ class IProcessRunner(ABC):
                 ``"plain"`` 表示通用命令，按既有路径执行；非 plain 值由
                 执行层经 ``iar.agent_output_protocols`` 注册表解析出中继
                 实现。通用命令（git/gh/验证命令）永远传 ``None``。
-            env_profile: 可选的子进程环境变量档名。``None`` 时子进程继承
-                runner 当前环境（默认行为，逐字段不变）；传
-                :data:`E2E_CHILD_ENV_PROFILE` 时实现端按 child_env 白名单
-                过滤子进程环境（runner 凭据默认不可见），并要求命令以
-                ``capture_output=True`` 且带 ``timeout`` 执行，否则实现端
-                直接报错，不做静默降级。
+            env_profile: 可选的子进程环境变量档名。``None`` 时实现端按
+                denylist 净化档组装子进程环境（剔除 ``SERVER__PORT`` 等
+                会话私有变量，其余透传——不存在「全量继承 os.environ」
+                的语义，见 Issue #230）；传 :data:`E2E_CHILD_ENV_PROFILE`
+                时实现端按 child_env 白名单过滤子进程环境（runner 凭据
+                默认不可见），并要求命令以 ``capture_output=True`` 且带
+                ``timeout`` 执行，否则实现端直接报错，不做静默降级。
             env_allow_extra: 启用 ``env_profile`` 时追加进白名单的变量名
                 （运营者显式声明的例外）；``env_profile`` 为 ``None`` 时无意义。
 
