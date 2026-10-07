@@ -560,8 +560,8 @@ oracles:
 
 - Depends on tasks/issues:
   - `tasks/pending/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md`（产品表面改名为 KedaCode / `kc`）
-- Gate type: via-main
-- Sequence: after `P1-REFACTOR-20261007-013512`
+- Gate type: hard
+- Sequence: via-main
 - Notes: **硬前置**。改名 PRD 把产品表面、Skill 目录名（`iar-operator` → `kedacode-operator`）、守卫测试文件名、命令示例提取前缀（`iar …` → `kc …`）一并改完，并把旧名字面量的残留守卫纳入其验收；本 PRD 的全部路径与命令名都建立在那些改动之上，且它的历史摘要集与残留守卫要求目录内容在改名那批里保持可判定的形态。若本 PRD 先落地，改名 PRD 的摘要集立刻失配。因此本 PRD 在其合并之后 rebase 开工，开工前按§7.3 第一条核对两个文件路径。与 `tasks/pending/P1-FEAT-20261006-122336-any-issue-execution.md`（命令名与文档文本）只有软重叠，不构成先后依赖，后落地者 rebase。
 
 ## 9. Acceptance Checklist
