@@ -25,7 +25,7 @@ import { BacklogList } from "@/components/backlog/backlog-list";
 import { BacklogTimeline } from "@/components/backlog/backlog-timeline";
 import { RepositoryAgentMatrixSheet } from "@/components/agent-runner/repository-agent-matrix-sheet";
 import { cn } from "@/lib/utils";
-import { fetchRegistryRepositories } from "@/lib/api/console";
+import { useRepositorySelection } from "@/lib/console-repository-selection";
 import {
   fetchBacklogAutopilot,
   fetchBacklogCiRepairGlobal,
@@ -73,9 +73,12 @@ export default function BacklogPage() {
   const [prds, setPrds] = useState<BacklogPrd[]>([]);
   const [loading, setLoading] = useState(true);
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [selectedRepoId, setSelectedRepoId] = useState("");
-  const [repositories, setRepositories] = useState<RegistryRepositoryEntry[]>([]);
-  const [reposLoading, setReposLoading] = useState(true);
+  const {
+    repositories,
+    selectedRepoId,
+    selectRepoId,
+    loading: reposLoading,
+  } = useRepositorySelection();
   const [settings, setSettings] = useState<BacklogSettings | null>(null);
   const [view, setView] = useState<BacklogView>("graph");
   const [startingPath, setStartingPath] = useState<string | null>(null);
@@ -124,26 +127,6 @@ export default function BacklogPage() {
     },
     [selectedRepoId, includeArchived],
   );
-
-  useEffect(() => {
-    setReposLoading(true);
-    fetchRegistryRepositories()
-      .then((loadedRepositories) => {
-        setRepositories(loadedRepositories);
-        const enabledRepositories = loadedRepositories.filter((repo) => repo.enabled);
-        if (enabledRepositories.length === 0) {
-          return;
-        }
-        const preferred =
-          enabledRepositories.find((repo) => repo.repo_id === "keda-main") ??
-          enabledRepositories[0];
-        setSelectedRepoId((current) => current || preferred.repo_id);
-      })
-      .catch((error: unknown) => {
-        toast.error(error instanceof Error ? error.message : "加载仓库列表失败。");
-      })
-      .finally(() => setReposLoading(false));
-  }, []);
 
   useEffect(() => {
     if (!selectedRepoId) {
@@ -364,7 +347,7 @@ export default function BacklogPage() {
                   type="button"
                   disabled={!repo.enabled}
                   onClick={() => {
-                    setSelectedRepoId(repo.repo_id);
+                    selectRepoId(repo.repo_id);
                     setSelectedPrd(null);
                   }}
                   className={cn(

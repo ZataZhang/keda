@@ -281,6 +281,20 @@ export type RegistryRepositoryEntry = {
   path_exists: boolean;
 };
 
+/**
+ * console 进程 cwd 与 registry 的匹配结果（`GET /console/context`）。
+ *
+ * `status` 取值：`matched` / `not_git_repo` / `not_registered` / `disabled` /
+ * `ambiguous`。只有 `matched` 时 `repo_id` 才有值。
+ */
+export type ConsoleContext = {
+  cwd: string;
+  git_root: string | null;
+  repo_id: string | null;
+  status: "matched" | "not_git_repo" | "not_registered" | "disabled" | "ambiguous";
+  candidates: string[];
+};
+
 export type DiscoveredRepositoryEntry = {
   repo_id: string;
   path: string;

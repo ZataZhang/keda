@@ -3,7 +3,7 @@
  *
  * 对着一个由 `iar console` 起的本机服务（FastAPI + 内置静态导出产物）
  * 直接访问深层路由，验证静态导出目录形态被 StaticFiles(html=True)
- * 正确解析：刷新 /app/backlog、/app/stats 不 404，根路径落到 Dashboard。
+ * 正确解析：刷新 /app/backlog、/app/stats 不 404，根路径落到 Backlog。
  *
  * Run with (PRD rv-5):
  *   PLAYWRIGHT_SKIP_STACK_BOOT=1 PLAYWRIGHT_STACK_MODE=dev \
@@ -13,12 +13,10 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('iar console 静态托管（真实入口）', () => {
-  test('根路径打开后落到 Dashboard', async ({ page }) => {
+  test('根路径打开后落到 Backlog', async ({ page }) => {
     const response = await page.goto('/')
     expect(response?.status()).toBe(200)
-    await expect(
-      page.getByRole('heading', { name: 'Agent Runner 管理终端' }),
-    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Backlog' })).toBeVisible()
   })
 
   test('直接刷新 /app/backlog 不 404 且渲染标题', async ({ page }) => {

@@ -1907,6 +1907,9 @@ iar run --all --all-ready
 # Daemon 模式（默认每 120 秒轮询一次，仅当前已初始化注册仓库；加 --all 才处理所有 enabled registry entries）
 iar daemon
 
+# 手动驱动一次 backlog 调度（一次 continuous-scheduling pass：reconcile + promote + discover，不用等 daemon 轮询）
+iar backlog advance
+
 # 单次 review 检查
 iar review
 
@@ -3439,14 +3442,39 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 ## Agent Runner 统一管理终端（Operations Console）
 
-管理终端把多项目的 Agent Runner 运维收敛到一个 Web 界面，四个页面：
+管理终端把多项目的 Agent Runner 运维收敛到一个 Web 界面，页面：
 
 | 页面 | 路由 | 能力 |
 |---|---|---|
-| 总览 | `/app/dashboard` | 队列监控（原有）+ 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
+| Backlog | `/app/backlog` | **首屏落点**。左侧受管理仓库栏 + 右侧当前仓库的 PRD 队列（依赖图 / 时间轴 / 列表三视图） |
+| 总览 | `/app/dashboard` | 队列监控 + 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
 | 进程 | `/app/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
 | 统计 | `/app/stats` | 实时完成度（GitHub 口径）+ 历史趋势与最近运行记录（本地 SQLite 口径） |
 | 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
+| 想法 | `/app/ideas` | 跨项目想法采集、AI 总结、PRD 草稿人审 |
+
+### 首屏默认仓库（当前项目）
+
+管理终端是多仓库面板，但在哪个仓库目录敲 `iar console`，打开就应该落在**那个
+仓库**上，而不是 registry 声明顺序最靠前的那个。首屏选仓库的优先级：
+
+1. **console 进程 cwd 匹配到的仓库** —— 后端把 cwd 归一到 git 仓库根，再去
+   registry 匹配；只有唯一命中且启用的条目才算数。在 `~/code/keda` 敲
+   `iar console` 就选中 `keda`，`cd` 到别的仓库再敲就切到那个仓库。
+2. **上次手动选择的仓库**（localStorage `iar.console.lastRepoId`）—— cwd 不在
+   git 仓库内、或所在仓库没登记进 registry 时的记忆兜底。
+3. **registry 里第一个启用的条目** —— 以上都拿不到时的最终兜底。
+
+落在 enabled 列表之外的候选一律忽略：停用或已移出 registry 的仓库不会成为首屏
+默认目标。
+
+后端侧推断在 `backend.core.use_cases.console_context.resolve_console_context`，
+经`GET /api/v1/agent-runner/console/context` 暴露；前端侧三个带仓库选择的页面
+（Backlog / 进程 / 想法）共用 `frontend-public/lib/console-repository-selection.ts`
+的 `useRepositorySelection`，不再各自实现一套优先级。
+
+该端点用 `status` 字段表达落空原因（`not_git_repo` / `not_registered` /
+`disabled` / `ambiguous`），**不返回 4xx** —— cwd 匹配不上是正常状态，不是故障。
 
 ### 启动方式（`iar console`）
 
@@ -3471,6 +3499,8 @@ iar console --no-browser
   再把 `frontend-public/out/` 复制到 `src/backend/api/static/console/`；
   或直接沿用 `just run` / `pnpm --filter frontend-public dev` 的开发双端口。
 - 面板与 API 同源，开发代理仅在 `frontend-public dev` 模式生效。
+- 改后端路由后必须**重启** `iar console` 才生效；`just console-sync` 只替换
+  静态前端产物，不重载后端代码。
 
 ### 信任边界与白名单动作
 

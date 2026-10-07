@@ -12,7 +12,7 @@
 // 草稿只在前端确认后才落入 `tasks/pending/`，从外部 IM 来的消息只
 // 进入原话流；草稿入口由 AI 在 core use case 派生。
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchRegistryRepositories } from "@/lib/api/console";
+import { useRepositorySelection } from "@/lib/console-repository-selection";
 import {
   appendIdea,
   approvePrdDraft,
@@ -41,15 +41,17 @@ import type {
   IdeaInboxMetadata,
   IdeaInboxSnapshot,
   PrdDraftSummary,
-  RegistryRepositoryEntry,
 } from "@/lib/api/types";
 
 const POLL_INTERVAL_MS = 30000;
 
 export default function IdeasPage() {
-  const [repositories, setRepositories] = useState<RegistryRepositoryEntry[]>([]);
   const [metadata, setMetadata] = useState<IdeaInboxMetadata | null>(null);
-  const [selectedRepoId, setSelectedRepoId] = useState<string>("");
+  const {
+    enabledRepositories: enabledRepos,
+    selectedRepoId,
+    selectRepoId,
+  } = useRepositorySelection();
   const [snapshot, setSnapshot] = useState<IdeaInboxSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedIdeaIds, setSelectedIdeaIds] = useState<Set<string>>(new Set());
@@ -62,29 +64,6 @@ export default function IdeasPage() {
   const [refreshingSummary, setRefreshingSummary] = useState(false);
   const [creatingDraft, setCreatingDraft] = useState(false);
   const [approvingPath, setApprovingPath] = useState<string | null>(null);
-
-  const enabledRepos = useMemo(
-    () => repositories.filter((entry) => entry.enabled),
-    [repositories],
-  );
-
-  const loadRepositories = useCallback(async () => {
-    try {
-      const entries = await fetchRegistryRepositories();
-      setRepositories(entries);
-      setSelectedRepoId((current) => {
-        if (current && entries.some((e) => e.repo_id === current && e.enabled)) {
-          return current;
-        }
-        const firstEnabled = entries.find((entry) => entry.enabled);
-        return firstEnabled?.repo_id ?? "";
-      });
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "无法加载仓库 registry。",
-      );
-    }
-  }, []);
 
   const loadMetadata = useCallback(async () => {
     try {
@@ -118,9 +97,8 @@ export default function IdeasPage() {
   }, []);
 
   useEffect(() => {
-    void loadRepositories();
     void loadMetadata();
-  }, [loadRepositories, loadMetadata]);
+  }, [loadMetadata]);
 
   useEffect(() => {
     if (!selectedRepoId) {
@@ -272,7 +250,7 @@ export default function IdeasPage() {
             <DropdownMenuContent align="start">
               <DropdownMenuRadioGroup
                 value={selectedRepoId}
-                onValueChange={setSelectedRepoId}
+                onValueChange={selectRepoId}
               >
                 {enabledRepos.length === 0 && (
                   <DropdownMenuRadioItem value="" disabled>

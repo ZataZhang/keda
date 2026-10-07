@@ -42,12 +42,14 @@ frontend-public/
 │   ├── (marketing)/    # 营销页面：首页、Agent 广场、功能、定价、FAQ
 │   ├── (auth)/          # 登录、注册
 │   ├── (app)/           # 登录后应用页面
+│   │   ├── page.tsx     # 根入口：客户端跳转到 /app/backlog（console 落点）
 │   │   └── app/
-│   │       ├── dashboard/    # 工作区首页
-│   │       ├── agents/       # Agent 列表/新建/详情/编辑
-│   │       ├── chat/         # 会话中心与单会话聊天
-│   │       ├── workflows/    # 工作流列表/编辑器/运行
-│   │       ├── tools/        # 工具列表
+│   │       ├── backlog/      # console 首屏：受管理仓库栏 + 当前仓库 PRD 队列
+│   │       ├── dashboard/    # 多仓混排的队列监控总览
+│   │       ├── processes/    # 托管进程启停与日志
+│   │       ├── repositories/ # 仓库 registry 管理
+│   │       ├── stats/        # 完成度统计
+│   │       ├── ideas/        # 想法采集与 PRD 草稿
 │   │       └── settings/     # 用户设置
 │   ├── layout.tsx       # 根布局
 │   └── globals.css      # 全局样式
@@ -59,12 +61,23 @@ frontend-public/
 │   └── workflow/        # 工作流画布组件
 ├── lib/
 │   ├── api/             # axios 封装与 API 调用
+│   ├── console-repository-selection.ts  # console 首屏默认仓库解析（见下节）
 │   ├── types/           # TypeScript 类型定义
 │   └── utils.ts         # 工具函数
 ├── public/              # 静态资源
 ├── next.config.ts
 └── Dockerfile
 ```
+
+## console 首屏落点
+
+`iar console` 打开根路径 `/` 后跳到 `/app/backlog`。Backlog 页首屏自动选中
+「启动 console 的那个目录对应的仓库」：后端 `GET /api/v1/agent-runner/console/context`
+把进程 cwd 归一到 git 仓库根并匹配 registry，前端再按
+**cwd 匹配 → localStorage 记忆 → registry 首个 enabled** 的顺序取舍。
+Backlog / Processes / Ideas 三个页面共用 `lib/console-repository-selection.ts`
+的 `useRepositorySelection`。完整语义见
+[Agent Runner 指南](../docs/guides/agent-runner.md) 的「首屏默认仓库（当前项目）」。
 
 ## 与后端的集成
 
