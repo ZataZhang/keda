@@ -990,13 +990,14 @@ uv run iar workflow install preview --force
 
 ## 子进程环境净化（child env sanitize）
 
-runner 派发 agent 子进程时**不会**原样继承父环境：派发点（Claude 流式路径、PTY 路径、`plain` / `pi-json-lines` 协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传。
+runner 派发的**所有**子进程都不再原样继承父环境：`SubprocessRunner.run()` 的默认档（agent 内容生成的 plain 路径、git/gh/pytest 等工具命令、验证命令）与 agent 流式派发点（Claude 流式路径、PTY 路径、`plain` / `pi-json-lines` 协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传；`env=None` 不再等于「全量继承 `os.environ`」。console 托管 runner 子进程（`process_supervisor.spawn`）与 `iar container up` 传给 docker compose 的环境（`container_ops._build_compose_env`）同样以净化档为基底，会话私有变量不会沿进程谱系下传。
 
 - 名单（8 个，硬编码于 `src/backend/infrastructure/child_env.py`）：`SERVER__PORT` 与 `CODEBUDDY_SERVICE_PROXY_URL`、`CODEBUDDY_SESSION_ID`、`CODEBUDDY_CONVERSATION_REQUEST_ID`、`CODEBUDDY_ROOT_REQUEST_ID`、`CODEBUDDY_CONVERSATION_MESSAGE_ID`、`CODEBUDDY_PROJECT_DIR`、`CODEBUDDY_CURRENT_MODEL_ID`
-- 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，20 分钟后被 inactivity watchdog 杀掉，见 2026-09-28 Issue #156 事故）
+- 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，最终被 inactivity/timeout watchdog 杀掉，见 2026-09-28 Issue #156 事故）
+- 为什么默认档也要净化：2026-10-07 Issue #229 事故确认，内容生成路径（`iar issue create --from-prompt` 派发的 `codebuddy -p ...`）走 `SubprocessRunner.run()` 且不传环境，当时的默认「全量继承」让 `SERVER__PORT` 原样透传，Issue 正文退化为模板渲染（修复记录：`tasks/` Issue #230）。环境构造收敛到 `run()` 一处后，**新增 denylist 变量无需改动任何调用点**
 - 每剔除一个变量，runner 日志记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值）；若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
-- 因此**从交互式 AI 会话的 shell 里直接启动 `iar run` / `iar review` 是安全的**，无需手工 `env -u SERVER__PORT`
-- git、gh、pytest 等工具命令类子进程与 console 守护子进程不在此净化范围内
+- 因此**从交互式 AI 会话的 shell 里直接启动 `iar run` / `iar review` / `iar issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
+- 白名单档（浏览器 E2E 验证子进程）的 fail-fast 前提校验不因默认档净化而改变：前提不成立时依旧报错，绝不静默回退到任何继承形态
 - 守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 保证新增的 agent 派发点必须接入净化环境
 
 ## 浏览器 E2E 验证命令形态（browser_e2e）

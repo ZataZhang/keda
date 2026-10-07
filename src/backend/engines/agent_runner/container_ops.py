@@ -13,7 +13,8 @@
 - **可注入的 runner**：默认走 :mod:`subprocess`；测试可注入自定义 ``runner``
   callable ``(argv, env, cwd, check) -> CompletedProcess`` 捕获参数，无需真
   起容器。
-- **环境变量合并**：传入 ``env_overrides`` 在系统 ``os.environ`` 之上覆盖，
+- **环境变量合并**：传入 ``env_overrides`` 在 denylist 净化后的系统环境
+  之上覆盖（会话私有变量不透传进容器，见 Issue #230），
   显式 ``RUNNER_UID``/``RUNNER_GID`` 从 ``os.getuid()``/``os.getgid()`` 推导。
 - **失败语义**：默认 ``check=True``，docker compose 失败抛
   :class:`CalledProcessError`，调用方决定如何向上汇报。``dry_run=True`` 时不真
@@ -38,6 +39,7 @@ from backend.core.shared.interfaces.container_runner import (
     IContainerRunnerController,
     RunnerContainerAssets,
 )
+from backend.infrastructure.child_env import build_sanitized_child_env
 
 TEMPLATE_PACKAGE_NAME = "backend.engines.agent_runner.templates"
 RUNNER_CONTAINER_TEMPLATE_NAME = "runner_container"
@@ -204,8 +206,13 @@ def plan_container_up(compose_file: Path, request: ContainerUpRequest) -> Contai
 
 
 def _build_compose_env(env_overrides: dict[str, str]) -> dict[str, str]:
-    """在系统环境之上叠加 ``env_overrides``，得到传给 compose 的最终 env。"""
-    merged_env = os.environ.copy()
+    """在净化后的系统环境之上叠加 ``env_overrides``，得到传给 compose 的最终 env。
+
+    基底用 denylist 净化档而非全量 ``os.environ``：compose 会把宿主环境
+    内插/透传进容器内的 runner，会话私有变量（SERVER__PORT 等）不应
+    沿这条谱系下传（Issue #230）。
+    """
+    merged_env = build_sanitized_child_env()
     merged_env.update(env_overrides)
     return merged_env
 

@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from backend.infrastructure.child_env import build_sanitized_child_env
+
 _logger = logging.getLogger(__name__)
 
 try:
@@ -299,7 +301,10 @@ class PidfileProcessSupervisor:
         log_path = log_directory / f"{kind_value}-{process_id}.log"
 
         # IAR_CONSOLE 标记让子进程把运行记录的 trigger 记为 console_*。
-        child_env = dict(os.environ)
+        # 基底用 denylist 净化档而非全量继承：托管 runner 还会派生 agent
+        # 与工具命令子进程，会话私有变量（SERVER__PORT 等）在这一跳即
+        # 截断，毒不再沿进程谱系下传（Issue #230）。
+        child_env = build_sanitized_child_env()
         child_env["IAR_CONSOLE"] = "1"
         # 托管子进程的 cwd 是目标仓库（见 ``resolve_console_spawn_cwd``），若让它
         # 自行按 cwd 解析配置，会撞上该仓库自己的应用级 ``config.toml``，把机器级

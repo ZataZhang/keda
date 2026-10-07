@@ -265,24 +265,30 @@ class SubprocessRunner:
                 流式协议（当前 ``claude-stream-json``）路由到对应的流式
                 渲染执行器，取代旧版对命令行内容的嗅探；``None`` /
                 ``"plain"`` 走通用路径。
-            env_profile: 子进程环境变量档名。``None``（默认）保持原有的
-                环境继承行为逐字段不变；``E2E_CHILD_ENV_PROFILE`` 时按
-                child_env 白名单构造子进程环境（runner 凭据不可见），
-                并要求 ``capture_output=True`` 且 ``timeout`` 非空、
-                ``output_protocol`` 为 plain——否则白名单+进程树击杀的
-                安全前提不成立，直接报错而非静默降级。
+            env_profile: 子进程环境变量档名。``None``（默认）走 denylist
+                净化档：以 :func:`build_sanitized_child_env` 组装子进程
+                环境——剔除会话私有变量（如 ``SERVER__PORT``），其余变量
+                原样透传；默认档不存在「全量继承 os.environ」的语义
+                （Issue #230：内容生成路径曾因全量继承被会话私有变量中毒）。
+                ``E2E_CHILD_ENV_PROFILE`` 时按 child_env 白名单构造子进程
+                环境（runner 凭据不可见），并要求 ``capture_output=True``
+                且 ``timeout`` 非空、``output_protocol`` 为 plain——否则
+                白名单+进程树击杀的安全前提不成立，直接报错而非静默降级。
             env_allow_extra: E2E 档下追加放行的变量名（配置 ``env_allow``）。
         """
         started_mono: float = time.monotonic()
-        child_env: dict[str, str] | None = None
         if env_profile is not None:
-            child_env = _resolve_profiled_child_env(
+            child_env: dict[str, str] = _resolve_profiled_child_env(
                 env_profile,
                 env_allow_extra,
                 capture_output=capture_output,
                 timeout=timeout,
                 output_protocol=output_protocol,
             )
+        else:
+            # 默认档也净化：env 构造收敛在本方法一处，新增 denylist 变量
+            # 无需改动任何调用点。
+            child_env = build_sanitized_child_env()
         usage_collector: StreamUsageCollector | None = None
         if output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID:
             usage_collector = StreamUsageCollector()
@@ -295,6 +301,7 @@ class SubprocessRunner:
                 label=label,
                 output_sink=output_sink,
                 usage_collector=usage_collector,
+                env=child_env,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -348,6 +355,7 @@ class SubprocessRunner:
                 inactivity_timeout=inactivity_timeout,
                 label=label,
                 output_sink=output_sink,
+                env=child_env,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -355,6 +363,7 @@ class SubprocessRunner:
             process = subprocess.Popen(
                 list(command),
                 cwd=cwd,
+                env=child_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -764,6 +773,7 @@ def run_filtered_claude_stream(
     display_sink: Callable[[str], None] | None = None,
     label: str | None = None,
     usage_collector: StreamUsageCollector | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Claude stream-json and print a filtered live view.
 
@@ -783,6 +793,9 @@ def run_filtered_claude_stream(
         usage_collector: Optional token 用量采集器。提供时，每行原始事件
             在渲染前先交给它观察（原始行只有此处可靠可得；渲染后的
             stdout 重解析会静默丢行）。
+        env: 可选的已净化子进程环境（由 :meth:`SubprocessRunner.run`
+            传入，避免同一环境重复构造）；``None`` 时本函数自行调用
+            :func:`build_sanitized_child_env`，直接调用方无需感知。
 
     Returns:
         CompletedProcess with collected stdout if requested.
@@ -797,7 +810,7 @@ def run_filtered_claude_stream(
     process = subprocess.Popen(
         list(command),
         cwd=cwd,
-        env=build_sanitized_child_env(),
+        env=env if env is not None else build_sanitized_child_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE if capture_stderr else None,
         stdin=subprocess.PIPE,
@@ -908,6 +921,7 @@ def _run_pty_stream(
     inactivity_timeout: int | None,
     label: str | None,
     output_sink: Callable[[str], None] | None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a streaming command under a pseudo-terminal so it line-buffers.
 
@@ -926,6 +940,8 @@ def _run_pty_stream(
         inactivity_timeout: Optional no-output timeout in seconds.
         label: Optional label for heartbeat/timeout logs.
         output_sink: Optional callback for rendered text chunks.
+        env: 可选的已净化子进程环境（由 :meth:`SubprocessRunner.run`
+            传入）；``None`` 时本函数自行调用 :func:`build_sanitized_child_env`。
 
     Returns:
         CompletedProcess with the collected stdout (stderr merged into it).
@@ -940,7 +956,7 @@ def _run_pty_stream(
         process = subprocess.Popen(
             list(command),
             cwd=cwd,
-            env=build_sanitized_child_env(),
+            env=env if env is not None else build_sanitized_child_env(),
             stdin=subprocess.DEVNULL,
             stdout=slave_fd,
             stderr=slave_fd,

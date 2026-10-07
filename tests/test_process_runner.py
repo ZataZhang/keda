@@ -1286,3 +1286,140 @@ def test_run_filtered_claude_stream_without_sanitizer_leaks_poison(
     assert completed.returncode == 0
     child_env_text = probe_file.read_text(encoding="utf-8")
     assert "SERVER__PORT=56469" in child_env_text
+
+
+# ---------------------------------------------------------------------------
+# run() 默认净化与内容生成路径（Issue #230：env=None 不得等于全量继承）
+# ---------------------------------------------------------------------------
+
+
+def _assert_child_env_sanitized(child_env_text: str) -> None:
+    """断言子进程实际环境：名单变量被剔除、透传变量原样在。"""
+    for key in _SANITIZE_DENYLIST_VARS:
+        assert f"{key}=" not in child_env_text, f"denylisted var {key} reached child env"
+    for key, value in _SANITIZE_PASSTHROUGH_VARS.items():
+        assert f"{key}={value}" in child_env_text, f"passthrough var {key} missing"
+
+
+def test_run_without_env_profile_defaults_to_sanitized_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run() 不指定 env_profile 时默认走净化档：致毒变量不得进入子进程环境。"""
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_run_default.txt"
+
+    result = SubprocessRunner().run(
+        ["/bin/sh", "-c", f"env > {probe_file}"],
+        cwd=tmp_path,
+        timeout=60,
+    )
+
+    assert result.return_code == 0
+    _assert_child_env_sanitized(probe_file.read_text(encoding="utf-8"))
+
+
+def test_run_stdin_branch_sanitizes_default_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """input_text 分支（内容生成的 stdin 投递形态）同样必须用净化档。"""
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_run_stdin.txt"
+
+    result = SubprocessRunner().run(
+        ["/bin/sh", "-c", f"cat > /dev/null; env > {probe_file}"],
+        cwd=tmp_path,
+        timeout=60,
+        input_text="prompt-via-stdin",
+    )
+
+    assert result.return_code == 0
+    _assert_child_env_sanitized(probe_file.read_text(encoding="utf-8"))
+
+
+def test_run_non_pty_stream_branch_sanitizes_default_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PTY 不可用时的管道中继兜底分支也不得回退到全量继承。"""
+    from backend.infrastructure import process_runner as process_runner_module
+
+    _inject_sanitize_env(monkeypatch)
+    monkeypatch.setattr(process_runner_module, "_PTY_AVAILABLE", False)
+    probe_file = tmp_path / "probe_env_run_pipe_fallback.txt"
+
+    result = process_runner_module.SubprocessRunner().run(
+        ["/bin/sh", "-c", f"env > {probe_file}"],
+        cwd=tmp_path,
+        capture_output=False,
+        timeout=60,
+    )
+
+    assert result.return_code == 0
+    _assert_child_env_sanitized(probe_file.read_text(encoding="utf-8"))
+
+
+def test_run_without_sanitizer_leaks_poison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """负控：绕过净化（模拟 Issue #230 修复前的默认全量继承）时，探针必须观测到致毒变量。"""
+    from backend.infrastructure import process_runner
+
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_run_unsanitized.txt"
+
+    with patch.object(
+        process_runner,
+        "build_sanitized_child_env",
+        side_effect=lambda: dict(os.environ),
+    ):
+        result = process_runner.SubprocessRunner().run(
+            ["/bin/sh", "-c", f"env > {probe_file}"],
+            cwd=tmp_path,
+            timeout=60,
+        )
+
+    assert result.return_code == 0
+    assert "SERVER__PORT=56469" in probe_file.read_text(encoding="utf-8")
+
+
+def test_content_generator_plain_path_child_env_is_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """真实内容生成入口（Issue #229 事故路径）：generate 启动的子进程环境必须已净化。
+
+    子进程用真实探针脚本打印自身环境，不 mock Popen；agent 注册表注入
+    一个把环境写入 ``$1`` 的 shell 探针，覆盖
+    ``SubprocessContentGenerator.generate`` → ``SubprocessRunner.run``
+    这条 plain 协议投递链。
+    """
+    from backend.core.shared.models.agent_runner import AppConfig
+    from backend.core.shared.models.agent_spec import (
+        AGENT_PROFILE_GENERATE,
+        AgentProfileSpec,
+        AgentSpec,
+    )
+    from backend.engines.agent_runner.factories.content_generators import (
+        SubprocessContentGenerator,
+    )
+
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_content_generator.txt"
+    probe_script = tmp_path / "env_probe.sh"
+    probe_script.write_text('#!/bin/sh\nenv > "$1"\n', encoding="utf-8")
+    probe_script.chmod(0o755)
+    config = AppConfig(
+        agents={
+            "env-probe": AgentSpec(
+                bin=str(probe_script),
+                label="agent/env-probe",
+                label_color="000000",
+                label_description="Test probe that dumps its own environment.",
+                profiles={AGENT_PROFILE_GENERATE: AgentProfileSpec(read_only=True)},
+            )
+        }
+    )
+    generator = SubprocessContentGenerator(SubprocessRunner(), config=config)
+
+    result = generator.generate("env-probe", str(probe_file), cwd=tmp_path, timeout=60)
+
+    assert result.return_code == 0
+    _assert_child_env_sanitized(probe_file.read_text(encoding="utf-8"))

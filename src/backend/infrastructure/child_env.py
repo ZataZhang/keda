@@ -42,11 +42,14 @@ AGENT_CHILD_ENV_DENYLIST: frozenset[str] = frozenset(
 
 
 def build_sanitized_child_env() -> dict[str, str]:
-    """构建 agent 子进程的净化环境。
+    """构建子进程的默认净化环境（透传 + denylist 档）。
 
     从当前进程环境剔除 :data:`AGENT_CHILD_ENV_DENYLIST` 中的会话私有变量，
     其余变量原样透传。每剔除一个变量记录一条 WARNING（只含变量名与值长度
     摘要，不记录完整值，避免泄密）；误剔变量可从该日志立即发现。
+    调用面覆盖 :meth:`SubprocessRunner.run` 的全部子进程（agent 内容与
+    工具命令）、agent 流式派发点、console 托管 runner 与 docker compose
+    基底——环境构造只有这一处事实源，新增名单变量无需改动调用点。
 
     Returns:
         剔除名单变量后的环境副本（新 dict，不修改 ``os.environ``）。
