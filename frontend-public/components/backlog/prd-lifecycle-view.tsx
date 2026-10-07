@@ -573,6 +573,12 @@ function EventDetailRows({
   runId: string | null;
 }) {
   const detailEntries = Object.entries(event.detail ?? {});
+  // 与时间线徽章同一回落规则：status 为空（旧后端响应）或观测事件（none）时
+  // 回落到粗粒度 phase 标签，避免渲染原始枚举（"none"）或空白行。
+  const statusLabelForDrawer =
+    event.status && event.status !== "none"
+      ? eventStatusLabel(event.status)
+      : (PHASE_LABELS[event.phase] ?? event.phase);
   return (
     <dl className="divide-y divide-slate-200 text-sm dark:divide-slate-800">
       {runId ? (
@@ -583,7 +589,7 @@ function EventDetailRows({
       <DetailRow label="事件类型">
         {EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}（{event.event_type}）
       </DetailRow>
-      <DetailRow label="状态">{eventStatusLabel(event.status)}</DetailRow>
+      <DetailRow label="状态">{statusLabelForDrawer}</DetailRow>
       <DetailRow label="阶段">{PHASE_LABELS[event.phase] ?? event.phase}</DetailRow>
       <DetailRow label="执行者">{event.actor}</DetailRow>
       <DetailRow label="发生时间">{formatLocalDateTime(event.occurred_at)}</DetailRow>

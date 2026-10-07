@@ -147,6 +147,15 @@ const MOCK_LIFECYCLE_DETAIL = {
       occurred_at: '2026-09-21T10:20:00+00:00',
       detail: { error_summary: '等待人工输入 Spec 澄清' },
     },
+    {
+      // 观测事件：status=none，前端须回落 phase 渲染，不得显示原始枚举。
+      event_type: 'agent_token_usage',
+      phase: 'none',
+      status: 'none',
+      actor: 'runner',
+      occurred_at: '2026-09-21T10:25:00+00:00',
+      detail: { flow: 'verify', agent: 'codex', input_tokens: 1200, output_tokens: 300 },
+    },
   ],
   has_data: true,
 }
@@ -300,6 +309,23 @@ test.describe('PRD lifecycle observability', () => {
     await screenshot(page, 'rv-1-backlog-lifecycle.png')
     await page.getByTestId('prd-lifecycle-event-sheet-close').click()
     await expect(sheet).not.toBeVisible()
+
+    // 抽屉「状态」行与时间线徽章同源：语义事件显示语义状态标签，
+    // 而非粗粒度 phase「执行中」（回归 #229 的抽屉侧覆盖）。
+    // 抽屉滑入动画 500ms，期间关闭按钮不稳定，用 Escape 关闭并等待完全收起。
+    await page.getByTestId('prd-lifecycle-event-claimed').first().click()
+    const claimedSheet = page.getByTestId('prd-lifecycle-event-sheet')
+    await expect(claimedSheet.locator('dt:text-is("状态") + dd')).toHaveText('已被领取')
+    await page.keyboard.press('Escape')
+    await expect(claimedSheet).not.toBeVisible()
+
+    // 观测事件（status=none）抽屉「状态」行回落 phase 标签，不渲染原始枚举 "none"。
+    await page.getByTestId('prd-lifecycle-event-agent_token_usage').first().click()
+    const usageSheet = page.getByTestId('prd-lifecycle-event-sheet')
+    await expect(usageSheet.locator('dt:text-is("状态") + dd')).toHaveText('未开始')
+    await expect(usageSheet.getByText('none', { exact: true })).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(usageSheet).not.toBeVisible()
 
     await writeEvidence('rv-1-lifecycle-detail.json', MOCK_LIFECYCLE_DETAIL)
   })
