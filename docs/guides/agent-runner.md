@@ -1468,8 +1468,8 @@ iar logs --repo-id keda-main --issue 42 --follow
 - 首次输出给**尾部窗口**（默认最近 64 KiB，再按 `--lines` 截行），不会从头倾泻整份日志；之后按字节偏移增量续读。
 - 默认跟随该 Issue 的**最新尝试**；重试产生新文件时 CLI 会提示并切换。
 - Issue 尚未开始、日志已清理或仓库未注册时，显示明确的空态 / 不可用提示，不会回退到别的 Issue 或进程日志。
-- 单次 `iar run`（串行）与并行 daemon 使用同一归属规则；原启动终端的可读输出不受影响。
-- Agent 流式输出的每个物理行在写入 per-Issue 日志与实时视图时带 `[HH:MM:SS]` 行首时间戳（与终端实时视图一致），可与心跳行的完整日期时间前缀对照时间线；文本增量只在行首加一次时间戳，不会切断同一行；`[iar-attempt-end]` 终态标记保持原样，不加前缀。
+- 单次 `iar run`（串行）与并行 daemon 使用同一归属规则；串行时启动终端收到的就是这条 per-Issue 流的镜像，因此**同样带行首时间戳**——与未经路由时终端实时视图的显示一致（TTY 与重定向都一样），不是「无前缀的原始输出」。
+- Agent 流式输出的每个物理行在写入 per-Issue 日志、实时看板与前台镜像时带 `[HH:MM:SS]` 行首时间戳，可与心跳行的完整日期时间前缀对照时间线。时间戳由**输出路由 sink** 统一添加（`core/use_cases/agent_runner_output_routing.py`）：agent 生产者交给 sink 的始终是可读原文，所以合议的 `workspaces/**/*.md` 等原文产物不会被塞进时间线。文本增量只在行首加一次时间戳，不会切断同一行；`[iar-attempt-end]` 终态标记不经 sink，保持裸行，`--follow` 仍能精确匹配它。
 
 `iar daemon` 本身继续作为启动 daemon 的快捷命令，等效于 `iar daemon run`。例如：
 
@@ -2153,7 +2153,7 @@ iar daemon --concurrency 3
 并行时多个 agent 的输出若都打到同一个终端会交错成乱码，因此 runner 会按 Issue 分流：
 
 - **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。agent 流式输出的每行行首带 `[HH:MM:SS]` 时间戳，与心跳行的时间前缀对得上。
-- **实时看板**（前台 TTY）：在交互终端直接 `iar daemon --concurrency 3` 时，会显示一个仿 `iar deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`iar registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。
+- **实时看板**（前台 TTY）：在交互终端直接 `iar daemon --concurrency 3` 时，会显示一个仿 `iar deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`iar registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。看板与纯文本视图收到的都是路由 sink 那份文本，因此每行顺序是 `[issue #N status=...] [HH:MM:SS] 原文`。
 - **按 Issue 从第二终端 / Console 查看**：`iar logs --repo-id <repo> --issue <N> [--follow]` 或 Console 的 PRD 详情「实时输出」标签，都读取同一份 per-Issue 日志文件；单次 `iar run`（串行）也走同一路径，只是不显示多列看板。
 
 ### 进度落盘与跨 claim 续作（checkpoint）

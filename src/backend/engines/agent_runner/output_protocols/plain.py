@@ -2,9 +2,9 @@
 
 行为等价于历史 ``transcript_runner`` 的
 ``_run_agent_with_stdin_prompt`` / ``_relay_process_stdout``：
-逐行把 stdout 交给 ``output_sink``（行首加 ``[HH:MM:SS]``，与终端实时视图
-一致；或终端 + logger），stderr 在后台线程里泵给 ``display_sink``（仅展示、
-不进 transcript），提示词按需写入 stdin。不做任何结构化渲染。
+逐行把 stdout 原文交给 ``output_sink``（或终端 + logger），stderr 在后台
+线程里泵给 ``display_sink``（仅展示、不进 transcript），提示词按需写入
+stdin。不做任何结构化渲染，也不加行首时间戳——时间戳属于消费侧展示。
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     PLAIN_PROTOCOL_ID,
     OutputRelayRequest,
 )
+from backend.core.shared.interfaces.output_timestamps import format_timestamped_line
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import PROMPT_DELIVERY_STDIN
 from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
-from backend.infrastructure.process_runner import _format_timestamped_line
 
 
 class PlainOutputProtocol:
@@ -89,7 +89,7 @@ def _pump_stderr(
         if display_sink is not None:
             display_sink(line)
         else:
-            print(_format_timestamped_line(line), end="", file=sys.stderr)
+            print(format_timestamped_line(line), end="", file=sys.stderr)
 
 
 def _relay_process_stdout(
@@ -110,12 +110,12 @@ def _relay_process_stdout(
                 if output_sink is not None:
                     # The sink drives the live view and the workspace file;
                     # avoid writing to stdout (would corrupt the live region).
-                    # 行首时间戳与终端实时视图一致，per-Issue 日志里的每行
-                    # agent 输出才有一条可对时的时间线。
-                    output_sink(_format_timestamped_line(line))
+                    # sink 收可读原文：per-Issue 日志的时间戳由路由 sink 加，
+                    # 合议 workspace 文件因此保持可渲染、可复制。
+                    output_sink(line)
                 else:
                     logger.info("%s", line.rstrip("\n"))
-                    timestamped = _format_timestamped_line(line)
+                    timestamped = format_timestamped_line(line)
                     print(timestamped, end="")
         return_code = process.wait(timeout=None)
     except Exception:

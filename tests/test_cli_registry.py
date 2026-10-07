@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from importlib import import_module
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 
@@ -1016,9 +1018,16 @@ def _run_issue_follow(repo_dir: Path, issue_number: int):
 
 
 class _VirtualFollowClock:
-    """只暴露 ``monotonic`` / ``sleep`` 的假时钟：时间随轮询推进，不随宿主速度漂移。"""
+    """假时钟：``monotonic`` / ``sleep`` 让时间随轮询推进，不随宿主速度漂移。
 
-    def __init__(self) -> None:
+    只替换跟随逻辑真正用到的两个函数，其余属性透传给真实 ``time`` 模块——
+    整个模块换成一个只有两个方法的对象，将来这条路径一旦用到 ``time.time()``
+    就会以「假时钟缺属性」这种与业务无关的方式炸掉，报错还指不到真正的原因。
+    """
+
+    def __init__(self, real_time_module: ModuleType) -> None:
+        """用真实 ``time`` 模块做兜底代理，并从零开始累计虚拟时间。"""
+        self._real_time_module = real_time_module
         self._now = 0.0
 
     def monotonic(self) -> float:
@@ -1028,6 +1037,10 @@ class _VirtualFollowClock:
     def sleep(self, seconds: float) -> None:
         """Advance the virtual clock by ``seconds``."""
         self._now += seconds
+
+    def __getattr__(self, name: str) -> object:
+        """未定义的属性（``time`` / ``perf_counter`` 等）交回真实模块。"""
+        return getattr(self._real_time_module, name)
 
 
 def test_logs_command_issue_follow_does_not_exit_on_bare_eof(tmp_path: Path, capsys) -> None:
@@ -1043,7 +1056,7 @@ def test_logs_command_issue_follow_does_not_exit_on_bare_eof(tmp_path: Path, cap
     # 空闲兜底走假时钟：真实 sleep 配几十毫秒的阈值等于测机器速度——testmon /
     # coverage 插桩或整套并发跑时，单次轮询就能超过阈值，"仍在跟随"的提示还没
     # 打印就已经落到兜底退出。时间只按轮询次数推进后，判定与宿主负载无关。
-    follow_clock = _VirtualFollowClock()
+    follow_clock = _VirtualFollowClock(time)
     with (
         patch("backend.api.cli_registry.time", follow_clock),
         patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 1.0),
@@ -1069,7 +1082,7 @@ def test_logs_command_issue_follow_exits_on_attempt_end_marker(tmp_path: Path, c
         f"line-1\n{ATTEMPT_END_MARKER}\n",
     )
 
-    follow_clock = _VirtualFollowClock()
+    follow_clock = _VirtualFollowClock(time)
     with (
         patch("backend.api.cli_registry.time", follow_clock),
         patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 1.0),

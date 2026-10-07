@@ -9,10 +9,12 @@ end-to-end ``run_once`` parallel behavior is tested in
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import sys
 from pathlib import Path
 
+from backend.core.shared.interfaces.issue_log_reader import IssueLogStatus
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import CLAUDE_STREAM_JSON_PROTOCOL_ID
@@ -21,13 +23,31 @@ from backend.core.use_cases.agent_runner_output_routing import (
     issue_output_routing,
     per_issue_log_path,
 )
+from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER, read_issue_log
 from backend.api.agent_runner_views.runner_live_view import (
     PlainRunnerLiveView,
     create_runner_live_view,
 )
 from backend.infrastructure import process_runner as process_runner_module
+from backend.infrastructure.console.issue_log_reader import FilesystemIssueLogReader
 from backend.infrastructure.process_runner import SubprocessRunner
 from tests.conftest import FakeProcessRunner
+
+#: per-Issue 实时输出的行首时间戳（Issue #223）：``[HH:MM:SS] `` + 原文。
+_LINE_TIMESTAMP_PATTERN = re.compile(r"^\[\d{2}:\d{2}:\d{2}\] ")
+
+
+def _timestamped_agent_lines(log_text: str) -> list[str]:
+    """取出日志中带行首时间戳的行并去掉前缀，便于断言原始 agent 文本。
+
+    worker 叙述行经 logging handler 写入，自带完整日期时间而不带该前缀，
+    所以这个筛选只保留 agent 流式输出行——正是 Issue #223 要求可对时的部分。
+    """
+    return [
+        _LINE_TIMESTAMP_PATTERN.sub("", line)
+        for line in log_text.splitlines()
+        if _LINE_TIMESTAMP_PATTERN.match(line)
+    ]
 
 
 class _RecordingView(NoOpRunnerLiveView):
@@ -173,7 +193,7 @@ def test_output_routed_runner_tolerates_partial_fake_signature(tmp_path: Path) -
 
 
 def test_issue_output_routing_writes_file_and_view(tmp_path: Path) -> None:
-    """The sink writes each chunk to the per-Issue file and the live view."""
+    """The sink writes each chunk, line-timestamped, to the Issue file and view."""
     view = _RecordingView()
     with issue_output_routing(
         repo_id="repo", issue_number=7, log_base=tmp_path, output_view=view
@@ -183,14 +203,19 @@ def test_issue_output_routing_writes_file_and_view(tmp_path: Path) -> None:
     log_files = list((tmp_path / "agent-runner" / "issues" / "repo").glob("issue-7-*.log"))
     assert len(log_files) == 1
     assert "agent says hi" in log_files[0].read_text(encoding="utf-8")
-    assert (7, "agent says hi\n") in view.appended
+    assert len(view.appended) == 1
+    issue_number, appended_chunk = view.appended[0]
+    assert issue_number == 7
+    assert _LINE_TIMESTAMP_PATTERN.match(appended_chunk)
+    assert appended_chunk.endswith("agent says hi\n")
 
 
 def test_issue_output_routing_serial_mirror_writes_file_and_console(tmp_path: Path, capsys) -> None:
-    """串行路径的 sink 同时落盘并把可读文本镜像回原终端。
+    """串行路径的 sink 同时落盘，并把同一份带行首时间戳的文本镜像回原终端。
 
     这覆盖「单次 ``iar run`` 之后，第二终端仍能按 Issue 找到输出」的核心
-    机制：文件与原 stdout 必须同时有内容，且互不替代。
+    机制：文件与原 stdout 必须同时有内容、逐行一致且互不替代（Issue #223
+    后前台与 per-Issue 日志共用 sink，因此也共用时间戳）。
     """
     mirrored: list[str] = []
     with issue_output_routing(
@@ -204,8 +229,12 @@ def test_issue_output_routing_serial_mirror_writes_file_and_console(tmp_path: Pa
 
     log_files = list((tmp_path / "agent-runner" / "issues" / "repo").glob("issue-11-*.log"))
     assert len(log_files) == 1
-    assert "agent progress line" in log_files[0].read_text(encoding="utf-8")
-    assert mirrored == ["agent progress line\n"]
+    log_text = log_files[0].read_text(encoding="utf-8")
+    assert "agent progress line" in log_text
+    assert len(mirrored) == 1
+    assert _LINE_TIMESTAMP_PATTERN.match(mirrored[0])
+    # 前台镜像与落盘内容是同一份文本：Console 读到的行与操作者看到的是行的。
+    assert mirrored[0] in log_text
 
 
 def test_issue_output_routing_captures_worker_thread_logs(tmp_path: Path) -> None:
@@ -219,6 +248,58 @@ def test_issue_output_routing_captures_worker_thread_logs(tmp_path: Path) -> Non
 
     log_file = next((tmp_path / "agent-runner" / "issues" / "r").glob("issue-9-*.log"))
     assert "worker-thread-line-xyz" in log_file.read_text(encoding="utf-8")
+
+
+def test_issue_output_routing_end_to_end_log_file_timestamps_agent_lines(
+    tmp_path: Path,
+) -> None:
+    """端到端（Issue #223）：真实 runner → 真实路由 → 磁盘日志 → Console 读取端口。
+
+    其余路由用例直接喂 sink 裸 chunk，绕过了生产者；这条钉住运营者与 Console
+    实际读到的那份产物：agent 流式输出的每个物理行在
+    ``issue-<N>-<ts>.log`` 里行首带 ``[HH:MM:SS]``，而 ``[iar-attempt-end]``
+    终态标记保持裸行——``iar logs --issue --follow`` 靠精确匹配它判断运行
+    结束，被前缀污染就会一路跟到空闲兜底才退出。
+    """
+    repo_root = tmp_path / "repo"
+    log_base = repo_root / "logs"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    child_script = "print('[agent tool] Bash: ls')\nprint('answer line')\n"
+
+    with issue_output_routing(
+        repo_id="fixture-repo",
+        issue_number=42,
+        log_base=log_base,
+        output_view=NoOpRunnerLiveView(),
+    ) as sink:
+        routed_runner = _OutputRoutedProcessRunner(SubprocessRunner(), sink)
+        routed_runner.run(
+            [sys.executable, "-c", child_script],
+            cwd=repo_root,
+            capture_output=False,
+            check=False,
+        )
+
+    log_file = next(log_base.glob("agent-runner/issues/fixture-repo/issue-42-*.log"))
+    log_text = log_file.read_text(encoding="utf-8")
+    assert _timestamped_agent_lines(log_text) == [
+        "[agent tool] Bash: ls",
+        "answer line",
+    ]
+    marker_lines = [line for line in log_text.splitlines() if ATTEMPT_END_MARKER in line]
+    assert marker_lines == [ATTEMPT_END_MARKER]
+
+    # Console / CLI 走的读取端口：读取端不解析前缀，逐字把带时间线的文本交给前端。
+    reader = FilesystemIssueLogReader(
+        lambda repo_id: repo_root if repo_id == "fixture-repo" else None
+    )
+    selection = read_issue_log(reader=reader, repo_id="fixture-repo", issue_number=42)
+    assert selection.status is IssueLogStatus.OK
+    assert _timestamped_agent_lines(selection.content) == [
+        "[agent tool] Bash: ls",
+        "answer line",
+    ]
+    assert ATTEMPT_END_MARKER in selection.content
 
 
 def test_per_issue_log_path_layout(tmp_path: Path) -> None:

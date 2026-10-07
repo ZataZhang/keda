@@ -55,8 +55,8 @@ class OutputRelayRequest:
         label: watchdog / 日志上下文标签。
         collect_stdout: 是否把（渲染后的）stdout 收集进返回值。
         output_sink: 渲染文本块回调（驱动 live 面板 / 工作区文件）；
-            每个物理行行首带 ``[HH:MM:SS]`` 时间戳前缀，与终端实时视图
-            一致（Issue #223）。
+            实现端只交**可读原文**，不加行首时间戳——需要时间线的消费方
+            （如 per-Issue 路由 sink）在自己的边界上加 ``[HH:MM:SS]``。
         display_sink: stderr 展示回调（仅供即时显示，不进 transcript）。
     """
 

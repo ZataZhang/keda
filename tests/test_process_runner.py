@@ -21,9 +21,7 @@ from backend.infrastructure.process_runner import (
     ClaudeStreamRenderer,
     CommandFailedError,
     SubprocessRunner,
-    _format_timestamped_line,
     _terminate_process_tree,
-    _TimestampedStreamFormatter,
     run_filtered_claude_stream,
 )
 
@@ -237,43 +235,6 @@ def test_transcript_runner_builds_codex_command() -> None:
     assert Path(cmd[cmd.index("--cd") + 1]).is_absolute()
 
 
-def test_format_timestamped_line_adds_timestamp_prefix() -> None:
-    """_format_timestamped_line should add [HH:MM:SS] prefix to each line."""
-    result = _format_timestamped_line("test output\n")
-    assert result.startswith("[")
-    assert "] " in result
-    assert "test output" in result
-
-
-def test_format_timestamped_line_handles_leading_newline() -> None:
-    """_format_timestamped_line should handle leading newlines correctly."""
-    result = _format_timestamped_line("\n[agent tool] Read\n")
-    # Should have timestamp on the second line (after the empty line)
-    assert result.startswith("\n[")
-    assert "[agent tool] Read" in result
-
-
-def test_format_timestamped_line_empty_string() -> None:
-    """_format_timestamped_line should handle empty string."""
-    result = _format_timestamped_line("")
-    assert result == ""
-
-
-def test_timestamped_stream_formatter_keeps_chunks_on_same_line() -> None:
-    """Streaming chunks should not receive timestamps inside one physical line."""
-    formatter = _TimestampedStreamFormatter()
-
-    first_line = "".join(
-        formatter.format_chunk(chunk) for chunk in ("{", '"action"', ": true", "\n")
-    )
-    second_line = formatter.format_chunk('"next"')
-
-    assert first_line.count("[") == 1
-    assert first_line.endswith('{"action": true\n')
-    assert second_line.count("[") == 1
-    assert second_line.endswith('"next"')
-
-
 def test_run_filtered_claude_stream_logs_structured_events(tmp_path: Path) -> None:
     """run_filtered_claude_stream should log tool/result/error events."""
     from backend.infrastructure.process_runner import run_filtered_claude_stream
@@ -426,7 +387,7 @@ def test_run_filtered_claude_stream_buffers_text_delta(tmp_path: Path) -> None:
 def test_run_filtered_claude_stream_output_sink_preserves_newlines(
     tmp_path: Path,
 ) -> None:
-    """Rendered Claude newlines reach the sink, prefixed with line timestamps."""
+    """Rendered Claude newlines reach the sink as raw text, unprefixed."""
     from backend.infrastructure.process_runner import run_filtered_claude_stream
 
     text_event = _json_line(
@@ -455,16 +416,16 @@ def test_run_filtered_claude_stream_output_sink_preserves_newlines(
             output_sink=streamed_output_chunks.append,
         )
 
-    assert re.fullmatch(r"\[\d{2}:\d{2}:\d{2}\] hello", streamed_output_chunks[0])
-    assert streamed_output_chunks[1] == "\n"
-    # 收集到的 transcript 保持无时间戳的渲染文本。
+    # 生产者交出的必须是可读原文：行首时间戳属于消费侧（per-Issue 路由 sink），
+    # 否则合议 workspace 文件等原文消费方会被动带上时间线。
+    assert streamed_output_chunks == ["hello", "\n"]
     assert completed_process.stdout == "hello\n"
 
 
-def test_run_filtered_claude_stream_output_sink_timestamps_tool_lines(
+def test_run_filtered_claude_stream_output_sink_keeps_tool_lines_raw(
     tmp_path: Path,
 ) -> None:
-    """Issue #223：sink 中的工具调用行必须带 [HH:MM:SS] 行首时间戳。"""
+    """sink 中的工具调用行必须是渲染原文，不带 ``[HH:MM:SS]`` 前缀。"""
     from backend.infrastructure.process_runner import run_filtered_claude_stream
 
     tool_event = _json_line(
@@ -498,10 +459,7 @@ def test_run_filtered_claude_stream_output_sink_timestamps_tool_lines(
             output_sink=streamed_output_chunks.append,
         )
 
-    assert re.fullmatch(
-        r"\n\[\d{2}:\d{2}:\d{2}\] \[agent tool\] Bash: ls\n",
-        "".join(streamed_output_chunks),
-    )
+    assert "".join(streamed_output_chunks) == "\n[agent tool] Bash: ls\n"
     assert completed_process.stdout == "\n[agent tool] Bash: ls\n"
 
 
@@ -521,10 +479,8 @@ def test_relay_process_stdout_output_sink_preserves_line_boundaries() -> None:
     )
 
     assert stdout_text == "first\nsecond\n"
-    # 每块仍是一整行，只是行首多了一个 [HH:MM:SS] 时间戳。
-    assert [chunk.count("\n") for chunk in streamed_output_chunks] == [1, 1]
-    assert re.fullmatch(r"\[\d{2}:\d{2}:\d{2}\] first\n", streamed_output_chunks[0])
-    assert re.fullmatch(r"\[\d{2}:\d{2}:\d{2}\] second\n", streamed_output_chunks[1])
+    # 每块是一整行原文：行首时间戳由消费侧添加，生产者不得抢先格式化。
+    assert streamed_output_chunks == ["first\n", "second\n"]
 
 
 def test_subprocess_runner_non_claude_path_streams_via_pty(tmp_path: Path) -> None:
@@ -585,8 +541,8 @@ def test_subprocess_runner_pty_routes_output_to_sink(tmp_path: Path) -> None:
     assert any("via-sink" in chunk for chunk in chunks)
 
 
-def test_subprocess_runner_pty_sink_chunks_carry_line_timestamps(tmp_path: Path) -> None:
-    """Issue #223：PTY 路径 sink 的每个物理行首都带 [HH:MM:SS] 时间戳。"""
+def test_subprocess_runner_pty_sink_chunks_are_raw_lines(tmp_path: Path) -> None:
+    """PTY 路径交给 sink 的是原文行，时间戳由消费侧（路由 sink）添加。"""
     import sys
 
     from backend.infrastructure.process_runner import SubprocessRunner
@@ -599,11 +555,13 @@ def test_subprocess_runner_pty_sink_chunks_carry_line_timestamps(tmp_path: Path)
         check=False,
         output_sink=chunks.append,
     )
-    assert re.search(r"\[\d{2}:\d{2}:\d{2}\] timed-line", "".join(chunks))
+    joined = "".join(chunks)
+    assert "timed-line" in joined
+    assert not re.search(r"\[\d{2}:\d{2}:\d{2}\]", joined)
 
 
-def test_pi_relay_events_sink_timestamps_line_starts() -> None:
-    """Issue #223：pi 事件流的 sink 文本行首带时间戳，且不切断行中 delta。"""
+def test_pi_relay_events_sink_delivers_raw_chunks() -> None:
+    """pi 事件流的 sink 收到渲染原文：行中 delta 不被切断，也不加时间戳。"""
     from backend.engines.agent_runner.output_protocols.pi_json_lines import _relay_events
     from backend.infrastructure.agent_stream_usage import StreamUsageCollector
 
@@ -623,11 +581,8 @@ def test_pi_relay_events_sink_timestamps_line_starts() -> None:
         output_sink=streamed_output_chunks.append,
         usage_collector=StreamUsageCollector(),
     )
-    joined = "".join(streamed_output_chunks)
 
-    assert re.search(r"\[\d{2}:\d{2}:\d{2}\] \[agent tool\] Bash\n", joined)
-    # 文本增量碎片只在行首出现一次时间戳，"hello" 不被切断。
-    assert re.sub(r"\[\d{2}:\d{2}:\d{2}\] ", "", joined) == collected
+    assert "".join(streamed_output_chunks) == collected
     assert collected == "\n[agent tool] Bash\nhello\n"
 
 

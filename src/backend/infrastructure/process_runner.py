@@ -12,7 +12,6 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -23,6 +22,10 @@ from backend.core.shared.interfaces.agent_output_protocol import (
 from backend.core.shared.interfaces.agent_runner import (
     AGENT_SESSION_ID_ATTR_NAME,
     E2E_CHILD_ENV_PROFILE,
+)
+from backend.core.shared.interfaces.output_timestamps import (
+    TimestampedStreamFormatter,
+    format_timestamped_line,
 )
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.infrastructure.agent_stream_usage import (
@@ -139,48 +142,6 @@ def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
         process.kill()
     except OSError:  # 子进程已退出。
         pass
-
-
-def _format_timestamped_line(text: str) -> str:
-    """Prefix each line with HH:MM:SS timestamp.
-
-    Args:
-        text: The text to prefix with timestamps.
-
-    Returns:
-        Text with each line prefixed by [HH:MM:SS].
-    """
-    ts = datetime.now().strftime("%H:%M:%S")
-    lines = text.split("\n")
-    result: list[str] = []
-    for idx, line in enumerate(lines):
-        prefix = f"[{ts}] " if line else ""
-        if idx == len(lines) - 1:
-            result.append(f"{prefix}{line}")
-        else:
-            result.append(f"{prefix}{line}\n")
-    return "".join(result)
-
-
-class _TimestampedStreamFormatter:
-    """Prefix non-empty output lines while preserving streaming chunks."""
-
-    def __init__(self) -> None:
-        self._at_line_start = True
-
-    def format_chunk(self, text: str) -> str:
-        """Return ``text`` with timestamps only at physical line starts."""
-        if not text:
-            return ""
-        result: list[str] = []
-        for character in text:
-            if self._at_line_start and character != "\n":
-                result.append(f"[{datetime.now().strftime('%H:%M:%S')}] ")
-                self._at_line_start = False
-            result.append(character)
-            if character == "\n":
-                self._at_line_start = True
-        return "".join(result)
 
 
 @dataclass(frozen=True)
@@ -380,9 +341,9 @@ class SubprocessRunner:
                     for line in process.stdout:
                         watchdog.note_output()
                         if output_sink is not None:
-                            output_sink(_format_timestamped_line(line))
+                            output_sink(line)
                         else:
-                            timestamped = _format_timestamped_line(line)
+                            timestamped = format_timestamped_line(line)
                             print(timestamped, end="", flush=True)
                         logger.info("%s", line.rstrip("\n"))
                         stdout_lines.append(line)
@@ -390,9 +351,9 @@ class SubprocessRunner:
                     for line in process.stderr:
                         watchdog.note_output()
                         if output_sink is not None:
-                            output_sink(_format_timestamped_line(line))
+                            output_sink(line)
                         else:
-                            timestamped = _format_timestamped_line(line)
+                            timestamped = format_timestamped_line(line)
                             print(timestamped, end="", file=sys.stderr, flush=True)
                         logger.warning("%s", line.rstrip("\n"))
                         stderr_lines.append(line)
@@ -775,8 +736,8 @@ def run_filtered_claude_stream(
             stdout/stderr output.
         collect_stdout: Whether to collect rendered output.
         prompt_text: Optional prompt to pass via stdin.
-        output_sink: Optional callback for rendered text chunks; each physical
-            line start is prefixed with ``[HH:MM:SS]`` like the terminal view.
+        output_sink: Optional callback for rendered text chunks (raw readable
+            text; line timestamps are added by the consumers, not here).
         display_sink: Optional callback for stderr lines (display only).
             When provided, stderr is drained on a background thread and
             routed here instead of leaking raw onto the terminal.
@@ -843,7 +804,7 @@ def run_filtered_claude_stream(
         process.stdin.close()
     stdout_lines: list[str] = []
     text_buffer: list[str] = []
-    stream_formatter = _TimestampedStreamFormatter()
+    stream_formatter = TimestampedStreamFormatter()
     try:
         if process.stdout is not None:
             for output_line in process.stdout:
@@ -854,14 +815,14 @@ def run_filtered_claude_stream(
                 if collect_stdout and rendered_text:
                     stdout_lines.append(rendered_text)
                 if rendered_text:
-                    timestamped = stream_formatter.format_chunk(rendered_text)
                     if output_sink is not None:
                         # The sink drives the live view and the workspace file;
                         # skip stdout/logger writes that would corrupt the
-                        # live region. 行首时间戳与终端实时视图保持一致，
-                        # Console 才能对照心跳行核对事件时间线。
-                        output_sink(timestamped)
+                        # live region. sink 只收可读原文，时间戳由消费侧
+                        # （per-Issue 路由 sink）在自己的边界上加。
+                        output_sink(rendered_text)
                         continue
+                    timestamped = stream_formatter.format_chunk(rendered_text)
                     print(timestamped, end="", flush=True)
 
                     # Structured events go straight to logger
@@ -927,8 +888,8 @@ def _run_pty_stream(
         timeout: Optional wall-clock timeout in seconds.
         inactivity_timeout: Optional no-output timeout in seconds.
         label: Optional label for heartbeat/timeout logs.
-        output_sink: Optional callback for rendered text chunks; each physical
-            line start is prefixed with ``[HH:MM:SS]`` like the terminal view.
+        output_sink: Optional callback for rendered text chunks (raw readable
+            text; line timestamps are added by the consumers, not here).
 
     Returns:
         CompletedProcess with the collected stdout (stderr merged into it).
@@ -963,7 +924,7 @@ def _run_pty_stream(
     )
     watchdog.start()
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    stream_formatter = _TimestampedStreamFormatter()
+    stream_formatter = TimestampedStreamFormatter()
     collected: list[str] = []
     line_buffer: list[str] = []
 
@@ -990,9 +951,9 @@ def _run_pty_stream(
             return
         collected.append(text)
         if output_sink is not None:
-            # sink 与终端走同一 formatter：Issue 日志与实时视图里的
-            # 每行事件都带 [HH:MM:SS] 行首时间戳。
-            output_sink(stream_formatter.format_chunk(text))
+            # sink 只收可读原文：时间戳属于消费侧展示，由 per-Issue 路由
+            # sink 在落盘 / 上屏前统一加，合议 workspace 文件因此保持干净。
+            output_sink(text)
             return
         print(stream_formatter.format_chunk(text), end="", flush=True)
         line_buffer.append(text)

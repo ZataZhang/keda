@@ -19,15 +19,12 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     PI_JSON_LINES_PROTOCOL_ID,
     OutputRelayRequest,
 )
+from backend.core.shared.interfaces.output_timestamps import format_timestamped_line
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import PROMPT_DELIVERY_STDIN
 from backend.infrastructure.agent_stream_usage import StreamUsageCollector
 from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
-from backend.infrastructure.process_runner import (
-    _TimestampedStreamFormatter,
-    _format_timestamped_line,
-)
 
 
 class PiJsonLinesOutputProtocol:
@@ -125,9 +122,6 @@ def _relay_events(
 ) -> str:
     """逐行读取事件流，渲染后交给 sink；返回收集的渲染文本。"""
     rendered_parts: list[str] = []
-    # 有状态的行首 formatter：text delta 以碎片到达，只在物理行首加
-    # [HH:MM:SS]，不切断同一行中间；sink（Issue 日志/实时视图）与终端一致。
-    stream_formatter = _TimestampedStreamFormatter()
     try:
         if process.stdout is not None:
             for line in process.stdout:
@@ -136,12 +130,13 @@ def _relay_events(
                 rendered_text = _render_line(line)
                 if rendered_text:
                     rendered_parts.append(rendered_text)
-                    timestamped = stream_formatter.format_chunk(rendered_text)
                     if output_sink is not None:
-                        output_sink(timestamped)
+                        # sink 收可读原文：行首时间戳属于消费侧（per-Issue
+                        # 路由 sink）的展示，不在生产者这里加。
+                        output_sink(rendered_text)
                     else:
                         logger.info("%s", rendered_text.strip())
-                        print(timestamped, end="", flush=True)
+                        print(format_timestamped_line(rendered_text), end="", flush=True)
         process.wait(timeout=None)
     except Exception:
         process.kill()
@@ -174,7 +169,7 @@ def _pump_stderr(
         if display_sink is not None:
             display_sink(line)
         else:
-            print(_format_timestamped_line(line), end="", file=sys.stderr)
+            print(format_timestamped_line(line), end="", file=sys.stderr)
 
 
 __all__ = ["PiJsonLinesOutputProtocol"]
