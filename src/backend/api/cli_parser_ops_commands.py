@@ -45,7 +45,7 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     container_parser = subparsers.add_parser(
         "container",
-        help="Manage the iar runner container (auth import, up, down, logs).",
+        help="Manage the KedaCode runner container (auth import, up, down, logs).",
     )
     container_subparsers = container_parser.add_subparsers(dest="container_command", required=True)
 
@@ -60,14 +60,14 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
         "import",
         help=(
             "Snapshot the host's claude / codex / kimi CLI auth + skills into "
-            "~/.iar/container-auth/ for the runner container to mount."
+            "~/.kedacode/container-auth/ for the runner container to mount."
         ),
     )
     container_auth_import_parser.set_defaults(command="container auth import")
 
     container_up_parser = container_subparsers.add_parser(
         "up",
-        help="Start the iar runner container for the target repository.",
+        help="Start the KedaCode runner container for the target repository.",
     )
     container_up_parser.set_defaults(command="container up")
     container_up_parser.add_argument(
@@ -80,7 +80,7 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help=(
             "Repository registry id. When set, refuses to start if a host "
-            "iar daemon is already serving this repo."
+            "kc daemon is already serving this repo."
         ),
     )
     container_up_parser.add_argument(
@@ -101,7 +101,7 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     container_down_parser = container_subparsers.add_parser(
         "down",
-        help="Stop and remove the iar runner container.",
+        help="Stop and remove the KedaCode runner container.",
     )
     container_down_parser.set_defaults(command="container down")
     container_down_parser.add_argument(
@@ -112,7 +112,7 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     container_logs_parser = container_subparsers.add_parser(
         "logs",
-        help="Stream the iar runner container's logs to the terminal.",
+        help="Stream the KedaCode runner container's logs to the terminal.",
     )
     container_logs_parser.set_defaults(command="container logs")
     container_logs_parser.add_argument(
@@ -139,7 +139,7 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
     takeover_parser.add_argument(
         "--clone-root",
         default=None,
-        help="Directory where repositories will be cloned (default: ~/.iar/repos).",
+        help="Directory where repositories will be cloned (default: ~/.kedacode/repos).",
     )
     takeover_parser.add_argument(
         "--repos",
@@ -259,14 +259,14 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     loop_daemon_parser = subparsers.add_parser(
         "loop-daemon",
-        help="Run the loop scheduler continuously (polls ~/.iar/loop-state.json).",
+        help="Run the loop scheduler continuously (polls ~/.kedacode/loop-state.json).",
     )
     loop_daemon_parser.set_defaults(command="loop-daemon")
     loop_daemon_parser.add_argument(
         "--interval",
         type=int,
         default=None,
-        help="Seconds between polling passes (default: 60 or $IAR_LOOP_DAEMON_INTERVAL).",
+        help="Seconds between polling passes (default: 60 or $KEDACODE_LOOP_DAEMON_INTERVAL).",
     )
     loop_daemon_parser.add_argument(
         "--dry-run",
@@ -306,18 +306,18 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     config_parser = subparsers.add_parser(
         "config",
-        help="Maintain the repository-local .iar.toml.",
+        help="Maintain local state: move ~/.iar, rename .iar.toml.",  # legacy-alias
     )
     config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
 
     config_migrate_parser = config_subparsers.add_parser(
         "migrate",
-        help="Remove generated_content values an older `iar init` pinned into .iar.toml.",
+        help="Move ~/.iar to ~/.kedacode, rename .iar.toml, drop pinned values.",  # legacy-alias
     )
     config_migrate_parser.set_defaults(command="config migrate")
     config_migrate_parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be removed (with a diff) without writing anything.",
+        help="Show the whole plan (state directory, rename, diff) without writing anything.",
     )
     add_common_options(config_migrate_parser)

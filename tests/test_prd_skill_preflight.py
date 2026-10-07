@@ -58,11 +58,11 @@ def test_skill_preflight_version_marker_parsing() -> None:
 def test_skill_preflight_fails_fast_when_skill_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """skill 不可解析 → fail fast，报错含 iar init 修复指引。"""
+    """skill 不可解析 → fail fast，报错含 kc init 修复指引。"""
     missing_path = tmp_path / "missing" / "SKILL.md"
     monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(missing_path))
 
-    with pytest.raises(PrdSkillPreflightError, match="iar init"):
+    with pytest.raises(PrdSkillPreflightError, match="kc init"):
         ensure_prd_machine_contract_available()
 
 
@@ -98,7 +98,7 @@ def test_skill_preflight_fails_fast_without_version_marker(
     unversioned_skill = _skill_fixture(tmp_path, "# prd\n\nno contract section\n")
     monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(unversioned_skill))
 
-    with pytest.raises(PrdSkillPreflightError, match="iar init"):
+    with pytest.raises(PrdSkillPreflightError, match="kc init"):
         ensure_prd_machine_contract_available()
 
 
@@ -166,5 +166,5 @@ def test_skill_preflight_via_run_preflight_checks(
         }
     )
 
-    with pytest.raises(PrdSkillPreflightError, match="iar init"):
+    with pytest.raises(PrdSkillPreflightError, match="kc init"):
         run_preflight_checks(tmp_path, AppConfig(), fake_runner)

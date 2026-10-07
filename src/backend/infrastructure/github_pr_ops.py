@@ -55,7 +55,7 @@ def create_draft_pr(
     cwd: Path,
 ) -> str:
     """Create a draft pull request from the current branch."""
-    with tempfile.TemporaryDirectory(prefix="iar-pr-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="kc-pr-") as temp_dir:
         body_path = client._write_body_file(temp_dir, "pr.md", body)
         result = client._run_with_retry(
             [
@@ -120,7 +120,7 @@ def get_pull_request_context(client: _ClientProtocol, branch: str) -> PullReques
 
 def comment_pr(client: _ClientProtocol, pr_number: int, body: str) -> None:
     """Post a Markdown comment to a Pull Request."""
-    with tempfile.TemporaryDirectory(prefix="iar-pr-comment-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="kc-pr-comment-") as temp_dir:
         comment_path = client._write_body_file(temp_dir, "comment.md", body)
         client._run_with_retry(
             [
@@ -137,7 +137,7 @@ def comment_pr(client: _ClientProtocol, pr_number: int, body: str) -> None:
 
 def update_pull_request_body(client: _ClientProtocol, pr_number: int, body: str) -> None:
     """Replace the description body of a Pull Request."""
-    with tempfile.TemporaryDirectory(prefix="iar-pr-body-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="kc-pr-body-") as temp_dir:
         body_path = client._write_body_file(temp_dir, "body.md", body)
         client._run_with_retry(
             [

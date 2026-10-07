@@ -1,4 +1,4 @@
-"""``iar loop *`` / ``iar loop-daemon`` handlers.
+"""``kc loop *`` / ``kc loop-daemon`` handlers.
 
 The actual command bodies live in :mod:`backend.api.cli_loop`; this
 module just routes the parsed ``argparse.Namespace`` through the
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def run_loop_command(ctx: ParsedCommandContext) -> int:
-    """``iar loop {create|list|cancel|run|daemon}`` dispatcher."""
+    """``kc loop {create|list|cancel|run|daemon}`` dispatcher."""
     from backend.api.cli import _run_loop_command  # local import to break cycle
 
     return _run_loop_command(ctx.parsed, ctx.process_runner)

@@ -52,16 +52,16 @@ PROMPT_DELIVERIES: tuple[str, ...] = (
 )
 
 AGENT_PROFILE_RUN = "run"
-"""主执行用途（Issue 的实现/修复，``iar run`` 路径）。"""
+"""主执行用途（Issue 的实现/修复，``kc run`` 路径）。"""
 
 AGENT_PROFILE_DELIBERATE = "deliberate"
-"""多方辩论用途（``iar deliberate`` / transcript runner 路径）。"""
+"""多方辩论用途（``kc deliberate`` / transcript runner 路径）。"""
 
 AGENT_PROFILE_GENERATE = "generate"
 """内容生成用途（Issue 正文 / PR 描述 / 决策 planner 等只读调用）。"""
 
 AGENT_PROFILE_REPL = "repl"
-"""REPL 用途（``iar repl``，允许在用户确认模型内写文件）。"""
+"""REPL 用途（``kc repl``，允许在用户确认模型内写文件）。"""
 
 AGENT_PROFILES: tuple[str, ...] = (
     AGENT_PROFILE_RUN,
@@ -90,7 +90,7 @@ class AgentProfileSpec:
             "对展开器返回的每个值各追加一次 ``<flag> <value>``
             （如 codex 的 ``git_writable_roots:--add-dir``）。
         read_only: 该用途是否为可验证的只读调用。只读决策入口
-            （planner / ``iar ask``）以此字段做 fail-fast 门禁。
+            （planner / ``kc ask``）以此字段做 fail-fast 门禁。
     """
 
     args: tuple[str, ...] = ()
@@ -148,7 +148,7 @@ class AgentSpec:
 
         ``auth_home`` 去掉 ``~`` 前缀后锚定到 ``user_home_path``，再拼接
         ``skills`` 子目录（与 ``auth_include`` 白名单里的 ``skills`` 条目
-        一致）。安装器（``iar init``）与读取器（prd skill 解析）都必须
+        一致）。安装器（``kc init``）与读取器（prd skill 解析）都必须
         经由此方法取目录，禁止各自写死路径。
 
         Args:
@@ -166,7 +166,7 @@ class AgentSpec:
 
 
 # ---------------------------------------------------------------------------
-# 内置默认（唯一来源；config.toml / .iar.toml 的 [agent_runner.agents.*] 覆盖它）
+# 内置默认（唯一来源；config.toml / .kedacode.toml 的 [agent_runner.agents.*] 覆盖它）
 # ---------------------------------------------------------------------------
 
 # 注意 dict 顺序即注册顺序：choose_agent 按标签匹配时先到先得，
@@ -542,7 +542,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
     # ``--format default``（逐行文本）即 plain；``--format json`` 是另一套事件
     # 形状，本项目没有对应协议，故不启用。**不声明 generate**：它没有任何
     # 沙箱 / 只读开关，声明 read_only 会是无法验证的假声明，只读决策入口
-    # （planner / iar ask）需要该字段做门禁，故宁可缺用途也不做假声明。
+    # （planner / kc ask）需要该字段做门禁，故宁可缺用途也不做假声明。
     # 配置在 ~/.config/opencode/（XDG 路径，容器认证导入会派生为 config/opencode）。
     "opencode": AgentSpec(
         bin="opencode",

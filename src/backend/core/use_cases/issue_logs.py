@@ -1,6 +1,6 @@
 """按 Issue 读取 Agent 输出日志的统一选择规则。
 
-CLI（``iar logs --issue``）与 Console API
+CLI（``kc logs --issue``）与 Console API
 （``GET .../issues/{issue_number}/logs``）共享同一套语义，本模块是唯一
 事实源：
 
@@ -29,7 +29,7 @@ from backend.core.shared.interfaces.issue_log_reader import (
 DEFAULT_TAIL_BYTES = 64 * 1024
 
 #: 尝试终态标记：sink 在每次尝试收尾时把它追加到 per-Issue 日志末尾。
-#: ``iar logs --issue --follow`` 以此为「运行结束」的唯一依据——裸 EOF 只表示
+#: ``kc logs --issue --follow`` 以此为「运行结束」的唯一依据——裸 EOF 只表示
 #: 这一刻没有新字节（Agent 两次写入之间、重试间隔里都会出现），把 EOF 当成结束
 #: 会提前退出并丢掉后续输出。
 ATTEMPT_END_MARKER = "[iar-attempt-end]"

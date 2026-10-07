@@ -120,12 +120,12 @@ export default function SettingsPage() {
       </section>
 
       <div className="rounded-2xl border bg-muted/30 p-6">
-        <h2 className="mb-2 text-lg font-semibold">关于 iar 管理终端</h2>
+        <h2 className="mb-2 text-lg font-semibold">关于 KedaCode 管理终端</h2>
         <p className="text-sm text-muted-foreground">
-          这是 iar 内置的 Agent Runner 管理终端（本机单用户模式，仅监听
+          这是 KedaCode 内置的 Agent Runner 管理终端（本机单用户模式，仅监听
           127.0.0.1）。仓库队列、托管进程与 backlog 数据均来自本机后端
-          API；runner 的行为由各仓库的 config.toml 与 .iar.toml 决定。
-          退出后可通过命令行重新执行 <code>iar console</code> 打开。
+          API；runner 的行为由各仓库的 config.toml 与 .kedacode.toml 决定。
+          退出后可通过命令行重新执行 <code>kc console</code> 打开。
         </p>
       </div>
       <Button variant="destructive" onClick={handleLogout}>

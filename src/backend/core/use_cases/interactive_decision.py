@@ -1,4 +1,4 @@
-"""Interactive decision use case for `iar ask`.
+"""Interactive decision use case for `kc ask`.
 
 Orchestrates context collection, planner call, strict JSON parsing,
 whitelist validation, audit writing and allowed action dispatch.
@@ -949,7 +949,7 @@ def run_interactive_decision(
     if plan_only or not execute:
         print("\nNo changes were made.")
         print("\nTo execute in this terminal:")
-        print(f'  uv run iar ask "{user_prompt}" --execute')
+        print(f'  uv run kc ask "{user_prompt}" --execute')
         return 0
 
     # 6. Execute

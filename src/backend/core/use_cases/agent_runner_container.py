@@ -1,4 +1,4 @@
-"""容器命令 core facade —— ``iar container`` 子命令的用例边界。
+"""容器命令 core facade —— ``kc container`` 子命令的用例边界。
 
 本模块是容器化 runner 编排的 core 层入口。它**不**直接 import ``engines`` 或
 ``infrastructure``（受架构守门约束），而是通过
@@ -10,12 +10,12 @@
 ``container_auth`` / ``container_ops`` 仍保持原位）。
 
 同时，启动容器前复用 :mod:`backend.core.use_cases.daemon_single_instance` 的锁
-判断语义，确保本机 ``iar daemon`` 与 ``iar container up`` 不会抢同一仓库（rv-7）。
+判断语义，确保本机 ``kc daemon`` 与 ``kc container up`` 不会抢同一仓库（rv-7）。
 
 核心契约：
 
 - ``import_container_auth(importer, global_iar_dir=None)`` —— 一次性把本机认证
-  快照写入 ``~/.iar/container-auth/``。
+  快照写入 ``<本机状态目录>/container-auth/``。
 - ``start_runner_container(controller, options, *, runner=None)`` —— 编排：定位
   资产 → daemon lock 互斥 → 注入环境变量 → 调 docker compose up。
 - ``stop_runner_container(controller, compose_file, *, runner=None)`` —— 调 docker
@@ -35,6 +35,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from backend.core.shared.models import product_identity
 from backend.core.shared.interfaces.container_runner import (
     ContainerCommandPlan,
     ContainerUpRequest,
@@ -50,6 +51,9 @@ from backend.core.use_cases.daemon_single_instance import (
 
 _logger = logging.getLogger(__name__)
 
+_PROCESS_REGISTRY_FILENAME = "processes.json"
+"""状态目录下的托管进程登记表文件名。"""
+
 
 @dataclass(frozen=True)
 class StartRunnerContainerOptions:
@@ -59,8 +63,8 @@ class StartRunnerContainerOptions:
         repo_path: 目标仓库绝对路径，将挂载为容器 ``/workspace/repo``。
         repo_id: 仓库 registry id；非空时启用与本机 daemon lock 的互斥检查。
         gh_token: GitHub Token；容器内 gh 用此认证。
-        process_registry_path: iar console 的 process_registry_path（默认
-            ``~/.iar/processes.json``），daemon lock 目录由此推导。
+        process_registry_path: 管理终端的 process_registry_path（默认落在
+            本机状态目录下的 ``processes.json``），daemon lock 目录由此推导。
         uid: 容器内进程 UID；``None`` 时回退到 ``os.getuid()``。
         gid: 容器内进程 GID；``None`` 时回退到 ``os.getgid()``。
         extra_env: 其它要注入 compose 的环境变量（合并而非覆盖）。
@@ -71,7 +75,9 @@ class StartRunnerContainerOptions:
     repo_path: Path
     repo_id: str = ""
     gh_token: str = ""
-    process_registry_path: str = "~/.iar/processes.json"
+    process_registry_path: str = field(
+        default_factory=lambda: str(product_identity.state_home() / _PROCESS_REGISTRY_FILENAME)
+    )
     uid: int | None = None
     gid: int | None = None
     extra_env: dict[str, str] = field(default_factory=dict)

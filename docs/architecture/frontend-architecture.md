@@ -6,7 +6,7 @@
 
 | 前端 | 目录 | 技术栈 | 场景 |
 |---|---|---|---|
-| 管理终端 | `frontend-public/`（详见其目录下 README） | Next.js 16 App Router + React 19 + Tailwind v4 + shadcn/ui | Agent Runner 管理终端（静态导出产物随 wheel 分发，`iar console` 托管） |
+| 管理终端 | `frontend-public/`（详见其目录下 README） | Next.js 16 App Router + React 19 + Tailwind v4 + shadcn/ui | Agent Runner 管理终端（静态导出产物随 wheel 分发，`kc console` 托管） |
 | 管理平台 | `frontend-admin/`（详见其目录下 README） | Vite + React 19 + TanStack Router + Zustand + shadcn/admin | admin 域登录与后台管理骨架 |
 
 两个前端互不依赖，与后端仅通过 `/api/*` HTTP 接口通信。包管理器为 pnpm，仓根 `pnpm-workspace.yaml` 声明两个 workspace，**lockfile 与 `node_modules` 统一由仓根管理**：锁文件只有 `pnpm-lock.yaml` 一份，依赖装到仓根 `.pnpm` 虚拟 store，子目录只保留指过去的软链。

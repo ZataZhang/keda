@@ -338,7 +338,7 @@ _FAST_MERGE_MARKER_PATTERN = re.compile(r"<!--\s*iar:fast-merge\s+issued=(?P<iss
 def format_fast_merge_marker(issue_number: int) -> str:
     """Format the ``iar:fast-merge`` hidden self-declaration marker.
 
-    经快速通道（``iar run --fast-merge``）发布的 PR 用它机器可读地声明
+    经快速通道（``kc run --fast-merge``）发布的 PR 用它机器可读地声明
     "本 PR 未过验证门禁"；``issued`` 记录目标 Issue 编号，便于审计与
     负例判定（普通 PR 不含该 marker）。
 
@@ -370,7 +370,7 @@ _DIRECT_PR_MARKER_PATTERN = re.compile(r"<!--\s*iar:direct-pr\s+issued=(?P<issue
 def format_direct_pr_marker(issue_number: int) -> str:
     """Format the ``iar:direct-pr`` hidden self-declaration marker.
 
-    经直发档（``iar run --direct-pr``）发布的 PR 用它机器可读地声明「本 PR 未经
+    经直发档（``kc run --direct-pr``）发布的 PR 用它机器可读地声明「本 PR 未经
     任何 runner 侧门禁」；与 ``iar:fast-merge`` 同族但**值不同**，两个档位因此可
     被下游区分（fast 仍跑 reviewer 与仓库验证，direct 连它们一起跳过）。
 

@@ -2,21 +2,21 @@
 
 Holds the runner-side commands:
 
-- :func:`run_command` (top-level ``iar run``)
-- :func:`logs_command` (top-level ``iar logs``) — placed between
-  ``run_command`` and ``review_command`` so the historical ``iar --help``
+- :func:`run_command` (top-level ``kc run``)
+- :func:`logs_command` (top-level ``kc logs``) — placed between
+  ``run_command`` and ``review_command`` so the historical ``kc --help``
   command order is preserved.
-- :func:`review_command` (top-level ``iar review``)
-- :func:`review_daemon_command` (top-level ``iar review-daemon``)
-- ``daemon_callback`` (default for ``iar daemon`` without subcommand)
+- :func:`review_command` (top-level ``kc review``)
+- :func:`review_daemon_command` (top-level ``kc review-daemon``)
+- ``daemon_callback`` (default for ``kc daemon`` without subcommand)
 - :func:`daemon_run_command` and :func:`daemon_status_command` (under
-  ``iar daemon``)
+  ``kc daemon``)
 
 Plus the ``_run_runner_command`` / ``_run_daemon_command`` helpers used
 by every command in this module.
 
-The top-level ``iar loop-daemon`` command lives in
-:mod:`backend.api.cli_typer_loop` so the historical ``iar --help``
+The top-level ``kc loop-daemon`` command lives in
+:mod:`backend.api.cli_typer_loop` so the historical ``kc --help``
 command order is preserved.
 """
 
@@ -115,7 +115,7 @@ def run_command(
         bool,
         typer.Option(
             "--all-ready",
-            help="Process the ready queue by priority (the historical iar run behavior).",
+            help="Process the ready queue by priority (the historical kc run behavior).",
         ),
     ] = False,
     takeover: Annotated[
@@ -240,7 +240,7 @@ def logs_command(
                 "--issue and --kind are mutually exclusive: --issue reads the per-Issue "
                 "agent output log, --kind selects a daemon process log.",
                 code=ExitCode.USAGE,
-                suggestion="iar logs --issue 1",
+                suggestion="kc logs --issue 1",
             ),
             fmt=fmt,
         )
@@ -346,7 +346,7 @@ def daemon_callback(
     config: ConfigOption = None,
     all_repositories: AllRepositoriesOption = False,
 ) -> None:
-    """Backward-compatible default: `iar daemon` runs the daemon."""
+    """Backward-compatible default: `kc daemon` runs the daemon."""
     if ctx.invoked_subcommand is not None:
         return
     exit_code = _run_daemon_command(

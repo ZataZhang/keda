@@ -26,11 +26,14 @@ export JUST_LOCAL_TEST_FLAGS := "--no-header"
 default: _check-completion
     @just --list
 
-# Reinstall the `iar` CLI tool globally via uv in editable mode
+# Reinstall the `kc` CLI tool globally via uv in editable mode
 # Usage:
-#   just reinstall-iar
-reinstall-iar:
+#   just reinstall-kc
+reinstall-kc:
     uv tool install --force --reinstall --editable .
+
+# 旧名 recipe：`iar` 作为弃用别名长期保留，用法与上面完全一致。  # legacy-alias
+alias reinstall-iar := reinstall-kc
 
 # Run the development entrypoint
 # Usage:
@@ -557,7 +560,7 @@ frontend-admin action="dev":
             ;;
     esac
 
-# 重新构建 frontend-public 并同步到后端 static 目录，让 `iar console`
+# 重新构建 frontend-public 并同步到后端 static 目录，让 `kc console`
 # 面板立即用上新构建。static console 是构建产物（gitignored），FastAPI
 # 的 StaticFiles 按请求读盘，同步后刷新浏览器即可，无需重启进程。
 # Usage:

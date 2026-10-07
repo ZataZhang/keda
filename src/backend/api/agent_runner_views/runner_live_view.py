@@ -1,6 +1,6 @@
 """Terminal live view for parallel Issue processing.
 
-Concrete :class:`IRunnerLiveView` implementations used by ``iar daemon`` when it
+Concrete :class:`IRunnerLiveView` implementations used by ``kc daemon`` when it
 processes several Issues concurrently (``--concurrency > 1``):
 
 - :class:`RichRunnerLiveView`: interactive TTY display with one live column per

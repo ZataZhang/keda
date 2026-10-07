@@ -2,14 +2,14 @@
  * Realistic validation for the lifecycle-agent-matrix console surfaces (PRD rv-3/4/6/7).
  *
  * 验证层级：**真实入口**。Settings / Backlog / PRD 原文页三个界面都走真实后端与
- * 真实配置（`config.toml` / 仓库 `.iar.toml` / PRD 文件头部），不做任何 stub。
+ * 真实配置（`config.toml` / 仓库 `.kedacode.toml` / PRD 文件头部），不做任何 stub。
  *
  * 覆盖范围与边界（刻意不写盘）：本 spec 只做**只读交互**——打开两个 Tab、展开九行
  * 矩阵的下拉看候选值、断言回退顺序编辑器的可用性、打开仓库级矩阵抽屉与 PRD 覆盖抽屉。
  * 凡涉及"保存后文件真的变了"的断言，均由后端契约测试
  * (`tests/test_lifecycle_agents_console_api.py`, 以磁盘内容为事实源) 与手工真实入口
  * 证据 (`tasks/evidence/<stem>/rv-*.png`) 覆盖——e2e 跑在共享仓库上，写盘会污染
- * registry 里的真实 `config.toml` / `.iar.toml`。
+ * registry 里的真实 `config.toml` / `.kedacode.toml`。
  *
  * 依赖数据：需要一个**已启用**的受管理仓库（齿轮抽屉用）与至少一个 PRD（覆盖抽屉用）；
  * 缺失时对应用例 skip 而不是失败，这样在没有预置仓库的环境里也能稳定跑通。
@@ -46,7 +46,7 @@ const ENTRY_GROUPS = [
 ] as const
 
 /**
- * PRD 覆盖抽屉只呈递有 PRD 消费点的键：`planner` 的唯一消费点是 `iar ask`，
+ * PRD 覆盖抽屉只呈递有 PRD 消费点的键：`planner` 的唯一消费点是 `kc ask`，
  * 既没有 Issue 也没有 PRD 上下文，PRD 级覆盖对它无效，因此后端不下发该行。
  */
 const PRD_OVERRIDE_KEYS = LIFECYCLE_KEYS.filter((key) => key !== 'planner')
@@ -85,7 +85,7 @@ test.describe('生命周期 Agent 矩阵 (lifecycle-agent)', () => {
     await expect(page.getByTestId('fallback-order-editor')).toBeVisible()
 
     // 原有页面内容保持在区块下方。
-    await expect(page.getByRole('heading', { name: '关于 iar 管理终端' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '关于 KedaCode 管理终端' })).toBeVisible()
   })
 
   test('全局矩阵按触发入口分组：三组标题可见，九行归属正确且行内可见触发时机', async ({

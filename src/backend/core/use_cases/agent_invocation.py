@@ -201,7 +201,7 @@ def resolve_agent_spec(agent_name: str, config: AppConfig) -> AgentSpec:
         raise UnknownAgentError(
             f"Agent '{agent_name}' is not registered. "
             f"Registered agents: {', '.join(resolve_registered_agents(config))}. "
-            f"Add an [agent_runner.agents.{agent_name}] block to config.toml / .iar.toml."
+            f"Add an [agent_runner.agents.{agent_name}] block to config.toml / .kedacode.toml."
         )
     return agent_spec
 
@@ -247,7 +247,7 @@ def _model_selection_argv(
                 f"agent '{agent_name}' has no model_args template, so the model binding "
                 f"(model='{model_selection.model}') cannot be applied. Declare "
                 f"[agent_runner.agents.{agent_name}].model_args "
-                '(e.g. ["--model", "{model}"]) in config.toml / .iar.toml.'
+                '(e.g. ["--model", "{model}"]) in config.toml / .kedacode.toml.'
             )
         for template_entry in agent_spec.model_args:
             argv_fragment.append(
@@ -265,7 +265,7 @@ def _model_selection_argv(
                 f"reasoning effort binding (effort='{model_selection.reasoning_effort}') "
                 "cannot be applied. Declare "
                 f"[agent_runner.agents.{agent_name}].reasoning_effort_args in "
-                "config.toml / .iar.toml."
+                "config.toml / .kedacode.toml."
             )
         for template_entry in agent_spec.reasoning_effort_args:
             argv_fragment.append(

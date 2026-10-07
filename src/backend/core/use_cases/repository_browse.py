@@ -15,8 +15,8 @@ from backend.core.shared.interfaces.runner_console import (
     DirectoryBrowseResult,
     IRepositoryRegistryEditor,
 )
+from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_runner_repository_local import normalize_repository_id
-from backend.core.use_cases.issue_pr_status import IAR_REPOSITORY_MARKER_FILENAME
 
 
 def browse_directories(
@@ -26,7 +26,7 @@ def browse_directories(
 ) -> DirectoryBrowseResult:
     """列举 ``path`` 下的子目录，供控制台目录选择器使用。
 
-    只返回非隐藏子目录，并为每项标注是否 git 仓库、是否有 IAR 本地配置、
+    只返回非隐藏子目录，并为每项标注是否 git 仓库、是否有 KedaCode 本地配置、
     是否已在 registry 中注册，让用户一眼看出哪些目录能通过「校验并添加」。
 
     Args:
@@ -100,7 +100,7 @@ def _describe_directory(
         name=directory.name,
         path=str(directory),
         is_git_repo=(directory / ".git").exists(),
-        has_iar_config=(directory / IAR_REPOSITORY_MARKER_FILENAME).is_file(),
+        has_iar_config=product_identity.has_repository_config(directory),
         already_registered=str(directory) in registered_paths,
         suggested_repo_id=normalize_repository_id(directory.name),
     )

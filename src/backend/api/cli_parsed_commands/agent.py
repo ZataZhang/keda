@@ -1,4 +1,4 @@
-"""``iar ask`` / ``iar repl`` / ``iar deliberate`` / ``iar agent *`` handlers.
+"""``kc ask`` / ``kc repl`` / ``kc deliberate`` / ``kc agent *`` handlers.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
 dispatcher.
@@ -38,7 +38,7 @@ from backend.core.use_cases.agent_runner_failure_resolver import AgentFailureRes
 from backend.core.use_cases.agent_runner_output_protocols import get_output_protocol_registry
 
 # 黄金快照的哨兵提示词：doctor 的 argv 输出用它替代真实提示词，
-# 使 `iar agent doctor --all-profiles --json` 可与改造前的快照逐字节 diff。
+# 使 `kc agent doctor --all-profiles --json` 可与改造前的快照逐字节 diff。
 GOLDEN_SNAPSHOT_PROMPT = "golden-prompt"
 
 # 沙箱/审批类参数的识别标记：非只读用途的 argv 不含任何标记时 doctor 给 WARN。
@@ -51,7 +51,7 @@ _SANDBOX_APPROVAL_MARKERS: tuple[str, ...] = (
 
 
 def run_ask_command(ctx: ParsedCommandContext) -> int:
-    """``iar ask``: natural-language decision entrypoint."""
+    """``kc ask``: natural-language decision entrypoint."""
     contexts = _cli._resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -119,7 +119,7 @@ def run_ask_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_repl_command(ctx: ParsedCommandContext) -> int:
-    """``iar repl``: interactive REPL session."""
+    """``kc repl``: interactive REPL session."""
     contexts = _cli._resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -160,7 +160,7 @@ def run_repl_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_deliberate_command(ctx: ParsedCommandContext) -> int:
-    """``iar deliberate``: multi-agent deliberation session."""
+    """``kc deliberate``: multi-agent deliberation session."""
     contexts = _cli._resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -259,7 +259,7 @@ def run_deliberate_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_agent_list_command(ctx: ParsedCommandContext) -> int:
-    """``iar agent list``: list registered agents and their profiles (read-only)."""
+    """``kc agent list``: list registered agents and their profiles (read-only)."""
     config = build_app_config()
     entries: list[dict[str, Any]] = []
     for agent_name, agent_spec in config.agents.items():
@@ -329,13 +329,13 @@ def _doctor_entry(
         raise CliError(
             str(exc),
             code=ExitCode.NOT_FOUND,
-            suggestion="iar agent list",
+            suggestion="kc agent list",
         ) from exc
     if shutil.which(agent_spec.bin) is None:
         raise CliError(
             f"executable '{agent_spec.bin}' (agent '{agent_name}') not found in PATH.",
             code=ExitCode.NOT_FOUND,
-            suggestion="iar agent list",
+            suggestion="kc agent list",
         )
     profile_spec = agent_spec.profiles.get(profile)
     if profile_spec is None:
@@ -343,7 +343,7 @@ def _doctor_entry(
             f"agent '{agent_name}' has no '{profile}' profile "
             f"(declared: {', '.join(agent_spec.profiles)}).",
             code=ExitCode.NOT_FOUND,
-            suggestion=f"iar agent doctor {agent_name} --all-profiles",
+            suggestion=f"kc agent doctor {agent_name} --all-profiles",
         )
     try:
         invocation = build_agent_invocation(
@@ -353,7 +353,7 @@ def _doctor_entry(
         raise CliError(
             str(exc),
             code=ExitCode.USAGE,
-            suggestion="iar agent presets",
+            suggestion="kc agent presets",
         ) from exc
     registry = get_output_protocol_registry()
     try:
@@ -362,7 +362,7 @@ def _doctor_entry(
         raise CliError(
             str(exc),
             code=ExitCode.NOT_FOUND,
-            suggestion="iar agent doctor --protocols",
+            suggestion="kc agent doctor --protocols",
         ) from exc
     if not profile_spec.read_only and not any(
         marker in (*profile_spec.args, *profile_spec.tail_args)
@@ -439,7 +439,7 @@ def _doctor_lifecycle_entry(
 
 
 def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
-    """``iar agent doctor <name>...``: print resolved invocations (read-only)."""
+    """``kc agent doctor <name>...``: print resolved invocations (read-only)."""
     parsed: argparse.Namespace = ctx.parsed
     if getattr(parsed, "protocols", False):
         protocol_ids = list(get_output_protocol_registry().list_ids())
@@ -463,7 +463,7 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
                 f"unknown lifecycle key '{lifecycle_key}'. "
                 f"Valid keys: {', '.join(LIFECYCLE_AGENT_KEYS)}.",
                 code=ExitCode.USAGE,
-                suggestion="iar agent doctor --lifecycle implementation",
+                suggestion="kc agent doctor --lifecycle implementation",
             )
         entry, warnings = _doctor_lifecycle_entry(lifecycle_key, prompt, cwd, config)
         for warning in warnings:
@@ -506,14 +506,14 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
             raise CliError(
                 str(exc),
                 code=ExitCode.USAGE,
-                suggestion="iar agent presets",
+                suggestion="kc agent presets",
             ) from exc
     else:
         if getattr(parsed, "model", None) or getattr(parsed, "reasoning_effort", None):
             raise CliError(
                 "--model / --reasoning-effort require --preset.",
                 code=ExitCode.USAGE,
-                suggestion="iar agent doctor --preset <name> --model <id>",
+                suggestion="kc agent doctor --preset <name> --model <id>",
             )
         preset_selection = None
 
@@ -522,7 +522,7 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             "no agent name given.",
             code=ExitCode.USAGE,
-            suggestion="iar agent list",
+            suggestion="kc agent list",
         )
     profile_names = list(AGENT_PROFILES) if getattr(parsed, "all_profiles", False) else ["run"]
     entries: list[dict[str, object]] = []
@@ -555,7 +555,7 @@ def run_agent_doctor_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_agent_presets_command(ctx: ParsedCommandContext) -> int:
-    """``iar agent presets``: list defined model presets (read-only)."""
+    """``kc agent presets``: list defined model presets (read-only)."""
     config = build_app_config()
     preset_entries = [
         {
@@ -571,7 +571,7 @@ def run_agent_presets_command(ctx: ParsedCommandContext) -> int:
         if not preset_entries:
             console.print(
                 "No model presets defined. Declare [agent_runner.presets.<name>] in "
-                "config.toml / .iar.toml (fields: agent / model / reasoning_effort).",
+                "config.toml / .kedacode.toml (fields: agent / model / reasoning_effort).",
                 markup=False,
             )
             return

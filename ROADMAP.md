@@ -7,18 +7,18 @@
 
 ## Vision
 
-构建一个面向人工调度的 AI 工程交互终端。项目本身不自动决定哪些 issue 开始、哪些 issue 暂停，而是在人工选择任务后，辅助完成需求理解、代码修改、验证、code review、提交 pull request，并在主分支、CI、评论或 PR 状态变化后维护已提交 PR 的监督与 rebase 状态。在这条链路里，`iar` CLI 是核心执行面：既供人操作，也是外部 agent（Claude / Codex / Kimi 等）经 shell 驱动这套基于 issue 的编排的一等机读接口。
+构建一个面向人工调度的 AI 工程交互终端。项目本身不自动决定哪些 issue 开始、哪些 issue 暂停，而是在人工选择任务后，辅助完成需求理解、代码修改、验证、code review、提交 pull request，并在主分支、CI、评论或 PR 状态变化后维护已提交 PR 的监督与 rebase 状态。在这条链路里，`kc` CLI 是核心执行面：既供人操作，也是外部 agent（Claude / Codex / Kimi 等）经 shell 驱动这套基于 issue 的编排的一等机读接口。
 
 ## Product Boundary
 
 - 当前项目提供交互终端和本地 runner 能力，不提供全自动 issue 调度系统。
-- 是否开始处理某个代码任务由人工控制：**守护进程的自主挑选**以 `agent/ready` label 为唯一准入（并可结合 `agent/claude`、`agent/codex` 或 `agent/kimi` 指定执行终端）；**人的显式定向**（`iar run --issue N` / 给 PRD 路径）不受该 label 约束——不打标记即直接执行，因而也不会与任何守护进程竞争。系统不提供「指派给某台机器」的机制：打标记即先到先得，不打标记则自行显式执行。
+- 是否开始处理某个代码任务由人工控制：**守护进程的自主挑选**以 `agent/ready` label 为唯一准入（并可结合 `agent/claude`、`agent/codex` 或 `agent/kimi` 指定执行终端）；**人的显式定向**（`kc run --issue N` / 给 PRD 路径）不受该 label 约束——不打标记即直接执行，因而也不会与任何守护进程竞争。系统不提供「指派给某台机器」的机制：打标记即先到先得，不打标记则自行显式执行。
 - 用户可以直接提交没有 PRD 的 Issue。**PRD 不是执行前置**：这类 Issue 只要被人工打上 `agent/ready`，就可以直接被 runner 当作可执行代码任务领取。需求澄清、多 agent 合议与 PRD 审批是**按需能力**（需求复杂、涉及多方或表述含糊时使用），不是每次都必经的强制链。
 - 用户提交 Issue 时有义务尽量把需求、问题背景、复现信息、期望结果和已知约束描述清楚。**没有 PRD 时，Issue 正文就是唯一的需求来源**，因此描述质量直接决定交付质量；澄清是可选的增强手段，不是执行前的强制闸门。
 - 用户可以在 Issue 中上传图片作为需求上下文，例如界面截图、错误截图、流程图或设计稿；AI 在澄清、合议和 PRD 草稿生成时应把这些图片视为 Issue 上下文的一部分。
 - 终端可以展示 issue 信息、辅助分析任务和执行工程动作，但不会主动处理未标记的 issue。
-- `iar` CLI 是本项目的核心执行面，并把外部 agent（Claude / Codex / Kimi 等）视为一等消费者：命令输出、退出码与运行时能力自省应提供可机读契约，而不只是给人看的表格（由 `P1-FEAT-20260930-141135` 承接）。
-- 改动 `iar` CLI 表面（新增/改名子命令、旗标、退出码或机器可读输出）必须同步随包 `iar-operator` skill 与 `docs/`，保证 agent 侧知识与真实命令树不漂移；约定见 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync。
+- `kc` CLI 是本项目的核心执行面，并把外部 agent（Claude / Codex / Kimi 等）视为一等消费者：命令输出、退出码与运行时能力自省应提供可机读契约，而不只是给人看的表格（由 `P1-FEAT-20260930-141135` 承接）。
+- 改动 `kc` CLI 表面（新增/改名子命令、旗标、退出码或机器可读输出）必须同步随包 `kedacode-operator` skill 与 `docs/`，保证 agent 侧知识与真实命令树不漂移；约定见 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync。
 - 一旦 Issue 被标记为 `agent/ready`（无论是否 PRD-backed），后续执行链路（修改代码、验证、review、提交 PR、维护 PR 分支）应尽量自动完成；遇到需求不明确、安全门禁、验证失败、发布失败、冲突或高风险 review 发现时安全停止并报告。
 - 当前实现优先支持 GitHub Issues / Labels / Pull Requests；其他代码托管平台暂不在当前交付边界内。
 

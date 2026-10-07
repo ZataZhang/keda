@@ -1,4 +1,4 @@
-"""为 IAR worktree 准备隔离的关系型数据库。"""
+"""为 KedaCode worktree 准备隔离的关系型数据库。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""``iar registry *`` handlers.
+"""``kc registry *`` handlers.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
 dispatcher.
@@ -26,14 +26,14 @@ from backend.core.use_cases.agent_runner_repository_local import discover_iar_re
 def _scan_root_error(command: str, exc: ValueError) -> CliError:
     """``registry scan/sync`` 的扫描根目录不存在：语义退出码 ``3``。"""
     return CliError(
-        f"iar registry {command} failed: {exc}",
+        f"kc registry {command} failed: {exc}",
         code=ExitCode.NOT_FOUND,
-        suggestion="iar registry list",
+        suggestion="kc registry list",
     )
 
 
 def run_registry_scan_command(ctx: ParsedCommandContext) -> int:
-    """``iar registry scan``: discover IAR-initialized repos under a path."""
+    """``kc registry scan``: discover KedaCode-initialized repos under a path."""
     try:
         entries = discover_iar_repositories(
             scan_root=Path(ctx.parsed.scan_root),
@@ -42,7 +42,7 @@ def run_registry_scan_command(ctx: ParsedCommandContext) -> int:
     except ValueError as exc:
         raise _scan_root_error("scan", exc) from exc
     if not entries:
-        console.print("[yellow]No IAR repositories found.[/]")
+        console.print("[yellow]No KedaCode repositories found.[/]")
         return 0
     for entry in entries:
         status = "registered" if entry.already_registered else "new"
@@ -51,7 +51,7 @@ def run_registry_scan_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_registry_sync_command(ctx: ParsedCommandContext) -> int:
-    """``iar registry sync``: discover and register all IAR repositories."""
+    """``kc registry sync``: discover and register all KedaCode repositories."""
     try:
         entries = discover_iar_repositories(
             scan_root=Path(ctx.parsed.scan_root),
@@ -61,7 +61,7 @@ def run_registry_sync_command(ctx: ParsedCommandContext) -> int:
         raise _scan_root_error("sync", exc) from exc
     new_entries = [entry for entry in entries if not entry.already_registered]
     if not new_entries:
-        console.print("[green]No new IAR repositories to register.[/]")
+        console.print("[green]No new KedaCode repositories to register.[/]")
         return 0
     if ctx.parsed.dry_run:
         console.print("[cyan]Would register:[/]")

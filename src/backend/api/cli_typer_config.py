@@ -1,8 +1,9 @@
-"""Typer commands under ``iar config``.
+"""Typer commands under ``kc config``.
 
-Currently a single command — ``iar config migrate`` — which removes the
-generated-content defaults an older ``iar init`` pinned into a repository's
-``.iar.toml`` so the repository follows the current defaults again.
+Currently a single command — ``kc config migrate`` — which moves the local state
+directory from the legacy ``~/.iar`` (legacy-alias) to ``~/.kedacode``, renames the
+repository's legacy ``.iar.toml`` (legacy-alias) to ``.kedacode.toml``, and removes
+the generated-content defaults an older ``kc init`` pinned into it.
 """
 
 from __future__ import annotations
@@ -21,12 +22,16 @@ def config_migrate_command(
         bool,
         typer.Option(
             "--dry-run",
-            help="Show what would be removed (with a diff) without writing anything.",
+            help="Show the whole plan (state directory, rename, diff) without writing anything.",
         ),
     ] = False,
     repo: Annotated[
         str | None,
-        typer.Option("--repo", help="Target repository path (default: the current repository)."),
+        typer.Option(
+            "--repo",
+            help="Target repository path (default: the current repository; outside one, "
+            "only the local state directory is handled).",
+        ),
     ] = None,
     repo_id: Annotated[
         str | None,
@@ -39,7 +44,7 @@ def config_migrate_command(
         ),
     ] = None,
 ) -> int:
-    """Remove generated_content values an older `iar init` pinned into .iar.toml."""
+    """Move ~/.iar (legacy-alias) to ~/.kedacode, rename .iar.toml, drop pinned values."""
     return _run_typer_repository_command(
         ctx,
         "config migrate",

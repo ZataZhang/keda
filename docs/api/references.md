@@ -145,8 +145,8 @@
 字段说明：
 
 - `path` / `parent` / `home`：当前目录、上级目录（已是文件系统根时为 `null`）与用户主目录。
-- `suggested_repo_id` / `suggested_display_name`：用于回填「添加仓库」表单的建议值，`suggested_repo_id` 由后端按 `normalize_repository_id` 规则从目录名生成，与 `iar registry` 扫描保持一致。
-- `directories[].is_git_repo` / `has_iar_config` / `already_registered`：该子目录是否为 git 仓库、是否已 `iar init`、是否已在 registry 中注册。
+- `suggested_repo_id` / `suggested_display_name`：用于回填「添加仓库」表单的建议值，`suggested_repo_id` 由后端按 `normalize_repository_id` 规则从目录名生成，与 `kc registry` 扫描保持一致。
+- `directories[].is_git_repo` / `has_iar_config` / `already_registered`：该子目录是否为 git 仓库、是否已 `kc init`、是否已在 registry 中注册。
 
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/content`
 
@@ -187,7 +187,7 @@ curl -sS \
   "auto_merge_enabled": false,
   "daemon_running": true,
   "max_parallel": 2,
-  "config_source": ".iar.toml",
+  "config_source": ".kedacode.toml",
   "persisted_enabled": true
 }
 ```
@@ -195,11 +195,11 @@ curl -sS \
 - `enabled`：生效配置中的 `agent_runner.autopilot.enabled`；
 - `auto_merge_enabled`：`safety.auto_merge`，即第二道危险动作门禁（只读展示）；
 - `daemon_running`：该仓库是否存在 `kind=daemon` 且存活的进程（来自既有 process supervisor 记录）；
-- `persisted_enabled`：目标仓库 `.iar.toml` 中的持久值；文件缺失或键未设置时为 `null`。
+- `persisted_enabled`：目标仓库 `.kedacode.toml` 中的持久值；文件缺失或键未设置时为 `null`。
 
 ### `PATCH /api/v1/agent-runner/backlog/autopilot`
 
-只修改目标仓库 `.iar.toml` 的 `[agent_runner.autopilot].enabled`。请求体：
+只修改目标仓库 `.kedacode.toml` 的 `[agent_runner.autopilot].enabled`。请求体：
 
 ```json
 { "repo_id": "keda-main", "enabled": true }
@@ -209,7 +209,7 @@ curl -sS \
 
 - 只改这一个布尔键；注释、同级键（`merge_method` / `require_verifier_pass` / `auto_sign_off` / `merge_check_timeout_seconds`）与未知子表逐字保留，写入采用同目录临时文件 + 完整加载校验 + `os.replace` 原子替换；
 - 不会修改 `safety.auto_merge`，也不会自动启动或停止 daemon；
-- 未知仓库返回 `400`；目标仓缺 `.iar.toml`、配置非法、不可写或写后读回不一致返回 `409`，且原文件保持不变。
+- 未知仓库返回 `400`；目标仓缺 `.kedacode.toml`、配置非法、不可写或写后读回不一致返回 `409`，且原文件保持不变。
 
 ### `GET /api/v1/agent-runner/backlog/ci-repair-global`
 
@@ -221,11 +221,11 @@ curl -sS \
 
 ### `PATCH /api/v1/agent-runner/backlog/ci-repair-global`
 
-只修改目标仓库 `.iar.toml` 的 `[agent_runner.post_pr_supervisor].auto_repair_ci`。请求体 `{"repo_id": "...", "enabled": true}`；成功响应体来自写后 fresh load，字段与 `GET` 一致。写回复用受限配置编辑器（底层 `toml_section_editor.update_toml_table_keys` 原子替换），失败时原文件不变并返回 `409`。
+只修改目标仓库 `.kedacode.toml` 的 `[agent_runner.post_pr_supervisor].auto_repair_ci`。请求体 `{"repo_id": "...", "enabled": true}`；成功响应体来自写后 fresh load，字段与 `GET` 一致。写回复用受限配置编辑器（底层 `toml_section_editor.update_toml_table_keys` 原子替换），失败时原文件不变并返回 `409`。
 
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/ci`
 
-返回单个 PRD 的 CI/CD 交付尾段投影 `ci_delivery`（每次请求 fresh 读取 GitHub PR context 与 Issue marker，不持久化、不复用缓存）。该 DTO 同时是 `iar backlog ci status --json` 的机读输出，二者同构：
+返回单个 PRD 的 CI/CD 交付尾段投影 `ci_delivery`（每次请求 fresh 读取 GitHub PR context 与 Issue marker，不持久化、不复用缓存）。该 DTO 同时是 `kc backlog ci status --json` 的机读输出，二者同构：
 
 - `status`：`no_pr` / `pending` / `success` / `failure` / `unavailable`；`unavailable` 表示 GitHub 不可达或状态未知，按「未验证」呈现而非通过或失败；
 - `round_count` / `max_rounds`：已发生的自动修复轮数与上限（复用 `post_pr_supervisor.max_repair_attempts`），轮次事实源是既有 `post_pr_rework_requested` marker 与 PR head SHA；
@@ -239,7 +239,7 @@ curl -sS \
 
 ### `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-repair`
 
-显式请求一次修复（问题卡「立即修复」与 `iar backlog ci repair` 共用语义）。服务端 fresh 解析当前 PR head 并以 `head SHA + repair action` 为幂等键：同一失败轮次的重复请求零新增副作用；修复仍走既有 run 侧 repair 路径，保留轮数上限、worktree 与禁止路径门禁。无法获取当前 PR context 时返回 `409`。
+显式请求一次修复（问题卡「立即修复」与 `kc backlog ci repair` 共用语义）。服务端 fresh 解析当前 PR head 并以 `head SHA + repair action` 为幂等键：同一失败轮次的重复请求零新增副作用；修复仍走既有 run 侧 repair 路径，保留轮数上限、worktree 与禁止路径门禁。无法获取当前 PR context 时返回 `409`。
 
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/evidence`
 
@@ -298,7 +298,7 @@ curl -sS \
 
 ## CLI 机读契约
 
-`iar` 对脚本与其他 agent 的调用面由三个模块定义，页面内容以代码为唯一事实源。
+`kc` 对脚本与其他 agent 的调用面由三个模块定义，页面内容以代码为唯一事实源。
 
 ### 语义退出码 `backend.api.cli_exit_codes`
 
@@ -312,14 +312,14 @@ curl -sS \
 | `5` | `CONFLICT` | `conflict` | 当前状态阻止：`--all-ready` 时同仓 daemon 正在轮询队列、显式定向的 Issue 被存活持有者认领或处于未解除的 `agent/blocked`、workflow 模板文件已安装、loop 条目已存在 |
 | `10` | `DRY_RUN_OK` | `dry_run_ok` | 机器模式下 dry-run 校验通过且未写入任何东西 |
 
-同一份表由 `EXIT_CODE_HELP` 印在 `iar --help` 与 `iar schema --json` 的顶层 `exit_codes.help` 中，`exit_codes.values` 则是「码 → 上表 `error` 名」的映射（与 envelope 同名，消费方不需要再翻译一次）；`translate_exit_code` 是「异常 → 退出码」的唯一落点（`FileNotFoundError` / `PermissionError` / `FileExistsError` 按语义归位，其余为 `1`）。
+同一份表由 `EXIT_CODE_HELP` 印在 `kc --help` 与 `kc schema --json` 的顶层 `exit_codes.help` 中，`exit_codes.values` 则是「码 → 上表 `error` 名」的映射（与 envelope 同名，消费方不需要再翻译一次）；`translate_exit_code` 是「异常 → 退出码」的唯一落点（`FileNotFoundError` / `PermissionError` / `FileExistsError` 按语义归位，其余为 `1`）。
 
 ### 结构化错误 `backend.api.cli_output`
 
 `--json` 是 `--output json` 的别名；默认永远是给人看的 `table`，非 TTY 不自动切换。机器模式下 `route_logs_to_stderr()` 把写向 stdout 的日志处理器改绑到 stderr，因此 stdout 只承载数据，序列化只有 `emit` / `emit_json` / `emit_ndjson` / `json_literal` 这一个出口。失败时 handler 抛 `CliError`，由 `cli.py` 中央调用 `render_cli_error` 落成 stderr envelope：
 
 ```json
-{"error": "not_found", "message": "...", "suggestion": "iar registry list", "retryable": false, "exit_code": 3}
+{"error": "not_found", "message": "...", "suggestion": "kc registry list", "retryable": false, "exit_code": 3}
 ```
 
 | 字段 | 含义 |
@@ -332,11 +332,11 @@ curl -sS \
 
 ### 运行时自省 `backend.api.cli_schema`
 
-`iar schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`iar ask` 与 `iar deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`iar run --fast-merge` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
+`kc schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`kc ask` 与 `kc deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`kc run --fast-merge` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
 
 ### PR 正文快速通道 marker `iar:fast-merge`
 
-`iar run --fast-merge` 开出的 Draft PR 正文末尾带一条机器可读 marker（同族于 `iar:ci-auto-repair-policy` / `post_pr_rework_requested` 等 latest-wins marker）：
+`kc run --fast-merge` 开出的 Draft PR 正文末尾带一条机器可读 marker（同族于 `iar:ci-auto-repair-policy` / `post_pr_rework_requested` 等 latest-wins marker）：
 
 ```html
 <!-- iar:fast-merge issued=<Issue 编号> -->

@@ -1,4 +1,4 @@
-"""Typer commands under ``iar registry``.
+"""Typer commands under ``kc registry``.
 
 Holds every command that operates on the global repository registry
 (:func:`registry_scan_command`, :func:`registry_sync_command`,
@@ -34,7 +34,7 @@ def _registry_selector_error(message: str, suggestion: str) -> int:
 def registry_scan_command(
     scan_root: Annotated[str, typer.Argument(help="Directory to scan.")] = ".",
 ) -> int:
-    """Discover IAR-initialized git repositories under a path."""
+    """Discover KedaCode-initialized git repositories under a path."""
     return _run_typer_command(
         "registry scan",
         scan_root=scan_root,
@@ -49,7 +49,7 @@ def registry_sync_command(
         typer.Option("--dry-run", help="Print candidates without writing."),
     ] = False,
 ) -> int:
-    """Discover and register all IAR repositories under a path."""
+    """Discover and register all KedaCode repositories under a path."""
     return _run_typer_command(
         "registry sync",
         scan_root=scan_root,
@@ -120,13 +120,13 @@ def registry_start_command(
     """Start daemon and review-daemon for registered repositories."""
     if not repo_id and not all:
         return _registry_selector_error(
-            "Either --repo-id or --all is required for iar registry start.",
-            "iar registry start --all",
+            "Either --repo-id or --all is required for kc registry start.",
+            "kc registry start --all",
         )
     if repo_id and all:
         return _registry_selector_error(
-            "--repo-id and --all are mutually exclusive for iar registry start.",
-            "iar registry start --repo-id <id>",
+            "--repo-id and --all are mutually exclusive for kc registry start.",
+            "kc registry start --repo-id <id>",
         )
     return _run_typer_command(
         "registry start",
@@ -157,13 +157,13 @@ def registry_stop_command(
     """Stop daemon and review-daemon for registered repositories."""
     if not repo_id and not all:
         return _registry_selector_error(
-            "Either --repo-id or --all is required for iar registry stop.",
-            "iar registry stop --all",
+            "Either --repo-id or --all is required for kc registry stop.",
+            "kc registry stop --all",
         )
     if repo_id and all:
         return _registry_selector_error(
-            "--repo-id and --all are mutually exclusive for iar registry stop.",
-            "iar registry stop --repo-id <id>",
+            "--repo-id and --all are mutually exclusive for kc registry stop.",
+            "kc registry stop --repo-id <id>",
         )
     return _run_typer_command(
         "registry stop",

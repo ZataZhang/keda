@@ -1,9 +1,9 @@
 """JSON-backed loop state store.
 
-Stores the registered loops in ``~/.iar/loop-state.json`` so that the schedule
-metadata is operator-scoped (not repository-scoped) and easy to inspect. The
-file is read once and cached in memory; mutations re-serialize the full file
-atomically via ``os.replace`` so concurrent readers never observe a partial
+Stores the registered loops in ``<local state directory>/loop-state.json`` so that
+the schedule metadata is operator-scoped (not repository-scoped) and easy to
+inspect. The file is read once and cached in memory; mutations re-serialize the full
+file atomically via ``os.replace`` so concurrent readers never observe a partial
 write.
 
 All filesystem I/O is explicit ``encoding="utf-8"`` and the file is written
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.core.shared.interfaces.loop_scheduler import ILoopStateStore
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.loop import (
     LoopSchedule,
     LoopScheduleKind,
@@ -32,9 +33,13 @@ from backend.core.shared.models.loop import (
 # ---------------------------------------------------------------------------
 
 
+_LOOP_STATE_FILENAME = "loop-state.json"
+"""状态目录下的 loop 状态文件名。"""
+
+
 def resolve_loop_state_path() -> Path:
     """Return the canonical location of the loop state file."""
-    return Path.home() / ".iar" / "loop-state.json"
+    return product_identity.state_home() / _LOOP_STATE_FILENAME
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +117,7 @@ def _task_to_dict(task: LoopTask) -> dict[str, Any]:
 
 
 class JsonLoopStateStore(ILoopStateStore):
-    """Persist loops to a JSON file under ``~/.iar/loop-state.json``.
+    """Persist loops to a JSON file under ``<local state directory>/loop-state.json``.
 
     The store keeps an in-memory cache that is lazily populated on first
     access and refreshed by :meth:`load`. Concurrent writers are tolerated

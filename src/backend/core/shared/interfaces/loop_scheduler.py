@@ -18,7 +18,7 @@ class ILoopStateStore(ABC):
     """Persist and query registered loops.
 
     Implementations are responsible for atomic writes to durable storage.
-    The default JSON implementation writes to ``~/.iar/loop-state.json``.
+    The default JSON implementation writes to ``~/.kedacode/loop-state.json``.
     """
 
     @abstractmethod

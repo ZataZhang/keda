@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +21,7 @@ from backend.api.cli_output import (
     CliError,
     render_cli_error,
 )
+from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 def _ensure_gh_auth_or_prompt(repo_path: Path, process_runner: "IProcessRunner") -> None:
     """Check gh auth status and exit with a friendly message if not authenticated."""
-    if os.environ.get("IAR_SKIP_GH_AUTH_CHECK") == "1":
+    if product_identity.read_product_env_value("SKIP_GH_AUTH_CHECK") == "1":
         return
     github_client = create_github_client(repo_path, process_runner)
     auth_status = github_client.check_auth_status()
@@ -115,21 +115,21 @@ def repository_selector_error(exc: ValueError) -> CliError:
         return CliError(
             message,
             code=ExitCode.USAGE,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         )
     if "not found in config" in lowered or "not found in registry" in lowered:
         return CliError(
             message,
             code=ExitCode.NOT_FOUND,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         )
     if "disabled" in lowered:
         return CliError(
             message,
             code=ExitCode.PERMISSION,
-            suggestion="iar registry reinit --repo-id <id>",
+            suggestion="kc registry reinit --repo-id <id>",
         )
-    return CliError(message, code=ExitCode.GENERAL, suggestion="iar registry list")
+    return CliError(message, code=ExitCode.GENERAL, suggestion="kc registry list")
 
 
 def _resolve_cli_repository_targets(
@@ -174,10 +174,10 @@ def require_single_repository_target(
     """
     if len(repository_contexts) != 1:
         raise CliError(
-            f"iar {command} requires exactly one target repository. "
+            f"kc {command} requires exactly one target repository. "
             "Use --repo or --repo-id to specify.",
             code=ExitCode.USAGE,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         )
     return repository_contexts[0]
 
@@ -206,16 +206,16 @@ def daemon_target_error(message: str) -> CliError:
     """
     lowered = message.lower()
     if "multiple enabled repositories" in lowered:
-        return CliError(message, code=ExitCode.USAGE, suggestion="iar registry list")
+        return CliError(message, code=ExitCode.USAGE, suggestion="kc registry list")
     if "is disabled" in lowered:
         return CliError(
             message,
             code=ExitCode.PERMISSION,
-            suggestion="iar registry reinit --repo-id <id>",
+            suggestion="kc registry reinit --repo-id <id>",
         )
     if "not initialized" in lowered:
-        return CliError(message, code=ExitCode.NOT_FOUND, suggestion="iar init")
-    return CliError(message, code=ExitCode.NOT_FOUND, suggestion="iar registry list")
+        return CliError(message, code=ExitCode.NOT_FOUND, suggestion="kc init")
+    return CliError(message, code=ExitCode.NOT_FOUND, suggestion="kc registry list")
 
 
 def report_daemon_target_error(message: str, *, fmt: str) -> int:
@@ -265,7 +265,7 @@ def _resolve_default_daemon_target() -> _DefaultDaemonTarget:
                 repo_id=None,
                 error=(
                     f"Repository '{match.matched_repo_id}' is not initialized. "
-                    "Run 'iar init' in the repository root, or use --all to target all enabled registry entries."
+                    "Run 'kc init' in the repository root, or use --all to target all enabled registry entries."
                 ),
             )
         return _DefaultDaemonTarget(repo_id=match.matched_repo_id, error="")
@@ -299,13 +299,14 @@ def _resolve_default_daemon_target() -> _DefaultDaemonTarget:
 def _resolve_run_trigger(command_kind: str) -> str:
     """解析运行记录的 trigger 来源。
 
-    管理终端托管的子进程带有 ``IAR_CONSOLE=1`` 环境标记，记为
+    管理终端托管的子进程带有 ``CONSOLE`` 产品环境标记（值为 1），记为
     ``console_*``；否则记为 ``cli_*``。
 
     Args:
         command_kind: ``"run"`` 或 ``"daemon"``。
     """
-    prefix = "console" if os.environ.get("IAR_CONSOLE") == "1" else "cli"
+    console_marker = product_identity.read_product_env_value("CONSOLE")
+    prefix = "console" if console_marker == "1" else "cli"
     return f"{prefix}_{command_kind}"
 
 
@@ -321,20 +322,20 @@ def _create_run_history_store_or_none():
 def _handle_not_initialized_error(
     exc: IARRepositoryNotInitializedError, *, fmt: str = OUTPUT_FORMAT_TABLE
 ) -> int:
-    """Print a friendly error and suggest running `iar init`.
+    """Print a friendly error and suggest running `kc init`.
 
-    仓库缺少 ``.iar.toml`` 属于「未找到」类别：机器模式落 envelope 并返回 ``3``，
+    仓库缺少 ``.kedacode.toml`` 属于「未找到」类别：机器模式落 envelope 并返回 ``3``，
     人类模式保留原有的四行引导文本（只改退出码，不改文案）。
     """
     error = CliError(
-        f"Repository is not initialized for iar; expected local config: {exc.config_path}",
+        f"Repository is not initialized for KedaCode; expected local config: {exc.config_path}",
         code=ExitCode.NOT_FOUND,
-        suggestion="iar init",
+        suggestion="kc init",
     )
     if fmt == OUTPUT_FORMAT_JSON:
         return render_cli_error(error, fmt=fmt)
-    error_console.print("[red]Repository is not initialized for iar.[/]")
+    error_console.print("[red]Repository is not initialized for KedaCode.[/]")
     error_console.print(f"Expected local config: {exc.config_path}", soft_wrap=True)
     error_console.print("Run the following command from the repository root:")
-    error_console.print("  iar init")
+    error_console.print("  kc init")
     return int(error.code)

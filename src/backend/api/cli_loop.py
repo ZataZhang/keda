@@ -1,4 +1,4 @@
-"""CLI handlers for the ``iar loop`` subcommand.
+"""CLI handlers for the ``kc loop`` subcommand.
 
 The argparse / Typer surfaces in :mod:`backend.api.cli_parser` and
 :mod:`backend.api.cli_typer` delegate the actual work to the helpers in
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import re
 import shlex
 from datetime import datetime, timezone
@@ -26,6 +25,7 @@ from backend.api.cli_output import (
     emit,
     resolve_output_format,
 )
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.loop import LoopSchedule, LoopScheduleKind, LoopTask
 from backend.core.use_cases.loop_create import (
     LoopAlreadyExistsError,
@@ -87,7 +87,7 @@ def _format_task_row(task: LoopTask) -> str:
 def _print_loop_table(tasks: list[LoopTask]) -> None:
     """Print a human-readable loop table to stdout."""
     if not tasks:
-        print("No loops registered. Use `iar loop create` to add one.")
+        print("No loops registered. Use `kc loop create` to add one.")
         return
     header = f"{'id':<24} {'repo_id':<24} {'schedule':<28} {'enabled':<10} next_fire"
     print(header)
@@ -145,7 +145,7 @@ def run_loop_create_command(
     *,
     state_store_factory,
 ) -> int:
-    """Implement ``iar loop create`` for both argparse and Typer paths.
+    """Implement ``kc loop create`` for both argparse and Typer paths.
 
     Args:
         parsed: The argparse namespace.
@@ -163,13 +163,13 @@ def run_loop_create_command(
         raise CliError(
             "loop id is required.",
             code=ExitCode.USAGE,
-            suggestion="iar loop create <kebab-case-id> --recipe <path>",
+            suggestion="kc loop create <kebab-case-id> --recipe <path>",
         )
     if not _SLUG_PATTERN.match(loop_id):
         raise CliError(
             f"Loop id {loop_id!r} must be kebab-case (lowercase letters, digits, hyphens).",
             code=ExitCode.USAGE,
-            suggestion="iar loop create my-daily-triage --recipe tasks/loop/my-daily-triage.md",
+            suggestion="kc loop create my-daily-triage --recipe tasks/loop/my-daily-triage.md",
         )
     recipe_path = validate_recipe_path(getattr(parsed, "recipe", ""))
     recipe = parse_loop_recipe(recipe_path)
@@ -177,7 +177,7 @@ def run_loop_create_command(
         raise CliError(
             f"Recipe frontmatter id {recipe.id!r} does not match command-line id {loop_id!r}.",
             code=ExitCode.USAGE,
-            suggestion=f"iar loop create {recipe.id} --recipe {recipe_path}",
+            suggestion=f"kc loop create {recipe.id} --recipe {recipe_path}",
         )
     try:
         schedule_override = build_schedule_from_args(parsed)
@@ -185,7 +185,7 @@ def run_loop_create_command(
         raise CliError(
             str(exc),
             code=ExitCode.USAGE,
-            suggestion="iar loop create --every 1d",
+            suggestion="kc loop create --every 1d",
         ) from exc
     state_store = state_store_factory()
     try:
@@ -199,7 +199,7 @@ def run_loop_create_command(
         raise CliError(
             f"{exc} Use --force to replace the existing entry.",
             code=ExitCode.CONFLICT,
-            suggestion=f"iar loop create {loop_id} --recipe {shlex.quote(str(recipe_path))} --force",
+            suggestion=f"kc loop create {loop_id} --recipe {shlex.quote(str(recipe_path))} --force",
         ) from exc
     except FileNotFoundError as exc:
         logger.error("%s", exc)
@@ -220,7 +220,7 @@ def run_loop_list_command(
     state_store_factory,
     fmt: str = OUTPUT_FORMAT_TABLE,
 ) -> int:
-    """Implement ``iar loop list``.
+    """Implement ``kc loop list``.
 
     Args:
         state_store_factory: Callable returning a fresh state store.
@@ -258,7 +258,7 @@ def run_loop_cancel_command(
     *,
     state_store_factory,
 ) -> int:
-    """Implement ``iar loop cancel``.
+    """Implement ``kc loop cancel``.
 
     Args:
         parsed: The argparse namespace.
@@ -275,7 +275,7 @@ def run_loop_cancel_command(
         raise CliError(
             "loop id is required.",
             code=ExitCode.USAGE,
-            suggestion="iar loop list",
+            suggestion="kc loop list",
         )
     state_store = state_store_factory()
     if cancel_loop(loop_id, state_store=state_store):
@@ -284,7 +284,7 @@ def run_loop_cancel_command(
     raise CliError(
         f"Loop '{loop_id}' is not registered.",
         code=ExitCode.NOT_FOUND,
-        suggestion="iar loop list",
+        suggestion="kc loop list",
     )
 
 
@@ -299,7 +299,7 @@ def run_loop_run_now_command(
     content_generator_factory=None,
     labels_config=None,
 ) -> int:
-    """Implement ``iar loop run --now <id>``.
+    """Implement ``kc loop run --now <id>``.
 
     Args:
         parsed: The argparse namespace.
@@ -322,7 +322,7 @@ def run_loop_run_now_command(
         raise CliError(
             "loop id is required.",
             code=ExitCode.USAGE,
-            suggestion="iar loop list",
+            suggestion="kc loop list",
         )
     dry_run = bool(getattr(parsed, "dry_run", False))
     state_store = state_store_factory()
@@ -332,7 +332,7 @@ def run_loop_run_now_command(
         raise CliError(
             f"Loop '{loop_id}' is not registered.",
             code=ExitCode.NOT_FOUND,
-            suggestion="iar loop list",
+            suggestion="kc loop list",
         )
     repo_path = repo_resolver(task)
     github_client = github_client_factory(repo_path)
@@ -381,7 +381,7 @@ def run_loop_daemon_command(
     content_generator_factory=None,
     labels_config=None,
 ) -> int:
-    """Implement ``iar loop-daemon``.
+    """Implement ``kc loop-daemon``.
 
     Args:
         parsed: The argparse namespace.
@@ -401,7 +401,7 @@ def run_loop_daemon_command(
     interval = getattr(parsed, "interval", None)
     dry_run = bool(getattr(parsed, "dry_run", False))
     if interval is None:
-        interval = int(os.environ.get("IAR_LOOP_DAEMON_INTERVAL", "60"))
+        interval = int(product_identity.read_product_env_value("LOOP_DAEMON_INTERVAL") or "60")
     if interval <= 0:
         logger.error("loop-daemon --interval must be positive.")
         return 1
@@ -506,7 +506,7 @@ def build_loop_cli_dependencies() -> dict[str, Any]:
 
 
 def run_loop_command(parsed: argparse.Namespace) -> int:
-    """Dispatch a parsed ``iar loop ...`` invocation.
+    """Dispatch a parsed ``kc loop ...`` invocation.
 
     Args:
         parsed: Parsed CLI namespace with a ``loop_command`` attribute.
@@ -549,5 +549,5 @@ def run_loop_command(parsed: argparse.Namespace) -> int:
     raise CliError(
         f"Unknown loop subcommand: {sub!r}.",
         code=ExitCode.USAGE,
-        suggestion="iar loop --help",
+        suggestion="kc loop --help",
     )

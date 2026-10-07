@@ -12,7 +12,7 @@
 - ``IProcessRunner``：执行任意外部命令的底层能力。
 - ``IAgentTranscriptRunner``：运行 AI Agent 并流式产出审议事件。
 - ``IContentGenerator``：以只读方式运行 Agent 生成 Markdown 文本。
-- ``IReplCommandExecutor``：在 REPL 入口中校验并执行 IAR 子命令。
+- ``IReplCommandExecutor``：在 REPL 入口中校验并执行 KedaCode 子命令。
 - ``IGitHubClient``：封装与 GitHub 仓库/Issue/PR 的交互。
 
 这种「依赖倒置 + 端口隔离」的设计，使 core 层的用例（use cases）
@@ -51,7 +51,7 @@ class IarExecRequest:
 
     Attributes:
         argv: Argument vector of the requested command. The first element is
-            the IAR subcommand name (for example ``"labels"``); the remaining
+            the KedaCode subcommand name (for example ``"labels"``); the remaining
             elements are positional / optional arguments destined for that
             subcommand.
         raw_text: The original raw text inside the markers, preserved for
@@ -64,7 +64,7 @@ class IarExecRequest:
 
 @dataclass(frozen=True)
 class ReplExecOutcome:
-    """The result of executing a single IAR command from the REPL.
+    """The result of executing a single KedaCode command from the REPL.
 
     Attributes:
         argv: The argv that was actually executed (echoed back so the REPL
@@ -300,7 +300,7 @@ class IContentGenerator(ABC):
 
 
 class IReplCommandExecutor(ABC):
-    """在 REPL 入口中校验并执行 IAR 子命令的端口。
+    """在 REPL 入口中校验并执行 KedaCode 子命令的端口。
 
     REPL use case 本身只负责「读取用户输入、调用 agent、解析
     ``<<IAR_EXEC>>`` 标记、把结果回填到对话历史」。所有与命令本身
@@ -316,7 +316,7 @@ class IReplCommandExecutor(ABC):
         *,
         repo_path: Path,
     ) -> ReplExecOutcome:
-        """校验并执行一条来自 REPL 的 IAR 子命令请求。
+        """校验并执行一条来自 REPL 的 KedaCode 子命令请求。
 
         Args:
             request: 解析后的命令请求，包含 argv 与原始文本。

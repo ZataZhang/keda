@@ -24,7 +24,7 @@ def add_registry_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     registry_subparsers = registry_parser.add_subparsers(dest="registry_command", required=True)
     registry_scan_parser = registry_subparsers.add_parser(
-        "scan", help="Discover IAR-initialized git repositories under a path."
+        "scan", help="Discover KedaCode-initialized git repositories under a path."
     )
     registry_scan_parser.add_argument(
         "scan_root",
@@ -34,7 +34,7 @@ def add_registry_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     registry_sync_parser = registry_subparsers.add_parser(
         "sync",
-        help="Discover and register all IAR repositories under a path.",
+        help="Discover and register all KedaCode repositories under a path.",
     )
     registry_sync_parser.add_argument(
         "scan_root",
@@ -60,12 +60,12 @@ def add_registry_commands(subparsers: argparse._SubParsersAction) -> None:
     registry_reinit_parser.add_argument(
         "--remote",
         default="origin",
-        help="Git remote name to write into .iar.toml (default: origin).",
+        help="Git remote name to write into .kedacode.toml (default: origin).",
     )
     registry_reinit_parser.add_argument(
         "--base-branch",
         default=None,
-        help="Base branch to write into .iar.toml.",
+        help="Base branch to write into .kedacode.toml.",
     )
     registry_reinit_parser.add_argument(
         "--start-daemons",

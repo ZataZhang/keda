@@ -70,7 +70,8 @@ nav:
       - Review Workflow: guides/review-workflow.md
       - Skill Lifecycle: guides/skill-lifecycle.md
       - Codex macOS 通知: guides/codex-notifications.md
-      - IAR Loop 定时任务: guides/iar-loop.md
+      - 从 iar 迁移到 kc: guides/migrating-from-iar.md
+      - Loop 定时任务: guides/loop.md
   - 原型演示:
       - 概览: prototypes/index.md
       - Prototype Hub: prototypes/hub.html

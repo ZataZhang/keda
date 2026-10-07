@@ -7,7 +7,7 @@ keda 不再自带 PRD 格式解析：格式定义与实现都归 prd skill 的
 把整个人属项误判成执行项）。
 
 **为什么用子进程而不是进程内 import**：skill 由用户在用户级目录安装、可能随时被
-更新（``iar init`` / sync），子进程给出干净的边界与超时，也避免把用户级代码的
+更新（``kc init`` / sync），子进程给出干净的边界与超时，也避免把用户级代码的
 异常与全局状态带进 runner 进程。代价是每次解析一次进程启动（几十毫秒量级），
 相对 agent 运行的分钟级可忽略。
 
@@ -51,7 +51,7 @@ def _run_contract_script(script_path: Path, arguments: list[str]) -> dict[str, A
         raise PrdContractError(
             f"prd skill 的解析脚本不存在：{script_path}。keda 不再自带 PRD 格式解析，"
             "它由 prd skill 的 scripts/prd_contract.py 提供。请安装或更新模板 skill"
-            "（`iar init` / skill sync），或用 IAR_PRD_SKILL_PATH 指向一个完整的 "
+            "（`kc init` / skill sync），或用 KEDACODE_PRD_SKILL_PATH 指向一个完整的 "
             "prd SKILL.md（其兄弟 scripts/ 目录必须一并安装）。"
         )
     try:

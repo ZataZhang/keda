@@ -1,4 +1,4 @@
-"""Implementation of the ``iar registry`` and ``iar logs`` subcommands.
+"""Implementation of the ``kc registry`` and ``kc logs`` subcommands.
 
 Provides ``scan``, ``sync``, ``reinit``, ``remove``, ``logs``, and ``daemon
 status`` for managing the repository registry in ``config.toml`` and viewing
@@ -73,7 +73,7 @@ if TYPE_CHECKING:
 
 
 def _run_registry_scan_command(parsed: argparse.Namespace) -> int:
-    """Run ``iar registry scan`` (stub kept for parser parity)."""
+    """Run ``kc registry scan`` (stub kept for parser parity)."""
     raise NotImplementedError("Use backend.api.cli for scan/sync dispatch.")
 
 
@@ -82,7 +82,7 @@ def _registry_repo_not_found(repo_id: str) -> CliError:
     return CliError(
         f"Repository '{repo_id}' not found in registry.",
         code=ExitCode.NOT_FOUND,
-        suggestion="iar registry list",
+        suggestion="kc registry list",
     )
 
 
@@ -91,7 +91,7 @@ def _registry_path_not_found(repo_path: Path) -> CliError:
     return CliError(
         f"Repository path does not exist: {repo_path}",
         code=ExitCode.NOT_FOUND,
-        suggestion="iar registry reinit --repo-id <id>",
+        suggestion="kc registry reinit --repo-id <id>",
     )
 
 
@@ -278,7 +278,7 @@ def _run_registry_start_command(parsed: argparse.Namespace, process_runner: IPro
             raise CliError(
                 f"Repository '{repo_id}' is disabled.",
                 code=ExitCode.PERMISSION,
-                suggestion=f"iar registry reinit --repo-id {repo_id}",
+                suggestion=f"kc registry reinit --repo-id {repo_id}",
             )
         repo_ids = [repo_id]
 
@@ -383,7 +383,7 @@ def _format_process_status(running: dict[str, list[tuple[str, bool]]], kind: str
 
     Managed running processes are shown with their process IDs. Unmanaged
     running processes are shown as ``running (unmanaged)`` so users can tell
-    which daemons were started outside of ``iar registry start`` / console.
+    which daemons were started outside of ``kc registry start`` / console.
     """
     entries = running.get(kind, [])
     if not entries:
@@ -446,17 +446,17 @@ def _restart_daemons(repo_id: str, repo_path: Path, process_runner) -> int:
 def _resolve_executable_from_command(command: tuple[str, ...]) -> str:
     """Return the executable script path from a process command line.
 
-    For direct invocations such as ``/path/bin/iar daemon ...`` the first
+    For direct invocations such as ``/path/bin/kc daemon ...`` the first
     argument is returned. For Python wrapper invocations such as
-    ``/path/python /path/bin/iar daemon ...`` the ``iar`` script path is
-    returned.
+    ``/path/python /path/bin/kc daemon ...`` the legacy ``iar`` script path
+    is returned (the deprecated alias keeps working).
     """
     if not command:
         return ""
     first = command[0]
     if len(command) >= 2 and ("python" in Path(first).name.lower()):
         second = command[1]
-        if Path(second).name == "iar" or second.endswith("/iar"):
+        if Path(second).name == "iar" or second.endswith("/iar"):  # legacy-alias
             return second
     return first
 
@@ -591,7 +591,7 @@ def _normalize_process_kind(record_kind: RunnerProcessKind | str) -> str:
 def _select_logs_record(
     records: list[RunnerProcessRecord], repo_id: str, kind: str
 ) -> RunnerProcessRecord | None:
-    """Select the most relevant record for ``iar logs`` display.
+    """Select the most relevant record for ``kc logs`` display.
 
     Preference order:
 
@@ -768,7 +768,7 @@ def _follow_issue_log(
         raise CliError(
             f"Repository '{repo_id}' is not registered or is disabled.",
             code=ExitCode.NOT_FOUND,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         )
     if selection.status is IssueLogStatus.NO_ATTEMPT:
         _notice(f"Issue #{issue_number} 暂无可用输出（尚未开始或日志已清理）。")
@@ -863,7 +863,7 @@ def _follow_issue_log(
             raise CliError(
                 f"Repository '{repo_id}' is not registered or is disabled.",
                 code=ExitCode.NOT_FOUND,
-                suggestion="iar registry list",
+                suggestion="kc registry list",
             )
 
         # 检测是否出现了新尝试（重试/新执行）。
@@ -959,10 +959,10 @@ def _run_logs_command(
         raise repository_selector_error(exc) from exc
     if len(contexts) != 1:
         raise CliError(
-            "iar logs requires exactly one target repository. "
+            "kc logs requires exactly one target repository. "
             "Use --repo or --repo-id to specify.",
             code=ExitCode.USAGE,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         )
     context = contexts[0]
 
@@ -972,7 +972,7 @@ def _run_logs_command(
             f"Unsupported --kind value: {kind!r}. "
             f"Use '{_DAEMON_KIND}' or '{_REVIEW_DAEMON_KIND}'.",
             code=ExitCode.USAGE,
-            suggestion=f"iar logs --kind {_DAEMON_KIND}",
+            suggestion=f"kc logs --kind {_DAEMON_KIND}",
         )
 
     issue_number = getattr(parsed, "issue", None)
@@ -987,7 +987,7 @@ def _run_logs_command(
             raise CliError(
                 "--issue and --kind are mutually exclusive; use one or the other.",
                 code=ExitCode.USAGE,
-                suggestion="iar logs --issue 1",
+                suggestion="kc logs --issue 1",
             )
 
     lines = int(getattr(parsed, "lines", _LOGS_DEFAULT_LINES) or _LOGS_DEFAULT_LINES)

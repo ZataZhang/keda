@@ -1,7 +1,7 @@
 """Backlog start actions: single PRD, global scheduling, continuous advance.
 
 Actions reuse existing Issue creation, label editing, and runner spawn
-workflows so the backlog layer never bypasses the iar state machine.
+workflows so the backlog layer never bypasses the KedaCode state machine.
 
 Three entry points share one selection rule (see :func:`_select_eligible_prds`):
 

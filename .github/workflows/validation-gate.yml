@@ -1,7 +1,8 @@
 name: Validation Gate
 
 # Realistic Validation 人工签收硬门禁：
-# 解析 PR body 中由 iar 注入的 <!-- iar:realistic-validation ... --> 区块，
+# 解析 PR body 中由 KedaCode 注入的 <!-- iar:realistic-validation ... --> 区块，
+# 该标记是跨版本 wire 契约，名字永久不变。
 # 存在未勾选项则 check 失败。配合 branch protection 将本 check 设为
 # required，即可物理阻止未经人工确认验证证据的 PR 被合并。
 # 人工在 PR body 点勾会触发 `edited` 事件自动重跑本 check。

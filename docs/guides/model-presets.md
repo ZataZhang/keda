@@ -12,7 +12,7 @@ keda 拉起 agent CLI 时按 agent 级声明式模板注入对应的模型与推
 
 ## 1. 定义预设
 
-在 `config.toml`（全局）或仓库 `.iar.toml`（仓库级，同键覆盖全局）写：
+在 `config.toml`（全局）或仓库 `.kedacode.toml`（仓库级，同键覆盖全局）写：
 
 ```toml
 [agent_runner.presets.plan]
@@ -30,7 +30,7 @@ reasoning_effort = "high"
 - `model` / `reasoning_effort` 可选；两者都缺省时预设只改 agent 路由，不改 argv。
 - 未知预设名在解析期 fail-fast（带已定义清单），绝不静默回落——"切了模型"不能成为假象。
 
-枚举全部预设：`iar agent presets`。
+枚举全部预设：`kc agent presets`。
 
 ## 2. Agent 级模型参数模板
 
@@ -51,7 +51,7 @@ reasoning_effort_args = ["--settings", "{\"reasoningEffort\":\"{effort}\"}"]
   （`ModelNotSupportedError`，指名 agent 与缺失模板），绝不静默忽略。
 - 注入位置：profile `args` 之后、展开器与 `tail_args` 之前；占位符闭集扩为
   `{cwd}` / `{worktree}` / `{prompt}` / `{model}` / `{effort}`。
-- 预览注入结果：`iar agent doctor <agent> --preset <名> [--json]`（doctor 是 what-if 工具，
+- 预览注入结果：`kc agent doctor <agent> --preset <名> [--json]`（doctor 是 what-if 工具，
   不做"执行 agent == 预设 agent"的丢弃判定，模板缺失时如实报错）。
 
 ## 3. 阶段 → 预设 绑定
@@ -73,7 +73,7 @@ supervisor / planner / content_generation / deliberate）。
 1. 命令行显式 `--agent`（绑定让位，模型绑定由换人丢弃规则处理）；
 2. 命令行 `--preset` / `--model` / `--reasoning-effort`（一次性锚定 + 同名字段覆盖）；
 3. PRD 头部 `lifecycle_presets` 块（除 planner 外八键，随 Issue 流动）；
-4. 仓库 `.iar.toml` > 全局 `config.toml`（同键仓库层赢）。
+4. 仓库 `.kedacode.toml` > 全局 `config.toml`（同键仓库层赢）。
 
 未绑定预设的阶段：继续走生命周期矩阵 / 既有散落键 / 内置默认，行为零变化。
 
@@ -96,15 +96,15 @@ supervisor / planner / content_generation / deliberate）。
 
 | 命令 | 锚定阶段 | 旗标 |
 |---|---|---|
-| `iar run` / `iar daemon` | implementation | `--preset <名> [--model <id>] [--reasoning-effort <档>]` |
-| `iar review` / `iar review-daemon` | supervisor | 同上 |
-| `iar ask` | planner | 同上 |
-| `iar issue create` | content_generation | 同上 |
-| `iar agent doctor` | what-if 预览 | `--preset` / `--model` / `--reasoning-effort` / `--lifecycle <键>` |
+| `kc run` / `kc daemon` | implementation | `--preset <名> [--model <id>] [--reasoning-effort <档>]` |
+| `kc review` / `kc review-daemon` | supervisor | 同上 |
+| `kc ask` | planner | 同上 |
+| `kc issue create` | content_generation | 同上 |
+| `kc agent doctor` | what-if 预览 | `--preset` / `--model` / `--reasoning-effort` / `--lifecycle <键>` |
 
 - `--preset` 把该阶段锚定到指定预设并**覆盖绑定同名字段**；`--model` / `--reasoning-effort`
   是预设同名字段的一次性覆盖（必须与 `--preset` 同用）。
-- 仓库层 `.iar.toml` 的显式绑定仍会赢过 CLI 合成的全局层绑定；PRD 块（随 Issue 流动）最高。
+- 仓库层 `.kedacode.toml` 的显式绑定仍会赢过 CLI 合成的全局层绑定；PRD 块（随 Issue 流动）最高。
 - PRD 头部块写法（与 `lifecycle_agents` 块同型）：
 
 ```markdown
@@ -115,9 +115,9 @@ supervisor / planner / content_generation / deliberate）。
 
 ## 6. 排查与观测
 
-- `iar agent presets`：列出全部预设。
-- `iar agent doctor <agent> --preset <名>`：预览将被执行的完整 argv。
-- `iar agent doctor --lifecycle <键>`：按阶段视角打印"解析出的 agent + 绑定的模型参数"；
+- `kc agent presets`：列出全部预设。
+- `kc agent doctor <agent> --preset <名>`：预览将被执行的完整 argv。
+- `kc agent doctor --lifecycle <键>`：按阶段视角打印"解析出的 agent + 绑定的模型参数"；
   fix / closeout 在无实现者上下文时如实返回 `follows_implementation`。
 - console 生命周期矩阵视图每行新增 `preset` / `model` / `reasoning_effort` 三个只读字段。
 - attempt 账本 `attempt_records` 新增 `preset` / `model` 可空列（schema v6，自动迁移）。

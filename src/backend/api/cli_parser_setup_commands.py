@@ -23,7 +23,9 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
     Args:
         subparsers: 顶层 parser 的 subparsers action（就地注册，不返回）。
     """
-    init_parser = subparsers.add_parser("init", help="Create repository-local .iar.toml config.")
+    init_parser = subparsers.add_parser(
+        "init", help="Create repository-local .kedacode.toml config."
+    )
     init_parser.add_argument("--dry-run", action="store_true")
     init_parser.add_argument("--force", action="store_true")
     init_parser.add_argument("--id", dest="repository_id")
@@ -34,8 +36,8 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
         "--no-update-gitignore",
         action="store_true",
         help=(
-            "Do not add IAR runtime patterns (.iar/, .agent-runner/, "
-            ".iar-worktrees/) to .gitignore. Default: managed by iar init."
+            "Do not add KedaCode runtime patterns (.iar/, .agent-runner/, "
+            ".iar-worktrees/) to .gitignore. Default: managed by kc init."
         ),
     )
 

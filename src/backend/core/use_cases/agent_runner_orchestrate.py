@@ -190,7 +190,7 @@ def refresh_runtime_dependencies() -> None:
     的入口必须在调用前显式调用本函数**，否则那些补丁会静默失效——这与拆分前
     "补丁打在本模块即生效"的语义不一致。当前已知的这类入口：
     :func:`backend.core.use_cases.blocked_continue.blocked_continue_issue`
-    （``iar blocked-continue``）。新增同类入口时请一并补上，并考虑是否需要覆盖它的探针。
+    （``kc blocked-continue``）。新增同类入口时请一并补上，并考虑是否需要覆盖它的探针。
     """
     _orchestration_runtime_module()
 

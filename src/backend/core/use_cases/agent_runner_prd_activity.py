@@ -1,4 +1,4 @@
-"""将 IAR 的 Issue 执行投影到仓库已有的 PRD 活动锁。"""
+"""将 KedaCode 的 Issue 执行投影到仓库已有的 PRD 活动锁。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ _WORKTREE_POLL_SECONDS = 10
 
 
 class PrdActivityConflictError(RuntimeError):
-    """PRD 已由其他执行入口持锁，IAR 不得并发处理。"""
+    """PRD 已由其他执行入口持锁，KedaCode 不得并发处理。"""
 
 
 class PrdActivityLease:

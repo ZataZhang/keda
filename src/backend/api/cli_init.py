@@ -1,4 +1,4 @@
-"""Implementation of the ``iar init`` CLI command."""
+"""Implementation of the ``kc init`` CLI command."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             process_runner,
         )
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
-        logger.error("iar init failed: %s", exc)
+        logger.error("kc init failed: %s", exc)
         return 1
     _print_verification_commands_review_hint(init_result)
     update_gitignore = not getattr(parsed, "no_update_gitignore", False)
@@ -89,15 +89,17 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             _print_operator_skill_plan(operator_skill_result)
         return 0
     if init_result.wrote_file:
-        console.print(f"[green]Wrote IAR local config:[/] {init_result.config_path}")
+        console.print(f"[green]Wrote KedaCode local config:[/] {init_result.config_path}")
     else:
-        console.print(f"[dim]IAR local config already up to date:[/] {init_result.config_path}")
+        console.print(
+            f"[dim]KedaCode local config already up to date:[/] {init_result.config_path}"
+        )
     _print_gitignore_summary(gitignore_result)
     try:
         remote_skill_result = install_remote_template_skills(
             RemoteTemplateSkillInstallOptions(process_runner=process_runner, force=parsed.force)
         )
-    except Exception as exc:  # noqa: BLE001 - remote availability is required by iar init.
+    except Exception as exc:  # noqa: BLE001 - remote availability is required by kc init.
         error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
         return 1
     remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
@@ -153,7 +155,7 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
 
 
 def _print_operator_skill_plan(result) -> None:
-    """呈现内置 operator Skill 的安装、冲突保护或覆盖结果。"""
+    """呈现内置 operator Skill 的安装、冲突保护或覆盖结果，并回显旧名副本处理说明。"""
     if result.action == "preserve-conflict":
         prefix = (
             "Would preserve existing user skill"
@@ -162,21 +164,23 @@ def _print_operator_skill_plan(result) -> None:
         )
         print(f"{prefix} (conflict; use --force to replace): {result.target_path}")
     elif result.action == "up-to-date":
-        print(f"IAR operator skill already up to date: {result.target_path}")
+        print(f"KedaCode operator skill already up to date: {result.target_path}")
     else:
         if result.action == "overwrite":
             prefix = (
-                "Would overwrite packaged IAR operator skill"
+                "Would overwrite packaged KedaCode operator skill"
                 if result.dry_run
-                else "Overwrote packaged IAR operator skill"
+                else "Overwrote packaged KedaCode operator skill"
             )
         else:
             prefix = (
-                "Would install packaged IAR operator skill"
+                "Would install packaged KedaCode operator skill"
                 if result.dry_run
-                else "Installed IAR operator skill"
+                else "Installed KedaCode operator skill"
             )
         print(f"{prefix}: {result.target_path}")
+    if result.legacy_notice:
+        print(result.legacy_notice)
 
 
 def _print_gitignore_plan(result: GitignoreSyncResult) -> None:
@@ -196,7 +200,7 @@ def _print_gitignore_plan(result: GitignoreSyncResult) -> None:
     if result.block_inserted:
         joined = ", ".join(result.entries_added)
         console.print(
-            f"[cyan]Would add IAR patterns to .gitignore:[/] {joined}",
+            f"[cyan]Would add KedaCode patterns to .gitignore:[/] {joined}",
             markup=False,
         )
         for line in _format_block_preview():
@@ -205,13 +209,13 @@ def _print_gitignore_plan(result: GitignoreSyncResult) -> None:
         joined_added = ", ".join(result.entries_added) or "(none)"
         joined_skipped = ", ".join(result.entries_skipped_external) or "(none)"
         console.print(
-            f"[cyan]Would update IAR .gitignore block:[/] "
+            f"[cyan]Would update KedaCode .gitignore block:[/] "
             f"added={joined_added}; skipped_external={joined_skipped}",
             markup=False,
         )
     elif not result.entries_added and not result.entries_skipped_external:
         console.print(
-            f"[cyan]Would leave .gitignore unchanged (no IAR patterns needed):[/] "
+            f"[cyan]Would leave .gitignore unchanged (no KedaCode patterns needed):[/] "
             f"{result.gitignore_path}",
             markup=False,
         )
@@ -239,33 +243,35 @@ def _print_gitignore_summary(result: GitignoreSyncResult) -> None:
     if result.block_inserted:
         joined = ", ".join(result.entries_added)
         console.print(
-            f"[green]Updated .gitignore with IAR patterns:[/] {joined} -> {result.gitignore_path}"
+            f"[green]Updated .gitignore with KedaCode patterns:[/] {joined} -> {result.gitignore_path}"
         )
     elif result.block_updated:
         joined_added = ", ".join(result.entries_added) or "(none)"
         joined_skipped = ", ".join(result.entries_skipped_external) or "(none)"
         console.print(
-            f"[yellow]Updated IAR .gitignore block:[/] "
+            f"[yellow]Updated KedaCode .gitignore block:[/] "
             f"added={joined_added}; skipped_external={joined_skipped} "
             f"-> {result.gitignore_path}"
         )
     elif result.entries_added or result.entries_skipped_external:
         joined_skipped = ", ".join(result.entries_skipped_external) or "(none)"
         console.print(
-            f"[dim]IAR .gitignore block already up to date:[/] "
+            f"[dim]KedaCode .gitignore block already up to date:[/] "
             f"skipped_external={joined_skipped} -> {result.gitignore_path}"
         )
     else:
-        console.print(f"[dim]IAR .gitignore block already up to date:[/] {result.gitignore_path}")
+        console.print(
+            f"[dim]KedaCode .gitignore block already up to date:[/] {result.gitignore_path}"
+        )
     _print_info_exclude_hint_if_needed(result)
 
 
 def _print_info_exclude_hint_if_needed(result: GitignoreSyncResult) -> None:
-    """当 ``.git/info/exclude`` 含历史 iar 条目时,提示用户清理。"""
+    """当 ``.git/info/exclude`` 含历史 iar 条目时,提示用户清理。 # legacy-alias"""
     if not result.info_exclude_hint:
         return
     error_console.print(
-        "[yellow]Hint:[/] .git/info/exclude contains legacy iar entries "
+        "[yellow]Hint:[/] .git/info/exclude contains legacy iar entries "  # legacy-alias
         "(e.g. /.iar/evidence/, /.iar-worktrees/) that are now covered by "
         "the managed .gitignore block. You may delete them manually.",
         markup=False,
@@ -273,7 +279,7 @@ def _print_info_exclude_hint_if_needed(result: GitignoreSyncResult) -> None:
 
 
 def _format_block_preview() -> list[str]:
-    """Return the would-be-written iar block as a list of display lines.
+    """Return the would-be-written managed .gitignore block as display lines.
 
     Used by dry-run output to show the user exactly what will be appended.
     """
@@ -298,8 +304,8 @@ def _print_verification_commands_review_hint(
         f"⚠️  请检查 {init_result.config_path} 中的 verification_commands / "
         f"Please review verification_commands in {init_result.config_path}:\n"
         f"    {commands_repr}\n"
-        "    这些命令由 iar init 自动探测生成，建议根据项目实际 test/lint/build 命令复核并调整。\n"
-        "    These commands are auto-detected by iar init; please review against your actual test/lint/build setup."
+        "    这些命令由 kc init 自动探测生成，建议根据项目实际 test/lint/build 命令复核并调整。\n"
+        "    These commands are auto-detected by kc init; please review against your actual test/lint/build setup."
     )
     error_console.print(message, style="yellow", markup=False)
 

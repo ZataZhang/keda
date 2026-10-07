@@ -1,6 +1,6 @@
-# 一键安装 iar CLI
+# 一键安装 kc CLI
 
-> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆）。安装后有两个完全等价的命令：主命令 `iar`，以及与安装名对齐的别名 `kedacode`——装完想不起来敲什么时，直接敲包名也能用。本文其余部分统一写 `iar`。
+> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆）。安装后有两个完全等价的命令：主命令 `kc`，以及与安装名对齐的别名 `kedacode`——装完想不起来敲什么时，直接敲包名也能用。本文其余部分统一写 `kc`。
 >
 > 刻意**不**提供 `keda` 命令：`bin/keda` 会与 CNCF KEDA 将来可能进入 homebrew-core 的同名 formula 抢符号链接，那时用户 `brew install` 会直接失败。
 
@@ -10,7 +10,7 @@
 
 ```bash
 brew install ZataZhang/tap/kedacode
-iar --version
+kc --version
 ```
 
 **任何平台（uv / pipx，含 Windows PowerShell）：**
@@ -25,7 +25,7 @@ pipx install kedacode
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | bash
-iar --version
+kc --version
 ```
 
 脚本默认从 GitHub Release tarball 安装（`--source auto`）；`--source pypi` 改为从 PyPI 安装已发布的 `kedacode` 包——PyPI 不可达或版本不存在时直接报错退出，绝不静默回退到 tarball。脚本会按 `uv → pipx → pip --user` 的优先级选择安装方式，缺失 `uv` 时自动从 `astral.sh` 引导；不需要 `sudo`。
@@ -38,7 +38,7 @@ iar --version
 | `--source auto\|pypi\|tarball` | 安装来源：`auto`/`tarball` 走 GitHub tarball（默认），`pypi` 走 PyPI。 |
 | `--method uv\|pipx\|pip` | 强制使用指定安装器。 |
 | `--check` | 打印安装计划但不做任何修改。 |
-| `--uninstall` | 卸载 `kedacode` tool，以及 `iar` / `kedacode` 两个命令入口。 |
+| `--uninstall` | 卸载 `kedacode` tool，以及 `kc` / `kedacode` 两个命令入口。 |
 | `KEDA_VERSION` | 等价于 `--version`。 |
 | `KEDA_SOURCE` | 等价于 `--source`。 |
 | `KEDA_PYPI=1` | `--source pypi` 的旧别名（向后兼容保留）。 |
@@ -46,20 +46,20 @@ iar --version
 
 ## 初始化仓库与用户级 Skills
 
-安装完 `iar` 之后，进入任意 Git 仓库执行：
+安装完 `kc` 之后，进入任意 Git 仓库执行：
 
 ```bash
 git init
-iar init
+kc init
 ```
 
-`iar init` 会：
+`kc init` 会：
 
-1. 写入仓库根目录的 `.iar.toml`。
-2. 管理 IAR 所需的 `.gitignore` 条目。
+1. 写入仓库根目录的 `.kedacode.toml`。
+2. 管理 KedaCode 所需的 `.gitignore` 条目。
 3. 同步标准 GitHub label（`agent`、`rework-prd` 等）。
 
-`prd` 与 `code-reviewer` 不随 wheel 分发。`iar init` 会从远程
+`prd` 与 `code-reviewer` 不随 wheel 分发。`kc init` 会从远程
 [`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 下载且仅下载这两个
 Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`.codex/skills` 或
 `.kimi-code/skills`。安装目标由 agent 注册表（各 agent 的 `auth_home`）派生：所有**已存在
@@ -69,35 +69,35 @@ Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`
 
 ## 容器化运行（可选）
 
-`iar` 还提供 `iar container` 子命令组，把 agent runner 跑进 Docker 容器：
+`kc` 还提供 `kc container` 子命令组，把 agent runner 跑进 Docker 容器：
 
 - 容器内预装 claude / codex / kimi 三个 agent CLI + gh + Node + uv + just + git，避免污染本机工具链。内置注册表里另有 `codebuddy` / `qoder` / `opencode`，但**容器镜像尚未预装它们**——容器里选中这些 agent 会在启动子进程时报可执行文件不存在；需要时请在本机跑，或自行在镜像里补装。
-- 认证通过 `iar container auth import` 一次性快照到 `~/.iar/container-auth/`，与本机 cc-switch 当前 profile 隔离——本机切账号不影响容器内 agent 认证。
-- 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `iar worktree open` 接管。
-- runner 容器资产（Dockerfile / compose / .env.example）随 `iar` 包发布，无需克隆 keda 源码，全局安装后即可使用。
+- 认证通过 `kc container auth import` 一次性快照到 `~/.kedacode/container-auth/`，与本机 cc-switch 当前 profile 隔离——本机切账号不影响容器内 agent 认证。
+- 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
+- runner 容器资产（Dockerfile / compose / .env.example）随 `kc` 包发布，无需克隆 keda 源码，全局安装后即可使用。
 
 最小启动流程：
 
 ```bash
 # 1. 准备认证（本机 cc-switch 切到要给容器用的账号）
-iar container auth import
+kc container auth import
 
 # 2. 准备 GitHub token（macOS keychain 容器读不到）
 export GH_TOKEN="$(gh auth token)"
 
 # 3. 启动容器 runner
-iar container up --repo /absolute/path/to/your-repo --repo-id keda
+kc container up --repo /absolute/path/to/your-repo --repo-id keda
 
 # 4. 查看日志 / 停止
-iar container logs
-iar container down
+kc container logs
+kc container down
 ```
 
-完整说明见 `docs/guides/agent-runner.md` 的「容器化运行」章节。Docker 未安装时该子命令返回明确错误，不影响本机 `iar daemon` 用法。
+完整说明见 `docs/guides/agent-runner.md` 的「容器化运行」章节。Docker 未安装时该子命令返回明确错误，不影响本机 `kc daemon` 用法。
 
 ## 排错
 
-- `command -v iar` 没命中：把 `~/.local/bin` 加入 `PATH`，或在新 shell 中重试。
+- `command -v kc` 没命中：把 `~/.local/bin` 加入 `PATH`，或在新 shell 中重试。
 - macOS GUI 终端未继承 `PATH`：在 shell rc 中显式追加 `export PATH="$HOME/.local/bin:$PATH"`。
 - 安装器报 Python 版本过低：升级到 Python >= 3.11，或使用 `uv python install 3.12` 后重试。
 
@@ -107,7 +107,7 @@ iar container down
 bash install.sh --uninstall
 ```
 
-会清理 `kedacode` tool 目录，以及 `~/.local/bin/` 下的 `iar` 与 `kedacode` 两个入口。
+会清理 `kedacode` tool 目录，以及 `~/.local/bin/` 下的 `kc` 与 `kedacode` 两个入口。
 
 uv / pipx / Homebrew 安装的用户直接用对应工具卸载：
 

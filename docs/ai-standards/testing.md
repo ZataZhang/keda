@@ -193,7 +193,7 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 
 使用 `just ai implement` 实现 PRD 时，Agent 必须生成可审查的证据包，而不是直接勾选 Acceptance Checklist。
 
-> **证据留存策略**：`tasks/evidence/` 只提交文本报告（`*.verification-plan.md`、`*.evidence-report.md`、`*.verifier-report.md`）；原始证据产物（截图、录屏、命令输出、大日志）由 `.gitignore` 白名单（`tasks/evidence/**` + `!tasks/evidence/**/*.md`）排除，仅留在本地磁盘——原始证据不进代码历史（避免二进制膨胀、密钥泄漏永久化）。verifier 与 `check_prd_evidence.sh` 在实现期仍针对本地文件运行。**本地 `just ai implement` 流与 iar daemon 的 Issue→PR 流使用同一约定**：daemon 流同样写入 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），三份 `.md` 报告随 PR 进版本库，原始产物额外发布到 PR 评论与 orphan 证据分支，见 `docs/guides/agent-runner.md`。显式配置 `validation.evidence_dir = ".iar/evidence"` 的 legacy 仓库保持整目录排除的旧行为。
+> **证据留存策略**：`tasks/evidence/` 只提交文本报告（`*.verification-plan.md`、`*.evidence-report.md`、`*.verifier-report.md`）；原始证据产物（截图、录屏、命令输出、大日志）由 `.gitignore` 白名单（`tasks/evidence/**` + `!tasks/evidence/**/*.md`）排除，仅留在本地磁盘——原始证据不进代码历史（避免二进制膨胀、密钥泄漏永久化）。verifier 与 `check_prd_evidence.sh` 在实现期仍针对本地文件运行。**本地 `just ai implement` 流与 kc daemon 的 Issue→PR 流使用同一约定**：daemon 流同样写入 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），三份 `.md` 报告随 PR 进版本库，原始产物额外发布到 PR 评论与 orphan 证据分支，见 `docs/guides/agent-runner.md`。显式配置 `validation.evidence_dir = ".iar/evidence"` 的 legacy 仓库保持整目录排除的旧行为。
 
 流程：
 
@@ -240,7 +240,7 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 
 ```yaml
 - id: rv-1
-  behavior: RV 命令含 [ -d x ] || true 兜底时，新版 iar 复跑必须抓到假绿灯
+  behavior: RV 命令含 [ -d x ] || true 兜底时，新版 kc 复跑必须抓到假绿灯
   real_entry: "在临时 worktree 的 .iar/evidence/evidence.json 里声明 stdout_assertions:"
               "{"pattern": "REAL_OUTPUT", "must_match": true}，命令写成 `[ -d /tmp/missing ] || true`，"
               "再跑 ensure_validation_commands_pass"

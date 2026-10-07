@@ -1,8 +1,8 @@
-"""Typer commands under ``iar console``.
+"""Typer commands under ``kc console``.
 
 提供 :func:`console_callback`：前台启动 FastAPI 后端并托管随 wheel
 分发的前端静态产物。端口解析、浏览器拉起都收敛在本模块内的纯函数上，
-便于单测直接覆盖；命令本身不触碰 ``~/.iar/processes.json``，与面板
+便于单测直接覆盖；命令本身不触碰 ``~/.kedacode/processes.json``，与面板
 托管的 runner 进程互不干扰。
 """
 
@@ -49,7 +49,7 @@ def _port_is_available(host: str, port: int) -> bool:
 
 
 def resolve_console_port(*, host: str, explicit_port: int | None, default_port: int) -> int:
-    """解析 ``iar console`` 实际监听的端口。
+    """解析 ``kc console`` 实际监听的端口。
 
     Args:
         host: 监听地址（配置项，固定 ``127.0.0.1``）。
@@ -90,7 +90,7 @@ def launch_console(*, host: str, port: int, open_browser: bool) -> None:
             预约打开管理终端首页。
     """
     console_url = f"http://{host}:{port}/"
-    typer.echo(f"iar console listening on {console_url} (Ctrl+C to stop)")
+    typer.echo(f"kc console listening on {console_url} (Ctrl+C to stop)")
     if open_browser:
         browser_timer = threading.Timer(
             _BROWSER_OPEN_DELAY_SECONDS, webbrowser.open, args=(console_url,)
@@ -118,7 +118,7 @@ def console_callback(
         typer.Option("--no-browser", help="Do not open the console in a browser tab."),
     ] = False,
 ) -> None:
-    """启动 iar 管理终端（API + 内置前端面板），前台运行。"""
+    """启动 KedaCode 管理终端（API + 内置前端面板），前台运行。"""
     if ctx.invoked_subcommand is not None:
         return
     console_settings = load_fresh_agent_runner_settings().console

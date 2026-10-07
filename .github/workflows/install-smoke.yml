@@ -3,7 +3,7 @@ name: Install smoke
 # 两个维度（PRD FR-9，实现期修订：发布触发改挂 release published 后，
 # tag 事件只产出 draft、PyPI 无变化，故"从 PyPI 真实安装"档挂在 release published）：
 #   1. install-check：install.sh 计划检查 + 可编辑安装（install.sh 是 bash 脚本，Windows 不适用）
-#   2. real-install：真实安装 + iar console 启动探活——
+#   2. real-install：真实安装 + kc console 启动探活——
 #      PR / 分支 / tag 事件从本次构建的 wheel 装；release published 事件从公共 PyPI 装
 on:
   pull_request:
@@ -56,12 +56,13 @@ jobs:
         run: |
           uv tool install --reinstall --editable .
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          # 两个 console script 都要验：漏掉别名时 pyproject 的 [project.scripts]
-          # 改动不会在这里冒烟出来。
-          iar --version
+          # 三个 console script 都要验：漏掉别名时 pyproject 的 [project.scripts]
+          # 改动不会在这里冒烟出来。永久弃用别名只在本档探测一次。
+          kc --version
           kedacode --version
+          iar --version  # legacy-alias
 
-      - name: Exercise iar init in a throwaway git repo
+      - name: Exercise kc init in a throwaway git repo
         run: |
           tmp_repo="$(mktemp -d)"
           git -C "$tmp_repo" init -q
@@ -70,15 +71,15 @@ jobs:
           git -C "$tmp_repo" config user.name "Install Smoke"
           user_skills_dir="$tmp_repo/user-skills"
           cd "$tmp_repo"
-          IAR_SKILLS_DIR="$user_skills_dir" iar init --dry-run
-          IAR_SKILLS_DIR="$user_skills_dir" iar init
-          test -f "$tmp_repo/.iar.toml"
+          KEDACODE_SKILLS_DIR="$user_skills_dir" kc init --dry-run
+          KEDACODE_SKILLS_DIR="$user_skills_dir" kc init
+          test -f "$tmp_repo/.kedacode.toml"
           test -f "$user_skills_dir/prd/SKILL.md"
           test -f "$user_skills_dir/code-reviewer/SKILL.md"
           test ! -e "$tmp_repo/.claude/skills"
           test ! -e "$tmp_repo/.codex/skills"
           test ! -e "$tmp_repo/.kimi-code/skills"
-          IAR_SKILLS_DIR="$user_skills_dir" iar init  # second run updates only user-level skills
+          KEDACODE_SKILLS_DIR="$user_skills_dir" kc init  # second run updates only user-level skills
 
       - name: "Optional: install from raw GitHub URL (release tag only)"
         if: startsWith(github.ref, 'refs/tags/v')
@@ -195,7 +196,7 @@ jobs:
         run: |
           uv tool install --reinstall dist/*.whl
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          iar --version
+          kc --version
           kedacode --version
 
       - name: Install from built wheel (real install, Windows)
@@ -206,16 +207,16 @@ jobs:
           if (-not $wheel_path) { throw "no wheel found under dist/" }
           uv tool install --reinstall $wheel_path
           Add-Content $env:GITHUB_PATH (Join-Path $env:USERPROFILE ".local/bin")
-          iar --version
+          kc --version
           kedacode --version
 
-      - name: Probe iar console (bash)
+      - name: Probe kc console (bash)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           probe_dir="$(mktemp -d)"
           cd "$probe_dir"
-          iar console --no-browser --port 8611 &
+          kc console --no-browser --port 8611 &
           console_pid=$!
           trap 'kill "$console_pid" 2>/dev/null || true' EXIT
           http_code=""
@@ -223,21 +224,21 @@ jobs:
             sleep 2
             http_code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8611/ || true)"
             if [ "$http_code" = "200" ]; then
-              echo "iar console returned 200"
+              echo "kc console returned 200"
               exit 0
             fi
           done
-          echo "iar console did not return 200 within 60s (last code: ${http_code:-none})"
+          echo "kc console did not return 200 within 60s (last code: ${http_code:-none})"
           exit 1
 
-      - name: Probe iar console (Windows)
+      - name: Probe kc console (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $probe_dir = Join-Path $env:RUNNER_TEMP "iar-console-probe"
+          $probe_dir = Join-Path $env:RUNNER_TEMP "kc-console-probe"
           New-Item -ItemType Directory -Force -Path $probe_dir | Out-Null
           Set-Location $probe_dir
-          $console_proc = Start-Process -FilePath "iar" `
+          $console_proc = Start-Process -FilePath "kc" `
             -ArgumentList "console", "--no-browser", "--port", "8611" `
             -PassThru -NoNewWindow
           $probe_ok = $false
@@ -248,7 +249,7 @@ jobs:
                 $response = Invoke-WebRequest -Uri "http://127.0.0.1:8611/" `
                   -UseBasicParsing -TimeoutSec 5
                 if ($response.StatusCode -eq 200) {
-                  Write-Host "iar console returned 200"
+                  Write-Host "kc console returned 200"
                   $probe_ok = $true
                   break
                 }
@@ -257,7 +258,7 @@ jobs:
               }
             }
             if (-not $probe_ok) {
-              throw "iar console did not return 200 within 60s"
+              throw "kc console did not return 200 within 60s"
             }
           } finally {
             if (-not $console_proc.HasExited) {
@@ -307,7 +308,7 @@ jobs:
           # 固定到刚发布的版本号：公共索引上不存在该版本时本步直接失败
           uv tool install --reinstall "kedacode==${package_version}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          iar --version
+          kc --version
           kedacode --version
 
       # Windows 不再单独写一份等待：上面那个 composite action 用 shell: bash，
@@ -321,16 +322,16 @@ jobs:
           $package_version = $env:PUBLISHED_VERSION -replace '^v', ''
           uv tool install --reinstall "kedacode==$package_version"
           Add-Content $env:GITHUB_PATH (Join-Path $env:USERPROFILE ".local/bin")
-          iar --version
+          kc --version
           kedacode --version
 
-      - name: Probe iar console (bash)
+      - name: Probe kc console (bash)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           probe_dir="$(mktemp -d)"
           cd "$probe_dir"
-          iar console --no-browser --port 8612 &
+          kc console --no-browser --port 8612 &
           console_pid=$!
           trap 'kill "$console_pid" 2>/dev/null || true' EXIT
           http_code=""
@@ -338,21 +339,21 @@ jobs:
             sleep 2
             http_code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8612/ || true)"
             if [ "$http_code" = "200" ]; then
-              echo "iar console returned 200"
+              echo "kc console returned 200"
               exit 0
             fi
           done
-          echo "iar console did not return 200 within 60s (last code: ${http_code:-none})"
+          echo "kc console did not return 200 within 60s (last code: ${http_code:-none})"
           exit 1
 
-      - name: Probe iar console (Windows)
+      - name: Probe kc console (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $probe_dir = Join-Path $env:RUNNER_TEMP "iar-console-probe"
+          $probe_dir = Join-Path $env:RUNNER_TEMP "kc-console-probe"
           New-Item -ItemType Directory -Force -Path $probe_dir | Out-Null
           Set-Location $probe_dir
-          $console_proc = Start-Process -FilePath "iar" `
+          $console_proc = Start-Process -FilePath "kc" `
             -ArgumentList "console", "--no-browser", "--port", "8612" `
             -PassThru -NoNewWindow
           $probe_ok = $false
@@ -363,7 +364,7 @@ jobs:
                 $response = Invoke-WebRequest -Uri "http://127.0.0.1:8612/" `
                   -UseBasicParsing -TimeoutSec 5
                 if ($response.StatusCode -eq 200) {
-                  Write-Host "iar console returned 200"
+                  Write-Host "kc console returned 200"
                   $probe_ok = $true
                   break
                 }
@@ -372,7 +373,7 @@ jobs:
               }
             }
             if (-not $probe_ok) {
-              throw "iar console did not return 200 within 60s"
+              throw "kc console did not return 200 within 60s"
             }
           } finally {
             if (-not $console_proc.HasExited) {
@@ -444,8 +445,8 @@ jobs:
 
       - name: Probe the installed console
         run: |
-          iar --version
-          iar console --no-browser --port 8899 &
+          kc --version
+          kc console --no-browser --port 8899 &
           for _ in $(seq 1 20); do
             if curl -fsS -o /dev/null "http://127.0.0.1:8899/api/v1/agent-runner/health"; then
               echo "console reachable with a 3.10 ambient python"

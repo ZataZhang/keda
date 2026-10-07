@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -170,11 +171,10 @@ class TestDefaultRunnerCommand:
         assert console_settings.runner_command == ["/custom/iar"]
 
     def test_argv0_named_iar_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """iar 入口直接运行时取 sys.argv[0]，保证与当前安装态同源。"""
+        """自有入口（含旧别名 iar）直接运行时取 sys.argv[0]，保证与当前安装态同源。"""
         monkeypatch.setattr(
             agent_runner_settings.sys, "argv", ["/tmp/iar-clean/bin/iar", "console"]
         )
-        monkeypatch.setattr(agent_runner_settings.shutil, "which", lambda name: "/from/which/iar")
         assert agent_runner_settings._default_runner_command() == ["/tmp/iar-clean/bin/iar"]
 
     def test_exe_suffixed_argv0_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -188,28 +188,39 @@ class TestDefaultRunnerCommand:
             "argv",
             ["/c/Users/zata/.local/bin/iar.exe", "console"],
         )
-        monkeypatch.setattr(agent_runner_settings.shutil, "which", lambda name: "/from/which/iar")
         assert agent_runner_settings._default_runner_command() == [
             "/c/Users/zata/.local/bin/iar.exe"
         ]
 
     def test_falls_back_to_which_when_argv0_is_not_iar(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """uvicorn 等其它入口启动后端时，从 PATH 解析 iar。"""
+        """uvicorn 等其它入口启动后端时，按 kc 优先从 PATH 解析（旧名兜底）。
+
+        which_command 是 resolve_own_command_argv 的默认参数，绑定的是真实
+        ``shutil.which``，无法用 monkeypatch 替换其函数对象；改为钉死 PATH 让其在
+        调用时读到受控目录，从而稳定命中新主名 kc。
+        """
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        kc_path = bin_dir / "kc"
+        kc_path.write_text("#!/bin/sh\n", encoding="utf-8")
+        kc_path.chmod(0o755)
         monkeypatch.setattr(
             agent_runner_settings.sys, "argv", ["/usr/bin/uvicorn", "backend.api.app:app"]
         )
-        monkeypatch.setattr(
-            agent_runner_settings.shutil, "which", lambda name: "/opt/homebrew/bin/iar"
-        )
-        assert agent_runner_settings._default_runner_command() == ["/opt/homebrew/bin/iar"]
+        monkeypatch.setenv("PATH", str(bin_dir))
+        assert agent_runner_settings._default_runner_command() == [str(kc_path)]
 
-    def test_falls_back_to_uv_run_when_iar_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """既非 iar 入口、PATH 也找不到 iar 时兜底 uv run。"""
+    def test_falls_back_to_uv_run_when_iar_not_found(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """既非自有入口、PATH 也找不到任一自有名时兜底 ``uv run kc``。"""
+        empty_bin_dir = tmp_path / "empty-bin"
+        empty_bin_dir.mkdir()
         monkeypatch.setattr(agent_runner_settings.sys, "argv", ["python", "-m", "backend.main"])
-        monkeypatch.setattr(agent_runner_settings.shutil, "which", lambda name: None)
-        assert agent_runner_settings._default_runner_command() == ["uv", "run", "iar"]
+        monkeypatch.setenv("PATH", str(empty_bin_dir))
+        assert agent_runner_settings._default_runner_command() == ["uv", "run", "kc"]
 
 
 class TestListenHostIsNotConfigurable:

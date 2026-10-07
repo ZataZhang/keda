@@ -1,6 +1,6 @@
 """解析 ``worktree.path_command`` 在 stdout 上输出的 worktree 路径。
 
-``iar worktree path`` 会在最后一行打印绝对路径，但同一进程可能在路径之前把
+``kc worktree path`` 会在最后一行打印绝对路径，但同一进程可能在路径之前把
 日志记录（WARNING/INFO）写到 stdout：应用日志器固定写 stdout，而配置加载发生
 在命令主体之前。若调用方直接 ``Path(stdout.strip())``，就会把日志噪声与路径
 拼成一条非法路径，导致路径「不存在」，进而把 Issue 误判为失败。这里统一取

@@ -320,7 +320,8 @@ _ensure_fzf() {
     esac
 }
 
-IAR_SKILLS_DIR="${IAR_SKILLS_DIR:-}"
+KEDACODE_SKILLS_DIR="${KEDACODE_SKILLS_DIR:-}"
+IAR_SKILLS_DIR="${IAR_SKILLS_DIR:-}" # legacy-alias
 SKILL_INSTALL_TARGET_DIR=""
 
 _resolve_skill_install_target_dir() {
@@ -328,17 +329,29 @@ _resolve_skill_install_target_dir() {
         return 0
     fi
 
-    if [ -n "$IAR_SKILLS_DIR" ]; then
-        SKILL_INSTALL_TARGET_DIR="$IAR_SKILLS_DIR"
+    if [ -n "$KEDACODE_SKILLS_DIR" ]; then
+        SKILL_INSTALL_TARGET_DIR="$KEDACODE_SKILLS_DIR"
         return 0
     fi
 
-    if [ -d "$HOME/.iar/skills" ]; then
-        SKILL_INSTALL_TARGET_DIR="$HOME/.iar/skills"
+    # 改名前的环境变量仍作为兜底被读取；新名存在时新名优先。
+    if [ -n "$IAR_SKILLS_DIR" ]; then # legacy-alias
+        SKILL_INSTALL_TARGET_DIR="$IAR_SKILLS_DIR" # legacy-alias
         return 0
     fi
 
-    echo "No ~/.iar/skills directory found."
+    if [ -d "$HOME/.kedacode/skills" ]; then
+        SKILL_INSTALL_TARGET_DIR="$HOME/.kedacode/skills"
+        return 0
+    fi
+
+    # 改名前的状态目录仍然可用（新旧目录都被承认），因此保留这条兜底。
+    if [ -d "$HOME/.iar/skills" ]; then # legacy-alias
+        SKILL_INSTALL_TARGET_DIR="$HOME/.iar/skills" # legacy-alias
+        return 0
+    fi
+
+    echo "No ~/.kedacode/skills directory found."
     echo "Choose a skill install target:"
     echo "  [1] Codex  -> $HOME/.codex/skills"
     echo "  [2] Claude -> $HOME/.claude/skills"

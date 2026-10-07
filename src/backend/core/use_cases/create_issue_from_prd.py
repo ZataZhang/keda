@@ -1,6 +1,6 @@
 """根据本地 PRD Markdown 文件创建 GitHub Issue。
 
-本模块实现 ``iar issue create`` 工作流：
+本模块实现 ``kc issue create`` 工作流：
 
 1. 读取本地 PRD Markdown 文件。
 2. 提取元数据（标题、验收清单、引言）。
@@ -701,7 +701,7 @@ def _materialize_prd_dependencies(
             "Cannot materialize PRD dependency "
             f"{prd_ref!r} resolved to {relative_path!r}: the referenced PRD "
             "has no '- GitHub Issue: .../issues/N' link. Create the upstream "
-            "Issue first (iar issue create writes its link back into the PRD), "
+            "Issue first (kc issue create writes its link back into the PRD), "
             "or replace the dependency with a concrete Issue number such as '#42'."
         )
 

@@ -1,4 +1,4 @@
-"""``iar init``, ``iar workflow install``, and ``iar takeover`` handlers.
+"""``kc init``, ``kc workflow install``, and ``kc takeover`` handlers.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
 dispatcher. Each handler takes a :class:`ParsedCommandContext` and
@@ -32,24 +32,24 @@ from backend.core.use_cases.agent_runner_repository_local import (
 
 
 def run_init_command(ctx: ParsedCommandContext) -> int:
-    """``iar init``: create repository-local .iar.toml config."""
+    """``kc init``: create repository-local .kedacode.toml config."""
     if ctx.repo_id is not None or ctx.repo_override is not None:
         raise CliError(
-            "iar init uses the current Git repository; omit --repo/--repo-id.",
+            "kc init uses the current Git repository; omit --repo/--repo-id.",
             code=ExitCode.USAGE,
-            suggestion="iar init",
+            suggestion="kc init",
         )
     return _run_init_command(ctx.parsed, ctx.process_runner)
 
 
 def run_workflow_install_command(ctx: ParsedCommandContext) -> int:
-    """``iar workflow install``: bundle a workflow template into the repo."""
+    """``kc workflow install``: bundle a workflow template into the repo."""
     if ctx.repo_id is not None or ctx.repo_override is not None or ctx.parsed.config is not None:
         raise CliError(
-            "iar workflow install uses the current Git repository; "
+            "kc workflow install uses the current Git repository; "
             "omit --repo/--repo-id/--config.",
             code=ExitCode.USAGE,
-            suggestion="iar workflow install --help",
+            suggestion="kc workflow install --help",
         )
     try:
         install_result = install_workflow(
@@ -65,18 +65,18 @@ def run_workflow_install_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             str(exc),
             code=ExitCode.NOT_FOUND,
-            suggestion="iar workflow install --help",
+            suggestion="kc workflow install --help",
         ) from exc
     except ExistingFileRefusedError as exc:
         raise CliError(
             str(exc),
             code=ExitCode.CONFLICT,
-            suggestion=f"iar workflow install {ctx.parsed.name} --force",
+            suggestion=f"kc workflow install {ctx.parsed.name} --force",
         ) from exc
     except IARRepositoryNotInitializedError as exc:
         return _handle_not_initialized_error(exc, fmt=ctx.output_format)
     except ValueError as exc:
-        logger.error("iar workflow install failed: %s", exc)
+        logger.error("kc workflow install failed: %s", exc)
         return 1
     if ctx.parsed.dry_run:
         console.print("[cyan]Would install workflow:[/] %s" % install_result.name)
@@ -103,7 +103,7 @@ def run_workflow_install_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_takeover_command(ctx: ParsedCommandContext) -> int:
-    """``iar takeover``: bulk import + register GitHub repositories."""
+    """``kc takeover``: bulk import + register GitHub repositories."""
     return _run_takeover_command(ctx.parsed, ctx.process_runner)
 
 

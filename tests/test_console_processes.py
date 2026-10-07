@@ -25,7 +25,7 @@ from backend.core.use_cases.console_processes import (
 )
 from backend.infrastructure.console.process_supervisor import (
     PidfileProcessSupervisor,
-    _find_iar_command_index,
+    _find_own_command_index,
     _parse_repo_id_from_argv,
     _parse_unmanaged_kind,
     _resolve_repo_id_from_cwd,
@@ -445,11 +445,14 @@ def test_stop_repository_persistent_processes_reports_failures() -> None:
 # ── 未托管进程扫描辅助函数 ─────────────────────────────────────────────────────
 
 
-def test_find_iar_command_index() -> None:
-    """``iar`` may appear after wrappers or with an absolute path."""
-    assert _find_iar_command_index(("uv", "run", "iar", "daemon")) == 2
-    assert _find_iar_command_index(("/Users/x/.local/bin/iar", "daemon")) == 0
-    assert _find_iar_command_index(("python", "-m", "backend.api.cli")) is None
+def test_find_own_command_index() -> None:
+    """三个自有命令名都可能出现在包装器之后或绝对路径形式的位置。"""
+    assert _find_own_command_index(("uv", "run", "iar", "daemon")) == 2
+    assert _find_own_command_index(("/Users/x/.local/bin/iar", "daemon")) == 0
+    assert _find_own_command_index(("kc", "daemon", "--repo-id", "keda")) == 0
+    assert _find_own_command_index(("/opt/bin/kedacode", "review")) == 0
+    assert _find_own_command_index(("python", "-m", "backend.api.cli")) is None
+    assert _find_own_command_index(("kiar", "daemon")) is None
 
 
 def test_parse_unmanaged_kind() -> None:

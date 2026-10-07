@@ -922,15 +922,15 @@ def build_publish_failure_comment_body(
 ) -> str:
     """Build the shared body for publish / publish-recovery failure comments.
 
-    Both the publish phase and the ``iar recover`` flow render the same
+    Both the publish phase and the ``kc recover`` flow render the same
     structure (failure category, optional worktree, error text + cause, and the
-    ``iar recover`` retry hint), differing only in the heading, intro line, and
+    ``kc recover`` retry hint), differing only in the heading, intro line, and
     action sentence.
 
     Args:
         header: Markdown heading line (e.g. ``"## Agent Runner Publish Failed"``).
         intro: One-line description shown under the heading.
-        action_intro: Sentence introducing the ``iar recover`` command block.
+        action_intro: Sentence introducing the ``kc recover`` command block.
         issue_number: GitHub Issue number used in the recover command.
         failure_category: Human-readable publish failure category.
         worktree_path: Worktree path to surface, if available.
@@ -969,7 +969,7 @@ def build_publish_failure_comment_body(
             action_intro,
             "",
             "```bash",
-            f"uv run iar recover --issue {issue_number}",
+            f"uv run kc recover --issue {issue_number}",
             "```",
         ]
     )
@@ -1020,7 +1020,7 @@ def format_blocked_failure_comment(
             "4. Run the following command to continue:",
             "",
             "```bash",
-            f"uv run iar blocked-continue --issue {issue_number}",
+            f"uv run kc blocked-continue --issue {issue_number}",
             "```",
             "",
         ]

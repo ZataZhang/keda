@@ -412,7 +412,7 @@ def run_agent_deliberation(
             prompt from the original ``request`` and the full discussion
             ``transcript``. When ``None`` the built-in
             :func:`_build_synthesis_prompt` is used (the historical
-            ``iar deliberate`` 5-section report shape); callers such as the
+            ``kc deliberate`` 5-section report shape); callers such as the
             Phase 0 ``agent/deliberate`` queue pass a custom builder that
             asks for a structured clarifying-question list instead.
 

@@ -2,7 +2,7 @@
 
 NOTE: This argparse-based parser is still the execution backend for
 ``backend.api.cli_typer``. When adding or changing CLI options, defaults, or
-argument structure, keep ``cli_typer.py`` in sync so the actual ``iar`` entry
+argument structure, keep ``cli_typer.py`` in sync so the actual ``kc`` entry
 point and its help text stay consistent.
 
 After the line-split refactor the per-subcommand bodies of
@@ -60,7 +60,7 @@ def _resolve_loop_target_repository(
     Loops may carry their own ``repo_id`` (resolved from the recipe when
     not overridden on the CLI). When the user did not pass ``--repo-id``
     or ``--repo``, we infer the target from the current working directory
-    the same way ``iar daemon`` does, falling back to ``None`` so the
+    the same way ``kc daemon`` does, falling back to ``None`` so the
     per-loop ``repo_id`` is honored.
     """
     if loop_repo_path:
@@ -87,7 +87,7 @@ def _resolve_loop_target_repository(
 
 
 def _run_loop_command(parsed: argparse.Namespace, process_runner) -> int:
-    """Dispatch ``iar loop ...`` and ``iar loop-daemon`` commands."""
+    """Dispatch ``kc loop ...`` and ``kc loop-daemon`` commands."""
     from backend.api.cli_loop import build_schedule_from_args, logger as loop_logger
 
     runner_settings = get_agent_runner_settings()
@@ -113,7 +113,7 @@ def _run_loop_command(parsed: argparse.Namespace, process_runner) -> int:
         if context is None:
             raise ValueError(
                 f"Loop '{task.id}' targets repo_id {task.repo_id!r} which is "
-                "not registered. Run `iar registry list` or pass "
+                "not registered. Run `kc registry list` or pass "
                 "`--repo-id` / `--repo` to target a specific repository."
             )
         return context.repo_path
@@ -171,7 +171,7 @@ def _run_loop_command(parsed: argparse.Namespace, process_runner) -> int:
 def _failure_diagnostic_command(repo_id: str | None) -> str:
     """给未分类失败拼一条可直接跑的下一步命令（完整 traceback 在进程日志里）。"""
     selector = f" --repo-id {shlex.quote(repo_id)}" if repo_id else ""
-    return f"iar logs{selector} --lines 200"
+    return f"kc logs{selector} --lines 200"
 
 
 def _run_parsed_command(parsed: argparse.Namespace) -> int:
@@ -201,14 +201,14 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
 
     # ``container up`` 把 ``--repo`` 用作容器挂载路径、``--repo-id`` 用作仓库
     # registry id，二者语义互补（与其它命令里二者互为仓库选择器不同），
-    # 不适用互斥校验；否则文档主路径 ``iar container up --repo <path>
+    # 不适用互斥校验；否则文档主路径 ``kc container up --repo <path>
     # --repo-id <id>`` 会被误拦。
     if repo_id is not None and repo_override is not None and parsed.command != "container up":
         return render_cli_error(
             CliError(
                 "--repo and --repo-id are mutually exclusive.",
                 code=ExitCode.USAGE,
-                suggestion="iar registry list",
+                suggestion="kc registry list",
             ),
             fmt=output_format,
         )
@@ -255,7 +255,7 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
         return render_cli_error(exc, fmt=output_format)
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
         error_detail = _format_cli_exception(exc)
-        logger.error("iar failed:\n%s", error_detail)
+        logger.error("kc failed:\n%s", error_detail)
         exit_code = translate_exit_code(exc)
         if output_format == OUTPUT_FORMAT_JSON:
             return render_cli_error(
@@ -267,7 +267,7 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
                 ),
                 fmt=output_format,
             )
-        error_console.print("[red]iar failed:[/]")
+        error_console.print("[red]kc failed:[/]")
         error_console.print(error_detail, markup=False)
         return exit_code
 

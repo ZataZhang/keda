@@ -1,4 +1,4 @@
-"""Typer commands under ``iar init``.
+"""Typer commands under ``kc init``.
 
 Holds :func:`init_command`. Imports the shared :func:`_run_typer_command`
 and option types from :mod:`backend.api.cli_typer_app`.
@@ -24,7 +24,7 @@ def init_command(
         bool, typer.Option("--dry-run", help="Print config without writing.")
     ] = False,
     force: Annotated[
-        bool, typer.Option("--force", help="Overwrite an existing .iar.toml.")
+        bool, typer.Option("--force", help="Overwrite an existing .kedacode.toml.")
     ] = False,
     repository_id: Annotated[
         str | None, typer.Option("--id", help="Repository ID to write.")
@@ -41,13 +41,13 @@ def init_command(
         typer.Option(
             "--no-update-gitignore",
             help=(
-                "Do not add IAR runtime patterns (.iar/, .agent-runner/, "
-                ".iar-worktrees/) to .gitignore. Default: managed by iar init."
+                "Do not add KedaCode runtime patterns (.iar/, .agent-runner/, "
+                ".iar-worktrees/) to .gitignore. Default: managed by kc init."
             ),
         ),
     ] = False,
 ) -> int:
-    """Create repository-local .iar.toml config."""
+    """Create repository-local .kedacode.toml config."""
     selector_options = _typer_selector_options(ctx, repo=None, repo_id=None, config=None)
     return _run_typer_command(
         "init",

@@ -117,7 +117,7 @@ async function mockBacklogApi(page: import('@playwright/test').Page) {
         auto_merge_enabled: false,
         daemon_running: false,
         max_parallel: 2,
-        config_source: '.iar.toml',
+        config_source: '.kedacode.toml',
         persisted_enabled: false,
       },
     }),

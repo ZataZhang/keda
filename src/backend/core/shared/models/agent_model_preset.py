@@ -79,7 +79,7 @@ def resolve_model_selection(
         raise ValueError(
             f"Unknown model preset '{preset_name}'. Defined presets: "
             f"{', '.join(config.agent_presets) or '(none)'}. "
-            "Declare it in an [agent_runner.presets.<name>] block in config.toml / .iar.toml."
+            "Declare it in an [agent_runner.presets.<name>] block in config.toml / .kedacode.toml."
         )
     return ModelSelection(
         agent=declared_preset.agent,

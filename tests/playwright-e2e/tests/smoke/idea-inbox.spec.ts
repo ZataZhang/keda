@@ -66,8 +66,9 @@ test.describe('smoke: idea inbox page', () => {
           body: JSON.stringify({
             priorities: ['P0', 'P1', 'P2', 'P3'],
             prd_types: ['FEAT', 'BUG', 'CHORE'],
+            // 签名头是跨版本线上传输契约，改名时保持不变。
             inbound_signature_header: 'X-IAR-Signature',
-            inbound_secret_env: 'IAR_IDEA_INBOX_INBOUND_SECRET',
+            inbound_secret_env: 'KEDACODE_IDEA_INBOX_INBOUND_SECRET',
           }),
         })
       },

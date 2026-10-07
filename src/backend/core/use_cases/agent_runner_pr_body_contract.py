@@ -77,8 +77,8 @@ _CONTRACT_ANCHOR_DESCRIPTIONS: dict[str, str] = {
 def load_prd_publish_contract(explicit_skill_path: Path | None = None) -> str | None:
     """读取 prd skill 的发布契约参考文本；不可达时安全返回 ``None``。
 
-    解析逻辑复用 :func:`resolve_prd_skill_path`（``IAR_PRD_SKILL_PATH`` /
-    ``IAR_SKILLS_DIR`` 覆盖，且优先取 keda 自有 ``~/.iar/skills``），在其
+    解析逻辑复用 :func:`resolve_prd_skill_path`（``KEDACODE_PRD_SKILL_PATH`` /
+    ``KEDACODE_SKILLS_DIR`` 覆盖，且优先取 keda 自有 ``~/.kedacode/skills``），在其
     ``SKILL.md`` 同级的 ``references/`` 下定位参考文档。文件缺失
     只意味着教学缺失——发布端会照常校验锚点并标注，调用方无需特殊处理。
 

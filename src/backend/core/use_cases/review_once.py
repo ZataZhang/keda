@@ -331,7 +331,7 @@ def _process_review_candidate(
 
     worktree_path = create_or_reuse_worktree(repo_path, issue, config, process_runner)
     # PRD 级覆盖随 Issue 流动：从该 Issue 引用的 PRD 文件头部解析 lifecycle_agents
-    # 并回填，使 `iar review` / review-daemon 这条路径也能读到 PRD 的 supervisor 覆盖
+    # 并回填，使 `kc review` / review-daemon 这条路径也能读到 PRD 的 supervisor 覆盖
     # （与发布路径共用同一解析规则）。
     issue = attach_prd_lifecycle_overrides(issue, repo_path)
     # 命令行 --agent > PRD 覆盖 > post_pr_supervisor.supervisor_agent > Issue 标签路由，
@@ -363,7 +363,7 @@ def _process_review_candidate(
             process_runner=process_runner,
             pr_context=pr_context,
             supervisor_agent=supervisor_agent,
-            # `iar review` 入口拿不到本次实现者，回退候选不排除 builder。
+            # `kc review` 入口拿不到本次实现者，回退候选不排除 builder。
             builder_agent=None,
             cycle=cycle,
         )

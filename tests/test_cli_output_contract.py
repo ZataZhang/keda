@@ -233,7 +233,7 @@ def test_parse_failure_in_machine_mode_renders_envelope(
     assert set(envelope) == {"error", "exit_code", "message", "retryable", "suggestion"}
     assert envelope["error"] == "usage_error"
     assert envelope["exit_code"] == 2
-    assert envelope["suggestion"] == "iar logs --help"
+    assert envelope["suggestion"] == "kc logs --help"
     assert "--bogus-flag" in envelope["message"]
 
 

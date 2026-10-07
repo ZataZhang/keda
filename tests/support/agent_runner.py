@@ -7,6 +7,7 @@ copying fixtures around.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Sequence
@@ -92,19 +93,26 @@ def worktree_path_response(
     )
 
 
+def default_worktree_path_argv(issue_number: int) -> tuple[str, ...]:
+    """按出厂默认的 ``worktree.path_command`` 模板拼出 fake runner 要匹配的 argv。
+
+    命令名会随产品改名变化，测试不能把它写死，否则默认值一改，所有依赖默认配置的
+    测试都会因为 argv 不匹配而拿到空 stdout。
+    """
+    template = AppConfig().worktree.path_command.format(issue_number=issue_number)
+    return tuple(shlex.split(template))
+
+
 def default_worktree_path_response(
     issue_number: int,
 ) -> dict[tuple[str, ...], CommandResult]:
-    """Return a response for the default ``worktree.path_command`` template.
+    """为默认的 ``worktree.path_command`` 模板造响应。
 
-    The default ``path_command`` is ``"iar worktree path --branch
-    issue-{issue_number}"``. Tests that keep the default config but still
-    resolve a worktree must register this response: path resolution now rejects
-    empty stdout instead of silently falling back to the process cwd. The
-    emitted ``"."`` anchors to the caller's ``repo_path`` (which the tests
-    control and which exists).
+    保留默认配置却又要解析出 worktree 的测试必须注册本响应：路径解析现在会拒绝空
+    stdout，而不是悄悄退回进程 cwd。这里输出的 ``"."`` 按调用方的 ``repo_path``
+    锚定（测试自己控制该目录，且它存在）。
     """
-    command = ("iar", "worktree", "path", "--branch", f"issue-{issue_number}")
+    command = default_worktree_path_argv(issue_number)
     return {
         command: CommandResult(
             command=command,
@@ -336,7 +344,7 @@ def transient_command_error() -> CommandFailedError:
 
 
 def worktree_site(root: Path, issue_number: int) -> Path:
-    """默认 ``iar worktree`` 布局下 Issue worktree 的落点（不创建目录）。"""
+    """默认 ``kc worktree`` 布局下 Issue worktree 的落点（不创建目录）。"""
     return root / ".iar-worktrees" / f"issue-{issue_number}"
 
 
@@ -349,7 +357,7 @@ def worktree_site_response(root: Path, issue_number: int) -> dict[tuple[str, ...
     site = worktree_site(root, issue_number)
     site.mkdir(parents=True, exist_ok=True)
     (site / ".git").write_text("gitdir: /nonexistent/worktrees/issue-1/.git\n", encoding="utf-8")
-    command = ("iar", "worktree", "path", "--branch", f"issue-{issue_number}")
+    command = default_worktree_path_argv(issue_number)
     return {
         command: CommandResult(
             command=command,

@@ -1,6 +1,6 @@
 """容器生命周期管理引擎模块 —— 封装 ``docker compose`` 子进程调用。
 
-本模块负责 ``iar container up / down / logs`` 的实现部分。不引入 docker SDK，
+本模块负责 ``kc container up / down / logs`` 的实现部分。不引入 docker SDK，
 仅通过 :func:`subprocess.run` 调 ``docker compose`` CLI；调用方提供 compose 文件
 路径、运行时环境变量，本模块负责构建正确的命令与 env。
 
@@ -31,6 +31,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Protocol
 
+from backend.core.shared.models import product_identity
 from backend.core.shared.interfaces.container_runner import (
     ContainerCommandPlan,
     ContainerUpRequest,
@@ -149,6 +150,9 @@ def build_container_up_env(request: ContainerUpRequest) -> dict[str, str]:
     """构造传给 ``docker compose`` 的环境变量集合。
 
     ``GH_TOKEN``、``REPO_PATH``、``RUNNER_UID``/``RUNNER_GID`` 是核心契约。
+    ``KEDACODE_HOST_STATE_HOME`` 取当前生效状态目录的绝对路径，供 compose 挂载
+    宿主侧状态目录（及其 ``container-auth`` 子目录）；直接跑 compose 时未设置会
+    由 ``${KEDACODE_HOST_STATE_HOME:?...}`` 立即报错而非挂错目录。
     ``extra_env`` 覆盖默认项，便于调用方在不重写本函数的前提下补字段。
     """
     resolved_uid, resolved_gid = _resolve_uid_gid(request)
@@ -160,7 +164,8 @@ def build_container_up_env(request: ContainerUpRequest) -> dict[str, str]:
     if request.gh_token:
         base_env["GH_TOKEN"] = request.gh_token
     if request.repo_id:
-        base_env["IAR_REPO_ID"] = request.repo_id
+        base_env.update(product_identity.build_child_env_aliases({"REPO_ID": request.repo_id}))
+    base_env.update(_build_host_state_env())
     base_env.update(request.extra_env)
     return base_env
 
@@ -203,9 +208,17 @@ def plan_container_up(compose_file: Path, request: ContainerUpRequest) -> Contai
     )
 
 
+def _build_host_state_env() -> dict[str, str]:
+    """所有 compose 操作使用同一生效状态目录，避免 down/logs 插值失败。"""
+    return {
+        f"{product_identity.ENV_PREFIX}HOST_STATE_HOME": str(product_identity.state_home())
+    }
+
+
 def _build_compose_env(env_overrides: dict[str, str]) -> dict[str, str]:
     """在系统环境之上叠加 ``env_overrides``，得到传给 compose 的最终 env。"""
     merged_env = os.environ.copy()
+    merged_env.update(_build_host_state_env())
     merged_env.update(env_overrides)
     return merged_env
 

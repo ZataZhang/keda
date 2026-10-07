@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.core.shared.interfaces.agent_output_protocol import PLAIN_PROTOCOL_ID
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_decision import (
     InteractiveDecisionConfig,
     ReplConfig,
@@ -380,7 +381,7 @@ class PullRequestSummary:
 
 @dataclass(frozen=True)
 class IssueWithPulls:
-    """View-model row for ``iar issue list`` output.
+    """View-model row for ``kc issue list`` output.
 
     Attributes:
         repo: ``owner/name`` identifier when the list spans multiple
@@ -430,6 +431,18 @@ class LabelConfig:
     )
 
 
+#: worktree 命令默认值：命令名取自身份模块，``{…}`` 占位符留给运行期 format。
+#: 与 infrastructure ``agent_runner_settings.py`` 的同名字面量必须保持一致
+#: （双类陷阱：运行时读的是本模块的默认值）。
+_WORKTREE_CREATE_COMMAND_DEFAULT = (
+    f"{product_identity.PRIMARY_COMMAND_NAME} worktree create "
+    "--branch issue-{issue_number} --base-branch {base_branch}"
+)
+_WORKTREE_PATH_COMMAND_DEFAULT = (
+    f"{product_identity.PRIMARY_COMMAND_NAME} worktree path " "--branch issue-{issue_number}"
+)
+
+
 @dataclass(frozen=True)
 class GitConfig:
     """Git publishing configuration."""
@@ -445,15 +458,14 @@ class WorktreeConfig:
     ``base_branch`` is the repository base branch (e.g. ``main``). It is
     passed to the ``create_command`` template so ``git worktree add`` can
     fork from the correct ref. See
-    :class:`backend.infrastructure.config.settings.AgentRunnerWorktreeSettings`
-    for the matching Pydantic defaults.
+    :mod:`backend.infrastructure.config.agent_runner_settings` for the
+    matching Pydantic defaults; both classes must keep the same literal
+    because the runtime reads this one.
     """
 
-    create_command: str = (
-        "iar worktree create --branch issue-{issue_number} --base-branch {base_branch}"
-    )
-    reuse_command: str = "iar worktree path --branch issue-{issue_number}"
-    path_command: str = "iar worktree path --branch issue-{issue_number}"
+    create_command: str = _WORKTREE_CREATE_COMMAND_DEFAULT
+    reuse_command: str = _WORKTREE_PATH_COMMAND_DEFAULT
+    path_command: str = _WORKTREE_PATH_COMMAND_DEFAULT
     # 默认开启;缺建库脚本或无关系型 DB 时告警回退到共享库(见 use_cases.worktree_database)。
     provision_database: bool = True
     base_branch: str = "main"
@@ -651,7 +663,7 @@ class ValidationConfig:
     ``tasks/evidence`` the runner resolves a per-task subdirectory
     (``tasks/evidence/<prd-stem>/``, or ``tasks/evidence/issue-<N>/`` when the
     Issue references no canonical PRD) and relies on the ``.gitignore``
-    whitelist provisioned by ``iar init`` so that only ``*.md`` reports enter
+    whitelist provisioned by ``kc init`` so that only ``*.md`` reports enter
     the code diff while raw artifacts stay out of git history. A repo that
     explicitly configures another value (e.g. the legacy ``.iar/evidence``)
     keeps the old whole-directory ``info/exclude`` exclusion, byte for byte.
@@ -747,7 +759,7 @@ class PrePrReviewConfig:
     # Overrides for the review rules appended after the review packet.
     # Empty tuple means "use the embedded default template" which instructs
     # the reviewer to call the ``code-reviewer`` skill and emit a findings
-    # array. Repositories can override individual lines via ``.iar.toml``
+    # array. Repositories can override individual lines via ``.kedacode.toml``
     # without forking ``agent_review.py``.
     review_prompt_template: tuple[str, ...] = ()
 
@@ -882,7 +894,7 @@ class GeneratedContentConfig:
     issue_from_prd: GeneratedContentTargetConfig = field(
         default_factory=GeneratedContentTargetConfig
     )
-    # 一句话需求 → Issue 正文（``iar issue create --from-prompt``）：产物不含 PRD 锚点，
+    # 一句话需求 → Issue 正文（``kc issue create --from-prompt``）：产物不含 PRD 锚点，
     # 由 generated_issue_prompt_content 独立消费，不走 issue_from_prd 的锚点校验。
     issue_from_prompt: GeneratedContentTargetConfig = field(
         default_factory=GeneratedContentTargetConfig
@@ -940,7 +952,7 @@ class RepositoryIdentity:
 
 @dataclass(frozen=True)
 class DaemonConfig:
-    """Daemon 长驻轮询层的仓库级开关（``.iar.toml`` 的 ``[agent_runner.daemon]``）。
+    """Daemon 长驻轮询层的仓库级开关（``.kedacode.toml`` 的 ``[agent_runner.daemon]``）。
 
     只承载**按仓库判定**才对账正确、且确实被消费的两个键；轮询间隔等仍由 CLI 边界
     按全局设置与 ``--interval`` 旗标解析（daemon 一次服务多仓，间隔无法按仓取值），
@@ -969,7 +981,7 @@ class AppConfig:
     # ``core/`` -> ``infrastructure/`` reverse dependency.
     repositories: dict[str, RepositoryIdentity] = field(default_factory=dict)
     # agent 注册表：agent 名 -> 声明式调用 spec。默认值为内置四个 agent
-    # （codex / claude / kimi / pi）；config.toml / .iar.toml 的
+    # （codex / claude / kimi / pi）；config.toml / .kedacode.toml 的
     # [agent_runner.agents.*] 段经 factory 映射与两层合并覆盖此字段。
     agents: dict[str, AgentSpec] = field(default_factory=lambda: dict(BUILTIN_AGENT_SPECS))
     labels: LabelConfig = LabelConfig()

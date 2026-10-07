@@ -1,6 +1,6 @@
-"""``iar issue list`` use case.
+"""``kc issue list`` use case.
 
-Assembles Issue + linked Pull Request views for the ``iar issue list``
+Assembles Issue + linked Pull Request views for the ``kc issue list``
 command. Target repositories are resolved through
 ``resolve_repository_targets`` with a thin cwd auto-detect wrapper so the
 single-repo / multi-repo decision can be made without copying the helper.
@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Protocol
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import (
     IssueSummary,
     IssueWithPulls,
@@ -46,12 +47,6 @@ _DEFAULT_LIMIT = 100
 # Issue states we accept on ``--state``.
 _VALID_ISSUE_STATES = ("open", "closed", "all")
 
-# File name whose presence at ``cwd`` signals an iAR project repo.
-# Mirrors ``backend.infrastructure.config.settings.IAR_REPOSITORY_CONFIG_FILENAME``
-# but is parameterised here so this use case stays free of any
-# ``infrastructure``-layer import (architecture four-layer rule).
-IAR_REPOSITORY_MARKER_FILENAME = ".iar.toml"
-
 
 @dataclass(frozen=True)
 class IssueListRequest:
@@ -61,7 +56,7 @@ class IssueListRequest:
         repo_id: Optional configured repository ID selector.
         repo_path_override: Optional ad-hoc repository path selector.
         all_repositories: Force multi-repository scan even when cwd is
-            an iAR project repo.
+            a KedaCode project repo.
         state_filter: GitHub issue state, one of ``"open"``,
             ``"closed"``, ``"all"``. Defaults to ``"all"``.
         label_filter: Optional label name to filter by.
@@ -97,31 +92,12 @@ class IssueListResult:
 
 
 def _has_local_iar_repo(cwd: Path) -> bool:
-    """Return True when ``cwd`` contains an ``.iar.toml`` marker.
+    """Return True when ``cwd`` holds a repository-local KedaCode config.
 
-    Default predicate. The CLI dispatch may build a different
-    predicate via :func:`make_default_has_local_iar_repo` to bind the
-    marker name from the canonical infrastructure setting.
+    新旧两个配置文件名按「新名优先」解析，因此只有 ``.kedacode.toml`` 的
+    仓库与只有旧 ``.iar.toml`` 的仓库同样被识别（legacy-alias）。
     """
-    return (cwd / IAR_REPOSITORY_MARKER_FILENAME).is_file()
-
-
-def make_default_has_local_iar_repo(
-    marker_filename: str = IAR_REPOSITORY_MARKER_FILENAME,
-) -> Callable[[Path], bool]:
-    """Build a ``has_local_iar_repo`` predicate bound to a marker file name.
-
-    The use case cannot import ``IAR_REPOSITORY_CONFIG_FILENAME`` from
-    ``infrastructure`` (four-layer rule). Instead, the CLI dispatch
-    layer builds the predicate via this factory so the single source of
-    truth (``infrastructure.config.settings``) is still the place that
-    knows the real filename.
-    """
-
-    def _predicate(cwd: Path) -> bool:
-        return (cwd / marker_filename).is_file()
-
-    return _predicate
+    return product_identity.has_repository_config(cwd)
 
 
 class _RepoTargetResolver(Protocol):
@@ -162,8 +138,8 @@ def _resolve_targets_with_cwd_autodetect(
         request: Validated caller request.
         cwd: Current working directory used for auto-detection.
         has_local_iar_repo: Predicate that returns ``True`` when ``cwd``
-            looks like an iAR project repo (i.e. an ``.iar.toml`` file
-            exists in ``cwd``).
+            looks like a KedaCode project repo (i.e. its repository-local
+            config file exists in ``cwd``).
         resolve_targets: Injected target resolver.
 
     Returns:
@@ -245,7 +221,7 @@ def _warn_missing_github_repo(repo_id: str) -> None:
     print(
         f"[WARN] Repository '{repo_id}' has no github_repo configured; "
         'PR column will be empty. Set github_repo = "owner/name" in '
-        "[agent_runner.repositories.<id>] or .iar.toml.",
+        "[agent_runner.repositories.<id>] or .kedacode.toml.",
         file=sys.stderr,
     )
 

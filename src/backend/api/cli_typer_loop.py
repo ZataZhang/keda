@@ -1,7 +1,7 @@
-"""Typer commands under ``iar loop``.
+"""Typer commands under ``kc loop``.
 
 Holds every command that registers, lists, cancels, or manually fires a
-loop entry, plus the top-level ``iar loop-daemon`` command (which was
+loop entry, plus the top-level ``kc loop-daemon`` command (which was
 grouped with the loop scheduler at the bottom of the original
 ``cli_typer`` module):
 
@@ -147,7 +147,7 @@ def loop_daemon_command(
         typer.Option("--repo", help="Override the local path of the target repository."),
     ] = None,
 ) -> int:
-    """Run the loop scheduler continuously (polls ~/.iar/loop-state.json)."""
+    """Run the loop scheduler continuously (polls ~/.kedacode/loop-state.json)."""
     return _run_typer_command(
         "loop-daemon",
         interval=interval,

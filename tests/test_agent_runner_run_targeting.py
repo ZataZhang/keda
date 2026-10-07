@@ -58,11 +58,11 @@ def test_resolve_prd_target_issue_number_returns_linked_issue(tmp_path: Path) ->
 
 
 def test_resolve_prd_target_issue_number_rejects_missing_link(tmp_path: Path) -> None:
-    """PRD 无回链时报错并提示先 ``iar issue create``。"""
+    """PRD 无回链时报错并提示先 ``kc issue create``。"""
     prd_path = _write_prd(tmp_path, "tasks/pending/b.md", issue_number=None)
     with pytest.raises(RunTargetResolveError) as excinfo:
         resolve_prd_target_issue_number(repo_path=tmp_path, prd_path=prd_path)
-    assert "iar issue create" in str(excinfo.value)
+    assert "kc issue create" in str(excinfo.value)
 
 
 def test_resolve_prd_target_issue_number_rejects_missing_file(tmp_path: Path) -> None:

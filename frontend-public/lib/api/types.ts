@@ -392,7 +392,7 @@ export type BacklogGlobalStartResult = {
  * 仓库级 Autopilot 完整闭环状态。
  *
  * `enabled` 是**生效**配置的值（写后 fresh load），`persisted_enabled` 是仓库
- * `.iar.toml` 里的持久值（文件缺失或键未设置时为 null）。两者与
+ * `.kedacode.toml` 里的持久值（文件缺失或键未设置时为 null）。两者与
  * `auto_merge_enabled` / `daemon_running` 必须分别展示——只有全部成立才是
  * 真正的全自动闭环。
  */
@@ -410,7 +410,7 @@ export type BacklogAutopilotState = {
 // Backlog CI/CD 交付尾段
 // Keep these aligned with `backend.core.shared.models.backlog`
 // (`BacklogCiDelivery` / `CiCheckProblem` / `CiRepairPolicy` /
-// `CiDeliveryStatus`) — the Console API and `iar backlog ci status --json`
+// `CiDeliveryStatus`) — the Console API and `kc backlog ci status --json`
 // share the same DTO.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -563,7 +563,7 @@ export type PrdLifecycleStats = {
   token_usage: TokenUsageStats;
   /**
    * PRD（Issue）维度 token 汇总（按 `total_tokens` 降序），与 CLI
-   * `iar tokens` 的「按 PRD」表同源同口径。旧响应缺省该字段时按空数组处理。
+   * `kc tokens` 的「按 PRD」表同源同口径。旧响应缺省该字段时按空数组处理。
    */
   token_usage_by_prd?: PrdTokenUsageEntry[];
 };
@@ -708,7 +708,7 @@ export type LifecycleAgentSource =
   | "legacy"
   | "builtin";
 
-/** 矩阵编辑视角：全局层（config.toml）或仓库层（.iar.toml）。 */
+/** 矩阵编辑视角：全局层（config.toml）或仓库层（.kedacode.toml）。 */
 export type LifecycleAgentScope = "global" | "repository";
 
 /** 单个生命周期键在某视角下的生效视图。 */

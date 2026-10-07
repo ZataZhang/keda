@@ -1,7 +1,7 @@
 """prd skill Machine Contract 的版本契约与 prompt 指针（单一出处）。
 
 PRD 格式约定（Change Log 条目结构、验收复选框语法、rv-id 证据命名、证据目录
-布局）的权威文本由 prd skill 的 ``## Machine Contract`` 章节承载；iar 的各
+布局）的权威文本由 prd skill 的 ``## Machine Contract`` 章节承载；KedaCode 的各
 prompt 只引用 :data:`PRD_MACHINE_CONTRACT_POINTER` 这一行指针，不抄录教学
 内容。daemon 起执行循环前用本模块的版本解析做预检：skill 缺失、无版本标记，
 或主版本不在 :data:`SUPPORTED_MACHINE_CONTRACT_VERSIONS` 内即 fail fast。
@@ -14,10 +14,10 @@ from __future__ import annotations
 import re
 
 SUPPORTED_MACHINE_CONTRACT_VERSIONS: tuple[int, ...] = (3, 4, 5)
-"""iar 能读懂的 prd skill Machine Contract 主版本号（升序）。
+"""KedaCode 能读懂的 prd skill Machine Contract 主版本号（升序）。
 
 契约自身规定「改这一节的内容必须 bump 版本」，而两侧发版无法原子完成：skill
-先 bump、keda 后跟进的那段时间里，硬相等 pin 会让**所有** iar 在启动预检直接
+先 bump、keda 后跟进的那段时间里，硬相等 pin 会让**所有** KedaCode 在启动预检直接
 fail fast。因此这里表达「能读懂的版本集合」，配套的发版纪律是：
 
 1. 先把新版本加进集合（keda 侧先发）；

@@ -1494,7 +1494,7 @@ def test_dirty_worktree_before_supervisor_stash_fails_blocked(tmp_path: Path) ->
                 "push",
                 "-u",
                 "-m",
-                "iar: auto-stash before supervisor cycle 1",
+                "kc: auto-stash before supervisor cycle 1",
             ): CommandResult(
                 command=(
                     "git",
@@ -1502,7 +1502,7 @@ def test_dirty_worktree_before_supervisor_stash_fails_blocked(tmp_path: Path) ->
                     "push",
                     "-u",
                     "-m",
-                    "iar: auto-stash before supervisor cycle 1",
+                    "kc: auto-stash before supervisor cycle 1",
                 ),
                 return_code=1,
                 stdout="",
@@ -1637,7 +1637,7 @@ def test_dirty_worktree_before_supervisor_auto_stash_and_approve(
         "push",
         "-u",
         "-m",
-        "iar: auto-stash before supervisor cycle 1",
+        "kc: auto-stash before supervisor cycle 1",
     ) in commands
     assert ("git", "stash", "pop") in commands
 

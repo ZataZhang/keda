@@ -59,9 +59,9 @@ console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、P
 
 | 触发入口分组 | 组内阶段 | 组说明 |
 |---|---|---|
-| **实现流水线**（`pipeline`） | 实现 / 修复 / 收尾 / 校验 / 审核 / 监督 | `iar run` / `daemon` 认领后，在同一 worktree 的同一次 claim 内依次触发 |
-| **讨论与内容生成**（`discussion_content`） | 辩论 / 内容生成 | 辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 `iar issue create`、`iar issue create --from-prompt`、Phase 1 与开 Draft PR 四处 |
-| **独立入口**（`standalone`） | 决策 | `iar ask`，不在任何 Issue 流水线上（无 Issue / PRD 上下文） |
+| **实现流水线**（`pipeline`） | 实现 / 修复 / 收尾 / 校验 / 审核 / 监督 | `kc run` / `daemon` 认领后，在同一 worktree 的同一次 claim 内依次触发 |
+| **讨论与内容生成**（`discussion_content`） | 辩论 / 内容生成 | 辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 `kc issue create`、`kc issue create --from-prompt`、Phase 1 与开 Draft PR 四处 |
+| **独立入口**（`standalone`） | 决策 | `kc ask`，不在任何 Issue 流水线上（无 Issue / PRD 上下文） |
 
 逐键消费点（"实现流水线"组的六个阶段都在同一次 claim 内）：
 
@@ -72,14 +72,14 @@ console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、P
 | `closeout` | 实现流水线 | Phase 2，同一次认领内（交付门禁失败时） | `run_agent_execution_loop.py::_attempt_delivery_closeout` |
 | `verifier` | 实现流水线 | Phase 2，同一次认领内 | `run_verifier_agent.py::_choose_verifier_agent` |
 | `review` | 实现流水线 | Phase 2，同一次认领内（开 Draft PR 前） | `run_agent_once.py::resolve_reviewer_agent` |
-| `supervisor` | 实现流水线 | Phase 2 发布路径**或** `iar review` / `iar review-daemon` | `run_agent_once.py::resolve_supervisor_agent` |
+| `supervisor` | 实现流水线 | Phase 2 发布路径**或** `kc review` / `kc review-daemon` | `run_agent_once.py::resolve_supervisor_agent` |
 | `deliberate` | 讨论与内容生成 | **Phase 0**：每轮先扫 `agent/deliberate` Issue（此时 PRD 尚不存在） | `agent_runner_deliberation_issues.py::_process_single_deliberation_issue` |
 | `content_generation` | 讨论与内容生成 | **横切四个 target**，见下文 | `generated_prd_content.py::generate_prd_content` / `generated_content.py::generate_issue_content` / `generated_issue_prompt_content.py::generate_issue_prompt_content` / `generate_pr_content` |
-| `planner` | 独立入口 | `iar ask`，不在任何 Issue 流水线上 | `cli_parsed_commands/agent.py::run_ask_command` |
+| `planner` | 独立入口 | `kc ask`，不在任何 Issue 流水线上 | `cli_parsed_commands/agent.py::run_ask_command` |
 
 ### 三个入口
 
-**入口 A：`iar run` / `iar daemon` 的每轮三段式。** daemon 每轮依次执行
+**入口 A：`kc run` / `kc daemon` 的每轮三段式。** daemon 每轮依次执行
 `process_deliberation_issues`（Phase 0）、`process_prd_rework_issues`（Phase 1）、
 `run_once`（Phase 2）：
 
@@ -93,10 +93,10 @@ console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、P
 完整流程见 [Agent Runner](agent-runner.md) 的「复杂需求：异步 Issue 评论讨论」一节，
 状态机见同页「状态流转与两阶段审查」一节。
 
-**入口 B：`iar review` / `iar review-daemon`。** 只驱动 `supervisor`（对已开 PR 的
+**入口 B：`kc review` / `kc review-daemon`。** 只驱动 `supervisor`（对已开 PR 的
 Issue 单独跑一轮），因此 `supervisor` 是唯一跨 A / B 两个入口的键。
 
-**入口 C：`iar ask`。** `planner` 的唯一消费点。它既没有 Issue 也没有 PRD 上下文，
+**入口 C：`kc ask`。** `planner` 的唯一消费点。它既没有 Issue 也没有 PRD 上下文，
 这正是它不支持 PRD 级覆盖的原因（见下文「PRD 层」）。
 
 > 结构性佐证：`attach_prd_lifecycle_overrides`（把 Issue 引用的 PRD 头部覆盖回填到
@@ -107,15 +107,15 @@ Issue 单独跑一轮），因此 `supervisor` 是唯一跨 A / B 两个入口�
 > - `_process_single_deliberation_issue` —— 入口 A 的 Phase 0。
 >
 > 这三处就是全部"既有 Issue、又能读到 PRD 覆盖"的处理循环。入口 C 与
-> `iar issue create` 不在其中，因为它们运行时还没有 Issue。
+> `kc issue create` 不在其中，因为它们运行时还没有 Issue。
 
 ### 两个容易误判的键
 
 - **`supervisor` 跨入口，同键不同义**：发布路径显式把本次实现者传给
-  `resolve_supervisor_agent`，所以那里的 `auto` 沿用实现者；独立跑 `iar review` /
-  `iar review-daemon` 时拿不到实现者，`auto` 回落成按 Issue 标签路由。
+  `resolve_supervisor_agent`，所以那里的 `auto` 沿用实现者；独立跑 `kc review` /
+  `kc review-daemon` 时拿不到实现者，`auto` 回落成按 Issue 标签路由。
 - **`content_generation` 是横切阶段，不是"流水线之外"**：四个 target 分别落在
-  `iar issue create`（`issue_from_prd`）、`iar issue create --from-prompt`
+  `kc issue create`（`issue_from_prd`）、`kc issue create --from-prompt`
   （`issue_from_prompt`，产物**不含 PRD 锚点**，因此提示词与回退模板都不能写出
   `- PRD path:`）、Phase 1（`prd_from_issue`）和 Phase 2 开
   Draft PR 时（`draft_pr`，生成 PR 标题与正文）。四者都以矩阵派生的
@@ -132,7 +132,7 @@ Issue 单独跑一轮），因此 `supervisor` 是唯一跨 A / B 两个入口�
 优先级从高到低：
 
 1. **PRD 文件头部** `lifecycle_agents` 覆盖块（PRD 级，只影响该 PRD）；
-2. **仓库 `.iar.toml`** 的 `[agent_runner.lifecycle_agents]`（仓库级）；
+2. **仓库 `.kedacode.toml`** 的 `[agent_runner.lifecycle_agents]`（仓库级）；
 3. **全局 `config.toml`** 的 `[agent_runner.lifecycle_agents]`（机器级）；
 4. **既有散落配置键**（上表最后一列）；
 5. **内置默认**。
@@ -169,17 +169,17 @@ PRD markdown 标题下的 bullet 区（与 §8 依赖声明同型）：
 
 PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`implementation`、
 `fix`、`closeout`、`verifier`、`review`、`supervisor`、`content_generation`、
-`deliberate`。**`planner` 不支持 PRD 覆盖**——它的唯一消费点是 `iar ask`
+`deliberate`。**`planner` 不支持 PRD 覆盖**——它的唯一消费点是 `kc ask`
 （交互式决策），既没有 Issue 也没有 PRD 上下文，所以 console 的「Agent 覆盖」
 抽屉不提供该行、写回也会拒绝该键。`planner` 的**矩阵值**（`config.toml` /
-`.iar.toml`）仍然有效。
+`.kedacode.toml`）仍然有效。
 
 ## console 界面落点：三层各写各自文件
 
 | 层 | 写入文件 | 入口 |
 |---|---|---|
 | 全局（机器级） | `config.toml` | **Settings → 「Agent 管理」→ Tab ②「生命周期 Agent 设置」** |
-| 仓库级 | 该仓库 `.iar.toml` | **Backlog → 受管理仓库列表每行右侧的齿轮** |
+| 仓库级 | 该仓库 `.kedacode.toml` | **Backlog → 受管理仓库列表每行右侧的齿轮** |
 | PRD 级 | 该 PRD 文件头部 | **PRD 原文页工具栏「Agent 覆盖」** |
 
 Settings 的「Agent 管理」区块用粘性 Tab 分两页：**Tab ①「Agent 标签设置」**
@@ -236,7 +236,7 @@ agent 在运行时跳过。Settings 的「生命周期 Agent 设置」页给这�
   Issue 判死，也不该强迫整条流水线换 builder 重跑；换一个审核者还顺带强化独立性。
 - content_generation 是纯文本生成，失败已有 agent → 模板 → 硬兜底三级，换 agent
   无语义增益（artifact 契约不变）。
-- planner（`iar ask`）与 deliberate 是交互式 / 规划会话，价值在单一连续会话的上下文；
+- planner（`kc ask`）与 deliberate 是交互式 / 规划会话，价值在单一连续会话的上下文；
   中途换人会丢上下文、产出不连贯；deliberate 另有角色感知的 fallback profile 机制。
 
 > 双层预算提示：review 本地候选链耗尽后仍会走外层 builder 阶梯，最坏出现

@@ -2,7 +2,7 @@
 
 // 仓库级生命周期 Agent 矩阵抽屉。
 //
-// 从 Backlog 仓库行的齿轮按钮打开，编辑的是该仓库 `.iar.toml` 里的
+// 从 Backlog 仓库行的齿轮按钮打开，编辑的是该仓库 `.kedacode.toml` 里的
 // `[agent_runner.lifecycle_agents]` 声明（仓库层），不影响全局 config.toml。
 
 import {
@@ -43,7 +43,7 @@ export function RepositoryAgentMatrixSheet({
         <SheetHeader>
           <SheetTitle>仓库生命周期 Agent 矩阵</SheetTitle>
           <SheetDescription>
-            {repoLabel} · 写回该仓库的 .iar.toml（仓库层）；未声明的键继续跟随全局
+            {repoLabel} · 写回该仓库的 KedaCode 配置文件（仓库层）；未声明的键继续跟随全局
             config.toml。
           </SheetDescription>
         </SheetHeader>

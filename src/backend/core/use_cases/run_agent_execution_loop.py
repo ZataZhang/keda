@@ -114,7 +114,7 @@ class AgentExecutionRequest:
     #: 发布档位（normal / fast / direct）：决定 Phase 2 起各门禁是否旁路。默认 normal
     #: = 与历史行为完全一致。
     publish_stage: PublishStage = PublishStage.NORMAL
-    #: 兼容旧调用面的快速通道布尔：``iar run --fast-merge`` 的等价写法。唯一事实源是
+    #: 兼容旧调用面的快速通道布尔：``kc run --fast-merge`` 的等价写法。唯一事实源是
     #: :attr:`publish_stage`，本字段在 ``__post_init__`` 里被归一化为该档位的派生视图，
     #: 因此不可能出现「stage=direct 且 fast_merge=True」这类矛盾状态。
     fast_merge: bool | None = None

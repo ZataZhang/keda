@@ -1,7 +1,7 @@
 """认证导入引擎模块 —— 从本机当前 cc-switch profile 复制认证与 skills 到容器专用目录。
 
-本模块负责 ``iar container auth import`` 的实现部分。导入后的快照落地于
-``~/.iar/container-auth/{claude,codex,kimi-code}/``，后续 ``iar container up``
+本模块负责 ``kc container auth import`` 的实现部分。导入后的快照落地于
+``<本机状态目录>/container-auth/{claude,codex,kimi-code}/``，后续 ``kc container up``
 会把这些目录以 volume 形式挂载到 runner 容器内，让容器里的 claude/codex/kimi
 读取导入时刻的认证——之后本机 cc-switch 切换账号不会影响容器。
 
@@ -13,7 +13,7 @@
 - 源目录缺失时跳过该 agent 并 ``WARN``，不 raise；命令级 ``exit 0`` 由调用方
   控制。
 - 目标目录权限 ``0700``（仅宿主用户可读），避免凭据被同机其他账户读取。
-- 凭据路径加入 ``~/.iar/info/exclude`` 的 gitignore（若该目录已是 git 仓库），
+- 凭据路径加入状态目录 ``info/exclude`` 的 gitignore（若该目录已是 git 仓库），
   确保不会进 git。
 """
 
@@ -30,12 +30,13 @@ from backend.core.shared.interfaces.container_runner import (
     ContainerAuthImportResult,
     IContainerAuthImporter,
 )
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS, AgentSpec
 
 _logger = logging.getLogger(__name__)
 
 CONTAINER_AUTH_DIR_NAME = "container-auth"
-"""全局目录名，落在 ``~/.iar/container-auth/`` 下，与全局 daemon 状态、config 同根。"""
+"""状态目录下的子目录名，与全局 daemon 状态、config 同根。"""
 
 CONTAINER_AUTH_PERMISSIONS = 0o700
 """目标根目录权限：仅宿主用户可读/可写/可遍历。"""
@@ -120,12 +121,12 @@ def container_auth_dir(global_iar_dir: Path | None = None) -> Path:
     """返回容器专用认证目录的绝对路径。
 
     Args:
-        global_iar_dir: 全局 iar 目录（默认 ``~/.iar``），便于测试注入临时目录。
+        global_iar_dir: 全局状态目录（默认按新旧名双读解析），便于测试注入临时目录。
 
     Returns:
         解析后的 ``container-auth/`` 绝对路径。
     """
-    base = global_iar_dir if global_iar_dir is not None else Path.home() / ".iar"
+    base = global_iar_dir if global_iar_dir is not None else product_identity.state_home()
     return base / CONTAINER_AUTH_DIR_NAME
 
 
@@ -259,10 +260,10 @@ def _ensure_global_iar_gitignore(
     global_iar_dir: Path,
     protected_relative_paths: tuple[str, ...],
 ) -> bool:
-    """将 ``container-auth`` 路径加入 ``~/.iar/info/exclude`` 的 gitignore。
+    """将 ``container-auth`` 路径加入状态目录 ``info/exclude`` 的 gitignore。
 
     Args:
-        global_iar_dir: iar 全局目录（默认 ``~/.iar``）。
+        global_iar_dir: 全局状态目录。
         protected_relative_paths: 需要排除的相对路径（相对 ``global_iar_dir``），
             通常是 ``("container-auth",)``。
 
@@ -305,13 +306,13 @@ def import_container_auth(
     """导入全部受支持 agent 的认证到 ``container_auth_dir``。
 
     Args:
-        global_iar_dir: 全局 iar 目录；为 ``None`` 时使用 ``~/.iar``。
+        global_iar_dir: 全局状态目录；为 ``None`` 时按新旧名双读解析。
         specs: 参与导入的 agent 规格列表，便于测试或将来扩展。
 
     Returns:
         聚合结果，包含每个 agent 的子结果与 gitignore 保护标记。
     """
-    base = global_iar_dir if global_iar_dir is not None else Path.home() / ".iar"
+    base = global_iar_dir if global_iar_dir is not None else product_identity.state_home()
     target_root = base / CONTAINER_AUTH_DIR_NAME
     ensure_container_auth_root(target_root)
 

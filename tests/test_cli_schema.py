@@ -48,7 +48,7 @@ def schema() -> dict[str, Any]:
 
 def test_schema_root_documents_the_machine_contract(schema: dict[str, Any]) -> None:
     """根文档带退出码表与命令总数，agent 一次调用就能拿到全貌。"""
-    assert schema["name"] == "iar"
+    assert schema["name"] == "kc"
     assert set(schema) == {"name", "help", "exit_codes", "command_count", "commands"}
     assert set(schema["exit_codes"]["values"]) == {0, 1, 2, 3, 4, 5, 10}
     # 导出的必须是 envelope ``error`` 名：消费方靠它把 $? 与 stderr envelope 对上。
@@ -181,7 +181,7 @@ def test_schema_json_and_output_json_are_byte_identical() -> None:
     assert as_json.exit_code == 0 and explicit.exit_code == 0
     assert as_json.stdout == explicit.stdout
     payload = json.loads(as_json.stdout)
-    assert payload["name"] == "iar"
+    assert payload["name"] == "kc"
 
 
 def test_schema_human_render_lists_commands_without_json(
@@ -190,7 +190,7 @@ def test_schema_human_render_lists_commands_without_json(
 ) -> None:
     """默认（不传新旗标）仍是人类可读清单，不泄漏 JSON。"""
     rendered = render_schema_human(schema)
-    assert "iar —" in rendered
+    assert "kc —" in rendered
     assert "issue list" in rendered
     assert "{" not in rendered
 

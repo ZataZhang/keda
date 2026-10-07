@@ -2,7 +2,7 @@
 //
 // 三层各自只写自己的文件：
 // - 全局层（Settings 页）-> 机器级 config.toml；
-// - 仓库层（Backlog 仓库行齿轮）-> 该仓库 .iar.toml；
+// - 仓库层（Backlog 仓库行齿轮）-> 该仓库 .kedacode.toml；
 // - PRD 层（PRD 原文页）-> 该 PRD 文件头部 lifecycle_agents 块。
 // 所有写操作都采用保留式语义：只发送用户显式改动的键，`null` 表示删除该键。
 

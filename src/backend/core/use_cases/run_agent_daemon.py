@@ -161,9 +161,9 @@ def run_agent_daemon(
             before Phase 2 so finished PRDs release their slot and the next
             queued PRD is promoted in the same pass. When omitted, the stage is
             skipped entirely (zero regression for existing callers).
-        autopilot_override: ``iar daemon --autopilot / --no-autopilot`` 的按次
+        autopilot_override: ``kc daemon --autopilot / --no-autopilot`` 的按次
             覆盖，只作用于**调度类** autopilot（``True``/``False``），优先级
-            ``flag > repo .iar.toml > 全局`` 并锁定本次常驻进程；``None`` 表示
+            ``flag > repo .kedacode.toml > 全局`` 并锁定本次常驻进程；``None`` 表示
             未传旗标，每轮热读配置。该覆盖**不**影响 review 侧自动合并——
             合并仍由 ``safety.auto_merge`` + ``autopilot.enabled`` 双开关决定。
     """
@@ -216,7 +216,7 @@ def _resolve_reconcile_settings(
 ) -> tuple[bool, int | None]:
     """把仓库级 ``[agent_runner.daemon]`` 对账开关解析成生效值。
 
-    ``.iar.toml`` 显式写了某项时该仓单独生效（daemon 可同时服务多个仓库，
+    ``.kedacode.toml`` 显式写了某项时该仓单独生效（daemon 可同时服务多个仓库，
     开关必须按仓判定）；没写时沿用调用方传入的全局默认，行为与本特性前一致。
 
     Args:
@@ -283,7 +283,7 @@ def _run_daemon_loop(
             # 之一并留下对账 comment；前两个出口回到 agent/ready，正好被本轮
             # Phase 2 领取（先对账后领取）。保守规则与原 reclaim 同源，因此绝不
             # 打扰在途运行。开关关闭时整轮空转，僵尸保持 agent/running 不被触碰。
-            # 仓库层开关优先：``.iar.toml`` 的 [agent_runner.daemon] 显式写了这两个
+            # 仓库层开关优先：``.kedacode.toml`` 的 [agent_runner.daemon] 显式写了这两个
             # 键时按仓库生效，没写才沿用调用方传入的全局默认（daemon 可同时服务多仓）。
             reconcile_enabled, reconcile_ttl_seconds = _resolve_reconcile_settings(
                 context.config,
@@ -357,7 +357,7 @@ def _run_daemon_loop(
             # promoted in this pass is picked up in the same pass. Failures are
             # logged and swallowed so a scheduling fault never kills the daemon.
             # --autopilot/--no-autopilot 的按次覆盖优先于配置；未传旗标时每轮
-            # 热读配置（flag > repo .iar.toml > 全局，锁定本次常驻进程）。
+            # 热读配置（flag > repo .kedacode.toml > 全局，锁定本次常驻进程）。
             autopilot_enabled = (
                 autopilot_override
                 if autopilot_override is not None

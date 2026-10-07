@@ -17,12 +17,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.core.shared.models.agent_spec import CLAUDE_STREAM_JSON_PROTOCOL_ID
+import backend.infrastructure.process_runner as process_runner_module
 from backend.infrastructure.process_runner import (
     ClaudeStreamRenderer,
     CommandFailedError,
     SubprocessRunner,
     _format_timestamped_line,
     _terminate_process_tree,
+    _with_available_own_command,
     _TimestampedStreamFormatter,
     run_filtered_claude_stream,
 )
@@ -1286,3 +1288,38 @@ def test_run_filtered_claude_stream_without_sanitizer_leaks_poison(
     assert completed.returncode == 0
     child_env_text = probe_file.read_text(encoding="utf-8")
     assert "SERVER__PORT=56469" in child_env_text
+
+
+def test_with_available_own_command_accepts_legacy_and_preserves_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SubprocessRunner 自有名替换只作用于 argv[0]：旧别名命中即接受，包装形态原样保留。
+
+    覆盖改名窗口里「配置写 kc、环境只装了 iar」这类错配，同时确认带包装的命令行
+    （``uv run kc daemon``）不会被误改——它的首个 token 不是自有名，交由身份识别在
+    别处处理。
+    """
+    available_command_names = {"iar"}
+    monkeypatch.setattr(
+        process_runner_module.shutil,
+        "which",
+        lambda name: f"/usr/local/bin/{name}" if name in available_command_names else None,
+    )
+
+    # 旧别名 iar 在 PATH 上可用：argv[0] 就是它，原样接受（legacy-alias 长期可用）。
+    assert _with_available_own_command(["iar", "daemon"]) == ["iar", "daemon"]
+
+    # 主名 kc 缺失、仅旧别名可用：换成可用的自有名，其余参数逐字不动。
+    assert _with_available_own_command(["kc", "run", "--all-ready"]) == [
+        "iar",
+        "run",
+        "--all-ready",
+    ]
+
+    # 包装形态：首个 token 是 uv，不是自有命令名，整条命令行原样保留、不做替换。
+    assert _with_available_own_command(["uv", "run", "kc", "daemon"]) == [
+        "uv",
+        "run",
+        "kc",
+        "daemon",
+    ]

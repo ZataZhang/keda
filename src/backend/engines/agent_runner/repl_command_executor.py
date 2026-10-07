@@ -2,7 +2,7 @@
 
 Implements :class:`IReplCommandExecutor` for the ``iar`` REPL entrypoint.
 The executor owns the policy decisions that core use cases should not
-have to know about: which IAR subcommands are allowed, which need
+have to know about: which KedaCode subcommands are allowed, which need
 explicit confirmation, how to invoke the real ``iar`` CLI as a
 subprocess, and how to truncate captured output before returning it to
 the conversation history.
@@ -15,6 +15,7 @@ surface even when the agent emits unusual strings.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
@@ -23,6 +24,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IReplCommandExecutor,
     ReplExecOutcome,
 )
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_decision import ReplConfig
 
 _logger = logging.getLogger(__name__)
@@ -75,7 +77,7 @@ def _starts_with_any(text: str, prefixes: tuple[str, ...]) -> bool:
 
 
 class ReplCommandExecutor(IReplCommandExecutor):
-    """Validate and execute IAR subcommands requested by the REPL agent.
+    """Validate and execute KedaCode subcommands requested by the REPL agent.
 
     Args:
         process_runner: Subprocess runner used to invoke ``iar``.
@@ -129,7 +131,7 @@ class ReplCommandExecutor(IReplCommandExecutor):
                     rejected=True,
                     rejection_reason=(
                         "Command contains forbidden shell metacharacter "
-                        f"{bad_char!r}; only IAR subcommands are allowed."
+                        f"{bad_char!r}; only KedaCode subcommands are allowed."
                     ),
                 )
 
@@ -144,7 +146,7 @@ class ReplCommandExecutor(IReplCommandExecutor):
                 rejection_reason=(f"Command {joined!r} is forbidden in the REPL sandbox."),
             )
 
-        # Allowlist: the first argv must match a known IAR subcommand.
+        # Allowlist: the first argv must match a known KedaCode subcommand.
         head = argv[0]
         if head not in _DEFAULT_ALLOWLIST:
             return ReplExecOutcome(
@@ -199,9 +201,9 @@ class ReplCommandExecutor(IReplCommandExecutor):
                     confirmation_granted=False,
                 )
 
-        _logger.info("REPL executing: iar %s", prefix)
+        _logger.info("REPL executing: %s", " ".join(argv))
         result = self._process_runner.run(
-            ["iar", *argv],
+            [*product_identity.resolve_own_command_argv(sys.argv[0]), *argv],
             cwd=repo_path,
             capture_output=True,
             check=False,

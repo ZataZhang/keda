@@ -1,4 +1,4 @@
-"""``iar run --takeover`` 的接管编排（engines 层实现）。
+"""``kc run --takeover`` 的接管编排（engines 层实现）。
 
 接管是显式破坏性动作：优雅停掉同仓 daemon → 终止其 agent 子进程树 →
 reclaim 在途 Issue → 随后由调用方执行定向 run。实现放在 engines 层，
@@ -8,7 +8,7 @@ registry 的托管停止）；api 层经 importlib 薄转发调用（四层依�
 
 停止语义与 :class:`PidfileProcessSupervisor` 一致：SIGTERM → 等待
 超时 → 仍存活才 SIGKILL；daemon 侧的 SIGTERM 钩子负责先整组终止在途
-agent 子进程树。托管路径之外（未托管的手动 ``iar daemon``）按锁文件
+agent 子进程树。托管路径之外（未托管的手动 ``kc daemon``）按锁文件
 记录的 PID 直接停，停后补扫 daemon 的后代进程组，确保无孤儿 agent。
 """
 

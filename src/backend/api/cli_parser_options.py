@@ -74,7 +74,7 @@ def add_model_preset_options(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Anchor this command's lifecycle stage to a named model preset "
-            "(overrides the stage binding for this run). See `iar agent presets`."
+            "(overrides the stage binding for this run). See `kc agent presets`."
         ),
     )
     preset_group.add_argument(

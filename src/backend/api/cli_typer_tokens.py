@@ -1,4 +1,4 @@
-"""Token 用量 CLI 查询（``iar tokens``）。
+"""Token 用量 CLI 查询（``kc tokens``）。
 
 只读命令：读取 console 账本（``history_db_path`` 指向的 SQLite），复用
 既有聚合口径输出按流程 / 按 agent / 按 PRD（Issue）的 token 汇总，并支持
@@ -180,7 +180,7 @@ def tokens(
             CliError(
                 f"token 查询失败：账本不可用（{exc}）",
                 code=ExitCode.GENERAL,
-                suggestion="iar logs --lines 200",
+                suggestion="kc logs --lines 200",
             ),
             fmt=fmt,
         )

@@ -1,6 +1,6 @@
 # 发布流程（PyPI / Homebrew）
 
-本文描述 `kedacode` 包（命令名 `iar`）的两步走发布流程：PyPI 上传由 GitHub OIDC Trusted Publishing 完成，Homebrew tap formula 由发布 CI 自动更新。对应 workflow 是 `.github/workflows/release.yml`。
+本文描述 `kedacode` 包（命令名 `kc`）的两步走发布流程：PyPI 上传由 GitHub OIDC Trusted Publishing 完成，Homebrew tap formula 由发布 CI 自动更新。对应 workflow 是 `.github/workflows/release.yml`。
 
 ## 总览：为什么是两步走
 
@@ -45,11 +45,11 @@ Homebrew tap 侧的一次性配置：`ZataZhang/homebrew-tap` 必须是 public �
 
 ## 日常发布步骤
 
-1. **本地产物预检**（打 tag 之前，必做）：`uv build` 构建前端静态产物后打包，`uvx twine check dist/*` 全部 PASSED（twine 不在 dev 依赖里，用 `uvx` 拉起，`uv run twine` 会报 `Failed to spawn`），再把 `dist/*.whl` 装进一个干净 venv，跑 `iar --version`、`kedacode --version` 与 `iar console --no-browser` 确认可用。
+1. **本地产物预检**（打 tag 之前，必做）：`uv build` 构建前端静态产物后打包，`uvx twine check dist/*` 全部 PASSED（twine 不在 dev 依赖里，用 `uvx` 拉起，`uv run twine` 会报 `Failed to spawn`），再把 `dist/*.whl` 装进一个干净 venv，跑 `kc --version`、`kedacode --version` 与 `kc console --no-browser` 确认可用。
 2. 推送 `v*` tag，等 `build` job 全绿，确认 draft release 已带 sdist、wheel 与 `SHA256SUMS`。
 3. 检查 draft release：确认产物文件名是 `kedacode-*`、console 产物在包内、版本号正确。
 4. 在 GitHub 上把该 draft release 正式发布。
-5. 等 `publish-pypi` 与 `update-tap` 全绿后，**不要只看 workflow 日志**：核对 `https://pypi.org/pypi/kedacode/json` 已返回新版本，`iar console` 从公共索引可装，tap 仓库的 `Formula/kedacode.rb` 已更新。
+5. 等 `publish-pypi` 与 `update-tap` 全绿后，**不要只看 workflow 日志**：核对 `https://pypi.org/pypi/kedacode/json` 已返回新版本，`kc console` 从公共索引可装，tap 仓库的 `Formula/kedacode.rb` 已更新。
 
 ## 误发与幂等
 
@@ -73,11 +73,11 @@ uvx twine upload packaging/keda-code/dist/*
 
 ## 命令入口与 tap formula
 
-wheel 提供两个完全等价的 console script，都指向 `backend.api.cli:main`：主命令 `iar`，以及与安装名对齐的别名 `kedacode`。**刻意不提供 `keda` 入口**——CNCF KEDA 目前只发 YAML manifest、homebrew-core 里也还没有 `keda` formula，但它一旦发 CLI，名字必然是 `keda` 且会进 homebrew-core，届时本项目 formula 的 `bin/keda` 符号链接会与之硬冲突，用户 `brew install` 直接失败。
+wheel 提供两个完全等价的 console script，都指向 `backend.api.cli:main`：主命令 `kc`，以及与安装名对齐的别名 `kedacode`。**刻意不提供 `keda` 入口**——CNCF KEDA 目前只发 YAML manifest、homebrew-core 里也还没有 `keda` formula，但它一旦发 CLI，名字必然是 `keda` 且会进 homebrew-core，届时本项目 formula 的 `bin/keda` 符号链接会与之硬冲突，用户 `brew install` 直接失败。
 
 新增或改名 console script 时，除了 `pyproject.toml` 的 `[project.scripts]`，还要同步这几处：
 
-1. `scripts/install/install.sh` 的 `TOOL_BIN_NAMES`（卸载逐个清理 `~/.local/bin/`，漏掉会留死链接）。
+1. `install.sh` 的 `TOOL_BIN_NAMES`（卸载逐个清理 `~/.local/bin/`，漏掉会留死链接）。
 2. `.github/workflows/install-smoke.yml` 的 5 个安装验证步骤（editable / wheel×2 / PyPI×2）。
 3. `.github/workflows/release.yml` 里的 formula skeleton。
 4. **tap 仓库里已存在的 formula——必须手工改。** skeleton 那段外面套着 `if [ ! -f .../Formula/kedacode.rb ]`，只在 formula 缺失时才 bootstrap；`ZataZhang/homebrew-tap` 里的 formula 早已存在，而 `brew update-python-resources` 只重写 resource 块。也就是说新增的 `bin.install_symlink` 行不会被任何自动化补上，得去 tap 仓库手动加，否则 brew 装出来的用户永远拿不到新命令，而 CI 全绿。

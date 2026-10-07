@@ -170,7 +170,7 @@ def _drop_empty_template_overrides(
 ) -> dict[str, object]:
     """Drop empty string template/prompt overrides so base config defaults survive.
 
-    ``.iar.toml`` often materializes ``title_template = ""``, ``body_template = ""``
+    ``.kedacode.toml`` often materializes ``title_template = ""``, ``body_template = ""``
     and ``prompt = ""`` as placeholders. Without this filter, those empty strings
     would wipe out meaningful defaults from ``config.toml``.
     """
@@ -359,7 +359,7 @@ def merge_repository_config(
             so that ``_repo_label_for`` can look up the identity via
             ``context.repo_id``.
         skip_identity: When ``True`` the caller's identity view is left
-            untouched. Used for local ``.iar.toml`` overrides whose
+            untouched. Used for local ``.kedacode.toml`` overrides whose
             ``github_repo`` should not clobber the registry value.
 
     Returns:

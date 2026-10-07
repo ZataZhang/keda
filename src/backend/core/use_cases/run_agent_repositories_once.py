@@ -33,7 +33,7 @@ _TRANSIENT_NETWORK_ERROR_HINTS: tuple[str, ...] = (
 
 _RECOVERY_MESSAGE = (
     "Recovery: this appears to be a transient GitHub API network error; "
-    "no issue labels were changed. Run `iar run` again to retry."
+    "no issue labels were changed. Run `kc run` again to retry."
 )
 
 
@@ -79,10 +79,10 @@ def run_agent_repositories_once(
             that do not assemble a runner).
         max_deliberation_issues: Maximum ``agent/deliberate`` Issues to process
             per Phase 0 pass.
-        target_issue: 定向目标 Issue 编号（``iar run --issue``）。非 ``None``
+        target_issue: 定向目标 Issue 编号（``kc run --issue``）。非 ``None``
             时每仓只处理该 Issue（仍走依赖门禁与 claim），其余 ready Issue
             一律不动；``None`` 保持既有"按优先级捞队列"行为。
-        publish_stage: 发布档位（``iar run --fast-merge`` / ``--direct-pr``），仅本次
+        publish_stage: 发布档位（``kc run --fast-merge`` / ``--direct-pr``），仅本次
             运行生效；默认 ``NORMAL`` 与今天完全一致。
 
     Returns:

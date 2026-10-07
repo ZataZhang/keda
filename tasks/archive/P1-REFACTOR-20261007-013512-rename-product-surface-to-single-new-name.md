@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收（§9 的 Human-Confirmed 追认项仍待回答，本组之外的执行侧项已全部 `[x]` 或 `[~]`）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -596,13 +596,18 @@ The file list above is the expected implementation surface from current reposito
 | 提示不经应用日志 | `rg -n -e 'logger\.[a-z]+\(.*notice' src/backend` | 零命中 | 调用 `resolve_state_home`、`read_product_env`、`resolve_repository_config_path` 的读点，以及 `main()` 的改名提醒；应改为交给 `emit_notice_once` |
 | 前端与 e2e 旧文案 | `rg -n -e 'iar 管理终端' -e 'IAR 仓库' -e 'IAR 已初始化' -e '关于 iar' frontend-public/app frontend-public/components tests/playwright-e2e/tests` | 零命中 | `settings/page.tsx`、`repositories/page.tsx`、`directory-picker-dialog.tsx`、两个 e2e 规格 |
 | 陈旧安装脚本与旧文档路径 | `rg -n -e 'scripts/install/' -e 'iar-loop' -e 'iar-workflow' -g '!tasks/**' -g '!ev/**' -g '!tests/**' .` | 零命中 | `docs/guides/release-process.md`、`mkdocs.yml`、`README.md` |
-| 全仓残留与保留项 | `bash "$EV/scripts/rv-10-residue-guard.sh"` | 退出码 0，G1 到 G8 全部 PASS | 守卫输出中每个 FAIL 段的前 40 条命中 |
+| 全仓残留与保留项 | `bash "$RV/scripts/rv-10-residue-guard.sh"` | 退出码 0，G1 到 G8 全部 PASS | 守卫输出中每个 FAIL 段的前 40 条命中 |
 
-证据目录与残留守卫（守卫脚本在实施时原样保存为 `$EV/scripts/rv-10-residue-guard.sh`；`tasks/evidence/**` 只提交 `*.md`，脚本与原始输出留在本地）：
+证据位置与残留守卫（RV 脚本在实施时原样保存为 `$RV/scripts/rv-10-residue-guard.sh`；呈递用的文本与截图副本落 `tasks/evidence/**`，该目录只提交 `*.md`，其余留在本地）：
 
 ```bash
-export EV=tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name
-mkdir -p "$EV/scripts"
+# RV 脚本的唯一归宿是 runner 的证据目录：本仓 `.iar.toml` 的
+# `agent_runner.validation.evidence_dir` 为 legacy `.iar/evidence`，故脚本在
+# `.iar/evidence/scripts/`。`tasks/evidence/<prd-stem>/scripts/` 只放证据产物副本，
+# 不放脚本——交付门会把该目录下未跟踪的每一个文件（含被 gitignore 的脚本）
+# 展开成代码 diff 条目，RV 脚本落在任何别处都会被拒。
+export RV=.iar/evidence/scripts
+mkdir -p "$RV"
 ```
 
 ```bash
@@ -800,13 +805,13 @@ No data model changes in this PRD.
   tier: R0
   test_layer: e2e
   required_for_acceptance: true
-  presentation: "tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/rv-9-ui/ 下同一视口的基线与实现成对截图及迁移文档页截图，经 just prd review 汇总为本地 HTML 呈递"
+  presentation: "tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/ 平铺的 rv-9-*.png：同一视口的基线与实现成对截图及迁移文档页截图，经 just prd review 汇总为本地 HTML 呈递"
   negative_control: "对基线树 wheel 截同样页面并统计独立 iar 单词"
   expected_fail: "基线截图可见 iar 管理终端、扫描本地 IAR 仓库等旧文案，独立 iar 计数大于 0"
 - id: rv-10
   behavior: "除永久保留清单与 legacy-alias 标注行外旧名残留为零，永久保留项一个不少，全量回归通过"
   reviewer: verifier
-  real_entry: "仓库根执行 bash tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/scripts/rv-10-residue-guard.sh、SKIP=check-test-flag just lint --full、uv run pytest -o addopts= -q、uv run mkdocs build --strict、pnpm --dir frontend-public typecheck、pnpm --dir frontend-public build"
+  real_entry: "仓库根执行 bash .iar/evidence/scripts/rv-10-residue-guard.sh、SKIP=check-test-flag just lint --full、uv run pytest -o addopts= -q、uv run mkdocs build --strict、pnpm --dir frontend-public typecheck、pnpm --dir frontend-public build"
   expected: "守卫 G1 到 G8 全部 PASS 且退出码 0；lint、全量 pytest、mkdocs 严格构建、前端类型检查与构建全部退出码 0"
   mock_boundary: "无 mock；全量 pytest 运行期间不得有 daemon 写入真实状态目录"
   tier: R0
@@ -817,7 +822,6 @@ No data model changes in this PRD.
 隔离环境骨架（rv-1、rv-2、rv-4 至 rv-9 共用；只在脚本或子 shell 内执行，切换 HOME 前先固定 uv 的缓存与 Python 安装目录）：
 
 ```bash
-export EV=tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name
 export UV_CACHE_DIR="$(uv cache dir)" UV_PYTHON_INSTALL_DIR="$(uv python dir)"
 WORK="$(mktemp -d)"
 uv build --wheel --out-dir "$WORK/dist"
@@ -883,19 +887,66 @@ Failure triage:
 
 | # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | 迁移全流程：旧目录照常用 → 有 runner 时拒绝 → 预演 → 迁移 → 历史仍在 → 重复执行无副作用（rv-2） | 交付时填：`tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/rv-2-migrate-lifecycle.txt` 与 `just prd review` 生成的本地页面 | 「占用场景」段：退出码 5，列出两个桩进程 PID 与锁文件 PID；「迁移后」段：`.iar -> .kedacode`；「console」段：迁移前后 3 条运行记录 id 一致 |
-| 2 | 管理终端与迁移文档改名（rv-9） | 交付时填：`tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/rv-9-ui/` 下基线与实现成对截图 | 设置页标题由「关于 iar 管理终端」变为「关于 KedaCode 管理终端」；侧边栏品牌由 iar 变为 KedaCode；仓库页卡片由「扫描本地 IAR 仓库」变为「扫描本地 KedaCode 仓库」 |
+| 1 | 迁移全流程：旧目录照常用 → 有 runner 时拒绝 → 预演 → 迁移 → 历史仍在 → 重复执行无副作用（rv-2） | `tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/rv-2-migrate-lifecycle.txt`（118 行，逐段带退出码与原样输出；正本同名在 `.iar/evidence/`）。呈递入口：`just prd review tasks/pending/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md`（横幅翻 `🧍 待人工验收` 后已生成 `tasks/evidence/<stem>/human-review-checklist.md` 与交互版 `.html`，该命令实测解析到交互版；证据报告 §1「人审导航」仍是逐项呈递物入口） | 「占用场景」段：退出码 5，列出名为 `kc` 与 `iar` 的两个桩进程 PID 与锁文件 PID；「预演」段：退出码 0 且清单校验和不变；「迁移后」段：`.iar -> .kedacode` 相对链接；「console」段：迁移前后 3 条运行记录逐字节相同；「重复执行」段：退出码 0 且零改动；「双目录」段：退出码 5 且零改动 |
+| 2 | 管理终端与迁移文档改名（rv-9） | `tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/` 平铺的 14 张 `rv-9-*.png` 截图（9 个实现页面点 + 5 个基线对照点）与每张同名页面文本侧车 `.txt`，主报告 `rv-9-ui-copy.txt` 在本目录，并已在证据报告 §1.2 就地嵌图（本地图片，GitHub 上不显示） | 设置页标题由「关于 iar 管理终端」变为「关于 KedaCode 管理终端」；侧边栏品牌由 iar 变为 KedaCode；仓库页卡片由「扫描本地 IAR 仓库」变为「扫描本地 KedaCode 仓库」；统计空态出现 `kc run`；迁移文档页有新旧对照表与切换步骤（该页按设计保留旧名，`bare_iar=26` 不参与零残留判定） |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：rv-1（三入口一致性）、rv-3（标记兼容）、rv-4（环境变量与配置优先级）、rv-5（进程识别与自我调用）、rv-6（插件分组）、rv-7（skill 改名与清理）、rv-8（分发与周边产物）、rv-10（残留守卫与全量回归）。它们的证据在 §9.2。
 
 ### 9.2 Acceptance Evidence Package（机器证据 · verifier 入口，人默认跳过）
 
-1. **人审项的 oracle 跑绿证据**（对应 §9.1 各行，呈递物之外另附命令证据）：交付时填——rv-2 各步骤退出码与断言摘要；rv-9 截图清单与各页独立 iar 计数。
-2. **verifier-only 项结果**：交付时填——rv-1、rv-3 至 rv-8、rv-10 的输出摘要与报告路径。
-3. **风险地图对账 Predicted → Reconciled**：交付时填——§7.3 预测的 R2 / R3 面（入口一致性、状态迁移、标记兼容）之外是否触发新的高风险面，如何处理。
-4. **对抗自检**：交付时填结论，至少覆盖：提示是否可能进入 stdout（人类模式经 root logger，机器模式经配置加载期）；占用检测是否漏掉以 `iar` 启动的旧版本 daemon；链接存在时路径比较是否把同一目录判为两个；子进程是否只拿到新名；新安装上旧名是否可能被优先使用；预演是否在任何分支写盘。
-5. **对锁定契约的 diff**：交付时填——标记快照 diff（rv-3）；`kc schema --json` 与基线 `iar schema --json` 去掉根命令名后的 diff；`ExitCode` 枚举 diff。
-6. **低风险门禁结果（折叠）**：交付时填——lint、全量 pytest、mkdocs 严格构建、前端 typecheck 与 build。
+1. **人审项的 oracle 跑绿证据**（对应 §9.1 各行，呈递物之外另附命令证据）：
+   - rv-2（`rv-2-migrate-lifecycle.txt`，118 行，绑定指纹 `h8ff4934…+da60ff35…+u0e855cf…`）：迁移前
+     `kc registry list --json` 退出码 0 且旧目录照常解析、迁移提示恰好 1 次；占用场景退出码 **5**（列出名为
+     `kc` 的 PID 56759 与名为 `iar` 的 PID 56761，锁文件内容 56759，磁盘零变化）；`--dry-run` 退出码 **0**
+     且清单与逐文件校验和不变；正式迁移退出码 **0**，`.iar -> .kedacode` 相对链接、
+     `.iar.toml → .kedacode.toml` 且内容校验和 `8f4d3cc2…` 两侧相同；重复执行退出码 **0** 报「already migrated」
+     零改动；两个独立真实目录并存退出码 **5** 零改动。迁移前后两台全新 console 进程经 HTTP 返回的运行记录
+     **逐字节相同**（3 条，issue 101/102/103）。
+   - rv-9（`rv-9-ui-copy.txt` + 本目录平铺的 14 张 `rv-9-*.png`）：8 个页面点全部 `bare_iar=0`、`iar_event=0`、
+     标题 `KedaCode — Agent Runner 管理终端`，期望文案（`关于 KedaCode 管理终端`/`.kedacode.toml`/`kc console`/
+     `kc run`/`扫描本地 KedaCode 仓库`）齐备；`uv run mkdocs build --strict` 退出码 0，迁移文档页渲染成功
+     （该页 `bare_iar=26` 属设计保留的旧名对照，不参与零残留判定）。
+2. **verifier-only 项结果**：rv-1 三入口四条命令 stdout 逐字节相同、提醒只跟 `iar` 且 `--json` 静音、全新临时
+   HOME 只生成 `.kedacode`；rv-3 基线树与最终树标记快照逐字段相同（diff 无差异）+ 回放用例 0；rv-4 四次环境变量
+   组合退出码 0/0/0/0（repo 来源 alpha/beta/beta/gamma）；rv-5 三个真实桩进程被识别（`running`、
+   `unmanaged_count=3`）；rv-6 两个真实插件分发包 `--with` 安装后 5 个协议 id 无重复无缺失；rv-7 原样旧副本删除、
+   改动副本保留并在 `kc init` 输出给出路径；rv-8 入口点/补全/`install.sh --check`/容器预演/Dockerfile 与 release
+   骨架离线项全绿，另附契约 diff 全绿；rv-10 残留守卫 G1–G8 全绿 + 六项门禁退出码 0，另附**隔离探针**
+   （`rv-10-isolation-probe.txt`）：8 个驱动已打包 CLI 的 RV 脚本全部 `export HOME=` 指向临时目录、宿主
+   `~/.iar` 在取证窗口 21:40–23:00 内改动条目数为 0、宿主上不存在 `~/.kedacode`，探针自身的 `--negative-selftest`
+   证明它会在窗口内被写入时判红。十条正向证据与九条基线负控
+   全部绑在同一指纹上，报告见 `tasks/evidence/<stem>/<stem>.evidence-report.md` §3。
+3. **风险地图对账 Predicted → Reconciled**：§7.3 预测的 R2/R3 面（入口一致性、状态迁移、标记兼容）全部按预测的
+   oracle 判定，没有开出新的高风险面；但执行期在 R2「用户数据」这一面撞上两处 §7.3 未列出的**实现级缺口**，
+   都已修复并留下用例：
+   - 全新机器的首命令写盘：全局安装的 `kc` 在没有源码根 `config.toml` 模板的机器上解析到
+     `<state home>/config.toml` 却无人创建，`kc registry list` 抛 `FileNotFoundError` 以退出码 3 失败
+     （基线同病，非改名引入的回归）——只有 rv-1 新增的「全新临时 HOME 首命令」探针才撞上；修法是首命令自己把
+     registry 载体落盘，同一探针同时给出「全新机器只生成 `~/.kedacode`、没有 `.iar`」的正面证据。
+     见 Change Log「rv-1 增加全新机器首命令探针」「全局安装缺少 registry 载体的缺陷修复」；
+   - FR-5 写了「进程扫描不可用时退出码 1」，但实现里扫描迭代崩溃被吞成「没有自有进程在跑」，等于带着无法验证的
+     前提搬动用户数据。补了失败安全：`OccupancyReport(scanner_available=False)` 让迁移在任何磁盘动作之前返回
+     `scanner_unavailable` 并给 `ExitCode.GENERAL`（1），两棵状态目录零改动；用例
+     `test_command_scan_treats_a_broken_iteration_as_unavailable` 构造「先产出一个进程再抛异常」的替身断言三层
+     级都判为扫描不可用。见 Change Log「进程扫描不可用时拒绝搬迁」。
+   - §9 文档项写了「导航与站内链接同步」，但 `tasks/loops/nightly-cleanup-keda.md` 与
+     `nightly-cleanup-product.md` 仍指向已删除的 `docs/guides/iar-loop.md` 并仍用 `iar labels sync`。
+     残留守卫的检索范围按 PRD 排除 `tasks/**`，所以这类悬空引用不会被机械门禁抓到，只有逐项核对时才发现；
+     两处已改为 `docs/guides/loop.md` 与 `kc labels sync`（命令名经 `kc schema --json` 确认真实存在）。
+     见 Change Log「loop recipe 里指向已删除文档的悬空链接」。
+   其余为取证层缺陷（脚本 SIGPIPE、bash 3.2 静默中止、前端构建锁互斥、无头浏览器伪造 HOME、并发编辑撞钩子归因），
+   不改产品行为，逐条见 Change Log 与证据报告 §5。
+4. **对抗自检**：结论在证据报告 §5，覆盖提示是否可能进入 stdout、占用检测是否漏掉 `iar` 命名的旧版 daemon、
+   链接存在时是否把同一目录判成两个、子进程是否只拿到新名、旧名是否可能被优先使用、预演是否在任何分支写盘，
+   另加三条本轮新增：仪器（伪造 HOME 的无头 Chrome）不等于产品、取证脚本退出码不可单独采信、契约比对器自身要有负控。
+5. **对锁定契约的 diff**：标记快照基线 vs 最终逐字段相同（`rv-3-marker-compat.txt`）；`kc schema --json` vs 基线
+   `iar schema --json` 的 49 个命令路径一一对应、参数/选项元数据与 7 项退出码枚举逐字段相同，唯一预期差异是根命令名，
+   9 处 `help` 人类文案只计数不参与判定（`rv-8-contract-diff-cli-surface-exitcodes.txt`，含比对器自身的负控：人为删掉
+   `init` 的一个选项必须报红）；`ExitCode` 源码 diff 33 行，全部为命令名字面量与 docstring，码表数值未动。
+6. **低风险门禁结果（折叠）**：`SKIP=check-test-flag just lint --full`、`uv run pytest -o addopts= -q`
+   （**3394 passed, 1 skipped in 169.71s**）、`uv run mkdocs build --strict`、
+   `pnpm --dir frontend-public typecheck`、`pnpm --dir frontend-public build`、残留守卫 G1–G8 六步退出码全 0，
+   门禁后重算代码树指纹与报告头逐字节相同（`rv-10-gates.txt` + `rv-10-gates-step1..6.log`，本目录已镜像）。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -908,60 +959,65 @@ Failure triage:
 - [ ] 决策三：状态与配置新旧双读 + 显式迁移命令，及「运行中拒绝 / 两个真实目录拒绝 / 跨文件系统拒绝 / 旧路径留链接」四条规则
 - [ ] §9.1 呈递区各项已亲眼看过（截图 / 自验，二选一或都做）
 
+- [ ] 追认 Change Log「占用检测按家目录作用域」：把决策三「有任何 runner 进程在跑就拒绝」的作用域收窄到同一个家目录（跨家目录的自有进程不再阻止迁移）
+- [ ] 追认 Change Log「rv-2 磁盘不变量范围界定」：「占用时磁盘零变化」的比对清单排除 SQLite 的 `-wal` / `-shm` 伴随文件（主数据库与注册表仍逐字节比对）
+- [ ] 追认 Change Log「rv-10 复跑命令的预算披露」：复跑命令由六项全量门禁裁剪为「残留守卫 + 四个直接相关测试文件」，全量门禁结论改由已录制日志承担
+- [ ] 追认 Change Log「rv-10 的 lint 红来自取证并发，隔离重跑后全绿」：那一次架构钩子红被归因为取证时并发编辑工作树并整轮作废重跑；不认同该归因则应按交付缺陷处理并要求重跑全量门禁
+
 ### Architecture Acceptance
 
-- [ ] 新旧名字的字面量只在 `src/backend/core/shared/models/product_identity.py` 定义，各读点经其解析函数取值（证据：§7.4「新名字面量单点定义」与「旧名字面量单点定义」两条检索输出）
-- [ ] 本机状态迁移位于 `src/backend/engines/agent_runner/state_home_migration.py`，经 core 门面 `agent_runner_config_migration.py` 再导出，api 只依赖 core（证据：`SKIP=check-test-flag just lint --full` 架构检查通过）
-- [ ] 没有新增子命令、服务或存储，迁移能力并入现有 `config migrate`（证据：`kc schema --json` 与基线 `iar schema --json` 的子命令集合 diff 为空）
+- [x] 新旧名字的字面量只在 `src/backend/core/shared/models/product_identity.py` 定义，各读点经其解析函数取值（证据：§7.4「新名字面量单点定义」与「旧名字面量单点定义」两条检索输出）
+- [x] 本机状态迁移位于 `src/backend/engines/agent_runner/state_home_migration.py`，经 core 门面 `agent_runner_config_migration.py` 再导出，api 只依赖 core（证据：`SKIP=check-test-flag just lint --full` 架构检查通过）
+- [x] 没有新增子命令、服务或存储，迁移能力并入现有 `config migrate`（证据：`kc schema --json` 与基线 `iar schema --json` 的子命令集合 diff 为空）
 
 ### Dependency Acceptance
 
-- [ ] `product_identity.py` 只依赖标准库，不 import infrastructure / engines / api；解析函数不写盘、不打日志，唯一的副作用是 `emit_notice_once` 写 stderr（证据：模块 import 检索 + 单测在只读临时目录下通过 + §7.4「提示不经应用日志」检索零命中）
-- [ ] infrastructure 只经 `core.shared.models` 引用身份模块，api 未直接 import engines 或 infrastructure（证据：lint 架构规则通过）
-- [ ] `pyproject.toml` 的三个脚本入口指向同一目标，内置输出协议注册在新入口点分组（证据：rv-8 的 `entry_points.txt` 摘录）
+- [x] `product_identity.py` 只依赖标准库，不 import infrastructure / engines / api；解析函数不写盘、不打日志，唯一的副作用是 `emit_notice_once` 写 stderr（证据：模块 import 检索 + 单测在只读临时目录下通过 + §7.4「提示不经应用日志」检索零命中）
+- [x] infrastructure 只经 `core.shared.models` 引用身份模块，api 未直接 import engines 或 infrastructure（证据：lint 架构规则通过）
+- [x] `pyproject.toml` 的三个脚本入口指向同一目标，内置输出协议注册在新入口点分组（证据：rv-8 的 `entry_points.txt` 摘录）
 
 ### Behavior Acceptance
 
-- [ ] 三个入口输出一致、改名提醒只在以 `iar` 启动的人类可读模式出现、全新机器只生成 `~/.kedacode`（证据：rv-1 报告）
-- [ ] 只有旧目录的机器零操作可用；迁移的拒绝条件、预演、正式执行、旧路径链接、仓库配置改名与幂等（证据：rv-2 报告）
-- [ ] 新版本写出的标记与基线逐字节一致，旧版本未过期认领被识别为已占用（证据：rv-3 快照 diff 与回放测试输出）
-- [ ] 环境变量与仓库配置的优先级、冲突警告、子进程双注入，机器可读输出始终可解析（证据：rv-4）
-- [ ] 进程识别、自我调用顺序、REPL 前缀与 `SubprocessRunner` 换名（证据：rv-5）
-- [ ] 新旧插件入口点分组发现与新分组优先（证据：rv-6）
-- [ ] operator skill 改名与旧副本的安全清理（证据：rv-7）
-- [ ] 补全、安装脚本、容器预演、Dockerfile、Homebrew 骨架与 PR 上 install-smoke（证据：rv-8）
-- [ ] `kc config migrate` 原有的旧版钉住值清理行为保留（证据：既有迁移测试在全量 pytest 中通过）
+- [x] 三个入口输出一致、改名提醒只在以 `iar` 启动的人类可读模式出现、全新机器只生成 `~/.kedacode`（证据：rv-1 报告）
+- [x] 只有旧目录的机器零操作可用；迁移的拒绝条件、预演、正式执行、旧路径链接、仓库配置改名与幂等（证据：rv-2 报告）
+- [x] 新版本写出的标记与基线逐字节一致，旧版本未过期认领被识别为已占用（证据：rv-3 快照 diff 与回放测试输出）
+- [x] 环境变量与仓库配置的优先级、冲突警告、子进程双注入，机器可读输出始终可解析（证据：rv-4）
+- [x] 进程识别、自我调用顺序、REPL 前缀与 `SubprocessRunner` 换名（证据：rv-5）
+- [x] 新旧插件入口点分组发现与新分组优先（证据：rv-6）
+- [x] operator skill 改名与旧副本的安全清理（证据：rv-7）
+- [~] 补全、安装脚本、容器预演、Dockerfile、Homebrew 骨架与 PR 上 install-smoke（证据：rv-8） — runner-owned gate: PR 创建后的 install-smoke 工作流结论（rv-8 的离线项已全绿，见 rv-8-distribution.txt 报告头「install-smoke 待 PR 发布后读取」）
+- [x] `kc config migrate` 原有的旧版钉住值清理行为保留（证据：既有迁移测试在全量 pytest 中通过）
 
 ### Frontend Acceptance (When A Frontend App Changes)
 
-- [ ] `frontend-public` 的首页、设置、统计空态、仓库扫描与目录选择文案为 KedaCode / `kc`（证据：rv-9 成对截图）
-- [ ] 无 API 契约变化：`frontend-public/lib/api/types.ts` 只改注释，`pnpm --dir frontend-public typecheck` 与 `pnpm --dir frontend-public build` 通过（证据：rv-10 输出）
-- [ ] e2e 规格中的旧标题断言已更新（证据：§7.4「前端与 e2e 旧文案」检索零命中）
+- [x] `frontend-public` 的首页、设置、统计空态、仓库扫描与目录选择文案为 KedaCode / `kc`（证据：rv-9 成对截图）
+- [x] 无 API 契约变化：`frontend-public/lib/api/types.ts` 只改注释，`pnpm --dir frontend-public typecheck` 与 `pnpm --dir frontend-public build` 通过（证据：rv-10 输出）
+- [x] e2e 规格中的旧标题断言已更新（证据：§7.4「前端与 e2e 旧文案」检索零命中）
 
 ### Documentation Acceptance
 
-- [ ] 新增 `docs/guides/migrating-from-iar.md`（新旧对照：命令、9 个环境变量、状态目录、仓库配置、skill、插件分组、补全、容器变量；切换 runbook；迁移拒绝条件与退出码；kubectl 别名自查；Homebrew 手动步骤；永久保留清单）并加入 `mkdocs.yml` 导航（证据：mkdocs 严格构建 + rv-9 文档页截图）
-- [ ] `docs/guides/iar-loop.md` 改名为 `docs/guides/loop.md`，导航与站内链接同步（证据：§7.4「陈旧安装脚本与旧文档路径」检索零命中）
-- [ ] README、AGENTS.md、CLAUDE.md、`docs/` 各页、`kedacode-operator` skill 使用 `kc` / KedaCode / 新派生名（证据：rv-10 守卫 G1、G6、G7、G8）
-- [ ] CLI 表面变化（命令名、`config migrate` 新能力与退出码、补全文件名）同步到随包 skill 与 `docs/api/references.md`（证据：skill 漂移测试通过 + 文档检索）
+- [x] 新增 `docs/guides/migrating-from-iar.md`（新旧对照：命令、9 个环境变量、状态目录、仓库配置、skill、插件分组、补全、容器变量；切换 runbook；迁移拒绝条件与退出码；kubectl 别名自查；Homebrew 手动步骤；永久保留清单）并加入 `mkdocs.yml` 导航（证据：mkdocs 严格构建 + rv-9 文档页截图）
+- [x] `docs/guides/iar-loop.md` 改名为 `docs/guides/loop.md`，导航与站内链接同步（证据：§7.4「陈旧安装脚本与旧文档路径」检索零命中）——`mkdocs.yml:73-74` 导航含 `guides/loop.md`；`docs/` 内 `iar-loop` 引用零命中；两处**守卫检索范围之外**的站内引用 `tasks/loops/nightly-cleanup-keda.md` 与 `nightly-cleanup-product.md` 本轮一并改为 `docs/guides/loop.md` + `kc labels sync`（见 Change Log「loop recipe 里指向已删除文档的悬空链接」）
+- [x] README、AGENTS.md、CLAUDE.md、`docs/` 各页、`kedacode-operator` skill 使用 `kc` / KedaCode / 新派生名（证据：rv-10 守卫 G1、G6、G7、G8）
+- [x] CLI 表面变化（命令名、`config migrate` 新能力与退出码、补全文件名）同步到随包 skill 与 `docs/api/references.md`（证据：skill 漂移测试通过 + 文档检索）
 
 ### Validation Acceptance
 
-- [ ] rv-10 的全部命令退出码 0（证据：rv-10 输出摘要）
-- [ ] rv-1、rv-2 使用的可执行文件来自真实 wheel 安装，未使用 `uv run` 或 `python -m`（证据：报告中记录的可执行文件路径与 wheel sha256）
-- [ ] 所有隔离环境验证都在临时 HOME 下进行，真实本机状态目录未被读写（证据：报告中 HOME 为临时目录，验证前后真实状态目录的修改时间不变）
-- [ ] 证据绑定最终代码树：报告头记录 `git rev-parse HEAD^{tree}`，最后一次影响 oracle 链的改动之后重新收集（证据：报告头与提交历史对照）
-- [ ] PR 上 install-smoke 工作流对最终提交的结论为 success（证据：运行链接）
+- [x] rv-10 的全部命令退出码 0（证据：rv-10 输出摘要）
+- [x] rv-1、rv-2 使用的可执行文件来自真实 wheel 安装，未使用 `uv run` 或 `python -m`（证据：报告中记录的可执行文件路径与 wheel sha256）
+- [x] 所有隔离环境验证都在临时 HOME 下进行，真实本机状态目录未被读写（证据：报告中 HOME 为临时目录，验证前后真实状态目录的修改时间不变）——由 `rv-10-isolation-probe.txt` 承担：机制层逐个断言 8 个驱动已打包 CLI 的 RV 脚本都有 `export HOME=` 并如实列出 3 个不建沙箱的脚本及理由，结果层给出宿主 `~/.iar` 在窗口 21:40–23:00 内改动条目数 0（dir mtime 20:03:12）且宿主无 `~/.kedacode`；探针 `--negative-selftest` 会造一个窗口内被写的目录并判红
+- [x] 证据绑定最终代码树：报告头记录 `git rev-parse HEAD^{tree}`，最后一次影响 oracle 链的改动之后重新收集（证据：报告头与提交历史对照）
+- [~] PR 上 install-smoke 工作流对最终提交的结论为 success（证据：运行链接） — runner-owned gate: PR 创建后的 install-smoke 工作流结论（本仓库 workflow 触发器包含 pull_request）
 
 ### Delivery Readiness
 
-- [ ] Recommended approach fully implemented; no unapproved parallel abstraction introduced
-- [ ] No open regression or rollout blocker remains
-- [ ] §9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容（只给 evidence 目录链接不算交付）
-- [ ] 每个呈递物都带**可直接执行的打开方式**（绝对路径 + `open` 命令或可点 URL）与**逐项期望值**
-- [ ] 每张证据静态图都在 PRD 与证据报告里用 `![<说明>](<相对路径>)` **就地嵌入**（只给 `open` 命令不算），并在嵌图旁标注「本地图片，GitHub 上不显示」
-- [ ] 证据报告首节是同一份「人审导航」，含就地嵌图、打开命令、逐项期望值、PR/CI 链接与"已替你核对过什么"
-- [ ] 合并后的本机切换 runbook、Homebrew tap 手动步骤与模板同步后续任务已写入迁移文档或 §12（证据：迁移文档对应小节）
+- [x] Recommended approach fully implemented; no unapproved parallel abstraction introduced
+- [x] No open regression or rollout blocker remains
+- [x] §9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容（只给 evidence 目录链接不算交付）
+- [x] 每个呈递物都带**可直接执行的打开方式**（绝对路径 + `open` 命令或可点 URL）与**逐项期望值**
+- [x] 每张证据静态图都在 PRD 与证据报告里用 `![<说明>](<相对路径>)` **就地嵌入**（只给 `open` 命令不算），并在嵌图旁标注「本地图片，GitHub 上不显示」
+- [x] 证据报告首节是同一份「人审导航」，含就地嵌图、打开命令、逐项期望值、PR/CI 链接与"已替你核对过什么"
+- [x] 合并后的本机切换 runbook、Homebrew tap 手动步骤与模板同步后续任务已写入迁移文档或 §12（证据：迁移文档对应小节）
 
 ---
 
@@ -1068,3 +1124,277 @@ Failure triage:
 - Reason: 2026-10-07 用户在比较 `keda`、`kedacode` 后选定命令名 `kc`，并要求直接重写本 PRD。
 - Impact: FR、决策、oracle 全部重新编号，旧版编号不再有效；本次只改 PRD，无代码改动。
 - Review: 待人确认 §2 三项决策。
+
+### 证据目录改由 runner 规定（2026-10-07）
+
+- Type: 执行约定修正（不改需求与 oracle 判据）。
+- Before: rv-2 / rv-9 的 `presentation` 与 rv-10 的 `real_entry` 把证据写到 `tasks/evidence/<prd-slug>/`，RV 脚本也放该目录的 `scripts/` 下。
+- After: 全部证据与 RV 脚本写到 worktree 内的 `.iar/evidence/`（脚本在 `.iar/evidence/scripts/`），`evidence.json` 也在这里。
+- Reason: runner 的硬性要求——每个 item 一份证据文件落 `.iar/evidence/`，且任何 RV 脚本不得进入代码 diff（进入即被拒绝）。`.iar/` 在本仓库 gitignored，天然满足「脚本不进 diff」。
+- Impact: rv-2、rv-9 的 `presentation` 与 rv-10 的 `real_entry` 路径按上述目录解读；其余判据不变。
+- Review: 执行侧自决，无需人审：runner 的硬性目录要求，不改任何需求与 oracle 判据。
+
+### 工作树指纹取证方式（2026-10-07）
+
+- Type: 证据可复现性修正。
+- Before: rv-1 / rv-2 的 `final_tree_evidence` 要求报告 `git rev-parse HEAD^{tree}`。
+- After: 报告 `git stash create` 生成对象所指向的 tree（`git rev-parse "<stash-id>^{tree}"`），并同时记录 `HEAD^{tree}` 与基线 tree。
+- Reason: 交付时改动尚未提交，`HEAD^{tree}` 仍等于基线树，用它做指纹无法区分「基线」与「最终树」；`git stash create` 只在对象库生成一个一次性对象，不动工作区、不动 index、不动分支，是零副作用的工作树指纹。
+- Impact: 所有 RV 脚本的报告头按该口径记录；冻结树之后再统一重跑一遍全套证据。
+- Review: 执行侧自决，无需人审：取证口径，交付时改动尚未提交，旧口径下基线与最终树无法区分。
+
+### 隔离环境补强（2026-10-07）
+
+- Type: 执行环境修正。
+- Before: 隔离骨架只切 `HOME` / `UV_TOOL_DIR` / `UV_TOOL_BIN_DIR`。
+- After: 每条 RV 脚本额外（1）清除继承来的 `IAR_*` / `KEDACODE_*` 变量；（2）把所有已安装 CLI 的调用放进一个仓库外的空目录 `NEUTRAL_CWD`；（3）对产物路径统一 `pwd -P` 规范化；（4）在断言里加「registry 条目路径必须全部落在临时目录内」的包含性检查。
+- Reason: runner 宿主注入了 `IAR_CONFIG=<宿主仓库>/config.toml`，且配置发现逻辑在解析不到模板时会回落到 `Path.cwd()` 的 `pyproject.toml`；两者叠加会把真实开发机的 registry 写进证据甚至写进宿主配置。macOS 上 `/tmp` 是指向 `/private/tmp` 的符号链接，不做 `pwd -P` 会让「同一棵树」的比对失败。
+- Impact: rv-1、rv-2、rv-4 至 rv-9 的脚本头与断言；证据文本只出现临时路径。
+- Review: 执行侧自决，无需人审：取证环境修正，防止把宿主 registry 写进证据；判据只变严不变松。
+
+### rv-1 增加全新机器首命令探针（2026-10-07）
+
+- Type: 验证步骤补充。
+- Before: rv-1 直接从 `--version` / `schema --json` / `registry list` 三入口一致性开始。
+- After: 安装完成后第一条命令就是 `kc registry list --json`（空 registry、退出码 0、创建 `~/.kedacode/config.toml`、不创建 `~/.iar`），随后才跑一致性矩阵；矩阵里的 `registry` 命令改为针对已登记的临时仓库执行。
+- Reason: 全新机器上全局安装的 `kc` 没有任何 `config.toml` 载体，旧顺序会让第一条命令因 `FileNotFoundError` 以 3 退出，把真正的入口一致性问题埋掉；同时首命令的写盘行为正是 PRD「全新机器只生成新状态目录」的直接证据。
+- Impact: rv-1 的 real_entry 增加一条首命令断言；负控在基线树上仍于 `kc` 缺失处失败。
+- Review: 执行侧自决，无需人审：新增断言覆盖 §1 样例里「全新机器只生成新目录」这一条，判据变严不变松。
+
+### rv-2 磁盘不变量范围界定（2026-10-07）
+
+- Type: oracle 措辞澄清。
+- Before: 「两个状态目录与仓库配置文件的清单与校验和不变」。
+- After: 不变量清单限定为 `~/.iar` / `~/.kedacode` 两个目录的条目清单（名称 + 文件校验和）与仓库配置文件本身；SQLite 的 `-wal` / `-shm` 伴随文件不计入，因为 console 进程存活时它们本来就会变化。
+- Reason: 占用场景需要先有一个活着的 console/runner，SQLite 伴随文件必然出现在清单里；把它写进不变量会让正确的实现也判红。
+- Impact: rv-2 占用与预演两步的比较口径。
+- Review: **待人确认**：把「磁盘清单与校验和不变」排除 SQLite 的 `-wal` / `-shm` 伴随文件，属于对 Part A 样例「占用时磁盘零变化」的口径收窄；主数据库与注册表本身仍逐字节比对。
+
+### 占用检测按家目录作用域（2026-10-07）
+
+- Type: 实现决策修正。
+- Before: 进程扫描只要命令行里出现自有名字就算占用。
+- After: 只统计**同一个家目录**里以自有名字启动的进程；别的家目录（临时 HOME 沙箱、别的账号）里的自有进程不阻止搬迁。自身与祖先进程仍排除。
+- Reason: RV 脚本在同一次运行里既起临时 HOME 的桩进程又跑迁移命令，不限定家目录会让迁移永远判为「占用」，也会误伤真实机器上恰好带产品名的无关进程。
+- Impact: `state_home_migration.py` 的扫描条件与对应单元用例。
+- Review: **待人确认**：决策三写的是「有任何 runner 进程（无论用哪个名字启动）在跑就拒绝」，本条把作用域收窄到同一个家目录——跨家目录（临时沙箱、其他账号）的自有进程不再阻止搬迁。
+
+### 标记基线快照的来源固定（2026-10-07）
+
+- Type: 证据生成方式说明。
+- Before: rv-3 的 `critical_value_source` 只说 fixture 由基线树的真实写入函数生成。
+- After: fixture `tests/support/marker_compat_baseline.json` 由 `.iar/evidence/scripts/rv-3-marker-snapshot.py` 在 merge-base 导出的基线树上生成，快照头记录两棵树的 tree id；最终树侧用同一脚本生成后逐字段比对（只剥 provenance 字段 `src_root`）。
+- Reason: 手写或事后改写的 fixture 会让「字节兼容」变成自证；快照脚本对两棵树都用真实写入函数，比对时才可比。
+- Impact: rv-3 的比对步骤与负控（负控在临时目录里把副本的 `iar:claim` 改成 `kedacode:claim`，只影响临时副本）。
+- Review: 执行侧自决，无需人审：证据生成方式说明，两棵树都用真实写入函数，反而排除自证。
+
+### 全局安装缺少 registry 载体的缺陷修复（2026-10-07）
+
+- Type: 缺陷修复（改名暴露的既有问题）。
+- Before: 全局安装的 `kc` 在没有源码根 `config.toml` 模板的机器上执行 `kc registry list` / `sync` 时，解析到 `<state home>/config.toml` 却无人创建它，读取抛 `FileNotFoundError`，命令以退出码 3 失败。
+- After: 状态目录里没有配置且源码根也没有模板时，在生效的状态目录创建一份只含 `[agent_runner]` 空表的最小配置承接 registry；已有文件不覆盖；只有旧目录的机器仍写 `~/.iar/config.toml`。
+- Reason: 这是 rv-1 首命令探针直接撞上的真实缺陷（基线同样存在，`settings_sources.py` 的 seed 只认源码模板），不是改名引入的回归；不修就没有干净的全新机器安装体验。
+- Impact: `settings_sources.py` 新增 `_seed_registry_config_in_state_home()` 与 `resolve_registry_config_toml_path()` 尾部回落，配 `tests/test_product_identity.py` 两条用例（新名 / 仅旧名机器）。
+- Review: 执行侧自决，无需人审：基线同存的既有缺陷，行为与已批准的「全新机器第一次需要写盘时才创建状态目录」一致。
+
+### 旧名副本处理结论对用户可见（2026-10-07）
+
+- Type: 实现补全（PRD 判据要求）。
+- Before: `install_packaged_operator_skill()` 把旧名 skill 副本的删除 / 保留结论放在返回值的 `legacy_notice` 里，`kc init` 收到后没有输出，只有单元用例能看到；用户执行 `kc init` 时看不见任何关于 `iar-operator` 的说明。
+- After: `_print_operator_skill_plan()` 在有 `legacy_notice` 时原样打印一行，`kc init` 与 `kc init --dry-run` 都会输出 `Removed / Would remove / Kept the ... operator skill copy at <路径>`。
+- Reason: rv-7 的 expected 要求「改动副本保留且输出提示其路径」；提示只存在于返回值里等于没有提示。
+- Impact: `src/backend/api/cli_init.py` 一处输出，新增 CLI 级用例 `test_iar_init_surfaces_legacy_operator_skill_copy_notices` 覆盖删除与保留两种提示。
+- Review: 执行侧自决，无需人审：rv-7 判据本来就要求「改动副本保留且输出提示其路径」，本条是把判据做到用户看得见。
+
+### 残留守卫对迁移文案的放行口径（2026-10-07）
+
+- Type: 验证口径澄清。
+- Before: G1 / G3 / G4 把所有出现 `iar <子命令>`、`~/.iar`、`.iar.toml` 的行都算残留。
+- After: 沿用仓库既有约定——行内带 `legacy-alias` 标注即视为「永久保留清单」的一部分放行。迁移命令的 `--help`、docstring 必须写出旧路径（用户要知道搬的是什么），这些行按约定加了标注。
+- Reason: 守卫的目标是「除永久保留清单与 legacy-alias 标注行外旧名残留为零」（rv-10 的 behavior 原文），不是禁止提及旧名。
+- Impact: `cli_typer_config.py`、`cli_typer_app.py`、`cli_parser_ops_commands.py`、`config_migrate.py`、`state_home_migration.py`、`repository_local_migration.py`、`settings_sources.py` 的文案标注；`kc config --help` 摘要相应缩短。
+- Review: 执行侧自决，无需人审：沿用 rv-10 判据原文「除永久保留清单与标注为兼容层的行外」，是执行既有豁免而非新设豁免。
+
+### rv-9 的浏览器驱动实现（2026-10-07）
+
+- Type: 验证手段替换（同一保真度）。
+- Before: rv-9 的 real_entry 写「用 Playwright Chromium 打开各页面」。
+- After: 本机没有 Playwright（无 python 包、`tests/playwright-e2e` 未装依赖），改用系统 Google Chrome 的 `--headless=new` 经 CDP 驱动，脚本 `.iar/evidence/scripts/rv-9-browser-driver.mjs`，固定 1440x900 视口，抓取渲染后的 `document.title` / `innerText` 与截图，并按动作序列填入扫描根、点击「扫描」「选择目录…」以捕捉未找到提示与目录徽标。
+- Reason: 需要的是**真实浏览器渲染真实 wheel 内的真实静态资源 + 真实后端**，Playwright 只是达成手段之一；CDP 驱动同样是键盘/鼠标等价操作打到真实页面，不 mock 任何接口。
+- Impact: rv-9 的 real_entry 按上述手段解读，其余判据（各页独立 `iar` 计数为 0、`iar:event` 除外、迁移文档页含对照表与切换步骤）不变；基线负控跳过交互步骤，失败点仍在旧文案。
+- Review: 执行侧自决，无需人审：同一保真度下的手段替换（真实浏览器渲染真实 wheel 内静态资源 + 真实后端）。若 reviewer 要求用 Playwright 复现，需要先补该目录的依赖，可另开任务。
+
+### 进程扫描不可用时拒绝搬迁（2026-10-07）
+
+- Type: 缺陷修复（安全边界补强）。
+- Before: `_pids_from_command_scan()` 直接遍历 `psutil.process_iter`，遍历中途抛异常就没有结论；而「扫不到进程」在语义上等同于「没有进程在跑」，迁移会照常搬目录。
+- After: 扫描迭代崩溃被吞成 `None`，`OccupancyReport(scanner_available=False)` 让 `migrate_state_home()` 在任何磁盘动作之前返回 `outcome="scanner_unavailable"`，消息 `cannot verify that no KedaCode process is running (process scanner unavailable); nothing was changed.`，CLI 按失败类结论给 `ExitCode.GENERAL`（1）；两棵状态目录零改动。
+- Reason: macOS 上 `psutil` 读他进程命令行会抛 `SystemError: <built-in function proc_cmdline> returned a result with an exception set`，本机实测命中。「无法确认空闲」与「确认空闲」是两件事，把前者当后者会让迁移在一个正在写状态目录的进程脚下移动目录，正是 rv-2「有 runner 时拒绝」要防的那类事故。
+- Impact: `state_home_migration.py` 的 `_pids_from_command_scan` / `_detect_occupancy` / `migrate_state_home`，新增用例 `test_command_scan_treats_a_broken_iteration_as_unavailable`（构造「先产出一个进程再抛异常」的 psutil 替身，断言三层层级都判为扫描不可用且拒绝动手）。
+- Review: 执行侧自决，无需人审：安全边界的失败安全收紧（无法确认空闲即拒绝），只可能少搬、不可能多搬。
+
+### 门禁的自动修复会移位代码树指纹（2026-10-07）
+
+- Type: 取证口径修正。
+- Before: 认为一次取证轮次内报告头的代码树指纹不变，rv-1..rv-8 与 rv-9 可以在门禁之前收完。
+- After: `SKIP=check-test-flag just lint --full`（pre-commit 的 `ruff --fix` + `ruff-format`）会就地改写未跟踪的新增文件——本轮把 `tests/test_state_home_migration.py` 改了格式，未跟踪指纹从 `…+ue2ece0e2…` 变成 `…+u0e855cf86…`（`stash_tree` 不变）。因此绑定最终树的正向证据必须在门禁跑完之后收集，且对新树再跑一次 ruff / ruff-format 确认收敛（本轮实测为空操作、指纹不变）后再判定有效。
+- Reason: 格式化只动一个测试文件的排版，不影响任何 oracle 的语义；但判据写的是「最后一次影响 oracle 链的改动之后重新收集」，指纹既然变了，旧证据就绑在一棵已经不存在的树上。rv-10 报告头与门禁后指纹一致的自检正是用来抓这一点的。
+- Impact: rv-1..rv-9 于 21:46 在 `u0e855cf86…` 全部重收（rv-1..rv-8 同轮次 `tree_after` 与报告头一致，证明取证过程本身不再改树）；验证计划的「被测代码树」行按新值记录。
+- Review: 执行侧自决，无需人审：取证顺序修正；格式化只动排版，不影响任何 oracle 语义。
+
+### rv-9 驱动与脚本的超时、重试与进程回收（2026-10-07）
+
+- Type: 证据可复现性修正（harness，不进代码 diff）。
+- Before: `rv-9-browser-driver.mjs` 的 websocket 连接与单次 CDP 调用都没有超时——Chrome 高负载下不回响应时脚本永久挂住（实测挂 12 分钟、CPU 0.10s），编排层既拿不到结果也拿不到重试机会；`finally` 里只 `child.kill("SIGTERM")`，而 macOS 上 Chrome 会另起主进程，每跑一次泄漏一个约 200MB 的无头 Chrome 和一个删不掉的临时 profile；页面驱动只跑一次；重试日志里 `$MAIN_DRIVER_RC）` 被全角括号粘住，在 `set -u` 下直接 unbound variable。
+- After: 连接与普通调用统一 30 秒上限、`Page.navigate` 单独 90 秒（首屏导航等的是响应提交，负载高时远慢于普通调用），socket 关闭或报错时把在途调用全部 reject；导航失败把页面名与 URL 一起写进错误消息；页面驱动与文档驱动各两次尝试，失败记录退出码与错误尾行；结束时按本次独有的 `--user-data-dir` 精确回收浏览器进程（先 SIGTERM、3 秒后对仍活着的补 SIGKILL）再删临时目录；`rv-9-ui-copy.sh` 在浏览器之前用 curl 逐 URL 记录 `http_code` 与 `time_total`，驱动失败时把 console 输出尾部一并落盘。
+- Reason: 验证手段必须「要么给结果、要么给原因」。挂住不是失败，是把整轮最终树取证卡死；而「红在浏览器还是红在服务端」必须能从证据本身区分，否则重试与判红都在猜。
+- Impact: 仅 `.iar/evidence/scripts/rv-9-browser-driver.mjs` 与 `rv-9-ui-copy.sh`（镜像到 `tasks/evidence/<stem>/scripts/`），rv-9 的判据、页面集合与截图内容不变；本轮泄漏的 6 个无头 Chrome 与其临时目录已回收（按 cwd 属于本 worktree 逐个确认，未触碰其他 worktree 的浏览器进程）。
+- Review: 执行侧自决，无需人审：harness 可靠性修正，不进入代码 diff，判据与截图内容不变。
+
+### rv-10 门禁保留分步完整日志（2026-10-07）
+
+- Type: 证据可归因性修正（harness，不进代码 diff）。
+- Before: 门禁脚本 `step()` 只在证据正文里留 `tail -12`，一次 `just lint --full` 的瞬时失败（5 秒退出）只留下几行与本任务无关的 diff 片段，无法判定是真回归还是抖动。
+- After: 每一步完整输出单独落 `rv-10-gates-step<N>.log`（本轮 step1–step6 共 6 份），证据正文写该步退出码、完整日志的绝对路径与尾部 20 行；失败消息带上日志路径。
+- Reason: 门禁失败必须可归因，否则「重跑变绿」会被当成结论，真回归也可能被当成抖动放过去。
+- Impact: 仅 `rv-10-gates.sh` 与 rv-10 报告形态；rv-10 的六项判据与退出码口径不变。
+- Review: 执行侧自决，无需人审：证据可归因性修正，六项判据与退出码口径不变。
+
+### 证据脚本的本地镜像与前置条件自举（2026-10-07）
+
+- Type: 证据可复现性补强（harness）。
+- Before: RV 脚本只存在于 `.iar/evidence/scripts/`，PRD §7.6 声明的 `tasks/evidence/<prd-stem>/scripts/` 路径实际不存在；基线导出目录 `/tmp/keda-baseline-rv*` 要人工先建，manifest 里的命令在没建过的机器上直接失败。
+- After: 每轮取证前把脚本同步到 `tasks/evidence/<stem>/scripts/` 并记 `shasum -a 256` 对照——该目录被 `tasks/evidence/**` 忽略、只有 `*.md` 入库，所以「RV 脚本不得进入代码 diff」的 runner 约束仍然成立；manifest 的 10 条命令一律走镜像路径。新增 `ensure-baseline-export.sh`：只接受 `/tmp/keda-baseline-*` 下的目标、拒绝任何含 `.git` 的目录，`.baseline-stamp` 与 `git merge-base HEAD main` 不符才用 `git archive | tar -x` 重导，rv-3 与 rv-7 的命令因此自己补齐基线。
+- Reason: runner 的复跑门禁按 worktree 相对路径执行命令，声明路径必须真实存在；前置条件写进命令而不是依赖手工步骤，否则证据不可复现。
+- Impact: `make_manifest.py`（生成 `.iar/evidence/evidence.json`，10 条命令 + 每条的 stdout 断言与产物清单）、`ensure-baseline-export.sh`、`_mirror-shas.txt`；不改任何产品代码与判据。
+- Review: 执行侧自决，无需人审：让 manifest 声明的命令在干净检出上真的能跑，不改产品代码与判据。
+
+### rv-10 复跑命令的预算披露（2026-10-07）
+
+- Type: 验证口径澄清（runner 复跑限制）。
+- Before: rv-10 的 real_entry 是「残留守卫 + lint + 全量 pytest + mkdocs + 前端 typecheck + 前端 build」六项门禁。
+- After: 清单里 item 10 的 `command` 只放「残留守卫 + 四个直接相关测试文件」（`tests/test_product_identity.py`、`tests/test_state_home_migration.py`、`tests/test_marker_compat_replay.py`、`tests/test_cli_config_migrate.py`），六项全量门禁作为已录制证据保留在 `rv-10-gates.txt` 与分步日志里，`risks` 字段披露该裁剪与原因。
+- Reason: runner 对每条命令的复跑上限是 300 秒（`validation.reexecute_timeout_seconds`），全量 pytest 单独就要 169 秒，加上 mkdocs 严格构建与两次前端构建必然超时；超时会被判成真实失败，把「行为没做对」和「预算不够」混成一类。
+- Impact: `.iar/evidence/evidence.json` item 10；复跑仍然每次都真跑残留守卫与四个测试文件，全量门禁的结论由本轮已落盘的日志承担。
+- Review: **待人确认**：§9 rv-10 项的复跑命令由「六项全量门禁」裁剪为「残留守卫 + 四个直接相关测试文件」，全量门禁的结论改由已录制日志承担。这是验证保真度的一次让渡（runner 300 秒复跑预算所致），若要求复跑全量，需放宽预算或把门禁拆成多条 oracle。
+
+### 代码树指纹改为与交付记录无关（2026-10-07）
+
+- Type: 证据可复现性修正（取证口径）。
+- Before: 指纹 = `git stash create` 的 tree + 未跟踪非 `tasks/` 文件 blob 指纹。前半段仍然把 `tasks/**`（PRD 正文、验证计划、证据报告）算进去。
+- After: 指纹 = `h<HEAD^{tree}> + d<非 tasks/ 的已跟踪改动整段 diff 的 blob hash> + u<非 tasks/ 未跟踪文件的 blob 指纹>`；`git stash create` 的 tree 只作参考行记录。本轮最终值 `h8ff49349…+da60ff35…+u0e855cf86…`（241 个已跟踪改动文件 + 9 个未跟踪代码文件）。
+- Reason: 旧口径下，取证之后继续写 PRD 自身就会让指纹移位（实测只改 `tasks/pending/` 里这篇 PRD，前缀就从 `5c14f59c…` 变成 `99f72b57…`），既让「证据绑定最终代码树」看起来永远达不成，也会让 rv-10 的门禁后自检把「我在写文档」误报成「门禁过程改动了工作树」。交付记录不影响任何 oracle，本就不该进代码树指纹。
+- Impact: 仅 `.iar/evidence/scripts/code-tree-fp.sh` 与各报告头的 `tree` / `tree_label` 文本；rv-1..rv-8、rv-9、rv-10 的正向证据与 rv-9 / rv-10 的基线负控按新口径重收一轮（负控头部只记基线树 `8ff49349…`，不受本次口径变更影响）。
+- Review: 执行侧自决，无需人审：指纹口径修正，把不影响任何 oracle 的交付记录排除在外；被测代码面未缩小。
+
+### rv-9 浏览器驱动改用真实 HOME（仪器与产品的边界）（2026-10-07）
+
+- Type: 验证手段修正（不改判据）。
+- Before: rv-9 的隔离骨架把 `HOME` 换成临时目录后直接 `node` 启动无头 Chrome 驱动，页面导航在 `Page.navigate` 处永久等待，rv-9 连续两轮（22:04、22:19）拿不到绿。
+- After: 驱动 node 进程显式用真实 HOME（`HOME="$REAL_HOME" node …`），报告头新增 `browser_driver_home` 行同时记录驱动 HOME 与产品沙箱 HOME；被测的 `kc console`、已安装 CLI、临时仓库、数据库仍在临时 HOME 沙箱内，一点没变。
+- Reason: 对照实验定位到唯一变量是 HOME——同一驱动、同一 console、同一端口，真实 HOME 下 8 个截图点全部渲染，`HOME=/tmp/<空目录>` 下导航永不回响应，而服务端同一 URL `curl` 1.8ms 返回 200。加 `--no-proxy-server` / `--no-sandbox` / `--disable-dev-shm-usage` 都无效。伪造 HOME 会连带改写无头 Chrome 依赖的用户级目录，这是测量仪器的限制，把它当成被测产品的行为会误判 rv-9。
+- Impact: 仅 `rv-9-ui-copy.sh`（两处 node 调用与报告头）；rv-9 的判据、页面集合、截图内容与「各页独立 `iar` 计数为 0」口径不变。基线负控同样受益：改用真实 HOME 后它第一次跑到文案断言（标题 `iar — Agent Runner 管理终端`、`bare_iar` 为 1 与 2、缺 `关于 KedaCode 管理终端`/`.kedacode.toml`/`kc console`/`kc run`/`扫描本地 KedaCode 仓库`），前两轮的负控都死在驱动超时，红在了错误的位置。
+- Review: 执行侧自决，无需人审：只有测量仪器（无头 Chrome 进程）使用宿主 HOME，被测的 `kc console`、已安装 CLI、临时仓库与数据库仍在临时 HOME 沙箱内。该边界正是新增「隔离探针」要如实披露的一行。
+
+### bash 3.2 变量名吞并全角标点首字节：静默中止且退出码为 0（2026-10-07）
+
+- Type: 取证脚本缺陷修正（harness）。
+- Before: 报告头写 `echo "browser_driver_home: $REAL_HOME（驱动 …）"`，编排脚本只按退出码判定该轮是否成立。
+- After: 变量后紧跟非 ASCII 标点一律写成 `${VAR}`；编排层不再只看退出码，改为在每条 RV 的证据文件里核对该 RV 自己的终局标记（绿要 `^PASS: rv-<n>`，红要 `^FAIL`）。
+- Reason: 仓库所在 macOS 的 bash 3.2 在 `set -u` 下会把 `$VAR（` 的全角括号首字节并进变量名，报 `VAR\uff08: unbound variable` 并中止脚本，而**进程退出码仍是 0**。同一形态在 21:40 也打死过一次 rv-9 负控（证据只剩「console 就绪」6 行）却记成 rc=0。按退出码取信的编排会把「脚本半路死掉」读成「oracle 通过」，这是全套证据里最危险的一类假绿。
+- Impact: `rv-9-ui-copy.sh` 报告头一行；`/tmp/rv-final5.sh` 与 `/tmp/rv-final6.sh` 的 `run()` 增加 marker 核对并把 `lines=` 一起记进 `_run-status.log`；不改产品代码与任何判据。
+- Review: 执行侧自决，无需人审：取证脚本缺陷修正；本类假绿风险改由「按证据文件核对终局标记」堵住，本轮补审核字段时又踩到同一形态，已一并修掉。
+
+### rv-9 与 rv-10 必须串行：前端构建锁互斥（2026-10-07）
+
+- Type: 取证编排修正。
+- Before: 编排脚本把 rv-9 与 rv-10 当作可并发步骤。
+- After: 两条 RV 严格串行，rv-9 的 `just console-sync` 与 rv-10 的 `pnpm --dir frontend-public typecheck` / `build` 不再重叠。
+- Reason: 22:23 那轮 rv-9 绿失败在 `just console-sync`：`A previous build that didn't exit cleanly`，正是同时跑着的 rv-10 前端步骤占住了 `frontend-public/.next`。这是取证编排的自伤，不是被测行为；把它当成 rv-9 变红会得出错误结论。
+- Impact: 仅编排顺序；rv-9 与 rv-10 的判据与各自脚本不变。
+- Review: 执行侧自决，无需人审：取证编排顺序，两条 RV 的判据与脚本不变。
+
+### RV 脚本的内部依赖改为按脚本自身目录解析（2026-10-07）
+
+- Type: 证据可复现性补强（harness）。
+- Before: 走镜像路径（`tasks/evidence/<stem>/scripts/`）复跑时，脚本内部仍硬编码 `$REPO_DIR/.iar/evidence/scripts/…` 去找兄弟脚本：rv-2 找 `rv-2-seed-runs.py`、rv-3 找 `rv-3-marker-snapshot.py`、rv-10 找 `rv-10-residue-guard.sh` 与 `code-tree-fp.sh`、负控找守卫。
+- After: 统一用 `SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"` 解析兄弟脚本，报告头记录实际使用的绝对路径；rv-3 另加 `--tree-id/--tree-label`，把与其他九条同口径的代码树指纹写进报告头（原先只记 `git stash create` 的 tree，已降级为参考行）。
+- Reason: `.iar/` 是 gitignored 的，合并后干净检出里根本不存在；「10 条命令一律走随交付提交的镜像脚本」这句话只有在脚本自身也不依赖 `.iar/` 时才为真。rv-3 缺 `tree:` 行也让「十条 oracle 都绑在同一指纹上」的陈述少一条。
+- Impact: `rv-2-migrate-lifecycle.sh`、`rv-3-marker-compat.sh`、`rv-9-ui-copy.sh`、`rv-10-gates.sh`、`rv-10-residue-guard-baseline.sh`、`make_manifest.py`（item 3 增加 `--tree-id`）；rv-2 / rv-3 / rv-9 / rv-10 及 rv-9、rv-10 负控按新镜像重收一轮，rv-1 与 rv-4..rv-8 的脚本未变，沿用同一指纹上已落的证据。
+- Review: 执行侧自决，无需人审：让镜像路径下的脚本自洽，不改产品代码与判据。
+
+### 取证脚本里的 `| head -N` 全部换成 `sed -n '1,Np'`（2026-10-07）
+
+- Type: 取证脚本缺陷修正（harness）。
+- Before: rv-10 负控用 `grep … | head -20 | sed …` 截残留命中前 20 条，rv-3 / rv-6 / rv-8 与 rv-10 守卫内部同样有 `| head -N`；此前只修过 `code-tree-fp.sh | head -1` 这一处。
+- After: 一律改成 `sed -n '1,Np'`（读完整个输入，不会提前关闭管道）。
+- Reason: 这些脚本都开了 `set -o pipefail`，上游还在写时 `head` 读到第 N 行就退出，写方收到 SIGPIPE，整条命令以 **141** 结束——本轮实测 rv-10 基线负控就这样死在最后一步（退出码 141、终局标记没写进证据文件），而命中数只有 267 条时是否触发取决于写入时序，是可复现的偶发红。把「harness 被信号打死」记成 oracle 结论是错的，尤其是 item 10 的复跑命令里就含残留守卫，runner 侧会直接吃到这个 141。
+- Impact: `rv-10-residue-guard.sh`、`rv-10-residue-guard-baseline.sh`、`rv-3-marker-compat.sh`、`rv-6-plugin-groups.sh`、`rv-8-distribution.sh`；rv-3 / rv-6 / rv-8 正向与 rv-10 正向、rv-10 基线负控按最终镜像脚本重收，rv-1 / rv-2 / rv-4 / rv-5 / rv-7 / rv-9 的正向与其余负控脚本未变，沿用同一代码树指纹上的证据。
+- Review: 执行侧自决，无需人审：harness 的 SIGPIPE 假红修正；`rv-10-residue-guard.sh` 本身未改判定逻辑，只改截取方式。
+
+### rv-10 的 lint 红来自取证并发，隔离重跑后全绿（2026-10-07）
+
+- Type: 取证编排纪律（harness）。
+- Before: 22:32 那轮 rv-10 在第 2 步 `SKIP=check-test-flag just lint --full` 报红：pre-commit 输出 `Check architecture layer dependencies....Failed / - hook id: check-architecture / - files were modified by this hook`，而该钩子自己打印「✅ 架构依赖方向全部合法，无违规」。同一分钟内我在往 `tasks/pending/` 追加 Change Log。
+- After: rv-10 单独重跑，期间对工作树零写入。六步退出码全 0（残留守卫 G1–G8、lint、全量 pytest **3394 passed / 1 skipped in 169.71s**、mkdocs 严格构建、前端 typecheck、前端 build），门禁后重算的代码树指纹与报告头逐字节相同；`rv-10-gates.txt` 只保留这一轮 122 行记录，22:32 那轮整份作废。
+- Reason: `hooks/shared/check_architecture.py` 全文只做检查与 `sys.exit(0 if passed else 1)`，没有任何写文件动作；pre-commit 的判定口径是「钩子执行窗口内观察到的工作树改动」，因此我把并发改文档这件事误记成了产品侧架构违规。这类红如果按报告头的 rc 采信，就会把一次取证编排失误写成一条交付缺陷——与 `.next` 构建锁那条同一教训：**门禁跑的时候不许碰工作树**。
+- Impact: 无代码改动；只重收 rv-10 正向证据并改写报告头/§5/§7 的时间与数字。新增纪律写进验证计划「编排与判定口径」行。
+- Review: **待人确认**：一次门禁红被归因为「取证时并发编辑工作树」并整轮作废、隔离重跑取绿。归因依据（架构钩子只做检查、不写文件）写在条目正文与证据报告 §5；若不认同该归因，这一轮红应按交付缺陷处理，verifier 可要求重跑全量门禁复核。
+
+### manifest 声明的契约 diff 附项此前没有产出脚本，补上（2026-10-07）
+
+- Type: 证据自洽性修正（harness）。
+- Before: `evidence.json` item 8 的 `evidence_files` 列了 `rv-8-contract-diff-cli-surface-exitcodes.txt`，但没有任何脚本写它；目录里实际存在的是更早手工留下的 `contract-diff-cli-surface-exitcodes.txt`，其报告头记的是已被替换掉的旧指纹口径（`5c14f59c…`）。
+- After: 新增 `rv-8-contract-diff.sh`：基线导出与最终树各跑一次 `uv run <bin> schema --json`，只比机器可读表面（49 个命令路径、参数/选项元数据、7 项退出码枚举），`help`/`example` 单列计数不参与判定，附 `ExitCode` 源码 diff；旧文件删除，新产物 22:47 生成并绑定当前指纹。附项自带**比对器负控**：在最终侧人为删掉 `init` 的一个真实选项，比对器必须以退出码 1 报 `RESULT: DIFF`，否则 SAME 不可信。
+- Reason: 「声明的证据文件」与「命令实际写出的证据文件」必须对得上，否则独立 verifier 按清单找文件会直接扑空；而一份记着作废指纹的遗留产物混在呈递目录里，等于自证摘录未复核。比对器不加负控的话，「49 个命令一致」有可能是恒真断言。
+- Impact: 只加取证脚本与 item 8 的 `risks` 披露（附项与基线负控同属已录制证据，没有串进 300 秒复跑命令）；rv-8 的判据、页面集合与其余九条 oracle 不变。
+- Review: 执行侧自决，无需人审：补齐声明与产物的一致性，并为比对器加了自身的负控，判据未变。
+
+### 逐图三件套与隔离探针：补齐 §9 声明但缺失的两处证据（2026-10-07）
+
+- Type: 证据自洽性修正（harness，不进代码 diff）。
+- Before: 证据报告 §1.2 的 12 张截图只有「嵌图 + 一组 `open` 命令」，逐图标注缺失，且 12 张图只覆盖到 7 个 `open` 路径（扫描结果、未找到提示、仓库页本身都没有打开命令）；§9 的「所有隔离环境验证都在临时 HOME 下进行，真实本机状态目录未被读写」一项没有对应证据——rv-4 / rv-5 的报告里根本没记 HOME，也没有任何地方核对过宿主真实状态目录。
+- After: （1）报告 §1.2 改成契约规定的逐图三件套顺序：嵌图 → 「本地图片，GitHub 上不显示」标注 → 该图绝对路径的 `open` 命令，12 张图各自齐发，废弃原来的成组 open 块。（2）新增只读探针 `rv-10-isolation-probe.sh`，两层取证：机制层逐个断言 8 个驱动已打包 CLI 的隔离脚本都有 `export HOME=` 并如实列出 3 个不建 HOME 沙箱的脚本及其理由（进程内标记快照 / 源码树内只读 schema 导出 / 仓库内门禁），结果层断言宿主 `~/.iar` 在取证窗口 21:40–23:00 内改动条目数为 0、宿主上不存在 `~/.kedacode`。（3）探针自带负控自检 `--negative-selftest`：在临时目录造一个时间戳落在窗口内的状态目录，必须判红，否则「0 改动」可能是恒真断言。
+- Reason: 呈递物要人能直接打开，只给一半的 open 路径等于让 reviewer 自己找；而 §9 写了「未读写真实状态目录」却没有一项证据，是清单与证据脱节——改名早期就发生过宿主 registry 被取证脚本写脏的事故（见「隔离环境补强」条目），这条恰恰是防它复发的断言，不能只靠散文声明。探针顺带把「仪器用宿主 HOME、产品仍 in 沙箱」这条边界写成机器可读的一行，避免被读成隔离失效。
+- Impact: `.iar/evidence/scripts/rv-10-isolation-probe.sh`（随交付镜像到 `tasks/evidence/<stem>/scripts/`）、产物 `rv-10-isolation-probe.txt`、证据报告 §1.2 的图片段；`make_manifest.py` 的 item 10 增加该附项（`evidence_files` + 复跑命令尾部 + 两条 stdout 断言 + `risks` 说明它是只读毫秒级探针，不挤占 300 秒预算）。rv-1..rv-9 判据、页面集合与截图内容不变，§9 该验收项的措辞不变。
+- Review: 执行侧自决，无需人审：两处都是「PRD 声明要什么、证据里就得有什么」的补齐，未新增判据。
+
+### loop recipe 里指向已删除文档的悬空链接（2026-10-07）
+
+- Type: 缺陷修复（改名直接造成）。
+- Before: `docs/guides/iar-loop.md` 已改名为 `docs/guides/loop.md`，但 `tasks/loops/nightly-cleanup-keda.md` 与 `tasks/loops/nightly-cleanup-product.md` 仍写「详见 `docs/guides/iar-loop.md`」，并仍用旧命令名 `iar labels sync`。
+- After: 两处改为 `docs/guides/loop.md` 与 `kc labels sync`（`kc labels sync` 经 `kc schema --json` 确认真实存在）。
+- Reason: §9 的文档验收项写的是「导航与站内链接同步」，站内链接没同步就是该项未达成；残留守卫的检索范围按 PRD 排除 `tasks/**`，所以这类悬空引用不会被机械检查抓到，只能靠逐项核对时发现。recipe 里的命令名同时是会被执行的文本，留着旧名会让后续跑 loop 的 agent 继续写 `iar`。
+- Impact: 两个 `tasks/loops/*.md` 各一行；不改产品代码、不改任何 oracle。
+- Review: 执行侧自决，无需人审：改名直接造成的悬空引用，属于 §9「站内链接同步」应完成而未完成的部分。
+
+
+### 人审清单落地：横幅翻 `🧍` 后 §9.1 的「当前尚无清单」成为陈旧陈述（2026-10-07）
+
+- Type: 交付记录补齐（本仓库规范要求的动作）。
+- Before: §9.1 第 1 行的呈递入口写着「当前尚无 `human-review-checklist`，该命令实测解析到同目录证据报告；清单在横幅翻 `🧍 待人工验收` 时由执行方生成」，`tasks/evidence/<stem>/` 下只有证据报告与验证计划。
+- After: 按 `docs/ai-standards/tooling.md`「只剩 Human-Confirmed 项、横幅翻 `🧍` 时执行方生成 `human-review-checklist.md`，清单携带截图或选项项时同目录再生成自包含交互版 `.html`」生成两份：Markdown 底稿（8 项决定，决策优先、逐字引用 §2 与 Change Log 原话、`§` 锚点而非行号、内嵌 rv-9 截图与关键报告原文）与交互版 HTML（模板 `skills/prd/templates/human-review-checklist.html` 逐字节复制样式与固定脚本，只改头部数据属性与卡片）。§9.1 该行改为「已生成交互版与底稿，该命令实测解析到交互版」。
+- Reason: 横幅一旦翻成 `🧍 待人工验收`，§9 只剩人审空框，规范要求执行方把「只有人能回答的 8 项」集中成可作答的清单；继续留着「尚无清单」这句话会让 reviewer 按旧路径去读证据报告，也构成一条已失效的交付陈述。
+- Impact: 新增 `tasks/evidence/<stem>/human-review-checklist.md`、`.html` 与驱动 `scripts/validate-review-html.mjs`；只改 §9.1 第 1 行的括号陈述。**无任何代码改动**（HTML/`.txt`/驱动均落在 `tasks/evidence/**`，被 `.gitignore` 排除在版本控制之外，不进入代码 diff），代码树指纹逐字节不变，十条 oracle 的证据绑定不失效。交互版交付前用本机 Chrome 实开自检 16 条断言全绿（零 `pageerror`、零未捕获异常、首屏卡片可见、5 张截图解码成功、8 组单选可翻页并在末页生成非空 Markdown），且用三处就地注入缺陷证明该自检能变红（脚本 `SyntaxError` → 14 条断言红、跨卡重复 radio `name` → 1 条红、坏图路径 → 2 条红）。
+- Review: 说明性变更，无需人拍板：本次不改任何用户可见行为、oracle 口径或验收要求，只补齐规范要求的呈递物；人审 8 项的原文与判定口径未动。
+
+
+### rv-9 截图从 `rv-9-ui/` 子目录平铺到证据目录根（交付门实测判红后修正，2026-10-07）
+
+- Type: 交付呈递布局修正（不改产品行为、不改 oracle 判据）。
+- Before: rv-9 的 14 张截图与 14 个同名页面文本侧车放在 `tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/rv-9-ui/` 子目录里；PRD §7.6 rv-9 的 `presentation`、§9.1 第 2 行、§9.2 的 rv-9 行，以及证据报告 §1/§1.2/§5 与验证计划，全部按该子目录路径书写。证据报告 §1.2 当时只嵌入 12 张，`rv-9-app.png` 与 `rv-9-baseline-app.png` 任何呈递物里都没嵌入。§9.1 第 1 行还写着「交付门解析正常」一类的结论，而该交付门本轮之前没有实跑过。
+- After: 28 个文件平铺到 `tasks/evidence/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name/` 根，`rv-9-ui/` 目录删除；`rv-9-ui/rv-9-*` 路径全部改为 `rv-9-*`，「本目录 `rv-9-ui/` 下 14 张截图」等表述改为「本目录平铺的 14 张 `rv-9-*.png`」，`open "$STEM/rv-9-ui"` 一行删掉（上一行 `open "$STEM"` 打开的就是同一目录）。把缺嵌入的 `rv-9-app.png` / `rv-9-baseline-app.png` 补进证据报告 §1.2，并如实标注这两张与首页两张 `shasum -a 256` 分别相同（`/` 与 `/app/dashboard/` 渲染的是同一个页面，断言按采集点各自跑过，证据按采集点齐全而不是按像素去重）。
+- Reason: 仓库自己的交付门 `scripts/shared/just/check_prd_evidence.sh` 用 `find "$evidence_dir" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webm' \)` 只扫证据目录**第一层**，再要求每个图片 basename 出现在证据报告的 `![…](…)` 嵌图里。实跑结果：平铺前 `rc=1`，`ERROR: Frontend changes detected but no visual evidence (.png/.jpg/.webm) found in …`；平铺并补齐两张后 `✅ 证据报告已就地嵌入全部 14 张证据图片`、`rc=0`。仓库其他 PRD 的证据报告同样是根目录平铺嵌图。这说明平铺是过门的必要条件而不是排版偏好，也说明我此前写在 §9.1 的「交付门解析正常」当时是未证而断。
+- Impact: 只动 `tasks/evidence/**` 与 PRD 的 3 处路径陈述（§7.6 rv-9 `presentation`、§9.1 第 2 行、§9.2 rv-9 行）。截图字节未变（只换目录），十条 oracle 的判据、采集点与内容不变，**无任何代码改动**，代码树指纹逐字节不变。复跑证据：`check_prd_evidence.sh` rc=0（14/14 已嵌入）；平铺后交互清单自检 20 条断言全绿（含 5 张 `file://` 内嵌截图仍 `naturalWidth > 0`，证明相对路径没断）；坏图路径注入实测红 2 条。
+- Review: 执行侧自决，无需人拍板：呈递物布局与本 PRD 路径陈述的修正，不改任何用户可见行为、验收要求或 rv-9 判定口径；被修正的那句「交付门解析正常」现在有了实测退出码支撑。
+
+
+### 交互清单自检驱动的两处加固：绑定待验证页面本身 + 逐卡 radio 分组唯一性（2026-10-07）
+
+- Type: 验证工装加固（收紧自检能力，不放宽任何验收要求）。
+- Before: `tasks/evidence/<stem>/scripts/validate-review-html.mjs` 取 `GET /json/list` 的 `targets[0]` 作为 CDP 求值目标，`Page.navigate` 之后固定 `sleep(1500)` 就开始统计控制台条目，radio 分组唯一性按「全局不同 `name` 的个数 == 8 且选项总数 == 17」判定；呈递文档里记录为「16 条断言全绿」「跨卡重复 `name` → 红 1 条」。
+- After: 先用 `PUT /json/new?file://<待验证文件>` 为该页面**单独开一个 tab**，按该 tab 自己的 `webSocketDebuggerUrl` 绑定；把「求值绑定的就是待验证文件本身」（`location.href` 等于目标 file URL）升级为第 1 条硬断言并打印实际值；导航后先轮询 `document.readyState == complete`，再等 1500ms 让坏图的 `Log.entryAdded` 落地，之后才统计控制台条目；radio 断言改为逐卡判定（本卡组内 `name` 统一 + 该 `name` 不与他卡复用，同时给出统一组数/互异 name 数/选项数）。新增负控驱动 `scripts/negctrl-review-html.py`：三处注入逐条实跑、副本跑完即删、并断言正本未被改动。断言总数 16 → 20，清单「交互版自检」节与证据报告 §5 的数值和注入描述按本轮实测全部重写。
+- Reason: 两处都是平铺复跑时暴露的真缺陷，不是假设。① 这台 Chrome 启动时 `/json/list` 已有 4 个目标（2 个 `browser_ui`、1 个扩展 `background_page`、1 个 `page`），取 `targets[0]` 实测抓到 `chrome-extension://nkeimhog…/background.html`，于是 9 张卡的清单被判 `卡片总数 实际 0`、整轮红——这一半运气好（报的是红），但绑定不可证意味着反向情形（目标页恰好也有 `.card`）会误报绿。② 用更严的单点注入（只改第 2 卡的**一个** radio：`name="q2" value="0"` → `name="q1" value="0"`）实测旧断言报 `RESULT: PASS`。浏览器按 `name` 分组互斥，这种漏改会让两张卡的勾选互相取消，而「全局 8 组」看不见它。旧记录那次「红 1 条」当时是整组改名注入跑出来的，本身属实，但我把可检测范围写宽了，逐卡断言后同一注入实测红 1 条。
+- Impact: 只改 `tasks/evidence/<stem>/scripts/`（正本 `.iar/evidence/scripts/` 同步，23 个脚本/驱动 `shasum -a 256` 与正本 0 处不一致，清单 `.iar/evidence/_mirror-shas.txt`）与两份呈递文档的文字。**无代码改动**，代码树指纹不变，十条 rv-* oracle 的判据与证据文件不变。加固后正跑连测 3 次全绿（`RESULT: PASS`，退出码 0）；三处注入分别红 14 / 1 / 2 条，退出码均为 1。
+- Review: 说明性变更 + 工装修正，无需人拍板：改动方向是让自检能抓的缺陷变多（不可检测 → 可检测），没有把任何判据改宽，也没有动 §9 的 8 个人审空框。
+- Supersedes: 上一条「人审清单落地…」的 Impact/Review 里那句「实开自检 16 条断言全绿…跨卡重复 radio `name` → 1 条红」，其中的能力范围被写宽（16 → 20 条；旧的 name 断言抓不到单点漏改）。Change Log 追加式不回头改写，以本条为准；该条描述的其他事实（零 `pageerror`、首屏卡片可见、5 张截图解码、末页生成 Markdown、三处注入均可变红）仍然成立。

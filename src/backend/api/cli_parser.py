@@ -6,7 +6,7 @@ This module builds the argparse parser used by both the direct
 
 命令树本体按域拆在同目录的 ``cli_parser_*_commands`` 模块里（单个文件的
 非空行有 CI 硬上限），共用旗标构造块在 :mod:`backend.api.cli_parser_options`；
-本模块只负责建顶层 parser 并按域装配。
+本模块只负责建顶层 parser（命令名取自身份模块）并按域装配。
 
 ``--agent`` 的合法值来自 agent 注册表（``[agent_runner.agents.*]`` 配置
 段 + 内置默认），不再写死 agent 名；配置加载失败时回落内置默认，
@@ -23,10 +23,12 @@ from backend.api.cli_parser_runner_commands import add_runner_commands
 from backend.api.cli_parser_session_commands import add_session_commands
 from backend.api.cli_parser_setup_commands import add_setup_commands
 
+from backend.core.shared.models import product_identity
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
-    parser = argparse.ArgumentParser(prog="iar")
+    parser = argparse.ArgumentParser(prog=product_identity.PRIMARY_COMMAND_NAME)
     parser.add_argument("--repo", default=None, help="Target repository path.")
     parser.add_argument("--repo-id", default=None, help="Target configured repository ID.")
     parser.add_argument(

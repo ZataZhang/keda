@@ -1,4 +1,4 @@
-"""一句话需求 → Issue 正文的内容生成（``iar issue create --from-prompt``）。
+"""一句话需求 → Issue 正文的内容生成（``kc issue create --from-prompt``）。
 
 与 ``issue_from_prd`` 的方向相反：本目标的产物**不得**携带 PRD 锚点。无锚点
 Issue 的正文就是唯一需求来源，写入 ``- PRD path:`` 会让 runner 去定位一个不存在

@@ -1,6 +1,6 @@
 """Single-instance locks for the queue-runner daemon.
 
-Every ``iar daemon`` process polls the issue queue and spawns its own agent
+Every ``kc daemon`` process polls the issue queue and spawns its own agent
 subprocesses, so two daemons serving the same repository multiply token spend.
 These helpers provide a filesystem single-instance guard keyed by ``repo_id``:
 a second daemon for an already-served repository refuses to start, while
@@ -19,7 +19,7 @@ from pathlib import Path
 
 _logger = logging.getLogger(__name__)
 
-# Subdirectory under the iar home (the process registry's parent directory)
+# Subdirectory under the product home (the process registry's parent directory)
 # that holds one lock file per repository-scoped daemon instance.
 DAEMON_LOCK_DIR_NAME = "daemon-locks"
 
@@ -41,11 +41,11 @@ def daemon_lock_dir(registry_path: str | Path) -> Path:
 
     Args:
         registry_path: Console ``process_registry_path`` setting (for example
-            ``~/.iar/processes.json``); ``~`` is expanded.
+            ``~/.kedacode/processes.json``); ``~`` is expanded.
 
     Returns:
         Absolute path to the directory that holds per-repository lock files,
-        co-located with the existing iar runtime state.
+        co-located with the existing KedaCode runtime state.
     """
     return Path(registry_path).expanduser().parent / DAEMON_LOCK_DIR_NAME
 
@@ -95,7 +95,7 @@ def _read_lock_owner(lock_path: Path) -> int | None:
 def find_live_daemon_pid(lock_dir: Path, repo_id: str) -> int | None:
     """Return the PID of the live daemon owning ``repo_id``'s lock, or ``None``.
 
-    Read-only probe used by ``iar run``'s default mutex: a live owner means a
+    Read-only probe used by ``kc run``'s default mutex: a live owner means a
     daemon is currently serving the repository, so a manual run must refuse
     (or take over explicitly) instead of double-claiming the ready queue.
 

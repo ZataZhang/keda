@@ -1,13 +1,13 @@
 """Container runner 抽象端口（ports）。
 
 按照四层依赖方向（``api -> core -> engines -> infrastructure``），``core`` 层
-禁止直接 import ``engines`` 或 ``infrastructure``。本模块声明 ``iar container``
+禁止直接 import ``engines`` 或 ``infrastructure``。本模块声明 ``kc container``
 相关用例所需的端口契约，具体实现由 ``engines.agent_runner.container_auth`` /
 ``container_ops`` 提供，并由 ``api`` 层在 dispatch 时注入。
 
 模块内包含三个端口：
 
-- ``IContainerAuthImporter``：把本机 agent CLI 认证快照到 ``~/.iar/container-auth/``。
+- ``IContainerAuthImporter``：把本机 agent CLI 认证快照到 ``~/.kedacode/container-auth/``。
 - ``IContainerRunnerController``：封装 ``docker compose`` 子进程调用（up / down / logs）。
 - ``IRunnerAssetsLocator``：从 keda package data 定位 runner 容器资产路径。
 
@@ -28,7 +28,7 @@ class ContainerAuthImportResult:
     """容器认证导入的聚合结果（core 侧只关心路径与逐 agent 成功/跳过状态）。
 
     Attributes:
-        container_auth_dir: 实际写入的 ``~/.iar/container-auth/`` 绝对路径。
+        container_auth_dir: 实际写入的 ``~/.kedacode/container-auth/`` 绝对路径。
         agent_results: 每个 agent 的子结果（agent_name / skipped / copied_entries）。
         gitignore_protected: 是否成功把 ``container-auth`` 加入 gitignore。
     """
@@ -70,12 +70,12 @@ class ContainerCommandPlan:
 
 @dataclass(frozen=True)
 class ContainerUpRequest:
-    """``iar container up`` 的请求参数（core 侧用，无 engines 实现细节）。
+    """``kc container up`` 的请求参数（core 侧用，无 engines 实现细节）。
 
     Attributes:
         repo_path: 挂载进容器的目标仓库绝对路径。
         gh_token: GitHub Token（容器内 gh 用此认证）。空串视为未设置。
-        repo_id: 仓库 registry id，传给容器方便 iar daemon 锁定目标。
+        repo_id: 仓库 registry id，传给容器方便 kc daemon 锁定目标。
         uid: 容器内进程 UID；``None`` 时使用 ``os.getuid()``。
         gid: 容器内进程 GID；``None`` 时使用 ``os.getgid()``。
         extra_env: 其它要注入 compose 的环境变量。

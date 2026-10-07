@@ -1,6 +1,6 @@
 """Abstract live-view contract for parallel Issue processing.
 
-When ``iar daemon`` processes several Issues concurrently, each Issue's agent
+When ``kc daemon`` processes several Issues concurrently, each Issue's agent
 output must be shown without interleaving on a single stdout. This port lets the
 core orchestration emit Issue-attributed output chunks while staying unaware of
 terminal UI details; the engines layer provides concrete implementations (Rich

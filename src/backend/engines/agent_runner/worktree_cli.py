@@ -30,7 +30,7 @@ def build_worktree_manager(
             without dependency wiring.
 
     Returns:
-        A :class:`WorktreeManager` ready to be used by ``iar worktree``.
+        A :class:`WorktreeManager` ready to be used by ``kc worktree``.
     """
     return WorktreeManager(repo_root_path, process_runner)
 

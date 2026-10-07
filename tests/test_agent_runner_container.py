@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_runner_container import (
     StartRunnerContainerOptions,
     import_container_auth,
@@ -32,7 +33,7 @@ from backend.engines.agent_runner.container_ops import ContainerOpsController
 
 @pytest.fixture
 def fake_global_iar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """把 ``Path.home()`` 指向临时目录，避免污染本机 ``~/.iar``。"""
+    """把 ``Path.home()`` 指向临时目录，避免污染本机 ``~/.kedacode``。"""
     fake_home = tmp_path / "fake-home"
     fake_home.mkdir()
     monkeypatch.setattr(Path, "home", lambda: fake_home)
@@ -68,7 +69,9 @@ def test_container_auth_controller_imports_through_facade(
 
     importer = ContainerAuthController()
     result = import_container_auth(importer)
-    assert result.container_auth_dir == fake_global_iar / ".iar" / "container-auth"
+    assert result.container_auth_dir == (
+        fake_global_iar / product_identity.STATE_DIR_NAME / "container-auth"
+    )
     # 由于 SUPPORTED_AGENT_SPECS 被 monkeypatched 但 default 参数在函数定义时已绑定，
     # 这里直接用底层函数验证：
     direct_result = ca_module.import_container_auth(specs=missing_specs)
@@ -287,6 +290,34 @@ def test_stream_runner_container_logs_no_follow(tmp_path: Path) -> None:
     controller = ContainerOpsController()
     argv = stream_runner_container_logs(controller, compose, follow=False, runner=fake_runner)
     assert "--follow" not in argv
+
+
+@pytest.mark.parametrize("operation", ["down", "logs"])
+@pytest.mark.parametrize("state_dir_name", [".iar", ".kedacode"])
+def test_container_operations_inject_effective_state_home(
+    fake_global_iar: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    state_dir_name: str,
+) -> None:
+    """停止与日志命令无需继承 up 的临时环境，也能解析新旧状态挂载。"""
+    expected_state_home = fake_global_iar / state_dir_name
+    expected_state_home.mkdir()
+    monkeypatch.delenv("KEDACODE_HOST_STATE_HOME", raising=False)
+    controller = ContainerOpsController()
+    compose_file = controller.resolve_packaged_runner_assets().compose_file
+    captured_envs: list[dict[str, str]] = []
+
+    def capture_runner(argv, *, env, cwd, check):
+        captured_envs.append(env)
+        return subprocess.CompletedProcess(args=argv, returncode=0)
+
+    if operation == "down":
+        stop_runner_container(controller, compose_file, runner=capture_runner)
+    else:
+        stream_runner_container_logs(controller, compose_file, runner=capture_runner)
+
+    assert captured_envs[0]["KEDACODE_HOST_STATE_HOME"] == str(expected_state_home)
 
 
 def test_core_facade_does_not_import_engines() -> None:

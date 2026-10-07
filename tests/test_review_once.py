@@ -997,7 +997,7 @@ def test_review_once_auto_stashes_dirty_worktree_and_approves() -> None:
         "push",
         "-u",
         "-m",
-        "iar: auto-stash before supervisor cycle 2",
+        "kc: auto-stash before supervisor cycle 2",
     ) in commands
     assert ("git", "stash", "pop") in commands
     label_calls = [c for c in client.calls if c["method"] == "edit_issue_labels"]
@@ -1037,7 +1037,7 @@ def test_review_once_dirty_worktree_stash_fails_blocked() -> None:
                 "push",
                 "-u",
                 "-m",
-                "iar: auto-stash before supervisor cycle 2",
+                "kc: auto-stash before supervisor cycle 2",
             ): CommandResult(
                 command=(
                     "git",
@@ -1045,7 +1045,7 @@ def test_review_once_dirty_worktree_stash_fails_blocked() -> None:
                     "push",
                     "-u",
                     "-m",
-                    "iar: auto-stash before supervisor cycle 2",
+                    "kc: auto-stash before supervisor cycle 2",
                 ),
                 return_code=1,
                 stdout="",

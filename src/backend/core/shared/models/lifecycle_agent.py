@@ -53,7 +53,7 @@ LIFECYCLE_AGENT_AUTO_KEYS: frozenset[str] = frozenset(
 )
 
 #: PRD 文件头部覆盖**真正会被消费**的生命周期键。
-#: ``planner`` 的唯一消费点是 ``iar ask``（交互式决策），既没有 Issue 也没有 PRD
+#: ``planner`` 的唯一消费点是 ``kc ask``（交互式决策），既没有 Issue 也没有 PRD
 #: 上下文，PRD 级覆盖对它没有消费点；因此 PRD 覆盖抽屉不提供该行，写回也拒绝该键，
 #: 避免写入一个静默无效的声明。（``planner`` 的矩阵值本身仍然有效。）
 LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS: tuple[str, ...] = tuple(
@@ -84,11 +84,11 @@ class LifecycleAgentEntryGroup:
 #: 组内顺序沿用 ``LIFECYCLE_AGENT_KEYS`` 的相对顺序——分组只声明"哪些阶段
 #: 共享同一次触发入口"，不改动 ``lifecycles`` 数组的键序契约。
 #:
-#: - ``pipeline``：``iar run`` / ``daemon`` 认领后同一次 claim 内依次发生的六个阶段；
+#: - ``pipeline``：``kc run`` / ``daemon`` 认领后同一次 claim 内依次发生的六个阶段；
 #: - ``discussion_content``：Phase 0 讨论（``deliberate``）与横切的内容生成
-#:   （``content_generation``，``iar issue create`` / ``--from-prompt`` / Phase 1 /
+#:   （``content_generation``，``kc issue create`` / ``--from-prompt`` / Phase 1 /
 #:   开 Draft PR 四个 target）；
-#: - ``standalone``：``planner``，唯一消费点是 ``iar ask``，不在任何 Issue 流水线上。
+#: - ``standalone``：``planner``，唯一消费点是 ``kc ask``，不在任何 Issue 流水线上。
 #:
 #: 语义出处与消费点对照见 ``docs/guides/lifecycle-agent-matrix.md`` 的
 #: 「各阶段在哪触发」一节；新增阶段或拆分 claim 时必须同轮更新本常量。
@@ -96,7 +96,7 @@ LIFECYCLE_AGENT_ENTRY_GROUPS: tuple[LifecycleAgentEntryGroup, ...] = (
     LifecycleAgentEntryGroup(
         entry="pipeline",
         label="实现流水线",
-        summary="iar run / daemon 认领后，在同一 worktree 的同一次 claim 内依次触发。",
+        summary="kc run / daemon 认领后，在同一 worktree 的同一次 claim 内依次触发。",
         keys=("implementation", "fix", "closeout", "verifier", "review", "supervisor"),
     ),
     LifecycleAgentEntryGroup(
@@ -104,14 +104,14 @@ LIFECYCLE_AGENT_ENTRY_GROUPS: tuple[LifecycleAgentEntryGroup, ...] = (
         label="讨论与内容生成",
         summary=(
             "辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；"
-            "内容生成横切 iar issue create、--from-prompt 建 Issue、Phase 1 与开 Draft PR 四处。"
+            "内容生成横切 kc issue create、--from-prompt 建 Issue、Phase 1 与开 Draft PR 四处。"
         ),
         keys=("content_generation", "deliberate"),
     ),
     LifecycleAgentEntryGroup(
         entry="standalone",
         label="独立入口",
-        summary="iar ask，不在任何 Issue 流水线上（无 Issue / PRD 上下文）。",
+        summary="kc ask，不在任何 Issue 流水线上（无 Issue / PRD 上下文）。",
         keys=("planner",),
     ),
 )
@@ -119,15 +119,15 @@ LIFECYCLE_AGENT_ENTRY_GROUPS: tuple[LifecycleAgentEntryGroup, ...] = (
 #: 每个生命周期阶段「何时被读」的一句话触发时机（``LIFECYCLE_AGENT_AUTO_DESCRIPTIONS``
 #: 描述 ``auto`` 取值语义，本表描述阶段本身的消费点）。
 LIFECYCLE_AGENT_TRIGGERS: Mapping[str, str] = {
-    "implementation": "iar run / daemon 认领 agent/ready Issue 时启动实现。",
+    "implementation": "kc run / daemon 认领 agent/ready Issue 时启动实现。",
     "fix": "同一次 claim 内，验证未通过时修复。",
     "closeout": "同一次 claim 内，交付收尾阶段执行。",
     "verifier": "同一次 claim 内，实现产出后做验证。",
     "review": "同一次 claim 内，开 Draft PR 前审查。",
-    "supervisor": "同一次 claim 的发布路径，或 iar review / review-daemon 单独一轮。",
-    "planner": "iar ask 交互式决策，不在任何 Issue 流水线上。",
+    "supervisor": "同一次 claim 的发布路径，或 kc review / review-daemon 单独一轮。",
+    "planner": "kc ask 交互式决策，不在任何 Issue 流水线上。",
     "content_generation": (
-        "横切 iar issue create、--from-prompt 建 Issue、Phase 1 Issue→PRD 与开 Draft PR 四处。"
+        "横切 kc issue create、--from-prompt 建 Issue、Phase 1 Issue→PRD 与开 Draft PR 四处。"
     ),
     "deliberate": "Phase 0 就该 Issue 在评论区讨论（此时 PRD 尚不存在）。",
 }
@@ -278,7 +278,7 @@ class LifecycleAgentsConfig:
 
     只记录**显式声明**过的键及其来源层，未声明的键交由解析函数按
     "既有配置键 -> 内置默认"继续回落。``repository_layer`` 来自仓库级
-    ``.iar.toml``，``global_layer`` 来自机器级 ``config.toml``；同键时
+    ``.kedacode.toml``，``global_layer`` 来自机器级 ``config.toml``；同键时
     仓库层赢过全局层。
 
     Attributes:

@@ -1,7 +1,7 @@
-"""从真实 Typer/click 命令树派生 ``iar`` 的命令与参数元数据。
+"""从真实 Typer/click 命令树派生 ``kc`` 的命令与参数元数据。
 
 不维护静态 schema 文件：CLI 演进时手工表必然漂移，运行时派生才是 agent 可以
-无条件相信的自省入口（``iar schema --json``）。
+无条件相信的自省入口（``kc schema --json``）。
 
 类型判定一律走鸭子类型（``param_type_name`` / ``commands``）而不是
 ``isinstance(param, click.Option)``：Typer 0.26 起自带一份 click
@@ -150,7 +150,7 @@ def build_command_schema(typer_app: "typer.Typer") -> dict[str, Any]:
     collected: list[dict[str, Any]] = []
     _walk(root, (), collected)
     return {
-        "name": root.name or "iar",
+        "name": root.name or "kc",
         "help": _clean_help(root),
         "exit_codes": {
             "help": EXIT_CODE_HELP,

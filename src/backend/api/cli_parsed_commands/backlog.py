@@ -1,4 +1,4 @@
-"""``iar backlog advance`` handler.
+"""``kc backlog advance`` handler.
 
 Runs exactly one continuous-scheduling pass for a single target repository:
 reconcile finished/failed queue entries, then promote queued PRDs (and PRDs
@@ -68,7 +68,7 @@ def _print_advance_report(report) -> None:
 
 
 def run_backlog_advance_command(ctx: ParsedCommandContext) -> int:
-    """``iar backlog advance``: run one scheduling pass, optionally dry-run."""
+    """``kc backlog advance``: run one scheduling pass, optionally dry-run."""
     contexts = _resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -80,7 +80,7 @@ def run_backlog_advance_command(ctx: ParsedCommandContext) -> int:
             "backlog advance requires exactly one target repository. "
             "Use --repo or --repo-id to select it.",
             code=ExitCode.USAGE,
-            suggestion="iar registry list",
+            suggestion="kc registry list",
         )
 
     context = contexts[0]
@@ -99,7 +99,7 @@ def run_backlog_advance_command(ctx: ParsedCommandContext) -> int:
 __all__ = ["run_backlog_advance_command"]
 
 
-# ── `iar backlog ci` 子命令（CI/CD 状态观察 / 策略 / 单次手动修复）──────────
+# ── `kc backlog ci` 子命令（CI/CD 状态观察 / 策略 / 单次手动修复）──────────
 # 与 Console API 共用同一批 core 用例（backlog_ci_delivery / 受限配置编辑器），
 # 不复制 effective 策略计算或 repair 实现；`status --json` 复用 Console 的
 # `ci_delivery` DTO 结构，数据只走 stdout、进度与警告走 stderr。
@@ -187,7 +187,7 @@ def _find_ci_target_prd(context, prd_path: str | None):
 
 
 def run_backlog_ci_status_command(ctx: ParsedCommandContext) -> int:
-    """``iar backlog ci status``：只读观察（``--json`` 与 Console DTO 同构）。"""
+    """``kc backlog ci status``：只读观察（``--json`` 与 Console DTO 同构）。"""
     context = _single_ci_context(ctx)
     if context is None:
         return 1
@@ -208,7 +208,7 @@ def run_backlog_ci_status_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_backlog_ci_policy_command(ctx: ParsedCommandContext) -> int:
-    """``iar backlog ci policy``：仓库级全局或单 PRD 三态覆盖（二者互斥）。"""
+    """``kc backlog ci policy``：仓库级全局或单 PRD 三态覆盖（二者互斥）。"""
     context = _single_ci_context(ctx)
     if context is None:
         return 1
@@ -231,7 +231,7 @@ def run_backlog_ci_policy_command(ctx: ParsedCommandContext) -> int:
         except ValueError as exc:
             error_console.print(f"[red]{exc}[/]")
             return 1
-        # fresh 校验直接读目标仓库本地 .iar.toml（--repo 传入未注册路径时，
+        # fresh 校验直接读目标仓库本地 .kedacode.toml（--repo 传入未注册路径时，
         # 重新解析 registry 不会包含该仓库，不能作为 fresh 依据）；经受限端口
         # 读取（``None`` = 键未设置 = 生效默认 False）。
         from backend.core.use_cases.agent_runner_factory import (
@@ -279,7 +279,7 @@ def run_backlog_ci_policy_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_backlog_ci_repair_command(ctx: ParsedCommandContext) -> int:
-    """``iar backlog ci repair``：显式请求一次修复（``--dry-run`` 零副作用）。"""
+    """``kc backlog ci repair``：显式请求一次修复（``--dry-run`` 零副作用）。"""
     context = _single_ci_context(ctx)
     if context is None:
         return 1

@@ -1,7 +1,7 @@
-# Keda
+# KedaCode (kc)
 
 <p align="center">
-  <img src="./assets/diagrams/hero.svg" alt="Keda · AI Agent Runner · Clean Architecture · Monorepo Template" width="100%">
+  <img src="./assets/diagrams/hero.svg" alt="KedaCode · AI Agent Runner · Clean Architecture · Monorepo Template" width="100%">
 </p>
 
 <p align="center">
@@ -14,9 +14,9 @@
   <a href="https://pypi.org/project/kedacode/"><img src="https://img.shields.io/pypi/v/kedacode?style=flat-square" alt="PyPI"></a>
 </p>
 
-> 把 GitHub Issue 变成本地 AI Agent 队列。给 Issue 打上 `agent/ready`，`iar` 就会创建隔离 worktree、驱动 Claude / Codex / Kimi 改代码、跑验证、做 code review、推分支开 Draft PR，并在 PR 合并前持续盯着 CI 与评论变化。你不想用命令行时，`iar console` 一条命令打开内置的管理面板。
+> 把 GitHub Issue 变成本地 AI Agent 队列。给 Issue 打上 `agent/ready`，`kc` 就会创建隔离 worktree、驱动 Claude / Codex / Kimi 改代码、跑验证、做 code review、推分支开 Draft PR，并在 PR 合并前持续盯着 CI 与评论变化。你不想用命令行时，`kc console` 一条命令打开内置的管理面板。
 >
-> 装什么、敲什么：`uv tool install kedacode` 之后主命令是 `iar`，也可以直接敲包名 `kedacode`（两者完全等价，见下方安装一节）。
+> 装什么、敲什么：`uv tool install kedacode` 之后主命令是 `kc`，也可以直接敲包名 `kedacode`（两者完全等价，见下方安装一节）；不想安装时可用 `uvx --from kedacode kc <命令>` 临时运行。旧命令 `iar` 长期作为弃用别名保留，新旧对照与迁移步骤见 `docs/guides/migrating-from-iar.md`。<!-- legacy-alias -->
 >
 > 仓库同时是一套可复用的 Python 工程骨架——Clean Architecture 四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链，可以整体拿去起新项目。
 >
@@ -24,7 +24,7 @@
 
 ## 一键安装
 
-无需克隆仓库，一条命令装上 `iar` CLI 并打开管理面板。三条等价入口任选其一；装完执行 `iar --version` 验证，在任意目录 `iar console` 打开管理面板。详见 `docs/getting-started/installation.md`。
+无需克隆仓库，一条命令装上 `kc` CLI 并打开管理面板。三条等价入口任选其一；装完执行 `kc --version` 验证，在任意目录 `kc console` 打开管理面板。详见 `docs/getting-started/installation.md`。
 
 **macOS（Homebrew）：**
 
@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | ba
 | `--method uv\|pipx\|pip` | 强制使用指定安装器（默认自动选择） |
 | `--source auto\|pypi\|tarball` | 安装源（默认: `auto` = GitHub tarball） |
 | `--check` | dry-run，只打印计划 |
-| `--uninstall` | 卸载 kedacode 工具环境与 iar binary |
+| `--uninstall` | 卸载 kedacode 工具环境与 kc binary |
 
 环境变量等价：`KEDA_VERSION`、`KEDA_INSTALL_METHOD`、`KEDA_SOURCE`、`KEDA_PYPI=1`（legacy，等价于 `--source pypi`）。
 
@@ -68,11 +68,11 @@ curl -fsSL https://raw.githubusercontent.com/ZataZhang/keda/main/install.sh | ba
 
 `prd` 与 `code-reviewer` 由远程
 [`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 仓库维护，不随 Keda
-wheel 分发。`iar init` 会仅下载这两个 Skill 并安装到用户级目录，绝不会写入项目目录；因此同一台
-机器上的所有项目共用同一份规范。安装目标首位是 **keda 自有目录 `~/.iar/skills`**——runner
-解析 PRD 时优先取这份，所以用户删掉 agent 目录里的副本也不会让 `iar` 失去解析能力；其后
-是 Codex、Claude、Kimi Code 等已检测到的 agent 配置目录。可用 `IAR_SKILLS_DIR` 覆盖安装
-根目录（CI / 测试把安装落到临时目录时用），用 `IAR_PRD_SKILL_PATH` 直接指定某一份
+wheel 分发。`kc init` 会仅下载这两个 Skill 并安装到用户级目录，绝不会写入项目目录；因此同一台
+机器上的所有项目共用同一份规范。安装目标首位是 **keda 自有目录 `~/.kedacode/skills`**——runner
+解析 PRD 时优先取这份，所以用户删掉 agent 目录里的副本也不会让 `kc` 失去解析能力；其后
+是 Codex、Claude、Kimi Code 等已检测到的 agent 配置目录。可用 `KEDACODE_SKILLS_DIR` 覆盖安装
+根目录（CI / 测试把安装落到临时目录时用），用 `KEDACODE_PRD_SKILL_PATH` 直接指定某一份
 `SKILL.md`。
 
 ## 前置要求
@@ -104,17 +104,17 @@ pnpm --filter frontend-admin dev        # 管理平台（Vite，默认 5173 端�
 
 > 项目提供了 `justfile` 作为便捷封装（如 `just dev`、`just run`、`just test`），如果你使用 [just](https://github.com/casey/just)，可以直接调用。下文只列出底层命令。
 
-## `iar` CLI 使用说明
+## `kc` CLI 使用说明
 
 <p align="center">
-  <img src="./assets/diagrams/iar-workflow.svg" alt="iar pipeline: GitHub issue to pull request" width="100%">
+  <img src="./assets/diagrams/kedacode-workflow.svg" alt="kc pipeline: GitHub issue to pull request" width="100%">
 </p>
 
-`iar`（issue-agent-runner）是本项目的核心工具，用于将 GitHub Issues 转为本地 AI Agent 任务队列，自动创建 Git Worktree 并驱动 Agent 执行。
+`kc`（KedaCode，原 issue-agent-runner）是本项目的核心工具，用于将 GitHub Issues 转为本地 AI Agent 任务队列，自动创建 Git Worktree 并驱动 Agent 执行。
 
 ### Recovery Flow
 
-当 Agent 提交遇到 pre-commit、测试或 verification 失败时，`iar` 不会直接失败退出，而是按下面两层 escalator 逐步修复，最大限度减少人工干预和 API 浪费：
+当 Agent 提交遇到 pre-commit、测试或 verification 失败时，`kc` 不会直接失败退出，而是按下面两层 escalator 逐步修复，最大限度减少人工干预和 API 浪费：
 
 1. **Fix Agent**：对简单局部问题（如 lint 逻辑错误、单测失败、遗漏 import），启动一个只聚焦当前 verification 失败的轻量 agent，使用更短的 `fix_timeout_seconds`。
 2. **Recovery Agent**：对复杂或全局失败（evidence、PRD checklist、commit request 等），启动完整 recovery agent，使用独立的 `recovery_timeout_seconds`。
@@ -131,9 +131,9 @@ pnpm --filter frontend-admin dev        # 管理平台（Vite，默认 5173 端�
   <img src="./assets/diagrams/agent-runner-recovery-flow.svg" alt="Agent Runner Recovery Flow: Fix Agent → Recovery Agent → WIP checkpoint" width="100%">
 </p>
 
-### 安装 `iar` 全局命令
+### 安装 `kc` 全局命令
 
-本项目通过 `pyproject.toml` 的 `[project.scripts]` 注册了两个等价入口：主命令 `iar`，以及与分发名对齐的别名 `kedacode`（装完想不起来敲什么时，敲包名也能用）。开发本仓库时推荐以可编辑模式安装为全局命令，这样源码改动可直接反映到 `iar`，无需每次重新构建安装：
+本项目通过 `pyproject.toml` 的 `[project.scripts]` 注册了两个等价入口：主命令 `kc`，以及与分发名对齐的别名 `kedacode`（装完想不起来敲什么时，敲包名也能用）。开发本仓库时推荐以可编辑模式安装为全局命令，这样源码改动可直接反映到 `kc`，无需每次重新构建安装：
 
 ```bash
 # 在仓库根目录安装（推荐）
@@ -149,115 +149,115 @@ uv tool install --reinstall --editable /path/to/keda
 uv tool install --reinstall --editable .
 ```
 
-安装后可直接使用 `iar <command>`；未安装时可用 `uv run iar <command>` 代替。CLI 基于 Typer/Rich，`iar --help` 会展示分组命令、参数和别名。
+安装后可直接使用 `kc <command>`；未安装时可用 `uv run kc <command>` 代替。CLI 基于 Typer/Rich，`kc --help` 会展示分组命令、参数和别名。
 
 ### 安装 shell 自动补全
 
-安装补全后，zsh 中输入 `iar is<Tab>` 可补全到 `issue`：
+安装补全后，zsh 中输入 `kc is<Tab>` 可补全到 `issue`：
 
 ```bash
 # zsh（推荐）
-iar completion install --shell zsh
+kc completion install --shell zsh
 source ~/.zshrc
 
 # 仅查看补全脚本，不写入 shell 配置
-iar completion show --shell zsh
+kc completion show --shell zsh
 ```
 
 也支持 `--shell bash` 和 `--shell fish`。
 
 ### 初始化与配置
 
-**前置步骤：所有 `iar` 子命令（除 `iar init` 本身外）都要求目标仓库已经执行过 `iar init`**。未初始化时命令会立即失败并提示运行 `iar init`。
+**前置步骤：所有 `kc` 子命令（除 `kc init` 本身外）都要求目标仓库已经执行过 `kc init`**。未初始化时命令会立即失败并提示运行 `kc init`。
 
 ```bash
 # 在目标仓库初始化本地配置
-iar init
+kc init
 # 或未安装全局命令时
-uv run iar init
+uv run kc init
 
 # 把 preview workflow 模板（GitHub Actions + deploy/vps-traefik + scripts/）复制到当前仓库
-iar workflow install preview
+kc workflow install preview
 
 # 同步当前仓库的 GitHub Labels
-iar labels sync
+kc labels sync
 
 # 同步指定仓库 Labels
-iar labels sync --repo-id keda
+kc labels sync --repo-id keda
 ```
 
 ### 从 PRD 创建 Issue
 
 ```bash
 # 从 PRD 创建 GitHub Issue，标记为 ready（默认发布 PRD）
-iar issue create tasks/pending/example.md --repo-id keda --agent codex --ready
+kc issue create tasks/pending/example.md --repo-id keda --agent codex --ready
 ```
 
 ### 运行 Agent
 
 ```bash
 # 单次执行（dry-run 预览，不实际执行）
-iar run --dry-run
+kc run --dry-run
 
 # 单次执行（当前仓库）
-iar run
+kc run
 
 # 处理 registry 中所有启用的仓库
-iar run --all
+kc run --all
 
 # Daemon 模式轮询（默认每 120 秒，监控所有已注册仓库）
-iar daemon
+kc daemon
 
 # Review daemon 模式轮询（默认每 120 秒，监控所有已注册仓库）
-iar review-daemon
+kc review-daemon
 
 # 只监控单个仓库
-iar daemon --repo-id keda
+kc daemon --repo-id keda
 ```
 
-### 管理终端（`iar console`）
+### 管理终端（`kc console`）
 
-`frontend-public` 构建出的管理终端静态产物会随 wheel 一起分发。装好 `iar` 后，在任意目录一条命令即可启动 Web 管理终端（API + 内置面板），无需 clone 本仓库、无需 Node / pnpm / just：
+`frontend-public` 构建出的管理终端静态产物会随 wheel 一起分发。装好 `kc` 后，在任意目录一条命令即可启动 Web 管理终端（API + 内置面板），无需 clone 本仓库、无需 Node / pnpm / just：
 
 ```bash
 # 启动管理终端并自动打开浏览器（前台运行）
-iar console
+kc console
 
 # 指定端口（省略时从 config.toml [agent_runner.console].port 起自动挑选空闲端口）
-iar console --port 8600
+kc console --port 8600
 
 # 只启动服务，不自动开浏览器
-iar console --no-browser
+kc console --no-browser
 ```
 
 面板提供所有已注册仓库的队列状态、Issue 事件时间线、运行历史与完成度统计，并支持启停 daemon、重试 failed Issue、管理 backlog 队列。默认只监听本机（`127.0.0.1`）；更多配置见 `docs/guides/agent-runner.md` 的「统一管理终端」一节。
 
-### 自然语言决策入口（`iar ask`）
+### 自然语言决策入口（`kc ask`）
 
-`iar ask` 是一个受限自然语言决策入口。默认只生成计划并写入审计文件，不执行任何副作用：
+`kc ask` 是一个受限自然语言决策入口。默认只生成计划并写入审计文件，不执行任何副作用：
 
 ```bash
 # 默认只输出计划
-uv run iar ask "帮我判断现在应该创建 issue 还是启动任务"
+uv run kc ask "帮我判断现在应该创建 issue 还是启动任务"
 
 # 显式指定 planner agent（默认 codex）
-uv run iar ask "从 pending PRD 中挑一个最适合创建 issue 的任务" --agent codex
+uv run kc ask "从 pending PRD 中挑一个最适合创建 issue 的任务" --agent codex
 
 # 只打印计划，适合 CI 验证
-uv run iar ask "现在可以跑一个 ready issue 吗" --plan-only
+uv run kc ask "现在可以跑一个 ready issue 吗" --plan-only
 
 # 进入确认执行流程（TTY 中要求输入 decision_id）
-uv run iar ask "从 tasks/pending/example.md 创建 issue" --execute
+uv run kc ask "从 tasks/pending/example.md 创建 issue" --execute
 
 # 非交互执行（仅允许 low/medium 风险动作）
-uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
+uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 ```
 
 白名单动作包括：`show_status`、`run_deliberation`、`create_issue_from_prd`、`mark_issue_ready`、`run_once_dry_run`、`run_once`、`review_once_dry_run`、`review_once`、`needs_clarification`、`no_op`。禁止动作包括 `git_push`、`git_merge`、`daemon`、任意 shell 命令等。Planner agent 必须通过可验证只读命令运行；目前仅 `codex` 被验证为安全。
 
 ### 清理已关闭 Issue 的本地分支
 
-`iar worktree cleanup` 用于清理本地遗留的 `issue-<number>` 分支及
+`kc worktree cleanup` 用于清理本地遗留的 `issue-<number>` 分支及
 `.iar-worktrees/issue-<number>` worktree。默认只预览；只有传入 `--yes` 才会删除。
 清理前会执行 `git fetch <remote> --prune`，并且默认只删除同时满足“GitHub Issue
 已关闭、远端同名分支已不存在、worktree 干净、分支已合入远端 base branch”的分支。
@@ -266,13 +266,13 @@ uv run iar ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 ```bash
 # 预览将会清理哪些本地 issue 分支
-iar worktree cleanup --dry-run
+kc worktree cleanup --dry-run
 
 # 执行安全清理
-iar worktree cleanup --yes
+kc worktree cleanup --yes
 
 # 同时删除脏 worktree 或未合入分支（谨慎）
-iar worktree cleanup --yes --force
+kc worktree cleanup --yes --force
 ```
 
 ### 多仓库配置
@@ -289,7 +289,7 @@ path = "/Users/zata/code/backend-service"
 enabled = true
 ```
 
-每个仓库根目录应有自己的 `.iar.toml` 文件，用于覆盖 runner、git、labels 等配置。
+每个仓库根目录应有自己的 `.kedacode.toml` 文件，用于覆盖 runner、git、labels 等配置。
 
 ## Git Worktree 工作流
 
@@ -371,7 +371,7 @@ uv run mkdocs build --strict
 ## 配置说明
 
 - **全局配置**：`config.toml` — 应用、数据库、模型、Agent Runner 等全局设置
-- **仓库级配置**：`.iar.toml` — 每个目标仓库根目录的 runner 覆盖配置
+- **仓库级配置**：`.kedacode.toml` — 每个目标仓库根目录的 runner 覆盖配置
 - **敏感信息**：`.env` — 密码、API Key 等（已加入 .gitignore）
 
 主要配置项：
@@ -439,11 +439,11 @@ Licensed under the Apache License, Version 2.0
 - ✅ 授予使用者**专利使用权**（patent grant）
 - ⚠️ 必须保留版权、商标与归属声明
 - ⚠️ 修改文件需显著标注
-- 🚫 不得使用 `keda` / `iar` 商标暗示官方背书
+- 🚫 不得使用 `keda` / `kc` 商标暗示官方背书
 
 ## 致谢
 
 - [FastAPI](https://github.com/tiangolo/fastapi) · [Typer](https://github.com/tiangolo/typer) · [Rich](https://github.com/Textualize/rich) — 后端 & CLI 栈
 - [uv](https://github.com/astral-sh/uv) · [just](https://github.com/casey/just) — 工具链
 - [MkDocs Material](https://github.com/squidfunk/mkdocs-material) — 文档站
-- [Anthropic Claude](https://www.anthropic.com/) · [OpenAI Codex](https://openai.com/) — 驱动 `iar` 的 AI Agent
+- [Anthropic Claude](https://www.anthropic.com/) · [OpenAI Codex](https://openai.com/) — 驱动 `kc` 的 AI Agent

@@ -2,7 +2,7 @@
 
 本项目通过 `src/backend/infrastructure/config/settings.py` 中的 `AppSettings` 统一管理配置，并组合多个子配置模型，实现工程化的配置分层。
 
-配置模型按职责分三个模块：`settings.py`（基础服务设置与 `AppSettings` / `AgentRunnerSettings` 聚合）、`agent_runner_settings.py`（全部 `AgentRunner*Settings` 与仓库级 `.iar.toml` 覆盖加载）、`settings_sources.py`（配置文件发现与 TOML 设置源）。`settings.py` 对另外两个模块的名字做再导出，既有的 `from backend.infrastructure.config.settings import ...` 路径保持不变。
+配置模型按职责分三个模块：`settings.py`（基础服务设置与 `AppSettings` / `AgentRunnerSettings` 聚合）、`agent_runner_settings.py`（全部 `AgentRunner*Settings` 与仓库级 `.kedacode.toml` 覆盖加载）、`settings_sources.py`（配置文件发现与 TOML 设置源）。`settings.py` 对另外两个模块的名字做再导出，既有的 `from backend.infrastructure.config.settings import ...` 路径保持不变。
 
 ## 配置来源优先级
 
@@ -51,7 +51,7 @@ Alembic 迁移（如仓库存在 `alembic.ini`）。该流程使用严格模式�
 PostgreSQL URL、数据库无法创建或迁移失败时，worktree 创建命令会失败，避免多个
 worktree 意外共用同一数据库。开发服务与 E2E 测试共用该 worktree 专用数据库。
 
-`iar daemon` 也可通过 `[agent_runner.worktree]` 的 `provision_database = true` 在领取
+`kc daemon` 也可通过 `[agent_runner.worktree]` 的 `provision_database = true` 在领取
 Issue 后执行同一流程。数据库 URL 支持 PostgreSQL（`postgresql...`）和 MySQL
 （`mysql...`）；两者均要求数据库账号有创建数据库的权限。SQLite 不支持 worktree
 隔离，严格模式下会阻止 daemon 开始执行，避免多个 Issue 共享同一个数据库文件。
@@ -75,10 +75,16 @@ Issue 后执行同一流程。数据库 URL 支持 PostgreSQL（`postgresql...`�
 ## Agent Runner 仓库配置
 
 `config.toml` 的 `[agent_runner.repositories.<repo_id>]` 段支持配置多个目标仓库：
-
 - `path`：本地已 clone 的仓库绝对路径（必填）。
 - `enabled`：是否启用该仓库，默认为 `true`。
 - `display_name`：前端展示名称，默认为 `repo_id`。
+
+registry 用的 `config.toml` 是**全局共享**的一份，解析顺序为：`KEDACODE_CONFIG` 优先，未设置时由旧名
+`IAR_CONFIG` 兜底（仅在旧名被显式设置时提醒一次） <!-- legacy-alias -->
+→ `<本机状态目录>/config.toml` → 源码根 `config.toml`。本机状态目录取 `~/.kedacode`，
+只有旧目录的机器继续用旧目录 `~/.iar` <!-- legacy-alias -->。源码根模板存在时，首次调用会把默认配置 seed 进状态目录；
+全局安装的 `kc`（`uv tool install kedacode`，没有源码根模板可拷）则在状态目录里创建一份只含
+`[agent_runner]` 空表的最小配置作为 registry 载体，已有文件不会被覆盖。
 
 每个仓库可独立覆盖 `labels`、`git`、`worktree`、`runner`、`safety` 子配置：
 
@@ -123,9 +129,9 @@ agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 
 - `bin` / `args` / `tail_args` / `prompt_flag` 的每个元素都是**字面量**：`$(whoami)`、`a|b`、`*.py` 会原样进入子进程 argv，绝不经 shell 解释。
 - 运行期参数只通过**命名展开器**注入，且展开器是**闭集**（当前仅 `git_writable_roots`）。引用未注册展开器在构造命令时报错并列出全部已命名展开器，不静默忽略。
-- `output_protocol` 必须指向已注册的输出协议（entry point group `iar.agent_output_protocols`），加载失败直接报错，不静默回落 `plain`。
+- `output_protocol` 必须指向已注册的输出协议（entry point group `kedacode.agent_output_protocols`），加载失败直接报错，不静默回落 `plain`。
 
-配置完成后用 `uv run iar agent doctor <name> --all-profiles` 自检，确认各用途 argv 与预期逐字节一致。
+配置完成后用 `uv run kc agent doctor <name> --all-profiles` 自检，确认各用途 argv 与预期逐字节一致。
 
 ### 模型参数模板与命名预设
 
@@ -170,7 +176,7 @@ behavior_prompt = "You are a pragmatic implementer..."
 
 ## Agent Runner Interactive Decision 配置
 
-`config.toml` 的 `[agent_runner.interactive_decision]` 段配置 `iar ask` 行为：
+`config.toml` 的 `[agent_runner.interactive_decision]` 段配置 `kc ask` 行为：
 
 ```toml
 [agent_runner.interactive_decision]
@@ -182,7 +188,7 @@ max_context_chars = 24000
 allow_execute_yes = true
 ```
 
-- `enabled`：是否启用 `iar ask`。
+- `enabled`：是否启用 `kc ask`。
 - `default_agent`：默认 planner agent（支持 `claude`、`codex`、`kimi`）。
 - `default_output_dir`：决策审计文件默认输出目录。
 - `planner_timeout_seconds`：planner agent 超时时间（秒）。
@@ -191,7 +197,7 @@ allow_execute_yes = true
 
 ## Agent Runner REPL 配置
 
-`config.toml` 的 `[agent_runner.repl]` 段配置 `iar` 无参数进入的交互式
+`config.toml` 的 `[agent_runner.repl]` 段配置 `kc` 无参数进入的交互式
 REPL 入口。整段与 `[agent_runner.interactive_decision]` 隔离，二者可
 独立调整默认 agent、超时、白名单策略。
 
@@ -221,10 +227,10 @@ confirm_commands = [
 ]
 ```
 
-- `enabled`：是否启用 REPL 入口；设为 `false` 时 `iar` 无参数仍走
+- `enabled`：是否启用 REPL 入口；设为 `false` 时 `kc` 无参数仍走
   Typer 默认帮助路径。
 - `default_agent`：默认 REPL agent（支持 `claude`、`codex`、`kimi`）。
-  `auto` 不被接受为 REPL 默认 agent（`iar run` 才用 auto）。
+  `auto` 不被接受为 REPL 默认 agent（`kc run` 才用 auto）。
 - `default_output_dir`：REPL 会话审计目录前缀；每次会话创建
   `<default_output_dir>/<session-id>/`，包含 `session.json`、
   `transcript.md`、`commands.json`。
@@ -236,12 +242,12 @@ confirm_commands = [
 - `confirm_commands`：前缀匹配列表，匹配的命令执行前先询问用户
   `Execute? [y/N]`。
 
-`auto_confirm_commands` 与 `confirm_commands` 都按「剥离 `iar` 后剩余
+`auto_confirm_commands` 与 `confirm_commands` 都按「剥离 `kc` 后剩余
 的命令 tail」做前缀匹配，例如 `"run --dry-run"` 只对
-`iar run --dry-run` 自动放行；`"run"` 则对 `iar run ...` 的所有调用
+`kc run --dry-run` 自动放行；`"run"` 则对 `kc run ...` 的所有调用
 询问确认。
 
-`.iar.toml` 可在 `[agent_runner.repl]` 段覆盖上述任意字段，实现仓库级
+`.kedacode.toml` 可在 `[agent_runner.repl]` 段覆盖上述任意字段，实现仓库级
 REPL 策略：默认全局 agent 是 `claude`，某个仓库可改为 `kimi` 或
 `codex`；默认 dry-run 白名单之外的命令可通过
 `confirm_commands` 在仓库层收紧或放宽。
@@ -297,15 +303,15 @@ tail -f logs/app-$(date +%Y-%m-%d).log
 | `log_level` | `LOG_LEVEL` | `INFO` | 日志级别。写成小写（如 `info`）会按大小写归一化生效，并留下一条"不是 logging 预定义名，已按 INFO 解析"的提示；写成完全无法解析的值（错拼、空值）时不中断启动，降级为 `INFO` 并留下一条"无效日志级别，已降级为 INFO"的警告。 |
 | `log_retention_days` | `LOG_RETENTION_DAYS` | `14` | 日日志保留天数。非正数或无法解析（如 `abc`）时回退到默认 14：既不会因为一次写错就清空历史日志，也不会让进程起不来。 |
 | `log_dir` | `LOG_DIR` | `<项目根>/logs` | 仅用于保证日志目录存在。**注意**：日文件的实际落点由 `log_file` 决定，单独设置 `LOG_DIR` 不会把日文件挪走。 |
-| `log_file` | `LOG_FILE` | `<项目根>/logs/app.log` | 日文件写在它的父目录里，命名为 `app-YYYY-MM-DD.log`。该目录由日志模块单点提供，`iar logs` 的回退提示也取它，因此不会因为自定义路径而指向另一个文件。 |
+| `log_file` | `LOG_FILE` | `<项目根>/logs/app.log` | 日文件写在它的父目录里，命名为 `app-YYYY-MM-DD.log`。该目录由日志模块单点提供，`kc logs` 的回退提示也取它，因此不会因为自定义路径而指向另一个文件。 |
 
 ### 日志特性
 
 - **按日期划分**：每天生成一个独立的日志文件，如 `app-2026-05-24.log`
-- **长驻进程跨天切换**：跑过午夜的进程（`iar loop-daemon`、`iar registry start` 的 runner / review-daemon）在下一次写日志时自动切到当天的 `app-YYYY-MM-DD.log`，不会继续写进昨天的文件。若新文件因为权限、只读挂载等原因开不出来，日志会继续写进原来的文件并提示一次，等目录恢复后自动补上切换——日志故障不会让业务调用失败
+- **长驻进程跨天切换**：跑过午夜的进程（`kc loop-daemon`、`kc registry start` 的 runner / review-daemon）在下一次写日志时自动切到当天的 `app-YYYY-MM-DD.log`，不会继续写进昨天的文件。若新文件因为权限、只读挂载等原因开不出来，日志会继续写进原来的文件并提示一次，等目录恢复后自动补上切换——日志故障不会让业务调用失败
 - **自动清理**：启动时以及每次跨天切换时删除超过 `log_retention_days`（默认 14）天的旧日志文件
 - **时间戳格式**：日志条目使用 `YYYY-MM-DD HH:MM:SS` 格式
-- **终端同步**：`iar` 命令的终端输出带有 `HH:MM:SS` 时间戳前缀
+- **终端同步**：`kc` 命令的终端输出带有 `HH:MM:SS` 时间戳前缀
 - **与第三方 handler 共存**：进程里已有其他日志 handler（uvicorn、测试框架）时，keda 仍会挂上自己的 stdout 与文件 handler，因此同一条记录可能同时出现在对方 handler 与 keda 日志里，这不是重复日志
 
 ### 日志内容

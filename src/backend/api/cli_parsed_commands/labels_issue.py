@@ -1,4 +1,4 @@
-"""``iar labels`` / ``iar issue create`` / ``iar issue list`` handlers.
+"""``kc labels`` / ``kc issue create`` / ``kc issue list`` handlers.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
 dispatcher.
@@ -24,7 +24,7 @@ from backend.api.cli_utils import _format_cli_exception
 
 
 def run_labels_command(ctx: ParsedCommandContext) -> int:
-    """``iar labels sync``: sync standard labels to the target repository."""
+    """``kc labels sync``: sync standard labels to the target repository."""
     contexts = _resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -66,15 +66,15 @@ def _require_issue_create_source(
     has_prd_paths = bool(raw_prd_paths)
     if has_prd_paths and from_prompt is not None:
         raise CliError(
-            "iar issue create takes either PRD path arguments or --from-prompt, not both.",
+            "kc issue create takes either PRD path arguments or --from-prompt, not both.",
             code=ExitCode.USAGE,
-            suggestion='iar issue create --from-prompt "<需求>"（或 iar issue create <prd-path>）',
+            suggestion='kc issue create --from-prompt "<需求>"（或 kc issue create <prd-path>）',
         )
     if not has_prd_paths and from_prompt is None:
         raise CliError(
-            "iar issue create needs a requirement source: PRD path argument(s) or --from-prompt.",
+            "kc issue create needs a requirement source: PRD path argument(s) or --from-prompt.",
             code=ExitCode.USAGE,
-            suggestion='iar issue create --from-prompt "<一句话需求>"',
+            suggestion='kc issue create --from-prompt "<一句话需求>"',
         )
     if from_prompt is None:
         if getattr(parsed, "require_validation", False):
@@ -82,14 +82,14 @@ def _require_issue_create_source(
                 "--require-validation only applies to --from-prompt; a PRD-backed Issue "
                 "takes its acceptance checklist from the PRD itself.",
                 code=ExitCode.USAGE,
-                suggestion='iar issue create --from-prompt "<需求>" --require-validation',
+                suggestion='kc issue create --from-prompt "<需求>" --require-validation',
             )
         return
     if not from_prompt.strip():
         raise CliError(
             "--from-prompt requires a non-empty requirement text.",
             code=ExitCode.USAGE,
-            suggestion='iar issue create --from-prompt "<一句话需求>"',
+            suggestion='kc issue create --from-prompt "<一句话需求>"',
         )
     conflicting_flags = ", ".join(
         flag
@@ -101,7 +101,7 @@ def _require_issue_create_source(
             f"{conflicting_flags} only apply to PRD-path creation; "
             "--from-prompt creates an Issue with no PRD to publish or overwrite.",
             code=ExitCode.USAGE,
-            suggestion='iar issue create --from-prompt "<需求>"',
+            suggestion='kc issue create --from-prompt "<需求>"',
         )
 
 
@@ -137,7 +137,7 @@ def _resolve_content_generation_setup(ctx: ParsedCommandContext, context: object
 def _run_issue_create_from_prompt(
     ctx: ParsedCommandContext, *, context: object, from_prompt: str, machine_mode: bool
 ) -> int:
-    """``iar issue create --from-prompt``：建一个不引用任何 PRD 的 Issue。
+    """``kc issue create --from-prompt``：建一个不引用任何 PRD 的 Issue。
 
     本路径不读工作区文件、不写回链、不发布任何内容，因此工作区必须零 diff。
     """
@@ -207,7 +207,7 @@ def _run_issue_create_from_prompt(
 
 
 def run_issue_create_command(ctx: ParsedCommandContext) -> int:
-    """``iar issue create``: create GitHub Issues from PRD files or a prompt."""
+    """``kc issue create``: create GitHub Issues from PRD files or a prompt."""
     raw_prd_paths = list(getattr(ctx.parsed, "prd_paths", []) or [])
     from_prompt = getattr(ctx.parsed, "from_prompt", None)
     machine_mode = ctx.output_format == OUTPUT_FORMAT_JSON
@@ -231,7 +231,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             str(exc),
             code=ExitCode.USAGE,
-            suggestion="iar issue create <prd-path>（文件或包含 PRD 的目录）",
+            suggestion="kc issue create <prd-path>（文件或包含 PRD 的目录）",
         ) from exc
 
     for skipped_prd_path in skipped_prd_paths:
@@ -259,7 +259,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
         raise CliError(
             "--title cannot be used when creating Issues from multiple PRDs.",
             code=ExitCode.USAGE,
-            suggestion="iar issue create <prd-path> --title <title>",
+            suggestion="kc issue create <prd-path> --title <title>",
         )
 
     _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
@@ -380,17 +380,16 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_issue_list_command(ctx: ParsedCommandContext) -> int:
-    """``iar issue list``: list Issues with linked PR status."""
+    """``kc issue list``: list Issues with linked PR status."""
     if ctx.parsed.with_pr and ctx.parsed.without_pr:
         raise CliError(
             "--with-pr and --without-pr are mutually exclusive.",
             code=ExitCode.USAGE,
-            suggestion="iar issue list --with-pr",
+            suggestion="kc issue list --with-pr",
         )
     from backend.core.use_cases.issue_pr_status import (
         IssueListRequest,
         list_issues_with_prs,
-        make_default_has_local_iar_repo,
         render_issue_with_pulls_json,
         render_pr_column,
     )
@@ -425,15 +424,14 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
             cwd=Path.cwd(),
             github_client_factory=ctx.github_client_factory,
             resolve_targets=_resolve_targets,
-            has_local_iar_repo=make_default_has_local_iar_repo(),
         )
     except ValueError as exc:
         from backend.api.cli_helpers import repository_selector_error
 
         raise repository_selector_error(exc) from exc
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
-        logger.error("iar issue list failed: %s", exc)
-        error_console.print(f"[red]iar issue list failed:[/] {exc}")
+        logger.error("kc issue list failed: %s", exc)
+        error_console.print(f"[red]kc issue list failed:[/] {exc}")
         return 1
 
     def _render_rows() -> list[dict[str, object]]:

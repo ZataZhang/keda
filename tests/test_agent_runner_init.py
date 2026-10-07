@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import tomllib
 from pathlib import Path
@@ -10,6 +11,8 @@ import pytest
 from pydantic import BaseModel
 
 from backend.api.cli import main
+from backend.core.shared.models import product_identity
+from backend.engines.agent_runner import remote_template_skills
 from backend.engines.agent_runner.remote_template_skills import (
     PackagedSkillInstallResult,
     RemoteTemplateSkillInstallOptions,
@@ -50,7 +53,7 @@ def _stub_remote_template_skill_install(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(
         "backend.api.cli_init.install_packaged_operator_skill",
         lambda **options: PackagedSkillInstallResult(
-            target_path=options["target_skills_root"] / "iar-operator",
+            target_path=options["target_skills_root"] / product_identity.OPERATOR_SKILL_NAME,
             action="install",
             dry_run=options["dry_run"],
         ),
@@ -104,7 +107,7 @@ def _assert_toml_includes_non_null_model_fields(
 
 
 def test_iar_init_dry_run_real_entry(tmp_path: Path) -> None:
-    """uv run iar init --dry-run should print TOML and not write .iar.toml."""
+    """`kc init --dry-run` must print the TOML without writing the repo config."""
     repo_path = _init_git_repository(tmp_path, "target")
     completed = subprocess.run(
         [
@@ -129,7 +132,7 @@ def test_iar_init_dry_run_real_entry(tmp_path: Path) -> None:
     assert "请检查" in completed.stderr
     assert "Please review verification_commands" in completed.stderr
     assert "git diff --check" in completed.stderr
-    assert not (repo_path / ".iar.toml").exists()
+    assert not (repo_path / product_identity.REPOSITORY_CONFIG_FILENAME).exists()
 
 
 def test_iar_init_result_includes_verification_commands(tmp_path: Path) -> None:
@@ -166,7 +169,7 @@ def test_iar_init_prints_review_hint_after_write(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar init` should print the bilingual review hint after writing .iar.toml."""
+    """`kc init` should print the bilingual review hint after writing the repo config."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
     monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
@@ -226,14 +229,15 @@ def test_iar_init_writes_idempotent_and_force_overwrites(
     monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
 
     first_exit_code = main(["init"])
-    config_path = repo_path / ".iar.toml"
+    config_path = repo_path / product_identity.REPOSITORY_CONFIG_FILENAME
     first_config_text = config_path.read_text(encoding="utf-8")
 
-    # iAR-owned worktree commands must be present and the legacy
+    # The product's own worktree commands must be present and the legacy
     # `just worktree` formula must be gone, so the historical
     # `PosixPath not found` regression cannot return.
-    assert "iar worktree create --branch issue-{issue_number}" in first_config_text
-    assert "iar worktree path --branch issue-{issue_number}" in first_config_text
+    primary = product_identity.PRIMARY_COMMAND_NAME
+    assert f"{primary} worktree create --branch issue-{{issue_number}}" in first_config_text
+    assert f"{primary} worktree path --branch issue-{{issue_number}}" in first_config_text
     assert "just worktree" not in first_config_text
 
     second_exit_code = main(["init"])
@@ -278,7 +282,7 @@ def test_iar_init_protects_diverged_config(
     monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
 
     assert main(["init"]) == 0
-    config_path = repo_path / ".iar.toml"
+    config_path = repo_path / product_identity.REPOSITORY_CONFIG_FILENAME
     config_path.write_text(config_path.read_text(encoding="utf-8") + "\n# extra", encoding="utf-8")
 
     assert main(["init"]) == 1
@@ -654,7 +658,7 @@ def test_iar_init_skips_check_test_flag_in_pre_commit_verification_command(
 def test_iar_init_renders_interactive_decision_and_deliberation_sections(
     tmp_path: Path,
 ) -> None:
-    """The rendered .iar.toml template includes ask and deliberate config."""
+    """The rendered repo config template includes ask and deliberate config."""
     repo_path = _init_git_repository(tmp_path, "target")
     _, config_text, _ = build_repository_local_config_text(
         RepositoryInitOptions(cwd=repo_path, dry_run=True)
@@ -813,7 +817,7 @@ def test_iar_init_does_not_pollute_target_repo_config_toml(
     assert repo_config_path.read_text(encoding="utf-8") == original_repo_config
 
     # Registry must land in the global IAR config instead.
-    global_config_path = fake_home / ".iar" / "config.toml"
+    global_config_path = fake_home / product_identity.STATE_DIR_NAME / "config.toml"
     assert global_config_path.is_file()
     global_config_text = global_config_path.read_text(encoding="utf-8")
     assert "[agent_runner.repositories.target]" in global_config_text
@@ -1091,10 +1095,8 @@ def test_iar_init_dry_run_emits_gitignore_block_lines(
 
     out = capsys.readouterr().out
     assert GITIGNORE_BLOCK_HEADER in out
-    assert "Would install packaged IAR operator skill:" in out
-    assert "Would overwrite packaged IAR operator skill:" not in out
-    assert "Would install packaged IAR operator skill:" in out
-    assert "Would overwrite packaged IAR operator skill:" not in out
+    assert "Would install packaged KedaCode operator skill:" in out
+    assert "Would overwrite packaged KedaCode operator skill:" not in out
     assert ".iar/" in out
     assert ".agent-runner/" in out
     assert ".iar-worktrees/" in out
@@ -1109,7 +1111,7 @@ def test_iar_init_dry_run_reports_packaged_operator_skill_conflict(
     """The real init handler reports a user-owned packaged Skill conflict."""
     repo_path = _init_git_repository(tmp_path, "target")
     skills_root = tmp_path / "isolated-home" / ".codex" / "skills"
-    user_skill = skills_root / "iar-operator" / "SKILL.md"
+    user_skill = skills_root / product_identity.OPERATOR_SKILL_NAME / "SKILL.md"
     user_skill.parent.mkdir(parents=True)
     user_skill.write_text("user version\n", encoding="utf-8")
     monkeypatch.chdir(repo_path)
@@ -1133,6 +1135,57 @@ def test_iar_init_dry_run_reports_packaged_operator_skill_conflict(
     assert "Would preserve existing user skill (conflict" in output
     assert str(user_skill.parent) in " ".join(output.split())
     assert user_skill.read_text(encoding="utf-8") == "user version\n"
+
+
+def test_iar_init_surfaces_legacy_operator_skill_copy_notices(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The real init handler tells the user which legacy skill copies were removed or kept."""
+    repo_path = _init_git_repository(tmp_path, "target")
+    pristine_root = tmp_path / "skills" / "pristine"
+    modified_root = tmp_path / "skills" / "modified"
+    pristine_contract_text = "historic packaged operator skill\n"
+    modified_contract_text = "user tuned operator skill\n"
+    for skills_root, contract_text in (
+        (pristine_root, pristine_contract_text),
+        (modified_root, modified_contract_text),
+    ):
+        legacy_skill_path = skills_root / product_identity.LEGACY_OPERATOR_SKILL_NAME
+        legacy_skill_path.mkdir(parents=True)
+        (legacy_skill_path / "SKILL.md").write_text(contract_text, encoding="utf-8")
+    monkeypatch.setattr(
+        remote_template_skills,
+        "_LEGACY_OPERATOR_SKILL_DIGESTS",
+        frozenset({hashlib.sha256(pristine_contract_text.encode("utf-8")).hexdigest()}),
+    )
+    monkeypatch.chdir(repo_path)
+    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setattr(
+        "backend.api.cli_init.install_remote_template_skills",
+        lambda options: RemoteTemplateSkillInstallResult(
+            target_skills_roots=(pristine_root, modified_root),
+            installed_skill_names=("prd", "code-reviewer"),
+            dry_run=options.dry_run,
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_init.install_packaged_operator_skill",
+        install_packaged_operator_skill,
+    )
+
+    assert main(["init"]) == 0
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "Removed the legacy operator skill copy at" in output
+    assert "Kept the modified legacy operator skill copy at" in output
+    assert str(modified_root / product_identity.LEGACY_OPERATOR_SKILL_NAME) in output
+    assert not (pristine_root / product_identity.LEGACY_OPERATOR_SKILL_NAME).exists()
+    preserved_contract_path = (
+        modified_root / product_identity.LEGACY_OPERATOR_SKILL_NAME / "SKILL.md"
+    )
+    assert preserved_contract_path.read_text(encoding="utf-8") == modified_contract_text
 
 
 def test_iar_init_idempotent_does_not_rewrite_gitignore(

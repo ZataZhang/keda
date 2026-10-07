@@ -1,4 +1,4 @@
-"""Typer commands under ``iar takeover``.
+"""Typer commands under ``kc takeover``.
 
 Holds :func:`takeover_command`, the bulk-import command used to clone,
 initialize, register, and start daemons across GitHub repositories.

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 1760" role="img" aria-label="iar pipeline: GitHub issue to pull request, detailed execution flow with recovery state machine">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 1760" role="img" aria-label="kc pipeline: GitHub issue to pull request, detailed execution flow with recovery state machine">
   <defs>
     <style>
       text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -24,7 +24,7 @@
   </defs>
 
   <!-- Title -->
-  <text x="490" y="36" text-anchor="middle" class="title">iar · From GitHub Issue to Pull Request（详细执行流）</text>
+  <text x="490" y="36" text-anchor="middle" class="title">kc · From GitHub Issue to Pull Request（详细执行流）</text>
   <text x="490" y="60" text-anchor="middle" class="subtitle">daemon 120s 轮询 · 每任务独占 worktree · recovery 状态机 + 跨 agent fallback · pre-PR review + post-PR supervisor</text>
 
   <!-- Legend -->
@@ -41,10 +41,10 @@
   <g filter="url(#sh)">
     <rect x="40" y="120" width="280" height="92" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
   </g>
-  <text x="180" y="146" text-anchor="middle" class="h" fill="#78350f">iar daemon（轮询）</text>
+  <text x="180" y="146" text-anchor="middle" class="h" fill="#78350f">kc daemon（轮询）</text>
   <text x="180" y="166" text-anchor="middle" class="b" fill="#78350f">轮询 120s（run_interval_seconds）</text>
   <text x="180" y="184" text-anchor="middle" class="b" fill="#78350f">监控 .iar/registry 所有启用仓库</text>
-  <text x="180" y="202" text-anchor="middle" class="s muted">iar run · iar run --all · iar daemon</text>
+  <text x="180" y="202" text-anchor="middle" class="s muted">kc run · kc run --all · kc daemon</text>
 
   <line x1="320" y1="166" x2="358" y2="166" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
   <text x="339" y="159" text-anchor="middle" class="arrowlabel">fetch</text>
@@ -293,5 +293,5 @@
   <text x="490" y="1714" text-anchor="middle" class="b" fill="#14532d">draft · 等待人工 review</text>
   <text x="490" y="1730" text-anchor="middle" class="s" fill="#16a34a">✓ CI passed · ✓ just test · ✓ verifier verdict</text>
 
-  <text x="490" y="1752" text-anchor="middle" class="s muted">iar ask · 自然语言决策入口（默认只生成 plan + 审计，白名单动作才允许 --execute；禁止 git_push / git_merge / daemon / 任意 shell）</text>
+  <text x="490" y="1752" text-anchor="middle" class="s muted">kc ask · 自然语言决策入口（默认只生成 plan + 审计，白名单动作才允许 --execute；禁止 git_push / git_merge / daemon / 任意 shell）</text>
 </svg>

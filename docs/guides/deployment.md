@@ -60,8 +60,8 @@
 
 ### PR 预览部署（每 PR 临时 Docker + Traefik）
 
-> ⚠️ **keda 自身不再跑预览部署。** 这是 IAR 提供给**目标仓库**的能力，通过
-> `uv run iar workflow install preview` 装进去（见
+> ⚠️ **keda 自身不再跑预览部署。** 这是 KedaCode 提供给**目标仓库**的能力，通过
+> `uv run kc workflow install preview` 装进去（见
 > [agent-runner.md](agent-runner.md) 的 Workflow Templates 一节）。本节出现的
 > `.github/workflows/deploy-preview.yml`、`deploy/vps-traefik/`、
 > `scripts/provision_preview_server.py` 等路径，指的都是**安装之后目标仓库里的

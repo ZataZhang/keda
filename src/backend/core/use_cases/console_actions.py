@@ -5,7 +5,7 @@
 - ``run_once`` / ``review_once``：为目标仓库启动一次性托管子进程。
 - ``retry_failed``：将 failed Issue 的 label 翻转回 ready（与手工
   ``gh`` 操作等价，不绕过 workflow 状态机）。
-- ``blocked_continue``：启动一次性 ``iar blocked-continue`` 托管子进程
+- ``blocked_continue``：启动一次性 ``kc blocked-continue`` 托管子进程
   （agent 执行耗时长，必须进程隔离，不能在 API 进程内跑）。
 
 所有动作（含被拒绝与出错的）都写入审计日志。

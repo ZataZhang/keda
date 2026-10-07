@@ -236,7 +236,7 @@ jobs:
               "class Kedacode < Formula",
               "  include Language::Python::Virtualenv",
               "",
-              '  desc "Issue Agent Runner (iar): turn GitHub Issues into a local AI agent queue"',
+              '  desc "KedaCode (kc): turn GitHub Issues into a local AI agent queue"',
               '  homepage "https://github.com/ZataZhang/keda"',
               f'  url "{sdist_url}"',
               f'  sha256 "{sdist_sha256}"',
@@ -252,13 +252,16 @@ jobs:
               "",
               "  def install",
               "    virtualenv_install_with_resources",
-              '    bin.install_symlink libexec/"bin/iar"',
-              # kedacode 是 iar 的同功能别名（见 pyproject [project.scripts]）。
-              '    bin.install_symlink libexec/"bin/kedacode"',
+              '    bin.install_symlink libexec/"bin/kc" if (libexec/"bin/kc").exist?',
+              # 三条链接分别对应主命令 kc、长别名 kedacode 与永久保留的弃用别名
+              # （见 pyproject [project.scripts]）；存在性判断是为了兼容尚未提供
+              # 某个名字的旧版本，弃用别名那一行自带 legacy-alias 标注。
+              '    bin.install_symlink libexec/"bin/kedacode" if (libexec/"bin/kedacode").exist?',
+              '    bin.install_symlink libexec/"bin/iar" if (libexec/"bin/iar").exist? # legacy-alias',
               "  end",
               "",
               "  test do",
-              '    assert_match version.to_s, shell_output("#{bin}/iar --version")',
+              '    assert_match version.to_s, shell_output("#{bin}/kc --version")',
               '    assert_match version.to_s, shell_output("#{bin}/kedacode --version")',
               "  end",
               "end",
@@ -390,7 +393,7 @@ jobs:
             cat > "$readme_file" <<'EOF'
           # ZataZhang/homebrew-tap
 
-          `kedacode` 的 Homebrew formula（命令名 `iar`），由 keda 仓库的 release 流水线自动更新。
+          `kedacode` 的 Homebrew formula（KedaCode，主命令 `kc`），由 keda 仓库的 release 流水线自动更新。
 
           - 安装：`brew install ZataZhang/tap/kedacode`（**必须写全限定名**：Homebrew 6.0 起
             第三方 tap 需显式信任，全限定名安装会顺带只信任该 formula；写成 `brew tap` + 短名

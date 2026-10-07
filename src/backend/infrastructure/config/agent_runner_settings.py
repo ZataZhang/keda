@@ -1,14 +1,14 @@
 """Agent Runner 的全部设置模型。
 
 本模块承接原先落在 ``settings.py`` 的 ``AgentRunner*Settings`` 家族与仓库级
-``.iar.toml`` 覆盖加载（:func:`load_agent_runner_local_settings`）。这些模型不依赖
-基础服务设置（数据库 / 模型 / 存储 / 超时），只依赖
-:mod:`backend.infrastructure.config.settings_sources` 的配置发现能力，因此可以
-独立成层；``settings.py`` 在 ``AgentRunnerSettings`` / ``AppSettings`` 中聚合它们。
+``.kedacode.toml`` 覆盖加载（:func:`load_agent_runner_local_settings`）。这些模型不依赖基础服务设置（数据库 /
+模型 / 存储 / 超时），只依赖
+:mod:`backend.infrastructure.config.settings_sources` 的配置发现能力与
+:mod:`backend.core.shared.models.product_identity` 的新旧名解析，因此可以独立成层；
+``settings.py`` 在 ``AgentRunnerSettings`` / ``AppSettings`` 中聚合它们。
 """
 
 import logging
-import shutil
 import sys
 import tomllib
 from pathlib import Path
@@ -23,6 +23,7 @@ from pydantic import (
     model_validator,
 )
 
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_AUTO,
     LIFECYCLE_AGENT_AUTO_KEYS,
@@ -30,9 +31,6 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_EXECUTOR_KEYS,
     LIFECYCLE_AGENT_KEYS,
     normalize_lifecycle_agent_value,
-)
-from backend.infrastructure.config.settings_sources import (
-    IAR_REPOSITORY_CONFIG_FILENAME,
 )
 
 logger = logging.getLogger(__name__)
@@ -246,19 +244,29 @@ class AgentRunnerGitSettings(BaseModel):
     base_branch: str = "main"
 
 
+#: worktree 命令默认值：命令名取自身份模块，``{…}`` 占位符留给运行期 format。
+#: 与 domain ``backend.core.shared.models.agent_runner`` 的同名字段必须保持一致
+#: （双类陷阱：运行时读的是 domain）。
+_WORKTREE_CREATE_COMMAND_DEFAULT = (
+    f"{product_identity.PRIMARY_COMMAND_NAME} worktree create "
+    "--branch issue-{issue_number} --base-branch {base_branch}"
+)
+_WORKTREE_PATH_COMMAND_DEFAULT = (
+    f"{product_identity.PRIMARY_COMMAND_NAME} worktree path " "--branch issue-{issue_number}"
+)
+
+
 class AgentRunnerWorktreeSettings(BaseModel):
     """Commands used to create and locate target worktrees.
 
-    Defaults delegate to the built-in ``iar worktree`` subcommand so the
+    Defaults delegate to the built-in ``kc worktree`` subcommand so the
     create / path pair can never drift apart. Override only when the target
     repository genuinely needs a custom worktree layout.
     """
 
-    create_command: str = (
-        "iar worktree create --branch issue-{issue_number} --base-branch {base_branch}"
-    )
-    reuse_command: str = "iar worktree path --branch issue-{issue_number}"
-    path_command: str = "iar worktree path --branch issue-{issue_number}"
+    create_command: str = _WORKTREE_CREATE_COMMAND_DEFAULT
+    reuse_command: str = _WORKTREE_PATH_COMMAND_DEFAULT
+    path_command: str = _WORKTREE_PATH_COMMAND_DEFAULT
     # 是否为每个 Issue worktree 建独立库,避免并行 worktree 互踩共享库的 alembic_version。
     # 默认开启;目标仓需含 scripts/shared/template/setup_copied_database.py,缺脚本或无关系型
     # DB 时 provision 会告警并回退到共享库(见 use_cases.worktree_database)。
@@ -469,29 +477,23 @@ class AgentRunnerValidationSettings(BaseModel):
     frontend_paths: list[str] = Field(default_factory=lambda: ["frontend-admin", "frontend-public"])
 
 
-#: ``iar console`` 的默认端口；被占用时 CLI 会自动顺延，显式 ``--port`` 不顺延。
+#: ``kc console`` 的默认端口；被占用时 CLI 会自动顺延，显式 ``--port`` 不顺延。
 _CONSOLE_DEFAULT_PORT = 8313
 
-#: 托管进程启动命令的兜底值：运行时解析失败时回退为 uv 项目内运行（旧行为）。
-_FALLBACK_RUNNER_COMMAND = ["uv", "run", "iar"]
+#: 状态目录下的默认文件名（路径前缀在加载时归一化到当前生效状态目录）。
+_CONSOLE_HISTORY_DB_NAME = "console.db"
+_CONSOLE_PROCESS_REGISTRY_NAME = "processes.json"
 
 
 def _default_runner_command() -> list[str]:
-    """解析当前 ``iar`` 可执行文件，作为托管进程的默认启动命令。
+    """解析托管进程的默认启动命令（自有名字优先，见身份模块）。
 
-    解析顺序：① ``sys.argv[0]``（``iar`` 入口直接运行时即当前可执行文件，
-    保证托管 daemon 与安装态同源；按 ``Path.stem`` 比较，否则 Windows 的
-    ``iar.exe`` 会漏判）；② ``shutil.which("iar")``（uvicorn 等入口启动后端
-    时 argv[0] 不是 iar）；③ 兜底 ``["uv", "run", "iar"]``（keda 源码树场景）。
+    解析顺序：① 当前进程就是以 ``kc`` / ``kedacode`` / ``iar`` 之一启动的 → 用它
+    （保证托管 daemon 与安装态同源）；② 按 ``kc`` → ``kedacode`` → ``iar`` 查
+    PATH；③ 都找不到时回落到 ``uv run kc``（keda 源码树场景）。
     ``config.toml`` 里显式配置的 ``runner_command`` 始终优先。
     """
-    argv0 = sys.argv[0] if sys.argv else ""
-    if argv0 and Path(argv0).stem == "iar":
-        return [argv0]
-    resolved_iar = shutil.which("iar")
-    if resolved_iar:
-        return [resolved_iar]
-    return list(_FALLBACK_RUNNER_COMMAND)
+    return product_identity.resolve_own_command_argv(sys.argv[0] if sys.argv else "")
 
 
 class AgentRunnerConsoleSettings(BaseModel):
@@ -501,10 +503,18 @@ class AgentRunnerConsoleSettings(BaseModel):
     硬编码在 ``cli_typer_console.CONSOLE_HOST``，不给 CLI 参数也不给配置项
     （一行 ``host = "0.0.0.0"`` 就能把可写面板暴露给整个网段）。残留的
     ``host`` 键按 pydantic extra 忽略。远程访问走 SSH 端口转发。
+
+    落库与注册表默认值随**当前生效的状态目录**派生（新旧双读），配置里写死的
+    旧状态路径在加载时归一化到同一个目录，因此迁移前后、旧路径链接存在与否，
+    读到的都是同一份历史。
     """
 
-    history_db_path: str = "~/.iar/console.db"
-    process_registry_path: str = "~/.iar/processes.json"
+    history_db_path: str = Field(
+        default_factory=lambda: str(product_identity.state_home() / _CONSOLE_HISTORY_DB_NAME)
+    )
+    process_registry_path: str = Field(
+        default_factory=lambda: str(product_identity.state_home() / _CONSOLE_PROCESS_REGISTRY_NAME)
+    )
     process_log_dir: str = "logs/agent-runner/processes"
     runner_command: list[str] = Field(default_factory=_default_runner_command)
     stop_timeout_seconds: int = 30
@@ -512,6 +522,22 @@ class AgentRunnerConsoleSettings(BaseModel):
     # dashboard 后台自动同步的静态默认间隔（秒）。界面上改的是 DB 里的运行时
     # 覆盖值（monitor_settings 表）；只有在从来没有保存过设置时才回落到这里。
     monitor_sync_interval_seconds: int = 300
+
+    @model_validator(mode="after")
+    def _normalize_state_home_paths(self) -> "AgentRunnerConsoleSettings":
+        """把写死旧/新状态目录的配置值归一化到当前生效状态目录。"""
+        for path_field in ("history_db_path", "process_registry_path", "process_log_dir"):
+            setattr(
+                self,
+                path_field,
+                str(
+                    product_identity.normalize_state_path(
+                        getattr(self, path_field),
+                        home_path=Path.home(),
+                    )
+                ),
+            )
+        return self
 
 
 class AgentRunnerDaemonSettings(BaseModel):
@@ -621,7 +647,7 @@ class AgentRunnerDeliberationProfileSettings(BaseModel):
 
 
 class AgentRunnerInteractiveDecisionSettings(BaseModel):
-    """Interactive decision (`iar ask`) configuration."""
+    """Interactive decision (`kc ask`) configuration."""
 
     enabled: bool = True
     default_agent: str = "claude"
@@ -632,13 +658,13 @@ class AgentRunnerInteractiveDecisionSettings(BaseModel):
 
 
 class AgentRunnerReplSettings(BaseModel):
-    """Interactive REPL (`iar` with no subcommand) configuration.
+    """Interactive REPL (`kc` with no subcommand) configuration.
 
     The REPL entrypoint lets the user chat with a configured agent and
-    grants the agent the ability to request execution of whitelisted IAR
+    grants the agent the ability to request execution of whitelisted KedaCode
     subcommands via ``<<IAR_EXEC>> ... <<END_IAR_EXEC>>`` markers. This
     settings block isolates the REPL's risk surface (default agent,
-    command allow/confirm lists, audit directory) from the ``iar ask``
+    command allow/confirm lists, audit directory) from the ``kc ask``
     decision planner.
     """
 
@@ -649,7 +675,7 @@ class AgentRunnerReplSettings(BaseModel):
     agent_timeout_seconds: int = 120
     # Commands that the executor may run without explicit confirmation.
     # Each entry is a *prefix* matched against the argv tail (everything
-    # after ``iar``), so ``"labels sync --dry-run"`` auto-confirms only
+    # after ``kc``), so ``"labels sync --dry-run"`` auto-confirms only
     # that exact form. Anything not listed here is either matched against
     # ``confirm_commands`` (which prompts) or rejected outright.
     auto_confirm_commands: list[str] = Field(
@@ -731,7 +757,7 @@ class AgentRunnerGeneratedContentTargetSettings(BaseModel):
     # 仅接受 template / agent；非法值（如手误 "agnet"）在配置加载期直接报错，
     # 而不是静默退回 fallback。默认 agent；agent 缺 prompt、超时、不可用或输出
     # 不合格时按 ``fallback`` 退回 template 渲染，所以未配置的机器同样能产出内容。
-    # 显式配成 template 已废弃（仍被接受，加载 ``.iar.toml`` 时会告警）：模板渲染的
+    # 显式配成 template 已废弃（仍被接受，加载仓库本地配置时会告警）：模板渲染的
     # 长期用途是上面这条失败兜底。
     mode: Literal["template", "agent"] = "agent"
     output: str = "json"
@@ -774,7 +800,7 @@ class AgentRunnerGeneratedContentSettings(BaseModel):
     issue_from_prd: AgentRunnerGeneratedContentTargetSettings = Field(
         default_factory=AgentRunnerGeneratedContentTargetSettings
     )
-    # 一句话需求 → Issue 正文（``iar issue create --from-prompt``）。产物不含 PRD 锚点，
+    # 一句话需求 → Issue 正文（``kc issue create --from-prompt``）。产物不含 PRD 锚点，
     # 因此提示词与回退模板都不能写出 ``- PRD path:``。
     issue_from_prompt: AgentRunnerGeneratedContentTargetSettings = Field(
         default_factory=AgentRunnerGeneratedContentTargetSettings
@@ -797,13 +823,13 @@ GENERATED_CONTENT_TARGET_NAMES: tuple[str, ...] = tuple(
 
 
 class AgentRunnerRepositoryMetadataSettings(BaseModel):
-    """Repository identity stored in repository-local IAR config."""
+    """Repository identity stored in the repository-local KedaCode config."""
 
     id: str | None = None
     enabled: bool = True
     display_name: str | None = None
     # Optional ``owner/name`` string passed to ``gh pr list --repo`` so the
-    # PR column on ``iar issue list`` is populated. Omitting it is allowed
+    # PR column on ``kc issue list`` is populated. Omitting it is allowed
     # — the PR column then stays empty with a one-shot stderr warning.
     github_repo: str | None = None
 
@@ -887,14 +913,14 @@ class AgentRunnerRepositorySettings(_AgentRunnerRepositoryOverrideSettings):
 
 
 class AgentRunnerLocalSettings(_AgentRunnerRepositoryOverrideSettings):
-    """Repository-local Agent Runner settings loaded from ``.iar.toml``."""
+    """Repository-local Agent Runner settings loaded from ``.kedacode.toml``."""
 
     repository: AgentRunnerRepositoryMetadataSettings = Field(
         default_factory=AgentRunnerRepositoryMetadataSettings
     )
 
 
-# 已经提示过的 (配置路径, target 名)：daemon 每轮轮询都会重新加载 ``.iar.toml``，
+# 已经提示过的 (配置路径, target 名)：daemon 每轮轮询都会重新加载仓库本地配置，
 # 同一份配置在一个进程里只提示一次，避免刷屏。
 _WARNED_TEMPLATE_PINS: set[tuple[str, tuple[str, ...]]] = set()
 
@@ -905,8 +931,8 @@ def _warn_deprecated_template_mode_pins(
     """对显式钉成 ``mode = "template"`` 的 generated_content target 记弃用警告。
 
     ``template`` 模式已废弃：agent 是默认值，模板渲染只保留为失败兜底。旧版
-    ``iar init`` 把当时的默认值 ``template`` 落盘成了显式配置，这类钉值会一直盖过
-    新的默认值，所以在加载时指出来，并提示用 ``iar config migrate`` 清理。
+    ``kc init`` 把当时的默认值 ``template`` 落盘成了显式配置，这类钉值会一直盖过
+    新的默认值，所以在加载时指出来，并提示用 ``kc config migrate`` 清理。
     有意使用模板渲染的仓库（自定义了模板）配置仍被接受，只是同样会收到弃用提示。
     """
     generated_content_section = agent_runner_section.get("generated_content")
@@ -925,8 +951,8 @@ def _warn_deprecated_template_mode_pins(
     logger.warning(
         '%s pins generated_content.<target>.mode = "template" for: %s. '
         "template mode is deprecated: agent is the default and template rendering stays "
-        "only as the failure fallback. If the pin is a leftover of an older `iar init`, "
-        "run `iar config migrate` in this repository to drop it.",
+        "only as the failure fallback. If the pin is a leftover of an older `kc init`, "
+        "run `kc config migrate` in this repository to drop it.",
         local_config_path,
         ", ".join(pinned_target_names),
     )
@@ -935,7 +961,9 @@ def _warn_deprecated_template_mode_pins(
 def load_agent_runner_local_settings(
     repo_root_path: Path,
 ) -> AgentRunnerRepositorySettings | None:
-    """Load repository-local IAR settings from ``.iar.toml``.
+    """Load repository-local KedaCode settings from the repository config file.
+
+    路径由身份模块双读解析（新配置文件优先，旧名兜底），并存时的警告只写 stderr。
 
     Args:
         repo_root_path: Target Git repository root path.
@@ -947,7 +975,7 @@ def load_agent_runner_local_settings(
         ValueError: If the local config exists but is invalid.
     """
     resolved_repo_path = repo_root_path.resolve()
-    local_config_path = resolved_repo_path / IAR_REPOSITORY_CONFIG_FILENAME
+    local_config_path = product_identity.effective_repository_config_path(resolved_repo_path)
     if not local_config_path.is_file():
         return None
 
@@ -955,18 +983,19 @@ def load_agent_runner_local_settings(
         with open(local_config_path, "rb") as local_config_file:
             local_toml_data: dict[str, Any] = tomllib.load(local_config_file)
     except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"Invalid IAR local config at {local_config_path}: {exc}") from exc
+        raise ValueError(f"Invalid KedaCode local config at {local_config_path}: {exc}") from exc
 
     agent_runner_section = local_toml_data.get("agent_runner")
     if not isinstance(agent_runner_section, dict):
         raise ValueError(
-            f"Invalid IAR local config at {local_config_path}: missing [agent_runner] section."
+            f"Invalid KedaCode local config at {local_config_path}: "
+            "missing [agent_runner] section."
         )
 
     try:
         local_settings = AgentRunnerLocalSettings(**agent_runner_section)
     except ValidationError as exc:
-        raise ValueError(f"Invalid IAR local config at {local_config_path}: {exc}") from exc
+        raise ValueError(f"Invalid KedaCode local config at {local_config_path}: {exc}") from exc
 
     _warn_deprecated_template_mode_pins(agent_runner_section, local_config_path)
 

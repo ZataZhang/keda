@@ -1,36 +1,36 @@
-# IAR Loop — 定时循环任务
+# KedaCode Loop — 定时循环任务
 
-> Issue #110 交付物。`iar loop` 子系统让运维者把 GitHub Issue 的“造票”变成
+> Issue #110 交付物。`kc loop` 子系统让运维者把 GitHub Issue 的“造票”变成
 > 定时任务，每天/每小时自动生成一份 PRD + Issue，交给现有 runner 流转到 PR。
 
 ## 为什么需要 Loop
 
-`iar` 已经能把单条 Issue 跑成 PR，但运维场景里很多任务是**周期性的**：
+`kc` 已经能把单条 Issue 跑成 PR，但运维场景里很多任务是**周期性的**：
 
 - 每天早上 8 点抓取 GitHub Trending，写入知识库；
 - 每周一汇总上周 PR 漏测项；
 - 每月 1 日扫描依赖过期版本。
 
-之前只能依赖外部 cron 调 `iar issue create`，既没有配方管理，也无法
-复用 IAR 的 Acceptance Checklist / Worktree / Draft PR 闭环。`iar loop`
-就是为了把这种“定时造票”正式接入 IAR 主流程。
+之前只能依赖外部 cron 调 `kc issue create`，既没有配方管理，也无法
+复用 KedaCode 的 Acceptance Checklist / Worktree / Draft PR 闭环。`kc loop`
+就是为了把这种“定时造票”正式接入 KedaCode 主流程。
 
 ## 与 Claude `/loop` 的差异：Persistent vs Session
 
 Claude Code 的 `/loop` 是**会话级**的（随终端关闭而消失，最长 3 天，
-最多 50 条）。IAR 是面向**无人值守**的 runner，loop 必须能在机器/会话
+最多 50 条）。KedaCode 是面向**无人值守**的 runner，loop 必须能在机器/会话
 关闭后继续执行，所以本 PRD **只实现 persistent loop**：
 
-| 维度 | Claude `/loop` | IAR Loop（persistent） |
+| 维度 | Claude `/loop` | KedaCode Loop（persistent） |
 |---|---|---|
-| 生命周期 | 当前会话 | 持久化到 `~/.iar/loop-state.json` |
+| 生命周期 | 当前会话 | 持久化到 `~/.kedacode/loop-state.json` |
 | 最大时长 | 3 天 | 任意（无过期） |
 | 数量上限 | 50 / 会话 | 无硬上限 |
 | 调度 | `5m`/`1h`/`1d` interval | cron (`0 8 * * *`) 或 interval (`10m`/`1h`)；`--every 1d` 隐式对齐到 `0 0 * * *` |
 | 配方 | 自然语言 / 命令 | 仓库内 Markdown + YAML frontmatter |
-| 执行 | Claude 在当前终端 | 现有 `iar daemon` / `iar run` |
+| 执行 | Claude 在当前终端 | 现有 `kc daemon` / `kc run` |
 
-后续可扩展 `iar loop --session`（会话级监控），但当前 PRD **不包含**。
+后续可扩展 `kc loop --session`（会话级监控），但当前 PRD **不包含**。
 
 ## 配方格式（Recipe）
 
@@ -41,7 +41,7 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 
 | 字段 | 必填 | 类型 | 默认 | 说明 |
 |---|---|---|---|---|
-| `id` | ✅ | string | — | loop 唯一标识，kebab-case（如 `github-trending`）。必须与文件 `iar loop create <id>` 一致。 |
+| `id` | ✅ | string | — | loop 唯一标识，kebab-case（如 `github-trending`）。必须与文件 `kc loop create <id>` 一致。 |
 | `schedule` | ✅ | string | — | 5 字段 cron 表达式（本地时区），或 interval 简写 `10m` / `1h` / `1d`（`1d` 自动按 `0 0 * * *` 解析）。 |
 | `repo_id` | ✅ | string | — | 目标仓库在 `config.toml` 中的注册 ID。 |
 | `issue_type` |  | enum | `feature` | `feature` / `refactor` / `bug`，决定初始 `type/*` 标签。 |
@@ -110,12 +110,12 @@ Every morning, scan GitHub Trending, summarize top repos for {{date}}.
 
 ## CLI 用法
 
-`iar loop` 子命令模仿 Claude Code 的 `/loop` 词汇，但语义对齐 IAR 持久化需求。
+`kc loop` 子命令模仿 Claude Code 的 `/loop` 词汇，但语义对齐 KedaCode 持久化需求。
 
-### `iar loop create`
+### `kc loop create`
 
 ```bash
-iar loop create github-trending \
+kc loop create github-trending \
     --recipe tasks/loops/github-trending.md \
     --cron "0 8 * * *"
 ```
@@ -123,9 +123,9 @@ iar loop create github-trending \
 - `--cron "<expr>"` 或 `--every <interval>` 二选一，缺省使用配方内 schedule。
 - `--repo-id <id>` / `--repo <path>` 临时覆盖配方中的目标仓库。
 - `--force` 覆盖已存在的同名 loop。
-- 注册成功后写入 `~/.iar/loop-state.json`，并计算 `next_fire_at`。
+- 注册成功后写入 `~/.kedacode/loop-state.json`，并计算 `next_fire_at`。
 
-### `iar loop list`
+### `kc loop list`
 
 打印所有 loop 的 id / repo_id / schedule / enabled / next_fire 表格：
 
@@ -135,23 +135,23 @@ id                       repo_id                   schedule                     
 github-trending          keda                      cron:0 8 * * *               yes         2026-06-24T00:00:00+00:00
 ```
 
-### `iar loop cancel <id>`
+### `kc loop cancel <id>`
 
-从 `~/.iar/loop-state.json` 删除条目；不影响已生成的 Issue / PRD / PR。
+从 `~/.kedacode/loop-state.json` 删除条目；不影响已生成的 Issue / PRD / PR。
 
-### `iar loop run --now <id>`
+### `kc loop run --now <id>`
 
 立即触发一次。常用于手动测试，触发后 `next_fire_at` 会重新计算。
 
-### `iar loop run --now <id> --dry-run`
+### `kc loop run --now <id> --dry-run`
 
 仅渲染 PRD、报告**将要**生成的文件路径和 Issue 标题，不写盘、不调 GitHub、
 不更新状态。**建议每次配置新 loop 时先用 `--dry-run` 验证一次。**
 
-### `iar loop-daemon [--interval <seconds>] [--dry-run]`
+### `kc loop-daemon [--interval <seconds>] [--dry-run]`
 
-常驻调度进程，按 `--interval`（默认 60 秒，可通过 `IAR_LOOP_DAEMON_INTERVAL`
-覆盖）轮询 `~/.iar/loop-state.json`：
+常驻调度进程，按 `--interval`（默认 60 秒，可通过 `KEDACODE_LOOP_DAEMON_INTERVAL`
+覆盖）轮询 `~/.kedacode/loop-state.json`：
 
 - 到点的 loop 会调用 `fire_loop`，复用 `create_issue_from_prd` 创建 Issue。
 - `loop/<id>` 标签 + recipe `labels` 会附加到 Issue。
@@ -163,20 +163,20 @@ github-trending          keda                      cron:0 8 * * *               
 
 ```mermaid
 flowchart TD
-    A[operator] -->|iar loop create| B[LoopStateStore]
-    B -->|iar loop-daemon / run --now| C[LoopScheduler]
+    A[operator] -->|kc loop create| B[LoopStateStore]
+    B -->|kc loop-daemon / run --now| C[LoopScheduler]
     C -->|due| D[LoopFire]
     D -->|read| E[tasks/loops/<id>.md]
     E -->|render| F[PRD body]
     D -->|write| G[tasks/pending/P<pri>-FEAT-<timestamp>-<slug>.md]
     G -->|create_issue_from_prd| H[GitHub Issue]
-    H -->|labels: agent/ready, loop/<id>| I[iar daemon]
+    H -->|labels: agent/ready, loop/<id>| I[kc daemon]
     I --> J[Draft PR]
 ```
 
 ## 已知风险与限制
 
-- **并发 daemon**：MVP 不加文件锁，请只跑一个 `iar loop-daemon` 进程。
+- **并发 daemon**：MVP 不加文件锁，请只跑一个 `kc loop-daemon` 进程。
 - **时区**：cron 默认本地时区，`time-zone: Asia/Shanghai` 等显式设置更稳。
 - **pre_command 失败**：失败时 loop 标记 `last_error` 但不中断 daemon。
 - **同一天去重**：通过 `loop/<id>` 标签 + Issue 标题日期判断；手动改 Issue 标题可能绕过去重。
@@ -184,7 +184,7 @@ flowchart TD
 ## 后续规划
 
 - 自然语言 schedule（`every morning at 8am`）。
-- 会话级 `iar loop --session`，对齐 Claude `/loop` 心智。
+- 会话级 `kc loop --session`，对齐 Claude `/loop` 心智。
 - 文件锁或迁移到 SQLite，避免多 daemon 并发写。
 
 ## Triage 决策树 Recipe 编写指南
@@ -244,9 +244,9 @@ agent 选完 scope 后，用 `gh issue edit` 给 Issue 补标 `scope/<x>`，
 其中 `x ∈ {ci, refactor, docs, deps}`。这 4 个 label 命名空间独立于
 `loop/<id>`，可被非 nightly-cleanup 的其他 loop 复用。
 
-**首次启用时**需要确保仓库里有这 4 个 label（`iar labels sync` 会自动创建
+**首次启用时**需要确保仓库里有这 4 个 label（`kc labels sync` 会自动创建
 已知的 `agent/*` / `type/*` label，但 `scope/*` 命名空间是 Issue #120 新引入的，
-可能需要手工 `gh label create` 或后续在 iar 内置 label 清单里加上）：
+可能需要手工 `gh label create` 或后续在 kc 内置 label 清单里加上）：
 
 ```bash
 gh label create scope/ci       --color 5319E7 --description "Nightly cleanup: CI failure fix"
@@ -293,7 +293,7 @@ block scalar，pre_command 必须写成单行 shell（用 `;` / `&&` 链接多�
 避免：
 
 - GitHub API 配额短时间内集中消耗（`create_issue_from_prd` 一次 1+ 次 REST 调用）。
-- `~/.iar/loop-state.json` 多个条目并发 upsert（虽然 iar-loop archive PRD 已有
+- `~/.kedacode/loop-state.json` 多个条目并发 upsert（虽然 loop 归档 PRD 已有
   "only one daemon" 约定，但错峰是更进一步的防御）。
 
 ### 失败兜底
@@ -314,7 +314,7 @@ block scalar，pre_command 必须写成单行 shell（用 `;` / `&&` 链接多�
 uv run pytest -o addopts="" tests/test_nightly_cleanup_recipe.py -v
 
 # 2. 干跑：dry-run 不写文件、不建 Issue
-uv run iar loop run --now nightly-cleanup-keda --dry-run
+uv run kc loop run --now nightly-cleanup-keda --dry-run
 ls tasks/pending/                # 应无新文件
 gh issue list --label loop/cleanup  # 应无新 Issue
 

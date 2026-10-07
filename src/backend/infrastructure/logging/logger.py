@@ -11,7 +11,7 @@ from typing import Any
 
 from backend.infrastructure.config.settings import config
 
-#: 日文件命名约定 ``app-YYYY-MM-DD.log`` 的日期部分，被 ``iar logs`` 回退提示消费
+#: 日文件命名约定 ``app-YYYY-MM-DD.log`` 的日期部分，被 ``kc logs`` 回退提示消费
 _DAILY_LOG_DATE_FORMAT = "%Y-%m-%d"
 #: keda 自挂载 handler 的私有标记属性名：幂等只认自己，不误伤第三方 handler
 _KEDA_HANDLER_ATTR = "_keda_handler"
@@ -149,7 +149,7 @@ class _DailyFileHandler(logging.FileHandler):
 
     长驻进程不能一直往昨天的文件里写，保留清理也必须跟着日期推进，而不是只在启动
     时跑一次。文件名继续是 ``app-YYYY-MM-DD.log``（不是 ``TimedRotatingFileHandler``
-    默认的 ``app.log.<date>`` 后缀），这样 ``iar logs`` 与 registry 的回退提示始终
+    默认的 ``app.log.<date>`` 后缀），这样 ``kc logs`` 与 registry 的回退提示始终
     指向真正在被写的那个文件。
     """
 

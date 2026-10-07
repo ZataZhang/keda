@@ -1,6 +1,6 @@
-"""Typer commands under ``iar worktree``.
+"""Typer commands under ``kc worktree``.
 
-Holds every command that operates on IAR-owned Git worktrees for the
+Holds every command that operates on KedaCode-owned Git worktrees for the
 current repository:
 
 - :func:`worktree_create_command`

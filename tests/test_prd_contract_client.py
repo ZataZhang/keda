@@ -30,7 +30,7 @@ class TestRunContractScript:
     """``_run_contract_script`` 的失败面与成功面。"""
 
     def test_missing_script_is_reported_with_the_install_hint(self, tmp_path: Path) -> None:
-        """脚本不存在时给出可行动的报错（指向 iar init / IAR_PRD_SKILL_PATH）。"""
+        """脚本不存在时给出可行动的报错（指向 kc init / KEDACODE_PRD_SKILL_PATH）。"""
         missing_script_path = tmp_path / "scripts" / "prd_contract.py"
 
         with pytest.raises(client.PrdContractError) as exc_info:
@@ -38,8 +38,8 @@ class TestRunContractScript:
 
         message = str(exc_info.value)
         assert "不存在" in message
-        assert "iar init" in message
-        assert "IAR_PRD_SKILL_PATH" in message
+        assert "kc init" in message
+        assert "KEDACODE_PRD_SKILL_PATH" in message
 
     def test_nonzero_exit_surfaces_the_exit_code_and_stderr(self, tmp_path: Path) -> None:
         """非零退出要把退出码与 stderr 带出来，否则失败无从诊断。"""

@@ -68,7 +68,7 @@ def test_iar_config_resolution_skips_application_config_toml(
         '[agent_runner]\n[agent_runner.lifecycle_agents]\nimplementation = "codebuddy"\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(settings_sources, "_global_iar_dir", lambda: iar_home)
+    monkeypatch.setattr(settings_sources, "_global_state_dir", lambda: iar_home)
 
     derived_repo = tmp_path / "derived-project"
     derived_repo.mkdir()
@@ -81,7 +81,7 @@ def test_iar_config_resolution_skips_application_config_toml(
     monkeypatch.chdir(derived_repo)
 
     # IAR 自己的配置：跳过应用级文件，落到机器级配置。
-    assert settings_sources._find_iar_config_toml() == machine_config
+    assert settings_sources._find_product_config_toml() == machine_config
     assert settings_sources.resolve_config_toml_path() == machine_config
     # 行为层：矩阵声明必须真的从机器级配置读到，而不是被同名文件挤掉。
     assert AgentRunnerSettings().lifecycle_agents.implementation == "codebuddy"
@@ -101,7 +101,7 @@ def test_iar_config_resolution_accepts_iar_config_toml(
     iar_home = tmp_path / "iar-home"
     iar_home.mkdir()
     (iar_home / "config.toml").write_text("[agent_runner]\n", encoding="utf-8")
-    monkeypatch.setattr(settings_sources, "_global_iar_dir", lambda: iar_home)
+    monkeypatch.setattr(settings_sources, "_global_state_dir", lambda: iar_home)
 
     project_root = tmp_path / "keda-checkout"
     (project_root / "src").mkdir(parents=True)
@@ -113,7 +113,7 @@ def test_iar_config_resolution_accepts_iar_config_toml(
 
     monkeypatch.chdir(project_root / "src")
 
-    assert settings_sources._find_iar_config_toml() == project_config
+    assert settings_sources._find_product_config_toml() == project_config
 
 
 def test_runner_timeout_settings_match_core() -> None:
