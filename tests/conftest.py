@@ -293,14 +293,30 @@ class FakeGitHubClient(IGitHubClient):
         self.calls.append({"method": "list_issue_comments", "issue_number": issue_number})
         return list(self._issue_comments.get(issue_number, []))
 
-    def list_issue_comment_entries(self, issue_number: int) -> list[tuple[int, str]]:
+    def list_issue_comment_entries(
+        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+    ) -> list[tuple[int, str]]:
+        """返回已授权测试 fixture 的评论，权限判定由真实 adapter 测试覆盖。
+
+        Args:
+            issue_number: 测试 Issue 编号。
+            trusted_only: 保留真实端口选项；fixture 评论均视为已授权。
+            body_contains: 可选正文子串筛选。
+
+        Returns:
+            测试存储中的评论 ID 与正文列表。
+        """
         self.calls.append(
             {
                 "method": "list_issue_comment_entries",
                 "issue_number": issue_number,
             }
         )
-        return list(self._issue_comment_entries.get(issue_number, []))
+        return [
+            (comment_id, body)
+            for comment_id, body in self._issue_comment_entries.get(issue_number, [])
+            if body_contains is None or body_contains in body
+        ]
 
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
         self.calls.append({"method": "edit_issue_comment", "comment_id": comment_id, "body": body})

@@ -94,7 +94,9 @@ def read_direct_pr_round(github_client: IGitHubClient, issue: IssueSummary) -> D
         DirectPrRoundError: 评论读取或关联身份无法确认。
     """
     try:
-        entries = github_client.list_issue_comment_entries(issue.number)
+        entries = github_client.list_issue_comment_entries(
+            issue.number, trusted_only=True, body_contains="<!-- iar:direct-pr-round "
+        )
         for comment_id, comment_body in reversed(entries):
             matched = _ROUND_MARKER.search(comment_body)
             if not matched:
@@ -184,7 +186,9 @@ def _save_round(github_client: IGitHubClient, record: DirectPrRound) -> DirectPr
     try:
         expected_body = _round_body(record)
         github_client.edit_issue_comment(record.comment_id, expected_body)
-        entries = github_client.list_issue_comment_entries(record.issue)
+        entries = github_client.list_issue_comment_entries(
+            record.issue, trusted_only=True, body_contains="<!-- iar:direct-pr-round "
+        )
         persisted_body = next(
             (body for comment_id, body in entries if comment_id == record.comment_id), None
         )

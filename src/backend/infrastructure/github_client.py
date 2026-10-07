@@ -282,8 +282,25 @@ class GitHubCliClient:
     def list_issue_comments(self, issue_number: int) -> list[str]:
         return list_issue_comments(self, issue_number)
 
-    def list_issue_comment_entries(self, issue_number: int) -> list[tuple[int, str]]:
-        return list_issue_comment_entries(self, issue_number)
+    def list_issue_comment_entries(
+        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+    ) -> list[tuple[int, str]]:
+        """读取评论，可按正文过滤并只保留可管理 Issue 的作者。
+
+        Args:
+            issue_number: Issue 编号。
+            trusted_only: 是否核验当前作者或当前仓库 triage 及以上权限。
+            body_contains: 可选正文子串过滤，避免对无关作者查询权限。
+
+        Returns:
+            评论 ID 与正文条目。
+
+        Raises:
+            RuntimeError: 可信模式无法确认读取结果或作者权限。
+        """
+        return list_issue_comment_entries(
+            self, issue_number, trusted_only=trusted_only, body_contains=body_contains
+        )
 
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
         edit_issue_comment(self, comment_id, body)

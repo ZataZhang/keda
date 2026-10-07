@@ -506,14 +506,22 @@ class IGitHubClient(ABC):
         ...
 
     @abstractmethod
-    def list_issue_comment_entries(self, issue_number: int) -> list[tuple[int, str]]:
+    def list_issue_comment_entries(
+        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+    ) -> list[tuple[int, str]]:
         """返回某个 Issue 的评论 ID 与正文列表。
 
         Args:
             issue_number: 目标 Issue 编号。
+            trusted_only: 只返回当前凭据作者或具备仓库 Issue 写权限者的评论；
+                开启时查询及权限判定必须成功。默认保留既有尽力读取语义。
+            body_contains: 可选正文子串筛选，先筛选再确认作者权限，避免无关评论的权限查询。
 
         Returns:
             list[tuple[int, str]]: 按时间顺序排列的评论 (id, body) 列表。
+
+        Raises:
+            RuntimeError: 可信模式下查询或权限无法确认；不得把读取失败当作空列表。
         """
         ...
 

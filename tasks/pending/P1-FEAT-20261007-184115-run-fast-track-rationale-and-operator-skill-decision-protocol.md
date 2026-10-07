@@ -157,13 +157,14 @@ No frontend impact：本期使用 GitHub 原生标签界面和现有 CLI，不�
 
 ### 7.1 Core Logic
 
-发现阶段只读识别已发布同轮 PR → 认领仲裁与本地锁 → fresh Issue 与关联重核 → 已发布者只补交接；其余每 Issue 档位、准入及依赖 → 执行 → 创建前候选检查点 → 确认 Draft PR → 消费 label 并 fresh 回读 → DIRECT 移交到 review → 检查点完成。初次发布与 cleanup-only 恢复使用相同终态，不随内联 supervisor 配置改变；最终切换失败保留未完成检查点。
+发现阶段只读识别已发布同轮 PR → 认领仲裁与本地锁 → fresh Issue 与关联重核 → 已发布者只补交接；其余每 Issue 档位、准入及依赖 → 执行 → 创建前候选检查点 → 确认 Draft PR → 消费 label 并 fresh 回读 → DIRECT 移交到 review → 检查点完成。初次发布与 cleanup-only 恢复使用相同终态，不随内联 supervisor 配置改变；最终切换失败保留未完成检查点。检查点读取只接受当前凭据作者，或经 fresh GitHub 仓库权限确认可管理 Issue 的作者；查询失败阻塞，外部无权限评论不能通过伪造 marker 获得 DIRECT。
 
 ### 7.2 Change Impact Tree
 
 ```text
 .
 ├── src/backend/core/shared/
+│   ├── interfaces/agent_runner.py [修改]【总结】既有评论端口增可选可信读取和正文筛选，默认旧语义不变
 │   └── models/agent_runner.py [修改]【总结】LabelConfig 增直发标签配置，默认 direct-pr
 ├── src/backend/core/use_cases/
 │   ├── agent_runner_orchestration_runtime.py [修改]【总结】共同入口每 Issue 解析/验证档位
@@ -179,6 +180,7 @@ No frontend impact：本期使用 GitHub 原生标签界面和现有 CLI，不�
 ├── src/backend/api/
 │   └── cli_parsed_commands/runner.py [修改]【总结】原 CLI 限制与 core 准入一致，映射冲突错误
 ├── src/backend/infrastructure/
+│   ├── github_issue_ops.py / github_client.py [修改]【总结】可信评论查询失败即阻塞，按当前作者/实际仓库权限筛选检查点
 │   ├── github_labels.py [修改]【总结】既有同步机制加入非 workflow 直发标签
 │   └── config/ [按需修改]【总结】既有标签配置加载及序列化同步
 ├── config.toml / src/backend/engines/agent_runner/factory_config_{builder,merge}.py [修改]【总结】默认/覆盖配置传播

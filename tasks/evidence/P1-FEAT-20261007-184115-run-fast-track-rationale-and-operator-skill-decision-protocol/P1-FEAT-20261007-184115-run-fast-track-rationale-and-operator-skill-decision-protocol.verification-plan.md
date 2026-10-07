@@ -3,7 +3,7 @@
 ## Review map
 
 - rv-1: independent CLI and daemon discover Issue labels, preserve DIRECT marker, consume label; neighboring NORMAL remains NORMAL; PRD negative dispatches no builder or PR.
-- rv-2: durable GitHub adapter writes PR before lost response; reconstruct a fresh client and recover without a second PR. Cover deletion failure, successful deletion followed by workflow crash, success response without deletion, same-head historical PR, identity mismatch and claimant loser. Initial publication and cleanup recovery must finish in review with inline supervisor enabled or disabled; final transition failure must leave the checkpoint pending.
+- rv-2: durable GitHub adapter writes PR before lost response; reconstruct a fresh client and recover without a second PR. Cover deletion failure, successful deletion followed by workflow crash, success response without deletion, same-head historical PR, identity mismatch and claimant loser. Initial publication and cleanup recovery must finish in review with inline supervisor enabled or disabled; final transition failure must leave the checkpoint pending. Actual comment adapter must filter unauthorized forged checkpoints before stage selection and fail closed on comment/permission query errors.
 - rv-3: actual configuration loading/sync, custom and disabled label, workflow preservation; read final hub/run/daemon/guide semantics against actual stage behavior.
 
 ## Commands and identity
@@ -20,6 +20,7 @@
 - Live probe uses actual command parser, subprocess runner, claim arbitration, worktree, commit proxy, git push, GitHub Draft PR and label API; no `--direct-pr` is passed.
 - Deterministic external builder replaces the LLM; memory, generated body AI, pre-PR reviewer, independent runner validation and inline supervisor are disabled in the isolated fixture. NORMAL repository verification remains real and counted. This proves label publication plumbing, not LLM quality.
 - Fault adapter persists comments, labels and PR state on disk and reconstructs independent clients. Git command output is a replacement boundary; actual creation, association and ready/running/blocked/recover handlers run.
+- Trusted checkpoint tests run the actual GitHub adapter with server metadata and permission responses replaced; self author, other writer/triage, read-only author, malformed metadata, failed reads and bounded permission queries are covered. Live validates actual self-author metadata; no second-account credentials are assumed.
 - Read-only discovery association is rechecked after acquiring claim/local ownership; arbitrary marker/history cannot grant cleanup or new work.
 - Human semantic review is not reduced to keyword tests. Existing skill tests check packaging contracts; final full-text review checks obligations.
 - No new UI: fresh API text and real URLs replace requested screenshot ceremony under the user's explicit preference. API evidence is not browser user-flow evidence.

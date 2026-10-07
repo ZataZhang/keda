@@ -26,6 +26,8 @@ The user says 「跑一下」「跑一次」「执行这个 Issue」「把 197 �
 
 ## Carry DIRECT across machines and recover its handoff
 
+Checkpoint reads trust the authenticated author or a fresh GitHub repository permission check for another author who can manage Issues. Public comments cannot grant DIRECT by imitating the checkpoint marker. Read/permission errors block the pass rather than masquerading as an absent round; unrelated comments do not require permission lookups.
+
 1. Upgrade **every possible claimant** before relying on this protocol. Old runners may ignore the label and execute NORMAL; installing a newer Skill alone does not upgrade an already-running runner process. Sync the configured label with `kc labels sync`, then, when already authorized, mark the named Issue with `gh issue edit <N> --add-label direct-pr` (substitute the configured label name).
 2. The label is an explicit Issue-level choice, not a daemon/global switch. It does not enqueue an Issue, grant a claim, alter priority, or bypass dependencies. The claim winner fresh-reads labels/body before starting affected stages: NORMAL + label becomes DIRECT; DIRECT + label stays DIRECT; FAST + label is refused. PRD anchors and unreadable bodies remain fail-closed. A dry-run only previews and never claims or consumes a label.
 3. Once admitted, the selected tier is fixed for that execution round, including Agent fallback and recovery. Adding/removing the label while execution is in flight does not switch its current stages. Failed execution or failed publication preserves the label for retry.
