@@ -15,7 +15,7 @@
 
 | 标准页 | 何时必须读 | 何时可以跳过 |
 |---|---|---|
-| `docs/ai-standards/index.md` | 任何任务开始时 | 永远不跳过 |
+| `docs/ai-standards/index.md` | 任何任务开始时；需求、方案与任务规划讨论时核对其中的 ROI 原则 | 永远不跳过 |
 | `docs/ai-standards/architecture.md` | 新增/修改 `src/backend/` 下的模块、调整跨层依赖、新增 engine 或 infrastructure 实现、新增对外 HTTP/CLI 入口 | 只改 `frontend-admin/`、文档、测试、构建脚本时 |
 | `docs/architecture/system-design.md` | 开始**任何**新的后端功能、新增四层之间的契约、改动 composition root、新增独立服务边界 | 已经只是小范围 bugfix 或参数调整，不动层间契约时 |
 | `docs/ai-standards/code-reuse.md` | **任何**新增或修改代码前；考虑提取 helper、判断是否复制粘贴、函数参数 ≥4 个、文件接近 500 行、运行 `just lint --reuse` 之前；交付前必须完成其中的 **AI 编码自检清单** | 纯文档排版或纯配置改动且无任何代码逻辑变更 |
@@ -30,6 +30,7 @@
 
 ## Critical Summary
 
+- 每次需求、方案与任务规划讨论默认评估 ROI，考虑当前收益、实施及维护成本和更低成本的替代方案，优先推荐最小有效方案；不强行量化，可选改进说明触发条件。详见 `docs/ai-standards/index.md` 的「讨论与规划的 ROI 原则」。
 - 项目以 AI Agent 理解并执行指令为核心；不为追求 100% 规范遵守率而逐条增加程序校验或硬门禁。指令执行偏差先修正执行结果、指令与上下文，不默认转成校验器开发；详见 `docs/ai-standards/index.md` 的「Agent 指令与程序边界」。
 - 后端必须遵守四层依赖方向：
   `src/backend/api/ -> src/backend/core/ -> src/backend/engines/ -> src/backend/infrastructure/`
