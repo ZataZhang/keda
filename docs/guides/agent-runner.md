@@ -151,9 +151,9 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 - 不会同时出现 `agent/supervising` + `agent/failed`
 - 历史脏状态（如同时贴有多个 workflow labels）会在下一次被处理时自动收敛到单一状态
 
-工具路由标签（`agent/codex`、`agent/claude`、`agent/kimi`）、类型标签（`type/*`）等非 workflow labels 不会被清理。
+工具路由标签（`agent/codex`、`agent/claude`、`agent/kimi`）、类型标签（`type/*`）等非 workflow labels 不会被清理。发布档位标签 `direct-pr` 也属于这一类：状态流转不会替它"消档"，只有认领者在确认 Draft PR 后显式消费它。
 
-### 14 个标准标签
+### 标准标签
 
 | 类别 | 标签 | 颜色 | 作用 |
 |---|---|---|---|
@@ -173,6 +173,7 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 | | `agent/opencode` | 🩵 天蓝 | 指定使用 OpenCode 执行 |
 | **来源标识** | `source/prd` | 🔵 深蓝 | Issue 关联了仓库内的 PRD 文件 |
 | **异步讨论** | `agent/deliberate` | 🩶 浅灰 | 复杂需求先走 Issue 评论区异步讨论，收敛后换 `agent/rework-prd` 落地 PRD |
+| **发布档位** | `direct-pr` | 🟠 橙 | 一次性直发声明：任何认领方（其他机器、批量队列、daemon）认领后读到它就把该 Issue 解析为直发档。**不是 workflow 状态标签**，发布确认后被认领者消费删除；见下节「Issue 上的 `direct-pr` 标签」 |
 | **任务类型** | `type/feature` | 🔵 | 功能需求 |
 | | `type/refactor` | 🟣 | 代码重构 |
 | | `type/bug` | 🔴 | Bug 修复 |
@@ -1214,15 +1215,16 @@ GitHub 的标签写入没有 compare-and-swap，所以"谁先领走这条 Issue"
 kc run --issue 42 --fast-merge
 ```
 
-- **PR 正文自我声明**：机器可读 marker `<!-- iar:fast-merge issued=<N> -->` + 人读说明"本 PR 经快速通道发布，未经过自动化验证门禁，合并前请人工验证"。无 marker 的 PR 才代表走了完整验证。
+- **PR 正文自我声明**：机器可读 marker `<!-- iar:fast-merge issued=<N> -->` + 人读说明"本 PR 经快速通道发布，未经过自动化验证门禁，合并前请人工验证"。marker 只声明旁路事实；无 marker 也不能代替最终代码树和实际验证结果的核对。
 - **只覆盖验证门禁本身**：发布路径（分支命名、push、PR 正文契约、pre-PR review）与"已提交干净工作树"的发布前提**照常执行**；builder 失败/恢复循环也不受影响——快速通道不会把失败掩盖成成功。
 - **单一目标限定**：与 `--all-ready` 组合是用法错误（退出码 2）——快速通道绝不能开启"整队未验证爆发"。
 - **stack 依赖拒绝（fail-closed）**：目标 Issue 若声明 `iar:depends-on ... mode="stack"` 顺序依赖，在启动任何 agent、乃至 `--takeover` 停 daemon 之前就报用法错误——未验证的上游会顺着 fork 基污染整条下游链；Issue 读不到时同样拒绝（无法证明不是 stack 就不走旁路）。
+- **与 `direct-pr` 标签冲突时拒绝**：目标 Issue 带着 `direct-pr` 标签却请求 `--fast-merge`，是用法错误而非"取更强者"——两个旁路跳过的门禁不同，静默升级会掩盖调用者的真实意图。撤掉旗标或摘掉标签，二选一。
 - **不加旗标时零变化**：默认 run 与今天完全一致（门禁照常）。daemon 没有 `--fast-merge`，也没有对应配置项——旁路只作用于这一次显式调用，且不触碰自动合并。
 
 ### 直发档旗标 `--direct-pr`
 
-`--fast-merge` 只跳验证门禁，发布路径（review agent、仓库验证命令、supervisor）照常。`--direct-pr` 是**面向没有 PRD 的 Issue 的更粗档位**：builder 提交后，除了 rv re-exec 与独立 verifier，**再跳过 pre-PR review agent 与 runner 侧的验证命令**，并跳过开 PR 后的 supervisor 轮次，直接开 Draft PR——质量门禁转移到该 PR 上的 CI。
+`--fast-merge` 只跳验证门禁，发布路径（review agent、仓库验证命令、supervisor）照常。`--direct-pr` 是**面向没有 PRD 的 Issue 的更粗档位**：builder 提交后，除了 rv re-exec 与独立 verifier，**再跳过 pre-PR review agent 与 runner 侧的验证命令**，并跳过发布链内联调用的 post-PR supervisor，直接开 Draft PR——质量门禁转移到该 PR 上的 CI。它不禁止独立运行的 review-daemon 后续审查，也不改变原有 workflow 标签选择；例如 Issue 仍进入 `agent/supervising` 时，后台 reviewer 可以选中它，DIRECT marker 不是后台审查排除规则。
 
 ```bash
 # 无 PRD 锚点的 Issue：做完就直接开 Draft PR
@@ -1232,7 +1234,55 @@ kc run --issue 42 --direct-pr
 - **适用边界（fail-closed）**：目标必须**没有 `- PRD path:` 锚点**。传 PRD 路径作为目标本身就是 PRD-backed，直接用法错误；`--issue <N>` 目标会读 Issue 正文证明无锚点，**读不到同样拒绝**——旁路不能留下一份未归档、未校验的 PRD。
 - **PR 正文自我声明**：marker `<!-- iar:direct-pr issued=<N> -->` + 人读说明"runner 侧未运行审核 Agent 与仓库验证命令，合并前请确认 CI 变绿并人工验证"。
 - **两个旁路旗标互斥**：`--fast-merge` 与 `--direct-pr` 同时给出是用法错误（退出码 2）。两者存在感不同（一个跳独立验证，一个连审核与仓库验证一起跳），所以刻意不"取更强者"，避免静默升级掩盖调用者的真实意图。
-- **单一目标限定**：与 `--all-ready` 组合是用法错误——直发档绝不能开启"整队未审核爆发"。daemon 没有 `--direct-pr`，也没有对应配置项；不触碰自动合并。
+- **单一目标限定**：与 `--all-ready` 组合是用法错误——直发档绝不能开启"整队未审核爆发"。旗标只改写敲下它的那台机器；daemon 没有 `--direct-pr` 旗标，也没有对应的全局配置项。要让 daemon 或另一台机器直发某个 Issue，用下面的 Issue 标签，而不是给 daemon 开总闸。不触碰自动合并。
+
+### Issue 上的 `direct-pr` 标签：跟着 Issue 走的直发档
+
+恢复发现会优先识别检查点已关联的同轮成功 PR：ready 的新依赖、blocked 缺少 resolution marker、running 的 rework 不阻止只补交接。已有 PR 仅经只读关联证明后入选，并在取得认领/本地锁后再次核对；未发布的选择和历史 PR 不享有这个例外。
+
+旗标作用于本次调用，不会成为其他认领进程的配置。`direct-pr` 标签把档位声明**绑到 Issue 本身**：升级后的认领方——另一台机器、`kc run --all-ready` 批量队列、或 daemon——在认领成功后重新 `get_issue` 读到它，就只把那个 Issue 解析为直发档。**所有可能认领的 runner 都必须升级并重启**；旧版可能忽略标签继续 NORMAL，更新 Skill 文件不等于更新已经运行的进程。
+
+```bash
+# 用现成的标签同步入口创建/改名标签，再贴到目标 Issue
+kc labels sync
+gh issue edit 42 --add-label direct-pr
+# 先确认 #42 已有 agent/ready 且依赖满足；标签自身不会入队
+kc daemon run            # 升级后的 daemon 认领 #42 后选择直发档
+```
+
+逐 Issue 解析表（同一次批量里的其他 Issue 各自独立判定，绝不共享档位）：
+
+| 调用侧请求档位 | Issue 带 `direct-pr` 标签 | 解析结果 |
+|---|---|---|
+| `NORMAL`（默认） | 是 | `DIRECT` |
+| `DIRECT`（`--direct-pr`） | 是 | `DIRECT`（来源记为旗标 + 标签） |
+| `FAST`（`--fast-merge`） | 是 | 显式拒绝：两个旁路跳过的门禁不同，不静默取更强者 |
+| 任意 | 否 | 沿用调用侧档位（默认行为零变化） |
+
+- **只选档位，不放宽准入**：标签只决定"走哪一档"，直发档的准入条件仍由同一个 core 入口把关——**带 PRD 锚点的 Issue 一律拒绝**（无法证明不是 PRD-backed 的读取失败同样 fail-closed），依赖门禁照常执行。拒绝发生在 builder 与 PR 创建之前，不会被降级成 `NORMAL` 悄悄跑完。daemon 侧只隔离那一条 Issue，其余照常推进。
+- **生命周期：保留 → 认领者消费 → 待恢复**：执行失败或建 PR 失败时标签**保留**，下一轮照常是直发意图。只有首次认领的胜者在**确认本次发布的那个 Draft PR** 之后删除它，且只删这一个标签；落败方既不建立档位也不删标签。删除失败与建 PR 不是原子操作，此时报告"发布成功、标签清理待恢复"并附上 PR URL，**不宣称本轮完全成功**。
+- **本轮关联先于消费**：准入后的有效档位固定到本执行轮，Agent fallback 与恢复沿用它；运行中增删标签不动态切换阶段。runner 用现有 Issue 评论记录未完成发布轮、候选分支/head 及创建前无历史 PR 的事实。检查点只接受当前凭据作者，或经 fresh GitHub 仓库权限确认可管理 Issue 的作者；不将 authorAssociation 当作权限。检查点或权限查询失败时阻塞，不把失败当成无记录。创建前不存在旧 PR 的证明和同轮关联也使用严格完整 PR 查询：只有成功空列表代表不存在，查询失败、空输出或格式错误不能授权新发布或消费历史 PR。消费需要当前未完成轮关联，以及仓库、Issue、分支/head、DIRECT marker 匹配；历史 PR 即使同分支、同 head、同 marker，也不能自动消费新选择。
+- **下一轮只补交接，不重建**：重新认领或 `kc recover --issue <N>` 先查未完成轮。确认对应的已发布 PR 后，仅补标签删除、移交到 `agent/review` 与完成记录，不重跑 Agent、不重复开 PR。DIRECT 的最终状态不随内联 supervisor 配置改变；只有最终状态切换成功后才完成发布轮检查点，切换失败仍可恢复。标签已删但移交前崩溃时也恢复原轮，不能退成新的 NORMAL 构建；发布后正文或 PRD 锚点变更时，清理专用路径可完成原交接，但不能借此启动新 DIRECT。关联无法核实则报告阻塞，不猜历史 PR 是本轮。
+- **同名标签没有版本**：等标签消费且 workflow 交接完成后，才为新轮重加标签。清理窗口内并发重加同名标签表达新选择不受支持。同样，创建前无旧 PR 的检查与创建不是原子操作；外部操作者在窗口内手动创建完全同分支/head/marker PR，现有接口不能保证原子归属，需与认领者协调手动发布。
+- **最终树验证责任在人**：标签与旗标一样只声明档位，PR 上的 marker 也不区分来源；直发 PR 的质量门禁转移到该 PR 的 CI 与人工对最终 Git tree 的验证——合并前确认 CI 变绿，并核对 landed tree 就是被验证过的那棵树。
+
+### Operator 的发布档位判断与验证责任
+
+| 档位 | runner 实际旁路 | 保留的责任 |
+|---|---|---|
+| NORMAL | 无 | 按配置执行 review、仓库验证命令、RV 重跑、独立 verifier 与 post-PR supervisor。 |
+| FAST | RV 重跑、独立 verifier | pre-PR review Agent、仓库验证命令与配置启用的 supervisor 照常；保留干净已提交树与未验证声明。仅显式单目标，不适用于 stack 上游。 |
+| DIRECT | FAST 两项，再加 pre-PR review Agent、runner 侧仓库验证命令、发布链内联 post-PR supervisor | builder 与发布前提、依赖/认领门禁、无 PRD 且正文可读准入、直发声明、PR CI，以及操作者对最终树的必要验证；不禁止独立后台 review。 |
+
+选择档位先看实际影响与可证明结果，不能按文件数或一段理由自动决定：
+
+- 公共构造函数或调用契约、四层之间的契约、schema/迁移、认证与安全边界、范围不明的任务使用 **NORMAL**。局部单测绿灯不足以证明跨层或真实入口安全，不给这些任务贴直发标签绕过失败。
+- FAST 与 DIRECT 减少的是 runner 的重复步骤，**不取消对最终改动的必要验证**。跑适用的现有检查及最高可行保真度的真实入口；改代码后重跑受影响验证并绑定最终 Git tree。失败、过期、被弱化或保真度不足的证据不能当 PASS；不能造绿灯、放宽断言、略去必要检查，或把手工注入状态/临时组件预览称为真实流程。此时转 NORMAL 或说明阻塞。
+- 正例：纯注释/docstring 修正，确认无可执行差异并通过相应 lint/文档检查；局部文字修正，已在实际 CLI `--help` 或生产页面正常布局/Provider 中观察到正确文本。文字局部不意味着可以用草稿页替代；涉及流程、Portal 或父级布局仍保留生产边界。
+- 设置标签是现有 GitHub 写操作，检查会话里已授权的目标、档位和副作用；授权有效且范围未扩张就继续，不新增每轮批准、理由参数、授权子命令或签名服务。只读“看看”不授予执行权限。
+- PR marker 与正文记录旁路事实，**不建立 PASS，也不自动合并**。合并前核对 CI、必要真实入口/人工结果和最终合并树；旧 head 证据不能替代最新代码验证。
+
+随包 operator 的「跑一次」说明包含完整判据与交接恢复路径；daemon 仅消费显式 Issue 标签，不提供全局 DIRECT 开关。
 
 ### 多条 run 之间的并发边界
 
@@ -2019,8 +2069,9 @@ kc> /exit
 > **PRD 不是执行的前置条件。** 没有 `- PRD path:` 锚点的 Issue 一样可以跑：`kc run --issue <N>`
 > 直接领取（见「显式定向的领取准入」），需要连审核与仓库验证一起省掉时用 `kc run --issue <N> --direct-pr`。
 > 本节是**按需增强**路径——想让这条 Issue 事后拥有规范 PRD（可归档、有验收清单）时才打
-> `agent/rework-prd`。注意锚点一旦写入，`--direct-pr` 就不再适用于该 Issue：PRD-backed 的交付必须走
-> PRD 交付门禁并归档其 PRD。
+> `agent/rework-prd`。注意锚点一旦写入，`--direct-pr` 与 Issue 上的 `direct-pr` 标签就不再适用于该
+> Issue 的新执行：PRD-backed 的交付必须走
+> PRD 交付门禁并归档其 PRD。已有未完成 DIRECT 轮的清理恢复只补交接，不借此重建。
 
 ### Triggering PRD Rework
 
@@ -2688,6 +2739,7 @@ blocked = "agent/blocked"
 codex = "agent/codex"
 claude = "agent/claude"
 kimi = "agent/kimi"
+direct_pr = "direct-pr"     # 跟着 Issue 走的直发档位声明；改名后 kc labels sync 会创建同名标签
 
 [agent_runner.git]
 remote = "origin"

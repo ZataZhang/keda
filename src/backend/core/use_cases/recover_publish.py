@@ -16,6 +16,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
@@ -256,10 +257,9 @@ def _create_recovery_draft_pr(
 ) -> str:
     """为恢复流程创建 Draft PR，失败时评论 Issue 并抛出 ``PublishRecoveryError``。
 
-    当 Issue 元数据可得时复用正常发布用例 :func:`create_draft_pr`，使恢复产出的
-    PR 正文与正常路径完全一致（内容生成 + contract anchors + validation checklist
-    + contract block）。只有 ``get_issue`` 失败、拿不到 Issue 上下文时才退回确定性
-    极简正文，因为内容生成依赖 Issue 标题与正文。
+    复用正常发布用例 :func:`create_draft_pr`，使恢复正文保留契约锚点与验证清单。
+    入口已要求 fresh Issue 可读，标签 DIRECT 通过持久检查点传入档位。保留内部
+    无元数据兜底分支供旧调用兼容，但公开恢复入口不会在 fresh 读取失败时调用它。
 
     Args:
         issue_number (int): GitHub Issue 编号。
@@ -283,6 +283,16 @@ def _create_recovery_draft_pr(
         if recovered_issue is not None:
             from backend.core.use_cases.agent_runner_publish import create_draft_pr
 
+            from backend.core.use_cases.agent_runner_direct_pr_round import read_direct_pr_round
+
+            pending_round = read_direct_pr_round(github_client, recovered_issue)
+            recovered_stage = (
+                PublishStage.DIRECT
+                if pending_round is not None
+                and not pending_round.handoff_complete
+                and not pending_round.abandoned
+                else PublishStage.NORMAL
+            )
             _, pr_url = create_draft_pr(
                 issue=recovered_issue,
                 worktree_path=worktree_path,
@@ -290,6 +300,7 @@ def _create_recovery_draft_pr(
                 github_client=github_client,
                 process_runner=process_runner,
                 content_generator=content_generator,
+                publish_stage=recovered_stage,
             )
             return pr_url
 
@@ -319,7 +330,7 @@ def _create_recovery_draft_pr(
         raise exc
 
 
-def recover_publish_issue(
+def _recover_publish_issue_owned(
     *,
     request: PublishRecoveryRequest,
     repo_path: Path,
@@ -336,9 +347,12 @@ def recover_publish_issue(
     运行现有 supervisor repair loop，只有 supervisor approve 后才进入
     ``agent/review``。当 supervisor 禁用时，保留直接进入 ``agent/review`` 的 fallback。
 
-    执行顺序经过精心编排：先完成全部本地安全校验与推送，确认成功后才更新标签、
-    评论 Issue，确保只有真正发布成功才会改变 Issue 的可见状态。任何 push、PR lookup
-    或 PR creation 失败都不会修改 labels，只会 posting failure comment。
+    fresh Issue 读取失败时不推送、不创建 PR。NORMAL 保留既有发布与监督流程；标签
+    DIRECT 先取得认领归属并持久化选择，认领会切换 workflow 标签，但直发标签只有
+    同轮 PR 成功后才消费。候选/PR 关联、标签消费与 workflow 交接分步恢复，失败不
+    宣称完整成功。已关联的成功 PR 优先只补交接，当前正文新增 PRD/依赖不阻塞这段
+    清理；新的 DIRECT 工作仍检查 fresh 正文准入与依赖。DIRECT 跳过 inline supervisor，
+    原 supervising workflow 与后台 review 行为保持。
 
     Args:
         request (PublishRecoveryRequest): 恢复请求，含 Issue 编号与可选分支。
@@ -386,6 +400,80 @@ def recover_publish_issue(
     # 后续用于评论与返回结果。
     head_sha = get_head_sha(worktree_path, process_runner)
 
+    from backend.core.use_cases.agent_runner_claim_arbitration import arbitrate_first_claim
+    from backend.core.use_cases.agent_runner_direct_pr_label import (
+        resolve_publish_stage,
+        ensure_direct_pr_admission,
+        ensure_direct_pr_dependencies_ready,
+        consume_label_after_publication,
+        DirectPrLabelPublicationRequest,
+    )
+    from backend.core.use_cases.agent_runner_direct_pr_round import (
+        DirectPrPublicationCandidate,
+        save_direct_pr_selection,
+        prepare_direct_pr_publication,
+        complete_direct_pr_round,
+    )
+    from backend.core.use_cases.agent_runner_issue_handlers import _resume_direct_pr_handoff
+    from backend.core.use_cases.agent_runner_publish import validate_safe_changes
+    from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
+
+    try:
+        recovered_issue = github_client.get_issue(issue_number)
+        stage_decision = resolve_publish_stage(
+            requested_stage=PublishStage.NORMAL,
+            issue=recovered_issue,
+            config=config,
+            github_client=github_client,
+        )
+        recovered_issue = stage_decision.issue
+        if stage_decision.publish_stage is PublishStage.DIRECT:
+            claim_bid = arbitrate_first_claim(
+                issue_number=issue_number,
+                github_client=github_client,
+                config=config,
+                selected_agent=config.runner.default_agent,
+            )
+            stage_decision = resolve_publish_stage(
+                requested_stage=PublishStage.NORMAL,
+                issue=recovered_issue,
+                config=config,
+                github_client=github_client,
+            )
+            recovered_issue = stage_decision.issue
+            if _resume_direct_pr_handoff(
+                github_client,
+                stage_decision,
+                DirectPrPublicationCandidate(branch, head_sha),
+                config,
+            ):
+                pr_context = github_client.get_pull_request_context(branch)
+                if pr_context is None:
+                    raise RuntimeError("Confirmed Direct PR context disappeared after cleanup.")
+                return PublishRecoveryResult(
+                    issue_number=issue_number,
+                    branch=branch,
+                    head_sha=head_sha,
+                    pr_url=pr_context.pr_url,
+                    pr_reused=True,
+                    supervisor_action="direct_pr_cleanup",
+                )
+            ensure_direct_pr_admission(decision=stage_decision)
+            ensure_direct_pr_dependencies_ready(stage_decision, config, github_client)
+            if stage_decision.direct_pr_label is not None:
+                save_direct_pr_selection(
+                    github_client,
+                    recovered_issue,
+                    stage_decision.direct_pr_label,
+                    claim_comment_id=claim_bid.comment_id,
+                )
+        validate_safe_changes(worktree_path, config, process_runner)
+    except Exception as policy_exc:
+        raise PublishRecoveryError(
+            f"Publish recovery admission or Direct PR handoff failed: {policy_exc}",
+            worktree_path=worktree_path,
+        ) from policy_exc
+
     # 推送前校验配置的远端是否真实存在，提前给出可读的报错与可用远端列表，
     # 避免 git push 因远端不存在而产生晦涩的失败信息。
     remote_names = list_git_remotes(worktree_path, process_runner)
@@ -431,6 +519,11 @@ def recover_publish_issue(
         )
         raise exc
 
+    if stage_decision.publish_stage is PublishStage.DIRECT:
+        prepare_direct_pr_publication(
+            github_client, recovered_issue, DirectPrPublicationCandidate(branch, head_sha)
+        )
+
     # 第五步：查找该分支是否已有处于 open 状态的 PR。恢复场景下 PR 可能在上次
     # 失败前已创建，复用可避免产生重复 PR。
     try:
@@ -453,18 +546,6 @@ def recover_publish_issue(
         raise exc
 
     pr_reused = existing_pr_url is not None
-
-    # Realistic Validation 上下文：恢复发布的 PR 同样需要人工签收清单与证据。
-    recovered_issue: IssueSummary | None
-    try:
-        recovered_issue = github_client.get_issue(issue_number)
-    except Exception as issue_lookup_exc:  # noqa: BLE001 - validation is best effort here.
-        recovered_issue = None
-        _logger.warning(
-            "Could not load Issue #%d for validation materialization: %s",
-            issue_number,
-            issue_lookup_exc,
-        )
 
     if existing_pr_url:
         pr_url = existing_pr_url
@@ -501,6 +582,16 @@ def recover_publish_issue(
             head_sha=head_sha,
         )
 
+    consume_label_after_publication(
+        DirectPrLabelPublicationRequest(
+            github_client=github_client,
+            issue_number=issue_number,
+            direct_pr_label=stage_decision.direct_pr_label,
+            candidate=DirectPrPublicationCandidate(branch=branch, head=head_sha),
+            pr_url=pr_url,
+        )
+    )
+
     # 第六步：推送与 PR 均成功后，写入恢复成功评论。
     success_comment = build_recovery_success_comment(
         branch=branch,
@@ -518,9 +609,13 @@ def recover_publish_issue(
         )
         raise exc
 
-    # 第七步：根据 supervisor 配置决定标签流转。
+    # 第七步：DIRECT 直接进入 review；其他档位按 supervisor 配置决定标签流转。
     supervisor_action: str | None = None
-    if config.post_pr_supervisor.enabled:
+    if stage_decision.publish_stage is PublishStage.DIRECT:
+        transition_issue_workflow_state(github_client, issue_number, config, config.labels.review)
+        complete_direct_pr_round(github_client, recovered_issue)
+        supervisor_action = "direct_pr_supervisor_skipped"
+    elif config.post_pr_supervisor.enabled:
         # 成功恢复后先进入 supervising，运行 supervisor。
         try:
             github_client.edit_issue_labels(
@@ -688,3 +783,53 @@ def build_recovery_success_comment(
             f"- Draft PR ({reuse_status}): {pr_url}",
         ]
     )
+
+
+def recover_publish_issue(
+    *,
+    request: PublishRecoveryRequest,
+    repo_path: Path,
+    config: AppConfig,
+    github_client: IGitHubClient,
+    process_runner: IProcessRunner,
+    content_generator: IContentGenerator | None = None,
+) -> PublishRecoveryResult:
+    """在现有工作树锁内恢复发布，标签 DIRECT 同时复用跨机器认领仲裁。
+
+    Args:
+        request: 恢复目标与可选分支。
+        repo_path: 主仓库路径。
+        config: 应用配置。
+        github_client: GitHub 端口。
+        process_runner: 进程执行器。
+        content_generator: 可选内容生成器。
+
+    Returns:
+        发布结果，保留原 NORMAL 恢复与监督行为。
+
+    Raises:
+        PublishRecoveryError: 发布或交接失败。
+        RuntimeError: 工作树已经被其他执行者锁定。
+    """
+    from backend.core.use_cases.agent_runner_blocked_claim import (
+        _acquire_blocked_claim_lock,
+        _release_blocked_claim_lock,
+        worktree_claim_lock_path,
+    )
+
+    worktree_path = resolve_existing_worktree(
+        repo_path, request.issue_number, config, process_runner
+    )
+    lock_path = worktree_claim_lock_path(worktree_path)
+    _acquire_blocked_claim_lock(lock_path, request.issue_number)
+    try:
+        return _recover_publish_issue_owned(
+            request=request,
+            repo_path=repo_path,
+            config=config,
+            github_client=github_client,
+            process_runner=process_runner,
+            content_generator=content_generator,
+        )
+    finally:
+        _release_blocked_claim_lock(lock_path)

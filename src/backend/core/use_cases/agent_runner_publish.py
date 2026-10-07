@@ -22,6 +22,7 @@ from backend.core.use_cases.agent_runner_feedback import (
 )
 from backend.core.use_cases.agent_runner_git import (
     get_current_branch,
+    get_head_sha,
     list_changed_paths,
     list_git_remotes,
 )
@@ -240,9 +241,9 @@ def _format_publish_stage_annotation(
     elif publish_stage is PublishStage.DIRECT:
         marker = format_direct_pr_marker(issue_number)
         human_note = (
-            "> **直发档发布**：本 PR 经 ``--direct-pr`` 发布，runner 侧未运行审核 "
-            "Agent 与仓库验证命令，质量门禁转移到本 PR 上的 CI；"
-            "合并前请确认 CI 变绿并人工验证。"
+            "> **直发档发布**：本 PR 经直发档发布（来自 ``--direct-pr`` 旗标或 Issue 上的 "
+            "``direct-pr`` 标签），runner 侧未运行审核 Agent 与仓库验证命令，"
+            "质量门禁转移到本 PR 上的 CI；合并前请确认 CI 变绿并人工验证。"
         )
     else:
         return None
@@ -278,8 +279,9 @@ def create_draft_pr(
         content_generator: Optional AI content generator for PR title/body.
         publish_stage: 发布档位。``FAST``（``kc run --fast-merge``）在正文末尾注入
             ``iar:fast-merge`` 自我声明 marker 与人读未验证标注；``DIRECT``
-            （``kc run --direct-pr``）注入同族的 ``iar:direct-pr`` marker 与直发说明；
-            ``NORMAL`` 不注入任何档位标注。
+            （``kc run --direct-pr`` 旗标，或认领后从 Issue ``direct-pr`` 标签解析出的
+            直发档）注入同族的 ``iar:direct-pr`` marker 与直发说明——marker 只声明档位，
+            不区分来源；``NORMAL`` 不注入任何档位标注。
 
     Returns:
         ``(branch, pr_url)`` tuple.
@@ -293,6 +295,32 @@ def create_draft_pr(
         expected_branch=expected_branch,
         issue=issue,
     )
+
+    # 标签直发先持久化当前轮次候选，历史同 head PR 不能被新标签复用。
+    from backend.core.use_cases.agent_runner_direct_pr_round import (
+        DirectPrPublicationCandidate,
+        associated_direct_pr,
+        prepare_direct_pr_publication,
+        read_direct_pr_round,
+    )
+
+    direct_round = read_direct_pr_round(github_client, issue)
+    active_direct_round = (
+        direct_round is not None
+        and not direct_round.handoff_complete
+        and not direct_round.abandoned
+    )
+    direct_candidate = DirectPrPublicationCandidate(
+        branch=branch, head=get_head_sha(worktree_path, process_runner)
+    )
+    if active_direct_round:
+        if publish_stage is not PublishStage.DIRECT:
+            raise DraftPRCreationError(
+                "An unfinished DIRECT round cannot be published as NORMAL/FAST."
+            )
+        associated_url = prepare_direct_pr_publication(github_client, issue, direct_candidate)
+        if associated_url is not None:
+            return branch, associated_url
 
     try:
         existing_pr_url = github_client.find_open_pr_by_head(branch)
@@ -397,6 +425,17 @@ def create_draft_pr(
         )
     except Exception as exc:
         raise DraftPRCreationError(str(exc)) from exc
+    if active_direct_round:
+        persisted_round = read_direct_pr_round(github_client, issue)
+        if persisted_round is None:
+            raise DraftPRCreationError(
+                "Direct PR was created but its publication checkpoint disappeared."
+            )
+        confirmed_url = associated_direct_pr(github_client, persisted_round, direct_candidate)
+        if confirmed_url != pr_url:
+            raise DraftPRCreationError(
+                "Direct PR was created but its current-round association is pending."
+            )
     return branch, pr_url
 
 

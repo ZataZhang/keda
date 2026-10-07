@@ -2,9 +2,9 @@
 
 - GitHub Issue: https://github.com/ZataZhang/keda/issues/235
 
-> ⛔ **交付前置**：改名与 operator hub 两份 PRD 经主线合并后开工。§8 是依赖唯一事实源。
+> ✅ **交付前置**：改名 PR #233 与 operator hub PR #240 已主线合并；§8 是依赖唯一事实源。
 >
-> ⬜ **验收状态**：未开工。此横幅投影 §9，那里是唯一事实源。
+> 🧍 **验收状态**：执行侧交付完成，独立 verifier PASS；待人工验收。此横幅投影 §9，那里是唯一事实源。
 >
 > Part A 为人审层，Part B 为执行器层；功能一览投影 §10。
 
@@ -143,7 +143,7 @@ No frontend impact：本期使用 GitHub 原生标签界面和现有 CLI，不�
 4. core 共同入口验证 DIRECT 无 PRD anchor、正文可读、既有依赖门禁，CLI 复用同一业务检查或保留入口错误映射。拒绝时无 builder/PR 创建，无消费标签；daemon 记录 blocked/error 并继续其他任务，不使整轮崩溃。
 5. 档位沿正常、已有提交、running 恢复和发布兜底链传递；创建 PR 保留原 DIRECT marker 与质量声明。不改 marker 协议，不增加理由。
 6. 找到并确认本次发布对应 PR（仓库、Issue、branch/head 与原直发 marker 匹配）后，仅认领赢家移除配置指定标签，不删除其他标签。创建失败/执行失败不移除。
-7. PR 创建成功与标签删除不是原子操作：删除失败报告「发布成功、标签清理待恢复」并保留 PR URL；不能宣称完整成功。后续通过已有 PR 查询/关联恢复，先确认匹配直发 PR，再补清理；不得重新构建/建 PR，也不得仅因任意历史 PR 有 marker 就消费新一轮标记。
+7. PR 创建成功与标签删除不是原子操作：删除失败或成功响应但 fresh 回读标签仍在时，报告「发布成功、标签清理待恢复」并保留 PR URL；不能宣称完整成功。后续通过已有 PR 查询/关联恢复，先确认匹配直发 PR，再补清理；不得重新构建/建 PR，也不得仅因任意历史 PR 有 marker 就消费新一轮标记。
 8. PR 成功后崩溃、已移除标签后状态切换崩溃、blocked/running 恢复均需对应测试；靠 PR 持久状态与现有认领/恢复上下文识别同次发布，不为此新增常驻服务。实现前确认关联信息是否充分，若不足扩展最小现有恢复记录并更新影响树，禁止用「标签删除即 exactly-once」掩盖缺口。
 9. CLI 旗标直发且 Issue 没标签不新增标签写入。无法 fresh read 时 fail-closed 不执行；已有成功 PR 的清理恢复允许处理带 PRD/内容变更的当前 Issue，但只补清理，不启动新的 DIRECT。
 
@@ -157,24 +157,34 @@ No frontend impact：本期使用 GitHub 原生标签界面和现有 CLI，不�
 
 ### 7.1 Core Logic
 
-认领仲裁 → fresh Issue → 每 Issue 档位与准入 → 已有同次 PR 恢复或执行 → 确认 Draft PR → 消费 label → 原 workflow 状态迁移。
+发现阶段只读识别已发布同轮 PR → 认领仲裁与本地锁 → fresh Issue 与关联重核 → 已发布者只补交接；其余每 Issue 档位、准入及依赖 → 执行 → 创建前候选检查点 → 确认 Draft PR → 消费 label 并 fresh 回读 → DIRECT 移交到 review → 检查点完成。初次发布与 cleanup-only 恢复使用相同终态，不随内联 supervisor 配置改变；最终切换失败保留未完成检查点。检查点读取只接受当前凭据作者，或经 fresh GitHub 仓库权限确认可管理 Issue 的作者；查询失败阻塞，外部无权限评论不能通过伪造 marker 获得 DIRECT。创建前不存在旧 PR 的证明和同轮关联也使用严格完整 PR 查询：只有成功空列表代表不存在，查询失败、空输出或格式错误不能授权新发布或消费历史 PR。
 
 ### 7.2 Change Impact Tree
 
 ```text
 .
 ├── src/backend/core/shared/
+│   ├── interfaces/agent_runner.py [修改]【总结】既有评论端口增可信读取/正文筛选，PR 上下文端口增严格读取；默认旧语义不变
 │   └── models/agent_runner.py [修改]【总结】LabelConfig 增直发标签配置，默认 direct-pr
 ├── src/backend/core/use_cases/
 │   ├── agent_runner_orchestration_runtime.py [修改]【总结】共同入口每 Issue 解析/验证档位
 │   ├── agent_runner_issue_handlers.py [修改]【总结】认领后 fresh read，正常/恢复接同一档位
 │   ├── agent_runner_publication.py [修改]【总结】确认 PR 后消费标签，清理失败与恢复幂等
-│   └── run_agent_daemon.py [核对/按需修改]【总结】daemon 共享 Issue 级行为，拒绝隔离不影响其他任务
+│   ├── agent_runner_direct_pr_label.py [新增]【总结】统一 fresh 档位、准入、依赖与消费，fallback 选择对象
+│   ├── agent_runner_direct_pr_round.py [新增]【总结】复用 Issue 评论持久化当前轮次、创建前候选与交接检查点
+│   ├── agent_runner_recovery_selection.py [新增]【总结】blocked/running 共用认领与 fresh 选择，cleanup-only 失联时拒绝新工作
+│   ├── agent_runner_publish.py [修改]【总结】创建前证明旧 PR 不存在，创建后确认仓库/Issue/branch/head/marker 关联
+│   ├── recover_publish.py [修改]【总结】已有工作树锁、DIRECT 认领与只补交接恢复
+│   ├── agent_runner_final_verification.py / run_agent_execution_loop.py [修改]【总结】标签来源日志与既有 DIRECT 旁路保持一致
+│   └── run_agent_daemon.py [核对，无修改]【总结】既有 daemon 共享 Issue 编排与拒绝隔离
 ├── src/backend/api/
 │   └── cli_parsed_commands/runner.py [修改]【总结】原 CLI 限制与 core 准入一致，映射冲突错误
 ├── src/backend/infrastructure/
+│   ├── github_issue_ops.py / github_client.py [修改]【总结】可信评论查询失败即阻塞，按当前作者/实际仓库权限筛选检查点
+│   ├── github_pr_ops.py [修改]【总结】DIRECT 严格 PR 上下文查询失败不当成没有历史 PR
 │   ├── github_labels.py [修改]【总结】既有同步机制加入非 workflow 直发标签
 │   └── config/ [按需修改]【总结】既有标签配置加载及序列化同步
+├── config.toml / src/backend/engines/agent_runner/factory_config_{builder,merge}.py [修改]【总结】默认/覆盖配置传播
 ├── src/backend/engines/agent_runner/templates/skills/kedacode-operator/
 │   ├── SKILL.md [修改]【总结】更新 daemon 可消费显式 Issue 直发标记的不变量
 │   ├── references/run-once.md [修改]【总结】标签/旗标解析和判据
@@ -232,7 +242,7 @@ No data model changes in persistent schema. 增加配置字段与 GitHub label�
 - id: rv-1
   behavior: 跨机器语义的 label 被 run/batch/daemon 按 Issue 消费为 DIRECT，准入限制与隔离成立
   reviewer: human
-  presentation: "真实测试 Issue/PR URL 与标签前后截图；混合队列及拒绝矩阵"
+  presentation: "真实测试 Issue/PR URL 与标签前后 fresh API 原始状态；混合队列及拒绝矩阵"
   real_entry: "GitHub 给 ready Issue 加 direct-pr，独立执行进程 kc run 或 kc daemon 发现认领；批量含标记和未标记 Issue"
   expected: "标记任务 DIRECT、保留直发 marker；相邻任务 NORMAL；有 PRD/读取失败/FAST 冲突拒绝且无 builder/建 PR；label 不使非 ready 任务入队"
   mock_boundary: "fallback 可 fake GitHub/agent/process；CLI、实际 daemon 迭代和共同编排必须真实。最终至少一条真实 GitHub daemon/独立进程流程"
@@ -283,7 +293,7 @@ No data model changes in persistent schema. 增加配置字段与 GitHub label�
   negative_control: "not feasible — 人读语义不新增文本强制守卫；配置隔离和状态标签保留用现有测试机制证明"
 ```
 
-矩阵覆盖显式 CLI DIRECT+label、FAST+label 冲突、无标签旧行为、两并发认领者仅赢家执行/消费、fresh read 与队列快照不同、不同仓库同编号隔离、恢复已存在同次 PR 和新轮历史 PR 不匹配。真实截图标 `real user flow`。失败先检查 Issue 级来源、claim 归属、PR 关联或删除 API；负控不修改生产代码制造红灯。
+矩阵覆盖显式 CLI DIRECT+label、FAST+label 冲突、无标签旧行为、两并发认领者仅赢家执行/消费、fresh read 与队列快照不同、不同仓库同编号隔离、恢复已存在同次 PR 和新轮历史 PR 不匹配。本功能不新增 UI；用户已明确不要求证据展示仪式，真实 GitHub API fresh read 提供标签/PR 状态，不以截图冒充浏览器 user flow。失败先检查 Issue 级来源、claim 归属、PR 关联或删除 API；负控不修改生产代码制造红灯。
 
 ### 7.7 Low-Fidelity Prototype
 
@@ -295,13 +305,14 @@ No interactive prototype file changes in this PRD.
 
 ### 7.9 External Validation
 
-No external validation required; repository evidence was sufficient. 外部非原子行为由测试与真实 GitHub fresh read 验证。
+真实 GitHub 私有隔离仓库验证为交付必需；外部非原子故障由持久 adapter 注入，并通过新客户端回读。外部凭据或网络失败不得声明 rv-1 PASS。
 
 ## 8. Delivery Dependencies
 
 - Depends on tasks/issues:
-  - tasks/pending/P1-FEAT-20261007-013031-iar-operator-skill-subcommand-hub.md
-  - tasks/pending/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md
+  - tasks/archive/P1-FEAT-20261007-013031-iar-operator-skill-subcommand-hub.md
+  - tasks/archive/P1-REFACTOR-20261007-013512-rename-product-surface-to-single-new-name.md
+- Merged: PR #233 (`e6f647be`) 与 PR #240 (`8f8642d8`) 已核对主线目标路径。
 - Gate type: hard
 - Sequence: via-main
 - Notes: 合并后采用 kc/kedacode-operator；允许修改 Safety、run 和 daemon references，不改变 hub 分层与安装比对。旧归档 PRD 的 daemon 禁止直发是本功能明确取代的行为边界，不修改其历史记录。
@@ -310,13 +321,13 @@ No external validation required; repository evidence was sufficient. 外部非�
 
 ### 9.1 人读呈递区（Human Review Surface）
 
-交付填写可点真实 URL 和证据相对路径，经 `just prd review <prd-file>` 聚合打开。真实截图在 PRD/报告就地嵌入，附「本地图片，GitHub 上不显示」与仓库根可执行 open 命令；不提交机器绝对路径。完成回复呈递本表。
+交付填写可点真实 URL 和证据相对路径，经 `just prd review <prd-file>` 聚合打开。本期无 UI 改动，按用户授权呈递真实 Issue/PR URL 与 fresh API 文本状态、故障矩阵；不要求 UI 截图，不把 API 证据声明为浏览器 user flow。完成回复呈递链接。
 
 | Oracle | 你要看什么 | 呈递物（交付填） | 自己复核 |
 |---|---|---|---|
-| rv-1 | 标签跨执行器直发、其他任务正常 | [真实 Issue/PR URL、截图、拒绝矩阵] | PR 有原直发声明，未标记任务无旁路 |
-| rv-2 | 成功消费和清理恢复不重复发布 | [标签前后、故障时序与唯一 PR 报告] | 创建失败保留；创建后删除失败下一轮只补清理 |
-| rv-3 | 配置与最终决策协议 | [配置/全文与场景审查入口] | daemon 可消费标记，义务与生命周期准确 |
+| rv-1 | 标签跨执行器直发、其他任务正常 | [CLI PR #5](https://github.com/ZataZhang/keda-direct-probe-20261008-054041-410/pull/5)、[daemon PR #6](https://github.com/ZataZhang/keda-direct-probe-20261008-054041-410/pull/6)、[NORMAL PR #7](https://github.com/ZataZhang/keda-direct-probe-20261008-054041-410/pull/7)、[PRD 拒绝 Issue #4](https://github.com/ZataZhang/keda-direct-probe-20261008-054041-410/issues/4)、[报告](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.evidence-report.md) | PR 有原直发声明，未标记任务无旁路 |
+| rv-2 | 成功消费和清理恢复不重复发布 | [故障矩阵](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.evidence-report.md)、[独立复核](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.verifier-report.md) | 创建失败保留；创建后删除失败下一轮只补清理 |
+| rv-3 | 配置与最终决策协议 | [验证计划](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.verification-plan.md)、[配置与全文审查](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.evidence-report.md) | daemon 可消费标记，义务与生命周期准确 |
 
 通用 lint/test/docs 门禁由 verifier 审查，人不逐项阅读日志。
 
@@ -338,39 +349,41 @@ No external validation required; repository evidence was sufficient. 外部非�
 
 ### Architecture Acceptance
 
-- [ ] core 统一 Issue 级档位与准入，复用 PublishStage/GitHub 端口，无逐入口重复规则。
-- [ ] 复用既有认领与 PR 恢复机制，无 label 锁、独立授权状态机或跨机器数据库。
-- [ ] 四层依赖、文件行数与复用规范符合；新增 config 同步加载/示例。
+- [x] core 统一 Issue 级档位与准入，复用 PublishStage/GitHub 端口，无逐入口重复规则。
+- [x] 复用既有认领与 PR 恢复机制，无 label 锁、独立授权状态机或跨机器数据库。
+- [x] 四层依赖、复用与新增模块行数符合；新增 config 同步加载/示例。历史 handlers 999 / publication 953 非空行的兼容例外与风险见报告。
 
 ### Dependency Acceptance
 
-- [ ] 两前置主线合并与目标路径核对，hub 路由/行数/安装机制保持。
+- [x] 两前置主线合并与目标路径核对，hub 路由/行数/安装机制保持。
 
 ### Behavior Acceptance
 
-- [ ] run/batch/daemon 三入口及 Issue 隔离、fresh read、冲突/PRD/不可读拒绝通过（rv-1）。
-- [ ] 真 GitHub 独立执行进程从标记到 PR 与标签消费通过（rv-1）。
-- [ ] 失败保留、成功移除、崩溃/删除失败恢复和历史 PR 不误消费通过（rv-2）。
-- [ ] 认领赢家才执行/消费，已有 PR 不重复建，其他标签保持（rv-2）。
-- [ ] 原 CLI 单目标限制、无标签 NORMAL、原 DIRECT marker/质量声明兼容。
+- [x] run/batch/daemon 三入口及 Issue 隔离、fresh read、冲突/PRD/不可读拒绝通过（rv-1）。
+- [x] 真 GitHub 独立执行进程从标记到 PR 与标签消费通过（rv-1）。
+- [x] 失败保留、成功移除、崩溃/删除失败恢复和历史 PR 不误消费通过（rv-2）。
+- [x] 认领赢家才执行/消费，已有 PR 不重复建，其他标签保持（rv-2）。
+- [x] 原 CLI 单目标限制、无标签 NORMAL、原 DIRECT marker/质量声明兼容。
 
 ### Documentation Acceptance
 
-- [ ] config、guide、Safety/run/daemon references 同步两档判据与生命周期（rv-3）。
-- [ ] 旧 daemon 一概禁止直发的当前文档已修正；历史归档记录保留。
-- [ ] 沿用原导航，新增文档页才同步 mkdocs.yml。
+- [x] config、guide、Safety/run/daemon references 同步两档判据与生命周期（rv-3）。
+- [x] 旧 daemon 一概禁止直发的当前文档已修正；历史归档记录保留。
+- [x] 沿用原导航，新增文档页才同步 mkdocs.yml。
 
 ### Validation Acceptance
 
-- [ ] 相关 CLI/daemon/labels/claim/publication/recovery 集成与合法负控通过。
-- [ ] `CI=true just test all`、`just lint --full`、`just lint --reuse`、`uv run mkdocs build --strict` 通过。
-- [ ] 无凭据 fallback 不替代真实流程；来源、边界、fresh read、最后相关改动后的最终树证据齐全。
+- [x] 相关 CLI/daemon/labels/claim/publication/recovery 集成与合法负控通过。
+- [x] `CI=true just test all`、`just lint --full`、`just lint --reuse`、`uv run mkdocs build --strict` 通过。
+- [x] 无凭据 fallback 不替代真实流程；来源、边界、fresh read、最后相关改动后的最终树证据齐全。
 
 ### Delivery Readiness
 
-- [ ] 独立 verifier PASS，非人工项证据充分，产品/恢复缺口已解决。
-- [ ] §9.1 实际链接/嵌图/打开方式回填，完成回复呈递。
-- [ ] Final Reconciliation 完成，交付归档；人工空框保留并投影 🧍 待人工验收。
+- [x] 独立 verifier PASS，非人工项证据充分，产品/恢复缺口已解决。
+- [x] §9.1 实际链接/嵌图/打开方式回填，完成回复呈递。
+- [x] Final Reconciliation 完成，交付归档；人工空框保留并投影 🧍 待人工验收。
+
+证据：以上执行侧项目由 [验证报告](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.evidence-report.md)、[独立 verifier PASS](../evidence/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.verifier-report.md) 支持；3578 passed / 1 skipped，全量 lint/reuse/docs 通过。Human-Confirmed 四项保持空框。
 
 ## 10. Functional Requirements
 
@@ -411,11 +424,11 @@ No external validation required; repository evidence was sufficient. 外部非�
 
 ### Final Reconciliation (Archive Only)
 
-- Interpretation: [confirmed / corrected — summary]
-- Public behavior and contracts: [confirmed / corrected — summary]
-- Related PRD status: [confirmed / corrected — summary]
-- Requirements and risks: [confirmed / corrected — summary]
-- Reconciled differences: [none，或正文已修正差异]
+- Interpretation: confirmed — Issue 级 direct-pr label 跨认领端生效；不恢复理由参数、FAST 标签或全局旁路。
+- Public behavior and contracts: confirmed — fresh 准入/依赖、当轮固定档位、确认同次 PR 后消费、仅清理恢复最终 review；原 CLI 和 marker 兼容。
+- Related PRD status: confirmed — 改名与 hub 已主线合并并归档；本 PRD 执行侧完成，四项 Human-Confirmed 待确认。
+- Requirements and risks: confirmed — 评论检查点需可信作者，评论/PR 权威查询失败拒绝；历史 PR、删除假成功及最终 workflow 写失败已覆盖。并发重加标签、手工相同 PR 创建需协调，各认领端须升级重启，recover 需本地干净工作树。
+- Reconciled differences: 最小现有 Issue 评论检查点及严格查询修复已回填正文/影响树/协议；live 混合 daemon 负例曾在认领后中断，最终独立 CLI 实际拒绝补齐，未把中断冒充通过。用户豁免截图呈递，不豁免真实行为取证。
 
 ## Change Log
 
@@ -454,4 +467,20 @@ No external validation required; repository evidence was sufficient. 外部非�
 - Impact: 本期恢复后端功能范围，不恢复理由参数。方案确认不代表实现/最终验收；仅修订本 PRD，沿用原路径保留引用。
 - Review: 待实施。
 
+### 2026-10-08 实现机制与验证呈递校准
+
+- Type: implementation
+- Before: 现有 PR marker/head 与恢复上下文是否足够仍待核对；请求截图，§7.9 错称无需外部验证。
+- After: 复用 Issue 评论及初始认领 ID 保存最小检查点；创建前持久化候选和无历史 PR 基线，创建后绑定 URL，删除后 fresh 回读，再完成 workflow 交接。恢复优先补已发布同轮交接，即使当前正文新增 PRD。fallback 缓存当轮档位，正文与依赖保持 fresh。
+- Reason: 同 head 历史 PR 不能证明新轮发布；PR 响应丢失及标签已删/workflow 未交接都需跨进程证据。用户明确不要求证据展示仪式，本期无 UI 改动，使用真实 GitHub fresh API 状态和文本报告。
+- Impact: 更新影响树、必需真实外部验证与文字呈递；不新增数据库、授权服务、CLI 参数或理由字段，尚未勾选验收。
+- Review: 实现已完成，最终门禁、真实探针与独立 verifier 进行中。
+
 Machine-Contract-Version: 5
+
+### 2026-10-08 执行侧交付归档
+
+- Type: delivery
+- After: 产品 d59ff9cc、指纹 405228cd8106a962071adfd3438b3c4182f9f2c240210ac3ac2a808dfafca704；全量 3578 passed / 1 skipped，真实 GitHub CLI/daemon/对照/PRD 拒绝及独立 verifier PASS。
+- Reason: 所有已确认发布/终态/可信检查点/权威 PR 查询缺陷均修复；证据和最终对账完成。
+- Review: 执行侧完成并归档，Human-Confirmed 四项不代勾，待人工验收。

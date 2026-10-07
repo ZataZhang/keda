@@ -14,6 +14,8 @@ The user says 「挂后台」「让它自己跑」「有个 daemon 在跑吗」�
 ## Execute and never do
 
 - Let work run unattended: `kc daemon run --repo-id <id> --concurrency N` — long-lived process that keeps polling the ready queue. The daemon command group has no `stop` subcommand — stop it with `kc registry stop --repo-id <id>`.
+- Advance one Issue on the direct track without any daemon flag: the daemon never takes `--direct-pr`, but an Issue carrying the configurable `direct-pr` label is resolved to the direct tier by **an upgraded claim winner**, from a fresh read after the claim and per Issue — siblings in the same pass keep their own selected gates. Upgrade/restart all claimant runner processes first; old runners may ignore this label. The chosen tier stays fixed for the execution round, including fallback/recovery. The label chooses a tier only: it does not make an Issue claimable, change priority, or bypass the PRD-anchor refusal.
+- DIRECT bypasses only the publication chain's inline post-PR supervisor. A separately running review-daemon may still review the published Issue under the existing workflow labels; marking DIRECT does not disable that background process.
 - Inspect or manage persistent runner processes: `kc registry start|stop`, `kc registry list`, `kc daemon status`, `kc logs`; see "启动与停止托管 daemon" in `docs/guides/agent-runner.md`. `registry start` launches persistent runner and review-daemon processes by default; `daemon status` and `logs` inspect them, `registry stop` terminates managed processes.
 - Never start a daemon just to *view* progress — that is what the 看进度 route is for.
 
@@ -21,7 +23,8 @@ The user says 「挂后台」「让它自己跑」「有个 daemon 在跑吗」�
 
 - A daemon that should stop: `kc registry stop --repo-id <id>`.
 - Work must be taken over from a live daemon immediately: run `kc run --all-ready --takeover` (add `--yes` in scripts) — destructive: it interrupts **all** of the daemon's in-flight Issues, so require the user's explicit consent first.
+- A labelled Issue keeps its `direct-pr` label after a failed execution or a failed PR creation — that is intentional: the unfinished round retains its DIRECT choice for retry. If the log says the PR was published but the label cleanup is pending, do **not** rerun the work: the next recovery confirms the unfinished publication-round association plus the same repository, Issue, branch, head and `iar:direct-pr` marker, then only completes label/workflow handoff—even after a crash where the label was already removed. An old same-head PR alone cannot consume a new choice. Wait for consumption and handoff before re-adding the label; a concurrent re-add in that window is unsupported.
 
 ## Related
 
-Issue-level failures and retry semantics for work a daemon abandoned are on the 卡住了 route (`${CODEBUDDY_SKILL_DIR}/references/triage.md`).
+For publication-tier decision/validation duties, read `${CODEBUDDY_SKILL_DIR}/references/run-once.md`; Issue-level failures and retry semantics for work a daemon abandoned are on the 卡住了 route (`${CODEBUDDY_SKILL_DIR}/references/triage.md`).

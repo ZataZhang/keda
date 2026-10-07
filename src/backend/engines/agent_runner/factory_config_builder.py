@@ -452,6 +452,7 @@ def build_label_config_from_settings(
         verifier_passed=label_settings.verifier_passed,
         rework_prd=label_settings.rework_prd,
         deliberate=label_settings.deliberate,
+        direct_pr=label_settings.direct_pr,
         agent_labels=agent_labels,
     )
 

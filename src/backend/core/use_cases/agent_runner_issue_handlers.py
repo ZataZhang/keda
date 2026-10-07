@@ -40,6 +40,23 @@ from backend.core.use_cases.agent_runner_blocked_claim import (
     worktree_claim_lock_path,
 )
 from backend.core.use_cases.agent_runner_claim_arbitration import arbitrate_first_claim
+from backend.core.use_cases.agent_runner_direct_pr_label import (
+    PublishStageDecision,
+    PublishStageSelection,
+    PublishStageSelectionRequest,
+    resolve_claim_publish_stage,
+)
+from backend.core.use_cases.agent_runner_direct_pr_round import (
+    DirectPrPublicationCandidate,
+    reset_unstarted_direct_pr_selection,
+)
+from backend.core.use_cases.agent_runner_recovery_selection import (
+    DirectPrHandoffRequest,
+    finish_direct_pr_handoff,
+    admit_claimed_selection,
+    RecoverySelectionRequest,
+    resolve_recovery_selection,
+)
 from backend.core.use_cases.agent_runner_events import (
     find_latest_failure_context_comment,
     has_failure_context_marker,
@@ -56,6 +73,8 @@ from backend.core.use_cases.agent_runner_publication import (
     _finish_existing_commit_publication,
     _finish_implementation_publication,
     _reuse_existing_local_commit,
+    _reuse_local_commit,
+    LocalCommitReuseRequest,
 )
 from backend.core.use_cases.agent_runner_publish import publish_changes
 from backend.core.use_cases.agent_runner_rework import build_missing_worktree_comment
@@ -147,6 +166,25 @@ def _guard_blocked_issue_has_resolution(
     )
 
 
+def _resume_direct_pr_handoff(
+    github_client: IGitHubClient,
+    decision: PublishStageDecision,
+    candidate: DirectPrPublicationCandidate,
+    config: AppConfig,
+) -> bool:
+    """已发布轮次只补标签与 workflow 交接，不启动 builder 或新的门禁。"""
+    return finish_direct_pr_handoff(
+        DirectPrHandoffRequest(
+            github_client,
+            decision,
+            candidate,
+            lambda: transition_issue_workflow_state(
+                github_client, decision.issue.number, config, config.labels.review
+            ),
+        )
+    )
+
+
 def _process_blocked_resolution(
     *,
     issue: IssueSummary,
@@ -160,6 +198,7 @@ def _process_blocked_resolution(
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    stage_selection: PublishStageSelection | None = None,
 ) -> None:
     """处理带 blocked_resolution marker 的 blocked Issue。
 
@@ -206,20 +245,43 @@ def _process_blocked_resolution(
             f"Blocked resolution aborted: on branch {current_branch}, expected {expected_branch}"
         )
 
-    # worktree 必须是 clean 的
-    if has_changes(worktree_path, process_runner):
-        raise RuntimeError(
-            "Blocked resolution aborted: worktree has uncommitted changes. "
-            "Please commit or stash them before continuing."
-        )
-
-    # 再次检查无 forbidden paths
-    validate_safe_changes(worktree_path, config, process_runner)
-
     # 原子锁：防止多个 runner 同时处理同一个 blocked Issue 的 worktree
     lock_path = worktree_claim_lock_path(worktree_path)
     _acquire_blocked_claim_lock(lock_path, issue.number)
     try:
+        stage_decision = resolve_recovery_selection(
+            RecoverySelectionRequest(
+                selection=PublishStageSelectionRequest(
+                    publish_stage, issue, config, github_client, stage_selection
+                ),
+                claim=lambda: arbitrate_first_claim(
+                    issue_number=issue.number,
+                    github_client=github_client,
+                    config=config,
+                    selected_agent=selected_agent,
+                ),
+                candidate=lambda: DirectPrPublicationCandidate(
+                    current_branch, get_head_sha(worktree_path, process_runner)
+                ),
+                handoff=lambda decision, candidate: _resume_direct_pr_handoff(
+                    github_client, decision, candidate, config
+                ),
+            )
+        )
+        if stage_decision is None:
+            return
+        issue = stage_decision.issue
+        publish_stage = stage_decision.publish_stage
+        # worktree 必须是 clean 的
+        if has_changes(worktree_path, process_runner):
+            raise RuntimeError(
+                "Blocked resolution aborted: worktree has uncommitted changes. "
+                "Please commit or stash them before continuing."
+            )
+
+        # 再次检查无 forbidden paths
+        validate_safe_changes(worktree_path, config, process_runner)
+
         # 构建并发送 continuation prompt
         continuation_prompt = build_blocked_continuation_prompt(
             issue, worktree_path, marker.blocked_paths
@@ -253,6 +315,7 @@ def _process_blocked_resolution(
             commit_result=commit_result,
             content_generator=content_generator,
             publish_stage=publish_stage,
+            direct_pr_label=stage_decision.direct_pr_label,
         )
     finally:
         _release_blocked_claim_lock(lock_path)
@@ -538,6 +601,7 @@ def _write_failure_handoff(
 def _process_ready_issue(
     *,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    stage_selection: PublishStageSelection | None = None,
     issue: IssueSummary,
     repo_path: Path,
     config: AppConfig,
@@ -558,8 +622,9 @@ def _process_ready_issue(
     5. 完成发布流程
 
     Args:
-        publish_stage: 发布档位：非 ``NORMAL`` 时 builder 提交后不再重跑
-            rv_reexec、不启动独立 verifier，直接发布带标注的 PR。
+        publish_stage: 调用侧请求的发布档位：非 ``NORMAL`` 时 builder 提交后不再重跑
+            rv_reexec、不启动独立 verifier，直接发布带标注的 PR。Issue 上带直发标签时，
+            认领后的有效档位会被提升到 ``DIRECT``（守护进程与批量因此也能直发）。
         issue: Issue 对象
         repo_path: 仓库根目录
         config: 应用配置
@@ -594,17 +659,41 @@ def _process_ready_issue(
     # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读仲裁确认自己是最早的
     # 认领者之后才把标签切到 running。落败方（ClaimArbitrationLost）不碰标签、
     # 不建 worktree、不起 agent，由派发层按 skip 处理。
-    arbitrate_first_claim(
+    claim_bid = arbitrate_first_claim(
         issue_number=issue.number,
         github_client=github_client,
         config=config,
         selected_agent=selected_agent,
     )
 
+    # 档位决定在认领之后做：只有赢家需要确立档位，落败方（ClaimArbitrationLost 已在
+    # 上面抛出）不会因一次只读解析去碰标签。Issue 上的直发标签把「这次要直发」这个
+    # 选择带给任何认领方，准入规则与 CLI 入口同源于 core。
+    if stage_selection is None or stage_selection.decision is None:
+        reset_unstarted_direct_pr_selection(github_client, issue)
+    stage_decision = resolve_claim_publish_stage(
+        PublishStageSelectionRequest(publish_stage, issue, config, github_client, stage_selection)
+    )
+
     # 步骤 2: 准备 worktree
     worktree_path = create_or_reuse_worktree(repo_path, issue, config, process_runner)
     before_sha = get_head_sha(worktree_path, process_runner)
     expected_branch = get_current_branch(worktree_path, process_runner)
+
+    if _resume_direct_pr_handoff(
+        github_client,
+        stage_decision,
+        DirectPrPublicationCandidate(expected_branch, before_sha),
+        config,
+    ):
+        return
+    admit_claimed_selection(
+        PublishStageSelectionRequest(publish_stage, issue, config, github_client, stage_selection),
+        stage_decision,
+        claim_bid.comment_id,
+    )
+    issue = stage_decision.issue
+    publish_stage = stage_decision.publish_stage
 
     # 步骤 3: 检查恢复路径
     #
@@ -615,7 +704,13 @@ def _process_ready_issue(
     # - 无本地提交 → 全新实现。
     continuation_prompt: str | None = None
     try:
-        commit_result = _reuse_existing_local_commit(issue, worktree_path, config, process_runner)
+        commit_result = (
+            _reuse_local_commit(
+                LocalCommitReuseRequest(issue, worktree_path, config, process_runner, publish_stage)
+            )
+            if publish_stage is PublishStage.DIRECT
+            else _reuse_existing_local_commit(issue, worktree_path, config, process_runner)
+        )
     except (VerificationFailedError, PrdDeliveryError, ValidationEvidenceError) as exc:
         _logger.info(
             "Issue #%d has partial local commits not yet delivery-ready (%s); "
@@ -649,6 +744,7 @@ def _process_ready_issue(
             commit_result=commit_result,
             content_generator=content_generator,
             publish_stage=publish_stage,
+            direct_pr_label=stage_decision.direct_pr_label,
         )
         return
 
@@ -736,6 +832,7 @@ def _process_ready_issue(
         commit_result=new_commit_result,
         content_generator=content_generator,
         publish_stage=publish_stage,
+        direct_pr_label=stage_decision.direct_pr_label,
     )
 
 
@@ -901,6 +998,8 @@ def _process_running_publish_recovery(
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    stage_selection: PublishStageSelection | None = None,
+    cleanup_only: bool = False,
     **kwargs: object,
 ) -> None:
     """恢复 running Issue 的发布流程。
@@ -918,6 +1017,7 @@ def _process_running_publish_recovery(
         content_generator: 可选的 AI 内容生成器
         publish_stage: 发布档位：非 ``NORMAL`` 时跳过发布前的最终 RV / verifier
             复核并在 PR 正文打未验证标注。
+        cleanup_only: 仅补既有 PR 交接；关联失效时拒绝转成普通发布。
     """
     selected_agent = choose_agent(issue, config, agent)
 
@@ -934,8 +1034,40 @@ def _process_running_publish_recovery(
     try:
         _ensure_worktree_branch(worktree_path, expected_branch, issue, config, process_runner)
 
+        # 共享恢复选择先交接已发布轮次，再对新工作应用 fresh 准入。
+        stage_decision = resolve_recovery_selection(
+            RecoverySelectionRequest(
+                selection=PublishStageSelectionRequest(
+                    publish_stage, issue, config, github_client, stage_selection
+                ),
+                claim=lambda: arbitrate_first_claim(
+                    issue_number=issue.number,
+                    github_client=github_client,
+                    config=config,
+                    selected_agent=selected_agent,
+                ),
+                candidate=lambda: DirectPrPublicationCandidate(
+                    expected_branch, get_head_sha(worktree_path, process_runner)
+                ),
+                handoff=lambda decision, candidate: _resume_direct_pr_handoff(
+                    github_client, decision, candidate, config
+                ),
+                cleanup_only=cleanup_only,
+            )
+        )
+        if stage_decision is None:
+            return
+        issue = stage_decision.issue
+        publish_stage = stage_decision.publish_stage
+
         # 检查是否有可复用的本地 commit
-        commit_result = _reuse_existing_local_commit(issue, worktree_path, config, process_runner)
+        commit_result = (
+            _reuse_local_commit(
+                LocalCommitReuseRequest(issue, worktree_path, config, process_runner, publish_stage)
+            )
+            if publish_stage is PublishStage.DIRECT
+            else _reuse_existing_local_commit(issue, worktree_path, config, process_runner)
+        )
         if commit_result is None:
             raise RuntimeError(
                 f"Issue #{issue.number} has no clean local commit ready for publication."
@@ -953,6 +1085,7 @@ def _process_running_publish_recovery(
             commit_result=commit_result,
             content_generator=content_generator,
             publish_stage=publish_stage,
+            direct_pr_label=stage_decision.direct_pr_label,
         )
     finally:
         _release_blocked_claim_lock(lock_path)

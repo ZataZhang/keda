@@ -404,6 +404,8 @@ def test_run_once_git_mv_prd_before_commit(tmp_path: Path) -> None:
     """run_once should git mv a complete pending PRD before staging and committing."""
     fake_client = FakeGitHubClient()
     issue = make_prd_issue("tasks/pending/example.md")
+    # 认领后读取真实正文，队列快照与 fresh API 的 PRD anchor 保持一致。
+    fake_client.set_issue_body(issue.number, issue.body)
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
@@ -521,6 +523,8 @@ def test_run_once_recovers_after_prd_delivery_failure(tmp_path: Path) -> None:
     """run_once should recover when the pending PRD checklist is initially incomplete."""
     fake_client = FakeGitHubClient()
     issue = make_prd_issue("tasks/pending/example.md")
+    # 认领后读取真实正文，队列快照与 fresh API 的 PRD anchor 保持一致。
+    fake_client.set_issue_body(issue.number, issue.body)
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
@@ -694,6 +698,8 @@ def test_run_once_passes_prd_baseline_to_change_log_gate(tmp_path: Path) -> None
     """
     fake_client = FakeGitHubClient()
     issue = make_prd_issue("tasks/pending/example.md")
+    # 认领后读取真实正文，队列快照与 fresh API 的 PRD anchor 保持一致。
+    fake_client.set_issue_body(issue.number, issue.body)
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()

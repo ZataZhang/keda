@@ -374,7 +374,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # 失败分支自然不触发，门禁转移到 PR 上的 CI。
         if publish_stage.skips_review_and_repo_verification:
             _logger.info(
-                "Direct-pr (origin: --direct-pr run flag): skipping runner verification "
+                "Direct-pr track (PublishStage.DIRECT): skipping runner verification "
                 "commands for Issue #%d at attempt %d; CI on the Draft PR is the gate.",
                 issue.number,
                 attempt_index + 1,
@@ -461,7 +461,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         if publish_stage.skips_review_and_repo_verification:
             # 直发档：即使 Issue 正文带了验收段，证据门禁也一并跳过（FR-15）。
             _logger.info(
-                "Direct-pr (origin: --direct-pr run flag): skipping the validation "
+                "Direct-pr track (PublishStage.DIRECT): skipping the validation "
                 "evidence gate for Issue #%d at attempt %d.",
                 issue.number,
                 attempt_index + 1,
@@ -708,22 +708,26 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # Phase 4.5: commit proxy 已固定代码树，先重验 RV，再做独立复验。
         # RED 仍回到同一条 bounded recovery 循环，避免把未提交工作树当作
         # builder SHA 对应的交付物。
-        # 旁路档位：--fast-merge 跳过这两道验证门禁，--direct-pr 同样跳过（其跳过
-        # 范围严格更大）；builder 失败 / 恢复循环照常。跳过必须留一行含旗标来源的审计日志。
+        # 旁路档位：--fast-merge 跳过这两道验证门禁，直发档（CLI 旗标或 Issue 标签）
+        # 同样跳过（其跳过范围严格更大）；builder 失败 / 恢复循环照常。跳过必须留一行
+        # 审计日志，档位来源记在认领时的 publish stage resolution 日志里。
         if publish_stage.skips_independent_verification:
             verifier_verdict = None
-            bypass_label = (
-                ("Fast-merge", "--fast-merge", "fast-track")
+            stage_name, source_note, annotation_name = (
+                ("Fast-merge", "--fast-merge run flag", "fast-track")
                 if publish_stage is PublishStage.FAST
-                else ("Direct-pr", "--direct-pr", "direct")
+                else (
+                    "Direct-pr",
+                    "--direct-pr run flag or the Issue direct-pr label",
+                    "direct",
+                )
             )
-            stage_name, flag_name, annotation_name = bypass_label
             _logger.info(
-                "%s (origin: %s run flag): skipping rv_reexec and verifier gates "
-                "for Issue #%d at attempt %d; the PR will carry the unverified "
-                "%s annotation.",
+                "%s (%s): skipping rv_reexec and verifier gates for Issue #%d at attempt %d; "
+                "the PR will carry the unverified %s annotation, and this Issue's publish "
+                "stage resolution log records which entry point chose the tier.",
                 stage_name,
-                flag_name,
+                source_note,
                 issue.number,
                 attempt_index + 1,
                 annotation_name,

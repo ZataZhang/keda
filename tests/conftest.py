@@ -131,6 +131,8 @@ class FakeGitHubClient(IGitHubClient):
         self._issue_comment_entries: dict[int, list[tuple[int, str]]] = {}
         self._next_comment_id = 1
         self._issue_bodies: dict[int, str] = {}
+        self._issue_get_bodies: dict[int, str] = {}
+        self._get_issue_error: Exception | None = None
         self._pr_bodies: dict[int, str] = {}
         self._pr_comments: dict[int, list[str]] = {}
         self._pr_contexts: dict[str, object | None] = {}
@@ -272,7 +274,18 @@ class FakeGitHubClient(IGitHubClient):
         )
         return []
 
-    def get_pull_request_context(self, branch: str) -> object | None:
+    def get_pull_request_context(
+        self, branch: str, *, require_success: bool = False
+    ) -> object | None:
+        """返回成功读取的 PR fixture；真实查询失败由 adapter 测试覆盖。
+
+        Args:
+            branch: 测试来源分支。
+            require_success: 保留真实端口的严格读取选项。
+
+        Returns:
+            测试上下文；None 代表成功查询后没有 PR。
+        """
         self.calls.append({"method": "get_pull_request_context", "branch": branch})
         return self._pr_contexts.get(branch)
 
@@ -291,14 +304,30 @@ class FakeGitHubClient(IGitHubClient):
         self.calls.append({"method": "list_issue_comments", "issue_number": issue_number})
         return list(self._issue_comments.get(issue_number, []))
 
-    def list_issue_comment_entries(self, issue_number: int) -> list[tuple[int, str]]:
+    def list_issue_comment_entries(
+        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+    ) -> list[tuple[int, str]]:
+        """返回已授权测试 fixture 的评论，权限判定由真实 adapter 测试覆盖。
+
+        Args:
+            issue_number: 测试 Issue 编号。
+            trusted_only: 保留真实端口选项；fixture 评论均视为已授权。
+            body_contains: 可选正文子串筛选。
+
+        Returns:
+            测试存储中的评论 ID 与正文列表。
+        """
         self.calls.append(
             {
                 "method": "list_issue_comment_entries",
                 "issue_number": issue_number,
             }
         )
-        return list(self._issue_comment_entries.get(issue_number, []))
+        return [
+            (comment_id, body)
+            for comment_id, body in self._issue_comment_entries.get(issue_number, [])
+            if body_contains is None or body_contains in body
+        ]
 
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
         self.calls.append({"method": "edit_issue_comment", "comment_id": comment_id, "body": body})
@@ -332,15 +361,33 @@ class FakeGitHubClient(IGitHubClient):
 
     def get_issue(self, issue_number: int) -> IssueSummary:
         self.calls.append({"method": "get_issue", "issue_number": issue_number})
+        if self._get_issue_error is not None:
+            raise self._get_issue_error
         title = self._issue_title if self._issue_title is not None else f"Issue #{issue_number}"
         return IssueSummary(
             number=issue_number,
             title=title,
             url=f"https://github.com/example/repo/issues/{issue_number}",
-            body="",
+            body=self._issue_get_bodies.get(issue_number, ""),
             labels=self._issue_labels.get(issue_number, ()),
             state=self._issue_states.get(issue_number, "OPEN"),
         )
+
+    def set_issue_labels(self, issue_number: int, labels: Sequence[str]) -> None:
+        """注入 Issue 当前标签，不记成 ``edit_issue_labels`` 调用（用于布置初始状态）。"""
+        self._issue_labels[issue_number] = tuple(labels)
+
+    def set_issue_body(self, issue_number: int, body: str) -> None:
+        """注入 ``get_issue`` 读到的正文（PRD 锚点判定的输入）。
+
+        与 ``edit_issue_body`` 分开存：后者记录「客户端被要求改正文」，这里布置的
+        是「GitHub 上当前正文」这一初始状态。
+        """
+        self._issue_get_bodies[issue_number] = body
+
+    def set_get_issue_error(self, error: Exception | None) -> None:
+        """让 ``get_issue`` 抛错，用于 fresh read 的 fail-closed 场景。"""
+        self._get_issue_error = error
 
     def list_issues_by_label(
         self, label: str, limit: int, state: str = "all"

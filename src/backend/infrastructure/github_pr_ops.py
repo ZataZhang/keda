@@ -75,8 +75,22 @@ def create_draft_pr(
     return result.stdout.strip().splitlines()[-1]
 
 
-def get_pull_request_context(client: _ClientProtocol, branch: str) -> PullRequestContext | None:
-    """Return PR context for an open PR on the given branch."""
+def get_pull_request_context(
+    client: _ClientProtocol, branch: str, *, require_success: bool = False
+) -> PullRequestContext | None:
+    """读取开放 PR 上下文，可要求成功查询才能证明 PR 不存在。
+
+    Args:
+        client: 当前仓库的 GitHub CLI 客户端。
+        branch: 要查询的远端 head 分支。
+        require_success: 是否拒绝查询失败、空响应及无法确认身份的返回结构。
+
+    Returns:
+        开放 PR 上下文；成功查询返回空列表时为 None。默认模式保留失败返回 None。
+
+    Raises:
+        RuntimeError: 严格模式不能确认查询成功或返回的 PR 身份。
+    """
     result = client._run_with_retry(
         [
             "gh",
@@ -93,13 +107,42 @@ def get_pull_request_context(client: _ClientProtocol, branch: str) -> PullReques
         check=False,
     )
     if result.return_code != 0:
+        if require_success:
+            raise RuntimeError(f"Cannot establish open PR context for branch {branch}.")
         _logger.warning(
             "Unable to load full PR context for branch %s: %s",
             branch,
             result.stderr.strip() or f"gh exited with status {result.return_code}",
         )
         return None
-    raw_prs = json.loads(result.stdout or "[]")
+    if require_success and not result.stdout.strip():
+        raise RuntimeError("Authoritative PR query returned an empty response.")
+    try:
+        raw_prs = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        if require_success:
+            raise RuntimeError("Authoritative PR query returned malformed JSON.") from exc
+        raise
+    if require_success:
+        if not isinstance(raw_prs, list) or len(raw_prs) > 1:
+            raise RuntimeError("Authoritative PR query returned an ambiguous or invalid list.")
+        if raw_prs:
+            raw_pr = raw_prs[0]
+            if (
+                not isinstance(raw_pr, dict)
+                or not isinstance(raw_pr.get("url"), str)
+                or not raw_pr["url"].startswith("https://")
+                or type(raw_pr.get("number")) is not int
+                or raw_pr["number"] <= 0
+                or raw_pr.get("headRefName") != branch
+                or not isinstance(raw_pr.get("headRefOid"), str)
+                or len(raw_pr["headRefOid"]) != 40
+                or any(
+                    character not in "0123456789abcdefABCDEF" for character in raw_pr["headRefOid"]
+                )
+                or not isinstance(raw_pr.get("body"), str)
+            ):
+                raise RuntimeError("Authoritative PR query returned invalid PR identity metadata.")
     if not raw_prs:
         return None
     raw_pr = raw_prs[0]

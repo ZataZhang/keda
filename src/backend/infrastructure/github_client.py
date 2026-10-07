@@ -282,8 +282,25 @@ class GitHubCliClient:
     def list_issue_comments(self, issue_number: int) -> list[str]:
         return list_issue_comments(self, issue_number)
 
-    def list_issue_comment_entries(self, issue_number: int) -> list[tuple[int, str]]:
-        return list_issue_comment_entries(self, issue_number)
+    def list_issue_comment_entries(
+        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+    ) -> list[tuple[int, str]]:
+        """读取评论，可按正文过滤并只保留可管理 Issue 的作者。
+
+        Args:
+            issue_number: Issue 编号。
+            trusted_only: 是否核验当前作者或当前仓库 triage 及以上权限。
+            body_contains: 可选正文子串过滤，避免对无关作者查询权限。
+
+        Returns:
+            评论 ID 与正文条目。
+
+        Raises:
+            RuntimeError: 可信模式无法确认读取结果或作者权限。
+        """
+        return list_issue_comment_entries(
+            self, issue_number, trusted_only=trusted_only, body_contains=body_contains
+        )
 
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
         edit_issue_comment(self, comment_id, body)
@@ -293,8 +310,22 @@ class GitHubCliClient:
     def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
         return create_draft_pr(self, title=title, body=body, base_branch=base_branch, cwd=cwd)
 
-    def get_pull_request_context(self, branch: str) -> PullRequestContext | None:
-        return get_pull_request_context(self, branch)
+    def get_pull_request_context(
+        self, branch: str, *, require_success: bool = False
+    ) -> PullRequestContext | None:
+        """读取 PR 上下文，可选要求权威成功查询才返回不存在。
+
+        Args:
+            branch: 远端 head 分支。
+            require_success: 是否拒绝查询失败和身份不完整的返回结构。
+
+        Returns:
+            开放 PR 上下文；没有 PR 时为 None。
+
+        Raises:
+            RuntimeError: 严格查询无法证明 PR 状态。
+        """
+        return get_pull_request_context(self, branch, require_success=require_success)
 
     def comment_pr(self, pr_number: int, body: str) -> None:
         comment_pr(self, pr_number, body)

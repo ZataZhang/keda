@@ -65,17 +65,14 @@ def ensure_final_verifier_verdict(request: FinalVerificationRequest) -> Validati
     final_sha = get_head_sha(request.worktree_path, request.process_runner)
     if request.publish_stage.skips_independent_verification:
         # 旁路档位的审计日志：跳过的是验证门禁，不是提交完整性前提（上方 clean-tree
-        # 检查照常），且旗标来源必须可事后追溯。
-        stage_name, flag_name = (
-            ("Fast-merge", "--fast-merge")
-            if request.publish_stage is PublishStage.FAST
-            else ("Direct-pr", "--direct-pr")
-        )
+        # 检查照常）。档位来源可能是 CLI 旗标，也可能是 Issue 上的直发标签，因此这里
+        # 只声明档位，来源记在认领时的 publish stage resolution 日志里。
+        stage_name = "Fast-merge" if request.publish_stage is PublishStage.FAST else "Direct-pr"
         _logger.info(
-            "%s (origin: %s run flag): skipping final RV/verifier "
-            "re-check for Issue #%d at %s; the PR will carry the unverified annotation.",
+            "%s: skipping final RV/verifier re-check for Issue #%d at %s; the PR will "
+            "carry the unverified annotation (see this Issue's publish stage resolution "
+            "log for the origin).",
             stage_name,
-            flag_name,
             request.issue.number,
             final_sha,
         )

@@ -495,6 +495,9 @@ claude = "agent/claude"
 kimi = "agent/kimi"
 rework_prd = "agent/rework-prd"
 deliberate = "agent/deliberate"
+# 直发档选择标签：非 workflow 状态标签，认领后 fresh read 命中即按 DIRECT 执行，
+# 一次成功发布后由认领赢家消费（移除）。改名不影响其语义。
+direct_pr = "direct-pr"
 
 [agent_runner.git]
 remote = "zata"

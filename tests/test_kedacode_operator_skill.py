@@ -394,6 +394,9 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # issue-234：建 issue 子命令说明写明「是否进队列」，示例用到 --ready；--repo
     # 是仓库歧义时的显式目标。均已在真实命令树核对。
     ("issue", "create"): {"--from-prompt", "--require-validation", "--ready", "--repo"},
+    # issue-235：随包 Skill 写明 direct-pr 标签由 `kc labels sync` 建立/改名，
+    # 旗标集合取自 ``kc schema --json`` 的真实命令树。
+    ("labels", "sync"): {"--repo", "--repo-id", "--config", "--all"},
     ("init",): {"--dry-run", "--force"},
     ("registry", "start"): set(),
     ("registry", "stop"): {"--repo-id", "--all"},
@@ -635,6 +638,25 @@ def test_packaged_skill_documents_direct_pr_and_from_prompt_entries() -> None:
     # 从一句话需求开 Issue：正文默认不带 PRD 锚点，验收小节是显式 opt-in。
     assert "`kc issue create --from-prompt" in text
     assert "--require-validation" in text
+
+
+def test_packaged_skill_documents_the_direct_pr_label_protocol() -> None:
+    """issue-235：直发选择放进 Issue 标签后，跨机器的消费协议必须写进随包 Skill。
+
+    断言的是 agent 会据此行动的事实，不是措辞：认领方含 daemon、逐 Issue fresh 读取、
+    非 workflow 标签、赢家在确认同次 PR 后才消费、清理失败只补清理不重复发布。
+    """
+    text = _all_skill_text()
+    assert "`direct-pr` Issue label" in text
+    assert "another machine, a batch pass, the daemon" in text
+    assert "not** a workflow state label" in text
+    assert "at the published head" in text
+    assert "cleanup pending" in text
+    assert "no rebuild, no duplicate PR" in text
+    assert "kc labels sync" in text
+    # 标签不扩大旁路范围：PRD 锚点仍拒绝，FAST 冲突仍明确拒绝。
+    assert "a PRD-anchored Issue is refused before any build or PR" in text
+    assert "usage error instead of a silent upgrade" in text
 
 
 def test_packaged_skill_drops_retired_absolute_claims() -> None:

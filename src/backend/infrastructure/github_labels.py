@@ -10,13 +10,11 @@ focused on connection lifecycle.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol, Sequence
+from collections.abc import Sequence
+from typing import Protocol
 
-from backend.core.shared.models.agent_spec import AgentSpec, BUILTIN_AGENT_SPECS
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS, AgentSpec
 from backend.infrastructure.github_models import LabelConfig
-
-if TYPE_CHECKING:
-    pass
 
 _logger = logging.getLogger(__name__)
 
@@ -58,6 +56,11 @@ _LABEL_SPECS: list[tuple[str, str, str]] = [
         "agent/deliberate",
         "D4C5F9",
         "Issue needs multi-agent deliberation (Phase 0) before implementation.",
+    ),
+    (
+        "direct-pr",
+        "D93F0B",
+        "One-shot DIRECT across claimants; consumed after confirmed Draft PR. Not a workflow state.",
     ),
     (
         "validation/pending",
@@ -112,7 +115,7 @@ def sync_labels(
 ) -> None:
     """Create or update standard labels."""
     label_specs = list(_LABEL_SPECS)
-    for agent_name, label_text in labels.agent_labels.items():
+    for agent_name in labels.agent_labels:
         color, description = _agent_label_meta(agent_name, agent_registry)
         label_specs.append((f"agent/{agent_name}", color, description))
     configured_names = {
@@ -128,10 +131,15 @@ def sync_labels(
         "validation/pending": labels.validation_pending,
         "validation/passed": labels.validation_passed,
         "validation/verifier-passed": labels.verifier_passed,
+        "direct-pr": labels.direct_pr,
     }
     configured_names.update({f"agent/{k}": v for k, v in labels.agent_labels.items()})
     for label_name, color, description in label_specs:
         effective_name = configured_names.get(label_name, label_name)
+        if label_name == "direct-pr":
+            effective_name = effective_name.strip()
+            if not effective_name:
+                continue
         client._run_with_retry(
             [
                 "gh",

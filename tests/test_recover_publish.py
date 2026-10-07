@@ -432,10 +432,8 @@ class TestRecoverPublishIssue:
         assert "Generated body from agent." in pr_create_calls[0]["body"]
         assert "Recovered by issue-agent-runner" not in pr_create_calls[0]["body"]
 
-    def test_success_uses_fallback_title_when_issue_lookup_fails(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Should fallback to issue-number title when get_issue fails."""
+    def test_unreadable_issue_refuses_recovery_before_publish(self, tmp_path: Path) -> None:
+        """读不到当前正文和标签时拒绝恢复，不以旧快照或默认标题继续发布。"""
         config = _make_config(supervisor_enabled=False)
         worktree_path = tmp_path / "issue-42"
         worktree_path.mkdir()
@@ -456,7 +454,7 @@ class TestRecoverPublishIssue:
         github_client = FakeGitHubClient()
         github_client._open_prs["issue-42"] = None
 
-        # Make get_issue raise so recovered_issue becomes None
+        # 读取失败意味着无法确认直发标签和准入条件。
         def _raise_get_issue(issue_number: int) -> None:
             raise RuntimeError("network error")
 
@@ -464,21 +462,16 @@ class TestRecoverPublishIssue:
 
         request = PublishRecoveryRequest(issue_number=42)
 
-        result = recover_publish_issue(
-            request=request,
-            repo_path=tmp_path,
-            config=config,
-            github_client=github_client,
-            process_runner=runner,
-        )
-
-        assert result.issue_number == 42
-
-        pr_create_calls = [c for c in github_client.calls if c["method"] == "create_draft_pr"]
-        assert len(pr_create_calls) == 1
-        assert pr_create_calls[0]["title"] == "[Agent] Issue #42"
-        # Issue 元数据不可得时无法生成正文，退回确定性极简正文。
-        assert pr_create_calls[0]["body"] == "Closes #42\n\nRecovered by issue-agent-runner.\n"
+        with pytest.raises(PublishRecoveryError, match="network error"):
+            recover_publish_issue(
+                request=request,
+                repo_path=tmp_path,
+                config=config,
+                github_client=github_client,
+                process_runner=runner,
+            )
+        assert not any(call["method"] == "create_draft_pr" for call in github_client.calls)
+        assert not any(list(command)[:2] == ["git", "push"] for command in runner.calls)
 
     def test_success_supervisor_enabled_goes_to_supervising(self, tmp_path: Path) -> None:
         """Should move to supervising when supervisor is enabled."""

@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Sequence
+from urllib.parse import quote
 
 from backend.infrastructure.github_helpers import _extract_comment_id_from_url
 from backend.infrastructure.github_models import IssueSummary
@@ -386,34 +387,38 @@ def create_issue(
 
 
 def list_issue_comments(client: _ClientProtocol, issue_number: int) -> list[str]:
-    """Return raw comment bodies for an Issue."""
-    result = client._run_with_retry(
-        [
-            "gh",
-            "issue",
-            "view",
-            str(issue_number),
-            "--comments",
-            "--json",
-            "comments",
-        ],
-        cwd=client.repo_path,
-        check=False,
-    )
-    if result.return_code != 0:
-        return []
-    raw_data = json.loads(result.stdout or "{}")
-    comments = raw_data.get("comments", [])
-    return [str(c.get("body", "")) for c in comments if c.get("body")]
+    """复用评论条目查询，返回非空正文并保留默认尽力读取语义。
+
+    Args:
+        client: 当前仓库的 GitHub CLI 客户端。
+        issue_number: Issue 编号。
+
+    Returns:
+        非空评论正文；查询失败时为列表空值。
+    """
+    return [body for _comment_id, body in list_issue_comment_entries(client, issue_number) if body]
 
 
-def list_issue_comment_entries(client: _ClientProtocol, issue_number: int) -> list[tuple[int, str]]:
-    """Return (comment_id, body) entries for an Issue.
+def list_issue_comment_entries(
+    client: _ClientProtocol,
+    issue_number: int,
+    *,
+    trusted_only: bool = False,
+    body_contains: str | None = None,
+) -> list[tuple[int, str]]:
+    """读取评论 ID 与正文，可选仅返回可授权直发检查点的可信作者。
 
-    The numeric comment ID is parsed from the comment URL so callers can
-    edit comments via the REST API. Comments without a usable URL are
-    included with ``comment_id=0`` so ``list_issue_comments`` semantics are
-    preserved and callers can still see the body.
+    Args:
+        client: 当前仓库的 GitHub CLI 客户端。
+        issue_number: Issue 编号。
+        trusted_only: 为 True 时要求作者是当前调用者或当前仓库有 triage 及以上权限。
+        body_contains: 可选正文子串过滤，在查询作者权限前排除无关评论。
+
+    Returns:
+        按服务端顺序排列的评论 ID 与正文；默认保留原有尽力读取语义。
+
+    Raises:
+        RuntimeError: 可信模式无法读取或确认作者权限、评论身份及元数据。
     """
     result = client._run_with_retry(
         [
@@ -429,14 +434,33 @@ def list_issue_comment_entries(client: _ClientProtocol, issue_number: int) -> li
         check=False,
     )
     if result.return_code != 0:
+        if trusted_only:
+            raise RuntimeError(f"Cannot read trusted Issue #{issue_number} comments.")
         return []
     raw_data = json.loads(result.stdout or "{}")
+    if trusted_only and (
+        not isinstance(raw_data, dict) or not isinstance(raw_data.get("comments"), list)
+    ):
+        raise RuntimeError("Trusted comment query has no complete comments list.")
     comments = raw_data.get("comments", [])
+    author_permissions: dict[str, bool] = {}
     entries: list[tuple[int, str]] = []
     for raw_comment in comments:
+        if body_contains is not None:
+            if not isinstance(raw_comment, dict) or not isinstance(raw_comment.get("body"), str):
+                raise RuntimeError("Filtered comment query has malformed body metadata.")
+            if body_contains not in raw_comment["body"]:
+                continue
+        if trusted_only:
+            if not isinstance(raw_comment, dict):
+                raise RuntimeError("Trusted comment query has malformed comment metadata.")
+            if not _is_trusted_comment_author(client, raw_comment, author_permissions):
+                continue
         url = str(raw_comment.get("url", ""))
         comment_id = _extract_comment_id_from_url(url) or 0
-        body = str(raw_comment.get("body", ""))
+        if trusted_only and (comment_id <= 0 or not isinstance(raw_comment.get("body"), str)):
+            raise RuntimeError("Trusted comment query has invalid comment identity or body.")
+        body = str(raw_comment.get("body", "") or "")
         entries.append((comment_id, body))
     return entries
 
@@ -475,3 +499,58 @@ __all__ = [
     "list_rework_prd_issues",
     "list_review_candidate_issues",
 ]
+
+
+def _is_trusted_comment_author(
+    client: _ClientProtocol, raw_comment: dict, author_permissions: dict[str, bool]
+) -> bool:
+    """使用当前调用者或实时仓库权限，不用 authorAssociation 推断授权。"""
+    viewer_did_author = raw_comment.get("viewerDidAuthor")
+    author = raw_comment.get("author")
+    if type(viewer_did_author) is not bool or not isinstance(author, dict):
+        raise RuntimeError("Trusted comment query has missing author metadata.")
+    login = author.get("login")
+    if not isinstance(login, str) or not login:
+        raise RuntimeError("Trusted comment query has no author login.")
+    if viewer_did_author:
+        return True
+    if login not in author_permissions:
+        author_permissions[login] = _can_manage_repository_issues(client, login)
+    return author_permissions[login]
+
+
+def _can_manage_repository_issues(client: _ClientProtocol, login: str) -> bool:
+    """每次评论查询独立核验其他机器认领者的当前仓库权限。"""
+    owner_repo = client._get_owner_repo()
+    result = client._run_with_retry(
+        ["gh", "api", f"repos/{owner_repo}/collaborators/{quote(login, safe='')}/permission"],
+        cwd=client.repo_path,
+        check=False,
+    )
+    if result.return_code != 0:
+        raise RuntimeError(f"Cannot establish repository permission for comment author {login}.")
+    permission_payload = json.loads(result.stdout or "{}")
+    if not isinstance(permission_payload, dict):
+        raise RuntimeError("Comment author permission query has malformed metadata.")
+    permission = permission_payload.get("permission")
+    role_name = permission_payload.get("role_name")
+    if permission not in ("none", "read", "triage", "write", "maintain", "admin"):
+        raise RuntimeError("Comment author permission query has unknown permission.")
+    user = permission_payload.get("user", {})
+    if not isinstance(user, dict):
+        raise RuntimeError("Comment author permission query has malformed user metadata.")
+    permissions = user.get("permissions", {})
+    if not isinstance(permissions, dict) or any(
+        type(flag) is not bool for flag in permissions.values()
+    ):
+        raise RuntimeError("Comment author permission query has malformed permission flags.")
+    if role_name is not None and not isinstance(role_name, str):
+        raise RuntimeError("Comment author permission query has malformed repository role.")
+    if permission in ("triage", "write", "maintain", "admin") or role_name in (
+        "triage",
+        "write",
+        "maintain",
+        "admin",
+    ):
+        return True
+    return any(permissions.get(flag, False) for flag in ("triage", "push", "maintain", "admin"))
