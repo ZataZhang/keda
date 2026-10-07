@@ -133,7 +133,7 @@ merge_check_timeout_seconds = 1800
 # 是否启用 Realistic Validation 证据门禁
 enabled = true
 # worktree 内证据目录（默认被 info/exclude 排除，不会进入代码 diff）
-evidence_dir = "tasks/evidence"
+evidence_dir = ".iar/evidence"
 # orphan 证据分支前缀
 branch_prefix = "iar-evidence/"
 # 是否逐项检查证据文件格式
