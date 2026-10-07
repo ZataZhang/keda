@@ -12,6 +12,7 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     PostPrSupervisorConfig,
     PullRequestContext,
+    SupervisorActionResult,
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_workflow import workflow_state_labels
@@ -1106,3 +1107,39 @@ def test_resolve_supervisor_agent_precedence() -> None:
     assert resolve_supervisor_agent(issue, AppConfig(), "auto") == "codex"
     # 发布路径传本次实现者作为回落，保持既有行为
     assert resolve_supervisor_agent(issue, AppConfig(), "auto", fallback_agent="pi") == "pi"
+
+
+def test_code_review_repair_queues_when_ci_policy_disabled() -> None:
+    """CI 开关关闭时仍把纯代码审查修复交回运行器。"""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=1, title="T", url="U", body="B", labels=(config.labels.supervising,)
+    )
+    client = FakeGitHubClient()
+    client._issue_labels[1] = issue.labels
+    client._remote_base_sha = "def456"
+    client._issue_comments[1] = [_marker_comment(), "new reviewer finding"]
+    client._pr_contexts["issue-1"] = _make_pr_context(checks_state="SUCCESS")
+    with (
+        patch(
+            "backend.core.use_cases.review_once.create_or_reuse_worktree", return_value=Path(".")
+        ),
+        patch("backend.core.use_cases.review_once.resolve_supervisor_agent", return_value="codex"),
+        patch(
+            "backend.core.use_cases.review_once.run_post_pr_supervisor_cycle",
+            return_value=SupervisorActionResult(
+                action="repair_pr_branch", repair_scope="code_review"
+            ),
+        ),
+    ):
+        outcome = _process_review_candidate(
+            issue=issue,
+            repo_path=Path("."),
+            config=config,
+            agent="auto",
+            github_client=client,
+            process_runner=FakeProcessRunner(),
+        )
+    assert outcome == "queued_repair_pr_branch"
+    assert config.labels.running in client._issue_labels[1]
+    assert any("post_pr_rework_requested" in comment for comment in client.list_issue_comments(1))

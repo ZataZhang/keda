@@ -64,6 +64,31 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   agent_token_usage: "Token 用量",
 };
 
+/**
+ * 状态徽章标签覆盖项（时间线状态徽章的事实源补充）。
+ *
+ * 后端按 event_type 在写入时冻结 `status`，比粗粒度 `phase` 更细，且其取值
+ * 与 event_type 大多同名，因此默认复用 `EVENT_TYPE_LABELS`；仅对需要「状态化」
+ * 区分的少数值在此覆盖，避免与 `EVENT_TYPE_LABELS` 形成大段重复。
+ */
+const STATUS_LABEL_OVERRIDES: Record<string, string> = {
+  // 事件类型「已进入队列」，徽章仍显示排队中（保持既有正确行为）。
+  queued: "排队中",
+  // merged 归入完成态。
+  completed: "已完成",
+  failed: "已失败",
+};
+
+/**
+ * 取得事件语义状态的中文徽章标签。
+ *
+ * @param status - 后端事件语义状态枚举值（与 event_type 大多同名）。
+ * @returns 覆盖表优先命中的标签，否则回落到 `EVENT_TYPE_LABELS`，再否则原样返回。
+ */
+export function eventStatusLabel(status: string): string {
+  return STATUS_LABEL_OVERRIDES[status] ?? EVENT_TYPE_LABELS[status] ?? status;
+}
+
 /** 生命周期 run 结果 -> 中文标签。 */
 const OUTCOME_LABELS: Record<string, string> = {
   completed: "已完成",
@@ -81,6 +106,29 @@ const PHASE_BADGE_VARIANTS: Record<string, BadgeVariant> = {
   failed: "error",
   completed: "ready",
   none: "default",
+};
+
+/** 事件语义状态 -> Badge 变体（配色），取值与 event_type / status 同名。 */
+const STATUS_BADGE_VARIANTS: Record<string, BadgeVariant> = {
+  queued: "default",
+  started: "running",
+  claimed: "supervising",
+  attempt: "running",
+  retry: "warning",
+  recovered: "ready",
+  implementation_completed: "supervising",
+  validation_started: "supervising",
+  validation_passed: "ready",
+  validation_failed: "error",
+  review_started: "review",
+  review_passed: "ready",
+  review_failed: "error",
+  merge_started: "supervising",
+  completed: "ready",
+  archived: "ready",
+  blocked: "blocked",
+  unblocked: "running",
+  failed: "error",
 };
 
 /**
@@ -112,6 +160,16 @@ export function formatLifecycleDuration(seconds: number | null): string {
  */
 export function phaseBadgeVariant(phase: string): BadgeVariant {
   return PHASE_BADGE_VARIANTS[phase] ?? "default";
+}
+
+/**
+ * 取得事件语义状态对应的 Badge 变体。
+ *
+ * @param status - 后端事件语义状态枚举值。
+ * @returns 该状态的 Badge 变体，未知状态回落到 ``default``。
+ */
+export function statusBadgeVariant(status: string): BadgeVariant {
+  return STATUS_BADGE_VARIANTS[status] ?? "default";
 }
 
 /**
@@ -385,30 +443,43 @@ export function PrdLifecycleView({ repoId, prdPath }: { repoId: string; prdPath:
           </p>
         ) : (
           <ol className="divide-y divide-slate-200 dark:divide-slate-800">
-            {orderedEvents.map((event, index) => (
-              <li key={`${event.event_type}-${event.occurred_at}-${index}`}>
-                <button
-                  type="button"
-                  data-testid={`prd-lifecycle-event-${event.event_type}`}
-                  onClick={() => setSelectedEvent(event)}
-                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 py-2 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900"
-                >
-                  <time className="font-mono text-[11px] text-slate-500">
-                    {formatLocalDateTime(event.occurred_at)}
-                  </time>
-                  <span className="font-medium">
-                    {EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}
-                  </span>
-                  <Badge variant={phaseBadgeVariant(event.phase)}>
-                    {PHASE_LABELS[event.phase] ?? event.phase}
-                  </Badge>
-                  <span className="text-xs text-slate-500">{event.actor}</span>
-                  <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-                    {summarizeEventDetail(event)}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {orderedEvents.map((event, index) => {
+              // 状态徽章按事件语义状态渲染；历史行（status 为空）或观测事件
+              // （status=none）回落到既有的粗粒度 phase，保持向后兼容。
+              const statusForBadge =
+                event.status && event.status !== "none" ? event.status : null;
+              const badgeTestId = `prd-lifecycle-event-status-${event.event_type}`;
+              return (
+                <li key={`${event.event_type}-${event.occurred_at}-${index}`}>
+                  <button
+                    type="button"
+                    data-testid={`prd-lifecycle-event-${event.event_type}`}
+                    onClick={() => setSelectedEvent(event)}
+                    className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 py-2 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900"
+                  >
+                    <time className="font-mono text-[11px] text-slate-500">
+                      {formatLocalDateTime(event.occurred_at)}
+                    </time>
+                    <span className="font-medium">
+                      {EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}
+                    </span>
+                    {statusForBadge ? (
+                      <Badge variant={statusBadgeVariant(statusForBadge)} data-testid={badgeTestId}>
+                        {eventStatusLabel(statusForBadge)}
+                      </Badge>
+                    ) : (
+                      <Badge variant={phaseBadgeVariant(event.phase)} data-testid={badgeTestId}>
+                        {PHASE_LABELS[event.phase] ?? event.phase}
+                      </Badge>
+                    )}
+                    <span className="text-xs text-slate-500">{event.actor}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
+                      {summarizeEventDetail(event)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ol>
         )}
       </div>
@@ -502,6 +573,12 @@ function EventDetailRows({
   runId: string | null;
 }) {
   const detailEntries = Object.entries(event.detail ?? {});
+  // 与时间线徽章同一回落规则：status 为空（旧后端响应）或观测事件（none）时
+  // 回落到粗粒度 phase 标签，避免渲染原始枚举（"none"）或空白行。
+  const statusLabelForDrawer =
+    event.status && event.status !== "none"
+      ? eventStatusLabel(event.status)
+      : (PHASE_LABELS[event.phase] ?? event.phase);
   return (
     <dl className="divide-y divide-slate-200 text-sm dark:divide-slate-800">
       {runId ? (
@@ -512,6 +589,7 @@ function EventDetailRows({
       <DetailRow label="事件类型">
         {EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}（{event.event_type}）
       </DetailRow>
+      <DetailRow label="状态">{statusLabelForDrawer}</DetailRow>
       <DetailRow label="阶段">{PHASE_LABELS[event.phase] ?? event.phase}</DetailRow>
       <DetailRow label="执行者">{event.actor}</DetailRow>
       <DetailRow label="发生时间">{formatLocalDateTime(event.occurred_at)}</DetailRow>

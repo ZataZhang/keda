@@ -10,6 +10,7 @@ import pytest
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    GeneratedContentConfig,
     GitConfig,
     RepositoryIdentity,
     RunnerConfig,
@@ -550,6 +551,9 @@ def test_generated_content_targets_default_to_agent_mode() -> None:
     output 错配会让 agent 输出被静默丢弃并退回 template。
     """
     generated_content = AgentRunnerGeneratedContentSettings()
+    assert generated_content.draft_pr.enabled is False
+    assert GeneratedContentConfig().draft_pr.enabled is False
+    assert generated_content.issue_from_prd.enabled is True
     assert AgentRunnerGeneratedContentTargetSettings().mode == "agent"
     assert {
         target_name: (target.mode, target.output)

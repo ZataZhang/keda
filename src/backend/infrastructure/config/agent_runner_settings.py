@@ -806,7 +806,9 @@ class AgentRunnerGeneratedContentSettings(BaseModel):
         default_factory=AgentRunnerGeneratedContentTargetSettings
     )
     draft_pr: AgentRunnerGeneratedContentTargetSettings = Field(
-        default_factory=lambda: AgentRunnerGeneratedContentTargetSettings(output="markdown")
+        default_factory=lambda: AgentRunnerGeneratedContentTargetSettings(
+            enabled=False, output="markdown"
+        )
     )
     prd_from_issue: AgentRunnerGeneratedContentTargetSettings = Field(
         default_factory=lambda: AgentRunnerGeneratedContentTargetSettings(output="markdown")

@@ -630,6 +630,8 @@ Agent command failed for Issue #19; asking agent to recover (1/5).
 
 这一分层修复的目的是把大量常见的 lint/类型错误（如 agent 遗漏 import、简单单测失败）用更短的超时和更聚焦的 prompt 解决，避免动辄调用一次完整的 recovery agent。
 
+默认 Fix/Recovery prompt 先要求定位失败命令与受影响范围，以证据区分环境问题、既有失败和本次回归；先跑最小相关检查修复根因，再执行现有最终门禁。分类不会自动豁免失败或修改测试缓存策略。默认 pre-PR review 要求完整收集 findings 后集中修复；共享 review/supervisor 修复 prompt 要求逐项说明修复或有证据的异议。后续审查聚焦修复与受影响边界，仍核对最终代码树所需的验证与独立证据。自定义 `pre_pr_review.review_prompt_template` 会覆盖默认审查规则，维护方需同步这些约定。
+
 Fix Agent 的每次启动、修复成功、修复失败以及被配置关闭跳过都会写入 runner 日志（`Starting Fix Agent` / `Fix Agent repaired` / `Fix Agent failed` / `Fix Agent disabled`），可以据此统计这一层的实际触发率与成功率，评估是否值得为仓库保留或关闭。
 
 ### 交付收尾层（Closeout Agent）
@@ -990,14 +992,16 @@ uv run kc workflow install preview --force
 
 ## 子进程环境净化（child env sanitize）
 
-runner 派发 agent 子进程时**不会**原样继承父环境：派发点（Claude 流式路径、PTY 路径、`plain` / `pi-json-lines` 协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传。
+凡经 runner **执行层**派发的子进程都不再原样继承父环境：`SubprocessRunner.run()` 的默认档（agent 内容生成的 plain 路径、git/gh/pytest 等工具命令、验证命令）与 agent 流式派发点（Claude 流式路径、PTY 路径、`plain` / `pi-json-lines` 协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传；`env=None` 不再等于「全量继承 `os.environ`」。console 托管 runner 子进程（`process_supervisor.spawn`）与 `iar container up` 传给 docker compose 的环境（`container_ops._build_compose_env`）同样以净化档为基底，会话私有变量不会沿进程谱系下传。
 
 - 名单（8 个，硬编码于 `src/backend/infrastructure/child_env.py`）：`SERVER__PORT` 与 `CODEBUDDY_SERVICE_PROXY_URL`、`CODEBUDDY_SESSION_ID`、`CODEBUDDY_CONVERSATION_REQUEST_ID`、`CODEBUDDY_ROOT_REQUEST_ID`、`CODEBUDDY_CONVERSATION_MESSAGE_ID`、`CODEBUDDY_PROJECT_DIR`、`CODEBUDDY_CURRENT_MODEL_ID`
-- 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，20 分钟后被 inactivity watchdog 杀掉，见 2026-09-28 Issue #156 事故）
-- 每剔除一个变量，runner 日志记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值）；若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
-- 因此**从交互式 AI 会话的 shell 里直接启动 `kc run` / `kc review` 是安全的**，无需手工 `env -u SERVER__PORT`
-- git、gh、pytest 等工具命令类子进程与 console 守护子进程不在此净化范围内
-- 守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 保证新增的 agent 派发点必须接入净化环境
+- 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，最终被 inactivity/timeout watchdog 杀掉，见 2026-09-28 Issue #156 事故）
+- 为什么默认档也要净化：2026-10-07 Issue #229 事故确认，内容生成路径（`kc issue create --from-prompt` 派发的 `codebuddy -p ...`）走 `SubprocessRunner.run()` 且不传环境，当时的默认「全量继承」让 `SERVER__PORT` 原样透传，Issue 正文退化为模板渲染（修复：Issue #230）。环境构造收敛到 `run()` 一处后，**新增 denylist 变量无需改动任何执行层调用点**
+- 已知例外（不经执行层的直接调用）：`core/use_cases/agent_runner_prd_activity.py` 的 PRD 活动锁命令（`git worktree list`、`scripts/shared/just/prd_lock.py`）与 `core/shared/prd_contract_client.py` 的 `prd_contract.py` 调用仍直接 `subprocess.run`，完整继承 `os.environ`。这三处都不监听端口，今日不会复现 `SERVER__PORT` 事故，但「新增名单变量无需改动调用点」只对上面列出的执行层路径成立；把它们接入执行层要改 core 的注入签名（core 不得直接 import infrastructure），动之前按 Issue #230 的口径重新审计
+- 剔除按变量名去重告警：某变量在本进程内**首次**被剔除时记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值），之后同一变量再被剔除只记 DEBUG——默认档净化覆盖每一次 `SubprocessRunner.run()`，工具命令单轮可达数十次，逐次 WARNING 会把这条排障信号淹掉。若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
+- 因此**从交互式 AI 会话的 shell 里直接启动 `kc run` / `kc review` / `kc issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
+- 白名单档（浏览器 E2E 验证子进程）的 fail-fast 前提校验不因默认档净化而改变：前提不成立时依旧报错，绝不静默回退到任何继承形态
+- 净化约定分两层守护：默认档「`run()` 一处构造、全分支透传」由 `tests/test_process_runner.py` 直接断言；守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 只钉住可以被 `run()` **之外直接调用**的派发点（`run_filtered_claude_stream`、`_run_pty_stream` 与 `output_protocols/` 全目录），新增这类派发点必须自行接入净化环境。Issue #230 之前「工具命令路径不净化」的旧约定已废止
 
 ## 浏览器 E2E 验证命令形态（browser_e2e）
 
@@ -1468,7 +1472,8 @@ kc logs --repo-id keda-main --issue 42 --follow
 - 首次输出给**尾部窗口**（默认最近 64 KiB，再按 `--lines` 截行），不会从头倾泻整份日志；之后按字节偏移增量续读。
 - 默认跟随该 Issue 的**最新尝试**；重试产生新文件时 CLI 会提示并切换。
 - Issue 尚未开始、日志已清理或仓库未注册时，显示明确的空态 / 不可用提示，不会回退到别的 Issue 或进程日志。
-- 单次 `kc run`（串行）与并行 daemon 使用同一归属规则；原启动终端的可读输出不受影响。
+- 单次 `kc run`（串行）与并行 daemon 使用同一归属规则；串行时启动终端收到的就是这条 per-Issue 流的镜像，因此**同样带行首时间戳**——与未经路由时终端实时视图的显示一致（TTY 与重定向都一样），不是「无前缀的原始输出」。
+- Agent 流式输出的每个物理行在写入 per-Issue 日志、实时看板与前台镜像时带 `[HH:MM:SS]` 行首时间戳，可与心跳行的完整日期时间前缀对照时间线。时间戳由**输出路由 sink** 统一添加（`core/use_cases/agent_runner_output_routing.py`）：agent 生产者交给 sink 的始终是可读原文，所以合议的 `workspaces/**/*.md` 等原文产物不会被塞进时间线。文本增量只在行首加一次时间戳，不会切断同一行；`[iar-attempt-end]` 终态标记不经 sink，保持裸行，`--follow` 仍能精确匹配它。
 
 `kc daemon` 本身继续作为启动 daemon 的快捷命令，等效于 `kc daemon run`。例如：
 
@@ -1907,6 +1912,9 @@ kc run --all --all-ready
 # Daemon 模式（默认每 120 秒轮询一次，仅当前已初始化注册仓库；加 --all 才处理所有 enabled registry entries）
 kc daemon
 
+# 手动驱动一次 backlog 调度（一次 continuous-scheduling pass：reconcile + promote + discover，不用等 daemon 轮询）
+iar backlog advance
+
 # 单次 review 检查
 kc review
 
@@ -2148,8 +2156,8 @@ kc daemon --concurrency 3
 
 并行时多个 agent 的输出若都打到同一个终端会交错成乱码，因此 runner 会按 Issue 分流：
 
-- **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。
-- **实时看板**（前台 TTY）：在交互终端直接 `kc daemon --concurrency 3` 时，会显示一个仿 `kc deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`kc registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。
+- **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。agent 流式输出的每行行首带 `[HH:MM:SS]` 时间戳，与心跳行的时间前缀对得上。
+- **实时看板**（前台 TTY）：在交互终端直接 `kc daemon --concurrency 3` 时，会显示一个仿 `kc deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`kc registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。看板与纯文本视图收到的都是路由 sink 那份文本，因此每行顺序是 `[issue #N status=...] [HH:MM:SS] 原文`。
 - **按 Issue 从第二终端 / Console 查看**：`kc logs --repo-id <repo> --issue <N> [--follow]` 或 Console 的 PRD 详情「实时输出」标签，都读取同一份 per-Issue 日志文件；单次 `kc run`（串行）也走同一路径，只是不显示多列看板。
 
 ### 进度落盘与跨 claim 续作（checkpoint）
@@ -2807,7 +2815,7 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
 
 - `mode = "agent"`（**默认**）：用 `.format()` 渲染配置的 `prompt`，调用本地只读 agent，解析输出。
   `kc issue create`（从 PRD）、`kc issue create --from-prompt`（无 PRD）、开 Draft PR、rework-prd
-  四处因此默认都会调一次 agent（超时上限
+  其中 Draft PR 正文默认 `draft_pr.enabled = false`，直接使用确定性正文；其余三处默认调一次 agent（超时上限
   `timeout_seconds`，默认 120 秒）。
 - `mode = "template"`（**已废弃**）：跳过 agent，直接用 `.format()` 渲染 `title_template` 和
   `body_template`。仍被接受，但将在后续版本移除；模板的长期用途是下面的失败兜底。
@@ -2833,7 +2841,15 @@ Issue 创建或 PR 发布，而是按下面的顺序落到下一级，并各记�
 1. agent 生成的内容；
 2. `fallback = "template"`（目前唯一支持的值）时，渲染 `title_template` / `body_template`；
 3. 调用方内置的确定性文案（Issue 用 PRD 派生的标题与正文；PR 用
-   `Closes #N` + `Generated by issue-agent-runner.`）。
+   `Closes #N` + Summary / Validation / Risk / Reviewer Notes，包含提交日志、diff stat、发布 HEAD 与发布 HEAD 中已提交的验证计划/证据报告/verifier 报告链接）。
+
+Draft PR 默认不等待 AI 生成。需要 AI 撰写时显式设置
+`[agent_runner.generated_content.draft_pr] enabled = true`；既有显式开启的配置继续生效，
+不会自动迁移。历史配置如果只写了 `agent` / `prompt` 或自定义模板、未显式设置
+`enabled`，升级后会继承关闭 AI 生成的默认值并使用内置事实正文；如需恢复之前的
+AI 或模板生成路径，请显式设置 `enabled = true`。关闭仅影响 PR 标题/正文生成，不改变测试、review、verifier 或合并门禁。
+确定性正文只引用已有事实，不推断 PASS，不替人勾选验收。链接报告的 Git tree 必须由 reviewer 核对；
+未在发布 HEAD 中找到报告时明确披露缺失。自定义 `body_template` 仍被尊重，未配置时用完整内置正文。
 
 ### Issue 生成变量
 
@@ -3439,14 +3455,39 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 ## Agent Runner 统一管理终端（Operations Console）
 
-管理终端把多项目的 Agent Runner 运维收敛到一个 Web 界面，四个页面：
+管理终端把多项目的 Agent Runner 运维收敛到一个 Web 界面，页面：
 
 | 页面 | 路由 | 能力 |
 |---|---|---|
-| 总览 | `/app/dashboard` | 队列监控（原有）+ 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
+| Backlog | `/app/backlog` | **首屏落点**。左侧受管理仓库栏 + 右侧当前仓库的 PRD 队列（依赖图 / 时间轴 / 列表三视图） |
+| 总览 | `/app/dashboard` | 队列监控 + 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
 | 进程 | `/app/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
 | 统计 | `/app/stats` | 实时完成度（GitHub 口径）+ 历史趋势与最近运行记录（本地 SQLite 口径） |
 | 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
+| 想法 | `/app/ideas` | 跨项目想法采集、AI 总结、PRD 草稿人审 |
+
+### 首屏默认仓库（当前项目）
+
+管理终端是多仓库面板，但在哪个仓库目录敲 `iar console`，打开就应该落在**那个
+仓库**上，而不是 registry 声明顺序最靠前的那个。首屏选仓库的优先级：
+
+1. **console 进程 cwd 匹配到的仓库** —— 后端把 cwd 归一到 git 仓库根，再去
+   registry 匹配；只有唯一命中且启用的条目才算数。在 `~/code/keda` 敲
+   `iar console` 就选中 `keda`，`cd` 到别的仓库再敲就切到那个仓库。
+2. **上次手动选择的仓库**（localStorage `iar.console.lastRepoId`）—— cwd 不在
+   git 仓库内、或所在仓库没登记进 registry 时的记忆兜底。
+3. **registry 里第一个启用的条目** —— 以上都拿不到时的最终兜底。
+
+落在 enabled 列表之外的候选一律忽略：停用或已移出 registry 的仓库不会成为首屏
+默认目标。
+
+后端侧推断在 `backend.core.use_cases.console_context.resolve_console_context`，
+经`GET /api/v1/agent-runner/console/context` 暴露；前端侧三个带仓库选择的页面
+（Backlog / 进程 / 想法）共用 `frontend-public/lib/console-repository-selection.ts`
+的 `useRepositorySelection`，不再各自实现一套优先级。
+
+该端点用 `status` 字段表达落空原因（`not_git_repo` / `not_registered` /
+`disabled` / `ambiguous`），**不返回 4xx** —— cwd 匹配不上是正常状态，不是故障。
 
 ### 启动方式（`kc console`）
 
@@ -3471,6 +3512,8 @@ kc console --no-browser
   再把 `frontend-public/out/` 复制到 `src/backend/api/static/console/`；
   或直接沿用 `just run` / `pnpm --filter frontend-public dev` 的开发双端口。
 - 面板与 API 同源，开发代理仅在 `frontend-public dev` 模式生效。
+- 改后端路由后必须**重启** `iar console` 才生效；`just console-sync` 只替换
+  静态前端产物，不重载后端代码。
 
 ### 信任边界与白名单动作
 
@@ -3567,6 +3610,22 @@ validation_started | validation_passed | validation_failed | review_started |
 review_passed | review_failed | merge_started | merged | archived | blocked |
 unblocked | failed | agent_token_usage`。
 
+**`status` 闭集（事件语义状态，时间线状态徽章的事实源）**：
+每条事件在**写入时**按当时 `event_type` 冻结一个 `status`，落 `prd_lifecycle_events`
+的 `status` 列（schema v8 追加，非空默认空串）。它与粗粒度 `phase` 分工不同：`phase`
+只用于耗时归属与「当前阶段」推导，会把 `started / claimed / attempt / retry / recovered`
+一并塌缩成 `executing`；`status` 保留每行「当时发生了什么」的可区分语义，避免
+「开始执行」与「已被领取」在时间线上都显示「执行中」。闭集为
+`none | queued | started | claimed | attempt | retry | recovered |
+implementation_completed | validation_started | validation_passed | validation_failed |
+review_started | review_passed | review_failed | merge_started | completed | archived |
+blocked | unblocked | failed`，其中 `merged` 收成 `completed`（已完成）、`archived`
+保留「已归档」、「已进入队列」保持既有的「排队中」显示。观测类 `agent_token_usage`
+记为 `none`，前端据此不渲染误导徽章。v8 之前的历史行 `status` 为空串，序列化时回落
+按 `event_type` 派生（`status_for_event_type`），**绝不取 run 的当前状态**——否则
+历史事件会失去当时语义。`frontend-public` 的 Backlog「执行过程」标签据此渲染逐行
+状态徽章，抽屉「状态」行同源。
+
 **Token 用量统计（agent_token_usage 观测维度）**
 
 每次 agent 子进程调用的官方 usage（claude stream-json 的 `result.usage`）
@@ -3597,7 +3656,8 @@ GET /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
     单 PRD 明细：repo_id / prd_path / run_id / issue_number / trigger /
     current_phase / in_progress / outcome / history_complete / started_at /
     finished_at / durations{end_to_end_seconds, active_seconds,
-    waiting_seconds, blocked_seconds} / events[] / has_data
+    waiting_seconds, blocked_seconds} / events[]（每条含 event_type / phase /
+    status / actor / occurred_at / detail，status 为逐行状态徽章事实源）/ has_data
 
 GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
     仓库级统计：completed_runs / average_end_to_end_seconds /
@@ -4136,6 +4196,8 @@ uv run kc backlog advance --repo <repo-id>
 - **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- iar:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
 - **最终生效值**由服务端按 `显式 on/off ?? fresh 全局值` 计算（`on → true`、`off → false`、`inherit → 全局值`），API/CLI 只回显，前端不得自行推断。
 
+Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 可正常交回 executor，避免 CI 全绿时仍因 CI 自动修复关闭而滞留。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。Supervisor 评论回显范围，便于核对实际政策。
+
 #### 多轮修复与重入去重
 
 Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；推送新 head 后重新等待 checks，允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求（daemon 重入、页面重试、手动/自动路径）幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。
@@ -4367,6 +4429,7 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 | worktree 属主变 root | `RUNNER_UID`/`RUNNER_GID` 未对齐宿主 | `id -u` / `id -g` 与 `.env.local` 校对 |
 | `kc container up` 拒绝启动 | 同 repo_id 的本机 daemon 已活 | `kc daemon stop --repo-id <id>` 后重试 |
 | `kc run --dry-run` 在容器内失败 | 挂载仓库未 `kc init` | 进容器：`docker compose exec iar-runner kc init` |
+| 目标仓库缺失 `agent/*` 标签：`kc` 无法识别可执行 Issue、贴不上目标状态标签，典型表现是 `gh issue edit` 报 label 不存在、Issue 卡在无法流转的状态 | 该仓库从未运行过 `kc labels sync`，或仓库初始化时间早于某些后加的标签（例如 `agent/rework-prd`） | 在目标仓库运行 `kc labels sync` 补齐缺失的 `agent/*` 标签（幂等，可重复执行；仓库根需已有有效 `.kedacode.toml`，否则先 `kc init`） |
 
 ### 架构边界
 

@@ -12,7 +12,11 @@ imports), so the layering rule ``core -> engines -> infrastructure`` holds:
   routes the agent stream without adding a parameter to every function.
 - :func:`issue_output_routing` opens the per-Issue log file, builds the sink
   (file + live-view panel) and installs a thread-scoped logging handler so the
-  worker thread's ``_logger`` lines also land in that Issue's file.
+  worker thread's ``_logger`` lines also land in that Issue's file. The sink is
+  also the **only** place that adds the ``[HH:MM:SS]`` line timestamp (Issue
+  #223): producers hand it readable raw text, so the per-Issue file, the live
+  board and the serial terminal mirror all show the same timeline while the
+  deliberation workspace files — fed by the same producers — stay clean.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
+from backend.core.shared.interfaces.output_timestamps import TimestampedStreamFormatter
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
@@ -157,25 +162,34 @@ def issue_output_routing(
     thread id), so the file holds both the agent stream and the worker
     narrative. The handler and file are torn down on exit.
 
+    该 sink 是行首 ``[HH:MM:SS]`` 时间戳的唯一落点（Issue #223）：生产者传入
+    的仍是可读原文，前缀在这里加上后再分发给日志文件、看板与前台镜像，三个
+    消费端因此逐行一致。日志末尾的 ``[iar-attempt-end]`` 终态标记由 writer
+    直接写入，不经 sink，因此保持裸行、可被 ``--follow`` 精确匹配。
+
     Args:
         repo_id: Repository identifier (log subdirectory).
         issue_number: Issue number (log filename + panel key).
         log_base: Base directory for logs (typically ``<repo_path>/logs``).
         output_view: Live view receiving each chunk for the Issue's panel.
         console_sink: 可选的「原终端镜像」回调。串行 ``kc run`` 传入它，
-            让 sink 同时把可读文本写回启动终端（保持原有前台输出），并行
-            daemon 则保持 ``None``（面板已承担展示）。只传**可读文本**，
-            避免 Rich 控制字符污染日志文件。
+            让 sink 将同一份（带行首时间戳的）文本写回启动终端，与未经路由
+            时的终端实时视图逐行一致；并行 daemon 则保持 ``None``（面板已承担
+            展示）。只传**可读文本**，避免 Rich 控制字符污染日志文件。
     """
     file_path = per_issue_log_path(log_base, repo_id, issue_number)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     writer = _IssueLogWriter(file_path)
+    # 每次尝试一个 formatter：碎片可能在任意位置切断，状态机保证时间戳只
+    # 落在物理行首；作用域结束即丢弃，不会把上一行的状态漏到下一份日志。
+    line_timestamps = TimestampedStreamFormatter()
 
     def sink(chunk: str) -> None:
-        writer.write(chunk)
-        output_view.append(issue_number, chunk)
+        timestamped_chunk = line_timestamps.format_chunk(chunk)
+        writer.write(timestamped_chunk)
+        output_view.append(issue_number, timestamped_chunk)
         if console_sink is not None:
-            console_sink(chunk)
+            console_sink(timestamped_chunk)
 
     handler = logging.StreamHandler(stream=writer)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))

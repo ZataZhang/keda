@@ -719,6 +719,7 @@ def test_generated_content_scaffold_example_is_valid_repository_config() -> None
     assert example_settings.generated_content is not None
     # 嵌套 target 模型忽略未知键，所以要看显式设置的字段集合才能发现改名。
     assert example_settings.generated_content.draft_pr.model_fields_set == {
+        "enabled",
         "agent",
         "timeout_seconds",
     }

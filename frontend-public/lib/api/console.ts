@@ -10,6 +10,7 @@ import type {
   AuditEntry,
   BatchAddRepositoriesResult,
   ConsoleActionResult,
+  ConsoleContext,
   DailyRunTrendEntry,
   DirectoryBrowseResult,
   DiscoveredRepositoryEntry,
@@ -214,6 +215,16 @@ export async function updateMonitorSettings(params: {
 }
 
 // ── 仓库 registry 管理 ──────────────────────────────────────────────────────
+
+/**
+ * 读取 console 进程 cwd 匹配到的 registry 仓库。
+ *
+ * 面板首屏默认仓库的事实来源：在哪个仓库目录敲 `iar console` 就优先选中哪个
+ * 仓库。cwd 匹配不上是正常状态，由返回值的 `status` 表达而非报错。
+ */
+export async function fetchConsoleContext(): Promise<ConsoleContext> {
+  return get<ConsoleContext>(`${BASE_PATH}/console/context`);
+}
 
 export async function fetchRegistryRepositories(): Promise<
   RegistryRepositoryEntry[]

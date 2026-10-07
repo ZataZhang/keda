@@ -23,6 +23,9 @@ from backend.core.use_cases.agent_candidate_fallback import build_agent_candidat
 from backend.core.use_cases.agent_review_comment import (
     build_pre_pr_review_result_comment,
 )
+from backend.core.use_cases.agent_review_prompts import (
+    DEFAULT_REVIEW_PROMPT_TEMPLATE as DEFAULT_REVIEW_PROMPT_TEMPLATE,
+)
 from backend.core.use_cases.agent_review_repair import (
     COMMIT_REQUEST_RELATIVE_PATH,
     build_commit_request_reminder_prompt,
@@ -55,45 +58,6 @@ from backend.core.use_cases.run_agent_once import (
 _logger = logging.getLogger(__name__)
 
 _VALID_REVIEW_VERDICTS = {"approved", "changes_requested"}
-
-# Default review rules appended after the review packet. The default instructs
-# the reviewer to invoke the ``code-reviewer`` skill via the Skill tool and to
-# emit structured findings so the runner can converge automatically.
-DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
-    "Before writing your verdict, call the `code-reviewer` skill using the Skill tool "
-    "with the diff and PRD context above.",
-    "Use the skill's findings to populate the `findings` array in your response.",
-    "If the skill reports no findings, verdict must be `approved`.",
-    "If findings exist, apply fixes in the worktree and write "
-    "`.agent-runner/commit-request.json` with a descriptive `commit_message`.",
-    "Do not leave findings unaddressed while returning `approved`.",
-    "",
-    "CRITICAL: The `code-reviewer` skill's Chinese text report is input for your "
-    "judgment, NOT your final answer to the runner. After calling the skill, you "
-    "MUST still produce a final ```json code block with the verdict/summary/findings "
-    "schema below. The runner parses only that JSON block; without it the review "
-    "fails with 'no parseable verdict'.",
-    "",
-    "Findings JSON schema:",
-    "```json",
-    "[",
-    "  {",
-    '    "category": "requirement|code|validation|docs",',
-    '    "severity": "critical|high|medium|low",',
-    '    "file": "path/to/file.py",',
-    '    "line": 42,',
-    '    "title": "short title",',
-    '    "description": "why this is a problem",',
-    '    "recommendation": "how to fix"',
-    "  }",
-    "]",
-    "```",
-    "",
-    "Final response must be a single JSON object in a markdown code block with:",
-    "- verdict: one of `approved`, `changes_requested`.",
-    "- summary: short rationale.",
-    "- findings: array of objects matching the schema above (may be empty).",
-)
 
 
 @dataclass(frozen=True)

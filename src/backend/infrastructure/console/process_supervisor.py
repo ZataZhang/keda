@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from backend.infrastructure.child_env import build_sanitized_child_env
+
 _logger = logging.getLogger(__name__)
 
 try:
@@ -299,9 +301,8 @@ class PidfileProcessSupervisor:
         log_directory.mkdir(parents=True, exist_ok=True)
         log_path = log_directory / f"{kind_value}-{process_id}.log"
 
-        # CONSOLE 标记让子进程把运行记录的 trigger 记为 console_*。子进程可能是
-        # 旧版本程序或用户的旧脚本，因此新旧两个环境变量名同时注入。
-        child_env = dict(os.environ)
+        # CONSOLE 标记保持新旧变量兼容，基底使用净化档，避免会话私有变量下传。
+        child_env = build_sanitized_child_env()
         child_env.update(product_identity.build_child_env_aliases({"CONSOLE": "1"}))
         # 托管子进程的 cwd 是目标仓库（见 ``resolve_console_spawn_cwd``），若让它
         # 自行按 cwd 解析配置，会撞上该仓库自己的应用级 ``config.toml``，把机器级

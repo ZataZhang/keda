@@ -13,7 +13,6 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -24,6 +23,10 @@ from backend.core.shared.interfaces.agent_output_protocol import (
 from backend.core.shared.interfaces.agent_runner import (
     AGENT_SESSION_ID_ATTR_NAME,
     E2E_CHILD_ENV_PROFILE,
+)
+from backend.core.shared.interfaces.output_timestamps import (
+    TimestampedStreamFormatter,
+    format_timestamped_line,
 )
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import TokenUsage
@@ -143,48 +146,6 @@ def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
         pass
 
 
-def _format_timestamped_line(text: str) -> str:
-    """Prefix each line with HH:MM:SS timestamp.
-
-    Args:
-        text: The text to prefix with timestamps.
-
-    Returns:
-        Text with each line prefixed by [HH:MM:SS].
-    """
-    ts = datetime.now().strftime("%H:%M:%S")
-    lines = text.split("\n")
-    result: list[str] = []
-    for idx, line in enumerate(lines):
-        prefix = f"[{ts}] " if line else ""
-        if idx == len(lines) - 1:
-            result.append(f"{prefix}{line}")
-        else:
-            result.append(f"{prefix}{line}\n")
-    return "".join(result)
-
-
-class _TimestampedStreamFormatter:
-    """Prefix non-empty output lines while preserving streaming chunks."""
-
-    def __init__(self) -> None:
-        self._at_line_start = True
-
-    def format_chunk(self, text: str) -> str:
-        """Return ``text`` with timestamps only at physical line starts."""
-        if not text:
-            return ""
-        result: list[str] = []
-        for character in text:
-            if self._at_line_start and character != "\n":
-                result.append(f"[{datetime.now().strftime('%H:%M:%S')}] ")
-                self._at_line_start = False
-            result.append(character)
-            if character == "\n":
-                self._at_line_start = True
-        return "".join(result)
-
-
 @dataclass(frozen=True)
 class CommandResult:
     """Captured subprocess result.
@@ -292,25 +253,31 @@ class SubprocessRunner:
                 流式协议（当前 ``claude-stream-json``）路由到对应的流式
                 渲染执行器，取代旧版对命令行内容的嗅探；``None`` /
                 ``"plain"`` 走通用路径。
-            env_profile: 子进程环境变量档名。``None``（默认）保持原有的
-                环境继承行为逐字段不变；``E2E_CHILD_ENV_PROFILE`` 时按
-                child_env 白名单构造子进程环境（runner 凭据不可见），
-                并要求 ``capture_output=True`` 且 ``timeout`` 非空、
-                ``output_protocol`` 为 plain——否则白名单+进程树击杀的
-                安全前提不成立，直接报错而非静默降级。
+            env_profile: 子进程环境变量档名。``None``（默认）走 denylist
+                净化档：以 :func:`build_sanitized_child_env` 组装子进程
+                环境——剔除会话私有变量（如 ``SERVER__PORT``），其余变量
+                原样透传；默认档不存在「全量继承 os.environ」的语义
+                （Issue #230：内容生成路径曾因全量继承被会话私有变量中毒）。
+                ``E2E_CHILD_ENV_PROFILE`` 时按 child_env 白名单构造子进程
+                环境（runner 凭据不可见），并要求 ``capture_output=True``
+                且 ``timeout`` 非空、``output_protocol`` 为 plain——否则
+                白名单+进程树击杀的安全前提不成立，直接报错而非静默降级。
             env_allow_extra: E2E 档下追加放行的变量名（配置 ``env_allow``）。
         """
         command = _with_available_own_command(command)
         started_mono: float = time.monotonic()
-        child_env: dict[str, str] | None = None
         if env_profile is not None:
-            child_env = _resolve_profiled_child_env(
+            child_env: dict[str, str] = _resolve_profiled_child_env(
                 env_profile,
                 env_allow_extra,
                 capture_output=capture_output,
                 timeout=timeout,
                 output_protocol=output_protocol,
             )
+        else:
+            # 默认档也净化：env 构造收敛在本方法一处，新增 denylist 变量
+            # 无需改动任何调用点。
+            child_env = build_sanitized_child_env()
         usage_collector: StreamUsageCollector | None = None
         if output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID:
             usage_collector = StreamUsageCollector()
@@ -323,6 +290,7 @@ class SubprocessRunner:
                 label=label,
                 output_sink=output_sink,
                 usage_collector=usage_collector,
+                env=child_env,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -376,6 +344,7 @@ class SubprocessRunner:
                 inactivity_timeout=inactivity_timeout,
                 label=label,
                 output_sink=output_sink,
+                env=child_env,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -383,6 +352,7 @@ class SubprocessRunner:
             process = subprocess.Popen(
                 list(command),
                 cwd=cwd,
+                env=child_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -410,7 +380,7 @@ class SubprocessRunner:
                         if output_sink is not None:
                             output_sink(line)
                         else:
-                            timestamped = _format_timestamped_line(line)
+                            timestamped = format_timestamped_line(line)
                             print(timestamped, end="", flush=True)
                         logger.info("%s", line.rstrip("\n"))
                         stdout_lines.append(line)
@@ -420,7 +390,7 @@ class SubprocessRunner:
                         if output_sink is not None:
                             output_sink(line)
                         else:
-                            timestamped = _format_timestamped_line(line)
+                            timestamped = format_timestamped_line(line)
                             print(timestamped, end="", file=sys.stderr, flush=True)
                         logger.warning("%s", line.rstrip("\n"))
                         stderr_lines.append(line)
@@ -488,7 +458,19 @@ def _run_captured_process(
     label: str | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a captured subprocess with heartbeat and optional inactivity logging."""
+    """Run a captured subprocess with heartbeat and optional inactivity logging.
+
+    Args:
+        command: Command and arguments to execute.
+        cwd: Working directory for the subprocess.
+        timeout: Wall-clock timeout in seconds.
+        inactivity_timeout: Optional no-output timeout in seconds.
+        label: Optional label for heartbeat/timeout logs.
+        env: 已构造好的子进程环境，正常由 :meth:`SubprocessRunner.run` 的
+            默认净化档或 E2E 白名单档传入（避免同一环境重复构造）；``None``
+            时沿用 ``subprocess`` 的父环境继承语义，绕过 ``run()`` 直接调用
+            本函数的调用方需自行保证环境已净化。
+    """
     process = subprocess.Popen(
         list(command),
         cwd=cwd,
@@ -792,6 +774,7 @@ def run_filtered_claude_stream(
     display_sink: Callable[[str], None] | None = None,
     label: str | None = None,
     usage_collector: StreamUsageCollector | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Claude stream-json and print a filtered live view.
 
@@ -803,7 +786,8 @@ def run_filtered_claude_stream(
             stdout/stderr output.
         collect_stdout: Whether to collect rendered output.
         prompt_text: Optional prompt to pass via stdin.
-        output_sink: Optional callback for rendered text chunks.
+        output_sink: Optional callback for rendered text chunks (raw readable
+            text; line timestamps are added by the consumers, not here).
         display_sink: Optional callback for stderr lines (display only).
             When provided, stderr is drained on a background thread and
             routed here instead of leaking raw onto the terminal.
@@ -811,6 +795,9 @@ def run_filtered_claude_stream(
         usage_collector: Optional token 用量采集器。提供时，每行原始事件
             在渲染前先交给它观察（原始行只有此处可靠可得；渲染后的
             stdout 重解析会静默丢行）。
+        env: 可选的已净化子进程环境（由 :meth:`SubprocessRunner.run`
+            传入，避免同一环境重复构造）；``None`` 时本函数自行调用
+            :func:`build_sanitized_child_env`，直接调用方无需感知。
 
     Returns:
         CompletedProcess with collected stdout if requested.
@@ -825,7 +812,7 @@ def run_filtered_claude_stream(
     process = subprocess.Popen(
         list(command),
         cwd=cwd,
-        env=build_sanitized_child_env(),
+        env=env if env is not None else build_sanitized_child_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE if capture_stderr else None,
         stdin=subprocess.PIPE,
@@ -870,7 +857,7 @@ def run_filtered_claude_stream(
         process.stdin.close()
     stdout_lines: list[str] = []
     text_buffer: list[str] = []
-    stream_formatter = _TimestampedStreamFormatter()
+    stream_formatter = TimestampedStreamFormatter()
     try:
         if process.stdout is not None:
             for output_line in process.stdout:
@@ -884,7 +871,8 @@ def run_filtered_claude_stream(
                     if output_sink is not None:
                         # The sink drives the live view and the workspace file;
                         # skip stdout/logger writes that would corrupt the
-                        # live region.
+                        # live region. sink 只收可读原文，时间戳由消费侧
+                        # （per-Issue 路由 sink）在自己的边界上加。
                         output_sink(rendered_text)
                         continue
                     timestamped = stream_formatter.format_chunk(rendered_text)
@@ -936,6 +924,7 @@ def _run_pty_stream(
     inactivity_timeout: int | None,
     label: str | None,
     output_sink: Callable[[str], None] | None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a streaming command under a pseudo-terminal so it line-buffers.
 
@@ -953,7 +942,9 @@ def _run_pty_stream(
         timeout: Optional wall-clock timeout in seconds.
         inactivity_timeout: Optional no-output timeout in seconds.
         label: Optional label for heartbeat/timeout logs.
-        output_sink: Optional callback for rendered text chunks.
+        output_sink: 可选的可读原始文本回调；行时间戳由消费者添加，本函数不添加。
+        env: 可选的已净化子进程环境（由 :meth:`SubprocessRunner.run`
+            传入）；``None`` 时本函数自行调用 :func:`build_sanitized_child_env`。
 
     Returns:
         CompletedProcess with the collected stdout (stderr merged into it).
@@ -968,7 +959,7 @@ def _run_pty_stream(
         process = subprocess.Popen(
             list(command),
             cwd=cwd,
-            env=build_sanitized_child_env(),
+            env=env if env is not None else build_sanitized_child_env(),
             stdin=subprocess.DEVNULL,
             stdout=slave_fd,
             stderr=slave_fd,
@@ -988,7 +979,7 @@ def _run_pty_stream(
     )
     watchdog.start()
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    stream_formatter = _TimestampedStreamFormatter()
+    stream_formatter = TimestampedStreamFormatter()
     collected: list[str] = []
     line_buffer: list[str] = []
 
@@ -1015,6 +1006,8 @@ def _run_pty_stream(
             return
         collected.append(text)
         if output_sink is not None:
+            # sink 只收可读原文：时间戳属于消费侧展示，由 per-Issue 路由
+            # sink 在落盘 / 上屏前统一加，合议 workspace 文件因此保持干净。
             output_sink(text)
             return
         print(stream_formatter.format_chunk(text), end="", flush=True)

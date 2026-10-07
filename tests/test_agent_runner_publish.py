@@ -902,3 +902,87 @@ def test_no_new_blocked_label_or_failure_classifier_was_introduced() -> None:
                 offenders.append(f"{python_path.name}:{forbidden_token}")
 
     assert offenders == []
+
+
+def test_default_pr_publication_does_not_invoke_content_generator() -> None:
+    """默认发布直接生成事实正文，不等待 AI，但不改变其他内容生成目标。"""
+    from tests.conftest import FakeContentGenerator
+
+    issue = IssueSummary(
+        number=123,
+        title="Fast publication",
+        url="https://github.com/a/b/issues/123",
+        body="",
+        labels=(),
+    )
+    generator = FakeContentGenerator(response="unused")
+    github_client = FakeGitHubClient()
+    create_draft_pr(
+        issue,
+        Path("."),
+        AppConfig(),
+        github_client,
+        _clean_branch_runner(),
+        content_generator=generator,
+    )
+    assert generator.prompts == []
+    published_body = next(
+        call["body"] for call in github_client.calls if call["method"] == "create_draft_pr"
+    )
+    assert all(
+        f"## {section}" in published_body
+        for section in ("Summary", "Validation", "Risk", "Reviewer Notes")
+    )
+    assert "does not assert PASS" in published_body
+    assert "No tracked validation reports" in published_body
+
+
+def test_pr_fallback_links_only_reports_in_publication_head(tmp_path: Path) -> None:
+    """真实 Git 负控：staged-only 不可链接，HEAD 已提交但工作树删除仍可链接。"""
+    from backend.core.use_cases.agent_runner_pr_fallback import build_pr_fallback_body
+    from backend.core.use_cases.generated_content import PrContext
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    runner = SubprocessRunner()
+    runner.run(["git", "init", "-b", "main"], cwd=tmp_path)
+    evidence_path = tmp_path / "tasks/evidence/issue-123/report.evidence-report.md"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text("REJECT", encoding="utf-8")
+    runner.run(["git", "add", "."], cwd=tmp_path)
+    runner.run(
+        [
+            "git",
+            "-c",
+            "user.name=Validation",
+            "-c",
+            "user.email=validation@example.invalid",
+            "commit",
+            "-m",
+            "test: committed evidence",
+        ],
+        cwd=tmp_path,
+    )
+    publication_head = runner.run(["git", "rev-parse", "HEAD"], cwd=tmp_path).stdout.strip()
+    staged_report = evidence_path.parent / "staged-only.verifier-report.md"
+    staged_report.write_text("PASS", encoding="utf-8")
+    runner.run(["git", "add", str(staged_report)], cwd=tmp_path)
+    (evidence_path.parent / "untracked.verifier-report.md").write_text("PASS", encoding="utf-8")
+    evidence_path.unlink()
+    context = PrContext(
+        123,
+        "Fix",
+        "",
+        "issue-123",
+        "main",
+        "fix: scope",
+        "fix: scope",
+        "file | 1 +",
+        "file | 1 +",
+        repo_url="https://github.com/a/b",
+    )
+    published_body = build_pr_fallback_body(context, "tasks/evidence/issue-123", tmp_path, runner)
+    relative_path = evidence_path.relative_to(tmp_path).as_posix()
+    assert f"https://github.com/a/b/blob/{publication_head}/{relative_path}" in published_body
+    assert "staged-only.verifier-report" not in published_body
+    assert "untracked.verifier-report" not in published_body
+    assert "does not assert PASS" in published_body

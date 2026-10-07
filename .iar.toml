@@ -132,8 +132,12 @@ merge_check_timeout_seconds = 1800
 [agent_runner.validation]
 # 是否启用 Realistic Validation 证据门禁
 enabled = true
-# worktree 内证据目录（默认被 info/exclude 排除，不会进入代码 diff）
-evidence_dir = ".iar/evidence"
+# worktree 内证据目录根；保持默认 tasks/evidence 以启用按任务子目录隔离
+# （tasks/evidence/<prd-stem>/，无 PRD 的 Issue 用 issue-<N>/），
+# .md 文本报告经 .gitignore 白名单进版本库，原始产物被排除。
+# 显式配置其它值（如 legacy 的 .iar/evidence）会退回扁平目录，
+# 任意 PRD 都会看到同一批文件。
+evidence_dir = "tasks/evidence"
 # orphan 证据分支前缀
 branch_prefix = "iar-evidence/"
 # 是否逐项检查证据文件格式

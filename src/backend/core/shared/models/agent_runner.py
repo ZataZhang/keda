@@ -797,8 +797,8 @@ class PostPrSupervisorConfig:
     # 行为）/ ``executor``（交回本次实现者，拿不到时按 Issue 标签回落并记录
     # 来源）/ 任意已注册 agent 名。
     repair_agent: str = "self"
-    # CI/CD 自动修复策略（独立开关）：Supervisor Agent 选择 repair_pr_branch
-    # 且生效策略为开时才允许自动修复；默认关闭（零自动副作用）。与
+    # CI/CD 自动修复策略（独立开关）：仅约束 repair_scope=ci 的修复；
+    # 代码审查修复不受此开关限制，但共享修复轮数预算。默认关闭。与
     # autopilot.enabled / safety.auto_merge / runner.fix_agent_enabled 语义独立。
     auto_repair_ci: bool = False
     max_repair_attempts: int = 2
@@ -856,6 +856,8 @@ class SupervisorActionResult:
     verification_status: str = ""
     head_sha: str | None = None
     findings_detail: tuple[FindingDetail, ...] = ()
+    #: 修复范围由 Supervisor 明确声明；缺失或无效时保守归为 CI。
+    repair_scope: str = "ci"
     #: 本 cycle 的 supervisor agent 调用自报用量；守卫层改写不携带它，由
     #: cycle 末尾统一回填，供观测层发用量事件。
     token_usage: TokenUsage | None = None
@@ -900,7 +902,7 @@ class GeneratedContentConfig:
         default_factory=GeneratedContentTargetConfig
     )
     draft_pr: GeneratedContentTargetConfig = field(
-        default_factory=lambda: GeneratedContentTargetConfig(output="markdown")
+        default_factory=lambda: GeneratedContentTargetConfig(enabled=False, output="markdown")
     )
     prd_from_issue: GeneratedContentTargetConfig = field(
         default_factory=lambda: GeneratedContentTargetConfig(output="markdown")

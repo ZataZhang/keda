@@ -281,6 +281,20 @@ export type RegistryRepositoryEntry = {
   path_exists: boolean;
 };
 
+/**
+ * console 进程 cwd 与 registry 的匹配结果（`GET /console/context`）。
+ *
+ * `status` 取值：`matched` / `not_git_repo` / `not_registered` / `disabled` /
+ * `ambiguous`。只有 `matched` 时 `repo_id` 才有值。
+ */
+export type ConsoleContext = {
+  cwd: string;
+  git_root: string | null;
+  repo_id: string | null;
+  status: "matched" | "not_git_repo" | "not_registered" | "disabled" | "ambiguous";
+  candidates: string[];
+};
+
 export type DiscoveredRepositoryEntry = {
   repo_id: string;
   path: string;
@@ -502,6 +516,8 @@ export type PrdLifecycleDurations = {
 export type PrdLifecycleEventView = {
   event_type: string;
   phase: string;
+  /** 事件自身的语义状态（按 event_type 写入时冻结），状态徽章的事实源。 */
+  status: string;
   actor: string;
   occurred_at: string;
   detail: Record<string, unknown>;

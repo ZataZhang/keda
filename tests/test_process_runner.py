@@ -22,10 +22,8 @@ from backend.infrastructure.process_runner import (
     ClaudeStreamRenderer,
     CommandFailedError,
     SubprocessRunner,
-    _format_timestamped_line,
     _terminate_process_tree,
     _with_available_own_command,
-    _TimestampedStreamFormatter,
     run_filtered_claude_stream,
 )
 
@@ -239,43 +237,6 @@ def test_transcript_runner_builds_codex_command() -> None:
     assert Path(cmd[cmd.index("--cd") + 1]).is_absolute()
 
 
-def test_format_timestamped_line_adds_timestamp_prefix() -> None:
-    """_format_timestamped_line should add [HH:MM:SS] prefix to each line."""
-    result = _format_timestamped_line("test output\n")
-    assert result.startswith("[")
-    assert "] " in result
-    assert "test output" in result
-
-
-def test_format_timestamped_line_handles_leading_newline() -> None:
-    """_format_timestamped_line should handle leading newlines correctly."""
-    result = _format_timestamped_line("\n[agent tool] Read\n")
-    # Should have timestamp on the second line (after the empty line)
-    assert result.startswith("\n[")
-    assert "[agent tool] Read" in result
-
-
-def test_format_timestamped_line_empty_string() -> None:
-    """_format_timestamped_line should handle empty string."""
-    result = _format_timestamped_line("")
-    assert result == ""
-
-
-def test_timestamped_stream_formatter_keeps_chunks_on_same_line() -> None:
-    """Streaming chunks should not receive timestamps inside one physical line."""
-    formatter = _TimestampedStreamFormatter()
-
-    first_line = "".join(
-        formatter.format_chunk(chunk) for chunk in ("{", '"action"', ": true", "\n")
-    )
-    second_line = formatter.format_chunk('"next"')
-
-    assert first_line.count("[") == 1
-    assert first_line.endswith('{"action": true\n')
-    assert second_line.count("[") == 1
-    assert second_line.endswith('"next"')
-
-
 def test_run_filtered_claude_stream_logs_structured_events(tmp_path: Path) -> None:
     """run_filtered_claude_stream should log tool/result/error events."""
     from backend.infrastructure.process_runner import run_filtered_claude_stream
@@ -428,7 +389,7 @@ def test_run_filtered_claude_stream_buffers_text_delta(tmp_path: Path) -> None:
 def test_run_filtered_claude_stream_output_sink_preserves_newlines(
     tmp_path: Path,
 ) -> None:
-    """Rendered Claude newlines should reach the live output sink."""
+    """Rendered Claude newlines reach the sink as raw text, unprefixed."""
     from backend.infrastructure.process_runner import run_filtered_claude_stream
 
     text_event = _json_line(
@@ -457,8 +418,51 @@ def test_run_filtered_claude_stream_output_sink_preserves_newlines(
             output_sink=streamed_output_chunks.append,
         )
 
+    # 生产者交出的必须是可读原文：行首时间戳属于消费侧（per-Issue 路由 sink），
+    # 否则合议 workspace 文件等原文消费方会被动带上时间线。
     assert streamed_output_chunks == ["hello", "\n"]
     assert completed_process.stdout == "hello\n"
+
+
+def test_run_filtered_claude_stream_output_sink_keeps_tool_lines_raw(
+    tmp_path: Path,
+) -> None:
+    """sink 中的工具调用行必须是渲染原文，不带 ``[HH:MM:SS]`` 前缀。"""
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    tool_event = _json_line(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "Bash",
+                        "input": {"command": "ls"},
+                    }
+                ]
+            },
+        }
+    )
+
+    mock_process = MagicMock()
+    mock_process.stdout = iter([tool_event])
+    mock_process.wait.return_value = 0
+    mock_process.stdin = MagicMock()
+    streamed_output_chunks: list[str] = []
+
+    with patch("subprocess.Popen", return_value=mock_process):
+        completed_process = run_filtered_claude_stream(
+            ["claude", "--output-format", "stream-json"],
+            cwd=tmp_path,
+            timeout=None,
+            collect_stdout=True,
+            output_sink=streamed_output_chunks.append,
+        )
+
+    assert "".join(streamed_output_chunks) == "\n[agent tool] Bash: ls\n"
+    assert completed_process.stdout == "\n[agent tool] Bash: ls\n"
 
 
 def test_relay_process_stdout_output_sink_preserves_line_boundaries() -> None:
@@ -477,6 +481,7 @@ def test_relay_process_stdout_output_sink_preserves_line_boundaries() -> None:
     )
 
     assert stdout_text == "first\nsecond\n"
+    # 每块是一整行原文：行首时间戳由消费侧添加，生产者不得抢先格式化。
     assert streamed_output_chunks == ["first\n", "second\n"]
 
 
@@ -536,6 +541,51 @@ def test_subprocess_runner_pty_routes_output_to_sink(tmp_path: Path) -> None:
         output_sink=chunks.append,
     )
     assert any("via-sink" in chunk for chunk in chunks)
+
+
+def test_subprocess_runner_pty_sink_chunks_are_raw_lines(tmp_path: Path) -> None:
+    """PTY 路径交给 sink 的是原文行，时间戳由消费侧（路由 sink）添加。"""
+    import sys
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    chunks: list[str] = []
+    SubprocessRunner().run(
+        [sys.executable, "-c", "print('timed-line')"],
+        cwd=tmp_path,
+        capture_output=False,
+        check=False,
+        output_sink=chunks.append,
+    )
+    joined = "".join(chunks)
+    assert "timed-line" in joined
+    assert not re.search(r"\[\d{2}:\d{2}:\d{2}\]", joined)
+
+
+def test_pi_relay_events_sink_delivers_raw_chunks() -> None:
+    """pi 事件流的 sink 收到渲染原文：行中 delta 不被切断，也不加时间戳。"""
+    from backend.engines.agent_runner.output_protocols.pi_json_lines import _relay_events
+    from backend.infrastructure.agent_stream_usage import StreamUsageCollector
+
+    event_lines = [
+        _json_line({"type": "tool_execution", "tool": "Bash"}),
+        _json_line({"type": "message_update", "delta": {"text": "he"}}),
+        _json_line({"type": "message_update", "delta": {"text": "llo\n"}}),
+    ]
+    mock_process = MagicMock()
+    mock_process.stdout = iter(event_lines)
+    mock_process.wait.return_value = 0
+    streamed_output_chunks: list[str] = []
+
+    collected = _relay_events(
+        mock_process,
+        collect_stdout=True,
+        output_sink=streamed_output_chunks.append,
+        usage_collector=StreamUsageCollector(),
+    )
+
+    assert "".join(streamed_output_chunks) == collected
+    assert collected == "\n[agent tool] Bash\nhello\n"
 
 
 def test_subprocess_runner_claude_capture_uses_filtered_stream(
@@ -875,18 +925,27 @@ def test_subprocess_runner_keeps_active_process_alive(
     from backend.infrastructure.process_runner import SubprocessRunner
 
     runner = SubprocessRunner()
-    script = "import time\n" "for _ in range(5):\n" "    print('tick')\n" "    time.sleep(0.1)\n"
+    # 逐行 flush：stdout 接到管道时 Python 默认块缓冲，不 flush 的话子进程要等退出
+    # 才把 tick 一次性倒出来，观测到的"静默"时长就由解释器启动速度决定——慢机器上
+    # 光启动就逼近 1s，1s 阈值会被直接击杀，测试变成测机器快慢。flush 后留 2s 阈值
+    # （脚本持续输出 2s > 2s 检查周期），断言仍是在测"持续输出能否续命"。
+    script = (
+        "import time\n"
+        "for _ in range(20):\n"
+        "    print('tick', flush=True)\n"
+        "    time.sleep(0.1)\n"
+    )
 
     result = runner.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
         capture_output=True,
         timeout=10,
-        inactivity_timeout=1,
+        inactivity_timeout=2,
     )
 
     assert result.return_code == 0
-    assert result.stdout.count("tick") == 5
+    assert result.stdout.count("tick") == 20
 
 
 def test_subprocess_runner_replaces_invalid_utf8_in_captured_output(
@@ -1204,7 +1263,8 @@ def _inject_sanitize_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_build_sanitized_child_env_removes_denylisted_vars_and_keeps_rest(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """净化函数剔除全部名单变量、原样透传其余变量，并对每次剔除记 WARNING。"""
+    """净化函数剔除全部名单变量、原样透传其余变量，并对每个被剔变量名告警一次。"""
+    from backend.infrastructure import child_env as child_env_module
     from backend.infrastructure.child_env import (
         AGENT_CHILD_ENV_DENYLIST,
         build_sanitized_child_env,
@@ -1212,6 +1272,8 @@ def test_build_sanitized_child_env_removes_denylisted_vars_and_keeps_rest(
 
     assert set(AGENT_CHILD_ENV_DENYLIST) == set(_SANITIZE_DENYLIST_VARS)
     _inject_sanitize_env(monkeypatch)
+    # 去重告警状态是进程级的，清空后才可断言「首次剔除即 WARNING」。
+    monkeypatch.setattr(child_env_module, "_WARNED_DENYLIST_REMOVALS", set())
 
     with caplog.at_level(logging.WARNING, logger="backend.infrastructure.child_env"):
         child_env = build_sanitized_child_env()
@@ -1235,6 +1297,41 @@ def test_build_sanitized_child_env_removes_denylisted_vars_and_keeps_rest(
         # 日志只含变量名与值长度摘要，不得记录完整值。
         for value in _SANITIZE_DENYLIST_VARS.values():
             assert value not in message
+
+
+def test_build_sanitized_child_env_warns_once_per_key_per_process(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """同一变量名只在首次剔除时 WARNING，后续剔除降为 DEBUG。
+
+    默认净化档自 Issue #230 起覆盖每一次 ``SubprocessRunner.run()``（git/gh
+    等工具命令单轮可达数十次），逐次 WARNING 会淹没「名单误剔」排障信号。
+    """
+    from backend.infrastructure import child_env as child_env_module
+
+    _inject_sanitize_env(monkeypatch)
+    monkeypatch.setattr(child_env_module, "_WARNED_DENYLIST_REMOVALS", set())
+
+    with caplog.at_level(logging.DEBUG, logger=child_env_module.logger.name):
+        first_env = child_env_module.build_sanitized_child_env()
+        second_env = child_env_module.build_sanitized_child_env()
+
+    # 净化本身逐次照常发生，降级的只是告警频次。
+    for env in (first_env, second_env):
+        for key in _SANITIZE_DENYLIST_VARS:
+            assert key not in env
+
+    sanitized_records = [r for r in caplog.records if "child env sanitized" in r.getMessage()]
+    warning_records = [r for r in sanitized_records if r.levelno == logging.WARNING]
+    debug_records = [r for r in sanitized_records if r.levelno == logging.DEBUG]
+    assert {record.getMessage() for record in warning_records} == {
+        f"child env sanitized: removed {key} (value length {len(value)})"
+        for key, value in _SANITIZE_DENYLIST_VARS.items()
+    }
+    assert len(debug_records) == len(_SANITIZE_DENYLIST_VARS)
+    assert {record.getMessage() for record in debug_records} == {
+        record.getMessage() for record in warning_records
+    }
 
 
 def test_run_filtered_claude_stream_child_env_is_sanitized(
@@ -1323,3 +1420,140 @@ def test_with_available_own_command_accepts_legacy_and_preserves_wrapper(
         "kc",
         "daemon",
     ]
+
+
+# ---------------------------------------------------------------------------
+# run() 默认净化与内容生成路径（Issue #230：env=None 不得等于全量继承）
+# ---------------------------------------------------------------------------
+
+
+def _assert_child_env_sanitized(child_env_text: str) -> None:
+    """断言子进程实际环境：名单变量被剔除、透传变量原样在。"""
+    for key in _SANITIZE_DENYLIST_VARS:
+        assert f"{key}=" not in child_env_text, f"denylisted var {key} reached child env"
+    for key, value in _SANITIZE_PASSTHROUGH_VARS.items():
+        assert f"{key}={value}" in child_env_text, f"passthrough var {key} missing"
+
+
+def test_run_without_env_profile_defaults_to_sanitized_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run() 不指定 env_profile 时默认走净化档：致毒变量不得进入子进程环境。"""
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_run_default.txt"
+
+    result = SubprocessRunner().run(
+        ["/bin/sh", "-c", f"env > {probe_file}"],
+        cwd=tmp_path,
+        timeout=60,
+    )
+
+    assert result.return_code == 0
+    _assert_child_env_sanitized(probe_file.read_text(encoding="utf-8"))
+
+
+def test_run_stdin_branch_sanitizes_default_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """input_text 分支（内容生成的 stdin 投递形态）同样必须用净化档。"""
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_run_stdin.txt"
+
+    result = SubprocessRunner().run(
+        ["/bin/sh", "-c", f"cat > /dev/null; env > {probe_file}"],
+        cwd=tmp_path,
+        timeout=60,
+        input_text="prompt-via-stdin",
+    )
+
+    assert result.return_code == 0
+    _assert_child_env_sanitized(probe_file.read_text(encoding="utf-8"))
+
+
+def test_run_non_pty_stream_branch_sanitizes_default_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PTY 不可用时的管道中继兜底分支也不得回退到全量继承。"""
+    from backend.infrastructure import process_runner as process_runner_module
+
+    _inject_sanitize_env(monkeypatch)
+    monkeypatch.setattr(process_runner_module, "_PTY_AVAILABLE", False)
+    probe_file = tmp_path / "probe_env_run_pipe_fallback.txt"
+
+    result = process_runner_module.SubprocessRunner().run(
+        ["/bin/sh", "-c", f"env > {probe_file}"],
+        cwd=tmp_path,
+        capture_output=False,
+        timeout=60,
+    )
+
+    assert result.return_code == 0
+    _assert_child_env_sanitized(probe_file.read_text(encoding="utf-8"))
+
+
+def test_run_without_sanitizer_leaks_poison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """负控：绕过净化（模拟 Issue #230 修复前的默认全量继承）时，探针必须观测到致毒变量。"""
+    from backend.infrastructure import process_runner
+
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_run_unsanitized.txt"
+
+    with patch.object(
+        process_runner,
+        "build_sanitized_child_env",
+        side_effect=lambda: dict(os.environ),
+    ):
+        result = process_runner.SubprocessRunner().run(
+            ["/bin/sh", "-c", f"env > {probe_file}"],
+            cwd=tmp_path,
+            timeout=60,
+        )
+
+    assert result.return_code == 0
+    assert "SERVER__PORT=56469" in probe_file.read_text(encoding="utf-8")
+
+
+def test_content_generator_plain_path_child_env_is_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """真实内容生成入口（Issue #229 事故路径）：generate 启动的子进程环境必须已净化。
+
+    子进程用真实探针脚本打印自身环境，不 mock Popen；agent 注册表注入
+    一个把环境写入 ``$1`` 的 shell 探针，覆盖
+    ``SubprocessContentGenerator.generate`` → ``SubprocessRunner.run``
+    这条 plain 协议投递链。
+    """
+    from backend.core.shared.models.agent_runner import AppConfig
+    from backend.core.shared.models.agent_spec import (
+        AGENT_PROFILE_GENERATE,
+        AgentProfileSpec,
+        AgentSpec,
+    )
+    from backend.engines.agent_runner.factories.content_generators import (
+        SubprocessContentGenerator,
+    )
+
+    _inject_sanitize_env(monkeypatch)
+    probe_file = tmp_path / "probe_env_content_generator.txt"
+    probe_script = tmp_path / "env_probe.sh"
+    probe_script.write_text('#!/bin/sh\nenv > "$1"\n', encoding="utf-8")
+    probe_script.chmod(0o755)
+    config = AppConfig(
+        agents={
+            "env-probe": AgentSpec(
+                bin=str(probe_script),
+                label="agent/env-probe",
+                label_color="000000",
+                label_description="Test probe that dumps its own environment.",
+                profiles={AGENT_PROFILE_GENERATE: AgentProfileSpec(read_only=True)},
+            )
+        }
+    )
+    generator = SubprocessContentGenerator(SubprocessRunner(), config=config)
+
+    result = generator.generate("env-probe", str(probe_file), cwd=tmp_path, timeout=60)
+
+    assert result.return_code == 0
+    _assert_child_env_sanitized(probe_file.read_text(encoding="utf-8"))

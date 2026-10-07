@@ -162,10 +162,15 @@ class PrdLifecycleDurations:
 
 @dataclass(frozen=True)
 class PrdLifecycleEventView:
-    """PRD 生命周期时间线中的单条事件（API 视图）。"""
+    """PRD 生命周期时间线中的单条事件（API 视图）。
+
+    ``status`` 是该事件自身的语义状态（供前端状态徽章按 event_type 语义渲染），
+    比粗粒度 ``phase`` 更细，让「开始执行」「已被领取」「重试」等在时间线上可辨。
+    """
 
     event_type: str
     phase: str
+    status: str
     actor: str
     occurred_at: str
     detail: dict

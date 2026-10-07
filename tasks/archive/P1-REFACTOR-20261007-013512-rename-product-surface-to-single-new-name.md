@@ -1398,3 +1398,11 @@ Failure triage:
 - Impact: 只改 `tasks/evidence/<stem>/scripts/`（正本 `.iar/evidence/scripts/` 同步，23 个脚本/驱动 `shasum -a 256` 与正本 0 处不一致，清单 `.iar/evidence/_mirror-shas.txt`）与两份呈递文档的文字。**无代码改动**，代码树指纹不变，十条 rv-* oracle 的判据与证据文件不变。加固后正跑连测 3 次全绿（`RESULT: PASS`，退出码 0）；三处注入分别红 14 / 1 / 2 条，退出码均为 1。
 - Review: 说明性变更 + 工装修正，无需人拍板：改动方向是让自检能抓的缺陷变多（不可检测 → 可检测），没有把任何判据改宽，也没有动 §9 的 8 个人审空框。
 - Supersedes: 上一条「人审清单落地…」的 Impact/Review 里那句「实开自检 16 条断言全绿…跨卡重复 radio `name` → 1 条红」，其中的能力范围被写宽（16 → 20 条；旧的 name 断言抓不到单点漏改）。Change Log 追加式不回头改写，以本条为准；该条描述的其他事实（零 `pageerror`、首屏卡片可见、5 张截图解码、末页生成 Markdown、三处注入均可变红）仍然成立。
+
+
+## 接管补充记录（2026-10-08）
+
+- Changes: 停止九小时收尾循环；修复密钥提示泄露、未初始化迁移退出码与容器 down/logs；整合最新 main。
+- Reason: 用户拒绝继续长时间循环，授权以代码审查完成交付。
+- Review: 两份独立分工代码审查 APPROVE；最终 3436 passed / 1 skipped（175.80s）、完整 lint 与文档构建通过。完整旧 RV 包未重新验收，历史勾选不能视为新树 verifier PASS；采用用户明确接受证据呈递缺口的交付方式，Human-Confirmed 不回填。
+- Evidence: 同目录证据包 takeover-code-review.md；完整 reuse 的既有重复片段限制见该报告。

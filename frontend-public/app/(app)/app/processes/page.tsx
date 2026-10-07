@@ -18,15 +18,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { formatLocalDateTime } from "@/lib/utils";
+import { useRepositorySelection } from "@/lib/console-repository-selection";
 import {
   fetchProcessLog,
   fetchProcesses,
-  fetchRegistryRepositories,
   startProcess,
   stopProcess,
 } from "@/lib/api/console";
 import type {
-  RegistryRepositoryEntry,
   RunnerProcessKind,
   RunnerProcessRecord,
 } from "@/lib/api/types";
@@ -51,8 +50,11 @@ const STARTABLE_KINDS: RunnerProcessKind[] = [
 
 export default function ProcessesPage() {
   const [processes, setProcesses] = useState<RunnerProcessRecord[]>([]);
-  const [repositories, setRepositories] = useState<RegistryRepositoryEntry[]>([]);
-  const [selectedRepoId, setSelectedRepoId] = useState("");
+  const {
+    enabledRepositories: repositories,
+    selectedRepoId,
+    selectRepoId,
+  } = useRepositorySelection();
   const [selectedKind, setSelectedKind] = useState<RunnerProcessKind>("daemon");
   const [starting, setStarting] = useState(false);
   const [logProcess, setLogProcess] = useState<RunnerProcessRecord | null>(null);
@@ -72,22 +74,6 @@ export default function ProcessesPage() {
     const timer = setInterval(() => void refreshProcesses(), PROCESS_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [refreshProcesses]);
-
-  useEffect(() => {
-    fetchRegistryRepositories()
-      .then((entries) => {
-        const enabledEntries = entries.filter((entry) => entry.enabled);
-        setRepositories(enabledEntries);
-        if (enabledEntries.length > 0) {
-          setSelectedRepoId((current) => current || enabledEntries[0].repo_id);
-        }
-      })
-      .catch((error: unknown) => {
-        toast.error(
-          error instanceof Error ? error.message : "无法加载仓库列表。",
-        );
-      });
-  }, []);
 
   async function handleStart() {
     if (!selectedRepoId) {
@@ -151,7 +137,7 @@ export default function ProcessesPage() {
           <select
             className="h-9 rounded-md border border-slate-200 bg-transparent px-2 text-sm dark:border-slate-700"
             value={selectedRepoId}
-            onChange={(event) => setSelectedRepoId(event.target.value)}
+            onChange={(event) => selectRepoId(event.target.value)}
             aria-label="目标仓库"
           >
             {repositories.length === 0 ? (

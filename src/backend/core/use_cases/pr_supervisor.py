@@ -295,6 +295,10 @@ def build_supervisor_prompt(
             "review input only. Do not return `verdict` or the skill report; "
             "translate the review outcome into the required `action` field.",
             "- action must be one of: approve_for_human_review, repair_pr_branch, rebase_pr_branch, resolve_conflict, wait_for_checks, request_human_input, mark_failed.",
+            "- For repair_pr_branch, set repair_scope to code_review only when "
+            "repairing code-review findings without CI remediation. Use ci for "
+            "failed-check remediation or mixed CI/code-review repairs. Missing "
+            "or invalid scope defaults to ci. Both scopes share the repair limit.",
             "- Optional fields: findings_high (int), findings_medium (int), findings_low (int), verification_status (str), head_sha (str).",
             "- Optional field `findings`: an array of objects describing concrete "
             "findings, each with `title` plus optional `severity` (high/medium/low), "
@@ -422,6 +426,7 @@ def parse_supervisor_action(text: str) -> SupervisorActionResult:
         verification_status=str(payload.get("verification_status", "")),
         head_sha=str(payload.get("head_sha", "")) or None,
         findings_detail=findings_detail,
+        repair_scope="code_review" if payload.get("repair_scope") == "code_review" else "ci",
     )
 
 
@@ -1023,7 +1028,7 @@ def run_post_pr_supervisor_cycle(
     comment_body = build_supervisor_result_comment(
         action=action_result.action,
         supervisor=chosen_agent,
-        summary=action_result.summary,
+        summary=f"[repair_scope={action_result.repair_scope}] {action_result.summary}",
         findings_counts=action_result.findings_counts,
         verification_status=action_result.verification_status,
         head_sha=action_result.head_sha or pr_context.head_sha,

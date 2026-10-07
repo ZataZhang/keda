@@ -837,10 +837,12 @@ def test_generate_issue_content_agent_without_prompt_never_runs_agent() -> None:
     assert generated_issue_content.source == "template"
 
 
-def test_default_config_generates_pr_with_agent_markdown() -> None:
-    """不写 mode / output：默认配置补上 prompt 就走 agent + markdown。"""
+def test_opt_in_config_generates_pr_with_agent_markdown() -> None:
+    """显式 enabled=true 后不写 mode / output，沿用 agent + markdown。"""
     default_draft_pr = GeneratedContentConfig().draft_pr
-    config = GeneratedContentConfig(draft_pr=replace(default_draft_pr, prompt="Generate PR"))
+    config = GeneratedContentConfig(
+        draft_pr=replace(default_draft_pr, enabled=True, prompt="Generate PR")
+    )
     generated_pr_content = generate_pr_content(
         config=config,
         context=_pr_context(),

@@ -19,12 +19,12 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     PI_JSON_LINES_PROTOCOL_ID,
     OutputRelayRequest,
 )
+from backend.core.shared.interfaces.output_timestamps import format_timestamped_line
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import PROMPT_DELIVERY_STDIN
 from backend.infrastructure.agent_stream_usage import StreamUsageCollector
 from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
-from backend.infrastructure.process_runner import _format_timestamped_line
 
 
 class PiJsonLinesOutputProtocol:
@@ -131,10 +131,12 @@ def _relay_events(
                 if rendered_text:
                     rendered_parts.append(rendered_text)
                     if output_sink is not None:
+                        # sink 收可读原文：行首时间戳属于消费侧（per-Issue
+                        # 路由 sink）的展示，不在生产者这里加。
                         output_sink(rendered_text)
                     else:
                         logger.info("%s", rendered_text.strip())
-                        print(_format_timestamped_line(rendered_text), end="", flush=True)
+                        print(format_timestamped_line(rendered_text), end="", flush=True)
         process.wait(timeout=None)
     except Exception:
         process.kill()
@@ -167,7 +169,7 @@ def _pump_stderr(
         if display_sink is not None:
             display_sink(line)
         else:
-            print(_format_timestamped_line(line), end="", file=sys.stderr)
+            print(format_timestamped_line(line), end="", file=sys.stderr)
 
 
 __all__ = ["PiJsonLinesOutputProtocol"]
