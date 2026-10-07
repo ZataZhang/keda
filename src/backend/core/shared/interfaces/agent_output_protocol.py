@@ -54,7 +54,9 @@ class OutputRelayRequest:
         inactivity_timeout: 可选无输出超时（秒）。
         label: watchdog / 日志上下文标签。
         collect_stdout: 是否把（渲染后的）stdout 收集进返回值。
-        output_sink: 渲染文本块回调（驱动 live 面板 / 工作区文件）。
+        output_sink: 渲染文本块回调（驱动 live 面板 / 工作区文件）；
+            每个物理行行首带 ``[HH:MM:SS]`` 时间戳前缀，与终端实时视图
+            一致（Issue #223）。
         display_sink: stderr 展示回调（仅供即时显示，不进 transcript）。
     """
 
