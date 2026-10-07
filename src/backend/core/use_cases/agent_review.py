@@ -63,6 +63,21 @@ DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
     "Before writing your verdict, call the `code-reviewer` skill using the Skill tool "
     "with the diff and PRD context above.",
     "Use the skill's findings to populate the `findings` array in your response.",
+    (
+        "Complete the review of the current diff and requirement/evidence boundaries "
+        "before editing; collect all actionable findings in this pass, consolidate "
+        "duplicate root causes, and then repair the complete set together."
+    ),
+    (
+        "On a follow-up review, focus on the repair diff, previously reported findings, "
+        "and affected boundaries. Report newly discovered regressions, but do not reopen "
+        "resolved findings without evidence or introduce unrelated cleanup."
+    ),
+    (
+        "Focused review does not waive final delivery gates: check that the required "
+        "verification and independent evidence apply to the final code tree; never "
+        "reuse a verdict or test flag for a different tree."
+    ),
     "If the skill reports no findings, verdict must be `approved`.",
     "If findings exist, apply fixes in the worktree and write "
     "`.agent-runner/commit-request.json` with a descriptive `commit_message`.",

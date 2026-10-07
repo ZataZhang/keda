@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -281,27 +282,44 @@ def request_manual_ci_repair(
     return True, f"已请求一次修复（第 {round_count + 1} 轮，head {pr_context.head_sha[:12]}）。"
 
 
+@dataclass(frozen=True)
+class AutoRepairDecisionContext:
+    """Supervisor 修复决策所需的关联上下文。"""
+
+    issue_number: int
+    pr_context: PullRequestContext
+    repair_scope: str = "ci"
+
+
 def gate_auto_repair_decision(
     *,
     config: AppConfig,
     github_client: IGitHubClient,
-    issue_number: int,
-    pr_context: PullRequestContext,
-    pr_branch: str,
+    context: AutoRepairDecisionContext,
 ) -> tuple[bool, str]:
     """Supervisor Agent 选择 repair 后的策略门禁（review_once 调用）。
 
     按「Agent 决定 + 策略约束」执行：``checks_state`` 不触发动作，这里只在
-    Agent 已选择 ``repair_pr_branch`` 后判断生效策略与剩余预算。返回
+    Agent 已选择 ``repair_pr_branch`` 后判断生效策略与剩余预算。
+    ``repair_scope=code_review`` 不受 CI 开关限制，但仍共享修复轮数上限。返回
     ``(allowed, reason)``；不允许时调用方必须零副作用（不评论修复意图、
     不改 label、不 push）。
+
+    Args:
+        config: 仓库运行配置。
+        github_client: Issue 评论读取端口。
+        context: 修复范围、Issue 与当前 PR 快照。
+
+    Returns:
+        tuple[bool, str]: 是否允许修复与可呈递的原因。
     """
-    comments = github_client.list_issue_comments(issue_number)
+    comments = github_client.list_issue_comments(context.issue_number)
     stored = read_stored_policy(comments)
     effective = compute_effective_auto_repair(
         stored.value, bool(config.post_pr_supervisor.auto_repair_ci)
     )
-    if not effective:
+    # 只有明确声明的纯代码审查修复可以绕过 CI 开关；混合/未知范围保守处理。
+    if context.repair_scope != "code_review" and not effective:
         return False, (
             "CI/CD 自动修复未开启"
             + (
@@ -317,7 +335,7 @@ def gate_auto_repair_decision(
         return False, f"自动修复轮数已耗尽（{round_count}/{max_rounds}）；停止新的自动修复。"
     return (
         True,
-        f"自动修复允许（第 {round_count + 1}/{max_rounds} 轮，head {pr_context.head_sha[:12]}）。",
+        f"自动修复允许（第 {round_count + 1}/{max_rounds} 轮，head {context.pr_context.head_sha[:12]}）。",
     )
 
 

@@ -115,3 +115,5 @@ An Agent that prints nothing for the configured inactivity timeout is killed and
 ## Lifecycle reference
 
 For repository setup, Issue/PRD commands, one-shot runs, viewing and triaging agent output, registry-managed daemons, logs, and shutdown steps, read [`docs/guides/agent-runner.md`](docs/guides/agent-runner.md). In particular, use its daemon lifecycle section before starting persistent processes.
+
+- Draft PR title/body generation defaults to deterministic publication (`generated_content.draft_pr.enabled = false`), with commit facts and tracked validation-report references. Set this target to `enabled = true` to opt into AI writing; this does not change review, validation, verifier, or merge gates. The body itself never establishes PASS. Existing explicit target settings are respected.
