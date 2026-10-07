@@ -2,7 +2,8 @@
 
 本文件位于 ``tests/guards/``，失败意味着 agent 子进程派发点违反了
 「必须传入净化环境（``build_sanitized_child_env``）」的仓库约定
-（PRD: ``tasks/pending/P1-BUG-20260928-232844-agent-runner-child-env-sanitize.md``）。
+（历史 PRD: ``tasks/archive/P1-BUG-20260928-232844-agent-runner-child-env-sanitize.md``；
+现行两层约定见 ``docs/guides/agent-runner.md`` 的子进程环境净化说明）。
 正确做法是修复触发它的源代码，而不是修改本文件让测试通过；仅当约定
 本身需要变更时才改本文件，并同步更新对应文档。详见
 ``docs/ai-standards/testing.md`` 的 Guard Tests 小节。
@@ -22,8 +23,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # process_runner.py 中只有这两个函数是 agent 流式派发点；
-# SubprocessRunner.run / _run_captured_process 服务于工具命令（git/gh/pytest），
-# 按约定不做净化，不在本守卫范围内。
+# SubprocessRunner.run 默认档也净化工具命令环境，并向 _run_captured_process 传入结果；
+# 该默认档的行为由 tests/test_process_runner.py 覆盖，本守卫仍检查流式派发点显式净化。
 PROCESS_RUNNER_AGENT_SPAWN_FUNCTIONS = frozenset(
     {
         "run_filtered_claude_stream",
