@@ -274,7 +274,18 @@ class FakeGitHubClient(IGitHubClient):
         )
         return []
 
-    def get_pull_request_context(self, branch: str) -> object | None:
+    def get_pull_request_context(
+        self, branch: str, *, require_success: bool = False
+    ) -> object | None:
+        """返回成功读取的 PR fixture；真实查询失败由 adapter 测试覆盖。
+
+        Args:
+            branch: 测试来源分支。
+            require_success: 保留真实端口的严格读取选项。
+
+        Returns:
+            测试上下文；None 代表成功查询后没有 PR。
+        """
         self.calls.append({"method": "get_pull_request_context", "branch": branch})
         return self._pr_contexts.get(branch)
 

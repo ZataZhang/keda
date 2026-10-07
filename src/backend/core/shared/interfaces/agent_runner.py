@@ -481,15 +481,22 @@ class IGitHubClient(ABC):
         ...
 
     @abstractmethod
-    def get_pull_request_context(self, branch: str) -> PullRequestContext | None:
+    def get_pull_request_context(
+        self, branch: str, *, require_success: bool = False
+    ) -> PullRequestContext | None:
         """返回给定分支上开放 PR 的上下文。
 
         Args:
             branch: 作为来源（head）的分支名。
+            require_success: 要求查询成功且响应完整；用于证明发布前无旧 PR，
+                不得把失败或未知响应当成不存在。默认保留既有尽力读取语义。
 
         Returns:
             PullRequestContext | None: 若该分支存在开放 PR，返回其
-            上下文；否则返回 ``None``。
+            上下文；成功确认无开放 PR 时返回 ``None``。
+
+        Raises:
+            RuntimeError: 严格模式下查询失败或响应无法确认。
         """
         ...
 

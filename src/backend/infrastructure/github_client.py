@@ -310,8 +310,22 @@ class GitHubCliClient:
     def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
         return create_draft_pr(self, title=title, body=body, base_branch=base_branch, cwd=cwd)
 
-    def get_pull_request_context(self, branch: str) -> PullRequestContext | None:
-        return get_pull_request_context(self, branch)
+    def get_pull_request_context(
+        self, branch: str, *, require_success: bool = False
+    ) -> PullRequestContext | None:
+        """读取 PR 上下文，可选要求权威成功查询才返回不存在。
+
+        Args:
+            branch: 远端 head 分支。
+            require_success: 是否拒绝查询失败和身份不完整的返回结构。
+
+        Returns:
+            开放 PR 上下文；没有 PR 时为 None。
+
+        Raises:
+            RuntimeError: 严格查询无法证明 PR 状态。
+        """
+        return get_pull_request_context(self, branch, require_success=require_success)
 
     def comment_pr(self, pr_number: int, body: str) -> None:
         comment_pr(self, pr_number, body)

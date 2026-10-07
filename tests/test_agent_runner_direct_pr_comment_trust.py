@@ -131,7 +131,7 @@ def test_started_checkpoint_trust_controls_actual_builder_stage(monkeypatch, tmp
     _patch_ready_handler(monkeypatch, run_agent=capture_builder)
     monkeypatch.setattr(handlers, "get_head_sha", lambda *_args: "a" * 40)
     monkeypatch.setattr(handlers, "_reuse_local_commit", lambda _request: None)
-    monkeypatch.setattr(client, "get_pull_request_context", lambda _branch: None)
+    monkeypatch.setattr(client, "get_pull_request_context", lambda _branch, **_kwargs: None)
     monkeypatch.setattr(client, "find_open_pr_by_head", lambda _branch: None)
     monkeypatch.setattr(
         handlers, "arbitrate_first_claim", lambda **_kwargs: SimpleNamespace(comment_id=91)

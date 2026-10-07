@@ -3,7 +3,7 @@
 ## Review map
 
 - rv-1: independent CLI and daemon discover Issue labels, preserve DIRECT marker, consume label; neighboring NORMAL remains NORMAL; PRD negative dispatches no builder or PR.
-- rv-2: durable GitHub adapter writes PR before lost response; reconstruct a fresh client and recover without a second PR. Cover deletion failure, successful deletion followed by workflow crash, success response without deletion, same-head historical PR, identity mismatch and claimant loser. Initial publication and cleanup recovery must finish in review with inline supervisor enabled or disabled; final transition failure must leave the checkpoint pending. Actual comment adapter must filter unauthorized forged checkpoints before stage selection and fail closed on comment/permission query errors.
+- rv-2: durable GitHub adapter writes PR before lost response; reconstruct a fresh client and recover without a second PR. Cover deletion failure, successful deletion followed by workflow crash, success response without deletion, same-head historical PR, identity mismatch and claimant loser. Initial publication and cleanup recovery must finish in review with inline supervisor enabled or disabled; final transition failure must leave the checkpoint pending. Actual comment adapter must filter unauthorized forged checkpoints before stage selection and fail closed on comment/permission query errors. Actual PR adapter must reject nonzero/empty/malformed responses in strict mode; neither prior-PR absence nor association may infer absence from failures.
 - rv-3: actual configuration loading/sync, custom and disabled label, workflow preservation; read final hub/run/daemon/guide semantics against actual stage behavior.
 
 ## Commands and identity

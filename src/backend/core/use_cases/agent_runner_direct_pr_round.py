@@ -224,7 +224,7 @@ def lookup_associated_direct_pr(
             "Direct PR candidate differs from the unfinished publication round."
         )
     try:
-        context = github_client.get_pull_request_context(candidate.branch)
+        context = github_client.get_pull_request_context(candidate.branch, require_success=True)
         existing_url = github_client.find_open_pr_by_head(candidate.branch)
     except Exception as exc:
         raise DirectPrRoundError(f"Cannot confirm Direct PR publication: {exc}") from exc
@@ -315,7 +315,9 @@ def prepare_direct_pr_publication(
     if record.branch:
         return associated_direct_pr(github_client, record, candidate)
     try:
-        previous_context = github_client.get_pull_request_context(candidate.branch)
+        previous_context = github_client.get_pull_request_context(
+            candidate.branch, require_success=True
+        )
         previous_url = github_client.find_open_pr_by_head(candidate.branch)
     except Exception as exc:
         raise DirectPrRoundError(f"Cannot establish absence of a previous PR: {exc}") from exc
