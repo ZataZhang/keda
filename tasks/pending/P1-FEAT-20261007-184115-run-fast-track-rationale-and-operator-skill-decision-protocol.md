@@ -1,5 +1,7 @@
 # PRD: Issue Direct PR label 与跨机器、daemon 发布协议
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/235
+
 > ⛔ **交付前置**：改名与 operator hub 两份 PRD 经主线合并后开工。§8 是依赖唯一事实源。
 >
 > ⬜ **验收状态**：未开工。此横幅投影 §9，那里是唯一事实源。
