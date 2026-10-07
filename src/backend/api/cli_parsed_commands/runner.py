@@ -21,6 +21,8 @@ from backend.api.cli_output import OUTPUT_FORMAT_JSON, CliError, emit
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_registry import _run_daemon_status_command
 from backend.api.agent_runner_views.runner_live_view import create_runner_live_view
+from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.shared.models.agent_runner import IssueSummary
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.api import cli as _cli
 from backend.core.use_cases.agent_runner_factory import logger
@@ -149,6 +151,9 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     # fork 基污染整条下游链，检查失败时一律拒绝放行（fail-closed）。
     if fast_merge and target_issue is not None:
         _reject_fast_merge_on_stack_issue(ctx, contexts=contexts, target_issue=target_issue)
+        # 直发标签与快速通道跳的门禁范围不同，同时命中时明确拒绝而非静默取更强者，
+        # 免得调用方以为只跳了验证门禁、实际却把审核 agent 也跳了。
+        _reject_fast_merge_on_direct_pr_label(ctx, contexts=contexts, target_issue=target_issue)
 
     # 直发档适用范围门禁（FR-16）：--direct-pr 只对**没有 PRD 锚点**的 Issue 有效。
     # PRD 路径目标本身就是 PRD-backed，不必读 Issue 即可拒绝；--issue 目标必须读正文
@@ -273,37 +278,37 @@ def _resolve_publish_stage(*, fast_merge: bool, direct_pr: bool) -> PublishStage
     return PublishStage.NORMAL
 
 
-def _target_issue_bodies(
+def _target_issue_details(
     ctx: ParsedCommandContext,
     *,
     contexts: list,
     target_issue: int,
     flag_name: str,
     check_purpose: str,
-) -> list[str]:
-    """读取每个目标仓库里该 Issue 的正文；读不到即以用法错误拒绝旁路档位。
+) -> list:
+    """读取每个目标仓库里该 Issue 的详情；读不到即以用法错误拒绝旁路档位。
 
-    两个旁路档位的前置检查都是 fail-closed 的：无法从正文证明条件成立，就不能放行
-    跳过门禁的运行。
+    两个旁路档位的前置检查都是 fail-closed 的：无法从 Issue 详情证明条件成立，就不能
+    放行跳过门禁的运行。
 
     Args:
         ctx: 已解析命令上下文（提供 Issue 读取客户端工厂）。
         contexts: 目标仓库列表（同仓只读一次）。
         target_issue: 目标 Issue 编号。
         flag_name: 触发本次检查的旗标名，用于报错与修复建议。
-        check_purpose: 读取正文要回答的问题（用于报错信息）。
+        check_purpose: 读取详情要回答的问题（用于报错信息）。
 
     Returns:
-        每个去重后仓库的 Issue 正文。
+        每个去重后仓库的 Issue 详情（含正文与标签）。
 
     Raises:
         CliError: Issue 无法读取。
     """
-    bodies: list[str] = []
+    details: list = []
     for context in _unique_repository_contexts(contexts):
         github_client = ctx.github_client_factory(context.repo_path)
         try:
-            issue_detail = github_client.get_issue(target_issue)
+            details.append(github_client.get_issue(target_issue))
         except Exception as exc:  # noqa: BLE001 - 无法证明前置条件即拒绝旁路
             raise CliError(
                 f"{flag_name} requires reading Issue #{target_issue} to check "
@@ -312,8 +317,28 @@ def _target_issue_bodies(
                 suggestion=f"Verify the Issue number and repository access, "
                 f"or rerun without {flag_name}.",
             ) from exc
-        bodies.append(issue_detail.body)
-    return bodies
+    return details
+
+
+def _target_issue_bodies(
+    ctx: ParsedCommandContext,
+    *,
+    contexts: list,
+    target_issue: int,
+    flag_name: str,
+    check_purpose: str,
+) -> list[str]:
+    """读取每个目标仓库里该 Issue 的正文（``_target_issue_details`` 的正文投影）。"""
+    return [
+        issue_detail.body
+        for issue_detail in _target_issue_details(
+            ctx,
+            contexts=contexts,
+            target_issue=target_issue,
+            flag_name=flag_name,
+            check_purpose=check_purpose,
+        )
+    ]
 
 
 def _unique_repository_contexts(contexts: list) -> list:
@@ -368,6 +393,21 @@ def _require_explicit_target_claimable(
             ) from exc
 
 
+def _has_existing_direct_pr_cleanup(
+    github_client: IGitHubClient, issue_detail: IssueSummary
+) -> bool:
+    """只读核验成功同轮 PR，让 core 认领后补交接而非重新构建。"""
+    from backend.core.use_cases.agent_runner_direct_pr_round import has_readonly_direct_pr_cleanup
+
+    try:
+        return has_readonly_direct_pr_cleanup(github_client, issue_detail)
+    except Exception as exc:
+        raise CliError(
+            f"Cannot establish existing Direct PR handoff for Issue #{issue_detail.number}: {exc}",
+            code=ExitCode.USAGE,
+        ) from exc
+
+
 def _reject_fast_merge_on_stack_issue(
     ctx: ParsedCommandContext,
     *,
@@ -384,15 +424,21 @@ def _reject_fast_merge_on_stack_issue(
     """
     from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
 
-    for issue_body in _target_issue_bodies(
-        ctx,
-        contexts=contexts,
-        target_issue=target_issue,
-        flag_name="--fast-merge",
-        check_purpose="its dependency declaration",
-    ):
-        declaration = parse_dependency_marker(issue_body)
-        if declaration is not None and declaration.sequence == "stack":
+    for context in _unique_repository_contexts(contexts):
+        for issue_detail in _target_issue_details(
+            ctx,
+            contexts=[context],
+            target_issue=target_issue,
+            flag_name="--fast-merge",
+            check_purpose="its dependency declaration",
+        ):
+            declaration = parse_dependency_marker(issue_detail.body)
+            if declaration is None or declaration.sequence != "stack":
+                continue
+            if _has_existing_direct_pr_cleanup(
+                ctx.github_client_factory(context.repo_path), issue_detail
+            ):
+                continue
             upstream = ", ".join(f"#{number}" for number in declaration.issue_numbers)
             raise CliError(
                 f"Issue #{target_issue} declares a stack dependency (upstream: {upstream}); "
@@ -402,6 +448,50 @@ def _reject_fast_merge_on_stack_issue(
                 suggestion=f"Run Issue #{target_issue} without --fast-merge, or "
                 "fast-merge the upstream Issue first.",
             )
+
+
+def _reject_fast_merge_on_direct_pr_label(
+    ctx: ParsedCommandContext,
+    *,
+    contexts: list,
+    target_issue: int,
+) -> None:
+    """快速通道与直发标签的冲突门禁：目标 Issue 带 ``direct-pr`` 标签时拒绝放行。
+
+    两个旁路的跳入门禁范围不同（直发连审核 agent 与仓内验证一起跳），同时给出时不猜
+    优先级，明确报冲突。core 在认领后还会再判一次，这里让单定向的调用方在启动任何
+    agent（乃至 takeover 停 daemon）之前就听到错误。Issue 读不到时同样拒绝（fail-closed）。
+
+    Raises:
+        CliError: 目标 Issue 带直发标签，或 Issue 无法读取。
+    """
+    from backend.core.use_cases.agent_runner_direct_pr_label import configured_direct_pr_label
+
+    for context in _unique_repository_contexts(contexts):
+        label = configured_direct_pr_label(context.config)
+        if label is None:
+            continue
+        for issue_detail in _target_issue_details(
+            ctx,
+            contexts=[context],
+            target_issue=target_issue,
+            flag_name="--fast-merge",
+            check_purpose=f"whether it carries the '{label}' label",
+        ):
+            if label in issue_detail.labels:
+                if _has_existing_direct_pr_cleanup(
+                    ctx.github_client_factory(context.repo_path), issue_detail
+                ):
+                    continue
+                raise CliError(
+                    f"Issue #{target_issue} carries the '{label}' label while --fast-merge "
+                    "was requested; the two bypass tiers skip different gates, so neither "
+                    "is silently chosen.",
+                    code=ExitCode.USAGE,
+                    suggestion=f"kc run --issue {target_issue} (drops --fast-merge and honors the "
+                    f"Issue direct track) · or remove '{label}' from Issue #{target_issue} to run "
+                    "the fast track.",
+                )
 
 
 def _reject_direct_pr_on_prd_backed_issue(
@@ -420,15 +510,19 @@ def _reject_direct_pr_on_prd_backed_issue(
     """
     from backend.core.use_cases.agent_runner_feedback import extract_prd_path
 
-    for issue_body in _target_issue_bodies(
-        ctx,
-        contexts=contexts,
-        target_issue=target_issue,
-        flag_name="--direct-pr",
-        check_purpose="whether it carries a PRD anchor",
-    ):
-        prd_path = extract_prd_path(issue_body)
-        if prd_path is not None:
+    for context in _unique_repository_contexts(contexts):
+        for issue_detail in _target_issue_details(
+            ctx,
+            contexts=[context],
+            target_issue=target_issue,
+            flag_name="--direct-pr",
+            check_purpose="whether it carries a PRD anchor",
+        ):
+            prd_path = extract_prd_path(issue_detail.body)
+            if prd_path is None or _has_existing_direct_pr_cleanup(
+                ctx.github_client_factory(context.repo_path), issue_detail
+            ):
+                continue
             raise CliError(
                 f"Issue #{target_issue} is PRD-backed (anchor: `{prd_path}`); --direct-pr "
                 "is only defined for Issues without a PRD anchor, because a PRD-backed "

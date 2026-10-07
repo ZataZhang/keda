@@ -122,6 +122,7 @@ class AgentRunnerLabelSettings(BaseModel):
     kimi: str | None = None
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
+    direct_pr: str = "direct-pr"
 
     def legacy_agent_label_overrides(self) -> dict[str, str]:
         """返回旧版三个 agent 键中**显式设置**的标签覆盖（供注册表合并）。"""

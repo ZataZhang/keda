@@ -345,7 +345,7 @@ def commit_requested_changes(
         # 直发档：commit proxy 仍是唯一提交路径，分支/禁改路径/干净度检查全部照常，
         # 只是不再跑仓库配置的验证命令与 pre-commit 命令（门禁转移到 PR 上的 CI）。
         _logger.info(
-            "Direct-pr (origin: --direct-pr run flag): skipping staged verification and "
+            "Direct-pr track (PublishStage.DIRECT): skipping staged verification and "
             "the pre-commit command for Issue #%d; the commit itself is still runner-made.",
             issue.number,
         )

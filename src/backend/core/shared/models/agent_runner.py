@@ -422,6 +422,9 @@ class LabelConfig:
     verifier_passed: str = "validation/verifier-passed"
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
+    # 直发档选择标签：不是 workflow 状态标签，状态切换必须保留它，
+    # 由认领赢家在一次成功发布后消费（移除）。
+    direct_pr: str = "direct-pr"
     # agent 路由标签由 agent 注册表派生（agent 名 -> spec.label），
     # 注册顺序即 choose_agent 的标签匹配顺序。
     agent_labels: dict[str, str] = field(

@@ -48,6 +48,12 @@ from backend.core.use_cases.agent_runner_final_verification import (
     FinalVerificationRequest,
     ensure_final_verifier_verdict,
 )
+from backend.core.use_cases.agent_runner_direct_pr_round import complete_direct_pr_round
+from backend.core.use_cases.agent_runner_direct_pr_round import DirectPrPublicationCandidate
+from backend.core.use_cases.agent_runner_direct_pr_label import (
+    consume_label_after_publication,
+    DirectPrLabelPublicationRequest,
+)
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import PublishFailureError
 from backend.core.use_cases.agent_runner_publish import (
@@ -346,7 +352,7 @@ def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrP
     # 携带的两道验证门禁与 PR 标注。直发档再往前一步，连 reviewer agent 也不跑。
     if verification_request.publish_stage.skips_review_and_repo_verification:
         _logger.info(
-            "Direct-pr (origin: --direct-pr run flag): skipping the pre-PR review agent "
+            "Direct-pr track (PublishStage.DIRECT): skipping the pre-PR review agent "
             "for Issue #%d; CI on the Draft PR is the gate.",
             verification_request.issue.number,
         )
@@ -487,19 +493,41 @@ def _reuse_existing_local_commit(
     Returns:
         包含验证结果的 AgentCommitResult，或 None（不满足复用条件）
     """
+    return _reuse_local_commit(
+        LocalCommitReuseRequest(issue, worktree_path, config, process_runner)
+    )
+
+
+@dataclass(frozen=True)
+class LocalCommitReuseRequest:
+    """已有提交复用的档位与机械安全检查上下文。"""
+
+    issue: IssueSummary
+    worktree_path: Path
+    config: AppConfig
+    process_runner: IProcessRunner
+    publish_stage: PublishStage = PublishStage.NORMAL
+
+
+def _reuse_local_commit(request: LocalCommitReuseRequest) -> AgentCommitResult | None:
+    """DIRECT 只跳验证，保留有提交、干净工作树和禁改路径检查。"""
+    issue = request.issue
+    worktree_path = request.worktree_path
+    config = request.config
+    process_runner = request.process_runner
     local_commit_count = _count_local_commits_since_base(worktree_path, config, process_runner)
     if local_commit_count <= 0 or has_changes(worktree_path, process_runner):
         return None
 
-    # 验证步骤：运行配置的验证命令
-    verification_results = run_verification(worktree_path, config, process_runner)
-    ensure_verification_passed(verification_results)
+    from backend.core.use_cases.agent_runner_publish import validate_safe_changes
 
-    # PRD 交付物检查：确保必要文件存在
-    ensure_prd_delivery_ready(issue, worktree_path, process_runner)
-
-    # Realistic Validation 证据门禁：复用路径同样不允许缺证据发布
-    ensure_validation_evidence_ready(issue, worktree_path, config)
+    validate_safe_changes(worktree_path, config, process_runner)
+    verification_results: list[CommandResult] = []
+    if not request.publish_stage.skips_review_and_repo_verification:
+        verification_results = run_verification(worktree_path, config, process_runner)
+        ensure_verification_passed(verification_results)
+        ensure_prd_delivery_ready(issue, worktree_path, process_runner)
+        ensure_validation_evidence_ready(issue, worktree_path, config)
 
     # 二次检查：验证后可能有新变更
     if has_changes(worktree_path, process_runner):
@@ -655,7 +683,7 @@ def _should_run_post_pr_supervisor(
         return False
     if publish_stage.skips_review_and_repo_verification:
         _logger.info(
-            "Direct-pr (origin: --direct-pr run flag): skipping the post-PR supervisor "
+            "Direct-pr track (PublishStage.DIRECT): skipping the post-PR supervisor "
             "for Issue #%d; the Draft PR goes straight to %s and CI on it is the gate.",
             issue_number,
             config.labels.review,
@@ -676,6 +704,7 @@ def _finish_implementation_publication(
     commit_result: AgentCommitResult,
     content_generator: IContentGenerator | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    direct_pr_label: str | None = None,
 ) -> None:
     """完成新实现的发布流程（完整路径）。
 
@@ -684,7 +713,8 @@ def _finish_implementation_publication(
     2. 立即 push 实现 commit 到远程（不再被 review 阻塞）
     3. 运行 pre-PR code review（reviewer 修复会即时 push）
     4. review 收敛后才创建 Draft PR
-    5. 启动 PR 后监督循环（或直接进入 review 标签）
+    5. 消费 Issue 上的直发标签（命中过标签时）
+    6. 启动 PR 后监督循环（或直接进入 review 标签）
 
     Args:
         issue: Issue 对象
@@ -698,6 +728,9 @@ def _finish_implementation_publication(
         content_generator: 可选的 AI 内容生成器（用于 PR description）
         publish_stage: 发布档位：非 ``NORMAL`` 时跳过发布前的最终 RV / verifier
             复核，PR 正文打未验证标注；``DIRECT`` 连 pre-PR review agent 也不跑。
+        direct_pr_label: 本次认领命中的直发标签名；确认 Draft PR 与本次发布同次后由
+            认领赢家移除该标签。``None`` 表示档位来自调用侧（如 CLI 旗标）而非标签，
+            此时不写任何标签。
     """
     # 导入监督循环（避免循环导入）
     from backend.core.use_cases.agent_runner_supervisor import (
@@ -767,6 +800,22 @@ def _finish_implementation_publication(
         )
     )
 
+    # 直发标签的消费点：Draft PR 已确认（同仓、同 Issue 分支、同 head、正文带指认本
+    # Issue 的 `iar:direct-pr` marker）才移除标签。放在 workflow 标签切换之前——删除
+    # 失败时 Issue 仍停在 running，下一轮认领会确认同一个 PR 并只补清理，而不是重复
+    # 构建或重复建 PR。
+    consume_label_after_publication(
+        DirectPrLabelPublicationRequest(
+            github_client=github_client,
+            issue_number=issue.number,
+            direct_pr_label=direct_pr_label,
+            candidate=DirectPrPublicationCandidate(
+                branch=reviewed_pr.branch, head=get_head_sha(worktree_path, process_runner)
+            ),
+            pr_url=reviewed_pr.pr_url,
+        )
+    )
+
     # 切换标签：running → supervising，并清理其他 workflow labels。
     _edit_issue_labels_after_publish(
         issue_number=issue.number,
@@ -779,6 +828,8 @@ def _finish_implementation_publication(
     )
 
     _publish_verified_pr(reviewed_pr)
+    if direct_pr_label is not None:
+        complete_direct_pr_round(github_client, issue)
 
     # 步骤 4: PR 后监督（可选；直发档不进监督）
     if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
@@ -842,6 +893,7 @@ def _finish_existing_commit_publication(
     expected_branch: str,
     commit_result: AgentCommitResult,
     content_generator: IContentGenerator | None = None,
+    direct_pr_label: str | None = None,
 ) -> None:
     """完成已存在本地 commit 的恢复发布流程。
 
@@ -853,11 +905,14 @@ def _finish_existing_commit_publication(
     2. 立即 push 本地 commit 到远程
     3. 运行 pre-PR code review（reviewer 修复会即时 push）
     4. review 收敛后才创建 Draft PR
-    5. 启动 PR 后监督循环（或直接进入 review 标签）
+    5. 消费 Issue 上的直发标签（命中过标签时）
+    6. 启动 PR 后监督循环（或直接进入 review 标签）
 
     Args:
         publish_stage: 恢复发布路径下的发布档位：非 ``NORMAL`` 时同样跳过发布前 RV /
             verifier 复核并打未验证标注。
+        direct_pr_label: 本次认领命中的直发标签名；确认 Draft PR 与本次发布同次后由
+            认领赢家移除。``None`` 表示档位来自调用侧旗标，不写任何标签。
         issue: Issue 对象
         worktree_path: worktree 目录
         config: 应用配置
@@ -926,6 +981,19 @@ def _finish_existing_commit_publication(
             content_generator=content_generator,
         )
     )
+    # 恢复路径同样只在确认同次 PR 之后消费标签（判据与完整路径完全一致）。
+    consume_label_after_publication(
+        DirectPrLabelPublicationRequest(
+            github_client=github_client,
+            issue_number=issue.number,
+            direct_pr_label=direct_pr_label,
+            candidate=DirectPrPublicationCandidate(
+                branch=reviewed_pr.branch, head=get_head_sha(worktree_path, process_runner)
+            ),
+            pr_url=reviewed_pr.pr_url,
+        )
+    )
+
     # 切换标签：从 workflow state labels → supervising
     _edit_issue_labels_after_publish(
         issue_number=issue.number,
@@ -935,6 +1003,8 @@ def _finish_existing_commit_publication(
         github_client=github_client,
     )
     _publish_verified_pr(reviewed_pr)
+    if direct_pr_label is not None:
+        complete_direct_pr_round(github_client, issue)
 
     # 步骤 4: PR 后监督（可选；直发档不进监督）
     if _should_run_post_pr_supervisor(config, publish_stage, issue.number):

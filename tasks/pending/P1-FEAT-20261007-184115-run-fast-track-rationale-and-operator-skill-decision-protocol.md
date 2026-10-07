@@ -4,7 +4,7 @@
 
 > ⛔ **交付前置**：改名与 operator hub 两份 PRD 经主线合并后开工。§8 是依赖唯一事实源。
 >
-> ⬜ **验收状态**：未开工。此横幅投影 §9，那里是唯一事实源。
+> 🚧 **验收状态**：实现与验证中，尚未取得最终独立验收。此横幅投影 §9，那里是唯一事实源。
 >
 > Part A 为人审层，Part B 为执行器层；功能一览投影 §10。
 
@@ -143,7 +143,7 @@ No frontend impact：本期使用 GitHub 原生标签界面和现有 CLI，不�
 4. core 共同入口验证 DIRECT 无 PRD anchor、正文可读、既有依赖门禁，CLI 复用同一业务检查或保留入口错误映射。拒绝时无 builder/PR 创建，无消费标签；daemon 记录 blocked/error 并继续其他任务，不使整轮崩溃。
 5. 档位沿正常、已有提交、running 恢复和发布兜底链传递；创建 PR 保留原 DIRECT marker 与质量声明。不改 marker 协议，不增加理由。
 6. 找到并确认本次发布对应 PR（仓库、Issue、branch/head 与原直发 marker 匹配）后，仅认领赢家移除配置指定标签，不删除其他标签。创建失败/执行失败不移除。
-7. PR 创建成功与标签删除不是原子操作：删除失败报告「发布成功、标签清理待恢复」并保留 PR URL；不能宣称完整成功。后续通过已有 PR 查询/关联恢复，先确认匹配直发 PR，再补清理；不得重新构建/建 PR，也不得仅因任意历史 PR 有 marker 就消费新一轮标记。
+7. PR 创建成功与标签删除不是原子操作：删除失败或成功响应但 fresh 回读标签仍在时，报告「发布成功、标签清理待恢复」并保留 PR URL；不能宣称完整成功。后续通过已有 PR 查询/关联恢复，先确认匹配直发 PR，再补清理；不得重新构建/建 PR，也不得仅因任意历史 PR 有 marker 就消费新一轮标记。
 8. PR 成功后崩溃、已移除标签后状态切换崩溃、blocked/running 恢复均需对应测试；靠 PR 持久状态与现有认领/恢复上下文识别同次发布，不为此新增常驻服务。实现前确认关联信息是否充分，若不足扩展最小现有恢复记录并更新影响树，禁止用「标签删除即 exactly-once」掩盖缺口。
 9. CLI 旗标直发且 Issue 没标签不新增标签写入。无法 fresh read 时 fail-closed 不执行；已有成功 PR 的清理恢复允许处理带 PRD/内容变更的当前 Issue，但只补清理，不启动新的 DIRECT。
 
@@ -157,7 +157,7 @@ No frontend impact：本期使用 GitHub 原生标签界面和现有 CLI，不�
 
 ### 7.1 Core Logic
 
-认领仲裁 → fresh Issue → 每 Issue 档位与准入 → 已有同次 PR 恢复或执行 → 确认 Draft PR → 消费 label → 原 workflow 状态迁移。
+发现阶段只读识别已发布同轮 PR → 认领仲裁与本地锁 → fresh Issue 与关联重核 → 已发布者只补交接；其余每 Issue 档位、准入及依赖 → 执行 → 创建前候选检查点 → 确认 Draft PR → 消费 label 并 fresh 回读 → 原 workflow 状态迁移 → 检查点完成。
 
 ### 7.2 Change Impact Tree
 
@@ -169,12 +169,19 @@ No frontend impact：本期使用 GitHub 原生标签界面和现有 CLI，不�
 │   ├── agent_runner_orchestration_runtime.py [修改]【总结】共同入口每 Issue 解析/验证档位
 │   ├── agent_runner_issue_handlers.py [修改]【总结】认领后 fresh read，正常/恢复接同一档位
 │   ├── agent_runner_publication.py [修改]【总结】确认 PR 后消费标签，清理失败与恢复幂等
-│   └── run_agent_daemon.py [核对/按需修改]【总结】daemon 共享 Issue 级行为，拒绝隔离不影响其他任务
+│   ├── agent_runner_direct_pr_label.py [新增]【总结】统一 fresh 档位、准入、依赖与消费，fallback 选择对象
+│   ├── agent_runner_direct_pr_round.py [新增]【总结】复用 Issue 评论持久化当前轮次、创建前候选与交接检查点
+│   ├── agent_runner_recovery_selection.py [新增]【总结】blocked/running 共用认领与 fresh 选择，cleanup-only 失联时拒绝新工作
+│   ├── agent_runner_publish.py [修改]【总结】创建前证明旧 PR 不存在，创建后确认仓库/Issue/branch/head/marker 关联
+│   ├── recover_publish.py [修改]【总结】已有工作树锁、DIRECT 认领与只补交接恢复
+│   ├── agent_runner_final_verification.py / run_agent_execution_loop.py [修改]【总结】标签来源日志与既有 DIRECT 旁路保持一致
+│   └── run_agent_daemon.py [核对，无修改]【总结】既有 daemon 共享 Issue 编排与拒绝隔离
 ├── src/backend/api/
 │   └── cli_parsed_commands/runner.py [修改]【总结】原 CLI 限制与 core 准入一致，映射冲突错误
 ├── src/backend/infrastructure/
 │   ├── github_labels.py [修改]【总结】既有同步机制加入非 workflow 直发标签
 │   └── config/ [按需修改]【总结】既有标签配置加载及序列化同步
+├── config.toml / src/backend/engines/agent_runner/factory_config_{builder,merge}.py [修改]【总结】默认/覆盖配置传播
 ├── src/backend/engines/agent_runner/templates/skills/kedacode-operator/
 │   ├── SKILL.md [修改]【总结】更新 daemon 可消费显式 Issue 直发标记的不变量
 │   ├── references/run-once.md [修改]【总结】标签/旗标解析和判据
@@ -232,7 +239,7 @@ No data model changes in persistent schema. 增加配置字段与 GitHub label�
 - id: rv-1
   behavior: 跨机器语义的 label 被 run/batch/daemon 按 Issue 消费为 DIRECT，准入限制与隔离成立
   reviewer: human
-  presentation: "真实测试 Issue/PR URL 与标签前后截图；混合队列及拒绝矩阵"
+  presentation: "真实测试 Issue/PR URL 与标签前后 fresh API 原始状态；混合队列及拒绝矩阵"
   real_entry: "GitHub 给 ready Issue 加 direct-pr，独立执行进程 kc run 或 kc daemon 发现认领；批量含标记和未标记 Issue"
   expected: "标记任务 DIRECT、保留直发 marker；相邻任务 NORMAL；有 PRD/读取失败/FAST 冲突拒绝且无 builder/建 PR；label 不使非 ready 任务入队"
   mock_boundary: "fallback 可 fake GitHub/agent/process；CLI、实际 daemon 迭代和共同编排必须真实。最终至少一条真实 GitHub daemon/独立进程流程"
@@ -283,7 +290,7 @@ No data model changes in persistent schema. 增加配置字段与 GitHub label�
   negative_control: "not feasible — 人读语义不新增文本强制守卫；配置隔离和状态标签保留用现有测试机制证明"
 ```
 
-矩阵覆盖显式 CLI DIRECT+label、FAST+label 冲突、无标签旧行为、两并发认领者仅赢家执行/消费、fresh read 与队列快照不同、不同仓库同编号隔离、恢复已存在同次 PR 和新轮历史 PR 不匹配。真实截图标 `real user flow`。失败先检查 Issue 级来源、claim 归属、PR 关联或删除 API；负控不修改生产代码制造红灯。
+矩阵覆盖显式 CLI DIRECT+label、FAST+label 冲突、无标签旧行为、两并发认领者仅赢家执行/消费、fresh read 与队列快照不同、不同仓库同编号隔离、恢复已存在同次 PR 和新轮历史 PR 不匹配。本功能不新增 UI；用户已明确不要求证据展示仪式，真实 GitHub API fresh read 提供标签/PR 状态，不以截图冒充浏览器 user flow。失败先检查 Issue 级来源、claim 归属、PR 关联或删除 API；负控不修改生产代码制造红灯。
 
 ### 7.7 Low-Fidelity Prototype
 
@@ -295,7 +302,7 @@ No interactive prototype file changes in this PRD.
 
 ### 7.9 External Validation
 
-No external validation required; repository evidence was sufficient. 外部非原子行为由测试与真实 GitHub fresh read 验证。
+真实 GitHub 私有隔离仓库验证为交付必需；外部非原子故障由持久 adapter 注入，并通过新客户端回读。外部凭据或网络失败不得声明 rv-1 PASS。
 
 ## 8. Delivery Dependencies
 
@@ -310,7 +317,7 @@ No external validation required; repository evidence was sufficient. 外部非�
 
 ### 9.1 人读呈递区（Human Review Surface）
 
-交付填写可点真实 URL 和证据相对路径，经 `just prd review <prd-file>` 聚合打开。真实截图在 PRD/报告就地嵌入，附「本地图片，GitHub 上不显示」与仓库根可执行 open 命令；不提交机器绝对路径。完成回复呈递本表。
+交付填写可点真实 URL 和证据相对路径，经 `just prd review <prd-file>` 聚合打开。本期无 UI 改动，按用户授权呈递真实 Issue/PR URL 与 fresh API 文本状态、故障矩阵；不要求 UI 截图，不把 API 证据声明为浏览器 user flow。完成回复呈递链接。
 
 | Oracle | 你要看什么 | 呈递物（交付填） | 自己复核 |
 |---|---|---|---|
@@ -453,5 +460,14 @@ No external validation required; repository evidence was sufficient. 外部非�
 - Reason: 用户明确核心场景是其他电脑或 daemon 认领仍可 Direct PR，并确认以上标签方案；此前排除 label/daemon 的解读已被取代。
 - Impact: 本期恢复后端功能范围，不恢复理由参数。方案确认不代表实现/最终验收；仅修订本 PRD，沿用原路径保留引用。
 - Review: 待实施。
+
+### 2026-10-08 实现机制与验证呈递校准
+
+- Type: implementation
+- Before: 现有 PR marker/head 与恢复上下文是否足够仍待核对；请求截图，§7.9 错称无需外部验证。
+- After: 复用 Issue 评论及初始认领 ID 保存最小检查点；创建前持久化候选和无历史 PR 基线，创建后绑定 URL，删除后 fresh 回读，再完成 workflow 交接。恢复优先补已发布同轮交接，即使当前正文新增 PRD。fallback 缓存当轮档位，正文与依赖保持 fresh。
+- Reason: 同 head 历史 PR 不能证明新轮发布；PR 响应丢失及标签已删/workflow 未交接都需跨进程证据。用户明确不要求证据展示仪式，本期无 UI 改动，使用真实 GitHub fresh API 状态和文本报告。
+- Impact: 更新影响树、必需真实外部验证与文字呈递；不新增数据库、授权服务、CLI 参数或理由字段，尚未勾选验收。
+- Review: 实现已完成，最终门禁、真实探针与独立 verifier 进行中。
 
 Machine-Contract-Version: 5

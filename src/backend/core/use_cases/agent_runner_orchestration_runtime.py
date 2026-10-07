@@ -46,6 +46,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
 )
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_runner_direct_pr_label import PublishStageSelection
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
     issue_output_routing,
@@ -327,6 +328,7 @@ def _process_single_issue(
     prd_activity_lease = PrdActivityLease(
         repo_path, lifecycle_prd_path, issue.number, selected_agent
     )
+    stage_selection = PublishStageSelection()
     try:
         prd_activity_lease.start()
         if issue_kind == "ready":
@@ -343,6 +345,7 @@ def _process_single_issue(
                     process_runner=process_runner,
                     content_generator=content_generator,
                     publish_stage=publish_stage,
+                    stage_selection=stage_selection,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
                 on_agent_usage=_emit_agent_usage_event,
@@ -418,6 +421,7 @@ def _process_single_issue(
                     content_generator=content_generator,
                     marker=marker,
                     publish_stage=publish_stage,
+                    stage_selection=stage_selection,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
                 on_agent_usage=_emit_agent_usage_event,
@@ -429,6 +433,7 @@ def _process_single_issue(
                 agent=agent,
                 process_for_agent=partial(
                     _process_running_publish_recovery,
+                    cleanup_only=issue_kind == "direct_pr_cleanup",
                     issue=issue,
                     repo_path=repo_path,
                     config=config,
@@ -436,6 +441,7 @@ def _process_single_issue(
                     process_runner=process_runner,
                     content_generator=content_generator,
                     publish_stage=publish_stage,
+                    stage_selection=stage_selection,
                 ),
             )
         _logger.info("Completed Issue #%d: %s", issue.number, issue.title)
@@ -547,6 +553,19 @@ def _process_single_issue(
         prd_activity_lease.close()
 
 
+def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueSummary) -> bool:
+    """只读证明待交接 PR，让发现过滤器不把已发布轮次误当新工作拦截。"""
+    from backend.core.use_cases.agent_runner_direct_pr_round import has_readonly_direct_pr_cleanup
+
+    try:
+        return has_readonly_direct_pr_cleanup(github_client, issue)
+    except Exception as exc:  # noqa: BLE001 - 关联读失败不允许旁路发现门禁。
+        _logger.warning(
+            "Cannot establish pending Direct PR handoff for Issue #%d: %s", issue.number, exc
+        )
+        return False
+
+
 @dataclass(frozen=True)
 class RunOnceRequest:
     """Agent Runner 单轮队列调度请求。"""
@@ -569,7 +588,8 @@ class RunOnceRequest:
     target_issue: int | None = None
     #: 发布档位（``kc run --fast-merge`` / ``--direct-pr``）：本次运行执行 agent
     #: 之后还剩多少门禁与第二个 agent。``NORMAL`` 即默认全量路径；daemon 与其余
-    #: 调用方恒为 ``NORMAL``（默认值），行为与今天完全一致。
+    #: 调用方传的仍是 ``NORMAL``（默认值），但它是**调用侧请求档位**——认领后
+    #: core 会用 Issue 上的 ``direct-pr`` 标签把它升级为 ``DIRECT``（逐 Issue 独立）。
     publish_stage: PublishStage = PublishStage.NORMAL
 
 
@@ -706,6 +726,10 @@ def run_once(request: RunOnceRequest) -> int:
             break
         declaration = parse_dependency_marker(issue.body)
         if declaration is not None:
+            if _has_published_direct_pr_handoff(github_client, issue):
+                issues_to_process.append((issue, "direct_pr_cleanup"))
+                processed_count += 1
+                continue
             verdict = evaluate_dependencies(declaration, github_client, config.labels)
             if not verdict.satisfied:
                 mark_dependency_waiting(
@@ -748,6 +772,9 @@ def run_once(request: RunOnceRequest) -> int:
                 [config.labels.running], remaining
             )
         for issue in running_candidates:
+            if _has_published_direct_pr_handoff(github_client, issue):
+                issues_to_process.append((issue, "direct_pr_cleanup"))
+                continue
             is_rework, marker = _guard_running_issue_is_rework(issue, config, github_client)
             if is_rework and marker is not None:
                 issues_to_process.append((issue, "running_rework"))
@@ -789,6 +816,8 @@ def run_once(request: RunOnceRequest) -> int:
             marker = _guard_blocked_issue_has_resolution(issue, github_client)
             if marker is not None:
                 issues_to_process.append((issue, "blocked_resolution"))
+            elif _has_published_direct_pr_handoff(github_client, issue):
+                issues_to_process.append((issue, "direct_pr_cleanup"))
             else:
                 _logger.info(
                     "Skipping Issue #%d with label %s: no blocked_resolution_requested marker.",
