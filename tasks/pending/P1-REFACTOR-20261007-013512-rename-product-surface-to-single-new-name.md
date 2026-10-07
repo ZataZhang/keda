@@ -1,5 +1,7 @@
 # PRD: 产品表面改名为 KedaCode / `kc` —— `iar` 保留为弃用别名，本机状态与配置双读迁移
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/228
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
