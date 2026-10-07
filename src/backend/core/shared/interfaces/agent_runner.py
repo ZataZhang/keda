@@ -170,11 +170,14 @@ class IProcessRunner(ABC):
                 命令），并强制以捕获模式运行；为 ``None`` 时不写 stdin。
             label: 可选的运行上下文标签，用于在 watchdog 心跳或超时
                 日志中标识本次命令。例如 ``"Issue #23: https://..."``。
-            output_sink: 可选的流式输出回调。提供时，Claude ``stream-json``
-                的渲染文本块会逐块回传给该回调，而非直接 ``print`` 到当前
-                终端——用于并行处理时把每个 Issue 的 agent 输出分流到独立
-                面板/日志，避免多路输出在同一 stdout 交错。非 Claude 流式
-                命令忽略该参数。
+            output_sink: 可选的流式输出回调。提供时，流式渲染文本块会逐块
+                回传给该回调，而非直接 ``print`` 到当前终端——用于并行处理
+                时把每个 Issue 的 agent 输出分流到独立面板/日志，避免多路
+                输出在同一 stdout 交错。回传块是**可读原文**：实现端不加
+                行首时间戳，需要时间线的消费方在自己的边界上加（per-Issue
+                实时输出由 ``core/use_cases/agent_runner_output_routing.py``
+                的 sink 统一加 ``[HH:MM:SS]``，见 Issue #223）。
+                通用捕获路径（``capture_output=True``）不使用该回调。
             output_protocol: agent 调用路径专用的输出协议 id（来自
                 ``build_agent_invocation`` 的声明式 spec）。``None`` 或
                 ``"plain"`` 表示通用命令，按既有路径执行；非 plain 值由
@@ -244,10 +247,12 @@ class IAgentTranscriptRunner(ABC):
             cwd: Agent 进程的工作目录，通常是目标仓库或工作树根目录。
             event_sink: 针对每个解析出的结构化事件调用的回调。这是
                 必填项，是审议流程消费 Agent 输出的主要通道。
-            output_sink: 可选回调，用于接收「可读的、已渲染的文本块」。
+            output_sink: 可选回调，用于接收「可读的、已渲染的文本块」
+                （可读原文，不带行首时间戳；时间线只在需要它的消费侧加，
+                见 :class:`IProcessRunner` 的 ``output_sink`` 说明）。
                 提供时，每一块渲染输出会在到达时即时传入，便于实时
-                流式展示并追加写入工作区文件。这部分内容会计入正式
-                transcript。
+                流式展示并追加写入工作区文件。
+                这部分内容会计入正式 transcript。
             display_sink: 可选回调，用于接收「临时性的进度文本」，
                 例如 Agent 在 stderr 上输出的推理过程 / 工具调用日志。
                 与 ``output_sink`` 的关键区别在于：它仅供即时展示，
