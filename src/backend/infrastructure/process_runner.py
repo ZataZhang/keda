@@ -380,7 +380,7 @@ class SubprocessRunner:
                     for line in process.stdout:
                         watchdog.note_output()
                         if output_sink is not None:
-                            output_sink(line)
+                            output_sink(_format_timestamped_line(line))
                         else:
                             timestamped = _format_timestamped_line(line)
                             print(timestamped, end="", flush=True)
@@ -390,7 +390,7 @@ class SubprocessRunner:
                     for line in process.stderr:
                         watchdog.note_output()
                         if output_sink is not None:
-                            output_sink(line)
+                            output_sink(_format_timestamped_line(line))
                         else:
                             timestamped = _format_timestamped_line(line)
                             print(timestamped, end="", file=sys.stderr, flush=True)
@@ -775,7 +775,8 @@ def run_filtered_claude_stream(
             stdout/stderr output.
         collect_stdout: Whether to collect rendered output.
         prompt_text: Optional prompt to pass via stdin.
-        output_sink: Optional callback for rendered text chunks.
+        output_sink: Optional callback for rendered text chunks; each physical
+            line start is prefixed with ``[HH:MM:SS]`` like the terminal view.
         display_sink: Optional callback for stderr lines (display only).
             When provided, stderr is drained on a background thread and
             routed here instead of leaking raw onto the terminal.
@@ -853,13 +854,14 @@ def run_filtered_claude_stream(
                 if collect_stdout and rendered_text:
                     stdout_lines.append(rendered_text)
                 if rendered_text:
+                    timestamped = stream_formatter.format_chunk(rendered_text)
                     if output_sink is not None:
                         # The sink drives the live view and the workspace file;
                         # skip stdout/logger writes that would corrupt the
-                        # live region.
-                        output_sink(rendered_text)
+                        # live region. 行首时间戳与终端实时视图保持一致，
+                        # Console 才能对照心跳行核对事件时间线。
+                        output_sink(timestamped)
                         continue
-                    timestamped = stream_formatter.format_chunk(rendered_text)
                     print(timestamped, end="", flush=True)
 
                     # Structured events go straight to logger
@@ -925,7 +927,8 @@ def _run_pty_stream(
         timeout: Optional wall-clock timeout in seconds.
         inactivity_timeout: Optional no-output timeout in seconds.
         label: Optional label for heartbeat/timeout logs.
-        output_sink: Optional callback for rendered text chunks.
+        output_sink: Optional callback for rendered text chunks; each physical
+            line start is prefixed with ``[HH:MM:SS]`` like the terminal view.
 
     Returns:
         CompletedProcess with the collected stdout (stderr merged into it).
@@ -987,7 +990,9 @@ def _run_pty_stream(
             return
         collected.append(text)
         if output_sink is not None:
-            output_sink(text)
+            # sink 与终端走同一 formatter：Issue 日志与实时视图里的
+            # 每行事件都带 [HH:MM:SS] 行首时间戳。
+            output_sink(stream_formatter.format_chunk(text))
             return
         print(stream_formatter.format_chunk(text), end="", flush=True)
         line_buffer.append(text)

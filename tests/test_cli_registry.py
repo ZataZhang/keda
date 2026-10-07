@@ -1015,6 +1015,21 @@ def _run_issue_follow(repo_dir: Path, issue_number: int):
         )
 
 
+class _VirtualFollowClock:
+    """只暴露 ``monotonic`` / ``sleep`` 的假时钟：时间随轮询推进，不随宿主速度漂移。"""
+
+    def __init__(self) -> None:
+        self._now = 0.0
+
+    def monotonic(self) -> float:
+        """Return the virtual elapsed seconds."""
+        return self._now
+
+    def sleep(self, seconds: float) -> None:
+        """Advance the virtual clock by ``seconds``."""
+        self._now += seconds
+
+
 def test_logs_command_issue_follow_does_not_exit_on_bare_eof(tmp_path: Path, capsys) -> None:
     """回归：裸 EOF 不等于运行结束。
 
@@ -1025,9 +1040,14 @@ def test_logs_command_issue_follow_does_not_exit_on_bare_eof(tmp_path: Path, cap
     repo_dir = tmp_path / "repo"
     _make_issue_attempt(repo_dir, "fixture-repo", 42, "line-1\nline-2\n")
 
+    # 空闲兜底走假时钟：真实 sleep 配几十毫秒的阈值等于测机器速度——testmon /
+    # coverage 插桩或整套并发跑时，单次轮询就能超过阈值，"仍在跟随"的提示还没
+    # 打印就已经落到兜底退出。时间只按轮询次数推进后，判定与宿主负载无关。
+    follow_clock = _VirtualFollowClock()
     with (
-        patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 0.01),
-        patch("backend.api.cli_registry._FOLLOW_IDLE_EXIT_SECONDS", 0.05),
+        patch("backend.api.cli_registry.time", follow_clock),
+        patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 1.0),
+        patch("backend.api.cli_registry._FOLLOW_IDLE_EXIT_SECONDS", 5.0),
     ):
         exit_code = _run_issue_follow(repo_dir, 42)
 
@@ -1049,10 +1069,13 @@ def test_logs_command_issue_follow_exits_on_attempt_end_marker(tmp_path: Path, c
         f"line-1\n{ATTEMPT_END_MARKER}\n",
     )
 
+    follow_clock = _VirtualFollowClock()
     with (
-        patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 0.01),
-        # 空闲兜底设得很短：若标记判定失效，退出会走兜底路径，下面的断言即失败。
-        patch("backend.api.cli_registry._FOLLOW_IDLE_EXIT_SECONDS", 0.2),
+        patch("backend.api.cli_registry.time", follow_clock),
+        patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 1.0),
+        # 空闲兜底故意设得比首次读标记晚：若标记判定失效，退出会走兜底路径，
+        # 下面的断言即失败。
+        patch("backend.api.cli_registry._FOLLOW_IDLE_EXIT_SECONDS", 5.0),
     ):
         exit_code = _run_issue_follow(repo_dir, 42)
 

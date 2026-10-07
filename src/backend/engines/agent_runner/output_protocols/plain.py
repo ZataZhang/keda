@@ -2,9 +2,9 @@
 
 行为等价于历史 ``transcript_runner`` 的
 ``_run_agent_with_stdin_prompt`` / ``_relay_process_stdout``：
-逐行把 stdout 交给 ``output_sink``（或终端 + logger），stderr 在后台
-线程里泵给 ``display_sink``（仅展示、不进 transcript），提示词按需
-写入 stdin。不做任何结构化渲染。
+逐行把 stdout 交给 ``output_sink``（行首加 ``[HH:MM:SS]``，与终端实时视图
+一致；或终端 + logger），stderr 在后台线程里泵给 ``display_sink``（仅展示、
+不进 transcript），提示词按需写入 stdin。不做任何结构化渲染。
 """
 
 from __future__ import annotations
@@ -110,7 +110,9 @@ def _relay_process_stdout(
                 if output_sink is not None:
                     # The sink drives the live view and the workspace file;
                     # avoid writing to stdout (would corrupt the live region).
-                    output_sink(line)
+                    # 行首时间戳与终端实时视图一致，per-Issue 日志里的每行
+                    # agent 输出才有一条可对时的时间线。
+                    output_sink(_format_timestamped_line(line))
                 else:
                     logger.info("%s", line.rstrip("\n"))
                     timestamped = _format_timestamped_line(line)

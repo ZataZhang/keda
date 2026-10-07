@@ -24,7 +24,10 @@ from backend.core.shared.models.agent_spec import PROMPT_DELIVERY_STDIN
 from backend.infrastructure.agent_stream_usage import StreamUsageCollector
 from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
-from backend.infrastructure.process_runner import _format_timestamped_line
+from backend.infrastructure.process_runner import (
+    _TimestampedStreamFormatter,
+    _format_timestamped_line,
+)
 
 
 class PiJsonLinesOutputProtocol:
@@ -122,6 +125,9 @@ def _relay_events(
 ) -> str:
     """逐行读取事件流，渲染后交给 sink；返回收集的渲染文本。"""
     rendered_parts: list[str] = []
+    # 有状态的行首 formatter：text delta 以碎片到达，只在物理行首加
+    # [HH:MM:SS]，不切断同一行中间；sink（Issue 日志/实时视图）与终端一致。
+    stream_formatter = _TimestampedStreamFormatter()
     try:
         if process.stdout is not None:
             for line in process.stdout:
@@ -130,11 +136,12 @@ def _relay_events(
                 rendered_text = _render_line(line)
                 if rendered_text:
                     rendered_parts.append(rendered_text)
+                    timestamped = stream_formatter.format_chunk(rendered_text)
                     if output_sink is not None:
-                        output_sink(rendered_text)
+                        output_sink(timestamped)
                     else:
                         logger.info("%s", rendered_text.strip())
-                        print(_format_timestamped_line(rendered_text), end="", flush=True)
+                        print(timestamped, end="", flush=True)
         process.wait(timeout=None)
     except Exception:
         process.kill()
