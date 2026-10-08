@@ -62,6 +62,6 @@
 
 ## 全局门禁（非 rv 条目，随交付树核验）
 
-- `CI=true just test all` 全绿（3685 passed / 1 skipped，见运行日志 `/tmp/rv246-test-all.log`）
+- `CI=true just test all` 全绿（最终树 `issue-246 @ a74d8078` 门禁复跑：3693 passed / 1 skipped，198s）
 - `just lint`（后端）+ `pnpm typecheck`（frontend-public）通过；前端既有 4 处 lint error 为未触碰文件的历史基线
 - `rg -n "_BACKLOG_CACHE" src/ tests/` 零命中（rv-6 内记录基线 10 命中 → 交付树 0）

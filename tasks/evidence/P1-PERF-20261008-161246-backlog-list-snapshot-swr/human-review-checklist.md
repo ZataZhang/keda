@@ -42,7 +42,7 @@ PRD 原文（§9 Human-Confirmed · 决策二）：
 
 白话展开：只有这一个列表读接口变了；开始/全局开始等写接口、PRD 详情/证据/CI 等读接口的实时语义原样保留。陈旧窗口默认 ≤30 秒（页面 3 秒短轮询追平），周期刷新默认 5 分钟且可在 dashboard 关闭。
 
-证据：`rv-1-first-paint-run.txt`（真实 console 重启后 15ms 返回快照、浏览器 165ms 出列表、表头"数据截至"）与 `rv-3-stale-contract.txt`（stale 判定、去重、fresh 恢复的 9 项契约测试；负控制拿掉后台触发后 7 项变红）。
+证据：`rv-1-first-paint-run.txt`（真实 console 重启后 12ms 返回快照、浏览器 166ms 出列表、表头"数据截至"）与 `rv-3-stale-contract.txt`（stale 判定、去重、fresh 恢复的 9 项契约测试；负控制拿掉后台触发后 7 项变红）。
 可选复跑：`bash tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/scripts/rv1_capture.sh`
 
 - [ ] 同意：接受该契约变化

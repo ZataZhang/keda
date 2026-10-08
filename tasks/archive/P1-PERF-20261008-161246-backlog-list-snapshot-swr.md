@@ -392,7 +392,7 @@ No external validation required; repository evidence was sufficient.
 
 | 观察点 | 呈递物 | 10 秒自检 |
 |---|---|---|
-| 重启 console 后打开 Backlog 页 1 秒内见列表 + "数据截至 HH:MM"（rv-1） | 真实入口截图 `tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/rv-1-first-paint.png`（实测首屏 165ms、快照读 15ms，验收阈值 ≤1s / <500ms，毫秒数随采集当次机器负载浮动；另有刷新自检帧 rv-1-reload-same-timestamp.png、负控制帧 rv-1-negative-control-no-snapshot.png） | 刷新页面，列表立即出现且时间戳不变 |
+| 重启 console 后打开 Backlog 页 1 秒内见列表 + "数据截至 HH:MM"（rv-1） | 真实入口截图 `tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/rv-1-first-paint.png`（实测首屏 166ms、快照读 12ms，验收阈值 ≤1s / <500ms，毫秒数随采集当次机器负载浮动；另有刷新自检帧 rv-1-reload-same-timestamp.png、负控制帧 rv-1-negative-control-no-snapshot.png） | 刷新页面，列表立即出现且时间戳不变 |
 | 数据过期时页面显示"后台更新中"并自动更新（rv-7） | e2e 两帧截图 `rv-7-stale-fresh.png`（上帧 stale 含「后台更新中」/ 下帧 fresh 提示消失；单帧 rv-7-stale.png / rv-7-fresh.png / rv-7-no-snapshot.png） | 本地 console 停留 Backlog 页，观察提示出现又消失 |
 
 刻意不呈递的 verifier 组：快照持久化/接口契约/预取/失败保留/start 触发的自动化测试结果（rv-2～rv-6），全部为机器断言，仅在失败时上报。
@@ -523,3 +523,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 顶层浅校验是独立 verifier 的发现 #1（"junk items inside prds 会被当作 fresh 下发"）；"重建失败仍写降级快照"与"请求失败显示正在同步"两处不是 verifier 发现，而是交付后对照 §1 行为样例第 5、6 行发现的正确性缺口——"失败不清场"应当包含"不把降级数据当新数据"，页面也不该把请求失败伪装成重建中，二者都属于把已声明契约做对，不是新增需求；rv-1 的旧探针把**改动前**的降级落库行为当成期望，实现纠正后该断言必然红——保留它等于用证据锁定一个错误契约，因此按 §7 声明的 oracle（删快照→空 prds + stale=true + scanned_at=null，不秒出列表）重写为 A/B 两条，oracle 文本本身未改
 - Impact: 代码与文档改动已在 `7e9b721f`；本次追加仅 `docs/guides/agent-runner.md`、`docs/api/references.md` 两行级说明同步与证据目录（脚本 `rv1_capture.sh`、`evidence.json`、7 项 `rv-*` 证据、三份报告 .md）。`CI=true just test all` 3693 passed / 1 skipped，`pnpm typecheck` 干净，`pnpm lint` 4 errors 全部落在本改动未触碰的文件（stats page 与 prd-ci/evidence/lifecycle 三个视图）；§9 勾选状态不变（无新增验收条件，rv-1 断言变强后仍为绿）
 - Review: 待人工复核——新增的"加载失败"前端态是用户可见文案，且 §1 行为样例第 5 行的"旧快照原样保留"现在由 A 断言在真实入口上验证；呈递物两张（rv-1 首屏、rv-7 两帧合成）仍待人工复核（§9 Human-Confirmed）
+
+### 门禁复跑：最终树全量重验与报告数字同步（2026-10-09）
+- Type: validation
+- Before: 报告与 manifest 记录的实测数字采自上一轮（rv-1 首屏 165ms / 快照读 15ms / PID 72893→74375、rv-7 green 11.1s、全量测试 3685 passed），采集后的最终树 HEAD 为 `a74d8078`，未在恢复轮做过复跑
+- After: 7 项 rv 全部按 manifest 命令在最终树 `issue-246 @ a74d8078` 复跑且先负控制变红、后 green 变绿——rv-1 首屏 166ms / 快照读 12ms / PID 91742→92470 / 断言 A 快照表 0 行、读取 28.2ms / 断言 B 恢复后 prds=3 stale=False（scanned_at 23:07:21 落库、23:08:47 自愈）；rv-2～rv-6 红绿计数与记录一致（4/2→6、7/2→9、1/4→5、1/1→2、1/2→3）且 rv-6 缓存核查 OVERALL PASS（基线 10 命中 → 交付树零命中）；rv-7 负控制 2 failed → green 6 passed（9.2s）；`CI=true just test all` 3693 passed / 1 skipped；`pnpm typecheck` 干净；§9.1 呈递行、evidence.json item 1 摘要与三份报告 .md 的 PID/毫秒数/时间戳同步为本次实测值
+- Reason: runner 恢复轮要求证据与最终交付树对齐——rv-1 的 final_tree_evidence 声明"证据在交付分支最终 tree 上重采"，且 PID/毫秒数/时间戳按 manifest 约定每次重跑刷新，不同步会让报告数字滞后于树时间
+- Impact: 仅 §9.1 数字一行、evidence.json item 1、三份报告 .md（含 checklist html）与本 Change Log；无任何代码 diff 改动，oracle 语义与 §9 勾选状态不变
+- Review: 无需人工复核新决策（复跑与数字同步不改变任何验收条件）；呈递物两张仍待人工复核（§9 Human-Confirmed）
