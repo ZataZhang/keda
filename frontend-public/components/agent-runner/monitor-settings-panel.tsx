@@ -103,6 +103,10 @@ export function MonitorSettingsPanel({ onClose }: { onClose: () => void }) {
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
+        <p className="text-xs text-slate-500">
+          这里的开关与间隔同时约束 Dashboard 概览和 Backlog
+          列表的后台刷新节奏；关闭后两处都停止周期扫描，页面读取仍按需触发单次重扫。
+        </p>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-500">自动同步</span>
           <Button

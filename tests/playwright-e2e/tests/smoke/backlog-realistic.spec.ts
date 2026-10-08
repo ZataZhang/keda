@@ -36,6 +36,24 @@ async function saveScreenshot(page: import('@playwright/test').Page, filename: s
   await page.screenshot({ path: filePath, fullPage: true })
 }
 
+/**
+ * 把验收证据截图写到 PRD 证据目录（`RV_EVIDENCE_DIR` 指定时）。
+ *
+ * 未设置该环境变量时静默跳过：普通 `just e2e smoke` 运行不产出 RV 证据，
+ * 只有 rv-7 证据采集脚本显式注入目录时才落盘。
+ *
+ * @param page - Playwright 页面对象。
+ * @param filename - 截图文件名（如 `rv-7-stale.png`）。
+ */
+async function saveRvEvidenceScreenshot(page: Page, filename: string): Promise<void> {
+  const rvDirectoryPath = process.env.RV_EVIDENCE_DIR
+  if (!rvDirectoryPath) {
+    return
+  }
+  await mkdir(rvDirectoryPath, { recursive: true })
+  await page.screenshot({ path: resolve(rvDirectoryPath, filename), fullPage: true })
+}
+
 async function waitForPrdCards(page: import('@playwright/test').Page): Promise<void> {
   await page.waitForSelector('[data-slot="card"]', { timeout: 15_000 })
 }
@@ -116,6 +134,7 @@ const MOCK_PRDS_RESPONSE = {
   repo_id: 'keda-main',
   include_archived: true,
   scanned_at: '2026-06-14T00:00:00+00:00',
+  stale: false,
 }
 
 test.describe('realistic: backlog page', () => {
@@ -194,5 +213,83 @@ test.describe('realistic: backlog page', () => {
     await expect(page.getByText('Backlog E2E Merged Highlight Test')).toBeVisible()
     await expect(page.getByText('开始下一个')).toBeVisible()
     await saveScreenshot(page, 'backlog-merged-highlight.png')
+  })
+
+  // ── rv-7：快照新鲜度契约（stale 短轮询自动追平 / 无快照「正在同步」空态）──
+
+  test('E2E-6 stale snapshot shows syncing hint and short polling auto-advances to fresh', async ({
+    page,
+  }) => {
+    const staleResponse = { ...MOCK_PRDS_RESPONSE, include_archived: false, stale: true }
+    const freshArrivalPrd = {
+      ...MOCK_PRDS_RESPONSE.prds[0],
+      prd_path: 'tasks/pending/P2-FEAT-20260614-backlog-e2e-fresh-arrival.md',
+      title: 'Backlog E2E Fresh Arrival PRD',
+    }
+    const freshResponse = {
+      ...staleResponse,
+      prds: [...staleResponse.prds, freshArrivalPrd],
+      scanned_at: '2026-06-14T00:05:00+00:00',
+      stale: false,
+    }
+    const requestTimestamps: number[] = []
+    let responseSeq = 0
+    await page.route('/api/v1/agent-runner/backlog/prds*', async (route) => {
+      requestTimestamps.push(Date.now())
+      responseSeq += 1
+      const nextBody = responseSeq === 1 ? staleResponse : freshResponse
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(nextBody),
+      })
+    })
+
+    await page.goto('/app/backlog')
+    await expect(page.getByRole('heading', { name: 'Backlog' })).toBeVisible()
+
+    // stale 态：如实显示数据截至时间，并追加「后台更新中」提示
+    await expect(page.getByText(/数据截至/)).toBeVisible()
+    await expect(page.getByText(/后台更新中/)).toBeVisible()
+    await saveRvEvidenceScreenshot(page, 'rv-7-stale.png')
+    await expect(page.getByText('Backlog E2E Fresh Arrival PRD')).not.toBeVisible()
+
+    // stale 时按 3 秒短节奏追平：第二次列表请求必须在 5 秒内发出。
+    // 实现若仍是固定 30 秒轮询（改动前的 setInterval 节奏），这条断言必红。
+    await expect
+      .poll(() => requestTimestamps.length >= 2, { timeout: 6_000 })
+      .toBe(true)
+    expect(requestTimestamps[1] - requestTimestamps[0]).toBeLessThanOrEqual(5_000)
+
+    // fresh 态：提示消失、列表反映新扫描结果、表头仅保留数据截至时间
+    await expect(page.getByText('Backlog E2E Fresh Arrival PRD')).toBeVisible()
+    await expect(page.getByText(/后台更新中/)).not.toBeVisible()
+    await expect(page.getByText(/数据截至/)).toBeVisible()
+    await saveRvEvidenceScreenshot(page, 'rv-7-fresh.png')
+  })
+
+  test('E2E-7 first visit without snapshot shows syncing empty state without error', async ({
+    page,
+  }) => {
+    await page.route('/api/v1/agent-runner/backlog/prds*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          prds: [],
+          skipped: [],
+          repo_id: 'keda-main',
+          include_archived: false,
+          scanned_at: null,
+          stale: true,
+        }),
+      })
+    })
+
+    await page.goto('/app/backlog')
+    await expect(page.getByRole('heading', { name: 'Backlog' })).toBeVisible()
+    await expect(page.getByText('正在同步').first()).toBeVisible()
+    await expect(page.getByText('加载 Backlog 失败')).not.toBeVisible()
+    await saveRvEvidenceScreenshot(page, 'rv-7-no-snapshot.png')
   })
 })

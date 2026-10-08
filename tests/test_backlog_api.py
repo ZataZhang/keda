@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
-import time
+import base64
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+import backend.api.backlog_sync as backlog_sync
 import backend.api.routes.agent_runner_backlog as backlog_routes
 from backend.api.app import app
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+from backend.core.use_cases.backlog_actions import BacklogActionError
+from backend.core.use_cases.backlog_snapshots import (
+    build_backlog_task_key,
+    persist_backlog_snapshot,
+)
+from backend.core.use_cases.monitor_snapshots import MonitorSyncCoordinator
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 from tests.conftest import FakeGitHubClient
 
@@ -98,48 +106,208 @@ def backlog_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     }
 
 
-def test_list_backlog_prds(backlog_environment) -> None:
-    """GET /backlog/prds should return scanned PRDs."""
+@dataclass
+class _SnapshotWiring:
+    """Backlog 快照在路由层的接线：tmp store + 真实协调器 + 请求计数。
+
+    Attributes:
+        coordinator: 真实扫描协调器，用于等待在途扫描结束。
+        resync_requests: ``request_backlog_resync`` 收到的任务键序列。
+    """
+
+    coordinator: MonitorSyncCoordinator
+    resync_requests: list[str]
+
+
+@pytest.fixture
+def snapshot_wiring(
+    backlog_environment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _SnapshotWiring:
+    """把快照读写的存储指向用例 tmp 库，并重置进程级单例。
+
+    协调器保持真实实现（含真实扫描线程），因为"读路径不等待扫描"只有在真有在途
+    线程时才会被证伪；用例库与真实 console 库隔离，避免测试写到用户磁盘。
+    """
+    store = backlog_environment["store"]
+    coordinator = MonitorSyncCoordinator(
+        scan_runner=backlog_sync._scan_backlog_variant_and_persist  # noqa: SLF001
+    )
+    requests: list[str] = []
+
+    def recording_resync(repo_id: str, *, include_archived: bool = False) -> None:
+        task_key = build_backlog_task_key(repo_id, include_archived=include_archived)
+        requests.append(task_key)
+        coordinator.request_sync(task_key)
+
+    monkeypatch.setattr(backlog_sync, "get_backlog_snapshot_store", lambda: store)
+    monkeypatch.setattr(backlog_sync, "get_backlog_sync_coordinator", lambda: coordinator)
+    monkeypatch.setattr(backlog_routes, "request_backlog_resync", recording_resync)
+    monkeypatch.setattr(backlog_sync, "_BACKLOG_COORDINATOR", None)
+    monkeypatch.setattr(backlog_sync, "_BACKLOG_SCHEDULER", None)
+
+    yield _SnapshotWiring(coordinator=coordinator, resync_requests=requests)
+
+    coordinator.wait_until_idle(timeout_seconds=5)
+
+
+def test_list_backlog_prds(backlog_environment, snapshot_wiring: _SnapshotWiring) -> None:
+    """GET /backlog/prds 读本地快照：首读空态 + stale，后台扫描落库后再读即命中快照。"""
+    first = client.get("/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=false")
+    assert first.status_code == 200
+    assert first.json()["prds"] == []
+    assert first.json()["stale"] is True
+    assert first.json()["scanned_at"] is None
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+
     response = client.get(
         "/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=false"
     )
     assert response.status_code == 200
     data = response.json()
     assert data["repo_id"] == "keda-main"
+    assert data["stale"] is False
+    assert data["scanned_at"]
     assert len(data["prds"]) == 1
     assert data["prds"][0]["title"] == "Test Feature"
 
 
-def test_backlog_cache_reused_after_slow_build(
-    backlog_environment, monkeypatch: pytest.MonkeyPatch
+def test_list_backlog_prds_serves_snapshot_without_rescanning(
+    backlog_environment,
+    snapshot_wiring: _SnapshotWiring,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """构建耗时超过 TTL 时缓存仍须命中，否则前端每轮轮询都会全量重扫。"""
-    build_count = 0
+    """快照落库后反复轮询都是纯本地读：不再触发扫描，否则 30s 轮询会打爆 GitHub。"""
+    client.get("/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=false")
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
 
-    def slow_build(repo_id: str, include_archived: bool) -> dict:
-        nonlocal build_count
-        build_count += 1
-        time.sleep(0.3)
-        return {
-            "prds": [],
-            "skipped": [],
-            "repo_id": repo_id,
-            "include_archived": include_archived,
-            "scanned_at": "",
-        }
+    build_calls: list[tuple[str, bool]] = []
 
-    backlog_routes._BACKLOG_CACHE.clear()
-    monkeypatch.setattr(backlog_routes, "_BACKLOG_CACHE_TTL_SECONDS", 0.2)
-    monkeypatch.setattr(backlog_routes, "_build_backlog_response", slow_build)
+    def counting_build(repo_id: str, include_archived: bool) -> dict:
+        build_calls.append((repo_id, include_archived))
+        return {"prds": [], "skipped": [], "repo_id": repo_id, "include_archived": include_archived}
 
-    for _ in range(2):
+    monkeypatch.setattr(backlog_routes, "_build_backlog_response", counting_build)
+
+    for _ in range(3):
         response = client.get(
             "/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=false"
         )
         assert response.status_code == 200
+        assert response.json()["stale"] is False
 
-    assert build_count == 1
-    backlog_routes._BACKLOG_CACHE.clear()
+    assert build_calls == []
+    assert snapshot_wiring.coordinator.in_flight_repo_ids() == ()
+
+
+def test_backlog_prds_rejects_unknown_repo_without_leaking_its_snapshot(
+    backlog_environment, snapshot_wiring: _SnapshotWiring
+) -> None:
+    """禁用/已删除仓库仍返回 400，其历史快照不得回流到任何页面。"""
+    persist_backlog_snapshot(
+        backlog_environment["store"],
+        repo_id="ghost-repo",
+        include_archived=False,
+        payload={
+            "prds": [{"title": "Ghost PRD"}],
+            "skipped": [],
+            "repo_id": "ghost-repo",
+            "include_archived": False,
+            "scanned_at": "2026-10-08T10:00:00+00:00",
+        },
+    )
+
+    response = client.get("/api/v1/agent-runner/backlog/prds?repo_id=ghost-repo")
+
+    assert response.status_code == 400
+    assert snapshot_wiring.resync_requests == []
+    assert snapshot_wiring.coordinator.in_flight_repo_ids() == ()
+
+
+def test_archived_variant_builds_on_demand(
+    backlog_environment, snapshot_wiring: _SnapshotWiring
+) -> None:
+    """``include_archived=true`` 没有预取，首次请求时按需构建并在落库后命中。"""
+    first = client.get("/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=true")
+    assert first.json()["stale"] is True
+    assert first.json()["include_archived"] is True
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+
+    second = client.get("/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=true")
+
+    assert second.json()["stale"] is False
+    entry = backlog_environment["store"].get_backlog_snapshot(
+        repo_id="keda-main", include_archived=True
+    )
+    assert entry is not None
+    default_entry = backlog_environment["store"].get_backlog_snapshot(
+        repo_id="keda-main", include_archived=False
+    )
+    assert default_entry is None
+
+
+def test_start_prd_triggers_one_resync(
+    snapshot_wiring: _SnapshotWiring, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """start 成功后为默认视图派一次后台重扫，取代原先"弹缓存→下次读全量等待"。
+
+    ``start_prd`` 本身用 fake（rv-6 声明的 mock 边界），被测接线是重扫触发。
+    """
+    monkeypatch.setattr(
+        backlog_routes,
+        "start_prd",
+        lambda **_kwargs: {"repo_id": "keda-main", "prd_path": "tasks/pending/a.md"},
+    )
+    encoded = _encode_prd_path("tasks/pending/P1-FEAT-20260101-test.md")
+
+    response = client.post(
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/start", json={"repo_id": "keda-main"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert snapshot_wiring.resync_requests == ["keda-main"]
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+
+
+def test_global_start_triggers_one_resync(
+    snapshot_wiring: _SnapshotWiring, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """全局开始同样只派一次重扫，且扫描动作不在请求线程里。"""
+    monkeypatch.setattr(
+        backlog_routes, "start_global_backlog", lambda **_kwargs: {"started": ["a"]}
+    )
+
+    response = client.post(
+        "/api/v1/agent-runner/backlog/start-global",
+        json={"repo_id": "keda-main", "max_parallel": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    assert snapshot_wiring.resync_requests == ["keda-main"]
+
+
+def test_failed_start_does_not_request_a_resync(
+    snapshot_wiring: _SnapshotWiring, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """start 失败时不得派重扫：为一次没发生的状态变化重扫只会白烧 GitHub 配额。"""
+    monkeypatch.setattr(
+        backlog_routes,
+        "start_prd",
+        lambda **_kwargs: (_ for _ in ()).throw(BacklogActionError("boom")),
+    )
+    encoded = _encode_prd_path("tasks/pending/P1-FEAT-20260101-test.md")
+
+    response = client.post(
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/start", json={"repo_id": "keda-main"}
+    )
+
+    assert response.status_code == 400
+    assert snapshot_wiring.resync_requests == []
+
+
+def _encode_prd_path(prd_path: str) -> str:
+    """按路由约定把 PRD 路径编码成 URL 安全的形式。"""
+    return base64.urlsafe_b64encode(prd_path.encode("utf-8")).decode("ascii")
 
 
 def test_update_settings(backlog_environment) -> None:

@@ -20,6 +20,7 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.api.backlog_sync import wake_backlog_scheduler
 from backend.api.monitor_sync import wake_monitor_scheduler
 from backend.api.response_cache import TTLResponseCache
 from backend.api.version_info import resolve_keda_version
@@ -633,7 +634,12 @@ def get_console_monitor_settings() -> dict:
 
 @router.patch("/agent-runner/console/monitor/settings")
 def update_console_monitor_settings(request: UpdateMonitorSettingsRequest) -> dict:
-    """保存全局监控同步设置并立即唤醒后台调度器重算等待时间。"""
+    """保存全局同步设置并立即唤醒两条后台调度器重算等待时间。
+
+    这份设置同时约束 dashboard 与 Backlog 的后台刷新节奏，因此两条循环都要
+    唤醒：只唤醒 dashboard 的话，Backlog 仍会按旧间隔等待，用户看到的
+    "已关闭周期刷新"要等到下一圈才生效。
+    """
     store = cast(IMonitorSnapshotStore, create_console_store())
     try:
         settings = update_monitor_settings(
@@ -646,4 +652,5 @@ def update_console_monitor_settings(request: UpdateMonitorSettingsRequest) -> di
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"保存同步设置失败: {exc}") from exc
     wake_monitor_scheduler()
+    wake_backlog_scheduler()
     return _serialize(settings)

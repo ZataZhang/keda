@@ -1031,3 +1031,54 @@ def test_invocation_event_reads_degrade_when_table_missing(tmp_path: Path) -> No
     legacy_store = SqliteConsoleStore(db_path)
     assert legacy_store.list_invocation_events(run_id="anything") == []
     assert legacy_store.list_issue_invocation_events(repo_id="keda-main", issue_number=7) == []
+
+
+def test_backlog_snapshot_migration_v10_only_adds_its_table(tmp_path: Path) -> None:
+    """v9 库升级到 v10 只新增 backlog_prd_snapshots，既有表、行与列值原样保留。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+    store.save_backlog_settings(
+        BacklogSettingsEntry(
+            repo_id="keda-main",
+            max_parallel=3,
+            default_view="list",
+            updated_at="2026-10-08T10:00:00+00:00",
+        )
+    )
+    store.upsert_monitor_snapshot(
+        MonitorSnapshotEntry(
+            repo_id="keda-main",
+            payload_json=json.dumps({"repositories": [{"repo_id": "keda-main"}]}),
+            scanned_at="2026-10-08T10:00:00+00:00",
+        )
+    )
+
+    # 把库退回 v9 形态：删掉 v10 新增的表并降回 user_version=9。
+    raw = sqlite3.connect(str(db_path))
+    raw.execute("DROP TABLE backlog_prd_snapshots")
+    raw.execute("PRAGMA user_version = 9")
+    raw.commit()
+    raw.close()
+
+    migrated = SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+        table_names = {
+            row[0]
+            for row in probe.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert "backlog_prd_snapshots" in table_names
+        assert probe.execute("SELECT COUNT(*) FROM backlog_prd_snapshots").fetchone()[0] == 0
+        assert probe.execute(
+            "SELECT repo_id, max_parallel, default_view FROM backlog_settings"
+        ).fetchall() == [("keda-main", 3, "list")]
+        assert probe.execute("SELECT repo_id, scanned_at FROM monitoring_snapshots").fetchall() == [
+            ("keda-main", "2026-10-08T10:00:00+00:00")
+        ]
+    finally:
+        probe.close()
+
+    assert migrated.get_backlog_settings("keda-main").max_parallel == 3
+    assert migrated.get_backlog_snapshot(repo_id="keda-main", include_archived=False) is None

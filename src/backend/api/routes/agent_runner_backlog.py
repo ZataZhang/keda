@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import threading
-import time
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -19,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
+from backend.api.backlog_sync import ensure_fresh_backlog_snapshot, request_backlog_resync
 from backend.core.shared.interfaces.runner_console import AuditEntry, IBacklogStore
 from backend.core.shared.models.backlog import (
     BacklogDependency,
@@ -71,10 +70,6 @@ from backend.core.use_cases.review_once import _extract_pr_branch_from_comments
 _logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["agent-runner-backlog"])
-
-_BACKLOG_CACHE: dict[str, Any] = {}
-_BACKLOG_CACHE_TTL_SECONDS = 30
-_cache_lock = threading.Lock()
 
 
 def _serialize(value: Any) -> Any:
@@ -216,22 +211,6 @@ def _build_backlog_response(
     }
 
 
-def _get_cached_backlog_response(repo_id: str, include_archived: bool) -> dict:
-    """Return cached backlog response or rebuild it."""
-    cache_key = f"{repo_id}:archived={include_archived}"
-    with _cache_lock:
-        entry = _BACKLOG_CACHE.get(cache_key)
-        if entry and (time.time() - entry["timestamp"]) < _BACKLOG_CACHE_TTL_SECONDS:
-            return entry["payload"]
-    payload = _build_backlog_response(repo_id, include_archived)
-    # 时间戳必须在构建完成之后再取：仓库级扫描要逐个 PRD 查 GitHub，慢仓库单次构建
-    # 就超过 TTL。若沿用构建前的时间戳，条目写进去就已经过期，缓存永远打不中——
-    # 表现为前端每轮 30 秒轮询都触发一次全量重扫，页面长期转圈。
-    with _cache_lock:
-        _BACKLOG_CACHE[cache_key] = {"payload": payload, "timestamp": time.time()}
-    return payload
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Read endpoints
 # ─────────────────────────────────────────────────────────────────────────────
@@ -239,8 +218,19 @@ def _get_cached_backlog_response(repo_id: str, include_archived: bool) -> dict:
 
 @router.get("/agent-runner/backlog/prds")
 def list_backlog_prds(repo_id: str, include_archived: bool = False) -> dict:
-    """列出 PRD 待办队列，包含依赖与状态。"""
-    return _get_cached_backlog_response(repo_id, include_archived)
+    """列出 PRD 待办队列：立即返回本地快照，缺失/过期时在后台重扫。
+
+    请求线程不做任何 GitHub 调用，也不等待重建结果——列表秒开的代价就是响应
+    可能短暂陈旧，因此响应里用 ``stale`` 与 ``scanned_at`` 把新鲜度如实交代给
+    前端。仓库不存在或已禁用仍返回 400，其历史快照不会回流到任何页面。
+    """
+    _resolve_context(repo_id)
+    snapshot_view = ensure_fresh_backlog_snapshot(repo_id, include_archived=include_archived)
+    return {
+        **snapshot_view.payload,
+        "scanned_at": snapshot_view.scanned_at,
+        "stale": snapshot_view.stale,
+    }
 
 
 @router.get("/agent-runner/backlog/settings")
@@ -273,7 +263,7 @@ def get_backlog_prd_content(encoded_path: str, repo_id: str) -> PlainTextRespons
 # ─────────────────────────────────────────────────────────────────────────────
 # Autopilot（仓库级）与验收证据
 #
-# 这两组端点刻意不复用 `_BACKLOG_CACHE`：Autopilot 状态必须是写后 fresh 读回，
+# 这两组端点刻意不读列表快照：Autopilot 状态必须是写后 fresh 读回，
 # 证据列表必须每次重新读盘，否则用户会看到陈旧值（rv-2 / rv-3 的验收基点）。
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -350,8 +340,8 @@ def update_backlog_autopilot(request: UpdateAutopilotRequest) -> dict:
 def get_backlog_prd_lifecycle(encoded_path: str, repo_id: str) -> dict:
     """返回单个 PRD 的生命周期详情（当前阶段、耗时拆分与有序事件）。
 
-    刻意不复用 ``_BACKLOG_CACHE``：生命周期账本必须在事件写入后 fresh 读回，
-    否则“运行中 → 刚失败”这种切换会被 30 秒缓存掩盖，页面显示陈旧进度。
+    刻意不读列表快照：生命周期账本必须在事件写入后 fresh 读回，
+    否则“运行中 → 刚失败”这种切换会被后台刷新节奏掩盖，页面显示陈旧进度。
     无任何 lifecycle run/event 时返回 ``has_data=False`` 空态，而不是 404——
     “还没开始执行”是正常状态，不是错误。
     """
@@ -432,7 +422,7 @@ def _artifact_headers(file_name: str, *, disposition: str) -> dict[str, str]:
 # ─────────────────────────────────────────────────────────────────────────────
 # CI/CD 交付尾段（状态投影 / 策略 / 单次手动修复）
 #
-# 与 Autopilot 端点同一原则：不复用 `_BACKLOG_CACHE`。ci_delivery 是从 GitHub
+# 与 Autopilot 端点同一原则：不读列表快照。ci_delivery 是从 GitHub
 # PR context 与 Issue marker 派生的运行时投影，必须 fresh 读取；策略与修复
 # 写回后也要 fresh 读回 Issue 评论流作为成功判据。
 # ─────────────────────────────────────────────────────────────────────────────
@@ -704,8 +694,9 @@ def start_backlog_prd(encoded_path: str, request: StartPrdRequest) -> dict:
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Invalidate cache for this repo so the next read reflects the new state.
-    _BACKLOG_CACHE.pop(f"{request.repo_id}:archived=False", None)
+    # 弹缓存换成"立即派一次后台重扫"：读侧仍先拿到上一份快照，但新状态会在
+    # 扫描落地后的下一次读取里出现，不需要有人在请求线程里等扫描。
+    request_backlog_resync(request.repo_id)
     return _serialize(result)
 
 
@@ -750,7 +741,7 @@ def start_backlog_global(request: StartGlobalRequest) -> dict:
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    _BACKLOG_CACHE.pop(f"{request.repo_id}:archived=False", None)
+    request_backlog_resync(request.repo_id)
     return _serialize(result)
 
 

@@ -780,3 +780,44 @@ class IMonitorSnapshotStore(ABC):
     def save_monitor_settings(self, settings: MonitorSettingsEntry) -> None:
         """保存或更新全局同步设置；失败时抛出异常。"""
         ...
+
+
+@dataclass(frozen=True)
+class BacklogSnapshotEntry:
+    """一个仓库某个 Backlog 视图变体的列表响应快照（core 侧端口类型）。
+
+    ``payload_json`` 是 ``GET /agent-runner/backlog/prds`` 完整响应体的 JSON
+    序列化结果；``include_archived`` 区分"默认视图"与"显示已归档"两个变体，
+    两者各自独立成行、互不覆盖。
+    """
+
+    repo_id: str
+    include_archived: bool
+    payload_json: str
+    scanned_at: str
+
+
+class IBacklogSnapshotStore(ABC):
+    """Backlog 列表快照的持久化端口。
+
+    与 :class:`IMonitorSnapshotStore` 同形：本端口是 Backlog 列表的事实读取
+    路径，写库失败必须抛给调用方（旧快照因此原样保留），绝不允许在请求线程里
+    降级成"顺手扫一次"。
+    """
+
+    @abstractmethod
+    def upsert_backlog_snapshot(self, entry: BacklogSnapshotEntry) -> None:
+        """写入或覆盖一个视图变体的快照；失败时抛出异常。"""
+        ...
+
+    @abstractmethod
+    def get_backlog_snapshot(
+        self, *, repo_id: str, include_archived: bool
+    ) -> BacklogSnapshotEntry | None:
+        """读取指定视图变体的快照；不存在时返回 ``None``。"""
+        ...
+
+    @abstractmethod
+    def list_backlog_snapshots(self) -> list[BacklogSnapshotEntry]:
+        """列出全部快照行，供调度首圈判定缺失快照的仓库；失败时抛出异常。"""
+        ...

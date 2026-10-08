@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收（执行侧已完成：§9 除 Human-Confirmed 外全部勾选或标注 runner-owned 门禁；独立 verifier 由 runner 执行）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现细节；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -203,7 +203,7 @@ frontend-public/lib/api/backlog.ts [修改]
 【总结】fetchBacklogPrds 返回类型同步 stale 字段。
 frontend-public/app/(app)/app/backlog/page.tsx [修改]
 【总结】自适应轮询（stale 时 3s，fresh 恢复 30s）+「数据截至/后台更新中/正在同步」提示。
-tests/backend/test_backlog_snapshots.py（或就近既有测试文件）[新增]
+tests/test_backlog_snapshots.py（实际落点；仓库测试平铺在 tests/，无 tests/backend/ 目录）[新增]
 【总结】快照读写、损坏降级、stale 判定、调度首圈补扫、失败保留旧快照的单元/集成测试。
 tests/playwright-e2e/tests/smoke/backlog-realistic.spec.ts（或新增 spec）[修改]
 【总结】补 stale→fresh 自动更新与「数据截至」提示的 e2e 断言。
@@ -285,7 +285,7 @@ erDiagram
 - id: rv-2
   behavior: 快照持久化跨进程重启有效，且新表不影响既有表
   reviewer: verifier
-  real_entry: "CI=true just test all（含新增 tests/backend/test_backlog_snapshots.py：upsert→新 store 实例读回→一致）"
+  real_entry: "CI=true just test all（含新增 tests/test_backlog_snapshots.py：upsert→新 store 实例读回→一致）"
   expected: "upsert 后用全新 store 实例（模拟重启后进程）能读回相同 payload；既有表读写测试全绿"
   mock_boundary: "SQLite 用真实临时库文件（store 现有测试模式），GitHub 不参与"
   tier: R2
@@ -392,8 +392,8 @@ No external validation required; repository evidence was sufficient.
 
 | 观察点 | 呈递物 | 10 秒自检 |
 |---|---|---|
-| 重启 console 后打开 Backlog 页 1 秒内见列表 + "数据截至 HH:MM"（rv-1） | 真实入口录屏/截图 `tasks/evidence/<prd-stem>/rv-1-first-paint.png`（交付时回填） | 刷新页面，列表立即出现且时间戳不变 |
-| 数据过期时页面显示"后台更新中"并自动更新（rv-7） | e2e 两帧截图 `rv-7-stale-fresh.png`（stale 态 / fresh 态，交付时回填） | 本地 console 停留 Backlog 页，观察提示出现又消失 |
+| 重启 console 后打开 Backlog 页 1 秒内见列表 + "数据截至 HH:MM"（rv-1） | 真实入口截图 `tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/rv-1-first-paint.png`（实测首屏 127ms、快照读 12ms，验收阈值 ≤1s / <500ms，毫秒数随采集当次机器负载浮动；另有刷新自检帧 rv-1-reload-same-timestamp.png、负控制帧 rv-1-negative-control-no-snapshot.png） | 刷新页面，列表立即出现且时间戳不变 |
+| 数据过期时页面显示"后台更新中"并自动更新（rv-7） | e2e 两帧截图 `rv-7-stale-fresh.png`（上帧 stale 含「后台更新中」/ 下帧 fresh 提示消失；单帧 rv-7-stale.png / rv-7-fresh.png / rv-7-no-snapshot.png） | 本地 console 停留 Backlog 页，观察提示出现又消失 |
 
 刻意不呈递的 verifier 组：快照持久化/接口契约/预取/失败保留/start 触发的自动化测试结果（rv-2～rv-6），全部为机器断言，仅在失败时上报。
 
@@ -403,40 +403,40 @@ No external validation required; repository evidence was sufficient.
 
 ### Architecture Acceptance
 
-- [ ] 四层依赖保持——`backlog_snapshots.py` 只依赖 `IBacklogSnapshotStore` 端口，不 import FastAPI/SQLite（架构检查 + lint 通过）
-- [ ] 路由模块 import 无线程/IO 副作用，调度器仅由 `app.py` lifespan 启停（对照 monitor_sync 纪律的测试或检查）
+- [x] 四层依赖保持——`backlog_snapshots.py` 只依赖 `IBacklogSnapshotStore` 端口，不 import FastAPI/SQLite（架构检查 + lint 通过）
+- [x] 路由模块 import 无线程/IO 副作用，调度器仅由 `app.py` lifespan 启停（对照 monitor_sync 纪律的测试或检查）
 
 ### Dependency Acceptance
 
-- [ ] §8 声明 none，交付不引入新的上游依赖或第三方库
+- [x] §8 声明 none，交付不引入新的上游依赖或第三方库
 
 ### Behavior Acceptance
 
-- [ ] rv-1 通过——重启后秒开 + 数据截至可见（证据文件见 §9.2）
-- [ ] rv-2 通过——快照跨"重启"（新 store 实例）读回一致，既有表不受影响
-- [ ] rv-3 通过——stale 判定 + 后台触发 + 去重 + fresh 恢复
-- [ ] rv-4 通过——启动预取为缺失快照仓库补扫，`sync_enabled=false` 时不触发
-- [ ] rv-5 通过——扫描失败旧快照保留、数据不清空
-- [ ] rv-6 通过——start 动作触发重扫；`rg -n "_BACKLOG_CACHE" src/` 零命中
+- [x] rv-1 通过——重启后秒开 + 数据截至可见（证据文件见 §9.2）
+- [x] rv-2 通过——快照跨"重启"（新 store 实例）读回一致，既有表不受影响
+- [x] rv-3 通过——stale 判定 + 后台触发 + 去重 + fresh 恢复
+- [x] rv-4 通过——启动预取为缺失快照仓库补扫，`sync_enabled=false` 时不触发
+- [x] rv-5 通过——扫描失败旧快照保留、数据不清空
+- [x] rv-6 通过——start 动作触发重扫；`rg -n "_BACKLOG_CACHE" src/` 零命中
 
 ### Frontend Acceptance
 
-- [ ] rv-7 通过——stale 短轮询 + 提示切换 + 无快照空态；`frontend-public` typecheck/lint 通过
+- [x] rv-7 通过——stale 短轮询 + 提示切换 + 无快照空态；`frontend-public` typecheck/lint 通过
 
 ### Documentation Acceptance
 
-- [ ] dashboard 全局同步设置的说明文案补充"同时约束 Backlog 后台刷新"（落点：dashboard 设置面板文案或 `docs/`，交付时按实际落点填写）
+- [x] dashboard 全局同步设置的说明文案补充"同时约束 Backlog 后台刷新"（落点：`frontend-public/components/agent-runner/monitor-settings-panel.tsx` 面板文案 + `docs/guides/agent-runner.md`「本地快照与后台刷新」小节）
 
 ### Validation Acceptance
 
-- [ ] `CI=true just test all` 全绿（含新增测试）
-- [ ] `just e2e smoke`（backlog 相关 spec）通过
-- [ ] `rg -n "_BACKLOG_CACHE" src/ tests/` 零命中（旧缓存路径彻底移除）
+- [x] `CI=true just test all` 全绿（含新增测试）
+- [x] `just e2e smoke`（backlog 相关 spec）通过
+- [x] `rg -n "_BACKLOG_CACHE" src/ tests/` 零命中（旧缓存路径彻底移除）
 
 ### Delivery Readiness
 
-- [ ] 推荐方案完整实现（快照 + SWR + 预取 + 单一缓存机制），无未决回归
-- [ ] PR 正文按 pr-evidence-and-merge-acceptance 契约携带 §9.1 呈递内容、verifier 结论与 verified tree 标识；完成消息原文携带 9.1 表格内容
+- [x] 推荐方案完整实现（快照 + SWR + 预取 + 单一缓存机制），无未决回归
+- [~] PR 正文按 pr-evidence-and-merge-acceptance 契约携带 §9.1 呈递内容、verifier 结论与 verified tree 标识；完成消息原文携带 9.1 表格内容 — runner-owned gate: PR 创建与证据评论由 runner 交付
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -491,3 +491,27 @@ No external validation required; repository evidence was sufficient.
 - Reason: 冷访问需等待逐 PRD 串行 GitHub 查询 30 秒以上，用户要求 1 秒内可见
 - Impact: 新增一张 SQLite 表与三个模块级改动；列表接口响应新增 stale 字段；人审决策两项（§2）
 - Review: Part A 待人工确认（Interpretation 与两项决策）
+
+### 交付执行（2026-10-09）
+- Type: validation
+- Before: §7 rv-1 负控制设计为"gh 快速失败→重扫落不了地"；rv-2 的 real_entry 写 `tests/backend/test_backlog_snapshots.py`；rv-1 real_entry 端口 8314
+- After: rv-1 负控制改为"gh 挂起桩（sleep 至客户端 15s 超时）+ 空态持续 8s 复测 + 重扫最终落地恢复探针"；测试实际落点为 `tests/test_backlog_snapshots.py`（仓库测试平铺 tests/，无 tests/backend/ 目录，已回改 §6/§7 两处引用）；rv-1 证据在隔离场景端口 8319 的真实 `kc console` 上采集
+- Reason: 实测发现扫描对 gh 失败是降级处理（block_reason），快速失败的假 gh 反而让快照几秒内用磁盘数据重建，空态窗口不可靠；挂起桩才构造出确定的"重建在途"形态。测试路径为 PRD 笔误修正，oracle 语义不变
+- Impact: 证据文件 `tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/`（rv-1～rv-7 全量、evidence.json、verification-plan/evidence-report、human-review-checklist.md/.html）；§9 执行侧条目已勾选，横幅翻至 🧍
+- Review: 呈递物两张（rv-1 首屏、rv-7 两帧合成）待人工复核（§9 Human-Confirmed）
+
+### 证据最终树重采（2026-10-09）
+- Type: validation
+- Before: rv-1～rv-7 证据采集于 02:49–03:04；随后 runner 会话重启在 03:16 重写了工作树全部 PR 文件（功能核对一致：全量测试、契约断言与前端产物在重写后均与证据描述相符）；evidence.json item 2 的 stdout 断言误写为 `OVERALL: PASS`（该 harness 的 rv-2 证据文件不含此行）
+- After: 全部 7 项证据在最终交付树上重采一遍并仍先负控制变红、后 green 变绿（rv-1 首屏 167ms / 快照读 13ms；rv-2～rv-6 红绿计数与首轮一致；rv-7 负控制 2 failed → green 6 passed）；evidence.json item 2 断言修正为 `VERDICT: green run 全绿 ✓`，item 1 摘要与 evidence-report / human-review-checklist 中的 PID、毫秒数、时间戳同步为新一轮实测值
+- Reason: rv-1 的 final_tree_evidence 要求"证据在交付分支最终 tree 上重采"；工作树被会话重启机制触碰后，旧证据文件的时间戳早于树时间，重采消除歧义；断言修正消除一处 manifest 假阳（原 pattern 在证据文件中不存在）
+- Impact: 仅证据目录与 §9.1 实测数字一行；本次重采不产生任何代码 diff 改动，oracle 语义与验收判定不变
+- Review: 无需人工复核新决策（数字同步不改变任何验收条件）；呈递物两张仍待人工复核
+
+### 证据 manifest 契约修复与全量重跑（2026-10-09）
+- Type: validation
+- Before: `evidence.json` 把 `risks` 写成字符串数组、`negative_control` 写成对象、`stdout_assertions[].source` 填成证据文件名；item 1/6/7 的 `command` 用 `> file 2>&1` 把输出整体重定向进证据文件；rv-7 负控制用 `git show HEAD:page.tsx` 取改动前实现；rv-2～rv-6 的 harness 只把报告写进文件、不打 stdout。门禁报错 `Item 1: missing or empty required field risks`
+- After: 三个字段按解析器契约改为标量（`risks`/`negative_control` 为字符串，`source` 取 `stdout`），7 项全部补齐红→绿断言与"不得出现"反向断言；命令改为 `set -o pipefail; … | tee <证据文件>`（harness 自身同时 print），使门禁复跑的 stdout 可见判定行；item 6 命令串接 `rv6_cache_removal_check.py` 并 `tee -a` 进同一证据文件；rv-7 基线改为随证据目录留存的改动前实现副本 `scripts/rv7_page_baseline.tsx`（并修掉 `$baseline_file`/`$png` 紧跟全角标点触发的 `set -u` 未绑定变量崩溃）；7 项证据在最终 tree 上重跑一遍，数字同步为实测值（rv-1 首屏 127ms / 快照读 11.9ms，rv-7 green 6 passed 11.9s；rv-2～rv-6 红绿计数不变）
+- Reason: 门禁复跑发生在 commit proxy **之后**、工作树干净时执行 `bash -lc <command>` 并对**真实 stdout** 断言——`git show HEAD:` 那时已是新实现，负控制会退化成空操作；重定向进文件的输出让 stdout 断言必然失败；字段写成容器类型直接被 `_extract_nonempty_string` 判红
+- Impact: 仅证据目录（`evidence.json`、7 项 `rv-*` 证据与脚本）与 §9.1 实测数字一行、三份报告 .md 的数字与命令描述；无任何代码 diff 改动，oracle 语义与验收判定不变
+- Review: 无需人工复核新决策（契约修复与重跑不改变任何验收条件）；呈递物两张仍待人工复核
