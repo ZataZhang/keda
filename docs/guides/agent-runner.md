@@ -3666,12 +3666,12 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 ### 首屏默认仓库（当前项目）
 
-管理终端是多仓库面板，但在哪个仓库目录敲 `iar console`，打开就应该落在**那个
+管理终端是多仓库面板，但在哪个仓库目录敲 `kc console`，打开就应该落在**那个
 仓库**上，而不是 registry 声明顺序最靠前的那个。首屏选仓库的优先级：
 
 1. **console 进程 cwd 匹配到的仓库** —— 后端把 cwd 归一到 git 仓库根，再去
    registry 匹配；只有唯一命中且启用的条目才算数。在 `~/code/keda` 敲
-   `iar console` 就选中 `keda`，`cd` 到别的仓库再敲就切到那个仓库。
+   `kc console` 就选中 `keda`，`cd` 到别的仓库再敲就切到那个仓库。
 2. **上次手动选择的仓库**（localStorage `iar.console.lastRepoId`）—— cwd 不在
    git 仓库内、或所在仓库没登记进 registry 时的记忆兜底。
 3. **registry 里第一个启用的条目** —— 以上都拿不到时的最终兜底。
