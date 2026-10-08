@@ -392,7 +392,7 @@ No external validation required; repository evidence was sufficient.
 
 | 观察点 | 呈递物 | 10 秒自检 |
 |---|---|---|
-| 重启 console 后打开 Backlog 页 1 秒内见列表 + "数据截至 HH:MM"（rv-1） | 真实入口截图 `tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/rv-1-first-paint.png`（实测首屏 127ms、快照读 12ms，验收阈值 ≤1s / <500ms，毫秒数随采集当次机器负载浮动；另有刷新自检帧 rv-1-reload-same-timestamp.png、负控制帧 rv-1-negative-control-no-snapshot.png） | 刷新页面，列表立即出现且时间戳不变 |
+| 重启 console 后打开 Backlog 页 1 秒内见列表 + "数据截至 HH:MM"（rv-1） | 真实入口截图 `tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/rv-1-first-paint.png`（实测首屏 165ms、快照读 15ms，验收阈值 ≤1s / <500ms，毫秒数随采集当次机器负载浮动；另有刷新自检帧 rv-1-reload-same-timestamp.png、负控制帧 rv-1-negative-control-no-snapshot.png） | 刷新页面，列表立即出现且时间戳不变 |
 | 数据过期时页面显示"后台更新中"并自动更新（rv-7） | e2e 两帧截图 `rv-7-stale-fresh.png`（上帧 stale 含「后台更新中」/ 下帧 fresh 提示消失；单帧 rv-7-stale.png / rv-7-fresh.png / rv-7-no-snapshot.png） | 本地 console 停留 Backlog 页，观察提示出现又消失 |
 
 刻意不呈递的 verifier 组：快照持久化/接口契约/预取/失败保留/start 触发的自动化测试结果（rv-2～rv-6），全部为机器断言，仅在失败时上报。
@@ -515,3 +515,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 门禁复跑发生在 commit proxy **之后**、工作树干净时执行 `bash -lc <command>` 并对**真实 stdout** 断言——`git show HEAD:` 那时已是新实现，负控制会退化成空操作；重定向进文件的输出让 stdout 断言必然失败；字段写成容器类型直接被 `_extract_nonempty_string` 判红
 - Impact: 仅证据目录（`evidence.json`、7 项 `rv-*` 证据与脚本）与 §9.1 实测数字一行、三份报告 .md 的数字与命令描述；无任何代码 diff 改动，oracle 语义与验收判定不变
 - Review: 无需人工复核新决策（契约修复与重跑不改变任何验收条件）；呈递物两张仍待人工复核
+
+### 交付后补强：失败不写脏快照 + 文档同步 + rv-1 负控制重构与最终树重采（2026-10-09）
+- Type: scope
+- Before: 三处留在实现里——快照结构校验只看顶层（独立 verifier 发现 #1：`prds` 数组装 `[1,2,3]` 这类垃圾条目会被当作 fresh 下发），后台重建遇到 GitHub 查询失败时按"降级继续"处理（`block_reason` / 未开始状态被写进快照，覆盖掉上一份好数据），页面在列表请求本身失败时仍显示"正在同步…"，把请求失败伪装成重建中。`docs/guides/agent-runner.md` 未描述这三处，`docs/api/references.md` 仍写"不复用 `GET /backlog/prds` 的 30 秒缓存"（该缓存已被快照机制删除）。rv-1 负控制的收尾探针断言"gh 挂起 → 在途重扫最终落地为降级快照（含 block_reason）"，与 §1 行为样例第 5 行"重扫失败时旧快照原样保留、数据不被清空"的正确语义正好相反，因此在补强后的树上必然变红
+- After: 提交 `7e9b721f` 落三处补强——快照按列表响应的完整结构逐条校验（含每个 PRD 的字段、依赖与 `next_action`），结构不符即视同缺失；`BacklogStateResolutionContext.fail_on_github_error` + `list_issue_comments/find_merged_pr_by_head(require_success=True)` 使后台重建在 GitHub 失败时**中止本次重建**而非写入降级结果；前端新增 `snapshotLoadFailed`，列表请求失败时如实显示"加载失败"。文档补齐三条（损坏定义、失败中止不落脏快照、加载失败态）并把 references.md 的"30 秒缓存"改为"本地快照"。rv-1 负控制重构为可开关 gh 桩（blocked 标记存在→挂起致重建失败；删除标记→同一进程同一 PATH 转发真实 gh），旧探针替换为两条更强的断言：A 等到日志 `Monitor sync failed` 判负后快照表行数必须仍为 0（失败的重建不得写脏），B 把 GitHub 切回可达后重扫必须自动落地并恢复 `stale=false`（空态是"重建失败"而非死态）。rv-1～rv-7 全部在最终 tree `7e9b721f` 上重采：rv-1 首屏 165ms / 快照读 15ms / PID 72893→74375 / 恢复后 prds=3 stale=False，rv-2～rv-6 红绿计数与首轮一致（4/2→6、7/2→9、1/4→5、1/1→2、1/2→3），rv-7 负控制 2 failed → green 6 passed (11.1s)；`evidence.json` item 1 的 summary/risks/negative_control/expected_fail 与 stdout 断言同步，三份报告 .md 数字同步
+- Reason: 顶层浅校验是独立 verifier 的发现 #1（"junk items inside prds 会被当作 fresh 下发"）；"重建失败仍写降级快照"与"请求失败显示正在同步"两处不是 verifier 发现，而是交付后对照 §1 行为样例第 5、6 行发现的正确性缺口——"失败不清场"应当包含"不把降级数据当新数据"，页面也不该把请求失败伪装成重建中，二者都属于把已声明契约做对，不是新增需求；rv-1 的旧探针把**改动前**的降级落库行为当成期望，实现纠正后该断言必然红——保留它等于用证据锁定一个错误契约，因此按 §7 声明的 oracle（删快照→空 prds + stale=true + scanned_at=null，不秒出列表）重写为 A/B 两条，oracle 文本本身未改
+- Impact: 代码与文档改动已在 `7e9b721f`；本次追加仅 `docs/guides/agent-runner.md`、`docs/api/references.md` 两行级说明同步与证据目录（脚本 `rv1_capture.sh`、`evidence.json`、7 项 `rv-*` 证据、三份报告 .md）。`CI=true just test all` 3693 passed / 1 skipped，`pnpm typecheck` 干净，`pnpm lint` 4 errors 全部落在本改动未触碰的文件（stats page 与 prd-ci/evidence/lifecycle 三个视图）；§9 勾选状态不变（无新增验收条件，rv-1 断言变强后仍为绿）
+- Review: 待人工复核——新增的"加载失败"前端态是用户可见文案，且 §1 行为样例第 5 行的"旧快照原样保留"现在由 A 断言在真实入口上验证；呈递物两张（rv-1 首屏、rv-7 两帧合成）仍待人工复核（§9 Human-Confirmed）

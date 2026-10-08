@@ -9,14 +9,14 @@
 
 ![rv-1 重启后首屏秒开（真实入口截图）](rv-1-first-paint.png)
 
-- 预期看到：3 条真实 PRD 卡片；表头 `3 个 PRD · 数据截至 04:25:48`（时间以实际采集为准）。
-- 验证层级：**real-entry**——`kc console` 真实进程重启后，Playwright chromium 打开 `http://127.0.0.1:8319/app/backlog/`，实测导航→条目可见 **127ms**。
+- 预期看到：3 条真实 PRD 卡片；表头 `3 个 PRD · 数据截至 06:05:21`（时间以实际采集为准）。
+- 验证层级：**real-entry**——`kc console` 真实进程重启后，Playwright chromium 打开 `http://127.0.0.1:8319/app/backlog/`，实测导航→条目可见 **165ms**。
 - 10 秒自检复跑：`set -o pipefail; bash tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/scripts/rv1_capture.sh 2>&1 | tee tasks/evidence/P1-PERF-20261008-161246-backlog-list-snapshot-swr/rv-1-first-paint-run.txt`
 - 配套帧：刷新后时间戳不变（同一份快照原样返回）：
 
 ![rv-1 刷新自检：时间戳不变](rv-1-reload-same-timestamp.png)
 
-- 负控制帧（删除快照行 + 挂起重扫后，页面停在「正在同步…」空态）：
+- 负控制帧（删除快照行 + GitHub 不可达时，页面停在「正在同步…」空态）：
 
 ![rv-1 负控制：无快照空态](rv-1-negative-control-no-snapshot.png)
 
@@ -51,12 +51,14 @@ PR / CI 链接：由 runner 在交付 PR 创建后回填（本分支尚未推送
 
 命令：`set -o pipefail; bash scripts/rv1_capture.sh 2>&1 | tee rv-1-first-paint-run.txt`（报告同时到 stdout 与证据文件，门禁复跑断言的是 stdout）
 关键判定行（逐字；其中 PID / 毫秒数 / ISO 时间戳每次重跑按当次实测刷新，判定阈值与结论不变）：
-- `VERDICT: 服务进程 PID 由 41369 变为 41885，快照行原样存活 ✓`
-- `- 响应耗时 0.011919s < 500ms ✓`
-- `RV1 VERDICT: PASS — first-paint-after-restart（firstPaintMs=127，scanned_at=2026-10-08T20:25:48+00:00）`
-- `- 两次读取的 scanned_at 均为 2026-10-08T20:25:48+00:00 ✓`
-- 负控制：`prds=[] stale=true scanned_at=null`、空态持续 8s+、浏览器 `RV1 VERDICT: PASS — negative-control-no-snapshot`、重扫最终落地恢复 `stale=False`（3 条降级 block_reason）
-- `OVERALL: PASS — rv-1 正控制（重启后秒开 + 数据截至 + 时间戳稳定）与负控制（删快照→空态）均按预期`
+- `VERDICT: 服务进程 PID 由 72893 变为 74375，快照行原样存活 ✓`
+- `- 响应耗时 0.014699s < 500ms ✓`
+- `RV1 VERDICT: PASS — first-paint-after-restart（firstPaintMs=165，scanned_at=2026-10-08T22:05:21+00:00）`
+- `- 两次读取的 scanned_at 均为 2026-10-08T22:05:21+00:00 ✓`
+- 负控制：`prds=[] stale=true scanned_at=null`、空态持续 8s+、浏览器 `RV1 VERDICT: PASS — negative-control-no-snapshot`
+- 断言 A（失败不写脏快照）：等到 console 日志 `Monitor sync failed` 判负后 `- 快照表行数仍为 0（重建失败即中止，不落成一份降级快照）✓`，读取仍 18.6ms
+- 断言 B（恢复探针）：只删 gh 桩的 blocked 标记（同一进程、同一 PATH）后重扫自动落地，`- 恢复后响应: prds=3, stale=False, scanned_at=2026-10-08T22:06:51+00:00`，条目状态取自真实 GitHub 解析（blocked / running）
+- `OVERALL: PASS — rv-1 正控制（重启后秒开 + 数据截至 + 时间戳稳定）与负控制（删快照→空态、失败不写脏快照、恢复自愈）均按预期`
 
 ### rv-2 · 快照持久化跨进程重启（R2 · verifier）
 
@@ -83,7 +85,7 @@ PR / CI 链接：由 runner 在交付 PR 创建后回填（本分支尚未推送
 ### rv-7 · 前端短轮询 + 新鲜度提示 + 空态（R1 · human，e2e）
 
 命令：`bash scripts/rv7_capture.sh` → `rv-7-e2e-run.txt`
-负控制（page.tsx 换成 `scripts/rv7_page_baseline.tsx` 改动前实现）`2 failed`（E2E-6/E2E-7 红，EXIT trap 恢复并做注入前后校验和比对）→ green `6 passed (11.9s)` → `OVERALL: PASS`。
+负控制（page.tsx 换成 `scripts/rv7_page_baseline.tsx` 改动前实现）`2 failed`（E2E-6/E2E-7 红，EXIT trap 恢复并做注入前后校验和比对）→ green `6 passed (11.1s)` → `OVERALL: PASS`。
 
 ## 全局门禁
 

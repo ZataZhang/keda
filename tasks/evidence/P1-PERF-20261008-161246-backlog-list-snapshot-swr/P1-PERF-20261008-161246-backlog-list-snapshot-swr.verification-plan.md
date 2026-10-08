@@ -10,7 +10,7 @@
 - 真实入口：`kc console`（隔离场景 `/tmp/rv246-rv1-scene`，独立 console.db，端口 8319）+ Playwright chromium 打开 `http://127.0.0.1:<port>/app/backlog/`
 - 采集命令：`bash scripts/rv1_capture.sh`（浏览器测量用 `scripts/rv1_firstpaint.mjs`）
 - 关键断言：冷启动预取真实 gh 扫描落库 → 杀进程重启（监听 PID 必变）→ 列表接口响应 <500ms 且 `prds>0`/`stale=false`/`scanned_at` 非空 → 浏览器导航到 PRD 条目可见 ≤1000ms 且表头匹配 `数据截至 HH:MM` → TTL 窗口内连续两次读取 `scanned_at` 不变，页面所属响应与 curl 直读一致
-- 负控制：DELETE `backlog_prd_snapshots` 全部行 + PATH 前置挂起版 `gh` 边界桩（sleep 60，被客户端 15s 超时击杀），重启后同路径：接口必须返回 `prds=[] + stale=true + scanned_at=null`，空态持续 ≥8 秒（重扫在途不阻塞读），浏览器停在「正在同步」；最终等待在途重扫落地并恢复 `stale=false`（降级数据含 `block_reason`），证明空态是"重建中"而非"什么都没发生"
+- 负控制：DELETE `backlog_prd_snapshots` 全部行 + PATH 前置**可开关**的 `gh` 边界桩（blocked 标记存在时 sleep 60，被客户端 15s 超时击杀 → 本轮重建必然失败；删掉标记后同一个桩原样转发真实 gh），重启后同路径：接口必须返回 `prds=[] + stale=true + scanned_at=null`，空态持续 ≥8 秒（重扫不阻塞读），浏览器停在「正在同步」；断言 A——等到 console 日志出现 `Monitor sync failed` 判负后，快照表行数必须仍为 0（失败的重建不得把降级结果写成快照）；断言 B——把 GitHub 切回可达后，后台重扫必须自动落地并恢复 `stale=false` + 新 `scanned_at`，证明空态是"重建中/重建失败"而非"什么都没发生"
 - expected_fail：若读路径仍内联等待扫描 → 首屏耗时回到数十秒 / 空态窗口不出现；若快照未跨进程持久化 → 重启后首请求 prds 为空且 >500ms
 - 产出：`rv-1-first-paint-run.txt`、`rv-1-first-paint.png`、`rv-1-reload-same-timestamp.png`、`rv-1-negative-control-no-snapshot.png`
 

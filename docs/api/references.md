@@ -172,7 +172,7 @@ curl -sS \
 
 ### `GET /api/v1/agent-runner/backlog/autopilot`
 
-返回当前仓库 Autopilot 的完整闭环状态。每次调用都重新加载配置（**不复用** `GET /backlog/prds` 的 30 秒缓存），以保证页面展示的是写后读回的真实值。
+返回当前仓库 Autopilot 的完整闭环状态。每次调用都重新加载配置（**不复用** `GET /backlog/prds` 的本地快照），以保证页面展示的是写后读回的真实值。
 
 查询参数：
 
