@@ -183,6 +183,11 @@ agent = "qoder"
 model = "Qwen3.8-Flash"
 reasoning_effort = "max"
 
+[agent_runner.presets.qoder-qwen3_8-max_xhigh]
+agent = "qoder"
+model = "Qwen3.8-Max"
+reasoning_effort = "xhigh"
+
 # =============================================================================
 # 阶段 -> 预设 绑定（九键闭集，与生命周期矩阵同键）
 # =============================================================================

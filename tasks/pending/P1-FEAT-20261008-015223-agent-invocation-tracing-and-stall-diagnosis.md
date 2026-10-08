@@ -1,6 +1,8 @@
 # PRD: Agent 调用记录与日志关联
 
 - GitHub Issue: https://github.com/ZataZhang/keda/issues/242
+- lifecycle_presets:
+  - implementation: qoder-qwen3_8-max_xhigh
 
 > ✅ **交付前置**：无硬依赖，可立即开工。结构化声明见 §8，那里是唯一事实源。
 >
