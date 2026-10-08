@@ -510,14 +510,18 @@ class IGitHubClient(ABC):
         ...
 
     @abstractmethod
-    def list_issue_comments(self, issue_number: int) -> list[str]:
+    def list_issue_comments(self, issue_number: int, *, require_success: bool = False) -> list[str]:
         """返回某个 Issue 的原始评论正文列表。
 
         Args:
             issue_number: 目标 Issue 编号。
+            require_success: 要求查询成功且评论列表结构完整；默认保留尽力读取语义。
 
         Returns:
             list[str]: 按时间顺序排列的评论正文（原始文本）列表。
+
+        Raises:
+            RuntimeError: 严格模式下查询失败或响应结构不完整。
         """
         ...
 
@@ -631,19 +635,23 @@ class IGitHubClient(ABC):
         ...
 
     @abstractmethod
-    def find_open_pr_by_head(self, branch: str) -> str | None:
+    def find_open_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
         """若该分支存在开放的 PR，则返回其 URL。
 
         Args:
             branch: 作为来源（head）的分支名。
+            require_success: 要求查询成功；默认保留尽力读取语义。
 
         Returns:
             str | None: 命中的开放 PR 的 URL；若不存在则返回 ``None``。
+
+        Raises:
+            RuntimeError: 严格模式下查询失败或响应结构不完整。
         """
         ...
 
     @abstractmethod
-    def find_merged_pr_by_head(self, branch: str) -> str | None:
+    def find_merged_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
         """若该分支存在已合并的 PR，则返回其 URL。
 
         用于检测 squash merge 或 rebase merge 后的分支：这些合并方式
@@ -652,9 +660,13 @@ class IGitHubClient(ABC):
 
         Args:
             branch: 作为来源（head）的分支名。
+            require_success: 要求查询成功；默认保留尽力读取语义。
 
         Returns:
             str | None: 命中的已合并 PR 的 URL；若不存在则返回 ``None``。
+
+        Raises:
+            RuntimeError: 严格模式下查询失败或响应结构不完整。
         """
         ...
 

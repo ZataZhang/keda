@@ -5,12 +5,13 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 9：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 10：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
   非空 ``status`` 列，记录每条事件写入时冻结的语义状态；v9 新增
-  ``agent_invocation_events`` 通用调用观测账本表，身份不依赖 PRD）。
+  ``agent_invocation_events`` 通用调用观测账本表，身份不依赖 PRD；v10 新增
+  按仓库与归档变体隔离的 ``backlog_prd_snapshots`` 列表快照表）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。

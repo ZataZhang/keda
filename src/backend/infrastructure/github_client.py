@@ -279,8 +279,8 @@ class GitHubCliClient:
     def create_issue(self, *, title: str, body: str, labels: Sequence[str]) -> str:
         return create_issue(self, title=title, body=body, labels=labels)
 
-    def list_issue_comments(self, issue_number: int) -> list[str]:
-        return list_issue_comments(self, issue_number)
+    def list_issue_comments(self, issue_number: int, *, require_success: bool = False) -> list[str]:
+        return list_issue_comments(self, issue_number, require_success=require_success)
 
     def list_issue_comment_entries(
         self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
@@ -342,11 +342,11 @@ class GitHubCliClient:
     def list_pr_comments(self, pr_number: int) -> list[str]:
         return list_pr_comments(self, pr_number)
 
-    def find_open_pr_by_head(self, branch: str) -> str | None:
-        return find_open_pr_by_head(self, branch)
+    def find_open_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
+        return find_open_pr_by_head(self, branch, require_success=require_success)
 
-    def find_merged_pr_by_head(self, branch: str) -> str | None:
-        return find_merged_pr_by_head(self, branch)
+    def find_merged_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
+        return find_merged_pr_by_head(self, branch, require_success=require_success)
 
     def get_remote_base_sha(self, remote: str, base_branch: str) -> str:
         return get_remote_base_sha(self, remote, base_branch)

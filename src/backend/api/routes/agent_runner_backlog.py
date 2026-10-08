@@ -64,7 +64,10 @@ from backend.core.use_cases.backlog_prd_evidence import (
     read_evidence_artifact_text,
 )
 from backend.core.use_cases.backlog_prd_scanner import scan_backlog_prds
-from backend.core.use_cases.backlog_state_resolver import resolve_backlog_states
+from backend.core.use_cases.backlog_state_resolver import (
+    BacklogStateResolutionContext,
+    resolve_backlog_states,
+)
 from backend.core.use_cases.review_once import _extract_pr_branch_from_comments
 
 _logger = logging.getLogger(__name__)
@@ -157,12 +160,16 @@ def _build_backlog_response(
     block_reasons = evaluate_backlog_dependencies(
         prds,
         github_client=github_client,
+        fail_on_github_error=True,
     )
     resolved = resolve_backlog_states(
         prds,
         github_client=github_client,
-        config=context.config,
-        block_reasons=block_reasons,
+        context=BacklogStateResolutionContext(
+            config=context.config,
+            block_reasons=block_reasons,
+            fail_on_github_error=True,
+        ),
     )
     # Enrich dependency targets with current issue numbers for the UI.
     prd_issue_map = {prd.prd_path: prd.issue_number for prd in resolved}

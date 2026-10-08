@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import AppConfig, LabelConfig
@@ -23,6 +23,21 @@ from backend.core.use_cases.agent_runner_monitor import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BacklogStateResolutionContext:
+    """解析 Backlog 状态时共享的配置与失败策略。
+
+    Attributes:
+        config: 目标仓库生效的 Agent 配置。
+        block_reasons: PRD 路径到依赖阻塞原因的映射。
+        fail_on_github_error: 为 ``True`` 时，GitHub 查询错误会向上抛出。
+    """
+
+    config: AppConfig
+    block_reasons: Mapping[str, str | None]
+    fail_on_github_error: bool = False
 
 
 def _state_from_labels(
@@ -51,12 +66,19 @@ def _is_pr_merged(
     issue_number: int,
     github_client: IGitHubClient,
     issue_body: str,
+    *,
+    fail_on_github_error: bool,
 ) -> tuple[bool, str | None]:
     """Return whether the associated PR has been merged and its URL."""
     try:
-        comments = github_client.list_issue_comments(issue_number)
+        if fail_on_github_error:
+            comments = github_client.list_issue_comments(issue_number, require_success=True)
+        else:
+            comments = github_client.list_issue_comments(issue_number)
     except Exception as exc:  # noqa: BLE001
         _logger.info("Failed to list comments for issue #%s: %s", issue_number, exc)
+        if fail_on_github_error:
+            raise
         comments = []
 
     # Reuse the monitor helper to resolve the PR branch from event markers.
@@ -68,9 +90,14 @@ def _is_pr_merged(
         return False, None
 
     try:
-        merged_url = github_client.find_merged_pr_by_head(pr_branch)
+        if fail_on_github_error:
+            merged_url = github_client.find_merged_pr_by_head(pr_branch, require_success=True)
+        else:
+            merged_url = github_client.find_merged_pr_by_head(pr_branch)
     except Exception as exc:  # noqa: BLE001
         _logger.info("Failed to find merged PR for %s: %s", pr_branch, exc)
+        if fail_on_github_error:
+            raise
         merged_url = None
     return bool(merged_url), merged_url
 
@@ -99,21 +126,23 @@ def _compute_next_action(
 def resolve_backlog_states(
     prds: Sequence[BacklogPrd],
     github_client: IGitHubClient,
-    config: AppConfig,
-    block_reasons: Mapping[str, str | None],
+    context: BacklogStateResolutionContext,
 ) -> list[BacklogPrd]:
     """Resolve live GitHub state for a list of backlog PRDs.
 
     Args:
         prds: PRDs from the scanner.
         github_client: GitHub client.
-        config: Merged app config for the target repository.
-        block_reasons: Dependency blocker map from :func:`evaluate_backlog_dependencies`.
+        context: Merged app config, dependency blockers, and GitHub failure policy.
 
     Returns:
         New list of PRDs with ``state``, ``block_reason``, and ``next_action`` updated.
+
+    Raises:
+        Exception: GitHub 查询失败且上下文启用严格失败策略时原样抛出。
     """
-    labels_config = config.labels
+    labels_config = context.config.labels
+    block_reasons = context.block_reasons
     resolved: list[BacklogPrd] = []
 
     for prd in prds:
@@ -149,6 +178,8 @@ def resolve_backlog_states(
             issue = github_client.get_issue(prd.issue_number)
         except Exception as exc:  # noqa: BLE001
             _logger.info("Failed to fetch issue #%s: %s", prd.issue_number, exc)
+            if context.fail_on_github_error:
+                raise
             block_reason = block_reasons.get(prd.prd_path)
             resolved.append(
                 replace(
@@ -160,8 +191,15 @@ def resolve_backlog_states(
             )
             continue
 
-        pr_merged, merged_url = _is_pr_merged(prd.issue_number, github_client, issue.body)
-        pr_context = _lookup_pr_context(issue, github_client)
+        pr_merged, merged_url = _is_pr_merged(
+            prd.issue_number,
+            github_client,
+            issue.body,
+            fail_on_github_error=context.fail_on_github_error,
+        )
+        pr_context = _lookup_pr_context(
+            issue, github_client, require_success=context.fail_on_github_error
+        )
         state = _state_from_labels(issue.labels, labels_config, issue.state, pr_merged)
 
         # Override with dependency blocker if present, unless already merged/archived.

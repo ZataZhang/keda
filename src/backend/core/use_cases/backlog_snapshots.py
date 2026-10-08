@@ -29,6 +29,7 @@ from backend.core.shared.interfaces.runner_console import (
     BacklogSnapshotEntry,
     IBacklogSnapshotStore,
 )
+from backend.core.shared.models.backlog import BacklogDependencyKind, BacklogPrdState
 
 _logger = logging.getLogger(__name__)
 
@@ -162,11 +163,116 @@ def _is_renderable_backlog_payload(
     """
     if not isinstance(payload_value, dict):
         return False
-    if not isinstance(payload_value.get("prds"), list):
+    if not {
+        "prds",
+        "skipped",
+        "repo_id",
+        "include_archived",
+        "scanned_at",
+    }.issubset(payload_value):
         return False
-    if str(payload_value.get("repo_id") or "") != repo_id:
+    if payload_value.get("repo_id") != repo_id:
         return False
-    return bool(payload_value.get("include_archived")) is include_archived
+    if type(payload_value.get("include_archived")) is not bool:
+        return False
+    if payload_value["include_archived"] is not include_archived:
+        return False
+    if not isinstance(payload_value.get("scanned_at"), str) or not payload_value["scanned_at"]:
+        return False
+
+    prd_payloads = payload_value.get("prds")
+    if not isinstance(prd_payloads, list):
+        return False
+    for prd_payload in prd_payloads:
+        if not isinstance(prd_payload, dict):
+            return False
+        if not {
+            "prd_path",
+            "title",
+            "status",
+            "priority",
+            "issue_url",
+            "issue_number",
+            "state",
+            "acceptance_total",
+            "acceptance_checked",
+            "delivery_dependencies",
+            "updated_at",
+            "block_reason",
+            "next_action",
+        }.issubset(prd_payload):
+            return False
+        if any(
+            not isinstance(prd_payload.get(field_name), str)
+            for field_name in ("prd_path", "title", "status", "priority", "updated_at")
+        ):
+            return False
+        if prd_payload.get("state") not in {state.value for state in BacklogPrdState}:
+            return False
+        if any(
+            type(prd_payload.get(field_name)) is not int or prd_payload[field_name] < 0
+            for field_name in ("acceptance_total", "acceptance_checked")
+        ):
+            return False
+        if (
+            prd_payload.get("issue_number") is not None
+            and type(prd_payload["issue_number"]) is not int
+        ):
+            return False
+        if prd_payload.get("issue_url") is not None and not isinstance(
+            prd_payload["issue_url"], str
+        ):
+            return False
+        if prd_payload.get("block_reason") is not None and not isinstance(
+            prd_payload["block_reason"], str
+        ):
+            return False
+
+        dependency_payloads = prd_payload.get("delivery_dependencies")
+        if not isinstance(dependency_payloads, list):
+            return False
+        for dependency_payload in dependency_payloads:
+            if not isinstance(dependency_payload, dict):
+                return False
+            if not {"from_path", "to_path", "kind", "detail"}.issubset(dependency_payload):
+                return False
+            if not all(
+                isinstance(dependency_payload.get(field_name), str)
+                for field_name in ("from_path", "to_path", "kind")
+            ):
+                return False
+            if dependency_payload["kind"] not in {kind.value for kind in BacklogDependencyKind}:
+                return False
+            if dependency_payload.get("detail") is not None and not isinstance(
+                dependency_payload["detail"], str
+            ):
+                return False
+
+        next_action_payload = prd_payload.get("next_action")
+        if next_action_payload is not None and (
+            not isinstance(next_action_payload, dict)
+            or not isinstance(next_action_payload.get("label"), str)
+            or (
+                next_action_payload.get("url") is not None
+                and not isinstance(next_action_payload.get("url"), str)
+            )
+        ):
+            return False
+
+    skipped_payloads = payload_value.get("skipped")
+    if not isinstance(skipped_payloads, list):
+        return False
+    for skipped_payload in skipped_payloads:
+        if (
+            not isinstance(skipped_payload, dict)
+            or not {"prd_path", "reason"}.issubset(skipped_payload)
+            or not all(
+                isinstance(skipped_payload.get(field_name), str)
+                for field_name in ("prd_path", "reason")
+            )
+        ):
+            return False
+    return True
 
 
 def persist_backlog_snapshot(

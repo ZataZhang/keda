@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -198,6 +199,66 @@ def test_list_backlog_prds_serves_snapshot_without_rescanning(
 
     assert build_calls == []
     assert snapshot_wiring.coordinator.in_flight_repo_ids() == ()
+
+
+def test_github_failure_keeps_previous_backlog_snapshot(
+    backlog_environment,
+    snapshot_wiring: _SnapshotWiring,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实 GET 触发的扫描遇到 GitHub 异常时仍返回并保留旧快照。"""
+    previous_payload = {
+        "prds": [
+            {
+                "prd_path": "tasks/pending/old.md",
+                "title": "Old Snapshot",
+                "status": "pending",
+                "priority": "P1",
+                "issue_url": "https://github.com/org/repo/issues/17",
+                "issue_number": 17,
+                "state": "ready",
+                "acceptance_total": 1,
+                "acceptance_checked": 0,
+                "delivery_dependencies": [],
+                "updated_at": "2026-10-08T00:00:00+00:00",
+                "block_reason": None,
+                "next_action": None,
+            }
+        ],
+        "skipped": [],
+        "repo_id": "keda-main",
+        "include_archived": False,
+        "scanned_at": "2020-01-01T00:00:00+00:00",
+    }
+    persist_backlog_snapshot(
+        backlog_environment["store"],
+        repo_id="keda-main",
+        include_archived=False,
+        payload=previous_payload,
+    )
+    (backlog_environment["repo_dir"] / "tasks/pending/P1-FEAT-20260101-test.md").write_text(
+        "# PRD: Test Feature\n\n- GitHub Issue: https://github.com/org/repo/issues/17\n",
+        encoding="utf-8",
+    )
+
+    def fail_get_issue(_issue_number: int) -> None:
+        raise RuntimeError("GitHub unavailable")
+
+    monkeypatch.setattr(backlog_environment["github_client"], "get_issue", fail_get_issue)
+
+    response = client.get(
+        "/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=false"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["prds"][0]["title"] == "Old Snapshot"
+    assert response.json()["stale"] is True
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+    stored_snapshot = backlog_environment["store"].get_backlog_snapshot(
+        repo_id="keda-main", include_archived=False
+    )
+    assert stored_snapshot is not None
+    assert json.loads(stored_snapshot.payload_json) == previous_payload
 
 
 def test_backlog_prds_rejects_unknown_repo_without_leaking_its_snapshot(

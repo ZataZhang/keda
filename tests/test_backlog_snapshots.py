@@ -100,7 +100,23 @@ def _list_payload(
 ) -> dict:
     """构造与 ``_build_backlog_response`` 同构的列表响应。"""
     return {
-        "prds": [{"title": title, "prd_path": "tasks/pending/x.md"}],
+        "prds": [
+            {
+                "prd_path": "tasks/pending/x.md",
+                "title": title,
+                "status": "pending",
+                "priority": "P1",
+                "issue_url": None,
+                "issue_number": None,
+                "state": "not_started",
+                "acceptance_total": 0,
+                "acceptance_checked": 0,
+                "delivery_dependencies": [],
+                "updated_at": _timestamp_with_age(0),
+                "block_reason": None,
+                "next_action": {"label": "开始", "url": None},
+            }
+        ],
         "skipped": [],
         "repo_id": repo_id,
         "include_archived": include_archived,
@@ -343,11 +359,29 @@ def test_corrupt_or_misshapen_snapshot_reads_as_missing(
         include_archived=True,
         payload_json=json.dumps(_list_payload("wrong-variant", include_archived=False)),
     )
+    junk_prd_payload = _list_payload("junk-prd", include_archived=False)
+    junk_prd_payload["prds"] = [1, 2, 3]
+    _write_raw_snapshot(
+        backlog_harness.store,
+        repo_id="junk-prd",
+        include_archived=False,
+        payload_json=json.dumps(junk_prd_payload),
+    )
+    missing_field_payload = _list_payload("missing-field", include_archived=False)
+    missing_field_payload.pop("skipped")
+    _write_raw_snapshot(
+        backlog_harness.store,
+        repo_id="missing-field",
+        include_archived=False,
+        payload_json=json.dumps(missing_field_payload),
+    )
 
     for repo_id, include_archived in (
         ("corrupt-repo", False),
         ("wrong-repo", False),
         ("wrong-variant", True),
+        ("junk-prd", False),
+        ("missing-field", False),
     ):
         view = read_backlog_snapshot(
             backlog_harness.store, repo_id=repo_id, include_archived=include_archived

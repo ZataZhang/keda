@@ -81,10 +81,18 @@ function repoStatusDotClass(repo: RegistryRepositoryEntry): string {
  * @param props - 快照时间与新鲜度标记。
  * @param props.scannedAt - 快照构建时间；null 表示还没有快照。
  * @param props.stale - 快照是否已超过后端 TTL 并正在后台重扫。
+ * @param props.loadFailed - 最近一次列表读取是否失败。
  * @returns 表头右侧的新鲜度文案。
  */
-function SnapshotFreshnessLabel(props: { scannedAt: string | null; stale: boolean }) {
-  const { scannedAt, stale } = props;
+function SnapshotFreshnessLabel(props: {
+  scannedAt: string | null;
+  stale: boolean;
+  loadFailed: boolean;
+}) {
+  const { scannedAt, stale, loadFailed } = props;
+  if (loadFailed) {
+    return <span className="text-xs text-rose-500">加载失败</span>;
+  }
   if (!scannedAt) {
     return <span className="text-xs text-slate-400 dark:text-slate-500">正在同步…</span>;
   }
@@ -103,6 +111,7 @@ export default function BacklogPage() {
   // stale 为 true 表示这份数据已过期且后台正在重扫，需要按短节奏追平。
   const [snapshotScannedAt, setSnapshotScannedAt] = useState<string | null>(null);
   const [snapshotStale, setSnapshotStale] = useState(false);
+  const [snapshotLoadFailed, setSnapshotLoadFailed] = useState(false);
   // 轮询节奏用 ref 传递：把 stale 放进 effect 依赖会让每次新鲜度翻转都重建整个
   // 加载流程，表现为列表反复闪骨架屏。
   const snapshotStaleRef = useRef(false);
@@ -153,6 +162,7 @@ export default function BacklogPage() {
         setPrds(response.prds);
         setSnapshotScannedAt(response.scanned_at);
         setSnapshotStale(response.stale);
+        setSnapshotLoadFailed(false);
         snapshotStaleRef.current = response.stale;
         return response.prds;
       } catch (error) {
@@ -166,6 +176,7 @@ export default function BacklogPage() {
         setPrds([]);
         setSnapshotScannedAt(null);
         setSnapshotStale(false);
+        setSnapshotLoadFailed(true);
         snapshotStaleRef.current = false;
         return [];
       }
@@ -179,6 +190,7 @@ export default function BacklogPage() {
     }
     const controller = new AbortController();
     setLoading(true);
+    setSnapshotLoadFailed(false);
     let timer: ReturnType<typeof setTimeout> | undefined;
     // 用自排的 setTimeout 而不是固定 setInterval：节奏跟着最近一次响应的 stale
     // 走（3 秒追平 / 30 秒保活），而依赖数组保持不变，避免每次翻转都重建加载。
@@ -495,7 +507,11 @@ export default function BacklogPage() {
           <span className="text-xs text-slate-500">
             {selectedPrd ? "PRD 详情" : `${visiblePrds.length} 个 PRD`}
           </span>
-          <SnapshotFreshnessLabel scannedAt={snapshotScannedAt} stale={snapshotStale} />
+          <SnapshotFreshnessLabel
+            scannedAt={snapshotScannedAt}
+            stale={snapshotStale}
+            loadFailed={snapshotLoadFailed}
+          />
           <div className="flex-1" />
           <Button
             size="sm"
@@ -542,6 +558,10 @@ export default function BacklogPage() {
                 <Skeleton className="h-40" />
                 <Skeleton className="h-40" />
                 <Skeleton className="h-40" />
+              </div>
+            ) : snapshotLoadFailed && visiblePrds.length === 0 ? (
+              <div className="flex h-40 items-center justify-center text-sm text-rose-500">
+                加载失败，请稍后重试。
               </div>
             ) : snapshotScannedAt === null && visiblePrds.length === 0 ? (
               // 还没有任何快照：这是后台首次扫描在途，不是"这个仓库没有 PRD"，
