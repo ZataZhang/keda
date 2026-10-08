@@ -22,6 +22,13 @@
 >
 > 注：本仓库与 CNCF 毕业项目 KEDA（keda.sh，Kubernetes 事件驱动自动扩缩）无关。
 
+<p align="center">
+  <img src="./assets/diagrams/issue-lifecycle.svg" alt="KedaCode · Open Issue 认领后的执行链：分诊（deliberate / rework-prd / 轻量）→ 统一实现 → 发布档位（默认 / fast-merge / direct-pr）→ 合并与收尾" width="85%">
+</p>
+<p align="center">
+  <sub>Issue 认领后的执行链全貌——分诊、PRD 生成、发布档位与合并收尾；细节见 <a href="./docs/guides/agent-runner.md">docs/guides/agent-runner.md</a>。</sub>
+</p>
+
 ## 一键安装
 
 无需克隆仓库，一条命令装上 `kc` CLI 并打开管理面板。三条等价入口任选其一；装完执行 `kc --version` 验证，在任意目录 `kc console` 打开管理面板。详见 `docs/getting-started/installation.md`。
