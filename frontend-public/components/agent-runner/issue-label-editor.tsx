@@ -21,11 +21,20 @@ import type { IssueLabelSnapshot } from "@/lib/api/types";
 
 import { prettyLabel, variantForLabel } from "@/components/agent-runner/label-variant";
 
+/** 标签面板向父级汇报的标签状态：打开加载与写入提交后的 fresh read 都会触发。 */
+export interface IssueLabelsChangedInfo {
+  repoId: string;
+  issueNumber: number;
+  labels: string[];
+  /** ``load`` = 打开加载；``write`` = 用户增删标签后的写回。 */
+  source: "load" | "write";
+}
+
 interface IssueLabelEditorProps {
   repoId: string;
   issueNumber: number;
-  /** 标签写回成功后的回调，用于父级同步展示（如全量列表行的标签）。 */
-  onLabelsChanged?: (labels: string[]) => void;
+  /** 标签读取/写回后的回调，用于父级同步展示（如全量列表行与详情头的标签）。 */
+  onLabelsChanged?: (info: IssueLabelsChangedInfo) => void;
 }
 
 /**
@@ -36,7 +45,7 @@ interface IssueLabelEditorProps {
  *
  * @param props.repoId - 仓库 ID。
  * @param props.issueNumber - Issue 编号。
- * @param props.onLabelsChanged - 写回成功后的标签变更回调。
+ * @param props.onLabelsChanged - 标签读取/写回后的状态汇报（load/write）。
  */
 export function IssueLabelEditor({
   repoId,
@@ -52,7 +61,12 @@ export function IssueLabelEditor({
       const result = await fetchIssueLabels(repoId, issueNumber);
       setSnapshot(result);
       setError(null);
-      onLabelsChanged?.(result.labels);
+      onLabelsChanged?.({
+        repoId,
+        issueNumber,
+        labels: result.labels,
+        source: "load",
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "无法加载 Issue 标签。");
     }
@@ -67,7 +81,12 @@ export function IssueLabelEditor({
     try {
       const fresh = await updateIssueLabels(repoId, issueNumber, { add, remove });
       setSnapshot(fresh);
-      onLabelsChanged?.(fresh.labels);
+      onLabelsChanged?.({
+        repoId,
+        issueNumber,
+        labels: fresh.labels,
+        source: "write",
+      });
       toast.success(`Issue #${issueNumber} 标签已更新。`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "标签更新失败。");

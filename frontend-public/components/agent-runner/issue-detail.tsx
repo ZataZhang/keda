@@ -9,15 +9,18 @@ import type { IssueMonitoringSnapshot } from "@/lib/api/types";
 
 import { CopyableCommand } from "@/components/agent-runner/copyable-command";
 import { IssueLabelEditor } from "@/components/agent-runner/issue-label-editor";
+import type { IssueLabelsChangedInfo } from "@/components/agent-runner/issue-label-editor";
 import { prettyLabel, variantForLabel } from "@/components/agent-runner/label-variant";
 
 interface IssueDetailProps {
   issue: IssueMonitoringSnapshot;
   /** 提供后渲染可编辑标签面板（FR-5）。 */
   repoId?: string;
+  /** 标签读取/写回后的状态汇报，让父级同步「全部」列表的标签展示。 */
+  onLabelsChanged?: (info: IssueLabelsChangedInfo) => void;
 }
 
-export function IssueDetail({ issue, repoId }: IssueDetailProps) {
+export function IssueDetail({ issue, repoId, onLabelsChanged }: IssueDetailProps) {
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
       <Card>
@@ -61,7 +64,12 @@ export function IssueDetail({ issue, repoId }: IssueDetailProps) {
             <CardTitle className="text-sm">标签（可编辑，范围限标准集）</CardTitle>
           </CardHeader>
           <CardContent>
-            <IssueLabelEditor repoId={repoId} issueNumber={issue.number} />
+            <IssueLabelEditor
+              key={`${repoId}:${issue.number}`}
+              repoId={repoId}
+              issueNumber={issue.number}
+              onLabelsChanged={onLabelsChanged}
+            />
           </CardContent>
         </Card>
       ) : null}

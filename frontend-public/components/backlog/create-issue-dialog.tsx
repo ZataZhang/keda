@@ -63,6 +63,7 @@ export function CreateIssueDialog({
       toast.success(`已创建 Issue #${created.number}（未入队）。`);
       onCreated?.(created.number, created.issue_url);
       setPrompt("");
+      setIssueType("feature");
       onOpenChange(false);
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "创建 Issue 失败。");

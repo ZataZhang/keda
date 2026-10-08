@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IssueDetail } from "@/components/agent-runner/issue-detail";
 import { ConsoleIssueDetail } from "@/components/agent-runner/console-issue-detail";
+import type { IssueLabelsChangedInfo } from "@/components/agent-runner/issue-label-editor";
 import { MonitorSettingsPanel } from "@/components/agent-runner/monitor-settings-panel";
 import { RepositoryOverview } from "@/components/agent-runner/repository-overview";
 import type { IssueScope } from "@/components/agent-runner/repository-overview";
@@ -213,18 +214,23 @@ export default function DashboardPage() {
     if (state.kind !== "ready") {
       return;
     }
-    // 「全部」视图选中的未监控 Issue：监控详情端点解析不到，走轻量面板。
-    if (selectedEntry && selectedEntry.number === selectedIssueNumber) {
-      setSelectedIssue(null);
-      setDetailError(null);
-      return;
-    }
     const cached = state.repos
       .filter((slot): slot is Extract<RepoSlot, { kind: "ready" }> => slot.kind === "ready")
       .flatMap((slot) => slot.repository.issues)
       .find((issue) => issue.number === selectedIssueNumber);
     if (cached) {
       setSelectedIssue(cached);
+      setDetailError(null);
+      // 快照已收录（例如刚通过标签面板打上 agent/ready）：升级回完整详情，
+      // 丢掉旧的全量列表条目，避免轻量面板停在过期标签/未入队态。
+      setSelectedEntry((prev) =>
+        prev && prev.number === selectedIssueNumber ? null : prev,
+      );
+      return;
+    }
+    // 「全部」视图选中的未监控 Issue：监控详情端点解析不到，走轻量面板。
+    if (selectedEntry && selectedEntry.number === selectedIssueNumber) {
+      setSelectedIssue(null);
       setDetailError(null);
       return;
     }
@@ -395,6 +401,49 @@ export default function DashboardPage() {
       setSelectedEntry(hasSnapshot ? null : entry);
     },
     [state],
+  );
+
+  // 「全部」缓存的引用镜像：供稳定回调读取最新缓存而不引入重渲染依赖。
+  const allIssuesByRepoRef = useRef(allIssuesByRepo);
+  allIssuesByRepoRef.current = allIssuesByRepo;
+
+  /**
+   * 标签面板的 fresh read 汇报（FR-5 一致性）：把最新标签写回轻量详情条目与
+   * 「全部」缓存行；写入操作（source=write）后再静默重取该仓库全量列表，
+   * 让 monitored 标注也由后端 fresh read 校准（前端不重演监控口径）。
+   */
+  const handleIssueLabelsChanged = useCallback(
+    (info: IssueLabelsChangedInfo) => {
+      setSelectedEntry((prev) =>
+        prev && prev.number === info.issueNumber
+          ? { ...prev, labels: info.labels }
+          : prev,
+      );
+      setAllIssuesByRepo((prev) => {
+        const cached = prev[info.repoId];
+        if (!cached) return prev;
+        return {
+          ...prev,
+          [info.repoId]: cached.map((entry) =>
+            entry.number === info.issueNumber
+              ? { ...entry, labels: info.labels }
+              : entry,
+          ),
+        };
+      });
+      if (info.source !== "write") return;
+      if (!allIssuesByRepoRef.current[info.repoId]) return;
+      void fetchAllRepositoryIssues(info.repoId)
+        .then((entries) => {
+          setAllIssuesByRepo((prev) =>
+            prev[info.repoId] ? { ...prev, [info.repoId]: entries } : prev,
+          );
+        })
+        .catch(() => {
+          // 校准失败不打断操作：缓存行已按写回结果补丁，下一次切换会重新拉取。
+        });
+    },
+    [],
   );
 
   /** 仓库级一次性动作（FR-1）：起非驻留托管进程，进度与停止去进程页。 */
@@ -637,12 +686,14 @@ export default function DashboardPage() {
                   <IssueDetail
                     issue={selectedIssue}
                     repoId={selectedIssueRepoId ?? undefined}
+                    onLabelsChanged={handleIssueLabelsChanged}
                   />
                 </div>
               ) : selectedEntry ? (
                 <ConsoleIssueDetail
                   repoId={selectedIssueRepoId ?? ""}
                   entry={selectedEntry}
+                  onLabelsChanged={handleIssueLabelsChanged}
                 />
               ) : (
                 <Card>
@@ -813,6 +864,8 @@ function RepoCard({
   repoActionPendingKey: string | null;
 }) {
   const repoId = getRepoIdFromSlot(slot);
+  // 同一仓库的「跑一轮 / 复核一轮」互斥：一次性进程启动期间禁止并发再发。
+  const repoActionBusy = repoActionPendingKey?.startsWith(`${repoId}:`) ?? false;
 
   return (
     <div className="space-y-1">
@@ -833,7 +886,7 @@ function RepoCard({
             size="sm"
             variant="outline"
             className="h-7 px-2 text-xs"
-            disabled={slot.kind !== "ready" || repoActionPendingKey === `${repoId}:run_once`}
+            disabled={slot.kind !== "ready" || repoActionBusy}
             data-testid={`dashboard-run-once-${repoId}`}
             onClick={() => onRepoAction(repoId, "run_once")}
           >
@@ -843,7 +896,7 @@ function RepoCard({
             size="sm"
             variant="outline"
             className="h-7 px-2 text-xs"
-            disabled={slot.kind !== "ready" || repoActionPendingKey === `${repoId}:review_once`}
+            disabled={slot.kind !== "ready" || repoActionBusy}
             data-testid={`dashboard-review-once-${repoId}`}
             onClick={() => onRepoAction(repoId, "review_once")}
           >

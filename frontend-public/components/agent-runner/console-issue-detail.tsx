@@ -7,11 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ConsoleIssueEntry } from "@/lib/api/types";
 
 import { IssueLabelEditor } from "@/components/agent-runner/issue-label-editor";
+import type { IssueLabelsChangedInfo } from "@/components/agent-runner/issue-label-editor";
 import { prettyLabel, variantForLabel } from "@/components/agent-runner/label-variant";
 
 interface ConsoleIssueDetailProps {
   repoId: string;
   entry: ConsoleIssueEntry;
+  /** 标签读取/写回后的回调，让父级同步「全部」列表与选中条目的标签展示。 */
+  onLabelsChanged?: (info: IssueLabelsChangedInfo) => void;
 }
 
 /**
@@ -22,8 +25,13 @@ interface ConsoleIssueDetailProps {
  *
  * @param props.repoId - 仓库 ID。
  * @param props.entry - 全量 Issue 列表行。
+ * @param props.onLabelsChanged - 标签读取/写回后的状态汇报。
  */
-export function ConsoleIssueDetail({ repoId, entry }: ConsoleIssueDetailProps) {
+export function ConsoleIssueDetail({
+  repoId,
+  entry,
+  onLabelsChanged,
+}: ConsoleIssueDetailProps) {
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1" data-testid="console-issue-detail">
       <Card>
@@ -81,7 +89,12 @@ export function ConsoleIssueDetail({ repoId, entry }: ConsoleIssueDetailProps) {
           <CardTitle className="text-sm">标签（可编辑，范围限标准集）</CardTitle>
         </CardHeader>
         <CardContent>
-          <IssueLabelEditor repoId={repoId} issueNumber={entry.number} />
+          <IssueLabelEditor
+            key={`${repoId}:${entry.number}`}
+            repoId={repoId}
+            issueNumber={entry.number}
+            onLabelsChanged={onLabelsChanged}
+          />
         </CardContent>
       </Card>
     </div>

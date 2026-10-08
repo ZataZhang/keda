@@ -54,11 +54,8 @@ export function PrdStartOptionsSheet({
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      // 关闭时把重置放进微任务，避免在 effect 体内同步 setState 触发级联渲染。
-      queueMicrotask(() => setOptions({}));
-      return;
-    }
+    // 父级只在打开时挂载本抽屉，组件内状态随重挂载自然重置。
+    if (!open) return;
     const controller = new AbortController();
     fetchLaunchOptions(repoId)
       .then((view) => {
