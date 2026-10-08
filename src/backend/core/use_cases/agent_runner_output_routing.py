@@ -17,6 +17,9 @@ imports), so the layering rule ``core -> engines -> infrastructure`` holds:
   #223): producers hand it readable raw text, so the per-Issue file, the live
   board and the serial terminal mirror all show the same timeline while the
   deliberation workspace files — fed by the same producers — stay clean.
+- :class:`IssueLogBinding` is published through a contextvar for the duration of
+  the routing scope, so the invocation tracer can record *which* log file a call
+  belongs to without this module importing the tracer (Issue #242).
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -39,6 +44,35 @@ from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
 # under this root (e.g. ``backend.core.use_cases.agent_runner_orchestrate``), so
 # attaching here captures the worker thread's narrative via propagation.
 _BACKEND_LOGGER_NAME = "backend"
+
+
+@dataclass(frozen=True)
+class IssueLogBinding:
+    """当前线程正在写入的 Issue 日志定位信息。
+
+    调用观测（:mod:`backend.core.use_cases.agent_invocation_tracing`）需要把
+    "这条调用记录对应哪个日志文件"写进事件里，但日志文件由本模块在路由作用域
+    内才创建。用 contextvar 传出定位信息，避免让 ``issue_output_routing`` 反向
+    依赖观测模块，也避免给中间每一层加参数。
+
+    Attributes:
+        log_root: 批准的日志根目录（``<repo_path>/logs``）。观测侧的相对定位
+            解析只允许落在这个根之内。
+        log_path: 本次路由实际打开的 Issue 日志文件绝对路径。
+    """
+
+    log_root: Path
+    log_path: Path
+
+
+_ACTIVE_ISSUE_LOG_BINDING: ContextVar[IssueLogBinding | None] = ContextVar(
+    "iar_active_issue_log_binding", default=None
+)
+
+
+def active_issue_log_binding() -> IssueLogBinding | None:
+    """返回当前上下文正在写入的 Issue 日志定位；不在路由作用域内时为 ``None``。"""
+    return _ACTIVE_ISSUE_LOG_BINDING.get()
 
 
 class _OutputRoutedProcessRunner:
@@ -196,9 +230,13 @@ def issue_output_routing(
     handler.addFilter(_ThreadLogFilter(threading.get_ident()))
     backend_logger = logging.getLogger(_BACKEND_LOGGER_NAME)
     backend_logger.addHandler(handler)
+    binding_token = _ACTIVE_ISSUE_LOG_BINDING.set(
+        IssueLogBinding(log_root=Path(log_base), log_path=file_path)
+    )
     try:
         yield sink
     finally:
+        _ACTIVE_ISSUE_LOG_BINDING.reset(binding_token)
         backend_logger.removeHandler(handler)
         # 追加显式尝试终态标记：``--follow`` 需要它把「运行结束」和「这一刻没有
         # 新字节」区分开（后者在 Agent 两次写入之间与重试间隔里都会出现）。

@@ -22,6 +22,7 @@ from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
 )
 from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.use_cases.agent_invocation_tracing import PHASE_SUPERVISOR_REPAIR
 from backend.core.use_cases.run_agent_once import (
     commit_requested_changes,
     ensure_verification_passed,
@@ -91,6 +92,8 @@ def execute_repair(
             config=config,
             issue=issue,
             model_selection=model_selection,
+            invocation_phase=PHASE_SUPERVISOR_REPAIR,
+            invocation_attempt=attempt,
         )
 
         request_path = worktree_path / ".agent-runner" / "commit-request.json"

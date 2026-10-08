@@ -113,6 +113,10 @@ class CommandResult:
         session_id: agent CLI 自报的会话 id（如 claude stream-json 首行
             ``system/init`` 事件里的 ``session_id``），供崩溃对账后的会话续传
             回填给 ``--resume``。协议未解析到或未声明该能力时为 ``None``。
+        reported_model: 执行器**自报**的实际模型名（如 claude stream-json
+            ``system/init`` 事件里的 ``model``）。只表示"执行器报告了什么"，
+            不声称已独立验证服务端内部运行的模型；协议未报告时为 ``None``
+            （≠ 配置里的默认模型，展示为"未提供"）。
     """
 
     command: tuple[str, ...]
@@ -123,6 +127,7 @@ class CommandResult:
     output_protocol: str = PLAIN_PROTOCOL_ID
     token_usage: TokenUsage | None = None
     session_id: str | None = None
+    reported_model: str | None = None
 
 
 @dataclass(frozen=True)

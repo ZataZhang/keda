@@ -1524,6 +1524,7 @@ kc logs --repo-id keda-main --issue 42 --follow
 - Issue 尚未开始、日志已清理或仓库未注册时，显示明确的空态 / 不可用提示，不会回退到别的 Issue 或进程日志。
 - 单次 `kc run`（串行）与并行 daemon 使用同一归属规则；串行时启动终端收到的就是这条 per-Issue 流的镜像，因此**同样带行首时间戳**——与未经路由时终端实时视图的显示一致（TTY 与重定向都一样），不是「无前缀的原始输出」。
 - Agent 流式输出的每个物理行在写入 per-Issue 日志、实时看板与前台镜像时带 `[HH:MM:SS]` 行首时间戳，可与心跳行的完整日期时间前缀对照时间线。时间戳由**输出路由 sink** 统一添加（`core/use_cases/agent_runner_output_routing.py`）：agent 生产者交给 sink 的始终是可读原文，所以合议的 `workspaces/**/*.md` 等原文产物不会被塞进时间线。文本增量只在行首加一次时间戳，不会切断同一行；`[iar-attempt-end]` 终态标记不经 sink，保持裸行，`--follow` 仍能精确匹配它。
+- 这条流里还带 `[iar-invocation-start]` / `[iar-invocation-end]` / `[iar-invocation-coverage-incomplete]` 三种结构化标记，用来核对"这段时间到底起了几次进程、每次谁在跑、跑成什么样"。字段读法、模型三态、`retry_of` 链与缺口解读见「Agent 调用记录与停滞诊断（Invocation Tracing）」。`grep '\[iar-invocation-' <日志文件>` 可以直接抽出调用清单。
 
 `kc daemon` 本身继续作为启动 daemon 的快捷命令，等效于 `kc daemon run`。例如：
 
@@ -2186,6 +2187,8 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 
 配置示例见上文 `[agent_runner.runner]`：`agent_fallback_order` / `max_agent_switches` / `transient_retry_attempts` / `transient_retry_delay_seconds`。
 
+阶梯的每一级都是**一次新的真实进程调用**，因此在 per-Issue 日志里各自留下一对 `[iar-invocation-start]` / `[iar-invocation-end]` 标记，并用 `retry_of=` + `retry_reason=`（`transient_failure` / `executor_fallback` / `resume_not_started`）串成链；`executor=` 记的是**实际执行**的那个 agent，所以"到底回退到谁了"不必再从 Attempt History 表反推。字段读法见「Agent 调用记录与停滞诊断（Invocation Tracing）」。
+
 ### 并行处理 Issue（`kc daemon --concurrency`）
 
 默认 `kc daemon` **逐个串行**处理 Issue。机器空闲、队列较多时，可以让同一轮并行跑多个 Issue：
@@ -2210,6 +2213,7 @@ kc daemon --concurrency 3
 - **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。agent 流式输出的每行行首带 `[HH:MM:SS]` 时间戳，与心跳行的时间前缀对得上。
 - **实时看板**（前台 TTY）：在交互终端直接 `kc daemon --concurrency 3` 时，会显示一个仿 `kc deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`kc registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。看板与纯文本视图收到的都是路由 sink 那份文本，因此每行顺序是 `[issue #N status=...] [HH:MM:SS] 原文`。
 - **按 Issue 从第二终端 / Console 查看**：`kc logs --repo-id <repo> --issue <N> [--follow]` 或 Console 的 PRD 详情「实时输出」标签，都读取同一份 per-Issue 日志文件；单次 `kc run`（串行）也走同一路径，只是不显示多列看板。
+- **归属靠字段而不是靠相邻文本**：每个 worker 线程各自绑定一份观测上下文（`contextvars`），因此并行时每条 `[iar-invocation-start]` / `[iar-invocation-end]` 都自带 `invocation=` / `run=` / `issue=`，即使日志被交错写入也能准确归属到具体 Issue 与具体那次调用。
 
 ### 进度落盘与跨 claim 续作（checkpoint）
 
@@ -3420,6 +3424,148 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 - `IProcessRunner.run` 新增可选 `label` 参数，例如 `"Issue #23: https://github.com/..."`。
 - `run_agent_once.run_agent_with_prompt` 在有 `IssueSummary` 时记录启动/结束日志，并把 `issue.number` 与 `issue.url` 作为 `label` 传给 process runner。
 - `_ProcessWatchdog` 将 `label` 附加到原有 base label 之后，无 `label` 时保持原有日志格式不变。
+
+## Agent 调用记录与停滞诊断（Invocation Tracing）
+
+**入口没有变化**：仍然是 `kc logs --repo <path> --issue <N> [--follow]`，没有新命令、新旗标、新 JSON 汇总或新页面。变的只是这条流里多了三种结构化标记行。
+
+### 为什么需要它
+
+一次无 PRD 的重命名任务跑了约 9 小时、经历多轮 recovery，最终没有发布 PR。事后复盘发现两个盲区：
+
+1. **日志有活动 ≠ 有交付**。Agent 一直在输出、进程一直活着、心跳一直在打，看起来"在干活"，但没有任何一次调用真正推进到发布。
+2. **模型只在显式绑定时才被记录**。preset 之外的调用完全看不出实际用了哪个模型；换执行器回退后，"请求的模型"和"执行器自报的模型"更是无从区分。
+
+调用记录给每一次**真实的顶层 Agent 子进程调用**一个唯一身份和一对起止事件，让"这段时间到底起了几次进程、每次谁在跑、跑成什么样"变成可核对的事实，而不是从相邻文本推断。
+
+### 三种标记行
+
+| 标记 | 出现时机 | 读法 |
+|---|---|---|
+| `[iar-invocation-start]` | 一次真实子进程调用**即将启动**（argv 已组装完成） | 这次调用存在了；后面必然有一条同 `invocation=` 的结束标记，或一个可解释的缺口 |
+| `[iar-invocation-end]` | 同一次调用返回、抛异常或超时被杀之后 | 这次调用的结局、耗时与模型事实 |
+| `[iar-invocation-coverage-incomplete]` | 观测事件写库失败、账本不可用或日志定位越界时（每个 run 最多一条） | **本次 run 的调用清单可能不完整**；业务结果不受影响，但不要拿这份清单当完整证据 |
+
+起止标记共用同一段身份前缀，因此并发场景下靠 `invocation=` 归属，不靠"上下相邻"推断：
+
+```text
+[iar-invocation-start] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude model_requested=claude-sonnet-4-5 retry_of=- retry_reason=- log=agent-runner/issues/keda-main/issue-242-20261008-015223.log
+[iar-invocation-end] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1843.207 model_requested=claude-sonnet-4-5 model_reported=claude-sonnet-4-5-20250929 model_source=executor_report retry_of=- failure_category=-
+```
+
+身份字段：
+
+| 字段 | 含义 |
+|---|---|
+| `invocation=` | 单次真实进程调用的唯一 id（`inv-` + 12 位十六进制），起止配对用它 |
+| `run=` | 本次 Issue run 的身份：`<repo_id>#issue-<N>#<UTC 时间戳>-<随机 12 位十六进制>`。**不依赖 PRD**，无 PRD 的 Issue 同样有 |
+| `issue=` | GitHub Issue 号 |
+| `attempt=` | runner 侧的尝试序号；无尝试语义的调用（如 Fix Agent）为 `-` |
+| `phase=` | 调用发生在哪个阶段，闭集：`implementation` / `fix` / `review` / `review_repair` / `verification` / `verification_recovery` / `rebase_recovery` / `closeout` / `supervisor` / `supervisor_repair` / `content_generation` / `unspecified` |
+| `role=` | 该阶段承担的角色（`implementer` / `fixer` / `reviewer` / `verifier` / `supervisor` / `content_generator` / `unspecified`），由 `phase` 派生 |
+| `executor=` | **实际执行**这次调用的 agent 名（回退后就是回退到的那个，不是配置里原本想要的那个） |
+
+所有字段一律 `key=value` 且不含空格，缺失统一渲染成 `-`（`model_requested=` / `model_reported=` 例外，见下文），因此可以直接 `grep -o 'phase=[^ ]*'` 之类逐字段取值。
+
+### 模型三态：请求的、自报的、来源
+
+三个字段分开记，任何一环拿不到就如实留空，**绝不从当前配置反推回填**：
+
+| 字段 | 取值 |
+|---|---|
+| `model_requested=` | 本次调用下发的模型；没有下发时显示 `未下发` |
+| `model_reported=` | 执行器从自己的输出流里自报的模型；没报时显示 `未提供` |
+| `model_source=` | 只有两种：`executor_report`（自报拿到了）或 `unknown`（没拿到） |
+
+因此下面三种情况都会**停在 unknown**，这是设计而不是缺陷：
+
+- 执行器没有自报模型（协议不产出、或输出被截断）；
+- 换执行器回退时 preset 的模型绑定被丢弃（执行器变了，原绑定不再适用）；
+- 本特性落地前的历史记录（当时根本没采集，事后补不出来）。
+
+超时或被杀的调用仍可能带 `model_reported=`：执行器在崩溃前已经吐出过自报模型，那个事实会挂在异常上一并被记录。
+
+### 结局与失败分类
+
+`outcome=` 是闭集，`failure_category=` 只在非 `ok` 时有值：
+
+| `outcome` | 含义 | 对应 `failure_category` |
+|---|---|---|
+| `ok` | 进程正常退出且退出码 0 | `-` |
+| `failed` | 进程退出了但退出码非 0 | `nonzero_exit` |
+| `timeout` | 墙钟超时或静默期超时被杀 | `timeout` |
+| `error` | 进程没能正常收尾（agent 不存在、OS 错误、运行时异常） | `agent_unavailable` / `os_error` / `runtime_error` / `unknown` |
+
+失败分类**只按异常类型判定，绝不读异常文本**——这是防止把提示词、密钥或 Agent 自由输出带进账本的结构性保证。整条标记行与整份 `detail_json` 只可能出现：闭集枚举、自生成的 id、整数退出码，以及经白名单校验的模型 / agent / session 字符串。
+
+`duration_s=` 用单调时钟算墙钟耗时，不采信执行器自报的 `duration_seconds`（那是子进程视角，合成结果里恒为 0）。
+
+### 重试与换执行器：永远是两条记录
+
+原地瞬态重试、会话续传没起跑后的重跑、换执行器回退——三种都是**新的一次真实进程调用**，各自新建 `invocation=`，并用 `retry_of=` 指向上一次、`retry_reason=` 说明为什么：
+
+| `retry_reason` | 触发场景 |
+|---|---|
+| `transient_failure` | 判定为瞬态错误后的原地重试 |
+| `resume_not_started` | 请求了会话续传但 argv 组装不出续传形态，退回全新会话重跑 |
+| `executor_fallback` | 换执行器（`agent_fallback_order` 前进、reviewer / supervisor 候选前进） |
+
+"重试了三次才成功"因此在日志里是四条记录（三次失败 + 一次成功）串成一条链，不会被折叠成一条。没有 `retry_of` 的调用显示 `-`。
+
+### 诚实解读缺口：`unclosed` 与 `incomplete` 不是一回事
+
+只有 start、没有对应 end 时，**不要**替它编一个终态。区分两种读法：
+
+- **`unclosed`（未闭合）**：默认读法。只能说明"结束事件没落盘"，可能是进程还在跑、可能是 daemon 被 `kill -9`、也可能是写库降级。此时 `finished_at` 与 `duration_seconds` 保持空。
+- **`incomplete`（已中断）**：只有在**另外确认了进程已退出**（例如 claim 里的 PID 已不存活）之后才能这么读。这说明调用确实被打断了，而不是还在进行。
+
+判断进程是否真的活着，仍然读现成事实：claim comment 里的 `pid=`、`kc logs --issue` 是否还在增长、worktree 现场文件状态。调用记录提供的是"起了几次、每次谁跑的"，不替你回答"现在活着吗"。
+
+### 覆盖范围（与不覆盖的部分）
+
+**在范围内**：implementation、fix、review、review_repair、independent verification 及其 recovery、rebase recovery、closeout、supervisor 及其 repair、启用状态下的 generated content。凡是走 `run_agent_with_prompt` 这个唯一真实子进程边界的顶层调用都被覆盖；content generation 走独立入口，单独记为 `phase=content_generation`。
+
+**不在范围内**（读到空不要误判成"没跑过"）：
+
+- **Agent 内部自己 spawn 的子 Agent**（例如 Claude 的 Task 工具）。事件里的 `internal_agent_coverage` 恒为 `unobserved`，这是显式披露而不是遗漏：我们只观测自己起的那一层进程。
+- **跨机聚合**。账本是本地 `~/.kedacode/console.db`，A 机起的调用不会出现在 B 机的清单里。
+- 合议（`kc deliberate` / transcript 路径）、`kc ask` 的 planner、`kc agent doctor`、REPL、idea 草稿、PRD 建 Issue、Phase 1 PRD rework——这些路径没有绑定 Issue run 的观测上下文，整体退化为 no-op，业务行为与接入前逐字节一致。
+
+**无 PRD 的 Issue 同样被覆盖**：`run=` 的身份由 repo + Issue 号 + 时间戳构成，不读 PRD，因此"没有 PRD 所以没有调用记录"这种情况不存在。
+
+### 旁路语义：观测永远不改变业务结果
+
+写库失败、账本对象不具备该能力、日志定位越界——全部降级为一条 warning 加一次 coverage 标记，然后**照常返回业务结果**。Agent 成功就是成功，不会因为观测没记上而被判失败；反之亦然。
+
+### 落盘位置
+
+事件写入 `~/.kedacode/console.db` 的 `agent_invocation_events` 表（schema v9，附加式迁移：v8 旧库打开新代码自动补表，既有行与列值原样保留）。每条事件按 `event_key = <invocation_id>:<event_type>` 幂等，重放不产生重复行。日志标记本身仍落在既有的 per-Issue 日志文件里，`log=` 字段给的是相对 `logs/` 的定位串，可直接拼回绝对路径。
+
+### 停滞时怎么办：用现成的恢复路径
+
+调用记录帮你**看清**发生了什么，不替你决定要不要动手，也不引入任何新阈值。确认一次 run 确实没有推进后，走的仍是既有路径：
+
+| 情况 | 既有路径 |
+|---|---|
+| 发布环节失败（代码是好的，push / PR / 状态没写成） | `kc recover --issue <N>` |
+| 需要重跑 | 修好原因后把 label 改回 `agent/ready`，下一轮 pass 领取 |
+| daemon 死了留下僵尸 attempt | 每轮 tick 开头的崩溃对账自动处置（`resume-session` / `re-enqueue` / `mark-failed`），见「崩溃对账与 Agent 会话续传」 |
+| 需要人决策（如 forbidden path） | 处理原因后 `kc blocked-continue --issue <N>` |
+
+### 显式非目标
+
+- **不设停滞阈值**：没有"超过 N 分钟无输出即判停滞"这类新配置项。
+- **不做停滞判定程序**：不提供任何自动判定"这次 run 卡住了"的代码路径。
+- **不做自动接管**：不会因为读到缺口就自动重跑、自动换执行器或自动关 Issue。
+- 不引入外部平台 / dashboard / OpenTelemetry，不做模型评分排名或自动选型，不采集完整提示词或任何密钥。
+
+### 实现要点
+
+- `core/use_cases/agent_invocation_tracing.py` 是唯一事实源：标记常量、闭集枚举、身份渲染、事件写入、时间线解读都在这里。
+- 观测上下文用 `contextvars` 绑定（`bound_invocation_trace_context`），因此并行 daemon 的每个 worker 各有一份，天然隔离；未绑定时所有函数整体 no-op。
+- 账本能力用鸭子类型探测（`resolve_invocation_store` 检查 `append_invocation_event` / `list_invocation_events`），不给既有构造器加参数，观测不泄漏进业务调用链。
+- `start_invocation` / `finish_invocation` 在 `run_agent_once._invoke` 的 try/except 两侧成对调用，异常原样上抛，不改变失败语义。
+- 执行器自报模型由输出协议解析（`infrastructure/agent_stream_usage.py` 的 `extract_reported_model_event` / `parse_reported_model_from_plain_stdout`），只认事件顶层的 `model` 字符串。
 
 ## Agent Runner Monitoring Dashboard
 

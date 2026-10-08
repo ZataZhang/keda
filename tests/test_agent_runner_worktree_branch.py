@@ -724,6 +724,8 @@ def test_run_once_rebase_conflict_detached_head(
         timeout_seconds=None,
         issue=None,
         model_selection=None,
+        invocation_phase=None,
+        invocation_attempt=None,
     ):
         return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
 

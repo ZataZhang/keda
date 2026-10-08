@@ -413,6 +413,72 @@ class IPrdLifecycleStore(ABC):
 
 
 @dataclass(frozen=True)
+class InvocationEventRecord:
+    """一条追加式 Agent 调用观测事件（通用调用账本的事件行）。
+
+    与 :class:`PrdLifecycleEventRecord` 分工不同：生命周期事件的身份是
+    ``repo_id + prd_path``，无 PRD 的 Issue 无法可靠关联；本记录的身份是
+    ``repo_id + issue_number + run_id``，**不依赖 PRD**，因此每个 Issue run
+    的每次实际进程调用都能落一条事实。
+
+    ``event_key`` 在同一 ``run_id`` 内唯一（约定为
+    ``<invocation_id>:<event_type>``），用于抵抗重试与并发重复写；
+    ``detail_json`` 只允许结构化非敏感摘要：不含提示词、命令参数、环境变量值
+    或密钥，自由文本一律不落库。
+    """
+
+    run_id: str
+    event_key: str
+    event_type: str  # invocation_started / invocation_finished
+    invocation_id: str
+    repo_id: str
+    issue_number: int | None
+    phase: str
+    role: str
+    agent: str
+    occurred_at: str  # ISO8601 UTC
+    detail_json: str
+
+
+class IInvocationEventStore(ABC):
+    """Agent 调用观测事件账本的旁路存储端口。
+
+    与 :class:`IPrdLifecycleStore` 同库同族：调用事件只是观测账本，不参与
+    workflow 决策；写入失败必须降级为日志告警并把该 run 的观测 coverage 标记为
+    不完整，绝不允许阻断 runner 主流程或改变业务返回结果。
+    """
+
+    @abstractmethod
+    def append_invocation_event(self, event_record: InvocationEventRecord) -> bool:
+        """追加一条调用观测事件。
+
+        Returns:
+            ``True`` 表示本次真实插入；``False`` 表示 ``event_key`` 已存在
+            （幂等命中，未产生重复事件）。
+
+        Raises:
+            Exception: 存储故障时抛出，由 core 观测函数捕获并降级 coverage。
+        """
+        ...
+
+    @abstractmethod
+    def list_invocation_events(self, *, run_id: str) -> list[InvocationEventRecord]:
+        """按发生顺序（occurred_at，再按写入顺序）列出某个 run 的全部调用事件。"""
+        ...
+
+    @abstractmethod
+    def list_issue_invocation_events(
+        self, *, repo_id: str, issue_number: int, limit: int = 500
+    ) -> list[InvocationEventRecord]:
+        """按发生顺序列出某个 Issue 的调用事件（跨 run，保留最近 ``limit`` 条）。
+
+        旧库（schema v9 之前）没有这张表，实现必须降级为空列表而不是抛出，
+        让读取侧显式披露"历史不完整"，不回填推测字段。
+        """
+        ...
+
+
+@dataclass(frozen=True)
 class RegistryRepositoryEntry:
     """registry 中一个仓库条目的摘要视图。"""
 

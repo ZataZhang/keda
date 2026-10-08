@@ -43,6 +43,7 @@ from backend.core.use_cases.agent_runner_git import (
     list_changed_paths,
 )
 from backend.core.use_cases.agent_runner_validation import list_evidence_files
+from backend.core.use_cases.agent_invocation_tracing import PHASE_CLOSEOUT
 from backend.core.use_cases.run_agent_once import run_agent_with_prompt_resilient
 
 _logger = logging.getLogger(__name__)
@@ -548,4 +549,5 @@ def run_closeout_agent(
         timeout_seconds=closeout_timeout_seconds,
         inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
         model_selection=model_selection,
+        invocation_phase=PHASE_CLOSEOUT,
     )

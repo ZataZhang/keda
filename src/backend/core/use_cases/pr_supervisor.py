@@ -51,6 +51,12 @@ from backend.core.use_cases.pr_supervisor_findings import (
     _persist_findings,
 )
 from backend.core.use_cases.pr_supervisor_repair import execute_repair
+from backend.core.use_cases.agent_invocation_tracing import (
+    PHASE_SUPERVISOR,
+    RETRY_REASON_EXECUTOR_FALLBACK,
+    RETRY_REASON_TRANSIENT,
+    link_next_invocation,
+)
 from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
 from backend.core.use_cases.agent_runner_verification_recovery import (
     ensure_verification_passed_with_recovery,
@@ -716,6 +722,8 @@ def execute_rebase(
                 config=config,
                 issue=issue,
                 model_selection=model_selection,
+                invocation_phase=PHASE_SUPERVISOR,
+                invocation_attempt=attempt,
             )
 
             # Agent 通过 commit-request.json 显式表达提交意图
@@ -896,6 +904,12 @@ def run_post_pr_supervisor_cycle(
         candidate_model_selection = drop_model_selection_for_agent(candidate_agent, model_selection)
         candidate_crash_exit_code: int | None = None
         for attempt in range(1, max_attempts + 1):
+            # 候选前进过就是换执行器回退；同一候选内的 attempt 前进是原地重试。
+            # 两种都新建独立 invocation 并以 retry_of 关联，绝不合并成一条记录。
+            if candidate_index > 0:
+                link_next_invocation(RETRY_REASON_EXECUTOR_FALLBACK)
+            elif attempt > 1:
+                link_next_invocation(RETRY_REASON_TRANSIENT)
             try:
                 result = run_agent_with_prompt(
                     candidate_agent,
@@ -906,6 +920,8 @@ def run_post_pr_supervisor_cycle(
                     capture_output=True,
                     issue=issue,
                     model_selection=candidate_model_selection,
+                    invocation_phase=PHASE_SUPERVISOR,
+                    invocation_attempt=attempt,
                 )
             except subprocess.CalledProcessError as exc:
                 result = CommandResult(

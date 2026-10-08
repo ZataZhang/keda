@@ -5,11 +5,12 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 8：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 9：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
-  非空 ``status`` 列，记录每条事件写入时冻结的语义状态）。
+  非空 ``status`` 列，记录每条事件写入时冻结的语义状态；v9 新增
+  ``agent_invocation_events`` 通用调用观测账本表，身份不依赖 PRD）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -22,6 +23,12 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+
+from backend.infrastructure.persistence.console_store_invocations import (
+    CREATE_INVOCATION_EVENT_INDEXES,
+    CREATE_INVOCATION_EVENTS,
+    InvocationEventStoreMixin,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -122,7 +129,7 @@ class PrdLifecycleEventRecord:
     status: str = ""
 
 
-_SCHEMA_VERSION = 8
+_SCHEMA_VERSION = 9
 
 _CREATE_RUN_RECORDS = """
 CREATE TABLE IF NOT EXISTS run_records (
@@ -268,7 +275,7 @@ _CREATE_PRD_LIFECYCLE_INDEXES = (
 )
 
 
-class SqliteConsoleStore:
+class SqliteConsoleStore(InvocationEventStoreMixin):
     """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` 的 SQLite 实现。
 
     三个端口都以鸭子类型实现：本类不 import core，仅保证方法签名与 core
@@ -348,6 +355,12 @@ class SqliteConsoleStore:
             }
             if "status" not in existing_event_columns:
                 connection.execute(_LIFECYCLE_EVENT_V8_ADD_STATUS)
+        if current_version < 9:
+            # 附加式迁移：只新增一张表与它的索引，既有表、行与列值原样保留。
+            # 建表语句带 IF NOT EXISTS，重复迁移幂等。
+            connection.execute(CREATE_INVOCATION_EVENTS)
+            for index_statement in CREATE_INVOCATION_EVENT_INDEXES:
+                connection.execute(index_statement)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 

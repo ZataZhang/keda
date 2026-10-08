@@ -79,6 +79,7 @@ class PiJsonLinesOutputProtocol:
             stderr="",
             output_protocol=PI_JSON_LINES_PROTOCOL_ID,
             token_usage=usage_collector.usage,
+            reported_model=usage_collector.reported_model,
         )
 
 

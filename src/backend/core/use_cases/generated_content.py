@@ -43,6 +43,13 @@ from backend.core.shared.models.agent_runner import (
     GeneratedIssueContent,
     GeneratedPrContent,
 )
+from backend.core.shared.models.agent_spec import AGENT_PROFILE_GENERATE
+from backend.core.use_cases.agent_invocation_tracing import (
+    PHASE_CONTENT_GENERATION,
+    InvocationStartRequest,
+    finish_invocation,
+    start_invocation,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -464,6 +471,20 @@ def _run_content_generator(
     if not prompt.strip():
         _logger.warning("Content generator '%s' skipped: no prompt configured", agent_name)
         return ""
+    # 内容生成是**独立的一次真实进程调用**，与 implementation/review 分开记录；
+    # 非 Issue 运行（建 Issue、idea 草稿、REPL）没有绑定观测上下文，此处整体退化为
+    # no-op，业务行为与接入前逐字节一致。
+    observation = start_invocation(
+        InvocationStartRequest(
+            agent_name=agent_name,
+            phase=PHASE_CONTENT_GENERATION,
+            profile=AGENT_PROFILE_GENERATE,
+            requested_model=(model_selection.model if model_selection is not None else None),
+            requested_reasoning_effort=(
+                model_selection.reasoning_effort if model_selection is not None else None
+            ),
+        )
+    )
     try:
         result = generator.generate(
             agent_name=agent_name,
@@ -473,8 +494,10 @@ def _run_content_generator(
             model_selection=model_selection,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
+        finish_invocation(observation, exc=exc)
         _logger.warning("Content generator '%s' did not finish: %s", agent_name, exc)
         return ""
+    finish_invocation(observation, result=result)
     if result.return_code != 0:
         _logger.warning(
             "Content generator exited with code %d: %s",

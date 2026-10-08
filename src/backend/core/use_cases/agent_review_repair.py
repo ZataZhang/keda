@@ -28,6 +28,7 @@ from backend.core.use_cases.agent_runner_feedback import (
     build_finding_bullet_lines,
     build_repair_prompt,
 )
+from backend.core.use_cases.agent_invocation_tracing import PHASE_REVIEW_REPAIR
 from backend.core.use_cases.run_agent_once import run_agent_with_prompt_resilient
 
 _logger = logging.getLogger(__name__)
@@ -131,6 +132,8 @@ def run_review_repair_agent(
             issue=issue,
             transient_retry_attempts=config.runner.transient_retry_attempts,
             transient_retry_delay_seconds=config.runner.transient_retry_delay_seconds,
+            invocation_phase=PHASE_REVIEW_REPAIR,
+            invocation_attempt=repair_attempt + 1,
         )
         if request_path.is_file() or repair_attempt >= max_reminder_attempts:
             break

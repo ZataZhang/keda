@@ -33,6 +33,7 @@ from backend.core.use_cases.agent_runner_git import (
 from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
 )
+from backend.core.use_cases.agent_invocation_tracing import PHASE_VERIFICATION_RECOVERY
 from backend.core.use_cases.run_agent_once import run_agent_with_prompt
 
 
@@ -84,6 +85,7 @@ def run_recovery_after_verification_failure(
         process_runner,
         config=config,
         issue=issue,
+        invocation_phase=PHASE_VERIFICATION_RECOVERY,
     )
 
     request_path = worktree_path / ".agent-runner" / "commit-request.json"
