@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "prd": "tasks/pending/P1-FEAT-20261008-015223-agent-invocation-tracing-and-stall-diagnosis.md",
+  "disclosure": "B1 折中（用户 2026-10-08 对话知情并选定）：rv-1/rv-2 已通过真实入口执行并声明如下；rv-3/rv-5/rv-6 的场景脚本未实现，对应清单项未执行，缺失原因与现状见各项 risks。独立 verifier 未运行；本 manifest 不构成 merge-acceptance 依据。",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "rv-1 完整调用时间线与回退调用关联（含人审日志样例）",
+      "command": "cd /Users/zata/code/keda/.iar-worktrees/issue-242 && .venv/bin/python tasks/evidence/P1-FEAT-20261008-015223-agent-invocation-tracing-and-stall-diagnosis/scripts/rv_1_invocation_log.py",
+      "evidence_files": [
+        "rv-1-invocation-log-sample.md",
+        "rv-1-run-transcript.json"
+      ],
+      "output_summary": "脚本自校验 rv-1 PASS：场景 A（首个执行器失败→回退）产生两条独立 implementation 调用，retry_of 指向首条、retry_reason=executor_fallback；场景 B（交付门禁失败→fix agent）产生 implementation/fix/review 三条独立调用；全部标记行经新进程 kc logs --issue N 读出，并与新 SQLite 连接读取的 agent_invocation_events 账本一致；记录实现树短哈希与夹具指纹。",
+      "explanation": "回退若被合并成一条记录、或漏掉任一条调用，调用清单断言即失败；日志样例逐行来自既有 kc logs 入口原文，证明 FR-4 的『现有日志入口展示调用身份/阶段/执行器/模型来源/结果/耗时』。",
+      "risks": "夹具执行器为确定性 shim，仅外部 Agent executable 是 mock；Git/SQLite/CLI 真实。耗时为单调时钟实测，不代表生产模型时延。",
+      "negative_control": "fixture 计划令首个执行器（claude）非零退出，验证回退产生两条关联调用而非一条合并记录。",
+      "expected_fail": "若回退被合并或漏记一条，rv_1_invocation_log.py 的调用清单断言失败（脚本退出非零，无 rv-1 PASS 行）。"
+    },
+    {
+      "item_number": 2,
+      "item_name": "rv-2 执行器未报告实际模型时显示「未提供」",
+      "command": "同 rv-1 命令（同一真实入口运行，观察 model_reported/model_source 字段）",
+      "evidence_files": [
+        "rv-2-unreported-model.md",
+        "rv-1-run-transcript.json"
+      ],
+      "output_summary": "报告了模型的调用 model_source=executor_report（报告值为执行器自报版本串，区别于请求值）；未报告的调用 model_source=unknown、model_reported=未提供，未用配置值冒充。",
+      "explanation": "两类观察同屏存在构成对照：若实现回填配置模型，unknown 侧将变为 executor_report，与样例记录相悖。",
+      "risks": "「已下发 model 旗标 + 执行器未报告」的组合未单独构造（回退侧绑定按设计丢弃，model_requested=未下发），详见 rv-2 文件的边界披露。",
+      "negative_control": "同 rv-1 场景 A 的 fixture 失败注入；model_source 分布断言充当对照读数。",
+      "expected_fail": "若配置值被回填为报告值，样例中 unknown/未提供 观察消失，rv-2 文件所引断言失真。"
+    },
+    {
+      "item_number": 3,
+      "item_name": "rv-3 调用超时/进程中断后的 incomplete 呈现",
+      "command": "未执行",
+      "evidence_files": [],
+      "output_summary": "未执行：场景脚本未实现。",
+      "explanation": "缺失。harness 底座（隔离 kc + fake_gh + fixture 执行器 + 新进程核验）已就绪，rv-3 需补『慢执行器 fixture + 超时击杀/杀进程后核对未闭合 start 记录』场景。",
+      "risks": "该清单项当前无证据支撑；合并前如需闭环需补场景或人工复核超时路径代码。",
+      "negative_control": "未构造。",
+      "expected_fail": "不适用（未执行）。"
+    },
+    {
+      "item_number": 5,
+      "item_name": "rv-5 无 PRD Issue 与旧库升级兼容",
+      "command": "未执行（部分覆盖）",
+      "evidence_files": [],
+      "output_summary": "部分覆盖：rv-1 场景 B 的 issue-243 为无 PRD Issue，其 invocation（implementation/fix/review）完整落账本并经 kc logs 读出，证明无 PRD 身份可追踪；但『旧 SQLite v8→v9 附加式升级』未验证。",
+      "explanation": "无 PRD 侧由场景 B 顺带证明；升级侧缺失，需要 v8 旧库 fixture 的升级后读取场景。",
+      "risks": "旧库升级行为当前无证据；升级逻辑另有单元测试覆盖（tests/test_console_store.py），但不构成 rv-5 的真实入口证据。",
+      "negative_control": "未构造。",
+      "expected_fail": "不适用（未执行）。"
+    },
+    {
+      "item_number": 6,
+      "item_name": "rv-6 敏感哨兵不落库、日志根目录外路径拒绝",
+      "command": "未执行",
+      "evidence_files": [],
+      "output_summary": "未执行：场景脚本未实现。",
+      "explanation": "缺失。需要『调用输出注入敏感哨兵 + 日志定位请求越界路径』的负控场景，核对事件表无哨兵、越界读取被拒绝。",
+      "risks": "脱敏与路径逃逸当前无真实入口证据；相关纯函数有单元测试，但不满足 rv-6 的 must_cross 要求。",
+      "negative_control": "未构造。",
+      "expected_fail": "不适用（未执行）。"
+    }
+  ]
+}
