@@ -3695,7 +3695,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 # 启动 API + 内置面板并自动打开浏览器（前台运行）
 kc console
 
-# 指定端口（省略时从 [agent_runner.console].port 起自动挑选空闲端口）
+# 指定端口（省略时先复用已在运行的实例，没有则在 [agent_runner.console].port 起自动挑选空闲端口）
 kc console --port 8600
 
 # 只启动服务，不自动开浏览器
@@ -3704,14 +3704,25 @@ kc console --no-browser
 
 - 服务固定监听 `127.0.0.1`（见下文信任边界）；端口缺省值来自
   `config.toml` 的 `[agent_runner.console].port`，被占用时自动顺延挑选
-  空闲端口，显式指定的端口不顺延、占用即报错退出。
+  空闲端口，显式指定的端口不顺延。
+- **重复调用不会起第二个实例**：启动前先在候选端口上探测是否已有 console 在
+  服务（打开发端自带的版本端点，认得出才算命中，本机其它占端口的服务不会被
+  误认），命中就只打开它当前监听的 URL 并退出。因此关掉浏览器后想再看面板，
+  直接再跑一次 `kc console`，不需要先停掉服务；同理，现有实例当初因端口占用
+  顺延到过别的端口，再次调用也会找回它，而不是在缺省端口新开一个。
+  要并行跑第二个 console（例如另一套状态目录）就显式指定一个空闲 `--port`；
+  显式端口被**非 console** 的服务占用时仍按原样报错退出。
+- 复用现有实例时 `--no-browser` 依旧有效：只打印 URL、不拉起浏览器，适合脚本
+  里取 URL 或配合 SSH 端口转发（`ssh -L 8313:127.0.0.1:8313 <host>`）。
 - 源码开发模式（wheel 里没有静态产物）时，`kc console` 仍可启动并只
   提供 API，日志会提示先构建前端：`pnpm --filter frontend-public build`，
   再把 `frontend-public/out/` 复制到 `src/backend/api/static/console/`；
   或直接沿用 `just run` / `pnpm --filter frontend-public dev` 的开发双端口。
 - 面板与 API 同源，开发代理仅在 `frontend-public dev` 模式生效。
-- 改后端路由后必须**重启** `iar console` 才生效；`just console-sync` 只替换
-  静态前端产物，不重载后端代码。
+- 改后端路由后必须**重启** `kc console` 才生效；`just console-sync` 只替换
+  静态前端产物，不重载后端代码。注意复用逻辑发生在这次重启之前——旧版本进程
+  仍在监听时，新装的 `kc console` 只会重开浏览器而不会把它换成新代码，需要先
+  停掉旧实例。
 
 ### 信任边界与白名单动作
 
@@ -3935,7 +3946,7 @@ runner_command = ["uv", "run", "kc"]            # 托管进程启动命令前缀
 stop_timeout_seconds = 30                        # SIGTERM → SIGKILL 等待秒数
 monitor_sync_interval_seconds = 300              # dashboard 后台自动同步的静态默认间隔（秒，60–3600）
 host = "127.0.0.1"                               # 监听地址（固定本机，不开放配置其它网卡）
-port = 8600                                      # kc console 缺省端口（被占用时自动顺延）
+port = 8600                                      # kc console 缺省端口（已有实例在跑则复用，否则被占用时自动顺延）
 ```
 
 `monitor_sync_interval_seconds` 只是**从来没有保存过界面设置**时的回落值；用户在
