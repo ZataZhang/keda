@@ -3722,10 +3722,14 @@ kc console --no-browser
 | 动作 | 语义 |
 |---|---|
 | `start_daemon` / `start_review_daemon` | 为某仓库启动常驻 runner 进程（同仓库同类型只允许一个） |
-| `run_once` / `review_once` | 启动一次性托管子进程 |
+| `run_once` / `review_once` | 启动一次性托管子进程（dashboard 仓库卡片「跑一轮」「复核一轮」即映射到这两个动作，以托管进程形态呈现于「进程」页，可看日志、可停止，**不产生常驻 daemon**） |
 | `stop_process` | SIGTERM 停止托管进程，超时升级 SIGKILL |
 | `retry_failed` | 把 failed Issue 的 label 翻转回 ready（与手工操作等价） |
+| `recover_failed_publish` | 复用 CLI `kc recover` 的既有恢复用例，把发布失败的 Issue 重新推 PR（不可恢复时返回明确失败） |
 | `blocked_continue` | 启动一次性 `kc blocked-continue` 托管子进程 |
+| `enqueue_ready` | backlog「加入就绪」：无关联 Issue 时建 Issue、随后打 `agent/ready`，**绝不启动 runner**（队列资格交给 autopilot） |
+| `update_issue_labels` | Issue 详情页在**已同步标准标签集内**增删标签（见下「Issue 标签的网页编辑」） |
+| `create_issue_from_prompt` | backlog「一句话建 Issue」：经 CLI 同款 from-prompt 用例开一条无 PRD 的 Issue，建完停在未入队态 |
 | `registry_add` / `registry_set_enabled` | registry 写回（路径必须存在、为 git 仓库，且未被其他 repo_id 占用） |
 | `registry_remove` | 停该仓库常驻进程后删除 registry 条目；只删注册，不删本地仓库目录 |
 
@@ -3733,8 +3737,43 @@ kc console --no-browser
 这些要么风险不可枚举（任意 shell），要么会绕过 workflow 状态机
 （任意 label），要么属于必须人工签收的决策（merge）。
 
+**标签编辑的例外**：网页允许增删，但**范围严格限定在 `kc labels sync` 同源的
+标准标签集**（同一份 `standard_label_names` 定义，不存在第二份硬编码清单）；
+集合外的标签（哪怕是拼错的 `agent/redy`）在写入前即被拒绝、GitHub 零变化，
+网页也不创建新标签——确需新标签仍走终端 `kc labels sync`。写回一律以 GitHub 的
+fresh read 结果作响应，因此页面状态与仓库实际状态不可能各说一套。
+
+
 所有写操作（含被拒绝的）都会写入审计日志，可在「项目」页或
 `GET /api/v1/agent-runner/console/audit` 查看。
+
+### 网页操作入口与对应端点（CLI 能力对齐）
+
+管理终端补齐了一批原本只能在终端做的操作。每一项都映射到既有 CLI 语义或既有
+core 用例，网页只是入口，不发明第二套执行规则：
+
+| 入口（页面/位置） | 语义（对齐的 CLI/用例） | HTTP 端点 |
+|---|---|---|
+| dashboard 仓库卡片「跑一轮」「复核一轮」 | 一次性 `kc run` / `kc review` 托管子进程 | `POST .../console/actions/repository`（`run_once` / `review_once`） |
+| dashboard runner 状态条 | 读既有 status/health，探测失败降级展示 | `GET /api/v1/agent-runner/status`、`/health` |
+| dashboard 仓库概览「监控中 / 全部」切换 | 全量列举 open Issue，标注是否已被监控收录 | `GET .../console/repositories/{repo_id}/issues` |
+| Issue 详情标签面板（增删） | `kc labels sync` 同源标准集内编辑 | `GET` / `PUT .../repositories/{repo_id}/issues/{n}/labels` |
+| Issue 详情 failed 态「恢复发布」 | 复用 `kc recover` 的恢复用例 | `POST .../console/actions/issue`（`recover_failed_publish`） |
+| backlog PRD「加入就绪」 | 建 Issue + 打 ready，绝不启动 runner | `POST .../console/backlog/.../enqueue-ready` |
+| backlog「开始此 PRD」高级选项 | 逐项对应 `kc run` 同名旗标（快合 / 直出 PR / agent / 预设 / 模型 / 推理力度），**全部默认关闭** | 复用 backlog start 端点，`launch_options` 字段透传 |
+| backlog「一句话建 Issue」 | CLI `kc issue create --from-prompt` 同一用例 | `POST .../repositories/{repo_id}/issues` |
+| 高级选项 sheet 的候选下拉 | 只读列举该仓库的 agent 名单与预设名 | `GET .../repositories/{repo_id}/launch-options` |
+
+要点：
+
+- **启动选项的缺省契约不变**：不勾选任何高级选项时，序列化出的 `launch_options`
+  折算成空 argv 片段，发出的 `kc run` 与引入该参数之前逐字节一致（由契约测试锁死）。
+  非法组合（快合与直出 PR 互斥、模型/推理力度未带预设）在发起端即被拒绝，而不是在
+  子进程里静默降级。
+- **「加入就绪」不启动 runner**：它与「开始此 PRD」共用建 Issue / 打标签路径，
+  唯一区别是最后不发 `kc run`；对运行中的 Issue 调用返回冲突，对已就绪的调用幂等。
+- **本次未改 `kc` CLI 表面**：以上都是新增 HTTP 入口，子命令 / 旗标 / 退出码 /
+  机器输出零变化，随包 `kedacode-operator` skill 无需同步。
 
 ### 进程托管与多项目并发
 

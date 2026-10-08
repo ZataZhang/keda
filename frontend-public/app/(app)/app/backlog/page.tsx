@@ -18,6 +18,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PrdDetail } from "@/components/backlog/prd-detail";
 import { PRD_CI_TAB_ID, PrdCiView } from "@/components/backlog/prd-ci-view";
+import { PrdStartOptionsSheet } from "@/components/backlog/prd-start-options-sheet";
+import { CreateIssueDialog } from "@/components/backlog/create-issue-dialog";
 import { BacklogAutopilotControl } from "@/components/backlog/backlog-autopilot-control";
 import { BacklogCiRepairControl } from "@/components/backlog/backlog-ci-repair-control";
 import { BacklogGraph } from "@/components/backlog/backlog-graph";
@@ -31,6 +33,7 @@ import {
   usePersistedBoolean,
 } from "@/lib/console-ui-prefs";
 import {
+  enqueueBacklogPrdReady,
   fetchBacklogAutopilot,
   fetchBacklogCiRepairGlobal,
   fetchBacklogPrds,
@@ -48,6 +51,7 @@ import type {
   BacklogCiRepairGlobalState,
   BacklogPrd,
   BacklogSettings,
+  StartPrdLaunchOptions,
 } from "@/lib/api/types";
 
 const POLL_INTERVAL_MS = 30000;
@@ -103,6 +107,12 @@ export default function BacklogPage() {
   const [repoPanelCollapsed, setRepoPanelCollapsed] = usePersistedBoolean(
     CONSOLE_REPO_PANEL_COLLAPSED_KEY,
   );
+  // 「加入就绪」进行中的 PRD 路径（FR-3）。
+  const [enqueuingPath, setEnqueuingPath] = useState<string | null>(null);
+  // 「启动高级选项」抽屉的目标 PRD（null 表示关闭，FR-7）。
+  const [startOptionsPrd, setStartOptionsPrd] = useState<BacklogPrd | null>(null);
+  // 「一句话建 Issue」对话框开关（FR-8）。
+  const [createIssueOpen, setCreateIssueOpen] = useState(false);
 
   const loadData = useCallback(
     async (signal?: AbortSignal): Promise<BacklogPrd[]> => {
@@ -275,10 +285,10 @@ export default function BacklogPage() {
     }
   }
 
-  async function handleStart(prd: BacklogPrd) {
+  async function handleStart(prd: BacklogPrd, options?: StartPrdLaunchOptions) {
     setStartingPath(prd.prd_path);
     try {
-      await startBacklogPrd(selectedRepoId, prd.prd_path);
+      await startBacklogPrd(selectedRepoId, prd.prd_path, options);
       toast.success(`${prd.title} 已开始。`);
       // fresh-state probe：启动成功后重新拉取列表，详情里的状态必须来自服务端
       // 而不是本地乐观值——否则队列/合并状态下的按钮可用性会说谎。
@@ -291,6 +301,25 @@ export default function BacklogPage() {
       toast.error(error instanceof Error ? error.message : "启动 PRD 失败。");
     } finally {
       setStartingPath(null);
+      setStartOptionsPrd(null);
+    }
+  }
+
+  /** 「加入就绪」：建 Issue + 打就绪标签但不启动 runner（FR-3）。 */
+  async function handleEnqueueReady(prd: BacklogPrd) {
+    setEnqueuingPath(prd.prd_path);
+    try {
+      await enqueueBacklogPrdReady(selectedRepoId, prd.prd_path);
+      toast.success(`${prd.title} 已加入就绪队列（未启动）。`);
+      const refreshedPrds = await loadData();
+      const refreshedPrd = refreshedPrds.find((item) => item.prd_path === prd.prd_path);
+      if (refreshedPrd) {
+        setSelectedPrd(refreshedPrd);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加入就绪失败。");
+    } finally {
+      setEnqueuingPath(null);
     }
   }
 
@@ -450,6 +479,14 @@ export default function BacklogPage() {
           <div className="flex-1" />
           <Button
             size="sm"
+            variant="outline"
+            onClick={() => setCreateIssueOpen(true)}
+            data-testid="backlog-create-issue"
+          >
+            一句话建 Issue
+          </Button>
+          <Button
+            size="sm"
             onClick={() => void handleStartGlobal()}
             disabled={globalStarting || !settings}
           >
@@ -502,6 +539,8 @@ export default function BacklogPage() {
                 onStart={(prd) => void handleStart(prd)}
                 onOpenContent={setSelectedPrd}
                 startingPath={startingPath}
+                onEnqueueReady={(prd) => void handleEnqueueReady(prd)}
+                enqueuingPath={enqueuingPath}
               />
             ) : (
               <BacklogList
@@ -509,6 +548,8 @@ export default function BacklogPage() {
                 onStart={(prd) => void handleStart(prd)}
                 onOpenContent={setSelectedPrd}
                 startingPath={startingPath}
+                onEnqueueReady={(prd) => void handleEnqueueReady(prd)}
+                enqueuingPath={enqueuingPath}
               />
             )}
           </div>
@@ -532,6 +573,9 @@ export default function BacklogPage() {
                 prd={selectedPrd}
                 starting={startingPath === selectedPrd.prd_path}
                 onStart={(prd) => void handleStart(prd)}
+                onEnqueueReady={(prd) => void handleEnqueueReady(prd)}
+                enqueuing={enqueuingPath === selectedPrd.prd_path}
+                onOpenStartOptions={(prd) => setStartOptionsPrd(prd)}
                 additionalTabs={[
                   {
                     id: PRD_CI_TAB_ID,
@@ -564,6 +608,26 @@ export default function BacklogPage() {
           }}
         />
       ) : null}
+
+      {startOptionsPrd ? (
+        <PrdStartOptionsSheet
+          repoId={selectedRepoId}
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) {
+              setStartOptionsPrd(null);
+            }
+          }}
+          submitting={startingPath === startOptionsPrd.prd_path}
+          onSubmit={(options) => void handleStart(startOptionsPrd, options)}
+        />
+      ) : null}
+
+      <CreateIssueDialog
+        repoId={selectedRepoId}
+        open={createIssueOpen}
+        onOpenChange={setCreateIssueOpen}
+      />
     </>
   );
 }

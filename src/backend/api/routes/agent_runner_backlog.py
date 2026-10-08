@@ -26,6 +26,10 @@ from backend.core.shared.models.backlog import (
     BacklogPrd,
     BacklogSettingsEntry,
 )
+from backend.core.shared.models.runner_launch import (
+    RunnerLaunchOptions,
+    RunnerLaunchOptionsError,
+)
 from backend.core.use_cases.agent_runner_factory import (
     create_github_client,
     create_process_runner,
@@ -40,6 +44,8 @@ from backend.core.use_cases.prd_content_reader import PrdContentError, read_prd_
 from backend.core.use_cases.agent_runner_lifecycle import build_prd_lifecycle_detail
 from backend.core.use_cases.backlog_actions import (
     BacklogActionError,
+    BacklogEnqueueConflictError,
+    enqueue_prd_ready,
     get_or_create_backlog_settings,
     start_global_backlog,
     start_prd,
@@ -664,18 +670,46 @@ def update_backlog_settings(repo_id: str, request: UpdateSettingsRequest) -> dic
 
 
 class StartPrdRequest(BaseModel):
-    """单个 PRD 开始请求。"""
+    """单个 PRD 开始请求。
+
+    高级选项字段全部可选且默认关闭/缺省，与 ``kc run`` 同名旗标一一对应；
+    全部缺省时启动命令与选项引入前逐字段一致。
+    """
 
     repo_id: str = Field(min_length=1)
+    fast_merge: bool = False
+    direct_pr: bool = False
+    agent: str | None = None
+    preset: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
+
+    def to_launch_options(self) -> RunnerLaunchOptions:
+        """把请求体选项字段折算为 core 启动选项。"""
+        return RunnerLaunchOptions(
+            fast_merge=self.fast_merge,
+            direct_pr=self.direct_pr,
+            agent=self.agent,
+            preset=self.preset,
+            model=self.model,
+            reasoning_effort=self.reasoning_effort,
+        )
 
 
 @router.post("/agent-runner/backlog/prds/{encoded_path}/start")
 def start_backlog_prd(encoded_path: str, request: StartPrdRequest) -> dict:
-    """开始单个 PRD：创建 Issue（若需要）、添加 ready、启动 runner。"""
+    """开始单个 PRD：创建 Issue（若需要）、添加 ready、启动 runner（可带高级选项）。"""
     prd_path = _decode_prd_path(encoded_path)
     settings = load_fresh_agent_runner_settings()
     contexts = _resolve_contexts()
     store = create_backlog_store()
+    launch_options = request.to_launch_options()
+    try:
+        # 提前折算 argv 片段：非法选项组合在动 Issue 之前就被拒绝，
+        # 避免出现「已打 ready 标签却启动失败」的半成品状态。
+        launch_options.cli_flags()
+    except RunnerLaunchOptionsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         spawn_cwd = resolve_console_spawn_cwd(request.repo_id, contexts)
     except ValueError as exc:
@@ -691,6 +725,7 @@ def start_backlog_prd(encoded_path: str, request: StartPrdRequest) -> dict:
             runner_command=settings.console.runner_command,
             spawn_cwd=spawn_cwd,
             process_runner=create_process_runner(),
+            launch_options=launch_options,
         )
     except BacklogActionError as exc:
         _audit(
@@ -705,6 +740,41 @@ def start_backlog_prd(encoded_path: str, request: StartPrdRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Invalidate cache for this repo so the next read reflects the new state.
+    _BACKLOG_CACHE.pop(f"{request.repo_id}:archived=False", None)
+    return _serialize(result)
+
+
+class EnqueueReadyRequest(BaseModel):
+    """「加入就绪」请求：只做队列资格动作，绝不启动 runner。"""
+
+    repo_id: str = Field(min_length=1)
+
+
+@router.post("/agent-runner/backlog/prds/{encoded_path}/enqueue-ready")
+def enqueue_backlog_prd_ready(encoded_path: str, request: EnqueueReadyRequest) -> dict:
+    """把 PRD 加入就绪队列：建 Issue（若无）+ 打 ready 标签，不启动 runner。
+
+    是否被自动领取完全由仓库 autopilot 开关决定；关联 Issue 正在执行中时
+    返回 409 冲突，不重复启动、不改写在途状态。
+    """
+    prd_path = _decode_prd_path(encoded_path)
+    contexts = _resolve_contexts()
+    try:
+        result = enqueue_prd_ready(
+            prd_path=prd_path,
+            repo_id=request.repo_id,
+            contexts=contexts,
+            github_client=create_github_client(_resolve_context(request.repo_id).repo_path),
+            store=create_backlog_store(),
+            process_runner=create_process_runner(),
+        )
+    except BacklogEnqueueConflictError as exc:
+        # 冲突已被 core 用例审计（rejected），这里只翻译为 409。
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except BacklogActionError as exc:
+        # 出错路径同样由 core 用例审计（error），路由不重复落审计。
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     _BACKLOG_CACHE.pop(f"{request.repo_id}:archived=False", None)
     return _serialize(result)
 

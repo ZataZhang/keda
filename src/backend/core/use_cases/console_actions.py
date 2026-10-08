@@ -7,6 +7,8 @@
   ``gh`` 操作等价，不绕过 workflow 状态机）。
 - ``blocked_continue``：启动一次性 ``kc blocked-continue`` 托管子进程
   （agent 执行耗时长，必须进程隔离，不能在 API 进程内跑）。
+- ``recover_failed_publish``：复用 CLI ``kc recover`` 的既有恢复用例，把已提交
+  但推送/建 PR 失败的发布收尾（不重跑 agent、不产生新提交）。
 
 所有动作（含被拒绝与出错的）都写入审计日志。
 """
@@ -20,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.interfaces.runner_console import (
     AuditEntry,
     IRunHistoryStore,
@@ -28,10 +30,17 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
     RunnerProcessRecord,
 )
-from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.shared.models.agent_runner import (
+    PublishRecoveryRequest,
+    RepositoryRunContext,
+)
 from backend.core.use_cases.console_processes import (
     ConsoleProcessError,
     start_runner_process,
+)
+from backend.core.use_cases.recover_publish import (
+    PublishRecoveryError,
+    recover_publish_issue,
 )
 
 _logger = logging.getLogger(__name__)
@@ -45,7 +54,7 @@ REPOSITORY_ACTIONS: dict[str, RunnerProcessKind] = {
 }
 
 #: Issue 级动作白名单。
-ISSUE_ACTIONS = ("retry_failed", "blocked_continue")
+ISSUE_ACTIONS = ("retry_failed", "blocked_continue", "recover_failed_publish")
 
 
 class ConsoleActionError(ValueError):
@@ -189,6 +198,40 @@ def _execute_retry_failed(
     return f"Issue #{issue_number}: '{failed_label}' -> '{ready_label}'."
 
 
+def _execute_recover_failed_publish(
+    *,
+    issue_number: int,
+    context: RepositoryRunContext,
+    github_client: IGitHubClient,
+    process_runner: IProcessRunner,
+) -> str:
+    """恢复失败的发布：直接调用 CLI ``kc recover`` 背后的同一个用例。
+
+    PR 正文生成与 CLI 一致地传入内容生成器；生成器工厂只在真的执行恢复时才取，
+    避免其他动作无谓地把 engines 装配层拉进调用路径。
+    """
+    from backend.core.use_cases.agent_runner_factory import create_content_generator
+
+    try:
+        recovery_result = recover_publish_issue(
+            request=PublishRecoveryRequest(issue_number=issue_number),
+            repo_path=context.repo_path,
+            config=context.config,
+            github_client=github_client,
+            process_runner=process_runner,
+            content_generator=create_content_generator(process_runner, config=context.config),
+        )
+    except PublishRecoveryError as exc:
+        raise ConsoleActionError(
+            f"Issue #{issue_number} 发布恢复失败（{exc.failure_category}）：{exc}"
+        ) from exc
+    reused_suffix = "（复用已有 PR）" if recovery_result.pr_reused else ""
+    return (
+        f"Issue #{issue_number} 发布已恢复：{recovery_result.pr_url}{reused_suffix}，"
+        f"分支 {recovery_result.branch}。"
+    )
+
+
 def execute_issue_action(
     *,
     action: str,
@@ -200,8 +243,9 @@ def execute_issue_action(
     store: IRunHistoryStore,
     runner_command: Sequence[str],
     spawn_cwd: Path,
+    process_runner: IProcessRunner,
 ) -> ConsoleActionResult:
-    """执行一个 Issue 级动作（retry_failed / blocked_continue）。"""
+    """执行一个 Issue 级动作（retry_failed / blocked_continue / recover_failed_publish）。"""
     params_json = (
         f'{{"action": "{action}", "repo_id": "{repo_id}", "issue_number": {issue_number}}}'
     )
@@ -235,6 +279,15 @@ def execute_issue_action(
                 issue_number=issue_number,
                 context=context,
                 github_client=github_client,
+            )
+            process_record = None
+        elif action == "recover_failed_publish":
+            github_client = github_client_factory(context.repo_path)
+            detail = _execute_recover_failed_publish(
+                issue_number=issue_number,
+                context=context,
+                github_client=github_client,
+                process_runner=process_runner,
             )
             process_record = None
         else:  # blocked_continue

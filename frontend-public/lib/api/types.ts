@@ -819,3 +819,96 @@ export type PrdAgentOverrideUpdateResponse = {
   prd_path: string;
   overrides: Record<string, string>;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Console CLI 对齐操作（Issue 全量视图 / 标签编辑 / 一句话建 Issue / 启动选项）
+// 与后端 `console_issues` / `issue_label_actions` / `console_issue_creation`
+// 用例的返回结构对齐。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 全量 Issue 列表的一行（`ConsoleIssueEntry`）；`monitored` 表示监控列表是否收录。 */
+export type ConsoleIssueEntry = {
+  number: number;
+  title: string;
+  url: string;
+  /** GitHub 状态原值（`"OPEN"` / `"CLOSED"`）。 */
+  state: string;
+  labels: string[];
+  monitored: boolean;
+};
+
+/** Issue 标签读取结果：现有标签 + 允许通过网页增删的标准标签集合。 */
+export type IssueLabelSnapshot = {
+  issue_number: number;
+  labels: string[];
+  allowed_labels: string[];
+};
+
+/** 一句话建 Issue 的结果（建完停在未入队态，不自动打就绪标签）。 */
+export type ConsoleCreatedIssue = {
+  number: number;
+  issue_url: string;
+};
+
+/** 启动高级选项的候选清单（agent 名单与已定义模型预设名）。 */
+export type LaunchOptionsView = {
+  repo_id: string;
+  agents: string[];
+  presets: string[];
+};
+
+/**
+ * 「开始此 PRD」的高级选项载荷；全部可选，缺省即不加任何旗标。
+ *
+ * 每个字段与 `kc run` 同名旗标一一对应，由后端折算为 argv 片段。
+ */
+export type StartPrdLaunchOptions = {
+  fast_merge?: boolean;
+  direct_pr?: boolean;
+  agent?: string | null;
+  preset?: string | null;
+  model?: string | null;
+  reasoning_effort?: string | null;
+};
+
+// ── runner 状态 / 健康（GET /agent-runner/status 与 /health，只读）
+
+/** runner 配置摘要与仓库清单（后端 status 接口的既定结构）。 */
+export type RunnerStatusSummary = {
+  daemon_mode: boolean;
+  config: {
+    max_issues: number;
+    default_agent: string;
+    max_recovery_attempts: number;
+    recovery_retry_delay_seconds: number;
+    ready_label: string;
+    running_label: string;
+    supervising_label: string;
+    review_label: string;
+    failed_label: string;
+    base_branch: string;
+    remote: string;
+    auto_merge: boolean;
+    forbidden_path_patterns: string[];
+    autopilot_enabled: boolean;
+    autopilot_merge_method: string;
+    autopilot_require_verifier_pass: boolean;
+    autopilot_auto_sign_off: boolean;
+    autopilot_merge_check_timeout_seconds: number;
+    pre_pr_review_enabled: boolean;
+    post_pr_supervisor_enabled: boolean;
+  };
+  repositories: {
+    repo_id: string;
+    display_name: string;
+    enabled: boolean;
+    base_branch: string;
+    remote: string;
+  }[];
+};
+
+/** gh CLI 健康探测结果。 */
+export type RunnerHealthStatus = {
+  status: "healthy" | "degraded";
+  gh_cli_available: boolean;
+};

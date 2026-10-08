@@ -1,5 +1,4 @@
 "use client"
-/* eslint-disable react-hooks/set-state-in-effect */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -9,8 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IssueDetail } from "@/components/agent-runner/issue-detail";
+import { ConsoleIssueDetail } from "@/components/agent-runner/console-issue-detail";
 import { MonitorSettingsPanel } from "@/components/agent-runner/monitor-settings-panel";
 import { RepositoryOverview } from "@/components/agent-runner/repository-overview";
+import type { IssueScope } from "@/components/agent-runner/repository-overview";
+import { RunnerStatusBar } from "@/components/agent-runner/runner-status-bar";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   fetchIssueDetail,
@@ -20,9 +22,12 @@ import {
 } from "@/lib/api/agentRunner";
 import {
   executeIssueAction,
+  executeRepositoryAction,
+  fetchAllRepositoryIssues,
   fetchCompletionStats,
 } from "@/lib/api/console";
 import type {
+  ConsoleIssueEntry,
   IssueMonitoringSnapshot,
   MonitorSnapshotsResponse,
   RepositoryCompletionStats,
@@ -101,6 +106,21 @@ export default function DashboardPage() {
   const [refreshState, setRefreshState] = useState<RefreshState>({ kind: "idle" });
   const [repoRefresh, setRepoRefresh] = useState<Record<string, RepoRefreshState>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 「监控中 / 全部」范围切换与全量列表按仓库缓存（FR-4）。
+  const [repoScope, setRepoScope] = useState<Record<string, IssueScope>>({});
+  const [allIssuesByRepo, setAllIssuesByRepo] = useState<
+    Record<string, ConsoleIssueEntry[] | undefined>
+  >({});
+  // 「全部」视图选中未监控 Issue 时的条目；与 selectedIssue 互斥。
+  const [selectedEntry, setSelectedEntry] = useState<ConsoleIssueEntry | null>(
+    null,
+  );
+  // 显式记录当前选中 Issue 所属仓库：未入队 Issue 无法从快照反查。
+  const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
+  // 正在提交的仓库级一次性动作（"repoId:action"），用于按钮禁用。
+  const [repoActionPending, setRepoActionPending] = useState<string | null>(
+    null,
+  );
 
   const refreshAbortRef = useRef<AbortController | null>(null);
 
@@ -148,16 +168,15 @@ export default function DashboardPage() {
   useEffect(() => {
     if (selectedIssueNumber !== null) return;
     if (state.kind !== "ready") return;
-    const firstIssue = state.repos
-      .filter(
-        (slot): slot is Extract<RepoSlot, { kind: "ready" }> =>
-          slot.kind === "ready",
-      )
-      .flatMap((slot) => slot.repository.issues)
-      .find(Boolean);
-    if (firstIssue) {
-      setSelectedIssueNumber(firstIssue.number);
-      setSelectedIssue(firstIssue);
+    for (const slot of state.repos) {
+      if (slot.kind !== "ready") continue;
+      const firstIssue = slot.repository.issues.find(Boolean);
+      if (firstIssue) {
+        setSelectedIssueNumber(firstIssue.number);
+        setSelectedIssue(firstIssue);
+        setSelectedRepoId(slot.repository.repo_id);
+        break;
+      }
     }
   }, [state, selectedIssueNumber]);
 
@@ -194,6 +213,12 @@ export default function DashboardPage() {
     if (state.kind !== "ready") {
       return;
     }
+    // 「全部」视图选中的未监控 Issue：监控详情端点解析不到，走轻量面板。
+    if (selectedEntry && selectedEntry.number === selectedIssueNumber) {
+      setSelectedIssue(null);
+      setDetailError(null);
+      return;
+    }
     const cached = state.repos
       .filter((slot): slot is Extract<RepoSlot, { kind: "ready" }> => slot.kind === "ready")
       .flatMap((slot) => slot.repository.issues)
@@ -219,7 +244,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedIssueNumber, state]);
+  }, [selectedIssueNumber, state, selectedEntry]);
 
   /** 全量刷新：起后台 job 重扫并写回快照，期间保留旧数据供继续浏览。 */
   const handleRefreshAll = useCallback(async () => {
@@ -335,6 +360,64 @@ export default function DashboardPage() {
     }
   }, [loadSnapshots]);
 
+  /** 切换仓库 Issue 范围；首次切到「全部」时实时拉取 GitHub 全量列表。 */
+  const handleScopeChange = useCallback(
+    async (repoId: string, scope: IssueScope) => {
+      setRepoScope((prev) => ({ ...prev, [repoId]: scope }));
+      if (scope !== "all" || allIssuesByRepo[repoId]) return;
+      try {
+        const entries = await fetchAllRepositoryIssues(repoId);
+        setAllIssuesByRepo((prev) => ({ ...prev, [repoId]: entries }));
+      } catch (error: unknown) {
+        // 拉取失败退回「监控中」并提示，避免「全部」页签停在空列表说谎。
+        setRepoScope((prev) => ({ ...prev, [repoId]: "monitoring" }));
+        toast.error(
+          error instanceof Error ? error.message : "加载全量 Issue 失败。",
+        );
+      }
+    },
+    [allIssuesByRepo],
+  );
+
+  /** 「全部」列表行点击：监控收录的走原快照面板，未收录的走轻量面板。 */
+  const handleSelectConsoleIssue = useCallback(
+    (repoId: string, entry: ConsoleIssueEntry) => {
+      setSelectedRepoId(repoId);
+      setSelectedIssueNumber(entry.number);
+      const hasSnapshot =
+        state.kind === "ready" &&
+        state.repos.some(
+          (slot) =>
+            slot.kind === "ready" &&
+            slot.repository.repo_id === repoId &&
+            slot.repository.issues.some((issue) => issue.number === entry.number),
+        );
+      setSelectedEntry(hasSnapshot ? null : entry);
+    },
+    [state],
+  );
+
+  /** 仓库级一次性动作（FR-1）：起非驻留托管进程，进度与停止去进程页。 */
+  const handleRepoAction = useCallback(
+    async (repoId: string, action: "run_once" | "review_once") => {
+      const verb = action === "run_once" ? "跑一轮" : "复核一轮";
+      const confirmed = window.confirm(
+        `确认对 ${repoId}「${verb}」？将启动一个一次性托管进程。`,
+      );
+      if (!confirmed) return;
+      setRepoActionPending(`${repoId}:${action}`);
+      try {
+        const result = await executeRepositoryAction(repoId, action);
+        toast.success(`${verb}已启动：${result.detail}（可在进程页查看与停止）`);
+      } catch (error: unknown) {
+        toast.error(error instanceof Error ? error.message : `${verb}失败。`);
+      } finally {
+        setRepoActionPending(null);
+      }
+    },
+    [],
+  );
+
   const readySlots = useMemo(() => {
     if (state.kind !== "ready") return [] as Extract<RepoSlot, { kind: "ready" }>[];
     return state.repos.filter(
@@ -352,6 +435,7 @@ export default function DashboardPage() {
   }, [readySlots]);
 
   const selectedIssueRepoId = useMemo(() => {
+    if (selectedRepoId) return selectedRepoId;
     if (state.kind !== "ready" || selectedIssueNumber === null) {
       return null;
     }
@@ -361,7 +445,7 @@ export default function DashboardPage() {
       }
     }
     return readySlots[0]?.repository.repo_id ?? null;
-  }, [state, selectedIssueNumber, readySlots]);
+  }, [selectedRepoId, state, selectedIssueNumber, readySlots]);
 
   const statsByRepoId = useMemo(() => {
     const lookup: Record<string, RepositoryCompletionStats> = {};
@@ -372,10 +456,15 @@ export default function DashboardPage() {
   }, [completionStats]);
 
   async function handleIssueAction(
-    action: "retry_failed" | "blocked_continue",
+    action: "retry_failed" | "blocked_continue" | "recover_failed_publish",
   ) {
     if (!selectedIssue || !selectedIssueRepoId) return;
-    const verb = action === "retry_failed" ? "重试" : "继续";
+    const verb =
+      action === "retry_failed"
+        ? "重试"
+        : action === "blocked_continue"
+          ? "继续"
+          : "恢复发布";
     const confirmed = window.confirm(
       `确认对 Issue #${selectedIssue.number} 执行「${verb}」？`,
     );
@@ -451,6 +540,8 @@ export default function DashboardPage() {
         <MonitorSettingsPanel onClose={() => setSettingsOpen(false)} />
       ) : null}
 
+      <RunnerStatusBar />
+
       {state.kind === "loading" ? <LoadingSkeleton /> : null}
 
       {state.kind === "error" ? (
@@ -519,9 +610,19 @@ export default function DashboardPage() {
                   slot={slot}
                   stats={statsByRepoId[getRepoIdFromSlot(slot)]}
                   selectedIssueNumber={selectedIssueNumber}
-                  onSelectIssue={(issue) => setSelectedIssueNumber(issue.number)}
+                  onSelectIssue={(repoId, issue) => {
+                    setSelectedRepoId(repoId);
+                    setSelectedEntry(null);
+                    setSelectedIssueNumber(issue.number);
+                  }}
                   onRefresh={(id) => void handleRefreshRepo(id)}
                   repoRefreshState={repoRefresh[getRepoIdFromSlot(slot)]}
+                  issueScope={repoScope[getRepoIdFromSlot(slot)] ?? "monitoring"}
+                  onScopeChange={(id, scope) => void handleScopeChange(id, scope)}
+                  allIssues={allIssuesByRepo[getRepoIdFromSlot(slot)] ?? null}
+                  onSelectConsoleIssue={handleSelectConsoleIssue}
+                  onRepoAction={(id, action) => void handleRepoAction(id, action)}
+                  repoActionPendingKey={repoActionPending}
                 />
               ))}
             </div>
@@ -533,8 +634,16 @@ export default function DashboardPage() {
                     pending={actionPending}
                     onAction={(action) => void handleIssueAction(action)}
                   />
-                  <IssueDetail issue={selectedIssue} />
+                  <IssueDetail
+                    issue={selectedIssue}
+                    repoId={selectedIssueRepoId ?? undefined}
+                  />
                 </div>
+              ) : selectedEntry ? (
+                <ConsoleIssueDetail
+                  repoId={selectedIssueRepoId ?? ""}
+                  entry={selectedEntry}
+                />
               ) : (
                 <Card>
                   <CardHeader>
@@ -613,7 +722,9 @@ function IssueActionBar({
 }: {
   issue: IssueMonitoringSnapshot;
   pending: boolean;
-  onAction: (action: "retry_failed" | "blocked_continue") => void;
+  onAction: (
+    action: "retry_failed" | "blocked_continue" | "recover_failed_publish",
+  ) => void;
 }) {
   const isFailed = issue.primary_label.includes("failed");
   const isBlocked = issue.primary_label.includes("blocked");
@@ -622,7 +733,7 @@ function IssueActionBar({
     <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950">
       <span className="text-xs text-amber-800 dark:text-amber-200">
         {isFailed
-          ? "该 Issue 处于 failed 状态，可重试（label 翻转回 ready）。"
+          ? "该 Issue 处于 failed 状态，可重试（label 翻转回 ready）或恢复发布。"
           : "该 Issue 处于 blocked 状态，可继续（启动 blocked-continue 进程）。"}
       </span>
       <Button
@@ -634,6 +745,17 @@ function IssueActionBar({
       >
         {pending ? "执行中…" : isFailed ? "重试" : "继续"}
       </Button>
+      {isFailed ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          data-testid="issue-recover-publish"
+          onClick={() => onAction("recover_failed_publish")}
+        >
+          {pending ? "执行中…" : "恢复发布"}
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -670,13 +792,25 @@ function RepoCard({
   onSelectIssue,
   onRefresh,
   repoRefreshState,
+  issueScope,
+  onScopeChange,
+  allIssues,
+  onSelectConsoleIssue,
+  onRepoAction,
+  repoActionPendingKey,
 }: {
   slot: RepoSlot;
   stats: RepositoryCompletionStats | undefined;
   selectedIssueNumber: number | null;
-  onSelectIssue: (issue: IssueMonitoringSnapshot) => void;
+  onSelectIssue: (repoId: string, issue: IssueMonitoringSnapshot) => void;
   onRefresh: (repoId: string) => void;
   repoRefreshState: RepoRefreshState | undefined;
+  issueScope: IssueScope;
+  onScopeChange: (repoId: string, scope: IssueScope) => void;
+  allIssues: ConsoleIssueEntry[] | null;
+  onSelectConsoleIssue: (repoId: string, entry: ConsoleIssueEntry) => void;
+  onRepoAction: (repoId: string, action: "run_once" | "review_once") => void;
+  repoActionPendingKey: string | null;
 }) {
   const repoId = getRepoIdFromSlot(slot);
 
@@ -694,17 +828,43 @@ function RepoCard({
             <CompletionSummaryStrip stats={stats} />
           ) : null}
         </div>
-        <RepoRefreshButton
-          repoId={repoId}
-          state={repoRefreshState}
-          onRefresh={onRefresh}
-        />
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            disabled={slot.kind !== "ready" || repoActionPendingKey === `${repoId}:run_once`}
+            data-testid={`dashboard-run-once-${repoId}`}
+            onClick={() => onRepoAction(repoId, "run_once")}
+          >
+            {repoActionPendingKey === `${repoId}:run_once` ? "启动中…" : "跑一轮"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            disabled={slot.kind !== "ready" || repoActionPendingKey === `${repoId}:review_once`}
+            data-testid={`dashboard-review-once-${repoId}`}
+            onClick={() => onRepoAction(repoId, "review_once")}
+          >
+            {repoActionPendingKey === `${repoId}:review_once` ? "启动中…" : "复核一轮"}
+          </Button>
+          <RepoRefreshButton
+            repoId={repoId}
+            state={repoRefreshState}
+            onRefresh={onRefresh}
+          />
+        </div>
       </div>
       {slot.kind === "ready" ? (
         <RepositoryOverview
           repository={slot.repository}
-          onSelectIssue={onSelectIssue}
+          onSelectIssue={(issue) => onSelectIssue(repoId, issue)}
           selectedIssueNumber={selectedIssueNumber}
+          issueScope={issueScope}
+          onScopeChange={(scope) => onScopeChange(repoId, scope)}
+          allIssues={allIssues}
+          onSelectConsoleIssue={(entry) => onSelectConsoleIssue(repoId, entry)}
         />
       ) : (
         <Card data-testid={`dashboard-repo-missing-${repoId}`}>

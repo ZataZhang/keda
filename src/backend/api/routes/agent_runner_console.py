@@ -54,6 +54,7 @@ from backend.core.use_cases.agent_runner_lifecycle import build_prd_lifecycle_st
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
+    create_process_runner,
     create_process_supervisor,
     create_registry_editor,
     load_fresh_agent_runner_settings,
@@ -281,7 +282,7 @@ class RepositoryActionRequest(BaseModel):
 
 
 class IssueActionRequest(BaseModel):
-    """Issue 级动作请求体（retry_failed / blocked_continue）。"""
+    """Issue 级动作请求体（retry_failed / blocked_continue / recover_failed_publish）。"""
 
     action: str = Field(min_length=1)
 
@@ -332,6 +333,7 @@ def execute_console_issue_action(
             store=create_console_store(),
             runner_command=settings.console.runner_command,
             spawn_cwd=spawn_cwd,
+            process_runner=create_process_runner(),
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

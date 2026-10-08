@@ -9,6 +9,9 @@ Three entry points share one selection rule (see :func:`_select_eligible_prds`):
 - :func:`start_global_backlog` — one-shot batch start used by the console.
 - :func:`advance_backlog_queue` — continuous scheduling: reconcile finished
   queue entries, then top the queue up to ``max_parallel``.
+
+:func:`enqueue_prd_ready` 不参与这条选择规则：它只把**指定**的一个 PRD 放进
+``agent/ready``，绝不启动 runner，是否被领取交给 daemon / autopilot。
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ from backend.core.shared.models.backlog import (
     BacklogPrdState,
     BacklogSettingsEntry,
 )
+from backend.core.shared.models.runner_launch import RunnerLaunchOptions
 from backend.core.shared.priority import priority_rank
 from backend.core.use_cases.agent_runner_lifecycle import (
     LifecycleEventType,
@@ -63,6 +67,10 @@ _logger = logging.getLogger(__name__)
 
 class BacklogActionError(ValueError):
     """Backlog action was rejected or failed."""
+
+
+class BacklogEnqueueConflictError(BacklogActionError):
+    """「加入就绪」的目标正被 runner 执行：再入队会打断在途执行并与 daemon 抢占。"""
 
 
 _DEFAULT_MAX_PARALLEL = 2
@@ -207,6 +215,7 @@ def _spawn_runner(
     runner_command: Sequence[str],
     spawn_cwd: Path,
     issue_number: int | None = None,
+    options: RunnerLaunchOptions | None = None,
 ) -> None:
     """Spawn a one-shot runner for the repository."""
     start_runner_process(
@@ -217,6 +226,7 @@ def _spawn_runner(
         runner_command=runner_command,
         spawn_cwd=spawn_cwd,
         issue_number=issue_number,
+        options=options,
     )
 
 
@@ -231,6 +241,7 @@ def start_prd(
     runner_command: Sequence[str],
     spawn_cwd: Path,
     process_runner: IProcessRunner,
+    launch_options: RunnerLaunchOptions | None = None,
 ) -> BacklogActionResult:
     """Start a single PRD: create Issue if needed, label it, spawn runner.
 
@@ -244,9 +255,14 @@ def start_prd(
         runner_command: Runner command prefix.
         spawn_cwd: Working directory for the runner subprocess.
         process_runner: Process runner for Git publishing commands.
+        launch_options: 「开始此 PRD」的高级选项，逐项对应 ``kc run`` 同名旗标。
+            ``None`` 或全缺省时启动命令与选项引入前逐字节一致。
 
     Returns:
         Action result with the new state.
+
+    Raises:
+        BacklogActionError: PRD 缺失、建 Issue / 打标签失败、选项非法或启动失败。
     """
     context = _resolve_context(repo_id, contexts)
     prds = scan_backlog_prds(context.repo_path, include_archived=False).prds
@@ -301,6 +317,7 @@ def start_prd(
             runner_command,
             spawn_cwd,
             issue_number=issue_number,
+            options=launch_options,
         )
     except ConsoleProcessError as exc:
         _audit(
@@ -558,6 +575,116 @@ def _promote_prd_without_spawn(
         _ensure_ready_label(prd, context, github_client)
         return prd.issue_number
     return _create_issue_for_prd(prd, context, github_client, process_runner)
+
+
+def _assert_issue_not_running(
+    prd: BacklogPrd,
+    context: RepositoryRunContext,
+    github_client: IGitHubClient,
+) -> None:
+    """已在执行中的 Issue 不允许再入队（否则会打断在途执行并与 daemon 抢占）。
+
+    判定读的是 GitHub 上的实时标签，而不是 PRD 文件里的回链状态：网页点按钮时
+    daemon 可能已经刚领走这个 Issue。
+    """
+    if prd.issue_number is None:
+        return
+    live_labels = github_client.get_issue(prd.issue_number).labels
+    running_label = context.config.labels.running
+    if running_label in live_labels:
+        raise BacklogEnqueueConflictError(
+            f"Issue #{prd.issue_number} 正在执行中（标签 '{running_label}'），"
+            "加入就绪会打断本轮执行。请等它结束或先停止本轮。"
+        )
+
+
+def enqueue_prd_ready(
+    *,
+    prd_path: str,
+    repo_id: str,
+    contexts: Sequence[RepositoryRunContext],
+    github_client: IGitHubClient,
+    store: IBacklogStore,
+    process_runner: IProcessRunner,
+) -> BacklogActionResult:
+    """把 PRD 加入就绪队列：建 Issue（若无）+ 打 ready 标签，**绝不启动 runner**。
+
+    与 :func:`start_prd` 的区别只在最后一步：入队复用完全相同的建 Issue / 打标签
+    路径（:func:`_promote_prd_without_spawn`），但不发出 ``kc run``。队列资格由此
+    完全交给既有的 autopilot 开关决定，与 CLI 侧「ready 标签是资格不是命令」的
+    语义一致。
+
+    Args:
+        prd_path: 仓库相对的 PRD 路径。
+        repo_id: 目标仓库 ID。
+        contexts: 已解析的 enabled 仓库上下文。
+        github_client: 目标仓库的 GitHub 客户端。
+        store: Backlog store（审计与生命周期账本）。
+        process_runner: 建 Issue 时发布 PRD 用的进程执行器。
+
+    Returns:
+        状态为 ``READY`` 的动作结果，``detail`` 明确说明未启动 runner。
+
+    Raises:
+        BacklogActionError: PRD 缺失或建 Issue / 打标签失败。
+        BacklogEnqueueConflictError: 关联 Issue 正在执行中。
+    """
+    context = _resolve_context(repo_id, contexts)
+    prds = scan_backlog_prds(context.repo_path, include_archived=False).prds
+    prd = next((item for item in prds if item.prd_path == prd_path), None)
+    if prd is None:
+        raise BacklogActionError(f"PRD not found or not pending: {prd_path}")
+
+    try:
+        _assert_issue_not_running(prd, context, github_client)
+        issue_number = _promote_prd_without_spawn(prd, context, github_client, process_runner)
+    except BacklogEnqueueConflictError as exc:
+        _audit(
+            store,
+            action="enqueue_ready",
+            repo_id=repo_id,
+            prd_path=prd_path,
+            issue_number=prd.issue_number,
+            result="rejected",
+            detail=str(exc),
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _audit(
+            store,
+            action="enqueue_ready",
+            repo_id=repo_id,
+            prd_path=prd_path,
+            issue_number=prd.issue_number,
+            result="error",
+            detail=str(exc),
+        )
+        raise BacklogActionError(f"加入就绪失败: {exc}") from exc
+
+    _record_lifecycle(
+        store,
+        event_type=LifecycleEventType.QUEUED,
+        repo_id=repo_id,
+        prd_path=prd_path,
+        issue_number=issue_number,
+        trigger="console_enqueue",
+        detail={"trigger": "manual", "spawned": False},
+    )
+    _audit(
+        store,
+        action="enqueue_ready",
+        repo_id=repo_id,
+        prd_path=prd_path,
+        issue_number=issue_number,
+        result="accepted",
+        detail="Issue created/relabelled to ready; no runner spawned.",
+    )
+    return BacklogActionResult(
+        prd_path=prd_path,
+        issue_number=issue_number,
+        state=BacklogPrdState.READY,
+        detail="已进入就绪队列（未启动 runner）；是否被自动领取由 autopilot 决定。",
+    )
 
 
 def _upsert_queue_status(

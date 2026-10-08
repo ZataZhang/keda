@@ -8,13 +8,16 @@ import { cn } from "@/lib/utils";
 import type { IssueMonitoringSnapshot } from "@/lib/api/types";
 
 import { CopyableCommand } from "@/components/agent-runner/copyable-command";
+import { IssueLabelEditor } from "@/components/agent-runner/issue-label-editor";
 import { prettyLabel, variantForLabel } from "@/components/agent-runner/label-variant";
 
 interface IssueDetailProps {
   issue: IssueMonitoringSnapshot;
+  /** 提供后渲染可编辑标签面板（FR-5）。 */
+  repoId?: string;
 }
 
-export function IssueDetail({ issue }: IssueDetailProps) {
+export function IssueDetail({ issue, repoId }: IssueDetailProps) {
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
       <Card>
@@ -51,6 +54,17 @@ export function IssueDetail({ issue }: IssueDetailProps) {
           <WorktreeBlock issue={issue} />
         </CardContent>
       </Card>
+
+      {repoId ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">标签（可编辑，范围限标准集）</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <IssueLabelEditor repoId={repoId} issueNumber={issue.number} />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
