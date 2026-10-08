@@ -296,6 +296,9 @@ def test_build_validation_prompt_line() -> None:
     )
     # 证据落点来自调用方解析的按任务子目录。
     assert "tasks/evidence/issue-42/" in prompt_line
+    # 增量出证：先落证据再搭下一项的脚手架，禁止先建全量 harness。
+    assert "Work incrementally:" in prompt_line
+    assert "before producing the first evidence file" in prompt_line
     # 唯一目的地：prompt 里不得再出现任何代码树落点。
     assert "tasks/evidence/issue-42/scripts/" in prompt_line
     assert "scripts/rv_evidence/" not in prompt_line
