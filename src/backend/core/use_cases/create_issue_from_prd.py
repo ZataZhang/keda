@@ -43,10 +43,7 @@ from backend.core.shared.models.agent_runner import (
     LabelConfig,
     evidence_dir_uses_task_subdirs,
 )
-from backend.core.shared.models.agent_spec import (
-    AGENT_PROFILE_GENERATE,
-    BUILTIN_AGENT_SPECS,
-)
+from backend.core.shared.models.agent_spec import AGENT_PROFILE_GENERATE, BUILTIN_AGENT_SPECS
 from backend.core.shared.priority import priority_from_prd_filename
 from backend.core.use_cases.agent_runner_dependencies import (
     format_dependency_marker,
@@ -67,6 +64,7 @@ from backend.core.use_cases.generated_content import (
     generate_issue_content,
 )
 from backend.core.use_cases.issue_labels import apply_routing_labels
+from backend.core.use_cases.issue_prd_github_link import append_prd_github_link
 from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
 
 _logger = logging.getLogger(__name__)
@@ -1128,6 +1126,9 @@ def create_issue_from_prd(
     # Ensure dependency marker survives AI-generated body as well.
     if dependency_marker and dependency_marker not in body:
         body = f"{body.rstrip()}\n\n{dependency_marker}\n"
+
+    # 在锚点行尾追加 GitHub blob 链接；无 GitHub remote 时原样返回（幂等）。
+    body = append_prd_github_link(body, repo_path=request.repo_path)
 
     # ------------------------------------------------------------------
     # 7.5 物化 Realistic Validation 区块。

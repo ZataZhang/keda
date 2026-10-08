@@ -34,6 +34,7 @@ from backend.core.use_cases.generated_prd_content import (
     build_prd_context,
     generate_prd_content,
 )
+from backend.core.use_cases.issue_prd_github_link import append_prd_github_link
 
 _logger = logging.getLogger(__name__)
 
@@ -219,7 +220,9 @@ def _build_fallback_prd(issue: IssueSummary) -> str:
     )
 
 
-def _update_issue_body_with_prd_path(issue_body: str, prd_relative_path: str) -> str:
+def _update_issue_body_with_prd_path(
+    issue_body: str, prd_relative_path: str, repo_path: Path | None = None
+) -> str:
     """在 Issue body 中插入或更新 ``PRD path`` 锚点。
 
     如果 body 中已存在 ``PRD path:`` 行，则替换为新的路径；
@@ -228,6 +231,7 @@ def _update_issue_body_with_prd_path(issue_body: str, prd_relative_path: str) ->
     Args:
         issue_body: 原始 Issue body。
         prd_relative_path: PRD 文件相对于仓库根的路径。
+        repo_path: 仓库根目录；提供时在锚点行尾追加 GitHub blob 链接。
 
     Returns:
         更新后的 Issue body。
@@ -245,7 +249,10 @@ def _update_issue_body_with_prd_path(issue_body: str, prd_relative_path: str) ->
     if not path_written:
         updated_lines.insert(0, prd_line)
         updated_lines.insert(1, "")
-    return "\n".join(updated_lines)
+    updated_body = "\n".join(updated_lines)
+    if repo_path is None:
+        return updated_body
+    return append_prd_github_link(updated_body, repo_path=repo_path)
 
 
 def _extract_existing_prd_text(prd_path: Path) -> str:
@@ -434,7 +441,9 @@ def create_prd_from_issue(
             process_runner=request.process_runner,
         )
 
-    updated_body = _update_issue_body_with_prd_path(issue.body, relative_prd_path)
+    updated_body = _update_issue_body_with_prd_path(
+        issue.body, relative_prd_path, repo_path=request.repo_path
+    )
     if updated_body != issue.body:
         github_client.edit_issue_body(issue.number, updated_body)
 

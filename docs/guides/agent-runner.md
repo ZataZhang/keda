@@ -2098,7 +2098,7 @@ The next daemon pass or `kc run` will detect the label and process the Issue bef
 6. **Write**: The PRD file is written inside the worktree (overwriting existing or creating new).
 7. **Commit + Publish**: The PRD is committed to the `issue-<N>` branch and published via `publish_changes` — pushed to the remote and opened (or reused) as a **draft PR**. A regenerated-but-identical PRD that produces no new commit skips PR creation.
 8. **Update Issue**:
-   - Inserts/updates the `PRD path:` anchor in the Issue body.
+   - Inserts/updates the `PRD path:` anchor in the Issue body. When the repository resolves to a GitHub remote, the anchor line gets a clickable suffix appended after the closing backtick (e.g. ``（[在 GitHub 打开](https://github.com/<owner>/<repo>/blob/HEAD/<path>)）``); the machine-readable anchor itself stays intact (see `issue_prd_github_link.py`).
    - Removes `agent/rework-prd`.
    - Adds `source/prd`.
    - Optionally adds `agent/ready`. Because the PRD is committed to the `issue-<N>` branch, a downstream ready-issue run reusing that worktree can read it, so `agent/ready` is safe to keep.
@@ -4263,7 +4263,7 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 ## Backlog（待办队列）
 
-管理终端提供 `/app/backlog` 页面，以 PRD 文件为粒度展示 `tasks/pending/` 与 `tasks/archive/` 中的任务全景。
+管理终端提供 `/app/backlog` 页面，以 PRD 文件为粒度展示 `tasks/pending/` 与 `tasks/archive/` 中的任务全景；扫描 Markdown 文件时会排除文件名为 `README.md` 的目录说明文档。
 
 ### 视图说明
 
