@@ -7,17 +7,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.api.cli_console import console, error_console
+from backend.api.cli_skill import sync_user_skills
 from backend.core.shared.models.agent_runner import LabelConfig
 from backend.core.use_cases.agent_runner_factory import (
     create_github_client,
     create_registry_editor,
     logger,
 )
-from backend.core.use_cases.agent_runner_init_assets import (
-    RemoteTemplateSkillInstallOptions,
-    install_packaged_operator_skill,
-    install_remote_template_skills,
-)
+from backend.core.use_cases.agent_runner_init_assets import RemoteTemplateSkillInstallError
 from backend.core.use_cases.agent_runner_repository_local import (
     GITIGNORE_BLOCK_FOOTER,
     GITIGNORE_BLOCK_HEADER,
@@ -26,6 +23,7 @@ from backend.core.use_cases.agent_runner_repository_local import (
     GitignoreSyncResult,
     RepositoryInitOptions,
     RepositoryInitResult,
+    RepositoryLocalConfigExistsError,
     ensure_gitignore_entries,
     initialize_repository_local_config,
 )
@@ -51,6 +49,16 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             ),
             process_runner,
         )
+    except RepositoryLocalConfigExistsError as exc:
+        logger.error("kc init failed: %s", exc)
+        error_console.print(
+            "Hint: 只想重装/刷新用户级 Skills 时不必改动这份配置，运行 "
+            "`kc skill install`；仅当确实要重建配置才用 `kc init --force`. "
+            "To refresh skills without touching the local config, run "
+            "`kc skill install`; use `kc init --force` only to rebuild it.",
+            markup=False,
+        )
+        return 1
     except Exception as exc:  # noqa: BLE001 - CLI should print concise failures.
         logger.error("kc init failed: %s", exc)
         return 1
@@ -66,28 +74,9 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
     if parsed.dry_run:
         print(init_result.config_text, end="")
         _print_gitignore_plan(gitignore_result)
-        remote_skill_result = install_remote_template_skills(
-            RemoteTemplateSkillInstallOptions(
-                process_runner=process_runner, dry_run=True, force=parsed.force
-            )
+        return _sync_user_skills_or_report_error(
+            process_runner=process_runner, dry_run=True, force=parsed.force
         )
-        remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
-        remote_skill_roots = ", ".join(
-            str(root_path) for root_path in remote_skill_result.target_skills_roots
-        )
-        console.print(
-            f"[cyan]Would install remote template skills:[/] {remote_skill_names} -> "
-            f"{remote_skill_roots}",
-            markup=False,
-        )
-        for skills_root in remote_skill_result.target_skills_roots:
-            operator_skill_result = install_packaged_operator_skill(
-                target_skills_root=skills_root,
-                dry_run=True,
-                force=parsed.force,
-            )
-            _print_operator_skill_plan(operator_skill_result)
-        return 0
     if init_result.wrote_file:
         console.print(f"[green]Wrote KedaCode local config:[/] {init_result.config_path}")
     else:
@@ -95,36 +84,11 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             f"[dim]KedaCode local config already up to date:[/] {init_result.config_path}"
         )
     _print_gitignore_summary(gitignore_result)
-    try:
-        remote_skill_result = install_remote_template_skills(
-            RemoteTemplateSkillInstallOptions(process_runner=process_runner, force=parsed.force)
-        )
-    except Exception as exc:  # noqa: BLE001 - remote availability is required by kc init.
-        error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
-        return 1
-    remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
-    overwritten_names = ", ".join(remote_skill_result.overwritten_skill_names)
-    skipped_names = ", ".join(remote_skill_result.skipped_skill_names)
-    remote_skill_roots = ", ".join(
-        str(root_path) for root_path in remote_skill_result.target_skills_roots
+    skills_exit_code = _sync_user_skills_or_report_error(
+        process_runner=process_runner, dry_run=False, force=parsed.force
     )
-    console.print(
-        f"[green]Installed remote template skills:[/] {remote_skill_names} -> "
-        f"{remote_skill_roots}"
-    )
-    if overwritten_names:
-        console.print(
-            f"[yellow]Overwrote user-owned skills (matching remote template):[/] {overwritten_names}"
-        )
-    if skipped_names:
-        console.print(f"[dim]Remote template skills already up to date:[/] {skipped_names}")
-    for skills_root in remote_skill_result.target_skills_roots:
-        operator_skill_result = install_packaged_operator_skill(
-            target_skills_root=skills_root,
-            dry_run=False,
-            force=parsed.force,
-        )
-        _print_operator_skill_plan(operator_skill_result)
+    if skills_exit_code:
+        return skills_exit_code
     if init_result.repo_id:
         try:
             registry_result = upsert_repository(
@@ -154,33 +118,16 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
     return 0
 
 
-def _print_operator_skill_plan(result) -> None:
-    """呈现内置 operator Skill 的安装、冲突保护或覆盖结果，并回显旧名副本处理说明。"""
-    if result.action == "preserve-conflict":
-        prefix = (
-            "Would preserve existing user skill"
-            if result.dry_run
-            else "Preserved existing user skill"
-        )
-        print(f"{prefix} (conflict; use --force to replace): {result.target_path}")
-    elif result.action == "up-to-date":
-        print(f"KedaCode operator skill already up to date: {result.target_path}")
-    else:
-        if result.action == "overwrite":
-            prefix = (
-                "Would overwrite packaged KedaCode operator skill"
-                if result.dry_run
-                else "Overwrote packaged KedaCode operator skill"
-            )
-        else:
-            prefix = (
-                "Would install packaged KedaCode operator skill"
-                if result.dry_run
-                else "Installed KedaCode operator skill"
-            )
-        print(f"{prefix}: {result.target_path}")
-    if result.legacy_notice:
-        print(result.legacy_notice)
+def _sync_user_skills_or_report_error(
+    *, process_runner: IProcessRunner, dry_run: bool, force: bool
+) -> int:
+    """同步用户级 Skills，远程模板不可用或冲突时报告原因并以失败退出。"""
+    try:
+        sync_user_skills(process_runner=process_runner, dry_run=dry_run, force=force)
+    except RemoteTemplateSkillInstallError as exc:
+        error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
+        return 1
+    return 0
 
 
 def _print_gitignore_plan(result: GitignoreSyncResult) -> None:

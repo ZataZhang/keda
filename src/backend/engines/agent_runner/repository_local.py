@@ -66,6 +66,20 @@ class IARRepositoryNotInitializedError(Exception):
         )
 
 
+class RepositoryLocalConfigExistsError(ValueError):
+    """仓库本地配置已存在且与本次生成结果不同，且调用方未声明覆盖。
+
+    单独成类型（而非裸 ``ValueError``）是为了让 CLI 能认出「配置冲突」这一种失败，
+    在不改变既有退出码的前提下把用户导向与配置文件无关的 Skill 重装入口。
+    """
+
+    def __init__(self, config_path: Path) -> None:
+        self.config_path = config_path
+        super().__init__(
+            f"KedaCode local config already exists at {config_path}. Use --force to overwrite it."
+        )
+
+
 def require_iar_repository_initialized(
     repo_root_path: Path,
     process_runner: SubprocessRunner | None = None,  # noqa: ARG001
@@ -847,7 +861,8 @@ def initialize_repository_local_config(
         Init result with generated TOML and write status.
 
     Raises:
-        ValueError: If the repository config already exists and overwrite was not forced.
+        RepositoryLocalConfigExistsError: 仓库本地配置已存在且未声明覆盖
+            （仍是 :class:`ValueError` 的子类，既有捕获不受影响）。
     """
     repo_root_path, config_text, verification_commands = build_repository_local_config_text(
         options, process_runner
@@ -874,9 +889,7 @@ def initialize_repository_local_config(
     if config_path.exists() and not options.force and not options.dry_run:
         existing_text = config_path.read_text(encoding="utf-8")
         if existing_text != config_text:
-            raise ValueError(
-                f"KedaCode local config already exists at {config_path}. Use --force to overwrite it."
-            )
+            raise RepositoryLocalConfigExistsError(config_path)
         return _make_result(wrote_file=False)
     if options.dry_run:
         return _make_result(wrote_file=False)

@@ -21,6 +21,7 @@ GitignoreSyncOptions = _engines_repository_local_module.GitignoreSyncOptions
 GitignoreSyncResult = _engines_repository_local_module.GitignoreSyncResult
 IARRepositoryNotInitializedError = _engines_repository_local_module.IARRepositoryNotInitializedError
 RepositoryInitOptions = _engines_repository_local_module.RepositoryInitOptions
+RepositoryLocalConfigExistsError = _engines_repository_local_module.RepositoryLocalConfigExistsError
 RepositoryInitResult = _engines_repository_local_module.RepositoryInitResult
 detect_git_repository_root = _engines_repository_local_module.detect_git_repository_root
 discover_iar_repositories = _engines_repository_local_module.discover_iar_repositories
@@ -41,6 +42,7 @@ __all__ = [
     "GitignoreSyncResult",
     "IARRepositoryNotInitializedError",
     "RepositoryInitOptions",
+    "RepositoryLocalConfigExistsError",
     "RepositoryInitResult",
     "detect_git_repository_root",
     "discover_iar_repositories",

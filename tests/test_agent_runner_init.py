@@ -43,7 +43,7 @@ SCAFFOLD_OMITTED_SECTIONS = frozenset({"generated_content"})
 def _stub_remote_template_skill_install(monkeypatch: pytest.MonkeyPatch) -> None:
     """避免既有 IAR 初始化测试访问 GitHub；远程同步另有专项测试覆盖。"""
     monkeypatch.setattr(
-        "backend.api.cli_init.install_remote_template_skills",
+        "backend.api.cli_skill.install_remote_template_skills",
         lambda options: RemoteTemplateSkillInstallResult(
             target_skills_roots=(Path("/test/user-skills"),),
             installed_skill_names=("prd", "code-reviewer"),
@@ -51,7 +51,7 @@ def _stub_remote_template_skill_install(monkeypatch: pytest.MonkeyPatch) -> None
         ),
     )
     monkeypatch.setattr(
-        "backend.api.cli_init.install_packaged_operator_skill",
+        "backend.api.cli_skill.install_packaged_operator_skill",
         lambda **options: PackagedSkillInstallResult(
             target_path=options["target_skills_root"] / product_identity.OPERATOR_SKILL_NAME,
             action="install",
@@ -203,7 +203,7 @@ def test_iar_init_requests_remote_user_skill_install(
         )
 
     monkeypatch.setattr(
-        "backend.api.cli_init.install_remote_template_skills", capture_install_options
+        "backend.api.cli_skill.install_remote_template_skills", capture_install_options
     )
 
     assert main(["init"]) == 0
@@ -1118,7 +1118,7 @@ def test_iar_init_dry_run_reports_packaged_operator_skill_conflict(
     monkeypatch.chdir(repo_path)
     monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
     monkeypatch.setattr(
-        "backend.api.cli_init.install_remote_template_skills",
+        "backend.api.cli_skill.install_remote_template_skills",
         lambda options: RemoteTemplateSkillInstallResult(
             target_skills_roots=(skills_root,),
             installed_skill_names=("prd", "code-reviewer"),
@@ -1126,7 +1126,7 @@ def test_iar_init_dry_run_reports_packaged_operator_skill_conflict(
         ),
     )
     monkeypatch.setattr(
-        "backend.api.cli_init.install_packaged_operator_skill",
+        "backend.api.cli_skill.install_packaged_operator_skill",
         install_packaged_operator_skill,
     )
 
@@ -1164,7 +1164,7 @@ def test_iar_init_surfaces_legacy_operator_skill_copy_notices(
     monkeypatch.chdir(repo_path)
     monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
     monkeypatch.setattr(
-        "backend.api.cli_init.install_remote_template_skills",
+        "backend.api.cli_skill.install_remote_template_skills",
         lambda options: RemoteTemplateSkillInstallResult(
             target_skills_roots=(pristine_root, modified_root),
             installed_skill_names=("prd", "code-reviewer"),
@@ -1172,7 +1172,7 @@ def test_iar_init_surfaces_legacy_operator_skill_copy_notices(
         ),
     )
     monkeypatch.setattr(
-        "backend.api.cli_init.install_packaged_operator_skill",
+        "backend.api.cli_skill.install_packaged_operator_skill",
         install_packaged_operator_skill,
     )
 
