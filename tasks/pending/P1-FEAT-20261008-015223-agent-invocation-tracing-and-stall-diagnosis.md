@@ -221,65 +221,64 @@ erDiagram
 真实入口使用隔离配置/状态目录和临时 Git 仓库，通过已安装 CLI 运行与查询。Agent 边界允许确定性 fixture executable，Git 与 SQLite 使用真实实现；这证明本地编排与存储，不声称验证第三方服务的实际模型。另做一个可用执行器真实调用冒烟；若没有凭据，明确未完成该项，不伪造通过。不得修改生产代码制造负控。
 
 ```yaml
-oracles:
-  - id: rv-1
-    behavior: 查看包含实现、修复、验证和执行器回退的任务
-    reviewer: human
-    real_entry: 已安装 kc run 的隔离任务及现有 kc logs --issue N
-    expected: 现有日志入口展示每次调用的身份、阶段、执行器、模型来源、结果和耗时；回退调用独立记录
-    presentation: tasks/evidence/<prd-stem>/invocation-log-sample.md；交付提供 open 命令和日志片段
-    mock_boundary: 仅外部 Agent executable 使用确定性 fixture，Git/SQLite/CLI 真实
-    tier: R2
-    test_layer: cli-integration
-    required_for_acceptance: true
-    critical_value_source: 实际进程启动及退出、单调时钟和可信执行器输出
-    must_cross: CLI -> orchestration -> actual invocation -> 事件/日志落盘 -> 新进程logs读取与存储核对
-    forbidden_bypasses: 直接插入事件作为真实运行证据；只测渲染函数
-    fresh_state_probe: 退出运行后用新 CLI 进程读取同一隔离库并核对 fixture 调用清单
-    final_tree_evidence: 记录实现 tree、fixture 哈希、命令和输出
-    negative_control: fixture 令首个执行器失败并回退，检查两次调用而非一条合并成功记录
-    expected_fail: 合并回退记录或漏掉一条会导致调用清单断言失败
-  - id: rv-2
-    behavior: 执行器没有报告实际模型
-    reviewer: verifier
-    real_entry: 同一 CLI fixture 运行与日志读取
-    expected: 请求模型可保留，执行器报告模型显示“未提供”，不用配置值冒充
-    mock_boundary: 执行器报告缺失和换执行器回退用 fixture 模拟
-    tier: R1
-    test_layer: cli-integration
-    required_for_acceptance: true
-  - id: rv-3
-    behavior: 调用超时或运行进程中断后读取日志及记录
-    reviewer: verifier
-    real_entry: 隔离 CLI 子进程超时测试以及开始事件落盘后终止该测试进程
-    expected: 超时有终态并记录完整结果；中断保留未闭合开始记录，已确认进程退出时视为 incomplete，不显示成功或虚构结束时间
-    mock_boundary: 慢执行器用 fixture，进程与存储真实
-    tier: R1
-    test_layer: process-integration
-    required_for_acceptance: true
-  - id: rv-5
-    behavior: 查看无 PRD Issue 和旧版任务
-    reviewer: verifier
-    real_entry: 无 PRD CLI 任务和旧版 SQLite fixture 的升级后 CLI 查询
-    expected: 新任务同样完整关联；旧任务标注历史不完整，不回填推测模型
-    mock_boundary: GitHub 使用本地测试适配边界，SQLite 升级真实
-    tier: R1
-    test_layer: cli-integration
-    required_for_acceptance: true
-  - id: rv-6
-    behavior: 调用输出包含敏感哨兵或请求日志根目录外路径
-    reviewer: verifier
-    real_entry: 隔离 CLI fixture 运行、现有logs读取及存储核对
-    expected: 新事件不保存敏感哨兵；根目录外日志不可读取；业务结果保持原语义
-    mock_boundary: 仅外部执行器fixture输出预设哨兵，存储和CLI真实
-    tier: R2
-    test_layer: cli-integration
-    required_for_acceptance: true
-    critical_value_source: fixture敏感哨兵和调用记录的日志定位
-    must_cross: 实际调用 -> 事件构造 -> SQLite -> 新CLI进程查询及日志解析
-    forbidden_bypasses: 只测脱敏helper；查询绕过CLI；预先写入安全记录
-    fresh_state_probe: 新进程读取新增日志标记及隔离SQLite事件，检查哨兵不存在并拒绝越界路径
-    final_tree_evidence: 最终tree、fixture哈希、查询输出及越界退出结果
+- id: rv-1
+  behavior: 查看包含实现、修复、验证和执行器回退的任务
+  reviewer: human
+  real_entry: 已安装 kc run 的隔离任务及现有 kc logs --issue N
+  expected: 现有日志入口展示每次调用的身份、阶段、执行器、模型来源、结果和耗时；回退调用独立记录
+  presentation: tasks/evidence/<prd-stem>/invocation-log-sample.md；交付提供 open 命令和日志片段
+  mock_boundary: 仅外部 Agent executable 使用确定性 fixture，Git/SQLite/CLI 真实
+  tier: R2
+  test_layer: cli-integration
+  required_for_acceptance: true
+  critical_value_source: 实际进程启动及退出、单调时钟和可信执行器输出
+  must_cross: CLI -> orchestration -> actual invocation -> 事件/日志落盘 -> 新进程logs读取与存储核对
+  forbidden_bypasses: 直接插入事件作为真实运行证据；只测渲染函数
+  fresh_state_probe: 退出运行后用新 CLI 进程读取同一隔离库并核对 fixture 调用清单
+  final_tree_evidence: 记录实现 tree、fixture 哈希、命令和输出
+  negative_control: fixture 令首个执行器失败并回退，检查两次调用而非一条合并成功记录
+  expected_fail: 合并回退记录或漏掉一条会导致调用清单断言失败
+- id: rv-2
+  behavior: 执行器没有报告实际模型
+  reviewer: verifier
+  real_entry: 同一 CLI fixture 运行与日志读取
+  expected: 请求模型可保留，执行器报告模型显示“未提供”，不用配置值冒充
+  mock_boundary: 执行器报告缺失和换执行器回退用 fixture 模拟
+  tier: R1
+  test_layer: cli-integration
+  required_for_acceptance: true
+- id: rv-3
+  behavior: 调用超时或运行进程中断后读取日志及记录
+  reviewer: verifier
+  real_entry: 隔离 CLI 子进程超时测试以及开始事件落盘后终止该测试进程
+  expected: 超时有终态并记录完整结果；中断保留未闭合开始记录，已确认进程退出时视为 incomplete，不显示成功或虚构结束时间
+  mock_boundary: 慢执行器用 fixture，进程与存储真实
+  tier: R1
+  test_layer: process-integration
+  required_for_acceptance: true
+- id: rv-5
+  behavior: 查看无 PRD Issue 和旧版任务
+  reviewer: verifier
+  real_entry: 无 PRD CLI 任务和旧版 SQLite fixture 的升级后 CLI 查询
+  expected: 新任务同样完整关联；旧任务标注历史不完整，不回填推测模型
+  mock_boundary: GitHub 使用本地测试适配边界，SQLite 升级真实
+  tier: R1
+  test_layer: cli-integration
+  required_for_acceptance: true
+- id: rv-6
+  behavior: 调用输出包含敏感哨兵或请求日志根目录外路径
+  reviewer: verifier
+  real_entry: 隔离 CLI fixture 运行、现有logs读取及存储核对
+  expected: 新事件不保存敏感哨兵；根目录外日志不可读取；业务结果保持原语义
+  mock_boundary: 仅外部执行器fixture输出预设哨兵，存储和CLI真实
+  tier: R2
+  test_layer: cli-integration
+  required_for_acceptance: true
+  critical_value_source: fixture敏感哨兵和调用记录的日志定位
+  must_cross: 实际调用 -> 事件构造 -> SQLite -> 新CLI进程查询及日志解析
+  forbidden_bypasses: 只测脱敏helper；查询绕过CLI；预先写入安全记录
+  fresh_state_probe: 新进程读取新增日志标记及隔离SQLite事件，检查哨兵不存在并拒绝越界路径
+  final_tree_evidence: 最终tree、fixture哈希、查询输出及越界退出结果
 ```
 
 补充自动验证：两任务并发身份隔离、观测写入失败不改变业务结果、敏感值不进入新事件、原CLI机器输出契约不变、现有logs读取/follow/换轮保持可用。按测试规范运行针对测试、`just lint --reuse`、`just lint --full`、`just test all`、`uv run mkdocs build --strict`。失败先诊断，禁止篡改 guard 或重复执行整轮仅为格式问题。
