@@ -24,7 +24,18 @@ An Agent that prints nothing for the configured inactivity timeout is killed and
 
 1. Read the `Attempt History` comment: per-attempt Agent, failure type, and duration.
 2. Check the latest claim comment for the Agent actually in use; a different name means fallback already happened.
-3. Only after retries *and* fallback are exhausted does the Issue become `agent/failed`.
+3. Read the `[iar-invocation-start]` / `[iar-invocation-end]` markers in `kc logs --issue <N>`: how many real subprocess calls happened, which `executor=` ran each, what `outcome=` / `failure_category=` each ended with, and how they chain via `retry_of=`. Field-by-field reading is on the 看进度 route (`${CODEBUDDY_SKILL_DIR}/references/watch.md`).
+4. Only after retries *and* fallback are exhausted does the Issue become `agent/failed`.
+
+What the markers do **not** tell you, so do not over-read them:
+
+- **Log activity is not delivery.** Calls can start, end `ok`, and still never reach a PR — that is exactly the failure mode this tracing was added for. Confirm delivery against the PR / label state, not against how busy the log looks.
+- **A start with no end is a gap, not a verdict.** Read it as *unclosed* by default; call it *interrupted* only after separately confirming the process exited (the `pid=` in the claim comment is gone). Never invent a terminal state for it.
+- **`model_source=unknown` is honest, not broken.** It means the executor did not self-report a model, a binding was dropped on fallback, or the record predates this feature. It is never back-filled from the current config.
+- **Coverage is one process layer on one machine.** Sub-Agents spawned inside an Agent are `unobserved`, and the ledger is the local `~/.kedacode/console.db` — no cross-machine aggregation.
+- **`[iar-invocation-coverage-incomplete]` means the list may be incomplete**, not that the run failed. Business results are unaffected by observation faults.
+
+There is no stall threshold, no stall-judgement program, and no auto-takeover behind these markers: they make a stall *diagnosable*, and the decision plus the recovery command stay with the operator.
 
 ## Recover
 

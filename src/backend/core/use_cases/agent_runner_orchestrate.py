@@ -45,6 +45,10 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.shared.models.publish_stage import (
     PublishStage,
 )
+from backend.core.use_cases.agent_invocation_tracing import (
+    RETRY_REASON_EXECUTOR_FALLBACK,
+    link_next_invocation,
+)
 from backend.core.use_cases.agent_runner_events import (
     parse_latest_pending_rework_marker,
 )
@@ -463,6 +467,11 @@ def run_issue_with_agent_fallback(
     last_switch_exc: Exception | None = None
     for candidate_index, candidate_agent in enumerate(candidate_agents):
         is_last_candidate = candidate_index == len(candidate_agents) - 1
+        # 换执行器重跑整条流水线属于**新的一次实际进程调用**：声明替代关系后，
+        # 观测侧会为下一个候选新建独立 invocation，并用 retry_of 指向上一候选最后
+        # 那次失败的调用，而不是把换人折叠成同一条记录。
+        if candidate_index > 0:
+            link_next_invocation(RETRY_REASON_EXECUTOR_FALLBACK)
         try:
             process_for_agent(
                 agent=candidate_agent,

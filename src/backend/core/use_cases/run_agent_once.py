@@ -15,15 +15,11 @@ agent 不直接执行 `git commit`，而是将 commit message 写入
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from backend.core.shared.interfaces.agent_output_protocol import (
-    CLAUDE_STREAM_JSON_PROTOCOL_ID,
-)
 from backend.core.shared.interfaces.agent_runner import (
     AGENT_SESSION_ID_ATTR_NAME,
     IGitHubClient,
@@ -44,11 +40,23 @@ from backend.core.shared.models.agent_spec import (
     PROMPT_DELIVERY_STDIN,
 )
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_response_text import extract_agent_response_text
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
     build_agent_invocation,
     resolve_agent_spec,
     resolve_registered_agents,
+)
+from backend.core.use_cases.agent_invocation_tracing import (
+    PHASE_FIX,
+    PHASE_IMPLEMENTATION,
+    PHASE_UNSPECIFIED,
+    RETRY_REASON_RESUME_NOT_STARTED,
+    RETRY_REASON_TRANSIENT,
+    InvocationStartRequest,
+    finish_invocation,
+    link_next_invocation,
+    start_invocation,
 )
 from backend.core.use_cases.agent_runner_attempt import (
     AttemptPhaseTimer,
@@ -563,6 +571,7 @@ def run_agent(
     inactivity_timeout_seconds: int | None = None,
     model_selection: ModelSelection | None = None,
     resume_session_id: str | None = None,
+    invocation_attempt: int | None = None,
 ) -> CommandResult:
     """Run Codex or Claude Code in non-interactive mode."""
     long_term_store, skill_store = _resolve_memory_stores(worktree_path, config.memory)
@@ -592,6 +601,8 @@ def run_agent(
         inactivity_timeout_seconds=inactivity_timeout_seconds,
         model_selection=model_selection,
         resume_session_id=resume_session_id,
+        invocation_phase=PHASE_IMPLEMENTATION,
+        invocation_attempt=invocation_attempt,
     )
 
 
@@ -603,6 +614,7 @@ def run_fix_agent(
     process_runner: IProcessRunner,
     verification_results: list[CommandResult],
     model_selection: ModelSelection | None = None,
+    invocation_attempt: int | None = None,
 ) -> CommandResult:
     """Run a focused Fix Agent for simple local verification failures.
 
@@ -619,6 +631,8 @@ def run_fix_agent(
         verification_results: Failed verification results to repair.
         model_selection: 阶段绑定的模型选择（fix 自身绑定或继承实现者）；
             执行 agent 与预设 agent 不一致时在 resilient 层丢弃并记日志。
+        invocation_attempt: 所属 recovery 轮次（1 起）；调用观测用它把修复调用
+            归到正确的那一轮。
 
     Returns:
         The Fix Agent command result.
@@ -647,6 +661,8 @@ def run_fix_agent(
         timeout_seconds=fix_timeout,
         inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
         model_selection=model_selection,
+        invocation_phase=PHASE_FIX,
+        invocation_attempt=invocation_attempt,
     )
 
 
@@ -664,6 +680,8 @@ def run_agent_with_prompt(
     profile: str = AGENT_PROFILE_RUN,
     model_selection: ModelSelection | None = None,
     resume_session_id: str | None = None,
+    invocation_phase: str = PHASE_UNSPECIFIED,
+    invocation_attempt: int | None = None,
 ) -> CommandResult:
     """Run an agent with a prepared prompt.
 
@@ -675,6 +693,21 @@ def run_agent_with_prompt(
     ``resume_session_id`` 非空且该 agent 声明了会话续传能力时，按声明式
     ``resume_args`` 模板注入续传参数；agent 未声明时**静默回落为全新会话**
     （FR-4：续传失败不得丢失整轮 recovery）。
+
+    本函数是**唯一**的实际进程调用边界，因此也是调用观测（Issue #242）的落点：
+    每次 ``process_runner.run`` 前后各发一条事实，回退/重跑新建 invocation 而不是
+    合并成一条成功记录。
+
+    Args:
+        invocation_phase: 本次调用所属阶段（取
+            :data:`~backend.core.use_cases.agent_invocation_tracing.KNOWN_PHASES`
+            之一）；只有调用点知道，因此显式传入，不在此处猜测。
+        invocation_attempt: recovery 轮次（1 起）；非 attempt 主体调用为 ``None``。
+
+    重试/回退关联不通过参数表达：调用方在发起替代之前调
+    :func:`~backend.core.use_cases.agent_invocation_tracing.link_next_invocation`
+    声明原因，观测侧据此把新 invocation 以 ``retry_of`` 挂到上一次，两次调用各自
+    独立成记录，绝不合并成一条成功记录。
     """
     if issue is not None:
         _logger.info(
@@ -709,7 +742,12 @@ def run_agent_with_prompt(
             )
 
     def _invoke(resume_id: str | None) -> CommandResult:
-        """按给定的续传会话 id 组装并执行一次调用。"""
+        """按给定的续传会话 id 组装并执行一次调用。
+
+        每次进入本函数就是一次**实际进程调用**，因此单独发一对 started/finished
+        观测事件：续传没起跑后改跑全新会话的那次是第二条记录，以 ``retry_of``
+        关联第一条，而不是把两条压成一条。
+        """
         attempt_invocation = build_agent_invocation(
             agent_name,
             profile,
@@ -726,6 +764,19 @@ def run_agent_with_prompt(
                 "capability; falling back to a fresh session.",
                 agent_name,
             )
+        observation = start_invocation(
+            InvocationStartRequest(
+                agent_name=agent_name,
+                phase=invocation_phase,
+                profile=profile,
+                attempt_number=invocation_attempt,
+                requested_model=(model_selection.model if model_selection is not None else None),
+                requested_reasoning_effort=(
+                    model_selection.reasoning_effort if model_selection is not None else None
+                ),
+                resumed_session_id=attempt_invocation.resumed_session_id,
+            )
+        )
         run_kwargs: dict[str, object] = {
             "command": list(attempt_invocation.argv),
             "cwd": worktree_path,
@@ -741,8 +792,10 @@ def run_agent_with_prompt(
         try:
             attempt_result = process_runner.run(**run_kwargs)
         except Exception as exc:  # noqa: BLE001 - 旁路落盘后原样抛出，不改变失败语义。
+            finish_invocation(observation, exc=exc)
             _persist_session_id(_session_id_from_exception(exc))
             raise
+        finish_invocation(observation, result=attempt_result)
         _persist_session_id(attempt_result.session_id)
         return attempt_result
 
@@ -775,6 +828,9 @@ def run_agent_with_prompt(
             resume_id,
             failure_detail,
         )
+        # 重跑是**新的一次实际进程调用**：先声明替代关系，观测侧才会把它以
+        # retry_of 挂到刚才那次没起跑的续传调用上。
+        link_next_invocation(RETRY_REASON_RESUME_NOT_STARTED)
         return _invoke(None)
 
     result = (
@@ -890,6 +946,10 @@ def run_agent_with_prompt_resilient(
     agent_call_issue = forwarded_options.get("issue")
     issue_number = agent_call_issue.number if isinstance(agent_call_issue, IssueSummary) else 0
     for retry_index in range(max_retries + 1):
+        if retry_index > 0:
+            # 原地瞬态重试是**新的一次实际进程调用**：新建 invocation 并用 retry_of
+            # 关联上一次，绝不合并成一条记录（否则"重试了三次才成功"会消失）。
+            link_next_invocation(RETRY_REASON_TRANSIENT)
         try:
             return run_agent_with_prompt(
                 agent_name,
@@ -918,89 +978,6 @@ def run_agent_with_prompt_resilient(
                 delay_seconds=transient_retry_delay_seconds,
             )
     raise RuntimeError("unreachable: resilient agent retry loop exited")
-
-
-def extract_agent_response_text(result: CommandResult) -> str:
-    """Return assistant response text from direct stdout or Claude stream-json.
-
-    Claude 使用 `--output-format stream-json` 时，每行输出是一个 JSON 事件，
-    包含 stream_event（文本增量）、assistant（完整消息）或 result（最终结果）。
-    本函数按优先级提取有效文本；非流式协议的结果直接返回原始 stdout。
-
-    注意：流式协议会把事件流渲染成纯文本再返回，此时 stdout 已不是原始
-    事件流；若仍逐行重解析，恰好构成合法 JSON 标量的行（如数组末尾不带
-    逗号的字符串元素）会被静默丢弃，破坏其中的 JSON 内容。因此只有
-    ``output_protocol`` 确实是流式协议时才走事件提取，否则原样返回。
-    """
-    if not result.stdout:
-        return ""
-    if result.output_protocol != CLAUDE_STREAM_JSON_PROTOCOL_ID:
-        return result.stdout
-
-    stream_text_parts: list[str] = []
-    assistant_text_parts: list[str] = []
-    result_parts: list[str] = []
-    saw_stream_json_event = False
-    for output_line in result.stdout.splitlines():
-        try:
-            event_payload = json.loads(output_line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event_payload, dict):
-            continue
-        event_type = event_payload.get("type")
-        if event_type == "stream_event":
-            saw_stream_json_event = True
-            _append_claude_stream_event_text(event_payload, stream_text_parts)
-        elif event_type == "assistant":
-            saw_stream_json_event = True
-            _append_claude_assistant_text(event_payload, assistant_text_parts)
-        elif event_type == "result":
-            saw_stream_json_event = True
-            result_text = str(event_payload.get("result") or "").strip()
-            if result_text:
-                result_parts.append(result_text)
-
-    if not saw_stream_json_event:
-        return result.stdout
-    if stream_text_parts:
-        return "".join(stream_text_parts)
-    if assistant_text_parts:
-        return "".join(assistant_text_parts)
-    if result_parts:
-        return "\n".join(result_parts)
-    return result.stdout
-
-
-def _append_claude_stream_event_text(
-    event_payload: dict[str, object],
-    text_parts: list[str],
-) -> None:
-    event = event_payload.get("event")
-    if not isinstance(event, dict):
-        return
-    delta = event.get("delta")
-    if not isinstance(delta, dict):
-        return
-    if delta.get("type") == "text_delta":
-        text_parts.append(str(delta.get("text", "")))
-
-
-def _append_claude_assistant_text(
-    event_payload: dict[str, object],
-    text_parts: list[str],
-) -> None:
-    message = event_payload.get("message")
-    if not isinstance(message, dict):
-        return
-    content_blocks = message.get("content", [])
-    if not isinstance(content_blocks, list):
-        return
-    for content_block in content_blocks:
-        if not isinstance(content_block, dict):
-            continue
-        if content_block.get("type") == "text":
-            text_parts.append(str(content_block.get("text", "")))
 
 
 def run_agent_until_committed(

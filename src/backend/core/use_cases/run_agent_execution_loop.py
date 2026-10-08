@@ -44,6 +44,7 @@ from backend.core.use_cases.run_agent_once import (
     unstage_changes,
     wait_before_recovery_attempt,
 )
+from backend.core.use_cases.agent_invocation_tracing import PHASE_IMPLEMENTATION
 from backend.core.use_cases.agent_runner_attempt_recording import (
     _AttemptRecordContext,
     _classify_and_record_gate_failure,
@@ -268,6 +269,8 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
                             model_selection=model_selection,
                             resume_session_id=resume_session_id,
+                            invocation_phase=PHASE_IMPLEMENTATION,
+                            invocation_attempt=attempt_index + 1,
                         )
                 else:
                     with attempt_phases.measure("agent"):
@@ -281,6 +284,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
                             model_selection=model_selection,
                             resume_session_id=resume_session_id,
+                            invocation_attempt=attempt_index + 1,
                         )
             else:
                 long_term_store, skill_store = _resolve_memory_stores(worktree_path, config.memory)
@@ -314,6 +318,8 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         inactivity_timeout_seconds=config.runner.inactivity_timeout_seconds,
                         model_selection=model_selection,
                         resume_session_id=resume_session_id,
+                        invocation_phase=PHASE_IMPLEMENTATION,
+                        invocation_attempt=attempt_index + 1,
                     )
         except AgentUnavailableError:
             # The agent CLI could not be launched; let the cross-agent fallback

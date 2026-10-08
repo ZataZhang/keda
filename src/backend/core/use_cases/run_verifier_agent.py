@@ -40,6 +40,7 @@ from backend.core.use_cases.agent_runner_validation import (
     validation_required,
 )
 from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.use_cases.agent_invocation_tracing import PHASE_VERIFICATION
 from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
 from backend.core.use_cases.run_agent_once import (
     extract_agent_response_text,
@@ -357,6 +358,7 @@ def run_verifier_agent(
             inactivity_timeout_seconds=inactivity_timeout_seconds,
             issue=issue,
             model_selection=model_selection,
+            invocation_phase=PHASE_VERIFICATION,
         )
     except subprocess.TimeoutExpired as timeout_error:
         _save_timed_out_verifier_response(

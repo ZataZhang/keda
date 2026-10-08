@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -16,6 +17,7 @@ import pytest
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
     AuditEntry,
+    InvocationEventRecord,
     PrdLifecycleEventRecord,
     PrdLifecycleRunRecord,
     RunRecord,
@@ -826,3 +828,206 @@ def test_attempt_preset_and_model_roundtrip(tmp_path: Path) -> None:
     assert by_detail["bound"].model == "glm-5.3-flash"
     assert by_detail["unbound"].preset is None
     assert by_detail["unbound"].model is None
+
+
+# --- Agent 调用观测事件账本（Issue #242 / schema v9）-------------------------
+
+
+def _invocation_event(
+    *,
+    run_id: str = "keda-main#issue-7#20261008T000000Z-abc",
+    event_key: str,
+    invocation_id: str,
+    event_type: str = "invocation_started",
+    issue_number: int | None = 7,
+    repo_id: str = "keda-main",
+    occurred_at: str = "2026-10-08T00:00:00+00:00",
+    phase: str = "implementation",
+) -> InvocationEventRecord:
+    """构造一条调用观测事件（detail 只放结构化非敏感摘要）。"""
+    return InvocationEventRecord(
+        run_id=run_id,
+        event_key=event_key,
+        event_type=event_type,
+        invocation_id=invocation_id,
+        repo_id=repo_id,
+        issue_number=issue_number,
+        phase=phase,
+        role="implementer",
+        agent="claude",
+        occurred_at=occurred_at,
+        detail_json=json.dumps({"outcome": None}, ensure_ascii=False),
+    )
+
+
+def test_v8_database_migrates_to_v9_and_creates_invocation_events_table(
+    tmp_path: Path,
+) -> None:
+    """v8 旧库打开新代码后自动补 agent_invocation_events 表，旧行完整保留。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+    store.append_run(_make_run_record(issue_number=228, outcome="failed"))
+
+    # 把库退回 v8 形态：删掉 v9 追加的表与索引并降回 user_version=8。
+    raw = sqlite3.connect(str(db_path))
+    raw.execute("DROP TABLE IF EXISTS agent_invocation_events")
+    raw.execute("PRAGMA user_version = 8")
+    raw.commit()
+    raw.close()
+
+    migrated = SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+        table_names = {
+            row[0]
+            for row in probe.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert "agent_invocation_events" in table_names
+        index_names = {
+            row[0]
+            for row in probe.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        }
+        assert any(name.startswith("idx_agent_invocation_events") for name in index_names)
+    finally:
+        probe.close()
+
+    # 迁移不得动既有历史：旧 run 记录仍读得到。
+    runs = migrated.list_recent_runs(repo_id="keda-main")
+    assert [run.issue_number for run in runs] == [228]
+
+    # 迁移后写入的新事件可落库并读回。
+    migrated.append_invocation_event(
+        _invocation_event(event_key="inv-1:invocation_started", invocation_id="inv-1")
+    )
+    events = migrated.list_invocation_events(run_id="keda-main#issue-7#20261008T000000Z-abc")
+    assert [event.invocation_id for event in events] == ["inv-1"]
+
+
+def test_fresh_database_creates_invocation_events_table(tmp_path: Path) -> None:
+    """全新库直接建到 v9，无需经过迁移分支。"""
+    db_path = tmp_path / "console.db"
+    SqliteConsoleStore(db_path)
+
+    probe = _fresh_connection(db_path)
+    try:
+        assert probe.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+        columns = {
+            row[1] for row in probe.execute("PRAGMA table_info(agent_invocation_events)").fetchall()
+        }
+    finally:
+        probe.close()
+    assert {
+        "run_id",
+        "event_key",
+        "event_type",
+        "invocation_id",
+        "repo_id",
+        "issue_number",
+        "phase",
+        "role",
+        "agent",
+        "occurred_at",
+        "detail_json",
+    } <= columns
+
+
+def test_invocation_event_append_is_idempotent_on_event_key(tmp_path: Path) -> None:
+    """同一 (run_id, event_key) 重复写入只落一行：重试/并发不会产生重复事实。"""
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    event = _invocation_event(event_key="inv-1:invocation_started", invocation_id="inv-1")
+
+    assert store.append_invocation_event(event) is True
+    assert store.append_invocation_event(event) is False
+
+    events = store.list_invocation_events(run_id=event.run_id)
+    assert len(events) == 1
+
+
+def test_list_invocation_events_returns_chronological_trail(tmp_path: Path) -> None:
+    """按发生顺序返回，且只返回本 run 的事件。"""
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    store.append_invocation_event(
+        _invocation_event(
+            event_key="inv-1:invocation_started",
+            invocation_id="inv-1",
+            occurred_at="2026-10-08T00:00:00+00:00",
+        )
+    )
+    store.append_invocation_event(
+        _invocation_event(
+            event_key="inv-1:invocation_finished",
+            invocation_id="inv-1",
+            event_type="invocation_finished",
+            occurred_at="2026-10-08T00:05:00+00:00",
+        )
+    )
+    store.append_invocation_event(
+        _invocation_event(
+            run_id="keda-main#issue-9#20261008T000000Z-def",
+            event_key="inv-9:invocation_started",
+            invocation_id="inv-9",
+            issue_number=9,
+        )
+    )
+
+    events = store.list_invocation_events(run_id="keda-main#issue-7#20261008T000000Z-abc")
+    assert [(event.invocation_id, event.event_type) for event in events] == [
+        ("inv-1", "invocation_started"),
+        ("inv-1", "invocation_finished"),
+    ]
+
+
+def test_list_issue_invocation_events_spans_runs_and_honours_limit(tmp_path: Path) -> None:
+    """跨 run 按 Issue 聚合（无 PRD 也能查），并保留最近 limit 条。"""
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    for index in range(5):
+        store.append_invocation_event(
+            _invocation_event(
+                run_id=f"keda-main#issue-7#20261008T00000{index}Z-run{index}",
+                event_key=f"inv-{index}:invocation_started",
+                invocation_id=f"inv-{index}",
+                occurred_at=f"2026-10-08T00:0{index}:00+00:00",
+            )
+        )
+    store.append_invocation_event(
+        _invocation_event(
+            run_id="keda-main#issue-9#20261008T000000Z-other",
+            event_key="inv-other:invocation_started",
+            invocation_id="inv-other",
+            issue_number=9,
+        )
+    )
+
+    all_events = store.list_issue_invocation_events(repo_id="keda-main", issue_number=7)
+    assert [event.invocation_id for event in all_events] == [
+        "inv-0",
+        "inv-1",
+        "inv-2",
+        "inv-3",
+        "inv-4",
+    ]
+
+    recent = store.list_issue_invocation_events(repo_id="keda-main", issue_number=7, limit=2)
+    assert [event.invocation_id for event in recent] == ["inv-3", "inv-4"]
+
+    other_issue = store.list_issue_invocation_events(repo_id="keda-main", issue_number=9)
+    assert [event.invocation_id for event in other_issue] == ["inv-other"]
+
+    assert store.list_issue_invocation_events(repo_id="other-repo", issue_number=7) == []
+
+
+def test_invocation_event_reads_degrade_when_table_missing(tmp_path: Path) -> None:
+    """历史库没有这张表时读取降级为空列表：披露不完整，而不是抛错阻断。"""
+    db_path = tmp_path / "console.db"
+    SqliteConsoleStore(db_path)
+
+    raw = sqlite3.connect(str(db_path))
+    raw.execute("DROP TABLE agent_invocation_events")
+    raw.commit()
+    raw.close()
+
+    legacy_store = SqliteConsoleStore(db_path)
+    assert legacy_store.list_invocation_events(run_id="anything") == []
+    assert legacy_store.list_issue_invocation_events(repo_id="keda-main", issue_number=7) == []

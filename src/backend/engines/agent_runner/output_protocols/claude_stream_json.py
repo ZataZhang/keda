@@ -54,6 +54,7 @@ class ClaudeStreamJsonOutputProtocol:
             output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
             token_usage=usage_collector.usage,
             session_id=usage_collector.session_id,
+            reported_model=usage_collector.reported_model,
         )
 
 

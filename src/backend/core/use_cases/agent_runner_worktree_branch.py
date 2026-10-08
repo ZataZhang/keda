@@ -8,6 +8,7 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.use_cases.agent_invocation_tracing import PHASE_REBASE_RECOVERY
 from backend.core.use_cases.agent_runner_commit import (
     read_commit_request,
     remove_commit_request,
@@ -146,6 +147,8 @@ def _recover_from_active_rebase(
                 process_runner,
                 config=config,
                 issue=issue,
+                invocation_phase=PHASE_REBASE_RECOVERY,
+                invocation_attempt=_attempt,
             )
         except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
             _logger.warning(

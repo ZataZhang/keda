@@ -46,6 +46,10 @@ from backend.core.use_cases.agent_runner_orchestrate import (
 )
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_invocation_tracing import (
+    bound_invocation_trace_context,
+    build_invocation_trace_context,
+)
 from backend.core.use_cases.agent_runner_direct_pr_label import PublishStageSelection
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
@@ -901,13 +905,20 @@ def run_once(request: RunOnceRequest) -> int:
                     console_sink=_console_mirror,
                 ) as sink:
                     scoped_runner = _OutputRoutedProcessRunner(process_runner, sink)
-                    return _process_single_issue(
-                        issue,
-                        issue_kind,
-                        process_runner=scoped_runner,
-                        output_view=noop_view,
-                        **process_kwargs,
-                    )
+                    with bound_invocation_trace_context(
+                        build_invocation_trace_context(
+                            repo_id=effective_repo_id,
+                            issue_number=issue.number,
+                            run_history_store=run_history_store,
+                        )
+                    ):
+                        return _process_single_issue(
+                            issue,
+                            issue_kind,
+                            process_runner=scoped_runner,
+                            output_view=noop_view,
+                            **process_kwargs,
+                        )
             except Exception as exc:  # noqa: BLE001 - 单个 Issue 的 I/O 不应中断本轮。
                 _logger.error("Serial routing failed for Issue #%d: %s", issue.number, exc)
                 return 1
@@ -932,13 +943,22 @@ def run_once(request: RunOnceRequest) -> int:
                 output_view=active_view,
             ) as sink:
                 scoped_runner = _OutputRoutedProcessRunner(process_runner, sink)
-                return _process_single_issue(
-                    issue,
-                    issue_kind,
-                    process_runner=scoped_runner,
-                    output_view=active_view,
-                    **process_kwargs,
-                )
+                # 观测上下文绑在 contextvar 上：线程池的每个 worker 有各自的上下文，
+                # 因此并行处理多个 Issue 时调用身份天然隔离，不靠相邻文本推断归属。
+                with bound_invocation_trace_context(
+                    build_invocation_trace_context(
+                        repo_id=effective_repo_id,
+                        issue_number=issue.number,
+                        run_history_store=run_history_store,
+                    )
+                ):
+                    return _process_single_issue(
+                        issue,
+                        issue_kind,
+                        process_runner=scoped_runner,
+                        output_view=active_view,
+                        **process_kwargs,
+                    )
         except Exception as exc:  # noqa: BLE001 - one Issue's I/O must not kill the pass.
             _logger.error("Parallel routing failed for Issue #%d: %s", issue.number, exc)
             return 1

@@ -110,6 +110,15 @@ core 层只声明档名并请求该档，白名单策略本体在 infrastructure
 #: 一律用 ``getattr`` 宽容读取（旧实现端没有该属性时等价于"没拿到会话"）。
 AGENT_SESSION_ID_ATTR_NAME = "agent_session_id"
 
+#: agent 调用失败时执行器自报模型名的异常属性名。
+#:
+#: 与 :data:`AGENT_SESSION_ID_ATTR_NAME` 同一手法：正常结束走
+#: :class:`CommandResult.reported_model`，超时击杀 / 非零退出只剩异常，因此实现端把
+#: 失败前观测到的最后一个模型名挂在这里，让"跑到一半死掉"的调用也能诚实记录执行器
+#: 报告了什么。调用方一律用 ``getattr`` 宽容读取；属性缺失等价于"未提供"，
+#: 绝不用配置值冒充。
+AGENT_REPORTED_MODEL_ATTR_NAME = "agent_reported_model"
+
 
 class IProcessRunner(ABC):
     """运行外部命令的端口。

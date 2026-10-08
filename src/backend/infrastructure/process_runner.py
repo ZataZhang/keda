@@ -21,7 +21,6 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     PLAIN_PROTOCOL_ID,
 )
 from backend.core.shared.interfaces.agent_runner import (
-    AGENT_SESSION_ID_ATTR_NAME,
     E2E_CHILD_ENV_PROFILE,
 )
 from backend.core.shared.interfaces.output_timestamps import (
@@ -32,6 +31,8 @@ from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.infrastructure.agent_stream_usage import (
     StreamUsageCollector,
+    _attach_stream_observations,
+    parse_reported_model_from_plain_stdout,
     parse_usage_from_plain_stdout,
 )
 from backend.infrastructure.child_env import build_e2e_child_env, build_sanitized_child_env
@@ -163,6 +164,7 @@ class CommandResult:
     output_protocol: str = PLAIN_PROTOCOL_ID
     token_usage: TokenUsage | None = None
     session_id: str | None = None
+    reported_model: str | None = None
 
 
 class CommandFailedError(subprocess.CalledProcessError):
@@ -416,15 +418,19 @@ class SubprocessRunner:
                 stderr=stderr,
             )
         token_usage = usage_collector.usage if usage_collector is not None else None
+        reported_model = usage_collector.reported_model if usage_collector is not None else None
         if (
-            token_usage is None
-            and output_protocol is not None
+            output_protocol is not None
             and output_protocol != CLAUDE_STREAM_JSON_PROTOCOL_ID
+            and (token_usage is None or reported_model is None)
         ):
             # agent 调用走通用执行路径（kimi / codex 等 plain / PTY）：stdout
-            # 未被渲染改写，事后容错解析；普通命令（output_protocol=None，
-            # git / gh / 验证命令）不解析，避免无谓扫描。
-            token_usage = parse_usage_from_plain_stdout(stdout)
+            # 未被渲染改写，事后容错解析用量与执行器自报模型；普通命令
+            # （output_protocol=None，git / gh / 验证命令）不解析，避免无谓扫描。
+            if token_usage is None:
+                token_usage = parse_usage_from_plain_stdout(stdout)
+            if reported_model is None:
+                reported_model = parse_reported_model_from_plain_stdout(stdout)
         result = CommandResult(
             command=tuple(command),
             return_code=completed.returncode,
@@ -434,6 +440,7 @@ class SubprocessRunner:
             output_protocol=output_protocol or PLAIN_PROTOCOL_ID,
             token_usage=token_usage,
             session_id=usage_collector.session_id if usage_collector is not None else None,
+            reported_model=reported_model,
         )
         if check and completed.returncode != 0:
             failure = CommandFailedError(
@@ -443,8 +450,9 @@ class SubprocessRunner:
                 stderr=stderr,
             )
             # 非零退出的 agent 调用同样可能已经聊出了一段会话（跑了一半才失败）。
-            # 把击杀/失败前的最后一个会话 id 一并挂在异常上，恢复轮次才有得可续。
-            _attach_captured_session_id(failure, usage_collector)
+            # 把击杀/失败前的最后一个会话 id 与自报模型一并挂在异常上，恢复轮次
+            # 才有得可续，调用观测也才能诚实记录"执行器报告了什么"。
+            _attach_stream_observations(failure, usage_collector)
             raise failure
         return result
 
@@ -745,23 +753,6 @@ class ClaudeStreamRenderer:
         return f"\n{prefix}{result_text}\n"
 
 
-def _attach_captured_session_id(
-    exc: BaseException,
-    usage_collector: StreamUsageCollector | None,
-) -> None:
-    """把 agent 自报的最后一个会话 id 挂到失败异常上。
-
-    超时击杀与非零退出都不返回 ``CommandResult``，而"这轮聊到哪儿了"恰恰要在失败的
-    那一刻留下——原始事件流只有本函数这一层可靠可见，会话的持有方仍是 agent CLI，
-    这里只做观测并把 id 交给上层落盘。没观察到会话 id 时什么都不挂，异常语义不变。
-    """
-    if usage_collector is None:
-        return
-    captured_session_id = usage_collector.session_id
-    if captured_session_id:
-        setattr(exc, AGENT_SESSION_ID_ATTR_NAME, captured_session_id)
-
-
 def run_filtered_claude_stream(
     command: Sequence[str],
     *,
@@ -900,7 +891,7 @@ def run_filtered_claude_stream(
         return_code = process.wait(timeout=timeout)
         watchdog.raise_if_timed_out(partial_stdout="".join(stdout_lines))
     except BaseException as exc:
-        _attach_captured_session_id(exc, usage_collector)
+        _attach_stream_observations(exc, usage_collector)
         _terminate_process_tree(process)
         process.wait()
         raise

@@ -29,6 +29,7 @@ from backend.core.shared.models.agent_spec import (
     PROMPT_DELIVERY_ARGV_TAIL,
     PROMPT_DELIVERY_STDIN,
 )
+from backend.infrastructure.agent_stream_usage import attach_agent_observations
 from backend.infrastructure.process_runner import CommandFailedError
 
 
@@ -98,12 +99,21 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
             duration_seconds=round(time.monotonic() - started_mono, 3),
         )
         if check and result.return_code != 0:
-            raise CommandFailedError(
+            failure = CommandFailedError(
                 result.return_code,
                 list(command),
                 output=result.stdout,
                 stderr=result.stderr,
             )
+            # 中继结果里执行器自报的会话 id 与模型名必须跟着异常一起上去：
+            # 崩溃对账靠 session_id 续传，调用观测靠 reported_model 诚实记录
+            # "执行器说了什么"。就地新建异常而不搬运会让两者在协议边界消失。
+            attach_agent_observations(
+                failure,
+                session_id=result.session_id,
+                reported_model=result.reported_model,
+            )
+            raise failure
         return result
 
 

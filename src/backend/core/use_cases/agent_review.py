@@ -23,6 +23,11 @@ from backend.core.use_cases.agent_candidate_fallback import build_agent_candidat
 from backend.core.use_cases.agent_review_comment import (
     build_pre_pr_review_result_comment,
 )
+from backend.core.use_cases.agent_invocation_tracing import (
+    PHASE_REVIEW,
+    RETRY_REASON_EXECUTOR_FALLBACK,
+    link_next_invocation,
+)
 from backend.core.use_cases.agent_review_prompts import (
     DEFAULT_REVIEW_PROMPT_TEMPLATE as DEFAULT_REVIEW_PROMPT_TEMPLATE,
 )
@@ -624,6 +629,11 @@ def run_pre_pr_review(
                     if split_repair
                     else AGENT_PROFILE_RUN
                 )
+                # 候选索引前进过就说明上一个审核者跑不起来、这里是换人回退：
+                # 先声明替代关系，观测侧才会新建一条独立 invocation 并以 retry_of
+                # 关联，而不是把两次调用合并成一条成功记录。
+                if reviewer_candidate_index > 0:
+                    link_next_invocation(RETRY_REASON_EXECUTOR_FALLBACK)
                 try:
                     review_result = run_agent_with_prompt_resilient(
                         candidate_agent,
@@ -641,6 +651,8 @@ def run_pre_pr_review(
                             candidate_agent,
                             resolve_lifecycle_model_selection("review", config, issue=issue),
                         ),
+                        invocation_phase=PHASE_REVIEW,
+                        invocation_attempt=cycle,
                     )
                     break
                 except (

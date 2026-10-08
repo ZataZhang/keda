@@ -24,7 +24,23 @@ from backend.core.shared.interfaces.runner_console import (
     ProcessLogChunk,
     RunnerProcessKind,
 )
+from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+from backend.core.shared.models.agent_runner import CommandResult
+from backend.core.shared.models.agent_spec import AGENT_PROFILE_RUN
+from backend.core.use_cases.agent_invocation_tracing import (
+    INVOCATION_COVERAGE_INCOMPLETE_MARKER,
+    INVOCATION_END_MARKER,
+    INVOCATION_START_MARKER,
+    PHASE_IMPLEMENTATION,
+    InvocationStartRequest,
+    bound_invocation_trace_context,
+    build_invocation_trace_context,
+    finish_invocation,
+    start_invocation,
+)
+from backend.core.use_cases.agent_runner_output_routing import issue_output_routing
 from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
+from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 
 #: 日文件名由日志实现模块的时钟产出；``backend.infrastructure.logging`` 包的 ``logger``
 #: 属性已被重绑成 ``Logger`` 单例，所以按模块对象取。
@@ -1123,3 +1139,196 @@ def test_logs_command_issue_follow_prints_content_written_while_polling(
     assert "early-line" in output
     assert "late-line" in output
     assert "finished; tail ends here" in output
+
+
+# ── Agent 调用标记经既有 `iar logs --issue` 入口可见（Issue #242）─────────────
+
+
+def _produce_invocation_attempt_log(
+    repo_dir: Path,
+    issue_number: int,
+    *,
+    run_history_store: object | None = None,
+) -> Path:
+    """用真输出路由 + 真观测模块产出一份带调用标记的 per-Issue 日志。
+
+    标记行由生产代码写出而不是测试手写：手写字符串只能证明"读文件读得出
+    字符串"，证明不了调用记录真的流进了既有入口。
+
+    Args:
+        repo_dir: 测试仓库根目录（日志落在 ``<repo_dir>/logs``）。
+        issue_number: Issue 号。
+        run_history_store: 旁路账本；传不具备该能力的对象即可复现"账本不可用"。
+
+    Returns:
+        本次产出的唯一 per-Issue 日志路径。
+    """
+    store = (
+        SqliteConsoleStore(repo_dir.parent / "console.db")
+        if run_history_store is None
+        else run_history_store
+    )
+    with issue_output_routing(
+        repo_id="fixture-repo",
+        issue_number=issue_number,
+        log_base=repo_dir / "logs",
+        output_view=NoOpRunnerLiveView(),
+    ) as sink:
+        sink("agent is working\n")
+        with bound_invocation_trace_context(
+            build_invocation_trace_context(
+                repo_id="fixture-repo",
+                issue_number=issue_number,
+                run_history_store=store,
+            )
+        ):
+            observation = start_invocation(
+                InvocationStartRequest(
+                    agent_name="claude",
+                    phase=PHASE_IMPLEMENTATION,
+                    profile=AGENT_PROFILE_RUN,
+                    attempt_number=1,
+                    requested_model="claude-sonnet-4-5",
+                )
+            )
+            finish_invocation(
+                observation,
+                result=CommandResult(
+                    command=("claude",),
+                    return_code=0,
+                    stdout="",
+                    stderr="",
+                    reported_model="claude-sonnet-4-5-20250929",
+                ),
+            )
+    log_dir = repo_dir / "logs" / "agent-runner" / "issues" / "fixture-repo"
+    attempts = sorted(log_dir.glob(f"issue-{issue_number}-*.log"))
+    assert len(attempts) == 1
+    return attempts[0]
+
+
+def _marker_field(marker_line: str, field_name: str) -> str:
+    """从标记行里取出 ``field=value`` 的 value（标记行带日志前缀，不能整行比对）。"""
+    for token in marker_line.split():
+        if token.startswith(f"{field_name}="):
+            return token[len(field_name) + 1 :]
+    raise AssertionError(f"field {field_name!r} missing from marker line: {marker_line}")
+
+
+def test_logs_command_issue_surfaces_invocation_markers(tmp_path: Path, capsys) -> None:
+    """既有 `iar logs --issue N` 原样带出调用起止标记——入口没有任何新增。"""
+    repo_dir = tmp_path / "repo"
+    attempt_path = _produce_invocation_attempt_log(repo_dir, 42)
+
+    context = MagicMock(repo_id="fixture-repo", repo_path=repo_dir)
+    parsed = _FakeArgs(
+        kind=None,
+        lines=200,
+        follow=False,
+        repo_id="fixture-repo",
+        issue=42,
+    )
+    with patch(
+        "backend.api.cli_registry.resolve_repository_targets",
+        return_value=[context],
+    ):
+        exit_code = _run_logs_command(
+            parsed=parsed,
+            process_runner=MagicMock(),
+            runner_settings=MagicMock(),
+            repo_id="fixture-repo",
+            repo_override=None,
+        )
+
+    assert exit_code == 0
+    printed_lines = capsys.readouterr().out.splitlines()
+    start_lines = [line for line in printed_lines if INVOCATION_START_MARKER in line]
+    end_lines = [line for line in printed_lines if INVOCATION_END_MARKER in line]
+    assert len(start_lines) == 1
+    assert len(end_lines) == 1
+
+    # 身份、阶段与实际执行器在既有入口就能读到，不需要新命令或新 JSON 汇总。
+    start_line = start_lines[0]
+    assert _marker_field(start_line, "run").startswith("fixture-repo#issue-42#")
+    assert _marker_field(start_line, "issue") == "42"
+    assert _marker_field(start_line, "attempt") == "1"
+    assert _marker_field(start_line, "phase") == PHASE_IMPLEMENTATION
+    assert _marker_field(start_line, "role") == "implementer"
+    assert _marker_field(start_line, "executor") == "claude"
+    assert _marker_field(start_line, "model_requested") == "claude-sonnet-4-5"
+    # log= 给的是相对日志根的定位串，可直接拼回本次真实写盘的那个文件。
+    assert (repo_dir / "logs" / _marker_field(start_line, "log")) == attempt_path
+
+    # 结束标记给出结局与模型三态：请求的、执行器自报的、以及来源。
+    end_line = end_lines[0]
+    assert _marker_field(end_line, "outcome") == "ok"
+    assert _marker_field(end_line, "exit_code") == "0"
+    assert _marker_field(end_line, "model_requested") == "claude-sonnet-4-5"
+    assert _marker_field(end_line, "model_reported") == "claude-sonnet-4-5-20250929"
+    assert _marker_field(end_line, "model_source") == "executor_report"
+
+    # 起止靠同一个 invocation id 配对，而不是靠"上下相邻"推断。
+    assert _marker_field(start_line, "invocation") == _marker_field(end_line, "invocation")
+
+
+def test_logs_command_issue_follow_still_exits_on_attempt_end_with_markers(
+    tmp_path: Path, capsys
+) -> None:
+    """调用标记不干扰 `--follow` 的终态判定：仍只认 `[iar-attempt-end]`。"""
+    repo_dir = tmp_path / "repo"
+    _produce_invocation_attempt_log(repo_dir, 42)
+
+    follow_clock = _VirtualFollowClock(time)
+    with (
+        patch("backend.api.cli_registry.time", follow_clock),
+        patch("backend.api.cli_registry._LOGS_POLL_INTERVAL_SECONDS", 1.0),
+        # 空闲兜底故意设得比首次读标记晚：若终态判定被新标记带偏，退出会走兜底
+        # 路径，下面"without an end marker"的断言即失败。
+        patch("backend.api.cli_registry._FOLLOW_IDLE_EXIT_SECONDS", 5.0),
+    ):
+        exit_code = _run_issue_follow(repo_dir, 42)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert INVOCATION_START_MARKER in output
+    assert INVOCATION_END_MARKER in output
+    assert "finished; tail ends here" in output
+    assert "without an end marker" not in output
+
+
+def test_logs_command_issue_surfaces_coverage_incomplete_disclosure(tmp_path: Path, capsys) -> None:
+    """账本不可用时，既有入口同样带出"调用清单可能不完整"的披露标记。"""
+    repo_dir = tmp_path / "repo"
+    # 传一个不具备调用事件账本能力的对象：观测降级，但日志标记照写。
+    _produce_invocation_attempt_log(repo_dir, 42, run_history_store=object())
+
+    context = MagicMock(repo_id="fixture-repo", repo_path=repo_dir)
+    parsed = _FakeArgs(
+        kind=None,
+        lines=200,
+        follow=False,
+        repo_id="fixture-repo",
+        issue=42,
+    )
+    with patch(
+        "backend.api.cli_registry.resolve_repository_targets",
+        return_value=[context],
+    ):
+        exit_code = _run_logs_command(
+            parsed=parsed,
+            process_runner=MagicMock(),
+            runner_settings=MagicMock(),
+            repo_id="fixture-repo",
+            repo_override=None,
+        )
+
+    assert exit_code == 0
+    printed_lines = capsys.readouterr().out.splitlines()
+    coverage_lines = [
+        line for line in printed_lines if INVOCATION_COVERAGE_INCOMPLETE_MARKER in line
+    ]
+    assert len(coverage_lines) == 1
+    assert "reason=store_unavailable" in coverage_lines[0]
+    # 披露降级不等于业务失败：起止标记仍然齐全。
+    assert any(INVOCATION_START_MARKER in line for line in printed_lines)
+    assert any(INVOCATION_END_MARKER in line for line in printed_lines)
