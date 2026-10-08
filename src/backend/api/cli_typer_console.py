@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import socket
 import threading
@@ -73,7 +74,8 @@ def _is_running_console(host: str, port: int) -> bool:
 
     端口绑不上只能说明“有东西在听”，无法区分我们自己的 console 和本机另一个
     占端口的服务，因此用版本端点做身份判定：能取回带 ``version`` 键的 JSON
-    才算命中。任何连接失败、超时或非 JSON 响应都判为未命中。
+    才算命中。任何连接失败、超时、协议错乱（对端回了非 HTTP 字节）或非 JSON
+    响应都判为未命中。
 
     Args:
         host: 监听地址（固定回环）。
@@ -86,7 +88,7 @@ def _is_running_console(host: str, port: int) -> bool:
     try:
         with urllib.request.urlopen(probe_url, timeout=_CONSOLE_PROBE_TIMEOUT_SECONDS) as response:
             version_payload = json.loads(response.read())
-    except (OSError, ValueError):
+    except (OSError, ValueError, http.client.HTTPException):
         return False
     return isinstance(version_payload, dict) and "version" in version_payload
 

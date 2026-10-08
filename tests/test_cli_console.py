@@ -190,6 +190,27 @@ def test_real_probe_gives_up_on_a_silent_listener() -> None:
         listening_socket.close()
 
 
+def test_real_probe_gives_up_on_a_garbage_speaker() -> None:
+    """连得上、回数据但不是 HTTP 的本机服务（裸 TCP 协议）也不能让探测抛错。"""
+
+    def _reply_garbage_once() -> None:
+        connection, _ = listening_socket.accept()
+        try:
+            connection.recv(1024)
+            connection.sendall(b"NOT-HTTP-GARBAGE\r\n")
+        finally:
+            connection.close()
+
+    listening_socket, garbage_port = _bind_ephemeral_port()
+    try:
+        reply_thread = threading.Thread(target=_reply_garbage_once, daemon=True)
+        reply_thread.start()
+        assert cli_console._is_running_console("127.0.0.1", garbage_port) is False
+        reply_thread.join(timeout=5)
+    finally:
+        listening_socket.close()
+
+
 def test_probe_path_exists_on_the_console_app() -> None:
     """探测路径必须真实存在于后端路由里。
 
@@ -241,7 +262,7 @@ class TestFindRunningConsole:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """现有实例当初顺延过：即便默认端口现在空着，也复用现有实例。"""
-        _stub_port_probe(monkeypatch, occupied={58418, 58419}, console_ports={58419})
+        _stub_port_probe(monkeypatch, occupied={58419}, console_ports={58419})
         assert find_running_console(host="127.0.0.1", candidate_ports=range(58418, 58422)) == 58419
 
     def test_foreign_occupants_are_not_claimed(self, monkeypatch: pytest.MonkeyPatch) -> None:
