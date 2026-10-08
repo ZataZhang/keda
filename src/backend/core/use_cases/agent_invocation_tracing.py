@@ -817,7 +817,9 @@ def build_invocation_timeline(
         process_confirmed_exited: 宿主进程是否已确认退出。
 
     Returns:
-        按开始时刻排序的时间线行；无法解读的 detail 降级为最小行而不是抛错。
+        按**开始事件在事件流中的出现顺序**排列的时间线行；无法解读的
+        detail 降级为最小行而不是抛错。不按 ``started_at`` 字符串重排：秒级
+        粒度下同秒完成的两次调用顺序会退化为随机 id 序。
     """
     starts: dict[str, InvocationEventRecord] = {}
     finishes: dict[str, InvocationEventRecord] = {}
@@ -853,7 +855,8 @@ def build_invocation_timeline(
                 outcome=outcome,
             )
         )
-    rows.sort(key=lambda row: (row.started_at or "", row.invocation_id))
+    # rows 已按 starts 的首次出现顺序构建（dict 保持插入序），即事件流里的
+    # 真实开始顺序；不再按秒级时间戳重排，避免同秒调用顺序随机化。
     return rows
 
 
