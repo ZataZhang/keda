@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from backend.api.monitor_sync import wake_monitor_scheduler
 from backend.api.response_cache import TTLResponseCache
+from backend.api.version_info import resolve_keda_version
 from backend.core.shared.interfaces.runner_console import (
     IMonitorSnapshotStore,
     RunnerProcessKind,
@@ -441,6 +442,17 @@ def get_console_context() -> dict:
     由 ``status`` 字段表达，因此不返回 4xx。
     """
     return _serialize(resolve_console_context(Path.cwd()))
+
+
+@router.get("/agent-runner/console/version")
+def get_console_version() -> dict:
+    """返回后端当前运行的 KedaCode 版本。
+
+    管理终端的「有新版本」提示要与自身版本比对：最新版本由前端查 PyPI 取得，
+    而**当前**版本必须来自后端运行时——构建期注入会与实际安装的包漂移
+    （``just console-sync`` 本地构建与已安装 wheel 未必同版本）。
+    """
+    return {"version": resolve_keda_version()}
 
 
 @router.get("/agent-runner/repositories")

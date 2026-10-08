@@ -20,7 +20,6 @@ import argparse
 import os
 import sys
 from enum import Enum
-from importlib import metadata as importlib_metadata
 from typing import Annotated, Any
 
 import typer
@@ -35,6 +34,7 @@ from backend.api.cli_output import (
     OutputFormat,
     render_cli_error,
 )
+from backend.api.version_info import resolve_keda_version
 from backend.core.shared.models import product_identity
 
 __all__ = [
@@ -80,23 +80,6 @@ __all__ = [
     "worktree_app",
     "workflow_app",
 ]
-
-
-def _resolve_keda_version() -> str:
-    """Return the installed ``kedacode`` distribution version, falling back to ``0.0.0+unknown``.
-
-    The install-smoke workflow shells out to ``kc --version`` after a
-    ``uv tool install --reinstall --editable .``; the editable install resolves
-    to the metadata recorded in ``pyproject.toml``. If the distribution cannot
-    be located (for example when running from an unpacked sdist), we still want
-    a well-formed version line instead of an exception so the smoke gate has a
-    deterministic contract. 分发包名是 ``kedacode``（PRD FR-1），查询必须用发行名
-    而非仓库名 ``keda``。
-    """
-    try:
-        return importlib_metadata.version("kedacode")
-    except importlib_metadata.PackageNotFoundError:
-        return "0.0.0+unknown"
 
 
 def _registered_agent_names() -> tuple[str, ...]:
@@ -518,7 +501,7 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     _emit_legacy_command_notice(args)
     if "--version" in args or "-V" in args:
-        typer.echo(f"{product_identity.PRIMARY_COMMAND_NAME} {_resolve_keda_version()}")
+        typer.echo(f"{product_identity.PRIMARY_COMMAND_NAME} {resolve_keda_version()}")
         return 0
     try:
         result = app(

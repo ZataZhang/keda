@@ -79,6 +79,19 @@ Backlog / Processes / Ideas 三个页面共用 `lib/console-repository-selection
 的 `useRepositorySelection`。完整语义见
 [Agent Runner 指南](../docs/guides/agent-runner.md) 的「首屏默认仓库（当前项目）」。
 
+## 升级提示
+
+管理终端顶部的「有新版本」提示条（`components/layout/update-banner.tsx`）比对两侧
+版本：**当前版本**取自后端运行时 `GET /api/v1/agent-runner/console/version`
+（构建期注入会与实际安装的包漂移，故必须走后端）；**最新版本**由浏览器直查
+`https://pypi.org/pypi/kedacode/json`（PyPI JSON API 允许跨域，后端不引入对外
+网络调用）。打开 / 刷新时静默查一次，离线、超时、被墙或拿不到任一侧都不显示。
+
+提示条只展示命令（`uv tool upgrade kedacode`，见 `CopyableCommand`），**不替用户
+执行升级**——console 不执行 CLI 动作是本前端的既定约定。用户「跳过此版本」按版本号
+记入 `localStorage`（`iar.console.skippedUpdateVersion`），该版本不再提示、下个
+版本再提示；升级后需重启 `kc console` 才生效。
+
 ## 与后端的集成
 
 - 开发时直接请求 `http://localhost:8000`。

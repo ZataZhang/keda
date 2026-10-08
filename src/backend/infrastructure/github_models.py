@@ -26,7 +26,13 @@ _BODY_TRUNCATION_MARKER = "\n\n... (truncated to fit GitHub's size limit) ...\n\
 
 @dataclass(frozen=True)
 class IssueSummary:
-    """GitHub Issue selected for runner execution."""
+    """GitHub Issue selected for runner execution.
+
+    镜像 :class:`backend.core.shared.models.agent_runner.IssueSummary`；两个
+    ``lifecycle_*`` 字段必须保持同步，否则编排入口的
+    ``attach_prd_lifecycle_overrides`` 在做 ``dataclasses.replace`` 时会因缺少
+    字段而抛 ``TypeError``。
+    """
 
     number: int
     title: str
@@ -34,6 +40,10 @@ class IssueSummary:
     body: str
     labels: tuple[str, ...]
     state: str = "OPEN"
+    #: 该 Issue 所引用 PRD 的头部 ``lifecycle_agents`` 覆盖（键值对元组）。
+    lifecycle_overrides: tuple[tuple[str, str], ...] = ()
+    #: 该 Issue 所引用 PRD 的头部 ``lifecycle_presets`` 块（键值对元组）。
+    lifecycle_preset_overrides: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

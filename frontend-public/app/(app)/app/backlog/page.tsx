@@ -4,7 +4,7 @@
 // Backlog 页面：左侧受管理仓库栏 + 右侧 PRD 画布（依赖图/时间轴/列表）。
 
 import { useCallback, useEffect, useState } from "react";
-import { Settings } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,10 @@ import { BacklogTimeline } from "@/components/backlog/backlog-timeline";
 import { RepositoryAgentMatrixSheet } from "@/components/agent-runner/repository-agent-matrix-sheet";
 import { cn } from "@/lib/utils";
 import { useRepositorySelection } from "@/lib/console-repository-selection";
+import {
+  CONSOLE_REPO_PANEL_COLLAPSED_KEY,
+  usePersistedBoolean,
+} from "@/lib/console-ui-prefs";
 import {
   fetchBacklogAutopilot,
   fetchBacklogCiRepairGlobal,
@@ -95,6 +99,10 @@ export default function BacklogPage() {
   const [ciRepairSaving, setCiRepairSaving] = useState(false);
   // 打开仓库级生命周期 Agent 矩阵抽屉的仓库 id（null 表示关闭）。
   const [matrixRepoId, setMatrixRepoId] = useState<string | null>(null);
+  // 「受管理仓库」栏收起偏好：默认展开，收起后记住选择（跨刷新）。
+  const [repoPanelCollapsed, setRepoPanelCollapsed] = usePersistedBoolean(
+    CONSOLE_REPO_PANEL_COLLAPSED_KEY,
+  );
 
   const loadData = useCallback(
     async (signal?: AbortSignal): Promise<BacklogPrd[]> => {
@@ -327,64 +335,89 @@ export default function BacklogPage() {
   return (
     <>
     <div className="flex h-[calc(100svh-4rem)] gap-4">
-      <aside className="flex w-60 shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
-        <div className="border-b border-slate-200 px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-800">
-          受管理仓库
-        </div>
-        <div className="flex-1 space-y-0.5 overflow-y-auto p-1.5">
-          {reposLoading ? (
-            <div className="space-y-1.5 p-1">
-              <Skeleton className="h-8" />
-              <Skeleton className="h-8" />
-              <Skeleton className="h-8" />
-            </div>
-          ) : repositories.length === 0 ? (
-            <p className="p-2 text-xs text-slate-500">无可用仓库。</p>
-          ) : (
-            repositories.map((repo) => (
-              <div key={repo.repo_id} className="flex items-center gap-1">
-                <button
-                  type="button"
-                  disabled={!repo.enabled}
-                  onClick={() => {
-                    selectRepoId(repo.repo_id);
-                    setSelectedPrd(null);
-                  }}
-                  className={cn(
-                    "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                    repo.repo_id === selectedRepoId
-                      ? "bg-slate-100 font-medium dark:bg-slate-800"
-                      : "hover:bg-slate-100 dark:hover:bg-slate-800",
-                    !repo.enabled && "cursor-not-allowed opacity-50",
-                  )}
-                >
-                  <span
-                    className={cn("h-2 w-2 shrink-0 rounded-full", repoStatusDotClass(repo))}
-                    aria-hidden="true"
-                  />
-                  <span className="truncate" title={repo.display_name ?? repo.repo_id}>
-                    {repo.display_name ?? repo.repo_id}
-                  </span>
-                </button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="shrink-0"
-                  onClick={() => setMatrixRepoId(repo.repo_id)}
-                  data-testid={`repo-agent-gear-${repo.repo_id}`}
-                  aria-label={`${repo.display_name ?? repo.repo_id} 生命周期 Agent 设置`}
-                >
-                  <Settings className="size-4" />
-                </Button>
+      {repoPanelCollapsed ? null : (
+        <aside className="flex w-60 shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between border-b border-slate-200 px-3 py-1.5 dark:border-slate-800">
+            <span className="text-xs font-medium text-slate-500">受管理仓库</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setRepoPanelCollapsed(true)}
+              aria-label="收起仓库栏"
+              title="收起仓库栏"
+            >
+              <PanelLeftClose className="size-4" />
+            </Button>
+          </div>
+          <div className="flex-1 space-y-0.5 overflow-y-auto p-1.5">
+            {reposLoading ? (
+              <div className="space-y-1.5 p-1">
+                <Skeleton className="h-8" />
+                <Skeleton className="h-8" />
+                <Skeleton className="h-8" />
               </div>
-            ))
-          )}
-        </div>
-      </aside>
+            ) : repositories.length === 0 ? (
+              <p className="p-2 text-xs text-slate-500">无可用仓库。</p>
+            ) : (
+              repositories.map((repo) => (
+                <div key={repo.repo_id} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={!repo.enabled}
+                    onClick={() => {
+                      selectRepoId(repo.repo_id);
+                      setSelectedPrd(null);
+                    }}
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                      repo.repo_id === selectedRepoId
+                        ? "bg-slate-100 font-medium dark:bg-slate-800"
+                        : "hover:bg-slate-100 dark:hover:bg-slate-800",
+                      !repo.enabled && "cursor-not-allowed opacity-50",
+                    )}
+                  >
+                    <span
+                      className={cn("h-2 w-2 shrink-0 rounded-full", repoStatusDotClass(repo))}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate" title={repo.display_name ?? repo.repo_id}>
+                      {repo.display_name ?? repo.repo_id}
+                    </span>
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0"
+                    onClick={() => setMatrixRepoId(repo.repo_id)}
+                    data-testid={`repo-agent-gear-${repo.repo_id}`}
+                    aria-label={`${repo.display_name ?? repo.repo_id} 生命周期 Agent 设置`}
+                  >
+                    <Settings className="size-4" />
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+      )}
 
       <section className="flex min-w-0 flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
+          {repoPanelCollapsed ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              onClick={() => setRepoPanelCollapsed(false)}
+              aria-label="展开仓库栏"
+              title="展开仓库栏"
+              data-testid="repo-panel-expand"
+            >
+              <PanelLeftOpen className="size-4" />
+            </Button>
+          ) : null}
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Backlog</h2>
           <label className="flex items-center gap-2 text-sm">
             <input

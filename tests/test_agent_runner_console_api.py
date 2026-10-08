@@ -614,3 +614,12 @@ def test_issue_log_tail_window_with_explicit_attempt(console_environment) -> Non
     assert payload["latest_attempt_id"] == "issue-13-20260929-130001.log"
     assert "first attempt tail" in payload["content"]
     assert payload["eof"] is True
+
+
+def test_console_version_endpoint_reports_installed_version() -> None:
+    """console 版本端点返回后端运行时版本，供「有新版本」提示与自身比对。"""
+    response = client.get("/api/v1/agent-runner/console/version")
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload["version"], str)
+    assert payload["version"]

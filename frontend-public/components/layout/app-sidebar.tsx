@@ -3,6 +3,8 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { CONSOLE_NAV_COLLAPSED_KEY, usePersistedBoolean } from "@/lib/console-ui-prefs"
 import {
   Activity,
   BarChart3,
@@ -10,6 +12,8 @@ import {
   LayoutDashboard,
   Lightbulb,
   Map,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
 } from "lucide-react"
 
@@ -28,12 +32,40 @@ const navItems = [
 /** Sidebar navigation for authenticated pages. */
 export function AppSidebar() {
   const pathname = usePathname()
+  // 收起偏好跨页面、跨刷新记忆：纯展示选择，不影响路由与数据。
+  const [collapsed, setCollapsed] = usePersistedBoolean(CONSOLE_NAV_COLLAPSED_KEY)
 
   return (
-    <aside className="flex w-64 flex-col border-r bg-sidebar">
-      <div className="flex h-14 items-center gap-2 border-b px-4">
-        <span className="size-6 rounded-md bg-primary" />
-        <span className="font-semibold text-sidebar-foreground">KedaCode</span>
+    <aside
+      className={cn(
+        "flex flex-col border-r bg-sidebar transition-[width] duration-200",
+        collapsed ? "w-14" : "w-64"
+      )}
+    >
+      <div
+        className={cn(
+          "flex h-14 items-center border-b",
+          collapsed ? "justify-center px-2" : "gap-2 px-4"
+        )}
+      >
+        {collapsed ? null : (
+          <>
+            <span className="size-6 rounded-md bg-primary" />
+            <span className="font-semibold text-sidebar-foreground">KedaCode</span>
+            <div className="flex-1" />
+          </>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? "展开导航栏" : "收起导航栏"}
+          title={collapsed ? "展开导航栏" : "收起导航栏"}
+        >
+          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+        </Button>
       </div>
       <nav className="flex-1 p-3">
         <ul className="space-y-1">
@@ -41,15 +73,18 @@ export function AppSidebar() {
             <li key={item.href}>
               <Link
                 href={item.href}
+                // 收起态的图标对屏幕阅读器仍要可辨：title 同时充当原生悬停提示。
+                title={collapsed ? item.label : undefined}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
+                  collapsed ? "justify-center px-0" : "gap-3 px-3",
                   pathname === item.href || pathname?.startsWith(`${item.href}/`)
                     ? "bg-sidebar-primary text-sidebar-primary-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 )}
               >
                 <item.icon className="size-4" />
-                {item.label}
+                {collapsed ? <span className="sr-only">{item.label}</span> : item.label}
               </Link>
             </li>
           ))}
