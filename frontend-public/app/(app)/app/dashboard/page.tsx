@@ -216,6 +216,12 @@ export default function DashboardPage() {
     }
     const cached = state.repos
       .filter((slot): slot is Extract<RepoSlot, { kind: "ready" }> => slot.kind === "ready")
+      // 选中带仓库上下文，只在本仓库快照内找：跨仓库 Issue 编号会撞号，
+      // 全局 flatMap 先命中别的仓库会把详情绑到错误的仓库上。
+      .filter(
+        (slot) =>
+          selectedRepoId === null || getRepoIdFromSlot(slot) === selectedRepoId,
+      )
       .flatMap((slot) => slot.repository.issues)
       .find((issue) => issue.number === selectedIssueNumber);
     if (cached) {
@@ -250,7 +256,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedIssueNumber, state, selectedEntry]);
+  }, [selectedIssueNumber, state, selectedEntry, selectedRepoId]);
 
   /** 全量刷新：起后台 job 重扫并写回快照，期间保留旧数据供继续浏览。 */
   const handleRefreshAll = useCallback(async () => {
