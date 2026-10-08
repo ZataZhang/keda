@@ -328,12 +328,22 @@ def _get_cached_overview_response(repo_ids: list[str] | None = None) -> dict:
     )
 
 
-def _build_issue_detail_response(issue_number: int) -> dict:
-    """Build the ``/issues/{issue_number}`` monitoring response payload."""
+def _build_issue_detail_response(issue_number: int, repo_id: str | None = None) -> dict:
+    """Build the ``/issues/{issue_number}`` monitoring response payload.
+
+    Args:
+        issue_number: 目标 Issue 编号。
+        repo_id: 可选的仓库作用域。给出时只在该仓库内查找——Issue 编号跨仓库会撞号，
+            不限定的话「第一个带该编号的仓库」会答成一个无关仓库的监控详情。
+    """
     settings = load_fresh_agent_runner_settings()
     repository_contexts, _resolution_failures = resolve_repository_targets_with_diagnostics(
         settings
     )
+    if repo_id:
+        repository_contexts = [
+            context for context in repository_contexts if context.repo_id == repo_id
+        ]
     github_client_factory, process_runner = _get_monitoring_dependencies()
 
     snapshot: IssueMonitoringSnapshot | None = None
@@ -381,9 +391,10 @@ def _build_issue_detail_response(issue_number: int) -> dict:
             break
 
     if snapshot is None:
+        scope = f"repository '{repo_id}'" if repo_id else "monitored repositories"
         raise HTTPException(
             status_code=404,
-            detail=f"Issue #{issue_number} not found in monitored repositories.",
+            detail=f"Issue #{issue_number} not found in {scope}.",
         )
     return _serialize_monitoring(snapshot)
 
@@ -491,8 +502,30 @@ def get_agent_runner_overview_per_repo() -> dict:
 
 
 @router.get("/agent-runner/issues/{issue_number}")
-def get_agent_runner_issue_detail(issue_number: int) -> dict:
-    """Return monitoring detail (labels, PR, worktree, timeline, anomalies) for an Issue."""
+def get_agent_runner_issue_detail(
+    issue_number: int,
+    repo_id: str | None = Query(
+        default=None,
+        description=(
+            "Optional repository scope. When set, only that repository is "
+            "searched, so a colliding issue number in another registered "
+            "repository can never answer for it. Omit to keep the legacy "
+            "cross-repository lookup."
+        ),
+    ),
+) -> dict:
+    """Return monitoring detail (labels, PR, worktree, timeline, anomalies) for an Issue.
+
+    Args:
+        issue_number: 目标 Issue 编号。
+        repo_id: 可选仓库 ID；给出时把查找限定在该仓库（撞号安全）。
+
+    Returns:
+        dict: 序列化后的 Issue 监控快照。
+
+    Raises:
+        HTTPException: 400 编号非正；404 目标（作用域内的）仓库里查不到该 Issue。
+    """
     if issue_number <= 0:
         raise HTTPException(status_code=400, detail="issue_number must be a positive integer.")
-    return _build_issue_detail_response(issue_number)
+    return _build_issue_detail_response(issue_number, repo_id=repo_id)

@@ -242,7 +242,10 @@ export default function DashboardPage() {
     }
     let cancelled = false;
     setDetailError(null);
-    fetchIssueDetail(selectedIssueNumber)
+    // 带仓库作用域查详情：Issue 编号跨仓库会撞号，不限定的话后端会返回「第一个带该
+    // 编号的仓库」的快照，面板就可能显示另一个仓库的 PR / worktree / 异常，而标签与
+    // 动作却发往点击的那个仓库。
+    fetchIssueDetail(selectedIssueNumber, { repoId: selectedRepoId })
       .then((detail) => {
         if (cancelled) return;
         setSelectedIssue(detail);

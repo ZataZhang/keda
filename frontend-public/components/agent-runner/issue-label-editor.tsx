@@ -13,6 +13,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -147,6 +149,11 @@ export function IssueLabelEditor({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
+            <DropdownMenuLabel className="max-w-64 text-xs font-normal text-muted-foreground">
+              候选项与 `kc labels sync` 同源；其中在途状态、直发档位与 validation
+              签收标签会被 daemon、依赖判定和验证门禁立即消费，点击即写入 GitHub。
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
             {addable.map((label) => (
               <DropdownMenuItem
                 key={label}

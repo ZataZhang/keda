@@ -76,8 +76,20 @@ def _resolve_enabled_context(repo_id: str) -> RepositoryRunContext:
     )
 
 
-def _audit_issue_write(*, action: str, repo_id: str, issue_number: int | None, detail: str) -> None:
-    """Issue 写操作的审计落库（best effort，失败不阻断响应）。"""
+def _audit_issue_write(
+    *,
+    action: str,
+    repo_id: str,
+    issue_number: int | None,
+    detail: str,
+    result: str = "accepted",
+) -> None:
+    """Issue 写操作的审计落库（best effort，失败不阻断响应）。
+
+    被拒绝的尝试同样落一条 ``result="rejected"``：文档承诺「所有写操作（含被拒绝的）
+    都会写入审计日志」，而「谁试着往 Issue 上写集合外 / 敏感标签」正是这条记录要回答的
+    ——只审计成功路径等于对被拒尝试零留痕。
+    """
     try:
         create_console_store().append_audit(
             AuditEntry(
@@ -87,12 +99,24 @@ def _audit_issue_write(*, action: str, repo_id: str, issue_number: int | None, d
                 repo_id=repo_id,
                 issue_number=issue_number,
                 params_json="{}",
-                result="accepted",
+                result=result,
                 detail=detail,
             )
         )
     except Exception as exc:  # noqa: BLE001 - audit must not break the action.
         _logger.warning("Failed to audit issue write %s: %s", action, exc)
+
+
+#: 审计 detail 里需求原文的截断长度：保证可追溯又不把整段 prompt 塞进审计页。
+_AUDIT_PROMPT_MAX_CHARS = 120
+
+
+def _truncate_prompt(prompt_text: str) -> str:
+    """把需求原文收敛成适合写入审计 detail 的单行片段。"""
+    collapsed = " ".join(prompt_text.split())
+    if len(collapsed) <= _AUDIT_PROMPT_MAX_CHARS:
+        return collapsed
+    return f"{collapsed[:_AUDIT_PROMPT_MAX_CHARS]}…"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -159,9 +183,21 @@ def put_console_issue_labels(
     """在已同步标准标签集内增删标签；写回后以 GitHub fresh read 返回状态。
 
     集合外标签在写入前被拒绝（422，GitHub 零变化）；网页不创建新标签，
-    确需新标签先在终端执行 ``kc labels sync``。
+    确需新标签先在终端执行 ``kc labels sync``。成功与被拒都写审计日志。
     """
+    attempt_detail = f"labels add=[{', '.join(request.add)}] remove=[{', '.join(request.remove)}]"
+
+    def _audit_write(*, result: str, reason: str = "") -> None:
+        _audit_issue_write(
+            action="update_issue_labels",
+            repo_id=repo_id,
+            issue_number=issue_number,
+            result=result,
+            detail=f"{attempt_detail}; {result}: {reason}" if reason else attempt_detail,
+        )
+
     if issue_number <= 0:
+        _audit_write(result="rejected", reason="issue_number must be a positive integer.")
         raise HTTPException(status_code=400, detail="issue_number must be a positive integer.")
     context = _resolve_enabled_context(repo_id)
     github_client = create_github_client(context.repo_path, create_process_runner())
@@ -174,15 +210,12 @@ def put_console_issue_labels(
             github_client=github_client,
         )
     except IssueLabelNotAllowedError as exc:
+        _audit_write(result="rejected", reason=str(exc))
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except IssueLabelActionError as exc:
+        _audit_write(result="rejected", reason=str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _audit_issue_write(
-        action="update_issue_labels",
-        repo_id=repo_id,
-        issue_number=issue_number,
-        detail=f"labels add=[{', '.join(request.add)}] remove=[{', '.join(request.remove)}]",
-    )
+    _audit_write(result="accepted")
     return _serialize(snapshot)
 
 
@@ -218,7 +251,23 @@ class CreateIssueFromPromptRequest(BaseModel):
 
 @router.post("/agent-runner/console/repositories/{repo_id}/issues", status_code=201)
 def create_console_issue_from_prompt(repo_id: str, request: CreateIssueFromPromptRequest) -> dict:
-    """用一句话需求创建 GitHub Issue；建完停在未入队态，不自动打就绪标签。"""
+    """用一句话需求创建 GitHub Issue；建完停在未入队态，不自动打就绪标签。
+
+    成功与被拒的写入尝试都进审计日志。
+    """
+    attempt_detail = (
+        f"issue_type={request.issue_type} prompt={_truncate_prompt(request.prompt_text)}"
+    )
+
+    def _audit_write(*, issue_number: int | None, result: str, reason: str) -> None:
+        _audit_issue_write(
+            action="create_issue_from_prompt",
+            repo_id=repo_id,
+            issue_number=issue_number,
+            result=result,
+            detail=f"{attempt_detail}; {result}: {reason}",
+        )
+
     context = _resolve_enabled_context(repo_id)
     try:
         created: ConsoleCreatedIssue = create_issue_from_prompt_for_console(
@@ -228,11 +277,7 @@ def create_console_issue_from_prompt(repo_id: str, request: CreateIssueFromPromp
             issue_type=request.issue_type,
         )
     except ValueError as exc:
+        _audit_write(issue_number=None, result="rejected", reason=str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _audit_issue_write(
-        action="create_issue_from_prompt",
-        repo_id=repo_id,
-        issue_number=created.number,
-        detail=f"Created issue from prompt; url={created.issue_url}",
-    )
+    _audit_write(issue_number=created.number, result="accepted", reason=f"url={created.issue_url}")
     return _serialize(created)

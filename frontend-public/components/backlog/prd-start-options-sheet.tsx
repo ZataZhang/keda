@@ -4,6 +4,10 @@
 //
 // 每一项都对应 `kc run` 的同名旗标，全部默认关闭：缺省提交产生空 options，
 // 后端折算成空 argv，与不打开本抽屉的普通启动逐字节一致。
+//
+// 只列出在本入口真实可成立的选项：直出 PR（--direct-pr）不在这里给——PRD 建的 Issue
+// 一定带 PRD 锚点，而 CLI 对「PRD-backed Issue + --direct-pr」是硬性用法拒绝，勾上它
+// 只会换来一次立刻以用法错误退出的托管进程。
 
 import { useEffect, useState } from "react";
 
@@ -72,7 +76,6 @@ export function PrdStartOptionsSheet({
   }, [open, repoId]);
 
   const fastMerge = options.fast_merge ?? false;
-  const directPr = options.direct_pr ?? false;
   const preset = options.preset ?? "";
 
   return (
@@ -87,27 +90,20 @@ export function PrdStartOptionsSheet({
 
         <div className="space-y-5 px-4 pb-4">
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">发布档位（互斥）</legend>
+            <legend className="text-sm font-medium">发布档位</legend>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={fastMerge}
-                disabled={directPr}
                 onCheckedChange={(checked) =>
                   setOptions((prev) => ({ ...prev, fast_merge: checked === true }))
                 }
               />
               快合（--fast-merge）
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={directPr}
-                disabled={fastMerge}
-                onCheckedChange={(checked) =>
-                  setOptions((prev) => ({ ...prev, direct_pr: checked === true }))
-                }
-              />
-              直出 PR（--direct-pr）
-            </label>
+            <p className="text-xs text-muted-foreground">
+              直出 PR（--direct-pr）不在本入口提供：PRD 建的 Issue 带 PRD 锚点，CLI
+              规定它必须过 PRD 交付门并归档 PRD，因此该组合会在发起端被拒绝。
+            </p>
           </fieldset>
 
           <div className="space-y-2">

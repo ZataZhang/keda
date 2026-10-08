@@ -5,7 +5,9 @@
 - FR-3 加入就绪：建 Issue / 打标签但**绝不启动 runner**；已就绪幂等；执行中冲突拒绝。
 - FR-4 全部 Issue 列表：按队列标签口径标注 ``monitored``，state 参数校验。
 - FR-5 标签编辑：越界集合在写入前被拒（GitHub 零变化），合法写入以 fresh read 返回。
-- FR-7 启动选项：缺省选项与「无选项」的 argv 逐字节一致，非法组合被拒。
+- FR-7 启动选项：缺省选项与「无选项」的 argv 逐字节一致，非法组合与 PRD 锚点目标域
+  冲突（直出 PR）都在发起端被拒。
+- FR-8 一句话建 Issue：``issue_type`` 先过 ``type/*`` 标签纪律，越界取值不交给 gh。
 """
 
 from __future__ import annotations
@@ -37,6 +39,8 @@ from backend.core.use_cases.backlog_actions import (
     enqueue_prd_ready,
     start_prd,
 )
+from backend.core.use_cases import console_issue_creation
+from backend.core.use_cases.console_issue_creation import selectable_issue_types
 from backend.core.use_cases.console_issues import list_repository_issues
 from backend.core.use_cases.console_processes import (
     ConsoleProcessError,
@@ -337,6 +341,64 @@ def test_start_prd_launch_options_reach_argv(tmp_path: Path) -> None:
     assert "codex" in argv
 
 
+def test_start_prd_rejects_direct_pr_on_linked_prd_issue(tmp_path: Path) -> None:
+    """直出 PR 配 PRD-backed Issue 在发起端即被拒：GitHub 零变化、不启动 runner。
+
+    CLI 对 ``kc run --issue N --direct-pr``（N 带 PRD 锚点）是硬性 USAGE 拒绝；
+    若不在这里拦下，网页会得到「已开始」提示加一条立刻用法错误退出的托管进程。
+    """
+    prd_path = _write_prd(tmp_path, "tasks/pending/P1-FEAT-20261008-dpr.md", issue_number=43)
+    context = _context(tmp_path)
+    client = FakeGitHubClient()
+    supervisor = _RecordingSupervisor(spawns=[])
+    store = FakeBacklogStore(repo_id=REPO_ID)
+
+    with pytest.raises(BacklogActionError) as rejection:
+        start_prd(
+            prd_path=prd_path,
+            repo_id=REPO_ID,
+            contexts=[context],
+            github_client=client,
+            supervisor=supervisor,
+            store=store,
+            runner_command=("uv", "run", "kc"),
+            spawn_cwd=tmp_path,
+            process_runner=FakeProcessRunner(),
+            launch_options=RunnerLaunchOptions(direct_pr=True),
+        )
+
+    assert "Issue #43" in str(rejection.value)
+    assert "PRD" in str(rejection.value)
+    assert client.calls == []
+    assert supervisor.spawns == []
+
+
+def test_start_prd_rejects_direct_pr_before_creating_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """尚未建 Issue 的 PRD 同样在改动任何东西之前被拒（不会留下半成品状态）。"""
+    prd_path = _write_prd(tmp_path, "tasks/pending/P1-FEAT-20261008-dpr2.md")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("直出 PR 被拒时绝不能建 Issue")
+
+    monkeypatch.setattr(backlog_actions, "_create_issue_for_prd", _boom)
+
+    with pytest.raises(BacklogActionError):
+        start_prd(
+            prd_path=prd_path,
+            repo_id=REPO_ID,
+            contexts=[_context(tmp_path)],
+            github_client=FakeGitHubClient(),
+            supervisor=_RecordingSupervisor(spawns=[]),
+            store=FakeBacklogStore(repo_id=REPO_ID),
+            runner_command=("uv", "run", "kc"),
+            spawn_cwd=tmp_path,
+            process_runner=FakeProcessRunner(),
+            launch_options=RunnerLaunchOptions(direct_pr=True),
+        )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FR-7 底层：RunnerLaunchOptions 折算与 build_runner_argv 的字节一致性/非法组合
 # ─────────────────────────────────────────────────────────────────────────────
@@ -347,6 +409,42 @@ def test_runner_launch_options_default_is_empty_flags() -> None:
     options = RunnerLaunchOptions()
     assert options.is_default()
     assert options.cli_flags() == ()
+
+
+def test_runner_launch_options_direct_pr_folds_to_cli_flag() -> None:
+    """折算契约正向覆盖直出 PR：选项为真时必须发出同名旗标。"""
+    assert RunnerLaunchOptions(direct_pr=True).cli_flags() == ("--direct-pr",)
+
+    argv = build_runner_argv(
+        runner_command=("kc",),
+        kind=RunnerProcessKind.RUN_ONCE,
+        repo_id=REPO_ID,
+        issue_number=9,
+        options=RunnerLaunchOptions(direct_pr=True),
+    )
+    assert argv == ("kc", "run", "--issue", "9", "--direct-pr", "--repo-id", REPO_ID)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        RunnerLaunchOptions(),
+        RunnerLaunchOptions(agent="auto"),
+        RunnerLaunchOptions(agent="  auto  "),
+        RunnerLaunchOptions(agent=None),
+        RunnerLaunchOptions(agent=""),
+        RunnerLaunchOptions(fast_merge=True),
+        RunnerLaunchOptions(direct_pr=True),
+        RunnerLaunchOptions(agent="codex"),
+        RunnerLaunchOptions(preset="strong"),
+        RunnerLaunchOptions(preset="strong", model="gpt-5", reasoning_effort="high"),
+    ],
+)
+def test_runner_launch_options_is_default_agrees_with_cli_flags(
+    options: RunnerLaunchOptions,
+) -> None:
+    """``is_default()`` 与「cli_flags 为空」必须同判据（``agent="auto"`` 是路由别名）。"""
+    assert options.is_default() is (options.cli_flags() == ())
 
 
 def test_build_runner_argv_byte_identity_default_vs_none() -> None:
@@ -397,6 +495,23 @@ def test_build_runner_argv_appends_non_default_flags() -> None:
 def test_build_runner_argv_rejects_invalid_options(options: RunnerLaunchOptions) -> None:
     """互斥档位 / 缺 preset 的覆盖旗标在构建 argv 时被拒。"""
     with pytest.raises(ConsoleProcessError):
+        build_runner_argv(
+            runner_command=("kc",),
+            kind=RunnerProcessKind.RUN_ONCE,
+            repo_id=REPO_ID,
+            options=options,
+        )
+
+
+@pytest.mark.parametrize(
+    "options",
+    [RunnerLaunchOptions(fast_merge=True), RunnerLaunchOptions(direct_pr=True)],
+)
+def test_build_runner_argv_rejects_bypass_flags_on_queue_wide_run(
+    options: RunnerLaunchOptions,
+) -> None:
+    """跳过闸门的旗标不能配队列级 ``--all-ready``：CLI 用法拒绝，argv 构建端同样拒绝。"""
+    with pytest.raises(ConsoleProcessError, match="--all-ready"):
         build_runner_argv(
             runner_command=("kc",),
             kind=RunnerProcessKind.RUN_ONCE,
@@ -540,3 +655,24 @@ def test_update_issue_labels_conflicting_add_remove(tmp_path: Path) -> None:
             github_client=client,
         )
     assert not [c for c in client.calls if c["method"] == "edit_issue_labels"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FR-8：一句话建 Issue —— 第二条标签写路径同样受同步集合纪律约束
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_selectable_issue_types_derives_from_synced_type_labels(tmp_path: Path) -> None:
+    """网页可用的 Issue 类型与 ``kc labels sync`` 的 ``type/*`` 集合同源。"""
+    assert selectable_issue_types(_context(tmp_path)) == ("bug", "feature", "refactor")
+
+
+def test_console_issue_creation_rejects_unsynced_issue_type(tmp_path: Path) -> None:
+    """越界 ``issue_type`` 在装配任何 GitHub 客户端之前就被拒（gh 零调用）。"""
+    with pytest.raises(ValueError, match="issue_type"):
+        console_issue_creation.create_issue_from_prompt_for_console(
+            context=_context(tmp_path),
+            process_runner=FakeProcessRunner(),
+            prompt_text="给监控面板加一个导出 CSV 的按钮",
+            issue_type="feature; rm -rf",
+        )

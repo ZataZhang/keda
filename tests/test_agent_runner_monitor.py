@@ -6,6 +6,8 @@ smoke is exercised separately.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +84,31 @@ def _make_issue(
         body="",
         labels=labels,
     )
+
+
+@dataclass(frozen=True)
+class _MarkerSnapshot:
+    """详情查找用的最小快照替身：只携带可区分的仓库标记。"""
+
+    number: int
+    title: str
+
+
+class _CollidingIssueClient:
+    """在编号 7 上「撞号」的仓库 GitHub 替身：只实现详情查找调用到的方法。"""
+
+    def __init__(self, title: str) -> None:
+        self._title = title
+        self.queried = False
+
+    def list_review_candidate_issues(
+        self,
+        labels: Sequence[str],
+        limit: int,
+    ) -> list[IssueSummary]:
+        """记录本仓库被查询过，并返回与别的仓库同编号的 Issue。"""
+        self.queried = True
+        return [_make_issue(7, title=self._title, labels=tuple(labels[:1]))]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -606,7 +633,7 @@ def test_api_issue_detail_returns_404_when_missing(
 ) -> None:
     """Unknown Issue numbers must return 404, not crash."""
 
-    def _fake_build_issue_detail_response(issue_number: int) -> dict:
+    def _fake_build_issue_detail_response(issue_number: int, repo_id: str | None = None) -> dict:
         from fastapi import HTTPException
 
         raise HTTPException(
@@ -623,6 +650,82 @@ def test_api_issue_detail_returns_404_when_missing(
     client = TestClient(app)
     response = client.get("/api/v1/agent-runner/issues/999999")
     assert response.status_code == 404
+
+
+def test_api_issue_detail_scopes_lookup_to_repo_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """撞号 Issue 必须按 ``repo_id`` 取值，不能答成「第一个带该编号的仓库」的快照。
+
+    面板的标签读写与动作端点都以点击的仓库为准；详情若不限定仓库，就会显示另一个
+    仓库的 PR / worktree / 异常，把操作员引到错误的仓库上。
+    """
+    import backend.api.routes.agent_runner as agent_runner_routes
+    from backend.api.app import app
+    from backend.core.shared.models.agent_runner import RepositoryRunContext
+
+    contexts = {
+        repo_id: RepositoryRunContext(
+            repo_id=repo_id,
+            display_name=repo_id,
+            repo_path=tmp_path / repo_id,
+            config=AppConfig(),
+        )
+        for repo_id in ("repo-a", "repo-b")
+    }
+    clients: dict[str, _CollidingIssueClient] = {
+        "repo-a": _CollidingIssueClient("from repo-a"),
+        "repo-b": _CollidingIssueClient("from repo-b"),
+    }
+
+    def _factory_name(repo_path: Path) -> str:
+        """把 repo_path 反查成 repo_id，供逐仓库断言「谁被查询过」。"""
+        return next(repo_id for repo_id, ctx in contexts.items() if ctx.repo_path == repo_path)
+
+    agent_runner_routes._OVERVIEW_CACHE.clear()
+    monkeypatch.setattr(agent_runner_routes, "load_fresh_agent_runner_settings", lambda: object())
+    monkeypatch.setattr(
+        agent_runner_routes,
+        "resolve_repository_targets_with_diagnostics",
+        lambda settings: (list(contexts.values()), []),
+    )
+    monkeypatch.setattr(
+        agent_runner_routes,
+        "_get_monitoring_dependencies",
+        lambda: (lambda repo_path: clients[_factory_name(repo_path)], FakeProcessRunner()),
+    )
+    snapshot_titles: list[str] = []
+
+    def _fake_build_issue_snapshot(**kwargs: Any) -> _MarkerSnapshot:
+        issue: IssueSummary = kwargs["issue"]
+        snapshot_titles.append(issue.title)
+        return _MarkerSnapshot(number=issue.number, title=issue.title)
+
+    monkeypatch.setattr(agent_runner_routes, "build_issue_snapshot", _fake_build_issue_snapshot)
+
+    http = TestClient(app)
+    scoped = http.get("/api/v1/agent-runner/issues/7?repo_id=repo-b")
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["title"] == "from repo-b"
+    # 限定仓库后只查询该仓库：撞号仓库连列 Issue 的机会都没有。
+    assert clients["repo-b"].queried is True
+    assert clients["repo-a"].queried is False
+
+    clients["repo-a"].queried = clients["repo-b"].queried = False
+    unscoped = http.get("/api/v1/agent-runner/issues/7")
+    assert unscoped.status_code == 200, unscoped.text
+    # 不带 repo_id 保留既有的跨仓库查找（CLI 与其它消费方零变化）。
+    assert unscoped.json()["title"] == "from repo-a"
+    assert clients["repo-a"].queried is True
+
+    clients["repo-a"].queried = clients["repo-b"].queried = False
+    unknown_repo = http.get("/api/v1/agent-runner/issues/7?repo_id=repo-ghost")
+    assert unknown_repo.status_code == 404
+    assert "repo-ghost" in unknown_repo.json()["detail"]
+    assert clients["repo-a"].queried is False
+    assert clients["repo-b"].queried is False
+    assert snapshot_titles == ["from repo-b", "from repo-a"]
 
 
 def test_api_issue_detail_rejects_invalid_number() -> None:

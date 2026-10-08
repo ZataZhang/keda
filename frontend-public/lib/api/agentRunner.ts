@@ -96,10 +96,24 @@ export async function pollOverviewJob(
   }
 }
 
+/**
+ * Fetch monitoring detail for one Issue.
+ *
+ * @param issueNumber - Target Issue number.
+ * @param params - Optional scope. `repoId` restricts the lookup to one
+ * repository; Issue numbers collide across registered repositories, so the
+ * dashboard always passes the repo the operator clicked.
+ */
 export async function fetchIssueDetail(
   issueNumber: number,
+  params: { repoId?: string | null } = {},
 ): Promise<IssueMonitoringSnapshot> {
-  return get<IssueMonitoringSnapshot>(`${BASE_PATH}/issues/${issueNumber}`);
+  const query = params.repoId
+    ? `?${new URLSearchParams({ repo_id: params.repoId })}`
+    : "";
+  return get<IssueMonitoringSnapshot>(
+    `${BASE_PATH}/issues/${issueNumber}${query}`,
+  );
 }
 
 /**

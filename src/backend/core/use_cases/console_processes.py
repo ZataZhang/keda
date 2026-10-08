@@ -89,8 +89,8 @@ def build_runner_argv(
         完整 argv 元组。
 
     Raises:
-        ConsoleProcessError: kind 与参数组合非法，或选项组合非法（互斥档位、
-            缺少 ``preset`` 的覆盖旗标）。
+        ConsoleProcessError: kind 与参数组合非法，选项组合非法（互斥档位、缺少
+            ``preset`` 的覆盖旗标），或发布档位旗标配队列级 ``--all-ready`` 目标。
     """
     command_prefix = tuple(runner_command)
     if not command_prefix:
@@ -115,6 +115,16 @@ def build_runner_argv(
                 str(issue_number),
                 *launch_flags,
                 *selector,
+            )
+        # CLI 的第二条**目标域**规则同样必须在发起端拦下：``--fast-merge`` /
+        # ``--direct-pr`` 与 ``--all-ready`` 互斥（整条队列一起跳过闸门正是这两个
+        # 旗标存在的理由）。放过去的话，子进程立刻以用法错误退出，网页只留下一条
+        # 幽灵托管进程记录。
+        if options is not None and (options.fast_merge or options.direct_pr):
+            raise ConsoleProcessError(
+                "--fast-merge / --direct-pr cannot combine with --all-ready: a queue-wide "
+                "unverified burst is exactly what those flags exist to prevent. Target one "
+                "issue instead (run_once with an issue_number)."
             )
         return (*command_prefix, "run", "--all-ready", *launch_flags, *selector)
     if kind is RunnerProcessKind.REVIEW_ONCE:

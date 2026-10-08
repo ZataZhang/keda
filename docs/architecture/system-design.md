@@ -204,13 +204,20 @@ Issue 日志不登记为托管进程，也不伪造 `process_id`；两者在 API
 
 | 维度 | public 域（C 端用户） | admin 域（内部管理员） |
 |---|---|---|
-| 用户表 | `public_user`（开放自助注册，UUID 主键） | `admin_user`（仅种子创建，不开放注册） |
-| 登录端点 | `/auth/*`（login/register/logout/me） | `/admin/auth/*`（login/logout/me，无 register） |
+| 用户表 | `public_user`（目标态；实际由固定 local operator 顶替，**不开放自助注册**） | `admin_user`（仅种子创建，不开放注册） |
+| 登录端点 | `/auth/*`（login/logout/me，**无 register**） | `/admin/auth/*`（login/logout/me，无 register） |
 | 会话 Cookie | `session_id` | `admin_session_id` |
 | 会话存储 | Redis，key 前缀 `public:session:` | Redis，key 前缀 `admin:session:` |
 | 鉴权依赖 | `get_current_public_user` | `get_current_admin_user` |
 | 主要 API | 业务 `agents/workflows/sessions/tools`（`owner_id = public_user.id`） | `/admin/users` 管理 public 用户 |
 | 前端 | `frontend-public` | `frontend-admin` |
+
+> **当前实现与上表的差距**：上表是**目标态**。实际后端只注册了
+> `src/backend/api/routes/local_auth.py`——「本机单用户部署」的 no-op 会话，`/api/auth/me|login|logout`
+> 恒返回固定 local operator 且不写任何 cookie；`/api/admin/auth/*`、`public_user` / `admin_user` 表与
+> `infrastructure/auth/` 均不存在。两域都**没有**注册端点，因此 `frontend-public` 不提供注册页
+> （Issue #247 FR-9 移除了那个调用必然失败的入口）；访问控制靠 console 只绑定 `127.0.0.1`，
+> 详见 `docs/guides/agent-runner.md` 的「信任边界与白名单动作」。
 
 ### 隔离保证
 

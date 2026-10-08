@@ -3580,7 +3580,7 @@ Dashboard 路由 `/app/dashboard`（即 `frontend-public/app/(app)/app/dashboard
 监控面板复用两个只读 API：
 
 - `GET /api/v1/agent-runner/overview` — 按仓库返回健康、队列统计、Issue 摘要、最近事件和异常计数。这是**实时扫描**口径（现场调 `gh`），供显式请求使用。
-- `GET /api/v1/agent-runner/issues/{issue_number}` — 单个 Issue 的 label、PR context、worktree 状态、event timeline、anomalies 和建议 CLI 命令。
+- `GET /api/v1/agent-runner/issues/{issue_number}` — 单个 Issue 的 label、PR context、worktree 状态、event timeline、anomalies 和建议 CLI 命令。可选 `repo_id` 查询参数把查找限定在该仓库：Issue 编号跨仓库会撞号，不带参数时后端按 registry 顺序返回**第一个**带该编号的仓库的快照，Dashboard 因此始终带上点击的那个仓库。
 
 Dashboard 首屏与轮询读的是第三个端点，见下节：
 
@@ -3743,9 +3743,21 @@ kc console --no-browser
 网页也不创建新标签——确需新标签仍走终端 `kc labels sync`。写回一律以 GitHub 的
 fresh read 结果作响应，因此页面状态与仓库实际状态不可能各说一套。
 
+> **开放范围里含「机器会立即消费」的标签**（人工决定一时的呈递项，见 PRD
+> `P1-FEAT-20261008-165241` 决定一）：白名单是同步集合的全量，不只是队列资格标签。
+> `agent/running`、`agent/supervising`、`agent/failed`、`agent/waiting` 是被 claim /
+> reclaim / 依赖判定读取的在途与等待状态——例如误打 `agent/running` 会让 daemon 跳过该
+> Issue，且「加入就绪」对它永久返回 409；`agent/rework-prd`、`agent/deliberate` 会触发
+> 重写 PRD 与多 agent 合议；`direct-pr` 选择发布档位；`validation/pending`、
+> `validation/passed`、`validation/verifier-passed` 是验证门禁读取的人工 / verifier
+> 签收信号。一次点击就能写出这些状态，因此它们被视作工作流操作而非「改个标签」；
+> 收窄集合等于改需求，需要更小的口子请在终端用 `kc labels` 或按仓库调整配置。
+
 
 所有写操作（含被拒绝的）都会写入审计日志，可在「项目」页或
-`GET /api/v1/agent-runner/console/audit` 查看。
+`GET /api/v1/agent-runner/console/audit` 查看。Issue 侧同样如此：集合外标签写入、
+非法 Issue 类型、被 core 拒绝的建 Issue 请求都会留下一条 `result="rejected"` 的审计，
+detail 记录本次尝试想写的标签 / 类型与拒绝原因。
 
 ### 网页操作入口与对应端点（CLI 能力对齐）
 
@@ -3754,22 +3766,34 @@ core 用例，网页只是入口，不发明第二套执行规则：
 
 | 入口（页面/位置） | 语义（对齐的 CLI/用例） | HTTP 端点 |
 |---|---|---|
-| dashboard 仓库卡片「跑一轮」「复核一轮」 | 一次性 `kc run` / `kc review` 托管子进程 | `POST .../console/actions/repository`（`run_once` / `review_once`） |
+| dashboard 仓库卡片「跑一轮」「复核一轮」 | 一次性 `kc run` / `kc review` 托管子进程 | `POST .../console/repositories/{repo_id}/actions`（`run_once` / `review_once`） |
 | dashboard runner 状态条 | 读既有 status/health，探测失败降级展示 | `GET /api/v1/agent-runner/status`、`/health` |
 | dashboard 仓库概览「监控中 / 全部」切换 | 全量列举 open Issue，标注是否已被监控收录 | `GET .../console/repositories/{repo_id}/issues` |
-| Issue 详情标签面板（增删） | `kc labels sync` 同源标准集内编辑 | `GET` / `PUT .../repositories/{repo_id}/issues/{n}/labels` |
-| Issue 详情 failed 态「恢复发布」 | 复用 `kc recover` 的恢复用例 | `POST .../console/actions/issue`（`recover_failed_publish`） |
-| backlog PRD「加入就绪」 | 建 Issue + 打 ready，绝不启动 runner | `POST .../console/backlog/.../enqueue-ready` |
-| backlog「开始此 PRD」高级选项 | 逐项对应 `kc run` 同名旗标（快合 / 直出 PR / agent / 预设 / 模型 / 推理力度），**全部默认关闭** | 复用 backlog start 端点，`launch_options` 字段透传 |
-| backlog「一句话建 Issue」 | CLI `kc issue create --from-prompt` 同一用例 | `POST .../repositories/{repo_id}/issues` |
-| 高级选项 sheet 的候选下拉 | 只读列举该仓库的 agent 名单与预设名 | `GET .../repositories/{repo_id}/launch-options` |
+| Issue 详情标签面板（增删） | `kc labels sync` 同源标准集内编辑 | `GET` / `PUT .../console/repositories/{repo_id}/issues/{issue_number}/labels` |
+| Issue 详情 failed 态「恢复发布」 | 复用 `kc recover` 的恢复用例 | `POST .../console/repositories/{repo_id}/issues/{issue_number}/actions`（`recover_failed_publish`） |
+| backlog PRD「加入就绪」 | 建 Issue + 打 ready，绝不启动 runner | `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/enqueue-ready`（无 `console` 段） |
+| backlog「开始此 PRD」高级选项 | 逐项对应 `kc run` 同名旗标（快合 / agent / 预设 / 模型 / 推理力度），**全部默认关闭**；直出 PR 不在其中（见下） | `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/start`，`launch_options` 字段透传 |
+| backlog「一句话建 Issue」 | CLI `kc issue create --from-prompt` 同一用例，`issue_type` 先过 `type/*` 标签纪律 | `POST .../console/repositories/{repo_id}/issues` |
+| 高级选项 sheet 的候选下拉 | 只读列举该仓库的 agent 名单与预设名 | `GET .../console/repositories/{repo_id}/launch-options` |
 
 要点：
 
 - **启动选项的缺省契约不变**：不勾选任何高级选项时，序列化出的 `launch_options`
   折算成空 argv 片段，发出的 `kc run` 与引入该参数之前逐字节一致（由契约测试锁死）。
-  非法组合（快合与直出 PR 互斥、模型/推理力度未带预设）在发起端即被拒绝，而不是在
-  子进程里静默降级。
+  非法组合在发起端即被拒绝，而不是在子进程里静默降级：既包括**选项自身**的规则（快合
+  与直出 PR 互斥、模型/推理力度未带预设、取值不是单一 token），也包括 CLI 的**目标域**
+  规则——队列级 `--all-ready` 不能配任何跳过闸门的旗标（`build_runner_argv` 直接拒绝），
+  PRD-backed 目标不能配直出 PR（见下条）。
+- **直出 PR 不进 PRD 启动入口**：CLI 的 `--direct-pr` 有一条**目标域**规则——目标 Issue
+  带 PRD 锚点时硬性用法拒绝（PRD-backed Issue 必须过 PRD 交付门并归档 PRD）。backlog
+  start 的目标按构造就是 PRD-backed Issue，因此该入口不暴露这个开关；请求体仍保留
+  `direct_pr` 字段，带上它在动 Issue 之前就返回 400 并给出同款原因（`start_prd` 的
+  目标域预检），不会留下「提示已开始、进程立刻退出」的半成品。直发档请按 CLI 用法
+  作用于无 PRD 锚点的 Issue。
+- **「一句话建 Issue」的类型受标签集合约束**：`issue_type` 会拼成 `type/<issue_type>`
+  写进 GitHub，因此后端只接受该仓库 `kc labels sync` 已同步的 `type/*` 名（默认
+  `feature` / `refactor` / `bug`），越界取值在调用用例之前被拒（400，GitHub 零变化），
+  与 FR-5「网页不创建新标签」同一口径；CLI 侧同类输入由 argv 枚举挡住。
 - **「加入就绪」不启动 runner**：它与「开始此 PRD」共用建 Issue / 打标签路径，
   唯一区别是最后不发 `kc run`；对运行中的 Issue 调用返回冲突，对已就绪的调用幂等。
 - **本次未改 `kc` CLI 表面**：以上都是新增 HTTP 入口，子命令 / 旗标 / 退出码 /

@@ -120,16 +120,36 @@ def test_put_issue_labels_in_set_succeeds_and_audits(issues_environment) -> None
 
     assert response.status_code == 200, response.text
     assert "agent/ready" in response.json()["labels"]
-    assert issues_environment["store"].audits[-1].action == "update_issue_labels"
+    audit = issues_environment["store"].audits[-1]
+    assert audit.action == "update_issue_labels"
+    assert audit.result == "accepted"
+    assert "add=[agent/ready]" in audit.detail
 
 
-def test_put_issue_labels_out_of_set_rejected_422(issues_environment) -> None:
+def test_put_issue_labels_out_of_set_rejected_422_and_audited(issues_environment) -> None:
     response = client.put(
         f"{PREFIX}/repositories/{REPO_ID}/issues/14/labels",
-        json={"add": ["agent/redy"], "remove": []},
+        json={"add": ["agent/redy"], "remove": ["validation/passed"]},
     )
+
     assert response.status_code == 422
     assert not [c for c in issues_environment["client"].calls if c["method"] == "edit_issue_labels"]
+    # 被拒的写入尝试也要留痕：文档承诺「含被拒绝的」都写审计日志。
+    audit = issues_environment["store"].audits[-1]
+    assert audit.action == "update_issue_labels"
+    assert audit.result == "rejected"
+    assert "agent/redy" in audit.detail and "validation/passed" in audit.detail
+
+
+def test_put_issue_labels_rejects_non_positive_issue_number(issues_environment) -> None:
+    response = client.put(
+        f"{PREFIX}/repositories/{REPO_ID}/issues/0/labels",
+        json={"add": ["agent/ready"], "remove": []},
+    )
+
+    assert response.status_code == 400
+    audit = issues_environment["store"].audits[-1]
+    assert (audit.action, audit.result) == ("update_issue_labels", "rejected")
 
 
 # ── 启动候选清单 ──────────────────────────────────────────────────────────────
@@ -163,7 +183,10 @@ def test_create_issue_from_prompt_endpoint(issues_environment, monkeypatch) -> N
 
     assert response.status_code == 201, response.text
     assert response.json()["number"] == 77
-    assert issues_environment["store"].audits[-1].action == "create_issue_from_prompt"
+    audit = issues_environment["store"].audits[-1]
+    assert audit.action == "create_issue_from_prompt"
+    assert audit.result == "accepted"
+    assert audit.issue_number == 77
 
 
 def test_create_issue_from_prompt_endpoint_value_error_400(issues_environment, monkeypatch) -> None:
@@ -176,4 +199,22 @@ def test_create_issue_from_prompt_endpoint_value_error_400(issues_environment, m
         f"{PREFIX}/repositories/{REPO_ID}/issues",
         json={"prompt_text": "x", "issue_type": "feature"},
     )
+
     assert response.status_code == 400
+    audit = issues_environment["store"].audits[-1]
+    assert (audit.action, audit.result) == ("create_issue_from_prompt", "rejected")
+    assert "bad prompt" in audit.detail
+
+
+def test_create_issue_from_prompt_rejects_unsynced_issue_type(issues_environment) -> None:
+    """类型不在已同步 ``type/*`` 集内时 400 拒绝：不把这个字符串交给 gh 当新标签。"""
+    response = client.post(
+        f"{PREFIX}/repositories/{REPO_ID}/issues",
+        json={"prompt_text": "随便一条需求", "issue_type": "feature; rm -rf"},
+    )
+
+    assert response.status_code == 400
+    assert "type" in response.json()["detail"]
+    assert not [c for c in issues_environment["client"].calls if c["method"] == "create_issue"]
+    audit = issues_environment["store"].audits[-1]
+    assert (audit.action, audit.result) == ("create_issue_from_prompt", "rejected")

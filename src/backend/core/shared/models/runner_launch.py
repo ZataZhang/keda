@@ -5,8 +5,14 @@
 
 1. 把选项折算成 argv 片段（:meth:`RunnerLaunchOptions.cli_flags`），全部缺省时
    返回**空元组**，使「不带选项」的启动链路与选项引入前逐字节一致；
-2. 用与 CLI 相同的规则拒绝非法组合（互斥的发布档位、依赖 ``--preset`` 的覆盖
-   旗标），让错误在发起端就暴露成一次明确的拒绝，而不是在子进程里静默降级。
+2. 用与 CLI 相同的规则拒绝非法组合（互斥的发布档位、依赖 ``preset`` 的覆盖旗标），
+   让错误在发起端就暴露成一次明确的拒绝，而不是在子进程里静默降级。
+
+本模块只掌握**选项自身**的规则；CLI 里还有一组取决于**启动目标**的规则（``direct_pr``
+对带 PRD 锚点的 Issue 是硬性用法拒绝、发布档位旗标不能配 ``--all-ready``）。这些规则
+由知道自己目标的调用方在同一发起端拒绝（见
+:func:`backend.core.use_cases.backlog_actions.start_prd`），否则网页只会得到一个
+「已开始」提示加上一条立刻以用法错误退出的托管进程。
 """
 
 from __future__ import annotations
@@ -34,7 +40,8 @@ class RunnerLaunchOptions:
 
     Attributes:
         fast_merge: ``--fast-merge``：本轮跳过合并前的独立验证门禁。
-        direct_pr: ``--direct-pr``：本轮只保留机械步骤，直接开 Draft PR。
+        direct_pr: ``--direct-pr``：本轮只保留机械步骤，直接开 Draft PR。CLI 只允许
+            它作用于**无 PRD 锚点**的 Issue，目标由调用方判定并拒绝。
         agent: ``--agent`` 的取值；``None``、空串或 ``"auto"`` 表示不传该旗标。
         preset: ``--preset``：把本轮生命周期阶段锚定到命名模型预设。
         model: ``--model``：预设字段的单次覆盖，必须与 ``preset`` 同时给出。
@@ -57,9 +64,22 @@ class RunnerLaunchOptions:
             "reasoning_effort": _normalized_flag(self.reasoning_effort),
         }
 
+    def _emittable_flag_values(self) -> dict[str, str | None]:
+        """真正会产生 argv 的取值：``--agent`` 的路由别名默认值按「未给出」处理。
+
+        :meth:`cli_flags` 与 :meth:`is_default` 共用这一份判定，避免「``auto`` 到底算
+        不算带选项」在两个方法里各说一套。
+        """
+        flag_values = self._flag_values()
+        if flag_values["agent"] == DEFAULT_RUN_AGENT:
+            flag_values["agent"] = None
+        return flag_values
+
     def is_default(self) -> bool:
-        """是否没有任何选项生效（「与改动前契约一致」的判定依据）。"""
-        return not (self.fast_merge or self.direct_pr or any(self._flag_values().values()))
+        """是否没有任何选项生效（与 :meth:`cli_flags` 返回空元组同判据）。"""
+        return not (
+            self.fast_merge or self.direct_pr or any(self._emittable_flag_values().values())
+        )
 
     def cli_flags(self) -> tuple[str, ...]:
         """构建与 CLI 同名旗标等价的 argv 片段。
@@ -78,7 +98,7 @@ class RunnerLaunchOptions:
                 "includes everything fast_merge skips, so combining them is ambiguous "
                 "rather than stronger."
             )
-        flag_values = self._flag_values()
+        flag_values = self._emittable_flag_values()
         if (flag_values["model"] or flag_values["reasoning_effort"]) and not flag_values["preset"]:
             raise RunnerLaunchOptionsError(
                 "model / reasoning_effort require preset: they are one-shot overrides "
@@ -92,8 +112,6 @@ class RunnerLaunchOptions:
             flags.append("--direct-pr")
         for flag_name, flag_value in flag_values.items():
             if not flag_value:
-                continue
-            if flag_name == "agent" and flag_value == DEFAULT_RUN_AGENT:
                 continue
             flags.extend([f"--{_cli_option_name(flag_name)}", _single_token(flag_value, flag_name)])
         return tuple(flags)

@@ -861,10 +861,11 @@ export type LaunchOptionsView = {
  * 「开始此 PRD」的高级选项载荷；全部可选，缺省即不加任何旗标。
  *
  * 每个字段与 `kc run` 同名旗标一一对应，由后端折算为 argv 片段。
+ * 直出 PR（`direct_pr`）不在其中：backlog start 的目标按构造就是带 PRD 锚点的
+ * Issue，CLI 对该组合硬性拒绝，后端在发起端返回 400，因此前端不暴露该开关。
  */
 export type StartPrdLaunchOptions = {
   fast_merge?: boolean;
-  direct_pr?: boolean;
   agent?: string | null;
   preset?: string | null;
   model?: string | null;

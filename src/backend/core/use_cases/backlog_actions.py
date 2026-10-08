@@ -230,6 +230,36 @@ def _spawn_runner(
     )
 
 
+def _reject_launch_options_incompatible_with_prd(
+    prd: BacklogPrd,
+    launch_options: RunnerLaunchOptions | None,
+) -> None:
+    """发起端复刻 CLI 的**目标域**规则：直出 PR 不适用于 PRD-backed Issue。
+
+    ``RunnerLaunchOptions`` 只能校验选项自身（互斥、缺预设、单 token）；而本用例的
+    目标按构造就是带 PRD 锚点的 Issue（``kc run --issue N`` 的 N 来自这份 PRD），
+    CLI 对该组合是硬性用法拒绝（``_reject_direct_pr_on_prd_backed_issue``）。不在这里
+    拦下的话，网页得到一次「已开始」成功提示，进程页留下一条立刻以用法错误退出的
+    托管进程，永远出不了 PR。
+
+    Args:
+        prd: 已定位的 pending PRD（提供锚点路径与可能已存在的 Issue 编号）。
+        launch_options: 「开始此 PRD」的高级选项；``None`` 表示未给出选项。
+
+    Raises:
+        BacklogActionError: 选项与启动目标冲突；此时 GitHub 与本地状态均未被动过。
+    """
+    if launch_options is None or not launch_options.direct_pr:
+        return
+    target = f"Issue #{prd.issue_number}" if prd.issue_number is not None else "该 PRD 的 Issue"
+    raise BacklogActionError(
+        f"{target} 由 PRD 锚定（{prd.prd_path}），直出 PR 只适用于没有 PRD 锚点的 Issue："
+        "PRD-backed Issue 必须过 PRD 交付门并归档 PRD，不能被「快速出 PR」旁路。"
+        "想跳过合并前的独立验证阶段请改勾快合（fast_merge），"
+        "或在终端对一个没有 PRD 锚点的 Issue 执行 `kc run --direct-pr`。"
+    )
+
+
 def start_prd(
     *,
     prd_path: str,
@@ -263,12 +293,15 @@ def start_prd(
 
     Raises:
         BacklogActionError: PRD 缺失、建 Issue / 打标签失败、选项非法或启动失败。
+            选项与 PRD 目标的组合非法（如直出 PR 配 PRD-backed Issue）时在改动
+            GitHub 之前就被拒绝。
     """
     context = _resolve_context(repo_id, contexts)
     prds = scan_backlog_prds(context.repo_path, include_archived=False).prds
     prd = next((p for p in prds if p.prd_path == prd_path), None)
     if prd is None:
         raise BacklogActionError(f"PRD not found or not pending: {prd_path}")
+    _reject_launch_options_incompatible_with_prd(prd, launch_options)
 
     if prd.issue_number is None:
         try:

@@ -5,6 +5,13 @@
 集合外的标签（哪怕是拼错的 ``agent/redy``）会让 Issue 静默脱离监控口径，且事后
 难以区分是网页还是终端改的。
 
+**开放范围必须知情**：同步集合里除了「队列资格」标签，还包含被自动化直接消费的
+工作流状态与签收标签——``agent/running`` / ``agent/supervising`` / ``agent/failed`` /
+``agent/waiting`` 是在途与依赖判定的依据，``agent/rework-prd`` / ``agent/deliberate``
+会触发重写 PRD 与多 agent 合议，``direct-pr`` 选择发布档位，``validation/passed`` 与
+``validation/verifier-passed`` 是验证门禁读取的签收信号。网页一次点击就能写出这些
+状态，因此它们属于人工决定（PRD 决定一）的呈递范围，而不是「顺便支持一下」。
+
 写回之后一律以 GitHub 的 fresh read 结果作为响应，因此页面状态与仓库实际状态
 不可能各说一套；校验失败的请求在写入之前就被拒绝，GitHub 侧零变化。
 """
@@ -37,7 +44,8 @@ class IssueLabelSnapshot:
     Attributes:
         issue_number: 目标 Issue 编号。
         labels: Issue 当前在 GitHub 上的全部标签（含集合外的历史标签，只读展示）。
-        allowed_labels: 本仓库允许通过网页增删的标签名（升序，稳定可断言）。
+        allowed_labels: 本仓库允许通过网页增删的标签名（升序，稳定可断言）；其中
+            含被自动化消费的工作流状态与签收标签，写出即改变执行/门禁判定。
     """
 
     issue_number: int
