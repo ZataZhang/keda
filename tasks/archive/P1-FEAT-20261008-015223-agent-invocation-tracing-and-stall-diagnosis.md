@@ -6,7 +6,7 @@
 
 > ✅ **交付前置**：无硬依赖，可立即开工。结构化声明见 §8，那里是唯一事实源。
 >
-> ⬜ **验收状态**：未开工。本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
+> 🧍 **验收状态**：待人工验收 — 交付 PR #243 已合并（squash，merge commit `9d0b7ef1`，2026-10-08）；rv-1/rv-2 证据已产出（orphan 分支 `evidence/issue-242`），rv-3/5/6 与独立 verifier 未闭环（B1 折中，用户知情）。本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
 
 本文 Part A 用于确认行为，Part B 用于执行。当前为需求规划，尚未实现。
 
@@ -334,22 +334,27 @@ erDiagram
 
 #### Automated / Verifier
 
-- [ ] R2调用关联和真实跨边界日志通过，绑定最终实现树（rv-1）。
-- [ ] 新事件通过敏感哨兵和日志路径逃逸负控。
-- [ ] 模型未知、超时和中断、无PRD、旧库兼容通过（rv-2/3/5）。
-- [ ] 并发隔离、写入故障降级、原logs读取/follow/换轮及既有机器输出兼容通过。
-- [ ] 已完成真实执行器冒烟，或明确记录不可用条件并保持该项未完成。
-- [ ] 最终代码完成 lint、复用自检、全量测试和文档构建。
-- [ ] 独立 verifier PASS；没有把 review incident 当产品失败或自宣告PASS。
+- [x] R2调用关联和真实跨边界日志通过，绑定最终实现树（rv-1）。证据：orphan 分支 `evidence/issue-242`，绑定 `4f1f78c3:src = db42e0c7cb95`，脚本可复现（rv-1 PASS）。
+- [ ] 新事件通过敏感哨兵和日志路径逃逸负控。（未执行：rv-6 场景脚本未实现，B1 折中）
+- [ ] 模型未知、超时和中断、无PRD、旧库兼容通过（rv-2/3/5）。（rv-2 已证：rv-2-unreported-model.md；rv-3/5 未执行，B1 折中）
+- [x] 并发隔离、写入故障降级、原logs读取/follow/换轮及既有机器输出兼容通过。（自动化单测覆盖：tests/test_agent_invocation_tracing.py::TestConcurrencyIsolation 及 flow/cli 套件；全量 3658 passed）
+- [ ] 已完成真实执行器冒烟，或明确记录不可用条件并保持该项未完成。（不可用条件：qoder/claude/kimi 周配额耗尽，无可用真实执行器）
+- [x] 最终代码完成 lint、复用自检、全量测试和文档构建。（just lint --full 与 --reuse 全过；CI=true just test all 3658 passed；mkdocs build --strict 通过）
+- [ ] 独立 verifier PASS；没有把 review incident 当产品失败或自宣告PASS。（未运行：B1 折中，用户知情）
 
 #### Delivery Readiness
 
-- [ ] §9.1已在交付回复或授权PR中直接呈递，验证限制可见。
-- [ ] 完成 Final Reconciliation，横幅与清单一致，执行完成随改动归档。
+- [x] §9.1已在交付回复或授权PR中直接呈递，验证限制可见。（PR #243 正文 Realistic Validation 节 + 证据分支 rv-1 样例）
+- [x] 完成 Final Reconciliation，横幅与清单一致，执行完成随改动归档。
 
 ### Final Reconciliation
 
-实施时填写最终路径、覆盖的调用角色、实测耗时、缺失字段、最终tree及与计划差异；当前未执行。
+- 交付 PR：#243（squash merge commit `9d0b7ef1`，2026-10-08）；分支最终 commit `4f1f78c3`。
+- 覆盖的调用角色：implementation、fix、review、review_repair、supervisor、supervisor_repair、verification、verification_recovery、rebase_recovery、closeout、content_generation（§7.1 全部角色）。
+- 实测耗时：fixture 调用单次 0.05–0.4s（CI 实测含 10s 重试场景）；时间线以单调时钟为准，不代表生产模型时延。
+- 证据绑定：rv-1 证据绑定 `4f1f78c3:src = db42e0c7cb95`（squash 后 main `9d0b7ef1` 内容同树）。
+- 缺失缺口：rv-3（超时/中断 incomplete）、rv-5 旧库升级侧、rv-6（敏感哨兵/路径逃逸）未执行；独立 verifier 未运行；真实执行器冒烟因执行器周配额耗尽未执行。
+- 与计划差异：无功能性偏差；CI 抓出 timeline 同秒排序缺陷并在交付前修复（`4f1f78c3`）；为满足 1000 行硬上限拆出 `agent_response_text.py` 与 `console_store_invocations.py`。
 
 ## 10. Functional Requirements
 
@@ -416,3 +421,12 @@ erDiagram
 - Reason: 用户确认直接读日志足够，应优先补当前缺少的事实关联。
 - Impact: 不新增CLI表面、停滞判断或自动接管；原决策二已获用户确认，产品日志呈递验收仍待实施。
 - Review: 用户已确认收窄范围和原决策二；尚未实施或提交。
+
+### 2026-10-08 交付归档（B1 折中）
+
+- Type: delivery
+- Before: PRD 位于 tasks/pending/，§9 清单全部未勾选，无证据产出。
+- After: 归档至 tasks/archive/；rv-1/rv-2 经真实入口产出证据（orphan 分支 evidence/issue-242，绑定 4f1f78c3:src=db42e0c7cb95）；rv-3/5/6 与独立 verifier 保持未完成并如实标注；横幅更新为 🧍 待人工验收。
+- Reason: qoder/claude/kimi 周配额级联耗尽致运行三度中断，人工接管完成审核与 CI 修复；用户选定 B1 折中并指示合并与归档。
+- Impact: PR #243 已 squash 合并（9d0b7ef1）；正式验收闭环需补 rv-3/5/6 与 verifier，或由人工明确豁免。
+- Review: 用户在对话中指示「合并 PR 然后归档」；Human-Confirmed 产品呈递项保持未勾选。
