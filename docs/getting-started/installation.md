@@ -95,6 +95,17 @@ kc container down
 
 完整说明见 `docs/guides/agent-runner.md` 的「容器化运行」章节。Docker 未安装时该子命令返回明确错误，不影响本机 `kc daemon` 用法。
 
+## 启动时版本更新检查
+
+每次启动 `kc` 时（`kc --version`、`--help` 等只读入口除外）会对照 PyPI 上的最新发布版本，发现新版后**仅在交互式终端**（stdin 与 stderr 都是 TTY）提示并询问是否升级；确认后用与你实际安装方式匹配的命令执行升级（`uv tool upgrade kedacode` / `pipx upgrade kedacode` / `brew upgrade kedacode` / `python -m pip install --upgrade kedacode`）。识别不出安装方式（如源码 editable、tarball 直链安装）或你拒绝自动执行时，只打印对应安装器的可复制命令，不会猜测执行。
+
+要点：
+
+- **缓存**：检查结果写入 `~/.kedacode/update-check.json`，默认 24 小时内不再访问 PyPI；升级后已安装版本变化会让旧缓存自动失效。
+- **离线容忍**：访问 PyPI 的超时只有 2 秒，失败即静默继续，不影响本次命令的退出码与输出。
+- **机器路径零打扰**：以下场景更新检查整段不发生（不联网、不提示、不询问）——`--json` / `--output json` 机器模式、shell 补全协议、`--help` / `-h`、`--version`、非交互终端（管道 / CI / agent 子进程）。
+- **显式关闭**：设置 `KEDACODE_NO_UPDATE_CHECK=1`（旧名 `IAR_NO_UPDATE_CHECK` 同样生效）永久停用；想手动升级时按上方安装方式对应的升级命令操作即可。
+
 ## 排错
 
 - `command -v kc` 没命中：把 `~/.local/bin` 加入 `PATH`，或在新 shell 中重试。

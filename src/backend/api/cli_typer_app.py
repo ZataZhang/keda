@@ -32,8 +32,10 @@ from backend.api.cli_output import (
     OUTPUT_FORMAT_JSON,
     CliError,
     OutputFormat,
+    machine_output_requested,
     render_cli_error,
 )
+from backend.api.cli_update_check import startup_update_check
 from backend.api.version_info import resolve_keda_version
 from backend.core.shared.models import product_identity
 
@@ -424,32 +426,6 @@ from backend.api import (  # noqa: E402,F401
 )
 
 
-def _machine_output_requested(args: list[str]) -> bool:
-    """从原始参数探测是否声明了机器模式（解析失败时拿不到 Namespace）。
-
-    解析失败的命令无法走
-    :func:`backend.api.cli_output.resolve_output_format` 的正规判定，
-    只能扫描原始 token：出现 ``--json``、``--output json`` 或
-    ``--output=json``（取值大小写不敏感）即视为机器模式声明。
-
-    Args:
-        args: 传给 :func:`main` 的原始参数序列。
-
-    Returns:
-        真值表示调用方显式请求了机器输出。
-    """
-    for index, token in enumerate(args):
-        if token == "--json":
-            return True
-        if token.startswith("--output="):
-            if token.removeprefix("--output=").strip().lower() == OUTPUT_FORMAT_JSON:
-                return True
-        elif token == "--output" and index + 1 < len(args):
-            if args[index + 1].strip().lower() == OUTPUT_FORMAT_JSON:
-                return True
-    return False
-
-
 def _render_click_exception(exc: typer_click.exceptions.ClickException) -> int:
     """把 click 解析/用法错误落成 FR-4 的结构化 envelope（机器模式）。
 
@@ -499,7 +475,7 @@ def _emit_legacy_command_notice(raw_args: list[str]) -> None:
         return
     if product_identity.COMPLETION_ENV_VAR_NAME in os.environ:
         return
-    if _machine_output_requested(raw_args):
+    if machine_output_requested(raw_args):
         return
     product_identity.emit_notice_once(product_identity.LEGACY_COMMAND_HINT)
 
@@ -511,6 +487,9 @@ def main(argv: list[str] | None = None) -> int:
     if "--version" in args or "-V" in args:
         typer.echo(f"{product_identity.PRIMARY_COMMAND_NAME} {resolve_keda_version()}")
         return 0
+    # 启动更新检查（Issue #264）：内部自带全部跳过判定——机器模式、补全协议、
+    # --help、非 TTY、显式关闭都在这条路径上原样不发生。
+    startup_update_check(args)
     try:
         result = app(
             args=args,
@@ -523,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     except typer_click.exceptions.ClickException as exc:
         # 解析期失败在机器模式下也必须落 FR-4 envelope（PRD「任意命令在
         # JSON 模式下的失败」oracle）；人类模式保持 click 原文逐字节不变。
-        if _machine_output_requested(args):
+        if machine_output_requested(args):
             return _render_click_exception(exc)
         exc.show()
         return exc.exit_code
