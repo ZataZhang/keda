@@ -1,5 +1,7 @@
 # PRD: 生命周期 Agent、模型与推理深度统一设置
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/262
+
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
