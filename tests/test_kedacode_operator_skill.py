@@ -398,6 +398,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # 旗标集合取自 ``kc schema --json`` 的真实命令树。
     ("labels", "sync"): {"--repo", "--repo-id", "--config", "--all"},
     ("init",): {"--dry-run", "--force"},
+    # issue-245：随包 Skill 写明 skill 重装/刷新的独立入口；它不带仓库 selector。
+    ("skill", "install"): {"--dry-run", "--force"},
     ("registry", "start"): set(),
     ("registry", "stop"): {"--repo-id", "--all"},
     ("backlog", "advance"): {"--dry-run", "--repo", "--repo-id", "--config"},

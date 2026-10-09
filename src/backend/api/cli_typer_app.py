@@ -77,6 +77,7 @@ __all__ = [
     "main",
     "registry_app",
     "backlog_app",
+    "skill_app",
     "worktree_app",
     "workflow_app",
 ]
@@ -203,6 +204,11 @@ auth_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+skill_app = typer.Typer(
+    help="Install and refresh the packaged and remote-template user-level Skills.",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 container_app.add_typer(auth_app, name="auth")
 app.add_typer(labels_app, name="labels")
 app.add_typer(issue_app, name="issue")
@@ -218,6 +224,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(container_app, name="container")
 app.add_typer(console_app, name="console")
 app.add_typer(agent_app, name="agent")
+app.add_typer(skill_app, name="skill")
 
 RepoOption = Annotated[str | None, typer.Option("--repo", help="Target repository path.")]
 RepoIdOption = Annotated[
@@ -412,6 +419,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_config,
     cli_typer_console,
     cli_typer_tokens,
+    cli_typer_skill,
     cli_typer_schema,
 )
 

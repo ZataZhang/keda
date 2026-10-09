@@ -431,7 +431,7 @@ uv run --project /path/to/keda kc init --dry-run
 uv run --project /path/to/keda kc init
 ```
 
-`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖；确认需要重建时显式传入 `--force`。
+`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖并把用户导向 `kc skill install`；确认需要重建时显式传入 `--force`。
 
 `kc init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `kc daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
@@ -458,11 +458,28 @@ tasks/evidence/**
 
 这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），`git add -A` 天然只把 `.md` 文本报告（verification-plan / evidence-report / verifier-report）带进 commit，截图、录屏、oracle 脚本等原始产物不进 git 历史；发布前拦截（`ensure_no_evidence_paths_in_changes`）再兜底拒绝被 `git add -f` 强制加入的非 `.md` 证据产物。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
 
-同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重跑 `kc init`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `kc init --force`。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
+同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重装 skill 用 `kc skill install`、重建仓库配置才用 `kc init --force`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `--force` 形式。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
 
 KedaCode 自带的 `kedacode-operator` Skill 随 Python 发行包安装，无需联网下载。它是 hub + references 结构：主文件 `SKILL.md` 只有路由表、共享基线（只读请求不启动执行、`kc run` 必须带目标、机器输出用 `kc schema --json` 自检）与 Safety 不变量，各子命令的流程步骤拆在同目录 `references/*.md`（建 issue / 查 issue / 跑一次 / 看进度 / 卡住了 / 后台跑 / CI 交付 / 装环境与查 Agent 配置共 8 份）。命令语义与参数以本文档和真实命令树（`kc --help` / `kc schema --json`）为权威，references 只写"什么时候用、按什么顺序用、别做什么"的流程分工。`kc init --dry-run` 会显示目标路径；安装的一致性比对以**受管文件集合**（主 `SKILL.md` + `references/*.md`）逐字节为准，用户自己新增的文件不会触发冲突；目标下已有改动过的受管内容时默认保留并报告冲突，只有显式 `--force` 才覆盖。
 
 ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`priority/P3` 识别优先级，按 P0→P3 排序，同级按 Issue number 升序；缺少这些标签的 Issue 排在显式 P3 之后。`kc run --all-ready --dry-run` 与实际执行共用排序，并在预览中显示 priority；每轮排序范围是 GitHub 返回的最多 100 条 ready Issue 候选，不能据此承诺候选窗口以外的全局排序。`kc issue list --state`、`--label` 与 PR 筛选分别由公开参数应用。
+
+### 用户级 Skill 的独立安装与刷新（`kc skill install`）
+
+`kc init` 内嵌的 Skill 同步（远程模板 `prd` / `code-reviewer` + 随包 `kedacode-operator`）也可以不经仓库配置独立触发：`kc skill install`。它与 init 走同一份安装实现（内容来源、安装根解析、幂等跳过、旧名副本清理与 fail-closed 语义完全一致），但不读写 `.kedacode.toml`、不注册仓库、不同步 labels 与 gitignore——典型场景是升级 kedacode 后 operator skill 改名，而常用仓库里 `.kedacode.toml` 已存在、`kc init` 第一步就会被挡住，此时在各安装根补装新名 skill 并清理未被改动的旧名副本只需一条命令：
+
+```bash
+kc skill install --dry-run   # 预览全部安装根的安装计划，不写任何文件
+kc skill install             # 安装/刷新全部用户级 Skill
+```
+
+与 init 相同的冲突语义：
+
+- 用户改动过的同名 Skill（受管文件与随包/远程模板不一致）默认保留并报告冲突，`--force` 才覆盖；
+- 旧名副本只有逐字节等于历史随包版本才自动删除，改动过的保留并回显路径；
+- 远程模板 `prd` / `code-reviewer` 的本地 `SKILL.md` 与远程不同且未传 `--force` 时报错退出（fail-closed，不覆盖）。
+
+`kc skill install` 面向用户级安装根，与目标仓库无关：传 `--repo` / `--repo-id` / `--config` 会被以用法错误拒绝（退出码 2）。
 
 ### 提交前验证命令自动探测
 
@@ -1911,6 +1928,10 @@ JSON 输出每行一个 `IssueWithPulls` 对象，字段稳定：`repo?`、`numb
 ```bash
 # 初始化当前目标仓库配置
 kc init
+
+# 重装/刷新用户级 Skill（不触碰 .kedacode.toml，仓库已 init 过也能用）
+kc skill install --dry-run
+kc skill install
 
 # 清掉旧版 kc init 钉死在 .kedacode.toml 里的 generated_content（先预览再执行）
 kc config migrate --dry-run

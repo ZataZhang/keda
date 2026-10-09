@@ -43,6 +43,28 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     add_common_options(workflow_install_parser)
 
+    skill_parser = subparsers.add_parser(
+        "skill",
+        help="Install and refresh the packaged and remote-template user-level Skills.",
+    )
+    skill_subparsers = skill_parser.add_subparsers(dest="skill_command", required=True)
+    skill_install_parser = skill_subparsers.add_parser(
+        "install",
+        help="Install or refresh user-level Skills in every detected skill root.",
+    )
+    skill_install_parser.set_defaults(command="skill install")
+    skill_install_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace user-modified skills and delete legacy-named copies outright.",
+    )
+    skill_install_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the install plan for every skill root without writing anything.",
+    )
+    add_common_options(skill_install_parser)
+
     container_parser = subparsers.add_parser(
         "container",
         help="Manage the KedaCode runner container (auth import, up, down, logs).",
