@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     AutopilotConfig,
+    BacklogConfig,
     BrowserE2EVerificationCommand,
     E2EVerificationArtifact,
     GeneratedContentConfig,
@@ -528,6 +529,7 @@ def build_app_config_from_settings(
     memory_settings = agent_runner_settings.memory
     safety_settings = agent_runner_settings.safety
     autopilot_settings = agent_runner_settings.autopilot
+    backlog_settings = agent_runner_settings.backlog
     validation_settings = agent_runner_settings.validation
     prompt_settings = agent_runner_settings.prompts
 
@@ -595,6 +597,7 @@ def build_app_config_from_settings(
             auto_sign_off=autopilot_settings.auto_sign_off,
             merge_check_timeout_seconds=autopilot_settings.merge_check_timeout_seconds,
         ),
+        backlog=BacklogConfig(auto_advance=backlog_settings.auto_advance),
         validation=ValidationConfig(
             enabled=validation_settings.enabled,
             evidence_dir=validation_settings.evidence_dir,

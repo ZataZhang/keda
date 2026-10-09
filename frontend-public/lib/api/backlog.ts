@@ -135,10 +135,10 @@ export async function fetchBacklogAutopilot(repoId: string): Promise<BacklogAuto
 }
 
 /**
- * 切换当前仓库的 Autopilot 自动推进（只改 agent_runner.autopilot.enabled）。
+ * 切换当前仓库的 Backlog 自动推进（只改 agent_runner.backlog.auto_advance）。
  *
  * @param params.repoId - 仓库标识。
- * @param params.enabled - 目标开关值；自动合并不受影响。
+ * @param params.enabled - 目标开关值；自动合并配置不受影响。
  * @returns 写后 fresh load 读回的状态快照（不是请求体回显）。
  */
 export async function updateBacklogAutopilot(params: {

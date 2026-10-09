@@ -25,6 +25,7 @@ from pydantic_settings import (
 from backend.infrastructure.config.agent_runner_settings import (
     AgentRunnerAgentSettings,
     AgentRunnerAutopilotSettings,
+    AgentRunnerBacklogSettings,
     AgentRunnerConsoleSettings,
     AgentRunnerDaemonSettings,
     AgentRunnerDeliberationSettings,
@@ -247,6 +248,7 @@ class AgentRunnerSettings(BaseSettings):
     memory: AgentRunnerMemorySettings = Field(default_factory=AgentRunnerMemorySettings)
     safety: AgentRunnerSafetySettings = Field(default_factory=AgentRunnerSafetySettings)
     autopilot: AgentRunnerAutopilotSettings = Field(default_factory=AgentRunnerAutopilotSettings)
+    backlog: AgentRunnerBacklogSettings = Field(default_factory=AgentRunnerBacklogSettings)
     validation: AgentRunnerValidationSettings = Field(default_factory=AgentRunnerValidationSettings)
     console: AgentRunnerConsoleSettings = Field(default_factory=AgentRunnerConsoleSettings)
     daemon: AgentRunnerDaemonSettings = Field(default_factory=AgentRunnerDaemonSettings)
@@ -465,6 +467,7 @@ _ensure_no_proxy_for_local_services()
 
 __all__ = [
     "AgentRunnerAutopilotSettings",
+    "AgentRunnerBacklogSettings",
     "AgentRunnerLocalSettings",
     "AgentRunnerRepositoryMetadataSettings",
     "AgentRunnerConsoleSettings",

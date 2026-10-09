@@ -20,6 +20,7 @@ from backend.api.app import app
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     AutopilotConfig,
+    BacklogConfig,
     RepositoryRunContext,
     SafetyConfig,
 )
@@ -28,7 +29,6 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessRecord,
 )
 from backend.core.use_cases.agent_runner_merge_queue import (
-    _autopilot_enabled,
     process_merge_queue,
 )
 from backend.core.use_cases.backlog_actions import advance_backlog_queue
@@ -58,6 +58,9 @@ merge_method = "squash"
 require_verifier_pass = true
 auto_sign_off = false
 merge_check_timeout_seconds = 1800
+
+[agent_runner.backlog]
+auto_advance = false
 """
 
 
@@ -65,21 +68,18 @@ def _make_editor() -> TomlRepositoryAutopilotSettingsEditor:
     return TomlRepositoryAutopilotSettingsEditor()
 
 
-def _read_local_enabled(repo_root: Path) -> bool:
-    """用标准 tomllib 读取临时仓配置（模拟 fresh loader 的磁盘读取）。"""
-    with open(repo_root / ".iar.toml", "rb") as handle:
-        data = tomllib.load(handle)
-    return bool(data["agent_runner"]["autopilot"]["enabled"])
-
-
 def _contexts_for(repo_root: Path, *, auto_merge: bool = False):
     """构造当前 tmp 仓库的上下文：fresh load 的真实值来自磁盘文件本身。"""
 
     def loader():
-        enabled = _read_local_enabled(repo_root)
+        with open(repo_root / ".iar.toml", "rb") as handle:
+            agent_runner_config = tomllib.load(handle)["agent_runner"]
+        auto_advance = bool(agent_runner_config["backlog"]["auto_advance"])
+        merge_autopilot = bool(agent_runner_config["autopilot"]["enabled"])
         config = replace(
             AppConfig(),
-            autopilot=AutopilotConfig(enabled=enabled),
+            autopilot=AutopilotConfig(enabled=merge_autopilot),
+            backlog=BacklogConfig(auto_advance=auto_advance),
             safety=SafetyConfig(auto_merge=auto_merge),
         )
         return [
@@ -154,13 +154,13 @@ def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
     )
     assert state.enabled is False
     assert state.persisted_enabled is False
-    assert state.auto_merge_enabled is True
+    assert state.auto_merge_enabled is False
     assert state.daemon_running is True
     assert state.max_parallel == 3
     assert state.config_source == ".iar.toml"
 
 
-def test_set_autopilot_enabled_writes_then_reads_back(tmp_path: Path) -> None:
+def test_set_backlog_auto_advance_writes_then_reads_back(tmp_path: Path) -> None:
     """写回后必须能从 fresh loader 读回同值，且只改一个键。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -181,10 +181,10 @@ def test_set_autopilot_enabled_writes_then_reads_back(tmp_path: Path) -> None:
     assert state.persisted_enabled is True
     after_lines = config_path.read_text(encoding="utf-8").splitlines()
     changed = [pair for pair in zip(before_lines, after_lines) if pair[0] != pair[1]]
-    assert changed == [("enabled = false", "enabled = true")]
+    assert changed == [("auto_advance = false", "auto_advance = true")]
 
 
-def test_set_autopilot_enabled_rejects_stale_fresh_loader(tmp_path: Path) -> None:
+def test_set_backlog_auto_advance_rejects_stale_fresh_loader(tmp_path: Path) -> None:
     """fresh load 与请求值不一致（未真正落盘）必须报错，而不是 200 冒充成功。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -196,7 +196,7 @@ def test_set_autopilot_enabled_rejects_stale_fresh_loader(tmp_path: Path) -> Non
                 repo_id=REPO_ID,
                 display_name="tmp",
                 repo_path=repo_root,
-                config=replace(AppConfig(), autopilot=AutopilotConfig(enabled=False)),
+                config=replace(AppConfig(), backlog=BacklogConfig(auto_advance=False)),
             )
         ]
 
@@ -237,22 +237,28 @@ def _real_config_for(repo_root: Path) -> AppConfig:
     assert settings is not None
     # local 配置里未写的段为 None：此时沿用 AppConfig 默认值（auto_merge=False）。
     local_autopilot = settings.autopilot
+    local_backlog = settings.backlog
     local_safety = settings.safety
     return replace(
         AppConfig(),
         autopilot=replace(
             AutopilotConfig(), enabled=bool(local_autopilot.enabled) if local_autopilot else False
         ),
+        backlog=replace(
+            BacklogConfig(),
+            auto_advance=bool(local_backlog.auto_advance) if local_backlog else False,
+        ),
         safety=SafetyConfig(auto_merge=bool(local_safety.auto_merge) if local_safety else False),
     )
 
 
-def test_upstream_merged_promotes_downstream_when_autopilot_enabled(tmp_path: Path) -> None:
-    """Autopilot 开启且上游已合并时，现有 advance 会自动启动下游（无需再点全局开始）。"""
+def test_upstream_merged_promotes_downstream_when_auto_advance_enabled(tmp_path: Path) -> None:
+    """Backlog 自动推进开启且上游已合并时会自动启动下游。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / ".iar.toml").write_text(
-        _CONFIG_TEMPLATE.replace("false", "true", 1), encoding="utf-8"
+        _CONFIG_TEMPLATE.replace("auto_advance = false", "auto_advance = true"),
+        encoding="utf-8",
     )
     upstream = _write_prd(
         repo_root, "tasks/pending/P1-FEAT-20260101-upstream.md", title="Upstream", issue=1
@@ -294,21 +300,22 @@ def test_upstream_merged_promotes_downstream_when_autopilot_enabled(tmp_path: Pa
     assert github_client._issue_labels[2] == ("agent/ready",)
 
 
-def test_autopilot_disabled_promotes_nothing(tmp_path: Path) -> None:
-    """Autopilot 关闭时同一场景零晋升：不得靠 UI 开关弱化这道门控。"""
+def test_auto_advance_disabled_promotes_nothing(tmp_path: Path) -> None:
+    """合并 autopilot 开启但 backlog 自动推进关闭时仍不晋升。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".iar.toml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+    (repo_root / ".iar.toml").write_text(
+        _CONFIG_TEMPLATE.replace("enabled = false", "enabled = true", 1),
+        encoding="utf-8",
+    )
     context = RepositoryRunContext(
         repo_id=REPO_ID,
         display_name="tmp",
         repo_path=repo_root,
         config=_real_config_for(repo_root),
     )
-    assert context.config.autopilot.enabled is False
-    # 既有的 daemon 门控据此跳过整个 backlog 调度阶段（detail 实现见
-    # tests/test_backlog_advance.py::test_gate_disabled_skips_scheduling）。
-    assert _autopilot_enabled(context.config) is False
+    assert context.config.autopilot.enabled is True
+    assert context.config.backlog.auto_advance is False
 
 
 def test_merge_queue_requires_both_switches(tmp_path: Path) -> None:
@@ -370,7 +377,7 @@ def test_get_autopilot_endpoint(autopilot_environment) -> None:
 def test_get_autopilot_rejects_non_bool_enabled(autopilot_environment) -> None:
     """`.iar.toml` 里的 enabled 不是布尔时必须返回 4xx，而不是漏成 500。"""
     (autopilot_environment["repo_root"] / ".iar.toml").write_text(
-        _CONFIG_TEMPLATE.replace("enabled = false", 'enabled = "yes"'),
+        _CONFIG_TEMPLATE.replace("auto_advance = false", 'auto_advance = "yes"'),
         encoding="utf-8",
     )
     response = client.get(f"/api/v1/agent-runner/backlog/autopilot?repo_id={REPO_ID}")

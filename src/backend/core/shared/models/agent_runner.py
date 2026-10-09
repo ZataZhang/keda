@@ -656,6 +656,13 @@ class AutopilotConfig:
 
 
 @dataclass(frozen=True)
+class BacklogConfig:
+    """Backlog 持续调度配置，与自动合并配置相互独立。"""
+
+    auto_advance: bool = False
+
+
+@dataclass(frozen=True)
 class PromptConfig:
     """Agent prompt template configuration."""
 
@@ -1001,6 +1008,7 @@ class AppConfig:
     memory: MemoryConfig = MemoryConfig()
     safety: SafetyConfig = SafetyConfig()
     autopilot: AutopilotConfig = AutopilotConfig()
+    backlog: BacklogConfig = BacklogConfig()
     validation: ValidationConfig = ValidationConfig()
     prompts: PromptConfig = field(default_factory=PromptConfig)
     pre_pr_review: PrePrReviewConfig = PrePrReviewConfig()

@@ -1,14 +1,14 @@
-"""Backlog 仓库级 Autopilot 控制用例。
+"""Backlog 仓库级自动推进设置用例。
 
 职责边界（刻意保守）：
 
 - **读**：把「仓库 local 配置的持久值」「生效配置」「daemon 是否真的在运行」
-  「Backlog 并发上限」聚合成一份状态快照，供页面如实展示完整闭环条件。
+  「Backlog 并发上限」聚合成一份状态快照，供页面如实展示。
 - **写**：只经受限端口修改目标仓库 ``.kedacode.toml`` 的
-  ``[agent_runner.autopilot].enabled``，并在写回后 fresh load 生效配置作为
+  ``[agent_runner.backlog].auto_advance``，并在写回后 fresh load 生效配置作为
   成功判据（不回显请求体冒充持久化结果）。
 
-不做的事：不 spawn / 停止 daemon；不修改 ``safety.auto_merge``；不调用
+不做的事：不 spawn / 停止 daemon；不修改自动合并相关配置；不调用
 ``advance_backlog_queue``——运行中的 daemon 下一轮自然读取新配置，既有持续
 调度链不变。``autopilot.enabled`` 与 ``safety.auto_merge`` 的双重门禁是既有
 不可逆远端合并的安全契约，本用例不允许把它折叠成一个开关。
@@ -33,21 +33,22 @@ _RUNNING_STATUS = "running"
 
 
 class BacklogAutopilotError(ValueError):
-    """Autopilot 读取或写回失败：仓库不存在、配置不可写或写后读回不一致。"""
+    """Backlog 自动推进设置读写失败。"""
 
 
 @dataclass(frozen=True)
 class BacklogAutopilotState:
-    """当前仓库 Autopilot 完整闭环状态快照。
+    """当前仓库 Backlog 自动推进与相关状态快照。
 
     Attributes:
         repo_id: 目标仓库 ID。
-        enabled: **生效**配置中的 ``autopilot.enabled``（fresh load 结果）。
-        auto_merge_enabled: ``safety.auto_merge``；第二道危险动作门禁，只读展示。
+        enabled: **生效**配置中的 ``backlog.auto_advance``（fresh load 结果）。
+        auto_merge_enabled: 两道合并开关 ``autopilot.enabled`` 与
+            ``safety.auto_merge`` 都开启时为真，只读展示。
         daemon_running: 该仓库是否存在运行中的 daemon 进程。
         max_parallel: Backlog 并发上限（来自既有 backlog settings）。
-        config_source: Autopilot 持久值的来源文件（仓库相对路径）。
-        persisted_enabled: 仓库本地配置中的持久值；``None`` 表示文件缺失或键
+        config_source: Backlog 持久值的来源文件（仓库相对路径）。
+        persisted_enabled: 仓库本地 Backlog 配置中的持久值；``None`` 表示文件缺失或键
             未设置（此时生效值来自全局配置默认值）。
     """
 
@@ -121,8 +122,10 @@ def load_autopilot_state(
         raise BacklogAutopilotError(str(exc)) from exc
     return BacklogAutopilotState(
         repo_id=repo_id,
-        enabled=bool(context.config.autopilot.enabled),
-        auto_merge_enabled=bool(context.config.safety.auto_merge),
+        enabled=bool(context.config.backlog.auto_advance),
+        auto_merge_enabled=bool(
+            context.config.autopilot.enabled and context.config.safety.auto_merge
+        ),
         daemon_running=daemon_is_running(repo_id, supervisor.list_processes()),
         max_parallel=max_parallel,
         config_source=_relative_source_name(
@@ -141,7 +144,7 @@ def set_autopilot_enabled(
     supervisor: IRunnerProcessSupervisor,
     max_parallel: int,
 ) -> BacklogAutopilotState:
-    """修改目标仓库 ``autopilot.enabled``，并以 fresh load 读回作为成功判据。
+    """修改目标仓库 ``backlog.auto_advance``，并以 fresh load 读回作为成功判据。
 
     Args:
         repo_id: 目标仓库 ID。
@@ -169,9 +172,9 @@ def set_autopilot_enabled(
     # 成功判据必须是「写后 fresh load 的生效配置」，而不是请求体回显：
     # 只有重新走一遍 resolver 才能证明原子替换后的文件被既有 loader 正确读取。
     fresh_context = _resolve_context(repo_id, contexts_loader())
-    if bool(fresh_context.config.autopilot.enabled) is not enabled:
+    if bool(fresh_context.config.backlog.auto_advance) is not enabled:
         raise BacklogAutopilotError(
-            "Autopilot 写回后重新加载的配置与请求值不一致，原文件可能未被正确替换。"
+            "Backlog 自动推进写回后重新加载的配置与请求值不一致，原文件可能未被正确替换。"
         )
     return load_autopilot_state(
         repo_id=repo_id,

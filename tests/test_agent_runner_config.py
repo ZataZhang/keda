@@ -30,6 +30,7 @@ from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
     AgentRunnerAutopilotSettings,
+    AgentRunnerBacklogSettings,
     AgentRunnerDeliberationProfileSettings,
     AgentRunnerDeliberationSettings,
     AgentRunnerGeneratedContentSettings,
@@ -955,6 +956,17 @@ def test_build_app_config_from_settings_maps_autopilot_defaults() -> None:
     assert app_config.autopilot.require_verifier_pass is True
     assert app_config.autopilot.auto_sign_off is True
     assert app_config.autopilot.merge_check_timeout_seconds == 1800
+    assert app_config.backlog.auto_advance is False
+
+
+def test_build_app_config_from_settings_maps_backlog_auto_advance() -> None:
+    """全局 Backlog 调度配置会映射到核心 AppConfig。"""
+    settings = AgentRunnerSettings()
+    settings.backlog.auto_advance = True
+
+    app_config = build_app_config_from_settings(settings)
+
+    assert app_config.backlog.auto_advance is True
 
 
 def test_build_app_config_from_settings_maps_autopilot_overrides() -> None:
@@ -998,6 +1010,19 @@ def test_merge_repository_config_overrides_autopilot() -> None:
     assert merged.autopilot.require_verifier_pass is True
 
 
+def test_merge_repository_config_overrides_backlog_auto_advance() -> None:
+    """仓库级 Backlog 调度配置会覆盖全局值。"""
+    global_config = AppConfig()
+    repo_settings = AgentRunnerRepositorySettings(
+        path="/tmp/repo",
+        backlog=AgentRunnerBacklogSettings(auto_advance=True),
+    )
+
+    merged = merge_repository_config(global_config, repo_settings)
+
+    assert merged.backlog.auto_advance is True
+
+
 def test_local_iar_toml_overrides_autopilot(tmp_path: Path) -> None:
     """.iar.toml-level autopilot overrides flow through ``resolve_repository_targets``."""
     from backend.engines.agent_runner.factory import resolve_repository_targets
@@ -1012,17 +1037,24 @@ id = "target-autopilot"
 [agent_runner.autopilot]
 enabled = true
 merge_check_timeout_seconds = 60
+
+[agent_runner.backlog]
+auto_advance = true
 """,
     )
     # Sanity check: the local settings object sees the autopilot section.
     local_settings = AgentRunnerLocalSettings(
         repository=AgentRunnerRepositoryMetadataSettings(id="target-autopilot"),
         autopilot=AgentRunnerAutopilotSettings(enabled=True, merge_check_timeout_seconds=60),
+        backlog=AgentRunnerBacklogSettings(auto_advance=True),
     )
     assert local_settings.autopilot is not None
     assert local_settings.autopilot.enabled is True
+    assert local_settings.backlog is not None
+    assert local_settings.backlog.auto_advance is True
 
     contexts = resolve_repository_targets(_make_settings(), repo_path_override=str(repo_path))
     assert len(contexts) == 1
     assert contexts[0].config.autopilot.enabled is True
     assert contexts[0].config.autopilot.merge_check_timeout_seconds == 60
+    assert contexts[0].config.backlog.auto_advance is True

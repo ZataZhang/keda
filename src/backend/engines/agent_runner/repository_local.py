@@ -21,6 +21,7 @@ from backend.engines.agent_runner.repository_gitignore import (  # noqa: F401
 )
 from backend.infrastructure.config.settings import (
     AgentRunnerAutopilotSettings,
+    AgentRunnerBacklogSettings,
     AgentRunnerDaemonSettings,
     AgentRunnerDeliberationSettings,
     AgentRunnerGitSettings,
@@ -187,6 +188,7 @@ _IAR_SECTION_ORDER = (
     "memory",
     "safety",
     "autopilot",
+    "backlog",
     "validation",
     "prompts",
     "pre_pr_review",
@@ -209,6 +211,7 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
     "memory": "KedaCode 任务记忆与 Skill 草稿存储配置",
     "safety": "发布前安全边界：自动合并开关、禁止提交的路径模式",
     "autopilot": "Autopilot 快速档（合并队列）：supervisor 之后串行合并；需配合 safety.auto_merge = true 同时启用",
+    "backlog": "Backlog 持续调度：控制 daemon 是否自动发现并推进 pending PRD，与自动合并独立",
     "validation": "Realistic Validation 证据门禁配置",
     "prompts": "实现 Agent 的 prompt 模板；默认 phase 与自定义阶段模板",
     "pre_pr_review": "Draft PR 创建前的 AI review 门禁（push 之后、PR 之前）",
@@ -285,6 +288,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "autopilot.require_verifier_pass": "Issue 需要 validation 时是否要求 validation/verifier-passed 标签先存在",
     "autopilot.auto_sign_off": "verifier 绿灯后自动替人工勾选 PR body 的 sign-off 清单（幂等）",
     "autopilot.merge_check_timeout_seconds": "等 PR checks 全绿的最大秒数；超时则放弃本轮合并",
+    "backlog.auto_advance": "是否允许 daemon 持续发现并推进 pending PRD；与自动合并开关独立",
     "validation.enabled": "是否启用 Realistic Validation 证据门禁",
     "validation.evidence_dir": (
         "worktree 内证据目录根（默认 tasks/evidence，按任务分子目录；.md 报告经 "
@@ -827,6 +831,7 @@ def build_repository_local_config_text(
         memory=AgentRunnerMemorySettings(),
         safety=AgentRunnerSafetySettings(),
         autopilot=AgentRunnerAutopilotSettings(),
+        backlog=AgentRunnerBacklogSettings(),
         validation=AgentRunnerValidationSettings(),
         prompts=AgentRunnerPromptSettings(),
         pre_pr_review=AgentRunnerPrePrReviewSettings(),

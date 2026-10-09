@@ -1,9 +1,9 @@
 /**
  * Realistic validation for Backlog single-PRD controls, archived evidence and
- * the repository-level Autopilot toggle.
+ * the repository-level Backlog auto-advance toggle.
  *
  * 验证层级：**UI 真实 + Backlog API stub**。浏览器、Next.js 页面、API client 与
- * 详情/证据/Autopilot 组件全部真实运行；只有 `/backlog/**` 的后端响应被 Playwright
+ * 详情/证据/Backlog 自动推进组件全部真实运行；只有 `/backlog/**` 的后端响应被 Playwright
  * route 替换为确定性数据，用于在 CI 里稳定复现「未开始 / 阻塞 / 已归档」三种形态。
  * start 请求不由测试伪造成功结果——它由测试捕获 URL 与请求体作为判据。
  *
@@ -106,10 +106,10 @@ function buildPrdsPayload(overrides: Record<string, string> = {}) {
 }
 
 /**
- * 构造 Autopilot 状态响应。
+ * 构造 Backlog 自动推进状态响应。
  *
  * @param state - 覆盖字段（enabled / daemon_running / auto_merge_enabled）。
- * @returns 与后端 `BacklogAutopilotState` 同构的 payload。
+ * @returns 与后端 Backlog 自动推进状态同构的 payload。
  */
 function buildAutopilotPayload(
   state: Partial<{ enabled: boolean; auto_merge_enabled: boolean; daemon_running: boolean }> = {},
@@ -270,10 +270,10 @@ test.describe('realistic: backlog controls, evidence and autopilot', () => {
 
     // 唯一的启动请求必须打到既有 canonical 端点（路径由响应里的 prd_path 编码而来）。
     expect(captures.starts).toHaveLength(1)
-    expect(captures.starts[0]!.url).toContain(
+    expect(captures.starts[0].url).toContain(
       `/api/v1/agent-runner/backlog/prds/${encodePrdPath(STARTABLE_PRD_PATH)}/start`,
     )
-    expect(captures.starts[0]!.body).toContain(REPO_ID)
+    expect(captures.starts[0].body).toContain(REPO_ID)
 
     // fresh-state probe：启动后必须重新拉取列表，而不是只弹本地 toast。
     await expect(page.getByTestId('prd-detail').locator('text=运行中')).toBeVisible()
@@ -333,13 +333,14 @@ test.describe('realistic: backlog controls, evidence and autopilot', () => {
     await expect(evidenceBody).toContainText('共 2 个文件')
   })
 
-  test('rv-2 Autopilot 开关走 PATCH 并如实显示降级条件', async ({ page }) => {
+  test('rv-2 Backlog 自动推进开关走 PATCH 并如实显示运行条件', async ({ page }) => {
     const captures = { starts: [] as StartCapture[], patches: [] as StartCapture[] }
     await installBacklogStubs(page, captures)
 
     await page.goto('/app/backlog')
     const autopilotBar = page.getByTestId('backlog-autopilot')
     await expect(autopilotBar).toBeVisible()
+    await expect(autopilotBar).toContainText('Backlog 自动推进')
     // 初始状态：daemon 未运行 + 自动合并未启用 → 必须显示降级文案而不是「全自动」。
     await expect(page.getByTestId('backlog-autopilot-daemon')).toContainText('Daemon 未运行')
     await expect(page.getByTestId('backlog-autopilot-auto-merge')).toContainText('自动合并未启用')
@@ -354,7 +355,7 @@ test.describe('realistic: backlog controls, evidence and autopilot', () => {
     await expect(autopilotToggle).toBeChecked()
     await expect(page.getByTestId('backlog-autopilot-daemon')).toContainText('Daemon 运行中')
     expect(captures.patches).toHaveLength(1)
-    expect(captures.patches[0]!.body).toContain('"enabled":true')
+    expect(captures.patches[0].body).toContain('"enabled":true')
     // 自动合并状态不能被本开关连带改变。
     await expect(page.getByTestId('backlog-autopilot-auto-merge')).toContainText('自动合并未启用')
   })

@@ -686,6 +686,7 @@ def test_iar_init_renders_every_repository_level_config_field(
     )
 
     rendered_agent_runner = tomllib.loads(config_text)["agent_runner"]
+    assert rendered_agent_runner["backlog"]["auto_advance"] is False
     rendered_settings = AgentRunnerLocalSettings(**rendered_agent_runner)
 
     for section_name in AgentRunnerLocalSettings.model_fields:

@@ -296,11 +296,11 @@ export default function BacklogPage() {
       setAutopilot(updated);
       toast.success(
         enabled
-          ? "已保存：Autopilot 开启，将在下一轮 daemon 生效。"
-          : "已保存：Autopilot 关闭。",
+          ? "已保存：Backlog 自动推进开启，将在下一轮 daemon 生效。"
+          : "已保存：Backlog 自动推进关闭。",
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存 Autopilot 设置失败。");
+      toast.error(error instanceof Error ? error.message : "保存 Backlog 自动推进设置失败。");
       await loadAutopilot();
     } finally {
       setAutopilotSaving(false);

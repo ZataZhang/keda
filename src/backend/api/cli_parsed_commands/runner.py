@@ -687,8 +687,8 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             reconcile_stale_attempts=ctx.runner_settings.daemon.reconcile_stale_attempts,
             reclaim_ttl_seconds=ctx.runner_settings.daemon.reclaim_ttl_seconds,
             # Continuous backlog scheduling: injected as a factory so core never
-            # constructs infrastructure objects itself. Repositories that did not
-            # opt into the fast lane (autopilot.enabled) skip the stage entirely.
+            # constructs infrastructure objects itself. Only repositories with
+            # backlog.auto_advance enabled run the stage.
             # --autopilot/--no-autopilot 的按次覆盖（None = 未传，热读配置）。
             backlog_store_factory=_cli.create_backlog_store,
             autopilot_override=getattr(ctx.parsed, "autopilot_override", None),

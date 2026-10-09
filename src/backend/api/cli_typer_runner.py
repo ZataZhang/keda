@@ -54,6 +54,12 @@ from backend.api.cli_typer_app import (
     daemon_app,
 )
 
+_BACKLOG_AUTO_ADVANCE_OPTION_HELP = (
+    "Enable/disable Backlog scheduling for this daemon run, overriding "
+    "backlog.auto_advance. Scheduling only: it never arms auto-merge "
+    "(that stays behind the safety.auto_merge config switch)."
+)
+
 
 def _run_runner_command(
     ctx: typer.Context,
@@ -323,7 +329,8 @@ def _run_daemon_command(
 
 
 @daemon_app.callback(invoke_without_command=True)
-def daemon_callback(
+@daemon_app.command("run")
+def daemon_run_command(
     ctx: typer.Context,
     interval: DaemonIntervalOption = None,
     agent: RunAgentOption = RunAgentChoice.auto,
@@ -333,9 +340,7 @@ def daemon_callback(
         bool | None,
         typer.Option(
             "--autopilot/--no-autopilot",
-            help="Enable/disable the scheduling autopilot for this daemon run, "
-            "overriding autopilot.enabled. Scheduling only: it never arms "
-            "auto-merge (that stays behind the safety.auto_merge config switch).",
+            help=_BACKLOG_AUTO_ADVANCE_OPTION_HELP,
         ),
     ] = None,
     preset: ModelPresetOption = None,
@@ -346,7 +351,10 @@ def daemon_callback(
     config: ConfigOption = None,
     all_repositories: AllRepositoriesOption = False,
 ) -> None:
-    """Backward-compatible default: `kc daemon` runs the daemon."""
+    """直接运行 daemon，也可通过显式的 ``run`` 子命令运行。
+
+    默认使用当前已初始化仓库；传入 ``--all`` 时则处理注册表中的所有启用仓库。
+    """
     if ctx.invoked_subcommand is not None:
         return
     exit_code = _run_daemon_command(
@@ -368,51 +376,8 @@ def daemon_callback(
     raise typer.Exit(code=exit_code)
 
 
-@daemon_app.command("run")
-def daemon_run_command(
-    ctx: typer.Context,
-    interval: DaemonIntervalOption = None,
-    agent: RunAgentOption = RunAgentChoice.auto,
-    max_issues: MaxIssuesOption = None,
-    concurrency: ConcurrencyOption = None,
-    autopilot: Annotated[
-        bool | None,
-        typer.Option(
-            "--autopilot/--no-autopilot",
-            help="Enable/disable the scheduling autopilot for this daemon run, "
-            "overriding autopilot.enabled. Scheduling only: it never arms "
-            "auto-merge (that stays behind the safety.auto_merge config switch).",
-        ),
-    ] = None,
-    preset: ModelPresetOption = None,
-    model: ModelIdOption = None,
-    reasoning_effort: ReasoningEffortOption = None,
-    repo: RepoOption = None,
-    repo_id: RepoIdOption = None,
-    config: ConfigOption = None,
-    all_repositories: AllRepositoriesOption = False,
-) -> int:
-    """Run the agent runner continuously.
-
-    Defaults to the current initialized repository; pass --all to target
-    every enabled registry entry instead.
-    """
-    return _run_daemon_command(
-        ctx,
-        command="daemon",
-        interval=interval,
-        agent=agent,
-        max_issues=max_issues,
-        repo=repo,
-        repo_id=repo_id,
-        config=config,
-        all_repositories=all_repositories,
-        concurrency=concurrency,
-        autopilot_override=autopilot,
-        preset=preset,
-        model=model,
-        reasoning_effort=reasoning_effort,
-    )
+# 保留旧导入名；根命令和 ``run`` 子命令共用同一份选项定义。
+daemon_callback = daemon_run_command
 
 
 @daemon_app.command("status")

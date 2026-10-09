@@ -374,6 +374,7 @@ def merge_repository_config(
     memory = _merge_optional_model(global_config.memory, repo_settings.memory)
     safety = _merge_optional_model(global_config.safety, repo_settings.safety)
     autopilot = _merge_optional_model(global_config.autopilot, repo_settings.autopilot)
+    backlog = _merge_optional_model(global_config.backlog, repo_settings.backlog)
     validation = _merge_optional_model(global_config.validation, repo_settings.validation)
     prompts = _merge_prompt_config(global_config.prompts, repo_settings.prompts)
     pre_pr_review = _merge_optional_model(global_config.pre_pr_review, repo_settings.pre_pr_review)
@@ -419,6 +420,7 @@ def merge_repository_config(
         memory=memory,
         safety=safety,
         autopilot=autopilot,
+        backlog=backlog,
         validation=validation,
         prompts=prompts,
         pre_pr_review=pre_pr_review,
