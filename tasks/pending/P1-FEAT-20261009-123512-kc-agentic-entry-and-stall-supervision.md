@@ -1,5 +1,7 @@
 # PRD: KedaCode Agent 执行器入口、按需项目预览与停滞任务监督
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/256
+
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8，那里是唯一依赖事实源。
 
