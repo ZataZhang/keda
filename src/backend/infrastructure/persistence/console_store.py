@@ -5,12 +5,13 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 9：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 10：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
   非空 ``status`` 列，记录每条事件写入时冻结的语义状态；v9 新增
-  ``agent_invocation_events`` 通用调用观测账本表，身份不依赖 PRD）。
+  ``agent_invocation_events`` 通用调用观测账本表，身份不依赖 PRD；v10 新增
+  按仓库与归档变体隔离的 ``backlog_prd_snapshots`` 列表快照表）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -129,7 +130,7 @@ class PrdLifecycleEventRecord:
     status: str = ""
 
 
-_SCHEMA_VERSION = 9
+_SCHEMA_VERSION = 10
 
 _CREATE_RUN_RECORDS = """
 CREATE TABLE IF NOT EXISTS run_records (
@@ -230,6 +231,18 @@ CREATE TABLE IF NOT EXISTS monitor_settings (
 )
 """
 
+# schema v9 -> v10：Backlog 列表快照。同一仓库的"默认视图 / 显示已归档"是两个
+# 独立变体，因此主键是 (repo_id, include_archived) 复合键，两行互不覆盖。
+_CREATE_BACKLOG_PRD_SNAPSHOTS = """
+CREATE TABLE IF NOT EXISTS backlog_prd_snapshots (
+    repo_id TEXT NOT NULL,
+    include_archived INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    scanned_at TEXT NOT NULL,
+    PRIMARY KEY (repo_id, include_archived)
+)
+"""
+
 _CREATE_PRD_LIFECYCLE_RUNS = """
 CREATE TABLE IF NOT EXISTS prd_lifecycle_runs (
     run_id TEXT PRIMARY KEY,
@@ -276,9 +289,10 @@ _CREATE_PRD_LIFECYCLE_INDEXES = (
 
 
 class SqliteConsoleStore(InvocationEventStoreMixin):
-    """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` 的 SQLite 实现。
+    """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` /
+    ``IBacklogSnapshotStore`` 的 SQLite 实现。
 
-    三个端口都以鸭子类型实现：本类不 import core，仅保证方法签名与 core
+    各端口都以鸭子类型实现：本类不 import core，仅保证方法签名与 core
     侧同名 dataclass 结构一致。
     """
 
@@ -361,6 +375,10 @@ class SqliteConsoleStore(InvocationEventStoreMixin):
             connection.execute(CREATE_INVOCATION_EVENTS)
             for index_statement in CREATE_INVOCATION_EVENT_INDEXES:
                 connection.execute(index_statement)
+        if current_version < 10:
+            # 附加式迁移：只新增 backlog_prd_snapshots 一张表，既有表、行与列值
+            # 原样保留；建表带 IF NOT EXISTS，重复迁移幂等。
+            connection.execute(_CREATE_BACKLOG_PRD_SNAPSHOTS)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 
@@ -941,6 +959,51 @@ class SqliteConsoleStore(InvocationEventStoreMixin):
             )
             connection.commit()
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Backlog PRD snapshots (IBacklogSnapshotStore duck-type implementation)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def upsert_backlog_snapshot(self, entry: BacklogSnapshotEntry) -> None:
+        """写入或覆盖一个视图变体的 Backlog 快照；失败时抛出异常。"""
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO backlog_prd_snapshots "
+                "(repo_id, include_archived, payload_json, scanned_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(repo_id, include_archived) DO UPDATE SET "
+                "payload_json=excluded.payload_json, scanned_at=excluded.scanned_at",
+                (
+                    entry.repo_id,
+                    int(entry.include_archived),
+                    entry.payload_json,
+                    entry.scanned_at,
+                ),
+            )
+            connection.commit()
+
+    def get_backlog_snapshot(
+        self, *, repo_id: str, include_archived: bool
+    ) -> BacklogSnapshotEntry | None:
+        """读取指定视图变体的快照；不存在时返回 ``None``。"""
+        with self._connect() as connection:
+            snapshot_row = connection.execute(
+                "SELECT repo_id, include_archived, payload_json, scanned_at "
+                "FROM backlog_prd_snapshots WHERE repo_id = ? AND include_archived = ?",
+                (repo_id, int(include_archived)),
+            ).fetchone()
+        if snapshot_row is None:
+            return None
+        return _row_to_backlog_snapshot(snapshot_row)
+
+    def list_backlog_snapshots(self) -> list[BacklogSnapshotEntry]:
+        """列出全部 Backlog 快照行；失败时抛出异常。"""
+        with self._connect() as connection:
+            snapshot_rows = connection.execute(
+                "SELECT repo_id, include_archived, payload_json, scanned_at "
+                "FROM backlog_prd_snapshots"
+            ).fetchall()
+        return [_row_to_backlog_snapshot(snapshot_row) for snapshot_row in snapshot_rows]
+
 
 @dataclass(frozen=True)
 class BacklogQueueEntry:
@@ -982,6 +1045,26 @@ class MonitorSettingsEntry:
     sync_enabled: bool
     sync_interval_seconds: int
     updated_at: str
+
+
+@dataclass(frozen=True)
+class BacklogSnapshotEntry:
+    """一个 Backlog 视图变体的列表快照（与 core 侧同构，供 SQLite 实现使用）。"""
+
+    repo_id: str
+    include_archived: bool
+    payload_json: str
+    scanned_at: str
+
+
+def _row_to_backlog_snapshot(snapshot_row: sqlite3.Row) -> BacklogSnapshotEntry:
+    """把一条 ``backlog_prd_snapshots`` 行还原为同构 dataclass。"""
+    return BacklogSnapshotEntry(
+        repo_id=snapshot_row["repo_id"],
+        include_archived=bool(snapshot_row["include_archived"]),
+        payload_json=snapshot_row["payload_json"],
+        scanned_at=snapshot_row["scanned_at"],
+    )
 
 
 def _row_to_lifecycle_run(run_row: sqlite3.Row) -> PrdLifecycleRunRecord:

@@ -139,6 +139,76 @@ def test_list_issue_comments_requests_comments_field(tmp_path: Path) -> None:
     assert fake_runner.calls == [list(command)]
 
 
+def test_strict_issue_comment_query_raises_on_gh_failure(tmp_path: Path) -> None:
+    """快照扫描严格读取评论时，gh 失败不能伪装成空评论列表。"""
+    command = ("gh", "issue", "view", "23", "--comments", "--json", "comments")
+    fake_runner = FakeProcessRunner(
+        responses={
+            command: CommandResult(
+                command=command,
+                return_code=1,
+                stdout="",
+                stderr="GitHub unavailable",
+            )
+        }
+    )
+    github_client = GitHubCliClient(tmp_path, fake_runner)
+
+    assert github_client.list_issue_comments(23) == []
+    with pytest.raises(RuntimeError, match="Cannot read Issue #23 comments"):
+        github_client.list_issue_comments(23, require_success=True)
+
+
+@pytest.mark.parametrize(
+    ("method_name", "state"),
+    [("find_open_pr_by_head", "open"), ("find_merged_pr_by_head", "merged")],
+)
+def test_strict_pr_head_queries_raise_on_gh_failure(
+    tmp_path: Path, method_name: str, state: str
+) -> None:
+    """快照扫描严格查询 PR 状态时，gh 失败不能伪装成 PR 不存在。"""
+    command = ("gh", "pr", "list", "--head", "issue-23", "--state", state, "--json", "url")
+    fake_runner = FakeProcessRunner(
+        responses={
+            command: CommandResult(
+                command=command,
+                return_code=1,
+                stdout="",
+                stderr="GitHub unavailable",
+            )
+        }
+    )
+    github_client = GitHubCliClient(tmp_path, fake_runner)
+
+    with pytest.raises(RuntimeError):
+        getattr(github_client, method_name)("issue-23", require_success=True)
+
+
+@pytest.mark.parametrize(
+    ("method_name", "state"),
+    [("find_open_pr_by_head", "open"), ("find_merged_pr_by_head", "merged")],
+)
+def test_strict_pr_head_queries_reject_empty_success_response(
+    tmp_path: Path, method_name: str, state: str
+) -> None:
+    """严格 PR 查询的空 stdout 不能被当成成功的无结果响应。"""
+    command = ("gh", "pr", "list", "--head", "issue-23", "--state", state, "--json", "url")
+    fake_runner = FakeProcessRunner(
+        responses={
+            command: CommandResult(
+                command=command,
+                return_code=0,
+                stdout="",
+                stderr="",
+            )
+        }
+    )
+    github_client = GitHubCliClient(tmp_path, fake_runner)
+
+    with pytest.raises(RuntimeError, match="empty response"):
+        getattr(github_client, method_name)("issue-23", require_success=True)
+
+
 def test_list_pr_comments_requests_comments_field(tmp_path: Path) -> None:
     """PR comment loading should request and parse the comments field."""
     command = (

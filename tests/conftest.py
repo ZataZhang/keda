@@ -300,7 +300,7 @@ class FakeGitHubClient(IGitHubClient):
     def get_pr_body_for_issue(self, issue_number: int) -> str | None:
         return self._pr_bodies.get(issue_number)
 
-    def list_issue_comments(self, issue_number: int) -> list[str]:
+    def list_issue_comments(self, issue_number: int, *, require_success: bool = False) -> list[str]:
         self.calls.append({"method": "list_issue_comments", "issue_number": issue_number})
         return list(self._issue_comments.get(issue_number, []))
 
@@ -341,11 +341,11 @@ class FakeGitHubClient(IGitHubClient):
         self.calls.append({"method": "list_pr_comments", "pr_number": pr_number})
         return list(self._pr_comments.get(pr_number, []))
 
-    def find_open_pr_by_head(self, branch: str) -> str | None:
+    def find_open_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
         self.calls.append({"method": "find_open_pr_by_head", "branch": branch})
         return self._open_prs.get(branch)
 
-    def find_merged_pr_by_head(self, branch: str) -> str | None:
+    def find_merged_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
         self.calls.append({"method": "find_merged_pr_by_head", "branch": branch})
         return self._merged_prs.get(branch)
 

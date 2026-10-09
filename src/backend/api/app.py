@@ -9,6 +9,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from backend.api.backlog_sync import (
+    start_backlog_scheduler,
+    stop_backlog_scheduler,
+)
 from backend.api.monitor_sync import (
     start_monitor_scheduler,
     stop_monitor_scheduler,
@@ -28,15 +32,18 @@ _logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Start/stop the long-running dashboard sync loop with the app.
+    """Start/stop the long-running dashboard and Backlog sync loops with the app.
 
     周期同步是唯一的长期后台任务，必须绑定应用生命周期：路由模块 import 不
-    得产生线程，服务关闭时要有界 join，避免残留幽灵线程。
+    得产生线程，服务关闭时要有界 join，避免残留幽灵线程。两条循环共享同一份
+    全局同步设置，但各自持有独立的协调器与线程，互不阻塞。
     """
     start_monitor_scheduler()
+    start_backlog_scheduler()
     try:
         yield
     finally:
+        stop_backlog_scheduler()
         stop_monitor_scheduler()
 
 

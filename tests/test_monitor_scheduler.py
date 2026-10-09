@@ -14,11 +14,12 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+import backend.api.app as app_module
 import backend.api.monitor_sync as monitor_sync
 from backend.api.app import app
 from backend.core.shared.interfaces.runner_console import MonitorSettingsEntry
@@ -26,6 +27,8 @@ from backend.core.use_cases.monitor_snapshots import (
     MonitorSyncCoordinator,
     MonitorSyncScheduler,
 )
+from tests.support.polling import wait_until
+from tests.support.scheduler_threads import scheduler_thread_ids
 
 _IMPORT_PROBE_SCRIPT = """
 import json
@@ -52,16 +55,6 @@ print(
 """
 
 
-def _wait_until(predicate: Callable[[], bool], *, timeout_seconds: float = 5.0) -> bool:
-    """Poll ``predicate`` until it holds or the timeout expires."""
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.01)
-    return predicate()
-
-
 class _ScanRecorder:
     """记录每次扫描请求的 fake ``scan_runner``。"""
 
@@ -81,17 +74,6 @@ class _ScanRecorder:
             return list(self._repo_ids)
 
 
-def _scheduler_thread_ids() -> set[int]:
-    """返回当前存活的调度器线程 ident（按线程 target 归属判定）。"""
-    return {
-        thread.ident
-        for thread in threading.enumerate()
-        if thread.ident is not None
-        and isinstance(getattr(thread, "_target", None), object)
-        and isinstance(getattr(thread._target, "__self__", None), MonitorSyncScheduler)  # noqa: SLF001
-    }
-
-
 def _enabled_settings(interval_seconds: int = 60) -> MonitorSettingsEntry:
     """构造一份开启状态下的同步设置。"""
     return MonitorSettingsEntry(
@@ -104,6 +86,17 @@ def _enabled_settings(interval_seconds: int = 60) -> MonitorSettingsEntry:
 # ─────────────────────────────────────────────────────────────────────────────
 # import 副作用
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_backlog_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把 Backlog 的第二个循环挡住，本模块只验 dashboard 循环。
+
+    app 的 lifespan 现在同时启停 dashboard 与 Backlog 两个循环；不隔离的话这些
+    用例会带着真实 provider 去扫真实仓库，测试结论也不再归属单一被测对象。
+    """
+    monkeypatch.setattr(app_module, "start_backlog_scheduler", lambda: None)
+    monkeypatch.setattr(app_module, "stop_backlog_scheduler", lambda **_kwargs: None)
 
 
 def test_importing_route_modules_starts_nothing() -> None:
@@ -152,19 +145,19 @@ def test_lifespan_owns_exactly_one_scheduler_and_reclaims_it(
     )
 
     with TestClient(app):
-        assert _wait_until(lambda: len(_scheduler_thread_ids()) == 1)
         scheduler = monitor_sync.get_monitor_scheduler()
+        assert wait_until(lambda: len(scheduler_thread_ids(scheduler)) == 1)
         assert scheduler.running is True
         # 重复 start 幂等：不会多出一个调度线程。
         assert monitor_sync.start_monitor_scheduler() is scheduler
         assert monitor_sync.start_monitor_scheduler() is scheduler
-        assert len(_scheduler_thread_ids()) == 1
+        assert len(scheduler_thread_ids(scheduler)) == 1
         # 首扫只为缺失快照的仓库申请，已有快照的仓库等下个周期。
-        assert _wait_until(lambda: recorder.recorded() == ["repo-b"])
+        assert wait_until(lambda: recorder.recorded() == ["repo-b"])
 
     assert scheduler.running is False
     assert monitor_sync._SCHEDULER is None  # noqa: SLF001
-    assert _wait_until(lambda: _scheduler_thread_ids() == set())
+    assert wait_until(lambda: scheduler_thread_ids(scheduler) == set())
 
 
 def test_lifespan_release_is_safe_without_start(monkeypatch) -> None:
@@ -196,13 +189,13 @@ def test_wake_recomputes_the_wait_window() -> None:
     scheduler.start()
     try:
         # 首圈没有缺失快照 → 不扫描，进入 3600 秒等待窗口。
-        assert _wait_until(lambda: scheduler.running)
+        assert wait_until(lambda: scheduler.running)
         time.sleep(0.1)
         assert recorder.recorded() == []
         settings_holder["value"] = _enabled_settings(interval_seconds=60)
         scheduler.wake()
         # 若沿用旧窗口，这里在 3600 秒内不可能出现扫描。
-        assert _wait_until(lambda: recorder.recorded() == ["repo-a"])
+        assert wait_until(lambda: recorder.recorded() == ["repo-a"])
     finally:
         scheduler.stop()
     assert scheduler.running is False
@@ -231,9 +224,9 @@ def test_disabled_settings_never_scan_and_wake_keeps_them_off() -> None:
     )
     scheduler.start()
     try:
-        assert _wait_until(lambda: len(settings_reads) >= 1)
+        assert wait_until(lambda: len(settings_reads) >= 1)
         scheduler.wake()
-        assert _wait_until(lambda: len(settings_reads) >= 2)
+        assert wait_until(lambda: len(settings_reads) >= 2)
     finally:
         scheduler.stop()
 
@@ -265,13 +258,13 @@ def test_stop_timeout_keeps_handle_so_no_second_loop_starts() -> None:
         stuck_thread = scheduler._thread  # noqa: SLF001 - 断言同一句柄未被丢弃
         scheduler.start()
         assert scheduler._thread is stuck_thread  # noqa: SLF001
-        assert len(_scheduler_thread_ids()) == 1
+        assert len(scheduler_thread_ids(scheduler)) == 1
     finally:
         release_reader.set()
         scheduler.stop(timeout_seconds=10)
 
     assert scheduler.running is False
-    assert _wait_until(lambda: _scheduler_thread_ids() == set())
+    assert wait_until(lambda: scheduler_thread_ids(scheduler) == set())
 
 
 def test_settings_reader_failure_does_not_kill_the_loop() -> None:
@@ -295,9 +288,9 @@ def test_settings_reader_failure_does_not_kill_the_loop() -> None:
     scheduler.start()
     try:
         # 第一次读取抛错后进入最小等待窗口，wake 之后第二轮应恢复并请求首扫。
-        assert _wait_until(lambda: len(read_attempts) >= 1)
+        assert wait_until(lambda: len(read_attempts) >= 1)
         scheduler.wake()
-        assert _wait_until(lambda: recorder.recorded() == ["repo-a"])
+        assert wait_until(lambda: recorder.recorded() == ["repo-a"])
     finally:
         scheduler.stop()
 

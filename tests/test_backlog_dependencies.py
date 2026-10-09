@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from backend.core.shared.models.backlog import (
     BacklogDependency,
     BacklogDependencyKind,
@@ -65,6 +67,29 @@ def test_issue_dependency_blocks_until_closed() -> None:
     client._issue_states[7] = "CLOSED"
     blockers = evaluate_backlog_dependencies([prd], client)
     assert blockers[prd.prd_path] is None
+
+
+def test_github_lookup_failure_can_abort_snapshot_scan() -> None:
+    """快照构建启用严格策略时，依赖 Issue 查询失败必须向上抛出。"""
+    prd = _make_prd(
+        "tasks/pending/P1-FEAT-20260101-a.md",
+        dependencies=(
+            BacklogDependency(
+                from_path="tasks/pending/P1-FEAT-20260101-a.md",
+                to_path="#8",
+                kind=BacklogDependencyKind.ISSUE,
+            ),
+        ),
+    )
+    client = FakeGitHubClient()
+
+    def fail_get_issue(_issue_number: int) -> None:
+        raise RuntimeError("GitHub unavailable")
+
+    client.get_issue = fail_get_issue  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="GitHub unavailable"):
+        evaluate_backlog_dependencies([prd], client, fail_on_github_error=True)
 
 
 def test_prd_dependency_blocks_until_upstream_merged() -> None:

@@ -60,7 +60,10 @@ from backend.core.use_cases.create_issue_from_prd import (
 )
 from backend.core.use_cases.backlog_prd_scanner import scan_backlog_prds
 from backend.core.use_cases.backlog_dependencies import evaluate_backlog_dependencies
-from backend.core.use_cases.backlog_state_resolver import resolve_backlog_states
+from backend.core.use_cases.backlog_state_resolver import (
+    BacklogStateResolutionContext,
+    resolve_backlog_states,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -489,8 +492,10 @@ def start_global_backlog(
     resolved_prds = resolve_backlog_states(
         prds,
         github_client=github_client,
-        config=context.config,
-        block_reasons=block_reasons,
+        context=BacklogStateResolutionContext(
+            config=context.config,
+            block_reasons=block_reasons,
+        ),
     )
 
     # Persist settings.
@@ -803,8 +808,10 @@ def advance_backlog_queue(
     resolved_prds = resolve_backlog_states(
         scanned_prds,
         github_client=github_client,
-        config=context.config,
-        block_reasons=block_reasons,
+        context=BacklogStateResolutionContext(
+            config=context.config,
+            block_reasons=block_reasons,
+        ),
     )
     resolved_by_path = {prd.prd_path: prd for prd in resolved_prds}
 

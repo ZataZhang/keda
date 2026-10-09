@@ -24,12 +24,16 @@ _logger = logging.getLogger(__name__)
 def _is_issue_closed(
     issue_number: int,
     github_client: IGitHubClient,
+    *,
+    fail_on_github_error: bool,
 ) -> bool:
     """Return ``True`` if the GitHub Issue is closed."""
     try:
         issue = github_client.get_issue(issue_number)
     except Exception as exc:  # noqa: BLE001 - dependency evaluation stays resilient.
         _logger.info("Failed to look up dependency issue #%s: %s", issue_number, exc)
+        if fail_on_github_error:
+            raise
         return False
     return issue.state.upper() == "CLOSED"
 
@@ -72,15 +76,22 @@ def _detect_cycles(prds: Sequence[BacklogPrd]) -> set[str]:
 def evaluate_backlog_dependencies(
     prds: Sequence[BacklogPrd],
     github_client: IGitHubClient,
+    *,
+    fail_on_github_error: bool = False,
 ) -> dict[str, str | None]:
     """Evaluate dependency satisfaction for each PRD.
 
     Args:
         prds: PRDs from the scanner.
         github_client: GitHub client for live state.
+        fail_on_github_error: Raise GitHub lookup errors so snapshot callers can retain
+            their previous persisted view instead of storing a degraded result.
 
     Returns:
         Mapping from PRD path to block reason, or ``None`` if unblocked.
+
+    Raises:
+        Exception: GitHub lookup failure when ``fail_on_github_error`` is enabled.
     """
     prd_by_path = {prd.prd_path: prd for prd in prds}
     cycle_paths = _detect_cycles(prds)
@@ -122,7 +133,11 @@ def evaluate_backlog_dependencies(
         for dep in prd.delivery_dependencies:
             if dep.kind is BacklogDependencyKind.ISSUE:
                 issue_number = int(dep.to_path.lstrip("#"))
-                if not _is_issue_closed(issue_number, github_client):
+                if not _is_issue_closed(
+                    issue_number,
+                    github_client,
+                    fail_on_github_error=fail_on_github_error,
+                ):
                     blockers.append(f"上游 Issue #{issue_number} 未关闭")
             elif dep.kind is BacklogDependencyKind.PRD:
                 upstream = prd_by_path.get(dep.to_path)

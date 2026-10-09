@@ -386,17 +386,29 @@ def create_issue(
     return result.stdout.strip().splitlines()[-1]
 
 
-def list_issue_comments(client: _ClientProtocol, issue_number: int) -> list[str]:
+def list_issue_comments(
+    client: _ClientProtocol, issue_number: int, *, require_success: bool = False
+) -> list[str]:
     """复用评论条目查询，返回非空正文并保留默认尽力读取语义。
 
     Args:
         client: 当前仓库的 GitHub CLI 客户端。
         issue_number: Issue 编号。
+        require_success: 要求查询成功且评论列表结构完整。
 
     Returns:
-        非空评论正文；查询失败时为列表空值。
+        非空评论正文；默认模式下查询失败时为列表空值。
+
+    Raises:
+        RuntimeError: 严格模式下查询失败或响应结构不完整。
     """
-    return [body for _comment_id, body in list_issue_comment_entries(client, issue_number) if body]
+    return [
+        body
+        for _comment_id, body in list_issue_comment_entries(
+            client, issue_number, require_success=require_success
+        )
+        if body
+    ]
 
 
 def list_issue_comment_entries(
@@ -405,6 +417,7 @@ def list_issue_comment_entries(
     *,
     trusted_only: bool = False,
     body_contains: str | None = None,
+    require_success: bool = False,
 ) -> list[tuple[int, str]]:
     """读取评论 ID 与正文，可选仅返回可授权直发检查点的可信作者。
 
@@ -413,12 +426,13 @@ def list_issue_comment_entries(
         issue_number: Issue 编号。
         trusted_only: 为 True 时要求作者是当前调用者或当前仓库有 triage 及以上权限。
         body_contains: 可选正文子串过滤，在查询作者权限前排除无关评论。
+        require_success: 要求评论查询成功且响应结构完整。
 
     Returns:
         按服务端顺序排列的评论 ID 与正文；默认保留原有尽力读取语义。
 
     Raises:
-        RuntimeError: 可信模式无法读取或确认作者权限、评论身份及元数据。
+        RuntimeError: 严格模式无法读取或确认评论结构，或可信模式无法确认作者权限。
     """
     result = client._run_with_retry(
         [
@@ -434,14 +448,14 @@ def list_issue_comment_entries(
         check=False,
     )
     if result.return_code != 0:
-        if trusted_only:
-            raise RuntimeError(f"Cannot read trusted Issue #{issue_number} comments.")
+        if trusted_only or require_success:
+            raise RuntimeError(f"Cannot read Issue #{issue_number} comments.")
         return []
     raw_data = json.loads(result.stdout or "{}")
-    if trusted_only and (
+    if (trusted_only or require_success) and (
         not isinstance(raw_data, dict) or not isinstance(raw_data.get("comments"), list)
     ):
-        raise RuntimeError("Trusted comment query has no complete comments list.")
+        raise RuntimeError("Issue comment query has no complete comments list.")
     comments = raw_data.get("comments", [])
     author_permissions: dict[str, bool] = {}
     entries: list[tuple[int, str]] = []
@@ -451,6 +465,10 @@ def list_issue_comment_entries(
                 raise RuntimeError("Filtered comment query has malformed body metadata.")
             if body_contains not in raw_comment["body"]:
                 continue
+        if require_success and (
+            not isinstance(raw_comment, dict) or not isinstance(raw_comment.get("body"), str)
+        ):
+            raise RuntimeError("Issue comment query has malformed body metadata.")
         if trusted_only:
             if not isinstance(raw_comment, dict):
                 raise RuntimeError("Trusted comment query has malformed comment metadata.")

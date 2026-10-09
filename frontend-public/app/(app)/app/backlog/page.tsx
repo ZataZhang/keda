@@ -3,7 +3,7 @@
 
 // Backlog 页面：左侧受管理仓库栏 + 右侧 PRD 画布（依赖图/时间轴/列表）。
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,7 +26,7 @@ import { BacklogGraph } from "@/components/backlog/backlog-graph";
 import { BacklogList } from "@/components/backlog/backlog-list";
 import { BacklogTimeline } from "@/components/backlog/backlog-timeline";
 import { RepositoryAgentMatrixSheet } from "@/components/agent-runner/repository-agent-matrix-sheet";
-import { cn } from "@/lib/utils";
+import { cn, formatLocalClockTime } from "@/lib/utils";
 import { useRepositorySelection } from "@/lib/console-repository-selection";
 import {
   CONSOLE_REPO_PANEL_COLLAPSED_KEY,
@@ -55,6 +55,8 @@ import type {
 } from "@/lib/api/types";
 
 const POLL_INTERVAL_MS = 30000;
+// 快照过期（后端 stale=true）时的追平节奏：后台重扫通常几秒内落库，30 秒要等太久。
+const STALE_POLL_INTERVAL_MS = 3000;
 
 type BacklogView = "graph" | "timeline" | "list";
 
@@ -77,9 +79,46 @@ function repoStatusDotClass(repo: RegistryRepositoryEntry): string {
   return repo.path_exists ? "bg-emerald-500" : "bg-amber-500";
 }
 
+/**
+ * 快照新鲜度提示：数据截至时间，过期时追加「后台更新中」。
+ *
+ * @param props - 快照时间与新鲜度标记。
+ * @param props.scannedAt - 快照构建时间；null 表示还没有快照。
+ * @param props.stale - 快照是否已超过后端 TTL 并正在后台重扫。
+ * @param props.loadFailed - 最近一次列表读取是否失败。
+ * @returns 表头右侧的新鲜度文案。
+ */
+function SnapshotFreshnessLabel(props: {
+  scannedAt: string | null;
+  stale: boolean;
+  loadFailed: boolean;
+}) {
+  const { scannedAt, stale, loadFailed } = props;
+  if (loadFailed) {
+    return <span className="text-xs text-rose-500">加载失败</span>;
+  }
+  if (!scannedAt) {
+    return <span className="text-xs text-slate-400 dark:text-slate-500">正在同步…</span>;
+  }
+  return (
+    <span className="text-xs text-slate-400 dark:text-slate-500">
+      {`数据截至 ${formatLocalClockTime(scannedAt)}`}
+      {stale ? " · 后台更新中…" : ""}
+    </span>
+  );
+}
+
 export default function BacklogPage() {
   const [prds, setPrds] = useState<BacklogPrd[]>([]);
   const [loading, setLoading] = useState(true);
+  // 列表数据来自后端本地快照：scannedAt 为 null 表示还没有任何快照（首屏「正在同步」），
+  // stale 为 true 表示这份数据已过期且后台正在重扫，需要按短节奏追平。
+  const [snapshotScannedAt, setSnapshotScannedAt] = useState<string | null>(null);
+  const [snapshotStale, setSnapshotStale] = useState(false);
+  const [snapshotLoadFailed, setSnapshotLoadFailed] = useState(false);
+  // 轮询节奏用 ref 传递：把 stale 放进 effect 依赖会让每次新鲜度翻转都重建整个
+  // 加载流程，表现为列表反复闪骨架屏。
+  const snapshotStaleRef = useRef(false);
   const [includeArchived, setIncludeArchived] = useState(false);
   const {
     repositories,
@@ -131,6 +170,10 @@ export default function BacklogPage() {
           return [];
         }
         setPrds(response.prds);
+        setSnapshotScannedAt(response.scanned_at);
+        setSnapshotStale(response.stale);
+        setSnapshotLoadFailed(false);
+        snapshotStaleRef.current = response.stale;
         return response.prds;
       } catch (error) {
         if (signal?.aborted) {
@@ -138,8 +181,13 @@ export default function BacklogPage() {
         }
         toast.error(error instanceof Error ? error.message : "加载 Backlog 失败。");
         // 失败时清空列表：否则上一次成功的结果会一直挂在依赖图上，冒充当前仓库
-        // 的 PRD（旧仓库停用后查询变 4xx，这个分支就会长期触发）。
+        // 的 PRD（旧仓库停用后查询变 4xx，这个分支就会长期触发）。新鲜度一并清空，
+        // 不能继续报一个无人认领的「数据截至」时间。
         setPrds([]);
+        setSnapshotScannedAt(null);
+        setSnapshotStale(false);
+        setSnapshotLoadFailed(true);
+        snapshotStaleRef.current = false;
         return [];
       }
     },
@@ -152,16 +200,28 @@ export default function BacklogPage() {
     }
     const controller = new AbortController();
     setLoading(true);
-    void loadData(controller.signal).finally(() => {
-      if (!controller.signal.aborted) {
-        setLoading(false);
+    setSnapshotLoadFailed(false);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // 用自排的 setTimeout 而不是固定 setInterval：节奏跟着最近一次响应的 stale
+    // 走（3 秒追平 / 30 秒保活），而依赖数组保持不变，避免每次翻转都重建加载。
+    const poll = async () => {
+      await loadData(controller.signal);
+      if (controller.signal.aborted) {
+        return;
       }
-    });
-    const timer = setInterval(() => void loadData(controller.signal), POLL_INTERVAL_MS);
+      setLoading(false);
+      timer = setTimeout(
+        () => void poll(),
+        snapshotStaleRef.current ? STALE_POLL_INTERVAL_MS : POLL_INTERVAL_MS,
+      );
+    };
+    void poll();
     return () => {
       // 切换仓库或卸载时中止在途请求，旧仓库的慢响应不能再写回 prds。
       controller.abort();
-      clearInterval(timer);
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
   }, [loadData, selectedRepoId]);
 
@@ -476,6 +536,11 @@ export default function BacklogPage() {
           <span className="text-xs text-slate-500">
             {selectedPrd ? "PRD 详情" : `${visiblePrds.length} 个 PRD`}
           </span>
+          <SnapshotFreshnessLabel
+            scannedAt={snapshotScannedAt}
+            stale={snapshotStale}
+            loadFailed={snapshotLoadFailed}
+          />
           <div className="flex-1" />
           <Button
             size="sm"
@@ -530,6 +595,16 @@ export default function BacklogPage() {
                 <Skeleton className="h-40" />
                 <Skeleton className="h-40" />
                 <Skeleton className="h-40" />
+              </div>
+            ) : snapshotLoadFailed && visiblePrds.length === 0 ? (
+              <div className="flex h-40 items-center justify-center text-sm text-rose-500">
+                加载失败，请稍后重试。
+              </div>
+            ) : snapshotScannedAt === null && visiblePrds.length === 0 ? (
+              // 还没有任何快照：这是后台首次扫描在途，不是"这个仓库没有 PRD"，
+              // 也不是错误，因此用中性的同步空态而不是报错样式。
+              <div className="flex h-40 items-center justify-center text-sm text-slate-500">
+                正在同步…
               </div>
             ) : view === "graph" ? (
               <BacklogGraph prds={visiblePrds} onOpenContent={setSelectedPrd} />

@@ -382,6 +382,18 @@ export type BacklogPrd = {
   next_action: BacklogNextAction | null;
 };
 
+/** Backlog 列表读路径的响应：数据来自后端本地快照，新鲜度由 stale 如实交代。 */
+export type BacklogPrdsResponse = {
+  prds: BacklogPrd[];
+  skipped: string[];
+  repo_id: string;
+  include_archived: boolean;
+  /** 快照构建时间；还没有可用快照时为 null，此时页面显示「正在同步」。 */
+  scanned_at: string | null;
+  /** 快照缺失、损坏或已超过后端 TTL：后台正在重扫，前端应短间隔继续轮询。 */
+  stale: boolean;
+};
+
 export type BacklogSettings = {
   repo_id: string;
   max_parallel: number;

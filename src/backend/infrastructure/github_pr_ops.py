@@ -282,8 +282,28 @@ def list_pr_comments(client: _ClientProtocol, pr_number: int) -> list[str]:
     return [str(c.get("body", "")) for c in comments if c.get("body")]
 
 
-def find_open_pr_by_head(client: _ClientProtocol, branch: str) -> str | None:
-    """Return PR URL if an open PR exists for the branch."""
+def find_open_pr_by_head(
+    client: _ClientProtocol, branch: str, *, require_success: bool = False
+) -> str | None:
+    """若分支存在开放 PR，则返回其 URL。"""
+    return _find_pr_by_head_state(client, branch, state="open", require_success=require_success)
+
+
+def find_merged_pr_by_head(
+    client: _ClientProtocol, branch: str, *, require_success: bool = False
+) -> str | None:
+    """若分支存在已合并 PR，则返回其 URL。"""
+    return _find_pr_by_head_state(client, branch, state="merged", require_success=require_success)
+
+
+def _find_pr_by_head_state(
+    client: _ClientProtocol,
+    branch: str,
+    *,
+    state: str,
+    require_success: bool,
+) -> str | None:
+    """按来源分支和 PR 状态查询 URL，并可要求响应足以证明查询成功。"""
     result = client._run_with_retry(
         [
             "gh",
@@ -292,7 +312,7 @@ def find_open_pr_by_head(client: _ClientProtocol, branch: str) -> str | None:
             "--head",
             branch,
             "--state",
-            "open",
+            state,
             "--json",
             "url",
         ],
@@ -300,33 +320,28 @@ def find_open_pr_by_head(client: _ClientProtocol, branch: str) -> str | None:
         check=False,
     )
     if result.return_code != 0:
+        if require_success:
+            raise RuntimeError(f"Cannot query {state} PRs for branch {branch}.")
         return None
+    if require_success and not result.stdout.strip():
+        raise RuntimeError(
+            f"{state.title()} PR query returned an empty response for branch {branch}."
+        )
     raw_prs = json.loads(result.stdout or "[]")
-    if not raw_prs:
+    if require_success and (
+        not isinstance(raw_prs, list)
+        or any(
+            not isinstance(raw_pr, dict)
+            or not isinstance(raw_pr.get("url"), str)
+            or not raw_pr["url"].startswith("https://")
+            for raw_pr in raw_prs
+        )
+    ):
+        raise RuntimeError(
+            f"{state.title()} PR query returned an incomplete response for branch {branch}."
+        )
+    if not isinstance(raw_prs, list):
         return None
-    return str(raw_prs[0].get("url", ""))
-
-
-def find_merged_pr_by_head(client: _ClientProtocol, branch: str) -> str | None:
-    """Return PR URL if a merged PR exists for the branch."""
-    result = client._run_with_retry(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--head",
-            branch,
-            "--state",
-            "merged",
-            "--json",
-            "url",
-        ],
-        cwd=client.repo_path,
-        check=False,
-    )
-    if result.return_code != 0:
-        return None
-    raw_prs = json.loads(result.stdout or "[]")
     if not raw_prs:
         return None
     return str(raw_prs[0].get("url", ""))

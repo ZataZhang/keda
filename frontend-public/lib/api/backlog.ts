@@ -4,7 +4,7 @@ import { get, patch, post } from "./client";
 import type {
   PrdLifecycleDetail,
   BacklogGlobalStartResult,
-  BacklogPrd,
+  BacklogPrdsResponse,
   BacklogSettings,
   BacklogActionResult,
   BacklogAutopilotState,
@@ -21,7 +21,7 @@ export async function fetchBacklogPrds(params: {
   repoId: string;
   includeArchived?: boolean;
   signal?: AbortSignal;
-}): Promise<{ prds: BacklogPrd[]; repo_id: string; include_archived: boolean; scanned_at: string }> {
+}): Promise<BacklogPrdsResponse> {
   const searchParams = new URLSearchParams();
   searchParams.set("repo_id", params.repoId);
   if (params.includeArchived) {

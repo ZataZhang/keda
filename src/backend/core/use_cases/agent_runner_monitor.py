@@ -595,15 +595,26 @@ def _lookup_pr_context(
     issue: IssueSummary,
     github_client: IGitHubClient,
     comments: list[str] | None = None,
+    *,
+    require_success: bool = False,
 ) -> PullRequestContext | None:
-    """Find an open PR context for the issue, if any."""
-    pr_branch = _extract_pr_branch_from_issue(issue, github_client, comments)
+    """查找关联 Issue 的开放 PR 上下文（若存在）。"""
+    pr_branch = _extract_pr_branch_from_issue(
+        issue, github_client, comments, require_success=require_success
+    )
     if pr_branch is None:
         return None
-    pr_context = github_client.get_pull_request_context(pr_branch)
+    if require_success:
+        pr_context = github_client.get_pull_request_context(pr_branch, require_success=True)
+    else:
+        pr_context = github_client.get_pull_request_context(pr_branch)
     if pr_context is not None:
         return pr_context
-    if github_client.find_open_pr_by_head(pr_branch):
+    if require_success:
+        has_open_pr = github_client.find_open_pr_by_head(pr_branch, require_success=True)
+    else:
+        has_open_pr = github_client.find_open_pr_by_head(pr_branch)
+    if has_open_pr:
         # Fall back to a synthetic minimal context so anomalies can still
         # report a PR exists even when full context lookup fails.
         return PullRequestContext(
@@ -620,10 +631,15 @@ def _extract_pr_branch_from_issue(
     issue: IssueSummary,
     github_client: IGitHubClient,
     comments: list[str] | None = None,
+    *,
+    require_success: bool = False,
 ) -> str | None:
-    """Resolve the PR branch associated with the issue, if any."""
+    """解析与 Issue 关联的 PR 分支。"""
     if comments is None:
-        comments = github_client.list_issue_comments(issue.number)
+        if require_success:
+            comments = github_client.list_issue_comments(issue.number, require_success=True)
+        else:
+            comments = github_client.list_issue_comments(issue.number)
     for comment_body in reversed(comments):
         marker = parse_latest_event_marker([comment_body])
         if marker is not None and marker.pr_branch:
