@@ -177,6 +177,204 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
     agent_presets_parser.set_defaults(command="agent presets")
     add_machine_output_options(agent_presets_parser)
 
+    # kc agent lifecycle / preset / fallback：生命周期统一设置的 argparse 门面。
+    # list 是机读命令（--output 枚举），必须与 Typer 侧同口径挂 add_machine_output_options，
+    # 才能通过 tests/test_cli_schema.py 的门面旗标对齐守卫；写命令只带 --json 别名。
+    agent_lifecycle_parser = agent_subparsers.add_parser(
+        "lifecycle", help="View and persist lifecycle stage → preset bindings."
+    )
+    agent_lifecycle_subparsers = agent_lifecycle_parser.add_subparsers(
+        dest="agent_lifecycle_command", required=True
+    )
+    agent_lifecycle_list_parser = agent_lifecycle_subparsers.add_parser(
+        "list", help="List nine lifecycle stages with effective agent/model/effort and sources."
+    )
+    agent_lifecycle_list_parser.set_defaults(command="agent lifecycle list")
+    agent_lifecycle_list_parser.add_argument(
+        "--scope",
+        choices=("effective", "global", "repository"),
+        default="effective",
+        help="Read scope: effective|global|repository.",
+    )
+    add_common_options(agent_lifecycle_list_parser)
+    add_machine_output_options(agent_lifecycle_list_parser)
+
+    agent_lifecycle_set_parser = agent_lifecycle_subparsers.add_parser(
+        "set", help="Bind a lifecycle stage to a named preset (persistent write)."
+    )
+    agent_lifecycle_set_parser.set_defaults(command="agent lifecycle set")
+    agent_lifecycle_set_parser.add_argument("stage", help="Lifecycle stage key to bind.")
+    agent_lifecycle_set_parser.add_argument(
+        "--preset", required=True, help="Named preset to bind to the stage."
+    )
+    agent_lifecycle_set_parser.add_argument(
+        "--scope", required=True, choices=("global", "repository"), help="Write scope."
+    )
+    agent_lifecycle_set_parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Alias of --output json."
+    )
+    add_common_options(agent_lifecycle_set_parser)
+
+    agent_lifecycle_unset_parser = agent_lifecycle_subparsers.add_parser(
+        "unset", help="Remove a lifecycle stage's preset binding (persistent write)."
+    )
+    agent_lifecycle_unset_parser.set_defaults(command="agent lifecycle unset")
+    agent_lifecycle_unset_parser.add_argument("stage", help="Lifecycle stage key to unbind.")
+    agent_lifecycle_unset_parser.add_argument(
+        "--scope", required=True, choices=("global", "repository"), help="Write scope."
+    )
+    agent_lifecycle_unset_parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Alias of --output json."
+    )
+    add_common_options(agent_lifecycle_unset_parser)
+
+    agent_preset_parser = agent_subparsers.add_parser(
+        "preset", help="Upsert named model presets (agent / model / reasoning effort)."
+    )
+    agent_preset_subparsers = agent_preset_parser.add_subparsers(
+        dest="agent_preset_command", required=True
+    )
+    agent_preset_set_parser = agent_preset_subparsers.add_parser(
+        "set", help="Create or update a named model preset (upsert)."
+    )
+    agent_preset_set_parser.set_defaults(command="agent preset set")
+    agent_preset_set_parser.add_argument("name", help="Preset name to create or update.")
+    agent_preset_set_parser.add_argument("--agent", required=True, help="Agent the preset runs.")
+    agent_preset_set_parser.add_argument(
+        "--model", default=None, help="Model id the preset sets (omit = unset)."
+    )
+    agent_preset_set_parser.add_argument(
+        "--reasoning-effort",
+        dest="reasoning_effort",
+        default=None,
+        help="Reasoning effort the preset sets (omit = unset).",
+    )
+    agent_preset_set_parser.add_argument(
+        "--scope", required=True, choices=("global", "repository"), help="Write scope."
+    )
+    agent_preset_set_parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Alias of --output json."
+    )
+    add_common_options(agent_preset_set_parser)
+
+    agent_fallback_parser = agent_subparsers.add_parser(
+        "fallback", help="View and persist executor fallback candidates."
+    )
+    agent_fallback_subparsers = agent_fallback_parser.add_subparsers(
+        dest="agent_fallback_command", required=True
+    )
+    agent_fallback_list_parser = agent_fallback_subparsers.add_parser(
+        "list", help="List ordered executor fallback candidates with presets and budget."
+    )
+    agent_fallback_list_parser.set_defaults(command="agent fallback list")
+    agent_fallback_list_parser.add_argument(
+        "--scope",
+        choices=("effective", "global", "repository"),
+        default="effective",
+        help="Read scope: effective|global|repository.",
+    )
+    add_common_options(agent_fallback_list_parser)
+    add_machine_output_options(agent_fallback_list_parser)
+
+    agent_candidate_parser = agent_fallback_subparsers.add_parser(
+        "candidate", help="Edit the ordered executor fallback candidate list."
+    )
+    agent_candidate_subparsers = agent_candidate_parser.add_subparsers(
+        dest="agent_fallback_candidate_command", required=True
+    )
+    agent_candidate_add_parser = agent_candidate_subparsers.add_parser(
+        "add", help="Insert an executor fallback candidate (persistent write)."
+    )
+    agent_candidate_add_parser.set_defaults(command="agent fallback candidate add")
+    agent_candidate_add_parser.add_argument("--agent", required=True, help="Candidate agent name.")
+    agent_candidate_add_parser.add_argument(
+        "--preset", default=None, help="Optional same-agent preset."
+    )
+    agent_candidate_add_parser.add_argument(
+        "--position", type=int, default=None, help="1-based insert position (default: append)."
+    )
+    agent_candidate_add_parser.add_argument(
+        "--scope", required=True, choices=("global", "repository"), help="Write scope."
+    )
+    agent_candidate_add_parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Alias of --output json."
+    )
+    add_common_options(agent_candidate_add_parser)
+
+    agent_candidate_remove_parser = agent_candidate_subparsers.add_parser(
+        "remove", help="Remove the candidate at a 1-based position (persistent write)."
+    )
+    agent_candidate_remove_parser.set_defaults(command="agent fallback candidate remove")
+    agent_candidate_remove_parser.add_argument(
+        "position", type=int, help="1-based position of the candidate to remove."
+    )
+    agent_candidate_remove_parser.add_argument(
+        "--scope", required=True, choices=("global", "repository"), help="Write scope."
+    )
+    agent_candidate_remove_parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Alias of --output json."
+    )
+    add_common_options(agent_candidate_remove_parser)
+
+    agent_candidate_move_parser = agent_candidate_subparsers.add_parser(
+        "move", help="Move a candidate to a new 1-based position (persistent write)."
+    )
+    agent_candidate_move_parser.set_defaults(command="agent fallback candidate move")
+    agent_candidate_move_parser.add_argument(
+        "position", type=int, help="1-based position of the candidate to move."
+    )
+    agent_candidate_move_parser.add_argument(
+        "--to", type=int, required=True, help="1-based destination position."
+    )
+    agent_candidate_move_parser.add_argument(
+        "--scope", required=True, choices=("global", "repository"), help="Write scope."
+    )
+    agent_candidate_move_parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Alias of --output json."
+    )
+    add_common_options(agent_candidate_move_parser)
+
+    agent_candidate_preset_parser = agent_candidate_subparsers.add_parser(
+        "preset", help="Bind or clear a named preset on one fallback candidate."
+    )
+    agent_candidate_preset_subparsers = agent_candidate_preset_parser.add_subparsers(
+        dest="agent_fallback_candidate_preset_command", required=True
+    )
+    agent_candidate_preset_set_parser = agent_candidate_preset_subparsers.add_parser(
+        "set", help="Bind a same-agent preset to a candidate (persistent write)."
+    )
+    agent_candidate_preset_set_parser.set_defaults(command="agent fallback candidate preset set")
+    agent_candidate_preset_set_parser.add_argument(
+        "position", type=int, help="1-based candidate position to bind."
+    )
+    agent_candidate_preset_set_parser.add_argument(
+        "--preset", required=True, help="Same-agent preset to bind."
+    )
+    agent_candidate_preset_set_parser.add_argument(
+        "--scope", required=True, choices=("global", "repository"), help="Write scope."
+    )
+    agent_candidate_preset_set_parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Alias of --output json."
+    )
+    add_common_options(agent_candidate_preset_set_parser)
+
+    agent_candidate_preset_unset_parser = agent_candidate_preset_subparsers.add_parser(
+        "unset", help="Clear the preset binding on a candidate (persistent write)."
+    )
+    agent_candidate_preset_unset_parser.set_defaults(
+        command="agent fallback candidate preset unset"
+    )
+    agent_candidate_preset_unset_parser.add_argument(
+        "position", type=int, help="1-based candidate position to clear."
+    )
+    agent_candidate_preset_unset_parser.add_argument(
+        "--scope", required=True, choices=("global", "repository"), help="Write scope."
+    )
+    agent_candidate_preset_unset_parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Alias of --output json."
+    )
+    add_common_options(agent_candidate_preset_unset_parser)
+
     worktree_parser = subparsers.add_parser(
         "worktree",
         help="Manage iAR-owned Git worktrees for the current repository.",

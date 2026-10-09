@@ -238,6 +238,32 @@ class AgentRunnerLifecyclePresetsSettings(BaseModel):
         return normalized_value
 
 
+class AgentRunnerFallbackCandidateSettings(BaseModel):
+    """``[[agent_runner.runner.agent_fallback_candidates]]`` 的一条有序回退候选。
+
+    候选 = ``(agent, 可选 preset)``：``agent`` 必填；``preset`` 可空，空表示
+    该候选不注入模型参数（与历史 ``agent_fallback_order`` 逐 agent 等价的形态）。
+    预设是否已定义、``preset.agent`` 是否与候选 agent 一致、同一 ``(agent,
+    preset)`` 是否重复等**语义校验**由写入侧与解析期负责，配置层只校验形状。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str
+    preset: str | None = None
+
+    @field_validator("agent", "preset")
+    @classmethod
+    def _reject_blank_values(cls, value: str | None) -> str | None:
+        """拒绝空字符串；``preset=None`` 表示该候选不绑定预设。"""
+        if value is None:
+            return None
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("fallback candidate field must be a non-empty string")
+        return normalized_value
+
+
 class AgentRunnerGitSettings(BaseModel):
     """Git publishing configuration."""
 
@@ -355,6 +381,12 @@ class AgentRunnerRunnerSettings(BaseModel):
     # or the provider is capacity-limited. Commands that are not installed on
     # this machine are automatically skipped. Set to [] to disable switching.
     agent_fallback_order: list[str] = Field(default_factory=lambda: ["claude", "kimi", "codex"])
+    # 有序回退候选（agent + 可选 preset）。非空时在运行时**整体接管**
+    # agent_fallback_order（旧字段只作为无预设候选的兼容读取路径）；同一 agent
+    # 可以以不同 preset 重复出现。空列表 = 沿用旧的纯 agent 名单语义。
+    agent_fallback_candidates: list[AgentRunnerFallbackCandidateSettings] = Field(
+        default_factory=list
+    )
     # Maximum number of agent switches before the Issue is marked failed.
     # With order [a, b, c] and max_agent_switches=2, up to 3 agents are tried.
     max_agent_switches: int = 2

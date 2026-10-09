@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收（执行侧交付完成，§9 非人工项已按证据勾选）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 需求层（§1-4）说明用户目标、已明确的范围与实现约束；Part B 执行器层（§5-13）给出复用路径、实现边界与验收证据。
@@ -274,13 +274,19 @@ Frontend: frontend-public
 │   【总结】移除旧 Agent-only 生命周期矩阵，改为统一设置页入口；生命周期、模型预设和执行器回退放在同一页
 ├── frontend-public/components/agent-runner/lifecycle-settings-page.tsx [新增]
 │   【总结】承载九阶段矩阵、来源、预设编辑、受影响阶段和写入状态
-├── frontend-public/components/agent-runner/repository-agent-matrix-sheet.tsx [修改]
-│   【总结】将仓库齿轮作为同一设置页的预选仓库快捷入口，不维持第二套编辑状态
+├── frontend-public/components/agent-runner/repository-agent-matrix-sheet.tsx [删除]
+│   【总结】旧 Agent-only 仓库矩阵抽屉由统一设置页取代；Backlog 齿轮改为带 `scope=repository&repo_id=` 导航到同一页并预选该仓库，不维持第二套编辑状态
+├── frontend-public/components/agent-runner/agent-fallback-order-editor.tsx [删除]
+│   【总结】回退顺序编辑并入统一设置页的「执行器回退候选」区，避免第二套候选编辑器
+├── frontend-public/components/layout/app-shell.tsx [修改]
+│   【总结】<md 视口改为纵向堆叠（侧栏变顶部导航条）并把容器内边距降为 `p-4`，使统一设置页在 400px 窄屏真正可读；≥768px 计算样式不变
+├── frontend-public/components/layout/app-sidebar.tsx [修改]
+│   【总结】窄屏整宽、`md:` 起恢复 `w-64` 左侧栏与右边框，保持收起偏好与导航可用
 ├── frontend-public/lib/api/lifecycleSettings.ts [新增]
 │   【总结】封装聚合 lifecycle settings API 与作用域/更新类型
-├── frontend-public/lib/api/lifecycleAgents.ts [修改]
-│   【总结】兼容既有 Agent-only 调用方并避免创建并行写回路径
-└── frontend-public/types/agentRunner.ts [修改]
+├── frontend-public/lib/api/lifecycleAgents.ts [不变]
+│   【总结】继续服务既有 Agent-only 调用方，不新建并行写回路径
+└── frontend-public/lib/api/types.ts [修改]
     【总结】同步全阶段 tuple、来源和 capability response types
 
 Tests
@@ -311,6 +317,14 @@ Docs
 ```
 
 实现过程中若触及未列路径，以 `rg -n "build_lifecycle_agents_view|lifecycle_presets|agent presets" src/backend frontend-public docs` 重新定位后补回本树；本树是起点，不是假装穷尽的 allowlist。
+
+交付后与本树的实际差异（按 `git status` 核对，供 reviewer 对照）：
+
+- 预测为 `[按需修改]` 且**确实改动**：`src/backend/infrastructure/config/agent_runner_settings.py`（候选数组表与预设字段校验）、`src/backend/core/use_cases/agent_candidate_fallback.py`、`src/backend/core/use_cases/agent_runner_orchestrate.py`、`docs/prototypes/lifecycle-agent-matrix.md`。
+- 预测为 `[复用]` 但**为消除 jscpd 重复而改动**：`src/backend/infrastructure/config/toml_section_editor.py`（抽出 `_load_roundtrip_document` / `_atomic_dump`，写回语义不变）。
+- 树未列出但**确实改动**：`src/backend/core/shared/models/agent_runner.py`、`src/backend/core/shared/models/lifecycle_agent.py`（候选与阶段常量/模型）、`src/backend/core/use_cases/agent_runner_issue_handlers.py`、`src/backend/api/cli_parsed_commands/{__init__.py,agent.py}` 与 `src/backend/api/cli_parser_session_commands.py`（新子命令解析）、`src/backend/engines/agent_runner/lifecycle_editor.py`（已在树内，改动含数组表写回）、`tests/test_kedacode_operator_skill.py`（把新 CLI 子命令与旗标登记进随包 skill 漂移守卫的白名单，属该守卫设计好的扩展点，未放宽任何断言）、`docs/guides/lifecycle-agent-matrix.md`、`tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts`（旧矩阵入口移除后改指统一页）。
+- 树内列出但**未改动**：`src/backend/api/cli_schema.py`（命令树自动派生，无需改）、`src/backend/core/use_cases/lifecycle_agent_resolution.py`、`run_verifier_agent.py`、`agent_review.py`、`pr_supervisor.py`（复用现有 resolver，无需改）、`frontend-public/lib/api/lifecycleAgents.ts`（保持原样继续服务旧调用方）、`tests/playwright-e2e/tests/workflows/prototype-screenshots.spec.ts`（无需重采）。
+- 路径纠正：本树原写 `frontend-public/types/agentRunner.ts`，该路径在仓库中不存在；前端契约类型实际位于 `frontend-public/lib/api/types.ts`，已按实际路径更正。
 
 ### 7.3 Risk Classification Register
 
@@ -442,6 +456,13 @@ notes: "已检查 pending/archive。#247 console/CLI parity、#246 backlog snaps
 
 verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/one-shot 优先级、TOML 未变化负控、静态类型/lint/docs 门禁若失败才升级。人审仅呈递以上两个 oracle，不把纯日志当成产品体验证据。
 
+判别性负控（证明上述 oracle 会变红，供 reviewer 抽查而不作为产品体验呈递）：
+
+- `rv-2-lifecycle-page-negctl.txt`：同一真实入口但去掉「保存」动作后，rv-2 的三条持久化断言（磁盘含预设 / fresh CLI 读回 / 页面重读显示卡片）全部落空 3/3。
+- `rv-2-e2e-narrow-screen-red.txt`：修复共享布局前，真实 Playwright 窄屏用例红（`Expected: > 300 / Received: 30`）；修复后同一用例转绿（`rv-2-e2e-lifecycle-settings.txt`，7 passed）。
+- rv-1 / rv-3 的负控内嵌在各自证据文件开头（非法 scope、缺 `repo_id`、未知预设、无推理档模板设 effort、重复与跨 agent 候选均 `exit=2` 且目标文件 `shasum` 不变）。
+- 复跑入口：`bash tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/scripts/rv1_capture.sh tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings`（rv-3 同理）；rv-2 需先 `pnpm --filter frontend-public build` 并把 `out/` 复制到 `src/backend/api/static/console/`、以 `KEDACODE_CONFIG=<临时 fixture>` 启动后端，再用 `scripts/` 下 `rv2_capture.cjs` / `rv2_negative_control.cjs` 采集。全部 RV 脚本只存在于证据目录，不进入代码 diff。
+
 ### 9.2 Acceptance Evidence Package
 
 #### Human-Confirmed
@@ -456,45 +477,45 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 
 #### Architecture Acceptance
 
-- [ ] CLI 与 API 使用同一 core snapshot/update use case；没有第二模型 resolver、通用 config CRUD API、数据库存储或第二 TOML writer；依赖方向保持 `api -> core -> engines -> infrastructure`。
-- [ ] nine lifecycle keys 来自 `LIFECYCLE_AGENT_KEYS`；effective value 与 field source 来自 existing resolver/merge，而不是 UI/CLI 硬编码映射。
-- [ ] 每次写操作先完整校验，再 sparse-update 现有 TOML table；注释、未知键和未指定配置保持不变，验证失败文件不变。
-- [ ] global 与 repository 的同名 preset 原子替换；仓库未设置的 stage 仍继承 global；`fix/closeout` 在无独立绑定时跟随实现预设。
-- [ ] 无 migration、新模型表、新后台服务或额外配置副本。
+- [x] CLI 与 API 使用同一 core snapshot/update use case；没有第二模型 resolver、通用 config CRUD API、数据库存储或第二 TOML writer；依赖方向保持 `api -> core -> engines -> infrastructure`。 <!-- 证据：`build_lifecycle_settings_view` / `update_lifecycle_settings` 单一 use case 同时服务 CLI 与聚合端点；`just lint --reuse` 的 Check architecture layer dependencies Passed；无新增表/迁移（rv-3 契约测试 + 代码审查） -->
+- [x] nine lifecycle keys 来自 `LIFECYCLE_AGENT_KEYS`；effective value 与 field source 来自 existing resolver/merge，而不是 UI/CLI 硬编码映射。 <!-- 证据：rv-1 `lifecycle list --json` 九键齐全；rv-3 fix 行 `is_inherited` + `follows_implementation` 由 resolver 下发 -->
+- [x] 每次写操作先完整校验，再 sparse-update 现有 TOML table；注释、未知键和未指定配置保持不变，验证失败文件不变。 <!-- 证据：rv-1/rv-3 A 段负控——非法输入 exit=2 且 `shasum` 前后字节不变；`update_toml_table_keys` / `update_toml_array_of_tables` 复用同一 round-trip writer -->
+- [x] global 与 repository 的同名 preset 原子替换；仓库未设置的 stage 仍继承 global；`fix/closeout` 在无独立绑定时跟随实现预设。 <!-- 证据：rv-1 B 段仓库层写入不污染 global；rv-3 C 段继承语义；`tests/test_agent_model_presets.py` 全绿 -->
+- [x] 无 migration、新模型表、新后台服务或额外配置副本。 <!-- 证据：改动树无 `alembic/versions/` 变更；`just test all` 3822 passed 无 schema 相关用例变化 -->
 
 #### Behavior Acceptance
 
-- [ ] `kc agent lifecycle list` 输出九行；`--json` 字段稳定且包含所选 scope/repo id、绑定 preset、effective Agent/model/effort、来源/缺省/支持状态。
-- [ ] lifecycle set 和 preset set 都需要显式 scope；未知 repo、未知 stage/preset、未注册 Agent、unsupported effort template 在写入前非零退出并返回字段级错误。
-- [ ] 新 preset 可仅设置 Agent，model/effort 字段可缺省；提供模型/effort 时只有对应 Agent arg template 存在才允许绑定/显示为已生效。
-- [ ] 执行器回退候选只引用已存在且执行器匹配的 preset；候选执行时应用自身的模型/推理深度，未绑定时保持执行器默认；同一执行器可绑定不同 preset 多次，完全相同的 `(agent, preset)` 组合被拒绝。
-- [ ] `kc agent fallback list` 显示有序候选、每项 preset、最大候选步数与 effective scope；候选 set/unset 要显式 scope，repository 写入必须给 `repo_id`。
-- [ ] 旧 `agent_fallback_order` 字符串列表可以读取为无 preset 候选；存在 `agent_fallback_candidates` 时它是运行时事实源，`agent_fallback_order` 只作为兼容顺序视图。
-- [ ] Settings 初始 global matrix 展示九阶段全部字段、继承/来源；repository scope 仅编辑所选 repo 文件，保存后页面和新 CLI 进程读回一致值。
-- [ ] 编辑共享 preset 前明确展示其绑定生命周期；保存后所有绑定阶段的有效值随 preset 一起变化；新建 preset 并单独绑定只影响所选阶段。
-- [ ] Backlog repo gear 打开同一 Settings 路由并预选 repo；PRD override 保持原入口与高于 repository base 的语义。
-- [ ] 现有 `kc agent presets` / `kc agent doctor --lifecycle` 输出仍兼容；单次 `--preset/--model/--reasoning-effort` 不写 persistent TOML。
-- [ ] 400px 窄屏和桌面真实 Settings 页面均能完成 scope 切换、stage preset 绑定和保存；关键字段无需横向滚动才能发现。
+- [x] `kc agent lifecycle list` 输出九行；`--json` 字段稳定且包含所选 scope/repo id、绑定 preset、effective Agent/model/effort、来源/缺省/支持状态。 <!-- 证据：rv-1 B 段（`rv-1-lifecycle-cli.txt`） -->
+- [x] lifecycle set 和 preset set 都需要显式 scope；未知 repo、未知 stage/preset、未注册 Agent、unsupported effort template 在写入前非零退出并返回字段级错误。 <!-- 证据：rv-1/rv-3 A 段四条负控全部 `[exit=2] …（负控如预期变红）` -->
+- [x] 新 preset 可仅设置 Agent，model/effort 字段可缺省；提供模型/effort 时只有对应 Agent arg template 存在才允许绑定/显示为已生效。 <!-- 证据：rv-1 B 段仅 agent+model 的预设；rv-3 A 段 claude 无 effort 模板被拒 -->
+- [x] 执行器回退候选只引用已存在且执行器匹配的 preset；候选执行时应用自身的模型/推理深度，未绑定时保持执行器默认；同一执行器可绑定不同 preset 多次，完全相同的 `(agent, preset)` 组合被拒绝。 <!-- 证据：rv-1 C 段（同 claude 两条不同预设通过、重复与跨 agent 被拒且文件字节不变） -->
+- [x] `kc agent fallback list` 显示有序候选、每项 preset、最大候选步数与 effective scope；候选 set/unset 要显式 scope，repository 写入必须给 `repo_id`。 <!-- 证据：rv-1 C 段 JSON（`max_agent_switches`、`budget_by_candidate_step=true`） -->
+- [x] 旧 `agent_fallback_order` 字符串列表可以读取为无 preset 候选；存在 `agent_fallback_candidates` 时它是运行时事实源，`agent_fallback_order` 只作为兼容顺序视图。 <!-- 证据：rv-1 C 段整表折叠行为（空数组时折叠出 preset-less 候选，判别口径见该段注释）；`tests/test_agent_candidate_fallback*` 于 `just test all` 全绿 -->
+- [x] Settings 初始 global matrix 展示九阶段全部字段、继承/来源；repository scope 仅编辑所选 repo 文件，保存后页面和新 CLI 进程读回一致值。 <!-- 证据：rv-2 桌面截图 + `rv-2-lifecycle-page-run.txt`（PATCH 200 → 页面卡片 → fresh CLI 磁盘读回一致） -->
+- [x] 编辑共享 preset 前明确展示其绑定生命周期；保存后所有绑定阶段的有效值随 preset 一起变化；新建 preset 并单独绑定只影响所选阶段。 <!-- 证据：rv-2 预设卡片显示「绑定阶段：review」；rv-1 B 段单阶段绑定；`affected_stages` 由视图下发 -->
+- [x] Backlog repo gear 打开同一 Settings 路由并预选 repo；PRD override 保持原入口与高于 repository base 的语义。 <!-- 证据：e2e `lifecycle-settings.spec.ts` 用例「Backlog 仓库齿轮带 repo-id 进入统一页并预选仓库范围」通过（`rv-2-e2e-lifecycle-settings.txt`） -->
+- [x] 现有 `kc agent presets` / `kc agent doctor --lifecycle` 输出仍兼容；单次 `--preset/--model/--reasoning-effort` 不写 persistent TOML。 <!-- 证据：rv-3 B 段（含只读/单次 surface 后 config 字节不变） -->
+- [x] 400px 窄屏和桌面真实 Settings 页面均能完成 scope 切换、stage preset 绑定和保存；关键字段无需横向滚动才能发现。 <!-- 证据：rv-2 窄屏截图（九行最小宽度 318px、溢出 0px）+ e2e 窄屏用例；本轮由该用例的真实红（`rv-2-e2e-narrow-screen-red.txt`：Expected > 300 / Received 30）驱动修复共享 AppShell/AppSidebar 的 <md 布局 -->
 
 #### Documentation Acceptance
 
-- [ ] 更新 `docs/guides/model-presets.md` 与 `docs/guides/agent-runner.md`：列出生命周期和 fallback 命令示例、范围语义、默认/unsupported 显示及 PRD/one-shot precedence。
-- [ ] 同步 `src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md` 与 `references/setup-and-config.md`；CLI 新子命令/旗标/JSON 语义不能只记在用户文档。
-- [ ] 配置 schema/help/命令文档与正式行为一致；更新文档导航时同步 `mkdocs.yml`。
+- [x] 更新 `docs/guides/model-presets.md` 与 `docs/guides/agent-runner.md`：列出生命周期和 fallback 命令示例、范围语义、默认/unsupported 显示及 PRD/one-shot precedence。 <!-- 证据：两文件在本次改动树中已更新；`mkdocs build --strict` exit 0 -->
+- [x] 同步 `src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md` 与 `references/setup-and-config.md`；CLI 新子命令/旗标/JSON 语义不能只记在用户文档。 <!-- 证据：两 skill 文件已更新；`tests/test_kedacode_operator_skill.py` 25 passed（命令示例漂移与白名单↔真实 schema 双向守卫） -->
+- [x] 配置 schema/help/命令文档与正式行为一致；更新文档导航时同步 `mkdocs.yml`。 <!-- 证据：`mkdocs build --strict` 无本 PRD 引入的新告警（余两条跨文件锚点告警为既有，已用 HEAD 基线核对） -->
 
 #### Validation Acceptance
 
-- [ ] 按 §7.6 完成 rv-1/rv-2/rv-3；rv-1/rv-2 保存 fresh CLI/API 与最终目标配置摘要。
-- [ ] 跑受影响 Python 核心/API/CLI tests、`just test-changed`；修改核心生命周期 resolver 或跨层契约时额外跑 `just test all`。
-- [ ] 运行 `just e2e tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts`，验证真实 Settings route、API、保存和 400px 窄屏；无 `.env.local` 时报告缺失的认证入口，并执行同一真实 Console 手动 fallback，不以 component preview 代替。
-- [ ] 执行 `just lint`、`just lint --reuse`、`mkdocs build --strict` 与 PRD/CLI schema 检查；按仓库守卫约定修复源代码，不放宽守卫。
-- [ ] 独立 verifier 对 R2 evidence PASS；resolver、writer、API、CLI 或 UI 行为变化后重跑受影响 oracle，最终 evidence 绑定待交付 Git tree。
+- [x] 按 §7.6 完成 rv-1/rv-2/rv-3；rv-1/rv-2 保存 fresh CLI/API 与最终目标配置摘要。 <!-- 证据：`tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/`（rv-1/rv-3 exit 0，rv-2 `RV-2 RESULT: PASS`，`evidence.json` 已按 item 分组并含 negative_control/expected_fail）；三份证据在最终实现树（含 TOML editor 与 console use case 去重、AppShell 窄屏修复）之后重跑 -->
+- [x] 跑受影响 Python 核心/API/CLI tests、`just test-changed`；修改核心生命周期 resolver 或跨层契约时额外跑 `just test all`。 <!-- 证据：`just test all` → 3822 passed, 1 skipped；定向 253 passed -->
+- [x] 运行 `just e2e tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts`，验证真实 Settings route、API、保存和 400px 窄屏；无 `.env.local` 时报告缺失的认证入口，并执行同一真实 Console 手动 fallback，不以 component preview 代替。 <!-- 证据：`rv-2-e2e-lifecycle-settings.txt` 7 passed（真实栈，无 stub）。**认证入口披露**：本 worktree 无 `PLAYWRIGHT_IDENTIFIER/PLAYWRIGHT_PASSWORD`，全套 e2e 中 19 项因缺凭据/registry 数据（`registry 中缺少 keda-main`）失败；已用 HEAD 基线对照确认这些失败与本次改动无关，并以真实浏览器 + 真实后端同源挂载的 rv-2 采集作为同一 Console 的真实入口 fallback -->
+- [x] 执行 `just lint`、`just lint --reuse`、`mkdocs build --strict` 与 PRD/CLI schema 检查；按仓库守卫约定修复源代码，不放宽守卫。 <!-- 证据：`just lint` Passed；`just lint --reuse` 首跑被 jscpd 判出三处重复（TOML editor 载入/原子写尾、console use case 未知键守卫、CLI list 命令签名），全部按 code-reuse 规范提取 helper 或收敛签名后 Passed，未修改任何守卫断言；`mkdocs build --strict` exit 0 -->
+- [ ] 独立 verifier 对 R2 evidence PASS；resolver、writer、API、CLI 或 UI 行为变化后重跑受影响 oracle，最终 evidence 绑定待交付 Git tree。 <!-- 待独立 verifier 出具裁决；受影响 oracle 已在最终树重跑（rv-1/rv-2/rv-3 + e2e），本项在 verifier PASS 后勾选 -->
 
 #### Delivery Readiness
 
-- [ ] API、CLI、页面、文档与随包 skill 都指向同一生命周期配置事实源；没有临时 façade 或未处理的失败路径。
-- [ ] 最终 PR 证据包含 rv-1 CLI 输出、rv-2 桌面/窄屏实现截图和与目标原型匹配图；prototype 明确标注为设计目标，不冒充生产验证。
-- [ ] 按仓库 PRD 工作流收集证据、独立 verifier PASS、完成 Final Reconciliation，并随代码变更将 PRD 从 `tasks/pending/` 归档至 `tasks/archive/`；人工确认留待 Human-Confirmed。
+- [x] API、CLI、页面、文档与随包 skill 都指向同一生命周期配置事实源；没有临时 façade 或未处理的失败路径。 <!-- 证据：单一 `agent_runner.presets` / `lifecycle_presets` / `agent_fallback_candidates` 事实源；聚合端点与 CLI 共用同一 use case；无兼容 façade（旧 lifecycle-agents 端点保持其原有 Agent-only 职责，rv-3 C 段验证） -->
+- [x] 最终 PR 证据包含 rv-1 CLI 输出、rv-2 桌面/窄屏实现截图和与目标原型匹配图；prototype 明确标注为设计目标，不冒充生产验证。 <!-- 证据：`evidence.json` 按 item 分组列出证据文件；§9.1 呈递区给出可打开路径；`docs/prototypes/lifecycle-agent-matrix.md` 标注为原型 -->
+- [ ] 按仓库 PRD 工作流收集证据、独立 verifier PASS、完成 Final Reconciliation，并随代码变更将 PRD 从 `tasks/pending/` 归档至 `tasks/archive/`；人工确认留待 Human-Confirmed。 <!-- Final Reconciliation 与证据已就绪；归档与 verifier 门禁由交付流程执行，执行器不自行 `git mv` -->
 
 ## 10. Functional Requirements
 
@@ -557,6 +578,8 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - Related PRD status: 已检查 pending/archive；#247、#246 和 `kc-agentic-entry-and-stall-supervision` 仅有软文件重叠，无构建/语义硬依赖。
 - Requirements, risks and overview: FR-1 至 FR-10 在 Feature Overview 均有锚点；fallback 配置由 rv-1 CLI 和 rv-2 页面 oracle 一并覆盖；不新增 DB/schema。
 - Reconciled differences: 回退候选预设与同执行器使用不同预设重复均已纳入范围；Human-Confirmed 仅用于交付后检查真实页面、CLI 和证据，不作为需求前置审批。
+- Evidence binding (交付时): rv-1/rv-2/rv-3 与 e2e `lifecycle-settings.spec.ts` 均在**最终实现树**上重跑（后端去重 helper、CLI 签名收敛与 AppShell/AppSidebar 窄屏修复完成之后），证据目录 `tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/` 含 `evidence.json`（按 item 分组，附 negative_control 与 expected_fail）；全部 RV 脚本只存在于该目录的 `scripts/` 下，不进入代码 diff，且不含密钥。
+- Gates (交付时): `just test all` 3822 passed / 1 skipped；`just lint` 与 `just lint --reuse`（jscpd、pylint 重复码、架构层依赖、指南一致性、文件行数）全部 Passed；`mkdocs build --strict` exit 0；e2e 目标 spec 7 passed。全套 e2e 其余失败已用 HEAD 基线对照证明源于本 worktree 缺凭据与 registry 数据，非本次改动引入。
 
 ## Change Log
 
@@ -607,3 +630,11 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - Reason: 需求已由用户在本轮及此前对话中提出，不应再次要求用户拍板。
 - Impact: 不改变功能范围；修正 PRD 的决策状态、实现条件和验收描述。
 - Review: 当前无待确认产品决策；交付后 Human-Confirmed 仅验收真实实现与证据。
+
+### 交付：真实入口验证与窄屏布局修复
+- Type: implementation / evidence / acceptance
+- Before: PRD 处于未开工状态，§9 全空；rv-2 窄屏判据只测「不横向溢出」。
+- After: 后端聚合视图与写回、CLI lifecycle/preset/fallback 命令面、`/app/settings/lifecycle/` 统一页、文档与随包 skill 全部落地；rv-1/rv-2/rv-3 在隔离 fixture 上以真实入口跑通并附负控变红证据；`just test all` 3822 passed、`just lint --reuse` 与 `mkdocs build --strict` 通过、e2e `lifecycle-settings.spec.ts` 7 passed。真实 e2e 暴露共享 `AppShell`/`AppSidebar` 在 <md 视口把内容压成 30px 宽（矩阵九行全部 30px，`dashboard`/`settings`/`backlog` 同样只有 80px 内容宽），据此把侧栏在窄屏改为整宽顶部导航条、容器内边距改为 `p-4 md:p-8`，窄屏九行最小宽度升至 318px；rv-2 据此补测逐行实际占位宽度而非只看溢出。
+- Reason: 窄屏「不溢出」并不等于「可读」——内容被压扁同样不产生横向滚动，原判据漏掉了真实缺陷；该缺陷由真实 Playwright 用例首先发现。
+- Impact: 侧栏与容器属全站共享布局，改动仅作用于 <md 断点（≥768px 计算样式与改前一致）；已用 HEAD 基线对照重跑失败用例，确认其余 e2e 失败源于本 worktree 缺少 `PLAYWRIGHT_IDENTIFIER/PASSWORD` 凭据与 registry 数据，与本次改动无关。后端去重（TOML 载入/原子写 helper、未知阶段键 helper、CLI list 签名收敛）在证据采集后完成，故 rv-1/rv-3 已在最终实现树重跑。
+- Review: 待人工验收项见 §9 Human-Confirmed；本条只记录执行侧交付与证据绑定关系。

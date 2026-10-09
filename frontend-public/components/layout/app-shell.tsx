@@ -8,10 +8,10 @@ interface AppShellProps {
 /** Main application shell wrapping sidebar and content. */
 export function AppShell({ children }: AppShellProps) {
   return (
-    <div className="flex min-h-svh">
+    <div className="flex min-h-svh flex-col md:flex-row">
       <AppSidebar />
       <main className="flex-1 overflow-auto">
-        <div className="container mx-auto p-8">
+        <div className="container mx-auto p-4 md:p-8">
           <UpdateBanner />
           {children}
         </div>

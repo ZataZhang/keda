@@ -10,6 +10,7 @@ rv-7（agent 标签写注册块且重复被拒）以及 PRD 覆盖读写（rv-4 
 from __future__ import annotations
 
 import subprocess
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -77,6 +78,12 @@ def console_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dic
 
 def _lifecycle_entry(view: dict, key: str) -> dict:
     return next(entry for entry in view["lifecycles"] if entry["key"] == key)
+
+
+def _parse_toml(path: Path) -> dict:
+    """读取磁盘上的 TOML，作为断言的事实源（不看内存状态）。"""
+    with path.open("rb") as handle:
+        return tomllib.load(handle)
 
 
 def test_get_global_and_repository_views(console_env: dict) -> None:
@@ -430,3 +437,262 @@ def test_prd_override_view_excludes_planner(console_env: dict) -> None:
     assert "planner" in rejected.json()["detail"]
     # 被拒绝的写回不落盘。
     assert "lifecycle_agents" not in console_env["prd_file"].read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# 聚合生命周期设置端点（/lifecycle-settings）：矩阵 + 预设 + 绑定
+# ---------------------------------------------------------------------------
+
+
+def test_lifecycle_settings_aggregate_view_shape(console_env: dict) -> None:
+    """GET /lifecycle-settings 返回九阶段生效值 + 逐字段来源 + 预设清单 + 回退候选三段。"""
+    client = console_env["client"]
+    view = client.get("/api/v1/agent-runner/lifecycle-settings", params={"scope": "global"}).json()
+    assert view["scope"] == "global"
+    assert len(view["lifecycles"]) == 9
+    assert set(view["field_source_vocabulary"]) >= {
+        "preset",
+        "agent_default",
+        "not_supported",
+    }
+    for row in view["lifecycles"]:
+        assert set(row["field_sources"]) == {
+            "agent",
+            "preset",
+            "model",
+            "reasoning_effort",
+        }
+        assert row["affected_stages"] == []
+    implementation = next(r for r in view["lifecycles"] if r["key"] == "implementation")
+    assert implementation["preset_name"] is None
+    assert "fallback" in view and "presets" in view
+
+
+def test_preset_create_and_bind_writes_config_toml(console_env: dict) -> None:
+    """一次 PATCH 既新建预设又绑定阶段：磁盘落预设表与绑定表，视图回显生效值与继承。"""
+    client = console_env["client"]
+    response = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {
+                "hot": {
+                    "agent": "claude",
+                    "model": "sonnet-hot",
+                    "reasoning_effort": None,
+                }
+            },
+            "bindings": {"implementation": "hot"},
+        },
+    )
+    assert response.status_code == 200
+    on_disk = _parse_toml(console_env["config_path"])
+    assert on_disk["agent_runner"]["presets"]["hot"] == {
+        "agent": "claude",
+        "model": "sonnet-hot",
+    }
+    assert on_disk["agent_runner"]["lifecycle_presets"]["implementation"] == "hot"
+
+    view = response.json()
+    implementation = next(r for r in view["lifecycles"] if r["key"] == "implementation")
+    assert implementation["preset_name"] == "hot"
+    assert implementation["effective_agent"] == "claude"
+    assert implementation["model"] == "sonnet-hot"
+    assert implementation["field_sources"]["agent"] == "preset"
+    assert implementation["reasoning_effort"] is None
+    assert implementation["affected_stages"] == ["implementation"]
+    # claude 不声明 reasoning_effort_args：推理深度不可注入。
+    assert implementation["reasoning_effort_supported"] is False
+
+    fix_row = next(r for r in view["lifecycles"] if r["key"] == "fix")
+    assert fix_row["follows_implementation"] is True
+    assert fix_row["effective_agent"] == "claude"
+    assert fix_row["model"] == "sonnet-hot"
+
+    hot_preset = next(p for p in view["presets"] if p["name"] == "hot")
+    assert hot_preset["bound_stages"] == ["implementation"]
+    assert hot_preset["model_supported"] is True
+    assert hot_preset["reasoning_effort_supported"] is False
+    assert hot_preset["source"] == "global"
+
+
+def test_preset_rejects_reasoning_effort_without_template(console_env: dict) -> None:
+    """给无推理深度模板的 agent 设推理深度被拒，且不落盘。"""
+    client = console_env["client"]
+    rejected = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {
+                "bad": {
+                    "agent": "claude",
+                    "model": None,
+                    "reasoning_effort": "high",
+                }
+            },
+            "bindings": {},
+        },
+    )
+    assert rejected.status_code == 422
+    assert "reasoning_effort" in rejected.json()["detail"]
+    on_disk = _parse_toml(console_env["config_path"])
+    assert "presets" not in on_disk.get("agent_runner", {})
+
+
+def test_binding_rejects_undefined_preset(console_env: dict) -> None:
+    """绑定到未定义、且本批也未新建的预设被拒。"""
+    client = console_env["client"]
+    rejected = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "global", "presets": {}, "bindings": {"implementation": "ghost"}},
+    )
+    assert rejected.status_code == 422
+    assert "ghost" in rejected.json()["detail"]
+
+
+def test_repository_scope_writes_repo_config_only(console_env: dict) -> None:
+    """仓库视角的预设与绑定写入仓库配置文件，不碰全局 config.toml。"""
+    client = console_env["client"]
+    response = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "repository",
+            "repo_id": "testrepo",
+            "presets": {
+                "repo_hot": {
+                    "agent": "claude",
+                    "model": "m",
+                    "reasoning_effort": None,
+                }
+            },
+            "bindings": {"verifier": "repo_hot"},
+        },
+    )
+    assert response.status_code == 200
+    repo_cfg = _parse_toml(console_env["iar_config_path"])
+    assert repo_cfg["agent_runner"]["presets"]["repo_hot"]["agent"] == "claude"
+    assert repo_cfg["agent_runner"]["lifecycle_presets"]["verifier"] == "repo_hot"
+    global_cfg = _parse_toml(console_env["config_path"])
+    assert "presets" not in global_cfg.get("agent_runner", {})
+
+
+def test_preset_delete_prunes_table_and_unbinds(console_env: dict) -> None:
+    """删除预设（三元组删空即剪表）并解绑阶段。"""
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {"temp": {"agent": "claude", "model": "m", "reasoning_effort": None}},
+            "bindings": {"implementation": "temp"},
+        },
+    )
+    removed = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {"temp": None},
+            "bindings": {"implementation": None},
+        },
+    )
+    assert removed.status_code == 200
+    on_disk = _parse_toml(console_env["config_path"])
+    assert "temp" not in on_disk.get("agent_runner", {}).get("presets", {})
+    assert "implementation" not in on_disk.get("agent_runner", {}).get("lifecycle_presets", {})
+
+
+# ---------------------------------------------------------------------------
+# 执行器回退候选端点（/agent-fallback-candidates）
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_candidates_write_ordered_with_presets(console_env: dict) -> None:
+    """同一 agent 用不同预设是两个候选；整体数组写入 runner 段并携带预算。"""
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {
+                "max": {"agent": "claude", "model": "m1", "reasoning_effort": None},
+                "eco": {"agent": "claude", "model": "m2", "reasoning_effort": None},
+            },
+            "bindings": {},
+        },
+    )
+    response = client.put(
+        "/api/v1/agent-runner/agent-fallback-candidates",
+        json={
+            "candidates": [
+                {"agent": "claude", "preset": "max"},
+                {"agent": "claude", "preset": "eco"},
+                {"agent": "codex", "preset": None},
+            ],
+            "max_agent_switches": 3,
+        },
+    )
+    assert response.status_code == 200
+    view = response.json()
+    assert view["budget_by_candidate_step"] is True
+    assert [c["agent"] for c in view["candidates"]] == ["claude", "claude", "codex"]
+    assert view["candidates"][0]["model"] == "m1"
+    assert view["candidates"][2]["preset"] is None
+    on_disk = _parse_toml(console_env["config_path"])
+    candidates = on_disk["agent_runner"]["runner"]["agent_fallback_candidates"]
+    assert [c.get("preset") for c in candidates] == ["max", "eco", None]
+    assert on_disk["agent_runner"]["runner"]["max_agent_switches"] == 3
+
+
+def test_fallback_candidates_reject_duplicate_and_mismatch(console_env: dict) -> None:
+    """完全相同的 (agent,preset) 被拒；候选 agent 与预设 agent 不一致也被拒。"""
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {
+                "only_claude": {
+                    "agent": "claude",
+                    "model": "m",
+                    "reasoning_effort": None,
+                }
+            },
+            "bindings": {},
+        },
+    )
+    dup = client.put(
+        "/api/v1/agent-runner/agent-fallback-candidates",
+        json={
+            "candidates": [
+                {"agent": "claude", "preset": "only_claude"},
+                {"agent": "claude", "preset": "only_claude"},
+            ],
+            "max_agent_switches": 1,
+        },
+    )
+    assert dup.status_code == 422
+    assert "duplicate" in dup.json()["detail"]
+
+    mismatch = client.put(
+        "/api/v1/agent-runner/agent-fallback-candidates",
+        json={
+            "candidates": [{"agent": "codex", "preset": "only_claude"}],
+            "max_agent_switches": 1,
+        },
+    )
+    assert mismatch.status_code == 422
+    assert "does not match" in mismatch.json()["detail"]
+
+
+def test_fallback_candidates_reject_unknown_preset(console_env: dict) -> None:
+    """候选引用未定义预设被拒。"""
+    client = console_env["client"]
+    rejected = client.put(
+        "/api/v1/agent-runner/agent-fallback-candidates",
+        json={
+            "candidates": [{"agent": "claude", "preset": "ghost"}],
+            "max_agent_switches": 1,
+        },
+    )
+    assert rejected.status_code == 422
+    assert "ghost" in rejected.json()["detail"]

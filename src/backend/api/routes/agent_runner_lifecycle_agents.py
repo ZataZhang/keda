@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
 from backend.core.use_cases.agent_runner_factory import (
@@ -36,10 +38,15 @@ from backend.core.use_cases.lifecycle_agents_console import (
     LifecycleAgentsUpdateError,
     build_agent_fallback_order_view,
     build_agent_labels_view,
+    build_fallback_candidates_view,
     build_lifecycle_agents_view,
+    build_lifecycle_settings_view,
     validate_agent_fallback_order_update,
     validate_agent_labels_update,
+    validate_fallback_candidates_update,
     validate_lifecycle_agents_update,
+    validate_lifecycle_preset_binding_update,
+    validate_preset_update,
 )
 from backend.core.use_cases.prd_content_reader import (
     PrdContentError,
@@ -137,6 +144,98 @@ def update_lifecycle_agents(request: UpdateLifecycleAgentsRequest) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 聚合生命周期设置（矩阵 + 预设 + 回退候选）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _aggregate_view(config: AppConfig, scope: str, repo_id: str | None) -> dict:
+    """构建聚合视图；``scope=repository`` 时带上独立加载的全局配置以区分预设来源层。"""
+    global_config = _global_config() if scope == SCOPE_REPOSITORY else None
+    return build_lifecycle_settings_view(
+        config, scope=scope, repo_id=repo_id, global_config=global_config
+    )
+
+
+@router.get("/agent-runner/lifecycle-settings")
+def get_lifecycle_settings(scope: str = SCOPE_GLOBAL, repo_id: str | None = None) -> dict:
+    """返回某视角下的聚合生命周期设置视图（九阶段三元组 + 预设 + 回退候选）。"""
+    config, _editor = _select_scope_config(scope, repo_id)
+    return _aggregate_view(config, scope, repo_id)
+
+
+class PresetPayload(BaseModel):
+    """单个命名预设的 upsert 字段（``model`` / ``reasoning_effort`` 为 ``None`` 表示不设置）。"""
+
+    agent: str
+    model: str | None = None
+    reasoning_effort: str | None = None
+
+
+class UpdateLifecycleSettingsRequest(BaseModel):
+    """聚合写回请求体：只提交用户改动过的预设与阶段绑定。
+
+    ``presets`` 值给对象表示 upsert、给 ``null`` 表示删除该预设；``bindings`` 是
+    阶段 -> 预设名的期望增量（``null`` 删除当前层绑定）。同一次提交可既新建预设又
+    把某阶段绑上去——校验时把本次预设并入工作副本，保证绑定能引用到同批新预设。
+    """
+
+    scope: str = Field(default=SCOPE_GLOBAL, pattern="^(global|repository)$")
+    repo_id: str | None = None
+    presets: dict[str, PresetPayload | None] = Field(default_factory=dict)
+    bindings: dict[str, str | None] = Field(default_factory=dict)
+
+
+@router.patch("/agent-runner/lifecycle-settings")
+def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
+    """先完整校验（含同批新建预设的引用），再 sparse 写回预设与阶段绑定。"""
+    config, editor = _select_scope_config(request.scope, request.repo_id)
+
+    # 工作副本：把本次预设改动并入，使绑定校验能看到同批新建的预设（不落盘）。
+    merged_presets = dict(config.agent_presets)
+    for preset_name, payload in request.presets.items():
+        if payload is None:
+            merged_presets.pop(preset_name, None)
+        else:
+            merged_presets[preset_name] = AgentModelPreset(
+                agent=payload.agent,
+                model=payload.model,
+                reasoning_effort=payload.reasoning_effort,
+            )
+    working_config = dataclasses.replace(config, agent_presets=merged_presets)
+
+    try:
+        normalized_presets: dict[str, dict[str, str | None] | None] = {}
+        for preset_name, payload in request.presets.items():
+            if payload is None:
+                normalized_presets[preset_name] = None
+                continue
+            normalized_presets[preset_name] = validate_preset_update(
+                preset_name, payload.model_dump(), working_config
+            )
+        normalized_bindings = validate_lifecycle_preset_binding_update(
+            request.bindings, working_config
+        )
+    except LifecycleAgentsUpdateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        for preset_name, normalized_preset in normalized_presets.items():
+            if normalized_preset is None:
+                editor.update_agent_preset(
+                    preset_name, {"agent": None, "model": None, "reasoning_effort": None}
+                )
+            else:
+                editor.update_agent_preset(preset_name, normalized_preset)
+        if normalized_bindings:
+            editor.update_lifecycle_presets(normalized_bindings)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
+
+    refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)
+    return _aggregate_view(refreshed_config, request.scope, request.repo_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # agent 回退顺序
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -188,6 +287,51 @@ def update_agent_fallback_order(request: UpdateFallbackOrderRequest) -> dict:
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
     return build_agent_fallback_order_view(_fallback_order_config(request.repo_id))
+
+
+class FallbackCandidateEntry(BaseModel):
+    """单个回退候选：agent + 可选的同 agent 预设。"""
+
+    agent: str = Field(min_length=1)
+    preset: str | None = None
+
+
+class UpdateFallbackCandidatesRequest(BaseModel):
+    """有序回退候选写回请求体（完整期望数组）。"""
+
+    candidates: list[FallbackCandidateEntry] = Field(default_factory=list)
+    max_agent_switches: int = Field(default=2, ge=0)
+    repo_id: str | None = None
+
+
+@router.get("/agent-runner/agent-fallback-candidates")
+def get_agent_fallback_candidates(repo_id: str | None = None) -> dict:
+    """返回 ``[[agent_runner.runner.agent_fallback_candidates]]`` 有序候选视图。"""
+    return build_fallback_candidates_view(_fallback_order_config(repo_id))
+
+
+@router.put("/agent-runner/agent-fallback-candidates")
+def update_agent_fallback_candidates(request: UpdateFallbackCandidatesRequest) -> dict:
+    """整体替换有序回退候选数组并写回候选步数预算。
+
+    与 ``agent_fallback_order`` 同理：候选是**机器级**配置，写入目标恒为全局
+    ``config.toml``；``repo_id`` 只用于选取校验视角（认可仓库级注册的 agent 与预设）。
+    """
+    config = _fallback_order_config(request.repo_id)
+    candidate_entries = [entry.model_dump() for entry in request.candidates]
+    try:
+        normalized_candidates, normalized_switches = validate_fallback_candidates_update(
+            candidate_entries, request.max_agent_switches, config
+        )
+    except LifecycleAgentsUpdateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
+    try:
+        editor.update_agent_fallback_candidates(normalized_candidates)
+        editor.update_runner_keys({"max_agent_switches": normalized_switches})
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
+    return build_fallback_candidates_view(_fallback_order_config(request.repo_id))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

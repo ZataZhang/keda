@@ -12,6 +12,12 @@ import pytest
 import backend.api.cli_registry as cli_registry
 from backend.api.cli import _expand_prd_paths, main
 from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import OUTPUT_FORMAT_TABLE, CliError
+from backend.api.cli_parsed_commands.agent import (
+    run_agent_fallback_candidate_add_command,
+    run_agent_lifecycle_set_command,
+)
+from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_parser import build_parser
 from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
@@ -4498,3 +4504,93 @@ def test_main_repl_requires_initialized_repo(monkeypatch, tmp_path: Path, capsys
     assert exit_code == int(ExitCode.NOT_FOUND)
     combined = (captured.out + captured.err).lower()
     assert "init" in combined
+
+
+# ---------------------------------------------------------------------------
+# kc agent lifecycle / preset / fallback：写入前置校验（负控，不触达磁盘）
+# ---------------------------------------------------------------------------
+
+
+def _stub_lifecycle_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把配置发现桩成内存 AppConfig，隔离开发者本机 config.toml。
+
+    这些负控用例断言"写文件之前就失败"，因此只需 scope 解析与字段校验这两步真实，
+    落盘与 fresh 读回由 tests/test_lifecycle_agents_console_api.py 覆盖。
+    """
+    from backend.core.shared.models.agent_runner import AppConfig
+
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.agent.load_fresh_agent_runner_settings",
+        lambda: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.agent.build_app_config_from_settings",
+        lambda _settings: AppConfig(),
+    )
+
+
+def _lifecycle_ctx(**parsed_kwargs: object) -> ParsedCommandContext:
+    """按写命令最小旗标构造 handler 上下文（其余注入项不触达）。"""
+    import argparse
+
+    defaults: dict[str, object] = {"scope": None, "stage": "review", "preset": "hot"}
+    defaults.update(parsed_kwargs)
+    return ParsedCommandContext(
+        parsed=argparse.Namespace(**defaults),
+        process_runner=None,
+        runner_settings=None,
+        repo_id=None,
+        repo_override=None,
+        github_client_factory=None,
+        output_format=OUTPUT_FORMAT_TABLE,
+    )
+
+
+def test_agent_lifecycle_set_requires_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """写命令缺 --scope 时 USAGE 退出，绝不默认写全局。"""
+    _stub_lifecycle_config(monkeypatch)
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_set_command(_lifecycle_ctx(scope=None))
+    assert exc_info.value.code == ExitCode.USAGE
+    assert "--scope" in str(exc_info.value)
+
+
+def test_agent_lifecycle_set_repository_requires_repo_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """scope=repository 未给仓库选择器时 USAGE 退出。"""
+    _stub_lifecycle_config(monkeypatch)
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_set_command(_lifecycle_ctx(scope="repository"))
+    assert exc_info.value.code == ExitCode.USAGE
+    assert "repo" in str(exc_info.value).lower()
+
+
+def test_agent_lifecycle_set_rejects_unknown_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未知阶段键在使用文件前 USAGE 退出并列出合法闭集。"""
+    _stub_lifecycle_config(monkeypatch)
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_set_command(_lifecycle_ctx(scope="global", stage="bogus"))
+    assert exc_info.value.code == ExitCode.USAGE
+    assert "unknown lifecycle stage" in str(exc_info.value)
+
+
+def test_agent_fallback_candidate_add_requires_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """候选写命令缺 --scope 时 USAGE 退出。"""
+    import argparse
+
+    _stub_lifecycle_config(monkeypatch)
+    ctx = ParsedCommandContext(
+        parsed=argparse.Namespace(scope=None, agent="claude", preset=None, position=None),
+        process_runner=None,
+        runner_settings=None,
+        repo_id=None,
+        repo_override=None,
+        github_client_factory=None,
+        output_format=OUTPUT_FORMAT_TABLE,
+    )
+    with pytest.raises(CliError) as exc_info:
+        run_agent_fallback_candidate_add_command(ctx)
+    assert exc_info.value.code == ExitCode.USAGE

@@ -833,6 +833,116 @@ export type PrdAgentOverrideUpdateResponse = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 聚合生命周期设置（矩阵 + 模型预设 + 执行器回退候选）
+// 与后端 `build_lifecycle_settings_view` / `build_fallback_candidates_view` 对齐。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 逐字段来源标签（后端 `FIELD_SOURCE_*`）；agent 字段还可能取配置层名。 */
+export type LifecycleFieldSource =
+  | "preset"
+  | "inherited"
+  | "agent_default"
+  | "not_supported";
+
+/** 单个生命周期阶段逐字段的来源。`agent` 除四种来源标签外还可能是层名（global/repository/legacy/builtin）。 */
+export type LifecycleRowFieldSources = {
+  agent: string;
+  preset: string | null;
+  model: string;
+  reasoning_effort: string;
+};
+
+/** 聚合视图里一个生命周期阶段的完整行（含最终生效值、逐字段来源与影响阶段）。 */
+export type LifecycleSettingsRow = {
+  key: LifecycleAgentKey;
+  label: string;
+  /** 该阶段当前绑定的预设名（未绑定为 null）。 */
+  preset_name: string | null;
+  /** 最终生效 agent（跟随实现者且无上下文时可能为 null）。 */
+  effective_agent: string | null;
+  model: string | null;
+  reasoning_effort: string | null;
+  field_sources: LifecycleRowFieldSources;
+  /** fix / closeout 无自绑时整体继承实现阶段解析结果。 */
+  is_inherited: boolean;
+  follows_implementation: boolean;
+  /** 生效 agent 是否声明了 model 参数模板。 */
+  model_supported: boolean;
+  reasoning_effort_supported: boolean;
+  /** 绑定预设共享的其它阶段（改这个预设会牵动的阶段）。 */
+  affected_stages: LifecycleAgentKey[];
+};
+
+/** 预设定义的来源层（scope=repository 时对比全局得出）。 */
+export type PresetDefinitionSource =
+  | "global"
+  | "repository_only"
+  | "repository_overrides";
+
+/** 一个命名模型预设的定义（原子三元组 agent/model/reasoning_effort）。 */
+export type AgentPresetDefinition = {
+  name: string;
+  agent: string;
+  model: string | null;
+  reasoning_effort: string | null;
+  model_supported: boolean;
+  reasoning_effort_supported: boolean;
+  /** 当前绑定了该预设的生命周期阶段。 */
+  bound_stages: LifecycleAgentKey[];
+  source: PresetDefinitionSource;
+};
+
+/** 单个回退候选（agent + 可选的同 agent 预设）在视图里的展开结果。 */
+export type FallbackCandidateRow = {
+  position: number;
+  agent: string;
+  preset: string | null;
+  model: string | null;
+  reasoning_effort: string | null;
+  model_supported: boolean;
+  reasoning_effort_supported: boolean;
+  field_sources: {
+    preset: string | null;
+    model: string;
+    reasoning_effort: string;
+  };
+};
+
+/** 执行器回退候选视图（有序候选 + 候选步数预算 + 可用 agent）。 */
+export type AgentFallbackCandidatesView = {
+  candidates: FallbackCandidateRow[];
+  max_agent_switches: number;
+  /** 预算按候选步数消耗（后端恒为 true）。 */
+  budget_by_candidate_step: boolean;
+  agents: string[];
+};
+
+/** 聚合生命周期设置的完整读写视图。 */
+export type LifecycleSettingsView = {
+  scope: LifecycleAgentScope;
+  repo_id: string | null;
+  agents: string[];
+  lifecycles: LifecycleSettingsRow[];
+  presets: AgentPresetDefinition[];
+  fallback: AgentFallbackCandidatesView;
+  /** 来源标签 -> 中文说明（后端下发，前端只渲染）。 */
+  field_source_vocabulary: Record<string, string>;
+};
+
+/** 预设 upsert 载荷（`model` / `reasoning_effort` 给 null 表示不设置该字段）。 */
+export type AgentPresetPayload = {
+  agent: string;
+  model: string | null;
+  reasoning_effort: string | null;
+};
+
+/** 回退候选写回项（完整期望数组的一项）。 */
+export type FallbackCandidateWriteEntry = {
+  agent: string;
+  preset: string | null;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Console CLI 对齐操作（Issue 全量视图 / 标签编辑 / 一句话建 Issue / 启动选项）
 // 与后端 `console_issues` / `issue_label_actions` / `console_issue_creation`
 // 用例的返回结构对齐。

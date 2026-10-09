@@ -166,6 +166,21 @@ PRD 原文 · 覆盖抽屉
 
 原型层级标注：**interactive prototype**（概念交互验证），底图属于真实产品截图，但覆盖层是概念实现，不构成 E2E 或功能验收证据。
 
+## 与正式页面的关系
+
+本原型演示的设计目标已由 `P1-FEAT-20261009-133425-lifecycle-agent-model-settings`（Issue #262）落地为正式页面
+`frontend-public/app/(app)/app/settings/lifecycle/`（路由 `/app/settings/lifecycle/`）：
+
+- 原型里的「生命周期矩阵 / 模型预设 / 执行器回退候选」三块合并页，正式实现由**聚合只读视图**
+  下发（`GET /api/v1/agent-runner/lifecycle-settings`），九阶段最终生效值与逐字段来源不再前端模拟。
+- 预设与阶段绑定通过 `PATCH /api/v1/agent-runner/lifecycle-settings` 一次提交（只发改动键）；
+  执行器回退候选通过 `GET/PUT /api/v1/agent-runner/agent-fallback-candidates` 读写有序数组表
+  （机器级，始终写全局 `config.toml`）。
+- Backlog 仓库齿轮改为**导航到同一路由并带 `?scope=repository&repo_id=<id>` 预选**，不再另设仓库抽屉；
+  Settings 主页只保留 Agent 标签编辑与统一入口卡片。
+- 上述真实入口的验收以 PRD §7.6 rv-2 的生产路由 E2E 与桌面 / 400px 窄屏截图为准；本原型仍是设计目标参照，
+  不替代生产验证。
+
 ## Prototype Change Log
 
 | File Path | Change Type | Before | After | Why |

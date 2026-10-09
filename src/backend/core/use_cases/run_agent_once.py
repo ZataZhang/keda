@@ -25,9 +25,10 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.shared.models.agent_model_preset import ModelSelection, resolve_model_selection
 from backend.core.shared.models.agent_runner import (
     AgentCommitResult,
+    AgentFallbackCandidate,
     AppConfig,
     AttemptResult,
     CommandResult,
@@ -40,6 +41,7 @@ from backend.core.shared.models.agent_spec import (
     PROMPT_DELIVERY_STDIN,
 )
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_candidate_fallback import effective_fallback_candidates
 from backend.core.use_cases.agent_response_text import extract_agent_response_text
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
@@ -207,6 +209,7 @@ __all__ = [
     "publish_changes",
     "repair_agent_is_self",
     "resolve_agent_fallback_order",
+    "resolve_agent_fallback_candidate_specs",
     "resolve_prd_archive_path",
     "resolve_repair_agent",
     "resolve_reviewer_agent",
@@ -253,6 +256,40 @@ def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) ->
     return config.runner.default_agent if config.runner.default_agent != "auto" else "claude"
 
 
+def resolve_agent_fallback_candidate_specs(
+    issue: IssueSummary,
+    config: AppConfig,
+    override_agent: str,
+) -> list[AgentFallbackCandidate]:
+    """返回某 Issue 的有序 ``(agent, preset)`` 回退候选序列。
+
+    首位是 :func:`choose_agent` 解析出的主选 agent，且**不携带**候选 preset
+    （主选的模型绑定来自生命周期预设，与回退候选的预设注入互不混淆）。尾部取
+    :func:`effective_fallback_candidates`（候选数组赢，旧名单映射为无 preset
+    候选），按 ``(agent, preset)`` 对去重——同一 agent 以不同 preset 重复出现是
+    合法配置。这里不设预算上限，``max_agent_switches`` 封顶由阶梯调用方完成。
+
+    Args:
+        issue: 正在处理的 Issue。
+        config: Agent Runner 配置。
+        override_agent: ``--agent`` 覆盖（``"auto"`` 走标签路由）。
+
+    Returns:
+        去重后的候选 spec 列表，主选在首位。
+    """
+    primary_agent = choose_agent(issue, config, override_agent)
+    fallback_specs = [AgentFallbackCandidate(agent=primary_agent)]
+    for candidate in effective_fallback_candidates(config):
+        candidate_spec = AgentFallbackCandidate(
+            agent=candidate.agent.strip(),
+            preset=candidate.preset,
+        )
+        if not candidate_spec.agent or candidate_spec in fallback_specs:
+            continue
+        fallback_specs.append(candidate_spec)
+    return fallback_specs
+
+
 def resolve_agent_fallback_order(
     issue: IssueSummary,
     config: AppConfig,
@@ -261,7 +298,8 @@ def resolve_agent_fallback_order(
     """Return the ordered list of agents to try for an Issue.
 
     The first entry is the primary agent resolved by :func:`choose_agent`.
-    Subsequent entries come from ``config.runner.agent_fallback_order`` with the
+    Subsequent entries come from the effective fallback chain (``agent_fallback_candidates``
+    wins, otherwise ``agent_fallback_order``) folded to agent names with the
     primary agent and duplicates removed, preserving configured order. When no
     fallback order is configured the list contains only the primary agent, so
     the escalation ladder behaves exactly like single-agent runs.
@@ -274,13 +312,11 @@ def resolve_agent_fallback_order(
     Returns:
         Ordered, de-duplicated agent names to attempt.
     """
-    primary_agent = choose_agent(issue, config, override_agent)
-    fallback_order = [primary_agent]
-    for candidate_agent in config.runner.agent_fallback_order:
-        normalized_agent = candidate_agent.strip()
-        if normalized_agent and normalized_agent not in fallback_order:
-            fallback_order.append(normalized_agent)
-    return fallback_order
+    agent_names: list[str] = []
+    for candidate_spec in resolve_agent_fallback_candidate_specs(issue, config, override_agent):
+        if candidate_spec.agent not in agent_names:
+            agent_names.append(candidate_spec.agent)
+    return agent_names
 
 
 def resolve_repair_agent(
@@ -889,6 +925,51 @@ def drop_model_selection_for_agent(
         agent_name,
     )
     return None
+
+
+def resolve_implementation_model_selection(
+    selected_agent: str,
+    config: AppConfig,
+    *,
+    issue: IssueSummary | None = None,
+    fallback_preset: str | None = None,
+) -> ModelSelection | None:
+    """解析 implementation 阶段对本次执行生效的模型绑定（单一入口）。
+
+    两条来源在"执行 agent 确定后"收敛到同一个丢弃校验：
+
+    - ``fallback_preset``（执行器回退链轮到带 preset 的候选）：直接解析该预设，
+      不经 ``lifecycle_presets`` 阶段绑定；若手工编辑的配置让预设 agent 与候选
+      agent 不一致，同样走 :func:`drop_model_selection_for_agent` 丢弃。
+    - 其余情形（含一次性 ``--agent``、无 preset 候选）：按阶段绑定解析
+      （PRD 级 > 仓库层 > 全局层），换人时丢弃，模型 flag 绝不跨 CLI 注入。
+
+    Args:
+        selected_agent: 本次实际执行 implementation 的 agent 名。
+        config: 应用配置。
+        issue: 当前 Issue（阶段绑定的 PRD 级预设随它流动）。
+        fallback_preset: 回退候选携带的预设名；``None`` 表示走阶段绑定。
+
+    Returns:
+        生效的 :class:`ModelSelection`，或 ``None``（零注入）。
+
+    Raises:
+        ValueError: ``fallback_preset`` 未在 ``[agent_runner.presets]`` 中定义
+            （fail-fast，不静默回落）。
+    """
+    if fallback_preset is not None:
+        # 预设名未定义 → ValueError（fail-fast）；预设声明的 agent 未注册时由
+        # 调用构建处的 UnknownAgentError 兜住，与阶段绑定路径同一判定。
+        candidate_selection = resolve_model_selection(fallback_preset, config)
+        return drop_model_selection_for_agent(selected_agent, candidate_selection)
+    from backend.core.use_cases.lifecycle_agent_resolution import (  # noqa: PLC0415 - 防模块级循环
+        resolve_lifecycle_model_selection,
+    )
+
+    return drop_model_selection_for_agent(
+        selected_agent,
+        resolve_lifecycle_model_selection("implementation", config, issue=issue),
+    )
 
 
 def run_agent_with_prompt_resilient(
