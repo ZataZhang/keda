@@ -669,3 +669,11 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - Reason: runner 逐字复跑 RV 命令，采集 harness 自身的端口碰撞即假失败；修复只落在 gitignored 的证据脚本，不动生产代码与被测行为。
 - Impact: 仅 `tasks/evidence/.../scripts/` 与证据产物再生；生产代码零改动；item 1 复跑命令恢复稳定绿。
 - Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求。
+
+### rv-* 复跑把临时 fixture 落在证据根，脏化工作树阻塞独立 verifier
+- Type: validation
+- Before: `fixture_lib.py` 把临时 fixture 仓库建在 `EVIDENCE_DIR/work/<name>/repo/`（证据根下的 `work/`，与 gitignored 的 `scripts/` 同级）。这些 fixture 是真实 git 仓库、内含 `README.md`；根 `.gitignore` 的 `!tasks/evidence/**/*.md` 白名单把这些 `*.md` 重新纳入跟踪，使 `git status --porcelain` 报出 `?? work/.../repo/`。独立 verifier 门禁 `run_verifier_gate` 先要求 `has_changes` 为假，而 `ensure_validation_commands_pass` 又在其之前逐字复跑 RV 脚本、当场重建这些 fixture——于是复跑越成功，工作树越脏，verifier 稳定抛「Independent verifier requires a clean committed worktree」。上一轮 rv-1/rv-3 已把生产代码与被测行为修到复跑全绿（本轮 rv1…rv5 再跑均 exit 0、`stdout_assertions` 全部命中），真正卡住的只剩这个采集 harness 的工作树洁净度。
+- After: `fixture_lib.py` 默认把 fixture base 从证据根 `work/` 迁到 `scripts/work/`（`scripts/.gitignore` 已是整目录 `*`），并对任何 base（含 `RV_FIXTURE_BASE` 覆盖）在构造 fixture 前写入自忽略 `work/.gitignore=*`——更深目录的 `.gitignore` 优先于根白名单，与 `scripts/.gitignore` 屏蔽 prd skill 桩 `SKILL.md` 同一生效机制。删除证据根遗留的 `work/`，最终树上 rv1…rv5 全量复跑后再 `git status --porcelain` 为空（CLEAN），verifier 的 clean-tree 前置得以满足。
+- Reason: 独立 verifier 与最终 tree 绑定要求工作树干净，且复跑发生在 verifier 之前；采集 harness 的临时现场若进入 `git status` 即自锁死门禁，属证据脚本自身的落点错误，而非被测行为问题。
+- Impact: 仅改动 `tasks/evidence/.../scripts/`（整目录 gitignored，不入代码 diff）与证据产物再生；生产代码、被测行为、rv 判别力均不变；`item 1…5` 的 `command`/`negative_control`/`expected_fail`/`stdout_assertions` 未改。
+- Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；无 `[~]` runner-owned 项状态变化（独立 verifier 复核与发布归档仍由 runner 执行）。
