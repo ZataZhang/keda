@@ -1,4 +1,4 @@
-"""针对仓库本地配置（``.iar.toml``）受限 Autopilot 写回的保真测试。
+"""针对仓库本地配置（``.iar.toml``）受限 Backlog 写回的保真测试。
 
 关注点：``set_enabled`` 只能改动一个布尔键——注释、同级键、未知键/子表必须逐字
 保留；失败时原文件不变；原子替换为同目录临时文件 + ``os.replace``。
@@ -15,28 +15,24 @@ from backend.infrastructure.config.repository_settings_editor import (
     TomlRepositoryAutopilotSettingsEditor,
 )
 
-# 本仓真实 .iar.toml 的 [agent_runner.autopilot] 同级键 + 注释 + 一个未知子表，
+# 本仓真实 .iar.toml 的 backlog 键 + 注释 + 一个未知子表，
 # 用于断言写回保真（PRD §7 Executor Drift Guard 要求的两类样本）。
 _FIDELITY_SAMPLE = """# 仓库本地配置
 [agent_runner]
 # 注释必须保留
 unknown_key = "keep-me"
 
-[agent_runner.autopilot]
+[agent_runner.backlog]
 # 是否启用自动推进
-enabled = false
-merge_method = "squash"
-require_verifier_pass = true
-auto_sign_off = false
-merge_check_timeout_seconds = 1800
+auto_advance = false
 
 # 尾部注释也要保留
 [agent_runner.some_unknown_table]
 nested = 1
 """
 
-_MINIMAL_SAMPLE = """[agent_runner.autopilot]
-enabled = false
+_MINIMAL_SAMPLE = """[agent_runner.backlog]
+auto_advance = false
 """
 
 
@@ -85,13 +81,12 @@ def test_set_enabled_changes_only_the_target_key(tmp_path: Path, editor) -> None
     changed = [
         (before, after) for before, after in zip(before_lines, after_lines) if before != after
     ]
-    assert changed == [("enabled = false", "enabled = true")]
+    assert changed == [("auto_advance = false", "auto_advance = true")]
     # 注释、未知键与同级键仍在（逐行保留）
     after_text = "\n".join(after_lines)
     assert "# 注释必须保留" in after_text
     assert 'unknown_key = "keep-me"' in after_text
     assert "[agent_runner.some_unknown_table]" in after_text
-    assert "merge_method" in after_text and "merge_check_timeout_seconds = 1800" in after_text
 
 
 def test_set_enabled_toggles_back_without_drift(tmp_path: Path, editor) -> None:

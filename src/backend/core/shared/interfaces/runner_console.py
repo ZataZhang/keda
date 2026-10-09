@@ -564,15 +564,15 @@ class IRepositoryRegistryEditor(ABC):
 
 
 class IRepositoryAutopilotSettingsEditor(ABC):
-    """仓库级 Autopilot 设置的受限读写端口。
+    """仓库级 Backlog 自动推进设置的受限读写端口。
 
-    Autopilot 的唯一持久事实源是仓库根目录的 ``.kedacode.toml``，因此本端口比
+    Backlog 自动推进的唯一持久事实源是仓库根目录的 ``.kedacode.toml``，因此本端口比
     :class:`IRepositoryRegistryEditor` 更窄：只允许读写
-    ``[agent_runner.autopilot].enabled`` 这一个布尔键，其余配置节、键、子表
+    ``[agent_runner.backlog].auto_advance`` 这一个布尔键，其余配置节、键、子表
     与注释必须逐字保留。
 
-    刻意不提供通用 TOML PATCH：它会把写权限扩大到全部配置键，突破
-    ``autopilot.enabled`` 与 ``safety.auto_merge`` 的双重危险动作门禁边界。
+    刻意不提供通用 TOML PATCH：Backlog 调度设置与
+    ``autopilot.enabled`` / ``safety.auto_merge`` 合并门禁相互独立。
     """
 
     @abstractmethod
@@ -582,7 +582,7 @@ class IRepositoryAutopilotSettingsEditor(ABC):
 
     @abstractmethod
     def read_enabled(self, repo_root_path: Path) -> bool | None:
-        """读取仓库本地配置中的 ``autopilot.enabled``。
+        """读取仓库本地配置中的 ``backlog.auto_advance``。
 
         Args:
             repo_root_path: 目标仓库根目录。
@@ -598,7 +598,7 @@ class IRepositoryAutopilotSettingsEditor(ABC):
 
     @abstractmethod
     def set_enabled(self, repo_root_path: Path, enabled: bool) -> None:
-        """仅修改 ``[agent_runner.autopilot].enabled`` 并原子替换文件。
+        """仅修改 ``[agent_runner.backlog].auto_advance`` 并原子替换文件。
 
         实现必须：保留注释与未知键/子表、只改这一个布尔键、失败时原文件保持
         不变。原子替换与格式保留由共享原语 ``update_toml_table_keys`` 提供，

@@ -1,4 +1,4 @@
-"""``iar run`` 目标必填 / 互斥接管 与 ``iar daemon`` autopilot 覆盖的测试。
+"""``iar run`` 目标必填 / 互斥接管 与 daemon Backlog 自动推进覆盖的测试。
 
 对应 PRD：run-daemon-autopilot-control-surface（FR-1/2/4/5/7/8）。
 """
@@ -16,7 +16,7 @@ import pytest
 from backend.api.cli_exit_codes import ExitCode
 from backend.core.shared.models.agent_runner import (
     AppConfig,
-    AutopilotConfig,
+    BacklogConfig,
     IssueSummary,
     RepositoryRunContext,
 )
@@ -537,8 +537,8 @@ def _run_one_daemon_pass(
 def test_daemon_autopilot_flag_enables_scheduling_when_config_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """配置 autopilot.enabled=false + --autopilot → 调度阶段运行（rv-8）。"""
-    config = replace(AppConfig(), autopilot=AutopilotConfig(enabled=False))
+    """配置 backlog.auto_advance=false + --autopilot → 调度阶段运行。"""
+    config = replace(AppConfig(), backlog=BacklogConfig(auto_advance=False))
     context = RepositoryRunContext(
         repo_id=REPO_ID, display_name="Keda Test", repo_path=tmp_path, config=config
     )
@@ -550,8 +550,8 @@ def test_daemon_autopilot_flag_enables_scheduling_when_config_disabled(
 def test_daemon_no_autopilot_flag_disables_scheduling_when_config_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """配置 autopilot.enabled=true + --no-autopilot → 调度阶段关闭（rv-8）。"""
-    config = replace(AppConfig(), autopilot=AutopilotConfig(enabled=True))
+    """配置 backlog.auto_advance=true + --no-autopilot → 调度阶段关闭。"""
+    config = replace(AppConfig(), backlog=BacklogConfig(auto_advance=True))
     context = RepositoryRunContext(
         repo_id=REPO_ID, display_name="Keda Test", repo_path=tmp_path, config=config
     )
@@ -563,8 +563,8 @@ def test_daemon_no_autopilot_flag_disables_scheduling_when_config_enabled(
 def test_daemon_without_flag_follows_config_each_pass(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """不传旗标 → 跟随配置（enabled=false → 不调度）（rv-8）。"""
-    config = replace(AppConfig(), autopilot=AutopilotConfig(enabled=False))
+    """不传旗标 → 跟随 backlog.auto_advance（false → 不调度）。"""
+    config = replace(AppConfig(), backlog=BacklogConfig(auto_advance=False))
     context = RepositoryRunContext(
         repo_id=REPO_ID, display_name="Keda Test", repo_path=tmp_path, config=config
     )

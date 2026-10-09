@@ -15,6 +15,7 @@ import pytest
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     AutopilotConfig,
+    BacklogConfig,
     CommandResult,
     RepositoryRunContext,
 )
@@ -56,10 +57,15 @@ def write_prd(
 def build_context(
     repo_path: Path,
     *,
-    autopilot_enabled: bool = True,
+    auto_advance_enabled: bool = True,
+    merge_autopilot_enabled: bool = False,
 ) -> RepositoryRunContext:
-    """Build a repository context with the autopilot gate set explicitly."""
-    config = replace(AppConfig(), autopilot=AutopilotConfig(enabled=autopilot_enabled))
+    """构造可分别设置调度开关和合并开关的仓库上下文。"""
+    config = replace(
+        AppConfig(),
+        autopilot=AutopilotConfig(enabled=merge_autopilot_enabled),
+        backlog=BacklogConfig(auto_advance=auto_advance_enabled),
+    )
     return RepositoryRunContext(
         repo_id=REPO_ID,
         display_name="Keda Test",
@@ -433,7 +439,7 @@ def test_dry_run_has_zero_side_effects(tmp_path: Path) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# rv-5: autopilot gate in the daemon
+# Backlog auto-advance gate in the daemon
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -467,13 +473,15 @@ def _run_single_daemon_pass(
         )
 
 
-def test_gate_disabled_skips_scheduling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Non-fast-lane repositories must see zero backlog store calls."""
+def test_auto_advance_disabled_skips_scheduling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """只开启合并 autopilot 不会启动 Backlog 调度。"""
     repo_path = tmp_path
     write_prd(repo_path, "tasks/pending/P1-FEAT-20260101-a.md", issue_number=1)
     store = FakeBacklogStore()
     client = FakeGitHubClient()
-    context = build_context(repo_path, autopilot_enabled=False)
+    context = build_context(repo_path, auto_advance_enabled=False, merge_autopilot_enabled=True)
 
     _run_single_daemon_pass(monkeypatch, context=context, store=store, client=client)
 
@@ -483,13 +491,15 @@ def test_gate_disabled_skips_scheduling(tmp_path: Path, monkeypatch: pytest.Monk
     assert not [call for call in client.calls if call["method"] == "edit_issue_labels"]
 
 
-def test_gate_enabled_runs_scheduling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fast-lane repositories advance the backlog on the very first pass."""
+def test_auto_advance_enabled_runs_scheduling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """不启用合并 autopilot 时 Backlog 调度仍可运行。"""
     repo_path = tmp_path
     pending_a = write_prd(repo_path, "tasks/pending/P1-FEAT-20260101-a.md", issue_number=1)
     store = FakeBacklogStore(max_parallel=1)
     client = FakeGitHubClient()
-    context = build_context(repo_path, autopilot_enabled=True)
+    context = build_context(repo_path, auto_advance_enabled=True, merge_autopilot_enabled=False)
 
     _run_single_daemon_pass(monkeypatch, context=context, store=store, client=client)
 

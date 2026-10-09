@@ -12,7 +12,7 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 - **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
 - **review**：单次检查 `agent/supervising` 和 `agent/review` 的 Issues，基于 PR 上下文变化运行 supervisor cycle（兼容旧命令 `review-once`）
 - **review-daemon**：常驻进程，按指定间隔循环执行 `review-once`
-- **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 autopilot 调度阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
+- **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 Backlog 自动推进阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
 - **ask**：受限自然语言决策入口，默认只生成计划，确认后执行白名单动作
 - **worktree cleanup**：清理 GitHub Issue 已关闭、远端分支已删除但本地仍残留的 `issue-<number>` 分支和 KedaCode worktree
 
@@ -431,7 +431,7 @@ uv run --project /path/to/keda kc init --dry-run
 uv run --project /path/to/keda kc init
 ```
 
-`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖并把用户导向 `kc skill install`；确认需要重建时显式传入 `--force`。
+`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.backlog].auto_advance` 与 `[agent_runner.autopilot].enabled` 默认关闭；前者控制 Backlog 持续调度，后者只作为合并队列的双重安全门之一。如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖并把用户导向 `kc skill install`；确认需要重建时显式传入 `--force`。
 
 `kc init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `kc daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
@@ -778,6 +778,14 @@ auto_sign_off = true
 # 等 PR checks 全绿的最大秒数；超时则放弃本轮合并（不阻塞后续 PR）。
 merge_check_timeout_seconds = 1800
 
+# Backlog 持续调度（与自动合并独立）
+[agent_runner.backlog]
+# daemon 是否自动发现并推进 pending PRD；默认关闭
+auto_advance = false
+
+# 配置迁移：旧版本的 autopilot.enabled 曾同时控制 Backlog 调度；现在它只作为
+# 自动合并门之一。原有值不会复制到 auto_advance；要继续自动推进请显式设为 true。
+
 # Realistic Validation 证据门禁配置
 [agent_runner.validation]
 # 是否启用 Realistic Validation 证据门禁
@@ -895,7 +903,7 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 
 ```
 
-仓库本地 `.kedacode.toml` 可覆盖 `labels`、`git`、`worktree`、`runner`、`memory`、`safety`、`autopilot`、`validation`、`prompts`、`pre_pr_review`、`post_pr_supervisor`、`daemon`、`generated_content`、`interactive_decision`、`repl` 和 `deliberation`。`config.toml` 继续保存全局默认值、环境级设置和 legacy registry，不应保存 token、API key 或账号凭据。
+仓库本地 `.kedacode.toml` 可覆盖 `labels`、`git`、`worktree`、`runner`、`memory`、`safety`、`autopilot`、`backlog`、`validation`、`prompts`、`pre_pr_review`、`post_pr_supervisor`、`daemon`、`generated_content`、`interactive_decision`、`repl` 和 `deliberation`。`config.toml` 继续保存全局默认值、环境级设置和 legacy registry，不应保存 token、API key 或账号凭据。
 
 #### `generated_content` 不由 `kc init` 写入
 
@@ -1149,7 +1157,7 @@ git branch -d issue-<number>
 
 ## run 与 daemon 的执行语义与控制面
 
-`kc run` 与 `kc daemon` 的职责边界是显式契约：**run = 手动单次、定向执行**（一条命令只处理一个目标，但**多条 `--issue` 命令之间互不阻塞，可并发**，见下节），不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 autopilot 调度阶段的地方。
+`kc run` 与 `kc daemon` 的职责边界是显式契约：**run = 手动单次、定向执行**（一条命令只处理一个目标，但**多条 `--issue` 命令之间互不阻塞，可并发**，见下节），不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 Backlog 自动推进阶段的地方。
 
 ### run 目标必填（breaking change）
 
@@ -1319,15 +1327,15 @@ kc run --issue 43
 ### daemon 的 autopilot 按次覆盖
 
 ```bash
-# 配置 autopilot.enabled=false，但本次 daemon 临时开调度
+# 配置 backlog.auto_advance=false，但本次 daemon 临时开调度
 kc daemon --autopilot
 
-# 配置 autopilot.enabled=true，但本次 daemon 临时关调度
+# 配置 backlog.auto_advance=true，但本次 daemon 临时关调度
 kc daemon --no-autopilot
 ```
 
 - 优先级：**flag > 仓库 `.kedacode.toml` > 全局**；传了旗标即锁定本次常驻进程（之后改 `.kedacode.toml` 不影响本次进程），不传则每轮热读配置。
-- 旗标**只覆盖调度类 autopilot**（发现/晋升 pending PRD、补槽）；它**不能**打开自动合并——合并仍由 `safety.auto_merge` + `autopilot.enabled` 配置双开关决定，`process_merge_queue` 在配置未开时保持 no-op。
+- 旗标**只覆盖 Backlog 自动推进**（发现/晋升 pending PRD、补槽）；它**不能**打开自动合并——合并仍由 `safety.auto_merge` + `autopilot.enabled` 配置双开关决定，`process_merge_queue` 在配置未开时保持 no-op。
 
 ## 多仓库 Registry 兼容
 
@@ -4433,7 +4441,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 启动成功后页面会立刻重新拉取该仓的 PRD 列表，并把详情头部状态刷新为服务端返回的最新状态——不是本地乐观值，也不是只弹一个 toast。
 
-「全局开始」与「停止全局调度」的行为没有变化：前者仍是一次性批量启动，后者仍只清空等待队列。它们与仓库级 Autopilot 开关是两件事，见下两节。
+「全局开始」与「停止全局调度」的行为没有变化：前者仍是一次性批量启动，后者仍只清空等待队列。它们与仓库级 Backlog 自动推进开关是两件事，见下两节。
 
 ### 验收证据浏览（归档 PRD）
 
@@ -4444,17 +4452,17 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 - 归档后 Issue 上的临时证据 orphan 分支会被清理，因此这里承诺的是仓库保留的长期事实源；历史 PRD 若本来就没有证据目录，页面显示「尚无可用证据」与实际查找位置，而不是报错或空白。
 - 访问边界：文件名以 base64url token 传递，解码后必须是证据目录的直接子文件；路径穿越、符号链接逃逸、子目录伪装与超过 10 MiB 的文件一律返回 4xx，不泄露仓外内容。服务端每次请求都重新读盘，不做任何缓存。
 
-### 仓库级 Autopilot 开关
+### 仓库级 Backlog 自动推进开关
 
-Backlog 顶部为当前选中仓库提供「Autopilot 自动推进」开关，写入该仓库根目录 `.kedacode.toml` 的 `[agent_runner.autopilot].enabled`。
+Backlog 顶部为当前选中仓库提供「Backlog 自动推进」开关，写入该仓库根目录 `.kedacode.toml` 的 `[agent_runner.backlog].auto_advance`。它只控制 daemon 是否持续发现、晋升并补位 pending PRD，不改变合并配置。
 
 - 只改这一个布尔键：注释、顺序、同级键与未知子表在写回后逐字保留，写入采用同目录临时文件 + 完整加载校验 + 原子替换；写成功与否以**写后 fresh load 的生效配置**为判据，页面显示的值就是重新读出来的值。
 - 修改后不要求重启 console：daemon 每轮本来就读取对应仓库上下文，最迟下一轮生效；正在进行的那一轮不会被中断，页面文案写的是「将在下一轮生效」。
 - 页面把三件事分开显示，缺哪件都给出明确降级文案：
-  - **Autopilot 是否开启**（自动发现、依赖解锁、队列补位）；
+  - **Backlog 自动推进是否开启**（自动发现、依赖解锁、队列补位）；
   - **daemon 是否运行中**（状态来自既有 process supervisor 记录；daemon 没跑时显示「自动推进暂不执行」，开关值仍可保存，可用 Processes 页面启动 daemon）；
-  - **自动合并是否启用**（`safety.auto_merge`）。
-- **开关不会联动打开 `safety.auto_merge`**。自动合并需要 `autopilot.enabled` 与 `safety.auto_merge` 同时为真（既有的双重危险动作门禁）；只有前者为真时流程会停在「待审阅」，人工合并后再由持续调度自动推进下游。想放开自动合并必须自己改 `.kedacode.toml`，UI 不会替你做这个决定。
+  - **自动合并是否启用**（`autopilot.enabled` 与 `safety.auto_merge` 是否同时为真）。
+- 开启 Backlog 自动推进不会联动开启合并配置；自动合并仍要求 `autopilot.enabled` 与 `safety.auto_merge` 同时为真。Backlog 页面只读显示合并状态，不会替用户改动合并开关。
 - 目标仓没有 `.kedacode.toml`、配置非法或不可写时返回 409，原文件保持不变。
 
 ### 全局调度
@@ -4482,7 +4490,7 @@ Backlog 顶部为当前选中仓库提供「Autopilot 自动推进」开关，�
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
 
-daemon 路径下的晋升**只**做幂等的 Issue 创建/复用 + 打上 `agent/ready` label，**不 spawn 进程**；真正的进程拉起仍由 daemon 的 Phase 2 在消费 `agent/ready` 时统一完成。该阶段仅在 `autopilot.enabled` 时执行，任何异常都会被记录且不影响 daemon 后续阶段。这个已有的开关正是 Backlog 顶部「Autopilot 自动推进」所控制的那个值（见上文「仓库级 Autopilot 开关」）；开关关闭后同一个场景零晋升，用 Backlog 页面与其它配置入口改这个键的效果完全一致。
+daemon 路径下的晋升**只**做幂等的 Issue 创建/复用 + 打上 `agent/ready` label，**不 spawn 进程**；真正的进程拉起仍由 daemon 的 Phase 2 在消费 `agent/ready` 时统一完成。该阶段仅在 `backlog.auto_advance` 时执行，任何异常都会被记录且不影响 daemon 后续阶段。这个开关正是 Backlog 顶部「Backlog 自动推进」所控制的那个值（见上文「仓库级 Backlog 自动推进开关」）；开关关闭后同一个场景零晋升。
 
 #### 手动触发：kc backlog advance
 

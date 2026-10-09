@@ -157,12 +157,12 @@ def run_agent_daemon(
         reclaim_ttl_seconds: Optional claim-age threshold for the reconcile pass.
         backlog_store_factory: Optional factory returning an
             :class:`IBacklogStore`. When provided *and* the repository has
-            ``autopilot.enabled``, each pass runs a continuous-scheduling stage
+            ``backlog.auto_advance``, each pass runs a continuous-scheduling stage
             before Phase 2 so finished PRDs release their slot and the next
             queued PRD is promoted in the same pass. When omitted, the stage is
             skipped entirely (zero regression for existing callers).
         autopilot_override: ``kc daemon --autopilot / --no-autopilot`` 的按次
-            覆盖，只作用于**调度类** autopilot（``True``/``False``），优先级
+            覆盖，只作用于 Backlog 自动推进（``True``/``False``），优先级
             ``flag > repo .kedacode.toml > 全局`` 并锁定本次常驻进程；``None`` 表示
             未传旗标，每轮热读配置。该覆盖**不**影响 review 侧自动合并——
             合并仍由 ``safety.auto_merge`` + ``autopilot.enabled`` 双开关决定。
@@ -350,20 +350,18 @@ def _run_daemon_loop(
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
                 _logger.error("PRD rework phase failed: %s", exc)
 
-            # Scheduling phase: continuous backlog scheduling, gated on the
-            # repository opting into the fast lane. Reconciles finished/failed
-            # PRDs, then tops the queue back up to max_parallel and labels the
-            # promoted PRDs agent/ready. Running it before Phase 2 means a PRD
-            # promoted in this pass is picked up in the same pass. Failures are
-            # logged and swallowed so a scheduling fault never kills the daemon.
+            # 调度阶段：仅在 ``backlog.auto_advance`` 开启时持续推进 Backlog，先处理
+            # 已完成/失败的 PRD，再将队列补到 max_parallel 并标记 agent/ready。
+            # 在 Phase 2 前运行可让本轮晋升的 PRD 立即启动；调度异常只记录日志，
+            # 不会终止 daemon。
             # --autopilot/--no-autopilot 的按次覆盖优先于配置；未传旗标时每轮
             # 热读配置（flag > repo .kedacode.toml > 全局，锁定本次常驻进程）。
-            autopilot_enabled = (
+            backlog_auto_advance = (
                 autopilot_override
                 if autopilot_override is not None
-                else context.config.autopilot.enabled
+                else context.config.backlog.auto_advance
             )
-            if backlog_store_factory is not None and autopilot_enabled:
+            if backlog_store_factory is not None and backlog_auto_advance:
                 try:
                     advance_report = advance_backlog_queue(
                         context=context,

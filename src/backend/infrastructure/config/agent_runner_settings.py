@@ -453,6 +453,16 @@ class AgentRunnerAutopilotSettings(BaseModel):
     merge_check_timeout_seconds: int = 1800
 
 
+class AgentRunnerBacklogSettings(BaseModel):
+    """Backlog 持续调度配置。
+
+    ``auto_advance`` 只控制 daemon 是否发现并晋升符合条件的 Backlog PRD，
+    与自动合并的两个配置开关相互独立。
+    """
+
+    auto_advance: bool = False
+
+
 class AgentRunnerValidationSettings(BaseModel):
     """Realistic Validation evidence gate configuration."""
 
@@ -869,6 +879,7 @@ class _AgentRunnerRepositoryOverrideSettings(BaseModel):
     memory: AgentRunnerMemorySettings | None = None
     safety: AgentRunnerSafetySettings | None = None
     autopilot: AgentRunnerAutopilotSettings | None = None
+    backlog: AgentRunnerBacklogSettings | None = None
     validation: AgentRunnerValidationSettings | None = None
     prompts: AgentRunnerPromptSettings | None = None
     pre_pr_review: AgentRunnerPrePrReviewSettings | None = None
@@ -1016,6 +1027,7 @@ def load_agent_runner_local_settings(
         runner=local_settings.runner,
         safety=local_settings.safety,
         autopilot=local_settings.autopilot,
+        backlog=local_settings.backlog,
         validation=local_settings.validation,
         prompts=local_settings.prompts,
         pre_pr_review=local_settings.pre_pr_review,

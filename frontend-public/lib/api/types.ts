@@ -415,12 +415,12 @@ export type BacklogGlobalStartResult = {
 };
 
 /**
- * 仓库级 Autopilot 完整闭环状态。
+ * 仓库级 Backlog 自动推进状态与相关运行条件。
  *
- * `enabled` 是**生效**配置的值（写后 fresh load），`persisted_enabled` 是仓库
- * `.kedacode.toml` 里的持久值（文件缺失或键未设置时为 null）。两者与
- * `auto_merge_enabled` / `daemon_running` 必须分别展示——只有全部成立才是
- * 真正的全自动闭环。
+ * `enabled` 是生效的 `backlog.auto_advance` 值（写后 fresh load），
+ * `persisted_enabled` 是仓库 `.kedacode.toml` 里的值（缺失时为 null）。
+ * `auto_merge_enabled` 表示自动合并的两道配置门都已开启，`daemon_running`
+ * 表示后台进程正在运行。三者互相独立。
  */
 export type BacklogAutopilotState = {
   repo_id: string;

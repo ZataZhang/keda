@@ -110,13 +110,13 @@ def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
         dest="autopilot_override",
         action="store_true",
         default=None,
-        help="Enable the scheduling autopilot for this run (never arms auto-merge).",
+        help="Enable Backlog scheduling for this run (overrides backlog.auto_advance; never arms auto-merge).",
     )
     daemon_run_options.add_argument(
         "--no-autopilot",
         dest="autopilot_override",
         action="store_false",
-        help="Disable the scheduling autopilot for this daemon run.",
+        help="Disable Backlog scheduling for this daemon run (overrides backlog.auto_advance).",
     )
     add_common_options(daemon_run_options)
     add_all_repositories_option(daemon_run_options)

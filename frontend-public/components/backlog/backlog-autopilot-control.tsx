@@ -1,10 +1,8 @@
 "use client";
 
-// Backlog 仓库级 Autopilot 控制条：开关键 + 真实闭环状态。
+// Backlog 仓库级自动推进控制条：调度开关键 + 真实运行状态。
 //
-// 页面必须把三件事分开显示：Autopilot 是否开启、daemon 是否在运行、自动合并
-// 是否启用。任一条件缺失时给出明确降级文案，绝不能把「开关已开」显示成
-// 「正在全自动推进」。
+// 页面分别显示 Backlog 自动推进、daemon 运行状态和自动合并是否通过双开关。
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,13 +16,13 @@ interface BacklogAutopilotControlProps {
 }
 
 /**
- * 渲染当前仓库的 Autopilot 开关与闭环状态。
+ * 渲染当前仓库的 Backlog 自动推进开关与运行状态。
  *
  * @param props.state - 后端聚合的状态快照；``null`` 表示尚未加载。
  * @param props.loading - 首次加载中为 ``true``。
  * @param props.saving - 正在写回配置时为 ``true``。
  * @param props.onToggle - 开关切换回调，参数是目标布尔值。
- * @returns Autopilot 控制条。
+ * @returns Backlog 自动推进控制条。
  */
 export function BacklogAutopilotControl({
   state,
@@ -54,11 +52,11 @@ export function BacklogAutopilotControl({
           onChange={(event) => onToggle(event.target.checked)}
           data-testid="backlog-autopilot-toggle"
         />
-        Autopilot 自动推进
+        Backlog 自动推进
       </label>
 
       <span className="text-slate-500">
-        {state.enabled ? "已开启：上游完成后自动解锁并启动下游 PRD" : "已关闭：不再自动补位"}
+        {state.enabled ? "已开启：daemon 会自动解锁并补位 pending PRD" : "已关闭：pending PRD 不会自动补位"}
       </span>
 
       <span className="text-slate-400">·</span>
@@ -81,7 +79,7 @@ export function BacklogAutopilotControl({
       >
         {state.auto_merge_enabled
           ? "自动合并已启用"
-          : "自动合并未启用，流程会停在待审阅"}
+          : "自动合并未启用（需 autopilot.enabled 与 safety.auto_merge 同时开启）"}
       </span>
 
       {state.persisted_enabled === null ? (

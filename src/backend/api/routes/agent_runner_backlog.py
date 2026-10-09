@@ -274,9 +274,9 @@ def get_backlog_prd_content(encoded_path: str, repo_id: str) -> PlainTextRespons
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Autopilot（仓库级）与验收证据
+# Backlog 自动推进（仓库级）与验收证据
 #
-# 这两组端点刻意不读列表快照：Autopilot 状态必须是写后 fresh 读回，
+# 这两组端点刻意不读列表快照：Backlog 状态必须是写后 fresh 读回，
 # 证据列表必须每次重新读盘，否则用户会看到陈旧值（rv-2 / rv-3 的验收基点）。
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -290,10 +290,10 @@ def _resolve_max_parallel(repo_id: str) -> int:
 
 @router.get("/agent-runner/backlog/autopilot")
 def get_backlog_autopilot(repo_id: str) -> dict:
-    """读取当前仓库的 Autopilot 完整闭环状态。
+    """读取当前仓库的 Backlog 自动推进状态。
 
-    返回生效的 ``autopilot.enabled``、``safety.auto_merge``、daemon 是否在跑、
-    Backlog 并发上限与配置来源，供页面如实展示是否具备全自动闭环条件。
+    返回生效的 ``backlog.auto_advance``、合并队列是否同时通过两道开关、daemon
+    是否在跑、Backlog 并发上限与配置来源。
     """
     context = _resolve_context(repo_id)
     try:
@@ -310,7 +310,7 @@ def get_backlog_autopilot(repo_id: str) -> dict:
 
 
 class UpdateAutopilotRequest(BaseModel):
-    """切换当前仓库的 Autopilot 自动推进。"""
+    """切换当前仓库的 Backlog 自动推进。"""
 
     repo_id: str = Field(min_length=1)
     enabled: bool
@@ -318,10 +318,10 @@ class UpdateAutopilotRequest(BaseModel):
 
 @router.patch("/agent-runner/backlog/autopilot")
 def update_backlog_autopilot(request: UpdateAutopilotRequest) -> dict:
-    """只修改目标仓库 `.kedacode.toml` 的 ``autopilot.enabled``。
+    """只修改目标仓库 `.kedacode.toml` 的 ``backlog.auto_advance``。
 
-    成功响应体来自写后 fresh load 的生效配置，不回显请求体；``safety.auto_merge``
-    保持原样（第二道危险动作门禁，页面只读展示）。写回失败时不替换原文件。
+    成功响应体来自写后 fresh load 的生效配置，不回显请求体；自动合并的两个配置
+    开关均保持原样。写回失败时不替换原文件。
     """
     contexts = _resolve_contexts()
     if not any(context.repo_id == request.repo_id for context in contexts):
@@ -339,12 +339,12 @@ def update_backlog_autopilot(request: UpdateAutopilotRequest) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     _audit(
         create_backlog_store(),
-        action="autopilot_toggle",
+        action="backlog_auto_advance_toggle",
         repo_id=request.repo_id,
         prd_path="",
         issue_number=None,
         result="accepted",
-        detail=f"autopilot.enabled={request.enabled}",
+        detail=f"backlog.auto_advance={request.enabled}",
     )
     return _serialize(state)
 
@@ -773,7 +773,7 @@ def enqueue_backlog_prd_ready(encoded_path: str, request: EnqueueReadyRequest) -
         # 出错路径同样由 core 用例审计（error），路由不重复落审计。
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    _BACKLOG_CACHE.pop(f"{request.repo_id}:archived=False", None)
+    request_backlog_resync(request.repo_id)
     return _serialize(result)
 
 
