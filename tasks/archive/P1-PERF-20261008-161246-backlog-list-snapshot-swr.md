@@ -482,6 +482,13 @@ No external validation required; repository evidence was sufficient.
 | D-06 | 归档变体的快照策略 | 周期预扫仅 pending 变体，archived 变体按需构建 | 每周期两个变体都扫 | 归档视图访问频率低且构建含本地解析成本；按需 + 持久化后同样秒开 |
 | D-07 | 状态解析瘦身是否本次做 | 不做（Phase 2 独立 PRD） | 与快照一起做 | 秒开目标由快照独立达成；瘦身收益是配额与重建速度，独立可验收、可回滚 |
 
+### Final Reconciliation
+
+- Interpretation: 已对照最终交付树逐行核对 §1 行为样例 7 行与「我默默定了这些」「我理解为不做」两张清单——每行都有对应实现与 rv 证据；`7e9b721f` 把「重扫失败不写降级快照」做实是对既有第 5 行契约的兑现而非改读法；「减少逐个 PRD 的 GitHub 查询次数」确认未混入本次改动（`resolve_backlog_states` 仍逐条查询，仅失败语义收敛为中止重建）。
+- Public behavior and contracts: `GET /agent-runner/backlog/prds` 保留 `prds`/`skipped`/`repo_id`/`include_archived` 并新增 `stale`/`scanned_at`（只增不减，路由实现与 `docs/api/references.md` 描述一致）；未知/禁用仓库仍返回 400 且历史快照不回流；全部写接口与详情类端点契约不变；前端新增「数据截至 / 后台更新中 / 正在同步 / 加载失败」状态文案，轮询节奏 stale 期 3 秒、fresh 期 30 秒。
+- Related PRD status: `tasks/pending/` 无引用或依赖本 PRD 的在办任务；机制前驱为已归档的 dashboard 快照同步（#143，代码已在 main，非执行前置）；后续 Phase 2 状态解析瘦身尚未建 PRD，不属于本次交付。
+- Requirements and risks: FR-1～FR-8 全部实现且由 rv-1～rv-7 在最终树上负控制变红→green 变绿后勾选（§9 执行侧条目全勾，仅 Human-Confirmed 三项留人审）；§12 三条风险陈述与最终实现相符；验收横幅 🧍 与 §9 状态一致；§9.1 实测数字采自代码树 `a74d8078`，其后的提交仅改动 tasks/ 下文档与证据（`git diff a74d8078..HEAD` 无代码文件），本轮在 HEAD `1e43948b` 复跑 `just test` 与 `CI=true just test all` 全绿佐证等价。
+
 ## Change Log
 
 ### PRD 创建（初始版本）
@@ -531,3 +538,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: runner 恢复轮要求证据与最终交付树对齐——rv-1 的 final_tree_evidence 声明"证据在交付分支最终 tree 上重采"，且 PID/毫秒数/时间戳按 manifest 约定每次重跑刷新，不同步会让报告数字滞后于树时间
 - Impact: 仅 §9.1 数字一行、evidence.json item 1、三份报告 .md（含 checklist html）与本 Change Log；无任何代码 diff 改动，oracle 语义与 §9 勾选状态不变
 - Review: 无需人工复核新决策（复跑与数字同步不改变任何验收条件）；呈递物两张仍待人工复核（§9 Human-Confirmed）
+
+### 归档补齐：Final Reconciliation 与呈递图内嵌（2026-10-09）
+- Type: doc
+- Before: §13 无 `### Final Reconciliation` 小节（prd skill 归档门禁检查器报「Missing Final Reconciliation section」）；evidence-report 中 rv-7 单帧 `rv-7-stale.png`/`rv-7-fresh.png` 仅文字提及、未内嵌（Machine Contract §4 要求每张静图至少在证据报告中内嵌一次）
+- After: §13 末尾新增 Final Reconciliation 小节，四个字段（Interpretation / Public behavior and contracts / Related PRD status / Requirements and risks）逐项对照最终交付树核对；证据报告 rv-7 小节补两张单帧内嵌；本轮在 HEAD `1e43948b` 复跑 `just test`（2461 passed）与 `CI=true just test all` 验证代码树与证据采集树 `a74d8078` 之间仅文档改动（`git diff a74d8078..HEAD` 无代码文件）
+- Reason: 独立 verifier/恢复轮复查发现归档门禁第 3 条（Section 13 Final Reconciliation is complete）未落文档；补记不新增任何验收条件，只是把已完成的对账结果按契约格式写入
+- Impact: 仅本 PRD §13 与证据报告 `P1-…-swr.evidence-report.md` 两处文档；§9 勾选状态、evidence.json、代码 diff 均不变
+- Review: 无需人工复核新决策（对账记录与图片补嵌不改变任何验收条件）；呈递物两张仍待人工复核（§9 Human-Confirmed）

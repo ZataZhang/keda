@@ -26,7 +26,13 @@
 
 - 预期看到：上帧 `3 个 PRD · 数据截至 08:00:00 · 后台更新中…`；下帧 `4 个 PRD · 数据截至 08:05:00`，新条目「Backlog E2E Fresh Arrival P…」出现、提示消失。
 - 验证层级：**e2e real-entry**——真实 dev 栈 + 真实浏览器渲染与轮询逻辑；仅列表 API 响应时序为 route mock（这正是被测的 stale→fresh 轮询契约本身）。
-- 单帧原图：`rv-7-stale.png`、`rv-7-fresh.png`、`rv-7-no-snapshot.png`（无快照「正在同步」空态）。
+- 单帧原图：`rv-7-stale.png`（stale 帧）与 `rv-7-fresh.png`（fresh 帧）：
+
+![rv-7 stale 帧原图](rv-7-stale.png)
+
+![rv-7 fresh 帧原图](rv-7-fresh.png)
+
+`rv-7-no-snapshot.png`（无快照「正在同步」空态）：
 
 ![rv-7 无快照空态帧](rv-7-no-snapshot.png)
 
