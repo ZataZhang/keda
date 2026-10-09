@@ -4,7 +4,7 @@
 
 ## 打开方式
 
-[打开交互原型](lifecycle-agent-matrix.html)（纯静态单文件，无构建步骤；也可从 [原型目录](hub.html) 进入）。[查看更新后的 Settings 主视图](assets/lifecycle-agent-matrix/preview-settings.png)；[查看回退预设保存预览](assets/lifecycle-agent-matrix/preview-fallback-settings.png)。可用 [`?screen=settings&demo=fallback-preset`](lifecycle-agent-matrix.html?screen=settings&demo=fallback-preset) 直达可编辑的 Claude 回退预设状态。
+[打开交互原型](lifecycle-agent-matrix.html)（纯静态单文件，无构建步骤；也可从 [原型目录](hub.html) 进入）。[查看更新后的 Settings 主视图](assets/lifecycle-agent-matrix/preview-settings.png)；[查看三条回退链都绑定预设的保存预览](assets/lifecycle-agent-matrix/preview-fallback-settings.png)。可用 [`?screen=settings&demo=fallback-preset`](lifecycle-agent-matrix.html?screen=settings&demo=fallback-preset) 直达三条回退链各自绑定匹配预设的编辑状态。
 
 ## 三层落点（本原型要评审的核心结论）
 
@@ -76,9 +76,9 @@ Settings 页在真实的「设置」标题与用户副标题下方显示「Agent
 - 回退链在 Issue 执行切换中使用，也被校验、审核和监督的候选顺延复用；决定四建议在共享候选路径里应用映射，并由 PRD 人审确认最终范围。
 - 新增的回退预设绑定行为仍是 PRD 待确认项：建议用 `agent_fallback_presets` 按 Agent 名称映射命名预设；绑定必须校验预设 Agent 与候选 Agent 一致。是否覆盖所有复用回退链的 runner 场景、以及 global/repository 的配置范围，以 PRD 人审决定为准。
 
-![interactive prototype：回退候选绑定预设与 TOML 保存预览](assets/lifecycle-agent-matrix/preview-fallback-settings.png)
+![interactive prototype：Claude、Kimi 与 Codex 分别绑定自己的模型预设及 TOML 保存预览](assets/lifecycle-agent-matrix/preview-fallback-settings.png)
 
-截图验证层级：**interactive prototype**；演示模型 ID 仅用于展示，不代表生产配置或供应商可用模型。
+截图验证层级：**interactive prototype**；模型和推理档位是已公开模型的演示组合，不代表当前仓库的 Agent 参数模板或账号可用性。
 
 ## 状态模型
 
@@ -125,7 +125,7 @@ PRD 原文 · 覆盖抽屉
 ## 演示数据说明
 
 - 九个生命周期键名、中文名、取值来自 PRD §1 与 §10 的闭集；已注册 agent 取自 `config.toml` 的七个注册块（codex / claude / kimi / pi / codebuddy / qoder / opencode）。
-- 回退预设下拉用 `fallback-claude`、`fallback-kimi`、`fallback-codex` 三个演示预设，分别匹配回退链里的 claude / kimi / codex；模型 ID（`example-*-model`）是占位示例，不表示供应商目录中的真实可用模型。实际已有的 codebuddy / qoder 示例预设仍保留。
+- 回退预设下拉用 `fallback-claude`、`fallback-kimi`、`fallback-codex` 三个演示预设，分别匹配回退链里的 claude / kimi / codex；展示值为 `claude-sonnet-5-5 / max`、`kimi-k2.6 / high`、`gpt-5.4 / xhigh`。这些是帮助评审具体化模型与推理档位的样例，不代表当前仓库已配置对应的参数模板或账号可用性。实际已有的 codebuddy / qoder 示例预设仍保留。
 - **Agent 标签设置**的七个标签取自真实 `config.toml`：`agent/codex`（#5319E7）、`agent/claude`（#BFDADC）、`agent/kimi`（#FF6B6B）、`agent/pi`（#7C3AED）、`agent/codebuddy`（#0052D9）、`agent/qoder`（#FF8C42）、`agent/opencode`（#0EA5E9），描述也逐字来自各自的 `label_description`。
 - 三个层级的初始值都是本机真实取值，来源列标注它来自哪一层：实现 `claude`（`runner.default_agent`）、校验 `auto`（`validation.verifier_agent` 缺省值）、审核 `auto`（`pre_pr_review.review_agent`）、监督 `auto`（`post_pr_supervisor.supervisor_agent`）、决策 `claude`（`interactive_decision.default_agent`）、内容生成 `claude`（`generated_content.default_agent`）、辩论 `auto`（`agent/deliberate` 标签路由）；fix / closeout 为内置默认 `executor`。
 - 受管理仓库列表与真实 registry 一致（`repo_id` / `display_name`），行位坐标实测自真实页面。
@@ -157,8 +157,8 @@ PRD 原文 · 覆盖抽屉
 | `docs/prototypes/lifecycle-agent-matrix.md` | Modify | 说明仍描述旧 Settings 矩阵与 Backlog 仓库抽屉，回退预设只写作后续想法 | 更新为统一设置页唯一矩阵入口，记录回退预设交互、演示数据和待确认边界，并内嵌保存预览截图 | 评审时可直接看到回退预设状态并核对 PRD 提案 |
 | `docs/prototypes/assets/prototype-hub.js` | Modify | lifecycle prototype v2.7 登记统一 Settings 与 lifecycle 页面 | v2.8 登记回退候选预设绑定与更新后的 Settings 预览 | Prototype Hub 是该原型的唯一登记入口 |
 | `docs/prototypes/assets/lifecycle-agent-matrix/preview-settings.png` | Modify | 旧截图仍显示 Settings 双 Tab 与 Agent-only 生命周期矩阵 | 重截为 Agent 标签、统一生命周期入口和带回退预设选择的当前 Settings 概览 | 删除误导性的旧画面，并直观展示新增回退预设能力 |
-| `docs/prototypes/assets/lifecycle-agent-matrix/preview-settings.source.md` | Modify | 来源记录只展示回退顺序与切换预算 | 增加带 claude 演示预设绑定的 capture URL 与数据限制 | 让截图可复现并说明模型 ID 是演示值，不代表生产配置 |
-| `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png` | Add | 无回退预设选择与保存预览截图 | 添加 Claude 回退预设已绑定后的 Settings 浏览器截图 | 让评审者直接看到新选择和对应 TOML 映射 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/preview-settings.source.md` | Modify | 来源记录只展示回退顺序与切换预算 | 增加三种匹配 Agent 预设均已绑定的 capture URL 与演示数据说明 | 让截图可复现并解释模型/effort 样例的范围 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png` | Add | 无回退预设选择与保存预览截图 | 添加三条回退候选分别绑定匹配预设及模型/effort 后的保存预览 | 让评审者直接看到每个候选独立选择预设及 TOML 映射 |
 | `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.source.md` | Add | 无截图来源记录 | 记录 capture URL、视口、状态、演示数据和验证层级 | 保留回退预设保存预览的复现方式及生产边界 |
 | `docs/prototypes/assets/lifecycle-agent-matrix/preview-lifecycle-settings.png` | Add | 无设置页缩略图 | 添加统一生命周期设置页真实浏览器 capture | Hub 目录需要能识别新主状态 |
 | `docs/prototypes/assets/lifecycle-agent-matrix/preview-lifecycle-settings.source.md` | Add | 无来源侧车 | 记录 capture URL、视口、日期、层级和失效条件 | 保留浏览器截图来源与可复现信息 |

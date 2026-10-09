@@ -112,9 +112,9 @@ KedaCode 已有 Agent 生命周期分配和模型预设：一个预设可以包�
 
 **验收：** Settings 能选择/清除匹配预设并显示最终模型/推理深度及来源；未知 preset 或 Agent 不匹配时拒绝写入；无绑定的候选和回退顺序保持既有行为。
 
-![interactive prototype：回退候选绑定预设与 TOML 保存预览](../../docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png)
+![interactive prototype：Claude、Kimi 与 Codex 分别绑定自己的模型预设及 TOML 保存预览](../../docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png)
 
-原型截图验证层级：**interactive prototype**。模型 ID 为演示值；生产行为与配置范围仍待本决定确认。
+原型截图验证层级：**interactive prototype**。图中展示 `claude-sonnet-5-5 / max`、`kimi-k2.6 / high`、`gpt-5.4 / xhigh`；仅作具体的预设示例，不代表当前仓库已配置对应的 Agent 参数模板或账号可用性。生产行为与配置范围仍待本决定确认。
 
 **自动门禁，不需要逐项人工审阅**：阶段键闭集、预设和 Agent 校验、配置层合并、TOML 保留式写入、HTTP 请求校验、CLI 参数/JSON 稳定性、静态前端构建、文档和随包 skill 同步由自动检查与独立 verifier 验证。人工确认只针对上述四个仍影响用户选择和安全感知的产品取舍。
 
@@ -427,7 +427,7 @@ realistic_validation:
 ### 7.8 Frontend / Prototype / Data Model
 
 - **Frontend impact**：`frontend-public/` 新增 `/app/settings/lifecycle/`，承载 global/repository scope、九阶段矩阵、preset editor 与影响阶段说明；Settings 原 Agent-only 矩阵由单一入口替换，Backlog 仓库 gear 打开同一页面并预选 repo。`frontend-admin/` 无影响。
-- **Target prototype**：已登记在 Prototype Hub 的 [生命周期 Agent / 模型统一设置原型](../../docs/prototypes/lifecycle-agent-matrix.html?screen=lifecycle-settings)；回退预设交互可从 [Claude fallback preset 演示态](../../docs/prototypes/lifecycle-agent-matrix.html?screen=settings&demo=fallback-preset) 打开，保存结果见 `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png`。验收关键状态为全局初始矩阵、切换仓库后显示继承与覆盖、编辑/保存预设、回退候选预设及 400px 窄屏。实现 PR 中每个状态都提供匹配 viewport 的目标原型图与生产页面截图；原型标注 `interactive prototype`，生产页面截图标注实际 e2e/手动验证层级。
+- **Target prototype**：已登记在 Prototype Hub 的 [生命周期 Agent / 模型统一设置原型](../../docs/prototypes/lifecycle-agent-matrix.html?screen=lifecycle-settings)；回退预设交互可从 [三条 fallback preset 演示态](../../docs/prototypes/lifecycle-agent-matrix.html?screen=settings&demo=fallback-preset) 打开，保存结果见 `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png`。验收关键状态为全局初始矩阵、切换仓库后显示继承与覆盖、编辑/保存预设、回退候选预设及 400px 窄屏。实现 PR 中每个状态都提供匹配 viewport 的目标原型图与生产页面截图；原型标注 `interactive prototype`，生产页面截图标注实际 e2e/手动验证层级。
 - **Prototype files changed in this PRD preparation**：prototype change log 在 `docs/prototypes/lifecycle-agent-matrix.md` 列出全部原型、registry、索引、静态底图 provenance 与导航变更。
 - **No data model changes in this PRD.** Global/repository TOML 是唯一持久化配置；无需 ER diagram 或 migration。
 

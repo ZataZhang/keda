@@ -709,7 +709,7 @@
                 '<span class="add">+ agent_fallback_order = ["claude", "kimi", "codex"]</span>',
                 '<span class="add">+ max_agent_switches = 2</span>',
                 '<span class="note">· [agent_runner.runner.agent_fallback_presets]</span>',
-                ...Object.entries(demoFallbackPresets).map(([agent, presetName]) => `<span class="add">+ ${esc(agent)} = "${esc(presetName)}"</span>`),
+                ...Object.entries(demoFallbackPresets).map(([agent, presetName]) => `<span class="add">+ ${agent} = "${presetName}"</span>`),
               ].join('\n')
             : null,
           prdOverrides: {},

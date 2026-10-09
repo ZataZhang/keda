@@ -10,13 +10,13 @@
 
 ## Feature Overview (功能一览)
 
-- **按配置启动 Agent 执行器**（FR-1）：裸 `kc` 在交互式终端直接启动所选的 Claude、Codex 或其他执行器原生对话界面；执行器由配置决定，`--agent` 可覆盖；移除旧 Keda REPL 与 `kc repl` 命令，不保留兼容入口。
+- **按配置启动 Agent 执行器**（FR-1）：裸 `kc` 在交互式终端直接启动所选的 Claude、Codex 或其他执行器原生对话界面；执行器由配置决定，`--agent` 可覆盖；保留 `kc repl` 进入原有 Keda REPL。
 - **执行器权限与上下文**（FR-2）：使用执行器自己的交互 profile、权限策略和终端 UI；注入 KedaCode operator skill 与仓库上下文，不创建 KC 网页聊天。
 - **对话式项目预览**（FR-3）：只有用户在执行器对话中明确要求预览时，agent 才按仓库配置启动本地开发服务，并在终端回复可访问的 loopback URL；不猜命令、不自动打开浏览器。
 - **注入 KedaCode 操作知识**（FR-4）：会话进入正确仓库，并能发现随包的 kedacode-operator skill 与启动指引。
 - **定时监督活跃任务**（FR-5）：监督默认关闭；启用后默认每 30 分钟巡检，巡检周期、停滞阈值和监督执行器均可由人覆盖。
 - **有界自动修复**（FR-6）：仅在确认停滞且进程归属明确时修复，仍经过既有恢复、验证和 review 门禁。
-- **安全交班与兼容**（FR-7、FR-8）：需人工、跨机器或 owner 不明时停手；保留帮助、其他 CLI 和 loop-daemon 职责，移除旧 REPL。
+- **安全交班与兼容**（FR-7、FR-8）：需人工、跨机器或 owner 不明时停手；保留 `kc repl`、帮助、其他 CLI 和 loop-daemon 职责。
 
 # Part A · 人审层 (Review Layer)
 
@@ -24,7 +24,7 @@
 
 ### Problem Statement
 
-KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 operator skill，但裸 kc 在 TTY 下进入 Keda 自己的命令代理 REPL；要直接使用 Codex 或 Claude，用户必须另开命令、切目录并选择 agent。用户确认自己从未使用旧 REPL，且认为其价值有限，因此本需求直接移除旧实现和 `kc repl` 命令，不保留兼容入口。`kc console` 已有本地网页管理终端，但只管理 Runner 和 Issue，不提供 agent 对话，也不负责打开目标仓库的前端预览。现有 kc loop-daemon 按 recipe 创建新 Issue，不检查正在执行的任务。
+KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 operator skill，但裸 `kc` 在 TTY 下进入 Keda 自己的命令代理 REPL；要直接使用 Codex 或 Claude，用户必须另开命令、切目录并选择 agent。本需求把裸 `kc` 改为启动已配置执行器的原生 TUI，并保留显式 `kc repl` 作为原有 Keda REPL 入口。`kc console` 已有本地网页管理终端，但只管理 Runner 和 Issue，不提供 agent 对话，也不负责打开目标仓库的前端预览。现有 kc loop-daemon 按 recipe 创建新 Issue，不检查正在执行的任务。
 
 执行链能检测 20 分钟没有 stdout/stderr 的 attempt 并终止子进程树；daemon 也能对账进程已死的僵尸任务。它们无法识别仍有输出但任务没有实质进展的情况。2026-10-08 归档的 Agent 调用追踪 PRD（#242）明确把停滞诊断和自动接管排除在范围外；用户本次明确重开该边界。
 
@@ -37,8 +37,7 @@ KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 opera
 | 👀 人审 + 自动验证 | 在交互式终端输入 `kc` | 按配置启动 Claude、Codex 或其他执行器的原生终端对话界面；使用当前仓库和 KedaCode operator skill；不启动 KC 网页聊天服务 |
 | 👀 人审 + 自动验证 | 在执行器对话里说“打开这个仓库的前端” | agent 使用受限的预览能力启动仓库明确配置的开发命令，确认 loopback URL 已就绪后在终端回复中显示该 URL；用户自行访问，不自动打开浏览器。若命令或 URL 不唯一就先询问，不猜测、不访问远程地址 |
 | 👀 人审 + 自动验证 | 输入 `kc --agent codex` 或 `kc --agent claude` | 打开所选执行器的原生终端交互界面；未安装/不支持交互时明确失败，不误跑非交互或自动批准 profile |
-| 🤖 自动验证 | 输入 `kc repl`；在管道/脚本中无 TTY 地运行 `kc` | 旧 `kc repl` 命令已移除，调用时返回标准未知命令/usage error；无 TTY 裸 `kc` 仍输出帮助并返回既有非零状态 |
-| 👀 人审 + 自动验证 | 启用本机监督，任务在停滞阈值内无阶段、调用或工作现场进展 | supervisor 诊断；若确认停滞且 owner 明确，先只停止该 attempt 的进程组，再经既有有界恢复修复并通过原验证门禁；同一 Issue 无并行 writer |
+| 🤖 自动验证 | 输入 `kc repl`；在管道/脚本中无 TTY 地运行 `kc` | `kc repl` 仍启动 KedaCode 原有多轮 REPL：agent 调用 KC 子命令时受白名单约束，写操作和高风险操作需确认；无 TTY 裸 `kc` 仍输出帮助并返回既有非零状态 |
 | 🤖 自动验证 | 监督器遇到用户输入/凭据需求、远端任务或不明进程归属 | 不抢进程、不写文件、不重置标签、不绕过门禁；留下可诊断原因和建议 |
 
 上表每行成为 §7.6 验收 oracle；修改行为或结果格即修改验收标准。
@@ -48,7 +47,7 @@ KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 opera
 - 裸 TTY `kc` 读取默认 executor 配置并直接启动其原生交互 profile；`--agent` 选择其他已配置的执行器。
 - 对话发生在执行器自己的终端 UI 中；KC 不启动网页聊天、session API 或第二个 writer。
 - 执行器 profile 明确配置如何加载 KedaCode operator skill 与 bootstrap 指引；无法支持上下文注入时应明确告知，不伪称已加载。
-- 旧 Keda REPL 与 `kc repl` 命令一并移除，不保留兼容别名；交互入口统一为裸 TTY `kc` 启动 provider 原生 TUI。
+- 裸 TTY `kc` 启动 provider 原生 TUI；原有 Keda REPL 保留在显式 `kc repl` 命令下，并继续使用白名单与写操作确认。
 - 裸 `kc` 不启动项目开发服务；项目预览只响应明确的对话请求，并复用仓库显式 preview 配置，或先让用户确认唯一无歧义的开发脚本。
 - 监督作为本机活跃 attempt 的一部分运行，不复用创建 Issue 的 kc loop-daemon，也不新建可并行写入的 runner。
 - 每个停滞周期至多触发一次修复；恢复受既有预算、验证、review 和发布门禁约束。
@@ -73,7 +72,7 @@ KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 opera
 - TTY 裸 `kc` 按默认配置启动匹配的原生交互 profile；`--agent` 可覆盖执行器；会话使用当前 repo cwd 并加载 operator skill。
 - KC 不启动网页聊天或本地 session server；目标仓库预览只在用户明确提出后启动，URL 只接受 loopback 并在执行器终端回复中提供。
 - 对话请求预览后，只有仓库白名单命令启动的子进程能被 KC 管理，目标 URL 需是该进程提供的本机地址。
-- `kc --help` 和无 TTY 裸 `kc` 保持原路由与退出语义；旧 `kc repl` 返回标准未知命令/usage error。
+- `kc --help`、`kc repl` 和无 TTY 裸 `kc` 保持原路由与退出语义。
 - 未启用、未到周期、无活跃任务或任务已有进展时不调用监督模型。
 - 修复前完成 attempt/owner/process-group fresh check；修复后走原验证链；同一 Issue 同时至多一个写入 executor。
 - 需人工、跨主机或 owner 不明时不自动写入或终止，并可观察具体交班原因。
@@ -104,9 +103,9 @@ KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 opera
 
 ### 决定四：裸 `kc` 的默认界面
 
-裸 `kc` 按仓库/全局设置直接启动选定的 Codex、Claude 等执行器原生终端 UI；不启动 KC 网页聊天或 session server。用户可用 `--agent` 覆盖默认执行器；旧 Keda REPL 和 `kc repl` 命令移除，不保留兼容入口。只有用户在执行器对话中明确请求打开目标仓库前端时，才启动受控 dev server，并在执行器回复中提供 loopback URL；不自动打开浏览器。
+裸 `kc` 按仓库/全局设置直接启动选定的 Codex、Claude 等执行器原生终端 UI；不启动 KC 网页聊天或 session server。用户可用 `--agent` 覆盖默认执行器；原有 Keda REPL 保留在 `kc repl`。只有用户在执行器对话中明确请求打开目标仓库前端时，才启动受控 dev server，并在执行器回复中提供 loopback URL；不自动打开浏览器。
 
-**已按你的选择更新：** 对话留在执行器原生终端 UI，旧 Keda REPL 与 `kc repl` 命令一并移除，不保留兼容入口；KC 不实现网页聊天。
+**已按你的选择更新：** 裸 `kc` 对话留在执行器原生终端 UI；`kc repl` 保留原有 Keda REPL；KC 不实现网页聊天。
 
 **验收：** 裸 `kc` 进入配置选择的 executor TUI 并注入当前仓库/skill；不会启动 KC Web chat 或项目 dev server。预览只在对话中明确请求后启动，成功后由执行器在终端回复 URL，用户自行访问。
 
@@ -122,7 +121,7 @@ KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 opera
 
 **Reviewer / 发布操作者**：既有 pre-push review、独立 verifier、Draft PR、post-PR supervisor 与人工 review 条件不变；监督器不能代替 reviewer 接受发布结果。
 
-**CI / 非交互 CLI 调用方**：无 TTY 的裸 `kc` 仍展示帮助并保留退出状态；`kc repl` 不再是有效命令，其他子命令保持原路由。交互 executor 只在本机 TTY 裸入口启动；监督默认关闭，因此已有 daemon automation 不会有新模型费用或终止副作用。
+**CI / 非交互 CLI 调用方**：无 TTY 的裸 `kc` 仍展示帮助并保留退出状态；`kc repl` 与其他子命令保持原路由。交互 executor 只在本机 TTY 裸入口启动；监督默认关闭，因此已有 daemon automation 不会有新模型费用或终止副作用。
 
 **执行器配置维护者**：通过 agent registry 声明默认 executor 与原生 interactive profile。仅配置非交互 run profile 的 agent 不会被猜测为支持交互 TTY；`--agent` 可选择其他已声明的交互执行器；能力缺失时给出可行动错误，不静默降级到权限更宽的执行方式。
 
@@ -141,8 +140,8 @@ KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 opera
 
 ### Existing Path / Reuse Candidates
 
-- 裸入口是 src/backend/api/cli_typer_app.py::_app_callback：TTY 无子命令当前转发给旧 REPL；非 TTY 显示帮助并返回错误；--help 由 Typer 保留。本需求将 TTY 路由改为原生 executor，并移除旧 REPL 路径。
-- 旧 REPL 路径包括 src/backend/api/cli_parsed_commands/agent.py::run_repl_command、src/backend/core/use_cases/repl_session.py 与 src/backend/engines/agent_runner/repl_command_executor.py；连同 `kc repl` 注册、专属配置和测试一起清理，不迁移旧 allowlist。
+- 裸入口是 `src/backend/api/cli_typer_app.py::_app_callback`：TTY 无子命令当前转发给旧 REPL；非 TTY 显示帮助并返回错误；`--help` 由 Typer 保留。本需求将 TTY 裸入口改为原生 executor，显式 `kc repl` 继续转发给旧 REPL。
+- 旧 REPL 路径包括 `src/backend/api/cli_parsed_commands/agent.py::run_repl_command`、`src/backend/core/use_cases/repl_session.py` 与 `src/backend/engines/agent_runner/repl_command_executor.py`；保留其 `kc repl` 注册、专属配置、白名单和确认行为。
 - Agent profile / 配置模型位于 `src/backend/core/shared/models/agent_spec.py`、`src/backend/infrastructure/config/agent_runner_settings.py`、`src/backend/engines/agent_runner/factory_config_builder.py`；`config.toml` 和仓库 `.kedacode.toml` 合并。为裸 `kc` 配置显式的原生 interactive profile；现有 Codex `exec`、Claude `-p` 形式不能直接冒充交互会话。
 - `kc console` 通过 `src/backend/api/cli_typer_console.py` 提供 Runner 运维页面，与裸 `kc` 的原生执行器对话无关；本任务不改 Console 或 `frontend-public`。
 - 裸 `kc` 通过前台子进程启动所选 executor，将 stdin/stdout/stderr、工作目录、信号和退出状态正确交给原生 TTY 会话；不托管聊天服务器。
@@ -174,7 +173,7 @@ KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 opera
 
 - 不新增 task monitor daemon、独立任务队列或第二份 stale claim 数据。
 - 不把 20 分钟 output inactivity watchdog 等同业务进展。
-- 只保留一个裸 `kc` 原生 TUI 交互入口，不维护旧 REPL 或双入口兼容层；不把 lifecycle_agents.supervisor 的只读 PR 审核扩大成执行期写权限。
+- 裸 `kc` 使用 provider 原生 TUI，显式 `kc repl` 保留现有 Keda REPL；两者不共享或扩大权限边界。不把 lifecycle_agents.supervisor 的只读 PR 审核扩大成执行期写权限。
 - 不硬编码跨版本参数；原生交互能力由 agent profile 明确声明并验证。
 - 不新增网页聊天、session 服务或前端打包路径；复用已有 agent runner、预览进程监督和 attempt 生命周期。
 
@@ -182,7 +181,7 @@ KedaCode 已能通过配置启动多个 coding-agent 执行器，也提供 opera
 
 ### Recommended Approach
 
-TTY 裸 `kc` 读取仓库/全局设置，解析默认 executor 与原生交互 profile，在当前 repo cwd 直接启动 Claude、Codex 或其他配置执行器的终端界面。对话和权限交给执行器本身；KC 不实现 Web chat、不创建 session server。`--agent …` 可覆盖默认 executor；旧 Keda REPL 和 `kc repl` 命令一并移除，不保留兼容入口。只有用户在对话中明确要求预览项目时，才按受控 preview profile 启动本地开发服务，并把验证过的 loopback URL 回复到执行器对话中；用户自行访问。
+TTY 裸 `kc` 读取仓库/全局设置，解析默认 executor 与原生交互 profile，在当前 repo cwd 直接启动 Claude、Codex 或其他配置执行器的终端界面。对话和权限交给执行器本身；KC 不实现 Web chat、不创建 session server。`--agent …` 可覆盖默认 executor；原有 Keda REPL 保留在 `kc repl`，并继续使用白名单与确认。只有用户在对话中明确要求预览项目时，才按受控 preview profile 启动本地开发服务，并把验证过的 loopback URL 回复到执行器对话中；用户自行访问。
 
 用户在执行器终端对话中明确要求预览项目时，agent 才调用受限的 `kc preview` 能力：先解析仓库显式预览配置；若不存在，则只在仓库内唯一发现一个开发入口时向用户确认。确认后的命令以目标仓库 cwd 启动为受管子进程，只接受其报告/配置的 loopback URL；agent 在终端回复该地址，用户自行访问。裸 `kc` 启动时不运行项目命令，KC 不自动打开浏览器。停止动作只针对 KC 持有的准确进程组。
 
@@ -201,7 +200,7 @@ TTY 裸 `kc` 读取仓库/全局设置，解析默认 executor 与原生交互 p
 - **监督器**：复用 attempt lifecycle、event/log 和 worktree 元数据；用单调时钟计算 interval 与无进展窗口。实质进展包括阶段推进、调用终态、新 commit/工作树变化、验证或 PR/Issue 状态变化。stdout 更新本身不算。候选快照只含必要状态摘要，不含凭据、环境变量或完整 prompt。
 - **诊断/修复**：监督 executor 只读，返回 progress / blocked / stalled / uncertain。blocked/uncertain 交人；stalled 后 fresh-check claim、attempt、progress 和 child-group ownership。全匹配后精确停止该组、确认退出，向既有 recovery 注入诊断摘要。重进展后才可重置停滞窗口；原验证、review 和发布 gate 不变。
 - **配置**：新增/扩展 [agent_session] 声明默认 executor 和 profile；[agent_session.preview] 仅配置可执行 argv、ready URL/timeout 等白名单能力。监督新增 [agent_runner.stall_supervisor]，含 enabled=false、check_interval_seconds=1800、stalled_after_seconds=1800；两项默认值均可由人覆盖、agent 默认为 lifecycle_agents.supervisor。仓库/全局配置可覆盖；数值须为正。attempt 监督复用已有 run context，不加会话历史表或第二事实源。
-- **文档/分发**：同步 agent-runner/configuration guides、ROADMAP、mkdocs 导航、随包 operator skill 和 references；说明裸 `kc` 按配置启动 provider TTY、`--agent` 覆盖、旧 `kc repl` 命令移除与 `kc preview` 的边界。
+- **文档/分发**：同步 agent-runner/configuration guides、ROADMAP、mkdocs 导航、随包 operator skill 和 references；说明裸 `kc` 按配置启动 provider TTY、`--agent` 覆盖、保留 `kc repl` 与 `kc preview` 的边界。
 
 ### Alternatives Considered
 
@@ -220,7 +219,7 @@ TTY 裸 `kc` 读取仓库/全局设置，解析默认 executor 与原生交互 p
 
 ### 7.1 Core Logic
 
-TTY 裸入口 → resolve 当前 repo 与默认 executor → 验证 native interactive profile、operator skill 与权限边界 → 在当前目录以原生 TTY 启动 executor，并转发输入、输出、信号和退出状态。`--agent <name>` 选择其他已配置 executor；旧 `kc repl` 命令返回 usage error；help、其他显式子命令和无 TTY 行为保持既有路由。启动入口不创建 Web server，也不运行项目 dev command。
+TTY 裸入口 → resolve 当前 repo 与默认 executor → 验证 native interactive profile、operator skill 与权限边界 → 在当前目录以原生 TTY 启动 executor，并转发输入、输出、信号和退出状态。`--agent <name>` 选择其他已配置 executor；显式 `kc repl` 仍进入原有 Keda REPL；help、其他显式子命令和无 TTY 行为保持既有路由。启动入口不创建 Web server，也不运行项目 dev command。
 
 对话中用户明确要求预览项目时，skill 指引 agent 使用受限的 `kc preview`：加载 repo preview profile；配置不存在时只把唯一候选交给用户确认；启动精确 argv 为受管进程组，等待 ready 并校验 loopback URL；agent 在执行器终端回复 URL，用户自行访问。未就绪、地址非本机或命令不唯一时停止/交还澄清。停止动作只作用于 KC 持有的准确进程组。
 
@@ -260,7 +259,7 @@ API / CLI
 ├── src/backend/api/cli_typer_app.py [修改]
 │   【总结】TTY 裸入口启动配置的原生执行器；保留 help、非 TTY 与显式命令
 ├── src/backend/api/cli_typer_agent.py [按需修改]
-│   【总结】增加/调整 `--agent` 入口并与 parser/schema 对齐，移除旧 `kc repl` 命令
+│   【总结】增加/调整 `--agent` 入口并与 parser/schema 对齐，保留 `kc repl` 原有入口
 └── src/backend/api/cli_typer_preview.py [新增或复用]
     【总结】让对话 agent 以受限命令管理项目预览并返回 loopback URL
 
@@ -272,7 +271,7 @@ Engines
 
 Tests
 ├── tests/test_cli_agent_session_entry.py [新增或扩展]
-│   【总结】验证裸 kc 原生 profile、stdio/cwd/signal，并确认旧 `kc repl` 命令已移除
+│   【总结】验证裸 kc 原生 profile、stdio/cwd/signal，以及 `kc repl` 兼容
 ├── tests/test_kc_preview.py [新增]
 │   【总结】验证明确请求、精确命令、loopback URL、ready timeout 与准确 stop
 └── tests/test_agent_runner_stall_supervision.py [新增]
@@ -280,7 +279,7 @@ Tests
 
 Docs
 ├── docs/guides/agent-runner.md [修改]
-│   【总结】说明 TUI/Console/按需 preview 入口、旧 REPL 移除、监督配置和安全边界
+│   【总结】说明 TUI/Console/按需 preview 入口、`kc repl` 兼容、监督配置和安全边界
 ├── docs/guides/configuration.md [修改]
 │   【总结】记录默认关闭、间隔和阈值配置
 └── ROADMAP.md [修改]
@@ -319,7 +318,7 @@ flowchart TD
     L -->|No| M["stop exact group and report error"]
     L -->|Yes| N["reply with URL; user opens it"]
     O["kc --agent <name>"] --> D
-    P["kc repl"] --> Q["removed command; usage error"]
+    P["kc repl"] --> Q["existing Keda REPL; allowlist and confirmation"]
     R["kc run / kc daemon attempt"] --> S["attempt observer timer"]
     S --> T{"interval reached and no progress?"}
     T -->|No| S
@@ -361,10 +360,10 @@ flowchart TD
   expected_fail: "未确认唯一命令前不启动子进程；不支持 TTY 的 profile 在触碰项目进程前明确报错；裸 kc 不自动启动 preview 或浏览器。"
 
 - id: rv-2
-  behavior: "旧 kc repl 命令已移除；kc console 与无 TTY 裸 kc 保持原路由和退出语义；TTY 裸入口只启动原生 executor。"
+  behavior: "kc repl 与 kc console 保持既有路由；无 TTY 裸 kc 保持帮助和退出语义；TTY 裸入口只启动原生 executor。"
   reviewer: verifier
   real_entry: "uv run kc repl --help；uv run kc console --help；printf question | uv run kc"
-  expected: "kc repl 返回标准未知命令/usage error，旧 Keda REPL、allowlist 与 REPL 专属配置不再注册或执行；kc console 仍启动 Runner Operations Console；no-TTY 裸 kc 输出帮助且保留既有非零状态；Typer/parser/schema 一致。"
+  expected: "kc repl 仍进入原有多轮 Keda REPL；agent 提议的 KC 子命令受白名单检查，写操作和高风险操作要求确认；kc console 仍启动 Runner Operations Console；no-TTY 裸 kc 输出帮助且保留既有非零状态；Typer/parser/schema 一致。"
   mock_boundary: "provider/GitHub 可替换；真实 CLI dispatch、schema 和 TTY 检测不得 mock。"
   tier: R1
   test_layer: e2e
@@ -444,9 +443,8 @@ notes: "已检查 ROADMAP、pending 与 archive。#245 共用 skill installer，
 | 要看什么 | 呈递物 | 人如何快速确认 |
 |---|---|---|
 | 裸 `kc` 进入原生执行器 TUI；明确请求预览后在终端收到 URL | tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/rv-1-kc-terminal-preview.png，交付时采集真实 TTY 截图/日志。 | 核对 provider、repo、skill 与权限提示；比较裸启动前后进程确认未自动启动项目服务；请求预览后确认 ready 并由终端回复 loopback URL。 |
-| 停滞 attempt 的自动诊断与有界恢复 | 无单独人工呈递物；纳入常规自动化验证，不要求真实停滞任务现场材料。 | 此项不要求人工查看或提交专项证据；按受控 attempt/process-group 自动化测试验证安全边界。 |
 
-verifier-only 组：旧 REPL 删除与剩余 CLI 路由、config/default/profile/schema、调用预算、脱敏、skill 包和静态架构门禁只有失败时升级。完成消息需报告本表各项状态；停滞监督不另附专项证据材料。
+verifier-only 组：停滞监督、`kc repl`/`kc console` 兼容路由、config/default/profile/schema、调用预算、脱敏、skill 包和静态架构门禁只有失败时升级。完成消息需报告本表各项状态；停滞监督不设人工验收项或专项证据材料。
 
 ### 9.2 Acceptance Evidence Package
 
@@ -458,7 +456,7 @@ verifier-only 组：旧 REPL 删除与剩余 CLI 路由、config/default/profile
 
 #### Architecture Acceptance
 
-- [ ] 旧 REPL 实现、`kc repl` 命令、专属白名单和配置均已移除；`kc console` 运维面板语义不变；证据 rv-2-cli-compat.txt。
+- [ ] `kc repl` 仍使用旧 Keda REPL 的白名单与确认；`kc console` 运维面板语义不变；rv-2。
 - [ ] `kc preview` 只启动 repo profile 中精确 argv 或经用户确认的单一候选；URL 必须由 owner process 提供且 host 属于 loopback；停止动作只影响 KC 持有的 process group；rv-1。
 - [ ] 中断 group 与 attempt 绑定；unknown/foreign group 不进入终止分支。
 - [ ] 同一 Issue 的监督/恢复期间至多一名写 executor。
@@ -472,7 +470,7 @@ verifier-only 组：旧 REPL 删除与剩余 CLI 路由、config/default/profile
 
 - [ ] 真实 TTY 中裸 `kc` 启动所选 Codex/Claude 原生多轮会话；新会话使用当前 repo、skill 与 executor 权限；rv-1。
 - [ ] 仅有非交互 profile、provider 缺失或 skill 冲突时 fail-fast，不改用自动批准 profile 或覆盖 skill；rv-1 负控。
-- [ ] TTY 路由、`--agent`、已移除的 `kc repl`、`kc console`、`kc --help`、no-TTY 在 Typer/parser/schema 一致；rv-2。
+- [ ] TTY 路由、`--agent`、`kc repl`、`kc console`、`kc --help`、no-TTY 在 Typer/parser/schema 一致；rv-2。
 - [ ] 裸启动不运行项目 dev server；只有用户在对话中明确请求后，agent 才启动配置/确认过的 preview 命令，并在 TUI 回复 loopback URL；没有唯一命令时先询问；rv-1。
 - [ ] 默认关闭时 daemon 无新增模型调用或取消；巡检周期默认 30 分钟且可覆盖；停滞阈值与 executor 也按配置优先级加载；rv-4。
 - [ ] 每个停滞窗口至多一次调用；progress/blocked/uncertain 不写工作区；旧进程退出并复核 owner 后才 recovery；rv-3。
@@ -487,7 +485,7 @@ verifier-only 组：旧 REPL 删除与剩余 CLI 路由、config/default/profile
 
 #### Validation Acceptance
 
-- [ ] just test-changed 验本次改动：公开 CLI、旧 REPL 移除、interactive profile、监督并发/取消、配置合并与恢复验证链；结果写 evidence report。
+- [ ] just test-changed 验本次改动：公开 CLI、`kc repl` 兼容、interactive profile、监督并发/取消、配置合并与恢复验证链；结果写 evidence report。
 - [ ] 若改全局 run lifecycle、process runner/interface、跨层契约或持久化，执行 just test all；核心档不能代替全量。
 - [ ] just lint、just lint --reuse、mkdocs build --strict 和 PRD checker 通过；guard 失败修触发源，不改守卫放行。
 - [ ] 独立 verifier PASS；R2/R3 代码变化后重跑相应 oracle，证据绑定最终 Git tree。
@@ -506,7 +504,7 @@ verifier-only 组：旧 REPL 删除与剩余 CLI 路由、config/default/profile
 - **FR-5 Per-attempt supervisor config**：新增默认关闭设置：`enabled=false`、`check_interval_seconds=1800`（30 分钟）、`stalled_after_seconds=1800`、`agent`。巡检周期和停滞阈值分别有默认值且可独立覆盖、校验。未启用、未到点、无活跃任务或有实质进展时不调用模型。
 - **FR-6 Bounded diagnosis and repair**：监督只读，分类 progress/blocked/stalled/uncertain。仅 stalled 且 fresh attempt、claim、progress、group identity 全匹配时停止准确 child group；退出后注入诊断到既有 recovery。每个停滞窗口至多一次，仍经过原 gate 和预算。
 - **FR-7 Safe handoff and audit**：owner 变化、人工/凭据依赖、远端控制或 identity 未知时不写/不杀；在现有 issue log/attempt trace 记录时间、摘要、reason 和分支；不记录 secret、完整 prompt 或冗余调用数据库。
-- **FR-8 Compatibility and packaging**：移除旧 Keda REPL 实现、`kc repl` 命令、专属配置和 allowlist，不提供兼容别名；保持 `kc console`、`kc --help`、非 TTY 和其他 CLI/schema 合约；不改变 `kc loop-daemon` 创建 recipe Issue 的语义；同步 docs、roadmap、operator skill 和发行包配置，不新增静态聊天前端。
+- **FR-8 Compatibility and packaging**：保留旧 Keda REPL 实现、`kc repl` 命令、专属配置和 allowlist；保持 `kc console`、`kc --help`、非 TTY 和其他 CLI/schema 合约；不改变 `kc loop-daemon` 创建 recipe Issue 的语义；同步 docs、roadmap、operator skill 和发行包配置，不新增静态聊天前端。
 
 ## 11. Non-Goals
 
@@ -516,7 +514,7 @@ verifier-only 组：旧 REPL 删除与剩余 CLI 路由、config/default/profile
 - 将 kc loop-daemon / loop 配方与 run attempt 状态机合并。
 - 完整 IDE、代码编辑器、多用户登录、外网可访问的 Web UI、远程设备接管或跨机器 transcript 同步。
 - 自动 merge/publish/close；扩大 fast-merge、direct-PR、auto-merge 或 bypass verification 权限。
-- 保留旧 Keda REPL 或为 `kc repl` 提供兼容别名；无 TTY 默认开启交互。
+- 移除旧 Keda REPL 或改变 `kc repl` 现有白名单/确认语义；无 TTY 默认开启交互。
 - 默认开启后台调用，或无活跃任务时空转巡检。
 - 通用停滞预测、成本平台、新数据库/事件系统。
 
@@ -540,7 +538,7 @@ verifier-only 组：旧 REPL 删除与剩余 CLI 路由、config/default/profile
 
 | ID | Decision | Rationale | Rejected alternative |
 |---|---|---|---|
-| D-01 | 裸 TTY `kc` 启动配置的 provider 原生 TUI，`--agent` 覆盖执行器；删除旧 Keda REPL 与 `kc repl` 命令，不保留兼容入口 | 用户确认从未使用旧 REPL 且认为价值有限；只维护一个交互入口可减少重复实现、配置、文档与验证成本 | 保留双入口或 KC 自建聊天页，会带来重复状态、权限边界和持续维护成本 |
+| D-01 | 裸 TTY `kc` 启动配置的 provider 原生 TUI，`--agent` 覆盖执行器；`kc repl` 保留原有 Keda REPL | 为日常 coding-agent 对话提供原生入口，同时不破坏现有白名单命令交互 | 把 TUI 路由和旧 REPL 合并会改变现有使用方式并增加兼容风险 |
 | D-02 | 项目预览只由对话中的明确请求触发，终端回复 loopback URL，不自动打开浏览器 | 大多数会话不需要前端；按需启动减少资源与任意项目脚本执行 | 裸 `kc` 自动启动项目服务或浏览器 |
 | D-03 | 监督挂共享 attempt，不建第二个 claim daemon | 同一执行链拥有真实 process handle 与 recovery | 独立 daemon 重复队列和 claim，制造双 writer |
 | D-04 | 监督默认关闭，巡检默认 30 分钟，周期与停滞阈值均可覆盖 | 避免静默费用和中断，同时保留按需调度 | 默认开启或无法覆盖频率 |
@@ -551,7 +549,7 @@ verifier-only 组：旧 REPL 删除与剩余 CLI 路由、config/default/profile
 ### Final Reconciliation
 
 - Interpretation: 待实现后核对；目标为本机原生 executor TUI + 用户请求后启动的受控项目预览 + 本机活跃 attempt 有界监督。
-- Public behavior and contracts: 待实现后核对；TTY 裸 `kc` 启动配置的 provider TUI，`--agent` 选择执行器，旧 `kc repl` 已移除且无兼容别名，`kc console` 与非 TTY 合约保留；预览 URL 仅在对话请求并成功启动后返回。
+- Public behavior and contracts: 待实现后核对；TTY 裸 `kc` 启动配置的 provider TUI，`--agent` 选择执行器，`kc repl` 保留原有白名单/确认 REPL，`kc console` 与非 TTY 合约保留；预览 URL 仅在对话请求并成功启动后返回。
 - Related PRD status: 已检查；#245 无硬依赖，#242 已归档且排除 stall diagnosis。
 - Requirements and risks: §2 已记录监督默认关闭、巡检默认 30 分钟且可覆盖、执行器权限、精确中断和终端入口选择；Human-Confirmed 验收在实现后由人工确认。
 - Reconciled differences:
