@@ -230,12 +230,14 @@ kc daemon --repo-id keda
 # 启动管理终端并自动打开浏览器（前台运行）
 kc console
 
-# 指定端口（省略时从 config.toml [agent_runner.console].port 起自动挑选空闲端口）
+# 指定端口（省略时先复用已在运行的实例，没有则在 config.toml [agent_runner.console].port 起自动挑选空闲端口）
 kc console --port 8600
 
 # 只启动服务，不自动开浏览器
 kc console --no-browser
 ```
+
+`kc console` 可重复调用：若已有 console 在监听，再敲一次只会打开它当前监听的 URL 并退出，不会因为默认端口被自己占住而顺延开第二个实例——关掉浏览器后想再看面板，直接再跑一次 `kc console`，无需重启服务。确实要并行跑第二个实例（例如另一套状态目录），显式指定一个空闲 `--port`。
 
 面板提供所有已注册仓库的队列状态、Issue 事件时间线、运行历史与完成度统计，并支持启停 daemon、重试 failed Issue、管理 backlog 队列。默认只监听本机（`127.0.0.1`）；更多配置见 `docs/guides/agent-runner.md` 的「统一管理终端」一节。
 
