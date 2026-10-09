@@ -8,7 +8,7 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 
 - **init**：在目标 Git 仓库创建仓库本地 `.kedacode.toml` 配置
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
-- **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
+- **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，**默认带上 `agent/ready` 直接进队列**（`--no-ready` 可只建 Issue 不排队），并默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
 - **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
 - **review**：单次检查 `agent/supervising` 和 `agent/review` 的 Issues，基于 PR 上下文变化运行 supervisor cycle（兼容旧命令 `review-once`）
 - **review-daemon**：常驻进程，按指定间隔循环执行 `review-once`
@@ -1970,8 +1970,9 @@ kc issue create tasks/pending --repo-id keda --type feature --agent codex --read
 # 一句话需求直接开 Issue（不产生也不引用任何 PRD；与 PRD 路径参数互斥）
 kc issue create --from-prompt "登录页在 token 过期时应当跳转到 SSO 而不是白屏"
 
-# 同上，但进队列由 daemon 挑；默认只建 Issue，等人显式 kc run --issue <N>
-kc issue create --from-prompt "给 CLI 的 logs 命令补一个 --json 输出" --ready
+# 默认即进队列由 daemon 挑；只想先建一条待定 Issue 时用 --no-ready
+kc issue create --from-prompt "给 CLI 的 logs 命令补一个 --json 输出"
+kc issue create --from-prompt "先不开工，等排队" --no-ready
 
 # 需要该 Issue 自带验收清单时显式开启（默认正文没有 Realistic Validation 小节）
 kc issue create --from-prompt "重排 ready 队列的排序规则" --require-validation

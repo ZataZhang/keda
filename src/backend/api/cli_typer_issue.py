@@ -113,8 +113,8 @@ def issue_create_command(
     ] = None,
     ready: Annotated[
         bool,
-        typer.Option("--ready/--no-ready", help="Queue the Issue for a runner."),
-    ] = False,
+        typer.Option("--ready/--no-ready", help="Queue the Issue for a runner (default: on)."),
+    ] = True,
     agent: Annotated[
         IssueAgentChoice,
         typer.Option("--agent", help="Optional agent routing label."),

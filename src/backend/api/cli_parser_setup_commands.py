@@ -85,8 +85,8 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
     issue_create_parser.add_argument(
         "--ready",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Add the ready label so a runner can pick the Issue up.",
+        default=True,
+        help="Add the ready label so a runner can pick the Issue up (default: on).",
     )
     issue_create_parser.add_argument(
         "--agent",
