@@ -262,6 +262,19 @@ def test_corrupt_cache_is_treated_as_absent(
     assert notice is not None and notice.latest_version == "0.5.0"
 
 
+def test_cache_with_non_numeric_timestamp_is_treated_as_absent(
+    _isolated_home: Path, _always_tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """JSON 合法但 ``checked_at`` 不是数字（手工改坏）时同样按无缓存处理。"""
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
+    _write_cache(
+        _isolated_home,
+        {"checked_at": "not-a-number", "current_version": "0.2.1", "latest_version": "9.9.9"},
+    )
+    notice = check_for_update(now_epoch=1_500.0, fetch_latest=lambda: "0.5.0")
+    assert notice == UpdateNotice(current_version="0.2.1", latest_version="0.5.0")
+
+
 def test_uninstalled_source_tree_skips_check(
     _always_tty: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

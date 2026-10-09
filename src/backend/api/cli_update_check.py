@@ -219,6 +219,14 @@ def fetch_latest_pypi_version(timeout_seconds: float = _HTTP_TIMEOUT_SECONDS) ->
     return str(version_text) if version_text else None
 
 
+def _cache_record_checked_at(record: dict[str, object]) -> float | None:
+    """缓存记录里的检查时间戳；缺失或不是数字时返回 ``None``（按无缓存处理）。"""
+    try:
+        return float(record.get("checked_at") or 0.0)
+    except (TypeError, ValueError):
+        return None
+
+
 def check_for_update(
     *,
     now_epoch: float | None = None,
@@ -242,10 +250,11 @@ def check_for_update(
     checked_at = time.time() if now_epoch is None else now_epoch
 
     cached = _read_cache_record()
+    cached_checked_at = _cache_record_checked_at(cached) if isinstance(cached, dict) else None
     if (
-        isinstance(cached, dict)
+        cached_checked_at is not None
         and cached.get("current_version") == current_version
-        and checked_at - float(cached.get("checked_at") or 0.0) < _CHECK_INTERVAL_SECONDS
+        and checked_at - cached_checked_at < _CHECK_INTERVAL_SECONDS
     ):
         latest_value = cached.get("latest_version")
         if latest_value is None:
