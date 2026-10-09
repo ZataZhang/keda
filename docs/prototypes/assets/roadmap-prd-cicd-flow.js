@@ -73,5 +73,6 @@
     if (selectedStateId === 'manual') selectState('repairing');
     else selectState(flowStates[Math.max(0, flowStates.findIndex((flowState) => flowState.id === selectedStateId) - 1)].id);
   });
+  document.addEventListener('prototype:reset', () => selectState('waiting'));
   renderState();
 })();

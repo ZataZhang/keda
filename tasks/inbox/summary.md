@@ -1,80 +1,47 @@
 # Idea Inbox — 总结（AI 派生，可重写；事实以 ideas.md 为准）
 
-_最后更新：2026-10-05_
+_最后更新：2026-10-09 16:30_
 
 ## 主题聚类
 
-- **PRD 路线图与前端工作流** — 在前端展示 PRD 执行状态、依赖关系、可开始/审阅/合并的交互式路线图，并考虑把 idea_inbox 也接入前端，作为 PRD 产生的上游入口；未来还可能对接飞书等跨平台输入。（来源：2026-06-14 19:07, 2026-06-14 19:41, 2026-06-14 19:45, 2026-06-14 19:46, 2026-06-14 19:48, 2026-06-14 19:53, 2026-06-14 19:54, 2026-06-14 20:15, 2026-06-15 00:50）
+- **Backlog、Roadmap 与 Idea Inbox** — 路线图、前端 idea inbox、依赖调度及 backlog 控制已由归档任务覆盖；loop 定时执行也已落地。近期“选目录添加仓库”已有页面实现；统一查看/编辑生命周期配置由当前 pending PRD 覆盖。（来源：2026-06-14 19:07, 2026-06-14 19:41, 2026-06-14 19:53, 2026-06-14 20:15, 2026-06-15 00:50, 2026-06-23 10:21, 2026-09-18 11:19；归档：`P1-FEAT-20260614-200054-frontend-prd-roadmap.md`、`P1-FEAT-20260614-203810-frontend-idea-inbox-cross-platform.md`、`P1-FEAT-20260703-105330-roadmap-continuous-scheduling.md`、`P1-FEAT-20260916-122645-roadmap-prd-controls-evidence-autopilot.md`；待办：`tasks/pending/P1-FEAT-20261009-133425-lifecycle-agent-model-settings.md`）
 
-- **验证证据展示** — PR 中的 Realistic Validation Evidence 需要更直观：证据应与 checklist 条目明确对应、使用中文（或以项目语言区分）、并给出解释说明，避免虚假证据通过。（来源：2026-06-14 20:24）
+- **执行器可观测性、会话与恢复** — 运行输出、attempt 历史、会话恢复、调用追踪等已有归档实现；子进程环境净化仍在 pending。另有 verifier 长任务的 stdout 捕获缺陷，当前代码仍可见提前返回路径，尚未找到覆盖它的归档任务。（来源：2026-06-15 00:48, 2026-06-15 09:30, 2026-06-26 13:39, 2026-06-26 15:55, 2026-07-31 15:37, 2026-09-28 23:17, 2026-09-29 10:57；归档：`P1-FEAT-20260626-174127-agent-runner-attempt-history-persistence.md`、`P1-FEAT-20260930-225000-daemon-crash-reconciliation-session-resume.md`、`P1-FEAT-20261008-015223-agent-invocation-tracing-and-stall-diagnosis.md`；待办：`tasks/pending/P1-BUG-20260928-232844-agent-runner-child-env-sanitize.md`）
 
-- **部署与持续交付** — 希望把应用通过 Docker + Traefik 部署到远程服务器，支持 PR 合并后自动部署、人工审阅时访问线上实例；也考虑把 zata-ops 的部署脚本封装为通用工具，或在服务器长期运行 IAR 项目。（来源：2026-06-14 21:16, 2026-06-14 21:17, 2026-06-26 15:57）
+- **验证证据与 Review** — 证据结构、逐项格式、独立 verifier、污染检测等已有归档任务。2026-09-29 记录的 verifier stdout 丢失是不同问题，不能因证据门禁已有 PRD 就视为已解决。（来源：2026-06-14 20:24, 2026-09-29 10:57；归档：`P1-FEAT-20260614-203811-structured-validation-evidence.md`、`20260611-143619-validation-evidence-per-item-format-check.md`、`P1-FEAT-20260628-041733-realistic-validation-independent-verifier-gate.md`、`20260625-095725-prd-realistic-validation-evidence-contamination-detection.md`）
 
-- **通知机制** — 进入审阅环节时向用户发送邮件提醒。（来源：2026-06-15 00:41）
+- **Memory、Token 与执行评估** — memory 持久化、token 统计已有归档实现；“记忆分层”和 IAR benchmark 尚无清晰验收口径，建议等出现持续使用痛点或具体评估场景再拆分。（来源：2026-06-26 15:56, 2026-06-26 15:59, 2026-06-26 16:01, 2026-07-03 16:17；归档：`P1-FEAT-20260626-093933-agent-runner-memory-persistence.md`、`P1-FEAT-20260930-212702-agent-token-usage-stats.md`、`P1-FEAT-20261006-013227-stats-token-usage-by-prd.md`）
 
-- **CLI 可观测性** — 当前对 agent 运行中的 CLI 输出不可见，需要更好地封装 CLI 运行过程以便查看实时输出。（来源：2026-06-15 00:48）
+- **部署与通知** — PR preview 和 Docker runner 有归档任务；2026-10-09 已明确远端托管保持 GitHub Issue/PR 代码交付、本地用户继续免费，首期数据库测试交给 CI，并提出自动资源清理与磁盘保护。专用 VM、费用责任及数据保留仍待人工确认；对应 PRD：`tasks/pending/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md`。审阅邮件没有独立需求边界，也需与 GitHub 自带通知比较收益。（来源：2026-06-14 21:16, 2026-06-14 21:17, 2026-06-15 00:41, 2026-06-26 15:57；归档：`P1-FEAT-20260614-224914-pr-preview-deployment.md`、`P2-FEAT-20260707-141659-iar-runner-docker-containerization.md`）
 
-- **上下文、会话与记忆** — 用户对注入给 runner agent 和其他 agent 的上下文信息缺乏可见性；agent runner 在失败后 session 容易丢失，需要借鉴 `just ai check` 的会话恢复机制；同时缺少 memory 机制，任务没有沉淀。（来源：2026-06-15 09:30, 2026-06-26 13:39, 2026-06-26 15:55, 2026-06-26 15:56）
+- **模型切换、定时任务与多 Agent** — Loop 定时任务已有归档实现；cc-switch 自动切换缺接口调研。PRD 拆分为多任务并由 Agent 组验收尚无实现，其并发、隔离和集成边界也未确定。（来源：2026-06-17 09:44, 2026-06-23 10:21, 2026-09-20 00:28；归档：`P2-FEAT-20260623-102437-iar-loop-scheduled-recurring-tasks.md`）
 
-- **模型切换与额度管理** — code plan 额度耗尽时应通过 cc-switch 自动切换模型，需确认 cc-switch 是否提供切换接口及兜底方案。（来源：2026-06-17 09:44）
-
-- **定时任务与 Loop** — 为 IAR 增加 loop 能力，用于定时执行任务（如每天早上 8 点更新 GitHub trending 介绍），可能每天新建一个 PR。（来源：2026-06-23 10:21）
-
-- **Token 消耗度量** — 缺少 agent 各环节 token 消耗的统计功能，无法了解成本分布。（来源：2026-06-26 15:59）
-
-- **测试与基准评估** — 预设若干 PRD，复制 `~/code/zata_code_template` 模板后在模板仓库完成 PRD，对比完成效果、完成度、是否使用 IAR 的差异以及人工介入耗时。（来源：2026-06-26 16:01）
-
-- **资源回收 / 卫生** — IAR Issue worktree 的专用库（`<repo>_iar_issue_<N>_<digest8>`）在 worktree 删除后无回收路径，会永久残留；已有 `gc_worktree_databases.py` 只覆盖 `create.sh` 的 `_wt_` 命名，两者命名错配。（来源：2026-10-05）
-
-- **测试隔离 / 配置污染** — `test_iar_init_does_not_pollute_target_repo_config_toml`（唯一不设 `IAR_CONFIG`、只靠 `HOME` 隔离的 init 测试）在某次 pytest 运行中隔离失效，把 `[agent_runner.repositories.target]` 注册条目写进了**真实仓库** `config.toml`，path 指向已清理的 pytest 临时目录；该测试的断言未覆盖真实仓库 config.toml，故静默通过。（来源：2026-10-05）
+- **日志与资源卫生** — 日志配置健壮性已修复；`LOG_DIR` 与 `log_file` 的行为差异是兼容性决策，改动前需明确迁移范围。IAR Issue worktree 数据库未纳入现有 GC；SIGTERM checkpoint 已明确选择暂不做。（来源：2026-06-30 09:52, 2026-09-30 14:53, 2026-09-30 19:59, 2026-10-05 · iar-issue-db-reclaim；归档：`P0-BUG-20260930-145323-logging-config-robustness.md`）
 
 ## 可执行候选
 
-- **PRD 路线图前端** → 建议 PRD：`P1-FEAT-20260626-160000-prd-roadmap-frontend.md`，理由：需求已比较完整，包含视图、状态流转、依赖关系、并行/串行执行策略，且与现有工作流是封装关系而非替代。（来源：2026-06-14 19:07, 2026-06-14 19:41, 2026-06-14 19:53, 2026-06-15 00:50）
+- **Verifier 长时间运行时 stdout 被提前截断/丢失** → 建议优先升级为 `P1-BUG` PRD 或窄范围 bugfix。`_communicate_with_activity_tracking()` 在两个 reader `join(timeout=5)` 后直接拼接并返回，长时 verifier 可能还未写出最终 verdict；原记录含 `response chars: 0` 的现场证据，失败会阻断验收并触发重复恢复。范围应聚焦“等子进程完成后收全输出”，并与 Codex 浏览器沙箱限制分开验证。（来源：2026-09-29 10:57；当前代码：`src/backend/infrastructure/process_runner.py`）
 
-- **远程 Docker 部署能力** → 建议 PRD：`P1-FEAT-20260626-160000-remote-docker-deploy.md`，理由：已提到 Docker + Traefik 方案、zata-ops 脚本复用、服务器 API key 配置、长期运行，具备可行性。（来源：2026-06-14 21:16, 2026-06-14 21:17, 2026-06-26 15:57）
+- **IAR Issue worktree 孤儿数据库回收** → 低优先级 `P2` 候选。优先扩展现有 dry-run GC 的识别与存活判定；不建议直接在 Issue 关闭时自动 DROP，除非先解决并发 worktree 风险。只有在孤儿库持续累积时再排期。（来源：2026-10-05 · iar-issue-db-reclaim）
 
-- **Agent Runner 会话恢复** → 建议 PRD：`P0-FEAT-20260626-160000-agent-runner-session-recovery.md`，理由：明确指向复用 `just ai check` 的会话恢复逻辑，解决失败后 session 丢失问题，可兼容 claude/codex/kimi。（来源：2026-06-26 13:39, 2026-06-26 15:55）
-
-- **Memory 机制 / Skill** → 建议 PRD：`P2-FEAT-20260626-160000-memory-skill.md`，理由：长期沉淀需求，但“做成 skill 还是内置机制”仍需用户拍板，建议先作为 skill 试点。（来源：2026-06-26 15:56）
-
-- **Token 统计** → 建议 PRD：`P2-FEAT-20260626-160000-token-metrics.md`，理由：范围明确，可在 agent runner 各环节埋点收集 token 用量并展示。（来源：2026-06-26 15:59）
-
-- **IAR Loop 定时任务** → 建议 PRD：`P2-FEAT-20260626-160000-iar-loop-scheduled-tasks.md`，理由：场景清晰（如每日 GitHub trending），但“每天新建 PR”还是复用同一 PR 需要明确。（来源：2026-06-23 10:21）
-
-- **cc-switch 模型切换** → 建议 PRD：`P2-FEAT-20260626-160000-cc-switch-model-failover.md`，理由：问题是失败场景，但缺少 cc-switch 接口信息，需要先调研再设计。（来源：2026-06-17 09:44）
-
-- **审阅邮件通知** → 建议 PRD：`P2-FEAT-20260626-160000-review-email-notification.md`，理由：单一功能，可与路线图状态联动触发。（来源：2026-06-15 00:41）
-
-- **CLI 运行输出可见性** → 建议 PRD：`P2-FEAT-20260626-160000-cli-output-observability.md`，理由：问题明确，但“封装”的具体形态（WebSocket、日志页、终端复用）需要进一步细化。（来源：2026-06-15 00:48）
-
-- **IAR 测试与基准** → 建议 PRD：`P2-FEAT-20260626-160000-iar-benchmark-suite.md`，理由：价值高但涉及模板仓库、评分标准、人工介入计时，设计较复杂，建议作为中长期项目。（来源：2026-06-26 16:01）
-
-- **验证证据改进** → 建议 PRD：`P2-FEAT-20260626-160000-validation-evidence-display.md`，理由：与现有 PR 流程强相关，需要改模板、改展示语言、增加解释字段，范围可控。（来源：2026-06-14 20:24）
+- **多 Agent 拆分 PRD 并组队验收** → 可先做决策/范围型 PRD，不直接承诺实现。触发条件：大型 PRD 经常因单 Agent 串行执行成为瓶颈。需先确定任务独立性、worktree 隔离、冲突集成、失败重试与验收组职责。（来源：2026-09-20 00:28）
 
 ## 待澄清问题
 
-- IAR 项目长期运行在远程服务器时，是否还需要本地 worktree / GitHub PR 流程？还是变成纯服务端运行？（来源：2026-06-26 15:57）
-- Memory 机制希望做成独立 skill 还是核心内置能力？（来源：2026-06-26 15:56）
-- IAR Loop 的定时任务是每天新建一个 PR，还是在同一分支/PR 上持续更新？（来源：2026-06-23 10:21）
-- cc-switch 是否暴露 API 或配置文件供自动切换模型？（来源：2026-06-17 09:44）
-- 测试基准中的“完成度”是由人主观评判，还是需要引入自动化检查/测试通过标准？（来源：2026-06-26 16:01）
-- 验证证据的语言切换是否按用户/项目语言动态决定，还是统一使用中文？（来源：2026-06-14 20:24）
-
-## 待 PRD
-
-- **iar init 不写 `[agent_runner.autopilot]` 段** → 建议 PRD：修复 init 生成路径。已复现：dry-run 输出仅在 safety 注释里出现 1 次 autopilot，整段缺失；freshai 等历史初始化过的仓库必须手动补段才能用快速档。根因：`AgentRunnerLocalSettings` 继承自 `_AgentRunnerRepositoryOverrideSettings`，所有字段是 `| None = None` → `settings.autopilot` 是 None → `model_dump()` 写 None → `_filter_none_dict` 过滤掉。修复范围限于 init 写出端，不能破坏老 TOML 加载路径的向后兼容（保留 `Optional`，让 init 路径显式填工厂默认）。（来源：2026-07-09）
-
-## 待 PRD
-
-- **`LOG_DIR` 与 `log_file` 是两套日志目录来源** → 建议 PRD：让日文件落点与 `log_dir` 一致（或由 `log_dir` 派生 `log_file` 默认值）。现状：`config.log_dir` 只被 `ensure_log_directory()` 消费，日文件写在 `Path(config.log_file).parent`，单独设 `LOG_DIR` 不移动日文件（已实测）。Issue #175 已把"两处消费点之间"收敛成单点并文档化该边界，合并两字段会挪走已有部署的落点，需单独决策。（来源：2026-09-30）
-
-- **IAR Issue 专用库无回收路径** → 建议 PRD：把 `{repo}_iar_issue_{N}_{digest8}` 纳入 worktree 孤儿库盘点（最小方案 = 扩 `gc_worktree_databases.py` 所有权正则 + 派生 repo-path 摘要；主动挂钩 Issue 关闭删除风险更高，需处理并发），或在 Issue 关闭/worktree 删除时主动 DROP。严重度低（只占磁盘），可等待成熟再立项。（来源：2026-10-05）
-
-- **iar init 测试隔离失效（污染真实 config.toml）** → 建议 PRD（或直接修复 + 守卫测试）：`test_iar_init_does_not_pollute_target_repo_config_toml` 显式隔离（设 `IAR_CONFIG` 到 tmp），并加守卫断言"跑 `iar init` 后真实仓库 config.toml 未被改动"；同时排查"无 `IAR_CONFIG` 时注册表落点解析"为何会命中真实仓库 config。严重度低（一次性污染、已清理），但会污染工作区且难察觉，值得修。（来源：2026-10-05）
-
-- **坏 PR 标题：agent 开场白被当成 PR 标题** → 建议 PRD（或最小修复 + 回归测试）：`_parse_markdown_output` 无条件取首个非空行当标题，agent 的对话式开场白（`Here is the draft PR body:`）泄漏进 PR 标题（PR #198/#199 复现，系统性）。最小修法 = 扩展标题无效化守卫（跳过 `Closes #N` 取下一行 / 判废对话式开场白回退 `fallback_title`）；更彻底 = `draft_pr` 改 `output="json"`。严重度中（污染 PR 元数据，不阻断合并）。（来源：2026-10-05）
+- 2026-09-29 的 Issue #39 当时决定由用户直接接管。是否仍希望 Keda 修复通用 verifier stdout 捕获缺陷？（来源：2026-09-29 10:57）
+- 多 Agent 拆分何时触发，是否需要独立 worktree，以及谁负责冲突集成？（来源：2026-09-20 00:28）
+- 是否持续产生足够多的 IAR Issue 孤儿库来值得排期？（来源：2026-10-05 · iar-issue-db-reclaim）
+- cc-switch 是否提供稳定接口；benchmark 的完成度由谁评定、人工介入时间如何计量？（来源：2026-06-17 09:44, 2026-06-26 16:01）
+- 是否仍需要审阅邮件通知，还是现有 GitHub 通知已满足提醒场景？（来源：2026-06-15 00:41）
+- `LOG_DIR` 是否需要改变现有落盘路径；如需要，如何迁移依赖旧路径的仓库？（来源：2026-09-30 19:59）
 
 ## 已升级
 
-- **Agent Runner 子进程环境净化（child env sanitize）** → 已升级为正式 PRD：`tasks/pending/P1-BUG-20260928-232844-agent-runner-child-env-sanitize.md`（2026-09-28 用户拍板三项决策：8 变量名单硬编码、无配置覆盖、process_supervisor 不纳入）。根因、方案与 RV oracle 详见该 PRD。（来源：2026-09-28 23:17）
+- **Agent Runner 子进程环境净化** → `tasks/pending/P1-BUG-20260928-232844-agent-runner-child-env-sanitize.md`。（来源：2026-09-28 23:17）
+- **托管 daemon 部署与自动资源清理** → `tasks/pending/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md`。待确认每客户隔离/模型费用边界和数据保留周期。（来源：2026-10-09 16:14）
+- **路线图、前端 Idea Inbox、验证证据、PR preview/Docker、Loop、Memory、Token 统计、会话恢复与调用追踪** → 已有对应归档 PRD，详见上方主题来源。
+- **PR 标题误用 Agent 开场白** → 当前 `generated_content.py` 已剥离对话式开场白，并有回归测试；无需再开 PRD。（来源：2026-10-05 · 坏 PR 标题）
+- **`iar init` 测试污染真实配置** → 当前回归测试显式检查仓库 `config.toml` 不变；测试隔离问题已有修正，无需再开 PRD。（来源：2026-10-05 · iar init 测试隔离失效）
+- **`iar init` 缺少 `[agent_runner.autopilot]`** → 当前初始化构造器显式提供 `AgentRunnerAutopilotSettings()`；无需再开 PRD。（来源：2026-07-09）
+- **目录选择与 attempt 起止时间呈现** → 当前仓库页面已有目录选择入口，Backlog 生命周期详情展示开始/结束时间；无需重复立项。（来源：2026-09-18 11:19, 2026-07-31 15:37）
+- **夜间任务批次总 PR** → 已升级为 `tasks/pending/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr.md`；按单次 opt-in 批次生成唯一总 PR，扩展多 PRD 合并验收，并在成功后关闭来源 PR。（来源：ideas.md 2026-10-09 16:05；本轮确认：总 PR 是唯一正式 PR、来源 PR 自动关闭并标注取代。）

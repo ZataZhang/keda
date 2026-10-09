@@ -10,7 +10,9 @@
  * 之后又改了几行），因此条目的身份是「路径 + 底层分区」而不是路径；选中态、请求参数与直达路径
  * 的归属都按这个二元组走，显示上的合并不改变它。折叠有三层粒度：整段（点分段标题）、段内目录、
  * 叶子——三层都用同一份「用户动过手才记」的口径，见 isChangeGroupExpanded 与
- * isDirectoryExpanded。
+ * isDirectoryExpanded。整段的默认值两段不同：`Staged Changes` 默认收起（那是已经看过、
+ * 等提交的部分），`Changes` 默认展开（那才是手头正在改的），见 CHANGE_GROUPS 的
+ * defaultExpanded。
  *
  * 页面只有一个写操作：`Changes` 里的加号（标题旁那一个、以及每个文件旁那一个）会把改动
  * 加进索引（`POST /api/stage`）。除此之外页面不写入任何东西——没有提交、没有撤销暂存、
@@ -53,11 +55,24 @@
    * 服务端仍按三段给数据（HEAD↔索引 / 索引↔工作区 / 未跟踪的 git 口径互不相同，单文件 diff
    * 与暂存动作都要知道自己面对哪一种），因此合并只发生在这里——`memberSections` 是这一段由
    * 哪几个底层分区拼出来的。`canStage` 决定这一段的标题旁摆不摆「全部暂存」的加号：已经在索引
-   * 里的东西再暂存一次没有意义。
+   * 里的东西再暂存一次没有意义。`defaultExpanded` 是用户没动过手时该段是否展开：已暂存的那段
+   * 默认收起（摊开只会把手头正在改的 `Changes` 挤下去），正在改的那段默认展开。
    */
   const CHANGE_GROUPS = [
-    { key: "staged", label: "Staged Changes", memberSections: ["staged"], canStage: false },
-    { key: "changes", label: "Changes", memberSections: ["unstaged", "untracked"], canStage: true },
+    {
+      key: "staged",
+      label: "Staged Changes",
+      memberSections: ["staged"],
+      canStage: false,
+      defaultExpanded: false,
+    },
+    {
+      key: "changes",
+      label: "Changes",
+      memberSections: ["unstaged", "untracked"],
+      canStage: true,
+      defaultExpanded: true,
+    },
   ];
 
   /**
@@ -80,6 +95,7 @@
     refreshTimer: document.getElementById("refresh-timer"),
     treeTitle: document.getElementById("tree-title"),
     treeNote: document.getElementById("tree-note"),
+    ignoredToggle: document.getElementById("ignored-toggle"),
     treeWidthToggle: document.getElementById("tree-width-toggle"),
     treeBody: document.getElementById("tree-body"),
     bodyGrid: document.querySelector(".body-grid"),
@@ -125,6 +141,9 @@
     isTreeWide: false,
     filterText: "",
     filePaths: [],
+    ignoredFilePaths: new Set(),
+    includeIgnoredFiles: false,
+    isLoadingIgnoredFiles: false,
     changedSections: [],
     isDisconnected: false,
     /** 一次手动刷新是否正在进行；用来防止连点发出多份请求。 */
@@ -353,8 +372,7 @@
       elements.branchChip.textContent = infoResponse.body.branch;
       window.document.title = `${infoResponse.body.repo_name} · 只读查看器`;
 
-      const treeResponse = await requestJson("/api/tree");
-      viewState.filePaths = treeResponse.body.paths;
+      await loadFileTree();
 
       if (viewState.view === DIFF_VIEW) {
         await loadChangedFiles();
@@ -402,8 +420,7 @@
       elements.branchChip.textContent = infoResponse.body.branch;
       window.document.title = `${infoResponse.body.repo_name} · 只读查看器`;
 
-      const treeResponse = await requestJson("/api/tree");
-      viewState.filePaths = treeResponse.body.paths;
+      await loadFileTree();
     });
     if (!didLoad) {
       return;
@@ -423,6 +440,18 @@
       }
     }
     renderViewTabs();
+  }
+
+  /**
+   * 按当前显示偏好读取文件树。
+   */
+  async function loadFileTree() {
+    const treeUrl = viewState.includeIgnoredFiles
+      ? "/api/tree?include_ignored=1"
+      : "/api/tree";
+    const treeResponse = await requestJson(treeUrl);
+    viewState.filePaths = treeResponse.body.paths;
+    viewState.ignoredFilePaths = new Set(treeResponse.body.ignored_paths || []);
   }
 
   /**
@@ -482,9 +511,10 @@
   /**
    * 判断改动视图里某一段当前是否展开。
    *
-   * 默认展开：改动视图里本来就是「有改动的才列出来」，两段都是用户当下要看的东西，没有
-   * 文件视图那种「几百个文件摊开是一堵墙」的理由（这也是 `isDirectoryExpanded` 给改动
-   * 视图的默认值）。用户点过标题的那一段以那次点击为准，其余按默认值走。
+   * 默认值两段不同（由 `CHANGE_GROUPS` 的 `defaultExpanded` 给出）：`Changes` 默认展开——
+   * 那是用户手头正在改的东西；`Staged Changes` 默认收起——它列的是已经看过、等提交的部分，
+   * 摊开只会把真正要盯的 `Changes` 挤出视口。段内目录的默认展开仍是「展开」，那是另一层
+   * 粒度（见 `isDirectoryExpanded`）。用户点过标题的那一段以那次点击为准，其余按默认值走。
    *
    * 过滤生效时一律展开，与目录同一条口径：命中项被藏在折叠的段里，界面和「没有命中」
    * 长得一模一样，那是明确错误的结论。
@@ -497,7 +527,11 @@
       return true;
     }
     const explicitExpansion = viewState.changeGroupExpansion.get(groupKey);
-    return explicitExpansion === undefined ? true : explicitExpansion;
+    if (explicitExpansion !== undefined) {
+      return explicitExpansion;
+    }
+    const changedGroup = CHANGE_GROUPS.find((group) => group.key === groupKey);
+    return changedGroup ? changedGroup.defaultExpanded : true;
   }
 
   /**
@@ -617,6 +651,21 @@
     const treeTitleNode = document.createElement("b");
     treeTitleNode.textContent = isDiffView ? "改动文件" : "文件树";
     elements.treeTitle.replaceChildren(treeTitleNode);
+    elements.ignoredToggle.hidden = isDiffView;
+    renderIgnoredFilesToggle();
+  }
+
+  /**
+   * 同步忽略项开关的可访问名称与状态。
+   */
+  function renderIgnoredFilesToggle() {
+    const isEnabled = viewState.includeIgnoredFiles;
+    const actionLabel = isEnabled ? "隐藏" : "显示";
+    const accessibleLabel = `${actionLabel}被 Git 忽略的文件`;
+    elements.ignoredToggle.textContent = `${actionLabel}忽略`;
+    elements.ignoredToggle.setAttribute("aria-pressed", String(isEnabled));
+    elements.ignoredToggle.setAttribute("aria-label", accessibleLabel);
+    elements.ignoredToggle.title = `${accessibleLabel}；依赖和缓存目录仍隐藏`;
   }
 
   /**
@@ -746,10 +795,16 @@
       elements.treeNote.textContent = `${countChangedFiles()} 个文件`;
     } else {
       const directoryTree = buildDirectoryTree(
-        viewState.filePaths.map((filePath) => ({ path: filePath })),
+        viewState.filePaths.map((filePath) => ({
+          path: filePath,
+          ignored: viewState.ignoredFilePaths.has(filePath),
+        })),
         FILES_TREE_KEY
       );
-      elements.treeNote.textContent = `${viewState.filePaths.length} 个文件`;
+      const ordinaryFileCount = viewState.filePaths.length - viewState.ignoredFilePaths.size;
+      elements.treeNote.textContent = viewState.ignoredFilePaths.size
+        ? `${ordinaryFileCount} 个文件 · ${viewState.ignoredFilePaths.size} 个忽略项`
+        : `${ordinaryFileCount} 个文件`;
       appendDirectoryChildren(treeFragment, directoryTree, 0, filterText);
     }
 
@@ -955,6 +1010,32 @@
   }
 
   /**
+   * 给树行画缩进参考线：第 i 层祖先在第 i 层缩进的中缝留一条 1px 的淡竖线，贯穿整行。
+   *
+   * 行是拍平的按钮，层级只靠 `paddingLeft` 的 14px 步长表达时，深一层的目录与浅一层的文件
+   * 很难一眼对上归属；参考线把「这些行同属一个父目录」钉在背景上。画在行自己的背景层
+   * （inline style）而不是给行套嵌套容器：渲染保持扁平结构，hover 与选中改的底色走
+   * background-color，不会抹掉这层背景图。
+   * @param {HTMLElement} rowButton 树行按钮。
+   * @param {number} depth 缩进层级。
+   */
+  function applyIndentGuides(rowButton, depth) {
+    if (depth <= 0) {
+      return;
+    }
+    rowButton.style.backgroundImage = Array.from(
+      { length: depth },
+      () => "linear-gradient(var(--indent-guide), var(--indent-guide))"
+    ).join(", ");
+    rowButton.style.backgroundRepeat = "no-repeat";
+    rowButton.style.backgroundSize = "1px 100%";
+    rowButton.style.backgroundPosition = Array.from(
+      { length: depth },
+      (_, levelIndex) => `${8 + levelIndex * 14 + 5}px 0`
+    ).join(", ");
+  }
+
+  /**
    * 构造一个改动文件叶子行：状态徽标 + 文件名 + 增删统计（+ 还在「Changes」里时的加号）。
    * 目录上下文由所在层级表达，行内不再重复完整路径。
    *
@@ -973,6 +1054,7 @@
     rowButton.type = "button";
     rowButton.className = "node";
     rowButton.style.paddingLeft = `${8 + depth * 14}px`;
+    applyIndentGuides(rowButton, depth);
     rowButton.title = changedFile.rename_from
       ? `${changedFile.path}\n重命名自 ${changedFile.rename_from}`
       : changedFile.path;
@@ -992,6 +1074,11 @@
 
     const nameNode = document.createElement("span");
     nameNode.className = "name";
+    // `Changes` 段（未暂存 + 未跟踪）的文件名给一层淡绿：同一个文件同时出现在两段里时，
+    // 一眼分得清哪条还没进索引；`Staged Changes` 段保持默认色不动。
+    if (changedFile.section !== "staged") {
+      nameNode.classList.add("name-unstaged");
+    }
     const lastSlashIndex = changedFile.path.lastIndexOf("/");
     nameNode.textContent =
       lastSlashIndex >= 0 ? changedFile.path.slice(lastSlashIndex + 1) : changedFile.path;
@@ -1122,7 +1209,7 @@
    * 文件视图传 `{path}`，改动视图传改动文件对象；叶子节点把原条目留在 `payload` 里，
    * 于是两种叶子行都能从同一棵树渲染。`treeKey` 标出这棵树是谁的，用来把折叠状态按树分开：
    * 改动视图里同一个目录路径会在每段各出现一次，两段是两棵树。
-   * @param {Array<{path: string}>} treeEntries 每条含仓库相对路径。
+   * @param {Array<{path: string, ignored?: boolean}>} treeEntries 每条含路径，可标记忽略文件。
    * @param {string} treeKey 这棵树的标识（文件视图或改动视图的某一段）。
    * @returns {{name: string, path: string, treeKey: string, isDirectory: boolean, children: Map, payload: object|null}} 根节点。
    */
@@ -1231,8 +1318,10 @@
     const isCollapsed = !isDirectoryExpanded(directoryNode, filterText);
     const rowButton = document.createElement("button");
     rowButton.type = "button";
-    rowButton.className = "node";
+    // is-dir 给目录名加一档字重：段标题 → 目录 → 文件三层的中间层看得出来（见 viewer.css）。
+    rowButton.className = "node is-dir";
     rowButton.style.paddingLeft = `${8 + depth * 14}px`;
+    applyIndentGuides(rowButton, depth);
     rowButton.setAttribute("aria-expanded", String(!isCollapsed));
 
     const caretNode = document.createElement("span");
@@ -1281,7 +1370,7 @@
 
   /**
    * 构造文件行。
-   * @param {{name: string, path: string}} fileNode 文件节点。
+   * @param {{name: string, path: string, payload: {ignored?: boolean}|null}} fileNode 文件节点。
    * @param {number} depth 缩进层级。
    * @returns {HTMLElement} 文件行。
    */
@@ -1290,6 +1379,7 @@
     rowButton.type = "button";
     rowButton.className = "node";
     rowButton.style.paddingLeft = `${8 + depth * 14}px`;
+    applyIndentGuides(rowButton, depth);
     rowButton.setAttribute("aria-selected", String(fileNode.path === viewState.selectedPath));
     rowButton.append(buildCaretPlaceholder());
 
@@ -1297,6 +1387,14 @@
     nameNode.className = "name";
     nameNode.textContent = fileNode.name;
     rowButton.append(nameNode);
+
+    if (fileNode.payload && fileNode.payload.ignored) {
+      const ignoredBadge = document.createElement("span");
+      ignoredBadge.className = "ignored-badge";
+      ignoredBadge.textContent = "忽略";
+      ignoredBadge.title = "被 Git 忽略；只在文件树中只读查看，不进入改动或暂存";
+      rowButton.append(ignoredBadge);
+    }
 
     rowButton.addEventListener("click", () => {
       void selectPath(fileNode.path);
@@ -1803,12 +1901,53 @@
     }
   }
 
+  /**
+   * 切换是否在文件树中包含被忽略的文件。
+   */
+  async function toggleIgnoredFiles() {
+    if (
+      viewState.isDisconnected ||
+      viewState.view !== FILES_VIEW ||
+      viewState.isLoadingIgnoredFiles
+    ) {
+      return;
+    }
+    viewState.isLoadingIgnoredFiles = true;
+    viewState.includeIgnoredFiles = !viewState.includeIgnoredFiles;
+    elements.ignoredToggle.disabled = true;
+    renderIgnoredFilesToggle();
+    await guardAgainstServiceExit(async () => {
+      await loadFileTree();
+      if (
+        !viewState.includeIgnoredFiles &&
+        viewState.view === FILES_VIEW &&
+        viewState.selectedPath &&
+        !viewState.filePaths.includes(viewState.selectedPath)
+      ) {
+        viewState.selectedPath = "";
+        viewState.lastFileViewPath = "";
+        resetFilePreview();
+        renderPlaceholder();
+      }
+      if (viewState.view !== FILES_VIEW) {
+        return;
+      }
+      expandToSelectedPath();
+      renderTree();
+    });
+    viewState.isLoadingIgnoredFiles = false;
+    elements.ignoredToggle.disabled = false;
+  }
+
   elements.tabFiles.addEventListener("click", () => {
     void switchView(FILES_VIEW);
   });
   elements.treeWidthToggle.addEventListener("click", () => {
     viewState.isTreeWide = !viewState.isTreeWide;
     renderTreeWidth();
+  });
+  elements.ignoredToggle.addEventListener("click", () => {
+    void toggleIgnoredFiles();
   });
   elements.copyPathButton.addEventListener("click", () => {
     void copyCurrentViewerPath();

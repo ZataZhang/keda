@@ -322,9 +322,11 @@ _is_always_skipped() {
         findings.md|progress.md|task_plan.md) return 0 ;;
         .DS_Store|.dockerignore|.gitignore) return 0 ;;
         # 模板仓库专属工具配置与历史产物：.iar.toml 含模板仓库身份/remote，
-        # 派生项目需自建；zata_code_template.zip 是含加密 .env.local 备份的
-        # 过期产物。两者都不应同步进派生项目（与 just copy 的排除名单一致）。
-        .iar.toml|zata_code_template.zip) return 0 ;;
+        # 派生项目需自建；.kedacode.toml 是 KedaCode（kc）工具改名后的配置
+        # 文件名，两种命名都留在跳过名单；zata_code_template.zip 是含加密
+        # .env.local 备份的过期产物。三者都不应同步进派生项目
+        # （与 just copy 的排除名单一致）。
+        .iar.toml|.kedacode.toml|zata_code_template.zip) return 0 ;;
         # Tests that exercise template-only artifacts (e.g. skills/prd/scripts)
         # are not portable to derived projects: the underlying artifact is
         # always-skipped below, so importing the test would guarantee a
@@ -333,6 +335,7 @@ _is_always_skipped() {
         tests/guards/test_prd_skill_checker.py) return 0 ;;
         tests/test_prd_contract.py) return 0 ;;
         tests/test_prd_human_review_checklist.py) return 0 ;;
+        tests/test_zata_writer_gzh_build.py) return 0 ;;
     esac
     case "$p" in
         # Local state, build output, runtime artifacts
@@ -552,7 +555,7 @@ SKILL_INSTALL_TARGET_DIRS=()
 # 可在交互菜单里显式选中）。默认探测只认工具自己读取的技能目录：把 Skill 装进
 # 某个中间层目录（由一个工具统一转发到各工具目录）看似能覆盖多个工具，实际依赖
 # 其转发，转发一停就变成「中间层更新了、工具看不见」——Codex / Claude 因此改为直连。
-SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy")
+SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy" "KedaCode")
 SKILL_ADAPTER_DIRS=(
     "$HOME/.codex/skills"
     "$HOME/.claude/skills"
@@ -560,6 +563,7 @@ SKILL_ADAPTER_DIRS=(
     "$HOME/.qoder-cn/skills"
     "$HOME/.kimi-code/skills"
     "$HOME/.codebuddy/skills"
+    "$HOME/.kedacode/skills"
 )
 SKILL_ADAPTER_AUTO_DETECT_DIRS=(
     "$HOME/.codex"
@@ -568,6 +572,7 @@ SKILL_ADAPTER_AUTO_DETECT_DIRS=(
     "$HOME/.qoder-cn"
     ""
     "$HOME/.codebuddy"
+    "$HOME/.kedacode"
 )
 
 _append_unique_skill_target() {

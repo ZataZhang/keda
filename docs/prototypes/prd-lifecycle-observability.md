@@ -1,35 +1,38 @@
 # PRD 生命周期观测与执行分析原型
 
-本页归档 `tasks/pending/P1-FEAT-20260921-161621-prd-lifecycle-observability.md` 的交互原型，用于在实施前确认三件事：Roadmap 单 PRD「执行过程」的信息层级、端到端耗时的拆分口径怎么读、以及失败/阻塞/观测缺口如何在不覆盖历史的前提下呈现。这是一个 **interactive prototype**（静态 fixture 驱动），不代表生产功能已实现或已接入真实 API。
+本页归档 `tasks/pending/P1-FEAT-20260921-161621-prd-lifecycle-observability.md` 的交互原型，用于在实施前确认三件事：Backlog 单 PRD「执行过程」的信息层级、端到端耗时的拆分口径怎么读、以及失败/阻塞/观测缺口如何在不覆盖历史的前提下呈现。这是一个 **interactive prototype**（静态 fixture 驱动），不代表生产功能已实现或已接入真实 API。
 
 ## 打开方式
 
 - 文档站入口：[Prototype Hub](hub.html)，从列表选择「PRD 生命周期观测与执行分析」
 - 直接入口：[打开交互原型](prd-lifecycle-observability.html)
 - 本地预览：`uv run mkdocs serve`，然后打开 `http://127.0.0.1:8000/prototypes/prd-lifecycle-observability.html`
+- 左侧 Settings 入口打开[生命周期与执行器设置原型](lifecycle-agent-matrix.html?screen=settings)；返回该原型后，左侧 Stats 入口回到本页统计视图。
 
 ## 状态模型
 
 ```text
 Hub
-└── Roadmap · PRD 已选中 · 「执行过程」标签
+└── Backlog · PRD 已选中 · 「执行过程」标签
     ├── 顶部：当前阶段 / Agent 尝试 / 完整性
     ├── 四类耗时：端到端（主）= 有效执行 + 等待 + 阻塞（互斥）
     ├── 生命周期时间线（按发生时间升序）
     │   └── 点击任一事件 → 事件详情抽屉（时间 / 执行者 / 原因 / 阶段 / run id）→ 关闭
     ├── 场景切换：正常轨迹 ⇄ 失败与重试 ⇄ 观测写入失败
     └── 「查看统计」→ PRD 执行统计
-        └── 点击 PRD 名称 → 返回 Roadmap 生命周期详情
+        └── 点击当前 PRD 名称 → 返回 Backlog 生命周期详情
 ```
+
+统计表的搜索框会按 PRD 名称、Issue 编号和状态筛选演示记录；统计周期固定为最近 30 天。只有当前 PRD 记录能返回对应生命周期详情，历史记录保持静态，避免误跳到当前 PRD。
 
 ## 关键点击语义
 
-- 侧栏 **Roadmap / 统计** 与详情页右上角 **查看统计**：在 Roadmap 详情与仓库级统计之间切换。
+- 侧栏 **Backlog / Stats** 与详情页右上角 **查看统计**：在 Backlog 生命周期详情与仓库级统计之间切换。
 - 时间线任一事件（点击或 `Enter` / `Space`）：打开事件详情抽屉；`×` 或 `Esc` 关闭。
 - **正常轨迹 / 失败与重试 / 观测写入失败**：切换三套稳定场景，同时刷新时间线、当前阶段与四类耗时。
 - Stats 表格第一行 PRD 名称：返回其生命周期详情；其余归档 / 失败行为静态展示。
 - Stats 顶部 `未关联 PRD` 提示与表格末行：演示旧记录降级，不提供生命周期链接。
-- 底部原型 Dock（评审工具层，非产品 UI）：**可点击区域开关**（默认开启）、**↺ 重置**（回到初始场景与 Roadmap 视图）、**返回 Hub**、**原型说明**。
+- 底部原型 Dock（评审工具层，非产品 UI）：**可点击区域开关**（默认开启）、**↺ 重置**（回到初始场景与 Backlog 视图）、**返回 Hub**、**原型说明**。
 
 ## 三套演示场景
 
@@ -52,11 +55,11 @@ Hub
 
 - 模拟 `RoadmapPrd`、生命周期 run/event、attempt、四类耗时与仓库统计聚合后的**目标展示形态**。
 - 所有数字、run id、事件 ID 与文案均为**稳定 fixture**，不含随机数与定时器，也不暗示已存在生产 API。
-- 未实现真实日志流、数据刷新、分页、搜索过滤、权限、错误请求与跨仓库切换。
+- 统计搜索只过滤当前静态 fixture；未实现真实日志流、后端数据刷新、周期选择、分页、权限、错误请求与跨仓库切换。
 
 ## 设计依据
 
-- 产品 shell、色彩与排版参考 `frontend-public/app/(app)/`、`frontend-public/app/globals.css` 与现有 Roadmap / Stats 页面；原型完全由 HTML/CSS/JavaScript 构建。
+- 产品 shell、色彩与排版参考 `frontend-public/app/(app)/`、`frontend-public/app/globals.css` 与现有 Backlog / Stats 页面；原型完全由 HTML/CSS/JavaScript 构建。
 - 生命周期详情沿用统一 PRD 详情的「PRD 原文 / 验收证据」标签结构（`frontend-public/components/roadmap/prd-detail.tsx`），新增「执行过程」。
 - Stats 入口沿用 `frontend-public/app/(app)/app/stats/page.tsx`，把统计口径从单次 runner 记录改为完整 PRD 生命周期。
 - 字段命名对齐后端只读契约：明细 `GET /v1/agent-runner/roadmap/prds/{encoded}/lifecycle`，统计 `GET /v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=`；`current_phase` 与 `event_type` 取值来自 PRD §7 的闭集。

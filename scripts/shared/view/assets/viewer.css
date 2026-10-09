@@ -21,6 +21,11 @@
   /* 重命名既不增也不删，单给一套蓝色：沿用增删那对「浅底 + 深字」的用法。 */
   --rename: oklch(0.62 0.11 256 / 18%);
   --rename-mark: oklch(0.48 0.13 256);
+  /* Changes 段（未暂存/未跟踪）文件名的淡绿：比 --add-mark 浅一档，名字读起来还是正文，
+     但和 Staged Changes 里默认色的文件名并排时一眼可分。 */
+  --name-unstaged: oklch(0.55 0.09 152);
+  /* 树的缩进参考线：比边框再淡一层，只在有层级的地方由 JS 按深度画出来。 */
+  --indent-guide: color-mix(in oklab, var(--muted-foreground) 24%, transparent);
   --code-bg: oklch(0.995 0.002 250);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -123,6 +128,17 @@ button, input, select { font: inherit; color: inherit; }
 .tree-head b { color: var(--foreground); font-weight: 650; }
 /* 文件数推到右缘，栏宽开关跟在它后面。 */
 .tree-note { margin-left: auto; }
+.ignored-toggle {
+  flex: none; border: 1px solid var(--border); border-radius: 6px; background: transparent;
+  padding: 3px 6px; color: var(--muted-foreground); font: inherit; font-size: 10.5px; cursor: pointer;
+}
+.ignored-toggle:hover { background: var(--secondary); color: var(--foreground); }
+.ignored-toggle:focus-visible { border-color: var(--ring); outline: none; }
+.ignored-toggle[aria-pressed='true'] {
+  border-color: color-mix(in oklab, var(--primary) 30%, var(--border));
+  background: color-mix(in oklab, var(--primary) 10%, transparent); color: var(--primary);
+}
+.ignored-toggle:disabled { opacity: .55; cursor: wait; }
 /* 栏宽开关：22px 的方形描边按钮（不是一枚裸箭头字符——那读起来像正文里的标点，不像能点的
    东西）。常态是「往右撑开」，加宽后换成「收回去」并保持一层淡底，状态一眼可见。 */
 .tree-width-toggle {
@@ -160,6 +176,17 @@ button, input, select { font: inherit; color: inherit; }
 }
 .node .caret { width: 12px; flex: none; color: var(--muted-foreground); font-size: 10px; }
 .node .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 目录行（.is-dir 由 buildDirectoryRow 加）：名字加一档字重，段标题 → 目录 → 文件三层的
+   中间层看得出来。 */
+.node.is-dir .name { color: var(--foreground); font-weight: 620; }
+/* Changes 段的文件名淡绿。color 写在 .name 自己身上，选中行的主色（写在行按钮上）盖不住它
+   ——选中后名字仍是淡绿，与 VSCode 的 git 着色行为一致。 */
+.node .name.name-unstaged { color: var(--name-unstaged); }
+.node .ignored-badge {
+  flex: none; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
+  color: var(--muted-foreground); font-size: 9px; font-weight: 500; line-height: 15px;
+  white-space: nowrap;
+}
 .node .rename-source {
   min-width: 0; overflow: hidden; color: var(--muted-foreground); font-size: 10.5px;
   text-overflow: ellipsis; white-space: nowrap;

@@ -14,7 +14,7 @@
 
 以下清单是 §10 Functional Requirements 的行为投影；具体验收以 §1 行为样例为准。
 
-- **显式启动一个多任务批次**（FR-1）：单次队列运行可选择汇总；普通运行不改变行为，也可预览批次候选。
+- **两种批次入口**（FR-1）：自动入口仅适用于 `kc run --all-ready --aggregate-pr`；手动入口 `kc pr aggregate --issue <N> ...` 可把已完成的同仓库任务 PR 显式组成一个批次，包括分别通过不同 `kc run` 执行的任务。普通 `run`、daemon 和 loop 不自动汇总。
 - **只在整批任务成功后集成**（FR-2、FR-3）：合并全部来源分支到一个新分支，并验证组合后的完整代码树。
 - **生成唯一正式总 PR**（FR-4、FR-6）：正文列出每个来源 Issue、PR 和去重后的 PRD 路径；合并总 PR 接受其中全部 PRD。
 - **收起来源 PR**（FR-5）：总 PR 创建且组合验证和必需的 GitHub 检查均通过后，自动关闭来源 PR 并写明取代关系；来源分支保留。
@@ -37,22 +37,22 @@
 
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
-| 🤖 自动验证 | 操作员在同一仓库的一次队列运行中选择汇总 3 个任务，3 个 Issue 均通过现有流程 | 系统在一个新批次分支上组合 3 个来源分支，验证组合后的代码树；总 PR 的必需 GitHub 检查也通过后，关闭 3 份来源 PR、保留其分支。 |
-| 🤖 自动验证 | 操作员进行普通队列运行，没有选择汇总 | 仍按现有规则逐 Issue 处理并发布来源 PR；不创建批次分支、不关闭来源 PR。 |
-| 🤖 自动验证 | 已选择汇总的任务中有一个 Issue 执行失败，或来源分支冲突 / 组合验证失败 | 不创建总 PR，也不关闭任何来源 PR；命令说明失败位置。任务失败时提示先用现有执行流程修复该 Issue；组合阶段失败时给出只重试聚合的命令。 |
-| 🤖 自动验证 | 操作员只选择 1 个 Issue 汇总，或同时选择会跳过既有审核 / 验证的发布方式 | 在认领任务前以使用错误退出，说明汇总至少需要 2 个任务且不能旁路既有门禁；不创建分支或 PR。 |
-| 🤖 自动验证 | 总 PR 已创建，但其必需 GitHub 检查失败或仍在运行 | 总 PR 保持 Draft，来源 PR 保持打开；命令显示检查状态，允许在检查成功后只重试来源收尾。 |
-| 👀 人审 + 自动验证 | 打开批次总 PR，检查正文、验收证据与来源 PR 状态 | 总 PR 列出全部来源 Issue/PR 和每个唯一 PRD 路径一次；明确“合并即接受所列 PRD”；来源 PR 标为被总 PR 取代并已关闭，来源分支仍存在。 |
+| ⚠️ 外部行为不验证 | 用户在真实仓库的一次队列运行中选择汇总，全部任务完成 | 目标行为是组合来源分支、重新验证总树、发布唯一总 PR，再按 required checks 关闭来源 PR；本轮不运行真实批次，也不以 mock 宣称通过。 |
+| 🤖 自动验证（本地） | 检查 CLI 默认参数与聚合 / direct-pr / fast-merge 参数组合 | 本地 parser / 参数校验确认聚合默认关闭，冲突参数在执行器启动前被拒绝；不启动队列或外部客户端。 |
+| 🤖 自动验证（本地） | 在临时 Git fixture 中组合多个 source SHA，或注入 Git merge conflict | 本地组合按显式顺序生成 tree；冲突时停止且不改写 fixture base / source refs。该结果不证明 GitHub 来源解析或 PR 发布。 |
+| 🤖 自动验证（本地） | 向 v2 PR body contract 提供完整、漏项、重复项的 PRD 路径集合 | 纯本地契约验证完整集合并拒绝漏项 / 重复项；不创建 PR，也不验证 GitHub 对正文的呈现。 |
+| ⚠️ 外部行为不验证 | 总 PR 的 GitHub checks pending / failed，或需要关闭来源 PR | 产品要求来源 PR 保持打开并允许重试；真实 GitHub 状态转移不在本轮验证，不使用 fake 状态代替。 |
+| ⚠️ 外部行为不验证 | 审阅真实总 PR 与来源 PR | 产品目标为总 PR 覆盖唯一 PRD 集、来源 PR 标记取代且 branch 保留；本轮不创建 / 打开真实 PR，也不声称这一外部体验通过。 |
 
-以上行为行分别成为 §7.6 的验收 oracle；更改一个行为或结果单元格，就会更改对应的验收标准。
+本地验证行对应 §7.6 rv-1—rv-3；外部行为行在 rv-4 明确记录未验证。更改行为或结果单元格时同步调整对应 oracle 与未验证范围。
 
 #### 我默默定了这些
 
-- 批次边界是一次明确启用汇总的队列运行实际选中的同仓库 Issue 集合；不跨多次运行或不同仓库猜测成员关系。
-- 聚合是显式 opt-in；普通运行、后台常驻任务和定时任务保留现状。候选不足 2 个时在认领前拒绝，避免意外产生单任务总 PR。
+- 自动批次边界是一次明确启用汇总的队列运行实际选中的同仓库 Issue 集合；手动入口由操作员提供完整 Issue 列表，可覆盖多个不同 `kc run` 的结果，但不跨调用或仓库猜测成员关系。
+- 自动聚合是显式 opt-in；普通单 Issue 运行、普通队列运行、daemon 和 loop 保留现状。自动 / 手动候选不足 2 个时拒绝，避免意外产生单任务总 PR。
 - 来源任务各自继续走现有实现、验证、审核和来源 PR 发布流程；只有所有选中任务成功后才构造总分支。
 - 总 PR 使用配置的目标分支并保持 Draft 状态，供用户统一审阅；系统不自动合并总 PR 到目标分支。
-- 来源 PR 只在组合树验证通过且总 PR 创建成功后关闭，并附“已由总 PR 取代”的说明；来源分支与 Issue 历史保留。
+- 来源 PR 在组合树验证通过、总 PR 创建且必需 checks 全绿后改为 closed，并附“已由总 PR 取代”的说明。关闭只改变 PR 状态，不删除 PR 页面、评论或审查记录；来源分支与 Issue 历史保留。此时总 PR 仍待用户审阅和合并。
 - 一次总 PR 可以包含多个不同 PRD；相同 PRD 在多个来源 Issue 出现时按路径去重。普通单任务 PR 的现行单 PRD 验收契约继续兼容。
 - 组合、验证、总 PR 发布或来源 PR 收尾失败时，来源分支和可重试状态会保留，操作员可用单独的聚合命令重试而不重跑 Agent；若任务本身失败，先按现有方式修复该任务，再聚合完整集合。
 
@@ -66,7 +66,7 @@
 
 ### What The User Gets
 
-夜间一次队列运行完成后，用户只需打开一个总 Draft PR，就能看到本批次的所有 Issue、来源 PR、唯一 PRD 列表、逐任务证据和整批组合验证结果。来源 PR 已标记为被总 PR 取代并关闭，分支仍保留以便追踪。用户只需对总 PR 作一次审阅和合并决定；任务失败或改动冲突时，系统不会藏起来源 PR，也不会把不完整批次伪装成成功总 PR。
+夜间一次队列运行完成后，用户只需打开一个总 Draft PR，就能看到本批次的所有 Issue、来源 PR、唯一 PRD 列表、逐任务证据和整批组合验证结果。来源 PR 在总 PR 合并前标记为被取代并关闭；它们的 PR 页面、评论、审查记录、来源分支和 Issue 历史都保留，方便追溯。用户只需对总 PR 作一次审阅和合并决定；任务失败或改动冲突时，来源 PR 保持开放，不会删除记录或把不完整批次伪装成成功总 PR。
 
 ### Measurable Objectives
 
@@ -80,21 +80,21 @@
 
 ### 决定一：一个总 PR 是这一批 PRD 的共同验收事件
 
-你已明确确认：总 PR 是唯一正式 PR；其合并成为正文列出的所有唯一 PRD 的共同交付与验收事件。错误地少列一个 PRD 会让该 PRD 的需求似乎已验收但没有经过同一次人工审阅；多列或重复列出则会模糊合并者实际接受的范围。实现完成后，最终审阅只需核对真实总 PR 的 PRD 列表与证据是否一一对应。
+你已明确确认：总 PR 是唯一正式 PR；其合并成为正文列出的所有唯一 PRD 的共同交付与验收事件。错误地少列一个 PRD 会让该 PRD 的需求似乎已验收但没有经过同一次人工审阅；多列或重复列出则会模糊合并者实际接受的范围。实现审阅仅核对本地正文构造 / 契约代码；外部 PR 合并与实际验收行为不在本次验证中。
 
-**请确认：** 在最终总 PR 中，是否完整列出了你本次要审阅的所有 PRD，且正文清楚说明合并总 PR 会接受这组 PRD 的人审决策和可见结果？（需求口径已按你本轮回答锁定。）
+**实现审阅时检查：** 不运行真实批次，也不把 mock 结果作为 GitHub 行为证据；仅审阅本地正文构造和 v2 契约测试。真实 GitHub 上的 PRD 集和合并验收结果明确保持未验证。该需求口径已按你本轮回答锁定。
 
-**验收：** 真实总 PR 的去重 PRD 路径集合与所选 Issue 的 PRD 集合一致；每个 PRD 都随总 PR 归档并保留待人工验收状态，合并授权句明确覆盖整组。
+**验收：** 本地 v2 正文契约可断言 PRD 路径去重、完整性与授权语句；不对真实 GitHub PR body、合并授权是否生效或 PRD 实际验收状态作通过声明。
 
 ### 决定二：总 PR 成功后关闭来源 PR，保留可追溯记录
 
-你已确认自动关闭来源 PR，并标记为被总 PR 取代。关闭必须发生在总 PR 已创建、组合验证和必需的 GitHub 检查都通过之后；提前关闭会在冲突、CI 失败或 GitHub 发布失败时失去可直接审阅的来源入口。来源分支和 Issue 记录仍保留，关闭说明附总 PR 链接；如总 PR 验证未通过，来源 PR 保持打开。
+你已确认自动关闭来源 PR，并标记为被总 PR 取代。关闭必须发生在总 PR 已创建、组合验证和必需的 GitHub 检查都通过之后，因此会早于用户合并总 PR。关闭只改变来源 PR 的状态：PR 页面、评论、审查记录、来源分支和 Issue 记录都保留，关闭说明附总 PR 链接；如总 PR 验证未通过，来源 PR 保持打开。
 
-**请确认：** 审阅实际批次时，是否能从总 PR 正文找到全部来源 PR，并确认它们只在总 PR 通过验证并成功创建后关闭、且保留来源分支？（该关闭策略已按你本轮回答锁定。）
+**实现审阅时检查：** 不通过 fake GitHub 推断实际 PR 状态；代码审阅只确认实现请求的先后条件。真实 GitHub 检查状态、PR 关闭结果与分支保留状态都不验证。该关闭策略已按你本轮回答锁定。
 
-**验收：** 本地组合验证或总 PR 必需的 GitHub 检查失败 / 未完成时来源 PR 仍打开；全部通过后每个来源 PR 都关闭并注明总 PR 编号，来源分支仍可读取。
+**验收：** 只审阅代码中的关闭前置条件；不模拟或宣称验证 GitHub 的 required checks、关闭评论、真实 PR 状态或远端分支保留。该外部行为因本轮不访问真实服务而未验证。
 
-**自动门禁，不需要逐项人工审阅**：默认兼容、候选数与参数互斥、依赖排序、组合树完整性、冲突处理、全树验证、重复 PRD 去重、失败原子性、命令行输出与新旧正文契约由自动验证和独立 verifier 负责。
+**本地自动检查**：CLI 参数解析、Git tree 组合与 PR body 纯逻辑契约可在本地验证。GitHub Issue/PR 读取、创建、required checks、关闭和评论不使用 mock 作验收证据，也不在本轮连接真实服务；这些结果明确留空。
 
 **本次明确不涉及**：前端、数据库 schema、跨仓库汇总、自动合并，以及总 PR 关闭未合并后的自动 reopen 服务。
 
@@ -110,11 +110,17 @@ kc run --all-ready --aggregate-pr --max-issues 4
 
 此调用从当前仓库本轮实际选中的 Issue 中组成批次；`--max-issues` 或现有并发配置需要允许至少两个候选。操作员可以先用 `--dry-run` 查看候选 Issue、可确定的 PRD 路径和预计批次大小；来源 PR 链接在对应任务完成并发布来源 PR 后显示。批次成功时终端给出唯一总 Draft PR 链接、来源 PR 关闭结果及复制友好的恢复命令；遇到失败则逐项指出阻断原因，不声称存在完整总 PR。现有 `kc run --all-ready` 不带 `--aggregate-pr` 时保持原行为。
 
-如果只在组合分支 / 最终验证阶段失败，操作员执行输出的 `kc pr aggregate --issue <N> --issue <N>` 重试，不需要重新运行已通过的任务 Agent。若来源代码或 PRD 集本身变化，操作员先修复对应 Issue / 来源 PR，再重新聚合。
+如果任务分别通过不同的 `kc run --issue` 或普通队列运行完成，操作员可显式指定它们聚合：
+
+```bash
+kc pr aggregate --issue 101 --issue 102
+```
+
+此命令只读取同仓库中已完成且符合条件的来源 PR，不自动猜测批次成员；任务数至少为两个。它也用于组合分支 / 最终验证失败后的重试，不需要重新运行已通过的任务 Agent。`kc run --issue`、未带 `--aggregate-pr` 的普通 `kc run`、daemon 和 loop 都不会自动聚合。若来源代码或 PRD 集本身变化，操作员先修复对应 Issue / 来源 PR，再重新聚合。
 
 ### 夜间任务发起者
 
-发起者仍使用现有 Issue 队列、Agent、验证和审核流程；新增参数只在单次显式调用中启用聚合，不改变后续 daemon / loop 的默认发布方式，也不把未来才出现的 Issue 暗中纳入已经结束的批次。
+发起者仍使用现有 Issue 队列、Agent、验证和审核流程；自动聚合只在单次显式 `kc run --all-ready --aggregate-pr` 调用中启用。若任务由多次调用完成，可用 `kc pr aggregate --issue ...` 明确列出成员；daemon / loop 不自动聚合，也不会把未来才出现的 Issue 暗中纳入已经结束的批次。
 
 ### PR 审阅者与 PRD 作者
 
@@ -178,7 +184,7 @@ kc run --all-ready --aggregate-pr --max-issues 4
 
 为 `kc run --all-ready` 增加默认关闭的 `--aggregate-pr`；在本轮全部 Issue worker 完成并分别通过原有检查后，调用共享的 core 批次聚合用例。另提供 `kc pr aggregate --issue <N> ...` 对已完成来源 PR 做显式聚合或失败重试。两条入口复用同一套资格验证、依赖排序、临时集成分支、组合验证、总 PR 正文构建与来源 PR 收尾逻辑。
 
-总 PR 是唯一正式审阅与 PRD 验收 PR。组合验证通过后发布总 Draft PR，随后读取该 PR 的必需状态检查；检查全绿后才使用既有 GitHub 客户端边界关闭来源 PR，并写明总 PR 链接。不删除来源分支。组合失败时不创建总 PR、也不关闭来源；总 PR checks 失败 / 未完成或 GitHub 在关闭多个 PR 时部分失败，则保留总 Draft PR 和所有未收尾的来源 PR，允许重跑聚合命令完成检查和幂等收尾。
+总 PR 是唯一正式审阅与 PRD 验收 PR。组合验证通过后发布总 Draft PR，随后读取该 PR 的必需状态检查；检查全绿后、用户合并总 PR 之前，才使用既有 GitHub 客户端边界关闭来源 PR，并写明总 PR 链接。来源 PR 不会被删除：关闭只将其状态改为 closed，原 PR 页面、评论和 review 历史保留；来源分支与 Issue 也保留。组合失败时不创建总 PR、也不关闭来源；总 PR checks 失败 / 未完成或 GitHub 在关闭多个 PR 时部分失败，则保留总 Draft PR 和所有未收尾的来源 PR，允许重跑聚合命令完成检查和幂等收尾。
 
 批次集成在隔离 worktree 中从远程目标分支的固定 SHA 起步，按 PRD / Issue 依赖顺序将来源 head 合入。组合分支验证完成后才创建 Draft 总 PR。若目标 base 在运行中前进，则基于最新 base 重新构建并重跑组合验证；若重建仍有冲突或验证失败，不发布合格总 PR。流程不自动合并至 base。
 
@@ -267,15 +273,11 @@ API / CLI
 
 Tests
 ├── tests/test_agent_runner_batch_aggregate.py [新增]
-│   【总结】验证完整批次成功、依赖排序、整树检查、冲突回滚、失败保全与可重试来源收尾
+│   【总结】只验证临时本地 Git 的依赖排序、组合 tree 与冲突处理；不测试 GitHub Issue / PR 读取、发布、checks 或关闭
 ├── tests/test_agent_runner_pr_body_contract.py [修改]
 │   【总结】覆盖 v1 向后兼容、v2 唯一 PRD 集、漏项 / 重复项拒绝及接受声明
 ├── tests/test_agent_runner_cli.py [修改]
-│   【总结】通过真实 CLI dispatch 验证 flag 默认、互斥、dry-run 和显式 retry 入口
-├── tests/test_agent_runner_orchestrate.py [修改]
-│   【总结】证明并发 worker 全部完成后才触发聚合且单项失败阻止聚合
-└── tests/test_github_client.py [修改]
-    【总结】验证来源 PR 关闭 / 评论经既有 GitHub client 边界传递
+│   【总结】只验证 CLI parser / 本地参数校验的 flag 默认值与互斥规则；不触发执行器或 GitHub client
 
 Docs / Skills
 ├── AGENTS.md [修改]
@@ -300,10 +302,10 @@ Database
 
 | Change point | Tier | Decisive dimension / override | Intervention | Failure-discriminating oracle / gate |
 |---|---|---|---|---|
-| CLI opt-in、批次规模与旁路 flag 组合 | R1 | 单一 CLI 边界，兼容行为可直接断言 | Executor + automated gate | `rv-1` 证明默认路径不变、候选不足和不兼容旗标在认领前失败 |
-| 多分支顺序、隔离集成、base 漂移与全树验证 | R2 | 跨 Issue 的正确性、依赖顺序与并发 base 更新，失败可能发布不完整代码 | Executor + automated gate | `rv-2` 组合 head/tree、冲突 fail closed、base 改变后重建并重跑验证 |
-| 整批失败 / 部分 GitHub close 的幂等恢复 | R2 | 多对象外部状态变更；中途网络失败可能留下重复开放 PR | Executor + automated gate | `rv-3` 验证 PR 创建失败时不关闭来源、关闭失败时可重试且来源分支存在 |
-| v2 multi-PRD merge acceptance 与唯一正式 PR | R3 | PRD 验收记录、外部 PR 与多个任务的集合一致性；错误可形成错误的验收结论 | Human confirmation + negative control | `rv-4` 最终真实 PR 的全集合匹配；漏列 / 未归档 PRD 必须在创建总 PR 或关闭来源前失败 |
+| CLI opt-in 参数与旁路参数组合 | R1 | 本地 parser / 参数校验；不启动执行器 | Executor + automated gate | `rv-1` 在本地验证参数默认值和互斥错误 |
+| 来源 head 的本地 Git 组合 | R2 | 临时 bare remote 与完整本地 tree；不查 Issue / PR | Executor + automated gate | `rv-2` 验证拓扑顺序、冲突和组合 tree；不证明 GitHub 来源解析 |
+| v2 多 PRD 正文纯逻辑契约 | R2 | 本地路径集合、去重与版本兼容；不发布 PR | Executor + automated gate | `rv-3` 证明契约拒绝漏项和重复项；不证明 GitHub 接受或展示正文 |
+| GitHub PR 创建 / checks / close 外部语义 | R3 | 只能通过真实 GitHub 状态验证；用户明确禁止本轮访问，fake 无法证明 | Not run; limitation disclosed | `rv-4` 记录未验证边界，不以 mock 结果宣称通过；本项不阻塞本 PRD 的实现侧交付 |
 
 ### 7.4 Core Flow
 
@@ -340,73 +342,74 @@ rg -n "merge-acceptance version=1|唯一关联该 PRD|唯一 PRD|PRD path:|--all
 
 ### 7.6 Realistic Validation Plan
 
+**范围说明**：本计划只验证不依赖 GitHub 外部状态的本地逻辑。GitHub Issue / PR 读取、Draft PR 创建、required checks 查询、来源 PR 关闭 / 评论和远端 branch 保留都需要真实服务状态才能证明；用户明确要求不做此类验证，因此这些行为标为未验证。fake GitHub、录制响应或 mock 状态不作为其验收证据。
+
 ```yaml
 - id: rv-1
-  behavior: "批次聚合默认关闭；聚合候选少于两个或与 direct-pr / fast-merge 并用时，在认领前给出明确使用错误；普通 all-ready 行为不变。"
+  behavior: "CLI 暴露默认关闭的聚合参数，并在本地参数校验层拒绝候选不足和与 direct-pr / fast-merge 冲突的组合，不启动执行器。"
   reviewer: verifier
-  real_entry: "生产 CLI 调用 `kc run --all-ready --aggregate-pr --max-issues 1 --repo-id aggregate-fixture`；随后调用普通 `kc run --all-ready --max-issues 1 --repo-id aggregate-fixture`。"
-  expected: "非法聚合请求返回 usage exit code，fake GH 不见 claim/write；普通命令未启用聚合阶段且沿用逐 Issue 发布路径。"
-  mock_boundary: "真实 kc parser、dispatch、core 资格校验与临时 Git；仅将 GitHub / gh CLI 边界替换为有状态、fail-loud fake。"
+  real_entry: "调用实际 CLI help / parser 和本地参数校验入口；不运行 `kc run` 队列、不读取仓库配置、不创建 GitHub 或 Git client。"
+  expected: "help 暴露聚合选项且默认值为关闭；不足两个候选和冲突参数组合在本地校验层失败，执行器与外部客户端均未启动。"
+  mock_boundary: "无 mock；只解析 CLI 参数并调用无副作用的本地校验逻辑。"
   tier: R1
   test_layer: integration
   required_for_acceptance: true
 
 - id: rv-2
-  behavior: "同一批次所有任务成功后，来源分支按依赖顺序进入以配置 base 为起点的隔离总分支，并对组合后的完整代码树重新运行仓库验证和独立 verifier。"
+  behavior: "多个已知 source SHA 可按给定依赖顺序在隔离的本地 Git worktree 中组合；冲突停止组合，不改写 base 或 source refs。"
   reviewer: verifier
-  real_entry: "生产 CLI 调用 `kc pr aggregate --issue 101 --issue 102 --repo-id aggregate-fixture`。"
-  expected: "真实本地 Git tree 含两条来源 head 的全部非重复提交，依赖先于依赖方；组合验证针对 batch worktree 执行；目标分支与 issue 分支无 ref 变更。冲突时无 total PR。"
-  mock_boundary: "真实 CLI、core aggregator、Git、bare remote 与验证命令；仅 GitHub issue / PR 数据和发布写入经 fake client 注入。"
+  real_entry: "通过项目现有 Git integration helper 操作本次创建的临时仓库与 bare remote；不调用 `kc pr aggregate`，因为该命令需要读取 GitHub Issue / PR 状态。"
+  expected: "临时 Git tree 包含 source SHA 的组合内容并遵循显式顺序；冲突时停止，base 与 source refs 不变。该结果只证明本地 Git 集成逻辑，不证明来源 PR 解析或 GitHub 发布。"
+  mock_boundary: "无 GitHub fake；source SHA 和依赖关系直接来自本地静态 fixture manifest，不声称它们来自真实 Issue / PR。"
   tier: R2
   test_layer: integration
   required_for_acceptance: true
-  critical_value_source: "CLI 提交的两个真实 fixture Issue 编号；source heads 从 fake GitHub PR 响应的 head SHA 读取；base SHA 从测试 bare remote 的配置目标分支读取。"
-  must_cross: "CLI parser -> parsed dispatcher -> batch aggregate use case -> fresh isolated worktree -> dependency ordering -> source-head Git merge -> verification_commands -> independent verifier adapter -> GitHub client publish boundary -> fresh fake-GitHub PR read。"
-  forbidden_bypasses: "禁止直接调用 branch-merge helper 替代 CLI；禁止预先写入完成的 batch branch；禁止假 Git 操作、跳过验证命令或用 PR mock 的 success 摘要代替总树验证。"
-  fresh_state_probe: "关闭聚合进程后重新执行 kc PR lookup 和 git ls-remote，从 fake GitHub 返回记录与 bare remote 读取已发布的 source/head/base，并比较本地 source refs 未变。"
-  final_tree_evidence: "保存组合前后 head/tree、base SHA、source PR head 列表及验证命令摘要；实现、集成入口或 Git 合并规则变化后重新采集，并将最终 tree 记入 verifier report。"
+  critical_value_source: "source/base SHA 与依赖顺序由本地 fixture manifest 给出；组合后的 commit/tree 从临时 Git repository 读取。"
+  must_cross: "project Git integration helper -> temporary worktree -> source SHA merge in declared order -> actual local Git tree inspection。"
+  forbidden_bypasses: "禁止预先写入完成的 aggregate branch、用假的 Git 命令替代 git，或将本地 source fixture 描述为真实 GitHub PR 状态。"
+  fresh_state_probe: "销毁 helper 进程后，从临时 bare remote 与新 worktree 重新读取 base/source refs 和 aggregate tree。"
+  final_tree_evidence: "记录临时 base SHA、source SHA、aggregate HEAD/tree 与命令结果；不包含 GitHub PR number 或外部状态结论。"
 
 - id: rv-3
-  behavior: "来源任务失败、Git 冲突、组合验证失败、总 PR 发布失败或总 PR 的 GitHub checks 失败 / pending 时，不提前关闭来源 PR；任务失败提示先修复任务，聚合阶段失败在来源齐全时给出只重试聚合的完整 Issue 列表。"
+  behavior: "本地 v2 PR body contract 对唯一 PRD 路径集合做稳定去重并拒绝漏列 / 重复列；普通 v1 contract 保持兼容。"
   reviewer: verifier
-  real_entry: "生产 CLI 调用 `kc run --all-ready --aggregate-pr --max-issues 2 --repo-id aggregate-fixture`。"
-  expected: "对每类预置失败，CLI 非零退出并列明阻断项；来源任务 / 本地集成 / 创建总 PR 失败时没有总 PR且来源 PR 都仍开着；总 PR required check failure / pending 时总 Draft PR 存在但来源 PR 都仍开着。source branches 与 Issues 始终可追溯。任务失败时不输出聚合重试命令；所有来源 PR 均已就绪而组合阶段或 source close 失败时输出 `kc pr aggregate --issue ...`。"
-  mock_boundary: "真实 kc CLI、core runner、临时 Git、GitHub client 调用顺序；仅在 fake GitHub / verifier process 边界注入失败，不改 production failure switch。"
+  real_entry: "调用 `agent_runner_pr_body_contract.py` 对本地 fixture PR body 执行 v1 / v2 contract 校验；不创建 PR、不读取 GitHub 状态。"
+  expected: "完整集合通过；漏列、重复或排序不稳定的集合被本地 contract 拒绝；现有 v1 单 PRD 正文继续通过。该结果不证明 GitHub 创建或渲染正文。"
+  mock_boundary: "无 GitHub fake；仅提供本地字符串和仓库相对 PRD 路径 fixture。"
   tier: R2
-  test_layer: integration
+  test_layer: unit
   required_for_acceptance: true
-  critical_value_source: "候选 Issue 集来自本轮 fake GitHub ready 队列响应；来源分支内容来自独立 bare remote；失败信号来自 fake GitHub 操作或组合 verifier 进程的真实返回码。"
-  must_cross: "kc run -> ready discovery / claim -> 每项完整 worker -> batch join -> isolated branch build -> configured combined-tree verifier -> total PR create -> actual required-check lookup -> child close boundary only after SUCCESS -> new-process inspection of Issues, PRs and refs。"
-  forbidden_bypasses: "禁止只测 aggregate helper；禁止让失败在 Issue worker 启动前被单测分支短路；禁止用同一个内存对象断言发布前状态；禁止先关闭来源 PR 再注入失败。"
-  fresh_state_probe: "新进程通过 GitHub client 与 `git ls-remote` 分别读取总 PR、required-check 状态、每个来源 PR 的 open/closed 状态、superseded 链接、Issue state 和 source refs。"
-  final_tree_evidence: "逐种失败保存终端输出、PR 状态快照与远程 refs；每次相关的编排、发布、GitHub close 或错误恢复改动后重跑，并在 evidence report 记录最终实现 tree。"
+  critical_value_source: "契约输入来自本地 fixture PR body 与 PRD 路径集合；实际判定结果来自纯 contract 函数。"
+  must_cross: "local v1/v2 body -> PRD path parser -> set completeness / uniqueness / ordering assertions。"
+  forbidden_bypasses: "禁止调用 fake GitHub 来声称 PR body 已成功发布、显示或被 GitHub 接受。"
+  fresh_state_probe: "在独立进程重新读取本地 fixture body 并运行 contract parser；不查询 GitHub。"
+  final_tree_evidence: "记录本地输入、contract 结果和实现 tree；不记录 PR number、CI 状态或远端 PR state。"
 
 - id: rv-4
-  behavior: "成功批次最终呈现唯一总 PR，正文列出完整来源集合和每个唯一 PRD 路径一次；明确该 PR 的 merge 接受列出的全部 PRD；仅在该总 PR 的组合验证和必需 GitHub checks 均成功后关闭来源 PR，保留来源分支。"
+  behavior: "GitHub 实际接受总 PR 创建、required checks 状态、来源 PR 关闭 / 评论和远端分支保留。"
   reviewer: human
-  real_entry: "生产 CLI 调用 `kc run --all-ready --aggregate-pr --max-issues 2 --repo-id aggregate-fixture`；交付后用真实 GitHub Draft PR 链接人工复核。"
-  expected: "fresh GitHub PR body 的 source Issue / PR 集合与入选项完全一致，PRD path 集合唯一且完整，含 v2 merge-acceptance 声明和批次验证/tree 摘要；总 PR required checks 均 SUCCESS 后，来源 PR 关闭评论才指向总 PR，来源分支仍存在；v1 普通 PR contract 仍通过。"
-  mock_boundary: "组合算法、PRD 集合校验、真实 CLI、本地 Git 与 body 构造均运行真实代码；隔离验证只 fake GitHub API 写入 / 读取，最终交付另提供用户授权测试仓库中的 opt-in 实际 Draft PR 证据。"
+  real_entry: "未运行：要证明此行为必须连接真实 GitHub 仓库并观察远端状态；用户明确要求不执行。"
+  expected: "不收集、不伪造通过证据；实现交付说明该外部边界未验证。"
+  mock_boundary: "不使用 fake / mock GitHub 替代，因为它不能证明真实 PR 状态、required checks 或关闭行为。"
   tier: R3
-  test_layer: integration
-  required_for_acceptance: true
-  presentation: "交付总 PR 的 GitHub URL + 稳定 evidence comment；约 10 秒自检：数一次正文的唯一 `PRD:` 路径并与 batch issue 列表比较，再看每个来源 PR 是否显示 `Superseded by #<total>`。"
-  critical_value_source: "入选 Issue 的 `PRD path:` 行与来源 PR 的 head/base SHA 来自本轮 GitHub 响应；用户最终打开的 URL 取自 `kc run` 实际输出，而非测试常量。"
-  must_cross: "真实 kc command -> Issue discovery / existing gates -> aggregate tree validation -> v2 body builder and contract gate -> Draft PR create -> required GitHub checks SUCCESS read -> each source PR close/comment -> fresh GitHub reads -> final PR URL shown to reviewer。"
-  forbidden_bypasses: "禁止把 issue-body fixture 的 PRD 列表直接当总 PR body；禁止只验单个 `contains(path)`；禁止用闭包前的内存状态冒充 GitHub closed state；禁止将 closed child PR 误作 merge acceptance。"
-  fresh_state_probe: "完成命令后启动新进程按实际 PR URL 拉取总 PR body，并分别查询每个来源 PR 的 state / body、bare remote refs 和每份 PRD 在 batch tree 中的 archive 路径及证据状态。"
-  final_tree_evidence: "验证报告记录 PR number、verified head、record-path-excluded tree、所有 source heads 和 PRD paths；与正文合同、PR 发布或 close 顺序有关的最终改动后重新采集，真实合并验收前再次核对 merged tree 等价性。"
-  negative_control: "在 fake GitHub 来源中令一个已选 Issue 的 PRD 路径指向未进入组合树 / 未归档的文件，然后运行同一真实 CLI 聚合命令。"
-  expected_fail: "总 PR create 调用次数为 0、来源 PR close/comment 调用次数为 0；命令非零退出并明确指出缺失 / 未归档的 PRD 路径。"
+  test_layer: sandbox/live
+  required_for_acceptance: false
+  presentation: "实现 PR 的限制说明：GitHub 外部创建、检查与关闭行为尚未验证；不呈递 fake GitHub 状态作为成功证据。"
+  critical_value_source: "未获取真实 GitHub PR / checks / branch 状态；本轮不访问外部服务。"
+  must_cross: "无；真实 GitHub write/read 需要用户明确允许且本轮明确不执行。"
+  forbidden_bypasses: "禁止将 fake response、录制响应、静态 fixture 或本地内存状态写成 GitHub 实际状态证据。"
+  fresh_state_probe: "无远端写入，因此不启动 GitHub fresh-state probe；保持未验证。"
+  final_tree_evidence: "无外部行为证据；代码 tree 不能证明 GitHub 接受请求或执行关闭。"
+  negative_control: "not feasible — 未授权且禁止访问真实 GitHub；fake GitHub 不能证明真实服务行为。"
 ```
 
-**失败排查顺序**：先核实 ready 候选集和各 Issue 的最终状态，再比对 source PR 的 base/head、依赖顺序和固定 base SHA，然后查看冲突文件与组合验证命令；最后检查 PRD 路径去重集合、v2 正文标记和 GitHub close 操作返回值。凭证化真实仓库 smoke 属 opt-in；无凭证默认验证仍通过本地 bare remote、真实 CLI / Git 和 fake GitHub boundary 完成。
+**失败排查顺序**：本地 oracle 失败时检查参数解析、fixture Git refs / merge 顺序和 PRD 路径契约。涉及 GitHub read/write、required checks 或远端状态的问题不通过 fake 重试或改写为通过；按用户要求保持未验证并报告限制。
 
-**人工交付面**：成功验证后，9.1 与结尾消息应直接呈现 GitHub 总 PR URL、唯一 PRD 列表、来源 PR 收尾结果和 verifier / CI 证据链接；不要只给证据文件名。
+**人工交付面**：实现 PR 呈递本地 CLI / Git / body contract 证据，并单独明确 GitHub 外部行为未验证；不得呈递 mock 状态快照冒充真实 PR 结果。
 
 ### 7.7 External Validation
 
-No external validation required; repository evidence was sufficient.
+No external research required. This does not authorize live GitHub validation; §7.6 records that behavior as unverified.
 
 ### 7.8 Frontend / Prototype / Data Model
 
@@ -430,21 +433,21 @@ No external validation required; repository evidence was sufficient.
 
 | 要看什么 | 展示入口 | 约 10 秒自检 |
 |---|---|---|
-| 总 PR 正文、批次 PRD / 来源 Issue / 来源 PR 清单，以及每份来源 PR 的被取代状态。 | 在交付 PR 的 evidence comment 打开 **GitHub 总 Draft PR URL（交付时填入真实链接）**；这是认证后的网页入口，不依赖本机路径。 | 数总 PR 正文中的唯一 PRD 路径并与来源 Issue 列表对照；来源 PR 页面显示 `Superseded by #<total>` 且状态为 closed。 |
+| 本地 PR body contract 的集合断言，以及外部 GitHub 行为未验证的范围说明。 | 在实现 PR evidence comment 打开 **本地 CLI / Git / body contract evidence report**。不呈递 fake PR 状态。 | 检查报告明确列出未验证项：真实 PR 创建、required checks、来源 PR 关闭 / 评论与远端 branch 状态。 |
 
-总 PR 的必需 GitHub 检查通过后才关闭来源 PR；检查失败或仍 pending 时，来源 PR 必须保持打开。
+真实 GitHub 状态不在本轮验证；不得用 fake required checks 或 fake PR state 代替真实服务证据。
 
 `reviewer: verifier` 的候选边界、Git tree 集成顺序、base SHA 变化重建、失败保全、验证命令、CLI 默认兼容和 v1/v2 contract 回归属于机器证据，不列为人读呈递项；仅在失败时升级给人。
 
 ### 9.2 Acceptance Evidence Package
 
-证据顺序：首先是 §2 的共同 PRD 验收范围与来源 PR 收尾结果；其次是 R3 的 v2 PR 正文 / 真实 GitHub 状态，再是 R2 的 batch tree、固定 base、冲突和失败恢复；最后附 CLI 兼容、默认关闭与 v1 合约门禁。
+证据顺序：首先披露 §7.6 rv-4 的外部行为未验证；其次是 R2 本地 Git tree 与 v2 body contract 结果，再是 R1 CLI 参数兼容。证据采集不使用 fake GitHub，也不连接真实 GitHub 或真实仓库。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] **总 PR 是这一批 PRD 的唯一正式交付 / 验收事件**：evidence comment 中的总 PR body 列出所有唯一 PRD；每份 PRD 在组合 tree 中归档、有独立证据，并由明确 v2 合并声明覆盖。人工合并前保持待验收，最终 Git tree 等价后逐个回填 acceptance record（§2 决定一）。
-- [ ] **来源 PR 只在聚合成功后关闭并链接总 PR**：PR 状态快照与来源分支 `ls-remote` 证明总 PR 创建前失败，或总 PR 必需检查失败 / pending 时不关闭来源；检查全绿后来源 PR 显示 superseded 链接且 branch ref 保留（§2 决定二）。
-- [ ] **9.1 Human Review Surface 已呈递**：交付评论内能直接打开真实总 PR；人工核对 PRD 集完整、来源 PR 全部关闭 / 可追溯和批次验证结果。呈递 URL 与 §9.1 表一致。
+- [ ] **总 PR 是这一批 PRD 的唯一正式交付 / 验收事件**：人工审阅实现 PR 中的本地正文构造与 v2 contract；GitHub 实际 body、PRD 合并验收记录和 merge 结果保持未验证（§2 决定一）。
+- [ ] **来源 PR 只在聚合成功后关闭并链接总 PR**：人工审阅关闭调用的代码前置条件；真实 checks、关闭评论、PR 状态和 branch 保留不验证，不以 mock 作为证据（§2 决定二）。
+- [ ] **9.1 Human Review Surface 已呈递**：实现 PR evidence comment 呈递本地 CLI / Git / body contract 报告，并明确 GitHub 外部行为尚未验证。
 
 ### Architecture Acceptance
 
@@ -454,11 +457,10 @@ No external validation required; repository evidence was sufficient.
 
 ### Behavior Acceptance
 
-- [ ] `kc run --all-ready` 无 `--aggregate-pr` 时逐项行为、PR 数量和 PRD v1 body 与改动前相同（`rv-1` evidence）。
-- [ ] 成功批次包含全部选中来源 head 的提交与内容，任务间共享祖先不重复合入；整树 `verification_commands` 和配置 verifier 都针对总分支执行（`rv-2` evidence）。
-- [ ] 任一 Issue 失败时不聚合成功子集，并提示先按既有流程修复失败任务；组合冲突、全树验证失败或总 PR 创建失败时无合格总 PR 且来源 PR 全部保留。若仅来源 PR 收尾部分失败，重复聚合命令能完成剩余关闭而不重跑 Agent（`rv-3` evidence）。
-- [ ] 总 PR PRD 集稳定排序、去重且完整，Issue / 来源 PR 的关系清晰；正文声明的验收集合与实际 archive PRD / evidence 集逐项相同。
-- [ ] 总 PR 保持 Draft，不自动合并；GitHub `Closes #N` / Issue 生命周期只在用户合并总 PR 后按平台规则完成。
+- [ ] CLI 聚合参数默认关闭；本地 parser / 参数校验能识别有效与冲突参数（`rv-1` evidence）。
+- [ ] 本地 Git helper 按输入顺序组合 source SHA，冲突停止且不改写 base / source refs（`rv-2` evidence）。
+- [ ] 本地 PR body v2 contract 稳定去重并拒绝漏项 / 重复项，普通 v1 contract 继续通过（`rv-3` evidence）。
+- [ ] GitHub PR 创建、required checks 读取、来源 PR 关闭 / 评论、远端 branch 保留和实际合并行为未验证；不得把局部代码测试结果写成这些外部行为已通过。
 
 ### Documentation Acceptance
 
@@ -468,26 +470,25 @@ No external validation required; repository evidence was sufficient.
 
 ### Validation Acceptance
 
-- [ ] `uv run pytest -o addopts="" tests/test_agent_runner_batch_aggregate.py tests/test_agent_runner_cli.py tests/test_agent_runner_pr_body_contract.py tests/test_agent_runner_orchestrate.py tests/test_github_client.py -q` 全绿；记录各失败矩阵、dry-run、默认兼容、v1 和 v2 的证据。
-- [ ] 按 `rv-2` 和 `rv-3` 从实际 `kc run` / `kc pr aggregate` CLI 入口跑完整隔离场景；验证 fake 只在 GitHub / verifier 边界，Git、worktree、parser、core、完整组合命令与 fresh-process probe 均真实执行。
-- [ ] 独立 verifier 对 final batch branch `HEAD` 和 PRD record paths excluded Git tree 给出 `PASS`；验证计划、evidence report、verifier report 记录匹配的 source head、base SHA 和 `rv-id` 证据。
-- [ ] `rv-4` 的负控漏掉一个未归档 PRD 时在创建总 PR / 关闭任何来源 PR 前失败；恢复合法输入后再收集最终结果。
-- [ ] 以用户授权的隔离 GitHub 测试仓执行 opt-in smoke：核实实际 Draft PR body / GitHub close comment / 保留 branch；未启用凭证时本项明确记录为未执行（不得用 mock 冒充真实 GitHub 验证）。
+- [ ] 仅运行不依赖 GitHub 的本地 CLI parser、Git helper 与 PR body contract 定向测试；测试目标仓库必须是自动创建的临时目录，不调用 `kc run` / `kc pr aggregate` 执行完整队列。
+- [ ] `rv-2` 使用真实本地 Git / 临时 bare remote 验证组合 tree；不读取 GitHub Issue / PR，不使用 fake GitHub。
+- [ ] `rv-3` 使用本地输入验证 v1 / v2 正文契约；不创建或发布 PR。
+- [ ] 对真实 GitHub PR 创建、checks、来源 PR close/comment 和远端 branch 状态不做验证；交付报告明确标记未验证，且不使用 fake 结果替代。
 
 ### Delivery Readiness
 
-- [ ] 最终 aggregate PR body 对齐每个 PRD 的 §2 决策、§9.1 人读呈递和 §9.2 evidence；稳定 comment 发布 verifier verdict、要求门禁、head/tree 与所有来源链接。
-- [ ] 如果 agent execution 出错、base 在验证期间改变或来源 PR close 部分失败，结尾消息明确说明状态、保留的 PR / branch 和可复制的 retry 命令；不把部分完成报告为唯一正式总 PR 已就绪。
+- [ ] 本地正文构造和 body contract 与 PRD 集一致；evidence report 记录实际完成的本地验证，并单列未验证的 GitHub 边界。
+- [ ] 不执行 live 批次；若实现说明涉及 source close / checks 的行为，仅陈述代码合同，不报告真实 PR 状态或外部操作结果。
 - [ ] 独立 verifier `PASS` 后，非人工 checklist 项均有可追踪 evidence；执行侧 Final Reconciliation 与 banner / §9 状态一致，再将本 PRD 随交付改动从 `tasks/pending/` 归档到 `tasks/archive/`。
-- [ ] 完成消息原样呈递 9.1 表的真实总 PR URL、PRD 集核对结果、来源 PR 关闭 / 分支保留结果和证据链接。
+- [ ] 完成消息呈递实现 PR URL、本地验证结果和未验证的 GitHub 外部边界；不得触发生产仓库批次或呈递 fake GitHub 状态作为证据。
 
 ## 10. Functional Requirements
 
-- **FR-1: 显式批次入口与预览**：提供默认关闭的 `kc run --all-ready --aggregate-pr`，以本轮实际选中的同仓库 Issue 作为批次；至少 2 项。提供 `kc pr aggregate --issue <N> ...` 用于指定已完成来源 PR 和失败重试，并在 dry-run 中显示候选 / 来源 / PRD 集而不产生副作用。聚合 option 与 `--direct-pr`、`--fast-merge` 冲突；不传 option 的所有现有流程不变。
+- **FR-1: 显式批次入口与预览**：提供默认关闭的自动入口 `kc run --all-ready --aggregate-pr`，批次是本轮实际选中的同仓库 Issue，至少 2 项；提供手动入口 `kc pr aggregate --issue <N> ...`，可显式指定已完成来源 PR，包括来自不同 `kc run` 的任务，并用于聚合失败重试。两入口的 dry-run 显示候选 / 来源 / PRD 集且不产生副作用。聚合 option 与 `--direct-pr`、`--fast-merge` 冲突；`kc run --issue`、未带 option 的普通 `kc run`、daemon 和 loop 均不自动聚合。
 - **FR-2: 全批成功门禁**：队列模式下，所有选中的 Issue 均须完成现有实现、验证、审核、push 和来源 Draft PR 流程，来源 PR 唯一且已有必需 GitHub checks 为 SUCCESS；一项失败就不开始总分支发布，不发布成功子集总 PR。
 - **FR-3: 隔离分支集成与完整验证**：从配置 base 的固定远程 SHA 建立隔离 batch branch；按显式 Issue / PRD 依赖拓扑并以 Issue 编号稳定排序集成来源 heads；冲突、base 漂移后无法重新验证、来源 head 改变、循环或来源不一致时 fail closed。完整总树通过仓库验证命令及独立 verifier 后才可发布。
 - **FR-4: 唯一总 Draft PR**：总 PR body 列出所有来源 Issue / PR、唯一 PRD 路径集合、批次验证摘要 / base-head-tree provenance；有 PRD 时带 `iar:merge-acceptance version=2` 声明合并接受整个集合。总 PR 保持 Draft，不自动 merge。普通单 PRD `version=1` contract 保持向后兼容。
-- **FR-5: 来源 PR 收尾**：仅在总 PR 创建成功、全树验证通过且该 PR 必需 GitHub checks 全 SUCCESS 后关闭每个来源 PR，附总 PR 链接与 superseded 说明；不删除来源 PR branch 和 Issue 记录。checks pending / failed 或收尾中断时保留未关闭来源并可幂等重试、逐项报告。
+- **FR-5: 来源 PR 收尾**：仅在总 PR 创建成功、全树验证通过且该 PR 必需 GitHub checks 全 SUCCESS 后（即用户合并总 PR 之前）关闭每个来源 PR，附总 PR 链接与 superseded 说明。关闭只改 PR 状态，不删除 PR 页面、评论、review 历史、来源 branch 或 Issue 记录。checks pending / failed 或收尾中断时保留未关闭来源并可幂等重试、逐项报告。
 - **FR-6: 多 PRD 验收正确性**：总 PR v2 PRD 集必须等于来源 Issue 的唯一 PRD 路径集合；每条路径须存在于已集成 tree 且已归档，并带有各自 evidence。普通来源 PR 的打开、关闭或非总 PR merge 不能接受该集合。合并总 PR 是集合内每份 PRD 的共同人工接受事件；合并后需按每份 PRD 及最终 tree 分别回填记录。
 - **FR-7: 失败可解释和恢复**：对选中任务失败、冲突、验证失败、GitHub 发布 / 关闭失败返回非零且准确指出 Issue、PR 或阶段；总 PR 创建前不关闭来源 PR。Issue 本身失败时指出先修复 / 重跑该 Issue；只有所有来源 PR 已合格而聚合或收尾失败时，才输出可复制的 `kc pr aggregate --issue ...` 命令并安全重试，不重跑已经成功的 Agent。
 - **FR-8: 文档与随包知识同步**：更新现有 Agent Runner 指南、Keda PRD 验收补充说明、仓库入口政策、CLI help / schema 与随包 `kedacode-operator` skill，声明默认 / 范围、v1/v2、多 PRD merge acceptance、关闭时序、失败恢复及不自动合并。
@@ -498,7 +499,7 @@ No external validation required; repository evidence was sufficient.
 - 不新建常驻 coordinator、批次数据库或面向前端的批次看板。
 - 不让聚合模式跳过单 Issue 现有 Agent review、仓库命令、PRD evidence 或 verifier；也不支持 `direct-pr` / `fast-merge` 绕过。
 - 不自动把总 PR 合到 base，不自动解决代码冲突，不对失败批次成功子集创建正式 PR。
-- 不删除来源 PR / branch、不把批次 merge commit 写回 Issue branch；不在总 PR closed-unmerged 时运行常驻自动 reopen 监听器。
+- 不删除来源 PR 记录或 branch、不把批次 merge commit 写回 Issue branch；关闭仅改变来源 PR 状态，不移除页面、评论或 review 历史；不在总 PR closed-unmerged 时运行常驻自动 reopen 监听器。
 - 不在总 PR 的 merge authorization 之外自动勾选 PRD oracle 或伪造 PRD 的人工记录；每份 PRD 仍需自己的证据与最终 tree 核对。
 
 ## 12. Risks And Follow-Ups
@@ -513,7 +514,7 @@ No external validation required; repository evidence was sufficient.
 
 | ID | Decision | Chosen | Rejected | Rationale |
 |---|---|---|---|---|
-| D-01 | 批次如何划界和启用 | 由一次显式 opt-in `kc run --all-ready --aggregate-pr` 冻结本轮同仓库候选集；CLI 显式 Issue 入口只用于聚合 / retry | daemon / loop 跨调用持久化批次身份 | 一次调用已提供清楚成员边界并复用现有队列，不需要增加常驻状态和超时策略 |
+| D-01 | 批次如何划界和启用 | 自动聚合由一次显式 opt-in `kc run --all-ready --aggregate-pr` 冻结本轮同仓库候选集；手动 `kc pr aggregate --issue ...` 可显式聚合跨不同 `kc run` 完成的同仓库来源 PR | daemon / loop 跨调用自动推断或持久化批次身份 | 自动入口复用现有队列且有清楚边界；跨运行场景由操作员显式给出 Issue 编号，不增加常驻状态和超时策略 |
 | D-02 | 总 PR 与多份 PRD 的正式关系 | 用户已确认总 PR 是唯一正式 PR；v2 正文列出所有唯一 PRD，merge 作为该集合的共同接受事件 | 每个来源 PR 分别接受一份 PRD，或总 PR 仅作信息汇总 | 单一 PR 有一份完整集合的唯一正文和最终组合树，避免多次审阅 / 部分验收歧义 |
 | D-03 | 原子 PR 如何收尾 | 用户已确认：总 PR 创建且整树验证通过后自动关闭来源 PR、标记 superseded；保留 branch 与 Issue | 来源 PR 永远保持 open，或只取消发布来源 PR | 关闭 open PR 才能让用户一眼只看到一个正式待审入口；保留 branch、PR 和关闭评论支持回溯 / 恢复 |
 | D-04 | 合并策略和重试 | 总 PR 保持 Draft、需要人工 merge；保留一个显式 Issue-list retry 命令 | 自动 merge 总 PR；失败后重新跑所有 Agent | 请求目标是统一人工审阅；复用完成任务的来源分支能避免重复执行成本 |
@@ -523,7 +524,7 @@ No external validation required; repository evidence was sufficient.
 - Interpretation: 待实现后核对；目标为同仓库一次显式 opt-in 批次生成唯一总 Draft PR，组合验证后由用户统一审阅与合并。
 - Public behavior and contracts: 待实现后核对；默认队列行为保持不变；总 PR 列出完整来源 Issue / PR 与去重 PRD 集，v2 merge-acceptance 覆盖该集合；来源 PR 仅在总 PR 创建且必需 GitHub checks 全 SUCCESS 后关闭并标记 superseded。
 - Related PRD status: 已检查当前 pending 与 archive；`kc-agentic-entry-and-stall-supervision`、`lifecycle-agent-model-settings` 和 `kc-hosted-runner-deployment` 只有共享 CLI / runtime 文件的软重叠，没有语义或交付硬依赖。
-- Requirements and risks: Part A 六个行为样例映射 §7.6 四条 oracle，FR-1—FR-8 与 overview 对齐；用户已确认唯一正式总 PR 及来源 PR 自动关闭策略。当前没有实现、运行结果或外部 PR 证据，交付时须按最终 CLI、PR 正文、来源 PR 状态与最终 Git tree 重做核对并更新验收证据和横幅。
+- Requirements and risks: Part A 六个行为样例中三条本地行为对应 §7.6 rv-1—rv-3，三条真实 GitHub 行为由 rv-4 记录为未验证；FR-1—FR-8 与 overview 对齐。用户已确认唯一正式总 PR 及来源 PR 自动关闭策略，并要求不验证真实 GitHub 行为。实现侧证据只来自本地 CLI parser、临时 Git 与 body contract；不使用 fake GitHub 作为验收证据，也不访问真实 GitHub。外部 PR 操作保持未验证并在交付报告披露。
 
 ## Change Log
 
@@ -534,3 +535,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 用户希望夜间任务结束后早晨只审一份总 PR，并确认总 PR 为唯一正式 PR、来源 PR 自动关闭并标记取代。
 - Impact: 增加 opt-in 队列集成与显式 retry CLI、多分支组合验证、多 PRD acceptance contract 和来源 PR 收尾；不改默认队列、不自动 merge。
 - Review: 用户已确认多 PRD 共同验收和来源 PR 收尾决定；PRD 内容 / 证据仍待实现与人工审阅。
+
+### 收窄验证范围：跳过无法由 mock 证明的 GitHub 行为
+- Type: scope
+- Before: 使用 fake GitHub 模拟总 PR 创建、required checks、来源 PR 关闭和远端状态，并将其作为验收证据。
+- After: 只保留本地 CLI 参数解析、临时 Git 组合与 PR body 纯逻辑契约验证；真实 GitHub 读写与状态不验证，fake GitHub 状态也不作为证明。
+- Reason: 用户要求不在真实仓库 / GitHub 上试跑；mock 状态无法证明真实 GitHub 的创建、检查或关闭结果。
+- Impact: GitHub 外部行为在实现交付时明确披露为未验证；不触发真实批次、真实 PR 或凭证化 smoke。
+- Review: 保留用户已确认的产品行为口径；本轮只调整验证范围，未运行产品测试。

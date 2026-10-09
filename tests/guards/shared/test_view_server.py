@@ -744,6 +744,38 @@ def test_tracked_files_win_over_directory_name_pruning(
     assert not any(tree_path.startswith("node_modules/") for tree_path in tree_paths)
 
 
+def test_ignored_files_are_opt_in_and_stay_out_of_the_changes_view(
+    running_view_server: RunningViewServer,
+) -> None:
+    """文件树可显式显示普通忽略文件，但默认隐藏且不把它们放进改动列表。"""
+    repository_root = running_view_server.repository_root
+    (repository_root / ".gitignore").write_text("*.local\nnode_modules/\n", encoding="utf-8")
+    (repository_root / ".env.local").write_text("SECRET=local\n", encoding="utf-8")
+    (repository_root / "src" / "debug.local").write_text("debug\n", encoding="utf-8")
+    ignored_dependency_file = repository_root / "node_modules" / "package" / "index.js"
+    ignored_dependency_file.parent.mkdir(parents=True)
+    ignored_dependency_file.write_text("dependency\n", encoding="utf-8")
+
+    default_status, default_body = running_view_server.request("/api/tree")
+    assert default_status == 200
+    assert ".env.local" not in default_body["paths"]
+    assert default_body["ignored_paths"] == []
+
+    ignored_status, ignored_body = running_view_server.request("/api/tree?include_ignored=1")
+    assert ignored_status == 200
+    assert set(ignored_body["ignored_paths"]) == {".env.local", "src/debug.local"}
+    assert ".env.local" in ignored_body["paths"]
+    assert not any(path.startswith("node_modules/") for path in ignored_body["paths"])
+
+    changes_status, changes_body = running_view_server.request("/api/changes")
+    assert changes_status == 200
+    assert all(
+        changed_file["path"] not in set(ignored_body["ignored_paths"])
+        for changed_section in changes_body["sections"]
+        for changed_file in changed_section["files"]
+    )
+
+
 def test_oversize_and_binary_files_are_marked_not_rendered(
     running_view_server: RunningViewServer,
 ) -> None:
@@ -1185,10 +1217,11 @@ def test_stage_route_with_scope_all_takes_every_change(
     repository_root = running_view_server.repository_root
     # 造一次「工作区删掉了受控文件」：``-A`` 必须把这次删除也收进索引，而不是只收修改与新增。
     (repository_root / "big.txt").unlink()
-    (repository_root / ".gitignore").write_text("build/\n", encoding="utf-8")
+    (repository_root / ".gitignore").write_text("build/\n.env.local\n", encoding="utf-8")
     ignored_path = repository_root / "build" / "ignored.txt"
     ignored_path.parent.mkdir(exist_ok=True)
     ignored_path.write_text("ignored\n", encoding="utf-8")
+    (repository_root / ".env.local").write_text("SECRET=local\n", encoding="utf-8")
 
     status_code, response_body = running_view_server.request(
         "/api/stage", method="POST", json_body={"scope": "all"}
@@ -1203,6 +1236,7 @@ def test_stage_route_with_scope_all_takes_every_change(
     assert "blob.bin" in staged_paths
     assert "big.txt" in staged_paths
     assert ".gitignore" in staged_paths
+    assert ".env.local" not in staged_paths
     # ``-A`` 不碰被忽略的路径：那是「这不是源码」的权威信号。
     assert not any(staged_path.startswith("build/") for staged_path in staged_paths)
 

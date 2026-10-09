@@ -54,6 +54,9 @@
       <div class="tree-head">
         <span id="tree-title"><b>文件树</b></span>
         <span class="tree-note" id="tree-note">加载中…</span>
+        <button type="button" class="ignored-toggle" id="ignored-toggle"
+                aria-pressed="false" aria-label="显示被 Git 忽略的文件"
+                title="显示被 Git 忽略的文件；依赖和缓存目录仍隐藏" hidden>显示忽略</button>
         <!-- 栏宽开关：一个小图标按钮，点一下把左栏放宽到放得下完整文件名；加宽后箭头翻向
              左边表示「收回去」。两个箭头都在这里，由 CSS 按 aria-pressed 选一个显示。 -->
         <button type="button" class="tree-width-toggle" id="tree-width-toggle"

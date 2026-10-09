@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>生命周期 Agent / 模型设置 · 交互原型</title>
+    <title>生命周期与执行器设置 · 交互原型</title>
     <link rel="stylesheet" href="./assets/prototype-chrome.css" />
     <style>
       /* ───────────────────────────────────────────────────────────────────
@@ -12,7 +12,7 @@
          底图是三张从真实 frontend-public 采集的同尺寸截图（1440×1200，
          采集方式见 lifecycle-agent-matrix.md）。Settings 中旧的 Agent-only
          生命周期矩阵已替换为统一设置页入口；仓库齿轮也进入同一页面并预选仓库。
-         覆盖层还展示 Agent 标签、回退顺序和 PRD 覆盖控件。画布尺寸与底图
+         生命周期矩阵、模型预设和执行器回退顺序集中在同一页。覆盖层还展示 Agent 标签和 PRD 覆盖控件。画布尺寸与底图
          一一对应，整体按视口宽度等比缩放，因此热点与覆盖层不会随视口漂移。
 
          三层落点：生命周期设置页 = 全局 config.toml / 仓库 .kedacode.toml ·
@@ -184,10 +184,12 @@
       .order-row .index { width: 18px; color: #94a3b8; font-size: 11px; }
       .order-row .agent { flex: 0 0 110px; font-size: 13px; font-weight: 500; }
       .order-row .agent-missing { margin-left: 6px; font-size: 10.5px; color: #b45309; }
+      .candidate-variant { display:block; margin-top:2px; color:#7c3aed; font-size:10px; font-weight:500; }
       .order-preset-field { flex: 0 0 190px; }
       .order-preset-select { width: 100%; min-width: 0; height: 28px; }
       .order-preset-summary { flex: 1; min-width: 120px; overflow: hidden; color: #64748b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
       .order-row.is-first { border-color: color-mix(in srgb, var(--primary) 45%, var(--slate-200)); background: color-mix(in srgb, var(--primary) 5%, transparent); }
+      .order-row.is-invalid { border-color:#fca5a5; background:#fff7f7; }
       .icon-btn { width: 24px; height: 24px; border: 1px solid var(--slate-200); border-radius: 6px; background: #fff; color: var(--slate-500); font-size: 11px; line-height: 1; cursor: pointer; }
       .icon-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
       .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
@@ -278,30 +280,73 @@
       .toast .dot { width: 8px; height: 8px; border-radius: 999px; background: #16a34a; }
       .toast.is-error .dot { background: var(--red-500); }
 
-      /* ── 专门的生命周期 Agent / 模型 / 推理深度设置页 ── */
-      .lifecycle-toolbar { display:flex; align-items:end; gap:10px; flex-wrap:wrap; margin:12px 24px; padding:12px; border:1px solid var(--slate-200); border-radius:9px; background:#f8fafc; }
-      .lifecycle-field { display:grid; gap:4px; color:var(--slate-500); font-size:10.5px; }
-      .lifecycle-field .select { min-width:170px; }
-      .lifecycle-caption { flex:1; min-width:250px; color:var(--slate-500); font-size:11px; line-height:1.55; }
-      .lifecycle-config-table { width:calc(100% - 48px); margin:0 24px; border-collapse:collapse; font-size:11.5px; }
-      .lifecycle-config-table th { padding:6px; border-bottom:1px solid var(--slate-200); color:var(--slate-500); text-align:left; font-size:10px; font-weight:600; }
-      .lifecycle-config-table td { padding:5px 6px; border-bottom:1px solid #eef1f6; vertical-align:middle; }
-      .lifecycle-config-table .select { width:100%; min-width:115px; height:27px; font-size:10.5px; }
-      .tuple-value { color:#1e293b; font-size:10.5px; line-height:1.45; }
-      .tuple-value span { display:block; color:var(--slate-500); font-size:9.5px; }
-      .scope-pill { display:inline-flex; border-radius:999px; background:#e0f2fe; padding:2px 6px; color:#075985; font-size:9.5px; white-space:nowrap; }
+      /* ── 生命周期设置：降低矩阵密度，明确三块设置关系 ── */
+      .lifecycle-section-nav { display:flex; gap:8px; margin:14px 24px 0; padding:5px; border:1px solid var(--slate-200); border-radius:10px; background:#f8fafc; }
+      .lifecycle-section-nav a { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:7px; color:#475569; font-size:12.5px; font-weight:600; text-decoration:none; }
+      .lifecycle-section-nav a:hover { background:#fff; color:#4f46e5; }
+      .lifecycle-section-nav span { display:inline-grid; min-width:22px; height:22px; place-items:center; border-radius:999px; background:#e2e8f0; color:#475569; font-size:10.5px; }
+      .lifecycle-toolbar { display:flex; align-items:end; gap:14px; flex-wrap:wrap; margin:12px 24px; padding:14px 16px; border:1px solid var(--slate-200); border-radius:11px; background:#f8fafc; }
+      .lifecycle-field { display:grid; gap:6px; color:#64748b; font-size:12px; font-weight:600; }
+      .lifecycle-field .select { min-width:190px; height:36px; font-size:13px; }
+      .lifecycle-caption { flex:1; min-width:250px; color:#64748b; font-size:12px; line-height:1.6; }
+      .lifecycle-settings-scroll { margin:0 24px; overflow:visible; border:1px solid #e2e8f0; border-radius:11px; background:#fff; }
+      .lifecycle-config-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:13px; }
+      .lifecycle-config-table th { padding:11px 12px; border-bottom:1px solid var(--slate-200); background:#f8fafc; color:#64748b; text-align:left; font-size:11.5px; font-weight:600; }
+      .lifecycle-config-table td { padding:10px 12px; border-bottom:1px solid #eef1f6; vertical-align:middle; }
+      .lifecycle-config-table tbody tr[data-lifecycle-key]:hover td { background:#fafaff; }
+      .lifecycle-config-table .select { width:100%; min-width:0; height:36px; font-size:13px; }
+      .lifecycle-stage-title { display:flex; align-items:center; gap:8px; color:#0f172a; font-size:13.5px; font-weight:650; }
+      .lifecycle-stage-key { color:#94a3b8; font-family:ui-monospace,Menlo,monospace; font-size:10.5px; font-weight:500; }
+      .lifecycle-trigger { display:block; margin-top:5px; color:#64748b; font-size:11.5px; line-height:1.45; }
+      .tuple-value { color:#1e293b; font-size:12px; line-height:1.5; }
+      .tuple-value span { display:block; color:#64748b; font-size:11.5px; }
+      .effective-model { display:block; margin-top:4px; color:#475569; font-family:ui-monospace,Menlo,monospace; font-size:11.5px; overflow-wrap:anywhere; }
+      .effective-effort { display:block; margin-top:2px; color:#64748b; font-size:11px; }
+      .scope-pill { display:inline-flex; border-radius:999px; background:#e0f2fe; padding:4px 8px; color:#075985; font-size:10.5px; line-height:1.2; white-space:normal; }
       .scope-pill.repo { background:#ede9fe; color:#5b21b6; }
       .scope-pill.legacy { background:#fef3c7; color:#92400e; }
-      .preset-editor { margin:14px 24px 20px; padding:12px; border:1px solid var(--slate-200); border-radius:9px; background:#fff; }
-      .preset-editor h3 { margin-bottom:4px; font-size:13px; }
-      .preset-editor p { margin-bottom:8px; color:var(--slate-500); font-size:10.5px; }
-      .preset-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
-      .preset-card { padding:8px; border:1px solid #e5e7eb; border-radius:7px; }
-      .preset-card strong { display:block; margin-bottom:5px; font-size:11px; }
-      .preset-card input,.preset-card select { width:100%; height:25px; margin-top:4px; padding:0 6px; border:1px solid var(--slate-200); border-radius:5px; font-size:10px; }
-      .lifecycle-footer { display:flex; align-items:center; gap:8px; margin:0 24px 20px; }
-      .lifecycle-footer .hint { flex:1; color:var(--slate-500); font-size:10.5px; }
-      @media (max-width:900px) { .lifecycle-config-table { min-width:980px; } .lifecycle-settings-scroll { overflow-x:auto; } .preset-list { grid-template-columns:1fr; } }
+      .preset-editor { margin:16px 24px 20px; padding:16px; border:1px solid var(--slate-200); border-radius:11px; background:#fff; }
+      .preset-editor h3 { margin-bottom:4px; color:#0f172a; font-size:15px; }
+      .preset-editor > p { margin-bottom:12px; color:#64748b; font-size:12px; line-height:1.5; }
+      .preset-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+      .preset-card { display:grid; grid-template-columns:minmax(120px,.8fr) minmax(180px,1.35fr) minmax(120px,.8fr); gap:10px 12px; padding:14px; border:1px solid #e2e8f0; border-radius:9px; background:#fcfcff; }
+      .preset-card strong { grid-column:1 / -1; color:#0f172a; font-size:13px; }
+      .preset-card > .cell-note { grid-column:1 / -1; margin-top:-8px; color:#64748b; font-size:11.5px; }
+      .preset-card label { display:grid; align-content:start; gap:5px; color:#64748b; font-size:11px; font-weight:600; }
+      .preset-card input,.preset-card select { width:100%; min-width:0; height:36px; margin:0; padding:0 9px; border:1px solid var(--slate-200); border-radius:6px; background:#fff; color:#0f172a; font-size:12.5px; }
+      .lifecycle-footer { display:flex; align-items:center; gap:12px; margin:0 24px 20px; padding:12px 14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; }
+      .lifecycle-footer .hint { flex:1; color:#64748b; font-size:12px; line-height:1.5; }
+      #lifecycle-fallback-card { scroll-margin-top:12px; }
+      #lifecycle-matrix-scroll,#lifecycle-preset-editor { scroll-margin-top:12px; }
+      #lifecycle-settings-diff-wrap { margin:0 24px 18px; }
+      #lifecycle-fallback-card .card-head { padding-top:18px; }
+      #lifecycle-fallback-card .card-body { padding-top:14px; }
+      #lifecycle-fallback-card .card-desc { max-width:760px; font-size:12.5px; }
+      #lifecycle-fallback-card .order-list { gap:8px; }
+      #lifecycle-fallback-card .order-row { min-height:44px; gap:12px; padding:6px 10px; }
+      #lifecycle-fallback-card .order-row .index { width:24px; font-size:12px; }
+      #lifecycle-fallback-card .order-row .agent { flex-basis:125px; font-size:13.5px; }
+      #lifecycle-fallback-card .order-preset-field { flex-basis:230px; }
+      #lifecycle-fallback-card .order-preset-select { height:34px; font-size:12.5px; }
+      #lifecycle-fallback-card .order-preset-summary { font-size:12px; }
+      #lifecycle-fallback-card .icon-btn { width:30px; height:30px; font-size:13px; }
+      #lifecycle-fallback-card .switch-field { font-size:12px; }
+      #lifecycle-fallback-card .switch-field input { width:64px; height:34px; }
+      #lifecycle-fallback-card .cell-note { font-size:11.5px; line-height:1.5; }
+      #lifecycle-fallback-card .card-foot { padding-top:14px; }
+      @media (max-width:1100px) {
+        .preset-card { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .preset-card label:nth-of-type(2) { grid-column:1 / -1; }
+      }
+      @media (max-width:900px) {
+        .lifecycle-section-nav { margin:12px; overflow-x:auto; }
+        .lifecycle-toolbar { margin:12px; }
+        .lifecycle-settings-scroll { margin:0 12px; overflow-x:auto; }
+        .lifecycle-config-table { min-width:0; }
+        .preset-editor { margin:12px; }
+        .preset-list { grid-template-columns:1fr; }
+        #lifecycle-settings-diff-wrap { margin:0 12px 16px; }
+      }
       @media (max-width:900px) {
         body.mobile-lifecycle-screen .viewer { width:100%; margin:0; padding:12px 12px 88px; }
         body.mobile-lifecycle-screen .viewer-head { align-items:flex-start; flex-direction:column; gap:8px; }
@@ -310,26 +355,57 @@
         body.mobile-lifecycle-screen .screen { position:relative; inset:auto; }
         body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] > img.base { display:none; }
         body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] .backlog-label-correction { display:none; }
-        body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] .overlay.panel { position:relative !important; inset:auto !important; width:auto !important; height:auto !important; overflow:visible !important; }
+        body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] .route-hotspot { display:none; }
+        body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] .overlay.panel { position:relative !important; inset:auto !important; width:100vw !important; max-width:100vw !important; height:auto !important; overflow:visible !important; }
         body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] .admin-head { position:relative; padding:12px 14px 0 !important; }
         body.mobile-lifecycle-screen .lifecycle-toolbar { align-items:stretch; flex-direction:column; margin:12px; }
         body.mobile-lifecycle-screen .lifecycle-field .select { width:100%; }
         body.mobile-lifecycle-screen .lifecycle-caption { min-width:0; }
         body.mobile-lifecycle-screen .lifecycle-settings-scroll { overflow:visible; }
-        body.mobile-lifecycle-screen .lifecycle-config-table { display:block; width:auto; min-width:0; margin:0 12px; }
+        body.mobile-lifecycle-screen .lifecycle-config-table { display:block; width:100%; min-width:0; margin:0; }
         body.mobile-lifecycle-screen .lifecycle-config-table thead { display:none; }
         body.mobile-lifecycle-screen .lifecycle-config-table tbody { display:block; }
         body.mobile-lifecycle-screen .lifecycle-config-table tr.entry-group-row { display:block; margin:16px 0 4px; }
-        body.mobile-lifecycle-screen .lifecycle-config-table tr.entry-group-row td { display:block; padding:8px 4px; }
-        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:8px 0; padding:12px; border:1px solid var(--slate-200); border-radius:9px; background:#fff; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr.entry-group-row td { display:block; padding:10px 12px; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0; padding:14px; border-bottom:1px solid #eef1f6; background:#fff; }
         body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] td { display:grid; min-width:0; gap:4px; padding:0; border:0; }
         body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] td:first-child { grid-column:1 / -1; }
-        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] td:not(:first-child)::before { color:var(--slate-500); font-size:9.5px; font-weight:600; content:attr(data-label); }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] td:not(:first-child)::before { color:var(--slate-500); font-size:11px; font-weight:600; content:attr(data-label); }
         body.mobile-lifecycle-screen .lifecycle-config-table .select { width:100%; min-width:0; }
         body.mobile-lifecycle-screen .preset-editor { margin:12px; }
         body.mobile-lifecycle-screen .preset-list { grid-template-columns:1fr; }
+        body.mobile-lifecycle-screen .preset-card { grid-template-columns:minmax(0,1fr); gap:10px; }
+        body.mobile-lifecycle-screen .preset-card label:nth-of-type(2) { grid-column:auto; }
+        body.mobile-lifecycle-screen .lifecycle-section-nav a { flex:0 0 auto; padding:8px 10px; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card { width:calc(100vw - 24px) !important; max-width:calc(100vw - 24px) !important; min-width:0; margin:12px !important; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .card-head { align-items:stretch; flex-direction:column; gap:10px; min-width:0; padding:14px 14px 0; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .card-head > div { width:100%; min-width:0; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .card-head > .switch-field { align-self:flex-end; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .card-body { min-width:0; padding:12px 14px 0; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-list,
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-row { width:100%; min-width:0; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-row { display:grid; grid-template-columns:20px minmax(0,1fr) repeat(3,28px); gap:6px; padding:8px; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-row .index { grid-column:1; grid-row:1 / 3; align-self:center; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-row .agent { grid-column:2; grid-row:1; min-width:0; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-preset-field { grid-column:2 / -1; grid-row:2; width:100%; min-width:0; flex:none; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-preset-summary { grid-column:2 / -1; grid-row:3; min-width:0; overflow:visible; white-space:normal; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-row button[data-order-delta="-1"] { grid-column:3; grid-row:1; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-row button[data-order-delta="1"] { grid-column:4; grid-row:1; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-row button[data-order-remove] { grid-column:5; grid-row:1; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-toolbar { align-items:stretch; flex-wrap:wrap; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .order-toolbar .select { flex:1; min-width:150px; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .card-foot { align-items:stretch; flex-direction:column; padding:10px 14px 14px; }
+        body.mobile-lifecycle-screen #lifecycle-fallback-card .card-foot .btn { width:100%; }
         body.mobile-lifecycle-screen .lifecycle-footer { align-items:stretch; flex-direction:column; margin:0 12px 16px; }
         body.mobile-lifecycle-screen .lifecycle-footer .btn { width:100%; }
+      }
+      @media (max-width:900px) {
+        .screen[data-screen="lifecycle-settings"] .overlay.panel { width:100vw !important; max-width:100vw !important; }
+        .screen[data-screen="lifecycle-settings"] #lifecycle-fallback-card { width:calc(100vw - 24px) !important; max-width:calc(100vw - 24px) !important; min-width:0; margin:12px !important; }
+        .screen[data-screen="lifecycle-settings"] #lifecycle-fallback-card .card-head > div,
+        .screen[data-screen="lifecycle-settings"] #lifecycle-fallback-card .card-body,
+        .screen[data-screen="lifecycle-settings"] #lifecycle-fallback-card .order-list,
+        .screen[data-screen="lifecycle-settings"] #lifecycle-fallback-card .order-row { width:100%; min-width:0; }
       }
       @media (max-width:500px) {
         body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] { grid-template-columns:minmax(0,1fr); }
@@ -341,11 +417,12 @@
       body.capture-product-only .state-hint,
       body.capture-product-only [data-prototype-chrome] { display: none !important; }
       body.capture-product-only .stage-wrap { width: 100%; }
-      body.capture-fallback-focus .screen[data-screen="settings"] .settings-labels,
-      body.capture-fallback-focus .screen[data-screen="settings"] .settings-labels + p,
-      body.capture-fallback-focus .screen[data-screen="settings"] .settings-labels + p + section.card,
-      body.capture-fallback-focus .screen[data-screen="settings"] section.card:has(#fallback-order-list) ~ .card,
-      body.capture-fallback-focus .screen[data-screen="settings"] section.card:has(#fallback-order-list) ~ button { display: none !important; }
+      body.capture-fallback-focus .screen[data-screen="lifecycle-settings"] #lifecycle-toolbar,
+      body.capture-fallback-focus .screen[data-screen="lifecycle-settings"] #lifecycle-matrix-scroll,
+      body.capture-fallback-focus .screen[data-screen="lifecycle-settings"] #lifecycle-preset-editor,
+      body.capture-fallback-focus .screen[data-screen="lifecycle-settings"] #lifecycle-settings-footer,
+      body.capture-fallback-focus .screen[data-screen="lifecycle-settings"] #lifecycle-settings-diff-wrap { display: none !important; }
+      body.capture-lifecycle-overview .screen[data-screen="lifecycle-settings"] #lifecycle-fallback-card { display: none !important; }
       @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
   </head>
@@ -353,8 +430,8 @@
     <main class="viewer">
       <header class="viewer-head">
         <div>
-          <h1>生命周期 Agent / 模型设置 · 交互原型</h1>
-          <p>底图为真实 frontend-public 截图；紫色描边区域是原型界面。生命周期 Agent、预设、模型、推理深度和全局 / 仓库范围集中在同一设置页；Backlog 与 PRD 保留各自快捷入口。</p>
+          <h1>生命周期与执行器设置 · 交互原型</h1>
+          <p>底图为真实 frontend-public 截图；紫色描边区域是原型界面。生命周期矩阵、模型预设与执行器回退集中在同一设置页；Backlog 与 PRD 保留各自快捷入口。</p>
         </div>
         <div class="viewer-legend">
           <span><i class="swatch" style="background:#c4b5fd"></i>本原型新增</span>
@@ -364,18 +441,19 @@
 
       <div class="stage-wrap" id="stage-wrap">
         <div class="stage" id="stage">
-          <!-- ══ 视图一：Settings · Agent 管理与统一生命周期设置入口 ══ -->
+          <!-- ══ 视图一：Settings · Agent 标签管理与统一设置入口 ══ -->
           <section class="screen is-active" data-screen="settings">
             <img class="base" src="./assets/lifecycle-agent-matrix/settings-real.png" alt="真实 frontend-public 设置页" />
             <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
             <button class="hotspot" type="button" data-goto="backlog" style="left:12px;top:228px;width:231px;height:36px" data-label="打开依赖图" data-label-side></button>
+            <a class="hotspot route-hotspot" href="./prd-lifecycle-observability.html#stats" target="_blank" rel="noopener noreferrer" aria-label="打开 PRD 执行统计原型" style="left:12px;top:188px;width:231px;height:36px" data-label="打开 PRD 执行统计 ↗" data-label-side></a>
 
-            <!-- 覆盖既有卡片区：保留 Agent 标签设置与回退顺序；旧生命周期矩阵替换为统一设置页入口。 -->
+            <!-- 覆盖既有卡片区：保留 Agent 标签设置；生命周期配置与执行器回退统一进入专门设置页。 -->
             <div class="overlay panel" style="left:288px;top:116px;width:1120px;height:1084px">
               <div class="admin-head">
                 <div class="admin-title">Agent 管理<span class="tag-new">本原型新增</span></div>
                 <div class="admin-desc">
-                  在此维护 Agent 的 GitHub 路由标签与回退顺序。九个生命周期的 Agent、模型预设、推理深度和全局 / 仓库覆盖统一在生命周期设置页管理。
+                  在此维护 Agent 的 GitHub 路由标签。九个生命周期的 Agent、模型预设、推理深度、全局 / 仓库覆盖和执行器回退统一在下方设置页管理。
                 </div>
               </div>
 
@@ -423,45 +501,11 @@
               <section class="card is-new" style="margin-top:16px" data-clickable>
                 <div class="card-head">
                   <div>
-                    <div class="card-title">生命周期 Agent、模型与推理深度</div>
-                    <div class="card-desc">全局和仓库配置共用一张九阶段矩阵；预设定义 Agent、模型 ID 与推理深度，页面显示继承关系和实际配置来源。</div>
+                    <div class="card-title">生命周期与执行器设置</div>
+                    <div class="card-desc">在同一页配置九个生命周期的 Agent、模型预设、推理深度与全局 / 仓库覆盖，并设置执行器回退顺序和每个候选的模型预设。</div>
                   </div>
                   <button class="btn default" type="button" data-goto="lifecycle-settings" data-clickable>打开统一设置 →</button>
                 </div>
-              </section>
-
-              <!-- Agent fallback order remains independent; candidates may opt into matching presets. -->
-              <section class="card is-new" style="margin-top:16px" data-clickable>
-                  <div class="card-head">
-                    <div>
-                      <div class="card-title">agent 回退顺序</div>
-                      <div class="card-desc">
-                        <strong>主 agent 失败或额度受限时</strong>，按这个顺序换下一个；本机没装的 agent 自动跳过。每个候选可选绑定同 Agent 的模型预设；不绑定时沿用 Agent 默认值。
-                      </div>
-                    </div>
-                    <label class="switch-field" style="white-space:nowrap">最多切换
-                      <input type="number" id="max-agent-switches" min="0" max="8" step="1" aria-label="最多切换次数" />
-                    </label>
-                  </div>
-                  <div class="card-body">
-                    <div class="order-list" id="fallback-order-list"></div>
-                    <p class="cell-note is-block" style="margin-top:8px">预设只列出 Agent 匹配项；绑定后该候选执行时使用预设模型与支持的推理深度。</p>
-                    <div class="order-toolbar">
-                      <select class="select" id="fallback-add-select" aria-label="添加回退 agent"></select>
-                      <button class="btn outline sm" type="button" id="fallback-add" data-clickable>＋ 加到末尾</button>
-                      <span class="cell-note" id="fallback-summary"></span>
-                    </div>
-                  </div>
-                  <div class="card-foot">
-                    <span class="hint" id="fallback-hint"></span>
-                    <button class="btn default" type="button" id="save-fallback" data-clickable disabled>保存更改</button>
-                  </div>
-                  <div class="card-body" id="fallback-diff-wrap" style="display:none;padding-bottom:20px">
-                    <div class="diff">
-                      <header id="fallback-diff-header">保存将写入</header>
-                      <pre id="fallback-diff-code"></pre>
-                    </div>
-                  </div>
               </section>
 
               <div class="card" style="margin-top:16px;padding:24px" data-clickable>
@@ -476,17 +520,23 @@
             </div>
           </section>
 
-          <!-- ══ 专门页面：全局 / 仓库生命周期 Agent、模型与推理深度设置 ══ -->
+          <!-- ══ 专门页面：生命周期配置、模型预设与执行器回退 ══ -->
           <section class="screen" data-screen="lifecycle-settings">
             <img class="base" src="./assets/lifecycle-agent-matrix/settings-real.png" alt="frontend-public 设置页真实产品外壳" />
             <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
-            <div class="overlay panel lifecycle-settings-scroll" style="left:288px;top:116px;width:1120px;height:1084px">
+            <a class="hotspot route-hotspot" href="./prd-lifecycle-observability.html#stats" target="_blank" rel="noopener noreferrer" aria-label="打开 PRD 执行统计原型" style="left:12px;top:188px;width:231px;height:36px" data-label="打开 PRD 执行统计 ↗" data-label-side></a>
+            <div class="overlay panel lifecycle-settings-scroll" style="left:256px;top:116px;width:1184px;height:1084px">
               <div class="admin-head" style="padding:12px 24px 0">
                 <button class="btn ghost sm" type="button" id="lifecycle-settings-back" data-clickable>← 设置</button>
-                <div class="admin-title" style="margin-top:6px">生命周期设置<span class="tag-new">独立设置页</span></div>
-                <div class="admin-desc">在一张表里查看九个阶段最终使用的 Agent、模型和推理深度。绑定模型预设后，阶段整体采用预设中的三项配置。</div>
+                <div class="admin-title" style="margin-top:6px">生命周期与执行器设置<span class="tag-new">统一设置页</span></div>
+                <div class="admin-desc">九个生命周期、模型预设和执行器回退集中在此管理。先定义预设，再绑定生命周期或回退候选；页面分别标明全局与仓库配置范围。</div>
               </div>
-              <div class="lifecycle-toolbar">
+              <nav class="lifecycle-section-nav" aria-label="设置区块导航">
+                <a href="#lifecycle-matrix-scroll">生命周期 <span>9</span></a>
+                <a href="#lifecycle-preset-editor">模型预设 <span>7</span></a>
+                <a href="#lifecycle-fallback-card">执行器回退 <span>顺序</span></a>
+              </nav>
+              <div class="lifecycle-toolbar" id="lifecycle-toolbar">
                 <label class="lifecycle-field">配置范围
                   <select class="select" id="lifecycle-scope"><option value="global">全局 · config.toml</option><option value="repository">仓库 · .kedacode.toml</option></select>
                 </label>
@@ -495,13 +545,13 @@
                 </label>
                 <p class="lifecycle-caption" id="lifecycle-scope-hint">全局设置供所有仓库继承。仓库层可逐阶段覆盖，未覆盖的行继续使用全局设置；每行同时显示绑定与预设的来源。</p>
               </div>
-              <div class="lifecycle-settings-scroll">
+              <div class="lifecycle-settings-scroll" id="lifecycle-matrix-scroll">
                 <table class="lifecycle-config-table">
-                  <thead><tr><th style="width:20%">生命周期 / 触发时机</th><th style="width:16%">模型预设</th><th style="width:20%">生效 Agent / 模型</th><th style="width:13%">推理深度</th><th style="width:17%">配置来源</th><th style="width:14%">本层操作</th></tr></thead>
+                  <thead><tr><th style="width:29%">生命周期 / 触发时机</th><th style="width:24%">模型预设</th><th style="width:29%">当前执行器与参数</th><th style="width:18%">配置来源</th></tr></thead>
                   <tbody id="lifecycle-settings-body"></tbody>
                 </table>
               </div>
-              <section class="preset-editor">
+              <section class="preset-editor" id="lifecycle-preset-editor">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
                   <h3>模型预设</h3>
                   <button class="btn outline sm" id="lifecycle-preset-add" type="button" data-clickable>＋ 新建预设</button>
@@ -509,13 +559,43 @@
                 <p>预设集中定义 Agent、模型 ID 和推理深度；Agent 不支持推理深度参数时，该字段不能生效。</p>
                 <div class="preset-list" id="lifecycle-preset-list"></div>
               </section>
-              <div class="lifecycle-footer">
+              <div class="lifecycle-footer" id="lifecycle-settings-footer">
                 <span class="hint" id="lifecycle-settings-hint">修改只保存在当前选择的作用域。</span>
                 <button class="btn default" type="button" id="lifecycle-settings-save" data-clickable>保存当前作用域</button>
               </div>
               <div class="card-body" id="lifecycle-settings-diff-wrap" style="display:none;padding:0 24px 20px">
                 <div class="diff"><header id="lifecycle-settings-diff-header">保存预览</header><pre id="lifecycle-settings-diff-code"></pre></div>
               </div>
+              <section class="card is-new" id="lifecycle-fallback-card" style="margin:0 24px 16px" aria-labelledby="lifecycle-fallback-title">
+                <div class="card-head">
+                  <div>
+                    <div class="card-title" id="lifecycle-fallback-title">执行器回退顺序 <span class="scope-pill global">全局 · config.toml</span></div>
+                    <div class="card-desc"><strong>当前执行器失败或额度受限时</strong>，按顺序尝试下一位；本机未安装的执行器会跳过。每个候选可绑定同执行器的模型预设。回退链是全局 Runner 设置，不随上方生命周期范围切换。</div>
+                  </div>
+                  <label class="switch-field" style="white-space:nowrap">最多回退候选
+                    <input type="number" id="max-agent-switches" min="0" max="8" step="1" aria-label="最多尝试的回退候选数" />
+                  </label>
+                </div>
+                <div class="card-body">
+                  <div class="order-list" id="fallback-order-list"></div>
+                  <p class="cell-note is-block" style="margin-top:8px">同一执行器可以出现多次，每一行都是独立候选，可绑定不同的全局模型预设；相同的「执行器 + 预设」组合不能重复。回退配置固定写入全局 <code>config.toml</code>；修改预设请先切回全局范围并点“保存当前作用域”，再到这里绑定。</p>
+                  <div class="order-toolbar">
+                    <select class="select" id="fallback-add-select" aria-label="添加回退候选"></select>
+                    <button class="btn outline sm" type="button" id="fallback-add" data-clickable>＋ 添加候选</button>
+                    <span class="cell-note" id="fallback-summary"></span>
+                  </div>
+                </div>
+                <div class="card-foot">
+                  <span class="hint" id="fallback-hint"></span>
+                  <button class="btn default" type="button" id="save-fallback" data-clickable disabled>保存回退设置</button>
+                </div>
+                <div class="card-body" id="fallback-diff-wrap" style="display:none;padding-bottom:20px">
+                  <div class="diff">
+                    <header id="fallback-diff-header">保存将写入</header>
+                    <pre id="fallback-diff-code"></pre>
+                  </div>
+                </div>
+              </section>
             </div>
           </section>
 
@@ -523,6 +603,7 @@
           <section class="screen" data-screen="backlog">
             <img class="base" src="./assets/lifecycle-agent-matrix/roadmap-real.png" alt="frontend-public Backlog 依赖图历史截图" />
             <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
+            <a class="hotspot route-hotspot" href="./prd-lifecycle-observability.html#stats" target="_blank" rel="noopener noreferrer" aria-label="打开 PRD 执行统计原型" style="left:12px;top:188px;width:231px;height:36px" data-label="打开 PRD 执行统计 ↗" data-label-side></a>
             <button class="hotspot" type="button" data-goto="settings" style="left:12px;top:308px;width:231px;height:36px" data-label="打开 Agent 管理与生命周期设置入口" data-label-below></button>
             <button class="hotspot" type="button" data-goto="prd" style="left:561px;top:445px;width:220px;height:64px" data-label="直开入口：PRD 原文" data-label-side></button>
 
@@ -534,6 +615,7 @@
           <section class="screen" data-screen="prd">
             <img class="base" src="./assets/lifecycle-agent-matrix/prd-content-real.png" alt="真实 frontend-public PRD 原文页" />
             <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
+            <a class="hotspot route-hotspot" href="./prd-lifecycle-observability.html#stats" target="_blank" rel="noopener noreferrer" aria-label="打开 PRD 执行统计原型" style="left:12px;top:188px;width:231px;height:36px" data-label="打开 PRD 执行统计 ↗" data-label-side></a>
             <button class="hotspot" type="button" data-goto="backlog" style="left:12px;top:228px;width:231px;height:36px" data-label="回到依赖图" data-label-side></button>
             <button class="hotspot" type="button" data-goto="backlog" style="left:561px;top:95px;width:100px;height:32px" data-label="返回列表" data-label-below></button>
 
@@ -583,7 +665,7 @@
     <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具">
       <span class="prototype-chrome__label" aria-hidden="true">原型</span>
       <a href="./hub.html">返回 Hub</a>
-      <a href="./lifecycle-agent-matrix.md">原型说明</a>
+      <a href="./lifecycle-agent-matrix/">原型说明</a>
       <button type="button" data-hotspot-toggle>◎ 可点击区域：开</button>
       <button type="button" data-prototype-reset>↺ 重置</button>
     </nav>
@@ -595,11 +677,12 @@
         if (pageParams.get('capture') === '1') {
           document.body.classList.add('capture-product-only');
           if (pageParams.get('focus') === 'fallback') document.body.classList.add('capture-fallback-focus');
+          if (pageParams.get('focus') === 'overview') document.body.classList.add('capture-lifecycle-overview');
         }
         // ── 真实数据（取自 config.toml、内置默认与真实 registry） ──
         const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi', 'codebuddy', 'qoder', 'opencode'];
         const UNREGISTERED_AGENT = 'no-such-agent';
-        // 本机已安装可用的 agent（用于回退链跳过未安装项）；'pi' 本机存在，这里按真实情况全部视为可用
+        // 本机已安装可用的 agent（用于执行器回退时跳过未安装项）；'pi' 本机存在，这里按真实情况全部视为可用
         const DEFAULT_FALLBACK_ORDER = ['claude', 'kimi', 'codex'];
         const DEFAULT_MAX_AGENT_SWITCHES = 2;
         // [agent_runner.agents.<name>] 段里的路由标签（auto 判定靠它）
@@ -632,7 +715,7 @@
           { key: 'implementation', name: '实现', legacyRef: 'claude', legacyNote: 'runner.default_agent', legacySource: 'legacy', autoLabel: 'auto（按 Issue 上的 agent 标签路由）', trigger: 'kc run / daemon 认领 agent/ready Issue 时启动实现。' },
           { key: 'fix', name: '修复', legacyRef: 'executor', legacyNote: '内置默认：跟随实现阶段', legacySource: 'builtin', allowExecutor: true, trigger: '同一次 claim 内，验证未通过时修复。' },
           { key: 'closeout', name: '收尾', legacyRef: 'executor', legacyNote: '内置默认：跟随实现阶段', legacySource: 'builtin', allowExecutor: true, trigger: '同一次 claim 内，交付收尾阶段执行。' },
-          { key: 'verifier', name: '校验', legacyRef: 'auto', legacyNote: 'validation.verifier_agent 缺省值', legacySource: 'legacy', autoLabel: 'auto（从回退链挑一个 ≠ 实现者的 agent）', trigger: '同一次 claim 内，实现产出后做验证。' },
+          { key: 'verifier', name: '校验', legacyRef: 'auto', legacyNote: 'validation.verifier_agent 缺省值', legacySource: 'legacy', autoLabel: 'auto（从执行器回退链挑一个不同于实现者的执行器）', trigger: '同一次 claim 内，实现产出后做验证。' },
           { key: 'review', name: '审核', legacyRef: 'auto', legacyNote: 'pre_pr_review.review_agent', legacySource: 'legacy', autoLabel: 'auto（优先挑 ≠ 实现者；allow_same_agent 时沿用实现者）', trigger: '同一次 claim 内，开 Draft PR 前审查。' },
           { key: 'supervisor', name: '监督', legacyRef: 'auto', legacyNote: 'post_pr_supervisor.supervisor_agent', legacySource: 'legacy', autoLabel: 'auto（发布路径沿用本次实现者）', trigger: '同一次 claim 的发布路径，或 kc review / review-daemon 单独一轮。' },
           { key: 'planner', name: '决策', legacyRef: 'claude', legacyNote: 'interactive_decision.default_agent', legacySource: 'legacy', trigger: 'kc ask 交互式决策，不在任何 Issue 流水线上。' },
@@ -661,7 +744,8 @@
           plan: { agent: 'codebuddy', model: 'glm-5.3-flash', reasoning_effort: 'max' },
           work: { agent: 'codebuddy', model: 'deepseek-v4.1-flash', reasoning_effort: 'high' },
           review: { agent: 'qoder', model: 'glm-5.3-flash', reasoning_effort: 'high' },
-          'fallback-claude': { agent: 'claude', model: 'claude-sonnet-5-5', reasoning_effort: 'max' },
+          'fallback-claude': { agent: 'claude', model: 'sonnet-5.5', reasoning_effort: 'max' },
+          'fallback-claude-high': { agent: 'claude', model: 'sonnet-5.5', reasoning_effort: 'high' },
           'fallback-kimi': { agent: 'kimi', model: 'kimi-k2.6', reasoning_effort: 'high' },
           'fallback-codex': { agent: 'codex', model: 'gpt-5.4', reasoning_effort: 'xhigh' },
         };
@@ -673,10 +757,22 @@
         const blankMatrix = () => Object.fromEntries(LIFECYCLES.map((item) => [item.key, null]));
         const initial = () => {
           const fallbackDemo = new URLSearchParams(window.location.search).get('demo');
-          const demoFallbackPresets = ['fallback-preset', 'fallback-preset-saved'].includes(fallbackDemo)
-            ? { claude: 'fallback-claude', kimi: 'fallback-kimi', codex: 'fallback-codex' }
-            : {};
+          const defaultFallbackCandidates = DEFAULT_FALLBACK_ORDER.map((agent, index) => ({
+            id: `fallback-${index + 1}`,
+            agent,
+            preset: null,
+          }));
+          const isFallbackPresetDemo = ['fallback-preset', 'fallback-preset-saved'].includes(fallbackDemo);
+          const demoFallbackCandidates = [
+            { id: 'fallback-1', agent: 'claude', preset: 'fallback-claude' },
+            { id: 'fallback-2', agent: 'claude', preset: 'fallback-claude-high' },
+            { id: 'fallback-3', agent: 'kimi', preset: 'fallback-kimi' },
+            { id: 'fallback-4', agent: 'codex', preset: 'fallback-codex' },
+          ];
+          const initialFallbackCandidates = isFallbackPresetDemo ? demoFallbackCandidates : defaultFallbackCandidates;
           const savedFallbackDemo = fallbackDemo === 'fallback-preset-saved';
+          const demoSwitches = 4;
+          const fallbackCandidateValues = (candidates) => candidates.map(({ agent, preset }) => ({ agent, preset: preset || null }));
           return ({
           screen: 'settings',
           fallbackDemo: fallbackDemo || null,
@@ -695,21 +791,29 @@
           globalPresetBindings: { ...INITIAL_PRESET_BINDINGS },
           repoPresetBindings: Object.fromEntries(REPOS.map((repo) => [repo.id, {}])),
           lifecycleSettingsDiff: null,
-          fallbackOrder: [...DEFAULT_FALLBACK_ORDER],
-          fallbackSwitches: DEFAULT_MAX_AGENT_SWITCHES,
-          fallbackPresets: { ...demoFallbackPresets },
+          fallbackCandidates: structuredClone(initialFallbackCandidates),
+          nextFallbackCandidateId: initialFallbackCandidates.length + 1,
+          fallbackSwitches: isFallbackPresetDemo ? demoSwitches : DEFAULT_MAX_AGENT_SWITCHES,
           fallbackBaseline: {
-            order: [...DEFAULT_FALLBACK_ORDER],
-            switches: DEFAULT_MAX_AGENT_SWITCHES,
-            presets: savedFallbackDemo ? { ...demoFallbackPresets } : {},
+            candidates: savedFallbackDemo ? fallbackCandidateValues(demoFallbackCandidates) : fallbackCandidateValues(defaultFallbackCandidates),
+            switches: savedFallbackDemo ? demoSwitches : DEFAULT_MAX_AGENT_SWITCHES,
           },
           fallbackDiff: savedFallbackDemo
             ? [
                 '<span class="note">· [agent_runner.runner] 段其余键不变</span>',
-                '<span class="add">+ agent_fallback_order = ["claude", "kimi", "codex"]</span>',
-                '<span class="add">+ max_agent_switches = 2</span>',
-                '<span class="note">· [agent_runner.runner.agent_fallback_presets]</span>',
-                ...Object.entries(demoFallbackPresets).map(([agent, presetName]) => `<span class="add">+ ${agent} = "${presetName}"</span>`),
+                '<span class="note">· [[agent_runner.runner.agent_fallback_candidates]]</span>',
+                '<span class="add">+ agent = "claude"</span>',
+                '<span class="add">+ preset = "fallback-claude"</span>',
+                '<span class="note">· [[agent_runner.runner.agent_fallback_candidates]]（同一执行器的另一预设）</span>',
+                '<span class="add">+ agent = "claude"</span>',
+                '<span class="add">+ preset = "fallback-claude-high"</span>',
+                '<span class="note">· [[agent_runner.runner.agent_fallback_candidates]]</span>',
+                '<span class="add">+ agent = "kimi"</span>',
+                '<span class="add">+ preset = "fallback-kimi"</span>',
+                '<span class="note">· [[agent_runner.runner.agent_fallback_candidates]]</span>',
+                '<span class="add">+ agent = "codex"</span>',
+                '<span class="add">+ preset = "fallback-codex"</span>',
+                '<span class="add">+ max_agent_switches = 4</span>',
               ].join('\n')
             : null,
           prdOverrides: {},
@@ -831,71 +935,109 @@
           }
         };
 
-        // ── 全局层：agent 回退顺序（写 config.toml 的 [agent_runner.runner] 段） ──
-        const normalizeFallbackPresetMap = (presetMap) => Object.entries(presetMap)
-          .filter(([, presetName]) => presetName)
-          .sort(([leftAgent], [rightAgent]) => leftAgent.localeCompare(rightAgent))
-          .map(([agent, presetName]) => `${agent}:${presetName}`)
-          .join(',');
+        // ── 全局层：执行器回退顺序（底层写 config.toml 的 [agent_runner.runner] 段） ──
+        const fallbackCandidateValues = (candidates) => candidates.map(({ agent, preset }) => ({ agent, preset: preset || null }));
+        const serializeFallbackCandidates = (candidates) => JSON.stringify(fallbackCandidateValues(candidates));
+        const hasDuplicateFallbackCandidates = () => {
+          const seen = new Set();
+          return state.fallbackCandidates.some(({ agent, preset }) => {
+            const pair = JSON.stringify([agent, preset || null]);
+            if (seen.has(pair)) return true;
+            seen.add(pair);
+            return false;
+          });
+        };
         const fallbackDirty = () =>
-          state.fallbackOrder.join(',') !== state.fallbackBaseline.order.join(',')
-          || state.fallbackSwitches !== state.fallbackBaseline.switches
-          || normalizeFallbackPresetMap(state.fallbackPresets) !== normalizeFallbackPresetMap(state.fallbackBaseline.presets);
+          serializeFallbackCandidates(state.fallbackCandidates) !== JSON.stringify(state.fallbackBaseline.candidates)
+          || state.fallbackSwitches !== state.fallbackBaseline.switches;
 
-        const fallbackPresetOptions = (agent) => {
+        const fallbackPresetOptions = (candidate) => {
+          const usedByOtherCandidates = new Set(state.fallbackCandidates
+            .filter((other) => other.id !== candidate.id && other.agent === candidate.agent)
+            .map((other) => other.preset || ''));
           const matchingPresets = Object.entries(state.globalPresets)
-            .filter(([, preset]) => preset.agent === agent)
-            .map(([presetName]) => presetName);
-          return ['<option value="">Agent 默认（不绑定）</option>', ...matchingPresets.map((presetName) =>
-            `<option value="${esc(presetName)}"${state.fallbackPresets[agent] === presetName ? ' selected' : ''}>${esc(presetName)}</option>`,
-          )].join('');
+            .filter(([, preset]) => preset.agent === candidate.agent)
+            .map(([presetName]) => ({ value: presetName, label: presetName }));
+          const options = [{ value: '', label: '执行器默认（不绑定）' }, ...matchingPresets]
+            .filter((option) => option.value === candidate.preset || !usedByOtherCandidates.has(option.value));
+          return options.map((option) =>
+            `<option value="${esc(option.value)}"${candidate.preset === option.value ? ' selected' : ''}>${esc(option.label)}</option>`,
+          ).join('');
         };
 
-        const fallbackPresetSummary = (agent) => {
-          const presetName = state.fallbackPresets[agent];
+        const fallbackPresetSummary = (candidate) => {
+          const presetName = candidate.preset;
           const preset = presetName ? state.globalPresets[presetName] : null;
-          if (!preset) return '模型与推理深度沿用 Agent 默认';
-          const effort = preset.reasoning_effort ? `推理深度 ${preset.reasoning_effort}` : '推理深度沿用 Agent 默认';
-          return `${preset.model ? `模型 ${preset.model}` : '模型沿用 Agent 默认'} · ${effort}`;
+          if (!preset) return '模型与推理深度沿用执行器默认';
+          const effort = preset.reasoning_effort ? `推理深度 ${preset.reasoning_effort}` : '推理深度沿用执行器默认';
+          return `${preset.model ? `模型 ${preset.model}` : '模型沿用执行器默认'} · ${effort}`;
+        };
+
+        const fallbackCandidateChoices = () => {
+          const choices = REGISTERED_AGENTS.flatMap((agent) => [
+            { agent, preset: null, label: `${agent} · 执行器默认` },
+            ...Object.entries(state.globalPresets)
+              .filter(([, preset]) => preset.agent === agent)
+              .map(([presetName, preset]) => ({
+                agent,
+                preset: presetName,
+                label: `${agent} · ${presetName}（${preset.model || 'Agent 默认'} / ${preset.reasoning_effort || '默认深度'}）`,
+              })),
+          ]);
+          return choices.filter((choice) => !state.fallbackCandidates.some((candidate) =>
+            candidate.agent === choice.agent && (candidate.preset || null) === (choice.preset || null),
+          ));
         };
 
         const renderFallback = () => {
-          $('#fallback-order-list').innerHTML = state.fallbackOrder.length
-            ? state.fallbackOrder.map((agent, index) => {
+          const hasDuplicate = hasDuplicateFallbackCandidates();
+          $('#fallback-order-list').innerHTML = state.fallbackCandidates.length
+            ? state.fallbackCandidates.map((candidate, index) => {
+                const { agent } = candidate;
                 const installed = REGISTERED_AGENTS.includes(agent);
-                return `<div class="order-row${index === 0 ? ' is-first' : ''}">
+                const sameAgentCandidates = state.fallbackCandidates.filter((item) => item.agent === agent);
+                const sameAgentPosition = state.fallbackCandidates.slice(0, index + 1).filter((item) => item.agent === agent).length;
+                const pairRepeated = state.fallbackCandidates.some((item, otherIndex) =>
+                  otherIndex !== index && item.agent === agent && (item.preset || null) === (candidate.preset || null),
+                );
+                const duplicateHint = sameAgentCandidates.length > 1
+                  ? `<span class="candidate-variant">同执行器 · 第 ${sameAgentPosition} 个预设方案</span>`
+                  : '';
+                return `<div class="order-row${index === 0 ? ' is-first' : ''}${pairRepeated ? ' is-invalid' : ''}">
                   <span class="index">${index + 1}</span>
-                  <span class="agent">${esc(agent)}${installed ? '' : '<span class="agent-missing">本机未安装，会被跳过</span>'}</span>
+                  <span class="agent">${esc(agent)}${duplicateHint}${installed ? '' : '<span class="agent-missing">本机未安装，会跳过</span>'}</span>
                   <label class="order-preset-field" aria-label="${esc(agent)} 的模型预设">
-                    <select class="select order-preset-select" data-fallback-preset="${esc(agent)}" aria-label="${esc(agent)} 的回退模型预设">
-                      ${fallbackPresetOptions(agent)}
+                    <select class="select order-preset-select" data-fallback-preset="${esc(candidate.id)}" aria-label="${esc(agent)} 第 ${sameAgentPosition} 个候选的回退模型预设">
+                      ${fallbackPresetOptions(candidate)}
                     </select>
                   </label>
-                  <span class="order-preset-summary">${esc(fallbackPresetSummary(agent))}</span>
+                  <span class="order-preset-summary">${esc(fallbackPresetSummary(candidate))}</span>
                   <button class="icon-btn" type="button" data-clickable data-order-move="${index}" data-order-delta="-1" aria-label="上移 ${esc(agent)}" ${index === 0 ? 'disabled' : ''}>↑</button>
-                  <button class="icon-btn" type="button" data-clickable data-order-move="${index}" data-order-delta="1" aria-label="下移 ${esc(agent)}" ${index === state.fallbackOrder.length - 1 ? 'disabled' : ''}>↓</button>
+                  <button class="icon-btn" type="button" data-clickable data-order-move="${index}" data-order-delta="1" aria-label="下移 ${esc(agent)}" ${index === state.fallbackCandidates.length - 1 ? 'disabled' : ''}>↓</button>
                   <button class="icon-btn" type="button" data-clickable data-order-remove="${index}" aria-label="移除 ${esc(agent)}">✕</button>
                 </div>`;
               }).join('')
-            : '<div class="cell-note">回退链为空：主 agent 失败后不再换人（等价于关闭自动切换）。</div>';
+            : '<div class="cell-note">候选队列为空：主执行器失败后不再切换（等价于关闭自动回退）。</div>';
 
-          const remaining = REGISTERED_AGENTS.filter((agent) => !state.fallbackOrder.includes(agent));
-          $('#fallback-add-select').innerHTML = remaining.length
-            ? remaining.map((agent) => `<option value="${agent}">${esc(agent)}</option>`).join('')
-            : '<option value="">（已全部加入）</option>';
-          $('#fallback-add').disabled = remaining.length === 0;
+          const availableChoices = fallbackCandidateChoices();
+          $('#fallback-add-select').innerHTML = availableChoices.length
+            ? availableChoices.map((choice) => `<option value="${esc(JSON.stringify({ agent: choice.agent, preset: choice.preset }))}">${esc(choice.label)}</option>`).join('')
+            : '<option value="">（所有执行器与预设组合都已加入）</option>';
+          $('#fallback-add').disabled = availableChoices.length === 0;
 
           $('#max-agent-switches').value = String(state.fallbackSwitches);
-          const attempts = state.fallbackOrder.slice(0, state.fallbackSwitches).length + 1;
-          $('#fallback-summary').textContent = `主 agent 之外最多再换 ${state.fallbackSwitches} 次，最多尝试 ${attempts} 个 agent。`;
-          $('#save-fallback').disabled = !fallbackDirty();
-          const boundPresetAgents = Object.keys(state.fallbackPresets).filter((agent) => state.fallbackOrder.includes(agent));
-          $('#fallback-hint').textContent = fallbackDirty()
-            ? '有未保存的修改，保存写入 config.toml 的 [agent_runner.runner] 段。'
-            : state.fallbackDemo && boundPresetAgents.length
-              ? `演示状态：${boundPresetAgents.join('、')} 已绑定备用 Agent 预设。`
-              : boundPresetAgents.length
-                ? `与 config.toml 一致：${boundPresetAgents.length} 个备用 Agent 已绑定预设。`
+          const fallbackAttempts = Math.min(state.fallbackSwitches, state.fallbackCandidates.length);
+          $('#fallback-summary').textContent = `主执行器之外最多尝试 ${fallbackAttempts} 个回退候选（可含同一执行器的不同预设），总计最多 ${fallbackAttempts + 1} 次。`;
+          $('#save-fallback').disabled = !fallbackDirty() || hasDuplicate;
+          const boundCandidates = state.fallbackCandidates.filter((candidate) => candidate.preset);
+          $('#fallback-hint').textContent = hasDuplicate
+            ? '相同的执行器与预设组合不能重复；请改选预设或移除该候选。'
+            : fallbackDirty()
+              ? '有未保存的修改，保存写入 config.toml 的 [agent_runner.runner] 段。'
+            : state.fallbackDemo && boundCandidates.length
+              ? `演示状态：${boundCandidates.length} 个候选绑定了模型预设，同一执行器可分开配置。`
+              : boundCandidates.length
+                ? `与 config.toml 一致：${boundCandidates.length} 个回退候选已绑定预设。`
                 : '与 config.toml 一致（当前走代码默认值）。';
 
           if (state.fallbackDiff) {
@@ -959,21 +1101,19 @@
                 : (localAgent ? (repositoryScope ? '本仓库 Agent 设置' : '全局 Agent 设置') : repositoryScope ? '继承全局 / 既有配置' : '既有配置 / 内置默认');
               const sourceClass = sourceText.includes('本仓库') ? 'repo' : sourceText.includes('既有') ? 'legacy' : '';
               return `<tr data-lifecycle-key="${lifecycle.key}">
-                <td><strong>${esc(lifecycle.name)}</strong><span class="tuple-value">${esc(lifecycle.trigger)}</span></td>
+                <td><div class="lifecycle-stage-title"><strong>${esc(lifecycle.name)}</strong><code class="lifecycle-stage-key">${esc(lifecycle.key)}</code></div><span class="lifecycle-trigger">${esc(lifecycle.trigger)}</span></td>
                 <td data-label="模型预设"><select class="select" data-lifecycle-preset="${lifecycle.key}" aria-label="${esc(lifecycle.name)}模型预设">
                   ${repositoryScope ? `<option value="__inherit"${bindingSelectValue === '__inherit' ? ' selected' : ''}>跟随全局</option>` : `<option value=""${bindingSelectValue === '' ? ' selected' : ''}>不绑定预设</option>`}
                   ${[...new Set([...Object.keys(state.globalPresets), ...(repositoryScope ? Object.keys(state.repoPresets) : [])])].map((presetName) => `<option value="${esc(presetName)}"${bindingSelectValue === presetName ? ' selected' : ''}>${esc(presetName)}</option>`).join('')}
                 </select>${presetBinding.name ? `<span class="tuple-value">生效：${esc(presetBinding.name)}</span>` : ''}</td>
-                <td data-label="Agent / 模型"><select class="select" data-lifecycle-agent="${lifecycle.key}" aria-label="${esc(lifecycle.name)}Agent" ${preset?.agent ? 'disabled' : ''}>
+                <td data-label="当前执行器与参数"><select class="select" data-lifecycle-agent="${lifecycle.key}" aria-label="${esc(lifecycle.name)}执行器" ${preset?.agent ? 'disabled' : ''}>
                   ${repositoryScope && !preset?.agent ? `<option value="__inherit"${agentSelectValue === '__inherit' ? ' selected' : ''}>跟随全局</option>` : ''}
                   ${options(lifecycle, agentSelectValue === '__inherit' ? shownValue('repo', lifecycle) : agentSelectValue)}
-                </select><span class="tuple-value">${esc(preset?.model ?? '模型：Agent 默认')}</span></td>
-                <td data-label="推理深度"><span class="tuple-value">${esc(preset?.reasoning_effort ?? '未指定 / Agent 默认')}</span></td>
-                <td data-label="配置来源"><span class="scope-pill ${sourceClass}">${esc(sourceText)}</span></td>
-                <td data-label="本层操作">${(repositoryScope && (localAgent || state.repoPresetBindings[repoId]?.[lifecycle.key])) || (!repositoryScope && (localAgent || state.globalPresetBindings[lifecycle.key])) ? `<button class="link-reset" type="button" data-lifecycle-restore="${lifecycle.key}">${repositoryScope ? '恢复继承' : '清除此阶段设置'}</button>` : '<span class="cell-note">跟随当前来源</span>'}</td>
+                </select><span class="effective-model">${esc(preset?.model ?? 'Agent 默认模型')}</span><span class="effective-effort">推理深度 · ${esc(preset?.reasoning_effort ?? '未指定，沿用 Agent 默认')}</span></td>
+                <td data-label="配置来源"><span class="scope-pill ${sourceClass}">${esc(sourceText)}</span>${(repositoryScope && (localAgent || state.repoPresetBindings[repoId]?.[lifecycle.key])) || (!repositoryScope && (localAgent || state.globalPresetBindings[lifecycle.key])) ? `<button class="link-reset" type="button" data-lifecycle-restore="${lifecycle.key}">${repositoryScope ? '恢复继承' : '清除此阶段设置'}</button>` : '<span class="cell-note is-block">跟随当前来源</span>'}</td>
               </tr>`;
             }).join('');
-            return `<tr class="entry-group-row"><td colspan="6"><span class="entry-group-label">${esc(group.label)}</span><span class="entry-group-summary">${esc(group.summary)}</span></td></tr>${rows}`;
+            return `<tr class="entry-group-row"><td colspan="4"><span class="entry-group-label">${esc(group.label)}</span><span class="entry-group-summary">${esc(group.summary)}</span></td></tr>${rows}`;
           }).join('');
 
           const visiblePresetNames = [...new Set([...Object.keys(state.globalPresets), ...Object.keys(state.repoPresets)])];
@@ -1000,6 +1140,7 @@
           } else {
             $('#lifecycle-settings-diff-wrap').style.display = 'none';
           }
+          renderFallback();
         };
 
         // ── 视图二：Backlog · 仓库级 ──
@@ -1081,11 +1222,11 @@
         // ── 视图切换：走真实侧栏导航，不设额外的原型标签栏 ──
         const SCREEN_HINTS = {
           settings:
-            'Settings → 「Agent 管理」保留 Agent 标签和回退顺序；生命周期 Agent、模型与推理深度通过统一设置页管理。',
+            'Settings → 「Agent 管理」保留 Agent 标签；生命周期设置、模型预设和执行器回退集中在统一设置页。',
           'lifecycle-settings':
-            '专门的生命周期设置页：顶部切换全局 / 仓库作用域，九个阶段同表查看 Agent、预设、模型、推理深度与来源；可编辑阶段绑定和预设字段，并查看配置写入预览。',
+            '统一设置页：先定义模型预设，再配置九个生命周期和执行器回退；生命周期可切换全局 / 仓库范围，回退设置固定写入全局 config.toml。',
           backlog:
-            'Backlog 的仓库 ⚙ 直接打开统一生命周期设置页，并预选该仓库；全局与仓库值、继承来源及模型预设都在同一处管理。',
+            'Backlog 的仓库 ⚙ 直接打开统一设置页并预选该仓库；生命周期值、继承来源、模型预设和执行器回退都在同一处管理。',
           prd:
             'PRD 原文 = PRD 级覆盖（本原型新增）：工具栏右侧「Agent 覆盖」打开抽屉，勾选生命周期并选择 agent，右侧实时预览写入文件头部的 bullet 块（本仓库 PRD 没有 YAML frontmatter）。',
         };
@@ -1189,6 +1330,13 @@
           presetMap[presetName].agent = agentInput.value;
           presetMap[presetName].model = modelInput.value.trim() || null;
           presetMap[presetName].reasoning_effort = effortInput.value || null;
+          if (!repositoryScope) {
+            state.fallbackCandidates.forEach((candidate) => {
+              if (candidate.preset === presetName && candidate.agent !== presetMap[presetName].agent) {
+                candidate.preset = null;
+              }
+            });
+          }
           state.lifecycleSettingsDiff = null;
           renderLifecycleSettings();
         });
@@ -1230,12 +1378,11 @@
           if (moveButton) {
             const from = Number(moveButton.dataset.orderMove);
             const to = from + Number(moveButton.dataset.orderDelta);
-            if (to < 0 || to >= state.fallbackOrder.length) return;
-            const [moved] = state.fallbackOrder.splice(from, 1);
-            state.fallbackOrder.splice(to, 0, moved);
+            if (to < 0 || to >= state.fallbackCandidates.length) return;
+            const [moved] = state.fallbackCandidates.splice(from, 1);
+            state.fallbackCandidates.splice(to, 0, moved);
           } else if (removeButton) {
-            const [removedAgent] = state.fallbackOrder.splice(Number(removeButton.dataset.orderRemove), 1);
-            delete state.fallbackPresets[removedAgent];
+            state.fallbackCandidates.splice(Number(removeButton.dataset.orderRemove), 1);
           } else {
             return;
           }
@@ -1245,17 +1392,21 @@
         $('#fallback-order-list').addEventListener('change', (event) => {
           const presetSelect = event.target.closest('[data-fallback-preset]');
           if (!presetSelect) return;
-          const agent = presetSelect.dataset.fallbackPreset;
-          if (presetSelect.value) state.fallbackPresets[agent] = presetSelect.value;
-          else delete state.fallbackPresets[agent];
+          const candidate = state.fallbackCandidates.find((item) => item.id === presetSelect.dataset.fallbackPreset);
+          if (!candidate) return;
+          candidate.preset = presetSelect.value || null;
           state.fallbackDiff = null;
           renderFallback();
         });
         $('#fallback-add').addEventListener('click', () => {
-          const agent = $('#fallback-add-select').value;
-          if (!agent || state.fallbackOrder.includes(agent)) return;
-          state.fallbackOrder.push(agent);
-          delete state.fallbackPresets[agent];
+          const choiceValue = $('#fallback-add-select').value;
+          if (!choiceValue) return;
+          const choice = JSON.parse(choiceValue);
+          const alreadyExists = state.fallbackCandidates.some((candidate) =>
+            candidate.agent === choice.agent && (candidate.preset || null) === (choice.preset || null),
+          );
+          if (alreadyExists) return;
+          state.fallbackCandidates.push({ id: `fallback-${state.nextFallbackCandidateId++}`, ...choice });
           state.fallbackDiff = null;
           renderFallback();
         });
@@ -1266,38 +1417,24 @@
           renderFallback();
         });
         $('#save-fallback').addEventListener('click', () => {
-          const orderLiteral = `[${state.fallbackOrder.map((agent) => `"${agent}"`).join(', ')}]`;
-          const currentPresets = Object.entries(state.fallbackPresets)
-            .filter(([agent, presetName]) => state.fallbackOrder.includes(agent) && presetName)
-            .sort(([leftAgent], [rightAgent]) => leftAgent.localeCompare(rightAgent));
-          const removedPresets = Object.entries(state.fallbackBaseline.presets)
-            .filter(([agent, presetName]) => state.fallbackOrder.includes(agent) && state.fallbackPresets[agent] !== presetName)
-            .sort(([leftAgent], [rightAgent]) => leftAgent.localeCompare(rightAgent));
-          const addedPresets = currentPresets
-            .filter(([agent, presetName]) => state.fallbackBaseline.presets[agent] !== presetName);
-          const presetChanges = [
-            ...removedPresets.map(([agent, presetName]) => `<span class="remove">- ${esc(agent)} = "${esc(presetName)}"（删除或替换）</span>`),
-            ...addedPresets.map(([agent, presetName]) => `<span class="add">+ ${esc(agent)} = "${esc(presetName)}"</span>`),
-          ];
-          const presetLines = presetChanges.length
-            ? [
-                '<span class="note">· [agent_runner.runner.agent_fallback_presets]</span>',
-                ...presetChanges,
-              ]
-            : ['<span class="note">· 回退 Agent 预设映射未变化</span>'];
+          const candidateLines = serializeFallbackCandidates(state.fallbackCandidates) !== JSON.stringify(state.fallbackBaseline.candidates)
+            ? state.fallbackCandidates.flatMap((candidate) => [
+                '<span class="note">· [[agent_runner.runner.agent_fallback_candidates]]</span>',
+                `<span class="add">+ agent = "${esc(candidate.agent)}"</span>`,
+                ...(candidate.preset ? [`<span class="add">+ preset = "${esc(candidate.preset)}"</span>`] : []),
+              ])
+            : ['<span class="note">· 执行器回退候选队列未变化</span>'];
           state.fallbackDiff = [
             '<span class="note">· [agent_runner.runner] 段其余键不变</span>',
-            `<span class="add">+ agent_fallback_order = ${esc(orderLiteral)}</span>`,
+            ...candidateLines,
             `<span class="add">+ max_agent_switches = ${state.fallbackSwitches}</span>`,
-            ...presetLines,
           ].join('\n');
           state.fallbackBaseline = {
-            order: [...state.fallbackOrder],
+            candidates: fallbackCandidateValues(state.fallbackCandidates),
             switches: state.fallbackSwitches,
-            presets: { ...state.fallbackPresets },
           };
           renderFallback();
-          toast('已生成回退顺序和 Agent 预设写入预览；原型不会修改本地文件');
+          toast('已生成执行器回退候选写入预览；原型不会修改本地文件');
         });
 
         // ── Agent 标签设置：输入 / 校验 / 演示 / 保存 ──

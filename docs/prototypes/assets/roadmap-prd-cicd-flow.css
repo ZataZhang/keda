@@ -22,6 +22,9 @@ body { background: #f2f6fc; }
 .image-hotspot { position: absolute; border: 2px solid #1268ed; border-radius: 6px; background: rgba(18, 104, 237, 0.1); color: transparent; box-shadow: 0 0 0 3px rgba(18, 104, 237, 0.15); pointer-events: auto; cursor: pointer; font-size: 0; }
 .image-hotspot::after { content: attr(aria-label); position: absolute; left: 50%; bottom: calc(100% + 5px); width: max-content; max-width: 180px; transform: translateX(-50%); border-radius: 4px; background: #0759d5; color: #fff; padding: 4px 7px; font-size: 10px; line-height: 1.3; }
 .image-hotspot:hover, .image-hotspot:focus-visible { border-color: #004fc7; background: rgba(18, 104, 237, 0.2); outline: 3px solid rgba(18, 104, 237, 0.24); outline-offset: 2px; }
+body:not(.hotspots-on) .image-hotspot { border-color: transparent; background: transparent; box-shadow: none; }
+body:not(.hotspots-on) .image-hotspot::after { display: none; }
+body:not(.hotspots-on) .image-hotspot:hover, body:not(.hotspots-on) .image-hotspot:focus-visible { border-color: #004fc7; background: rgba(18, 104, 237, 0.2); outline: 3px solid rgba(18, 104, 237, 0.24); outline-offset: 2px; }
 .flow-hint { position: absolute; right: 18px; bottom: 18px; max-width: 360px; border: 1px solid #b8cff2; border-radius: 8px; background: rgba(239, 246, 255, 0.96); color: #24528f; padding: 10px 12px; box-shadow: 0 8px 24px rgba(35, 75, 135, 0.14); font-size: 12px; }
 .flow-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #d9e4f2; border-top: 0; border-radius: 0 0 12px 12px; background: #fff; padding: 14px 18px; }
 .flow-controls p { color: #6b7b94; font-size: 12px; }

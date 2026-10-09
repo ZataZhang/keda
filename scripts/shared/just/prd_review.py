@@ -118,8 +118,8 @@ def resolve_evidence_candidate_dirs(
 
     worktree 定位与看板 EVIDENCE 列同一套规则（``match_worktree_for_prd``）：
     分支名等于 PRD slug，或分支名等于 PRD 正文 ``GitHub Issue:`` 行指向的
-    ``issue-<编号>``（iar runner 的分支命名）。执行发生在 worktree 里，证据要等
-    合并回主线才出现在主仓库，因此分支副本必须优先——两处不得分叉。
+    ``issue-<编号>``（KedaCode（kc）runner 的分支命名）。执行发生在 worktree 里，
+    证据要等合并回主线才出现在主仓库，因此分支副本必须优先——两处不得分叉。
 
     Args:
         prd_path (Path): PRD 文件路径。

@@ -843,8 +843,9 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     assert result.block_inserted is True
     assert result.block_updated is False
     assert result.entries_added == (
-        ".iar/",
+        ".kedacode/",
         ".agent-runner/",
+        ".iar/",
         ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
@@ -853,6 +854,7 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     assert result.entries_skipped_external == ()
     assert GITIGNORE_BLOCK_HEADER in text
     assert GITIGNORE_BLOCK_FOOTER in text
+    assert ".kedacode/" in text
     assert ".iar/" in text
     assert ".agent-runner/" in text
     assert ".iar-worktrees/" in text
@@ -879,6 +881,7 @@ def test_ensure_gitignore_skips_patterns_already_outside_block(
     text = gitignore.read_text(encoding="utf-8")
     assert result.block_inserted is True
     assert result.entries_added == (
+        ".kedacode/",
         ".iar/",
         ".iar-worktrees/",
         "tasks/evidence/**",
@@ -929,8 +932,10 @@ def test_ensure_gitignore_updates_block_when_patterns_missing(
     text = gitignore.read_text(encoding="utf-8")
     assert result.block_inserted is False
     assert result.block_updated is True
+    assert ".kedacode/" in result.entries_added
     assert ".agent-runner/" in result.entries_added
     assert ".iar-worktrees/" in result.entries_added
+    assert ".kedacode/" in text
     assert ".agent-runner/" in text
     assert ".iar-worktrees/" in text
     # Header / footer order must be preserved.
@@ -945,7 +950,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     repo_path.mkdir()
     gitignore = repo_path / ".gitignore"
     gitignore.write_text(
-        ".iar/\n.agent-runner/\n.iar-worktrees/\n"
+        ".kedacode/\n.iar/\n.agent-runner/\n.iar-worktrees/\n"
         "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n",
         encoding="utf-8",
     )
@@ -957,6 +962,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     assert result.block_updated is False
     assert result.entries_added == ()
     assert set(result.entries_skipped_external) == {
+        ".kedacode/",
         ".iar/",
         ".agent-runner/",
         ".iar-worktrees/",
@@ -1054,6 +1060,7 @@ def test_iar_init_writes_gitignore_block(tmp_path: Path, monkeypatch: pytest.Mon
     gitignore_text = (repo_path / ".gitignore").read_text(encoding="utf-8")
     assert GITIGNORE_BLOCK_HEADER in gitignore_text
     assert GITIGNORE_BLOCK_FOOTER in gitignore_text
+    assert ".kedacode/" in gitignore_text
     assert ".iar/" in gitignore_text
     assert ".agent-runner/" in gitignore_text
     assert ".iar-worktrees/" in gitignore_text
@@ -1099,6 +1106,7 @@ def test_iar_init_dry_run_emits_gitignore_block_lines(
     assert GITIGNORE_BLOCK_HEADER in out
     assert "Would install packaged KedaCode operator skill:" in out
     assert "Would overwrite packaged KedaCode operator skill:" not in out
+    assert ".kedacode/" in out
     assert ".iar/" in out
     assert ".agent-runner/" in out
     assert ".iar-worktrees/" in out

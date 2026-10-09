@@ -598,9 +598,9 @@ class MemoryConfig:
     """
 
     enabled: bool = True
-    base_dir: str = ".iar/memory"
-    skill_drafts_dir: str = ".iar/skills/drafts"
-    promoted_skills_dirs: tuple[str, ...] = (".iar/skills",)
+    base_dir: str = ".kedacode/memory"
+    skill_drafts_dir: str = ".kedacode/skills/drafts"
+    promoted_skills_dirs: tuple[str, ...] = (".kedacode/skills",)
     top_k_skills: int = 3
     top_k_facts: int = 5
     auto_promote: bool = True

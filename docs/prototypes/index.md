@@ -1,29 +1,20 @@
 # 原型演示
 
-本目录用于承载 PRD 关联的可交互原型页面，目标是让评审和开发在文档站点内直接操作关键流程。
+本目录用于承载需求评审原型。Prototype Hub 是原型清单、可用状态和相互关系的唯一入口；从 Hub 的原型详情可以打开页面、说明文档、图片来源记录和关联原型。
 
 ## 使用方式
 
-1. 在对应 PRD 的 `Implementation Guide` 中写明原型文件路径。
-2. 原型页面放在 `docs/prototypes/`，静态资源放在 `docs/prototypes/assets/`。
-3. 原型页面应提供最小交互（例如 Start / Next / Reset）和可见状态变化。
-4. 资源命名使用通用约定，优先引用 `assets/prototype.css` 与 `assets/prototype.js`。
+1. 从 [Prototype Hub](hub.html) 搜索原型；名称和缩略图直达原型，选择条目其他区域查看详情与关联原型。
+2. 在原型详情中打开说明和图片 provenance 旁车，确认状态模型、来源与限制。
+3. 新增或实质修改独立原型时，同步更新 Hub 的 registry；不要在本页维护第二份原型清单。
 
-## 示例入口
+## 目录与规范
 
 - [Prototype Hub（原型总览）](hub.html)
-- [PRD 生命周期观测与执行分析原型](prd-lifecycle-observability.md)
-- [Backlog PRD 完成后 CI/CD 监控与自动修复草图](roadmap-prd-cicd-auto-repair.md)
-- [Backlog 单 PRD 控制、验收证据与 Autopilot 草图](roadmap-prd-controls-evidence-autopilot.md)
-- [失败上下文交接与失败 Draft PR 草图](blocked-draft-pr-surface.md)
-- [生命周期 Agent / 模型统一设置原型](lifecycle-agent-matrix.md)
-- [KC 终端执行器与按需项目预览概念图](kc-agent-terminal-preview.md)
-- [PRD Demo 可交互原型](prd-demo.html)
-- [Worktree 前端依赖策略 Demo](worktree-frontend-demo.html)
-- [Assets 命名规范](assets/README.md)
+- [原型资源说明](assets/README.md)
 
 ## 设计约束
 
 - 仅用于需求评审与流程演示，不替代正式前端实现。
 - 保持移动端可操作，避免仅桌面可用。
-- 页面内应提供回链到 PRD 或规范文档的入口。
+- 页面内应提供返回 Hub 或说明文档的入口；互相关联的原型在 registry 中维护关系。

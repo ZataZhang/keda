@@ -1,7 +1,8 @@
 """仓库工作区的快照：文件树、文件正文、改动列表、单文件 diff、两种预览，以及暂存。
 
 查看器的全部内容都从这里出。读操作占绝大多数：所有列目录、看正文、算 diff 的 ``git`` 调用都是
-查询（``ls-files`` / ``diff`` / ``rev-parse`` / ``cat-file``），所有文件访问都是读取。
+查询（``ls-files`` / ``diff`` / ``rev-parse`` / ``cat-file``），所有文件访问都是读取。被忽略的
+未跟踪文件默认不列出；文件树可显式请求它们，改动与暂存口径不变。
 
 **这个模块里只有一处写操作**：:func:`stage_changes` 与 :func:`stage_all_changes`（``git add``），
 供界面上「改动」那一段的加号使用。它能做的只有「把工作区里这些改动记进索引」——不改内容、不提交、
@@ -271,15 +272,51 @@ def build_info_payload(repository_root: Path) -> WorkspacePayload:
     )
 
 
-def build_tree_payload(repository_root: Path) -> WorkspacePayload:
-    """列出文件树要展示的全部仓库内路径。
+def build_tree_payload(
+    repository_root: Path,
+    include_ignored: bool = False,
+) -> WorkspacePayload:
+    """列出文件树要展示的仓库内路径，可按需包含被忽略文件。
+
+    忽略项默认不返回；显式开启时只加入被 Git 忽略的未跟踪文件。为避免依赖与缓存目录
+    把列表撑大，目录名剪枝同样适用。忽略项只出现在文件树，不进入改动列表或暂存操作。
+
+    Args:
+        repository_root (Path): 仓库根绝对路径。
+        include_ignored (bool): 是否附加被 Git 忽略的文件；默认关闭。
 
     Returns:
-        WorkspacePayload: 含扁平路径列表与文件数的应答；前端据此自行组装成树。
+        WorkspacePayload: 含扁平路径、忽略路径和文件数的应答；前端据此自行组装成树。
     """
-    file_paths = collect_viewable_file_paths(repository_root)
+    ignored_file_paths: list[str] = []
+    if include_ignored:
+        pruned_pathspecs = tuple(
+            f":(exclude,glob)**/{directory_name}/**"
+            for directory_name in sorted(_PRUNED_DIRECTORY_NAMES)
+        )
+        ignored_file_output = _run_git(
+            repository_root,
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "-z",
+            "--",
+            *pruned_pathspecs,
+        )
+        ignored_file_paths = sorted(
+            ignored_path
+            for ignored_path in ignored_file_output.split("\0")
+            if ignored_path and not _is_pruned_path(ignored_path)
+        )
+    file_paths = sorted(set(collect_viewable_file_paths(repository_root)) | set(ignored_file_paths))
     return WorkspacePayload(
-        status_code=200, payload={"paths": file_paths, "count": len(file_paths)}
+        status_code=200,
+        payload={
+            "paths": file_paths,
+            "ignored_paths": ignored_file_paths,
+            "count": len(file_paths),
+        },
     )
 
 

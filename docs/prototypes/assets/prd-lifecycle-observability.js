@@ -32,9 +32,10 @@
     runs: [
       // dynamic:true 的行会跟随当前场景的实时状态（进行中 → 阻塞中）重绘。
       { dynamic: true },
-      { name: 'Roadmap PRD 控制与验收证据', issue: 402, status: 'done', statusLabel: '已归档', start: '09-20 09:18', end: '09-20 12:02', active: '2h 09m', waiting: '35m', total: '2h 44m', retry: 0, link: true },
-      { name: '生命周期 Agent 矩阵', issue: 395, status: 'done', statusLabel: '已归档', start: '09-18 10:11', end: '09-18 16:39', active: '4h 51m', waiting: '1h 37m', total: '6h 28m', retry: 2, link: true },
-      { name: 'Dashboard 快照同步', issue: 371, status: 'failed', statusLabel: '失败', start: '09-16 14:08', end: '验证失败', active: '1h 06m', waiting: '11m', total: '1h 17m', retry: 3, link: true },
+      { name: 'Backlog PRD 控制与验收证据', issue: 402, status: 'done', statusLabel: '已归档', start: '09-20 09:18', end: '09-20 12:02', active: '2h 09m', waiting: '35m', total: '2h 44m', retry: 0 },
+      { name: '生命周期 Agent 矩阵', issue: 395, status: 'done', statusLabel: '已归档', start: '09-18 10:11', end: '09-18 16:39', active: '4h 51m', waiting: '1h 37m', total: '6h 28m', retry: 2 },
+      { name: 'Dashboard 快照同步', issue: 371, status: 'failed', statusLabel: '失败', start: '09-16 14:08', end: '验证失败', active: '1h 06m', waiting: '11m', total: '1h 17m', retry: 3 },
+      { name: '旧运行记录', issue: 288, status: 'legacy', statusLabel: '未关联 PRD', start: '09-10 08:20', end: '已结束', active: '52m', waiting: '9m', total: '1h 01m', retry: 0 },
     ],
   };
 
@@ -46,7 +47,7 @@
       durations: { end_to_end_seconds: 8280, active_seconds: 6120, waiting_seconds: 2160, blocked_seconds: 0 },
       attempts: '3 次', attemptNote: '1 次失败后自动恢复',
       events: [
-        { time: '13:42', type: 'wait', title: '进入执行队列', detail: '由 Roadmap 手动启动，core 创建稳定 run 标识并追加首个事件。', duration: '等待 12m', actor: 'operator', eventType: 'queued', phase: 'queued', reason: '操作者在 Roadmap 点击「单个开始」' },
+        { time: '13:42', type: 'wait', title: '进入执行队列', detail: '由 Backlog 手动启动，core 创建稳定 run 标识并追加首个事件。', duration: '等待 12m', actor: 'operator', eventType: 'queued', phase: 'queued', reason: '操作者在 Backlog 点击「单个开始」' },
         { time: '13:54', type: 'success', title: 'Agent 开始实现', detail: 'Issue #417 进入 agent/running，首次 attempt 使用 codex。', duration: '执行 48m', actor: 'codex', eventType: 'started', phase: 'executing', reason: 'runner 领取到可处理 Issue' },
         { time: '14:42', type: 'failure', title: '首次验证未通过', detail: '真实入口断言失败；失败事件被保留，后续成功不会覆盖它。', duration: '7m', actor: 'verifier', eventType: 'validation_failed', phase: 'validating', reason: 'Playwright 真实入口断言失败 1 项' },
         { time: '14:49', type: 'success', title: '失败后自动恢复', detail: '复用同一 PRD run 新建 attempt，重新收集最终代码树证据。', duration: '执行 35m', actor: 'codex', eventType: 'recovered', phase: 'executing', reason: '同一 run 内重试，不新建 run' },
@@ -60,7 +61,7 @@
       durations: { end_to_end_seconds: 9060, active_seconds: 5040, waiting_seconds: 1620, blocked_seconds: 2400 },
       attempts: '4 次', attemptNote: '3 次失败，1 次人工重试',
       events: [
-        { time: '13:42', type: 'wait', title: '进入执行队列', detail: '由 Roadmap 手动启动，创建稳定 PRD run 标识。', duration: '等待 12m', actor: 'operator', eventType: 'queued', phase: 'queued', reason: '操作者在 Roadmap 点击「单个开始」' },
+        { time: '13:42', type: 'wait', title: '进入执行队列', detail: '由 Backlog 手动启动，创建稳定 PRD run 标识。', duration: '等待 12m', actor: 'operator', eventType: 'queued', phase: 'queued', reason: '操作者在 Backlog 点击「单个开始」' },
         { time: '13:54', type: 'success', title: 'Agent 开始实现', detail: 'Issue #417 进入 agent/running，首次 attempt 使用 codex。', duration: '执行 48m', actor: 'codex', eventType: 'started', phase: 'executing', reason: 'runner 领取到可处理 Issue' },
         { time: '14:42', type: 'failure', title: '连续验证失败', detail: '三次 attempt 均未跨过真实浏览器入口；失败事件与耗时全部保留。', duration: '29m', actor: 'verifier', eventType: 'validation_failed', phase: 'validating', reason: '真实入口断言连续 3 次失败' },
         { time: '15:11', type: 'success', title: '人工触发重试', detail: '从失败点新建 attempt，不覆盖旧失败事件与耗时。', duration: '执行 21m', actor: 'operator', eventType: 'retry', phase: 'executing', reason: '操作者关闭代码缺陷后手动重试' },
@@ -74,7 +75,7 @@
       durations: { end_to_end_seconds: 4800, active_seconds: 3600, waiting_seconds: 1200, blocked_seconds: 0 },
       attempts: '2 次', attemptNote: '观测写入失败 1 次',
       events: [
-        { time: '13:42', type: 'wait', title: '进入执行队列', detail: '由 Roadmap 手动启动，创建稳定 PRD run 标识。', duration: '等待 12m', actor: 'operator', eventType: 'queued', phase: 'queued', reason: '操作者在 Roadmap 点击「单个开始」' },
+        { time: '13:42', type: 'wait', title: '进入执行队列', detail: '由 Backlog 手动启动，创建稳定 PRD run 标识。', duration: '等待 12m', actor: 'operator', eventType: 'queued', phase: 'queued', reason: '操作者在 Backlog 点击「单个开始」' },
         { time: '13:54', type: 'success', title: 'Agent 开始实现', detail: 'Issue #417 进入 agent/running。', duration: '执行 48m', actor: 'codex', eventType: 'started', phase: 'executing', reason: 'runner 领取到可处理 Issue' },
         { time: '14:42', type: 'failure', title: '生命周期事件写入失败', detail: '旁路观测存储异常，事件未落库；runner 继续执行，history_complete 置为 false。', duration: '—', actor: 'system', eventType: 'failed', phase: 'executing', reason: '观测存储写入异常（不阻断主流程）' },
         { time: '15:41', type: 'success', title: '实现完成（事件缺失）', detail: '主流程已完成实现并进入验证，但对应事件缺失，页面据此显示数据不完整告警。', duration: '执行 47m', actor: 'codex', eventType: 'implementation_completed', phase: 'validating', reason: '主流程继续，观测缺口已记录' },
@@ -94,6 +95,7 @@
     completeness: document.querySelector('#completeness-pill'),
     warning: document.querySelector('#data-warning'),
     runsBody: document.querySelector('#runs-body'),
+    runsSearch: document.querySelector('#runs-search'),
     unlinkedNote: document.querySelector('#unlinked-note'),
   };
 
@@ -165,29 +167,29 @@
       `另有 ${stats.unlinked_run_count} 条旧运行记录只有 Issue 编号、无法可靠关联 PRD，已标记为「未关联 PRD」并从完成分位数中排除；最近运行列表仍可查看它们。`;
 
     const active = scenarioOf();
-    elements.runsBody.innerHTML = stats.runs.map((run) => {
-      const row = run.dynamic
+    const searchQuery = elements.runsSearch.value.trim().toLowerCase();
+    const visibleRuns = stats.runs.map((run) => run.dynamic
         ? { name: 'PRD 生命周期观测与执行分析', issue: 417, status: active.statusClass, statusLabel: active.statusLabel,
             start: '09-21 13:42', end: active.inProgress ? `当前阶段：${PHASE_LABELS[active.phase]}` : '已结束',
             active: formatDuration(active.durations.active_seconds), waiting: formatDuration(active.durations.waiting_seconds),
             total: formatDuration(active.durations.end_to_end_seconds), retry: 1, link: true, incomplete: !active.historyComplete }
-        : run;
+        : run).filter((run) => !searchQuery || `${run.name} ${run.issue} ${run.statusLabel}`.toLowerCase().includes(searchQuery));
+    elements.runsBody.innerHTML = visibleRuns.length ? visibleRuns.map((row) => {
       const nameCell = row.link
         ? `<button class="table-link hotspot-target" type="button" data-view-link="roadmap">${row.name} <small>#${row.issue}</small></button>`
-        : `${row.name} <small>#${row.issue}</small>`;
+        : `<span>${row.name} <small>#${row.issue}</small></span>`;
       const statusCell = row.incomplete
         ? `<span class="state ${row.status}">${row.statusLabel}</span><small class="incomplete-note">数据不完整</small>`
         : `<span class="state ${row.status}">${row.statusLabel}</span>`;
       return `<tr><td>${nameCell}</td><td>${statusCell}</td><td>${row.start}</td><td>${row.end}</td><td>${row.active}</td><td>${row.waiting}</td><td><strong>${row.total}</strong></td><td>${row.retry}</td></tr>`;
-    }).join('') + `
-      <tr class="legacy-row"><td><span class="legacy-name">旧运行记录 <small>#288</small></span></td><td><span class="state legacy">未关联 PRD</span></td><td>09-10 08:20</td><td>已结束</td><td>52m</td><td>9m</td><td><strong>1h 01m</strong></td><td>0</td></tr>`;
+    }).join('') : '<tr><td colspan="8">没有匹配的记录。</td></tr>';
   }
 
   function showView(view) {
     uiState.view = view;
     document.querySelectorAll('[data-view]').forEach((page) => page.classList.toggle('is-visible', page.dataset.view === view));
     document.querySelectorAll('.product-sidebar [data-view-link]').forEach((link) => link.classList.toggle('is-active', link.dataset.viewLink === view));
-    elements.pageTitle.textContent = view === 'stats' ? '统计' : 'Roadmap';
+    elements.pageTitle.textContent = view === 'stats' ? 'Stats' : 'Backlog';
     if (view === 'stats') renderStats();
     window.location.hash = view;
   }
@@ -221,7 +223,10 @@
     const scenarioButton = event.target.closest('[data-scenario]');
     if (scenarioButton) {
       uiState.scenario = scenarioButton.dataset.scenario;
-      document.querySelectorAll('[data-scenario]').forEach((button) => button.classList.toggle('is-active', button === scenarioButton));
+      document.querySelectorAll('[data-scenario]').forEach((button) => {
+        button.classList.toggle('is-active', button === scenarioButton);
+        button.setAttribute('aria-pressed', String(button === scenarioButton));
+      });
       elements.inspector.hidden = true;
       renderAll();
       return;
@@ -237,13 +242,23 @@
     if (event.key === 'Escape') elements.inspector.hidden = true;
   });
 
-  // 底部原型 Dock 的「重置」会派发该事件：回到初始场景与 Roadmap 视图。
+  // 底部原型 Dock 的「重置」会派发该事件：回到初始场景与 Backlog 视图。
   document.addEventListener('prototype:reset', () => {
     uiState.scenario = 'normal';
-    document.querySelectorAll('[data-scenario]').forEach((button) => button.classList.toggle('is-active', button.dataset.scenario === 'normal'));
+    document.querySelectorAll('[data-scenario]').forEach((button) => {
+      const isNormalScenario = button.dataset.scenario === 'normal';
+      button.classList.toggle('is-active', isNormalScenario);
+      button.setAttribute('aria-pressed', String(isNormalScenario));
+    });
     elements.inspector.hidden = true;
     renderAll();
     showView('roadmap');
+  });
+
+  elements.runsSearch.addEventListener('input', renderStats);
+  window.addEventListener('hashchange', () => {
+    const requestedView = window.location.hash === '#stats' ? 'stats' : 'roadmap';
+    if (requestedView !== uiState.view) showView(requestedView);
   });
 
   renderAll();

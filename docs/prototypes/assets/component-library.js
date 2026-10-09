@@ -43,6 +43,13 @@
     if (!selectedRow) return;
     selectedRow.parentElement.querySelectorAll('tr').forEach((row) => row.classList.toggle('is-selected', row === selectedRow));
   });
+  document.querySelector('.ui-table tbody').addEventListener('keydown', (event) => {
+    if (!['Enter', ' '].includes(event.key)) return;
+    const selectedRow = event.target.closest('tr');
+    if (!selectedRow) return;
+    event.preventDefault();
+    selectedRow.parentElement.querySelectorAll('tr').forEach((row) => row.classList.toggle('is-selected', row === selectedRow));
+  });
   document.querySelector('#open-dialog').addEventListener('click', () => { dialogBackdrop.hidden = false; document.querySelector('#close-dialog').focus(); });
   document.querySelector('#close-dialog').addEventListener('click', () => { dialogBackdrop.hidden = true; });
   dialogBackdrop.addEventListener('click', (event) => { if (event.target === dialogBackdrop) dialogBackdrop.hidden = true; });

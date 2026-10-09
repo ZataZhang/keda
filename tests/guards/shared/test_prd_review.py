@@ -49,7 +49,7 @@ import prd_review  # noqa: E402
 _PRD_FILENAME = "P1-FEAT-20260916-212206-demo-feature.md"
 _PRD_STEM = "P1-FEAT-20260916-212206-demo-feature"
 _BRANCH_NAME = "demo-feature"
-# iar runner 的分支名是 ``issue-<编号>``，不等于 PRD slug；定位必须靠 PRD 正文的
+# KedaCode（kc）runner 的分支名是 ``issue-<编号>``，不等于 PRD slug；定位必须靠 PRD 正文的
 # ``GitHub Issue:`` 行兜底，否则从主仓库跑 `just prd review` 找不到 worktree 副本。
 _ISSUE_BRANCH_NAME = "issue-53"
 

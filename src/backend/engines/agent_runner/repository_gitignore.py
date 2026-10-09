@@ -1,7 +1,7 @@
 """``.gitignore`` sync for ``kc init``.
 
 ``kc init`` 在写完 ``.kedacode.toml`` 之后,会确保 KedaCode 运行时的中间产物
-(``.iar/``、``.agent-runner/``、``.iar-worktrees/``) 出现在
+(``.kedacode/``、``.agent-runner/``、``.iar-worktrees/``) 出现在
 ``.gitignore`` 中。新增的条目用 ``# >>> iar (managed by `iar init`) >>>``
 / ``# <<< iar <<<`` 块标记包裹,保证:
 
@@ -28,8 +28,9 @@ GITIGNORE_BLOCK_FOOTER = "# <<< iar <<<"
 # 段注释 -> 该段包含的 ignore 模式。结构化便于幂等地构建块,
 # 也让用户能一眼看出每条规则的作用域。
 IAR_GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("# Realistic Validation evidence (worktree-local)", (".iar/",)),
+    ("# KedaCode runner state (worktree-local)", (".kedacode/",)),
     ("# Agent runner state (worktree-local)", (".agent-runner/",)),
+    ("# Legacy IAR state (for existing repositories)", (".iar/",)),
     ("# IAR-managed git worktrees (host-local)", (".iar-worktrees/",)),
     (
         "# PRD task evidence (commit only the *.md text reports; "

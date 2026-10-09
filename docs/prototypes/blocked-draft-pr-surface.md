@@ -2,6 +2,8 @@
 
 本页归档 `tasks/pending/P1-FEAT-20260922-000431-blocked-draft-pr-validation-failure.md` 的界面示意。它要回答一件事：recovery 耗尽后，"上一轮做到哪、为什么没过"这份交接记录长什么样，以及它怎么同时服务**下一轮 agent** 和**人**。
 
+从 [Prototype Hub](hub.html) 可查看相关的 PRD 生命周期与恢复原型；本页提供 [HTML 概念画布](blocked-draft-pr-surface.html)、[Issue 评论图片来源](assets/blocked-draft-pr-01-failure-context-comment.source.md)和[Draft PR 图片来源](assets/blocked-draft-pr-02-draft-pr-body.source.md)。
+
 注意本 PRD 的 `Frontend Impact` 是 `No frontend impact`——两层表面都是 **GitHub 页面本身**（Issue 评论 + Draft PR），不是 `frontend-public/` 的任何页面。因此本原型复刻的是 GitHub 的信息层级，而不是产品 UI。
 
 ## 面板 A：Issue 交接评论（持久载体）

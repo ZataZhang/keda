@@ -6,6 +6,7 @@
     <title>CI/CD 监控与自动修复 · 交互原型</title>
     <link rel="stylesheet" href="./assets/prototype-common.css" />
     <link rel="stylesheet" href="./assets/roadmap-prd-cicd-flow.css" />
+    <link rel="stylesheet" href="./assets/prototype-chrome.css" />
   </head>
   <body>
     <main class="flow-shell">
@@ -14,9 +15,6 @@
           <p class="flow-eyebrow">Interactive prototype</p>
           <h1>CI/CD 监控与自动修复</h1>
           <p id="state-description">PRD 完成后，系统自动等待 GitHub Checks。</p>
-        </div>
-        <div class="flow-header-actions">
-          <a class="flow-link" href="./hub.html">返回原型目录</a>
         </div>
       </header>
 
@@ -41,5 +39,13 @@
       </footer>
     </main>
     <script src="./assets/roadmap-prd-cicd-flow.js"></script>
+    <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具">
+      <span class="prototype-chrome__label" aria-hidden="true">原型</span>
+      <a href="./hub.html">返回 Hub</a>
+      <a href="./roadmap-prd-cicd-auto-repair/">原型说明</a>
+      <button type="button" data-hotspot-toggle aria-pressed="true">◎ 可点击区域：开</button>
+      <button type="button" data-prototype-reset>↺ 重置</button>
+    </nav>
+    <script src="./assets/prototype-chrome.js"></script>
   </body>
 </html>

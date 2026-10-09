@@ -208,7 +208,10 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
         elif route_path == "/api/info":
             self._serve_workspace_payload(workspace.build_info_payload(repository_root))
         elif route_path == "/api/tree":
-            self._serve_workspace_payload(workspace.build_tree_payload(repository_root))
+            include_ignored = self._read_query_parameter(query_parameters, "include_ignored") == "1"
+            self._serve_workspace_payload(
+                workspace.build_tree_payload(repository_root, include_ignored=include_ignored)
+            )
         elif route_path == "/api/file":
             self._serve_workspace_payload(
                 workspace.build_file_payload(

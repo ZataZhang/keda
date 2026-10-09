@@ -2,6 +2,8 @@
 
 本页归档 `tasks/pending/P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair.md` 的视觉草图。它是在既有 Roadmap 单 PRD 详情原型上做的定向增补，用于确认 PRD 完成后的 CI/CD 等待、失败呈现和可选自动修复交互；正式实现继续复用 `frontend-public` 的组件与既有 runner 修复链路。
 
+从 [Prototype Hub](hub.html) 可查看同一 Backlog 流程中的生命周期观测、控制与验收证据原型。
+
 ## 最终草图
 
 ![Roadmap PRD 完成后 CI/CD 监控与自动修复最终草图](assets/roadmap-prd-cicd-auto-repair.png)

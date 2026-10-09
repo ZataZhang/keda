@@ -6,7 +6,7 @@
 > ⬜ **验收状态**：未开工。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
-本文分两层：Part A 人审层（§1-4）说明需要解决的问题和需确认的选择；Part B 执行器层（§5-13）给出复用路径、实现边界与验收证据。
+本文分两层：Part A 需求层（§1-4）说明用户目标、已明确的范围与实现约束；Part B 执行器层（§5-13）给出复用路径、实现边界与验收证据。
 
 ## Feature Overview (功能一览)
 
@@ -19,9 +19,9 @@
 - **保留现有解析和覆盖规则**（FR-6）：继续使用全局、仓库、PRD 与命令级优先级；继承、未指定及 Agent 不支持的推理深度都明确展示。
 - **配置错误提前失败**（FR-7）：未注册 Agent、未知预设或缺少必要参数模板时，拒绝保存/执行并说明具体字段，不静默忽略。
 - **文档与随包操作知识同步**（FR-8）：更新用户指南、CLI 帮助和随包 `kedacode-operator` skill。
-- **回退候选可选绑定预设**（FR-9，待人审）：让每个备用 Agent 可选使用匹配该 Agent 的模型预设；未绑定时保持 Agent 默认行为。
+- **执行器回退候选可绑定预设并允许同执行器重复**（FR-9/FR-10）：每个有序候选可绑定匹配的模型预设；同一执行器可用不同预设出现多次，完全相同的组合不能重复。
 
-# Part A · 人审层 (Review Layer)
+# Part A · 需求层 (Requirements Layer)
 
 ## 1. Introduction & Goals
 
@@ -38,10 +38,9 @@ KedaCode 已有 Agent 生命周期分配和模型预设：一个预设可以包�
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
 | 👀 人审 + 自动验证 | 打开专门的生命周期设置页，保持全局范围 | 一张表列出全部九个生命周期；每行可看出绑定预设、生效 Agent、模型 ID、推理深度及配置来源。没有显式模型/推理参数时明确标为 Agent 默认或未配置，不编造值。 |
-| 👀 人审 + 自动验证 | 切换到一个仓库，编辑一个阶段的预设并保存，再回到全局范围 | 仓库范围显示本次覆盖和未改动阶段继承的全局值；保存后该仓库实际生效的值更新，全局值不变。页面显示被修改的共享预设会影响哪些阶段。 |
 | 👀 人审 + 自动验证 | 用 CLI 请求完整生命周期 JSON，并将一个阶段绑定到已有预设 | 输出包含九个阶段及各自的有效 Agent、模型、推理深度、预设和来源；绑定命令写入明确选定的全局或仓库配置，新的 CLI 进程读回相同值。 |
-| 👀 人审 + 自动验证 | 在 Settings 的回退顺序卡片中给一个备用 Agent 选同 Agent 预设，并保存 | 该 Agent 行显示预设和模型/推理深度；保存预览增加回退 Agent→预设映射；执行切换到该候选时使用这个预设，未绑定候选仍使用 Agent 默认值。 |
-| 🤖 自动验证 | 把带模型或推理深度的预设绑定给缺少对应参数模板的 Agent，或引用不存在的预设 | 操作在调用 Agent 前失败，指出 Agent、字段或预设名；不静默忽略参数，也不留下部分写入。 |
+| 👀 人审 + 自动验证 | 打开统一设置页的“执行器回退顺序”，给 Claude 连续添加 `sonnet-5.5 / max` 与 `sonnet-5.5 / high` 两种候选并保存 | 两行都显示 Claude，但模型预设和推理深度分别可见；保存预览按数组顺序写入两个候选；同一个执行器可用另一预设再次尝试，候选预算按行数消耗；未绑定时使用执行器默认。 |
+| 🤖 自动验证 | 把带模型或推理深度的预设绑定给 Agent 注册配置中缺少对应 CLI 参数模板的 Agent，或引用不存在的预设 | 根据本地 Agent 注册配置，在保存或调用 Agent 前失败，指出 Agent、缺失字段或预设名；不静默忽略参数，也不留下部分写入。此检查只验证模型/推理值能否按已声明模板传给 Agent CLI，不查询模型目录，也不验证模型 ID 在线有效或账号权限。 |
 | 🤖 自动验证 | 不使用新持久化设置，只用现有单次运行参数启动任务 | 单次参数仍只影响当前调用，不写入生命周期配置；既有命令、PRD 覆盖和 `fix/closeout` 继承行为保持不变。 |
 
 以上行为样例是当前验收口径，并分别对应 §7.6 的验收 oracle；修改任一结果格即修改相应验收标准。
@@ -49,9 +48,11 @@ KedaCode 已有 Agent 生命周期分配和模型预设：一个预设可以包�
 #### 我默默定了这些
 
 - 专门页面放在 Settings 下，以范围选择器组合全局和仓库设置；Backlog 仓库入口只作为指向该页的快捷入口，不再维护另一份生命周期编辑器。
+- 页面首部提供「生命周期 / 模型预设 / 执行器回退」区块导航；生命周期用四列矩阵呈现阶段/触发时机、预设、当前执行器与参数、配置来源，避免把九阶段压进过多窄列。
+- 模型预设使用双列卡片编辑，执行器回退顺序位于同页下方；回退卡片注明它固定写入全局 `config.toml`，不随生命周期范围切换。
 - 页面按所选范围显示有效基线；仓库行同时标出本仓库覆盖、全局继承、既有配置或内置默认的来源。
 - 命名预设仍是模型与推理深度的配置单元；阶段通过绑定预设获得三元组，修复和收尾在没有独立预设时继承实现阶段的选择。
-- 回退预设按候选 Agent 绑定；只有实际切换到对应回退候选时才应用，不改变阶段主 Agent、回退顺序或切换预算。预设的 Agent 必须与候选一致。
+- 执行器回退预设按候选绑定；只有实际走到对应候选时才应用。同一执行器可用不同预设重复，候选队列顺序不变，`max_agent_switches` 按候选步数计数；预设的 Agent 必须与候选执行器一致。
 - PRD 级与命令级覆盖仍在其上下文中查看；本页展示全局/仓库基线，并提示更高优先级覆盖可能改变单个 PRD 或调用的最终值。
 - 不替用户推断 Agent CLI 的默认模型或推理深度；无法从配置中确定时会明确显示“Agent 默认 / 未显式指定”。
 
@@ -61,11 +62,11 @@ KedaCode 已有 Agent 生命周期分配和模型预设：一个预设可以包�
 - 不在本页编辑 PRD 文件头覆盖；PRD 覆盖继续跟随具体 PRD 上下文。
 - 不改变现有单次运行覆盖的优先级或已有 Agent 执行语义。
 
-本需求读作：将目前已经存在的九阶段 Agent/模型预设能力做成一个可看、可编辑的全局与仓库统一入口，并补上可脚本化的完整查看和持久化配置命令；同时评审是否扩展现有回退顺序卡片，让每个备用 Agent 可选绑定匹配的命名预设。每个阶段都要展示有效 Agent、模型、推理深度及来源；显式值可通过现有命名预设设置，未显式配置或 Agent 不支持的值必须如实标记。它不要求系统猜测外部 Agent CLI 的默认模型，也不把一次性覆盖写进长期配置。任何模型参数模板缺失、Agent 未注册、回退预设与候选 Agent 不匹配或目标范围不明确的操作都必须失败并保留原配置。
+本需求读作：将目前已经存在的九阶段 Agent/模型预设能力做成一个可看、可编辑的全局与仓库统一入口，并补上可脚本化的完整查看和持久化配置命令；同时评审是否在同一设置页为每个执行器回退候选绑定匹配的命名预设。每个阶段都要展示有效 Agent、模型、推理深度及来源；显式值可通过现有命名预设设置，未显式配置或 Agent 不支持的值必须如实标记。它不要求系统猜测外部 Agent CLI 的默认模型，也不把一次性覆盖写进长期配置。任何模型参数模板缺失、Agent 未注册、回退预设与候选执行器不匹配或目标范围不明确的操作都必须失败并保留原配置。
 
 ### What The User Gets
 
-用户可以在 Settings 的一个专门页面切换全局和仓库范围，并一次查看九个生命周期的 Agent、模型、推理深度及配置来源。页面可新建或编辑命名预设、绑定到阶段，并提示共享预设影响的阶段。Settings 的回退顺序卡片可为每个候选选择匹配的模型预设。用户也可以从 CLI 获得完整的表格或 JSON 生效视图，并把预设定义、阶段绑定或回退预设映射写入明确的配置范围。
+用户可以在 Settings 的一个统一页面切换全局和仓库范围，并一次查看九个生命周期的 Agent、模型、推理深度及配置来源。页面可新建或编辑命名预设、绑定到阶段，并提示共享预设影响的阶段；同页的“执行器回退顺序”可为每个候选选择匹配的模型预设。用户也可以从 CLI 获得完整的表格或 JSON 生效视图，并把预设定义、阶段绑定或执行器回退预设映射写入明确的配置范围。
 
 ### Measurable Objectives
 
@@ -78,51 +79,34 @@ KedaCode 已有 Agent 生命周期分配和模型预设：一个预设可以包�
 - 回退候选未绑定专用预设时仍使用现有 Agent 默认模型与推理深度；绑定后模型/effort 来源和候选 Agent 一致且可诊断。
 - 桌面与 400px 窄屏均能查看和操作完整设置，不依赖横向滚动来发现阶段字段。
 
-## 2. Human Review Map (介入与风险地图)
+## 2. 已明确需求与实现约束
 
-### 决定一：全局与仓库配置的主要入口
+以下产品需求已由用户在讨论中明确，不作为开工前待确认项：
 
-建议采用 Settings 下的独立生命周期设置页，页面顶部切换全局/仓库并选择目标仓库；原 Settings Agent-only 矩阵退役，只保留指向该页的单一入口。Backlog 仓库齿轮进入同一页面并预选该仓库。这样两种范围共享一套编辑器和来源呈现，不会并存两套生命周期矩阵。
+- **统一设置入口**：生命周期矩阵、模型预设和“执行器回退顺序”放在同一 Settings 页面；页面能在全局与仓库范围间切换。Backlog 仓库入口打开同一页面并预选仓库。
+- **生命周期模型细节**：九个阶段都显示有效 Agent、模型、推理深度和来源，并允许为阶段绑定具体预设。没有显式配置时保留 Agent 默认和 `fix/closeout` 继承行为，如实标示，不强制写入未经选择的模型。
+- **CLI 查看与设置**：提供完整生命周期查看及持久化设置命令。
+- **执行器回退预设**：统一页面中的每个回退候选可绑定同一执行器的命名预设；绑定时仅在该候选执行时应用，未绑定时沿用执行器默认。回退配置保持其既有写入范围，生命周期范围选择器不应意外改写回退配置的目标。
+- **重复执行器候选**：同一执行器可用不同模型/推理预设在回退队列中出现多次；候选以 `(agent, preset)` 区分，完全相同的组合拒绝重复。预算按候选步数计算，因此同一执行器的不同预设也分别消耗一步。
 
-**请确认：** 是否接受 Settings 中的统一页面作为主入口，并把 Backlog 仓库操作收敛为指向该页的快捷入口？
+### 实现约束（不作为额外产品决策）
 
-**验收：** Settings 主页面不再显示旧 Agent-only 矩阵；单一入口和 Backlog 仓库齿轮都打开统一页面，且仓库入口预选对应仓库。
+- 查询可按可确定的仓库上下文推断有效范围；所有 CLI 写入显式指定全局或仓库范围，仓库写入显式提供 `repo_id`，避免脚本误写配置层。
+- 未显式配置的阶段保留现有 Agent 默认和 `fix/closeout` 继承；同一回退候选的 `(agent, preset)` 组合不得重复，旧 `agent_fallback_order` 继续兼容读取。
 
-### 决定二：CLI 持久化写入的目标范围
+因此，当前没有需要用户在开工前逐项回答的产品决策。若实现发现现有配置语义与以上要求冲突，再基于具体冲突提交一个聚焦的取舍问题。
 
-建议查询默认显示当前仓库的有效视图（仓库上下文无法唯一确定时显示全局视图并说明），而所有修改命令必须明确选择全局或仓库范围；仓库修改还要明确指定目标仓库。这样查看方便，同时不会让脚本或用户在不知情时改错配置层。
+![interactive prototype：Claude 的 sonnet-5.5 max 与 sonnet-5.5 high 两个回退候选及 TOML 保存预览](../../docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png)
 
-**请确认：** 是否接受 CLI 修改必须显式指定全局或仓库范围，并要求仓库修改显式指定目标仓库？
+原型截图验证层级：**interactive prototype**。图中展示 `sonnet-5.5 / max`、`kimi-k2.6 / high`、`gpt-5.4 / xhigh`；仅作具体的预设示例，不代表当前仓库已配置对应的 Agent 参数模板或账号可用性。生产行为与配置范围按 §2 已明确需求实现，截图不替代生产验证。
 
-**验收：** 缺少/错误范围或仓库 ID 的修改在触碰文件前失败；给出目标范围的写入只影响该层。
+**自动门禁，不需要逐项人工审阅**：阶段键闭集、预设和 Agent 校验、配置层合并、TOML 保留式写入、HTTP 请求校验、CLI 参数/JSON 稳定性、静态前端构建、文档和随包 skill 同步由自动检查与独立 verifier 验证。实施后的人工验收针对 §9 的真实界面与 CLI 证据，不再要求重复确认已经明确的需求。
 
-### 决定三：九个阶段是否必须全部显式锁定模型与推理深度
-
-建议九个阶段都显示完整的最终有效信息，并允许逐阶段绑定预设；缺省阶段继续遵循当前 Agent 默认和 `fix/closeout` 继承语义，明确标记“未显式指定”。部分 Agent 没有推理深度参数模板，系统不能伪造推理档位；若强制每阶段锁定，可能要求改变现有 Agent 选择或执行行为。
-
-**请确认：** 是否接受“所有阶段都可单独配置并可见，但未设置/不支持时保留并明确标记默认状态”，而不是强制九个阶段都必须指定模型和推理深度？
-
-**验收：** 九行均显示有效值或明确的缺省/不支持原因；未配置值不被悄悄替换，实际设置值通过预设生效。
-
-### 决定四：回退候选是否允许绑定模型预设
-
-建议允许每个 `agent_fallback_order` 候选可选绑定一个现有命名预设。下拉只列出 `preset.agent` 与候选 Agent 相同的预设；绑定后仅在该 Agent 作为回退候选执行时应用预设的模型和推理深度，未绑定时保持现有 Agent 默认值。配置随回退顺序使用的同一 scope 保存，顺序和最大切换次数语义不变。CLI 提供 fallback list 与 preset set/unset，写入仍需显式 scope。
-
-**请确认：** 是否接受每个备用 Agent 可选绑定同 Agent 的命名预设，并由回退候选执行时应用？
-
-**验收：** Settings 能选择/清除匹配预设并显示最终模型/推理深度及来源；未知 preset 或 Agent 不匹配时拒绝写入；无绑定的候选和回退顺序保持既有行为。
-
-![interactive prototype：Claude、Kimi 与 Codex 分别绑定自己的模型预设及 TOML 保存预览](../../docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png)
-
-原型截图验证层级：**interactive prototype**。图中展示 `claude-sonnet-5-5 / max`、`kimi-k2.6 / high`、`gpt-5.4 / xhigh`；仅作具体的预设示例，不代表当前仓库已配置对应的 Agent 参数模板或账号可用性。生产行为与配置范围仍待本决定确认。
-
-**自动门禁，不需要逐项人工审阅**：阶段键闭集、预设和 Agent 校验、配置层合并、TOML 保留式写入、HTTP 请求校验、CLI 参数/JSON 稳定性、静态前端构建、文档和随包 skill 同步由自动检查与独立 verifier 验证。人工确认只针对上述四个仍影响用户选择和安全感知的产品取舍。
-
-**本次明确不涉及**：自动查询供应商可用模型目录、为用户选模型、每阶段新增独立 fallback 顺序链、外网模型调用健康检查、PRD override editor 重做、数据库/迁移、改变一次性 CLI 覆盖或 Agent 调用授权。回退候选可选预设属于单独的待确认项（FR-9），不改变顺序或切换预算。
+**本次明确不涉及**：自动查询供应商可用模型目录、为用户选模型、每阶段新增独立执行器回退顺序链、外网模型调用健康检查、PRD override editor 重做、数据库/迁移、改变一次性 CLI 覆盖或 Agent 调用授权。统一设置页配置既有回退队列，不为每个生命周期阶段另建独立回退链。
 
 ## 3. Usage And Impact After Implementation
 
-**生命周期配置维护者**：从 Settings 打开生命周期设置，切换全局范围或某个仓库范围；在九行表格查看当前生效 Agent、模型、推理深度和来源。编辑共享预设时先看受影响阶段，再保存；只想调整一个阶段时创建预设并只绑定该阶段。回退顺序卡片可给每个备用 Agent 单独选择匹配的预设。
+**生命周期配置维护者**：从 Settings 打开统一设置页，切换全局范围或某个仓库范围；在九行表格查看当前生效 Agent、模型、推理深度和来源。编辑共享预设时先看受影响阶段，再保存；只想调整一个阶段时创建预设并只绑定该阶段。同页的“执行器回退顺序”可给每个备用执行器单独选择匹配的预设。
 
 **CLI 使用者与脚本**：通过 CLI 查看全生命周期矩阵，需要机器处理时使用 JSON。持久化更新通过命名预设和阶段绑定命令完成，并指明全局或仓库目标；回退候选预设也能通过 fallback list/set/unset 操作。一次性模型/推理参数仍只用于当前调用。
 
@@ -135,7 +119,7 @@ KedaCode 已有 Agent 生命周期分配和模型预设：一个预设可以包�
 - **actor**：全局 Agent 配置维护者、仓库维护者、CLI/自动化脚本调用方、PRD 作者和审阅者。
 - **trigger**：用户打开生命周期设置页面；或请求查看/修改某阶段预设、模型参数或配置范围。
 - **expected behavior**：一次读取返回九个阶段的有效配置和来源；同一命名预设提供 Agent、模型 ID、推理深度；通过所选范围安全地持久化最小变更；缺省、继承与错误状态可解释。
-- **scope boundary**：覆盖全局与仓库级现有配置中的生命周期 Agent、阶段预设绑定、预设定义，以及同 scope 的回退候选预设映射；不覆盖 PRD 级配置、瞬时旗标、Provider 模型目录或数据库状态。
+- **scope boundary**：覆盖全局与仓库级现有配置中的生命周期 Agent、阶段预设绑定、预设定义，以及同 scope 的回退候选有序数组与候选预设；不覆盖 PRD 级配置、瞬时旗标、Provider 模型目录或数据库状态。
 
 # Part B · 执行器层 (Build Layer)
 
@@ -148,7 +132,7 @@ KedaCode 已有 Agent 生命周期分配和模型预设：一个预设可以包�
 - `src/backend/core/use_cases/lifecycle_agents_console.py` 已返回生命周期矩阵与来源，并校验写回；`src/backend/api/routes/agent_runner_lifecycle_agents.py` 已提供 `GET/PUT /agent-runner/lifecycle-agents`。当前视图尚不能完整表达每个字段的独立来源与预设编辑写回。
 - `src/backend/infrastructure/config/toml_section_editor.py` 是 TOML 保留式 round-trip 与原子替换的共享原语；新增写入复用 `create_lifecycle_settings_editor`/该原语及其仓库/全局解析，不复制 tomlkit 实现。
 - CLI 已有 `kc agent presets` 和单阶段 `kc agent doctor --lifecycle <key>`；生命周期检查器可解析一个阶段，但没有全矩阵、JSON 来源视图或持久化设置命令。
-- `agent_fallback_order` 被实现、校验、审核、监督等候选流程复用；现行 fallback 会丢弃主 Agent 的模型预设并使用所选候选 Agent 的默认模型/推理深度。FR-9 如获确认，给候选增加可选的 `agent_fallback_presets` 映射，未绑定行为保持兼容。
+- `agent_fallback_order` 被实现、校验、审核、监督等候选流程复用；现行 fallback 会丢弃主 Agent 的模型预设并使用所选候选 Agent 的默认模型/推理深度。FR-9/FR-10 如获确认，以有序 `agent_fallback_candidates` 数组表承载执行器和可选预设；旧字符串顺序按无预设候选读取。
 - Settings 页面当前包含 Agent 标签与旧生命周期 Agent 矩阵；Backlog 仓库行已有仓库设置入口；PRD override 另有上下文抽屉。本需求以统一页面入口替换旧矩阵，保留标签设置和 PRD 上下文覆盖。
 - 当前 Agent capability 是声明式参数模板：七个内置 Agent 都声明模型参数模板；`reasoning_effort_args` 目前只有 CodeBuddy、Qoder、Pi 声明。预设中的推理值为字符串，不能把未声明模板当作“已应用”。
 
@@ -181,7 +165,7 @@ KedaCode 已有 Agent 生命周期分配和模型预设：一个预设可以包�
 
 在既有 lifecycle settings core/editor/API/CLI 路径中扩展一个“全阶段生命周期设置”用例，集中返回九阶段有效快照、每个字段来源和适用能力；由 Console 页面与 CLI 分别调用同一用例。预设仍是 (agent, model, reasoning_effort) 原子定义，生命周期阶段指向预设；直接 Agent 默认值和 `fix/closeout` 继承按当前 resolver 执行。保存仅提交用户改动的键，复用 TOML round-trip editor。
 
-网页新增 Settings 子页面 `/app/settings/lifecycle/`；页面的全局/仓库选择器管理当前文件范围。Backlog 仓库齿轮改为进入该页面并预选仓库，不再独立提供一张编辑器。保留 PRD override 抽屉。页面表格显示九阶段和生效信息，预设卡片显示绑定阶段；共享预设编辑前提示所有受影响阶段。Settings 中现有回退顺序卡片增加候选预设下拉，选项只包含同 Agent 预设，保存预览同时呈现回退顺序/预算和 preset mapping。
+网页新增 Settings 子页面 `/app/settings/lifecycle/`；页面的全局/仓库选择器管理生命周期配置范围，页首的区块导航可直达生命周期矩阵、模型预设和执行器回退。生命周期矩阵使用四列宽布局显示九阶段、生效信息与来源；模型预设用双列卡片显示绑定阶段并编辑字段。Backlog 仓库齿轮改为进入该页面并预选仓库，不再独立提供一张编辑器。保留 PRD override 抽屉；共享预设编辑前提示所有受影响阶段。执行器回退顺序与生命周期设置在同一页面连续呈现；回退区每行绑定同执行器预设，同一执行器可用不同预设重复出现，保存预览按序呈现候选数组和预算。
 
 CLI 扩展 `kc agent` 命令面：
 
@@ -191,15 +175,18 @@ kc agent lifecycle set <stage> --preset <name> --scope global|repository [--repo
 kc agent lifecycle unset <stage> --scope global|repository [--repo-id <id>]
 kc agent preset set <name> --agent <agent> [--model <id>] [--reasoning-effort <value>] --scope global|repository [--repo-id <id>]
 kc agent fallback list [--scope effective|global|repository] [--repo-id <id>] [--json]
-kc agent fallback preset set <agent> --preset <name> --scope global|repository [--repo-id <id>]
-kc agent fallback preset unset <agent> --scope global|repository [--repo-id <id>]
+kc agent fallback candidate add --agent <agent> [--preset <name>] [--position <n|end>] --scope global|repository [--repo-id <id>]
+kc agent fallback candidate preset set --position <n> --preset <name> --scope global|repository [--repo-id <id>]
+kc agent fallback candidate preset unset --position <n> --scope global|repository [--repo-id <id>]
+kc agent fallback candidate remove --position <n> --scope global|repository [--repo-id <id>]
+kc agent fallback candidate move --from <n> --to <n> --scope global|repository [--repo-id <id>]
 ```
 
-`list` 默认按当前 cwd 可唯一解析的仓库显示 effective view；没有唯一仓库上下文时显示 global，并在表头/JSON 标明 scope。所有写命令必须显式给 `--scope`；repository scope 必须显式给注册 `repo_id`。`lifecycle set` 只绑定指定的命名预设；`lifecycle unset` 只删除当前层该阶段的 preset binding，仓库层清除后恢复全局层，global 清除后恢复既有直接 Agent/legacy/default 解析。要设置 Agent/model/effort 三元组，先用 `preset set` upsert preset 再绑定。预设 `set` 是 upsert：未提供 model/effort 表示该预设不显式设置该字段。现有 `kc agent presets` 列表命令保留；可扩展 JSON 输出但不得删除/改名既有入口。单次运行旗标不调用这些持久化命令。
+`list` 默认按当前 cwd 可唯一解析的仓库显示 effective view；没有唯一仓库上下文时显示 global，并在表头/JSON 标明 scope。所有写命令必须显式给 `--scope`；repository scope 必须显式给注册 `repo_id`。`lifecycle set` 只绑定指定的命名预设；`lifecycle unset` 只删除当前层该阶段的 preset binding，仓库层清除后恢复全局层，global 清除后恢复既有直接 Agent/legacy/default 解析。要设置 Agent/model/effort 三元组，先用 `preset set` upsert preset 再绑定。预设 `set` 是 upsert：未提供 model/effort 表示该预设不显式设置该字段。fallback candidate 命令用 1-based `--position` 定位有序候选，因此同一 agent 可添加多次并绑定不同 preset；重复的 `(agent, preset)` 组合拒绝写入。现有 `kc agent presets` 列表命令保留；可扩展 JSON 输出但不得删除/改名既有入口。单次运行旗标不调用这些持久化命令。
 
 本页和新增 CLI 通过命名预设设置生命周期阶段的 Agent/model/effort；预设只填写 Agent 时，表示使用该 Agent CLI 默认的 model/effort。现有直接 Agent 配置仍按 resolver 生效，但新增的页面/CLI 不把它和预设绑定的优先级重写成新规则。若绑定预设包含模型或推理深度但 Agent 缺少对应参数模板，则拒绝写入或标错为无效，并阻止执行。
 
-回退候选预设拟使用 `[agent_runner.runner.agent_fallback_presets]` 表，按候选 Agent 名称映射到现有 `[agent_runner.presets.<name>]`。该映射与 `agent_fallback_order` 使用同一配置 scope；保存时要求 Agent 已注册、预设存在且 `preset.agent` 与候选一致。运行时仅当 shared fallback chain 选中该候选时应用预设；候选被选为主 Agent 或通过 one-shot `--agent` 显式选择时，不应用此映射。模型/effort 参数模板校验复用现有 lifecycle preset validation。
+执行器回退候选预设拟使用 `[[agent_runner.runner.agent_fallback_candidates]]` 数组表，每个条目包含 `agent` 与可选 `preset`。旧 `agent_fallback_order` 字符串列表按无 preset 候选读取；新格式存在时数组表是运行时事实源，旧列表仅作为执行器顺序兼容视图。数组顺序与 `max_agent_switches` 共同决定实际尝试；同一 agent 可绑定不同 preset 多次，重复的 `(agent, preset)` 组合拒绝写入。保存时要求 Agent 已注册、预设存在且 `preset.agent` 与候选执行器一致。运行时仅当 shared fallback chain 选中该候选时应用预设；one-shot `--agent` 不应用此映射。模型/effort 参数模板校验复用现有 lifecycle preset validation。
 
 ### ROI 与范围取舍
 
@@ -235,7 +222,7 @@ core 组合已解析的 global/repository config，为每个阶段返回预设�
 7. `agent preset set` 更新预设时会提示/返回该预设当前绑定的阶段；Web 页面保存共享预设前展示受影响阶段。若只改一阶段，提示先复制/新建 preset 并单独绑定。该提示不改变原子预设语义。
 8. API 用一个聚合生命周期 settings endpoint 提供 snapshot/patch；patch 只包含用户修改的键。scope/repo 校验、旧 HTTP response 兼容及错误码由 routes 做协议映射，业务规则在 core。
 9. CLI mutations 都需要显式 scope；读取 `effective` 在 registry path 能唯一解析时按仓库读取，否则按 global 读取并打印所选 scope。错误的 repo id、未知 lifecycle key、缺失 preset、unsupported effort template 应在写入或执行前返回可诊断非零错误。
-10. FR-9 若经 Human Review 接受：在 `[agent_runner.runner.agent_fallback_presets]` 按 fallback Agent 名称映射到既有命名预设，scope 与对应 fallback order 配置一致。写入前校验 Agent 已注册、预设存在且预设 Agent 与候选一致；候选执行时使用该预设，未绑定继续用 Agent 默认。显式主 Agent / one-shot `--agent` 不消费这张表。
+10. FR-9/FR-10：以有序 `[[agent_runner.runner.agent_fallback_candidates]]` 数组表保存 `agent` 与可选 `preset`；数组顺序就是候选顺序。旧 `agent_fallback_order` 列表按无预设候选读取，并保留同值执行器顺序兼容视图。写入前校验 Agent 已注册、预设存在且预设 Agent 与候选一致；相同 `(agent, preset)` 组合拒绝重复，不同 preset 的同一 Agent 可重复。候选执行时使用其绑定 preset，未绑定继续用执行器默认。`max_agent_switches` 按候选步数计数，显式主 Agent / one-shot `--agent` 不直接应用候选 preset。
 
 ### 7.2 Change Impact Tree
 
@@ -272,7 +259,7 @@ Core
 
 API / CLI
 ├── src/backend/api/routes/agent_runner_lifecycle_agents.py [修改]
-│   【总结】新增聚合生命周期 snapshot/patch，并扩展现有 fallback-order endpoint 读写候选预设映射；保持旧响应兼容
+│   【总结】新增聚合生命周期 snapshot/patch，并扩展 fallback endpoint 读写有序候选数组；保持旧响应兼容
 ├── src/backend/api/cli_typer_agent.py [修改]
 │   【总结】新增 lifecycle list/set、preset upsert 和 fallback list/preset set/unset 命令，旧 doctor/presets 保持兼容
 └── src/backend/api/cli_schema.py [按需修改]
@@ -282,7 +269,7 @@ Frontend: frontend-public
 ├── frontend-public/app/(app)/app/settings/lifecycle/page.tsx [新增]
 │   【总结】新增 Settings 生命周期设置真实页面及全局/仓库范围导航
 ├── frontend-public/app/(app)/app/settings/page.tsx [修改]
-│   【总结】移除旧 Agent-only 生命周期矩阵，改为统一设置页入口并保留 Agent 标签/回退顺序及可选预设选择
+│   【总结】移除旧 Agent-only 生命周期矩阵，改为统一设置页入口；生命周期、模型预设和执行器回退放在同一页
 ├── frontend-public/components/agent-runner/lifecycle-settings-page.tsx [新增]
 │   【总结】承载九阶段矩阵、来源、预设编辑、受影响阶段和写入状态
 ├── frontend-public/components/agent-runner/repository-agent-matrix-sheet.tsx [修改]
@@ -304,7 +291,7 @@ Tests
 ├── tests/test_agent_runner_cli.py [修改]
 │   【总结】覆盖 lifecycle/fallback list、显式范围、preset upsert/bind/unbind、回退候选映射与错误退出码
 ├── tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts [新增]
-│   【总结】通过生产 Settings 页面验证生命周期 scope、阶段绑定、回退预设编辑、保存与窄屏布局
+│   【总结】通过生产 Settings 页面验证生命周期 scope、阶段绑定、执行器回退预设编辑、保存与窄屏布局
 └── tests/playwright-e2e/tests/workflows/prototype-screenshots.spec.ts [修改]
     【总结】仅当正式原型截图需要重采时同步新生命周期设置画面的来源采集
 
@@ -329,7 +316,7 @@ Docs
 |---|---|---|---|---|
 | 生命周期三元组、回退候选 preset 与 global/repository 解析、继承、TOML 更新 | R2 | 跨 core/config/runtime/CLI/HTTP，持久化配置会影响后续 Agent 执行 | Executor + real-entry oracle；Section 2 对未指定/不支持、fallback 行为与目标范围由人确认 | `rv-1` fresh CLI + file reread；`rv-2` browser save + fresh read；无效模板/不匹配 Agent 负控 |
 | CLI `lifecycle` / `preset` / `fallback` 表面及 JSON | R2 | 新增持久化命令；目标范围/退出语义易使用户修改错误文件 | Executor + CLI contract and fresh-process oracle | `rv-1` 真实 CLI 调用、显式错范围负控、`kc agent presets` 兼容 |
-| Settings 页面、fallback card、scope selector、仓库快捷入口 | R2 | 新的跨层写入界面，可能把 global/repository 来源显示错或保存到错误目标 | Executor + production-route browser E2E + 人审 | `rv-2` 真实页面/端点/磁盘/fresh config 链路与桌面/窄屏呈递 |
+| Settings 统一页面、执行器回退卡片、scope selector、仓库快捷入口 | R2 | 新的跨层写入界面，可能把 global/repository 来源显示错或保存到错误目标 | Executor + production-route browser E2E + 人审 | `rv-2` 真实页面/端点/磁盘/fresh config 链路与桌面/窄屏呈递 |
 | 现有 PRD/单次覆盖及旧 endpoint 兼容 | R1 | 行为既有且可通过优先级/兼容测试明确区分 | Executor + targeted test | `rv-3` 旧命令及配置回归断言 |
 | 文档、静态前端类型与原型入口同步 | R0 | 机械同步，可立即回滚 | Executor + lint/docs build and prototype Hub navigation | `rv-3` 文档/静态构建与 Hub 路径门禁 |
 
@@ -338,7 +325,7 @@ Docs
 ```mermaid
 flowchart TD
   U["用户选择 Settings 全局或仓库范围"] --> F["frontend-public 生命周期设置页"]
-  U --> FB["Settings 回退顺序卡片"]
+  U --> FB["统一设置页 · 执行器回退"]
   FB --> FBAPI["fallback order + candidate preset API"]
   F --> API["聚合 lifecycle settings API"]
   CLI["kc agent lifecycle / preset / fallback"] --> CORE["core 生命周期与 fallback 设置用例"]
@@ -363,59 +350,58 @@ flowchart TD
 - 不得修改 CLI 单次旗标或 PRD override 优先级；persistent setting 和 one-shot setting 不能共用写入路径。
 - 不得把仓库页面快捷入口保留成另一套独立表单/缓存/写入 API。
 - 不得在没有 `reasoning_effort_args` 时宣称推理深度已传给 Agent；不调用外部模型目录来“验证”随意输入的模型 ID。
-- Fallback preset 只在 shared fallback chain 选中备用 Agent 时应用；primary Agent 与 one-shot `--agent` 不消费 `agent_fallback_presets`。
+- Fallback preset 只在 shared fallback chain 选中对应候选时应用；同一 Agent 的另一预设仍是独立候选；one-shot `--agent` 不消费该配置。
 - 不允许 fallback Agent 引用其他 Agent 的 preset；未绑定 fallback preset 必须保留现有默认行为。
 - 不得运行由 PRD 新增的通用配置编辑器、通用数据库设置层或第二 TOML writer。
 
 ### 7.6 Realistic Validation Plan
 
 ```yaml
-realistic_validation:
-  - id: rv-1
-    behavior: "CLI 能列出九阶段和 fallback 有效配置，并在显式范围内持久化阶段绑定、预设定义与回退候选预设映射。"
-    reviewer: human
-    real_entry: "uv run kc agent lifecycle list --scope repository --repo-id <fixture-repo> --json；随后设置并绑定 review-test，验证后 unset。再运行 uv run kc agent fallback list --scope global --json、uv run kc agent preset set fallback-test --agent claude --model example-model --scope global、uv run kc agent fallback preset set claude --preset fallback-test --scope global，fresh list 后执行 unset。"
-    expected: "Lifecycle JSON 有固定九行和稳定字段；fallback JSON 有顺序、切换预算、映射与来源。Lifecycle 写入只落 fixture repo 的 .kedacode.toml；fallback global 映射只落 global config.toml。新 CLI 进程 list 返回相同值；缺省与不支持字段有明示状态。"
-    mock_boundary: "可使用临时注册仓库与外部 Agent 可执行器 stub；真实 Typer 命令树、配置发现、TOML parser/merge/editor、文件和 JSON stdout 不得 mock。"
-    tier: R2
-    test_layer: smoke
-    required_for_acceptance: true
-    presentation: "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-1-lifecycle-cli.txt；交付时用 open 打开终端记录，快速检查九行、scope/repo id 和写后 fresh process 输出。"
-    critical_value_source: "CLI 输出中的实际 stage/preset/model/effort/source 与 fixture repo TOML 的写入内容；不得从预先拼好的 JSON 生成 evidence。"
-    must_cross: "真实 CLI entry → config discovery → existing global/repository merge → core lifecycle/fallback snapshot/update → lifecycle/fallback candidate preset validation → editor → toml_section_editor → 写入文件 → 新 CLI 进程 fresh read。"
-    forbidden_bypasses: "不得直接调用 core helper 代替命令；不得构造 AppConfig 假装来自文件；不得 mock TOML editor、stdout、exit code 或写后读取。"
-    fresh_state_probe: "绑定和 preset upsert 完成后启动独立 uv run kc 进程重新请求 JSON；并从磁盘重新读取 global 与 repository 文件，确认仅目标层/键变化。"
-    final_tree_evidence: "保存 stdout、退出码、fixture 配置 before/after 摘要与 git tree；CLI/config/resolver 改动后重跑。"
-    negative_control: "省略写命令 --scope、对 repository scope 省略 repo_id、使用未知 preset、把别的 Agent 的 preset 绑定给 Claude，及对不支持 effort 参数模板的 Agent 设非空 effort。"
-    expected_fail: "分别在文件写入前返回非零错误并指出缺失/未知项、候选 Agent 不匹配或不支持模板；目标 TOML 字节内容不变。"
+- id: rv-1
+  behavior: "CLI 能列出九阶段和 fallback 有效配置，并在显式范围内持久化阶段绑定、预设定义与有序回退候选。"
+  reviewer: human
+  real_entry: "uv run kc agent lifecycle list --scope repository --repo-id <fixture-repo> --json；随后设置并绑定 review-test，验证后 unset。再运行 uv run kc agent fallback list --scope global --json、uv run kc agent preset set fallback-test --agent claude --model example-model --scope global、添加两个同为 claude 但 preset 不同的候选、fresh list 后移除测试候选。"
+  expected: "Lifecycle JSON 有固定九行和稳定字段；fallback JSON 有候选顺序、每个候选的 Agent/preset、候选步数预算与来源。Lifecycle 写入只落 fixture repo 的 .kedacode.toml；fallback global 候选只落 global config.toml。新 CLI 进程 list 返回相同值；相同 (agent,preset) 被拒绝，不同 preset 可重复；缺省与不支持字段有明示状态。"
+  mock_boundary: "可使用临时注册仓库与外部 Agent 可执行器 stub；真实 Typer 命令树、配置发现、TOML parser/merge/editor、文件和 JSON stdout 不得 mock。"
+  tier: R2
+  test_layer: smoke
+  required_for_acceptance: true
+  presentation: "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-1-lifecycle-cli.txt；交付时用 open 打开终端记录，快速检查九行、scope/repo id 和写后 fresh process 输出。"
+  critical_value_source: "CLI 输出中的实际 stage/preset/model/effort/source 与 fixture repo TOML 的写入内容；不得从预先拼好的 JSON 生成 evidence。"
+  must_cross: "真实 CLI entry → config discovery → existing global/repository merge → core lifecycle/fallback snapshot/update → lifecycle/fallback candidate preset validation → editor → toml_section_editor → 写入文件 → 新 CLI 进程 fresh read。"
+  forbidden_bypasses: "不得直接调用 core helper 代替命令；不得构造 AppConfig 假装来自文件；不得 mock TOML editor、stdout、exit code 或写后读取。"
+  fresh_state_probe: "绑定和 preset upsert 完成后启动独立 uv run kc 进程重新请求 JSON；并从磁盘重新读取 global 与 repository 文件，确认仅目标层/键变化。"
+  final_tree_evidence: "保存 stdout、退出码、fixture 配置 before/after 摘要与 git tree；CLI/config/resolver 改动后重跑。"
+  negative_control: "省略写命令 --scope、对 repository scope 省略 repo_id、使用未知 preset、把别的 Agent 的 preset 绑定给 Claude，及对不支持 effort 参数模板的 Agent 设非空 effort。"
+  expected_fail: "分别在文件写入前返回非零错误并指出缺失/未知项、候选 Agent 不匹配或不支持模板；目标 TOML 字节内容不变。"
 
-  - id: rv-2
-    behavior: "Settings 生命周期页可切换 global/repository 范围、展示九阶段最终值与来源、编辑预设/绑定；Settings 回退卡片可设置候选预设并持久化到正确范围。"
-    reviewer: human
-    real_entry: "just e2e tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts；生产路径 /app/settings/lifecycle/，使用本机 Console 的真实认证与 API。"
-    expected: "桌面与 400px 窄屏页面均能操作完整九阶段；选择仓库后显示真实继承来源；回退候选预设只显示同 Agent 选项、保存后行内模型/推理深度与来源更新；global/repository 持久化目标正确，重新打开页面及 fresh CLI 都读到相同值；页面不把 PRD/one-shot override 冒充为当前基线。"
-    mock_boundary: "可 stub provider CLI/模型请求；不得 mock 前端 API client、HTTP route、core resolver、真实 TOML editor 或页面持久化写入。使用隔离 fixture config。"
-    tier: R2
-    test_layer: e2e
-    required_for_acceptance: true
-    presentation: "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-2-lifecycle-settings-desktop.png、rv-2-settings-fallback.png 与 rv-2-lifecycle-settings-mobile.png；交付时检查选中范围、九行字段和来源，并打开 Settings 回退卡片图核对 Agent 下拉、模型摘要和写入预览。"
-    critical_value_source: "浏览器在真实 Settings 页面中展示的 API response 值、保存后的文件以及 fresh CLI response；截图必须从浏览器实际生产路由截取。"
-    must_cross: "Settings route/fallback card → typed API client → canonical lifecycle/fallback endpoints → core scope selection/validation → TOML editor → fresh API GET + fresh CLI read；Backlog shortcut → 同一 lifecycle Settings route 并携带当前 repo id。"
-    forbidden_bypasses: "不得用 component preview、静态截图/mock data、手工注入 React state 或直调 core 替代页面入口；不得经旧 Agent-only endpoint 保存预设；不得只截图不复读配置。"
-    fresh_state_probe: "保存后关闭/重载 Settings 页面发起新 GET，并在新 CLI 进程查选中 repo；截图与 response 中 scope/repo_id/model/effort/source 对齐。"
-    final_tree_evidence: "保存 E2E trace、desktop/mobile screenshots、API 请求记录的非敏感摘要、配置前后摘要和 git tree；页面/API/editor 修改后重跑完整路径。"
-    negative_control: "在真实页面提交未知 preset、Agent 不匹配 preset 或 unsupported reasoning effort，然后再提交有效 repository-only lifecycle override。"
-    expected_fail: "无效请求显示可操作错误且不改变配置；有效请求仅改变选中的 scope，global 和其他 repo fresh read 不变。"
+- id: rv-2
+  behavior: "Settings 统一页面可切换 global/repository 生命周期范围、展示九阶段最终值与来源、编辑预设/绑定；同页执行器回退区可设置候选预设并按明确范围持久化。"
+  reviewer: human
+  real_entry: "just e2e tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts；生产路径 /app/settings/lifecycle/，使用本机 Console 的真实认证与 API。"
+  expected: "桌面与 400px 窄屏页面均能操作完整九阶段；选择仓库后显示真实继承来源；同页执行器回退预设只显示同执行器选项、保存后行内模型/推理深度与来源更新；global/repository 持久化目标正确，重新打开页面及 fresh CLI 都读到相同值；页面不把 PRD/one-shot override 冒充为当前基线。"
+  mock_boundary: "可 stub provider CLI/模型请求；不得 mock 前端 API client、HTTP route、core resolver、真实 TOML editor 或页面持久化写入。使用隔离 fixture config。"
+  tier: R2
+  test_layer: e2e
+  required_for_acceptance: true
+  presentation: "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-2-lifecycle-settings-desktop.png、rv-2-settings-fallback.png 与 rv-2-lifecycle-settings-mobile.png；交付时检查选中范围、九行字段和来源，并打开同页执行器回退图核对候选下拉、模型摘要和写入预览。"
+  critical_value_source: "浏览器在真实 Settings 页面中展示的 API response 值、保存后的文件以及 fresh CLI response；截图必须从浏览器实际生产路由截取。"
+  must_cross: "Settings lifecycle route/同页执行器回退卡片 → typed API client → canonical lifecycle/fallback endpoints → core scope selection/validation → TOML editor → fresh API GET + fresh CLI read；Backlog shortcut → 同一 lifecycle Settings route 并携带当前 repo id。"
+  forbidden_bypasses: "不得用 component preview、静态截图/mock data、手工注入 React state 或直调 core 替代页面入口；不得经旧 Agent-only endpoint 保存预设；不得只截图不复读配置。"
+  fresh_state_probe: "保存后关闭/重载 Settings 页面发起新 GET，并在新 CLI 进程查选中 repo；截图与 response 中 scope/repo_id/model/effort/source 对齐。"
+  final_tree_evidence: "保存 E2E trace、desktop/mobile screenshots、API 请求记录的非敏感摘要、配置前后摘要和 git tree；页面/API/editor 修改后重跑完整路径。"
+  negative_control: "在真实页面提交未知 preset、Agent 不匹配 preset 或 unsupported reasoning effort，然后再提交有效 repository-only lifecycle override。"
+  expected_fail: "无效请求显示可操作错误且不改变配置；有效请求仅改变选中的 scope，global 和其他 repo fresh read 不变。"
 
-  - id: rv-3
-    behavior: "历史查询、PRD 覆盖、单次运行旗标、无 fallback preset 映射时的既有默认行为及既有 Agent-only API 保持兼容，模板缺失仍 fail-fast。"
-    reviewer: verifier
-    real_entry: "uv run kc agent presets；uv run kc agent doctor --lifecycle verifier --json；既有 lifecycle-agents API contract；uv run kc run --help / uv run kc ask --help。"
-    expected: "原有命令/响应仍有效，one-shot 参数未写持久配置；PRD header precedence、仓库同名 preset 原子覆盖、fix/closeout inheritance 与 unsupported template error 均符合现有 contracts。"
-    mock_boundary: "外部 Agent CLI 可以 stub；既有 CLI parser、配置加载/merge、API schema 与 core resolver 必须真实。"
-    tier: R1
-    test_layer: integration
-    required_for_acceptance: true
+- id: rv-3
+  behavior: "历史查询、PRD 覆盖、单次运行旗标、无 fallback preset 映射时的既有默认行为及既有 Agent-only API 保持兼容，模板缺失仍 fail-fast。"
+  reviewer: verifier
+  real_entry: "uv run kc agent presets；uv run kc agent doctor --lifecycle verifier --json；既有 lifecycle-agents API contract；uv run kc run --help / uv run kc ask --help。"
+  expected: "原有命令/响应仍有效，one-shot 参数未写持久配置；PRD header precedence、仓库同名 preset 原子覆盖、fix/closeout inheritance 与 unsupported template error 均符合现有 contracts。"
+  mock_boundary: "外部 Agent CLI 可以 stub；既有 CLI parser、配置加载/merge、API schema 与 core resolver 必须真实。"
+  tier: R1
+  test_layer: integration
+  required_for_acceptance: true
 ```
 
 失败排查顺序：先核对配置输入 scope 与 repo id，再核对 TOML 全局/仓库层内容及 preset 原子覆盖，之后核对 lifecycle resolver 对 fix/closeout 的继承，最后检查 Agent 注册块是否提供 model/effort 参数模板。UI 显示正确但 fresh CLI 不同，优先排查保存目标文件和配置发现，不要重建前端计算逻辑。
@@ -427,7 +413,7 @@ realistic_validation:
 ### 7.8 Frontend / Prototype / Data Model
 
 - **Frontend impact**：`frontend-public/` 新增 `/app/settings/lifecycle/`，承载 global/repository scope、九阶段矩阵、preset editor 与影响阶段说明；Settings 原 Agent-only 矩阵由单一入口替换，Backlog 仓库 gear 打开同一页面并预选 repo。`frontend-admin/` 无影响。
-- **Target prototype**：已登记在 Prototype Hub 的 [生命周期 Agent / 模型统一设置原型](../../docs/prototypes/lifecycle-agent-matrix.html?screen=lifecycle-settings)；回退预设交互可从 [三条 fallback preset 演示态](../../docs/prototypes/lifecycle-agent-matrix.html?screen=settings&demo=fallback-preset) 打开，保存结果见 `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png`。验收关键状态为全局初始矩阵、切换仓库后显示继承与覆盖、编辑/保存预设、回退候选预设及 400px 窄屏。实现 PR 中每个状态都提供匹配 viewport 的目标原型图与生产页面截图；原型标注 `interactive prototype`，生产页面截图标注实际 e2e/手动验证层级。
+- **Target prototype**：已登记在 Prototype Hub 的 [生命周期与执行器统一设置原型](../../docs/prototypes/lifecycle-agent-matrix.html?screen=lifecycle-settings)；回退预设交互可从 [含两个 Claude 预设的候选队列演示态](../../docs/prototypes/lifecycle-agent-matrix.html?screen=lifecycle-settings&demo=fallback-preset) 打开，保存结果见 `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png`。验收关键状态为全局初始矩阵、编辑/保存预设、同执行器不同预设的回退候选及 400px 窄屏。实现 PR 中每个状态都提供匹配 viewport 的目标原型图与生产页面截图；原型标注 `interactive prototype`，生产页面截图标注实际 e2e/手动验证层级。
 - **Prototype files changed in this PRD preparation**：prototype change log 在 `docs/prototypes/lifecycle-agent-matrix.md` 列出全部原型、registry、索引、静态底图 provenance 与导航变更。
 - **No data model changes in this PRD.** Global/repository TOML 是唯一持久化配置；无需 ER diagram 或 migration。
 
@@ -450,7 +436,7 @@ notes: "已检查 pending/archive。#247 console/CLI parity、#246 backlog snaps
 | 要看什么 | 呈递物 | 人如何快速确认 |
 |---|---|---|
 | CLI 生命周期与回退预设查看/持久化 | `tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-1-lifecycle-cli.txt`。交付时运行 `open tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-1-lifecycle-cli.txt`。 | 查看 JSON 是否有九个生命周期键和 fallback 顺序/预算/映射；核对 repository lifecycle 与 global fallback 写入后 fresh CLI 进程仍返回相同值。 |
-| Settings 生命周期与回退预设编辑 | `rv-2-lifecycle-settings-desktop.png`、`rv-2-settings-fallback.png` 与 `rv-2-lifecycle-settings-mobile.png`，位于 `tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/`。交付时打开 desktop 与 fallback 图。 | 生命周期图检查九行字段、来源和仓库选择；回退图检查 Agent 匹配下拉、模型/推理深度和写入预览；窄屏图检查字段可读且无横向滚动依赖；按报告核对 fresh API/CLI。 |
+| Settings 生命周期与执行器回退预设编辑 | `rv-2-lifecycle-settings-desktop.png`、`rv-2-settings-fallback.png` 与 `rv-2-lifecycle-settings-mobile.png`，位于 `tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/`。交付时打开 desktop 与 fallback 图。 | 生命周期图检查九行字段、来源和仓库选择；同页执行器回退图检查候选匹配下拉、模型/推理深度和写入预览；窄屏图检查字段可读且无横向滚动依赖；按报告核对 fresh API/CLI。 |
 
 verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/one-shot 优先级、TOML 未变化负控、静态类型/lint/docs 门禁若失败才升级。人审仅呈递以上两个 oracle，不把纯日志当成产品体验证据。
 
@@ -458,10 +444,13 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 
 #### Human-Confirmed
 
-- [ ] 确认 Settings 独立生命周期页面是主入口，Backlog 仓库快捷入口打开同一页面并预选该仓库。（§2 决定一；rv-2）
-- [ ] 确认 CLI 所有持久化修改显式指定 global/repository，repository 修改显式提供 `repo_id`。（§2 决定二；rv-1）
-- [ ] 确认九阶段都可查看/编辑，但缺省与不支持的模型/推理深度保持如实标记，不强制更改现有运行默认。（§2 决定三；rv-1、rv-2）
-- [ ] 确认回退顺序中的每个备用 Agent 可选绑定同 Agent 的命名预设，未绑定时沿用 Agent 默认配置。（§2 决定四；rv-1、rv-2）
+以下项目是实现完成后对真实交付证据的人工验收，不是要求用户再次确认需求范围：
+
+- [ ] Settings 独立生命周期页面是主入口；Backlog 仓库快捷入口打开同一页面并预选该仓库。（§2；rv-2）
+- [ ] CLI 持久化修改显式指定 global/repository；repository 修改显式提供 `repo_id`。（§2；rv-1）
+- [ ] 九阶段都可查看/编辑；缺省与不支持的模型/推理深度如实标记，不强制更改现有运行默认。（§2；rv-1、rv-2）
+- [ ] 执行器回退候选可绑定匹配的命名预设，未绑定时沿用执行器默认配置。（§2；rv-1、rv-2）
+- [ ] 同一执行器可通过不同模型预设重复出现在回退队列；预算按候选步数计算，完全相同的执行器/预设组合不能重复。（§2；rv-1、rv-2）
 
 #### Architecture Acceptance
 
@@ -476,8 +465,9 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - [ ] `kc agent lifecycle list` 输出九行；`--json` 字段稳定且包含所选 scope/repo id、绑定 preset、effective Agent/model/effort、来源/缺省/支持状态。
 - [ ] lifecycle set 和 preset set 都需要显式 scope；未知 repo、未知 stage/preset、未注册 Agent、unsupported effort template 在写入前非零退出并返回字段级错误。
 - [ ] 新 preset 可仅设置 Agent，model/effort 字段可缺省；提供模型/effort 时只有对应 Agent arg template 存在才允许绑定/显示为已生效。
-- [ ] Fallback preset mapping 只引用已存在且 Agent 相同的 preset；候选执行时应用模型/推理深度，未绑定时保持 Agent 默认；显式 primary/one-shot Agent 选择不消费此映射。
-- [ ] `kc agent fallback list` 显示有效顺序、最大切换次数与 preset mapping；fallback preset set/unset 要显式 scope，repository 写入必须给 `repo_id`。
+- [ ] 执行器回退候选只引用已存在且执行器匹配的 preset；候选执行时应用自身的模型/推理深度，未绑定时保持执行器默认；同一执行器可绑定不同 preset 多次，完全相同的 `(agent, preset)` 组合被拒绝。
+- [ ] `kc agent fallback list` 显示有序候选、每项 preset、最大候选步数与 effective scope；候选 set/unset 要显式 scope，repository 写入必须给 `repo_id`。
+- [ ] 旧 `agent_fallback_order` 字符串列表可以读取为无 preset 候选；存在 `agent_fallback_candidates` 时它是运行时事实源，`agent_fallback_order` 只作为兼容顺序视图。
 - [ ] Settings 初始 global matrix 展示九阶段全部字段、继承/来源；repository scope 仅编辑所选 repo 文件，保存后页面和新 CLI 进程读回一致值。
 - [ ] 编辑共享 preset 前明确展示其绑定生命周期；保存后所有绑定阶段的有效值随 preset 一起变化；新建 preset 并单独绑定只影响所选阶段。
 - [ ] Backlog repo gear 打开同一 Settings 路由并预选 repo；PRD override 保持原入口与高于 repository base 的语义。
@@ -510,18 +500,19 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - **FR-2 Accurate resolution**：应用现有命名 preset、global/repository 原子覆盖、`fix/closeout` implementation inheritance 和已有 fallback/legacy 语义；页面说明 PRD header 与 one-shot CLI 可进一步覆盖当前基线。
 - **FR-3 Unified Settings scope**：新增 `/app/settings/lifecycle/`，全局与选中仓库在同一页面读取/编辑；Backlog repo shortcut 指向同一 route 并预选 repo；PRD override 保持 context-specific。
 - **FR-4 Preset editor**：可 upsert 命名 preset 的 agent/model/reasoning_effort，并绑定/解绑 stage preset；展示被共享 preset 影响的 stage；未设置字段、Agent 默认和不支持字段有不同显示。
-- **FR-5 CLI persistent lifecycle settings**：新增全矩阵 list table/JSON、stage preset set/unset、preset upsert 和 fallback list/preset set/unset；所有写入显式指定 scope，repository 写入显式提供 repo id；既有 `kc agent presets` 和 doctor 保持兼容。
+- **FR-5 CLI persistent lifecycle settings**：新增全矩阵 list table/JSON、stage preset set/unset、preset upsert 和 fallback candidate list/add/preset set/unset/remove/move；所有写入显式指定 scope，repository 写入显式提供 repo id；既有 `kc agent presets` 和 doctor 保持兼容。
 - **FR-6 Targeted safe persistence**：复用现有 TOML round-trip/atomic writer，只更新用户指定键，写前校验完整 payload，写后 reload 并返回 fresh view；失败不写入。
 - **FR-7 Fail-fast capability validation**：未知 stage/preset、未注册 Agent、model/effort 模板缺失均产生可操作错误；不静默忽略模型参数、不错误标为已应用、不调用 Agent。
 - **FR-8 Docs and packaged skill sync**：同步使用指南、命令帮助和随包 `kedacode-operator` skill/reference；schema/CLI JSON contract 同步。
-- **FR-9 Fallback candidate preset mapping**：每个 `agent_fallback_order` 候选可选绑定一个同 Agent 的命名预设；Settings 可选择/清除并展示模型/推理深度，CLI 可 list/set/unset；未绑定时继续使用 Agent 默认配置，顺序和切换预算语义不变。
+- **FR-9 Executor fallback candidate presets**：每个回退候选可选绑定一个匹配的命名预设；统一设置页可选择/清除并展示模型/推理深度，CLI 可 list/set/unset；未绑定时继续使用执行器默认配置。
+- **FR-10 Repeated executor candidates**：回退链以有序 `agent_fallback_candidates` 条目保存；同一执行器可通过不同 preset 多次出现，完全相同的 `(agent, preset)` 不可重复；最多切换预算按回退候选步数计算，旧 `agent_fallback_order` 继续作为无预设配置的读取兼容形式。
 
 ## 11. Non-Goals
 
 - 以数据库、API setting cache 或其他新文件保存生命周期配置。
 - 通用化为任意 TOML 读写界面、全局所有配置的管理面板或任意 Agent 参数编辑器。
 - 自动查询外部模型目录、验证供应商账户权限、推荐模型或发起模型调用探测。
-- 为每个 stage 增加独立 fallback 顺序或改变现有 Agent fallback order / switch budget 语义；回退候选预设绑定仅按 FR-9 提案处理，是否纳入由 Human Review 决定。
+- 为每个 lifecycle stage 增加独立 fallback 顺序；全局/仓库既有回退队列中的候选预设和重复执行器按 FR-9/FR-10 实现。
 - 重做 PRD override editor、改写 PRD 文件头格式、改变 PRD 与 CLI 优先级。
 - 改变 `kc run` / `ask` / `review` 等 one-shot flags 的语义，或把单次参数持久化。
 - 保证 Agent CLI 内部默认模型/推理档可从本仓库读取；缺少显式配置时展示未知/默认。
@@ -536,12 +527,13 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 | 修改共享 preset 同时影响多个 lifecycle | 用户意外改动多个阶段 | UI 和 CLI 回显所有绑定 stage；提供新建 preset 并单阶段绑定路径 |
 | repository scope 写到错误文件或 global 被覆盖 | 多仓库 Agent 行为扩散 | Mutation 要求明确 scope/repo id；fresh process 同时核对目标与非目标文件 |
 | PRD/one-shot override 高于页面基线 | 用户比较时看到不同 Agent/模型 | 页面明确标为 global/repository baseline，列出更高优先级覆盖入口；`doctor --lifecycle` 保持 stage 诊断 |
-| fallback Agent 没有显式模型预设 | 切换到备用 Agent 后使用该 Agent 自己的默认模型和推理深度，可能与主阶段预设不同 | §2 决定四待确认每个候选是否可选绑定匹配预设；若纳入，验证 Agent 一致与模型/effort 能力，未绑定保持现有默认行为 |
+| 回退候选以 Agent 名称作为身份 | 同一执行器无法尝试两个不同模型预设，或预算被误读成唯一执行器切换数 | 使用 `(agent, preset)` 作为候选身份；运行时按候选逐个消耗预算，旧字符串列表转成无预设候选 |
+| fallback Agent 没有显式模型预设 | 切换到备用 Agent 后使用该 Agent 自己的默认模型和推理深度，可能与主阶段预设不同 | 允许候选绑定匹配预设；验证 Agent 一致与模型/effort 参数模板能力，未绑定保持现有默认行为 |
 | 新 UI 与旧仓库 drawer 变成两套编辑器 | 状态和写入路径漂移 | Backlog gear 导航到同一 page/state；不得另造 repository-only form/API |
 | UI 与 CLI 并行修改配置 | 某一字段值被最后写入覆盖 | sparse update 使用现有 writer 每次从最新磁盘文档 round-trip；返回 fresh snapshot；同一键并发仍按最后成功写入者为准并记录此限制 |
 | frontend-public 静态 bundle 与相关 pending PRD 冲突 | rebase/发布冲突 | 提交前核对 #246/#247 和 agentic-entry PRD 状态，协调同一 static build 输出 |
 
-如用户决定必须让九阶段都显式锁定可验证的模型和推理深度，应另行评估 Agent template capability 覆盖率及启动时的缺省配置策略；不在本 PRD 默认写入未经用户选定的模型。
+本 PRD 允许九阶段分别设置具体模型与推理深度，但不默认写入未经用户选定的值。若未来要求所有阶段必须显式锁定且启动时拒绝缺省，应另行评估 Agent 参数模板覆盖率及缺省配置策略。
 
 ## 13. Decision Log
 
@@ -552,16 +544,17 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 | D-03 | 九阶段都显示 effective value，但没有显式配置/Agent 不支持时如实标记 | 复用现有可选 preset/Agent 行为，不把外部 CLI 默认值猜成事实 | 随 PRD 默认强行写入九个未经用户选择的 preset |
 | D-04 | 以现有 `presets` 与 `lifecycle_presets` 为唯一模型设置语法 | 已有三元组是 agent/model/reasoning_effort；复用已有 resolver 和 CLI template | 按 stage 另存一份 model/effort |
 | D-05 | 旧 lifecycle-agent route 作为兼容入口，聚合页面用专门 settings route；两者共用 core/editor | 旧 API 仍为旧矩阵和 PRD 相关入口服务，聚合页面需要完整预设载荷 | 不兼容改写旧 route response 或维护第二套 writer |
-| D-06 | 建议每个 fallback candidate 可选绑定同 Agent preset；确认前保持 Human-Confirmed 未勾选 | 主 Agent 的模型预设在切换 Agent 时会被丢弃；候选独立映射可明确回退模型且不改变回退顺序 | 所有候选继续使用 Agent CLI 默认，或把一个阶段的预设强行套给不同 Agent |
+| D-06 | 每个 fallback candidate 可选绑定同 Agent preset（用户需求） | 主 Agent 的模型预设在切换执行器时会被丢弃；候选预设能明确回退模型 | 所有候选继续使用 Agent CLI 默认，或把一个阶段的预设强行套给不同 Agent |
+| D-07 | 同一执行器可用不同 preset 重复进入回退队列；候选以 `(agent, preset)` 区分，预算按候选步数（用户需求与必要实现约束） | 同一执行器可能有多种模型/推理档，重复候选可逐步降档或换模型；精确重复没有价值 | 每个执行器最多一次，或以 Agent 名称映射一个 preset |
 
 ### Final Reconciliation
 
-- Interpretation: 初稿锁定用户要求的九阶段 Agent/模型/推理深度统一视图、同页 global/repository 设置与 CLI 查看/持久化操作；新增回退 candidate preset 作为第四项待确认决策。
+- Interpretation: 用户明确要求九阶段 Agent/模型/推理深度统一视图、同页 global/repository 设置、CLI 查看/持久化操作，以及统一页面内的执行器回退预设；同一执行器可用不同预设重复出现在回退队列。§2 已记录这些需求及安全实现约束，没有遗留的开工前产品决策。
 - Existing behavior/compatibility: 复核 `model-presets.md`、resolver、console API 与 TOML editor；PRD/one-shot precedence、preset tuple、仓库原子覆盖、`fix/closeout` inheritance 仍按现行语义。
-- Public surfaces: proposed Settings route `/app/settings/lifecycle/` 与现有 Settings fallback card；CLI lifecycle/fallback list/set/upsert 命令由 §6/§10 唯一描述；implementation 时若 Typer naming 冲突先修本节和 Change Log。
+- Public surfaces: Settings route `/app/settings/lifecycle/` 内含生命周期设置与“执行器回退”区；CLI lifecycle/fallback list/candidate commands 由 §6/§10 唯一描述。旧 `agent_fallback_order` 可继续读为无预设候选；新 `agent_fallback_candidates` 保存候选数组；`max_agent_switches` 键名保留，预算按候选步数计算。
 - Related PRD status: 已检查 pending/archive；#247、#246 和 `kc-agentic-entry-and-stall-supervision` 仅有软文件重叠，无构建/语义硬依赖。
-- Requirements, risks and overview: FR-1 至 FR-9 在 Feature Overview 均有锚点；fallback 配置由 rv-1 CLI 和 rv-2 页面 oracle 一并覆盖；不新增 DB/schema。
-- Reconciled differences: fallback candidate preset 是新增提案，不标记为已确认；最终是否纳入由 Human-Confirmed 决定。
+- Requirements, risks and overview: FR-1 至 FR-10 在 Feature Overview 均有锚点；fallback 配置由 rv-1 CLI 和 rv-2 页面 oracle 一并覆盖；不新增 DB/schema。
+- Reconciled differences: 回退候选预设与同执行器使用不同预设重复均已纳入范围；Human-Confirmed 仅用于交付后检查真实页面、CLI 和证据，不作为需求前置审批。
 
 ## Change Log
 
@@ -571,12 +564,44 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - After: 新增单一 Settings 页面和全生命周期 CLI view/persistent edit 目标，移除旧 Agent-only 生命周期矩阵入口，保留现有 preset/resolver/TOML 事实源。
 - Reason: 用户要求每阶段明确 Agent、模型与推理深度，并把全局/仓库设置与 CLI 查看/设置收敛到可发现入口。
 - Impact: 需要后端聚合视图、CLI 写入、frontend-public Settings 页面、文档/随包 skill 同步；无数据库变化。
-- Review: 待用户评审 §1 Interpretation 与 §2 四项 Human Review 决定。
+- Review: 初稿曾把需求和实现约束误列为五项待确认；该标记已由后续修订纠正。当前 §2 无开工前待确认项。
 
 ### 修订：补齐回退候选预设交互
 - Type: scope / prototype / acceptance
 - Before: Settings 回退卡片只编辑候选顺序和切换次数；PRD 将可选回退预设列为后续。
-- After: 原型每个候选行可选同 Agent 的预设并展示模型/推理深度摘要，保存预览纳入映射；回退状态截图内嵌在 PRD 决定四；PRD 新增 FR-9 与第四项 Human Review 决定，覆盖配置、CLI、API、runtime 和真实入口验证。
-- Reason: 评审发现原型没有呈现已讨论的 fallback preset 需求，无法对这项行为作出具象确认。
-- Impact: 若 Human Review 接受，增加 fallback mapping 的 TOML/API/CLI/runtime 支持；未绑定行为、回退顺序和预算保持兼容。
-- Review: §2 决定四待确认；本次只更新概念原型与 PRD，不实现生产行为。
+- After: 原型每个候选行可选同 Agent 的预设并展示模型/推理深度摘要，保存预览纳入映射；回退状态截图当时内嵌在 §2 决定四；PRD 新增 FR-9 与对应的范围说明（初稿曾误列为待确认），覆盖配置、CLI、API、runtime 和真实入口验证。
+- Reason: 按用户提出的具体回退预设需求补齐原型；初稿误将其作为待确认决定。
+- Impact: 将 fallback mapping 的 TOML/API/CLI/runtime 支持纳入当前需求；未绑定行为、回退顺序和预算保持兼容。
+- Review: 用户需求按 §2 实现；本次只更新概念原型与 PRD，不实现生产行为。
+
+### 修订：统一生命周期与执行器回退页面
+- Type: prototype / interaction / terminology
+- Before: 生命周期矩阵和模型预设位于专门页面，回退顺序仍在 Settings 的独立卡片中。
+- After: 生命周期矩阵、模型预设和“执行器回退顺序”在同一设置页连续呈现；Settings 主页面只保留 Agent 标签设置和统一入口。用户可在上方定义模型预设，再为匹配的回退候选绑定预设。
+- Reason: 设置分散导致用户难以发现如何给回退候选指定具体模型；“执行器回退”更贴近用户要配置的执行行为。
+- Impact: 本原型和 PRD 的页面说明、回退命名与截图更新；底层 `agent_fallback_order` / `agent_fallback_presets` 配置标识不改。
+- Review: 页面位置、术语和同页回退预设入口按用户指示更新。
+
+### 修订：设置页布局与可读性
+- Type: prototype / interaction / presentation
+- Before: 生命周期矩阵有六列且字号偏小；统一设置内容面板左侧留有底图残片；模型预设卡片三列过窄，页面区块较难定位。
+- After: 矩阵改为四列并放大字号和行距；内容面板对齐真实设置内容区；预设卡片改为双列；页面首部提供三个区块锚点，便于跳转。
+- Reason: 原型评审指出布局拥挤、页面对齐不一致。
+- Impact: 更新交互原型、预览截图和操作说明；生产页面尚未实现，PRD 验收仍以真实页面为准。
+- Review: 等待继续评审。
+
+### 修订：允许同一执行器使用不同预设重复回退
+- Type: scope / configuration / interaction / acceptance
+- Before: 回退候选按执行器名去重，模型预设映射也按执行器名索引；同一执行器不能顺序尝试不同预设。
+- After: 每行作为独立候选，以 `agent` 和可选 `preset` 成对配置；同一执行器可用不同预设多次，完全相同组合拒绝。新配置以有序 `agent_fallback_candidates` 数组表为事实源，旧 `agent_fallback_order` 仍可读作无预设候选；切换预算按候选步数计算。
+- Reason: 用户指出选择预设后，同一个执行器应能使用不同模型配置再次尝试。
+- Impact: 更新原型、TOML 写入提案、API/CLI/runtime 校验和交付验收；本轮只更新概念原型与 PRD，不改生产实现。
+- Review: 用户提出允许同一执行器用不同预设重复；fallback 截图展示 Claude 的 `sonnet-5.5 / max` 与 `sonnet-5.5 / high` 两条候选。
+
+### 修订：纠正待确认决策标记
+- Type: requirements / review / acceptance
+- Before: §2 将统一页面、生命周期模型细节和执行器回退预设等用户已提出的需求列作五项待确认决策。
+- After: §2 区分用户明确提出的需求与实现安全约束；移除开工前逐项确认要求，保留 §9 的交付后人工验收清单。
+- Reason: 需求已由用户在本轮及此前对话中提出，不应再次要求用户拍板。
+- Impact: 不改变功能范围；修正 PRD 的决策状态、实现条件和验收描述。
+- Review: 当前无待确认产品决策；交付后 Human-Confirmed 仅验收真实实现与证据。

@@ -834,7 +834,7 @@ def _build_memory_block(
             for fact in relevant_memory.long_term_facts
         ]
         sections.append(
-            "Project conventions / long-term memory (from .iar/memory/long_term/):\n"
+            "Project conventions / long-term memory (from .kedacode/memory/long_term/):\n"
             + "\n".join(fact_lines)
         )
     catalog = format_skill_catalog(
