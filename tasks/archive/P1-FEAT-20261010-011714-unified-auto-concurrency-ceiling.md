@@ -653,3 +653,11 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - Reason: 保持「无 schema 变更、沿用行缺失语义」（D-04）；拆列需迁移，成本高于收益。
 - Impact: 用户恢复继承后默认视图回到 list；已在页面提示与文档说明。
 - Review: 人工知悉项（随 §2 决定三与 §9.1 一并复核）。
+
+### rv-3 证据脚本取错 PATCH 负载（异步缓冲竞态致误红）
+- Type: validation
+- Before: `rv3_console.py` 断言 `settings_patch.max_parallel`，但驱动记录的其实是 PATCH 的**响应体**，且经 `page.on("response")` 异步缓冲（监听里 `await response.json()` 晚于取数）：`policy` 步负载被记成 `_non_json` → 页面三态、来源、DB 行删除全部正确，脚本却 exit 1，runner 复跑该项失败。
+- After: 驱动在点击动作处同步取齐 PATCH **请求体**（`request.postDataJSON()`）与响应体（await 后入记录），并对本步 fresh GET 增加落位等待；`rv3_console.py` 改为断言请求体 `max_parallel`＝2 / 8 / 4 / null、status=200、响应写回值与请求一致，另新增 fresh GET /settings 策略值与 /autopilot 生效值同源断言。连续两次独立复跑均 `RESULT: PASS`（exit 0）。
+- Reason: runner 逐字复跑 RV 命令，证据脚本自身的取数竞态即假失败；「页面写了什么」应以页面发出的请求体为事实源，而不是从服务端响应反推。
+- Impact: 仅改动 `tasks/evidence/.../scripts/` 下的证据脚本（整目录 gitignore，不入代码 diff），生产代码与被测行为零改动；rv-3 判别力增强（多两组同源断言）。同时新增可复现现场负控 `rv3_negative.py`：向 gitignored 的 console 静态构建产物注入旧「未设置即显示伪造默认 2」口径，`rv3_console.py` 出现 6 条断言变红（inherit / capped / restored-fresh 文案不符 + 页面数字与 fresh GET 生效值不同源），随后按字节还原并校验，红证存 `rv-3-negative-control.txt`。
+- Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；item 3 的 `negative_control` / `expected_fail` 已改为实测命令与实测红态。
