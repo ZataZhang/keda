@@ -69,7 +69,10 @@ from backend.core.use_cases.agent_runner_worktree_probe import (
     _has_existing_local_commit_ready_for_publish,
     _worktree_needs_rebase_recovery,
 )
-from backend.core.use_cases.agent_runner_prd_activity import PrdActivityLease
+from backend.core.use_cases.agent_runner_prd_activity import (
+    PrdActivityConflictError,
+    PrdActivityLease,
+)
 from backend.core.use_cases.create_prd_from_issue import (
     CreatePrdFromIssueRequest,
     create_prd_from_issue,
@@ -334,7 +337,10 @@ def _process_single_issue(
     )
     stage_selection = PublishStageSelection()
     try:
-        prd_activity_lease.start()
+        # Ready Issue 先完成 claim election，再取得 PRD 锁。并发的 daemon 与
+        # 定向 run 只有赢家会持锁，落败者不会误报失败或释放赢家的锁。
+        if issue_kind != "ready":
+            prd_activity_lease.start()
         if issue_kind == "ready":
             used_agent = run_issue_with_agent_fallback(
                 issue=issue,
@@ -350,6 +356,7 @@ def _process_single_issue(
                     content_generator=content_generator,
                     publish_stage=publish_stage,
                     stage_selection=stage_selection,
+                    on_claimed=prd_activity_lease.start,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
                 on_agent_usage=_emit_agent_usage_event,
@@ -504,6 +511,13 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 1
+
+    except PrdActivityConflictError as exc:
+        # Fresh lock means another execution path owns the PRD. Skip without
+        # marking the shared Issue failed or changing the holder's workflow label.
+        _logger.info("Issue #%d PRD activity lock is held; skipping: %s", issue.number, exc)
+        output_view.update_status(issue.number, "skipped")
+        return 0
 
     except ClaimArbitrationLost as exc:
         # 首次领取仲裁落败：Issue 归更早的认领者。这里既不能标 failed 也不能改

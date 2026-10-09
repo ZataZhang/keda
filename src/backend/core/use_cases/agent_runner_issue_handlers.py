@@ -608,6 +608,7 @@ def _process_ready_issue(
     agent: str,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
+    on_claimed: Callable[[], None] | None = None,
     content_generator: IContentGenerator | None = None,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
@@ -664,6 +665,7 @@ def _process_ready_issue(
         github_client=github_client,
         config=config,
         selected_agent=selected_agent,
+        on_won=on_claimed,
     )
 
     # 档位决定在认领之后做：只有赢家需要确立档位，落败方（ClaimArbitrationLost 已在

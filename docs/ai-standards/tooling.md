@@ -180,7 +180,7 @@ python scripts/check_prd_acceptance_checklist.py --repo-root "$PWD" --all
 
 ### PRD 执行锁
 
-KedaCode 处理带 `PRD path:` 锚点的 Issue 时，复用仓库的 PRD 执行锁：开始时领锁、执行期间每分钟续期、结束后释放。若目标仓库未提供 `scripts/shared/just/prd_lock.py` 或 PRD 文件不存在，则跳过此集成；已有锁或领锁冲突会阻止该 Issue 并行执行，须先核实持锁者并按既有 `just prd release` 流程处理。KedaCode 继续使用 `issue-<N>` 分支名，看板通过上述 Issue 关联读取其分支副本。
+KedaCode 处理带 `PRD path:` 锚点的 Issue 时，复用仓库的 PRD 执行锁：开始时领锁、执行期间每分钟续期、结束后释放。若目标仓库未提供 `scripts/shared/just/prd_lock.py` 或 PRD 文件不存在，则跳过此集成。ready Issue 先完成 GitHub claim election，再由赢家领锁；输家不接触锁。fresh lock 表示另一个执行入口持有该 PRD，KedaCode 将本次 run 作为 skip 处理，不把共享 Issue 改成 failed。过期锁交给锁脚本按心跳和 worktree 活性规则接管并留档。KedaCode 继续使用 `issue-<N>` 分支名，看板通过上述 Issue 关联读取其分支副本。
 
 执行 `tasks/pending/` 下的 PRD 前必须先领锁：`just prd start <prd-file>`（知道工具名就 `--tool` 自报）。锁语义：
 

@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -81,7 +82,7 @@ def test_iar_activity_lock_visible_to_status(tmp_path: Path) -> None:
 
 
 def test_iar_does_not_run_through_existing_prd_lock(tmp_path: Path) -> None:
-    """已有 PRD 锁时拒绝并发执行，且不改写原锁。"""
+    """权威锁脚本拒绝已有锁时，lease 不改写它。"""
     repo_path = tmp_path / "repo"
     prd_path = repo_path / "tasks/pending/P1-FEAT-20260928-example.md"
     prd_path.parent.mkdir(parents=True)
@@ -97,6 +98,49 @@ def test_iar_does_not_run_through_existing_prd_lock(tmp_path: Path) -> None:
     with pytest.raises(PrdActivityConflictError):
         lease.start()
     assert lock_path.read_text(encoding="utf-8") == '{"ai_tool": "just"}'
+
+
+def test_iar_claim_reclaims_stale_prd_lock(tmp_path: Path) -> None:
+    """旧锁由共享 PRD 锁脚本判 stale 并留档后接管，不被文件存在性挡住。"""
+    source_root = Path(__file__).resolve().parents[1]
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
+    script_dir = repo_path / "scripts/shared/just"
+    script_dir.mkdir(parents=True)
+    shutil.copy2(source_root / "scripts/shared/just/prd_lock.py", script_dir / "prd_lock.py")
+    prd_name = "P1-FEAT-20260928-example.md"
+    pending_dir = repo_path / "tasks/pending"
+    pending_dir.mkdir(parents=True)
+    (pending_dir / prd_name).write_text("# Example\n", encoding="utf-8")
+    lock_path = repo_path / "tasks/evidence/P1-FEAT-20260928-example/active.lock"
+    lock_path.parent.mkdir(parents=True)
+    stale_heartbeat = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": 123,
+                "hostname": "dead-runner",
+                "worktree": "deleted-old-worktree",
+                "started_at": stale_heartbeat,
+                "heartbeat_at": stale_heartbeat,
+                "ai_tool": "iar/qoder",
+                "branch": "issue-39",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    lease = PrdActivityLease(repo_path, f"tasks/pending/{prd_name}", 39, "codebuddy")
+    lease.start()
+    try:
+        claimed_metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+        assert claimed_metadata["ai_tool"] == "iar/codebuddy"
+        assert claimed_metadata["branch"] == "issue-39"
+        stale_archives = list(lock_path.parent.glob("active.lock.*.stale"))
+        assert len(stale_archives) == 1
+    finally:
+        lease.close()
 
 
 def test_status_reads_issue_worktree_prd_progress(tmp_path: Path) -> None:

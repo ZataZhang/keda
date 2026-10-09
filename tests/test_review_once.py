@@ -559,8 +559,8 @@ def test_review_once_reruns_supervisor_after_mark_failed_marker() -> None:
     assert mock_cycle.called is True
 
 
-def test_review_once_still_skips_unchanged_context_with_approve_marker() -> None:
-    """Markers now record action; a non-failed action must keep the dedup skip."""
+def test_review_once_reconciles_stale_supervising_label_after_approve() -> None:
+    """上下文未变且最新 action 已 approve 时，不重跑 agent 但修正滞留的 supervising 标签。"""
     issue = IssueSummary(
         number=1,
         title="T",
@@ -593,8 +593,12 @@ def test_review_once_still_skips_unchanged_context_with_approve_marker() -> None
             process_runner=FakeProcessRunner(),
         )
 
-    assert outcome == "skipped_context_unchanged"
+    assert outcome == "skipped_context_unchanged_reconciled"
     assert mock_cycle.called is False
+    label_calls = [call for call in client.calls if call["method"] == "edit_issue_labels"]
+    assert len(label_calls) == 1
+    assert label_calls[0]["add"] == ["agent/review"]
+    assert label_calls[0]["remove"] == ["agent/supervising"]
 
 
 def test_review_once_moves_review_label_to_supervising_on_change() -> None:
