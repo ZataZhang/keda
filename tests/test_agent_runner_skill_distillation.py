@@ -26,7 +26,7 @@ from backend.core.shared.models.agent_runner import (
     MemoryConfig,
     RunnerConfig,
 )
-from backend.core.use_cases.agent_runner_publication import (
+from backend.core.use_cases.agent_runner_skill_distillation import (
     _SkillDistillationRequest,
     _format_distillation_attempt_history,
     _try_distill_skill_after_success,
