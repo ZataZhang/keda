@@ -608,6 +608,7 @@ def _process_ready_issue(
     agent: str,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
+    on_claimed: Callable[[], None] | None = None,
     content_generator: IContentGenerator | None = None,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
@@ -656,14 +657,14 @@ def _process_ready_issue(
         resolve_lifecycle_model_selection("implementation", config, issue=issue),
     )
 
-    # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读仲裁确认自己是最早的
-    # 认领者之后才把标签切到 running。落败方（ClaimArbitrationLost）不碰标签、
-    # 不建 worktree、不起 agent，由派发层按 skip 处理。
+    # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读后确认最早认领者才切 running。
+    # 落败方不碰标签、worktree 或 agent，由派发层按 skip 处理。
     claim_bid = arbitrate_first_claim(
         issue_number=issue.number,
         github_client=github_client,
         config=config,
         selected_agent=selected_agent,
+        on_won=on_claimed,
     )
 
     # 档位决定在认领之后做：只有赢家需要确立档位，落败方（ClaimArbitrationLost 已在

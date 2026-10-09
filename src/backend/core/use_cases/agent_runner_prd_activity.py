@@ -31,7 +31,9 @@ class PrdActivityLease:
         self._command_cwd = repo_path
 
     def start(self) -> None:
-        """存在 PRD 锚点和锁脚本时领锁，并启动心跳。"""
+        """存在 PRD 锚点和锁脚本时原子领锁，并启动心跳。"""
+        if self._thread is not None:
+            return
         relative_path = Path(self._prd_relative_path)
         if (
             relative_path.is_absolute()
@@ -42,10 +44,6 @@ class PrdActivityLease:
         ):
             return
         lock_path = self._repo_path / "tasks/evidence" / relative_path.stem / "active.lock"
-        if lock_path.exists():
-            raise PrdActivityConflictError(
-                f"PRD activity lock already exists for Issue #{self._issue_number}: {lock_path}"
-            )
         self._lock_path = lock_path
         worktree_path = self._find_worktree()
         self._command_cwd = (
@@ -57,8 +55,11 @@ class PrdActivityLease:
             "claim", "--tool", f"iar/{self._agent}", "--branch", f"issue-{self._issue_number}"
         )
         if claim_result.returncode != 0:
+            detail = (claim_result.stderr or claim_result.stdout).strip()
+            detail_suffix = f": {detail}" if detail else ""
             raise PrdActivityConflictError(
                 f"Could not claim PRD activity lock for Issue #{self._issue_number}"
+                f"{detail_suffix}"
             )
         self._lock_started_at = self._read_lock_metadata().get("started_at", "")
         if not self._owns_lock():
@@ -126,11 +127,9 @@ class PrdActivityLease:
 
     def _owns_lock(self) -> bool:
         metadata = self._read_lock_metadata()
-        return bool(
-            self._lock_started_at
-            and metadata.get("started_at") == self._lock_started_at
-            and metadata.get("ai_tool") == f"iar/{self._agent}"
-        )
+        # ai_tool 是展示信息，不参与共享锁的归属判定；同一 worktree 上由模型
+        # fallback 续跑时，锁脚本会保留最初的 ai_tool 与 started_at。
+        return bool(self._lock_started_at and metadata.get("started_at") == self._lock_started_at)
 
     def _run_lock_command(self, action: str, *extra_args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

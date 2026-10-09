@@ -35,6 +35,7 @@ from backend.core.use_cases.agent_runner_structured_evidence import (
     has_structured_evidence_marker,
     load_evidence_manifest,
 )
+from backend.core.use_cases.agent_runner_failure import is_provider_capacity_failure
 from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_dir,
     validation_required,
@@ -95,6 +96,10 @@ class ValidationVerdict:
     def missing_marker(self) -> bool:
         """verifier 没有产出可解析的 verdict marker(fail-safe 记为 red)。"""
         return not self.marker_found
+
+
+class VerifierUnavailableError(RuntimeError):
+    """候选 verifier 全部不可用或未能给出可解析结论，停止而不让 builder 盲修。"""
 
 
 def format_verifier_verdict_marker(risk: str) -> str:
@@ -513,19 +518,24 @@ def _format_verifier_unavailable_message(
         failure: 最后一次失败。
 
     Returns:
-        写进 attempt 历史与 recovery prompt 的阻断消息。
+        写进 Issue 失败摘要的阻断消息。
     """
-    from backend.core.use_cases.agent_runner_failure import is_provider_capacity_failure
-
-    if failure is not None and is_provider_capacity_failure(failure):
+    failure_summary = str(failure).lower() if failure is not None else ""
+    if "no parseable verdict marker" in failure_summary:
+        reason = (
+            "the candidate pool was exhausted after at least one agent failed to return "
+            "a parseable verdict marker"
+        )
+    elif failure is not None and is_provider_capacity_failure(failure):
         reason = (
             "every candidate agent's provider is out of quota or rate limited, so retrying "
             "the same agents before the usage window resets cannot help"
         )
     else:
-        reason = "every candidate agent failed to run"
+        reason = "every candidate agent failed to run or return a usable verdict"
     return (
-        f"The independent verifier could not run for issue #{issue_number}: {reason}. "
+        f"The independent verifier could not run or return a parseable verdict for issue "
+        f"#{issue_number}: {reason}. "
         f"Tried agent(s): {', '.join(tried_agents) or '(none)'}. "
         "This is a runner/agent-side failure, NOT a proven defect in the change: do not "
         "invent fixes for findings that do not exist. Restore a working verifier agent "
@@ -598,10 +608,10 @@ def run_verifier_gate(
     先把部分输出落盘再让异常上抛。另外 verifier 复跑证据脚本会覆盖 builder 的
     ``rv-*`` 文件,因此这里对证据目录做快照并在结束后恢复。
 
-    选定的 verifier agent **跑不起来**时(CLI 缺失 / 额度耗尽 / 进程级失败)不再
-    判死整个 Issue:先按 ``agent_fallback_order``(封顶 ``max_agent_switches``、始终
-    ≠ builder)顺延下一个候选;全部失败才降级成 fail-safe 阻断,让失败落进 builder
-    既有的 recovery 循环。
+    选定的 verifier agent 跑不起来或没有输出可解析 marker 时，按
+    ``agent_fallback_order``(封顶 ``max_agent_switches``、始终 ≠ builder)顺延；
+    全部候选耗尽后停止该 run，并把失败交给 runner 处理，绝不让 builder 修复
+    verifier 协议故障。
 
     Returns:
         ``ValidationVerdict`` 当 verifier 实际运行(verdict 非 red 时返回,red
@@ -609,9 +619,9 @@ def run_verifier_gate(
         marker(调用方据此决定是否在 PR 上做 label/评论副作用)。
 
     Raises:
-        ValidationEvidenceError: verifier 判定 red(经 recovery 自动打回 builder),
-            或所有候选 verifier agent 都跑不起来(verifier 侧故障,同样经 recovery
-            打回,但消息明说不是被证实的代码缺陷)。
+        ValidationEvidenceError: verifier 给出明确 red 结论（经 recovery 自动打回 builder）。
+        VerifierUnavailableError: 所有候选均无法运行或没有可解析结论；这是 verifier
+            侧故障，不会启动 builder repair 循环。
         subprocess.TimeoutExpired: verifier 超时被杀(部分输出已落盘、证据已恢复)。
     """
     if not config.validation.verifier_enabled:
@@ -664,6 +674,7 @@ def run_verifier_gate(
     verdict: ValidationVerdict | None = None
     tried_agents: list[str] = []
     last_failure: BaseException | None = None
+    protocol_failure_observed = False
 
     for index, candidate_agent in enumerate(candidate_agents):
         is_last_candidate = index == len(candidate_agents) - 1
@@ -673,7 +684,7 @@ def run_verifier_gate(
         # 换 agent 重跑时起点干净。
         evidence_snapshot = snapshot_evidence_dir(worktree_path, config, issue)
         try:
-            verdict = run_verifier_agent(
+            candidate_verdict = run_verifier_agent(
                 issue,
                 worktree_path,
                 builder_sha,
@@ -696,7 +707,14 @@ def run_verifier_gate(
             # agent 跑不起来（CLI 缺失 / 额度耗尽 / 进程级失败）不该判死整个 Issue:
             # 顺延下一个候选,全部失败才降级成 fail-safe red 交回可恢复的 repair 循环。
             tried_agents.append(candidate_agent)
-            last_failure = exc
+            last_failure = (
+                RuntimeError(
+                    "a previous verifier candidate returned no parseable verdict marker; "
+                    f"candidate {candidate_agent} then failed to run: {exc}"
+                )
+                if protocol_failure_observed
+                else exc
+            )
             if is_last_candidate:
                 break
             _logger.warning(
@@ -712,11 +730,46 @@ def run_verifier_gate(
                 evidence_snapshot,
                 keep_filenames=(_VERIFIER_RESPONSE_FILENAME,),
             )
+        if candidate_verdict.missing_marker:
+            protocol_failure_observed = True
+            tried_agents.append(candidate_agent)
+            candidate_agent_slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", candidate_agent)
+            candidate_response_log_path = response_log_path.with_name(
+                f"{response_log_path.stem}-{candidate_agent_slug}{response_log_path.suffix}"
+            )
+            try:
+                if response_log_path.is_file():
+                    candidate_response_log_path.write_text(
+                        response_log_path.read_text(encoding="utf-8"),
+                        encoding="utf-8",
+                    )
+            except OSError as exc:
+                _logger.warning(
+                    "Could not preserve verifier response for Issue #%d and agent %r: %s",
+                    issue.number,
+                    candidate_agent,
+                    exc,
+                )
+            last_failure = RuntimeError(
+                f"agent {candidate_agent} returned no parseable verdict marker; "
+                f"raw response log: {candidate_response_log_path}"
+            )
+            _logger.warning(
+                "Independent verifier agent %r emitted no verdict marker for Issue #%d; "
+                "trying the next independent candidate.",
+                candidate_agent,
+                issue.number,
+            )
+            verdict = None
+            if is_last_candidate:
+                break
+            continue
+        verdict = candidate_verdict
         chosen_agent = candidate_agent
         break
 
     if verdict is None:
-        raise ValidationEvidenceError(
+        raise VerifierUnavailableError(
             _format_verifier_unavailable_message(
                 issue_number=issue.number,
                 tried_agents=tuple(tried_agents),

@@ -23,6 +23,7 @@ from backend.core.use_cases.agent_runner_structured_evidence import (
 )
 from backend.core.use_cases.run_verifier_agent import (
     ValidationVerdict,
+    VerifierUnavailableError,
     build_verifier_prompt,
     format_verifier_verdict_marker,
     parse_verifier_verdict,
@@ -698,11 +699,7 @@ def test_run_verifier_gate_keeps_files_the_verifier_created(
 def test_run_verifier_gate_missing_marker_message_does_not_blame_the_builder(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """漏 marker 的阻断消息不得指使 builder 去修不存在的发现。
-
-    这条消息同时是 attempt Detail 与 recovery prompt;以前两种成因共用
-    "Fix what the verifier found",白烧过 attempt。
-    """
+    """无 marker 时尝试完独立候选后停止，不把 verifier 故障塞给 builder repair。"""
     from backend.core.use_cases import run_verifier_agent as rva
 
     record: dict = {}
@@ -712,16 +709,19 @@ def test_run_verifier_gate_missing_marker_message_does_not_blame_the_builder(
         ValidationVerdict(risk="red", findings="I had trouble.", marker_found=False),
         record,
     )
-    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+    config = AppConfig(
+        validation=ValidationConfig(verifier_enabled=True, verifier_agent="kimi"),
+        runner=RunnerConfig(agent_fallback_order=("kimi", "codex"), max_agent_switches=1),
+    )
 
-    with pytest.raises(ValidationEvidenceError) as exc_info:
+    with pytest.raises(VerifierUnavailableError) as exc_info:
         rva.run_verifier_gate(_structured_issue(), tmp_path, config, FakeProcessRunner(), "claude")
 
     message = str(exc_info.value)
-    assert "NO verdict marker" in message
-    assert "verifier-side protocol failure" in message
+    assert "parseable verdict marker" in message
+    assert "runner/agent-side failure" in message
     assert "do not invent fixes" in message
-    assert "verifier-response.txt" in message
+    assert "verifier-response-codex.txt" in message
     assert "Fix what the verifier found" not in message
 
 
@@ -780,10 +780,44 @@ def test_verifier_gate_falls_back_when_the_configured_agent_cannot_run(
     assert attempted == ["kimi", "codex"]
 
 
+def test_verifier_gate_falls_back_after_missing_verdict_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """候选模型漏掉 verdict marker 时，顺延下一名独立 verifier 并接受其判定。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    attempted: list[str] = []
+    monkeypatch.setattr(rva, "load_evidence_manifest", lambda *a, **k: _manifest())
+    monkeypatch.setattr(rva, "get_head_sha", lambda *a, **k: "abc1234")
+
+    def _fake_run(_issue, _worktree, _sha, _manifest, agent, _runner, **_kwargs):
+        attempted.append(agent)
+        if agent == "kimi":
+            return ValidationVerdict(
+                risk="red",
+                findings="The response omitted the protocol marker.",
+                marker_found=False,
+            )
+        return ValidationVerdict(risk="green", agent=agent)
+
+    monkeypatch.setattr(rva, "run_verifier_agent", _fake_run)
+    config = AppConfig(
+        validation=ValidationConfig(verifier_enabled=True, verifier_agent="kimi"),
+        runner=RunnerConfig(agent_fallback_order=("kimi", "codex"), max_agent_switches=1),
+    )
+
+    verdict = rva.run_verifier_gate(
+        _structured_issue(), tmp_path, config, FakeProcessRunner(), "claude"
+    )
+
+    assert verdict.risk == "green"
+    assert attempted == ["kimi", "codex"]
+
+
 def test_verifier_gate_blocks_rather_than_killing_the_issue_when_no_agent_can_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """所有候选都跑不起来时降级成 fail-safe red，让失败落进可恢复的 repair 循环。"""
+    """所有候选都不可用时明确失败，不让 builder repair 循环重复撞同一组 provider。"""
     from backend.core.use_cases import run_verifier_agent as rva
 
     attempted: list[str] = []
@@ -799,7 +833,7 @@ def test_verifier_gate_blocks_rather_than_killing_the_issue_when_no_agent_can_ru
     monkeypatch.setattr(rva, "run_verifier_agent", _fake_run)
     config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
 
-    with pytest.raises(ValidationEvidenceError) as exc_info:
+    with pytest.raises(VerifierUnavailableError) as exc_info:
         rva.run_verifier_gate(_structured_issue(), tmp_path, config, FakeProcessRunner(), "claude")
 
     message = str(exc_info.value)

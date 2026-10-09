@@ -1792,7 +1792,7 @@ uv run kc review-daemon
   - Issue comments 数量超过最新 supervisor marker 记录的游标
   - PR review comments 数量增加
 - 任一维度变化时，先移回 `agent/supervising`，运行 supervisor cycle
-- 无变化时直接 skip，避免无意义重评
+- 无变化时不重复启动 supervisor；若最新 `post_pr_supervisor` marker 的 action 与当前标签不一致，则按已完成 action 对齐标签（approve → `agent/review`、wait → `agent/supervising`、request input → `agent/blocked`、repair/rebase → `agent/running`）。这能恢复 supervisor 已写结果 marker、但进程在标签更新前退出时留下的滞后状态。
 
 Supervisor 结果评论会把自身写入后的 Issue comment 数量记录进 marker，
 因此 runner 自己写出的 `Agent Runner Post-PR Supervisor` 评论不会触发下一轮重审。
@@ -3251,8 +3251,8 @@ validation_passed = "validation/passed"
 
 verifier 以 `capture_output` 运行，输出不进 stdout、也不逐行落日志。为了让阻断事后可查证：
 
-- **原始响应落盘**：每次 verifier 跑完，完整响应写到 `<证据目录>/verifier-response.txt`（默认 `tasks/evidence/<prd-stem>/verifier-response.txt`），文件头记录 issue、verifier agent、builder sha、解析出的 risk、**是否找到 verdict marker**、响应字符数。写盘失败只降级为告警，不影响门禁本身。
-- **两种阻断成因分开表述**：verdict marker 缺失时仍按 fail-safe 阻断（绝不静默放行），但它是 **verifier 侧的协议/可靠性故障**，不代表 builder 的改动有缺陷。此时 attempt Detail 与 recovery prompt 明确写"NO verdict marker / verifier-side protocol failure / do not invent fixes"，并指向上面那份原始响应；只有真判 `red` 才说"Fix what the verifier found"。
+- **原始响应落盘**：每次 verifier 跑完，完整响应写到 `<证据目录>/verifier-response.txt`（默认 `tasks/evidence/<prd-stem>/verifier-response.txt`），文件头记录 issue、verifier agent、builder sha、解析出的 risk、**是否找到 verdict marker**、响应字符数。候选因漏 marker 被替换时，另留 `verifier-response-<agent>.txt`，以免下一位候选覆盖前一位的诊断材料。写盘失败只降级为告警，不影响门禁本身。
+- **无 verdict 时顺延独立候选**：缺少 verdict marker 仍 fail-closed，不会被当成通过；runner 把该候选视作 verifier 协议故障，按 `agent_fallback_order` 尝试下一个与 builder 不同的 agent。若候选池耗尽仍无可解析结果，run 以 verifier-side failure 结束，不触发 builder repair 循环，也不把无依据的发现交给 builder 修。
 - **为什么必须区分**：`ValidationVerdict.findings` 总会被填入响应文本，所以"findings 是否为空"无法用来判断有没有 verdict——唯一可靠信号是 `marker_found`。混在一起时，verifier 只是漏了最后那行 marker，builder 却被指使去修一个不存在的发现，白烧一轮 attempt。
 - **排查顺序**：daemon 被 verifier 挡下时，先读 `verifier-response.txt`；若里面没有任何实际发现，问题在 verifier agent（考虑用 `verifier_agent` 显式指定一个稳定的 agent，而不是 `auto`），不在被验的代码。
 
@@ -3264,7 +3264,7 @@ verifier 以 `capture_output` 运行，输出不进 stdout、也不逐行落日�
 
 - **顺延候选**：选定的 verifier agent 跑不起来时，按 `agent_fallback_order` 依次尝试下一个候选，封顶 `max_agent_switches`（与 builder 换 agent 共用同一套配置与预算，不新增开关）。候选池始终排除 builder——独立性靠"换 model 即换判定视角"保证，显式声明的 `verifier` 仍是首选，只在它跑不起来时才让位。每次候选都重新取证据快照，换 agent 重跑时起点干净。
 - **超时不参与顺延**：`TimeoutExpired` 仍按运行事故处理（不伪造 verdict、也不换 agent），与上一节语义一致。
-- **全失败才降级**：所有候选都跑不起来时抛 `ValidationEvidenceError`，消息明说这是 **runner/agent 侧故障、不是被证实的代码缺陷**（"do not invent fixes for findings that do not exist"），于是失败落进 builder 既有的 recovery 循环，而不是判死整个 Issue。
+- **候选耗尽时停止**：所有候选都跑不起来或无法给出可解析 marker 时抛 `VerifierUnavailableError`。错误说明这是 **runner/agent 侧故障、不是被证实的代码缺陷**（"do not invent fixes for findings that do not exist"）；当前 run 结束并将 Issue 标为 failed，避免相同 builder recovery 轮次反复重试同一组失效 verifier。
 - **额度措辞要认全**：provider-capacity 判定曾要求 `usage limit exceeded|reached`，认不出 codex 的 `You've hit your usage limit` —— 同一句额度耗尽因此既不算 capacity（builder 路径只重试不换 agent）也不触发顺延。现在裸 `usage limit` 与 `insufficient_quota` 都算，重置时刻同时支持 Claude 的 `resets at <ISO>` 与 codex 的 `try again at Oct 5th, 2026 10:24 AM`。
 
 **排查顺序**：daemon 报 "independent verifier could not run" 时看 `Tried agent(s)` 与 `Last failure`；若是额度问题，换一个有余量的 verifier agent（或改 `verifier = "auto"`）再重跑，不必怀疑被验代码。

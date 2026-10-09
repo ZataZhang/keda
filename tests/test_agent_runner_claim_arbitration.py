@@ -67,6 +67,34 @@ def test_sole_bidder_wins_and_issue_becomes_running() -> None:
     assert "agent/running" in labels_call["add"]
 
 
+def test_winner_hook_runs_before_running_label_transition() -> None:
+    """互斥准入在赢家切 running 前执行，锁冲突不会留下假 running 标签。"""
+    client = FakeGitHubClient()
+    callback_calls: list[str] = []
+
+    def _claim_prd_lock() -> None:
+        assert not [call for call in client.calls if call["method"] == "edit_issue_labels"]
+        callback_calls.append("claimed")
+
+    arbitrate_first_claim(
+        issue_number=42,
+        github_client=client,
+        config=AppConfig(),
+        selected_agent="claude",
+        grace_seconds=0,
+        host=HOST,
+        pid=111,
+        started_at=NOW,
+        sleeper=lambda _seconds: None,
+        pid_alive=lambda candidate: candidate == 111,
+        now=NOW,
+        on_won=_claim_prd_lock,
+    )
+
+    assert callback_calls == ["claimed"]
+    assert [call for call in client.calls if call["method"] == "edit_issue_labels"]
+
+
 def test_earlier_rival_claim_makes_this_side_lose_without_touching_labels() -> None:
     """存在更早的认领者时落败：不写标签，并把自己那条评论改写成撤销。"""
     client = FakeGitHubClient()

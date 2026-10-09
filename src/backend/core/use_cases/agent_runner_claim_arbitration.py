@@ -199,6 +199,7 @@ def arbitrate_first_claim(
     sleeper: Callable[[float], None] = time.sleep,
     pid_alive: Callable[[int], bool] = is_pid_alive,
     now: datetime | None = None,
+    on_won: Callable[[], None] | None = None,
 ) -> ClaimBid:
     """投标 → 回读 → 仲裁 → 赢家切 running；输家撤销并抛出落败。
 
@@ -217,6 +218,7 @@ def arbitrate_first_claim(
         sleeper: 等待函数（测试可注入，避免真实睡眠）。
         pid_alive: PID 存活探针（测试可注入）。
         now: 当前时间（测试可注入）。
+        on_won: 赢家确认后、切换 Issue 标签前执行的互斥准入回调。
 
     Returns:
         胜出的投标（即调用方自己那条）。
@@ -267,6 +269,8 @@ def arbitrate_first_claim(
     if (winner.host, winner.pid) == (this_host, this_pid):
         # 赢家就是本进程更早的那次投标：这是**同一次领取的重入**（agent fallback
         # 换 agent 会再走一遍领取），不是竞争。继续执行，不撤销自己的认领。
+        if on_won is not None:
+            on_won()
         transition_issue_workflow_state(github_client, issue_number, config, config.labels.running)
         return own_bid
     if _bid_sort_key(winner) != _bid_sort_key(own_bid):

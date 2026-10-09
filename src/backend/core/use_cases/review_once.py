@@ -316,6 +316,34 @@ def _process_review_candidate(
         issue_comments_count=len(comments),
         pr_comments_count=len(pr_comments),
     ):
+        supervisor_action_states = {
+            "approve_for_human_review": config.labels.review,
+            "wait_for_checks": config.labels.supervising,
+            "request_human_input": config.labels.blocked,
+            "repair_pr_branch": config.labels.running,
+            "rebase_pr_branch": config.labels.running,
+            "resolve_conflict": config.labels.running,
+        }
+        target_state = (
+            supervisor_action_states.get(last_marker.action or "")
+            if last_marker is not None
+            else None
+        )
+        if target_state is not None and target_state not in issue.labels:
+            transition_issue_workflow_state(
+                github_client,
+                issue.number,
+                config,
+                target_state,
+            )
+            _logger.info(
+                "Issue #%d context is unchanged; reconciled workflow state to %s from "
+                "the last supervisor action %s.",
+                issue.number,
+                target_state,
+                last_marker.action if last_marker is not None else None,
+            )
+            return "skipped_context_unchanged_reconciled"
         _logger.info(
             "Issue #%d context unchanged since last supervisor event; skipping.",
             issue.number,
