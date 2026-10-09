@@ -657,9 +657,8 @@ def _process_ready_issue(
         resolve_lifecycle_model_selection("implementation", config, issue=issue),
     )
 
-    # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读仲裁确认自己是最早的
-    # 认领者之后才把标签切到 running。落败方（ClaimArbitrationLost）不碰标签、
-    # 不建 worktree、不起 agent，由派发层按 skip 处理。
+    # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读后确认最早认领者才切 running。
+    # 落败方不碰标签、worktree 或 agent，由派发层按 skip 处理。
     claim_bid = arbitrate_first_claim(
         issue_number=issue.number,
         github_client=github_client,
