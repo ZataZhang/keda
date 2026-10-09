@@ -393,7 +393,14 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # 显式 opt-in（默认正文不带 PRD 锚点也不带验收清单）。
     # issue-234：建 issue 子命令说明写明「是否进队列」，示例用到 --ready；--repo
     # 是仓库歧义时的显式目标。均已在真实命令树核对。
-    ("issue", "create"): {"--from-prompt", "--require-validation", "--ready", "--repo"},
+    # --ready 现为默认开启，--no-ready 是显式退出（示例用它表达「只建不排队」）。
+    ("issue", "create"): {
+        "--from-prompt",
+        "--require-validation",
+        "--ready",
+        "--no-ready",
+        "--repo",
+    },
     # issue-235：随包 Skill 写明 direct-pr 标签由 `kc labels sync` 建立/改名，
     # 旗标集合取自 ``kc schema --json`` 的真实命令树。
     ("labels", "sync"): {"--repo", "--repo-id", "--config", "--all"},

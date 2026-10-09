@@ -87,7 +87,8 @@ def test_cli_parser_issue_create_defaults() -> None:
     assert parsed.issue_command == "create"
     assert parsed.prd_paths == ["tasks/example.md"]
     assert parsed.type == "feature"
-    assert parsed.ready is False
+    # Issue 默认入队（--ready 为默认），用户可用 --no-ready 显式退出。
+    assert parsed.ready is True
     assert parsed.agent == "auto"
     # --publish-prd / --force 是三态：None 表示「未给出」，由 handler 归一为默认值。
     # `--from-prompt` 需要区分「没提」与「显式给出」（后者是矛盾指令，必须报错）。
