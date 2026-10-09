@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。仅建议排在在飞的 backlog 列表快照 PRD（P1-PERF-20261008-161246-backlog-list-snapshot-swr，对应 issue #246）合并之后再动工，原因见 §8。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：执行侧交付完成（含 2026-10-09 第 3 轮 pre-PR 代码审查修复：直出 PR 死路改为发起端拒绝、标签白名单范围补呈递、被拒写操作补审计、`issue_type` 补服务端集合校验、`is_default`/`cli_flags` 判定统一；第 4 轮：Issue 详情端点补 `repo_id` 作用域修掉撞号串仓、文档端点表三行纠正、`rv-3`/`rv-6` 证据脚本补 fail-loud 门禁、system-design 注册端点口径修正），待人工验收。九个 FR 已落地，verifier 组 oracle（rv-2/5/6/7/8）与全量门禁（`CI=true just test all`、`just lint`）跑绿，8 个 rv 脚本与 7 张真实入口截图均已在修复后的最终代码树重采；第 4 轮再次在同一棵树复跑并扩至 **10 个 rv 脚本 / 32 条 stdout 断言 / 8 张真实入口截图**（新增 Issue 详情的仓库作用域取证：真实 HTTP 两条负控 + 真实浏览器发出的 `?repo_id=` 请求）（见 §9.1、§14 与证据报告）；**待人工**：会改动共享状态的动作手测（「跑一轮」进程页记录、真实入队/标签写回后的线上 GitHub fresh read，rv-1/3/4）与 §9.1 呈递物过目、`Human-Confirmed` 决定一/二/三（**决定一/二在 2026-10-09 补了修正呈递，表态前请先读 §2 那两段 ⚠️ 引用块**；见 §14 Change Log 的保真度披露）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：**Part A · 人审层**（§1-4）给人工审阅者看——读什么、决定什么、验收什么，不含实现机制；**Part B · 执行器层**（§5-13）给执行 Agent 看——机制、改动树、验证命令。人审只需读 Part A，并只在 §2 的三个决定处表态。
@@ -20,7 +20,7 @@
 - **全量 Issue 视图**（FR-4）：dashboard 仓库概览内可切换「监控中 / 全部」，没有 agent 标签的 GitHub Issue 也能看到。
 - **Issue 标签查看与编辑**（FR-5）：Issue 详情面板可查看并增删标签，范围限于仓库已同步的标准标签集，不提供创建新标签。
 - **恢复发布动作**（FR-6）：发布失败的 Issue 在详情面板多一个「恢复发布」动作，复用 CLI recover 的既有恢复逻辑。
-- **启动 PRD 高级选项**（FR-7）：「开始此 PRD」可展开高级选项（快合、直出 PR、agent、模型预设等），全部默认关闭，行为与 CLI 同名旗标一致。
+- **启动 PRD 高级选项**（FR-7）：「开始此 PRD」可展开高级选项（快合、agent、模型预设等），全部默认关闭，行为与 CLI 同名旗标一致。直出 PR 不在该入口提供——backlog start 的目标按构造带 PRD 锚点，CLI 对该组合硬性拒绝（见 §2 决定二的修正呈递）。
 - **一句话建 Issue**（FR-8）与**死注册页清理**（FR-9）：backlog 可直接输入一句话创建 Issue；无后端支撑的注册页删除。
 
 # Part A · 人审层 (Review Layer)
@@ -51,7 +51,7 @@ keda 的网页 console 目前是一个偏只读的观测面：看得到 PRD 队�
 | 👀 人审 + 自动验证 | 在 dashboard 某仓库卡片点「跑一轮」 | 一次单次执行被启动，进程页出现对应托管进程记录（可看日志、可停止）；CLI 语义的 run-once 不变成常驻 daemon |
 | 👀 人审 + 自动验证 | 在 backlog 对一个尚无 Issue 的 pending PRD 点「加入就绪」 | 该 PRD 状态变为已入队：GitHub 上新建了带就绪标签的 Issue，但 runner **没有**被启动；autopilot 关闭时它停在队列里等显式执行 |
 | 👀 人审 + 自动验证 | 在 dashboard 仓库概览切到「全部 Issue」，点开一个没有 agent 标签的 Issue，在详情面板给它加上 `agent/ready` 标签 | 这个 Issue 立即出现在监控列表里；刷新页面或用独立查询确认 GitHub 上标签已真实写入 |
-| 🤖 自动验证 | 对一个「开始」时展开高级选项、勾选直出 PR 的 PRD 启动 | 启动请求携带直出 PR 选项，执行结果走直接开 PR 通道（不建草稿 PR 等复核）；未勾选时行为与现在完全一致 |
+| 🤖 自动验证 | 对一个「开始」时展开高级选项的 PRD 启动 | 高级选项里能勾的档位（快合）确实进入启动链路，未勾选时行为与现在完全一致；直出 PR 不在这个入口提供——PRD 建的 Issue 带 PRD 锚点，CLI 对该组合是硬性用法拒绝，带上它时启动请求在动 Issue 之前就被拒并给出同款原因（400），不会留下「提示已开始、进程立刻退出」的半成品 |
 | 🤖 自动验证 | 对一个处于发布失败态的 Issue 点「恢复发布」 | 恢复动作执行成功，Issue 状态按既有恢复逻辑迁移；对不处于可恢复状态的 Issue 调用同一动作会得到明确的失败响应而不是静默成功 |
 | 🤖 自动验证 | 在 backlog 输入一句话「给日志模块加上耗时打点」并确认 | GitHub 上出现一个内容来自这句话的新 Issue（不要求有 PRD 文件） |
 | 🤖 自动验证 | 浏览器访问原注册页地址 | 页面不存在（已删除）；前端代码中不再有任何注册接口调用 |
@@ -95,15 +95,19 @@ keda 的网页 console 目前是一个偏只读的观测面：看得到 PRD 队�
 
 建议只允许增删**仓库已同步的标准标签集**（`agent/*` 队列标签、优先级标签等工作流标签），网页不提供创建全新标签的能力。主要风险在于：如果开放任意标签写入，等于把 GitHub 的工作流纪律入口交给了网页上的随手操作——一个拼错的标签名就能让 Issue 脱离监控口径，而且事后难以追溯是网页还是终端改的。限定在已同步集合内，既覆盖「把 Issue 送进/请出工作流」的真实需求，又保住了标签集合的可控性。代价是遇到确实需要新标签时仍要去终端执行一次 `kc labels sync`（低频，可接受）。
 
-**请确认：** 标签编辑是否按「仅限仓库已同步的标准标签集，不提供创建新标签」执行？
+> **⚠️ 补充呈递（2026-10-09 代码审查后补，拍板前请先读这一段）**：上面那句「`agent/*` 队列标签」把范围说得偏窄，实际开放的是同步集合的**全量**，其中包含**被自动化直接消费的工作流状态标签与签收标签**：`agent/running`（claim/reclaim 与「加入就绪」冲突判定把它当作在途依据——误打会让 daemon 跳过该 Issue 且入队永久返回 409）、`agent/supervising`、`agent/failed`、`agent/waiting`（依赖判定）、`agent/review`、`agent/blocked`、`agent/rework-prd` 与 `agent/deliberate`（写出即触发重写 PRD / 多 agent 合议）、`direct-pr`（选择发布档位），以及 `validation/pending`、`validation/passed`、`validation/verifier-passed`（验证门禁读取的人工 / verifier 签收信号）。也就是说：**网页一次点击就能改变执行状态机或替人签收验收**，面板上的下拉不分级、点击即写入。这一层此前只在文档里以「拼错的 `agent/redy` 会脱离监控口径」的形式披露，未呈到本决定里；执行侧没有擅自收窄集合（收窄等于改需求），只把范围如实写进 `docs/guides/agent-runner.md`「标签编辑的例外」并在网页下拉顶部加了提示。若您认为状态机与签收标签不应由网页写出，请选择下面第 2 个选项或指定更小的子集。
+
+**请确认：** 标签编辑是否按「仅限仓库已同步的标准标签集，不提供创建新标签」执行？（1=按现方案执行并接受「网页可写出状态机/签收标签」；2=收窄为「队列资格 + 描述类」子集，状态与签收标签仍留终端）
 **验收：** 在 Issue 详情面板尝试添加一个仓库中不存在的自定义标签会被明确拒绝；添加集合内标签后，独立查询 GitHub 能看到该标签真实写入。
 
 ### 决定二：发布通道开关是否暴露到网页
 
 建议把快合（跳过合并前的独立验证阶段）和直出 PR（不经草稿 PR 复核直接开 PR）这两个「跳过流程闸门」的开关暴露到「开始此 PRD」的高级选项里，但**默认折叠且默认关闭**。主要风险在于：这两个开关本质上是降低交付安全阈值的捷径，放在显眼位置容易养成随手勾选的习惯；折叠 + 默认关闭保留了「偶尔需要时的可达性」，又让默认路径与今天完全一致。若您倾向于更保守，可以只暴露 agent/模型预设选择，把这两个通道开关留给 CLI。
 
-**请确认：** 快合与直出 PR 是否上网页（高级选项内、默认关闭）？还是仅暴露 agent/模型预设？
-**验收：** 未展开高级选项直接点「开始」时，启动行为与改动前完全一致；勾选后启动请求携带对应选项且执行结果走了对应通道。
+> **⚠️ 修正呈递（2026-10-09 代码审查后）**：本入口是 backlog 的「开始此 PRD」，它启动的是 `kc run --issue <N>`，而 N 按构造就是带 PRD 锚点的 Issue。CLI 对「PRD-backed Issue + `--direct-pr`」是硬性 USAGE 拒绝（PRD-backed Issue 必须过 PRD 交付门并归档 PRD，见 `cli_parsed_commands/runner.py::_reject_direct_pr_on_prd_backed_issue`），所以**原方案里的「直出 PR」在这个入口上必然被拒**：勾上只会换来前端「已开始」提示加一条立刻以用法错误退出的托管进程，永远出不了 PR，§1 行为样例与下表验收项当时按「能走通」写，属于呈递错误。现按您的保守档收敛：**高级选项只暴露快合 + agent/模型预设**，直出 PR 仍只在 CLI 用；请求体保留 `direct_pr` 字段但在改动 Issue 之前就返回 400 并给出 CLI 同款原因（不静默降级）。快合对 PRD-backed Issue 是 CLI 允许的组合，行为不变。
+
+**请确认：** 快合是否上网页（高级选项内、默认关闭）？直出 PR 已按 CLI 的目标域规则退回终端，若您希望网页也能出直发 PR，需要的是「允许对无 PRD 锚点的 Issue 发起启动」这一新入口（超出本 PRD 范围）。
+**验收：** 未展开高级选项直接点「开始」时，启动行为与改动前完全一致；勾选快合后启动请求携带对应选项且执行结果走了对应通道；带 `direct_pr` 的请求在发起端即被拒（400），GitHub 与进程列表零残留。
 
 ### 决定三：「加入就绪」的启动语义
 
@@ -238,7 +242,7 @@ frontend-public/components/agent-runner/
 │   [修改] 标签编辑区（集合内增删）与「恢复发布」动作按钮
 │
 └── prd-start-options-sheet.tsx
-    [新增] 「开始此 PRD」高级选项 sheet（快合、直出 PR、agent、模型预设；默认折叠、默认关闭）
+    [新增] 「开始此 PRD」高级选项 sheet（快合、agent、模型预设；默认折叠、默认关闭；直出 PR 不在此入口）
 frontend-public/components/backlog/
 ├── prd-card.tsx
 │   [修改] 加「加入就绪」按钮
@@ -334,7 +338,8 @@ flowchart LR
   展开 ▾：
   ┌─ 高级选项 ──────────────┐
   │ [ ] 快合 fast-merge     │
-  │ [ ] 直出 PR direct-pr   │
+  │ （直出 PR 不提供：PRD 锚 │
+  │   点目标被 CLI 硬性拒绝）│
   │ agent  [auto ▾]         │
   │ 预设   [默认 ▾]         │
   │        [取消] [ 开始 ]  │
@@ -416,8 +421,8 @@ flowchart LR
 - id: rv-5
   behavior: 「开始此 PRD」高级选项正确传递且缺省行为与旧契约完全一致
   reviewer: verifier
-  real_entry: "隔离 registry 下经 console API 调 start 端点：一次带 fast_merge/direct_pr/预设，一次全缺省"
-  expected: 带选项请求在启动链路中体现对应旗标语义；全缺省请求与改动前契约逐字段一致（既有契约测试不放宽）
+  real_entry: "隔离 registry 下经 console API 调 start 端点：一次带 fast_merge/预设，一次全缺省，另带 direct_pr=true 的越界请求"
+  expected: 带选项请求在启动链路中体现对应旗标语义（含 `direct_pr=true` 折算成 `--direct-pr` 的正例）；对 PRD 锚点目标的 `direct_pr` 请求在发起端即被拒（400，GitHub 与进程列表零残留）；全缺省请求与改动前契约逐字段一致（既有契约测试不放宽）
   mock_boundary: 端点与启动链路真实；外部 agent 执行可按 rv-harness 伪造
   tier: R2
   test_layer: integration
@@ -476,9 +481,9 @@ flowchart LR
 
 | 看什么 | 呈递物（交付时填路径） | 10 秒自检 |
 |---|---|---|
-| dashboard 一键执行与全量 Issue 视图可用 | `tasks/evidence/P1-FEAT-20261008-165241-console-cli-parity-operations/rv-1-dashboard-actions.png`（或 `just prd review` 入口）+ 截图内嵌 | 进程页出现新托管进程记录；「全部」列表里能看到未入队 Issue |
-| 「加入就绪」入队不启动 | `tasks/evidence/…/rv-3-enqueue-ready.png` + 独立 gh 查询输出 | GitHub Issue 有就绪标签、进程页无新 runner |
-| Issue 标签增删真实生效 | `tasks/evidence/…/rv-4-issue-labels.png` + fresh read 输出 | 独立查询看到的标签与页面一致；集合外标签被拒截图 |
+| dashboard 一键执行与全量 Issue 视图可用 | `tasks/evidence/P1-FEAT-20261008-165241-console-cli-parity-operations/rv-1-dashboard-actions.png` + `rv-1-dashboard-all-issues.png`（closeout 已补采真实入口渲染截图，内嵌于证据报告「人审导航」节） | 截图可见：runner 状态条、「跑一轮/复核一轮」操作行、「全部」列表里的未入队 Issue #239；点「跑一轮」后进程页出现新托管进程记录留人工手测 |
+| 「加入就绪」入队不启动 | `tasks/evidence/…/rv-3-enqueue-ready.png`（closeout 已补采 backlog 真实入口截图；按钮态限制见下方披露）+ 独立 gh 查询输出（留人工） | 截图可见 backlog 列表 + PRD 详情真实入口；「加入就绪」按钮仅渲染于 not_started 态 PRD，当前受管仓库无该态（如实披露），写路径由 rv-3 自动化层证据 + 人工手测覆盖；GitHub Issue 有就绪标签、进程页无新 runner 留人工核对 |
+| Issue 标签增删真实生效 | `tasks/evidence/…/rv-4-issue-labels.png`（closeout 已补采：标签编辑面板 + 标准集下拉展开）+ fresh read 输出（留人工） | 截图内标签徽章与「添加标签」下拉（blocked/claude/codebuddy/…）即已同步标准集；线上增删后独立查询与页面一致的交叉核对留人工 |
 
 内嵌图（本地渲染，gitignore 白名单外不进版本库，交付时填相对路径）：
 
@@ -494,44 +499,45 @@ flowchart LR
 
 #### Behavior Acceptance
 
-- [ ] rv-3 加入就绪：建 Issue + 就绪标签 + 不启动 runner 全链路证据，负例（运行中调用→冲突）有 RED 记录 — 证据 `rv-3-enqueue-ready.png` + `rv-3-negative-control.txt`
-- [ ] rv-4 标签增删：UI→API→gh→fresh read 四界穿越证据，集合外标签拒绝的 RED 记录 — 证据 `rv-4-issue-labels.png` + `rv-4-negative-control.txt`
-- [ ] rv-5 启动契约：带选项请求旗标生效、全缺省请求与旧契约逐字段一致 — 证据 `rv-5-start-contract.txt`
-- [ ] rv-6 恢复发布：可恢复态成功迁移 + 不可恢复态明确失败 — 证据 `rv-6-recover-action.txt`
-- [ ] rv-7 一句话建 Issue：新 Issue 编号 + 内容与输入一致 — 证据 `rv-7-from-prompt.txt`
-- [ ] rv-1 一键执行与全量视图：真实入口截图 + 进程页记录 — 证据 `rv-1-dashboard-actions.png`
-- [ ] rv-2 状态条：status/health 端点结构断言 + 前端渲染一致性 — 证据 `rv-2-runner-status.txt`
+- [~] rv-3 加入就绪：建 Issue + 就绪标签 + 不启动 runner 全链路证据，负例（运行中调用→冲突）有 RED 记录 — 证据 `rv-3-enqueue-ready.png` + `rv-3-negative-control.txt` — runner-owned gate: 人工真实入口验收（§9.1 呈递，PR review 阶段截图）；执行侧自动化层证据 `rv-3-enqueue-ready.txt` + `rv-3-negative-control.txt`（API→core→gh 假件→fresh read，负控 RED 已记录）已备
+- [~] rv-4 标签增删：UI→API→gh→fresh read 四界穿越证据，集合外标签拒绝的 RED 记录 — 证据 `rv-4-issue-labels.png` + `rv-4-negative-control.txt` — runner-owned gate: 人工真实入口验收（§9.1 呈递，PR review 阶段截图）；执行侧自动化层证据 `rv-4-issue-labels.txt` + `rv-4-negative-control.txt` 已备
+- [x] rv-5 启动契约：带选项请求旗标生效、全缺省请求与旧契约逐字段一致；直出 PR 按 CLI 目标域规则在发起端被拒 — 证据 `rv-5-start-contract.txt`（RED 见 `scripts/rv-5-start-contract.sh` step1；`tests/test_console_cli_parity.py` 断言默认 `cli_flags()==()` 且 `build_runner_argv(None)==默认==省略`，并**正向**断言 `RunnerLaunchOptions(direct_pr=True).cli_flags()==("--direct-pr",)` 与 `start_prd` 对 PRD 锚点目标的 400 拒绝：GitHub 零变化、不 spawn）。**审查修正（2026-10-09）**：首轮本项仅记 `direct_pr` 的互斥负例，未对 `direct_pr=True` 做正例折算断言，同时 §1 行为样例与决定二把「勾选直出 PR 后走直发通道」写成可达验收——而该组合被 CLI 硬性 USAGE 拒绝，oracle 无法达成；现补正例与边界断言、收敛入口开关并同步 §1/决定二，详见 §14 Change Log
+- [x] rv-6 恢复发布：可恢复态成功迁移 + 不可恢复态明确失败 — 证据 `rv-6-recover-action.txt`（`tests/test_console_actions.py` 覆盖成功映射与 `PublishRecoveryError→ConsoleActionError(failure_category)`）
+- [x] rv-7 一句话建 Issue：新 Issue 编号 + 内容与输入一致 — 证据 `rv-7-from-prompt.txt`（`tests/test_agent_runner_console_issues_api.py` from-prompt 201 + audit；gh 写边界按 mock_boundary 用假件捕获）
+- [~] rv-1 一键执行与全量视图：真实入口截图 + 进程页记录 — 证据 `rv-1-dashboard-actions.png` — runner-owned gate: 人工真实入口验收（§9.1 呈递，PR review 阶段截图）；执行侧真实子进程启动层证据 `rv-1-dashboard-actions.txt`（live spawn + 5 项 pytest）已备。**撞号安全（2026-10-09 第 4 轮）**：详情面板原先调的 `GET /agent-runner/issues/{n}` 不带仓库限定，注册多仓库时可能返回**别的仓库**同编号 Issue 的监控详情；现该端点接受 `repo_id` 作用域、dashboard 始终带上点击的仓库，契约由 `tests/test_agent_runner_monitor.py::test_api_issue_detail_scopes_lookup_to_repo_id` 锁死（scoped→只查该仓库；unscoped→保留旧跨仓库行为；未知 repo→404 且零查询）
+- [x] rv-2 状态条：status/health 端点结构断言 + 前端渲染一致性 — 证据 `rv-2-runner-status.txt`（live HTTP `/agent-runner/status`+`/health`，真实 gh 探测；RED 见 `scripts/rv-2-runner-status.sh` step1）
 
 #### Frontend Acceptance
 
-- [ ] §7 低保真原型的三个验收关键态均有「原型图 vs 真实实现截图」成对呈现，标注验证层级 — 证据 `rv-1/rv-3/rv-4` 截图组
-- [ ] `frontend-public/app/(auth)/register/` 目录不存在，`rg -n "auth/register|register\\(" frontend-public/` 零命中（rv-8）
-- [ ] 未使用高级选项时「开始此 PRD」请求契约与改动前一致（既有契约测试通过且未放宽断言）
+- [~] §7 低保真原型的三个验收关键态均有「原型图 vs 真实实现截图」成对呈现，标注验证层级 — 证据 `rv-1/rv-3/rv-4` 截图组 — runner-owned gate: 人工真实入口验收（原型对比需真实浏览器截图，在 §9.1/PR review 阶段完成）
+- [x] `frontend-public/app/(auth)/register/` 目录不存在，`rg -n "auth/register|register\\(" frontend-public/` 零命中（rv-8）— 证据 `rv-8-register-removal.txt`（目录已删、rg 零命中、`pnpm --dir frontend-public build` 通过）
+- [x] 未使用高级选项时「开始此 PRD」请求契约与改动前一致（既有契约测试通过且未放宽断言）— `tests/test_console_cli_parity.py` 逐字节比对 argv，断言未放宽
 
 #### Architecture Acceptance
 
-- [ ] 新端点均在 `src/backend/api/routes/` 现有模块或按行数红线拆出的新模块内，业务语义在 core 用例，四层依赖方向未被破坏（`just lint` 通过）
-- [ ] 标签集合校验与 `kc labels sync` 同源（同一集合定义，无第二份硬编码清单）
+- [x] 新端点均在 `src/backend/api/routes/` 现有模块或按行数红线拆出的新模块内，业务语义在 core 用例，四层依赖方向未被破坏（`just lint` 通过）— Issue 端点拆入 `agent_runner_console_issues.py`（从 `agent_runner_console.py` 按行数红线），语义在 `console_issues`/`issue_label_actions`/`console_issue_creation` core 用例；`just lint --full` 绿（含 `check-architecture`），`CI=true just test all` 3694 passed
+- [x] 标签集合校验与 `kc labels sync` 同源（同一集合定义，无第二份硬编码清单）— `standard_label_names(labels, agent_registry)` 为唯一集合源，`issue_label_actions` 校验走该函数，无第二份清单
 
 #### Documentation Acceptance
 
-- [ ] `docs/` console 相关文档更新新操作入口说明，`mkdocs.yml` 导航一致
-- [ ] 本次未改 `kc` CLI 表面（确认无需同步随包 skill，`git diff --stat` 无 `cli_typer_*` 改动）
+- [x] `docs/` console 相关文档更新新操作入口说明，`mkdocs.yml` 导航一致 — `docs/guides/agent-runner.md` 新增「网页操作入口与对应端点（CLI 能力对齐）」表；`mkdocs.yml:65` 已含该页，无新页无需改导航
+- [x] 本次未改 `kc` CLI 表面（确认无需同步随包 skill，`git diff --stat` 无 `cli_typer_*` 改动）— `git diff --name-only` 无 `cli_typer*`/`templates/skills/**` 命中
 
 #### Validation Acceptance
 
-- [ ] 全部 oracle 按证据分层跑绿且在 src 最终改动后重采；R2 三项的 critical_value_source / must_cross / fresh_state_probe 记录完整
-- [ ] `CI=true just test all` 全绿；真实入口验证（rv-1/3/4 手测）完成且截图呈递
+- [x] 全部 oracle 按证据分层跑绿且在 src 最终改动后重采；R2 三项的 critical_value_source / must_cross / fresh_state_probe 记录完整 — 8 个 rv 脚本 2026-10-08 在最终代码树全部重跑 GREEN（负控 RED→正例 GREEN 均在 stdout 与 `rv-*.txt` 证据文件），manifest 20 条 stdout 断言逐项复核通过；rv-3/4/5 的 provenance 链字段见 §7 Realistic Validation Plan 原文，人工层（rv-1/3/4 浏览器/线上 GitHub）按 §14 披露以 `- [~]` 项挂人工验收
+- [x] `CI=true just test all` 全绿（最终树重跑；结果与命令记录见 §14 Change Log「收尾修复」条目的门禁记录）
+- [~] 真实入口验证（rv-1/3/4 手测）完成且截图呈递 — runner-owned gate: 人工真实入口验收（§9.1 呈递物在 PR review 阶段完成）
 
 #### Delivery Readiness
 
-- [ ] 推荐方案完整落地（§7 改动树全部节点有对应交付或已在 PRD 中记录偏差修正）
-- [ ] PR 正文含唯一 PRD 归档路径与「合并即验收」声明，PR 证据评论携带 §9.1 全部内容 — runner-owned gate: PR 发布与人工验收流程
+- [x] 推荐方案完整落地（§7 改动树全部节点有对应交付或已在 PRD 中记录偏差修正）— 九 FR 全落地；§14 Change Log 记录附加交付（`repositories/{repo_id}/launch-options` 只读端点）与证据保真度披露（rv-1/3/4 浏览器/线上 GitHub 层留待人工）
+- [~] PR 正文含唯一 PRD 归档路径与「合并即验收」声明，PR 证据评论携带 §9.1 全部内容 — runner-owned gate: PR 发布与人工验收流程
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决定一：标签编辑范围按「仅限仓库已同步的标准标签集，不提供创建新标签」执行（Part A §2）
-- [ ] 决定二：快合与直出 PR 暴露到网页高级选项、默认折叠默认关闭（Part A §2）
+- [ ] 决定一：标签编辑范围按「仅限仓库已同步的标准标签集，不提供创建新标签」执行（Part A §2）——**含 2026-10-09 补充呈递**：该集合按构造包含被自动化消费的工作流状态标签与 validation 签收标签，网页一次点击即可写出，请在选项 1（照现方案接受）/ 选项 2（收窄为队列资格 + 描述类）之间表态
+- [ ] 决定二：快合暴露到网页高级选项、默认折叠默认关闭；直出 PR 按 CLI 目标域规则退回终端（Part A §2，2026-10-09 修正呈递）
 - [ ] 决定三：「加入就绪」绝不触发 runner 启动（Part A §2）
 - [ ] §9.1 人读呈递区整体过目确认（三个呈递物均可打开且与描述一致）
 
@@ -543,7 +549,7 @@ flowchart LR
 - **FR-4**：dashboard 仓库概览支持「监控中 / 全部」切换；「全部」模式列出仓库 open Issue（含无 agent 标签者），标注未入队态。
 - **FR-5**：Issue 详情面板展示全部标签并支持增删；可增删集合限于仓库已同步的标准标签集；集合外标签写入被明确拒绝且 GitHub 无变化；每次写回后页面状态与 GitHub 实际状态一致。
 - **FR-6**：发布失败态的 Issue 提供「恢复发布」动作，复用 CLI recover 的既有恢复逻辑；不可恢复状态下动作不可用或返回明确失败。
-- **FR-7**：「开始此 PRD」支持可选高级选项：快合、直出 PR、指定 agent、模型预设（含推理力度）；全部默认关闭/默认值；缺省请求的行为与契约和改动前完全一致。
+- **FR-7**：「开始此 PRD」支持可选高级选项：快合、指定 agent、模型预设（含推理力度）；全部默认关闭/默认值；缺省请求的行为与契约和改动前完全一致。直出 PR 经决定二的修正呈递退回终端（PRD-backed 目标 + `--direct-pr` 被 CLI 硬性用法拒绝），请求体带上该字段时在改动 Issue 之前返回 400 并给出同款原因。
 - **FR-8**：backlog 提供「一句话建 Issue」入口，输入文本经既有 from-prompt 用例创建 GitHub Issue，不要求存在 PRD 文件。
 - **FR-9**：删除前端注册页与注册接口调用代码；前端不存在指向不存在后端端点的调用。
 
@@ -573,3 +579,76 @@ flowchart LR
 | D-04 | 一次性执行的进程呈现 | 复用托管进程模型（日志/停止） | 后台裸跑无记录 | 进程页已有完整观测与停止能力，复用零新增机制 |
 | D-05 | 单 PRD 还是拆分 | 单 PRD 交付全部九项 | 按 A/B/C 三档拆三个 PRD | 九项共享同批页面与端点文件，拆分制造三次串行同文件冲突；R2 oracle 恰好三个在深度预算内，合并不超限 |
 | D-06 | 裸 Issue 的入队入口在哪、FR-8 建后是否自动就绪 | 裸 Issue 入队走 dashboard 全量视图（FR-4）+ 标签编辑（FR-5）打 `agent/ready`；FR-8 建完停在未入队态 | backlog 加裸 Issue「入队」按钮；一句话建 Issue 后自动打就绪标 | 机制已被 FR-4+FR-5 覆盖，同一操作不做第二入口（ROI 单一入口原则）；本 PRD 章程是 CLI 对齐，CLI 无「裸 Issue 一键入队」命令面，Console 先行发明会制造新的不一致；页面分工自洽（backlog=PRD 流水线视角、dashboard=仓库/Issue 操作视角）；「建 Issue」与「何时入队」是两个独立判断，入队时机留给用户显式决定，与 FR-3「入队不启动」是同一克制立场。重开条件见 §12 |
+
+### Final Reconciliation
+
+- Interpretation: confirmed — 九个网页操作入口与 CLI 语义一一对应（一次性执行、状态条、加入就绪、监控/全部视图、标签编辑、PRD 启动选项、恢复发布、一句话建 Issue、注册页移除）；加入就绪只发放队列资格绝不启动；启动高级选项默认折叠默认关闭、缺省路径与旧契约逐字节一致；不改 CLI 表面。
+- Public behavior and contracts: confirmed — 新增只读与操作端点（仓库 Issue 全量列表、Issue 创建 from-prompt、labels GET/PUT、enqueue-ready、launch-options）与 backlog start 选项扩展；status/health 复用既有结构无字段漂移；注册页目录与 `register()` 调用彻底移除且前端静态导出无死端点；`docs/guides/agent-runner.md` 已同步「网页操作入口与对应端点」表。
+- Related PRD status: confirmed — soft 依赖上游 P1-PERF-20261008-161246（issue #246，backlog 列表快照）仍在飞，§8 交付顺序说明维持原样；`tasks/pending/` 其余 PRD 与本 PRD 无重叠或冲突。
+- Requirements and risks: confirmed — rv-3/rv-4/rv-5 三个 R2 项的 critical_value_source、must_cross、fresh_state_probe 与 §7.6 逐条对齐并在 `evidence.json` 落档；rv-1/3/4 的浏览器与线上 GitHub 手测在 §14 保真度披露下留待人工第二触点；标签集合校验与 sync 同源、越界写入拒绝且零变化已证。
+- Reconciled differences: 超出 §7 改动树的 launch-options 只读端点未回填改动树正文、以 §14 Change Log 第二条为审计记录；无头执行环境以 `mock_boundary` 边界内替身链路替代真实浏览器/线上 GitHub 取证并如实披露，未把缺席冒充通过；其余正文与最终实现无矛盾。
+
+## 14. Change Log
+
+### 执行侧交付记录（executor，2026-10-08）
+
+- 类型：doc + evidence（交付记录与验收勾选；不改需求、范围与 oracle 定义）
+- 原文：PRD 发布时无 Change Log 章节，验收状态横幅为 `⬜ 未开工`，§9 执行侧条目全部空框。
+- 变更后：九个 FR 全部落地——FR-1 跑一轮/复核一轮（`repository` action 的 `run_once`/`review_once`，托管进程形态，非常驻 daemon）、FR-2 状态条（复用 `/status`+`/health`）、FR-3 加入就绪（`enqueue-ready` 端点，`enqueue_prd_ready` 无 supervisor 形参 = 结构性不启动）、FR-4 监控中/全部切换（`GET .../repositories/{repo_id}/issues`）、FR-5 标签读写（`GET|PUT .../issues/{n}/labels`，集合校验与 `standard_label_names` 同源）、FR-6 恢复发布（`issue` action `recover_failed_publish` 复用 `recover_publish_issue`）、FR-7 启动高级选项（backlog start `launch_options`，缺省请求与旧契约逐字节一致）、FR-8 一句话建 Issue（`POST .../repositories/{repo_id}/issues`）、FR-9 删注册页与 `register()` 调用；横幅翻为 `🧍 待人工验收`；§9 自动门禁项按证据勾选。
+- 原因：执行侧实现完成，按 Machine Contract v5 随交付记录归档状态（归档只代表执行侧交付完成，不等人工验收）。
+- 影响：§3 所述网页操作入口全部可用；`docs/guides/agent-runner.md` 新增「网页操作入口与对应端点（CLI 能力对齐）」表；CLI 表面零变化，无需同步随包 skill。
+- 审核：执行器自记，待独立 verifier 与 §9.1 人工验收复核。
+
+### 超出 §7 改动树的附加交付：launch-options 只读端点（executor，2026-10-08）
+
+- 类型：scope（追加，只读、无副作用）
+- 原文：§7 改动树未列出 agent/模型预设目录端点；前端高级选项 sheet 的候选项没有与后端同源的来源。
+- 变更后：新增只读端点 `GET /api/v1/agent-runner/console/repositories/{repo_id}/launch-options`，向前端提供 `agents`（来自 registry 配置）与 `model_presets` 目录；已在 `docs/guides/agent-runner.md` 的「网页操作入口与对应端点」表登记。
+- 原因：确保 FR-7 高级选项的候选项与后端同源而非前端硬编码，避免前后端预设漂移。
+- 影响：纯读、无副作用，不改变任何既有契约；§7 改动树以本记录为补充说明，不回填改动树正文以保持原审计可见。
+- 审核：执行器自加，随决定二一并交人工呈阅（Part A §2）。
+
+### 证据保真度披露：rv-1/3/4 人工层证据未捕获，留待真实入口验收（executor，2026-10-08）
+
+- 类型：evidence（证据分层披露；不削弱、不删除验收要求本身）
+- 原文：rv-1/rv-3/rv-4（`reviewer: human`）要求「真实浏览器点击 + 独立 `gh issue view` fresh read」并附截图（`.png`）作为交付证据。
+- 变更后：本执行环境为无头 runner，且刻意避免对共享 GitHub 状态的写入；执行侧以 `mock_boundary` 允许边界内的自动化替身验证核心语义——rv-1 真实子进程启动（live spawn）、rv-3/rv-4 走 API→core 用例→`gh` 假件→fresh read、rv-2 live HTTP、rv-8 真实构建 + `rg`；未捕获真实浏览器截图与线上 GitHub 交叉核对，`evidence.json` 各 block 的 `risks` 字段逐条如实披露未穿越层，`evidence_files` 不含捏造的 `.png`。
+- 原因：不得伪造人工层证据，也不得静默删除人工验收要求；无头环境 + 共享仓库写入风险下，人工真实入口验证归 §9.1 第二触点。
+- 影响：rv-1/rv-3/rv-4 行为验收、§9.1 呈递物过目、`Human-Confirmed` 决定一/二/三保持待人回答；人工若认为自动化层不足以支撑结论，按 reopen 协议处理而非就地补框。
+- 审核：披露待人工验收裁决（本条即 §9.1 呈递内容的一部分）。
+
+### 收尾修复：Change Log 结构合规、runner-owned gate 改写与证据 manifest 修正（recovery 尝试 2，executor，2026-10-08）
+
+- 类型：doc + evidence（验收项归属改写与 manifest 字段修正；不改需求与 oracle 定义，无生产代码改动）
+- 原文：本节前三个条目的记录形式为散文 bullet（缺 Machine Contract §1 的六个字段，交付门禁报 `entry 1: 类型, 原文, 变更后, 原因, 影响, 审核`）；rv-1/3/4 行为验收、原型图成对呈递、验证分层重采、全量门禁+手测复合项、PR 呈递等 7 个执行侧条目挂 `- [ ]`（archive 门禁将其判为未完成的执行侧工作，其中浏览器/线上 GitHub 手测与 PR 呈递在本门禁之前无法满足）；`evidence.json` 的 `stdout_assertions.source` 写成证据文件名（schema 仅接受 `stdout`/`stderr`，且 keda 复跑 `command` 后对复跑输出断言）；rv-1/rv-2/rv-5 脚本部分输出只写文件未进 stdout。
+- 变更后：① Change Log 重排为六字段条目（本节即重排后形态）；② 依赖人工/PR 阶段的条目改写为 `- [~] <原文> — runner-owned gate: 人工真实入口验收（§9.1 呈递，PR review 阶段）`，PR 呈递条目改为 `- [~] … — runner-owned gate: PR 发布与人工验收流程`（`[~]` 计为 resolved，需求原文逐字保留、未删除任何条目）；③ 复合门禁项拆为两条：`CI=true just test all` 全绿为执行侧项（本轮最终树重跑通过后代入证据勾选），手测呈递为 `[~]` 项；「oracle 分层跑绿+重采」项在 8 个 rv 脚本于最终代码树全部重跑 GREEN（负控 RED→正例 GREEN 均落 stdout 与 `rv-*.txt`）、manifest 20 条 stdout 断言逐项复核通过后勾选；④ manifest `source` 统一改为 `stdout`、`severity` 统一为 `high`，脚本侧将断言输出 tee 到 stdout（rv-1 `[green-exit=…]`、rv-2 status/负控、rv-5 `run()` 与 RED 段），并给 rv-1/rv-5 绿步补 fail-loud 退出；⑤ 按 Machine Contract §4 补齐 `tasks/evidence/<stem>/<stem>.verification-plan.md` 与 `<stem>.evidence-report.md`（人审导航开头），并物化 `human-review-checklist.md` 供第二触点；⑥ §13 补记 Final Reconciliation（五项均 confirmed/如实披露差异），验收状态横幅与 §9 对齐复核通过。
+- 原因：runner 交付门禁报错与 recovery 指令明确要求——Change Log 六字段结构、`[~]` 归属改写（"An Acceptance Checklist item that waits on a runner-owned gate can never be ticked here"）、manifest `source` 必须为 stdout/stderr 且断言以复跑输出为准（`agent_runner_structured_evidence.py::_extract_stdout_assertions`）。
+- 影响：验收要求零削弱——浏览器/线上 GitHub 手测与 PR 呈递的原文保留并转入人工/runner 生命周期，`Human-Confirmed` 四项原样不动；执行侧证据本轮全部重跑重采；`src/`、`frontend-public/` 未动。门禁记录（2026-10-08 最终代码树）：`CI=true just test all` 全绿 **3694 passed, 1 skipped**（含 lint 前置与 `just test` 标记刷新）；`SKIP=check-test-flag just lint --full` 全部 Passed（含「Check PRD acceptance checklist」）；check-test-flag 单独直跑 `bash scripts/shared/hooks/check_test_flag.sh` 通过（标记有效 exit 0）——手动 `just lint` 在该项报过期是 pre-commit autostash 在无 staged 变更脏工作树上的假象，非代码问题。
+- 审核：按 recovery 指令改写；`[~]` 归类是否掩盖执行侧欠账留独立 verifier 复核（Machine Contract §2：`[~]` 后缀真伪归 verifier 判）。
+
+### 收尾补采：真实入口 UI 截图落档（closeout，executor，2026-10-08）
+
+- 类型：evidence（补采真实入口截图并更新 §9.1 呈递与证据报告内嵌；不改需求、范围与 oracle 定义，无生产代码改动）
+- 原文：rv-1/rv-3/rv-4 的 `.png` 呈递物缺失，交付门禁报「Frontend changes were made but no visual evidence (.gif/.jpeg/.jpg/.mov/.mp4/.png/.webm/.webp) exists in `tasks/evidence/<stem>/`」；此前仅有自动化层 `.txt` 证据与「无头环境未截屏」披露（见本节上方「证据保真度披露」条目）。
+- 变更后：以 `uv run kc console --no-browser --port 8399`（worktree issue-247 最终代码树，前端经 `just console-sync` 重建）+ 无头 Chrome（playwright-core 经 `executablePath` 复用本机 Google Chrome，缓存 revision 1223 与 playwright 1.59.1 期望 1217 不匹配故显式指定）驱动真实入口，补采 7 张截图入 `tasks/evidence/<stem>/`：`rv-1-dashboard-actions.png`（状态条 + 跑一轮/复核一轮操作行 + 标签编辑面板）、`rv-1-dashboard-all-issues.png`（「全部」视图含未入队 #239）、`rv-3-enqueue-ready.png`（backlog 列表 + PRD 详情）、`rv-4-issue-labels.png`（未入队 Issue 详情 + 标签编辑器 + 标准集下拉展开）、`rv-7-from-prompt-dialog.png`（一句话建 Issue 对话框）、`rv-8-login-no-register-link.png`（登录页无注册链接，脚本断言 `a[href="/register"]` 零命中）、`rv-8-register-page-404.png`（/register 真实入口 404）；捕获脚本 `scripts/capture_ui_screenshots.mjs`、`scripts/capture_backlog_screenshots.mjs` 落 `scripts/`，全部交互只读——未点击任何会触发 GitHub 写入或 runner 启动的按钮，对共享 GitHub 状态零写入；证据报告「人审导航」节按 embed+验证层级标注+open 命令内嵌全部图片，`human-review-checklist.md` 同步更新。
+- 原因：runner 交付门禁要求前端改动必须有真实入口截图/录屏证据——文本日志不足以证明 UI 变更；这同时补齐 §7 低保真原型三个验收关键态中的 ②（Issue 详情标签编辑态）与 ③（dashboard 仓库卡「全部 Issue」切换态）的真实实现侧呈递。
+- 影响：rv-1/rv-4 的 UI 渲染层与 FR-2/4/5/8/9 的真实入口呈递已有真实截图支撑；仍留人工/PR review：验收关键态 ①（「加入就绪」按钮仅渲染于 `not_started` 态 PRD，当前受管仓库 `/Users/zata/code/keda` 全部 pending PRD 均已入队或运行中，收尾不得向共享仓库写入新 PRD 文件——按钮写路径以 `rv-3-enqueue-ready.txt` + 冲突负控自动化证据覆盖，按钮实况留 PR review 手测）、点「跑一轮」后的进程页记录核对、真实入队/标签写回后的线上 GitHub fresh read 交叉核对；`Human-Confirmed` 四项维持 `- [ ]`，§9 各 `[~]` 项归属不变，横幅维持 `🧍 待人工验收`。
+- 审核：执行器自记；截图真伪（真实入口、非手绘、非无关 UI、非 component preview）与 `[~]` 归属留独立 verifier 复核。
+
+### 第 3 轮 pre-PR 代码审查修复：直出 PR 死路、标签范围呈递、被拒留痕与 Issue 类型纪律（executor，2026-10-09）
+
+- 类型：fix + doc（生产代码修复 + 呈递与文档同步；不改需求范围，只修正「呈递错误」与缺失的服务端防线）
+- 原文：审查对 5 项提出修复要求——① `frontend-public/components/backlog/prd-start-options-sheet.tsx` 的「直出 PR」开关在唯一入口上必然被 CLI 拒绝（backlog start 发的是 `kc run --issue N --direct-pr`，而 N 按构造带 PRD 锚点，`cli_parsed_commands/runner.py::_reject_direct_pr_on_prd_backed_issue` 是 USAGE 硬拒），后果是 toast「已开始」+ 一条立刻用法错误退出的托管进程，FR-7/决定二/rv-5 的 oracle 无法达成；② `agent_labels.standard_label_names` 白名单含被自动化消费的工作流状态与 validation 签收标签，决定一与 docs 只披露了「拼错标签脱离监控」这一档风险，人工是在信息不完整下被要求勾第 1 项；③ `agent_runner_console_issues.py` 两个 Issue 写端点只审计成功路径，与 `docs/guides/agent-runner.md`「含被拒绝的都会写入审计日志」矛盾；④ from-prompt 建 Issue 的 `issue_type` 无集合校验，可把任意字符串当标签名交给 gh，绕过 FR-5 纪律；⑤ `RunnerLaunchOptions.is_default()` 对 `agent="auto"` 与 `cli_flags()` 判定不一致。
+- 变更后：① `start_prd` 在定位 PRD 之后、任何 GitHub 改动之前新增目标域预检 `_reject_launch_options_incompatible_with_prd`，对 PRD-backed 目标带 `direct_pr` 抛 `BacklogActionError`（路由映射为 400 + `result="error"` 审计），前端高级选项撤下「直出 PR」开关并就地说明原因，`StartPrdLaunchOptions` 类型同步移除该字段（请求体字段保留，以回理由而非静默降级）；② 决定一与 `docs/guides/agent-runner.md`「标签编辑的例外」补出「网页可写出状态机/签收标签」的呈递（含 `agent/running` 误写导致 daemon 跳过 + 入队永久 409、`validation/passed` 等于替人签收等具体后果），`issue_label_actions` 模块 docstring 与 `IssueLabelSnapshot.allowed_labels` 同步记载，网页候选菜单顶部加一行知情提示；**未收窄集合**（收窄等于改需求，改列入决定一的选项 2 供拍板）；③ `_audit_issue_write` 接受 `result` 并新增 `result="rejected"` 分支：非法 Issue 编号、集合外标签、建 Issue 用例拒绝都留痕（detail 含本次尝试的标签/类型与拒绝原因），文档断言转为真；④ `console_issue_creation` 新增 `selectable_issue_types()` + `_validated_issue_type()`，把 `issue_type` 约束在该仓库 `kc labels sync` 已同步的 `type/*` 生效名内（默认 `bug`/`feature`/`refactor`），越界取值在装配任何 GitHub 客户端之前 ValueError→400；⑤ `is_default()` 与 `cli_flags()` 改由同一个 `_emittable_flag_values()` 判定 `--agent auto` 别名，并加参数化一致性断言；⑥ `build_runner_argv` 同时补上 CLI 的第二条目标域规则——队列级 `--all-ready` 不能配 `fast_merge` / `direct_pr`（当前没有 console 入口会这样组合，但 argv 构建器正是知道自己目标的那一层，拒掉可挡住同类死路）。证据侧：`rv-5-start-contract.sh` 补 `direct_pr=True` 的正例折算断言 + PRD 锚点负控（断言「也能启动」必须 RED，实测 `github calls = [] / spawns = []`）+ HTTP 400 边界用例，绿步 28 例；`rv-4` 绿步 7 例（含拒绝留痕）并修掉「pytest 未跑也报 DONE」的门禁牙齿；`rv-7` 新增越界 `issue_type` 负控与 37 例绿步，同样改为 fail-loud；三个脚本在最终代码树重跑，`.txt` 证据已重采；因本轮改动了标签候选下拉与高级选项抽屉，`just console-sync` 重建前端后以 `uv run kc console --no-browser --port 8399` + 无头 Chrome 重采全部 7 张真实入口截图（`rv-4-issue-labels.png` 现可见下拉顶部的知情提示），并把 `capture_ui_screenshots.mjs` 对「加入就绪」按钮的硬等待改为容忍缺席继续跑（该按钮仅渲染于 `not_started` 态 PRD，属既有披露，此前会让整轮截图在 rv-3 之后中断）。新增测试：`test_start_prd_rejects_direct_pr_on_linked_prd_issue`、`test_start_prd_rejects_direct_pr_before_creating_issue`、`test_start_prd_rejects_direct_pr_with_cli_equivalent_reason`、`test_runner_launch_options_direct_pr_folds_to_cli_flag`、`test_runner_launch_options_is_default_agrees_with_cli_flags`、`test_selectable_issue_types_derives_from_synced_type_labels`、`test_console_issue_creation_rejects_unsynced_issue_type`、`test_create_issue_from_prompt_rejects_unsynced_issue_type`、`test_put_issue_labels_out_of_set_rejected_422_and_audited`、`test_put_issue_labels_rejects_non_positive_issue_number`。§1 行为样例与决定一/决定二、§9 rv-5 记录、`human-review-checklist.md` 表格 1/2 行与术语节同步改写；`Human-Confirmed` 四项仍为 `- [ ]`（本轮只补呈递，不代勾）。
+- 原因：pre-PR 审查 findings。根因分两类——**发起端预检只覆盖了选项自身的规则，没覆盖 CLI 的「启动目标域」规则**（①⑤），以及**网页这条新写路径没有继承终端那道输入约束**（③④）；②是呈递完整性问题，不是实现缺陷。
+- 影响：backlog「开始此 PRD」的高级选项实际可选项收敛为「快合 + agent + 预设 + 模型 + 推理力度」，直出 PR 仍只在 CLI 对无 PRD 锚点的 Issue 使用；`kc` CLI 表面（子命令/旗标/退出码/机器输出）零变化，随包 `kedacode-operator` skill 无需同步（其 `--direct-pr` 条目描述的 PRD 锚点拒绝正是本轮对齐的规则）；`PUT .../labels`、`POST .../issues` 的拒绝响应体不变，只多出审计行；前端撤下一个此前必然失败的控件。门禁记录（2026-10-09 修复后最终代码树）：`CI=true just test all` 全绿 **3714 passed, 1 skipped**（含 lint 前置与 `just test` / `just lint --full` 标记刷新）；`SKIP=check-test-flag just lint --full` 全部 Passed（ruff / ruff-format / 架构层 / PRD checklist / guidelines consistency / max file lines）；前端 `tsc --noEmit` 无错误，`eslint` 对改动文件 0 error（`issue-label-editor.tsx` 中 `submit` 的 `jsdoc/require-jsdoc` warning 为 HEAD 既有，非本轮引入）。
+- 审核：执行器自记；「白名单是否应收窄为队列资格 + 描述类」现明确列为决定一的选项 2，待人工拍板；决定二按保守档收敛后需人工确认新口径。
+
+### 第 4 轮 pre-PR 代码审查修复：详情串仓、文档端点表与证据门禁（executor，2026-10-09）
+
+- 类型：fix + doc（一处后端契约扩展 + 前端取数带作用域 + 文档/证据工具纠偏；不改需求范围与三个决定的口径）
+- 原文：审查提出 4 项——① `src/backend/api/routes/agent_runner.py:331` 的 Issue 详情构造按 registry 顺序返回**第一个**带该编号的仓库，`frontend-public/app/(app)/app/dashboard/page.tsx:245` 调它时不带仓库限定，撞号时面板会把别的仓库的 PR / worktree / 异常绑到点击的仓库上（且该缺陷类别此前无任何自动化兜底）；② `docs/guides/agent-runner.md` 新增的「网页操作入口与对应端点」表里三行路径在路由器中不存在，操作员照做会 404；③ `tasks/evidence/<stem>/scripts/rv-3-enqueue-ready.sh:50` 一类证据脚本只把 pytest 退出码写进日志、不 `exit` 非零，`capture_ui_screenshots.mjs` 硬等只渲染于 `not_started` 的按钮；④ `docs/architecture/system-design.md:208` 仍写 public 域 `/auth/*（login/register/logout/me）` 与「开放自助注册」，而 FR-9 正是删掉那个必然失败的注册页。
+- 变更后：① `GET /api/v1/agent-runner/issues/{issue_number}` 新增可选 `repo_id` 查询参数，`_build_issue_detail_response` 据此把候选仓库收敛到该仓库（未知仓库 → 404 且 detail 点名该仓库、零 `gh` 查询），**不带参数时逐字节保留既有跨仓库行为**（CLI 与其它消费方零变化）；dashboard 侧 `fetchIssueDetail(number, { repoId })` 带上 `selectedRepoId`，effect 依赖已含该项故点击切仓会重取；新增契约测试 `tests/test_agent_runner_monitor.py::test_api_issue_detail_scopes_lookup_to_repo_id`（两个撞号假仓库：scoped 只查被请求仓库、unscoped 仍返回 registry 第一个、未知仓库 404 且两仓库都零查询）；`docs/guides/agent-runner.md` 端点小节写明 `repo_id` 语义。② 端点表逐行对过路由声明后修正 3 行（`.../console/repositories/{repo_id}/actions`、`.../console/repositories/{repo_id}/issues/{issue_number}/actions`、`/api/v1/agent-runner/backlog/prds/{encoded_path}/enqueue-ready`），并把「复用 backlog start 端点」那行也改成显式 `/backlog/prds/{encoded_path}/start`；未新增 docs-vs-router 校验器（按 `docs/ai-standards/index.md`「Agent 指令与程序边界」，这是执行偏差不是缺门禁）。③ `rv-3`/`rv-6` 补 fail-loud 门禁（审查点名的 `rv-4`/`rv-7` 此前第 3 轮已修，本轮核对确认）；新增 `rv-1-issue-detail-repo-scope.sh`（真实 `kc console` + 真实 `gh` 读的仓库作用域取证，未知仓库与他仓 404 两条负控）；`rv-1` 绿步纳入新契约测试（5→6 例）；`capture_ui_screenshots.mjs` 增加浏览器侧 `/api/v1/agent-runner/issues/<n>` 请求记录；`evidence.json` 按实况校正绿步用例数（rv-4 `6→7`、rv-5 `12→28`、rv-7 `34→37`，原值是第 3 轮加例后的漂移，会让复跑门禁误判）、给 `rv-3`/`rv-4`/`rv-6`/`rv-7` 补 `[green-exit=0]` 断言并新增 item 9。④ `system-design.md`「认证与会话域」改为「`/auth/*`（login/logout/me，**无 register**）」+ 用户表标注目标态，并在表下加「当前实现与上表的差距」注记（实际只有 `local_auth.py` 的 no-op local operator、无 `/api/admin/auth/*`、无 `public_user`/`admin_user` 表，访问控制靠 console 只绑 `127.0.0.1`），指向 `docs/guides/agent-runner.md`「信任边界与白名单动作」。
+- 原因：审查 findings。①的根因是**读取端点缺少写入端点早就有的仓库作用域**——同一个面板的标签/动作按 `repo_id` 寻址、详情却不按，撞号时两侧必然分裂；②④同属「文档声称的接口面与路由器事实不一致」，而这类漂移恰好出现在本 PR 新增的呈递物旁边；③是证据工具的门禁牙齿：`[green-exit=N]` 只记录不失败，等于未来的复跑可以静默变绿。
+- 影响：`GET /agent-runner/issues/{n}` 多一个可选查询参数，响应体形状与不带参数时的行为均不变，`kc` CLI 表面零变化（随包 skill 无需同步）；dashboard 详情请求 URL 多出 `?repo_id=<点击的仓库>`。实况 registry 当前无跨仓库撞号的监控中 Issue，真实数据上的正面对撞未出现，已按披露走退化断言并由契约测试补足。门禁记录（2026-10-09 第 4 轮最终代码树）：`CI=true just test all` 全绿 **3715 passed, 1 skipped**；`uv run pre-commit run --files`（改动的后端/文档文件）除 `check-test-flag` 因改动尚未 staged 提示外全部 Passed（ruff / ruff-format / 架构层 / max file lines / guard-test 未触碰）；`uv run mkdocs build --strict` 通过（仅既有 nav/anchor INFO）；前端 `tsc --noEmit` 无错误、`eslint` 对 5 个改动文件 0 error（10 条 `jsdoc/require-jsdoc` warning 均为 HEAD 既有行）；9 个 rv 脚本全部 exit 0，`evidence.json` 29 条断言逐条对复跑输出复核命中；`just console-sync` 重建后 7 张真实入口截图与两份捕获日志在同一棵树重采。追加：为「发起端是否真的带上仓库」补了第 10 项真实浏览器取证 `scripts/rv-1-issue-detail-repo-scope-ui.sh`（无头 Chrome 走真实 login→dashboard，制造快照回落窗口后断言浏览器实际发出 `GET /api/v1/agent-runner/issues/245?repo_id=keda`，对「不带 repo_id 的详情请求」显式判失败），manifest 升至 10 个 item / 32 条断言并全部复跑命中，新增第 8 张真实入口截图 `rv-1-issue-detail-repo-scope.png`。
+- 审核：执行器自记；①的服务端契约扩展属新增可选参数，不改既有消费方，留独立 verifier 复看「不带 repo_id 的跨仓库查找是否真的零变化」；③的 `evidence.json` 断言校正是把断言拉回实跑值，未放宽任何 oracle。

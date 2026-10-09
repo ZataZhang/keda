@@ -1,10 +1,10 @@
 """Label syncing for the GitHub CLI client.
 
-Holds the static label specifications and the
-:func:`sync_labels` helper that creates or updates each label
-through ``gh label create``. Extracted out of the main client so
-:class:`backend.infrastructure.github_client.GitHubCliClient` stays
-focused on connection lifecycle.
+Creates or updates each standard label through ``gh label create``. The label
+set itself is defined once in
+:mod:`backend.core.shared.models.agent_labels` so that the console's label
+write validation and ``kc labels sync`` can never drift apart; this module only
+holds the ``gh`` side of that contract.
 """
 
 from __future__ import annotations
@@ -13,7 +13,8 @@ import logging
 from collections.abc import Sequence
 from typing import Protocol
 
-from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS, AgentSpec
+from backend.core.shared.models.agent_labels import standard_label_specs
+from backend.core.shared.models.agent_spec import AgentSpec
 from backend.infrastructure.github_models import LabelConfig
 
 _logger = logging.getLogger(__name__)
@@ -27,129 +28,23 @@ class _ClientProtocol(Protocol):
     def _run_with_retry(self, command: Sequence[str], *, cwd: object) -> object: ...
 
 
-_LABEL_SPECS: list[tuple[str, str, str]] = [
-    ("agent/ready", "0E8A16", "Issue is ready for a local AI runner to claim."),
-    (
-        "agent/running",
-        "FBCA04",
-        "Issue is currently being executed by a local AI runner.",
-    ),
-    (
-        "agent/supervising",
-        "C5DEF5",
-        "PR exists and automatic post-PR supervisor is reviewing or reprocessing.",
-    ),
-    ("agent/review", "1D76DB", "AI runner opened work for human review."),
-    ("agent/failed", "D73A4A", "AI runner failed and posted details."),
-    ("agent/blocked", "000000", "AI runner needs human input."),
-    (
-        "agent/waiting",
-        "FEF2C0",
-        "Issue has unmet dependencies and is waiting for upstream closure.",
-    ),
-    (
-        "agent/rework-prd",
-        "D93F0B",
-        "Request the AI runner to generate or rewrite this Issue's PRD.",
-    ),
-    (
-        "agent/deliberate",
-        "D4C5F9",
-        "Issue needs multi-agent deliberation (Phase 0) before implementation.",
-    ),
-    (
-        "direct-pr",
-        "D93F0B",
-        "One-shot DIRECT across claimants; consumed after confirmed Draft PR. Not a workflow state.",
-    ),
-    (
-        "validation/pending",
-        "FBCA04",
-        "Realistic Validation evidence awaits human sign-off on the PR.",
-    ),
-    (
-        "validation/passed",
-        "0E8A16",
-        "A human verified the validation evidence and signed off.",
-    ),
-    (
-        "validation/verifier-passed",
-        "0E8A16",
-        "Independent verifier agent approved this PR.",
-    ),
-    (
-        "source/prd",
-        "0052CC",
-        "Issue has a canonical PRD tracked in the repository.",
-    ),
-    ("type/feature", "1D76DB", "User-facing feature or capability work."),
-    ("type/refactor", "5319E7", "Internal refactor or structural improvement."),
-    ("type/bug", "D73A4A", "Broken behavior or regression fix."),
-    ("status/backlog", "BFDADC", "Tracked work that is not in progress yet."),
-]
-
-
-def _agent_label_meta(
-    agent_name: str,
-    agent_registry: dict[str, AgentSpec] | None,
-) -> tuple[str, str]:
-    """返回 agent 路由标签的颜色与描述（从 agent 注册表派生）。
-
-    注册表优先用调用方传入的合并视图（含配置注册的新 agent），缺省回落
-    内置默认；两者都未命中时使用通用兜底，保证未知 agent 仍可同步标签。
-    """
-    spec = None
-    if agent_registry is not None:
-        spec = agent_registry.get(agent_name)
-    if spec is None:
-        spec = BUILTIN_AGENT_SPECS.get(agent_name)
-    if spec is None:
-        return "5319E7", f"Use {agent_name} for local runner execution."
-    return spec.label_color, spec.label_description
-
-
 def sync_labels(
     client: _ClientProtocol,
     labels: LabelConfig,
     agent_registry: dict[str, AgentSpec] | None = None,
 ) -> None:
     """Create or update standard labels."""
-    label_specs = list(_LABEL_SPECS)
-    for agent_name in labels.agent_labels:
-        color, description = _agent_label_meta(agent_name, agent_registry)
-        label_specs.append((f"agent/{agent_name}", color, description))
-    configured_names = {
-        "agent/ready": labels.ready,
-        "agent/running": labels.running,
-        "agent/supervising": labels.supervising,
-        "agent/review": labels.review,
-        "agent/failed": labels.failed,
-        "agent/blocked": labels.blocked,
-        "agent/waiting": labels.waiting,
-        "agent/rework-prd": labels.rework_prd,
-        "agent/deliberate": labels.deliberate,
-        "validation/pending": labels.validation_pending,
-        "validation/passed": labels.validation_passed,
-        "validation/verifier-passed": labels.verifier_passed,
-        "direct-pr": labels.direct_pr,
-    }
-    configured_names.update({f"agent/{k}": v for k, v in labels.agent_labels.items()})
-    for label_name, color, description in label_specs:
-        effective_name = configured_names.get(label_name, label_name)
-        if label_name == "direct-pr":
-            effective_name = effective_name.strip()
-            if not effective_name:
-                continue
+    for label_spec in standard_label_specs(labels, agent_registry):
         client._run_with_retry(
             [
                 "gh",
                 "label",
                 "create",
-                effective_name,
+                label_spec.effective_name,
                 "--color",
-                color,
+                label_spec.color,
                 "--description",
-                description,
+                label_spec.description,
                 "--force",
             ],
             cwd=client.repo_path,

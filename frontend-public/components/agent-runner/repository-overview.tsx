@@ -3,19 +3,30 @@
 import { useMemo } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
+  ConsoleIssueEntry,
   IssueMonitoringSnapshot,
   RepositoryMonitoringOverview,
 } from "@/lib/api/types";
+import { cn } from "@/lib/utils";
 
 import { IssueList } from "@/components/agent-runner/issue-list";
-import { variantForLabel } from "@/components/agent-runner/label-variant";
+import { prettyLabel, variantForLabel } from "@/components/agent-runner/label-variant";
+
+/** 仓库概览的 Issue 范围：仅监控收录，或 GitHub 全量（含无 agent 标签者）。 */
+export type IssueScope = "monitoring" | "all";
 
 interface RepositoryOverviewProps {
   repository: RepositoryMonitoringOverview;
   onSelectIssue: (issue: IssueMonitoringSnapshot) => void;
   selectedIssueNumber: number | null;
+  issueScope: IssueScope;
+  onScopeChange: (scope: IssueScope) => void;
+  /** 「全部」模式下的列表数据；``null`` 表示尚未加载完成。 */
+  allIssues: ConsoleIssueEntry[] | null;
+  onSelectConsoleIssue: (entry: ConsoleIssueEntry) => void;
 }
 
 const QUEUE_ORDER: Array<keyof RepositoryMonitoringOverview["queue_counts"]> = [
@@ -31,6 +42,10 @@ export function RepositoryOverview({
   repository,
   onSelectIssue,
   selectedIssueNumber,
+  issueScope,
+  onScopeChange,
+  allIssues,
+  onSelectConsoleIssue,
 }: RepositoryOverviewProps) {
   const groupedIssues = useMemo(() => {
     const groups: Record<string, IssueMonitoringSnapshot[]> = {};
@@ -76,6 +91,28 @@ export function RepositoryOverview({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="flex items-center gap-1" data-testid={`dashboard-issue-scope-${repository.repo_id}`}>
+          {(["monitoring", "all"] as const).map((scope) => (
+            <Button
+              key={scope}
+              size="sm"
+              variant={issueScope === scope ? "secondary" : "ghost"}
+              className="h-7 px-2 text-xs"
+              onClick={() => onScopeChange(scope)}
+            >
+              {scope === "monitoring" ? "监控中" : "全部"}
+            </Button>
+          ))}
+        </div>
+
+        {issueScope === "all" ? (
+          <AllIssuesBlock
+            entries={allIssues}
+            selectedIssueNumber={selectedIssueNumber}
+            onSelect={onSelectConsoleIssue}
+          />
+        ) : (
+          <>
         <div className="flex flex-wrap gap-2">
           {QUEUE_ORDER.map((queueKey) => {
             const count = repository.queue_counts[queueKey];
@@ -133,6 +170,8 @@ export function RepositoryOverview({
             当前没有匹配工作流标签的 Issue。
           </p>
         ) : null}
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -176,5 +215,69 @@ function HealthPill({
       />
       {label}
     </span>
+  );
+}
+
+/** 「全部」模式的 Issue 行列表：open Issue 含无 agent 标签者，未收录的标注未入队。 */
+function AllIssuesBlock({
+  entries,
+  selectedIssueNumber,
+  onSelect,
+}: {
+  entries: ConsoleIssueEntry[] | null;
+  selectedIssueNumber: number | null;
+  onSelect: (entry: ConsoleIssueEntry) => void;
+}) {
+  if (entries === null) {
+    return <p className="text-sm text-slate-500">正在加载全量 Issue…</p>;
+  }
+  if (entries.length === 0) {
+    return <p className="text-sm text-slate-500">该仓库当前没有 open Issue。</p>;
+  }
+  return (
+    <ul
+      className="divide-y divide-slate-200 overflow-hidden rounded-md border border-slate-200 dark:divide-slate-800 dark:border-slate-800"
+      data-testid="dashboard-all-issues"
+    >
+      {entries.map((entry) => (
+        <li
+          key={entry.number}
+          className={cn(
+            "flex items-center gap-3 bg-white px-3 py-2 text-sm transition-colors dark:bg-slate-950",
+            selectedIssueNumber === entry.number
+              ? "bg-slate-50 dark:bg-slate-900"
+              : "hover:bg-slate-50 dark:hover:bg-slate-900",
+          )}
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex-1 justify-start gap-2 px-1"
+            onClick={() => onSelect(entry)}
+          >
+            <span className="font-mono text-xs text-slate-500">#{entry.number}</span>
+            <span className="truncate text-left text-slate-900 dark:text-slate-100">
+              {entry.title}
+            </span>
+          </Button>
+          {entry.monitored ? (
+            <Badge variant="default" className="text-xs">
+              监控中
+            </Badge>
+          ) : (
+            <Badge variant="warning" className="text-xs">
+              未入队
+            </Badge>
+          )}
+          <span className="hidden max-w-40 flex-wrap items-center gap-1 sm:flex">
+            {entry.labels.slice(0, 3).map((label) => (
+              <Badge key={label} variant={variantForLabel(label)} className="text-[10px]">
+                {prettyLabel(label)}
+              </Badge>
+            ))}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

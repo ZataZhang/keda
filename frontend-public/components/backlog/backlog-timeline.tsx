@@ -7,9 +7,20 @@ interface BacklogTimelineProps {
   onStart: (prd: BacklogPrd) => void;
   onOpenContent: (prd: BacklogPrd) => void;
   startingPath: string | null;
+  /** 「加入就绪」回调（FR-3）。 */
+  onEnqueueReady?: (prd: BacklogPrd) => void;
+  /** 正在入队的 PRD 路径。 */
+  enqueuingPath?: string | null;
 }
 
-export function BacklogTimeline({ prds, onStart, onOpenContent, startingPath }: BacklogTimelineProps) {
+export function BacklogTimeline({
+  prds,
+  onStart,
+  onOpenContent,
+  startingPath,
+  onEnqueueReady,
+  enqueuingPath,
+}: BacklogTimelineProps) {
   if (prds.length === 0) {
     return <p className="text-sm text-slate-500">暂无 PRD。</p>;
   }
@@ -31,6 +42,8 @@ export function BacklogTimeline({ prds, onStart, onOpenContent, startingPath }: 
                 onStart={() => onStart(prd)}
                 onOpenContent={() => onOpenContent(prd)}
                 starting={startingPath === prd.prd_path}
+                onEnqueueReady={onEnqueueReady ? () => onEnqueueReady(prd) : undefined}
+                enqueuing={enqueuingPath === prd.prd_path}
               />
             ))}
           </div>

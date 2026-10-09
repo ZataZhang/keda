@@ -24,6 +24,10 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessRecord,
 )
 from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.shared.models.runner_launch import (
+    RunnerLaunchOptions,
+    RunnerLaunchOptionsError,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -48,12 +52,27 @@ class ConsoleProcessLaunchPlan:
     cwd: Path
 
 
+def _launch_flags_to_argv(options: RunnerLaunchOptions | None) -> tuple[str, ...]:
+    """把 per-run 启动选项折算成 argv 片段；缺省选项返回空元组。
+
+    空元组是「缺省契约不变」的机器可断言形态：不传选项时构建出的 argv 与
+    本参数引入前逐字节一致。
+    """
+    if options is None:
+        return ()
+    try:
+        return options.cli_flags()
+    except RunnerLaunchOptionsError as exc:
+        raise ConsoleProcessError(str(exc)) from exc
+
+
 def build_runner_argv(
     *,
     runner_command: Sequence[str],
     kind: RunnerProcessKind,
     repo_id: str,
     issue_number: int | None = None,
+    options: RunnerLaunchOptions | None = None,
 ) -> tuple[str, ...]:
     """从白名单枚举构建 runner 子进程的 argv。
 
@@ -63,21 +82,25 @@ def build_runner_argv(
         repo_id: 目标仓库 ID（传给 ``--repo-id``）。
         issue_number: ``BLOCKED_CONTINUE`` 的目标 Issue；``RUN_ONCE`` 传它时
             定向执行（``kc run --issue N``），缺省走 ``--all-ready``。
+        options: per-run 启动选项，每项映射到 ``kc run`` 的同名旗标。``None``
+            或全部取默认值时不产生任何额外 argv。
 
     Returns:
         完整 argv 元组。
 
     Raises:
-        ConsoleProcessError: kind 与参数组合非法。
+        ConsoleProcessError: kind 与参数组合非法，选项组合非法（互斥档位、缺少
+            ``preset`` 的覆盖旗标），或发布档位旗标配队列级 ``--all-ready`` 目标。
     """
     command_prefix = tuple(runner_command)
     if not command_prefix:
         raise ConsoleProcessError("console.runner_command must not be empty.")
+    launch_flags = _launch_flags_to_argv(options)
     selector = ("--repo-id", repo_id)
     if kind is RunnerProcessKind.DAEMON:
-        return (*command_prefix, "daemon", *selector)
+        return (*command_prefix, "daemon", *launch_flags, *selector)
     if kind is RunnerProcessKind.REVIEW_DAEMON:
-        return (*command_prefix, "review-daemon", *selector)
+        return (*command_prefix, "review-daemon", *launch_flags, *selector)
     if kind is RunnerProcessKind.RUN_ONCE:
         # ``kc run`` 目标必填后的 Console 迁移（FR-7）：带 Issue 编号时定向
         # 执行（开始此 PRD 路径），否则显式 ``--all-ready`` 保留旧的捞队列
@@ -85,10 +108,27 @@ def build_runner_argv(
         if issue_number is not None:
             if issue_number <= 0:
                 raise ConsoleProcessError("run_once requires a positive issue_number.")
-            return (*command_prefix, "run", "--issue", str(issue_number), *selector)
-        return (*command_prefix, "run", "--all-ready", *selector)
+            return (
+                *command_prefix,
+                "run",
+                "--issue",
+                str(issue_number),
+                *launch_flags,
+                *selector,
+            )
+        # CLI 的第二条**目标域**规则同样必须在发起端拦下：``--fast-merge`` /
+        # ``--direct-pr`` 与 ``--all-ready`` 互斥（整条队列一起跳过闸门正是这两个
+        # 旗标存在的理由）。放过去的话，子进程立刻以用法错误退出，网页只留下一条
+        # 幽灵托管进程记录。
+        if options is not None and (options.fast_merge or options.direct_pr):
+            raise ConsoleProcessError(
+                "--fast-merge / --direct-pr cannot combine with --all-ready: a queue-wide "
+                "unverified burst is exactly what those flags exist to prevent. Target one "
+                "issue instead (run_once with an issue_number)."
+            )
+        return (*command_prefix, "run", "--all-ready", *launch_flags, *selector)
     if kind is RunnerProcessKind.REVIEW_ONCE:
-        return (*command_prefix, "review", *selector)
+        return (*command_prefix, "review", *launch_flags, *selector)
     if kind is RunnerProcessKind.BLOCKED_CONTINUE:
         if issue_number is None or issue_number <= 0:
             raise ConsoleProcessError("blocked_continue requires a positive issue_number.")
@@ -97,6 +137,7 @@ def build_runner_argv(
             "blocked-continue",
             "--issue",
             str(issue_number),
+            *launch_flags,
             *selector,
         )
     raise ConsoleProcessError(f"Unsupported process kind: {kind}.")
@@ -120,6 +161,7 @@ def start_runner_process(
     runner_command: Sequence[str],
     spawn_cwd: Path,
     issue_number: int | None = None,
+    options: RunnerLaunchOptions | None = None,
 ) -> RunnerProcessRecord:
     """启动一个托管 runner 进程。
 
@@ -131,12 +173,14 @@ def start_runner_process(
         runner_command: 启动命令前缀。
         spawn_cwd: 子进程工作目录（keda 项目根，保证读到正确配置）。
         issue_number: blocked_continue 所需的 Issue 编号。
+        options: per-run 启动选项（与 ``kc run`` 同名旗标一一对应）；缺省时
+            构建的 argv 与本参数引入前完全一致。
 
     Returns:
         新进程的登记记录。
 
     Raises:
-        ConsoleProcessError: 校验失败或同类常驻进程已在运行。
+        ConsoleProcessError: 校验失败、选项非法或同类常驻进程已在运行。
     """
     _resolve_enabled_context(repo_id, contexts)
     if kind in PERSISTENT_PROCESS_KINDS:
@@ -151,6 +195,7 @@ def start_runner_process(
         kind=kind,
         repo_id=repo_id,
         issue_number=issue_number,
+        options=options,
     )
     _logger.info("Starting console process %s for '%s': %s", kind.value, repo_id, argv)
     return supervisor.spawn(repo_id=repo_id, kind=kind, argv=argv, cwd=spawn_cwd)

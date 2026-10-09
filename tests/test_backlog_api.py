@@ -168,6 +168,42 @@ def test_start_prd_rejects_missing_repo(backlog_environment) -> None:
     assert response.status_code == 400
 
 
+def test_start_prd_rejects_direct_pr_with_cli_equivalent_reason(
+    backlog_environment, monkeypatch
+) -> None:
+    """直出 PR 在 HTTP 边界即 400 拒绝，不留「已启动但立刻用法错误退出」的幽灵进程。"""
+    import base64
+    from types import SimpleNamespace
+
+    encoded = base64.urlsafe_b64encode(b"tasks/pending/P1-FEAT-20260101-test.md").decode("ascii")
+    spawn_calls: list[dict] = []
+
+    def _record_spawn(**kwargs):
+        spawn_calls.append(kwargs)
+        return SimpleNamespace(process_id="fake-id", status="running", command=kwargs.get("argv"))
+
+    monkeypatch.setattr(
+        backlog_routes,
+        "create_process_supervisor",
+        lambda: type(
+            "RecordingSupervisor",
+            (),
+            {"list_processes": lambda: [], "spawn": staticmethod(_record_spawn)},
+        )(),
+    )
+
+    response = client.post(
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/start",
+        json={"repo_id": "keda-main", "direct_pr": True},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "--direct-pr" in response.json()["detail"]
+    assert spawn_calls == []
+    github_client = backlog_environment["github_client"]
+    assert not [c for c in github_client.calls if c["method"] == "edit_issue_labels"]
+
+
 def test_start_global_requires_valid_parallel(backlog_environment) -> None:
     """Global start must validate max_parallel bounds."""
     response = client.post(

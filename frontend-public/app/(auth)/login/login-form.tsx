@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { useForm } from "react-hook-form"
@@ -116,15 +115,6 @@ export function LoginForm() {
           登录
         </Button>
       </form>
-      <p className="mt-6 text-center text-sm text-muted-foreground">
-        还没有账号？{" "}
-        <Link
-          href="/register"
-          className="text-primary underline-offset-4 hover:underline"
-        >
-          立即注册
-        </Link>
-      </p>
     </Form>
   )
 }

@@ -5,16 +5,20 @@
 // All write operations map to backend whitelisted actions; the frontend
 // never sends raw shell commands.
 
-import { del, get, patch, post } from "./client";
+import { del, get, patch, post, put } from "./client";
 import type {
   AuditEntry,
   BatchAddRepositoriesResult,
   ConsoleActionResult,
   ConsoleContext,
+  ConsoleCreatedIssue,
+  ConsoleIssueEntry,
   DailyRunTrendEntry,
   DirectoryBrowseResult,
   DiscoveredRepositoryEntry,
+  IssueLabelSnapshot,
   IssueLogChunk,
+  LaunchOptionsView,
   MonitorSettings,
   PrdLifecycleStats,
   ProcessLogChunk,
@@ -115,11 +119,111 @@ export async function executeRepositoryAction(
 export async function executeIssueAction(
   repoId: string,
   issueNumber: number,
-  action: "retry_failed" | "blocked_continue",
+  action: "retry_failed" | "blocked_continue" | "recover_failed_publish",
 ): Promise<ConsoleActionResult> {
   return post<ConsoleActionResult>(
     `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues/${issueNumber}/actions`,
     { action },
+  );
+}
+
+// ── Issue 全量视图 / 标签编辑 / 一句话建 Issue ──────────────────────────────
+
+/**
+ * 列举仓库 Issue（默认不过滤标签），每条标注是否已被监控收录。
+ *
+ * @param repoId - 已注册且启用的仓库 ID。
+ * @param params.state - `open` / `closed` / `all`，默认 `open`。
+ * @param params.label - 可选标签过滤；省略即返回全部。
+ * @param params.limit - 返回条数上限（后端收敛到 1–500）。
+ * @returns 全量 Issue 行列表。
+ */
+export async function fetchAllRepositoryIssues(
+  repoId: string,
+  params: { state?: string; label?: string; limit?: number } = {},
+): Promise<ConsoleIssueEntry[]> {
+  const searchParams = new URLSearchParams();
+  if (params.state) {
+    searchParams.set("state", params.state);
+  }
+  if (params.label) {
+    searchParams.set("label", params.label);
+  }
+  if (params.limit !== undefined) {
+    searchParams.set("limit", String(params.limit));
+  }
+  const query = searchParams.toString();
+  const response = await get<{ issues: ConsoleIssueEntry[] }>(
+    `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues${query ? `?${query}` : ""}`,
+  );
+  return response.issues;
+}
+
+/**
+ * 读取 Issue 当前标签与允许通过网页增删的标准标签集合。
+ *
+ * @param repoId - 仓库 ID。
+ * @param issueNumber - Issue 编号。
+ * @returns 标签快照（`allowed_labels` 即 `kc labels sync` 同源集合）。
+ */
+export async function fetchIssueLabels(
+  repoId: string,
+  issueNumber: number,
+): Promise<IssueLabelSnapshot> {
+  return get<IssueLabelSnapshot>(
+    `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues/${issueNumber}/labels`,
+  );
+}
+
+/**
+ * 在已同步标准标签集内增删标签；写回后响应为 GitHub fresh read 结果。
+ *
+ * @param repoId - 仓库 ID。
+ * @param issueNumber - Issue 编号。
+ * @param payload.add - 要添加的标签名（集合外将被后端拒绝）。
+ * @param payload.remove - 要移除的标签名（集合外同样被拒绝）。
+ * @returns 写入后的最新标签快照。
+ */
+export async function updateIssueLabels(
+  repoId: string,
+  issueNumber: number,
+  payload: { add: string[]; remove: string[] },
+): Promise<IssueLabelSnapshot> {
+  return put<IssueLabelSnapshot>(
+    `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues/${issueNumber}/labels`,
+    payload,
+  );
+}
+
+/**
+ * 用一句话需求创建 GitHub Issue（等价 CLI `kc issue create --from-prompt`）。
+ *
+ * @param repoId - 目标仓库 ID。
+ * @param payload.prompt_text - 需求原文。
+ * @param payload.issue_type - Issue 类型（如 `feature` / `bug`），默认 `feature`。
+ * @returns 新 Issue 的编号与地址；建完停在未入队态。
+ */
+export async function createIssueFromPrompt(
+  repoId: string,
+  payload: { prompt_text: string; issue_type?: string },
+): Promise<ConsoleCreatedIssue> {
+  return post<ConsoleCreatedIssue>(
+    `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues`,
+    payload,
+  );
+}
+
+/**
+ * 读取启动高级选项的候选清单（agent 名单与已定义模型预设名）。
+ *
+ * @param repoId - 仓库 ID。
+ * @returns 选项 sheet 的下拉数据。
+ */
+export async function fetchLaunchOptions(
+  repoId: string,
+): Promise<LaunchOptionsView> {
+  return get<LaunchOptionsView>(
+    `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/launch-options`,
   );
 }
 

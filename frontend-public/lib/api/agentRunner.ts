@@ -9,6 +9,8 @@ import type {
   IssueMonitoringSnapshot,
   MonitorSnapshotsResponse,
   MonitoringOverview,
+  RunnerHealthStatus,
+  RunnerStatusSummary,
 } from "./types";
 
 const BASE_PATH = "/v1/agent-runner";
@@ -94,10 +96,24 @@ export async function pollOverviewJob(
   }
 }
 
+/**
+ * Fetch monitoring detail for one Issue.
+ *
+ * @param issueNumber - Target Issue number.
+ * @param params - Optional scope. `repoId` restricts the lookup to one
+ * repository; Issue numbers collide across registered repositories, so the
+ * dashboard always passes the repo the operator clicked.
+ */
 export async function fetchIssueDetail(
   issueNumber: number,
+  params: { repoId?: string | null } = {},
 ): Promise<IssueMonitoringSnapshot> {
-  return get<IssueMonitoringSnapshot>(`${BASE_PATH}/issues/${issueNumber}`);
+  const query = params.repoId
+    ? `?${new URLSearchParams({ repo_id: params.repoId })}`
+    : "";
+  return get<IssueMonitoringSnapshot>(
+    `${BASE_PATH}/issues/${issueNumber}${query}`,
+  );
 }
 
 /**
@@ -118,4 +134,22 @@ export async function fetchOverviewJobsByRepo(): Promise<OverviewJobsByRepo> {
  */
 export async function fetchOverviewSnapshots(): Promise<MonitorSnapshotsResponse> {
   return get<MonitorSnapshotsResponse>(`${BASE_PATH}/overview/snapshots`);
+}
+
+/**
+ * 读取 runner 配置摘要（daemon 模式、全局 runner 设置与仓库清单）。
+ *
+ * dashboard 状态条的第一数据源；只读，不触发任何执行。
+ */
+export async function fetchRunnerStatus(): Promise<RunnerStatusSummary> {
+  return get<RunnerStatusSummary>(`${BASE_PATH}/status`);
+}
+
+/**
+ * 读取 runner 健康探测结果（gh CLI 可用性）。
+ *
+ * gh 探测在后端真实执行 `gh --version`，失败时返回 `degraded` 而非报错。
+ */
+export async function fetchRunnerHealth(): Promise<RunnerHealthStatus> {
+  return get<RunnerHealthStatus>(`${BASE_PATH}/health`);
 }

@@ -12,6 +12,7 @@ import type {
   BacklogCiDelivery,
   BacklogCiRepairGlobalState,
   CiRepairPolicy,
+  StartPrdLaunchOptions,
 } from "./types";
 
 const BASE_PATH = "/v1/agent-runner/backlog";
@@ -61,9 +62,35 @@ export function encodePrdPath(prdPath: string): string {
     .replace(/\//g, "_");
 }
 
-export async function startBacklogPrd(repoId: string, prdPath: string): Promise<BacklogActionResult> {
+export async function startBacklogPrd(
+  repoId: string,
+  prdPath: string,
+  options?: StartPrdLaunchOptions,
+): Promise<BacklogActionResult> {
   const encodedPath = encodePrdPath(prdPath);
-  return post(`${BASE_PATH}/prds/${encodedPath}/start`, { repo_id: repoId });
+  return post(`${BASE_PATH}/prds/${encodedPath}/start`, {
+    repo_id: repoId,
+    ...(options ?? {}),
+  });
+}
+
+/**
+ * 「加入就绪」：建 Issue（若无）+ 打就绪标签，绝不启动 runner。
+ *
+ * 是否被自动领取由仓库 autopilot 决定；目标 Issue 正在执行中时后端返回 409。
+ *
+ * @param repoId - 仓库标识。
+ * @param prdPath - 相对仓库根目录的 PRD 路径。
+ * @returns 状态为 ready 的动作结果。
+ */
+export async function enqueueBacklogPrdReady(
+  repoId: string,
+  prdPath: string,
+): Promise<BacklogActionResult> {
+  const encodedPath = encodePrdPath(prdPath);
+  return post(`${BASE_PATH}/prds/${encodedPath}/enqueue-ready`, {
+    repo_id: repoId,
+  });
 }
 
 /**

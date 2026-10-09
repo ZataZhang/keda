@@ -37,6 +37,10 @@ interface PrdCardProps {
   onStart: () => void;
   onOpenContent: () => void;
   starting: boolean;
+  /** 「加入就绪」回调：建 Issue + 打就绪标签但不启动 runner（FR-3）。 */
+  onEnqueueReady?: () => void;
+  /** 该 PRD 是否正在执行「加入就绪」。 */
+  enqueuing?: boolean;
 }
 
 /**
@@ -55,7 +59,14 @@ export function canStartBacklogPrd(prd: BacklogPrd): boolean {
   return stateAllowsStart && !prd.block_reason;
 }
 
-export function PrdCard({ prd, onStart, onOpenContent, starting }: PrdCardProps) {
+export function PrdCard({
+  prd,
+  onStart,
+  onOpenContent,
+  starting,
+  onEnqueueReady,
+  enqueuing,
+}: PrdCardProps) {
   const progress =
     prd.acceptance_total > 0
       ? Math.round((prd.acceptance_checked / prd.acceptance_total) * 100)
@@ -141,6 +152,19 @@ export function PrdCard({ prd, onStart, onOpenContent, starting }: PrdCardProps)
           {isStartable ? (
             <Button size="sm" onClick={onStart} disabled={starting || !!prd.block_reason}>
               {starting ? "启动中…" : "开始"}
+            </Button>
+          ) : null}
+          {onEnqueueReady && prd.state === "not_started" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onEnqueueReady}
+              disabled={enqueuing || !!prd.block_reason}
+              data-testid="prd-enqueue-ready"
+              data-prd-path={prd.prd_path}
+              title="建 Issue（若无）并打就绪标签，但不启动 runner"
+            >
+              {enqueuing ? "入队中…" : "加入就绪"}
             </Button>
           ) : null}
           {prd.next_action?.url ? (

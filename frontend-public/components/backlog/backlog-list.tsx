@@ -18,6 +18,10 @@ interface BacklogListProps {
   onStart: (prd: BacklogPrd) => void;
   onOpenContent: (prd: BacklogPrd) => void;
   startingPath: string | null;
+  /** 「加入就绪」回调（FR-3），透传到每张卡片。 */
+  onEnqueueReady?: (prd: BacklogPrd) => void;
+  /** 正在入队的 PRD 路径。 */
+  enqueuingPath?: string | null;
 }
 
 const PRIORITY_ORDER: Record<string, number> = {
@@ -80,7 +84,14 @@ const SORT_LABELS: Record<ListSortKey, string> = {
   updated_at: "按更新时间",
 };
 
-export function BacklogList({ prds, onStart, onOpenContent, startingPath }: BacklogListProps) {
+export function BacklogList({
+  prds,
+  onStart,
+  onOpenContent,
+  startingPath,
+  onEnqueueReady,
+  enqueuingPath,
+}: BacklogListProps) {
   const [sortKey, setSortKey] = useState<ListSortKey>("priority");
   const sortedPrds = useMemo(() => sortPrds(prds, sortKey), [prds, sortKey]);
 
@@ -119,6 +130,8 @@ export function BacklogList({ prds, onStart, onOpenContent, startingPath }: Back
             onStart={() => onStart(prd)}
             onOpenContent={() => onOpenContent(prd)}
             starting={startingPath === prd.prd_path}
+            onEnqueueReady={onEnqueueReady ? () => onEnqueueReady(prd) : undefined}
+            enqueuing={enqueuingPath === prd.prd_path}
           />
         ))}
       </div>

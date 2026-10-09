@@ -37,6 +37,12 @@ interface PrdDetailProps {
   starting: boolean;
   onStart: (prd: BacklogPrd) => void;
   additionalTabs?: PrdDetailTab[];
+  /** 「加入就绪」回调（FR-3）：建 Issue + 打就绪标签但不启动 runner。 */
+  onEnqueueReady?: (prd: BacklogPrd) => void;
+  /** 该 PRD 是否正在入队。 */
+  enqueuing?: boolean;
+  /** 打开「启动高级选项」抽屉（FR-7）。 */
+  onOpenStartOptions?: (prd: BacklogPrd) => void;
 }
 
 /**
@@ -47,6 +53,9 @@ interface PrdDetailProps {
  * @param props.starting - 该 PRD 是否正在启动。
  * @param props.onStart - 点击「开始此 PRD」的回调，继续走既有的单启动 API。
  * @param props.additionalTabs - 追加的标签页（供后续 PRD 扩展）。
+ * @param props.onEnqueueReady - 「加入就绪」回调（不启动 runner）。
+ * @param props.enqueuing - 该 PRD 是否正在入队。
+ * @param props.onOpenStartOptions - 打开启动高级选项抽屉。
  * @returns PRD 详情面板。
  */
 export function PrdDetail({
@@ -55,6 +64,9 @@ export function PrdDetail({
   starting,
   onStart,
   additionalTabs = [],
+  onEnqueueReady,
+  enqueuing,
+  onOpenStartOptions,
 }: PrdDetailProps) {
   const tabs: PrdDetailTab[] = [
     {
@@ -96,6 +108,7 @@ export function PrdDetail({
   const [activeTabId, setActiveTabId] = useState<string>(tabs[0]?.id ?? PRD_CONTENT_TAB_ID);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const startable = canStartBacklogPrd(prd);
+  const enqueueReadyVisible = onEnqueueReady !== undefined && prd.state === "not_started";
 
   return (
     <div
@@ -134,6 +147,29 @@ export function PrdDetail({
           >
             {starting ? "启动中…" : "开始此 PRD"}
           </Button>
+          {enqueueReadyVisible ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onEnqueueReady?.(prd)}
+              disabled={enqueuing || !!prd.block_reason}
+              data-testid="prd-detail-enqueue-ready"
+              title="建 Issue（若无）并打就绪标签，但不启动 runner"
+            >
+              {enqueuing ? "入队中…" : "加入就绪"}
+            </Button>
+          ) : null}
+          {onOpenStartOptions && startable ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onOpenStartOptions(prd)}
+              data-testid="prd-detail-start-options"
+              title="快合 / 直出 PR / 指定 agent / 模型预设"
+            >
+              高级选项…
+            </Button>
+          ) : null}
           {prd.issue_url ? (
             <Button size="sm" variant="outline" asChild>
               <a href={prd.issue_url} target="_blank" rel="noreferrer" data-testid="prd-detail-issue">
