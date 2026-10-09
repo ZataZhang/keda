@@ -69,6 +69,8 @@ Thumbs.db
 
 # Agent runner state (local only)
 .agent-runner/
+# iar runner 写进工作区 .iar/ 下的同类会话状态（与上面 .agent-runner/ 只差一层目录）
+.iar/agent-runner/
 
 # Realistic Validation evidence packages — local PRD flow (`just ai implement`).
 # Commit only the text reports (*.md: verification-plan / evidence-report /

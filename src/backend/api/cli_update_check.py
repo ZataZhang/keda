@@ -5,8 +5,9 @@
 - 更新检查永远不得让原命令失败：网络短超时、离线静默、最外层兜底吞异常。
 - 机器路径整段跳过，逐字节保持原样：机器模式（``--json`` / ``--output json``）、
   shell 补全协议（补全环境变量存在）、``--help`` / ``-h``、``--version``（入口已
-  先行短路）、非交互终端（stdin 或 stderr 不是 TTY），以及显式关闭
-  ``KEDACODE_NO_UPDATE_CHECK=1``（旧名 ``IAR_NO_UPDATE_CHECK`` 双读）。
+  先行短路）、无参数调用（只打印用法帮助）、非交互终端（stdin 或 stderr 不是
+  TTY），以及显式关闭 ``KEDACODE_NO_UPDATE_CHECK=1``（旧名 ``IAR_NO_UPDATE_CHECK``
+  双读）。
 - 结果缓存到 ``<状态目录>/update-check.json``，默认 24 小时内不再访问 PyPI；
   缓存记录绑定了当时的已安装版本，升级后自动失效。
 - 询问后仅对「可确认的 PyPI 托管安装」（uv tool / pipx / Homebrew / venv pip /
@@ -141,6 +142,9 @@ def _should_skip_startup_update_check(
     if _truthy_env_flag(source_environ):
         return True
     if machine_output_requested(list(argv)):
+        return True
+    # 无参数调用只会打印用法帮助（main 里的 NoArgsIsHelpError），同属帮助路径。
+    if not argv:
         return True
     if "--help" in argv or "-h" in argv or "--version" in argv or "-V" in argv:
         return True

@@ -119,30 +119,39 @@ def test_skip_on_help_and_version(_always_tty: None) -> None:
 def test_skip_when_env_disabled_both_names(_always_tty: None) -> None:
     """KEDACODE_NO_UPDATE_CHECK / 旧名 IAR_NO_UPDATE_CHECK 都能显式关闭。"""
     assert _should_skip_startup_update_check(
-        [],
+        ["registry", "list"],
         environ={"KEDACODE_NO_UPDATE_CHECK": "1"},
     )
-    assert _should_skip_startup_update_check([], environ={"IAR_NO_UPDATE_CHECK": "1"})
-    assert not _should_skip_startup_update_check([], environ={"KEDACODE_NO_UPDATE_CHECK": "0"})
+    assert _should_skip_startup_update_check(
+        ["registry", "list"], environ={"IAR_NO_UPDATE_CHECK": "1"}
+    )
+    assert not _should_skip_startup_update_check(
+        ["registry", "list"], environ={"KEDACODE_NO_UPDATE_CHECK": "0"}
+    )
 
 
 def test_skip_when_not_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
     """stdin 或 stderr 不是 TTY 时不访问网络也不询问。"""
     _make_non_interactive(monkeypatch)
-    assert _should_skip_startup_update_check([], environ=_INTERACTIVE_ENVIRON)
+    assert _should_skip_startup_update_check(["registry", "list"], environ=_INTERACTIVE_ENVIRON)
 
 
 def test_interactive_terminal_is_checked(monkeypatch: pytest.MonkeyPatch) -> None:
     """人坐在终端前（stdin + stderr 皆 TTY）才放行检查。"""
     _make_interactive(monkeypatch)
-    assert not _should_skip_startup_update_check([], environ=_INTERACTIVE_ENVIRON)
+    assert not _should_skip_startup_update_check(["registry", "list"], environ=_INTERACTIVE_ENVIRON)
 
 
 def test_stdout_pipe_still_prompts(monkeypatch: pytest.MonkeyPatch) -> None:
     """提示走 stderr，因此 stdout 被管道接住时人仍然看得到问得到。"""
     monkeypatch.setattr(sys, "stdin", _Tty())
     monkeypatch.setattr(sys, "stderr", _Tty())
-    assert not _should_skip_startup_update_check([], environ=_INTERACTIVE_ENVIRON)
+    assert not _should_skip_startup_update_check(["registry", "list"], environ=_INTERACTIVE_ENVIRON)
+
+
+def test_skip_on_bare_invocation(_always_tty: None) -> None:
+    """无参数调用只打印用法帮助，同属帮助路径：不检查、不提示。"""
+    assert _should_skip_startup_update_check([], environ=_INTERACTIVE_ENVIRON)
 
 
 def test_startup_check_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,7 +162,7 @@ def test_startup_check_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("internal update-check failure")
 
     monkeypatch.setattr(cli_update_check, "check_for_update", _boom)
-    assert startup_update_check([]) is None
+    assert startup_update_check(["registry", "list"]) is None
 
 
 def test_startup_check_skips_before_touching_network(
@@ -425,7 +434,7 @@ def test_confirmed_upgrade_runs_detected_command(
         return _Result()
 
     monkeypatch.setattr(cli_update_check.subprocess, "run", _fake_run)
-    startup_update_check([])
+    startup_update_check(["registry", "list"])
     assert run_calls == [["uv", "tool", "upgrade", "kedacode"]]
 
 
@@ -444,7 +453,7 @@ def test_declined_upgrade_prints_copyable_command_only(
     monkeypatch.setattr(
         cli_update_check.subprocess, "run", lambda argv, **k: run_calls.append(argv)
     )
-    startup_update_check([])
+    startup_update_check(["registry", "list"])
     assert run_calls == []
     captured = capsys.readouterr()
     assert "pipx upgrade kedacode" in captured.err
@@ -462,7 +471,7 @@ def test_unrecognized_install_lists_candidate_commands(
         "confirm",
         lambda *a, **k: confirm_calls.append("confirm"),
     )
-    startup_update_check([])
+    startup_update_check(["registry", "list"])
     assert confirm_calls == []
     captured = capsys.readouterr()
     assert "uv tool install --force kedacode" in captured.err
@@ -485,7 +494,7 @@ def test_failed_upgrade_keeps_command_for_manual_retry(
         returncode = 1
 
     monkeypatch.setattr(cli_update_check.subprocess, "run", lambda argv, **k: _Result())
-    startup_update_check([])
+    startup_update_check(["registry", "list"])
     captured = capsys.readouterr()
     assert "brew upgrade kedacode" in captured.err
 
