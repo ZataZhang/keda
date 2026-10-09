@@ -551,7 +551,7 @@ verification_commands = [
 # - 跨副本累积由
 #   ``backend.engines.agent_runner.factory._anchor_memory_config``
 #   一次性绝对化；本节只关心值，不关心解析位置。
-agent_fallback_order = ["codebuddy", "qoder", "codex"]
+agent_fallback_order = ["qoder", "codex", "claude"]
 max_agent_switches = 4
 [agent_runner.memory]
 enabled = true
@@ -563,8 +563,8 @@ promoted_skills_dirs = [".kedacode/skills"]
 top_k_skills = 3
 top_k_facts = 5
 # 是否自动将满足条件的 skill 草稿晋升到 promoted_skills_dirs。
-# 默认开启：当 usage_count >= auto_promote_threshold 且 success_rate >=
-# auto_promote_min_success_rate 时自动晋升；设为 false 则改为人工审查后移动。
+# 只有存在真实使用观测时才允许自动晋升。自动提炼只创建草稿，不会伪造 usage_count，
+# 因此当前生成的草稿仍需人工审核与晋升；设为 false 可明确关闭未来的自动晋升。
 auto_promote = true
 auto_promote_threshold = 3
 auto_promote_min_success_rate = 1.0

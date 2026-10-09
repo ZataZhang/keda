@@ -22,8 +22,11 @@ from .short_term_memory import save_short_term_memory
 from .skill_catalog import format_skill_catalog
 from .skill_distillation import (
     DistilledSkill,
+    SkillDistillationEvidence,
+    build_skill_distillation_prompt,
     distill_skill,
     find_similar_draft,
+    find_similar_draft_for_issue,
     promote_draft_to_skills,
     save_skill_draft,
     should_auto_promote,
@@ -33,8 +36,11 @@ from .skill_distillation import (
 __all__ = [
     "DistilledSkill",
     "RelevantMemory",
+    "SkillDistillationEvidence",
+    "build_skill_distillation_prompt",
     "distill_skill",
     "find_similar_draft",
+    "find_similar_draft_for_issue",
     "format_skill_catalog",
     "load_relevant_memory",
     "match_skills_and_memory",

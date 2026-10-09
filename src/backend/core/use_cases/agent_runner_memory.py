@@ -15,6 +15,7 @@ from backend.core.agent.memory import save_short_term_memory
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     AttemptResult,
+    FailureType,
     IssueSummary,
 )
 
@@ -64,6 +65,11 @@ def _persist_short_term_memory(
             attempt_result=attempt,
             worktree_path=worktree_path,
             memory_config=config.memory,
+            final_solution=(
+                attempt.detail
+                if attempt.failure_type is FailureType.SUCCESS and attempt.detail
+                else None
+            ),
             store=services.short_term,
         )
     except Exception as exc:  # noqa: BLE001 - memory side-channel must not break runner.

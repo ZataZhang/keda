@@ -226,6 +226,8 @@ def test_persist_short_term_memory_swallows_errors(tmp_path: Path) -> None:
     )
     target = tmp_path / config.memory.base_dir / "short_term" / "keda-main" / "2" / "context.json"
     assert target.is_file()
+    saved_context = json.loads(target.read_text(encoding="utf-8"))
+    assert saved_context["final_solution"] == "ok"
 
 
 def test_resolve_repo_id_falls_back_to_directory_name(tmp_path: Path) -> None:

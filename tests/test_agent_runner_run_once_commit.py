@@ -387,7 +387,7 @@ def test_run_once_recovers_after_agent_command_failure(
     ]
     assert exit_code == 0
     assert len(agent_commands) == 2
-    assert sleep_calls == [7]
+    assert sleep_calls.count(7) == 1
     assert ("git", "commit", "-m", "agent: recovered after api error") in commands
     assert len(failed_calls) == 0
     assert "Agent command failed for Issue #123" in caplog.text

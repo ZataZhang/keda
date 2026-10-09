@@ -347,6 +347,26 @@ def test_global_start_triggers_one_resync(
     assert snapshot_wiring.resync_requests == ["keda-main"]
 
 
+def test_enqueue_ready_triggers_one_resync(
+    snapshot_wiring: _SnapshotWiring, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """加入就绪队列后重扫一次，让 backlog 快照反映新的队列状态。"""
+    monkeypatch.setattr(
+        backlog_routes,
+        "enqueue_prd_ready",
+        lambda **_kwargs: {"repo_id": "keda-main", "prd_path": "tasks/pending/a.md"},
+    )
+    encoded = _encode_prd_path("tasks/pending/P1-FEAT-20260101-test.md")
+
+    response = client.post(
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/enqueue-ready",
+        json={"repo_id": "keda-main"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert snapshot_wiring.resync_requests == ["keda-main"]
+
+
 def test_failed_start_does_not_request_a_resync(
     snapshot_wiring: _SnapshotWiring, monkeypatch: pytest.MonkeyPatch
 ) -> None:
