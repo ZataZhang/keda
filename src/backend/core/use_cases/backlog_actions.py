@@ -8,7 +8,7 @@ Three entry points share one selection rule (see :func:`_select_eligible_prds`):
 - :func:`start_prd` — start exactly one PRD (console single-start).
 - :func:`start_global_backlog` — one-shot batch start used by the console.
 - :func:`advance_backlog_queue` — continuous scheduling: reconcile finished
-  queue entries, then top the queue up to ``max_parallel``.
+  queue entries, then top the queue up to the resolved execution ceiling.
 
 :func:`enqueue_prd_ready` 不参与这条选择规则：它只把**指定**的一个 PRD 放进
 ``agent/ready``，绝不启动 runner，是否被领取交给 daemon / autopilot。
@@ -40,7 +40,6 @@ from backend.core.shared.models.backlog import (
     BacklogGlobalStartResult,
     BacklogPrd,
     BacklogPrdState,
-    BacklogSettingsEntry,
 )
 from backend.core.shared.models.runner_launch import RunnerLaunchOptions
 from backend.core.shared.priority import priority_rank
@@ -60,6 +59,11 @@ from backend.core.use_cases.create_issue_from_prd import (
 )
 from backend.core.use_cases.backlog_prd_scanner import scan_backlog_prds
 from backend.core.use_cases.backlog_dependencies import evaluate_backlog_dependencies
+from backend.core.use_cases.backlog_concurrency import (
+    describe_ceiling_source,
+    read_policy_max_parallel,
+    resolve_execution_ceiling,
+)
 from backend.core.use_cases.backlog_state_resolver import (
     BacklogStateResolutionContext,
     resolve_backlog_states,
@@ -75,8 +79,6 @@ class BacklogActionError(ValueError):
 class BacklogEnqueueConflictError(BacklogActionError):
     """「加入就绪」的目标正被 runner 执行：再入队会打断在途执行并与 daemon 抢占。"""
 
-
-_DEFAULT_MAX_PARALLEL = 2
 
 #: Queue statuses that still need reconciliation (terminal ones never change again).
 _ACTIVE_QUEUE_STATUSES = ("queued", "running")
@@ -438,23 +440,10 @@ def _select_eligible_prds(resolved_prds: Sequence[BacklogPrd]) -> list[BacklogPr
     return eligible
 
 
-def get_or_create_backlog_settings(store: IBacklogStore, repo_id: str) -> BacklogSettingsEntry:
-    """Return existing settings or create defaults."""
-    settings = store.get_backlog_settings(repo_id)
-    if settings is not None:
-        return settings
-    return BacklogSettingsEntry(
-        repo_id=repo_id,
-        max_parallel=_DEFAULT_MAX_PARALLEL,
-        default_view="list",
-        updated_at=_now_iso(),
-    )
-
-
 def start_global_backlog(
     *,
     repo_id: str,
-    max_parallel: int,
+    execution_ceiling: int,
     contexts: Sequence[RepositoryRunContext],
     github_client_factory: Callable[[Path], IGitHubClient],
     supervisor: IRunnerProcessSupervisor,
@@ -463,11 +452,15 @@ def start_global_backlog(
     spawn_cwd: Path,
     process_runner: IProcessRunner,
 ) -> BacklogGlobalStartResult:
-    """Start up to ``max_parallel`` eligible pending PRDs.
+    """Start up to ``execution_ceiling`` eligible pending PRDs.
 
     Args:
         repo_id: Target repository ID.
-        max_parallel: Upper bound on concurrent running PRDs.
+        execution_ceiling: The single resolved concurrency ceiling for this
+            batch (``min(policy, runner capacity)``), computed by the caller
+            through :func:`resolve_execution_ceiling`. This path never
+            persists Backlog settings — the console button is a one-shot burst
+            bounded by the same ceiling the daemon gates use.
         contexts: Resolved enabled repository contexts.
         github_client_factory: Callable ``(repo_path) -> IGitHubClient``.
         supervisor: Process supervisor.
@@ -479,8 +472,8 @@ def start_global_backlog(
     Returns:
         Summary of started, queued, and skipped PRDs.
     """
-    if max_parallel < 1:
-        raise BacklogActionError("并发数必须 >= 1")
+    if execution_ceiling < 1:
+        raise BacklogActionError("并发上限必须 >= 1")
 
     context = _resolve_context(repo_id, contexts)
     github_client = github_client_factory(context.repo_path)
@@ -498,18 +491,9 @@ def start_global_backlog(
         ),
     )
 
-    # Persist settings.
-    settings = BacklogSettingsEntry(
-        repo_id=repo_id,
-        max_parallel=max_parallel,
-        default_view="list",
-        updated_at=_now_iso(),
-    )
-    store.save_backlog_settings(settings)
-
     # Determine how many slots are free.
     running_count = sum(1 for p in resolved_prds if p.state == BacklogPrdState.RUNNING)
-    free_slots = max(0, max_parallel - running_count)
+    free_slots = max(0, execution_ceiling - running_count)
 
     # Eligible PRDs: not started and not blocked/merged/running.
     eligible = _select_eligible_prds(resolved_prds)
@@ -587,8 +571,7 @@ def _parked_failure_detail(prd: BacklogPrd) -> str:
     """
     issue_reference = f"（Issue #{prd.issue_number}）" if prd.issue_number is not None else ""
     return (
-        f"PRD {prd.prd_path}{issue_reference} 执行失败，已泊车等待人工处理；"
-        "持续调度不会自动重试。"
+        f"PRD {prd.prd_path}{issue_reference} 执行失败，已泊车等待人工处理；持续调度不会自动重试。"
     )
 
 
@@ -766,6 +749,7 @@ def advance_backlog_queue(
     store: IBacklogStore,
     process_runner: IProcessRunner,
     dry_run: bool = False,
+    execution_ceiling: int | None = None,
 ) -> BacklogAdvanceReport:
     """Run one continuous-scheduling pass for a repository.
 
@@ -774,7 +758,7 @@ def advance_backlog_queue(
     1. **Reconcile** — every ``running``/``queued`` entry is checked against the
        live PRD state: merged or archived PRDs close as ``completed``; failed
        PRDs are parked as ``failed`` with a reason and are never retried.
-    2. **Account slots** — ``free = max_parallel - running``. Only PRDs that are
+    2. **Account slots** — ``free = ceiling - running``. Only PRDs that are
        actually executing hold a slot; blocked / supervising / review PRDs keep
        their queue entry but consume none.
     3. **Promote and discover** — candidates are the still-``queued`` entries
@@ -791,6 +775,12 @@ def advance_backlog_queue(
             promotion has to create a new Issue.
         dry_run: When ``True`` the pass computes and reports the plan without
             writing to the store, the Issue tracker, or any PRD file.
+        execution_ceiling: The single resolved concurrency ceiling to honor
+            for this pass. When ``None`` the pass resolves it itself through
+            :func:`resolve_execution_ceiling` from the persisted policy and
+            ``context.config.runner.max_concurrent_issues`` — the same function
+            every other consumer uses, so a standalone CLI advance agrees with
+            the daemon.
 
     Returns:
         A :class:`BacklogAdvanceReport` describing what happened (or, in dry-run
@@ -815,8 +805,15 @@ def advance_backlog_queue(
     )
     resolved_by_path = {prd.prd_path: prd for prd in resolved_prds}
 
-    settings = get_or_create_backlog_settings(store, repo_id)
-    max_parallel = max(1, settings.max_parallel)
+    # 「从未设置」就是没有设置行：策略为 None 时继承 runner 容量，不再伪造默认值。
+    policy_max_parallel = read_policy_max_parallel(store, repo_id)
+    if execution_ceiling is None:
+        ceiling = resolve_execution_ceiling(
+            policy_max_parallel, context.config.runner.max_concurrent_issues
+        )
+    else:
+        ceiling = execution_ceiling
+    ceiling_source = describe_ceiling_source(policy_max_parallel, ceiling)
 
     queue_entries = store.list_backlog_queue(repo_id=repo_id)
     entry_by_path = {entry.prd_path: entry for entry in queue_entries}
@@ -872,7 +869,7 @@ def advance_backlog_queue(
 
     # ── Step 2: slot accounting (RUNNING-only, matching the console) ───────
     running_count = sum(1 for prd in resolved_prds if prd.state is BacklogPrdState.RUNNING)
-    free_slots = max(0, max_parallel - running_count)
+    free_slots = max(0, ceiling - running_count)
 
     # ── Step 3: candidate set, then promote up to the free slots ───────────
     candidate_by_path: dict[str, BacklogPrd] = {}
@@ -971,7 +968,8 @@ def advance_backlog_queue(
     return BacklogAdvanceReport(
         repo_id=repo_id,
         dry_run=dry_run,
-        max_parallel=max_parallel,
+        ceiling=ceiling,
+        ceiling_source=ceiling_source,
         free_slots=free_slots,
         reconciled_completed=reconciled_completed,
         reconciled_failed=reconciled_failed,

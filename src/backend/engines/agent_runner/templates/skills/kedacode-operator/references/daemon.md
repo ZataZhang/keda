@@ -9,7 +9,7 @@ The user says 「挂后台」「让它自己跑」「有个 daemon 在跑吗」�
 1. **Starting a daemon is a persistent side effect** — it keeps polling the ready queue and running Agents unattended; confirm the user asked for background processing, not one pass.
 2. **Check whether one already serves this repository** — `kc daemon status` and `kc registry list` answer this read-only; a second queue poller would double-claim the ready queue (the mutex rule is in Safety and compatibility on the main file).
 3. **The repository target is unambiguous** — when the working directory matches several registered repositories the commands refuse to guess; pass `--repo-id <id>`.
-4. **Concurrency is the user's call** — default `max_concurrent_issues=1` (sequential); raising `--concurrency` makes one daemon advance several Issues in parallel.
+4. **Concurrency is the user's call** — default `max_concurrent_issues=1` (sequential); raising `--concurrency` makes one daemon advance several Issues in parallel. With auto-advance on, the daemon each pass resolves one ceiling `min(Backlog「并发」policy, capacity)` (never-saved policy inherits the capacity) and applies it to both the backfill gate and the ready-claim gate (claims = max(0, ceiling − live `agent/running` count; a failed count fails closed to zero). Explicit `kc run` paths stay exempt.
 
 ## Execute and never do
 

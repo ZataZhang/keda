@@ -186,7 +186,10 @@ curl -sS \
   "enabled": true,
   "auto_merge_enabled": false,
   "daemon_running": true,
-  "max_parallel": 2,
+  "max_parallel": null,
+  "effective_max_parallel": 2,
+  "runner_capacity": 2,
+  "ceiling_source": "inherited",
   "config_source": ".kedacode.toml",
   "persisted_enabled": true
 }
@@ -195,6 +198,10 @@ curl -sS \
 - `enabled`：生效配置中的 `agent_runner.autopilot.enabled`；
 - `auto_merge_enabled`：`safety.auto_merge`，即第二道危险动作门禁（只读展示）；
 - `daemon_running`：该仓库是否存在 `kind=daemon` 且存活的进程（来自既有 process supervisor 记录）；
+- `max_parallel`：Backlog「并发」**策略值**；`null` = 从未设置（存储层没有设置行），此时生效值继承 runner 容量；
+- `effective_max_parallel`：统一生效并发上限 `min(策略, runner_capacity)`，补位闸门与认领闸门本轮实际使用的数；
+- `runner_capacity`：`[agent_runner.runner].max_concurrent_issues`（下限 1）；
+- `ceiling_source`：`inherited` / `policy` / `capped_by_capacity` 三态来源，UI 据此标注生效值出处；
 - `persisted_enabled`：目标仓库 `.kedacode.toml` 中的持久值；文件缺失或键未设置时为 `null`。
 
 ### `PATCH /api/v1/agent-runner/backlog/autopilot`

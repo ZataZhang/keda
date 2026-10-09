@@ -45,13 +45,18 @@ from backend.core.use_cases.backlog_actions import (
     BacklogActionError,
     BacklogEnqueueConflictError,
     enqueue_prd_ready,
-    get_or_create_backlog_settings,
     start_global_backlog,
     start_prd,
     stop_global_backlog,
 )
+from backend.core.use_cases.backlog_concurrency import (
+    describe_ceiling_source,
+    read_policy_max_parallel,
+    resolve_execution_ceiling,
+)
 from backend.core.use_cases.backlog_autopilot_settings import (
     BacklogAutopilotError,
+    BacklogAutopilotState,
     load_autopilot_state,
     set_autopilot_enabled,
 )
@@ -246,12 +251,32 @@ def list_backlog_prds(repo_id: str, include_archived: bool = False) -> dict:
     }
 
 
+def _settings_payload(store: IBacklogStore, repo_id: str, runner_capacity: int) -> dict:
+    """构造「可空策略 + 生效值 + 容量 + 来源」的设置快照（GET/PATCH 共用）。"""
+    row = store.get_backlog_settings(repo_id)
+    policy_max_parallel = read_policy_max_parallel(store, repo_id)
+    effective_max_parallel = resolve_execution_ceiling(policy_max_parallel, runner_capacity)
+    return {
+        "repo_id": repo_id,
+        "max_parallel": policy_max_parallel,
+        "effective_max_parallel": effective_max_parallel,
+        "runner_capacity": runner_capacity,
+        "ceiling_source": describe_ceiling_source(policy_max_parallel, effective_max_parallel),
+        "default_view": row.default_view if row is not None else "list",
+        "updated_at": row.updated_at if row is not None else "",
+    }
+
+
 @router.get("/agent-runner/backlog/settings")
 def get_backlog_settings(repo_id: str) -> dict:
-    """读取 backlog 设置。"""
+    """读取 backlog 设置：可空策略值 + 生效并发上限 + 容量 + 来源。
+
+    「从未保存」表现为 ``max_parallel: null``（没有设置行），不再是伪造的内置 2；
+    生效值与 daemon 认领、补位、全局开始消费的是同一个解析结果。
+    """
+    context = _resolve_context(repo_id)
     store = create_backlog_store()
-    settings = get_or_create_backlog_settings(store, repo_id)
-    return _serialize(settings)
+    return _settings_payload(store, repo_id, max(1, context.config.runner.max_concurrent_issues))
 
 
 @router.get(
@@ -281,11 +306,20 @@ def get_backlog_prd_content(encoded_path: str, repo_id: str) -> PlainTextRespons
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _resolve_max_parallel(repo_id: str) -> int:
-    """读取该仓库 Backlog 并发上限（既有 backlog settings，不新增存储）。"""
-    store = create_backlog_store()
-    backlog_settings = get_or_create_backlog_settings(store, repo_id)
-    return backlog_settings.max_parallel
+def _resolve_policy_max_parallel(repo_id: str) -> int | None:
+    """读取该仓库 Backlog「并发」策略值；从未保存过时为 ``None``（继承容量）。"""
+    return read_policy_max_parallel(create_backlog_store(), repo_id)
+
+
+def _autopilot_payload(state: BacklogAutopilotState) -> dict:
+    """序列化 Autopilot 快照并把策略字段映射回对外契约名 ``max_parallel``。
+
+    core 快照用 ``policy_max_parallel`` 表达「可空策略值」，对外契约保持
+    ``max_parallel``（语义为策略、可为 null）不变，避免前端类型改名扩散。
+    """
+    payload: dict = _serialize(state)
+    payload["max_parallel"] = payload.pop("policy_max_parallel")
+    return payload
 
 
 @router.get("/agent-runner/backlog/autopilot")
@@ -293,7 +327,7 @@ def get_backlog_autopilot(repo_id: str) -> dict:
     """读取当前仓库的 Backlog 自动推进状态。
 
     返回生效的 ``backlog.auto_advance``、合并队列是否同时通过两道开关、daemon
-    是否在跑、Backlog 并发上限与配置来源。
+    是否在跑、可空的并发策略值与生效并发上限（含容量与来源）与配置来源。
     """
     context = _resolve_context(repo_id)
     try:
@@ -301,12 +335,12 @@ def get_backlog_autopilot(repo_id: str) -> dict:
             repo_id=repo_id,
             contexts=(context,),
             supervisor=create_process_supervisor(),
-            max_parallel=_resolve_max_parallel(repo_id),
+            policy_max_parallel=_resolve_policy_max_parallel(repo_id),
             editor=create_repository_autopilot_settings_editor(),
         )
     except BacklogAutopilotError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize(state)
+    return _autopilot_payload(state)
 
 
 class UpdateAutopilotRequest(BaseModel):
@@ -333,7 +367,7 @@ def update_backlog_autopilot(request: UpdateAutopilotRequest) -> dict:
             editor=create_repository_autopilot_settings_editor(),
             contexts_loader=_resolve_contexts,
             supervisor=create_process_supervisor(),
-            max_parallel=_resolve_max_parallel(request.repo_id),
+            policy_max_parallel=_resolve_policy_max_parallel(request.repo_id),
         )
     except BacklogAutopilotError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -346,7 +380,7 @@ def update_backlog_autopilot(request: UpdateAutopilotRequest) -> dict:
         result="accepted",
         detail=f"backlog.auto_advance={request.enabled}",
     )
-    return _serialize(state)
+    return _autopilot_payload(state)
 
 
 @router.get("/agent-runner/backlog/prds/{encoded_path}/lifecycle")
@@ -643,27 +677,57 @@ def request_backlog_prd_ci_repair(encoded_path: str, request: ManualCiRepairRequ
 
 
 class UpdateSettingsRequest(BaseModel):
-    """更新 backlog 用户设置。"""
+    """更新 backlog 用户设置（PATCH 语义：省略＝保持原值不变）。"""
 
-    max_parallel: int = Field(default=2, ge=1, le=10)
-    default_view: str = Field(default="list", pattern="^(timeline|list)$")
+    max_parallel: int | None = Field(default=None, ge=1, le=10)
+    default_view: str | None = Field(default=None, pattern="^(timeline|list)$")
 
 
 @router.patch("/agent-runner/backlog/settings")
 def update_backlog_settings(repo_id: str, request: UpdateSettingsRequest) -> dict:
-    """更新 backlog 并发数与默认视图。"""
+    """更新 Backlog 并发策略与/或默认视图；响应为写后 fresh 读回。
+
+    ``max_parallel``：省略＝不变；显式 ``null``＝清除策略（恢复继承＝删行，
+    已知副作用是默认视图一并回落到 list）；1–10＝设置策略值。
+    ``default_view``：省略＝不变；设置视图时若尚无策略行，则不落库——
+    ``backlog_settings.max_parallel`` 列 NOT NULL 且哨兵值已被否决（D-04），
+    单独的行内视图偏好在「未设置」态不可持久，响应如实返回 list。
+    """
+    context = _resolve_context(repo_id)
     store = create_backlog_store()
-    settings = BacklogSettingsEntry(
-        repo_id=repo_id,
-        max_parallel=request.max_parallel,
-        default_view=request.default_view,
-        updated_at=_now_iso(),
-    )
+    fields = request.model_fields_set
     try:
-        store.save_backlog_settings(settings)
+        if "max_parallel" in fields and request.max_parallel is None:
+            # 恢复继承＝删行（幂等）。
+            store.delete_backlog_settings(repo_id)
+        elif "max_parallel" in fields and request.max_parallel is not None:
+            existing = store.get_backlog_settings(repo_id)
+            store.save_backlog_settings(
+                BacklogSettingsEntry(
+                    repo_id=repo_id,
+                    max_parallel=int(request.max_parallel),
+                    default_view=(
+                        request.default_view
+                        if request.default_view is not None
+                        else (existing.default_view if existing is not None else "list")
+                    ),
+                    updated_at=_now_iso(),
+                )
+            )
+        elif "default_view" in fields and request.default_view is not None:
+            existing = store.get_backlog_settings(repo_id)
+            if existing is not None:
+                store.save_backlog_settings(
+                    BacklogSettingsEntry(
+                        repo_id=repo_id,
+                        max_parallel=existing.max_parallel,
+                        default_view=request.default_view,
+                        updated_at=_now_iso(),
+                    )
+                )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"保存设置失败: {exc}") from exc
-    return _serialize(settings)
+    return _settings_payload(store, repo_id, max(1, context.config.runner.max_concurrent_issues))
 
 
 class StartPrdRequest(BaseModel):
@@ -781,15 +845,25 @@ class StartGlobalRequest(BaseModel):
     """全局开始请求。"""
 
     repo_id: str = Field(min_length=1)
-    max_parallel: int = Field(default=2, ge=1, le=10)
 
 
 @router.post("/agent-runner/backlog/start-global")
 def start_backlog_global(request: StartGlobalRequest) -> dict:
-    """按并发上限批量开始无依赖的 pending PRD。"""
+    """按生效并发上限批量开始无依赖的 pending PRD。
+
+    批量上限不再来自请求体：服务端经同一解析函数取「策略与容量」的生效值，
+    批量口径 ``max(0, ceiling - running)`` 由 core 计算，本层不落任何设置。
+    """
     settings = load_fresh_agent_runner_settings()
     contexts = _resolve_contexts()
+    context = next((item for item in contexts if item.repo_id == request.repo_id), None)
+    if context is None:
+        raise HTTPException(status_code=400, detail=f"仓库 '{request.repo_id}' 不存在或未启用。")
     store = create_backlog_store()
+    execution_ceiling = resolve_execution_ceiling(
+        read_policy_max_parallel(store, request.repo_id),
+        max(1, context.config.runner.max_concurrent_issues),
+    )
     try:
         spawn_cwd = resolve_console_spawn_cwd(request.repo_id, contexts)
     except ValueError as exc:
@@ -797,7 +871,7 @@ def start_backlog_global(request: StartGlobalRequest) -> dict:
     try:
         result = start_global_backlog(
             repo_id=request.repo_id,
-            max_parallel=request.max_parallel,
+            execution_ceiling=execution_ceiling,
             contexts=contexts,
             github_client_factory=create_github_client,
             supervisor=create_process_supervisor(),

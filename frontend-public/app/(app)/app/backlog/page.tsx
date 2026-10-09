@@ -136,6 +136,7 @@ export default function BacklogPage() {
   const [autopilot, setAutopilot] = useState<BacklogAutopilotState | null>(null);
   const [autopilotLoading, setAutopilotLoading] = useState(true);
   const [autopilotSaving, setAutopilotSaving] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
   // 全局 CI/CD 自动修复开关：与 Autopilot 并列、语义独立的仓库级偏好。
   const [ciRepair, setCiRepair] = useState<BacklogCiRepairGlobalState | null>(null);
   const [ciRepairLoading, setCiRepairLoading] = useState(true);
@@ -307,6 +308,28 @@ export default function BacklogPage() {
     }
   }
 
+  /** 保存 Backlog「并发」策略（1–10），或以 ``null`` 恢复继承（清除设置行）。 */
+  async function handleUpdatePolicy(maxParallel: number | null) {
+    setPolicySaving(true);
+    try {
+      // 响应体是写后 fresh 读回的设置快照，不做乐观 UI 覆盖。
+      const updated = await updateBacklogSettings({ repoId: selectedRepoId, maxParallel });
+      setSettings(updated);
+      // 控制条三态来自 Autopilot 快照，写后一并 fresh 回读保持同源。
+      await loadAutopilot();
+      toast.success(
+        maxParallel === null
+          ? "已恢复继承：并发上限跟随 runner 配置。"
+          : `已保存：生效并发上限 ${updated.effective_max_parallel}。`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存并发设置失败。");
+      await loadAutopilot();
+    } finally {
+      setPolicySaving(false);
+    }
+  }
+
   async function handleToggleCiRepair(enabled: boolean) {
     setCiRepairSaving(true);
     try {
@@ -334,9 +357,10 @@ export default function BacklogPage() {
       return;
     }
     try {
+      // 视图切换只回写 default_view；并发策略是独立入口（控制条编辑器），
+      // 不再被视图切换顺带改写。
       const updated = await updateBacklogSettings({
         repoId: selectedRepoId,
-        maxParallel: settings.max_parallel,
         defaultView: nextView,
       });
       setSettings(updated);
@@ -384,15 +408,11 @@ export default function BacklogPage() {
   }
 
   async function handleStartGlobal() {
-    if (!settings) {
-      toast.warning("设置尚未加载。");
-      return;
-    }
     setGlobalStarting(true);
     try {
+      // 批量上限由服务端按「策略与容量」的生效值解析，请求体不再携带并发数。
       const result = await startGlobalBacklog({
         repoId: selectedRepoId,
-        maxParallel: settings.max_parallel,
       });
       toast.success(
         `全局开始完成：启动 ${result.started.length} 个，排队 ${result.queued.length} 个。`,
@@ -572,6 +592,8 @@ export default function BacklogPage() {
           loading={autopilotLoading}
           saving={autopilotSaving}
           onToggle={(enabled) => void handleToggleAutopilot(enabled)}
+          policySaving={policySaving}
+          onUpdatePolicy={(maxParallel) => void handleUpdatePolicy(maxParallel)}
         />
 
         <BacklogCiRepairControl

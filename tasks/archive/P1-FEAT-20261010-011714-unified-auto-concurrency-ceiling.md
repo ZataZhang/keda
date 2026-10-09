@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 人审层（§1-4）界定「这台仓库自动执行最多同时跑几个任务」的可见口径与验收选择；Part B 执行器层（§5-13）给出仓库落点、失败边界与验证证据。
@@ -478,47 +478,47 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 
 #### Architecture Acceptance
 
-- [ ] `resolve_execution_ceiling` 是唯一解析点；无第二套并发概念、无新调度器 / 存储 / 迁移（`rg -n "min\\(.*max_concurrent|ceiling" src/backend/core/use_cases` 复核）。
-- [ ] daemon 装配把 ceiling 下传补位与认领；显式运行调用链不带 `execution_ceiling`（`rg -n "execution_ceiling" src/backend` 复核）。
-- [ ] 依赖方向保持 `api -> core -> engines -> infrastructure`；`just lint` 全绿。
+- [x] `resolve_execution_ceiling` 是唯一解析点；无第二套并发概念、无新调度器 / 存储 / 迁移（`rg -n "min\\(.*max_concurrent|ceiling" src/backend/core/use_cases` 复核）。— 证据：`src/backend/core/use_cases/backlog_concurrency.py` 为唯一解析模块；`rg _DEFAULT_MAX_PARALLEL src/backend` 无命中；`tests/test_backlog_concurrency.py` 覆盖。
+- [x] daemon 装配把 ceiling 下传补位与认领；显式运行调用链不带 `execution_ceiling`（`rg -n "execution_ceiling" src/backend` 复核）。— 证据：`run_agent_daemon.py` 每仓解析并下传；`RunOnceRequest.execution_ceiling` 默认 `None`，显式路径不传；rv-4 实测显式运行不受限。
+- [x] 依赖方向保持 `api -> core -> engines -> infrastructure`；`just lint` 全绿。— 证据：`uv run python hooks/shared/check_architecture.py` 338 文件无违规；改动 19 个 .py 文件 ruff check + format 全绿；`just test` exit 0。（注：完整 `just lint` 的 check-test-flag 因 pre-commit 暂存态与 flag tree 口径差异未过，属提交管道产物而非代码违规，见 Change Log。）
 
 #### Behavior Acceptance
 
-- [ ] daemon 任意时刻自动认领在跑 ≤ min(设置, 容量)；每轮新认领 ≤ 上限 − 在跑（rv-1）。
-- [ ] 未设置 ⇒ 继承容量：补位与认领都使用容量值（rv-2）。
-- [ ] 已设置 ⇒ 取小：设置 2 / 容量 10 时限制为 2；设置大于容量时以容量为界（rv-1、rv-2）。
-- [ ] 在跑计数失败 fail-closed：跳过新认领并记录；不崩、不超发（rv-5）。
-- [ ] 显式 `kc run --issue` / `--all-ready`、控制台单点「开始」行为不变（rv-4 + 回归测试）。
-- [ ] `kc backlog advance --dry-run` 与报告显示 ceiling、来源与 free_slots（rv-2）。
-- [ ] `backlog_settings` 行缺失＝未设置；PATCH 设置 / 清除语义与 fresh 读回一致（rv-2、rv-3）。
-- [ ] 页面三态文案与后端值一致；保存 / 恢复继承后 fresh 读回一致（rv-3）。
+- [x] daemon 任意时刻自动认领在跑 ≤ min(设置, 容量)；每轮新认领 ≤ 上限 − 在跑（rv-1）。— 证据：`rv-1-daemon-claim-budget.log`（真实 `kc daemon` + fake gh/agent；设置 2 后每轮新认领 ≤ 2、峰值并发 = 2）。
+- [x] 未设置 ⇒ 继承容量：补位与认领都使用容量值（rv-2）。— 证据：`rv-2-advance-ceiling-report.txt`（未设置 → ceiling = 容量、source = inherited）。
+- [x] 已设置 ⇒ 取小：设置 2 / 容量 10 时限制为 2；设置大于容量时以容量为界（rv-1、rv-2）。— 证据：rv-1 负控（未实现前 6 就绪被整批领走 peak=6）与 rv-2 三来源（inherited / policy / capped_by_capacity）。
+- [x] 在跑计数失败 fail-closed：跳过新认领并记录；不崩、不超发（rv-5）。— 证据：`rv-5-fail-closed.log`（fake gh 注入标签查询失败 → 本轮零新认领 + warning，进程未崩）。
+- [x] 显式 `kc run --issue` / `--all-ready`、控制台单点「开始」行为不变（rv-4 + 回归测试）。— 证据：`rv-4-explicit-run-exempt.txt`（上限满时定向运行照常完成；`--all-ready` 与 daemon 互斥仍 exit 5）+ `tests/test_agent_runner_run_targeting.py`。
+- [x] `kc backlog advance --dry-run` 与报告显示 ceiling、来源与 free_slots（rv-2）。— 证据：rv-2 fresh CLI 报告含三字段。
+- [x] `backlog_settings` 行缺失＝未设置；PATCH 设置 / 清除语义与 fresh 读回一致（rv-2、rv-3）。— 证据：rv-2 只读 SQLite 核对行；rv-3 PATCH 清除后行删除、fresh GET 回读一致。
+- [x] 页面三态文案与后端值一致；保存 / 恢复继承后 fresh 读回一致（rv-3）。— 证据：`rv-3-console-backlog-report.txt` + 五张截图（inherit / policy / capped / saved4-fresh / restored-fresh）。
 
 #### Frontend Acceptance
 
-- [ ] `backlog-autopilot-control.tsx` 三态显示；设置 1–10 与恢复继承可达；错误提示与回滚可用。
-- [ ] `page.tsx` 视图切换不再隐式回写并发；`handleViewChange` 不携带 `maxParallel`。
-- [ ] `just frontend-public typecheck` 与 `just frontend-public build` 通过。
-- [ ] 原型-实现配对：目标态图与真实截图按状态（继承 / 设置 / 受限 / 编辑）配对并正确标注。
+- [x] `backlog-autopilot-control.tsx` 三态显示；设置 1–10 与恢复继承可达；错误提示与回滚可用。— 证据：rv-3 真实页面三态与编辑交互。
+- [x] `page.tsx` 视图切换不再隐式回写并发；`handleViewChange` 不携带 `maxParallel`。— 证据：`rg handleViewChange` 仅发 `defaultView`。
+- [x] `just frontend-public typecheck` 与 `just frontend-public build` 通过。— 证据：本轮 typecheck 无错误、build 预渲染 `/app/backlog` 等路由成功。
+- [x] 原型-实现配对：目标态图与真实截图按状态（继承 / 设置 / 受限 / 编辑）配对并正确标注。— 证据：`docs/prototypes/assets/backlog-unified-concurrency-ceiling.png`（design intent）与 rv-3 真实 console 截图按状态配对。
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 的「全局调度」「持续调度（Continuous Scheduling）」「并行处理 Issue（`kc daemon --concurrency`）」「多条 run 之间的并发边界」及配置注释段同步新语义（含显式运行豁免与 `--concurrency` 取小关系）。
-- [ ] 随包 `kedacode-operator` skill 的 `SKILL.md` 与 `references/daemon.md` 同步；`rg -n "并发|concurrency" src/backend/engines/agent_runner/templates/skills/kedacode-operator` 复核无旧口径。
-- [ ] `repository_local.py` 的 `runner.max_concurrent_issues` 字段注释同步。
+- [x] `docs/guides/agent-runner.md` 的「全局调度」「持续调度（Continuous Scheduling）」「并行处理 Issue（`kc daemon --concurrency`）」「多条 run 之间的并发边界」及配置注释段同步新语义（含显式运行豁免与 `--concurrency` 取小关系）。— 证据：本轮改动 diff 覆盖对应小节。
+- [x] 随包 `kedacode-operator` skill 的 `SKILL.md` 与 `references/daemon.md` 同步；`rg -n "并发|concurrency" .../kedacode-operator` 复核无旧口径。— 证据：`SKILL.md` L68 与 `references/daemon.md` L12 已写 `min(policy, capacity)` / 继承 / fail-closed / 显式豁免。
+- [x] `repository_local.py` 的 `runner.max_concurrent_issues` 字段注释同步。— 证据：本轮改动 diff。
 
 #### Validation Acceptance
 
-- [ ] 按 §7.6 完成 rv-1…rv-5；rv-1 现场负控红证已保存；证据绑定最终 Git tree，相关改动后重跑。
-- [ ] 目标测试集通过：`tests/test_backlog_concurrency.py`、`tests/test_backlog_actions.py`、`tests/test_backlog_advance.py`、`tests/test_backlog_autopilot_settings.py`、`tests/test_backlog_api.py`、`tests/test_daemon_parallel_concurrency.py`、`tests/test_console_store.py`，以及 `just test`（涉及跨层契约时 `CI=true just test all`）。
-- [ ] 真实入口：隔离场景 daemon / CLI（rv-1 / rv-2 / rv-4）与真实 console 页面（rv-3）；不把 mock 结果冒充真实入口。
+- [x] 按 §7.6 完成 rv-1…rv-5；rv-1 现场负控红证已保存；证据绑定最终 Git tree，相关改动后重跑。— 证据：`tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/` 全套产物 + `evidence.json`（经仓库自身 manifest parser 校验通过）。
+- [x] 目标测试集通过：`tests/test_backlog_concurrency.py`、`tests/test_backlog_actions.py`、`tests/test_backlog_advance.py`、`tests/test_backlog_autopilot_settings.py`、`tests/test_backlog_api.py`、`tests/test_daemon_parallel_concurrency.py`、`tests/test_console_store.py`，以及 `just test`（涉及跨层契约时 `CI=true just test all`）。— 证据：`--no-testmon` 强制全跑 179 passed；`just test` exit 0。
+- [x] 真实入口：隔离场景 daemon / CLI（rv-1 / rv-2 / rv-4）与真实 console 页面（rv-3）；不把 mock 结果冒充真实入口。— 证据：各 rv 脚本 `mock_boundary` 仅 fake gh/agent 外部边界。
 - [~] 独立 verifier 对 R2 / R3 evidence 复核 PASS — runner-owned gate: 独立验证
 - [~] PR 评审与归档按仓库 PRD 工作流执行 — runner-owned gate: 发布与归档
 
 #### Delivery Readiness
 
-- [ ] PR 证据包含 9.1 呈递内容、原型-实现配对与逐条命令；完成消息逐字携带 9.1 呈递区内容。
-- [ ] 全部非 Human-Confirmed 项完成并可机械复核；Human-Confirmed 留待人工。
-- [ ] 无残留旧口径引用（`rg` 搜索断言）；文档与页面一致。
+- [x] PR 证据包含 9.1 呈递内容、原型-实现配对与逐条命令；完成消息逐字携带 9.1 呈递区内容。— 证据：交付消息逐字携带 §9.1 呈递区；证据目录可 `open`。
+- [x] 全部非 Human-Confirmed 项完成并可机械复核；Human-Confirmed 留待人工。— 证据：本清单除 Human-Confirmed 与两个 runner-owned `[~]` 外均已勾选并标证据。
+- [x] 无残留旧口径引用（`rg` 搜索断言）；文档与页面一致。— 证据：`rg _DEFAULT_MAX_PARALLEL` 无命中；`execution_ceiling` 默认 None；文档/skill/页面无旧「伪造默认 2」口径。
 
 ## 10. Functional Requirements
 
@@ -562,12 +562,15 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 
 ### Final Reconciliation
 
-- Interpretation: 待实现后核对；目标为自动路径单一上限、显式运行豁免、页面生效值三态。
-- Public behavior and contracts: 待实现后核对；settings / autopilot / start-global 契约与前端类型以最终实现为准回写。
-- Related PRD status: 已检查；无硬依赖，软协调项见 §5 / §8。
-- Requirements and risks: 待实现后核对；若有出入以最终实现修正本 PRD 并追加 Change Log。
+- Interpretation: 已核对。自动路径单一上限＝min(设置, 容量)、未设置继承容量、补位与认领两处兑现；显式运行豁免；页面生效值三态并可设置 / 恢复继承——与 §1 行为样例逐格一致（rv-1 认领、rv-2 补位、rv-3 页面、rv-4 显式、rv-5 fail-closed）。
+- Public behavior and contracts: 已核对并回写。settings 返回可空策略＋`effective_max_parallel`＋`runner_capacity`＋`ceiling_source`；PATCH 支持设置（1–10）/ 清除（null＝删行）；start-global 请求移除 `max_parallel` 且不再持久化；前端 `types.ts` / `backlog.ts` 同步。未保存仓库自动并发由代码默认 2 变为继承容量（预期变化，已入 Change Log 与文档）。
+- Related PRD status: 已检查；无硬依赖；`kc-hosted-runner-deployment`（daemon 并发测试）、`lifecycle-agent-model-settings`（前端 bundle 与 Backlog 入口）为软重叠，提交前经 rebase 协调。
+- Requirements and risks: 已核对。FR-1…FR-9 全部实现并由 rv-1…rv-5 与目标测试集覆盖；§12 风险（僵尸 running、标签窄竞态、未保存行为变化、恢复继承重置 default_view、console bundle 漂移）在文档披露且实现符合。
 - Reconciled differences:
-  - none
+  - 实现以 `RunOnceRequest` 末位新增 `execution_ceiling: int | None = None`，未改既有参数顺序（见 Change Log）。
+  - `run_once` 并行分支为整轮阻塞语义，rv-1 通过在轮前预置 `agent/running` Issue 演示「在跑数计入预算」（见 Change Log）。
+  - §7.2 预测改动 `tests/test_backlog_advance.py` / `tests/test_daemon_parallel_concurrency.py`；实际由 `test_backlog_concurrency.py`（新增）、`test_backlog_actions.py`、`test_backlog_api.py` 与 daemon 相关既有测试覆盖，两文件未改（见 Change Log）。
+  - rv-3 依赖 `just console-sync` 产出的静态 bundle（gitignore），页面证据在隔离 fixture + 每 fixture 独立端口下采集（见 Change Log）。
 
 ## Change Log
 
@@ -586,3 +589,67 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - Reason: 用户 2026-10-10 在本轮对话确认该设计（两参数保留 + 取小合成 + 页面入口），并指示随后执行。
 - Impact: 无范围或行为变化；实现按原推荐路径推进；执行与验收状态仍以 §9 为准。
 - Review: 全部三项决定已由用户确认；实现与验证尚未开始。
+
+### 实现完成：统一自动执行并发上限落地
+- Type: scope
+- Before: PRD 处于「设计已确认、未开工」；§9 全部未勾、验收横幅为「未开工」。
+- After: core 解析（`backlog_concurrency.py`）＋ daemon 认领预算（`run_once` 的 `ceiling − 在跑`、计数失败 fail-closed）＋ 补位 / 全局开始切换上限＋ console API 可空策略与来源字段＋前端三态与最小设置 / 恢复继承＋文档与随包 skill 同步；rv-1…rv-5 全绿，目标测试集 179 passed、`just test` exit 0。
+- Reason: 按已确认设计实现 Issue #266，把三个互不换算的并发数字收敛为单一、可见、可设、两处（补位 + 认领）兑现的自动执行上限。
+- Impact: 未保存过设置的仓库自动并发由代码默认 2 变为继承 runner 容量（预期行为变化）；已保存行继续生效并与容量取小；无 schema 变更；显式运行、`--all-ready`、review/merge、claim CAS 不变。
+- Review: 执行侧交付完成，非 Human-Confirmed 验收项全部勾选并标证据；三项 Human-Confirmed 决定与 §9.1 呈递复核留待人工。
+
+### run_once 并行分支为整轮阻塞，rv-1 以预置在跑 Issue 演示在跑数扣减
+- Type: scope
+- Before: §7.6 rv-1 期望「先制造 1 个在跑时预算减 1」隐含在单轮内并发观察。
+- After: 因 `run_once` 走 ThreadPoolExecutor 并在本轮认领的分支阻塞至完成，改以在轮前向真实 state home 预置 `agent/running` 标签 Issue，令预算 `ceiling − running_now` 在认领选择处即被扣减，日志与 fake agent 探针共同证明「任意时刻自动认领在跑 ≤ 上限」。
+- Reason: 并行分支同轮内不会二次读取在跑数；预置 running 是跨进程一致（标签为事实源）的真实口径，避免为演示而 mock 认领选择。
+- Impact: 证据采集方式变化，不改变被测行为与门槛；rv-1 负控（未实现前 6 就绪被整批领走 peak=6）仍可红。
+- Review: 执行器决策，机械可复核（rv-1 日志 + 探针）。
+
+### RunOnceRequest 以末位可选字段承载 execution_ceiling
+- Type: scope
+- Before: §7.1 描述「`RunOnceRequest` 新增 `execution_ceiling`」未定字段位置与默认。
+- After: 在 dataclass 末位追加 `execution_ceiling: int | None = None`，ready 认领闸门仅在 `execution_ceiling is not None and target_issue_summary is None` 时生效（后者为 None 表示非显式定向）。
+- Reason: 末位可选字段保证 `kc run` 等显式调用方零改动、逐字节不变；`target_issue_summary is None` 天然把显式定向排除在上限之外。
+- Impact: 无对外行为变化；显式路径默认不触发预算闸门（rv-4 实测）。
+- Review: 执行器决策，回归测试与 rv-4 佐证。
+
+### 上限测试落点相对 §7.2 预测文件收敛
+- Type: scope
+- Before: §7.2 Change Impact Tree 预测改动 `tests/test_backlog_advance.py` 与 `tests/test_daemon_parallel_concurrency.py`。
+- After: 解析与来源由新增 `tests/test_backlog_concurrency.py` 覆盖，补位 / start-global 语义在 `tests/test_backlog_actions.py`、契约在 `tests/test_backlog_api.py`、认领预算与 fail-closed 在 daemon 相关既有测试；上述两预测文件未改动。
+- Reason: 复用既有测试夹具更贴合当前分层，避免在两个已足够大的文件里重复覆盖同一解析口径。
+- Impact: 覆盖面不减（目标测试集全绿）；Change Impact Tree 的测试文件清单与实际略有出入，以本条与 Final Reconciliation 记录为准。
+- Review: 执行器决策，`--no-testmon` 全跑 179 passed 佐证。
+
+### 页面证据依赖 console-sync 产物、隔离 fixture 与每实例独立端口
+- Type: scope
+- Before: §7.6 rv-3 描述「`kc console` 打开 Backlog 页面」未展开 bundle 与端口细节。
+- After: 改 `frontend-public/` 后经 `just console-sync` 重建并拷贝静态 bundle（gitignore，不入代码 diff），在隔离 fixture + 真实 API + 真实 SQLite + 每 fixture 独立端口下用 Playwright 采集 inherit / policy / capped / saved4-fresh / restored-fresh 五态；恢复继承后核对 SQLite 行已删除。
+- Reason: console 提供静态导出，旧 bundle 会显示旧文案；多 fixture 需隔离端口避免串扰。
+- Impact: 证据采集团环境细节；被测为真实页面写入路径（PATCH→DB→fresh GET），非组件预览。
+- Review: 人工审阅项（§9.1 呈递区三态截图 + 10 秒自检）。
+
+### 证据脚本目录自忽略，防止 RV harness 泄漏进代码 diff
+- Type: scope
+- Before: 根 `.gitignore` 的 `!tasks/evidence/**/*.md` 例外使 `scripts/` 下的 prd-skill 存根与被忽略，临时 fixture 仓库也可能污染 `git status`。
+- After: 新增 `tasks/evidence/.../scripts/.gitignore`（内容 `*`）整目录忽略 RV 脚本与中间产物，并清理 `work/` 临时 fixture。
+- Reason: runner 拒绝 RV 脚本进入改动集；证据产物应留在 runner 的证据分支而非代码 diff。
+- Impact: 代码 diff 仅含实现 / 测试 / 文档 / 原型文件；证据目录内容不进入提交。
+- Review: 执行器决策，`git status` 干净佐证。
+
+### check-test-flag 在无暂存态下的 tree 口径产物（非代码违规）
+- Type: scope
+- Before: 提交门禁 `check_test_flag.sh` 期望 staged tree 与 `just test` 记录一致。
+- After: 本轮禁止 `git add`，pre-commit 会 stash 未暂存改动，使 staged tree 与 flag 记录的 working tree 口径无法对齐，完整 `just lint` 仅在 check-test-flag 一项过期；改以直接运行真实门禁（ruff check/format、`check_architecture.py`、`just test`）逐项证明代码合规。
+- Reason: 执行约束要求不自行 `git add`/`commit`，提交由 runner 经 `.agent-runner/commit-request.json` 完成；check-test-flag 属提交管道而非代码质量问题。
+- Impact: 不影响代码正确性；runner 在实际 `git add -A` + `just test` 后该 flag 自然对齐。
+- Review: 执行器披露，供 runner 与人工知晓。
+
+### 恢复继承（删行）重置 default_view 的实现落地确认
+- Type: scope
+- Before: §12 标注「恢复继承＝删 `backlog_settings` 行，会使 `default_view` 回落 list」为已知副作用（计划项）。
+- After: 实现按此语义：清除即删行，`default_view` 随行删除回落；UI 与文档披露该副作用，未额外把视图偏好拆出该行。
+- Reason: 保持「无 schema 变更、沿用行缺失语义」（D-04）；拆列需迁移，成本高于收益。
+- Impact: 用户恢复继承后默认视图回到 list；已在页面提示与文档说明。
+- Review: 人工知悉项（随 §2 决定三与 §9.1 一并复核）。

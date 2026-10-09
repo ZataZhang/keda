@@ -558,8 +558,8 @@ provision_database = true
 [agent_runner.runner]
 # 每次轮询每个仓库最多处理多少个 Issue
 max_issues = 1
-# 单轮内并行处理的 Issue 数量：1 为串行（默认）；>1 时同一轮并行跑多个 Issue。
-# 仅 `kc daemon --concurrency` 未指定时作为默认值。
+# 单轮内并行处理的 Issue 数量（自动执行的 runner 容量）：1 为串行（默认）；>1 时同一轮并行跑多个 Issue。
+# 仅 `kc daemon --concurrency` 未指定时作为默认值；自动调度的生效并发上限 = min(Backlog「并发」策略, 本值)。
 max_concurrent_issues = 1
 # 默认使用的 AI agent：auto / claude / codex / kimi
 default_agent = "auto"
@@ -1176,7 +1176,7 @@ kc run --all-ready
 
 - `--issue` 与 PRD 路径互斥；三者（`--issue` / PRD 路径 / `--all-ready`）都不给时退出码 2（usage error）。
 - 定向 run 只处理目标 Issue（仍走依赖门禁与 claim）；队列里其他 ready Issue 原封不动。
-- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。
+- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。显式 run（定向与 `--all-ready`）**不受 Backlog「并发」策略约束**：统一并发上限只闸门自动执行路径。
 
 **迁移**：旧脚本/文档里"无目标的 `kc run`"改为 `kc run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
 
@@ -1322,6 +1322,7 @@ kc run --issue 43
 - 前台 `run` **不获取 repo 级 daemon 锁**：`--all-ready` 只做"是否有 daemon 存活"的只读检查（互斥语义见上文），显式单目标连这个检查都不做。所以 run 与 run 之间、定向 run 与 daemon 之间都不互斥。
 - 每个 Issue 自带隔离资源：worktree 在 `.iar-worktrees/issue-<N>`，claim / blocked-claim 锁也按 worktree 独立；状态库走 WAL 容忍并发写。两条命令撞向**同一条 Issue** 时，由首次领取选举裁决归属（见上节），落败方安静跳过。
 - **例外**：`--all-ready` 领的是同一份 ready 队列，两条 `--all-ready` 并发会双 claim，不要这么用。要并发多个 Issue，就给每个 Issue 各发一条 `--issue`。
+- **统一并发上限不挡这里**：Backlog「并发」策略只闸门**自动执行**（daemon 补位/认领、Console「全局开始」）；显式 `kc run` 走的是 `execution_ceiling=None` 的全量语义，人在命令行人工点名的运行不因页面数字被压低。
 - 停止常驻进程没有 `kc daemon stop`：`kc daemon` 只暴露 `run` / `status`，托管进程用 `kc registry stop --repo-id <id>`（对未托管的手动 `kc daemon` 无效，需自行结束进程）。
 
 ### daemon 的 autopilot 按次覆盖
@@ -2229,6 +2230,7 @@ kc daemon --concurrency 3
 ```
 
 - **取值来源**：未传 `--concurrency` 时回退到 `[agent_runner.runner].max_concurrent_issues`（默认 `1` = 串行，行为与改动前逐字节一致）。
+- **统一并发上限**：自动调度开启时，daemon 每轮先把 Backlog「并发」策略与该轮容量解析成单一生效值 `ceiling = min(策略, 容量)`（策略从未设置 = 继承容量）。这个 ceiling 同时喂给补位闸门（`kc backlog advance` 同一口径）与认领闸门：ready 通道本轮新认领数 = `max(0, ceiling − 在途 agent/running 数)`，占满即本轮零认领；在途数查询失败按 fail-closed 处理（宁可不领）。running / blocked 恢复通道不新增并发，保持原配额，不受 ceiling 压低。
 - **领取上限**：并行时单轮领取上限抬到 `max(max_issues, concurrency)`，所以单独一个 `--concurrency N` 即可领到并跑 N 个，无需再调 `--max-issues`。
 - **隔离**：每个 Issue 仍各自 worktree / 分支；共享仓库的 worktree 创建被串行化以避开 `.git` 竞争，真正耗时的 agent 执行阶段全程并行。
 - **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）仍逐仓库串行、仓库内 Issue 并行。
@@ -4442,7 +4444,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 启动成功后页面会立刻重新拉取该仓的 PRD 列表，并把详情头部状态刷新为服务端返回的最新状态——不是本地乐观值，也不是只弹一个 toast。
 
-「全局开始」与「停止全局调度」的行为没有变化：前者仍是一次性批量启动，后者仍只清空等待队列。它们与仓库级 Backlog 自动推进开关是两件事，见下两节。
+「全局开始」与「停止全局调度」：前者仍是一次性批量启动，但并发数**不再由这次点击持久化**——它按当前生效并发上限放行（见下文「全局调度」与「持续调度」）；后者仍只清空等待队列。它们与仓库级 Backlog 自动推进开关是两件事，见下两节。
 
 ### 验收证据浏览（归档 PRD）
 
@@ -4463,17 +4465,21 @@ Backlog 顶部为当前选中仓库提供「Backlog 自动推进」开关，写�
   - **Backlog 自动推进是否开启**（自动发现、依赖解锁、队列补位）；
   - **daemon 是否运行中**（状态来自既有 process supervisor 记录；daemon 没跑时显示「自动推进暂不执行」，开关值仍可保存，可用 Processes 页面启动 daemon）；
   - **自动合并是否启用**（`autopilot.enabled` 与 `safety.auto_merge` 是否同时为真）。
+- 同排显示**生效并发上限及其来源**：「并发 N（继承 runner 配置 / Backlog 设置 / 受 runner 容量限制）」；策略未设置时输入框占位「未设置」，已设置时可点「恢复继承」删除设置行回到跟随容量。该数字就是补位闸门与认领闸门本轮实际使用的 ceiling。
 - 开启 Backlog 自动推进不会联动开启合并配置；自动合并仍要求 `autopilot.enabled` 与 `safety.auto_merge` 同时为真。Backlog 页面只读显示合并状态，不会替用户改动合并开关。
 - 目标仓没有 `.kedacode.toml`、配置非法或不可写时返回 409，原文件保持不变。
 
 ### 全局调度
 
-在控制面板设置并发数（1–10）后点击「全局开始」：
+Backlog 顶部的「并发」是仓库级**策略**（1–10，可以从未设置），生效并发上限全仓只有一个口径：
 
-- 系统扫描所有无依赖且可安全进入 ready 的 pending PRD。
-- 按优先级排序，同时启动最多 N 个 PRD。
-- 超出槽位的 PRD 进入 `backlog_queue` 等待队列。
-- 点击「停止全局调度」可清空等待队列，已运行的进程不会被中断。
+```text
+ceiling = min(Backlog「并发」策略, runner 容量 max_concurrent_issues)
+```
+
+- 策略从未设置 = **继承容量**（存储层就是「没有设置行」，不再落一行伪造默认值）；策略高于容量时页面同时显示两个数并标明「受 runner 容量限制」；「恢复继承」= 删除该仓设置行（副作用：默认视图一并回到「列表」）。
+- 点击「全局开始」：按**当前生效上限**一次性批量启动——扫描所有无依赖且可安全进入 ready 的 pending PRD，按优先级排序，同时启动最多 ceiling 个；超出槽位的进入 `backlog_queue` 等待队列。请求体只带 `repo_id`，这次点击**不写设置**；改并发只能通过「并发」输入框落库。
+- 系统扫描、槽位与等待队列语义不变；「停止全局调度」仍只清空等待队列，已运行的进程不受影响。
 
 ### 持续调度（Continuous Scheduling）
 
@@ -4486,7 +4492,7 @@ Backlog 顶部为当前选中仓库提供「Backlog 自动推进」开关，写�
    - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/backlog` 页面处理后再回到调度。
    - BLOCKED → 保留为 `running`，但**不占槽也不晋升**，等人工解除阻塞。
    - WAITING → 不动，依赖未满足的 PRD 继续等待。
-2. **槽位核算**：`free_slots = max_parallel - RUNNING 条目数`。只有 RUNNING 计数，BLOCKED 不占槽；结果为负时按 0 处理。`max_parallel` **沿用控制台「全局调度」里持久化的并发数**（1–10，缺省 1），不是独立配置项——想调整在途数量就改控制台那个值，或用 `--dry-run` 先预检当前口径。
+2. **槽位核算**：`free_slots = ceiling - RUNNING 条目数`。`ceiling` 是统一生效并发上限 `min(Backlog「并发」策略, runner 容量)`（策略未设置 = 继承容量）；daemon 同一轮把这一个值同时分发给补位闸门与 Phase 2 认领闸门，页面数字在两处同时兑现。「全局开始」与 `kc backlog advance`（不带上限时）按同一口径自解析。只有 RUNNING 计数，BLOCKED 不占槽；结果为负时按 0 处理。
 3. **晋升（promote）**：候选集 = 队列中 `queued` 的条目 ∪ 新发现的未入队 pending PRD（**发现式入队**）。候选经依赖重算后过滤出 `NOT_STARTED` 且无 `block_reason` 的 PRD，按 `P0 > P1 > P2 > P3`、再按 `updated_at` 升序排序，最多晋升 `free_slots` 个。
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
@@ -4503,7 +4509,7 @@ uv run kc backlog advance --dry-run
 uv run kc backlog advance --repo <repo-id>
 ```
 
-`--dry-run` 会打印对账结果（completed / failed 泊车）、`max_parallel` 与 `free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
+`--dry-run` 会打印对账结果（completed / failed 泊车）、`ceiling=` 生效上限与 `source=` 来源（继承 / 策略 / 受容量限制）、`free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
 
 #### 幂等与竞态
 

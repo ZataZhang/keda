@@ -688,6 +688,15 @@ class IBacklogStore(ABC):
         ...
 
     @abstractmethod
+    def delete_backlog_settings(self, repo_id: str) -> None:
+        """删除指定仓库的 backlog 设置行（恢复继承＝删行）。
+
+        行不存在时应静默成功：删除语义是幂等的「此后没有设置行」。
+        失败时抛出异常。
+        """
+        ...
+
+    @abstractmethod
     def enqueue_backlog(self, entry: BacklogQueueEntry) -> int:
         """将 PRD 加入 backlog 队列，返回自增 ID；失败时抛出异常。"""
         ...

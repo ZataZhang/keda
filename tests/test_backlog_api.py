@@ -453,10 +453,18 @@ def test_start_prd_rejects_direct_pr_with_cli_equivalent_reason(
     assert not [c for c in github_client.calls if c["method"] == "edit_issue_labels"]
 
 
-def test_start_global_requires_valid_parallel(backlog_environment) -> None:
-    """Global start must validate max_parallel bounds."""
+def test_start_global_drops_max_parallel_and_never_persists_settings(
+    backlog_environment,
+) -> None:
+    """全局开始不再吃请求体 ``max_parallel``：上限由服务端解析，且不落设置行。"""
+    store: SqliteConsoleStore = backlog_environment["store"]
+
     response = client.post(
         "/api/v1/agent-runner/backlog/start-global",
         json={"repo_id": "keda-main", "max_parallel": 0},
     )
-    assert response.status_code == 422
+
+    # 多余的 max_parallel 不再是契约字段：被忽略而不是 422，批量按生效上限执行。
+    assert response.status_code == 200, response.text
+    # 「全局开始」是一次性批量，绝不把请求参数写成仓库设置。
+    assert store.get_backlog_settings("keda-main") is None
