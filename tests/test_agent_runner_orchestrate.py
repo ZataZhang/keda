@@ -1163,15 +1163,16 @@ def test_stamp_attempts_with_agent_preserves_existing_label() -> None:
     assert stamped[1].agent == "codex"
 
 
-def test_persist_attempt_result_writes_to_sqlite_and_github() -> None:
+def test_persist_attempt_result_writes_to_sqlite_and_github(tmp_path: Path) -> None:
     """Each attempt is persisted to SQLite and rendered into a GitHub comment."""
     import sqlite3
 
     from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 
     fake_client = FakeGitHubClient()
-    db_path = Path("/tmp/iar-test-attempt-records.db")
-    db_path.unlink(missing_ok=True)
+    # 必须用 tmp_path：硬编码的共享 /tmp 路径会残留 WAL -wal/-shm 边车文件，
+    # 下次运行在首个 PRAGMA 上报 disk I/O error（独占 tmp_path 保证每次全新）。
+    db_path = tmp_path / "attempt-records.db"
     store = SqliteConsoleStore(db_path)
 
     result = AttemptResult(

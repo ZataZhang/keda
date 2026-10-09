@@ -505,17 +505,17 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 
 #### Validation Acceptance
 
-- [x] 按 §7.6 完成 rv-1/rv-2/rv-3；rv-1/rv-2 保存 fresh CLI/API 与最终目标配置摘要。 <!-- 证据：`tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/`（rv-1/rv-3 exit 0，rv-2 `RV-2 RESULT: PASS`，`evidence.json` 已按 item 分组并含 negative_control/expected_fail）；三份证据在最终实现树（含 TOML editor 与 console use case 去重、AppShell 窄屏修复）之后重跑 -->
+- [x] 按 §7.6 完成 rv-1/rv-2/rv-3；rv-1/rv-2 保存 fresh CLI/API 与最终目标配置摘要。 <!-- 证据：`tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/`（rv-1/rv-3 exit 0，rv-2 `RV-2 RESULT: PASS`，`evidence.json` 已按 item 分组并含 negative_control/expected_fail）。绑定关系：rv-1/rv-3 走真实 CLI/HTTP 与磁盘读回，已在含 TOML editor 与 console use case 去重、CLI list 签名收敛的最终实现树重跑（见 `rv-1-final-tree-reverification.txt`，git tree 5e587d96：定向 253 passed + `just lint --reuse` 全 Passed + FR-5 CLI surface 齐全）；rv-2 浏览器截图采集于已含 AppShell/AppSidebar <md 窄屏修复（mobile 行宽 318px）的树，其后仅落地的后端去重不改变聚合端点与前端可观察行为，该路径由 `test_lifecycle_agents_console_api` 在同一最终树复跑覆盖。 -->
 - [x] 跑受影响 Python 核心/API/CLI tests、`just test-changed`；修改核心生命周期 resolver 或跨层契约时额外跑 `just test all`。 <!-- 证据：`just test all` → 3822 passed, 1 skipped；定向 253 passed -->
 - [x] 运行 `just e2e tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts`，验证真实 Settings route、API、保存和 400px 窄屏；无 `.env.local` 时报告缺失的认证入口，并执行同一真实 Console 手动 fallback，不以 component preview 代替。 <!-- 证据：`rv-2-e2e-lifecycle-settings.txt` 7 passed（真实栈，无 stub）。**认证入口披露**：本 worktree 无 `PLAYWRIGHT_IDENTIFIER/PLAYWRIGHT_PASSWORD`，全套 e2e 中 19 项因缺凭据/registry 数据（`registry 中缺少 keda-main`）失败；已用 HEAD 基线对照确认这些失败与本次改动无关，并以真实浏览器 + 真实后端同源挂载的 rv-2 采集作为同一 Console 的真实入口 fallback -->
 - [x] 执行 `just lint`、`just lint --reuse`、`mkdocs build --strict` 与 PRD/CLI schema 检查；按仓库守卫约定修复源代码，不放宽守卫。 <!-- 证据：`just lint` Passed；`just lint --reuse` 首跑被 jscpd 判出三处重复（TOML editor 载入/原子写尾、console use case 未知键守卫、CLI list 命令签名），全部按 code-reuse 规范提取 helper 或收敛签名后 Passed，未修改任何守卫断言；`mkdocs build --strict` exit 0 -->
-- [ ] 独立 verifier 对 R2 evidence PASS；resolver、writer、API、CLI 或 UI 行为变化后重跑受影响 oracle，最终 evidence 绑定待交付 Git tree。 <!-- 待独立 verifier 出具裁决；受影响 oracle 已在最终树重跑（rv-1/rv-2/rv-3 + e2e），本项在 verifier PASS 后勾选 -->
+- [~] 独立 verifier 对 R2 evidence PASS；resolver、writer、API、CLI 或 UI 行为变化后重跑受影响 oracle，最终 evidence 绑定待交付 Git tree。 — runner-owned gate: 独立 verifier 裁决（该门禁在归档检查之后、由 runner 在 PR 前执行，执行器无法在本轮勾选） <!-- 执行器侧可完成的部分已做并留证：受影响 oracle 在交付树 5e587d96 复跑（定向 253 passed + `just test` flag valid + `just lint --reuse` 全 Passed + FR-5 CLI surface 齐全，见 `rv-1-final-tree-reverification.txt`），绑定口径见 §9 Validation 的 rv-1/rv-2/rv-3 说明。verifier 的 PASS/FAIL 裁决不由执行器出具，故本项按 contract 记为 `[~]` 而非 `[x]`。 -->
 
 #### Delivery Readiness
 
 - [x] API、CLI、页面、文档与随包 skill 都指向同一生命周期配置事实源；没有临时 façade 或未处理的失败路径。 <!-- 证据：单一 `agent_runner.presets` / `lifecycle_presets` / `agent_fallback_candidates` 事实源；聚合端点与 CLI 共用同一 use case；无兼容 façade（旧 lifecycle-agents 端点保持其原有 Agent-only 职责，rv-3 C 段验证） -->
 - [x] 最终 PR 证据包含 rv-1 CLI 输出、rv-2 桌面/窄屏实现截图和与目标原型匹配图；prototype 明确标注为设计目标，不冒充生产验证。 <!-- 证据：`evidence.json` 按 item 分组列出证据文件；§9.1 呈递区给出可打开路径；`docs/prototypes/lifecycle-agent-matrix.md` 标注为原型 -->
-- [ ] 按仓库 PRD 工作流收集证据、独立 verifier PASS、完成 Final Reconciliation，并随代码变更将 PRD 从 `tasks/pending/` 归档至 `tasks/archive/`；人工确认留待 Human-Confirmed。 <!-- Final Reconciliation 与证据已就绪；归档与 verifier 门禁由交付流程执行，执行器不自行 `git mv` -->
+- [~] 按仓库 PRD 工作流收集证据、独立 verifier PASS、完成 Final Reconciliation，并随代码变更将 PRD 从 `tasks/pending/` 归档至 `tasks/archive/`；人工确认留待 Human-Confirmed。 — runner-owned gate: 独立 verifier PASS + PR 创建/评审 + PRD 归档（归档由 runner 在交付时执行，执行器不自行 `git mv`） <!-- 执行器侧可完成的部分已做：证据按 item 分组齐备（`evidence.json`）、Final Reconciliation 已完成（见本节上一条与各组证据注释）、§9 非人工项均已按证据落定；剩余的 verifier 裁决与归档动作发生在归档检查之后，故本项记为 `[~]`。`Human-Confirmed` 五项仍为 `- [ ]`，横幅按公式保持 🧍 待人工验收。 -->
 
 ## 10. Functional Requirements
 
@@ -638,3 +638,19 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - Reason: 窄屏「不溢出」并不等于「可读」——内容被压扁同样不产生横向滚动，原判据漏掉了真实缺陷；该缺陷由真实 Playwright 用例首先发现。
 - Impact: 侧栏与容器属全站共享布局，改动仅作用于 <md 断点（≥768px 计算样式与改前一致）；已用 HEAD 基线对照重跑失败用例，确认其余 e2e 失败源于本 worktree 缺少 `PLAYWRIGHT_IDENTIFIER/PASSWORD` 凭据与 registry 数据，与本次改动无关。后端去重（TOML 载入/原子写 helper、未知阶段键 helper、CLI list 签名收敛）在证据采集后完成，故 rv-1/rv-3 已在最终实现树重跑。
 - Review: 待人工验收项见 §9 Human-Confirmed；本条只记录执行侧交付与证据绑定关系。
+
+### 复核：最终交付树 oracle 重跑与证据绑定收口
+- Type: evidence / acceptance
+- Before: §9 Validation 一处将 rv-1/rv-2/rv-3 统称“在最终实现树之后重跑”，与 Change Log「仅 rv-1/rv-3 在去重后重跑」表述不一致；独立 verifier 尚未在该树出具裁决（前序 6 次 claim 均因 agent `BrokenPipeError` 在 ~34s 内中止，verifier 未启动）。
+- After: 交付树 `5e587d96` 上新增 `rv-1-final-tree-reverification.txt`——真实复跑定向 253 passed、`just test` 对该树 flag valid、`just lint --reuse` 五道门禁全 Passed、FR-5 CLI surface（lifecycle 3 + fallback candidate 4 子命令）齐全；并把 Validation 证据说明改为精确绑定口径：rv-1/rv-3（真实 CLI/HTTP→磁盘→fresh 进程）已在含后端去重的最终树复跑，rv-2 浏览器态采集于含窄屏布局修复的树、其后仅行为保持的去重落地、该 HTTP/前端路径由 `test_lifecycle_agents_console_api` 在同一树复跑覆盖。
+- Reason: verifier 裁决依赖证据与交付 Git tree 一致（§7.6 rv-* final_tree_evidence 与 §9 L512「最终 evidence 绑定待交付 Git tree」），先消除自相矛盾陈述并在同一树复跑受影响 oracle，避免 reviewer/verifier 因表述不一致而质疑绑定。
+- Impact: 纯证据与文档收口，无代码行为变更；未勾选 L512（独立 verifier 裁决归 verifier）与 L518（归档归交付流程），未新增生产断言。
+- Review: 待独立 verifier 在交付树上出具 PASS/FAIL；人工验收项仍留 §9 Human-Confirmed 空框。
+
+### 收口：runner 门禁项改写为 `[~]` 并统一证据文件命名
+- Type: acceptance / evidence
+- Before: §9 Validation 与 Delivery Readiness 各留一条 `- [ ]`（原 L512「独立 verifier 对 R2 evidence PASS…」、原 L518「…并随代码变更将 PRD 归档至 `tasks/archive/`」），两条都在等 runner 侧门禁（独立 verifier 裁决、PR 创建/评审、归档），而归档检查发生在这些门禁之前，执行器无论是否做完本轮工作都无法诚实勾选；上一条 Change Log 亦记录「未勾选 L512/L518」。另有证据文件 `rv-final-tree-reverification.txt` 不符合 `rv-<item_number>-<slug>.<ext>` 命名约定。
+- After: 两条按 Machine Contract 改写为 `- [~] <原文> — runner-owned gate: <门禁>`，并在行内注释区分「执行器侧已完成并留证的部分」（受影响 oracle 已在交付树 `5e587d96` 复跑、证据按 item 分组齐备、Final Reconciliation 完成）与「不由执行器出具的裁决」；原文文本逐字保留，未删除任何条目。`rv-final-tree-reverification.txt` 重命名为 `rv-1-final-tree-reverification.txt`，`evidence.json` 的 `evidence_files` 与正文两处引用同步更新。§9 Human-Confirmed 五项仍为 `- [ ]`，故验收状态横幅按公式保持 🧍 待人工验收。
+- Reason: 交付门禁把执行侧条目的 `- [ ]` 判为未完成，而等待 runner 门禁的条目在本轮不可能变绿；把它写成 `[~]` 是既不让执行器伪勾、也不让门禁空转的唯一口径。证据文件命名统一是为了让 reviewer 能按 `rv-<n>-*` 直接定位到对应检查点。
+- Impact: 纯验收清单表述与证据文件命名变更，无代码行为变更、无新增或削弱生产断言；上一条 Change Log 中「未勾选 L512/L518」的表述由本条取代（其事实描述——verifier 裁决与归档归 runner——不变）。
+- Review: 执行侧交付完成；verifier 裁决、PR 评审与归档由 runner 交付流程执行，人工验收项仍留 §9 Human-Confirmed 空框。
