@@ -79,7 +79,8 @@ nav:
       - Backlog CI/CD 监控与自动修复草图: prototypes/roadmap-prd-cicd-auto-repair.md
       - Backlog 单 PRD 控制与 Autopilot 草图: prototypes/roadmap-prd-controls-evidence-autopilot.md
       - 失败上下文交接与失败 Draft PR 草图: prototypes/blocked-draft-pr-surface.md
-      - 生命周期 Agent 矩阵原型: prototypes/lifecycle-agent-matrix.md
+      - 生命周期 Agent / 模型统一设置原型: prototypes/lifecycle-agent-matrix.md
+      - KC 终端执行器与按需项目预览概念图: prototypes/kc-agent-terminal-preview.md
       - PRD Demo UI: prototypes/prd-demo.html
       - Worktree 前端依赖策略: prototypes/worktree-frontend-demo.html
       - Assets 命名规范: prototypes/assets/README.md

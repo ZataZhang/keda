@@ -227,6 +227,8 @@ def scan_backlog_prds(
     candidate_files: list[tuple[Path, Path]] = []
     for target_dir in dependency_index_dirs:
         for md_path in sorted(target_dir.glob("*.md")):
+            if md_path.stem.casefold() == "readme":
+                continue
             relative_path = md_path.relative_to(repo_path).as_posix()
             prd_path_to_issue_number[relative_path] = None
             if target_dir in target_dirs:

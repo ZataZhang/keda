@@ -62,12 +62,8 @@ default_agent = "auto"
 max_recovery_attempts = 5
 # 每次重试前等待的秒数
 recovery_retry_delay_seconds = 30
-# 跨 agent fallback 链：主 agent 失败后依次尝试本机可用 agent（如 ["claude", "kimi", "codex"]），命令不存在则自动跳过；设为空列表可关闭切换
-agent_fallback_order = [
-    "claude",
-    "kimi",
-    "codex",
-]
+# 跨 agent fallback 链：夜间恢复优先 Qoder，CodeBuddy 作为后备。
+agent_fallback_order = ["qoder", "codebuddy"]
 # 最多切换 agent 次数（order=[a,b,c] 且此值=2 时最多尝试 3 个 agent）
 max_agent_switches = 2
 # 瞬时网络错误（socket 断开 / 5xx / 超时）的就地重试次数
@@ -92,10 +88,10 @@ pre_commit_verification_command = "SKIP=check-test-flag uv run pre-commit run --
 # KedaCode 任务记忆与 Skill 草稿存储配置
 [agent_runner.memory]
 enabled = true
-base_dir = ".iar/memory"
-skill_drafts_dir = ".iar/skills/drafts"
+base_dir = ".kedacode/memory"
+skill_drafts_dir = ".kedacode/skills/drafts"
 promoted_skills_dirs = [
-    ".iar/skills",
+    ".kedacode/skills",
 ]
 top_k_skills = 3
 top_k_facts = 5
@@ -118,7 +114,8 @@ forbidden_path_patterns = [
 # Autopilot 快速档（合并队列）：supervisor 之后串行合并；需配合 safety.auto_merge = true 同时启用
 [agent_runner.autopilot]
 # 是否启用快速档（合并队列）；仅当该值与 safety.auto_merge 同时为 true 时 review 才会自动合并
-enabled = false
+# 同时门控 daemon 的 continuous-scheduling 调度阶段（run_agent_daemon.py）：true 才会自动领取就绪 Issue
+enabled = true
 # 合并方式；当前唯一支持 'squash'（非法值在加载期拒绝）
 merge_method = "squash"
 # Issue 需要 validation 时是否要求 validation/verifier-passed 标签先存在
@@ -159,9 +156,9 @@ reexecute_cache_enabled = true
 # 是否启用独立 verifier agent 复验（默认开;开启后在开 PR 前换一个 agent 对抗复验,red 自动打回 builder）
 verifier_enabled = true
 # verifier 用哪个 agent（auto=自动挑一个≠builder 的）
-verifier_agent = "auto"
+verifier_agent = "qoder"
 # verifier agent 运行超时秒数（默认 1800）
-verifier_timeout_seconds = 1800
+verifier_timeout_seconds = 3600
 artifact_health_enabled = true
 # 前端改动（git diff 命中 frontend_paths）是否强制证据目录含真实视觉文件(图片/视频),否则门禁失败(默认开;独立于 verifier)
 frontend_visual_evidence_required = true
@@ -182,14 +179,14 @@ default_phase = "execution"
 [agent_runner.pre_pr_review]
 # 是否启用 Draft PR 创建前的 AI review
 enabled = true
-# 执行 review 的 agent：auto / claude / codex / kimi
-review_agent = "auto"
+# 执行 review 的 agent：夜间恢复优先使用仍可用的 Qoder。
+review_agent = "qoder"
 # 是否允许实现 agent 与 reviewer 为同一个
 allow_same_agent = true
 # review 不通过时的最大修复轮数
 max_attempts = 2
 # review agent 最长运行秒数
-timeout_seconds = 1800
+timeout_seconds = 3600
 # reviewer 报出问题但未写 commit request 时，同一轮内追加提醒的最大次数
 commit_request_reminder_attempts = 1
 review_prompt_template = []
@@ -214,8 +211,8 @@ key_paths = []
 max_diff_chars = 6000
 # 是否把历轮未解决 findings 注入下个 cycle 的 supervisor prompt（补丁 4）
 previous_findings_injection_enabled = true
-# 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .iar/ gitignore 排除）
-findings_artifact_dir = ".iar/state"
+# 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .kedacode/ gitignore 排除）
+findings_artifact_dir = ".kedacode/state"
 
 # Daemon 轮询与崩溃对账配置（覆盖全局 [agent_runner.daemon] 默认）
 [agent_runner.daemon]

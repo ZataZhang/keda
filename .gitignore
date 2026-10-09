@@ -67,8 +67,7 @@ Thumbs.db
 # Claude planning session archives (local state, not for VCS)
 .local/state/gh/device-id
 
-# Realistic validation evidence and runner state (local only)
-.iar
+# Agent runner state (local only)
 .agent-runner/
 
 # Realistic Validation evidence packages — local PRD flow (`just ai implement`).
@@ -86,12 +85,12 @@ tasks/evidence/**
 .testmondata*
 
 # >>> iar (managed by `iar init`) >>>
-# Realistic Validation evidence (worktree-local)
-.iar/
-
 # IAR-managed git worktrees (host-local)
 .iar-worktrees/
 # <<< iar <<<
+
+# KedaCode runner local state (memory / skills / decisions / state)
+.kedacode/
 
 
 # Agent

@@ -3,20 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>生命周期 Agent 矩阵 · 交互原型</title>
+    <title>生命周期 Agent / 模型设置 · 交互原型</title>
     <link rel="stylesheet" href="./assets/prototype-chrome.css" />
     <style>
       /* ───────────────────────────────────────────────────────────────────
          真实截图 + HTML 覆盖层混合原型。
 
          底图是三张从真实 frontend-public 采集的同尺寸截图（1440×1200，
-         采集方式见 lifecycle-agent-matrix.md）。覆盖层只绘制本 PRD 新增的
-         区域：Settings 页的全局矩阵卡片、Roadmap 受管理仓库列表的齿轮入口
-         与仓库级矩阵抽屉、PRD 原文页的「Agent 覆盖」抽屉。画布尺寸与底图
+         采集方式见 lifecycle-agent-matrix.md）。Settings 中旧的 Agent-only
+         生命周期矩阵已替换为统一设置页入口；仓库齿轮也进入同一页面并预选仓库。
+         覆盖层还展示 Agent 标签、回退顺序和 PRD 覆盖控件。画布尺寸与底图
          一一对应，整体按视口宽度等比缩放，因此热点与覆盖层不会随视口漂移。
 
-         三层落点：Settings = 全局 config.toml · Roadmap 仓库行齿轮 =
-         仓库级 .iar.toml · PRD 原文页 = PRD 头部覆盖。
+         三层落点：生命周期设置页 = 全局 config.toml / 仓库 .kedacode.toml ·
+         PRD 原文页 = PRD 头部覆盖。
 
          下拉语义：下拉里只有真实取值（注册 agent / auto / executor），
          当前生效值直接选中；未改动的行不写入本层文件，来源列说明它来自哪一层。
@@ -66,6 +66,10 @@
       .screen { position: absolute; inset: 0; display: none; }
       .screen.is-active { display: block; }
       .screen > img.base { display: block; width: 1440px; height: 1200px; }
+      /* 底图是旧命名时期的真实截图；只覆盖侧栏旧标签，保持当前 Backlog 名称。 */
+      .backlog-label-correction { position:absolute; z-index:2; left:50px; top:228px; display:flex; align-items:center; width:82px; height:35px; padding-left:2px; background:#f5f6fa; color:#0f172a; font-size:14px; font-weight:500; pointer-events:none; }
+      .screen[data-screen="backlog"] .backlog-label-correction,
+      .screen[data-screen="prd"] .backlog-label-correction { background:#7050e8; color:#fff; }
 
       .overlay { position: absolute; inset: 0; }
       /* 设置页覆盖层即页面内容区：内容比画布高时自身滚动，Tab 栏保持粘性 */
@@ -178,8 +182,11 @@
       .order-list { display: flex; flex-direction: column; gap: 4px; }
       .order-row { display: flex; align-items: center; gap: 8px; padding: 3px 8px; border: 1px solid var(--slate-200); border-radius: 8px; background: #fff; }
       .order-row .index { width: 18px; color: #94a3b8; font-size: 11px; }
-      .order-row .agent { flex: 1; font-size: 13px; font-weight: 500; }
+      .order-row .agent { flex: 0 0 110px; font-size: 13px; font-weight: 500; }
       .order-row .agent-missing { margin-left: 6px; font-size: 10.5px; color: #b45309; }
+      .order-preset-field { flex: 0 0 190px; }
+      .order-preset-select { width: 100%; min-width: 0; height: 28px; }
+      .order-preset-summary { flex: 1; min-width: 120px; overflow: hidden; color: #64748b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
       .order-row.is-first { border-color: color-mix(in srgb, var(--primary) 45%, var(--slate-200)); background: color-mix(in srgb, var(--primary) 5%, transparent); }
       .icon-btn { width: 24px; height: 24px; border: 1px solid var(--slate-200); border-radius: 6px; background: #fff; color: var(--slate-500); font-size: 11px; line-height: 1; cursor: pointer; }
       .icon-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
@@ -230,13 +237,14 @@
       .diff header { padding: 7px 12px; border-bottom: 1px solid var(--slate-200); background: #f8fafc; color: var(--slate-500); font-size: 11px; }
       .diff pre { padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; line-height: 1.75; white-space: pre-wrap; }
       .diff .add { border-radius: 3px; padding: 0 3px; background: #dcfce7; color: #166534; }
+      .diff .remove { border-radius: 3px; padding: 0 3px; background: #fee2e2; color: #991b1b; }
       .diff .note { color: #94a3b8; }
 
       /* ── PRD 原文页：工具栏新增入口 ── */
       .prd-entry { position: absolute; left: 1259px; top: 93px; }
       .prd-entry .btn { height: 32px; padding: 0 12px; font-size: 12.5px; }
 
-      /* ── 浮层（仓库矩阵抽屉 / PRD 覆盖抽屉） ── */
+      /* ── PRD 覆盖抽屉 ── */
       .mask { position: absolute; inset: 0; display: flex; justify-content: flex-end; background: rgb(2 6 23 / 45%); }
       .drawer { display: flex; width: 720px; flex-direction: column; border-left: 1px solid var(--slate-200); background: #fff; box-shadow: -16px 0 40px rgb(2 6 23 / 18%); }
       .drawer.is-narrow { width: 620px; }
@@ -270,7 +278,74 @@
       .toast .dot { width: 8px; height: 8px; border-radius: 999px; background: #16a34a; }
       .toast.is-error .dot { background: var(--red-500); }
 
+      /* ── 专门的生命周期 Agent / 模型 / 推理深度设置页 ── */
+      .lifecycle-toolbar { display:flex; align-items:end; gap:10px; flex-wrap:wrap; margin:12px 24px; padding:12px; border:1px solid var(--slate-200); border-radius:9px; background:#f8fafc; }
+      .lifecycle-field { display:grid; gap:4px; color:var(--slate-500); font-size:10.5px; }
+      .lifecycle-field .select { min-width:170px; }
+      .lifecycle-caption { flex:1; min-width:250px; color:var(--slate-500); font-size:11px; line-height:1.55; }
+      .lifecycle-config-table { width:calc(100% - 48px); margin:0 24px; border-collapse:collapse; font-size:11.5px; }
+      .lifecycle-config-table th { padding:6px; border-bottom:1px solid var(--slate-200); color:var(--slate-500); text-align:left; font-size:10px; font-weight:600; }
+      .lifecycle-config-table td { padding:5px 6px; border-bottom:1px solid #eef1f6; vertical-align:middle; }
+      .lifecycle-config-table .select { width:100%; min-width:115px; height:27px; font-size:10.5px; }
+      .tuple-value { color:#1e293b; font-size:10.5px; line-height:1.45; }
+      .tuple-value span { display:block; color:var(--slate-500); font-size:9.5px; }
+      .scope-pill { display:inline-flex; border-radius:999px; background:#e0f2fe; padding:2px 6px; color:#075985; font-size:9.5px; white-space:nowrap; }
+      .scope-pill.repo { background:#ede9fe; color:#5b21b6; }
+      .scope-pill.legacy { background:#fef3c7; color:#92400e; }
+      .preset-editor { margin:14px 24px 20px; padding:12px; border:1px solid var(--slate-200); border-radius:9px; background:#fff; }
+      .preset-editor h3 { margin-bottom:4px; font-size:13px; }
+      .preset-editor p { margin-bottom:8px; color:var(--slate-500); font-size:10.5px; }
+      .preset-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+      .preset-card { padding:8px; border:1px solid #e5e7eb; border-radius:7px; }
+      .preset-card strong { display:block; margin-bottom:5px; font-size:11px; }
+      .preset-card input,.preset-card select { width:100%; height:25px; margin-top:4px; padding:0 6px; border:1px solid var(--slate-200); border-radius:5px; font-size:10px; }
+      .lifecycle-footer { display:flex; align-items:center; gap:8px; margin:0 24px 20px; }
+      .lifecycle-footer .hint { flex:1; color:var(--slate-500); font-size:10.5px; }
+      @media (max-width:900px) { .lifecycle-config-table { min-width:980px; } .lifecycle-settings-scroll { overflow-x:auto; } .preset-list { grid-template-columns:1fr; } }
+      @media (max-width:900px) {
+        body.mobile-lifecycle-screen .viewer { width:100%; margin:0; padding:12px 12px 88px; }
+        body.mobile-lifecycle-screen .viewer-head { align-items:flex-start; flex-direction:column; gap:8px; }
+        body.mobile-lifecycle-screen .viewer-legend { flex-wrap:wrap; }
+        body.mobile-lifecycle-screen .stage { width:100%; height:auto; min-height:0; overflow:visible; transform:none !important; }
+        body.mobile-lifecycle-screen .screen { position:relative; inset:auto; }
+        body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] > img.base { display:none; }
+        body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] .backlog-label-correction { display:none; }
+        body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] .overlay.panel { position:relative !important; inset:auto !important; width:auto !important; height:auto !important; overflow:visible !important; }
+        body.mobile-lifecycle-screen .screen[data-screen="lifecycle-settings"] .admin-head { position:relative; padding:12px 14px 0 !important; }
+        body.mobile-lifecycle-screen .lifecycle-toolbar { align-items:stretch; flex-direction:column; margin:12px; }
+        body.mobile-lifecycle-screen .lifecycle-field .select { width:100%; }
+        body.mobile-lifecycle-screen .lifecycle-caption { min-width:0; }
+        body.mobile-lifecycle-screen .lifecycle-settings-scroll { overflow:visible; }
+        body.mobile-lifecycle-screen .lifecycle-config-table { display:block; width:auto; min-width:0; margin:0 12px; }
+        body.mobile-lifecycle-screen .lifecycle-config-table thead { display:none; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tbody { display:block; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr.entry-group-row { display:block; margin:16px 0 4px; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr.entry-group-row td { display:block; padding:8px 4px; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:8px 0; padding:12px; border:1px solid var(--slate-200); border-radius:9px; background:#fff; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] td { display:grid; min-width:0; gap:4px; padding:0; border:0; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] td:first-child { grid-column:1 / -1; }
+        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] td:not(:first-child)::before { color:var(--slate-500); font-size:9.5px; font-weight:600; content:attr(data-label); }
+        body.mobile-lifecycle-screen .lifecycle-config-table .select { width:100%; min-width:0; }
+        body.mobile-lifecycle-screen .preset-editor { margin:12px; }
+        body.mobile-lifecycle-screen .preset-list { grid-template-columns:1fr; }
+        body.mobile-lifecycle-screen .lifecycle-footer { align-items:stretch; flex-direction:column; margin:0 12px 16px; }
+        body.mobile-lifecycle-screen .lifecycle-footer .btn { width:100%; }
+      }
+      @media (max-width:500px) {
+        body.mobile-lifecycle-screen .lifecycle-config-table tr[data-lifecycle-key] { grid-template-columns:minmax(0,1fr); }
+      }
+
       .state-hint { padding: 12px 4px 0; font-size: 12.5px; line-height: 1.7; color: #4b5563; }
+      body.capture-product-only .viewer { width: 100%; margin: 0; padding: 0; }
+      body.capture-product-only .viewer-head,
+      body.capture-product-only .state-hint,
+      body.capture-product-only [data-prototype-chrome] { display: none !important; }
+      body.capture-product-only .stage-wrap { width: 100%; }
+      body.capture-fallback-focus .screen[data-screen="settings"] .settings-labels,
+      body.capture-fallback-focus .screen[data-screen="settings"] .settings-labels + p,
+      body.capture-fallback-focus .screen[data-screen="settings"] .settings-labels + p + section.card,
+      body.capture-fallback-focus .screen[data-screen="settings"] section.card:has(#fallback-order-list) ~ .card,
+      body.capture-fallback-focus .screen[data-screen="settings"] section.card:has(#fallback-order-list) ~ button { display: none !important; }
       @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
   </head>
@@ -278,8 +353,8 @@
     <main class="viewer">
       <header class="viewer-head">
         <div>
-          <h1>生命周期 Agent 矩阵 · 交互原型</h1>
-          <p>底图为真实 frontend-public 截图；紫色描边区域是本 PRD 新增的界面。三层落点：Settings「Agent 管理」= 全局 config.toml（Auto 标签 / 生命周期矩阵 / 回退顺序），Roadmap 仓库行齿轮 = 仓库级 .iar.toml，PRD 原文页 = PRD 头部覆盖。</p>
+          <h1>生命周期 Agent / 模型设置 · 交互原型</h1>
+          <p>底图为真实 frontend-public 截图；紫色描边区域是原型界面。生命周期 Agent、预设、模型、推理深度和全局 / 仓库范围集中在同一设置页；Backlog 与 PRD 保留各自快捷入口。</p>
         </div>
         <div class="viewer-legend">
           <span><i class="swatch" style="background:#c4b5fd"></i>本原型新增</span>
@@ -289,26 +364,23 @@
 
       <div class="stage-wrap" id="stage-wrap">
         <div class="stage" id="stage">
-          <!-- ══ 视图一：Settings · Agent 管理（真实截图 + 粘性 Tab 区块覆盖层） ══ -->
+          <!-- ══ 视图一：Settings · Agent 管理与统一生命周期设置入口 ══ -->
           <section class="screen is-active" data-screen="settings">
             <img class="base" src="./assets/lifecycle-agent-matrix/settings-real.png" alt="真实 frontend-public 设置页" />
-            <button class="hotspot" type="button" data-goto="roadmap" style="left:12px;top:228px;width:231px;height:36px" data-label="打开依赖图" data-label-side></button>
+            <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
+            <button class="hotspot" type="button" data-goto="backlog" style="left:12px;top:228px;width:231px;height:36px" data-label="打开依赖图" data-label-side></button>
 
-            <!-- 覆盖既有卡片区：新增「Agent 管理」粘性 Tab 区块，再按真实样式复刻被下推的既有卡片与按钮 -->
+            <!-- 覆盖既有卡片区：保留 Agent 标签设置与回退顺序；旧生命周期矩阵替换为统一设置页入口。 -->
             <div class="overlay panel" style="left:288px;top:116px;width:1120px;height:1084px">
               <div class="admin-head">
                 <div class="admin-title">Agent 管理<span class="tag-new">本原型新增</span></div>
                 <div class="admin-desc">
-                  配置每个 agent 的 GitHub 路由标签（<code>auto</code> 靠它判定），以及九个生命周期阶段各自用哪个 agent。两个 Tab 分别写 <code>config.toml</code> 的不同段。
+                  在此维护 Agent 的 GitHub 路由标签与回退顺序。九个生命周期的 Agent、模型预设、推理深度和全局 / 仓库覆盖统一在生命周期设置页管理。
                 </div>
-                <nav class="tabs" role="tablist" aria-label="Agent 管理">
-                  <button class="tab is-active" type="button" role="tab" aria-selected="true" data-clickable data-tab="labels">Agent 标签设置</button>
-                  <button class="tab" type="button" role="tab" aria-selected="false" data-clickable data-tab="lifecycle">生命周期 Agent 设置</button>
-                </nav>
               </div>
 
               <!-- Tab 1（默认）：Agent 标签设置 -->
-              <section class="tab-panel is-active" data-tab-panel="labels">
+              <section class="settings-labels">
                 <div class="card is-new" data-clickable>
                   <div class="card-head">
                     <div>
@@ -348,48 +420,23 @@
                 </p>
               </section>
 
-              <!-- Tab 2：生命周期 Agent 设置 -->
-              <section class="tab-panel" data-tab-panel="lifecycle">
-                <div class="card is-new" data-clickable>
-                  <div class="card-head">
-                    <div>
-                      <div class="card-title">生命周期 Agent 矩阵 · 全局</div>
-                      <div class="card-desc">
-                        九个生命周期各自的 agent。下拉里是当前生效值；<strong>只写入改动过的行</strong>，没动的行继续沿用既有配置键。保存写入 <code>config.toml</code>，单仓库可用 <code>.iar.toml</code> 覆盖（Roadmap 仓库行齿轮），单 PRD 可用文件头覆盖。
-                      </div>
-                    </div>
+              <section class="card is-new" style="margin-top:16px" data-clickable>
+                <div class="card-head">
+                  <div>
+                    <div class="card-title">生命周期 Agent、模型与推理深度</div>
+                    <div class="card-desc">全局和仓库配置共用一张九阶段矩阵；预设定义 Agent、模型 ID 与推理深度，页面显示继承关系和实际配置来源。</div>
                   </div>
-                  <div class="card-body">
-                    <table class="matrix">
-                      <thead>
-                        <tr>
-                          <th style="width:22%">生命周期</th>
-                          <th style="width:34%">agent</th>
-                          <th>当前值来源</th>
-                        </tr>
-                      </thead>
-                      <tbody id="global-matrix-body"></tbody>
-                    </table>
-                  </div>
-                  <div class="card-foot">
-                    <span class="hint" id="global-hint"></span>
-                    <button class="btn outline" type="button" id="demo-global-unregistered" data-clickable>演示：写入未注册 agent</button>
-                    <button class="btn default" type="button" id="save-global" data-clickable disabled>保存更改</button>
-                  </div>
-                  <div class="card-body" id="global-diff-wrap" style="display:none;padding-bottom:20px">
-                    <div class="diff">
-                      <header id="global-diff-header">保存将写入</header>
-                      <pre id="global-diff-code"></pre>
-                    </div>
-                  </div>
+                  <button class="btn default" type="button" data-goto="lifecycle-settings" data-clickable>打开统一设置 →</button>
                 </div>
+              </section>
 
-                <div class="card is-new" style="margin-top:16px" data-clickable>
+              <!-- Agent fallback order remains independent; candidates may opt into matching presets. -->
+              <section class="card is-new" style="margin-top:16px" data-clickable>
                   <div class="card-head">
                     <div>
                       <div class="card-title">agent 回退顺序</div>
                       <div class="card-desc">
-                        <strong>主 agent 失败或额度受限时</strong>，按这个顺序换下一个；本机没装的 agent 自动跳过。设成空列表即关闭自动切换。这是 Issue 执行阶段的跨 agent 回退链。
+                        <strong>主 agent 失败或额度受限时</strong>，按这个顺序换下一个；本机没装的 agent 自动跳过。每个候选可选绑定同 Agent 的模型预设；不绑定时沿用 Agent 默认值。
                       </div>
                     </div>
                     <label class="switch-field" style="white-space:nowrap">最多切换
@@ -398,6 +445,7 @@
                   </div>
                   <div class="card-body">
                     <div class="order-list" id="fallback-order-list"></div>
+                    <p class="cell-note is-block" style="margin-top:8px">预设只列出 Agent 匹配项；绑定后该候选执行时使用预设模型与支持的推理深度。</p>
                     <div class="order-toolbar">
                       <select class="select" id="fallback-add-select" aria-label="添加回退 agent"></select>
                       <button class="btn outline sm" type="button" id="fallback-add" data-clickable>＋ 加到末尾</button>
@@ -414,14 +462,13 @@
                       <pre id="fallback-diff-code"></pre>
                     </div>
                   </div>
-                </div>
               </section>
 
               <div class="card" style="margin-top:16px;padding:24px" data-clickable>
-                <h2 style="font-size:18px;font-weight:600">关于 iar 管理终端</h2>
+                <h2 style="font-size:18px;font-weight:600">关于 KedaCode 管理终端</h2>
                 <p style="margin-top:8px;font-size:14px;line-height:1.6;color:var(--muted-foreground)">
-                  这是 iar 内置的 Agent Runner 管理终端（本机单用户模式，仅监听 127.0.0.1）。仓库队列、托管进程与 roadmap 数据均来自本机后端
-                  API；runner 的行为由各仓库的 config.toml 与 .iar.toml 决定。退出后可通过命令行重新执行 <code>iar console</code> 打开。
+                  这是 KedaCode 内置的 Agent Runner 管理终端（本机单用户模式，仅监听 127.0.0.1）。仓库队列、托管进程与 Backlog 数据均来自本机后端
+                  API；runner 的行为由各仓库的 config.toml 与 .kedacode.toml 决定。退出后可通过命令行重新执行 <code>kc console</code> 打开。
                 </p>
               </div>
 
@@ -429,60 +476,66 @@
             </div>
           </section>
 
-          <!-- ══ 视图二：Roadmap · 仓库级（真实截图 + 齿轮入口 + 仓库矩阵抽屉） ══ -->
-          <section class="screen" data-screen="roadmap">
-            <img class="base" src="./assets/lifecycle-agent-matrix/roadmap-real.png" alt="真实 frontend-public Roadmap 依赖图" />
-            <button class="hotspot" type="button" data-goto="settings" style="left:12px;top:308px;width:231px;height:36px" data-label="打开全局矩阵（Settings）" data-label-below></button>
+          <!-- ══ 专门页面：全局 / 仓库生命周期 Agent、模型与推理深度设置 ══ -->
+          <section class="screen" data-screen="lifecycle-settings">
+            <img class="base" src="./assets/lifecycle-agent-matrix/settings-real.png" alt="frontend-public 设置页真实产品外壳" />
+            <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
+            <div class="overlay panel lifecycle-settings-scroll" style="left:288px;top:116px;width:1120px;height:1084px">
+              <div class="admin-head" style="padding:12px 24px 0">
+                <button class="btn ghost sm" type="button" id="lifecycle-settings-back" data-clickable>← 设置</button>
+                <div class="admin-title" style="margin-top:6px">生命周期设置<span class="tag-new">独立设置页</span></div>
+                <div class="admin-desc">在一张表里查看九个阶段最终使用的 Agent、模型和推理深度。绑定模型预设后，阶段整体采用预设中的三项配置。</div>
+              </div>
+              <div class="lifecycle-toolbar">
+                <label class="lifecycle-field">配置范围
+                  <select class="select" id="lifecycle-scope"><option value="global">全局 · config.toml</option><option value="repository">仓库 · .kedacode.toml</option></select>
+                </label>
+                <label class="lifecycle-field" id="lifecycle-repo-field" style="display:none">目标仓库
+                  <select class="select" id="lifecycle-repo"></select>
+                </label>
+                <p class="lifecycle-caption" id="lifecycle-scope-hint">全局设置供所有仓库继承。仓库层可逐阶段覆盖，未覆盖的行继续使用全局设置；每行同时显示绑定与预设的来源。</p>
+              </div>
+              <div class="lifecycle-settings-scroll">
+                <table class="lifecycle-config-table">
+                  <thead><tr><th style="width:20%">生命周期 / 触发时机</th><th style="width:16%">模型预设</th><th style="width:20%">生效 Agent / 模型</th><th style="width:13%">推理深度</th><th style="width:17%">配置来源</th><th style="width:14%">本层操作</th></tr></thead>
+                  <tbody id="lifecycle-settings-body"></tbody>
+                </table>
+              </div>
+              <section class="preset-editor">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                  <h3>模型预设</h3>
+                  <button class="btn outline sm" id="lifecycle-preset-add" type="button" data-clickable>＋ 新建预设</button>
+                </div>
+                <p>预设集中定义 Agent、模型 ID 和推理深度；Agent 不支持推理深度参数时，该字段不能生效。</p>
+                <div class="preset-list" id="lifecycle-preset-list"></div>
+              </section>
+              <div class="lifecycle-footer">
+                <span class="hint" id="lifecycle-settings-hint">修改只保存在当前选择的作用域。</span>
+                <button class="btn default" type="button" id="lifecycle-settings-save" data-clickable>保存当前作用域</button>
+              </div>
+              <div class="card-body" id="lifecycle-settings-diff-wrap" style="display:none;padding:0 24px 20px">
+                <div class="diff"><header id="lifecycle-settings-diff-header">保存预览</header><pre id="lifecycle-settings-diff-code"></pre></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ══ 视图二：Backlog · 仓库入口直达统一生命周期设置页 ══ -->
+          <section class="screen" data-screen="backlog">
+            <img class="base" src="./assets/lifecycle-agent-matrix/roadmap-real.png" alt="frontend-public Backlog 依赖图历史截图" />
+            <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
+            <button class="hotspot" type="button" data-goto="settings" style="left:12px;top:308px;width:231px;height:36px" data-label="打开 Agent 管理与生命周期设置入口" data-label-below></button>
             <button class="hotspot" type="button" data-goto="prd" style="left:561px;top:445px;width:220px;height:64px" data-label="直开入口：PRD 原文" data-label-side></button>
 
-            <!-- 新增：受管理仓库每行右侧的仓库级 Agent 设置入口（坐标为真实列表行实测值） -->
+            <!-- 受管理仓库的齿轮直接进入统一设置页并预选当前仓库。 -->
             <div class="overlay" id="repo-gears"></div>
-
-            <div class="mask" id="repo-mask" style="display:none">
-              <aside class="drawer" role="dialog" aria-modal="true" aria-label="仓库 Agent 设置">
-                <div class="drawer-head">
-                  <div>
-                    <div class="drawer-title" id="repo-drawer-title">仓库 Agent 设置</div>
-                    <div class="drawer-desc">
-                      该仓库的生命周期 agent。下拉里是当前生效值；<strong>只写入改动过的行</strong>，没动的行继续跟随全局层。保存写入本仓库 <code>.iar.toml</code>，<code>config.toml</code> 与其它仓库不动。
-                    </div>
-                  </div>
-                  <button class="drawer-close" type="button" id="repo-drawer-close" aria-label="关闭仓库设置">✕</button>
-                </div>
-                <div class="drawer-body">
-                  <table class="matrix">
-                    <thead>
-                      <tr>
-                        <th style="width:20%">生命周期</th>
-                        <th style="width:32%">agent</th>
-                        <th>当前值来源</th>
-                      </tr>
-                    </thead>
-                    <tbody id="repo-matrix-body"></tbody>
-                  </table>
-                </div>
-                <div class="drawer-body" id="repo-diff-wrap" style="display:none;flex:0 0 auto;padding-bottom:0">
-                  <div class="diff" style="margin-bottom:14px">
-                    <header id="repo-diff-header">保存将写入</header>
-                    <pre id="repo-diff-code"></pre>
-                  </div>
-                </div>
-                <div class="drawer-foot">
-                  <span class="hint" id="repo-hint"></span>
-                  <div class="drawer-actions">
-                    <button class="btn outline sm" type="button" id="demo-repo-unregistered" data-clickable>演示：写入未注册 agent</button>
-                    <button class="btn default" type="button" id="save-repo" data-clickable disabled>保存更改</button>
-                  </div>
-                </div>
-              </aside>
-            </div>
           </section>
 
           <!-- ══ 视图三：PRD 原文 · PRD 级覆盖（真实截图 + 工具栏入口 + 覆盖抽屉） ══ -->
           <section class="screen" data-screen="prd">
             <img class="base" src="./assets/lifecycle-agent-matrix/prd-content-real.png" alt="真实 frontend-public PRD 原文页" />
-            <button class="hotspot" type="button" data-goto="roadmap" style="left:12px;top:228px;width:231px;height:36px" data-label="回到依赖图" data-label-side></button>
-            <button class="hotspot" type="button" data-goto="roadmap" style="left:561px;top:95px;width:100px;height:32px" data-label="返回列表" data-label-below></button>
+            <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
+            <button class="hotspot" type="button" data-goto="backlog" style="left:12px;top:228px;width:231px;height:36px" data-label="回到依赖图" data-label-side></button>
+            <button class="hotspot" type="button" data-goto="backlog" style="left:561px;top:95px;width:100px;height:32px" data-label="返回列表" data-label-below></button>
 
             <div class="prd-entry" data-clickable>
               <button class="btn outline" type="button" id="open-prd-drawer"><span style="color:var(--primary)">◈</span> Agent 覆盖</button>
@@ -538,6 +591,11 @@
 
     <script>
       (() => {
+        const pageParams = new URLSearchParams(window.location.search);
+        if (pageParams.get('capture') === '1') {
+          document.body.classList.add('capture-product-only');
+          if (pageParams.get('focus') === 'fallback') document.body.classList.add('capture-fallback-focus');
+        }
         // ── 真实数据（取自 config.toml、内置默认与真实 registry） ──
         const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi', 'codebuddy', 'qoder', 'opencode'];
         const UNREGISTERED_AGENT = 'no-such-agent';
@@ -571,14 +629,14 @@
         // autoLabel = 该阶段 auto 的真实语义（各阶段不同，见 PRD §1 表）；只有实现了 auto 的阶段才提供该选项
         // trigger = 该阶段「何时被读」的一句话（与 core LIFECYCLE_AGENT_TRIGGERS 同源）
         const LIFECYCLES = [
-          { key: 'implementation', name: '实现', legacyRef: 'claude', legacyNote: 'runner.default_agent', legacySource: 'legacy', autoLabel: 'auto（按 Issue 上的 agent 标签路由）', trigger: 'iar run / daemon 认领 agent/ready Issue 时启动实现。' },
+          { key: 'implementation', name: '实现', legacyRef: 'claude', legacyNote: 'runner.default_agent', legacySource: 'legacy', autoLabel: 'auto（按 Issue 上的 agent 标签路由）', trigger: 'kc run / daemon 认领 agent/ready Issue 时启动实现。' },
           { key: 'fix', name: '修复', legacyRef: 'executor', legacyNote: '内置默认：跟随实现阶段', legacySource: 'builtin', allowExecutor: true, trigger: '同一次 claim 内，验证未通过时修复。' },
           { key: 'closeout', name: '收尾', legacyRef: 'executor', legacyNote: '内置默认：跟随实现阶段', legacySource: 'builtin', allowExecutor: true, trigger: '同一次 claim 内，交付收尾阶段执行。' },
           { key: 'verifier', name: '校验', legacyRef: 'auto', legacyNote: 'validation.verifier_agent 缺省值', legacySource: 'legacy', autoLabel: 'auto（从回退链挑一个 ≠ 实现者的 agent）', trigger: '同一次 claim 内，实现产出后做验证。' },
           { key: 'review', name: '审核', legacyRef: 'auto', legacyNote: 'pre_pr_review.review_agent', legacySource: 'legacy', autoLabel: 'auto（优先挑 ≠ 实现者；allow_same_agent 时沿用实现者）', trigger: '同一次 claim 内，开 Draft PR 前审查。' },
-          { key: 'supervisor', name: '监督', legacyRef: 'auto', legacyNote: 'post_pr_supervisor.supervisor_agent', legacySource: 'legacy', autoLabel: 'auto（发布路径沿用本次实现者）', trigger: '同一次 claim 的发布路径，或 iar review / review-daemon 单独一轮。' },
-          { key: 'planner', name: '决策', legacyRef: 'claude', legacyNote: 'interactive_decision.default_agent', legacySource: 'legacy', trigger: 'iar ask 交互式决策，不在任何 Issue 流水线上。' },
-          { key: 'content_generation', name: '内容生成', legacyRef: 'claude', legacyNote: 'generated_content.default_agent', legacySource: 'legacy', trigger: '横切 iar issue create、Phase 1 Issue→PRD 与开 Draft PR 三处。' },
+          { key: 'supervisor', name: '监督', legacyRef: 'auto', legacyNote: 'post_pr_supervisor.supervisor_agent', legacySource: 'legacy', autoLabel: 'auto（发布路径沿用本次实现者）', trigger: '同一次 claim 的发布路径，或 kc review / review-daemon 单独一轮。' },
+          { key: 'planner', name: '决策', legacyRef: 'claude', legacyNote: 'interactive_decision.default_agent', legacySource: 'legacy', trigger: 'kc ask 交互式决策，不在任何 Issue 流水线上。' },
+          { key: 'content_generation', name: '内容生成', legacyRef: 'claude', legacyNote: 'generated_content.default_agent', legacySource: 'legacy', trigger: '横切 kc issue create、Phase 1 Issue→PRD 与开 Draft PR 三处。' },
           { key: 'deliberate', name: '辩论', legacyRef: 'auto', legacyNote: '内置默认：按 agent/deliberate 标签路由', legacySource: 'builtin', autoLabel: 'auto（按 agent/deliberate 标签路由）', trigger: 'Phase 0 就该 Issue 在评论区讨论（此时 PRD 尚不存在）。' },
         ];
         // 触发入口分组（与 core LIFECYCLE_AGENT_ENTRY_GROUPS 同源；九个阶段不在同一条流水线上）
@@ -588,47 +646,77 @@
         // docs/ 不在"单一份键→组映射"的 rg 门禁范围内，这份漂移由守卫测试
         // tests/guards/test_lifecycle_entry_group_copies.py 逐组逐键比对兜住（含 E2E spec 的同名副本）。
         const ENTRY_GROUPS = [
-          { entry: 'pipeline', label: '实现流水线', summary: 'iar run / daemon 认领后，在同一 worktree 的同一次 claim 内依次触发。', keys: ['implementation', 'fix', 'closeout', 'verifier', 'review', 'supervisor'] },
-          { entry: 'discussion_content', label: '讨论与内容生成', summary: '辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 iar issue create、Phase 1 与开 Draft PR 三处。', keys: ['content_generation', 'deliberate'] },
-          { entry: 'standalone', label: '独立入口', summary: 'iar ask，不在任何 Issue 流水线上（无 Issue / PRD 上下文）。', keys: ['planner'] },
+          { entry: 'pipeline', label: '实现流水线', summary: 'kc run / daemon 认领后，在同一 worktree 的同一次 claim 内依次触发。', keys: ['implementation', 'fix', 'closeout', 'verifier', 'review', 'supervisor'] },
+          { entry: 'discussion_content', label: '讨论与内容生成', summary: '辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 kc issue create、Phase 1 与开 Draft PR 三处。', keys: ['content_generation', 'deliberate'] },
+          { entry: 'standalone', label: '独立入口', summary: 'kc ask，不在任何 Issue 流水线上（无 Issue / PRD 上下文）。', keys: ['planner'] },
         ];
-        const SOURCE_BADGE = {
-          repo: ['badge repo', '本仓库 .iar.toml'],
-          global: ['badge global', '本机 config.toml'],
-          legacy: ['badge legacy', '既有配置键'],
-          builtin: ['badge builtin', '内置默认'],
-        };
         // 本仓库 PRD 没有 YAML frontmatter：覆盖块落在标题下方的元信息 bullet 区。
         const PRD_HEAD_LINES = [
           '# PRD: 生命周期 Agent 矩阵——全局统一配置 + PRD 级覆盖',
           '',
           '- GitHub Issue: （创建后回填）',
         ];
+        // 原型固定样例：预设声明完整的 agent/model/reasoning_effort 三元组。
+        const INITIAL_PRESETS = {
+          plan: { agent: 'codebuddy', model: 'glm-5.3-flash', reasoning_effort: 'max' },
+          work: { agent: 'codebuddy', model: 'deepseek-v4.1-flash', reasoning_effort: 'high' },
+          review: { agent: 'qoder', model: 'glm-5.3-flash', reasoning_effort: 'high' },
+          'fallback-claude': { agent: 'claude', model: 'claude-sonnet-5-5', reasoning_effort: 'max' },
+          'fallback-kimi': { agent: 'kimi', model: 'kimi-k2.6', reasoning_effort: 'high' },
+          'fallback-codex': { agent: 'codex', model: 'gpt-5.4', reasoning_effort: 'xhigh' },
+        };
+        const INITIAL_PRESET_BINDINGS = {
+          implementation: 'work', verifier: 'review', review: 'review', supervisor: 'review',
+          planner: 'plan', content_generation: 'work', deliberate: 'plan',
+        };
 
         const blankMatrix = () => Object.fromEntries(LIFECYCLES.map((item) => [item.key, null]));
-        const initial = () => ({
+        const initial = () => {
+          const fallbackDemo = new URLSearchParams(window.location.search).get('demo');
+          const demoFallbackPresets = ['fallback-preset', 'fallback-preset-saved'].includes(fallbackDemo)
+            ? { claude: 'fallback-claude', kimi: 'fallback-kimi', codex: 'fallback-codex' }
+            : {};
+          const savedFallbackDemo = fallbackDemo === 'fallback-preset-saved';
+          return ({
           screen: 'settings',
-          activeTab: 'labels',
+          fallbackDemo: fallbackDemo || null,
           agentLabels: AGENT_LABEL_DEFAULTS.map((entry) => ({ ...entry })),
           labelBaseline: AGENT_LABEL_DEFAULTS.map((entry) => ({ ...entry })),
           labelError: null,
           labelErrorReason: null,
           labelDiff: null,
           globalMatrix: blankMatrix(),
-          globalErrorKey: null,
-          globalDiff: null,
           repoId: 'keda-main',
           repoMatrices: Object.fromEntries(REPOS.map((repo) => [repo.id, blankMatrix()])),
-          repoErrorKey: null,
-          repoDiff: null,
+          lifecycleScope: 'global',
+          lifecycleReturnScreen: 'settings',
+          globalPresets: structuredClone(INITIAL_PRESETS),
+          repoPresets: {},
+          globalPresetBindings: { ...INITIAL_PRESET_BINDINGS },
+          repoPresetBindings: Object.fromEntries(REPOS.map((repo) => [repo.id, {}])),
+          lifecycleSettingsDiff: null,
           fallbackOrder: [...DEFAULT_FALLBACK_ORDER],
           fallbackSwitches: DEFAULT_MAX_AGENT_SWITCHES,
-          fallbackBaseline: { order: [...DEFAULT_FALLBACK_ORDER], switches: DEFAULT_MAX_AGENT_SWITCHES },
-          fallbackDiff: null,
+          fallbackPresets: { ...demoFallbackPresets },
+          fallbackBaseline: {
+            order: [...DEFAULT_FALLBACK_ORDER],
+            switches: DEFAULT_MAX_AGENT_SWITCHES,
+            presets: savedFallbackDemo ? { ...demoFallbackPresets } : {},
+          },
+          fallbackDiff: savedFallbackDemo
+            ? [
+                '<span class="note">· [agent_runner.runner] 段其余键不变</span>',
+                '<span class="add">+ agent_fallback_order = ["claude", "kimi", "codex"]</span>',
+                '<span class="add">+ max_agent_switches = 2</span>',
+                '<span class="note">· [agent_runner.runner.agent_fallback_presets]</span>',
+                ...Object.entries(demoFallbackPresets).map(([agent, presetName]) => `<span class="add">+ ${esc(agent)} = "${esc(presetName)}"</span>`),
+              ].join('\n')
+            : null,
           prdOverrides: {},
           prdErrorKey: null,
           prdWritten: false,
-        });
+          });
+        };
         let state = initial();
 
         const $ = (selector) => document.querySelector(selector);
@@ -636,7 +724,6 @@
         const esc = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
         const byKey = (key) => LIFECYCLES.find((item) => item.key === key);
         const isUnregistered = (value) => Boolean(value) && value !== 'executor' && value !== 'auto' && !REGISTERED_AGENTS.includes(value);
-        const agentLabel = (value) => (value === 'auto' ? 'auto' : value);
         const localMatrix = () => state.repoMatrices[state.repoId];
         const declaredIn = (matrix, lifecycle) => matrix[lifecycle.key] ?? null;
 
@@ -654,18 +741,6 @@
           }
           return lifecycle.legacyRef;
         };
-        const shownSource = (layer, lifecycle) => {
-          if (declaredIn(layer === 'global' ? state.globalMatrix : localMatrix(), lifecycle)) return layer === 'global' ? 'global' : 'repo';
-          if (layer === 'repo' && declaredIn(state.globalMatrix, lifecycle)) return 'global';
-          return lifecycle.legacySource;
-        };
-        /** executor 只是「跟随实现」的声明，附带展示它当前解析成哪个 agent。 */
-        const executorHint = (layer, lifecycle) => {
-          if (shownValue(layer, lifecycle) !== 'executor') return null;
-          const implementation = shownValue(layer, byKey('implementation'));
-          return `当前实现阶段：${implementation}`;
-        };
-
         const toastRoot = $('#toast-root');
         const toast = (message, isError = false) => {
           const node = document.createElement('div');
@@ -690,59 +765,6 @@
             .map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${esc(label)}</option>`)
             .join('');
         };
-
-        const rowHtml = (layer, lifecycle, { isError, errorText, selectId, resetLabel }) => {
-          const value = shownValue(layer, lifecycle);
-          const source = shownSource(layer, lifecycle);
-          const [badgeClass, badgeText] = SOURCE_BADGE[source];
-          const pinned = declaredIn(layer === 'global' ? state.globalMatrix : localMatrix(), lifecycle) !== null;
-          const hint = executorHint(layer, lifecycle);
-          const note = pinned
-            ? (layer === 'global' ? '已在本机 config.toml 显式设置' : '已在本仓库 .iar.toml 显式设置')
-            : source === 'legacy'
-              ? lifecycle.legacyNote
-              : source === 'global'
-                ? '继承全局层'
-                : '';
-          return `<tr class="${isError ? 'is-error' : pinned ? 'is-pinned' : ''}">
-            <td>
-              <div class="lifecycle-name">${esc(lifecycle.name)}</div>
-              <div class="cell-note lifecycle-trigger">${esc(lifecycle.trigger)}</div>
-              <div class="lifecycle-key">${esc(lifecycle.key)}</div>
-            </td>
-            <td>
-              <select class="select" data-clickable ${selectId}
-                data-edited="${pinned ? 'true' : 'false'}" data-invalid="${isError ? 'true' : 'false'}"
-                aria-label="${esc(lifecycle.name)}的 agent">
-                ${options(lifecycle, isError ? UNREGISTERED_AGENT : value)}
-              </select>
-              ${hint ? `<div class="cell-note is-block">${esc(hint)}</div>` : ''}
-              ${isError ? `<div class="cell-error">${esc(errorText)}</div>` : ''}
-            </td>
-            <td>
-              <span class="${badgeClass}">${badgeText}</span>
-              ${note ? `<span class="cell-note" style="margin-left:6px">${esc(note)}</span>` : ''}
-              ${pinned ? `<div><button class="link-reset" type="button" data-clickable data-reset-layer="${layer}" data-reset-key="${lifecycle.key}">${esc(resetLabel)}</button></div>` : ''}
-            </td>
-          </tr>`;
-        };
-
-        /**
-         * 按触发入口分组渲染矩阵行：每组先插一行组头（组名 + 一行说明），再渲染组内各行。
-         * 组常量与真实界面同源（core 的 LIFECYCLE_AGENT_ENTRY_GROUPS）；
-         * lifecycles 参数可先按 PRD 覆盖白名单过滤，空组整组不渲染。
-         */
-        const groupedMatrixRows = (layer, lifecycles, rowOptionsFor) => ENTRY_GROUPS.map((group) => {
-          const groupLifecycles = lifecycles.filter((lifecycle) => group.keys.includes(lifecycle.key));
-          if (groupLifecycles.length === 0) return '';
-          return `<tr class="entry-group-row">
-              <td colspan="3">
-                <span class="entry-group-label">${esc(group.label)}</span>
-                <span class="entry-group-summary">${esc(group.summary)}</span>
-              </td>
-            </tr>`
-            + groupLifecycles.map((lifecycle) => rowHtml(layer, lifecycle, rowOptionsFor(lifecycle))).join('');
-        }).join('');
 
         // ── Tab 1：Agent 标签设置（写 [agent_runner.agents.<name>] 段） ──
         const labelEntry = (agent) => state.agentLabels.find((entry) => entry.agent === agent);
@@ -810,9 +832,32 @@
         };
 
         // ── 全局层：agent 回退顺序（写 config.toml 的 [agent_runner.runner] 段） ──
+        const normalizeFallbackPresetMap = (presetMap) => Object.entries(presetMap)
+          .filter(([, presetName]) => presetName)
+          .sort(([leftAgent], [rightAgent]) => leftAgent.localeCompare(rightAgent))
+          .map(([agent, presetName]) => `${agent}:${presetName}`)
+          .join(',');
         const fallbackDirty = () =>
           state.fallbackOrder.join(',') !== state.fallbackBaseline.order.join(',')
-          || state.fallbackSwitches !== state.fallbackBaseline.switches;
+          || state.fallbackSwitches !== state.fallbackBaseline.switches
+          || normalizeFallbackPresetMap(state.fallbackPresets) !== normalizeFallbackPresetMap(state.fallbackBaseline.presets);
+
+        const fallbackPresetOptions = (agent) => {
+          const matchingPresets = Object.entries(state.globalPresets)
+            .filter(([, preset]) => preset.agent === agent)
+            .map(([presetName]) => presetName);
+          return ['<option value="">Agent 默认（不绑定）</option>', ...matchingPresets.map((presetName) =>
+            `<option value="${esc(presetName)}"${state.fallbackPresets[agent] === presetName ? ' selected' : ''}>${esc(presetName)}</option>`,
+          )].join('');
+        };
+
+        const fallbackPresetSummary = (agent) => {
+          const presetName = state.fallbackPresets[agent];
+          const preset = presetName ? state.globalPresets[presetName] : null;
+          if (!preset) return '模型与推理深度沿用 Agent 默认';
+          const effort = preset.reasoning_effort ? `推理深度 ${preset.reasoning_effort}` : '推理深度沿用 Agent 默认';
+          return `${preset.model ? `模型 ${preset.model}` : '模型沿用 Agent 默认'} · ${effort}`;
+        };
 
         const renderFallback = () => {
           $('#fallback-order-list').innerHTML = state.fallbackOrder.length
@@ -821,6 +866,12 @@
                 return `<div class="order-row${index === 0 ? ' is-first' : ''}">
                   <span class="index">${index + 1}</span>
                   <span class="agent">${esc(agent)}${installed ? '' : '<span class="agent-missing">本机未安装，会被跳过</span>'}</span>
+                  <label class="order-preset-field" aria-label="${esc(agent)} 的模型预设">
+                    <select class="select order-preset-select" data-fallback-preset="${esc(agent)}" aria-label="${esc(agent)} 的回退模型预设">
+                      ${fallbackPresetOptions(agent)}
+                    </select>
+                  </label>
+                  <span class="order-preset-summary">${esc(fallbackPresetSummary(agent))}</span>
                   <button class="icon-btn" type="button" data-clickable data-order-move="${index}" data-order-delta="-1" aria-label="上移 ${esc(agent)}" ${index === 0 ? 'disabled' : ''}>↑</button>
                   <button class="icon-btn" type="button" data-clickable data-order-move="${index}" data-order-delta="1" aria-label="下移 ${esc(agent)}" ${index === state.fallbackOrder.length - 1 ? 'disabled' : ''}>↓</button>
                   <button class="icon-btn" type="button" data-clickable data-order-remove="${index}" aria-label="移除 ${esc(agent)}">✕</button>
@@ -838,9 +889,14 @@
           const attempts = state.fallbackOrder.slice(0, state.fallbackSwitches).length + 1;
           $('#fallback-summary').textContent = `主 agent 之外最多再换 ${state.fallbackSwitches} 次，最多尝试 ${attempts} 个 agent。`;
           $('#save-fallback').disabled = !fallbackDirty();
+          const boundPresetAgents = Object.keys(state.fallbackPresets).filter((agent) => state.fallbackOrder.includes(agent));
           $('#fallback-hint').textContent = fallbackDirty()
             ? '有未保存的修改，保存写入 config.toml 的 [agent_runner.runner] 段。'
-            : '与 config.toml 一致（当前走代码默认值）。';
+            : state.fallbackDemo && boundPresetAgents.length
+              ? `演示状态：${boundPresetAgents.join('、')} 已绑定备用 Agent 预设。`
+              : boundPresetAgents.length
+                ? `与 config.toml 一致：${boundPresetAgents.length} 个备用 Agent 已绑定预设。`
+                : '与 config.toml 一致（当前走代码默认值）。';
 
           if (state.fallbackDiff) {
             $('#fallback-diff-wrap').style.display = 'block';
@@ -851,74 +907,113 @@
           }
         };
 
-        // ── 视图一：Settings · Agent 管理（Auto 标签 / 生命周期矩阵 / 回退顺序） ──
-        const renderGlobalMatrix = () => {
-          $('#global-matrix-body').innerHTML = groupedMatrixRows('global', LIFECYCLES, (lifecycle) => ({
-            isError: state.globalErrorKey === lifecycle.key,
-            errorText: `agent “${UNREGISTERED_AGENT}” 未注册：该阶段开始前报错，保存被阻断`,
-            selectId: `data-global-select="${lifecycle.key}"`,
-            resetLabel: '不写本键（跟随既有配置）',
-          }));
+        // ── 生命周期设置页：同屏编辑 agent、阶段预设与预设三元组 ──
+        const effectivePresetName = (lifecycleKey, scope, repoId) => {
+          const globalName = state.globalPresetBindings[lifecycleKey] ?? null;
+          if (scope === 'repository') {
+            const repositoryName = state.repoPresetBindings[repoId]?.[lifecycleKey] ?? null;
+            if (repositoryName) return { name: repositoryName, source: '本仓库绑定' };
+          }
+          if (globalName) return { name: globalName, source: scope === 'repository' ? '继承全局绑定' : '全局绑定' };
+          if (['fix', 'closeout'].includes(lifecycleKey)) {
+            const repositoryImplementation = scope === 'repository'
+              ? state.repoPresetBindings[repoId]?.implementation ?? null
+              : null;
+            const implementationName = repositoryImplementation ?? state.globalPresetBindings.implementation ?? null;
+            if (implementationName) return { name: implementationName, source: '继承实现阶段' };
+          }
+          return { name: null, source: '既有 Agent 配置' };
+        };
 
-          const pinnedCount = LIFECYCLES.filter((lifecycle) => declaredIn(state.globalMatrix, lifecycle) !== null).length;
-          $('#save-global').disabled = Boolean(state.globalErrorKey) || pinnedCount === 0;
-          $('#global-hint').textContent = state.globalErrorKey
-            ? '存在未注册 agent，保存被阻断（fail-fast）。'
-            : pinnedCount
-              ? `${pinnedCount} 行已改，保存写入 config.toml；其余行继续沿用既有配置键。`
-              : '与 config.toml 一致：九个生命周期都还在沿用既有配置键与内置默认。';
+        const effectivePresetDefinition = (presetName, scope, repoId) => {
+          if (!presetName) return null;
+          const repositoryPreset = scope === 'repository' ? state.repoPresets[presetName] : null;
+          return { ...(repositoryPreset ?? state.globalPresets[presetName] ?? {}) };
+        };
 
-          if (state.globalDiff) {
-            $('#global-diff-wrap').style.display = 'block';
-            $('#global-diff-header').textContent = 'config.toml — 保存将写入';
-            $('#global-diff-code').innerHTML = state.globalDiff;
+        const renderLifecycleSettings = () => {
+          const scope = state.lifecycleScope;
+          const repoId = state.repoId;
+          const repositoryScope = scope === 'repository';
+          $('#lifecycle-settings-back').textContent = state.lifecycleReturnScreen === 'backlog' ? '← Backlog' : '← 设置';
+          $('#lifecycle-scope').value = scope;
+          $('#lifecycle-repo-field').style.display = repositoryScope ? 'grid' : 'none';
+          $('#lifecycle-repo').innerHTML = REPOS.map((repo) => `<option value="${esc(repo.id)}"${repo.id === repoId ? ' selected' : ''}>${esc(repo.label)}</option>`).join('');
+          $('#lifecycle-scope-hint').textContent = repositoryScope
+            ? `正在查看 ${REPOS.find((repo) => repo.id === repoId)?.label}：本仓库显式值覆盖全局；未覆盖行继续继承。保存只写入该仓库 .kedacode.toml。`
+            : '全局设置供所有仓库继承。仓库层可逐阶段覆盖，未覆盖的行继续使用全局设置；每行同时显示绑定与预设的来源。';
+
+          $('#lifecycle-settings-body').innerHTML = ENTRY_GROUPS.map((group) => {
+            const rows = LIFECYCLES.filter((lifecycle) => group.keys.includes(lifecycle.key)).map((lifecycle) => {
+              const localMatrix = repositoryScope ? state.repoMatrices[repoId] : state.globalMatrix;
+              const localAgent = localMatrix[lifecycle.key] ?? null;
+              const presetBinding = effectivePresetName(lifecycle.key, scope, repoId);
+              const preset = effectivePresetDefinition(presetBinding.name, scope, repoId);
+              const agentValue = preset?.agent ?? shownValue(scope === 'repository' ? 'repo' : 'global', lifecycle);
+              const agentSelectValue = repositoryScope && !localAgent && !preset?.agent ? '__inherit' : agentValue;
+              const bindingSelectValue = repositoryScope
+                ? (state.repoPresetBindings[repoId]?.[lifecycle.key] ?? '__inherit')
+                : (state.globalPresetBindings[lifecycle.key] ?? '');
+              const sourceText = preset
+                ? `${presetBinding.source} · ${repositoryScope && state.repoPresets[presetBinding.name] ? '本仓库预设定义' : '全局预设定义'}`
+                : (localAgent ? (repositoryScope ? '本仓库 Agent 设置' : '全局 Agent 设置') : repositoryScope ? '继承全局 / 既有配置' : '既有配置 / 内置默认');
+              const sourceClass = sourceText.includes('本仓库') ? 'repo' : sourceText.includes('既有') ? 'legacy' : '';
+              return `<tr data-lifecycle-key="${lifecycle.key}">
+                <td><strong>${esc(lifecycle.name)}</strong><span class="tuple-value">${esc(lifecycle.trigger)}</span></td>
+                <td data-label="模型预设"><select class="select" data-lifecycle-preset="${lifecycle.key}" aria-label="${esc(lifecycle.name)}模型预设">
+                  ${repositoryScope ? `<option value="__inherit"${bindingSelectValue === '__inherit' ? ' selected' : ''}>跟随全局</option>` : `<option value=""${bindingSelectValue === '' ? ' selected' : ''}>不绑定预设</option>`}
+                  ${[...new Set([...Object.keys(state.globalPresets), ...(repositoryScope ? Object.keys(state.repoPresets) : [])])].map((presetName) => `<option value="${esc(presetName)}"${bindingSelectValue === presetName ? ' selected' : ''}>${esc(presetName)}</option>`).join('')}
+                </select>${presetBinding.name ? `<span class="tuple-value">生效：${esc(presetBinding.name)}</span>` : ''}</td>
+                <td data-label="Agent / 模型"><select class="select" data-lifecycle-agent="${lifecycle.key}" aria-label="${esc(lifecycle.name)}Agent" ${preset?.agent ? 'disabled' : ''}>
+                  ${repositoryScope && !preset?.agent ? `<option value="__inherit"${agentSelectValue === '__inherit' ? ' selected' : ''}>跟随全局</option>` : ''}
+                  ${options(lifecycle, agentSelectValue === '__inherit' ? shownValue('repo', lifecycle) : agentSelectValue)}
+                </select><span class="tuple-value">${esc(preset?.model ?? '模型：Agent 默认')}</span></td>
+                <td data-label="推理深度"><span class="tuple-value">${esc(preset?.reasoning_effort ?? '未指定 / Agent 默认')}</span></td>
+                <td data-label="配置来源"><span class="scope-pill ${sourceClass}">${esc(sourceText)}</span></td>
+                <td data-label="本层操作">${(repositoryScope && (localAgent || state.repoPresetBindings[repoId]?.[lifecycle.key])) || (!repositoryScope && (localAgent || state.globalPresetBindings[lifecycle.key])) ? `<button class="link-reset" type="button" data-lifecycle-restore="${lifecycle.key}">${repositoryScope ? '恢复继承' : '清除此阶段设置'}</button>` : '<span class="cell-note">跟随当前来源</span>'}</td>
+              </tr>`;
+            }).join('');
+            return `<tr class="entry-group-row"><td colspan="6"><span class="entry-group-label">${esc(group.label)}</span><span class="entry-group-summary">${esc(group.summary)}</span></td></tr>${rows}`;
+          }).join('');
+
+          const visiblePresetNames = [...new Set([...Object.keys(state.globalPresets), ...Object.keys(state.repoPresets)])];
+          $('#lifecycle-preset-list').innerHTML = visiblePresetNames.map((presetName) => {
+            const preset = effectivePresetDefinition(presetName, scope, repoId) ?? {};
+            const agents = REGISTERED_AGENTS.map((agent) => `<option value="${agent}"${preset.agent === agent ? ' selected' : ''}>${agent}</option>`).join('');
+            const inherited = repositoryScope && !state.repoPresets[presetName];
+            const boundStages = LIFECYCLES.filter((lifecycle) => effectivePresetName(lifecycle.key, scope, repoId).name === presetName).map((lifecycle) => lifecycle.name);
+            return `<div class="preset-card" data-preset-card="${esc(presetName)}"><strong>${esc(presetName)}${inherited ? ' · 继承全局定义' : ''}</strong>
+              <span class="cell-note">当前作用于：${esc(boundStages.join('、') || '尚未绑定')}</span>
+              <label class="cell-note">Agent<select data-preset-agent="${esc(presetName)}">${agents}</select></label>
+              <label class="cell-note">模型 ID<input data-preset-model="${esc(presetName)}" value="${esc(preset.model ?? '')}" aria-label="${esc(presetName)}模型 ID" /></label>
+              <label class="cell-note">推理深度<input data-preset-effort="${esc(presetName)}" value="${esc(preset.reasoning_effort ?? '')}" placeholder="Agent 支持的档位" aria-label="${esc(presetName)}推理深度" /></label>
+            </div>`;
+          }).join('');
+
+          $('#lifecycle-settings-hint').textContent = repositoryScope
+            ? '本仓库未覆盖的生命周期继续继承全局绑定；预设字段也可在本仓库覆盖。'
+            : '保存只修改全局配置中本次变更的 Agent、预设绑定和预设定义。';
+          if (state.lifecycleSettingsDiff) {
+            $('#lifecycle-settings-diff-wrap').style.display = 'block';
+            $('#lifecycle-settings-diff-header').textContent = repositoryScope ? `${REPOS.find((repo) => repo.id === repoId)?.label}/.kedacode.toml — 保存预览` : 'config.toml — 保存预览';
+            $('#lifecycle-settings-diff-code').innerHTML = state.lifecycleSettingsDiff;
           } else {
-            $('#global-diff-wrap').style.display = 'none';
+            $('#lifecycle-settings-diff-wrap').style.display = 'none';
           }
         };
 
-        // ── 视图二：Roadmap · 仓库级 ──
+        // ── 视图二：Backlog · 仓库级 ──
         const renderRepoGears = () => {
           $('#repo-gears').innerHTML = REPOS.map((repo) => `<button class="hotspot gear${repo.id === state.repoId ? ' is-current' : ''}"
-            type="button" data-open-repo="${repo.id}" aria-label="打开 ${esc(repo.label)} 的 Agent 设置"
+            type="button" data-open-repo="${repo.id}" aria-label="打开 ${esc(repo.label)} 的生命周期模型设置"
             style="left:490px;top:${repo.rowTop + 5}px;width:22px;height:22px">⚙</button>`).join('');
           $$('[data-open-repo]').forEach((node) => node.addEventListener('click', () => {
             state.repoId = node.dataset.openRepo;
-            state.repoErrorKey = null;
-            state.repoDiff = null;
-            openRepoDrawer();
+            state.lifecycleScope = 'repository';
+            state.lifecycleReturnScreen = 'backlog';
+            setScreen('lifecycle-settings');
           }));
         };
-
-        const renderRepoMatrix = () => {
-          const repo = REPOS.find((item) => item.id === state.repoId);
-          $('#repo-drawer-title').textContent = `仓库 Agent 设置 · ${repo.label}`;
-          $('#repo-matrix-body').innerHTML = groupedMatrixRows('repo', LIFECYCLES, (lifecycle) => ({
-            isError: state.repoErrorKey === lifecycle.key,
-            errorText: `agent “${UNREGISTERED_AGENT}” 未注册：保存被阻断`,
-            selectId: `data-repo-select="${lifecycle.key}"`,
-            resetLabel: '跟随全局（删除本键）',
-          }));
-
-          const pinnedCount = LIFECYCLES.filter((lifecycle) => declaredIn(state.repoMatrices[repo.id], lifecycle) !== null).length;
-          $('#save-repo').disabled = Boolean(state.repoErrorKey) || pinnedCount === 0;
-          $('#repo-hint').textContent = state.repoErrorKey
-            ? '存在未注册 agent，保存被阻断（fail-fast）。'
-            : pinnedCount
-              ? `${pinnedCount} 行已改，保存写入 ${repo.label} 的 .iar.toml；其余行继续跟随全局层。`
-              : `与 ${repo.label} 的 .iar.toml 一致：九个生命周期都还在跟随全局层。`;
-
-          if (state.repoDiff) {
-            $('#repo-diff-wrap').style.display = 'block';
-            $('#repo-diff-header').textContent = `${repo.label}/.iar.toml — 保存将写入`;
-            $('#repo-diff-code').innerHTML = state.repoDiff;
-          } else {
-            $('#repo-diff-wrap').style.display = 'none';
-          }
-        };
-
-        const openRepoDrawer = () => { $('#repo-mask').style.display = 'flex'; renderRepoMatrix(); };
-        const closeRepoDrawer = () => { $('#repo-mask').style.display = 'none'; };
 
         // ── 视图三：PRD · 覆盖层 ──
         const inheritedForOverride = (lifecycle) => {
@@ -927,7 +1022,7 @@
         };
 
         const renderOverrides = () => {
-          // PRD 级覆盖只对有 Issue/PRD 消费点的键开放：planner（独立入口·iar ask）与真实 UI 一样不下发。
+          // PRD 级覆盖只对有 Issue/PRD 消费点的键开放：planner（独立入口·kc ask）与真实 UI 一样不下发。
           $('#override-rows').innerHTML = ENTRY_GROUPS.map((group) => {
             const groupLifecycles = LIFECYCLES.filter(
               (lifecycle) => group.keys.includes(lifecycle.key) && lifecycle.key !== 'planner'
@@ -986,17 +1081,20 @@
         // ── 视图切换：走真实侧栏导航，不设额外的原型标签栏 ──
         const SCREEN_HINTS = {
           settings:
-            'Settings → 「Agent 管理」（本原型新增）用粘性 Tab 分成两页：① Agent 标签设置（默认页）配置每个 agent 的路由标签、颜色与描述，auto 靠它判定；② 生命周期 Agent 设置 配置九个阶段用谁 + 主 agent 失败后的回退顺序。三个保存按钮各写 config.toml 的不同段。',
-          roadmap:
-            'Roadmap = 仓库级入口（本原型新增）：受管理仓库每行右侧的 ⚙ 打开该仓库的 .iar.toml 矩阵；下拉显示的是该仓库当前生效值（含继承自全局的值），只有改动过的行写进 .iar.toml，其余继续跟随全局。点侧栏 Settings 回全局页；点 PRD 卡片进原文。',
+            'Settings → 「Agent 管理」保留 Agent 标签和回退顺序；生命周期 Agent、模型与推理深度通过统一设置页管理。',
+          'lifecycle-settings':
+            '专门的生命周期设置页：顶部切换全局 / 仓库作用域，九个阶段同表查看 Agent、预设、模型、推理深度与来源；可编辑阶段绑定和预设字段，并查看配置写入预览。',
+          backlog:
+            'Backlog 的仓库 ⚙ 直接打开统一生命周期设置页，并预选该仓库；全局与仓库值、继承来源及模型预设都在同一处管理。',
           prd:
             'PRD 原文 = PRD 级覆盖（本原型新增）：工具栏右侧「Agent 覆盖」打开抽屉，勾选生命周期并选择 agent，右侧实时预览写入文件头部的 bullet 块（本仓库 PRD 没有 YAML frontmatter）。',
         };
         const setScreen = (screen) => {
           state.screen = screen;
           $$('.screen').forEach((node) => node.classList.toggle('is-active', node.dataset.screen === screen));
-          if (screen !== 'roadmap') closeRepoDrawer();
+          fitStage();
           if (screen !== 'prd') closePrdDrawer();
+          if (screen === 'lifecycle-settings') renderLifecycleSettings();
           $('#state-hint').textContent = SCREEN_HINTS[screen];
         };
 
@@ -1007,56 +1105,122 @@
         const STAGE_WIDTH = 1440;
         const STAGE_HEIGHT = 1200;
         const fitStage = () => {
+          const mobileLifecycleScreen = state.screen === 'lifecycle-settings' && window.innerWidth <= 900;
+          document.body.classList.toggle('mobile-lifecycle-screen', mobileLifecycleScreen);
+          if (mobileLifecycleScreen) {
+            $('#stage').style.transform = 'none';
+            $('#stage').style.width = '100%';
+            $('#stage').style.height = 'auto';
+            $('#stage-wrap').style.height = 'auto';
+            return;
+          }
           const scale = Math.min(1, $('#stage-wrap').clientWidth / STAGE_WIDTH);
           $('#stage').style.transform = `scale(${scale})`;
+          $('#stage').style.width = `${STAGE_WIDTH}px`;
+          $('#stage').style.height = `${STAGE_HEIGHT}px`;
           $('#stage-wrap').style.height = `${STAGE_HEIGHT * scale}px`;
         };
         window.addEventListener('resize', fitStage);
 
-        // 下拉 change 的统一处理：把值写进对应层的声明表（等于「本层显式设置」）
-        const applyLayerChange = (layer, key, value) => {
-          const matrix = layer === 'global' ? state.globalMatrix : localMatrix();
-          // 与继承值相同 = 不显式声明，避免把「跟随」误写成固定值
-          matrix[key] = value === shownSourceValueForCompare(layer, key) ? null : value;
-        };
-        /** 与当前继承到的值比较：相等则不写入本层。 */
-        const shownSourceValueForCompare = (layer, key) => {
-          const lifecycle = byKey(key);
-          if (layer === 'repo') {
-            const global = declaredIn(state.globalMatrix, lifecycle);
-            return global ?? lifecycle.legacyRef;
-          }
-          return lifecycle.legacyRef;
-        };
-
         // ── 事件绑定 ──
         $$('[data-goto]').forEach((node) => node.addEventListener('click', () => setScreen(node.dataset.goto)));
 
-        $('#global-matrix-body').addEventListener('change', (event) => {
-          const select = event.target.closest('[data-global-select]');
-          if (!select) return;
-          applyLayerChange('global', select.dataset.globalSelect, select.value);
-          state.globalErrorKey = isUnregistered(select.value) ? select.dataset.globalSelect : null;
-          state.globalDiff = null;
-          renderGlobalMatrix();
+        $('#lifecycle-scope').addEventListener('change', (event) => {
+          state.lifecycleScope = event.target.value;
+          state.lifecycleSettingsDiff = null;
+          renderLifecycleSettings();
         });
-        $('#demo-global-unregistered').addEventListener('click', () => {
-          state.globalMatrix.review = UNREGISTERED_AGENT;
-          state.globalErrorKey = 'review';
-          state.globalDiff = null;
-          renderGlobalMatrix();
-          toast(`fail-fast：agent “${UNREGISTERED_AGENT}” 未注册（阶段：审核 review）`, true);
+        $('#lifecycle-repo').addEventListener('change', (event) => {
+          state.repoId = event.target.value;
+          state.lifecycleSettingsDiff = null;
+          renderLifecycleSettings();
         });
-        $('#save-global').addEventListener('click', () => {
-          const lines = LIFECYCLES.map((lifecycle) => {
-            const declaredValue = declaredIn(state.globalMatrix, lifecycle);
-            return declaredValue
-              ? `<span class="add">+ ${lifecycle.key} = "${declaredValue}"</span>`
-              : `<span class="note">· ${lifecycle.key}：不写入，沿用 ${esc(lifecycle.legacyNote)}</span>`;
-          });
-          state.globalDiff = `<span class="note">· [agent_runner.lifecycle_agents] 原为空 / 注释</span>\n${lines.join('\n')}`;
-          renderGlobalMatrix();
-          toast('已保存到 config.toml（各仓库 .iar.toml 未改动）');
+        $('#lifecycle-settings-body').addEventListener('change', (event) => {
+          const presetSelect = event.target.closest('[data-lifecycle-preset]');
+          if (presetSelect) {
+            const key = presetSelect.dataset.lifecyclePreset;
+            if (state.lifecycleScope === 'repository') {
+              state.repoPresetBindings[state.repoId] ??= {};
+              if (presetSelect.value === '__inherit') delete state.repoPresetBindings[state.repoId][key];
+              else state.repoPresetBindings[state.repoId][key] = presetSelect.value;
+            } else if (presetSelect.value) state.globalPresetBindings[key] = presetSelect.value;
+            else delete state.globalPresetBindings[key];
+            state.lifecycleSettingsDiff = null;
+            renderLifecycleSettings();
+            return;
+          }
+          const agentSelect = event.target.closest('[data-lifecycle-agent]');
+          if (agentSelect) {
+            const key = agentSelect.dataset.lifecycleAgent;
+            const matrix = state.lifecycleScope === 'repository' ? state.repoMatrices[state.repoId] : state.globalMatrix;
+            matrix[key] = agentSelect.value === '__inherit' ? null : agentSelect.value;
+            state.lifecycleSettingsDiff = null;
+            renderLifecycleSettings();
+            return;
+          }
+        });
+
+        $('#lifecycle-settings-back').addEventListener('click', () => setScreen(state.lifecycleReturnScreen));
+        $('#lifecycle-settings-body').addEventListener('click', (event) => {
+          const restoreButton = event.target.closest('[data-lifecycle-restore]');
+          if (!restoreButton) return;
+          const key = restoreButton.dataset.lifecycleRestore;
+          if (state.lifecycleScope === 'repository') {
+            state.repoMatrices[state.repoId][key] = null;
+            delete state.repoPresetBindings[state.repoId]?.[key];
+          } else {
+            state.globalMatrix[key] = null;
+            delete state.globalPresetBindings[key];
+          }
+          state.lifecycleSettingsDiff = null;
+          renderLifecycleSettings();
+        });
+        $('#lifecycle-preset-list').addEventListener('change', (event) => {
+          const card = event.target.closest('[data-preset-card]');
+          if (!card) return;
+          const presetName = card.dataset.presetCard;
+          const repositoryScope = state.lifecycleScope === 'repository';
+          const presetMap = repositoryScope ? state.repoPresets : state.globalPresets;
+          const inheritedPreset = repositoryScope ? state.globalPresets[presetName] : null;
+          presetMap[presetName] = { ...(presetMap[presetName] ?? inheritedPreset ?? {}) };
+          const agentInput = card.querySelector('[data-preset-agent]');
+          const modelInput = card.querySelector('[data-preset-model]');
+          const effortInput = card.querySelector('[data-preset-effort]');
+          presetMap[presetName].agent = agentInput.value;
+          presetMap[presetName].model = modelInput.value.trim() || null;
+          presetMap[presetName].reasoning_effort = effortInput.value || null;
+          state.lifecycleSettingsDiff = null;
+          renderLifecycleSettings();
+        });
+        $('#lifecycle-preset-add').addEventListener('click', () => {
+          const repositoryScope = state.lifecycleScope === 'repository';
+          const presetMap = repositoryScope ? state.repoPresets : state.globalPresets;
+          let presetName = 'custom';
+          let suffix = 2;
+          while (state.globalPresets[presetName] || state.repoPresets[presetName]) presetName = `custom-${suffix++}`;
+          presetMap[presetName] = { agent: 'codex', model: null, reasoning_effort: null };
+          state.lifecycleSettingsDiff = null;
+          renderLifecycleSettings();
+          toast(`已新增预设 ${presetName}；可绑定到任一生命周期`);
+        });
+        $('#lifecycle-settings-save').addEventListener('click', () => {
+          const repositoryScope = state.lifecycleScope === 'repository';
+          const bindings = repositoryScope ? state.repoPresetBindings[state.repoId] : state.globalPresetBindings;
+          const matrix = repositoryScope ? state.repoMatrices[state.repoId] : state.globalMatrix;
+          const presets = repositoryScope ? state.repoPresets : state.globalPresets;
+          const lines = [
+            repositoryScope ? '# 仅为当前仓库写入本层差异' : '# 全局配置',
+            '[agent_runner.lifecycle_agents]',
+            ...Object.entries(matrix).filter(([, value]) => value).map(([key, value]) => `${key} = "${value}"`),
+            '',
+            '[agent_runner.lifecycle_presets]',
+            ...Object.entries(bindings).map(([key, value]) => `${key} = "${value}"`),
+            '',
+            ...Object.entries(presets).map(([name, preset]) => `[agent_runner.presets.${name}]\nagent = "${preset.agent}"\nmodel = "${preset.model ?? ''}"\nreasoning_effort = "${preset.reasoning_effort ?? ''}"`),
+          ];
+          state.lifecycleSettingsDiff = esc(lines.filter((line) => line !== '').join('\n'));
+          renderLifecycleSettings();
+          toast('已生成配置写入预览；原型不会修改本地文件');
         });
 
         // 回退顺序：排序 / 增删 / 切换次数 / 保存
@@ -1070,10 +1234,20 @@
             const [moved] = state.fallbackOrder.splice(from, 1);
             state.fallbackOrder.splice(to, 0, moved);
           } else if (removeButton) {
-            state.fallbackOrder.splice(Number(removeButton.dataset.orderRemove), 1);
+            const [removedAgent] = state.fallbackOrder.splice(Number(removeButton.dataset.orderRemove), 1);
+            delete state.fallbackPresets[removedAgent];
           } else {
             return;
           }
+          state.fallbackDiff = null;
+          renderFallback();
+        });
+        $('#fallback-order-list').addEventListener('change', (event) => {
+          const presetSelect = event.target.closest('[data-fallback-preset]');
+          if (!presetSelect) return;
+          const agent = presetSelect.dataset.fallbackPreset;
+          if (presetSelect.value) state.fallbackPresets[agent] = presetSelect.value;
+          else delete state.fallbackPresets[agent];
           state.fallbackDiff = null;
           renderFallback();
         });
@@ -1081,6 +1255,7 @@
           const agent = $('#fallback-add-select').value;
           if (!agent || state.fallbackOrder.includes(agent)) return;
           state.fallbackOrder.push(agent);
+          delete state.fallbackPresets[agent];
           state.fallbackDiff = null;
           renderFallback();
         });
@@ -1092,27 +1267,38 @@
         });
         $('#save-fallback').addEventListener('click', () => {
           const orderLiteral = `[${state.fallbackOrder.map((agent) => `"${agent}"`).join(', ')}]`;
+          const currentPresets = Object.entries(state.fallbackPresets)
+            .filter(([agent, presetName]) => state.fallbackOrder.includes(agent) && presetName)
+            .sort(([leftAgent], [rightAgent]) => leftAgent.localeCompare(rightAgent));
+          const removedPresets = Object.entries(state.fallbackBaseline.presets)
+            .filter(([agent, presetName]) => state.fallbackOrder.includes(agent) && state.fallbackPresets[agent] !== presetName)
+            .sort(([leftAgent], [rightAgent]) => leftAgent.localeCompare(rightAgent));
+          const addedPresets = currentPresets
+            .filter(([agent, presetName]) => state.fallbackBaseline.presets[agent] !== presetName);
+          const presetChanges = [
+            ...removedPresets.map(([agent, presetName]) => `<span class="remove">- ${esc(agent)} = "${esc(presetName)}"（删除或替换）</span>`),
+            ...addedPresets.map(([agent, presetName]) => `<span class="add">+ ${esc(agent)} = "${esc(presetName)}"</span>`),
+          ];
+          const presetLines = presetChanges.length
+            ? [
+                '<span class="note">· [agent_runner.runner.agent_fallback_presets]</span>',
+                ...presetChanges,
+              ]
+            : ['<span class="note">· 回退 Agent 预设映射未变化</span>'];
           state.fallbackDiff = [
             '<span class="note">· [agent_runner.runner] 段其余键不变</span>',
             `<span class="add">+ agent_fallback_order = ${esc(orderLiteral)}</span>`,
             `<span class="add">+ max_agent_switches = ${state.fallbackSwitches}</span>`,
+            ...presetLines,
           ].join('\n');
-          state.fallbackBaseline = { order: [...state.fallbackOrder], switches: state.fallbackSwitches };
+          state.fallbackBaseline = {
+            order: [...state.fallbackOrder],
+            switches: state.fallbackSwitches,
+            presets: { ...state.fallbackPresets },
+          };
           renderFallback();
-          toast('已保存到 config.toml 的 [agent_runner.runner] 段');
+          toast('已生成回退顺序和 Agent 预设写入预览；原型不会修改本地文件');
         });
-
-        // ── Tab 切换 ──
-        $$('[data-tab]').forEach((node) => node.addEventListener('click', () => {
-          state.activeTab = node.dataset.tab;
-          $$('[data-tab]').forEach((tab) => {
-            const active = tab.dataset.tab === state.activeTab;
-            tab.classList.toggle('is-active', active);
-            tab.setAttribute('aria-selected', String(active));
-          });
-          $$('[data-tab-panel]').forEach((panel) => panel.classList.toggle('is-active', panel.dataset.tabPanel === state.activeTab));
-          $('.overlay.panel').scrollTop = 0;
-        }));
 
         // ── Agent 标签设置：输入 / 校验 / 演示 / 保存 ──
         $('#agent-label-body').addEventListener('input', (event) => {
@@ -1161,53 +1347,11 @@
           toast('已保存到 config.toml 的 agent 注册块');
         });
 
-        $('#repo-mask').addEventListener('click', (event) => { if (event.target === $('#repo-mask')) closeRepoDrawer(); });
-        $('#repo-drawer-close').addEventListener('click', closeRepoDrawer);
-        $('#repo-matrix-body').addEventListener('change', (event) => {
-          const select = event.target.closest('[data-repo-select]');
-          if (!select) return;
-          applyLayerChange('repo', select.dataset.repoSelect, select.value);
-          state.repoErrorKey = isUnregistered(select.value) ? select.dataset.repoSelect : null;
-          state.repoDiff = null;
-          renderRepoMatrix();
-        });
-        $('#demo-repo-unregistered').addEventListener('click', () => {
-          localMatrix().review = UNREGISTERED_AGENT;
-          state.repoErrorKey = 'review';
-          state.repoDiff = null;
-          renderRepoMatrix();
-          toast(`fail-fast：agent “${UNREGISTERED_AGENT}” 未注册（阶段：审核 review）`, true);
-        });
-        $('#save-repo').addEventListener('click', () => {
-          const repo = REPOS.find((item) => item.id === state.repoId);
-          const lines = LIFECYCLES.map((lifecycle) => {
-            const declaredValue = declaredIn(state.repoMatrices[repo.id], lifecycle);
-            return declaredValue
-              ? `<span class="add">+ ${lifecycle.key} = "${declaredValue}"</span>`
-              : `<span class="note">· ${lifecycle.key}：不写入，跟随全局 → ${esc(shownSourceValueForCompare('repo', lifecycle.key))}</span>`;
-          });
-          state.repoDiff = `<span class="note">· [agent_runner.lifecycle_agents] 原为空 / 注释</span>\n${lines.join('\n')}`;
-          renderRepoMatrix();
-          toast(`已保存到 ${repo.label} 的 .iar.toml（config.toml 未改动）`);
-        });
-
-        // 「跟随上一层」：清掉本层声明
-        document.addEventListener('click', (event) => {
-          const reset = event.target.closest('[data-reset-layer]');
-          if (!reset) return;
-          const layer = reset.dataset.resetLayer;
-          const matrix = layer === 'global' ? state.globalMatrix : localMatrix();
-          matrix[reset.dataset.resetKey] = null;
-          if (layer === 'global') { state.globalErrorKey = null; state.globalDiff = null; renderGlobalMatrix(); }
-          else { state.repoErrorKey = null; state.repoDiff = null; renderRepoMatrix(); }
-        });
-
         $('#open-prd-drawer').addEventListener('click', openPrdDrawer);
         $('#close-prd-drawer').addEventListener('click', closePrdDrawer);
         $('#prd-mask').addEventListener('click', (event) => { if (event.target === $('#prd-mask')) closePrdDrawer(); });
         document.addEventListener('keydown', (event) => {
           if (event.key !== 'Escape') return;
-          closeRepoDrawer();
           closePrdDrawer();
         });
 
@@ -1251,28 +1395,19 @@
         document.addEventListener('prototype:reset', () => {
           state = initial();
           setScreen('settings');
-          $$('[data-tab]').forEach((tab) => {
-            const active = tab.dataset.tab === 'labels';
-            tab.classList.toggle('is-active', active);
-            tab.setAttribute('aria-selected', String(active));
-          });
-          $$('[data-tab-panel]').forEach((panel) => panel.classList.toggle('is-active', panel.dataset.tabPanel === 'labels'));
           $('.overlay.panel').scrollTop = 0;
           renderAgentLabels();
-          renderGlobalMatrix();
           renderFallback();
           renderRepoGears();
-          renderRepoMatrix();
           renderOverrides();
         });
 
         fitStage();
-        setScreen('settings');
+        const requestedScreen = new URLSearchParams(window.location.search).get('screen');
+        setScreen(SCREEN_HINTS[requestedScreen] ? requestedScreen : 'settings');
         renderAgentLabels();
-        renderGlobalMatrix();
         renderFallback();
         renderRepoGears();
-        renderRepoMatrix();
         renderOverrides();
       })();
     </script>

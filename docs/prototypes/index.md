@@ -13,9 +13,11 @@
 
 - [Prototype Hub（原型总览）](hub.html)
 - [PRD 生命周期观测与执行分析原型](prd-lifecycle-observability.md)
-- [Roadmap PRD 完成后 CI/CD 监控与自动修复草图](roadmap-prd-cicd-auto-repair.md)
-- [Roadmap 单 PRD 控制、验收证据与 Autopilot 草图](roadmap-prd-controls-evidence-autopilot.md)
+- [Backlog PRD 完成后 CI/CD 监控与自动修复草图](roadmap-prd-cicd-auto-repair.md)
+- [Backlog 单 PRD 控制、验收证据与 Autopilot 草图](roadmap-prd-controls-evidence-autopilot.md)
 - [失败上下文交接与失败 Draft PR 草图](blocked-draft-pr-surface.md)
+- [生命周期 Agent / 模型统一设置原型](lifecycle-agent-matrix.md)
+- [KC 终端执行器与按需项目预览概念图](kc-agent-terminal-preview.md)
 - [PRD Demo 可交互原型](prd-demo.html)
 - [Worktree 前端依赖策略 Demo](worktree-frontend-demo.html)
 - [Assets 命名规范](assets/README.md)

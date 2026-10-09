@@ -1,41 +1,49 @@
-# 生命周期 Agent 矩阵 · 交互原型说明
+# 生命周期 Agent / 模型设置 · 交互原型说明
 
-本页归档 `tasks/pending/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md` 的交互原型（v2.4，2026-09-18 重做）。原型用于在实施前确认三件事：三层配置各自的编辑落点长什么样、每层的"生效值与来源"怎么读、PRD 覆盖写回文件头部是什么形态。
+本页先前归档 `tasks/pending/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md` 的交互原型，2026-10-09 加入独立生命周期设置页（v2.8）。Settings 中旧的 Agent-only 生命周期矩阵已替换为统一设置页入口；Backlog 仓库齿轮进入同一页面并预选仓库。新页面集中展示九阶段 Agent、命名预设、模型 ID、推理深度和来源。Settings 的独立回退顺序卡片现可为每个备用 Agent 选择同 Agent 的命名预设，并预览对应 TOML 写入；该项是新增设计提案，等待 PRD 人审确认。Backlog 为现行产品名称；仓库底图文件沿用历史名 `roadmap-real.png`，截图内的旧侧栏标签由原型覆盖层改为 Backlog。
 
 ## 打开方式
 
-[打开交互原型](lifecycle-agent-matrix.html)（纯静态单文件，无构建步骤；也可从 [原型目录](hub.html) 进入）
+[打开交互原型](lifecycle-agent-matrix.html)（纯静态单文件，无构建步骤；也可从 [原型目录](hub.html) 进入）。[查看更新后的 Settings 主视图](assets/lifecycle-agent-matrix/preview-settings.png)；[查看回退预设保存预览](assets/lifecycle-agent-matrix/preview-fallback-settings.png)。可用 [`?screen=settings&demo=fallback-preset`](lifecycle-agent-matrix.html?screen=settings&demo=fallback-preset) 直达可编辑的 Claude 回退预设状态。
 
 ## 三层落点（本原型要评审的核心结论）
 
 | 层 | 配置文件 | 界面落点 | 原型里的画面 |
 |---|---|---|---|
-| 全局（机器级） | `config.toml`：agent 注册块标签、`[agent_runner.lifecycle_agents]`、`[agent_runner.runner]` | Settings 页新增 **「Agent 管理」粘性 Tab 区块** | 视图一 |
-| 仓库级 | 该仓库 `.iar.toml` 的 `[agent_runner.lifecycle_agents]` | Roadmap「受管理仓库」每行右侧的 ⚙ | 视图二（抽屉） |
+| 全局（机器级） | `config.toml`：agent 注册块标签、`[agent_runner.lifecycle_agents]`、`[agent_runner.runner]` | Settings 的 Agent 管理区保留标签与回退设置；生命周期卡片只提供统一设置页入口 | 视图一、统一设置页 |
+| 仓库级 | 该仓库 `.kedacode.toml` 的 `[agent_runner.lifecycle_agents]` | 统一生命周期页的范围选择器；Backlog 仓库行 ⚙ 进入同一页并预选仓库 | 统一设置页 |
 | PRD 级 | PRD 文件头部 `- lifecycle_agents:` bullet 块 | PRD 原文页工具栏「Agent 覆盖」 | 视图三（抽屉） |
 
-仓库级配置**不放 Settings**：Settings 是机器级页面（会话信息 + 关于本机终端），仓库级配置跟着仓库走，入口挂在仓库列表上。
+仓库配置仍写入仓库自己的 `.kedacode.toml`。全局和仓库设置只在统一生命周期页编辑；Settings 移除旧矩阵，Backlog 仓库齿轮作为预选范围的快捷入口。
 
-## Agent 管理：粘性 Tab 两页
+## 新增：生命周期 Agent / 模型统一设置页
 
-Settings 页在真实的「设置」标题与用户副标题下方，覆盖一层新增的 **「Agent 管理」** 区块：标题 + 说明 + **粘性 Tab 栏**（覆盖层自身滚动，Tab 栏始终钉在区块顶部），下面依次是两个 Tab 面板，再往下是忠实复刻的「关于 iar 管理终端」卡片与「退出登录」按钮（滚动可见，说明页面会滚动、Tab 栏不动）。
+从 Settings 的「生命周期 Agent、模型与推理深度」卡片点击「打开统一设置」进入；也可点 Backlog 仓库行齿轮直接进入并预选该仓库。原型可用 `?screen=lifecycle-settings` 直接打开该状态。
 
-| 顺序 | Tab | 内容 | 写入 |
-|---|---|---|---|
-| ① 默认 | **Agent 标签设置** | 每个 agent 各自的路由标签：GitHub 标签名 / 标签颜色 / 标签描述 | `config.toml` 里各自的 `[agent_runner.agents.<name>]` 段（`label` / `label_color` / `label_description`） |
-| ② | **生命周期 Agent 设置** | 九行生命周期矩阵 + 「agent 回退顺序」卡片 | `[agent_runner.lifecycle_agents]` 段 / `[agent_runner.runner]` 段 |
+- 顶部范围切换为「全局 · config.toml」或「仓库 · .kedacode.toml」；仓库范围额外选择目标仓库，并显示该仓库继承的全局配置。
+- 九阶段按三个真实触发入口分组；每行同时呈现阶段预设、生效 Agent / 模型、推理深度、来源和本层操作。未指定模型/推理深度时明确显示 Agent 默认值。
+- 阶段预设下拉支持全局绑定/不绑定，以及仓库继承/覆盖；`fix` / `closeout` 未单独绑定时展示继承实现阶段预设的结果。
+- 同一页的预设区允许新建预设并编辑 Agent、模型 ID、推理深度。仓库范围可以覆盖全局预设定义；编辑 inherited preset 时只形成仓库层覆盖。
+- 预设卡片列出当前绑定的生命周期；编辑共享预设前能看到会受影响的阶段。若只想更改单个阶段，可以新建预设再单独绑定。
+- 「恢复继承」清除该仓库阶段的 Agent 与预设绑定；全局阶段可清除此阶段显式配置。保存只展示当前作用域的 TOML 写入预览，不写本地文件。
+- 页面是交互原型；预设值是演示数据。真实 config loading、保存、CLI 命令及 API 合约尚未在本原型实现。
 
-- 「Agent 标签设置」说明 `auto` 的判定 = 运行时看 Issue 上挂着哪个 agent 标签，所以这张表就是 auto 的解析依据；并注明工作流标签（`agent/ready` 等，来自 `[agent_runner.labels]`）不在本表范围。
-- 校验：标签名不能为空、也不能两个 agent 用同一个标签（会让 auto 无法判定）；非法时该行标红并阻断保存。演示按钮「两个 agent 用同一标签」把 kimi 的标签改成另一个 agent 正在用的值。
-- 三个保存按钮各写 `config.toml` 的不同段，预览里都会说明"段内其余字段/键不变"。
-- 改过的行/字段高亮；保存后基线更新，界面回到"与 config.toml 一致"。
+## Settings：Agent 管理与统一设置入口
+
+Settings 页在真实的「设置」标题与用户副标题下方显示「Agent 管理」区块。此处保留 Agent 标签编辑和 Agent 回退顺序；旧的 Agent-only 生命周期矩阵已移除，替换为一张醒目的「生命周期 Agent、模型与推理深度」入口卡片，点击进入唯一的生命周期编辑页。页面滚动时 Agent 管理区块标题保持可见。
+
+- 「Agent 标签设置」说明 `auto` 的判定依据是 Issue 上的 agent 标签，并注明工作流标签（`agent/ready` 等，来自 `[agent_runner.labels]`）不在本表范围。
+- 校验：标签名不能为空，也不能两个 agent 使用同一个标签；非法时该行标红并阻断保存。演示按钮「两个 agent 用同一标签」把 kimi 的标签改成另一个 agent 正在用的值。
+- 生命周期入口卡片说明九阶段矩阵、预设、模型、推理深度和来源均在统一设置页维护；Settings 不再呈现第二张生命周期矩阵。
+- Agent 标签和回退顺序保存到 `config.toml`；生命周期设置按当前范围保存到 `config.toml` 或仓库 `.kedacode.toml`。预览说明段内其余字段/键保持不变。
+- 改过的行/字段高亮；保存后基线更新，界面回到“与 config.toml 一致”。
 
 ## 原型形式：真实截图 + HTML 覆盖层（hybrid）
 
-- **底图是真实 frontend-public 截图**，三张同尺寸（1440×1200 @2x）：Settings 页、Roadmap 依赖图、PRD 原文页。采集方式见各图的 `*.source.md` 旁车与 `tests/playwright-e2e/tests/workflows/prototype-screenshots.spec.ts`。不用图片生成模型截图——上一版 AI 生成的外壳图与真实产品的主题、导航、卡片结构都不一致。
-- **覆盖层只绘制本 PRD 新增的区域**：Settings 页的「Agent 管理」区块（标题 + Tab + 两个面板）、仓库行齿轮、两个抽屉与 PRD 工具栏入口。其余像素全部来自真实产品。
+- **底图是真实 frontend-public 截图**，三张同尺寸（1440×1200 @2x）：Settings 页、Backlog 依赖图、PRD 原文页。采集方式见各图的 `*.source.md` 旁车与 `tests/playwright-e2e/tests/workflows/prototype-screenshots.spec.ts`。Backlog 底图是 2026-09-18 的历史截图，侧栏仍显示旧名称；现行路由与文案统一使用 Backlog。其余底图像素保持真实页面截图，不用图片生成模型伪造产品界面。
+- **覆盖层只绘制本原型调整的区域**：Settings 页的 Agent 标签区、统一生命周期页入口、回退顺序卡片，Backlog 仓库行齿轮和 PRD 工具栏入口。旧生命周期矩阵与仓库矩阵抽屉不再展示。其余像素全部来自真实产品。
 - **画布固定 1440×1200 并按视口宽度等比缩放**，热点与覆盖层使用固定像素坐标（在真实页面上用 `getBoundingClientRect()` 实测），因此不会随视口漂移。
-- **视图切换走真实侧栏导航**（截图上的 Settings / Roadmap 行），没有额外的原型标签栏，避免出现真实产品里不存在的页面结构。
+- **视图切换走真实侧栏导航**（截图上的 Settings / Backlog 行），没有额外的原型标签栏，避免出现真实产品里不存在的页面结构。
 - 新增区域统一带「本原型新增」标注；设计令牌（oklch 主题变量、shadcn Button/Card 类）取自 `frontend-public/app/globals.css` 与 `frontend-public/components/ui/*.tsx`。
 
 ## 下拉语义（三层共用）
@@ -44,7 +52,7 @@ Settings 页在真实的「设置」标题与用户副标题下方，覆盖一�
 - 下拉里**只有真实取值**：已注册 agent（codex / claude / kimi / pi / codebuddy / qoder / opencode）、该阶段的 `auto`、fix 与 closeout 的 `跟随实现（executor）`。没有"未设置""跟随全局"之类的伪选项。
 - **`auto` 的文案按阶段如实描述**（各阶段语义本来就不同，见下表）；没有实现 `auto` 的阶段（决策 / 内容生成）不给这个选项。
 - 下拉中**选中的就是当前生效值**，即优先级链上第一个被声明的值（本层声明 > 上一层声明 > 既有配置键 / 内置默认）；`executor` 不做二次解析，只在下方补一行"当前实现阶段：claude"。
-- 右侧「当前值来源」列说明这个值来自哪一层（本机 `config.toml` / 本仓库 `.iar.toml` / 既有配置键 / 内置默认），并在本层已显式设置时给出「不写本键（跟随既有配置）」或「跟随全局（删除本键）」的恢复入口。
+- 右侧「当前值来源」列说明这个值来自哪一层（本机 `config.toml` / 本仓库 `.kedacode.toml` / 既有配置键 / 内置默认），并在本层已显式设置时给出「不写本键（跟随既有配置）」或「跟随全局（删除本键）」的恢复入口。
 - **只有改动过的行会写进本层文件**：没动的行不在该层声明，继续沿回退链走；把下拉改回与继承值相同的取值，也会被视为"未改动"。保存预览逐行列明"写入 / 不写入并沿用谁"。
 - 这样三层的关系是"越靠近 PRD 越优先"，而"继承"是**不动它**的默认状态，不需要在取值域里造一个假值。
 
@@ -53,76 +61,63 @@ Settings 页在真实的「设置」标题与用户副标题下方，覆盖一�
 | 实现 | 按 Issue 上挂的 `agent/*` 标签路由 | `choose_agent`（`run_agent_once.py`） |
 | 校验 | 从 `runner.agent_fallback_order` 里挑第一个 ≠ 实现者的 agent（独立性靠换模型） | `run_verifier_agent.py` 的 `_choose_verifier_agent` |
 | 审核 | `allow_same_agent` 为真时沿用实现者；否则从注册表取第一个 ≠ 实现者的 | `run_agent_once.py` 的 `resolve_reviewer_agent` |
-| 监督 | 发布路径沿用本次实现者；`iar review` 路径按标签路由 | `run_agent_once.py` 的 `resolve_supervisor_agent` |
+| 监督 | 发布路径沿用本次实现者；`kc review` 路径按标签路由 | `run_agent_once.py` 的 `resolve_supervisor_agent` |
 | 辩论 | 按 `agent/deliberate` 标签路由 | 辩论队列 |
 | 修复 / 收尾 / 决策 / 内容生成 | 无 `auto` 语义，不给该选项 | — |
 
-## agent 回退顺序（生命周期 Agent 设置 Tab 里的第二张卡片）
+## agent 回退顺序（Settings 中独立于生命周期矩阵的配置卡片）
 
-矩阵只决定"这个阶段用谁"（单值）。**主 agent 失败或额度受限时换下一个**是另一套机制，入口在 Settings 页矩阵卡片下方：
+生命周期设置页决定各阶段的主 Agent 与预设。**主 agent 失败或额度受限时换下一个**是另一套机制，入口在 Settings 的独立回退顺序卡片：
 
 - 编辑 `[agent_runner.runner]` 的 `agent_fallback_order`（默认 `["claude", "kimi", "codex"]`，本机 `config.toml` 没写、走代码默认）与 `max_agent_switches`（默认 `2`）。
-- 交互：顺序可上下移动、可移除、可从剩余已注册 agent 里加到末尾；「最多切换」是数字输入，实时显示"最多尝试 N 个 agent"；保存展示 `[agent_runner.runner]` 段的写入预览（其余 runner 键不变）。
+- 每个回退候选可选一个**属于同一 Agent**的命名模型预设；可选项按候选 Agent 过滤。绑定后，该候选作为回退 Agent 执行时使用预设模型与支持的推理深度；清除绑定则恢复 Agent 默认值。原型只演示全局 `config.toml` 范围。
+- 交互：顺序可上下移动、可移除、可从剩余已注册 agent 里加到末尾；「最多切换」是数字输入，实时显示"最多尝试 N 个 agent"；保存预览包括 `[agent_runner.runner]` 与 `[agent_runner.runner.agent_fallback_presets]` 的差异，其余 runner 键不变。
 - 回退链只列"换谁"，**第一个尝试的 agent 由矩阵 / 标签路由决定**；本机未安装的 agent 会被运行时跳过（原型里对非注册表项标出"本机未安装，会被跳过"）。
-- 卡片文案明确写了它的作用范围是 **Issue 执行阶段**的跨 agent 回退；校验阶段的 `auto` 会借用这条链来挑一个不同的 agent。
+- 回退链在 Issue 执行切换中使用，也被校验、审核和监督的候选顺延复用；决定四建议在共享候选路径里应用映射，并由 PRD 人审确认最终范围。
+- 新增的回退预设绑定行为仍是 PRD 待确认项：建议用 `agent_fallback_presets` 按 Agent 名称映射命名预设；绑定必须校验预设 Agent 与候选 Agent 一致。是否覆盖所有复用回退链的 runner 场景、以及 global/repository 的配置范围，以 PRD 人审决定为准。
+
+![interactive prototype：回退候选绑定预设与 TOML 保存预览](assets/lifecycle-agent-matrix/preview-fallback-settings.png)
+
+截图验证层级：**interactive prototype**；演示模型 ID 仅用于展示，不代表生产配置或供应商可用模型。
 
 ## 状态模型
 
-三处矩阵覆盖层（全局矩阵、仓库抽屉、PRD 覆盖抽屉）的九行/八行均按「触发入口」分组切块（组标题行 + 行内触发时机），分组呈现与真实 UI 逐块对照；PRD 覆盖抽屉的「独立入口」组因唯一成员 planner 不下发而整组缺席。
+生命周期 Agent / 模型 / 推理深度只有一处编辑矩阵：专门设置页。Settings 卡片和 Backlog 仓库齿轮只是通往该页的入口；PRD 覆盖抽屉仍保留为局部上下文编辑。
 
 ```text
-Settings · Agent 管理（默认视图，Tab 栏粘性）
-→ 默认停在「Agent 标签设置」：每个 agent 的标签 / 颜色 / 描述
-→ 改任一字段 → 该行高亮、保存点亮；把标签改名（如 claude → agent/cc）
-→ 演示：两个 agent 用同一标签 → 冲突行标红 + 保存被阻断
-→ 保存更改 → config.toml 各 agent 注册块的写入预览（段内其余字段不变）+ toast
-→ 切到「生命周期 Agent 设置」→ 矩阵与回退顺序两张卡片
-→ 滚动覆盖层到底 → Tab 栏保持钉住，「关于 iar 管理终端」卡片与「退出登录」按真实样式出现
+Settings · Agent 管理
+→ Agent 标签设置区：编辑标签 / 颜色 / 描述
+→ 改任一字段 → 该行高亮、保存点亮；重复标签使冲突行标红并阻断保存
+→ 生命周期入口卡片 → 打开统一生命周期设置页（默认全局范围）
+→ 回退顺序卡片 → 调整 agent_fallback_order / max_agent_switches / 可选备用 Agent 预设，并查看独立写入预览
 
-Settings · 生命周期 Agent 矩阵（Tab ②）
-→ 下拉显示九个生命周期当前生效的 agent，直接改成目标值 → 该行高亮为"已改"、来源列切成"已在本机 config.toml 显式设置"、保存点亮
-→ 把某行改回与继承值相同的取值 → 视为未改动，恢复入口消失
-→ 点「不写本键（跟随既有配置）」→ 该行回到继承（回落既有配置键）
-→ 演示：写入未注册 agent → 该行变红 + fail-fast 说明 + 保存被阻断
-→ 保存更改 → config.toml 写入预览（逐行列明写入 / 不写入）+ toast（各仓库 .iar.toml 不动）
+生命周期设置页 · 全局范围
+→ 九阶段矩阵显示阶段预设、Agent、模型 ID、推理深度和配置来源
+→ 编辑阶段预设绑定或预设三元组 → 保存预览只列当前全局差异
+→ 切换仓库范围并选仓库 → 未覆盖阶段继承全局值
 
-Settings · agent 回退顺序（Tab ② 第二张卡片）
-→ 上移 / 下移 / 移除某一项、从剩余 agent 里加到末尾 → 顺序变化、保存点亮
-→ 改「最多切换」→ 摘要实时变成"最多尝试 N 个 agent"
-→ 空列表 → 提示"回退链为空：主 agent 失败后不再换人"
-→ 保存更改 → [agent_runner.runner] 段写入预览 + toast（其余 runner 键不变）
-
-Roadmap · 受管理仓库列表（真实截图）
-→ 点侧栏 Settings → 回全局矩阵
-→ 点某行右侧 ⚙ → 打开该仓库的矩阵抽屉（默认选中该行仓库）
-→ 抽屉里的下拉显示该仓库当前生效值（可能继承自全局层，来源列会标注）→ 改成目标值即在本仓库声明
-→ 点「跟随全局（删除本键）」→ 该行回到继承
-→ 演示：写入未注册 agent → 保存被阻断
-→ 保存更改 → .iar.toml 写入预览 + toast；换一个仓库 ⚙ 打开，矩阵各自独立
+Backlog · 受管理仓库列表（历史截图）
+→ 点 Settings → 打开统一生命周期设置页
+→ 点仓库行右侧 ⚙ → 打开同一设置页并预选该仓库
+→ 修改仓库配置并保存预览；返回后可切换其他仓库再次进入
 → 点 PRD 卡片（直开入口）→ PRD 原文画面
 
 PRD 原文 · 覆盖抽屉
 → 点工具栏「Agent 覆盖」→ 抽屉打开，右侧实时预览将要写入的文件头部
 → 勾选生命周期 → 行内下拉解禁，默认值取当前继承值；继承值为 auto 的行要求显式选择 agent
 → 演示：文件里已有未注册 agent → 该行变红 + 写回被阻断
-→ 写回 PRD 文件 → 头部 bullet 块变为"已写入"样式 + toast
+→ 写回 PRD 文件 → 头部 bullet 块变为“已写入”样式 + toast
 → 清除全部覆盖 / Esc / 点遮罩 → 回到继承
 ```
 
 ## 关键可点击对象与点击结果
 
-- 侧栏 **Roadmap / Settings**：在三个画面之间切换（每个画面使用各自底图）。
-- Roadmap 仓库行右侧 **⚙**：打开该仓库的仓库级矩阵抽屉；抽屉标题带仓库名，右上角 ✕ 与 Esc 可关闭。
-- Roadmap 上**「生命周期 Agent 矩阵」PRD 卡片**：真实产品的直开入口，点击进入该 PRD 原文画面。
-- Settings 页矩阵行 **agent 下拉**：已注册 agent（codex、claude、kimi、pi、codebuddy、qoder、opencode）、`auto（按 agent 标签路由）`，fix 与 closeout 另含 `跟随实现（executor）`；选中的是当前生效值，改成别的值即视为"本层显式声明"。「当前值来源」列说明它来自哪一层。
-- 来源列的 **不写本键（跟随既有配置）** / **跟随全局（删除本键）**：只在本层已显式声明时出现，点它即恢复继承。
-- 仓库抽屉矩阵行 **agent 下拉**：语义同上，作用范围是该仓库的 `.iar.toml`；来源列显示的值可能继承自全局层。
-- **演示：写入未注册 agent**（Settings 与仓库抽屉各一个）：把审核行置为未注册的 `no-such-agent`，展示"阶段开始前报错、不静默回落"的界面形态。真实下拉里不会出现未注册值，它模拟的是"文件被手工改坏"。
-- Settings 页 **Tab 栏（Agent 标签设置 / 生命周期 Agent 设置）**：切换两个面板，Tab 栏在覆盖层滚动时保持钉在顶部。
-- **Agent 标签设置**的 **标签名 / 颜色 / 描述输入**：改任一字段即视为"本行已改"；标签名空或与其它 agent 重复时该行标红并阻断保存。
-- **演示：两个 agent 用同一标签**：把 kimi 的标签改成另一个 agent 正在用的值，展示冲突拦截。
-- **保存更改**（Auto 标签、生命周期矩阵、agent 回退顺序三处各一个）：展示将写入 `config.toml` / `<仓库>/.iar.toml` 的内容，并逐行说明哪些行不写入、各自沿用谁。
-- 回退顺序卡片 **↑ / ↓ / ✕ / ＋ 加到末尾 / 最多切换**：调整 `agent_fallback_order` 与 `max_agent_switches`；保存预览只动 `[agent_runner.runner]` 段。
+- 侧栏 **Backlog / Settings**：在三个画面之间切换（每个画面使用各自底图）。
+- Settings「生命周期 Agent、模型与推理深度」入口卡片：打开唯一生命周期设置页；Backlog 仓库行右侧 **⚙**：打开同一页面并预选该仓库。
+- 统一生命周期页的 **范围选择器和九阶段矩阵**：切换全局/仓库范围，查看 Agent、预设、模型、推理深度与来源；恢复操作清除当前层覆盖。
+- **演示：两个 agent 用同一标签**：把 kimi 标签改成另一个 agent 正在用的值，展示冲突拦截。
+- Agent 标签、生命周期配置和回退顺序的 **保存更改**：分别展示目标配置段的写入预览；生命周期页只预览当前作用域差异。
+- 回退顺序卡片 **Agent 预设下拉 / ↑ / ↓ / ✕ / ＋ 加到末尾 / 最多切换**：每个候选只列同 Agent 的预设；选择“Agent 默认”清除绑定；保存预览可见候选顺序、切换预算和 `agent_fallback_presets` 映射。
 - PRD 原文工具栏 **「Agent 覆盖」**：打开覆盖抽屉（右侧，带遮罩）。
 - 覆盖抽屉 **勾选框 / 下拉 / 演示：文件里已有未注册 agent / 清除全部覆盖 / 写回 PRD 文件**：勾选后立即在右侧头部预览里新增 bullet 行。
 - 底部「原型」Dock（评审工具层，非产品 UI）：**可点击区域开关**（默认开启）、**↺ 重置**（回到初始状态）、**返回 Hub**、**原型说明**。
@@ -130,6 +125,7 @@ PRD 原文 · 覆盖抽屉
 ## 演示数据说明
 
 - 九个生命周期键名、中文名、取值来自 PRD §1 与 §10 的闭集；已注册 agent 取自 `config.toml` 的七个注册块（codex / claude / kimi / pi / codebuddy / qoder / opencode）。
+- 回退预设下拉用 `fallback-claude`、`fallback-kimi`、`fallback-codex` 三个演示预设，分别匹配回退链里的 claude / kimi / codex；模型 ID（`example-*-model`）是占位示例，不表示供应商目录中的真实可用模型。实际已有的 codebuddy / qoder 示例预设仍保留。
 - **Agent 标签设置**的七个标签取自真实 `config.toml`：`agent/codex`（#5319E7）、`agent/claude`（#BFDADC）、`agent/kimi`（#FF6B6B）、`agent/pi`（#7C3AED）、`agent/codebuddy`（#0052D9）、`agent/qoder`（#FF8C42）、`agent/opencode`（#0EA5E9），描述也逐字来自各自的 `label_description`。
 - 三个层级的初始值都是本机真实取值，来源列标注它来自哪一层：实现 `claude`（`runner.default_agent`）、校验 `auto`（`validation.verifier_agent` 缺省值）、审核 `auto`（`pre_pr_review.review_agent`）、监督 `auto`（`post_pr_supervisor.supervisor_agent`）、决策 `claude`（`interactive_decision.default_agent`）、内容生成 `claude`（`generated_content.default_agent`）、辩论 `auto`（`agent/deliberate` 标签路由）；fix / closeout 为内置默认 `executor`。
 - 受管理仓库列表与真实 registry 一致（`repo_id` / `display_name`），行位坐标实测自真实页面。
@@ -140,15 +136,32 @@ PRD 原文 · 覆盖抽屉
 1. **矩阵是单值，回退顺序是另一张表。** 原型按"矩阵选主 agent + Settings 单独一节编辑 `runner.agent_fallback_order` / `max_agent_switches`"实现；如果之后想要"每个阶段一条独立顺序链"，配置格式要从单值改成数组，是破坏性变更。
 2. **`auto` 的文案按阶段如实描述**（实现=标签路由 / 校验=挑一个 ≠ 实现者 / 审核=不同人优先 / 监督=沿用本次实现者 / 辩论=标签路由）。下拉里会出现五种不同说明的 `auto`，评审时要确认这个表达是否可接受，还是希望把各阶段语义统一。
 3. **下拉用原生 `<select>` 演示。** 真实实现需要按 PRD §5 落 shadcn 的 `dropdown-menu`（仓库里暂无可直接复用的 select/table 组件）；回退顺序的拖拽排序在原型里用 ↑/↓ 按钮代替。
-4. **「Agent 管理」粘性 Tab 是新增的页面组织**（原来 Settings 上只有"会话信息 + 关于 + 退出"）。两个 Tab 的面板高度会让页面滚动，原型里滚动的是覆盖层（底图是静态截图，无法真的滚页面），所以 Tab 栏钉在区块顶部而不是视口顶部。
+4. **Settings 只保留一个生命周期入口**：旧 Agent-only 矩阵从主页面移除；阶段 Agent、模型和推理深度只在专门设置页编辑，避免两套矩阵产生不同结果。
 5. **仓库行「选中」行为未在原型里还原。** 真实产品点仓库行会切换当前仓库并重绘 PRD 画布；原型底图是静态截图，因此只把齿轮作为新增入口，点行本身不产生可见变化。
 
 ## 已知限制与尚未验证的生产行为
 
 - 仅浅色主题（真实截图即浅色；frontend-public 的深色令牌未演示）。
 - `GET/PUT /api/v1/agent-runner/lifecycle-agents` 与 PRD 覆盖写回 API 均为前端模拟，未接真实端点。
-- `config.toml` / `.iar.toml` 的保留式写入、PRD 头部保留式写回、并发写入的真实实现未验证。
+- `config.toml` / `.kedacode.toml` 的保留式写入、PRD 头部保留式写回、并发写入的真实实现未验证。
 - 解析优先级链的真实合并行为以 PRD §7 Realistic Validation Plan 的 oracle 为准。
 - 真实截图是 2026-09-18 从本机 `just run` 起的栈上采集的静态快照；产品界面变化后需要按上述 spec 重采。
 
 原型层级标注：**interactive prototype**（概念交互验证），底图属于真实产品截图，但覆盖层是概念实现，不构成 E2E 或功能验收证据。
+
+## Prototype Change Log
+
+| File Path | Change Type | Before | After | Why |
+|---|---|---|---|---|
+| `docs/prototypes/lifecycle-agent-matrix.html` | Modify | Settings 与 Backlog 各有一套 Agent-only 生命周期矩阵编辑界面；回退链只编辑顺序与预算 | Settings 移除旧矩阵并换成统一页入口；Backlog 仓库齿轮进入同一页面并预选仓库；回退每行增加同 Agent 预设下拉与 TOML 预览 | 让全局与仓库生命周期值共用一张有效矩阵，并把回退 Agent 的模型选择展示给人评审 |
+| `docs/prototypes/lifecycle-agent-matrix.md` | Modify | 说明仍描述旧 Settings 矩阵与 Backlog 仓库抽屉，回退预设只写作后续想法 | 更新为统一设置页唯一矩阵入口，记录回退预设交互、演示数据和待确认边界，并内嵌保存预览截图 | 评审时可直接看到回退预设状态并核对 PRD 提案 |
+| `docs/prototypes/assets/prototype-hub.js` | Modify | lifecycle prototype v2.7 登记统一 Settings 与 lifecycle 页面 | v2.8 登记回退候选预设绑定与更新后的 Settings 预览 | Prototype Hub 是该原型的唯一登记入口 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/preview-settings.png` | Modify | 旧截图仍显示 Settings 双 Tab 与 Agent-only 生命周期矩阵 | 重截为 Agent 标签、统一生命周期入口和带回退预设选择的当前 Settings 概览 | 删除误导性的旧画面，并直观展示新增回退预设能力 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/preview-settings.source.md` | Modify | 来源记录只展示回退顺序与切换预算 | 增加带 claude 演示预设绑定的 capture URL 与数据限制 | 让截图可复现并说明模型 ID 是演示值，不代表生产配置 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.png` | Add | 无回退预设选择与保存预览截图 | 添加 Claude 回退预设已绑定后的 Settings 浏览器截图 | 让评审者直接看到新选择和对应 TOML 映射 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.source.md` | Add | 无截图来源记录 | 记录 capture URL、视口、状态、演示数据和验证层级 | 保留回退预设保存预览的复现方式及生产边界 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/preview-lifecycle-settings.png` | Add | 无设置页缩略图 | 添加统一生命周期设置页真实浏览器 capture | Hub 目录需要能识别新主状态 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/preview-lifecycle-settings.source.md` | Add | 无来源侧车 | 记录 capture URL、视口、日期、层级和失效条件 | 保留浏览器截图来源与可复现信息 |
+| `docs/prototypes/assets/lifecycle-agent-matrix/roadmap-real.source.md` | Modify | 记录历史 `/app/roadmap/` 和 2026-09-18 截图 | 记录现行 `/app/backlog/` 路由、历史截图与原型内 Backlog 标签覆盖层 | 文档对齐现行产品名，同时披露静态底图与覆盖层边界 |
+| `docs/prototypes/index.md` | Modify | 两份旧草图标题显示 Roadmap | 目录标题改为 Backlog，链接文件名保持兼容 | 让原型索引使用现行产品术语 |
+| `mkdocs.yml` | Modify | 导航标题有历史/不一致命名 | 原型目录标题统一使用 Backlog 与新生命周期页面名称 | 文档站导航与产品命名一致 |

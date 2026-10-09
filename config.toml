@@ -551,14 +551,14 @@ verification_commands = [
 # - 跨副本累积由
 #   ``backend.engines.agent_runner.factory._anchor_memory_config``
 #   一次性绝对化；本节只关心值，不关心解析位置。
-agent_fallback_order = ["claude", "kimi", "codebuddy", "qoder"]
+agent_fallback_order = ["codebuddy", "qoder", "codex"]
 max_agent_switches = 4
 [agent_runner.memory]
 enabled = true
-base_dir = ".iar/memory"
-skill_drafts_dir = ".iar/skills/drafts"
+base_dir = ".kedacode/memory"
+skill_drafts_dir = ".kedacode/skills/drafts"
 # 已晋升 skill 的扫描目录；可配置多个项目级 skills 目录。
-promoted_skills_dirs = [".iar/skills"]
+promoted_skills_dirs = [".kedacode/skills"]
 # 注入 prompt 时最多选用的 skill / 长期记忆条目数。
 top_k_skills = 3
 top_k_facts = 5
