@@ -35,6 +35,7 @@
 - 后端必须遵守四层依赖方向：
   `src/backend/api/ -> src/backend/core/ -> src/backend/engines/ -> src/backend/infrastructure/`
 - Python 项目优先使用 `uv` 和 `just`
+- 本地日常验证使用 `just test`（本地核心档，目标 <30 秒）；无需为普通交付在本机运行 `just test all`。CI 负责运行完整 CI 测试集；只有用户明确要求或排查全量相关问题时，才本地运行 `just test all`。详见 `docs/ai-standards/testing.md`
 - 新增 Alembic migration **必须**通过 `just new-migration <slug>`（或其底层 `scripts/shared/alembic/new_migration.sh`）生成；禁止手工创建、命名或伪造秒级时间戳。生成后再仅用补丁填写 `upgrade()` / `downgrade()`，并执行 `uv run alembic heads` 确认唯一 head。
 - 公共 Python API 使用 Google Style Docstrings；后端启用 Ruff `D100`–`D107`/`D419` 强制检查
 - 内部注释、docstring、JSDoc/TSDoc 统一使用中文（专有名词除外）

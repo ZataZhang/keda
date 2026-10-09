@@ -570,7 +570,7 @@ recovery_retry_delay_seconds = 30
 # 跨 agent fallback 链：主 agent 失败后依次尝试本机可用 agent。
 # 某 agent 反复修不好或供应商受限时切到下一个；命令不存在则自动跳过。
 # 设为空列表可关闭跨 agent 切换，回退到单 agent 行为。
-agent_fallback_order = ["claude", "kimi", "codex"]
+agent_fallback_order = ["qoder", "codex", "claude"]
 # 最多切换 agent 的次数（order=[a,b,c] 且 max_agent_switches=2 时最多尝试 3 个 agent）
 max_agent_switches = 2
 # 瞬时网络错误（socket 断开 / 5xx / 超时）的就地重试次数与退避秒数
@@ -4639,14 +4639,14 @@ promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 ### 触发点
 
 - `kc run <issue>` 启动：`build_prompt` 通过 `core/agent/memory/memory_loader.load_relevant_memory` 检索与当前 Issue 标签/标题/正文相关的长期记忆和已晋升 skills，以**目录形式**（name / description / 路径，不含全文）注入 prompt。
-- `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 写入 `context.json`，记录尝试序号、失败类型、详情摘要。
-- `run_agent_until_committed` 成功返回、`_finish_implementation_publication` 开头：调用 `core/agent/memory/skill_distillation.distill_skill` 与 `save_skill_draft`。**蒸馏失败不阻塞**后续 push / pre-PR review / Draft PR 创建。
-- 草稿满足 `usage_count >= auto_promote_threshold` 且 `success_rate >= auto_promote_min_success_rate` 时，runner 自动移动草稿到 `promoted_skills_dirs` 并清除 `draft` 标记。
+- `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 写入 `context.json`，记录尝试序号、失败类型、完整详情；成功时另存最终方案摘要，供后续提炼回看。
+- `run_agent_until_committed` 成功返回、`_finish_implementation_publication` 开头：只对明确记录为成功且带实际 Agent 名称的执行生成 skill。蒸馏会读取该 Issue 的完整短期尝试历史、已记录的最终方案、相对 base branch 的真实提交 diff 与验证命令结果，再由最后一个成功 Agent 的只读 `generate` 能力提炼。生成内容必须包含触发条件、步骤、验证、陷阱和证据，并通过格式与本地路径 / Issue 编号过滤后才写入草稿；证据、生成或写盘失败都不阻塞后续 push / review / PR。
+- 自动提炼只会创建 `draft: true` 草稿。生成草稿时 `usage_count` 和 `success_count` 保持为 0，因为 runner 目前无法确认 Agent 是否实际读取并采用了被推荐的 skill；因此不能把“被检索到”或“本次 Issue 成功”误作技能使用效果，草稿不会自动晋升。维护者审阅后再手动晋升。
 
 ### 关闭与降级
 
 - `config.toml` 的 `[agent_runner.memory] enabled = false` 完全关闭记忆读写与 skill 蒸馏；现有 runner 路径无回归。
-- `auto_promote = false` 时草稿不会自动晋升到 `.iar/skills/`，维护者手动移动文件并（可选）编辑 description。
+- `auto_promote = false` 时草稿不会自动晋升到 `.iar/skills/`，维护者手动移动文件并（可选）编辑 description。当前自动提炼产生的草稿即使 `auto_promote = true` 也不会自动晋升；只有未来接入可核验的实际使用记录后，该门槛才会对这些草稿生效。
 - 维护者可手工创建 `<worktree>/.iar/memory/long_term/facts/<topic>.md` 写入项目约定，runner 会在相关 Issue 的 prompt 中自动引用。
 
 ### 与已有机制的关系

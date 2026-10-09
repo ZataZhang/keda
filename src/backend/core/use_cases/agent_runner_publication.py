@@ -21,12 +21,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.core.agent.memory import (
-    distill_skill,
-    find_similar_draft,
-    promote_draft_to_skills,
-    save_skill_draft,
-    should_auto_promote,
+from backend.core.use_cases.agent_runner_skill_distillation import (
+    _SkillDistillationRequest,
+    _try_distill_skill_after_success,
 )
 from backend.core.shared.interfaces.agent_runner import (
     IContentGenerator,
@@ -557,109 +554,6 @@ def _reuse_local_commit(request: LocalCommitReuseRequest) -> AgentCommitResult |
     )
 
 
-def _try_distill_skill_after_success(
-    *,
-    issue: IssueSummary,
-    worktree_path: Path,
-    config: AppConfig,
-    commit_result: AgentCommitResult,
-) -> None:
-    """Best-effort skill distillation at the start of publication.
-
-    Runs only when ``config.memory.enabled`` is true and at least one
-    attempt succeeded. Any failure (project-specific filter, write error,
-    promotion error) is logged and swallowed so push / pre-PR review /
-    draft PR creation never block on the skill pipeline.
-    """
-    if not config.memory.enabled:
-        return
-    if not commit_result.attempt_results:
-        return
-    successful_attempts = [
-        attempt for attempt in commit_result.attempt_results if attempt.recovered or attempt.detail
-    ]
-    if not successful_attempts:
-        return
-    diff_summary = "\n".join(
-        f"- attempt {a.attempt_number}: {a.failure_type.value} ({'recovered' if a.recovered else 'first-shot'})"
-        for a in commit_result.attempt_results
-    )
-    recovery_history = "\n".join(
-        f"- attempt {a.attempt_number} ({a.failure_type.value}): {a.detail[:300]}"
-        for a in commit_result.attempt_results
-    )
-    try:
-        candidate = distill_skill(
-            issue=issue,
-            diff_summary=diff_summary,
-            recovery_history=recovery_history,
-            worktree_path=worktree_path,
-            memory_config=config.memory,
-        )
-    except Exception as exc:  # noqa: BLE001 - distillation must not block publication.
-        _logger.warning(
-            "Skill distillation raised for Issue #%d: %s",
-            issue.number,
-            exc,
-        )
-        return
-    if candidate is None:
-        return
-    skill_store = _build_skill_store(worktree_path, config.memory)
-    try:
-        saved_path = save_skill_draft(
-            candidate,
-            config.memory,
-            worktree_path,
-            skill_store,
-        )
-    except Exception as exc:  # noqa: BLE001
-        _logger.warning(
-            "Failed to save skill draft for Issue #%d: %s",
-            issue.number,
-            exc,
-        )
-        return
-    _logger.info(
-        "Distilled skill draft for Issue #%d at %s.",
-        issue.number,
-        saved_path,
-    )
-    if not config.memory.auto_promote:
-        return
-    try:
-        existing = find_similar_draft(candidate, config.memory, worktree_path, skill_store)
-        if existing is None:
-            return
-        if not should_auto_promote(existing, config.memory):
-            return
-        promote_draft_to_skills(existing, config.memory, worktree_path, skill_store)
-    except Exception as exc:  # noqa: BLE001
-        _logger.warning(
-            "Auto-promote failed for Issue #%d: %s",
-            issue.number,
-            exc,
-        )
-
-
-def _build_skill_store(worktree_path: Path, memory_config):
-    """Construct the skill-store protocol adapter for distillation calls.
-
-    Kept as a tiny shim so the publication hook stays decoupled from
-    ``infrastructure/memory`` specifics; returns ``None`` when memory is
-    disabled (the caller skips distillation in that case). The actual
-    composition lives in ``core/agent/memory/_composition.py`` which
-    dynamically loads the ``infrastructure/`` implementations, preserving
-    the strict ``core -> infrastructure`` ban.
-    """
-    from backend.core.agent.memory._composition import (
-        build_default_memory_services,
-    )
-
-    services = build_default_memory_services(worktree_path, memory_config)
-    return services.skill
-
-
 def _should_run_post_pr_supervisor(
     config: AppConfig,
     publish_stage: PublishStage,
@@ -742,10 +636,15 @@ def _finish_implementation_publication(
 
     # 步骤 0: 蒸馏 skill 草稿。失败仅记录日志，不阻塞后续 push / review / PR。
     _try_distill_skill_after_success(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        commit_result=commit_result,
+        request=_SkillDistillationRequest(
+            issue=issue,
+            worktree_path=worktree_path,
+            config=config,
+            commit_result=commit_result,
+            selected_agent=selected_agent,
+            process_runner=process_runner,
+            content_generator=content_generator,
+        )
     )
 
     # 步骤 1: 评论实现完成信息

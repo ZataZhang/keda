@@ -244,6 +244,10 @@ class _SkillAdapter:
         existing_concrete = _record_to_draft(existing)
         return self._inner.update_draft(existing_concrete, update)
 
+    def reset_usage_metrics(self, draft):
+        existing_concrete = _record_to_draft(draft)
+        return self._inner.reset_usage_metrics(existing_concrete)
+
     def load_promoted_skills(self, skills_dirs: Iterable[str | Path]) -> list:
         drafts = self._inner.load_promoted_skills(skills_dirs)
         return [_draft_to_record(d) for d in drafts if d is not None]

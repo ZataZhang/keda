@@ -137,6 +137,19 @@ class SkillDraftStore:
         )
         return self.save_draft(merged)
 
+    def reset_usage_metrics(self, existing: SkillDraft) -> Path:
+        """Clear unverified usage counters while preserving the current draft."""
+        current = _parse_skill(existing.path) or existing
+        reset = SkillDraftUpdate(
+            name=current.name,
+            description=current.description,
+            tags=current.tags,
+            body=current.body,
+            version=current.version,
+            draft=current.draft,
+        )
+        return self.save_draft(reset)
+
     def load_promoted_skills(self, skills_dirs: Iterable[str | Path]) -> list[SkillDraft]:
         """Load all promoted (non-draft) skills from the given directories."""
         results: list[SkillDraft] = []
