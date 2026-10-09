@@ -661,3 +661,11 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - Reason: runner 逐字复跑 RV 命令，证据脚本自身的取数竞态即假失败；「页面写了什么」应以页面发出的请求体为事实源，而不是从服务端响应反推。
 - Impact: 仅改动 `tasks/evidence/.../scripts/` 下的证据脚本（整目录 gitignore，不入代码 diff），生产代码与被测行为零改动；rv-3 判别力增强（多两组同源断言）。同时新增可复现现场负控 `rv3_negative.py`：向 gitignored 的 console 静态构建产物注入旧「未设置即显示伪造默认 2」口径，`rv3_console.py` 出现 6 条断言变红（inherit / capped / restored-fresh 文案不符 + 页面数字与 fresh GET 生效值不同源），随后按字节还原并校验，红证存 `rv-3-negative-control.txt`。
 - Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；item 3 的 `negative_control` / `expected_fail` 已改为实测命令与实测红态。
+
+### rv-1 复跑误红：fixture 端口哈希碰撞，改为内核分配空闲端口并重试
+- Type: validation
+- Before: 证据 harness 的 console 端口为 `8940 + abs(hash(name)) % 40`；runner 复跑 item 1 时（04:03），`rv1-p2` 与 `rv1-r1` 在该进程哈希种子下解到同一端口 8956，且 P2 console 刚停止、socket 尚处 TIME_WAIT，R1 的 `kc console --port 8956` 预检报「already in use」退出，`start_console` 探测超时 raise，脚本 exit 1（红证残留于 `work/rv1-r1/console.log`，P2/R1 场景目录即中断现场）。
+- After: `fixture_lib.py` 改为每个 fixture 构造时经 `bind(0)` 向内核申请空闲端口，并以进程内集合避免顺序 fixture 重复取端口；`start_console` 在绑定失败或超时时换端口重试（最多 3 次，同步重写 config.toml）。修复后 rv1 连续两次独立复跑均 exit 0 且逐行数值与捕获一致（P2/R1/R0/UNSET），三场景端口各不相同；rv-2/rv-4/rv-5 与 rv-3（含现场负控复跑：6 条红态、bundle 按字节还原）在最终 tree 上全部重跑并再生证据。
+- Reason: runner 逐字复跑 RV 命令，采集 harness 自身的端口碰撞即假失败；修复只落在 gitignored 的证据脚本，不动生产代码与被测行为。
+- Impact: 仅 `tasks/evidence/.../scripts/` 与证据产物再生；生产代码零改动；item 1 复跑命令恢复稳定绿。
+- Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求。
