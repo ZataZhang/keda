@@ -24,6 +24,7 @@ from backend.core.use_cases.agent_runner_batch_aggregate import (
     build_total_pr_body,
     plan_merge_order,
     resolve_aggregate_prd_paths,
+    _same_aggregate_pr_body_text,
     _validate_aggregate_prd_evidence,
 )
 from backend.core.use_cases.agent_runner_batch_aggregate_git import (
@@ -177,7 +178,7 @@ def test_build_total_pr_body_satisfies_v2_contract() -> None:
 
 
 def test_build_total_pr_body_annotates_when_source_pr_missing() -> None:
-    """来源集合与批次成员不匹配时正文被追加 aggregate-contract 标注（本地软门）。"""
+    """来源集合与批次成员不匹配时正文被追加 aggregate-contract 标注（本地聚合门）。"""
     sources = [_source(101), _source(102)]
     body = build_total_pr_body(
         AggregatePRBodyContext(
@@ -190,7 +191,8 @@ def test_build_total_pr_body_annotates_when_source_pr_missing() -> None:
             tree_sha="tree",
         )
     )
-    # 正文 PRD 集与来源解析结果不一致 → 本地软门标注块出现并点名 prd-link。
+    # 正文 PRD 集与来源解析结果不一致 → 本地聚合门标注块出现并点名 prd-link；
+    # 发布路径会在 aggregate_batch 里先拒绝，这份正文不会带着标注到达 GitHub。
     assert "iar:aggregate-contract" in body
     assert "missing=prd-link" in body
     # 用错误的来源 Issue 集去校验同一正文 → 来源 marker 不匹配。
@@ -228,6 +230,28 @@ def test_build_aggregate_retry_command_lists_sorted_issues() -> None:
     """重试命令带 repo-id 且 Issue 升序去重。"""
     command = build_aggregate_retry_command("keda-test", [102, 101, 102])
     assert command == "kc pr aggregate --repo-id keda-test --issue 101 --issue 102"
+
+
+def test_same_aggregate_pr_body_text_ignores_markdown_whitespace_only() -> None:
+    """GitHub 回读的空白规范化（行尾空格、缩进、空行）不算正文不一致。
+
+    收尾门用它比较生成正文与回读正文：逐字比较会把同一份正文判成不一致，并以
+    "required checks are not all SUCCESS" 之外的原因阻断来源 PR 关闭。
+    """
+    generated_body = (
+        "## Batch Sources\n\n- Issue #101 <https://example.test>\n\n## Unique PRD Set\n"
+    )
+    github_read_body = (
+        "## Batch Sources\n\n- Issue #101 <https://example.test>   \n\n\n## Unique PRD Set\n"
+    )
+    assert _same_aggregate_pr_body_text(github_read_body, generated_body) is True
+
+
+def test_same_aggregate_pr_body_text_keeps_content_difference() -> None:
+    """正文内容差异（marker、清单项）仍判为不一致，收尾门不会因此放过漂移。"""
+    generated_body = "<!-- iar:aggregate-pr version=1 issues=101,102 source_prs=301,302 -->\n"
+    stale_body = "<!-- iar:aggregate-pr version=1 issues=101,103 source_prs=301,303 -->\n"
+    assert _same_aggregate_pr_body_text(stale_body, generated_body) is False
 
 
 # ---------------------------------------------------------------------------

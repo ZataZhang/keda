@@ -497,7 +497,11 @@ def find_aggregate_pr_body_contract_violations(
 def build_aggregate_contract_annotation_block(violations: list[str]) -> str:
     """构建追加到总 PR 正文末尾的 v2 不合规标注块（与 v1 标注块同型、独立 marker）。
 
-    合并队列硬门据此拒绝自动合并被 runner 自报为聚合契约不合规的总 PR。
+    ``iar:aggregate-contract`` 是**本地聚合门**的信号：``aggregate_batch`` 在正文仍
+    不合规时先抛错、根本不创建总 PR，因此这个标注块只出现在 dry-run / 本地预览产出里。
+    合并队列只消费单 PRD 的 ``iar:pr-contract``（见
+    :func:`has_contract_annotation`），没有任何路径读取本 marker，文案不得声称队列会
+    据此拒绝自动合并——总 PR 本就保持 Draft 交人工合并。
     """
     missing_text = ",".join(violations)
     violation_lines = [
@@ -510,8 +514,10 @@ def build_aggregate_contract_annotation_block(violations: list[str]) -> str:
             "## Aggregate PR Body Contract Violation (auto-generated)",
             "",
             "This aggregate PR body does not satisfy the multi-PRD acceptance "
-            "contract, so the autopilot merge queue will refuse to auto-merge "
-            "it. Missing or mismatched anchors:",
+            "contract. `kc pr aggregate` refuses to publish a total Draft PR whose "
+            "body still carries this marker, so it is a local gate signal only: no "
+            "autopilot merge queue reads `iar:aggregate-contract`, and the total PR "
+            "stays Draft for manual merge regardless. Missing or mismatched anchors:",
             "",
             *violation_lines,
             "",

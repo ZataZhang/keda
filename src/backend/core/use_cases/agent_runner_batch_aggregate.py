@@ -420,6 +420,25 @@ def _close_source_prs(
     return tuple(closed_numbers), tuple(pending_numbers)
 
 
+def _same_aggregate_pr_body_text(github_read_body: str, generated_body: str) -> bool:
+    """按 GitHub 回读后会保住的形态比较两份总 PR 正文。
+
+    GitHub 会对提交过的 Markdown 做空白规范化（行尾空格、缩进、空行数量），逐字
+    比较会把"同一份正文"判成不一致并以收尾失败阻断来源关闭；这里只丢弃这类排版
+    差异，正文内容（marker、PRD 清单、声明句）仍逐行参与比较。
+
+    Args:
+        github_read_body: GitHub 回读到的 PR 正文。
+        generated_body: 本地确定性生成的 PR 正文。
+
+    Returns:
+        两者在规范化后是否一致。
+    """
+    read_body_lines = [line.strip() for line in github_read_body.splitlines() if line.strip()]
+    generated_body_lines = [line.strip() for line in generated_body.splitlines() if line.strip()]
+    return read_body_lines == generated_body_lines
+
+
 def aggregate_batch(request: BatchAggregateRequest) -> AggregateResult:
     """构建、验证和发布唯一总 Draft PR，然后按 checks 结果收尾来源 PR。
 
@@ -676,7 +695,7 @@ def aggregate_batch(request: BatchAggregateRequest) -> AggregateResult:
                         ) from exc
             else:
                 total_pr_url = existing_total_context.pr_url
-                if existing_total_context.body != total_pr_body:
+                if not _same_aggregate_pr_body_text(existing_total_context.body, total_pr_body):
                     request.github_client.update_pull_request_body(
                         existing_total_context.number, total_pr_body
                     )
@@ -690,19 +709,41 @@ def aggregate_batch(request: BatchAggregateRequest) -> AggregateResult:
                     failure_category="closeout",
                     retry_command=retry_command,
                 ) from exc
+            if total_pr_context is None or total_pr_context.number is None:
+                raise BatchAggregateError(
+                    "total Draft PR context is unreadable after publication; source PRs remain "
+                    f"open and total PR is {total_pr_url}",
+                    failure_category="closeout",
+                    retry_command=retry_command,
+                )
             if (
-                total_pr_context is None
-                or total_pr_context.number is None
-                or total_pr_context.head_sha != branch_result.head_sha
+                total_pr_context.head_sha != branch_result.head_sha
                 or total_pr_context.base_sha != aggregate_worktree.base_sha
                 or total_pr_context.is_draft is not True
-                or total_pr_context.checks_state != _REQUIRED_CHECKS_STATE
-                or total_pr_context.body != total_pr_body
             ):
-                check_state = total_pr_context.checks_state if total_pr_context else "UNKNOWN"
+                raise BatchAggregateError(
+                    "total Draft PR refs or draft state do not match the published batch; source "
+                    f"PRs remain open and total PR is {total_pr_url} "
+                    f"(head={total_pr_context.head_sha} expected {branch_result.head_sha}; "
+                    f"base={total_pr_context.base_sha} expected {aggregate_worktree.base_sha}; "
+                    f"draft={total_pr_context.is_draft})",
+                    failure_category="closeout",
+                    retry_command=retry_command,
+                )
+            if not _same_aggregate_pr_body_text(total_pr_context.body, total_pr_body):
+                raise BatchAggregateError(
+                    "total Draft PR body does not match the generated aggregate contract; source "
+                    f"PRs remain open and total PR is {total_pr_url}. This is a body write/read "
+                    "difference, not a checks failure; re-run the retry command to re-apply "
+                    "the body.",
+                    failure_category="closeout",
+                    retry_command=retry_command,
+                )
+            if total_pr_context.checks_state != _REQUIRED_CHECKS_STATE:
+                check_state = total_pr_context.checks_state
                 check_details = (
                     "; ".join(total_pr_context.checks_summary)
-                    if total_pr_context and total_pr_context.checks_summary
+                    if total_pr_context.checks_summary
                     else "GitHub returned no individual check URLs"
                 )
                 raise BatchAggregateError(

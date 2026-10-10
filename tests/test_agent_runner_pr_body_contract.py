@@ -774,3 +774,10 @@ def test_aggregate_contract_annotation_block_marks_missing_anchors() -> None:
     )
     assert "merge-acceptance-v2" in annotation
     assert "prd-link" in annotation
+
+
+def test_aggregate_contract_annotation_block_does_not_claim_merge_queue_gate() -> None:
+    """标注块只声明本地聚合门：没有任何合并队列路径消费 ``iar:aggregate-contract``。"""
+    annotation = build_aggregate_contract_annotation_block(["prd-link"])
+    assert "merge queue will refuse to auto-merge" not in annotation
+    assert "refuses to publish" in annotation

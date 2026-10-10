@@ -10,7 +10,7 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
 - **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，**默认带上 `agent/ready` 直接进队列**（`--no-ready` 可只建 Issue 不排队），并默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
 - **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
-- **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。
+- **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。**同一条聚合资格门对两个入口都一样**：成员 Issue 必须是 open 且已带 `agent/review`，且每个来源 PR 的必需 checks 必须已是 `SUCCESS`；刚发布完的 Issue 通常还停在 `agent/supervising`、Draft PR 的 checks 还是 PENDING，所以单次夜间 `kc run --all-ready --aggregate-pr` 常会在资格阶段被拒，需要等 checks 与标签落定后再补一次 `kc pr aggregate --issue ...`（见「批次聚合的资格门与两次调用」）。
 - **review**：单次检查 `agent/supervising` 和 `agent/review` 的 Issues，基于 PR 上下文变化运行 supervisor cycle（兼容旧命令 `review-once`）
 - **review-daemon**：常驻进程，按指定间隔循环执行 `review-once`
 - **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 Backlog 自动推进阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
@@ -421,6 +421,12 @@ PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分四层，全部�
 
 设计原则是**发布端软、合并端硬**：正文格式问题永远不应阻止代码被推送和审阅
 （那会触发恢复循环烧预算），只应阻止"看起来合格"地被自动合并。
+
+> **聚合总 PR 的 v2 契约不在这道硬门里**：`iar:aggregate-contract` 标注没有任何合并
+> 队列消费方（队列只认单 PRD 的 `iar:pr-contract`）。`kc pr aggregate` 在创建总 PR
+> **之前**重算 v2 违规并直接以 `verification` 失败拒绝发布，因此带标注的正文只会出现在
+> 本地 / dry-run 产出里，它是本地门的信号，不是给自动化读的机器门；总 PR 本就保持 Draft
+> 交人工合并。
 
 ## 仓库本地配置
 
@@ -1184,7 +1190,7 @@ kc pr aggregate --issue 101 --issue 102
 - `--issue` 与 PRD 路径互斥；三者（`--issue` / PRD 路径 / `--all-ready`）都不给时退出码 2（usage error）。
 - `--aggregate-pr` 只能与 `--all-ready` 合用，要求单个仓库和至少两个本轮实际选中的 Issue；`--max-issues` 也必须允许至少两个候选。dry-run 预览会列出批次大小和可识别的 PRD 路径，不认领或写入状态。该选项不能与 `--direct-pr` 或 `--fast-merge` 合用。
 - 每个 Issue 仍先通过现有实现、审核、验证和来源 Draft PR 流程。所有 worker 完成后，runner 从配置的远程 base SHA 建隔离 `batch-*` 分支，按依赖顺序合入 source heads，并对完整 tree 运行仓库验证命令及 PRD 独立 verifier。失败时不发布总 PR，也不关闭来源 PR。
-- 总 PR 使用多 PRD v2 正文列出来源 Issue / PR、去重 PRD、逐任务 evidence links 和 base/head/tree；总 PR 保持 Draft，交给用户审阅并手动合并。仅当总 PR 创建、组合验证和必需 checks 均成功后才关闭来源 PR 并附取代链接；source branch 保留。checks pending/failed 时来源 PR 保持开放。若收尾部分失败，已关闭来源保留取代记录，未关闭来源保持开放并逐项列出，同时给出 `kc pr aggregate --issue ...` 重试命令。
+- 总 PR 使用多 PRD v2 正文列出来源 Issue / PR、去重 PRD、逐任务 evidence links 和 base/head/tree；总 PR 保持 Draft，交给用户审阅并手动合并。仅当总 PR 创建、组合验证和必需 checks 均成功后才关闭来源 PR 并附取代链接；source branch 保留。checks pending/failed 时来源 PR 保持开放。收尾拒绝逐项点名原因：必需 checks 未全绿、批次身份不符（head/base/draft）、以及总 PR 正文与生成结果不符是三条不同诊断——正文差异按 GitHub 的空白规范化后比较，报错不会伪装成 checks 问题，处理方式是用重试命令重新落正文。若收尾部分失败，已关闭来源保留取代记录，未关闭来源保持开放并逐项列出，同时给出 `kc pr aggregate --issue ...` 重试命令。
 - 重试已完成的来源批次：
 
   ```bash
@@ -1192,11 +1198,30 @@ kc pr aggregate --issue 101 --issue 102
   kc pr aggregate --issue 101 --issue 102 --dry-run
   ```
 
-  手动入口仅接受同仓库、仍符合门禁且每个 Issue 唯一的来源 PR；自动入口和手动入口都至少需要两个 Issue。系统不跨调用猜测批次、不自动合并总 PR。真实 GitHub PR 创建、checks、关闭评论及远端分支保留状态需在真实服务上确认，不能由本地测试代替。
+  手动入口仅接受同仓库、仍符合门禁（见下节「批次聚合的资格门与两次调用」）且每个 Issue 唯一的来源 PR；自动入口和手动入口都至少需要两个 Issue。系统不跨调用猜测批次、不自动合并总 PR。真实 GitHub PR 创建、checks、关闭评论及远端分支保留状态需在真实服务上确认，不能由本地测试代替。
 - 定向 run 只处理目标 Issue（仍走依赖门禁与 claim）；队列里其他 ready Issue 原封不动。
 - `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。
 
 **迁移**：旧脚本/文档里"无目标的 `kc run`"改为 `kc run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
+
+### 批次聚合的资格门与两次调用
+
+聚合只有一个资格判定源：`resolve_batch_sources`（`src/backend/core/use_cases/agent_runner_batch_aggregate_sources.py`）。自动入口（`kc run --all-ready --aggregate-pr`）在本轮全部 worker join 之后调用它，手动入口（`kc pr aggregate`）在第一步就调用它——**两者过的是同一道门**：
+
+| 门禁 | 要求 | 任务刚发布完时的实际状态 |
+|---|---|---|
+| Issue 状态 | 仍为 open，且带 `agent/review` 标签 | NORMAL 档位发布后 Issue 先进 `agent/supervising`；PR 后监督返回 `wait_for_checks` 时就停在那里，本轮不会拿到 `agent/review` |
+| 来源 PR checks | 必需 checks 汇总为 `SUCCESS` | 新建 Draft PR 的 checks 通常是 `PENDING` |
+| 来源 PR 集合 | 每个 Issue 恰好一个未合并来源 PR，且未绕过 review/verification（正文不含 `iar:direct-pr` / `iar:fast-merge`） | 直发档、快速合并档的 Issue 会被拒 |
+
+**后果**：单次夜间 `kc run --all-ready --aggregate-pr` 处理的通常正是"刚跑完"的 Issue，几乎必然卡在前两行，于是整批在 eligibility 阶段被拒绝——不创建总 PR、不关闭来源 PR，日志与错误里给出同一批成员的重试命令。要拿到总 PR，等 checks 跑绿、监督把 Issue 推进到 `agent/review` 之后，再显式补一次：
+
+```bash
+kc pr aggregate --issue 101 --issue 102 --dry-run   # 只核对资格与去重 PRD 集，不写分支不建 PR
+kc pr aggregate --issue 101 --issue 102             # 组合、验证、发布总 Draft PR 并关闭来源
+```
+
+`--dry-run` 走的是同一道门，可以直接当作"这一批现在能不能聚合"的检查。想让一次调用就出总 PR，只有在本轮选中的 Issue **进入队列前**就已经带 review 标签且 checks 全绿时才成立；系统不跨调用猜测批次，也不会为了聚合放宽这两道门。
 
 ### 与 daemon 的互斥范围：只挡队列轮询
 

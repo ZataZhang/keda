@@ -630,3 +630,11 @@ No external research required. This does not authorize live GitHub validation; �
 - Reason: 完成仓库要求的独立复核后对账，不把未执行的 live GitHub / PR / CI 行为描述为已通过。
 - Impact: 验收横幅维持 `🧍 待人工验收`；PR / CI surface 发布后再补链接，用户人工验收项仍未确认。
 - Review: `tasks/evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr.verifier-report.md` 首行 `PASS`，并披露两项非阻塞限制。
+
+### 评审修正：拆分队列聚合接线并披露资格门
+- Type: implementation
+- Before: 队列侧聚合接线（`AggregateQueueCompletionRequest` 与 `_complete_aggregate_queue`）留在 `agent_runner_orchestration_runtime.py`，该文件 1045 非空行触发 CI 的 1000 行硬门（本地 `just lint` 只告警，所以只在远端暴露）；聚合资格门（成员 Issue 须 open 且带 `agent/review`、来源 PR 必需 checks 须 `SUCCESS`）只存在于代码，指南与随包 operator skill 未点名，操作员无法预期单次夜间调用一般会在资格阶段被拒；收尾门把批次身份（head/base/draft）与总 PR 正文差异一并报成 `required checks are not all SUCCESS`；`iar:aggregate-contract` 标注声称合并队列会据此拒绝自动合并，而队列实际只消费单 PRD 的 `iar:pr-contract`。
+- After: 聚合接线落在新模块 `agent_runner_batch_aggregate_queue.py`（调度入口降到 954 非空行，被移动的公开名经导入仍可解析）；`docs/guides/agent-runner.md` 新增「批次聚合的资格门与两次调用」小节，并在功能概览、`resolve_batch_sources` docstring、两条资格错误文案与 `SKILL.md` / `references/run-once.md` 里点名这两道门与"通常需要再补一次 `kc pr aggregate`"；收尾拒绝按原因分成 checks 未全绿 / head-base-draft 身份不符 / 正文不符三条诊断，正文比较先做空白规范化；聚合标注改述为发布前的本地门信号并声明没有合并队列消费方。
+- Reason: 处理 Issue #258 代码评审的四项发现。CI 硬门要求结构拆分而非 allowlist；未披露的门禁与不存在的机器门声明都会让操作员按错误预期调度夜间批次。
+- Impact: 不改变聚合语义、资格判定结果、发布或关闭顺序，也不放宽任何门禁；只调整模块落点、失败诊断分类、文案与文档披露。真实 GitHub 行为仍按既定 rv-4 边界保持未验证。
+- Review: 见 `tasks/evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr.evidence-report.md` 的 Review-cycle verification 一节——CI 同款 max-lines 命令在本树 exit 0（调度入口 954 非空行）、rv-1 exit 0、rv-2 **21 passed**、rv-3 **19 passed**、新增队列接线 oracle **5 passed**、定向回归 **353 passed**、CI 等价全量 **3853 passed / 1 skipped**、`mkdocs build --strict` 与 `just lint --reuse` 通过；真实 GitHub 行为仍为 rv-4 NOT RUN。

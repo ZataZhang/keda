@@ -274,8 +274,15 @@ def _read_source_pr_context(
 def resolve_batch_sources(request: BatchSourceResolutionRequest) -> tuple[BatchSource, ...]:
     """读取并校验一个显式来源批次，支持同一总 PR 的部分关闭重试。
 
-    每个 Issue 必须保持 open 且处于现有成功发布态；每个 Issue 仅允许一个未合并来源
-    PR。closed 来源只有在其评论含有当前开放总 PR 的 superseded marker 时才可重试。
+    资格门（逐 Issue 判定，任一不满足即整批拒绝）：Issue 必须仍为 open 且带
+    ``config.labels.review``（默认 ``agent/review``）标签；每个 Issue 仅允许一个未合并
+    来源 PR，且该 PR 的必需 checks 必须已经是 ``SUCCESS``。closed 来源只有在其评论含有
+    当前开放总 PR 的 superseded marker 时才可重试。
+
+    这两道门决定了单次队列运行的现实边界：同一轮 ``kc run --all-ready --aggregate-pr``
+    刚发布的 Issue 此时通常还停在 ``agent/supervising``（监督阶段还没把 Issue 推进到
+    review 标签），新建 Draft PR 的 checks 也仍是 PENDING，因此队列侧的聚合调用一般会在
+    这里被拒，需要等 checks 与标签落定后再用 ``kc pr aggregate --issue ...`` 补一次。
 
     Args:
         request: 仓库、GitHub client、批次 Issue 和配置身份。
@@ -323,7 +330,9 @@ def resolve_batch_sources(request: BatchSourceResolutionRequest) -> tuple[BatchS
             issue = request.github_client.get_issue(issue_number)
             if issue.state.upper() != "OPEN" or request.config.labels.review not in issue.labels:
                 raise BatchAggregateError(
-                    f"Issue #{issue_number} is not in the completed review state",
+                    f"Issue #{issue_number} is not an open Issue carrying the "
+                    f"`{request.config.labels.review}` label (aggregate members must have "
+                    "finished their post-PR supervision first)",
                     failure_category="eligibility",
                 )
             linked_prs = request.github_client.list_pull_requests_for_issue(
@@ -361,7 +370,9 @@ def resolve_batch_sources(request: BatchSourceResolutionRequest) -> tuple[BatchS
                 or not source_context.base_sha
             ):
                 raise BatchAggregateError(
-                    f"source PR #{source_pr.number} checks or SHA metadata are not complete",
+                    f"source PR #{source_pr.number} required checks are "
+                    f"{source_context.checks_state!r}, not {_REQUIRED_CHECKS_STATE}, or its "
+                    "head/base SHA metadata is not readable yet",
                     failure_category="eligibility",
                 )
             if (

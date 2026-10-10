@@ -55,6 +55,19 @@
 - With both an isolated writable home and `KEDACODE_PRD_SKILL_PATH=/Users/zata/.codex/skills/prd/SKILL.md`, the standard `just test` selection reported **148 passed, 10 failed, 231 deselected**. All ten failures are the same process-enumeration `EPERM`; aggregate, CLI, contract, and skill synchronization tests selected by this local run passed. An earlier isolated-home run without the skill path was a setup error (the home lacked the installed PRD skill) and is not used as validation evidence.
 - `just lint --reuse` passed. Full pre-commit lint hooks passed during the post-change `just test` preflight; `just lint --full` also confirmed the current test/lint markers after the scoped test command. The regular local test gate remains partial because of the process-scanner sandbox limitation above.
 
+### Review-cycle verification
+
+Issue #258 代码评审后的修复轮（拆分队列聚合接线、补齐资格门披露、细分收尾诊断、更正聚合标注口径）在本最终树重新执行以下检查：
+
+- CI 硬门用工作流原命令复跑：`uv run python hooks/shared/check_max_file_lines.py --max-lines 1000 --glob "*.py" src/backend --allow-list-file hooks/max_file_lines.allowlist.txt` → **exit 0**。修复前同一命令报 `agent_runner_orchestration_runtime.py: 1045 非空行，超过上限 1000 行`；聚合队列接线落到新模块 `agent_runner_batch_aggregate_queue.py` 后，该调度入口文件为 **954 非空行**，未新增 allowlist 条目。
+- 已发行 oracle 重跑：`scripts/run-rv-1.sh` **exit 0**；`scripts/run-rv-2.sh` **21 passed**（原 19，新增两份总 PR 正文空白规范化比较的本地用例，覆盖收尾门不再把正文差异误判为 checks 失败）；`scripts/run-rv-3.sh` **19 passed, 29 deselected**（原 18，新增一条钉住 aggregate-contract 标注只声明本地门、不声称合并队列拒绝的用例）。
+- 新增队列接线 oracle：`uv run pytest --no-testmon -q tests/test_agent_runner_batch_aggregate_queue.py` → **5 passed**。只覆盖队列侧判定（批次数量门、未声明聚合时的退出码透传、整批失败短路、dry-run 预览），协作者换成"取属性即失败"的哨兵，因此这些用例不隐含任何 GitHub 调用，也不作为 rv-4 证据。
+- 定向回归集：`uv run pytest -o addopts="" -q tests/test_agent_runner_batch_aggregate.py tests/test_agent_runner_pr_body_contract.py tests/test_agent_runner_batch_aggregate_queue.py tests/test_agent_runner_orchestrate.py tests/test_agent_runner_run_targeting.py tests/test_agent_runner_direct_pr_discovery.py tests/test_lifecycle_agent_routing.py tests/test_kedacode_operator_skill.py tests/test_agent_runner_cli.py` → **353 passed**。
+- CI 等价全量选择：`uv run pytest tests/ -m "not expensive" --no-testmon --timeout=120` → **3853 passed, 1 skipped**。此前记录的 `kc config migrate` 进程枚举 `EPERM` 失败在本轮未复现，因此本行按实际结果记录为全绿，不作为环境限制。
+- `uv run mkdocs build --strict` → **exit 0**，仍是既有的 unlinked-page / reciprocal-anchor 信息级提示；本次只在既有页面 `guides/agent-runner.md` 内新增一个 `###` 小节，未新增页面或导航项。
+- `just lint --reuse` → duplicate-code、architecture layer、guidelines consistency、max-file-lines 四道 hook 全部 **Passed**；改动文件的 pre-commit（ruff + ruff-format + PRD checklist + max lines）全部 Passed。
+- 披露项的可核对方式：指南新小节「批次聚合的资格门与两次调用」、`resolve_batch_sources` docstring、两条资格错误文案与随包 `SKILL.md` / `references/run-once.md` 条目都点名 `agent/review` 与 checks `SUCCESS`，并写明单次夜间队列调用通常需要在 checks 与标签落定后再执行 `kc pr aggregate`。本轮仍不连接 GitHub：真实 PR 创建、checks、来源关闭与远端分支状态维持 **rv-4 NOT RUN**，本修复不改变该边界。
+
 ## Review state
 
 Independent verifier round 1 reports **PASS** in the sibling `verifier-report.md`. The verifier records ten unrelated sandbox `EPERM` migration failures and pending PR / CI presentation as non-blocking; no live GitHub behavior is claimed. PR / CI publication remains runner-owned, and the three `Human-Confirmed` items remain open.
