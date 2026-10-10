@@ -106,25 +106,19 @@ def run_agent_repositories_once(
         # was injected so existing callers (tests, ad-hoc scripts) keep their
         # previous behaviour.
         if not dry_run and transcript_runner_factory is not None:
-            try:
-                from backend.core.use_cases.agent_runner_deliberation_issues import (
-                    process_deliberation_issues,
-                )
+            from backend.core.use_cases.agent_runner_deliberation_issues import (
+                run_deliberation_phase,
+            )
 
-                process_deliberation_issues(
-                    repo_path=context.repo_path,
-                    config=context.config,
-                    github_client=github_client,
-                    transcript_runner_factory=transcript_runner_factory,
-                    max_issues=max_deliberation_issues,
-                    stale_rounds_before_hint=context.config.deliberation.stale_rounds_before_hint,
-                )
-            except Exception as exc:  # noqa: BLE001 - isolate Phase 0 failures.
-                _logger.error(
-                    "Deliberation phase failed for repository '%s': %s",
-                    context.repo_id,
-                    exc,
-                )
+            run_deliberation_phase(
+                repo_path=context.repo_path,
+                config=context.config,
+                github_client=github_client,
+                transcript_runner_factory=transcript_runner_factory,
+                max_issues=max_deliberation_issues,
+                stale_rounds_before_hint=context.config.deliberation.stale_rounds_before_hint,
+                repo_id=context.repo_id,
+            )
 
         if not dry_run:
             try:

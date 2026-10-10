@@ -185,7 +185,7 @@ config_app = typer.Typer(
     context_settings=_HELP_CONTEXT,
 )
 container_app = typer.Typer(
-    help="Manage the KedaCode runner container (auth import, up, down, logs).",
+    help="Manage the KedaCode runner container (auth import, up, down, logs, gc).",
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )

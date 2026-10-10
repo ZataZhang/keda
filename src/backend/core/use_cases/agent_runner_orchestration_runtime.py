@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -609,6 +610,19 @@ class RunOnceRequest:
     #: 调用方传的仍是 ``NORMAL``（默认值），但它是**调用侧请求档位**——认领后
     #: core 会用 Issue 上的 ``direct-pr`` 标签把它升级为 ``DIRECT``（逐 Issue 独立）。
     publish_stage: PublishStage = PublishStage.NORMAL
+    #: 资源不足时在创建 claim/worktree 前拒绝新任务；None 表示沿用原行为。
+    issue_admission_check: Callable[[], bool] | None = None
+
+
+def _is_issue_admitted(request: RunOnceRequest, issue: IssueSummary) -> bool:
+    """在启动 worker 前检查可选资源准入门。"""
+    if request.issue_admission_check is None or request.issue_admission_check():
+        return True
+    _logger.warning(
+        "Disk admission paused before claiming Issue #%d; the Issue remains queued.",
+        issue.number,
+    )
+    return False
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -910,6 +924,8 @@ def run_once(request: RunOnceRequest) -> int:
 
         def _process_serial(item: tuple[IssueSummary, str]) -> int:
             issue, issue_kind = item
+            if not _is_issue_admitted(request, issue):
+                return 0
             try:
                 with issue_output_routing(
                     repo_id=effective_repo_id,
@@ -949,6 +965,8 @@ def run_once(request: RunOnceRequest) -> int:
 
     def _process_with_routing(item: tuple[IssueSummary, str]) -> int:
         issue, issue_kind = item
+        if not _is_issue_admitted(request, issue):
+            return 0
         try:
             with issue_output_routing(
                 repo_id=effective_repo_id,

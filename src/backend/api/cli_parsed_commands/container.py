@@ -22,6 +22,8 @@ from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_runner_container import (
     StartRunnerContainerOptions,
+    garbage_collect_runner_resources,
+    ContainerGcRequest,
     create_default_container_auth_importer,
     create_default_container_ops_controller,
     import_container_auth,
@@ -196,6 +198,65 @@ def run_container_logs_command(ctx: ParsedCommandContext) -> int:
     return 0
 
 
+def run_container_gc_command(ctx: ParsedCommandContext) -> int:
+    """``kc container gc``：预览或显式清理安全的 Docker 镜像与缓存。"""
+    parsed = ctx.parsed
+    should_apply = bool(getattr(parsed, "apply", False))
+    requested_dry_run = bool(getattr(parsed, "dry_run", False))
+    cache_retention_days = int(getattr(parsed, "cache_retention_days", 90))
+    if should_apply and requested_dry_run:
+        raise CliError(
+            "Pass either --apply or --dry-run, not both.",
+            code=ExitCode.USAGE,
+            suggestion="kc container gc --dry-run",
+        )
+    if cache_retention_days < 1:
+        raise CliError(
+            "--cache-retention-days must be at least 1.",
+            code=ExitCode.USAGE,
+            suggestion="kc container gc --cache-retention-days 90 --dry-run",
+        )
+
+    controller = create_default_container_ops_controller()
+    try:
+        gc_result = garbage_collect_runner_resources(
+            controller,
+            ContainerGcRequest(
+                apply=should_apply,
+                cache_retention_days=cache_retention_days,
+            ),
+        )
+    except FileNotFoundError as exc:
+        raise CliError(
+            str(exc),
+            code=ExitCode.NOT_FOUND,
+            suggestion="Install Docker Engine and its Buildx plugin, then retry.",
+        ) from exc
+
+    mode_label = "apply" if should_apply else "dry-run"
+    console.print(f"Container GC ({mode_label})", markup=False)
+    console.print(
+        f"Scanned={gc_result.scanned_count} eligible={gc_result.eligible_count} "
+        f"deleted={gc_result.deleted_count} skipped={gc_result.skipped_count} "
+        f"failed={gc_result.failed_count}",
+        markup=False,
+    )
+    console.print(
+        f"Host disk: used={gc_result.disk_used_bytes} free={gc_result.disk_free_bytes} "
+        f"total={gc_result.disk_total_bytes} bytes",
+        markup=False,
+    )
+    for gc_entry in gc_result.entries:
+        console.print(
+            f"{gc_entry.status}: {gc_entry.resource_type} {gc_entry.resource_id} — "
+            f"{gc_entry.reason}",
+            markup=False,
+        )
+    if not should_apply:
+        console.print("Preview only; pass --apply to delete eligible resources.", markup=False)
+    return int(ExitCode.GENERAL if gc_result.failed_count else ExitCode.SUCCESS)
+
+
 def _dry_run_runner(dry_run: bool):
     """``--dry-run`` 时屏蔽实际 docker 调用，仅打印 argv。"""
     if not dry_run:
@@ -215,6 +276,7 @@ def _dry_run_runner(dry_run: bool):
 __all__ = [
     "run_container_auth_import_command",
     "run_container_down_command",
+    "run_container_gc_command",
     "run_container_logs_command",
     "run_container_up_command",
 ]

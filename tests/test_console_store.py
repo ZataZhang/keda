@@ -294,6 +294,48 @@ def test_audit_round_trip(tmp_path: Path) -> None:
     assert audits[0].issue_number == 19
 
 
+def test_prune_expired_summaries_keeps_audit_and_recent_rows(tmp_path: Path) -> None:
+    """仅分批删除旧的已完成运行与 attempt 摘要，保留审计和近期行。"""
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    old_run = replace(_make_run_record(issue_number=1), finished_at="2026-06-11T10:05:00+00:00")
+    recent_run = replace(_make_run_record(issue_number=2), finished_at="2026-09-11T10:05:00+00:00")
+    store.append_run(old_run)
+    store.append_run(replace(old_run, issue_number=3))
+    store.append_run(recent_run)
+    old_attempt = replace(
+        _make_attempt_record(attempt_number=1), finished_at="2026-06-11T10:05:00+00:00"
+    )
+    store.append_attempt(old_attempt)
+    store.append_attempt(replace(old_attempt, attempt_number=2))
+    store.append_attempt(
+        replace(old_attempt, attempt_number=3, finished_at="2026-09-11T10:05:00+00:00")
+    )
+    store.append_audit(
+        AuditEntry(
+            occurred_at="2026-01-01T00:00:00+00:00",
+            actor="console",
+            action="credential_updated",
+            repo_id="keda-main",
+            issue_number=None,
+            params_json="{}",
+            result="accepted",
+            detail=None,
+        )
+    )
+
+    deleted_run_count, deleted_attempt_count = store.prune_expired_summaries(
+        cutoff="2026-07-01T00:00:00+00:00", batch_size=1
+    )
+
+    assert (deleted_run_count, deleted_attempt_count) == (2, 2)
+    assert [run.issue_number for run in store.list_recent_runs(limit=10)] == [2]
+    assert [
+        attempt.attempt_number
+        for attempt in store.list_issue_attempts(repo_id="keda-main", issue_number=99, limit=10)
+    ] == [3]
+    assert len(store.list_recent_audits(limit=10)) == 1
+
+
 def test_daily_trend_groups_by_day_and_outcome(tmp_path: Path) -> None:
     """Trend aggregation should bucket by day with per-outcome counts."""
     store = SqliteConsoleStore(tmp_path / "console.db")

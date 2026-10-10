@@ -67,7 +67,7 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     container_parser = subparsers.add_parser(
         "container",
-        help="Manage the KedaCode runner container (auth import, up, down, logs).",
+        help="Manage the KedaCode runner container (auth import, up, down, logs, gc).",
     )
     container_subparsers = container_parser.add_subparsers(dest="container_command", required=True)
 
@@ -141,6 +141,29 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
         "--no-follow",
         action="store_true",
         help="Dump existing logs and exit instead of streaming.",
+    )
+
+    container_gc_parser = container_subparsers.add_parser(
+        "gc",
+        help="Preview or explicitly apply safe host Docker image and cache cleanup.",
+    )
+    container_gc_parser.set_defaults(command="container gc")
+    container_gc_mode = container_gc_parser.add_mutually_exclusive_group()
+    container_gc_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="Delete only the resources reported as eligible.",
+    )
+    container_gc_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview cleanup without deleting (the default).",
+    )
+    container_gc_parser.add_argument(
+        "--cache-retention-days",
+        type=int,
+        default=90,
+        help="Keep build cache used within this many days (default: 90).",
     )
 
     takeover_parser = subparsers.add_parser(

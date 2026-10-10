@@ -11,6 +11,7 @@ import pytest
 
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    DaemonConfig,
     RepositoryRunContext,
 )
 from backend.core.use_cases.agent_runner_reclaim import format_claim_marker
@@ -228,3 +229,88 @@ def test_repo_level_ttl_overrides_caller_default(
     )
 
     assert config.labels.ready in github.get_issue(7).labels
+
+
+@pytest.mark.parametrize("maintenance_enabled", [False, True])
+def test_hosted_maintenance_prunes_only_when_repo_opts_in(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    maintenance_enabled: bool,
+) -> None:
+    """显式启用才调用历史摘要清理端口；默认本地 daemon 不进入新维护路径。"""
+
+    class RecordingHistoryStore:
+        def __init__(self) -> None:
+            self.cutoffs: list[str] = []
+
+        def prune_expired_summaries(self, *, cutoff: str, batch_size: int = 5000):
+            self.cutoffs.append(cutoff)
+            return 1, 2
+
+    _stop_after_first_pass(monkeypatch)
+    config = AppConfig(daemon=DaemonConfig(hosted_maintenance_enabled=maintenance_enabled))
+    history_store = RecordingHistoryStore()
+    with pytest.raises(StopIteration):
+        run_agent_daemon(
+            contexts=[_build_context("maintenance-test", tmp_path, config=config)],
+            interval=1,
+            agent="claude",
+            max_issues=1,
+            process_runner=FakeProcessRunner(),
+            github_client_factory=lambda _repo_path: FakeGitHubClient(),
+            run_history_store=history_store,
+            reconcile_stale_attempts=False,
+        )
+
+    assert len(history_store.cutoffs) == int(maintenance_enabled)
+
+
+@pytest.mark.parametrize("maintenance_enabled", [False, True])
+def test_hosted_worktree_cleanup_runs_after_issue_workers_only_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    maintenance_enabled: bool,
+) -> None:
+    """仅显式托管维护会在 run_once 的 worker 全部退出后调用 worktree cleaner。"""
+    from backend.core.use_cases import run_agent_daemon as daemon_module
+    from backend.core.use_cases.worktree_cleanup import WorktreeCleanupResult
+
+    events: list[str] = []
+
+    def stop_after_one_pass(_seconds: float) -> None:
+        raise StopIteration
+
+    def finish_workers(**_kwargs) -> None:
+        events.append("workers-finished")
+
+    def record_cleanup(*_args, **_kwargs) -> WorktreeCleanupResult:
+        events.append("cleanup")
+        return WorktreeCleanupResult(branches=())
+
+    def record_log_cleanup(*_args, **_kwargs):
+        events.append("logs-cleanup")
+
+    monkeypatch.setattr(daemon_module.time, "sleep", stop_after_one_pass)
+    monkeypatch.setattr(daemon_module, "process_prd_rework_issues", lambda **_kwargs: None)
+    monkeypatch.setattr(daemon_module, "run_once", finish_workers)
+    monkeypatch.setattr(daemon_module, "cleanup_iar_worktrees", record_cleanup)
+    monkeypatch.setattr(daemon_module, "_run_hosted_issue_log_cleanup", record_log_cleanup)
+    config = AppConfig(daemon=DaemonConfig(hosted_maintenance_enabled=maintenance_enabled))
+
+    with pytest.raises(StopIteration):
+        run_agent_daemon(
+            contexts=[_build_context("worktree-maintenance-test", tmp_path, config=config)],
+            interval=1,
+            agent="claude",
+            max_issues=1,
+            process_runner=FakeProcessRunner(),
+            github_client_factory=lambda _repo_path: FakeGitHubClient(),
+            reconcile_stale_attempts=False,
+        )
+
+    expected_events = (
+        ["workers-finished", "cleanup", "logs-cleanup"]
+        if maintenance_enabled
+        else ["workers-finished"]
+    )
+    assert events == expected_events
