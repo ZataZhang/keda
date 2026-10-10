@@ -1,5 +1,7 @@
 # PRD: Console 交付进度信号：验收证据「计划 vs 产出」与影响树触达
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/274
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
