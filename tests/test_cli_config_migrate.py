@@ -47,13 +47,19 @@ id = "target-local"
 
 @pytest.fixture(autouse=True)
 def _isolated_global_config_and_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """把全局配置与家目录都指到临时目录，真实机器上的状态一律看不见。"""
+    """把配置与家目录隔离，避免 CLI 用例依赖宿主机进程表。"""
     isolated_config_path = tmp_path / "isolated-config.toml"
     isolated_config_path.write_text("[agent_runner]\n", encoding="utf-8")
     monkeypatch.setenv(product_identity.LEGACY_ENV_PREFIX + "CONFIG", str(isolated_config_path))
     fake_home_path = tmp_path / "home"
     fake_home_path.mkdir()
     monkeypatch.setenv("HOME", str(fake_home_path))
+    # 真实进程扫描由 test_state_home_migration.py 覆盖；这里验证 CLI/文件迁移，
+    # 不让 psutil 的宿主机权限或其他工作树里运行的 kc 进程污染隔离 HOME。
+    monkeypatch.setattr(
+        "backend.engines.agent_runner.state_home_migration._pids_from_command_scan",
+        lambda _target_home_path: frozenset(),
+    )
     return fake_home_path
 
 
