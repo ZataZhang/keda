@@ -13,6 +13,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from backend.api import cli as _cli
+from backend.api.agent_runner_views.live_terminal import create_output_view
 from backend.api.cli_console import console, error_console
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_helpers import repository_selector_error, require_single_repository_target
@@ -23,7 +25,7 @@ from backend.api.cli_output import (
     emit_json,
 )
 from backend.api.cli_parsed_context import ParsedCommandContext
-from backend.api import cli as _cli
+from backend.core.shared.models.agent_deliberation import DeliberationSession
 from backend.core.shared.models.agent_spec import AGENT_PROFILES
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_KEYS
 from backend.core.use_cases.agent_invocation import (
@@ -31,10 +33,6 @@ from backend.core.use_cases.agent_invocation import (
     build_agent_invocation,
     resolve_agent_spec,
 )
-from backend.core.use_cases.interactive_decision import run_interactive_decision
-from backend.core.use_cases.lifecycle_agent_resolution import resolve_lifecycle_agent
-from backend.api.agent_runner_views.live_terminal import create_output_view
-from backend.core.shared.models.agent_deliberation import DeliberationSession
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config,
     build_app_config_from_settings,
@@ -45,11 +43,15 @@ from backend.core.use_cases.agent_runner_factory import (
 )
 from backend.core.use_cases.agent_runner_failure_resolver import AgentFailureResolver
 from backend.core.use_cases.agent_runner_output_protocols import get_output_protocol_registry
+from backend.core.use_cases.interactive_decision import run_interactive_decision
+from backend.core.use_cases.lifecycle_agent_resolution import resolve_lifecycle_agent
 from backend.core.use_cases.lifecycle_agents_console import (
     SCOPE_EFFECTIVE,
     SCOPE_GLOBAL,
     SCOPE_REPOSITORY,
     LifecycleAgentsUpdateError,
+)
+from backend.core.use_cases.lifecycle_settings_console import (
     build_fallback_candidates_view,
     build_lifecycle_settings_view,
     validate_fallback_candidates_update,
@@ -984,18 +986,18 @@ def run_agent_fallback_candidate_preset_unset_command(ctx: ParsedCommandContext)
 
 __all__ = [
     "run_agent_doctor_command",
-    "run_agent_list_command",
-    "run_agent_presets_command",
-    "run_agent_lifecycle_list_command",
-    "run_agent_lifecycle_set_command",
-    "run_agent_lifecycle_unset_command",
-    "run_agent_preset_set_command",
-    "run_agent_fallback_list_command",
     "run_agent_fallback_candidate_add_command",
-    "run_agent_fallback_candidate_remove_command",
     "run_agent_fallback_candidate_move_command",
     "run_agent_fallback_candidate_preset_set_command",
     "run_agent_fallback_candidate_preset_unset_command",
+    "run_agent_fallback_candidate_remove_command",
+    "run_agent_fallback_list_command",
+    "run_agent_lifecycle_list_command",
+    "run_agent_lifecycle_set_command",
+    "run_agent_lifecycle_unset_command",
+    "run_agent_list_command",
+    "run_agent_preset_set_command",
+    "run_agent_presets_command",
     "run_ask_command",
     "run_deliberate_command",
     "run_repl_command",

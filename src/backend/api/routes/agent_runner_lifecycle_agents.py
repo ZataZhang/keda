@@ -7,7 +7,9 @@
 - PRD 层（PRD 原文页）-> 该 PRD 文件头部 ``lifecycle_agents`` 块。
 
 路由层只做 HTTP 映射与 4xx 转换，生效值计算与入参校验收敛在 core 用例
-:mod:`backend.core.use_cases.lifecycle_agents_console`。
+:mod:`backend.core.use_cases.lifecycle_agents_console`（Agent-only 旧矩阵视图）、
+:mod:`backend.core.use_cases.lifecycle_settings_console`（九阶段聚合视图与写前校验）与
+:mod:`backend.core.use_cases.lifecycle_settings_integrity`（预设引用完整性门禁）。
 """
 
 from __future__ import annotations
@@ -39,16 +41,20 @@ from backend.core.use_cases.lifecycle_agents_console import (
     LifecycleAgentsUpdateError,
     build_agent_fallback_order_view,
     build_agent_labels_view,
-    build_fallback_candidates_view,
     build_lifecycle_agents_view,
-    build_lifecycle_settings_view,
     validate_agent_fallback_order_update,
     validate_agent_labels_update,
-    validate_fallback_candidates_update,
     validate_lifecycle_agents_update,
+)
+from backend.core.use_cases.lifecycle_settings_console import (
+    build_fallback_candidates_view,
+    build_lifecycle_settings_view,
+    validate_fallback_candidates_update,
     validate_lifecycle_preset_binding_update,
-    validate_lifecycle_settings_reference_integrity,
     validate_preset_update,
+)
+from backend.core.use_cases.lifecycle_settings_integrity import (
+    validate_lifecycle_settings_reference_integrity,
 )
 from backend.core.use_cases.prd_content_reader import (
     PrdContentError,
