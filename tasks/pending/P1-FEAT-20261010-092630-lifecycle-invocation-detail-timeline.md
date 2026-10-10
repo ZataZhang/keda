@@ -1,5 +1,7 @@
 # PRD: 生命周期时间线接入调用明细与展示去噪
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/273
+
 > ✅ **交付前置**：无，可立即开工。结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 >
 > ⬜ **验收状态**：未开工。本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
