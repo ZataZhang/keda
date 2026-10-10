@@ -84,15 +84,17 @@
               </div>
 
               <div class="process-toolbar">
-                <div><strong>生命周期时间线</strong><span>状态变化按发生时间追加，失败与重试历史不会被覆盖</span></div>
+                <div><strong>生命周期时间线</strong><span>执行会话 → Agent 尝试 → 调用；状态变化按发生时间追加，失败与重试历史不会被覆盖</span></div>
                 <div class="scenario-switch" aria-label="演示场景">
                   <button class="is-active hotspot-target" type="button" data-scenario="normal" aria-pressed="true">正常轨迹</button>
                   <button class="hotspot-target" type="button" data-scenario="failure" aria-pressed="false">失败与重试</button>
                   <button class="hotspot-target" type="button" data-scenario="degraded" aria-pressed="false">观测写入失败</button>
+                  <button class="hotspot-target" type="button" data-scenario="unavailable" aria-pressed="false">调用明细不可用</button>
+                  <button class="hotspot-target" type="button" data-scenario="legacy" aria-pressed="false">旧记录（无归属）</button>
                 </div>
               </div>
 
-              <ol class="timeline" id="timeline"></ol>
+              <div id="timeline-root"></div>
               <aside class="event-inspector" id="event-inspector" hidden aria-live="polite">
                 <button type="button" aria-label="关闭事件详情" data-close-inspector>×</button>
                 <span>事件详情</span><h3 id="inspector-title"></h3><p id="inspector-detail"></p><dl id="inspector-meta"></dl>

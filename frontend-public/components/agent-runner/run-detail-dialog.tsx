@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 
-import { formatLifecycleDuration } from "@/components/backlog/prd-lifecycle-view";
+import {
+  describeInvocationModel,
+  formatLifecycleDuration,
+  INVOCATION_PHASE_LABELS,
+  INVOCATION_ROLE_LABELS,
+} from "@/components/backlog/prd-lifecycle-format";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -47,31 +52,6 @@ const LIFECYCLE_PHASE_LABELS: Record<string, string> = {
   closeout: "交付收尾",
   rv_reexec: "提交后验收重跑",
   verifier: "独立复核",
-};
-
-const INVOCATION_PHASE_LABELS: Record<string, string> = {
-  implementation: "编写代码",
-  fix: "修复问题",
-  review: "代码审查",
-  review_repair: "按审查意见修复",
-  verification: "运行验证",
-  verification_recovery: "修复验证问题",
-  rebase_recovery: "同步分支并处理冲突",
-  closeout: "交付收尾",
-  supervisor: "自动检查进度",
-  supervisor_repair: "检查发现问题后的修复",
-  content_generation: "生成任务内容",
-  unspecified: "Agent 工作",
-};
-
-const INVOCATION_ROLE_LABELS: Record<string, string> = {
-  implementer: "负责修改代码",
-  fixer: "负责修复问题",
-  reviewer: "负责审查代码",
-  verifier: "负责运行验证",
-  supervisor: "负责检查进度",
-  content_generator: "负责生成内容",
-  unspecified: "角色未记录",
 };
 
 /** 将运行结果的机器错误摘要整理成先给人看的失败结论。 */
@@ -142,26 +122,6 @@ function getRunFailureExplanation(
       : "没有保存更具体的失败阶段；可以展开下方原始错误信息查看运行器记录。",
     nextStep: null,
   };
-}
-
-/** 用准确但易读的文字说明模型名称来自哪里。 */
-function describeInvocationModel(invocationDetail: RunInvocationDetailEntry): string {
-  const requestedModel = invocationDetail.requested_model;
-  const reportedModel = invocationDetail.reported_model;
-
-  if (requestedModel && reportedModel && requestedModel !== reportedModel) {
-    return `KC 下发：${requestedModel}；执行器报告：${reportedModel}`;
-  }
-  if (requestedModel && reportedModel) {
-    return `KC 下发且执行器报告：${requestedModel}`;
-  }
-  if (requestedModel) {
-    return `KC 下发：${requestedModel}；执行器没有报告模型名称`;
-  }
-  if (reportedModel) {
-    return `执行器报告：${reportedModel}；KC 没有单独指定模型`;
-  }
-  return "无法确认具体模型：执行器没有上报，KC 也没有单独指定。";
 }
 
 /** 显示一次运行的失败结论、实际 Agent 调用时间线和详细记录。 */

@@ -12,8 +12,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatLifecycleDuration,
+  formatTokenCount,
   PHASE_LABELS,
-} from "@/components/backlog/prd-lifecycle-view";
+} from "@/components/backlog/prd-lifecycle-format";
 import {
   fetchCompletionStats,
   fetchPrdLifecycleStats,
@@ -28,7 +29,6 @@ import type {
   RunRecordEntry,
   TokenUsageTotals,
 } from "@/lib/api/types";
-import { formatTokenCount } from "@/components/backlog/prd-lifecycle-view";
 
 export default function StatsPage() {
   const [stats, setStats] = useState<RepositoryCompletionStats[] | null>(null);

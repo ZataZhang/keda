@@ -3485,7 +3485,9 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 
 ## Agent 调用记录与停滞诊断（Invocation Tracing）
 
-**入口没有变化**：仍然是 `kc logs --repo <path> --issue <N> [--follow]`，没有新命令、新旗标、新 JSON 汇总或新页面。变的只是这条流里多了三种结构化标记行。
+**入口没有变化**：仍然是 `kc logs --repo <path> --issue <N> [--follow]`，没有新命令、新旗标、新 JSON 汇总。变的只是这条流里多了三种结构化标记行。
+
+同一批调用事件另外还喂给 Backlog PRD 详情的「执行过程」标签页（只读消费，见下文「PRD 生命周期账本与执行分析」的 `invocations` 区）：`grep '\[iar-invocation-'` 仍是逐条核对的第一入口，页面只是把同一事实按会话/尝试分组呈现，不改口径、不补数据。
 
 ### 为什么需要它
 
@@ -4011,7 +4013,8 @@ GET /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
     current_phase / in_progress / outcome / history_complete / started_at /
     finished_at / durations{end_to_end_seconds, active_seconds,
     waiting_seconds, blocked_seconds} / events[]（每条含 event_type / phase /
-    status / actor / occurred_at / detail，status 为逐行状态徽章事实源）/ has_data
+    status / actor / occurred_at / detail，status 为逐行状态徽章事实源）/
+    invocations{available, truncated, rows[]}（调用明细，见下）/ has_data
 
 GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
     仓库级统计：completed_runs / average_end_to_end_seconds /

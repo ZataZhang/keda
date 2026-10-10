@@ -32,6 +32,7 @@ from backend.core.shared.interfaces.runner_console import (
 )
 from backend.core.shared.models.agent_runner import AttemptResult
 from backend.core.shared.models.backlog import (
+    PrdInvocationDetail,
     PrdLifecycleDetail,
     PrdLifecycleDurations,
     PrdLifecycleEventView,
@@ -42,6 +43,10 @@ from backend.core.shared.models.backlog import (
 from backend.core.use_cases.agent_runner_token_stats import (
     aggregate_token_usage,
     build_token_usage_by_prd,
+)
+from backend.core.use_cases.prd_invocation_detail import (
+    build_prd_invocation_detail,
+    with_invocation_run_detail,
 )
 
 _logger = logging.getLogger(__name__)
@@ -343,6 +348,9 @@ def record_lifecycle_event(
         event_key: run 内唯一键；缺省用 ``event_type@occurred_at``，可抵抗同秒重复写。
         detail: 结构化非敏感摘要。
     """
+    # 会话标识注入：仅在一次 Issue 处理会话内补 `invocation_run`，供「执行过程」视图
+    # 把生命周期事件确定性归组到执行会话；上下文之外（roadmap 侧事件）保持不写。
+    event_detail = with_invocation_run_detail(detail)
     lifecycle_store = resolve_lifecycle_store(store)
     if lifecycle_store is None:
         return
@@ -375,7 +383,7 @@ def record_lifecycle_event(
         status=status.value,
         actor=actor,
         occurred_at=timestamp,
-        detail_json=_json_detail(detail),
+        detail_json=_json_detail(event_detail),
     )
     _safe_store_call(
         lifecycle_store,
@@ -695,7 +703,18 @@ def build_prd_lifecycle_detail(
     if run_record is None:
         return _empty_lifecycle_detail(repo_id, prd_path)
 
-    return _build_lifecycle_detail_for_run(lifecycle_store, run_record, now=now)
+    # 调用明细只在单 PRD 详情路径挂接：列表路径按 run 逐个组装，逐条读账本会放大
+    # 读取次数且列表视图不展示调用区。issue_number 为空时不挂接（无从归属）。
+    invocation_detail = (
+        build_prd_invocation_detail(
+            store=store, repo_id=repo_id, issue_number=run_record.issue_number
+        )
+        if run_record.issue_number is not None
+        else None
+    )
+    return _build_lifecycle_detail_for_run(
+        lifecycle_store, run_record, now=now, invocation_detail=invocation_detail
+    )
 
 
 def _build_lifecycle_detail_for_run(
@@ -703,6 +722,7 @@ def _build_lifecycle_detail_for_run(
     run_record: PrdLifecycleRunRecord,
     *,
     now: datetime | None = None,
+    invocation_detail: PrdInvocationDetail | None = None,
 ) -> PrdLifecycleDetail:
     """由一条 run 记录和其事件构建生命周期详情。"""
     try:
@@ -738,6 +758,7 @@ def _build_lifecycle_detail_for_run(
             for event in stored_events
         ],
         has_data=True,
+        invocations=invocation_detail,
     )
 
 

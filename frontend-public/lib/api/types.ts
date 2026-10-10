@@ -570,6 +570,49 @@ export type PrdLifecycleEventView = {
   detail: Record<string, unknown>;
 };
 
+/**
+ * 一次真实进程调用在「执行过程」视图里的展示行。
+ *
+ * 字段与后端 `PrdInvocationRow` 逐字对应，全部来自调用账本已落库的事实：
+ * `outcome` 为闭集语义（ok / failed / timeout / error / unclosed / incomplete），
+ * 未闭合调用的 `finished_at` 与 `duration_seconds` 恒为 null（前端不得估算）；
+ * 模型三态由 requested/reported/model_source 共同表达。
+ */
+export type PrdInvocationRow = {
+  invocation_id: string;
+  run_id: string;
+  attempt_number: number | null;
+  phase: string;
+  role: string;
+  executor: string;
+  outcome: string;
+  failure_category: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  requested_model: string | null;
+  reported_model: string | null;
+  model_source: string | null;
+  token_usage: Record<string, unknown> | null;
+  retry_of: string | null;
+  retry_reason: string | null;
+  exit_code: number | null;
+  log_locator: string | null;
+};
+
+/**
+ * 调用明细读取区（三类缺口必须可区分，不得由前端推测）。
+ *
+ * `available=false` 表示账本不可读或该 PRD 无从归属调用事实；`available=true`
+ * 且 `rows` 为空表示账本可读但确实没有记录——两者的页面文案不同。
+ * `truncated=true` 表示返回条数已达读取上限，展示的不是完整历史。
+ */
+export type PrdInvocationDetail = {
+  available: boolean;
+  truncated: boolean;
+  rows: PrdInvocationRow[];
+};
+
 /** 单个 PRD 的生命周期详情（Backlog 详情“执行过程”标签的数据源）。 */
 export type PrdLifecycleDetail = {
   repo_id: string;
@@ -587,6 +630,8 @@ export type PrdLifecycleDetail = {
   events: PrdLifecycleEventView[];
   /** false 表示该 PRD 还没有任何 lifecycle run/event。 */
   has_data: boolean;
+  /** 旧响应没有该字段，此时按「无调用明细区」处理。 */
+  invocations?: PrdInvocationDetail | null;
 };
 
 /** 仓库级 PRD 生命周期统计中的单行 PRD 明细。 */
