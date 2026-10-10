@@ -39,6 +39,8 @@ Every example below uses the current command name `kc`. The legacy `iar` command
 
 Whenever the reader of the output is a program rather than a human, pass `--json` explicitly. `--json` is an alias of `--output json`; with neither flag the output stays the human table, **including when stdout is a pipe**, so never assume a machine format.
 
+- Startup update checks never disturb a program: machine mode, the completion protocol, `--help`, `--version`, non-TTY stdin/stderr, and `KEDACODE_NO_UPDATE_CHECK=1` each skip the PyPI visit and the upgrade prompt entirely, so scripted invocations never block on a question.
+
 - In JSON mode stdout carries data only. Progress, warnings, and errors go to stderr, so `command > out.json` cannot be polluted by log lines.
 - A failure in JSON mode writes one envelope to stderr: `{"error", "message", "suggestion", "retryable", "exit_code"}`. `suggestion` is a runnable command, and the only safe way to continue is `$?` — do not parse English.
 - `kc ask` and `kc deliberate` reuse `--output` for an output **directory**, so `--output json` there means a directory literally named `json`. Neither takes `--json`; read their human summary or the written session files instead.
