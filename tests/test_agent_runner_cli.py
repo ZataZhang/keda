@@ -3065,7 +3065,7 @@ def test_main_registry_reinit_start_daemons_uses_config_directory_cwd(
     assert exit_code == 0, captured.err
     assert "Reinitialized" in _strip_ansi(captured.out)
     assert "Started daemon" in _strip_ansi(captured.out)
-    assert "Started review_daemon" in _strip_ansi(captured.out)
+    assert "Started supervise-daemon" in _strip_ansi(captured.out)
 
     # The local config initializer was invoked as part of reinit.
     mock_init.assert_called_once()

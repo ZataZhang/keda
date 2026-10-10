@@ -14,7 +14,7 @@
   <a href="https://pypi.org/project/kedacode/"><img src="https://img.shields.io/pypi/v/kedacode?style=flat-square" alt="PyPI"></a>
 </p>
 
-> 把 GitHub Issue 变成本地 AI Agent 队列。给 Issue 打上 `agent/ready`，`kc` 就会创建隔离 worktree、驱动 Claude / Codex / Kimi 改代码、跑验证、做 code review、推分支开 Draft PR，并在 PR 合并前持续盯着 CI 与评论变化。你不想用命令行时，`kc console` 一条命令打开内置的管理面板。
+> 把 GitHub Issue 变成本地 AI Agent 队列。给 Issue 打上 `agent/ready`，`kc` 就会创建隔离 worktree、驱动 Claude / Codex / Kimi 改代码、跑验证、做 code review、推分支开 Draft PR，并可按配置检查 PR 上的 CI 与评论变化；需要持续跟进时，可以显式启动监督 daemon。你不想用命令行时，`kc console` 一条命令打开内置的管理面板。
 >
 > 装什么、敲什么：`uv tool install kedacode` 之后主命令是 `kc`，也可以直接敲包名 `kedacode`（两者完全等价，见下方安装一节）；不想安装时可用 `uvx --from kedacode kc <命令>` 临时运行。旧命令 `iar` 长期作为弃用别名保留，新旧对照与迁移步骤见 `docs/guides/migrating-from-iar.md`。<!-- legacy-alias -->
 >
@@ -28,6 +28,36 @@
 <p align="center">
   <sub>Issue 认领后的执行链全貌——分诊、PRD 生成、发布档位与合并收尾；细节见 <a href="./docs/guides/agent-runner.md">docs/guides/agent-runner.md</a>。</sub>
 </p>
+
+### Agent 生命周期
+
+下面按职责分成三个彼此独立的功能区，它们不组成一条统一流程。每个功能区都有自己的入口和触发条件；同一功能区内的阶段也只在各自条件满足时运行。
+
+#### Issue 执行与交付
+
+| 生命周期 | 触发时机 | 做什么 |
+|---|---|---|
+| **实现（`implementation`）** | `kc run` / `kc daemon` 认领 `agent/ready` Issue | 根据 Issue 和 PRD 需求，在隔离 worktree 中完成代码改动。 |
+| **修复（`fix`）** | 实现后的验证失败 | 针对失败结果修正代码。 |
+| **收尾（`closeout`）** | 交付门禁失败 | 处理阻碍交付的问题。 |
+| **校验（`verifier`）** | 发布前的验证阶段 | 独立复核实现结果与验证证据，作为质量门禁。 |
+| **审核（`review`）** | 创建 Draft PR 之前 | 做代码审查，检查 findings 并推动问题收敛。 |
+| **监督（`supervisor`）** | 发布链创建 Draft PR 后，或显式运行 `kc supervise` | 与创建 Draft PR 前的代码审核（`review`）分开：它检查 PR 变更、CI 和讨论，决定等待、修复 / rebase、请求人工输入或转交人工审查，本身不合并 PR。发布链内的调用受 `post_pr_supervisor.enabled` 和发布档位控制（本仓库默认配置启用，`--direct-pr` 会跳过）；常驻进程不会由 `kc run` 自动常驻启动，可运行 `kc supervise-daemon`；通过 `kc registry start` 启动托管进程时默认会一并启动，想跳过可用 `--no-supervise-daemon`。 |
+
+#### 讨论与内容生成
+
+| 生命周期 | 触发时机 | 做什么 |
+|---|---|---|
+| **辩论（`deliberate`）** | `agent/deliberate` Issue 的讨论阶段 | 围绕复杂 Issue 做异步多角色讨论，整理澄清问题和结论，供后续 PRD 落地。 |
+| **内容生成（`content_generation`）** | 创建 Issue、从讨论生成 PRD，或创建 Draft PR 时 | 辅助生成 Issue 内容、PRD、Draft PR 标题和正文。 |
+
+#### 独立决策入口
+
+| 生命周期 | 触发时机 | 做什么 |
+|---|---|---|
+| **决策（`planner`）** | `kc ask` | 把自然语言请求整理成受限操作计划，默认先展示计划，确认后再执行；不依赖 Issue 流水线。 |
+
+各阶段的配置、消费点与覆盖规则见[生命周期 Agent 矩阵](./docs/guides/lifecycle-agent-matrix.md)。
 
 ## 一键安装
 
@@ -212,11 +242,11 @@ kc run
 # 处理 registry 中所有启用的仓库
 kc run --all
 
-# Daemon 模式轮询（默认每 120 秒，监控所有已注册仓库）
+# Daemon 模式轮询（默认每 120 秒处理当前仓库；加 --all 处理所有启用仓库）
 kc daemon
 
-# Review daemon 模式轮询（默认每 120 秒，监控所有已注册仓库）
-kc review-daemon
+# Post-PR supervisor daemon 模式轮询（默认每 120 秒处理当前仓库；加 --all 处理所有启用仓库）
+kc supervise-daemon
 
 # 只监控单个仓库
 kc daemon --repo-id keda

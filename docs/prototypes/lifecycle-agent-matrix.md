@@ -63,7 +63,7 @@ Settings 页在真实的「设置」标题与用户副标题下方显示「Agent
 | 实现 | 按 Issue 上挂的 `agent/*` 标签路由 | `choose_agent`（`run_agent_once.py`） |
 | 校验 | 从 `runner.agent_fallback_order` 里挑第一个 ≠ 实现者的 agent（独立性靠换模型） | `run_verifier_agent.py` 的 `_choose_verifier_agent` |
 | 审核 | `allow_same_agent` 为真时沿用实现者；否则从注册表取第一个 ≠ 实现者的 | `run_agent_once.py` 的 `resolve_reviewer_agent` |
-| 监督 | 发布路径沿用本次实现者；`kc review` 路径按标签路由 | `run_agent_once.py` 的 `resolve_supervisor_agent` |
+| 监督 | 发布路径沿用本次实现者；`kc supervise` 路径按标签路由 | `run_agent_once.py` 的 `resolve_supervisor_agent` |
 | 辩论 | 按 `agent/deliberate` 标签路由 | 辩论队列 |
 | 修复 / 收尾 / 决策 / 内容生成 | 无 `auto` 语义，不给该选项 | — |
 

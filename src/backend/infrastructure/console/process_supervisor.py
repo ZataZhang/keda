@@ -107,8 +107,9 @@ def _probe_pid(pid: int) -> tuple[bool, int | None]:
 
 
 #: 需要识别的 runner 子命令到 supervisor 内部 kind 字符串的映射。
-#: 顺序重要：review-daemon 必须在 daemon 之前检查，避免 "daemon" 子串误匹配。
+#: 顺序重要：supervisor daemon 名称必须在 daemon 之前检查，避免 "daemon" 子串误匹配。
 _UNMANAGED_KIND_PATTERNS = (
+    ("supervise-daemon", "review_daemon"),
     ("review-daemon", "review_daemon"),
     ("daemon", "daemon"),
 )
@@ -382,7 +383,7 @@ class PidfileProcessSupervisor:
     def list_unmanaged_processes(
         self, registry_entries: Sequence[Any]
     ) -> list[RunnerProcessRecord]:
-        """扫描系统进程，返回未在 pidfile 中登记的 kc daemon / review-daemon。
+        """扫描系统进程，返回未在 pidfile 中登记的 kc daemon / supervise-daemon。
 
         仅返回当前用户拥有的进程；命令行无法解析或不属于 registry 的进程
         被忽略。结果仅用于观测，不参与 ``stop`` / ``read_log`` 等托管操作。

@@ -1,6 +1,6 @@
 """CLI ``--preset`` 一次性锚定：把旗标合成为本轮的预设与阶段绑定。
 
-PRD FR-5：``run`` / ``daemon`` / ``review`` / ``review-daemon`` / ``ask`` /
+PRD FR-5：``run`` / ``daemon`` / ``supervise`` / ``supervise-daemon`` / ``ask`` /
 ``issue create`` 支持可选 ``--preset`` / ``--model`` / ``--reasoning-effort``，
 锚定各自主生命周期阶段并覆盖绑定同名字段。
 

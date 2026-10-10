@@ -6,8 +6,8 @@ Holds the runner-side commands:
 - :func:`logs_command` (top-level ``kc logs``) — placed between
   ``run_command`` and ``review_command`` so the historical ``kc --help``
   command order is preserved.
-- :func:`review_command` (top-level ``kc review``)
-- :func:`review_daemon_command` (top-level ``kc review-daemon``)
+- :func:`review_command` (top-level ``kc supervise``; ``kc review`` alias)
+- :func:`review_daemon_command` (top-level ``kc supervise-daemon``; ``kc review-daemon`` alias)
 - ``daemon_callback`` (default for ``kc daemon`` without subcommand)
 - :func:`daemon_run_command` and :func:`daemon_status_command` (under
   ``kc daemon``)
@@ -79,7 +79,7 @@ def _run_runner_command(
     as_json: bool = False,
     **extra_kwargs: Any,
 ) -> int:
-    """Run `run` or `review` through the shared dispatch path."""
+    """Run `run` or `supervise` through the shared dispatch path."""
     return _run_typer_repository_command(
         ctx,
         command,
@@ -203,7 +203,10 @@ def logs_command(
     ctx: typer.Context,
     kind: Annotated[
         LogsKindChoice,
-        typer.Option("--kind", help="Process kind to tail: daemon or review_daemon."),
+        typer.Option(
+            "--kind",
+            help="Process kind to tail: daemon or supervise_daemon (review_daemon is a legacy alias).",
+        ),
     ] = LogsKindChoice.daemon,
     lines: Annotated[
         int,
@@ -230,8 +233,8 @@ def logs_command(
     """Print the most recent log lines for a managed daemon process.
 
     By default the command targets the daemon for the repository inferred
-    from the current working directory.  Pass --kind review_daemon to tail
-    the review-daemon log instead.  Pass --issue <N> to read the per-Issue
+    from the current working directory. Pass --kind supervise_daemon to tail
+    the supervisor daemon log instead. Pass --issue <N> to read the per-Issue
     agent output log for one Issue instead of a process log.
     """
     selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
@@ -263,7 +266,7 @@ def logs_command(
     )
 
 
-@app.command("review")
+@app.command("supervise", help="Run one post-PR supervisor cycle.")
 def review_command(
     ctx: typer.Context,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview only.")] = False,
@@ -294,6 +297,10 @@ def review_command(
     )
 
 
+# 注册隐藏兼容命令；主 help 与 schema 只呈现 canonical 名称。
+app.command("review", hidden=True)(review_command)
+
+
 def _run_daemon_command(
     ctx: typer.Context,
     *,
@@ -311,7 +318,7 @@ def _run_daemon_command(
     model: str | None = None,
     reasoning_effort: str | None = None,
 ) -> int:
-    """Run daemon or review-daemon through the shared dispatch path."""
+    """Run the implementation daemon or post-PR supervisor daemon."""
     return _run_typer_repository_command(
         ctx,
         command,
@@ -390,7 +397,7 @@ def daemon_status_command(
     config: ConfigOption = None,
     all_repositories: AllRepositoriesOption = False,
 ) -> int:
-    """Show running daemon and review-daemon processes."""
+    """Show running agent and supervisor daemon processes."""
     selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
     return _run_typer_command(
         "daemon",
@@ -402,7 +409,7 @@ def daemon_status_command(
     )
 
 
-@app.command("review-daemon")
+@app.command("supervise-daemon", help="Run the post-PR supervisor continuously.")
 def review_daemon_command(
     ctx: typer.Context,
     interval: DaemonIntervalOption = None,
@@ -435,6 +442,10 @@ def review_daemon_command(
         model=model,
         reasoning_effort=reasoning_effort,
     )
+
+
+# 注册隐藏兼容命令；主 help 与 schema 只呈现 canonical 名称。
+app.command("review-daemon", hidden=True)(review_daemon_command)
 
 
 # Re-export the ``_typer_selector_options`` helper so ``daemon_status_command``

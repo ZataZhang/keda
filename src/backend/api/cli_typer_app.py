@@ -121,9 +121,10 @@ class IssueTypeChoice(str, Enum):
 
 
 class LogsKindChoice(str, Enum):
-    """Kind selector for ``kc logs``."""
+    """Kind selector for ``kc logs``; legacy process kind stays accepted."""
 
     daemon = "daemon"
+    supervise_daemon = "supervise_daemon"
     review_daemon = "review_daemon"
 
 
@@ -396,7 +397,7 @@ def _app_callback(
 #
 # Import order matters: Typer preserves the order in which commands register
 # on a Typer app. The original ``cli_typer`` module defined commands in this
-# order: init → registry → labels → issue → run/review/review-daemon/loop-daemon
+# order: init → registry → labels → issue → run/supervise/supervise-daemon/loop-daemon
 # → logs → recover/blocked-continue → ask/repl/deliberate → worktree/workflow
 # → takeover → loop. New read-only commands are appended after that baseline;
 # ``cli_typer_schema`` stays last so it does not reorder existing entries.

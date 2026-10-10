@@ -124,7 +124,7 @@ LIFECYCLE_AGENT_TRIGGERS: Mapping[str, str] = {
     "closeout": "同一次 claim 内，交付收尾阶段执行。",
     "verifier": "同一次 claim 内，实现产出后做验证。",
     "review": "同一次 claim 内，开 Draft PR 前审查。",
-    "supervisor": "同一次 claim 的发布路径，或 kc review / review-daemon 单独一轮。",
+    "supervisor": "同一次 claim 的发布路径，或 kc supervise / supervise-daemon 单独一轮。",
     "planner": "kc ask 交互式决策，不在任何 Issue 流水线上。",
     "content_generation": (
         "横切 kc issue create、--from-prompt 建 Issue、Phase 1 Issue→PRD 与开 Draft PR 四处。"

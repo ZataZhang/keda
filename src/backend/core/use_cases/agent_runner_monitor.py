@@ -373,16 +373,16 @@ def _derive_suggested_cli(
         "agent/blocked",
         "agent/failed",
     }:
-        _add("kc review --dry-run")
+        _add("kc supervise --dry-run")
     if pr_dirty:
-        _add("kc review")
+        _add("kc supervise")
         _add("kc run --max-issues 1")
     if worktree_dirty and primary_label != "agent/running":
         _add("kc run --dry-run")
     if primary_label == "agent/failed":
         _add("kc run --dry-run")
     if primary_label == "agent/blocked":
-        _add("kc review")
+        _add("kc supervise")
     if primary_label == "agent/ready":
         _add("kc run --dry-run")
     return tuple(suggested)
@@ -446,7 +446,7 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
                 type="label_pr_mismatch",
                 severity="warning",
                 message=("PR exists but Issue label does not reflect post-PR state."),
-                suggested_cli=("kc labels sync", "kc review --dry-run"),
+                suggested_cli=("kc labels sync", "kc supervise --dry-run"),
             )
         )
 
@@ -456,7 +456,7 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
                 type="pr_dirty_in_review",
                 severity="error",
                 message=("PR is dirty/conflicted while Issue is in review state."),
-                suggested_cli=("kc review", "kc run --max-issues 1"),
+                suggested_cli=("kc supervise", "kc run --max-issues 1"),
             )
         )
 

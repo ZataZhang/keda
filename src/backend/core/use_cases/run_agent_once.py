@@ -352,7 +352,7 @@ def resolve_supervisor_agent(
 
     生命周期矩阵（或 PRD 覆盖）显式声明了具体 agent 时用它；``fallback_agent``
     描述"配置为 ``auto`` 时用谁"：发布路径传本次实现者（保持历史行为），
-    ``kc review`` 不传，回落到按 Issue 标签路由。
+    ``kc supervise`` 不传，回落到按 Issue 标签路由。
 
     Args:
         issue: 当前 Issue。

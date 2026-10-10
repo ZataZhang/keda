@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 def _start_daemons_for_repo(repo_id: str, _repo_path: Path) -> None:
-    """Start managed daemon and review-daemon for a freshly registered repo.
+    """Start managed daemon and supervise-daemon for a freshly registered repo.
 
     The daemon is spawned from the directory containing the registry
     ``config.toml`` so the subprocess resolves the same global registry that was
@@ -137,7 +137,7 @@ def _run_takeover_command(parsed: argparse.Namespace, process_runner: IProcessRu
     if result.started_daemons:
         console.print(f"  Started {result.started_daemons} daemon(s)")
     if result.started_review_daemons:
-        console.print(f"  Started {result.started_review_daemons} review-daemon(s)")
+        console.print(f"  Started {result.started_review_daemons} supervise-daemon(s)")
     for repo_result in result.repositories:
         status = "[green]OK[/]" if repo_result.error is None else "[red]FAILED[/]"
         console.print(f"  {status} {repo_result.full_name} -> {repo_result.repo_path}")

@@ -35,6 +35,8 @@ _DEFAULT_ALLOWLIST: tuple[str, ...] = (
     "issue",
     "run",
     "daemon",
+    "supervise",
+    "supervise-daemon",
     "review",
     "review-daemon",
     "recover",

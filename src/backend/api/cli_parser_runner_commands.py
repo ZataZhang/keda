@@ -1,4 +1,4 @@
-"""agent 运行与守护命令树（run / daemon / logs / review / review-daemon / recover / blocked-continue）的 parser 构造。
+"""agent 运行与守护命令树（含 supervise 命令及其旧名 alias）的 parser 构造。
 
 从 :mod:`backend.api.cli_parser` 拆分而来：单文件超过 1000 非空行的 CI
 硬上限后，按命令域把命令树搬到这里，行为逐字节不变。
@@ -18,7 +18,7 @@ from backend.api.cli_parser_options import (
 
 
 def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
-    """注册agent 运行与守护命令树（run / daemon / logs / review / review-daemon / recover / blocked-continue）。
+    """注册 agent 运行与守护命令树（含 supervisor 入口及兼容别名）。
 
     Args:
         subparsers: 顶层 parser 的 subparsers action（就地注册，不返回）。
@@ -142,13 +142,13 @@ def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
 
     logs_parser = subparsers.add_parser(
         "logs",
-        help="Tail the daemon or review-daemon process log.",
+        help="Tail the agent daemon or post-PR supervisor daemon log.",
     )
     logs_parser.add_argument(
         "--kind",
-        choices=("daemon", "review_daemon"),
+        choices=("daemon", "supervise_daemon", "review_daemon"),
         default=None,
-        help="Process kind (default: daemon).",
+        help="Process kind: daemon or supervise_daemon (review_daemon remains accepted).",
     )
     logs_parser.add_argument(
         "--lines",
@@ -176,31 +176,36 @@ def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
     add_machine_output_options(logs_parser)
     add_common_options(logs_parser)
 
-    review_parser = subparsers.add_parser("review")
-    review_parser.add_argument("--dry-run", action="store_true")
-    review_parser.add_argument(
+    supervise_parser = subparsers.add_parser(
+        "supervise",
+        aliases=["review"],
+        help="Run one post-PR supervisor cycle (review is a compatibility alias).",
+    )
+    supervise_parser.add_argument("--dry-run", action="store_true")
+    supervise_parser.add_argument(
         "--agent", choices=agent_choices_with(prefix=("auto",)), default="auto"
     )
-    review_parser.add_argument("--max-issues", type=int)
-    add_model_preset_options(review_parser)
-    add_common_options(review_parser)
-    add_all_repositories_option(review_parser)
+    supervise_parser.add_argument("--max-issues", type=int)
+    add_model_preset_options(supervise_parser)
+    add_common_options(supervise_parser)
+    add_all_repositories_option(supervise_parser)
 
-    review_daemon_parser = subparsers.add_parser(
-        "review-daemon",
+    supervise_daemon_parser = subparsers.add_parser(
+        "supervise-daemon",
+        aliases=["review-daemon"],
         help=(
-            "Run supervisor review continuously for the current initialized "
+            "Run post-PR supervision continuously for the current initialized "
             "repository (or pass --all to target every enabled registry entry)."
         ),
     )
-    review_daemon_parser.add_argument("--interval", type=int, default=None)
-    review_daemon_parser.add_argument(
+    supervise_daemon_parser.add_argument("--interval", type=int, default=None)
+    supervise_daemon_parser.add_argument(
         "--agent", choices=agent_choices_with(prefix=("auto",)), default="auto"
     )
-    review_daemon_parser.add_argument("--max-issues", type=int)
-    add_model_preset_options(review_daemon_parser)
-    add_common_options(review_daemon_parser)
-    add_all_repositories_option(review_daemon_parser)
+    supervise_daemon_parser.add_argument("--max-issues", type=int)
+    add_model_preset_options(supervise_daemon_parser)
+    add_common_options(supervise_daemon_parser)
+    add_all_repositories_option(supervise_daemon_parser)
 
     recover_parser = subparsers.add_parser(
         "recover",

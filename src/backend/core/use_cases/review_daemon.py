@@ -1,4 +1,4 @@
-"""Post-PR review daemon — continuous polling across all targets."""
+"""Post-PR supervisor daemon — continuous polling across all targets."""
 
 from __future__ import annotations
 

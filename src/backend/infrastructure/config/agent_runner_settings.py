@@ -693,6 +693,7 @@ class AgentRunnerReplSettings(BaseModel):
         default_factory=lambda: [
             "labels sync --dry-run",
             "run --dry-run",
+            "supervise --dry-run",
             "review --dry-run",
             "ask --plan-only",
         ]
@@ -703,6 +704,8 @@ class AgentRunnerReplSettings(BaseModel):
         default_factory=lambda: [
             "run",
             "daemon",
+            "supervise",
+            "supervise-daemon",
             "review",
             "review-daemon",
             "issue create",

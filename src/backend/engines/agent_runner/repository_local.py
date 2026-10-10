@@ -326,7 +326,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "post_pr_supervisor.max_agent_crash_retries": "supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数",
     "post_pr_supervisor.crash_retry_initial_backoff_seconds": "崩溃重试的初始退避秒数，之后每次重试翻倍",
     "post_pr_supervisor.crash_retry_max_backoff_seconds": "崩溃重试单次退避等待的最大秒数",
-    "daemon.review_interval_seconds": "review-daemon 轮询间隔秒数",
+    "daemon.review_interval_seconds": "supervise-daemon 轮询间隔秒数",
     "daemon.run_interval_seconds": "daemon 轮询间隔秒数",
     "daemon.max_deliberation_issues": "每轮 Phase 0 审议最大 Issue 数",
     "daemon.reconcile_stale_attempts": "是否在每轮开头对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）；关闭后僵尸不被触碰",

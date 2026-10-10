@@ -65,6 +65,24 @@ from backend.core.use_cases.repository_registry import remove_registry_repositor
 # literal values directly.
 _DAEMON_KIND = RunnerProcessKind.DAEMON.value
 _REVIEW_DAEMON_KIND = RunnerProcessKind.REVIEW_DAEMON.value
+_PROCESS_KIND_DISPLAY_NAMES = {
+    _DAEMON_KIND: "daemon",
+    _REVIEW_DAEMON_KIND: "supervise-daemon",
+}
+
+
+def _display_process_kind(process_kind: RunnerProcessKind | str) -> str:
+    """把稳定的内部进程类型转换为面向用户的显示名称。
+
+    Args:
+        process_kind: 进程类型枚举或其稳定字符串值。
+
+    Returns:
+        面向用户的进程名称；未知类型原样返回。
+    """
+    kind_name = process_kind if isinstance(process_kind, str) else process_kind.value
+    return _PROCESS_KIND_DISPLAY_NAMES.get(kind_name, kind_name)
+
 
 if TYPE_CHECKING:
     import argparse
@@ -221,7 +239,7 @@ def _run_registry_list_command(
         table.add_column("display_name")
         table.add_column("path", overflow="fold")
         table.add_column("daemon", style="green")
-        table.add_column("review-daemon", style="green")
+        table.add_column("supervise-daemon", style="green")
 
         for entry in registry_entries:
             repo_running = running.get(entry.repo_id, {})
@@ -257,7 +275,7 @@ def _run_registry_list_command(
 
 
 def _run_registry_start_command(parsed: argparse.Namespace, process_runner: IProcessRunner) -> int:
-    """Start daemon and review-daemon for registered repositories."""
+    """为已注册仓库启动 daemon 和 supervise-daemon。"""
     settings = load_fresh_agent_runner_settings()
     supervisor = create_process_supervisor()
     runner_command = settings.console.runner_command
@@ -319,11 +337,14 @@ def _run_registry_start_command(parsed: argparse.Namespace, process_runner: IPro
                     spawn_cwd=spawn_cwd,
                 )
                 console.print(
-                    f"[green]Started {kind.value}[/] for {repo_id} (process {record.process_id})"
+                    f"[green]Started {_display_process_kind(kind)}[/] for {repo_id} "
+                    f"(process {record.process_id})"
                 )
             except Exception as exc:  # noqa: BLE001 - best effort start.
                 repo_success = False
-                error_console.print(f"[yellow]Failed to start {kind.value} for {repo_id}:[/] {exc}")
+                error_console.print(
+                    f"[yellow]Failed to start {_display_process_kind(kind)} for {repo_id}:[/] {exc}"
+                )
         if not repo_success:
             exit_code = 1
 
@@ -331,7 +352,7 @@ def _run_registry_start_command(parsed: argparse.Namespace, process_runner: IPro
 
 
 def _run_registry_stop_command(parsed: argparse.Namespace, process_runner: IProcessRunner) -> int:
-    """Stop daemon and review-daemon for registered repositories."""
+    """Stop daemon and supervise-daemon for registered repositories."""
     supervisor = create_process_supervisor()
     records = supervisor.list_processes()
 
@@ -353,9 +374,10 @@ def _run_registry_stop_command(parsed: argparse.Namespace, process_runner: IProc
 
     exit_code = 0
     for record in matched_records:
+        display_kind = _display_process_kind(record.kind)
         if record.status != "running":
             console.print(
-                f"[dim]Skipped[/] {record.kind} {record.process_id} for {record.repo_id} "
+                f"[dim]Skipped[/] {display_kind} {record.process_id} for {record.repo_id} "
                 f"(not running)"
             )
             continue
@@ -366,11 +388,11 @@ def _run_registry_stop_command(parsed: argparse.Namespace, process_runner: IProc
                 stop_timeout_seconds=30,
             )
             console.print(
-                f"[green]Stopped[/] {record.kind} {record.process_id} for {record.repo_id}"
+                f"[green]Stopped[/] {display_kind} {record.process_id} for {record.repo_id}"
             )
         except Exception as exc:  # noqa: BLE001 - best effort stop.
             error_console.print(
-                f"[yellow]Failed to stop {record.kind} {record.process_id} "
+                f"[yellow]Failed to stop {display_kind} {record.process_id} "
                 f"for {record.repo_id}:[/] {exc}"
             )
             exit_code = 1
@@ -417,10 +439,14 @@ def _restart_daemons(repo_id: str, repo_path: Path, process_runner) -> int:
                     supervisor=supervisor,
                     stop_timeout_seconds=30,
                 )
-                console.print(f"[green]Stopped old[/] {record.kind} {record.process_id}")
+                console.print(
+                    f"[green]Stopped old[/] {_display_process_kind(record.kind)} "
+                    f"{record.process_id}"
+                )
             except Exception as exc:  # noqa: BLE001 - best effort stop.
                 error_console.print(
-                    f"[yellow]Failed to stop old {record.kind} {record.process_id}:[/] {exc}"
+                    f"[yellow]Failed to stop old {_display_process_kind(record.kind)} "
+                    f"{record.process_id}:[/] {exc}"
                 )
 
     spawn_cwd = resolve_registry_config_toml_path().parent
@@ -435,10 +461,13 @@ def _restart_daemons(repo_id: str, repo_path: Path, process_runner) -> int:
                 spawn_cwd=spawn_cwd,
             )
             console.print(
-                f"[green]Started {kind.value}[/] for {repo_id} (process {record.process_id})"
+                f"[green]Started {_display_process_kind(kind)}[/] for {repo_id} "
+                f"(process {record.process_id})"
             )
         except Exception as exc:  # noqa: BLE001 - daemon start is best effort.
-            error_console.print(f"[yellow]Failed to start {kind.value} for {repo_id}:[/] {exc}")
+            error_console.print(
+                f"[yellow]Failed to start {_display_process_kind(kind)} for {repo_id}:[/] {exc}"
+            )
             return 1
     return 0
 
@@ -468,7 +497,7 @@ def _run_daemon_status_command(
     repo_id: str | None,
     repo_override: str | None,
 ) -> int:
-    """Show running daemon and review-daemon processes for selected repos."""
+    """Show running daemon and supervise-daemon processes for selected repos."""
     from rich.table import Table
 
     fmt = resolve_output_format(parsed)
@@ -537,7 +566,7 @@ def _run_daemon_status_command(
             )
             table.add_row(
                 record.repo_id,
-                record.kind,
+                _display_process_kind(record.kind),
                 status_text,
                 str(record.pid),
                 record.process_id,
@@ -936,7 +965,7 @@ def _run_logs_command(
     repo_id: str,
     repo_override: str | None,
 ) -> int:
-    """Print the recent log of a managed daemon / review-daemon process.
+    """打印受管 daemon / supervise-daemon 进程的最近日志。
 
     With ``--issue <N>``, read the per-Issue agent output log instead of a
     managed process log. The two modes are mutually exclusive.
@@ -966,11 +995,16 @@ def _run_logs_command(
         )
     context = contexts[0]
 
-    kind = getattr(parsed, "kind", None) or _DAEMON_KIND
+    requested_kind = getattr(parsed, "kind", None)
+    kind = (
+        _REVIEW_DAEMON_KIND
+        if requested_kind == "supervise_daemon"
+        else requested_kind or _DAEMON_KIND
+    )
     if kind not in (_DAEMON_KIND, _REVIEW_DAEMON_KIND):
         raise CliError(
             f"Unsupported --kind value: {kind!r}. "
-            f"Use '{_DAEMON_KIND}' or '{_REVIEW_DAEMON_KIND}'.",
+            f"Use '{_DAEMON_KIND}' or 'supervise_daemon' (legacy alias: 'review_daemon').",
             code=ExitCode.USAGE,
             suggestion=f"kc logs --kind {_DAEMON_KIND}",
         )

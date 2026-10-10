@@ -130,12 +130,15 @@ class ReplConfig:
     auto_confirm_commands: tuple[str, ...] = (
         "labels sync --dry-run",
         "run --dry-run",
+        "supervise --dry-run",
         "review --dry-run",
         "ask --plan-only",
     )
     confirm_commands: tuple[str, ...] = (
         "run",
         "daemon",
+        "supervise",
+        "supervise-daemon",
         "review",
         "review-daemon",
         "issue create",

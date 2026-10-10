@@ -157,8 +157,8 @@ reexecute_cache_enabled = true
 verifier_enabled = true
 # verifier 用哪个 agent（auto=自动挑一个≠builder 的）
 verifier_agent = "qoder"
-# verifier agent 运行超时秒数（默认 1800）
-verifier_timeout_seconds = 3600
+# verifier agent 运行超时秒数；多条 RV 与负控需要延长，静默卡死仍由 inactivity timeout 处理
+verifier_timeout_seconds = 7200
 artifact_health_enabled = true
 # 前端改动（git diff 命中 frontend_paths）是否强制证据目录含真实视觉文件(图片/视频),否则门禁失败(默认开;独立于 verifier)
 frontend_visual_evidence_required = true
@@ -174,6 +174,9 @@ frontend_paths = [
 default_phase = "execution"
 
 [agent_runner.prompts.phases]
+
+[agent_runner.lifecycle_agents]
+review = "qoder"
 
 # Draft PR 创建前的 AI review 门禁（push 之后、PR 之前）
 [agent_runner.pre_pr_review]

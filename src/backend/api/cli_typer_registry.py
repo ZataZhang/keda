@@ -112,12 +112,13 @@ def registry_start_command(
     no_review_daemon: Annotated[
         bool,
         typer.Option(
+            "--no-supervise-daemon",
             "--no-review-daemon",
-            help="Only start/stop the agent daemon, skip the review daemon.",
+            help="Only start the agent daemon, skip post-PR supervision.",
         ),
     ] = False,
 ) -> int:
-    """Start daemon and review-daemon for registered repositories."""
+    """Start daemon and supervise-daemon for registered repositories."""
     if not repo_id and not all:
         return _registry_selector_error(
             "Either --repo-id or --all is required for kc registry start.",
@@ -149,12 +150,13 @@ def registry_stop_command(
     no_review_daemon: Annotated[
         bool,
         typer.Option(
+            "--no-supervise-daemon",
             "--no-review-daemon",
-            help="Only start/stop the agent daemon, skip the review daemon.",
+            help="Only stop the agent daemon, leave post-PR supervision running.",
         ),
     ] = False,
 ) -> int:
-    """Stop daemon and review-daemon for registered repositories."""
+    """Stop daemon and supervise-daemon for registered repositories."""
     if not repo_id and not all:
         return _registry_selector_error(
             "Either --repo-id or --all is required for kc registry stop.",
