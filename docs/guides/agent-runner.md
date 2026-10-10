@@ -4699,16 +4699,16 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 ## 本地记忆持久化与 Skill 蒸馏（Memory Persistence & Skill Distillation）
 
-Agent Runner 默认开启两层**本地**记忆与 skill 蒸馏循环，用于把同类 Issue 的成功修复经验沉淀给后续 Issue 复用。所有数据保存在**目标仓库的主检出** `.iar/memory/` 与 `.iar/skills/` 下（默认被 `.gitignore` 排除），不引入外部数据库或服务。即使每个 Issue 在独立的工作副本里跑，记忆与 skill 也都在主检出里累积并跨 Issue 共享——目录的解析由 `backend.engines.agent_runner.factory._anchor_memory_config` 在构造 `RepositoryRunContext` 时一次性绝对化到 `repo_path`。
+Agent Runner 默认开启两层**本地**记忆与 skill 蒸馏循环，用于把同类 Issue 的成功修复经验沉淀给后续 Issue 复用。所有数据保存在**目标仓库的主检出** `.kedacode/memory/` 与 `.kedacode/skills/` 下（默认被 `.gitignore` 排除），不引入外部数据库或服务。即使每个 Issue 在独立的工作副本里跑，记忆与 skill 也都在主检出里累积并跨 Issue 共享——目录的解析由 `backend.engines.agent_runner.factory._anchor_memory_config` 在构造 `RepositoryRunContext` 时一次性绝对化到 `repo_path`。
 
 ### 数据落点
 
 | 用途 | 路径 | 格式 |
 |---|---|---|
-| 短期记忆（每个 Issue 的执行轨迹） | `<repo_path>/.iar/memory/short_term/<repo_id>/<issue_number>/context.json` | JSON |
-| 长期记忆（项目约定 / 模式） | `<repo_path>/.iar/memory/long_term/<category>/<topic>.md` | Markdown + YAML front matter |
-| Skill 草稿 | `<repo_path>/.iar/skills/drafts/<name>.md` | Markdown + YAML front matter (`draft: true`) |
-| 已晋升 skill | `<repo_path>/.iar/skills/<name>.md`（默认；可配置） | Markdown + YAML front matter (`draft: false`) |
+| 短期记忆（每个 Issue 的执行轨迹） | `<repo_path>/.kedacode/memory/short_term/<repo_id>/<issue_number>/context.json` | JSON |
+| 长期记忆（项目约定 / 模式） | `<repo_path>/.kedacode/memory/long_term/<category>/<topic>.md` | Markdown + YAML front matter |
+| Skill 草稿 | `<repo_path>/.kedacode/skills/drafts/<name>.md` | Markdown + YAML front matter (`draft: true`) |
+| 已晋升 skill | `<repo_path>/.kedacode/skills/<name>.md`（默认；可配置） | Markdown + YAML front matter (`draft: false`) |
 
 注：相对路径 **相对目标仓库主检出根** 解析，而不是相对每个 Issue 的工作副本。
 
@@ -4737,8 +4737,8 @@ promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 ### 关闭与降级
 
 - `config.toml` 的 `[agent_runner.memory] enabled = false` 完全关闭记忆读写与 skill 蒸馏；现有 runner 路径无回归。
-- `auto_promote = false` 时草稿不会自动晋升到 `.iar/skills/`，维护者手动移动文件并（可选）编辑 description。
-- 维护者可手工创建 `<worktree>/.iar/memory/long_term/facts/<topic>.md` 写入项目约定，runner 会在相关 Issue 的 prompt 中自动引用。
+- `auto_promote = false` 时草稿不会自动晋升到 `.kedacode/skills/`，维护者手动移动文件并（可选）编辑 description。
+- 维护者可手工创建 `<worktree>/.kedacode/memory/long_term/facts/<topic>.md` 写入项目约定，runner 会在相关 Issue 的 prompt 中自动引用。
 
 ### 与已有机制的关系
 

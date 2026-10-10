@@ -5,19 +5,74 @@
     {
       "item_number": 1,
       "item_name": "rv-1 真实 TTY 原生入口、operator skill 与按需预览",
-      "command": "真实 TTY（在 PTY 中运行）：UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_real_tty_preview.py；自动负控与回归：UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_cli_agent_session_entry.py tests/test_kedacode_operator_skill.py --no-testmon -q --no-header",
+      "command": "现场采集：PYTHONPATH=src python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_native_tty_session.py（在交付树 HEAD 的隔离 clone /private/tmp/issue256-rv1/repo 中，用 tmux 分配的真实 PTY 跑裸 `uv run kc`，由 `script -q` 记录未被 alternate screen 吞掉的原始字节；完成只读 cwd/skill 核对轮、明确预览请求轮、停止轮，再跑 `uv run kc --agent codex` 覆盖入口） && 预览门禁负控：PYTHONPATH=src python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_preview_gate_negative_controls.py（同一真实 CLI 入口，切换 profile/候选数量，逐组探针确认未启动进程） && 自动回归：UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_cli_agent_session_entry.py tests/test_kedacode_operator_skill.py --no-testmon -q --no-header",
       "evidence_files": [
+        "rv-1-kc-terminal-preview.txt",
+        "rv-1-kc-terminal-preview.png",
+        "rv-1-preview-gate-negative-control.txt",
         "rv-1-automated-tests.txt",
         "rv-1-kc-native-session.txt"
       ],
-      "output_summary": "Skill 冲突 fail-fast 负控在缺陷形态下未抛 RuntimeError 并打印 EXPECTED_FAIL/RESTORED_OK；修复后 native-session 与 packaged-skill/installer 测试合计 47 passed（其中 session 用例 22）。真实 TTY 冲突和不支持交互的 qoder 均 fail-fast。Claude TUI 收到 API ConnectionRefused；Codex v0.162.0 由真实 kc TTY 启动，但宿主拒绝其 daemon lock 与后续文件操作。恢复重试以无参数裸 kc 进入 TUI 后，在输入前返回 Operation not permitted；未启动 preview。临时配置/源码/Skill 已恢复，端口始终关闭。",
-      "explanation": "负控证明冲突检查的回归断言可变红；修复后入口和 packaged installer/skill contract 测试覆盖冲突 fail-closed 与共用 installer。真实 PTY 尝试覆盖 CLI 到 provider 的启动边界。provider 对话未能继续，因此证据不宣称 skill 回复、用户请求 preview 或终端 URL 回传已通过。",
-      "risks": "INCONCLUSIVE：无法完成真实 provider 对话、skill 回复、明确请求后的 preview 启停与 loopback URL 回传。computer-use 安全策略拒绝打开 Terminal app；Codex 文件写入也被宿主权限拒绝。PRD 要求的 rv-1-kc-terminal-preview.png 未产生；没有伪造截图或复制凭据。Human-Confirmed 项保持未勾选。",
-      "negative_control": "UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast：临时将 preserve-conflict 从 RuntimeError 改成普通 notice，并运行 user_edited_skill_is_preserved_and_blocks_session。",
-      "expected_fail": "负控输出 DID NOT RAISE RuntimeError，测试失败并打印 EXPECTED_FAIL；源码恢复后修复回归测试通过。真实 TTY 冲突命令退出 1 且输出 Refusing to start the native session。",
+      "output_summary": "真实 TTY 现场采集通过（HEAD 0c18369a / TREE 20fd53f0ae50ab6110a3ab7afd9bb851dee0500f）：裸 `uv run kc` 在 tmux 真实 PTY 上把终端交给 OpenAI Codex CLI v0.162.0 原生 TUI，cwd = 目标仓库；raw log 含交接提示 \"KedaCode hands the terminal over; run `kc preview start` here only when the user asks to preview the project\"。只读轮里 provider 报告 cwd、发现 .codex/skills/kedacode-operator/SKILL.md 并复述\"仅在用户明确要求时启动预览\"约束，此时端口未监听、无 dev server 进程。明确要求预览后 provider 自行调用 `uv run kc preview start`（使用仓库声明的 argv，非 shell 文本），端口 127.0.0.1:31789 开始监听、curl 返回 200、dev server PID 69995/70001，终端回复 loopback URL 且 Chrome 主进程 PID 与 preflight 完全一致（未自动打开浏览器）。同轮 `kc preview stop` 输出 \"Stopped preview process group 69968 (pid 69968): SIGTERM drained the group.\"，随后端口不再监听、curl 000、`kc preview status` 无登记；两次会话退出码均为 0；`uv run kc --agent codex` 覆盖入口同样进入原生 TUI 且未启动项目服务。预览门禁负控四组（0 候选 / 2 候选 / 唯一候选缺 --confirm / --confirm 文本不相等）全部退出 2 并在启动进程前被拒，端口与 dev server 探针始终为空，仓库配置与 package.json 按字节还原（SHA256 前后一致）。自动回归：skill 冲突 fail-fast 负控 EXPECTED_FAIL + RESTORED_OK，native-session 与 packaged-skill/installer 测试合计 47 passed。",
+      "explanation": "rv-1 的每条期望都经过真实链路：shell PTY → kc 裸入口 callback → 仓库配置 → provider 原生 TUI → packaged operator skill 发现 → 对话中的明确预览请求 → kc preview CLI → 精确进程组与 ready 校验 → loopback URL 回到终端。采集脚本只观察与记录，不代替 provider 启动进程；端口/HTTP/dev-server PID/浏览器 PID 是独立探针，不依赖 provider 自述。负控在同一真实 CLI 入口上运行，证明\"未经确认不启动进程\"这条断言确实可变红（去掉门禁时四组会直接起进程并让探针为真）。PNG 是 tmux capture-pane -e 真实终端画面的忠实转译，原始 .ansi/.raw.log 一并提供。",
+      "risks": "前五次在**交付工作树内**运行 provider 的尝试被宿主沙箱以 Operation not permitted 拒绝（rv-1-kc-native-session.txt 保留该历史与取代说明），本次改在交付树同一 HEAD 的隔离 clone 中采集，以避开宿主对该目录的权限限制；被运行的 CLI 代码与工作树一致（脚本同时打印两个 HEAD）。clone 中 `skill_install_check_enabled = false`，因为用户级 ~/.codex/skills 存在旧版 packaged 副本会触发 fail-closed 拒绝（该拒绝路径由自动负控单独证明）；skill 可发现性由 clone 项目级安装副本现场证明。provider 先试 PATH 上旧发行版 `kc`（无 preview 子命令 → 报错、未启动进程），再改用仓库内 `uv run kc`，说明交付树能力尚未安装为全局 kc。终端画面为 ANSI→HTML→无头 Chrome 截图的转译，非浏览器实拍。Human-Confirmed 项保持未勾选，交由人工验收。",
+      "negative_control": "PYTHONPATH=src python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_preview_gate_negative_controls.py：同一仓库、同一真实 `kc preview start` 入口，依次移除 [agent_session.preview]（0 候选）、注入两个 dev 脚本（2 候选）、只留一个脚本（缺 --confirm）、给出与候选不相等的 --confirm 文本；每组都独立探针端口与 dev server 进程。另有自动负控 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast（把 preserve-conflict 从 RuntimeError 降级为普通 notice）。",
+      "expected_fail": "四组未确认请求若门禁失效会真的起进程：预期它们全部退出非 0 且探针为空——实测全部 exit 2、CASE_PORT_LISTENING: False、CASE_DEV_SERVER_PIDS: none，最终 NEGATIVE_CONTROL_OK；一旦去掉确认检查，这些探针即变红。自动负控在缺陷形态下 DID NOT RAISE RuntimeError 并输出 EXPECTED_FAIL，源码恢复后对应测试转绿。",
       "stdout_assertions": [
         {
-          "pattern": "RESTORED_OK: src/backend/engines/agent_runner/interactive_agent_session.py",
+          "pattern": "KC_HANDOFF_NOTICE: FOUND",
+          "must_match": true
+        },
+        {
+          "pattern": "BARE_START_DID_NOT_RUN_PROJECT_SERVER: listening = False",
+          "must_match": true
+        },
+        {
+          "pattern": "DEV_SERVER_PIDS_AFTER_READ_ONLY_TURN: none",
+          "must_match": true
+        },
+        {
+          "pattern": "PORT_AFTER_EXPLICIT_PREVIEW_REQUEST: listening = True",
+          "must_match": true
+        },
+        {
+          "pattern": "HTTP_PROBE_OF_REPLIED_URL: 200",
+          "must_match": true
+        },
+        {
+          "pattern": "Stopped preview process group 69968",
+          "must_match": true
+        },
+        {
+          "pattern": "PORT_AFTER_PROVIDER_STOP: listening = False",
+          "must_match": true
+        },
+        {
+          "pattern": "HTTP_REPROBE_AFTER_STOP: 000",
+          "must_match": true
+        },
+        {
+          "pattern": "OVERRIDE_START_DID_NOT_RUN_PROJECT_SERVER: listening = False",
+          "must_match": true
+        },
+        {
+          "pattern": "DELIVERED_GIT_TREE: 20fd53f0ae50ab6110a3ab7afd9bb851dee0500f",
+          "must_match": true
+        },
+        {
+          "pattern": "NEGATIVE_CONTROL_OK: every unconfirmed preview request was refused before any process start",
+          "must_match": true
+        },
+        {
+          "pattern": "CASE_PORT_LISTENING: False",
+          "must_match": true
+        },
+        {
+          "pattern": "RESTORE_CONFIG_OK: True",
+          "must_match": true
+        },
+        {
+          "pattern": "EXPECTED_FAIL",
           "must_match": true
         },
         {
@@ -34,7 +89,7 @@
         "rv-2-cli-routing.txt",
         "rv-2-negative-control.txt"
       ],
-      "output_summary": "真实 CLI help/repl/console/schema 命令退出 0；裸 kc 经 stdin pipe 输出帮助并以 1 退出。Typer/parser/schema、兼容路由、空 argv TTY dispatch 与已安装 kc console script 回归 11 passed；旧 REPL 白名单/确认会话测试 18 passed。负控把裸入口 no-TTY 分支退出码改成 0，真实 console-script 测试失败并确认源码已恢复。",
+      "output_summary": "真实 CLI help/repl/console/schema 命令退出 0；裸 kc 经 stdin pipe 输出帮助并以 1 退出。Typer/parser/schema、兼容路由、空 argv TTY dispatch 与已安装 kc console script 回归 11 passed；旧 REPL 白名单/确认会话测试 18 passed。负控把裸入口 no-TTY 分支退出码改成 0，真实 console-script 测试失败并确认源码已恢复。（最终代码树复跑见本文件末尾\"最终代码树复跑（2026-10-10）\"块：HEAD 0c18369a / TREE 20fd53f0ae50ab6110a3ab7afd9bb851dee0500f） 真实 CLI 路由探针与 tests/test_cli_agent_session_entry.py 22 passed 均在该块内复现。",
       "explanation": "验证经过真实 kc console script、Typer/parser/schema 和 shell pipe；负控针对裸无参真实 console-script 的退出码断言，证明此前的空 argv 快捷 help 路径会返回 0 并能被测试发现；旧 REPL 白名单和写操作确认由原 REPL session tests 覆盖；两种兼容入口的 shell completion 都经 Typer completion 协议返回。",
       "risks": "Console 按验收命令执行了真实 --help 路由，但未启动监听服务；REPL 多轮白名单和确认路径由现有 dispatch 回归测试覆盖。",
       "negative_control": "UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case bare_kc_exit_code：将 cli_typer_app.py 的 no-TTY help 回退退出码从 1 改为 0。",
@@ -67,7 +122,7 @@
         "rv-3-architecture-reuse.txt",
         "rv-3-stall-recovery-gates.txt"
       ],
-      "output_summary": "监督测试 63 passed。测试真实本地 writer/孙进程组，验证仅已确认的 stalled attempt 被精确取消一次并在旧组退出后进入既有 recovery 边界；healthy、blocked、uncertain、unknown owner、变化/结束的 attempt 不被误中断。unknown-owner 审计缺失与诊断后 process creation identity 改变时仍取消的两项负控均变红；恢复后全套通过。架构证据确认没有 migration/持久化模型变更、依赖方向合法且监督复用 invocation trace/recovery/verification 事实；合成 migration 负控被捕获。 新增执行循环集成测试 2 passed、pre-PR review 与最终 verifier 门禁测试 3 passed（合计 5 passed）；取消 RuntimeError 由同一 recovery budget 捕获，恢复后仍依序运行验证/证据门/commit/RV/verifier。",
+      "output_summary": "监督测试 63 passed。测试真实本地 writer/孙进程组，验证仅已确认的 stalled attempt 被精确取消一次并在旧组退出后进入既有 recovery 边界；healthy、blocked、uncertain、unknown owner、变化/结束的 attempt 不被误中断。unknown-owner 审计缺失与诊断后 process creation identity 改变时仍取消的两项负控均变红；恢复后全套通过。架构证据确认没有 migration/持久化模型变更、依赖方向合法且监督复用 invocation trace/recovery/verification 事实；合成 migration 负控被捕获。 新增执行循环集成测试 2 passed、pre-PR review 与最终 verifier 门禁测试 3 passed（合计 5 passed）；取消 RuntimeError 由同一 recovery budget 捕获，恢复后仍依序运行验证/证据门/commit/RV/verifier。（最终代码树复跑见本文件末尾\"最终代码树复跑（2026-10-10）\"块：HEAD 0c18369a / TREE 20fd53f0ae50ab6110a3ab7afd9bb851dee0500f） 停滞监督 + recovery 65 passed，架构/复用脚本 SCRIPT_EXIT=0。",
       "explanation": "测试中的 writer 和子进程组由真实 SubprocessRunner 启动并通过真实 OS process-group 信号验证；provider verdict 与 GitHub 按 PRD 允许的边界控制，不接触真实业务数据。进程创建身份负控在诊断快照之后改变实时身份，旧实现仍取消目标组时断言变红；unknown-owner 负控证明交班原因审计缺失会被发现。架构脚本检查现有 invocation event store、claim/attempt/recovery 和验证/发布用例，并确认没有第二个监督队列或新增持久化事实源。 `rv-3-stall-recovery-gates.txt` 通过执行循环的实际状态机断言取消异常进入原预算，正向恢复仍经过既有验证与独立 verifier；验证失败以 MaxRetriesExceededError 上抛，reviewer 拒绝与 final-verifier 失败不发布。负控删除 RuntimeError 捕获后该集成断言变红。",
       "risks": "PRD 明确不要求真实 provider 停滞调用或真实任务现场材料；本项覆盖本机受控 attempt，不证明跨主机协调（范围外）。当前测试验证进入既有 recovery 的异常/摘要边界，没有执行真实 GitHub 发布流程。 本地状态机集成以受控诊断结果替代外部 provider，GitHub 发布边界由既有隔离测试替代；真实 provider TTY 与项目 preview 仍受 RV-1 主机限制。",
       "negative_control": "依次运行 issue256_negative_control.py --case unknown_owner_handoff_reason 与 --case attempt_creation_identity：前者临时删除 unknown-owner 分支审计调用，后者临时移除 attempt 取消前的实时进程创建时刻复核。；`issue256_negative_control.py --case stall_recovery_catch` 临时从执行循环异常分支移除 RuntimeError 捕获",
@@ -114,7 +169,7 @@
       "evidence_files": [
         "rv-4-config-supervision.txt"
       ],
-      "output_summary": "loopback 配置校验和 preview PID/PGID 创建身份复核的负控都变红并恢复源码。修复后 preview CLI/process tests 20 passed，native session tests 22 passed，配置/监督选择 tests 10 passed；help 命令均退出 0。隔离 global/repo TOML 实跑中，真实 kc PTY 选择 repo executor，preview CLI 启停受管 loopback 进程组，fresh merge 输出 enabled=false、周期 29、阈值 47、executor repo-supervisor。",
+      "output_summary": "loopback 配置校验和 preview PID/PGID 创建身份复核的负控都变红并恢复源码。修复后 preview CLI/process tests 20 passed，native session tests 22 passed，配置/监督选择 tests 10 passed；help 命令均退出 0。隔离 global/repo TOML 实跑中，真实 kc PTY 选择 repo executor，preview CLI 启停受管 loopback 进程组，fresh merge 输出 enabled=false、周期 29、阈值 47、executor repo-supervisor。（最终代码树复跑见本文件末尾\"最终代码树复跑（2026-10-10）\"块：HEAD 0c18369a / TREE 20fd53f0ae50ab6110a3ab7afd9bb851dee0500f） 配置分层脚本 SCRIPT_EXIT=0，tests/test_preview_settings.py 5 passed。",
       "explanation": "验证经过真实 kc CLI 的 preview lifecycle、fresh-process TOML loader 与本地子进程；监督 zero-call 分支检查 observer 和 adapter 调用数，executor 选择检查真实 diagnosis request 的配置值。两个缺陷注入分别使非 loopback URL 可能通过以及 PID/PGID 创建身份不匹配时仍被当作 owned preview，两者均有失败测试；修复后配置脚本在隔离真实 CLI、preview lifecycle 和 TOML merge 中确认优先级。",
       "risks": "没有等待完整 30 分钟周期；秒级受控 tick 与禁用/无候选零调用分支已验证。global/repo TOML 通过新的隔离 CLI/merge 运行验证；RV-1 另有真实 provider API 不可用限制。",
       "negative_control": "依次运行 issue256_negative_control.py --case preview_loopback_check 与 --case preview_creation_identity：前者将 require_loopback_preview_url 替换为原样返回，后者移除 preview manager 对已登记 PID/PGID 创建时刻的复核。",
