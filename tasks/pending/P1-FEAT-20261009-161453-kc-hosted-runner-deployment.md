@@ -4,7 +4,7 @@
 
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 人审层（§1–4）说明用户价值、行为边界和待确认事项；Part B 执行层（§5–13）记录实现方案、架构与验收证据。
@@ -441,7 +441,7 @@ flowchart TD
 - id: rv-2
   behavior: "托管 GC 预览和执行只回收已确认保留期的日志、终态摘要及安全 worktree，保护活动/脏/未合并/远端仍存在的数据。"
   reviewer: human
-  real_entry: "在隔离 fixture repo 中通过真实入口运行 `uv run kc container gc --repo <fixture-repo> --dry-run`，检查清理摘要；确认后运行 `uv run kc container gc --repo <fixture-repo> --apply`。"
+  real_entry: "在隔离 fixture repo 中通过 `uv run kc worktree cleanup --dry-run` 预览 worktree 候选，并在确认后用 `uv run kc worktree cleanup --yes` 执行；通过启用托管维护的 daemon pass 执行 raw log 与 SQLite 摘要清理。Docker host 资源另用真实 `uv run kc container gc --dry-run` 预览；只有在隔离 Docker host 且预览集合已核对后才运行 `uv run kc container gc --apply`。清理后从新 CLI 进程 probe 文件、worktree 与 SQLite。"
   expected: "dry-run 只列出超期且满足全部规则的候选；apply 后这些候选消失；活动、dirty、未合并、远端仍存在的 worktree、审计记录和认证文件仍存在，输出逐类给出删除/跳过数量和原因。"
   mock_boundary: "真实 CLI、临时 Git repo/worktree、真实文件删除与 SQLite fixture 必须执行；GitHub Issue/PR API 可在 IGitHubClient 边界替身以固定 closed/open 状态，Docker Engine 只在 host-cache 子项使用可用时的 sandbox smoke。"
   tier: R3
@@ -560,16 +560,16 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 
 - [ ] runner Compose 与 `docker inspect` 证明没有 DB/middleware sidecar、对公网端口或 Docker socket；Console 的外部入口经 HTTPS 和真实认证保护，服务端本地管理接口不开放给任意网络来源。
 - [ ] 本机 Console 默认仍绑定 `127.0.0.1` 并维持本机模式；托管登录不能退化为 `local_auth.py` 的 no-op 会话。
-- [ ] `just lint` 中现有 architecture 检查通过，证明后端依赖仍为 `api → core → engines → infrastructure`。
+- [x] `just lint` 中现有 architecture 检查通过，证明后端依赖仍为 `api → core → engines → infrastructure`。— `rv-1-architecture-green.txt`
 
 #### Dependency Acceptance
 
-- [ ] `pyproject.toml` 与锁文件没有新增 Docker SDK、外部 scheduler 或服务端数据库依赖。
+- [x] `pyproject.toml` 与锁文件没有新增 Docker SDK、外部 scheduler 或服务端数据库依赖。— `rv-1-dependencies-green.txt`
 
 #### Behavior Acceptance
 
 - [ ] 托管维护关闭时，本地 `kc daemon` / `kc container up` 不进入新清理分支；配置默认关闭并有对应的回归证据。
-- [ ] 有效关闭 Issue 的安全 worktree 在 worker 全部结束后被清理；活动、dirty、unmerged、remote-exists 和 GitHub 状态不可用候选都被保留。
+- [x] 有效关闭 Issue 的安全 worktree 在 worker 全部结束后被清理；活动、dirty、unmerged、remote-exists 和 GitHub 状态不可用候选都被保留。— `rv-2-worktree-cleanup-green.txt`、`rv-2-active-guard-green.txt`、`rv-2-github-unavailable-green.txt`、`rv-2-default-off-green.txt`
 - [ ] 达到磁盘阈值时 active worker 不被杀；该 daemon pass 结束后停领并输出已用/可用空间，空间恢复越过高水位后继续领取。
 - [ ] 过期运行摘要按确定的 keyset/事务边界删除；audit、queue settings、活动队列、已保存凭据和 Console sessions 不受清理策略误删。
 - [ ] 首次引导码由 VM 本地 CLI 生成、只显示一次、24 小时过期、单次消费且服务端只存哈希；过期或重放均拒绝。
@@ -578,13 +578,13 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 - [ ] 凭据可新增、验证、轮换和删除 KedaCode 副本；API/页面只返回状态，不回显 secret。验证失败保留旧值；轮换成功后 runner 只用新值；删除停止对应 runner、清除密文/tmpfs，但明确提示上游 key 仍有效，直到客户主动 revoke。
 - [ ] GitHub/Agent 凭据按仓库隔离；只有匹配 runner 获得对应 auth 文件。测试证明另一个仓库/客户不能读取，并明确披露同一 runner 内的 Agent/代码可读取本 runner 自己的 key。
 - [ ] GitHub Actions secrets、项目 DB 凭据、SSH 私钥和反向代理 TLS 私钥不会进入 hosted credential API；自动清理不会删除加密凭据存储。
-- [ ] Compose JSON log driver 的最大文件尺寸/数量有界；host GC 只清理悬空镜像与过期 build cache，不运行 volume prune，不删除活动容器正在引用的镜像。
+- [x] Compose JSON log driver 的最大文件尺寸/数量有界；host GC 只清理悬空镜像与过期 build cache，不运行 volume prune，不删除活动容器正在引用的镜像。— `rv-2-gc-engine-green.txt`、`rv-2-gc-dry-run.txt`
 
 #### Documentation Acceptance
 
 - [ ] `docs/guides/agent-runner.md` 和 `docs/getting-started/installation.md` 明确本地免费路径；引导码由谁、如何发放；PAT 创建入口、仓库范围和精确权限；Anthropic/OpenAI/Kimi API key 获取入口、API 账户/计费条件和显式测试费用；密码/session、Actions secrets、DB 凭据、SSH/TLS key 的归属；加密保存/tmpfs 交付、runner 内代码读取风险、本地删除与上游 revoke 的区别；CI、磁盘和退订步骤。
 - [ ] `src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md` 同步 `kc console bootstrap-token create --expires-in 24h` 的签发/重发边界、凭据交付、`kc container gc` 参数、dry-run/apply、默认关闭和“绝不挂 Docker socket”边界。
-- [ ] `mkdocs.yml` 导航与文档实际位置一致，不添加重复入口。
+- [x] `mkdocs.yml` 导航与文档实际位置一致，不添加重复入口。— `rv-2-mkdocs-build.txt`
 
 #### Validation Acceptance
 
@@ -593,13 +593,14 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 - [ ] rv-3 staging PR 的 DB-backed CI service 测试绿；负例能让 required check 红，PR merge gate 不放行。
 - [ ] rv-4 真实 hosted URL 浏览器流程通过；负例证明未认证/API session 失效、引导码重放、PAT 权限不足、错误 provider、未通过 Agent API key 测试时均拒绝；secret 不回显/落日志；删除 KedaCode 副本后 runner 无法再使用本地 key，上游 revoke 后 provider 拒绝旧 key；与原型图并排的真实截图经过人审。
 - [ ] `uv run pytest tests/test_worktree_cleanup.py tests/test_daemon_parallel_concurrency.py tests/test_cli_container.py tests/test_agent_runner_config.py tests/test_console_store.py tests/test_agent_runner_agent_invocation.py -q` 与 `just lint` 通过；相关行为变更后重跑。
-- [ ] `uv run kc container gc --repo <fixture-repo> --dry-run` 真实 CLI 入口退出成功；相同候选的 `--apply` 只在明确指定后执行，fresh process 结果符合 rv-2。该证据与最终实现 Git tree 绑定。
+- [ ] `uv run kc container gc --dry-run` 真实 CLI 入口退出成功；相同候选的 `--apply` 只在明确指定后执行，fresh process 结果符合 rv-2。该证据与最终实现 Git tree 绑定。
 
 #### Delivery Readiness
 
 - [ ] 实施、文档和随包 skill 均完成；部署命令与数据保留行为没有未决生产阻断项；失败或外部 staging 不可用时如实记录并保持未归档。
 - [ ] PR 描述/evidence comment 或完成消息逐字呈现 9.1 的三项结果与可执行 review 入口；证据只对授权评审人可见，没有公开客户代码/凭据；托管 UI 原型和真实截图同时呈现。
-- [ ] 非人工验收项全勾选或按仓库 PRD 流程记录 `[~]` 有理由；Final Reconciliation 完成；本 PRD 随实现归档，`Human-Confirmed` 保留开放复选框等待人工验收。
+- [ ] 非人工验收项全勾选或按仓库 PRD 流程记录 `[~]` 有理由；Final Reconciliation 完成。
+- [~] 本 PRD 随实现归档，`Human-Confirmed` 保留开放复选框等待人工验收。— runner-owned gate: independent verifier PASS 后由 runner 执行归档。
 
 ## 10. Functional Requirements
 
@@ -649,14 +650,22 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 
 ### Final Reconciliation
 
-- Interpretation: updated 2026-10-10 to define the customer-side credential acquisition steps, exact first-run bootstrap handoff, supported GitHub/Agent credential types, runtime delivery, billing prompt, and local deletion versus upstream revocation; pending implementation.
-- Public behavior and contracts: local `kc console` remains loopback-only; hosted access requires D-03 auth model and never returns saved secret values.
-- Related PRD status: reviewed against repository state on 2026-10-09.
-- Requirements and risks: pending implementation.
+- Interpretation: updated 2026-10-10 to define customer-side credential setup, bootstrap handoff, supported credential types, runtime delivery, cost confirmation, and local deletion versus upstream revocation. Local maintenance work is implemented and tested; hosted Console onboarding and credential delivery remain unimplemented.
+- Public behavior and contracts: local `kc console` remains loopback-only and preserves the existing no-op local session. A hosted endpoint must not reuse that auth mode; no hosted endpoint or secret-setting UI is currently delivered.
+- Related PRD status: reviewed against repository state on 2026-10-10; archived Docker runner and worktree cleanup PRDs remain the implemented foundation.
+- Requirements and risks: local resource maintenance includes default-off cleanup, conservative worktree deletion, 14-day Issue log cleanup, 90-day completed summary pruning, disk-watermark admission, bounded container logs, and host GC preview/apply implementation. Hosted auth/bootstrap, credential encryption/provider validation/tmpfs handoff, actual customer isolation and staging RV-3/RV-4 remain pending. `just test` has 10 sandbox process-scanner failures; normal `just lint` is blocked by stale test freshness after that failure.
 - Reconciled differences:
   - the prior draft excluded customer UI and described operator-prepared host paths; this revision includes a dedicated hosted Console setup flow while keeping shared multi-tenant control plane, public signup, and central customer DB out of scope.
   - hosted credentials are customer-created GitHub fine-grained PATs and provider API keys only; no OAuth/session or auth-file upload. GitHub Actions secrets, project DB credentials, SSH keys, and proxy TLS keys remain in their existing owner-managed locations.
   - Console deletion removes KedaCode's encrypted copy and runner access; only the upstream GitHub/provider revoke action invalidates the source key.
+
+### 补充本地维护实现与现实验证状态（2026-10-10）
+- Type: evidence
+- Before: 当前恢复记录把 Issue 原始日志清理和磁盘水位准入描述为未实现；部分本地维护回归结果、Compose/GC 现实入口以及 staging 缺口尚未按 rv-1 至 rv-4 的 manifest 结构完整记录。
+- After: 在托管维护显式启用时增加 14 天 Issue 原始日志清理、10/15 GiB 磁盘准入与恢复滞回，并把同一准入门传给 deliberation 队列；补齐 rv-1 至 rv-4 整数序号 evidence manifest、逐项输出文件、red/green 局部证据和准确的未完成说明。只勾选实际测试覆盖的安全 worktree、Compose/host-GC engine 与 MkDocs navigation 项。
+- Reason: 修复恢复时发现的实际功能缺口，并避免将局部测试误报为真实 staging 或 hosted Console 验收。
+- Impact: FR-6/FR-8 的本地维护实现范围扩大，但没有改变 14/90 天策略、低/高水位或任何 hosted security oracle；PRD 的 hosted Console、跨客户隔离、真实 GC apply/fresh probe 和 staging required-check 仍未通过，保持不归档。
+- Review: 相关本地回归 `239 passed`；`just lint --reuse` 与跳过 freshness 守卫后的其余全量 hooks 通过；`just test` 仍有 10 个 macOS sandbox process-scanner failure，正常 `just lint` 的 freshness gate 未通过。Evidence manifest 与 referenced files 已按 machine contract 逐项检查；Human-Confirmed 项与验收状态横幅仍待人工验收。
 
 ## Change Log
 
@@ -675,3 +684,43 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 - Reason: 归档门禁 `check_prd_acceptance_checklist.py` 会拒绝原结构；执行 agent 以 Issue 正文为真相源，缺失 rv-4 会使托管 Console 主链不被验收。
 - Impact: 仅格式与记录修复，不改行为、范围与验收语义；验收仍以 §7.6 与 §9 为准。
 - Review: 已重跑检查器确认三项结构错误消除（未开工条目与验收横幅状态除外）。
+
+### 修正 host GC 的 CLI 验证入口（2026-10-10）
+- Type: clarification
+- Before: Validation Acceptance 要求以 `kc container gc --repo <fixture-repo>` 验证 Docker host 资源回收，暗示 GC 按仓库隔离。
+- After: 使用 `kc container gc --dry-run` 验证真实 CLI；host GC 仍按 FR-7 扫描当前 Docker host 的悬空镜像与选中 Buildx builder 缓存。
+- Reason: Docker 镜像与 Buildx builder 缓存属于宿主资源，不能由单个仓库路径可靠归属；增加 `--repo` 会给出无效的仓库级范围承诺。
+- Impact: 只修正验证命令与真实命令树的一致性；候选安全条件、显式 `--apply`、fresh-process 探测和 final-tree 证据要求均保留。
+- Review: 执行器根据 FR-7、CLI host 资源边界及 Docker/Buildx 当前运行输出核对；D-02 数据保留选择不变，仍待人工确认。
+
+### 分离执行器交付与 runner 归档门禁（2026-10-10）
+- Type: clarification
+- Before: Delivery Readiness 把非人工验收与 Final Reconciliation 的执行器责任，同 runner 负责的 PRD 归档写在同一个复选框中。
+- After: 执行器完成清单与 Final Reconciliation 保持独立复选框；归档单独记为 `[~]`，明确等待独立 verifier PASS 后由 runner 处理。
+- Reason: PRD 归档发生在独立 verifier、PR 创建和 review 之前，由 runner 控制；恢复执行器不能将该 runner-owned gate 当作已执行验收。
+- Impact: 仅拆分责任与门禁状态，不改变功能范围、验收行为或人工确认项；未完成的执行器工作仍保持未勾选。
+- Review: 与本次 Issue 恢复指令中的 runner-owned gate 规则核对；归档和 verifier 仍待 runner 执行。
+
+### 按 Human-Confirmed 项同步验收状态横幅（2026-10-10）
+- Type: clarification
+- Before: 验收清单存在未勾选的 Human-Confirmed 项，但横幅仍显示“未开工”。
+- After: 横幅显示“待人工验收”，与仍开放的 Human-Confirmed 项状态公式一致；执行器项保持各自当前状态。
+- Reason: 验收状态横幅必须投影 §9 清单中的人工验收状态，不能与开放的人审项冲突。
+- Impact: 只更新验收状态投影，不代表执行器交付已完成，不勾选任何 Acceptance Checklist 项，也不触发归档。
+- Review: 按本次恢复指令的 banner 公式逐项核对，Human-Confirmed 仍有开放复选框。
+
+### 记录架构方向与依赖变更验证（2026-10-10）
+- Type: evidence
+- Before: Architecture Acceptance 与 Dependency Acceptance 两项仍未验证。
+- After: 架构检查的正控扫描当前后端通过；注入 `api → infrastructure` 的负控退出 1。当前 `pyproject.toml` 与 `uv.lock` 相对 HEAD 无差异；临时注入 Docker SDK 依赖的负控退出 1。对应证据为 `rv-1-architecture-red.txt`、`rv-1-architecture-green.txt`、`rv-1-dependency-red.txt` 与 `rv-1-dependencies-green.txt`。
+- Reason: 本次恢复实际执行了这两项检查及可区分失败的负控。
+- Impact: 仅勾选 Architecture Acceptance 与 Dependency Acceptance 中有直接证据的两项；未完成的 hosted Console、Docker 隔离和 staging 验证仍保持开放。
+- Review: `hooks/shared/check_architecture.py` 正控扫描 338 个后端文件；负控确认依赖违规可被识别。依赖差异检查的负控只在临时目录注入，不改动项目依赖。
+
+### 统一 rv-2 的 worktree 与 Docker GC 真实入口（2026-10-10）
+- Type: clarification
+- Before: rv-2 Realistic Validation Plan 曾把 `kc container gc --repo <fixture-repo>` 用作 worktree、日志、SQLite 和 Docker host cache 的统一清理入口；该 CLI 不接受 `--repo`，且 Docker GC 只作用于当前 host。
+- After: worktree 使用 `kc worktree cleanup --dry-run/--yes`，日志与 SQLite 通过启用托管维护的 daemon pass 验证，Docker host 资源使用无仓库旗标的 `kc container gc --dry-run/--apply`；host apply 仅在隔离 Docker host 上执行。
+- Reason: 清理边界必须与真实 CLI 所有权一致；host-wide Docker 资源不能声称按仓库过滤，worktree/log/history 也不是 container GC 的职责。
+- Impact: 仅澄清 rv-2 的真实入口与安全执行环境；保留全部 14/90 天保留、清理预览、安全候选、新进程 probe、审计/凭据保护和 final-tree 验收要求。
+- Review: 与 `cli_typer_worktree.py` 的 `--dry-run/--yes` 和 `cli_typer_container.py` 的 `--dry-run/--apply` 命令签名核对。当前 worktree 尚未完成该完整 oracle，相关 checklist 保持开放。

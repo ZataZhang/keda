@@ -72,6 +72,24 @@ def test_container_logs_parses_no_follow() -> None:
     assert args.no_follow is True
 
 
+@pytest.mark.parametrize(
+    ("gc_arguments", "expected_apply", "expected_retention_days"),
+    [
+        (("--dry-run",), False, 90),
+        (("--apply", "--cache-retention-days", "30"), True, 30),
+    ],
+)
+def test_container_gc_parses_explicit_mode_and_cache_retention(
+    gc_arguments: tuple[str, ...], expected_apply: bool, expected_retention_days: int
+) -> None:
+    """``container gc`` 默认预览，并可解析显式 apply 与保留期。"""
+    parser = build_parser()
+    args = parser.parse_args(["container", "gc", *gc_arguments])
+    assert args.command == "container gc"
+    assert args.apply is expected_apply
+    assert args.cache_retention_days == expected_retention_days
+
+
 def test_typer_app_registers_container_subapp() -> None:
     """Typer 主 app 上注册了 ``container`` 与 ``auth`` 子 app。"""
     registered_subapps = {info.typer_instance for info in app.registered_groups}
@@ -87,6 +105,14 @@ def test_typer_container_help_lists_auth() -> None:
     result = runner.invoke(app, ["container", "--help"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "auth" in result.stdout
+
+
+def test_typer_container_help_lists_gc() -> None:
+    """Typer ``kc container`` 帮助列出宿主 GC 命令。"""
+    runner = CliRunner()
+    result = runner.invoke(app, ["container", "--help"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "gc" in result.stdout
 
 
 def test_typer_container_auth_help_lists_import() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
@@ -584,6 +585,17 @@ def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueS
         return False
 
 
+def _is_issue_admitted(request: RunOnceRequest, issue: IssueSummary) -> bool:
+    """在启动 worker 前检查可选资源准入门。"""
+    if request.issue_admission_check is None or request.issue_admission_check():
+        return True
+    _logger.warning(
+        "Disk admission paused before claiming Issue #%d; the Issue remains queued.",
+        issue.number,
+    )
+    return False
+
+
 def run_once(request: RunOnceRequest) -> int:
     """执行一次轮询处理。
 
@@ -967,6 +979,8 @@ def run_once(request: RunOnceRequest) -> int:
 
         def _process_serial(item: tuple[IssueSummary, str]) -> int:
             issue, issue_kind = item
+            if not _is_issue_admitted(request, issue):
+                return 0
             try:
                 with issue_output_routing(
                     repo_id=effective_repo_id,
@@ -1012,6 +1026,8 @@ def run_once(request: RunOnceRequest) -> int:
 
     def _process_with_routing(item: tuple[IssueSummary, str]) -> int:
         issue, issue_kind = item
+        if not _is_issue_admitted(request, issue):
+            return 0
         try:
             with issue_output_routing(
                 repo_id=effective_repo_id,

@@ -35,12 +35,15 @@ from typing import Protocol
 from backend.core.shared.models import product_identity
 from backend.core.shared.interfaces.container_runner import (
     ContainerCommandPlan,
+    ContainerGcRequest,
+    ContainerGcResult,
     ContainerUpRequest,
     DockerRunnerCallable,
     IContainerRunnerController,
     RunnerContainerAssets,
 )
 from backend.infrastructure.child_env import build_sanitized_child_env
+from backend.engines.agent_runner.container_gc import run_container_gc
 
 TEMPLATE_PACKAGE_NAME = "backend.engines.agent_runner.templates"
 RUNNER_CONTAINER_TEMPLATE_NAME = "runner_container"
@@ -325,11 +328,22 @@ class ContainerOpsController(IContainerRunnerController):
         """执行 ``docker compose logs``（默认 streaming）。"""
         return run_container_logs(compose_file, follow=follow, runner=runner)
 
+    def run_container_gc(
+        self,
+        request: ContainerGcRequest,
+        *,
+        runner: DockerRunnerCallable | None = None,
+    ) -> ContainerGcResult:
+        """扫描或清理安全的宿主 Docker 缓存。"""
+        return run_container_gc(request, runner=runner)
+
 
 __all__ = [
     "COMPOSE_ENV_EXAMPLE_NAME",
     "COMPOSE_FILE_NAME",
     "ContainerCommandPlan",
+    "ContainerGcRequest",
+    "ContainerGcResult",
     "ContainerOpsController",
     "ContainerUpRequest",
     "RUNNER_CONTAINER_TEMPLATE_NAME",
@@ -342,6 +356,7 @@ __all__ = [
     "plan_container_up",
     "resolve_packaged_runner_assets",
     "run_container_down",
+    "run_container_gc",
     "run_container_logs",
     "run_container_up",
 ]

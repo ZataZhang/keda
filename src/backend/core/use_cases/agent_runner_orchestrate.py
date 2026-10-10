@@ -578,6 +578,7 @@ def run_once(
     publish_stage: PublishStage = PublishStage.NORMAL,
     aggregate_pr: bool = False,
     execution_ceiling: int | None = None,
+    issue_admission_check: Callable[[], bool] | None = None,
 ) -> int:
     """执行一次 Agent Runner 轮询。"""
     module = _orchestration_runtime_module()
@@ -600,5 +601,6 @@ def run_once(
             publish_stage=publish_stage,
             aggregate_pr=aggregate_pr,
             execution_ceiling=execution_ceiling,
+            issue_admission_check=issue_admission_check,
         )
     )

@@ -75,6 +75,8 @@ Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`
 - 认证通过 `kc container auth import` 一次性快照到 `~/.kedacode/container-auth/`，与本机 cc-switch 当前 profile 隔离——本机切账号不影响容器内 agent 认证。
 - 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
 - runner 容器资产（Dockerfile / compose / .env.example）随 `kc` 包发布，无需克隆 keda 源码，全局安装后即可使用。
+- Compose 日志最多保留 5 个 10 MiB 文件；当前 Docker host 的缓存回收由运营者先运行 `kc container gc --dry-run` 检查，再用 `kc container gc --apply` 明确执行。候选也可能来自该主机上的其它本地项目；此清理不会移除 volume 或活动容器使用的镜像。
+- daemon 的 `hosted_maintenance_enabled` 默认关闭；仅托管部署显式开启时，在 worker 边界清理安全的关闭 Issue worktree、14 天前的 Issue 原始输出日志和 90 天前已完成的 run/attempt 摘要。可用磁盘低于 10 GiB 时暂停领取新 Issue，恢复到 15 GiB 后继续；当前任务不被清理流程终止。活动标签、dirty/unmerged worktree、远端分支、审计与队列设置均受保护。
 
 最小启动流程：
 

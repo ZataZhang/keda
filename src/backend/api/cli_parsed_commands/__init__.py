@@ -34,6 +34,7 @@ from backend.api.cli_parsed_commands.config_migrate import run_config_migrate_co
 from backend.api.cli_parsed_commands.container import (
     run_container_auth_import_command,
     run_container_down_command,
+    run_container_gc_command,
     run_container_logs_command,
     run_container_up_command,
 )
@@ -146,6 +147,7 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "container auth import": run_container_auth_import_command,
     "container up": run_container_up_command,
     "container down": run_container_down_command,
+    "container gc": run_container_gc_command,
     "container logs": run_container_logs_command,
 }
 

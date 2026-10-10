@@ -25,7 +25,7 @@ class WorktreeCleanupStatus(str, Enum):
 
 @dataclass(frozen=True)
 class WorktreeCleanupRequest:
-    """Options controlling stale iAR worktree cleanup."""
+    """控制过期 worktree 清理范围与活动 Issue 标签判定。"""
 
     repo_path: Path
     remote: str = "origin"
@@ -34,6 +34,7 @@ class WorktreeCleanupRequest:
     force: bool = False
     branch_prefix: str = DEFAULT_ISSUE_BRANCH_PREFIX
     managed_worktree_root_path: Path | None = None
+    active_issue_label: str = "agent/running"
 
 
 @dataclass(frozen=True)
@@ -96,9 +97,10 @@ def cleanup_iar_worktrees(
     A branch is eligible only when all default safety checks pass:
     its name matches ``issue-<number>``, the corresponding remote branch is
     gone after ``git fetch --prune``, the GitHub Issue is closed, the worktree
-    is iAR-managed, the worktree is clean, and the branch is merged into the
-    configured remote base branch. ``force`` bypasses the dirty and merged
-    checks, but still requires a closed Issue and missing remote branch.
+    is not marked active, is iAR-managed, the worktree is clean, and the branch
+    is merged into the configured remote base branch. ``force`` bypasses the
+    dirty and merged checks, but still requires a closed, inactive Issue and a
+    missing remote branch.
     """
     repo_path = request.repo_path.resolve()
     managed_worktree_root_path = (
@@ -153,7 +155,11 @@ def _evaluate_issue_branch(
             candidate_worktree_path,
         )
 
-    issue_closed, issue_reason = _issue_is_closed(github_client, issue_number)
+    issue_closed, issue_reason = _issue_is_closed(
+        github_client,
+        issue_number,
+        active_issue_label=request.active_issue_label,
+    )
     if not issue_closed:
         return _skipped(candidate, issue_reason, candidate_worktree_path)
 
@@ -276,11 +282,21 @@ def _remote_branch_exists(
     return remote_ref_result.return_code == 0
 
 
-def _issue_is_closed(github_client: IGitHubClient, issue_number: int) -> tuple[bool, str]:
+def _issue_is_closed(
+    github_client: IGitHubClient,
+    issue_number: int,
+    *,
+    active_issue_label: str,
+) -> tuple[bool, str]:
+    """仅允许关闭且不再标记为活动执行的 Issue 进入清理。"""
     try:
         issue_summary = github_client.get_issue(issue_number)
     except Exception as exc:  # noqa: BLE001 - cleanup should continue per branch.
         return False, f"Issue #{issue_number} lookup failed: {exc}"
+
+    issue_labels = set(getattr(issue_summary, "labels", ()) or ())
+    if active_issue_label in issue_labels:
+        return False, f"Issue #{issue_number} still has active label {active_issue_label}"
 
     issue_state = str(getattr(issue_summary, "state", "OPEN") or "OPEN").lower()
     if issue_state == "closed":

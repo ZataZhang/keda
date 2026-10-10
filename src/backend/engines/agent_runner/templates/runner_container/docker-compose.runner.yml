@@ -22,6 +22,11 @@ services:
     image: iar-runner:latest
     container_name: iar-runner
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # 注意：不在 compose 顶层设 user。entrypoint 需要以 root 身份 chown
     # /home/runner 与 .kedacode 全局目录对齐到 RUNNER_UID/RUNNER_GID，再用
     # gosu 切到目标 UID 跑 CMD。这样 gh/claude/codex/kimi 在 ``RUNNER_UID
