@@ -1,6 +1,6 @@
 # Verification Plan — Agent 与预设执行表现统计
 
-PRD: [`tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`](../../pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md)
+PRD: [`tasks/archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`](../../archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md)
 
 ## rv-1 — API 与 SQLite 聚合
 

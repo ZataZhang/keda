@@ -2,13 +2,13 @@
 
 **Verdict: NOT RUN.** 本文不是独立 verifier 的结论。
 
-当前 executor 交付了 backend/API/SQLite 集成测试及前端构建证据。rv-2 Playwright 浏览器测试和真实 Stats 页面截图仍受当前环境的浏览器 / Chromium 启动权限阻挡。Human-Confirmed 也尚未由人回答。
+最终轮次已完成此前受阻的全部 follow-up：rv-2 Playwright 5/5 通过（`rv-2-e2e-green-final.txt`），桌面与窄屏截图由 `just console-sync` 后经 worktree `uv run kc console` 静态分发的真实 `/app/stats` 页面采集（`rv-2-stats-agent-performance.png`、`rv-2-stats-agent-performance-narrow.png`），`just prd review` 人审 HTML 已通过真实浏览器呈现检查（`rv-2-prd-review-browser-check.txt`）。Human-Confirmed 两项仍留待人确认。
 
 PRD 归档规则要求 runner 的独立 verifier 在确认所有 executor-owned 项完成后另行执行。该 verifier 必须检查最终 Git tree、rv-1 精确 SQLite / API 证据、rv-2 真实页面证据、失败与空态、跨仓库分组、既有 Stats 回归以及文档状态。此报告不授予 `PASS`，也不授权归档。
 
 ## Required follow-up
 
-1. 在获准的浏览器环境运行 `just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts`。
-2. 经 `just console-sync` 后打开真实 `kc console` `/app/stats`，采集桌面 PNG 与窄屏结果，并内嵌桌面图到 evidence report。
-3. 运行 `just prd review tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`，确认生成的人审清单在真实浏览器呈现。
-4. 对包含最终代码树的工作树重新验证，再由 runner 的独立 verifier 给出可解析 verdict。
+1. 在获准的浏览器环境运行 `just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts` — 已完成：5 passed（`rv-2-e2e-green-final.txt`）。
+2. 经 `just console-sync` 后打开真实 `kc console` `/app/stats`，采集桌面 PNG 与窄屏结果，并内嵌桌面图到 evidence report — 已完成（`rv-2-stats-agent-performance.png`、`rv-2-stats-agent-performance-narrow.png`，已内嵌 evidence report）。
+3. 运行 `just prd review tasks/archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`，确认生成的人审清单在真实浏览器呈现 — 已完成（`rv-2-prd-review-browser-check.txt`）。
+4. 对包含最终代码树的工作树重新验证，再由 runner 的独立 verifier 给出可解析 verdict — 仍待 runner 的独立 verifier 执行；本文档不授予 `PASS`，也不授权归档。

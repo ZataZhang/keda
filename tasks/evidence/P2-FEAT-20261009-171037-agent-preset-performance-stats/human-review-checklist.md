@@ -1,8 +1,8 @@
 # 人工验收清单：Agent 与预设执行表现统计
 
-PRD: [`tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`](../../pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md)
+PRD: [`tasks/archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`](../../archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md)
 
-本清单汇总 PRD §9 的两项 `Human-Confirmed`，不替代 Acceptance Checklist。交互版通过 `just prd review tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md` 打开同目录 HTML；该 HTML 已通过真实浏览器呈现检查（首屏卡片、翻页、结果生成与内嵌截图均正常，见 [rv-2-prd-review-browser-check.txt](rv-2-prd-review-browser-check.txt)）。
+本清单汇总 PRD §9 的两项 `Human-Confirmed`，不替代 Acceptance Checklist。交互版通过 `just prd review tasks/archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md` 打开同目录 HTML；该 HTML 已通过真实浏览器呈现检查（首屏卡片、翻页、结果生成与内嵌截图均正常，见 [rv-2-prd-review-browser-check.txt](rv-2-prd-review-browser-check.txt)）。
 
 ## 1. 确认统计归属按单次 attempt 计算
 
