@@ -1,0 +1,1524 @@
+{
+  "repo_id": "issue-256",
+  "issue_number": 123,
+  "issue_title": "Issue #123",
+  "issue_url": "https://github.com/example/repo/issues/123",
+  "summary": "Agent produced no git commits.",
+  "attempts": [
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 1,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 2,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 3,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 4,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 5,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    },
+    {
+      "attempt_number": 6,
+      "failure_type": "no_commits",
+      "detail": "Agent produced no git commits.",
+      "recovered": false
+    }
+  ],
+  "final_solution": "",
+  "key_files": [],
+  "updated_at": "2026-10-10T01:58:44.802160+00:00"
+}

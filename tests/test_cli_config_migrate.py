@@ -1,8 +1,8 @@
 """Tests for the ``kc config migrate`` CLI command.
 
 覆盖两步：本机状态目录搬迁（``~/.iar`` → ``~/.kedacode``）与仓库配置文件改名 +
-旧钉住值清理。家目录被隔离到临时目录，因此真实的进程扫描与开发机上的状态目录都不
-会被碰到；占用场景用临时状态目录里的锁文件复现。
+旧钉住值清理。家目录被隔离到临时目录，CLI 测试把进程扫描明确注入为空闲结果；占用与
+scanner unavailable 场景分别用锁文件和专门的负控覆盖，不依赖宿主机进程枚举权限。
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from backend.api.cli import main
 from backend.api.cli_parser import build_parser
 from backend.api.cli_typer_app import app, config_app
 from backend.core.shared.models import product_identity
+from backend.engines.agent_runner import state_home_migration
 from tests.support.agent_runner import init_git_repo
 
 LEGACY_PINNED_CONFIG = """\
@@ -47,7 +48,7 @@ id = "target-local"
 
 @pytest.fixture(autouse=True)
 def _isolated_global_config_and_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """把配置与家目录隔离，避免 CLI 用例依赖宿主机进程表。"""
+    """隔离配置、家目录和进程扫描，真实机器状态不会影响 CLI 断言。"""
     isolated_config_path = tmp_path / "isolated-config.toml"
     isolated_config_path.write_text("[agent_runner]\n", encoding="utf-8")
     monkeypatch.setenv(product_identity.LEGACY_ENV_PREFIX + "CONFIG", str(isolated_config_path))
@@ -57,7 +58,8 @@ def _isolated_global_config_and_home(tmp_path: Path, monkeypatch: pytest.MonkeyP
     # 真实进程扫描由 test_state_home_migration.py 覆盖；这里验证 CLI/文件迁移，
     # 不让 psutil 的宿主机权限或其他工作树里运行的 kc 进程污染隔离 HOME。
     monkeypatch.setattr(
-        "backend.engines.agent_runner.state_home_migration._pids_from_command_scan",
+        state_home_migration,
+        "_pids_from_command_scan",
         lambda _target_home_path: frozenset(),
     )
     return fake_home_path
@@ -297,6 +299,23 @@ def test_config_migrate_refuses_while_a_runner_is_alive(
     assert legacy_state_path.is_dir() and not legacy_state_path.is_symlink()
     assert not (home_path / product_identity.STATE_DIR_NAME).exists()
     assert (repo_path / ".iar.toml").is_file()
+
+
+def test_config_migrate_refuses_when_process_scanner_is_unavailable(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """scanner unavailable 必须从真实 CLI 入口 fail-closed，且不改仓库配置。"""
+    monkeypatch.setattr(state_home_migration, "_pids_from_command_scan", lambda _home: None)
+    repo_path = _init_git_repository(tmp_path, "target", CONFIG_WITHOUT_PINS)
+
+    exit_code = main(["config", "migrate", "--dry-run", "--repo", str(repo_path)])
+
+    assert exit_code == 1
+    assert "process scanner unavailable" in capsys.readouterr().out
+    assert (repo_path / ".iar.toml").is_file()
+    assert not (repo_path / ".kedacode.toml").exists()
 
 
 def test_config_migrate_refuses_when_both_config_names_exist(

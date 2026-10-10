@@ -43,6 +43,9 @@ create_repository_autopilot_settings_editor = (
 create_repl_command_executor = _engines_factory_module.create_repl_command_executor
 create_backlog_store = _engines_factory_module.create_backlog_store
 create_transcript_runner = _engines_factory_module.create_transcript_runner
+create_foreground_session_launcher = _engines_factory_module.create_foreground_session_launcher
+create_preview_process_manager = _engines_factory_module.create_preview_process_manager
+prepare_native_session_plan = _engines_factory_module.prepare_native_session_plan
 daily_log_path = _engines_factory_module.daily_log_path
 find_repository_match_for_path = _engines_factory_module.find_repository_match_for_path
 get_agent_runner_settings = _engines_factory_module.get_agent_runner_settings
@@ -64,11 +67,13 @@ __all__ = [
     "create_console_store",
     "create_content_generator",
     "create_event_sink",
+    "create_foreground_session_launcher",
     "create_github_client",
     "create_lifecycle_settings_editor",
     "create_loop_clock",
     "create_loop_state_store",
     "create_planner_runner",
+    "create_preview_process_manager",
     "create_process_runner",
     "create_process_supervisor",
     "create_registry_editor",
@@ -82,6 +87,7 @@ __all__ = [
     "get_agent_runner_status_data",
     "load_fresh_agent_runner_settings",
     "logger",
+    "prepare_native_session_plan",
     "resolve_console_spawn_cwd",
     "resolve_issue_from_prd_target",
     "resolve_project_root_path",

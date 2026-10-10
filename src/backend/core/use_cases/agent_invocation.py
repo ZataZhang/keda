@@ -27,8 +27,10 @@ from pathlib import Path
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.shared.models.agent_spec import (
+    INTERACTIVE_PROFILE_ID,
     PROMPT_DELIVERY_ARGV_TAIL,
     PROMPT_DELIVERY_FLAG,
+    PROMPT_DELIVERY_NONE,
     AgentProfileSpec,
     AgentSpec,
 )
@@ -211,8 +213,26 @@ def resolve_profile_spec(
     profile: str,
     config: AppConfig,
 ) -> AgentProfileSpec:
-    """返回 agent 指定用途的 spec；未声明时抛 :class:`UnknownProfileError`。"""
+    """返回 agent 指定用途的 spec；未声明时抛 :class:`UnknownProfileError`。
+
+    ``profile`` 为 :data:`INTERACTIVE_PROFILE_ID` 时读的是 agent 上独立的
+    ``interactive`` 声明（原生 TUI 不是第四种提示词投递用途，不进
+    ``profiles`` 闭集，见该常量的定义），未声明即报错并指名要写的配置段——
+    绝不拿 ``run`` 的无人值守形态冒充交互界面。
+    """
     agent_spec = resolve_agent_spec(agent_name, config)
+    if profile == INTERACTIVE_PROFILE_ID:
+        interactive_spec = agent_spec.interactive
+        if interactive_spec is None:
+            raise UnknownProfileError(
+                f"Agent '{agent_name}' does not declare an interactive profile, so it "
+                f"cannot run as the native terminal executor for `kc`. Declared "
+                f"non-interactive profiles: {', '.join(agent_spec.profiles) or 'none'}. "
+                f"To enable it, add an [agent_runner.agents.{agent_name}.interactive] "
+                f"block with the argv its terminal UI actually accepts, or pick an "
+                f"agent that declares one (see `kc agent list`)."
+            )
+        return interactive_spec
     profile_spec = agent_spec.profiles.get(profile)
     if profile_spec is None:
         raise UnknownProfileError(
@@ -369,14 +389,21 @@ def build_agent_invocation(
         argv.append(_expand_placeholders(tail_arg, worktree_path=worktree_path, prompt=prompt))
 
     if profile_spec.prompt_delivery == PROMPT_DELIVERY_ARGV_TAIL:
-        argv.append(prompt)
+        # 空提示词不占位置参数：原生入口在 bootstrap_enabled = false 时 prompt 为空串，
+        # 传 "" 会被 provider 当成"用户提的一条消息"，那是凭空多出来的一轮。
+        if prompt:
+            argv.append(prompt)
     elif profile_spec.prompt_delivery == PROMPT_DELIVERY_FLAG:
         if not profile_spec.prompt_flag:
             raise ValueError(
                 f"Agent '{agent_name}' profile '{profile}' uses prompt_delivery='flag' "
                 f"but does not declare prompt_flag."
             )
-        argv.extend([profile_spec.prompt_flag, prompt])
+        if prompt:
+            argv.extend([profile_spec.prompt_flag, prompt])
+    elif profile_spec.prompt_delivery == PROMPT_DELIVERY_NONE:
+        # 交互入口没有可核实的 bootstrap 投递通道：不投递，也不假装投递。
+        pass
     # prompt_delivery == "stdin"：提示词不进 argv，由执行层写 stdin。
 
     return AgentInvocation(

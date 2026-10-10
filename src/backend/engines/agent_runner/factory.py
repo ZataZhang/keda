@@ -55,10 +55,12 @@ from backend.engines.agent_runner.factories import (
     create_content_generator,
     create_console_store,
     create_event_sink,
+    create_foreground_session_launcher,
     create_github_client,
     create_loop_clock,
     create_loop_state_store,
     create_planner_runner,
+    create_preview_process_manager,
     create_process_runner,
     create_process_supervisor,
     create_registry_editor,
@@ -78,6 +80,11 @@ from backend.engines.agent_runner.factories.content_generators import (
     SafePlannerContentGenerator,
     SubprocessContentGenerator,
 )
+from backend.engines.agent_runner.interactive_agent_session import (
+    NativeSessionPreparation,
+    build_operator_bootstrap,
+    prepare_native_session_plan,
+)
 from backend.engines.agent_runner.lifecycle_editor import (
     TomlLifecycleSettingsEditor,
     create_lifecycle_settings_editor,
@@ -89,6 +96,7 @@ from backend.infrastructure.config.settings import (
 from backend.infrastructure.logging.logger import daily_log_path
 
 __all__ = [
+    "NativeSessionPreparation",
     "RepositoryResolutionFailure",
     "SafePlannerContentGenerator",
     "SubprocessContentGenerator",
@@ -112,14 +120,17 @@ __all__ = [
     "build_app_config",
     "build_app_config_from_settings",
     "build_deliberation_config_from_settings",
+    "build_operator_bootstrap",
     "create_content_generator",
     "create_console_store",
     "create_event_sink",
+    "create_foreground_session_launcher",
     "create_github_client",
     "create_lifecycle_settings_editor",
     "create_loop_clock",
     "create_loop_state_store",
     "create_planner_runner",
+    "create_preview_process_manager",
     "create_process_runner",
     "create_process_supervisor",
     "create_registry_editor",
@@ -134,6 +145,7 @@ __all__ = [
     "load_fresh_agent_runner_settings",
     "logger",
     "merge_repository_config",
+    "prepare_native_session_plan",
     "resolve_console_spawn_cwd",
     "resolve_issue_from_prd_target",
     "resolve_project_root_path",

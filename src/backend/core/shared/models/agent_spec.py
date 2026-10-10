@@ -45,11 +45,42 @@ PROMPT_DELIVERY_FLAG = "flag"
 PROMPT_DELIVERY_STDIN = "stdin"
 """提示词不进 argv，由执行层写入子进程 stdin。"""
 
+PROMPT_DELIVERY_NONE = "none"
+"""提示词完全不投递。
+
+只服务于 :data:`INTERACTIVE_PROFILE_ID`：有些 provider 的交互界面没有任何已核实的
+启动指引入口（既不认位置参数，也没有追加 system prompt 的 flag），此时 KC 直接空手
+启动原生 TUI，bootstrap 只靠已安装的 operator skill 生效。非交互用途禁止声明本值——
+那等于悄悄丢掉提示词。
+"""
+
 PROMPT_DELIVERIES: tuple[str, ...] = (
     PROMPT_DELIVERY_ARGV_TAIL,
     PROMPT_DELIVERY_FLAG,
     PROMPT_DELIVERY_STDIN,
+    PROMPT_DELIVERY_NONE,
 )
+
+NON_INTERACTIVE_PROMPT_DELIVERIES: tuple[str, ...] = (
+    PROMPT_DELIVERY_ARGV_TAIL,
+    PROMPT_DELIVERY_FLAG,
+    PROMPT_DELIVERY_STDIN,
+)
+"""非交互用途可用的投递方式闭集。
+
+``PROMPT_DELIVERY_NONE`` 被排除在外：交互入口"没有可核实的 bootstrap 通道"是诚实
+结论，而非交互调用把提示词丢掉则会让 agent 收到一条空命令并安静地什么也不做。
+"""
+
+INTERACTIVE_PROMPT_DELIVERIES: tuple[str, ...] = (
+    PROMPT_DELIVERY_ARGV_TAIL,
+    PROMPT_DELIVERY_FLAG,
+    PROMPT_DELIVERY_NONE,
+)
+"""原生交互入口可用的 bootstrap 投递方式闭集。
+
+``stdin`` 不在其中：交互会话的 stdin 属于用户，KC 往里写 bootstrap 等于抢走输入。
+"""
 
 AGENT_PROFILE_RUN = "run"
 """主执行用途（Issue 的实现/修复，``kc run`` 路径）。"""
@@ -69,6 +100,17 @@ AGENT_PROFILES: tuple[str, ...] = (
     AGENT_PROFILE_GENERATE,
     AGENT_PROFILE_REPL,
 )
+
+INTERACTIVE_PROFILE_ID = "interactive"
+"""原生交互式 TUI 的声明名（裸 ``kc`` 入口用）。
+
+刻意**不**放进 :data:`AGENT_PROFILES`：那四样都是"KC 投递提示词、捕获输出、
+跑完即退"的非交互用途，而交互 profile 把 stdin/stdout/TTY 整个交给 provider
+自己的界面，没有提示词投递与输出协议可言。把它混进闭集会让 ``kc agent doctor
+--all-profiles``、生命周期预设枚举和只读门禁都必须回答一个并不存在的语义。
+因此它是 agent 上的一项**独立能力声明**：未声明即代表该 agent 不支持原生
+交互界面，裸 ``kc`` 入口 fail-fast，绝不拿非交互 profile 冒充。
+"""
 
 
 @dataclass(frozen=True)
@@ -91,6 +133,12 @@ class AgentProfileSpec:
             （如 codex 的 ``git_writable_roots:--add-dir``）。
         read_only: 该用途是否为可验证的只读调用。只读决策入口
             （planner / ``kc ask``）以此字段做 fail-fast 门禁。
+
+    同一个类型也承载 :data:`INTERACTIVE_PROFILE_ID` 声明（原生交互式 TUI）：
+    提示词由人在继承来的 TTY 上输入，输出也直接回到该 TTY；bootstrap 如何投递由
+    provider 的交互能力显式声明（位置参数、system-prompt flag 或不投递），不得
+    从非交互 profile 猜测。``output_protocol`` 保持 ``plain``，``read_only`` 为
+    ``False``，沿用 provider 自己的权限与确认策略，不附加自动批准参数。
     """
 
     args: tuple[str, ...] = ()
@@ -118,6 +166,9 @@ class AgentSpec:
         project_skills_dir: 项目级 skills 目录（相对仓库根，如 pi 的
             ``".pi/skills"``）。
         profiles: 用途名 -> 调用形态。四种用途键见 ``AGENT_PROFILES``。
+        interactive: 原生交互式 TUI 的声明（裸 ``kc`` 入口用），见
+            :data:`INTERACTIVE_PROFILE_ID`；``None`` 表示该 agent **未声明**交互能力，
+            交互入口必须 fail-fast，绝不猜测或改用非交互 profile。
         model_args: 模型参数 argv 模板（含 ``{model}`` 占位符）；为空表示
             该 agent 未声明模型选择语法，命中模型绑定时 fail-fast。
         reasoning_effort_args: 推理档参数 argv 模板（含 ``{effort}`` 占位符）；
@@ -138,6 +189,7 @@ class AgentSpec:
     auth_exclude: tuple[str, ...] = ()
     project_skills_dir: str | None = None
     profiles: dict[str, AgentProfileSpec] = field(default_factory=dict)
+    interactive: AgentProfileSpec | None = None
     model_args: tuple[str, ...] = ()
     reasoning_effort_args: tuple[str, ...] = ()
     supports_resume: bool = False
@@ -163,6 +215,46 @@ class AgentSpec:
         if relative_home.startswith("~"):
             relative_home = relative_home[1:].lstrip("/")
         return user_home_path / relative_home / "skills"
+
+
+def _permissioned_plain_profiles() -> dict[str, AgentProfileSpec]:
+    """为 provider 的 plain generate / repl 声明共享的非交互命令形态。"""
+    return {
+        AGENT_PROFILE_GENERATE: AgentProfileSpec(
+            args=("--dangerously-skip-permissions", "-p"),
+            prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+            output_protocol=PLAIN_PROTOCOL_ID,
+            read_only=True,
+        ),
+        AGENT_PROFILE_REPL: AgentProfileSpec(
+            args=("--dangerously-skip-permissions", "-p"),
+            prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+            output_protocol=PLAIN_PROTOCOL_ID,
+            read_only=False,
+        ),
+    }
+
+
+def _claude_compatible_profiles() -> dict[str, AgentProfileSpec]:
+    """为 Claude CLI 与兼容它的 CodeBuddy 复用相同的非交互 profile。"""
+    streaming_write_profile = AgentProfileSpec(
+        args=(
+            "--dangerously-skip-permissions",
+            "--verbose",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+        ),
+        prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+        output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+        read_only=False,
+    )
+    return {
+        AGENT_PROFILE_RUN: streaming_write_profile,
+        AGENT_PROFILE_DELIBERATE: streaming_write_profile,
+        **_permissioned_plain_profiles(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +286,19 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # 模型选择：`codex -m/--model <id>`（本机 --help 确认）。推理档需
         # `-c model_reasoning_effort=...`，未核实，保持为空 → 带推理档的绑定 fail-fast。
         model_args=("--model", "{model}"),
+        # 原生交互入口：`codex [OPTIONS] [PROMPT]`（本机 --help 确认，无子命令即
+        # 进入交互式 CLI）。**只带 --cd**：run profile 里的 `--sandbox
+        # workspace-write` / `--ask-for-approval never` 是无人值守用的，交互界面必须
+        # 沿用用户自己的 codex 权限配置与确认提示（PRD §2 决定三 / FR-2）。
+        # bootstrap **不投递**：位置参数 [PROMPT] 会被 codex 当成"用户提的任务"直接
+        # 开跑，不是使用说明；codex 也没有核实过的 system prompt 注入旗标（`-c` 需
+        # 知道 config key，未验证）。仓库根的 AGENTS.md 是 codex 自己的指令来源，
+        # 因此这里诚实保持"无投递通道"，绝不假装投递。
+        interactive=AgentProfileSpec(
+            args=("--cd", "{cwd}"),
+            prompt_delivery=PROMPT_DELIVERY_NONE,
+            output_protocol=PLAIN_PROTOCOL_ID,
+        ),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=(
@@ -276,46 +381,19 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # session id 来自 stream-json 首行 system/init 事件。
         supports_resume=True,
         resume_args=("--resume", "{session_id}"),
-        profiles={
-            AGENT_PROFILE_RUN: AgentProfileSpec(
-                args=(
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                    "-p",
-                    "--output-format",
-                    "stream-json",
-                    "--include-partial-messages",
-                ),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
-                read_only=False,
-            ),
-            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
-                args=(
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                    "-p",
-                    "--output-format",
-                    "stream-json",
-                    "--include-partial-messages",
-                ),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
-                read_only=False,
-            ),
-            AGENT_PROFILE_GENERATE: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=True,
-            ),
-            AGENT_PROFILE_REPL: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=False,
-            ),
-        },
+        # 原生交互入口：`claude [options] [prompt]`（本机 --help 确认，不带 -p 即
+        # 进入交互式会话）。空 args 是刻意的：run profile 的 `-p
+        # --output-format stream-json` 与 `--dangerously-skip-permissions` 都属于
+        # 无人值守形态，交互界面必须由 claude 自己按用户配置做权限确认（FR-2）。
+        # bootstrap 走 `--append-system-prompt`（本机 --help 确认）：它是"给 agent 的
+        # 使用说明"，不是替用户提的问题，因此落在 system prompt 而不是位置参数。
+        interactive=AgentProfileSpec(
+            args=(),
+            prompt_flag="--append-system-prompt",
+            prompt_delivery=PROMPT_DELIVERY_FLAG,
+            output_protocol=PLAIN_PROTOCOL_ID,
+        ),
+        profiles=_claude_compatible_profiles(),
     ),
     "kimi": AgentSpec(
         bin="kimi",
@@ -438,46 +516,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # 与推理档 `--settings '{"reasoningEffort":"<档>"}'`。
         model_args=("--model", "{model}"),
         reasoning_effort_args=("--settings", '{"reasoningEffort":"{effort}"}'),
-        profiles={
-            AGENT_PROFILE_RUN: AgentProfileSpec(
-                args=(
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                    "-p",
-                    "--output-format",
-                    "stream-json",
-                    "--include-partial-messages",
-                ),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
-                read_only=False,
-            ),
-            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
-                args=(
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                    "-p",
-                    "--output-format",
-                    "stream-json",
-                    "--include-partial-messages",
-                ),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
-                read_only=False,
-            ),
-            AGENT_PROFILE_GENERATE: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=True,
-            ),
-            AGENT_PROFILE_REPL: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=False,
-            ),
-        },
+        profiles=_claude_compatible_profiles(),
     ),
     # Qoder CLI CN（@qodercn-ai/qoderclicn）。两点与 claude 不同，均以本机
     # --help 与包内 schema 实测为准：
@@ -524,18 +563,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=False,
             ),
-            AGENT_PROFILE_GENERATE: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=True,
-            ),
-            AGENT_PROFILE_REPL: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=False,
-            ),
+            **_permissioned_plain_profiles(),
         },
     ),
     # OpenCode。非交互入口是 ``run`` 子命令（消息是位置参数），输出走
@@ -597,13 +625,17 @@ __all__ = [
     "AGENT_PROFILE_RUN",
     "BUILTIN_AGENT_SPECS",
     "CLAUDE_STREAM_JSON_PROTOCOL_ID",
+    "INTERACTIVE_PROFILE_ID",
+    "INTERACTIVE_PROMPT_DELIVERIES",
     "PI_JSON_LINES_PROTOCOL_ID",
     "PLAIN_PROTOCOL_ID",
     "AgentProfileSpec",
     "AgentSpec",
+    "NON_INTERACTIVE_PROMPT_DELIVERIES",
     "PROMPT_DELIVERIES",
     "PROMPT_DELIVERY_ARGV_TAIL",
     "PROMPT_DELIVERY_FLAG",
+    "PROMPT_DELIVERY_NONE",
     "PROMPT_DELIVERY_STDIN",
     "builtin_agent_names",
 ]

@@ -18,6 +18,7 @@ from backend.api.cli_parsed_commands.agent import (
     run_ask_command,
     run_deliberate_command,
     run_repl_command,
+    run_session_command,
 )
 from backend.api.cli_parsed_commands.config_migrate import run_config_migrate_command
 from backend.api.cli_parsed_commands.container import (
@@ -52,6 +53,11 @@ from backend.api.cli_parsed_commands.backlog import run_backlog_ci_policy_comman
 from backend.api.cli_parsed_commands.backlog import run_backlog_ci_repair_command
 from backend.api.cli_parsed_commands.backlog import run_backlog_ci_status_command
 from backend.api.cli_parsed_commands.aggregate_pr import run_aggregate_pr_command
+from backend.api.cli_parsed_commands.preview import (
+    run_preview_start_command,
+    run_preview_status_command,
+    run_preview_stop_command,
+)
 from backend.api.cli_parsed_commands.runner import (
     run_blocked_continue_command,
     run_daemon_command,
@@ -93,7 +99,11 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "recover": run_recover_command,
     "blocked-continue": run_blocked_continue_command,
     "ask": run_ask_command,
+    "session": run_session_command,
     "repl": run_repl_command,
+    "preview start": run_preview_start_command,
+    "preview status": run_preview_status_command,
+    "preview stop": run_preview_stop_command,
     "deliberate": run_deliberate_command,
     "agent list": run_agent_list_command,
     "agent doctor": run_agent_doctor_command,

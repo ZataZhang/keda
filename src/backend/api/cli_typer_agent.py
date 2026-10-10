@@ -92,6 +92,34 @@ def ask_command(
     )
 
 
+@app.command("session")
+def session_command(
+    ctx: typer.Context,
+    agent: Annotated[
+        RunAgentChoice | None,
+        typer.Option(
+            "--agent",
+            help="Override the native executor (defaults to [agent_session].default_agent).",
+        ),
+    ] = None,
+    repo: RepoOption = None,
+    repo_id: RepoIdOption = None,
+    config: ConfigOption = None,
+) -> int:
+    """Start the configured executor's own terminal UI in this repository.
+
+    这是 TTY 下裸 ``kc`` 的显式写法：KC 只负责解析默认执行器、核对 operator
+    skill 并把终端交出去，不接管对话、不改权限策略、不启动项目服务。原有 Keda
+    REPL 仍在 ``kc repl``。
+    """
+    selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
+    return _run_typer_command(
+        "session",
+        **selector_options,
+        agent=_enum_value(agent) if agent is not None else None,
+    )
+
+
 @app.command("repl")
 def repl_command(
     ctx: typer.Context,
