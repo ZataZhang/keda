@@ -400,6 +400,10 @@ def test_non_pypi_source_is_never_auto_upgraded(
 ) -> None:
     """源码 / editable / tarball 直链安装只给命令，不自动执行。"""
     monkeypatch.setattr(cli_update_check, "_installed_from_non_pypi_source", lambda: True)
+    # 钉死 prefix：避免测试宿主本身跑在 Homebrew Python 里时先命中 Cellar 分支。
+    monkeypatch.setattr(sys, "prefix", "/Users/x/src/keda/.venv")
+    monkeypatch.setattr(sys, "base_prefix", "/usr/local")
+    monkeypatch.setattr(site, "USER_SITE", "/nonexistent-user-site")
     assert detect_upgrade_command() is None
 
 
@@ -447,6 +451,21 @@ def test_homebrew_prefix_maps_to_brew_upgrade(
     _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Homebrew Cellar 路径 → `brew upgrade kedacode`。"""
+    monkeypatch.setattr(sys, "prefix", "/opt/homebrew/Cellar/kedacode/0.2.1/libexec")
+    monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"/opt/homebrew/bin/{name}")
+    plan = detect_upgrade_command()
+    assert plan is not None and plan.argv == ("brew", "upgrade", "kedacode")
+
+
+def test_homebrew_install_with_direct_url_still_maps_to_brew_upgrade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实 Homebrew 安装（tap formula 本地路径安装带 direct_url.json）仍识别为 brew。
+
+    Homebrew 的 virtualenv 从本地构建路径 pip 安装，发行版必然带 direct_url.json；
+    brew 托管前缀必须先于 direct_url 判定，否则 Cellar 分支对真实 brew 安装不可达。
+    """
+    monkeypatch.setattr(cli_update_check, "_installed_from_non_pypi_source", lambda: True)
     monkeypatch.setattr(sys, "prefix", "/opt/homebrew/Cellar/kedacode/0.2.1/libexec")
     monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"/opt/homebrew/bin/{name}")
     plan = detect_upgrade_command()

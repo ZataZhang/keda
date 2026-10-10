@@ -11,9 +11,9 @@
 - 结果缓存到 ``<状态目录>/update-check.json``，默认 24 小时内不再访问 PyPI；
   缓存记录绑定了当时的已安装版本，升级后自动失效。
 - 拒绝升级或显示候选安装命令后，同一版本在缓存过期前不再重复提示。
-- 询问后仅对「可确认的 PyPI 托管安装」（uv tool / pipx / Homebrew / venv pip /
-  user-site pip）直接执行对应升级命令；来源不是 PyPI（源码、editable、tarball
-  直链）或识别不出安装方式时，只打印可复制的命令，绝不猜测执行。
+- 询问后仅对「可确认包管理器托管的安装」（Homebrew formula / uv tool / pipx /
+  venv pip / user-site pip）直接执行对应升级命令；来源不适合原地升级（源码、
+  editable、tarball 直链）或识别不出安装方式时，只打印可复制的命令，绝不猜测执行。
 """
 
 from __future__ import annotations
@@ -336,23 +336,28 @@ def _has_path_part_sequence(path_text: str, *expected_parts: str) -> bool:
 def detect_upgrade_command() -> UpgradeCommand | None:
     """按当前安装痕迹识别可自动执行的升级命令；识别不出返回 ``None``。
 
-    识别顺序：uv tool 隔离环境 → pipx 隔离环境 → Homebrew prefix → venv 内
+    识别顺序：Homebrew prefix → uv tool 隔离环境 → pipx 隔离环境 → venv 内
     pip → 安装路径确实位于 ``USER_SITE`` 的 pip。任何一支都要求对应安装器
     可执行文件存在，避免给出跑不起来的命令。
+
+    Homebrew 必须排最前：tap formula 经 Homebrew 从本地构建路径 pip 安装，
+    发行版一定带 ``direct_url.json``（PEP 610），但那仍是 brew 托管的安装，
+    升级只能走 ``brew upgrade``；若先做 direct_url 判定，真实 brew 安装会被
+    误归为「非 PyPI 来源」，Cellar 分支永远不可达。
 
     Returns:
         :class:`UpgradeCommand` 表示可以放心执行；``None`` 时调用方打印
         :data:`_FALLBACK_UPGRADE_COMMANDS` 供用户自行选择。
     """
+    prefix_path = sys.prefix
+    if _has_path_part_sequence(prefix_path, "Cellar") and shutil.which("brew"):
+        return UpgradeCommand(("brew", "upgrade", _DISTRIBUTION_NAME))
     if _installed_from_non_pypi_source():
         return None
-    prefix_path = sys.prefix
     if _has_path_part_sequence(prefix_path, "uv", "tools") and shutil.which("uv"):
         return UpgradeCommand(("uv", "tool", "upgrade", _DISTRIBUTION_NAME))
     if _has_path_part_sequence(prefix_path, "pipx", "venvs") and shutil.which("pipx"):
         return UpgradeCommand(("pipx", "upgrade", _DISTRIBUTION_NAME))
-    if _has_path_part_sequence(prefix_path, "Cellar") and shutil.which("brew"):
-        return UpgradeCommand(("brew", "upgrade", _DISTRIBUTION_NAME))
     if sys.prefix != sys.base_prefix:
         pip_spec = importlib.util.find_spec("pip")
         if pip_spec is not None:
