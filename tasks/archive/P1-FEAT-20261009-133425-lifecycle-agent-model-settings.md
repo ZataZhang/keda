@@ -749,3 +749,11 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - Reason: 恢复规则同时要求「命令退出码 0 不等于检查点成立」与「修复行为使命令真正通过」，且「A diagnosis is not a waiver」——产品行为已反复复跑为真，唯一未达成的是该判据在 runner 复跑环境下不稳定。把「环境能力探针」做到能容忍瞬时解释器 / uv 抖动、同时保留判别性，是既不伪勾、也不让门禁空转的最小修复；不采用 `validation.reexecute_commands=false` 规避复跑。
 - Impact: 纯证据脚本与 PRD 表述，无 src 改动、不改 `kc` CLI 表面（无需同步随包 skill）、不新增 / 删减 / 削弱任何 FR、验收判据或 §7.6 检查点；`rv3_delete_integrity.sh` 的 A/B/C/D 四段「负控变红 → 判别正控变绿」完全保留。§9 Human-Confirmed 五项不勾选。
 - Review: 执行侧已以加固脚本真实重跑串联命令 exit 0 并绑定证据；待独立 verifier 复跑确认稳定绿；PRD 保持归档态，不自行移回 `tasks/pending/`。
+
+### 修复（恢复尝试 5）：rv-3 复跑 exit 3 的真实根因是 /bin/bash 3.2 吞并 `$VAR` 后多字节首字节，前两轮「uv 抖动」诊断有误
+- Type: evidence / tooling（本轮无任何 src 改动）
+- Before: runner 连续三轮复跑 item 3 串联命令 exit 3，证据日志恰截断于 `rv3_delete_integrity.sh` A 段末行且无「环境错误」提示行。恢复尝试 3/4 把它归因于 `uv run python` 的项目环境解析抖动并逐轮加固探针，但复跑仍红。本轮用 runner 同款入口 `bash -lc "bash <script> …"` 在本机直接复现红态并定位真根因：`bash -lc` 登录环境把内层 `bash` 解析为 macOS /bin/bash 3.2.57，该版本在 UTF-8 locale 下会把紧跟 `$VAR` 之后的多字节字符首字节并入变量名——L183 描述串 `（tomllib 读回 $GLOBAL）` 被展开成未定义变量 `GLOBAL\xef…`，`set -u` 使 `$(pyprobe …)` 子壳即时中止，脚本自身的 `|| exit 3` 兜住非零状态退出。该路径不打印「环境错误」note、不写 traceback，与三轮失败证据形态逐字节吻合；产品断言与 uv 均无过错。
+- After: 证据脚本内两处紧邻全角标点的变量引用改为花括号形式（`${GLOBAL}`、`${PYRUN}`），并对 scripts/ 全目录以 `$VAR`+非 ASCII 模式扫描确认无其它残留；断言、判读口径与 `|| exit 3` 环境错误语义零改动。修复后以 runner 同款 `bash -lc`（内层 3.2.57）完整串联复跑 exit 0（链实测 ≈7s，300s 预算余量充足），`rv3_delete_integrity.sh` 另以 /bin/bash 3.2 直跑 exit 0，`RV-3 / RV-3-DEL RESULT: PASS` 与两段「判别性检查失败数：0」齐现，11 条 stdout 断言对实跑输出逐条命中；负控按「先证会红再证变绿」补录：对副本反回退 L183 花括号即复现 exit 3（`rv-3-bash32-unbound-red.txt`），恢复花括号转绿。`evidence.json` item 3 的 output_summary / explanation / risks / negative_control / expected_fail 与 note 已同步该轮事实并纠正前两轮误诊记录。
+- Reason: 恢复规则要求「修复行为使命令真正通过」且诊断须有证据支撑——注入复现证明红/绿只取决于花括号这一处文本，前两轮抖动假说已被同一实验证伪（3.2 下无 uv 参与的产品断言路径同样 exit 3）；不采用 `validation.reexecute_commands=false` 规避复跑。
+- Impact: 纯证据脚本（scripts/ 不随代码 diff 交付）与 PRD/证据报告表述；无 src 改动、不改 `kc` CLI 表面、不新增/删减/削弱任何 FR、验收判据或 §7.6 检查点，rv3 四段「负控变红 → 判别正控变绿」完整保留。§9 Human-Confirmed 五项不勾选。
+- Review: 执行侧已在与 runner 相同的登录入口与 3.2.57 解释器下真实重跑串联命令 exit 0 并重采证据；待 runner 复跑确认稳定绿；PRD 保持归档态。
