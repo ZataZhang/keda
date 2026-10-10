@@ -609,6 +609,95 @@ class RunOnceRequest:
     #: 调用方传的仍是 ``NORMAL``（默认值），但它是**调用侧请求档位**——认领后
     #: core 会用 Issue 上的 ``direct-pr`` 标签把它升级为 ``DIRECT``（逐 Issue 独立）。
     publish_stage: PublishStage = PublishStage.NORMAL
+    #: 仅显式队列运行聚合；必须等待本轮全部 worker 完成后才可调用聚合用例。
+    aggregate_pr: bool = False
+
+
+@dataclass(frozen=True)
+class AggregateQueueCompletionRequest:
+    """完整 worker join 后交给批次聚合的队列运行结果。"""
+
+    run_request: RunOnceRequest
+    issue_numbers: tuple[int, ...]
+    exit_codes: tuple[int, ...]
+
+
+def _complete_aggregate_queue(request: AggregateQueueCompletionRequest) -> int:
+    """所有 Issue worker 完成后，仅在整批成功时执行聚合发布。"""
+    if not request.run_request.aggregate_pr:
+        return 1 if any(request.exit_codes) else 0
+    if any(request.exit_codes):
+        failed_issue_numbers = [
+            issue_number
+            for issue_number, exit_code in zip(
+                request.issue_numbers, request.exit_codes, strict=True
+            )
+            if exit_code
+        ]
+        _logger.error(
+            "Aggregate batch stopped because these Issues failed: %s. "
+            "No total PR was created; source PRs remain available for repair.",
+            failed_issue_numbers,
+        )
+        return 1
+
+    from backend.core.use_cases.agent_runner_batch_aggregate import (
+        BatchAggregateError,
+        BatchAggregateRequest,
+        BatchSourceResolutionRequest,
+        aggregate_batch,
+        resolve_batch_repo_identifier,
+        resolve_batch_sources,
+    )
+
+    run_request = request.run_request
+    effective_repo_id = run_request.repo_id or run_request.repo_path.name
+    try:
+        repo_identifier = resolve_batch_repo_identifier(
+            repo_path=run_request.repo_path,
+            repo_id=effective_repo_id,
+            config=run_request.config,
+        )
+        sources = resolve_batch_sources(
+            BatchSourceResolutionRequest(
+                repo_path=run_request.repo_path,
+                github_client=run_request.github_client,
+                config=run_request.config,
+                repo_id=effective_repo_id,
+                issue_numbers=request.issue_numbers,
+                repo_identifier=repo_identifier,
+            )
+        )
+        result = aggregate_batch(
+            BatchAggregateRequest(
+                repo_path=run_request.repo_path,
+                repo_id=effective_repo_id,
+                config=run_request.config,
+                github_client=run_request.github_client,
+                process_runner=run_request.process_runner,
+                sources=sources,
+            )
+        )
+    except BatchAggregateError as exc:
+        _logger.error(
+            "Aggregate batch failed during %s: %s%s",
+            exc.failure_category,
+            exc,
+            f" Retry with `{exc.retry_command}`." if exc.retry_command else "",
+        )
+        return 1
+    _logger.info(
+        "Batch review entry: %s; source PRs closed=%s; Issues=%d, unique PRDs=%d; "
+        "base=%s head=%s tree=%s.",
+        result.total_pr_url,
+        list(result.source_pr_numbers_closed),
+        len(sources),
+        len(result.prd_paths),
+        result.base_sha,
+        result.head_sha,
+        result.tree_sha,
+    )
+    return 0
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -843,6 +932,17 @@ def run_once(request: RunOnceRequest) -> int:
                     config.labels.blocked,
                 )
 
+    if request.aggregate_pr and len(issues_to_process) < 2:
+        from backend.core.use_cases.agent_runner_batch_aggregate import (
+            validate_aggregate_candidate_count,
+        )
+
+        try:
+            validate_aggregate_candidate_count(len(issues_to_process))
+        except ValueError as exc:
+            _logger.error("Aggregate batch rejected: %s.", exc)
+        return 1
+
     if not issues_to_process:
         _logger.info(
             "No open Issues found with label %s, eligible running rework, or blocked resolution.",
@@ -852,6 +952,23 @@ def run_once(request: RunOnceRequest) -> int:
 
     # DRY RUN：仅列出将处理的 Issue，不实际处理（串行、零副作用）。
     if dry_run:
+        if request.aggregate_pr:
+            from backend.core.use_cases.agent_runner_feedback import extract_prd_path
+
+            preview_prd_paths = sorted(
+                {
+                    path
+                    for issue, _ in issues_to_process
+                    if (path := extract_prd_path(issue.body)) is not None
+                }
+            )
+            _logger.info(
+                "DRY RUN: aggregate batch would include %d Issues and %d distinct PRD paths.",
+                len(issues_to_process),
+                len(preview_prd_paths),
+            )
+            for prd_path in preview_prd_paths:
+                _logger.info("DRY RUN: aggregate PRD: %s", prd_path)
         # 定向模式的候选来自 get_issue（单个目标），不是 ready 列表的 limit 宽度，
         # 因此不能套用同一句「覆盖 N 个候选」的措辞。
         if target_issue_summary is not None:
@@ -937,10 +1054,16 @@ def run_once(request: RunOnceRequest) -> int:
                 _logger.error("Serial routing failed for Issue #%d: %s", issue.number, exc)
                 return 1
 
-        exit_code = 0
-        for issue, issue_kind in issues_to_process:
-            exit_code |= _process_serial((issue, issue_kind))
-        return exit_code
+        issue_results = [
+            _process_serial((issue, issue_kind)) for issue, issue_kind in issues_to_process
+        ]
+        return _complete_aggregate_queue(
+            AggregateQueueCompletionRequest(
+                run_request=request,
+                issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
+                exit_codes=tuple(issue_results),
+            )
+        )
 
     # 并行路径：线程池同一轮并行处理多个 Issue。每个 Issue 的 agent 输出经
     # output_sink 路由到独立日志文件与（可选）独立看板列，互不交错。
@@ -982,4 +1105,10 @@ def run_once(request: RunOnceRequest) -> int:
             results = list(pool.map(_process_with_routing, issues_to_process))
     finally:
         active_view.close()
-    return 1 if any(results) else 0
+    return _complete_aggregate_queue(
+        AggregateQueueCompletionRequest(
+            run_request=request,
+            issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
+            exit_codes=tuple(results),
+        )
+    )

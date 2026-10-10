@@ -13,7 +13,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 |---|---|---|
 | 建 issue | 建个 issue / 把 tasks/pending/xxx.md 建成 issue / 开个 Issue / issue create | `${CODEBUDDY_SKILL_DIR}/references/create-issue.md` |
 | 查 issue | 查 issue / issue list / 看看有哪些 Issue / 这个 PRD 有 issue 吗 | `${CODEBUDDY_SKILL_DIR}/references/issue-inspect.md` |
-| 跑一次 | 跑一下 / 跑一次 / 执行这个 Issue / run this / 快速通道发 PR / 直接发 PR | `${CODEBUDDY_SKILL_DIR}/references/run-once.md` |
+| 跑一次或聚合已完成批次 | 跑一下 / 跑一次 / 执行这个 Issue / run this / 快速通道发 PR / 直接发 PR / 夜间任务总 PR / 聚合来源 PR / 重试批次 PR | `${CODEBUDDY_SKILL_DIR}/references/run-once.md` |
 | 看进度 | 看看 197 现在什么情况 / 到哪了 / 实时输出 / logs / tail / `/ps` | `${CODEBUDDY_SKILL_DIR}/references/watch.md` |
 | 卡住了 | 怎么不动了 / 卡住了 / 失败了 / agent/blocked / 恢复 | `${CODEBUDDY_SKILL_DIR}/references/triage.md` |
 | 后台跑 | 挂后台 / 让它自己跑 / daemon / 起守护 / 停掉它 | `${CODEBUDDY_SKILL_DIR}/references/daemon.md` |
@@ -33,6 +33,8 @@ Every example below uses the current command name `kc`. The legacy `iar` command
 
 - **A read-only request gets a read-only command.** Never start `kc run` or `kc registry start` just because the user asked to *view* progress — an inspect, preview, or "just check" request never becomes execution.
 - **`kc run` requires a target** (breaking change): pass `--issue <N>`, a PRD path (resolved via the PRD's `- GitHub Issue:` link — a PRD without one must first go through `kc issue create`), or `--all-ready` for the historical queue-draining behavior. Bare `kc run` fails with a usage error.
+- **Batch aggregation is opt-in**: `kc run --all-ready --aggregate-pr --max-issues 4` aggregates only the Issues selected in that one repository pass and requires at least two; `--direct-pr`, `--fast-merge`, targeted runs and multi-repository runs are rejected. Ordinary runs, daemon and loop do not aggregate. Dry-run previews the selected batch size and known PRD paths.
+- For tasks completed by separate runs, explicitly aggregate or retry with `kc pr aggregate --issue 101 --issue 102`. All source tasks and their required checks must be successful before isolated branch integration and full-tree verification. One total Draft PR lists the source Issues/PRs, unique PRD set and evidence links. Source PRs close with a superseded link only after total PR checks succeed; branches remain. Pending/failed checks leave source PRs open. After partial closeout, already closed sources retain their superseded records and unclosed sources remain open; report each state and the same retry command. The total PR is never auto-merged; this local implementation does not claim live GitHub behavior was verified.
 - **Unknown flag, default, or enum value**: read `kc schema --json` — read-only introspection derived from the live command tree: every command, flag, type, required flag, enum choices, default, and an example — instead of guessing from a table.
 
 ## Consuming `kc` from a script or another Agent

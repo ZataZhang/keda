@@ -59,6 +59,7 @@ def run_agent_repositories_once(
     max_deliberation_issues: int = 1,
     target_issue: int | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    aggregate_pr: bool = False,
 ) -> int:
     """Run one polling pass across all target repositories.
 
@@ -84,6 +85,8 @@ def run_agent_repositories_once(
             一律不动；``None`` 保持既有"按优先级捞队列"行为。
         publish_stage: 发布档位（``kc run --fast-merge`` / ``--direct-pr``），仅本次
             运行生效；默认 ``NORMAL`` 与今天完全一致。
+        aggregate_pr: 仅在 ``kc run --all-ready --aggregate-pr`` 下启用；全部选中
+            Issue 成功后才将本轮冻结集合交给共享批次聚合用例。
 
     Returns:
         Exit code (0 on success, 1 if any repository failed).
@@ -157,6 +160,7 @@ def run_agent_repositories_once(
                 repo_id=context.repo_id,
                 target_issue=target_issue,
                 publish_stage=publish_stage,
+                aggregate_pr=aggregate_pr,
             )
             if repo_exit_code != 0:
                 aggregated_exit_code = 1

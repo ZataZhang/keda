@@ -27,6 +27,7 @@ _ROW = dict(
     headRefName="issue-7",
     headRefOid="a" * 40,
     baseRefOid="b" * 40,
+    isDraft=False,
 )
 
 

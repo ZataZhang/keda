@@ -144,6 +144,9 @@ issue_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+pr_app = typer.Typer(
+    help="Manage pull requests.", no_args_is_help=True, context_settings=_HELP_CONTEXT
+)
 completion_app = typer.Typer(
     help="Manage shell completion.",
     no_args_is_help=True,
@@ -212,6 +215,7 @@ skill_app = typer.Typer(
 container_app.add_typer(auth_app, name="auth")
 app.add_typer(labels_app, name="labels")
 app.add_typer(issue_app, name="issue")
+app.add_typer(pr_app, name="pr")
 app.add_typer(completion_app, name="completion")
 register_completion_commands(completion_app)
 app.add_typer(worktree_app, name="worktree")
@@ -407,6 +411,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_registry,
     cli_typer_labels,
     cli_typer_issue,
+    cli_typer_pr,
     cli_typer_runner,
     cli_typer_recover,
     cli_typer_agent,

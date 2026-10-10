@@ -124,6 +124,16 @@ def run_command(
             help="Process the ready queue by priority (the historical kc run behavior).",
         ),
     ] = False,
+    aggregate_pr: Annotated[
+        bool,
+        typer.Option(
+            "--aggregate-pr",
+            help=(
+                "After every Issue selected by --all-ready succeeds, combine the batch "
+                "into one verified Draft PR and close its source PRs."
+            ),
+        ),
+    ] = False,
     takeover: Annotated[
         bool,
         typer.Option(
@@ -191,6 +201,7 @@ def run_command(
         prd_path=prd_path,
         issue=issue,
         all_ready=all_ready,
+        aggregate_pr=aggregate_pr,
         takeover=takeover,
         yes=yes,
         fast_merge=fast_merge,
