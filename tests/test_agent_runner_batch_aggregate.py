@@ -189,18 +189,11 @@ def test_build_total_pr_body_annotates_when_source_pr_missing() -> None:
             tree_sha="tree",
         )
     )
-    # 用错误的来源 PR 集去校验同一正文 → 来源 marker 不匹配 → 标注块出现。
-    assert "iar:aggregate-contract" in build_total_pr_body(
-        AggregatePRBodyContext(
-            sources=tuple(sources),
-            prd_paths=("tasks/archive/a.md",),
-            verification_results=(),
-            verification_passed=True,
-            base_sha="base",
-            head_sha="head",
-            tree_sha="tree",
-        )
-    ) or find_aggregate_pr_body_contract_violations(
+    # 正文 PRD 集与来源解析结果不一致 → 本地软门标注块出现并点名 prd-link。
+    assert "iar:aggregate-contract" in body
+    assert "missing=prd-link" in body
+    # 用错误的来源 Issue 集去校验同一正文 → 来源 marker 不匹配。
+    assert find_aggregate_pr_body_contract_violations(
         body,
         expected_prd_paths=("tasks/archive/a.md",),
         expected_issue_numbers=(101, 999),

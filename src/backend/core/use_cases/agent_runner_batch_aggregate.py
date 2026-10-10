@@ -725,7 +725,7 @@ def aggregate_batch(request: BatchAggregateRequest) -> AggregateResult:
                 failure_category=exc.failure_category,
                 retry_command=retry_command,
             ) from exc
-        except Exception as exc:  # noqa: BLE001 - неизвестная阶段失败时来源仍保持开放。
+        except Exception as exc:  # noqa: BLE001 - 未知阶段失败时来源 PR 仍保持开放。
             raise BatchAggregateError(
                 f"aggregate lifecycle failed safely: {exc}",
                 failure_category="publication",
