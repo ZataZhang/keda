@@ -16,6 +16,7 @@ import json
 import site
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -483,6 +484,54 @@ def test_system_python_falls_back_to_none(
     monkeypatch.setattr(sys, "base_prefix", "/usr/local")
     monkeypatch.setattr(site, "USER_SITE", "/nonexistent-user-site")
     assert detect_upgrade_command() is None
+
+
+def test_system_python_does_not_offer_user_install_for_system_distribution(
+    _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """USER_SITE 在 sys.path 中，但发行版位于系统 site-packages 时不升级到 user-site。"""
+    user_site_path = tmp_path / "user-site"
+    system_site_path = tmp_path / "system-site"
+    monkeypatch.setattr(sys, "prefix", "/usr/local")
+    monkeypatch.setattr(sys, "base_prefix", "/usr/local")
+    monkeypatch.setattr(site, "USER_SITE", str(user_site_path))
+    monkeypatch.setattr(sys, "path", [str(user_site_path)])
+    monkeypatch.setattr(
+        cli_update_check.importlib_metadata,
+        "distribution",
+        lambda name: SimpleNamespace(locate_file=lambda relative_path: system_site_path),
+    )
+
+    assert detect_upgrade_command() is None
+
+
+def test_system_python_user_site_distribution_maps_to_user_pip_upgrade(
+    _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """系统解释器中确实安装在 USER_SITE 的发行版可使用 pip --user 升级。"""
+    user_site_path = tmp_path / "user-site"
+    monkeypatch.setattr(sys, "prefix", "/usr/local")
+    monkeypatch.setattr(sys, "base_prefix", "/usr/local")
+    monkeypatch.setattr(site, "USER_SITE", str(user_site_path))
+    monkeypatch.setattr(sys, "path", [str(user_site_path)])
+    monkeypatch.setattr(
+        cli_update_check.importlib_metadata,
+        "distribution",
+        lambda name: SimpleNamespace(locate_file=lambda relative_path: user_site_path),
+    )
+
+    plan = detect_upgrade_command()
+
+    assert plan is not None
+    assert plan.argv == (
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--user",
+        "--upgrade",
+        "kedacode",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -337,8 +337,8 @@ def detect_upgrade_command() -> UpgradeCommand | None:
     """按当前安装痕迹识别可自动执行的升级命令；识别不出返回 ``None``。
 
     识别顺序：uv tool 隔离环境 → pipx 隔离环境 → Homebrew prefix → venv 内
-    pip → user-site pip。任何一支都要求对应安装器可执行文件存在，避免给出
-    跑不起来的命令。
+    pip → 安装路径确实位于 ``USER_SITE`` 的 pip。任何一支都要求对应安装器
+    可执行文件存在，避免给出跑不起来的命令。
 
     Returns:
         :class:`UpgradeCommand` 表示可以放心执行；``None`` 时调用方打印
@@ -360,12 +360,30 @@ def detect_upgrade_command() -> UpgradeCommand | None:
                 (sys.executable, "-m", "pip", "install", "--upgrade", _DISTRIBUTION_NAME)
             )
         return None
-    if site.USER_SITE and any(
-        Path(entry).expanduser() == Path(site.USER_SITE) for entry in sys.path if entry
-    ):
-        return UpgradeCommand(
-            (sys.executable, "-m", "pip", "install", "--user", "--upgrade", _DISTRIBUTION_NAME)
-        )
+    if site.USER_SITE:
+        try:
+            distribution = importlib_metadata.distribution(_DISTRIBUTION_NAME)
+            distribution_location = Path(distribution.locate_file("")).resolve()
+            user_site_location = Path(site.USER_SITE).expanduser().resolve()
+        except (
+            importlib_metadata.PackageNotFoundError,
+            OSError,
+            RuntimeError,
+            TypeError,
+        ):
+            return None
+        if distribution_location.is_relative_to(user_site_location):
+            return UpgradeCommand(
+                (
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--user",
+                    "--upgrade",
+                    _DISTRIBUTION_NAME,
+                )
+            )
     return None
 
 
