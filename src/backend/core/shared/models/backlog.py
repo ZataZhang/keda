@@ -128,6 +128,10 @@ class BacklogAdvanceReport:
         ceiling_source: Where the ceiling came from: ``"inherited"`` /
             ``"policy"`` / ``"capped_by_capacity"``.
         free_slots: Slots available for promotion in this pass.
+        running_count: Live repository-wide ``agent/running`` count, or ``None``
+            if the count query failed and promotions were skipped.
+        running_count_is_lower_bound: ``True`` when the live count exceeded the
+            ceiling and the value is therefore a lower bound.
         reconciled_completed: PRD paths whose queue entry was closed as ``completed``
             because the PRD is merged or archived.
         reconciled_failed: PRD paths whose queue entry was parked as ``failed``.
@@ -142,6 +146,8 @@ class BacklogAdvanceReport:
     ceiling: int
     ceiling_source: str
     free_slots: int
+    running_count: int | None
+    running_count_is_lower_bound: bool
     reconciled_completed: list[str]
     reconciled_failed: list[str]
     started: list[BacklogActionResult]

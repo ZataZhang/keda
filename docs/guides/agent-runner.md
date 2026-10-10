@@ -2230,7 +2230,7 @@ kc daemon --concurrency 3
 ```
 
 - **取值来源**：未传 `--concurrency` 时回退到 `[agent_runner.runner].max_concurrent_issues`（默认 `1` = 串行，行为与改动前逐字节一致）。
-- **统一并发上限**：daemon 每轮（无论 Backlog 自动推进开关是否开启）先把 Backlog「并发」策略与该轮容量解析成单一生效值 `ceiling = min(策略, 容量)`（策略从未设置 = 继承容量）。这个 ceiling 同时喂给补位闸门（`kc backlog advance` 同一口径；补位动作仅在 Backlog 自动推进开启时执行）与认领闸门：ready 通道本轮新认领数 = `max(0, ceiling − 在途 agent/running 数)`，占满即本轮零认领；在途数查询失败按 fail-closed 处理（宁可不领）。如果后续带标签的 running 恢复候选查询也失败，daemon 会用有界的 open Issue 列表重试筛选，以便继续处理既有恢复项；备用扫描也失败时记录原因并跳过该恢复扫描。running / blocked 恢复通道不新增并发，保持原配额，不受 ceiling 压低。
+- **统一并发上限**：daemon 每轮（无论 Backlog 自动推进开关是否开启）先把 Backlog「并发」策略与该轮容量解析成单一生效值 `ceiling = min(策略, 容量)`（策略从未设置 = 继承容量）。这个 ceiling 同时喂给补位闸门（`kc backlog advance` 同一口径；补位动作仅在 Backlog 自动推进开启时执行）与认领闸门：ready 通道本轮新认领数 = ``max(0, ceiling − 仓库内 open agent/running 标签数)``，占满即本轮零认领；计数查询最多取到 ceiling + 1，超出时日志标为「至少 ceiling + 1」。计数失败按 fail-closed 处理（宁可不领）。如果后续带标签的 running 恢复候选查询也失败，daemon 会用有界的 open Issue 列表重试筛选，以便继续处理既有恢复项；备用扫描也失败时记录原因并跳过该恢复扫描。running / blocked 恢复通道不新增并发，保持原配额，不受 ceiling 压低。
 - **领取上限**：并行时单轮领取上限抬到 `max(max_issues, concurrency)`，所以单独一个 `--concurrency N` 即可领到并跑 N 个，无需再调 `--max-issues`。
 - **隔离**：每个 Issue 仍各自 worktree / 分支；共享仓库的 worktree 创建被串行化以避开 `.git` 竞争，真正耗时的 agent 执行阶段全程并行。
 - **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）仍逐仓库串行、仓库内 Issue 并行。
@@ -4478,7 +4478,7 @@ ceiling = min(Backlog「并发」策略, runner 容量 max_concurrent_issues)
 ```
 
 - 策略从未设置 = **继承容量**（存储层就是「没有设置行」，不再落一行伪造默认值）；策略高于容量时页面同时显示两个数并标明「受 runner 容量限制」；「恢复继承」= 删除该仓设置行（副作用：默认视图一并回到「列表」，且在该行重新建立之前视图偏好无法再持久，见上文「视图说明」）。
-- 点击「全局开始」：按**当前生效上限**一次性批量启动——扫描所有无依赖且可安全进入 ready 的 pending PRD，按优先级排序，同时启动最多 ceiling 个；超出槽位的进入 `backlog_queue` 等待队列。请求体只带 `repo_id`，这次点击**不写设置**；改并发只能通过「并发」输入框落库。
+- 点击「全局开始」：按**当前生效上限减去仓库内 open `agent/running` Issue 数**一次性批量启动——扫描所有无依赖且可安全进入 ready 的 pending PRD，按优先级排序，同时启动最多 `max(0, ceiling − running)` 个；超出槽位的进入 `backlog_queue` 等待队列。running 数覆盖没有 Backlog PRD 锚点的任务；查询失败时本次全局开始报错且不启动任务。请求体只带 `repo_id`，这次点击**不写设置**；改并发只能通过「并发」输入框落库。
 - 系统扫描、槽位与等待队列语义不变；「停止全局调度」仍只清空等待队列，已运行的进程不受影响。
 
 ### 持续调度（Continuous Scheduling）
@@ -4492,7 +4492,7 @@ ceiling = min(Backlog「并发」策略, runner 容量 max_concurrent_issues)
    - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/backlog` 页面处理后再回到调度。
    - BLOCKED → 保留为 `running`，但**不占槽也不晋升**，等人工解除阻塞。
    - WAITING → 不动，依赖未满足的 PRD 继续等待。
-2. **槽位核算**：`free_slots = ceiling - RUNNING 条目数`。`ceiling` 是统一生效并发上限 `min(Backlog「并发」策略, runner 容量)`（策略未设置 = 继承容量）；daemon 同一轮把这一个值同时分发给补位闸门与 Phase 2 认领闸门，页面数字在两处同时兑现。「全局开始」与 `kc backlog advance`（不带上限时）按同一口径自解析。只有 RUNNING 计数，BLOCKED 不占槽；结果为负时按 0 处理。
+2. **槽位核算**：`free_slots = max(0, ceiling - open agent/running 标签数)`。计数覆盖整个仓库，不要求 Issue 有 Backlog PRD 锚点；查询最多读到 ceiling + 1，用于显示超额下限。计数失败时保留对账、跳过本轮新补位并记录原因。`ceiling` 是统一生效并发上限 `min(Backlog「并发」策略, runner 容量)`（策略未设置 = 继承容量）；daemon 同一轮把这一个值同时分发给补位闸门与 Phase 2 认领闸门，页面数字在两处同时兑现。「全局开始」与 `kc backlog advance`（不带上限时）按同一口径自解析。
 3. **晋升（promote）**：候选集 = 队列中 `queued` 的条目 ∪ 新发现的未入队 pending PRD（**发现式入队**）。候选经依赖重算后过滤出 `NOT_STARTED` 且无 `block_reason` 的 PRD，按 `P0 > P1 > P2 > P3`、再按 `updated_at` 升序排序，最多晋升 `free_slots` 个。
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
@@ -4509,7 +4509,7 @@ uv run kc backlog advance --dry-run
 uv run kc backlog advance --repo <repo-id>
 ```
 
-`--dry-run` 会打印对账结果（completed / failed 泊车）、`ceiling=` 生效上限与 `source=` 来源（继承 / 策略 / 受容量限制）、`free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
+`--dry-run` 会打印对账结果（completed / failed 泊车）、`ceiling=` 生效上限、`running=` 仓库级在跑数（超额时以「at least N」表示下限，查询失败时为 unknown）、`source=` 来源（继承 / 策略 / 受容量限制）、`free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
 
 #### 幂等与竞态
 

@@ -60,6 +60,7 @@ from backend.core.use_cases.create_issue_from_prd import (
 from backend.core.use_cases.backlog_prd_scanner import scan_backlog_prds
 from backend.core.use_cases.backlog_dependencies import evaluate_backlog_dependencies
 from backend.core.use_cases.backlog_concurrency import (
+    count_live_running_issues,
     describe_ceiling_source,
     read_policy_max_parallel,
     resolve_execution_ceiling,
@@ -491,8 +492,22 @@ def start_global_backlog(
         ),
     )
 
-    # Determine how many slots are free.
-    running_count = sum(1 for p in resolved_prds if p.state == BacklogPrdState.RUNNING)
+    # 沿用 daemon 的仓库级事实源：没有 PRD 锚点的显式运行也占据自动路径预算。
+    try:
+        running_count = count_live_running_issues(
+            github_client,
+            context.config.labels.running,
+            execution_ceiling,
+        )
+    except Exception as exc:  # noqa: BLE001 - cannot safely batch without live count.
+        _logger.warning(
+            "Global backlog start skipped for repository '%s': could not count live '%s' "
+            "Issues: %s",
+            repo_id,
+            context.config.labels.running,
+            exc,
+        )
+        raise BacklogActionError("无法读取仓库内 agent/running 数量，本次全局开始已跳过。") from exc
     free_slots = max(0, execution_ceiling - running_count)
 
     # Eligible PRDs: not started and not blocked/merged/running.
@@ -869,9 +884,27 @@ def advance_backlog_queue(
                     error_detail=_parked_failure_detail(prd),
                 )
 
-    # ── Step 2: slot accounting (RUNNING-only, matching the console) ───────
-    running_count = sum(1 for prd in resolved_prds if prd.state is BacklogPrdState.RUNNING)
-    free_slots = max(0, ceiling - running_count)
+    # ── Step 2: repository-wide live running count ─────────────────────────
+    running_count: int | None
+    running_count_error: str | None = None
+    try:
+        running_count = count_live_running_issues(
+            github_client,
+            context.config.labels.running,
+            ceiling,
+        )
+    except Exception as exc:  # noqa: BLE001 - fail closed before promoting new PRDs.
+        running_count = None
+        running_count_error = str(exc)
+        _logger.warning(
+            "Backlog advance for '%s' cannot count live '%s' Issues; skipping new "
+            "promotions this pass: %s",
+            repo_id,
+            context.config.labels.running,
+            exc,
+        )
+    free_slots = max(0, ceiling - running_count) if running_count is not None else 0
+    running_count_is_lower_bound = running_count is not None and running_count > ceiling
 
     # ── Step 3: candidate set, then promote up to the free slots ───────────
     candidate_by_path: dict[str, BacklogPrd] = {}
@@ -890,7 +923,11 @@ def advance_backlog_queue(
 
     started: list[BacklogActionResult] = []
     queued: list[str] = []
-    skipped: list[str] = []
+    skipped: list[str] = (
+        [f"agent/running count failed; skipped promotions this pass: {running_count_error}"]
+        if running_count_error is not None
+        else []
+    )
 
     for prd in eligible:
         if len(started) < free_slots:
@@ -973,6 +1010,8 @@ def advance_backlog_queue(
         ceiling=ceiling,
         ceiling_source=ceiling_source,
         free_slots=free_slots,
+        running_count=running_count,
+        running_count_is_lower_bound=running_count_is_lower_bound,
         reconciled_completed=reconciled_completed,
         reconciled_failed=reconciled_failed,
         started=started,

@@ -78,6 +78,7 @@ from backend.core.use_cases.create_prd_from_issue import (
     create_prd_from_issue,
 )
 from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
+from backend.core.use_cases.backlog_concurrency import count_live_running_issues
 
 RUNTIME_DEPENDENCY_NAMES = (
     "_process_ready_issue",
@@ -749,13 +750,17 @@ def run_once(request: RunOnceRequest) -> int:
     # 宁可不跑也不超发。
     ready_claim_budget = effective_max_issues
     running_count_failed = False
+    live_running_count_for_budget = 0
+    live_running_count: int | None = None
     if request.execution_ceiling is not None and target_issue_summary is None:
         ceiling = request.execution_ceiling
         try:
-            live_running_issues = github_client.list_issues_by_label(
-                config.labels.running, limit=ceiling, state="open"
+            live_running_count = count_live_running_issues(
+                github_client,
+                config.labels.running,
+                ceiling,
             )
-            live_running_count = len(live_running_issues)
+            live_running_count_for_budget = live_running_count
         except Exception as count_exc:  # noqa: BLE001 - 计数失败即不认领（fail-closed）。
             _logger.warning(
                 "Failed to count live '%s' Issues for the concurrency ceiling: %s; "
@@ -764,12 +769,24 @@ def run_once(request: RunOnceRequest) -> int:
                 count_exc,
             )
             running_count_failed = True
-            live_running_count = ceiling
-        ready_claim_budget = min(effective_max_issues, max(0, ceiling - live_running_count))
+            live_running_count_for_budget = ceiling
+        ready_claim_budget = min(
+            effective_max_issues,
+            max(0, ceiling - live_running_count_for_budget),
+        )
+        running_count_label = (
+            "unknown"
+            if live_running_count is None
+            else (
+                f"at least {live_running_count}"
+                if live_running_count > ceiling
+                else str(live_running_count)
+            )
+        )
         _logger.info(
-            "Concurrency ceiling: ceiling=%d running=%d ready_budget=%d",
+            "Concurrency ceiling: ceiling=%d running=%s ready_budget=%d",
             ceiling,
-            live_running_count,
+            running_count_label,
             ready_claim_budget,
         )
 

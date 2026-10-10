@@ -2,15 +2,15 @@
 
 - Issue: [#266](https://github.com/ZataZhang/keda/issues/266)
 - Canonical PRD: `tasks/archive/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling.md`（本轮发现已归档；未修改、未移动，也未勾选 Human-Confirmed）
-- 验证对象：生产实现 commit `13e52394308b40097010931c3d0880a3f27be42a`，tree `a68f3e0f7abf9da4d95334393c05bc4b08112aa7`
+- 验证对象：当前 review 工作树（base HEAD `bf9e39e200b0b4f831e23be68118bc429124e505`）；最终生产源码 diff 指纹记于每项 `rv-N-implementation-tree.txt`。
 - 隔离方式：RV fixture 使用真实 CLI / daemon / console API / SQLite / Git 逻辑，只替换明确注明的 GitHub CLI 与 agent 外部边界；RV3 页面不允许 mock。
-- 结论：RV1–RV5 本轮证据均为绿；RV3 在宿主侧完整运行真实页面 red→green，旧 bundle 页面断言变红，恢复后五态及 API / SQLite 断言通过。
+- 结论：RV1、RV2、RV4、RV5 已在当前 review 工作树通过。RV3 曾在此前验证树完成真实页面 red→green；本轮重新执行在 Chromium 启动时被 macOS `Permission denied (1100)` 阻断，未产生页面断言结论。RV3 涉及的前端页面、设置 GET/PATCH 路由与设置读写用例未被本轮改动；已保留历史真实页面证据与当前重跑诊断，见证据报告。
 
 | RV | 检查点 | 本轮状态 | 关键证据 |
 |---|---|---|---|
 | 1 | daemon 认领 ceiling、扣除在跑数、未设置继承容量 | PASS | `rv-1-negative-control.txt`、`rv-1-daemon-command.txt`、`rv-1-daemon-claim-budget.log` |
 | 2 | backlog advance 与全局开始使用 ceiling / source / free slots | PASS | `rv-2-command-output.txt`、`rv-2-advance-ceiling-report.txt`、`rv-2-global-start.txt` |
-| 3 | 真实 Backlog 页面三态、设置、恢复继承与 fresh 读回 | PASS | `rv-3-console-roundtrip.txt`、`rv-3-negative-control.txt`、`rv-3-console-backlog-report.txt` 与十张本轮截图 |
+| 3 | 真实 Backlog 页面三态、设置、恢复继承与 fresh 读回 | 此前 PASS；本轮重跑 INCONCLUSIVE（浏览器启动受阻） | 历史真实运行的 `rv-3-console-roundtrip.txt`、`rv-3-negative-control.txt`、`rv-3-console-backlog-report.txt` 与截图；本轮诊断 `rv-3-backlog-control-roundtrip.txt` |
 | 4 | 显式定向运行豁免、`--all-ready` 与 daemon 互斥 | PASS | `rv-4-negative-control.txt`、`rv-4-explicit-command.txt`、`rv-4-explicit-run-exempt.txt` |
 | 5 | running 计数失败时 fail-closed 且续做恢复发现 | PASS | `rv-5-negative-control.txt`、`rv-5-fail-closed.log`、`rv-5-inflight-probe.txt` |
 
@@ -35,7 +35,7 @@ cd tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scrip
 ```
 
 - 负控将策略 2 错当成继承行为时，6 个 pending 只补入 2 而非期望 6，必须打印 `NEG CONTROL: RED reproduced`。
-- 绿态核对 unset/策略 2/已有 running 的补位数，以及全局开始按容量 4 或策略 2 启动并排队；报告须包含 ceiling、source 与 free slots。
+- 绿态核对 unset/策略 2/已有 running 的补位数；本轮另加入没有 PRD 锚点的 `agent/running` Issue，验证 advance 与 start-global 均扣减该仓库级 running 数，并在 ceiling 已满时不启动；报告包含 ceiling、source、running 与 free slots。
 - 本轮输出与断言通过。
 
 ### RV3 — Backlog 真实页面 red→green
@@ -45,8 +45,8 @@ just console-sync && cd tasks/evidence/P1-FEAT-20261010-011714-unified-auto-conc
 ```
 
 - **预期红态：** 注入旧显示口径后，真实页面断言返回非零、打印 `RESULT: FAIL`；恢复 bundle 后再运行同一页面流程，需 `RESULT: PASS` 并验证继承 / 设置 / 受限 / 保存 4 / 恢复继承五态、fresh GET、PATCH 与 SQLite 行删除。
-- **本轮实际：** 宿主 shell 执行上方命令成功。故障注入的旧静态 bundle 使真实页面断言变红：继承和恢复继承显示 2 而 fresh API 为 4，受限态显示 8 而 effective 为 4；输出 `RESULT: FAIL` / `NEG CONTROL: RED 已复现`。脚本 finally 按字节还原 bundle 后，真实页面流程通过继承、设置 2、受限 8、保存 4、恢复继承五态，fresh GET、PATCH 和 SQLite 终态均正确，输出 `RESULT: PASS` / `RV-3 PASSED`。
-- 全量命令 stdout 为 `rv-3-console-roundtrip.txt`；页面断言与请求记录在 `rv-3-console-backlog-report.txt`；本轮完整页面和控制条截图列于证据 manifest。此前受 sandbox 影响的 Chromium `Permission denied (1100)` 诊断保留为历史恢复记录，不作为当前失败证据。
+- **此前实际：** 在 `HEAD=4335947c` 的验证树上，旧静态 bundle 使真实页面断言变红；恢复 bundle 后真实页面流程通过继承、设置 2、受限 8、保存 4、恢复继承五态，fresh GET、PATCH 和 SQLite 终态正确。原页面记录和截图保留。
+- **本轮实际：** `just console-sync` 成功；旧口径 bundle 故障注入后，Playwright Chromium 在页面启动前被 macOS `Permission denied (1100)` 终止，因此本轮没有新的页面 PASS 或产品红态。bundle 已按字节还原。失败诊断写入 `rv-3-backlog-control-roundtrip.txt`。本轮改动未触及前端源码、Backlog settings GET/PATCH 路由或设置读写用例；旧页面证据只对这些未变的页面边界继续有效，不代表整棵工作树相同。
 
 ### RV4 — 显式运行豁免
 
@@ -72,6 +72,4 @@ cd tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scrip
 
 ## 验证范围
 
-Recovery 4/5 修正两处受宿主权限影响的测试隔离：CLI 配置迁移用例不再扫描宿主进程，daemon 参数用例不再写真实用户状态目录。最终执行 `UV_CACHE_DIR=/private/tmp/uv-cache-issue-266 just test all`，结果为 3826 passed、1 skipped；`just lint --reuse` 与 `just lint --full` 通过。未改生产实现或 PRD。
-
-RV1–RV5 的结构化证据对应实现 commit `13e52394308b40097010931c3d0880a3f27be42a`。RV3 的 red→green 已在宿主侧完成；历史 sandbox 权限错误不影响本轮页面结论。
+本轮 reviewer 修复涉及 repository-wide `agent/running` 计数、自动预算与报告；当前工作树相关测试、lint、严格文档构建结果记录在最终报告中。默认 `just test` 命中已有 flag 而跳过，故禁用 testmon 显式跑受影响模块。曾在此前树运行的完整 `just test all` 不作为本轮代码的验证结论。RV1、RV2、RV4、RV5 已在当前工作树重跑；RV3 的前端与设置读写边界未受改动，但本轮 Chromium 权限阻断使页面重跑为 INCONCLUSIVE。

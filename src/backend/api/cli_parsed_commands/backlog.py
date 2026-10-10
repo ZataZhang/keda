@@ -38,9 +38,18 @@ def _print_advance_report(report) -> None:
     """
     mode = "dry-run" if report.dry_run else "applied"
     console.print(f"[bold]backlog advance[/] ({mode}) repo={report.repo_id}")
+    running_count_label = (
+        "unknown"
+        if report.running_count is None
+        else (
+            f"at least {report.running_count}"
+            if report.running_count_is_lower_bound
+            else str(report.running_count)
+        )
+    )
     console.print(
         f"ceiling={report.ceiling} source={report.ceiling_source} "
-        f"free_slots={report.free_slots} running_after={report.ceiling - report.free_slots}"
+        f"running={running_count_label} free_slots={report.free_slots}"
     )
     if report.reconciled_completed:
         console.print(f"[green]completed[/] {report.reconciled_completed}")

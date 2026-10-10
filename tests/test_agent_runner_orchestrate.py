@@ -1673,6 +1673,7 @@ def test_run_once_ceiling_saturated_by_running_claims_zero_new_ready(
         [
             _make_ready_issue(21, "R21", "", ("agent/running",)),
             _make_ready_issue(22, "R22", "", ("agent/running",)),
+            _make_ready_issue(23, "R23", "", ("agent/running",)),
         ]
     )
     with caplog.at_level(logging.INFO):
@@ -1687,11 +1688,11 @@ def test_run_once_ceiling_saturated_by_running_claims_zero_new_ready(
             execution_ceiling=2,
         )
     assert exit_code == 0
-    assert "Concurrency ceiling: ceiling=2 running=2 ready_budget=0" in caplog.text
+    assert "Concurrency ceiling: ceiling=2 running=at least 3 ready_budget=0" in caplog.text
     assert _dry_run_selected_issue_numbers(caplog) == []
     count_call = [call for call in fake_client.calls if call["method"] == "list_issues_by_label"]
     assert count_call[0]["state"] == "open"
-    assert count_call[0]["limit"] == 2
+    assert count_call[0]["limit"] == 3
     recovery_calls = [
         call for call in fake_client.calls if call["method"] == "list_review_candidate_issues"
     ]

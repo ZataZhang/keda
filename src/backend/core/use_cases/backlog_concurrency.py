@@ -12,6 +12,7 @@ Backlog 的「并发」设置是仓库级策略，runner 配置的 ``max_concurr
 
 from __future__ import annotations
 
+from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.interfaces.runner_console import IBacklogStore
 
 CEILING_SOURCE_INHERITED = "inherited"
@@ -87,3 +88,37 @@ def read_policy_max_parallel(store: IBacklogStore, repo_id: str) -> int | None:
     if entry.max_parallel < 1:
         return None
     return int(entry.max_parallel)
+
+
+def count_live_running_issues(
+    github_client: IGitHubClient,
+    running_label: str,
+    execution_ceiling: int,
+) -> int:
+    """读取仓库内 ``agent/running`` Issue 数，最多探测到上限之外一个。
+
+    达到 ceiling 后，更多精确数量不会改变本轮预算（预算已经是 0）；额外探测
+    一个用于区分「刚好占满」与「已超过上限」，让日志和补位报告不把下限伪装
+    成精确计数。
+
+    Args:
+        github_client: 目标仓库 GitHub 客户端。
+        running_label: 仓库配置的运行中标签。
+        execution_ceiling: 本轮已解析的生效并发上限。
+
+    Returns:
+        运行中 Issue 数；超过上限时返回 ``execution_ceiling + 1``，表示至少
+        有这么多。
+
+    Raises:
+        ValueError: ``execution_ceiling`` 小于 1。
+        Exception: GitHub 查询失败时原样向上传播，由消费方决定 fail-closed 策略。
+    """
+    if execution_ceiling < 1:
+        raise ValueError(f"execution_ceiling must be >= 1, got {execution_ceiling}")
+    live_running_issues = github_client.list_issues_by_label(
+        running_label,
+        limit=execution_ceiling + 1,
+        state="open",
+    )
+    return len(live_running_issues)
