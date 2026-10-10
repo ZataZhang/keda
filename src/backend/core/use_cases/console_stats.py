@@ -15,16 +15,20 @@ GitHub 仍是 workflow 状态唯一事实来源；SQLite 只反映 runner 处理
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.interfaces.runner_console import (
     DailyRunTrendEntry,
     IRunHistoryStore,
+    PerformanceAttemptRecord,
 )
+from backend.core.shared.statistics import linear_percentile
 from backend.core.shared.models.agent_runner import (
     IssueSummary,
     RepositoryRunContext,
@@ -53,6 +57,55 @@ class RepositoryCompletionStats:
     completion_rate: float | None
     truncated: bool
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class FailureTypeCount:
+    """一类非成功 attempt 的数量。"""
+
+    failure_type: str
+    count: int
+
+
+@dataclass(frozen=True)
+class AttemptPerformanceGroup:
+    """一个 Agent 或预设分组的 attempt 统计。"""
+
+    repo_id: str
+    agent: str
+    preset: str | None
+    model: str | None
+    attempt_count: int
+    success_count: int
+    non_success_count: int
+    success_rate: float
+    non_success_rate: float
+    p50_duration_seconds: float | None
+    p90_duration_seconds: float | None
+    failure_types: tuple[FailureTypeCount, ...]
+
+
+@dataclass(frozen=True)
+class RunOutcomePerformanceGroup:
+    """一个最终任务结果分组的 run 耗时统计。"""
+
+    repo_id: str
+    outcome: str
+    run_count: int
+    p50_duration_seconds: float | None
+    p90_duration_seconds: float | None
+
+
+@dataclass(frozen=True)
+class AgentPerformanceStats:
+    """Stats 页使用的 Agent / 预设 attempt 与整项任务统计。"""
+
+    repo_id: str | None
+    window_days: int
+    agents: tuple[AttemptPerformanceGroup, ...]
+    presets: tuple[AttemptPerformanceGroup, ...]
+    unbound_preset_attempt_count: int
+    runs: tuple[RunOutcomePerformanceGroup, ...]
 
 
 def _workflow_labels(context: RepositoryRunContext) -> tuple[str, ...]:
@@ -216,3 +269,129 @@ def build_run_history_trend(
     """
     bounded_days = min(max(days, 1), 365)
     return store.daily_run_trend(repo_id=repo_id, days=bounded_days)
+
+
+def build_agent_performance_stats(
+    *,
+    store: IRunHistoryStore,
+    repo_id: str | None,
+    days: int,
+    reference_now: datetime | None = None,
+) -> AgentPerformanceStats:
+    """按 attempt 和最终任务结果构建执行表现统计。
+
+    Args:
+        store: 运行历史存储端口。
+        repo_id: 仓库过滤；``None`` 表示全部仓库。
+        days: 回看天数，最终限制在 1–365 天。
+        reference_now: 可注入的 UTC 参考时间，供确定性验证使用。
+
+    Returns:
+        按 Agent、历史 preset 快照与 run 最终结果独立分组的统计。
+    """
+    bounded_days = min(max(days, 1), 365)
+    window_end = reference_now or datetime.now(timezone.utc)
+    if window_end.tzinfo is None:
+        window_end = window_end.replace(tzinfo=timezone.utc)
+    since = (window_end - timedelta(days=bounded_days)).isoformat(timespec="seconds")
+    records = store.list_agent_performance_records(repo_id=repo_id, since=since)
+
+    agent_groups: dict[tuple[str, str | None, str, str | None], list[PerformanceAttemptRecord]] = (
+        defaultdict(list)
+    )
+    preset_groups: dict[tuple[str, str | None, str, str | None], list[PerformanceAttemptRecord]] = (
+        defaultdict(list)
+    )
+    unbound_preset_attempt_count = 0
+    for attempt_record in records.attempts:
+        agent_name = attempt_record.agent or "未记录"
+        agent_groups[(attempt_record.repo_id, None, agent_name, None)].append(attempt_record)
+        if not attempt_record.preset:
+            unbound_preset_attempt_count += 1
+            continue
+        preset_groups[
+            (
+                attempt_record.repo_id,
+                attempt_record.preset,
+                agent_name,
+                attempt_record.model,
+            )
+        ].append(attempt_record)
+
+    outcome_groups: dict[tuple[str, str], list[float]] = defaultdict(list)
+    for run_record in records.runs:
+        if run_record.outcome not in {"completed", "failed", "blocked"}:
+            continue
+        outcome_groups[(run_record.repo_id, run_record.outcome)].append(run_record.duration_seconds)
+
+    outcome_order = {"completed": 0, "failed": 1, "blocked": 2}
+    run_groups: list[RunOutcomePerformanceGroup] = []
+    for (run_repo_id, outcome), durations in sorted(
+        outcome_groups.items(),
+        key=lambda entry: (entry[0][0], outcome_order[entry[0][1]]),
+    ):
+        valid_durations = sorted(duration for duration in durations if duration >= 0)
+        run_groups.append(
+            RunOutcomePerformanceGroup(
+                repo_id=run_repo_id,
+                outcome=outcome,
+                run_count=len(durations),
+                p50_duration_seconds=linear_percentile(valid_durations, 0.5),
+                p90_duration_seconds=linear_percentile(valid_durations, 0.9),
+            )
+        )
+
+    return AgentPerformanceStats(
+        repo_id=repo_id,
+        window_days=bounded_days,
+        agents=_build_attempt_performance_groups(agent_groups),
+        presets=_build_attempt_performance_groups(preset_groups),
+        unbound_preset_attempt_count=unbound_preset_attempt_count,
+        runs=tuple(run_groups),
+    )
+
+
+def _build_attempt_performance_groups(
+    grouped_attempts: dict[tuple[str, str | None, str, str | None], list[PerformanceAttemptRecord]],
+) -> tuple[AttemptPerformanceGroup, ...]:
+    """将相同分组键的 attempt 汇总为展示行。"""
+    performance_groups: list[AttemptPerformanceGroup] = []
+    for (repo_id, preset_name, agent_name, model_id), attempts in sorted(
+        grouped_attempts.items(),
+        key=lambda entry: (
+            entry[0][0],
+            entry[0][1] or "",
+            entry[0][2],
+            entry[0][3] or "",
+        ),
+    ):
+        success_count = sum(attempt.failure_type == "success" for attempt in attempts)
+        non_success_count = len(attempts) - success_count
+        failure_counts: dict[str, int] = defaultdict(int)
+        valid_durations = sorted(
+            attempt.duration_seconds for attempt in attempts if attempt.duration_seconds >= 0
+        )
+        for attempt in attempts:
+            if attempt.failure_type != "success":
+                failure_counts[attempt.failure_type] += 1
+        attempt_count = len(attempts)
+        performance_groups.append(
+            AttemptPerformanceGroup(
+                repo_id=repo_id,
+                agent=agent_name,
+                preset=preset_name,
+                model=model_id,
+                attempt_count=attempt_count,
+                success_count=success_count,
+                non_success_count=non_success_count,
+                success_rate=success_count / attempt_count,
+                non_success_rate=non_success_count / attempt_count,
+                p50_duration_seconds=linear_percentile(valid_durations, 0.5),
+                p90_duration_seconds=linear_percentile(valid_durations, 0.9),
+                failure_types=tuple(
+                    FailureTypeCount(failure_type=failure_type, count=count)
+                    for failure_type, count in sorted(failure_counts.items())
+                ),
+            )
+        )
+    return tuple(performance_groups)

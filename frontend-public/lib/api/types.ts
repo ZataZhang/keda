@@ -249,6 +249,43 @@ export type DailyRunTrendEntry = {
   average_duration_seconds: number | null;
 };
 
+export type FailureTypeCount = {
+  failure_type: string;
+  count: number;
+};
+
+export type AttemptPerformanceGroup = {
+  repo_id: string;
+  agent: string;
+  preset: string | null;
+  model: string | null;
+  attempt_count: number;
+  success_count: number;
+  non_success_count: number;
+  success_rate: number;
+  non_success_rate: number;
+  p50_duration_seconds: number | null;
+  p90_duration_seconds: number | null;
+  failure_types: FailureTypeCount[];
+};
+
+export type RunOutcomePerformanceGroup = {
+  repo_id: string;
+  outcome: "completed" | "failed" | "blocked";
+  run_count: number;
+  p50_duration_seconds: number | null;
+  p90_duration_seconds: number | null;
+};
+
+export type AgentPerformanceStats = {
+  repo_id: string | null;
+  window_days: number;
+  agents: AttemptPerformanceGroup[];
+  presets: AttemptPerformanceGroup[];
+  unbound_preset_attempt_count: number;
+  runs: RunOutcomePerformanceGroup[];
+};
+
 export type RunRecordEntry = {
   repo_id: string;
   repo_path: string;

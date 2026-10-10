@@ -3692,7 +3692,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 | Backlog | `/app/backlog` | **首屏落点**。左侧受管理仓库栏 + 右侧当前仓库的 PRD 队列（依赖图 / 时间轴 / 列表三视图） |
 | 总览 | `/app/dashboard` | 队列监控 + 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
 | 进程 | `/app/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
-| 统计 | `/app/stats` | 实时完成度（GitHub 口径）+ 历史趋势与最近运行记录（本地 SQLite 口径） |
+| 统计 | `/app/stats` | 实时完成度、运行趋势、Agent / 预设 attempt 表现、整项任务耗时、PRD 生命周期与 Token 用量 |
 | 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
 | 想法 | `/app/ideas` | 跨项目想法采集、AI 总结、PRD 草稿人审 |
 
@@ -3872,6 +3872,30 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   与面板托管共用 `~/.kedacode/console.db`（`history_db_path` 可配）。
   `GET .../console/stats/history` 返回按天聚合趋势。
 
+新增的 Agent 执行表现区与趋势、PRD 生命周期和 Token 汇总共用仓库及时间筛选，
+通过独立只读端点读取：
+
+```text
+GET .../console/stats/agent-performance?repo_id=&days=30
+```
+
+- **Agent / 预设成功率按 attempt 计算**：只有 `failure_type=success` 计为成功；
+  其他已记录分类都计为非成功，并在失败分类中逐项显示。耗时 P50 / P90 对该组
+  全部非负 attempt 耗时使用线性插值，不只计算成功样本。
+- **预设分组读取执行时快照**：按仓库、预设名、实际 Agent 和模型分组。改名或删除
+  当前配置不会改变 SQLite 中已保存的历史；没有预设快照的记录显示在“未绑定 / 历史
+  未记录”计数中，不会猜测其当时使用的配置。
+- **整项任务耗时单独统计**：按仓库和最终 `completed` / `failed` / `blocked` 结果
+  分组；不把最终结果归给 `run_records.agent`，也不推导 Agent / 预设完成任务的概率。
+- **全部仓库视图保留仓库列**：避免同名预设跨仓库合并。Agent 名称缺失时归入“未记录”。
+- **数据缺失与读取错误分开呈现**：无样本时显示空态或 `—`；新统计端点读取失败时只
+  显示在新增卡片中，既有 Stats 区块继续独立加载。
+
+该统计只读取现有 `run_records` / `attempt_records`，不新增表或字段，不读取当前配置，
+也不会改变 runner 的执行与 fallback 行为。历史 attempt 未保存 reasoning effort，
+因此同仓库同名预设、同 Agent 和模型但 effort 不同的记录会合并；旧 schema 或未绑定
+记录缺少 preset / model 时，无法进一步还原其配置。
+
 SQLite 只是旁路记录，**不参与 workflow 状态机决策**——GitHub
 labels/comments/PR 与本地 worktree 仍是唯一事实来源；落库失败只产生
 日志警告，不会阻断 runner。
@@ -4019,6 +4043,7 @@ POST   /api/v1/agent-runner/console/repositories/{repo}/issues/{n}/actions  {act
 GET    /api/v1/agent-runner/console/stats/overview
 GET    /api/v1/agent-runner/console/stats/history?repo_id=&days=30
 GET    /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=30
+GET    /api/v1/agent-runner/console/stats/agent-performance?repo_id=&days=30
 GET    /api/v1/agent-runner/console/runs?repo_id=&limit=100
 GET    /api/v1/agent-runner/console/audit?limit=100
 GET    /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle

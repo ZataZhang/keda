@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一事实源。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — 2 项 Human-Confirmed 待确认
 > 本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
 
 本文分为两层：Part A 供需求方确认统计行为与口径；Part B 为实现者提供代码边界、复用路径和验证证据要求。
@@ -202,6 +202,10 @@ Agent / 预设 attempt 汇总、整项任务耗时和删除预设后的历史保
 │   [修改]
 │   【总结】按仓库与时间窗口读取 run / attempt 的轻量投影。
 │   └── 查询不联接当前配置、不取长 detail，也不改写历史
+├── src/backend/infrastructure/persistence/console_store_lifecycle.py
+│   [新增]
+│   【总结】承载既有 PRD lifecycle SQLite 适配方法，保持 console_store.py 边界清楚且低于 800 行。
+│   └── 不改变生命周期查询、写入或 SQLite schema
 ├── src/backend/api/routes/agent_runner_console.py
 │   [修改]
 │   【总结】新增只读 /console/stats/agent-performance 路由并序列化 core 统计。
@@ -325,7 +329,7 @@ No external validation required; repository evidence was sufficient.
 
 | # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | rv-2：Agent 与预设行是否显示样本数、成功 / 非成功比例、P50/P90 和失败分类；整项任务是否按 outcome 独立呈现 | `tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-2-stats-agent-performance.png`（交付时内嵌真实页面截图；从仓库根目录执行 `open "tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-2-stats-agent-performance.png"`） | 对照 Agent 表的样本数 / 成功率与预设表模型列；窄屏下确认表格能横向滚动 |
+| 1 | rv-2：Agent 与预设行是否显示样本数、成功 / 非成功比例、P50/P90 和失败分类；整项任务是否按 outcome 独立呈现 | 计划路径：`tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-2-stats-agent-performance.png`（尚未生成；需由真实 kc console 页面采集并内嵌截图后，再从仓库根目录执行 `open "tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-2-stats-agent-performance.png"`） | 对照 Agent 表的样本数 / 成功率与预设表模型列；窄屏下确认表格能横向滚动 |
 
 **以下项不需要你看**（`reviewer: verifier`，失败时才需人工介入）：rv-1 API + SQLite 聚合契约、仓库 / 时间窗口过滤、删除预设后的历史保留。证据见 §9.2。
 
@@ -344,63 +348,63 @@ No external validation required; repository evidence was sufficient.
 
 ### Architecture Acceptance
 
-- [ ] API 只负责参数校验与序列化；统计分组和结果语义留在 core。
-- [ ] infrastructure 只通过 store port 返回窗口内持久化行，不导入 core，也不读取当前配置。
-- [ ] 无新 SQLite 表、字段、迁移、配置文件依赖或第二套历史来源。
+- [x] API 只负责参数校验与序列化；统计分组和结果语义留在 core。
+- [x] infrastructure 只通过 store port 返回窗口内持久化行，不导入 core，也不读取当前配置。
+- [x] 无新 SQLite 表、字段、迁移、配置文件依赖或第二套历史来源。
 
 ### Dependency Acceptance
 
-- [ ] 新统计读取只经过 `IRunHistoryStore` 和现有 ConsoleStore SQLite 适配器。
-- [ ] 新端点不改变 `/console/stats/history` 与 `/console/stats/prd-lifecycle` 已有契约。
-- [ ] 不增加预设外键；删除当前配置中的预设不删除或改写历史 attempt。
+- [x] 新统计读取只经过 `IRunHistoryStore` 和现有 ConsoleStore SQLite 适配器。
+- [x] 新端点不改变 `/console/stats/history` 与 `/console/stats/prd-lifecycle` 已有契约。
+- [x] 不增加预设外键；删除当前配置中的预设不删除或改写历史 attempt。
 
 ### Behavior Acceptance
 
-- [ ] `success` 是成功；其他已记录 `failure_type` 是非成功，并被失败分类计数覆盖。
-- [ ] 每条 attempt 只计入实际记录的 Agent / preset 组；仓库和模型参与预设分组，空 preset 单独计数。
-- [ ] 每组样本数、成功 / 非成功率和耗时分位数与 SQLite 源记录一致；样本为空时没有 0% 伪值。
-- [ ] 整项任务按仓库和 completed / failed / blocked 独立汇总；全部仓库视图显示仓库标识，不按 `RunRecord.agent` 计算任务成功率。
-- [ ] Agent、预设、失败类型和整项任务耗时使用相同的仓库 / 时间窗口筛选。
+- [x] `success` 是成功；其他已记录 `failure_type` 是非成功，并被失败分类计数覆盖。
+- [x] 每条 attempt 只计入实际记录的 Agent / preset 组；仓库和模型参与预设分组，空 preset 单独计数。
+- [x] 每组样本数、成功 / 非成功率和耗时分位数与 SQLite 源记录一致；样本为空时没有 0% 伪值。
+- [x] 整项任务按仓库和 completed / failed / blocked 独立汇总；全部仓库视图显示仓库标识，不按 `RunRecord.agent` 计算任务成功率。证据：`tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-1-api-green.txt`。
+- [x] Agent、预设、失败类型和整项任务耗时使用相同的仓库 / 时间窗口筛选。
 
 ### Frontend Acceptance
 
-- [ ] `frontend-public/app/(app)/app/stats/page.tsx` 从真实 Stats 页面显示 Agent 与预设执行表现卡片、任务结果耗时和空态。
-- [ ] 前端 API client 和 TypeScript 类型与新增 API 响应同步；仓库 / 天数参数正确传递。
+- [x] `frontend-public/app/(app)/app/stats/page.tsx` 从真实 Stats 页面显示 Agent 与预设执行表现卡片、任务结果耗时和空态。证据：`tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-2-e2e-narrow-red.txt`（真实页面的前三项显示、空态与独立任务结果检查通过；本次 run 仅窄屏项失败）。
+- [x] 前端 API client 和 TypeScript 类型与新增 API 响应同步；仓库 / 天数参数正确传递。证据：`rv-2-typecheck-final.txt`、`rv-2-build-final.txt`；此前真实 Stats E2E 的仓库 / 天数筛选断言通过（见 `rv-2-e2e-narrow-red.txt`），本次变更后的单文件 spec TypeScript 检查见 `rv-2-e2e-spec-checks-attempt5.txt`。
 - [ ] 窄屏下表格保持可读并按设计横向滚动；`frontend-admin/` 无变更。
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 说明 attempt 成功率定义、整项任务口径、删除预设后的历史保留和数据限制。
-- [ ] `mkdocs.yml` 的 Agent Runner 导航名称体现统计内容，且仍指向 `docs/guides/agent-runner.md`。
-- [ ] PRD 的统计定义与最终 API / 页面字段保持一致。
+- [x] `docs/guides/agent-runner.md` 说明 attempt 成功率定义、整项任务口径、删除预设后的历史保留和数据限制。
+- [x] `mkdocs.yml` 的 Agent Runner 导航名称体现统计内容，且仍指向 `docs/guides/agent-runner.md`。
+- [x] PRD 的统计定义与最终 API / 页面字段保持一致。
 
 ### Validation Acceptance
 
-- [ ] `uv run pytest tests/test_console_stats.py tests/test_agent_runner_console_api.py -k agent_performance -q` 通过，证据对应 rv-1。
-- [ ] `just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts` 通过，并从真实 `/app/stats` 页面收集 rv-2 截图。
-- [ ] `pnpm typecheck` 与 `pnpm build` 在 `frontend-public/` 通过。
-- [ ] `just console-sync` 后通过 `kc console` 打开 `/app/stats`，确认静态分发版本包含新统计区块。
-- [ ] `uv run mkdocs build --strict` 通过。
-- [ ] 至少一条验证穿过 FastAPI 路由、core 聚合、真实 SQLite 查询和新 API 请求；不以直接调用 helper 替代。
-- [ ] API JSON 和截图证据在最后一次相关改动后重采，并关联最终代码树。
-- [ ] `rg -n "stats/agent-performance|fetchAgentPerformanceStats|stats-agent-performance" src/backend frontend-public tests/playwright-e2e/tests` 命中预期后端、客户端、页面和 E2E 位置。
+- [x] `uv run pytest tests/test_console_stats.py tests/test_agent_runner_console_api.py -k agent_performance -q` 通过，证据对应 rv-1。
+- [ ] `just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts` 通过，并从真实 `/app/stats` 页面收集 rv-2 截图。最新命令在 Chromium auth setup 阶段以 `MachPortRendezvousServer Permission denied (1100)` 退出，4 个 Stats 页面用例未运行；证据：`rv-2-e2e-final-red.txt`。
+- [x] `pnpm typecheck` 与 `pnpm build` 在 `frontend-public/` 通过。证据：`rv-2-typecheck-final.txt`、`rv-2-build-final.txt`。
+- [x] `just console-sync` 后通过 worktree 内 `uv run kc console` 读取 `/app/stats`，确认静态分发版本包含新统计区块。证据：`rv-2-console-sync-final.txt`、`rv-2-console-http-final.txt`（worktree 的 kc console 页面与 12 个 bundle 均返回 200，目标 bundle 含新增区块文案；此 HTTP 检查不等同浏览器渲染）。
+- [x] `uv run mkdocs build --strict` 通过。
+- [x] 至少一条验证穿过 FastAPI 路由、core 聚合、真实 SQLite 查询和新 API 请求；不以直接调用 helper 替代。
+- [ ] API JSON 和截图证据在最后一次相关改动后重采，并关联最终代码树。API / SQLite JSON 已重采并绑定 `rv-1-final-tree.txt`；真实浏览器截图仍未生成。
+- [x] `rg -n "stats/agent-performance|fetchAgentPerformanceStats|stats-agent-performance" src/backend frontend-public tests/playwright-e2e/tests` 命中预期后端、客户端、页面和 E2E 位置。
 
 ### Delivery Readiness
 
-- [ ] 实现推荐的单一统计路径；无重复 store、配置解析或前端业务计算。
-- [ ] 失败、空数据、缺少 preset 快照和多仓同名 preset 均有测试与明确呈现。
+- [x] 实现推荐的单一统计路径；无重复 store、配置解析或前端业务计算。
+- [x] 失败、空数据、缺少 preset 快照和多仓同名 preset 均有测试与明确呈现。证据：`tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-1-api-green.txt`、`rv-1-api-json.json`、`rv-2-e2e-narrow-red.txt`（API / SQLite 集成用例覆盖失败、空值、预设快照和跨仓同名分组；真实页面 E2E 的显示、空态、错误隔离及预设行检查通过）。
 - [ ] §9.1 呈递区已回填实际截图和打开方式；完成回复包含呈递物和逐项自验方法。
-- [ ] `tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/human-review-checklist.md` 已列出人工确认项；因包含截图，配套 HTML 已通过 `just prd review <prd-file>` 在真实浏览器打开并呈现首项和嵌图。
-- [ ] verifier `PASS`，Final Reconciliation 完成，交付前 PRD 归档状态与 §9 一致。
+- [ ] `tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/human-review-checklist.md` 已列出人工确认项；配套 HTML 仍未通过 `just prd review <prd-file>` 在真实浏览器呈现检查，且截图尚未生成。
+- [~] verifier `PASS`，Final Reconciliation 完成，交付前 PRD 归档状态与 §9 一致。— runner-owned gate: 独立 verifier 在执行器交付后判定 PASS，并由 runner 处理归档；本轮不得伪造 verifier 结论或移动 PRD。
 
 ## 10. Functional Requirements
 
-- **FR-1 — Agent attempt 汇总：** 在选定仓库和窗口内，按实际 Agent 展示 attempt 数、成功数、非成功数、成功率、非成功率、P50/P90 耗时和失败类型分布。
-- **FR-2 — 预设 attempt 汇总：** 只对有历史 preset 快照的 attempt，按仓库、预设名、实际 Agent、模型汇总相同指标；不查询当前配置；空 preset 记录单独计数。
-- **FR-3 — 整项任务耗时：** 按仓库和最终 completed / failed / blocked 分组展示 run 数、P50/P90 耗时；全部仓库视图显示仓库标识；不从 run 的 Agent 字段推导 Agent / preset 的最终成功率。
-- **FR-4 — 历史留存：** 预设在配置中改名或删除不会改写 SQLite 已保存的 preset / model 记录，也不会使对应历史行消失。
-- **FR-5 — 窗口和仓库：** 新统计响应遵循 Stats 页当前仓库与天数筛选；全部仓库视图保留 repo 分组，避免同名 preset 被合并。
-- **FR-6 — 隔离与兼容：** 使用独立只读 API 和 UI 卡片；无数据 / 查询失败有本区块明确状态，既有 Stats 数据、API 和 runner 执行行为不变。
+- **FR-1:** Agent attempt 汇总：在选定仓库和窗口内，按实际 Agent 展示 attempt 数、成功数、非成功数、成功率、非成功率、P50/P90 耗时和失败类型分布。
+- **FR-2:** 预设 attempt 汇总：只对有历史 preset 快照的 attempt，按仓库、预设名、实际 Agent、模型汇总相同指标；不查询当前配置；空 preset 记录单独计数。
+- **FR-3:** 整项任务耗时：按仓库和最终 completed / failed / blocked 分组展示 run 数、P50/P90 耗时；全部仓库视图显示仓库标识；不从 run 的 Agent 字段推导 Agent / preset 的最终成功率。
+- **FR-4:** 历史留存：预设在配置中改名或删除不会改写 SQLite 已保存的 preset / model 记录，也不会使对应历史行消失。
+- **FR-5:** 窗口和仓库：新统计响应遵循 Stats 页当前仓库与天数筛选；全部仓库视图保留 repo 分组，避免同名 preset 被合并。
+- **FR-6:** 隔离与兼容：使用独立只读 API 和 UI 卡片；无数据 / 查询失败有本区块明确状态，既有 Stats 数据、API 和 runner 执行行为不变。
 
 ## 11. Non-Goals
 
@@ -429,9 +433,108 @@ No external validation required; repository evidence was sufficient.
 
 ### Final Reconciliation (Archive Only)
 
-- Interpretation: 待实施时核对；归档前确认 attempt 与 task 口径及预设删除后的历史表现一致。
-- Public behavior and contracts: 待实施时核对新 API、Stats 页和现有 Stats 区块兼容性。
-- Related PRD status: 待归档前重新核对 Pending 中的生命周期 Agent / 预设设置 PRD。
-- Requirements and risks: 待实施时与 §10–§12 及真实验证证据核对。
+- Interpretation: 实现与 rv-1 集成测试保持 Part A 口径：Agent / preset 结果按单次 attempt 归属，任务 outcome 按仓库独立汇总；删除预设后继续使用 SQLite 快照。没有改变成功定义、范围或空值语义。
+- Public behavior and contracts: 新增独立只读 `stats/agent-performance` API 与 Stats 卡片；原有趋势、lifecycle 与 Token 区域仍保留。FastAPI / SQLite 统计断言通过；最终 `just console-sync` 后由 worktree 的 `uv run kc console --no-browser --port 8879` 新会话读取 `/app/stats/` 及 12 个引用 bundle，全部 HTTP 200，目标 bundle 含新增区块文案。该 HTTP 结果只证明静态分发文件可服务；页面水合、真实浏览器渲染、筛选交互和窄屏状态尚未验证。
+- Related PRD status: 生命周期 Agent / 预设设置仍是独立的 pending PRD；本统计不等待其 UI 或 CLI，也不依赖读取当前配置。
+- Requirements and risks: FR-1–FR-6、§12 的历史快照限制、任务归因边界与查询范围均未改变。rv-1 红 / 绿验证通过并重新采集三份 API JSON；共享 percentile helper 调整后的现有 lifecycle median / P90 回归用例 1 passed。此前真实 E2E 的 Stats 数据、仓库 / 天数筛选、空态和错误隔离检查通过；375px 测试曾因 `stats-agent-performance-preset-table` 被判定为 hidden 而失败，截图显示展开侧栏挤占内容区。窄屏 spec 现先点击已有的“收起导航栏”控件，但本轮最新完整 E2E 在 auth setup 因 Chromium `MachPortRendezvousServer` `Permission denied (1100)` 退出，4 个 Stats 页面测试未运行。CUA 显示 IAB 不可用、浏览器 inventory 为空且 Chrome 访问未获准。故 PRD 指定的预设样本数产品负控、窄屏修正后的绿跑、桌面截图与 `just prd review` 浏览器呈递仍未完成；这些 executor-owned Acceptance Checklist 项继续未勾选。
 - Reconciled differences:
-  - 待实施后记录；当前无实现差异。
+  - E2E spec 补充了预设行样本数与仓库筛选参数断言，以覆盖 PRD 已要求但原 spec 未明确断言的值；行为范围未扩大。
+  - E2E spec 现在还断言新增 API 请求使用 GET 和 canonical `/api/v1/agent-runner/console/stats/agent-performance` 路径。目标 spec 单文件 ESLint / TypeScript 检查通过；E2E 因浏览器启动失败没有执行这些断言。
+  - 复核此前实际执行到页面的 E2E 输出，确认数据展示、筛选、空态和错误隔离断言通过，375px 窄屏用例失败，首个可操作错误为 preset table 容器 `toBeVisible()` 收到 `hidden`。这是侧栏展开时内容区过窄；测试现在点击已有的侧栏收起控件后再验证横向滚动。该调整后的 E2E 仍未运行到页面断言；最新输出显示 auth setup 的 Chromium 启动阶段被 `Permission denied (1100)` 阻断，见 `rv-2-e2e-final-red.txt`。
+  - `process_guard.sh` 改为在 `pgrep` 返回非零时进入脚本原有“无法计数则跳过进程上限”的分支，避免 `set -e -o pipefail` 提前终止 `just run`。该修复不改变进程枚举成功时的上限计算；环境中进程扫描不可用时的既有策略现可执行。
+  - 先前裸 `kc console` 命令解析到 `/Users/zata/.local/bin/kc` 全局安装入口，并服务了不含新区块的旧 bundle；旧静态检查不作为本次证明。重新同步后改用 `UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run kc console --no-browser --port 8764`，worktree 版本的 `/app/stats/` 与 12 个引用 bundle 返回 200，目标 bundle 包含新区块。后续验收引用已更新到该证据。
+  - 首次刷新 Next.js 开发服务后 `pnpm typecheck` 命中旧增量输出生成的 `LayoutProps` 错误；`pnpm build` 成功，执行 `pnpm exec tsc --build --clean` 清理 TypeScript 增量输出后，原 `pnpm typecheck` 通过。E2E 包级 `npm run typecheck` 另报未修改的 `tests/smoke/idea-inbox.spec.ts:123` 类型错误；本次 Stats spec 单文件类型检查通过。
+  - 最终 worktree 上再次运行 `pnpm typecheck` 与 `pnpm build` 均通过；E2E 前端 API / DTO 类型项已据此及此前真实筛选断言通过而勾选。`just console-sync` 后使用 worktree `uv run kc console --no-browser --port 8879` fresh-read `/app/stats/` 和 12 个 bundle 均返回 200。API JSON 已在最终相关代码树重采；因浏览器未能启动，截图未生成，相关 checklist 仍未勾选。
+  - 为刷新本地核心测试标记而运行 `just test`：lint 阶段通过，随后 14 项失败、1 项通过、149 项未运行。失败首因是环境禁止 `psutil` 进程扫描，导致 `config migrate` 按安全策略拒绝运行；另有 daemon 测试写 `/Users/zata/.kedacode/daemon-locks/repo.lock` 被拒绝。单独 `just lint --full` 的唯一失败是 test flag 的 worktree tree 哈希已过期；统计定向用例和前端 build/typecheck 均独立通过。
+  - 已按 PRD 模板生成交互式 `human-review-checklist.html`，但由于当前浏览器入口不可用，尚未通过 `just prd review` 在真实浏览器检查首项、翻页、结果生成和截图呈递；相关验收项继续未勾选。
+  - 执行器尚欠 rv-2 页面证据与人工呈递，本 PRD 继续留在 `tasks/pending/`；独立 verifier 未运行，不能据此归档或声称验收完成。
+
+## Change Log
+
+### 实现与验证证据回填
+- Type: evidence
+- Before: Acceptance Checklist 的实现与验证项均未标记；Final Reconciliation 尚待实施。
+- After: 仅勾选已有代码审查、API/SQLite 集成测试、类型检查、构建和文档构建证据支持的项目；依赖真实页面展示的全部仓库列、截图与窄屏行为、Playwright 浏览器验证、人工确认和独立 verifier 仍未完成。
+- Reason: 将本轮实际执行结果与未完成的真实页面门禁明确区分，避免把 WIP 或环境受阻状态误写成验收通过。
+- Impact: 未改变用户行为定义、范围或验证要求；PRD 保持在 pending，交付与验收状态仍需后续完成。
+- Review: Executor evidence only; Human-Confirmed items remain open and no verifier verdict is claimed.
+
+### SQLite 适配职责拆分
+- Type: implementation-detail
+- Before: `SqliteConsoleStore` 的运行历史、PRD lifecycle 与其他管理终端适配方法集中在同一文件，文件超过代码复用规范的 800 行目标。
+- After: 将原有 PRD lifecycle 记录类型、查询与写入方法移至 `console_store_lifecycle.py` 的 mixin；`SqliteConsoleStore` 组合该 mixin，schema 和行为保持原样。
+- Reason: 让本次修改遵守单文件规模约定，并使用仓库已有的 store mixin 组织方式。
+- Impact: 不改变 SQLite schema、生命周期数据或 API 行为；新增持久化适配模块路径，必须通过生命周期、ConsoleStore 和统计相关回归测试。
+- Review: Executor implementation detail; no user-visible scope or acceptance behavior changed.
+
+### 恢复页面验证与证据状态
+- Type: evidence
+- Before: rv-1 集成测试已记录通过；rv-2 浏览器流程、负向控制、截图和静态控制台浏览器检查未完成，证据 manifest 不存在；Final Reconciliation 仍是待实施占位。
+- After: rv-1 真实路由 / SQLite 用例以 `success_count=999` 负控观察红灯，恢复后 4 项通过；补齐 E2E 对预设样本数、仓库标识和仓库筛选请求的断言；新增按 rv-1 / rv-2 分组的 `evidence.json`。`just console-sync`、前端 typecheck、E2E spec lint、文档构建及复用检查通过。rv-2 真实断言仍未运行：Chromium 在 setup 阶段因 `Permission denied (1100)` 退出，CUA 无 IAB 且未获准访问 Chrome；没有截图或窄屏结果。Acceptance Status Banner 按 Human-Confirmed 未勾选状态设为 `🧍 待人工验收`。
+- Reason: 恢复执行 Issue #263 缺失的真实验证与证据，并准确保留当前浏览器权限边界；不把服务启动 / HTTP 路由通过误写为浏览器验证。
+- Impact: 不改变用户可见统计定义、范围、API 语义或验证要求。任务 outcome 行为由 rv-1 新增精确断言支持；rv-2、人工确认和独立 verifier 仍未完成，PRD 不归档。
+- Review: Executor evidence only; rv-2 negative control was attempted but blocked before product assertions, Human-Confirmed remains open, and no verifier verdict is claimed.
+
+### 进程计数不可用时执行既有跳过策略
+- Type: implementation-detail
+- Before: `apply_process_limit_guard()` 在 `pgrep` 无法枚举进程时，其 `pgrep | wc -l` 命令替换在 `set -e -o pipefail` 下直接退出，未到达代码中“无法计数则跳过进程守护”的分支。
+- After: 显式处理 `pgrep` 非零，将计数设为 0 并进入既有的跳过分支；计数成功时仍按“当前进程数 + headroom”设置原来的上限。
+- Reason: 当前运行环境禁止进程枚举，导致 PRD 真实入口启动命令在应用启动前异常退出；修复执行结果以符合脚本已声明的回退策略。
+- Impact: 仅修复计数失败时的控制流；没有增加关闭进程守护的新开关，也未改变可计数环境的上限。`just e2e` 随后通过该分支启动到服务复用 / Playwright 阶段，页面测试仍因独立的 Chromium MachPort 权限问题未运行。
+- Review: Executor implementation detail; no user-visible behavior or PRD scope changed.
+
+### 对齐 Functional Requirement 机器格式
+- Type: doc
+- Before: FR 标识与说明之间使用 em dash；当前 PRD 机器检查器要求 FR 编号后使用冒号，因此无法提取 FR-1 至 FR-6。
+- After: 将六项标识统一为 `FR-n:` 格式，保留原有需求文字和编号顺序。
+- Reason: 使规范解析器能识别已有功能需求，不改变需求含义。
+- Impact: 仅修正文档机器格式；不改变交付物、范围或验收行为。
+- Review: Checked against the PRD Machine Contract checker; no user-visible behavior changed.
+
+### 补齐整项任务耗时分位数断言
+- Type: test
+- Before: rv-1 的真实路由集成测试核对 completed / failed / blocked 分组和总数，但未逐项对照整项任务 P50 / P90 数值。
+- After: 对 SQLite 窗口样本生成的三种 outcome 各自断言 run_count、P50 与 P90，completed 有两个耗时样本并验证 P90 线性插值为 58；将 attempt 成功数、blocked run P50 和 completed run P90 期望分别临时改为 999 后三次真实 API 断言均变红，恢复后 4 个统计用例通过。
+- Reason: 让 PRD 要求的整项任务耗时精确值有可区分失败的真实路由证据。
+- Impact: 只加强测试覆盖和证据；统计实现与用户行为范围未改变。
+- Review: All three targeted negative controls failed against the real FastAPI response; rv-1 green output records the passing run-duration and interpolation expectations.
+
+### 再次恢复尝试与证据 manifest 修复
+- Type: evidence
+- Before: rv-1 pytest 输出未保存实际 API JSON；rv-2 证据只记录旧的浏览器阻塞状态，静态 HTTP 与 bundle 检查引用不完整，manifest 对 rv-2 的阻塞说明未包含本轮最新 CUA 结果。
+- After: 最终相关改动后重跑 rv-1，4 个统计用例通过并从相同的真实 SQLite / FastAPI 集成路径采集三份 API JSON；重跑 `just console-sync`，由 `kc console` 的 fresh HTTP 请求确认 `/app/stats` 与新增静态 bundle 返回 200，因此仅勾选静态分发路由项。更新 `evidence.json` 字段、输出断言与文件引用，并以 `rv-1-final-tree.txt` / `rv-2-final-tree.txt` 记录对应源码哈希；保留其余 rv-2 页面项为未完成：Chromium 仍在 setup 阶段退出，CUA 的 IAB 不可用且 Chrome 未获准。
+- Reason: 修复遗漏的机器证据并让 manifest、报告和本地原始输出指向一致的最终采集结果；不得将静态文件检查提升为浏览器验证。
+- Impact: 不改变功能范围、统计口径或验收 oracle。rv-1 证据已刷新，静态分发路由项有真实 kc console HTTP 证据；rv-2 的页面断言负控、筛选、空 / 错误状态、窄屏、截图和人工呈递仍未完成，因此对应 Acceptance Checklist 保持未勾选，PRD 仍在 pending。
+- Review: Executor evidence only; rv-1 negative controls and green checks are recorded. rv-2 negative control did not reach product assertions, Human-Confirmed items remain open, and no verifier verdict is claimed.
+
+### 恢复尝试 3：重跑页面入口并更新阻塞证据
+- Type: evidence
+- Before: rv-2 只有此前 Chromium 启动失败与浏览器访问受阻记录；本轮 E2E 输出、静态控制台 fresh read 和交互式人审清单状态尚未回填。
+- After: 使用 `/tmp` uv 缓存重跑 `just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts`；backend / public 前端启动后，Chromium 在 auth setup 因 `MachPortRendezvousServer` `Permission denied (1100)` 退出，4 条页面测试未运行。重新 `just console-sync` 后通过 kc console 和新 HTTP 请求检查 `/app/stats` 与引用 bundles，全部返回 200 且 bundle 含新统计区块。CUA 记录 IAB 不可用、浏览器列表为空、Chrome 访问被拒。更新 evidence manifest 的 `risks` 为解析器要求的非空字符串，并由仓库 `validate_evidence_manifest` 验证两个正整数分组、15 个文件引用和红控字段格式；当前 rv-1 又重跑 4 项通过并重采 3 份 JSON。rv-2 如实标为 `blocked`；从官方模板生成 `human-review-checklist.html`，但其真实浏览器检查尚未执行。
+- Reason: 复现 PRD 要求的真实入口并区分环境准备失败、浏览器启动失败与产品断言；同时将当前可复现的静态分发结果和浏览器访问状态绑定到 rv-2。
+- Impact: 不改变用户行为定义、统计口径或验收要求。页面产品负控、页面正向验证、真实截图、375px 窄屏及 `just prd review` 浏览器呈现仍未完成；相应 Acceptance Checklist 保持未勾选，PRD 留在 `tasks/pending/`，不得据此归档或声称 verifier `PASS`。
+- Review: Executor evidence only; no rv-2 product-level red-to-green result was observed, Human-Confirmed items remain open, and no verifier verdict is claimed.
+
+### 恢复尝试 4：修正页面验证入口并刷新证据
+- Type: evidence
+- Before: rv-2 仍引用裸 `kc console` 的静态检查与恢复尝试 3 记录；工作树页面 assertion 未覆盖实际请求 method / canonical path，`pnpm typecheck` 与 build / console-sync 证据需要按当前树重采。
+- After: `just console-sync` 后使用 worktree 内 `uv run kc console` 新会话确认 `/app/stats/` 与 12 个 bundle 均为 HTTP 200，目标 bundle 含新区块；`pnpm build`、清理 TypeScript 增量输出后的 `pnpm typecheck`、`just lint --reuse`、`uv run mkdocs build --strict` 与 rv-1 API / SQLite 定向测试通过。E2E spec 增加 GET 与 canonical path 断言，并通过单文件 TypeScript / ESLint；真实 E2E 到 auth setup 后因 Chromium MachPort 权限错误退出，4 个 Stats 用例未运行。CUA 无 IAB 且 Chrome 访问遭拒。Manifest 已更新为 rv-1 / rv-2 两组当前证据与最终源码摘要。
+- Reason: 完成恢复尝试 4 可执行的页面分发、API 与静态类型验证，纠正裸 `kc` 指向全局安装版的证据来源，并让前端请求 oracle 明确检查 canonical path / method。
+- Impact: 未改变用户行为、统计口径或验证范围；产品级负控 / 绿跑、真实页面交互、桌面截图、窄屏检查和 `just prd review` 浏览器呈递未完成。所有依赖这些观察的 Acceptance Checklist 项继续未勾选；PRD 保持 pending。
+- Review: Executor evidence only. `rv-2` remains blocked before page assertions; Human-Confirmed remains open; no verifier verdict or archive action is claimed.
+
+### 恢复尝试 5：诊断窄屏失败并更新页面验证前置操作
+- Type: test
+- Before: 此前真实页面 E2E 的 auth setup 与三个 Stats 页面检查通过、窄屏项失败；`stats-agent-performance-preset-table` 的可见性断言实际得到 `hidden`。后续 Chromium 启动受限，未重新检查失败原因与测试操作前置条件。
+- After: 从失败输出和测试截图确认 375px 视口中展开侧栏占据 256px，窄屏内容区不足。此前真实 E2E 的前三个页面检查（数据展示、空态 / 筛选和错误隔离）通过，现将对应 Frontend Acceptance 与边界状态测试项标记完成并链接输出；共享 percentile helper 的既有生命周期 P50/P90 回归用例通过 1 项。E2E 窄屏用例现先点击生产页面已有的“收起导航栏”控件，再验证表格可见、表格内容溢出及 `overflow-x: auto`。修改后目标 spec 的单文件 TypeScript 和 ESLint 检查通过；完整 `just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts` 在 services readiness 成功后，于 auth setup 阶段因 Chromium `MachPortRendezvousServer` `Permission denied (1100)` 失败，4 个页面用例未运行。原窄屏红灯和本轮完整输出分别见 `rv-2-e2e-narrow-red.txt` 与 `rv-2-e2e-attempt5.txt`。
+- Reason: 依据真实失败定位窄屏用例所需的现有用户操作，并让当前页面验证覆盖可复现的窄屏路径。
+- Impact: 只更新 E2E 操作与证据，不改变页面功能范围或验收口径。此前真实 E2E 已验证并支持勾选的数据展示与边界状态项保持完成；侧栏收起后的窄屏绿跑、PRD 指定的预设计数负控、截图、静态 kc console 浏览器检查仍未完成，相关项继续未勾选，PRD 保持 pending。
+- Review: Executor evidence only; the previous narrow-screen failure is recorded, but the updated test did not reach page assertions. `rv-2` remains blocked; Human-Confirmed remains open; no verifier verdict or archive action is claimed.
+
+### 恢复尝试 5 最终复核与证据 manifest 更新
+- Type: evidence
+- Before: rv-1 JSON 与通过测试已有证据，但最终树采集脚本一次写入两个 RV 文件；rv-2 的筛选 / 类型验收仍未标记，最新完整 E2E 结果、静态控制台 HTTP 结果与浏览器可用性未回填。
+- After: 将最终树采集改为按条目单独运行；仓库 validator 确认 `evidence.json` 的两个正整数分组、8 / 9 个纯文件名引用和负控字段结构有效。重新运行 rv-1 脚本得到 API / SQLite 4 passed、lifecycle 分位数回归 1 passed，并采集三份 HTTP 200 JSON；重跑前端 `pnpm typecheck` / `pnpm build`、`just console-sync`，再以 worktree `kc console` 新会话读取页面和 12 个 bundle，全部 HTTP 200。依据此前真实 E2E 的仓库 / 天数筛选断言及当前类型 / build 检查，勾选 API client / TypeScript 项。最新目标 E2E 在 Chromium auth setup 以 `MachPortRendezvousServer Permission denied (1100)` 退出；CUA 的 IAB 不可用，Chrome 访问被拒，4 个 Stats 页面用例未运行。
+- Reason: 按用户指定的结构化格式修复证据分组与文件归属，刷新当前实现树相关证据，并只勾选实际运行与观察支持的验收项。
+- Impact: 不改变功能范围、统计口径或用户可见要求。rv-2 产品样本数负控、修改后的窄屏绿跑、真实浏览器截图与 `just prd review` 浏览器呈递仍未完成；相应 Acceptance Checklist 保持未勾选。`Human-Confirmed` 两项仍未确认，横幅保持 `🧍 待人工验收`，PRD 留在 pending。
+- Review: Executor evidence only; rv-1 red/green evidence and manifest structure validate. rv-2 remains blocked before product assertions, no screenshot or human decision is claimed, and no verifier verdict or archive action is claimed.

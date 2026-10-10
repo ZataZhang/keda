@@ -19,7 +19,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -31,6 +30,7 @@ from backend.core.shared.interfaces.runner_console import (
     PrdLifecycleRunRecord,
 )
 from backend.core.shared.models.agent_runner import AttemptResult
+from backend.core.shared.statistics import linear_percentile
 from backend.core.shared.models.backlog import (
     PrdLifecycleDetail,
     PrdLifecycleDurations,
@@ -597,22 +597,6 @@ def derive_current_phase(
     return LifecyclePhase.NONE
 
 
-def _percentile(sorted_values: list[float], fraction: float) -> float | None:
-    """线性插值分位数；空列表返回 ``None``。"""
-    if not sorted_values:
-        return None
-    if len(sorted_values) == 1:
-        return sorted_values[0]
-    position = (len(sorted_values) - 1) * fraction
-    lower_index = math.floor(position)
-    upper_index = math.ceil(position)
-    if lower_index == upper_index:
-        return sorted_values[int(position)]
-    lower_value = sorted_values[lower_index]
-    upper_value = sorted_values[upper_index]
-    return lower_value + (upper_value - lower_value) * (position - lower_index)
-
-
 def _round_seconds(value: float | None) -> float | None:
     """耗时统一保留一位小数，避免浮点噪声进入页面与证据。"""
     return None if value is None else round(value, 1)
@@ -840,8 +824,8 @@ def build_prd_lifecycle_stats(
             if completed_end_to_end
             else None
         ),
-        median_end_to_end_seconds=_round_seconds(_percentile(sorted_end_to_end, 0.5)),
-        p90_end_to_end_seconds=_round_seconds(_percentile(sorted_end_to_end, 0.9)),
+        median_end_to_end_seconds=_round_seconds(linear_percentile(sorted_end_to_end, 0.5)),
+        p90_end_to_end_seconds=_round_seconds(linear_percentile(sorted_end_to_end, 0.9)),
         average_blocked_seconds=(
             _round_seconds(sum(completed_blocked) / len(completed_blocked))
             if completed_blocked
