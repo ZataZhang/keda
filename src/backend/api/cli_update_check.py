@@ -10,6 +10,7 @@
   双读）。
 - 结果缓存到 ``<状态目录>/update-check.json``，默认 24 小时内不再访问 PyPI；
   缓存记录绑定了当时的已安装版本，升级后自动失效。
+- 拒绝升级或显示候选安装命令后，同一版本在缓存过期前不再重复提示。
 - 询问后仅对「可确认的 PyPI 托管安装」（uv tool / pipx / Homebrew / venv pip /
   user-site pip）直接执行对应升级命令；来源不是 PyPI（源码、editable、tarball
   直链）或识别不出安装方式时，只打印可复制的命令，绝不猜测执行。
@@ -174,12 +175,14 @@ def _write_cache_record(
     checked_at: float,
     current_version: str,
     latest_version: str | None,
+    suppressed_version: str | None = None,
 ) -> None:
     """把本次检查结论落盘；缓存目录不可写时静默放弃（下次照常检查）。"""
     record = {
         "checked_at": checked_at,
         "current_version": current_version,
         "latest_version": latest_version,
+        "suppressed_version": suppressed_version,
     }
     cache_path = _cache_path()
     try:
@@ -235,7 +238,7 @@ def check_for_update(
     """查一次「是否有新版本」，带 TTL 缓存；离线或版本不旧于当前时返回 ``None``。
 
     缓存命中条件：记录未过期、且记录里绑定的已安装版本与当前一致。升级后
-    版本变化会让旧缓存自动失效，避免刚升完还被追问。
+    版本变化会让旧缓存自动失效；已处理的提示也会在缓存过期前被抑制。
 
     Args:
         now_epoch: 判定缓存是否过期的时间戳；省略时取当前时间。
@@ -251,6 +254,7 @@ def check_for_update(
 
     cached = _read_cache_record()
     cached_checked_at = _cache_record_checked_at(cached) if isinstance(cached, dict) else None
+    suppressed_version: str | None = None
     if (
         cached_checked_at is not None
         and cached.get("current_version") == current_version
@@ -260,6 +264,8 @@ def check_for_update(
         if latest_value is None:
             return None
         latest_version = str(latest_value)
+        suppressed_value = cached.get("suppressed_version")
+        suppressed_version = suppressed_value if isinstance(suppressed_value, str) else None
     else:
         latest_version_opt = fetch_latest()
         _write_cache_record(
@@ -273,7 +279,29 @@ def check_for_update(
 
     if not _is_newer(latest_version, current_version):
         return None
+    if suppressed_version == latest_version:
+        return None
     return UpdateNotice(current_version=current_version, latest_version=latest_version)
+
+
+def _suppress_cached_notice(notice: UpdateNotice) -> None:
+    """记录本次版本提示已处理，在当前检查缓存过期前不再重复提示。"""
+    cache_record = _read_cache_record()
+    if not isinstance(cache_record, dict):
+        return
+    cached_checked_at = _cache_record_checked_at(cache_record)
+    if (
+        cached_checked_at is None
+        or cache_record.get("current_version") != notice.current_version
+        or cache_record.get("latest_version") != notice.latest_version
+    ):
+        return
+    _write_cache_record(
+        checked_at=cached_checked_at,
+        current_version=notice.current_version,
+        latest_version=notice.latest_version,
+        suppressed_version=notice.latest_version,
+    )
 
 
 def _installed_from_non_pypi_source() -> bool:
@@ -292,6 +320,19 @@ def _installed_from_non_pypi_source() -> bool:
         return True
 
 
+def _has_path_part_sequence(path_text: str, *expected_parts: str) -> bool:
+    """按路径片段匹配安装目录，并兼容 Windows 反斜杠与大小写。"""
+    path_parts = tuple(
+        path_part.casefold() for path_part in path_text.replace("\\", "/").split("/") if path_part
+    )
+    normalized_expected_parts = tuple(path_part.casefold() for path_part in expected_parts)
+    part_count = len(normalized_expected_parts)
+    return part_count > 0 and any(
+        path_parts[index : index + part_count] == normalized_expected_parts
+        for index in range(len(path_parts) - part_count + 1)
+    )
+
+
 def detect_upgrade_command() -> UpgradeCommand | None:
     """按当前安装痕迹识别可自动执行的升级命令；识别不出返回 ``None``。
 
@@ -306,11 +347,11 @@ def detect_upgrade_command() -> UpgradeCommand | None:
     if _installed_from_non_pypi_source():
         return None
     prefix_path = sys.prefix
-    if "/uv/tools/" in prefix_path and shutil.which("uv"):
+    if _has_path_part_sequence(prefix_path, "uv", "tools") and shutil.which("uv"):
         return UpgradeCommand(("uv", "tool", "upgrade", _DISTRIBUTION_NAME))
-    if "/pipx/venvs/" in prefix_path and shutil.which("pipx"):
+    if _has_path_part_sequence(prefix_path, "pipx", "venvs") and shutil.which("pipx"):
         return UpgradeCommand(("pipx", "upgrade", _DISTRIBUTION_NAME))
-    if "/Cellar/" in prefix_path and shutil.which("brew"):
+    if _has_path_part_sequence(prefix_path, "Cellar") and shutil.which("brew"):
         return UpgradeCommand(("brew", "upgrade", _DISTRIBUTION_NAME))
     if sys.prefix != sys.base_prefix:
         pip_spec = importlib.util.find_spec("pip")
@@ -358,10 +399,12 @@ def _handle_update_notice(notice: UpdateNotice) -> None:
     plan = detect_upgrade_command()
     if plan is None:
         _print_available_notice(notice, upgrade_hint=None)
+        _suppress_cached_notice(notice)
         return
     _print_available_notice(notice, upgrade_hint=plan.display)
     confirmed = typer.confirm(f"Run `{plan.display}` now?", default=False, err=True)
     if not confirmed:
+        _suppress_cached_notice(notice)
         error_console.print(
             "Not upgraded. Re-run the command above whenever you like.",
             markup=False,

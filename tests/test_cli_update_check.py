@@ -198,6 +198,42 @@ def test_fresh_cache_avoids_second_pypi_visit(
     assert notice == UpdateNotice(current_version="0.2.1", latest_version="9.9.9")
 
 
+def test_suppressed_cached_notice_is_not_returned(
+    _isolated_home: Path, _always_tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """当前缓存周期内已处理的版本提示不会再次触发通知。"""
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
+    _write_cache(
+        _isolated_home,
+        {
+            "checked_at": 1_000.0,
+            "current_version": "0.2.1",
+            "latest_version": "9.9.9",
+            "suppressed_version": "9.9.9",
+        },
+    )
+
+    def _forbidden_fetch() -> str | None:
+        raise AssertionError("fresh suppressed cache must not hit PyPI")
+
+    assert check_for_update(now_epoch=1_500.0, fetch_latest=_forbidden_fetch) is None
+
+
+def test_cache_uses_legacy_state_directory_when_it_is_the_only_one(
+    _isolated_home: Path, _always_tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """仅有旧状态目录时，更新检查缓存继续写入 ``~/.iar``。"""
+    legacy_state_dir = _isolated_home / ".iar"
+    legacy_state_dir.mkdir()
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
+
+    notice = check_for_update(now_epoch=1_500.0, fetch_latest=lambda: "0.5.0")
+
+    assert notice == UpdateNotice(current_version="0.2.1", latest_version="0.5.0")
+    assert (legacy_state_dir / "update-check.json").is_file()
+    assert not (_isolated_home / ".kedacode").exists()
+
+
 def test_cache_is_bound_to_installed_version(
     _isolated_home: Path, _always_tty: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -249,6 +285,26 @@ def test_stale_cache_triggers_refetch_and_updates_cache(
     assert notice == UpdateNotice(current_version="0.2.1", latest_version="0.4.0")
     record = json.loads(_cache_file(_isolated_home).read_text(encoding="utf-8"))
     assert record["latest_version"] == "0.4.0"
+
+
+def test_expired_notice_suppression_triggers_new_notice(
+    _isolated_home: Path, _always_tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """提示抑制随检查缓存过期；重新检查仍发现同一版本时会再次通知。"""
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
+    _write_cache(
+        _isolated_home,
+        {
+            "checked_at": 0.0,
+            "current_version": "0.2.1",
+            "latest_version": "0.4.0",
+            "suppressed_version": "0.4.0",
+        },
+    )
+
+    notice = check_for_update(now_epoch=25 * 3600.0, fetch_latest=lambda: "0.4.0")
+
+    assert notice == UpdateNotice(current_version="0.2.1", latest_version="0.4.0")
 
 
 def test_corrupt_cache_is_treated_as_absent(
@@ -356,12 +412,32 @@ def test_uv_tool_install_maps_to_uv_tool_upgrade(
     assert plan is not None and plan.argv == ("uv", "tool", "upgrade", "kedacode")
 
 
+def test_windows_uv_tool_install_maps_to_uv_tool_upgrade(
+    _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows uv tool 路径使用反斜杠时仍识别为 uv tool。"""
+    monkeypatch.setattr(sys, "prefix", r"C:\Users\x\AppData\Local\uv\tools\kedacode")
+    monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"C:/bin/{name}")
+    plan = detect_upgrade_command()
+    assert plan is not None and plan.argv == ("uv", "tool", "upgrade", "kedacode")
+
+
 def test_pipx_install_maps_to_pipx_upgrade(
     _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """pipx 隔离环境（prefix 含 /pipx/venvs/）→ `pipx upgrade kedacode`。"""
     monkeypatch.setattr(sys, "prefix", "/Users/x/.local/pipx/venvs/kedacode")
     monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"/usr/bin/{name}")
+    plan = detect_upgrade_command()
+    assert plan is not None and plan.argv == ("pipx", "upgrade", "kedacode")
+
+
+def test_windows_pipx_install_maps_to_pipx_upgrade(
+    _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows pipx 路径使用反斜杠时仍识别为 pipx。"""
+    monkeypatch.setattr(sys, "prefix", r"C:\Users\x\pipx\venvs\kedacode")
+    monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"C:/bin/{name}")
     plan = detect_upgrade_command()
     assert plan is not None and plan.argv == ("pipx", "upgrade", "kedacode")
 
@@ -452,16 +528,33 @@ def test_confirmed_upgrade_runs_detected_command(
 
 
 def test_declined_upgrade_prints_copyable_command_only(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    _isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """用户拒绝时不执行任何东西，但把命令留在屏上随时可复制。"""
     _interactive_ready(monkeypatch)
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
+    _write_cache(
+        _isolated_home,
+        {
+            "checked_at": cli_update_check.time.time(),
+            "current_version": "0.2.1",
+            "latest_version": "0.3.0",
+        },
+    )
     monkeypatch.setattr(
         cli_update_check,
         "detect_upgrade_command",
         lambda: UpgradeCommand(("pipx", "upgrade", "kedacode")),
     )
-    monkeypatch.setattr(cli_update_check.typer, "confirm", lambda *a, **k: False)
+    confirm_calls: list[str] = []
+
+    def _decline(*args: object, **kwargs: object) -> bool:
+        confirm_calls.append("confirm")
+        return False
+
+    monkeypatch.setattr(cli_update_check.typer, "confirm", _decline)
     run_calls: list[list[str]] = []
     monkeypatch.setattr(
         cli_update_check.subprocess, "run", lambda argv, **k: run_calls.append(argv)
@@ -470,13 +563,38 @@ def test_declined_upgrade_prints_copyable_command_only(
     assert run_calls == []
     captured = capsys.readouterr()
     assert "pipx upgrade kedacode" in captured.err
+    cache_record = json.loads(_cache_file(_isolated_home).read_text(encoding="utf-8"))
+    assert cache_record["suppressed_version"] == "0.3.0"
+
+    def _forbidden_fetch() -> str | None:
+        raise AssertionError("a fresh dismissed cache must not hit PyPI")
+
+    monkeypatch.setattr(
+        cli_update_check,
+        "check_for_update",
+        lambda: check_for_update(fetch_latest=_forbidden_fetch),
+    )
+    startup_update_check(["registry", "list"])
+    assert capsys.readouterr().err == ""
+    assert confirm_calls == ["confirm"]
 
 
 def test_unrecognized_install_lists_candidate_commands(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    _isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """识别不出安装方式时不追问、不执行，列出各安装器的可复制命令。"""
-    _interactive_ready(monkeypatch)
+    monkeypatch.setattr(cli_update_check, "_is_interactive_terminal", lambda *a, **k: True)
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
+    _write_cache(
+        _isolated_home,
+        {
+            "checked_at": cli_update_check.time.time(),
+            "current_version": "0.2.1",
+            "latest_version": "0.3.0",
+        },
+    )
     monkeypatch.setattr(cli_update_check, "detect_upgrade_command", lambda: None)
     confirm_calls: list[str] = []
     monkeypatch.setattr(
@@ -489,6 +607,19 @@ def test_unrecognized_install_lists_candidate_commands(
     captured = capsys.readouterr()
     assert "uv tool install --force kedacode" in captured.err
     assert "brew upgrade kedacode" in captured.err
+    cache_record = json.loads(_cache_file(_isolated_home).read_text(encoding="utf-8"))
+    assert cache_record["suppressed_version"] == "0.3.0"
+
+    def _forbidden_fetch() -> str | None:
+        raise AssertionError("a fresh noticed cache must not hit PyPI")
+
+    monkeypatch.setattr(
+        cli_update_check,
+        "check_for_update",
+        lambda: check_for_update(fetch_latest=_forbidden_fetch),
+    )
+    startup_update_check(["registry", "list"])
+    assert capsys.readouterr().err == ""
 
 
 def test_failed_upgrade_keeps_command_for_manual_retry(
