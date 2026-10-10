@@ -38,6 +38,7 @@ def test_local_settings_round_trip_daemon_override(tmp_path: Path) -> None:
     assert loaded.daemon is not None
     assert loaded.daemon.reclaim_ttl_seconds == 600
     assert loaded.daemon.reconcile_stale_attempts is False
+    assert loaded.daemon.hosted_maintenance_enabled is False
     # 未在 .iar.toml 写出的字段 → 继承全局默认(来自 AgentRunnerDaemonSettings)
     assert loaded.daemon.review_interval_seconds == 120
 
@@ -84,6 +85,9 @@ def test_global_daemon_default_is_3_hours() -> None:
 
     settings = AgentRunnerDaemonSettings()
     assert settings.reclaim_ttl_seconds == 10800
+    assert settings.hosted_maintenance_enabled is False
+    assert settings.disk_low_watermark_bytes == 10 * 1024**3
+    assert settings.disk_resume_watermark_bytes == 15 * 1024**3
 
 
 def test_merge_repository_config_applies_daemon_reconcile_override(
@@ -105,6 +109,9 @@ def test_merge_repository_config_applies_daemon_reconcile_override(
         "[agent_runner.daemon]\n"
         "reconcile_stale_attempts = false\n"
         "reclaim_ttl_seconds = 600\n"
+        "hosted_maintenance_enabled = true\n"
+        "disk_low_watermark_bytes = 8589934592\n"
+        "disk_resume_watermark_bytes = 12884901888\n"
         "run_interval_seconds = 7\n",
         encoding="utf-8",
     )
@@ -115,6 +122,9 @@ def test_merge_repository_config_applies_daemon_reconcile_override(
     assert merged.daemon == DaemonConfig(
         reconcile_stale_attempts=False,
         reclaim_ttl_seconds=600,
+        hosted_maintenance_enabled=True,
+        disk_low_watermark_bytes=8589934592,
+        disk_resume_watermark_bytes=12884901888,
     )
 
 

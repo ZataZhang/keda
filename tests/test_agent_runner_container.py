@@ -9,12 +9,16 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 
+from backend.core.shared.interfaces.container_runner import ContainerGcRequest
 from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_runner_container import (
     StartRunnerContainerOptions,
@@ -28,6 +32,7 @@ from backend.engines.agent_runner.container_auth import (
     AgentImportSpec,
     ContainerAuthController,
 )
+from backend.engines.agent_runner.container_gc import run_container_gc
 from backend.engines.agent_runner.container_ops import ContainerOpsController
 
 
@@ -46,6 +51,149 @@ def test_container_ops_controller_resolves_assets() -> None:
     assets = controller.resolve_packaged_runner_assets()
     assert assets.compose_file.is_absolute()
     assert assets.compose_file.name == "docker-compose.runner.yml"
+
+
+def test_runner_compose_is_single_service_without_public_port_or_socket() -> None:
+    """runner Compose 保持单服务、无发布端口与 Docker socket，且日志有界。"""
+    compose_path = ContainerOpsController().resolve_packaged_runner_assets().compose_file
+    compose_settings = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    service_map = compose_settings["services"]
+    runner_service = service_map["iar-runner"]
+    mounted_volumes = runner_service.get("volumes", [])
+
+    assert set(service_map) == {"iar-runner"}
+    assert "ports" not in runner_service
+    assert runner_service.get("expose", []) == []
+    assert all("docker.sock" not in str(volume) for volume in mounted_volumes)
+    assert runner_service["logging"] == {
+        "driver": "json-file",
+        "options": {"max-size": "10m", "max-file": "5"},
+    }
+
+
+def test_container_gc_preview_preserves_referenced_and_recent_resources() -> None:
+    """GC 预览只标记未引用悬空镜像及过期、可回收 cache。"""
+    now = datetime(2026, 10, 10, tzinfo=UTC)
+    stale_image_id = "sha256:" + "a" * 64
+    referenced_image_id = "sha256:" + "b" * 64
+    stale_cache_id = "cache_stale_1"
+    recent_cache_id = "cache_recent_2"
+    active_cache_id = "cache_active_3"
+    old_time = (now - timedelta(days=100)).isoformat()
+    recent_time = (now - timedelta(days=12)).isoformat()
+    buildx_json_lines = "\n".join(
+        json.dumps(cache_record)
+        for cache_record in (
+            {"ID": stale_cache_id, "LastUsedAt": old_time, "Reclaimable": True},
+            {"ID": recent_cache_id, "LastUsedAt": recent_time, "Reclaimable": True},
+            {"ID": active_cache_id, "LastUsedAt": old_time, "Reclaimable": False},
+        )
+    )
+    called_argv: list[list[str]] = []
+
+    def fake_runner(argv, *, env, cwd, check):  # noqa: ARG001
+        called_argv.append(argv)
+        if argv[1:3] == ["image", "ls"]:
+            stdout = f"{stale_image_id}\n{referenced_image_id}\n"
+        elif argv[1:3] == ["container", "ls"]:
+            stdout = "container-id\n" if referenced_image_id in argv[-1] else ""
+        elif argv[1:4] == ["buildx", "du", "--format=json"]:
+            stdout = buildx_json_lines
+        else:
+            raise AssertionError(f"Preview unexpectedly attempted mutation: {argv}")
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout=stdout, stderr="")
+
+    gc_result = run_container_gc(
+        ContainerGcRequest(cache_retention_days=90),
+        runner=fake_runner,
+        now=now,
+    )
+
+    status_by_resource = {
+        (entry.resource_type, entry.resource_id): entry.status for entry in gc_result.entries
+    }
+    assert gc_result.scanned_count == 5
+    assert gc_result.eligible_count == 2
+    assert gc_result.deleted_count == 0
+    assert gc_result.skipped_count == 3
+    assert gc_result.failed_count == 0
+    assert status_by_resource[("image", stale_image_id)] == "eligible"
+    assert status_by_resource[("image", referenced_image_id)] == "skipped"
+    assert status_by_resource[("build-cache", stale_cache_id)] == "eligible"
+    assert status_by_resource[("build-cache", recent_cache_id)] == "skipped"
+    assert status_by_resource[("build-cache", active_cache_id)] == "skipped"
+    assert all("volume" not in " ".join(argv) for argv in called_argv)
+
+
+def test_container_gc_apply_deletes_only_scanned_safe_candidates() -> None:
+    """apply 对扫描得到的精确候选执行非强制镜像删除和精确 cache prune。"""
+    now = datetime(2026, 10, 10, tzinfo=UTC)
+    dangling_image_id = "sha256:" + "c" * 64
+    reclaimable_cache_id = "cache_old_4"
+    old_time = (now - timedelta(days=100)).isoformat()
+    called_argv: list[list[str]] = []
+
+    def fake_runner(argv, *, env, cwd, check):  # noqa: ARG001
+        called_argv.append(argv)
+        if argv[1:3] == ["image", "ls"]:
+            stdout = f"{dangling_image_id}\n"
+        elif argv[1:3] == ["container", "ls"]:
+            stdout = ""
+        elif argv[1:4] == ["buildx", "du", "--format=json"]:
+            stdout = json.dumps(
+                {"ID": reclaimable_cache_id, "LastUsedAt": old_time, "Reclaimable": True}
+            )
+        else:
+            stdout = "removed"
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout=stdout, stderr="")
+
+    gc_result = run_container_gc(
+        ContainerGcRequest(apply=True, cache_retention_days=90),
+        runner=fake_runner,
+        now=now,
+    )
+
+    assert gc_result.eligible_count == 2
+    assert gc_result.deleted_count == 2
+    assert gc_result.failed_count == 0
+    assert ["docker", "image", "rm", dangling_image_id] in called_argv
+    assert not any("--force" in argv for argv in called_argv if argv[1:3] == ["image", "rm"])
+    assert [
+        "docker",
+        "buildx",
+        "prune",
+        "--filter",
+        f"id={reclaimable_cache_id}",
+        "--filter",
+        "inuse=false",
+        "--force",
+    ] in called_argv
+
+
+def test_container_gc_conservatively_handles_relative_buildx_ages() -> None:
+    """相对时间接近保留期时保留；明确超过窗口的 cache 才能回收。"""
+    now = datetime(2026, 10, 10, tzinfo=UTC)
+    buildx_json_lines = "\n".join(
+        json.dumps(cache_record)
+        for cache_record in (
+            {"ID": "cache_three_months", "LastUsedAt": "3 months ago", "Reclaimable": True},
+            {"ID": "cache_four_months", "LastUsedAt": "4 months ago", "Reclaimable": True},
+        )
+    )
+
+    def fake_runner(argv, *, env, cwd, check):  # noqa: ARG001
+        stdout = buildx_json_lines if argv[1:3] == ["buildx", "du"] else ""
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout=stdout, stderr="")
+
+    gc_result = run_container_gc(
+        ContainerGcRequest(cache_retention_days=90),
+        runner=fake_runner,
+        now=now,
+    )
+    status_by_cache_id = {entry.resource_id: entry.status for entry in gc_result.entries}
+
+    assert status_by_cache_id["cache_three_months"] == "skipped"
+    assert status_by_cache_id["cache_four_months"] == "eligible"
 
 
 def test_container_auth_controller_imports_through_facade(

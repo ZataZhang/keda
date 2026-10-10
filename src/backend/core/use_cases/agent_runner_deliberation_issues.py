@@ -184,6 +184,7 @@ def process_deliberation_issues(
     max_issues: int = 1,
     stale_rounds_before_hint: int = 3,
     clock: Callable[[], float] = time.monotonic,
+    issue_admission_check: Callable[[], bool] | None = None,
 ) -> None:
     """Drive one Phase 0 pass over Issues labelled ``agent/deliberate``.
 
@@ -216,6 +217,8 @@ def process_deliberation_issues(
             hint suggesting the operator swap labels.
         clock: Monotonic clock used to log per-issue elapsed time in debug
             builds; defaults to ``time.monotonic``.
+        issue_admission_check: Optional resource gate evaluated before each
+            Issue is processed; ``False`` leaves the Issue queued.
     """
     issues = github_client.list_issues_by_label(
         config.labels.deliberate, limit=max_issues, state="open"
@@ -226,6 +229,13 @@ def process_deliberation_issues(
     transcript_runner = transcript_runner_factory(repo_path)
 
     for issue in issues:
+        if issue_admission_check is not None and not issue_admission_check():
+            _logger.warning(
+                "Resource admission paused before deliberation Issue #%d; "
+                "the Issue remains queued.",
+                issue.number,
+            )
+            continue
         started_at = clock()
         try:
             # PRD 级覆盖随 Issue 流动：本入口不经过编排运行时，需自行从该 Issue
@@ -252,6 +262,32 @@ def process_deliberation_issues(
                 issue.number,
                 clock() - started_at,
             )
+
+
+def run_deliberation_phase(
+    *,
+    repo_path: Path,
+    config: AppConfig,
+    github_client: IGitHubClient,
+    transcript_runner_factory: Callable[[Path], IAgentTranscriptRunner],
+    max_issues: int,
+    stale_rounds_before_hint: int,
+    repo_id: str,
+    issue_admission_check: Callable[[], bool] | None = None,
+) -> None:
+    """执行一个仓库的 Phase 0，并隔离该阶段的异常。"""
+    try:
+        process_deliberation_issues(
+            repo_path=repo_path,
+            config=config,
+            github_client=github_client,
+            transcript_runner_factory=transcript_runner_factory,
+            max_issues=max_issues,
+            stale_rounds_before_hint=stale_rounds_before_hint,
+            issue_admission_check=issue_admission_check,
+        )
+    except Exception as exc:  # noqa: BLE001 - one repository's phase must not stop the daemon.
+        _logger.error("Deliberation phase failed for repository '%s': %s", repo_id, exc)
 
 
 def _process_single_deliberation_issue(

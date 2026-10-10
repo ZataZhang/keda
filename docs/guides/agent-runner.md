@@ -347,10 +347,25 @@ recovery 轮次。
 [agent_runner.daemon]
 reconcile_stale_attempts = true   # 主开关；设为 false 即回到本特性落地前的现状
 reclaim_ttl_seconds = 10800       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
+hosted_maintenance_enabled = false # 仅托管部署显式开启；本地 daemon 默认不执行托管维护
+disk_low_watermark_bytes = 10737418240 # 可用空间低于 10 GiB 时停止领取新 Issue
+disk_resume_watermark_bytes = 16106127360 # 可用空间达到 15 GiB 后恢复领取
 ```
 
 `reconcile_stale_attempts = false` 时 Phase -1 整轮空转，僵尸 Issue 保持 `agent/running` 不被触碰、
 不留任何 comment（负控口径见 `.iar/evidence/`：rv-1 关掉开关后僵尸确实纹丝不动）。
+
+`hosted_maintenance_enabled` 默认关闭。开启后 daemon 在一轮 Issue worker 全部结束后运行既有
+worktree 清理器，删除 14 天前的 Issue 原始输出日志，并删除 SQLite 中超过 90 天的已完成
+run 与 attempt 摘要。日志清理只检查当前仓库 `logs/agent-runner/issues/<repo_id>/` 下的普通
+`.log` 文件，不跟随符号链接或越界 repo id。worktree 必须属于
+仓库的 `.iar-worktrees/`，对应 Issue 已关闭且不再带 `agent/running` 标签，远端分支已删除，
+工作树干净并且分支已合并；自动流程固定 `force=False`。活动、dirty、未合并、远端仍存在或
+GitHub 状态无法读取的候选会保留并记录跳过原因。审计、队列、设置和活动状态不受摘要策略
+影响。托管维护还会在领取边界检查仓库所在文件系统的可用空间：低于 10 GiB 时保留当前
+worker 并停止启动新 Issue；容量恢复到 15 GiB 后继续领取。两个阈值按字节配置，恢复水位
+必须高于低水位。Compose 容器日志使用 10 MiB × 5 个文件轮转。宿主镜像和 Buildx 缓存仍由
+运营者手动执行 `kc container gc`，默认预览，需显式传 `--apply` 才删除。
 
 ## 复杂需求：异步 Issue 评论讨论（`agent/deliberate`）
 
@@ -4736,6 +4751,24 @@ kc container logs
 # 停止容器（保留容器外的工作目录、container-auth 快照）
 kc container down
 ```
+
+### 容器日志轮转与宿主缓存清理
+
+runner Compose 为 Docker `json-file` 日志设置 `10m` 单文件上限和最多 `5` 个轮转文件。宿主机需要回收 Docker 镜像或当前 Buildx builder 的构建缓存时，先预览：
+
+```bash
+kc container gc --dry-run
+```
+
+`kc container gc` 默认只预览；确认候选后才显式执行：
+
+```bash
+kc container gc --apply
+```
+
+清理只针对没有容器引用的悬空镜像，以及 Buildx 标记可回收且最后使用时间明确超过 90 天的缓存记录。可用 `--cache-retention-days <天数>` 调整 build cache 保留期；Docker 只给出粗略相对时间且无法证明已超过保留期时，命令会跳过该记录。Buildx 缓存属于当前选中的 builder，可能包含其它本地项目构建产生的缓存。命令逐项报告扫描、符合条件、删除、跳过和失败数量，并显示宿主根文件系统已用与可用空间。Docker/Buildx 无法扫描或删除时会报告失败并返回非零状态。
+
+此命令作用于当前 Docker host：悬空镜像和当前选中 builder 的缓存可能来自该主机上的其它本地项目，执行前应检查预览。它不会删除 Docker volume、bind mount、非悬空镜像或活动容器引用的镜像；镜像删除不使用强制选项。不要用 `docker system prune --volumes` 替代该命令。它是运营者显式运行的宿主清理工具，不会在普通本地 `kc daemon` 中自动运行；runner 容器也不挂载 Docker socket。
 
 ### 容器资产定位
 

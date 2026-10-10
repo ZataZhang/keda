@@ -19,6 +19,7 @@ from backend.core.shared.models.agent_runner import (
     AutopilotConfig,
     BacklogConfig,
     BrowserE2EVerificationCommand,
+    DaemonConfig,
     E2EVerificationArtifact,
     GeneratedContentConfig,
     GeneratedContentTargetConfig,
@@ -667,6 +668,11 @@ def build_app_config_from_settings(
         agent_presets=build_agent_presets_from_settings(agent_runner_settings.presets),
         lifecycle_presets=build_lifecycle_presets_config_from_settings(
             agent_runner_settings.lifecycle_presets
+        ),
+        daemon=DaemonConfig(
+            hosted_maintenance_enabled=(agent_runner_settings.daemon.hosted_maintenance_enabled),
+            disk_low_watermark_bytes=(agent_runner_settings.daemon.disk_low_watermark_bytes),
+            disk_resume_watermark_bytes=(agent_runner_settings.daemon.disk_resume_watermark_bytes),
         ),
     )
 

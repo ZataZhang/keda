@@ -244,6 +244,27 @@ def test_process_deliberation_issues_first_round_posts_question_list(
     assert "issue_comments_count=1" in posted
 
 
+def test_process_deliberation_issues_resource_gate_keeps_issue_queued(
+    tmp_path: Path,
+) -> None:
+    """资源不足时不启动 agent 或写 Issue 评论。"""
+    fake_github = FakeGitHubClient()
+    issue = _make_deliberate_issue()
+    _set_deliberate_issues(fake_github, [issue])
+    runner = _StubTranscriptRunner()
+
+    process_deliberation_issues(
+        repo_path=tmp_path,
+        config=_build_config(),
+        github_client=fake_github,
+        transcript_runner_factory=lambda _: runner,
+        issue_admission_check=lambda: False,
+    )
+
+    assert runner.calls == []
+    assert fake_github.list_issue_comments(issue.number) == []
+
+
 def test_process_deliberation_issues_waiting_skips(tmp_path: Path) -> None:
     """When the AI has just asked and no user reply arrived, skip the pass."""
     fake_github = FakeGitHubClient()

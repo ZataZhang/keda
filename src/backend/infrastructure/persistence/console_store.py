@@ -437,6 +437,34 @@ class SqliteConsoleStore(InvocationEventStoreMixin):
         except Exception as exc:  # noqa: BLE001 - side-channel must not break runs.
             _logger.warning("Failed to append attempt record to %s: %s", self._db_path, exc)
 
+    def prune_expired_summaries(self, *, cutoff: str, batch_size: int = 5000) -> tuple[int, int]:
+        """以单个事务分批删除截止时间前完成的 run 与 attempt 摘要。
+
+        审计、生命周期账本、队列、设置和监控快照不属于运行摘要，因此不触碰。
+        未完成记录也保留，避免把活动执行状态误当作过期历史。
+        """
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least 1")
+        deleted_counts: list[int] = []
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for table_name in ("run_records", "attempt_records"):
+                deleted_for_table = 0
+                while True:
+                    cursor = connection.execute(
+                        f"DELETE FROM {table_name} WHERE id IN ("
+                        f"SELECT id FROM {table_name} WHERE finished_at < ? "
+                        "ORDER BY id LIMIT ?) "
+                        "AND finished_at < ?",
+                        (cutoff, batch_size, cutoff),
+                    )
+                    deleted_for_table += cursor.rowcount
+                    if cursor.rowcount < batch_size:
+                        break
+                deleted_counts.append(deleted_for_table)
+            connection.commit()
+        return deleted_counts[0], deleted_counts[1]
+
     def append_audit(self, audit_entry: AuditEntry) -> None:
         """追加审计条目；失败时降级为日志警告。"""
         try:

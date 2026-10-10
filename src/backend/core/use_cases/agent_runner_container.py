@@ -38,6 +38,8 @@ from pathlib import Path
 from backend.core.shared.models import product_identity
 from backend.core.shared.interfaces.container_runner import (
     ContainerCommandPlan,
+    ContainerGcRequest,
+    ContainerGcResult,
     ContainerUpRequest,
     DockerRunnerCallable,
     IContainerAuthImporter,
@@ -231,6 +233,25 @@ def stream_runner_container_logs(
     return controller.run_container_logs(compose_file, follow=follow, runner=runner)
 
 
+def garbage_collect_runner_resources(
+    controller: IContainerRunnerController,
+    request: ContainerGcRequest,
+    *,
+    runner: DockerRunnerCallable | None = None,
+) -> ContainerGcResult:
+    """扫描或清理悬空 runner 镜像与过期 build cache。
+
+    Args:
+        controller: Docker CLI 生命周期端口实现。
+        request: 预览/执行选项与 cache 保留期。
+        runner: 可注入的 Docker 命令执行器。
+
+    Returns:
+        按资源分类的扫描、跳过、删除或失败结果。
+    """
+    return controller.run_container_gc(request, runner=runner)
+
+
 def _is_pid_alive(pid: int) -> bool:
     """进程存活判定（macOS / Linux 均兼容）。"""
     if pid <= 0:
@@ -267,6 +288,7 @@ __all__ = [
     "StartRunnerContainerResult",
     "create_default_container_auth_importer",
     "create_default_container_ops_controller",
+    "garbage_collect_runner_resources",
     "import_container_auth",
     "start_runner_container",
     "stop_runner_container",

@@ -272,6 +272,15 @@ class IRunHistoryStore(ABC):
         """按天聚合最近 ``days`` 天的运行结果。"""
         ...
 
+    @abstractmethod
+    def prune_expired_summaries(self, *, cutoff: str, batch_size: int = 5000) -> tuple[int, int]:
+        """按截止时间删除已完成的 run / attempt 摘要并返回各自删除数。
+
+        实现必须保留审计、队列、设置与其他持久状态；每次调用使用一个事务，
+        并以有界批次删除，避免旧数据库一次性产生过大的写锁。
+        """
+        ...
+
 
 @dataclass(frozen=True)
 class PrdLifecycleRunRecord:

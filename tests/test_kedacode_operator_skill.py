@@ -412,6 +412,9 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("backlog", "advance"): {"--dry-run", "--repo", "--repo-id", "--config"},
     ("registry", "list"): set(),
     ("daemon", "status"): set(),
+    # issue-265：随包 Skill 说明 host GC 的预览、显式执行与缓存保留期；
+    # 旗标必须同时通过下方的实时命令树白名单检查。
+    ("container", "gc"): {"--apply", "--dry-run", "--cache-retention-days"},
     ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
     ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
     ("worktree", "path"): {"--branch"},

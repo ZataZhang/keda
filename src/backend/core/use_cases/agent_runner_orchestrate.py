@@ -559,6 +559,7 @@ def run_once(
     output_view: IRunnerLiveView | None = None,
     target_issue: int | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    issue_admission_check: Callable[[], bool] | None = None,
 ) -> int:
     """执行一次 Agent Runner 轮询。"""
     module = _orchestration_runtime_module()
@@ -579,5 +580,6 @@ def run_once(
             output_view=output_view,
             target_issue=target_issue,
             publish_stage=publish_stage,
+            issue_admission_check=issue_admission_check,
         )
     )

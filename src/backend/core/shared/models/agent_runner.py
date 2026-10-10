@@ -980,10 +980,17 @@ class DaemonConfig:
             传入的全局默认。``False`` 时 Phase -1 整轮空转，僵尸保持 ``agent/running``
             不被触碰（即本特性落地前的现状）。
         reclaim_ttl_seconds: claim 老化阈值(秒)；``None`` 表示沿用调用方默认。
+        hosted_maintenance_enabled: 托管维护开关；``None`` 表示沿用全局值，关闭时不
+            清理运行摘要或执行托管资源维护。
+        disk_low_watermark_bytes: 新任务暂停水位；``None`` 表示沿用全局配置。
+        disk_resume_watermark_bytes: 新任务恢复水位；``None`` 表示沿用全局配置。
     """
 
     reconcile_stale_attempts: bool | None = None
     reclaim_ttl_seconds: int | None = None
+    hosted_maintenance_enabled: bool | None = None
+    disk_low_watermark_bytes: int = 10 * 1024**3
+    disk_resume_watermark_bytes: int = 15 * 1024**3
 
 
 @dataclass(frozen=True)
