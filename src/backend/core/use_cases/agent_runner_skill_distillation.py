@@ -31,6 +31,7 @@ from backend.core.shared.models.agent_runner import (
     FailureType,
     IssueSummary,
 )
+from backend.core.use_cases.agent_candidate_fallback import effective_fallback_candidates
 
 _logger = logging.getLogger(__name__)
 
@@ -122,6 +123,20 @@ def _try_distill_skill_after_success(request: _SkillDistillationRequest) -> None
     _try_promote_observed_skill(request, candidate, memory_services.skill)
 
 
+def _effective_fallback_agent_names(config: AppConfig) -> tuple[str, ...]:
+    """提炼证据里的回退顺序取**有效候选链**，按首次出现顺序去重成 agent 名单。
+
+    候选数组非空时整体接管候选链（同 agent 换预设是另一个候选步）；直接读
+    ``runner.agent_fallback_order`` 会在页面 / CLI 写候选后报告 stale 名单。
+    空数组时折叠结果与旧名单逐字节一致。
+    """
+    ordered_agents: list[str] = []
+    for candidate in effective_fallback_candidates(config):
+        if candidate.agent not in ordered_agents:
+            ordered_agents.append(candidate.agent)
+    return tuple(ordered_agents)
+
+
 def _build_skill_distillation_evidence(
     request: _SkillDistillationRequest,
     short_term_store: IShortTermMemoryStore,
@@ -174,7 +189,7 @@ def _build_skill_distillation_evidence(
         attempt_history=attempt_history,
         change_evidence=patch_result.stdout,
         verification_evidence=verification_evidence,
-        agent_fallback_order=request.config.runner.agent_fallback_order,
+        agent_fallback_order=_effective_fallback_agent_names(request.config),
         final_solution=(short_term_context.final_solution if short_term_context else ""),
         previous_draft=previous_draft.body if previous_draft is not None else "",
     )

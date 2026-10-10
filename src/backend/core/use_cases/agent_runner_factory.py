@@ -26,6 +26,7 @@ _engines_factory_module = importlib.import_module("backend.engines.agent_runner.
 logger = _engines_factory_module.logger
 build_app_config = _engines_factory_module.build_app_config
 build_app_config_from_settings = _engines_factory_module.build_app_config_from_settings
+collect_repository_own_presets = _engines_factory_module.collect_repository_own_presets
 create_console_store = _engines_factory_module.create_console_store
 create_content_generator = _engines_factory_module.create_content_generator
 create_event_sink = _engines_factory_module.create_event_sink
@@ -58,9 +59,11 @@ resolve_repository_targets_with_diagnostics = (
 )
 write_deliberation_outputs = _engines_factory_module.write_deliberation_outputs
 
+
 __all__ = [
     "build_app_config",
     "build_app_config_from_settings",
+    "collect_repository_own_presets",
     "create_console_store",
     "create_content_generator",
     "create_event_sink",

@@ -18,7 +18,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 | 卡住了 | 怎么不动了 / 卡住了 / 失败了 / agent/blocked / 恢复 | `${CODEBUDDY_SKILL_DIR}/references/triage.md` |
 | 后台跑 | 挂后台 / 让它自己跑 / daemon / 起守护 / 停掉它 | `${CODEBUDDY_SKILL_DIR}/references/daemon.md` |
 | CI 交付 | CI 状态 / checks 怎么样 / 自动修复 / 修一下 CI / backlog ci | `${CODEBUDDY_SKILL_DIR}/references/ci.md` |
-| 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 有哪些模型预设 / agent doctor / 这个命令收什么旗标 | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |
+| 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 有哪些模型预设 / agent doctor / 生命周期矩阵 / 九阶段生效模型 / kc agent lifecycle / kc agent preset / 回退候选 / kc agent fallback / 这个命令收什么旗标 | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |
 
 Use the repository guide as the authoritative command reference. Start with `kc --help` or the relevant subcommand `--help` when command details differ by KedaCode version. Do not claim `--dry-run` executes work.
 

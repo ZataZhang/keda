@@ -100,6 +100,7 @@ from backend.core.use_cases.run_agent_once import (
     choose_agent,
     create_or_reuse_worktree,
     get_head_sha,
+    resolve_implementation_model_selection,
     resolve_repair_agent,
 )
 
@@ -191,6 +192,7 @@ def _process_blocked_resolution(
     repo_path: Path,
     config: AppConfig,
     agent: str,
+    fallback_preset: str | None = None,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None = None,
@@ -209,6 +211,9 @@ def _process_blocked_resolution(
         repo_path: 仓库根目录
         config: 应用配置
         agent: Agent 覆盖
+        fallback_preset: 回退链条轮到本候选时携带的预设名（由
+            :func:`run_issue_with_agent_fallback` 注入）；``None`` 表示沿用
+            implementation 阶段绑定。
         github_client: GitHub 客户端
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
@@ -224,15 +229,13 @@ def _process_blocked_resolution(
 
     selected_agent = choose_agent(issue, config, agent)
     # implementation 阶段绑定的模型选择：换人（CLI --agent 显式指定 / 回退链
-    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入。
-    from backend.core.use_cases.lifecycle_agent_resolution import (
-        resolve_lifecycle_model_selection,
-    )
-    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
-
-    implementation_model_selection = drop_model_selection_for_agent(
+    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入；回退链条轮到
+    # 携带 preset 的候选时改按该候选预设解析（单一入口见 core helper）。
+    implementation_model_selection = resolve_implementation_model_selection(
         selected_agent,
-        resolve_lifecycle_model_selection("implementation", config, issue=issue),
+        config,
+        issue=issue,
+        fallback_preset=fallback_preset,
     )
 
     # 定位 worktree 并确认分支
@@ -606,6 +609,7 @@ def _process_ready_issue(
     repo_path: Path,
     config: AppConfig,
     agent: str,
+    fallback_preset: str | None = None,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     on_claimed: Callable[[], None] | None = None,
@@ -646,15 +650,13 @@ def _process_ready_issue(
 
     selected_agent = choose_agent(issue, config, agent)
     # implementation 阶段绑定的模型选择：换人（CLI --agent 显式指定 / 回退链
-    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入。
-    from backend.core.use_cases.lifecycle_agent_resolution import (
-        resolve_lifecycle_model_selection,
-    )
-    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
-
-    implementation_model_selection = drop_model_selection_for_agent(
+    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入；回退链条轮到
+    # 携带 preset 的候选时改按该候选预设解析（单一入口见 core helper）。
+    implementation_model_selection = resolve_implementation_model_selection(
         selected_agent,
-        resolve_lifecycle_model_selection("implementation", config, issue=issue),
+        config,
+        issue=issue,
+        fallback_preset=fallback_preset,
     )
 
     # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读后确认最早认领者才切 running。

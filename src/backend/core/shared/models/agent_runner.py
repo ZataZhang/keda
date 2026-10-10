@@ -480,6 +480,20 @@ class WorktreeConfig:
 
 
 @dataclass(frozen=True)
+class AgentFallbackCandidate:
+    """``[[agent_runner.runner.agent_fallback_candidates]]`` 的一条有序回退候选。
+
+    Attributes:
+        agent: 候选执行器名。
+        preset: 该候选命中执行时应用的 ``[agent_runner.presets.<name>]`` 预设名；
+            ``None`` 表示不注入模型参数（与旧纯 agent 名单语义等价）。
+    """
+
+    agent: str
+    preset: str | None = None
+
+
+@dataclass(frozen=True)
 class RunnerConfig:
     """Local runner behavior.
 
@@ -488,6 +502,12 @@ class RunnerConfig:
             primary agent. Empty disables cross-agent fallback (single-agent
             behavior). The primary agent is prepended and de-duplicated by
             ``resolve_agent_fallback_order``.
+        agent_fallback_candidates: Ordered ``(agent, optional preset)`` fallback
+            candidates. When non-empty this array takes over the runtime
+            fallback chain wholesale (``agent_fallback_order`` then only serves
+            as the legacy read path for no-preset candidates); the same agent
+            may repeat with different presets. Empty keeps the legacy
+            agent-name-only semantics byte-for-byte.
         max_agent_switches: Maximum number of agent switches before the Issue
             is marked failed.
         transient_retry_attempts: In-place retries granted to transient
@@ -522,6 +542,7 @@ class RunnerConfig:
     max_recovery_attempts: int = 5
     recovery_retry_delay_seconds: int = 30
     agent_fallback_order: tuple[str, ...] = ("claude", "kimi", "codex")
+    agent_fallback_candidates: tuple[AgentFallbackCandidate, ...] = ()
     max_agent_switches: int = 2
     transient_retry_attempts: int = 2
     transient_retry_delay_seconds: int = 10
@@ -538,6 +559,22 @@ class RunnerConfig:
         "uv run mkdocs build",
     )
     pre_commit_verification_command: str | None = None
+
+    def __post_init__(self) -> None:
+        """把 ``agent_fallback_candidates`` 的 dict 形态条目收进强类型元组。
+
+        ``factory_config_merge._merge_optional_model`` 用 ``dataclasses.asdict``
+        展平基础配置、并把仓库级 pydantic 覆盖 ``model_dump`` 出的 dict 原样传入
+        构造函数，因此这里统一回填为 :class:`AgentFallbackCandidate`，保证运行期
+        只见到一种条目形态。
+        """
+        normalized_candidates: list[AgentFallbackCandidate] = []
+        for candidate_entry in tuple(self.agent_fallback_candidates or ()):
+            if isinstance(candidate_entry, AgentFallbackCandidate):
+                normalized_candidates.append(candidate_entry)
+            else:
+                normalized_candidates.append(AgentFallbackCandidate(**dict(candidate_entry)))
+        object.__setattr__(self, "agent_fallback_candidates", tuple(normalized_candidates))
 
     def resolve_closeout_timeout_seconds(self, kind: DeliveryGateFailureKind) -> int:
         """返回该类收尾实际生效的 wall-clock 超时秒数。

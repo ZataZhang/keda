@@ -119,5 +119,98 @@ supervisor / planner / content_generation / deliberate）。
 - `kc agent doctor <agent> --preset <名>`：预览将被执行的完整 argv。
 - `kc agent doctor --lifecycle <键>`：按阶段视角打印"解析出的 agent + 绑定的模型参数"；
   fix / closeout 在无实现者上下文时如实返回 `follows_implementation`。
-- console 生命周期矩阵视图每行新增 `preset` / `model` / `reasoning_effort` 三个只读字段。
 - attempt 账本 `attempt_records` 新增 `preset` / `model` 可空列（schema v6，自动迁移）。
+
+## 7. 统一设置页与持久化 CLI（生命周期 Agent / 模型 / 推理深度）
+
+上述预设与绑定过去只能在多份 TOML 与逐阶段 doctor 之间手工拼；现在有一个跨全局 / 仓库
+范围的**统一设置页**和一组**持久化 CLI**，读写同一份 `presets` / `lifecycle_presets` /
+回退候选事实源（不新建第二套配置、不入库）。
+
+### 7.1 Settings 统一设置页
+
+路由 `/app/settings/lifecycle/`（入口：Settings「Agent 管理」区下方卡片，或 Backlog 仓库行
+齿轮带仓库直接进入并预选）。一页承载三块，页首有锚点导航：
+
+- **生命周期矩阵**：九阶段各自的最终生效 Agent / 模型 / 推理深度 / 绑定预设与**逐字段来源**
+  （预设 / 继承 / Agent 默认 / 未支持，或来自哪一层）。缺省与不支持如实标示，不猜外部 CLI
+  默认。阶段通过**绑定命名预设**设定显式值；`fix` / `closeout` 未绑定时继承实现阶段。
+- **模型预设**：双列卡片 upsert `(agent, model, reasoning_effort)` 三元组，编辑前展示该共享
+  预设当前绑定的所有阶段；删除预设连带解绑其阶段绑定。仍被**回退候选**引用的预设不能删除
+  （保存前 422 并点名候选，需先在回退区清除候选绑定）。删除只移除当前范围层的预设表——
+  仓库范围删除被全局同名预设托底的覆盖时，阶段 / 候选引用自动回落到全局预设、不算悬空；
+  全局删除被仓库继承引用而仓库无自有副本时才是真正的悬空，会被拒绝。
+- **执行器回退候选**：有序候选链，每个候选可选绑定**同 agent** 的预设（见 §7.3）；页面这一区
+  **固定写入全局 `config.toml`**，不随生命周期范围切换改变落点。但它显示的是所选范围内的
+  **有效**链——若该仓库自己声明了候选数组（§7.2 的 `--scope repository` 写法），仓库数组对该
+  仓库整体接管机器级链，此时在仓库范围保存只会改到机器级文件、对该仓库不生效；要动这个仓库
+  的链，用 CLI 往该仓库写，或删掉仓库里那一段让它回到继承。
+
+范围选择器在「全局」（`config.toml`）与「仓库」（该仓库 `.kedacode.toml`）间切换；页面展示
+的是所选**基线**，PRD 头部覆盖与单次 `--preset/--model/--reasoning-effort` 仍可在其上进一步
+覆写（页面会提示，不把基线冒充成某个 PRD 的最终值）。保存只提交改动过的键，写前完整校验、
+写后从磁盘重载返回新视图。
+
+### 7.2 持久化 CLI
+
+与页面调用同一 core 用例 / TOML editor。**读取可自动推断 effective 范围；所有写入必须显式
+`--scope`，仓库写入必须显式给 `--repo-id`（或 `--repo`）**，避免脚本在 cwd 不明时写错文件：
+
+```text
+kc agent lifecycle list [--scope effective|global|repository] [--repo-id <id>] [--output json]
+kc agent lifecycle set   <stage> --preset <name> --scope global|repository [--repo-id <id>]
+kc agent lifecycle unset <stage>                --scope global|repository [--repo-id <id>]
+kc agent preset set      <name> --agent <agent> [--model <id>] [--reasoning-effort <档>]
+                          --scope global|repository [--repo-id <id>]
+kc agent fallback list   [--scope effective|global|repository] [--repo-id <id>] [--output json]
+kc agent fallback candidate add    --agent <a> [--preset <p>] [--position <n>] --scope … [--repo-id <id>]
+kc agent fallback candidate preset set   <position> --preset <p> --scope … [--repo-id <id>]
+kc agent fallback candidate preset unset <position>            --scope … [--repo-id <id>]
+kc agent fallback candidate remove <position> --scope … [--repo-id <id>]
+kc agent fallback candidate move   <position> --to <n>  --scope … [--repo-id <id>]
+```
+
+- `lifecycle list` / `fallback list` 输出固定九行 / 有序候选，`--output json`（或 `--json`）字段
+  名稳定、顺序确定，含 scope / repo id 与来源；写命令成功后重新打印生效视图（写后 fresh 读）。
+- `preset set` 是 **upsert**：省略 `--model` / `--reasoning-effort` 表示该预设不显式设置该字段。
+  要设三元组先 `preset set` 再 `lifecycle set` 绑定；`lifecycle unset` 只删当前层该阶段的绑定
+  （仓库层清除后回落全局，全局清除后回落既有直接 Agent / legacy / 内置默认）。
+- 未知 stage、未注册 agent、未知预设、预设 agent 与候选执行器不一致、给缺 `reasoning_effort_args`
+  模板的 agent 设非空 effort——都在**写文件或调用 agent 前**返回可诊断的非零退出，目标文件字节不变。
+- `--scope global` 与 `--repo-id` / `--repo` **互斥**：全局层写的是机器级 `config.toml`，仓库选择器
+  在这里没有任何作用，同时给出按用法错误退出（2），不静默落到机器级配置。预设名写入前去掉首尾
+  空白，落盘键与可绑定名字始终是同一个。
+- 候选命令的 `--scope repository` 写的是**该仓库配置文件**里的
+  `[[agent_runner.runner.agent_fallback_candidates]]`（不是机器级文件）。数组表按**整体接管**
+  合并：写入前会把该仓库当前的**生效**候选链（机器级数组，或旧 `agent_fallback_order` 的折叠
+  结果）连同新候选一起物化进仓库文件，并写下该仓库的 `max_agent_switches`；此后该仓库不再跟随
+  机器级候选链的改动。所以只想调整机器级链请用 `--scope global`；要让某仓库回到继承状态，删掉
+  仓库文件里那一段候选表。页面「执行器回退」区不写仓库文件（见 §7.1）。
+- 既有 `kc agent presets` 与 `kc agent doctor` 保持兼容；单次运行旗标不调用这些持久化命令。
+
+### 7.3 执行器回退候选预设（FR-9 / FR-10）
+
+回退候选链有两种写法，运行时以有序数组表为事实源：
+
+```toml
+[[agent_runner.runner.agent_fallback_candidates]]
+agent  = "claude"
+preset = "claude-max"     # 可选；该候选被轮到时用这个预设的模型 / 推理档
+
+[[agent_runner.runner.agent_fallback_candidates]]
+agent  = "claude"          # 同一 agent 可用不同预设再来一步
+preset = "claude-high"
+
+[agent_runner.runner]
+max_agent_switches = 3     # 预算按候选步数计，同 agent 另一预设也各占一步
+```
+
+- 数组非空时整体接管候选链；为空时读旧 `agent_fallback_order` 字符串列表，折叠成**无预设**
+  候选，行为逐字节不变。
+- 去重单位是 `(agent, preset)`：完全相同的组合被拒绝，同一 agent 的另一预设是独立候选。
+- 候选 preset 的 agent 必须与候选 agent 一致；绑定的预设若带模型 / 推理值，须有对应参数模板
+  （复用生命周期预设校验）。
+- 预设**只在链条轮到该候选时**应用；一次性 `--agent` 换人不消费此映射；主 agent 的模型绑定在
+  换人时丢弃（各 CLI 命名空间不同），与"候选自带 preset"是两条独立路径。
+- 数组表**也能按仓库声明**（该仓库 `.kedacode.toml`）：仓库数组非空时对该仓库整体接管机器级
+  链，不与机器级逐条合并；为空时继续继承。写入方式见 §7.2 的 `--scope repository`。

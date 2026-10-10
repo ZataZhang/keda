@@ -14,7 +14,16 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, RunnerConfig
+from backend.core.shared.models.agent_runner import (
+    AgentFallbackCandidate,
+    AppConfig,
+    IssueSummary,
+    RunnerConfig,
+)
+from backend.core.use_cases.agent_candidate_fallback import (
+    build_fallback_candidate_specs,
+    effective_fallback_candidates,
+)
 from backend.core.use_cases.agent_invocation import UnknownAgentError
 from backend.core.use_cases.lifecycle_agent_resolution import (
     parse_prd_lifecycle_overrides,
@@ -486,3 +495,115 @@ def test_upsert_prd_overrides_roundtrip_and_preserves_body() -> None:
     assert parse_prd_lifecycle_overrides(removed) == {}
     assert "lifecycle_agents" not in removed
     assert "## 1. Intro" in removed
+
+
+# ---------------------------------------------------------------------------
+# 执行器回退候选链（agent_fallback_candidates + 可选 preset，PRD FR-9 / FR-10）
+# ---------------------------------------------------------------------------
+
+
+def _config_with_runner(**runner_kwargs: object) -> AppConfig:
+    """用给定 runner 字段覆盖默认 AppConfig（其余字段走内置默认）。"""
+    return AppConfig(runner=RunnerConfig(**runner_kwargs))
+
+
+def test_effective_fallback_candidates_prefers_array() -> None:
+    """候选数组非空时整体接管，原样有序返回 ``(agent, preset)``。"""
+    candidates = (
+        AgentFallbackCandidate(agent="claude", preset="max"),
+        AgentFallbackCandidate(agent="claude", preset="high"),
+    )
+    config = _config_with_runner(
+        agent_fallback_candidates=candidates,
+        agent_fallback_order=("kimi", "codex"),
+    )
+    assert effective_fallback_candidates(config) == candidates
+
+
+def test_effective_fallback_candidates_falls_back_to_order_when_array_empty() -> None:
+    """数组为空时读旧名单折叠成无预设候选：按 agent 名去重、跳过空白。"""
+    config = _config_with_runner(agent_fallback_order=("claude", "kimi", "claude", "  "))
+    folded = effective_fallback_candidates(config)
+    assert folded == (
+        AgentFallbackCandidate(agent="claude", preset=None),
+        AgentFallbackCandidate(agent="kimi", preset=None),
+    )
+
+
+def test_build_fallback_specs_budget_counts_candidate_steps() -> None:
+    """预算按候选步数计：同一 agent 的两个预设各消耗一步，超出后截断后续候选。"""
+    config = _config_with_runner(
+        agent_fallback_candidates=(
+            AgentFallbackCandidate(agent="claude", preset="max"),
+            AgentFallbackCandidate(agent="claude", preset="high"),
+            AgentFallbackCandidate(agent="kimi"),
+        ),
+        max_agent_switches=2,
+    )
+    specs = build_fallback_candidate_specs(config, "opencode")
+    # 首选无预设在首位，其后两个候选步，kimi 被预算截断。
+    assert specs == (
+        AgentFallbackCandidate(agent="opencode", preset=None),
+        AgentFallbackCandidate(agent="claude", preset="max"),
+        AgentFallbackCandidate(agent="claude", preset="high"),
+    )
+
+
+def test_build_fallback_specs_dedups_exact_pair_keeps_distinct_presets() -> None:
+    """完全相同的 ``(agent, preset)`` 组合去重，不同预设的同一 agent 各留一份。"""
+    config = _config_with_runner(
+        agent_fallback_candidates=(
+            AgentFallbackCandidate(agent="claude", preset="max"),
+            AgentFallbackCandidate(agent="claude", preset="max"),
+            AgentFallbackCandidate(agent="claude", preset="high"),
+        ),
+        max_agent_switches=3,
+    )
+    specs = build_fallback_candidate_specs(config, "kimi")
+    assert specs == (
+        AgentFallbackCandidate(agent="kimi", preset=None),
+        AgentFallbackCandidate(agent="claude", preset="max"),
+        AgentFallbackCandidate(agent="claude", preset="high"),
+    )
+
+
+def test_build_fallback_specs_excludes_builder_by_agent_name() -> None:
+    """独立性：回退尾部按 agent 名排除本次 builder，同名不同预设一并排除。"""
+    config = _config_with_runner(
+        agent_fallback_candidates=(
+            AgentFallbackCandidate(agent="claude", preset="max"),
+            AgentFallbackCandidate(agent="codex"),
+        ),
+        max_agent_switches=2,
+    )
+    specs = build_fallback_candidate_specs(config, "opencode", exclude_agent="claude")
+    assert specs == (
+        AgentFallbackCandidate(agent="opencode", preset=None),
+        AgentFallbackCandidate(agent="codex", preset=None),
+    )
+
+
+def test_verifier_auto_prefers_fallback_candidates_array_over_stale_legacy_order(
+    config_toml: Path,
+) -> None:
+    """verifier auto 从有效候选链挑第一个 ≠ 实现者：候选数组写后不再读 stale 旧名单。
+
+    旧名单仍是默认的 [claude, kimi, codex]；候选数组 [codex/x, claude/y] 非空时
+    整体接管候选链，第一个 ≠ 实现者(claude) 的应是 codex 而不是旧名单里的 kimi。
+    """
+    config = _global_config_from_toml(
+        config_toml,
+        """
+[agent_runner]
+[agent_runner.runner]
+agent_fallback_order = ["claude", "kimi", "codex"]
+[[agent_runner.runner.agent_fallback_candidates]]
+agent = "codex"
+preset = "x"
+[[agent_runner.runner.agent_fallback_candidates]]
+agent = "claude"
+preset = "y"
+""",
+    )
+    assert config.runner.agent_fallback_order == ("claude", "kimi", "codex")
+    assert resolve_lifecycle_agent("verifier", config, selected_agent="claude") == "codex"

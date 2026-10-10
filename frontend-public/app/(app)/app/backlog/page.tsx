@@ -4,6 +4,7 @@
 // Backlog 页面：左侧受管理仓库栏 + 右侧 PRD 画布（依赖图/时间轴/列表）。
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,7 +26,6 @@ import { BacklogCiRepairControl } from "@/components/backlog/backlog-ci-repair-c
 import { BacklogGraph } from "@/components/backlog/backlog-graph";
 import { BacklogList } from "@/components/backlog/backlog-list";
 import { BacklogTimeline } from "@/components/backlog/backlog-timeline";
-import { RepositoryAgentMatrixSheet } from "@/components/agent-runner/repository-agent-matrix-sheet";
 import { cn, formatLocalClockTime } from "@/lib/utils";
 import { useRepositorySelection } from "@/lib/console-repository-selection";
 import {
@@ -136,6 +136,7 @@ export default function BacklogPage() {
     selectRepoId,
     loading: reposLoading,
   } = useRepositorySelection();
+  const router = useRouter();
   const [settings, setSettings] = useState<BacklogSettings | null>(null);
   const [view, setView] = useState<BacklogView>("graph");
   const [startingPath, setStartingPath] = useState<string | null>(null);
@@ -150,8 +151,6 @@ export default function BacklogPage() {
   const [ciRepair, setCiRepair] = useState<BacklogCiRepairGlobalState | null>(null);
   const [ciRepairLoading, setCiRepairLoading] = useState(true);
   const [ciRepairSaving, setCiRepairSaving] = useState(false);
-  // 打开仓库级生命周期 Agent 矩阵抽屉的仓库 id（null 表示关闭）。
-  const [matrixRepoId, setMatrixRepoId] = useState<string | null>(null);
   // 「受管理仓库」栏收起偏好：默认展开，收起后记住选择（跨刷新）。
   const [repoPanelCollapsed, setRepoPanelCollapsed] = usePersistedBoolean(
     CONSOLE_REPO_PANEL_COLLAPSED_KEY,
@@ -483,8 +482,6 @@ export default function BacklogPage() {
     ? prds
     : prds.filter((prd) => prd.status === "pending");
 
-  const matrixRepo = repositories.find((repo) => repo.repo_id === matrixRepoId);
-
   return (
     <>
     <div className="flex h-[calc(100svh-4rem)] gap-4">
@@ -543,9 +540,13 @@ export default function BacklogPage() {
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0"
-                    onClick={() => setMatrixRepoId(repo.repo_id)}
+                    onClick={() =>
+                      router.push(
+                        `/app/settings/lifecycle/?scope=repository&repo_id=${encodeURIComponent(repo.repo_id)}`,
+                      )
+                    }
                     data-testid={`repo-agent-gear-${repo.repo_id}`}
-                    aria-label={`${repo.display_name ?? repo.repo_id} 生命周期 Agent 设置`}
+                    aria-label={`${repo.display_name ?? repo.repo_id} 生命周期与模型设置`}
                   >
                     <Settings className="size-4" />
                   </Button>
@@ -734,19 +735,6 @@ export default function BacklogPage() {
         </div>
       </section>
     </div>
-
-      {matrixRepoId ? (
-        <RepositoryAgentMatrixSheet
-          repoId={matrixRepoId}
-          repoLabel={matrixRepo?.display_name ?? matrixRepoId}
-          open
-          onOpenChange={(nextOpen) => {
-            if (!nextOpen) {
-              setMatrixRepoId(null);
-            }
-          }}
-        />
-      ) : null}
 
       {startOptionsPrd ? (
         <PrdStartOptionsSheet

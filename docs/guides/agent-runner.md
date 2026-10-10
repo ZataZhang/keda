@@ -92,7 +92,7 @@ kc daemon status --json
 
 `suggestion` 一定是一条可直接跑的下一步命令；调用方只该读 `$?` 与这个 envelope，不要 parse 英文句子。
 
-当前暴露机器格式的命令：`run`、`logs`、`tokens`、`schema`、`issue create`、`issue list`、`worktree path`、`registry list`、`daemon status`、`loop list`、`agent list`、`agent presets`、`agent doctor`（以 `kc schema --json` 的实际导出为准，新增命令无需改本文）。
+当前暴露机器格式的命令：`run`、`logs`、`tokens`、`schema`、`issue create`、`issue list`、`worktree path`、`registry list`、`daemon status`、`loop list`、`agent list`、`agent presets`、`agent doctor`、`agent lifecycle list`、`agent fallback list`（以 `kc schema --json` 的实际导出为准，新增命令无需改本文）。生命周期持久化写命令（`agent lifecycle set/unset`、`agent preset set`、`agent fallback candidate …`）成功后以 `--json` 回显新视图。
 
 **例外**：`kc ask` 与 `kc deliberate` 的 `--output` 是**输出目录**（文本型参数），不是格式；那里 `--output json` 表示名为 `json` 的目录，两者也都不接受 `--json`。
 
@@ -444,7 +444,9 @@ uv run --project /path/to/keda kc init
 
 面板（`kc console`）托管或触发的 runner 子进程，cwd 就是目标仓库（见 `resolve_console_spawn_cwd`）；因此面板会把自己当前生效的机器级 `config.toml` 以 `KEDACODE_CONFIG` 注入子进程，保证"界面上显示的配置"与"实际执行用的配置"是同一份。手动在目标仓库里直接执行 `kc run` / `kc daemon` 且未设 `KEDACODE_CONFIG` 时，机器级配置取 `~/.kedacode/config.toml`——想让某个仓库的每个阶段都用指定 agent，写该仓库 `.kedacode.toml` 的 `[agent_runner.lifecycle_agents]` 是最稳的一层（仓库层覆盖机器层）。
 
-在"选 agent"之上，还可以给阶段绑定**命名模型预设**（`[agent_runner.presets.<name>]` + `[agent_runner.lifecycle_presets]`）：绑定后该阶段整体由预设决定 (agent, 模型, 推理档)，遮蔽矩阵同键声明；换人（fallback / 显式 `--agent`）时模型绑定自动丢弃并在日志与 `attempt_records`（`preset` / `model` 列）中标注。完整语义、优先级与命令行一次性旗标见 [Agent 模型预设](model-presets.md)。
+在"选 agent"之上，还可以给阶段绑定**命名模型预设**（`[agent_runner.presets.<name>]` + `[agent_runner.lifecycle_presets]`）：绑定后该阶段整体由预设决定 (agent, 模型, 推理档)，遮蔽矩阵同键声明；换人（fallback / 显式 `--agent`）时**主 agent 的模型绑定自动丢弃**并在日志与 `attempt_records`（`preset` / `model` 列）中标注；被选中的回退候选若自带 `preset`（`[[agent_runner.runner.agent_fallback_candidates]]`）则应用该候选自己的模型 / 推理档。完整语义、优先级与命令行一次性旗标见 [Agent 模型预设](model-presets.md)。
+
+生命周期矩阵、模型预设与执行器回退候选合并到管理终端的**统一设置页** `/app/settings/lifecycle/`：顶部范围选择器切换「全局」（写 `config.toml`）与「仓库」（写该仓库 `.kedacode.toml`），九阶段一行显示最终生效 Agent / 模型 / 推理深度与**逐字段来源**；Backlog 仓库行齿轮进入同一页并预选该仓库，不再另设编辑器。执行器回退候选是**机器级**配置，固定写全局 `config.toml`，不随范围切换改变落点。页面展示的是所选**基线**：PRD 头部覆盖与单次 `--preset/--model/--reasoning-effort` 仍可在其上覆写，页面会提示而不把基线冒充成某个 PRD 的最终值。对应的命令行持久化入口（`kc agent lifecycle|preset|fallback`，写入必须显式 `--scope`，仓库写入必须给 `--repo-id`）见 [Agent 模型预设](model-presets.md) 第 7 节。
 
 ### `.gitignore` 托管块与 prd skill 契约
 

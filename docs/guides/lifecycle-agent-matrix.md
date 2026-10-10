@@ -44,16 +44,22 @@ pi / codebuddy / qoder / opencode 或自定义注册的 agent）。**生命周�
 上一张表回答"这个键能配什么"，这一张回答"配了之后什么时候被读"。九个键分布在
 三个互相独立的 CLI 入口，外加一个横跨全程的内容生成阶段。
 
-console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、PRD 覆盖抽屉）
-**按同一分组呈现**：组标题与每行触发时机来自只读视图下发，分组事实的唯一代码
-定义是 `src/backend/core/shared/models/lifecycle_agent.py` 的
+console 的生命周期入口（统一设置页
+[生命周期、模型与推理深度设置](#console) 的全局 / 仓库范围、
+以及 PRD 覆盖抽屉）**按同一分组呈现**：组标题与每行触发时机来自只读视图下发，分组事实的
+唯一代码定义是 `src/backend/core/shared/models/lifecycle_agent.py` 的
 `LIFECYCLE_AGENT_ENTRY_GROUPS`（前端不持有第二份映射），与本表的三组一一对应：
 
-> **两份手写副本，需人工同步。** `docs/prototypes/lifecycle-agent-matrix.html` 与
-> `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 各手写了一份
-> `ENTRY_GROUPS`（前者是自包含原型、不能 import 后端常量；后者是独立 TS 包，
-> 只能自己声明）。两份都不含 `LIFECYCLE_AGENT_ENTRY*` / `LIFECYCLE_AGENT_KEYS`
-> 字面量，因此 `rg -n 'LIFECYCLE_AGENT_ENTRY|LIFECYCLE_AGENT_KEYS' src tests frontend-public`
+> **两份手写副本，需人工同步。** 九阶段的触发入口分组在代码里只有一份定义
+> （`src/backend/core/shared/models/lifecycle_agent.py` 的
+> `LIFECYCLE_AGENT_ENTRY_GROUPS`），只读视图下发时按它分组。PRD 覆盖抽屉
+> （`frontend-public/components/agent-runner/prd-agent-override-sheet.tsx`）直接消费
+> 视图下发，不持有映射。需要人工核对的自包含副本有两处：交互原型
+> `docs/prototypes/lifecycle-agent-matrix.html`（不能 import 后端常量，内联一份）与
+> 对应的 e2e 用例 `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts`
+> 的 PRD 覆盖断言（独立 TS 包，只能自己声明要断言的组 id）。两者都不含
+> `LIFECYCLE_AGENT_ENTRY*` / `LIFECYCLE_AGENT_KEYS` 字面量，因此
+> `rg -n 'LIFECYCLE_AGENT_ENTRY|LIFECYCLE_AGENT_KEYS' src tests frontend-public`
 > 这道"分组只有一份定义"的门禁扫不到它们。改动 core 常量（组顺序、组 id、组名、
 > 组内含哪些键及组内顺序、组说明）时，必须同轮手工核对这两份副本。
 
@@ -178,35 +184,54 @@ PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`impl
 
 | 层 | 写入文件 | 入口 |
 |---|---|---|
-| 全局（机器级） | `config.toml` | **Settings → 「Agent 管理」→ Tab ②「生命周期 Agent 设置」** |
-| 仓库级 | 该仓库 `.kedacode.toml` | **Backlog → 受管理仓库列表每行右侧的齿轮** |
+| 全局（机器级） | `config.toml` | **Settings → 「生命周期、模型与推理深度统一设置」→ 范围选「全局」** |
+| 仓库级 | 该仓库 `.kedacode.toml` | **同一设置页 → 范围选「仓库」并选仓库**；或 **Backlog 仓库行齿轮**（直接带仓库进入该页） |
 | PRD 级 | 该 PRD 文件头部 | **PRD 原文页工具栏「Agent 覆盖」** |
 
-Settings 的「Agent 管理」区块用粘性 Tab 分两页：**Tab ①「Agent 标签设置」**
-（默认页）编辑每个 agent 的 GitHub 路由标签名 / 颜色 / 描述——这是 `auto`
-解析 Issue 标签的依据；**Tab ②「生命周期 Agent 设置」**放九行矩阵与
-**agent 回退顺序**。
+生命周期矩阵、模型预设与「执行器回退候选」合并到**一个** Settings 子页
+`/app/settings/lifecycle/`（原先分散在 Settings「生命周期 Agent 设置」Tab 与 Backlog
+仓库齿轮抽屉里的两张矩阵、以及独立的「回退顺序卡片」都已被它取代）。页面顶部用**范围
+选择器**在「全局」与「仓库」间切换，仓库范围附一个仓库下拉；页首另有「生命周期矩阵 /
+模型预设 / 执行器回退」三个区块锚点。Settings 主页面只保留**「Agent 标签设置」**
+（编辑每个 agent 的 GitHub 路由标签名 / 颜色 / 描述，是 `auto` 解析 Issue 标签的依据）
+与指向统一设置页的入口卡片。Backlog 的仓库齿轮不再自带编辑器，只负责进入同一页面并预选
+该仓库。
 
-矩阵行的交互口径（三层一致）：九行按上表的三组**触发入口分组**呈现，组标题
-旁有一行组说明，每行生命周期名下再带一行触发时机；下拉里**只有真实取值**
-（已注册 agent / 该阶段的
-`auto` / fix-closeout 的 `executor`），**当前生效值直接选中**；「当前值来源」列
-说明它来自哪一层，本层已显式设置时给出恢复入口（全局层「不写本键（跟随既有
-配置）」/ 仓库层「跟随全局（删除本键）」）；**只有改动过的行会写进本层文件**。
-分组只是呈现：下拉取值、来源标注、恢复动作与写回载荷与分组前完全一致。
-写入一律保留式——只动点名的那几个键，文件其余内容与格式（含注释）不变。
+矩阵区此刻是**九阶段有效配置表**：每行同时呈递绑定预设、最终生效 Agent、模型 ID、推理深度
+及**逐字段来源**（预设 / 继承 / Agent 默认 / 未支持，或来自哪一层），来自聚合只读视图，前端
+不硬编码映射。阶段本身通过**绑定命名预设**设定显式值；未绑定时如实展示 Agent 默认或
+`fix` / `closeout` 的继承，不替用户猜外部 CLI 默认。矩阵行仍只有**真实取值**（已注册
+agent / 该阶段的 `auto` / fix-closeout 的 `executor`），**当前生效值直接选中**，本层已显式
+设置时给出恢复入口；**只有改动过的键会写进目标文件**，写入一律保留式（只动点名键，文件
+其余内容与格式含注释不变）。
 
-> 只有生命周期矩阵是三层可写的。**「Agent 标签设置」与「agent 回退顺序」是机器级
-> 配置**（PRD FR-10 / FR-12：两者都在 Settings 页），对应 API 无论是否带 `repo_id`
-> 都只写全局 `config.toml`；`repo_id` 仅用于选取校验视角（认可该仓库级注册的 agent）。
+> **只有生命周期矩阵与预设是三层可写的。** PRD 覆盖抽屉与矩阵的写入按各自层落文件；
+> **「Agent 标签设置」与「执行器回退候选」是机器级配置**——它们的 API 无论是否带
+> `repo_id` 都只写全局 `config.toml`，`repo_id` 仅用于选取校验视角（认可该仓库级注册的
+> agent）。因此统一页的「执行器回退」区注明它固定写入全局 `config.toml`，不随生命周期范围
+> 切换而改变落点。命令行是例外：`kc agent fallback candidate …` 的落点跟着 `--scope` 走，
+> `--scope repository` 把那一段候选数组写进**该仓库**的配置文件并对该仓库整体接管机器级链
+> （含物化继承来的候选与该仓库的 `max_agent_switches`），口径见
+> [Agent 模型预设](model-presets.md) §7.2 与 §7.3。
 
 ## 跨 agent 回退顺序（与矩阵是两件事）
 
 矩阵只选**一个**主 agent；"主 agent 跑不起来（CLI 缺失 / 额度限流 / 进程级崩溃 /
-超时）时换下一个"由 `[agent_runner.runner]` 的 `agent_fallback_order`（默认
-`["claude", "kimi", "codex"]`）与 `max_agent_switches`（默认 `2`，即最多试 3 个
-agent）驱动。第一个尝试的 agent 仍由矩阵 / 标签路由 / 阶段预设决定；本机未安装的
-agent 在运行时跳过。Settings 的「生命周期 Agent 设置」页给这一对键一个可排序编辑入口。
+超时）时换下一个"由 `[agent_runner.runner]` 的候选链与 `max_agent_switches`（默认 `2`，
+即最多额外试 2 个候选步）驱动。候选链有两种写法：
+
+- **有序数组表 `[[agent_runner.runner.agent_fallback_candidates]]`**（新格式，运行时事实源）：
+  每项是 `agent` + 可选 `preset`，数组顺序就是候选顺序。**同一 agent 可用不同 preset 重复
+  出现**（如 `claude` 先试 `sonnet-5.5 / max` 再试 `sonnet-5.5 / high`），去重单位是
+  `(agent, preset)` 对——完全相同的组合被拒绝。切换预算 `max_agent_switches` **按候选步数
+  计**，同一 agent 的另一预设也各消耗一步。每个候选**只有轮到它执行时**才应用自身绑定的
+  preset（模型 / 推理档），未绑定时沿用该执行器的默认。
+- **旧字符串列表 `agent_fallback_order`**（默认 `["claude", "kimi", "codex"]`）：候选数组
+  为空时读取，逐 agent 折叠成**无 preset** 候选，行为与过去逐字节一致；数组非空时它仅作
+  兼容顺序视图。
+
+第一个尝试的 agent 仍由矩阵 / 标签路由 / 阶段预设决定；本机未安装的 agent 在运行时跳过。
+统一设置页的「执行器回退候选」区给候选链一个可排序编辑入口（每行可选同 agent 的预设）。
 
 **哪些阶段接入了这条链：**
 
@@ -222,13 +247,17 @@ agent 在运行时跳过。Settings 的「生命周期 Agent 设置」页给这�
 **换人条件（载重语义）：** 只对"agent 跑不起来"的**基础设施失败**换人——CLI 缺失 /
 额度限流 / 进程级崩溃 / 超时包裹的执行失败，以及 supervisor 的进程启动 I/O 失败。
 **语义判定绝不换人**：reviewer 返回 `changes_requested`、supervisor 输出 `mark_failed`
-都是真实决定，不触发换人。换人时**丢弃模型 / 推理档绑定**（各 CLI 模型命名空间不同，
-继续套用会报错或误设模型）。
+都是真实决定，不触发换人。换到备用 agent 时**主 agent 的模型 / 推理档绑定整体丢弃**（各
+CLI 模型命名空间不同，继续套用会报错或误设模型）；被选中的**回退候选若自带 `preset`，则
+应用该候选自己的模型 / 推理档**（见上节候选数组表），未带 preset 的候选沿用执行器默认。
 
-**候选枚举口径：** `build_agent_candidates`
-（`src/backend/core/use_cases/agent_candidate_fallback.py`）统一构建"首选 + 回退链、
-去重、排除 builder、按 `max_agent_switches` 封顶"的序列；各阶段自己的"逐个候选尝试"
-遍历留在各自调用点（失败分类 / 状态清理 / 耗尽语义各不相同，强行统一更易出错）。
+**候选枚举口径：** `src/backend/core/use_cases/agent_candidate_fallback.py` 统一构建候选链：
+`effective_fallback_candidates` 解析"候选数组赢、旧名单兜底"的有序 `(agent, preset)` 序列；
+verifier / review / supervisor 按 **agent 名**遍历（`build_agent_candidates`，同名不同 preset
+折叠为一个名字，独立性排除也按 agent 名）；implementation 执行器阶梯按 **`(agent, preset)`
+spec** 遍历（`build_fallback_candidate_specs`），preset 只在链条真正轮到该候选时应用。
+各阶段自己的"逐个候选尝试"遍历仍留在各自调用点（失败分类 / 状态清理 / 耗尽语义各不相同，
+强行统一更易出错）。
 
 **为什么 review / supervisor 要接、其余不接：**
 

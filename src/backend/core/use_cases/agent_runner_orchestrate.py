@@ -72,7 +72,7 @@ from backend.core.use_cases.run_agent_once import (
     choose_agent,
     create_or_reuse_worktree,
     get_head_sha,
-    resolve_agent_fallback_order,
+    resolve_agent_fallback_candidate_specs,
 )
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
@@ -428,9 +428,14 @@ def run_issue_with_agent_fallback(
     """Process an Issue across the configured agent fallback chain.
 
     Level 2 of the escalation ladder. ``process_for_agent`` is invoked with a
-    keyword ``agent`` argument for each candidate agent resolved by
-    :func:`resolve_agent_fallback_order`, capped at ``max_agent_switches``
-    switches. The chain advances to the next agent when an agent exhausts its
+    keyword ``agent`` argument for each candidate resolved by
+    :func:`resolve_agent_fallback_candidate_specs`, capped at
+    ``max_agent_switches`` switches (counted per candidate, not per distinct
+    agent name — the same agent may legitimately repeat with a different
+    preset). A candidate that carries a preset additionally passes
+    ``fallback_preset=<name>`` so the implementation stage applies that
+    preset's model binding only when the chain actually reaches this
+    candidate. The chain advances to the next agent when an agent exhausts its
     recovery budget (:class:`MaxRetriesExceededError`), hits a provider
     capacity limit (:class:`ProviderCapacityError`), or dies from an
     unclassified execution accident (:class:`AgentExecutionError`, e.g. a
@@ -460,24 +465,30 @@ def run_issue_with_agent_fallback(
         MaxRetriesExceededError: Every candidate agent failed.
         AgentUnavailableError: Every candidate agent's CLI was unavailable.
     """
-    fallback_order = resolve_agent_fallback_order(issue, config, agent)
+    fallback_specs = resolve_agent_fallback_candidate_specs(issue, config, agent)
     max_switches = max(0, config.runner.max_agent_switches)
-    candidate_agents = fallback_order[: max_switches + 1]
+    candidate_specs = fallback_specs[: max_switches + 1]
     combined_attempts: list[AttemptResult] = []
     last_switch_exc: Exception | None = None
-    for candidate_index, candidate_agent in enumerate(candidate_agents):
-        is_last_candidate = candidate_index == len(candidate_agents) - 1
+    for candidate_index, candidate_spec in enumerate(candidate_specs):
+        candidate_agent = candidate_spec.agent
+        is_last_candidate = candidate_index == len(candidate_specs) - 1
         # 换执行器重跑整条流水线属于**新的一次实际进程调用**：声明替代关系后，
         # 观测侧会为下一个候选新建独立 invocation，并用 retry_of 指向上一候选最后
         # 那次失败的调用，而不是把换人折叠成同一条记录。
         if candidate_index > 0:
             link_next_invocation(RETRY_REASON_EXECUTOR_FALLBACK)
+        process_kwargs: dict[str, object] = {
+            "agent": candidate_agent,
+            "on_attempt_recorded": on_attempt_recorded,
+            "on_agent_usage": on_agent_usage,
+        }
+        # 候选 preset 只在链条**真正轮到该候选**时下发；无 preset 候选（含全部
+        # 旧配置路径）不追加关键字，行为与今天逐字节一致。
+        if candidate_spec.preset:
+            process_kwargs["fallback_preset"] = candidate_spec.preset
         try:
-            process_for_agent(
-                agent=candidate_agent,
-                on_attempt_recorded=on_attempt_recorded,
-                on_agent_usage=on_agent_usage,
-            )
+            process_for_agent(**process_kwargs)
             return candidate_agent
         except (UnrecoverableError, ForbiddenBlockedError, ClaimArbitrationLost):
             # Every agent would hit the same wall; do not switch. 首次领取仲裁

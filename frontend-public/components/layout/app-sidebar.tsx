@@ -38,8 +38,9 @@ export function AppSidebar() {
   return (
     <aside
       className={cn(
-        "flex flex-col border-r bg-sidebar transition-[width] duration-200",
-        collapsed ? "w-14" : "w-64"
+        // 窄屏（<md）侧栏改为顶部整宽导航条，把横向空间让给内容；md 起恢复左侧栏。
+        "flex flex-col border-b bg-sidebar transition-[width] duration-200 md:border-r md:border-b-0",
+        collapsed ? "w-full md:w-14" : "w-full md:w-64"
       )}
     >
       <div

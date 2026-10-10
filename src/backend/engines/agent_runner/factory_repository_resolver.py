@@ -1,7 +1,8 @@
 """Agent Runner repository resolution.
 
 Holds :func:`resolve_repository_targets`,
-:func:`resolve_repository_targets_with_diagnostics`, and
+:func:`resolve_repository_targets_with_diagnostics`,
+:func:`collect_repository_own_presets`, and
 :func:`find_repository_match_for_path` plus the supporting helpers used
 by the consolidated multi-repo flows. These functions were originally
 part of :mod:`backend.engines.agent_runner.factory`.
@@ -12,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
+from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     MemoryConfig,
@@ -325,6 +327,59 @@ def resolve_repository_targets_with_diagnostics(
     return contexts, failures
 
 
+def collect_repository_own_presets(
+    settings: AgentRunnerSettings,
+) -> dict[str, dict[str, AgentModelPreset]]:
+    """Return the named presets each enabled repository declares **on its own**.
+
+    Reads ``[agent_runner.presets.<name>]`` from every repository-local config
+    file, independent of the global presets. Deleting a global preset needs this
+    to tell apart a repository that merely inherits the global preset (the
+    binding dangles once the global entry is gone) from a repository that keeps
+    its own copy of the same name (the copy still resolves, so the delete is
+    safe).
+
+    Failure isolation matches
+    :func:`resolve_repository_targets_with_diagnostics`: repositories whose git
+    root cannot be detected or whose local config fails to load are skipped with
+    a warning instead of aborting the scan. Repositories without a local config
+    are absent from the result, so callers can fall back to the merged view.
+
+    Args:
+        settings: Agent runner settings (its ``repositories`` registry is scanned).
+
+    Returns:
+        Mapping of registry ``repo_id`` to that repository's own preset map
+        (preset name -> :class:`AgentModelPreset` triple).
+    """
+    own_presets_by_repo: dict[str, dict[str, AgentModelPreset]] = {}
+    for repo_id, repo_settings in settings.repositories.items():
+        if not repo_settings.enabled:
+            continue
+        try:
+            repo_root_path = detect_git_repository_root(Path(repo_settings.path))
+            local_settings = _load_enabled_repository_local_settings(repo_root_path)
+        except Exception as exc:  # noqa: BLE001 - isolate broken registry entries.
+            logger.warning(
+                "Skipping repository '%s' (%s) when collecting own presets: %s",
+                repo_id,
+                repo_settings.path,
+                exc,
+            )
+            continue
+        if local_settings is None:
+            continue
+        own_presets_by_repo[repo_id] = {
+            preset_name: AgentModelPreset(
+                agent=own_preset.agent,
+                model=own_preset.model,
+                reasoning_effort=own_preset.reasoning_effort,
+            )
+            for preset_name, own_preset in local_settings.presets.items()
+        }
+    return own_presets_by_repo
+
+
 def _repository_settings_for_path(
     repo_root_path: Path,
 ) -> AgentRunnerRepositorySettings:
@@ -459,6 +514,7 @@ def _build_merged_repository_context(
 
 __all__ = [
     "RepositoryResolutionFailure",
+    "collect_repository_own_presets",
     "find_repository_match_for_path",
     "resolve_repository_targets",
     "resolve_repository_targets_with_diagnostics",
