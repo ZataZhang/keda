@@ -5,6 +5,8 @@
 // 页面分别显示 Backlog 自动推进、daemon 运行状态和自动合并是否通过双开关。
 // 「并发」显示的是后端解析出的生效值与来源（继承 / 设置 / 受容量限制），
 // 并提供最小设置入口（1–10 与恢复继承）；数字与 daemon 认领、补位闸门同源。
+// 「恢复继承」= 删除设置行，已知副作用是默认视图偏好回落到列表（PRD §12），
+// 按钮 title 上如实披露。
 
 import { useState } from "react";
 
@@ -19,7 +21,7 @@ interface BacklogAutopilotControlProps {
   saving: boolean;
   onToggle: (enabled: boolean) => void;
   policySaving: boolean;
-  onUpdatePolicy: (maxParallel: number | null) => void;
+  onUpdatePolicy: (maxParallel: number | null) => Promise<boolean>;
 }
 
 /** 生效并发上限来源对应的说明文案。 */
@@ -55,7 +57,8 @@ function parsePolicyDraft(draft: string): number | null {
  * @param props.saving - 正在写回自动推进开关时为 ``true``。
  * @param props.onToggle - 开关切换回调，参数是目标布尔值。
  * @param props.policySaving - 正在保存 / 清除并发策略时为 ``true``。
- * @param props.onUpdatePolicy - 并发策略写回回调：1–10 为设置，``null`` 为恢复继承。
+ * @param props.onUpdatePolicy - 并发策略写回回调：1–10 为设置，``null`` 为恢复继承；
+ *   解析为 ``true`` 表示写入成功（调用方据此清空输入草稿），失败为 ``false``。
  * @returns Backlog 自动推进控制条。
  */
 export function BacklogAutopilotControl({
@@ -124,10 +127,15 @@ export function BacklogAutopilotControl({
           className="h-7 px-2 text-xs"
           disabled={!canSave}
           onClick={() => {
-            if (parsedDraft !== null) {
-              onUpdatePolicy(parsedDraft);
-              setDraft("");
+            if (parsedDraft === null) {
+              return;
             }
+            // 草稿在写入成功后才清空；失败时保留供用户修正重试。
+            void onUpdatePolicy(parsedDraft).then((saved) => {
+              if (saved) {
+                setDraft("");
+              }
+            });
           }}
           data-testid="backlog-concurrency-save"
         >
@@ -140,9 +148,14 @@ export function BacklogAutopilotControl({
             className="h-7 px-2 text-xs"
             disabled={policySaving}
             onClick={() => {
-              onUpdatePolicy(null);
-              setDraft("");
+              // 恢复继承＝删除设置行；成功后才丢弃未保存的输入草稿。
+              void onUpdatePolicy(null).then((saved) => {
+                if (saved) {
+                  setDraft("");
+                }
+              });
             }}
+            title="恢复继承会删除本仓库的 Backlog 设置，默认视图偏好将回落到列表"
             data-testid="backlog-concurrency-restore"
           >
             恢复继承

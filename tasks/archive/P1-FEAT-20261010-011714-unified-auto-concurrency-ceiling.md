@@ -685,3 +685,11 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - Reason: 该缺陷在本 PRD 的交付门禁现场暴露（verifier 复跑 rv 会写脏 qoder 会话记录，clean-tree 前置失败）；按「修复触发门禁的源代码」原则就地修复，而非绕行门禁。
 - Impact: 仅恢复路径的旁路落盘行为变化：修复 / 核验会话不再产生可恢复断点（原本就是错误断点）；实现会话落盘与既有恢复语义不变。§7.2 变更树未预测此文件，以本条为准。
 - Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；行为由新增回归测试锁定。
+
+### qoder 会话记录最终未随交付跟踪（Change Log 订正）
+- Type: scope
+- Before: 上一条「会话记录按调用阶段过滤…」称本分支「随交付跟踪 qoder 会话文件」、本 diff 新跟踪 `.iar/agent-runner/sessions/qoder.json`。
+- After: 该文件最终未进入交付树：交付前将其移出 Git 跟踪，并把 `.iar/agent-runner/` 整体加入根 `.gitignore`（`git check-ignore` 已生效，on-disk 文件仅保留在本机）；按调用阶段过滤会话记录的修复本身不变，仍由 `tests/test_agent_runner_agent_invocation.py::TestSessionRecordPersistence` 锁定。
+- Reason: 独立 verifier 的 clean-tree 前置要求会话记录不进入交付验证树；issue-262 分支 `e202b23d` 的同类修复同样取消跟踪会话文件，两分支 rebase 时按「不跟踪会话文件」的同一口径协调。
+- Impact: 仅交付跟踪范围与本 Change Log 记录的订正；生产代码、被测行为、rv 证据均不变；`git ls-files .iar/` 为空、`git diff -- .iar/` 为空。
+- Review: 执行器修复，供 runner 与人工知晓，避免归档记录与最终树不一致。

@@ -309,7 +309,7 @@ export default function BacklogPage() {
   }
 
   /** 保存 Backlog「并发」策略（1–10），或以 ``null`` 恢复继承（清除设置行）。 */
-  async function handleUpdatePolicy(maxParallel: number | null) {
+  async function handleUpdatePolicy(maxParallel: number | null): Promise<boolean> {
     setPolicySaving(true);
     try {
       // 响应体是写后 fresh 读回的设置快照，不做乐观 UI 覆盖。
@@ -322,9 +322,11 @@ export default function BacklogPage() {
           ? "已恢复继承：并发上限跟随 runner 配置。"
           : `已保存：生效并发上限 ${updated.effective_max_parallel}。`,
       );
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "保存并发设置失败。");
       await loadAutopilot();
+      return false;
     } finally {
       setPolicySaving(false);
     }
@@ -588,12 +590,14 @@ export default function BacklogPage() {
         </div>
 
         <BacklogAutopilotControl
+          // 按仓库重建本地组件，避免并发输入草稿跨仓库切换残留、被写到新选中仓库。
+          key={selectedRepoId}
           state={autopilot}
           loading={autopilotLoading}
           saving={autopilotSaving}
           onToggle={(enabled) => void handleToggleAutopilot(enabled)}
           policySaving={policySaving}
-          onUpdatePolicy={(maxParallel) => void handleUpdatePolicy(maxParallel)}
+          onUpdatePolicy={(maxParallel) => handleUpdatePolicy(maxParallel)}
         />
 
         <BacklogCiRepairControl

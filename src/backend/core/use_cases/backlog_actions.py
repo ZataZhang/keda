@@ -808,8 +808,10 @@ def advance_backlog_queue(
     # 「从未设置」就是没有设置行：策略为 None 时继承 runner 容量，不再伪造默认值。
     policy_max_parallel = read_policy_max_parallel(store, repo_id)
     if execution_ceiling is None:
+        # 容量来自用户配置，可能为非法值；与 daemon / 路由等消费点同口径兜底到 1，
+        # 避免独立跑 advance 的 CLI 入口因非法配置抛 ValueError。
         ceiling = resolve_execution_ceiling(
-            policy_max_parallel, context.config.runner.max_concurrent_issues
+            policy_max_parallel, max(1, context.config.runner.max_concurrent_issues)
         )
     else:
         ceiling = execution_ceiling

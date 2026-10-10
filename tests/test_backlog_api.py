@@ -405,6 +405,39 @@ def test_update_settings(backlog_environment) -> None:
     assert response.json()["max_parallel"] == 3
 
 
+def test_clear_settings_restores_inheritance(backlog_environment) -> None:
+    """PATCH max_parallel=null 应删除设置行（恢复继承），fresh 读回策略为空。"""
+    store: SqliteConsoleStore = backlog_environment["store"]
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"max_parallel": 3, "default_view": "timeline"},
+    )
+    assert response.status_code == 200
+    assert store.get_backlog_settings("keda-main") is not None
+
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"max_parallel": None},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["max_parallel"] is None
+    assert payload["ceiling_source"] == "inherited"
+    assert store.get_backlog_settings("keda-main") is None
+
+    # 恢复继承是删行语义，重复清除保持幂等成功。
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"max_parallel": None},
+    )
+    assert response.status_code == 200
+    assert response.json()["max_parallel"] is None
+
+    response = client.get("/api/v1/agent-runner/backlog/settings?repo_id=keda-main")
+    assert response.status_code == 200
+    assert response.json()["max_parallel"] is None
+
+
 def test_start_prd_rejects_missing_repo(backlog_environment) -> None:
     """Starting a PRD for an unknown repo must return 400."""
     import base64
