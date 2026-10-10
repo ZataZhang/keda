@@ -119,6 +119,16 @@ export default function BacklogPage() {
   // 轮询节奏用 ref 传递：把 stale 放进 effect 依赖会让每次新鲜度翻转都重建整个
   // 加载流程，表现为列表反复闪骨架屏。
   const snapshotStaleRef = useRef(false);
+  // 入队成功后，快照重扫完成前保留动作接口确认的状态，避免旧快照把 UI 改回未开始。
+  const optimisticEnqueueUpdatesRef = useRef(
+    new Map<
+      string,
+      {
+        state: BacklogPrd["state"];
+        issueNumber: number | null;
+      }
+    >(),
+  );
   const [includeArchived, setIncludeArchived] = useState(false);
   const {
     repositories,
@@ -169,12 +179,41 @@ export default function BacklogPage() {
         if (signal?.aborted) {
           return [];
         }
-        setPrds(response.prds);
+        const refreshedPrds = response.prds.map((serverPrd) => {
+          const optimisticUpdateKey = `${selectedRepoId}\u0000${serverPrd.prd_path}`;
+          const optimisticUpdate = optimisticEnqueueUpdatesRef.current.get(optimisticUpdateKey);
+          if (!optimisticUpdate) {
+            return serverPrd;
+          }
+          if (serverPrd.state !== "not_started") {
+            // 后端快照已经观察到入队或更后的状态，结束本地覆盖。
+            optimisticEnqueueUpdatesRef.current.delete(optimisticUpdateKey);
+            return serverPrd;
+          }
+          return {
+            ...serverPrd,
+            state: optimisticUpdate.state,
+            issue_number: optimisticUpdate.issueNumber,
+          };
+        });
+        const refreshedPrdPaths = new Set(response.prds.map((serverPrd) => serverPrd.prd_path));
+        const optimisticUpdateKeyPrefix = `${selectedRepoId}\u0000`;
+        for (const optimisticUpdateKey of optimisticEnqueueUpdatesRef.current.keys()) {
+          const optimisticPrdPath = optimisticUpdateKey.slice(optimisticUpdateKeyPrefix.length);
+          if (
+            optimisticUpdateKey.startsWith(optimisticUpdateKeyPrefix) &&
+            !refreshedPrdPaths.has(optimisticPrdPath)
+          ) {
+            // PRD 已离开当前视图（例如被归档），清理对应的本地覆盖状态。
+            optimisticEnqueueUpdatesRef.current.delete(optimisticUpdateKey);
+          }
+        }
+        setPrds(refreshedPrds);
         setSnapshotScannedAt(response.scanned_at);
         setSnapshotStale(response.stale);
         setSnapshotLoadFailed(false);
         snapshotStaleRef.current = response.stale;
-        return response.prds;
+        return refreshedPrds;
       } catch (error) {
         if (signal?.aborted) {
           return [];
@@ -369,7 +408,32 @@ export default function BacklogPage() {
   async function handleEnqueueReady(prd: BacklogPrd) {
     setEnqueuingPath(prd.prd_path);
     try {
-      await enqueueBacklogPrdReady(selectedRepoId, prd.prd_path);
+      const enqueueResult = await enqueueBacklogPrdReady(selectedRepoId, prd.prd_path);
+      const optimisticUpdateKey = `${selectedRepoId}\u0000${prd.prd_path}`;
+      optimisticEnqueueUpdatesRef.current.set(optimisticUpdateKey, {
+        state: enqueueResult.state,
+        issueNumber: enqueueResult.issue_number,
+      });
+      setPrds((currentPrds) =>
+        currentPrds.map((currentPrd) =>
+          currentPrd.prd_path === prd.prd_path
+            ? {
+                ...currentPrd,
+                state: enqueueResult.state,
+                issue_number: enqueueResult.issue_number,
+              }
+            : currentPrd,
+        ),
+      );
+      setSelectedPrd((currentPrd) =>
+        currentPrd?.prd_path === prd.prd_path
+          ? {
+              ...currentPrd,
+              state: enqueueResult.state,
+              issue_number: enqueueResult.issue_number,
+            }
+          : currentPrd,
+      );
       toast.success(`${prd.title} 已加入就绪队列（未启动）。`);
       const refreshedPrds = await loadData();
       const refreshedPrd = refreshedPrds.find((item) => item.prd_path === prd.prd_path);
