@@ -547,6 +547,7 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - **标签近似与窄竞态**：在跑数是实时标签近似值，显式运行与 daemon 之间存在窗口。上限是选择层护栏，CAS 仍是唯一硬保证；文档披露。
 - **未保存仓库行为变化**（默认 2 → 容量）：预期修复；Change Log 与文档写明。已保存行不受影响。
 - **恢复继承（删行）重置默认视图偏好**：`backlog_settings` 行同时存 `default_view`；删行后视图偏好回落到 list。接受并在文档与 UI 提示说明；后续如需保留，另开 PRD 把视图偏好移出该行。
+- **同一行的另一面：未设置态无法单独持久视图偏好**：`max_parallel` 列 NOT NULL 且哨兵值已否决（D-04），因此 `PATCH /backlog/settings` 只带 `default_view` 而该仓没有策略行时**不落库**，响应如实返回 `list`——页面切换只在当前会话生效，刷新后回到默认视图；先设置一个「并发」策略值即可恢复持久。该口径写入 `docs/guides/agent-runner.md`「视图说明」与「全局调度」，契约由 `tests/test_backlog_api.py::test_default_view_only_patch_persists_only_with_policy_row` 与 `::test_empty_settings_patch_is_no_op` 锁定。
 - **console 前端版本漂移**：静态 bundle 与后端需同批 `console-sync` 并重启 console；否则旧文案与 404 风险。提交前与并行 PRD 协调 rebase。
 
 ## 13. Decision Log
@@ -693,3 +694,19 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - Reason: 独立 verifier 的 clean-tree 前置要求会话记录不进入交付验证树；issue-262 分支 `e202b23d` 的同类修复同样取消跟踪会话文件，两分支 rebase 时按「不跟踪会话文件」的同一口径协调。
 - Impact: 仅交付跟踪范围与本 Change Log 记录的订正；生产代码、被测行为、rv 证据均不变；`git ls-files .iar/` 为空、`git diff -- .iar/` 为空。
 - Review: 执行器修复，供 runner 与人工知晓，避免归档记录与最终树不一致。
+
+### 未设置态视图偏好不可持久：补文档口径与 PATCH 契约测试
+- Type: scope
+- Before: 「视图说明」一节仍写「『时间轴』『列表』选择会通过 `PATCH /backlog/settings` 回写 `default_view`」，无条件成立；而本轮把策略改为可空后，该写回只在仓库已有策略行时落库。从未保存过「并发」的仓库（现在的默认态）切换视图其实静默不持久，且这条分支没有任何自动化测试锁定，只有独立 verifier 的手工探针碰过。
+- After: `docs/guides/agent-runner.md`「视图说明」与「全局调度」两处如实写明条件与恢复办法（先设置一个策略值即可持久），§12 增列该风险面；新增 `tests/test_backlog_api.py::test_default_view_only_patch_persists_only_with_policy_row`（无行→返回 list 且不落库；有行→持久且不改写策略）与 `::test_empty_settings_patch_is_no_op`。生产代码零改动。
+- Reason: 需求源只披露了「恢复继承删行 → 视图回落」这一面，没有覆盖「无策略行时视图偏好根本写不进去」；文档描述旧现实 + 行为回归无测试锁定，属交付缺口而非风格问题。D-04 已否决哨兵值与 schema 变更，故按如实披露处理，不改存储语义。
+- Impact: 操作员在未设置态切换视图不再被持久——与改动前（顺带落一行伪造策略 2 换取视图持久）不同，这是本需求的直接后果，现已在文档与本节写明；后端契约与页面代码不变。
+- Review: 评审侧修复（Issue #266 第二轮 Pre-PR），未削弱任何用户可见、安全、范围或真实验证要求；两条新测试即该契约的机械门禁。
+
+### 五项 Realistic Validation 在最终交付树复跑，rv-3 不再依赖「源码未变」复用判定
+- Type: validation
+- Before: rv-1…rv-5 的 `rv-N-implementation-tree.txt` 全部记 `13e52394 / a68f3e0f…`，rv-3 报告并声明「页面与后端源代码自该成功运行以来未变」（记录点为 `44ed390a`）；随后 `4335947c` 改动了 rv-2 的 `backlog_actions.py` 补位自解析分支与 rv-3 的 `backlog-autopilot-control.tsx` / `page.tsx`，最终树上的 rv-2 / rv-3 因此没有绑定证据，rv-3 的上一次复跑又被浏览器权限阻断。
+- After: 在 `HEAD=4335947c`（tree `61d7a965…`）逐字复跑五项规定命令并全部 exit 0——rv-2 16:03、rv-1 / rv-4 / rv-5 16:04–16:05（含各自现场负控 RED 复现与按字节还原）、rv-3 16:06（`just console-sync` → 旧 bundle 口径负控 6 条断言变红并还原 → 真实 console 页面五态 PASS，截图与 DB 终态行删除再生）；`rv-3-console-roundtrip.txt`、`rv-3-tree-equivalence.txt` 与五个 tree 绑定文件按本轮产物重写，报告改为如实陈述复跑而非「源码未变」复用。复跑后 `git status` 仅含本轮文档 / 测试修复，工作树未被证据采集污染。
+- Reason: 独立验证与最终 tree 绑定不接受跨树复用判定；`4335947c` 之后 rv 的 `final_tree_evidence` 条款（「页面 / API / 路由改动后重跑」「补位 / 解析 / 路由改动后重跑」）被触发。
+- Impact: 仅证据产物与记录更新；生产代码、被测行为与 rv 判别力不变；上一轮披露的浏览器阻断限制本轮已消失，相应披露作废。
+- Review: 评审侧驱动的执行复跑（Issue #266 第二轮 Pre-PR），runner 的独立 verifier 仍会在最终树上逐字复跑，本条只保证交付证据自身与代码树一致。

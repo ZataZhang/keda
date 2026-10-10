@@ -4,12 +4,12 @@
 
 | 呈递项 | 本地路径与打开方式 | 核对结果 |
 |---|---|---|
-| Issue #266 真实 console 页面状态记录（五态） | `tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling`；`open "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling"` | 页面报告、API / PATCH / fresh GET / SQLite 记录和截图来自真实 `kc console` 页面运行；红→绿输出见 `rv-3-console-roundtrip.txt`。本轮复核页面与后端源代码自该成功运行以来未变，见 `rv-3-tree-equivalence.txt`。 |
+| Issue #266 真实 console 页面状态记录（五态） | `tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling`；`open "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling"` | 页面报告、API / PATCH / fresh GET / SQLite 记录和截图来自真实 `kc console` 页面运行；红→绿输出见 `rv-3-console-roundtrip.txt`。本轮按最终交付树（`HEAD=4335947c`，`tree=61d7a965b07697782205d1bd98e922362e979c1a`）重新执行 rv-3 规定命令（`just console-sync` → 旧口径 bundle 负控 → 真实页面正控），五张截图与 roundtrip 均为该树产物；树绑定与前次运行之间的生产源码差异见 `rv-3-tree-equivalence.txt`。 |
 
 - Issue: [GitHub #266](https://github.com/ZataZhang/keda/issues/266)
 - Pull request: 尚未创建；本工作流没有创建 PR。
 - CI: 尚无关联 PR / CI run。
-- 执行器交叉核对：rv-1、rv-2、rv-4、rv-5 在本轮逐项完成 red→green；rv-3 复用与当前 `frontend-public/`、`src/backend/` 完全相同源代码上的既有真实页面 red→green 运行和截图。本轮额外重跑受当前浏览器权限阻断，诊断见 `rv-3-backlog-control-roundtrip.txt`，不作为页面通过证据。
+- 执行器交叉核对：rv-1…rv-5 已在最终交付树（`HEAD=4335947c`）上逐字复跑规定命令并全部 exit 0——rv-1 / rv-4 / rv-5 于 16:04–16:05、rv-2 于 16:03、rv-3 于 16:06（含真实页面五态截图与旧 bundle 口径现场负控红证，bundle 事后按字节还原）；每项的树绑定见对应 `rv-N-implementation-tree.txt`，跨轮差异与结论见 `rv-3-tree-equivalence.txt`。上一轮记录的浏览器权限阻断本轮已消失，不再作为限制保留。
 - 快速自检：`rv-3-console-roundtrip.txt` 包含 `NEG CONTROL PASSED`、`RESULT: PASS` 和 `RV-3 PASSED`；`rv-3-console-backlog-report.txt` 记录 policy=2、capped effective=4、saved4-fresh=4 及恢复后 `[DB 终态] ... None`。
 
 #### 目标原型（design intent；不是运行时证据）
