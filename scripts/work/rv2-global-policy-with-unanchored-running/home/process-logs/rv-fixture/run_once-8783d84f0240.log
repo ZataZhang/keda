@@ -1,0 +1,9 @@
+note: 'IAR_SKIP_GH_AUTH_CHECK' has been renamed to 'KEDACODE_SKIP_GH_AUTH_CHECK'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+2026-10-11 00:51:49 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:97 - Running once for repository 'rv-fixture' (RV Fixture).
+2026-10-11 00:51:51 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #600 publish stage resolved: normal (origin: caller request).
+2026-10-11 00:51:52 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #600: https://github.com/fake-owner/fake-repo/issues/600
+2026-10-11 00:51:52 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-d2211d68f0a7 run=rv-fixture#issue-600#20261010T165150Z-1a7f2a0fdf6e issue=600 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-600-20261011-005150.log
+[00:51:52] fake agent start issue=600
+[00:51:52] fake agent end issue=600
+2026-10-11 00:51:52 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-d2211d68f0a7 run=rv-fixture#issue-600#20261010T165150Z-1a7f2a0fdf6e issue=600 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=0.13 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-11 00:51:52 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:849 - Agent finished for Issue #600: https://github.com/fake-owner/fake-repo/issues/600 (exit_code=0)

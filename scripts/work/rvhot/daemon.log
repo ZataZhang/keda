@@ -1,0 +1,210 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+note: 'IAR_SKIP_GH_AUTH_CHECK' has been renamed to 'KEDACODE_SKIP_GH_AUTH_CHECK'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+2026-10-10 05:19:55 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:272 - Daemon pass for repository 'rv-fixture' (RV Fixture).
+note: 'IAR_PRD_SKILL_PATH' has been renamed to 'KEDACODE_PRD_SKILL_PATH'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+2026-10-10 05:19:56 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:767 - Concurrency ceiling: ceiling=4 running=0 ready_budget=4
+[issue #100 agent=claude status=running]
+[issue #102 agent=claude status=running]
+[issue #103 agent=claude status=running]
+[issue #101 agent=claude status=running]
+2026-10-10 05:19:58 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #100 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:19:58 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #102 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:19:58 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #101 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:19:58 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #103 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:19:59 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:19:59 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:19:59 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:19:59 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:01 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #102: https://github.com/fake-owner/fake-repo/issues/102
+2026-10-10 05:20:01 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-b990fccce424 run=rv-fixture#issue-102#20261009T211956Z-11f8d63b3a62 issue=102 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-102-20261010-051956.log
+[issue #102 status=running] [05:20:01] fake agent start issue=102
+[issue #102 status=running] [05:20:02] fake agent end issue=102
+2026-10-10 05:20:02 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-b990fccce424 run=rv-fixture#issue-102#20261009T211956Z-11f8d63b3a62 issue=102 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.077 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:02 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #102: https://github.com/fake-owner/fake-repo/issues/102 (exit_code=0)
+2026-10-10 05:20:03 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #102 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:03 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #102: Failed after 1 attempts.
+[issue #102 status=failed]
+2026-10-10 05:20:04 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #101: https://github.com/fake-owner/fake-repo/issues/101
+2026-10-10 05:20:04 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-2327a87fa52e run=rv-fixture#issue-101#20261009T211956Z-3d9dcbefc159 issue=101 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-101-20261010-051956.log
+[issue #101 status=running] [05:20:04] fake agent start issue=101
+[issue #101 status=running] [05:20:05] fake agent end issue=101
+2026-10-10 05:20:05 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-2327a87fa52e run=rv-fixture#issue-101#20261009T211956Z-3d9dcbefc159 issue=101 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.054 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:05 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #101: https://github.com/fake-owner/fake-repo/issues/101 (exit_code=0)
+2026-10-10 05:20:05 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #101 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:05 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #101: Failed after 1 attempts.
+[issue #101 status=failed]
+2026-10-10 05:20:07 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #100: https://github.com/fake-owner/fake-repo/issues/100
+2026-10-10 05:20:07 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-e74138b13afc run=rv-fixture#issue-100#20261009T211956Z-131fd6a23579 issue=100 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-100-20261010-051956.log
+[issue #100 status=running] [05:20:07] fake agent start issue=100
+[issue #100 status=running] [05:20:08] fake agent end issue=100
+2026-10-10 05:20:08 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-e74138b13afc run=rv-fixture#issue-100#20261009T211956Z-131fd6a23579 issue=100 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.077 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:08 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #100: https://github.com/fake-owner/fake-repo/issues/100 (exit_code=0)
+2026-10-10 05:20:08 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #100 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:08 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #100: Failed after 1 attempts.
+[issue #100 status=failed]
+2026-10-10 05:20:09 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #103: https://github.com/fake-owner/fake-repo/issues/103
+2026-10-10 05:20:09 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-afb1e1f2f3ef run=rv-fixture#issue-103#20261009T211956Z-2afe42302092 issue=103 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-103-20261010-051956.log
+[issue #103 status=running] [05:20:09] fake agent start issue=103
+[issue #103 status=running] [05:20:10] fake agent end issue=103
+2026-10-10 05:20:10 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-afb1e1f2f3ef run=rv-fixture#issue-103#20261009T211956Z-2afe42302092 issue=103 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.059 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:10 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #103: https://github.com/fake-owner/fake-repo/issues/103 (exit_code=0)
+2026-10-10 05:20:10 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #103 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:10 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #103: Failed after 1 attempts.
+[issue #103 status=failed]
+2026-10-10 05:20:10 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:441 - Sleeping for 1 seconds before next poll.
+2026-10-10 05:20:11 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:272 - Daemon pass for repository 'rv-fixture' (RV Fixture).
+2026-10-10 05:20:13 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:767 - Concurrency ceiling: ceiling=2 running=0 ready_budget=2
+[issue #104 agent=claude status=running]
+[issue #105 agent=claude status=running]
+2026-10-10 05:20:14 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #104 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:14 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #105 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:15 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:15 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:17 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #105: https://github.com/fake-owner/fake-repo/issues/105
+2026-10-10 05:20:17 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-511057627841 run=rv-fixture#issue-105#20261009T212013Z-9a57135f0d50 issue=105 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-105-20261010-052013.log
+[issue #105 status=running] [05:20:18] fake agent start issue=105
+[issue #105 status=running] [05:20:19] fake agent end issue=105
+2026-10-10 05:20:19 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-511057627841 run=rv-fixture#issue-105#20261009T212013Z-9a57135f0d50 issue=105 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.061 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:19 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #105: https://github.com/fake-owner/fake-repo/issues/105 (exit_code=0)
+2026-10-10 05:20:19 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #105 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:19 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #105: Failed after 1 attempts.
+[issue #105 status=failed]
+2026-10-10 05:20:19 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #104: https://github.com/fake-owner/fake-repo/issues/104
+2026-10-10 05:20:19 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-b203916c19cb run=rv-fixture#issue-104#20261009T212013Z-aa078d4e3b3d issue=104 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-104-20261010-052013.log
+[issue #104 status=running] [05:20:19] fake agent start issue=104
+[issue #104 status=running] [05:20:20] fake agent end issue=104
+2026-10-10 05:20:20 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-b203916c19cb run=rv-fixture#issue-104#20261009T212013Z-aa078d4e3b3d issue=104 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.06 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:20 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #104: https://github.com/fake-owner/fake-repo/issues/104 (exit_code=0)
+2026-10-10 05:20:21 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #104 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:21 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #104: Failed after 1 attempts.
+[issue #104 status=failed]
+2026-10-10 05:20:21 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:441 - Sleeping for 1 seconds before next poll.
+2026-10-10 05:20:22 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:272 - Daemon pass for repository 'rv-fixture' (RV Fixture).
+2026-10-10 05:20:23 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:767 - Concurrency ceiling: ceiling=2 running=0 ready_budget=2
+[issue #106 agent=claude status=running]
+[issue #107 agent=claude status=running]
+2026-10-10 05:20:25 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #107 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:25 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #106 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:25 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:25 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:28 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #107: https://github.com/fake-owner/fake-repo/issues/107
+2026-10-10 05:20:28 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-5b2c00ef15c8 run=rv-fixture#issue-107#20261009T212023Z-8cfb94a138cc issue=107 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-107-20261010-052023.log
+[issue #107 status=running] [05:20:28] fake agent start issue=107
+[issue #107 status=running] [05:20:29] fake agent end issue=107
+2026-10-10 05:20:29 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-5b2c00ef15c8 run=rv-fixture#issue-107#20261009T212023Z-8cfb94a138cc issue=107 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.061 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:29 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #107: https://github.com/fake-owner/fake-repo/issues/107 (exit_code=0)
+2026-10-10 05:20:29 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #107 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:30 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #107: Failed after 1 attempts.
+[issue #107 status=failed]
+2026-10-10 05:20:30 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #106: https://github.com/fake-owner/fake-repo/issues/106
+2026-10-10 05:20:30 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-84fc8d9eda16 run=rv-fixture#issue-106#20261009T212023Z-33f25a0e4986 issue=106 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-106-20261010-052023.log
+[issue #106 status=running] [05:20:30] fake agent start issue=106
+[issue #106 status=running] [05:20:31] fake agent end issue=106
+2026-10-10 05:20:31 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-84fc8d9eda16 run=rv-fixture#issue-106#20261009T212023Z-33f25a0e4986 issue=106 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.061 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:31 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #106: https://github.com/fake-owner/fake-repo/issues/106 (exit_code=0)
+2026-10-10 05:20:31 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #106 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:31 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #106: Failed after 1 attempts.
+[issue #106 status=failed]
+2026-10-10 05:20:31 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:441 - Sleeping for 1 seconds before next poll.
+2026-10-10 05:20:32 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:272 - Daemon pass for repository 'rv-fixture' (RV Fixture).
+2026-10-10 05:20:34 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:767 - Concurrency ceiling: ceiling=4 running=0 ready_budget=4
+[issue #108 agent=claude status=running]
+[issue #109 agent=claude status=running]
+[issue #110 agent=claude status=running]
+[issue #111 agent=claude status=running]
+2026-10-10 05:20:35 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #109 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:35 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #110 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:35 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #108 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:35 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #111 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:36 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:36 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:36 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:36 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:39 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #108: https://github.com/fake-owner/fake-repo/issues/108
+2026-10-10 05:20:39 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-20202c1ba960 run=rv-fixture#issue-108#20261009T212034Z-51420b9daf34 issue=108 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-108-20261010-052034.log
+[issue #108 status=running] [05:20:39] fake agent start issue=108
+[issue #108 status=running] [05:20:40] fake agent end issue=108
+2026-10-10 05:20:40 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-20202c1ba960 run=rv-fixture#issue-108#20261009T212034Z-51420b9daf34 issue=108 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.073 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:40 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #108: https://github.com/fake-owner/fake-repo/issues/108 (exit_code=0)
+2026-10-10 05:20:40 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #108 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:40 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #108: Failed after 1 attempts.
+[issue #108 status=failed]
+2026-10-10 05:20:40 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #110: https://github.com/fake-owner/fake-repo/issues/110
+2026-10-10 05:20:40 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-8641993c5e7d run=rv-fixture#issue-110#20261009T212034Z-638cc53c2275 issue=110 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-110-20261010-052034.log
+[issue #110 status=running] [05:20:41] fake agent start issue=110
+[issue #110 status=running] [05:20:42] fake agent end issue=110
+2026-10-10 05:20:42 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-8641993c5e7d run=rv-fixture#issue-110#20261009T212034Z-638cc53c2275 issue=110 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.062 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:42 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #110: https://github.com/fake-owner/fake-repo/issues/110 (exit_code=0)
+2026-10-10 05:20:42 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #110 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:42 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #110: Failed after 1 attempts.
+[issue #110 status=failed]
+2026-10-10 05:20:42 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #109: https://github.com/fake-owner/fake-repo/issues/109
+2026-10-10 05:20:42 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-76187d4cb38f run=rv-fixture#issue-109#20261009T212034Z-dd06bf8b92e7 issue=109 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-109-20261010-052034.log
+[issue #109 status=running] [05:20:42] fake agent start issue=109
+[issue #109 status=running] [05:20:43] fake agent end issue=109
+2026-10-10 05:20:43 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-76187d4cb38f run=rv-fixture#issue-109#20261009T212034Z-dd06bf8b92e7 issue=109 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.068 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:43 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #109: https://github.com/fake-owner/fake-repo/issues/109 (exit_code=0)
+2026-10-10 05:20:44 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #109 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:44 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #109: Failed after 1 attempts.
+[issue #109 status=failed]
+2026-10-10 05:20:44 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #111: https://github.com/fake-owner/fake-repo/issues/111
+2026-10-10 05:20:44 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-8d0c024eda28 run=rv-fixture#issue-111#20261009T212034Z-301524586184 issue=111 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-111-20261010-052034.log
+[issue #111 status=running] [05:20:44] fake agent start issue=111
+[issue #111 status=running] [05:20:45] fake agent end issue=111
+2026-10-10 05:20:45 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-8d0c024eda28 run=rv-fixture#issue-111#20261009T212034Z-301524586184 issue=111 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.067 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:45 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #111: https://github.com/fake-owner/fake-repo/issues/111 (exit_code=0)
+2026-10-10 05:20:46 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #111 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:46 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #111: Failed after 1 attempts.
+[issue #111 status=failed]
+2026-10-10 05:20:46 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:441 - Sleeping for 1 seconds before next poll.
+2026-10-10 05:20:47 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:272 - Daemon pass for repository 'rv-fixture' (RV Fixture).
+2026-10-10 05:20:48 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:767 - Concurrency ceiling: ceiling=4 running=0 ready_budget=4
+[issue #113 agent=claude status=running]
+[issue #112 agent=claude status=running]
+[issue #114 agent=claude status=running]
+[issue #115 agent=claude status=running]
+2026-10-10 05:20:50 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #113 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:50 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #114 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:50 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #115 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:50 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #112 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:20:50 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:178 - Daemon received SIGTERM; terminating in-flight agent trees before exit.
+2026-10-10 05:20:50 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:50 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:50 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:50 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:170 - Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:53 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #114: https://github.com/fake-owner/fake-repo/issues/114
+2026-10-10 05:20:53 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-320981419adf run=rv-fixture#issue-114#20261009T212048Z-1935e47e198d issue=114 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-114-20261010-052048.log
+[issue #114 status=running] [05:20:53] fake agent start issue=114
+[issue #114 status=running] [05:20:54] fake agent end issue=114
+2026-10-10 05:20:54 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-320981419adf run=rv-fixture#issue-114#20261009T212048Z-1935e47e198d issue=114 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.08 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:54 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #114: https://github.com/fake-owner/fake-repo/issues/114 (exit_code=0)
+2026-10-10 05:20:54 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #114 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:55 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #114: Failed after 1 attempts.
+[issue #114 status=failed]
+2026-10-10 05:20:55 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #112: https://github.com/fake-owner/fake-repo/issues/112
+2026-10-10 05:20:55 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-7d230ed73239 run=rv-fixture#issue-112#20261009T212048Z-33509e5f47cd issue=112 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-112-20261010-052048.log
+[issue #112 status=running] [05:20:55] fake agent start issue=112
+[issue #112 status=running] [05:20:56] fake agent end issue=112
+2026-10-10 05:20:56 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-7d230ed73239 run=rv-fixture#issue-112#20261009T212048Z-33509e5f47cd issue=112 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.082 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:56 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #112: https://github.com/fake-owner/fake-repo/issues/112 (exit_code=0)
+2026-10-10 05:20:57 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #112 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:57 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #112: Failed after 1 attempts.
+[issue #112 status=failed]
+2026-10-10 05:20:58 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #115: https://github.com/fake-owner/fake-repo/issues/115
+2026-10-10 05:20:58 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-4cba1342b2b3 run=rv-fixture#issue-115#20261009T212048Z-6e32e2a65c44 issue=115 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-115-20261010-052048.log
+[issue #115 status=running] [05:20:58] fake agent start issue=115
+[issue #115 status=running] [05:20:59] fake agent end issue=115
+2026-10-10 05:20:59 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-4cba1342b2b3 run=rv-fixture#issue-115#20261009T212048Z-6e32e2a65c44 issue=115 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.084 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:59 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #115: https://github.com/fake-owner/fake-repo/issues/115 (exit_code=0)
+2026-10-10 05:21:00 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #115 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:21:00 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #115: Failed after 1 attempts.
+[issue #115 status=failed]
+2026-10-10 05:21:01 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #113: https://github.com/fake-owner/fake-repo/issues/113
+2026-10-10 05:21:01 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-6cb397557ae9 run=rv-fixture#issue-113#20261009T212048Z-c514673ee11e issue=113 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-113-20261010-052048.log
+[issue #113 status=running] [05:21:01] fake agent start issue=113
+[issue #113 status=running] [05:21:02] fake agent end issue=113
+2026-10-10 05:21:02 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-6cb397557ae9 run=rv-fixture#issue-113#20261009T212048Z-c514673ee11e issue=113 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.061 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:21:02 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:842 - Agent finished for Issue #113: https://github.com/fake-owner/fake-repo/issues/113 (exit_code=0)
+2026-10-10 05:21:02 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #113 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:21:03 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #113: Failed after 1 attempts.
+[issue #113 status=failed]

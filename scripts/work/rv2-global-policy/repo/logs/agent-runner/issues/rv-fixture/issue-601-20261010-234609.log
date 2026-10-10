@@ -1,0 +1,7 @@
+2026-10-10 23:46:10,380 INFO backend.core.use_cases.agent_runner_direct_pr_label: Issue #601 publish stage resolved: normal (origin: caller request).
+2026-10-10 23:46:11,109 INFO backend.core.use_cases.run_agent_once: Starting agent for Issue #601: https://github.com/fake-owner/fake-repo/issues/601
+2026-10-10 23:46:11,110 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-start] invocation=inv-e24cb0cf23ac run=rv-fixture#issue-601#20261010T154609Z-9961f6f3b151 issue=601 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-601-20261010-234609.log
+[23:46:11] fake agent start issue=601
+[23:46:11] fake agent end issue=601
+2026-10-10 23:46:11,236 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-end] invocation=inv-e24cb0cf23ac run=rv-fixture#issue-601#20261010T154609Z-9961f6f3b151 issue=601 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=0.125 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 23:46:11,236 INFO backend.core.use_cases.run_agent_once: Agent finished for Issue #601: https://github.com/fake-owner/fake-repo/issues/601 (exit_code=0)

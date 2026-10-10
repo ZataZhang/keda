@@ -1,0 +1,104 @@
+{"argv": ["issue", "list", "--label", "agent/running", "--state", "all", "--limit", "50", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--label", "agent/deliberate", "--state", "open", "--limit", "1", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/rework-prd", "--limit", "1", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/review", "--limit", "20", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/ready", "--limit", "100", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--label", "agent/running", "--state", "open", "--limit", "11", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/running", "--limit", "4", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/blocked", "--limit", "4", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "comment", "104", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-7cm123_7/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "101", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-qzymrqgo/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "105", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-j53jp4jy/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "102", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-g5_8igje/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "100", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-ib063zr7/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "103", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-y9h03476/comment.md"], "code": 0}
+{"argv": ["issue", "view", "101", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "104", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "105", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "103", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "100", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "102", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "101", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "104", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "105", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "103", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "100", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "101", "--json", "labels"], "code": 0}
+{"argv": ["issue", "view", "102", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "104", "--json", "labels"], "code": 0}
+{"argv": ["issue", "view", "105", "--json", "labels"], "code": 0}
+{"argv": ["issue", "view", "103", "--json", "labels"], "code": 0}
+{"argv": ["issue", "view", "100", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "101", "--add-label", "agent/running", "--remove-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "view", "102", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "104", "--add-label", "agent/running", "--remove-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "edit", "105", "--add-label", "agent/running", "--remove-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "edit", "103", "--add-label", "agent/running", "--remove-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "edit", "100", "--add-label", "agent/running", "--remove-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "view", "101", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "104", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "edit", "102", "--add-label", "agent/running", "--remove-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "view", "105", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "103", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "100", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "101", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "104", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "102", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "105", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "103", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "101", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "100", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "104", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "102", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "105", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "103", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "100", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "102", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "103", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "101", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "104", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "102", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "105", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "comment", "103", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-wc25ztr2/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "104", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-o_1dlzsv/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "101", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-46i1iwcx/comment.md"], "code": 0}
+{"argv": ["issue", "view", "100", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "comment", "102", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-cok9pnml/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "105", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-0ijn2ill/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "100", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-_ezc7_zp/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "101", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-xm9qluwl/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "104", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-e43tbcq0/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "103", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-ywdtsrbq/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "102", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-2n3nxxj1/comment.md"], "code": 0}
+{"argv": ["issue", "view", "103", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "101", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "comment", "105", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-r5k8x02v/comment.md"], "code": 0}
+{"argv": ["issue", "view", "104", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "comment", "100", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-e50z7uxs/comment.md"], "code": 0}
+{"argv": ["issue", "view", "102", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "103", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "101", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "105", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "104", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "100", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "102", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "101", "--json", "labels"], "code": 0}
+{"argv": ["issue", "view", "103", "--json", "labels"], "code": 0}
+{"argv": ["issue", "view", "104", "--json", "labels"], "code": 0}
+{"argv": ["issue", "view", "105", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "100", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "102", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "101", "--add-label", "agent/failed", "--remove-label", "agent/running"], "code": 0}
+{"argv": ["issue", "edit", "103", "--add-label", "agent/failed", "--remove-label", "agent/running"], "code": 0}
+{"argv": ["issue", "edit", "104", "--add-label", "agent/failed", "--remove-label", "agent/running"], "code": 0}
+{"argv": ["issue", "view", "105", "--json", "labels"], "code": 0}
+{"argv": ["issue", "view", "100", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "102", "--add-label", "agent/failed", "--remove-label", "agent/running"], "code": 0}
+{"argv": ["issue", "comment", "101", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-zzj690t8/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "104", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-gz0gdql8/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "103", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-uz2q3p6z/comment.md"], "code": 0}
+{"argv": ["issue", "edit", "105", "--add-label", "agent/failed", "--remove-label", "agent/running"], "code": 0}
+{"argv": ["issue", "edit", "100", "--add-label", "agent/failed", "--remove-label", "agent/running"], "code": 0}
+{"argv": ["issue", "comment", "102", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-p2ywsldv/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "105", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-fxsseub9/comment.md"], "code": 0}
+{"argv": ["issue", "comment", "100", "--body-file", "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-comment-56xb5_a5/comment.md"], "code": 0}

@@ -1,0 +1,24 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+kc console listening on http://127.0.0.1:64989/ (Ctrl+C to stop)
+INFO:     Started server process [56735]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:64989 (Press CTRL+C to quit)
+2026-10-10 11:26:30 - backend.core.use_cases.monitor_snapshots - WARNING - monitor_snapshots.py:644 - Monitor scheduler failed to read settings: database is locked
+2026-10-10 11:26:30 - backend.core.use_cases.monitor_snapshots - INFO - monitor_snapshots.py:623 - Monitor sync initial pass: 1 repositories have no snapshot yet.
+INFO:     127.0.0.1:64993 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64994 - "GET /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64995 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64996 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64999 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 422 Unprocessable Content
+INFO:     127.0.0.1:65000 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 422 Unprocessable Content
+INFO:     127.0.0.1:65001 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65002 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65003 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65006 - "GET /api/v1/agent-runner/backlog/autopilot?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65007 - "GET /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65008 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [56735]

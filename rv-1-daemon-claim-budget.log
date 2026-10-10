@@ -1,0 +1,14 @@
+[P2 policy=2,6ready,0running] ceiling_lines=[(2, 0, 2)]
+[P2 policy=2,6ready,0running] peak_concurrent=2 started_issues=[100, 101]
+[P2 policy=2,6ready,0running] ready_still_ready=[102, 103, 104, 105]
+[R1 policy=2,6ready,1pre-running] ceiling_lines=[(2, 1, 1)]
+[R1 policy=2,6ready,1pre-running] peak_concurrent=1 started_issues=[100]
+[R1 policy=2,6ready,1pre-running] ready_still_ready=[101, 102, 103, 104, 105]
+[R0 policy=2,6ready,2pre-running] ceiling_lines=[(2, 2, 0)]
+[R0 policy=2,6ready,2pre-running] peak_concurrent=0 started_issues=[]
+[R0 policy=2,6ready,2pre-running] ready_still_ready=[100, 101, 102, 103, 104, 105]
+[UNSET inherit-capacity] ceiling_lines=[(10, 0, 10)]
+[UNSET inherit-capacity] peak_concurrent=6 started_issues=[100, 101, 102, 103, 104, 105]
+[UNSET inherit-capacity] ready_still_ready=[]
+
+INHERIT CONTROL: no policy inherits capacity 10 and all 6 ready Issues are claimed; injected bad-count negative control is recorded separately in rv-1-negative-control.txt.

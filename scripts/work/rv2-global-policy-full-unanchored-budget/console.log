@@ -1,0 +1,18 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+kc console listening on http://127.0.0.1:55917/ (Ctrl+C to stop)
+INFO:     Started server process [22050]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:55917 (Press CTRL+C to quit)
+2026-10-11 00:51:53 - backend.core.use_cases.monitor_snapshots - INFO - monitor_snapshots.py:623 - Monitor sync initial pass: 1 repositories have no snapshot yet.
+2026-10-11 00:51:53 - backend.core.use_cases.monitor_snapshots - INFO - monitor_snapshots.py:623 - Monitor sync initial pass: 1 repositories have no snapshot yet.
+INFO:     127.0.0.1:55932 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55935 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55938 - "GET /api/v1/agent-runner/backlog/autopilot?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55939 - "POST /api/v1/agent-runner/backlog/start-global HTTP/1.1" 200 OK
+2026-10-11 00:51:54 - backend.core.use_cases.backlog_state_resolver - INFO - backlog_state_resolver.py:180 - Failed to fetch issue #601: Failed to fetch Issue #601: 
+2026-10-11 00:51:54 - backend.core.use_cases.monitor_snapshots - WARNING - monitor_snapshots.py:483 - Monitor sync failed for rv-fixture: Failed to fetch Issue #601: 
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [22050]

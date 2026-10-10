@@ -1,0 +1,6 @@
+RV-3 当前产品页面 oracle 未启动。
+准备步骤：just console-sync 完成，输出显示已将 frontend-public/out 同步至后端 console static。
+首个可操作错误：Chromium 在页面创建前 fatal：bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)，SIGTRAP。
+CUA 入口复核：browsers=[]；IAB 返回 Browser is not available: iab；cua.getApp("Google Chrome") 返回 Computer Use was not approved to use Google Chrome。
+影响：rv3_negative.py 没有到达页面文案断言，NEG CONTROL 未复现；本轮没有页面绿态。
+状态：REVIEW_INCIDENT / INCONCLUSIVE；浏览器阻断不是产品 FAIL 或 PASS。

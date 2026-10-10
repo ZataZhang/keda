@@ -1,0 +1,12 @@
+2026-10-10 05:19:58,695 INFO backend.core.use_cases.agent_runner_direct_pr_label: Issue #103 publish stage resolved: normal (origin: caller request).
+2026-10-10 05:19:59,579 WARNING backend.core.use_cases.agent_runner_worktree_create: Could not refresh base 'main' from 'origin'; forking from local base.
+2026-10-10 05:20:09,330 INFO backend.core.use_cases.run_agent_once: Starting agent for Issue #103: https://github.com/fake-owner/fake-repo/issues/103
+2026-10-10 05:20:09,331 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-start] invocation=inv-afb1e1f2f3ef run=rv-fixture#issue-103#20261009T211956Z-2afe42302092 issue=103 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-103-20261010-051956.log
+[05:20:09] fake agent start issue=103
+[05:20:10] fake agent end issue=103
+2026-10-10 05:20:10,392 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-end] invocation=inv-afb1e1f2f3ef run=rv-fixture#issue-103#20261009T211956Z-2afe42302092 issue=103 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1.059 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 05:20:10,392 INFO backend.core.use_cases.run_agent_once: Agent finished for Issue #103: https://github.com/fake-owner/fake-repo/issues/103 (exit_code=0)
+2026-10-10 05:20:10,702 INFO backend.core.use_cases.agent_runner_issue_handlers: Issue #103 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 05:20:10,924 ERROR backend.core.use_cases.agent_runner_orchestrate: Failed Issue #103: Failed after 1 attempts.
+
+[iar-attempt-end]

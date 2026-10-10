@@ -1,0 +1,49 @@
+[NEG CONTROL] PATCH policy=2 status-effective=2 advance_exit=0 promoted=2 inherited_expected=6
+NEG CONTROL: RED reproduced — setting=2 yields 2 promoted, so the inherited expectation of 6 rejects this state.
+[A1] exit=0
+backlog advance (applied) repo=rv-fixture
+ceiling=10 source=inherited running=0 free_slots=10
+promoted tasks/pending/P1-FEAT-20260101-000000-probe.md -> #500
+promoted tasks/pending/P1-FEAT-20260101-000001-probe.md -> #501
+promoted tasks/pending/P1-FEAT-20260101-000002-probe.md -> #502
+promoted tasks/pending/P1-FEAT-20260101-000003-probe.md -> #503
+promoted tasks/pending/P1-FEAT-20260101-000004-probe.md -> #504
+promoted tasks/pending/P1-FEAT-20260101-000005-probe.md -> #505
+ok   A1 ceiling/source: ceiling=10 source=inherited running=0 free_slots=10
+ok   A1 promoted==6 (旧口径会是 2): 6
+ok   A1 issues labelled ready: [500, 501, 502, 503, 504, 505]
+ok   A2 PATCH effective: {'repo_id': 'rv-fixture', 'max_parallel': 2, 'effective_max_parallel': 2, 'runner_capacity': 10, 'ceiling_source': 'policy', 'default_view': 'list', 'updated_at': '2026-10-10T16:51:31+00:00'}
+[A2] exit=0
+backlog advance (applied) repo=rv-fixture
+ceiling=2 source=policy running=0 free_slots=2
+promoted tasks/pending/P1-FEAT-20260101-000000-probe.md -> #500
+promoted tasks/pending/P1-FEAT-20260101-000001-probe.md -> #501
+queued ['tasks/pending/P1-FEAT-20260101-000002-probe.md', 
+'tasks/pending/P1-FEAT-20260101-000003-probe.md', 
+'tasks/pending/P1-FEAT-20260101-000004-probe.md', 
+'tasks/pending/P1-FEAT-20260101-000005-probe.md']
+ok   A2 ceiling/source: ceiling=2 source=policy running=0 free_slots=2
+ok   A2 promoted==2: 2
+ok   A2 queued==4: 4
+[A3] exit=0
+backlog advance (applied) repo=rv-fixture
+ceiling=2 source=policy running=2 free_slots=0
+queued ['tasks/pending/P1-FEAT-20260101-000002-probe.md', 
+'tasks/pending/P1-FEAT-20260101-000003-probe.md', 
+'tasks/pending/P1-FEAT-20260101-000004-probe.md', 
+'tasks/pending/P1-FEAT-20260101-000005-probe.md']
+ok   A3 free_slots==0: ceiling=2 source=policy running=2 free_slots=0
+ok   A3 promoted==0: 0
+ok   A3 queued==4: 4
+[C] exit=0
+2026-10-11 00:51:35 - backend.core.use_cases.backlog_prd_scanner - WARNING - backlog_prd_scanner.py:250 - Invalid issue URL in tasks/archive/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md: https://github.com/ZataZhang/keda/pull/147 （本 PRD 未单独开 Issue，直接经 PR 交付）
+2026-10-11 00:51:39 - backend.core.use_cases.backlog_prd_scanner - WARNING - backlog_prd_scanner.py:271 - Skipping PRD tasks/archive/P1-FEAT-20261007-184115-run-fast-track-rationale-and-operator-skill-decision-protocol.md: Unknown field in Delivery Dependencies: 'Merged'. Expected one of: Depends on tasks/issues, Gate type, Sequence, Notes.
+2026-10-11 00:51:40 - backend.core.use_cases.backlog_dependencies - INFO - backlog_dependencies.py:34 - Failed to look up dependency issue #23: Failed to fetch Issue #23: gh: issue #23 not found
+2026-10-11 00:51:40 - backend.core.use_cases.backlog_state_resolver - INFO - backlog_state_resolver.py:180 - Failed to fetch issue #256: Failed to fetch Issue #256: gh: issue #256 not found
+2026-10-11 00:51:40 - backend.core.use_cases.backlog_state_resolver - INFO - backlog_state_resolver.py:180 - Failed to fetch issue #262: Failed to fetch Issue #262: gh: issue #262 not found
+2026-10-11 00:51:40 - backend.core.use_cases.backlog_state_resolver - INFO - backlog_state_resolver.py:180 - Failed to fetch issue #265: Failed to fetch Issue #265: gh: issue #265 not found
+2026-10-11 00:51:40 - backend.core.use_cases.backlog_state_resolver - INFO - backlog_state_resolver.py:180 - Failed to fetch iss
+ok   C ceiling==10（真实 .kedacode.toml 容量）: 2026-10-11 00:51:35 - backend.core.use_cases.backlog_prd_scanner - WARNING - backlog_prd_scanner.py:250 - Invalid issue URL in tasks/archive/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md: https://github.com/ZataZhang/keda/pull/147 （本 PRD 未单独开 Issue，直接经 PR 交付）
+ok   C source==inherited: 2026-10-11 00:51:35 - backend.core.use_cases.backlog_prd_scanner - WARNING - backlog_prd_scanner.py:250 - Invalid issue URL in tasks/archive/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md: https://github.com/ZataZhang/keda/pull/147 （本 PRD 未单独开 Issue，直接经 PR 交付）
+2026-10-11 00:51:39 - backend.core.use_cases.backlog_prd_scanner - WARNING - backlog_prd_scanner.py:271 - Skipping PRD tasks/archive/P1-
+PROBE RESULT: PASS

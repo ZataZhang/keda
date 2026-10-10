@@ -1,0 +1,12 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+kc console listening on http://127.0.0.1:65011/ (Ctrl+C to stop)
+INFO:     Started server process [56822]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:65011 (Press CTRL+C to quit)
+INFO:     127.0.0.1:65015 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65016 - "GET /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [56822]

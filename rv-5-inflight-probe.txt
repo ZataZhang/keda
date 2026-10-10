@@ -1,0 +1,14 @@
+verifier probe：fail-closed 对「已在跑任务照常推进」的实际影响
+
+== OFF（不注入，正常轮次基线）==
+  passes=1 pass_failed=0 fail_closed=0 running_touched=True started=[100]
+== ON（注入 agent/running 计数失败）==
+  passes=5 pass_failed=0 fail_closed=5 running_touched=True started=[]
+
+== ON 日志尾部 ==
+ses.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:896 - Skipping Issue #200 with label agent/running: no rework marker, no clean local commit ready to publish, and no recoverable rebase/detached worktree.
+2026-10-11 00:52:50 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:178 - Daemon received SIGTERM; terminating in-flight agent trees before exit.
+
+
+结论：
+  ON 时 pass_failed=0、fail_closed=5、running_touched=True、ready_started=[]。

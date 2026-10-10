@@ -1,0 +1,26 @@
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/ready", "--limit", "30", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/running", "--limit", "30", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/supervising", "--limit", "30", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/review", "--limit", "30", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/failed", "--limit", "30", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "501", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "500", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "500", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "500", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "500", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "501", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "501", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "501", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "502", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "502", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "502", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "503", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "503", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "503", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "504", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "504", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "504", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "505", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "505", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "505", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "list", "--label", "agent/running", "--state", "open", "--limit", "3", "--json", "number,title,url,labels,body,state"], "code": 0}

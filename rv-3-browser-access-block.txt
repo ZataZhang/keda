@@ -1,0 +1,7 @@
+RV-3 浏览器入口阻断记录（本轮）
+- `cua.getState()` 返回 `browsers=[]`。
+- `cua.createBrowserTab("iab", "about:blank", {visible:false})` 返回：`Browser is not available: iab`。
+- `cua.getApp("Google Chrome")` 返回：`Computer Use was not approved to use Google Chrome`。
+- `just console-sync` 完成，生产静态页面构建与同步成功。
+- 随后的 `rv3_negative.py` 启动 Playwright Chromium 时，`bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)`，子进程以 SIGTRAP 退出；真实页面断言没有执行。
+- 结论：环境 / 浏览器入口阻断（REVIEW_INCIDENT / INCONCLUSIVE），不能当作产品红态或绿态。

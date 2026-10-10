@@ -1,0 +1,16 @@
+rv-2 global-start: real POST /backlog/start-global, fresh API state, isolated fixture
+Only GitHub CLI and agent executable boundaries are fake; kc console, route, core batch selection, SQLite and kc run children are real.
+
+[inherit-with-unanchored-running] policy=None source=inherited effective=4 unanchored_running=1 started=3 queued=3 spawned_run_processes=3 agent_starts=3
+  started_prds=["tasks/pending/P1-FEAT-20260101-00000-global.md", "tasks/pending/P1-FEAT-20260101-00001-global.md", "tasks/pending/P1-FEAT-20260101-00002-global.md"]
+  queued_prds=["tasks/pending/P1-FEAT-20260101-00003-global.md", "tasks/pending/P1-FEAT-20260101-00004-global.md", "tasks/pending/P1-FEAT-20260101-00005-global.md"]
+  fresh_settings_row=None
+[policy-with-unanchored-running] policy=2 source=policy effective=2 unanchored_running=1 started=1 queued=5 spawned_run_processes=1 agent_starts=1
+  started_prds=["tasks/pending/P1-FEAT-20260101-00000-global.md"]
+  queued_prds=["tasks/pending/P1-FEAT-20260101-00001-global.md", "tasks/pending/P1-FEAT-20260101-00002-global.md", "tasks/pending/P1-FEAT-20260101-00003-global.md", "tasks/pending/P1-FEAT-20260101-00004-global.md", "tasks/pending/P1-FEAT-20260101-00005-global.md"]
+  fresh_settings_row={'repo_id': 'rv-fixture', 'max_parallel': 2, 'default_view': 'list'}
+[policy-full-unanchored-budget] policy=2 source=policy effective=2 unanchored_running=2 started=0 queued=6 spawned_run_processes=0 agent_starts=0
+  started_prds=[]
+  queued_prds=["tasks/pending/P1-FEAT-20260101-00000-global.md", "tasks/pending/P1-FEAT-20260101-00001-global.md", "tasks/pending/P1-FEAT-20260101-00002-global.md", "tasks/pending/P1-FEAT-20260101-00003-global.md", "tasks/pending/P1-FEAT-20260101-00004-global.md", "tasks/pending/P1-FEAT-20260101-00005-global.md"]
+  fresh_settings_row={'repo_id': 'rv-fixture', 'max_parallel': 2, 'default_view': 'list'}
+RESULT: PASS

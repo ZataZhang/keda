@@ -1,0 +1,6 @@
+rv-1 negative control: fake gh returns an empty running-count result despite two live labels.
+faulty_count_budget=[(2, 0, 2)]
+observed_start_probe_issues=[100, 101]
+new_agent_starts=[100, 101]
+actual_running_issues=[100, 101, 200, 201] count=4 ceiling=2
+NEG CONTROL: RED reproduced — the false zero count allowed claims beyond ceiling 2.

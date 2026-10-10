@@ -1,0 +1,177 @@
+# Independent verifier raw response
+# issue: #266
+# verifier agent: qoder
+# builder sha: 64ee09ff8a242d8e2969e283b5a3c6e429ece14b
+# parsed risk: green
+# verdict marker found: yes
+# response chars: 17770
+
+
+[agent tool] Bash: git show --stat 64ee09ff8a242d8e2969e283b5a3c6e429ece14b | head -80
+
+[agent tool] Bash: ls -la tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/ tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/ 2>&1 | head -80
+
+[agent tool] Bash: git log --oneline -15
+
+[agent tool] Bash: git merge-base HEAD main; echo "---base---"; git log --oneline main -3
+
+[agent tool] Bash: git diff --stat $(git merge-base HEAD main) HEAD -- 'src/' 'tests/' 'frontend-admin/' 'config' '*.py' '*.ts' '*.tsx' '*.vue' | tail -60
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/src/backend/core/use_cases/backlog_concurrency.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/pending/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling.md
+
+[agent tool] Bash: find tasks -name '*unified-auto-concurrency-ceiling*.md' 2>/dev/null | grep -v evidence; echo "---"; ls tasks/pending/ tasks/archive/ 2>/dev/null | grep -i 266
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/archive/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling.md
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/src/backend/core/use_cases/run_agent_daemon.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/src/backend/core/use_cases/backlog_actions.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/src/backend/api/routes/agent_runner_backlog.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; rg -n "execution_ceiling" src/backend/core/use_cases/agent_runner_orchestrate.py src/backend/core/use_cases/run_agent_once.py; echo "=== callers of run_once (positional/keyword) ==="; rg -n "run_once\(|RunOnceRequest\(" src/backend | grep -v "test"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; which uv just node npx 2>&1; ls .venv/bin/python 2>&1; node --version 2>&1; echo "---playwright---"; ls frontend-public/node_modules/.bin/playwright 2>&1 || ls node_modules/.bin/playwright 2>&1 || echo "no playwright bin"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; sed -n '140,175p' src/backend/core/use_cases/run_agent_repositories_once.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; .venv/bin/python -m pytest -p no:randomly -q tests/test_backlog_concurrency.py tests/test_backlog_actions.py tests/test_backlog_advance.py tests/test_backlog_autopilot_settings.py tests/test_backlog_api.py tests/test_daemon_parallel_concurrency.py tests/test_console_store.py tests/test_agent_runner_run_targeting.py tests/test_agent_runner_orchestrate.py tests/test_agent_runner_agent_invocation.py 2>&1 | tail -30
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; rg -n "addopts|markers|testpaths|\-m " pyproject.toml pytest.ini setup.cfg tox.ini 2>/dev/null | head; echo "=== just test recipe ==="; rg -n "^test:|test-core|test all|pytest" justfile 2>/dev/null | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; .venv/bin/python -m pytest -o addopts="" -p no:randomly -q tests/test_backlog_concurrency.py tests/test_backlog_actions.py tests/test_backlog_advance.py tests/test_backlog_autopilot_settings.py tests/test_backlog_api.py tests/test_daemon_parallel_concurrency.py tests/test_console_store.py tests/test_agent_runner_run_targeting.py tests/test_agent_runner_orchestrate.py tests/test_agent_runner_agent_invocation.py 2>&1 | tail -20
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv1_daemon.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv1_negative.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/fixture_lib.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; git check-ignore tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work 2>&1; echo "exit=$?"; git status --porcelain | head; echo "--- kc present ---"; ls -la .venv/bin/kc
+
+[agent tool] TaskCreate
+
+[agent tool] TaskCreate
+
+[agent tool] TaskCreate
+
+[agent tool] TaskCreate
+
+[agent tool] TaskCreate
+
+[agent tool] TaskUpdate
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv1_negative.py; echo "=== rv1_negative exit=$? ==="
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv1_daemon.py; echo "=== rv1_daemon exit=$? ==="
+
+[agent tool] TaskUpdate
+
+[agent tool] TaskUpdate
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/verifier_probe.py
+
+[agent tool] Bash: ls -la ~/.kedacode/skills/prd/SKILL.md 2>&1; echo "=== run verifier_probe.py (rv-2 negative control) ==="; cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python verifier_probe.py; echo "=== exit=$? ==="
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv2_advance.py; echo "=== rv2_advance exit=$? ==="; echo "########"; ../../../../.venv/bin/python rv2_global_start.py; echo "=== rv2_global_start exit=$? ==="
+
+[agent tool] TaskUpdate
+
+[agent tool] TaskUpdate
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv4_explicit.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv4_negative.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv4_negative.py; echo "=== rv4_negative exit=$? ==="; echo "######## git diff on production sources after restore ########"; cd /Users/zata/code/keda/.iar-worktrees/issue-266 && git status --porcelain -- src/backend/core/use_cases/run_agent_repositories_once.py src/backend/core/use_cases/agent_runner_orchestration_runtime.py; echo "porcelain_done"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv4_explicit.py; echo "=== rv4_explicit exit=$? ==="; echo "######## overall tree status ########"; cd /Users/zata/code/keda/.iar-worktrees/issue-266 && git status --porcelain | head
+
+[agent tool] TaskUpdate
+
+[agent tool] TaskUpdate
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv5_failclosed.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv5_negative.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/verifier_probe_inflight.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv5_negative.py; echo "=== rv5_negative exit=$? ==="; echo "## source diff check ##"; cd /Users/zata/code/keda/.iar-worktrees/issue-266 && git status --porcelain -- src/backend/core/use_cases/agent_runner_orchestration_runtime.py; echo "porcelain_done"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv5_failclosed.py; echo "=== rv5_failclosed exit=$? ==="; echo "########"; ../../../../.venv/bin/python verifier_probe_inflight.py; echo "=== inflight exit=$? ==="
+
+[agent tool] TaskUpdate
+
+[agent tool] TaskUpdate
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; echo "== npx playwright? =="; npx --no-install playwright --version 2>&1 | head -3; echo "== chromium cache =="; ls ~/Library/Caches/ms-playwright 2>&1 | head; echo "== frontend-public node_modules? =="; ls -d frontend-public/node_modules 2>&1 | head; echo "== console bundle dir (gitignored static) =="; ls -d src/backend/**/console 2>/dev/null; find . -path ./node_modules -prune -o -name "*.py" -path "*console*static*" -print 2>/dev/null | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; node -e "try{require.resolve('playwright');console.log('playwright resolvable')}catch(e){console.log('no playwright in project')}"; ls frontend-public/node_modules 2>/dev/null | head -1 && echo "has frontend node_modules" || echo "NO frontend node_modules"; echo "== driver head =="; sed -n '1,40p' tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv3_driver.mjs
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; ls node_modules/.pnpm/ 2>/dev/null | grep -i playwright; echo "== console-sync recipe =="; rg -n "console-sync|console_sync" justfile scripts/ 2>/dev/null | head; echo "== current bundle present? =="; ls -la src/backend/api/static/console/ 2>/dev/null | head -3
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; sed -n '560,600p' justfile
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; which pnpm; just console-sync 2>&1 | tail -15; echo "=== console-sync exit=${PIPESTATUS[0]} ==="
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv3_negative.py; echo "=== rv3_negative exit=$? ==="
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts && ../../../../.venv/bin/python rv3_console.py; echo "=== rv3_console exit=$? ==="; echo "## tree status ##"; cd /Users/zata/code/keda/.iar-worktrees/issue-266 && git status --porcelain | head
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/rv-3-backlog-concurrency-capped.png
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/rv-3-backlog-concurrency-inherit.png
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; echo "== any alembic migration in the delivery diff? =="; git diff --stat 7940d5f8 HEAD -- alembic/ | tail -5 || true; echo "(empty above = no migration)"; echo "== ruff on new/changed core files =="; .venv/bin/ruff check src/backend/core/use_cases/backlog_concurrency.py src/backend/core/use_cases/agent_runner_orchestration_runtime.py src/backend/core/use_cases/backlog_actions.py src/backend/core/use_cases/run_agent_daemon.py src/backend/api/routes/agent_runner_backlog.py 2>&1 | tail -15; echo "== evidence tracked? =="; git ls-files tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/ | head -3; git check-ignore tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/rv-1-daemon-claim-budget.log; echo "checkignore_exit=$?"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; uv run --quiet ruff check src/backend/core/use_cases/backlog_concurrency.py 2>&1 | tail -8; echo "=== resolver edge cases ==="; uv run --quiet python -c "
+from backend.core.use_cases.backlog_concurrency import resolve_execution_ceiling as r, describe_ceiling_source as d
+cases=[(None,10),(2,10),(10,10),(8,4),(1,1),(11,10)]
+for p,c in cases:
+    e=r(p,c); print(f'policy={p} cap={c} -> eff={e} src={d(p,e)}')
+for bad in [(0,10),(2,0),(0,0)]:
+    try: r(*bad); print('NO RAISE', bad)
+    except ValueError as ex: print('raises', bad, '->', ex)
+"
+
+[agent tool] TaskUpdate
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-266; git status --porcelain; echo "porcelain_exit=$?"; git rev-parse HEAD
+
+[agent result] Tree clean at HEAD 64ee09ff. Here is my independent verification report.
+
+## Verifier report — Issue #266 unified auto-execution concurrency ceiling
+
+I derived my own checks from the intent and ran every real entry point myself (real `kc` binary, real daemon loop, real FastAPI routes, real SQLite, real Playwright-rendered console page — only `gh` and the agent executable are faked, per the PRD's mock boundary). I did not trust the builder's scripts blindly: I read the production code, ran the builder's RV scripts, ran two verifier-authored probes, and ran all five negative controls.
+
+### Code review (independently)
+- `backlog_concurrency.py:29` `resolve_execution_ceiling` is the single parse point (`capacity if policy is None else min(policy,capacity)`); `describe_ceiling_source` yields inherited/policy/capped_by_capacity. All three consumers (daemon claim `run_once`, `advance_backlog_queue`, `start_global_backlog`) call it — no fourth concept.
+- `agent_runner_orchestration_runtime.py:755` gates only the ready channel, only when `execution_ceiling is not None and target_issue_summary is None`; budget = `max(0, ceiling − live_running)`; count failure sets budget 0 (fail-closed) yet still discovers running recovery via a bounded open-issue scan.
+- Explicit path `run_agent_repositories_once.py:146` never passes `execution_ceiling` → exemption holds structurally.
+- Route `start-global` request has no `max_parallel` and never persists settings; `PATCH /settings` null = delete row.
+
+### What I ran and observed
+- **Target tests**: 218 passed (concurrency/actions/advance/autopilot/api/console-store/daemon/run-targeting/orchestrate/invocation), forced full (no testmon).
+- **rv-1** `rv1_negative.py` → RED reproduced (poisoned running-count=0 lets claims past ceiling 2 → actual running 4). `rv1_daemon.py` → P2 (2,0,2) peak=2; R1 (2,1,1); R0 (2,2,0) zero claims no crash; UNSET (10,0,10) all 6 claimed. Confirms budget = ceiling − running and inherit-on-unset.
+- **rv-2** `verifier_probe.py` (independent): NEG CONTROL RED (policy=2 → promoted 2 ≠ inherited 6); A1 unset→ceiling=10 promoted 6; A2 policy→2/queued4; A3 running consumes free_slots=0; **C: the real worktree repo with empty settings reports ceiling=10 source=inherited** — directly answers the operator's original "page 2 vs config 10". `rv2_advance.py` shows all three sources incl. capped_by_capacity (policy 8 > cap 4 → 4). `rv2_global_start.py`: real POST start-global, batch = ceiling − unanchored-running, `fresh_settings_row=None` proves no persistence.
+- **rv-4** `rv4_negative.py` → RED (injecting ceiling into explicit CLI + removing the target guard blocks Issue 100, AssertionError ([],[])), sources restored byte-for-byte. `rv4_explicit.py` → ceiling=1 full, `kc run --issue 100` still completes; `--all-ready` with live daemon → exit 5.
+- **rv-5** `rv5_negative.py` → RED (old propagate-exception branch: pass_failed=1, recovery not discovered), source restored. `rv5_failclosed.py` → fail-closed warning, zero new claims, running recovery still discovered, 2 passes 0 failed. `verifier_probe_inflight.py` → under count failure: pass_failed=0, fail_closed=5, running_touched=True, no ready started — proves in-flight tasks keep advancing without crash.
+- **rv-3** Rebuilt the console bundle from HEAD source (`just console-sync`), then `rv3_negative.py` → RED (6 assertions: old bundle shows fabricated 2 / raw policy 8 instead of effective 4), bundle restored. `rv3_console.py` → PASS all five states via real page + fresh GET + PATCH→SQLite, row deleted on restore. I visually inspected the capped and inherit screenshots: capped renders "并发 4（受 runner 容量限制），容量 4" (headline = effective 4, editor = stored 8); inherit renders "并发 4（继承 runner 配置）".
+
+### Adversarial probes
+- Resolver edges: None→inherited; policy<cap→policy; policy==cap→policy; policy>cap→capped; policy 11/cap 10→capped; invalid (0 or capacity<1) raise ValueError. All correct.
+- No Alembic migration in the delivery diff (schema unchanged, as required).
+- Tree `git status --porcelain` empty after every re-run (fixtures under gitignored `scripts/work/`; regenerated tracked evidence matches committed bytes).
+
+### Disclosed nuance (not a gap)
+When a daemon is started with `--concurrency` overriding repo config, its capacity differs from the page's config-derived capacity; the page number won't reflect an overridden daemon's actual ceiling. This is the documented, user-confirmed exception (PRD §5/§12 and the HEAD docs commit explicitly explain it), and matches the agreed intent — so it does not count against the verdict.
+
+### Conclusion
+Every measurable objective and all five realistic-validation items were independently confirmed on real entry points, and every negative control provably goes RED with clean restoration. The behavior matches the intent: one visible/settable/inheritable effective ceiling enforced at both backfill and claim, explicit runs exempt, fail-closed on count errors, page shows effective value + source.
+
+<!-- iar:verifier-verdict risk=green -->

@@ -1,0 +1,46 @@
+===== rv-5-negative-control.txt =====
+rv-5 negative control: 暂时注入旧行为（恢复候选查询异常直接抛出）。
+执行真实 kc daemon fixture；计数失败与 agent/running 查询失败均由 fake gh 定点注入。
+故意恢复旧分支后 rv5_failclosed.py exit=1
+daemon_pass_failed=1 running_recovery_discovered=False
+--- 断言输出 ---
+
+Traceback (most recent call last):
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv5_failclosed.py", line 107, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv5_failclosed.py", line 94, in main
+    assert running_recovery_discovered, "existing running recovery candidate was not discovered"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: existing running recovery candidate was not discovered
+
+NEG CONTROL: RED reproduced — 旧行为让 daemon pass 失败且在途恢复项未发现。
+生产源码已按字节还原。
+
+===== rv-5-fail-closed.log =====
+fail_closed_warnings=['gh: injection: cannot count agent/running; claiming zero new Issues this pass (fail-closed).']
+ceiling_lines=[]
+daemon_passes_observed=2 failed_passes=0 running_recovery_discovered=True agent_started=[]
+  | 2026-10-10 23:51:17 - backend.core.use_cases.agent_runner_worktree_probe - INFO - agent_runner_worktree_probe.py:106 - Skipping existing local commit probe for Issue #200: worktree path does not exist (path_command output): /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv5/repo/.iar-worktrees/issue-200. path_command return_code=0, stdout="Warning: 无法创建日志文件处理器: [Errno 1] Operation not permitted: '/Users/zata/code/keda/logs/app-2026-10-10.log'\n/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv5/repo/.iar-worktrees/issue-200\n".
+  | 2026-10-10 23:51:17 - backend.core.use_cases.agent_runner_worktree_probe - INFO - agent_runner_worktree_probe.py:143 - Skipping rebase-recovery probe for Issue #200: worktree path does not exist (path_command output): /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv5/repo/.iar-worktrees/issue-200. path_command return_code=0, stdout="Warning: 无法创建日志文件处理器: [Errno 1] Operation not permitted: '/Users/zata/code/keda/logs/app-2026-10-10.log'\n/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv5/repo/.iar-worktrees/issue-200\n".
+  | 2026-10-10 23:51:17 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:891 - Skipping Issue #200 with label agent/running: no rework marker, no clean local commit ready to publish, and no recoverable rebase/detached worktree.
+ready_still_ready=[100, 101, 102, 103]
+  | 2026-10-10 23:51:17 - backend.core.use_cases.agent_runner_orchestrate - WARNING - agent_runner_orchestration_runtime.py:765 - Failed to count live 'agent/running' Issues for the concurrency ceiling: Command '['gh', 'issue', 'list', '--label', 'agent/running', '--state', 'open', '--limit', '3', '--json', 'number,title,url,labels,body,state']' returned non-zero exit status 127.
+  | gh: injection: cannot count agent/running; claiming zero new Issues this pass (fail-closed).
+
+===== rv-5-inflight-probe.txt =====
+verifier probe：fail-closed 对「已在跑任务照常推进」的实际影响
+
+== OFF（不注入，正常轮次基线）==
+  passes=1 pass_failed=0 fail_closed=0 running_touched=True started=[100]
+== ON（注入 agent/running 计数失败）==
+  passes=5 pass_failed=0 fail_closed=5 running_touched=True started=[]
+
+== ON 日志尾部 ==
+No open Issues found with label agent/ready, eligible running rework, or blocked resolution.
+2026-10-10 23:52:50 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:441 - Sleeping for 1 seconds before next poll.
+2026-10-10 23:52:51 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:178 - Daemon received SIGTERM; terminating in-flight agent trees before exit.
+
+
+结论：
+  ON 时 pass_failed=0、fail_closed=5、running_touched=True、ready_started=[]。

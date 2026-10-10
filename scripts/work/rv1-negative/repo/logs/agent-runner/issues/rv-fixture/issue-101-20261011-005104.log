@@ -1,0 +1,9 @@
+2026-10-11 00:51:05,657 INFO backend.core.use_cases.agent_runner_direct_pr_label: Issue #101 publish stage resolved: normal (origin: caller request).
+2026-10-11 00:51:06,472 INFO backend.core.use_cases.run_agent_once: Starting agent for Issue #101: https://github.com/fake-owner/fake-repo/issues/101
+2026-10-11 00:51:06,472 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-start] invocation=inv-e1ee32d37be1 run=rv-fixture#issue-101#20261010T165104Z-c27008f70876 issue=101 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-101-20261011-005104.log
+[00:51:06] fake agent start issue=101
+2026-10-11 00:51:07,345 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-end] invocation=inv-e1ee32d37be1 run=rv-fixture#issue-101#20261010T165104Z-c27008f70876 issue=101 attempt=1 phase=implementation role=implementer executor=claude outcome=error exit_code=-15 duration_s=0.872 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=nonzero_exit
+2026-10-11 00:51:07,499 INFO backend.core.use_cases.agent_runner_issue_handlers: Issue #101 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-11 00:51:07,641 ERROR backend.core.use_cases.agent_runner_orchestrate: Failed Issue #101: Failed after 1 attempts.
+
+[iar-attempt-end]

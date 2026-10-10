@@ -1,0 +1,20 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+note: 'IAR_SKIP_GH_AUTH_CHECK' has been renamed to 'KEDACODE_SKIP_GH_AUTH_CHECK'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+2026-10-11 00:52:29 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:272 - Daemon pass for repository 'rv-fixture' (RV Fixture).
+note: 'IAR_PRD_SKILL_PATH' has been renamed to 'KEDACODE_PRD_SKILL_PATH'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+2026-10-11 00:52:30 - backend.core.use_cases.agent_runner_orchestrate - WARNING - agent_runner_orchestration_runtime.py:765 - Failed to count live 'agent/running' Issues for the concurrency ceiling: Command '['gh', 'issue', 'list', '--label', 'agent/running', '--state', 'open', '--limit', '3', '--json', 'number,title,url,labels,body,state']' returned non-zero exit status 127.
+
+--- stderr/stdout ---
+gh: injection: cannot count agent/running; claiming zero new Issues this pass (fail-closed).
+2026-10-11 00:52:30 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:786 - Concurrency ceiling: ceiling=2 running=unknown ready_budget=0
+2026-10-11 00:52:30 - backend.core.use_cases.agent_runner_orchestrate - WARNING - agent_runner_orchestration_runtime.py:855 - Could not query 'agent/running' recovery candidates after the running-count failure (Command '['gh', 'issue', 'list', '--state', 'open', '--label', 'agent/running', '--limit', '2', '--json', 'number,title,url,labels,body,state']' returned non-zero exit status 127.
+
+--- stderr/stdout ---
+gh: injection: cannot count agent/running); retrying with a bounded open-Issue scan.
+2026-10-11 00:52:30 - backend.core.use_cases.agent_runner_worktree_probe - INFO - agent_runner_worktree_probe.py:106 - Skipping existing local commit probe for Issue #200: worktree path does not exist (path_command output): /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv5/repo/.iar-worktrees/issue-200. path_command return_code=0, stdout='/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv5/repo/.iar-worktrees/issue-200\n'.
+2026-10-11 00:52:30 - backend.core.use_cases.agent_runner_worktree_probe - INFO - agent_runner_worktree_probe.py:143 - Skipping rebase-recovery probe for Issue #200: worktree path does not exist (path_command output): /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv5/repo/.iar-worktrees/issue-200. path_command return_code=0, stdout='/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv5/repo/.iar-worktrees/issue-200\n'.
+2026-10-11 00:52:30 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:896 - Skipping Issue #200 with label agent/running: no rework marker, no clean local commit ready to publish, and no recoverable rebase/detached worktree.
+2026-10-11 00:52:30 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:931 - No open Issues found with label agent/ready, eligible running rework, or blocked resolution.
+2026-10-11 00:52:30 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:441 - Sleeping for 1 seconds before next poll.
+2026-10-11 00:52:31 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:272 - Daemon pass for repository 'rv-fixture' (RV Fixture).
+2026-10-11 00:52:31 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:178 - Daemon received SIGTERM; terminating in-flight agent trees before exit.

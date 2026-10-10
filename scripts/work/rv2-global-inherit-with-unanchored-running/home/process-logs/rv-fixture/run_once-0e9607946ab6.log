@@ -1,0 +1,11 @@
+note: 'IAR_SKIP_GH_AUTH_CHECK' has been renamed to 'KEDACODE_SKIP_GH_AUTH_CHECK'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+2026-10-11 00:51:44 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:97 - Running once for repository 'rv-fixture' (RV Fixture).
+2026-10-11 00:51:45 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #600 publish stage resolved: normal (origin: caller request).
+2026-10-11 00:51:46 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #600: https://github.com/fake-owner/fake-repo/issues/600
+2026-10-11 00:51:46 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-019f6df42e6c run=rv-fixture#issue-600#20261010T165144Z-7f1fcd64102f issue=600 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-600-20261011-005144.log
+[00:51:46] fake agent start issue=600
+[00:51:46] fake agent end issue=600
+2026-10-11 00:51:46 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-019f6df42e6c run=rv-fixture#issue-600#20261010T165144Z-7f1fcd64102f issue=600 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=0.127 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-11 00:51:46 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:849 - Agent finished for Issue #600: https://github.com/fake-owner/fake-repo/issues/600 (exit_code=0)
+2026-10-11 00:51:46 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #600 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-11 00:51:46 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:545 - Failed Issue #600: Failed after 1 attempts.

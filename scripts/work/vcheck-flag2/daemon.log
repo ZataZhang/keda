@@ -1,0 +1,24 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+note: 'IAR_SKIP_GH_AUTH_CHECK' has been renamed to 'KEDACODE_SKIP_GH_AUTH_CHECK'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+2026-10-10 17:17:39 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:272 - Daemon pass for repository 'rv-fixture' (RV Fixture).
+note: 'IAR_PRD_SKILL_PATH' has been renamed to 'KEDACODE_PRD_SKILL_PATH'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+2026-10-10 17:17:39 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:769 - Concurrency ceiling: ceiling=2 running=0 ready_budget=2
+[issue #100 agent=claude status=running]
+[issue #101 agent=claude status=running]
+2026-10-10 17:17:40 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #100 publish stage resolved: normal (origin: caller request).
+2026-10-10 17:17:40 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:217 - Issue #101 publish stage resolved: normal (origin: caller request).
+2026-10-10 17:17:41 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #100: https://github.com/fake-owner/fake-repo/issues/100
+2026-10-10 17:17:41 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-129f836f8bbd run=rv-fixture#issue-100#20261010T091739Z-37c9ad11e754 issue=100 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-100-20261010-171739.log
+[issue #100 status=running] [17:17:41] fake agent start issue=100
+2026-10-10 17:17:42 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:713 - Starting agent for Issue #101: https://github.com/fake-owner/fake-repo/issues/101
+2026-10-10 17:17:42 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-475ff3cef5d7 run=rv-fixture#issue-101#20261010T091739Z-5f93c8940d74 issue=101 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-101-20261010-171739.log
+[issue #101 status=running] [17:17:42] fake agent start issue=101
+2026-10-10 17:17:43 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:178 - Daemon received SIGTERM; terminating in-flight agent trees before exit.
+2026-10-10 17:17:43 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-475ff3cef5d7 run=rv-fixture#issue-101#20261010T091739Z-5f93c8940d74 issue=101 attempt=1 phase=implementation role=implementer executor=claude outcome=error exit_code=-15 duration_s=1.522 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=nonzero_exit
+2026-10-10 17:17:43 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-129f836f8bbd run=rv-fixture#issue-100#20261010T091739Z-37c9ad11e754 issue=100 attempt=1 phase=implementation role=implementer executor=claude outcome=error exit_code=-15 duration_s=2.044 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=nonzero_exit
+2026-10-10 17:17:43 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #101 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 17:17:43 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:553 - Issue #100 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 17:17:43 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #101: Failed after 1 attempts.
+2026-10-10 17:17:43 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:544 - Failed Issue #100: Failed after 1 attempts.
+[issue #101 status=failed]
+[issue #100 status=failed]

@@ -1,0 +1,10 @@
+[agent_runner.console]
+history_db_path = "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/vp-c/real-home/console.db"
+process_registry_path = "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/vp-c/real-home/processes.json"
+process_log_dir = "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/vp-c/real-home/process-logs"
+port = 0
+
+[agent_runner.repositories.keda]
+path = "/Users/zata/code/keda/.iar-worktrees/issue-266"
+enabled = true
+display_name = "keda worktree issue-266"

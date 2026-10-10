@@ -1,0 +1,17 @@
+verifier probe：fail-closed 对「已在跑任务照常推进」的实际影响
+
+== OFF（不注入，正常轮次基线）==
+  passes=1 pass_failed=0 fail_closed=0 running_touched=True started=[100]
+== ON（注入 agent/running 计数失败）==
+  passes=3 pass_failed=0 fail_closed=3 running_touched=True started=[]
+
+== ON 日志尾部 ==
+bel', 'agent/running', '--limit', '2', '--json', 'number,title,url,labels,body,state']' returned non-zero exit status 127.
+
+--- stderr/stdout ---
+gh: injection: cannot count agent/running); retrying with a bounded open-Issue scan.
+2026-10-10 11:37:18 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:178 - Daemon received SIGTERM; terminating in-flight agent trees before exit.
+
+
+结论：
+  ON 时 pass_failed=0；若 pass_failed>0 且 running_touched=False，则 fail-closed 之后同一轮的 running 通道发现查询也会失败，整轮 pass 被抛出，in-flight 推进被中断（与 PRD「不中断已在跑任务」有差距）。

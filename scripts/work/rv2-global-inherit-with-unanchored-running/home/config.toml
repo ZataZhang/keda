@@ -1,0 +1,21 @@
+[agent_runner.console]
+history_db_path = "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv2-global-inherit-with-unanchored-running/home/.kedacode/console.db"
+process_registry_path = "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv2-global-inherit-with-unanchored-running/home/.kedacode/processes.json"
+process_log_dir = "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv2-global-inherit-with-unanchored-running/home/process-logs"
+port = 55849
+
+[agent_runner.runner]
+runner_command = ["/Users/zata/code/keda/.iar-worktrees/issue-266/.venv/bin/kc"]
+
+[agent_runner.repositories.rv-fixture]
+path = "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/rv2-global-inherit-with-unanchored-running/repo"
+enabled = true
+display_name = "RV Fixture"
+
+[agent_runner.agents.claude]
+bin = "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/fake_agent"
+label = "agent/claude"
+
+[agent_runner.agents.claude.profiles.run]
+args = ["--rv-fake-agent"]
+output_protocol = "plain"

@@ -1,0 +1,131 @@
+# rv-3 最终 tree 复跑（2026-10-10 16:06，HEAD=4335947c / tree=61d7a965b07697782205d1bd98e922362e979c1a）
+# 命令逐字取自 evidence.json item 3：just console-sync && python rv3_negative.py && python rv3_console.py
+# --- just console-sync ---
+$ next build
+⚠ Specified "rewrites" will not automatically work with "output: export". See more info here: https://nextjs.org/docs/messages/export-no-custom-routes
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /Users/zata/code/keda/pnpm-workspace.yaml as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /Users/zata/code/keda/.iar-worktrees/issue-266/pnpm-workspace.yaml
+
+▲ Next.js 16.2.6 (Turbopack)
+
+  Creating an optimized production build ...
+⚠ Specified "rewrites" will not automatically work with "output: export". See more info here: https://nextjs.org/docs/messages/export-no-custom-routes
+✓ Compiled successfully in 5.7s
+  Running TypeScript ...
+  Finished TypeScript in 5.9s ...
+  Collecting page data using 9 workers ...
+  Generating static pages using 9 workers (0/12) ...
+  Generating static pages using 9 workers (3/12) 
+  Generating static pages using 9 workers (6/12) 
+  Generating static pages using 9 workers (9/12) 
+✓ Generating static pages using 9 workers (12/12) in 465ms
+  Finalizing page optimization ...
+⚠ rewrites, redirects, and headers are not applied when exporting your application, detected (rewrites). See more info here: https://nextjs.org/docs/messages/export-no-custom-routes
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /app/backlog
+├ ○ /app/dashboard
+├ ○ /app/ideas
+├ ○ /app/processes
+├ ○ /app/repositories
+├ ○ /app/settings
+├ ○ /app/stats
+└ ○ /login
+
+
+○  (Static)  prerendered as static content
+
+✅ 已同步 /Users/zata/code/keda/.iar-worktrees/issue-266/frontend-public/out -> /Users/zata/code/keda/.iar-worktrees/issue-266/src/backend/api/static/console （硬刷新浏览器 Cmd+Shift+R 即可看到新版）
+# --- rv3_negative.py（现场负控：旧 bundle 口径令页面断言变红，随后按字节还原）---
+注入完成，运行 rv3_console.py（期望 RESULT: FAIL / 非零退出）。
+rv3_console.py exit=1
+
+[inherit] action=noop
+  期望文案: 并发 4（继承 runner 配置）
+  实测文案: 并发 2（继承 runner 配置）
+  截图: rv-3-backlog-concurrency-inherit.png
+  fresh GET /autopilot: ceiling_source=inherited effective=4 max_parallel=None runner_capacity=4
+[policy] action=set_save
+  期望文案: 并发 2（Backlog 设置）
+  实测文案: 并发 2（Backlog 设置）
+  截图: rv-3-backlog-concurrency-policy.png
+  fresh GET /autopilot: ceiling_source=policy effective=2 max_parallel=2 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 2} 响应体 max_parallel=2 effective=2 source=policy
+[capped] action=set_save
+  期望文案: 并发 4（受 runner 容量限制），容量 4
+  实测文案: 并发 8（受 runner 容量限制），容量 4
+  截图: rv-3-backlog-concurrency-capped.png
+  fresh GET /autopilot: ceiling_source=capped_by_capacity effective=4 max_parallel=8 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 8} 响应体 max_parallel=8 effective=4 source=capped_by_capacity
+[saved4-fresh] action=set_save
+  期望文案: 并发 4（Backlog 设置）
+  实测文案: 并发 4（Backlog 设置）
+  截图: rv-3-backlog-concurrency-saved4-fresh.png
+  fresh GET /autopilot: ceiling_source=policy effective=4 max_parallel=4 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 4} 响应体 max_parallel=4 effective=4 source=policy
+[restored-fresh] action=restore
+  期望文案: 并发 4（继承 runner 配置）
+  实测文案: 并发 2（继承 runner 配置）
+  截图: rv-3-backlog-concurrency-restored-fresh.png
+  fresh GET /autopilot: ceiling_source=inherited effective=4 max_parallel=None runner_capacity=4
+  写入 status=200 请求体={"max_parallel": null} 响应体 max_parallel=None effective=4 source=inherited
+[DB 终态] 恢复继承后设置行: None
+
+RESULT: FAIL
+  - inherit: 页面文案不匹配 —— 期望「并发 4（继承 runner 配置）」实测「并发 2（继承 runner 配置）」
+  - inherit: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 2（继承 runner 配置）
+  - capped: 页面文案不匹配 —— 期望「并发 4（受 runner 容量限制），容量 4」实测「并发 8（受 runner 容量限制），容量 4」
+  - capped: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 8（受 runner 容量限制），容量 4
+  - restored-fresh: 页面文案不匹配 —— 期望「并发 4（继承 runner 配置）」实测「并发 2（继承 runner 配置）」
+  - restored-fresh: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 2（继承 runner 配置）
+
+--- stderr ---
+
+RV-3 FAILED: ['inherit: 页面文案不匹配 —— 期望「并发 4（继承 runner 配置）」实测「并发 2（继承 runner 配置）」', 'inherit: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 2（继承 runner 配置）', 'capped: 页面文案不匹配 —— 期望「并发 4（受 runner 容量限制），容量 4」实测「并发 8（受 runner 容量限制），容量 4」', 'capped: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 8（受 runner 容量限制），容量 4', 'restored-fresh: 页面文案不匹配 —— 期望「并发 4（继承 runner 配置）」实测「并发 2（继承 runner 配置）」', 'restored-fresh: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 2（继承 runner 配置）']
+
+
+NEG CONTROL: RED 已复现
+NEG CONTROL PASSED (rv-3 可变红，且已还原 bundle)
+bundle 还原：OK 字节一致
+# --- rv3_console.py（真实页面正控）---
+[inherit] action=noop
+  期望文案: 并发 4（继承 runner 配置）
+  实测文案: 并发 4（继承 runner 配置）
+  截图: rv-3-backlog-concurrency-inherit.png
+  fresh GET /autopilot: ceiling_source=inherited effective=4 max_parallel=None runner_capacity=4
+[policy] action=set_save
+  期望文案: 并发 2（Backlog 设置）
+  实测文案: 并发 2（Backlog 设置）
+  截图: rv-3-backlog-concurrency-policy.png
+  fresh GET /autopilot: ceiling_source=policy effective=2 max_parallel=2 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 2} 响应体 max_parallel=2 effective=2 source=policy
+[capped] action=set_save
+  期望文案: 并发 4（受 runner 容量限制），容量 4
+  实测文案: 并发 4（受 runner 容量限制），容量 4
+  截图: rv-3-backlog-concurrency-capped.png
+  fresh GET /autopilot: ceiling_source=capped_by_capacity effective=4 max_parallel=8 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 8} 响应体 max_parallel=8 effective=4 source=capped_by_capacity
+[saved4-fresh] action=set_save
+  期望文案: 并发 4（Backlog 设置）
+  实测文案: 并发 4（Backlog 设置）
+  截图: rv-3-backlog-concurrency-saved4-fresh.png
+  fresh GET /autopilot: ceiling_source=policy effective=4 max_parallel=4 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 4} 响应体 max_parallel=4 effective=4 source=policy
+[restored-fresh] action=restore
+  期望文案: 并发 4（继承 runner 配置）
+  实测文案: 并发 4（继承 runner 配置）
+  截图: rv-3-backlog-concurrency-restored-fresh.png
+  fresh GET /autopilot: ceiling_source=inherited effective=4 max_parallel=None runner_capacity=4
+  写入 status=200 请求体={"max_parallel": null} 响应体 max_parallel=None effective=4 source=inherited
+[DB 终态] 恢复继承后设置行: None
+
+RESULT: PASS
+  三态文案、fresh GET 负载、PATCH 写入与终态 DB 行删除全部一致；数字与来源均由真实 API 渲染，非组件预览 / mock。
+
+RV-3 PASSED

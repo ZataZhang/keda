@@ -1,0 +1,17 @@
+rv-5 negative control: 暂时注入旧行为（恢复候选查询异常直接抛出）。
+执行真实 kc daemon fixture；计数失败与 agent/running 查询失败均由 fake gh 定点注入。
+故意恢复旧分支后 rv5_failclosed.py exit=1
+daemon_pass_failed=1 running_recovery_discovered=False
+--- 断言输出 ---
+
+Traceback (most recent call last):
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv5_failclosed.py", line 106, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv5_failclosed.py", line 93, in main
+    assert running_recovery_discovered, "existing running recovery candidate was not discovered"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: existing running recovery candidate was not discovered
+
+NEG CONTROL: RED reproduced — 旧行为让 daemon pass 失败且在途恢复项未发现。
+生产源码已按字节还原。

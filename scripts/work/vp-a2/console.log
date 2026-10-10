@@ -1,0 +1,19 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+kc console listening on http://127.0.0.1:55795/ (Ctrl+C to stop)
+INFO:     Started server process [20584]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:55795 (Press CTRL+C to quit)
+2026-10-11 00:51:31 - backend.core.use_cases.monitor_snapshots - WARNING - monitor_snapshots.py:644 - Monitor scheduler failed to read settings: database is locked
+2026-10-11 00:51:31 - backend.core.use_cases.monitor_snapshots - INFO - monitor_snapshots.py:623 - Monitor sync initial pass: 1 repositories have no snapshot yet.
+INFO:     127.0.0.1:55804 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+note: 'IAR_PRD_SKILL_PATH' has been renamed to 'KEDACODE_PRD_SKILL_PATH'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+INFO:     127.0.0.1:55805 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+2026-10-11 00:51:31 - backend.core.use_cases.monitor_snapshots - WARNING - monitor_snapshots.py:483 - Monitor sync failed for rv-fixture: prd skill 解析脚本以退出码 -15 结束：/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/prd_skill_contract/scripts/prd_contract.py
+--- stderr ---
+
+2026-10-11 00:51:31 - backend.core.use_cases.agent_runner_monitor - INFO - agent_runner_monitor.py:709 - Queue scan failed for label agent/supervising: Command '['gh', 'issue', 'list', '--state', 'open', '--label', 'agent/supervising', '--limit', '30', '--json', 'number,title,url,labels,body,state']' died with <Signals.SIGTERM: 15>.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [20584]

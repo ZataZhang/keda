@@ -1,0 +1,31 @@
+{"argv": ["issue", "view", "500", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "500", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "500", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "501", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "501", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "501", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "502", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "502", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "502", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "503", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "503", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "503", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "504", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "504", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "504", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "505", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "505", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "505", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "list", "--label", "agent/running", "--state", "open", "--limit", "11", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "500", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "500", "--add-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "view", "501", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "501", "--add-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "view", "502", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "502", "--add-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "view", "503", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "503", "--add-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "view", "504", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "504", "--add-label", "agent/ready"], "code": 0}
+{"argv": ["issue", "view", "505", "--json", "labels"], "code": 0}
+{"argv": ["issue", "edit", "505", "--add-label", "agent/ready"], "code": 0}

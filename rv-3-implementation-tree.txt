@@ -1,0 +1,5 @@
+commit=46137963afb241934e10cb3324df5d07e8e5475d
+tree=b9b5d6b7e0ba2161b11586f8b35d9b1477de09a5
+production_and_test_diff_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+RV-3 note: current browser retry remains INCONCLUSIVE; historical real-page evidence is retained. The current review tree has no changes to frontend-public/, the settings GET/PATCH route, or the settings read/write use case.

@@ -1,0 +1,60 @@
+rv-3 现场负控：在 console 静态构建产物里把控制条数字改回旧口径（伪造默认 2）。
+注入文件：src/backend/api/static/console/_next/static/chunks/0-38slmpdbxg7.js（gitignored 构建产物，非生产源码）
+锚点：e.effective_max_parallel,"（"
+替换为：(e.max_parallel??2),"（"
+
+注入完成，运行 rv3_console.py（期望 RESULT: FAIL / 非零退出）。
+rv3_console.py exit=1
+
+
+--- stderr ---
+Traceback (most recent call last):
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv3_console.py", line 247, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv3_console.py", line 125, in main
+    run_driver(fixture.port, plan_path, summary_path)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv3_console.py", line 93, in run_driver
+    raise RuntimeError(
+        f"driver failed (exit {result.returncode})\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+RuntimeError: driver failed (exit 1)
+STDOUT:
+
+STDERR:
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+browserType.launch: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Users/zata/Library/Caches/ms-playwright/chromium_headless_shell-1217/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --enable-automation --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/playwright_chromiumdev_profile-jnIiRf --remote-debugging-pipe --no-startup-window
+<launched> pid=90474
+[pid=90474][err] [1010/113531.345305:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+[pid=90474][err] [1010/113531.353800:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+[pid=90474][err] [1010/113531.357482:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.90474: Permission denied (1100)
+Call log:
+[2m  - <launching> /Users/zata/Library/Caches/ms-playwright/chromium_headless_shell-1217/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --enable-automation --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/playwright_chromiumdev_profile-jnIiRf --remote-debugging-pipe --no-startup-window[22m
+[2m  - <launched> pid=90474[22m
+[2m  - [pid=90474][err] [1010/113531.345305:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9[22m
+[2m  - [pid=90474][err] [1010/113531.353800:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.[22m
+[2m  - [pid=90474][err] [1010/113531.357482:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.90474: Permission denied (1100)[22m
+[2m  - [pid=90474] <gracefully close start>[22m
+[2m  - [pid=90474] <kill>[22m
+[2m  - [pid=90474] <will force kill>[22m
+[2m  - [pid=90474] exception while trying to kill process: Error: kill EPERM[22m
+[2m  - [pid=90474] <process did exit: exitCode=null, signal=SIGTRAP>[22m
+[2m  - [pid=90474] starting temporary directories cleanup[22m
+[2m  - [pid=90474] finished temporary directories cleanup[22m
+[2m  - [pid=90474] <gracefully close end>[22m
+
+    at /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv3_driver.mjs:45:32
+
+Node.js v22.22.2
+
+
+
+NEG CONTROL: 未复现红态（负控无效）
+bundle 还原：OK 字节一致

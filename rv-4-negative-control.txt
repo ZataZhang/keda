@@ -1,0 +1,17 @@
+rv-4 negative control: 暂时注入回归——显式 CLI 传入 ceiling，定向请求也进入预算门控。
+执行真实 kc run --issue fixture；外部 GitHub 与 agent 仅使用隔离 fake 边界。
+故意注入旧行为后 rv4_explicit.py exit=1
+target_issue_100_agent_started=False
+--- 断言输出 ---
+
+Traceback (most recent call last):
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv4_explicit.py", line 109, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/rv4_explicit.py", line 74, in main
+    assert 100 in started and 100 in ended, (started, ended)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ([], [])
+
+NEG CONTROL: RED reproduced — ceiling=1 且已有 1 个在跑时，回归门控会拦下定向运行。
+生产源码已按字节还原并清除临时字节码缓存。

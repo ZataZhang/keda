@@ -1,0 +1,15 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+kc console listening on http://127.0.0.1:58184/ (Ctrl+C to stop)
+INFO:     Started server process [49598]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:58184 (Press CTRL+C to quit)
+2026-10-10 16:23:26 - backend.core.use_cases.monitor_snapshots - INFO - monitor_snapshots.py:623 - Monitor sync initial pass: 1 repositories have no snapshot yet.
+2026-10-10 16:23:26 - backend.core.use_cases.monitor_snapshots - INFO - monitor_snapshots.py:623 - Monitor sync initial pass: 1 repositories have no snapshot yet.
+INFO:     127.0.0.1:58186 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58187 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+2026-10-10 16:23:26 - backend.core.use_cases.agent_runner_monitor - INFO - agent_runner_monitor.py:709 - Queue scan failed for label agent/failed: Command '['gh', 'issue', 'list', '--state', 'open', '--label', 'agent/failed', '--limit', '30', '--json', 'number,title,url,labels,body,state']' died with <Signals.SIGTERM: 15>.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [49598]

@@ -1,0 +1,12 @@
+{"argv": ["issue", "list", "--label", "agent/running", "--state", "all", "--limit", "50", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "200", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "list", "--label", "agent/deliberate", "--state", "open", "--limit", "1", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/rework-prd", "--limit", "1", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/review", "--limit", "20", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/ready", "--limit", "100", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "list", "--label", "agent/running", "--state", "open", "--limit", "3", "--json", "number,title,url,labels,body,state"], "code": 127}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/running", "--limit", "2", "--json", "number,title,url,labels,body,state"], "code": 127}
+{"argv": ["issue", "list", "--state", "open", "--limit", "100", "--json", "number,title,url,labels,body,state"], "code": 0}
+{"argv": ["issue", "view", "200", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "view", "200", "--comments", "--json", "comments"], "code": 0}
+{"argv": ["issue", "list", "--state", "open", "--label", "agent/blocked", "--limit", "2", "--json", "number,title,url,labels,body,state"], "code": 0}

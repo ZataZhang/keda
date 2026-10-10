@@ -1,0 +1,22 @@
+GET /backlog/autopilot -> 200 {'repo_id': 'rv-fixture', 'enabled': True, 'auto_merge_enabled': False, 'daemon_running': False, 'effective_max_parallel': 4, 'runner_capacity': 4, 'ceiling_source': 'inherited', 'config_source': '.kedacode.toml', 'persisted_enabled': True, 'max_parallel': None}
+[A] advance --dry-run (unset) exit=0
+backlog advance (dry-run) repo=rv-fixture
+ceiling=4 source=inherited free_slots=4 running_after=0
+nothing to do
+PATCH settings max_parallel=2 -> 200 {'repo_id': 'rv-fixture', 'max_parallel': 2, 'effective_max_parallel': 2, 'runner_capacity': 4, 'ceiling_source': 'policy', 'default_view': 'list', 'updated_at': '2026-10-10T03:35:00+00:00'}
+[B] advance --dry-run (policy=2, fresh CLI) exit=0
+backlog advance (dry-run) repo=rv-fixture
+ceiling=2 source=policy free_slots=2 running_after=0
+nothing to do
+[B2] advance (policy=2, applied) exit=0
+backlog advance (applied) repo=rv-fixture
+ceiling=2 source=policy free_slots=2 running_after=0
+nothing to do
+PATCH settings max_parallel=8 -> 200 {'repo_id': 'rv-fixture', 'max_parallel': 8, 'effective_max_parallel': 4, 'runner_capacity': 4, 'ceiling_source': 'capped_by_capacity', 'default_view': 'list', 'updated_at': '2026-10-10T03:35:01+00:00'}
+[C] advance --dry-run (policy=8>capacity, fresh CLI) exit=0
+backlog advance (dry-run) repo=rv-fixture
+ceiling=4 source=capped_by_capacity free_slots=4 running_after=0
+nothing to do
+只读 SQLite 核对设置行: {'repo_id': 'rv-fixture', 'max_parallel': 8, 'default_view': 'list'}
+fake gh 调用条数: 7
+EVIDENCE rv-2-advance-ceiling-report.txt written

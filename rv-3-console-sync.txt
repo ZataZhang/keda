@@ -1,0 +1,41 @@
+$ next build
+⚠ Specified "rewrites" will not automatically work with "output: export". See more info here: https://nextjs.org/docs/messages/export-no-custom-routes
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /Users/zata/code/keda/pnpm-workspace.yaml as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /Users/zata/code/keda/.iar-worktrees/issue-266/pnpm-workspace.yaml
+
+▲ Next.js 16.2.6 (Turbopack)
+
+  Creating an optimized production build ...
+⚠ Specified "rewrites" will not automatically work with "output: export". See more info here: https://nextjs.org/docs/messages/export-no-custom-routes
+✓ Compiled successfully in 6.4s
+  Running TypeScript ...
+  Finished TypeScript in 8.5s ...
+  Collecting page data using 9 workers ...
+  Generating static pages using 9 workers (0/12) ...
+  Generating static pages using 9 workers (3/12) 
+  Generating static pages using 9 workers (6/12) 
+  Generating static pages using 9 workers (9/12) 
+✓ Generating static pages using 9 workers (12/12) in 595ms
+  Finalizing page optimization ...
+⚠ rewrites, redirects, and headers are not applied when exporting your application, detected (rewrites). See more info here: https://nextjs.org/docs/messages/export-no-custom-routes
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /app/backlog
+├ ○ /app/dashboard
+├ ○ /app/ideas
+├ ○ /app/processes
+├ ○ /app/repositories
+├ ○ /app/settings
+├ ○ /app/stats
+└ ○ /login
+
+
+○  (Static)  prerendered as static content
+
+✅ 已同步 /Users/zata/code/keda/.iar-worktrees/issue-266/frontend-public/out -> /Users/zata/code/keda/.iar-worktrees/issue-266/src/backend/api/static/console （硬刷新浏览器 Cmd+Shift+R 即可看到新版）

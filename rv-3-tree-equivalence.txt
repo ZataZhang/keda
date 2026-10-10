@@ -1,0 +1,24 @@
+RV-3 page-boundary identity and current retry status
+
+Historical real page red→green run:
+  commit=4335947c3df7e6c6ac480aed21fd4a4416656e9c
+  tree=61d7a965b07697782205d1bd98e922362e979c1a
+  Evidence: rv-3-console-roundtrip.txt, rv-3-console-backlog-report.txt, and the ten rv-3-backlog-concurrency-*.png screenshots.
+
+Current reviewed implementation commit:
+  commit=46137963afb241934e10cb3324df5d07e8e5475d
+  tree=b9b5d6b7e0ba2161b11586f8b35d9b1477de09a
+  production_and_test_diff_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+The current review history changes daemon selection/recovery and repository-wide running-budget behavior. Compared with the historical page-PASS commit, these RV-3 boundaries have no source diff:
+  frontend-public/
+  src/backend/api/routes/agent_runner_backlog.py (settings GET/PATCH routes)
+  src/backend/core/use_cases/backlog_autopilot_settings.py (settings read/write use case)
+
+Current retry:
+  just console-sync passed and rebuilt the ignored static bundle from current frontend-public/.
+  rv3_negative.py could not launch Chromium; macOS terminated chrome-headless-shell with Permission denied (1100) before page assertions.
+  The negative control was therefore inconclusive, not a product failure or pass. The generated bundle was restored byte-for-byte.
+
+Conclusion:
+  Historical real-page artifacts remain evidence for the unchanged RV-3 page/settings boundaries. They do not claim that the whole current review tree received another browser PASS; this limitation is explicit in the evidence report.

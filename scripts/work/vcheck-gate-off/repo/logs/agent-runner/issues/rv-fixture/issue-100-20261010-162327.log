@@ -1,0 +1,4 @@
+2026-10-10 16:23:29,855 INFO backend.core.use_cases.agent_runner_direct_pr_label: Issue #100 publish stage resolved: normal (origin: caller request).
+2026-10-10 16:23:37,047 INFO backend.core.use_cases.run_agent_once: Starting agent for Issue #100: https://github.com/fake-owner/fake-repo/issues/100
+2026-10-10 16:23:37,048 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-start] invocation=inv-2363124dbe67 run=rv-fixture#issue-100#20261010T082327Z-81d668fe1af0 issue=100 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-100-20261010-162327.log
+[16:23:37] fake agent start issue=100

@@ -1,0 +1,7 @@
+{"argv": ["issue", "view", "23", "--json", "number,title,url,labels,body,state"], "code": 127}
+{"argv": ["issue", "view", "256", "--json", "number,title,url,labels,body,state"], "code": 127}
+{"argv": ["issue", "view", "262", "--json", "number,title,url,labels,body,state"], "code": 127}
+{"argv": ["issue", "view", "265", "--json", "number,title,url,labels,body,state"], "code": 127}
+{"argv": ["issue", "view", "258", "--json", "number,title,url,labels,body,state"], "code": 127}
+{"argv": ["issue", "view", "263", "--json", "number,title,url,labels,body,state"], "code": 127}
+{"argv": ["issue", "list", "--label", "agent/running", "--state", "open", "--limit", "11", "--json", "number,title,url,labels,body,state"], "code": 0}

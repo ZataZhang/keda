@@ -1,0 +1,53 @@
+rv-3 现场负控：在 console 静态构建产物里把控制条数字改回旧口径（伪造默认 2）。
+注入文件：src/backend/api/static/console/_next/static/chunks/0-em9qr4uwxi~.js（gitignored 构建产物，非生产源码）
+锚点：e.effective_max_parallel,"（"
+替换为：(e.max_parallel??2),"（"
+
+注入完成，运行 rv3_console.py（期望 RESULT: FAIL / 非零退出）。
+rv3_console.py exit=1
+
+[inherit] action=noop
+  期望文案: 并发 4（继承 runner 配置）
+  实测文案: 并发 2（继承 runner 配置）
+  截图: rv-3-backlog-concurrency-inherit.png
+  fresh GET /autopilot: ceiling_source=inherited effective=4 max_parallel=None runner_capacity=4
+[policy] action=set_save
+  期望文案: 并发 2（Backlog 设置）
+  实测文案: 并发 2（Backlog 设置）
+  截图: rv-3-backlog-concurrency-policy.png
+  fresh GET /autopilot: ceiling_source=policy effective=2 max_parallel=2 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 2} 响应体 max_parallel=2 effective=2 source=policy
+[capped] action=set_save
+  期望文案: 并发 4（受 runner 容量限制），容量 4
+  实测文案: 并发 8（受 runner 容量限制），容量 4
+  截图: rv-3-backlog-concurrency-capped.png
+  fresh GET /autopilot: ceiling_source=capped_by_capacity effective=4 max_parallel=8 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 8} 响应体 max_parallel=8 effective=4 source=capped_by_capacity
+[saved4-fresh] action=set_save
+  期望文案: 并发 4（Backlog 设置）
+  实测文案: 并发 4（Backlog 设置）
+  截图: rv-3-backlog-concurrency-saved4-fresh.png
+  fresh GET /autopilot: ceiling_source=policy effective=4 max_parallel=4 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 4} 响应体 max_parallel=4 effective=4 source=policy
+[restored-fresh] action=restore
+  期望文案: 并发 4（继承 runner 配置）
+  实测文案: 并发 2（继承 runner 配置）
+  截图: rv-3-backlog-concurrency-restored-fresh.png
+  fresh GET /autopilot: ceiling_source=inherited effective=4 max_parallel=None runner_capacity=4
+  写入 status=200 请求体={"max_parallel": null} 响应体 max_parallel=None effective=4 source=inherited
+[DB 终态] 恢复继承后设置行: None
+
+RESULT: FAIL
+  - inherit: 页面文案不匹配 —— 期望「并发 4（继承 runner 配置）」实测「并发 2（继承 runner 配置）」
+  - inherit: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 2（继承 runner 配置）
+  - capped: 页面文案不匹配 —— 期望「并发 4（受 runner 容量限制），容量 4」实测「并发 8（受 runner 容量限制），容量 4」
+  - capped: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 8（受 runner 容量限制），容量 4
+  - restored-fresh: 页面文案不匹配 —— 期望「并发 4（继承 runner 配置）」实测「并发 2（继承 runner 配置）」
+  - restored-fresh: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 2（继承 runner 配置）
+
+--- stderr ---
+
+RV-3 FAILED: ['inherit: 页面文案不匹配 —— 期望「并发 4（继承 runner 配置）」实测「并发 2（继承 runner 配置）」', 'inherit: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 2（继承 runner 配置）', 'capped: 页面文案不匹配 —— 期望「并发 4（受 runner 容量限制），容量 4」实测「并发 8（受 runner 容量限制），容量 4」', 'capped: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 8（受 runner 容量限制），容量 4', 'restored-fresh: 页面文案不匹配 —— 期望「并发 4（继承 runner 配置）」实测「并发 2（继承 runner 配置）」', 'restored-fresh: 页面数字与 fresh GET effective_max_parallel=4 不同源：并发 2（继承 runner 配置）']
+
+
+NEG CONTROL: RED 已复现

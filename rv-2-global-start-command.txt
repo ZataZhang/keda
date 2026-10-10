@@ -1,0 +1,12 @@
+rv-2 global-start: real POST /backlog/start-global, fresh API state, isolated fixture
+Only GitHub CLI and agent executable boundaries are fake; kc console, route, core batch selection, SQLite and kc run children are real.
+
+[inherit] policy=None source=inherited effective=4 started=4 queued=2 spawned_run_processes=4 agent_starts=4
+  started_prds=["tasks/pending/P1-FEAT-20260101-00000-global.md", "tasks/pending/P1-FEAT-20260101-00001-global.md", "tasks/pending/P1-FEAT-20260101-00002-global.md", "tasks/pending/P1-FEAT-20260101-00003-global.md"]
+  queued_prds=["tasks/pending/P1-FEAT-20260101-00004-global.md", "tasks/pending/P1-FEAT-20260101-00005-global.md"]
+  fresh_settings_row=None
+[policy] policy=2 source=policy effective=2 started=2 queued=4 spawned_run_processes=2 agent_starts=2
+  started_prds=["tasks/pending/P1-FEAT-20260101-00000-global.md", "tasks/pending/P1-FEAT-20260101-00001-global.md"]
+  queued_prds=["tasks/pending/P1-FEAT-20260101-00002-global.md", "tasks/pending/P1-FEAT-20260101-00003-global.md", "tasks/pending/P1-FEAT-20260101-00004-global.md", "tasks/pending/P1-FEAT-20260101-00005-global.md"]
+  fresh_settings_row={'repo_id': 'rv-fixture', 'max_parallel': 2, 'default_view': 'list'}
+RESULT: PASS

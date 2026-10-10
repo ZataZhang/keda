@@ -1,0 +1,35 @@
+[inherit] action=noop
+  期望文案: 并发 4（继承 runner 配置）
+  实测文案: 并发 4（继承 runner 配置）
+  截图: rv-3-backlog-concurrency-inherit.png
+  fresh GET /autopilot: ceiling_source=inherited effective=4 max_parallel=None runner_capacity=4
+[policy] action=set_save
+  期望文案: 并发 2（Backlog 设置）
+  实测文案: 并发 2（Backlog 设置）
+  截图: rv-3-backlog-concurrency-policy.png
+  fresh GET /autopilot: ceiling_source=policy effective=2 max_parallel=2 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 2} 响应体 max_parallel=2 effective=2 source=policy
+[capped] action=set_save
+  期望文案: 并发 4（受 runner 容量限制），容量 4
+  实测文案: 并发 4（受 runner 容量限制），容量 4
+  截图: rv-3-backlog-concurrency-capped.png
+  fresh GET /autopilot: ceiling_source=capped_by_capacity effective=4 max_parallel=8 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 8} 响应体 max_parallel=8 effective=4 source=capped_by_capacity
+[saved4-fresh] action=set_save
+  期望文案: 并发 4（Backlog 设置）
+  实测文案: 并发 4（Backlog 设置）
+  截图: rv-3-backlog-concurrency-saved4-fresh.png
+  fresh GET /autopilot: ceiling_source=policy effective=4 max_parallel=4 runner_capacity=4
+  写入 status=200 请求体={"max_parallel": 4} 响应体 max_parallel=4 effective=4 source=policy
+[restored-fresh] action=restore
+  期望文案: 并发 4（继承 runner 配置）
+  实测文案: 并发 4（继承 runner 配置）
+  截图: rv-3-backlog-concurrency-restored-fresh.png
+  fresh GET /autopilot: ceiling_source=inherited effective=4 max_parallel=None runner_capacity=4
+  写入 status=200 请求体={"max_parallel": null} 响应体 max_parallel=None effective=4 source=inherited
+[DB 终态] 恢复继承后设置行: None
+
+RESULT: PASS
+  三态文案、fresh GET 负载、PATCH 写入与终态 DB 行删除全部一致；数字与来源均由真实 API 渲染，非组件预览 / mock。
+
+RV-3 PASSED

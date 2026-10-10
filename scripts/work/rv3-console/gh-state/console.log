@@ -1,0 +1,373 @@
+note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+kc console listening on http://127.0.0.1:56184/ (Ctrl+C to stop)
+INFO:     Started server process [24070]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:56184 (Press CTRL+C to quit)
+2026-10-11 00:52:09 - backend.core.use_cases.monitor_snapshots - WARNING - monitor_snapshots.py:644 - Monitor scheduler failed to read settings: database is locked
+2026-10-11 00:52:09 - backend.core.use_cases.monitor_snapshots - INFO - monitor_snapshots.py:623 - Monitor sync initial pass: 1 repositories have no snapshot yet.
+INFO:     127.0.0.1:56188 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/backlog HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:56189 - "GET /app/backlog/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /_next/static/media/797e433ab948586e-s.p.08e28id.o-okb.woff2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /_next/static/media/caa3a2e1cccd8315-s.p.09~u27dqhyhd6.woff2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /_next/static/chunks/16.yrnhpt30np.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0384cvm1l3mgv.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0nzxdtn77oxs8.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/08_n6gatw7s7l.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /_next/static/chunks/turbopack-0kpxub1psezbv.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /_next/static/chunks/0w-zh0ufcolpp.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0ufg_aseqo29z.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0_jmz2-ep.swk.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/0hs5tawh0f-nf.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0y1uukwcq6rvb.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /_next/static/chunks/13xd-srzj2m-v.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/005wxykvhhinj.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/0s1yqb7z~lty3.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /_next/static/chunks/0-em9qr4uwxi~.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /api/v1/agent-runner/repositories HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "HEAD /app/ideas/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "HEAD /app/stats/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "HEAD /app/settings/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "HEAD /app/repositories/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/ideas/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /app/stats/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/repositories/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/settings/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "HEAD /app/processes/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /app/ideas/__next._index.txt?_rsc=uU9WsyHObH6TNrlz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/ideas/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "HEAD /app/dashboard/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /api/v1/agent-runner/console/context HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/processes/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /app/dashboard/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/settings/__next.%21KGFwcCk.txt?_rsc=mhS5y9UCpGZBcrLW HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /app/settings/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /app/settings/__next.%21KGFwcCk.app.settings.txt?_rsc=jkT2aZqgiQvPfq_3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/settings/__next.%21KGFwcCk.app.txt?_rsc=F6X55dvk_93lgiUi HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /api/v1/agent-runner/backlog/ci-repair-global?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.txt?_rsc=CsSbQhXUNEIXgH3e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.__PAGE__.txt?_rsc=Xp2sMntfwTaMEpor HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next.%21KGFwcCk.app.settings.__PAGE__.txt?_rsc=XsVpyrefizGgRISU HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /api/v1/agent-runner/backlog/autopilot?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /_next/static/chunks/0x.4eb9rv5z~x.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /app/backlog/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0k3_k57sj8pwp.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.txt?_rsc=E_i6F-h09lMR3jV- HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.__PAGE__.txt?_rsc=0YD_cjYd1QeBRx6y HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/001sitiy5su~7.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/stats/__next.%21KGFwcCk.app.stats.txt?_rsc=5qHUCbFhLigQAuGt HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /app/stats/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/stats/__next.%21KGFwcCk.app.stats.__PAGE__.txt?_rsc=2n1ZjMACikqlDx4X HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/02j0l44mke5f2.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /app/repositories/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.txt?_rsc=m4WPTbAfjEcwJ2B2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /_next/static/chunks/0mx-gwximntsf.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /app/processes/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.__PAGE__.txt?_rsc=esCXW0mUqmADKbGv HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/13ltb4hft8b12.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/processes/__next.%21KGFwcCk.app.processes.txt?_rsc=5kOOKTcIcsLvjRQO HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.__PAGE__.txt?_rsc=DtObnJBOeduUH_2m HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /app/dashboard/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/174h3mtf_.nb8.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.txt?_rsc=kMD5lWHw9tSdXTZ3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /app/processes/__next.%21KGFwcCk.app.processes.__PAGE__.txt?_rsc=pnAH_qcrDra0KKgC HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/11e9~5uc7qkm-.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/11u8ovh9ma0cr.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "GET /_next/static/chunks/0vt~d-3vno3o7.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56190 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/backlog/ HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/media/797e433ab948586e-s.p.08e28id.o-okb.woff2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/media/caa3a2e1cccd8315-s.p.09~u27dqhyhd6.woff2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/16.yrnhpt30np.css HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /_next/static/chunks/0nzxdtn77oxs8.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /_next/static/chunks/0384cvm1l3mgv.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/08_n6gatw7s7l.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/0ufg_aseqo29z.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/turbopack-0kpxub1psezbv.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /_next/static/chunks/0hs5tawh0f-nf.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0y1uukwcq6rvb.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0w-zh0ufcolpp.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /_next/static/chunks/0_jmz2-ep.swk.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/13xd-srzj2m-v.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/005wxykvhhinj.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /_next/static/chunks/0-em9qr4uwxi~.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0s1yqb7z~lty3.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56198 - "GET /api/v1/agent-runner/repositories HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "HEAD /app/repositories/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "HEAD /app/stats/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "HEAD /app/ideas/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /api/v1/agent-runner/console/context HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56198 - "HEAD /app/settings/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/repositories/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /app/stats/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/ideas/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "HEAD /app/processes/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/ideas/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "HEAD /app/dashboard/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/ideas/__next._index.txt?_rsc=uU9WsyHObH6TNrlz HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/processes/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /api/v1/agent-runner/backlog/ci-repair-global?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /app/dashboard/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/settings/__next.%21KGFwcCk.txt?_rsc=mhS5y9UCpGZBcrLW HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/settings/__next.%21KGFwcCk.app.txt?_rsc=F6X55dvk_93lgiUi HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next.%21KGFwcCk.app.settings.__PAGE__.txt?_rsc=XsVpyrefizGgRISU HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /app/settings/__next.%21KGFwcCk.app.settings.txt?_rsc=jkT2aZqgiQvPfq_3 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.txt?_rsc=CsSbQhXUNEIXgH3e HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.__PAGE__.txt?_rsc=Xp2sMntfwTaMEpor HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /_next/static/chunks/001sitiy5su~7.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/02j0l44mke5f2.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/backlog/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.txt?_rsc=E_i6F-h09lMR3jV- HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /api/v1/agent-runner/backlog/autopilot?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /_next/static/chunks/0x.4eb9rv5z~x.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.__PAGE__.txt?_rsc=0YD_cjYd1QeBRx6y HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/stats/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0k3_k57sj8pwp.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /app/stats/__next.%21KGFwcCk.app.stats.__PAGE__.txt?_rsc=2n1ZjMACikqlDx4X HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/stats/__next.%21KGFwcCk.app.stats.txt?_rsc=5qHUCbFhLigQAuGt HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.txt?_rsc=m4WPTbAfjEcwJ2B2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/repositories/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/processes/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /_next/static/chunks/0mx-gwximntsf.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.__PAGE__.txt?_rsc=esCXW0mUqmADKbGv HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/13ltb4hft8b12.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/processes/__next.%21KGFwcCk.app.processes.txt?_rsc=5kOOKTcIcsLvjRQO HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/processes/__next.%21KGFwcCk.app.processes.__PAGE__.txt?_rsc=pnAH_qcrDra0KKgC HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/dashboard/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.txt?_rsc=kMD5lWHw9tSdXTZ3 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/174h3mtf_.nb8.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /_next/static/chunks/0vt~d-3vno3o7.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.__PAGE__.txt?_rsc=DtObnJBOeduUH_2m HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/11e9~5uc7qkm-.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "GET /_next/static/chunks/11u8ovh9ma0cr.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56191 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /app/backlog/ HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/media/caa3a2e1cccd8315-s.p.09~u27dqhyhd6.woff2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/media/797e433ab948586e-s.p.08e28id.o-okb.woff2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/16.yrnhpt30np.css HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /_next/static/chunks/0nzxdtn77oxs8.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/08_n6gatw7s7l.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/0ufg_aseqo29z.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/0384cvm1l3mgv.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/0y1uukwcq6rvb.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/turbopack-0kpxub1psezbv.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0w-zh0ufcolpp.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0hs5tawh0f-nf.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /_next/static/chunks/0_jmz2-ep.swk.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/13xd-srzj2m-v.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/005wxykvhhinj.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0-em9qr4uwxi~.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0s1yqb7z~lty3.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /api/v1/agent-runner/repositories HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56201 - "HEAD /app/stats/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56198 - "HEAD /app/repositories/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "HEAD /app/ideas/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "HEAD /app/settings/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/repositories/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /app/stats/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/ideas/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/settings/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/ideas/__next._index.txt?_rsc=uU9WsyHObH6TNrlz HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/ideas/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "HEAD /app/dashboard/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56198 - "HEAD /app/processes/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/dashboard/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/settings/__next.%21KGFwcCk.txt?_rsc=mhS5y9UCpGZBcrLW HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /api/v1/agent-runner/console/context HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /app/settings/__next.%21KGFwcCk.app.settings.txt?_rsc=jkT2aZqgiQvPfq_3 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next.%21KGFwcCk.app.txt?_rsc=F6X55dvk_93lgiUi HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /app/processes/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/settings/__next.%21KGFwcCk.app.settings.__PAGE__.txt?_rsc=XsVpyrefizGgRISU HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.__PAGE__.txt?_rsc=Xp2sMntfwTaMEpor HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.txt?_rsc=CsSbQhXUNEIXgH3e HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/backlog/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/001sitiy5su~7.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/02j0l44mke5f2.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.txt?_rsc=E_i6F-h09lMR3jV- HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/0k3_k57sj8pwp.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0x.4eb9rv5z~x.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.__PAGE__.txt?_rsc=0YD_cjYd1QeBRx6y HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/stats/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/stats/__next.%21KGFwcCk.app.stats.txt?_rsc=5qHUCbFhLigQAuGt HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/stats/__next.%21KGFwcCk.app.stats.__PAGE__.txt?_rsc=2n1ZjMACikqlDx4X HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /api/v1/agent-runner/backlog/ci-repair-global?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.txt?_rsc=m4WPTbAfjEcwJ2B2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/repositories/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.__PAGE__.txt?_rsc=esCXW0mUqmADKbGv HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /api/v1/agent-runner/backlog/autopilot?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0mx-gwximntsf.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/processes/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/processes/__next.%21KGFwcCk.app.processes.txt?_rsc=5kOOKTcIcsLvjRQO HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/13ltb4hft8b12.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /app/processes/__next.%21KGFwcCk.app.processes.__PAGE__.txt?_rsc=pnAH_qcrDra0KKgC HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/174h3mtf_.nb8.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/dashboard/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.__PAGE__.txt?_rsc=DtObnJBOeduUH_2m HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.txt?_rsc=kMD5lWHw9tSdXTZ3 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /_next/static/chunks/0vt~d-3vno3o7.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/11u8ovh9ma0cr.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "GET /_next/static/chunks/11e9~5uc7qkm-.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56198 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56201 - "GET /app/backlog/ HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/16.yrnhpt30np.css HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/media/797e433ab948586e-s.p.08e28id.o-okb.woff2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/media/caa3a2e1cccd8315-s.p.09~u27dqhyhd6.woff2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/08_n6gatw7s7l.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /_next/static/chunks/0384cvm1l3mgv.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0ufg_aseqo29z.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0nzxdtn77oxs8.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/0w-zh0ufcolpp.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/turbopack-0kpxub1psezbv.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0y1uukwcq6rvb.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0_jmz2-ep.swk.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /_next/static/chunks/0hs5tawh0f-nf.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/13xd-srzj2m-v.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/005wxykvhhinj.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/0-em9qr4uwxi~.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0s1yqb7z~lty3.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56201 - "GET /api/v1/agent-runner/repositories HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "HEAD /app/settings/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56204 - "HEAD /app/ideas/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "HEAD /app/stats/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "HEAD /app/repositories/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/ideas/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/stats/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/repositories/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /app/settings/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/ideas/__next._index.txt?_rsc=uU9WsyHObH6TNrlz HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/ideas/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "HEAD /app/dashboard/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/settings/__next.%21KGFwcCk.txt?_rsc=mhS5y9UCpGZBcrLW HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "HEAD /app/processes/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /api/v1/agent-runner/console/context HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56204 - "GET /app/dashboard/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/settings/__next.%21KGFwcCk.app.txt?_rsc=F6X55dvk_93lgiUi HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/processes/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next.%21KGFwcCk.app.settings.txt?_rsc=jkT2aZqgiQvPfq_3 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/settings/__next.%21KGFwcCk.app.settings.__PAGE__.txt?_rsc=XsVpyrefizGgRISU HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.txt?_rsc=CsSbQhXUNEIXgH3e HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/backlog/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.__PAGE__.txt?_rsc=Xp2sMntfwTaMEpor HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/001sitiy5su~7.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/02j0l44mke5f2.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.txt?_rsc=E_i6F-h09lMR3jV- HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /api/v1/agent-runner/backlog/ci-repair-global?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.__PAGE__.txt?_rsc=0YD_cjYd1QeBRx6y HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/stats/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0k3_k57sj8pwp.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0x.4eb9rv5z~x.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/stats/__next.%21KGFwcCk.app.stats.txt?_rsc=5qHUCbFhLigQAuGt HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /app/repositories/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.txt?_rsc=m4WPTbAfjEcwJ2B2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /app/stats/__next.%21KGFwcCk.app.stats.__PAGE__.txt?_rsc=2n1ZjMACikqlDx4X HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.__PAGE__.txt?_rsc=esCXW0mUqmADKbGv HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/0mx-gwximntsf.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/processes/__next.%21KGFwcCk.app.processes.__PAGE__.txt?_rsc=pnAH_qcrDra0KKgC HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/13ltb4hft8b12.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/processes/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/processes/__next.%21KGFwcCk.app.processes.txt?_rsc=5kOOKTcIcsLvjRQO HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.txt?_rsc=kMD5lWHw9tSdXTZ3 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/dashboard/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.__PAGE__.txt?_rsc=DtObnJBOeduUH_2m HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/174h3mtf_.nb8.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0vt~d-3vno3o7.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /api/v1/agent-runner/backlog/autopilot?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/11u8ovh9ma0cr.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "GET /_next/static/chunks/11e9~5uc7qkm-.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56201 - "PATCH /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /app/backlog/ HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0nzxdtn77oxs8.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /_next/static/media/caa3a2e1cccd8315-s.p.09~u27dqhyhd6.woff2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/16.yrnhpt30np.css HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/media/797e433ab948586e-s.p.08e28id.o-okb.woff2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/08_n6gatw7s7l.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /_next/static/chunks/turbopack-0kpxub1psezbv.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56208 - "GET /_next/static/chunks/0384cvm1l3mgv.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0ufg_aseqo29z.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0_jmz2-ep.swk.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0w-zh0ufcolpp.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56208 - "GET /_next/static/chunks/13xd-srzj2m-v.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/0hs5tawh0f-nf.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0-em9qr4uwxi~.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /_next/static/chunks/0y1uukwcq6rvb.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/005wxykvhhinj.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /_next/static/chunks/0s1yqb7z~lty3.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /api/v1/agent-runner/repositories HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "HEAD /app/settings/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "HEAD /app/stats/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "HEAD /app/ideas/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "HEAD /app/repositories/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/repositories/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/stats/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/ideas/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/settings/__next._index.txt?_rsc=uU9WsyHObH6TNrlz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/settings/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "HEAD /app/processes/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "HEAD /app/dashboard/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/dashboard/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/settings/__next.%21KGFwcCk.app.txt?_rsc=F6X55dvk_93lgiUi HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/settings/__next.%21KGFwcCk.txt?_rsc=mhS5y9UCpGZBcrLW HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/processes/__next._tree.txt?_rsc=XtKJANJD2Rxn53f2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /api/v1/agent-runner/console/context HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /app/settings/__next.%21KGFwcCk.app.settings.txt?_rsc=jkT2aZqgiQvPfq_3 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.txt?_rsc=CsSbQhXUNEIXgH3e HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/settings/__next.%21KGFwcCk.app.settings.__PAGE__.txt?_rsc=XsVpyrefizGgRISU HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /app/ideas/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /app/ideas/__next.%21KGFwcCk.app.ideas.__PAGE__.txt?_rsc=Xp2sMntfwTaMEpor HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56208 - "GET /app/backlog/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /_next/static/chunks/001sitiy5su~7.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56208 - "GET /_next/static/chunks/02j0l44mke5f2.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56208 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.__PAGE__.txt?_rsc=0YD_cjYd1QeBRx6y HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /app/backlog/__next.%21KGFwcCk.app.backlog.txt?_rsc=E_i6F-h09lMR3jV- HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /api/v1/agent-runner/backlog/ci-repair-global?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/stats/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /_next/static/chunks/0k3_k57sj8pwp.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56208 - "GET /_next/static/chunks/0x.4eb9rv5z~x.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/stats/__next.%21KGFwcCk.app.stats.txt?_rsc=5qHUCbFhLigQAuGt HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /app/stats/__next.%21KGFwcCk.app.stats.__PAGE__.txt?_rsc=2n1ZjMACikqlDx4X HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /api/v1/agent-runner/backlog/prds?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56192 - "GET /api/v1/agent-runner/backlog/autopilot?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56194 - "GET /api/v1/agent-runner/backlog/settings?repo_id=rv-fixture HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.txt?_rsc=m4WPTbAfjEcwJ2B2 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56208 - "GET /app/repositories/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /app/repositories/__next.%21KGFwcCk.app.repositories.__PAGE__.txt?_rsc=esCXW0mUqmADKbGv HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/processes/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /_next/static/chunks/13ltb4hft8b12.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56193 - "GET /_next/static/chunks/0mx-gwximntsf.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56208 - "GET /_next/static/chunks/174h3mtf_.nb8.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /app/processes/__next.%21KGFwcCk.app.processes.txt?_rsc=5kOOKTcIcsLvjRQO HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /app/processes/__next.%21KGFwcCk.app.processes.__PAGE__.txt?_rsc=pnAH_qcrDra0KKgC HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56194 - "GET /app/dashboard/__next._head.txt?_rsc=TjEgaRqP5O7cD42z HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56192 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.txt?_rsc=kMD5lWHw9tSdXTZ3 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /app/dashboard/__next.%21KGFwcCk.app.dashboard.__PAGE__.txt?_rsc=DtObnJBOeduUH_2m HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/0vt~d-3vno3o7.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56204 - "GET /_next/static/chunks/11u8ovh9ma0cr.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56189 - "GET /_next/static/chunks/11e9~5uc7qkm-.js HTTP/1.1" 304 Not Modified
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [24070]

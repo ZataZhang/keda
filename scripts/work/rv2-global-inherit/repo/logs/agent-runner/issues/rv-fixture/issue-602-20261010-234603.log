@@ -1,0 +1,11 @@
+2026-10-10 23:46:04,695 INFO backend.core.use_cases.agent_runner_direct_pr_label: Issue #602 publish stage resolved: normal (origin: caller request).
+2026-10-10 23:46:05,499 INFO backend.core.use_cases.run_agent_once: Starting agent for Issue #602: https://github.com/fake-owner/fake-repo/issues/602
+2026-10-10 23:46:05,500 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-start] invocation=inv-35c66715e338 run=rv-fixture#issue-602#20261010T154603Z-6fbd6d7d0dbc issue=602 attempt=1 phase=implementation role=implementer executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-602-20261010-234603.log
+[23:46:05] fake agent start issue=602
+[23:46:05] fake agent end issue=602
+2026-10-10 23:46:05,638 INFO backend.core.use_cases.agent_invocation_tracing: [iar-invocation-end] invocation=inv-35c66715e338 run=rv-fixture#issue-602#20261010T154603Z-6fbd6d7d0dbc issue=602 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=0.136 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-10 23:46:05,638 INFO backend.core.use_cases.run_agent_once: Agent finished for Issue #602: https://github.com/fake-owner/fake-repo/issues/602 (exit_code=0)
+2026-10-10 23:46:05,818 INFO backend.core.use_cases.agent_runner_issue_handlers: Issue #602 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-10 23:46:05,919 ERROR backend.core.use_cases.agent_runner_orchestrate: Failed Issue #602: Failed after 1 attempts.
+
+[iar-attempt-end]

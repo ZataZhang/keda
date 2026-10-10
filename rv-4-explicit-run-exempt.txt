@@ -1,0 +1,21 @@
+PATCH settings max_parallel=1 -> 200 {'repo_id': 'rv-fixture', 'max_parallel': 1, 'effective_max_parallel': 1, 'runner_capacity': 10, 'ceiling_source': 'policy', 'default_view': 'list', 'updated_at': '2026-10-10T16:52:16+00:00'}
+kc run --issue 100 exit=0 agent_started_issues=[100] agent_completed_issues=[100] committed_head=76438b7f3c10f981c31a50665140b90f7c0ba68b
+  (ceiling=1 且 1 个在跑时守护进程 ready 认领预算=0；定向运行仍执行=豁免)
+  --stdout--
+  2026-10-11 00:52:21 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:849 - Agent finished for Issue #100: https://github.com/fake-owner/fake-repo/issues/100 (exit_code=0)
+  2026-10-11 00:52:21 - backend.core.use_cases.run_agent_once - WARNING - run_agent_execution_loop.py:526 - Agent left uncommitted changes for Issue #100; runner processing commit request.
+  2026-10-11 00:52:21 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:629 - [iar-invocation-start] invocation=inv-3321d6a5028a run=rv-fixture#issue-100#20261010T165216Z-f716bb97d17e issue=100 attempt=- phase=content_generation role=content_generator executor=claude model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/rv-fixture/issue-100-20261011-005216.log
+  2026-10-11 00:52:24 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:754 - [iar-invocation-end] invocation=inv-3321d6a5028a run=rv-fixture#issue-100#20261010T165216Z-f716bb97d17e issue=100 attempt=- phase=content_generation role=content_generator executor=claude outcome=ok exit_code=0 duration_s=3.033 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+  2026-10-11 00:52:24 - backend.core.agent.memory.skill_distillation - INFO - skill_distillation.py:191 - Skipping skill distillation for Issue #100: malformed output.
+  2026-10-11 00:52:25 - backend.core.use_cases.agent_review - INFO - agent_review.py:533 - Pre-PR review disabled for Issue #100.
+  2026-10-11 00:52:25 - backend.core.use_cases.agent_runner_publication - INFO - agent_runner_publication.py:778 - Published Issue #100 from issue-100 at 76438b7f3c10f981c31a50665140b90f7c0ba68b after implementation head 76438b7f3c10f981c31a50665140b90f7c0ba68b.
+  2026-10-11 00:52:25 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:459 - Completed Issue #100: target ready
+  --stderr--
+  note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+  note: 'IAR_SKIP_GH_AUTH_CHECK' has been renamed to 'KEDACODE_SKIP_GH_AUTH_CHECK'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+  note: 'IAR_PRD_SKILL_PATH' has been renamed to 'KEDACODE_PRD_SKILL_PATH'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+kc run --all-ready (daemon live) exit=5
+  | note: 'IAR_CONFIG' has been renamed to 'KEDACODE_CONFIG'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+  | note: 'IAR_SKIP_GH_AUTH_CHECK' has been renamed to 'KEDACODE_SKIP_GH_AUTH_CHECK'; the old name still works. Update your script or CI (see docs/guides/migrating-from-iar.md).
+  | conflict: A daemon for repository 'rv-fixture' is already running (PID 25028); refusing to double-claim the ready queue.
+  | next: kc registry stop --repo-id rv-fixture (or stop the daemon), or rerun with --takeover to stop the daemon and take over.

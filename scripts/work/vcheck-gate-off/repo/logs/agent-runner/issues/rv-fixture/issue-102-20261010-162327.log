@@ -1,0 +1,4 @@
+2026-10-10 16:23:29,684 INFO backend.core.use_cases.agent_runner_direct_pr_label: Issue #102 publish stage resolved: normal (origin: caller request).
+2026-10-10 16:23:36,124 ERROR backend.core.use_cases.agent_runner_orchestrate: Failed Issue #102: worktree path does not exist after create/reuse/path pipeline: /Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/vcheck-gate-off/repo/.iar-worktrees/issue-102. create_command return_code=-15, reuse_command return_code=0, path_command return_code=0, path_command stdout='/Users/zata/code/keda/.iar-worktrees/issue-266/tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scripts/work/vcheck-gate-off/repo/.iar-worktrees/issue-102\n'.
+
+[iar-attempt-end]
