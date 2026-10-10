@@ -791,10 +791,11 @@ def run_once(request: RunOnceRequest) -> int:
         )
 
     processed_count = 0
+    ready_claimed_count = 0
     issues_to_process: list[tuple[IssueSummary, str]] = []
 
     for issue in sort_ready_issues(ready_issues):
-        if processed_count >= ready_claim_budget:
+        if len(issues_to_process) >= effective_max_issues:
             break
         declaration = parse_dependency_marker(issue.body)
         if declaration is not None:
@@ -802,6 +803,9 @@ def run_once(request: RunOnceRequest) -> int:
                 issues_to_process.append((issue, "direct_pr_cleanup"))
                 processed_count += 1
                 continue
+        if ready_claimed_count >= ready_claim_budget:
+            continue
+        if declaration is not None:
             verdict = evaluate_dependencies(declaration, github_client, config.labels)
             if not verdict.satisfied:
                 mark_dependency_waiting(
@@ -829,6 +833,7 @@ def run_once(request: RunOnceRequest) -> int:
             )
         issues_to_process.append((issue, "ready"))
         processed_count += 1
+        ready_claimed_count += 1
 
     # 发现 running Issue（使用剩余配额）；定向模式只考虑目标 Issue。
     remaining = effective_max_issues - processed_count

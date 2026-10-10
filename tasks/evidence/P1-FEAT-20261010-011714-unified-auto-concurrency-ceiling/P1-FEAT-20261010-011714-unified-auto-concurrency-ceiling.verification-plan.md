@@ -72,4 +72,4 @@ cd tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scrip
 
 ## 验证范围
 
-本轮 reviewer 修复涉及 repository-wide `agent/running` 计数、自动预算与报告；当前工作树相关测试、lint、严格文档构建结果记录在最终报告中。默认 `just test` 命中已有 flag 而跳过，故禁用 testmon 显式跑受影响模块。曾在此前树运行的完整 `just test all` 不作为本轮代码的验证结论。RV1、RV2、RV4、RV5 已在当前工作树重跑；RV3 的前端与设置读写边界未受改动，但本轮 Chromium 权限阻断使页面重跑为 INCONCLUSIVE。
+本轮 reviewer 修复追加覆盖：ready 预算为 0 时仍进入已有 `direct_pr_cleanup` 收尾通道，普通 ready 仍不认领。该边界由 `tests/test_agent_runner_orchestrate.py::test_run_once_direct_pr_cleanup_bypasses_ready_claim_budget` 锁定，并在同一真实编排入口的定向测试中通过。运行时文件变化后，rv-1、rv-4、rv-5 真实入口均重新执行；rv-2 的补位 / 全局开始边界未变，RV-3 页面与设置 GET/PATCH 边界未变。RV-3 重跑仍因 Chromium `Permission denied (1100)` 为 INCONCLUSIVE。

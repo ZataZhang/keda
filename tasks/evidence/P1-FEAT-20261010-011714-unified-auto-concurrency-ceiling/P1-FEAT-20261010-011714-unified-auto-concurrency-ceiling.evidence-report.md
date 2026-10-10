@@ -115,3 +115,12 @@ just console-sync && cd tasks/evidence/P1-FEAT-20261010-011714-unified-auto-conc
 - 更新后的 `evidence.json` 已由仓库 `validate_manifest.py` 校验：RV1–RV5 均覆盖，字段、命名、文件存在性和负控声明通过。RV-3 本轮浏览器权限阻断单独记录，不作为产品负控或本轮 PASS。
 - Canonical PRD 实际位于 `tasks/archive/`；本轮遵守归档边界：没有移动或编辑该 PRD，也没有代勾 Human-Confirmed 项。
 - rv-3 图片对应此前的真实页面五态运行；完整页面图与控制条裁切图均逐张列出。当前 front end 与设置 GET/PATCH 目标边界未变，但整棵工作树有本轮 backend action/runtime 修改，详见 `rv-3-tree-equivalence.txt` 与各 RV 的工作树指纹。
+
+## Pre-PR review repair revalidation
+
+- Review finding repaired: when the ready budget reached zero, the candidate loop stopped before recognizing an already-published Direct PR handoff. The loop now identifies `direct_pr_cleanup` first, keeps that recovery item outside the new-ready budget, and still bounds the overall selected list by `effective_max_issues`. The normal ready candidate remains unclaimed when the ceiling is full.
+- Regression test: `UV_CACHE_DIR=/private/tmp/uv-cache-issue-266 uv run pytest --no-testmon tests/test_agent_runner_orchestrate.py -q` — **52 passed**. This includes parameterized checks that cleanup does not consume a ready slot and still runs when the ceiling is saturated. The focused first attempt used an inaccessible default uv cache; the rerun with the temporary cache passed.
+- Full-file lint: `SKIP=check-test-flag UV_CACHE_DIR=/private/tmp/uv-cache-issue-266 uv run pre-commit run --all-files --show-diff-on-failure` — **exit 0**; Ruff, Ruff format, architecture, PRD, and file-size hooks passed.
+- Docs: `UV_CACHE_DIR=/private/tmp/uv-cache-issue-266 uv run mkdocs build --strict` — **exit 0** with the repository's existing nav/link notices. `git diff --check` — **exit 0**.
+- Re-run real-entry evidence after the runtime change: rv-1 negative + daemon budget scenarios passed; rv-4 negative + explicit `kc run --issue` and `--all-ready` mutual-exclusion scenarios passed; rv-5 negative + fail-closed daemon and in-flight recovery probe passed. Their implementation-tree files bind the current review patch to base `787e2ac7b3f53a79062bfb557469e4bed82ff4a1`, tree `5ddab51ea9742d8fef2f81de0f305bb333b38a17`, source/test diff SHA-256 `d5b8944370cfc6f717e8256b5b9008ee43240b4b734677682155a7c561901bf9`.
+- Independent verifier remains unresolved: `verifier-response.txt` records a timeout with no verdict for builder SHA `bf9e39e200b0b4f831e23be68118bc429124e505`. It is not a PASS for this review patch; the runner-owned verifier gate must return PASS against the committed final tree. The archived PRD and its Human-Confirmed items were not changed.

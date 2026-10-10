@@ -1700,6 +1700,70 @@ def test_run_once_ceiling_saturated_by_running_claims_zero_new_ready(
     assert all(call["limit"] == 3 for call in recovery_calls)
 
 
+@pytest.mark.parametrize(
+    ("running_issues", "expected_issue_kinds"),
+    [
+        ([], [(8, "direct_pr_cleanup"), (9, "ready")]),
+        (
+            [_make_ready_issue(21, "Already running", "", ("agent/running",))],
+            [(8, "direct_pr_cleanup")],
+        ),
+    ],
+    ids=("cleanup-does-not-consume-ready-budget", "cleanup-survives-saturated-ceiling"),
+)
+def test_run_once_direct_pr_cleanup_bypasses_ready_claim_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    running_issues: list[IssueSummary],
+    expected_issue_kinds: list[tuple[int, str]],
+) -> None:
+    """Direct PR 收尾不消耗新认领预算；额度满时也照常进入收尾通道。"""
+    from backend.core.use_cases import agent_runner_orchestration_runtime as runtime
+
+    cleanup_issue = _make_ready_issue(
+        8,
+        "Published Direct PR handoff",
+        "<!-- iar:depends-on #1 -->",
+        ("agent/ready",),
+    )
+    regular_ready_issue = _make_ready_issue(9, "New work", "", ("agent/ready",))
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [cleanup_issue, regular_ready_issue]
+    fake_client.set_list_issues_by_label_result(running_issues)
+    monkeypatch.setattr(
+        runtime,
+        "_has_published_direct_pr_handoff",
+        lambda _github_client, issue: issue.number == cleanup_issue.number,
+    )
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=2,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+            concurrency=2,
+            execution_ceiling=1,
+        )
+
+    assert exit_code == 0
+    expected_running_count = len(running_issues)
+    expected_ready_budget = 1 - expected_running_count
+    assert (
+        f"Concurrency ceiling: ceiling=1 running={expected_running_count} "
+        f"ready_budget={expected_ready_budget}"
+    ) in caplog.text
+    actual_issue_kinds = [
+        (issue_number, issue_kind)
+        for issue_number, issue_kind in ((8, "direct_pr_cleanup"), (9, "ready"))
+        if f"would process Issue #{issue_number} ({issue_kind})" in caplog.text
+    ]
+    assert actual_issue_kinds == expected_issue_kinds
+
+
 def test_run_once_running_count_failure_claims_zero_fail_closed(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
