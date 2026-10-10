@@ -1931,6 +1931,34 @@ JSON 输出每行一个 `IssueWithPulls` 对象，字段稳定：`repo?`、`numb
 - 单仓调用失败（gh 不可用、网络错误）→ 退出码非零，错误信息包含 repo 路径和错误原因
 - 全仓模式下某仓 API 失败不影响其他仓，最终退出码非零，stderr 含该仓错误
 
+## kc lifecycle
+
+`kc lifecycle` 从本机 console 生命周期账本只读查询 Issue 的当前阶段与事件时间线。默认列出账本中所有有关联 Issue 的记录，不访问 GitHub，也不设置时间范围；指定 `--repo-id` 可缩小到单仓。
+
+```bash
+# 列出所有已记录的 Issue 当前阶段
+kc lifecycle
+
+# 查某个 Issue 的当前阶段与完整事件时间线
+kc lifecycle --repo-id keda-main --issue 268
+
+# 筛选历史上到达过 validation_passed 的 Issue；当前阶段会一并显示
+kc lifecycle --reached validation_passed
+
+# 按当前阶段精确筛选
+kc lifecycle --phase blocked
+
+# 输出机器可读结果
+kc lifecycle --reached validation_passed --json
+```
+
+- `--reached <event>` 按事件历史筛选：命中该事件的 Issue 即使后来进入评审、阻塞、失败或完成阶段，仍会保留在结果中。可选值来自生命周期事件闭集；纯观测事件 `agent_token_usage` 不作为里程碑。
+- `--phase <phase>` 只匹配当前阶段，支持 `none`、`queued`、`executing`、`validating`、`reviewing`、`merging`、`blocked`、`failed`、`completed`。
+- `--issue <n>` 显示事件时间线；若不同仓库存在同号 Issue 且没有传 `--repo-id`，会分别显示匹配记录。
+- `--json` 输出每条生命周期的 run、阶段、结局、账本完整性与事件详情，供脚本消费。
+- 数据来自本机 `history_db_path` 指向的 SQLite 生命周期账本。其它机器上的记录不会自动同步到这里；账本没有记录时，命令会报告空结果，不会把它推断成“未开始”。
+- 生命周期阶段是 `queued`、`executing`、`validating`、`reviewing`、`merging`、`blocked`、`failed`、`completed` 等粗粒度阶段；`--reached` 则按更细的历史事件（例如 `validation_passed`）筛选。
+
 ## 常用命令
 
 ```bash
@@ -4805,6 +4833,8 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 - `kc container up` 与 `kc daemon` 是**互斥**选项：同一仓库不能同时跑本机 daemon 和容器 daemon。
 - 不装 Docker 的用户零影响：`kc container` 全部子命令都是 opt-in。
 
+<a id="new-agent-registry"></a>
+
 ## 接入一个新 agent（声明式注册表）
 
 一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` 的出厂默认已在代码注册表中生效）。
@@ -4836,7 +4866,7 @@ profile 级字段（`profiles.<profile>`，用途为 4 种闭集：`run` / `deli
 | `expand` | `"<展开器>:<flag>"` | 运行期参数注入；展开器为**闭集**（当前仅 `git_writable_roots`），如 codex 的 `"git_writable_roots:--add-dir"` |
 | `read_only` | bool，默认 `false` | 是否为可验证的只读调用；只读决策入口（planner / `kc ask`）以此做 fail-fast 门禁 |
 
-argv 组装顺序：`[bin] + args(占位符替换) + expanders + tail_args`，再按 `prompt_delivery` 决定提示词落在 argv 尾部、指定 flag 后还是 stdin。字段的三层合并语义与 shell 展开边界详见 [配置说明](configuration.md#agent-runner-agent-注册表配置)。
+argv 组装顺序：`[bin] + args(占位符替换) + expanders + tail_args`，再按 `prompt_delivery` 决定提示词落在 argv 尾部、指定 flag 后还是 stdin。字段的三层合并语义与 shell 展开边界详见 [配置说明](configuration.md#agent-runner-agent-registry)。
 
 ### 自检流程（`kc agent doctor`）
 

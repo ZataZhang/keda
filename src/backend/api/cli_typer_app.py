@@ -398,10 +398,8 @@ def _app_callback(
 # on a Typer app. The original ``cli_typer`` module defined commands in this
 # order: init → registry → labels → issue → run/review/review-daemon/loop-daemon
 # → logs → recover/blocked-continue → ask/repl/deliberate → worktree/workflow
-# → takeover → loop. The modules below are imported in that exact order so
-# ``kc --help`` byte-output stays stable. ``cli_typer_schema`` is appended
-# last: the read-only introspection command only adds a trailing entry and must
-# not reorder the existing ones.
+# → takeover → loop. New read-only commands are appended after that baseline;
+# ``cli_typer_schema`` stays last so it does not reorder existing entries.
 from backend.api import (  # noqa: E402,F401
     cli_typer_init,
     cli_typer_registry,
@@ -419,6 +417,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_config,
     cli_typer_console,
     cli_typer_tokens,
+    cli_typer_lifecycle,
     cli_typer_skill,
     cli_typer_schema,
 )

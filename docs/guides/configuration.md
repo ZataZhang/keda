@@ -111,9 +111,11 @@ verification_commands = [
 
 未覆盖的字段自动继承全局 `[agent_runner]` 默认值。环境变量仍可对全局段生效，但暂不支持通过环境变量覆盖单个仓库的字段。
 
+<a id="agent-runner-agent-registry"></a>
+
 ## Agent Runner Agent 注册表配置
 
-`config.toml` 的 `[agent_runner.agents.<name>]` 段以声明式方式注册 agent。一个 agent 的全部调用差异（可执行文件、认证/skills 路径、各用途 argv、提示词投递、输出协议）都是纯数据，由统一的命令构造器组装；`src/` 下没有 agent 专有的分支代码。全部字段与取值域见 [Agent Runner 使用指南](agent-runner.md#接入一个新-agent声明式注册表)。
+`config.toml` 的 `[agent_runner.agents.<name>]` 段以声明式方式注册 agent。一个 agent 的全部调用差异（可执行文件、认证/skills 路径、各用途 argv、提示词投递、输出协议）都是纯数据，由统一的命令构造器组装；`src/` 下没有 agent 专有的分支代码。全部字段与取值域见 [Agent Runner 使用指南](agent-runner.md#new-agent-registry)。
 
 ### 合并语义
 

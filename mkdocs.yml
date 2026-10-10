@@ -64,7 +64,6 @@ nav:
       - 发布流程: guides/release-process.md
       - Agent Runner:
           - 完整指南: guides/agent-runner.md
-          - 运行历史、任务链接与失败详情: guides/agent-runner.md#运行历史与完成度统计
       - 生命周期 Agent 矩阵: guides/lifecycle-agent-matrix.md
       - Agent 模型预设: guides/model-presets.md
       - PRD 编写规范: guides/prd-standard.md

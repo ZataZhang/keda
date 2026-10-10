@@ -1,6 +1,6 @@
 ---
 name: kedacode-operator
-description: Use KedaCode (kc) when the user asks to operate the KedaCode CLI or its managed runner — 装环境与查 Agent 配置 (initialize a repository, inspect agent presets/models), 建 issue (create an Issue from a PRD file or from a one-line request), 查 issue (inspect Issues and the ready queue), 跑一次 (run one execution pass, preview or execute), 看进度 (watch progress and per-Issue live agent output), 卡住了 (triage stuck, blocked, or failed Issues), 后台跑 (run and manage daemons in the background), or CI 交付 (observe CI status, set the auto-repair policy, request one manual repair). Read-only requests never start execution.
+description: Use KedaCode (kc) when the user asks to operate the KedaCode CLI or its managed runner — 装环境与查 Agent 配置 (initialize a repository, inspect agent presets/models), 建 issue (create an Issue from a PRD file or from a one-line request), 查 issue (inspect Issues and the ready queue), 查生命周期 (show current Issue lifecycle phases and filter by reached milestones), 跑一次 (run one execution pass, preview or execute), 看进度 (watch progress and per-Issue live agent output), 卡住了 (triage stuck, blocked, or failed Issues), 后台跑 (run and manage daemons in the background), or CI 交付 (observe CI status, set the auto-repair policy, request one manual repair). Read-only requests never start execution.
 ---
 
 # KedaCode Operator
@@ -13,6 +13,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 |---|---|---|
 | 建 issue | 建个 issue / 把 tasks/pending/xxx.md 建成 issue / 开个 Issue / issue create | `${CODEBUDDY_SKILL_DIR}/references/create-issue.md` |
 | 查 issue | 查 issue / issue list / 看看有哪些 Issue / 这个 PRD 有 issue 吗 | `${CODEBUDDY_SKILL_DIR}/references/issue-inspect.md` |
+| 查生命周期 | 当前到哪个 lifecycle / 哪些 Issue 已通过某个阶段 / 看 Issue 的生命周期时间线 | `${CODEBUDDY_SKILL_DIR}/references/lifecycle.md` |
 | 跑一次 | 跑一下 / 跑一次 / 执行这个 Issue / run this / 快速通道发 PR / 直接发 PR | `${CODEBUDDY_SKILL_DIR}/references/run-once.md` |
 | 看进度 | 看看 197 现在什么情况 / 到哪了 / 实时输出 / logs / tail / `/ps` | `${CODEBUDDY_SKILL_DIR}/references/watch.md` |
 | 卡住了 | 怎么不动了 / 卡住了 / 失败了 / agent/blocked / 恢复 | `${CODEBUDDY_SKILL_DIR}/references/triage.md` |
