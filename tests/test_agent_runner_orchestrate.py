@@ -1728,6 +1728,62 @@ def test_run_once_running_count_failure_claims_zero_fail_closed(
     assert _dry_run_selected_issue_numbers(caplog) == []
 
 
+def test_run_once_running_count_failure_keeps_recovery_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """计数与标签候选查询同时失败时，用 open Issue 扫描继续运行恢复通道。"""
+    from backend.core.use_cases import agent_runner_orchestrate as orchestrate
+
+    running_label = AppConfig().labels.running
+    running_issue = _make_ready_issue(21, "Running recovery", "", (running_label,))
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(7, "Ready", "", ("agent/ready",))
+    ]
+
+    def _fail_running_label_query(labels: list[str], limit: int) -> list[IssueSummary]:
+        if running_label in labels:
+            raise RuntimeError("running label query unavailable")
+        return []
+
+    def _running_count_fails(
+        label: str | None, limit: int, state: str = "all"
+    ) -> list[IssueSummary]:
+        if label == running_label:
+            raise RuntimeError("running count unavailable")
+        if label is None and state == "open":
+            return [running_issue]
+        return []
+
+    fake_client.list_review_candidate_issues = _fail_running_label_query
+    fake_client.list_issues_by_label = _running_count_fails
+    monkeypatch.setattr(
+        orchestrate,
+        "_has_existing_local_commit_ready_for_publish",
+        lambda **_kwargs: False,
+    )
+    monkeypatch.setattr(orchestrate, "_worktree_needs_rebase_recovery", lambda **_kwargs: True)
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=2,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+            execution_ceiling=2,
+        )
+
+    assert exit_code == 0
+    assert "claiming zero new Issues this pass (fail-closed)" in caplog.text
+    assert "retrying with a bounded open-Issue scan" in caplog.text
+    assert "would process Issue #21 (running_publish_recovery)" in caplog.text
+    assert _dry_run_selected_issue_numbers(caplog) == [21]
+
+
 def test_run_once_without_ceiling_keeps_explicit_path_fully_exempt(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

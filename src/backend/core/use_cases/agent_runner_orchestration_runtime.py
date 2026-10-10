@@ -748,6 +748,7 @@ def run_once(request: RunOnceRequest) -> int:
     # 不新增并发，保持原配额。计数失败按 fail-closed 处理：本轮不认领新 Issue，
     # 宁可不跑也不超发。
     ready_claim_budget = effective_max_issues
+    running_count_failed = False
     if request.execution_ceiling is not None and target_issue_summary is None:
         ceiling = request.execution_ceiling
         try:
@@ -762,6 +763,7 @@ def run_once(request: RunOnceRequest) -> int:
                 config.labels.running,
                 count_exc,
             )
+            running_count_failed = True
             live_running_count = ceiling
         ready_claim_budget = min(effective_max_issues, max(0, ceiling - live_running_count))
         _logger.info(
@@ -821,9 +823,34 @@ def run_once(request: RunOnceRequest) -> int:
                 else []
             )
         else:
-            running_candidates = github_client.list_review_candidate_issues(
-                [config.labels.running], remaining
-            )
+            try:
+                running_candidates = github_client.list_review_candidate_issues(
+                    [config.labels.running], remaining
+                )
+            except Exception as discovery_exc:
+                if not running_count_failed:
+                    raise
+                _logger.warning(
+                    "Could not query '%s' recovery candidates after the running-count "
+                    "failure (%s); retrying with a bounded open-Issue scan.",
+                    config.labels.running,
+                    discovery_exc,
+                )
+                try:
+                    open_issues = github_client.list_issues_by_label(
+                        None, _READY_DISCOVERY_LIMIT, state="open"
+                    )
+                    running_candidates = [
+                        issue for issue in open_issues if config.labels.running in issue.labels
+                    ][:remaining]
+                except Exception as fallback_exc:  # noqa: BLE001 - preserve the daemon pass.
+                    _logger.warning(
+                        "Could not discover in-flight '%s' recovery candidates after the "
+                        "running-count failure (%s); skipping running recovery this pass.",
+                        config.labels.running,
+                        fallback_exc,
+                    )
+                    running_candidates = []
         for issue in running_candidates:
             if _has_published_direct_pr_handoff(github_client, issue):
                 issues_to_process.append((issue, "direct_pr_cleanup"))

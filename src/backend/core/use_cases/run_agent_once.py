@@ -721,10 +721,17 @@ def run_agent_with_prompt(
         """把本次调用自报的会话 id 落在 worktree 局部记录里。
 
         只记 run 用途的会话：fix / closeout / verifier 是另一段独立对话，写进同一个
-        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。落盘是旁路，失败只记
-        日志——续传是增益路径，不能反过来把正常执行拖下水。
+        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。这些调用都走默认
+        ``profile="run"``，profile 一档拦不住，因此以调用阶段为准：只有
+        ``implementation``（主循环与其 recovery 轮次）与未标注阶段的调用才落盘；
+        verifier 等独立对话即使同 profile 也不覆盖——它还顺手把 git 跟踪的
+        ``.iar/agent-runner/sessions/<agent>.json`` 改脏，让「独立 verifier 不得
+        改动代码树」的门禁误报。落盘是旁路，失败只记日志——续传是增益路径，
+        不能反过来把正常执行拖下水。
         """
         if not session_id or profile != AGENT_PROFILE_RUN:
+            return
+        if invocation_phase not in (PHASE_IMPLEMENTATION, PHASE_UNSPECIFIED):
             return
         try:
             save_agent_session_record(
