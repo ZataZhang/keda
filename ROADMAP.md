@@ -50,12 +50,14 @@
 - **Agent Runner 记忆持久化已落地**：runner 启动时检索长期记忆 / 草稿 / 已晋升 skill，短期记忆写入 worktree 局部目录、问题关闭后清理；skill 草稿按 usage_count 自动晋升阈值（默认 3）。
 - **Agent Runner 记忆锚点稳定化已落地**：所有记忆目录在 `factory` 构建 `RepositoryRunContext` 时被一次性绝对化到目标仓库主检出根，跨 worktree / 跨 Issue 持久化真实生效；共享目录写入采用 tmp + `os.replace` 原子落盘，并发场景 last-write-wins 不产生半写文件；原 PRD 验收降级为"同目录内部函数调用"的失真场景已被纠正，证据脚本强制 `git worktree add` 创建两个真实副本。
 - **`api → engines` 直连已迁移回 `core` 编排层**：`src/backend/api/` 对 11 个 `engines/agent_runner/` 能力的直连 import 全部清零，业务类能力在 `core/use_cases/` 补薄 facade 用例或复用既有用例；`live_terminal` / `runner_live_view` 等呈现模块从 engines 迁入 `api/`；`hooks/shared/check_architecture.py` 的 `FORBIDDEN_IMPORTS["api"]` 恢复严格态 `["infrastructure", "engines"]` 并稳定通过 `just lint --full`；`CLAUDE.md` 与 `docs/ai-standards/architecture.md`、`docs/architecture/system-design.md` 关于 `api/` 依赖方向的表述三处一致。
+- **原生执行器入口与按需项目预览已落地**：TTY 下裸 `kc` 即 `kc session`——KC 只解析默认执行器、核对随包 operator skill、投递 bootstrap 后把终端交出去，并**原样转发 provider 退出码**（非 TTY 回落帮助且退出 1，管道/CI 不会把失败读成成功）；`kc preview start|status|stop` 承载按需预览，argv 必须是精确参数数组（不经 `sh -c`），ready 地址主机限定回环闭集且非回环是**加载期错误**，只终止 KC 自己登记的进程组。隧道、外部预览平台、以及"用模型猜用户是否想要预览"仍是明确非目标（PRD `P1-FEAT-20261009-123512`）。
+- **停滞监督已落地（默认关闭）**：`[agent_runner.stall_supervisor]` 为活跃 attempt 起一个只读 observer，按现场指纹（HEAD/branch/status/diff/调用终态数/最近事件时间，**刻意不含 stdout**）判定疑似停滞，请模型在 `progress / blocked / stalled / uncertain` 闭集里下一次结论；只有 `stalled` 且摘要与证据齐全、且处置前现场与进程归属复核通过，才终止该进程组并把 `AgentStallCancelledError` 交回既有失败分类与恢复阶梯——不新增恢复路径、不改标签。结论解析容忍中英键名、markdown/表格/JSON/换行续写与 provider 追加字段（两个线上误报：追加字段解析失败、三字段齐全仍判 uncertain），容错只到"读法"为止，取值仍落闭集（PRD `P1-FEAT-20261009-123512`，含 P2 复盘）。
 - **文档与测试基础已落地**：已有 Agent Runner 使用指南、配置说明、架构规范、归档 PRD、pytest 覆盖和 `just test` 验证入口。
 - **包管理器分发链路已落地**：PyPI 分发包定名 `kedacode`（命令名仍是 `iar`，避免与 CNCF KEDA 撞名），发布走"tag 构建 draft release → 人工正式发布 → OIDC Trusted Publishing 上传 PyPI → 自动更新 Homebrew tap"两步走；用户侧三条等价入口 `brew install ZataZhang/tap/kedacode`、`uv tool install kedacode` / `pipx install kedacode`、`curl -fsSL .../install.sh | bash`（`--source auto|pypi|tarball`，pypi 来源失败不静默回退）。明确不做原生安装包：macOS 不签名不公证在 Sequoia 是硬阻断，Homebrew 5.0 起下架过不了 Gatekeeper 的 cask，原生 .app 需要每年 $99 的开发者账号，而 CLI 包管理器路径完全不碰 Gatekeeper、成本为零（PRD `P1-FEAT-20260910-125248` 决策一 / "本次明确不涉及"）。
 
 ### Partially Completed
 
-- **交互终端能力**：已有 CLI、少量交互式提示和基础前端结构，但还没有完整的 issue 浏览、任务选择、状态追踪和人工介入终端体验。
+- **交互终端能力**：裸 `kc` 原生执行器入口、`kc repl`、`kc preview` 与少量交互式提示已具备，前端仍是基础结构；但还没有完整的 issue 浏览、任务选择、状态追踪和人工介入终端体验。
 - **自动恢复能力**：执行、验证、提交请求、已有本地 commit 发布恢复、repair/rebase 已有基础闭环；发布恢复后重新进入 supervisor 的安全闭环、blocked/forbidden resolution、CI rework 状态恢复、rebase detached HEAD guard 仍待补齐。
 - **可观测性**：终端前台输出、Issue comment、`iar:event` marker、合议日志、review-daemon cursor 和健康端点已具备；还缺少面向 operator 的统一监控面板、异常聚合和可审计时间线视图。
 - **review 能力**：pre-push review、post-PR supervisor、宽上下文 review-daemon、独立 verifier gate 已有闭环；高风险 finding 的稳定阻断规则、PR 正文 schema 校验和部分 supervisor 安全边界仍需补齐。

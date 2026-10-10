@@ -27,6 +27,10 @@ from backend.core.shared.models.agent_runner import (
     PromptConfig,
     RepositoryIdentity,
 )
+from backend.core.shared.models.agent_session import (
+    AgentSessionConfig,
+    PreviewProfile,
+)
 from backend.core.shared.models.agent_spec import AgentSpec
 from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_KEYS,
@@ -49,6 +53,7 @@ from backend.infrastructure.config.settings import (
     AgentRunnerPresetSettings,
     AgentRunnerPromptSettings,
     AgentRunnerRepositorySettings,
+    AgentSessionSettings,
 )
 
 
@@ -64,6 +69,42 @@ def _pydantic_override_dict(override_model: BaseModel) -> dict:
     return {
         k: v for k, v in override_model.model_dump().items() if k in override_model.model_fields_set
     }
+
+
+def _merge_agent_session_config(
+    base_config: AgentSessionConfig,
+    override: AgentSessionSettings | None,
+) -> AgentSessionConfig:
+    """合并仓库级顶层 ``[agent_session]`` 段。
+
+    预览子表要单独处理：``_merge_optional_model`` 会把 pydantic 的
+    ``AgentSessionPreviewSettings`` 整对象塞进期待 ``PreviewProfile`` 的字段里，
+    于是 ``argv`` 停在 list、类型也错位。这里按字段逐个覆盖，仓库层只改它显式声明
+    过的键（全局层的 preview 仍然生效）。
+
+    Args:
+        base_config: 全局层已构建的会话配置。
+        override: 仓库层 ``.kedacode.toml`` 顶层 ``[agent_session]`` 声明；
+            ``None`` 时原样返回全局层。
+
+    Returns:
+        合并后的 :class:`AgentSessionConfig`。
+    """
+    if override is None:
+        return base_config
+    merged_data = _model_to_dict(base_config)
+    for field_name, field_value in _pydantic_override_dict(override).items():
+        if field_name != "preview":
+            merged_data[field_name] = field_value
+    preview_override = override.preview
+    if preview_override is not None:
+        merged_preview = _model_to_dict(base_config.preview)
+        for preview_field, preview_value in _pydantic_override_dict(preview_override).items():
+            merged_preview[preview_field] = (
+                tuple(preview_value) if preview_field == "argv" else preview_value
+            )
+        merged_data["preview"] = PreviewProfile(**merged_preview)
+    return AgentSessionConfig(**merged_data)
 
 
 def _merge_optional_model(base_model, override_model):
@@ -390,6 +431,10 @@ def merge_repository_config(
         global_config.deliberation, repo_settings.deliberation
     )
     repl = _merge_optional_model(global_config.repl, repo_settings.repl)
+    agent_session = _merge_agent_session_config(global_config.agent_session, repo_settings.session)
+    stall_supervisor = _merge_optional_model(
+        global_config.stall_supervisor, repo_settings.stall_supervisor
+    )
     daemon = _merge_daemon_config(global_config.daemon, repo_settings.daemon)
     lifecycle_agents = _merge_lifecycle_agents_config(
         global_config.lifecycle_agents, repo_settings.lifecycle_agents
@@ -426,6 +471,8 @@ def merge_repository_config(
         generated_content=generated_content,
         interactive_decision=interactive_decision,
         repl=repl,
+        agent_session=agent_session,
+        stall_supervisor=stall_supervisor,
         daemon=daemon,
         deliberation=deliberation,
         lifecycle_agents=lifecycle_agents,

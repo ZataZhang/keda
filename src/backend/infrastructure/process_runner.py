@@ -8,6 +8,7 @@ import os
 import select
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -29,6 +30,13 @@ from backend.core.shared.interfaces.output_timestamps import (
 )
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import TokenUsage
+from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
+from backend.infrastructure.attempt_process_registry import (
+    probe_attempt_ownership,
+    register_live_attempt,
+    terminate_attempt,
+    unregister_live_attempt,
+)
 from backend.infrastructure.agent_stream_usage import (
     StreamUsageCollector,
     _attach_stream_observations,
@@ -37,6 +45,7 @@ from backend.infrastructure.agent_stream_usage import (
 )
 from backend.infrastructure.child_env import build_e2e_child_env, build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
+from backend.infrastructure.process_identity import process_start_time
 
 
 def _resolve_profiled_child_env(
@@ -104,7 +113,12 @@ _COMMAND_HEARTBEAT_SECONDS = 60
 _OWN_PROCESS_GROUP_KWARGS: dict[str, Any] = {"process_group": 0} if hasattr(os, "setpgid") else {}
 
 
-def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
+def _terminate_process_tree(
+    process: subprocess.Popen[Any],
+    *,
+    expected_process_group: int | None = None,
+    expected_process_started_at: float | None = None,
+) -> bool:
     """终止超时子进程**及其整个进程组**，而不是只终止直接子进程。
 
     ``Popen.kill()`` 只向直接子进程发信号。对 ``bash -lc "script.sh | tee log"``
@@ -126,25 +140,52 @@ def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
 
     Args:
         process: 需要终止的子进程句柄。
+
+    Returns:
+        是否已发出终止信号。监督器取消时，实时 PID、PGID 与创建时刻任一对不上
+        都拒绝信号；普通超时调用忽略返回值并沿用既有失败处理。
     """
     killable_group_id: int | None = None
-    if hasattr(os, "killpg"):
+    has_expected_identity = expected_process_group is not None
+    if has_expected_identity and not hasattr(os, "killpg"):
+        return False
+    if has_expected_identity:
+        if expected_process_started_at is None or process.poll() is not None:
+            return False
         try:
-            child_group_id = os.getpgid(process.pid)
-        except OSError:  # 子进程已退出或已被回收。
-            child_group_id = None
-        if child_group_id is not None and child_group_id > 1 and child_group_id != os.getpgid(0):
-            killable_group_id = child_group_id
+            current_group_id = os.getpgid(process.pid)
+        except (OSError, AttributeError):
+            return False
+        if (
+            current_group_id != expected_process_group
+            or process_start_time(process.pid) != expected_process_started_at
+        ):
+            return False
+        killable_group_id = expected_process_group
+    if hasattr(os, "killpg"):
+        if not has_expected_identity:
+            try:
+                child_group_id = os.getpgid(process.pid)
+            except OSError:  # 子进程已退出或已被回收。
+                child_group_id = None
+            if (
+                child_group_id is not None
+                and child_group_id > 1
+                and child_group_id != os.getpgid(0)
+            ):
+                killable_group_id = child_group_id
     if killable_group_id is not None:
         try:
             os.killpg(killable_group_id, signal.SIGKILL)
-            return
+            return True
         except OSError:  # 组已消失，退回直接终止。
-            pass
+            if has_expected_identity:
+                return False
     try:
         process.kill()
+        return True
     except OSError:  # 子进程已退出。
-        pass
+        return False
 
 
 @dataclass(frozen=True)
@@ -232,6 +273,7 @@ class SubprocessRunner:
         output_protocol: str | None = None,
         env_profile: str | None = None,
         env_allow_extra: Sequence[str] = (),
+        attempt_key: str | None = None,
     ) -> CommandResult:
         """Run a subprocess and capture output.
 
@@ -265,6 +307,10 @@ class SubprocessRunner:
                 且 ``timeout`` 非空、``output_protocol`` 为 plain——否则
                 白名单+进程树击杀的安全前提不成立，直接报错而非静默降级。
             env_allow_extra: E2E 档下追加放行的变量名（配置 ``env_allow``）。
+            attempt_key: 活跃 attempt 登记键。非 ``None`` 时把这次 ``Popen`` 登记进
+                :mod:`backend.infrastructure.attempt_process_registry`，供停滞监督
+                当场复核归属并精确取消（Issue #256 FR-6/FR-7）；``None``（默认）
+                不登记，行为与本特性之前一致。
         """
         command = _with_available_own_command(command)
         started_mono: float = time.monotonic()
@@ -293,21 +339,22 @@ class SubprocessRunner:
                 output_sink=output_sink,
                 usage_collector=usage_collector,
                 env=child_env,
+                attempt_key=attempt_key,
             )
             stdout = completed.stdout
             stderr = completed.stderr
         elif input_text is not None:
-            completed = subprocess.run(
-                list(command),
+            # stdin 投递也走 Popen：只有拿到真实句柄，停滞监督才有"当场可复核的
+            # 进程归属"可言。语义与原先的 ``subprocess.run`` 保持一致——捕获式输出、
+            # 只有 wall-clock 超时，不新增无输出超时（那会误杀长时间静默思考的 agent）。
+            completed = _run_captured_process(
+                command,
                 cwd=cwd,
-                check=False,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=timeout,
-                input=input_text,
+                label=label,
                 env=child_env,
+                attempt_key=attempt_key,
+                input_text=input_text,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -319,6 +366,7 @@ class SubprocessRunner:
                 inactivity_timeout=inactivity_timeout,
                 label=label,
                 env=child_env,
+                attempt_key=attempt_key,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -347,6 +395,7 @@ class SubprocessRunner:
                 label=label,
                 output_sink=output_sink,
                 env=child_env,
+                attempt_key=attempt_key,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -371,6 +420,7 @@ class SubprocessRunner:
                 heartbeat_seconds=_COMMAND_HEARTBEAT_SECONDS,
                 base_label="Command",
                 context_label=label,
+                attempt_key=attempt_key,
             )
             watchdog.start()
             stdout_lines: list[str] = []
@@ -456,32 +506,63 @@ class SubprocessRunner:
             raise failure
         return result
 
+    def probe_live_attempt(self, attempt_key: str) -> AttemptOwnership:
+        """读取一次活跃 attempt 的进程归属证据（只读，绝不触碰任何进程）。
+
+        证据口径见 :mod:`backend.infrastructure.attempt_process_registry`：在册、
+        仍存活、实时进程组与登记值一致三项全过才 ``confirmed=True``。未走 ``Popen``
+        的调用（例如普通 ``subprocess.run`` 命令）不在册，一律是"归属不可证实"。
+        """
+        return probe_attempt_ownership(attempt_key=attempt_key, host_label=socket.gethostname())
+
+    def cancel_live_attempt(
+        self, attempt_key: str, expected: AttemptOwnership
+    ) -> StallCancelOutcome:
+        """按登记身份精确终止一个活跃 attempt 的进程组。
+
+        Args:
+            attempt_key: 待终止的 attempt 键。
+            expected: 调用方在动手前**重新读取**的所有权证据。
+
+        Returns:
+            :class:`StallCancelOutcome`：身份不符时未触碰任何进程并说明原因。
+        """
+        return terminate_attempt(attempt_key=attempt_key, expected=expected)
+
 
 def _run_captured_process(
     command: Sequence[str],
     *,
     cwd: Path,
-    timeout: int,
+    timeout: int | None,
     inactivity_timeout: int | None = None,
     label: str | None = None,
     env: dict[str, str] | None = None,
+    attempt_key: str | None = None,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a captured subprocess with heartbeat and optional inactivity logging.
 
     Args:
         command: Command and arguments to execute.
         cwd: Working directory for the subprocess.
-        timeout: Wall-clock timeout in seconds.
+        timeout: Wall-clock timeout in seconds；``None`` 表示不设 wall-clock 上限
+            （与 ``subprocess.run(timeout=None)`` 同语义）。
         inactivity_timeout: Optional no-output timeout in seconds.
         label: Optional label for heartbeat/timeout logs.
         env: 已构造好的子进程环境，正常由 :meth:`SubprocessRunner.run` 的
             默认净化档或 E2E 白名单档传入（避免同一环境重复构造）；``None``
             时沿用 ``subprocess`` 的父环境继承语义，绕过 ``run()`` 直接调用
             本函数的调用方需自行保证环境已净化。
+        attempt_key: 活跃 attempt 登记键（停滞监督的所有权证据来源）。
+        input_text: 经 stdin 投递的文本。传入时走 ``communicate(input=...)``
+            ——与 :meth:`SubprocessRunner.run` 原先用 ``subprocess.run`` 投递
+            stdin 的语义一致（捕获式、无输出活动跟踪）。
     """
     process = subprocess.Popen(
         list(command),
         cwd=cwd,
+        stdin=subprocess.PIPE if input_text is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -498,11 +579,12 @@ def _run_captured_process(
         heartbeat_seconds=_COMMAND_HEARTBEAT_SECONDS,
         base_label="Command",
         context_label=label,
+        attempt_key=attempt_key,
     )
     watchdog.start()
     try:
-        if inactivity_timeout is None:
-            stdout, stderr = process.communicate()
+        if input_text is not None or inactivity_timeout is None:
+            stdout, stderr = process.communicate(input=input_text)
         else:
             stdout, stderr = _communicate_with_activity_tracking(process, watchdog)
             process.wait()
@@ -570,6 +652,7 @@ class _ProcessWatchdog:
         heartbeat_seconds: int,
         base_label: str,
         context_label: str | None = None,
+        attempt_key: str | None = None,
     ) -> None:
         self._process = process
         self._command = tuple(command)
@@ -579,6 +662,7 @@ class _ProcessWatchdog:
         self._heartbeat_seconds = heartbeat_seconds
         self._base_label = base_label
         self._context_label = context_label
+        self._attempt_key = attempt_key
         self._started_at = time.monotonic()
         self._last_output_at = self._started_at
         self._output_lock = threading.Lock()
@@ -588,12 +672,30 @@ class _ProcessWatchdog:
 
     def start(self) -> None:
         """Start the watchdog background thread."""
+        if self._attempt_key is not None:
+            # 活跃 attempt 的进程句柄进登记簿，停滞监督才能"当场再读一次归属"。
+            # 标签只取命令名：完整 argv 里可能带提示词，绝不进任何日志与证据。
+            register_live_attempt(
+                attempt_key=self._attempt_key,
+                process=self._process,
+                label=str(self._command[0]) if self._command else "command",
+                terminator=lambda expected_group, expected_started_at: _terminate_process_tree(
+                    self._process,
+                    expected_process_group=expected_group,
+                    expected_process_started_at=expected_started_at,
+                ),
+            )
         self._thread.start()
 
     def stop(self) -> None:
         """Stop the watchdog and wait briefly for it to exit."""
         self._stop_event.set()
         self._thread.join(timeout=1)
+        if self._attempt_key is not None:
+            unregister_live_attempt(
+                attempt_key=self._attempt_key,
+                pid=self._process.pid,
+            )
 
     def note_output(self) -> None:
         """Reset the inactivity timeout clock after observing output."""
@@ -766,6 +868,7 @@ def run_filtered_claude_stream(
     label: str | None = None,
     usage_collector: StreamUsageCollector | None = None,
     env: dict[str, str] | None = None,
+    attempt_key: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Claude stream-json and print a filtered live view.
 
@@ -821,6 +924,7 @@ def run_filtered_claude_stream(
         heartbeat_seconds=_COMMAND_HEARTBEAT_SECONDS,
         base_label="Claude stream",
         context_label=label,
+        attempt_key=attempt_key,
     )
     watchdog.start()
 
@@ -916,6 +1020,7 @@ def _run_pty_stream(
     label: str | None,
     output_sink: Callable[[str], None] | None,
     env: dict[str, str] | None = None,
+    attempt_key: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a streaming command under a pseudo-terminal so it line-buffers.
 
@@ -967,6 +1072,7 @@ def _run_pty_stream(
         heartbeat_seconds=_COMMAND_HEARTBEAT_SECONDS,
         base_label="Command",
         context_label=label,
+        attempt_key=attempt_key,
     )
     watchdog.start()
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")

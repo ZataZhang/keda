@@ -58,6 +58,11 @@ class OutputRelayRequest:
             实现端只交**可读原文**，不加行首时间戳——需要时间线的消费方
             （如 per-Issue 路由 sink）在自己的边界上加 ``[HH:MM:SS]``。
         display_sink: stderr 展示回调（仅供即时显示，不进 transcript）。
+        attempt_key: 活跃 attempt 登记键（Issue #256 停滞监督）。协议实现只有在
+            **自己独占进程组**地起子进程时才该用它登记（见
+            :meth:`IProcessRunner.run` 的同名参数）；沿用调用方进程组的实现必须
+            忽略它——按这个键去终止会打到宿主进程自己身上，监督器因此对这类协议
+            只能诊断、不能处置（fail-closed，不是静默假成功）。
     """
 
     argv: tuple[str, ...]
@@ -70,6 +75,7 @@ class OutputRelayRequest:
     collect_stdout: bool = False
     output_sink: Callable[[str], None] | None = None
     display_sink: Callable[[str], None] | None = None
+    attempt_key: str | None = None
 
 
 class IAgentOutputProtocol(ABC):

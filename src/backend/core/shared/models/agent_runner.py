@@ -15,10 +15,12 @@ from backend.core.shared.models.agent_decision import (
 )
 from backend.core.shared.models.agent_deliberation import DeliberationConfig
 from backend.core.shared.models.agent_model_preset import AgentModelPreset
+from backend.core.shared.models.agent_session import AgentSessionConfig
 from backend.core.shared.models.agent_spec import (
     BUILTIN_AGENT_SPECS,
     AgentSpec,
 )
+from backend.core.shared.models.agent_stall import StallSupervisorConfig
 from backend.core.shared.models.lifecycle_agent import (
     LifecycleAgentsConfig,
     LifecyclePresetsConfig,
@@ -1010,6 +1012,11 @@ class AppConfig:
         default_factory=InteractiveDecisionConfig
     )
     repl: ReplConfig = field(default_factory=ReplConfig)
+    # 裸 ``kc`` 原生执行器入口与按需项目预览（顶层 ``[agent_session]``）。与
+    # ``repl`` 分开是因为两者是不同风险面的两种交互形态，见该模型 docstring。
+    agent_session: AgentSessionConfig = field(default_factory=AgentSessionConfig)
+    # 活跃 attempt 的停滞监督（``[agent_runner.stall_supervisor]``），默认关闭。
+    stall_supervisor: StallSupervisorConfig = field(default_factory=StallSupervisorConfig)
     # daemon 层的仓库级对账开关（None = 未声明，沿用调用方全局默认）。
     daemon: DaemonConfig = field(default_factory=DaemonConfig)
     deliberation: DeliberationConfig = field(default_factory=DeliberationConfig)

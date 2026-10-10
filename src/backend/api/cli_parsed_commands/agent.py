@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import shlex
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,18 +23,27 @@ from backend.api.cli_output import (
     emit_json,
 )
 from backend.api.cli_parsed_context import ParsedCommandContext
+from backend.api.cli_parsed_commands.repository_context import (
+    resolve_initialized_repository_target,
+)
 from backend.api import cli as _cli
 from backend.core.shared.models.agent_spec import AGENT_PROFILES
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
+    UnknownProfileError,
     build_agent_invocation,
     resolve_agent_spec,
+)
+from backend.core.use_cases.agent_runner_factory import (
+    build_app_config,
+    create_foreground_session_launcher,
+    logger,
+    prepare_native_session_plan,
 )
 from backend.core.use_cases.interactive_decision import run_interactive_decision
 from backend.core.use_cases.lifecycle_agent_resolution import resolve_lifecycle_agent
 from backend.api.agent_runner_views.live_terminal import create_output_view
 from backend.core.shared.models.agent_deliberation import DeliberationSession
-from backend.core.use_cases.agent_runner_factory import build_app_config, logger
 from backend.core.use_cases.agent_runner_failure_resolver import AgentFailureResolver
 from backend.core.use_cases.agent_runner_output_protocols import get_output_protocol_registry
 
@@ -52,15 +62,7 @@ _SANDBOX_APPROVAL_MARKERS: tuple[str, ...] = (
 
 def run_ask_command(ctx: ParsedCommandContext) -> int:
     """``kc ask``: natural-language decision entrypoint."""
-    contexts = _cli._resolve_cli_repository_targets(
-        parsed=ctx.parsed,
-        runner_settings=ctx.runner_settings,
-        repo_id=ctx.repo_id,
-        repo_override=ctx.repo_override,
-    )
-    for context in contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
-    context = require_single_repository_target("ask", contexts)
+    context = resolve_initialized_repository_target(ctx, "ask")
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     planner_runner = _cli.create_planner_runner(ctx.process_runner, config=context.config)
@@ -116,6 +118,57 @@ def run_ask_command(ctx: ParsedCommandContext) -> int:
         },
         model_selection=planner_model_selection,
     )
+
+
+def run_session_command(ctx: ParsedCommandContext) -> int:
+    """``kc session``（即 TTY 下裸 ``kc``）：启动配置的原生执行器界面。
+
+    与 ``kc repl`` 的分界是刻意的：本入口把整块终端交给 provider 自己的 TUI，
+    KC 不接管对话、不注入权限旗标、也不启动任何项目服务；``kc repl`` 仍是原来
+    的多轮 Keda REPL（白名单 + 确认）。
+
+    Returns:
+        执行器进程的退出码（原样转发，KC 不重新解释）。
+
+    Raises:
+        CliError: stdin 不是 TTY、执行器未注册、或该执行器未声明 interactive
+            能力。三者都在**启动任何进程之前**返回，绝不静默回退到非交互跑法。
+    """
+    context = resolve_initialized_repository_target(ctx, "session")
+    if not sys.stdin.isatty():
+        raise CliError(
+            "The native executor entrypoint needs an interactive terminal: stdin is not a TTY.",
+            code=ExitCode.USAGE,
+            suggestion=(
+                "run `kc session` from a terminal, or use the non-interactive "
+                "`kc run --agent <name>` for unattended execution"
+            ),
+            retryable=False,
+        )
+    try:
+        preparation = prepare_native_session_plan(
+            config=context.config,
+            repo_root=context.repo_path,
+            agent_override=getattr(ctx.parsed, "agent", None),
+        )
+    except (UnknownAgentError, UnknownProfileError) as profile_error:
+        raise CliError(
+            str(profile_error),
+            code=ExitCode.USAGE,
+            suggestion="kc agent doctor --all-profiles",
+            retryable=False,
+        ) from profile_error
+    for notice in preparation.notices:
+        console.print(notice, style="dim")
+    console.print(
+        f"Starting {preparation.plan.agent_name} in {preparation.plan.cwd} "
+        "(KedaCode hands the terminal over; run `kc preview start` here only when "
+        "the user asks to preview the project).",
+        style="dim",
+    )
+    launcher = create_foreground_session_launcher()
+    session_result = launcher.launch(preparation.plan)
+    return session_result.exit_code
 
 
 def run_repl_command(ctx: ParsedCommandContext) -> int:

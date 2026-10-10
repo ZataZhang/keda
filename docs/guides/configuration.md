@@ -197,9 +197,14 @@ allow_execute_yes = true
 
 ## Agent Runner REPL 配置
 
-`config.toml` 的 `[agent_runner.repl]` 段配置 `kc` 无参数进入的交互式
+`config.toml` 的 `[agent_runner.repl]` 段配置 `kc repl` 的交互式
 REPL 入口。整段与 `[agent_runner.interactive_decision]` 隔离，二者可
 独立调整默认 agent、超时、白名单策略。
+
+> 入口变更（Issue #256）：TTY 下的**裸 `kc`** 不再进入本段的 REPL，而是进入原生执行器
+> 入口 `kc session`（见下文「Agent Session 原生入口与预览配置」）；本段入口固定为显式的
+> `kc repl`。两者是不同风险面：REPL 由 KC 解释 agent 输出并按白名单执行子命令，原生入口
+> 把对话与权限整个交给 provider。
 
 ```toml
 [agent_runner.repl]
@@ -227,8 +232,7 @@ confirm_commands = [
 ]
 ```
 
-- `enabled`：是否启用 REPL 入口；设为 `false` 时 `kc` 无参数仍走
-  Typer 默认帮助路径。
+- `enabled`：是否启用 REPL；设为 `false` 时 `kc repl` 直接报 `REPL is disabled in configuration.` 并以 1 退出。
 - `default_agent`：默认 REPL agent（支持 `claude`、`codex`、`kimi`）。
   `auto` 不被接受为 REPL 默认 agent（`kc run` 才用 auto）。
 - `default_output_dir`：REPL 会话审计目录前缀；每次会话创建
@@ -251,6 +255,68 @@ confirm_commands = [
 REPL 策略：默认全局 agent 是 `claude`，某个仓库可改为 `kimi` 或
 `codex`；默认 dry-run 白名单之外的命令可通过
 `confirm_commands` 在仓库层收紧或放宽。
+
+## Agent Session 原生入口与预览配置
+
+`config.toml` 的顶层 `[agent_session]` 段配置 TTY 下裸 `kc` 的原生执行器入口，以及
+`[agent_session.preview]` 子表所声明的按需项目预览。行为全景见
+[Agent Runner 指南](agent-runner.md) 的「原生执行器入口与按需项目预览」。
+
+```toml
+[agent_session]
+default_agent = "claude"
+bootstrap_enabled = true
+skill_install_check_enabled = true
+
+[agent_session.preview]
+argv = ["npm", "run", "dev"]
+ready_url = "http://127.0.0.1:3000"
+ready_timeout_seconds = 60
+```
+
+- `default_agent`：裸 `kc` / `kc session` 使用的执行器注册名，`--agent` 可覆盖。该 agent
+  **必须声明 `interactive` profile**，否则入口 fail-fast 报错，不会静默回退到别的 provider。
+- `bootstrap_enabled`：是否把 operator 使用说明作为 bootstrap 投递给 provider。投递通道由
+  profile 的 `prompt_delivery` 决定（claude 走 `--append-system-prompt`；没有可核实通道的
+  provider 就不投递，也不假装投递）。设为 `false` 时空提示词不会占用 argv 位置参数。
+- `skill_install_check_enabled`：启动前是否用既有 fail-closed 安装器核对随包 operator skill；
+  冲突时报错，**绝不覆盖**用户改过的内容。
+- `preview.argv`：已批准的 dev 命令 **argv 数组**（不是 shell 文本）。空列表视为未配置，此时走
+  "仓库唯一候选 + 用户显式确认"路径；元素为空字符串是加载期错误。
+- `preview.ready_url`：期望的 ready 地址。主机必须属于回环闭集（`localhost` / `127.0.0.1` / `::1`），
+  非回环主机是**加载期错误**——绑到可路由网卡这条路径在任何进程启动之前就被排除。
+- `preview.ready_timeout_seconds`：等待进程自报地址的上限，必须为正数。
+
+仓库层 `.kedacode.toml` 可覆盖以上任意字段（含 `preview.argv`），因此不同仓库能各自声明自己的
+dev 命令而不改动机器级配置。预览进程**只在用户于执行器对话里明确要求时**由 `kc preview start`
+启动，KC 不主动起、也不猜用户想不想看。
+
+## Agent Runner 停滞监督配置
+
+`config.toml` 的 `[agent_runner.stall_supervisor]` 段控制"活跃 attempt 是否被周期性问一次
+是否停滞"。**默认关闭**是刻意的：开启意味着 KC 会按周期调用模型，并在满足全部所有权校验后
+终止一个正在写代码的子进程。关闭时一次模型都不调用，执行与恢复行为与本特性之前逐字节一致。
+
+```toml
+[agent_runner.stall_supervisor]
+enabled = false
+check_interval_seconds = 1800
+stalled_after_seconds = 1800
+agent = "auto"
+diagnosis_timeout_seconds = 600
+diagnosis_inactivity_timeout_seconds = 300
+```
+
+- `enabled`：总开关。
+- `check_interval_seconds`：巡检周期；必须为正数，`0` 或负值在配置加载期就报错（不会起观察线程再崩）。
+- `stalled_after_seconds`：现场指纹连续冻结多久算疑似停滞；同样必须为正。
+- `agent`：诊断使用哪个 agent 的**只读 `generate`** profile。默认 `auto` 沿用生命周期矩阵的
+  `supervisor` 键（与 post-PR 监督同一派生），未声明时回落到 `runner.default_agent` 的 auto 解析。
+  解析结果没有只读 `generate` 形态时，监督器自我禁用并记一条审计，而不是拿带写权限的 profile 去诊断。
+- `diagnosis_timeout_seconds` / `diagnosis_inactivity_timeout_seconds`：单次诊断调用的总上限与静默上限。
+
+判定与处置的完整链路（含"结论必须落进闭集、`stalled` 缺摘要或证据一律降级 `uncertain`"）见
+[Agent Runner 指南](agent-runner.md) 的「停滞监督（Stall Supervisor）」。
 
 ## 预览部署配置
 

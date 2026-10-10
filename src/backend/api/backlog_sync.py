@@ -121,7 +121,7 @@ def ensure_fresh_backlog_snapshot(
 
 
 def request_backlog_resync(repo_id: str, *, include_archived: bool = False) -> None:
-    """写操作（开始 / 全局开始）成功后立即为对应仓库申请一次后台重扫。
+    """写操作（入队 / 开始 / 全局开始）成功后立即为对应仓库申请一次后台重扫。
 
     替换原先"弹掉内存缓存"的失效方式：缓存被删掉后下一次读仍要等一次全量扫描，
     而这里直接把重建动作派到后台，读取方拿到的是上一份快照 + 过期标记。

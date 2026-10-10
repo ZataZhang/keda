@@ -75,6 +75,7 @@ __all__ = [
     "labels_app",
     "loop_app",
     "main",
+    "preview_app",
     "registry_app",
     "backlog_app",
     "skill_app",
@@ -209,6 +210,11 @@ skill_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+preview_app = typer.Typer(
+    help="Manage the on-demand local preview server for the current repository.",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 container_app.add_typer(auth_app, name="auth")
 app.add_typer(labels_app, name="labels")
 app.add_typer(issue_app, name="issue")
@@ -225,6 +231,7 @@ app.add_typer(container_app, name="container")
 app.add_typer(console_app, name="console")
 app.add_typer(agent_app, name="agent")
 app.add_typer(skill_app, name="skill")
+app.add_typer(preview_app, name="preview")
 
 RepoOption = Annotated[str | None, typer.Option("--repo", help="Target repository path.")]
 RepoIdOption = Annotated[
@@ -362,30 +369,31 @@ def _app_callback(
         RunAgentChoice | None,
         typer.Option(
             "--agent",
-            help="Override the REPL default agent. "
+            help="Override the native executor for the bare `kc` entrypoint. "
             "Accepts any registered agent name (see `kc agent list`); "
-            "'auto' falls back to [agent_runner.repl].default_agent.",
+            "'auto' falls back to [agent_session].default_agent.",
         ),
     ] = None,
-) -> None:
-    """Store top-level options and dispatch the no-arg REPL entrypoint."""
+) -> int | None:
+    """Store top-level options and dispatch the no-arg native executor entrypoint."""
     ctx.obj = {"repo": repo, "repo_id": repo_id, "config": config}
     if ctx.invoked_subcommand is not None:
-        return
-    # No subcommand and the user did not pass --help. The REPL entrypoint
-    # only makes sense inside an interactive terminal; otherwise fall back
-    # to Typer's standard help-and-exit behaviour so CI / pipe-driven
-    # scripts keep working.
+        return None
+    # No subcommand and the user did not pass --help. The native executor entry
+    # only makes sense inside an interactive terminal (the provider owns the
+    # TTY); otherwise fall back to Typer's standard help-and-exit behaviour so
+    # CI / pipe-driven scripts keep working. The legacy Keda REPL stays at
+    # `kc repl`.
     agent_override = _enum_value(agent) if agent is not None else None
     if sys.stdin.isatty():
-        _run_typer_command(
-            "repl",
+        # 执行器退出码必须原样交回：裸 kc 就是那个进程，包装层重新解释等于吞掉失败。
+        return _run_typer_command(
+            "session",
             repo=repo,
             repo_id=repo_id,
             config=config,
             agent=agent_override,
         )
-        return
     typer.echo(ctx.get_help())
     raise typer.Exit(code=1)
 
@@ -420,6 +428,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_console,
     cli_typer_tokens,
     cli_typer_skill,
+    cli_typer_preview,
     cli_typer_schema,
 )
 
@@ -508,6 +517,24 @@ def main(argv: list[str] | None = None) -> int:
     """Run the Typer-powered CLI (``kc``; also installed as ``kedacode`` / ``iar``)."""
     args = list(sys.argv[1:] if argv is None else argv)
     _emit_legacy_command_notice(args)
+    # Typer/Click 会在调用根回调前把空参数处理成成功的帮助输出；保留裸命令既有的
+    # no-TTY 非零退出语义，TTY 下直接交给原生会话。
+    if not args and product_identity.COMPLETION_ENV_VAR_NAME not in os.environ:
+        if sys.stdin.isatty():
+            return _run_typer_command(
+                "session",
+                repo=None,
+                repo_id=None,
+                config=None,
+                agent=None,
+            )
+        app(
+            args=["--help"],
+            prog_name=product_identity.PRIMARY_COMMAND_NAME,
+            complete_var=product_identity.COMPLETION_ENV_VAR_NAME,
+            standalone_mode=False,
+        )
+        return 1
     if "--version" in args or "-V" in args:
         typer.echo(f"{product_identity.PRIMARY_COMMAND_NAME} {resolve_keda_version()}")
         return 0

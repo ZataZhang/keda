@@ -773,7 +773,7 @@ def enqueue_backlog_prd_ready(encoded_path: str, request: EnqueueReadyRequest) -
         # 出错路径同样由 core 用例审计（error），路由不重复落审计。
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    _BACKLOG_CACHE.pop(f"{request.repo_id}:archived=False", None)
+    request_backlog_resync(request.repo_id)
     return _serialize(result)
 
 

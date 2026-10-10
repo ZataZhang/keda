@@ -24,6 +24,7 @@ from pydantic import (
 )
 
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.agent_session import require_loopback_preview_url
 from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_AUTO,
     LIFECYCLE_AGENT_AUTO_KEYS,
@@ -178,6 +179,11 @@ class AgentRunnerAgentSettings(BaseModel):
     supports_resume: bool | None = None
     resume_args: list[str] | None = None
     profiles: dict[str, AgentRunnerAgentProfileSettings] = Field(default_factory=dict)
+    # 原生交互式 TUI 声明（`[agent_runner.agents.<name>.interactive]`）。与
+    # ``profiles.*`` 分开而不是第五个用途：交互形态把 stdin/stdout/TTY 整个交给
+    # provider，没有提示词投递与输出协议可言（见 core 的 INTERACTIVE_PROFILE_ID）。
+    # 未声明即代表该 agent 不支持交互入口，裸 ``kc`` fail-fast，不猜、不降级。
+    interactive: AgentRunnerAgentProfileSettings | None = None
 
 
 class AgentRunnerPresetSettings(BaseModel):
@@ -704,6 +710,98 @@ class AgentRunnerReplSettings(BaseModel):
     )
 
 
+class AgentSessionPreviewSettings(BaseModel):
+    """``[agent_session.preview]``：受控项目预览的白名单声明。
+
+    预览**只在用户于执行器对话里明确要求时**才启动，因此这里能声明的东西必须是
+    精确 argv，而不是任意 shell 文本：``argv`` 直接作为子进程参数数组使用，KC 不
+    经过 ``sh -c``，也就没有"把仓库里的字符串当脚本执行"这条路径。
+
+    Attributes:
+        argv: 已批准的 dev 命令 argv（如 ``["npm", "run", "dev"]``）。空列表视为
+            未配置（走"仓库唯一候选 + 用户显式确认"路径）。
+        ready_url: 期望的 ready 地址；主机必须属于回环闭集，且端口/路径原样用于
+            校验进程自报的地址。配置非回环主机是**加载期错误**，绝不静默接受。
+        ready_timeout_seconds: 等待进程报告地址的上限；必须为正数。
+    """
+
+    argv: list[str] = Field(default_factory=list)
+    ready_url: str | None = None
+    ready_timeout_seconds: int = Field(default=60, gt=0)
+
+    @field_validator("argv")
+    @classmethod
+    def _validate_argv_entries(cls, value: list[str]) -> list[str]:
+        """拒绝空 argv 元素：空字符串会被解释成参数而不是命令。"""
+        for argv_entry in value:
+            if not isinstance(argv_entry, str) or not argv_entry.strip():
+                raise ValueError(
+                    "agent_session.preview.argv must contain non-empty literal argv entries "
+                    "(no shell text); each entry is passed to the child process verbatim."
+                )
+        return value
+
+    @field_validator("ready_url")
+    @classmethod
+    def _validate_ready_url(cls, value: str | None) -> str | None:
+        """校验声明的 ready URL 是回环 http 地址（非回环一律加载期报错）。"""
+        if value is None:
+            return None
+        require_loopback_preview_url(value, source="agent_session.preview.ready_url")
+        return value
+
+
+class AgentSessionSettings(BaseModel):
+    """顶层 ``[agent_session]``：裸 ``kc`` 原生执行器入口与按需项目预览。
+
+    与 ``[agent_runner.repl]``（旧 Keda REPL）刻意分开：两者是不同风险面的两种
+    交互形态——REPL 由 KC 解释 agent 输出并按白名单执行子命令，原生入口把对话
+    与权限整个交给 provider，KC 只负责选择 executor、注入 operator skill 与
+    bootstrap，然后转发 stdio / 信号 / 退出码。
+
+    Attributes:
+        default_agent: 裸 ``kc`` 使用的执行器注册名；``--agent`` 覆盖它。
+            该 agent 必须声明 ``interactive`` profile，否则入口 fail-fast。
+        bootstrap_enabled: 是否把 operator 使用说明作为 bootstrap 投递给 provider。
+        skill_install_check_enabled: 启动前是否用现有 fail-closed 安装器校验
+            packaged operator skill（冲突时报错，绝不覆盖用户改过的内容）。
+        preview: ``[agent_session.preview]`` 子表。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_agent: str = "claude"
+    bootstrap_enabled: bool = True
+    skill_install_check_enabled: bool = True
+    preview: AgentSessionPreviewSettings = Field(default_factory=AgentSessionPreviewSettings)
+
+
+class AgentRunnerStallSupervisorSettings(BaseModel):
+    """``[agent_runner.stall_supervisor]``：活跃 attempt 的停滞监督（默认关闭）。
+
+    默认关闭是刻意的安全选择：开启意味着 KC 会按周期调用模型，并在满足全部所有权
+    校验后终止一个正在写代码的子进程。关闭时监督器一次都不调用模型，执行与恢复
+    行为与本特性之前逐字节一致。
+
+    两个阈值各自独立可覆盖：``check_interval_seconds`` 是巡检周期（决定模型调用
+    频率下限），``stalled_after_seconds`` 是"无实质进展"的判定窗口（决定误中断
+    门槛）。两者都必须为正数——0 或负数会让巡检空转或把任何任务判为停滞。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    check_interval_seconds: int = Field(default=1800, gt=0)
+    stalled_after_seconds: int = Field(default=1800, gt=0)
+    # 诊断用 agent；默认走生命周期矩阵的 supervisor 键（与 post-PR 监督同一派生），
+    # 未声明时回落 runner.default_agent 的 auto 解析。
+    agent: str = "auto"
+    # 单次诊断调用自身的 wall-clock / 无输出上限，避免"为诊断停滞而制造的调用"
+    # 自己变成新的停滞源。
+    diagnosis_timeout_seconds: int = Field(default=600, gt=0)
+    diagnosis_inactivity_timeout_seconds: int = Field(default=300, gt=0)
+
+
 class AgentRunnerDeliberationSettings(BaseModel):
     """Multi-agent deliberation configuration."""
 
@@ -878,6 +976,11 @@ class _AgentRunnerRepositoryOverrideSettings(BaseModel):
     interactive_decision: AgentRunnerInteractiveDecisionSettings | None = None
     deliberation: AgentRunnerDeliberationSettings | None = None
     repl: AgentRunnerReplSettings | None = None
+    # 仓库级 ``[agent_runner.stall_supervisor]`` 覆盖（在全局段之内，故随本模型）。
+    # ``[agent_session]`` 不在此列：它在仓库配置文件里同样是**顶层**段，由
+    # :class:`AgentRunnerRepositorySettings.session` 承载，见
+    # :func:`load_agent_runner_local_settings`。
+    stall_supervisor: AgentRunnerStallSupervisorSettings | None = None
     lifecycle_agents: AgentRunnerLifecycleAgentsSettings | None = None
     presets: dict[str, AgentRunnerPresetSettings] = Field(default_factory=dict)
     lifecycle_presets: AgentRunnerLifecyclePresetsSettings | None = None
@@ -891,6 +994,10 @@ class AgentRunnerRepositorySettings(_AgentRunnerRepositoryOverrideSettings):
     id: str | None = None
     enabled: bool = True
     display_name: str | None = None
+    # 仓库配置文件里的**顶层** ``[agent_session]`` 段（与全局 config.toml 同名同形）。
+    # 刻意不放进共享的 override 模型：那样 ``[agent_runner.session]`` 会被静默接受，
+    # 同一个能力出现两种写法。
+    session: AgentSessionSettings | None = None
     # Optional ``owner/name`` string passed to ``gh pr list --repo``.
     # Mirrors the same field on ``AgentRunnerRepositoryMetadataSettings``;
     # the local-config loader propagates the value at merge time. See
@@ -1003,6 +1110,21 @@ def load_agent_runner_local_settings(
     _warn_deprecated_template_mode_pins(agent_runner_section, local_config_path)
 
     repository_metadata = local_settings.repository
+    session_section = local_toml_data.get("agent_session")
+    if session_section is not None and not isinstance(session_section, dict):
+        raise ValueError(
+            f"Invalid KedaCode local config at {local_config_path}: "
+            "[agent_session] must be a table."
+        )
+    try:
+        local_session_settings = (
+            AgentSessionSettings(**session_section) if session_section is not None else None
+        )
+    except ValidationError as exc:
+        raise ValueError(
+            f"Invalid KedaCode local config at {local_config_path}: "
+            f"invalid [agent_session] section: {exc}"
+        ) from exc
     return AgentRunnerRepositorySettings(
         path=str(resolved_repo_path),
         id=repository_metadata.id,
@@ -1025,6 +1147,8 @@ def load_agent_runner_local_settings(
         interactive_decision=local_settings.interactive_decision,
         deliberation=local_settings.deliberation,
         repl=local_settings.repl,
+        session=local_session_settings,
+        stall_supervisor=local_settings.stall_supervisor,
         lifecycle_agents=local_settings.lifecycle_agents,
         presets=local_settings.presets,
         lifecycle_presets=local_settings.lifecycle_presets,

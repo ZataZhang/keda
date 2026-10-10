@@ -28,7 +28,13 @@ from backend.infrastructure.logging.logger import logger
 
 
 class PiJsonLinesOutputProtocol:
-    """pi JSON Lines 事件流渲染协议。"""
+    """pi JSON Lines 事件流渲染协议。
+
+    本实现刻意**不**使用 :attr:`OutputRelayRequest.attempt_key`：它的子进程沿用
+    调用方的进程组（不是 ``process_group=0`` 的独占组），按那个键去终止会打到
+    KedaCode 自己身上。因此 ``pi`` 作为执行器时，停滞监督只能诊断与交班，
+    不能精确取消——监督器读到"归属不可证实"后原样继续，绝不猜测性击杀。
+    """
 
     def relay(self, request: OutputRelayRequest) -> CommandResult:
         """启动 pi 子进程并把 JSON Lines 事件渲染成可读文本。"""

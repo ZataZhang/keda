@@ -46,8 +46,10 @@ from backend.infrastructure.config.agent_runner_settings import (
     AgentRunnerRepositorySettings,
     AgentRunnerRunnerSettings,
     AgentRunnerSafetySettings,
+    AgentRunnerStallSupervisorSettings,
     AgentRunnerValidationSettings,
     AgentRunnerWorktreeSettings,
+    AgentSessionSettings,
     load_agent_runner_local_settings,
 )
 
@@ -68,6 +70,7 @@ from backend.infrastructure.config.agent_runner_settings import (
 
 from backend.infrastructure.config.settings_sources import (
     _PROJECT_ROOT_PATH,
+    _NestedTomlSectionSource,
     _RegistryRepositoriesSource,
     _TomlSectionSource,
     _env_toml_init_sources,
@@ -267,6 +270,13 @@ class AgentRunnerSettings(BaseSettings):
         default_factory=AgentRunnerInteractiveDecisionSettings
     )
     repl: AgentRunnerReplSettings = Field(default_factory=AgentRunnerReplSettings)
+    # 裸 ``kc`` 原生执行器入口与按需项目预览（顶层 ``[agent_session]`` 段）。
+    # 与 ``repl``（旧 Keda REPL）分开：两种交互形态的风险面不同，见模型 docstring。
+    session: AgentSessionSettings = Field(default_factory=AgentSessionSettings)
+    # 活跃 attempt 的停滞监督（``[agent_runner.stall_supervisor]``），默认关闭。
+    stall_supervisor: AgentRunnerStallSupervisorSettings = Field(
+        default_factory=AgentRunnerStallSupervisorSettings
+    )
     # 生命周期 Agent 矩阵（九键）：把"阶段 -> agent"从散落配置段收敛到一张表。
     # 未声明的键继续回落到既有散落配置键与内置默认（零配置行为不变）。
     lifecycle_agents: AgentRunnerLifecycleAgentsSettings = Field(
@@ -296,10 +306,16 @@ class AgentRunnerSettings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         toml_source = _TomlSectionSource(settings_cls, "agent_runner")
+        session_toml_source = _NestedTomlSectionSource(
+            settings_cls,
+            "agent_session",
+            "session",
+        )
         return (
             env_settings,
             _RegistryRepositoriesSource(settings_cls),
             toml_source,
+            session_toml_source,
             init_settings,
         )
 

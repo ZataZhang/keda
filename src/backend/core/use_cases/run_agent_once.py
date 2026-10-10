@@ -36,6 +36,7 @@ from backend.core.shared.models.agent_runner import (
     describe_verification_command,
 )
 from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_GENERATE,
     AGENT_PROFILE_RUN,
     PROMPT_DELIVERY_STDIN,
 )
@@ -45,15 +46,18 @@ from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
     build_agent_invocation,
     resolve_agent_spec,
+    resolve_profile_spec,
     resolve_registered_agents,
 )
 from backend.core.use_cases.agent_invocation_tracing import (
     PHASE_FIX,
     PHASE_IMPLEMENTATION,
+    PHASE_SUPERVISOR,
     PHASE_UNSPECIFIED,
     RETRY_REASON_RESUME_NOT_STARTED,
     RETRY_REASON_TRANSIENT,
     InvocationStartRequest,
+    active_invocation_trace_context,
     finish_invocation,
     link_next_invocation,
     start_invocation,
@@ -63,6 +67,12 @@ from backend.core.use_cases.agent_runner_attempt import (
     _append_attempt_and_notify,
     _make_attempt_result,
     wait_before_recovery_attempt,
+)
+from backend.core.use_cases.agent_runner_stall_supervision import (
+    StallDiagnosisRequest,
+    StallSupervisionRequest,
+    build_supervision_attempt_key,
+    supervised_agent_invocation,
 )
 from backend.core.use_cases.agent_runner_commit import (
     EmptyCommitRequestError,
@@ -704,6 +714,14 @@ def run_agent_with_prompt(
             之一）；只有调用点知道，因此显式传入，不在此处猜测。
         invocation_attempt: recovery 轮次（1 起）；非 attempt 主体调用为 ``None``。
 
+    停滞监督（Issue #256）在**这里**接入，因为本函数是唯一真实进程边界：只有
+    ``profile="run"`` 且带 Issue 身份、且 ``[agent_runner.stall_supervisor].enabled``
+    为真时，才把这次调用交给
+    :func:`~backend.core.use_cases.agent_runner_stall_supervision.supervised_agent_invocation`
+    并给子进程登记 attempt 键。诊断自身走 ``generate`` 只读 profile，因此不会
+    再被监督（不存在递归 observer）。开关为假时组装上下文直接返回 ``None``：
+    不起线程、不登记进程、不调用模型，argv 与本特性之前逐字节一致。
+
     重试/回退关联不通过参数表达：调用方在发起替代之前调
     :func:`~backend.core.use_cases.agent_invocation_tracing.link_next_invocation`
     声明原因，观测侧据此把新 invocation 以 ``retry_of`` 挂到上一次，两次调用各自
@@ -716,6 +734,91 @@ def run_agent_with_prompt(
             issue.url,
         )
     label = f"Issue #{issue.number}: {issue.url}" if issue is not None else None
+    effective_config = config or AppConfig()
+
+    def _run_stall_diagnosis(diagnosis: StallDiagnosisRequest) -> str:
+        """跑一次只读诊断：走被诊断 agent 声明的 generate profile，取回作答文本。
+
+        这里刻意不套 ``profile=run``：监督器不能写工作区，也不能把自己变成下一个
+        被监督的 attempt 主体（``run_agent_with_prompt`` 只在 run profile 起 observer）。
+        """
+        diagnosis_result = run_agent_with_prompt(
+            diagnosis.agent_name,
+            diagnosis.prompt,
+            diagnosis.worktree_path,
+            process_runner,
+            config=effective_config,
+            capture_output=True,
+            timeout_seconds=diagnosis.timeout_seconds,
+            inactivity_timeout_seconds=diagnosis.inactivity_timeout_seconds,
+            profile=AGENT_PROFILE_GENERATE,
+            issue=issue,
+            invocation_phase=PHASE_SUPERVISOR,
+        )
+        return extract_agent_response_text(diagnosis_result)
+
+    def _build_stall_supervision_request() -> StallSupervisionRequest | None:
+        """按本次真实调用组装停滞监督上下文；不适用时返回 ``None``。
+
+        返回 ``None`` 的三种情况都必须**一次模型都不调用**：开关关闭（默认）、
+        没有 Issue 身份（``kc ask`` / REPL / 辩论不是 attempt 主体）、非 run profile。
+        此外诊断通道不可用时也返回 ``None``——起一个注定失败的 observer 比不监督更糟。
+        """
+        supervisor_config = effective_config.stall_supervisor
+        if not supervisor_config.enabled or issue is None or profile != AGENT_PROFILE_RUN:
+            return None
+        # 局部导入：lifecycle_agent_resolution 与本模块互相依赖（同 resolve_verifier_agent）。
+        from backend.core.use_cases.lifecycle_agent_resolution import (  # noqa: PLC0415
+            resolve_lifecycle_agent,
+        )
+
+        try:
+            supervisor_agent = resolve_lifecycle_agent(
+                # 生命周期矩阵的 ``supervisor`` 键（九键之一，见 LIFECYCLE_AGENT_KEYS）。
+                "supervisor",
+                effective_config,
+                issue=issue,
+                selected_agent=agent_name,
+                override_agent=supervisor_config.agent,
+            )
+            diagnosis_profile_spec = resolve_profile_spec(
+                supervisor_agent, AGENT_PROFILE_GENERATE, effective_config
+            )
+        except ValueError as exc:
+            _logger.warning(
+                "Issue #%d: stall supervisor disabled for this attempt (%s); "
+                "no diagnosis will be called.",
+                issue.number,
+                exc,
+            )
+            return None
+        if not diagnosis_profile_spec.read_only:
+            _logger.warning(
+                "Issue #%d: stall supervisor disabled because agent '%s' declares a "
+                "non-read-only '%s' profile; no diagnosis will be called.",
+                issue.number,
+                supervisor_agent,
+                AGENT_PROFILE_GENERATE,
+            )
+            return None
+        return StallSupervisionRequest(
+            config=supervisor_config,
+            process_runner=process_runner,
+            worktree_path=worktree_path,
+            attempt_key=build_supervision_attempt_key(
+                issue_number=issue.number,
+                invocation_phase=invocation_phase,
+                invocation_attempt=invocation_attempt,
+            ),
+            writer_agent=agent_name,
+            supervisor_agent=supervisor_agent,
+            issue_number=issue.number,
+            invocation_phase=invocation_phase,
+            invocation_attempt=invocation_attempt,
+            # ContextVar 不随新线程继承：在主线程读出来，显式交给 observer。
+            trace_context=active_invocation_trace_context(),
+            diagnose=_run_stall_diagnosis,
+        )
 
     def _persist_session_id(session_id: str | None) -> None:
         """把本次调用自报的会话 id 落在 worktree 局部记录里。
@@ -753,7 +856,7 @@ def run_agent_with_prompt(
             profile,
             prompt,
             worktree_path,
-            config or AppConfig(),
+            effective_config,
             model_selection=model_selection,
             resume_session_id=resume_id,
         )
@@ -789,8 +892,21 @@ def run_agent_with_prompt(
             run_kwargs["inactivity_timeout"] = inactivity_timeout_seconds
         if attempt_invocation.prompt_delivery == PROMPT_DELIVERY_STDIN:
             run_kwargs["input_text"] = prompt
+        # 监督上下文每次进入都新建：attempt_key 唯一到"这一次真实进程调用"，
+        # 因此遗留 observer 不可能在后续 recovery 轮次里找到可取消的同名进程。
+        stall_request = _build_stall_supervision_request()
+        if stall_request is not None:
+            run_kwargs["attempt_key"] = stall_request.attempt_key
+
+        def _run_attempt() -> CommandResult:
+            return process_runner.run(**run_kwargs)
+
         try:
-            attempt_result = process_runner.run(**run_kwargs)
+            attempt_result = (
+                _run_attempt()
+                if stall_request is None
+                else supervised_agent_invocation(stall_request, _run_attempt)
+            )
         except Exception as exc:  # noqa: BLE001 - 旁路落盘后原样抛出，不改变失败语义。
             finish_invocation(observation, exc=exc)
             _persist_session_id(_session_id_from_exception(exc))

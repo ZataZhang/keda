@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -422,6 +423,10 @@ def test_main_daemon_default_interval_uses_config(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        # This test covers CLI config routing; single-instance locking has
+        # dedicated tests and must not touch the host user's daemon directory.
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all"])
 
@@ -474,6 +479,8 @@ def test_main_daemon_interval_override(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all", "--interval", "300"])
 
@@ -1227,6 +1234,8 @@ def test_main_daemon_explicit_all_targets_all_repositories(monkeypatch) -> None:
             "backend.api.cli_helpers.load_fresh_agent_runner_settings",
             return_value=settings,
         ),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all"])
 
@@ -4122,6 +4131,8 @@ def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli.create_github_client"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all"])
 
@@ -4423,14 +4434,24 @@ def test_main_no_args_non_tty_shows_help_and_exits_nonzero(monkeypatch, capsys) 
     assert "Usage:" in combined or "iar" in combined
 
 
-def test_main_no_args_tty_dispatches_repl(monkeypatch, tmp_path: Path) -> None:
-    """`iar` with no args in TTY mode should drive the REPL use case."""
+def test_main_no_args_tty_launches_native_executor(monkeypatch, tmp_path: Path) -> None:
+    """`kc` with no args in TTY mode hands the terminal to the native executor.
+
+    Issue #256 改了这条路由：TTY 裸入口不再是 Keda REPL，而是配置的执行器原生
+    TUI（``kc repl`` 保留旧 REPL，见 ``test_main_repl_dispatches_repl_session``）。
+    这里断言的是**路由**：走到 session 入口、把执行器进程的退出码原样交回，
+    且旧 REPL 一次都没被调用。
+    """
     from backend.api.cli import main
 
     repo_path = _init_iar_repo(tmp_path)
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt="": "/exit")
+
+    fake_plan = SimpleNamespace(agent_name="claude", cwd=repo_path)
+    preparation = SimpleNamespace(plan=fake_plan, notices=[])
+    launcher = MagicMock()
+    launcher.launch.return_value = SimpleNamespace(exit_code=7)
 
     with (
         patch(
@@ -4439,26 +4460,28 @@ def test_main_no_args_tty_dispatches_repl(monkeypatch, tmp_path: Path) -> None:
         patch("backend.api.cli._ensure_gh_auth_or_prompt"),
         patch("backend.api.cli.create_github_client"),
         patch("backend.api.cli.create_content_generator"),
-        patch("backend.api.cli.create_repl_command_executor") as mock_executor_factory,
+        patch("backend.api.cli.run_repl_session") as mock_repl,
         patch(
-            "backend.api.cli.run_repl_session",
-            return_value=0,
-        ) as mock_run,
+            "backend.api.cli_parsed_commands.agent.prepare_native_session_plan",
+            return_value=preparation,
+        ) as mock_prepare,
+        patch(
+            "backend.api.cli_parsed_commands.agent.create_foreground_session_launcher",
+            return_value=launcher,
+        ),
     ):
         mock_context = MagicMock()
         mock_context.repo_path = repo_path
-        mock_context.repo_id = "repl-test-repo"
-        mock_context.display_name = "REPL Test"
-        mock_context.config.repl.default_agent = "claude"
+        mock_context.repo_id = "session-test-repo"
+        mock_context.display_name = "Session Test"
         mock_resolve.return_value = [mock_context]
-        mock_executor_factory.return_value = MagicMock()
 
         exit_code = main(["--repo", str(repo_path)])
 
-    assert exit_code == 0
-    mock_run.assert_called_once()
-    inputs_obj = mock_run.call_args.args[0]
-    assert inputs_obj.agent == "claude"
+    assert exit_code == 7
+    mock_repl.assert_not_called()
+    mock_prepare.assert_called_once()
+    launcher.launch.assert_called_once_with(fake_plan)
 
 
 def test_main_repl_requires_initialized_repo(monkeypatch, tmp_path: Path, capsys) -> None:

@@ -39,6 +39,7 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     PullRequestSummary,
 )
+from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
 from backend.core.shared.models.agent_deliberation import (
     DeliberationEvent,
 )
@@ -132,6 +133,8 @@ class IProcessRunner(ABC):
     从而避免真正启动子进程。
     """
 
+    # 端口声明与适配器的参数注解必须一致；仅从重复检测中排除签名，方法体仍参与扫描。
+    # jscpd:ignore-start
     @abstractmethod
     def run(
         self,
@@ -148,7 +151,9 @@ class IProcessRunner(ABC):
         output_protocol: str | None = None,
         env_profile: str | None = None,
         env_allow_extra: Sequence[str] = (),
+        attempt_key: str | None = None,
     ) -> CommandResult:
+        # jscpd:ignore-end
         """运行一条命令并捕获其结果。
 
         命令以参数序列（而非单个 shell 字符串）传入，可避免 shell
@@ -201,6 +206,10 @@ class IProcessRunner(ABC):
                 ``timeout`` 执行，否则实现端直接报错，不做静默降级。
             env_allow_extra: 启用 ``env_profile`` 时追加进白名单的变量名
                 （运营者显式声明的例外）；``env_profile`` 为 ``None`` 时无意义。
+            attempt_key: 活跃 attempt 登记键（Issue #256 停滞监督）。非 ``None``
+                时实现端把这次真实子进程登记在册，监督器随后可以据此复核进程归属并
+                精确取消；``None``（默认）不登记，适用于 git / gh / 验证命令等一切
+                非 attempt 主体调用。实现端**必须**能在没有登记时安全返回"不可证实"。
 
         Returns:
             CommandResult: 包含退出码与（按需）捕获到的 stdout/stderr
@@ -215,6 +224,50 @@ class IProcessRunner(ABC):
                 这个字段），使调用方仍能把断点会话落盘供续传。
         """
         ...
+
+    def probe_live_attempt(self, attempt_key: str) -> AttemptOwnership:
+        """读取一次活跃 attempt 的真实进程归属证据（**只读**，绝不触碰进程）。
+
+        非抽象且带 fail-closed 默认实现：不实现的执行器（测试替身、只跑
+        ``subprocess.run`` 的轻量实现）一律得到"不可证实"，监督器因此只会交班、
+        永远不会对陌生进程发信号。真实实现按 ``run(attempt_key=...)`` 的登记结果
+        交叉验证 pid 与进程组。
+
+        Args:
+            attempt_key: 由 :meth:`run` 的 ``attempt_key`` 参数建立的 attempt 键。
+
+        Returns:
+            :class:`~backend.core.shared.models.agent_stall.AttemptOwnership`。
+        """
+        return AttemptOwnership(
+            confirmed=False,
+            reason=(
+                f"process runner {type(self).__name__} exposes no live-attempt registry; "
+                "ownership cannot be proven"
+            ),
+        )
+
+    def cancel_live_attempt(
+        self, attempt_key: str, expected: AttemptOwnership
+    ) -> StallCancelOutcome:
+        """按 :meth:`probe_live_attempt` 给出的证据精确终止该 attempt 的进程组。
+
+        默认实现**不发任何信号**：只有能证实归属的实现才有权终止进程。调用方必须
+        在动手前重新读取一次证据，并把结果原样传回来做二次比对。
+
+        Args:
+            attempt_key: attempt 键。
+            expected: 调用方刚读到的所有权证据。
+
+        Returns:
+            :class:`~backend.core.shared.models.agent_stall.StallCancelOutcome`。
+        """
+        return StallCancelOutcome(
+            reason=(
+                f"process runner {type(self).__name__} does not support live-attempt "
+                "cancellation; no signal was sent"
+            ),
+        )
 
 
 class IAgentTranscriptRunner(ABC):

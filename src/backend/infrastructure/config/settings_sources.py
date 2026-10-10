@@ -331,6 +331,42 @@ class _TomlSectionSource(PydanticBaseSettingsSource):
         return result
 
 
+class _NestedTomlSectionSource(PydanticBaseSettingsSource):
+    """把 config.toml 的**顶层** section 挂到目标模型的单个字段上。
+
+    ``[agent_session]`` 与 ``[agent_runner]`` 是两个顶层命名空间，但都由
+    :class:`AgentRunnerSettings` 这一个配置根承载（``AppConfig`` 只经这一个根装配，
+    不为第二段配置再开一条加载链）。于是顶层 section 需要一次"降一级"的映射：
+    读到 ``agent_session`` 整段，写成 ``{"session": 整段}``。
+
+    与 :class:`_TomlSectionSource` 一致：文件缺失或 section 缺失时返回空，配置加载
+    照常完成并落到模型默认值（未配置不等于错误）。
+    """
+
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        section_name: str,
+        target_field_name: str,
+    ) -> None:
+        super().__init__(settings_cls)
+        self._target_field_name = target_field_name
+        self._section_data: dict[str, Any] = _load_toml_section_data(section_name)
+
+    def get_field_value(
+        self,
+        field: Any,  # noqa: ARG002
+        field_name: str,
+    ) -> tuple[Any, str, bool]:
+        field_value: Any = self._section_data if field_name == self._target_field_name else None
+        return field_value, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        if not self._section_data or self._target_field_name not in self.settings_cls.model_fields:
+            return {}
+        return {self._target_field_name: self._section_data}
+
+
 def _env_toml_init_sources(
     settings_cls: type[BaseSettings],
     section_name: str,

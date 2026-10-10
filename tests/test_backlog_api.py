@@ -330,6 +330,29 @@ def test_start_prd_triggers_one_resync(
     assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
 
 
+def test_enqueue_ready_triggers_one_resync(
+    backlog_environment,
+    snapshot_wiring: _SnapshotWiring,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """加入就绪后派发快照重扫，不再引用已移除的内存缓存。"""
+    monkeypatch.setattr(
+        backlog_routes,
+        "enqueue_prd_ready",
+        lambda **_kwargs: {"repo_id": "keda-main", "prd_path": "tasks/pending/a.md"},
+    )
+    encoded = _encode_prd_path("tasks/pending/P1-FEAT-20260101-test.md")
+
+    response = client.post(
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/enqueue-ready",
+        json={"repo_id": "keda-main"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert snapshot_wiring.resync_requests == ["keda-main"]
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+
+
 def test_global_start_triggers_one_resync(
     snapshot_wiring: _SnapshotWiring, monkeypatch: pytest.MonkeyPatch
 ) -> None:

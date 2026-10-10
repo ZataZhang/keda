@@ -3575,10 +3575,13 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 
 ### 显式非目标
 
-- **不设停滞阈值**：没有"超过 N 分钟无输出即判停滞"这类新配置项。
-- **不做停滞判定程序**：不提供任何自动判定"这次 run 卡住了"的代码路径。
-- **不做自动接管**：不会因为读到缺口就自动重跑、自动换执行器或自动关 Issue。
+- **调用记录自身不做停滞判定**：tracing 只描述"起了几次、每次谁在跑、跑成什么样"，不引入任何阈值，也不会因为读到缺口就自动重跑、自动换执行器或自动关 Issue。
 - 不引入外部平台 / dashboard / OpenTelemetry，不做模型评分排名或自动选型，不采集完整提示词或任何密钥。
+
+> 历史注记：本节原本还写着"**不设停滞阈值**"。Issue #256 之后，仓库多了一个**默认关闭**的
+> 可选组件——停滞监督（`[agent_runner.stall_supervisor]`，见下文「停滞监督（Stall Supervisor）」），
+> 它会在现场指纹冻结超过 `stalled_after_seconds` 时请模型下一次结论。这是刻意取代，不是漂移：
+> 调用记录仍然只观测，判定与处置都在那个需要显式开启、且每次处置前都要复核所有权的独立组件里。
 
 ### 实现要点
 
@@ -3587,6 +3590,94 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 - 账本能力用鸭子类型探测（`resolve_invocation_store` 检查 `append_invocation_event` / `list_invocation_events`），不给既有构造器加参数，观测不泄漏进业务调用链。
 - `start_invocation` / `finish_invocation` 在 `run_agent_once._invoke` 的 try/except 两侧成对调用，异常原样上抛，不改变失败语义。
 - 执行器自报模型由输出协议解析（`infrastructure/agent_stream_usage.py` 的 `extract_reported_model_event` / `parse_reported_model_from_plain_stdout`），只认事件顶层的 `model` 字符串。
+
+## 原生执行器入口与按需项目预览（`kc session` / `kc preview`）
+
+用户在终端里要的是"把这一轮的对话交给 provider"，不是再学一套 KC 子命令。因此 TTY 下直接敲 `kc` 就是原生执行器入口：KC 只负责**选执行器、核对随包 operator skill、投递 bootstrap、然后把终端整个交出去**，不接管对话、不改权限策略、也不擅自启动项目服务。原有的 Keda REPL（KC 解释输出并按白名单执行子命令）仍在 `kc repl`，两者是不同风险面的两种形态，配置表也刻意分开（`[agent_session]` vs `[agent_runner.repl]`）。
+
+### 入口路由与退出码
+
+| 场景 | 行为 |
+|---|---|
+| TTY 下裸 `kc` | 等价于 `kc session`：解析 `.agent_session.default_agent`，起该 agent 的 `interactive` profile，stdio / 信号 / **退出码原样转发** |
+| 非 TTY（管道、CI）下裸 `kc` | 打印帮助并以 **1** 退出——把包装层的非零退出码吞成 0，会让脚本把失败当成功 |
+| `kc --help` / 显式子命令 | 照常走 Typer，不被入口回调拦截 |
+| `kc session --agent <name>` | 覆盖默认执行器；该 agent 必须声明 `interactive` profile，否则 fail-fast 报错而不是回退 |
+
+若随包 operator Skill 与用户已安装版本不一致，原生入口会保留用户文件并在启动 provider 前报错。先由用户明确处理冲突，再开启新会话；入口不会把冲突内容当作已核验的 KedaCode 操作指引。
+
+执行器退出码是"这一轮成不成"的唯一事实源：`_run_typer_command("session", ...)` 直接返回 provider 的码，包装层不再重新解释。`prompt_delivery` 由 profile 声明（claude 用 `--append-system-prompt`，codex 的交互形态没有可核实的 bootstrap 通道，因此是 `none`——不投递，也不假装投递），**空提示词不占 argv 位置**，避免 provider 收到一条凭空多出来的空消息。
+
+### 按需项目预览：`kc preview start|status|stop`
+
+预览只在用户于执行器对话里明确要求时才启动，由 `kc preview` 承载，启动前不占用任何端口。
+
+| 命令 | 语义 |
+|---|---|
+| `kc preview start` | 起仓库的 dev server：配置里有 `[agent_session.preview].argv` 就用它，否则走"仓库唯一候选 + 用户显式确认"路径；等待进程自报地址并在回环校验通过后才报 ready |
+| `kc preview status` | 只读：受管进程状态与回环 URL |
+| `kc preview stop` | 只终止 KC 自己登记的进程组（`attempt_process_registry` 里的 pgid），**绝不**杀陌生进程 |
+
+安全边界是刻意的：
+
+- `argv` 必须是**精确参数数组**（如 `["npm", "run", "dev"]`），KC 不经 `sh -c`，因此不存在"把仓库里的字符串当脚本执行"这条路径；空字符串元素在配置加载期就报错。
+- `ready_url` 的主机必须属于回环闭集（`localhost` / `127.0.0.1` / `::1` 等），非回环主机是**加载期错误**，不静默接受；进程自报地址同样要过回环校验（`require_loopback_preview_url`）。
+- 一个仓库同时只有一个受管预览进程：注册表里还活着时 `start` 不再起第二个，而是回报既有 pid / 进程组 / URL，并指名先跑 `kc preview stop`；记录已陈旧（pid 不在）时先清理记录再按新启动处理，不对任何进程发信号。
+- 隧道（autossh 之类）、外部预览平台、以及任何"用 LLM 猜用户是否想要预览"的自动触发都不是本特性的范围——没有常驻进程、没有额外凭据，需要预览时由人显式说一声。
+
+配置项与默认值见 [配置指南](configuration.md) 的「Agent Session 原生入口与预览配置」。
+
+## 停滞监督（Stall Supervisor）
+
+daemon 里一个 writer 卡住时，现状是"没人知道"：日志还在，进程还活着，队列里的 Issue 停在 `agent/running`。停滞监督把这件事变成**可选的、每次处置都要复核所有权的**闭环：到点了先问一次模型"这是长时间思考还是真停滞"，只有拿到可取消的结论、且现场与归属都没变，才终止那个进程组，然后走既有的失败分类与恢复阶梯。
+
+默认关闭。开启意味着 KC 会按周期调用模型，并可能终止一个正在写代码的子进程。
+
+### 配置
+
+`[agent_runner.stall_supervisor]`（全部键见配置指南；`enabled=false` 时一次模型都不调用，执行与恢复行为与本特性之前逐字节一致）：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `false` | 总开关 |
+| `check_interval_seconds` | `1800` | 巡检周期，必须为正 |
+| `stalled_after_seconds` | `1800` | 现场指纹冻结多久才算疑似停滞，必须为正 |
+| `agent` | `"auto"` | 诊断用哪个 agent；必须声明**只读** `generate` profile，否则监督器自我禁用 |
+| `diagnosis_timeout_seconds` | `600` | 单次诊断调用上限 |
+| `diagnosis_inactivity_timeout_seconds` | `300` | 诊断调用的静默上限 |
+
+只监督**带 Issue 身份、且属于 run 类 profile** 的调用；没有 Issue 身份的调用（如 `kc ask`、deliberation）不挂观察线程。
+
+### "有没有推进"用什么判断
+
+现场指纹由 `build_progress_snapshot` 组装：`HEAD | branch | status 指纹 | diff 指纹 | 账本终态调用数 | 最近事件时间`。**stdout 刻意不在其中**——一个反复打印同样错误的循环看起来在动，实际没推进；反过来长思考期间没有输出也不等于停。签名不变才算疑似停滞。
+
+### 一次停滞的完整链路
+
+1. 观察线程（daemon）按 `check_interval_seconds` 采样；签名一变就重置锚点。
+2. 冻结超过 `stalled_after_seconds` → 起一次只读诊断（`generate` profile，提示词里给了现场指纹与判定口径），审计行落 `[iar-stall-diagnosis]`。同一个停滞窗口至多问一次；**诊断调用本身失败**（网络 / CLI 抖动）不算结论，窗口保留、下个周期再问。
+3. 解析结论。只有 `stalled` 可触发处置，且必须同时给出摘要与支撑证据；`blocked` / `uncertain` 只交班（`[iar-stall-handoff]`），不写入也不终止。
+4. 处置前复核三件事：被监督调用仍活着、现场签名与诊断时一致、`probe_live_attempt` 确认这个 attempt  owns 那批 PID。任一项不成立 → 只交班。
+5. 全部成立 → `cancel_live_attempt` 终止该进程组，`[iar-stall-cancel]` 记账，抛 `AgentStallCancelledError`。
+6. 该异常流进**既有**的 `classify_failure` → 恢复阶梯 → 既有门禁。监督器不新增恢复路径，也不改写标签。
+
+排查时直接 `grep '\[iar-stall-' <per-Issue 日志>`；审计行在调用线程里补写一遍，因此按 Issue 过滤就能看到监督器的每一步判断（含"为什么没动手"）。
+
+### 结论协议：三个字段，形态容错，闭集不变
+
+模型必须最后三行逐字给出：
+
+```text
+STALL_VERDICT: progress | blocked | stalled | uncertain
+STALL_SUMMARY: 不超过 120 字的中文摘要，会原样交给下一轮 recovery
+STALL_EVIDENCE: 一条支撑事实；事实多时可以重复这一行
+```
+
+`parse_supervisor_verdict` 认识的是**协议字段**，不是某一种排版：中英文键名别名、markdown 强调/列表/表格行、代码围栏与 JSON 写法、取值换行续写、以及 provider 在三个字段之外追加的额外字段（`理由` / `风险` / `建议`）都按字面读或忽略；同名槽位以**最后一条**为准（提示词写明结论放在最后三行）。提示词模板自身被原样回声的"选项罗列"行会被跳过，否则一次复读模板就足以把结论读歪。
+
+容错只到"读法"为止，取值仍必须落进闭集：`stalled` 缺少摘要或证据一律降级为 `uncertain`。一个拼错的单词不该获得"可以杀进程"的权力，从自由文本里"读出来"的结论更不该。
+
+这两条边界各对应一个线上误报（`tasks/pending/` 里那份 P2 报告）：追加字段导致解析失败、以及三个字段都在却仍判 `uncertain`，两者都表现为"停滞了却不会自动续跑"。回归见 `tests/test_agent_runner_stall_supervision.py`，多模型实探针见 `scripts/diagnostics/stall_verdict_multi_model_probe.py`。
 
 ## Agent Runner Monitoring Dashboard
 

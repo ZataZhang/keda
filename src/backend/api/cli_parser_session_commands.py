@@ -56,9 +56,55 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
     add_model_preset_options(ask_parser)
     add_common_options(ask_parser)
 
+    session_parser = subparsers.add_parser(
+        "session",
+        help="Start the configured native executor UI (equivalent to bare `kc` in a TTY).",
+    )
+    session_parser.add_argument(
+        "--agent",
+        choices=agent_choices_with(prefix=("auto",)),
+        default=None,
+        help="Override the native executor (defaults to [agent_session].default_agent).",
+    )
+    add_common_options(session_parser)
+
+    preview_parser = subparsers.add_parser(
+        "preview",
+        help="Manage the on-demand local preview server (start only when the user asks).",
+    )
+    preview_subparsers = preview_parser.add_subparsers(dest="preview_command", required=True)
+    preview_start_parser = preview_subparsers.add_parser(
+        "start",
+        help="Start the repository preview command declared or confirmed by the user.",
+    )
+    preview_start_parser.set_defaults(command="preview start")
+    preview_start_parser.add_argument(
+        "--confirm",
+        default=None,
+        help=(
+            'Exact text of the discovered preview candidate (e.g. --confirm "pnpm run dev"). '
+            "Required when [agent_session.preview].argv is not declared."
+        ),
+    )
+    add_machine_output_options(preview_start_parser)
+    add_common_options(preview_start_parser)
+    preview_status_parser = preview_subparsers.add_parser(
+        "status", help="Report the managed preview state and its loopback URL (read-only)."
+    )
+    preview_status_parser.set_defaults(command="preview status")
+    add_machine_output_options(preview_status_parser)
+    add_common_options(preview_status_parser)
+    preview_stop_parser = preview_subparsers.add_parser(
+        "stop", help="Stop the KedaCode-owned preview process group (never a foreign process)."
+    )
+    preview_stop_parser.set_defaults(command="preview stop")
+    add_machine_output_options(preview_stop_parser)
+    add_common_options(preview_stop_parser)
+
     repl_parser = subparsers.add_parser(
         "repl",
-        help="Run the interactive REPL session (equivalent to `kc` with no subcommand).",
+        help="Run the interactive REPL session (legacy Keda REPL; bare `kc` "
+        "starts the native executor UI).",
     )
     repl_parser.add_argument(
         "--agent",

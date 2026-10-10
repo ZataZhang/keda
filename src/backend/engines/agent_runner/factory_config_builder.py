@@ -33,13 +33,21 @@ from backend.core.shared.models.agent_runner import (
     VerificationCommand,
     WorktreeConfig,
 )
+from backend.core.shared.models.agent_session import (
+    AgentSessionConfig,
+    PreviewProfile,
+)
 from backend.core.shared.models.agent_spec import (
     AGENT_PROFILES,
     BUILTIN_AGENT_SPECS,
+    INTERACTIVE_PROMPT_DELIVERIES,
+    NON_INTERACTIVE_PROMPT_DELIVERIES,
     PROMPT_DELIVERIES,
+    PROMPT_DELIVERY_NONE,
     AgentProfileSpec,
     AgentSpec,
 )
+from backend.core.shared.models.agent_stall import StallSupervisorConfig
 from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_KEYS,
     LifecycleAgentsConfig,
@@ -61,6 +69,8 @@ from backend.infrastructure.config.settings import (
     AgentRunnerPresetSettings,
     AgentRunnerReplSettings,
     AgentRunnerSettings,
+    AgentRunnerStallSupervisorSettings,
+    AgentSessionSettings,
 )
 from backend.core.shared.models.agent_decision import (
     InteractiveDecisionConfig,
@@ -250,6 +260,15 @@ def _merge_profile_settings(
             f"agents.{agent_name}.profiles.{profile_name}: invalid prompt_delivery "
             f"'{prompt_delivery}'. Valid values: {', '.join(PROMPT_DELIVERIES)}."
         )
+    elif prompt_delivery == PROMPT_DELIVERY_NONE:
+        # "none" 只为原生交互入口而存在（那里"不投递"是一个诚实的结论）；非交互
+        # 用途声明它等于悄悄把提示词丢掉，agent 会拿到一条空命令。
+        raise ValueError(
+            f"agents.{agent_name}.profiles.{profile_name}: prompt_delivery='none' is only "
+            "valid for the native interactive profile; a non-interactive invocation must "
+            f"declare how its prompt is delivered "
+            f"({', '.join(NON_INTERACTIVE_PROMPT_DELIVERIES)})."
+        )
     if prompt_delivery == "flag" and profile_settings.prompt_flag is None:
         base_prompt_flag = base_profile.prompt_flag if base_profile is not None else None
     else:
@@ -405,6 +424,95 @@ def _merge_agent_settings(
             else (base_spec.resume_args if base_spec else ())
         ),
         profiles=profiles,
+        interactive=_merge_interactive_settings(
+            agent_name,
+            agent_settings.interactive,
+            base_spec.interactive if base_spec is not None else None,
+        ),
+    )
+
+
+def _merge_interactive_settings(
+    agent_name: str,
+    interactive_settings: AgentRunnerAgentProfileSettings | None,
+    base_interactive: AgentProfileSpec | None,
+) -> AgentProfileSpec | None:
+    """把 ``[agent_runner.agents.<name>.interactive]`` 覆盖合并到内置交互声明上。
+
+    交互声明不在 :data:`AGENT_PROFILES` 闭集里，因此不能复用
+    :func:`_merge_profile_settings`（它会以"用途名不在闭集"拒绝），但它确实需要
+    同一套逐字段回落语义：只想补一段交互 argv 的仓库配置不该被迫重抄
+    ``prompt_delivery`` / ``output_protocol``。
+
+    交互形态只允许三种 bootstrap 投递方式：``argv_tail``（首个位置参数）、
+    ``flag``（provider 自己的 system-prompt flag）、``none``（不投递）。
+    ``stdin`` 被排除——交互会话的 stdin 属于用户，KC 往里写等于抢走输入。
+
+    Args:
+        agent_name: 报错上下文用的 agent 名。
+        interactive_settings: 配置声明；``None`` 时直接返回内置声明。
+        base_interactive: 内置基础声明；全新 agent 两侧都可能为空。
+
+    Returns:
+        合并后的交互声明；两侧都没声明时返回 ``None``（该 agent 不支持交互入口）。
+
+    Raises:
+        ValueError: 投递方式不在交互闭集内，或 ``prompt_delivery="flag"`` 却
+            没有声明 ``prompt_flag``。
+    """
+    if interactive_settings is None:
+        return base_interactive
+    declared_fields = interactive_settings.model_fields_set
+    prompt_delivery = (
+        interactive_settings.prompt_delivery
+        if interactive_settings.prompt_delivery is not None
+        else (base_interactive.prompt_delivery if base_interactive is not None else "argv_tail")
+    )
+    if prompt_delivery not in INTERACTIVE_PROMPT_DELIVERIES:
+        raise ValueError(
+            f"agents.{agent_name}.interactive: prompt_delivery='{prompt_delivery}' is not "
+            f"valid for the native interactive profile. Valid values: "
+            f"{', '.join(INTERACTIVE_PROMPT_DELIVERIES)} ('stdin' belongs to "
+            "non-interactive profiles only — an interactive session's stdin is the user's)."
+        )
+    prompt_flag = (
+        interactive_settings.prompt_flag
+        if "prompt_flag" in declared_fields
+        else (base_interactive.prompt_flag if base_interactive is not None else None)
+    )
+    if prompt_delivery == "flag" and not prompt_flag:
+        raise ValueError(
+            f"agents.{agent_name}.interactive: prompt_delivery='flag' requires prompt_flag "
+            "(the provider's own system-prompt argument)."
+        )
+    return AgentProfileSpec(
+        args=tuple(
+            interactive_settings.args
+            if interactive_settings.args is not None
+            else (base_interactive.args if base_interactive is not None else ())
+        ),
+        prompt_flag=prompt_flag,
+        prompt_delivery=prompt_delivery,
+        output_protocol=(
+            interactive_settings.output_protocol
+            if interactive_settings.output_protocol is not None
+            else (base_interactive.output_protocol if base_interactive is not None else "plain")
+        ),
+        tail_args=tuple(
+            interactive_settings.tail_args
+            if interactive_settings.tail_args is not None
+            else (base_interactive.tail_args if base_interactive is not None else ())
+        ),
+        expand=tuple(
+            interactive_settings.expand
+            if interactive_settings.expand is not None
+            else (base_interactive.expand if base_interactive is not None else ())
+        ),
+        read_only=(
+            interactive_settings.read_only
+            if interactive_settings.read_only is not None
+            else (base_interactive.read_only if base_interactive is not None else False)
+        ),
     )
 
 
@@ -517,6 +625,43 @@ def build_lifecycle_presets_config_from_settings(
     return LifecyclePresetsConfig(global_layer=global_layer)
 
 
+def _build_agent_session_config(
+    session_settings: AgentSessionSettings,
+) -> AgentSessionConfig:
+    """把 ``[agent_session]`` 配置段转换为冻结的领域视图。
+
+    预览 argv 从 list 收敛成 tuple（领域侧一律是不可变序列）；ready URL 的回环
+    校验已在配置层完成，这里原样搬运，不再重复判定。
+    """
+    preview_settings = session_settings.preview
+    return AgentSessionConfig(
+        default_agent=session_settings.default_agent,
+        bootstrap_enabled=session_settings.bootstrap_enabled,
+        skill_install_check_enabled=session_settings.skill_install_check_enabled,
+        preview=PreviewProfile(
+            argv=tuple(preview_settings.argv),
+            ready_url=preview_settings.ready_url,
+            ready_timeout_seconds=preview_settings.ready_timeout_seconds,
+        ),
+    )
+
+
+def _build_stall_supervisor_config(
+    supervisor_settings: AgentRunnerStallSupervisorSettings,
+) -> StallSupervisorConfig:
+    """把 ``[agent_runner.stall_supervisor]`` 配置段转换为冻结的领域视图。"""
+    return StallSupervisorConfig(
+        enabled=supervisor_settings.enabled,
+        check_interval_seconds=supervisor_settings.check_interval_seconds,
+        stalled_after_seconds=supervisor_settings.stalled_after_seconds,
+        agent=supervisor_settings.agent,
+        diagnosis_timeout_seconds=supervisor_settings.diagnosis_timeout_seconds,
+        diagnosis_inactivity_timeout_seconds=(
+            supervisor_settings.diagnosis_inactivity_timeout_seconds
+        ),
+    )
+
+
 def build_app_config_from_settings(
     agent_runner_settings: AgentRunnerSettings,
 ) -> AppConfig:
@@ -542,6 +687,8 @@ def build_app_config_from_settings(
     )
     interactive_decision = agent_runner_settings.interactive_decision
     repl = _build_repl_config(agent_runner_settings.repl)
+    agent_session = _build_agent_session_config(agent_runner_settings.session)
+    stall_supervisor = _build_stall_supervisor_config(agent_runner_settings.stall_supervisor)
     deliberation = _build_deliberation_config(agent_runner_settings.deliberation)
     agent_registry = build_agent_registry_from_settings(agent_runner_settings.agents)
     labels = build_label_config_from_settings(label_settings, agent_registry)
@@ -659,6 +806,8 @@ def build_app_config_from_settings(
             allow_execute_yes=interactive_decision.allow_execute_yes,
         ),
         repl=repl,
+        agent_session=agent_session,
+        stall_supervisor=stall_supervisor,
         deliberation=deliberation,
         lifecycle_agents=lifecycle_agents,
         agent_presets=build_agent_presets_from_settings(agent_runner_settings.presets),

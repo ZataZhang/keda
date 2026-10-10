@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "rv-1 真实 TTY 原生入口、operator skill 与按需预览",
+      "command": "真实 TTY（在 PTY 中运行）：UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_real_tty_preview.py；自动负控与回归：UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_cli_agent_session_entry.py tests/test_kedacode_operator_skill.py --no-testmon -q --no-header",
+      "evidence_files": [
+        "rv-1-automated-tests.txt",
+        "rv-1-kc-native-session.txt"
+      ],
+      "output_summary": "Skill 冲突 fail-fast 负控在缺陷形态下未抛 RuntimeError 并打印 EXPECTED_FAIL/RESTORED_OK；修复后 native-session 与 packaged-skill/installer 测试合计 47 passed（其中 session 用例 22）。真实 TTY 冲突和不支持交互的 qoder 均 fail-fast。Claude TUI 收到 API ConnectionRefused；Codex v0.162.0 由真实 kc TTY 启动，但宿主拒绝其 daemon lock 与后续文件操作。恢复重试以无参数裸 kc 进入 TUI 后，在输入前返回 Operation not permitted；未启动 preview。临时配置/源码/Skill 已恢复，端口始终关闭。",
+      "explanation": "负控证明冲突检查的回归断言可变红；修复后入口和 packaged installer/skill contract 测试覆盖冲突 fail-closed 与共用 installer。真实 PTY 尝试覆盖 CLI 到 provider 的启动边界。provider 对话未能继续，因此证据不宣称 skill 回复、用户请求 preview 或终端 URL 回传已通过。",
+      "risks": "INCONCLUSIVE：无法完成真实 provider 对话、skill 回复、明确请求后的 preview 启停与 loopback URL 回传。computer-use 安全策略拒绝打开 Terminal app；Codex 文件写入也被宿主权限拒绝。PRD 要求的 rv-1-kc-terminal-preview.png 未产生；没有伪造截图或复制凭据。Human-Confirmed 项保持未勾选。",
+      "negative_control": "UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast：临时将 preserve-conflict 从 RuntimeError 改成普通 notice，并运行 user_edited_skill_is_preserved_and_blocks_session。",
+      "expected_fail": "负控输出 DID NOT RAISE RuntimeError，测试失败并打印 EXPECTED_FAIL；源码恢复后修复回归测试通过。真实 TTY 冲突命令退出 1 且输出 Refusing to start the native session。",
+      "stdout_assertions": [
+        {
+          "pattern": "RESTORED_OK: src/backend/engines/agent_runner/interactive_agent_session.py",
+          "must_match": true
+        },
+        {
+          "pattern": "47 passed",
+          "must_match": true
+        }
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "rv-2 REPL、Console、help、no-TTY 与 schema 路由兼容",
+      "command": "UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case bare_kc_exit_code && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run kc --help && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run kc repl --help && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run kc console --help && { printf 'issue256 probe\\n' | UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run kc; result_code=$?; test \"$result_code\" -eq 1; } && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run kc schema --json && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_cli_agent_session_entry.py tests/test_agent_runner_cli.py tests/test_cli_schema.py --no-testmon -q --no-header -k 'bare_kc_in_tty_launches_provider or bare_kc_without_tty_keeps_help or bare_kc_without_options_and_tty_dispatches_to_session or console_entrypoint_returns_nonzero_for_no_tty or main_repl_subcommand_starts_session or main_repl_rejects_auto_agent_override or schema_command_registered_on_root_app or schema_covers_every_leaf_of_the_real_command_tree or argparse_facade_matches_typer_machine_flags or completion_protocol_matches_issue_prefix' && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_repl_session.py --no-testmon -q --no-header",
+      "evidence_files": [
+        "rv-2-cli-routing.txt",
+        "rv-2-negative-control.txt"
+      ],
+      "output_summary": "真实 CLI help/repl/console/schema 命令退出 0；裸 kc 经 stdin pipe 输出帮助并以 1 退出。Typer/parser/schema、兼容路由、空 argv TTY dispatch 与已安装 kc console script 回归 11 passed；旧 REPL 白名单/确认会话测试 18 passed。负控把裸入口 no-TTY 分支退出码改成 0，真实 console-script 测试失败并确认源码已恢复。",
+      "explanation": "验证经过真实 kc console script、Typer/parser/schema 和 shell pipe；负控针对裸无参真实 console-script 的退出码断言，证明此前的空 argv 快捷 help 路径会返回 0 并能被测试发现；旧 REPL 白名单和写操作确认由原 REPL session tests 覆盖；两种兼容入口的 shell completion 都经 Typer completion 协议返回。",
+      "risks": "Console 按验收命令执行了真实 --help 路由，但未启动监听服务；REPL 多轮白名单和确认路径由现有 dispatch 回归测试覆盖。",
+      "negative_control": "UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case bare_kc_exit_code：将 cli_typer_app.py 的 no-TTY help 回退退出码从 1 改为 0。",
+      "expected_fail": "test_bare_kc_without_tty_keeps_help_and_nonzero_exit 断言 exit_code == 1 失败，缺陷形态实际为 0；恢复后真实管道入口返回 1，路由测试通过。",
+      "stdout_assertions": [
+        {
+          "pattern": "EXPECTED_FAIL: 缺陷形态下测试变红",
+          "must_match": true
+        },
+        {
+          "pattern": "Usage: kc",
+          "must_match": true
+        },
+        {
+          "pattern": "11 passed",
+          "must_match": true
+        },
+        {
+          "pattern": "18 passed",
+          "must_match": true
+        }
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "rv-3 停滞诊断、精确进程组取消与安全交班",
+      "command": "UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case unknown_owner_handoff_reason && UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case attempt_creation_identity && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_agent_runner_stall_supervision.py --no-testmon -q --no-header && UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv3_architecture_reuse.py && UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case stall_recovery_catch && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_agent_runner_stall_recovery.py tests/test_agent_review.py::test_run_pre_pr_review_rejects_changes_requested_without_commit_request tests/test_agent_review.py::test_run_pre_pr_review_raises_after_all_reviewer_candidates_fail tests/test_agent_runner_final_verification.py::test_failed_final_verifier_prevents_draft_pr --no-testmon -q --no-header",
+      "evidence_files": [
+        "rv-3-stall-supervision.txt",
+        "rv-3-architecture-reuse.txt",
+        "rv-3-stall-recovery-gates.txt"
+      ],
+      "output_summary": "监督测试 63 passed。测试真实本地 writer/孙进程组，验证仅已确认的 stalled attempt 被精确取消一次并在旧组退出后进入既有 recovery 边界；healthy、blocked、uncertain、unknown owner、变化/结束的 attempt 不被误中断。unknown-owner 审计缺失与诊断后 process creation identity 改变时仍取消的两项负控均变红；恢复后全套通过。架构证据确认没有 migration/持久化模型变更、依赖方向合法且监督复用 invocation trace/recovery/verification 事实；合成 migration 负控被捕获。 新增执行循环集成测试 2 passed、pre-PR review 与最终 verifier 门禁测试 3 passed（合计 5 passed）；取消 RuntimeError 由同一 recovery budget 捕获，恢复后仍依序运行验证/证据门/commit/RV/verifier。",
+      "explanation": "测试中的 writer 和子进程组由真实 SubprocessRunner 启动并通过真实 OS process-group 信号验证；provider verdict 与 GitHub 按 PRD 允许的边界控制，不接触真实业务数据。进程创建身份负控在诊断快照之后改变实时身份，旧实现仍取消目标组时断言变红；unknown-owner 负控证明交班原因审计缺失会被发现。架构脚本检查现有 invocation event store、claim/attempt/recovery 和验证/发布用例，并确认没有第二个监督队列或新增持久化事实源。 `rv-3-stall-recovery-gates.txt` 通过执行循环的实际状态机断言取消异常进入原预算，正向恢复仍经过既有验证与独立 verifier；验证失败以 MaxRetriesExceededError 上抛，reviewer 拒绝与 final-verifier 失败不发布。负控删除 RuntimeError 捕获后该集成断言变红。",
+      "risks": "PRD 明确不要求真实 provider 停滞调用或真实任务现场材料；本项覆盖本机受控 attempt，不证明跨主机协调（范围外）。当前测试验证进入既有 recovery 的异常/摘要边界，没有执行真实 GitHub 发布流程。 本地状态机集成以受控诊断结果替代外部 provider，GitHub 发布边界由既有隔离测试替代；真实 provider TTY 与项目 preview 仍受 RV-1 主机限制。",
+      "negative_control": "依次运行 issue256_negative_control.py --case unknown_owner_handoff_reason 与 --case attempt_creation_identity：前者临时删除 unknown-owner 分支审计调用，后者临时移除 attempt 取消前的实时进程创建时刻复核。；`issue256_negative_control.py --case stall_recovery_catch` 临时从执行循环异常分支移除 RuntimeError 捕获",
+      "expected_fail": "unknown-owner 变异使 handoff marker/reason 日志断言失败，writer 仍存活；creation-identity 变异使拒绝取消断言失败，旧实现错误地取消该进程组。两项均打印 EXPECTED_FAIL 并 RESTORED_OK；恢复后完整监督模块 63 passed。；停滞恢复集成测试因 AgentStallCancelledError 未进入 loop recovery 而失败，不能观察到第二次 agent prompt 或原验证/发布门禁",
+      "stdout_assertions": [
+        {
+          "pattern": "EXPECTED_FAIL: 缺陷形态下测试变红",
+          "must_match": true
+        },
+        {
+          "pattern": "RESTORED_OK: src/backend/infrastructure/attempt_process_registry.py",
+          "must_match": true
+        },
+        {
+          "pattern": "MIGRATION_DIFF: empty",
+          "must_match": true
+        },
+        {
+          "pattern": "EXPECTED_FAIL: 合成 migration 被持久化搜索捕获",
+          "must_match": true
+        },
+        {
+          "pattern": "架构依赖方向全部合法，无违规。",
+          "must_match": true
+        },
+        {
+          "pattern": "63 passed",
+          "must_match": true
+        },
+        {
+          "pattern": "RESTORED_OK: src/backend/core/use_cases/run_agent_execution_loop.py",
+          "must_match": true
+        },
+        {
+          "pattern": "5 passed",
+          "must_match": true
+        }
+      ]
+    },
+    {
+      "item_number": 4,
+      "item_name": "rv-4 配置分层、preview 校验与监督默认关闭/零调用",
+      "command": "UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case preview_loopback_check && UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case preview_creation_identity && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_kc_preview.py --no-testmon -q --no-header && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_cli_agent_session_entry.py --no-testmon -q --no-header && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_agent_runner_stall_supervision.py --no-testmon -q --no-header -k 'preview_status_loads_defaults or invalid_supervisor_intervals or public_preview_ready_url or repo_layer_overrides_the_declared_preview_argv or disabled_supervision or supervision_off_by_default or calls_without_issue_identity or non_run_profiles or supervisor_without_a_read_only_generate_profile or run_attempt_with_issue_identity_registers' && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run kc --help && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run kc daemon --help && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run kc preview status --help && UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv4_config_layering.py",
+      "evidence_files": [
+        "rv-4-config-supervision.txt"
+      ],
+      "output_summary": "loopback 配置校验和 preview PID/PGID 创建身份复核的负控都变红并恢复源码。修复后 preview CLI/process tests 20 passed，native session tests 22 passed，配置/监督选择 tests 10 passed；help 命令均退出 0。隔离 global/repo TOML 实跑中，真实 kc PTY 选择 repo executor，preview CLI 启停受管 loopback 进程组，fresh merge 输出 enabled=false、周期 29、阈值 47、executor repo-supervisor。",
+      "explanation": "验证经过真实 kc CLI 的 preview lifecycle、fresh-process TOML loader 与本地子进程；监督 zero-call 分支检查 observer 和 adapter 调用数，executor 选择检查真实 diagnosis request 的配置值。两个缺陷注入分别使非 loopback URL 可能通过以及 PID/PGID 创建身份不匹配时仍被当作 owned preview，两者均有失败测试；修复后配置脚本在隔离真实 CLI、preview lifecycle 和 TOML merge 中确认优先级。",
+      "risks": "没有等待完整 30 分钟周期；秒级受控 tick 与禁用/无候选零调用分支已验证。global/repo TOML 通过新的隔离 CLI/merge 运行验证；RV-1 另有真实 provider API 不可用限制。",
+      "negative_control": "依次运行 issue256_negative_control.py --case preview_loopback_check 与 --case preview_creation_identity：前者将 require_loopback_preview_url 替换为原样返回，后者移除 preview manager 对已登记 PID/PGID 创建时刻的复核。",
+      "expected_fail": "loopback 变异使公网 ready_url 配置被 fresh CLI 接受并返回 0；创建身份变异使状态检查错误返回 ready 而不是 foreign。两项均打印 EXPECTED_FAIL 并 RESTORED_OK；恢复后 preview 20 passed。",
+      "stdout_assertions": [
+        {
+          "pattern": "EXPECTED_FAIL: 缺陷形态下测试变红",
+          "must_match": true
+        },
+        {
+          "pattern": "RESTORED_OK: src/backend/infrastructure/preview_process_manager.py",
+          "must_match": true
+        },
+        {
+          "pattern": "20 passed",
+          "must_match": true
+        },
+        {
+          "pattern": "22 passed",
+          "must_match": true
+        },
+        {
+          "pattern": "10 passed",
+          "must_match": true
+        },
+        {
+          "pattern": "SUPERVISOR_LAYERING_OK",
+          "must_match": true
+        }
+      ]
+    }
+  ]
+}

@@ -37,6 +37,7 @@ from backend.infrastructure.config.settings import (
     AgentRunnerRepositoryMetadataSettings,
     AgentRunnerRunnerSettings,
     AgentRunnerSafetySettings,
+    AgentRunnerStallSupervisorSettings,
     AgentRunnerValidationSettings,
     AgentRunnerWorktreeSettings,
     load_agent_runner_local_settings,
@@ -192,6 +193,7 @@ _IAR_SECTION_ORDER = (
     "pre_pr_review",
     "post_pr_supervisor",
     "daemon",
+    "stall_supervisor",
     "interactive_decision",
     "repl",
     "deliberation",
@@ -214,6 +216,7 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
     "pre_pr_review": "Draft PR 创建前的 AI review 门禁（push 之后、PR 之前）",
     "post_pr_supervisor": "Draft PR 创建后的自动 supervisor 配置",
     "daemon": "Daemon 轮询与崩溃对账配置（覆盖全局 [agent_runner.daemon] 默认）",
+    "stall_supervisor": "活跃 attempt 停滞监督（默认关闭；启用后才会按周期调用模型）",
     "interactive_decision": "交互式决策（kc ask）配置：默认 agent、输出目录、执行确认等",
     "repl": "交互式 REPL（kc 无子命令）配置：默认 agent、审计目录与命令确认策略",
     "deliberation": "多 agent 审议（kc deliberate）配置：轮数、合成 agent、参与角色",
@@ -832,6 +835,7 @@ def build_repository_local_config_text(
         pre_pr_review=AgentRunnerPrePrReviewSettings(),
         post_pr_supervisor=AgentRunnerPostPrSupervisorSettings(),
         daemon=AgentRunnerDaemonSettings(),
+        stall_supervisor=AgentRunnerStallSupervisorSettings(),
         # 有意不传 generated_content：写入会把当时的代码默认值钉死在每个仓库里，之后
         # 默认值升级（如 template → agent）就传不到已初始化的仓库。文末追加注释示例。
         interactive_decision=AgentRunnerInteractiveDecisionSettings(),

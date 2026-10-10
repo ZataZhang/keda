@@ -401,6 +401,13 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # issue-245：随包 Skill 写明 skill 重装/刷新的独立入口；它不带仓库 selector。
     ("skill", "install"): {"--dry-run", "--force"},
     ("registry", "start"): set(),
+    # issue-256：裸 kc 的原生执行器入口与按需项目预览。旗标集合取自真实命令树
+    # （``kc schema --json``），少一个即 skill ↔ CLI 漂移，多一个说明示例写了不存在的旗标。
+    ("session",): {"--agent", "--repo", "--repo-id", "--config"},
+    ("repl",): {"--agent", "--repo", "--repo-id", "--config"},
+    ("preview", "start"): {"--repo", "--repo-id", "--config", "--json", "--output", "--confirm"},
+    ("preview", "status"): {"--repo", "--repo-id", "--config", "--json", "--output"},
+    ("preview", "stop"): {"--repo", "--repo-id", "--config", "--json", "--output"},
     ("registry", "stop"): {"--repo-id", "--all"},
     ("backlog", "advance"): {"--dry-run", "--repo", "--repo-id", "--config"},
     ("registry", "list"): set(),

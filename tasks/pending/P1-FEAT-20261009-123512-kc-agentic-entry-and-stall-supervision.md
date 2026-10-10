@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8，那里是唯一依赖事实源。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — Human-Confirmed 仍有 3 项未确认，执行器验证也尚未全部完成。
 > 本行投影 §9 Acceptance Checklist，那里是唯一事实源。
 
 本文分两层：Part A 人审层（§1-4）说明用户价值与需确认事项；Part B 执行器层（§5-13）记录架构、实现和验收证据。
@@ -237,9 +237,14 @@ Database
     【总结】原生会话不保存 Keda transcript；attempt 复用现有 claim/event，不增加数据库和第二事实源
 
 Infrastructure
-├── src/backend/infrastructure/process_runner.py [按需修改]
-│   【总结】为 attempt observer 暴露 heartbeat/精确 cancel，并管理按需预览 child group
-│   └── 保持现有 timeout 和 daemon shutdown 语义
+├── src/backend/infrastructure/process_runner.py [修改]
+│   【总结】登记 live attempt 的子进程组，并暴露 freshness/精确 cancel；保持 timeout 与 daemon shutdown 语义
+├── src/backend/infrastructure/attempt_process_registry.py [新增]
+│   【总结】以 attempt key 绑定 PID、PGID、启动标识与 owner，取消前重新核对后只发给目标组信号
+├── src/backend/infrastructure/foreground_session_launcher.py [新增]
+│   【总结】将原生 executor 作为前台子进程启动并转发 TTY、signal 与退出码
+├── src/backend/infrastructure/preview_process_manager.py [新增]
+│   【总结】按 repo 配置启动、探测和停止 KC 持有的 preview 子进程组
 └── src/backend/infrastructure/config/agent_runner_settings.py [修改]
     【总结】解析 native interactive profile、preview allowlist 与 supervisor 配置
 
@@ -248,25 +253,27 @@ Domain
 │   【总结】描述进展快照、监督结论、owner 与取消结果
 ├── src/backend/core/shared/interfaces/agent_runner.py [修改]
 │   【总结】定义只读 supervisor 与 per-attempt process-control 契约
-├── src/backend/core/use_cases/run_agent_execution_loop.py [修改]
-│   【总结】在共享 attempt loop 插入 observer 与串行恢复
+├── src/backend/core/use_cases/run_agent_execution_loop.py [适配]
+│   【总结】保留原 attempt orchestration、recovery budget 与验证门禁；监督结果沿既有失败路径回流
 ├── src/backend/core/use_cases/run_agent_once.py [修改]
-│   【总结】将唯一 run/attempt context 传给监督器
-├── src/backend/core/use_cases/agent_invocation_tracing.py [按需修改]
-│   【总结】仅在现有事件不足时补进展关联，不复制调用记录
-└── src/backend/core/use_cases/agent_runner_stall_supervision.py [新增，如需]
-    【总结】分类进展/阻塞/停滞/不确定并协调单次修复
+│   【总结】在真实写入调用边界挂 observer，沿既有 execution loop 交回 bounded recovery
+├── src/backend/core/use_cases/agent_runner_stall_supervision.py [新增]
+│   【总结】分类 progress/blocked/stalled/uncertain，核对新鲜度并协调单次修复
+└── src/backend/core/use_cases/agent_session_preview.py [新增]
+    【总结】解析已配置或唯一候选的 repo preview profile，调用窄 infrastructure 能力
 
 API / CLI
 ├── src/backend/api/cli_typer_app.py [修改]
 │   【总结】TTY 裸入口启动配置的原生执行器；保留 help、非 TTY 与显式命令
 ├── src/backend/api/cli_typer_agent.py [按需修改]
 │   【总结】增加/调整 `--agent` 入口并与 parser/schema 对齐，保留 `kc repl` 原有入口
-└── src/backend/api/cli_typer_preview.py [新增或复用]
-    【总结】让对话 agent 以受限命令管理项目预览并返回 loopback URL
+├── src/backend/api/cli_typer_preview.py [新增]
+│   【总结】让对话 agent 以受限命令管理项目预览并返回 loopback URL
+└── src/backend/api/cli_parsed_commands/repository_context.py [新增]
+    【总结】session/repl/preview 共用单一 repo target 解析，避免重复解析仓库上下文
 
 Engines
-├── src/backend/engines/agent_runner/interactive_agent_session.py [新增，如需]
+├── src/backend/engines/agent_runner/interactive_agent_session.py [新增]
 │   【总结】使用声明式 native profile、skill/bootstrap 和 repo cwd 启动 TTY 会话
 └── src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md [修改]
     【总结】描述原生入口、按需 `kc preview`、监督诊断和安全边界
@@ -276,8 +283,10 @@ Tests
 │   【总结】验证裸 kc 原生 profile、stdio/cwd/signal，以及 `kc repl` 兼容
 ├── tests/test_kc_preview.py [新增]
 │   【总结】验证明确请求、精确命令、loopback URL、ready timeout 与准确 stop
-└── tests/test_agent_runner_stall_supervision.py [新增]
+├── tests/test_agent_runner_stall_supervision.py [新增]
     【总结】验证进展阈值、精确取消、owner 复核、预算和负控
+└── tests/test_agent_runner_stall_recovery.py [新增]
+    【总结】验证停滞取消进入原 recovery budget、验证/证据门、commit proxy、RV 复跑与独立 verifier
 
 Docs
 ├── docs/guides/agent-runner.md [修改]
@@ -420,7 +429,7 @@ flowchart TD
 
 ### 7.8 Prototype / Data Model
 
-- **Frontend impact：无。** 不新增网页对话页、session API 或浏览器聊天；`frontend-public/` 和 `frontend-admin/` 不在本需求变更范围。只有用户在执行器 TUI 对话中明确要求预览时，才启动受限项目服务；agent 在终端回复 loopback URL，用户决定是否访问。
+- **No frontend impact / 前端影响：无。** 不新增网页对话页、session API 或浏览器聊天；`frontend-public/` 和 `frontend-admin/` 不在本需求变更范围。只有用户在执行器 TUI 对话中明确要求预览时，才启动受限项目服务；agent 在终端回复 loopback URL，用户决定是否访问。
 - 概念图片原型已登记：[KC 终端执行器与按需项目预览](../../docs/prototypes/kc-agent-terminal-preview.md)，原图为 [kc-terminal-agent-preview.png](../../docs/prototypes/assets/kc-terminal-agent-preview.png)，提示词和图片来源记录在同名 `.prompt.md`。它是 ImageGen 静态概念图，不是实际 Codex/Claude 截图、交互原型或实现证据。
 - 交付验证从真实 `kc` TTY 入口走通原生 executor 与明确请求后的 preview；停滞监督按 §9.1 的常规自动化测试验证，不要求真实任务现场材料。概念图不能替代原生入口与 preview 验证。
 - No interactive prototype implementation in this PRD.
@@ -458,55 +467,55 @@ verifier-only 组：停滞监督、`kc repl`/`kc console` 兼容路由、config/
 
 #### Architecture Acceptance
 
-- [ ] `kc repl` 仍使用旧 Keda REPL 的白名单与确认；`kc console` 运维面板语义不变；rv-2。
-- [ ] `kc preview` 只启动 repo profile 中精确 argv 或经用户确认的单一候选；URL 必须由 owner process 提供且 host 属于 loopback；停止动作只影响 KC 持有的 process group；rv-1。
-- [ ] 中断 group 与 attempt 绑定；unknown/foreign group 不进入终止分支。
-- [ ] 同一 Issue 的监督/恢复期间至多一名写 executor。
-- [ ] 复用 invocation trace、claim、recovery 和验证事实，无重复表/队列；migration absence、依赖方向和仓库搜索证明。
+- [x] `kc repl` 仍使用旧 Keda REPL 的白名单与确认；`kc console` 运维面板语义不变；rv-2。证据：`rv-2-cli-routing.txt`（18 个 REPL 会话测试通过，真实命令路由通过）。
+- [x] `kc preview` 只启动 repo profile 中精确 argv 或经用户确认的单一候选；URL 必须由 owner process 提供且 host 属于 loopback；停止动作只影响 KC 持有的 process group；rv-4。证据：`rv-4-config-supervision.txt`（隔离仓库通过真实 CLI 启停受管进程组并返回 loopback URL；公网地址与创建身份不匹配负控变红）。
+- [x] 中断 group 与 attempt 绑定；unknown/foreign group 不进入终止分支。证据：`rv-3-stall-supervision.txt`（真实 OS group 取消与 unknown-owner 负控）。
+- [x] 同一 Issue 的监督/恢复期间至多一名写 executor。证据：`rv-3-stall-supervision.txt`（旧 writer group 确认退出后才把诊断交回既有 recovery）。
+- [x] 复用 invocation trace、claim、recovery 和验证事实，无重复表/队列；migration absence、依赖方向和仓库搜索证明。证据：`rv-3-architecture-reuse.txt`（migration/persistence absence、合成 migration 负控、全仓依赖方向检查与现有 trace/recovery/verification 引用）。
 
 #### Dependency Acceptance
 
-- [ ] 与 #245 共存时仍调用同一 packaged skill installer；无第二份 skill-root 写算法；rg 与 installer contract 证据。
+- [x] 与 #245 共存时仍调用同一 packaged skill installer；无第二份 skill-root 写算法；rg 与 installer contract 证据。证据：`rv-1-automated-tests.txt`（入口共用 installer 的冲突/保留契约及发行包 skill 测试）。
 
 #### Behavior Acceptance
 
 - [ ] 真实 TTY 中裸 `kc` 启动所选 Codex/Claude 原生多轮会话；新会话使用当前 repo、skill 与 executor 权限；rv-1。
-- [ ] 仅有非交互 profile、provider 缺失或 skill 冲突时 fail-fast，不改用自动批准 profile 或覆盖 skill；rv-1 负控。
-- [ ] TTY 路由、`--agent`、`kc repl`、`kc console`、`kc --help`、no-TTY 在 Typer/parser/schema 一致；rv-2。
+- [x] 仅有非交互 profile、provider 缺失或 skill 冲突时 fail-fast，不改用自动批准 profile 或覆盖 skill；rv-1 负控。证据：`rv-1-automated-tests.txt`（unsupported profile、missing binary、无 skip-permission argv、skill 冲突负控）。
+- [x] TTY 路由、`--agent`、`kc repl`、`kc console`、`kc --help`、no-TTY 在 Typer/parser/schema 一致；rv-2。证据：`rv-2-cli-routing.txt`（真实命令与 11 个路由/schema/completion 用例通过；completion 保持 Typer 协议）。
 - [ ] 裸启动不运行项目 dev server；只有用户在对话中明确请求后，agent 才启动配置/确认过的 preview 命令，并在 TUI 回复 loopback URL；没有唯一命令时先询问；rv-1。
-- [ ] 默认关闭时 daemon 无新增模型调用或取消；巡检周期默认 30 分钟且可覆盖；停滞阈值与 executor 也按配置优先级加载；rv-4。
-- [ ] 每个停滞窗口至多一次调用；progress/blocked/uncertain 不写工作区；旧进程退出并复核 owner 后才 recovery；rv-3。
-- [ ] 自愈复用 recovery budget、验证命令、pre-push review 与发布 gate；验证失败不报成功；rv-3。
-- [ ] 人类输入、凭据、远端 claim 或 identity 改变时交班，目标进程和工作树不被监督轮改动；rv-3 negative control。
+- [x] 默认关闭时 daemon 无新增模型调用或取消；巡检周期默认 30 分钟且可覆盖；停滞阈值与 executor 也按配置优先级加载；rv-4。证据：`rv-4-config-supervision.txt`（隔离 global/repo 合并）与 `rv-3-stall-supervision.txt`（默认关闭零调用）。
+- [x] 每个停滞窗口至多一次调用；progress/blocked/uncertain 不写工作区；旧进程退出并复核 owner 后才 recovery；rv-3。证据：`rv-3-stall-supervision.txt`（63 个监督测试通过，含诊断后进程创建身份变化负控）。
+- [x] 自愈复用 recovery budget、验证命令、pre-push review 与发布 gate；验证失败不报成功；rv-3。证据：`rv-3-stall-recovery-gates.txt`（取消异常进入原 recovery 状态机；恢复后验证、证据门、commit、RV 与 verifier 顺序通过；失败验证耗尽 budget；reviewer/verifier 负控阻止发布）。
+- [x] 人类输入、凭据、远端 claim 或 identity 改变时交班，目标进程和工作树不被监督轮改动；rv-3 negative control。证据：`rv-3-stall-supervision.txt`（blocked/uncertain、owner unknown 与实时 process creation identity freshness 分支通过）。
 
 #### Documentation Acceptance
 
-- [ ] docs/guides/agent-runner.md、docs/guides/configuration.md、随包 operator skill 与 references 同步；导航变化时更新 mkdocs.yml。
-- [ ] ROADMAP.md 更新 M1 原生交互终端子项、M3 恢复/审计状态与「交互终端 / 管理 Dashboard」边界，不把 M1 全里程碑标完成。
-- [ ] kc schema --json、kc --help 与发行包 skill 指引反映最终能力。
+- [x] docs/guides/agent-runner.md、docs/guides/configuration.md、随包 operator skill 与 references 同步；导航变化时更新 mkdocs.yml。证据：文档/skill 文件改动及 `uv run mkdocs build --strict` exit 0。
+- [x] ROADMAP.md 更新 M1 原生交互终端子项、M3 恢复/审计状态与「交互终端 / 管理 Dashboard」边界，不把 M1 全里程碑标完成。证据：ROADMAP.md 更新并通过 `just lint --full`。
+- [x] kc schema --json、kc --help 与发行包 skill 指引反映最终能力。证据：`rv-2-cli-routing.txt`、`rv-1-automated-tests.txt`。
 
 #### Validation Acceptance
 
-- [ ] just test-changed 验本次改动：公开 CLI、`kc repl` 兼容、interactive profile、监督并发/取消、配置合并与恢复验证链；结果写 evidence report。
-- [ ] 若改全局 run lifecycle、process runner/interface、跨层契约或持久化，执行 just test all；核心档不能代替全量。
-- [ ] just lint、just lint --reuse、mkdocs build --strict 和 PRD checker 通过；guard 失败修触发源，不改守卫放行。
-- [ ] 独立 verifier PASS；R2/R3 代码变化后重跑相应 oracle，证据绑定最终 Git tree。
+- [x] `uv run pytest tests/test_cli_agent_session_entry.py tests/test_repl_session.py tests/test_kc_preview.py tests/test_agent_runner_stall_supervision.py tests/test_agent_runner_cli.py tests/test_cli_schema.py tests/test_kedacode_operator_skill.py --no-testmon -q --no-header` 定向验证本次公开 CLI、旧 `kc repl` 白名单/确认、interactive profile、preview、监督并发/取消、配置合并、skill 包和恢复验证链；结果写 evidence report。证据：已复跑既有验收集 `309 passed`；新增停滞 recovery 与 review/verifier gate 集 `5 passed`，证据分别记录于 `rv-3-stall-recovery-gates.txt`。
+- [x] 若改全局 run lifecycle、process runner/interface、跨层契约或持久化，执行 just test all；核心档不能代替全量。证据：最终工作树 `3903 passed, 1 skipped`。
+- [x] just lint、just lint --reuse、mkdocs build --strict 和 PRD checker 通过；guard 失败修触发源，不改守卫放行。证据：最终 `just lint --full`、`just lint --reuse`、`mkdocs build --strict` 与 PRD checker `--all` 通过。
+- [~] 独立 verifier PASS；R2/R3 代码变化后重跑相应 oracle，证据绑定最终 Git tree。 — runner-owned gate: 独立 verifier 对最终 Git tree 与证据包出具 PASS
 - [ ] 真实入口高保真验证：真实 Codex/Claude 原生 TTY + 明确请求后的 repo preview；受控进程组 integration 覆盖 stalled、healthy、unknown-owner；rv-1 至 rv-4。
 
 #### Delivery Readiness
 
-- [ ] CLI、配置、进程所有权、skill 文档/发行模板和安全门禁均到目标状态，无临时 façade 或未处理范围分歧。
-- [ ] 自动化验证覆盖 native TTY、按需 preview 和受控 stall supervision；停滞监督不要求额外报告、截图、录屏、真实任务现场或 GitHub sandbox 材料。
+- [x] CLI、配置、进程所有权、skill 文档/发行模板和安全门禁均到目标状态，无临时 façade 或未处理范围分歧。证据：`rv-1-automated-tests.txt`、`rv-2-cli-routing.txt`、`rv-3-stall-supervision.txt`、`rv-3-stall-recovery-gates.txt`、`rv-4-config-supervision.txt` 与 `mkdocs build --strict`。
+- [x] 自动化验证覆盖 native TTY 路由、按需 preview 和受控 stall supervision；停滞监督不要求额外报告、截图、录屏、真实任务现场或 GitHub sandbox 材料。证据：`rv-1-automated-tests.txt`、`rv-3-stall-supervision.txt`、`rv-4-config-supervision.txt`；真实 provider TTY 交互仍由 §9.1 单独保持未完成。
 ## 10. Functional Requirements
 
-- **FR-1 Native executor entry**：TTY 裸 `kc` 读取配置的默认 executor 和 interactive profile，并在当前 repo cwd 启动其原生 TUI；`--agent <name>` 可覆盖。正确转发 stdio、TTY、signals 和 exit code；不启动 KC chat server 或项目 dev server。profile 缺失/不兼容时报错，不静默切非交互或自动批准模式。
-- **FR-2 Provider permissions and operator context**：沿用执行器正常权限与 sandbox；原生会话可发现 packaged `kedacode-operator` skill 并获得必要 bootstrap/repo 上下文。复用 fail-closed installer，不覆盖用户修改内容；冲突时停止并说明。
-- **FR-3 Conversation-requested preview**：仅当用户在 executor TUI 对话中明确要求预览项目时，agent 才可调用 `kc preview start/status/stop`。默认只用 repo `agent_session.preview` 中声明的 argv；无配置时仅将唯一候选交用户确认。进程必须归 KC 所有且 ready URL host 属于 loopback；agent 在终端回复 URL，由用户决定是否打开浏览器。
-- **FR-4 Operator skill bootstrap**：使用随包 `kedacode-operator` skill 和短 bootstrap 为 executor 提供 KedaCode 命令、仓库配置和安全边界；复用 fail-closed installer，不覆盖用户修改内容；skill 冲突时停止并说明。
-- **FR-5 Per-attempt supervisor config**：新增默认关闭设置：`enabled=false`、`check_interval_seconds=1800`（30 分钟）、`stalled_after_seconds=1800`、`agent`。巡检周期和停滞阈值分别有默认值且可独立覆盖、校验。未启用、未到点、无活跃任务或有实质进展时不调用模型。
-- **FR-6 Bounded diagnosis and repair**：监督只读，分类 progress/blocked/stalled/uncertain。仅 stalled 且 fresh attempt、claim、progress、group identity 全匹配时停止准确 child group；退出后注入诊断到既有 recovery。每个停滞窗口至多一次，仍经过原 gate 和预算。
-- **FR-7 Safe handoff and audit**：owner 变化、人工/凭据依赖、远端控制或 identity 未知时不写/不杀；在现有 issue log/attempt trace 记录时间、摘要、reason 和分支；不记录 secret、完整 prompt 或冗余调用数据库。
-- **FR-8 Compatibility and packaging**：保留旧 Keda REPL 实现、`kc repl` 命令、专属配置和 allowlist；保持 `kc console`、`kc --help`、非 TTY 和其他 CLI/schema 合约；不改变 `kc loop-daemon` 创建 recipe Issue 的语义；同步 docs、roadmap、operator skill 和发行包配置，不新增静态聊天前端。
+- FR-1: Native executor entry —TTY 裸 `kc` 读取配置的默认 executor 和 interactive profile，并在当前 repo cwd 启动其原生 TUI；`--agent <name>` 可覆盖。正确转发 stdio、TTY、signals 和 exit code；不启动 KC chat server 或项目 dev server。profile 缺失/不兼容时报错，不静默切非交互或自动批准模式。
+- FR-2: Provider permissions and operator context —沿用执行器正常权限与 sandbox；原生会话可发现 packaged `kedacode-operator` skill 并获得必要 bootstrap/repo 上下文。复用 fail-closed installer，不覆盖用户修改内容；冲突时停止并说明。
+- FR-3: Conversation-requested preview —仅当用户在 executor TUI 对话中明确要求预览项目时，agent 才可调用 `kc preview start/status/stop`。默认只用 repo `agent_session.preview` 中声明的 argv；无配置时仅将唯一候选交用户确认。进程必须归 KC 所有且 ready URL host 属于 loopback；agent 在终端回复 URL，由用户决定是否打开浏览器。
+- FR-4: Operator skill bootstrap —使用随包 `kedacode-operator` skill 和短 bootstrap 为 executor 提供 KedaCode 命令、仓库配置和安全边界；复用 fail-closed installer，不覆盖用户修改内容；skill 冲突时停止并说明。
+- FR-5: Per-attempt supervisor config —新增默认关闭设置：`enabled=false`、`check_interval_seconds=1800`（30 分钟）、`stalled_after_seconds=1800`、`agent`。巡检周期和停滞阈值分别有默认值且可独立覆盖、校验。未启用、未到点、无活跃任务或有实质进展时不调用模型。
+- FR-6: Bounded diagnosis and repair —监督只读，分类 progress/blocked/stalled/uncertain。仅 stalled 且 fresh attempt、claim、progress、group identity 全匹配时停止准确 child group；退出后注入诊断到既有 recovery。每个停滞窗口至多一次，仍经过原 gate 和预算。
+- FR-7: Safe handoff and audit —owner 变化、人工/凭据依赖、远端控制或 identity 未知时不写/不杀；在现有 issue log/attempt trace 记录时间、摘要、reason 和分支；不记录 secret、完整 prompt 或冗余调用数据库。
+- FR-8: Compatibility and packaging —保留旧 Keda REPL 实现、`kc repl` 命令、专属配置和 allowlist；保持 `kc console`、`kc --help`、非 TTY 和其他 CLI/schema 合约；不改变 `kc loop-daemon` 创建 recipe Issue 的语义；同步 docs、roadmap、operator skill 和发行包配置，不新增静态聊天前端。
 
 ## 11. Non-Goals
 
@@ -550,9 +559,116 @@ verifier-only 组：停滞监督、`kc repl`/`kc console` 兼容路由、config/
 
 ### Final Reconciliation
 
-- Interpretation: 待实现后核对；目标为本机原生 executor TUI + 用户请求后启动的受控项目预览 + 本机活跃 attempt 有界监督。
-- Public behavior and contracts: 待实现后核对；TTY 裸 `kc` 启动配置的 provider TUI，`--agent` 选择执行器，`kc repl` 保留原有白名单/确认 REPL，`kc console` 与非 TTY 合约保留；预览 URL 仅在对话请求并成功启动后返回。
-- Related PRD status: 已检查；#245 无硬依赖，#242 已归档且排除 stall diagnosis。
-- Requirements and risks: §2 已记录监督默认关闭、巡检默认 30 分钟且可覆盖、执行器权限、精确中断和终端入口选择；Human-Confirmed 验收在实现后由人工确认。
+- Interpretation: 已实现 TTY 裸 `kc` 到配置的原生 executor、旧 `kc repl`、窄 preview CLI 与默认关闭监督的代码路径；RV-1 真实 provider 对话/preview oracle 尚未完成，因此不能把这些代码入口写成完整的端到端交付。已验证的行为与 Part A 解释一致，未验证部分继续保持开放。
+- Public behavior and contracts: `--help`、显式命令与**无额外参数**的 no-TTY 裸 `kc` 回落经安装 console script 验证，帮助输出后进程以 1 退出；TTY 空参数分支进入 native session 并保留 provider 退出码。补全环境变量存在时空参数请求继续交给 Typer completion 协议。Typer/parser/schema、completion、REPL/Console 路由有回归覆盖；preview 的真实 CLI/config/process group 通过隔离 repo 验证。真实 provider TUI 启动过，但 Claude API 连接失败、Codex 的宿主文件操作被拒绝；没有完成 provider 对话或其发起的 preview。
+- Related PRD status: #245 无硬依赖；#242 已归档且排除 stall diagnosis；#246/#247 未扩展到各自前端范围。
+- Requirements and risks: 默认关闭、1800 秒默认间隔/阈值及仓库覆盖、PID/PGID/host/process creation time 复核、fail-closed Skill 冲突与返回既有 recovery 的路径有代码和自动证据；本轮新增执行循环集成验证：停滞取消消耗原 recovery budget，成功 recovery 仍经过验证、证据门、commit、RV 复跑和 independent verifier；恢复验证失败不报告成功，reviewer/final-verifier 失败阻断发布。RV-1 的 provider 回复、skill 正向发现、对话请求 preview、终端 loopback URL 回传和 `rv-1-kc-terminal-preview.png` 尚未产生；Human-Confirmed 仍由人工负责，未勾选。
 - Reconciled differences:
-  - none
+  - 监督协调落在 `run_agent_once.py` 的真实调用边界，复用 `run_agent_execution_loop.py` 的原有恢复阶梯；精确进程归属登记由新增 `attempt_process_registry.py` 承担。
+  - 增加 `preview_process_manager.py` 与 `agent_session_preview.py` 承载窄 preview 生命周期；session/repl/preview 的仓库选择复用新增 `repository_context.py`。
+  - 本次没有数据库迁移、网页聊天或第二 writer/daemon。
+- RV-2 负控期间真实裸 `kc` 无参数管道运行揭示 Typer 空 argv help 路径退出码为 0；现由 `cli_typer_app.main()` 显式处理空 argv，并用真实 console script 负控验证修复前红、修复后绿。focused suite 又发现空 argv shell completion 回归，现把 completion 环境变量路径交回 Typer，并覆盖旧 `iar` 与 `kedacode` 两种补全前缀。
+- Validation state: 最终定向验收命令 `uv run pytest tests/test_cli_agent_session_entry.py tests/test_repl_session.py tests/test_kc_preview.py tests/test_agent_runner_stall_supervision.py tests/test_agent_runner_cli.py tests/test_cli_schema.py tests/test_kedacode_operator_skill.py --no-testmon -q --no-header` 为 `309 passed`；停滞 recovery 与 review/verifier gate 定向集为 `5 passed`；`just test all` 为 `3903 passed, 1 skipped`。最终 `just lint --full`、`just lint --reuse`、`mkdocs build --strict` 和 PRD checker `--all` 均通过；`just lint --reuse` 的 adapter 接口重复只在三个必要相同签名周围使用 `jscpd:ignore` 注释，不改变阈值、hook 或函数体。`git diff --check` 与结构化 evidence manifest 检查通过。独立 verifier 尚未运行/判定，archive-ready 仍因未解决的 executor-owned 项而不能通过。
+- Delivery state: RV-1 仍 INCONCLUSIVE，provider 多轮回复、对话发起 preview 与真实 TTY 截图没有完成；第五次真实 TTY 复核仍在首个输入前收到 `Operation not permitted`。因此真实对话式预览入口仍未验证。独立 verifier 尚无 PASS，HTML 人审清单的真实浏览器 QC 也未完成，不宣称其已验证。PRD 留在 `tasks/pending/`，未归档，Human-Confirmed 项保持未勾选，banner 继续为待人工验收。`commit-request.json` 留给 runner 按既有提交与验证流程处理；不得将当前证据状态解释为 RV-1 或 archive gate 通过。
+
+## Change Log
+
+### 2026-10-10 · 修正 FR 机器解析格式
+- Type: doc / validation
+- Before: §10 的 FR 编号被 Markdown 粗体包裹，标签后未使用机器契约要求的冒号，PRD checker 未识别功能需求。
+- After: 保留原八项需求正文与顺序，仅改为 `FR-n: Title` 格式。
+- Reason: 实际运行 PRD checker 后发现结构化 FR 索引缺失。
+- Impact: 没有更改行为或验收标准；checker 已能解析 FR-1 至 FR-8，但仍因 executor-owned 验收清单未完成而返回非零。
+- Review: 已重跑 checker；格式错误消失，未完成项符合当前 RV-1/独立 verifier 阻塞状态。
+
+### 2026-10-10 · 实际路径与证据对账
+- Type: architecture / evidence / doc
+- Before: §7.2 的部分路径仍标为待实现或只按候选位置描述；Final Reconciliation 尚未收集执行结果。
+- After: §7.2 更新为实际 attempt ownership registry、native session/preview 模块和共享仓库上下文 helper；Final Reconciliation 与三份证据报告记录了已验证行为和未完成的 RV-1。
+- Reason: 按实现后的真实职责与逐项 RV 结果对齐 living PRD，避免将单测或 TUI 启动误记为完成真实 provider 对话。
+- Impact: RV-2/3/4 的 executor evidence 可复核；RV-1 仍 INCONCLUSIVE，Human-Confirmed 未动，独立 verifier 和 archive gate 保持未完成。
+- Review: 已按 Machine Contract 核对证据分组与状态；等待人工解决 RV-1 的宿主权限/可视化验证条件以及独立 verifier。
+
+### 2026-10-10 · 初始化配置展示停滞监督默认值
+- Type: config / test
+- Before: `kc init` 生成的仓库配置没有 `[agent_runner.stall_supervisor]`，尽管该字段已加入仓库级配置模型。
+- After: 新仓库配置显式包含默认关闭的监督段与默认巡检/停滞阈值，可由仓库配置覆盖。
+- Reason: 全量回归中的配置脚手架契约要求每个仓库级模型字段均可序列化；此段也需要让用户能直接发现并配置新能力。
+- Impact: 初始化生成的配置增加一个默认 `enabled = false` 的段；不会产生监督调用。补充 section 顺序与说明，并由脚手架测试校验。
+- Review: 已按 §2 决定一与 FR-5 核对；待目标测试和 verifier 检查。
+
+### 2026-10-10 · 原生入口的 Skill 冲突门禁
+- Type: behavior / doc / test
+- Before: 原生入口会保留用户修改过的 operator Skill，但仍启动 provider 并将冲突作为普通提示。
+- After: 原生入口保留用户文件并 fail-fast；冲突解决前不启动 provider，也不把未核实内容当作已加载的 packaged skill。
+- Reason: rv-1 的真实 TTY 运行发现实现与 §2 自动门禁、§9 Behavior Acceptance 的“skill 冲突时 fail-fast”要求矛盾。
+- Impact: 收紧了交互入口失败语义；不覆盖用户 Skill。更新入口回归测试、操作指南与发行 skill 指引；Human-Confirmed 决策未改变。
+- Review: 执行器依据 PRD 已确认要求修正；待本轮真实 CLI 负控与正向验证。
+
+### 2026-10-09 · 执行侧交付（Issue #256 修复轮，含两份线上误报复盘）
+- Type: behavior / reliability / configuration / documentation / evidence
+- Before: 用户报告的两项停滞任务未触发预期恢复；结论解析对格式差异和续写不稳健，瞬时锚点或诊断失败会消耗监督窗口，配置合并可能漏掉监督设置，预览退出进程可能被误当作外部进程；负控采集也曾有还原次序缺陷。
+- After: 扩展监督结论的中英文与多格式解析并对不完整 stalled 证据 fail-closed；锚点可重试、诊断失败保留窗口、提示词要求多次稳定指纹；修正预览退出态和 supervisor 配置合并；校验正数、argv 与 loopback URL；原生入口保留 provider 退出码并避免空 bootstrap 占 argv；同步 runner/configuration/skill/references/roadmap；负控先备份再变异并验证源码还原。修复归因基于代码及用户报告，不声称复现线上现场。
+- Reason: 修复用户报告的监督器漏恢复问题，并使新 TTY、preview、配置与监督路径遵守原 PRD 的 fail-closed 和单一 writer 约束。
+- Impact: 新增受控 attempt 的停滞诊断与恢复、native TTY / preview 配置及对应文档和测试；不新增聊天服务、数据库或第二任务队列。rv-2/3/4 自动证据可用，真实 provider 的 RV-1 对话/preview 尚未完成。
+- Review: executor 侧实现与针对性负控/绿测已记录在证据包；RV-1 保持 INCONCLUSIVE，独立 verifier 和 runner gate 未完成。
+
+### 2026-10-10 · 修复空参数裸 kc 的 no-TTY 退出语义并校正证据链
+- Type: behavior / test / evidence / doc
+- Before: 实际 `uv run kc` 无参数管道运行时，Typer/Click 在调用根 callback 前走空参数 help 快捷路径并以 0 退出；带 `--repo` 的 CLI 测试没有覆盖这个入口。rv-2 证据命令还使用 zsh 只读特殊变量 `status`，因此采集命令会在检查退出码时失败。
+- After: CLI composition root 对空 argv 显式分流：TTY 进入配置 native session 并原样返回 provider exit code；no-TTY 仍渲染真实 root help 并返回 1。新增真实安装 `kc` console-script no-TTY 回归与空 argv TTY dispatch 测试；负控把 no-TTY 返回值改为 0 后真实入口断言变红，恢复后 rv-2 9 项路由测试通过。manifest 改用普通变量 `result_code`；RV-1 使用最终裸入口重试，宿主仍在 Codex 首次输入前拒绝 `Operation not permitted`。
+- Reason: 真实 CLI 探针发现 §2/FR-8 承诺的 no-TTY 非零退出状态并未被裸命令满足；runner 交付检查另发现 Change Log entry 5 非结构化，复核时同时修正可复现证据命令。
+- Impact: 修复公开 CLI 的无参入口兼容行为并补上失败可区分的真实入口断言；不放宽 TTY、权限或预览验收。RV-1 对话/preview/截图继续未完成，Human-Confirmed 保持未勾选，PRD 不归档。
+- Review: rv-2 负控显示真实 console-script 返回 0 时测试失败，修复后返回 1 且 targeted tests 9 passed；rv-1 自动测试 22 passed，provider 现场仍 INCONCLUSIVE。PRD Machine Contract Change Log 六字段已结构化；独立 verifier / archive 留给 runner。
+
+
+### 2026-10-10 · 保留空参数 shell completion 路由并更新验收对账
+- Type: behavior / test / evidence / acceptance
+- Before: 裸 `kc` 空 argv 分流能保留 TTY/no-TTY 语义，但也拦截带 `_IAR_COMPLETE` 的兼容 shell completion 请求，导致 `iar` 与 `kedacode` 的两个补全协议用例退出异常。Acceptance Status banner 仍是“未开工”，与 §9 中未勾选的 Human-Confirmed 项不一致；部分可复核的 rv-2/3/4 行为证据尚未投影到 executor-owned checklist。
+- After: 有 completion 环境变量时空 argv 继续经 Typer completion 分支，并保留 shell completion 的 `SystemExit` 到现有 exit-code 翻译；新增检查后，shell completion 和裸入口测试 5 passed。按 raw RV-1 至 RV-4 证据勾选已实际验证的架构、配置、fail-fast、路由、监督及文档项；真实 provider 多轮对话/preview、全量/定向测试（受宿主权限限制）、reuse lint 和独立 verifier 保持未完成。Banner 改为 `🧍 **验收状态**：待人工验收`，与仍打开的 Human-Confirmed 组一致。
+- Reason: PRD 中的兼容协议必须完整保留；验收状态 banner 必须投影真实 checklist 状态，且只可勾选有本轮证据支持的行为。
+- Impact: 只恢复旧 shell completion 空 argv 路由，不更改 TTY session 与 no-TTY 非零帮助语义；如实区分已完成的自动 oracle、宿主环境阻断和人工/provider 交互未完成项。PRD 仍留在 pending，runner-owned verifier/archive 不被预先声明通过。
+- Review: 裸入口/补全 focused cases 5 passed；完整定向集 `301 passed, 4 failed`，四项均被宿主锁目录写入权限拒绝；`just test all` 为 `3882 passed, 1 skipped, 14 failed`，另 10 项为宿主进程扫描 fail-closed。`just lint --full` 与 mkdocs strict 通过；`just lint --reuse` 两个重复块未解决；`check_test_flag.sh` 指出最近成功测试标记已过期，本轮全量测试失败因此没有伪造更新；RV-1 provider 对话仍 INCONCLUSIVE。PRD checker `--all` 和 evidence manifest 校验通过；`--check-provided --archive-ready` 明确列出 9 个仍未解决的 executor-owned 项，本 PRD 保持 pending。
+
+
+### 2026-10-10 · 将 shell completion 纳入 rv-2 可复现证据
+- Type: evidence / test / doc
+- Before: rv-2 manifest 命令覆盖真实 no-TTY、Typer/parser/schema 与旧 REPL，但没有在同一 item 的 raw 输出里运行 `iar` / `kedacode` 空参数 completion 协议；报告与 checklist 已提及 completion。
+- After: 扩展 rv-2 的 pytest 选择并重采 `rv-2-cli-routing.txt`；命令实际执行两个 completion 前缀，CLI/parser/schema/TTY 路由断言 11 passed，旧 REPL 会话 18 passed。
+- Reason: 让每条验收描述都有 item-local、可复现且可机器断言的原始证据，避免引用另一份 focused-suite 临时日志。
+- Impact: 只扩充 rv-2 证据命令和输出摘要，不改产品行为或 Acceptance oracle；evidence manifest 仍按原 RV-2 分组，文件保持仅含该 item 内容。
+- Review: 重跑 manifest 中完整 rv-2 command，exit 0；`rv-2-cli-routing.txt` 明确记录 `11 passed` 和 `18 passed`，负控输出仍绑定单独的 `rv-2-negative-control.txt`。
+
+### 2026-10-10 · 补齐监督复用证据与人审呈递记录
+- Type: evidence / acceptance / doc
+- Before: Architecture Acceptance 中“复用 invocation trace、claim、recovery 和验证事实”没有独立的 migration/persistence、依赖方向和仓库搜索证据；人审横幅已按 §9 Human-Confirmed 状态投影，但没有集中审查清单。
+- After: 新增 `rv-3-architecture-reuse.txt` 与可复现脚本，确认无 migration/persistence 改动、依赖方向合法、监督继续使用现有调用账本和恢复/验证门禁，并用合成 migration 证明 absence 检查会变红；据此勾选对应架构项。新增 Markdown/HTML 人审清单，明确 provider TTY 阻断和缺失的 preview 对话证据。
+- Reason: 只在有可复核证据时解决清单项，并让人工决定集中呈递而不把设计图误作运行截图。
+- Impact: 仅解决 §9 Architecture Acceptance 的持久化/复用项；RV-1、定向/full 测试、reuse lint、独立 verifier 与其他 executor-owned 项保持开放，Human-Confirmed 三项均未勾选，PRD 不归档。
+- Review: RV-3 架构脚本 exit 0，合成 migration 负控被捕获、架构检查扫描 348 个文件且无违规。人工清单因本轮没有可用 CUA 浏览器、Chrome 使用被安全策略拒绝，尚未通过真实浏览器 QC；定向集 `301 passed, 4 failed` 的四个失败均为宿主拒绝写入 daemon lock。
+
+### 2026-10-10 · 刷新最终验证并补进程身份负控
+- Type: security / test / evidence / acceptance
+- Before: RV-3/4 原始证据缺少 PID/PGID 对应的进程创建时刻复核负控，摘要仍记录 62 个监督测试与 17 个 preview 测试；Validation Acceptance 也保留早期宿主权限失败结果。
+- After: attempt 与 preview 所有权检查加入实时进程创建时刻复核；新增两个负控，分别证明诊断后 attempt identity 改变仍取消、preview PID/PGID 被复用仍 stop 会使断言变红。修复后 RV-3 为 63 passed，RV-4 为 20 preview、22 session、10 配置/监督测试通过。按最终工作树结果更新 manifest、证据报告、验证计划与 verifier handoff；勾选已经实际执行并通过的定向集、全量集、lint/reuse、MkDocs 与 PRD checker 项。
+- Reason: stale PID/PGID 可能被操作系统复用于不同进程；必须在发信号和预览 stop 前核对创建身份，并让证据区分旧 PID/PGID 与当前进程归属。
+- Impact: 安全检查更严格；未改变停滞分类、恢复预算、人工边界或真实 TTY/preview 验收 oracle。最终定向集 `309 passed`，`just test all` 为 `3901 passed, 1 skipped`；全量 lint、reuse lint、MkDocs strict 与 PRD checker `--all` 通过。RV-1 真实 provider 对话/preview 仍未完成，Human-Confirmed 项未勾选，独立 verifier 仍是 runner-owned gate，PRD 不归档。
+- Review: 负控先显示取消/stop 错误发生，再由 `RESTORED_OK` 确认恢复；修复后的 RV-3/RV-4 测试与最终验证门禁通过。证据详见 `rv-3-stall-supervision.txt`、`rv-3-architecture-reuse.txt`、`rv-4-config-supervision.txt` 和本目录的 `evidence.json`。Final Reconciliation 和 banner 与 §9 当前状态一致；`--check-provided --archive-ready` 仍会因未完成的真实 RV-1 与验证/review gate 项失败。
+
+
+### 2026-10-10 · 补齐停滞恢复与既有发布门禁的执行循环证据
+- Type: test / evidence / acceptance / doc
+- Before: RV-3 已覆盖真实子进程组的停滞判断与精确取消，但没有从执行循环实际取消异常开始、验证它复用原 recovery budget 并到达原验证/RV/verifier 门的负控证据；Final Reconciliation 与报告仍把恢复验证/review gate 记为未解决，全量测试计数为 3901。
+- After: 新增 `tests/test_agent_runner_stall_recovery.py`，在 `run_agent_execution_loop` 实际状态机中注入停滞取消，断言诊断进入 recovery prompt、budget 为单轮、验证/证据门/commit/RV 复跑/verifier 顺序；失败验证不会成功。新增 `stall_recovery_catch` 负控，移除捕获后测试在 recovery 前变红；修复后 recovery/review/verifier 定向集 5 passed，全量集 `3903 passed, 1 skipped`。报告、验证计划、handoff、manifest 与 checklist 计数/状态已对齐。第五次真实 TTY 复核仍在输入前受宿主 `Operation not permitted` 阻止，未产生对话 preview 或截图，RV-1 保持开放。
+- Reason: 恢复路径的架构存在不足以证明故障恢复、预算与发布 gate 实际连接；Delivery check 要求本轮提供缺失的行为 oracle。
+- Impact: 仅增加受控执行循环集成测试与 recovery-gate 证据、更新证据及 PRD 执行侧状态；没有更改用户验收 oracle、门禁、Human-Confirmed 项、RV-1 状态或归档状态。真实 TTY/preview executor-owned 检查仍未解决。
+- Review: `stall_recovery_catch` 负控显示 `AgentStallCancelledError` 未捕获时首轮测试失败并输出 `RESTORED_OK`；修复后 5 项 recovery/review/verifier 测试通过，最终全量 `just test all` 为 `3903 passed, 1 skipped`。后续仍需严格 lint/MkDocs/PRD/evidence 校验以及 runner 独立 verifier。
+
+
+### 2026-10-10 · 明确机器可识别的无前端影响声明
+- Type: documentation / evidence
+- Before: §7.8 已用中文说明无前端影响，但证据包检查器只识别 `No frontend impact`，随后把范围说明里对 `frontend-public/` 与 `frontend-admin/` 的非目标引用误判为前端实现。
+- After: §7.8 将原声明补成 `No frontend impact / 前端影响：无。`；实际改动仍不触及两个前端目录。
+- Reason: 让证据门禁按实际改动路径识别后端-only 交付，并避免为未修改的 UI 虚构截图。
+- Impact: 仅消除机器解析歧义；没有更改功能范围、用户可见行为或真实 TTY/preview 验收标准。
+- Review: `check_prd_evidence.sh` 已识别无前端改动并返回 exit 0；manifest 检查确认 4 个 RV 分组、8 个纯文件名证据文件均存在。本次声明只影响机器范围识别；完整测试与 lint/build 将在此 PRD 最终文本上重跑。
