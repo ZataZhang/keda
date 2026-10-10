@@ -388,6 +388,155 @@ def test_stats_history_empty(console_environment) -> None:
     assert response.json()["trend"] == []
 
 
+def test_agent_performance_stats_reads_fresh_sqlite_rows_through_api(console_environment) -> None:
+    """真实路由按仓库和时间窗口汇总持久化 attempt 与 run。"""
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+
+    database_path = console_environment["tmp_path"] / "console.db"
+    current_time = datetime.now(timezone.utc).replace(microsecond=0)
+    recent_timestamp = (current_time - timedelta(days=2)).isoformat()
+    older_timestamp = (current_time - timedelta(days=40)).isoformat()
+    run_samples = (
+        ("keda-main", "completed", 40, recent_timestamp),
+        ("keda-main", "completed", 60, recent_timestamp),
+        ("keda-main", "failed", 20, recent_timestamp),
+        ("keda-main", "blocked", 30, recent_timestamp),
+        ("keda-main", "completed", 900, older_timestamp),
+        ("other-repo", "completed", 50, recent_timestamp),
+    )
+    attempt_samples = (
+        ("keda-main", "codex", "success", 10, "removed-preset", "model-a", recent_timestamp),
+        (
+            "keda-main",
+            "codex",
+            "verification_failed",
+            30,
+            "removed-preset",
+            "model-a",
+            recent_timestamp,
+        ),
+        ("keda-main", "codex", "success", 50, "removed-preset", "model-b", recent_timestamp),
+        ("keda-main", "", "future_failure_type", 20, None, None, recent_timestamp),
+        ("other-repo", "codex", "success", 100, "removed-preset", "model-a", recent_timestamp),
+        ("keda-main", "codex", "success", 5000, "removed-preset", "model-a", older_timestamp),
+    )
+    with sqlite3.connect(database_path) as connection:
+        connection.executemany(
+            "INSERT INTO run_records "
+            "(repo_id, repo_path, issue_number, trigger, agent, outcome, error_summary, "
+            "started_at, finished_at, duration_seconds) "
+            "VALUES (?, '/tmp/repo', 1, 'test', 'codex', ?, NULL, ?, ?, ?)",
+            [
+                (repo_id, outcome, started_at, started_at, duration_seconds)
+                for repo_id, outcome, duration_seconds, started_at in run_samples
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO attempt_records "
+            "(repo_id, issue_number, agent, attempt_number, failure_type, recovered, detail, "
+            "started_at, finished_at, duration_seconds, preset, model) "
+            "VALUES (?, 1, ?, 1, ?, 0, 'fixture detail', ?, ?, ?, ?, ?)",
+            [
+                (
+                    repo_id,
+                    agent,
+                    failure_type,
+                    started_at,
+                    started_at,
+                    duration_seconds,
+                    preset,
+                    model,
+                )
+                for repo_id, agent, failure_type, duration_seconds, preset, model, started_at in attempt_samples
+            ],
+        )
+        connection.commit()
+
+    # 由独立 SQLite connection fresh-read 原始样本，核对窗口内关键值。
+    with sqlite3.connect(database_path) as connection:
+        persisted_attempts = connection.execute(
+            "SELECT agent, failure_type, duration_seconds, preset, model "
+            "FROM attempt_records WHERE repo_id = 'keda-main' AND started_at >= ? "
+            "ORDER BY id",
+            ((current_time - timedelta(days=30)).isoformat(),),
+        ).fetchall()
+        persisted_runs = connection.execute(
+            "SELECT outcome, duration_seconds FROM run_records "
+            "WHERE repo_id = 'keda-main' AND started_at >= ? ORDER BY id",
+            ((current_time - timedelta(days=30)).isoformat(),),
+        ).fetchall()
+
+    assert len(persisted_attempts) == 4
+    assert sorted(row[2] for row in persisted_attempts if row[0] == "codex") == [10, 30, 50]
+    assert {row[3:5] for row in persisted_attempts if row[3]} == {
+        ("removed-preset", "model-a"),
+        ("removed-preset", "model-b"),
+    }
+    assert len(persisted_runs) == 4
+
+    response = client.get(
+        "/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda-main&days=30"
+    )
+    assert response.status_code == 200, response.text
+    stats = response.json()
+    assert stats["repo_id"] == "keda-main"
+    assert stats["window_days"] == 30
+    codex_group = next(group for group in stats["agents"] if group["agent"] == "codex")
+    assert codex_group["attempt_count"] == len(
+        [row for row in persisted_attempts if row[0] == "codex"]
+    )
+    assert codex_group["success_count"] == 2
+    assert codex_group["non_success_count"] == 1
+    assert codex_group["success_rate"] == 2 / 3
+    assert codex_group["non_success_rate"] == 1 / 3
+    assert codex_group["p50_duration_seconds"] == 30
+    assert codex_group["p90_duration_seconds"] == 46
+    assert codex_group["failure_types"] == [{"failure_type": "verification_failed", "count": 1}]
+    assert stats["unbound_preset_attempt_count"] == 1
+    assert len(stats["presets"]) == 2
+    assert {group["model"] for group in stats["presets"]} == {"model-a", "model-b"}
+    assert all(group["repo_id"] == "keda-main" for group in stats["presets"])
+    assert {group["outcome"] for group in stats["runs"]} == {"completed", "failed", "blocked"}
+    assert sum(group["run_count"] for group in stats["runs"]) == len(persisted_runs)
+    assert {
+        group["outcome"]: (
+            group["run_count"],
+            group["p50_duration_seconds"],
+            group["p90_duration_seconds"],
+        )
+        for group in stats["runs"]
+    } == {
+        "completed": (2, 50, 58),
+        "failed": (1, 20, 20),
+        "blocked": (1, 30, 30),
+    }
+
+    all_repositories = client.get("/api/v1/agent-runner/console/stats/agent-performance?days=30")
+    assert all_repositories.status_code == 200, all_repositories.text
+    all_stats = all_repositories.json()
+    assert all_stats["repo_id"] is None
+    same_named_presets = [
+        group for group in all_stats["presets"] if group["preset"] == "removed-preset"
+    ]
+    assert {group["repo_id"] for group in same_named_presets} == {"keda-main", "other-repo"}
+    assert {group["repo_id"] for group in all_stats["runs"]} == {"keda-main", "other-repo"}
+    assert all("agent" not in group for group in all_stats["runs"])
+
+    short_window = client.get(
+        "/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda-main&days=1"
+    )
+    assert short_window.status_code == 200, short_window.text
+    assert short_window.json()["agents"] == []
+    assert short_window.json()["runs"] == []
+
+
+def test_agent_performance_stats_rejects_invalid_days(console_environment) -> None:
+    """API 校验统计窗口天数范围。"""
+    response = client.get("/api/v1/agent-runner/console/stats/agent-performance?days=0")
+    assert response.status_code == 422
+
+
 def test_audit_endpoint_lists_actions(console_environment) -> None:
     """Audit endpoint should expose process start/stop entries."""
     start = client.post(

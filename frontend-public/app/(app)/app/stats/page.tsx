@@ -8,18 +8,21 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AgentPerformanceSection } from "@/components/stats/agent-performance-section";
 import {
   formatLifecycleDuration,
   PHASE_LABELS,
 } from "@/components/backlog/prd-lifecycle-view";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
+  fetchAgentPerformanceStats,
   fetchCompletionStats,
   fetchPrdLifecycleStats,
   fetchRecentRuns,
   fetchRunHistoryTrend,
 } from "@/lib/api/console";
 import type {
+  AgentPerformanceStats,
   DailyRunTrendEntry,
   PrdLifecycleStats,
   PrdTokenUsageEntry,
@@ -36,6 +39,9 @@ export default function StatsPage() {
   const [trend, setTrend] = useState<DailyRunTrendEntry[]>([]);
   const [recentRuns, setRecentRuns] = useState<RunRecordEntry[]>([]);
   const [lifecycleStats, setLifecycleStats] = useState<PrdLifecycleStats | null>(null);
+  const [agentPerformanceStats, setAgentPerformanceStats] =
+    useState<AgentPerformanceStats | null>(null);
+  const [agentPerformanceError, setAgentPerformanceError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCompletionStats()
@@ -59,6 +65,29 @@ export default function StatsPage() {
     fetchRecentRuns({ repoId: trendRepoId || undefined, limit: 30 })
       .then(setRecentRuns)
       .catch(() => setRecentRuns([]));
+  }, [trendRepoId, trendDays]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    setAgentPerformanceStats(null);
+    setAgentPerformanceError(null);
+    fetchAgentPerformanceStats({ repoId: trendRepoId || undefined, days: trendDays })
+      .then((stats) => {
+        if (!isCancelled) {
+          setAgentPerformanceStats(stats);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCancelled) {
+          return;
+        }
+        setAgentPerformanceError(
+          error instanceof Error ? error.message : "无法读取 Agent 执行表现。",
+        );
+      });
+    return () => {
+      isCancelled = true;
+    };
   }, [trendRepoId, trendDays]);
 
   useEffect(() => {
@@ -292,6 +321,11 @@ export default function StatsPage() {
           )}
         </CardContent>
       </Card>
+
+      <AgentPerformanceSection
+        stats={agentPerformanceStats}
+        error={agentPerformanceError}
+      />
 
       <Card data-testid="stats-prd-lifecycle">
         <CardHeader>

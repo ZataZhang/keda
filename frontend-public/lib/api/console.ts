@@ -8,6 +8,7 @@
 import { del, get, patch, post, put } from "./client";
 import type {
   AuditEntry,
+  AgentPerformanceStats,
   BatchAddRepositoriesResult,
   ConsoleActionResult,
   ConsoleContext,
@@ -251,6 +252,27 @@ export async function fetchRunHistoryTrend(params: {
     `${BASE_PATH}/console/stats/history?${searchParams.toString()}`,
   );
   return response.trend;
+}
+
+/**
+ * 读取按 Agent / preset attempt 和最终任务结果汇总的执行表现。
+ *
+ * @param params.repoId - 仓库标识；省略表示全部仓库。
+ * @param params.days - 统计窗口天数，默认 30。
+ * @returns 后端已聚合的执行表现数据。
+ */
+export async function fetchAgentPerformanceStats(params: {
+  repoId?: string;
+  days?: number;
+}): Promise<AgentPerformanceStats> {
+  const searchParams = new URLSearchParams();
+  if (params.repoId) {
+    searchParams.set("repo_id", params.repoId);
+  }
+  searchParams.set("days", String(params.days ?? 30));
+  return get<AgentPerformanceStats>(
+    `${BASE_PATH}/console/stats/agent-performance?${searchParams.toString()}`,
+  );
 }
 
 /**
