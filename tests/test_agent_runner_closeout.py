@@ -316,6 +316,7 @@ def test_closeout_layer_is_skipped_when_disabled(
     assert len(fake_runner.agent_prompts) == 1
     assert "Closeout Agent disabled for Issue #7" in caplog.text
     assert len(error_info.value.attempt_results) == 1
+    assert error_info.value.attempt_results[0].failure_phase == "prd_delivery"
     assert not any(
         attempt.failure_type == FailureType.DELIVERY_CLOSEOUT
         for attempt in error_info.value.attempt_results

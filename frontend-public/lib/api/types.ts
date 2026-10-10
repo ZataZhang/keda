@@ -253,6 +253,8 @@ export type RunRecordEntry = {
   repo_id: string;
   repo_path: string;
   issue_number: number;
+  issue_title: string | null;
+  issue_url: string | null;
   trigger: string;
   agent: string;
   outcome: "completed" | "failed" | "blocked";
@@ -260,6 +262,39 @@ export type RunRecordEntry = {
   started_at: string;
   finished_at: string;
   duration_seconds: number;
+};
+
+export type RunAttemptDetailEntry = {
+  attempt_number: number;
+  failure_type: string;
+  recovered: boolean;
+  detail: string;
+  agent: string;
+  started_at: string;
+  finished_at: string;
+  duration_seconds: number;
+  failure_phase: string | null;
+  preset: string;
+  model: string;
+  phase_durations: Array<{
+    name: string;
+    seconds: number;
+  }>;
+};
+
+export type RunInvocationDetailEntry = {
+  invocation_id: string;
+  phase: string;
+  role: string;
+  executor: string;
+  retry_of: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  outcome: string;
+  requested_model: string | null;
+  reported_model: string | null;
+  model_source: string | null;
 };
 
 export type AuditEntry = {

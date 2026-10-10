@@ -168,6 +168,8 @@ def _make_run_record(
     outcome: str = "completed",
     repo_id: str = "keda-main",
     started_at: str = "2026-06-11T10:00:00+00:00",
+    issue_title: str | None = None,
+    issue_url: str | None = None,
 ) -> RunRecord:
     return RunRecord(
         repo_id=repo_id,
@@ -180,13 +182,21 @@ def _make_run_record(
         started_at=started_at,
         finished_at="2026-06-11T10:05:00+00:00",
         duration_seconds=300.0,
+        issue_title=issue_title,
+        issue_url=issue_url,
     )
 
 
 def test_append_and_list_runs(tmp_path: Path) -> None:
     """Run records should round-trip through the SQLite store."""
     store = SqliteConsoleStore(tmp_path / "console.db")
-    store.append_run(_make_run_record(issue_number=1))
+    store.append_run(
+        _make_run_record(
+            issue_number=1,
+            issue_title="Show task names in recent run history",
+            issue_url="https://github.com/example/keda/issues/1",
+        )
+    )
     store.append_run(_make_run_record(issue_number=2, outcome="failed"))
 
     recent_runs = store.list_recent_runs(limit=10)
@@ -196,6 +206,52 @@ def test_append_and_list_runs(tmp_path: Path) -> None:
     assert recent_runs[0].outcome == "failed"
     assert recent_runs[0].error_summary == "boom"
     assert recent_runs[1].outcome == "completed"
+    assert recent_runs[1].issue_title == "Show task names in recent run history"
+    assert recent_runs[1].issue_url == "https://github.com/example/keda/issues/1"
+
+
+def test_v12_run_records_migrate_with_empty_issue_metadata(tmp_path: Path) -> None:
+    """v12 运行记录升级后保留原数据，新增任务标题与 URL 为空。"""
+    db_path = tmp_path / "console.db"
+    legacy_connection = sqlite3.connect(str(db_path))
+    try:
+        legacy_connection.executescript(_V3_CREATE_RUN_RECORDS)
+        legacy_connection.execute(
+            "INSERT INTO run_records "
+            "(repo_id, repo_path, issue_number, trigger, agent, outcome, error_summary, "
+            "started_at, finished_at, duration_seconds) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "keda-main",
+                "/tmp/repo",
+                264,
+                "cli_run",
+                "codex",
+                "failed",
+                "push rejected",
+                "2026-10-10T10:13:03+00:00",
+                "2026-10-10T10:55:41+00:00",
+                2560.0,
+            ),
+        )
+        legacy_connection.execute("PRAGMA user_version = 12")
+        legacy_connection.commit()
+    finally:
+        legacy_connection.close()
+
+    migrated_store = SqliteConsoleStore(db_path)
+    migrated_run = migrated_store.list_recent_runs()[0]
+    migrated_connection = _fresh_connection(db_path)
+    try:
+        migrated_version = migrated_connection.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        migrated_connection.close()
+
+    assert migrated_version == _SCHEMA_VERSION
+    assert migrated_run.issue_number == 264
+    assert migrated_run.outcome == "failed"
+    assert migrated_run.issue_title is None
+    assert migrated_run.issue_url is None
 
 
 def _make_attempt_record(
@@ -787,7 +843,7 @@ def test_backlog_migration_creates_missing_legacy_tables(tmp_path: Path) -> None
 
 
 def test_attempt_preset_and_model_roundtrip(tmp_path: Path) -> None:
-    """绑定生效的 attempt 写入 preset / model；未绑定写入 None（零回归）。"""
+    """attempt 的预设、模型、失败阶段与生命周期耗时都能往返保存。"""
     db_path = tmp_path / "console.db"
     store = SqliteConsoleStore(db_path)
 
@@ -805,6 +861,8 @@ def test_attempt_preset_and_model_roundtrip(tmp_path: Path) -> None:
             duration_seconds=120.0,
             preset="plan",
             model="glm-5.3-flash",
+            failure_phase="prd_delivery",
+            phase_durations=(("agent", 90.0), ("prd_delivery", 4.5)),
         )
     )
     store.append_attempt(
@@ -826,8 +884,32 @@ def test_attempt_preset_and_model_roundtrip(tmp_path: Path) -> None:
     by_detail = {attempt.detail: attempt for attempt in attempts}
     assert by_detail["bound"].preset == "plan"
     assert by_detail["bound"].model == "glm-5.3-flash"
+    assert by_detail["bound"].failure_phase == "prd_delivery"
+    assert by_detail["bound"].phase_durations == (("agent", 90.0), ("prd_delivery", 4.5))
     assert by_detail["unbound"].preset is None
     assert by_detail["unbound"].model is None
+    assert by_detail["unbound"].failure_phase is None
+
+
+def test_v10_database_migrates_attempt_failure_phase(tmp_path: Path) -> None:
+    """v10 旧库自动补失败阶段和生命周期耗时列，不推测历史阶段数据。"""
+    db_path = tmp_path / "console.db"
+    store = SqliteConsoleStore(db_path)
+    store.append_attempt(_make_attempt_record())
+
+    raw = sqlite3.connect(str(db_path))
+    raw.execute("ALTER TABLE attempt_records DROP COLUMN failure_phase")
+    raw.execute("ALTER TABLE attempt_records DROP COLUMN phase_durations_json")
+    raw.execute("PRAGMA user_version = 10")
+    raw.commit()
+    raw.close()
+
+    migrated = SqliteConsoleStore(db_path)
+    attempts = migrated.list_issue_attempts(repo_id="keda-main", issue_number=99)
+
+    assert len(attempts) == 1
+    assert attempts[0].failure_phase is None
+    assert attempts[0].phase_durations == ()
 
 
 # --- Agent 调用观测事件账本（Issue #242 / schema v9）-------------------------

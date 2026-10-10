@@ -379,6 +379,10 @@ def _persist_attempt_result(
                     duration_seconds=result.duration_seconds,
                     preset=result.preset or None,
                     model=result.model or None,
+                    failure_phase=result.failure_phase,
+                    phase_durations=tuple(
+                        (phase.name, phase.seconds) for phase in result.phase_durations
+                    ),
                 )
             )
         except Exception:  # noqa: BLE001 - side-channel must not break runs

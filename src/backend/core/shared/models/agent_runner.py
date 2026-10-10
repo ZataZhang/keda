@@ -325,6 +325,7 @@ class AttemptResult:
             未产出可用 usage 时为 ``None``。
         preset: 绑定生效时实际使用的预设名（空串 = 未绑定或绑定被丢弃）。
         model: 绑定生效时实际注入的模型 id（空串 = 未注入）。
+        failure_phase: 失败发生的生命周期阶段；成功或旧记录可为空。
     """
 
     attempt_number: int
@@ -341,6 +342,7 @@ class AttemptResult:
     preset: str = ""
     #: 绑定生效时实际注入的模型 id（空串 = 未注入）。
     model: str = ""
+    failure_phase: str | None = None
 
 
 @dataclass(frozen=True)

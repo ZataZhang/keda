@@ -787,6 +787,9 @@ class InvocationTimelineRow:
         duration_seconds: 墙钟耗时；未闭合/中断时为 ``None``。
         outcome: 终态；只有开始事件时按 ``process_confirmed_exited`` 取
             :data:`OUTCOME_INCOMPLETE` 或 :data:`OUTCOME_UNCLOSED`。
+        requested_model: 该调用实际下发的模型 id；未下发时为 ``None``。
+        reported_model: 执行器自报的实际模型 id；未报告时为 ``None``。
+        model_source: 实际模型信息来源；没有自报时为 ``None``。
     """
 
     invocation_id: str
@@ -798,6 +801,9 @@ class InvocationTimelineRow:
     finished_at: str | None
     duration_seconds: float | None
     outcome: str
+    requested_model: str | None = None
+    reported_model: str | None = None
+    model_source: str | None = None
 
 
 def build_invocation_timeline(
@@ -853,6 +859,21 @@ def build_invocation_timeline(
                 finished_at=finished_at,
                 duration_seconds=duration_seconds,
                 outcome=outcome,
+                requested_model=(
+                    start_detail.get("requested_model")
+                    if isinstance(start_detail.get("requested_model"), str)
+                    else None
+                ),
+                reported_model=(
+                    finish_detail.get("reported_model")
+                    if isinstance(finish_detail.get("reported_model"), str)
+                    else None
+                ),
+                model_source=(
+                    finish_detail.get("model_source")
+                    if isinstance(finish_detail.get("model_source"), str)
+                    else None
+                ),
             )
         )
     # rows 已按 starts 的首次出现顺序构建（dict 保持插入序），即事件流里的

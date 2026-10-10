@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -9,7 +10,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.api.routes.agent_runner_console as console_routes
+import backend.api.routes.agent_runner_console_runs as console_run_routes
 from backend.api.app import app
+from backend.core.shared.interfaces.runner_console import (
+    AttemptRecord,
+    InvocationEventRecord,
+)
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     RepositoryRunContext,
@@ -60,6 +66,7 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fake_runner_command = [sys.executable, "-u", "-c", "print('fake runner')"]
 
     monkeypatch.setattr(console_routes, "create_console_store", lambda: store)
+    monkeypatch.setattr(console_run_routes, "create_console_store", lambda: store)
     monkeypatch.setattr(console_routes, "create_process_supervisor", lambda: supervisor)
     monkeypatch.setattr(
         console_routes,
@@ -106,6 +113,143 @@ def test_process_lifecycle_via_api(console_environment) -> None:
     stop_response = client.post(f"/api/v1/agent-runner/console/processes/{process_id}/stop")
     assert stop_response.status_code == 200
     assert stop_response.json()["status"] in ("stopped", "exited", "killed")
+
+
+def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> None:
+    """按运行时间窗口读取同一 Issue 的尝试详情，不混入其他运行。"""
+    store = console_environment["store"]
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda-main",
+            issue_number=263,
+            agent="qoder",
+            attempt_number=1,
+            failure_type="agent_error",
+            recovered=False,
+            detail=(
+                "Agent command failed before runner verification could start.\n"
+                "Exception type: BrokenPipeError\n"
+                "[Errno 32] Broken pipe"
+            ),
+            started_at="2026-10-10T04:51:59+00:00",
+            finished_at="2026-10-10T04:52:09+00:00",
+            duration_seconds=10,
+            preset="fast-qoder",
+            model="claude-sonnet-4-5",
+            phase_durations=(("agent", 9.2), ("verification", 0.5)),
+        )
+    )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="keda-main#issue-263#20261010T045124Z-test",
+            event_key="inv-run-details:invocation_started",
+            event_type="invocation_started",
+            invocation_id="inv-run-details",
+            repo_id="keda-main",
+            issue_number=263,
+            phase="implementation",
+            role="implementer",
+            agent="qoder",
+            occurred_at="2026-10-10T04:52:00+00:00",
+            detail_json=json.dumps(
+                {"requested_model": "claude-sonnet-4-5"},
+                ensure_ascii=False,
+            ),
+        )
+    )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="keda-main#issue-263#20261010T045124Z-test",
+            event_key="inv-run-details:invocation_finished",
+            event_type="invocation_finished",
+            invocation_id="inv-run-details",
+            repo_id="keda-main",
+            issue_number=263,
+            phase="implementation",
+            role="implementer",
+            agent="qoder",
+            occurred_at="2026-10-10T04:52:09+00:00",
+            detail_json=json.dumps(
+                {
+                    "requested_model": "claude-sonnet-4-5",
+                    "reported_model": None,
+                    "model_source": "unknown",
+                    "duration_seconds": 9.0,
+                    "outcome": "error",
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda-main",
+            issue_number=263,
+            agent="qoder",
+            attempt_number=2,
+            failure_type="success",
+            recovered=True,
+            detail="recovered in a later run",
+            started_at="2026-10-10T05:12:00+00:00",
+            finished_at="2026-10-10T05:12:05+00:00",
+            duration_seconds=5,
+        )
+    )
+
+    response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 263,
+            "started_at": "2026-10-10T04:51:24+00:00",
+            "finished_at": "2026-10-10T05:11:52+00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    attempts = response.json()["attempts"]
+    assert len(attempts) == 1
+    assert attempts[0]["agent"] == "qoder"
+    assert "BrokenPipeError" in attempts[0]["detail"]
+    assert attempts[0]["failure_phase"] == "agent"
+    assert attempts[0]["preset"] == "fast-qoder"
+    assert attempts[0]["model"] == "claude-sonnet-4-5"
+    assert attempts[0]["phase_durations"] == [
+        {"name": "agent", "seconds": 9.2},
+        {"name": "verification", "seconds": 0.5},
+    ]
+    invocations = response.json()["invocations"]
+    assert len(invocations) == 1
+    assert invocations[0]["phase"] == "implementation"
+    assert invocations[0]["executor"] == "qoder"
+    assert invocations[0]["requested_model"] == "claude-sonnet-4-5"
+    assert invocations[0]["reported_model"] is None
+    assert invocations[0]["duration_seconds"] == 9.0
+
+
+def test_run_attempt_details_reject_invalid_time_window(console_environment) -> None:
+    """拒绝无时区或倒置的运行时间窗口。"""
+    missing_timezone_response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 263,
+            "started_at": "2026-10-10T04:51:24",
+            "finished_at": "2026-10-10T05:11:52+00:00",
+        },
+    )
+    assert missing_timezone_response.status_code == 422
+
+    reversed_window_response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 263,
+            "started_at": "2026-10-10T05:11:52+00:00",
+            "finished_at": "2026-10-10T04:51:24+00:00",
+        },
+    )
+    assert reversed_window_response.status_code == 422
 
 
 def test_duplicate_daemon_rejected_via_api(console_environment) -> None:

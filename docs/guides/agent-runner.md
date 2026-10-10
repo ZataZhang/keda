@@ -3394,7 +3394,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 - 如果验证过程结束后工作区还剩下任何 `git add -A` 仍会 stage 的内容，runner 会在安全路径校验后补一次 `git add -A`，避免 `.last_tested_commit` 指向 working tree 而 commit hook 检查到过期 staged tree。探测口径（`_verification_left_unstaged_worktree_changes`）覆盖两类残留：formatter / lint 自动修复的**已跟踪**文件（`git diff --quiet`），以及门禁自己生成、**未跟踪且未被 gitignore** 的新文件（`git ls-files --others --exclude-standard`，如新增快照或 golden 文件）。第二类曾是 `check-test-flag` 硬失败的盲区：`just test` 写标记用的路径集包含未跟踪未 ignore 的文件，而 commit 钩子比对 staged 树，只补 `git add -u` 时这些新文件永远进不了索引，钩子会给出「请运行 `git add -A` 归一」——恰好是 runner 漏做的那一步。判定与首次入索引的 `git add -A` 同口径，被 gitignore 的构建产物两边都看不见，因此不会被卷进提交
 - Agent CLI 非零退出或任一验证失败时，runner 最多按 `max_recovery_attempts` 重新调用同一个 Agent；每次 recovery 前会等待 `recovery_retry_delay_seconds` 秒，并把失败摘要以及失败命令的 exit code、stdout、stderr 放入 Fix Agent / Recovery Agent prompt；首次实现 prompt 也会预先列出完整的 `verification_commands` 并提醒检查项目规范，让 Agent 在写代码阶段就了解交付门禁。Agent 修复后仍只能写 commit request，不能直接提交
 - Runner 通过 `classify_failure` 对每次尝试进行分层失败识别，覆盖 `UNCOMMITTED_CHANGES`、`NO_COMMITS`、`VERIFICATION_FAILED`、`AGENT_ERROR`、`UNRECOVERABLE` 等类型；不可恢复错误（如安全路径拦截）会立即终止 retry loop
-- 每轮尝试的结果都会记录在 `AttemptResult` 中，包含执行 agent、起止时间、耗时；runner 会实时把结果写入本地 SQLite `attempt_records` 表，再用 `IRunHistoryStore.list_issue_attempts` 读回该 Issue 的完整轨迹（跨 agent、跨 claim）渲染 GitHub Issue 上带 `<!-- iar-attempt-history -->` marker 的增量评论。内存中的 attempt 列表每次换 agent 或重新 claim 都会从 1 重新计数，只能代表本轮，因此不作为渲染源（仅在没有配置 SQLite 存储时兜底）。最终失败评论中的「Attempt History」表格展示 attempt_number、started_at、agent、failure_type、recovered、duration、detail，便于人工 review 时追踪 Agent 的修复轨迹；由于 attempt_number 只在本轮内递增，整表会混排多轮（例如 `claude 1..6` 后紧跟 `kimi 1..2`），因此表格用 **Started (UTC)** 列给出时间锚点（`YYYY-MM-DD HH:MMZ`；缺失渲染为 `-`，无法解析则原样回显），并在表格下方固定附一行说明"编号在每次换 agent 与每次重新 claim 时从 1 重新开始"，避免被误读成编号错乱；Detail 列取每次失败输出的最后一行有效内容（实际报错几乎总在末尾），而不是从头截断的样板文字
+- 每轮尝试的结果都会记录在 `AttemptResult` 中，包含执行 agent、起止时间、耗时与失败生命周期阶段；runner 会实时把结果写入本地 SQLite `attempt_records` 表，再用 `IRunHistoryStore.list_issue_attempts` 读回该 Issue 的完整轨迹（跨 agent、跨 claim）渲染 GitHub Issue 上带 `<!-- iar-attempt-history -->` marker 的增量评论。内存中的 attempt 列表每次换 agent 或重新 claim 都会从 1 重新计数，只能代表本轮，因此不作为渲染源（仅在没有配置 SQLite 存储时兜底）。最终失败评论中的「Attempt History」表格展示 attempt_number、started_at、agent、failure_type、recovered、duration、detail，便于人工 review 时追踪 Agent 的修复轨迹；由于 attempt_number 只在本轮内递增，整表会混排多轮（例如 `claude 1..6` 后紧跟 `kimi 1..2`），因此表格用 **Started (UTC)** 列给出时间锚点（`YYYY-MM-DD HH:MMZ`；缺失渲染为 `-`，无法解析则原样回显），并在表格下方固定附一行说明"编号在每次换 agent 与每次重新 claim 时从 1 重新开始"，避免被误读成编号错乱；Detail 列取每次失败输出的最后一行有效内容（实际报错几乎总在末尾），而不是从头截断的样板文字
 - 失败评论会识别已知错误签名：命中 Claude API 用量限额（429 / usage limit）时，在评论顶部输出加粗的 Root cause 摘要并带上限额重置时间；`CalledProcessError` 的命令回显只保留命令名（如 `claude`），不会把完整 agent prompt 打进评论
 - 如果 Agent 没有产生任何新 commit 且工作区也没有未提交变更，runner 仍会将 Issue 标记为 `agent/failed`
 - Pre-PR reviewer 的修改同样必须通过 `verification_commands` 才能发布
@@ -3873,6 +3873,24 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   写入一条运行记录（outcome：completed / failed / blocked），CLI 直跑
   与面板托管共用 `~/.kedacode/console.db`（`history_db_path` 可配）。
   `GET .../console/stats/history` 返回按天聚合趋势。
+- **最近运行记录**：Stats 页将最近 30 条运行按仓库与 Issue 分组，组按最近一次运行时间排序；
+  分组标题显示任务名，点击任务名会在新标签页打开对应 GitHub Issue；每条运行仍是一次独立 runner 调用。
+  展开分组可查看该 Issue 的运行时间、结果、触发方式、Agent 与耗时，并打开单次 failed / blocked
+  运行的失败详情。运行记录会保存执行时的 Issue 标题和 URL；升级前的历史记录没有这两项快照。
+- **运行详情**：结果、失败阶段与面向人的失败解释优先展示；原始错误日志收在可展开区域。
+  例如 GitHub 因远端分支更新而拒绝推送时，详情会说明这是推送阶段失败，并建议先整合远端提交，
+  并明确区分「Agent 进程正常退出」与「整次运行失败」：前者只描述单次 Agent 调用，后者包含
+  后续推送等交付步骤。Agent 调用时间线按开始时间排列，逐次展示阶段、
+  执行器、调用结果、开始/结束时间与耗时；模型名称会说明是 KC 实际下发还是执行器上报。
+  未保存的模型或生命周期数据会明确标记为未知，不用总耗时推算。重试与阶段统计作为技术明细折叠展示。
+  详情顶部也显示任务标题与 GitHub Issue 链接；没有快照的旧记录会明确显示标题或链接未记录。
+  尝试详情来自同一 SQLite 的 `attempt_records`，调用详情来自 `agent_invocation_events`；两者都按
+  本次运行的仓库、Issue 与起止时间筛选，不会混入同一 Issue 的其他运行。新数据库升级后会为 attempt
+  增加阶段耗时列，v13 为运行记录追加可空的 Issue 标题和 URL，升级前的运行记录保持为空。
+  既有尝试的阶段耗时保持为空。没有 Agent 尝试汇总记录时，仍可单独展示已记录的
+  Agent 进程调用；两种记录的含义和覆盖范围不同。
+  前端通过 `GET .../console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=`
+  读取尝试与调用详情，其中时间参数必须为带时区的 ISO-8601。
 
 SQLite 只是旁路记录，**不参与 workflow 状态机决策**——GitHub
 labels/comments/PR 与本地 worktree 仍是唯一事实来源；落库失败只产生
@@ -3894,9 +3912,11 @@ console SQLite 另加两张**追加式**账本表，把观测单位从"一次调
 
 两张表沿用现有旁路历史端口（`IRunHistoryStore` 族）的 WAL、迁移与
 错误策略，schema 通过 `PRAGMA user_version` 升级，不新增数据库或服务。
-现有 `run_records` / `attempt_records` 保持原 schema，仅按
-`repo_id + issue_number + 时间窗口` 做**展示关联**，不反向伪造
-lifecycle event。
+`run_records` 在 schema v13 追加可空 `issue_title` / `issue_url` 快照，升级前的
+运行记录两项数据为空；`attempt_records` 在 schema v11 附加可空 `failure_phase`
+列记录失败阶段，v12 附加 `phase_durations_json` 记录各生命周期阶段累计耗时；
+升级前的 attempt 两项数据都保持为空。两者仅按
+`repo_id + issue_number + 时间窗口` 做**展示关联**，不反向伪造 lifecycle event。
 
 **耗时口径（core 计算，前端只格式化）**
 
@@ -4022,6 +4042,7 @@ GET    /api/v1/agent-runner/console/stats/overview
 GET    /api/v1/agent-runner/console/stats/history?repo_id=&days=30
 GET    /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=30
 GET    /api/v1/agent-runner/console/runs?repo_id=&limit=100
+GET    /api/v1/agent-runner/console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=
 GET    /api/v1/agent-runner/console/audit?limit=100
 GET    /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
 GET    /api/v1/agent-runner/repositories
