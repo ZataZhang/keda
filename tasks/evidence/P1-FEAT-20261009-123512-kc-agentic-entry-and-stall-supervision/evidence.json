@@ -5,79 +5,80 @@
     {
       "item_number": 1,
       "item_name": "rv-1 真实 TTY 原生入口、operator skill 与按需预览",
-      "command": "现场采集：PYTHONPATH=src python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_native_tty_session.py（在交付树 HEAD 的隔离 clone /private/tmp/issue256-rv1/repo 中，用 tmux 分配的真实 PTY 跑裸 `uv run kc`，由 `script -q` 记录未被 alternate screen 吞掉的原始字节；完成只读 cwd/skill 核对轮、明确预览请求轮、停止轮，再跑 `uv run kc --agent codex` 覆盖入口） && 预览门禁负控：PYTHONPATH=src python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_preview_gate_negative_controls.py（同一真实 CLI 入口，切换 profile/候选数量，逐组探针确认未启动进程） && 自动回归：UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_cli_agent_session_entry.py tests/test_kedacode_operator_skill.py --no-testmon -q --no-header",
+      "command": "UV_CACHE_DIR=/private/tmp/issue256-uv-cache python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_prepare_clone.py && UV_CACHE_DIR=/private/tmp/issue256-uv-cache python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_bare_entry_pty_probe.py && python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_preview_gate_negative_controls.py && python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_preview_lifecycle_probe.py && python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_preview_lifecycle_negative_control.py && UV_CACHE_DIR=/private/tmp/issue256-uv-cache PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast && UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest tests/test_cli_agent_session_entry.py tests/test_kedacode_operator_skill.py --no-testmon -q --no-header",
       "evidence_files": [
         "rv-1-kc-terminal-preview.txt",
         "rv-1-kc-terminal-preview.png",
+        "rv-1-reproducible-oracle.txt",
         "rv-1-preview-gate-negative-control.txt",
         "rv-1-automated-tests.txt",
         "rv-1-kc-native-session.txt"
       ],
-      "output_summary": "真实 TTY 现场采集通过（HEAD 0c18369a / TREE 20fd53f0ae50ab6110a3ab7afd9bb851dee0500f）：裸 `uv run kc` 在 tmux 真实 PTY 上把终端交给 OpenAI Codex CLI v0.162.0 原生 TUI，cwd = 目标仓库；raw log 含交接提示 \"KedaCode hands the terminal over; run `kc preview start` here only when the user asks to preview the project\"。只读轮里 provider 报告 cwd、发现 .codex/skills/kedacode-operator/SKILL.md 并复述\"仅在用户明确要求时启动预览\"约束，此时端口未监听、无 dev server 进程。明确要求预览后 provider 自行调用 `uv run kc preview start`（使用仓库声明的 argv，非 shell 文本），端口 127.0.0.1:31789 开始监听、curl 返回 200、dev server PID 69995/70001，终端回复 loopback URL 且 Chrome 主进程 PID 与 preflight 完全一致（未自动打开浏览器）。同轮 `kc preview stop` 输出 \"Stopped preview process group 69968 (pid 69968): SIGTERM drained the group.\"，随后端口不再监听、curl 000、`kc preview status` 无登记；两次会话退出码均为 0；`uv run kc --agent codex` 覆盖入口同样进入原生 TUI 且未启动项目服务。预览门禁负控四组（0 候选 / 2 候选 / 唯一候选缺 --confirm / --confirm 文本不相等）全部退出 2 并在启动进程前被拒，端口与 dev server 探针始终为空，仓库配置与 package.json 按字节还原（SHA256 前后一致）。自动回归：skill 冲突 fail-fast 负控 EXPECTED_FAIL + RESTORED_OK，native-session 与 packaged-skill/installer 测试合计 47 passed。",
-      "explanation": "rv-1 的每条期望都经过真实链路：shell PTY → kc 裸入口 callback → 仓库配置 → provider 原生 TUI → packaged operator skill 发现 → 对话中的明确预览请求 → kc preview CLI → 精确进程组与 ready 校验 → loopback URL 回到终端。采集脚本只观察与记录，不代替 provider 启动进程；端口/HTTP/dev-server PID/浏览器 PID 是独立探针，不依赖 provider 自述。负控在同一真实 CLI 入口上运行，证明\"未经确认不启动进程\"这条断言确实可变红（去掉门禁时四组会直接起进程并让探针为真）。PNG 是 tmux capture-pane -e 真实终端画面的忠实转译，原始 .ansi/.raw.log 一并提供。",
-      "risks": "前五次在**交付工作树内**运行 provider 的尝试被宿主沙箱以 Operation not permitted 拒绝（rv-1-kc-native-session.txt 保留该历史与取代说明），本次改在交付树同一 HEAD 的隔离 clone 中采集，以避开宿主对该目录的权限限制；被运行的 CLI 代码与工作树一致（脚本同时打印两个 HEAD）。clone 中 `skill_install_check_enabled = false`，因为用户级 ~/.codex/skills 存在旧版 packaged 副本会触发 fail-closed 拒绝（该拒绝路径由自动负控单独证明）；skill 可发现性由 clone 项目级安装副本现场证明。provider 先试 PATH 上旧发行版 `kc`（无 preview 子命令 → 报错、未启动进程），再改用仓库内 `uv run kc`，说明交付树能力尚未安装为全局 kc。终端画面为 ANSI→HTML→无头 Chrome 截图的转译，非浏览器实拍。Human-Confirmed 项保持未勾选，交由人工验收。",
-      "negative_control": "PYTHONPATH=src python3 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/rv1_preview_gate_negative_controls.py：同一仓库、同一真实 `kc preview start` 入口，依次移除 [agent_session.preview]（0 候选）、注入两个 dev 脚本（2 候选）、只留一个脚本（缺 --confirm）、给出与候选不相等的 --confirm 文本；每组都独立探针端口与 dev server 进程。另有自动负控 tasks/evidence/P1-FEAT-20261009-123512-kc-agentic-entry-and-stall-supervision/scripts/issue256_negative_control.py --case skill_conflict_fail_fast（把 preserve-conflict 从 RuntimeError 降级为普通 notice）。",
-      "expected_fail": "四组未确认请求若门禁失效会真的起进程：预期它们全部退出非 0 且探针为空——实测全部 exit 2、CASE_PORT_LISTENING: False、CASE_DEV_SERVER_PIDS: none，最终 NEGATIVE_CONTROL_OK；一旦去掉确认检查，这些探针即变红。自动负控在缺陷形态下 DID NOT RAISE RuntimeError 并输出 EXPECTED_FAIL，源码恢复后对应测试转绿。",
+      "output_summary": "复跑链实测 exit 0、45s（完整 stdout 见 rv-1-reproducible-oracle.txt，采集时绑定 HEAD 95e341a6 / TREE 701b1cc224f79c6f228842428c59335008ee5a44；门禁复跑时 rv1_prepare_clone.py 会把隔离 clone 快进到当时 HEAD 重新绑定）。tmux 真实 PTY 上裸 `uv run kc` 与 `uv run kc --agent codex` 两个入口都打印交接提示 KedaCode hands the terminal over 与 preview 边界提示（PROBE_HANDOFF_NOTICE/PROBE_PREVIEW_BOUNDARY_NOTICE: FOUND），端口与项目进程探针全空（PTY_PROBE_OK）。真实 `kc preview start` 门禁负控四组（0 候选 / 2 候选 / 缺 --confirm / --confirm 不相等）全部 CASE_EXIT_CODE: 2 且 CASE_PORT_LISTENING: False、CASE_DEV_SERVER_PIDS: none（NEGATIVE_CONTROL_OK）。真实 `kc preview start/status/stop` 生命周期：LIFECYCLE_HTTP_AFTER_START: 200 → stop 输出 Stopped preview process group …（SIGTERM drained the group）→ LIFECYCLE_HTTP_AFTER_STOP: 000、注册表清空（PREVIEW_LIFECYCLE_OK）。生命周期负控把 stop 改成只清记录时探针变红（PROBE_EXIT_CODE_UNDER_DEFECT: 1、EXPECTED_FAIL），clone 源码还原 RESTORE_CLONE_SOURCE_OK: True。skill 冲突 fail-fast 负控 EXPECTED_FAIL + RESTORED_OK；自动回归 47 passed。对话级现场（rv-1-kc-terminal-preview.txt/.png，已在同一交付 HEAD 95e341a6 重采）：Codex CLI v0.162.0 原生 TUI 以仓库为 cwd 接管，只读轮报告 cwd 并复述 .codex/skills/kedacode-operator/SKILL.md 的预览约束、端口未监听；明确要求后 provider 自行 `uv run kc preview start`，127.0.0.1:31789 监听、curl 200、dev PID 73320/73327，终端回复该 URL 且 Chrome 主进程 PID 47242 全程不变；`kc preview stop` 精确终止进程组 73296 后端口不再监听；两次会话退出码 0。",
+      "explanation": "rv-1 的证据分两层且互补：(1) 复跑链在每次门禁复跑时都真实走 shell PTY → kc 裸入口 callback → 仓库配置 → provider 原生 TUI 交接 → kc preview CLI → 精确进程组与 ready 校验 → loopback URL；端口/HTTP/进程探针独立判定，不依赖 provider 自述，采集脚本只观察、不代替 provider 启动进程。(2) 对话级 oracle（PRD 规定由人工审阅真实 provider 会话）由交付 HEAD 重采的 rv-1-kc-terminal-preview.txt/.png 承担：provider 自主发现 skill、仅应明确请求启动预览、终端回传 URL、不自动打开浏览器、精确停止进程组。三组负控内置于复跑链本身（预览确认门禁、停止失效注入、skill 冲突降级），各自有独立红灯标记（CASE_*/PROBE_EXIT_CODE_UNDER_DEFECT: 1/EXPECTED_FAIL），因此该项不是纯绿证据。PNG 为 tmux capture-pane -e 真实终端画面的忠实转译，原始 .ansi 帧与 script -q 字节日志保留在证据目录。",
+      "risks": "前五次在交付工作树内运行 provider 的现场采集被宿主沙箱以 Operation not permitted 拒绝（rv-1-kc-native-session.txt 保留该历史与取代说明），对话级采集改在快进到同一交付 HEAD 的隔离 clone 中进行，被运行的 CLI 代码与工作树一致（脚本同时打印两个 HEAD）。clone 内 skill_install_check_enabled = false，因为用户级 ~/.codex/skills 存在旧版 packaged 副本会触发 fail-closed 拒绝（该拒绝路径由链内 skill_conflict_fail_fast 负控单独证明）；skill 可发现性由 clone 项目级安装副本现场证明。provider 先试 PATH 上旧发行 `kc`（无 preview 子命令 → 报错、未启动进程），再改用仓库内 `uv run kc`，说明交付树能力尚未安装为全局 kc。终端画面为 ANSI→HTML→无头 Chrome 转译，非浏览器实拍。现场采集文件记录的 DELIVERED_GIT_TREE（701b1cc2）为采集时交付 HEAD；复跑链由 rv1_prepare_clone.py 在每个当前 HEAD 上重新绑定 clone，因此断言不锁定动态的 tree 哈希或 PID——最终提交的相对差异仅为 PRD/证据文档与本 manifest 自身，不在裸 `kc` 原生入口与 preview 的调用路径上。Human-Confirmed 项保持未勾选，交由人工验收。",
+      "negative_control": "内置于 item 1 command：(a) rv1_preview_gate_negative_controls.py 在同一仓库、同一真实 `kc preview start` 入口依次移除 [agent_session.preview]（0 候选）、注入两个 dev 脚本（2 候选）、只留一个脚本（缺 --confirm）、给出与候选不相等的 --confirm 文本，每组独立探针端口与 dev server 进程；(b) rv1_preview_lifecycle_negative_control.py 把 stop_preview() 改为只清注册记录、不对已确认归属的进程组发信号，要求第 4 步生命周期探针必须变红后还原 clone 源码；(c) issue256_negative_control.py --case skill_conflict_fail_fast 把 preserve-conflict 冲突从 RuntimeError 降级为普通 notice。",
+      "expected_fail": "(a) 确认门禁若失效，未确认请求会真的起进程——实测四组全部 exit 2 且 CASE_PORT_LISTENING: False、CASE_DEV_SERVER_PIDS: none、NEGATIVE_CONTROL_OK，去掉门禁这些探针即变红；(b) 生命周期负控输出 PROBE_EXIT_CODE_UNDER_DEFECT: 1 与 LIFECYCLE_CHECK_FAILED: port 31789 is still listening after preview stop / still answers 200 / preview process group survived the stop，随后 CLEANUP_PORT_FREE: True、EXPECTED_FAIL: 缺陷形态下生命周期探针变红（检查点有效）；(c) skill 冲突负控输出 1 failed、DID NOT RAISE <class 'RuntimeError'>、EXPECTED_FAIL: 缺陷形态下测试变红（检查点有效），源码恢复后同链 pytest 回归 47 passed 转绿。",
       "stdout_assertions": [
         {
-          "pattern": "KC_HANDOFF_NOTICE: FOUND",
-          "must_match": true
+          "pattern": "PREPARE_CLONE_OK"
         },
         {
-          "pattern": "BARE_START_DID_NOT_RUN_PROJECT_SERVER: listening = False",
-          "must_match": true
+          "pattern": "PROBE_HANDOFF_NOTICE[probe-bare]: FOUND"
         },
         {
-          "pattern": "DEV_SERVER_PIDS_AFTER_READ_ONLY_TURN: none",
-          "must_match": true
+          "pattern": "PROBE_PREVIEW_BOUNDARY_NOTICE[probe-bare]: FOUND"
         },
         {
-          "pattern": "PORT_AFTER_EXPLICIT_PREVIEW_REQUEST: listening = True",
-          "must_match": true
+          "pattern": "PROBE_PORT_LISTENING[probe-bare]: False"
         },
         {
-          "pattern": "HTTP_PROBE_OF_REPLIED_URL: 200",
-          "must_match": true
+          "pattern": "PROBE_PROJECT_SERVER_MATCHES[probe-bare]: none"
         },
         {
-          "pattern": "Stopped preview process group 69968",
-          "must_match": true
+          "pattern": "PROBE_HANDOFF_NOTICE[probe-override]: FOUND"
         },
         {
-          "pattern": "PORT_AFTER_PROVIDER_STOP: listening = False",
-          "must_match": true
+          "pattern": "PTY_PROBE_OK: both entries printed the handoff notice without starting any project server"
         },
         {
-          "pattern": "HTTP_REPROBE_AFTER_STOP: 000",
-          "must_match": true
+          "pattern": "CASE_PORT_LISTENING: False"
         },
         {
-          "pattern": "OVERRIDE_START_DID_NOT_RUN_PROJECT_SERVER: listening = False",
-          "must_match": true
+          "pattern": "CASE_DEV_SERVER_PIDS: none"
         },
         {
-          "pattern": "DELIVERED_GIT_TREE: 20fd53f0ae50ab6110a3ab7afd9bb851dee0500f",
-          "must_match": true
+          "pattern": "NEGATIVE_CONTROL_OK: every unconfirmed preview request was refused before any process start"
         },
         {
-          "pattern": "NEGATIVE_CONTROL_OK: every unconfirmed preview request was refused before any process start",
-          "must_match": true
+          "pattern": "LIFECYCLE_HTTP_AFTER_START: 200"
         },
         {
-          "pattern": "CASE_PORT_LISTENING: False",
-          "must_match": true
+          "pattern": "Stopped preview process group"
         },
         {
-          "pattern": "RESTORE_CONFIG_OK: True",
-          "must_match": true
+          "pattern": "LIFECYCLE_HTTP_AFTER_STOP: 000"
         },
         {
-          "pattern": "EXPECTED_FAIL",
-          "must_match": true
+          "pattern": "PREVIEW_LIFECYCLE_OK: the real kc CLI started, reported and stopped a managed loopback preview group without leaving a listener"
         },
         {
-          "pattern": "47 passed",
-          "must_match": true
+          "pattern": "PROBE_EXIT_CODE_UNDER_DEFECT: 1"
+        },
+        {
+          "pattern": "EXPECTED_FAIL: 缺陷形态下生命周期探针变红（检查点有效）"
+        },
+        {
+          "pattern": "EXPECTED_FAIL: 缺陷形态下测试变红（检查点有效）"
+        },
+        {
+          "pattern": "RESTORED_OK: src/backend/engines/agent_runner/interactive_agent_session.py"
+        },
+        {
+          "pattern": "RESTORE_CLONE_SOURCE_OK: True"
+        },
+        {
+          "pattern": "47 passed"
         }
       ]
     },
