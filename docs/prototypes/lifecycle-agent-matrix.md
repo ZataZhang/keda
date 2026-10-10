@@ -189,6 +189,7 @@ PRD 原文 · 覆盖抽屉
 | `docs/prototypes/lifecycle-agent-matrix.html` | Modify | 六列矩阵字号偏小；统一设置内容区未覆盖真实内容区左侧边缘；预设三列挤在一起 | 调整为四列矩阵、较大字号与行距、双列预设卡片，并增加三个区块锚点导航；内容面板对齐真实内容区 | 修正空隙和拥挤字段，提高阅读与跳转效率 |
 | `docs/prototypes/lifecycle-agent-matrix.html` | Modify | 回退候选以执行器去重，无法为同一执行器设置多个模型方案 | 每个候选改为独立的执行器/预设组合；示例展示 Claude 的 `sonnet-5.5 / max` 与 `sonnet-5.5 / high`，预算按候选步数计算 | 让用户可以对同一个执行器配置不同模型预设的顺序重试 |
 | `docs/prototypes/lifecycle-agent-matrix.md` | Modify | 说明仍描述 Settings 独立回退卡片 | 更新为统一设置页，记录执行器回退位置、模型预设操作和全局范围说明 | 评审者能在一页理解并演示完整设置路径 |
+| `docs/prototypes/lifecycle-agent-matrix.md` | Modify | 原型文档无正式页面对照说明 | 新增「与正式页面的关系」节，指向 Issue #262 落地页 `/app/settings/lifecycle/` 与 rv-2 生产验收入口 | 让评审者从设计目标跳到生产验证证据 |
 | `docs/prototypes/assets/prototype-hub.js` | Modify | lifecycle prototype v3.0 登记四列矩阵、区块导航和同页回退流程 | v3.1 增加可重复执行器候选与独立预设绑定说明 | Prototype Hub 是该原型的唯一登记入口 |
 | `docs/prototypes/assets/lifecycle-agent-matrix/preview-settings.png` | Modify | Settings 截图显示独立的回退卡片 | 重截为 Agent 标签和统一设置入口 | 让入口页与新页面边界一致 |
 | `docs/prototypes/assets/lifecycle-agent-matrix/preview-settings.source.md` | Modify | 来源记录包含回退预设绑定 | 更新 capture 说明，只呈现统一设置入口 | 保留当前截图的可复现来源 |

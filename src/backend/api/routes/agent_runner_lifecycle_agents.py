@@ -232,9 +232,11 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
         # 删除预设前先确认不会留下悬空引用：目标层内未被本次解绑触及的既有绑定 / 候选，
         # 以及（全局删除时）仍引用该全局预设、自身却未自带同名覆盖的仓库绑定，都会让读取端
         # 无法解析生效值。此类操作必须失败且不改文件（FR-7），而非写成功后让页面 / CLI 崩。
+        # 反向（仓库删除被全局同名预设托底的覆盖）不算悬空：引用写后仍解析到全局预设。
         deleted_names = {name for name, payload in preset_updates.items() if payload is None}
         repository_configs: dict[str, AppConfig] | None = None
         repository_own_presets: dict[str, dict[str, AgentModelPreset]] | None = None
+        global_presets: dict[str, AgentModelPreset] | None = None
         if deleted_names and request.scope == SCOPE_GLOBAL:
             repository_configs = {
                 context.repo_id: context.config for context in _resolve_contexts()
@@ -244,6 +246,10 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
             repository_own_presets = collect_repository_own_presets(
                 load_fresh_agent_runner_settings()
             )
+        elif deleted_names and request.scope == SCOPE_REPOSITORY:
+            # 仓库层删除后引用仍解析到全局同名预设：把全局预设清单交给写前校验，
+            # 避免把"删除仓库覆盖、回到全局预设"误判成悬空引用而误拒。
+            global_presets = dict(_global_config().agent_presets)
         validate_lifecycle_settings_reference_integrity(
             config,
             request.scope,
@@ -251,6 +257,7 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
             normalized_bindings,
             repository_configs=repository_configs,
             repository_own_presets=repository_own_presets,
+            global_presets=global_presets,
         )
     except LifecycleAgentsUpdateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

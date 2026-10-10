@@ -996,12 +996,16 @@ def validate_lifecycle_settings_reference_integrity(
     *,
     repository_configs: Mapping[str, AppConfig] | None = None,
     repository_own_presets: Mapping[str, Mapping[str, AgentModelPreset]] | None = None,
+    global_presets: Mapping[str, AgentModelPreset] | None = None,
 ) -> None:
     """写前拒绝悬空：删除预设时若其仍被写后可见的绑定 / 候选引用则报错、不改文件。
 
     绑定校验只保证**本批新增**绑定指向存在的预设，这里兜住未被本批触及的**既有**引用：
 
-    - 目标层：并入本次预设与绑定改动后复查是否仍指向被删预设。
+    - 目标层：并入本次预设与绑定改动后复查是否仍指向被删预设。``scope=repository``
+      的删除只移除本层预设表，全局同名预设写后仍解析——``global_presets`` 提供时把
+      这些名字保留进写后集合，"删除仓库覆盖、回到全局预设"不被误拒，错误信息也不
+      会与事实不符。
     - 跨层（仅 ``scope=global`` 删除）：全局预设若被某仓库自身绑定引用、而该仓库并未
       自带同名预设，删全局会让该仓库视图悬空；逐一按仓库写后预设集合复查并拒绝。
       仓库自带同名预设（哪怕与全局字节相同）则仓库副本继续生效、删全局安全。
@@ -1014,6 +1018,9 @@ def validate_lifecycle_settings_reference_integrity(
             预设"重建写后可用集合——仓库自带的同名副本（含与全局字节相同的副本）
             留在集合内，绑定仍可解析；未提供（或某仓库缺失）时回退到合并视图近似
             （合并视图里与被删全局预设字节相同的条目视为纯继承、随删除消失）。
+        global_presets: 独立加载的全局层预设清单（``scope=repository`` 删除时
+            必填语义才有差别）：删除的预设名若仍在全局层声明，写后引用继续解析到
+            全局预设，不算悬空；未提供时按合并视图近似（名字随删除消失）。
 
     Raises:
         LifecycleAgentsUpdateError: 存在指向被删预设的悬空引用（信息含具体阶段 / 候选与预设名）。
@@ -1024,9 +1031,16 @@ def validate_lifecycle_settings_reference_integrity(
     if not deleted_presets:
         return
 
+    presets_after_write = _presets_after_write(config, preset_updates)
+    if scope == SCOPE_REPOSITORY and global_presets is not None:
+        # 仓库层删除只移除本层预设表；全局同名预设写后仍解析，引用不算悬空。
+        for preset_name in deleted_presets:
+            global_preset = global_presets.get(preset_name)
+            if global_preset is not None:
+                presets_after_write[preset_name] = global_preset
     target_after = dataclasses.replace(
         config,
-        agent_presets=_presets_after_write(config, preset_updates),
+        agent_presets=presets_after_write,
         lifecycle_presets=_bindings_after_write(config, scope, binding_updates),
     )
     offenders = [

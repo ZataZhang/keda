@@ -657,6 +657,53 @@ def test_global_preset_delete_rejects_cross_layer_repo_reference(console_env: di
     assert console_env["iar_config_path"].read_bytes() == repo_before
 
 
+def test_repository_preset_delete_allowed_when_global_same_name_resolves(
+    console_env: dict,
+) -> None:
+    """删除"仓库覆盖全局"的预设：引用写后仍解析到全局同名预设，不得误拒 422。
+
+    合并语义下仓库同名预设原子遮蔽全局；删除仓库层那张表 = 撤销遮蔽、回到全局
+    预设，绑定 / 候选并不悬空。写门禁若按"合并视图随删除消失"近似就会把这一合法
+    操作误拒（且错误信息与事实不符），故校验必须以全局层预设清单重建写后集合。
+    """
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {
+                "shared": {"agent": "claude", "model": "m-global", "reasoning_effort": None}
+            },
+            "bindings": {"verifier": "shared"},
+        },
+    )
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "repository",
+            "repo_id": "testrepo",
+            "presets": {"shared": {"agent": "claude", "model": "m-repo", "reasoning_effort": None}},
+        },
+    )
+    global_before = console_env["config_path"].read_bytes()
+
+    removed = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "repository", "repo_id": "testrepo", "presets": {"shared": None}},
+    )
+
+    assert removed.status_code == 200
+    repo_on_disk = _parse_toml(console_env["iar_config_path"])
+    assert "shared" not in repo_on_disk.get("agent_runner", {}).get("presets", {})
+    # 全局层预设与绑定未被波及（仓库写入只动仓库文件）。
+    assert console_env["config_path"].read_bytes() == global_before
+    # 写后视图：verifier 绑定回落到全局预设（model=m-global），引用不悬空。
+    verifier_row = _lifecycle_entry(removed.json(), "verifier")
+    assert verifier_row["preset_name"] == "shared"
+    assert verifier_row["model"] == "m-global"
+    assert verifier_row["field_sources"]["model"] == "preset"
+
+
 def test_han_edited_dangling_binding_view_never_500_and_marks_unresolved(
     console_env: dict,
 ) -> None:

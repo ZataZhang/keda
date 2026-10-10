@@ -225,6 +225,11 @@ function MatrixRow({
             已绑定 {row.preset_name}
           </Badge>
         ) : null}
+        {row.preset_name ? (
+          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+            绑定来源：{describeFieldSource(row.field_sources.preset, vocabularySafe)}
+          </span>
+        ) : null}
         {row.is_inherited ? (
           <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
             继承实现阶段
@@ -258,6 +263,17 @@ function MatrixRow({
             vocabularySafe,
           )}
         </p>
+        {row.model ? (
+          <p
+            className={cn(
+              "text-[11px] text-slate-500 dark:text-slate-400",
+              row.field_sources.model === "not_supported" &&
+                "font-medium text-amber-600 dark:text-amber-400",
+            )}
+          >
+            {describeFieldSource(row.field_sources.model, vocabularySafe)}
+          </p>
+        ) : null}
       </div>
 
       <div className="min-w-0">
@@ -272,6 +288,17 @@ function MatrixRow({
             vocabularySafe,
           )}
         </p>
+        {row.reasoning_effort ? (
+          <p
+            className={cn(
+              "text-[11px] text-slate-500 dark:text-slate-400",
+              row.field_sources.reasoning_effort === "not_supported" &&
+                "font-medium text-amber-600 dark:text-amber-400",
+            )}
+          >
+            {describeFieldSource(row.field_sources.reasoning_effort, vocabularySafe)}
+          </p>
+        ) : null}
       </div>
 
       <div className="min-w-0">
@@ -920,10 +947,25 @@ export function LifecycleSettingsPage({
       toast.success("执行器回退候选已保存。");
     } catch (error) {
       setFallbackError(error instanceof Error ? error.message : "保存失败。");
+    } finally {
+      setFallbackSaving(false);
     }
   }
 
-  /** 某候选可绑定的预设（预设声明的 agent 必须与候选一致）。 */
+  /** 本次新建、尚未保存落盘的预设名（保存矩阵后才可被回退候选绑定）。 */
+  const pendingNewPresetNames = useMemo(() => {
+    const savedNames = new Set((view?.presets ?? []).map((preset) => preset.name));
+    return Object.entries(presetDraft)
+      .filter(([name, payload]) => payload !== null && !savedNames.has(name))
+      .map(([name]) => name);
+  }, [view, presetDraft]);
+
+  /**
+   * 某候选可绑定的预设（预设声明的 agent 必须与候选一致）。
+   *
+   * 只列已落盘的预设：候选写接口不接受预设 upsert，绑定"本次新建"预设会在写前被
+   * 拒绝；页面上方对未落盘预设给出提示（见回退区块的 pendingNewPresetNames 提示）。
+   */
   function candidatePresetOptions(agentName: string): PresetOption[] {
     return (view?.presets ?? [])
       .filter((preset) => preset.agent === agentName && presetDraft[preset.name] !== null)
@@ -1175,6 +1217,15 @@ export function LifecycleSettingsPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {pendingNewPresetNames.length > 0 ? (
+            <p
+              className="text-xs text-slate-500 dark:text-slate-400"
+              data-testid="fallback-pending-presets-note"
+            >
+              本次新建、尚未保存的预设（{pendingNewPresetNames.join("、")}
+              ）需先在「模型预设」区保存后，才能绑定为回退候选。
+            </p>
+          ) : null}
           {workingCandidates.length === 0 ? (
             <p className="text-sm text-slate-500" data-testid="fallback-empty">
               当前回退候选为空。
@@ -1192,7 +1243,7 @@ export function LifecycleSettingsPage({
                 const presetLabel = candidate.preset ?? "跟随执行器默认";
                 return (
                   <li
-                    key={`${candidate.agent}-${index}`}
+                    key={`${candidate.agent}|${candidate.preset ?? ""}`}
                     className="grid grid-cols-1 gap-2 rounded-md border p-2 sm:grid-cols-[auto_minmax(7rem,1fr)_minmax(9rem,1fr)_auto] sm:items-center"
                     data-testid={`fallback-row-${index + 1}`}
                   >
@@ -1369,7 +1420,7 @@ export function LifecycleSettingsPage({
               <p className="font-medium">将写入候选队列：</p>
               <ol className="mt-1 space-y-0.5">
                 {workingCandidates.map((candidate, index) => (
-                  <li key={`${candidate.agent}-${index}`}>
+                  <li key={`${candidate.agent}|${candidate.preset ?? ""}`}>
                     {index + 1}. {candidate.agent}
                     {candidate.preset ? `（预设 ${candidate.preset}）` : ""}
                   </li>
