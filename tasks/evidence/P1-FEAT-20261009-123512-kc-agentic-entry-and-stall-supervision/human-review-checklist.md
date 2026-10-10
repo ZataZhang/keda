@@ -24,7 +24,7 @@ rv-1 至 rv-4 的执行器侧证据已齐备，**可以进入人工验收**。rv
 
 > 确认监督默认关闭；启用后默认每 30 分钟巡检，周期、停滞阈值和执行器均可通过配置覆盖。（§2 决定一；rv-4）
 
-**证据：** [rv-4-config-supervision.txt](rv-4-config-supervision.txt) 记录隔离配置加载结果 `SUPERVISOR_LAYERING_OK {"enabled": false, "check_interval_seconds": 29, "stalled_after_seconds": 47, "agent": "repo-supervisor"}`，并含最终代码树复跑块（HEAD `0c18369a` / TREE `20fd53f0…`，脚本 SCRIPT_EXIT=0、`tests/test_preview_settings.py` 5 passed）。另有默认关闭零调用与 interval override 测试。
+**证据：** [rv-4-config-supervision.txt](rv-4-config-supervision.txt) 记录隔离配置加载结果 `SUPERVISOR_LAYERING_OK {"enabled": false, "check_interval_seconds": 29, "stalled_after_seconds": 47, "agent": "repo-supervisor"}`，含代码树复跑块（脚本 SCRIPT_EXIT=0、`tests/test_preview_settings.py` 5 passed）。本地状态落点修复已作为提交 `95e341a6`（tree `701b1cc2…`）落地，交付树由此推进，门禁在提交树上对该命令复跑。另有默认关闭零调用与 interval override 测试。
 
 **回复：** 确认以上默认值与覆盖规则，或指出期望调整的配置行为。
 
@@ -40,7 +40,7 @@ rv-1 至 rv-4 的执行器侧证据已齐备，**可以进入人工验收**。rv
 
 ![终端执行器与按需项目预览概念图（设计参考，不是运行截图）](../../../docs/prototypes/assets/kc-terminal-agent-preview.png)
 
-**证据与限制：** [rv-1-kc-terminal-preview.txt](rv-1-kc-terminal-preview.txt) 逐项对应本决定的期望：裸启动与只读轮 `listening = False` / `DEV_SERVER_PIDS: none` / Chrome 主进程 PID 与 preflight 完全一致（未自动打开浏览器）；明确要求预览后 provider 自行调用 `uv run kc preview start` → 端口监听、`HTTP_PROBE_OF_REPLIED_URL: 200`、dev PID 69995/70001，终端回复 `http://127.0.0.1:31789`；停止轮 `kc preview stop` 输出 `Stopped preview process group 69968`，随后 `HTTP_REPROBE_AFTER_STOP: 000`、registry 无登记；`uv run kc --agent codex` 覆盖入口同样进入原生 TUI 且未启动项目服务。"没有唯一命令时先询问"由 [rv-1-preview-gate-negative-control.txt](rv-1-preview-gate-negative-control.txt) 在同一真实 CLI 入口上证明（0 候选 / 2 候选 / 缺 `--confirm` / `--confirm` 不相等四组全部 exit 2 且探针为空）。需要人工判断的两点：(1) 采集在交付树同一 HEAD 的**隔离 clone** 完成（交付工作树所在目录被宿主沙箱拒绝 provider 写入，历史与定位见 [rv-1-kc-native-session.txt](rv-1-kc-native-session.txt) 末尾），(2) 终端画面是 `capture-pane -e` 真实画面的 ANSI→HTML→无头 Chrome 转译，非屏幕实拍。另注意 PATH 上的旧发行 `kc` 尚无 `preview` 子命令（provider 先试它失败后改用仓库内 `uv run kc`），属发布节奏而非本 Feature 缺陷。
+**证据与限制：** [rv-1-kc-terminal-preview.txt](rv-1-kc-terminal-preview.txt) 逐项对应本决定的期望：裸启动与只读轮 `listening = False` / `DEV_SERVER_PIDS: none` / Chrome 主进程 PID 与 preflight 完全一致（未自动打开浏览器）；明确要求预览后 provider 自行调用 `uv run kc preview start` → 端口监听、`HTTP_PROBE_OF_REPLIED_URL: 200`、dev PID 73320/73327，终端回复 `http://127.0.0.1:31789`；停止轮 `kc preview stop` 输出 `Stopped preview process group 73296`，随后 `HTTP_REPROBE_AFTER_STOP: 000`、registry 无登记；`uv run kc --agent codex` 覆盖入口同样进入原生 TUI 且未启动项目服务。"没有唯一命令时先询问"由 [rv-1-preview-gate-negative-control.txt](rv-1-preview-gate-negative-control.txt) 在同一真实 CLI 入口上证明（0 候选 / 2 候选 / 缺 `--confirm` / `--confirm` 不相等四组全部 exit 2 且探针为空）；预览生命周期正控与三组内置负控的可复跑链记录在 [rv-1-reproducible-oracle.txt](rv-1-reproducible-oracle.txt)（每次门禁复跑由 `rv1_prepare_clone.py` 把 clone 快进到当时 HEAD）。需要人工判断的两点：(1) 采集在快进到交付 HEAD `95e341a6` 的**隔离 clone** 完成（交付工作树所在目录被宿主沙箱拒绝 provider 写入，历史与定位见 [rv-1-kc-native-session.txt](rv-1-kc-native-session.txt) 末尾），(2) 终端画面是 `capture-pane -e` 真实画面的 ANSI→HTML→无头 Chrome 转译，非屏幕实拍。另注意 PATH 上的旧发行 `kc` 尚无 `preview` 子命令（provider 先试它失败后改用仓库内 `uv run kc`），属发布节奏而非本 Feature 缺陷。
 
 **回复：** 确认该行为边界与上述两点披露可接受，或指出差异（例如要求在交付工作树目录内复现、或要求屏幕实拍）。
 
