@@ -38,30 +38,30 @@ def blocked_continue_issue(
     agent: str,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
+    repo_id: str | None = None,
 ) -> bool:
-    """Resume a blocked Issue after the operator has resolved forbidden paths.
+    """操作员处理完禁止路径后，继续执行被阻塞的 Issue。
 
-    Steps:
-    1. Validate the worktree is clean and no forbidden paths remain.
-    2. Write a ``blocked_resolution_requested`` marker comment.
-    3. Attempt a CAS claim to move the Issue from ``agent/blocked`` to
-       ``agent/running``.
-    4. If claimed successfully, start ``_process_blocked_resolution``.
+    流程如下：
+    1. 检查 worktree 是否干净，并确认禁止路径已处理。
+    2. 写入 ``blocked_resolution_requested`` 标记评论。
+    3. 尝试通过 CAS 将 Issue 从 ``agent/blocked`` 认领到 ``agent/running``。
+    4. 认领成功后启动 ``_process_blocked_resolution``。
 
     Args:
-        issue_number: GitHub Issue number.
-        repo_path: Repository root path.
-        config: Application configuration.
-        agent: Agent override.
-        github_client: GitHub client.
-        process_runner: Process runner.
+        issue_number: GitHub Issue 编号。
+        repo_path: 仓库根目录。
+        repo_id: 用于划分短期记忆目录的 registry 仓库标识。
+        config: 应用配置。
+        agent: Agent 覆盖值。
+        github_client: GitHub 客户端。
+        process_runner: 进程运行器。
 
     Returns:
-        True if the Issue was claimed and processing started, False if
-        another runner already claimed it.
+        当前进程认领并启动处理时返回 ``True``；其他 runner 已认领时返回 ``False``。
 
     Raises:
-        BlockedContinueError: Worktree validation failed.
+        BlockedContinueError: worktree 校验失败。
     """
     issue = github_client.get_issue(issue_number)
     if config.labels.blocked not in issue.labels:
@@ -123,6 +123,7 @@ def blocked_continue_issue(
         _process_blocked_resolution(
             issue=issue,
             repo_path=repo_path,
+            repo_id=repo_id,
             config=config,
             agent=agent,
             github_client=github_client,

@@ -994,8 +994,9 @@ def run_agent_until_committed(
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
     model_selection: ModelSelection | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    repo_id: str | None = None,
 ) -> AgentCommitResult:
-    """运行 Agent recovery 状态机并返回最终提交结果。"""
+    """运行 Agent recovery 状态机并返回最终提交结果；``repo_id`` 指稳定仓库 registry id。"""
     from backend.core.use_cases.run_agent_execution_loop import (
         AgentExecutionRequest,
         run_agent_until_committed as run_execution_loop,
@@ -1014,6 +1015,7 @@ def run_agent_until_committed(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=model_selection,
+            repo_id=repo_id,
             # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"
             # （崩溃对账重新入队 / 部分进度续作），而不是新任务被历史会话污染。
             resume_session_id=resolve_resumable_session_id(

@@ -199,6 +199,7 @@ def _process_blocked_resolution(
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
     stage_selection: PublishStageSelection | None = None,
+    repo_id: str | None = None,
 ) -> None:
     """处理带 blocked_resolution marker 的 blocked Issue。
 
@@ -213,6 +214,7 @@ def _process_blocked_resolution(
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
         marker: blocked_resolution_requested 事件标记
+        repo_id: 稳定的仓库 registry id，用于短期记忆分区。
         publish_stage: 发布档位：非 ``NORMAL`` 时跳过 Phase 4.5 验证门禁并在 PR
             正文打未验证标注；``DIRECT`` 再跳过审核 agent 与仓内验证命令。
     """
@@ -301,6 +303,7 @@ def _process_blocked_resolution(
             on_agent_usage=on_agent_usage,
             model_selection=implementation_model_selection,
             publish_stage=publish_stage,
+            repo_id=repo_id,
         )
 
         # 完成发布流程
@@ -316,6 +319,7 @@ def _process_blocked_resolution(
             content_generator=content_generator,
             publish_stage=publish_stage,
             direct_pr_label=stage_decision.direct_pr_label,
+            repo_id=repo_id,
         )
     finally:
         _release_blocked_claim_lock(lock_path)
@@ -612,6 +616,7 @@ def _process_ready_issue(
     content_generator: IContentGenerator | None = None,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
+    repo_id: str | None = None,
 ) -> None:
     """处理 ready 状态的 Issue（完整实现路径）。
 
@@ -633,6 +638,7 @@ def _process_ready_issue(
         github_client: GitHub 客户端
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
+        repo_id: 稳定的仓库 registry id，用于短期记忆分区。
     """
     from backend.core.use_cases.run_agent_once import (
         MaxRetriesExceededError,
@@ -767,6 +773,7 @@ def _process_ready_issue(
             on_agent_usage=on_agent_usage,
             model_selection=implementation_model_selection,
             publish_stage=publish_stage,
+            repo_id=repo_id,
         )
     except (
         MaxRetriesExceededError,
@@ -834,6 +841,7 @@ def _process_ready_issue(
         content_generator=content_generator,
         publish_stage=publish_stage,
         direct_pr_label=stage_decision.direct_pr_label,
+        repo_id=repo_id,
     )
 
 

@@ -4632,6 +4632,12 @@ Agent Runner 默认开启两层**本地**记忆与 skill 蒸馏循环，用于�
 
 注：相对路径 **相对目标仓库主检出根** 解析，而不是相对每个 Issue 的工作副本。
 
+- 短期记忆目录使用 runner 注入的稳定 registry `repo_id`，再按 Issue 编号分区；不使用
+  `issue-<N>` worktree 名作为仓库身份。读取时会兼容旧版 `issue-<N>/<N>/context.json`，
+  下一次写入时落到稳定仓库分区。
+- 每轮 attempt 都追加到历史；未显式提供任务摘要时，`summary` 更新为最近 attempt 的详情。
+  `updated_at` 在每次写入时刷新。
+
 ### 锚点与并发语义
 
 - `config.toml` `[agent_runner.memory]` 的 `base_dir` / `skill_drafts_dir` / `promoted_skills_dirs` 中的**相对路径**在 engines 层会被解析为 `<repo_path>/<rel>` 的绝对路径；**绝对路径或 ``~``** 会被原样使用，不再挂到任何锚点下。

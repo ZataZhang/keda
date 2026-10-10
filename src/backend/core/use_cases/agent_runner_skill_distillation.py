@@ -46,6 +46,7 @@ class _SkillDistillationRequest:
     selected_agent: str
     process_runner: IProcessRunner
     content_generator: IContentGenerator | None
+    repo_id: str | None = None
 
 
 def _try_distill_skill_after_success(request: _SkillDistillationRequest) -> None:
@@ -130,8 +131,8 @@ def _build_skill_distillation_evidence(
     """Load durable history, final solution, committed diff, and verification evidence."""
     from backend.core.use_cases.agent_runner_worktree_create import _resolve_repo_id
 
-    repo_id = _resolve_repo_id(request.issue, request.worktree_path)
-    short_term_context = short_term_store.load(repo_id, request.issue.number)
+    context_repo_id = request.repo_id or _resolve_repo_id(request.issue, request.worktree_path)
+    short_term_context = short_term_store.load(context_repo_id, request.issue.number)
     attempt_history = _format_distillation_attempt_history(
         short_term_context.attempts if short_term_context is not None else (),
         request.commit_result.attempt_results,

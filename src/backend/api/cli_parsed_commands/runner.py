@@ -862,6 +862,7 @@ def run_blocked_continue_command(ctx: ParsedCommandContext) -> int:
         claimed = blocked_continue_issue(
             issue_number=ctx.parsed.issue,
             repo_path=context.repo_path,
+            repo_id=context.repo_id,
             config=context.config,
             agent=ctx.parsed.agent,
             github_client=github_client,

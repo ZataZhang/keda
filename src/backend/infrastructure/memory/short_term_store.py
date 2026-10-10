@@ -93,24 +93,28 @@ class ShortTermMemoryStore:
         issue_number: int,
         memory_context: ShortTermMemoryContext,
     ) -> Path:
-        """Persist the short-term memory for an issue, returning the file path.
+        """持久化 Issue 的短期记忆并返回文件路径。
 
-        使用 ``tmp + os.replace`` 原子落盘：先在同一父目录写入一个临时文件，
-        再用 ``os.replace`` 替换目标路径。并发场景下可避免半写损坏文件，
-        行为为 ``last-write-wins``。
+        每次写入都会刷新 ``updated_at``。文件通过 ``tmp + os.replace`` 原子落盘：
+        先在同一父目录写入临时文件，再替换目标路径，避免并发写入留下半个文件；
+        并发冲突时采用最后写入者生效。
         """
         path = self._context_path(repo_id, issue_number)
         payload = memory_context.to_dict()
-        if not payload.get("updated_at"):
-            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
         atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))
         return path
 
     def load(self, repo_id: str, issue_number: int) -> ShortTermMemoryContext | None:
-        """Load a previously-saved short-term memory, or ``None`` if missing."""
+        """按 registry id 读取短期记忆，并兼容旧版 worktree 分区键。"""
         path = self._context_path(repo_id, issue_number)
         if not path.is_file():
-            return None
+            # 旧版把 worktree 名 issue-N 当作 repo_id；后续 save 会写入稳定仓库分区。
+            legacy_repo_id = f"issue-{int(issue_number)}"
+            legacy_path = self._context_path(legacy_repo_id, issue_number)
+            if not legacy_path.is_file():
+                return None
+            path = legacy_path
         try:
             raw = path.read_text(encoding="utf-8")
         except OSError:
@@ -121,7 +125,9 @@ class ShortTermMemoryStore:
             return None
         if not isinstance(payload, dict):
             return None
-        return ShortTermMemoryContext.from_dict(payload)
+        memory_context = ShortTermMemoryContext.from_dict(payload)
+        memory_context.repo_id = repo_id
+        return memory_context
 
 
 def _safe_segment(value: str) -> str:

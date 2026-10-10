@@ -31,23 +31,21 @@ def save_short_term_memory(
     summary: str | None = None,
     store: IShortTermMemoryStore,
 ) -> Path | None:
-    """Update the per-Issue short-term memory after a recovery attempt.
+    """在一次恢复尝试后更新 Issue 的短期记忆。
 
     Args:
-        repo_id: Stable per-repository identifier.
-        issue: Issue being processed.
-        attempt_result: The attempt that just finished.
-        worktree_path: Worktree whose ``memory_config.base_dir`` should be
-            used for persistence.
-        memory_config: Effective memory configuration.
-        final_solution: Optional final-solution snippet to record.
-        key_files: Optional list of touched file paths to record.
-        summary: Optional short summary line.
-        store: Caller-injected short-term store.
+        repo_id: 稳定的仓库标识。
+        issue: 正在处理的 Issue。
+        attempt_result: 刚完成的尝试结果。
+        worktree_path: 用于解析 ``memory_config.base_dir`` 并持久化记忆的 worktree。
+        memory_config: 生效的记忆配置。
+        final_solution: 可选的最终解决方案摘要。
+        key_files: 可选的已修改文件路径列表。
+        summary: 可选的稳定任务摘要；未提供时使用最近一次 attempt 详情。
+        store: 由调用方注入的短期记忆存储。
 
     Returns:
-        The path to the persisted ``context.json`` file, or ``None`` when
-        memory persistence is disabled.
+        已写入的 ``context.json`` 路径；未启用记忆持久化时返回 ``None``。
     """
     if not memory_config.enabled:
         return None
@@ -63,7 +61,8 @@ def save_short_term_memory(
     existing.issue_url = issue.url or existing.issue_url
     if summary is not None:
         existing.summary = summary
-    elif attempt_result.detail and not existing.summary:
+    elif attempt_result.detail:
+        # 未提供任务摘要时，让摘要跟随最近一次 attempt，避免重试后留下旧故障。
         existing.summary = attempt_result.detail
     existing.attempts.append(
         ShortTermAttempt(

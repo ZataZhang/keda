@@ -119,6 +119,8 @@ class AgentExecutionRequest:
     #: :attr:`publish_stage`，本字段在 ``__post_init__`` 里被归一化为该档位的派生视图，
     #: 因此不可能出现「stage=direct 且 fast_merge=True」这类矛盾状态。
     fast_merge: bool | None = None
+    #: 稳定的仓库 registry id；兼容调用未提供时才回退到 worktree 名。
+    repo_id: str | None = None
 
     def __post_init__(self) -> None:
         """把 ``fast_merge`` 布尔收进 :attr:`publish_stage`，并回填其派生视图。"""
@@ -233,7 +235,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         attempt_started_mono = time.monotonic()
         attempt_phases = AttemptPhaseTimer()
         attempt_started_iso = datetime.now(timezone.utc).isoformat()
-        repo_id = _resolve_repo_id(issue, worktree_path)
+        attempt_repo_id = request.repo_id or _resolve_repo_id(issue, worktree_path)
         attempt_record_context = _AttemptRecordContext(
             request=request,
             attempt_index=attempt_index,
@@ -241,7 +243,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             attempt_started_mono=attempt_started_mono,
             attempt_started_iso=attempt_started_iso,
             attempt_results=attempt_results,
-            repo_id=repo_id,
+            repo_id=attempt_repo_id,
             effective_model_selection=model_selection,
         )
 
