@@ -223,7 +223,7 @@ run_interval_seconds = 120
 # 每轮 Phase 0 审议最大 Issue 数
 max_deliberation_issues = 1
 # 是否在每轮开头对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）；关闭后僵尸不被触碰
-reconcile_stale_attempts = false
+reconcile_stale_attempts = true
 # 对账的 claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale
 reclaim_ttl_seconds = 10800
 
