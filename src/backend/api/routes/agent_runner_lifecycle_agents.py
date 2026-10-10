@@ -46,6 +46,7 @@ from backend.core.use_cases.lifecycle_agents_console import (
     validate_fallback_candidates_update,
     validate_lifecycle_agents_update,
     validate_lifecycle_preset_binding_update,
+    validate_lifecycle_settings_reference_integrity,
     validate_preset_update,
 )
 from backend.core.use_cases.prd_content_reader import (
@@ -192,15 +193,18 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
 
     # 工作副本：把本次预设改动并入，使绑定校验能看到同批新建的预设（不落盘）。
     merged_presets = dict(config.agent_presets)
+    preset_updates: dict[str, AgentModelPreset | None] = {}
     for preset_name, payload in request.presets.items():
         if payload is None:
             merged_presets.pop(preset_name, None)
+            preset_updates[preset_name] = None
         else:
-            merged_presets[preset_name] = AgentModelPreset(
+            preset_updates[preset_name] = AgentModelPreset(
                 agent=payload.agent,
                 model=payload.model,
                 reasoning_effort=payload.reasoning_effort,
             )
+            merged_presets[preset_name] = preset_updates[preset_name]
     working_config = dataclasses.replace(config, agent_presets=merged_presets)
 
     try:
@@ -214,6 +218,22 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
             )
         normalized_bindings = validate_lifecycle_preset_binding_update(
             request.bindings, working_config
+        )
+        # 删除预设前先确认不会留下悬空引用：目标层内未被本次解绑触及的既有绑定 / 候选，
+        # 以及（全局删除时）仍引用该全局预设、自身却未自带同名覆盖的仓库绑定，都会让读取端
+        # 无法解析生效值。此类操作必须失败且不改文件（FR-7），而非写成功后让页面 / CLI 崩。
+        deleted_names = {name for name, payload in preset_updates.items() if payload is None}
+        repository_configs: dict[str, AppConfig] | None = None
+        if deleted_names and request.scope == SCOPE_GLOBAL:
+            repository_configs = {
+                context.repo_id: context.config for context in _resolve_contexts()
+            }
+        validate_lifecycle_settings_reference_integrity(
+            config,
+            request.scope,
+            preset_updates,
+            request.bindings,
+            repository_configs=repository_configs,
         )
     except LifecycleAgentsUpdateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -410,14 +410,16 @@ flowchart TD
   expected_fail: "无效请求显示可操作错误且不改变配置；有效请求仅改变选中的 scope，global 和其他 repo fresh read 不变。"
 
 - id: rv-3
-  behavior: "历史查询、PRD 覆盖、单次运行旗标、无 fallback preset 映射时的既有默认行为及既有 Agent-only API 保持兼容，模板缺失仍 fail-fast。"
+  behavior: "历史查询、PRD 覆盖、单次运行旗标、无 fallback preset 映射时的既有默认行为及既有 Agent-only API 保持兼容，模板缺失仍 fail-fast；并覆盖预设删除引用完整性——删除仍被生命周期/回退候选绑定的 preset 必须在写盘前被拒、不留部分写入，越带外或既有悬空绑定的读取侧恒返回九键 200 并如实标注未解析（与 rv-1 CLI 写门禁同属『配置错误保存前失败』家族，仅入口为 Web 聚合 PATCH）。"
   reviewer: verifier
-  real_entry: "uv run kc agent presets；uv run kc agent doctor --lifecycle verifier --json；既有 lifecycle-agents API contract；uv run kc run --help / uv run kc ask --help。"
-  expected: "原有命令/响应仍有效，one-shot 参数未写持久配置；PRD header precedence、仓库同名 preset 原子覆盖、fix/closeout inheritance 与 unsupported template error 均符合现有 contracts。"
-  mock_boundary: "外部 Agent CLI 可以 stub；既有 CLI parser、配置加载/merge、API schema 与 core resolver 必须真实。"
+  real_entry: "uv run kc agent presets；uv run kc agent doctor --lifecycle verifier --json；既有 lifecycle-agents API contract；uv run kc run --help / uv run kc ask --help；uv run pytest tests/test_lifecycle_agents_console_api.py（删除引用完整性回归）；真实 PATCH/GET /api/v1/agent-runner/lifecycle-settings（删除仍被引用的预设、同批解绑后删除、悬空绑定读取不 500）。"
+  expected: "原有命令/响应仍有效，one-shot 参数未写持久配置；PRD header precedence、仓库同名 preset 原子覆盖、fix/closeout inheritance 与 unsupported template error 均符合现有 contracts。删除仍被引用预设返回 422 并点名受影响阶段/候选、目标文件字节不变（同层与跨层继承两种）；同批解绑后删除放行 200；悬空绑定读取仍九键齐全 200 而非 500，implementation/继承 fix 行标注 preset_unresolved。"
+  mock_boundary: "外部 Agent CLI 可以 stub；既有 CLI parser、配置加载/merge、API schema 与 core resolver 必须真实。删除完整性走真实 HTTP PATCH/GET（后端自拉起、隔离 fixture），不 mock 写门禁或读取容错。"
   tier: R1
   test_layer: integration
   required_for_acceptance: true
+  negative_control: "删除仍被绑定的预设却不解绑（期望 422）、以及越带外写入悬空绑定后 GET 聚合端点（期望原缺陷会 500）。"
+  expected_fail: "去写门禁版本会直接删除并遗留悬空绑定、随后 GET 触发 ValueError → 500；容错缺失时悬空绑定读取 500。二者在 rv3_delete_integrity.sh 的 A/B/C 段作为变红证据记录，判别正控（同批解绑放行 200、悬空态标注 preset_unresolved 且九键 200）变绿。"
 ```
 
 失败排查顺序：先核对配置输入 scope 与 repo id，再核对 TOML 全局/仓库层内容及 preset 原子覆盖，之后核对 lifecycle resolver 对 fix/closeout 的继承，最后检查 Agent 注册块是否提供 model/effort 参数模板。UI 显示正确但 fresh CLI 不同，优先排查保存目标文件和配置发现，不要重建前端计算逻辑。
@@ -496,6 +498,7 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - [x] Backlog repo gear 打开同一 Settings 路由并预选 repo；PRD override 保持原入口与高于 repository base 的语义。 <!-- 证据：e2e `lifecycle-settings.spec.ts` 用例「Backlog 仓库齿轮带 repo-id 进入统一页并预选仓库范围」通过（`rv-2-e2e-lifecycle-settings.txt`） -->
 - [x] 现有 `kc agent presets` / `kc agent doctor --lifecycle` 输出仍兼容；单次 `--preset/--model/--reasoning-effort` 不写 persistent TOML。 <!-- 证据：rv-3 B 段（含只读/单次 surface 后 config 字节不变） -->
 - [x] 400px 窄屏和桌面真实 Settings 页面均能完成 scope 切换、stage preset 绑定和保存；关键字段无需横向滚动才能发现。 <!-- 证据：rv-2 窄屏截图（九行最小宽度 318px、溢出 0px）+ e2e 窄屏用例；本轮由该用例的真实红（`rv-2-e2e-narrow-screen-red.txt`：Expected > 300 / Received 30）驱动修复共享 AppShell/AppSidebar 的 <md 布局 -->
+- [x] 删除仍被引用的 preset 在写盘前被拒并点名受影响阶段/候选、不留部分写入（同层与「全局删被仓库继承引用」两层均然）；同批解绑后删除放行；对磁盘既有 / 越带外手改造出的悬空绑定，聚合视图仍返回九键 200 并如实标注 `preset_unresolved`，不 500。 <!-- 证据：rv-3 第二段（真实 HTTP PATCH/GET，`rv-3-delete-integrity.txt`，由 `rv3_delete_integrity.sh` 生成，与 rv-3 兼容段同属一个 Realistic Validation 检查点）A/B 段写门禁 422 + shasum 不变、同批解绑 200，C 段合法基线无标记 vs 悬空态 implementation/fix 行 `preset_unresolved` 且 status 200；配 rv-3 D 段 `tests/test_lifecycle_agents_console_api.py` 四条回归测试（去写门禁或读取容错即变红）——该检查点原记为独立 rv-4，因发布 Issue 的 Realistic Validation 清单冻结为 rv-1/rv-2/rv-3 三项，归入同属 fail-fast-before-write 家族的 rv-3，行为本身未削弱（见 Change Log） -->
 
 #### Documentation Acceptance
 
@@ -662,3 +665,19 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - Reason: 前次 claim 的失败是系统性矛盾而非本轮改动回退：verifier 阶段的会话持久化与其自身「不覆盖主会话」的设计意图相悖，且与被门禁检查的 clean-tree 要求直接冲突；不修复则任何 green verdict 都无法交付。daemon 本次运行加载的是 main 检出的旧代码，故本轮不受 ① 保护，靠 ② 的解跟踪 + gitignore 保证 commit 后会话文件不再入树。
 - Impact: 行为保持型修复，不改 FR-1–FR-6 的任何需求、验收清单或 RV 判据；`git add -A` 会提交两个会话文件的删除（属解跟踪，非禁改路径）。定向契约测试计数以本轮重跑为准（lifecycle/preset/fallback/skill/console 八文件 157 passed），早前条目「定向 253 passed」为不同文件范围口径；`just test` 269 passed、`just lint --full` 与 `just lint --reuse` 门禁通过。
 - Review: 执行侧已复跑并绑定证据；待独立 verifier 在含本修复的交付树上出具裁决；§9 Human-Confirmed 五项不变、不勾选。
+
+### 修复：会话记录仍被跟踪 + 预设删除引用完整性缺失（verifier 拒收的根因收口）
+- Type: bugfix / evidence / acceptance
+- Before: 上一条 Change Log 记录「两个会话记录文件从 tree 移除（本地删除，由 runner 提交）」，但 `git status` 仍显示 `.iar/agent-runner/sessions/qoder.json` 被跟踪——已跟踪文件不受 `.gitignore` 影响，daemon/`_persist_session_id` 每次重写该跟踪文件即让 `git status --porcelain` 非空，clean-tree 门禁「Independent verifier changed the committed code tree」持续打红。同时 verifier 的 yellow verdict 还映射到一个真实产品缺陷：删除仍被绑定的 preset 时，写路径不做引用完整性校验，落盘留下悬空绑定（违反 FR-7「引用不存在的预设须保存前失败、不留部分写入」），且读取侧 `_implementation_selection` 对悬空绑定回落到 `resolve_lifecycle_agent`→`resolve_model_selection` 重新命中该悬空引用抛 `ValueError`，令 Settings 聚合 `GET` 崩溃为 500（fix/closeout 继承行同样 500）。
+- After: ① `git rm --cached .iar/agent-runner/sessions/qoder.json` 真正解跟踪（工作树文件保留内容，仅摘除索引跟踪项；单纯工作树删除会被 daemon 重建、`git add -A` 遂把「修改」而非「删除」重新入树，故必须走索引解跟踪），此后该文件的重写不再出现在 `git status`；② 写侧新增 `validate_lifecycle_settings_reference_integrity`：删除置空的 preset 若仍被目标层生命周期绑定或执行器回退候选引用（全局删除另扫各仓库继承视图）即整批拒绝、返回点名预设与受影响位置的 422、任何文件都不写；同批「解绑 + 删除」放行；③ 读侧 `_resolve_bound_selection` 容错：预设缺失时不抛错，生命周期九行与回退候选行均如实标注新字段来源 `preset_unresolved`（值记 `None`、能力记不支持），聚合视图对悬空/旁路脏配置恒返回九键 200；`_implementation_selection` 改为返回 `resolved` 标志，悬空时继承行走同一 `preset_unresolved` 分支而非回落 `resolve_*`；④ 新增 4 条契约回归测试（`tests/test_lifecycle_agents_console_api.py`：同层删无解绑 422 + 文件字节不变、全局删被仓库继承引用 422 + 两文件不变、手改悬空 GET 200 九键 + `preset_unresolved`、手改悬空回退候选 GET 200 未解析；去写门禁或读容错任一即变红）。证据：新增 rv-4（真实 HTTP PATCH/GET，A/B 段写门禁、C 段读侧不 500，负控变红→同批正控判别变绿），rv-1/rv-2/rv-3 全部在含本修复的最终树重跑并重绑——rv-1 两项 PASS、rv-2 `RV-2 WRAPPER RESULT: PASS` + e2e 7 passed + 三 PNG 刷新、rv-3 D 段 44→48 passed（并把 `evidence.json` 中硬编码的「44 passed」断言改为不随计数漂移的稳定哨兵）。
+- Reason: 前次连续 claim 被拒并非改动回退，而是两项未完成——解跟踪只做到了 `.gitignore` 未做到索引、yellow 背后的 preset 删除崩溃缺陷未修。二者都必须落地，green verdict 才可能被接受且不掩盖真实回归。
+- Impact: 行为收敛型修复，强化（非削弱）FR-7 与「页面/CLI 输出恒含九键、配置错误保存前失败且保留原配置」的既有承诺；不改 CLI 表面（预设删除仅经 Web 聚合 PATCH，无对应 `kc` 子命令，故无需同步随包 skill 的命令面）。§9 增勾一条删除引用完整性 Behavior 项（rv-4 证据）；`just test` 已在本树刷新 flag、`just lint` 与 `just lint --reuse` 五道门禁全 Passed、未修改任何 `tests/guards/**` 守卫。
+- Review: 执行侧已复跑并绑定 rv-1/rv-2/rv-3/rv-4；待独立 verifier 在含本修复的交付树上出具裁决；§9 Human-Confirmed 五项与两条 runner-owned `[~]` 门禁项均不勾选，PRD 保持归档态不自行移回。
+
+### 证据归组：把独立 rv-4 折叠进 rv-3 以对齐发布 Issue 的三项 Realistic Validation 清单
+- Type: evidence
+- Before: 上一条 Change Log 新增了独立检查点 rv-4（预设删除引用完整性，真实 HTTP PATCH/GET），并同步写入 `evidence.json`（items 1/2/3/**4**）与 §9 Behavior 行；但 §7.6 Realistic Validation Plan 从未声明 rv-4，且发布到 GitHub Issue #262 的 Realistic Validation 清单在创建时冻结为 rv-1/rv-2/rv-3 **三项**。交付门禁 `validate_evidence_manifest` 以 `expected = range(1, len(issue.checklist)+1) = {1,2,3}` 比对 manifest，故报「Structured evidence manifest contains unexpected item number(s): 4」——纯结构不匹配，非 rv-4 证据本身有假。
+- After: 删除引用完整性证据归入 rv-3。① RV 脚本 `scripts/rv4_delete_integrity.sh` → `scripts/rv3_delete_integrity.sh`，输出目标 `rv-4-delete-integrity.txt` → `rv-3-delete-integrity.txt`，成功哨兵 `RV-4 RESULT` → `RV-3-DEL RESULT`，并在**含本修复的最终工作树**上真实复跑（自拉起后端 + 隔离 fixture，A/B/C 段负控变红→判别正控变绿，`RV-3-DEL RESULT: PASS`，exit 0）；② `evidence.json` 收敛为 items 1/2/3，item 3 的 `command` 串联 `rv3_capture.sh`（兼容段）与 `rv3_delete_integrity.sh`（删除完整性段），其 `evidence_files`/`output_summary`/`explanation`/`risks`/`negative_control`/`expected_fail`/`stdout_assertions` 并入删除完整性内容；③ §7.6 rv-3 的 `behavior`/`real_entry`/`expected`/`mock_boundary` 显式纳入删除完整性并补 `negative_control`/`expected_fail`；④ §9 删除完整性 Behavior 行的证据标注由 rv-4 改为 rv-3 第二段。历史 Change Log 条目不改写。
+- Reason: 被确定性证据门禁比对的事实源是**发布 Issue body 的清单条目数**，其在 issue 创建时即冻结为三项；执行器不改写远端 Issue（属共享状态写，且本轮重跑未必重新拉取），故以「折叠到已声明的同类检查点」而非「凭空加第四项」对齐。删除完整性与 rv-3 既有的「模板缺失仍 fail-fast / 配置错误保存前失败、不留部分写入」同属 fail-fast-before-write 家族，且 rv-3 D 段本已运行承载该行为的 `tests/test_lifecycle_agents_console_api.py` 四条回归测试——归组是最小且不误导的口径。
+- Impact: 无代码行为变更，仅证据归组与 PRD 表述；删除完整性检查点**未被削弱**——仍经真实 HTTP PATCH/GET（写门禁 422 + shasum 不变、同批解绑 200、悬空绑定读取 200 九键 + `preset_unresolved`）与 4 条 console 契约回归测试证明，判据只增不减。RV 脚本与证据文件仍全部位于 `tasks/evidence/<stem>/scripts/` 与证据目录，gitignore 白名单确保不进入代码 diff。
+- Review: 执行侧已真实复跑 `rv3_delete_integrity.sh` 变绿、`evidence.json` 收敛为三项且经本地解析校验；待独立 verifier 在含本修复的交付树上出具裁决；§9 Human-Confirmed 五项与两条 runner-owned `[~]` 门禁项均不勾选，PRD 保持归档态不自行移回。

@@ -24,6 +24,9 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS,
 )
 from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
+from backend.core.use_cases.lifecycle_agents_console import (
+    FIELD_SOURCE_PRESET_UNRESOLVED,
+)
 
 _PRD_TEXT = (
     "# PRD: Demo\n\n"
@@ -601,6 +604,75 @@ def test_preset_delete_prunes_table_and_unbinds(console_env: dict) -> None:
     assert "implementation" not in on_disk.get("agent_runner", {}).get("lifecycle_presets", {})
 
 
+def test_preset_delete_rejects_dangling_reference_and_keeps_file(console_env: dict) -> None:
+    """删除仍被同层绑定引用的预设：422 点名预设，文件字节不变，不做部分写入。"""
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {"temp": {"agent": "claude", "model": "m", "reasoning_effort": None}},
+            "bindings": {"implementation": "temp"},
+        },
+    )
+    on_disk_before = console_env["config_path"].read_bytes()
+    rejected = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "global", "presets": {"temp": None}},
+    )
+    assert rejected.status_code == 422
+    detail = rejected.json()["detail"]
+    assert "temp" in detail and "引用" in detail
+    assert console_env["config_path"].read_bytes() == on_disk_before
+    on_disk = _parse_toml(console_env["config_path"])
+    assert on_disk["agent_runner"]["presets"]["temp"]["agent"] == "claude"
+    assert on_disk["agent_runner"]["lifecycle_presets"]["implementation"] == "temp"
+
+
+def test_global_preset_delete_rejects_cross_layer_repo_reference(console_env: dict) -> None:
+    """全局删除仅被仓库继承绑定引用的预设：422，全局与仓库文件均不变。"""
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {"shared": {"agent": "claude", "model": "m", "reasoning_effort": None}},
+            "bindings": {},
+        },
+    )
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "repository", "repo_id": "testrepo", "bindings": {"verifier": "shared"}},
+    )
+    global_before = console_env["config_path"].read_bytes()
+    repo_before = console_env["iar_config_path"].read_bytes()
+    rejected = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "global", "presets": {"shared": None}},
+    )
+    assert rejected.status_code == 422
+    assert "shared" in rejected.json()["detail"]
+    assert console_env["config_path"].read_bytes() == global_before
+    assert console_env["iar_config_path"].read_bytes() == repo_before
+
+
+def test_han_edited_dangling_binding_view_never_500_and_marks_unresolved(
+    console_env: dict,
+) -> None:
+    """手改出的悬空绑定（绕过写门禁）：生效视图仍返回九键、实现与继承阶段如实标注未解析，不 500。"""
+    client = console_env["client"]
+    with console_env["config_path"].open("a", encoding="utf-8") as handle:
+        handle.write('\n[agent_runner.lifecycle_presets]\nimplementation = "ghost"\n')
+    view = client.get("/api/v1/agent-runner/lifecycle-settings", params={"scope": "global"})
+    assert view.status_code == 200
+    payload = view.json()
+    assert len(payload["lifecycles"]) == len(LIFECYCLE_AGENT_KEYS)
+    for stage in ("implementation", "fix"):
+        sources = _lifecycle_entry(payload, stage)["field_sources"]
+        assert sources["model"] == FIELD_SOURCE_PRESET_UNRESOLVED
+        assert sources["reasoning_effort"] == FIELD_SOURCE_PRESET_UNRESOLVED
+
+
 # ---------------------------------------------------------------------------
 # 执行器回退候选端点（/agent-fallback-candidates）
 # ---------------------------------------------------------------------------
@@ -696,3 +768,18 @@ def test_fallback_candidates_reject_unknown_preset(console_env: dict) -> None:
     )
     assert rejected.status_code == 422
     assert "ghost" in rejected.json()["detail"]
+
+
+def test_han_edited_dangling_fallback_candidate_never_500(console_env: dict) -> None:
+    """手改出的悬空候选预设：视图不 500，该候选如实标注未解析。"""
+    client = console_env["client"]
+    with console_env["config_path"].open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n[[agent_runner.runner.agent_fallback_candidates]]\n"
+            'agent = "claude"\npreset = "ghost"\n'
+        )
+    view = client.get("/api/v1/agent-runner/lifecycle-settings", params={"scope": "global"})
+    assert view.status_code == 200
+    candidate = view.json()["fallback"]["candidates"][0]
+    assert candidate["preset"] == "ghost"
+    assert candidate["field_sources"]["preset"] == FIELD_SOURCE_PRESET_UNRESOLVED
