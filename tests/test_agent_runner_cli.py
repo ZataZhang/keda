@@ -12,7 +12,15 @@ import pytest
 import backend.api.cli_registry as cli_registry
 from backend.api.cli import _expand_prd_paths, main
 from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_schema import build_command_schema
 from backend.api.cli_parser import build_parser
+from backend.api.cli_parsed_commands.runner import _validate_aggregate_run_options
+from backend.api.cli_output import CliError
+from backend.api.cli_typer_app import app as typer_app
+from backend.core.use_cases.agent_runner_batch_aggregate import (
+    validate_aggregate_candidate_count,
+    validate_aggregate_issue_numbers,
+)
 from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
     RunnerProcessRecord,
@@ -50,6 +58,58 @@ def test_cli_parser_labels_sync() -> None:
     parsed = parser.parse_args(["labels", "sync"])
     assert parsed.command == "labels"
     assert parsed.labels_command == "sync"
+
+
+def test_cli_parser_aggregate_pr_is_opt_in_and_requires_all_ready() -> None:
+    """argparse parser 注册默认关闭的聚合开关与手动入口。"""
+    parser = build_parser()
+    default_run = parser.parse_args(["run", "--all-ready"])
+    aggregate_run = parser.parse_args(["run", "--all-ready", "--aggregate-pr", "--max-issues", "2"])
+    manual_aggregate = parser.parse_args(["pr", "aggregate", "--issue", "101", "--issue", "102"])
+    assert default_run.aggregate_pr is False
+    assert aggregate_run.aggregate_pr is True
+    assert aggregate_run.all_ready is True
+    assert manual_aggregate.command == "pr aggregate"
+    assert manual_aggregate.issues == [101, 102]
+
+
+def test_typer_schema_exposes_aggregate_commands() -> None:
+    """机器 schema 从 Typer 命令树导出两种入口及其默认 / 多选语义。"""
+    schema = build_command_schema(typer_app)
+    command_by_name = {command["name"]: command for command in schema["commands"]}
+    run_options = {option["name"]: option for option in command_by_name["run"]["options"]}
+    aggregate_options = {
+        option["name"]: option for option in command_by_name["pr aggregate"]["options"]
+    }
+    assert run_options["--aggregate-pr"]["default"] is False
+    assert aggregate_options["--issue"]["multiple"] is True
+    assert aggregate_options["--issue"]["required"] is True
+
+
+def test_aggregate_cli_local_validation_rejects_invalid_combinations() -> None:
+    """無倉庫或外部 client 的本地驗證拒絕 bypass 與單 Issue 配額。"""
+    parser = build_parser()
+    valid = parser.parse_args(["run", "--all-ready", "--aggregate-pr", "--max-issues", "2"])
+    _validate_aggregate_run_options(valid, configured_max_issues=1)
+    for arguments in (
+        ["run", "--aggregate-pr", "--max-issues", "2"],
+        ["run", "--all-ready", "--aggregate-pr", "--fast-merge", "--max-issues", "2"],
+        ["run", "--all-ready", "--aggregate-pr", "--direct-pr", "--max-issues", "2"],
+        ["run", "--all-ready", "--aggregate-pr", "--max-issues", "1"],
+    ):
+        parsed = parser.parse_args(arguments)
+        with pytest.raises(CliError):
+            _validate_aggregate_run_options(parsed, configured_max_issues=1)
+
+
+def test_aggregate_issue_and_candidate_count_validation_is_local() -> None:
+    """手动集合与自动实际候选数的纯本地校验都拒绝单成员批次。"""
+    assert validate_aggregate_issue_numbers([101, 102]) == (101, 102)
+    with pytest.raises(ValueError, match="at least 2"):
+        validate_aggregate_issue_numbers([101])
+    assert validate_aggregate_candidate_count(2) == 2
+    with pytest.raises(ValueError, match="at least 2"):
+        validate_aggregate_candidate_count(1)
 
 
 def test_cli_parser_init() -> None:

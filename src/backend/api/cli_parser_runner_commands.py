@@ -46,6 +46,15 @@ def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Process the ready queue by priority (the historical kc run behavior).",
     )
     run_parser.add_argument(
+        "--aggregate-pr",
+        action="store_true",
+        default=False,
+        help=(
+            "After every Issue selected by --all-ready succeeds, combine the batch into "
+            "one verified Draft PR and close its source PRs."
+        ),
+    )
+    run_parser.add_argument(
         "--takeover",
         action="store_true",
         default=False,

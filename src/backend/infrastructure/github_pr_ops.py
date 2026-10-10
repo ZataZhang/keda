@@ -101,7 +101,7 @@ def get_pull_request_context(
             "--state",
             "open",
             "--json",
-            "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup",
+            "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup,isDraft",
         ],
         cwd=client.repo_path,
         check=False,
@@ -141,6 +141,7 @@ def get_pull_request_context(
                     character not in "0123456789abcdefABCDEF" for character in raw_pr["headRefOid"]
                 )
                 or not isinstance(raw_pr.get("body"), str)
+                or type(raw_pr.get("isDraft")) is not bool
             ):
                 raise RuntimeError("Authoritative PR query returned invalid PR identity metadata.")
     if not raw_prs:
@@ -158,6 +159,78 @@ def get_pull_request_context(
         checks_summary=checks_summary,
         number=int(raw_pr_number) if raw_pr_number is not None else None,
         body=str(raw_pr.get("body", "") or ""),
+        is_draft=raw_pr.get("isDraft") if isinstance(raw_pr.get("isDraft"), bool) else None,
+    )
+
+
+def get_pull_request_context_by_number(
+    client: _ClientProtocol, pr_number: int, *, require_success: bool = False
+) -> PullRequestContext | None:
+    """按编号读取开放或已关闭 PR 的身份、head/base 与检查状态。
+
+    Args:
+        client: 当前仓库的 GitHub CLI 客户端。
+        pr_number: 要读取的 PR 编号。
+        require_success: 是否拒绝查询失败或不完整身份响应。
+
+    Returns:
+        完整 PR 上下文；非严格模式下查询失败时返回 ``None``。
+
+    Raises:
+        RuntimeError: 严格读取不能确认该 PR 身份时。
+    """
+    result = client._run_with_retry(
+        [
+            "gh",
+            "pr",
+            "view",
+            str(pr_number),
+            "--json",
+            "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup,isDraft",
+        ],
+        cwd=client.repo_path,
+        check=False,
+    )
+    if result.return_code != 0:
+        if require_success:
+            raise RuntimeError(f"Cannot establish PR context for PR #{pr_number}.")
+        return None
+    try:
+        raw_pr = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        if require_success:
+            raise RuntimeError("Authoritative PR query returned malformed JSON.") from exc
+        raise
+    if not isinstance(raw_pr, dict):
+        if require_success:
+            raise RuntimeError("Authoritative PR query returned an invalid object.")
+        return None
+    head_sha = raw_pr.get("headRefOid")
+    if require_success and (
+        type(raw_pr.get("number")) is not int
+        or raw_pr.get("number") != pr_number
+        or not isinstance(raw_pr.get("url"), str)
+        or not raw_pr["url"].startswith("https://")
+        or not isinstance(raw_pr.get("headRefName"), str)
+        or not isinstance(head_sha, str)
+        or len(head_sha) != 40
+        or any(character not in "0123456789abcdefABCDEF" for character in head_sha)
+        or not isinstance(raw_pr.get("body"), str)
+        or type(raw_pr.get("isDraft")) is not bool
+    ):
+        raise RuntimeError(f"Authoritative PR query returned invalid identity for PR #{pr_number}.")
+    checks_state, checks_summary = _aggregate_status_check_rollup(raw_pr.get("statusCheckRollup"))
+    return PullRequestContext(
+        pr_url=str(raw_pr.get("url", "")),
+        branch=str(raw_pr.get("headRefName", "")),
+        head_sha=str(head_sha or ""),
+        base_sha=str(raw_pr.get("baseRefOid", "")),
+        mergeable=_normalize_mergeable(raw_pr.get("mergeable")),
+        checks_state=checks_state,
+        checks_summary=checks_summary,
+        number=pr_number,
+        body=str(raw_pr.get("body", "") or ""),
+        is_draft=raw_pr.get("isDraft") if isinstance(raw_pr.get("isDraft"), bool) else None,
     )
 
 
@@ -258,6 +331,40 @@ def merge_pull_request(client: _ClientProtocol, pr_number: int, *, method: str =
             f"gh pr merge failed for PR #{pr_number}: "
             f"{(exc.stderr or '').strip() or (exc.stdout or '').strip()}"
         ) from exc
+
+
+def close_pull_request(
+    client: _ClientProtocol,
+    pr_number: int,
+    *,
+    comment: str | None = None,
+) -> None:
+    """关闭 PR，并可选地留下取代说明。
+
+    批次聚合在总 Draft PR 发布并通过完整树验证后调用；PR 页面、评论、审查历史与
+    来源分支仍保留。已关闭的响应按幂等成功处理，便于重试部分失败的收尾操作。
+
+    Args:
+        client: 当前仓库的 GitHub CLI 客户端。
+        pr_number: 要关闭的 PR 编号。
+        comment: 可选 Markdown 评论，例如包含总 PR 链接的取代说明。
+
+    Raises:
+        RuntimeError: ``gh pr close`` 失败且不是“已经关闭”的幂等情况时。
+    """
+    command = ["gh", "pr", "close", str(pr_number)]
+    if comment is not None:
+        command.extend(["--comment", comment])
+    result = client._run_with_retry(command, cwd=client.repo_path, check=False)
+    if result.return_code != 0:
+        combined_output = f"{result.stdout}\n{result.stderr}"
+        if "already closed" in combined_output.lower():
+            _logger.info("PR #%d is already closed; treating close request as no-op.", pr_number)
+            return
+        raise RuntimeError(
+            f"gh pr close failed for PR #{pr_number}: "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
 
 
 def list_pr_comments(client: _ClientProtocol, pr_number: int) -> list[str]:
@@ -404,6 +511,7 @@ __all__ = [
     "find_merged_pr_by_head",
     "find_open_pr_by_head",
     "get_pull_request_context",
+    "get_pull_request_context_by_number",
     "get_remote_base_sha",
     "list_pr_comments",
     "list_pull_requests_for_issue",

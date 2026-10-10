@@ -8,6 +8,12 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
+    AggregateQueueCompletionRequest,
+    check_aggregate_candidate_shortfall,
+    complete_aggregate_queue,
+    log_aggregate_dry_run_preview,
+)
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_dependencies import (
@@ -609,6 +615,8 @@ class RunOnceRequest:
     #: 调用方传的仍是 ``NORMAL``（默认值），但它是**调用侧请求档位**——认领后
     #: core 会用 Issue 上的 ``direct-pr`` 标签把它升级为 ``DIRECT``（逐 Issue 独立）。
     publish_stage: PublishStage = PublishStage.NORMAL
+    #: 仅显式队列运行聚合；必须等待本轮全部 worker 完成后才可调用聚合用例。
+    aggregate_pr: bool = False
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -843,6 +851,11 @@ def run_once(request: RunOnceRequest) -> int:
                     config.labels.blocked,
                 )
 
+    if request.aggregate_pr:
+        candidate_shortfall_exit_code = check_aggregate_candidate_shortfall(len(issues_to_process))
+        if candidate_shortfall_exit_code is not None:
+            return candidate_shortfall_exit_code
+
     if not issues_to_process:
         _logger.info(
             "No open Issues found with label %s, eligible running rework, or blocked resolution.",
@@ -852,6 +865,8 @@ def run_once(request: RunOnceRequest) -> int:
 
     # DRY RUN：仅列出将处理的 Issue，不实际处理（串行、零副作用）。
     if dry_run:
+        if request.aggregate_pr:
+            log_aggregate_dry_run_preview([issue for issue, _ in issues_to_process])
         # 定向模式的候选来自 get_issue（单个目标），不是 ready 列表的 limit 宽度，
         # 因此不能套用同一句「覆盖 N 个候选」的措辞。
         if target_issue_summary is not None:
@@ -937,10 +952,16 @@ def run_once(request: RunOnceRequest) -> int:
                 _logger.error("Serial routing failed for Issue #%d: %s", issue.number, exc)
                 return 1
 
-        exit_code = 0
-        for issue, issue_kind in issues_to_process:
-            exit_code |= _process_serial((issue, issue_kind))
-        return exit_code
+        issue_results = [
+            _process_serial((issue, issue_kind)) for issue, issue_kind in issues_to_process
+        ]
+        return complete_aggregate_queue(
+            AggregateQueueCompletionRequest(
+                run_request=request,
+                issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
+                exit_codes=tuple(issue_results),
+            )
+        )
 
     # 并行路径：线程池同一轮并行处理多个 Issue。每个 Issue 的 agent 输出经
     # output_sink 路由到独立日志文件与（可选）独立看板列，互不交错。
@@ -982,4 +1003,10 @@ def run_once(request: RunOnceRequest) -> int:
             results = list(pool.map(_process_with_routing, issues_to_process))
     finally:
         active_view.close()
-    return 1 if any(results) else 0
+    return complete_aggregate_queue(
+        AggregateQueueCompletionRequest(
+            run_request=request,
+            issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
+            exit_codes=tuple(results),
+        )
+    )

@@ -23,11 +23,21 @@ PR-Native Acceptance 结构（唯一 PRD 路径、"合并即接受"声明、证�
 （prd skill 的管辖范围）；无 PRD 的轻量 Issue 不新增要求。
 所有 hidden marker 与 ``agent_runner_events.py`` 的 ``iar:event`` 同型
 （``<!-- iar:... -->`` + 命名捕获组正则）。
+
+批次总 PR（v2）：夜间聚合把一组同仓库来源 Issue / PR 合成唯一总 Draft PR，其正文
+用 ``<!-- iar:aggregate-pr version=1 issues=... source_prs=... -->`` 记录来源集合，
+用 ``<!-- iar:merge-acceptance version=2 -->`` 声明"合并本总 PR 即接受正文列出的每
+一份 PRD"。下方 ``aggregate`` 前缀的一组纯函数只做**本地字符串**的集合断言（去重、
+完整性、重复拒绝、来源 marker 匹配），不发布 PR、不读取 GitHub。普通单 PRD ``v1``
+判定完全不变：v2 是叠加在聚合正文上的独立校验面，历史 v1 正文仍按 v1 规则通过。
 """
 
 from __future__ import annotations
 
 import re
+from collections import Counter
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.use_cases.agent_runner_feedback import (
@@ -229,3 +239,288 @@ def parse_contract_annotation(pr_body: str) -> list[str]:
 def has_contract_annotation(pr_body: str) -> bool:
     """PR 正文是否被发布端标注为契约不合规（合并队列硬门的判定源）。"""
     return bool(_PR_CONTRACT_MARKER_PATTERN.search(pr_body))
+
+
+# ---------------------------------------------------------------------------
+# 批次总 PR 多 PRD 验收契约（v2）——纯本地字符串 / 路径集合断言，无 GitHub 副作用。
+# ---------------------------------------------------------------------------
+
+# 总 PR "合并即接受整组 PRD"声明必须携带的 hidden marker（v2，区别于单 PRD 的 v1）。
+MERGE_ACCEPTANCE_V2_MARKER_TEXT = "<!-- iar:merge-acceptance version=2 -->"
+
+# 来源集合 marker 的版本与正则：``issues=`` 必填，``source_prs=`` 允许为空串
+# （dry-run 预览阶段来源 PR 尚未产生）。
+_AGGREGATE_SOURCE_MARKER_VERSION = 1
+_AGGREGATE_SOURCE_MARKER_PATTERN = re.compile(
+    r"<!--\s*iar:aggregate-pr\s+version=(?P<version>\d+)\s+"
+    r"issues=(?P<issues>[^\s>]*)\s+source_prs=(?P<source_prs>[^\s>]*)\s*-->"
+)
+
+# 正文里的 PRD 引用行（v1 确定性补锚点与 v2 聚合清单共用同一 ``- PRD: <path>`` 形态）。
+_PRD_LIST_LINE_PATTERN = re.compile(r"^[-*]\s+PRD:\s*(?P<path>\S+)\s*$", re.MULTILINE)
+
+# 聚合正文里"合并即接受整组 PRD"的确定性小节标题与声明句（发布端与测试钉住同一文案）。
+_AGGREGATE_ACCEPTANCE_HEADING = "## Human Acceptance And Aggregated PRDs"
+AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT = (
+    "Merging this aggregate PR means that the merger accepts, for every PRD listed "
+    "above, the human decisions and human-visible outcomes recorded in that PRD, and "
+    "authorizes post-merge acceptance recording on each listed PRD individually (its "
+    "Human-Confirmed items are ticked and its banner becomes \u2705 \u5df2\u9a8c\u6536), provided the "
+    "required gates remain green and the merged Git tree matches that PRD's verified "
+    "tree. Closing a source PR is never, on its own, acceptance of any PRD."
+)
+
+# 聚合契约锚点标识 → 人读含义（错误信息与标注块共用，避免文案漂移）。
+_AGGREGATE_CONTRACT_ANCHOR_DESCRIPTIONS: dict[str, str] = {
+    "aggregate-source-marker": (
+        "body is missing a valid `<!-- iar:aggregate-pr version=1 issues=... "
+        "source_prs=... -->` source marker, or its Issue / source PR set does not "
+        "match the batch's declared members"
+    ),
+    "merge-acceptance-v2": (
+        "body is missing the `<!-- iar:merge-acceptance version=2 -->` "
+        "merge-means-acceptance declaration for the aggregated PRD set"
+    ),
+    "prd-link": (
+        "the set of `- PRD:` paths listed in the body is not exactly the batch's "
+        "unique PRD set (a PRD is missing or an unrelated PRD is listed)"
+    ),
+    "prd-duplicate": "the body lists the same PRD path on more than one `- PRD:` line",
+    "prd-order": "the body does not list unique PRD paths in stable lexical order",
+    "prd-path": "the body contains an unsafe or non-archived PRD path",
+    "merge-acceptance-statement": (
+        "body is missing the explicit statement that merging accepts each listed PRD's "
+        "human-visible outcomes and authorizes individual post-merge acceptance records"
+    ),
+}
+
+
+@dataclass(frozen=True)
+class AggregateSourceDeclaration:
+    """解析出的聚合来源 marker 内容。
+
+    Attributes:
+        version: marker 的 ``version=`` 字段。
+        issue_numbers: marker 声明的来源 Issue 编号（升序去重）。
+        source_pr_numbers: marker 声明的来源 PR 编号（升序去重，可为空）。
+    """
+
+    version: int
+    issue_numbers: tuple[int, ...]
+    source_pr_numbers: tuple[int, ...]
+
+
+def unique_prd_paths(prd_paths: Iterable[str]) -> tuple[str, ...]:
+    """把 PRD 路径集合规范化为**去重且稳定排序**的元组。
+
+    发布端用它生成正文清单，校验端用它做集合相等比较，两处共用一份定义，避免
+    "排序不稳定"导致的漏列 / 重复列判定漂移。空串与首尾空白条目被丢弃。
+
+    Args:
+        prd_paths: 任意来源的 PRD 路径可迭代对象（可能含重复 / 乱序）。
+
+    Returns:
+        升序去重后的仓库相对路径元组。
+    """
+    normalized = {path.strip() for path in prd_paths if path and path.strip()}
+    return tuple(sorted(normalized))
+
+
+def _parse_marker_numbers(raw: str) -> tuple[int, ...] | None:
+    """严格解析 marker 编号；空集合可用，非法、非正或重复条目返回 ``None``。"""
+    if not raw:
+        return ()
+    tokens = raw.split(",")
+    if any(not token.isdigit() or int(token) <= 0 for token in tokens):
+        return None
+    numbers = tuple(int(token) for token in tokens)
+    if len(set(numbers)) != len(numbers):
+        return None
+    return tuple(sorted(numbers))
+
+
+def _format_marker_numbers(numbers: Iterable[int]) -> str:
+    """把编号可迭代对象规范化为升序去重的逗号串（供 marker 拼接）。"""
+    return ",".join(str(number) for number in sorted({int(number) for number in numbers}))
+
+
+def build_aggregate_source_marker(
+    *,
+    issue_numbers: Iterable[int],
+    source_pr_numbers: Iterable[int] = (),
+) -> str:
+    """构建总 PR 的来源集合 hidden marker。
+
+    Args:
+        issue_numbers: 批次来源 Issue 编号。
+        source_pr_numbers: 批次来源 PR 编号；dry-run 阶段可为空。
+
+    Returns:
+        ``<!-- iar:aggregate-pr version=1 issues=... source_prs=... -->`` 单行 marker。
+    """
+    issues_text = _format_marker_numbers(issue_numbers)
+    source_prs_text = _format_marker_numbers(source_pr_numbers)
+    return (
+        f"<!-- iar:aggregate-pr version={_AGGREGATE_SOURCE_MARKER_VERSION} "
+        f"issues={issues_text} source_prs={source_prs_text} -->"
+    )
+
+
+def parse_aggregate_source_marker(pr_body: str) -> AggregateSourceDeclaration | None:
+    """解析总 PR 正文里的聚合来源 marker；缺失或不合规时返回 ``None``。
+
+    ``version`` 非 1 视为无法识别的契约，同样返回 ``None``，让调用方 fail closed。
+    """
+    match = _AGGREGATE_SOURCE_MARKER_PATTERN.search(pr_body)
+    if match is None:
+        return None
+    version = int(match.group("version"))
+    if version != _AGGREGATE_SOURCE_MARKER_VERSION:
+        return None
+    issue_numbers = _parse_marker_numbers(match.group("issues"))
+    source_pr_numbers = _parse_marker_numbers(match.group("source_prs"))
+    if issue_numbers is None or not issue_numbers or source_pr_numbers is None:
+        return None
+    return AggregateSourceDeclaration(
+        version=version,
+        issue_numbers=issue_numbers,
+        source_pr_numbers=source_pr_numbers,
+    )
+
+
+def _has_merge_acceptance_version(pr_body: str, version: int) -> bool:
+    """正文是否携带指定 ``version`` 的合并即接受 marker（v1 / v2 分别判定）。"""
+    return any(
+        int(match.group("version")) == version
+        for match in _MERGE_ACCEPTANCE_MARKER_PATTERN.finditer(pr_body)
+    )
+
+
+def extract_prd_reference_paths(pr_body: str) -> tuple[str, ...]:
+    """按正文出现顺序抽取所有 ``- PRD: <path>`` 引用路径（不去重）。
+
+    校验端据此同时判断"完整性"（集合相等）与"重复"（同一路径出现多次），因此保留
+    文档顺序与重复项，不在这里做 :func:`unique_prd_paths` 的收敛。
+    """
+    return tuple(match.group("path").strip() for match in _PRD_LIST_LINE_PATTERN.finditer(pr_body))
+
+
+def build_aggregate_merge_acceptance_block(prd_paths: Iterable[str]) -> str:
+    """构建总 PR 的多 PRD "合并即接受"确定性小节（去重排序清单 + v2 marker + 声明）。
+
+    发布端与确定性正文共用本函数，保证正文清单与校验端的"唯一集合"判定同源。
+
+    Args:
+        prd_paths: 批次来源 Issue 解析出的 PRD 路径（pending 或 archive 形态均可，
+            调用方负责传入已在集成树里归档后的路径）。
+
+    Returns:
+        以标题起、以声明句止的小节文本（无末尾换行）。
+    """
+    prd_lines = [f"- PRD: {prd_path}" for prd_path in unique_prd_paths(prd_paths)]
+    return "\n".join(
+        [
+            _AGGREGATE_ACCEPTANCE_HEADING,
+            "",
+            *prd_lines,
+            "",
+            MERGE_ACCEPTANCE_V2_MARKER_TEXT,
+            AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT,
+        ]
+    )
+
+
+def find_aggregate_pr_body_contract_violations(
+    pr_body: str,
+    *,
+    expected_prd_paths: Iterable[str],
+    expected_issue_numbers: Iterable[int],
+    expected_source_pr_numbers: Iterable[int] = (),
+) -> list[str]:
+    """返回总 PR 正文缺失 / 不匹配的 v2 契约锚点标识列表；完全合规时为空。
+
+    校验面（全部本地字符串断言，不发布 PR、不读 GitHub）：
+
+    - ``aggregate-source-marker``：正文缺少合规的来源 marker，或其 Issue / 来源 PR
+      集合与批次声明的成员不一致。
+    - ``merge-acceptance-v2``：正文缺少 ``version=2`` 的合并即接受 marker（v1 单
+      PRD marker 不算）。
+    - ``prd-link``：正文列出的 ``- PRD:`` 路径集合不等于批次唯一 PRD 集合（漏列或
+      多列）。
+    - ``prd-duplicate``：正文把同一 PRD 路径列了多于一行。
+
+    Args:
+        pr_body: 总 PR 正文。
+        expected_prd_paths: 批次来源 Issue 的唯一 PRD 路径集合（权威源，由调用方
+            从 GitHub Issue / 集成树解析得到）。
+        expected_issue_numbers: 批次来源 Issue 编号集合。
+        expected_source_pr_numbers: 批次来源 PR 编号集合；dry-run 预览可为空。
+
+    Returns:
+        缺失 / 不匹配的锚点标识列表（顺序稳定：marker 类 → PRD 集合类）。
+    """
+    violations: list[str] = []
+    declaration = parse_aggregate_source_marker(pr_body)
+    expected_issues = tuple(sorted({int(number) for number in expected_issue_numbers}))
+    expected_prs = tuple(sorted({int(number) for number in expected_source_pr_numbers}))
+    if (
+        declaration is None
+        or declaration.issue_numbers != expected_issues
+        or declaration.source_pr_numbers != expected_prs
+    ):
+        violations.append("aggregate-source-marker")
+    if not _has_merge_acceptance_version(pr_body, 2):
+        violations.append("merge-acceptance-v2")
+    if AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT not in pr_body:
+        violations.append("merge-acceptance-statement")
+    listed_paths = extract_prd_reference_paths(pr_body)
+    if any(count > 1 for count in Counter(listed_paths).values()):
+        violations.append("prd-duplicate")
+    expected_paths = unique_prd_paths(expected_prd_paths)
+    all_prd_paths = (*listed_paths, *expected_paths)
+    if any(
+        Path(prd_path).is_absolute()
+        or "\\" in prd_path
+        or ".." in Path(prd_path).parts
+        or Path(prd_path).suffix.lower() != ".md"
+        or Path(prd_path).parts[:2] != ("tasks", "archive")
+        for prd_path in all_prd_paths
+    ):
+        violations.append("prd-path")
+    if set(listed_paths) != set(expected_paths):
+        violations.append("prd-link")
+    elif listed_paths != expected_paths:
+        violations.append("prd-order")
+    return violations
+
+
+def build_aggregate_contract_annotation_block(violations: list[str]) -> str:
+    """构建追加到总 PR 正文末尾的 v2 不合规标注块（与 v1 标注块同型、独立 marker）。
+
+    ``iar:aggregate-contract`` 是**本地聚合门**的信号：``aggregate_batch`` 在正文仍
+    不合规时先抛错、根本不创建总 PR，因此这个标注块只出现在 dry-run / 本地预览产出里。
+    合并队列只消费单 PRD 的 ``iar:pr-contract``（见
+    :func:`has_contract_annotation`），没有任何路径读取本 marker，文案不得声称队列会
+    据此拒绝自动合并——总 PR 本就保持 Draft 交人工合并。
+    """
+    missing_text = ",".join(violations)
+    violation_lines = [
+        f"- `{anchor}`: " f"{_AGGREGATE_CONTRACT_ANCHOR_DESCRIPTIONS.get(anchor, 'unknown anchor')}"
+        for anchor in violations
+    ]
+    return "\n".join(
+        [
+            f"<!-- iar:aggregate-contract version=1 missing={missing_text} -->",
+            "## Aggregate PR Body Contract Violation (auto-generated)",
+            "",
+            "This aggregate PR body does not satisfy the multi-PRD acceptance "
+            "contract. `kc pr aggregate` refuses to publish a total Draft PR whose "
+            "body still carries this marker, so it is a local gate signal only: no "
+            "autopilot merge queue reads `iar:aggregate-contract`, and the total PR "
+            "stays Draft for manual merge regardless. Missing or mismatched anchors:",
+            "",
+            *violation_lines,
+            "",
+            "<!-- iar:aggregate-contract-end -->",
+        ]
+    )

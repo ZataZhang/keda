@@ -11,14 +11,24 @@ from pathlib import Path
 import pytest
 
 from backend.core.use_cases.agent_runner_pr_body_contract import (
+    AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT,
     MERGE_ACCEPTANCE_MARKER_TEXT,
+    MERGE_ACCEPTANCE_V2_MARKER_TEXT,
+    AggregateSourceDeclaration,
     append_missing_contract_anchors,
+    build_aggregate_contract_annotation_block,
+    build_aggregate_merge_acceptance_block,
+    build_aggregate_source_marker,
     build_contract_annotation_block,
     build_contract_prompt_prefix,
+    extract_prd_reference_paths,
+    find_aggregate_pr_body_contract_violations,
     find_pr_body_contract_violations,
     has_contract_annotation,
     load_prd_publish_contract,
+    parse_aggregate_source_marker,
     parse_contract_annotation,
+    unique_prd_paths,
 )
 
 _ISSUE_BODY_WITH_PRD = "PRD path: `tasks/pending/20260928-feature.md`\n\nSome description."
@@ -525,3 +535,249 @@ def test_merge_queue_merges_prs_without_contract_annotation(tmp_path, monkeypatc
         supervisor_agent="auto",
     )
     assert outcome.action == "merged"
+
+
+# ---------------------------------------------------------------------------
+# rv-3：批次总 PR 多 PRD 验收契约（v2）——纯本地字符串 / 路径集合断言。
+# 不发布 PR、不读取 GitHub；来源集合与 PRD 集合来自本地 fixture。
+# ---------------------------------------------------------------------------
+
+_AGGREGATE_ISSUES = (101, 102)
+_AGGREGATE_SOURCE_PRS = (201, 202)
+_AGGREGATE_PRD_A = "tasks/archive/a-feature.md"
+_AGGREGATE_PRD_B = "tasks/archive/b-feature.md"
+
+
+def _build_aggregate_body(
+    *,
+    prd_lines: list[str],
+    issue_numbers=_AGGREGATE_ISSUES,
+    source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    acceptance_marker: str = MERGE_ACCEPTANCE_V2_MARKER_TEXT,
+) -> str:
+    """按 v2 契约形态拼一份可控的总 PR 正文（清单 + 来源 marker + 接受声明）。"""
+    return "\n".join(
+        [
+            "Nightly aggregate for this batch.",
+            "",
+            build_aggregate_source_marker(
+                issue_numbers=issue_numbers,
+                source_pr_numbers=source_pr_numbers,
+            ),
+            "",
+            "## Human Acceptance And Aggregated PRDs",
+            "",
+            *prd_lines,
+            "",
+            acceptance_marker,
+            AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT,
+            "",
+        ]
+    )
+
+
+def _prd_lines(*paths: str) -> list[str]:
+    return [f"- PRD: {path}" for path in paths]
+
+
+def test_aggregate_contract_accepts_complete_prd_set() -> None:
+    """完整来源集 + 精确 PRD 集合 + v2 声明的正文应零违规。"""
+    pr_body = _build_aggregate_body(prd_lines=_prd_lines(_AGGREGATE_PRD_A, _AGGREGATE_PRD_B))
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert violations == []
+
+
+def test_aggregate_contract_rejects_missing_prd() -> None:
+    """漏列一份来源 PRD 时以 prd-link 拒绝（合并即接受范围不能少列）。"""
+    pr_body = _build_aggregate_body(prd_lines=_prd_lines(_AGGREGATE_PRD_A))
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert violations == ["prd-link"]
+
+
+def test_aggregate_contract_rejects_extra_prd() -> None:
+    """多列一份不属于本批次的 PRD 时以 prd-link 拒绝（不得越权接受）。"""
+    pr_body = _build_aggregate_body(
+        prd_lines=_prd_lines(_AGGREGATE_PRD_A, _AGGREGATE_PRD_B, "tasks/archive/c-extra.md")
+    )
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert violations == ["prd-link"]
+
+
+def test_aggregate_contract_rejects_unsafe_or_nonarchived_prd_paths() -> None:
+    """PRD 路径必须是安全、仓库相对且已归档的 Markdown 路径。"""
+    unsafe_path = "tasks/archive/../pending/secret.md"
+    pr_body = _build_aggregate_body(prd_lines=_prd_lines(unsafe_path))
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[unsafe_path],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert "prd-path" in violations
+
+
+def test_aggregate_contract_rejects_duplicate_prd() -> None:
+    """同一 PRD 路径列两行时以 prd-duplicate 拒绝（去重语义）。"""
+    pr_body = _build_aggregate_body(prd_lines=_prd_lines(_AGGREGATE_PRD_A, _AGGREGATE_PRD_A))
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert "prd-duplicate" in violations
+    assert "prd-link" not in violations
+
+
+def test_aggregate_contract_rejects_unstable_prd_order() -> None:
+    """v2 正文按仓库相对路径稳定排序列出 PRD。"""
+    pr_body = _build_aggregate_body(prd_lines=_prd_lines(_AGGREGATE_PRD_B, _AGGREGATE_PRD_A))
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert violations == ["prd-order"]
+
+
+def test_aggregate_contract_requires_v2_marker() -> None:
+    """聚合正文只有 v1 单 PRD marker 时缺 merge-acceptance-v2（v1/v2 是两道独立门）。"""
+    pr_body = _build_aggregate_body(
+        prd_lines=_prd_lines(_AGGREGATE_PRD_A, _AGGREGATE_PRD_B),
+        acceptance_marker=MERGE_ACCEPTANCE_MARKER_TEXT,
+    )
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert violations == ["merge-acceptance-v2"]
+
+
+def test_aggregate_contract_requires_explicit_acceptance_statement() -> None:
+    """v2 marker 本身不能替代覆盖整组 PRD 的明确授权句。"""
+    pr_body = _build_aggregate_body(
+        prd_lines=_prd_lines(_AGGREGATE_PRD_A, _AGGREGATE_PRD_B)
+    ).replace(AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT, "Merging this PR.")
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert violations == ["merge-acceptance-statement"]
+
+
+def test_aggregate_contract_rejects_source_marker_mismatch() -> None:
+    """来源 marker 声明的 Issue 集合与批次成员不一致时以 aggregate-source-marker 拒绝。"""
+    pr_body = _build_aggregate_body(
+        prd_lines=_prd_lines(_AGGREGATE_PRD_A, _AGGREGATE_PRD_B),
+        issue_numbers=(101, 999),
+    )
+    violations = find_aggregate_pr_body_contract_violations(
+        pr_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+    assert violations == ["aggregate-source-marker"]
+
+
+def test_aggregate_source_marker_roundtrip() -> None:
+    """来源 marker 拼接后可被解析回同一升序去重的编号元组。"""
+    marker = build_aggregate_source_marker(
+        issue_numbers=[102, 101, 101],
+        source_pr_numbers=[202, 201],
+    )
+    declaration = parse_aggregate_source_marker(f"body\n{marker}\n")
+    assert declaration == AggregateSourceDeclaration(
+        version=1,
+        issue_numbers=(101, 102),
+        source_pr_numbers=(201, 202),
+    )
+
+
+def test_aggregate_source_marker_ignores_wrong_version() -> None:
+    """未知 version 的来源 marker 视为无法识别，解析返回 None（fail closed）。"""
+    assert (
+        parse_aggregate_source_marker("<!-- iar:aggregate-pr version=2 issues=1 source_prs=2 -->")
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "<!-- iar:aggregate-pr version=1 issues=101,garbage source_prs=201,202 -->",
+        "<!-- iar:aggregate-pr version=1 issues=101,101 source_prs=201,202 -->",
+        "<!-- iar:aggregate-pr version=1 issues=0,102 source_prs=201,202 -->",
+    ],
+)
+def test_aggregate_source_marker_rejects_malformed_number_sets(marker: str) -> None:
+    """非法编号、重复编号和非正编号不能被忽略后误认成完整来源集合。"""
+    assert parse_aggregate_source_marker(marker) is None
+
+
+def test_unique_prd_paths_is_order_independent_and_deduped() -> None:
+    """PRD 路径去重 + 稳定排序：乱序含重输入得到同一升序去重元组。"""
+    scrambled = [_AGGREGATE_PRD_B, _AGGREGATE_PRD_A, _AGGREGATE_PRD_B, "  ", _AGGREGATE_PRD_A]
+    ordered = [_AGGREGATE_PRD_A, _AGGREGATE_PRD_B]
+    assert unique_prd_paths(scrambled) == unique_prd_paths(ordered)
+    assert unique_prd_paths(scrambled) == (_AGGREGATE_PRD_A, _AGGREGATE_PRD_B)
+
+
+def test_extract_prd_reference_paths_preserves_order_and_duplicates() -> None:
+    """抽取正文 PRD 行保留文档顺序与重复项，供重复判定使用。"""
+    pr_body = _build_aggregate_body(
+        prd_lines=_prd_lines(_AGGREGATE_PRD_B, _AGGREGATE_PRD_A, _AGGREGATE_PRD_B)
+    )
+    assert extract_prd_reference_paths(pr_body) == (
+        _AGGREGATE_PRD_B,
+        _AGGREGATE_PRD_A,
+        _AGGREGATE_PRD_B,
+    )
+
+
+def test_build_aggregate_merge_acceptance_block_lists_deduped_sorted() -> None:
+    """确定性接受小节按去重排序列 PRD 并带 v2 marker。"""
+    block = build_aggregate_merge_acceptance_block(
+        [_AGGREGATE_PRD_B, _AGGREGATE_PRD_A, _AGGREGATE_PRD_B]
+    )
+    assert block.index(_AGGREGATE_PRD_A) < block.index(_AGGREGATE_PRD_B)
+    assert block.count(f"- PRD: {_AGGREGATE_PRD_B}") == 1
+    assert MERGE_ACCEPTANCE_V2_MARKER_TEXT in block
+
+
+def test_aggregate_contract_annotation_block_marks_missing_anchors() -> None:
+    """不合规标注块写入 aggregate-contract marker 并逐项说明缺失锚点。"""
+    annotation = build_aggregate_contract_annotation_block(["merge-acceptance-v2", "prd-link"])
+    assert (
+        "<!-- iar:aggregate-contract version=1 missing=merge-acceptance-v2,prd-link -->"
+        in annotation
+    )
+    assert "merge-acceptance-v2" in annotation
+    assert "prd-link" in annotation
+
+
+def test_aggregate_contract_annotation_block_does_not_claim_merge_queue_gate() -> None:
+    """标注块只声明本地聚合门：没有任何合并队列路径消费 ``iar:aggregate-contract``。"""
+    annotation = build_aggregate_contract_annotation_block(["prd-link"])
+    assert "merge queue will refuse to auto-merge" not in annotation
+    assert "refuses to publish" in annotation

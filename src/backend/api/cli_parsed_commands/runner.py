@@ -28,6 +28,29 @@ from backend.api import cli as _cli
 from backend.core.use_cases.agent_runner_factory import logger
 
 
+def _validate_aggregate_run_options(parsed: object, configured_max_issues: int) -> None:
+    """在任何仓库解析或 client 创建前校验自动聚合参数组合。"""
+    if not getattr(parsed, "aggregate_pr", False):
+        return
+    max_issues = getattr(parsed, "max_issues", None)
+    max_issues = configured_max_issues if max_issues is None else max_issues
+    suggestions = "kc run --all-ready --aggregate-pr --max-issues 2"
+    if not getattr(parsed, "all_ready", False):
+        message = "--aggregate-pr is only available with --all-ready."
+    elif getattr(parsed, "issue", None) is not None or getattr(parsed, "prd_path", None):
+        message = "--aggregate-pr cannot be combined with a targeted Issue or PRD path."
+    elif getattr(parsed, "direct_pr", False) or getattr(parsed, "fast_merge", False):
+        message = "--aggregate-pr cannot be combined with --direct-pr or --fast-merge."
+    elif getattr(parsed, "all_repositories", False):
+        message = "--aggregate-pr requires one explicitly selected repository."
+        suggestions = "kc run --repo-id <repo> --all-ready --aggregate-pr --max-issues 2"
+    elif max_issues < 2:
+        message = "--aggregate-pr requires --max-issues of at least 2."
+    else:
+        return
+    raise CliError(message, code=ExitCode.USAGE, suggestion=suggestions)
+
+
 def _dry_run_preview(
     contexts: list,
     *,
@@ -36,6 +59,7 @@ def _dry_run_preview(
     target_issue: int | None = None,
     all_ready: bool = False,
     fast_merge: bool = False,
+    aggregate_pr: bool = False,
     publish_stage: str = PublishStage.NORMAL.value,
 ) -> dict:
     """组装 ``kc run --dry-run`` 的机读预览（本轮执行计划，逐 Issue 明细在 stderr 日志）。"""
@@ -46,6 +70,7 @@ def _dry_run_preview(
         "target_issue": target_issue,
         "all_ready": all_ready,
         "fast_merge": fast_merge,
+        "aggregate_pr": aggregate_pr,
         "publish_stage": publish_stage,
         "repositories": [
             {"repo_id": context.repo_id, "repo_path": str(context.repo_path)}
@@ -78,7 +103,14 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     assume_yes = getattr(parsed, "yes", False)
     fast_merge = getattr(parsed, "fast_merge", False)
     direct_pr = getattr(parsed, "direct_pr", False)
+    aggregate_pr = getattr(parsed, "aggregate_pr", False)
     publish_stage = _resolve_publish_stage(fast_merge=fast_merge, direct_pr=direct_pr)
+
+    if aggregate_pr:
+        _validate_aggregate_run_options(
+            parsed,
+            ctx.runner_settings.runner.max_issues,
+        )
 
     if direct_pr and all_ready:
         raise CliError(
@@ -118,6 +150,12 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         repo_id=ctx.repo_id,
         repo_override=ctx.repo_override,
     )
+    if aggregate_pr and len(contexts) != 1:
+        raise CliError(
+            "--aggregate-pr requires exactly one repository target.",
+            code=ExitCode.USAGE,
+            suggestion="kc run --repo-id <repo> --all-ready --aggregate-pr --max-issues 2",
+        )
     # CLI --preset 一次性锚定（implementation 阶段）；未传旗标时原样返回。
     from backend.api.cli_model_preset_anchor import apply_cli_model_preset
 
@@ -225,6 +263,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         max_deliberation_issues=ctx.runner_settings.daemon.max_deliberation_issues,
         target_issue=target_issue,
         publish_stage=publish_stage,
+        aggregate_pr=aggregate_pr,
     )
     if not parsed.dry_run or ctx.output_format != OUTPUT_FORMAT_JSON:
         return exit_code
@@ -238,6 +277,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             target_issue=target_issue,
             all_ready=all_ready,
             fast_merge=fast_merge,
+            aggregate_pr=aggregate_pr,
             publish_stage=publish_stage.value,
         ),
         fmt=OUTPUT_FORMAT_JSON,

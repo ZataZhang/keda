@@ -51,6 +51,7 @@ from backend.api.cli_parsed_commands.backlog import run_backlog_advance_command
 from backend.api.cli_parsed_commands.backlog import run_backlog_ci_policy_command
 from backend.api.cli_parsed_commands.backlog import run_backlog_ci_repair_command
 from backend.api.cli_parsed_commands.backlog import run_backlog_ci_status_command
+from backend.api.cli_parsed_commands.aggregate_pr import run_aggregate_pr_command
 from backend.api.cli_parsed_commands.runner import (
     run_blocked_continue_command,
     run_daemon_command,
@@ -83,6 +84,7 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "issue create": run_issue_create_command,
     "issue list": run_issue_list_command,
     "run": run_run_command,
+    "pr aggregate": run_aggregate_pr_command,
     "daemon": run_daemon_command,
     "review": run_review_command,
     "review-daemon": run_review_daemon_command,
