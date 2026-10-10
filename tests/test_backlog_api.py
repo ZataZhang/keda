@@ -405,6 +405,91 @@ def test_update_settings(backlog_environment) -> None:
     assert response.json()["max_parallel"] == 3
 
 
+def test_clear_settings_restores_inheritance(backlog_environment) -> None:
+    """PATCH max_parallel=null 应删除设置行（恢复继承），fresh 读回策略为空。"""
+    store: SqliteConsoleStore = backlog_environment["store"]
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"max_parallel": 3, "default_view": "timeline"},
+    )
+    assert response.status_code == 200
+    assert store.get_backlog_settings("keda-main") is not None
+
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"max_parallel": None},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["max_parallel"] is None
+    assert payload["ceiling_source"] == "inherited"
+    assert store.get_backlog_settings("keda-main") is None
+
+    # 恢复继承是删行语义，重复清除保持幂等成功。
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"max_parallel": None},
+    )
+    assert response.status_code == 200
+    assert response.json()["max_parallel"] is None
+
+    response = client.get("/api/v1/agent-runner/backlog/settings?repo_id=keda-main")
+    assert response.status_code == 200
+    assert response.json()["max_parallel"] is None
+
+
+def test_default_view_only_patch_persists_only_with_policy_row(backlog_environment) -> None:
+    """视图偏好与策略值同居一行：没有策略行时 PATCH 只带 default_view 不落库。
+
+    ``backlog_settings.max_parallel`` 是 NOT NULL 且哨兵值已被否决（PRD D-04），
+    所以「未设置」态无法单独持久视图偏好；响应必须如实回读 ``list``，而不是
+    回显请求值骗过页面。建立策略行后同一请求才真正持久化，且不得改写策略。
+    """
+    store: SqliteConsoleStore = backlog_environment["store"]
+
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"default_view": "timeline"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert store.get_backlog_settings("keda-main") is None
+    assert payload["default_view"] == "list"
+    assert payload["max_parallel"] is None
+
+    client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"max_parallel": 3, "default_view": "list"},
+    )
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"default_view": "timeline"},
+    )
+    assert response.status_code == 200
+    assert response.json()["default_view"] == "timeline"
+    assert response.json()["max_parallel"] == 3
+    assert store.get_backlog_settings("keda-main").max_parallel == 3
+
+
+def test_empty_settings_patch_is_no_op(backlog_environment) -> None:
+    """省略全部字段的 PATCH 既不落库也不删行：响应只是 fresh 读回。"""
+    store: SqliteConsoleStore = backlog_environment["store"]
+    client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={"max_parallel": 4, "default_view": "timeline"},
+    )
+
+    response = client.patch(
+        "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["max_parallel"] == 4
+    assert response.json()["default_view"] == "timeline"
+    assert store.get_backlog_settings("keda-main").max_parallel == 4
+
+
 def test_start_prd_rejects_missing_repo(backlog_environment) -> None:
     """Starting a PRD for an unknown repo must return 400."""
     import base64
@@ -453,10 +538,18 @@ def test_start_prd_rejects_direct_pr_with_cli_equivalent_reason(
     assert not [c for c in github_client.calls if c["method"] == "edit_issue_labels"]
 
 
-def test_start_global_requires_valid_parallel(backlog_environment) -> None:
-    """Global start must validate max_parallel bounds."""
+def test_start_global_drops_max_parallel_and_never_persists_settings(
+    backlog_environment,
+) -> None:
+    """全局开始不再吃请求体 ``max_parallel``：上限由服务端解析，且不落设置行。"""
+    store: SqliteConsoleStore = backlog_environment["store"]
+
     response = client.post(
         "/api/v1/agent-runner/backlog/start-global",
         json={"repo_id": "keda-main", "max_parallel": 0},
     )
-    assert response.status_code == 422
+
+    # 多余的 max_parallel 不再是契约字段：被忽略而不是 422，批量按生效上限执行。
+    assert response.status_code == 200, response.text
+    # 「全局开始」是一次性批量，绝不把请求参数写成仓库设置。
+    assert store.get_backlog_settings("keda-main") is None

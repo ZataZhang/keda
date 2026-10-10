@@ -21,6 +21,11 @@ from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_DELIBERATE,
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
 )
+from backend.core.use_cases.agent_invocation_tracing import (
+    PHASE_FIX,
+    PHASE_IMPLEMENTATION,
+    PHASE_VERIFICATION,
+)
 from backend.core.use_cases.agent_runner_session_store import (
     load_agent_session_record,
     save_agent_session_record,
@@ -513,6 +518,40 @@ class TestSessionRecordPersistence:
         )
 
         assert load_agent_session_record(tmp_path, "claude").session_id == "sess-main"
+
+    @pytest.mark.parametrize("invocation_phase", [PHASE_FIX, PHASE_VERIFICATION])
+    def test_non_implementation_phases_do_not_overwrite_run_session(
+        self, tmp_path: Path, invocation_phase: str
+    ) -> None:
+        """修复 / 核验阶段与实现共用 run profile，也不得覆盖主实现会话记录。
+
+        这些阶段是另一段独立对话：落盘会把恢复用的实现会话 id 顶掉（续错
+        对象），还会改脏 git 跟踪的 ``.iar/agent-runner/sessions/<agent>.json``，
+        让独立 verifier 的洁净树门禁误报。
+        """
+        save_agent_session_record(tmp_path, agent_name="claude", session_id="sess-main")
+
+        run_agent_with_prompt(
+            "claude",
+            "Fix the failure.",
+            tmp_path,
+            _SessionReportingRunner("sess-other"),
+            invocation_phase=invocation_phase,
+        )
+
+        assert load_agent_session_record(tmp_path, "claude").session_id == "sess-main"
+
+    def test_implementation_phase_persists_run_session(self, tmp_path: Path) -> None:
+        """显式标注实现阶段的调用照常落盘：恢复断点只认主实现会话。"""
+        run_agent_with_prompt(
+            "claude",
+            "Implement.",
+            tmp_path,
+            _SessionReportingRunner("sess-impl"),
+            invocation_phase=PHASE_IMPLEMENTATION,
+        )
+
+        assert load_agent_session_record(tmp_path, "claude").session_id == "sess-impl"
 
     def test_failed_call_persists_session_observed_before_failure(self, tmp_path: Path) -> None:
         """跑到一半才失败（执行端把观测到的会话 id 挂在异常上）→ 断点仍要留下。"""

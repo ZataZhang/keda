@@ -563,19 +563,27 @@ class FakeBacklogStore(IBacklogStore):
     (idempotency and dry-run guarantees depend on the latter).
     """
 
-    def __init__(self, *, repo_id: str = "keda-test", max_parallel: int = 1) -> None:
+    def __init__(self, *, repo_id: str = "keda-test", max_parallel: int | None = 1) -> None:
         self.repo_id = repo_id
         self._entries: list[BacklogQueueEntry] = []
         self._next_entry_id = 1
-        self.settings = BacklogSettingsEntry(
-            repo_id=repo_id,
-            max_parallel=max_parallel,
-            default_view="list",
-            updated_at="2026-01-01T00:00:00+00:00",
+        # 「未设置」= 没有设置行：max_parallel 为 None 时不物化行，与 SQLite
+        # 侧的行缺失语义一致。
+        self.settings: BacklogSettingsEntry | None = (
+            None
+            if max_parallel is None
+            else BacklogSettingsEntry(
+                repo_id=repo_id,
+                max_parallel=max_parallel,
+                default_view="list",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
         )
         self.enqueue_calls: list[BacklogQueueEntry] = []
         self.update_calls: list[dict] = []
         self.clear_calls = 0
+        self.delete_settings_calls: list[str] = []
+        self.save_settings_calls = 0
         self.audits: list[AuditEntry] = []
 
     # -- reads ---------------------------------------------------------------
@@ -596,7 +604,13 @@ class FakeBacklogStore(IBacklogStore):
 
     # -- writes --------------------------------------------------------------
     def save_backlog_settings(self, settings: BacklogSettingsEntry) -> None:
+        self.save_settings_calls += 1
         self.settings = settings
+
+    def delete_backlog_settings(self, repo_id: str) -> None:
+        self.delete_settings_calls.append(repo_id)
+        if repo_id == self.repo_id:
+            self.settings = None
 
     def enqueue_backlog(self, entry: BacklogQueueEntry) -> int:
         self.enqueue_calls.append(entry)

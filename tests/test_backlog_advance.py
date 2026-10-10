@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_runner import (
     AutopilotConfig,
     BacklogConfig,
     CommandResult,
+    IssueSummary,
     RepositoryRunContext,
 )
 from backend.core.use_cases.backlog_actions import advance_backlog_queue
@@ -223,6 +224,17 @@ def test_no_slot_when_max_parallel_is_saturated(tmp_path: Path) -> None:
     store.seed(pending_b, "queued")
     client = FakeGitHubClient()
     client._issue_labels[1] = ("agent/running",)
+    client.set_list_issues_by_label_result(
+        [
+            IssueSummary(
+                number=1,
+                title="Running PRD",
+                url="https://github.com/example/repo/issues/1",
+                body="",
+                labels=("agent/running",),
+            )
+        ]
+    )
 
     report = advance(repo_path=repo_path, store=store, client=client)
 
@@ -230,6 +242,64 @@ def test_no_slot_when_max_parallel_is_saturated(tmp_path: Path) -> None:
     assert report.started == []
     assert store.entry_for(pending_b).status == "queued"
     assert not [call for call in client.calls if call["method"] == "edit_issue_labels"]
+
+
+def test_advance_counts_running_issue_without_prd_anchor(tmp_path: Path) -> None:
+    """未关联 Backlog PRD 的在跑 Issue 也占用自动补位预算。"""
+    candidate = write_prd(
+        tmp_path,
+        "tasks/pending/P1-FEAT-20260101-candidate.md",
+    )
+    store = FakeBacklogStore(max_parallel=1)
+    client = FakeGitHubClient()
+    client.set_list_issues_by_label_result(
+        [
+            IssueSummary(
+                number=99,
+                title="Explicit run without a PRD",
+                url="https://github.com/example/repo/issues/99",
+                body="",
+                labels=("agent/running",),
+            )
+        ]
+    )
+
+    report = advance(repo_path=tmp_path, store=store, client=client)
+
+    assert report.running_count == 1
+    assert report.running_count_is_lower_bound is False
+    assert report.free_slots == 0
+    assert report.started == []
+    assert report.queued == [candidate]
+
+
+def test_advance_fails_closed_when_running_count_fails(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """running 数查询失败时保留既有调度状态，但不晋升新 PRD。"""
+    candidate = write_prd(
+        tmp_path,
+        "tasks/pending/P1-FEAT-20260101-candidate.md",
+    )
+    store = FakeBacklogStore(max_parallel=1)
+    client = FakeGitHubClient()
+
+    def fail_running_count(label: str | None, limit: int, state: str = "all") -> list[IssueSummary]:
+        raise RuntimeError("GitHub unavailable")
+
+    client.list_issues_by_label = fail_running_count
+
+    report = advance(repo_path=tmp_path, store=store, client=client, dry_run=True)
+
+    assert report.running_count is None
+    assert report.free_slots == 0
+    assert report.started == []
+    assert report.queued == [candidate]
+    assert report.skipped == [
+        "agent/running count failed; skipped promotions this pass: GitHub unavailable"
+    ]
+    assert "skipping new promotions this pass" in caplog.text
 
 
 def test_blocked_prd_holds_entry_but_consumes_no_slot(tmp_path: Path) -> None:

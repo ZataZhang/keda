@@ -12,14 +12,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from backend.core.shared.interfaces.runner_console import (
     IRunnerProcessSupervisor,
     RunnerProcessKind,
     RunnerProcessRecord,
 )
-from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, RepositoryRunContext
 from backend.core.shared.models.backlog import BacklogPrdState
-from backend.core.use_cases.backlog_actions import start_global_backlog
+from backend.core.use_cases.backlog_actions import BacklogActionError, start_global_backlog
 from tests.conftest import FakeGitHubClient, FakeProcessRunner, FakeBacklogStore
 
 REPO_ID = "keda-test"
@@ -89,7 +91,7 @@ def _write_prd(repo_path: Path, relative_path: str, *, issue_number: int | None 
 def _start_global(
     repo_path: Path,
     *,
-    max_parallel: int,
+    execution_ceiling: int,
     store: FakeBacklogStore,
     client: FakeGitHubClient,
     supervisor: _FakeSupervisor,
@@ -102,7 +104,7 @@ def _start_global(
     )
     return start_global_backlog(
         repo_id=REPO_ID,
-        max_parallel=max_parallel,
+        execution_ceiling=execution_ceiling,
         contexts=[context],
         github_client_factory=lambda path: client,
         supervisor=supervisor,
@@ -121,24 +123,35 @@ def test_global_start_orders_by_priority(tmp_path: Path) -> None:
     supervisor = _FakeSupervisor(spawns=[])
 
     result = _start_global(
-        tmp_path, max_parallel=1, store=store, client=FakeGitHubClient(), supervisor=supervisor
+        tmp_path,
+        execution_ceiling=1,
+        store=store,
+        client=FakeGitHubClient(),
+        supervisor=supervisor,
     )
 
     assert [item.prd_path for item in result.started] == [p0_prd]
     assert result.queued == [p2_prd]
     assert result.started[0].state is BacklogPrdState.READY
     assert supervisor.spawns == [REPO_ID]
+    # 「全局开始」只消费上限，绝不落设置行（持久化设置是 PATCH /settings 的事）。
+    assert store.save_settings_calls == 0
+    assert store.delete_settings_calls == []
 
 
 def test_global_start_queues_overflow(tmp_path: Path) -> None:
-    """Candidates beyond max_parallel are enqueued, not started."""
+    """Candidates beyond the execution ceiling are enqueued, not started."""
     first_prd = _write_prd(tmp_path, "tasks/pending/P1-FEAT-20260101-a.md", issue_number=1)
     second_prd = _write_prd(tmp_path, "tasks/pending/P1-FEAT-20260101-b.md", issue_number=2)
     store = FakeBacklogStore(repo_id=REPO_ID)
     supervisor = _FakeSupervisor(spawns=[])
 
     result = _start_global(
-        tmp_path, max_parallel=1, store=store, client=FakeGitHubClient(), supervisor=supervisor
+        tmp_path,
+        execution_ceiling=1,
+        store=store,
+        client=FakeGitHubClient(),
+        supervisor=supervisor,
     )
 
     assert len(result.started) == 1
@@ -167,9 +180,73 @@ def test_global_start_skips_running_and_blocked(tmp_path: Path) -> None:
     supervisor = _FakeSupervisor(spawns=[])
 
     result = _start_global(
-        tmp_path, max_parallel=3, store=store, client=client, supervisor=supervisor
+        tmp_path, execution_ceiling=3, store=store, client=client, supervisor=supervisor
     )
 
     assert [item.prd_path for item in result.started] == [free_prd]
     assert running_prd not in result.queued
     assert blocked_prd not in result.queued
+
+
+def test_global_start_counts_running_issue_without_prd_anchor(tmp_path: Path) -> None:
+    """没有 PRD 锚点的在跑 Issue 也占用全局开始的自动预算。"""
+    pending_prd = _write_prd(
+        tmp_path,
+        "tasks/pending/P1-FEAT-20260101-pending.md",
+        issue_number=10,
+    )
+    client = FakeGitHubClient()
+    client.set_list_issues_by_label_result(
+        [
+            IssueSummary(
+                number=99,
+                title="Explicit run without a PRD",
+                url="https://github.com/example/repo/issues/99",
+                body="",
+                labels=("agent/running",),
+            )
+        ]
+    )
+    store = FakeBacklogStore(repo_id=REPO_ID)
+    supervisor = _FakeSupervisor(spawns=[])
+
+    result = _start_global(
+        tmp_path,
+        execution_ceiling=1,
+        store=store,
+        client=client,
+        supervisor=supervisor,
+    )
+
+    assert result.started == []
+    assert result.queued == [pending_prd]
+    assert supervisor.spawns == []
+
+
+def test_global_start_fails_closed_when_running_count_fails(
+    tmp_path: Path,
+) -> None:
+    """无法取得仓库级 running 数时，全局开始不得先行 spawn。"""
+    _write_prd(
+        tmp_path,
+        "tasks/pending/P1-FEAT-20260101-pending.md",
+        issue_number=10,
+    )
+    client = FakeGitHubClient()
+
+    def fail_running_count(label: str | None, limit: int, state: str = "all") -> list[IssueSummary]:
+        raise RuntimeError("GitHub unavailable")
+
+    client.list_issues_by_label = fail_running_count
+    supervisor = _FakeSupervisor(spawns=[])
+
+    with pytest.raises(BacklogActionError, match="agent/running"):
+        _start_global(
+            tmp_path,
+            execution_ceiling=1,
+            store=FakeBacklogStore(repo_id=REPO_ID),
+            client=client,
+            supervisor=supervisor,
+        )
+
+    assert supervisor.spawns == []

@@ -78,6 +78,7 @@ from backend.core.use_cases.create_prd_from_issue import (
     create_prd_from_issue,
 )
 from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
+from backend.core.use_cases.backlog_concurrency import count_live_running_issues
 
 RUNTIME_DEPENDENCY_NAMES = (
     "_process_ready_issue",
@@ -611,6 +612,12 @@ class RunOnceRequest:
     #: 调用方传的仍是 ``NORMAL``（默认值），但它是**调用侧请求档位**——认领后
     #: core 会用 Issue 上的 ``direct-pr`` 标签把它升级为 ``DIRECT``（逐 Issue 独立）。
     publish_stage: PublishStage = PublishStage.NORMAL
+    #: 统一自动执行并发上限（由调用方经 ``resolve_execution_ceiling`` 解析出的
+    #: 单一生效值）。非 ``None`` 时只约束 **ready 通道的新认领**：本轮认领数 =
+    #: max(0, ceiling − 在途 running 数)，认领数不足即少领；``None`` 表示不设
+    #: 闸门——人显式点名的路径（``kc run --issue`` / 控制台单PRD 开始）保持全量。
+    #: running / blocked / cleanup 通道是恢复性处理，不新增并发，不受该值约束。
+    execution_ceiling: int | None = None
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -738,11 +745,59 @@ def run_once(request: RunOnceRequest) -> int:
         )
     else:
         ready_issues = github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
+
+    # 统一并发闸门：仅当调用方解析出生效上限且非定向模式时约束 ready 通道的
+    # 新认领。running / blocked / cleanup 通道处理的是已在途或恢复性工作，
+    # 不新增并发，保持原配额。计数失败按 fail-closed 处理：本轮不认领新 Issue，
+    # 宁可不跑也不超发。
+    ready_claim_budget = effective_max_issues
+    running_count_failed = False
+    live_running_count_for_budget = 0
+    live_running_count: int | None = None
+    if request.execution_ceiling is not None and target_issue_summary is None:
+        ceiling = request.execution_ceiling
+        try:
+            live_running_count = count_live_running_issues(
+                github_client,
+                config.labels.running,
+                ceiling,
+            )
+            live_running_count_for_budget = live_running_count
+        except Exception as count_exc:  # noqa: BLE001 - 计数失败即不认领（fail-closed）。
+            _logger.warning(
+                "Failed to count live '%s' Issues for the concurrency ceiling: %s; "
+                "claiming zero new Issues this pass (fail-closed).",
+                config.labels.running,
+                count_exc,
+            )
+            running_count_failed = True
+            live_running_count_for_budget = ceiling
+        ready_claim_budget = min(
+            effective_max_issues,
+            max(0, ceiling - live_running_count_for_budget),
+        )
+        running_count_label = (
+            "unknown"
+            if live_running_count is None
+            else (
+                f"at least {live_running_count}"
+                if live_running_count > ceiling
+                else str(live_running_count)
+            )
+        )
+        _logger.info(
+            "Concurrency ceiling: ceiling=%d running=%s ready_budget=%d",
+            ceiling,
+            running_count_label,
+            ready_claim_budget,
+        )
+
     processed_count = 0
+    ready_claimed_count = 0
     issues_to_process: list[tuple[IssueSummary, str]] = []
 
     for issue in sort_ready_issues(ready_issues):
-        if processed_count >= effective_max_issues:
+        if len(issues_to_process) >= effective_max_issues:
             break
         declaration = parse_dependency_marker(issue.body)
         if declaration is not None:
@@ -750,6 +805,9 @@ def run_once(request: RunOnceRequest) -> int:
                 issues_to_process.append((issue, "direct_pr_cleanup"))
                 processed_count += 1
                 continue
+        if ready_claimed_count >= ready_claim_budget:
+            continue
+        if declaration is not None:
             verdict = evaluate_dependencies(declaration, github_client, config.labels)
             if not verdict.satisfied:
                 mark_dependency_waiting(
@@ -777,6 +835,7 @@ def run_once(request: RunOnceRequest) -> int:
             )
         issues_to_process.append((issue, "ready"))
         processed_count += 1
+        ready_claimed_count += 1
 
     # 发现 running Issue（使用剩余配额）；定向模式只考虑目标 Issue。
     remaining = effective_max_issues - processed_count
@@ -788,9 +847,34 @@ def run_once(request: RunOnceRequest) -> int:
                 else []
             )
         else:
-            running_candidates = github_client.list_review_candidate_issues(
-                [config.labels.running], remaining
-            )
+            try:
+                running_candidates = github_client.list_review_candidate_issues(
+                    [config.labels.running], remaining
+                )
+            except Exception as discovery_exc:
+                if not running_count_failed:
+                    raise
+                _logger.warning(
+                    "Could not query '%s' recovery candidates after the running-count "
+                    "failure (%s); retrying with a bounded open-Issue scan.",
+                    config.labels.running,
+                    discovery_exc,
+                )
+                try:
+                    open_issues = github_client.list_issues_by_label(
+                        None, _READY_DISCOVERY_LIMIT, state="open"
+                    )
+                    running_candidates = [
+                        issue for issue in open_issues if config.labels.running in issue.labels
+                    ][:remaining]
+                except Exception as fallback_exc:  # noqa: BLE001 - preserve the daemon pass.
+                    _logger.warning(
+                        "Could not discover in-flight '%s' recovery candidates after the "
+                        "running-count failure (%s); skipping running recovery this pass.",
+                        config.labels.running,
+                        fallback_exc,
+                    )
+                    running_candidates = []
         for issue in running_candidates:
             if _has_published_direct_pr_handoff(github_client, issue):
                 issues_to_process.append((issue, "direct_pr_cleanup"))

@@ -252,8 +252,9 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     ),
     "runner.max_issues": "每次轮询每个仓库最多处理多少个 Issue",
     "runner.max_concurrent_issues": (
-        "单轮内并行处理的 Issue 数量：1 为串行（默认）；>1 时同一轮并行跑多个 "
-        "Issue，仅 kc daemon --concurrency 未指定时作为默认值"
+        "单轮内并行处理的 Issue 数量（自动执行的 runner 容量）：1 为串行（默认）；>1 时同一轮并行跑多个 "
+        "Issue，仅 kc daemon --concurrency 未指定时作为默认值；自动调度的生效并发上限 "
+        "= min(Backlog「并发」策略, 本值)，显式 kc run 不受约束"
     ),
     "runner.default_agent": "默认使用的 AI agent：auto / claude / codex / kimi",
     "runner.max_recovery_attempts": "Agent 失败后的最大重试次数",

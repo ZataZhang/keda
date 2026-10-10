@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 人审层（§1-4）界定「这台仓库自动执行最多同时跑几个任务」的可见口径与验收选择；Part B 执行器层（§5-13）给出仓库落点、失败边界与验证证据。
@@ -478,47 +478,47 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 
 #### Architecture Acceptance
 
-- [ ] `resolve_execution_ceiling` 是唯一解析点；无第二套并发概念、无新调度器 / 存储 / 迁移（`rg -n "min\\(.*max_concurrent|ceiling" src/backend/core/use_cases` 复核）。
-- [ ] daemon 装配把 ceiling 下传补位与认领；显式运行调用链不带 `execution_ceiling`（`rg -n "execution_ceiling" src/backend` 复核）。
-- [ ] 依赖方向保持 `api -> core -> engines -> infrastructure`；`just lint` 全绿。
+- [x] `resolve_execution_ceiling` 是唯一解析点；无第二套并发概念、无新调度器 / 存储 / 迁移（`rg -n "min\\(.*max_concurrent|ceiling" src/backend/core/use_cases` 复核）。— 证据：`src/backend/core/use_cases/backlog_concurrency.py` 为唯一解析模块；`rg _DEFAULT_MAX_PARALLEL src/backend` 无命中；`tests/test_backlog_concurrency.py` 覆盖。
+- [x] daemon 装配把 ceiling 下传补位与认领；显式运行调用链不带 `execution_ceiling`（`rg -n "execution_ceiling" src/backend` 复核）。— 证据：`run_agent_daemon.py` 每仓解析并下传；`RunOnceRequest.execution_ceiling` 默认 `None`，显式路径不传；rv-4 实测显式运行不受限。
+- [x] 依赖方向保持 `api -> core -> engines -> infrastructure`；`just lint` 全绿。— 证据：`uv run python hooks/shared/check_architecture.py` 338 文件无违规；改动 19 个 .py 文件 ruff check + format 全绿；`just test` exit 0。（注：完整 `just lint` 的 check-test-flag 因 pre-commit 暂存态与 flag tree 口径差异未过，属提交管道产物而非代码违规，见 Change Log。）
 
 #### Behavior Acceptance
 
-- [ ] daemon 任意时刻自动认领在跑 ≤ min(设置, 容量)；每轮新认领 ≤ 上限 − 在跑（rv-1）。
-- [ ] 未设置 ⇒ 继承容量：补位与认领都使用容量值（rv-2）。
-- [ ] 已设置 ⇒ 取小：设置 2 / 容量 10 时限制为 2；设置大于容量时以容量为界（rv-1、rv-2）。
-- [ ] 在跑计数失败 fail-closed：跳过新认领并记录；不崩、不超发（rv-5）。
-- [ ] 显式 `kc run --issue` / `--all-ready`、控制台单点「开始」行为不变（rv-4 + 回归测试）。
-- [ ] `kc backlog advance --dry-run` 与报告显示 ceiling、来源与 free_slots（rv-2）。
-- [ ] `backlog_settings` 行缺失＝未设置；PATCH 设置 / 清除语义与 fresh 读回一致（rv-2、rv-3）。
-- [ ] 页面三态文案与后端值一致；保存 / 恢复继承后 fresh 读回一致（rv-3）。
+- [x] daemon 任意时刻自动认领在跑 ≤ min(设置, 容量)；每轮新认领 ≤ 上限 − 在跑（rv-1）。— 证据：`rv-1-daemon-claim-budget.log`（真实 `kc daemon` + fake gh/agent；设置 2 后每轮新认领 ≤ 2、峰值并发 = 2）。
+- [x] 未设置 ⇒ 继承容量：补位与认领都使用容量值（rv-2）。— 证据：`rv-2-advance-ceiling-report.txt`（未设置 → ceiling = 容量、source = inherited）。
+- [x] 已设置 ⇒ 取小：设置 2 / 容量 10 时限制为 2；设置大于容量时以容量为界（rv-1、rv-2）。— 证据：rv-1 负控（未实现前 6 就绪被整批领走 peak=6）与 rv-2 三来源（inherited / policy / capped_by_capacity）。
+- [x] 在跑计数失败 fail-closed：跳过新认领并记录；不崩、不超发（rv-5）。— 证据：`rv-5-fail-closed.log`（fake gh 注入标签查询失败 → 本轮零新认领 + warning，进程未崩）。
+- [x] 显式 `kc run --issue` / `--all-ready`、控制台单点「开始」行为不变（rv-4 + 回归测试）。— 证据：`rv-4-explicit-run-exempt.txt`（上限满时定向运行照常完成；`--all-ready` 与 daemon 互斥仍 exit 5）+ `tests/test_agent_runner_run_targeting.py`。
+- [x] `kc backlog advance --dry-run` 与报告显示 ceiling、来源与 free_slots（rv-2）。— 证据：rv-2 fresh CLI 报告含三字段。
+- [x] `backlog_settings` 行缺失＝未设置；PATCH 设置 / 清除语义与 fresh 读回一致（rv-2、rv-3）。— 证据：rv-2 只读 SQLite 核对行；rv-3 PATCH 清除后行删除、fresh GET 回读一致。
+- [x] 页面三态文案与后端值一致；保存 / 恢复继承后 fresh 读回一致（rv-3）。— 证据：`rv-3-console-backlog-report.txt` + 五张截图（inherit / policy / capped / saved4-fresh / restored-fresh）。
 
 #### Frontend Acceptance
 
-- [ ] `backlog-autopilot-control.tsx` 三态显示；设置 1–10 与恢复继承可达；错误提示与回滚可用。
-- [ ] `page.tsx` 视图切换不再隐式回写并发；`handleViewChange` 不携带 `maxParallel`。
-- [ ] `just frontend-public typecheck` 与 `just frontend-public build` 通过。
-- [ ] 原型-实现配对：目标态图与真实截图按状态（继承 / 设置 / 受限 / 编辑）配对并正确标注。
+- [x] `backlog-autopilot-control.tsx` 三态显示；设置 1–10 与恢复继承可达；错误提示与回滚可用。— 证据：rv-3 真实页面三态与编辑交互。
+- [x] `page.tsx` 视图切换不再隐式回写并发；`handleViewChange` 不携带 `maxParallel`。— 证据：`rg handleViewChange` 仅发 `defaultView`。
+- [x] `just frontend-public typecheck` 与 `just frontend-public build` 通过。— 证据：本轮 typecheck 无错误、build 预渲染 `/app/backlog` 等路由成功。
+- [x] 原型-实现配对：目标态图与真实截图按状态（继承 / 设置 / 受限 / 编辑）配对并正确标注。— 证据：`docs/prototypes/assets/backlog-unified-concurrency-ceiling.png`（design intent）与 rv-3 真实 console 截图按状态配对。
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 的「全局调度」「持续调度（Continuous Scheduling）」「并行处理 Issue（`kc daemon --concurrency`）」「多条 run 之间的并发边界」及配置注释段同步新语义（含显式运行豁免与 `--concurrency` 取小关系）。
-- [ ] 随包 `kedacode-operator` skill 的 `SKILL.md` 与 `references/daemon.md` 同步；`rg -n "并发|concurrency" src/backend/engines/agent_runner/templates/skills/kedacode-operator` 复核无旧口径。
-- [ ] `repository_local.py` 的 `runner.max_concurrent_issues` 字段注释同步。
+- [x] `docs/guides/agent-runner.md` 的「全局调度」「持续调度（Continuous Scheduling）」「并行处理 Issue（`kc daemon --concurrency`）」「多条 run 之间的并发边界」及配置注释段同步新语义（含显式运行豁免与 `--concurrency` 取小关系）。— 证据：本轮改动 diff 覆盖对应小节。
+- [x] 随包 `kedacode-operator` skill 的 `SKILL.md` 与 `references/daemon.md` 同步；`rg -n "并发|concurrency" .../kedacode-operator` 复核无旧口径。— 证据：`SKILL.md` L68 与 `references/daemon.md` L12 已写 `min(policy, capacity)` / 继承 / fail-closed / 显式豁免。
+- [x] `repository_local.py` 的 `runner.max_concurrent_issues` 字段注释同步。— 证据：本轮改动 diff。
 
 #### Validation Acceptance
 
-- [ ] 按 §7.6 完成 rv-1…rv-5；rv-1 现场负控红证已保存；证据绑定最终 Git tree，相关改动后重跑。
-- [ ] 目标测试集通过：`tests/test_backlog_concurrency.py`、`tests/test_backlog_actions.py`、`tests/test_backlog_advance.py`、`tests/test_backlog_autopilot_settings.py`、`tests/test_backlog_api.py`、`tests/test_daemon_parallel_concurrency.py`、`tests/test_console_store.py`，以及 `just test`（涉及跨层契约时 `CI=true just test all`）。
-- [ ] 真实入口：隔离场景 daemon / CLI（rv-1 / rv-2 / rv-4）与真实 console 页面（rv-3）；不把 mock 结果冒充真实入口。
+- [x] 按 §7.6 完成 rv-1…rv-5；rv-1 现场负控红证已保存；证据绑定最终 Git tree，相关改动后重跑。— 证据：`tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/` 全套产物 + `evidence.json`（经仓库自身 manifest parser 校验通过）。
+- [x] 目标测试集通过：`tests/test_backlog_concurrency.py`、`tests/test_backlog_actions.py`、`tests/test_backlog_advance.py`、`tests/test_backlog_autopilot_settings.py`、`tests/test_backlog_api.py`、`tests/test_daemon_parallel_concurrency.py`、`tests/test_console_store.py`，以及 `just test`（涉及跨层契约时 `CI=true just test all`）。— 证据：`--no-testmon` 强制全跑 179 passed；`just test` exit 0。
+- [x] 真实入口：隔离场景 daemon / CLI（rv-1 / rv-2 / rv-4）与真实 console 页面（rv-3）；不把 mock 结果冒充真实入口。— 证据：各 rv 脚本 `mock_boundary` 仅 fake gh/agent 外部边界。
 - [~] 独立 verifier 对 R2 / R3 evidence 复核 PASS — runner-owned gate: 独立验证
 - [~] PR 评审与归档按仓库 PRD 工作流执行 — runner-owned gate: 发布与归档
 
 #### Delivery Readiness
 
-- [ ] PR 证据包含 9.1 呈递内容、原型-实现配对与逐条命令；完成消息逐字携带 9.1 呈递区内容。
-- [ ] 全部非 Human-Confirmed 项完成并可机械复核；Human-Confirmed 留待人工。
-- [ ] 无残留旧口径引用（`rg` 搜索断言）；文档与页面一致。
+- [x] PR 证据包含 9.1 呈递内容、原型-实现配对与逐条命令；完成消息逐字携带 9.1 呈递区内容。— 证据：交付消息逐字携带 §9.1 呈递区；证据目录可 `open`。
+- [x] 全部非 Human-Confirmed 项完成并可机械复核；Human-Confirmed 留待人工。— 证据：本清单除 Human-Confirmed 与两个 runner-owned `[~]` 外均已勾选并标证据。
+- [x] 无残留旧口径引用（`rg` 搜索断言）；文档与页面一致。— 证据：`rg _DEFAULT_MAX_PARALLEL` 无命中；`execution_ceiling` 默认 None；文档/skill/页面无旧「伪造默认 2」口径。
 
 ## 10. Functional Requirements
 
@@ -547,6 +547,7 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - **标签近似与窄竞态**：在跑数是实时标签近似值，显式运行与 daemon 之间存在窗口。上限是选择层护栏，CAS 仍是唯一硬保证；文档披露。
 - **未保存仓库行为变化**（默认 2 → 容量）：预期修复；Change Log 与文档写明。已保存行不受影响。
 - **恢复继承（删行）重置默认视图偏好**：`backlog_settings` 行同时存 `default_view`；删行后视图偏好回落到 list。接受并在文档与 UI 提示说明；后续如需保留，另开 PRD 把视图偏好移出该行。
+- **同一行的另一面：未设置态无法单独持久视图偏好**：`max_parallel` 列 NOT NULL 且哨兵值已否决（D-04），因此 `PATCH /backlog/settings` 只带 `default_view` 而该仓没有策略行时**不落库**，响应如实返回 `list`——页面切换只在当前会话生效，刷新后回到默认视图；先设置一个「并发」策略值即可恢复持久。该口径写入 `docs/guides/agent-runner.md`「视图说明」与「全局调度」，契约由 `tests/test_backlog_api.py::test_default_view_only_patch_persists_only_with_policy_row` 与 `::test_empty_settings_patch_is_no_op` 锁定。
 - **console 前端版本漂移**：静态 bundle 与后端需同批 `console-sync` 并重启 console；否则旧文案与 404 风险。提交前与并行 PRD 协调 rebase。
 
 ## 13. Decision Log
@@ -562,12 +563,15 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 
 ### Final Reconciliation
 
-- Interpretation: 待实现后核对；目标为自动路径单一上限、显式运行豁免、页面生效值三态。
-- Public behavior and contracts: 待实现后核对；settings / autopilot / start-global 契约与前端类型以最终实现为准回写。
-- Related PRD status: 已检查；无硬依赖，软协调项见 §5 / §8。
-- Requirements and risks: 待实现后核对；若有出入以最终实现修正本 PRD 并追加 Change Log。
+- Interpretation: 已核对。自动路径单一上限＝min(设置, 容量)、未设置继承容量、补位与认领两处兑现；显式运行豁免；页面生效值三态并可设置 / 恢复继承——与 §1 行为样例逐格一致（rv-1 认领、rv-2 补位、rv-3 页面、rv-4 显式、rv-5 fail-closed）。
+- Public behavior and contracts: 已核对并回写。settings 返回可空策略＋`effective_max_parallel`＋`runner_capacity`＋`ceiling_source`；PATCH 支持设置（1–10）/ 清除（null＝删行）；start-global 请求移除 `max_parallel` 且不再持久化；前端 `types.ts` / `backlog.ts` 同步。未保存仓库自动并发由代码默认 2 变为继承容量（预期变化，已入 Change Log 与文档）。
+- Related PRD status: 已检查；无硬依赖；`kc-hosted-runner-deployment`（daemon 并发测试）、`lifecycle-agent-model-settings`（前端 bundle 与 Backlog 入口）为软重叠，提交前经 rebase 协调。
+- Requirements and risks: 已核对。FR-1…FR-9 全部实现并由 rv-1…rv-5 与目标测试集覆盖；§12 风险（僵尸 running、标签窄竞态、未保存行为变化、恢复继承重置 default_view、console bundle 漂移）在文档披露且实现符合。
 - Reconciled differences:
-  - none
+  - 实现以 `RunOnceRequest` 末位新增 `execution_ceiling: int | None = None`，未改既有参数顺序（见 Change Log）。
+  - `run_once` 并行分支为整轮阻塞语义，rv-1 通过在轮前预置 `agent/running` Issue 演示「在跑数计入预算」（见 Change Log）。
+  - §7.2 预测改动 `tests/test_backlog_advance.py` / `tests/test_daemon_parallel_concurrency.py`；实际由 `test_backlog_concurrency.py`（新增）、`test_backlog_actions.py`、`test_backlog_api.py` 与 daemon 相关既有测试覆盖，两文件未改（见 Change Log）。
+  - rv-3 依赖 `just console-sync` 产出的静态 bundle（gitignore），页面证据在隔离 fixture + 每 fixture 独立端口下采集（见 Change Log）。
 
 ## Change Log
 
@@ -586,3 +590,123 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - Reason: 用户 2026-10-10 在本轮对话确认该设计（两参数保留 + 取小合成 + 页面入口），并指示随后执行。
 - Impact: 无范围或行为变化；实现按原推荐路径推进；执行与验收状态仍以 §9 为准。
 - Review: 全部三项决定已由用户确认；实现与验证尚未开始。
+
+### 实现完成：统一自动执行并发上限落地
+- Type: scope
+- Before: PRD 处于「设计已确认、未开工」；§9 全部未勾、验收横幅为「未开工」。
+- After: core 解析（`backlog_concurrency.py`）＋ daemon 认领预算（`run_once` 的 `ceiling − 在跑`、计数失败 fail-closed）＋ 补位 / 全局开始切换上限＋ console API 可空策略与来源字段＋前端三态与最小设置 / 恢复继承＋文档与随包 skill 同步；rv-1…rv-5 全绿，目标测试集 179 passed、`just test` exit 0。
+- Reason: 按已确认设计实现 Issue #266，把三个互不换算的并发数字收敛为单一、可见、可设、两处（补位 + 认领）兑现的自动执行上限。
+- Impact: 未保存过设置的仓库自动并发由代码默认 2 变为继承 runner 容量（预期行为变化）；已保存行继续生效并与容量取小；无 schema 变更；显式运行、`--all-ready`、review/merge、claim CAS 不变。
+- Review: 执行侧交付完成，非 Human-Confirmed 验收项全部勾选并标证据；三项 Human-Confirmed 决定与 §9.1 呈递复核留待人工。
+
+### run_once 并行分支为整轮阻塞，rv-1 以预置在跑 Issue 演示在跑数扣减
+- Type: scope
+- Before: §7.6 rv-1 期望「先制造 1 个在跑时预算减 1」隐含在单轮内并发观察。
+- After: 因 `run_once` 走 ThreadPoolExecutor 并在本轮认领的分支阻塞至完成，改以在轮前向真实 state home 预置 `agent/running` 标签 Issue，令预算 `ceiling − running_now` 在认领选择处即被扣减，日志与 fake agent 探针共同证明「任意时刻自动认领在跑 ≤ 上限」。
+- Reason: 并行分支同轮内不会二次读取在跑数；预置 running 是跨进程一致（标签为事实源）的真实口径，避免为演示而 mock 认领选择。
+- Impact: 证据采集方式变化，不改变被测行为与门槛；rv-1 负控（未实现前 6 就绪被整批领走 peak=6）仍可红。
+- Review: 执行器决策，机械可复核（rv-1 日志 + 探针）。
+
+### RunOnceRequest 以末位可选字段承载 execution_ceiling
+- Type: scope
+- Before: §7.1 描述「`RunOnceRequest` 新增 `execution_ceiling`」未定字段位置与默认。
+- After: 在 dataclass 末位追加 `execution_ceiling: int | None = None`，ready 认领闸门仅在 `execution_ceiling is not None and target_issue_summary is None` 时生效（后者为 None 表示非显式定向）。
+- Reason: 末位可选字段保证 `kc run` 等显式调用方零改动、逐字节不变；`target_issue_summary is None` 天然把显式定向排除在上限之外。
+- Impact: 无对外行为变化；显式路径默认不触发预算闸门（rv-4 实测）。
+- Review: 执行器决策，回归测试与 rv-4 佐证。
+
+### 上限测试落点相对 §7.2 预测文件收敛
+- Type: scope
+- Before: §7.2 Change Impact Tree 预测改动 `tests/test_backlog_advance.py` 与 `tests/test_daemon_parallel_concurrency.py`。
+- After: 解析与来源由新增 `tests/test_backlog_concurrency.py` 覆盖，补位 / start-global 语义在 `tests/test_backlog_actions.py`、契约在 `tests/test_backlog_api.py`、认领预算与 fail-closed 在 daemon 相关既有测试；上述两预测文件未改动。
+- Reason: 复用既有测试夹具更贴合当前分层，避免在两个已足够大的文件里重复覆盖同一解析口径。
+- Impact: 覆盖面不减（目标测试集全绿）；Change Impact Tree 的测试文件清单与实际略有出入，以本条与 Final Reconciliation 记录为准。
+- Review: 执行器决策，`--no-testmon` 全跑 179 passed 佐证。
+
+### 页面证据依赖 console-sync 产物、隔离 fixture 与每实例独立端口
+- Type: scope
+- Before: §7.6 rv-3 描述「`kc console` 打开 Backlog 页面」未展开 bundle 与端口细节。
+- After: 改 `frontend-public/` 后经 `just console-sync` 重建并拷贝静态 bundle（gitignore，不入代码 diff），在隔离 fixture + 真实 API + 真实 SQLite + 每 fixture 独立端口下用 Playwright 采集 inherit / policy / capped / saved4-fresh / restored-fresh 五态；恢复继承后核对 SQLite 行已删除。
+- Reason: console 提供静态导出，旧 bundle 会显示旧文案；多 fixture 需隔离端口避免串扰。
+- Impact: 证据采集团环境细节；被测为真实页面写入路径（PATCH→DB→fresh GET），非组件预览。
+- Review: 人工审阅项（§9.1 呈递区三态截图 + 10 秒自检）。
+
+### 证据脚本目录自忽略，防止 RV harness 泄漏进代码 diff
+- Type: scope
+- Before: 根 `.gitignore` 的 `!tasks/evidence/**/*.md` 例外使 `scripts/` 下的 prd-skill 存根与被忽略，临时 fixture 仓库也可能污染 `git status`。
+- After: 新增 `tasks/evidence/.../scripts/.gitignore`（内容 `*`）整目录忽略 RV 脚本与中间产物，并清理 `work/` 临时 fixture。
+- Reason: runner 拒绝 RV 脚本进入改动集；证据产物应留在 runner 的证据分支而非代码 diff。
+- Impact: 代码 diff 仅含实现 / 测试 / 文档 / 原型文件；证据目录内容不进入提交。
+- Review: 执行器决策，`git status` 干净佐证。
+
+### check-test-flag 在无暂存态下的 tree 口径产物（非代码违规）
+- Type: scope
+- Before: 提交门禁 `check_test_flag.sh` 期望 staged tree 与 `just test` 记录一致。
+- After: 本轮禁止 `git add`，pre-commit 会 stash 未暂存改动，使 staged tree 与 flag 记录的 working tree 口径无法对齐，完整 `just lint` 仅在 check-test-flag 一项过期；改以直接运行真实门禁（ruff check/format、`check_architecture.py`、`just test`）逐项证明代码合规。
+- Reason: 执行约束要求不自行 `git add`/`commit`，提交由 runner 经 `.agent-runner/commit-request.json` 完成；check-test-flag 属提交管道而非代码质量问题。
+- Impact: 不影响代码正确性；runner 在实际 `git add -A` + `just test` 后该 flag 自然对齐。
+- Review: 执行器披露，供 runner 与人工知晓。
+
+### 恢复继承（删行）重置 default_view 的实现落地确认
+- Type: scope
+- Before: §12 标注「恢复继承＝删 `backlog_settings` 行，会使 `default_view` 回落 list」为已知副作用（计划项）。
+- After: 实现按此语义：清除即删行，`default_view` 随行删除回落；UI 与文档披露该副作用，未额外把视图偏好拆出该行。
+- Reason: 保持「无 schema 变更、沿用行缺失语义」（D-04）；拆列需迁移，成本高于收益。
+- Impact: 用户恢复继承后默认视图回到 list；已在页面提示与文档说明。
+- Review: 人工知悉项（随 §2 决定三与 §9.1 一并复核）。
+
+### rv-3 证据脚本取错 PATCH 负载（异步缓冲竞态致误红）
+- Type: validation
+- Before: `rv3_console.py` 断言 `settings_patch.max_parallel`，但驱动记录的其实是 PATCH 的**响应体**，且经 `page.on("response")` 异步缓冲（监听里 `await response.json()` 晚于取数）：`policy` 步负载被记成 `_non_json` → 页面三态、来源、DB 行删除全部正确，脚本却 exit 1，runner 复跑该项失败。
+- After: 驱动在点击动作处同步取齐 PATCH **请求体**（`request.postDataJSON()`）与响应体（await 后入记录），并对本步 fresh GET 增加落位等待；`rv3_console.py` 改为断言请求体 `max_parallel`＝2 / 8 / 4 / null、status=200、响应写回值与请求一致，另新增 fresh GET /settings 策略值与 /autopilot 生效值同源断言。连续两次独立复跑均 `RESULT: PASS`（exit 0）。
+- Reason: runner 逐字复跑 RV 命令，证据脚本自身的取数竞态即假失败；「页面写了什么」应以页面发出的请求体为事实源，而不是从服务端响应反推。
+- Impact: 仅改动 `tasks/evidence/.../scripts/` 下的证据脚本（整目录 gitignore，不入代码 diff），生产代码与被测行为零改动；rv-3 判别力增强（多两组同源断言）。同时新增可复现现场负控 `rv3_negative.py`：向 gitignored 的 console 静态构建产物注入旧「未设置即显示伪造默认 2」口径，`rv3_console.py` 出现 6 条断言变红（inherit / capped / restored-fresh 文案不符 + 页面数字与 fresh GET 生效值不同源），随后按字节还原并校验，红证存 `rv-3-negative-control.txt`。
+- Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；item 3 的 `negative_control` / `expected_fail` 已改为实测命令与实测红态。
+
+### rv-1 复跑误红：fixture 端口哈希碰撞，改为内核分配空闲端口并重试
+- Type: validation
+- Before: 证据 harness 的 console 端口为 `8940 + abs(hash(name)) % 40`；runner 复跑 item 1 时（04:03），`rv1-p2` 与 `rv1-r1` 在该进程哈希种子下解到同一端口 8956，且 P2 console 刚停止、socket 尚处 TIME_WAIT，R1 的 `kc console --port 8956` 预检报「already in use」退出，`start_console` 探测超时 raise，脚本 exit 1（红证残留于 `work/rv1-r1/console.log`，P2/R1 场景目录即中断现场）。
+- After: `fixture_lib.py` 改为每个 fixture 构造时经 `bind(0)` 向内核申请空闲端口，并以进程内集合避免顺序 fixture 重复取端口；`start_console` 在绑定失败或超时时换端口重试（最多 3 次，同步重写 config.toml）。修复后 rv1 连续两次独立复跑均 exit 0 且逐行数值与捕获一致（P2/R1/R0/UNSET），三场景端口各不相同；rv-2/rv-4/rv-5 与 rv-3（含现场负控复跑：6 条红态、bundle 按字节还原）在最终 tree 上全部重跑并再生证据。
+- Reason: runner 逐字复跑 RV 命令，采集 harness 自身的端口碰撞即假失败；修复只落在 gitignored 的证据脚本，不动生产代码与被测行为。
+- Impact: 仅 `tasks/evidence/.../scripts/` 与证据产物再生；生产代码零改动；item 1 复跑命令恢复稳定绿。
+- Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求。
+
+### rv-* 复跑把临时 fixture 落在证据根，脏化工作树阻塞独立 verifier
+- Type: validation
+- Before: `fixture_lib.py` 把临时 fixture 仓库建在 `EVIDENCE_DIR/work/<name>/repo/`（证据根下的 `work/`，与 gitignored 的 `scripts/` 同级）。这些 fixture 是真实 git 仓库、内含 `README.md`；根 `.gitignore` 的 `!tasks/evidence/**/*.md` 白名单把这些 `*.md` 重新纳入跟踪，使 `git status --porcelain` 报出 `?? work/.../repo/`。独立 verifier 门禁 `run_verifier_gate` 先要求 `has_changes` 为假，而 `ensure_validation_commands_pass` 又在其之前逐字复跑 RV 脚本、当场重建这些 fixture——于是复跑越成功，工作树越脏，verifier 稳定抛「Independent verifier requires a clean committed worktree」。上一轮 rv-1/rv-3 已把生产代码与被测行为修到复跑全绿（本轮 rv1…rv5 再跑均 exit 0、`stdout_assertions` 全部命中），真正卡住的只剩这个采集 harness 的工作树洁净度。
+- After: `fixture_lib.py` 默认把 fixture base 从证据根 `work/` 迁到 `scripts/work/`（`scripts/.gitignore` 已是整目录 `*`），并对任何 base（含 `RV_FIXTURE_BASE` 覆盖）在构造 fixture 前写入自忽略 `work/.gitignore=*`——更深目录的 `.gitignore` 优先于根白名单，与 `scripts/.gitignore` 屏蔽 prd skill 桩 `SKILL.md` 同一生效机制。删除证据根遗留的 `work/`，最终树上 rv1…rv5 全量复跑后再 `git status --porcelain` 为空（CLEAN），verifier 的 clean-tree 前置得以满足。
+- Reason: 独立 verifier 与最终 tree 绑定要求工作树干净，且复跑发生在 verifier 之前；采集 harness 的临时现场若进入 `git status` 即自锁死门禁，属证据脚本自身的落点错误，而非被测行为问题。
+- Impact: 仅改动 `tasks/evidence/.../scripts/`（整目录 gitignored，不入代码 diff）与证据产物再生；生产代码、被测行为、rv 判别力均不变；`item 1…5` 的 `command`/`negative_control`/`expected_fail`/`stdout_assertions` 未改。
+- Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；无 `[~]` runner-owned 项状态变化（独立 verifier 复核与发布归档仍由 runner 执行）。
+
+### 会话记录按调用阶段过滤，修复/核验阶段不再覆盖实现会话（交付门禁修复）
+- Type: scope
+- Before: `run_agent_with_prompt` 只按 `profile` 过滤会话记录落盘；修复 / 核验等阶段与实现共用默认 `profile="run"`，会把恢复用的主实现会话 id 覆盖掉（续错对象），并把本 diff 新跟踪的 `.iar/agent-runner/sessions/qoder.json` 改脏——独立 verifier 以 run profile 运行时直接触发「verifier 不得改动代码树」门禁误报。
+- After: 落盘条件收紧为「run profile 且调用阶段为 `implementation` 或未标注」；`fix` / `verification` 等独立对话即使同 profile 也不写记录。与 issue-262 分支 `e202b23d` 的同类修复同向（彼处按 `PHASE_VERIFICATION` 单挡并取消跟踪会话文件，本分支按阶段一般化且随交付跟踪 qoder 会话文件），rebase 时按同一口径协调。回归测试见 `tests/test_agent_runner_agent_invocation.py::TestSessionRecordPersistence`。
+- Reason: 该缺陷在本 PRD 的交付门禁现场暴露（verifier 复跑 rv 会写脏 qoder 会话记录，clean-tree 前置失败）；按「修复触发门禁的源代码」原则就地修复，而非绕行门禁。
+- Impact: 仅恢复路径的旁路落盘行为变化：修复 / 核验会话不再产生可恢复断点（原本就是错误断点）；实现会话落盘与既有恢复语义不变。§7.2 变更树未预测此文件，以本条为准。
+- Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；行为由新增回归测试锁定。
+
+### qoder 会话记录最终未随交付跟踪（Change Log 订正）
+- Type: scope
+- Before: 上一条「会话记录按调用阶段过滤…」称本分支「随交付跟踪 qoder 会话文件」、本 diff 新跟踪 `.iar/agent-runner/sessions/qoder.json`。
+- After: 该文件最终未进入交付树：交付前将其移出 Git 跟踪，并把 `.iar/agent-runner/` 整体加入根 `.gitignore`（`git check-ignore` 已生效，on-disk 文件仅保留在本机）；按调用阶段过滤会话记录的修复本身不变，仍由 `tests/test_agent_runner_agent_invocation.py::TestSessionRecordPersistence` 锁定。
+- Reason: 独立 verifier 的 clean-tree 前置要求会话记录不进入交付验证树；issue-262 分支 `e202b23d` 的同类修复同样取消跟踪会话文件，两分支 rebase 时按「不跟踪会话文件」的同一口径协调。
+- Impact: 仅交付跟踪范围与本 Change Log 记录的订正；生产代码、被测行为、rv 证据均不变；`git ls-files .iar/` 为空、`git diff -- .iar/` 为空。
+- Review: 执行器修复，供 runner 与人工知晓，避免归档记录与最终树不一致。
+
+### 未设置态视图偏好不可持久：补文档口径与 PATCH 契约测试
+- Type: scope
+- Before: 「视图说明」一节仍写「『时间轴』『列表』选择会通过 `PATCH /backlog/settings` 回写 `default_view`」，无条件成立；而本轮把策略改为可空后，该写回只在仓库已有策略行时落库。从未保存过「并发」的仓库（现在的默认态）切换视图其实静默不持久，且这条分支没有任何自动化测试锁定，只有独立 verifier 的手工探针碰过。
+- After: `docs/guides/agent-runner.md`「视图说明」与「全局调度」两处如实写明条件与恢复办法（先设置一个策略值即可持久），§12 增列该风险面；新增 `tests/test_backlog_api.py::test_default_view_only_patch_persists_only_with_policy_row`（无行→返回 list 且不落库；有行→持久且不改写策略）与 `::test_empty_settings_patch_is_no_op`。生产代码零改动。
+- Reason: 需求源只披露了「恢复继承删行 → 视图回落」这一面，没有覆盖「无策略行时视图偏好根本写不进去」；文档描述旧现实 + 行为回归无测试锁定，属交付缺口而非风格问题。D-04 已否决哨兵值与 schema 变更，故按如实披露处理，不改存储语义。
+- Impact: 操作员在未设置态切换视图不再被持久——与改动前（顺带落一行伪造策略 2 换取视图持久）不同，这是本需求的直接后果，现已在文档与本节写明；后端契约与页面代码不变。
+- Review: 评审侧修复（Issue #266 第二轮 Pre-PR），未削弱任何用户可见、安全、范围或真实验证要求；两条新测试即该契约的机械门禁。
+
+### 五项 Realistic Validation 在最终交付树复跑，rv-3 不再依赖「源码未变」复用判定
+- Type: validation
+- Before: rv-1…rv-5 的 `rv-N-implementation-tree.txt` 全部记 `13e52394 / a68f3e0f…`，rv-3 报告并声明「页面与后端源代码自该成功运行以来未变」（记录点为 `44ed390a`）；随后 `4335947c` 改动了 rv-2 的 `backlog_actions.py` 补位自解析分支与 rv-3 的 `backlog-autopilot-control.tsx` / `page.tsx`，最终树上的 rv-2 / rv-3 因此没有绑定证据，rv-3 的上一次复跑又被浏览器权限阻断。
+- After: 在 `HEAD=4335947c`（tree `61d7a965…`）逐字复跑五项规定命令并全部 exit 0——rv-2 16:03、rv-1 / rv-4 / rv-5 16:04–16:05（含各自现场负控 RED 复现与按字节还原）、rv-3 16:06（`just console-sync` → 旧 bundle 口径负控 6 条断言变红并还原 → 真实 console 页面五态 PASS，截图与 DB 终态行删除再生）；`rv-3-console-roundtrip.txt`、`rv-3-tree-equivalence.txt` 与五个 tree 绑定文件按本轮产物重写，报告改为如实陈述复跑而非「源码未变」复用。复跑后 `git status` 仅含本轮文档 / 测试修复，工作树未被证据采集污染。
+- Reason: 独立验证与最终 tree 绑定不接受跨树复用判定；`4335947c` 之后 rv 的 `final_tree_evidence` 条款（「页面 / API / 路由改动后重跑」「补位 / 解析 / 路由改动后重跑」）被触发。
+- Impact: 仅证据产物与记录更新；生产代码、被测行为与 rv 判别力不变；上一轮披露的浏览器阻断限制本轮已消失，相应披露作废。
+- Review: 评审侧驱动的执行复跑（Issue #266 第二轮 Pre-PR），runner 的独立 verifier 仍会在最终树上逐字复跑，本条只保证交付证据自身与代码树一致。

@@ -123,8 +123,15 @@ class BacklogAdvanceReport:
     Attributes:
         repo_id: Target repository ID.
         dry_run: ``True`` when the pass only computed the plan without writing.
-        max_parallel: Concurrency ceiling read from the persisted backlog settings.
+        ceiling: The single resolved concurrency ceiling used by this pass
+            (``min(policy, runner capacity)``, policy ``None`` inherits capacity).
+        ceiling_source: Where the ceiling came from: ``"inherited"`` /
+            ``"policy"`` / ``"capped_by_capacity"``.
         free_slots: Slots available for promotion in this pass.
+        running_count: Live repository-wide ``agent/running`` count, or ``None``
+            if the count query failed and promotions were skipped.
+        running_count_is_lower_bound: ``True`` when the live count exceeded the
+            ceiling and the value is therefore a lower bound.
         reconciled_completed: PRD paths whose queue entry was closed as ``completed``
             because the PRD is merged or archived.
         reconciled_failed: PRD paths whose queue entry was parked as ``failed``.
@@ -136,8 +143,11 @@ class BacklogAdvanceReport:
 
     repo_id: str
     dry_run: bool
-    max_parallel: int
+    ceiling: int
+    ceiling_source: str
     free_slots: int
+    running_count: int | None
+    running_count_is_lower_bound: bool
     reconciled_completed: list[str]
     reconciled_failed: list[str]
     started: list[BacklogActionResult]

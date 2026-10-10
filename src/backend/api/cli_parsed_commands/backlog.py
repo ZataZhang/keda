@@ -2,7 +2,8 @@
 
 Runs exactly one continuous-scheduling pass for a single target repository:
 reconcile finished/failed queue entries, then promote queued PRDs (and PRDs
-newly discovered in ``tasks/pending/``) up to ``max_parallel``.
+newly discovered in ``tasks/pending/``) up to the resolved execution ceiling
+(``min(policy, runner capacity)``; unsaved policy inherits capacity).
 
 This is the manual entry point for the same logic the fast-lane daemon runs
 every pass, so ``--dry-run`` doubles as the "what would the next pass do?"
@@ -37,9 +38,18 @@ def _print_advance_report(report) -> None:
     """
     mode = "dry-run" if report.dry_run else "applied"
     console.print(f"[bold]backlog advance[/] ({mode}) repo={report.repo_id}")
+    running_count_label = (
+        "unknown"
+        if report.running_count is None
+        else (
+            f"at least {report.running_count}"
+            if report.running_count_is_lower_bound
+            else str(report.running_count)
+        )
+    )
     console.print(
-        f"max_parallel={report.max_parallel} free_slots={report.free_slots} "
-        f"running_after={report.max_parallel - report.free_slots}"
+        f"ceiling={report.ceiling} source={report.ceiling_source} "
+        f"running={running_count_label} free_slots={report.free_slots}"
     )
     if report.reconciled_completed:
         console.print(f"[green]completed[/] {report.reconciled_completed}")

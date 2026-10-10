@@ -627,8 +627,8 @@ def test_run_once_routes_mid_rebase_running_issue_to_recovery(
     running_issue = _make_ready_issue(85, "Issue #85", "PRD path: `tasks/x.md`", (running_label,))
     fake_client = FakeGitHubClient()
     fake_client.list_ready_issues = lambda ready_label, limit: []
-    fake_client.list_review_candidate_issues = (
-        lambda labels, limit: [running_issue] if running_label in labels else []
+    fake_client.list_review_candidate_issues = lambda labels, limit: (
+        [running_issue] if running_label in labels else []
     )
 
     monkeypatch.setattr(
@@ -665,8 +665,8 @@ def test_run_once_skips_running_issue_without_recoverable_state(
     running_issue = _make_ready_issue(85, "Issue #85", "PRD path: `tasks/x.md`", (running_label,))
     fake_client = FakeGitHubClient()
     fake_client.list_ready_issues = lambda ready_label, limit: []
-    fake_client.list_review_candidate_issues = (
-        lambda labels, limit: [running_issue] if running_label in labels else []
+    fake_client.list_review_candidate_issues = lambda labels, limit: (
+        [running_issue] if running_label in labels else []
     )
 
     monkeypatch.setattr(
@@ -1617,3 +1617,262 @@ def test_run_once_sequential_default_writes_per_issue_logs(monkeypatch, tmp_path
     # 每个 Issue 各自一份尝试日志（文件名含 Issue 编号与时间戳）。
     assert len(list(issue_log_dir.glob("issue-1-*.log"))) == 1
     assert len(list(issue_log_dir.glob("issue-2-*.log"))) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 统一并发上限：run_once 的 ready 认领闸门（PRD P1-FEAT-20261010-011714）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _dry_run_selected_issue_numbers(caplog: pytest.LogCaptureFixture) -> list[int]:
+    """从 DRY RUN 汇总里取出本轮实际认领的 Issue 编号。"""
+    return [
+        int(line.split("Issue #", 1)[1].split(" ", 1)[0])
+        for line in caplog.text.splitlines()
+        if "would process Issue #" in line
+    ]
+
+
+def test_run_once_execution_ceiling_limits_new_ready_claims(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """生效上限 2、无在途 running → 本轮只认领 2 个新 ready（配额 3 用不满）。"""
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(n, f"I{n}", "", ("agent/ready",)) for n in (7, 8, 9)
+    ]
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=3,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+            execution_ceiling=2,
+        )
+    assert exit_code == 0
+    assert "Concurrency ceiling: ceiling=2 running=0 ready_budget=2" in caplog.text
+    assert _dry_run_selected_issue_numbers(caplog) == [7, 8]
+
+
+def test_run_once_ceiling_saturated_by_running_claims_zero_new_ready(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """在途 running 已占满上限 → ready 通道零认领，但恢复通道保持原配额。
+
+    认领预算 = max(0, ceiling − 在途数)；running / blocked 是恢复性处理，
+    不新增并发，不受上限压低——否则卡住的在途 Issue 会因补位闸门饿死。
+    """
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(7, "I7", "", ("agent/ready",))
+    ]
+    fake_client.set_list_issues_by_label_result(
+        [
+            _make_ready_issue(21, "R21", "", ("agent/running",)),
+            _make_ready_issue(22, "R22", "", ("agent/running",)),
+            _make_ready_issue(23, "R23", "", ("agent/running",)),
+        ]
+    )
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=3,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+            execution_ceiling=2,
+        )
+    assert exit_code == 0
+    assert "Concurrency ceiling: ceiling=2 running=at least 3 ready_budget=0" in caplog.text
+    assert _dry_run_selected_issue_numbers(caplog) == []
+    count_call = [call for call in fake_client.calls if call["method"] == "list_issues_by_label"]
+    assert count_call[0]["state"] == "open"
+    assert count_call[0]["limit"] == 3
+    recovery_calls = [
+        call for call in fake_client.calls if call["method"] == "list_review_candidate_issues"
+    ]
+    assert recovery_calls
+    assert all(call["limit"] == 3 for call in recovery_calls)
+
+
+@pytest.mark.parametrize(
+    ("running_issues", "expected_issue_kinds"),
+    [
+        ([], [(8, "direct_pr_cleanup"), (9, "ready")]),
+        (
+            [_make_ready_issue(21, "Already running", "", ("agent/running",))],
+            [(8, "direct_pr_cleanup")],
+        ),
+    ],
+    ids=("cleanup-does-not-consume-ready-budget", "cleanup-survives-saturated-ceiling"),
+)
+def test_run_once_direct_pr_cleanup_bypasses_ready_claim_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    running_issues: list[IssueSummary],
+    expected_issue_kinds: list[tuple[int, str]],
+) -> None:
+    """Direct PR 收尾不消耗新认领预算；额度满时也照常进入收尾通道。"""
+    from backend.core.use_cases import agent_runner_orchestration_runtime as runtime
+
+    cleanup_issue = _make_ready_issue(
+        8,
+        "Published Direct PR handoff",
+        "<!-- iar:depends-on #1 -->",
+        ("agent/ready",),
+    )
+    regular_ready_issue = _make_ready_issue(9, "New work", "", ("agent/ready",))
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [cleanup_issue, regular_ready_issue]
+    fake_client.set_list_issues_by_label_result(running_issues)
+    monkeypatch.setattr(
+        runtime,
+        "_has_published_direct_pr_handoff",
+        lambda _github_client, issue: issue.number == cleanup_issue.number,
+    )
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=2,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+            concurrency=2,
+            execution_ceiling=1,
+        )
+
+    assert exit_code == 0
+    expected_running_count = len(running_issues)
+    expected_ready_budget = 1 - expected_running_count
+    assert (
+        f"Concurrency ceiling: ceiling=1 running={expected_running_count} "
+        f"ready_budget={expected_ready_budget}"
+    ) in caplog.text
+    actual_issue_kinds = [
+        (issue_number, issue_kind)
+        for issue_number, issue_kind in ((8, "direct_pr_cleanup"), (9, "ready"))
+        if f"would process Issue #{issue_number} ({issue_kind})" in caplog.text
+    ]
+    assert actual_issue_kinds == expected_issue_kinds
+
+
+def test_run_once_running_count_failure_claims_zero_fail_closed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """在途数查询异常时 fail-closed：本轮零认领，daemon 不因此崩溃。"""
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(7, "I7", "", ("agent/ready",))
+    ]
+
+    def _boom(label: str, limit: int, state: str = "all") -> list[IssueSummary]:
+        raise RuntimeError("gh unavailable")
+
+    fake_client.list_issues_by_label = _boom
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=2,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+            execution_ceiling=2,
+        )
+    assert exit_code == 0
+    assert "claiming zero new Issues this pass (fail-closed)" in caplog.text
+    assert _dry_run_selected_issue_numbers(caplog) == []
+
+
+def test_run_once_running_count_failure_keeps_recovery_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """计数与标签候选查询同时失败时，用 open Issue 扫描继续运行恢复通道。"""
+    from backend.core.use_cases import agent_runner_orchestrate as orchestrate
+
+    running_label = AppConfig().labels.running
+    running_issue = _make_ready_issue(21, "Running recovery", "", (running_label,))
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(7, "Ready", "", ("agent/ready",))
+    ]
+
+    def _fail_running_label_query(labels: list[str], limit: int) -> list[IssueSummary]:
+        if running_label in labels:
+            raise RuntimeError("running label query unavailable")
+        return []
+
+    def _running_count_fails(
+        label: str | None, limit: int, state: str = "all"
+    ) -> list[IssueSummary]:
+        if label == running_label:
+            raise RuntimeError("running count unavailable")
+        if label is None and state == "open":
+            return [running_issue]
+        return []
+
+    fake_client.list_review_candidate_issues = _fail_running_label_query
+    fake_client.list_issues_by_label = _running_count_fails
+    monkeypatch.setattr(
+        orchestrate,
+        "_has_existing_local_commit_ready_for_publish",
+        lambda **_kwargs: False,
+    )
+    monkeypatch.setattr(orchestrate, "_worktree_needs_rebase_recovery", lambda **_kwargs: True)
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=2,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+            execution_ceiling=2,
+        )
+
+    assert exit_code == 0
+    assert "claiming zero new Issues this pass (fail-closed)" in caplog.text
+    assert "retrying with a bounded open-Issue scan" in caplog.text
+    assert "would process Issue #21 (running_publish_recovery)" in caplog.text
+    assert _dry_run_selected_issue_numbers(caplog) == [21]
+
+
+def test_run_once_without_ceiling_keeps_explicit_path_fully_exempt(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """不传 execution_ceiling（显式 run / --all-ready 默认）→ 不数在途、全量认领。
+
+    人显式点名的路径保持既有语义：即便 GitHub 上有在途 running，也不挤占
+    本轮配额；闸门只属于自动执行（daemon / 控制台全局开始）。
+    """
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        _make_ready_issue(n, f"I{n}", "", ("agent/ready",)) for n in (7, 8)
+    ]
+    fake_client.set_list_issues_by_label_result(
+        [_make_ready_issue(21, "R21", "", ("agent/running",))]
+    )
+    with caplog.at_level(logging.INFO):
+        run_once(
+            repo_path=Path("."),
+            config=AppConfig(),
+            dry_run=True,
+            agent="auto",
+            max_issues=2,
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+        )
+    assert not [call for call in fake_client.calls if call["method"] == "list_issues_by_label"]
+    assert _dry_run_selected_issue_numbers(caplog) == [7, 8]
