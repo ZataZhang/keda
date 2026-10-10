@@ -1,0 +1,5 @@
+kc console listening on http://127.0.0.1:8763/ (Ctrl+C to stop)
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8763 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51910 - "GET /app/stats HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:51910 - "GET /app/stats/ HTTP/1.1" 200 OK

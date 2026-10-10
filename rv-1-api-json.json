@@ -1,0 +1,263 @@
+[
+  {
+    "status_code": 200,
+    "request_url": "http://testserver/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda-main&days=30",
+    "json": {
+      "repo_id": "keda-main",
+      "window_days": 30,
+      "agents": [
+        {
+          "repo_id": "keda-main",
+          "agent": "codex",
+          "preset": null,
+          "model": null,
+          "attempt_count": 3,
+          "success_count": 2,
+          "non_success_count": 1,
+          "success_rate": 0.6666666666666666,
+          "non_success_rate": 0.3333333333333333,
+          "p50_duration_seconds": 30.0,
+          "p90_duration_seconds": 46.0,
+          "failure_types": [
+            {
+              "failure_type": "verification_failed",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "repo_id": "keda-main",
+          "agent": "未记录",
+          "preset": null,
+          "model": null,
+          "attempt_count": 1,
+          "success_count": 0,
+          "non_success_count": 1,
+          "success_rate": 0.0,
+          "non_success_rate": 1.0,
+          "p50_duration_seconds": 20.0,
+          "p90_duration_seconds": 20.0,
+          "failure_types": [
+            {
+              "failure_type": "future_failure_type",
+              "count": 1
+            }
+          ]
+        }
+      ],
+      "presets": [
+        {
+          "repo_id": "keda-main",
+          "agent": "codex",
+          "preset": "removed-preset",
+          "model": "model-a",
+          "attempt_count": 2,
+          "success_count": 1,
+          "non_success_count": 1,
+          "success_rate": 0.5,
+          "non_success_rate": 0.5,
+          "p50_duration_seconds": 20.0,
+          "p90_duration_seconds": 28.0,
+          "failure_types": [
+            {
+              "failure_type": "verification_failed",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "repo_id": "keda-main",
+          "agent": "codex",
+          "preset": "removed-preset",
+          "model": "model-b",
+          "attempt_count": 1,
+          "success_count": 1,
+          "non_success_count": 0,
+          "success_rate": 1.0,
+          "non_success_rate": 0.0,
+          "p50_duration_seconds": 50.0,
+          "p90_duration_seconds": 50.0,
+          "failure_types": []
+        }
+      ],
+      "unbound_preset_attempt_count": 1,
+      "runs": [
+        {
+          "repo_id": "keda-main",
+          "outcome": "completed",
+          "run_count": 2,
+          "p50_duration_seconds": 50.0,
+          "p90_duration_seconds": 58.0
+        },
+        {
+          "repo_id": "keda-main",
+          "outcome": "failed",
+          "run_count": 1,
+          "p50_duration_seconds": 20.0,
+          "p90_duration_seconds": 20.0
+        },
+        {
+          "repo_id": "keda-main",
+          "outcome": "blocked",
+          "run_count": 1,
+          "p50_duration_seconds": 30.0,
+          "p90_duration_seconds": 30.0
+        }
+      ]
+    }
+  },
+  {
+    "status_code": 200,
+    "request_url": "http://testserver/api/v1/agent-runner/console/stats/agent-performance?days=30",
+    "json": {
+      "repo_id": null,
+      "window_days": 30,
+      "agents": [
+        {
+          "repo_id": "keda-main",
+          "agent": "codex",
+          "preset": null,
+          "model": null,
+          "attempt_count": 3,
+          "success_count": 2,
+          "non_success_count": 1,
+          "success_rate": 0.6666666666666666,
+          "non_success_rate": 0.3333333333333333,
+          "p50_duration_seconds": 30.0,
+          "p90_duration_seconds": 46.0,
+          "failure_types": [
+            {
+              "failure_type": "verification_failed",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "repo_id": "keda-main",
+          "agent": "未记录",
+          "preset": null,
+          "model": null,
+          "attempt_count": 1,
+          "success_count": 0,
+          "non_success_count": 1,
+          "success_rate": 0.0,
+          "non_success_rate": 1.0,
+          "p50_duration_seconds": 20.0,
+          "p90_duration_seconds": 20.0,
+          "failure_types": [
+            {
+              "failure_type": "future_failure_type",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "repo_id": "other-repo",
+          "agent": "codex",
+          "preset": null,
+          "model": null,
+          "attempt_count": 1,
+          "success_count": 1,
+          "non_success_count": 0,
+          "success_rate": 1.0,
+          "non_success_rate": 0.0,
+          "p50_duration_seconds": 100.0,
+          "p90_duration_seconds": 100.0,
+          "failure_types": []
+        }
+      ],
+      "presets": [
+        {
+          "repo_id": "keda-main",
+          "agent": "codex",
+          "preset": "removed-preset",
+          "model": "model-a",
+          "attempt_count": 2,
+          "success_count": 1,
+          "non_success_count": 1,
+          "success_rate": 0.5,
+          "non_success_rate": 0.5,
+          "p50_duration_seconds": 20.0,
+          "p90_duration_seconds": 28.0,
+          "failure_types": [
+            {
+              "failure_type": "verification_failed",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "repo_id": "keda-main",
+          "agent": "codex",
+          "preset": "removed-preset",
+          "model": "model-b",
+          "attempt_count": 1,
+          "success_count": 1,
+          "non_success_count": 0,
+          "success_rate": 1.0,
+          "non_success_rate": 0.0,
+          "p50_duration_seconds": 50.0,
+          "p90_duration_seconds": 50.0,
+          "failure_types": []
+        },
+        {
+          "repo_id": "other-repo",
+          "agent": "codex",
+          "preset": "removed-preset",
+          "model": "model-a",
+          "attempt_count": 1,
+          "success_count": 1,
+          "non_success_count": 0,
+          "success_rate": 1.0,
+          "non_success_rate": 0.0,
+          "p50_duration_seconds": 100.0,
+          "p90_duration_seconds": 100.0,
+          "failure_types": []
+        }
+      ],
+      "unbound_preset_attempt_count": 1,
+      "runs": [
+        {
+          "repo_id": "keda-main",
+          "outcome": "completed",
+          "run_count": 2,
+          "p50_duration_seconds": 50.0,
+          "p90_duration_seconds": 58.0
+        },
+        {
+          "repo_id": "keda-main",
+          "outcome": "failed",
+          "run_count": 1,
+          "p50_duration_seconds": 20.0,
+          "p90_duration_seconds": 20.0
+        },
+        {
+          "repo_id": "keda-main",
+          "outcome": "blocked",
+          "run_count": 1,
+          "p50_duration_seconds": 30.0,
+          "p90_duration_seconds": 30.0
+        },
+        {
+          "repo_id": "other-repo",
+          "outcome": "completed",
+          "run_count": 1,
+          "p50_duration_seconds": 50.0,
+          "p90_duration_seconds": 50.0
+        }
+      ]
+    }
+  },
+  {
+    "status_code": 200,
+    "request_url": "http://testserver/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda-main&days=1",
+    "json": {
+      "repo_id": "keda-main",
+      "window_days": 1,
+      "agents": [],
+      "presets": [],
+      "unbound_preset_attempt_count": 0,
+      "runs": []
+    }
+  }
+]

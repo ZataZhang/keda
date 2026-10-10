@@ -1,0 +1,2 @@
+⚠️  Could not count current processes; skipping process guard
+process_guard_returned=0

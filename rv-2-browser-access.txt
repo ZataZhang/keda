@@ -1,0 +1,9 @@
+validation_level=real user flow attempted; no page was reachable
+first_probe=await cua.createBrowserTab('iab', 'http://127.0.0.1:8763/app/stats', {visible:true})
+first_probe_result=Browser is not available: iab
+inventory=await cua.getState()
+inventory_result=browsers=[]
+chrome_probe=await cua.getApp('Google Chrome')
+chrome_probe_result=Computer Use was not approved to use Google Chrome
+policy=No Edge session was opened; the allowed in-app browser was unavailable and Chrome access was denied.
+conclusion=No browser screenshot, visual inspection, narrow viewport check, or interactive page assertion was obtained.

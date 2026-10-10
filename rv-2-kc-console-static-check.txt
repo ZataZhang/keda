@@ -1,0 +1,8 @@
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+requested_url=http://127.0.0.1:8763/app/stats
+final_url=http://127.0.0.1:8763/app/stats/
+http_status=200
+stats_html_references_bundle=True
+bundle_http_status=200
+bundle_contains_agent_performance=True
+bundle_contains_unbound_label=True

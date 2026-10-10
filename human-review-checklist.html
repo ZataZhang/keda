@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>人工审查 · Agent 与预设执行表现统计（Issue #263）</title>
+<!--
+  人工审查清单（交互 HTML）模板 —— 复制本文件到
+  tasks/evidence/<prd-stem>/human-review-checklist.html，然后只改两处：
+
+  1) 头部与 <body> 的数据属性：把 &lt;主题&gt; / &lt;N&gt; / &lt;prd-stem&gt; 换成真实值。
+  2) <main> 里的卡片：每个决定一张 <section class="card">，最后一张是结果卡。
+     卡片内容可自由增删（h2 / p.lead / div.decide / blockquote / figure / p / div.opts /
+     label.field），但每张决定卡必须有：
+       - 一个 <h2>（会被逐字抄进 markdown 结果）
+       - 一组 <div class="opts"> 里的单选（name 在本卡内唯一即可）
+       - 一个 <textarea>（补充说明，可留空）
+     结果卡结构不要改（它的 id 被脚本引用）。
+
+  下面的脚本是固定的：导航、进度点、localStorage 持久化、生成 markdown 全部读 DOM，
+  不需要为每个 PRD 改动。所有语句以分号结尾，且没有以 [ 或 ( 开头的续行，避免
+  automatic semicolon insertion 把两行连成一句（曾因此整段脚本 SyntaxError、页面全空）。
+
+  自检（必须做，见 skills/prd/SKILL.md）：用真实浏览器打开本页，确认控制台零
+  pageerror、首屏卡片可见、能翻页并在末页生成 markdown，再把它交给用户。
+-->
+<style>
+:root{--bg:#f8fafc;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--brand:#4f46e5;--warn:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 24px}
+header h1{margin:0;font-size:17px}
+header p{margin:4px 0 0;color:var(--muted);font-size:12.5px}
+main{max-width:900px;margin:24px auto 80px;padding:0 20px}
+.progress{display:flex;gap:8px;margin-bottom:18px}
+.dot{flex:1;height:4px;border-radius:999px;background:var(--line)}
+.dot.on{background:var(--brand)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:16px;display:none}
+.card.active{display:block}
+h2{font-size:16px;margin:0 0 6px}
+.lead{color:var(--muted);margin:0 0 14px}
+.decide{border-left:3px solid var(--warn);background:#fffbeb;padding:10px 12px;border-radius:0 8px 8px 0;margin:0 0 14px}
+.decide b{color:var(--warn)}
+blockquote{margin:0 0 14px;padding:10px 14px;background:#f1f5f9;border-radius:8px;color:#334155;font-size:13px}
+figure{margin:14px 0}
+figure img{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff}
+figcaption{color:var(--muted);font-size:12px;margin-top:6px}
+.opts{margin:14px 0 4px}
+label.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+label.opt:hover{border-color:var(--brand)}
+label.opt:has(input:checked){border-color:var(--brand);background:#eef2ff}
+label.opt input{margin-top:3px}
+label.field{display:block;color:var(--muted);font-size:12.5px;margin-top:10px}
+textarea{width:100%;min-height:76px;border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit;margin-top:4px}
+nav{display:flex;justify-content:space-between;gap:10px;margin-top:18px}
+button{border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer;background:var(--brand);color:#fff}
+button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+button:disabled{opacity:.45;cursor:not-allowed}
+pre{background:#0f172a;color:#e2e8f0;padding:14px;border-radius:10px;white-space:pre-wrap;word-break:break-word;font-size:12.5px}
+code{background:#e2e8f0;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.tag{display:inline-block;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin-left:6px}
+</style>
+</head>
+<body data-review-key="iar-review-agent-preset-performance-stats" data-markdown-title="人工审查结果 · Agent 与预设执行表现统计（Issue #263）">
+<header>
+  <h1>人工审查清单 · Agent 与预设执行表现统计<span class="tag">Issue #263</span><span class="tag">PRD P2-FEAT-20261009-171037-agent-preset-performance-stats</span></h1>
+  <p>共 2 项决定。答案保存在本机浏览器（localStorage），最后一步生成可复制的 Markdown 回复给 agent。静态底稿：同目录 <code>human-review-checklist.md</code>。</p>
+</header>
+<main>
+  <div class="progress" id="progress"></div>
+  <section class="card">
+    <h2>第 1 项 · 确认 Agent / 预设成功率按 attempt 计算</h2>
+    <p class="lead">attempt 指一条 Agent 单次执行记录；整项任务的最终 outcome 单独统计，不回归给任一 Agent 或预设。</p>
+    <div class="decide"><b>你在决定什么：</b>确认成功率按每次执行计算。<b>如果判错：</b>失败后被替换的 Agent 可能被错误记成整项任务成功，比较结果会误导选择。</div>
+    <blockquote>PRD 原文（§2 决策一）：<br>是否接受 Agent / 预设成功率按 attempt 计算，且整项任务结果不归属到单个 Agent 或预设？<br><br>attempt 指一条 Agent 单次执行记录；整项任务最终状态只进入任务汇总。</blockquote>
+    <div class="opts">
+      <label class="opt"><input type="radio" name="q1" value="0"><span>同意：按 attempt 计算成功率，任务 outcome 独立呈现。</span></label>
+      <label class="opt"><input type="radio" name="q1" value="1"><span>不同意：请在补充说明中描述希望调整的口径。</span></label>
+    </div>
+    <label class="field">补充说明（可选）<textarea></textarea></label>
+  </section>
+  <section class="card">
+    <h2>第 2 项 · 查看真实 Stats 页面呈递与窄屏结果</h2>
+    <div class="decide"><b>你在决定什么：</b>查看真实 `/app/stats` 页面截图并核对 Agent / 预设 / 整项任务表格及窄屏状态。<b>如果判错：</b>真实用户可能看不到关键指标，窄屏布局也可能无法操作。</div>
+    <blockquote>PRD 原文（§9 Human-Confirmed）：<br>§9.1 人读呈递区已查看，或按表中复核方法完成检查。<br><br>对应对象：Agent 与预设行显示样本数、成功 / 非成功比例、P50/P90 和失败分类；整项任务按 outcome 独立呈现。</blockquote>
+    <p>呈递截图来自 <code>just console-sync</code> 后由 worktree <code>uv run kc console</code> 服务、真实浏览器打开的 <code>/app/stats</code> 页面（全部仓库 + 30 天窗口，无 mock，数据为本地运行账本的真实记录）：</p>
+    <figure><img src="rv-2-stats-agent-performance.png" alt="kc console 真实 /app/stats 页面的 Agent 与预设执行表现卡片（桌面 1440px）"><figcaption>桌面 1440px：Agent 表（样本数、成功 / 非成功、比例、P50/P90、失败分类）、预设与模型表（含仓库列与未绑定计数 551 次）、整项任务按 outcome 独立耗时。</figcaption></figure>
+    <figure><img src="rv-2-stats-agent-performance-narrow.png" alt="375px 窄屏下收起导航后的执行表现卡片，表格横向滚动"><figcaption>窄屏 375px（收起导航后）：表格可见并按 <code>overflow-x: auto</code> 横向滚动（容器 173px &lt; 内容 920px）。</figcaption></figure>
+    <p>自动化门禁：<code>just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts</code> 5/5 通过（见 <code>rv-2-e2e-green-final.txt</code>）；预设样本数负控 4→5 变红、恢复转绿（见 <code>rv-2-e2e-negative-control.txt</code>）。</p>
+    <p>复核入口（可选）：在当前 worktree 执行 <code>just console-sync</code>，再运行 <code>uv run kc console</code> 打开真实 <code>/app/stats</code>，把窗口拖到 375px 并点击“收起导航栏”核对横向滚动。</p>
+    <div class="opts">
+      <label class="opt"><input type="radio" name="q2" value="0"><span>已查看真实页面和窄屏结果，接受当前呈递。</span></label>
+      <label class="opt"><input type="radio" name="q2" value="1"><span>尚未能复核，或发现差异；请在补充说明中列出。</span></label>
+    </div>
+    <label class="field">复核结果 / 差异（可选）<textarea></textarea></label>
+  </section>
+  <section class="card">
+    <h2>审查结果（复制下面这段回给 agent）</h2>
+    <p class="lead">静态底稿：同目录 <code>human-review-checklist.md</code>。rv-2 真实页面呈递截图已内嵌于第 2 项。</p>
+    <pre id="result"></pre>
+    <nav><button class="ghost" id="prev2">上一步</button><button id="copy">复制 Markdown</button></nav>
+  </section>
+  <nav>
+    <button class="ghost" id="prev" disabled>上一步</button>
+    <button id="next">下一步</button>
+  </nav>
+</main>
+<script>
+/* 固定脚本：只读 DOM，不解析任何内嵌数据。改内容不需要动这里。 */
+const STORAGE_KEY = document.body.dataset.reviewKey || 'iar-review';
+const cards = Array.from(document.querySelectorAll('.card'));
+const RESULT_INDEX = cards.length - 1;
+const progress = document.getElementById('progress');
+
+function readState() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  } catch (error) {
+    return {};
+  }
+}
+const state = Object.assign({ step: 0, picks: {}, notes: {} }, readState());
+if (typeof state.step !== 'number' || state.step < 0 || state.step > RESULT_INDEX) {
+  state.step = 0;
+}
+function save() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    /* file:// 或隐私模式下 localStorage 可能被拒；交互仍可用，只是不持久化。 */
+  }
+}
+function cardIndexOf(element) {
+  return cards.indexOf(element ? element.closest('.card') : null);
+}
+function buildMarkdown() {
+  const title = document.body.dataset.markdownTitle || document.title;
+  const lines = ['# ' + title, ''];
+  cards.forEach(function (card, index) {
+    if (index === RESULT_INDEX) {
+      return;
+    }
+    const heading = card.querySelector('h2');
+    const label = heading ? heading.textContent.trim() : ('第 ' + (index + 1) + ' 项');
+    const checked = card.querySelector('input[type=radio]:checked');
+    const span = checked ? checked.closest('label').querySelector('span') : null;
+    const answer = span ? span.textContent.trim() : '（未选择）';
+    lines.push(label + '：' + answer);
+    const note = String(state.notes[index] || '').trim();
+    if (note) {
+      lines.push('  补充：' + note);
+    }
+  });
+  lines.push('', '审查时间：' + new Date().toLocaleString('zh-CN'));
+  return lines.join('\n');
+}
+function render() {
+  cards.forEach(function (card, index) {
+    card.classList.toggle('active', index === state.step);
+  });
+  Array.from(progress.children).forEach(function (dot, index) {
+    dot.classList.toggle('on', index <= state.step);
+  });
+  const prevButton = document.getElementById('prev');
+  const nextButton = document.getElementById('next');
+  const onResult = state.step === RESULT_INDEX;
+  prevButton.disabled = state.step === 0;
+  prevButton.style.display = onResult ? 'none' : '';
+  nextButton.style.display = onResult ? 'none' : '';
+  if (onResult) {
+    document.getElementById('result').textContent = buildMarkdown();
+  }
+  window.scrollTo({ top: 0 });
+}
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  /* file:// 下 navigator.clipboard 可能不可用，退回 execCommand。 */
+  const scratch = document.createElement('textarea');
+  scratch.value = text;
+  scratch.style.position = 'fixed';
+  scratch.style.opacity = '0';
+  document.body.appendChild(scratch);
+  scratch.select();
+  document.execCommand('copy');
+  document.body.removeChild(scratch);
+  return Promise.resolve();
+}
+
+cards.forEach(function (card, index) {
+  const dot = document.createElement('div');
+  dot.className = 'dot';
+  progress.appendChild(dot);
+  const savedPick = state.picks[index];
+  if (savedPick !== undefined) {
+    const input = card.querySelector('input[type=radio][value="' + savedPick + '"]');
+    if (input) {
+      input.checked = true;
+    }
+  }
+  const notesBox = card.querySelector('textarea');
+  if (notesBox && state.notes[index] !== undefined) {
+    notesBox.value = state.notes[index];
+  }
+});
+document.addEventListener('change', function (event) {
+  const target = event.target;
+  if (target && target.type === 'radio') {
+    const index = cardIndexOf(target);
+    if (index >= 0) {
+      state.picks[index] = target.value;
+      save();
+    }
+  }
+});
+document.addEventListener('input', function (event) {
+  const target = event.target;
+  if (target && target.tagName === 'TEXTAREA') {
+    const index = cardIndexOf(target);
+    if (index >= 0) {
+      state.notes[index] = target.value;
+      save();
+    }
+  }
+});
+document.getElementById('next').addEventListener('click', function () {
+  if (state.step < RESULT_INDEX) {
+    state.step += 1;
+    save();
+    render();
+  }
+});
+document.getElementById('prev').addEventListener('click', function () {
+  if (state.step > 0) {
+    state.step -= 1;
+    save();
+    render();
+  }
+});
+document.getElementById('prev2').addEventListener('click', function () {
+  state.step = RESULT_INDEX - 1;
+  save();
+  render();
+});
+document.getElementById('copy').addEventListener('click', function () {
+  const button = document.getElementById('copy');
+  copyText(buildMarkdown()).then(function () {
+    button.textContent = '已复制 ✓';
+    window.setTimeout(function () {
+      button.textContent = '复制 Markdown';
+    }, 1600);
+  });
+});
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+$ npm exec -- tsc --noEmit --strict --skipLibCheck --esModuleInterop --moduleResolution bundler --module esnext --target es2022 --types node tests/smoke/stats-agent-performance.spec.ts
+exit=0
+$ npm exec eslint -- --no-cache tests/smoke/stats-agent-performance.spec.ts
+exit=0

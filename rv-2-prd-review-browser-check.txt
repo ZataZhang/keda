@@ -1,0 +1,9 @@
+FIRST_CARD "第 1 项 · 确认 Agent / 预设成功率按 attempt 计算"
+SECOND_CARD "第 2 项 · 查看真实 Stats 页面呈递与窄屏结果"
+IMAGES [{"src":"rv-2-stats-agent-performance.png","loaded":true},{"src":"rv-2-stats-agent-performance-narrow.png","loaded":true}]
+RESULT_HAS_MARKDOWN true
+RESULT_HAS_ANSWERS true
+PAGE_ERRORS 0
+$ just prd review tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md --print
+/Users/zata/code/keda/.iar-worktrees/issue-263/tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/human-review-checklist.html
+exit=0

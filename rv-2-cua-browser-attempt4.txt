@@ -1,0 +1,11 @@
+item=rv-2
+action=cua.getState()
+observed_browsers=[]
+
+action=cua.getApp('com.google.Chrome')
+result=Computer Use was not approved to use Google Chrome.
+
+action=cua.createBrowserTab('iab', 'about:blank', { visible: false })
+result=Browser is not available: iab.
+
+No browser tab was opened and no page screenshot or visual inspection was produced.

@@ -1,0 +1,505 @@
+# Independent verifier raw response
+# issue: #263
+# verifier agent: qoder
+# builder sha: f7bb432dccdf0401467ad037b43d3bd9b19e247c
+# parsed risk: green
+# verdict marker found: yes
+# response chars: 41786
+
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git log --oneline -8 && echo "---FILES CHANGED vs main---" && git diff --stat main...HEAD | tail -40
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && ls tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/ && echo "---scripts---" && ls tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/scripts/ 2>/dev/null
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && cat tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/P2-FEAT-20261009-171037-agent-preset-performance-stats.verifier-report.md && echo "=== PLAN ===" && cat tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/P2-FEAT-20261009-171037-agent-preset-performance-stats.verification-plan.md
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && cat tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/scripts/rv-1-validation.sh
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git diff main...HEAD -- src/backend/api/routes/agent_runner_console.py src/backend/core/shared/interfaces/runner_console.py src/backend/core/shared/statistics.py src/backend/core/use_cases/console_stats.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-263/src/backend/infrastructure/persistence/console_store_history.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "record_attempt\|failure_type" src/backend --include=*.py | grep -v test | head -40
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "attempt_records" src/backend/infrastructure/persistence/console_store.py | head -20 && echo "=== schema ===" && grep -rn -A 25 "CREATE TABLE IF NOT EXISTS attempt_records" src/backend/infrastructure/persistence/console_store.py | head -40
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "record_attempt\|failure_type" src/backend/ --include="*.py" | grep -v "^src/backend/infrastructure/persistence" | head -30
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn -B3 -A 15 "class FailureType" src/backend/core/shared/models/agent_runner.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 30,140p src/backend/core/use_cases/agent_runner_attempt_recording.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git diff main...HEAD -- src/backend/core/use_cases/agent_runner_lifecycle.py && echo "=== store insert ===" && sed -n 300,360p src/backend/infrastructure/persistence/console_store.py
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-263/frontend-public/components/stats/agent-performance-section.tsx
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git diff main...HEAD -- "frontend-public/app/(app)/app/stats/page.tsx" frontend-public/lib/api/console.ts frontend-public/lib/api/types.ts
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn -A 20 "^def _serialize" src/backend/api/routes/agent_runner_console.py | head -40
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 1,120p tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && mkdir -p /tmp/verify263 && UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run pytest --no-testmon tests/test_console_stats.py tests/test_agent_runner_console_api.py -k agent_performance -q 2>&1 | tail -20
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 120,229p tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 520,575p src/backend/core/use_cases/agent_runner_publication.py && echo "=== who calls it ===" && grep -rn "record_successful_attempt\|SUCCESS" src/backend/core/use_cases/run_agent_execution_loop.py | head -20
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "attempt_started_iso\s*=\|started_iso\s*=\|_utc_iso\|isoformat" src/backend/core/use_cases/agent_runner_attempt_recording.py src/backend/core/use_cases/agent_runner_lifecycle.py src/backend/core/use_cases/run_agent_execution_loop.py 2>/dev/null | head -25
+
+[agent tool] Bash: tail -25 /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/qoder-cli-cn-501/-Users-zata-code-keda--iar-worktrees-issue-263/ac22bea8-acf7-4cc4-932e-656410ab2f0f/tasks/balzz9sfm.output
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn -B5 -A 20 "def create_console_store" src/backend/ | head -60
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "history_db_path" config.toml src/backend/core/shared/models/agent_runner.py 2>/dev/null | head -10; echo "=== find db files ==="; ls -la ~/.kedacode 2>/dev/null | head; find /Users/zata/code/keda -maxdepth 4 -name "*.sqlite3" -o -maxdepth 4 -name "console_history*" 2>/dev/null | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "history_db_path" src/backend --include="*.py" | head; echo "=== defaults ==="; grep -rn -B4 -A4 "history.db\|runner_history" src/backend/core/shared/models/*.py src/backend/engines/agent_runner/*.py 2>/dev/null | head -30
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 515,545p src/backend/infrastructure/config/agent_runner_settings.py; echo "=== db files ==="; ls -la ~/.keda* 2>/dev/null | head -20; find ~/.config -maxdepth 3 -name "*.db" 2>/dev/null | head
+
+[agent tool] Bash: ls -d ~/.keda* ~/.config/keda* 2>/dev/null; echo "---"; DB=$(ls -d ~/.kedacode/console.db 2>/dev/null || ls -d ~/.keda/console.db 2>/dev/null); echo "DB=$DB"; sqlite3 "file:${DB}?mode=ro" "SELECT COUNT(*) FROM attempt_records; SELECT COUNT(*) FROM run_records;" 2>&1 | head
+
+[agent tool] Bash: DB=~/.kedacode/console.db; sqlite3 "file:${DB}?mode=ro&immutable=0" "PRAGMA table_info(attempt_records);" 2>&1 | tail -20; echo "=== counts ==="; sqlite3 "file:${DB}?mode=ro" "SELECT COUNT(*) FROM attempt_records; SELECT COUNT(*) FROM run_records;" 2>&1; echo "=== sample attempts ==="; sqlite3 -header "file:${DB}?mode=ro" "SELECT repo_id,agent,attempt_number,failure_type,started_at,duration_seconds,preset,model FROM attempt_records ORDER BY id DESC LIMIT 8;" 2>&1
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "_CONSOLE_DEFAULT_PORT =" src/backend/infrastructure/config/agent_runner_settings.py; echo "=== listening ==="; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -E "python|uvicorn|node" | head -10
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "console" justfile | head -20; echo "=== console-sync ==="; grep -rn -A 12 "^console-sync:" justfile
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && ls -la src/backend/api/static/console 2>/dev/null | head -5; echo "=== grep new testid in built bundle ==="; grep -rl "stats-agent-performance" src/backend/api/static/console 2>/dev/null | head -5; echo "=== state_home ==="; grep -rn -A 15 "def state_home" src/backend/infrastructure/config/product_identity.py 2>/dev/null | head -30; ls src/backend/infrastructure/config/ | head -20
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "def state_home" -A 20 src/backend/ --include="*.py" | head -40
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "HOME\|environ" src/backend/core/shared/models/product_identity.py | head -20
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git diff main...HEAD -- tests/test_console_stats.py | head -160
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git diff main...HEAD -- tests/test_agent_runner_console_api.py | head -200
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn -B5 -A 45 "def console_environment" tests/test_agent_runner_console_api.py | head -80
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "append_attempt\|append_run" src/backend --include="*.py" | grep -v "def append" | head -20
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 330,385p src/backend/core/use_cases/agent_runner_orchestrate.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "def console" src/backend/api/cli_typer_console.py src/backend/engines/agent_runner/cli*.py 2>/dev/null | head; echo "=== find console command ==="; grep -rln "static/console\|StaticFiles" src/backend/api/*.py src/backend/api/**/*.py 2>/dev/null | head
+
+[agent tool] Bash: DB=~/.kedacode/console.db; sqlite3 "file:${DB}?mode=ro" "SELECT COUNT(*), preset IS NULL AS preset_null, model IS NULL AS model_null FROM attempt_records GROUP BY preset IS NULL, model IS NULL;" ; echo "=== distinct failure types ==="; sqlite3 "file:${DB}?mode=ro" "SELECT failure_type, COUNT(*) FROM attempt_records GROUP BY 1 ORDER BY 2 DESC;"; echo "=== outcomes ==="; sqlite3 "file:${DB}?mode=ro" "SELECT outcome, COUNT(*) FROM run_records GROUP BY 1;"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "static/console\|StaticFiles\|console" src/backend/api/app.py | head -20; echo "=== kc console cmd ==="; grep -rn "console" src/backend/api/cli.py 2>/dev/null | head -20; ls src/backend/api/ | head -30
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && mkdir -p /tmp/verify263/home && HOME=/tmp/verify263/home UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run python -c "
+from backend.core.shared.models import product_identity as pi
+print('state_home=', pi.state_home())
+from backend.infrastructure.config.agent_runner_settings import load_agent_runner_settings
+s=load_agent_runner_settings()
+print('db=', s.console.history_db_path)
+" 2>&1 | tail -8
+
+[agent tool] Bash: mkdir -p /tmp/verify263/home/.kedacode && sqlite3 "file:$HOME/.kedacode/console.db?mode=ro" ".backup /tmp/verify263/home/.kedacode/console.db" && sqlite3 /tmp/verify263/home/.kedacode/console.db "SELECT COUNT(*) FROM attempt_records; SELECT COUNT(*) FROM run_records; SELECT MAX(started_at) FROM attempt_records;"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && HOME=/tmp/verify263/home UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache nohup uv run --no-sync python -m uvicorn backend.api.app:app --host 127.0.0.1 --port 8399 > /tmp/verify263/uvicorn.log 2>&1 &
+sleep 8; tail -20 /tmp/verify263/uvicorn.log
+
+[agent tool] Bash: cd /tmp/verify263 && curl -s "http://127.0.0.1:8399/api/v1/agent-runner/console/stats/agent-performance?days=30" -o api_all_30d.json -w "HTTP %{http_code}\n" && python3 -c "
+import json
+d=json.load(open('api_all_30d.json'))
+print('repo_id',d['repo_id'],'window',d['window_days'],'unbound',d['unbound_preset_attempt_count'])
+print('agents',len(d['agents']),'presets',len(d['presets']),'runs',len(d['runs']))
+for g in d['agents']: print(' A',g['repo_id'],g['agent'],g['attempt_count'],g['success_count'],g['non_success_count'],round(g['success_rate'],4),g['p50_duration_seconds'],g['p90_duration_seconds'],g['failure_types'])
+for g in d['presets']: print(' P',g['repo_id'],g['preset'],g['agent'],g['model'],g['attempt_count'],g['success_count'],round(g['success_rate'],4),g['p50_duration_seconds'],g['p90_duration_seconds'])
+for g in d['runs']: print(' R',g['repo_id'],g['outcome'],g['run_count'],g['p50_duration_seconds'],g['p90_duration_seconds'])
+"
+
+[agent tool] Write: /tmp/verify263/independent_oracle.py
+
+[agent tool] Bash: cd /tmp/verify263 && python3 independent_oracle.py 2>&1 | tail -30
+
+[agent tool] Bash: grep -n "preset" ~/.kedacode/config.toml | head -40; echo "=== names ==="; grep -oE "^\[\[?[a-z_.]*presets\.[a-zA-Z0-9_-]+" ~/.kedacode/config.toml | head -20
+
+[agent tool] Bash: grep -nE "^\[\[|^\[|name = " ~/.kedacode/config.toml | grep -i -A2 -B2 "preset" | head -40; echo "=== all preset-ish names ==="; python3 - <<'EOF'
+import re,sys
+txt=open('/Users/zata/.kedacode/config.toml',encoding='utf-8').read()
+for m in re.finditer(r'^\[\[.*preset.*\]\]$', txt, re.M):
+    print(m.group(0))
+names=re.findall(r'^\s*name\s*=\s*"([^"]+)"', txt, re.M)
+print("names:", names[:40])
+for target in ["qwen_flash_max","qoder-qwen3_8-flash_max","qoder-qwen3_8-max_xhigh"]:
+    print(target, "present" if target in txt else "ABSENT from current config")
+EOF
+
+[agent tool] Write: /tmp/verify263/edge_probe.py
+
+[agent tool] Bash: cd /tmp/verify263 && python3 edge_probe.py 2>&1 | tail -30
+
+[agent tool] Edit: /tmp/verify263/edge_probe.py
+
+[agent tool] Bash: cd /tmp/verify263 && python3 edge_probe.py 2>&1 | tail -30
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run --no-sync python -c "
+import numpy as np
+print('numpy p90 [10,20,40] =', np.percentile([10,20,40],90))
+print('numpy p50 =', np.percentile([10,20,40],50))
+print('numpy p90 [10,20] =', np.percentile([10,20],90))
+print('numpy p90 [40,60] =', np.percentile([40,60],90))
+" 2>&1 | tail -6; echo "=== git status ==="; git status --porcelain | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && f=tests/test_agent_runner_console_api.py && grep -n 'success_count"\] == 2\|p50_duration_seconds"] == 30\|"blocked": (1, 30, 30)\|"completed": (2, 50, 58)' $f | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && run_ctl () {
+  desc="$1"; py="$2"
+  uv_run="UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache"
+  python3 - "$py" <<'EOF'
+import sys, io
+path, old, new = None, None, None
+spec = sys.argv[1]
+# spec format: file|old|new
+f, o, n = spec.split("\x1f")
+src = open(f, encoding="utf-8").read()
+assert src.count(o) >= 1, ("pattern not found", o)
+open(f, "w", encoding="utf-8").write(src.replace(o, n, 1))
+print("patched", f, ":", o, "->", n)
+EOF
+  UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run --no-sync pytest --no-testmon "$ctl_test" -q 2>&1 | tail -4
+  echo "EXIT=$?"
+  git checkout -- .
+}
+CTL_TEST="tests/test_agent_runner_console_api.py::test_agent_performance_stats_reads_fresh_sqlite_rows_through_api"
+for spec in "tests/test_agent_runner_console_api.py\x1fassert codex_group[\"success_count\"] == 2\x1fassert codex_group[\"success_count\"] == 999" "x" ; do :; done
+echo "----- control A: success_count -----"
+python3 - <<'EOF'
+f="tests/test_agent_runner_console_api.py"
+s=open(f,encoding="utf-8").read()
+s2=s.replace('assert codex_group["success_count"] == 2','assert codex_group["success_count"] == 999',1)
+assert s!=s2
+open(f,"w",encoding="utf-8").write(s2)
+EOF
+UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run --no-sync pytest --no-testmon "$CTL_TEST" -q 2>&1 | tail -5; git checkout -- . ; git status --porcelain | head -3
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && CTL_TEST="tests/test_agent_runner_console_api.py::test_agent_performance_stats_reads_fresh_sqlite_rows_through_api"
+echo "----- control B: blocked run P50 -----"
+python3 -c "
+f='tests/test_agent_runner_console_api.py';s=open(f,encoding='utf-8').read()
+s2=s.replace('\"blocked\": (1, 30, 30),','\"blocked\": (1, 999, 30),',1);assert s!=s2;open(f,'w',encoding='utf-8').write(s2)"
+UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run --no-sync pytest --no-testmon "$CTL_TEST" -q 2>&1 | grep -E "^(E|FAILED|[0-9]+ (passed|failed))" | tail -4; git checkout -- .
+echo "----- control C: completed run P90 -----"
+python3 -c "
+f='tests/test_agent_runner_console_api.py';s=open(f,encoding='utf-8').read()
+s2=s.replace('\"completed\": (2, 50, 58),','\"completed\": (2, 50, 999),',1);assert s!=s2;open(f,'w',encoding='utf-8').write(s2)"
+UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run --no-sync pytest --no-testmon "$CTL_TEST" -q 2>&1 | grep -E "^(E|FAILED|[0-9]+ (passed|failed))" | tail -4; git checkout -- .
+echo "----- control D: mutate the FEATURE (unbound rows folded into preset groups) -----"
+python3 -c "
+f='src/backend/core/use_cases/console_stats.py';s=open(f,encoding='utf-8').read()
+s2=s.replace('        if not attempt_record.preset:\n            unbound_preset_attempt_count += 1\n            continue','        if attempt_record.preset is None and False:\n            unbound_preset_attempt_count += 1\n            continue',1);assert s!=s2;open(f,'w',encoding='utf-8').write(s2)"
+UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run --no-sync pytest --no-testmon "$CTL_TEST" tests/test_console_stats.py::test_agent_performance_stats_uses_attempt_snapshots_and_separate_run_outcomes -q 2>&1 | grep -E "^(E|FAILED|[0-9]+ (passed|failed))" | tail -5; git checkout -- .; git status --porcelain | head -3
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git status --porcelain | head -3; CTL_TEST="tests/test_agent_runner_console_api.py::test_agent_performance_stats_reads_fresh_sqlite_rows_through_api"
+python3 -c "
+f='tests/test_agent_runner_console_api.py';s=open(f,encoding='utf-8').read()
+assert '(2, 50, 58)' in s, 'baseline not restored!'
+s2=s.replace('\"completed\": (2, 50, 58),','\"completed\": (2, 50, 999),',1);open(f,'w',encoding='utf-8').write(s2)"
+echo "--- diff before run ---"; git diff --stat; git diff | grep "^[+-].*completed" | head -3
+UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run --no-sync pytest --no-testmon "$CTL_TEST" -q 2>&1 | grep -E "^(E|FAILED|[0-9]+ (passed|failed))" | tail -3
+git checkout -- .; echo "--- after restore ---"; git status --porcelain | wc -l
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -n -A 12 "^e2e:" justfile | head -25; echo "=== fixture ==="; sed -n 1,60p tests/playwright-e2e/fixtures/session.fixture.ts 2>/dev/null; echo "=== global setup ==="; ls tests/playwright-e2e/ ; grep -rn "globalSetup" tests/playwright-e2e/playwright.config.ts | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -n "e2e" justfile | head -20
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "^e2e\|e2e .*:" justfile* scripts/shared/just/*.just 2>/dev/null | head -20; echo "=== imports ==="; grep -rn "^import\|^!include" justfile | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -n "e2e" justfile.just 2>/dev/null | head -20; grep -n "^e2e" justfile.just | head; grep -n "just e2e\|e2e:" justfile.just | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && ls | head -20; echo "=== shared justfile ==="; grep -rn "e2e" justfile.shared 2>/dev/null | head -15
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git diff main...HEAD -- scripts/shared/just/process_guard.sh .gitignore
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && PLAYWRIGHT_STACK_TIMEOUT_MS=45000 UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts > /tmp/verify263/e2e-gate.log 2>&1; echo "EXIT=$?"; tail -30 /tmp/verify263/e2e-gate.log
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && curl -s -o /dev/null -w "GET /app/stats -> %{http_code}\n" "http://127.0.0.1:8399/app/stats"; curl -s -o /dev/null -w "GET /app/stats/ -> %{http_code}\n" "http://127.0.0.1:8399/app/stats/"; ls src/backend/api/static/console/app/ 2>/dev/null | head
+
+[agent tool] Bash: cd /tmp/verify263 && python3 -c "
+import sqlite3
+c=sqlite3.connect('/tmp/verify263/home/.kedacode/console.db')
+c.execute(\"DELETE FROM attempt_records WHERE repo_id='edge-probe'\");c.execute(\"DELETE FROM run_records WHERE repo_id='edge-probe'\");c.commit()
+print('probe rows removed:', c.execute(\"SELECT COUNT(*) FROM attempt_records WHERE repo_id='edge-probe'\").fetchone()[0])
+"
+
+[agent tool] Bash: tail -25 /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/qoder-cli-cn-501/-Users-zata-code-keda--iar-worktrees-issue-263/ac22bea8-acf7-4cc4-932e-656410ab2f0f/tasks/b8qmt4sql.output
+
+[agent tool] Bash: ls -la /tmp/verify263/; echo "=== log tail ==="; tail -25 /tmp/verify263/e2e-gate.log 2>/dev/null || echo "no log"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && SPEC=tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts && grep -n "attempt_count: 4," $SPEC | head -3 && python3 -c "
+f='$SPEC';s=open(f,encoding='utf-8').read()
+old='''    preset: 'removed-preset',
+      model: 'provider/model-x',
+      attempt_count: 4,'''
+print('pattern present:', old in s)"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && python3 -c "
+f='tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts'
+s=open(f,encoding='utf-8').read()
+i=s.index('removed-preset'); j=s.index('attempt_count: 4,', i)
+assert j-i<200, (j-i)
+s2=s[:j]+'attempt_count: 5,'+s[j+len('attempt_count: 4,'):]
+open(f,'w',encoding='utf-8').write(s2)
+print('patched preset attempt_count 4 -> 5 at offset', j)
+"; git diff --stat
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && PLAYWRIGHT_STACK_TIMEOUT_MS=45000 UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts > /tmp/verify263/e2e-negative.log 2>&1; echo "NEG_EXIT=$?"; grep -E "✓|✘|passed|failed|Expected substring|Received string" /tmp/verify263/e2e-negative.log | head -20; git checkout -- .; echo "tree clean: $(git status --porcelain | wc -l)"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 1,60p tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/scripts/capture_kc_console_static.py
+
+[agent tool] Bash: ln -sfn /Users/zata/code/keda/.iar-worktrees/issue-263/tests/playwright-e2e/node_modules /tmp/verify263/node_modules && curl -s -o /dev/null -w "auth/me %{http_code}\n" http://127.0.0.1:8399/api/auth/me && curl -s http://127.0.0.1:8399/api/auth/me | head -c 300; echo
+
+[agent tool] Write: /tmp/verify263/real_page_check.mjs
+
+[agent tool] Bash: cat /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/qoder-cli-cn-501/-Users-zata-code-keda--iar-worktrees-issue-263/ac22bea8-acf7-4cc4-932e-656410ab2f0f/tasks/b4h9pl2m9.output; echo "=== tree ==="; cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git status --porcelain | head -3
+
+[agent tool] Edit: /tmp/verify263/real_page_check.mjs
+
+[agent tool] Edit: /tmp/verify263/real_page_check.mjs
+
+[agent tool] Write: /tmp/verify263/real_page_check.mjs
+
+[agent tool] Bash: cd /tmp/verify263 && curl -s -o /dev/null -w "server %{http_code}\n" "http://127.0.0.1:8399/api/v1/agent-runner/console/stats/agent-performance?days=30" && node real_page_check.mjs 2>&1 | tail -60
+
+[agent tool] Bash: ls /Users/zata/code/keda/.iar-worktrees/issue-263/tests/playwright-e2e/node_modules | head -20; echo "---"; ls -d /Users/zata/code/keda/.iar-worktrees/issue-263/tests/playwright-e2e/node_modules/playwright* 2>/dev/null; ls /Users/zata/code/keda/.iar-worktrees/issue-263/tests/playwright-e2e/node_modules/.pnpm 2>/dev/null | grep -c . 
+
+[agent tool] Bash: cd /tmp/verify263 && sed -i '' "s|import { chromium } from 'playwright'|import { chromium } from '@playwright/test'|" real_page_check.mjs && node real_page_check.mjs 2>&1 | tail -60
+
+[agent tool] Write: /tmp/verify263/real_page_check2.mjs
+
+[agent tool] Edit: /tmp/verify263/real_page_check2.mjs
+
+[agent tool] Bash: cd /tmp/verify263 && node real_page_check2.mjs 2>&1 | tail -35
+
+[agent tool] Edit: /tmp/verify263/real_page_check2.mjs
+
+[agent tool] Edit: /tmp/verify263/real_page_check2.mjs
+
+[agent tool] Bash: cd /tmp/verify263 && node real_page_check2.mjs 2>&1 | tail -30
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && just test > /tmp/verify263/just-test.log 2>&1; echo "EXIT=$?"; tail -15 /tmp/verify263/just-test.log
+
+[agent tool] Bash: cd /tmp/verify263 && curl -s "http://127.0.0.1:8399/api/v1/agent-runner/console/stats/agent-performance?days=30&repo_id=freshai" | python3 -c "import json,sys; d=json.load(sys.stdin); print('agents',[g['agent'] for g in d['agents']],'presets',len(d['presets']),'unbound',d['unbound_preset_attempt_count'],'runs',[g['outcome'] for g in d['runs']])"; curl -s "http://127.0.0.1:8399/api/v1/agent-runner/console/stats/overview" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+repos=[]
+for r in d.get('repositories',[]): repos.append(r.get('repo_id') or r.get('id'))
+print('overview repos:', repos[:20])
+print('error:', d.get('error'))
+"
+
+[agent tool] Write: /tmp/verify263/real_partial_empty.mjs
+
+[agent tool] Bash: tail -12 /tmp/verify263/just-test.log; echo "=== partial empty probe ==="; cd /tmp/verify263 && node real_partial_empty.mjs 2>&1 | tail -8
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -n -A 8 "^test:" justfile.shared | head -25; echo "=== log head ==="; head -30 /tmp/verify263/just-test.log
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "^test \|^test:" justfile justfile.shared | head; echo "=== recipe body ==="; awk '/^test:/{f=1} f{print NR": "$0} f&&/^$/{c++; if(c>2) exit}' justfile.shared | head -40
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 1330,1380p justfile.shared
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn -B5 -A 40 "_check-completion" justfile.shared | sed -n 1,90p
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 1379,1440p justfile.shared
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && sed -n 1440,1500p justfile.shared | grep -n -A 12 "pytest\|uv run" | head -40
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && CI=1 TERM=dumb just test > /tmp/verify263/just-test-ci.log 2>&1; echo "EXIT=$?"; tail -20 /tmp/verify263/just-test-ci.log
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && ls -la tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/*.png && file --mime tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/*.png
+
+[agent tool] Read: /Users/zata/code/keda/.iar-worktrees/issue-263/tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-2-stats-agent-performance.png
+
+[agent tool] Bash: tail -20 /tmp/verify263/just-test-ci.log; echo "=== summary lines ==="; grep -E "passed|failed|error" /tmp/verify263/just-test-ci.log | tail -5
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "JUST_LOCAL_TEST_TARGET" justfile .env* 2>/dev/null | head; sed -n 1500,1540p justfile.shared | grep -n -B3 -A 12 "local_test_target\|JUST_LOCAL_TEST_TARGET" | head -30
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -rn "testmon\|addopts" pyproject.toml .env 2>/dev/null | head -10
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run --no-sync pytest tests -q --no-testmon -m "not slow and not real_api and not redis" -p no:cacheprovider > /tmp/verify263/full-local.log 2>&1; echo "EXIT=$?"; tail -12 /tmp/verify263/full-local.log
+
+[agent tool] Read: /tmp/verify263/real-page-desktop.png
+
+[agent tool] Bash: ls -la /tmp/verify263/*.png 2>/dev/null; file --mime /tmp/verify263/*.png 2>/dev/null
+
+[agent tool] Bash: cd /tmp/verify263 && cat > shot.mjs <<'EOF'
+import { chromium } from '@playwright/test'
+const BASE='http://127.0.0.1:8399'
+const b=await chromium.launch()
+const p=await b.newPage({viewport:{width:1440,height:1000}})
+await p.goto(`${BASE}/app/stats`,{waitUntil:'domcontentloaded'})
+await p.waitForSelector('[data-testid="stats-agent-performance"]',{timeout:60000})
+await p.waitForFunction(()=>document.querySelectorAll('[data-testid="stats-agent-performance-preset-table"] tbody tr').length>0,null,{timeout:60000})
+await p.locator('[data-testid="stats-agent-performance"]').screenshot({path:'/tmp/verify263/mine-desktop.png'})
+await p.setViewportSize({width:375,height:812})
+await p.waitForTimeout(1000)
+await p.locator('[data-testid="stats-agent-performance"]').screenshot({path:'/tmp/verify263/mine-narrow.png'})
+await b.close()
+console.log('shots done')
+EOF
+node shot.mjs 2>&1 | tail -3
+
+[agent tool] Bash: sqlite3 "file:$HOME/.kedacode/console.db?mode=ro" ".backup /tmp/verify263/home/.kedacode/console.db" && cd /tmp/verify263 && curl -s "http://127.0.0.1:8399/api/v1/agent-runner/console/stats/agent-performance?days=30" | python3 -c "import json,sys;d=json.load(sys.stdin);print('presets',len(d['presets']),'agents',len(d['agents']),'unbound',d['unbound_preset_attempt_count'])" && node shot.mjs 2>&1 | tail -3
+
+[agent tool] Read: /tmp/verify263/mine-desktop.png
+
+[agent tool] Read: /tmp/verify263/mine-narrow.png
+
+[agent tool] Bash: cd /tmp/verify263 && cat > shot_narrow.mjs <<'EOF'
+import { chromium } from '@playwright/test'
+const BASE='http://127.0.0.1:8399'
+const b=await chromium.launch()
+const p=await b.newPage({viewport:{width:375,height:812}})
+await p.goto(`${BASE}/app/stats`,{waitUntil:'domcontentloaded'})
+await p.waitForSelector('[data-testid="stats-agent-performance"]',{timeout:60000})
+await p.waitForFunction(()=>document.querySelectorAll('[data-testid="stats-agent-performance-preset-table"] tbody tr').length>0,null,{timeout:60000})
+// 收起导航（与 e2e 同样的真实控件）
+await p.getByRole('button',{name:'收起导航栏'}).click().catch(()=>{})
+await p.waitForTimeout(800)
+await p.locator('[data-testid="stats-agent-performance"]').scrollIntoViewIfNeeded()
+await p.waitForTimeout(500)
+await p.screenshot({path:'/tmp/verify263/mine-narrow2.png'})
+const dims=await p.$eval('[data-testid="stats-agent-performance-preset-table"]',el=>({cw:el.clientWidth,sw:el.scrollWidth,ox:getComputedStyle(el).overflowX}))
+console.log('narrow dims', JSON.stringify(dims))
+await b.close()
+EOF
+node shot_narrow.mjs 2>&1 | tail -3
+
+[agent tool] Read: /tmp/verify263/mine-narrow2.png
+
+[agent tool] Bash: tail -15 /tmp/verify263/full-local.log 2>/dev/null || echo "still running"; echo "---"; grep -cE "^" /tmp/verify263/full-local.log 2>/dev/null
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && git diff main...HEAD -- docs/guides/agent-runner.md mkdocs.yml | head -70
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && ls tasks/pending/ tasks/archive/ 2>/dev/null | grep -i "agent-preset" ; echo "=== banner + checklist ==="; sed -n 1,30p tasks/archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md 2>/dev/null; echo "=== acceptance section ==="; grep -n -A 25 "Acceptance Checklist" tasks/archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md 2>/dev/null | tail -40
+
+[agent tool] Bash: tail -6 /tmp/verify263/full-local.log; echo "=== failures? ==="; grep -E "^(FAILED|ERROR)" /tmp/verify263/full-local.log | head -10
+
+[agent tool] Bash: cd /tmp/verify263 && python3 - <<'EOF'
+import json, sqlite3, subprocess
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+DB="/tmp/verify263/home/.kedacode/console.db"
+now=datetime.now(timezone.utc); since=(now-timedelta(days=30)).isoformat(timespec="seconds")
+c=sqlite3.connect(f"file:{DB}?mode=ro",uri=True); c.row_factory=sqlite3.Row
+rows=c.execute("SELECT repo_id,issue_number,agent,failure_type,duration_seconds,preset,model,started_at FROM attempt_records WHERE started_at>=?",(since,)).fetchall()
+by_issue=defaultdict(list)
+for r in rows: by_issue[(r["repo_id"],r["issue_number"])].append(r)
+# 找同一 issue 由 >=2 个 agent 执行、既有失败又有成功的样例
+cands=[k for k,v in by_issue.items() if len({x["agent"] for x in v})>1 and any(x["failure_type"]=="success" for x in v) and any(x["failure_type"]!="success" for x in v)]
+print("mixed-agent issues in window:", len(cands))
+target=sorted(cands, key=lambda k:-len(by_issue[k]))[0]
+attempts=by_issue[target]
+print("target:", target, "attempts:", len(attempts))
+per=defaultdict(lambda: defaultdict(int))
+for a in attempts: per[a["agent"]][a["failure_type"]]+=1
+for ag,ft in sorted(per.items()): print("   ", ag, dict(ft))
+api=json.loads(subprocess.run(["curl","-s",f"http://127.0.0.1:8399/api/v1/agent-runner/console/stats/agent-performance?repo_id={target[0]}&days=30"],capture_output=True,text=True).stdout)
+grp={g["agent"]:g for g in api["agents"]}
+print("API 该仓库 agent 组：")
+for ag,g in grp.items(): print("   ", ag, "样本",g["attempt_count"],"成功",g["success_count"],"非成功",g["non_success_count"],"成功率",round(g["success_rate"],3))
+# 该 issue 的每个 agent 只拿到自己 attempt 的计数：验证 API 组总数 >= 本 issue 分布，且失败 agent 不因整项任务完成而 +1 成功
+runs=c.execute("SELECT outcome,agent FROM run_records WHERE repo_id=? AND issue_number=? AND started_at>=?",(target[0],target[1],since)).fetchall()
+print("该 issue 的 run 最终结果:", [(r["outcome"],r["agent"]) for r in runs])
+ok=True
+for ag,ft in per.items():
+    g=grp.get(ag)
+    if not g: ok=False; print("[RED] API 缺少 agent 组",ag); continue
+    exp_succ=ft.get("success",0)
+    # API 组是仓库级聚合，必然 >= 本 issue 的分布
+    if g["success_count"]<exp_succ or g["attempt_count"]<sum(ft.values()): ok=False; print("[RED] 组计数小于该 issue 分布",ag,g,ft)
+print("[OK ] 每条 attempt 只计入其实际 agent（仓库级组计数覆盖且不低于本 issue 分布）" if ok else "[RED] 归因异常")
+EOF
+
+[agent tool] Bash: cd /tmp/verify263 && python3 - <<'EOF' 2>&1 | tail -20
+import json, sqlite3, subprocess
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+DB="/tmp/verify263/home/.kedacode/console.db"
+since=(datetime.now(timezone.utc)-timedelta(days=30)).isoformat(timespec="seconds")
+c=sqlite3.connect(f"file:{DB}?mode=ro",uri=True); c.row_factory=sqlite3.Row
+rows=c.execute("SELECT * FROM attempt_records WHERE started_at>=? AND repo_id='keda'",(since,)).fetchall()
+by=defaultdict(list)
+for r in rows: by[r["issue_number"]].append(r)
+cands=[(i,v) for i,v in by.items() if len({x["agent"] for x in v})>1 and any(x["failure_type"]=="success" for x in v) and any(x["failure_type"]!="success" for x in v)]
+print("keda 仓库 30 天内混合 agent 的 issue 数:", len(cands))
+issue,v=sorted(cands,key=lambda t:-len(t[1]))[0]
+per=defaultdict(lambda: defaultdict(int))
+for a in v: per[a["agent"]][a["failure_type"]]+=1
+print(f"样例 issue #{issue}:")
+for ag,ft in sorted(per.items()): print("   ", ag, dict(ft))
+runs=c.execute("SELECT outcome,COUNT(*) n FROM run_records WHERE repo_id='keda' AND issue_number=? GROUP BY outcome",(issue,)).fetchall()
+print("   整项任务最终结果:", {r["outcome"]:r["n"] for r in runs})
+api=json.loads(subprocess.run(["curl","-s","http://127.0.0.1:8399/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda&days=30"],capture_output=True,text=True).stdout)
+grp={g["agent"]:g for g in api["agents"]}
+bad=[]
+for ag,ft in per.items():
+    g=grp[ag]
+    if g["success_count"]<ft.get("success",0): bad.append((ag,"成功数被低估",g))
+    if g["non_success_count"]<sum(v2 for k,v2 in ft.items() if k!="success"): bad.append((ag,"非成功数被低估",g))
+# 关键：失败的 agent 不应因为整项任务 completed 而获得额外成功
+for ag,ft in per.items():
+    if ft.get("success",0)==0 and grp[ag]["success_count"]==0:
+        print(f"   [OK ] {ag} 在本 issue 全部失败 -> 其组成功数未被整项任务 completed 污染 (success_count={grp[ag]['success_count']})")
+print("[OK ] attempt 级归因与整项任务结果互不污染" if not bad else f"[RED] {bad}")
+EOF
+echo "=== regression ==="; tail -4 /tmp/verify263/full-local.log
+
+[agent tool] Bash: cd /Users/zata/code/keda/.iar-worktrees/issue-263 && grep -n -B6 -A 12 '趋势天数' "frontend-public/app/(app)/app/stats/page.tsx" | head -40
+
+[agent tool] Bash: pkill -f "uvicorn backend.api.app:app --host 127.0.0.1 --port 8399" ; rm -f /tmp/verify263/node_modules; cd /Users/zata/code/keda/.iar-worktrees/issue-263 && echo "=== git status ==="; git status --porcelain; echo "(empty above = clean)"; git log --oneline -1
+
+[agent result] ## Independent verification — Issue #263 "Agent 与预设执行表现统计"
+
+### What "working" means here, and how I tested it independently
+
+I derived my own oracle from the PRD's six interpretation rows rather than re-running the builder's tests: per-attempt attribution, execution-time preset/model snapshots (never current config), attempt-level success vs. separately-grouped whole-task duration, explicit unbound bucket, no fake `0%`, and isolated failure of the new endpoint.
+
+**I built my own aggregation from raw SQL and diffed it against the live API.** I snapshotted the real production DB (`~/.kedacode/console.db`, 1014 attempts / 650 runs) into an isolated `HOME`, started a real uvicorn server from this worktree, and compared my independently written grouping + linear-interpolation percentile code against the endpoint for 7 query combinations (`/tmp/verify263/independent_oracle.py`): all-repo 30/7/365 days, `keda`, `rv-demo`, `keda-main`, and an unknown repo. **Every row matched field-for-field** (23 agent groups, 4 preset groups, 14 run groups, unbound=557 at 30d).
+
+### Real entry points I ran myself
+
+- rv-1 gate: `4 passed, 31 deselected`; lifecycle percentile regression test passed.
+- rv-2 gate: `just e2e …/stats-agent-performance.spec.ts` → **5 passed** in real Chromium against a booted stack.
+- **Full local-tier suite: 3806 passed, 1 skipped** (`--no-testmon`, since `just test` short-circuits on the warm-tree flag and collects 0 tests under `addopts = "--testmon"` — a pre-existing tooling condition, not caused by this change).
+
+### Negative controls (all four actually went RED)
+
+| Control | Result |
+|---|---|
+| `success_count == 2` → `999` | RED, `1 failed` |
+| blocked run `P50 30` → `999` | RED |
+| completed run `P90 58` → `999` (isolated re-run, diff verified) | RED |
+| rv-2 fixture preset `attempt_count 4` → `5` | RED in real browser: row text `…codex53 / 175% / 25%…`, `1 failed`, exit 1; restored → tree clean |
+| **mine:** mutate the *feature* (fold unbound attempts into preset groups) | RED in both the SQLite/API test and the core test |
+
+### Adversarial probes through real HTTP (writes against my isolated copy only)
+
+Negative durations (counted in sample, excluded from percentiles), `preset=''` vs `NULL` (both land in unbound), unknown run outcome `cancelled` (excluded), 200-day-old run outside a 30d window, window boundary ±3 min, same preset name across repos (kept as separate rows), single-sample group (`P50==P90`, `0%` with a visible sample), `days=0/366/-1/abc` → 422. All behaved per the locked interpretation. One apparent mismatch — agent `P90` = 36 vs my expected 38 — was **my own arithmetic error**: at index 1.8 of `[10,20,40]` linear interpolation gives `20+20×0.8=36`; my independent implementation agrees.
+
+### Interpretation rows confirmed on real data, not fixtures
+
+- **Deleted preset:** `qoder-qwen3_8-flash_max` and `qoder-qwen3_8-max_xhigh` are **absent from the current `~/.kedacode/config.toml`** (only `codebuddy-glm5_3-flash-max`, `codebuddy-deepseek-v4_1-flash`, `qwen_flash_max` exist), yet their historical rows still render with Agent `qoder` and model `Qwen3.8-Max` / `Qwen3.8-Flash`. The aggregation code never touches config.
+- **No cross-agent contamination:** real issue `keda#263` has codebuddy 6×`transient`, codex 6×`agent_error`, qoder 1×`success`+failures, and the whole task `failed` — each agent's group counts only its own attempts. Same shape on `rv-demo#1` (claude 6 failures stays 0% while codex/rv-implementer carry the successes).
+- **Real storage fault (no mocking):** I dropped the `preset` column on my copy. The new endpoint returned 5xx while `stats/history`, `stats/prd-lifecycle` and `runs` stayed 200; the real page showed `新统计暂不可用`, rendered zero fake rows, and the trend/lifecycle cards still loaded. Restoring the column returned 200.
+- **Real page, real backend, no route mocks:** I drove `kc console`'s static `/app/stats` (this worktree's build) with Playwright and compared the DOM cell-by-cell to the API: row counts, sample/success/rate/failure-classification columns, unbound `557 次`, repo-filter re-request with `repo_id`, 7-day re-request, repo column hidden in single-repo view, 375px scroll (`clientWidth 173 < scrollWidth 920`, `overflow-x: auto`).
+
+### Multimodal artifacts inspected
+
+I read `rv-2-stats-agent-performance.png` directly: it shows the real section with production-shaped data (23 agent rows, 4 preset rows, unbound 551, run-outcome table) consistent with my own live render — not a mock. I also captured and read my own desktop/narrow/fault screenshots (`/tmp/verify263/mine-desktop.png`, `mine-narrow2.png`, `real-storage-fault.png`). Docs (`docs/guides/agent-runner.md`, endpoint list) match implemented behavior, including the disclosed effort-not-snapshotted caveat.
+
+### Non-blocking gaps
+
+1. **rv-2's own spec mocks the new endpoint**, so the UI↔API contract was unproven by the delivered gate; I closed it with the real-stack run above. Future regressions in the API shape won't fail that spec.
+2. `unbound_preset_attempt_count` is window-global; in the all-repos view you can't tell which repo the 557 unbound attempts came from. Within the PRD's letter (per-repo breakdown is required for presets/agents/runs), but a disclosure asymmetry.
+3. A row with `model=''` would render an empty cell instead of `未记录` (the real write path normalises `''`→`NULL`, so unreachable today).
+4. No index on `attempt_records.started_at` / `run_records.started_at`; the new query full-scans the window. Fine at ~1k rows, same pattern as existing trend queries.
+5. The mkdocs nav label rename (`Agent Runner 与执行统计`) is scope beyond the PRD, harmless.
+
+Worktree is clean at `f7bb432d`; all my mutations were reverted and all writes were confined to `/tmp/verify263` copies of the DB.
+
+**Verdict: green.** I independently confirmed the aggregation against my own SQL-derived oracle on real production history, proved each gate can fail, reproduced the deleted-preset, mixed-agent, empty and real-failure cases through the real page and real HTTP server, and saw no regression in 3806 local tests.
+
+<!-- iar:verifier-verdict risk=green -->

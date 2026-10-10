@@ -1,0 +1,138 @@
+cd "/Users/zata/code/keda/.iar-worktrees/issue-263" && ./scripts/shared/e2e/run-with-just-stack.sh "tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts"
+Starting services with 'just run all'...
+Process guard: capped at 1275 processes (current 875 + headroom 400)
+Saved run ports to /Users/zata/code/keda/.iar-worktrees/issue-263/.env.run-state
+Starting backend on port 8064: uv run python -m backend.main
+Starting public frontend in frontend-public on port 3283: pnpm dev
+$ NODE_OPTIONS=--max-old-space-size=3072 next dev
+INFO:     Started server process [70808]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8064 (Press CTRL+C to quit)
+2026-10-10 13:29:12 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:12 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+2026-10-10 13:29:12 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:12 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+2026-10-10 13:29:12 - backend.infrastructure.config.agent_runner_settings - WARNING - agent_runner_settings.py:965 - /Users/zata/code/freshai/.iar.toml pins generated_content.<target>.mode = "template" for: issue_from_prd, draft_pr. template mode is deprecated: agent is the default and template rendering stays only as the failure fallback. If the pin is a leftover of an older `kc init`, run `kc config migrate` in this repository to drop it.
+2026-10-10 13:29:12 - backend.infrastructure.config.agent_runner_settings - WARNING - agent_runner_settings.py:965 - /Users/zata/code/zata-docs/.iar.toml pins generated_content.<target>.mode = "template" for: issue_from_prd, draft_pr. template mode is deprecated: agent is the default and template rendering stays only as the failure fallback. If the pin is a leftover of an older `kc init`, run `kc config migrate` in this repository to drop it.
+2026-10-10 13:29:12 - backend.infrastructure.config.agent_runner_settings - WARNING - agent_runner_settings.py:965 - /Users/zata/code/fsense/.iar.toml pins generated_content.<target>.mode = "template" for: issue_from_prd, draft_pr. template mode is deprecated: agent is the default and template rendering stays only as the failure fallback. If the pin is a leftover of an older `kc init`, run `kc config migrate` in this repository to drop it.
+2026-10-10 13:29:12 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:12 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+2026-10-10 13:29:12 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:12 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3283
+- Network:       http://172.16.20.155:3283
+✓ Ready in 337ms
+⚠ Specified "rewrites" will not automatically work with "output: export". See more info here: https://nextjs.org/docs/messages/export-no-custom-routes
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /Users/zata/code/keda/pnpm-workspace.yaml as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /Users/zata/code/keda/.iar-worktrees/issue-263/pnpm-workspace.yaml
+
+Services ready on ports 8064/3283.
+E2E artifacts will be written to: /Users/zata/code/keda/.iar-worktrees/issue-263/tests/playwright-e2e/test-results/2026-10-10T05-29-13
+
+$ playwright test --grep-invert @visual tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts
+INFO:     127.0.0.1:54061 - "GET /api/v1/agent-runner/health HTTP/1.1" 200 OK
+ GET / 200 in 456ms (next.js: 200ms, application-code: 256ms)
+
+Running 5 tests using 1 worker
+
+(node:70937) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:70937) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ GET /app/dashboard/ 200 in 157ms (next.js: 19ms, application-code: 138ms)
+INFO:     127.0.0.1:54086 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54094 - "GET /api/v1/agent-runner/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54100 - "GET /api/v1/agent-runner/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54093 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54103 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+2026-10-10 13:29:18 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:18 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+2026-10-10 13:29:18 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:18 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+INFO:     127.0.0.1:54106 - "GET /api/v1/agent-runner/health HTTP/1.1" 200 OK
+  ✓  1 [setup] › tests/setup/auth.setup.ts:11:1 › authenticate and persist storage state (960ms)
+(node:71057) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:71057) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ GET /app/stats/ 200 in 97ms (next.js: 23ms, application-code: 74ms)
+INFO:     127.0.0.1:54127 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54141 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54143 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54144 - "GET /api/v1/agent-runner/console/runs?limit=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54142 - "GET /api/v1/agent-runner/console/stats/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54154 - "GET /api/v1/agent-runner/console/stats/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54158 - "GET /api/v1/agent-runner/console/runs?limit=30 HTTP/1.1" 200 OK
+2026-10-10 13:29:19 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:19 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+2026-10-10 13:29:19 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:19 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+INFO:     127.0.0.1:54162 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54146 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30 HTTP/1.1" 200 OK
+  ✓  2 [chromium] › tests/smoke/stats-agent-performance.spec.ts:121:3 › Stats Agent performance › renders attempt groups, historical model snapshots and independent run outcomes (1.3s)
+ GET /app/stats/ 200 in 36ms (next.js: 1993µs, application-code: 34ms)
+INFO:     127.0.0.1:54195 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54204 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54213 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54207 - "GET /api/v1/agent-runner/console/stats/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54211 - "GET /api/v1/agent-runner/console/runs?limit=30 HTTP/1.1" 200 OK
+2026-10-10 13:29:20 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:20 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+INFO:     127.0.0.1:54220 - "GET /api/v1/agent-runner/console/stats/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54225 - "GET /api/v1/agent-runner/console/runs?limit=30 HTTP/1.1" 200 OK
+2026-10-10 13:29:20 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 13:29:20 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+INFO:     127.0.0.1:54208 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54226 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54206 - "GET /api/v1/agent-runner/console/stats/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54637 - "GET /api/v1/agent-runner/console/runs?repo_id=keda&limit=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54636 - "GET /api/v1/agent-runner/console/stats/history?repo_id=keda&days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54638 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=keda&days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54645 - "GET /api/v1/agent-runner/console/stats/history?repo_id=keda&days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54646 - "GET /api/v1/agent-runner/console/runs?repo_id=keda&limit=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54647 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=keda&days=7 HTTP/1.1" 200 OK
+  ✓  3 [chromium] › tests/smoke/stats-agent-performance.spec.ts:151:3 › Stats Agent performance › shows an explicit empty state and applies the selected time window (18.8s)
+ GET /app/stats/ 200 in 30ms (next.js: 2ms, application-code: 27ms)
+INFO:     127.0.0.1:54660 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54673 - "GET /api/v1/agent-runner/console/stats/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54672 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54674 - "GET /api/v1/agent-runner/console/runs?limit=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54675 - "GET /api/v1/agent-runner/console/runs?limit=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54677 - "GET /api/v1/agent-runner/console/stats/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54681 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54684 - "GET /api/v1/agent-runner/console/stats/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54687 - "GET /api/v1/agent-runner/console/stats/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54676 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54689 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30 HTTP/1.1" 200 OK
+  ✓  4 [chromium] › tests/smoke/stats-agent-performance.spec.ts:192:3 › Stats Agent performance › keeps the existing Stats areas available when this endpoint fails (614ms)
+ GET /app/stats/ 200 in 39ms (next.js: 1773µs, application-code: 37ms)
+INFO:     127.0.0.1:54699 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54707 - "GET /api/v1/agent-runner/console/stats/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54706 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54718 - "GET /api/v1/agent-runner/console/version HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54720 - "GET /api/v1/agent-runner/console/stats/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54715 - "GET /api/v1/agent-runner/console/runs?limit=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54712 - "GET /api/v1/agent-runner/console/stats/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54722 - "GET /api/v1/agent-runner/console/stats/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54725 - "GET /api/v1/agent-runner/console/runs?limit=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54716 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54728 - "GET /api/v1/agent-runner/console/stats/prd-lifecycle?days=30 HTTP/1.1" 200 OK
+  ✓  5 [chromium] › tests/smoke/stats-agent-performance.spec.ts:201:3 › Stats Agent performance › keeps the tables horizontally scrollable at a narrow viewport (897ms)
+
+  5 passed (25.3s)
+Shutting down just-run services...
+Stopping backend process(es) on port 8064: 70808
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [70808]
+[?25h
+error: recipe `run` failed with exit code 143
+No admin frontend process listening on port 5195
+No public frontend process listening on port 3283

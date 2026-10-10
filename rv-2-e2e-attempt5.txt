@@ -1,0 +1,135 @@
+cd "/Users/zata/code/keda/.iar-worktrees/issue-263" && ./scripts/shared/e2e/run-with-just-stack.sh "tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts"
+Starting services with 'just run all'...
+⚠️  Could not count current processes; skipping process guard
+Saved run ports to /Users/zata/code/keda/.iar-worktrees/issue-263/.env.run-state
+Starting backend on port 8064: uv run python -m backend.main
+Starting public frontend in frontend-public on port 3283: pnpm dev
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+$ NODE_OPTIONS=--max-old-space-size=3072 next dev
+INFO:     Started server process [36212]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8064 (Press CTRL+C to quit)
+2026-10-10 11:20:44 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 11:20:44 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+2026-10-10 11:20:44 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 11:20:44 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3283
+- Network:       http://172.16.20.155:3283
+✓ Ready in 752ms
+2026-10-10 11:20:44 - backend.infrastructure.config.agent_runner_settings - WARNING - agent_runner_settings.py:965 - /Users/zata/code/freshai/.iar.toml pins generated_content.<target>.mode = "template" for: issue_from_prd, draft_pr. template mode is deprecated: agent is the default and template rendering stays only as the failure fallback. If the pin is a leftover of an older `kc init`, run `kc config migrate` in this repository to drop it.
+2026-10-10 11:20:44 - backend.infrastructure.config.agent_runner_settings - WARNING - agent_runner_settings.py:965 - /Users/zata/code/zata-docs/.iar.toml pins generated_content.<target>.mode = "template" for: issue_from_prd, draft_pr. template mode is deprecated: agent is the default and template rendering stays only as the failure fallback. If the pin is a leftover of an older `kc init`, run `kc config migrate` in this repository to drop it.
+2026-10-10 11:20:44 - backend.infrastructure.config.agent_runner_settings - WARNING - agent_runner_settings.py:965 - /Users/zata/code/fsense/.iar.toml pins generated_content.<target>.mode = "template" for: issue_from_prd, draft_pr. template mode is deprecated: agent is the default and template rendering stays only as the failure fallback. If the pin is a leftover of an older `kc init`, run `kc config migrate` in this repository to drop it.
+⚠ Specified "rewrites" will not automatically work with "output: export". See more info here: https://nextjs.org/docs/messages/export-no-custom-routes
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /Users/zata/code/keda/pnpm-workspace.yaml as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /Users/zata/code/keda/.iar-worktrees/issue-263/pnpm-workspace.yaml
+
+2026-10-10 11:20:44 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 11:20:44 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+2026-10-10 11:20:44 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-fsense' (/Users/zata/.iar/repos/zata-zhangtao/fsense): Path '/Users/zata/.iar/repos/zata-zhangtao/fsense' does not exist.
+2026-10-10 11:20:44 - app - WARNING - factory_repository_resolver.py:311 - Skipping unresolvable repository 'zata-zhangtao-freshai' (/Users/zata/.iar/repos/zata-zhangtao/freshai): Path '/Users/zata/.iar/repos/zata-zhangtao/freshai' does not exist.
+Services ready on ports 8064/3283.
+E2E artifacts will be written to: /Users/zata/code/keda/.iar-worktrees/issue-263/tests/playwright-e2e/test-results/2026-10-10T03-20-45
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+$ playwright test --grep-invert @visual tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+Watchpack Error (watcher): Error: EMFILE: too many open files, watch
+INFO:     127.0.0.1:62898 - "GET /api/v1/agent-runner/health HTTP/1.1" 200 OK
+ GET / 200 in 519ms (next.js: 218ms, application-code: 301ms)
+
+Running 5 tests using 1 worker
+
+(node:36549) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:36549) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  1 [setup] › tests/setup/auth.setup.ts:11:1 › authenticate and persist storage state (2ms)
+
+
+  1) [setup] › tests/setup/auth.setup.ts:11:1 › authenticate and persist storage state ─────────────
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /Users/zata/Library/Caches/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/playwright_chromiumdev_profile-T4h7wK --remote-debugging-pipe --no-startup-window
+    <launched> pid=36592
+    [pid=36592][err] [1010/112048.470027:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=36592][err] [1010/112048.489360:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=36592][err] [1010/112048.497342:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.36592: Permission denied (1100)
+    [pid=36592] <process did exit: exitCode=null, signal=SIGTRAP>
+    [pid=36592] starting temporary directories cleanup
+    Call log:
+    [2m  - <launching> /Users/zata/Library/Caches/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/playwright_chromiumdev_profile-T4h7wK --remote-debugging-pipe --no-startup-window[22m
+    [2m  - <launched> pid=36592[22m
+    [2m  - [pid=36592][err] [1010/112048.470027:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9[22m
+    [2m  - [pid=36592][err] [1010/112048.489360:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.[22m
+    [2m  - [pid=36592][err] [1010/112048.497342:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.36592: Permission denied (1100)[22m
+    [2m  - [pid=36592] <process did exit: exitCode=null, signal=SIGTRAP>[22m
+    [2m  - [pid=36592] starting temporary directories cleanup[22m
+    [2m  - [pid=36592] <gracefully close start>[22m
+    [2m  - [pid=36592] <kill>[22m
+    [2m  - [pid=36592] <skipped force kill spawnedProcess.killed=false processClosed=true>[22m
+    [2m  - [pid=36592] finished temporary directories cleanup[22m
+    [2m  - [pid=36592] <gracefully close end>[22m
+
+
+    Error Context: test-results/2026-10-10T03-20-45/setup-auth.setup.ts-authenticate-and-persist-storage-state-setup/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/2026-10-10T03-20-45/setup-auth.setup.ts-authenticate-and-persist-storage-state-setup/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/2026-10-10T03-20-45/setup-auth.setup.ts-authenticate-and-persist-storage-state-setup/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [setup] › tests/setup/auth.setup.ts:11:1 › authenticate and persist storage state ──────────────
+  4 did not run
+[ELIFECYCLE] Test failed. See above for more details.
+Shutting down just-run services...
+Stopping backend process(es) on port 8064: 36212
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [36212]
+[?25h
+[2]+  Terminated: 15          run_frontend_public
+error: recipe `run` failed with exit code 143
+No admin frontend process listening on port 5195
+No public frontend process listening on port 3283
+error: recipe `e2e` failed on line 1565 with exit code 1

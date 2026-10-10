@@ -1,0 +1,13 @@
+$ npm run typecheck
+
+> typecheck
+> tsc --noEmit
+
+tests/smoke/idea-inbox.spec.ts(123,40): error TS2339: Property 'text' does not exist on type '{}'.
+package_typecheck_exit_code=2
+
+$ npm exec -- tsc --noEmit --strict --skipLibCheck --esModuleInterop --moduleResolution bundler --module esnext --target es2022 --types node tests/smoke/stats-agent-performance.spec.ts
+stats_spec_typecheck_exit_code=0
+
+$ npm exec eslint -- --no-cache tests/smoke/stats-agent-performance.spec.ts
+stats_spec_eslint_exit_code=0

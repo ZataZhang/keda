@@ -1,0 +1,48 @@
+$ UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache just lint --reuse
+🔍 Running reuse hook: jscpd
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Check copy-paste duplication.............................................Passed
+🔍 Running reuse hook: pylint-duplicate-code
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Check Python duplicate code..............................................Passed
+🔍 Running reuse hook: check-architecture
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Check architecture layer dependencies....................................Passed
+🔍 Running reuse hook: check-guidelines-consistency
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Check guidelines consistency.............................................Passed
+🔍 Running reuse hook: check-max-file-lines
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Check max file lines (non-empty).........................................Passed
+
+$ UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run mkdocs build --strict
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/zata/code/keda/.iar-worktrees/issue-263/site
+INFO    -  The following pages exist in the docs directory, but are not included in the "nav" configuration:
+  - ai-standards/alembic.md
+  - prototypes/blocked-draft-pr-surface.md
+  - prototypes/kc-agent-terminal-preview.md
+  - prototypes/lifecycle-agent-matrix.md
+  - prototypes/prd-lifecycle-observability.md
+  - prototypes/roadmap-prd-cicd-auto-repair.md
+  - prototypes/roadmap-prd-controls-evidence-autopilot.md
+  - prototypes/assets/blocked-draft-pr-01-failure-context-comment.source.md
+  - prototypes/assets/blocked-draft-pr-02-draft-pr-body.source.md
+  - prototypes/assets/kc-terminal-agent-preview.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-01-waiting.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-02-repairing.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-03-rechecking.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-04-passed.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-auto-repair.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot.prompt.md
+  - prototypes/assets/lifecycle-agent-matrix/prd-content-real.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-lifecycle-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/roadmap-real.source.md
+  - prototypes/assets/lifecycle-agent-matrix/settings-real.source.md
+INFO    -  mkdocstrings_handlers: Formatting signatures requires either Black or Ruff to be installed.
+INFO    -  Doc file 'guides/agent-runner.md' contains a link 'configuration.md#agent-runner-agent-注册表配置', but the doc 'guides/configuration.md' does not contain an anchor '#agent-runner-agent-注册表配置'.
+INFO    -  Doc file 'guides/configuration.md' contains a link 'agent-runner.md#接入一个新-agent声明式注册表', but the doc 'guides/agent-runner.md' does not contain an anchor '#接入一个新-agent声明式注册表'.
+INFO    -  Documentation built in 6.28 seconds

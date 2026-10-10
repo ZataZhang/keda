@@ -1,0 +1,10 @@
+command: rg -l 'Agent 与预设执行表现|未绑定 / 历史未记录' src/backend/api/static/console/
+src/backend/api/static/console/_next/static/chunks/17ov6-6ryva9v.js
+
+command: rg -c '17ov6-6ryva9v' src/backend/api/static/console/app/stats/index.html
+1
+
+说明：just console-sync（rv-2-console-sync.txt）同步的静态分发 src/backend/api/static/console/ 中，
+chunk _next/static/chunks/17ov6-6ryva9v.js 包含新增统计区块文案（“Agent 与预设执行表现”、“未绑定 / 历史未记录”），
+且 /app/stats 的 index.html 引用该 chunk；kc console 对 /app/stats/ 的 HTTP 200 见 rv-2-console-http.txt / rv-2-static-route.txt。
+本检查于交付收尾（2026-10-10）对当前工作树静态产物执行，仅读取文件，未修改任何源代码。

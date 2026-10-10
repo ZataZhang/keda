@@ -1,0 +1,7 @@
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+2026-10-10 14:49:29 - httpx - INFO - _client.py:1025 - HTTP Request: GET http://testserver/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda-main&days=30 "HTTP/1.1 200 OK"
+2026-10-10 14:49:29 - httpx - INFO - _client.py:1025 - HTTP Request: GET http://testserver/api/v1/agent-runner/console/stats/agent-performance?days=30 "HTTP/1.1 200 OK"
+2026-10-10 14:49:29 - httpx - INFO - _client.py:1025 - HTTP Request: GET http://testserver/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda-main&days=1 "HTTP/1.1 200 OK"
+captured_responses=3
+captured_statuses=200,200,200
+captured_json=rv-1-api-json.json

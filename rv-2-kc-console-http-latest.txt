@@ -1,0 +1,16 @@
+warning: `VIRTUAL_ENV=/Users/zata/code/keda/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+page_status=200
+page_final_url=http://127.0.0.1:8763/app/stats/
+bundle_status=200 path=/_next/static/chunks/0.o-kr.do-cs5.js
+bundle_status=200 path=/_next/static/chunks/02wu0lgqj-lp..js
+bundle_status=200 path=/_next/static/chunks/03.a8zuatqj-4.js
+bundle_status=200 path=/_next/static/chunks/030qghuo70n1c.js
+bundle_status=200 path=/_next/static/chunks/03~yq9q893hmn.js
+bundle_status=200 path=/_next/static/chunks/08m0amupxlbqu.js
+bundle_status=200 path=/_next/static/chunks/0d4m~dg24gba0.js
+bundle_status=200 path=/_next/static/chunks/0n1tnjhli962k.js
+bundle_status=200 path=/_next/static/chunks/0o2.ct7_kmhk-.js
+bundle_status=200 path=/_next/static/chunks/151w89x7wrx3p.js
+bundle_status=200 path=/_next/static/chunks/17ov6-6ryva9v.js
+bundle_contains_agent_performance=True path=/_next/static/chunks/17ov6-6ryva9v.js
+bundle_status=200 path=/_next/static/chunks/turbopack-0xkta2ga8w0t9.js

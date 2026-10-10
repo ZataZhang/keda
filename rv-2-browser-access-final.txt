@@ -1,0 +1,4 @@
+CUA createBrowserTab('iab', 'about:blank', { visible: true }): Browser is not available: iab
+CUA getState(): browsers=[]
+CUA getApp('com.google.Chrome'): Computer Use was not approved to use Google Chrome.
+No browser tab was opened; no screenshot was captured.

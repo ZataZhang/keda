@@ -1,0 +1,6 @@
+command=just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts
+exit_code=1
+first_actionable_error=error: Failed to initialize cache at `/Users/zata/.cache/uv`
+detail=failed to open file `/Users/zata/.cache/uv/sdists-v9/.git`: Operation not permitted (os error 1)
+effect=just run all exited before services became ready; no browser test started
+resolution=reran the same E2E command with UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache

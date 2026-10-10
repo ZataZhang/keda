@@ -1,0 +1,6 @@
+Browser access retry for the rv-2 real Stats page check:
+- `cua.createBrowserTab("iab", "about:blank", { visible: false })` -> `Browser is not available: iab`.
+- `cua.getState()` -> `browsers=[]`.
+- `cua.getApp("Google Chrome")` -> `Computer Use was not approved to use Google Chrome`.
+
+No browser tab was opened. No page screenshot, visual assertion, or 375px viewport check was produced. Edge was not used because the repository browser-use workflow restricts this validation to IAB or Chrome.

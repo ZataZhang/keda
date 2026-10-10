@@ -1,0 +1,80 @@
+$ negative control: presets[0].attempt_count 4 -> 5, page assertions unchanged
+
+Running 2 tests using 1 worker
+
+(node:80612) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80612) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [setup] › tests/setup/auth.setup.ts:11:1 › authenticate and persist storage state (1.0s)
+(node:80704) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80704) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  2 [chromium] › tests/smoke/stats-agent-performance.spec.ts:121:3 › Stats Agent performance › renders attempt groups, historical model snapshots and independent run outcomes (11.3s)
+
+
+  1) [chromium] › tests/smoke/stats-agent-performance.spec.ts:121:3 › Stats Agent performance › renders attempt groups, historical model snapshots and independent run outcomes 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoContainText[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Locator: getByTestId('stats-agent-performance-preset-table').getByRole('row').filter({ hasText: 'removed-preset' })
+    Expected substring: [32m"4"[39m
+    Received string:    [31m"keda-mainremoved-presetprovider/model-xcodex53 / 175% / 25%2m3mverification_failed: 1"[39m
+    Timeout: 10000ms
+
+    Call log:
+    [2m  - Expect "toContainText" with timeout 10000ms[22m
+    [2m  - waiting for getByTestId('stats-agent-performance-preset-table').getByRole('row').filter({ hasText: 'removed-preset' })[22m
+    [2m    24 × locator resolved to <tr class="border-b border-slate-100 dark:border-slate-800">…</tr>[22m
+    [2m       - unexpected value "keda-mainremoved-presetprovider/model-xcodex53 / 175% / 25%2m3mverification_failed: 1"[22m
+
+
+      137 |     await expect(historicalPresetRow).toContainText('keda-main')
+      138 |     await expect(historicalPresetRow).toContainText('provider/model-x')
+    > 139 |     await expect(historicalPresetRow).toContainText('4')
+          |                                       ^
+      140 |     await expect(page.getByTestId('stats-agent-performance-unbound')).toContainText('2 次')
+      141 |
+      142 |     const runTable = page.getByTestId('stats-agent-performance-run-table')
+        at /Users/zata/code/keda/.iar-worktrees/issue-263/tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts:139:39
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/smoke-stats-agent-performa-08dbc-nd-independent-run-outcomes-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/smoke-stats-agent-performa-08dbc-nd-independent-run-outcomes-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/smoke-stats-agent-performa-08dbc-nd-independent-run-outcomes-chromium/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/smoke-stats-agent-performa-08dbc-nd-independent-run-outcomes-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/smoke-stats-agent-performa-08dbc-nd-independent-run-outcomes-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests/smoke/stats-agent-performance.spec.ts:121:3 › Stats Agent performance › renders attempt groups, historical model snapshots and independent run outcomes 
+  1 passed (14.8s)
+RED_EXIT=1
+$ restore attempt_count=4, re-run same test
+
+Running 2 tests using 1 worker
+
+(node:82586) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:82586) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [setup] › tests/setup/auth.setup.ts:11:1 › authenticate and persist storage state (454ms)
+(node:82698) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:82698) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  2 [chromium] › tests/smoke/stats-agent-performance.spec.ts:121:3 › Stats Agent performance › renders attempt groups, historical model snapshots and independent run outcomes (2.1s)
+
+  2 passed (4.1s)
+GREEN_EXIT=0

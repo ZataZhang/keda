@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "Agent、预设与整项任务的 API / SQLite 精确统计",
+      "command": "bash tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/scripts/rv-1-validation.sh",
+      "evidence_files": [
+        "rv-1-api-negative-control.txt",
+        "rv-1-run-duration-negative-control.txt",
+        "rv-1-run-percentile-negative-control.txt",
+        "rv-1-api-green.txt",
+        "rv-1-api-json.json",
+        "rv-1-api-json-capture.txt",
+        "rv-1-lifecycle-percentile-regression.txt",
+        "rv-1-final-tree.txt"
+      ],
+      "output_summary": "对错误期望 999 的三个真实 API 断言均观察到红灯，分别得到 success_count=2、blocked P50=30 秒、completed P90=58 秒；恢复后统计集成用例 4 passed、31 deselected，既有 lifecycle 分位数回归 1 passed。最终脚本重新采集 repo-filter、all-repos、1-day 三份 HTTP 200 JSON。keda-main 的 codex 组为 3 次 attempt、成功 2、非成功 1、成功率 2/3、P50 30 秒、P90 46 秒；deleted preset 的两个模型快照保留，未绑定计数为 1；run outcome 为 completed=(2,50,58)、failed=(1,20,20)、blocked=(1,30,30)。",
+      "explanation": "集成用例向临时 SQLite 写入并提交 run_records / attempt_records，以独立 SQLite connection fresh-read 原始行，再经真实 FastAPI 路由、core 聚合和 ConsoleStore 查询观测 JSON；用例逐项核对数据库样本、仓库和窗口过滤、失败分类、删除预设快照、未绑定记录、P50/P90 与独立任务 outcome。负控只把已知正确断言替换成错误值，真实 API 响应使同一断言失败；恢复后同一路由验证通过。",
+      "risks": "测试使用隔离的临时数据库；旧记录中缺失的 preset/model 快照不能从当前配置还原。",
+      "negative_control": "已执行三次：分别将 tests/test_agent_runner_console_api.py 中 success_count=2、blocked run P50=30、completed run P90=58 的正确期望临时改为 999；每次运行 UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run pytest --no-testmon tests/test_agent_runner_console_api.py::test_agent_performance_stats_reads_fresh_sqlite_rows_through_api -q，再恢复正确值。",
+      "expected_fail": "success_count 负控报告实际 2、期望 999；blocked P50 报告实际 30、期望 999；completed P90 报告实际 58、期望 999。三个断言均失败；恢复后统计集成用例 4 passed、31 deselected。",
+      "final_tree_evidence": "rv-1-final-tree.txt",
+      "stdout_assertions": [
+        {
+          "pattern": "4 passed, 31 deselected",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "pattern": "captured_statuses=200,200,200",
+          "source": "stdout",
+          "must_match": true
+        }
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "Stats 真实页面、筛选、空错态、窄屏和 kc console 呈递",
+      "command": "PLAYWRIGHT_STACK_TIMEOUT_MS=45000 UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts",
+      "evidence_files": [
+        "rv-2-e2e-green-final.txt",
+        "rv-2-e2e-negative-control.txt",
+        "rv-2-e2e-narrow-red.txt",
+        "rv-2-e2e-spec-checks-final.txt",
+        "rv-2-typecheck-final.txt",
+        "rv-2-build-final.txt",
+        "rv-2-console-sync-green.txt",
+        "rv-2-console-http-green.txt",
+        "rv-2-stats-agent-performance.png",
+        "rv-2-stats-agent-performance-desktop-page.png",
+        "rv-2-stats-agent-performance-narrow.png",
+        "rv-2-prd-review-browser-check.txt",
+        "rv-2-prd-review-checklist-page2.png",
+        "rv-2-final-tree.txt"
+      ],
+      "output_summary": "目标 E2E 全绿：auth setup 与 4 个 Stats 页面用例共 5 passed（25.3s，recovery 轮在最终树上复跑复核），覆盖 attempt 分组 / 历史模型快照 / 独立任务 outcome 展示、空态与时间窗口筛选、端点失败时原 Stats 区块隔离、375px 窄屏先收起导航后表格可见且 scrollWidth > clientWidth、overflow-x:auto。PRD 指定的产品负控已执行：presets[0].attempt_count 4→5 时真实浏览器断言转红（toContainText 期望 4、收到含 5 的行，RED_EXIT=1），恢复后同命令 2 passed、GREEN_EXIT=0。just console-sync、pnpm typecheck / build 通过；worktree kc console 的 /app/stats 与引用 bundle HTTP 200，并在该静态分发上以真实浏览器采集桌面 1440x900 与窄屏 375x812 截图。just prd review 人审 HTML 通过真实浏览器呈现检查（首屏卡片、翻页、结果 Markdown、内嵌截图加载、零 pageerror）。",
+      "explanation": "E2E 在真实浏览器水合的页面断言级别核对 Stats 区块：mock 只替换统计 API 响应以固定口径样本，交互（筛选、空态、错误隔离、收起导航、横向滚动）全部走生产组件；窄屏用例先等待客户端 effect 发出统计请求作为水合证据，再重试点击页面已有的收起导航控件。历史窄屏红灯（rv-2-e2e-narrow-red.txt，toBeVisible 收到 hidden）由该操作前置修复并在绿跑中反转。桌面截图取自 kc console 静态分发的真实 /app/stats（GitHub overview 实时仓库数据），HTTP 200 仅证明分发，浏览器渲染结论由截图与 E2E 承担；人审呈递由 HTML 浏览器检查与内嵌截图证据。",
+      "risks": "E2E 使用 mock 的统计响应固定断言口径，真实数据展示以 kc console 截图佐证；仓库下拉依赖 GitHub 实时 overview（后端 TTL 30 秒），冷重建时用例走耐心等待 / 刷新重试路径；375px 窄屏可读性基于收起导航后的横向滚动，展开侧栏时内容区仍无剩余宽度。",
+      "negative_control": "已执行：将 tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts 中 PERFORMANCE_STATS.presets[0].attempt_count 从 4 临时改为 5，保持历史预设行的 toContainText('4') 断言不变，运行 PLAYWRIGHT_STACK_TIMEOUT_MS=45000 UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts，观察到该行样本数断言在真实浏览器失败（RED_EXIT=1）后恢复 fixture，同一命令转绿（GREEN_EXIT=0）。完整红绿输出见 rv-2-e2e-negative-control.txt。",
+      "expected_fail": "红灯形态：renders attempt groups 用例在 expect(historicalPresetRow).toContainText('4') 失败，Expected substring 4、Received string 行文本含样本数 5（keda-mainremoved-presetprovider/model-xcodex5…），1 failed、RED_EXIT=1；恢复 fixture 后同命令 2 passed、GREEN_EXIT=0。窄屏用例的历史红灯为 toBeVisible 收到 hidden，已由收起导航前置修复并在绿跑中反转。",
+      "final_tree_evidence": "rv-2-final-tree.txt",
+      "stdout_assertions": [
+        {
+          "pattern": "5 passed",
+          "source": "stdout",
+          "must_match": true
+        }
+      ]
+    }
+  ]
+}
