@@ -10,7 +10,7 @@
 
 ## Delivery summary
 
-实现包含默认关闭的 `kc run --all-ready --aggregate-pr`、显式 `kc pr aggregate --issue ...` / retry、worker 全部成功后的聚合编排、按依赖排序的隔离 Git worktree 集成、完整 tree 验证、来源 PRD 证据门、多 PRD v2 body contract、Draft PR 检查与延迟 source closeout，以及操作指南 / 随包 skill 同步。
+实现包含默认关闭的 `kc run --all-ready --aggregate-pr`、显式 `kc pr aggregate --issue ...` / retry、worker 全部成功后的聚合编排、按依赖排序的隔离 Git worktree 集成、完整 tree 验证、来源 PRD 证据门、多 PRD v2 body contract、Draft PR 检查与延迟 source closeout，以及操作指南 / 随包 skill 同步。审阅发现并补上总 PR 创建失败后的恢复：确认同分支没有 PR 后，仅按远端 SHA lease 清理本次 batch ref；远端 ref 已变化时拒绝删除。
 
 ### rv-1 — 本地 CLI 参数与 help
 
@@ -22,8 +22,8 @@
 
 ### rv-2 — 临时 Git tree 与 ref 保全
 
-- 结果：**PASS**；`tests/test_agent_runner_batch_aggregate.py` 为 **17 passed**。
-- 观察：真实本地 Git fixture 按来源顺序生成组合 tree；冲突 fixture 保持 base 与 source refs；未拥有的远端 batch ref 被拒绝，已知总 PR head 与远端 ref 不一致时也拒绝覆盖并保留原 ref。fixture values 由本地测试创建，不代表 GitHub PR 状态。
+- 结果：**PASS**；当前 HEAD 工作树上的 `tests/test_agent_runner_batch_aggregate.py` 为 **19 passed**。
+- 观察：真实本地 Git fixture 按来源顺序生成组合 tree；冲突 fixture 保持 base 与 source refs；未拥有的远端 batch ref 被拒绝，已知总 PR head 与远端 ref 不一致时拒绝覆盖；总 PR 创建失败后按当前远端 SHA lease 删除本次 batch ref，SHA 已变化时保留该 ref。fixture values 由本地测试创建，不代表 GitHub PR 状态。
 - 终端输出：本机忽略文件 `rv-2-git.txt`。
 
 ### rv-3 — 本地 v1 / v2 PR body contract
@@ -40,8 +40,10 @@
 
 ## Static and focused test gates
 
-- `JUST_LOCAL_TEST_TARGET=tests/test_agent_runner_batch_aggregate.py just test`: repository lint checks passed; the configured testmon selection reported **17 deselected** and is not counted as test evidence. The rv-2 script runs the same file with `--no-testmon` and reports **17 passed**, which is the acceptance evidence for the batch Git oracle.
-- `UV_CACHE_DIR=/private/tmp/uv-cache-issue-258 uv run mkdocs build`: exited 0. MkDocs printed unlinked-page and reciprocal-anchor warnings; no new documentation page or navigation entry was added in this change.
+- `UV_CACHE_DIR=/private/tmp/uv-cache-issue-258 uv run pytest --no-testmon -q tests/test_agent_runner_batch_aggregate.py`: **19 passed**; this is the current batch Git oracle evidence.
+- `UV_CACHE_DIR=/private/tmp/uv-cache-issue-258 uv run pytest --no-testmon -q tests/test_agent_runner_direct_pr_authoritative_pr.py tests/test_agent_runner_direct_pr.py tests/test_agent_runner_fast_merge.py tests/test_kedacode_operator_skill.py tests/test_github_client.py`: **110 passed**.
+- The default `just test` ran the batch file's 19 passing tests, then reported **10 failed, 4 deselected**. All ten failures are in unrelated `tests/test_cli_config_migrate.py` cases: sandbox process enumeration returns `EPERM` / scanner unavailable. A scoped `just test` with `JUST_LOCAL_TEST_TARGET=tests/test_agent_runner_batch_aggregate.py` reported **19 deselected** under pytest-testmon, so that invocation is not counted as evidence.
+- `UV_CACHE_DIR=/private/tmp/uv-cache-issue-258 uv run mkdocs build --strict`: exited 0. MkDocs printed existing unlinked-page and reciprocal-anchor informational messages; no new documentation page or navigation entry was added in this change.
 - The three rv test commands above were run with `--no-testmon` where applicable so their named subsets execute explicitly.
 - `tests/test_github_client.py -k 'get_pull_request_context'`: **2 passed** as a local adapter compatibility check for the requested `isDraft` field. Its local process-runner fixture is not evidence of GitHub status, PR creation, checks, or close behavior and is not counted toward rv-4.
 
@@ -51,8 +53,8 @@
 - A repeated `UV_CACHE_DIR=/private/tmp/keda-issue258-uv-cache just test all` completed full lint successfully and reported **3,829 passed, 14 failed, 1 skipped**. Four daemon CLI failures were caused by attempts to write `/Users/zata/.kedacode/daemon-locks/repo.lock` outside this worktree; rerunning those four with `HOME=/private/tmp/keda-issue258-home` completed **4 passed**.
 - The remaining ten `kc config migrate` failures are environment-blocked. This sandbox rejects `ps` with `Operation not permitted`; a direct `psutil.process_iter(["pid", "cmdline"])` probe fails with `PermissionError(1, 'Operation not permitted (originated from sysctl() malloc 1/3)')`. The migration command correctly refuses when it cannot verify process occupancy. The production scanner and its tests were not changed, and this result is not recorded as a pass.
 - With both an isolated writable home and `KEDACODE_PRD_SKILL_PATH=/Users/zata/.codex/skills/prd/SKILL.md`, the standard `just test` selection reported **148 passed, 10 failed, 231 deselected**. All ten failures are the same process-enumeration `EPERM`; aggregate, CLI, contract, and skill synchronization tests selected by this local run passed. An earlier isolated-home run without the skill path was a setup error (the home lacked the installed PRD skill) and is not used as validation evidence.
-- `just lint --reuse` passed. A later explicit `just lint --full` invocation stopped at the repository's stale test-tree marker because the full test run remained red; the full lint phase at the start of `just test all` had passed.
+- `just lint --reuse` passed. Full pre-commit lint hooks passed during the post-change `just test` preflight; `just lint --full` also confirmed the current test/lint markers after the scoped test command. The regular local test gate remains partial because of the process-scanner sandbox limitation above.
 
 ## Review state
 
-Executor-produced local evidence is ready for independent review. This report does not assert an independent verifier verdict; the runner owns that gate and PR / CI publication. The `Human-Confirmed` items remain open.
+Independent verifier round 1 reports **PASS** in the sibling `verifier-report.md`. The verifier records ten unrelated sandbox `EPERM` migration failures and pending PR / CI presentation as non-blocking; no live GitHub behavior is claimed. PR / CI publication remains runner-owned, and the three `Human-Confirmed` items remain open.

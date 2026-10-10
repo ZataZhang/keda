@@ -1,5 +1,5 @@
-# Independent Verifier Report — PENDING
+PASS
 
-**Status: PENDING — no independent verifier verdict has been run by the executor.**
-
-The executor completed local rv-1 through rv-3 and recorded outputs in the sibling evidence report. This file intentionally does not claim `PASS`. The runner owns independent review of the final implementation tree, these reports, the unverified rv-4 boundary, and the PRD reconciliation. Replace this pending notice with the independent verdict and findings before archive readiness is claimed.
+## NON-BLOCKING
+- [Validation Acceptance] The broader local `just test` run remains partial: 10 unrelated `kc config migrate` cases fail because sandbox process enumeration returns `EPERM`. The evidence report discloses this limitation; the targeted CLI, Git, and body-contract evidence passes, so this does not undermine the claimed local behavior.
+- [Human-Confirmed: 9.1 surface] Implementation PR / CI presentation is still pending runner publication. This item remains unchecked, and the evidence package makes no live PR or CI claim.

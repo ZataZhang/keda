@@ -42,6 +42,7 @@ from backend.core.use_cases.agent_runner_batch_aggregate_git import (
     aggregate_tree_is_clean,
     build_aggregate_branch as _build_aggregate_branch,
     create_aggregate_worktree,
+    delete_unpublished_aggregate_branch,
     fetch_latest_base_sha,
     push_aggregate_branch,
     remove_aggregate_worktree,
@@ -634,12 +635,45 @@ def aggregate_batch(request: BatchAggregateRequest) -> AggregateResult:
                     retry_command=retry_command,
                 ) from exc
             if existing_total_context is None:
-                total_pr_url = request.github_client.create_draft_pr(
-                    title=f"[Batch] Nightly aggregate ({len(ordered_sources)} Issues)",
-                    body=total_pr_body,
-                    base_branch=request.config.git.base_branch,
-                    cwd=aggregate_worktree.path,
-                )
+                try:
+                    total_pr_url = request.github_client.create_draft_pr(
+                        title=f"[Batch] Nightly aggregate ({len(ordered_sources)} Issues)",
+                        body=total_pr_body,
+                        base_branch=request.config.git.base_branch,
+                        cwd=aggregate_worktree.path,
+                    )
+                except Exception as exc:  # noqa: BLE001 - 发布失败后清理本次未认领分支。
+                    try:
+                        created_total_context = request.github_client.get_pull_request_context(
+                            batch_branch, require_success=True
+                        )
+                    except Exception as lookup_exc:  # noqa: BLE001 - 创建结果不确定时保留分支。
+                        raise BatchAggregateError(
+                            "total PR creation failed and its result could not be checked; "
+                            f"batch branch was preserved: {lookup_exc}",
+                            failure_category="publication",
+                            retry_command=retry_command,
+                        ) from exc
+                    if created_total_context is not None:
+                        total_pr_url = created_total_context.pr_url
+                    else:
+                        try:
+                            delete_unpublished_aggregate_branch(
+                                git_request,
+                                expected_remote_sha=branch_result.head_sha,
+                            )
+                        except AggregateGitError as cleanup_exc:
+                            raise BatchAggregateError(
+                                "total PR creation failed and its unpublished batch branch "
+                                f"could not be safely removed: {cleanup_exc}",
+                                failure_category="publication",
+                                retry_command=retry_command,
+                            ) from exc
+                        raise BatchAggregateError(
+                            f"failed to create total Draft PR: {exc}",
+                            failure_category="publication",
+                            retry_command=retry_command,
+                        ) from exc
             else:
                 total_pr_url = existing_total_context.pr_url
                 if existing_total_context.body != total_pr_body:

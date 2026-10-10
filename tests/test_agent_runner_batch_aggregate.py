@@ -30,6 +30,7 @@ from backend.core.use_cases.agent_runner_batch_aggregate_git import (
     AggregateBranchBuildRequest,
     AggregateGitError,
     AggregateGitRequest,
+    delete_unpublished_aggregate_branch,
     push_aggregate_branch,
 )
 from backend.core.use_cases.agent_runner_pr_body_contract import (
@@ -405,3 +406,48 @@ def test_push_aggregate_branch_preserves_remote_head_mismatching_pr_context(
         )
 
     assert run_git(remote, "rev-parse", batch_branch).strip() == head1
+
+
+def test_delete_unpublished_aggregate_branch_removes_only_expected_head(tmp_path: Path) -> None:
+    """总 PR 创建失败后，按 SHA lease 删除本次推送的 batch ref。"""
+    repo, base_sha, head1, _, remote = _init_repo_with_base_and_branches(tmp_path, conflict=False)
+    batch_branch = "batch-101-102"
+    run_git(repo, "push", "origin", f"{head1}:refs/heads/{batch_branch}")
+    git_request = AggregateGitRequest(
+        repo_path=repo,
+        remote_name="origin",
+        base_branch="main",
+        batch_branch=batch_branch,
+        source_branches=(("issue-1", head1),),
+        process_runner=SubprocessRunner(),
+    )
+
+    delete_unpublished_aggregate_branch(git_request, expected_remote_sha=head1)
+
+    assert run_git(repo, "ls-remote", "origin", f"refs/heads/{batch_branch}") == ""
+    assert run_git(remote, "rev-parse", "main").strip() == base_sha
+    assert run_git(remote, "rev-parse", "issue-1").strip() == head1
+
+
+def test_delete_unpublished_aggregate_branch_preserves_moved_head(tmp_path: Path) -> None:
+    """batch ref 已移动时拒绝删除并保留远端提交。"""
+    repo, base_sha, head1, head2, remote = _init_repo_with_base_and_branches(
+        tmp_path, conflict=False
+    )
+    batch_branch = "batch-101-102"
+    run_git(repo, "push", "origin", f"{head1}:refs/heads/{batch_branch}")
+    run_git(repo, "push", "--force", "origin", f"{head2}:refs/heads/{batch_branch}")
+    git_request = AggregateGitRequest(
+        repo_path=repo,
+        remote_name="origin",
+        base_branch="main",
+        batch_branch=batch_branch,
+        source_branches=(("issue-1", head1),),
+        process_runner=SubprocessRunner(),
+    )
+
+    with pytest.raises(AggregateGitError, match="moved before cleanup"):
+        delete_unpublished_aggregate_branch(git_request, expected_remote_sha=head1)
+
+    assert run_git(remote, "rev-parse", batch_branch).strip() == head2
+    assert run_git(remote, "rev-parse", "main").strip() == base_sha

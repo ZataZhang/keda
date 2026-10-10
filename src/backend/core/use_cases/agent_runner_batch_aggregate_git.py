@@ -240,31 +240,20 @@ def push_aggregate_branch(
 ) -> None:
     """推送批次分支；仅按已读总 PR head SHA lease 更新远端 ref。"""
     remote_ref = f"refs/heads/{request.batch_branch}"
-    listing = request.process_runner.run(
-        ["git", "ls-remote", "--heads", request.remote_name, remote_ref],
-        cwd=request.repo_path,
-        check=False,
-    )
-    if listing.return_code != 0:
-        raise AggregateGitError(
-            f"failed to inspect remote aggregate branch {request.batch_branch}: "
-            f"{listing.stderr.strip() or listing.stdout.strip()}",
-            failure_category="publication",
-        )
-    existing_ref_line = next(
-        (line for line in listing.stdout.splitlines() if line.endswith(f"\t{remote_ref}")),
-        None,
+    existing_remote_sha = _read_remote_aggregate_sha(
+        request,
+        remote_ref,
+        action="before push",
     )
     push_arguments = ["push"]
-    if existing_ref_line is not None:
+    if existing_remote_sha is not None:
         if not allow_update:
             raise AggregateGitError(
                 f"remote aggregate branch {request.batch_branch} already exists without a "
                 "matching aggregate PR; refusing to overwrite it",
                 failure_category="publication",
             )
-        actual_remote_sha = existing_ref_line.split(maxsplit=1)[0]
-        if not expected_remote_sha or actual_remote_sha != expected_remote_sha:
+        if not expected_remote_sha or existing_remote_sha != expected_remote_sha:
             raise AggregateGitError(
                 f"remote aggregate branch {request.batch_branch} moved after its PR context "
                 "was read; refusing to overwrite an unverified head",
@@ -278,6 +267,64 @@ def push_aggregate_branch(
         push_arguments,
         failure_category="publication",
     )
+
+
+def delete_unpublished_aggregate_branch(
+    request: AggregateGitRequest,
+    *,
+    expected_remote_sha: str,
+) -> None:
+    """删除本次已推送但未能创建总 PR 的 batch ref，且仅当 SHA 未变化时删除。"""
+    remote_ref = f"refs/heads/{request.batch_branch}"
+    existing_remote_sha = _read_remote_aggregate_sha(
+        request,
+        remote_ref,
+        action="before cleanup",
+    )
+    if existing_remote_sha is None:
+        return
+    if existing_remote_sha != expected_remote_sha:
+        raise AggregateGitError(
+            f"remote aggregate branch {request.batch_branch} moved before cleanup; "
+            "refusing to delete an unverified head",
+            failure_category="publication",
+        )
+    _run_git_step(
+        request.repo_path,
+        request.process_runner,
+        [
+            "push",
+            f"--force-with-lease={remote_ref}:{expected_remote_sha}",
+            request.remote_name,
+            f":{remote_ref}",
+        ],
+        failure_category="publication",
+    )
+
+
+def _read_remote_aggregate_sha(
+    request: AggregateGitRequest,
+    remote_ref: str,
+    *,
+    action: str,
+) -> str | None:
+    """读取指定 batch ref 的远端 SHA，区分不存在与查询失败。"""
+    listing = request.process_runner.run(
+        ["git", "ls-remote", "--heads", request.remote_name, remote_ref],
+        cwd=request.repo_path,
+        check=False,
+    )
+    if listing.return_code != 0:
+        raise AggregateGitError(
+            f"failed to inspect remote aggregate branch {request.batch_branch} {action}: "
+            f"{listing.stderr.strip() or listing.stdout.strip()}",
+            failure_category="publication",
+        )
+    reference_line = next(
+        (line for line in listing.stdout.splitlines() if line.endswith(f"\t{remote_ref}")),
+        None,
+    )
+    return reference_line.split(maxsplit=1)[0] if reference_line is not None else None
 
 
 def aggregate_tree_is_clean(*, worktree_path: Path, process_runner: IProcessRunner) -> bool:
