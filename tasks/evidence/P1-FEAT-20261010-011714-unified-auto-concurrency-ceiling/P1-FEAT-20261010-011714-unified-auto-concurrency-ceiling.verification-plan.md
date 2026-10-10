@@ -2,17 +2,17 @@
 
 - Issue: [#266](https://github.com/ZataZhang/keda/issues/266)
 - Canonical PRD: `tasks/archive/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling.md`（本轮发现已归档；未修改、未移动，也未勾选 Human-Confirmed）
-- 验证对象：当前 review 工作树（base HEAD `bf9e39e200b0b4f831e23be68118bc429124e505`）；最终生产源码 diff 指纹记于每项 `rv-N-implementation-tree.txt`。
+- 验证对象：实现提交 `HEAD=46137963afb241934e10cb3324df5d07e8e5475d`、tree `b9b5d6b7e0ba2161b11586f8b35d9b1477de09a5`；每项 `rv-N-implementation-tree.txt` 均已绑定该提交。之后的 reviewer 改动只澄清指南、API 参考与随包 operator skill 文案，未改 Python 生产逻辑或测试。
 - 隔离方式：RV fixture 使用真实 CLI / daemon / console API / SQLite / Git 逻辑，只替换明确注明的 GitHub CLI 与 agent 外部边界；RV3 页面不允许 mock。
-- 结论：RV1、RV2、RV4、RV5 已在当前 review 工作树通过。RV3 曾在此前验证树完成真实页面 red→green；本轮重新执行在 Chromium 启动时被 macOS `Permission denied (1100)` 阻断，未产生页面断言结论。RV3 涉及的前端页面、设置 GET/PATCH 路由与设置读写用例未被本轮改动；已保留历史真实页面证据与当前重跑诊断，见证据报告。
+- 结论：RV1、RV2、RV4、RV5 在上述实现提交上串行复跑通过。RV3 曾在此前验证树完成真实页面 red→green；本轮重新执行在 Chromium 启动时被 macOS `Permission denied (1100)` 阻断，未产生页面断言结论。RV3 涉及的前端页面、设置 GET/PATCH 路由与设置读写用例相对历史页面验证树无变化；保留历史真实页面证据与当前重跑诊断，见证据报告。
 
 | RV | 检查点 | 本轮状态 | 关键证据 |
 |---|---|---|---|
-| 1 | daemon 认领 ceiling、扣除在跑数、未设置继承容量 | PASS | `rv-1-negative-control.txt`、`rv-1-daemon-command.txt`、`rv-1-daemon-claim-budget.log` |
-| 2 | backlog advance 与全局开始使用 ceiling / source / free slots | PASS | `rv-2-command-output.txt`、`rv-2-advance-ceiling-report.txt`、`rv-2-global-start.txt` |
+| 1 | daemon 认领 ceiling、扣除在跑数、未设置继承容量 | PASS（当前实现提交） | `rv-1-negative-control.txt`、`rv-1-daemon-command.txt`、`rv-1-daemon-claim-budget.log`、`rv-1-implementation-tree.txt` |
+| 2 | backlog advance 与全局开始使用 ceiling / source / free slots | PASS（当前实现提交） | `rv-2-command-output.txt`、`rv-2-advance-ceiling-report.txt`、`rv-2-global-start.txt`、`rv-2-implementation-tree.txt` |
 | 3 | 真实 Backlog 页面三态、设置、恢复继承与 fresh 读回 | 此前 PASS；本轮重跑 INCONCLUSIVE（浏览器启动受阻） | 历史真实运行的 `rv-3-console-roundtrip.txt`、`rv-3-negative-control.txt`、`rv-3-console-backlog-report.txt` 与截图；本轮诊断 `rv-3-backlog-control-roundtrip.txt` |
-| 4 | 显式定向运行豁免、`--all-ready` 与 daemon 互斥 | PASS | `rv-4-negative-control.txt`、`rv-4-explicit-command.txt`、`rv-4-explicit-run-exempt.txt` |
-| 5 | running 计数失败时 fail-closed 且续做恢复发现 | PASS | `rv-5-negative-control.txt`、`rv-5-fail-closed.log`、`rv-5-inflight-probe.txt` |
+| 4 | 显式定向运行豁免、`--all-ready` 与 daemon 互斥 | PASS（当前实现提交） | `rv-4-negative-control.txt`、`rv-4-explicit-command.txt`、`rv-4-explicit-run-exempt.txt`、`rv-4-implementation-tree.txt` |
+| 5 | running 计数失败时 fail-closed 且续做恢复发现 | PASS（当前实现提交） | `rv-5-negative-control.txt`、`rv-5-fail-closed.log`、`rv-5-inflight-probe.txt`、`rv-5-implementation-tree.txt` |
 
 ## 每项复现命令与判定
 
@@ -72,4 +72,4 @@ cd tasks/evidence/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling/scrip
 
 ## 验证范围
 
-本轮 reviewer 修复追加覆盖：ready 预算为 0 时仍进入已有 `direct_pr_cleanup` 收尾通道，普通 ready 仍不认领。该边界由 `tests/test_agent_runner_orchestrate.py::test_run_once_direct_pr_cleanup_bypasses_ready_claim_budget` 锁定，并在同一真实编排入口的定向测试中通过。运行时文件变化后，rv-1、rv-4、rv-5 真实入口均重新执行；rv-2 的补位 / 全局开始边界未变，RV-3 页面与设置 GET/PATCH 边界未变。RV-3 重跑仍因 Chromium `Permission denied (1100)` 为 INCONCLUSIVE。
+本轮 reviewer 修复追加覆盖：ready 预算为 0 时仍进入已有 `direct_pr_cleanup` 收尾通道，普通 ready 仍不认领。该边界由 `tests/test_agent_runner_orchestrate.py::test_run_once_direct_pr_cleanup_bypasses_ready_claim_budget` 锁定，并在同一真实编排入口的定向测试中通过。rv-1、rv-2、rv-4、rv-5 在 `HEAD=46137963` 上串行执行，避免各负控临时改写同一运行时源码造成相互污染；四项均 PASS。RV-3 页面与设置 GET/PATCH 边界相对历史通过树未变，但当前浏览器重跑因 Chromium `Permission denied (1100)` 为 INCONCLUSIVE。
