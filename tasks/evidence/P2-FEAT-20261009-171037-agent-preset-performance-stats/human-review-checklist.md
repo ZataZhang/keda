@@ -2,7 +2,7 @@
 
 PRD: [`tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`](../../pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md)
 
-本清单汇总 PRD §9 的两项 `Human-Confirmed`，不替代 Acceptance Checklist。交互版通过 `just prd review tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md` 打开同目录 HTML；当前受管环境没有可用浏览器，尚未验证 HTML 呈现。
+本清单汇总 PRD §9 的两项 `Human-Confirmed`，不替代 Acceptance Checklist。交互版通过 `just prd review tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md` 打开同目录 HTML；该 HTML 已通过真实浏览器呈现检查（首屏卡片、翻页、结果生成与内嵌截图均正常，见 [rv-2-prd-review-browser-check.txt](rv-2-prd-review-browser-check.txt)）。
 
 ## 1. 确认统计归属按单次 attempt 计算
 
@@ -28,7 +28,7 @@ attempt 指一条 Agent 单次执行记录。最终 `completed` / `failed` / `bl
 
 > rv-2：Agent 与预设行是否显示样本数、成功 / 非成功比例、P50/P90 和失败分类；整项任务是否按 outcome 独立呈现。
 
-当前没有真实浏览器截图或修改后 375px 检查结果。此前 E2E 真实页面的数据展示、筛选、空态和错误隔离检查通过；窄屏检查曾因侧栏展开导致表格容器不可见而失败。当前 spec 已加入页面已有的“收起导航栏”操作，但最新 `just e2e` 重跑在 auth setup 启动 Chromium 时因 `MachPortRendezvousServer Permission denied (1100)` 退出，页面用例未运行。`kc console` HTTP 200 只证明静态文件可服务，不证明浏览器渲染。详见 [rv-2-e2e-final-red.txt](rv-2-e2e-final-red.txt)、[rv-2-console-http-final.txt](rv-2-console-http-final.txt) 和 [rv-2-browser-access-final.txt](rv-2-browser-access-final.txt)。
+呈递截图来自 `just console-sync` 后由 worktree `uv run kc console` 服务、真实浏览器打开的 `/app/stats` 页面（全部仓库 + 30 天窗口，无 mock，数据为本地运行账本的真实记录）：桌面 [rv-2-stats-agent-performance.png](rv-2-stats-agent-performance.png)，窄屏 375px 收起导航后 [rv-2-stats-agent-performance-narrow.png](rv-2-stats-agent-performance-narrow.png)（容器 173px < 内容 920px，`overflow-x: auto` 横向滚动）。自动化门禁：`just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts` 5/5 通过（[rv-2-e2e-green-final.txt](rv-2-e2e-green-final.txt)）；预设样本数负控 4→5 变红、恢复转绿（[rv-2-e2e-negative-control.txt](rv-2-e2e-negative-control.txt)）。
 
 **请按以下格式回复：** `已完成复核`，或 `尚未完成 / 发现差异：<具体项目>`。
 
@@ -37,7 +37,7 @@ attempt 指一条 Agent 单次执行记录。最终 `completed` / `failed` / `bl
 在当前 worktree 执行 `just console-sync`，再运行 `UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run kc console`，于真实 `/app/stats` 页面选择全部仓库和 30 天窗口。确认这些内容：
 
 - [ ] Agent 表每行的 attempt 数、成功 / 非成功数和比例、P50 / P90、失败分类可读。
-- [ ] 预设表保留 `removed-preset` 历史快照，并显示模型与对应 Agent。
+- [ ] 预设表按历史记录显示预设名、模型与对应 Agent（快照口径，不由当前配置反推；`removed-preset` 场景由 E2E 断言覆盖）。
 - [ ] 未绑定 / 历史未记录 preset 计数独立显示。
 - [ ] `completed` / `failed` / `blocked` 的任务耗时按整项 run 结果独立分组。
 - [ ] 全部仓库视图显示仓库标识；筛选仓库及 7 / 30 / 90 天后，新统计随筛选更新。

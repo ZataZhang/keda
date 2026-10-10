@@ -151,6 +151,9 @@ test.describe('Stats Agent performance', () => {
   test('shows an explicit empty state and applies the selected time window', async ({
     page,
   }) => {
+    // 仓库下拉来自 GitHub 实时 overview（后端 TTL 30s）：冷重建可能超过半分钟，
+    // 也可能本轮返回空。先耐心等选项出现，返回空时才整页刷新重试。
+    test.setTimeout(240_000)
     const requests: Array<{ method: string; url: string }> = []
     await mockPerformanceStats(page, EMPTY_PERFORMANCE_STATS, 200, requests)
     await openStatsPage(page)
@@ -160,6 +163,15 @@ test.describe('Stats Agent performance', () => {
 
     const repositoryFilter = page.getByLabel('趋势仓库筛选')
     const repositoryOption = repositoryFilter.locator('option').nth(1)
+    try {
+      await expect(repositoryOption).toHaveAttribute('value', /\S/, { timeout: 45_000 })
+    } catch {
+      await expect(async () => {
+        await page.reload()
+        await expect(page.getByTestId('stats-agent-performance')).toBeVisible()
+        await expect(repositoryOption).toHaveAttribute('value', /\S/, { timeout: 45_000 })
+      }).toPass({ timeout: 150_000 })
+    }
     const repositoryId = await repositoryOption.getAttribute('value')
     expect(repositoryId).toBeTruthy()
     await repositoryFilter.selectOption(repositoryId)
@@ -188,11 +200,21 @@ test.describe('Stats Agent performance', () => {
 
   test('keeps the tables horizontally scrollable at a narrow viewport', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 })
-    await mockPerformanceStats(page, PERFORMANCE_STATS)
+    const requests: Array<{ method: string; url: string }> = []
+    await mockPerformanceStats(page, PERFORMANCE_STATS, 200, requests)
     await openStatsPage(page)
 
+    // 统计请求由 hydration 后的客户端 effect 发出；先确认请求出现，
+    // 避免冷编译下点击落在尚未挂 handler 的预渲染按钮上。
+    await expect.poll(() => requests.length).toBeGreaterThan(0)
+
     // 375px 下先使用现有导航收起控件，为 Stats 内容留出可读宽度。
-    await page.getByRole('button', { name: '收起导航栏' }).click()
+    await expect(async () => {
+      await page.getByRole('button', { name: '收起导航栏' }).click()
+      await expect(page.getByRole('button', { name: '展开导航栏' })).toBeVisible({
+        timeout: 1_000,
+      })
+    }).toPass()
 
     const tableContainer = page.getByTestId('stats-agent-performance-preset-table')
     await expect(tableContainer).toBeVisible()

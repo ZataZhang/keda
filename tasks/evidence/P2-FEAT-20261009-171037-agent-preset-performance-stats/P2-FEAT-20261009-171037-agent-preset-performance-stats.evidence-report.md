@@ -2,9 +2,17 @@
 
 | 人审呈递 | 实际路径与打开方式 | 需要核对的值 | 状态与已交叉检查 |
 |---|---|---|---|
-| rv-2：Stats 页面 Agent / preset 表、整项任务与窄屏布局 | 计划截图路径：`/Users/zata/code/keda/.iar-worktrees/issue-263/tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-2-stats-agent-performance.png`。截图尚未生成；浏览器可用后从 worktree 执行 `just console-sync`、`UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run kc console`，再打开 `/app/stats`；HTML 入口为 `just prd review tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`（尚未做浏览器检查）。 | fixture 预期显示 `codex` 4 次、成功 3 / 非成功 1、75% / 25%、`verification_failed: 1`；预设 `removed-preset` / `provider/model-x` 4 次；未绑定 2 次；整项任务 `completed / failed / blocked` 为 2 / 1 / 1；全部仓库行显示 `keda-main`，375px 表格可横向滚动。 | **未完成。** 此前真实页面的数据、筛选、空态和错误隔离检查通过，窄屏项因表容器不可见失败；spec 现先点击“收起导航栏”，但最新 E2E 在 Chromium auth setup 因 `Permission denied (1100)` 退出，页面用例未运行。CUA 当前无 IAB 且 Chrome 访问未获准。worktree `kc console` 的 fresh HTTP 只证明静态路由和 bundle，不证明浏览器渲染、交互或窄屏。Issue: [GitHub #263](https://github.com/ZataZhang/keda/issues/263)。PR / CI 由 runner 后续处理。 |
+| rv-2：Stats 页面 Agent / preset 表、整项任务与窄屏布局 | 截图已生成：桌面 [rv-2-stats-agent-performance.png](rv-2-stats-agent-performance.png)（1440x900，卡片与整页）与窄屏 [rv-2-stats-agent-performance-narrow.png](rv-2-stats-agent-performance-narrow.png)（375x812，收起导航后横向滚动）。打开方式：worktree 内 `just console-sync` 后运行 `UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache uv run kc console`，访问 `/app/stats`；HTML 入口 `just prd review tasks/pending/P2-FEAT-20261009-171037-agent-preset-performance-stats.md` 已通过真实浏览器呈现检查（见 [rv-2-prd-review-browser-check.txt](rv-2-prd-review-browser-check.txt)）。 | fixture 预期显示 `codex` 4 次、成功 3 / 非成功 1、75% / 25%、`verification_failed: 1`；预设 `removed-preset` / `provider/model-x` 4 次；未绑定 2 次；整项任务 `completed / failed / blocked` 为 2 / 1 / 1；全部仓库行显示 `keda-main`，375px 表格可横向滚动。 | **执行侧证据已完成。** 目标 E2E **5 passed**（含窄屏 375px 用例，见 [rv-2-e2e-green-final.txt](rv-2-e2e-green-final.txt)）；PRD 指定的样本数负控在真实浏览器转红（期望 4、收到 5）并恢复转绿（RED_EXIT=1 / GREEN_EXIT=0，见 [rv-2-e2e-negative-control.txt](rv-2-e2e-negative-control.txt)）；桌面与窄屏截图取自 kc console 静态分发的真实页面，桌面截图为 GitHub overview 实时数据。Human-Confirmed 两项与独立 verifier 仍由人 / runner 处理。Issue: [GitHub #263](https://github.com/ZataZhang/keda/issues/263)。PR / CI 由 runner 后续处理。 |
 
-本轮没有生成静态图片，因此没有可嵌入的页面图，也没有伪造截图。页面的人工复核仍需在有获准浏览器的环境完成。
+真实页面截图已生成并嵌入配套人审 HTML（桌面 + 375px 窄屏，均采自 worktree `kc console` 静态分发；图片被 `.gitignore` 排除，属本地图片，仅随证据目录分发）。
+
+![rv-2 桌面 1440x900 真实 /app/stats 页面（kc console 静态分发，GitHub overview 实时数据）](rv-2-stats-agent-performance.png)
+
+![rv-2 桌面整页视图（含原有趋势 / lifecycle / Token 区块与新统计区共存）](rv-2-stats-agent-performance-desktop-page.png)
+
+![rv-2 窄屏 375x812 收起导航后表格横向滚动](rv-2-stats-agent-performance-narrow.png)
+
+![人审 HTML 第 2 项截图呈递页（真实浏览器检查）](rv-2-prd-review-checklist-page2.png)
 
 ## rv-1 — API 与 SQLite 结果
 
@@ -70,3 +78,15 @@
 - 修复 `capture_final_tree_evidence.py` 使它每次只写入所选 RV 的一份文件；按 rv-1 和 rv-2 分别刷新摘要。仓库 `validate_evidence_manifest` 校验 `evidence.json` 通过：item 1 引用 8 个 `rv-1-*` 文件，item 2 引用 9 个 `rv-2-*` 文件，均存在且没有目录前缀；manifest 含版本 1、`zh-CN`、正整数 item 编号及 `negative_control` / `expected_fail`。rv-2 仍诚实标为 `blocked`，其产品负控和页面绿跑未观察到。
 - 最终 worktree 执行 `just test` 时 lint 阶段通过，核心测试 **1 passed、14 failed、149 deselected**；失败来自进程扫描被环境禁止及写入 `/Users/zata/.kedacode/daemon-locks/repo.lock` 被拒绝。另一次 `just lint --full` 因本地 `just test` 标记 tree 过期而失败，不能声称总门禁通过。
 - 更新了 §9 中已实际验证的前端 API / TypeScript 项及最新证据引用；其余依赖窄屏绿跑、真实截图和 HTML 浏览器呈现的项保持未勾选。`human-review-checklist.md` 与配套 HTML 已更新为引用 PRD 原文并说明当前阻塞，但两者尚未在真实浏览器检查。Human-Confirmed 两项仍开放，验收横幅为 `🧍 待人工验收`；PRD 保持 pending，不声称 verifier `PASS` 或归档完成。
+
+## 恢复尝试 6 收口（2026-10-10）
+
+本节是 rv-2 的当前权威状态；此前各节中的 `blocked` / 浏览器受阻描述均已被推翻，仅保留为历史记录。
+
+- 目标 E2E 按 PRD 原命令 `PLAYWRIGHT_STACK_TIMEOUT_MS=45000 UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts` 全绿：auth setup + 4 个 Stats 页面用例共 **5 passed（35.8s）**，覆盖 attempt 分组 / 历史模型快照 / 独立任务 outcome、空态与时间窗口筛选（仓库下拉走 GitHub 实时 overview 的耐心等待 / 刷新重试路径）、端点失败时原 Stats 区块隔离，以及 375px 窄屏先点击“收起导航栏”后表容器可见、scrollWidth > clientWidth、`overflow-x: auto`。历史窄屏红灯保留于 [rv-2-e2e-narrow-red.txt](rv-2-e2e-narrow-red.txt)，本轮已反转；上一轮的 Chromium `MachPortRendezvousServer Permission denied (1100)` 未在本会话复现（最小启动探测通过），视为该会话的瞬态环境故障。输出见 [rv-2-e2e-green-final.txt](rv-2-e2e-green-final.txt)。
+- PRD 指定的产品负控已执行并触达真实浏览器断言：`PERFORMANCE_STATS.presets[0].attempt_count` 4→5 后，历史预设行 `toContainText('4')` 失败（Received 行文本含样本数 5），1 failed、RED_EXIT=1；恢复 fixture 后同一命令 2 passed、GREEN_EXIT=0。完整红绿对照见 [rv-2-e2e-negative-control.txt](rv-2-e2e-negative-control.txt)。
+- 真实页面截图已从 kc console 静态分发采集：桌面 1440x900 卡片与整页（[rv-2-stats-agent-performance.png](rv-2-stats-agent-performance.png)，GitHub overview 实时数据）与 375x812 窄屏收起导航后的横向滚动状态（[rv-2-stats-agent-performance-narrow.png](rv-2-stats-agent-performance-narrow.png)）；采集脚本与断言维度见 `scripts/capture-rv2-console-screens.js`。`just console-sync` 与 worktree `uv run kc console` 的 `/app/stats/` + 引用 bundle HTTP 200 复核见 [rv-2-console-sync-green.txt](rv-2-console-sync-green.txt) 与 [rv-2-console-http-green.txt](rv-2-console-http-green.txt)。
+- 人审 HTML 通过真实浏览器呈现检查：`just prd review --print` 解析到同目录 `human-review-checklist.html`，浏览器断言首屏卡片可见、单选与翻页、结果卡生成 Markdown、两张内嵌截图 `naturalWidth > 0`、控制台零 pageerror；第 2 项截图呈递页存图见 [rv-2-prd-review-checklist-page2.png](rv-2-prd-review-checklist-page2.png)，输出见 [rv-2-prd-review-browser-check.txt](rv-2-prd-review-browser-check.txt)。`human-review-checklist.md` 同步更新为已呈递状态。
+- 修改后的目标 spec 单文件 TypeScript / ESLint 通过，见 [rv-2-e2e-spec-checks-final.txt](rv-2-e2e-spec-checks-final.txt)；`frontend-admin/` 无改动（`git diff HEAD -- frontend-admin` 为空）。E2E 仅改测试 spec，未改任何产品代码。
+- `evidence.json` 的 rv-2 已按上述结果重写（移除 `blocked` 状态，14 个 `rv-2-*` 证据文件、已执行负控与 `5 passed` stdout 断言），并用仓库 `validate_evidence_manifest` 校验通过：item 1 引用 8 个 `rv-1-*`、item 2 引用 14 个 `rv-2-*`，均存在且命名合规，两项均含 `negative_control` / `expected_fail`。本轮收尾后重采最终源码树：rv-1 摘要 `0f61c4dc9cd1797e53cc0028fba988b3349086677f93347a2370906148f5610a`（不变），rv-2 摘要 `f181829f0a7b444adb6a5e3d8dfac534d5017d2c58ee4f66fe7b8fcf8e950dbc`（含本轮 spec 修改），见 [rv-1-final-tree.txt](rv-1-final-tree.txt) 与 [rv-2-final-tree.txt](rv-2-final-tree.txt)。
+- Acceptance Checklist 中依赖 rv-2 的窄屏、E2E 绿跑 + 截图、证据重采关联、§9.1 呈递与 HTML 浏览器检查已全部勾选并关联上述证据；两项 `Human-Confirmed` 仍留给人，独立 verifier 未运行。验收横幅保持 `🧍 待人工验收`，PRD 留在 `tasks/pending/`，本报告不声称 verifier `PASS` 或归档完成。
