@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import site
 import sys
+import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -354,8 +355,18 @@ def test_prerelease_behind_release_is_not_an_update(
     assert cli_update_check._is_newer("not-a-version", "0.9.0") is False
 
 
+def test_prerelease_latest_is_not_notified(
+    _isolated_home: Path, _always_tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PyPI 最新版是预发布版时不提示：pip / uv / pipx 默认不会装 rc / dev 版。"""
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.9.0")
+    assert check_for_update(now_epoch=1_000.0, fetch_latest=lambda: "1.0.0rc1") is None
+    record = json.loads(_cache_file(_isolated_home).read_text(encoding="utf-8"))
+    assert record["latest_version"] == "1.0.0rc1"
+
+
 def test_fetch_latest_parses_pypi_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """PyPI JSON 端点的 info.version 是取最新版的唯一入口。"""
+    """PyPI JSON 端点的 info.version 是取最新版的唯一入口，且请求打对地址与身份。"""
 
     class _Response:
         def __enter__(self) -> "_Response":
@@ -370,8 +381,19 @@ def test_fetch_latest_parses_pypi_payload(monkeypatch: pytest.MonkeyPatch) -> No
             """返回模拟的 PyPI payload。"""
             return json.dumps({"info": {"version": "0.9.9"}}).encode("utf-8")
 
-    monkeypatch.setattr(cli_update_check.urllib.request, "urlopen", lambda *a, **k: _Response())
+    captured: list[tuple[urllib.request.Request, dict[str, object]]] = []
+
+    def _record_request(request: urllib.request.Request, **kwargs: object) -> _Response:
+        captured.append((request, kwargs))
+        return _Response()
+
+    monkeypatch.setattr(cli_update_check.urllib.request, "urlopen", _record_request)
     assert fetch_latest_pypi_version() == "0.9.9"
+    assert len(captured) == 1
+    request, kwargs = captured[0]
+    assert request.full_url == "https://pypi.org/pypi/kedacode/json"
+    assert request.get_header("User-agent") == "kedacode-cli-update-check"
+    assert kwargs == {"timeout": cli_update_check._HTTP_TIMEOUT_SECONDS}
 
 
 def test_fetch_latest_swallows_network_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -470,6 +492,25 @@ def test_homebrew_install_with_direct_url_still_maps_to_brew_upgrade(
     monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"/opt/homebrew/bin/{name}")
     plan = detect_upgrade_command()
     assert plan is not None and plan.argv == ("brew", "upgrade", "kedacode")
+
+
+def test_homebrew_python_prefix_is_not_a_brew_install(
+    _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Homebrew 自己的 Python 也在 ``Cellar`` 下，但那不是 brew 装的 kedacode。
+
+    只匹配 ``Cellar`` 会让跑在 Homebrew Python 里的 pip / user-site 安装命中 brew
+    分支，经确认后自动执行本机并不存在的 ``brew upgrade kedacode``。
+    """
+    monkeypatch.setattr(
+        sys,
+        "prefix",
+        "/opt/homebrew/Cellar/python@3.13/3.13.1/Frameworks/Python.framework/Versions/3.13",
+    )
+    monkeypatch.setattr(sys, "base_prefix", sys.prefix)
+    monkeypatch.setattr(site, "USER_SITE", "/nonexistent-user-site")
+    monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"/opt/homebrew/bin/{name}")
+    assert detect_upgrade_command() is None
 
 
 def test_missing_installer_binary_is_not_offered(
@@ -571,9 +612,9 @@ def _interactive_ready(
 
 
 def test_confirmed_upgrade_runs_detected_command(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """确认后按识别出的安装方式实际执行升级命令。"""
+    """确认后按识别出的安装方式实际执行升级命令，并按复核后的新版本报成功。"""
     _interactive_ready(monkeypatch)
     monkeypatch.setattr(
         cli_update_check,
@@ -581,6 +622,7 @@ def test_confirmed_upgrade_runs_detected_command(
         lambda: UpgradeCommand(("uv", "tool", "upgrade", "kedacode")),
     )
     monkeypatch.setattr(cli_update_check.typer, "confirm", lambda *a, **k: True)
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.3.0")
     run_calls: list[list[str]] = []
 
     class _Result:
@@ -593,6 +635,60 @@ def test_confirmed_upgrade_runs_detected_command(
     monkeypatch.setattr(cli_update_check.subprocess, "run", _fake_run)
     startup_update_check(["registry", "list"])
     assert run_calls == [["uv", "tool", "upgrade", "kedacode"]]
+    assert "Upgraded kedacode to 0.3.0" in capsys.readouterr().err
+
+
+def test_confirmed_upgrade_that_installs_nothing_reports_and_snoozes(
+    _isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """命令退出 0 却什么都没装（预发布版 / 解析器判定已满足）时不报升级成功，且不再追问。"""
+    monkeypatch.setattr(cli_update_check, "_is_interactive_terminal", lambda *a, **k: True)
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
+    _write_cache(
+        _isolated_home,
+        {
+            "checked_at": cli_update_check.time.time(),
+            "current_version": "0.2.1",
+            "latest_version": "0.3.0",
+        },
+    )
+    monkeypatch.setattr(
+        cli_update_check,
+        "detect_upgrade_command",
+        lambda: UpgradeCommand(("pipx", "upgrade", "kedacode")),
+    )
+    confirm_calls: list[str] = []
+
+    def _confirm(*args: object, **kwargs: object) -> bool:
+        confirm_calls.append("confirm")
+        return True
+
+    monkeypatch.setattr(cli_update_check.typer, "confirm", _confirm)
+
+    class _Result:
+        returncode = 0
+
+    monkeypatch.setattr(cli_update_check.subprocess, "run", lambda argv, **k: _Result())
+    startup_update_check(["registry", "list"])
+    captured = capsys.readouterr()
+    assert "Upgraded kedacode to 0.3.0" not in captured.err
+    assert "still 0.2.1" in captured.err
+    cache_record = json.loads(_cache_file(_isolated_home).read_text(encoding="utf-8"))
+    assert cache_record["suppressed_version"] == "0.3.0"
+
+    def _forbidden_fetch() -> str | None:
+        raise AssertionError("a fresh suppressed cache must not hit PyPI")
+
+    monkeypatch.setattr(
+        cli_update_check,
+        "check_for_update",
+        lambda: check_for_update(fetch_latest=_forbidden_fetch),
+    )
+    startup_update_check(["registry", "list"])
+    assert capsys.readouterr().err == ""
+    assert confirm_calls == ["confirm"]
 
 
 def test_declined_upgrade_prints_copyable_command_only(

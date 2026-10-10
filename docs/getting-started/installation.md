@@ -97,12 +97,13 @@ kc container down
 
 ## 启动时版本更新检查
 
-每次启动 `kc` 时（`kc --version`、`--help` 等只读入口除外）会对照 PyPI 上的最新发布版本，发现新版后**仅在交互式终端**（stdin 与 stderr 都是 TTY）提示并询问是否升级；确认后用与你实际安装方式匹配的命令执行升级（`uv tool upgrade kedacode` / `pipx upgrade kedacode` / `brew upgrade kedacode` / `python -m pip install --upgrade kedacode`）。识别不出安装方式（如源码 editable、tarball 直链安装）或你拒绝自动执行时，只打印对应安装器的可复制命令，不会猜测执行。
+每次启动 `kc` 时（`kc --version`、`--help` 等只读入口除外）会对照 PyPI 上的最新发布版本，发现新版后**仅在交互式终端**（stdin 与 stderr 都是 TTY）提示并询问是否升级；确认后用与你实际安装方式匹配的命令执行升级（`uv tool upgrade kedacode` / `pipx upgrade kedacode` / `brew upgrade kedacode` / `python -m pip install --upgrade kedacode`），并在执行后复核已安装版本，只有确实换到新版才报升级成功。`brew upgrade` 只给真正由 Homebrew formula 安装的副本（安装路径位于 `Cellar/kedacode/…`），跑在 Homebrew Python 里的 pip 安装不会被误当成 brew 托管。识别不出安装方式（如源码 editable、tarball 直链安装）或你拒绝自动执行时，只打印对应安装器的可复制命令，不会猜测执行。
 
 要点：
 
+- **只提示正式版**：PyPI 最新版是预发布版（`rc` / `beta` / `dev`）时不提示，因为默认安装器不会装它。
 - **缓存**：检查结果写入状态目录的 `update-check.json`，通常是 `~/.kedacode/update-check.json`；若只有旧目录 `~/.iar` 存在，则写入 `~/.iar/update-check.json`，直到迁移状态目录。默认 24 小时内不再访问 PyPI；升级后已安装版本变化会让旧缓存自动失效。
-- **提示频率**：拒绝自动升级，或安装方式无法识别而显示候选命令后，同一版本在当前缓存有效期内不会重复提示；缓存过期后会重新检查并按结果提示。
+- **提示频率**：拒绝自动升级、安装方式无法识别而显示候选命令、或升级命令执行完却什么都没装上时，同一版本在当前缓存有效期内不会重复提示；缓存过期后会重新检查并按结果提示。
 - **离线容忍**：访问 PyPI 的超时只有 2 秒，失败即静默继续，不影响本次命令的退出码与输出。
 - **机器路径零打扰**：以下场景更新检查整段不发生（不联网、不提示、不询问）——`--json` / `--output json` 机器模式、shell 补全协议、`--help` / `-h`、`--version`、无参数调用（只打印用法）、非交互终端（管道 / CI / agent 子进程）。
 - **显式关闭**：设置 `KEDACODE_NO_UPDATE_CHECK=1`（旧名 `IAR_NO_UPDATE_CHECK` 同样生效）永久停用；想手动升级时按上方安装方式对应的升级命令操作即可。

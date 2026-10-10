@@ -10,10 +10,14 @@
   双读）。
 - 结果缓存到 ``<状态目录>/update-check.json``，默认 24 小时内不再访问 PyPI；
   缓存记录绑定了当时的已安装版本，升级后自动失效。
-- 拒绝升级或显示候选安装命令后，同一版本在缓存过期前不再重复提示。
+- PyPI 最新版是预发布版（``rc`` / ``dev``）时不提示：默认安装器不会装它。
+- 拒绝升级、显示候选安装命令、或执行后已安装版本没有变化时，同一版本在缓存
+  过期前不再重复提示。
 - 询问后仅对「可确认包管理器托管的安装」（Homebrew formula / uv tool / pipx /
-  venv pip / user-site pip）直接执行对应升级命令；来源不适合原地升级（源码、
-  editable、tarball 直链）或识别不出安装方式时，只打印可复制的命令，绝不猜测执行。
+  venv pip / user-site pip）直接执行对应升级命令；Homebrew 分支要求 ``Cellar``
+  之后紧跟发行名，跑在 Homebrew Python 里的 pip 安装不算 brew 安装；来源不适合
+  原地升级（源码、editable、tarball 直链）或识别不出安装方式时，只打印可复制的
+  命令，绝不猜测执行。
 """
 
 from __future__ import annotations
@@ -49,8 +53,8 @@ __all__ = [
     "startup_update_check",
 ]
 
-#: PyPI 项目 JSON 端点；``info.version`` 即最新稳定版（发布时勾选 pre-release
-#: 的版本不会成为该字段，除非项目只有预发布）。
+#: PyPI 项目 JSON 端点；``info.version`` 是最新发布版本，**可能是**勾选了
+#: pre-release 的 rc / dev 版（上传即成为该字段），这类版本不用于升级提示。
 _PYPI_LATEST_URL = f"https://pypi.org/pypi/{_DISTRIBUTION_NAME}/json"
 
 #: 单次网络访问的硬超时（秒），宁可漏报也不拖慢任何一条 kc 命令。
@@ -200,6 +204,16 @@ def _is_newer(latest_version: str, current_version: str) -> bool:
         return False
 
 
+def _is_pre_release(version_text: str) -> bool:
+    """判断是否 PEP 440 预发布版（``rc`` / ``b`` / ``a`` / ``dev``）。
+
+    默认安装器（pip / uv / pipx）不带 ``--pre`` 不会装预发布版，提示了也只会得到
+    一次「已满足要求」的空升级，因此这类版本不进提示。调用方需保证版本可解析
+    （:func:`_is_newer` 已先行判定）。
+    """
+    return Version(version_text).is_prerelease
+
+
 def fetch_latest_pypi_version(timeout_seconds: float = _HTTP_TIMEOUT_SECONDS) -> str | None:
     """从 PyPI JSON 端点取 ``kedacode`` 最新发布版本；任何失败返回 ``None``。
 
@@ -239,13 +253,14 @@ def check_for_update(
 
     缓存命中条件：记录未过期、且记录里绑定的已安装版本与当前一致。升级后
     版本变化会让旧缓存自动失效；已处理的提示也会在缓存过期前被抑制。
+    PyPI 上的预发布版（``rc`` / ``dev``）不提示，默认安装器并不会装它。
 
     Args:
         now_epoch: 判定缓存是否过期的时间戳；省略时取当前时间。
         fetch_latest: 取 PyPI 最新版的函数（测试注入口）。
 
     Returns:
-        :class:`UpdateNotice` 表示确实有更新的版本；否则 ``None``。
+        :class:`UpdateNotice` 表示确实有可提示的新版本；否则 ``None``。
     """
     current_version = resolve_keda_version()
     if current_version == _UNKNOWN_VERSION:
@@ -278,6 +293,8 @@ def check_for_update(
         latest_version = latest_version_opt
 
     if not _is_newer(latest_version, current_version):
+        return None
+    if _is_pre_release(latest_version):
         return None
     if suppressed_version == latest_version:
         return None
@@ -336,21 +353,26 @@ def _has_path_part_sequence(path_text: str, *expected_parts: str) -> bool:
 def detect_upgrade_command() -> UpgradeCommand | None:
     """按当前安装痕迹识别可自动执行的升级命令；识别不出返回 ``None``。
 
-    识别顺序：Homebrew prefix → uv tool 隔离环境 → pipx 隔离环境 → venv 内
-    pip → 安装路径确实位于 ``USER_SITE`` 的 pip。任何一支都要求对应安装器
-    可执行文件存在，避免给出跑不起来的命令。
+    识别顺序：Homebrew Cellar 下的 ``kedacode`` formula → uv tool 隔离环境 →
+    pipx 隔离环境 → venv 内 pip → 安装路径确实位于 ``USER_SITE`` 的 pip。任何一支
+    都要求对应安装器可执行文件存在，避免给出跑不起来的命令。
 
     Homebrew 必须排最前：tap formula 经 Homebrew 从本地构建路径 pip 安装，
     发行版一定带 ``direct_url.json``（PEP 610），但那仍是 brew 托管的安装，
     升级只能走 ``brew upgrade``；若先做 direct_url 判定，真实 brew 安装会被
     误归为「非 PyPI 来源」，Cellar 分支永远不可达。
 
+    Homebrew 判定要求 ``Cellar`` 之后紧跟发行名：Homebrew 自己的 Python 也住在
+    ``<prefix>/Cellar/python@3.13/...`` 下，只匹配 ``Cellar`` 会让跑在 Homebrew
+    Python 里的 pip / user-site 安装被误判成 brew，进而经确认后自动执行
+    ``brew upgrade kedacode``（本机根本没有这个 formula，或 formula 并非该安装）。
+
     Returns:
         :class:`UpgradeCommand` 表示可以放心执行；``None`` 时调用方打印
         :data:`_FALLBACK_UPGRADE_COMMANDS` 供用户自行选择。
     """
     prefix_path = sys.prefix
-    if _has_path_part_sequence(prefix_path, "Cellar") and shutil.which("brew"):
+    if _has_path_part_sequence(prefix_path, "Cellar", _DISTRIBUTION_NAME) and shutil.which("brew"):
         return UpgradeCommand(("brew", "upgrade", _DISTRIBUTION_NAME))
     if _installed_from_non_pypi_source():
         return None
@@ -418,7 +440,11 @@ def _print_available_notice(notice: UpdateNotice, upgrade_hint: str | None) -> N
 
 
 def _handle_update_notice(notice: UpdateNotice) -> None:
-    """呈现新版本并按安装方式询问、执行或给出命令。"""
+    """呈现新版本并按安装方式询问、执行或给出命令。
+
+    执行分支会复核已安装版本：命令退出码为 0 但版本没变（解析器判定「已满足
+    要求」）时不算升级成功，并按已处理提示抑制本轮通知，避免逐条命令重复询问。
+    """
     plan = detect_upgrade_command()
     if plan is None:
         _print_available_notice(notice, upgrade_hint=None)
@@ -435,20 +461,33 @@ def _handle_update_notice(notice: UpdateNotice) -> None:
         )
         return
     result = subprocess.run(list(plan.argv))
-    if result.returncode == 0:
-        error_console.print(
-            f"Upgraded {_DISTRIBUTION_NAME} to {notice.latest_version}; "
-            "restart kc to use the new version.",
-            markup=False,
-            soft_wrap=True,
-        )
-    else:
+    if result.returncode != 0:
         error_console.print(
             f"Upgrade command failed with exit code {result.returncode}. "
             f"Run it manually: {plan.display}",
             markup=False,
             soft_wrap=True,
         )
+        return
+    # 退出码 0 不等于装上了新版本：解析器可能判定「已满足要求」而什么都不装，
+    # 此时若不复核版本就会一边报升级成功、一边在每个命令前重复问同一个问题。
+    installed_version = resolve_keda_version()
+    if installed_version in {notice.current_version, _UNKNOWN_VERSION}:
+        _suppress_cached_notice(notice)
+        error_console.print(
+            f"The upgrade command finished, but {_DISTRIBUTION_NAME} is still "
+            f"{notice.current_version} ({notice.latest_version} was not installed). "
+            f"Run it manually to check: {plan.display}",
+            markup=False,
+            soft_wrap=True,
+        )
+        return
+    error_console.print(
+        f"Upgraded {_DISTRIBUTION_NAME} to {installed_version}; "
+        "restart kc to use the new version.",
+        markup=False,
+        soft_wrap=True,
+    )
 
 
 def startup_update_check(argv: Sequence[str]) -> None:
