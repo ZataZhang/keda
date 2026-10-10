@@ -34,6 +34,8 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
 
     const entry = page.getByTestId('settings-lifecycle-entry')
     await expect(entry).toBeVisible()
+    // 回归守护：入口页仍渲染 Agent 标签设置编辑器（原 lifecycle-agent-matrix spec 的首条用例）。
+    await expect(page.getByTestId('agent-labels-editor')).toBeVisible()
     await entry.getByRole('link', { name: '打开统一设置页' }).click()
 
     await expect(page).toHaveURL(/\/app\/settings\/lifecycle\/?/)
@@ -114,6 +116,15 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
     await gearButtons.first().click()
     await expect(page).toHaveURL(/\/app\/settings\/lifecycle\/\?scope=repository&repo_id=/)
     await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
+    for (const lifecycleKey of LIFECYCLE_KEYS) {
+      await expect(page.getByTestId(`matrix-row-${lifecycleKey}`)).toBeVisible()
+    }
+
+    // 回归守护：带 repo_id 进入后切回「全局」，视图身份须与新选择一致。
+    // 全局请求不带 repo_id、响应 repo_id 恒为 null，若残留仓库选择参与比对，
+    // 页面会永远停在「加载中…」，九阶段矩阵一次都看不到。
+    await page.getByTestId('scope-global').click()
+    await expect(page.getByTestId('lifecycle-settings-loading')).toHaveCount(0)
     for (const lifecycleKey of LIFECYCLE_KEYS) {
       await expect(page.getByTestId(`matrix-row-${lifecycleKey}`)).toBeVisible()
     }

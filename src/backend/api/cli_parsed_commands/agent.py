@@ -684,6 +684,15 @@ def _resolve_lifecycle_scope(ctx: ParsedCommandContext, *, allow_effective: bool
             suggestion="kc agent lifecycle list --scope global",
         )
     if scope == SCOPE_GLOBAL:
+        # 全局层写的是机器级 config.toml，仓库选择器在此没有任何作用；容忍它
+        # 只会让"我以为改了某个仓库"的误操作静默落到机器级配置上。
+        if ctx.repo_id is not None or ctx.repo_override is not None:
+            raise CliError(
+                "--scope global targets the machine-level config; remove --repo-id/--repo "
+                "or use --scope repository to write a repository.",
+                code=ExitCode.USAGE,
+                suggestion="kc agent lifecycle list --scope global",
+            )
         return _LifecycleScopeTarget(SCOPE_GLOBAL, global_config, None, None, global_config)
     if scope == SCOPE_REPOSITORY:
         if ctx.repo_id is None and ctx.repo_override is None:
@@ -884,17 +893,19 @@ def run_agent_lifecycle_unset_command(ctx: ParsedCommandContext) -> int:
 def run_agent_preset_set_command(ctx: ParsedCommandContext) -> int:
     """``kc agent preset set <name> --agent``：upsert 命名预设三元组（持久化写）。"""
     target = _resolve_lifecycle_scope(ctx, allow_effective=False)
+    # 校验与写回用同一个归一化名字：带首尾空白的预设名会写成一个绑定解析不到的预设。
+    preset_name = ctx.parsed.name.strip()
     values = {
         "agent": ctx.parsed.agent,
         "model": ctx.parsed.model,
         "reasoning_effort": ctx.parsed.reasoning_effort,
     }
     try:
-        normalized = validate_preset_update(ctx.parsed.name, values, target.config)
+        normalized = validate_preset_update(preset_name, values, target.config)
     except LifecycleAgentsUpdateError as exc:
         raise CliError(str(exc), code=ExitCode.USAGE, suggestion="kc agent list") from exc
     editor = target.editor()
-    _write_or_fail(lambda: editor.update_agent_preset(ctx.parsed.name, normalized))
+    _write_or_fail(lambda: editor.update_agent_preset(preset_name, normalized))
     return _emit_lifecycle_view(ctx, allow_effective=False)
 
 

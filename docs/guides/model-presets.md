@@ -137,7 +137,7 @@ supervisor / planner / content_generation / deliberate）。
   默认。阶段通过**绑定命名预设**设定显式值；`fix` / `closeout` 未绑定时继承实现阶段。
 - **模型预设**：双列卡片 upsert `(agent, model, reasoning_effort)` 三元组，编辑前展示该共享
   预设当前绑定的所有阶段；删除预设连带解绑。
-- **执行器回退候选**：有序候选链，每个候选可选绑定**同 agent** 的预设（见第 8 节）；候选是
+- **执行器回退候选**：有序候选链，每个候选可选绑定**同 agent** 的预设（见 §7.3）；候选是
   **机器级**配置，固定写入全局 `config.toml`，不随页面范围切换改变落点。
 
 范围选择器在「全局」（`config.toml`）与「仓库」（该仓库 `.kedacode.toml`）间切换；页面展示
@@ -171,6 +171,9 @@ kc agent fallback candidate move   <position> --to <n>  --scope … [--repo-id <
   （仓库层清除后回落全局，全局清除后回落既有直接 Agent / legacy / 内置默认）。
 - 未知 stage、未注册 agent、未知预设、预设 agent 与候选执行器不一致、给缺 `reasoning_effort_args`
   模板的 agent 设非空 effort——都在**写文件或调用 agent 前**返回可诊断的非零退出，目标文件字节不变。
+- `--scope global` 与 `--repo-id` / `--repo` **互斥**：全局层写的是机器级 `config.toml`，仓库选择器
+  在这里没有任何作用，同时给出按用法错误退出（2），不静默落到机器级配置。预设名写入前去掉首尾
+  空白，落盘键与可绑定名字始终是同一个。
 - 既有 `kc agent presets` 与 `kc agent doctor` 保持兼容；单次运行旗标不调用这些持久化命令。
 
 ### 7.3 执行器回退候选预设（FR-9 / FR-10）

@@ -780,27 +780,6 @@ export type LifecycleAgentEntryGroup = {
   summary: string;
 };
 
-/** 生命周期矩阵某视角的完整视图。 */
-export type LifecycleAgentsView = {
-  scope: LifecycleAgentScope;
-  repo_id: string | null;
-  agents: string[];
-  lifecycles: LifecycleAgentEntry[];
-  /** 触发入口分组，按展示顺序排列。 */
-  entry_groups: LifecycleAgentEntryGroup[];
-  /** 来源层 key -> 中文标签。 */
-  source_layers: Record<string, string>;
-  /** 本层「恢复/删除本键」操作的提示文案。 */
-  restore_hint: string;
-};
-
-/** agent 回退顺序视图。 */
-export type AgentFallbackOrderView = {
-  agent_fallback_order: string[];
-  max_agent_switches: number;
-  agents: string[];
-};
-
 /** 单个 agent 的路由标签配置。 */
 export type AgentLabelEntry = {
   agent: string;

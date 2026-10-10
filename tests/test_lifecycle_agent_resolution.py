@@ -581,3 +581,29 @@ def test_build_fallback_specs_excludes_builder_by_agent_name() -> None:
         AgentFallbackCandidate(agent="opencode", preset=None),
         AgentFallbackCandidate(agent="codex", preset=None),
     )
+
+
+def test_verifier_auto_prefers_fallback_candidates_array_over_stale_legacy_order(
+    config_toml: Path,
+) -> None:
+    """verifier auto 从有效候选链挑第一个 ≠ 实现者：候选数组写后不再读 stale 旧名单。
+
+    旧名单仍是默认的 [claude, kimi, codex]；候选数组 [codex/x, claude/y] 非空时
+    整体接管候选链，第一个 ≠ 实现者(claude) 的应是 codex 而不是旧名单里的 kimi。
+    """
+    config = _global_config_from_toml(
+        config_toml,
+        """
+[agent_runner]
+[agent_runner.runner]
+agent_fallback_order = ["claude", "kimi", "codex"]
+[[agent_runner.runner.agent_fallback_candidates]]
+agent = "codex"
+preset = "x"
+[[agent_runner.runner.agent_fallback_candidates]]
+agent = "claude"
+preset = "y"
+""",
+    )
+    assert config.runner.agent_fallback_order == ("claude", "kimi", "codex")
+    assert resolve_lifecycle_agent("verifier", config, selected_agent="claude") == "codex"

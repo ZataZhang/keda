@@ -25,6 +25,7 @@ from backend.core.shared.models.lifecycle_agent import (
 )
 from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
 from backend.core.use_cases.lifecycle_agents_console import (
+    FIELD_SOURCE_NOT_SUPPORTED,
     FIELD_SOURCE_PRESET_UNRESOLVED,
 )
 
@@ -783,3 +784,215 @@ def test_han_edited_dangling_fallback_candidate_never_500(console_env: dict) -> 
     candidate = view.json()["fallback"]["candidates"][0]
     assert candidate["preset"] == "ghost"
     assert candidate["field_sources"]["preset"] == FIELD_SOURCE_PRESET_UNRESOLVED
+
+
+# ---------------------------------------------------------------------------
+# 评审修复回归：executor 显式声明、跨仓库删除、未绑候选来源、旧视图悬空绑定
+# ---------------------------------------------------------------------------
+
+
+def test_executor_declared_fix_keeps_aggregate_view_200(console_env: dict) -> None:
+    """兼容写回 fix=executor 合法：聚合视图不再 500，fix 行如实跟随实现阶段。"""
+    client = console_env["client"]
+    written = client.put(
+        "/api/v1/agent-runner/lifecycle-agents",
+        json={"scope": "global", "values": {"fix": "executor"}},
+    )
+    assert written.status_code == 200
+
+    view = client.get("/api/v1/agent-runner/lifecycle-settings", params={"scope": "global"})
+    assert view.status_code == 200
+    payload = view.json()
+    assert len(payload["lifecycles"]) == len(LIFECYCLE_AGENT_KEYS)
+    fix_row = _lifecycle_entry(payload, "fix")
+    assert fix_row["follows_implementation"] is True
+    assert fix_row["is_inherited"] is True
+    assert (
+        fix_row["effective_agent"] == _lifecycle_entry(payload, "implementation")["effective_agent"]
+    )
+
+
+def test_global_preset_delete_allowed_when_repo_declares_identical_copy(console_env: dict) -> None:
+    """仓库自带与全局字节相同的预设副本：删全局后仓库绑定仍解析得到，删除被放行。"""
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {"shared": {"agent": "claude", "model": "m", "reasoning_effort": None}},
+            "bindings": {},
+        },
+    )
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "repository", "repo_id": "testrepo", "bindings": {"review": "shared"}},
+    )
+    # 手改：仓库声明自己的同名副本（值与全局字节相同），须与"纯继承全局"区分开。
+    with console_env["iar_config_path"].open("a", encoding="utf-8") as handle:
+        handle.write('\n[agent_runner.presets.shared]\nagent = "claude"\nmodel = "m"\n')
+
+    removed = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "global", "presets": {"shared": None}},
+    )
+    assert removed.status_code == 200
+    on_disk = _parse_toml(console_env["config_path"])
+    assert "shared" not in on_disk.get("agent_runner", {}).get("presets", {})
+    # 仓库副本与绑定原样保留，仓库视图仍可解析。
+    repo_cfg = _parse_toml(console_env["iar_config_path"])
+    assert repo_cfg["agent_runner"]["presets"]["shared"]["agent"] == "claude"
+    assert repo_cfg["agent_runner"]["lifecycle_presets"]["review"] == "shared"
+
+
+def test_global_preset_delete_still_rejects_pure_inherited_repo_binding(console_env: dict) -> None:
+    """仓库无自有副本、仅继承全局绑定时：删除全局预设仍被 422 拒绝，两侧文件不变。"""
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {"shared": {"agent": "claude", "model": "m", "reasoning_effort": None}},
+            "bindings": {},
+        },
+    )
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "repository", "repo_id": "testrepo", "bindings": {"review": "shared"}},
+    )
+    global_before = console_env["config_path"].read_bytes()
+    repo_before = console_env["iar_config_path"].read_bytes()
+    removed = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "global", "presets": {"shared": None}},
+    )
+    assert removed.status_code == 422
+    assert "shared" in removed.json()["detail"]
+    assert console_env["config_path"].read_bytes() == global_before
+    assert console_env["iar_config_path"].read_bytes() == repo_before
+
+
+def test_unbound_fallback_candidate_marks_unsupported_fields(console_env: dict) -> None:
+    """未绑定预设的候选：字段来源如实反映 agent 能力，无推理档模板的 agent 标 not_supported。"""
+    client = console_env["client"]
+    response = client.put(
+        "/api/v1/agent-runner/agent-fallback-candidates",
+        json={"candidates": [{"agent": "claude", "preset": None}], "max_agent_switches": 1},
+    )
+    assert response.status_code == 200
+    view = client.get("/api/v1/agent-runner/lifecycle-settings", params={"scope": "global"})
+    assert view.status_code == 200
+    candidate = view.json()["fallback"]["candidates"][0]
+    assert candidate["agent"] == "claude"
+    assert candidate["preset"] is None
+    # claude 声明了 model 模板、未声明 reasoning_effort 模板。
+    assert candidate["field_sources"]["model"] == "agent_default"
+    assert candidate["field_sources"]["reasoning_effort"] == FIELD_SOURCE_NOT_SUPPORTED
+
+
+def test_compat_view_tolerates_hand_edited_dangling_binding(console_env: dict) -> None:
+    """手改悬空绑定：旧兼容视图同样返回 200，preset / model / effort 如实为 null。"""
+    client = console_env["client"]
+    with console_env["config_path"].open("a", encoding="utf-8") as handle:
+        handle.write('\n[agent_runner.lifecycle_presets]\nimplementation = "ghost"\n')
+    response = client.get("/api/v1/agent-runner/lifecycle-agents", params={"scope": "global"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["lifecycles"]) == len(LIFECYCLE_AGENT_KEYS)
+    implementation = _lifecycle_entry(payload, "implementation")
+    assert implementation["preset"] is None
+    assert implementation["model"] is None
+    assert implementation["reasoning_effort"] is None
+    assert implementation["effective_agent"] is None
+    # fix 行仍如实跟随实现阶段（不因实现阶段的悬空绑定而 500 或跑偏）。
+    assert _lifecycle_entry(payload, "fix")["follows_executor"] is True
+
+
+def test_unbound_stage_marks_unsupported_model_template(console_env: dict) -> None:
+    """未声明模型模板的 agent：无预设的阶段如实标 not_supported，不混同为 Agent 默认。"""
+    client = console_env["client"]
+    with console_env["config_path"].open("a", encoding="utf-8") as handle:
+        handle.write(
+            '\n[agent_runner.agents.templateless]\nbin = "templateless"\n'
+            'label = "agent/templateless"\n\n'
+            "[agent_runner.agents.templateless.profiles.run]\n"
+            'args = ["-p"]\nprompt_delivery = "stdin"\n'
+        )
+    written = client.put(
+        "/api/v1/agent-runner/lifecycle-agents",
+        json={"scope": "global", "values": {"implementation": "templateless"}},
+    )
+    assert written.status_code == 200
+
+    payload = client.get(
+        "/api/v1/agent-runner/lifecycle-settings", params={"scope": "global"}
+    ).json()
+    row = _lifecycle_entry(payload, "implementation")
+    assert row["effective_agent"] == "templateless"
+    assert row["model_supported"] is False
+    assert row["field_sources"]["model"] == FIELD_SOURCE_NOT_SUPPORTED
+    assert row["field_sources"]["reasoning_effort"] == FIELD_SOURCE_NOT_SUPPORTED
+    # fix 继承实现阶段：同一判据，继承行也不得把"没有注入通道"说成"Agent 默认"。
+    inherited_fix = _lifecycle_entry(payload, "fix")
+    assert inherited_fix["follows_implementation"] is True
+    assert inherited_fix["field_sources"]["model"] == FIELD_SOURCE_NOT_SUPPORTED
+
+
+def test_preset_name_normalized_at_api_boundary(console_env: dict) -> None:
+    """预设名在写入前归一化：落盘键、视图回显与绑定引用用同一个名字。"""
+    client = console_env["client"]
+    created = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {"  spaced  ": {"agent": "claude", "model": "m", "reasoning_effort": None}},
+        },
+    )
+    assert created.status_code == 200
+    on_disk = _parse_toml(console_env["config_path"])
+    assert list(on_disk["agent_runner"]["presets"]) == ["spaced"]
+
+    # 带空白的绑定值同样归一化到该预设，不产生"写得出却绑不上"的预设名。
+    bound = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "global", "bindings": {"review": " spaced "}},
+    )
+    assert bound.status_code == 200
+    review_row = _lifecycle_entry(bound.json(), "review")
+    assert review_row["preset_name"] == "spaced"
+    assert review_row["model"] == "m"
+
+
+def test_identical_candidate_write_leaves_config_unchanged(console_env: dict) -> None:
+    """重复提交同一条候选链是 no-op：文件逐字节不变，预算不被共写成第二次落盘。"""
+    client = console_env["client"]
+    payload = {
+        "candidates": [{"agent": "claude", "preset": None}],
+        "max_agent_switches": 1,
+    }
+    first = client.put("/api/v1/agent-runner/agent-fallback-candidates", json=payload)
+    assert first.status_code == 200
+    bytes_after_first = console_env["config_path"].read_bytes()
+    assert "[[agent_runner.runner.agent_fallback_candidates]]" in bytes_after_first.decode(
+        encoding="utf-8"
+    )
+
+    second = client.put("/api/v1/agent-runner/agent-fallback-candidates", json=payload)
+    assert second.status_code == 200
+    assert console_env["config_path"].read_bytes() == bytes_after_first
+
+    # 只动候选、预算保持同值时，预算那一行不被改写。
+    third = client.put(
+        "/api/v1/agent-runner/agent-fallback-candidates",
+        json={
+            "candidates": [
+                {"agent": "claude", "preset": None},
+                {"agent": "codex", "preset": None},
+            ],
+            "max_agent_switches": 1,
+        },
+    )
+    assert third.status_code == 200
+    on_disk = _parse_toml(console_env["config_path"])
+    runner_section = on_disk["agent_runner"]["runner"]
+    assert runner_section["max_agent_switches"] == 1
+    assert len(runner_section["agent_fallback_candidates"]) == 2

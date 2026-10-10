@@ -2,8 +2,8 @@
 
 三层各自写各自的文件：
 
-- 全局层（Settings 页）-> ``config.toml``；
-- 仓库层（Backlog 仓库行齿轮）-> 该仓库 ``.kedacode.toml``；
+- 全局层（统一设置页选「全局」）-> ``config.toml``；
+- 仓库层（统一设置页选「仓库」，Backlog 仓库行齿轮直达该页）-> 该仓库 ``.kedacode.toml``；
 - PRD 层（PRD 原文页）-> 该 PRD 文件头部 ``lifecycle_agents`` 块。
 
 路由层只做 HTTP 映射与 4xx 转换，生效值计算与入参校验收敛在 core 用例
@@ -24,6 +24,7 @@ from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunCont
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config_from_settings,
+    collect_repository_own_presets,
     create_lifecycle_settings_editor,
     load_fresh_agent_runner_settings,
     resolve_repository_targets_with_diagnostics,
@@ -194,7 +195,15 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
     # 工作副本：把本次预设改动并入，使绑定校验能看到同批新建的预设（不落盘）。
     merged_presets = dict(config.agent_presets)
     preset_updates: dict[str, AgentModelPreset | None] = {}
-    for preset_name, payload in request.presets.items():
+    for raw_preset_name, payload in request.presets.items():
+        # 预设名在 API 边界归一化：校验、写回键与绑定引用必须用同一个名字，
+        # 否则能写出一个绑定永远解析不到的带空白预设。
+        preset_name = raw_preset_name.strip()
+        if not preset_name or preset_name in preset_updates:
+            raise HTTPException(
+                status_code=422,
+                detail=f"预设名非法或在本次请求里重复：'{raw_preset_name}'。",
+            )
         if payload is None:
             merged_presets.pop(preset_name, None)
             preset_updates[preset_name] = None
@@ -209,7 +218,8 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
 
     try:
         normalized_presets: dict[str, dict[str, str | None] | None] = {}
-        for preset_name, payload in request.presets.items():
+        for raw_preset_name, payload in request.presets.items():
+            preset_name = raw_preset_name.strip()
             if payload is None:
                 normalized_presets[preset_name] = None
                 continue
@@ -224,16 +234,23 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
         # 无法解析生效值。此类操作必须失败且不改文件（FR-7），而非写成功后让页面 / CLI 崩。
         deleted_names = {name for name, payload in preset_updates.items() if payload is None}
         repository_configs: dict[str, AppConfig] | None = None
+        repository_own_presets: dict[str, dict[str, AgentModelPreset]] | None = None
         if deleted_names and request.scope == SCOPE_GLOBAL:
             repository_configs = {
                 context.repo_id: context.config for context in _resolve_contexts()
             }
+            # 各仓库自身声明的预设（含与全局字节相同的副本）：让校验能区分"纯继承
+            # 全局"与"仓库自带同名副本"，后者不阻挡全局删除。
+            repository_own_presets = collect_repository_own_presets(
+                load_fresh_agent_runner_settings()
+            )
         validate_lifecycle_settings_reference_integrity(
             config,
             request.scope,
             preset_updates,
-            request.bindings,
+            normalized_bindings,
             repository_configs=repository_configs,
+            repository_own_presets=repository_own_presets,
         )
     except LifecycleAgentsUpdateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

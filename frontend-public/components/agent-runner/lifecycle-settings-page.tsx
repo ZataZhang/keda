@@ -1,5 +1,4 @@
 "use client";
-/* eslint-disable react-hooks/set-state-in-effect */
 
 // 生命周期、模型预设与执行器回退的统一设置页（全局层 / 仓库层共用）。
 //
@@ -209,14 +208,13 @@ function MatrixRow({
 }) {
   const vocabularySafe = vocabulary;
   const affected = row.affected_stages.filter((stage) => stage !== row.key);
-  const agentDisplay = row.follows_implementation
-    ? "跟随实现阶段"
-    : (row.effective_agent ?? "—");
+  const agentDisplay =
+    row.effective_agent ?? (row.follows_implementation ? "跟随实现阶段" : "—");
   return (
     <div
       data-testid={`matrix-row-${row.key}`}
       className={cn(
-        "grid grid-cols-1 gap-3 rounded-lg border p-3 md:grid-cols-[minmax(7rem,1fr)_minmax(6rem,0.8fr)_repeat(2,minmax(6rem,1fr))_minmax(9rem,1.2fr)] md:items-center",
+        "grid grid-cols-1 gap-3 rounded-lg border p-3 lg:grid-cols-[minmax(7rem,1fr)_minmax(6rem,0.8fr)_repeat(2,minmax(6rem,1fr))_minmax(9rem,1.2fr)] lg:items-center",
         bindingChanged && "border-amber-400 bg-amber-50 dark:bg-amber-950/30",
       )}
     >
@@ -590,6 +588,8 @@ export function LifecycleSettingsPage({
 
   const [view, setView] = useState<LifecycleSettingsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // 视角请求是否仍在途：从切换选择起为 true，直到对应视角请求落定（成功或失败）。
+  const [isLoading, setIsLoading] = useState(true);
 
   // 矩阵草稿：本次改动过的预设与阶段绑定（保留式，只提交差异）。
   const [presetDraft, setPresetDraft] = useState<
@@ -611,13 +611,21 @@ export function LifecycleSettingsPage({
   // 候选新增下拉的临时 agent 选择。
   const [newCandidateAgent, setNewCandidateAgent] = useState<string>("");
 
-  const applyView = useCallback((nextView: LifecycleSettingsView) => {
-    setView(nextView);
+  /** 清空全部编辑草稿（切换视角时调用，避免旧视角草稿跨视角泄漏）。 */
+  const clearAllDrafts = useCallback(() => {
     setPresetDraft({});
     setBindingDraft({});
     setCandidateDraft(null);
     setSwitchesDraft(null);
   }, []);
+
+  const applyView = useCallback(
+    (nextView: LifecycleSettingsView) => {
+      setView(nextView);
+      clearAllDrafts();
+    },
+    [clearAllDrafts],
+  );
 
   useEffect(() => {
     fetchRegistryRepositories()
@@ -627,6 +635,7 @@ export function LifecycleSettingsPage({
 
   useEffect(() => {
     let isCancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadError(null);
     if (scope === "repository" && !repoId) {
       setView(null);
@@ -638,6 +647,7 @@ export function LifecycleSettingsPage({
       .then((loaded) => {
         if (!isCancelled) {
           applyView(loaded);
+          setIsLoading(false);
         }
       })
       .catch((error: unknown) => {
@@ -645,6 +655,7 @@ export function LifecycleSettingsPage({
           setLoadError(
             error instanceof Error ? error.message : "加载生命周期设置失败。",
           );
+          setIsLoading(false);
         }
       });
     return () => {
@@ -653,6 +664,40 @@ export function LifecycleSettingsPage({
   }, [scope, repoId, applyView]);
 
   const agents = view?.agents ?? [];
+
+  // 视图身份必须与当前选择一致：切换后、新视角请求落定前，内存里的视图还属于旧选择，
+  // 此时按加载态渲染并禁止保存，防止把旧视角的编辑写进新视角的目标文件。
+  const viewMatchesSelection =
+    view !== null &&
+    view.scope === scope &&
+    (view.repo_id ?? null) === (repoId ?? null);
+
+  /** 切换全局 / 仓库范围：先同步清草稿、清错误、置加载态，再切选择。 */
+  function switchScope(nextScope: LifecycleAgentScope) {
+    if (nextScope === scope) {
+      return;
+    }
+    clearAllDrafts();
+    setLoadError(null);
+    setIsLoading(true);
+    // 全局视角的请求不带 repo_id、响应里 repo_id 恒为 null；残留的仓库选择会让
+    // 视图身份比对永不成立，页面卡在加载态。仓库选择只在仓库视角有意义。
+    if (nextScope === "global") {
+      setRepoId(undefined);
+    }
+    setScope(nextScope);
+  }
+
+  /** 切换目标仓库：与切范围同口径（清草稿 + 加载态）。 */
+  function switchRepo(nextRepoId: string) {
+    if (nextRepoId === repoId) {
+      return;
+    }
+    clearAllDrafts();
+    setLoadError(null);
+    setIsLoading(true);
+    setRepoId(nextRepoId);
+  }
 
   /** 计算某预设当前应显示的三元组（草稿优先于已存）。 */
   function presetValues(name: string): AgentPresetPayload {
@@ -737,7 +782,7 @@ export function LifecycleSettingsPage({
 
   /** 提交改动过的预设与绑定（一次 PATCH）。 */
   async function handleSaveMatrix() {
-    if (!view || !matrixDirty) {
+    if (!view || !matrixDirty || !viewMatchesSelection) {
       return;
     }
     setMatrixSaving(true);
@@ -757,7 +802,11 @@ export function LifecycleSettingsPage({
         presets,
         bindings,
       });
-      applyView(nextView);
+      setView(nextView);
+      // 只重置本区块（矩阵 / 预设）草稿；回退候选与预算草稿保留——两块写回互不牵连，
+      // 避免一次矩阵保存静默丢弃未保存的回退编辑。
+      setPresetDraft({});
+      setBindingDraft({});
       toast.success("生命周期设置已保存。");
     } catch (error) {
       setMatrixError(error instanceof Error ? error.message : "保存失败。");
@@ -777,7 +826,11 @@ export function LifecycleSettingsPage({
     setBindingDraft((current) => {
       const next = { ...current };
       for (const stage of boundStages) {
-        next[stage] = null;
+        // 只解绑仍指向被删预设的阶段：未触碰（undefined）的阶段沿用基线绑定（即被删
+        // 预设），需显式解绑；本会话已改绑其它预设的草稿保持不动。
+        if (next[stage] === undefined || next[stage] === name) {
+          next[stage] = null;
+        }
       }
       return next;
     });
@@ -848,7 +901,7 @@ export function LifecycleSettingsPage({
 
   /** 写回完整期望候选数组与预算（候选为机器级配置）。 */
   async function handleSaveFallback() {
-    if (!view || !fallbackDirty) {
+    if (!view || !fallbackDirty || !viewMatchesSelection) {
       return;
     }
     setFallbackSaving(true);
@@ -884,7 +937,7 @@ export function LifecycleSettingsPage({
         <div className="inline-flex rounded-lg border p-0.5">
           <button
             type="button"
-            onClick={() => setScope("global")}
+            onClick={() => switchScope("global")}
             data-testid="scope-global"
             className={cn(
               "rounded-md px-3 py-1 text-sm transition-colors",
@@ -897,7 +950,7 @@ export function LifecycleSettingsPage({
           </button>
           <button
             type="button"
-            onClick={() => setScope("repository")}
+            onClick={() => switchScope("repository")}
             data-testid="scope-repository"
             className={cn(
               "rounded-md px-3 py-1 text-sm transition-colors",
@@ -922,7 +975,7 @@ export function LifecycleSettingsPage({
               {repositories.map((repo) => (
                 <DropdownMenuItem
                   key={repo.repo_id}
-                  onSelect={() => setRepoId(repo.repo_id)}
+                  onSelect={() => switchRepo(repo.repo_id)}
                   data-testid={`scope-repo-option-${repo.repo_id}`}
                 >
                   {repo.display_name ?? repo.repo_id}
@@ -967,7 +1020,8 @@ export function LifecycleSettingsPage({
           <CardTitle>生命周期矩阵</CardTitle>
           <CardDescription>
             九阶段各自的最终生效 Agent / 模型 / 推理深度与来源。显式值通过绑定命名预设设定；
-            fix / closeout 未绑定时继承实现阶段。
+            fix / closeout 未绑定时继承实现阶段。本表为全局 / 仓库基线，PRD 头部声明与
+            单次运行的 CLI 旗标对单个 PRD / 运行优先生效。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -1014,7 +1068,7 @@ export function LifecycleSettingsPage({
           <Button
             size="sm"
             onClick={() => void handleSaveMatrix()}
-            disabled={matrixSaving || !matrixDirty}
+            disabled={matrixSaving || !matrixDirty || !viewMatchesSelection}
             data-testid="matrix-save"
           >
             {matrixSaving ? "保存中…" : "保存矩阵与预设"}
@@ -1128,7 +1182,13 @@ export function LifecycleSettingsPage({
           ) : (
             <ol className="space-y-2">
               {workingCandidates.map((candidate, index) => {
-                const rowView = currentView.fallback.candidates[index];
+                // 摘要按行自身 (agent, preset) 身份匹配基线候选：按位置索引在增删 /
+                // 移动 / 换绑后会错配；身份对不上基线的行不显示摘要。
+                const rowView = currentView.fallback.candidates.find(
+                  (baselineRow) =>
+                    baselineRow.agent === candidate.agent &&
+                    baselineRow.preset === candidate.preset,
+                );
                 const presetLabel = candidate.preset ?? "跟随执行器默认";
                 return (
                   <li
@@ -1327,7 +1387,7 @@ export function LifecycleSettingsPage({
           <Button
             size="sm"
             onClick={() => void handleSaveFallback()}
-            disabled={fallbackSaving || !fallbackDirty}
+            disabled={fallbackSaving || !fallbackDirty || !viewMatchesSelection}
             data-testid="fallback-save"
           >
             {fallbackSaving ? "保存中…" : "保存回退候选"}
@@ -1357,7 +1417,7 @@ export function LifecycleSettingsPage({
     );
   }
 
-  if (!view) {
+  if (isLoading || !viewMatchesSelection) {
     return (
       <div className="space-y-4" data-testid="lifecycle-settings-page">
         {renderScopeBar()}
@@ -1375,7 +1435,11 @@ export function LifecycleSettingsPage({
       <p className="text-xs text-slate-500 dark:text-slate-400">
         {view.scope === "global"
           ? "正在编辑：全局 config.toml。"
-          : `正在编辑：仓库 ${view.repo_id ?? ""} 的 .kedacode.toml（预设与回退仍写入机器级 config.toml）。`}
+          : `正在编辑：仓库 ${view.repo_id ?? ""}。生命周期矩阵与预设绑定写入该仓库的 .kedacode.toml；仅下方「执行器回退」固定写入机器级 config.toml。`}
+      </p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        本页展示全局 / 仓库基线；PRD 头部声明与单次运行的 CLI 旗标（--preset / --model
+        / --reasoning-effort）对单个 PRD / 运行优先生效。
       </p>
       {renderMatrixSection(view)}
       {renderPresetSection(view)}

@@ -4529,7 +4529,12 @@ def _stub_lifecycle_config(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _lifecycle_ctx(**parsed_kwargs: object) -> ParsedCommandContext:
+def _lifecycle_ctx(
+    *,
+    repo_id: str | None = None,
+    repo_override: str | None = None,
+    **parsed_kwargs: object,
+) -> ParsedCommandContext:
     """按写命令最小旗标构造 handler 上下文（其余注入项不触达）。"""
     import argparse
 
@@ -4539,8 +4544,8 @@ def _lifecycle_ctx(**parsed_kwargs: object) -> ParsedCommandContext:
         parsed=argparse.Namespace(**defaults),
         process_runner=None,
         runner_settings=None,
-        repo_id=None,
-        repo_override=None,
+        repo_id=repo_id,
+        repo_override=repo_override,
         github_client_factory=None,
         output_format=OUTPUT_FORMAT_TABLE,
     )
@@ -4594,3 +4599,15 @@ def test_agent_fallback_candidate_add_requires_scope(
     with pytest.raises(CliError) as exc_info:
         run_agent_fallback_candidate_add_command(ctx)
     assert exc_info.value.code == ExitCode.USAGE
+
+
+def test_agent_lifecycle_set_rejects_repo_selector_with_global_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--scope global 与仓库选择器互斥：误用在使用文件前 USAGE 退出，不静默写机器级配置。"""
+    _stub_lifecycle_config(monkeypatch)
+    for selector_kwargs in ({"repo_id": "keda-main"}, {"repo_override": "/tmp/somewhere"}):
+        with pytest.raises(CliError) as exc_info:
+            run_agent_lifecycle_set_command(_lifecycle_ctx(scope="global", **selector_kwargs))
+        assert exc_info.value.code == ExitCode.USAGE
+        assert "--scope global" in str(exc_info.value)

@@ -42,7 +42,6 @@ from backend.core.use_cases.agent_candidate_fallback import (
 from backend.core.use_cases.lifecycle_agent_resolution import (
     legacy_configured_agent,
     resolve_lifecycle_agent,
-    resolve_lifecycle_model_selection,
 )
 
 SCOPE_GLOBAL = "global"
@@ -125,13 +124,17 @@ def build_lifecycle_agents_view(
         entry_group = LIFECYCLE_AGENT_ENTRY_BY_KEY[lifecycle_key]
         # 阶段 -> 预设 绑定与生效模型（本 PRD 新增的只读展示字段）：绑定名
         # 取两层显式声明（仓库层 > 全局层），解析结果给出生效的模型/推理档；
-        # 未绑定时三项均为 ``None``（前端渲染为空，行为与过去一致）。
+        # 未绑定时三项均为 ``None``（前端渲染为空，行为与过去一致）。手改出的
+        # 悬空绑定（指向已删除 / 未声明预设）与聚合视图同口径容忍：三项如实为
+        # ``None``、effective_agent 为 ``None``，绝不回落 resolve（那会重新命中
+        # 同一条悬空绑定并抛错、把整个视图打成 500）。
         bound_preset_name = config.lifecycle_presets.declared_value(lifecycle_key)
         bound_selection = (
-            resolve_lifecycle_model_selection(lifecycle_key, config)
+            _resolve_bound_selection(config, bound_preset_name)
             if bound_preset_name is not None
             else None
         )
+        binding_unresolved = bound_preset_name is not None and bound_selection is None
         lifecycles.append(
             {
                 "key": lifecycle_key,
@@ -149,14 +152,18 @@ def build_lifecycle_agents_view(
                 "declared_value": in_scope_layer.get(lifecycle_key),
                 "inherited_value": other_layer.get(lifecycle_key),
                 # ``executor`` 阶段在无实现者上下文时无法解析成具体 agent，用
-                # ``effective_agent=None`` + ``follows_executor`` 如实表达"跟随实现者"。
+                # ``effective_agent=None`` + ``follows_executor`` 如实表达"跟随实现者"；
+                # 悬空绑定同理用 ``None`` 如实表达"该阶段当前无解析得到的 agent"。
                 "effective_agent": (
-                    None if follows_executor else resolve_lifecycle_agent(lifecycle_key, config)
+                    None
+                    if follows_executor or binding_unresolved
+                    else resolve_lifecycle_agent(lifecycle_key, config)
                 ),
                 "follows_executor": follows_executor,
                 "source": _resolve_source_layer(lifecycle_key, config),
-                # 预设绑定视图（纯新增）：绑定的预设名 + 解析后的模型/推理档。
-                "preset": bound_preset_name,
+                # 预设绑定视图（纯新增）：绑定的预设名 + 解析后的模型/推理档；
+                # 悬空绑定时 preset 也如实为 ``None``（旧响应形状不变，不加新字段）。
+                "preset": bound_preset_name if bound_selection is not None else None,
                 "model": bound_selection.model if bound_selection is not None else None,
                 "reasoning_effort": (
                     bound_selection.reasoning_effort if bound_selection is not None else None
@@ -475,9 +482,16 @@ def _lifecycle_row_source(key: str, config: AppConfig) -> dict[str, Any]:
             "reasoning_effort_supported": effort_supported,
         }
 
-    # 情形 B：fix / closeout 无自绑，取值整体继承实现阶段解析结果。
+    # 情形 B：fix / closeout 声明 executor（含兼容写回显式落盘的 "executor"）或
+    # 未声明（回落既有键的 executor 语义）时，取值整体继承实现阶段解析结果。
+    # 判据与 build_lifecycle_agents_view 同口径：归一化"显式声明或既有键"取值，
+    # 而不是只看声明是否为 None——否则显式 "executor" 会掉进情形 C 的
+    # resolve_lifecycle_agent，在无实现者上下文时抛 ValueError 把视图打成 500。
+    declared_or_legacy = config.lifecycle_agents.declared_value(key) or legacy_configured_agent(
+        key, config
+    )
     follows_implementation = key in LIFECYCLE_AGENT_EXECUTOR_KEYS and (
-        config.lifecycle_agents.declared_value(key) is None
+        normalize_lifecycle_agent_value(declared_or_legacy) == LIFECYCLE_AGENT_EXECUTOR
     )
     if follows_implementation:
         impl_agent, impl_model, impl_effort, impl_resolved = _implementation_selection(config)
@@ -538,10 +552,8 @@ def _lifecycle_row_source(key: str, config: AppConfig) -> dict[str, Any]:
         "field_sources": {
             "agent": _resolve_source_layer(key, config),
             "preset": None,
-            "model": FIELD_SOURCE_AGENT_DEFAULT,
-            "reasoning_effort": (
-                FIELD_SOURCE_AGENT_DEFAULT if effort_supported else FIELD_SOURCE_NOT_SUPPORTED
-            ),
+            "model": _value_field_source(None, model_supported),
+            "reasoning_effort": _value_field_source(None, effort_supported),
         },
         "is_inherited": False,
         "follows_implementation": False,
@@ -551,10 +563,15 @@ def _lifecycle_row_source(key: str, config: AppConfig) -> dict[str, Any]:
 
 
 def _value_field_source(value: str | None, supported: bool) -> str:
-    """把"某字段是否有值 + Agent 是否支持"折叠成逐字段来源标签。"""
-    if value is None:
-        return FIELD_SOURCE_AGENT_DEFAULT
-    return FIELD_SOURCE_PRESET if supported else FIELD_SOURCE_NOT_SUPPORTED
+    """把"某字段是否有值 + Agent 是否支持"折叠成逐字段来源标签。
+
+    Agent 未声明对应参数模板时一律 :data:`FIELD_SOURCE_NOT_SUPPORTED`，包括该字段
+    没有显式值的行：既没有可注入的通道，也就没有"Agent 默认 / 未显式指定"可标，
+    不能把"不支持"混同成"未配置"（PRD：无法由注册模板注入时页面与 CLI 明确指出不支持）。
+    """
+    if not supported:
+        return FIELD_SOURCE_NOT_SUPPORTED
+    return FIELD_SOURCE_AGENT_DEFAULT if value is None else FIELD_SOURCE_PRESET
 
 
 def _preset_definition_source(
@@ -602,8 +619,10 @@ def _fallback_candidate_view(config: AppConfig) -> list[dict[str, Any]]:
             model = reasoning_effort = None
             model_supported, effort_supported = _model_capability(config, candidate.agent)
             preset_source = None
-            model_source = FIELD_SOURCE_AGENT_DEFAULT
-            effort_source = FIELD_SOURCE_AGENT_DEFAULT
+            # 与生命周期行情形 C 共用同一判据：未绑定预设时"有模板却没显式值"才是
+            # "Agent 默认 / 未显式指定"，没有模板则如实 not_supported。
+            model_source = _value_field_source(None, model_supported)
+            effort_source = _value_field_source(None, effort_supported)
         candidates.append(
             {
                 "position": position,
@@ -976,6 +995,7 @@ def validate_lifecycle_settings_reference_integrity(
     binding_updates: Mapping[str, str | None],
     *,
     repository_configs: Mapping[str, AppConfig] | None = None,
+    repository_own_presets: Mapping[str, Mapping[str, AgentModelPreset]] | None = None,
 ) -> None:
     """写前拒绝悬空：删除预设时若其仍被写后可见的绑定 / 候选引用则报错、不改文件。
 
@@ -983,8 +1003,17 @@ def validate_lifecycle_settings_reference_integrity(
 
     - 目标层：并入本次预设与绑定改动后复查是否仍指向被删预设。
     - 跨层（仅 ``scope=global`` 删除）：全局预设若被某仓库自身绑定引用、而该仓库并未
-      自带同名预设整体覆盖，删全局会让该仓库视图悬空；逐一按仓库写后预设集合复查并拒绝。
-      仓库自带同名（值与全局不同）则覆盖生效、删全局安全。
+      自带同名预设，删全局会让该仓库视图悬空；逐一按仓库写后预设集合复查并拒绝。
+      仓库自带同名预设（哪怕与全局字节相同）则仓库副本继续生效、删全局安全。
+
+    Args:
+        repository_configs: ``scope=global`` 删除时参与跨层复查的仓库合并配置
+            （repo_id -> 该仓库"全局 + 仓库层"合并后的 AppConfig）。
+        repository_own_presets: 各仓库**自身声明**的预设（repo_id -> 预设名 ->
+            三元组），来自各仓库本地配置文件。提供时以"删后全局预设 + 仓库自有
+            预设"重建写后可用集合——仓库自带的同名副本（含与全局字节相同的副本）
+            留在集合内，绑定仍可解析；未提供（或某仓库缺失）时回退到合并视图近似
+            （合并视图里与被删全局预设字节相同的条目视为纯继承、随删除消失）。
 
     Raises:
         LifecycleAgentsUpdateError: 存在指向被删预设的悬空引用（信息含具体阶段 / 候选与预设名）。
@@ -1015,14 +1044,28 @@ def validate_lifecycle_settings_reference_integrity(
     # 未解绑的全局继承绑定，都算悬空）。
     global_layer_after = _bindings_after_write(config, SCOPE_GLOBAL, binding_updates).global_layer
     global_presets_before = config.agent_presets
+    global_presets_after = target_after.agent_presets
     for repo_id, repo_config in repository_configs.items():
-        repo_presets_after = {
-            preset_name: preset
-            for preset_name, preset in repo_config.agent_presets.items()
-            if not (
-                preset_name in deleted_presets and global_presets_before.get(preset_name) == preset
-            )
-        }
+        own_presets = (
+            repository_own_presets.get(repo_id) if repository_own_presets is not None else None
+        )
+        if own_presets is not None:
+            # 以"删后全局预设 + 仓库自有声明"重建写后可用预设（与合并语义同序：
+            # 仓库层同键整体替换全局、新键追加）。仓库自带的同名副本哪怕与全局
+            # 字节相同也留在集合里，绑定仍可解析——不再被误当成纯继承而误拒删除。
+            repo_presets_after = dict(global_presets_after)
+            repo_presets_after.update(own_presets)
+        else:
+            # 无仓库自有声明信息时的近似：合并视图里与被删全局预设字节相同的条目
+            # 视为纯继承（随全局删除消失）。
+            repo_presets_after = {
+                preset_name: preset
+                for preset_name, preset in repo_config.agent_presets.items()
+                if not (
+                    preset_name in deleted_presets
+                    and global_presets_before.get(preset_name) == preset
+                )
+            }
         repo_bindings_after = LifecycleAgentsConfig(
             global_layer=global_layer_after,
             repository_layer=dict(repo_config.lifecycle_presets.repository_layer),
