@@ -4611,3 +4611,44 @@ def test_agent_lifecycle_set_rejects_repo_selector_with_global_scope(
             run_agent_lifecycle_set_command(_lifecycle_ctx(scope="global", **selector_kwargs))
         assert exc_info.value.code == ExitCode.USAGE
         assert "--scope global" in str(exc_info.value)
+
+
+def test_agent_fallback_candidate_repository_scope_lands_in_repo_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """候选写命令 ``--scope repository`` 的落点是该仓库配置文件，机器级文件逐字节不变。
+
+    回退候选数组表可按仓库声明，写后该仓库以自身数组整体接管机器级候选链；这条
+    落点契约只由本测试钉住（HTTP API 恒写 ``config.toml``，页面回退区同样只写机器级），
+    因此 ``docs/guides/model-presets.md`` §7.2 与随包 kedacode-operator skill 必须按同一
+    口径描述，不得把它写成"CLI 也恒写全局"。
+    """
+    import tomllib
+
+    repo_path = _init_bare_git_repository(tmp_path, "fbrepo")
+    (repo_path / ".iar.toml").write_text("[agent_runner]\n", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "[agent_runner]\n\n"
+        "[agent_runner.repositories.fbrepo]\n"
+        f'path = "{repo_path.resolve()}"\n'
+        "enabled = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    global_bytes_before = config_path.read_bytes()
+
+    exit_code = run_agent_fallback_candidate_add_command(
+        _lifecycle_ctx(
+            scope="repository", repo_id="fbrepo", agent="qoder", preset=None, position=None
+        )
+    )
+    capsys.readouterr()
+
+    assert exit_code == 0
+    repository_config = tomllib.loads((repo_path / ".iar.toml").read_text(encoding="utf-8"))
+    written_candidates = repository_config["agent_runner"]["runner"]["agent_fallback_candidates"]
+    assert written_candidates[-1] == {"agent": "qoder"}
+    assert config_path.read_bytes() == global_bytes_before

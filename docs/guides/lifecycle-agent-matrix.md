@@ -209,7 +209,10 @@ agent / 该阶段的 `auto` / fix-closeout 的 `executor`），**当前生效值
 > **「Agent 标签设置」与「执行器回退候选」是机器级配置**——它们的 API 无论是否带
 > `repo_id` 都只写全局 `config.toml`，`repo_id` 仅用于选取校验视角（认可该仓库级注册的
 > agent）。因此统一页的「执行器回退」区注明它固定写入全局 `config.toml`，不随生命周期范围
-> 切换而改变落点。
+> 切换而改变落点。命令行是例外：`kc agent fallback candidate …` 的落点跟着 `--scope` 走，
+> `--scope repository` 把那一段候选数组写进**该仓库**的配置文件并对该仓库整体接管机器级链
+> （含物化继承来的候选与该仓库的 `max_agent_switches`），口径见
+> [Agent 模型预设](model-presets.md) §7.2 与 §7.3。
 
 ## 跨 agent 回退顺序（与矩阵是两件事）
 
