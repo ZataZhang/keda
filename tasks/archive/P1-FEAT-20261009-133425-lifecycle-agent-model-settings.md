@@ -654,3 +654,11 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - Reason: 交付门禁把执行侧条目的 `- [ ]` 判为未完成，而等待 runner 门禁的条目在本轮不可能变绿；把它写成 `[~]` 是既不让执行器伪勾、也不让门禁空转的唯一口径。证据文件命名统一是为了让 reviewer 能按 `rv-<n>-*` 直接定位到对应检查点。
 - Impact: 纯验收清单表述与证据文件命名变更，无代码行为变更、无新增或削弱生产断言；上一条 Change Log 中「未勾选 L512/L518」的表述由本条取代（其事实描述——verifier 裁决与归档归 runner——不变）。
 - Review: 执行侧交付完成；verifier 裁决、PR 评审与归档由 runner 交付流程执行，人工验收项仍留 §9 Human-Confirmed 空框。
+
+### 修复：verifier 会话记录污染交付树导致 clean-tree 门禁永久打红
+- Type: bugfix / evidence / tooling
+- Before: checkpoint cce2d963 意外把 worktree 本地会话记录 `.iar/agent-runner/sessions/{qoder,codebuddy}.json` 纳入版本跟踪；独立 verifier 经 `run_agent_with_prompt_resilient` 调用时未指定 profile，落入默认 `run` profile，进程退出时 `_persist_session_id` 用 verifier 自报会话 id 覆盖主实现会话记录——发生在 verdict 之后、commit 之前，runner 的 clean-tree 门禁（`git status --porcelain` 非空即拒）据此报「Independent verifier changed the committed code tree」，green verdict 永远无法被接受。辅助脚本 `scripts/rv1_final_tree.sh` 另把工作树干净设为硬失败项，在 pre-commit 时机（修复合法地尚未提交）必然变红。
+- After: ① `run_agent_once.py` 的 `_persist_session_id` 增加 `invocation_phase == PHASE_VERIFICATION` 即跳过的守卫（verifier 仍走 `run` profile 保持与实现者同一调用形态，但不再落会话记录），配回归测试 `test_verification_phase_run_profile_does_not_overwrite_session`（去守卫即变红）；② 两个会话记录文件从 tree 移除（本地删除，由 runner 提交），`.gitignore` 新增 `.iar/agent-runner/`，恢复目录可写、即便旧版 daemon 再写也不会重新入树；③ `rv1_final_tree.sh` 的 tree 状态改为信息性记录（打印 head_commit/git_tree/porcelain 清单并注明在途改动待 runner 落 commit），退出码仍只由实质性 oracle（定向契约测试 + FR-5 CLI surface）决定，未删除任何生产断言。证据在同一最终树上全部重跑：rv-1 两项（157 passed、CLI surface 齐全，`rv-1-final-tree-reverification.txt` 重新生成 PASS）、rv-2（`RV-2 WRAPPER RESULT: PASS`、e2e 7 passed、三个 PNG 刷新）、rv-3（44 passed），与 `evidence.json` 各 item 的 stdout 断言逐条一致。
+- Reason: 前次 claim 的失败是系统性矛盾而非本轮改动回退：verifier 阶段的会话持久化与其自身「不覆盖主会话」的设计意图相悖，且与被门禁检查的 clean-tree 要求直接冲突；不修复则任何 green verdict 都无法交付。daemon 本次运行加载的是 main 检出的旧代码，故本轮不受 ① 保护，靠 ② 的解跟踪 + gitignore 保证 commit 后会话文件不再入树。
+- Impact: 行为保持型修复，不改 FR-1–FR-6 的任何需求、验收清单或 RV 判据；`git add -A` 会提交两个会话文件的删除（属解跟踪，非禁改路径）。定向契约测试计数以本轮重跑为准（lifecycle/preset/fallback/skill/console 八文件 157 passed），早前条目「定向 253 passed」为不同文件范围口径；`just test` 269 passed、`just lint --full` 与 `just lint --reuse` 门禁通过。
+- Review: 执行侧已复跑并绑定证据；待独立 verifier 在含本修复的交付树上出具裁决；§9 Human-Confirmed 五项不变、不勾选。

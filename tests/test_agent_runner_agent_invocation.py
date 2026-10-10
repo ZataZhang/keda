@@ -21,6 +21,7 @@ from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_DELIBERATE,
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
 )
+from backend.core.use_cases.agent_invocation_tracing import PHASE_VERIFICATION
 from backend.core.use_cases.agent_runner_session_store import (
     load_agent_session_record,
     save_agent_session_record,
@@ -510,6 +511,26 @@ class TestSessionRecordPersistence:
             tmp_path,
             _SessionReportingRunner("sess-other"),
             profile=AGENT_PROFILE_DELIBERATE,
+        )
+
+        assert load_agent_session_record(tmp_path, "claude").session_id == "sess-main"
+
+    def test_verification_phase_run_profile_does_not_overwrite_session(
+        self, tmp_path: Path
+    ) -> None:
+        """verifier 走 run profile（与实现者同一调用形态）但 phase=verification：
+
+        它自报的会话 id 绝不能覆盖主实现会话——被跟踪的会话记录一旦在 verifier
+        跑完后变脏，独立 verifier 门禁的「交付树保持干净」检查会把 green verdict
+        直接打回，Issue 永远无法交付。"""
+        save_agent_session_record(tmp_path, agent_name="claude", session_id="sess-main")
+
+        run_agent_with_prompt(
+            "claude",
+            "Verify the evidence.",
+            tmp_path,
+            _SessionReportingRunner("sess-verifier"),
+            invocation_phase=PHASE_VERIFICATION,
         )
 
         assert load_agent_session_record(tmp_path, "claude").session_id == "sess-main"

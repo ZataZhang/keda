@@ -69,6 +69,10 @@ Thumbs.db
 
 # Agent runner state (local only)
 .agent-runner/
+# kc runner worktree-local session records (crash-reconciliation resume) —
+# same local-only principle; keeping them tracked lets agent runs dirty the
+# tree and break the independent-verifier clean-tree gate.
+.iar/agent-runner/
 
 # Realistic Validation evidence packages — local PRD flow (`just ai implement`).
 # Commit only the text reports (*.md: verification-plan / evidence-report /

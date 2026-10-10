@@ -53,6 +53,7 @@ from backend.core.use_cases.agent_invocation_tracing import (
     PHASE_FIX,
     PHASE_IMPLEMENTATION,
     PHASE_UNSPECIFIED,
+    PHASE_VERIFICATION,
     RETRY_REASON_RESUME_NOT_STARTED,
     RETRY_REASON_TRANSIENT,
     InvocationStartRequest,
@@ -757,10 +758,15 @@ def run_agent_with_prompt(
         """把本次调用自报的会话 id 落在 worktree 局部记录里。
 
         只记 run 用途的会话：fix / closeout / verifier 是另一段独立对话，写进同一个
-        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。落盘是旁路，失败只记
-        日志——续传是增益路径，不能反过来把正常执行拖下水。
+        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。verifier 走 ``run``
+        profile（与实现者同一 CLI 调用形态），所以这道还得按 ``invocation_phase``
+        再挡一层：独立 verifier 门禁要求交付树保持干净，覆盖 worktree 里被跟踪的
+        会话记录会直接把门禁打红、让 green verdict 永远无法被接受。落盘是旁路，
+        失败只记日志——续传是增益路径，不能反过来把正常执行拖下水。
         """
         if not session_id or profile != AGENT_PROFILE_RUN:
+            return
+        if invocation_phase == PHASE_VERIFICATION:
             return
         try:
             save_agent_session_record(
