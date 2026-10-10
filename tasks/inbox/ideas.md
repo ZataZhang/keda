@@ -395,3 +395,15 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - **运营要求**：托管需按客户隔离凭据和代码；长期运行要有 worktree、日志、SQLite 运行摘要、容器日志/镜像缓存清理与磁盘压力处理，不能删除活动或未合并数据。
 - **收敛结论**：基于已有 Docker runner、单仓库挂载、GitHub PR/CI 和保守 worktree cleaner，建议先做专用 VM 单客户部署，不建 SaaS 控制面/集中数据库/自动计费。托管隔离/费用边界和数据保留周期列为待确认项。
 - **PRD**：`tasks/pending/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md`。
+
+## 2026-10-10 09:25 · Console 显示「计划 vs 产出」进度（验收证据 / 影响树）
+
+> 关于验收证据，为什么不显示规划了多少验收证据，当前已经产出了多少呢？还有一点就是，我的 just prd status 里面有一个内容，是显示出 PRD 里面规划改动多少文件，而实际多少文件已经落盘了的功能，我感觉也可以加进来，你觉得呢
+
+**AI 派生背景**（2026-10-10 会话核实仓库现状，非用户原话）：
+
+- **现状（为什么现在不显示）**：Backlog 详情「验收证据」tab 是"已落盘证据文件浏览器"（`frontend-public/components/backlog/prd-evidence-view.tsx` + `src/backend/core/use_cases/backlog_prd_evidence.py`）：只列出主仓库 `tasks/evidence/<stem>/` 下真实存在的文件，从未解析过"计划了多少项"这类 PRD 内容。
+- **运行中 PRD 的结构性盲区**：执行期间证据写在 worktree 里，主仓库只有 `active.lock`。实证：`P1-FEAT-20261009-123512`（issue #256）的 `.iar-worktrees/issue-256/tasks/evidence/<stem>/` 已有 `evidence.json` + 6 个 `rv-1~rv-4` 证据文件，主仓库同名目录只有一把锁——界面因此只能显示"共 1 个文件"。要做"已产出多少"，前置是 console 定位 PRD 的 worktree（`git worktree list` 匹配 `issue-<N>` / slug，分支优先、主仓库兜底，对齐 `scripts/shared/just/prd_locator.py` 语义）。
+- **可用的计划口径**：PRD §7.6 Realistic Validation Plan 是机器契约（顶层 `- id: rv-N` 序列，v3 强制），可解析出计划项数与 human/verifier 分组；产出归属优先用 `evidence.json`（结构化 manifest，已被证据门禁校验，强信号），缺失时回退 `rv-N-*` 文件名前缀（弱信号，旧 PRD 命名不全会低报，须标注"按文件名归属，不代表通过"）；报告三件套状态（plan✓ report✓ verifier:PASS）照 `scripts/shared/just/prd_status.py` 的 EVIDENCE 列。
+- **影响树口径**：CLI 的 FILES 列由 `scripts/shared/just/prd_impact_tree.py` 计算——§7.2 Change Impact Tree 节点 × 分支实际 diff 求交（`~touched/judgeable?unresolvable`，明确弱信号、无分支时显示 `-`）。console 要复用需把解析移植到 backend（scripts 脚本不可 import，且 console 跨仓库服务、各仓 scripts 版本不同步），并复用同一套 worktree/git（merge-base/diff/ls-files）定位。
+- **收敛结论**：建议先写 PRD；两个能力（证据计划/产出、影响树触达）共享同一前置"console 按 PRD 读 worktree 证据与分支 diff"，展示落点建议为 PRD 详情头部进度摘要 + 证据 tab 明细分组；弱信号口径与 CLI 逐条对齐。
