@@ -198,7 +198,7 @@ enabled = true
 # 执行 supervisor 的 agent
 supervisor_agent = "auto"
 # supervisor 要求修复时的最大修复 / rebase 次数
-max_repair_attempts = 2
+max_repair_attempts = 3
 # supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数
 max_agent_crash_retries = 5
 # 崩溃重试的初始退避秒数，之后每次重试翻倍
