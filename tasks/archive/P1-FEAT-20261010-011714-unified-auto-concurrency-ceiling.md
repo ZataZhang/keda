@@ -677,3 +677,11 @@ verifier-only 组（不呈递，失败才升级给人）：daemon 认领预算�
 - Reason: 独立 verifier 与最终 tree 绑定要求工作树干净，且复跑发生在 verifier 之前；采集 harness 的临时现场若进入 `git status` 即自锁死门禁，属证据脚本自身的落点错误，而非被测行为问题。
 - Impact: 仅改动 `tasks/evidence/.../scripts/`（整目录 gitignored，不入代码 diff）与证据产物再生；生产代码、被测行为、rv 判别力均不变；`item 1…5` 的 `command`/`negative_control`/`expected_fail`/`stdout_assertions` 未改。
 - Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；无 `[~]` runner-owned 项状态变化（独立 verifier 复核与发布归档仍由 runner 执行）。
+
+### 会话记录按调用阶段过滤，修复/核验阶段不再覆盖实现会话（交付门禁修复）
+- Type: scope
+- Before: `run_agent_with_prompt` 只按 `profile` 过滤会话记录落盘；修复 / 核验等阶段与实现共用默认 `profile="run"`，会把恢复用的主实现会话 id 覆盖掉（续错对象），并把本 diff 新跟踪的 `.iar/agent-runner/sessions/qoder.json` 改脏——独立 verifier 以 run profile 运行时直接触发「verifier 不得改动代码树」门禁误报。
+- After: 落盘条件收紧为「run profile 且调用阶段为 `implementation` 或未标注」；`fix` / `verification` 等独立对话即使同 profile 也不写记录。与 issue-262 分支 `e202b23d` 的同类修复同向（彼处按 `PHASE_VERIFICATION` 单挡并取消跟踪会话文件，本分支按阶段一般化且随交付跟踪 qoder 会话文件），rebase 时按同一口径协调。回归测试见 `tests/test_agent_runner_agent_invocation.py::TestSessionRecordPersistence`。
+- Reason: 该缺陷在本 PRD 的交付门禁现场暴露（verifier 复跑 rv 会写脏 qoder 会话记录，clean-tree 前置失败）；按「修复触发门禁的源代码」原则就地修复，而非绕行门禁。
+- Impact: 仅恢复路径的旁路落盘行为变化：修复 / 核验会话不再产生可恢复断点（原本就是错误断点）；实现会话落盘与既有恢复语义不变。§7.2 变更树未预测此文件，以本条为准。
+- Review: 执行器修复，未削弱任何用户可见、安全、范围或真实验证要求；行为由新增回归测试锁定。
