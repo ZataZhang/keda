@@ -83,12 +83,22 @@
                 <span class="tab is-active" aria-current="page">执行过程</span>
               </div>
 
+              <section class="lifecycle-stages" aria-labelledby="lifecycle-stages-title">
+                <div class="stage-heading">
+                  <div><strong id="lifecycle-stages-title">Agent 生命周期阶段</strong><span>按实际调用阶段归类；点击阶段展开整行调用明细</span></div>
+                  <span class="stage-order-note">按生命周期顺序</span>
+                </div>
+                <p class="invocation-warning" id="invocation-warning" hidden></p>
+                <ol class="stage-list" id="lifecycle-stages"></ol>
+              </section>
+
               <div class="process-toolbar">
-                <div><strong>生命周期时间线</strong><span>状态变化按发生时间追加，失败与重试历史不会被覆盖</span></div>
+                <div><strong>运行事件时间线</strong><span>队列、领取、状态变化按发生时间追加；Agent 调用明细见上方六个生命周期阶段</span></div>
                 <div class="scenario-switch" aria-label="演示场景">
                   <button class="is-active hotspot-target" type="button" data-scenario="normal" aria-pressed="true">正常轨迹</button>
                   <button class="hotspot-target" type="button" data-scenario="failure" aria-pressed="false">失败与重试</button>
                   <button class="hotspot-target" type="button" data-scenario="degraded" aria-pressed="false">观测写入失败</button>
+                  <button class="hotspot-target" type="button" data-scenario="invocationUnavailable" aria-pressed="false">调用明细不可用</button>
                 </div>
               </div>
 
