@@ -533,7 +533,7 @@ class TestSessionRecordPersistence:
 
         run_agent_with_prompt(
             "claude",
-            "Fix the failure.",
+            "Verify the failure.",
             tmp_path,
             _SessionReportingRunner("sess-other"),
             invocation_phase=invocation_phase,

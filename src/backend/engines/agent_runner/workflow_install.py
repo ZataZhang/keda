@@ -23,6 +23,7 @@ from tomlkit.items import Table
 from tomlkit.toml_document import TOMLDocument
 
 from backend.infrastructure.config.settings import PreviewSettings
+from backend.infrastructure.config.toml_section_editor import mutate_toml_document
 from backend.infrastructure.logging.logger import Logger
 from backend.infrastructure.process_runner import SubprocessRunner
 
@@ -312,14 +313,12 @@ def _apply_config_toml_update(
     if config_toml_plan.present_existing and not force:
         return
 
-    raw_text = config_toml_plan.config_toml_path.read_text(encoding="utf-8")
-    document: TOMLDocument = tomlkit.loads(raw_text)
-
-    preview_table = _build_preview_table()
-    if "preview" in document and isinstance(document.get("preview"), Table):
-        document["preview"] = preview_table  # type: ignore[index]
-    else:
-        if len(document) and not _ends_with_blank_line(raw_text):
+    def _mutate(document: TOMLDocument) -> None:
+        preview_table = _build_preview_table()
+        if "preview" in document and isinstance(document.get("preview"), Table):
+            document["preview"] = preview_table  # type: ignore[index]
+            return
+        if len(document) and not _ends_with_blank_line(document.as_string()):
             document.add(tomlkit.nl())
             document.add(tomlkit.nl())
         elif len(document):
@@ -328,8 +327,9 @@ def _apply_config_toml_update(
         document.add(tomlkit.nl())
         document.append("preview", preview_table)
 
-    rendered_text = tomlkit.dumps(document)
-    config_toml_plan.config_toml_path.write_text(rendered_text, encoding="utf-8")
+    # 委托共享写回原语：与 Console / registry / CLI 的读-改-写取同一把按路径派生的锁，
+    # 否则这份 config.toml 上的裸 write_text 能与持锁写者交错，把对方刚写的段落顶掉。
+    mutate_toml_document(config_toml_plan.config_toml_path, _mutate)
 
 
 def _build_preview_table() -> Table:

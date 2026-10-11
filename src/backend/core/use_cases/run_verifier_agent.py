@@ -24,7 +24,10 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, TokenUsage
-from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
+from backend.core.use_cases.agent_candidate_fallback import (
+    build_agent_candidates,
+    effective_fallback_candidates,
+)
 from backend.core.use_cases.agent_runner_evidence_snapshot import (
     restore_evidence_snapshot,
     snapshot_evidence_dir,
@@ -468,9 +471,11 @@ def _choose_verifier_agent(
     configured = config.validation.verifier_agent
     if configured and configured != "auto":
         return configured
-    for candidate in config.runner.agent_fallback_order:
-        if candidate != builder_agent:
-            return candidate
+    # 有效回退链（候选数组非空时整体接管、空数组把旧名单折叠为无预设候选）上
+    # 第一个 ≠ builder 的 agent；直接读旧名单会在候选数组写后读到 stale 顺序。
+    for fallback_candidate in effective_fallback_candidates(config):
+        if fallback_candidate.agent != builder_agent:
+            return fallback_candidate.agent
     return builder_agent
 
 
@@ -482,9 +487,10 @@ def _verifier_candidate_agents(
     """返回本次 verifier 的候选 agent 序列（首选之后按 fallback 链补齐）。
 
     显式声明的 ``verifier`` agent 仍然是首选——只有当它**根本跑不起来**（CLI
-    不存在 / 额度耗尽 / 进程级失败）时才顺延。候选池复用 ``agent_fallback_order``
-    与 ``max_agent_switches``，与 builder 换 agent 用同一套配置与预算，不新增开关；
-    独立性由"≠ builder"保证（换 model 即换判定视角）。
+    不存在 / 额度耗尽 / 进程级失败）时才顺延。候选池复用**有效回退候选链**
+    （``agent_fallback_candidates`` 非空时整体接管，空数组折叠旧
+    ``agent_fallback_order``）与 ``max_agent_switches``，与 builder 换 agent
+    用同一套配置与预算，不新增开关；独立性由"≠ builder"保证（换 model 即换判定视角）。
 
     具体枚举委托 :func:`build_agent_candidates`（review / supervisor 阶段共用同一
     套候选口径）。
@@ -608,10 +614,10 @@ def run_verifier_gate(
     先把部分输出落盘再让异常上抛。另外 verifier 复跑证据脚本会覆盖 builder 的
     ``rv-*`` 文件,因此这里对证据目录做快照并在结束后恢复。
 
-    选定的 verifier agent 跑不起来或没有输出可解析 marker 时，按
-    ``agent_fallback_order``(封顶 ``max_agent_switches``、始终 ≠ builder)顺延；
-    全部候选耗尽后停止该 run，并把失败交给 runner 处理，绝不让 builder 修复
-    verifier 协议故障。
+    选定的 verifier agent 跑不起来或没有输出可解析 marker 时，按**有效回退候选链**
+    (``agent_fallback_candidates``，空数组时折叠旧 ``agent_fallback_order``；封顶
+    ``max_agent_switches``、始终 ≠ builder)顺延；全部候选耗尽后停止该 run，并把
+    失败交给 runner 处理，绝不让 builder 修复 verifier 协议故障。
 
     Returns:
         ``ValidationVerdict`` 当 verifier 实际运行(verdict 非 red 时返回,red

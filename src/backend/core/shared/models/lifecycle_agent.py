@@ -221,6 +221,20 @@ LIFECYCLE_AGENT_AUTO_DESCRIPTIONS: Mapping[str, str] = {
     "deliberate": "按 Issue 上的 agent/deliberate 标签路由",
 }
 
+#: 九个生命周期键的中文展示名（唯一代码内来源；顺序即 ``LIFECYCLE_AGENT_KEYS``）。
+#: console 聚合视图逐行下发 ``label``，前端只渲染、不再各持一份键 -> 中文名映射。
+LIFECYCLE_AGENT_STAGE_LABELS: Mapping[str, str] = {
+    "implementation": "实现",
+    "fix": "修复",
+    "closeout": "收尾",
+    "verifier": "校验",
+    "review": "审核",
+    "supervisor": "监督",
+    "planner": "决策",
+    "content_generation": "内容生成",
+    "deliberate": "辩论",
+}
+
 #: 未声明且既有配置键也为 ``auto`` 时的内置兜底 agent。
 #: 与 ``choose_agent`` 的历史回落（``"claude"``）一致，保证零新配置行为不变。
 LIFECYCLE_AGENT_BUILTIN_DEFAULT = "claude"
@@ -331,6 +345,7 @@ __all__ = [
     "LIFECYCLE_AGENT_EXECUTOR_KEYS",
     "LIFECYCLE_AGENT_KEYS",
     "LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS",
+    "LIFECYCLE_AGENT_STAGE_LABELS",
     "LIFECYCLE_AGENT_TRIGGERS",
     "LIFECYCLE_SOURCE_BUILTIN",
     "LIFECYCLE_SOURCE_GLOBAL",

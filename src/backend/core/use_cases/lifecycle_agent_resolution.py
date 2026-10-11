@@ -48,6 +48,7 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_SOURCE_PRD_OVERRIDE,
     normalize_lifecycle_agent_value,
 )
+from backend.core.use_cases.agent_candidate_fallback import effective_fallback_candidates
 
 _logger = logging.getLogger(__name__)
 
@@ -730,8 +731,13 @@ def _resolve_auto(
             and normalize_lifecycle_agent_value(legacy_verifier_agent) != LIFECYCLE_AGENT_AUTO
         ):
             return _validate_registered(legacy_verifier_agent, lifecycle=lifecycle, config=config)
-        # 否则从回退链里挑第一个 ≠ 实现者，都没有再退回实现者。
-        for candidate_agent in config.runner.agent_fallback_order:
+        # 否则从有效回退链里挑第一个 ≠ 实现者，都没有再退回实现者。
+        # 迭代来源与 run_verifier_agent._choose_verifier_agent 同口径：
+        # effective_fallback_candidates（候选数组非空时整体接管，空数组把旧名单
+        # 折叠为无预设候选）；直接读 agent_fallback_order 会在候选数组写后
+        # 读到 stale 顺序。每个候选仍逐个过 _validate_registered 注册校验。
+        for fallback_candidate in effective_fallback_candidates(config):
+            candidate_agent = fallback_candidate.agent
             if candidate_agent != selected_agent:
                 return _validate_registered(candidate_agent, lifecycle=lifecycle, config=config)
         if selected_agent:
