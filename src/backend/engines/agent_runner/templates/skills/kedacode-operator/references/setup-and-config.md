@@ -2,21 +2,21 @@
 
 ## When to use
 
-The user says 「装环境」「初始化仓库」「把这个仓库登记进来」「kc init」, 「重装 skill」「刷新 skill」「kc skill install」, or asks what agents/models/presets exist (「有哪些模型预设」「这条命令收什么旗标」), or translates the CLI directly: `kc init` / `kc skill install` / `kc agent presets` / `kc agent doctor` / `kc schema`. This route also owns the two interactive surfaces: 「裸 kc 进哪个入口」「 kc session 和 kc repl 有什么区别」「起个预览」「dev server 起不起来」 — `kc session` and `kc preview start|status|stop` are documented below.
+The user says 「装环境」「初始化仓库」「把这个仓库登记进来」「kc init」, 「重装 skill」「刷新 skill」「kc skill install」, 「修复 operator skill」「kc skill repair-operator」, or asks what agents/models/presets exist (「有哪些模型预设」「这条命令收什么旗标」), or translates the CLI directly: `kc init` / `kc skill install` / `kc skill repair-operator` / `kc agent presets` / `kc agent doctor` / `kc schema`. This route also owns the two interactive surfaces: 「裸 kc 进哪个入口」「 kc session 和 kc repl 有什么区别」「起个预览」「dev server 起不起来」 — `kc session` and `kc preview start|status|stop` are documented below.
 
 ## Confirm before acting
 
 1. **`kc init` writes** — repository config, `.gitignore` entries, installed Skills in the user skill roots, a registry entry, and a GitHub label sync. Run `kc init --dry-run` first and show the plan; only a previewed init earns the real one.
-2. **Skill conflict semantics** — a user-owned `kedacode-operator` Skill with different content is preserved by default. `kc session` stops before starting the provider until the conflict is resolved; it never treats the conflicting content as verified packaged instructions. The overwrite-style `--force` can replace the user's own Skills and is **not a version-repair tool**: pass it only when the user explicitly asked to replace those files.
+2. **Skill conflict semantics** — a prior packaged `kedacode-operator` Skill that has not been edited refreshes automatically when the user next starts a native session. User changes to managed files are preserved by default; `kc session` stops before starting the provider until the conflict is resolved. To inspect or replace one copy only, use `kc skill repair-operator --skill-dir <absolute-path> --dry-run` and, only when the user explicitly asks to replace its managed files, add `--force`.
 3. **The remote template download needs network and GitHub access** — `kc init` and `kc skill install` both clone the `prd` / `code-reviewer` template skills; a label-sync failure during init is reported, not fatal, but the user should hear why.
 4. **Repository ambiguity** — when the working directory matches several registered repositories, later commands refuse to guess; init reports the repo id it registered, and other routes pass it as `--repo-id <id>`.
 
 ## The native executor entry (`kc session`)
 
-Bare `kc` in a terminal **is** `kc session`: KedaCode resolves `[agent_session].default_agent` (or `--agent`), checks the packaged operator Skill, hands the terminal over, and returns the provider's exit code unchanged. It does not interpret the conversation, does not change permission policy, and does not start project services. Non-TTY `kc` prints help and exits **1** so pipes and CI cannot read a wrapped failure as success. The Keda REPL that interprets Agent output stays at `kc repl` with its own `[agent_runner.repl]` section — the two entries are deliberately separate risk surfaces.
+Bare `kc` in a terminal **is** `kc session`: KedaCode resolves `[agent_session].default_agent` (or `--agent`), checks and refreshes the packaged operator Skill in that Agent's own Skill directory, hands the terminal over, and returns the provider's exit code unchanged. Exact prior packaged versions refresh automatically; user-edited managed files remain untouched and block startup. It does not interpret the conversation, does not change permission policy, and does not start project services. Non-TTY `kc` prints help and exits **1** so pipes and CI cannot read a wrapped failure as success. The Keda REPL that interprets Agent output stays at `kc repl` with its own `[agent_runner.repl]` section — the two entries are deliberately separate risk surfaces.
 
 - `kc session --agent <name>` — override the default executor. The Agent must declare an `interactive` profile; otherwise the entry fails fast instead of silently falling back.
-- If the installed operator Skill differs from the packaged version, `kc session` preserves the user's files and stops before starting the provider. Resolve the conflict explicitly, then start a new session.
+- If the installed operator Skill differs from the packaged version because a managed file was edited, `kc session` preserves it and stops before starting the provider. Preview a one-directory repair with `kc skill repair-operator --skill-dir <absolute-path> --dry-run`; add `--force` only after the user asks to replace that copy's managed files. Extra files in the Skill directory are preserved.
 - `kc session` never authorizes you to start a dev server, install dependencies, or open a tunnel. The human is now talking to the provider directly; your role is the same operator Skill, nothing wider.
 
 ## On-demand project preview (`kc preview start|status|stop`)
@@ -33,6 +33,7 @@ The preview dev server starts **only when the user asked for it in the conversat
 
 - Initialize: `kc init --dry-run`, then `kc init`.
 - Refresh user-level Skills only (already-initialized repo, renamed packaged skill, or an explicit skill-refresh request): `kc skill install --dry-run`, then `kc skill install`. It never reads or writes `.kedacode.toml`, so it also works where `kc init` would stop at the existing config; it takes no repository (reject `--repo` / `--repo-id` / `--config` as a usage error).
+- Repair one `kedacode-operator` copy without touching any other Agent root or remote Skill: `kc skill repair-operator --skill-dir <absolute-path> --dry-run`; add `--force` only for an explicitly requested overwrite of that copy's managed files. The path must name the exact `kedacode-operator` directory.
 - Inspect model presets (agent + model + reasoning effort), read-only: `kc agent presets` — lists every defined `[agent_runner.presets.<name>]` entry.
 - Preview a stage's or preset's exact command line, read-only: `kc agent doctor <agent> --preset <name> --json`; `kc agent doctor --lifecycle <key>` — the nine lifecycle keys are accepted; fix/closeout without an implementer context report `follows_implementation` instead of argv.
 - View the effective lifecycle matrix and executor fallback chain, read-only: `kc agent lifecycle list [--scope effective|global|repository] [--repo-id <id>] [--output json]` prints the nine stages with effective agent/model/effort, bound preset and per-field source; `kc agent fallback list [--scope …] [--repo-id <id>] [--output json]` prints the ordered fallback candidates with each candidate's preset and the `max_agent_switches` budget. `effective` resolves to a repository when the cwd or a selector uniquely matches one registered repo, otherwise global.
@@ -43,7 +44,7 @@ The preview dev server starts **only when the user asked for it in the conversat
 
 ## Recovery
 
-- A conflict report from `kc init` or `kc skill install` means your own Skill files were preserved — nothing was lost; act only on the user's explicit overwrite request.
+- A conflict report from `kc session`, `kc init`, or `kc skill install` means the modified Skill files were preserved — nothing was lost; use the one-directory repair command and act only on the user's explicit overwrite request.
 - `kc init` refusing to run because `.kedacode.toml` already exists is not an installation failure: run `kc skill install` for the Skill side, and reserve `kc init --force` for a genuine config rebuild (it rewrites the whole file).
 - A wrong repo id registered at init: re-run `kc init --dry-run` to see the current registration before deciding.
 

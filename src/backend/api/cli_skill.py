@@ -1,4 +1,4 @@
-"""用户级 Skills 的安装与刷新——``kc init`` 与 ``kc skill install`` 的共享实现。
+"""用户级 Skills 的安装与刷新——``kc init`` 与 ``kc skill`` 的共享实现。
 
 两条入口都调用 :func:`sync_user_skills`：远程模板 Skill 与随包 operator Skill 的
 内容来源、目标安装根、幂等跳过、旧名副本清理与 fail-closed 保护全部由
@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import shlex
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.api.cli_console import console
@@ -19,6 +21,7 @@ from backend.core.use_cases.agent_runner_init_assets import (
     RemoteTemplateSkillInstallResult,
     install_packaged_operator_skill,
     install_remote_template_skills,
+    repair_packaged_operator_skill,
 )
 
 if TYPE_CHECKING:
@@ -61,6 +64,17 @@ def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bo
         )
 
 
+def repair_operator_skill(*, skill_dir: Path, dry_run: bool, force: bool) -> None:
+    """只同步用户明确指定的一个 operator Skill 目录。"""
+    _print_operator_skill_plan(
+        repair_packaged_operator_skill(
+            target_skill_path=skill_dir,
+            dry_run=dry_run,
+            force=force,
+        )
+    )
+
+
 def _print_remote_template_skill_result(result: RemoteTemplateSkillInstallResult) -> None:
     """呈现远程模板 Skill 的同步结果；dry-run 下只呈现计划路径。"""
     skill_names = ", ".join(result.installed_skill_names)
@@ -90,15 +104,26 @@ def _print_operator_skill_plan(result: PackagedSkillInstallResult) -> None:
             if result.dry_run
             else "Preserved existing user skill"
         )
-        print(f"{prefix} (conflict; use --force to replace): {result.target_path}")
+        skill_dir_argument = shlex.quote(str(result.target_path))
+        print(
+            f"{prefix} (preview one-directory repair with `kc skill repair-operator "
+            f"--skill-dir {skill_dir_argument} --dry-run`; add `--force` only to overwrite "
+            f"this copy's managed files): {result.target_path}"
+        )
     elif result.action == "up-to-date":
         print(f"KedaCode operator skill already up to date: {result.target_path}")
     else:
-        if result.action == "overwrite":
+        if result.action == "refresh":
             prefix = (
-                "Would overwrite packaged KedaCode operator skill"
+                "Would refresh unchanged packaged KedaCode operator skill"
                 if result.dry_run
-                else "Overwrote packaged KedaCode operator skill"
+                else "Refreshed unchanged packaged KedaCode operator skill"
+            )
+        elif result.action == "overwrite":
+            prefix = (
+                "Would overwrite packaged KedaCode operator skill managed files"
+                if result.dry_run
+                else "Overwrote packaged KedaCode operator skill managed files"
             )
         else:
             prefix = (
@@ -111,4 +136,4 @@ def _print_operator_skill_plan(result: PackagedSkillInstallResult) -> None:
         print(result.legacy_notice)
 
 
-__all__ = ["sync_user_skills"]
+__all__ = ["repair_operator_skill", "sync_user_skills"]

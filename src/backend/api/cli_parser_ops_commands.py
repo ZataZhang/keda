@@ -65,6 +65,28 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     add_common_options(skill_install_parser)
 
+    skill_repair_operator_parser = skill_subparsers.add_parser(
+        "repair-operator",
+        help="Repair one installed packaged operator Skill directory.",
+    )
+    skill_repair_operator_parser.set_defaults(command="skill repair-operator")
+    skill_repair_operator_parser.add_argument(
+        "--skill-dir",
+        required=True,
+        help="Exact absolute path to one installed kedacode-operator skill directory.",
+    )
+    skill_repair_operator_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite changed managed files in this directory only.",
+    )
+    skill_repair_operator_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print this directory's repair plan without writing.",
+    )
+    add_common_options(skill_repair_operator_parser)
+
     container_parser = subparsers.add_parser(
         "container",
         help="Manage the KedaCode runner container (auth import, up, down, logs).",

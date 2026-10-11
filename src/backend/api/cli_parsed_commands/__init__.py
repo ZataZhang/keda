@@ -76,7 +76,10 @@ from backend.api.cli_parsed_commands.runner import (
     run_review_daemon_command,
     run_run_command,
 )
-from backend.api.cli_parsed_commands.skill import run_skill_install_command
+from backend.api.cli_parsed_commands.skill import (
+    run_skill_install_command,
+    run_skill_repair_operator_command,
+)
 from backend.api.cli_parsed_commands.worktree import run_worktree_command
 from backend.api.cli_parsed_context import ParsedCommandContext
 
@@ -87,6 +90,7 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "init": run_init_command,
     "workflow install": run_workflow_install_command,
     "skill install": run_skill_install_command,
+    "skill repair-operator": run_skill_repair_operator_command,
     "takeover": run_takeover_command,
     "registry scan": run_registry_scan_command,
     "registry sync": run_registry_sync_command,

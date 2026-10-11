@@ -189,12 +189,13 @@ def test_skill_install_force_replaces_diverged_packaged_skill(
 
     assert main(["skill", "install"]) == 0
     preserved_output = " ".join(capsys.readouterr().out.split())
-    assert "Preserved existing user skill (conflict; use --force to replace)" in preserved_output
+    assert "Preserved existing user skill (preview one-directory repair with" in preserved_output
+    assert "kc skill repair-operator --skill-dir" in preserved_output
     assert user_contract_path.read_text(encoding="utf-8") == "user version\n"
 
     assert main(["skill", "install", "--force"]) == 0
     forced_output = " ".join(capsys.readouterr().out.split())
-    assert "Overwrote packaged KedaCode operator skill" in forced_output
+    assert "Overwrote packaged KedaCode operator skill managed files" in forced_output
     assert user_contract_path.read_text(encoding="utf-8") != "user version\n"
 
 

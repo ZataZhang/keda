@@ -14,12 +14,13 @@ operator skill + 仓库 cwd」组装成一份可启动的 :class:`NativeSessionP
   权限更宽的跑法。
 - **不附加权限**：交互 argv 只含 provider 的原生界面参数，不含无人值守 runner 的
   ``--dangerously-skip-permissions`` / ``exec`` 子命令，provider 自己的审批照旧。
-- **skill 不覆盖用户内容**：复用 ``kc init`` 那条 fail-closed 安装路径；用户改动过
-  的随包 skill 保留并说明，不 ``force``。
+- **skill 不覆盖用户内容**：未改动的历史随包版本会自动刷新；用户改过的受管文件
+  保留并说明，不 ``force``。
 """
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -160,10 +161,9 @@ def prepare_native_session_plan(
 def _ensure_operator_skill(*, agent_name: str, skills_dir: Path | None) -> tuple[str, ...]:
     """核对（必要时安装）该执行器可发现的 operator skill，返回需要展示的事实。
 
-    语义与 ``kc init`` 完全一致（同一个安装器），差别只在**默认不 ``force``**：
-    入口不该改写用户内容，改动过的随包副本保留并说明。安装器拒绝时（随包
-    ``SKILL.md`` 缺失、目标目录是指向他处的符号链接）本次会话**不启动**并指名
-    原因——这两种状态下"skill 内容可信"无法证明，而原生会话会把它当指令来源。
+    复用发行包 Skill 安装器，但只处理当前执行器的 Skill 目录且不清理旧名副本。
+    可证明未被编辑的历史发行版自动刷新；用户改动过的受管文件保留，且本次会话
+    **不启动**，避免带着与随包命令契约不一致的指令进入会话。
 
     Raises:
         RuntimeError: skill 目录状态无法核实（安装器 fail-closed 的两种情形）。
@@ -176,14 +176,20 @@ def _ensure_operator_skill(*, agent_name: str, skills_dir: Path | None) -> tuple
         )
     try:
         plan_result = install_packaged_operator_skill(
-            target_skills_root=skills_dir, dry_run=True, force=False
+            target_skills_root=skills_dir,
+            dry_run=True,
+            force=False,
         )
-        if plan_result.action == "install":
+        if plan_result.action != "preserve-conflict":
             install_packaged_operator_skill(
-                target_skills_root=skills_dir, dry_run=False, force=False
+                target_skills_root=skills_dir,
+                dry_run=False,
+                force=False,
             )
+        if plan_result.action in {"install", "refresh"}:
+            action_description = "Installed" if plan_result.action == "install" else "Refreshed"
             return (
-                f"Installed the packaged `{product_identity.OPERATOR_SKILL_NAME}` skill at "
+                f"{action_description} the packaged `{product_identity.OPERATOR_SKILL_NAME}` skill at "
                 f"{plan_result.target_path}.",
             )
     except RemoteTemplateSkillInstallError as install_exc:
@@ -193,11 +199,13 @@ def _ensure_operator_skill(*, agent_name: str, skills_dir: Path | None) -> tuple
             "[agent_session]) and try again."
         ) from install_exc
     if plan_result.action == "preserve-conflict":
+        skill_dir_argument = shlex.quote(str(plan_result.target_path))
         raise RuntimeError(
             f"Refusing to start the native session: the operator skill at "
             f"{plan_result.target_path} differs from the packaged version. Your edits were "
-            "kept and nothing was overwritten. Review the conflict, then explicitly repair "
-            "the skill before starting a new session."
+            "kept and nothing was overwritten. Review the conflict. To preview a repair of "
+            "this directory only, run `kc skill repair-operator --skill-dir "
+            f"{skill_dir_argument} --dry-run`; to replace its managed files, add `--force`."
         )
     return (f"Operator skill at {plan_result.target_path} is up to date.",)
 

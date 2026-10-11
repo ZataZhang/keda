@@ -32,6 +32,9 @@ install_remote_template_skills = (
 install_packaged_operator_skill = (
     _engines_remote_template_skills_module.install_packaged_operator_skill
 )
+repair_packaged_operator_skill = (
+    _engines_remote_template_skills_module.repair_packaged_operator_skill
+)
 PackagedSkillInstallResult = _engines_remote_template_skills_module.PackagedSkillInstallResult
 RemoteTemplateSkillInstallError = (
     _engines_remote_template_skills_module.RemoteTemplateSkillInstallError
@@ -54,5 +57,6 @@ __all__ = [
     "WorkflowInstallOptions",
     "install_remote_template_skills",
     "install_packaged_operator_skill",
+    "repair_packaged_operator_skill",
     "install_workflow",
 ]

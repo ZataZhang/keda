@@ -7,10 +7,12 @@ operator Skill 与远程模板 Skill 同步到用户级安装根，因此在已�
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_output import CliError
 from backend.api.cli_parsed_context import ParsedCommandContext
-from backend.api.cli_skill import sync_user_skills
+from backend.api.cli_skill import repair_operator_skill, sync_user_skills
 from backend.core.use_cases.agent_runner_init_assets import RemoteTemplateSkillInstallError
 
 
@@ -57,4 +59,39 @@ def run_skill_install_command(ctx: ParsedCommandContext) -> int:
     return 0
 
 
-__all__ = ["run_skill_install_command"]
+def run_skill_repair_operator_command(ctx: ParsedCommandContext) -> int:
+    """``kc skill repair-operator``：只处理用户指定的一个 operator Skill 目录。"""
+    if (
+        ctx.repo_id is not None
+        or ctx.repo_override is not None
+        or getattr(ctx.parsed, "config", None) is not None
+    ):
+        raise CliError(
+            "kc skill repair-operator writes to one user-level skill directory; "
+            "it takes no repository. Omit --repo/--repo-id/--config.",
+            code=ExitCode.USAGE,
+            suggestion="kc skill repair-operator --help",
+        )
+    skill_dir = Path(ctx.parsed.skill_dir).expanduser()
+    if not skill_dir.is_absolute():
+        raise CliError(
+            "--skill-dir must be an absolute path.",
+            code=ExitCode.USAGE,
+            suggestion="kc skill repair-operator --help",
+        )
+    try:
+        repair_operator_skill(
+            skill_dir=skill_dir,
+            dry_run=ctx.parsed.dry_run,
+            force=ctx.parsed.force,
+        )
+    except RemoteTemplateSkillInstallError as exc:
+        raise CliError(
+            str(exc),
+            code=ExitCode.USAGE,
+            suggestion="kc skill repair-operator --help",
+        ) from exc
+    return 0
+
+
+__all__ = ["run_skill_install_command", "run_skill_repair_operator_command"]

@@ -1142,7 +1142,8 @@ def test_iar_init_dry_run_reports_packaged_operator_skill_conflict(
     assert main(["init", "--dry-run"]) == 0
 
     output = capsys.readouterr().out
-    assert "Would preserve existing user skill (conflict" in output
+    assert "Would preserve existing user skill (preview one-directory repair with" in output
+    assert "kc skill repair-operator --skill-dir" in output
     assert str(user_skill.parent) in " ".join(output.split())
     assert user_skill.read_text(encoding="utf-8") == "user version\n"
 

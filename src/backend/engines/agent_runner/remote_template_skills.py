@@ -15,6 +15,17 @@ if TYPE_CHECKING:
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.core.shared.prd_skill_location import keda_owned_skills_root
+from backend.engines.agent_runner.packaged_operator_skill_sync import (
+    _OPERATOR_SKILL_METADATA_FILENAME,
+    _OperatorSkillSyncError,
+    _is_managed_operator_skill_up_to_date as _is_managed_skill_up_to_date,
+    _managed_operator_skill_relative_paths as _managed_packaged_skill_relative_paths,
+    _operator_skill_metadata_matches_current,
+    _read_operator_skill_metadata_paths,
+    _recognize_unmodified_operator_skill,
+    _sync_packaged_operator_skill,
+    _write_operator_skill_metadata,
+)
 
 
 REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL = "https://github.com/ZataZhang/zata-codes-template.git"
@@ -37,21 +48,13 @@ _SKILLS_DIR_ENV_SUFFIX = "SKILLS_DIR"
 _REMOTE_SKILL_PROTECTED_FILENAME = "SKILL.md"
 """用于识别用户同名 Skill 是否被改动的最小契约文件。"""
 
-_SKILL_REFERENCES_SUBDIR = "references"
-"""子命令说明所在子目录；目录内递归的 ``.md`` 与主文件同属发行包受管集合。"""
-
 _LEGACY_ACTION_ABSENT = "absent"
 _LEGACY_ACTION_REMOVE = "remove"
 _LEGACY_ACTION_PRESERVE = "preserve"
 """旧名 operator Skill 副本的三种处理决策（安装根逐个判定）。"""
 
-#: 改名前随包发行的 operator Skill 主文件在 Git 历史中出现过的全部 sha256 摘要
-#: （旧目录只有一个随包文件，摘要取自该文件在各提交下的 blob，去重后 12 条）。
-#: 用途：``kc init`` 装完新名 skill 后要清理各安装根遗留的旧名副本——只有副本的
-#: ``SKILL.md`` 逐字节等于某个**历史随包版本**（即用户从未改动过它）时才允许自动
-#: 删除；改动过的副本一律保留并回传提示，避免静默丢失用户的私有定制。
-#: 重新计算：对旧 skill 路径 ``git log --all --format=%H -- <旧路径>/SKILL.md`` 的
-#: 每个提交 ``git show "<提交>:<旧路径>/SKILL.md" | shasum -a 256`` 后去重。
+#: 改名前旧名 operator Skill 的历史 ``SKILL.md`` sha256 摘要，用于安全清理未修改副本。
+#: 重新计算：遍历旧路径 ``git log --all`` 的提交，对每个旧版 ``SKILL.md`` 去重后哈希。
 _LEGACY_OPERATOR_SKILL_DIGESTS: frozenset[str] = frozenset(
     {
         "1b5ee146b236c664d14e385850e822ce2dbd68f0ed2008d21cbd6905e4dbe5df",
@@ -80,8 +83,8 @@ class PackagedSkillInstallResult:
 
     Attributes:
         target_path: 新名 operator Skill 在本安装根下的目标目录。
-        action: 安装决策，``install`` / ``up-to-date`` / ``preserve-conflict`` /
-            ``overwrite`` 之一。
+        action: 安装决策，``install`` / ``refresh`` / ``up-to-date`` /
+            ``preserve-conflict`` / ``overwrite`` 之一。
         dry_run: 是否没有写入任何文件。
         legacy_skill_path: 本次检查到的旧名副本路径；该安装根没有旧副本时为 ``None``。
         legacy_action: 旧副本处理决策，见 :data:`_LEGACY_ACTION_ABSENT` 等三个常量。
@@ -97,29 +100,32 @@ class PackagedSkillInstallResult:
 
 
 def install_packaged_operator_skill(
-    *, target_skills_root: Path, dry_run: bool, force: bool
+    *,
+    target_skills_root: Path,
+    dry_run: bool,
+    force: bool,
+    cleanup_legacy: bool = True,
 ) -> PackagedSkillInstallResult:
     """安装随发行包发行的 operator Skill，并清理旧名下的历史随包副本。
 
-    新名安装语义不变：同名用户 Skill 的**受管文件**（主文件 + ``references/`` 下
-    全部 ``.md``）与随包不一致时默认保留，``force=True`` 才覆盖；用户自己放进
-    Skill 目录的非受管文件不参与比对、不触发冲突。旧名副本按安装根逐个判定
-    （``kc init`` 会为每个安装根各调用一次本函数）：目录里只有已知随包文件、且
-    ``SKILL.md`` 的 sha256 命中 :data:`_LEGACY_OPERATOR_SKILL_DIGESTS`（用户从未
-    改动过）时才删除；改动过的副本保留，判定结果与提示路径通过返回值的
-    ``legacy_*`` 字段交给调用方展示。
+    同名用户 Skill 的**受管文件**（主文件 + ``references/`` 下全部 ``.md``）与随包
+    不一致时默认保留。带有有效安装元数据且受管文件未改动的旧版本，以及能匹配
+    历史随包摘要的首次迁移版本，会自动刷新到当前包；用户修改过的副本只有
+    ``force=True`` 才覆盖。同步只更新受管文件，并保留用户自加文件。旧名副本清理
+    可由 ``cleanup_legacy`` 控制；全局安装和原生会话默认清理，单目录修复不清理。
 
     Args:
         target_skills_root: 本次安装写入的 skills 根目录。
         dry_run: 是否只返回计划、不触碰文件系统。
-        force: 是否覆盖改动过的同名 Skill，并直接删除旧名副本。
+        force: 是否覆盖改动过的同名 Skill，并在 ``cleanup_legacy`` 开启时删除旧名副本。
+        cleanup_legacy: 是否处理旧名 operator Skill 副本。
 
     Returns:
         PackagedSkillInstallResult: 新名安装决策与旧名副本处理决策。
 
     Raises:
-        RemoteTemplateSkillInstallError: 随包目录缺少 ``SKILL.md``，或新名目标
-            是指向别处的符号链接。
+        RemoteTemplateSkillInstallError: 随包目录缺少 ``SKILL.md``，或目标目录、元数据
+            或受管文件路径无法安全写入。
     """
     skill_name = product_identity.OPERATOR_SKILL_NAME
     source_path = Path(__file__).with_name("templates") / "skills" / skill_name
@@ -131,6 +137,12 @@ def install_packaged_operator_skill(
         raise RemoteTemplateSkillInstallError(
             f"Refusing to write skill through symlink: {target_path}"
         )
+    if (target_path / _OPERATOR_SKILL_METADATA_FILENAME).is_symlink():
+        raise RemoteTemplateSkillInstallError(
+            f"Refusing to write operator skill through metadata symlink: {target_path}"
+        )
+    managed_relative_paths = _managed_packaged_skill_relative_paths(source_path)
+    previous_managed_paths: tuple[str, ...] | None = None
     action = "install"
     if target_path.exists():
         if _is_managed_skill_up_to_date(
@@ -138,62 +150,95 @@ def install_packaged_operator_skill(
             source_path=source_path,
         ):
             action = "up-to-date"
+            previous_managed_paths = _read_operator_skill_metadata_paths(target_path)
+        elif (
+            not force
+            and (previous_managed_paths := _recognize_unmodified_operator_skill(target_path))
+            is not None
+        ):
+            action = "refresh"
         elif not force:
             action = "preserve-conflict"
         else:
             action = "overwrite"
-    if not dry_run and action in {"install", "overwrite"}:
+            previous_managed_paths = _read_operator_skill_metadata_paths(target_path)
+    if not dry_run and action != "preserve-conflict":
         target_skills_root.mkdir(parents=True, exist_ok=True)
-        if action == "overwrite":
-            shutil.rmtree(target_path)
-        shutil.copytree(source_path, target_path)
+        try:
+            if action != "up-to-date":
+                if target_path.exists() and not target_path.is_dir():
+                    raise RemoteTemplateSkillInstallError(
+                        f"Refusing to replace non-directory operator skill path: {target_path}"
+                    )
+                target_path.mkdir(parents=True, exist_ok=True)
+                _sync_packaged_operator_skill(
+                    target_path=target_path,
+                    source_path=source_path,
+                    previous_managed_paths=previous_managed_paths or (),
+                    managed_relative_paths=managed_relative_paths,
+                )
+            if not _operator_skill_metadata_matches_current(
+                skill_path=target_path,
+                source_path=source_path,
+                managed_relative_paths=managed_relative_paths,
+            ):
+                _write_operator_skill_metadata(
+                    target_path=target_path,
+                    managed_relative_paths=managed_relative_paths,
+                    source_path=source_path,
+                )
+        except _OperatorSkillSyncError as sync_exc:
+            raise RemoteTemplateSkillInstallError(str(sync_exc)) from sync_exc
 
-    legacy_skill_path = target_skills_root / product_identity.LEGACY_OPERATOR_SKILL_NAME
-    legacy_action, legacy_notice = _resolve_legacy_operator_skill(
-        legacy_skill_path=legacy_skill_path,
-        packaged_relative_paths=_packaged_relative_file_paths(source_path),
-        dry_run=dry_run,
-        force=force,
-    )
+    legacy_skill_path: Path | None = None
+    legacy_action = _LEGACY_ACTION_ABSENT
+    legacy_notice: str | None = None
+    if cleanup_legacy:
+        legacy_skill_path = target_skills_root / product_identity.LEGACY_OPERATOR_SKILL_NAME
+        legacy_action, legacy_notice = _resolve_legacy_operator_skill(
+            legacy_skill_path=legacy_skill_path,
+            packaged_relative_paths=_packaged_relative_file_paths(source_path),
+            dry_run=dry_run,
+            force=force,
+        )
     return PackagedSkillInstallResult(
         target_path=target_path,
         action=action,
         dry_run=dry_run,
-        legacy_skill_path=legacy_skill_path if legacy_action != _LEGACY_ACTION_ABSENT else None,
+        legacy_skill_path=(legacy_skill_path if legacy_action != _LEGACY_ACTION_ABSENT else None),
         legacy_action=legacy_action,
         legacy_notice=legacy_notice,
     )
 
 
-def _managed_packaged_skill_relative_paths(source_path: Path) -> tuple[str, ...]:
-    """枚举发行包**受管**的 Skill 文件（相对路径，POSIX 分隔，主文件在前）。
+def repair_packaged_operator_skill(
+    *, target_skill_path: Path, dry_run: bool, force: bool
+) -> PackagedSkillInstallResult:
+    """只修复一个明确指定的 ``kedacode-operator`` Skill 目录。
 
-    受管集合 = 主文件 ``SKILL.md`` + ``references/`` 子目录下递归的全部 ``.md``。
-    目标目录里不属于该集合的文件（用户自加的笔记等）既不参与同步判定，也不触发
-    冲突，与 :func:`_packaged_relative_file_paths`（旧名副本清理用的全量枚举）
-    是两种口径。
+    Args:
+        target_skill_path: 必须是绝对路径，且目录名为当前 operator Skill 名称。
+        dry_run: 是否只打印计划、不写入文件。
+        force: 是否只覆盖这个目录里的用户修改受管文件。
+
+    Returns:
+        单目录安装计划；不会处理远程模板 Skills 或旧名 operator 副本。
+
+    Raises:
+        RemoteTemplateSkillInstallError: 目标路径不是绝对路径，或目录名称不匹配。
     """
-    managed_relative_paths = [_REMOTE_SKILL_PROTECTED_FILENAME]
-    references_root = source_path / _SKILL_REFERENCES_SUBDIR
-    if references_root.is_dir():
-        managed_relative_paths.extend(
-            reference_file_path.relative_to(source_path).as_posix()
-            for reference_file_path in sorted(references_root.rglob("*.md"))
-            if reference_file_path.is_file()
+    if not target_skill_path.is_absolute():
+        raise RemoteTemplateSkillInstallError("The operator skill path must be absolute.")
+    if target_skill_path.name != product_identity.OPERATOR_SKILL_NAME:
+        raise RemoteTemplateSkillInstallError(
+            f"The target directory must be named {product_identity.OPERATOR_SKILL_NAME}."
         )
-    return tuple(managed_relative_paths)
-
-
-def _is_managed_skill_up_to_date(*, target_path: Path, source_path: Path) -> bool:
-    """目标 Skill 目录的受管文件是否逐一与发行包逐字节一致（任一缺失或不同即否）。"""
-    for managed_relative_path in _managed_packaged_skill_relative_paths(source_path):
-        packaged_file_bytes = (source_path / managed_relative_path).read_bytes()
-        local_file_path = target_path / managed_relative_path
-        if not local_file_path.is_file():
-            return False
-        if local_file_path.read_bytes() != packaged_file_bytes:
-            return False
-    return True
+    return install_packaged_operator_skill(
+        target_skills_root=target_skill_path.parent,
+        dry_run=dry_run,
+        force=force,
+        cleanup_legacy=False,
+    )
 
 
 def _packaged_relative_file_paths(source_path: Path) -> frozenset[str]:
