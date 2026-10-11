@@ -24,6 +24,9 @@ from backend.core.use_cases.agent_runner_structured_evidence import (
     ValidationEvidenceError,
     load_evidence_manifest,
 )
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    _iterate_validation_section_lines,
+)
 from backend.core.use_cases.backlog_prd_evidence import (
     BacklogEvidenceFile,
     BacklogPrdEvidenceError,
@@ -49,8 +52,6 @@ from backend.core.use_cases.prd_content_reader import resolve_prd_content_path
 
 _logger = logging.getLogger(__name__)
 
-#: §7.6 验证计划标题：接受 ``Realistic Validation Plan`` 与编号变体（``### 7.6 ...``）。
-_RV_PLAN_HEADING_PATTERN = re.compile(r"^#{2,6}[^\n]*?(?:Realistic Validation Plan)\s*$")
 #: 计划条目锚：行首（允许缩进）``- id: rv-<n>``。
 _PLAN_ITEM_PATTERN = re.compile(r"^\s*-\s+id:\s*rv-(?P<n>\d+)\s*$")
 #: 条目内摘要字段（``behavior:`` 优先，退而求其次 ``summary:``）。
@@ -178,26 +179,22 @@ def _truncate_summary(summary_text: str) -> str:
 
 
 def _extract_plan_block_lines(prd_text: str) -> tuple[str, ...]:
-    """截取 §7.6 标题后的第一个围栏代码块内容行。"""
-    raw_lines_list = prd_text.splitlines()
-    heading_line_index = -1
-    for line_index, raw_line_text in enumerate(raw_lines_list):
-        if _RV_PLAN_HEADING_PATTERN.match(raw_line_text):
-            heading_line_index = line_index
-            break
-    if heading_line_index < 0:
-        return ()
+    """截取验证计划小节的第一个围栏代码块内容行。
 
+    小节边界沿用权威解析器 :func:`_iterate_validation_section_lines` 的口径：标题以
+    ``Realistic Validation`` 前缀匹配（兼容 ``7.6`` 编号前缀与 ``(Oracle 块)`` 后缀），
+    遇到同级或更高级标题才退出，标题与围栏之间的 ``#### rv-N`` 子标题按小节内容收集、
+    不会截断解析。
+    """
+    section_lines = _iterate_validation_section_lines(prd_text)
     block_lines_list: list[str] = []
     is_inside_fence = False
-    for raw_line_text in raw_lines_list[heading_line_index + 1 :]:
+    for raw_line_text in section_lines:
         if raw_line_text.lstrip().startswith("```"):
             if is_inside_fence:
                 break
             is_inside_fence = True
             continue
-        if not is_inside_fence and raw_line_text.startswith("#"):
-            return ()
         if is_inside_fence:
             block_lines_list.append(raw_line_text)
     return tuple(block_lines_list)
