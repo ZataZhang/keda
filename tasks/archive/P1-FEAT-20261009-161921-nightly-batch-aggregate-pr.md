@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收。
+> ✅ **验收状态**：已验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 人审层（§1-4）界定夜间批次的可见结果与验收选择；Part B 执行器层（§5-13）给出仓库落点、失败边界与验证证据。
@@ -459,9 +459,9 @@ No external research required. This does not authorize live GitHub validation; �
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] **总 PR 是这一批 PRD 的唯一正式交付 / 验收事件**：人工审阅实现 PR 中的本地正文构造与 v2 contract；GitHub 实际 body、PRD 合并验收记录和 merge 结果保持未验证（§2 决定一）。
-- [ ] **来源 PR 只在聚合成功后关闭并链接总 PR**：人工审阅关闭调用的代码前置条件；真实 checks、关闭评论、PR 状态和 branch 保留不验证，不以 mock 作为证据（§2 决定二）。
-- [ ] **9.1 Human Review Surface 已呈递**：实现 PR evidence comment 呈递本地 CLI / Git / body contract 报告，并明确 GitHub 外部行为尚未验证。
+- [x] **总 PR 是这一批 PRD 的唯一正式交付 / 验收事件**：人工审阅实现 PR 中的本地正文构造与 v2 contract；GitHub 实际聚合 PR body、来源 PRD 合并验收记录和聚合 PR merge 结果仍未验证（§2 决定一）。本 PR 的合并验收由 PR #271 的明确声明及用户授权完成。
+- [x] **来源 PR 只在聚合成功后关闭并链接总 PR**：人工审阅关闭调用的代码前置条件；真实聚合流程的 checks、关闭评论、来源 PR 状态和 branch 保留仍未验证，不以 mock 作为证据（§2 决定二）。
+- [x] **9.1 Human Review Surface 已呈递**：PR #271 evidence comment 呈递本地 CLI / Git / body contract 报告、最终 head 的 CI 结果，并明确 GitHub 外部行为尚未验证。
 
 ### Architecture Acceptance
 
@@ -542,6 +542,14 @@ No external research required. This does not authorize live GitHub validation; �
 - Delivery status: 本地验证计划、rv-1—rv-4 边界记录、人审 checklist、evidence report 与 verifier report 位于 `tasks/evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/`。独立 verifier 已给出 `PASS`；所有证据充分支持的执行侧验收项已勾选并引用证据。PR / CI surface 尚待 runner 发布，保留为唯一 runner-owned `[~]` gate。`Human-Confirmed` 三项保留未勾选，banner 为 `🧍 待人工验收`。
 
 ## Change Log
+
+### PR #271 合并验收
+- Type: acceptance
+- Before: 三项 `Human-Confirmed` 未勾选，验收状态为 `🧍 待人工验收`。
+- After: 用户授权将 PR #271 合并到 `main`；required checks 全绿，squash merge tree 与已验证 PR head tree 完全一致，PR evidence comment 已发布。三项 `Human-Confirmed` 已确认，验收状态改为 `✅ 已验收`。
+- Reason: 执行 PR 正文的 `iar:merge-acceptance version=1` 声明，将该 PR 的合并作为本 PRD 的人工接受事件。
+- Impact: 只记录人工验收结果，不表示真实聚合流程的 GitHub PR 创建、required checks 观察、来源 PR 关闭或远端 branch 保留行为已验证。
+- Review: PR #271 `513d5c618f05719d0f944449d4b159a5e1550872` 的 Git tree `e81213bf95ea859c77519b60f000c4a69c1074f0` 与 squash merge commit `d9be15ae14f4ef3f55c7728374029c7a46b39726` 的 Git tree 相同；CI 为 **3,892 passed, 1 skipped**，install smoke 与 Validation Gate 均通过。
 
 ### 初稿：夜间任务批次总 PR
 - Type: scope
