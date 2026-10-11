@@ -23,6 +23,19 @@ const CHECKLIST_HINT = "验收清单已勾选 / 总项数（弱信号，勾选�
 const EVIDENCE_HINT = "证据已产出 / 计划条目（弱信号，文件归属≠验证通过）。";
 
 /**
+ * 影响树读不到数时的原因披露：`-` 与「暂不可用」都必须说清为什么，
+ * 否则「无法测量」会被读成「零触达」。
+ */
+const IMPACT_STATUS_NOTES: Record<string, string> = {
+  terminal_archive: "归档终态，不参与分支比较",
+  no_worktree: "未发现执行工作区",
+  no_tree: "PRD 未声明影响树",
+  no_nodes: "影响树无可测节点",
+  no_base: "无有效比较基准，无法比较",
+  unavailable: "查询或计算失败",
+};
+
+/**
  * 影响树触达读数的紧凑文案。
  *
  * @param progress - 聚合进度读数。
@@ -40,6 +53,20 @@ export function formatImpactReading(progress: BacklogPrdProgress): string {
   return progress.impact.unresolvable > 0
     ? `${base} ?${progress.impact.unresolvable}`
     : base;
+}
+
+/**
+ * 影响树读数不可比较 / 不可用时的原因文案。
+ *
+ * @param progress - 聚合进度读数。
+ * @returns 可计算时为 ``undefined``；否则返回对应 ``impact_status`` 的中文说明，
+ *   与读数一起呈现（说明为什么是 `-` 或「暂不可用」）。
+ */
+export function explainImpactStatus(progress: BacklogPrdProgress): string | undefined {
+  if (progress.impact_status === "available") {
+    return undefined;
+  }
+  return IMPACT_STATUS_NOTES[progress.impact_status];
 }
 
 /**
@@ -100,6 +127,8 @@ type Reading = {
   text: string;
   hint: string;
   testId: string;
+  /** 不可比较 / 不可用时的原因说明；可正常读数时缺省。 */
+  note?: string;
 };
 
 /**
@@ -123,6 +152,7 @@ export function buildProgressReadings(progress: BacklogPrdProgress): Reading[] {
       text: formatImpactReading(progress),
       hint: IMPACT_HINT,
       testId: "prd-progress-impact",
+      note: explainImpactStatus(progress),
     },
     {
       key: "evidence",
@@ -164,6 +194,11 @@ export function PrdProgressStrip({ progress }: { progress: BacklogPrdProgress })
           <Badge variant={chipVariant(reading.text)} data-testid={reading.testId}>
             {reading.text}
           </Badge>
+          {reading.note ? (
+            <span className="text-xs text-slate-400" data-testid={`${reading.testId}-note`}>
+              {reading.note}
+            </span>
+          ) : null}
         </span>
       ))}
     </div>

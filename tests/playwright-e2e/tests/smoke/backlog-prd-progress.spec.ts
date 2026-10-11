@@ -216,6 +216,44 @@ const MOCK_EVIDENCE_UNAVAILABLE = {
   files: [],
 }
 
+/** 结构化清单把无 rv 前缀的文件归属到 rv-2：分组徽标必须与汇总行一致。 */
+const MOCK_PROGRESS_MANIFEST_MAPPED = {
+  ...MOCK_PROGRESS_RUNNING,
+  evidence: {
+    ...MOCK_PROGRESS_RUNNING.evidence,
+    produced_ids: ['rv-2'],
+    produced_planned_count: 1,
+    file_count: 2,
+    attribution_source: 'manifest',
+  },
+}
+
+const MOCK_EVIDENCE_MANIFEST_MAPPED = {
+  prd_path: FIXTURE_PRD_PATH,
+  prd_stem: FIXTURE_PRD_STEM,
+  evidence_dir: `tasks/evidence/${FIXTURE_PRD_STEM}`,
+  exists: true,
+  status: 'complete',
+  files: [
+    {
+      name: 'shot.png',
+      size_bytes: 2048,
+      media_type: 'image/png',
+      role: 'artifact',
+      artifact_token: 'c2hvdC5wbmc',
+      source: 'worktree',
+    },
+    {
+      name: 'evidence-report.md',
+      size_bytes: 800,
+      media_type: 'text/markdown',
+      role: 'evidence_report',
+      artifact_token: 'ZXZpZGVuY2UtcmVwb3J0Lm1k',
+      source: 'main',
+    },
+  ],
+}
+
 const MOCK_LIFECYCLE_DETAIL = {
   repo_id: 'keda-main',
   prd_path: FIXTURE_PRD_PATH,
@@ -336,6 +374,7 @@ test.describe('PRD progress signals', () => {
 
     await expect(page.getByTestId('prd-progress-checklist')).toHaveText('—')
     await expect(page.getByTestId('prd-progress-impact')).toHaveText('—')
+    await expect(page.getByTestId('prd-progress-impact-note')).toHaveText('未发现执行工作区')
     await expect(page.getByTestId('prd-progress-evidence')).toHaveText('—')
 
     await page.getByTestId('prd-detail-tab-evidence').click()
@@ -354,6 +393,7 @@ test.describe('PRD progress signals', () => {
     await openBacklogDetail(page)
 
     await expect(page.getByTestId('prd-progress-impact')).toHaveText('—')
+    await expect(page.getByTestId('prd-progress-impact-note')).toHaveText('无有效比较基准，无法比较')
     await expect(page.getByTestId('prd-progress-checklist')).toHaveText('3/12')
     await expect(page.getByTestId('prd-progress-evidence')).toHaveText('2/3')
 
@@ -369,14 +409,41 @@ test.describe('PRD progress signals', () => {
     )
     await openBacklogDetail(page)
 
-    // 三读数都显示「暂不可用」，不混成 `-` 或 `0`。
+    // 三读数都显示「暂不可用」，不混成 `-` 或 `0`；影响树另说明原因。
     for (const metric of ['checklist', 'impact', 'evidence']) {
       await expect(page.getByTestId(`prd-progress-${metric}`)).toHaveText('暂不可用')
     }
+    await expect(page.getByTestId('prd-progress-impact-note')).toHaveText('查询或计算失败')
 
     await page.getByTestId('prd-detail-tab-evidence').click()
     await expect(page.getByTestId('prd-evidence-unavailable')).toBeVisible()
 
     await screenshot(page, 'rv-1-e2e-unavailable.png')
+  })
+
+  test('RV-1 manifest 归属与文件名前缀不一致时分组徽标不与汇总矛盾', async ({ page }) => {
+    await page.route('/api/v1/agent-runner/backlog/prds/*/progress*', (route) =>
+      fulfillJson(route, MOCK_PROGRESS_MANIFEST_MAPPED),
+    )
+    await page.route('/api/v1/agent-runner/backlog/prds/*/evidence*', (route) =>
+      fulfillJson(route, MOCK_EVIDENCE_MANIFEST_MAPPED),
+    )
+    await openBacklogDetail(page)
+
+    await page.getByTestId('prd-detail-tab-evidence').click()
+    await expect(page.getByTestId('prd-evidence-summary')).toContainText(
+      '计划 3 项 · 已产出 1 项（共 2 个文件）',
+    )
+    // rv-2 由结构化清单归属（文件不带 rv 前缀）：不得显示「待产出」而与汇总行矛盾。
+    await expect(page.getByTestId('prd-evidence-group-rv-2')).toContainText(
+      '已产出（文件未按编号命名）',
+    )
+    await expect(page.getByTestId('prd-evidence-group-rv-2')).not.toContainText('待产出')
+    // 无产物的计划条目仍显示「待产出」占位。
+    await expect(page.getByTestId('prd-evidence-group-rv-1')).toContainText('待产出')
+    // 无前缀文件不丢展示，归入「其他」。
+    await expect(page.getByTestId('prd-evidence-others')).toContainText('shot.png')
+
+    await screenshot(page, 'rv-1-e2e-manifest-attribution.png')
   })
 })

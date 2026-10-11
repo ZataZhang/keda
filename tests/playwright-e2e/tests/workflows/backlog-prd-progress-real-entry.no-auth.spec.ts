@@ -182,6 +182,8 @@ test.describe('真实入口：PRD 交付进度四态', () => {
     await openPrdDetail(page, PRD_RUNNING_PATH)
 
     await expectReadingChips(page, { checklist: '3/12', impact: '~7/12 ?2', evidence: '2/3' })
+    // 可计算的读数不带原因说明：只有 `-` / 「暂不可用」才需要解释为什么。
+    await expect(page.getByTestId('prd-progress-impact-note')).toHaveCount(0)
     // 弱信号口径必须随读数一起呈现：三个 chip 各自的 title 提示都要写明「弱信号」。
     await expect(
       page.locator('[data-testid="prd-progress-strip"] span[title*="弱信号"]'),
@@ -231,6 +233,7 @@ test.describe('真实入口：PRD 交付进度四态', () => {
     await openPrdDetail(page, PRD_ARCHIVED_PATH)
 
     await expectReadingChips(page, { checklist: '12/12', impact: '—', evidence: '3/3' })
+    await expect(page.getByTestId('prd-progress-impact-note')).toHaveText('归档终态，不参与分支比较')
     await page.screenshot({
       path: resolve(evidenceDirPath, 'rv-1-archived-detail.png'),
       fullPage: true,
@@ -248,6 +251,7 @@ test.describe('真实入口：PRD 交付进度四态', () => {
     await openPrdDetail(page, PRD_NO_PLAN_PATH)
 
     await expectReadingChips(page, { checklist: '5/12', impact: '—', evidence: '—' })
+    await expect(page.getByTestId('prd-progress-impact-note')).toHaveText('未发现执行工作区')
     await page.screenshot({
       path: resolve(evidenceDirPath, 'rv-1-degraded-no-plan.png'),
       fullPage: true,
@@ -266,6 +270,8 @@ test.describe('真实入口：PRD 交付进度四态', () => {
     await openPrdDetail(page, PRD_NO_BASE_PATH)
 
     await expectReadingChips(page, { checklist: '4/12', impact: '—', evidence: '1/3' })
+    // 无有效比较基准时不止显示 `-`，还要说明无法比较（不能伪装成零触达）。
+    await expect(page.getByTestId('prd-progress-impact-note')).toHaveText('无有效比较基准，无法比较')
     await page.screenshot({
       path: resolve(evidenceDirPath, 'rv-1-no-base-detail.png'),
       fullPage: true,

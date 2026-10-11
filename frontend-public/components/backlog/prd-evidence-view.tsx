@@ -270,6 +270,9 @@ function PlanGroupedList({
       others.push(file);
     }
   }
+  // 产出判定以后端聚合读数为准（结构化清单归属优先）；文件名前缀只用于把文件
+  // 挂到分组下。两者不一致时如实披露，不让分组徽标与汇总行互相矛盾。
+  const producedIds = new Set(progress.evidence.produced_ids);
 
   return (
     <div className="space-y-4" data-testid="prd-evidence-plan-groups">
@@ -277,8 +280,9 @@ function PlanGroupedList({
         const numberMatch = /^rv-(\d+)$/.exec(item.id);
         const number = numberMatch === null ? null : Number(numberMatch[1]);
         const itemFiles = number === null ? [] : grouped.get(number) ?? [];
+        const itemProduced = producedIds.has(item.id);
         return (
-          <div key={item.id} className="space-y-1">
+          <div key={item.id} data-testid={`prd-evidence-group-${item.id}`} className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs text-slate-500">{item.id}</span>
               <span className="text-sm font-medium" title={item.summary}>
@@ -287,8 +291,12 @@ function PlanGroupedList({
               {item.reviewer ? (
                 <span className="text-xs text-slate-400">{REVIEWER_LABELS[item.reviewer] ?? item.reviewer}</span>
               ) : null}
-              <Badge variant={itemFiles.length > 0 ? "ready" : "default"}>
-                {itemFiles.length > 0 ? `已产出 ${itemFiles.length} 个文件` : "待产出"}
+              <Badge variant={itemProduced ? "ready" : "default"}>
+                {itemFiles.length > 0
+                  ? `已产出 ${itemFiles.length} 个文件`
+                  : itemProduced
+                    ? "已产出（文件未按编号命名）"
+                    : "待产出"}
               </Badge>
             </div>
             {itemFiles.length > 0 ? (
@@ -304,7 +312,11 @@ function PlanGroupedList({
                 ))}
               </ul>
             ) : (
-              <p className="pl-1 text-xs text-slate-400">该条目暂无可读取的产物文件。</p>
+              <p className="pl-1 text-xs text-slate-400">
+                {itemProduced
+                  ? "该条目已有归属产物，但文件未带 rv 编号，见「其他」分组。"
+                  : "该条目暂无可读取的产物文件。"}
+              </p>
             )}
           </div>
         );
@@ -468,7 +480,10 @@ export function PrdEvidenceView({
         共 {manifest.files.length} 个文件 · 来自 <code>{manifest.evidence_dir}</code>
       </p>
 
-      {progress && progress.evidence.planned && progress.evidence.planned.length > 0 ? (
+      {progress &&
+      progress.evidence.status === "complete" &&
+      progress.evidence.planned &&
+      progress.evidence.planned.length > 0 ? (
         <PlanGroupedList
           repoId={repoId}
           prdPath={prdPath}
