@@ -46,17 +46,43 @@ interface PrdCardProps {
 /**
  * 统一的「能否开始此 PRD」判定：卡片、依赖图详情头部共用同一份规则。
  *
- * 规则来自既有 \`isStartable\` 语义——state 为 not_started / failed / waiting
- * 且 block_reason 为空。任何视图都不得再复制一份判断，否则默认值（依赖图）
- * 会与列表行为漂移。
+ * 允许开始的状态为 not_started / ready / failed / waiting，且 block_reason
+ * 为空。``ready``（agent/ready 就绪态）表示 Issue 已在队列等待 daemon 领取；
+ * 队列没有消费者（daemon 未运行、autopilot 关闭）时，点击是唯一的显式启动
+ * 入口——后端会定向执行该 Issue（``kc run --issue N``），不重复打标签。
+ * 运行中 / 监督中 / 待审阅 / 已合并 / 已归档等仍不可启动。任何视图都不得
+ * 再复制一份判断，否则默认值（依赖图）会与列表行为漂移。
  *
  * @param prd - 列表响应中的 PRD 条目。
  * @returns 允许开始该 PRD 时为 true。
  */
 export function canStartBacklogPrd(prd: BacklogPrd): boolean {
   const stateAllowsStart =
-    prd.state === "not_started" || prd.state === "failed" || prd.state === "waiting";
+    prd.state === "not_started" ||
+    prd.state === "ready" ||
+    prd.state === "failed" ||
+    prd.state === "waiting";
   return stateAllowsStart && !prd.block_reason;
+}
+
+/**
+ * 「开始」操作的悬停提示：卡片与详情头部共用，区分依赖阻塞、不可启动与
+ * 已就绪（点击 = 立即定向执行本轮，不等队列）。
+ *
+ * @param prd - 列表响应中的 PRD 条目。
+ * @returns 按钮 title 文案。
+ */
+export function startBacklogPrdHint(prd: BacklogPrd): string {
+  if (prd.block_reason) {
+    return `被依赖阻塞：${prd.block_reason}`;
+  }
+  if (!canStartBacklogPrd(prd)) {
+    return "当前状态不可启动";
+  }
+  if (prd.state === "ready") {
+    return "已就绪：立即定向执行本轮，不再等待队列领取";
+  }
+  return "开始此 PRD";
 }
 
 export function PrdCard({
@@ -150,7 +176,14 @@ export function PrdCard({
             查看原文
           </Button>
           {isStartable ? (
-            <Button size="sm" onClick={onStart} disabled={starting || !!prd.block_reason}>
+            <Button
+              size="sm"
+              onClick={onStart}
+              disabled={starting || !!prd.block_reason}
+              data-testid="prd-card-start"
+              data-prd-path={prd.prd_path}
+              title={startBacklogPrdHint(prd)}
+            >
               {starting ? "启动中…" : "开始"}
             </Button>
           ) : null}

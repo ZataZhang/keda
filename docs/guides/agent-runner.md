@@ -3922,6 +3922,8 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 | 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
 | 想法 | `/app/ideas` | 跨项目想法采集、AI 总结、PRD 草稿人审 |
 
+全局配色可从左侧导航顶部的「主题」菜单选择「浅色」「深色」或「跟随系统」；首次访问默认浅色，选择会保存在当前浏览器。
+
 ### 首屏默认仓库（当前项目）
 
 管理终端是多仓库面板，但在哪个仓库目录敲 `kc console`，打开就应该落在**那个
@@ -4741,11 +4743,13 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 ### 单个开始
 
-三种视图都可以在详情头部「开始此 PRD」——包括默认视图依赖图里的节点（过去只有时间轴/列表有这个入口）。按钮的可见与禁用由同一个 `canStartBacklogPrd` 规则决定：`state` 为 `not_started` / `failed` / `waiting` 且没有 `block_reason`。存在未满足依赖时按钮禁用并显示阻塞原因，不允许绕过依赖门禁。点击后后端会：
+三种视图都可以在详情头部「开始此 PRD」——包括默认视图依赖图里的节点（过去只有时间轴/列表有这个入口）。按钮的可见与禁用由同一个 `canStartBacklogPrd` 规则决定：`state` 为 `not_started` / `ready` / `failed` / `waiting` 且没有 `block_reason`。存在未满足依赖时按钮禁用并显示阻塞原因，不允许绕过依赖门禁。点击后后端会：
 
 1. 若 PRD 无 Issue，调用 `create_issue_from_prd` 的安全路径（`publish_prd=True, queue_ready=True`），在 PRD 成功发布到 base branch 后添加 `agent/ready`。
 2. 若 PRD 已有 Issue，直接添加 `agent/ready` 并移除 `agent/failed`。
-3. 启动一次 `kc run` 托管进程。
+3. 启动一次 `kc run` 托管进程（按该 PRD 的 Issue 定向执行，即 `kc run --issue <N>`）。
+
+`ready`（就绪）的点击语义是**立即定向执行**：就绪表示 Issue 已在队列里等 daemon / autopilot 领取，队列没有消费者（daemon 未运行、自动推进关闭）时这就是唯一的显式启动入口。点击不会改变标签状态，直接以 `kc run --issue <N>` 定向执行该 Issue——等效于终端里的显式 run，不等队列。运行中 / 监督中 / 待审阅 / 已合并 / 已归档仍不可启动。
 
 启动成功后页面会立刻重新拉取该仓的 PRD 列表，并把详情头部状态刷新为服务端返回的最新状态——不是本地乐观值，也不是只弹一个 toast。
 

@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fetchPrdProgress } from "@/lib/api/backlog";
 import type { BacklogPrd, BacklogPrdProgress } from "@/lib/api/types";
-import { canStartBacklogPrd, STATE_LABELS, STATE_VARIANTS } from "./prd-card";
+import { canStartBacklogPrd, startBacklogPrdHint, STATE_LABELS, STATE_VARIANTS } from "./prd-card";
 import { PrdContentView } from "./prd-content-view";
 import { PrdEvidenceView } from "./prd-evidence-view";
 import { PrdIssueOutputView } from "./prd-issue-output-view";
@@ -184,13 +184,7 @@ export function PrdDetail({
             onClick={() => onStart(prd)}
             disabled={starting || !startable}
             data-testid="prd-detail-start"
-            title={
-              prd.block_reason
-                ? `被依赖阻塞：${prd.block_reason}`
-                : startable
-                  ? "开始此 PRD"
-                  : "当前状态不可启动"
-            }
+            title={startBacklogPrdHint(prd)}
           >
             {starting ? "启动中…" : "开始此 PRD"}
           </Button>
