@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分两层：Part A 人审层（§1-4）界定夜间批次的可见结果与验收选择；Part B 执行器层（§5-13）给出仓库落点、失败边界与验证证据。
@@ -218,8 +218,8 @@ CLI 由操作员提供 opt-in 聚合声明及同仓库批次范围；`kc run` �
 1. `--aggregate-pr` 只与 `kc run --all-ready` 组合；`--direct-pr` 和 `--fast-merge` 继续被拒绝。dry-run 在认领前展示候选 Issue、可确定的 PRD 路径及预计批次大小，不写 Issue、branch 或 PR；来源 PR 只有在对应任务完成后才会出现。
 2. 聚合模式在开始处理前确认候选至少 2 个且属于同一目标仓库；手动 `kc pr aggregate` 至少接收两个显式 Issue。两种入口拒绝非终态、失败、无唯一合格来源 PR、来源 PR 必需检查非 SUCCESS、base 不一致或来源已无可读取 branch 的项。
 3. 一次调用选择的 Issue 集是冻结批次。所有选中项各自现有流程都返回成功且来源 PR 可供审阅后，才能进入 aggregate；一个失败就结束此批次，不从成功子集发布总 PR。
-4. 每个来源 PR 从 GitHub 读取 head、base、状态及 Issue body 的 `PRD path:`；显式依赖构成拓扑顺序，同级按 Issue 编号排序。环、缺依赖、多个候选 PR、来源不可信或 PRD 路径不能在 branch tree 解析时均 fail closed。
-5. 聚合使用隔离 worktree / 新的 `batch-*` branch，从固定 base SHA 集成来源 head；不使用本地当前分支作为基线，不 checkout 到 base，不强推 issue 分支。已经包含的祖先 head 幂等跳过；任一 merge conflict 立即停止并保留来源。
+4. 每个来源 PR 从 GitHub 读取 head、base、状态及 Issue body 的 `PRD path:`；显式依赖构成拓扑顺序，同级按 Issue 编号排序。环、缺依赖、多个候选 PR、来源不可信或 PRD 路径不能在 branch tree 解析时均 fail closed。重试时，`refs:` 搜索可能把正文提及 Issue 的现有总 PR 一并列出；仅当其 `batch-*` 分支、聚合来源 marker 和 Issue 集均匹配当前批次时才从来源候选中排除，之后仍严格核对 marker 中的来源 PR 集。
+5. 聚合使用隔离 worktree / 新的 `batch-*` branch，从固定 base SHA 集成来源 head；不使用本地当前分支作为基线，不 checkout 到 base，不强推 issue 分支。已经包含的祖先 head 幂等跳过；任一 merge conflict 立即停止并保留来源。重试仅能用 force-with-lease 更新与已核实总 PR head SHA 完全一致的 batch ref；远端 ref 在读取后移动时拒绝覆盖。
 6. 组合后按完整 tree 跑仓库 `verification_commands` 与当前配置的独立 verifier；只在二者 PASS 后创建总 Draft PR。base SHA 在集成期间变化时，以新的 SHA 重建并重新验证；若持续变化、冲突或命令失败则不创建总 PR。
 7. 总 PR body 包含所有来源 Issue 与 PR 的稳定链接、去重有序的 PRD 路径、批次验证摘要、base/head/tree 证据，以及 `<!-- iar:aggregate-pr version=1 issues=... source_prs=... -->` 来源标记和 `<!-- iar:merge-acceptance version=2 -->`。同一 PRD 路径只列一次，任何来源 PRD 缺失、未归档、或其证据不齐均拒绝发布。总 PR 创建后读取现有 PR context / 必需 checks；只有 required checks 全 SUCCESS 时才进入来源 PR close。
 8. 对 PRD-backed 的总 PR，v2 正文合同必须检查 PRD 路径集合与来源集合完整匹配，并明确“合并总 PR 会接受列出的所有人审决策 / 可见结果，并授权逐个记录验收”。合并后的 acceptance record 仍须按每份 PRD 的最终 Git tree 和证据单独回填；总 PR 的 merge 不省略任何单份 oracle 或 evidence gate。普通 v1 单 PRD 验收规则不变。
@@ -232,6 +232,8 @@ CLI 由操作员提供 opt-in 聚合声明及同仓库批次范围；`kc run` �
 Infrastructure
 ├── src/backend/core/shared/interfaces/agent_runner.py [修改]
 │   【总结】在现有 GitHub client 契约中增加可诊断、可重试的关闭来源 PR 操作
+├── src/backend/infrastructure/github_models.py [修改]
+│   【总结】扩展 PR 上下文以暴露 Draft 状态供发布收尾 fail closed 校验
 ├── src/backend/infrastructure/github_client.py [修改]
 │   【总结】把新增的关闭 PR 能力接入既有 GitHub client
 └── src/backend/infrastructure/github_pr_ops.py [修改]
@@ -239,13 +241,21 @@ Infrastructure
 
 Core
 ├── src/backend/core/use_cases/agent_runner_batch_aggregate.py [新增]
-│   【总结】共享批次资格校验、依赖排序、隔离分支集成、整树验证、总 PR 发布和来源 PR 收尾
+│   【总结】共享批次生命周期、隔离分支集成、整树验证、总 PR 发布和来源 PR 收尾
+├── src/backend/core/use_cases/agent_runner_batch_aggregate_sources.py [新增]
+│   【总结】来源资格 / GitHub 上下文解析、依赖拓扑排序、PRD 集与重试标记
+├── src/backend/core/use_cases/agent_runner_batch_aggregate_models.py [新增]
+│   【总结】共享来源、请求、结果数据结构和可诊断批次错误
+├── src/backend/core/use_cases/agent_runner_batch_aggregate_git.py [新增]
+│   【总结】创建与清理隔离 worktree、按固定 SHA 组合来源并安全推送批次分支
 ├── src/backend/core/use_cases/agent_runner_orchestration_runtime.py [修改]
 │   【总结】在一轮所有 Issue worker 完成后按 opt-in 结果调用批次聚合
-├── src/backend/core/use_cases/agent_runner_git.py [按需修改]
-│   【总结】复用并补齐从固定远程 base SHA 建立 / 丢弃隔离集成 worktree 的 Git 原语
-├── src/backend/core/use_cases/agent_runner_publish.py [修改]
-│   【总结】复用现有 Draft PR 发布契约发布含完整来源和 PRD 列表的总 PR
+├── src/backend/core/use_cases/agent_runner_orchestrate.py [修改]
+│   【总结】把显式聚合选项从执行入口传入 runtime request
+├── src/backend/core/use_cases/run_agent_repositories_once.py [修改]
+│   【总结】将聚合 opt-in 传递到单仓库队列执行
+├── src/backend/core/shared/models/agent_runner.py [修改]
+│   【总结】为 core PR 上下文增加 Draft 状态
 └── src/backend/core/use_cases/agent_runner_pr_body_contract.py [修改]
     【总结】新增聚合 PR v2 的多 PRD 集合校验，同时保留普通 PR v1 语义
 
@@ -268,8 +278,8 @@ API / CLI
 │   【总结】公开 Typer `kc pr aggregate` 命令和参数 help
 ├── src/backend/api/cli_typer_app.py [修改]
 │   【总结】注册 `kc pr aggregate` 子应用并保持命令 help 一致
-└── src/backend/api/cli_schema.py [按需修改]
-    【总结】同步机器可读命令 schema 和稳定 flag / 参数语义
+└── src/backend/api/cli_schema.py [复用，无改动]
+    【总结】机器可读 schema 从 Typer 命令动态派生；新增命令和 flag 后经 rv-1 入口断言核对
 
 Tests
 ├── tests/test_agent_runner_batch_aggregate.py [新增]
@@ -278,6 +288,8 @@ Tests
 │   【总结】覆盖 v1 向后兼容、v2 唯一 PRD 集、漏项 / 重复项拒绝及接受声明
 ├── tests/test_agent_runner_cli.py [修改]
 │   【总结】只验证 CLI parser / 本地参数校验的 flag 默认值与互斥规则；不触发执行器或 GitHub client
+└── tests/test_github_client.py [修改]
+    【总结】验证本地 PR context 字段解析与命令字段兼容，不作为 GitHub 外部状态证据
 
 Docs / Skills
 ├── AGENTS.md [修改]
@@ -286,8 +298,10 @@ Docs / Skills
 │   【总结】文档化批次命令、来源关闭边界、失败恢复、分支与多 PRD PR 正文合同
 ├── docs/guides/prd-standard.md [修改]
 │   【总结】说明 Keda 聚合 PR 对通用 PRD 合并验收规则的窄范围扩展和逐 PRD 回填要求
-└── src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md [修改]
+├── src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md [修改]
     【总结】同步随包 CLI 用法、约束参数组合和失败恢复命令
+└── src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/run-once.md [修改]
+    【总结】同步 `kc pr aggregate` 用法、dry-run 和部分收尾 retry 语义
 
 Frontend
 └── No frontend changes
@@ -433,7 +447,7 @@ No external research required. This does not authorize live GitHub validation; �
 
 | 要看什么 | 展示入口 | 约 10 秒自检 |
 |---|---|---|
-| 本地 PR body contract 的集合断言，以及外部 GitHub 行为未验证的范围说明。 | 在实现 PR evidence comment 打开 **本地 CLI / Git / body contract evidence report**。不呈递 fake PR 状态。 | 检查报告明确列出未验证项：真实 PR 创建、required checks、来源 PR 关闭 / 评论与远端 branch 状态。 |
+| 本地 PR body contract 的集合断言，以及外部 GitHub 行为未验证的范围说明。 | 打开 [`tasks/evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr.evidence-report.md`](../evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr.evidence-report.md)，或运行 `open tasks/evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr.evidence-report.md`。PR / CI 发布后由 runner 将同一 surface 呈递在实现 PR evidence comment。 | 检查报告中 rv-1—rv-3 有本地结果，rv-4 明确未验证真实 PR 创建、required checks、来源 PR 关闭 / 评论与远端 branch 状态；没有 fake PR 状态。 |
 
 真实 GitHub 状态不在本轮验证；不得用 fake required checks 或 fake PR state 代替真实服务证据。
 
@@ -451,36 +465,36 @@ No external research required. This does not authorize live GitHub validation; �
 
 ### Architecture Acceptance
 
-- [ ] `agent_runner_batch_aggregate.py` 仅持有批次整合生命周期；编排、Git 和 GitHub 仍遵守 `api -> core -> engines -> infrastructure` 方向，且未创建第二个 CLI / GitHub client 或 scheduler。
-- [ ] 新建 / 重试聚合均从配置目标 base SHA 和隔离 worktree 构建；审查 `git diff --name-only`、source refs 与远程 base ref，确认未把批次改动写入 base 或 Issue branch。
-- [ ] 依赖拓扑无环且可排序；来源 PR 歧义、base 不一致、缺失依赖、无唯一来源分支或无有效 PRD tree 都 fail closed。
+- [x] `agent_runner_batch_aggregate.py` 仅持有批次整合生命周期；编排、Git 和 GitHub 仍遵守 `api -> core -> engines -> infrastructure` 方向，且未创建第二个 CLI / GitHub client 或 scheduler。证据：独立 verifier `PASS`；`just lint --reuse` 架构与复用检查通过。
+- [x] 新建 / 重试聚合均从配置目标 base SHA 和隔离 worktree 构建；审查最终 diff、source refs 与远程 base ref，确认未把批次改动写入 base 或 Issue branch。证据：独立 verifier `PASS`；rv-2 临时 bare remote 的 tree/ref 断言通过；失败发布清理仅按预期 SHA lease 删除。
+- [x] 依赖拓扑无环且可排序；来源 PR 歧义、base 不一致、缺失依赖、无唯一来源分支或无有效 PRD tree 都 fail closed。证据：独立 verifier `PASS`；批次资格与拓扑测试包含在 rv-2 的 19 项通过结果中。
 
 ### Behavior Acceptance
 
-- [ ] CLI 聚合参数默认关闭；本地 parser / 参数校验能识别有效与冲突参数（`rv-1` evidence）。
-- [ ] 本地 Git helper 按输入顺序组合 source SHA，冲突停止且不改写 base / source refs（`rv-2` evidence）。
-- [ ] 本地 PR body v2 contract 稳定去重并拒绝漏项 / 重复项，普通 v1 contract 继续通过（`rv-3` evidence）。
-- [ ] GitHub PR 创建、required checks 读取、来源 PR 关闭 / 评论、远端 branch 保留和实际合并行为未验证；不得把局部代码测试结果写成这些外部行为已通过。
+- [x] CLI 聚合参数默认关闭；本地 parser / 参数校验能识别有效与冲突参数。证据：rv-1，4 passed，两个 CLI help 命令 exit 0；独立 verifier `PASS`。
+- [x] 本地 Git helper 按输入顺序组合 source SHA，冲突停止且不改写 base / source refs。证据：rv-2，19 passed，含 SHA lease 清理与 ref 移动时拒绝删除；独立 verifier `PASS`。
+- [x] 本地 PR body v2 contract 稳定去重并拒绝漏项 / 重复项，普通 v1 contract 继续通过。证据：rv-3，18 passed；独立 verifier `PASS`。
+- [x] GitHub PR 创建、required checks 读取、来源 PR 关闭 / 评论、远端 branch 保留和实际合并行为未验证；没有将局部代码测试写成这些外部行为已通过。证据：rv-4 `NOT RUN`，evidence report 明确披露；独立 verifier `PASS`。
 
 ### Documentation Acceptance
 
-- [ ] `AGENTS.md` 与 `docs/guides/prd-standard.md` 明确普通 PR 仍只接受一个 PRD，只有带完整来源和 v2 集合契约的总 PR 才可共同验收多个唯一 PRD。
-- [ ] `docs/guides/agent-runner.md` 与 `kedacode-operator/SKILL.md` 同步准确的命令、参数约束、候选预览、source PR 关闭时点和 retry 操作；CLI help / schema 输出一致。
-- [ ] `rg -n "merge-acceptance version=1|merge-acceptance version=2|aggregate-pr|kc pr aggregate" AGENTS.md docs src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md src/backend/core/use_cases` 显示普通 v1 和 aggregate v2 的边界没有过期或冲突描述；现有 MkDocs 导航无需变更，因为只改已有页面。
+- [x] `AGENTS.md` 与 `docs/guides/prd-standard.md` 明确普通 PR 仍只接受一个 PRD，只有带完整来源和 v2 集合契约的总 PR 才可共同验收多个唯一 PRD。证据：独立 verifier `PASS`；已复核对应规范与指南。
+- [x] `docs/guides/agent-runner.md` 与 `kedacode-operator/SKILL.md` 同步准确的命令、参数约束、候选预览、source PR 关闭时点和 retry 操作；CLI help / schema 输出一致。证据：rv-1 help 输出与独立 verifier `PASS`。
+- [x] `rg -n "merge-acceptance version=1|merge-acceptance version=2|aggregate-pr|kc pr aggregate" AGENTS.md docs src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md src/backend/core/use_cases` 显示普通 v1 和 aggregate v2 的边界没有过期或冲突描述；现有 MkDocs 导航无需变更，因为只改已有页面。证据：独立 verifier `PASS`；`mkdocs build --strict` exit 0。
 
 ### Validation Acceptance
 
-- [ ] 仅运行不依赖 GitHub 的本地 CLI parser、Git helper 与 PR body contract 定向测试；测试目标仓库必须是自动创建的临时目录，不调用 `kc run` / `kc pr aggregate` 执行完整队列。
-- [ ] `rv-2` 使用真实本地 Git / 临时 bare remote 验证组合 tree；不读取 GitHub Issue / PR，不使用 fake GitHub。
-- [ ] `rv-3` 使用本地输入验证 v1 / v2 正文契约；不创建或发布 PR。
-- [ ] 对真实 GitHub PR 创建、checks、来源 PR close/comment 和远端 branch 状态不做验证；交付报告明确标记未验证，且不使用 fake 结果替代。
+- [x] 仅运行不依赖 GitHub 的本地 CLI parser、Git helper 与 PR body contract 定向测试；测试目标仓库由自动创建的临时 fixture 提供，不调用完整聚合队列。证据：rv-1—rv-3 命令记录；独立 verifier `PASS`。
+- [x] `rv-2` 使用真实本地 Git / 临时 bare remote 验证组合 tree；不读取 GitHub Issue / PR，不使用 fake GitHub。证据：rv-2，19 passed；独立 verifier `PASS`。
+- [x] `rv-3` 使用本地输入验证 v1 / v2 正文契约；不创建或发布 PR。证据：rv-3，18 passed；独立 verifier `PASS`。
+- [x] 对真实 GitHub PR 创建、checks、来源 PR close/comment 和远端 branch 状态不做验证；交付报告明确标记未验证，且不使用 fake 结果替代。证据：rv-4 `NOT RUN` 与 verifier `PASS`。
 
 ### Delivery Readiness
 
-- [ ] 本地正文构造和 body contract 与 PRD 集一致；evidence report 记录实际完成的本地验证，并单列未验证的 GitHub 边界。
-- [ ] 不执行 live 批次；若实现说明涉及 source close / checks 的行为，仅陈述代码合同，不报告真实 PR 状态或外部操作结果。
-- [ ] 独立 verifier `PASS` 后，非人工 checklist 项均有可追踪 evidence；执行侧 Final Reconciliation 与 banner / §9 状态一致，再将本 PRD 随交付改动从 `tasks/pending/` 归档到 `tasks/archive/`。
-- [ ] 完成消息呈递实现 PR URL、本地验证结果和未验证的 GitHub 外部边界；不得触发生产仓库批次或呈递 fake GitHub 状态作为证据。
+- [x] 本地正文构造和 body contract 与 PRD 集一致；evidence report 记录实际完成的本地验证，并单列未验证的 GitHub 边界。证据：rv-3、evidence report 与 verifier report 均经独立 verifier `PASS`。
+- [x] 不执行 live 批次；若实现说明涉及 source close / checks 的行为，仅陈述代码合同，不报告真实 PR 状态或外部操作结果。证据：rv-4 `NOT RUN`，evidence report 与 verifier report 明确披露。
+- [x] 独立 verifier `PASS` 后，非人工 checklist 项均有可追踪 evidence；执行侧 Final Reconciliation 与 banner / §9 状态一致，PRD 位于 `tasks/archive/`。证据：本次 §9 更新、§13 Final Reconciliation、verifier report `PASS`；三项 `Human-Confirmed` 保留空框，banner 为 `🧍 待人工验收`。
+- [~] 完成消息呈递实现 PR URL、本地验证结果和未验证的 GitHub 外部边界；不得触发生产仓库批次或呈递 fake GitHub 状态作为证据。—— runner-owned gate：runner 发布 PR / CI 后补链接与 stable evidence surface。
 
 ## 10. Functional Requirements
 
@@ -521,10 +535,11 @@ No external research required. This does not authorize live GitHub validation; �
 
 ### Final Reconciliation
 
-- Interpretation: 待实现后核对；目标为同仓库一次显式 opt-in 批次生成唯一总 Draft PR，组合验证后由用户统一审阅与合并。
-- Public behavior and contracts: 待实现后核对；默认队列行为保持不变；总 PR 列出完整来源 Issue / PR 与去重 PRD 集，v2 merge-acceptance 覆盖该集合；来源 PR 仅在总 PR 创建且必需 GitHub checks 全 SUCCESS 后关闭并标记 superseded。
+- Interpretation: 已对照最终实现核对；自动批次仅限显式 `kc run --all-ready --aggregate-pr`，手动 / retry 用 `kc pr aggregate --issue ...`；整批 worker 成功后按依赖顺序在隔离 worktree 组合并重验，失败不发布总 PR。
+- Public behavior and contracts: 已对照 CLI、core lifecycle 与 body contract 核对；默认队列行为保持不变；总 Draft PR 正文列出完整来源 Issue / PR 与去重 PRD 集，并以 v2 声明共同验收范围；来源 PR 只有在组合 tree 与总 PR required checks 均 PASS 后才进入关闭。真实 GitHub 创建、检查、关闭、评论、分支保留与实际 merge 本轮未验证。
 - Related PRD status: 已检查当前 pending 与 archive；`kc-agentic-entry-and-stall-supervision`、`lifecycle-agent-model-settings` 和 `kc-hosted-runner-deployment` 只有共享 CLI / runtime 文件的软重叠，没有语义或交付硬依赖。
-- Requirements and risks: Part A 六个行为样例中三条本地行为对应 §7.6 rv-1—rv-3，三条真实 GitHub 行为由 rv-4 记录为未验证；FR-1—FR-8 与 overview 对齐。用户已确认唯一正式总 PR 及来源 PR 自动关闭策略，并要求不验证真实 GitHub 行为。实现侧证据只来自本地 CLI parser、临时 Git 与 body contract；不使用 fake GitHub 作为验收证据，也不访问真实 GitHub。外部 PR 操作保持未验证并在交付报告披露。
+- Requirements and risks: Part A 的 CLI / Git / v1-v2 contract 可见结果已由 rv-1—rv-3 本地 oracle 覆盖；rv-4 按用户要求不连接 GitHub、不运行 live 批次、不使用 fake，真实外部语义保持未验证。FR-1—FR-8 与实现和文档同步；部分 close 失败保留已关闭来源的标记、未关闭来源供幂等重试；重试只在总 PR 分支和 Issue marker 匹配时排除总 PR 来源项，且只按已核实的 PR head SHA lease 更新 batch branch。源代码组合、资格检查、证据门、body 合同、CLI help、打包 skill 与指南均完成 executor-side 实现。
+- Delivery status: 本地验证计划、rv-1—rv-4 边界记录、人审 checklist、evidence report 与 verifier report 位于 `tasks/evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/`。独立 verifier 已给出 `PASS`；所有证据充分支持的执行侧验收项已勾选并引用证据。PR / CI surface 尚待 runner 发布，保留为唯一 runner-owned `[~]` gate。`Human-Confirmed` 三项保留未勾选，banner 为 `🧍 待人工验收`。
 
 ## Change Log
 
@@ -543,3 +558,83 @@ No external research required. This does not authorize live GitHub validation; �
 - Reason: 用户要求不在真实仓库 / GitHub 上试跑；mock 状态无法证明真实 GitHub 的创建、检查或关闭结果。
 - Impact: GitHub 外部行为在实现交付时明确披露为未验证；不触发真实批次、真实 PR 或凭证化 smoke。
 - Review: 保留用户已确认的产品行为口径；本轮只调整验证范围，未运行产品测试。
+
+### 实现与本地证据对账
+- Type: evidence
+- Before: §9 的实现验收项与 Final Reconciliation 均待实现；本地 oracle 尚无执行记录。
+- After: 完成双 CLI 入口、整批编排、隔离 Git 集成、PRD 证据门、v2 contract 和文档同步；rv-1—rv-3 有本地运行记录，rv-4 明确未运行；独立 verifier 和 PR / CI 发布继续由 runner 处理。
+- Reason: 对照最终代码和实际本地验证结果完成 executor-side reconciliation，并保留真实 GitHub 行为的既定未验证边界。
+- Impact: 增加本地 evidence package 与 human review checklist；不扩大 scope、不改变已确认行为、不执行真实 GitHub 操作。§9 executor 项等待 runner 独立复核后回填，Human-Confirmed 保持开放。
+- Review: executor 已核对命令输出、临时 Git refs、v1/v2 contract 和文档；独立 verifier 尚未裁决，不能据此声称 verifier PASS 或完成 archive。
+
+### 按职责拆分聚合 core 模块
+- Type: design
+- Before: Change Impact Tree 将来源解析、批次模型和完整聚合生命周期集中写入 `agent_runner_batch_aggregate.py`。
+- After: 来源资格 / 依赖 / retry 解析放在 `agent_runner_batch_aggregate_sources.py`，共享 DTO 与错误放在 `agent_runner_batch_aggregate_models.py`，生命周期留在 `agent_runner_batch_aggregate.py`。
+- Reason: 聚合生命周期文件接近仓库单代码文件 1000 非空行上限；按既有依赖拆分以降低维护成本并保留清楚边界。
+- Impact: 只调整 core 内部模块落点和 PRD Change Impact Tree，不改变 CLI、批次资格、合并顺序或外部行为。
+- Review: executor 已更新 Change Impact Tree 并通过结构化导入 / 定向测试复核；独立 verifier 仍由 runner 执行。
+
+### 排除重试搜索结果中的现有总 PR
+- Type: implementation
+- Before: 显式重试要求每个 Issue 的 `refs:` 搜索只返回一个 PR，但已发布的总 PR 正文也引用批次 Issue，可能被同一搜索结果返回。
+- After: 来源解析只在总 PR 的稳定批次分支、严格来源 marker 和 Issue 集匹配时排除该总 PR；之后仍验证 v2 正文声明的来源 PR 集完整匹配解析结果。
+- Reason: 保证已发布总 PR 与部分来源关闭后的重试不会把总 PR 本身误判成第二个来源 PR，也不放宽来源身份校验。
+- Impact: 只修正同一批次现有总 PR 的重试成员解析；不改变批次范围、GitHub 状态验证边界或其他 PR 的资格。
+- Review: 通过当前代码审阅确认筛选依赖稳定分支和来源 marker；GitHub `refs:` 搜索结果与真实重试仍按 rv-4 明确未验证。
+
+### 按当前仓库落点校正 Change Impact Tree
+- Type: design
+- Before: 变更树预期修改通用 `agent_runner_git.py` / `agent_runner_publish.py`，并把 `cli_schema.py` 列为按需修改；没有列出新隔离 Git helper、CLI 参数透传层、两份 PR context model 和 skill reference。
+- After: 单列实际新增的 `agent_runner_batch_aggregate_git.py`，将 `agent_runner_git.py` 与发布端标为既有能力复用；记录实际修改的 queue pass-through / context model / adapter 测试与 operator reference；schema 标为 Typer 派生并由 rv-1 核对，无静态文件修改。
+- Reason: 代码检索确认新组合 Git 生命周期需要批次专用隔离边界；现有 Draft PR 创建端口可直接复用，机器 schema 由命令定义生成。
+- Impact: 仅校准实施落点和复用说明；没有新增行为范围，也没有重建已存在的 CLI / GitHub client 结构。
+- Review: 对照 `git status`、实际导入注册链、rv-1 help/schema 与依赖边界更新；全仓库搜索未发现计划内公共入口遗留为未实现路径。
+
+### 保护重试时被人工推进的总分支
+- Type: implementation
+- Before: 已核实总 PR 身份后，聚合重试会读取远端 batch ref 当前 SHA 并直接以该值作为 `--force-with-lease`，但不会确认它仍是该 PR context 报告的 head。
+- After: 更新远端 batch ref 前要求当前 SHA 与总 PR context 的 head SHA 完全一致；若分支在读取上下文后被修改，重试 fail closed 并保留远端 ref。
+- Reason: 防止人工推进或并发更新的集成分支被重试意外覆盖。
+- Impact: 只收紧同一总 PR 的 batch branch retry 更新条件；来源 branch 从不强推。
+- Review: `rv-2` 增加临时 bare remote 的不匹配 head 负向控制，断言拒绝覆盖且远端 ref 不变；真实 GitHub 状态仍由 rv-4 留空。
+
+### Final Reconciliation 同步重试安全边界
+- Type: evidence
+- Before: Final Reconciliation 未概述已加入的现有总 PR 搜索结果排除条件与远端 batch ref head 一致性门。
+- After: Final Reconciliation 明确重试仅排除来源 marker / Issue 集匹配的同批总 PR，并要求远端 batch ref 与已核实 PR head SHA 一致后才可 lease 更新。
+- Reason: 让最终叙事准确覆盖代码审阅中补充的 GitHub 搜索和并发 ref 风险处理，同时保留外部行为未验证边界。
+- Impact: 只同步实现状态和恢复边界，不改变产品范围或人工验收选择。
+- Review: 对照 source resolver、Git push helper、rv-2 fresh local bare-remote assertions 与 rv-4 披露核对。
+
+### 恢复尝试 1：修复全量测试暴露的回归
+- Type: implementation
+- Before: 首次 `just test all` 有 19 项失败：权威 PR 响应 fixture 缺少新增必需的 `isDraft`；非聚合 `kc run` 在配置为空的测试上下文中提前解引用聚合设置；随包 skill 对新增聚合命令的 flag 白名单和路由数未同步。
+- After: 权威响应 fixture 明确提供 `isDraft`；只在 `--aggregate-pr` 启用时读取聚合设置；skill 把聚合关键词并入现有 `run-once.md` 路由，并在 CLI 同步断言中登记 `--aggregate-pr` 与 `kc pr aggregate` flags。
+- Reason: 让新增 CLI / PR 上下文契约与既有非聚合入口及随包操作说明保持兼容。
+- Impact: 不改变聚合行为、严格 PR 身份要求或八份 reference 文件结构；恢复无聚合参数时原有命令的设置独立性。
+- Review: 定向用例 25 passed；隔离 `HOME=/private/tmp/keda-issue258-home` 的 4 个 daemon 用例 passed。再次 `just test all` 的 full lint passed、3,829 passed、14 failed、1 skipped；剩余 14 项是沙箱阻止 `psutil.process_iter()` 经 `sysctl` 枚举进程（`EPERM`）及测试默认写入工作区外 `~/.kedacode`，不是本分支 scanner 改动（本分支未改迁移 / 进程扫描代码）。设置隔离 `HOME` 并显式提供本机 PRD skill 路径后，日常 `just test` 为 148 passed、10 failed、231 deselected；10 项仍全部因同一个进程枚举 `EPERM`。`just lint --reuse` passed，`just test` 内 full lint passed。未修改测试守卫或将环境失败记为通过。
+
+### 总 PR 创建失败后的可重试恢复
+- Type: implementation
+- Before: batch branch 推送成功后，若 Draft PR 创建失败且确认远端没有对应 PR，重试会因分支已存在而拒绝覆盖，造成无法自动继续的孤儿分支。
+- After: 查询确认没有对应 PR 时，只在远端 batch ref 仍等于本次推送 head SHA 的情况下通过 `--force-with-lease` 删除该 ref；若查询结果不确定、ref 已移动或清理失败，则保留分支并给出可重试错误。若创建请求实际成功但客户端报错，则继续验证已存在 PR 的身份与状态。
+- Reason: 修复 FR-7 的失败恢复缺口，同时避免删除并发或人工更新的远端提交。
+- Impact: 仅影响总 Draft PR 创建异常后的恢复路径；base 与来源 refs 不变，GitHub 外部行为本轮仍未验证。
+- Review: 两个临时 bare-remote 测试验证仅删除匹配 SHA、ref 移动时拒绝删除；聚合 Git 文件 19 passed，兼容回归 110 passed；独立 verifier `PASS`。真实 GitHub PR 创建未运行。
+
+### 独立复核与执行侧验收对账
+- Type: evidence
+- Before: rv-1—rv-3 和 GitHub 未验证边界已有执行器证据，但 verifier 报告为 PENDING，§9 runner-owned 项尚未完成回填。
+- After: 独立 verifier 对最终实现和证据包给出 `PASS`；所有有证据支持的执行侧 checklist 项已勾选并引用证据，Final Reconciliation 对齐，保留三项 Human-Confirmed 与 PR / CI 发布 gate。
+- Reason: 完成仓库要求的独立复核后对账，不把未执行的 live GitHub / PR / CI 行为描述为已通过。
+- Impact: 验收横幅维持 `🧍 待人工验收`；PR / CI surface 发布后再补链接，用户人工验收项仍未确认。
+- Review: `tasks/evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr.verifier-report.md` 首行 `PASS`，并披露两项非阻塞限制。
+
+### 评审修正：拆分队列聚合接线并披露资格门
+- Type: implementation
+- Before: 队列侧聚合接线（`AggregateQueueCompletionRequest` 与 `_complete_aggregate_queue`）留在 `agent_runner_orchestration_runtime.py`，该文件 1045 非空行触发 CI 的 1000 行硬门（本地 `just lint` 只告警，所以只在远端暴露）；聚合资格门（成员 Issue 须 open 且带 `agent/review`、来源 PR 必需 checks 须 `SUCCESS`）只存在于代码，指南与随包 operator skill 未点名，操作员无法预期单次夜间调用一般会在资格阶段被拒；收尾门把批次身份（head/base/draft）与总 PR 正文差异一并报成 `required checks are not all SUCCESS`；`iar:aggregate-contract` 标注声称合并队列会据此拒绝自动合并，而队列实际只消费单 PRD 的 `iar:pr-contract`。
+- After: 聚合接线落在新模块 `agent_runner_batch_aggregate_queue.py`（调度入口降到 954 非空行，被移动的公开名经导入仍可解析）；`docs/guides/agent-runner.md` 新增「批次聚合的资格门与两次调用」小节，并在功能概览、`resolve_batch_sources` docstring、两条资格错误文案与 `SKILL.md` / `references/run-once.md` 里点名这两道门与"通常需要再补一次 `kc pr aggregate`"；收尾拒绝按原因分成 checks 未全绿 / head-base-draft 身份不符 / 正文不符三条诊断，正文比较先做空白规范化；聚合标注改述为发布前的本地门信号并声明没有合并队列消费方。
+- Reason: 处理 Issue #258 代码评审的四项发现。CI 硬门要求结构拆分而非 allowlist；未披露的门禁与不存在的机器门声明都会让操作员按错误预期调度夜间批次。
+- Impact: 不改变聚合语义、资格判定结果、发布或关闭顺序，也不放宽任何门禁；只调整模块落点、失败诊断分类、文案与文档披露。真实 GitHub 行为仍按既定 rv-4 边界保持未验证。
+- Review: 见 `tasks/evidence/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr/P1-FEAT-20261009-161921-nightly-batch-aggregate-pr.evidence-report.md` 的 Review-cycle verification 一节——CI 同款 max-lines 命令在本树 exit 0（调度入口 954 非空行）、rv-1 exit 0、rv-2 **21 passed**、rv-3 **19 passed**、新增队列接线 oracle **5 passed**、定向回归 **353 passed**、CI 等价全量 **3853 passed / 1 skipped**、`mkdocs build --strict` 与 `just lint --reuse` 通过；真实 GitHub 行为仍为 rv-4 NOT RUN。

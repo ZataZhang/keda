@@ -4,10 +4,15 @@ from __future__ import annotations
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
+    AggregateQueueCompletionRequest,
+    check_aggregate_candidate_shortfall,
+    complete_aggregate_queue,
+    log_aggregate_dry_run_preview,
+)
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_dependencies import (
@@ -43,6 +48,10 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     choose_agent,
     create_or_reuse_worktree,
     run_issue_with_agent_fallback,
+)
+from backend.core.use_cases.agent_runner_orchestration_models import (
+    PrdReworkRequest,
+    RunOnceRequest,
 )
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.shared.models.publish_stage import PublishStage
@@ -105,18 +114,6 @@ def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
         return extract_prd_path(issue.body) or ""
     except Exception:  # noqa: BLE001 - observation must not break the run.
         return ""
-
-
-@dataclass(frozen=True)
-class PrdReworkRequest:
-    """一轮 PRD rework Issue 处理请求。"""
-
-    repo_path: Path
-    config: AppConfig
-    github_client: IGitHubClient
-    process_runner: IProcessRunner
-    content_generator: IContentGenerator | None = None
-    max_issues: int = 1
 
 
 def process_prd_rework_issues(request: PrdReworkRequest) -> None:
@@ -587,39 +584,6 @@ def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueS
         return False
 
 
-@dataclass(frozen=True)
-class RunOnceRequest:
-    """Agent Runner 单轮队列调度请求。"""
-
-    repo_path: Path
-    config: AppConfig
-    dry_run: bool
-    agent: str
-    max_issues: int
-    github_client: IGitHubClient
-    process_runner: IProcessRunner
-    content_generator: IContentGenerator | None = None
-    run_history_store: IRunHistoryStore | None = None
-    run_trigger: str = "cli_run"
-    repo_id: str | None = None
-    concurrency: int = 1
-    output_view: IRunnerLiveView | None = None
-    #: 定向目标 Issue 编号（``kc run --issue``）。非 ``None`` 时只处理该
-    #: Issue（仍走依赖门禁与 claim）；``None`` 保持"按优先级捞队列"行为。
-    target_issue: int | None = None
-    #: 发布档位（``kc run --fast-merge`` / ``--direct-pr``）：本次运行执行 agent
-    #: 之后还剩多少门禁与第二个 agent。``NORMAL`` 即默认全量路径；daemon 与其余
-    #: 调用方传的仍是 ``NORMAL``（默认值），但它是**调用侧请求档位**——认领后
-    #: core 会用 Issue 上的 ``direct-pr`` 标签把它升级为 ``DIRECT``（逐 Issue 独立）。
-    publish_stage: PublishStage = PublishStage.NORMAL
-    #: 统一自动执行并发上限（由调用方经 ``resolve_execution_ceiling`` 解析出的
-    #: 单一生效值）。非 ``None`` 时只约束 **ready 通道的新认领**：本轮认领数 =
-    #: max(0, ceiling − 在途 running 数)，认领数不足即少领；``None`` 表示不设
-    #: 闸门——人显式点名的路径（``kc run --issue`` / 控制台单PRD 开始）保持全量。
-    #: running / blocked / cleanup 通道是恢复性处理，不新增并发，不受该值约束。
-    execution_ceiling: int | None = None
-
-
 def run_once(request: RunOnceRequest) -> int:
     """执行一次轮询处理。
 
@@ -929,6 +893,11 @@ def run_once(request: RunOnceRequest) -> int:
                     config.labels.blocked,
                 )
 
+    if request.aggregate_pr:
+        candidate_shortfall_exit_code = check_aggregate_candidate_shortfall(len(issues_to_process))
+        if candidate_shortfall_exit_code is not None:
+            return candidate_shortfall_exit_code
+
     if not issues_to_process:
         _logger.info(
             "No open Issues found with label %s, eligible running rework, or blocked resolution.",
@@ -938,6 +907,8 @@ def run_once(request: RunOnceRequest) -> int:
 
     # DRY RUN：仅列出将处理的 Issue，不实际处理（串行、零副作用）。
     if dry_run:
+        if request.aggregate_pr:
+            log_aggregate_dry_run_preview([issue for issue, _ in issues_to_process])
         # 定向模式的候选来自 get_issue（单个目标），不是 ready 列表的 limit 宽度，
         # 因此不能套用同一句「覆盖 N 个候选」的措辞。
         if target_issue_summary is not None:
@@ -1023,10 +994,16 @@ def run_once(request: RunOnceRequest) -> int:
                 _logger.error("Serial routing failed for Issue #%d: %s", issue.number, exc)
                 return 1
 
-        exit_code = 0
-        for issue, issue_kind in issues_to_process:
-            exit_code |= _process_serial((issue, issue_kind))
-        return exit_code
+        issue_results = [
+            _process_serial((issue, issue_kind)) for issue, issue_kind in issues_to_process
+        ]
+        return complete_aggregate_queue(
+            AggregateQueueCompletionRequest(
+                run_request=request,
+                issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
+                exit_codes=tuple(issue_results),
+            )
+        )
 
     # 并行路径：线程池同一轮并行处理多个 Issue。每个 Issue 的 agent 输出经
     # output_sink 路由到独立日志文件与（可选）独立看板列，互不交错。
@@ -1068,4 +1045,10 @@ def run_once(request: RunOnceRequest) -> int:
             results = list(pool.map(_process_with_routing, issues_to_process))
     finally:
         active_view.close()
-    return 1 if any(results) else 0
+    return complete_aggregate_queue(
+        AggregateQueueCompletionRequest(
+            run_request=request,
+            issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
+            exit_codes=tuple(results),
+        )
+    )
