@@ -395,7 +395,7 @@ No external validation required; repository evidence was sufficient.
 - [x] 失败、空数据、缺少 preset 快照和多仓同名 preset 均有测试与明确呈现。证据：`tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/rv-1-api-green.txt`、`rv-1-api-json.json`、`rv-2-e2e-green-final.txt`（API / SQLite 集成用例覆盖失败、空值、预设快照和跨仓同名分组；真实页面 E2E 的显示、空态、错误隔离、窄屏及预设行检查 5/5 通过）。
 - [x] §9.1 呈递区已回填实际截图和打开方式；完成回复包含呈递物和逐项自验方法。呈递物：`rv-2-stats-agent-performance.png`（桌面）与 `rv-2-stats-agent-performance-narrow.png`（窄屏），打开方式与自验方法已写入 §9.1 表格行。
 - [x] `tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/human-review-checklist.md` 已列出人工确认项；配套 HTML 已通过 `just prd review <prd-file>` 解析并在真实浏览器完成呈现检查（零 pageerror、首项卡片、翻页、内嵌两张截图加载、结果 Markdown 生成），证据：`rv-2-prd-review-browser-check.txt`、`rv-2-prd-review-checklist-page2.png`。
-- [~] verifier `PASS`，Final Reconciliation 完成，交付前 PRD 归档状态与 §9 一致。— runner-owned gate: 独立 verifier 在执行器交付后判定 PASS，并由 runner 处理归档；本轮不得伪造 verifier 结论或移动 PRD。
+- [x] 独立 verifier 在最终代码提交 `07f93d55980a761831aaaa10d1318decaee9925c` 上判定 `PASS`；Final Reconciliation 已按 §9 更新，本 PRD 随交付归档。verdict 与复核记录：`tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/P2-FEAT-20261009-171037-agent-preset-performance-stats.verifier-report.md`。
 
 ## 10. Functional Requirements
 
@@ -436,7 +436,7 @@ No external validation required; repository evidence was sufficient.
 - Interpretation: 实现与 rv-1 集成测试保持 Part A 口径：Agent / preset 结果按单次 attempt 归属，任务 outcome 按仓库独立汇总；删除预设后继续使用 SQLite 快照。没有改变成功定义、范围或空值语义。
 - Public behavior and contracts: 新增独立只读 `stats/agent-performance` API 与 Stats 卡片；原有趋势、lifecycle 与 Token 区域仍保留。FastAPI / SQLite 统计断言通过；最终 `just console-sync` 后由 worktree `uv run kc console` 新会话读取 `/app/stats/` 及引用 bundle 全部 HTTP 200（`rv-2-console-http-green.txt`），并在真实浏览器中完成页面水合、数据渲染与 375px 窄屏横向滚动检查（`rv-2-e2e-green-final.txt`、`rv-2-stats-agent-performance*.png`）。
 - Related PRD status: 生命周期 Agent / 预设设置仍是独立的 pending PRD；本统计不等待其 UI 或 CLI，也不依赖读取当前配置。
-- Requirements and risks: FR-1–FR-6、§12 的历史快照限制、任务归因边界与查询范围均未改变。rv-1 红 / 绿验证通过并重新采集三份 API JSON；共享 percentile helper 调整后的现有 lifecycle median / P90 回归用例 1 passed。此前真实 E2E 的 Stats 数据、仓库 / 天数筛选、空态和错误隔离检查通过；375px 测试曾因 `stats-agent-performance-preset-table` 被判定为 hidden 而失败，截图显示展开侧栏挤占内容区。窄屏 spec 现先点击已有的“收起导航栏”控件，但本轮最新完整 E2E 在 auth setup 因 Chromium `MachPortRendezvousServer` `Permission denied (1100)` 退出，4 个 Stats 页面测试未运行。CUA 显示 IAB 不可用、浏览器 inventory 为空且 Chrome 访问未获准。上述受阻项已在最终一轮全部完成：窄屏绿跑、预设样本数产品负控（4→5 红、恢复绿）、真实 kc console 桌面与窄屏截图、`just prd review` 浏览器呈递，见 `rv-2-e2e-green-final.txt`、`rv-2-e2e-negative-control.txt`、`rv-2-stats-agent-performance*.png` 与 `rv-2-prd-review-browser-check.txt`。
+- Requirements and risks: FR-1–FR-6、§12 的历史快照限制、任务归因边界与查询范围均未改变。rv-1 API / SQLite 测试 4 passed，现有 lifecycle 分位数回归 1 passed；三份最终 API 响应均为 HTTP 200，all-repos 响应按仓库返回未绑定计数。目标 Stats E2E 5/5 通过，覆盖数据、仓库 / 日期筛选、空态、错误隔离和 375px 横向滚动；预设样本数负控 4→5 变红、恢复后通过。页面截图来自真实 `kc console` 分发。全仓 `pnpm lint` 的 4 个 `react-hooks/set-state-in-effect` 错误均位于与最新 `main` 一致且本 PR 未修改的页面；目标文件 ESLint 为 0 errors，`pnpm typecheck`、生产 build、`just test`、`just lint --full` 与 strict docs build 通过。独立 verifier 在 HEAD `07f93d55` 只读复核后判定 `PASS`；证据字段与输出摘要已对齐。两项 `Human-Confirmed` 仍待用户确认，验收横幅保持 `🧍 待人工验收`。
 - Reconciled differences:
   - E2E spec 补充了预设行样本数与仓库筛选参数断言，以覆盖 PRD 已要求但原 spec 未明确断言的值；行为范围未扩大。
   - E2E spec 现在还断言新增 API 请求使用 GET 和 canonical `/api/v1/agent-runner/console/stats/agent-performance` 路径。目标 spec 单文件 ESLint / TypeScript 检查通过；这些断言在受阻轮次未执行，最终轮次目标 spec 5/5 真实运行已覆盖，见 `rv-2-e2e-green-final.txt`。
@@ -447,7 +447,7 @@ No external validation required; repository evidence was sufficient.
   - 最终 worktree 上再次运行 `pnpm typecheck` 与 `pnpm build` 均通过；E2E 前端 API / DTO 类型项已据此及此前真实筛选断言通过而勾选。`just console-sync` 后使用 worktree `uv run kc console --no-browser --port 8879` fresh-read `/app/stats/` 和 12 个 bundle 均返回 200。API JSON 已在最终相关代码树重采；桌面与 375px 窄屏截图随后在真实浏览器从 kc console 静态分发采集，最终轮次相关 checklist 已勾选（`rv-2-stats-agent-performance*.png`、`rv-2-e2e-green-final.txt`）。
   - 为刷新本地核心测试标记而运行 `just test`：lint 阶段通过，随后 14 项失败、1 项通过、149 项未运行。失败首因是环境禁止 `psutil` 进程扫描，导致 `config migrate` 按安全策略拒绝运行；另有 daemon 测试写 `/Users/zata/.kedacode/daemon-locks/repo.lock` 被拒绝。单独 `just lint --full` 的唯一失败是 test flag 的 worktree tree 哈希已过期；统计定向用例和前端 build/typecheck 均独立通过。
   - 已按 PRD 模板生成交互式 `human-review-checklist.html` 并内嵌两张真实 kc console 页面截图；本轮在真实浏览器完成呈现检查（零 pageerror、首项卡片可见、翻页与结果 Markdown 生成、内嵌截图加载），`just prd review <prd-file> --print` 解析到该 HTML，见 `rv-2-prd-review-browser-check.txt`。
-  - 本轮 rv-2 收口：窄屏用例先因点击落在 hydration 完成前而失败、后又因 GitHub overview 冷重建慢而超时，spec 增加「等待新统计请求出现后再点击收起并 toPass 重试」与「仓库选项耐心 45s 等待、超时才整页刷新重试」两项确定性前置（不改产品代码）；`just e2e` 目标 spec 5/5 通过；预设样本数 4→5 产品负控红、恢复绿；`just console-sync` 后由 worktree `uv run kc console` 在真实浏览器采集桌面与 375px 窄屏截图；rv-1 API / SQLite 证据与两份 final-tree 哈希在最终改动后重采。执行器侧交付完成，待独立 verifier 判定与 runner 归档；两项 `Human-Confirmed` 仍留人工。
+  - 本轮 rv-2 收口：窄屏用例先因点击落在 hydration 完成前而失败、后又因 GitHub overview 冷重建慢而超时，spec 增加「等待新统计请求出现后再点击收起并 toPass 重试」与「仓库选项耐心 45s 等待、超时才整页刷新重试」两项确定性前置（不改产品代码）；`just e2e` 目标 spec 5/5 通过；预设样本数 4→5 产品负控红、恢复绿；`just console-sync` 后由 worktree `uv run kc console` 在真实浏览器采集桌面与 375px 窄屏截图；rv-1 API / SQLite 证据与两份 final-tree 哈希在最终改动后重采。最终独立 verifier 于 HEAD `07f93d55` 判定 `PASS`；PRD 的非人工验收项已对齐并随交付归档，两项 `Human-Confirmed` 仍留人工。
 
 ## Change Log
 
@@ -554,3 +554,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 让 PRD 正文、验收勾选状态与结构化证据 manifest 指向同一最终事实，避免 verifier 读到自相矛盾的受阻措辞。
 - Impact: 仅文档与证据一致性修正；不改变功能范围、统计口径、验证要求或任何未勾选状态。两项 `Human-Confirmed` 与独立 verifier 判定保持原样。
 - Review: Executor evidence only; no new user-visible behavior claimed; Human-Confirmed remains open.
+
+### 冲突整合后的独立复核与 PRD 归档
+- Type: evidence
+- Before: 最新 `main` 合并后的代码已验证并推送，但 rv-1 JSON 形状与新 API 契约不一致；manifest 仍保留旧的 `31 deselected` 摘要，PRD verifier gate 未完成且暂在 pending。
+- After: 在最终代码提交上重采 API JSON 与 final-tree 证据，修正忽略的 `evidence.json` 中测试数量为 `4 passed, 33 deselected`；独立 verifier 复核 stale API 形状、归档门禁与摘要一致性后判定 `PASS`。更新 Final Reconciliation 和 verifier Acceptance 项，并将 PRD 从 `tasks/pending/` 归档至 `tasks/archive/`。
+- Reason: 解决独立复核指出的证据不一致，并按仓库交付流程完成 verifier gate 与执行侧归档。
+- Impact: 不改变实现或用户可见行为；两项 `Human-Confirmed` 保持未勾选，验收横幅为 `🧍 待人工验收`，等待用户查看呈递证据后确认。
+- Review: Independent verifier PASS at `07f93d55980a761831aaaa10d1318decaee9925c`; Human-Confirmed items remain open.

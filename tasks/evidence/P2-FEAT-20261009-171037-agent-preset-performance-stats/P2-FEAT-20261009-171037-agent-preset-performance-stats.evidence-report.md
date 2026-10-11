@@ -110,3 +110,8 @@
 
 - 第一轮独立复核指出本地 `rv-1-api-json.json` 仍是旧的标量字段形状。已在 `12f73660f472d70fd930227dd925ff93e53b36a8` 上重跑 `bash tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/scripts/rv-1-validation.sh`：API / SQLite 定向测试 **4 passed、33 deselected**，lifecycle percentile 回归 **1 passed**；重新捕获 repo-filter、all-repos、1-day 三份 HTTP 200 响应。最终响应包含按仓库分组的 `unbound_preset_attempts`（`keda-main: 1`、`other-repo: 1`），不再包含旧字段；`rv-1-final-tree.txt` 绑定提交 `12f73660f472d70fd930227dd925ff93e53b36a8`。
 - 第一轮指出 PRD 在 verifier gate 仍为 `[~]` 时已处于 `tasks/archive/`。为符合归档门禁，现将 PRD 放回 `tasks/pending/`；第二轮 verifier 通过后再完成 Final Reconciliation 并归档。两项 `Human-Confirmed` 仍待人工确认。
+
+## 独立 verifier 最终复核（2026-10-11）
+
+- 第二轮 verifier 确认 API JSON 和 PRD 状态问题已解决，并指出 `evidence.json` 的 pytest 摘要仍为 `4 passed, 31 deselected`，与最新捕获的 `rv-1-api-green.txt` 不符。已将 manifest 中三个摘要 / 断言引用统一更正为 `4 passed, 33 deselected`，并解析 JSON 确认有效。
+- 第三轮独立 verifier 只读检查 `07f93d55980a761831aaaa10d1318decaee9925c` 与最新证据，确认 API JSON 字段形状、PRD pending 状态及 pytest 摘要一致，结论 **PASS**。两项 `Human-Confirmed` 仍待用户查看呈递证据后确认。
