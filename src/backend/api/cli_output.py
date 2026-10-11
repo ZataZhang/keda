@@ -36,6 +36,7 @@ __all__ = [
     "emit_ndjson",
     "error_envelope",
     "json_literal",
+    "machine_output_requested",
     "output_format_of",
     "render_cli_error",
     "resolve_output_format",
@@ -88,6 +89,31 @@ def resolve_output_format(parsed: Any) -> str:
         output=getattr(parsed, "output", None),
         as_json=bool(getattr(parsed, "as_json", False)),
     )
+
+
+def machine_output_requested(args: Sequence[str]) -> bool:
+    """从原始参数探测是否声明了机器模式（解析失败时拿不到 Namespace）。
+
+    解析失败的命令无法走 :func:`resolve_output_format` 的正规判定，只能扫描
+    原始 token：出现 ``--json``、``--output json`` 或 ``--output=json``
+    （取值大小写不敏感）即视为机器模式声明。
+
+    Args:
+        args: 传给 CLI 入口的原始参数序列。
+
+    Returns:
+        真值表示调用方显式请求了机器输出。
+    """
+    for index, token in enumerate(args):
+        if token == "--json":
+            return True
+        if token.startswith("--output="):
+            if token.removeprefix("--output=").strip().lower() == OUTPUT_FORMAT_JSON:
+                return True
+        elif token == "--output" and index + 1 < len(args):
+            if args[index + 1].strip().lower() == OUTPUT_FORMAT_JSON:
+                return True
+    return False
 
 
 def _dump_json(payload: Any) -> str:

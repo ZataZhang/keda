@@ -34,6 +34,9 @@ classifiers = [
 dependencies = [
     "croniter>=3.0.0",
     "fastapi>=0.115.0",
+    # 启动更新检查（cli_update_check）需要在所有 CLI 主路径上比较 PEP 440 版本，
+    # 纯 Python 小包，不重造版本解析轮子。
+    "packaging>=24.0",
     # 注意：pre-commit 刻意不在这里。src/ 与 tests/ 从不 import 它，runner 只是
     # 生成 `uv run pre-commit run --all-files` 这类命令字符串，在**目标仓库**的
     # 环境里作为子进程执行（见 engines/agent_runner/repository_local.py）。

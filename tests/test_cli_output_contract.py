@@ -32,7 +32,8 @@ from backend.api.cli_output import (
     resolve_output_format,
     route_logs_to_stderr,
 )
-from backend.api.cli_typer_app import _machine_output_requested, main as typer_main
+from backend.api.cli_output import machine_output_requested
+from backend.api.cli_typer_app import main as typer_main
 
 
 def test_output_format_json_alias_equals_explicit_flag() -> None:
@@ -212,13 +213,13 @@ def test_json_serialization_stays_in_cli_output() -> None:
 
 def test_machine_output_requested_detects_raw_tokens() -> None:
     """解析失败时只能靠原始 token 探测机器模式：三种写法都算显式声明。"""
-    assert _machine_output_requested(["logs", "--json"])
-    assert _machine_output_requested(["logs", "--output", "json"])
-    assert _machine_output_requested(["logs", "--output=json"])
-    assert _machine_output_requested(["logs", "--output", "JSON"])
-    assert not _machine_output_requested(["logs", "--output", "table"])
-    assert not _machine_output_requested(["logs"])
-    assert not _machine_output_requested(["logs", "--output"])
+    assert machine_output_requested(["logs", "--json"])
+    assert machine_output_requested(["logs", "--output", "json"])
+    assert machine_output_requested(["logs", "--output=json"])
+    assert machine_output_requested(["logs", "--output", "JSON"])
+    assert not machine_output_requested(["logs", "--output", "table"])
+    assert not machine_output_requested(["logs"])
+    assert not machine_output_requested(["logs", "--output"])
 
 
 def test_parse_failure_in_machine_mode_renders_envelope(
