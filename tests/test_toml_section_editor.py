@@ -6,18 +6,31 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
+import stat
 from pathlib import Path
 
 import pytest
+import tomlkit
 
+from backend.core.shared.models.config_edit import (
+    ConfigDocumentInvalidError,
+    ConfigKeyMissingError,
+)
 from backend.infrastructure.config.toml_section_editor import (
+    ArrayTableUpdate,
+    TableKeyUpdate,
+    apply_toml_updates,
+    mutate_toml_document,
     update_toml_array_of_tables,
     update_toml_table_keys,
 )
 
 _RUNNER_TABLE = ("agent_runner", "runner")
 _CANDIDATES_KEY = "agent_fallback_candidates"
+_LIFECYCLE_PRESETS_TABLE = ("agent_runner", "lifecycle_presets")
+_GHOST_PRESET_TABLE = ("agent_runner", "presets", "ghost")
 
 _CONFIG_WITH_ANNOTATED_CANDIDATES = """\
 [agent_runner]
@@ -166,3 +179,183 @@ def test_empty_entries_removes_the_array_table_key(config_path: Path) -> None:
     assert 'agent = "claude"' not in written
     assert 'agent = "kimi"' not in written
     assert "[agent_runner.runner.unrelated]" in written
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 落盘权限、跨进程锁、单事务与"删不掉就失败"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def bound_presets_path(tmp_path: Path) -> Path:
+    """写一份带 ``[agent_runner.lifecycle_presets]`` 与一个已声明预设的配置。"""
+    path = tmp_path / "bound.toml"
+    path.write_text(
+        """\
+[agent_runner]
+[agent_runner.lifecycle_presets]
+review = "hot"
+
+[agent_runner.presets.hot]
+agent = "claude"
+model = "sonnet"
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_write_keeps_existing_file_mode(config_path: Path) -> None:
+    """原子替换沿用目标权限位：一次写回不把 0644 降级成 mkstemp 的 0600。
+
+    ``tempfile.mkstemp`` 建出的临时文件是 0600，``os.replace`` 会把该 mode 带到目标；
+    机器级 ``config.toml`` 因此会在每次保存后变成只有属主可读，其他读取者静默失效。
+    """
+    os.chmod(config_path, 0o644)
+    update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 5})
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o644
+
+
+def test_write_keeps_tighter_current_mode(config_path: Path) -> None:
+    """0600 是现状时同样沿用——写回只保持权限，不擅自放宽或收紧。"""
+    os.chmod(config_path, 0o600)
+    update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 5})
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+
+
+def test_created_config_file_is_readable_by_default(tmp_path: Path) -> None:
+    """新建配置文件用 0644，而不是临时文件的 0600。"""
+    created = tmp_path / "fresh.toml"
+    update_toml_table_keys(created, _RUNNER_TABLE, {"max_agent_switches": 1})
+    assert created.is_file()
+    assert stat.S_IMODE(created.stat().st_mode) == 0o644
+
+
+def test_batched_update_lands_in_a_single_replace(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """候选链 + 预算收敛成一次读-改-写：只发生一次 ``os.replace``。"""
+    real_replace = os.replace
+    replaced: list[Path] = []
+
+    def _observe(temp_path: Path, target: Path) -> None:
+        replaced.append(Path(target))
+        real_replace(temp_path, target)
+
+    monkeypatch.setattr(os, "replace", _observe)
+    apply_toml_updates(
+        config_path,
+        [
+            ArrayTableUpdate(_RUNNER_TABLE, _CANDIDATES_KEY, [{"agent": "codex", "preset": None}]),
+            TableKeyUpdate(_RUNNER_TABLE, {"max_agent_switches": 3}),
+        ],
+    )
+
+    assert replaced == [config_path]
+    written = config_path.read_text(encoding="utf-8")
+    assert 'agent = "codex"' in written
+    assert "max_agent_switches = 3" in written
+
+
+def test_batched_update_aborts_entire_batch_on_invalid_delete(
+    config_path: Path,
+) -> None:
+    """一批改动里任一段校验不过 → 整批不落盘，已能写的那半也不会先进文件。
+
+    这是"失败时配置文件不发生部分改动"的判别口径：去掉写前的存在性检查，
+    ``max_agent_switches`` 就会先落盘、随后才抛错。
+    """
+    before = config_path.read_bytes()
+    with pytest.raises(ConfigKeyMissingError):
+        apply_toml_updates(
+            config_path,
+            [
+                TableKeyUpdate(_RUNNER_TABLE, {"max_agent_switches": 9}),
+                TableKeyUpdate(_GHOST_PRESET_TABLE, {"agent": None}, presence="table"),
+            ],
+        )
+
+    assert config_path.read_bytes() == before
+
+
+def test_delete_of_preset_absent_in_target_layer_fails(bound_presets_path: Path) -> None:
+    """删一个本层根本没声明的预设必须失败：这类删除不会改动任何配置，不能报成功。"""
+    before = bound_presets_path.read_bytes()
+    with pytest.raises(ConfigKeyMissingError, match="agent_runner.presets.ghost"):
+        apply_toml_updates(
+            bound_presets_path,
+            [TableKeyUpdate(_GHOST_PRESET_TABLE, {"agent": None}, presence="table")],
+        )
+    assert bound_presets_path.read_bytes() == before
+
+
+def test_unset_of_unbound_stage_fails_but_bound_stage_succeeds(bound_presets_path: Path) -> None:
+    """解绑要求该阶段在本层确有绑定；本层绑定的阶段仍能正常解绑。"""
+    before = bound_presets_path.read_bytes()
+    with pytest.raises(ConfigKeyMissingError, match="planner"):
+        apply_toml_updates(
+            bound_presets_path,
+            [TableKeyUpdate(_LIFECYCLE_PRESETS_TABLE, {"planner": None}, presence="keys")],
+        )
+    assert bound_presets_path.read_bytes() == before
+
+    apply_toml_updates(
+        bound_presets_path,
+        [TableKeyUpdate(_LIFECYCLE_PRESETS_TABLE, {"review": None}, presence="keys")],
+    )
+    assert 'review = "hot"' not in bound_presets_path.read_text(encoding="utf-8")
+
+
+def test_lenient_delete_of_absent_key_stays_a_no_op(bound_presets_path: Path) -> None:
+    """默认 ``presence="none"`` 保留旧语义：删不存在的键仍是不落盘的 no-op（矩阵 PUT 依赖）。"""
+    before = bound_presets_path.read_bytes()
+    apply_toml_updates(
+        bound_presets_path,
+        [TableKeyUpdate(("agent_runner", "lifecycle_agents"), {"planner": None})],
+    )
+    assert bound_presets_path.read_bytes() == before
+
+
+def test_invalid_toml_is_not_overwritten(config_path: Path) -> None:
+    """现有文件不是合法 TOML 时抛可读错误、原字节一字不动，而非静默重写成"能解析"的新文件。"""
+    corrupted = "[agent_runner.runner\nmax_agent_switches = 2\n"
+    config_path.write_text(corrupted, encoding="utf-8")
+
+    with pytest.raises(ConfigDocumentInvalidError, match="不是合法的 TOML"):
+        update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 7})
+
+    assert config_path.read_text(encoding="utf-8") == corrupted
+
+
+def test_read_modify_write_holds_exclusive_lock(config_path: Path) -> None:
+    """读-改-写全程持有同目录写锁：第二个写入者拿不到锁，因此不会插进来丢键。"""
+    lock_path = config_path.with_name(config_path.name + ".lock")
+    lock_held_during_write: list[bool] = []
+
+    def _probe(document: tomlkit.TOMLDocument) -> None:
+        with open(lock_path, "a", encoding="utf-8") as probe_handle:
+            try:
+                fcntl.flock(probe_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                lock_held_during_write.append(True)
+                return
+            fcntl.flock(probe_handle.fileno(), fcntl.LOCK_UN)
+        lock_held_during_write.append(False)
+        document["agent_runner"]["runner"]["max_agent_switches"] = 7
+
+    mutate_toml_document(config_path, _probe)
+
+    assert lock_held_during_write == [True]
+
+
+def test_strict_reader_refuses_missing_config_without_creating_it(tmp_path: Path) -> None:
+    """``create_if_missing=False`` 的读-改-写沿用"文件必须已存在"：缺失即 OSError，不凭空建文件。"""
+    missing = tmp_path / "registry.toml"
+
+    def _noop(_document: tomlkit.TOMLDocument) -> None:
+        return None
+
+    with pytest.raises(OSError):
+        mutate_toml_document(missing, _noop)
+    assert not missing.exists()

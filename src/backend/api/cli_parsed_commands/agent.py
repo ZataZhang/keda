@@ -27,6 +27,10 @@ from backend.api.cli_output import (
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.core.shared.models.agent_deliberation import DeliberationSession
 from backend.core.shared.models.agent_spec import AGENT_PROFILES
+from backend.core.shared.models.config_edit import (
+    ConfigDocumentInvalidError,
+    ConfigKeyMissingError,
+)
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_KEYS
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
@@ -811,9 +815,30 @@ def _validate_lifecycle_stage(stage: str) -> None:
 
 
 def _write_or_fail(operation, message_prefix: str = "config write failed"):
-    """执行一次写回，把 OSError 归为可跑诊断的 :class:`CliError`（不吞栈）。"""
+    """执行一次写回，把失败归为可跑诊断的 :class:`CliError`（不吞栈）。
+
+    写回是一次读-改-写，因此下面每条失败都保证**配置文件未被改动**：
+
+    - 要删的预设 / 要解绑的阶段在本层根本没声明 → ``USAGE(2)``：这个操作不会生效，
+      报成功等于让用户以为设置已改（该阶段仍按上一层的绑定运行）；
+    - 磁盘上的配置不是合法 TOML → ``GENERAL(1)``，并给出"先修文件"的下一步；
+    - 纯 I/O 失败 → ``GENERAL(1)``。
+
+    Args:
+        operation: 无参写回回调。
+        message_prefix: I/O 失败时的消息前缀。
+
+    Raises:
+        CliError: 上述任一失败，退出码与上文一致。
+    """
     try:
         operation()
+    except ConfigKeyMissingError as exc:
+        raise CliError(str(exc), code=ExitCode.USAGE, suggestion="kc agent lifecycle list") from exc
+    except ConfigDocumentInvalidError as exc:
+        raise CliError(
+            str(exc), code=ExitCode.GENERAL, suggestion="先修复该配置文件再重试写入"
+        ) from exc
     except OSError as exc:
         raise CliError(
             f"{message_prefix}: {exc}", code=ExitCode.GENERAL, suggestion="kc logs"
@@ -841,10 +866,11 @@ def _persist_candidate_entries(
     except LifecycleAgentsUpdateError as exc:
         raise CliError(str(exc), code=ExitCode.USAGE, suggestion="kc agent fallback list") from exc
     editor = target.editor()
+    # 候选链与预算同批落盘：分两次 read-modify-write 时，第二次失败会留下
+    # "链已换、预算还是旧的"的半套配置。
     _write_or_fail(
-        lambda: (
-            editor.update_agent_fallback_candidates(normalized),
-            editor.update_runner_keys({"max_agent_switches": normalized_switches}),
+        lambda: editor.update_fallback_candidates_with_budget(
+            normalized, max_agent_switches=normalized_switches
         )
     )
 

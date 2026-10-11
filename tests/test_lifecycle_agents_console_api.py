@@ -704,6 +704,105 @@ def test_repository_preset_delete_allowed_when_global_same_name_resolves(
     assert verifier_row["field_sources"]["model"] == "preset"
 
 
+def test_repository_preset_delete_absent_in_repo_layer_fails(console_env: dict) -> None:
+    """仓库范围删除"只有全局层声明"的预设：必须失败且不动文件，不能 200 却什么都没删。
+
+    仓库层没有这张表时写回是零字节改动（无改动即不落盘），端点却返回 200、预设照旧
+    生效。全局同名预设写后仍能解析，引用完整性门禁不拦它——必须由写回层的**目标层
+    存在性**检查兜住（PRD：不能生效的操作必须失败并保留原配置）。
+    """
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {
+                "gonly": {"agent": "claude", "model": "m-global", "reasoning_effort": None}
+            },
+            "bindings": {"verifier": "gonly"},
+        },
+    )
+    repo_before = console_env["iar_config_path"].read_bytes()
+    global_before = console_env["config_path"].read_bytes()
+
+    rejected = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "repository", "repo_id": "testrepo", "presets": {"gonly": None}},
+    )
+
+    assert rejected.status_code == 422
+    assert "gonly" in rejected.json()["detail"]
+    assert console_env["iar_config_path"].read_bytes() == repo_before
+    assert console_env["config_path"].read_bytes() == global_before
+    # 什么都没改掉：全局预设与绑定仍然生效。
+    fresh_view = client.get("/api/v1/agent-runner/lifecycle-settings", params={"scope": "global"})
+    assert _lifecycle_entry(fresh_view.json(), "verifier")["model"] == "m-global"
+
+
+def test_unset_binding_absent_in_target_layer_fails(console_env: dict) -> None:
+    """解绑本层没有声明过的阶段：422 且文件字节不变（此前返回 200 却什么都没做）。"""
+    client = console_env["client"]
+    client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={
+            "scope": "global",
+            "presets": {"temp": {"agent": "claude", "model": "m", "reasoning_effort": None}},
+            "bindings": {"review": "temp"},
+        },
+    )
+    before = console_env["config_path"].read_bytes()
+
+    rejected = client.patch(
+        "/api/v1/agent-runner/lifecycle-settings",
+        json={"scope": "global", "bindings": {"planner": None}},
+    )
+
+    assert rejected.status_code == 422
+    assert "planner" in rejected.json()["detail"]
+    assert console_env["config_path"].read_bytes() == before
+
+
+def test_aggregate_patch_lands_in_one_replace_without_partial_write(
+    console_env: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """预设 + 绑定是同一次读-改-写：落盘只替换一次，替换失败则整批不落盘。
+
+    旧实现逐个预设各写一次、再独立写绑定层，第二次 ``OSError`` 时前半已落盘，
+    违反「失败时配置文件不发生部分改动」。
+    """
+    import os
+
+    client = console_env["client"]
+    payload = {
+        "scope": "global",
+        "presets": {"batch": {"agent": "claude", "model": "m", "reasoning_effort": None}},
+        "bindings": {"review": "batch"},
+    }
+    url = "/api/v1/agent-runner/lifecycle-settings"
+    before = console_env["config_path"].read_bytes()
+    attempted: list[Path] = []
+    real_replace = os.replace
+
+    def _fail_replace(temp_path: object, target: object) -> None:
+        attempted.append(Path(target))
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(os, "replace", _fail_replace)
+    failed = client.patch(url, json=payload)
+    assert failed.status_code == 500
+    assert attempted == [console_env["config_path"]], "预设与绑定应同批落盘，只替换一次"
+    assert console_env["config_path"].read_bytes() == before
+
+    # 只还原 os.replace：monkeypatch.undo() 会连 fixture 的 KEDACODE_CONFIG 一起撤掉，
+    # 那次还原后的写入会落到开发者真实的 config.toml 上。
+    monkeypatch.setattr(os, "replace", real_replace)
+    assert client.patch(url, json=payload).status_code == 200
+    on_disk = _parse_toml(console_env["config_path"])
+    assert on_disk["agent_runner"]["presets"]["batch"]["agent"] == "claude"
+    assert on_disk["agent_runner"]["lifecycle_presets"]["review"] == "batch"
+
+
 def test_han_edited_dangling_binding_view_never_500_and_marks_unresolved(
     console_env: dict,
 ) -> None:

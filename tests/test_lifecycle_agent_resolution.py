@@ -20,16 +20,14 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     RunnerConfig,
 )
-from backend.core.use_cases.agent_candidate_fallback import (
-    build_fallback_candidate_specs,
-    effective_fallback_candidates,
-)
+from backend.core.use_cases.agent_candidate_fallback import effective_fallback_candidates
 from backend.core.use_cases.agent_invocation import UnknownAgentError
 from backend.core.use_cases.lifecycle_agent_resolution import (
     parse_prd_lifecycle_overrides,
     resolve_lifecycle_agent,
     upsert_prd_lifecycle_overrides,
 )
+from backend.core.use_cases.run_agent_once import resolve_agent_fallback_candidate_specs
 from backend.engines.agent_runner.factory import (
     build_app_config_from_settings,
     resolve_repository_targets,
@@ -530,57 +528,39 @@ def test_effective_fallback_candidates_falls_back_to_order_when_array_empty() ->
     )
 
 
-def test_build_fallback_specs_budget_counts_candidate_steps() -> None:
-    """预算按候选步数计：同一 agent 的两个预设各消耗一步，超出后截断后续候选。"""
-    config = _config_with_runner(
-        agent_fallback_candidates=(
-            AgentFallbackCandidate(agent="claude", preset="max"),
-            AgentFallbackCandidate(agent="claude", preset="high"),
-            AgentFallbackCandidate(agent="kimi"),
-        ),
-        max_agent_switches=2,
-    )
-    specs = build_fallback_candidate_specs(config, "opencode")
-    # 首选无预设在首位，其后两个候选步，kimi 被预算截断。
-    assert specs == (
-        AgentFallbackCandidate(agent="opencode", preset=None),
-        AgentFallbackCandidate(agent="claude", preset="max"),
-        AgentFallbackCandidate(agent="claude", preset="high"),
-    )
+def test_fallback_candidate_specs_dedup_exact_pair_and_skip_blank_agent() -> None:
+    """生产阶梯：完全相同的 ``(agent, preset)`` 折叠成一个，不同预设的同一 agent 各留一份。
 
-
-def test_build_fallback_specs_dedups_exact_pair_keeps_distinct_presets() -> None:
-    """完全相同的 ``(agent, preset)`` 组合去重，不同预设的同一 agent 各留一份。"""
+    断言对象是 implementation 阶梯真正调用的
+    :func:`resolve_agent_fallback_candidate_specs`（不再是无生产调用者的平行实现）；
+    它**不设长度上限**，``max_agent_switches`` 封顶由阶梯调用方完成。
+    """
     config = _config_with_runner(
         agent_fallback_candidates=(
             AgentFallbackCandidate(agent="claude", preset="max"),
             AgentFallbackCandidate(agent="claude", preset="max"),
+            AgentFallbackCandidate(agent="  "),
             AgentFallbackCandidate(agent="claude", preset="high"),
         ),
         max_agent_switches=3,
     )
-    specs = build_fallback_candidate_specs(config, "kimi")
-    assert specs == (
+    specs = resolve_agent_fallback_candidate_specs(_issue(), config, "kimi")
+    assert specs == [
         AgentFallbackCandidate(agent="kimi", preset=None),
         AgentFallbackCandidate(agent="claude", preset="max"),
         AgentFallbackCandidate(agent="claude", preset="high"),
-    )
+    ]
 
 
-def test_build_fallback_specs_excludes_builder_by_agent_name() -> None:
-    """独立性：回退尾部按 agent 名排除本次 builder，同名不同预设一并排除。"""
+def test_fallback_candidate_specs_primary_carries_no_candidate_preset() -> None:
+    """首选不带候选 preset：主选的模型绑定来自生命周期预设，与回退候选注入是两条路径。"""
     config = _config_with_runner(
-        agent_fallback_candidates=(
-            AgentFallbackCandidate(agent="claude", preset="max"),
-            AgentFallbackCandidate(agent="codex"),
-        ),
+        agent_fallback_candidates=(AgentFallbackCandidate(agent="claude", preset="max"),),
         max_agent_switches=2,
     )
-    specs = build_fallback_candidate_specs(config, "opencode", exclude_agent="claude")
-    assert specs == (
-        AgentFallbackCandidate(agent="opencode", preset=None),
-        AgentFallbackCandidate(agent="codex", preset=None),
-    )
+    specs = resolve_agent_fallback_candidate_specs(_issue(), config, "opencode")
+    assert specs[0] == AgentFallbackCandidate(agent="opencode", preset=None)
+    assert specs[1] == AgentFallbackCandidate(agent="claude", preset="max")
 
 
 def test_verifier_auto_prefers_fallback_candidates_array_over_stale_legacy_order(

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import (
+    AgentFallbackCandidate,
     AppConfig,
     AttemptResult,
     CommandResult,
@@ -1107,6 +1108,40 @@ def test_fallback_respects_max_agent_switches() -> None:
 
     # max_agent_switches=1 means at most 2 agents; kimi is never tried.
     assert calls == ["claude", "codex"]
+
+
+def test_fallback_budget_counts_candidate_steps_not_agent_names() -> None:
+    """候选步数预算：同一 agent 的两个预设各消耗一步，超预算的后续候选不再尝试。
+
+    封顶发生在阶梯调用方，候选序列本身不设长度上限
+    （见 :func:`resolve_agent_fallback_candidate_specs`），换人预算按 ``(agent, preset)``
+    候选计、不按去重后的 agent 名计。
+    """
+    config = AppConfig(
+        runner=RunnerConfig(
+            agent_fallback_candidates=(
+                AgentFallbackCandidate(agent="claude", preset="max"),
+                AgentFallbackCandidate(agent="claude", preset="high"),
+                AgentFallbackCandidate(agent="kimi"),
+            ),
+            max_agent_switches=2,
+        )
+    )
+    tried: list[tuple[str, str | None]] = []
+
+    def process_for_agent(*, agent: str, **kwargs: object) -> None:
+        tried.append((agent, kwargs.get("fallback_preset")))
+        raise MaxRetriesExceededError([_attempt(f"{agent} failed", FailureType.NO_COMMITS)])
+
+    with pytest.raises(MaxRetriesExceededError):
+        run_issue_with_agent_fallback(
+            issue=_fallback_issue("agent/claude"),
+            config=config,
+            agent="claude",
+            process_for_agent=process_for_agent,
+        )
+
+    assert tried == [("claude", None), ("claude", "max"), ("claude", "high")]
 
 
 def test_fallback_merges_attempt_history_with_agent_labels() -> None:

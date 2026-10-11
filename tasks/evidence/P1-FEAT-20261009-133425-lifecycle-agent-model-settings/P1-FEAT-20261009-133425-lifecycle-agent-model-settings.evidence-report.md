@@ -68,7 +68,21 @@ open "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-2
 期望：九行仍全部渲染；横向溢出 **0px**；每行宽度 318px（视口 400px）；「生效 Agent」
 字段未被裁剪（292px 可见）。这三项由 `rv2_capture.cjs` 在浏览器里实测，不是目测。
 
-### 4. CLI 真实入口记录（rv-1 / rv-3）
+### 4. 仓库范围覆盖（只改所选仓库，global 与另一仓不动）
+
+![rv-2 仓库范围：review 绑定到仓库覆盖的预设](rv-2-lifecycle-settings-repository.png)
+
+> 验证层级：真实生产路由，scope 切到仓库并选中 `rv2repo`。local-only 图像。
+
+```bash
+open "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-2-lifecycle-settings-repository.png"
+```
+
+期望：review 行显示 `ui-made-preset` / 生效 Agent `claude` / 绑定来源「仓库 .kedacode.toml」，
+而 global 仍是 `gpt-review` / `codex`。这一张补齐了第七轮评审指出的缺口——早前的浏览器证据
+只在 global 范围点过保存，repository 路径要靠独立 verifier 自行补探。
+
+### 5. CLI 真实入口记录（rv-1 / rv-3）
 
 ```bash
 open "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-1-lifecycle-cli.txt"
@@ -80,12 +94,26 @@ open "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-3
 相同值；末行哨兵 `RV-1 RESULT: PASS` / `RV-3 RESULT: PASS` / `RV-3-DEL RESULT: PASS`，
 且每段都有「判别性检查失败数：0」。
 
+### 6. 页面负控（PRD §7.6 给 rv-2 声明的 oracle，第七轮补齐）
+
+`rv-2-lifecycle-page-run.txt` 现在在同一真实页面里带这四条，reviewer 可直接 grep：
+
+| 检查 | 期望观察 |
+|---|---|
+| 提交无 `reasoning_effort_args` 模板的推理深度 | `PATCH 422`，页面错误位点名 `preset 'ui-bad-effort' … reasoning-effort argument template`；global / 所选仓库 / 另一仓**三份文件字节全等** |
+| 仓库范围删除只有全局层声明的预设 | `PATCH 422`，detail 指认仓库文件里没有 `[agent_runner.presets.ui-made-preset]` 并说明该改哪一配置范围；预设仍声明在 global |
+| 新加 codex 回退候选的预设下拉 | 只列 codex 自己的预设（`option-sonnet-high` 计数 0）——跨 agent 组合在页面里构造不出来 |
+| 有效的 repository-only 绑定 | `PATCH 200`，仓库文件落 `review = "ui-made-preset"`，global 与 `rv2other` 逐字节不变，fresh CLI 两个 scope 各读各的 |
+
 ### 执行者已替你核对过什么
 
 - 九键、逐字段来源、继承与「不支持」标示：由后端聚合视图下发，前端不持有第二份映射
   （`rg LIFECYCLE_AGENT_ENTRY|LIFECYCLE_AGENT_KEYS src tests frontend-public` 无前端命中）。
 - 写入保留式：`tests/test_toml_section_editor.py` 钉住「同值写回 no-op / 数组表保住位置与
-  注释 / 纯删除不建文件」，另有本轮新增的「替换失败不留临时文件」「两次落盘临时名不同」。
+  注释 / 纯删除不建文件」，第七轮又补上「沿用目标权限位（0644 不被写成 0600）」
+  「一批多段改动只 `os.replace` 一次、失败整批不落盘」「删不掉的预设 / 解绑不到的阶段必须
+  失败」「坏 TOML 不被覆盖」「读-改-写全程持锁」「缺失文件不被凭空新建」；
+  `tests/test_repository_registry.py` 钉住第二个写入者已委托同一原语（无固定名临时文件）。
 - 兼容性：`kc agent presets`、`kc agent doctor --lifecycle`、单次 `--preset/--model/
   --reasoning-effort`、旧 Agent-only 端点与 PRD 覆盖优先级均有契约测试（rv-3 段内 57 passed）。
 - 未替你做的：`Human-Confirmed` 五项（PRD §9.2）按约定留空，需你在真实 Console 里点一遍。
@@ -94,20 +122,23 @@ open "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-3
 
 | 检查点 | 采集脚本 | 结果 | 绑定树 |
 |---|---|---|---|
-| rv-1 | `scripts/rv1_capture.sh` | `RV-1 RESULT: PASS` | 本轮评审修复后的工作树 |
-| rv-2 | `scripts/rv2_run.sh`（自拉起生产栈） | `RV-2 RESULT: PASS` + `RV-2 WRAPPER RESULT: PASS` + 真实 Playwright `7 passed` | 同上（含前端拆分后的重建 bundle） |
+| rv-1 | `scripts/rv1_capture.sh` | `RV-1 RESULT: PASS` | 产物首部自带 `tree stamp`（本轮 `working_state_tree be8b0ae2…`） |
+| rv-2 | `scripts/rv2_run.sh`（自拉起生产栈） | `RV-2 RESULT: PASS` + `RV-2 WRAPPER RESULT: PASS` + 真实 Playwright `7 passed`；负控另跑一次 `NEGATIVE-CONTROL RED-CONFIRMED 3/3` | 同上（正控与负控各一次，同一树） |
 | rv-3 | `scripts/rv3_capture.sh` + `scripts/rv3_delete_integrity.sh` | `RV-3 RESULT: PASS` + `RV-3-DEL RESULT: PASS` | 同上 |
-| 定向复验 | `scripts/rv1_final_tree.sh` | `RV-1-FINAL RESULT: PASS` | `head_commit acaa0584`，`working_state_tree 6e6fe60f…` |
-| 全量测试 | `JUST_FULL_TEST_FLAGS=--no-testmon just test all`（`scripts/r5_just_test_all.sh`） | `R5-FULL-SUITE RESULT: PASS（3848 passed, 1 skipped）` → `rv-just-test-all.txt` | 本轮修复后的交付树 |
+| 定向复验 | `scripts/rv1_final_tree.sh` | `RV-1-FINAL RESULT: PASS`（389 passed） | `head_commit b10a7e06`，`working_state_tree be8b0ae2…` |
+| 全量测试 | `JUST_FULL_TEST_FLAGS=--no-testmon just test all`（`scripts/r5_just_test_all.sh`） | `R5-FULL-SUITE RESULT: PASS（3866 passed, 1 skipped）` → `rv-just-test-all.txt` | 同上 |
 
-> **本轮（第六轮评审修复）之后**：代码侧改动为 `toml_section_editor` 的临时文件唯一化
-> （含 2 条新回归测试）、前端统一页按职责拆成 4 个 sibling 模块（行为保持），其余为
-> 文档 / PRD / 配置模板注释。rv-1 / rv-2 / rv-3 / rv-1-final 与全量测试均已在含这些改动的
-> 树上整体重跑并全绿（上表）：`RV-1 / RV-2 / RV-2 WRAPPER / RV-3 / RV-3-DEL / RV-1-FINAL`
-> 均 PASS、真实 Playwright 7 passed、窄屏横向溢出 0px、全量 `3848 passed, 1 skipped`
-> （较第五轮的 3846 多出的 2 条正是本轮新增的 TOML 写回归断言）。
-> 树标识以 `rv-1-final-tree-reverification.txt` 当次打印的 `working_state_tree` 为准；
-> 该打印之后仅追加了 PRD Change Log 与本报告的 markdown 编辑，无代码行为变化。
+> **本轮（第七轮评审修复）之后**：代码侧改动集中在**唯一一份 TOML 落盘原语**与其调用方——
+> 权限沿用目标现状（不再把 `config.toml` 写成 0600）、`<name>.lock` 跨进程写锁覆盖整个
+> 读-改-写、`registry_editor` 改委托同一原语（不再用固定名 `<name>.tmp`）、多段保存收敛成
+> 一次读-改-写、删不掉的预设 / 解绑不到的阶段改为 422 / `USAGE(2)`、坏 TOML 不再被覆盖。
+> 另删除无生产调用者的 `build_fallback_candidate_specs`，文档与随包 skill 改指真实阶梯。
+> rv-1 / rv-2（正控 + 负控）/ rv-3 / rv-3-DEL / rv-1-final 与全量测试均已在含这些改动的树上
+> 整体重跑并全绿（上表）：真实 Playwright 7 passed、窄屏横向溢出 0px、全量
+> `3866 passed, 1 skipped`（较第六轮 3848 多出的 18 条即本轮新增判别断言）。
+> **每个 rv 产物现在首部都自带 `tree stamp · head_commit / head_tree / working_state_tree /
+> working_tree_clean`**，不再只有 `rv-1-final-tree-reverification.txt` 一处；本轮
+> `working_tree_clean=no`，runner 落交付 commit 后其 tree 应等于各产物打印的 `working_state_tree`。
 
 ## 已知限制（不粉饰）
 

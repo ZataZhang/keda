@@ -175,8 +175,13 @@ kc agent fallback candidate move   <position> --to <n>  --scope … [--repo-id <
 - `preset set` 是 **upsert**：省略 `--model` / `--reasoning-effort` 表示该预设不显式设置该字段。
   要设三元组先 `preset set` 再 `lifecycle set` 绑定；`lifecycle unset` 只删当前层该阶段的绑定
   （仓库层清除后回落全局，全局清除后回落既有直接 Agent / legacy / 内置默认）。
+- **删不掉的东西不能报成功**：`lifecycle unset` 要求该阶段在**目标层**确有绑定，删除预设要求
+  该预设由**目标层**声明。在仓库范围解绑一个只由全局层绑定的阶段、或删除一个只有全局层声明的
+  预设，都不会改动任何配置文件——这类请求以用法错误（2）退出并指出该改哪一层，文件字节不变。
 - 未知 stage、未注册 agent、未知预设、预设 agent 与候选执行器不一致、给缺 `reasoning_effort_args`
   模板的 agent 设非空 effort——都在**写文件或调用 agent 前**返回可诊断的非零退出，目标文件字节不变。
+- 目标配置文件本身不是合法 TOML 时，写命令以一般错误（1）退出并提示先修复该文件；原文件一字
+  不动，不会被"重写"成一份能解析但丢掉注释与其余段落的新文件。
 - `--scope global` 与 `--repo-id` / `--repo` **互斥**：全局层写的是机器级 `config.toml`，仓库选择器
   在这里没有任何作用，同时给出按用法错误退出（2），不静默落到机器级配置。预设名写入前去掉首尾
   空白，落盘键与可绑定名字始终是同一个。

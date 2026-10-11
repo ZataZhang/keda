@@ -251,11 +251,14 @@ agent / 该阶段的 `auto` / fix-closeout 的 `executor`），**当前生效值
 CLI 模型命名空间不同，继续套用会报错或误设模型）；被选中的**回退候选若自带 `preset`，则
 应用该候选自己的模型 / 推理档**（见上节候选数组表），未带 preset 的候选沿用执行器默认。
 
-**候选枚举口径：** `src/backend/core/use_cases/agent_candidate_fallback.py` 统一构建候选链：
-`effective_fallback_candidates` 解析"候选数组赢、旧名单兜底"的有序 `(agent, preset)` 序列；
-verifier / review / supervisor 按 **agent 名**遍历（`build_agent_candidates`，同名不同 preset
-折叠为一个名字，独立性排除也按 agent 名）；implementation 执行器阶梯按 **`(agent, preset)`
-spec** 遍历（`build_fallback_candidate_specs`），preset 只在链条真正轮到该候选时应用。
+**候选枚举口径：** `src/backend/core/use_cases/agent_candidate_fallback.py` 是候选链的
+唯一解析来源：`effective_fallback_candidates` 解析"候选数组赢、旧名单兜底"的有序
+`(agent, preset)` 序列；verifier / review / supervisor 按 **agent 名**遍历
+（`build_agent_candidates`，同名不同 preset 折叠为一个名字，独立性排除也按 agent 名）；
+implementation 执行器阶梯按 **`(agent, preset)` spec** 遍历，其序列由
+`run_agent_once.resolve_agent_fallback_candidate_specs` 在上述生效候选链之上拼出（首选不携带
+候选 preset，序列本身不设长度上限，`max_agent_switches` 封顶由
+`agent_runner_orchestrate.run_issue_with_agent_fallback` 完成），preset 只在链条真正轮到该候选时应用。
 各阶段自己的"逐个候选尝试"遍历仍留在各自调用点（失败分类 / 状态清理 / 耗尽语义各不相同，
 强行统一更易出错）。
 

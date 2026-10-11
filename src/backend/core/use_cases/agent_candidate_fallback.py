@@ -15,8 +15,10 @@ verifier、review、supervisor）。它们都从 ``[agent_runner.runner]`` 的
 
 阶段侧的分歧只发生在"如何取值"：verifier / review / supervisor 按 agent 名遍历
 （:func:`build_agent_candidates`，同名不同 preset 折叠为一个名字，独立性排除
-也按 agent 名）；implementation 执行器阶梯按 ``(agent, preset)`` spec 遍历
-（:func:`build_fallback_candidate_specs`），preset 只在链条真正轮到该候选时应用。
+也按 agent 名）；implementation 执行器阶梯按 ``(agent, preset)`` spec 遍历，其
+候选序列由 :func:`backend.core.use_cases.run_agent_once.resolve_agent_fallback_candidate_specs`
+构建（它同样以本函数的生效候选链为唯一来源），preset 只在链条真正轮到该候选时应用，
+``max_agent_switches`` 封顶由阶梯调用方完成。
 
 语义说明见 docs/guides/lifecycle-agent-matrix.md。
 """
@@ -30,7 +32,6 @@ from backend.core.shared.models.agent_runner import (
 
 __all__ = [
     "build_agent_candidates",
-    "build_fallback_candidate_specs",
     "effective_fallback_candidates",
 ]
 
@@ -61,46 +62,6 @@ def effective_fallback_candidates(config: AppConfig) -> tuple[AgentFallbackCandi
         seen_agents.add(normalized_agent)
         folded.append(AgentFallbackCandidate(agent=normalized_agent))
     return tuple(folded)
-
-
-def build_fallback_candidate_specs(
-    config: AppConfig,
-    primary_agent: str,
-    *,
-    exclude_agent: str | None = None,
-) -> tuple[AgentFallbackCandidate, ...]:
-    """构建 ``(agent, preset)`` 粒度的候选序列（首选 + 回退尾部，按预算封顶）。
-
-    首选恒在首位且**不携带候选 preset**（一次性的主选解析来自生命周期绑定，
-    与回退候选的预设注入是两条独立路径）；尾部取
-    :func:`effective_fallback_candidates`，跳过空白 agent、与已选
-    ``(agent, preset)`` 对重复项和 ``exclude_agent``（按 agent 名排除，保持
-    各阶段"回退尾部不含本次 builder"的独立性语义），最多补充
-    ``max_agent_switches`` 个候选步（换人预算按候选计，不按去重后的名字计）。
-
-    Args:
-        config: 应用配置。
-        primary_agent: 链条首选 agent 名。
-        exclude_agent: 需要从回退尾部按 agent 名排除的执行器，``None`` 表示不排除。
-
-    Returns:
-        候选 spec 序列，首选在首位，长度 ≤ ``max_agent_switches + 1``。
-    """
-    specs = [AgentFallbackCandidate(agent=primary_agent)]
-    max_switches = max(0, config.runner.max_agent_switches)
-    for candidate in effective_fallback_candidates(config):
-        if len(specs) - 1 >= max_switches:
-            break
-        normalized_agent = candidate.agent.strip()
-        if not normalized_agent:
-            continue
-        if exclude_agent is not None and normalized_agent == exclude_agent:
-            continue
-        candidate_spec = AgentFallbackCandidate(agent=normalized_agent, preset=candidate.preset)
-        if any(existing == candidate_spec for existing in specs):
-            continue
-        specs.append(candidate_spec)
-    return tuple(specs)
 
 
 def build_agent_candidates(

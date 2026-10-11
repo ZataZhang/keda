@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -23,6 +24,10 @@ from pydantic import BaseModel, Field
 
 from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+from backend.core.shared.models.config_edit import (
+    ConfigDocumentInvalidError,
+    ConfigKeyMissingError,
+)
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config_from_settings,
@@ -105,6 +110,33 @@ def _select_scope_config(scope: str, repo_id: str | None) -> tuple[AppConfig, An
     raise HTTPException(status_code=400, detail=f"未知 scope '{scope}'。")
 
 
+def _write_or_fail_http(operation: Callable[[], None]) -> None:
+    """执行一次配置写回，把领域失败映射成可读 HTTP 结果（不吞栈、不半写）。
+
+    写回本身已经是一次读-改-写（见
+    :func:`backend.infrastructure.config.toml_section_editor.apply_toml_updates`），
+    所以这里的三类失败都保证**文件未被改动**：
+
+    - 请求要删的预设 / 要解绑的阶段在本层根本没声明 → ``422``，并说明该改哪一层；
+    - 磁盘上的配置不是合法 TOML → ``500``，detail 指向"先修文件"；
+    - 纯 I/O 失败（权限、磁盘）→ ``500``。
+
+    Args:
+        operation: 无参写回回调。
+
+    Raises:
+        HTTPException: 上述任一失败。
+    """
+    try:
+        operation()
+    except ConfigKeyMissingError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ConfigDocumentInvalidError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 生命周期 Agent 矩阵
 # ─────────────────────────────────────────────────────────────────────────────
@@ -140,10 +172,7 @@ def update_lifecycle_agents(request: UpdateLifecycleAgentsRequest) -> dict:
         normalized_values = validate_lifecycle_agents_update(request.values, config)
     except LifecycleAgentsUpdateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    try:
-        editor.update_lifecycle_agents(normalized_values)
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
+    _write_or_fail_http(lambda: editor.update_lifecycle_agents(normalized_values))
     # 写后重读，返回与磁盘一致的生效视图。
     refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)
     return build_lifecycle_agents_view(
@@ -268,18 +297,14 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
     except LifecycleAgentsUpdateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    try:
-        for preset_name, normalized_preset in normalized_presets.items():
-            if normalized_preset is None:
-                editor.update_agent_preset(
-                    preset_name, {"agent": None, "model": None, "reasoning_effort": None}
-                )
-            else:
-                editor.update_agent_preset(preset_name, normalized_preset)
-        if normalized_bindings:
-            editor.update_lifecycle_presets(normalized_bindings)
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
+    # 预设定义与阶段绑定是**一次**读-改-写：分成"逐个预设写 + 绑定写"时，中途失败会
+    # 留下前半已落盘的半套配置，违反「失败时配置文件不发生部分改动」。
+    _write_or_fail_http(
+        lambda: editor.update_presets_and_bindings(
+            preset_updates=normalized_presets,
+            binding_updates=normalized_bindings,
+        )
+    )
 
     refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)
     return _aggregate_view(refreshed_config, request.scope, request.repo_id)
@@ -327,15 +352,14 @@ def update_agent_fallback_order(request: UpdateFallbackOrderRequest) -> dict:
     except LifecycleAgentsUpdateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
-    try:
-        editor.update_runner_keys(
+    _write_or_fail_http(
+        lambda: editor.update_runner_keys(
             {
                 "agent_fallback_order": normalized_order,
                 "max_agent_switches": normalized_switches,
             }
         )
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
+    )
     return build_agent_fallback_order_view(_fallback_order_config(request.repo_id))
 
 
@@ -376,11 +400,12 @@ def update_agent_fallback_candidates(request: UpdateFallbackCandidatesRequest) -
     except LifecycleAgentsUpdateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
-    try:
-        editor.update_agent_fallback_candidates(normalized_candidates)
-        editor.update_runner_keys({"max_agent_switches": normalized_switches})
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
+    # 候选链与其预算是同一件事的两半：分两次写会留下"链已换、预算未换"的半套配置。
+    _write_or_fail_http(
+        lambda: editor.update_fallback_candidates_with_budget(
+            normalized_candidates, max_agent_switches=normalized_switches
+        )
+    )
     return build_fallback_candidates_view(_fallback_order_config(request.repo_id))
 
 
@@ -425,11 +450,7 @@ def update_agent_labels(request: UpdateAgentLabelsRequest) -> dict:
     except LifecycleAgentsUpdateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
-    try:
-        for agent_name, label_fields in normalized_labels.items():
-            editor.update_agent_label(agent_name, label_fields)
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
+    _write_or_fail_http(lambda: editor.update_agent_labels(normalized_labels))
     return {"labels": build_agent_labels_view(_fallback_order_config(request.repo_id))}
 
 

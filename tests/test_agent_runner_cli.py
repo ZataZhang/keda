@@ -16,6 +16,7 @@ from backend.api.cli_output import OUTPUT_FORMAT_TABLE, CliError
 from backend.api.cli_parsed_commands.agent import (
     run_agent_fallback_candidate_add_command,
     run_agent_lifecycle_set_command,
+    run_agent_lifecycle_unset_command,
 )
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_parser import build_parser
@@ -4652,3 +4653,63 @@ def test_agent_fallback_candidate_repository_scope_lands_in_repo_file(
     written_candidates = repository_config["agent_runner"]["runner"]["agent_fallback_candidates"]
     assert written_candidates[-1] == {"agent": "qoder"}
     assert config_path.read_bytes() == global_bytes_before
+
+
+def _global_config_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+) -> Path:
+    """把机器级配置指向临时文件（真实发现、真实 TOML，不 stub）。"""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(text, encoding="utf-8")
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
+    return config_path
+
+
+def test_agent_lifecycle_unset_requires_binding_in_target_layer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``lifecycle unset`` 解绑本层没声明的阶段：USAGE(2) 且文件字节不变，不能报成功。
+
+    旧行为是 exit 0 + 零字节写入，调用方以为解绑生效，实际该阶段仍按上一层的绑定运行
+    （PRD：不能生效的操作必须失败并保留原配置）。本层确有绑定的阶段仍能正常解绑。
+    """
+    config_path = _global_config_env(
+        tmp_path,
+        monkeypatch,
+        '[agent_runner]\n[agent_runner.lifecycle_presets]\nreview = "hot"\n'
+        '[agent_runner.presets.hot]\nagent = "claude"\n',
+    )
+    before = config_path.read_bytes()
+
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_unset_command(_lifecycle_ctx(scope="global", stage="planner"))
+    assert exc_info.value.code == ExitCode.USAGE
+    assert config_path.read_bytes() == before
+
+    capsys.readouterr()
+    assert run_agent_lifecycle_unset_command(_lifecycle_ctx(scope="global", stage="review")) == 0
+    assert 'review = "hot"' not in config_path.read_text(encoding="utf-8")
+
+
+def test_agent_lifecycle_unset_on_broken_config_fails_readable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """目标配置不是合法 TOML：CLI 归成可诊断的 :class:`CliError`，原字节一字不动。
+
+    没有这层映射时 ``tomlkit`` 的解析错误会一路冒泡成 traceback；有了它，命令给出
+    "先修文件"的失败并保留原文件（写回在落盘前就停止）。
+    """
+    corrupt_text = "[agent_runner.lifecycle_presets\nreview = \n"
+    config_path = _global_config_env(tmp_path, monkeypatch, corrupt_text)
+
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_unset_command(_lifecycle_ctx(scope="global", stage="review"))
+
+    assert exc_info.value.code == ExitCode.GENERAL
+    assert "不是合法的 TOML" in str(exc_info.value)
+    assert config_path.read_text(encoding="utf-8") == corrupt_text
