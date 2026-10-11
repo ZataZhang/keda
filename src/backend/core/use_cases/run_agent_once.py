@@ -25,9 +25,10 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.shared.models.agent_model_preset import ModelSelection, resolve_model_selection
 from backend.core.shared.models.agent_runner import (
     AgentCommitResult,
+    AgentFallbackCandidate,
     AppConfig,
     AttemptResult,
     CommandResult,
@@ -40,7 +41,7 @@ from backend.core.shared.models.agent_spec import (
     PROMPT_DELIVERY_STDIN,
 )
 from backend.core.shared.models.publish_stage import PublishStage
-from backend.core.use_cases.agent_response_text import extract_agent_response_text
+from backend.core.use_cases.agent_candidate_fallback import effective_fallback_candidates
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
     build_agent_invocation,
@@ -58,6 +59,11 @@ from backend.core.use_cases.agent_invocation_tracing import (
     link_next_invocation,
     start_invocation,
 )
+from backend.core.use_cases.agent_model_selection import (
+    drop_model_selection_for_agent,
+    resolve_implementation_model_selection,
+)
+from backend.core.use_cases.agent_response_text import extract_agent_response_text
 from backend.core.use_cases.agent_runner_attempt import (
     AttemptPhaseTimer,
     _append_attempt_and_notify,
@@ -151,21 +157,21 @@ REPAIR_AGENT_EXECUTOR = "executor"
 """``repair_agent`` 取值：把修复交回本次实现者。"""
 
 __all__ = [
+    "REPAIR_AGENT_EXECUTOR",
+    "REPAIR_AGENT_SELF",
     "AgentRunnerAttemptError",
     "AgentUnavailableError",
+    "AttemptPhaseTimer",
+    "EmptyCommitRequestError",
     "MaxRetriesExceededError",
     "PrdDeliveryError",
     "ProviderCapacityError",
     "PublishFailureError",
-    "EmptyCommitRequestError",
-    "REPAIR_AGENT_EXECUTOR",
-    "REPAIR_AGENT_SELF",
     "UnknownAgentError",
     "UnrecoverableError",
     "VerificationFailedError",
-    "AttemptPhaseTimer",
-    "_ensure_worktree_branch",
     "_append_attempt_and_notify",
+    "_ensure_worktree_branch",
     "_make_attempt_result",
     "_reconcile_worktree_with_remote_branch",
     "_resolve_repo_id",
@@ -206,7 +212,8 @@ __all__ = [
     "list_stageable_paths",
     "publish_changes",
     "repair_agent_is_self",
-    "resolve_agent_fallback_order",
+    "resolve_agent_fallback_candidate_specs",
+    "resolve_implementation_model_selection",
     "resolve_prd_archive_path",
     "resolve_repair_agent",
     "resolve_reviewer_agent",
@@ -253,34 +260,38 @@ def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) ->
     return config.runner.default_agent if config.runner.default_agent != "auto" else "claude"
 
 
-def resolve_agent_fallback_order(
+def resolve_agent_fallback_candidate_specs(
     issue: IssueSummary,
     config: AppConfig,
     override_agent: str,
-) -> list[str]:
-    """Return the ordered list of agents to try for an Issue.
+) -> list[AgentFallbackCandidate]:
+    """返回某 Issue 的有序 ``(agent, preset)`` 回退候选序列。
 
-    The first entry is the primary agent resolved by :func:`choose_agent`.
-    Subsequent entries come from ``config.runner.agent_fallback_order`` with the
-    primary agent and duplicates removed, preserving configured order. When no
-    fallback order is configured the list contains only the primary agent, so
-    the escalation ladder behaves exactly like single-agent runs.
+    首位是 :func:`choose_agent` 解析出的主选 agent，且**不携带**候选 preset
+    （主选的模型绑定来自生命周期预设，与回退候选的预设注入互不混淆）。尾部取
+    :func:`effective_fallback_candidates`（候选数组赢，旧名单映射为无 preset
+    候选），按 ``(agent, preset)`` 对去重——同一 agent 以不同 preset 重复出现是
+    合法配置。这里不设预算上限，``max_agent_switches`` 封顶由阶梯调用方完成。
 
     Args:
-        issue: Issue being processed.
-        config: Agent Runner configuration.
-        override_agent: The ``--agent`` override (``"auto"`` routes by label).
+        issue: 正在处理的 Issue。
+        config: Agent Runner 配置。
+        override_agent: ``--agent`` 覆盖（``"auto"`` 走标签路由）。
 
     Returns:
-        Ordered, de-duplicated agent names to attempt.
+        去重后的候选 spec 列表，主选在首位。
     """
     primary_agent = choose_agent(issue, config, override_agent)
-    fallback_order = [primary_agent]
-    for candidate_agent in config.runner.agent_fallback_order:
-        normalized_agent = candidate_agent.strip()
-        if normalized_agent and normalized_agent not in fallback_order:
-            fallback_order.append(normalized_agent)
-    return fallback_order
+    fallback_specs = [AgentFallbackCandidate(agent=primary_agent)]
+    for candidate in effective_fallback_candidates(config):
+        candidate_spec = AgentFallbackCandidate(
+            agent=candidate.agent.strip(),
+            preset=candidate.preset,
+        )
+        if not candidate_spec.agent or candidate_spec in fallback_specs:
+            continue
+        fallback_specs.append(candidate_spec)
+    return fallback_specs
 
 
 def resolve_repair_agent(
@@ -405,7 +416,6 @@ def _resolve_bound_lifecycle_agent(
     )
     if bound_preset_name is None:
         return None
-    from backend.core.shared.models.agent_model_preset import resolve_model_selection
     from backend.core.use_cases.lifecycle_agent_resolution import _validate_registered
 
     bound_selection = resolve_model_selection(bound_preset_name, config)
@@ -724,10 +734,11 @@ def run_agent_with_prompt(
         per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。这些调用都走默认
         ``profile="run"``，profile 一档拦不住，因此以调用阶段为准：只有
         ``implementation``（主循环与其 recovery 轮次）与未标注阶段的调用才落盘；
-        verifier 等独立对话即使同 profile 也不覆盖——它还顺手把 git 跟踪的
-        ``.iar/agent-runner/sessions/<agent>.json`` 改脏，让「独立 verifier 不得
-        改动代码树」的门禁误报。落盘是旁路，失败只记日志——续传是增益路径，
-        不能反过来把正常执行拖下水。
+        fix、closeout、verifier 等独立对话即使同 profile 也不覆盖。这样既避免
+        恢复时续错会话，也避免改脏 git 跟踪的
+        ``.iar/agent-runner/sessions/<agent>.json``，导致独立 verifier 的洁净树
+        门禁误报。落盘是旁路，失败只记日志——续传是增益路径，不能反过来把正常
+        执行拖下水。
         """
         if not session_id or profile != AGENT_PROFILE_RUN:
             return
@@ -869,33 +880,6 @@ def _resumed_run_never_started(result: CommandResult) -> bool:
     起跑后再失败（超时、跑到一半崩）不能重跑，否则会白扔掉已经取得的进度。
     """
     return result.return_code != 0 and result.session_id is None
-
-
-def drop_model_selection_for_agent(
-    agent_name: str,
-    model_selection: ModelSelection | None,
-) -> ModelSelection | None:
-    """执行 agent 与预设声明 agent 不一致时丢弃模型绑定并记日志。
-
-    不同 CLI 的模型命名空间不同（codebuddy 的 ``--settings`` 对 claude 无意义），
-    绝不把 A CLI 的模型参数塞给 B CLI。回退换人与显式 ``--agent`` 换人都走
-    这里——两种情形都表现为"执行 agent != 预设 agent"。
-
-    Returns:
-        匹配时原样返回 ``model_selection``；不匹配（或入参为空）时返回 ``None``。
-    """
-    if model_selection is None:
-        return None
-    if model_selection.agent == agent_name:
-        return model_selection
-    _logger.warning(
-        "model binding dropped on agent switch: preset declares agent '%s' but this "
-        "attempt runs '%s'; the model/effort flags are NOT applied (each CLI has its "
-        "own model namespace).",
-        model_selection.agent,
-        agent_name,
-    )
-    return None
 
 
 def run_agent_with_prompt_resilient(

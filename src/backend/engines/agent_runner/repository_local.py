@@ -42,6 +42,7 @@ from backend.infrastructure.config.settings import (
     AgentRunnerWorktreeSettings,
     load_agent_runner_local_settings,
 )
+from backend.infrastructure.config.toml_section_editor import config_write_lock
 from backend.core.shared.interfaces.runner_console import (
     DiscoveredRepositoryEntry,
     IRepositoryRegistryEditor,
@@ -892,15 +893,19 @@ def initialize_repository_local_config(
             verification_commands=verification_commands,
         )
 
-    if config_path.exists() and not options.force and not options.dry_run:
-        existing_text = config_path.read_text(encoding="utf-8")
-        if existing_text != config_text:
-            raise RepositoryLocalConfigExistsError(config_path)
-        return _make_result(wrote_file=False)
     if options.dry_run:
         return _make_result(wrote_file=False)
 
-    config_path.write_text(config_text, encoding="utf-8")
+    # 读-判-写整段持同一把按路径派生的写锁：flock 是建议锁，锁外的 exists() 检查与
+    # 裸 write_text 能插进 Console / registry 的持锁读-改-写中间，把仓库本地配置顶成
+    # 模板初值并丢掉对方刚写的生命周期段。
+    with config_write_lock(config_path):
+        if config_path.exists() and not options.force:
+            existing_text = config_path.read_text(encoding="utf-8")
+            if existing_text != config_text:
+                raise RepositoryLocalConfigExistsError(config_path)
+            return _make_result(wrote_file=False)
+        config_path.write_text(config_text, encoding="utf-8")
     return _make_result(wrote_file=True)
 
 

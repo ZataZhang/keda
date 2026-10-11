@@ -1066,3 +1066,128 @@ def test_lifecycle_endpoint_exposes_status_per_event(api_environment) -> None:
     assert by_type["claimed"]["status"] == "claimed"
     # 三条 phase 相同（queued 之外都 executing），区分度只来自 status。
     assert by_type["started"]["phase"] == by_type["claimed"]["phase"] == "executing"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 执行会话标识注入（FR-2）：runner 执行期内的事件可确定性归组
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _trace_context(run_id: str = "keda-main#issue-7#session-a"):
+    """构造一次 Issue 处理会话的调用观测上下文。"""
+    from backend.core.use_cases.agent_invocation_tracing import InvocationTraceContext
+
+    return InvocationTraceContext(
+        repo_id=_REPO_ID,
+        run_id=run_id,
+        issue_number=7,
+        store=None,
+    )
+
+
+def test_invocation_run_injected_into_event_detail_within_session(
+    tmp_path: Path,
+) -> None:
+    """绑定会话上下文时，生命周期事件 detail 自动带上所属执行会话标识。"""
+    from backend.core.use_cases.agent_invocation_tracing import bound_invocation_trace_context
+
+    store = _store(tmp_path)
+    with bound_invocation_trace_context(_trace_context()):
+        _record(
+            store,
+            LifecycleEventType.ATTEMPT,
+            "2026-10-10T01:18:00+00:00",
+            detail={"attempt_number": 1, "agent": "codex"},
+        )
+
+    stored_events = store.list_lifecycle_events(run_id="keda-main#7")
+    detail_payload = json.loads(stored_events[0].detail_json)
+    assert detail_payload["invocation_run"] == "keda-main#issue-7#session-a"
+    # 注入只是追加一个键，调用方原有 detail 字段一个不少。
+    assert detail_payload["attempt_number"] == 1
+    assert detail_payload["agent"] == "codex"
+
+
+def test_invocation_run_absent_without_session_context(tmp_path: Path) -> None:
+    """会话上下文之外（roadmap 侧 promote/merged 等）不写该键，行为与现状一致。"""
+    store = _store(tmp_path)
+    _record(store, LifecycleEventType.MERGED, "2026-10-10T09:00:00+00:00")
+
+    stored_events = store.list_lifecycle_events(run_id="keda-main#7")
+    assert "invocation_run" not in json.loads(stored_events[0].detail_json)
+
+
+def test_invocation_run_never_overrides_caller_value(tmp_path: Path) -> None:
+    """调用方已显式提供同名键时以调用方为准，注入不得覆盖。"""
+    from backend.core.use_cases.agent_invocation_tracing import bound_invocation_trace_context
+
+    store = _store(tmp_path)
+    with bound_invocation_trace_context(_trace_context("keda-main#issue-7#session-a")):
+        _record(
+            store,
+            LifecycleEventType.STARTED,
+            "2026-10-10T01:00:00+00:00",
+            detail={"invocation_run": "keda-main#issue-7#caller-declared"},
+        )
+
+    stored_events = store.list_lifecycle_events(run_id="keda-main#7")
+    assert (
+        json.loads(stored_events[0].detail_json)["invocation_run"]
+        == "keda-main#issue-7#caller-declared"
+    )
+
+
+def test_invocation_run_injection_does_not_change_duration_or_status(
+    tmp_path: Path,
+) -> None:
+    """口径不变量：注入只增 detail 键，phase/status/耗时拆分逐位不变。"""
+    from backend.core.use_cases.agent_invocation_tracing import bound_invocation_trace_context
+
+    plain_store = _store(tmp_path / "plain")
+    injected_store = _store(tmp_path / "injected")
+    for target_store, bind_session in ((plain_store, False), (injected_store, True)):
+        for event_type, occurred_at in (
+            (LifecycleEventType.QUEUED, "2026-10-10T01:00:00+00:00"),
+            (LifecycleEventType.STARTED, "2026-10-10T01:01:00+00:00"),
+            (LifecycleEventType.ATTEMPT, "2026-10-10T01:02:00+00:00"),
+            (LifecycleEventType.VALIDATION_PASSED, "2026-10-10T01:03:00+00:00"),
+        ):
+            if bind_session:
+                with bound_invocation_trace_context(_trace_context()):
+                    _record(target_store, event_type, occurred_at)
+            else:
+                _record(target_store, event_type, occurred_at)
+
+        latest_run = target_store.get_latest_lifecycle_run(repo_id=_REPO_ID, prd_path=_PRD_PATH)
+        assert latest_run is not None
+        assert latest_run.run_id == "keda-main#7"
+
+    plain_detail = build_prd_lifecycle_detail(
+        store=plain_store, repo_id=_REPO_ID, prd_path=_PRD_PATH
+    )
+    injected_detail = build_prd_lifecycle_detail(
+        store=injected_store, repo_id=_REPO_ID, prd_path=_PRD_PATH
+    )
+    assert [event.phase for event in injected_detail.events] == [
+        event.phase for event in plain_detail.events
+    ]
+    assert [event.status for event in injected_detail.events] == [
+        event.status for event in plain_detail.events
+    ]
+    assert injected_detail.durations == plain_detail.durations
+    assert injected_detail.current_phase == plain_detail.current_phase
+
+
+def test_lifecycle_detail_omits_invocations_on_legacy_list_path(tmp_path: Path) -> None:
+    """列表路径不逐行读调用账本：list_issue_lifecycle_details 不挂调用明细。"""
+    store = _store(tmp_path)
+    _record(store, LifecycleEventType.ATTEMPT, "2026-10-10T01:18:00+00:00")
+
+    from backend.core.use_cases.agent_runner_lifecycle import (
+        LifecycleQuery,
+        list_issue_lifecycle_details,
+    )
+
+    listed_details = list_issue_lifecycle_details(store=store, query=LifecycleQuery())
+    assert len(listed_details) == 1
+    assert listed_details[0].invocations is None

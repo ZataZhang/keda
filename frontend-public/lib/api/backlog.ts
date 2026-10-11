@@ -11,6 +11,7 @@ import type {
   BacklogPrdEvidenceManifest,
   BacklogCiDelivery,
   BacklogCiRepairGlobalState,
+  BacklogPrdProgress,
   CiRepairPolicy,
   StartPrdLaunchOptions,
 } from "./types";
@@ -62,7 +63,8 @@ export async function updateBacklogSettings(params: {
  * 把 PRD 相对路径编码为 URL-safe base64（后端按同样的方式解码）。
  *
  * @param prdPath - 相对仓库根目录的 PRD 路径。
- * @returns 不带 padding 的 URL-safe base64 字符串。
+ * @returns 带 padding 的 URL-safe base64 字符串；后端 `urlsafe_b64decode` 要求
+ *   padding，去掉 `=` 会让长度不是 3 倍数的路径直接 400。
  */
 export function encodePrdPath(prdPath: string): string {
   const bytes = new TextEncoder().encode(prdPath);
@@ -186,6 +188,30 @@ export async function fetchPrdEvidence(
   return get(
     `${BASE_PATH}/prds/${encodedPath}/evidence?repo_id=${encodeURIComponent(repoId)}`,
   );
+}
+
+/**
+ * 读取某个 PRD 的交付进度聚合读数（清单 / 证据计划与产出 / 影响树 / 工作区）。
+ *
+ * 与证据端点同一原则：后端每次 fresh 读盘，前端不缓存；详情面板选中 PRD 时拉取
+ * 一次即可，头部三读数与证据标签复用同一份数据。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.prdPath - 列表响应给出的 PRD 仓库相对路径。
+ * @param params.signal - 可选的取消信号，用于组件卸载或切换 PRD 时中止请求。
+ * @returns 该 PRD 的聚合进度读数快照。
+ */
+export async function fetchPrdProgress(params: {
+  repoId: string;
+  prdPath: string;
+  signal?: AbortSignal;
+}): Promise<BacklogPrdProgress> {
+  const encodedPath = encodePrdPath(params.prdPath);
+  const searchParams = new URLSearchParams();
+  searchParams.set("repo_id", params.repoId);
+  return get(`${BASE_PATH}/prds/${encodedPath}/progress?${searchParams.toString()}`, {
+    signal: params.signal,
+  });
 }
 
 /**

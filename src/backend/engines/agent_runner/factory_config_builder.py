@@ -16,6 +16,7 @@ from backend.core.shared.models.agent_deliberation import (
 from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    AgentFallbackCandidate,
     AutopilotConfig,
     BacklogConfig,
     BrowserE2EVerificationCommand,
@@ -569,6 +570,10 @@ def build_app_config_from_settings(
             max_recovery_attempts=runner_settings.max_recovery_attempts,
             recovery_retry_delay_seconds=runner_settings.recovery_retry_delay_seconds,
             agent_fallback_order=tuple(runner_settings.agent_fallback_order),
+            agent_fallback_candidates=tuple(
+                AgentFallbackCandidate(agent=candidate.agent, preset=candidate.preset)
+                for candidate in runner_settings.agent_fallback_candidates
+            ),
             max_agent_switches=runner_settings.max_agent_switches,
             transient_retry_attempts=runner_settings.transient_retry_attempts,
             transient_retry_delay_seconds=runner_settings.transient_retry_delay_seconds,

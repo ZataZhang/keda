@@ -12,10 +12,16 @@ import pytest
 import backend.api.cli_registry as cli_registry
 from backend.api.cli import _expand_prd_paths, main
 from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_output import OUTPUT_FORMAT_TABLE, CliError
+from backend.api.cli_parsed_commands.agent import (
+    run_agent_fallback_candidate_add_command,
+    run_agent_lifecycle_set_command,
+    run_agent_lifecycle_unset_command,
+)
+from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_schema import build_command_schema
 from backend.api.cli_parser import build_parser
 from backend.api.cli_parsed_commands.runner import _validate_aggregate_run_options
-from backend.api.cli_output import CliError
 from backend.api.cli_typer_app import app as typer_app
 from backend.core.use_cases.agent_runner_batch_aggregate import (
     validate_aggregate_candidate_count,
@@ -4566,3 +4572,255 @@ def test_main_repl_requires_initialized_repo(monkeypatch, tmp_path: Path, capsys
     assert exit_code == int(ExitCode.NOT_FOUND)
     combined = (captured.out + captured.err).lower()
     assert "init" in combined
+
+
+# ---------------------------------------------------------------------------
+# kc agent lifecycle / preset / fallback：写入前置校验（负控，不触达磁盘）
+# ---------------------------------------------------------------------------
+
+
+def _stub_lifecycle_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把配置发现桩成内存 AppConfig，隔离开发者本机 config.toml。
+
+    这些负控用例断言"写文件之前就失败"，因此只需 scope 解析与字段校验这两步真实，
+    落盘与 fresh 读回由 tests/test_lifecycle_agents_console_api.py 覆盖。
+    """
+    from backend.core.shared.models.agent_runner import AppConfig
+
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.agent.load_fresh_agent_runner_settings",
+        lambda: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.agent.build_app_config_from_settings",
+        lambda _settings: AppConfig(),
+    )
+
+
+def _lifecycle_ctx(
+    *,
+    repo_id: str | None = None,
+    repo_override: str | None = None,
+    **parsed_kwargs: object,
+) -> ParsedCommandContext:
+    """按写命令最小旗标构造 handler 上下文（其余注入项不触达）。"""
+    import argparse
+
+    defaults: dict[str, object] = {"scope": None, "stage": "review", "preset": "hot"}
+    defaults.update(parsed_kwargs)
+    return ParsedCommandContext(
+        parsed=argparse.Namespace(**defaults),
+        process_runner=None,
+        runner_settings=None,
+        repo_id=repo_id,
+        repo_override=repo_override,
+        github_client_factory=None,
+        output_format=OUTPUT_FORMAT_TABLE,
+    )
+
+
+def test_agent_lifecycle_set_requires_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """写命令缺 --scope 时 USAGE 退出，绝不默认写全局。"""
+    _stub_lifecycle_config(monkeypatch)
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_set_command(_lifecycle_ctx(scope=None))
+    assert exc_info.value.code == ExitCode.USAGE
+    assert "--scope" in str(exc_info.value)
+
+
+def test_agent_lifecycle_set_repository_requires_repo_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """scope=repository 未给仓库选择器时 USAGE 退出。"""
+    _stub_lifecycle_config(monkeypatch)
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_set_command(_lifecycle_ctx(scope="repository"))
+    assert exc_info.value.code == ExitCode.USAGE
+    assert "repo" in str(exc_info.value).lower()
+
+
+def test_agent_lifecycle_set_rejects_unknown_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未知阶段键在使用文件前 USAGE 退出并列出合法闭集。"""
+    _stub_lifecycle_config(monkeypatch)
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_set_command(_lifecycle_ctx(scope="global", stage="bogus"))
+    assert exc_info.value.code == ExitCode.USAGE
+    assert "unknown lifecycle stage" in str(exc_info.value)
+
+
+def test_agent_fallback_candidate_add_requires_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """候选写命令缺 --scope 时 USAGE 退出。"""
+    import argparse
+
+    _stub_lifecycle_config(monkeypatch)
+    ctx = ParsedCommandContext(
+        parsed=argparse.Namespace(scope=None, agent="claude", preset=None, position=None),
+        process_runner=None,
+        runner_settings=None,
+        repo_id=None,
+        repo_override=None,
+        github_client_factory=None,
+        output_format=OUTPUT_FORMAT_TABLE,
+    )
+    with pytest.raises(CliError) as exc_info:
+        run_agent_fallback_candidate_add_command(ctx)
+    assert exc_info.value.code == ExitCode.USAGE
+
+
+def test_agent_lifecycle_set_rejects_repo_selector_with_global_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--scope global 与仓库选择器互斥：误用在使用文件前 USAGE 退出，不静默写机器级配置。"""
+    _stub_lifecycle_config(monkeypatch)
+    for selector_kwargs in ({"repo_id": "keda-main"}, {"repo_override": "/tmp/somewhere"}):
+        with pytest.raises(CliError) as exc_info:
+            run_agent_lifecycle_set_command(_lifecycle_ctx(scope="global", **selector_kwargs))
+        assert exc_info.value.code == ExitCode.USAGE
+        assert "--scope global" in str(exc_info.value)
+
+
+def test_agent_fallback_candidate_repository_scope_lands_in_repo_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """候选写命令 ``--scope repository`` 的落点是该仓库配置文件，机器级文件逐字节不变。
+
+    回退候选数组表可按仓库声明，写后该仓库以自身数组整体接管机器级候选链；这条
+    落点契约只由本测试钉住（HTTP API 恒写 ``config.toml``，页面回退区同样只写机器级），
+    因此 ``docs/guides/model-presets.md`` §7.2 与随包 kedacode-operator skill 必须按同一
+    口径描述，不得把它写成"CLI 也恒写全局"。
+    """
+    import tomllib
+
+    repo_path = _init_bare_git_repository(tmp_path, "fbrepo")
+    (repo_path / ".iar.toml").write_text("[agent_runner]\n", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "[agent_runner]\n\n"
+        "[agent_runner.repositories.fbrepo]\n"
+        f'path = "{repo_path.resolve()}"\n'
+        "enabled = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    global_bytes_before = config_path.read_bytes()
+
+    exit_code = run_agent_fallback_candidate_add_command(
+        _lifecycle_ctx(
+            scope="repository", repo_id="fbrepo", agent="qoder", preset=None, position=None
+        )
+    )
+    capsys.readouterr()
+
+    assert exit_code == 0
+    repository_config = tomllib.loads((repo_path / ".iar.toml").read_text(encoding="utf-8"))
+    written_candidates = repository_config["agent_runner"]["runner"]["agent_fallback_candidates"]
+    assert written_candidates[-1] == {"agent": "qoder"}
+    assert config_path.read_bytes() == global_bytes_before
+
+
+def _global_config_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+) -> Path:
+    """把机器级配置指向临时文件（真实发现、真实 TOML，不 stub）。"""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(text, encoding="utf-8")
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
+    return config_path
+
+
+def test_agent_lifecycle_unset_requires_binding_in_target_layer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``lifecycle unset`` 解绑本层没声明的阶段：USAGE(2) 且文件字节不变，不能报成功。
+
+    旧行为是 exit 0 + 零字节写入，调用方以为解绑生效，实际该阶段仍按上一层的绑定运行
+    （PRD：不能生效的操作必须失败并保留原配置）。本层确有绑定的阶段仍能正常解绑。
+    """
+    config_path = _global_config_env(
+        tmp_path,
+        monkeypatch,
+        '[agent_runner]\n[agent_runner.lifecycle_presets]\nreview = "hot"\n'
+        '[agent_runner.presets.hot]\nagent = "claude"\n',
+    )
+    before = config_path.read_bytes()
+
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_unset_command(_lifecycle_ctx(scope="global", stage="planner"))
+    assert exc_info.value.code == ExitCode.USAGE
+    assert config_path.read_bytes() == before
+
+    capsys.readouterr()
+    assert run_agent_lifecycle_unset_command(_lifecycle_ctx(scope="global", stage="review")) == 0
+    assert 'review = "hot"' not in config_path.read_text(encoding="utf-8")
+
+
+def test_agent_lifecycle_unset_on_broken_config_fails_readable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """目标配置不是合法 TOML：CLI 归成可诊断的 :class:`CliError`，原字节一字不动。
+
+    没有这层映射时 ``tomlkit`` 的解析错误会一路冒泡成 traceback；有了它，命令给出
+    "先修文件"的失败并保留原文件（写回在落盘前就停止）。
+    """
+    corrupt_text = "[agent_runner.lifecycle_presets\nreview = \n"
+    config_path = _global_config_env(tmp_path, monkeypatch, corrupt_text)
+
+    with pytest.raises(CliError) as exc_info:
+        run_agent_lifecycle_unset_command(_lifecycle_ctx(scope="global", stage="review"))
+
+    assert exc_info.value.code == ExitCode.GENERAL
+    assert "不是合法的 TOML" in str(exc_info.value)
+    assert config_path.read_text(encoding="utf-8") == corrupt_text
+
+
+def test_agent_fallback_candidate_add_reads_baseline_under_write_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """候选链整段替换：读基线 → 校验 → 落盘必须同持一把写锁，否则丢并发更新。
+
+    锁只保护 ``os.replace`` 那一下，保护不了一份过期的数组快照：基线在锁外读时，另一个
+    写入者在那个窗口里 append 的候选会被本次替换原样抹掉，而命令仍返回成功。探针在基线
+    读取时抢一次 ``LOCK_EX | LOCK_NB``——抢不到才说明整段操作被同一把锁覆盖。
+    """
+    import fcntl
+
+    from backend.api.cli_parsed_commands import agent as agent_commands
+
+    config_path = _global_config_env(tmp_path, monkeypatch, "[agent_runner]\n")
+    lock_path = config_path.with_name(config_path.name + ".lock")
+    lock_held_at_baseline: list[bool] = []
+    original_reader = agent_commands._current_candidate_entries
+
+    def _probe(config):
+        with open(lock_path, "a", encoding="utf-8") as probe_handle:
+            try:
+                fcntl.flock(probe_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                lock_held_at_baseline.append(True)
+            else:
+                fcntl.flock(probe_handle.fileno(), fcntl.LOCK_UN)
+                lock_held_at_baseline.append(False)
+        return original_reader(config)
+
+    monkeypatch.setattr("backend.api.cli_parsed_commands.agent._current_candidate_entries", _probe)
+
+    assert (
+        run_agent_fallback_candidate_add_command(
+            _lifecycle_ctx(scope="global", agent="qoder", preset=None, position=None)
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert lock_held_at_baseline == [True]

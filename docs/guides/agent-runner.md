@@ -97,7 +97,7 @@ kc daemon status --json
 
 `suggestion` 一定是一条可直接跑的下一步命令；调用方只该读 `$?` 与这个 envelope，不要 parse 英文句子。
 
-当前暴露机器格式的命令：`run`、`logs`、`tokens`、`schema`、`issue create`、`issue list`、`worktree path`、`registry list`、`daemon status`、`loop list`、`agent list`、`agent presets`、`agent doctor`（以 `kc schema --json` 的实际导出为准，新增命令无需改本文）。
+当前暴露机器格式的命令：`run`、`logs`、`tokens`、`schema`、`issue create`、`issue list`、`worktree path`、`registry list`、`daemon status`、`loop list`、`agent list`、`agent presets`、`agent doctor`、`agent lifecycle list`、`agent fallback list`（以 `kc schema --json` 的实际导出为准，新增命令无需改本文）。生命周期持久化写命令（`agent lifecycle set/unset`、`agent preset set`、`agent fallback candidate …`）成功后以 `--json` 回显新视图。
 
 **例外**：`kc ask` 与 `kc deliberate` 的 `--output` 是**输出目录**（文本型参数），不是格式；那里 `--output json` 表示名为 `json` 的目录，两者也都不接受 `--json`。
 
@@ -126,6 +126,8 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 ```
 
 每个参数导出名称、类型、是否必填、枚举取值（`--output` 的 `["table","json"]` 即由此而来）、默认值与示例；顶层同时给出 `exit_codes` 与命令总数。给 agent 写调用代码前先跑它，而不是抄文档。
+
+> **一处例外要记住**：`agent lifecycle set/unset`、`agent preset set`、`agent fallback candidate …` 这些**持久化写命令**的 `--scope` 在导出里显示 `required=False`，因为必填性由命令实现层在使用文件前校验（缺失即以 `USAGE(2)` 退出并给出建议命令），Typer 声明层因此保持 optional——`required` 字段只反映声明层，不反映这条运行期规则。按导出拼调用代码时**必须**照旧带上 `--scope`（repository 还要 `--repo-id`），否则拿到的是退出码 2。
 
 ## labels sync 详解
 
@@ -455,7 +457,9 @@ uv run --project /path/to/keda kc init
 
 面板（`kc console`）托管或触发的 runner 子进程，cwd 就是目标仓库（见 `resolve_console_spawn_cwd`）；因此面板会把自己当前生效的机器级 `config.toml` 以 `KEDACODE_CONFIG` 注入子进程，保证"界面上显示的配置"与"实际执行用的配置"是同一份。手动在目标仓库里直接执行 `kc run` / `kc daemon` 且未设 `KEDACODE_CONFIG` 时，机器级配置取 `~/.kedacode/config.toml`——想让某个仓库的每个阶段都用指定 agent，写该仓库 `.kedacode.toml` 的 `[agent_runner.lifecycle_agents]` 是最稳的一层（仓库层覆盖机器层）。
 
-在"选 agent"之上，还可以给阶段绑定**命名模型预设**（`[agent_runner.presets.<name>]` + `[agent_runner.lifecycle_presets]`）：绑定后该阶段整体由预设决定 (agent, 模型, 推理档)，遮蔽矩阵同键声明；换人（fallback / 显式 `--agent`）时模型绑定自动丢弃并在日志与 `attempt_records`（`preset` / `model` 列）中标注。完整语义、优先级与命令行一次性旗标见 [Agent 模型预设](model-presets.md)。
+在"选 agent"之上，还可以给阶段绑定**命名模型预设**（`[agent_runner.presets.<name>]` + `[agent_runner.lifecycle_presets]`）：绑定后该阶段整体由预设决定 (agent, 模型, 推理档)，遮蔽矩阵同键声明；换人（fallback / 显式 `--agent`）时**主 agent 的模型绑定自动丢弃**并在日志与 `attempt_records`（`preset` / `model` 列）中标注；被选中的回退候选若自带 `preset`（`[[agent_runner.runner.agent_fallback_candidates]]`）则应用该候选自己的模型 / 推理档。完整语义、优先级与命令行一次性旗标见 [Agent 模型预设](model-presets.md)。
+
+生命周期矩阵、模型预设与执行器回退候选合并到管理终端的**统一设置页** `/app/settings/lifecycle/`：顶部范围选择器切换「全局」（写 `config.toml`）与「仓库」（写该仓库 `.kedacode.toml`），九阶段一行显示最终生效 Agent / 模型 / 推理深度与**逐字段来源**；Backlog 仓库行齿轮进入同一页并预选该仓库，不再另设编辑器。执行器回退候选是**机器级**配置，固定写全局 `config.toml`，不随范围切换改变落点。页面展示的是所选**基线**：PRD 头部覆盖与单次 `--preset/--model/--reasoning-effort` 仍可在其上覆写，页面会提示而不把基线冒充成某个 PRD 的最终值。对应的命令行持久化入口（`kc agent lifecycle|preset|fallback`，写入必须显式 `--scope`，仓库写入必须给 `--repo-id`）见 [Agent 模型预设](model-presets.md) 第 7 节。
 
 ### `.gitignore` 托管块与 prd skill 契约
 
@@ -471,7 +475,7 @@ tasks/evidence/**
 
 同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重装 skill 用 `kc skill install`、重建仓库配置才用 `kc init --force`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `--force` 形式。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
 
-KedaCode 自带的 `kedacode-operator` Skill 随 Python 发行包安装，无需联网下载。它是 hub + references 结构：主文件 `SKILL.md` 只有路由表、共享基线（只读请求不启动执行、`kc run` 必须带目标、机器输出用 `kc schema --json` 自检）与 Safety 不变量，各子命令的流程步骤拆在同目录 `references/*.md`（建 issue / 查 issue / 跑一次 / 看进度 / 卡住了 / 后台跑 / CI 交付 / 装环境与查 Agent 配置共 8 份）。命令语义与参数以本文档和真实命令树（`kc --help` / `kc schema --json`）为权威，references 只写"什么时候用、按什么顺序用、别做什么"的流程分工。`kc init --dry-run` 会显示目标路径；安装的一致性比对以**受管文件集合**（主 `SKILL.md` + `references/*.md`）逐字节为准，用户自己新增的文件不会触发冲突；目标下已有改动过的受管内容时默认保留并报告冲突，只有显式 `--force` 才覆盖。
+KedaCode 自带的 `kedacode-operator` Skill 随 Python 发行包安装，无需联网下载。它是 hub + references 结构：主文件 `SKILL.md` 只有路由表、共享基线（只读请求不启动执行、`kc run` 必须带目标、机器输出用 `kc schema --json` 自检）与 Safety 不变量，各子命令的流程步骤拆在同目录 `references/*.md`（建 issue / 查 issue / 查生命周期 / 跑一次 / 看进度 / 卡住了 / 后台跑 / CI 交付 / 装环境与查 Agent 配置共 9 份）。命令语义与参数以本文档和真实命令树（`kc --help` / `kc schema --json`）为权威，references 只写"什么时候用、按什么顺序用、别做什么"的流程分工。`kc init --dry-run` 会显示目标路径；安装的一致性比对以**受管文件集合**（主 `SKILL.md` + `references/*.md`）逐字节为准，用户自己新增的文件不会触发冲突；目标下已有改动过的受管内容时默认保留并报告冲突，只有显式 `--force` 才覆盖。
 
 ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`priority/P3` 识别优先级，按 P0→P3 排序，同级按 Issue number 升序；缺少这些标签的 Issue 排在显式 P3 之后。`kc run --all-ready --dry-run` 与实际执行共用排序，并在预览中显示 priority；每轮排序范围是 GitHub 返回的最多 100 条 ready Issue 候选，不能据此承诺候选窗口以外的全局排序。`kc issue list --state`、`--label` 与 PR 筛选分别由公开参数应用。
 
@@ -2003,7 +2007,7 @@ kc lifecycle --reached validation_passed --json
 - `--reached <event>` 按事件历史筛选：命中该事件的 Issue 即使后来进入评审、阻塞、失败或完成阶段，仍会保留在结果中。可选值来自生命周期事件闭集；纯观测事件 `agent_token_usage` 不作为里程碑。
 - `--phase <phase>` 只匹配当前阶段，支持 `none`、`queued`、`executing`、`validating`、`reviewing`、`merging`、`blocked`、`failed`、`completed`。
 - `--issue <n>` 显示事件时间线；若不同仓库存在同号 Issue 且没有传 `--repo-id`，会分别显示匹配记录。
-- `--json` 输出每条生命周期的 run、阶段、结局、账本完整性与事件详情，供脚本消费。
+- `--json` 输出每条生命周期的 run、阶段、结局、账本完整性与事件详情，供脚本消费。记录里另带一个 `invocations` 键，本命令下**恒为 `null`**：调用明细只在 Backlog 的 PRD 生命周期详情接口里按 Issue 组装，`kc lifecycle` 不查调用账本，也不改变任何 CLI 参数、退出码或命令树。
 - 数据来自本机 `history_db_path` 指向的 SQLite 生命周期账本。其它机器上的记录不会自动同步到这里；账本没有记录时，命令会报告空结果，不会把它推断成“未开始”。
 - 生命周期阶段是 `queued`、`executing`、`validating`、`reviewing`、`merging`、`blocked`、`failed`、`completed` 等粗粒度阶段；`--reached` 则按更细的历史事件（例如 `validation_passed`）筛选。
 
@@ -3534,7 +3538,9 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 
 ## Agent 调用记录与停滞诊断（Invocation Tracing）
 
-**入口没有变化**：仍然是 `kc logs --repo <path> --issue <N> [--follow]`，没有新命令、新旗标、新 JSON 汇总或新页面。变的只是这条流里多了三种结构化标记行。
+**入口没有变化**：仍然是 `kc logs --repo <path> --issue <N> [--follow]`，没有新命令、新旗标、新 JSON 汇总。变的只是这条流里多了三种结构化标记行。
+
+同一批调用事件另外还喂给 Backlog PRD 详情的「执行过程」标签页（只读消费，见下文「PRD 生命周期账本与执行分析」的 `invocations` 区）：`grep '\[iar-invocation-'` 仍是逐条核对的第一入口，页面只是把同一事实按会话/尝试分组呈现，不改口径、不补数据。
 
 ### 为什么需要它
 
@@ -4085,7 +4091,8 @@ GET /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
     current_phase / in_progress / outcome / history_complete / started_at /
     finished_at / durations{end_to_end_seconds, active_seconds,
     waiting_seconds, blocked_seconds} / events[]（每条含 event_type / phase /
-    status / actor / occurred_at / detail，status 为逐行状态徽章事实源）/ has_data
+    status / actor / occurred_at / detail，status 为逐行状态徽章事实源）/
+    invocations{available, truncated, rows[]}（调用明细，见下）/ has_data
 
 GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
     仓库级统计：completed_runs / average_end_to_end_seconds /
@@ -4099,6 +4106,32 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
     usage_count}；账本不可用时降级为空数组。响应新增字段，只增不改，
     既有消费者不受影响）
 ```
+
+**调用明细（`invocations`）**
+
+`invocations` 把同一 Issue 的调用账本（`agent_invocation_events`，跨执行会话）按发生顺序解释成展示行，
+供 Backlog「执行过程」的「执行会话 → Agent 尝试 → 调用」三层视图消费。它就是
+`grep '\[iar-invocation-'` 的页面读法：同源同口径，页面不改写事件、不新增采集、不补数据。
+
+- `rows[]` 每行含 `invocation_id / run_id（所属执行会话）/ attempt_number / phase / role / executor /
+  outcome / failure_category / started_at / finished_at / duration_seconds / requested_model /
+  reported_model / model_source / token_usage / retry_of / retry_reason / exit_code / log_locator`。
+  `outcome` 沿用账本闭集（`ok / failed / timeout / error / unclosed / incomplete`）；未闭合的调用
+  `finished_at` 与 `duration_seconds` 恒为空，**不补估算时长**；模型字段保持「KC 下发 / 执行器报告 /
+  未提供」三态，失败与回退调用独立成行，不并入后续成功调用。
+- **缺口显式披露，绝不推测回填**：`invocations=null`（该 PRD 没有关联 Issue，调用事实无从归属）、
+  `available=false`（账本读端不可用：存储不具备 Issue 级调用读端、或读取异常）、
+  `available=true` 且 `rows=[]`（账本可读但没有该 Issue 的调用记录，例如早于账本上线的旧库）、
+  `truncated=true`（读取触达 500 条上限，历史只是最近一段，本视图不做分页、过滤或搜索）。缺口只影响
+  调用明细区，页面其余部分照常渲染。尝试展开区的空态同样按这四种成因分别说成一句话：截断时某次尝试
+  没有行，要说「读取只返回最近一段」，**不得**写成「这次尝试没调用过」。
+- 生命周期事件 detail 里的 `invocation_run` 键是写侧注入的「该事件发生在哪次执行会话内」（只在 runner
+  执行上下文内写、不覆盖调用方已有同名键）。旧事件没有该键时页面回落为平铺列表并说明「无归属」，
+  不按时间窗口猜测会话分组。
+- **账本返回的每一行都必须在页面上有着落**：行的归属只用显式字段（`run_id` + `attempt_number`）。
+  `attempt_number` 为 `null` 的调用（`closeout` / `content_generation` 等非 attempt 主体调用）与
+  所属尝试没有事件的行，挂在会话级「其他调用」里；`run_id` 对不上任何执行会话分组的行不并入任何
+  分组，只单独披露条数。任何一类都不许既不分组的、又不出现在披露里。
 
 **降级语义**
 

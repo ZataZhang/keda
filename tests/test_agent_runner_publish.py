@@ -856,7 +856,7 @@ def test_pr_handoff_ref_block_replaces_instead_of_stacking() -> None:
     交接评论是唯一事实源，PR 正文只是发布那一刻的快照；回链段要保证人顺链找到的是
     **最新**一条记录，而不是一串互相矛盾的旧链接。
     """
-    from backend.core.use_cases.agent_runner_issue_handlers import (
+    from backend.core.use_cases.agent_runner_pr_handoff import (
         _build_pr_handoff_ref_block,
         _with_pr_handoff_ref,
     )

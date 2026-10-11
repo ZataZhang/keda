@@ -8,8 +8,9 @@
 预演（``dry_run=True``）与正式执行共用同一套预检与结论，预演永不写盘；因此预演
 在被拒绝的场景里返回与正式执行相同的结论，而不是永远报成功。
 
-依赖方向：本模块在 ``engines/``，只引用 ``core.shared.models.product_identity``
-的状态目录解析与标准库/三方库，不反向依赖 ``api`` 的退出码——对外结论以
+依赖方向：本模块在 ``engines/``，配置解析用 ``core.shared.models.product_identity``、
+配置写回委托 ``infrastructure.config.toml_section_editor`` 的共享原语（与 Console /
+registry 抢同一把按路径派生的写锁），不反向依赖 ``api`` 的退出码——对外结论以
 :data:`StateHomeOutcome` 表达，由 api 层映射成 :class:`ExitCode`。
 """
 
@@ -26,6 +27,8 @@ from typing import Any, Literal
 import tomlkit
 
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.config_edit import ConfigDocumentInvalidError
+from backend.infrastructure.config.toml_section_editor import mutate_toml_document
 
 #: 状态目录下的默认文件名，与 ``[agent_runner.console]`` 的默认取值一致；
 #: 迁移只按默认位置找，用户把登记表挪到别处时由 psutil 扫描兜底。
@@ -393,16 +396,31 @@ def count_legacy_state_path_values(new_state_path: Path, home_path: Path) -> int
 def _rewrite_global_config_paths(new_state_path: Path, home_path: Path) -> tuple[Path | None, int]:
     """改写新状态目录里 ``config.toml`` 的旧路径取值。
 
+    锁外那份预读只用来判断"要不要动手"；真正的读-改-写交给共享 TOML 原语在写锁内
+    对**磁盘现状**重做一遍，否则搬迁会把同时在线的 Console 保存顶成旧路径。
+
     Returns:
         tuple[Path | None, int]: 被改写的文件与改写条数；无需改写时文件为 ``None``。
     """
     config_path, config_document = _load_global_config_document(new_state_path)
-    if config_document is None:
+    if config_path is None or config_document is None:
         return None, 0
-    rewritten_count = _rewrite_container(config_document, home_path, mutate=True)
+    if not _rewrite_container(config_document, home_path, mutate=False):
+        return None, 0
+
+    rewritten_counts: list[int] = []
+
+    def _rewrite_in_place(document: Any) -> None:
+        rewritten_counts.append(_rewrite_container(document, home_path, mutate=True))
+
+    try:
+        mutate_toml_document(config_path, _rewrite_in_place)
+    except ConfigDocumentInvalidError:
+        # 与预读同一立场：配置文件损坏时不阻断搬迁，只在报告里说明。
+        return None, 0
+    rewritten_count = rewritten_counts[0] if rewritten_counts else 0
     if not rewritten_count:
         return None, 0
-    config_path.write_text(config_document.as_string(), encoding="utf-8")
     return config_path, rewritten_count
 
 

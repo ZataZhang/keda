@@ -69,9 +69,13 @@ Thumbs.db
 
 # Agent runner state (local only)
 .agent-runner/
-# iar 与 kc runner 会话状态均只保存在本机；纳入版本控制会污染工作树，
-# 并导致独立验证的 clean-tree 门禁失败。
+# kc runner 会话记录仅保存在本机；纳入版本控制会让 Agent 执行改动工作树，
+# 并导致独立验证的 clean-tree 门禁失败。崩溃恢复与阶段续传需要它保留在本地。
 .iar/agent-runner/
+
+# TOML 原子写的临时文件（同目录唯一命名，正常路径由 writer 清理）：只在进程被
+# 强杀时可能残留，绝不该进版本控制——它会弄脏 clean-tree 门禁。
+*.toml.tmp
 
 # Realistic Validation evidence packages — local PRD flow (`just ai implement`).
 # Commit only the text reports (*.md: verification-plan / evidence-report /
@@ -94,6 +98,9 @@ tasks/evidence/**
 
 # KedaCode runner local state (memory / skills / decisions / state)
 .kedacode/
+
+# KedaCode TOML 写回的跨进程锁（与 config.toml / .kedacode.toml 同目录，零字节）
+*.toml.lock
 
 
 # Agent

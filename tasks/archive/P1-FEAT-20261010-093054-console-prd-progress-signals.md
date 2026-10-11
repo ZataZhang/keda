@@ -2,11 +2,11 @@
 
 - GitHub Issue: https://github.com/ZataZhang/keda/issues/274
 
-> ✅ **交付前置**：无，可立即开工。
-> 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
+> ✅ **交付前置**：无，可立即开工。（§8 依赖仍为 none）
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> 已达成：后端 progress/evidence 端点与三个解析模块（worktree 定位 / 影响树移植 / 进度聚合）+ 前端三读数与证据分组；rv-1（真实 `kc console` 进程 + 零 mock 浏览器四态 spec，5 passed + 负控按预期变红 rc=1）、rv-2（TestClient 进程内 HTTP 集成 55 passed + 安全负控 15 passed + 跨进程 curl 29 条断言全通过）、rv-3（真实 git + importlib CLI 逐字段对照 9 passed）全绿；`just frontend-public typecheck`/`build`/`console-sync` rc=0 且同步后的真实页面可见新 UI；改动集 pre-commit 代码类钩子全 Passed。恢复轮 2 另修复 5 条与本 PRD 无关的 baseline 守卫失败（祖先提交 39014730 lifecycle CLI 面未同步；只同步守卫登记常量与豁免集合，旗标契约未削弱），最终树 `just test all`（含 full lint）3859 passed / 1 skipped 全绿。恢复轮 5 用仓库自身门禁复验时发现并修掉一个半截绿灯：runner 以 `bash -lc` 复跑时解析到系统 bash 3.2，`$VAR（` 的全角字节被并入变量名触发 `set -u` 中断而退出码仍为 0，故取证脚本加了「未走到收尾即判失败」哨兵。Pre-PR Review 修复轮补上证据目录枚举失败的降级路径（原为 500）与损坏/mixed/不可读清单的 5 条 oracle 用例，并订正证据包中的失实覆盖声明。证据与逐条可复跑命令见 `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/`。
 
 本文分两层：Part A 人审层（§1-4）界定「详情页能不能看到交付进度、这些数字怎么读」的可见口径与验收选择；Part B 执行器层（§5-13）给出读取边界、解析移植、失败降级与验证证据。
 
@@ -299,7 +299,7 @@ Frontend
 ├── frontend-public/components/backlog/prd-evidence-view.tsx [修改]
 │   【总结】计划/产出汇总、按验证条目分组、未合并徽标与降级空态
 ├── frontend-public/lib/api/backlog.ts [修改]
-│   【总结】fetchPrdProgress 客户端与类型同步
+│   【总结】fetchPrdProgress 客户端与类型同步；encodePrdPath 保留 base64 padding 的契约注释更正
 └── frontend-public/lib/api/types.ts [修改]
     【总结】BacklogPrdProgress 等新类型；证据文件加 source
 
@@ -312,8 +312,10 @@ Tests
 │   【总结】计划解析、两条归属路径、报告状态与端点契约（含降级）
 ├── tests/test_backlog_prd_evidence.py [修改]
 │   【总结】候选目录合并、source 标注、artifact 分支优先与逃逸负控
+├── tests/playwright-e2e/tests/workflows/backlog-prd-progress-real-entry.no-auth.spec.ts [新增]
+│   【总结】真实 console + 真实 git worktree fixture 的四态读数与证据分组（零 page.route，含 fresh-state 探针）
 └── tests/playwright-e2e/tests/smoke/backlog-prd-progress.spec.ts [新增]
-    【总结】详情头部三读数与证据分组渲染（读端点 fixture 顶替，页面真实）
+    【总结】详情头部三读数与证据分组渲染（读端点 fixture 顶替，需带鉴权应用栈）
 
 Docs / Prototype
 ├── docs/api/references.md [修改]
@@ -470,7 +472,7 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 
 | # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | 详情页交付进度：运行中 PRD 的三读数与证据分组（含未合并标注）、已归档 PRD 的来源回落、无计划旧 PRD 与无基准的降级 | `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/rv-1-running-detail.png`、`rv-1-archived-detail.png`、`rv-1-degraded-no-plan.png`、`rv-1-no-base-detail.png`；每态与 Hub 登记的目标图配对；交付时打开 evidence 目录并在交付消息内嵌呈递全部目标图和真实页面截图 | 运行中截图精确显示「清单 3/12」「影响树 ~7/12 ?2」「证据 2/3」和「计划 3 项 · 已产出 2 项（共 4 个文件）」；rv-1 与 rv-3 文件带「未合并」。归档截图即使存在遗留工作区仍显示主仓库来源、影响树 `-`。无计划截图显示计划/产出 `-`、共 2 个文件；无基准截图显示 `-` 并说明无法比较。10 秒自检：选中不同 PRD 后重载页面，读数与对应 fixture 一致 |
+| 1 | 详情页交付进度：运行中 PRD 的三读数与证据分组（含未合并标注）、已归档 PRD 的来源回落、无计划旧 PRD 与无基准的降级 | `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/rv-1-running-detail.png`、`rv-1-archived-detail.png`、`rv-1-degraded-no-plan.png`、`rv-1-no-base-detail.png`；Hub 只登记了 3 张目标图（运行中 / 已归档 / 无计划降级），前两态与第三态分别与前两张及第三张目标图配对，「无基准」是没有目标图的额外真实态；交付时打开 evidence 目录并在交付消息内嵌呈递全部目标图和真实页面截图。四态真实截图已就位：由 `scripts/rv1_real_entry.sh --negative` 在真实 `kc console` 进程 + 真实 git worktree fixture 上零 mock 跑出（5 passed），并附未实现构建上的负控红证 `rv-1-negative-control-red.txt`；复现与层级声明见 `rv-1-verification-status.md` | 运行中截图精确显示「清单 3/12」「影响树 ~7/12 ?2」「证据 2/3」和「计划 3 项 · 已产出 2 项（共 4 个文件）」；rv-1 与 rv-3 文件带「未合并」。归档截图即使存在遗留工作区仍显示主仓库来源、影响树 `-`。无计划截图显示计划/产出 `-`、共 2 个文件；无基准截图显示 `-` 并说明无法比较。10 秒自检：选中不同 PRD 后重载页面，读数与对应 fixture 一致 |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：工作区定位与分支优先读取、安全边界负控（rv-2）、影响树口径与 CLI 对照（rv-3），以及单测、类型检查、构建与文档搜索断言。它们的证据在 §9.2。
 
@@ -495,47 +497,47 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 
 #### Architecture Acceptance
 
-- [ ] worktree 定位经 `git worktree list --porcelain`（不硬编码目录拼接）；匹配规则 slug 优先、`issue-<N>` 兜底（`rg -n "match_prd_worktree|issue-" src/backend/core/use_cases/backlog_prd_worktree.py` 复核）。
-- [ ] git 调用全部经 `IProcessRunner`；core 无直接 `subprocess`（`rg -n "subprocess" src/backend/core/use_cases/backlog_prd_impact.py src/backend/core/use_cases/backlog_prd_worktree.py` 应无命中）。
-- [ ] 依赖方向保持 `api -> core -> engines -> infrastructure`；`just lint` 全绿。
+- [x] worktree 定位经 `git worktree list --porcelain`（不硬编码目录拼接）；匹配规则 slug 优先、`issue-<N>` 兜底（`rg -n "match_prd_worktree|issue-" src/backend/core/use_cases/backlog_prd_worktree.py` 复核）。<!-- 证据: rv-2-mechanical-gates.txt §5；rv-2-endpoint-integration.txt worktree 匹配用例 -->
+- [x] git 调用全部经 `IProcessRunner`；core 无直接 `subprocess`（精确检索 `^\s*import subprocess` / `subprocess.(run|Popen|call|check_)` 于三模块 0 命中；`rg subprocess` 命中的两处均为注释/docstring 说明「改为经 IProcessRunner」，非真实调用）。<!-- 证据: rv-2-mechanical-gates.txt §5 -->
+- [x] 依赖方向保持 `api -> core -> engines -> infrastructure`；本次改动集 pre-commit 代码类钩子（ruff/ruff-format/check-architecture/max-file-lines 等）全 Passed。<!-- 注: 曾致 check-test-flag 为红的 5 条无关 baseline 失败（kc CLI/operator-skill）已在恢复轮 2 修复，最终树 `just test all` 含 full lint 全绿并写入 .last_tested_commit（见 rv-2-mechanical-gates.txt 恢复轮附录） -->
 
 #### Behavior Acceptance
 
-- [ ] 计划解析：`planned` 条目的 id/摘要/reviewer 与 PRD §7.6 逐项一致；无 §7.6 时为 `[]`（rv-1、rv-2 + 单测）。
-- [ ] 产出归属：清单按 `item_number` 映射（`item_name` 仅作描述），有效时 `attribution_source=manifest`；缺失/损坏时回退 `filename`；若合并文件使用两种来源则为 `mixed`；磁盘存在性始终为唯一事实。`produced_planned_count` 是有文件的不同计划条目数，`file_count` 是合并去重后可展示文件数（rv-2 + 单测）。
-- [ ] 影响树：有效 merge-base 时 `touched/judgeable/unresolvable` 与 CLI 对照一致；`?n` 不进分母；无工作区/无树/无节点/无基准时 `impact=null` 且状态可区分，计算失败不能返回零（rv-3）。
-- [ ] 清单进度读数与 PRD 勾选状态一致；无清单区块为 `0/0` 且前端显示 `-`（单测 + rv-1）。
-- [ ] manifest 每个文件带 `source`；同名文件分支优先；artifact 分支优先读取（rv-2）。
-- [ ] 安全边界：越界、隐藏文件、符号链接、超限、畸形 token 全部 400 且不泄露仓外内容（rv-2 + 既有攻击面用例扩展）。
-- [ ] 不存在的 PRD 路径 → 400；读取异常（无权限、worktree 查询或目录枚举失败等）→ 字段状态为 unavailable/partial 且未知计数为 null，不伪装成空读数（单测）。
+- [x] 计划解析：`planned` 条目的 id/摘要/reviewer 与 PRD §7.6 逐项一致；无 §7.6 时为 `[]`（rv-1、rv-2 + 单测）。<!-- 后端解析由 test_backlog_prd_progress::test_parse_validation_plan_* 全绿覆盖（含 absent→[]、reviewer 其他→null）；页面呈现见 Frontend/rv-1（待真实浏览器） -->
+- [x] 产出归属：清单按 `item_number` 映射（`item_name` 仅作描述），有效时 `attribution_source=manifest`；缺失/损坏时回退 `filename`；若合并文件使用两种来源则为 `mixed`；磁盘存在性始终为唯一事实。`produced_planned_count` 是有文件的不同计划条目数，`file_count` 是合并去重后可展示文件数（rv-2 + 单测）。<!-- test_attribution_manifest_by_item_number / test_attribution_filename_fallback_when_manifest_missing / test_attribution_filename_fallback_when_manifest_damaged / test_unreadable_manifest_falls_back_to_prefix / test_attribution_mixed_when_manifest_and_prefix_both_used / test_attribution_unattributed_does_not_count_planned；损坏与 mixed 两条为 Pre-PR Review 修复轮补齐，此前只有「缺失」一条 -->
+- [x] 影响树：有效 merge-base 时 `touched/judgeable/unresolvable` 与 CLI 对照一致；`?n` 不进分母；无工作区/无树/无节点/无基准时 `impact=null` 且状态可区分，计算失败不能返回零（rv-3）。<!-- rv-3-impact-cli-parity.txt：9 passed，importlib 真实 git 逐字段对照 -->
+- [x] 清单进度读数与 PRD 勾选状态一致；无清单区块为 `0/0` 且前端显示 `-`（单测 + rv-1）。<!-- 后端读数单测覆盖；前端已由真实浏览器复核：无计划/无基准 fixture 的清单区块显示 `-`，且 fresh-state 探针在真实磁盘把工作区 PRD 第 3 项取消勾选后重进页面读数变 2/12、恢复后回到 3/12（spec:201-225，rv-1-real-entry-green.txt 用例 2） -->
+- [x] manifest 每个文件带 `source`；同名文件分支优先；artifact 分支优先读取（rv-2）。<!-- test_manifest_merges_candidates_worktree_first / test_artifact_reads_branch_first_content -->
+- [x] 安全边界：越界、隐藏文件、符号链接、超限、畸形 token 全部 400 且不泄露仓外内容（rv-2 + 既有攻击面用例扩展）。<!-- rv-2-security-negative-control.txt：15 passed，pytest.raises / assert status==400 -->
+- [x] 不存在的 PRD 路径 → 400；读取异常（无权限、worktree 查询或目录枚举失败等）→ 字段状态为 unavailable/partial 且未知计数为 null，不伪装成空读数（单测）。<!-- test_endpoint_progress_missing_prd / test_worktree_query_failure_marks_unavailable / test_ambiguous_worktree_marks_unavailable / test_manifest_status_field_surfaces_unavailable / test_unreadable_evidence_dir_marks_unavailable_not_empty / test_endpoints_survive_unreadable_evidence_dir（后两条为 Pre-PR Review 修复轮补齐：目录枚举失败此前会让 PermissionError 穿透成 HTTP 500） -->
 
 #### Frontend Acceptance
 
-- [ ] `prd-progress-strip.tsx` 渲染三读数；空值显示 `-`；提示文案包含弱信号口径。
-- [ ] `prd-evidence-view.tsx` 显示「计划 N 项 · 已产出 M 项（共 K 个文件）」、按验证条目分组、未产出占位与「未合并」徽标；无计划时不出现伪造数字。
-- [ ] `just frontend-public typecheck` 与 `just frontend-public build` 通过；`just console-sync` 后真实页面可见新 UI。
-- [ ] `tests/playwright-e2e/tests/smoke/backlog-prd-progress.spec.ts` 通过（读端点 fixture 顶替、页面真实）。
-- [ ] 原型-实现配对：目标态图与真实截图按四态（运行中/已归档/无计划/无基准）配对并标注 `design intent` / 验证层级；无基准可复用降级目标图，但截图须说明原因。
+- [x] `prd-progress-strip.tsx` 渲染三读数；空值显示 `-`；提示文案包含弱信号口径。<!-- 真实浏览器复核（rv-1）：运行中态三 chip 精确为 3/12、~7/12 ?2、2/3（spec:143-152 `expectReadingChips`），归档/无计划/无基准态对应位置显示 `-`，并断言 strip 内三个 chip 的 `title` 提示都带「弱信号」（spec:185-188） -->
+- [x] `prd-evidence-view.tsx` 显示「计划 N 项 · 已产出 M 项（共 K 个文件）」、按验证条目分组、未产出占位与「未合并」徽标；无计划时不出现伪造数字。<!-- 真实浏览器复核（rv-1）：运行中为「计划 3 项 · 已产出 2 项（共 4 个文件）」，rv-1/rv-3 分组各带工作区文件与「未合并」徽标，rv-2 显示未产出占位；无计划 fixture 显示 `-` 与「共 2 个文件」并提示未声明验证计划 -->
+- [x] `just frontend-public typecheck` 与 `just frontend-public build` 通过；`just console-sync` 后真实页面可见新 UI。<!-- typecheck rc=0、build rc=0 已达；`just console-sync` 由取证脚本执行并断言产物含 prd-progress-strip，随后真实 kc console 托管该产物、真实页面渲染出读数（rv-1-running-detail.png） -->
+- [x] Playwright 浏览器用例通过（真实端点、无 mock）。<!-- 交付的执行体为 `tests/playwright-e2e/tests/workflows/backlog-prd-progress-real-entry.no-auth.spec.ts`：5 passed 对着真实 console 进程与真实 git worktree fixture，零 page.route。原计划的 `tests/smoke/backlog-prd-progress.spec.ts`（读端点 fixture 顶替）依赖带鉴权的应用栈（`/api/auth/login` + 3000 端口 dev server），本 worktree 无法真实跑通，且按 §7.6 rv-1 `forbidden_bypasses` mock 读数本就不能充当 rv-1 oracle，故不作为勾选依据；见 Change Log 恢复轮 5 -->
+- [x] 原型-实现配对：目标态图与真实截图按四态（运行中/已归档/无计划/无基准）配对并标注 `design intent` / 验证层级；无基准可复用降级目标图，但截图须说明原因。<!-- 三张目标图 + `.prompt.md` 旁车（design intent）与四张真实截图（real console verification）齐备；无基准态复用降级目标图的原因记录在 `rv-1-verification-status.md` 与原型页 -->
 
 #### Documentation Acceptance
 
-- [ ] `docs/api/references.md` 新增 progress 端点契约与 evidence `source` 字段说明，与实现一致。
-- [ ] 原型登记（Prototype Hub registry、原型页）与三张状态目标图及提示词旁车同步（§7.8）。
-- [ ] `rg -n "progress" docs/api/references.md` 复核新端点文档在场；无过期字段描述。
+- [x] `docs/api/references.md` 新增 progress 端点契约与 evidence `source` 字段说明，与实现一致。<!-- references.md:289 GET .../progress 端点段在场，含 worktree_status/impact_status 枚举、归档终态、400、每文件 source、manifest status -->
+- [x] 原型登记（Prototype Hub registry、原型页）与三张状态目标图及提示词旁车同步（§7.8）。<!-- roadmap-controls-evidence registry bump v2.0/2026-10-10 + 原型页进度段 + progress-{running,archived,degraded}.png 与 .prompt.md 旁车均在场 -->
+- [x] `rg -n "progress" docs/api/references.md` 复核新端点文档在场；无过期字段描述。<!-- rg 命中端点标题与语义说明 -->
 
 #### Validation Acceptance
 
-- [ ] 按 §7.6 完成 rv-1…rv-3；rv-1 负控红证（未实现构建上无读数）已保存；证据绑定最终 Git tree，相关改动后重跑。
-- [ ] 目标测试集通过：`tests/test_backlog_prd_worktree.py`、`tests/test_backlog_prd_impact.py`、`tests/test_backlog_prd_progress.py`、`tests/test_backlog_prd_evidence.py`，以及 `just test`（跨层契约时 `CI=true just test all`）。
-- [ ] 真实入口：真实 console 进程 + curl（rv-2）与浏览器四态（rv-1）；不把 mock 结果冒充真实入口。
+- [x] 按 §7.6 完成 rv-1…rv-3；rv-1 负控红证（未实现构建上无读数）已保存；证据绑定最终 Git tree，相关改动后重跑。<!-- 三项各自的 command 写在 `evidence.json` 里且可复跑：rv-1 = `scripts/rv1_real_entry.sh --negative`（5 passed + 负控 rc=1 红证），rv-2 = 目标 pytest + `scripts/rv2_live_console.sh`（55 passed + 29 条 curl 断言，其中 5 条为 Pre-PR Review 修复轮补充），rv-3 = `pytest tests/test_backlog_prd_impact.py`（9 passed）。本轮改动后已用仓库自身门禁 `scripts/rehearse_gates.py` 复跑三条命令（rc=0 且 stdout/stderr 断言全满足），证据即该次复跑产物 -->
+- [x] 目标测试集通过：`tests/test_backlog_prd_worktree.py`、`tests/test_backlog_prd_impact.py`、`tests/test_backlog_prd_progress.py`、`tests/test_backlog_prd_evidence.py`，以及 `just test`（跨层契约时 `CI=true just test all`）。<!-- 四个目标文件全绿（9+55 passed，含在最终树全量复检内）；恢复轮 2 修复 5 条无关 baseline 后，最终树 `just test all`（全量收集 -m ''，含 full lint）在 Pre-PR Review 修复轮复跑为 3859 passed / 1 skipped / EXIT=0，.last_tested_commit 已更新（3854→3859 即修复轮新增的 5 条用例）。见 rv-2-mechanical-gates.txt 恢复轮附录与 Pre-PR Review 修复轮附录 -->
+- [x] 真实入口：真实 console 进程 + curl（rv-2）与浏览器四态（rv-1）；不把 mock 结果冒充真实入口。<!-- 两者均已达成：`uv run kc console --no-browser` 起在只登记 fixture 仓库的隔离 `KEDACODE_CONFIG` 上，curl 29 条断言的转写（请求 URL + 状态码 + PASS）见 `rv-2-live-console.txt`，浏览器四态截图与端点响应原文见 `rv-1-*.png` / `rv-1-*-progress-endpoint.json`；执行 spec 零 `page.route`，TestClient 集成仅作为进程内补充、未被声称为真实入口 -->
 - [~] 独立 verifier 对 R2 证据复核 PASS — runner-owned gate: 独立验证
 - [~] PR 评审与归档按仓库 PRD 工作流执行 — runner-owned gate: 发布与归档
 
 #### Delivery Readiness
 
-- [ ] PR 证据包含 9.1 呈递内容、原型-实现配对与逐条命令；完成消息逐字携带 9.1 呈递区内容及内嵌截图。
-- [ ] 全部非 Human-Confirmed 项完成并可机械复核；Human-Confirmed 留待人工。
-- [ ] 无残留旧口径引用（`rg` 搜索断言）；文档、原型与页面一致。
+- [x] PR 证据包含 9.1 呈递内容、原型-实现配对与逐条命令；完成消息逐字携带 9.1 呈递区内容及内嵌截图。<!-- 结构化 `evidence.json` 三条 item 各带可复跑 command + 红→绿证据；9.1 四态真实截图（`rv-1-{running,archived,degraded-no-plan,no-base}-detail.png`）与三张 design-intent 目标图配对，交付消息逐张内嵌并携带 9.1 呈递区原文 -->
+- [x] 全部非 Human-Confirmed 项完成并可机械复核；Human-Confirmed 留待人工。<!-- 本清单内除 §2 三项 Human-Confirmed 与两条 runner-owned `[~]` 外全部 `[x]`，每条都标注证据文件/用例名；机械复核入口＝`evidence.json` 的三条 command + `scripts/rehearse_gates.py`（调用仓库自身门禁复跑）。归档动作本身按仓库工作流由 runner 执行，故本 PRD 仍留在 `tasks/pending/` -->
+- [x] 无残留旧口径引用（`rg` 搜索断言）；文档、原型与页面一致。<!-- `rg -n "live-console-gap|真实浏览器四态未跑|待补跑清单|未能跑真实 kc console" docs/ frontend-public/ src/ tests/ tasks/`（本轮将搜索范围扩到 `tasks/` 与证据目录本身）现仅剩两处有意保留的历史叙述：`rv-2-live-console-notes.md` 记录该 gap 文件改名与缺口闭合的由来，以及写下这个 pattern 的本行注释自身。范围扩大后确实抓到一条仍生效的假陈述——`rv-2-security-negative-control.txt` 结尾仍指向已删除的 `rv-2-live-console-gap.md`，已改成指向真实的跨进程取证件并如实说明 gap 文件已删除。`rg "端口 3000"` 只余早期轮次 Change Log 的历史条目与 §12 里那条「诊断已被复跑证伪」的对账记录。`docs/api/references.md` 端点契约、原型页进度段与真实页面渲染逐项一致（rv-1 截图 + 端点响应转存件） -->
 
 ## 10. Functional Requirements
 
@@ -584,12 +586,15 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 
 ### Final Reconciliation
 
-- Interpretation: 待实现后核对；目标为「运行中可读工作区、三读数弱信号呈现、旧 PRD 降级」。
-- Public behavior and contracts: 待实现后核对；progress 响应结构、manifest `source` 字段与前端类型以最终实现为准回写。
+- Interpretation: 已核对。「运行中读数来自执行工作区（分支优先、主仓库兜底）、三读数弱信号呈现、无计划/无工作区/无基准/读取失败各自降级且不伪造数字」按实现与 rv-2/rv-3 单测落地；`resolve_prd_source` 为候选/归档终态单一事实源，progress/manifest/artifact 三链路复用。
+- Public behavior and contracts: 已核对并回写。progress 响应结构（`prd_source`/`worktree_status`/`checklist`/`evidence.{planned,produced_ids,produced_planned_count,file_count,attribution_source,status,reports}`/`impact_status`/`impact`）与 `docs/api/references.md`、`lib/api/types.ts` 一致；evidence manifest 每文件新增 `source`（默认 `main`）、manifest 新增 `status`（默认 `complete`），均为**新增字段**、旧字段语义不变（FR-10 兼容达成）。
 - Related PRD status: 已检查；无硬依赖，软重叠项见 §5 / §8。
-- Requirements and risks: 待实现后核对；若有出入以最终实现修正本 PRD 并追加 Change Log。
+- Requirements and risks: 已核对；FR-1…FR-10 后端行为由单测覆盖，弱信号口径（`~` 前缀、`?n`、`-`/「暂不可用」区分）在解析层与展示层均落地。
 - Reconciled differences:
-  - none
+  - **真实入口保真度**：已按 §7.6 达成，不再是差异。rv-1 由真实 `kc console` 进程 + 零 mock 浏览器 spec 跑出四态截图与负控红证，rv-2 在同一隔离 console 上补跑跨进程 curl（29 条断言）并把 TestClient 进程内集成降为补充层；此前「端口 3000 被无关 java 进程占用 + 缺 `.env.run-state`」的诊断经复跑证伪——console 自带空闲端口挑选且无鉴权，验证只需 `KEDACODE_CONFIG` 指向隔离登记（见 `rv-1-verification-status.md`）。
+  - **取证脚本的半截绿灯**（本轮新发现、已修）：runner 以 `bash -lc` 复跑命令时解析到系统 `/bin/bash` 3.2，`$VAR（` 的全角字节被并入变量名并触发 `set -u` 展开错误，脚本当场中断而退出码仍为 0，于是 curl 取证只跑到第 1 节却表现为通过。修复＝变量统一加 `${}` 花括号，`lib_console.sh` 增加「未走到收尾即判失败」EXIT 哨兵，并在 `evidence.json` 的断言里钉住收尾标记。
+  - **just test flag**：先前 full `just test` 因 5 条与本 PRD 无关的 baseline 失败（kc CLI/operator-skill，祖先提交 39014730 引入）未写 `.last_tested_commit`，pre-commit 的 check-test-flag 因此为红；恢复轮 2 已按守卫测试自身声明的登记路径修复（零源码改动、旗标契约未削弱），最终树全量复检转绿并写入 flag。
+  - 其余行为、契约与风险项与原 PRD 一致，无未预测的读取边界或解析降级被触发。
 
 ## Change Log
 
@@ -608,3 +613,43 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 - Reason: PRD 审核发现原契约无法稳定区分「零进度」和「无法读取」，且验收样例及原型交付范围不足以判定实现是否符合用户可见预期。
 - Impact: 只澄清执行契约和验证证据；不改变功能主范围，不改实现代码，也未替用户确认 §2 的两项人审决策。
 - Review: §1 行为样例、§6/§7 数据来源和降级、§7.6 Realistic Validation Plan、§7.8 原型范围与 §9 验收清单已同步；待实现后按真实端点和浏览器入口复核。
+
+### 执行交付：实现完成 + 可运行验证证据（真实入口待补，未归档）
+- Type: verification
+- Before: §9 全部未勾；无实现、无证据目录。
+- After: 后端 `backlog_prd_worktree/impact/progress.py` 新增、`backlog_prd_evidence.py` 扩展（候选合并 + `source`/`status`）、`/progress` 端点与 evidence 两端点接线；前端 `prd-progress-strip.tsx` 新增、`prd-detail.tsx`/`prd-evidence-view.tsx` 升级、`lib/api/{backlog,types}.ts` 契约同步；smoke 用例与三态目标图 + 文档登记交付。§9 中后端/架构/文档/契约类非 Human 项按证据勾选并附证据注释；`evidence.json`（version 1 / zh-CN，三块含 negative_control）与逐条命令证据落 `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/`。可运行 oracle 全绿：rv-2 TestClient 集成 50 passed + 安全负控 15 passed、rv-3 真实 git CLI 对照 9 passed、typecheck/build rc=0、改动集 pre-commit 代码钩子 Passed。
+- Reason: 按 PRD §6/§7 完成执行器侧交付；rv-1 真实浏览器四态与 rv-2 live `kc console`+curl 因本 worktree 端口 3000 被无关 java 进程占用 + 缺 `.env.run-state` 无法诚实跑通，据 §7.6 forbidden_bypasses 不伪造，转交独立 verifier/人工补跑；故本 PRD **保留在 tasks/pending、不归档**（存在未勾的非 Human 项）。
+- Impact: 交付代码与文档/原型；CLI 表面、磁盘证据约定、数据库结构不变。`just test` 的 check-test-flag 因 5 条无关 baseline 失败未写 flag（非本改动缺陷，见证据 mechanical-gates §4）。
+- Review: 顶部验收横幅已投影为 🟡「代码交付完成、可运行门禁全绿、真实入口待补、未归档」；§9 呈递区标注四态截图待补；待人工确认 §2 两项人审决策与真实入口补跑后再定归档。
+
+### 恢复轮 2：修复 5 条无关 baseline 守卫失败，最终树全量门禁转绿
+- Type: verification
+- Before: `just test all`（runner 最终门禁）因 5 条与本 PRD 无关的 baseline 失败而红——祖先提交 39014730 为 `kc lifecycle` 增加 Typer 命令与第 9 份随包子命令说明（references/lifecycle.md、路由表行均已发行），但未同步 argparse 门面守卫与 operator-skill 守卫登记；`main` 上同样为红。上一轮处置为「不越界修」，flag 未写。
+- After: 按恢复指令在本 worktree 修复，只动两个守卫测试文件、零源码改动：`tests/test_cli_schema.py` 将 `lifecycle` 加入既有 FACADE_EXEMPT_COMMANDS（同类先例 schema/tokens：Typer 侧自发射、无 argparse 执行后端；旗标取值域断言仍覆盖 lifecycle）；`tests/test_kedacode_operator_skill.py` 将 _EXPECTED_REFERENCE_COUNT 同步为 9、登记 ("lifecycle",) 旗标白名单（经运行时 schema 核验）与 lifecycle.md 路由关键词，八→九注释随改。守卫两文件 37 passed；最终树 `just test all`（含 full lint）3854 passed / 1 skipped / EXIT=0，`.last_tested_commit` 已写入。§9「目标测试集通过」按证据勾选，机械门禁证据更新为红→绿闭环（rv-2-mechanical-gates.txt 恢复轮附录），evidence.json item 2 摘要/风险同步。
+- Reason: runner 交付门禁要求最终树全绿且恢复规则禁止跳过、削弱或以缓存替代验证命令；该 5 条失败不属本 PRD 功能面，但阻塞最终树复检，最小同步修复即守卫测试自身声明的「新增命令/说明文件须登记」维护路径。
+- Impact: 交付改动集新增两个守卫测试文件的登记同步（不改任何 CLI 行为与随包 Skill 内容）；本 PRD 功能范围、口径与真实入口待补项不变（rv-1 真实浏览器与 rv-2 live console 阻塞仍在，横幅「未归档」维持）。
+- Review: 属执行侧验证修复，无用户可见行为变更；待 verifier/人工复核红→绿证据链与豁免先例是否可接受。
+
+### 恢复轮 5：真实入口跑通 + 结构化证据清单可复跑，并修掉取证脚本的半截绿灯
+- Type: verification
+- Before: 恢复简报判定「runner 在验证前中断（qodercn exit 1、无输出）」，并沿用轮 1 的环境结论——端口 3000 被无关 java 进程占用 + 缺 `.env.run-state`，rv-1 真实浏览器与 rv-2 live console 记为不可跑；`evidence.json` 的 command 不可复跑、引用的证据文件名与条目编号不对齐，导致 `FRONTEND_VISUAL_EVIDENCE_MISSING` 与结构化清单门禁连续失败。
+- After: 该环境结论经实测证伪：`kc console` 自带空闲端口选择且无鉴权，验证只需 `KEDACODE_CONFIG`/`IAR_CONFIG` 指向一份只登记 fixture 仓库的隔离配置。据此交付 `scripts/rv1_fixture.py`（两个真实 git 仓库 + `.iar` 风格 worktree + 真实证据目录，覆盖运行中/归档终态/无计划/无基准四态）、`scripts/rv1_real_entry.sh`（`just console-sync` → 起真 console → 零 mock Playwright spec 5 passed → 换 main 构建跑同一 spec 得负控红证 rc=1 → 恢复产物）、`scripts/rv2_live_console.sh`（同一 console 上 29 条 curl 断言：分支优先读数、同名异构取工作区、主仓库独有标 `source=main`、符号链接/隐藏/超限/遍历/畸形 token 五类一律 4xx 且不泄露内容）、`scripts/rehearse_gates.py`（调用仓库自身门禁 `ensure_validation_evidence_ready` + `ensure_validation_commands_pass` 复验）。`evidence.json` 重写为三条 item：`item_number` 为裸整数、`evidence_files` 为纯 basename 且全部存在、每条 command 可在 worktree 内直接复跑、每条声明 negative_control/expected_fail，item 2/3 带 stdout/stderr 断言、item 1 带「绿跑 5 passed + 负控收尾标记 + stderr 不得出现未收尾哨兵」断言；§9 的 Behavior/Frontend/Validation/Delivery 各组按新证据勾选，横幅与 §12 对账同步为「真实入口已达成」。新增交付：`tests/playwright-e2e/tests/workflows/backlog-prd-progress-real-entry.no-auth.spec.ts`（含 strip 内三 chip `title` 均含「弱信号」的断言与磁盘级 fresh-state 探针 3/12→2/12→3/12）、`frontend-public/lib/api/backlog.ts` 的 `encodePrdPath` padding 契约注释更正（Node `base64url` 去 padding 会让后端 `urlsafe_b64decode` 直接 400）。
+- Reason: 恢复规则禁止以诊断替代验证、禁止削弱或缓存必需检查；唯一能让交付成立的路径是把真实入口真的跑通，并把清单改成 runner 能复跑、能判红绿的形态。取证脚本另发现一类必须记录的假绿灯：runner 用 `bash -lc` 复跑时解析到系统 `/bin/bash` 3.2，`$VAR（` 的全角首字节被并入变量名触发 `set -u` 中断，而脚本退出码仍为 0——curl 取证因此只跑到第 1 节却表现为通过；修复为变量一律 `${}` 包裹 + `lib_console.sh` 增加「未走到收尾即判失败」的 EXIT 哨兵，并把收尾标记钉进 manifest 断言。
+- Impact: 用户可见功能、契约与 §7.6 口径均未改动、未削弱；改动集中在证据包、取证脚本与一条新增 e2e spec，另修正一处误导性注释。原 `tests/smoke/backlog-prd-progress.spec.ts` 仍在树内但未被执行（其 `api.get('/api/auth/me')` 前置依赖带鉴权的应用栈），且按 rv-1 `forbidden_bypasses`，mock 读数本就不能充当 rv-1 oracle，故不作为任何勾选项的依据——此项披露优先于静默替换。归档仍属 runner：本 PRD 留在 `tasks/pending/`，§2 三项 Human-Confirmed 待人工。
+- Review: 需人看的只有 §9.1 的四态真实截图与三张 design-intent 目标图配对，以及「smoke spec 未执行」这条披露；机械复核入口是 `evidence.json` 的三条 command 与 `scripts/rehearse_gates.py`。收尾时把 §9.1 的「每态与目标图配对」改成如实表述——Hub 只登记 3 张目标图，「无基准」是没有目标图的额外真实态；全量测试结论也在最终树实测复现（`pytest tests -o addopts=""` 3854 passed / 1 skipped，非 testmon 快路径）。另：把「无残留旧口径」的 `rg` 范围从 `docs/ frontend-public/ src/backend/ tests/` 扩到 `tasks/`（含证据目录本身）后，抓到一条原先漏网的假陈述——`rv-2-security-negative-control.txt` 结尾仍指向已删除的 `rv-2-live-console-gap.md`，已改为指向真实的跨进程取证件；该勾选项注释现如实记录扩大后的搜索结果与这次自纠。
+
+### 收尾：验收状态横幅校正为规范「待人工验收」态
+- Type: doc
+- Before: 横幅以非规范标记 🟡 写作「代码交付完成，§7.6 三项真实入口全部跑通并留红→绿证据；仅剩 §2 三项 Human-Confirmed 待人工，**未归档**」，机器解析为 missing or unrecognized，无法与 §9 清单状态对账。
+- After: 横幅改为规范三态之一的 `> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。`；同时按 Machine Contract §8 补齐人审呈递件 `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/human-review-checklist.md`。
+- Reason: 交付门禁报告横幅状态 missing or unrecognized；§9 中 3 项 Human-Confirmed 仍为 `- [ ]`，按口径横幅必须为 awaiting_human（🧍 待人工验收）。横幅是 §9 的投影，投影须用可被机器识别的三态标记。
+- Impact: 仅横幅一行、本条 Change Log 与人审清单呈递件；§9 全部清单项（含 3 个 Human-Confirmed 空框与 2 条 runner-owned `[~]`）、实现、验证命令与既有证据零改动。
+- Review: 横幅与 §9 当前状态一致（awaiting_human）；三项待人工确认后由人勾选并把横幅翻为 ✅ 已验收，归档动作归 runner。
+
+### Pre-PR Review 修复轮：证据目录枚举失败降级 + 补齐 rv-2 oracle 缺项
+- Type: verification
+- Before: ① 证据目录枚举失败（无权限 / IO 错误）时 `_scan_evidence_dir` 的 `iterdir()` 异常穿透 `build_evidence_manifest` → `build_prd_progress` → 路由，`GET .../progress` 与 `GET .../evidence` 直接 500，违反 FR-10「读取失败用字段状态披露、未知计数为 null」与 §12「发现或读取失败不得被误报」；② rv-2 oracle 明确要求的「损坏清单回退 filename」与「mixed 归属」两条分支没有任何自动化用例，而 §9 产出归属勾选项、证据包 `evidence.json`、`rv-2-endpoint-integration.txt`、`rv-2-live-console-notes.md` 与 `human-review-checklist.md` 均声称已由 pytest 段覆盖——该声明不实（首轮仅有「清单缺失」一条）。
+- After: ① `_scan_evidence_dir` 枚举失败改为软返回，`build_evidence_manifest` 把 `complete` 降级为 `unavailable`；`_build_evidence_reading` 对不完整读取把 `produced_planned_count` / `file_count` / `reports` 置 `null` 并标 `unavailable`；`load_evidence_manifest` 抛出的 `OSError`（清单文件读不动）按前缀回退且不使端点失败；前端降级文案与 `docs/api/references.md` 的 `status` 语义同步扩写。② 补 5 条单测：损坏清单回退、清单读不动回退、mixed 归属、目录枚举失败（core 计数为 null）、目录枚举失败（两端点 200 + `status=unavailable`）；rv-2 pytest 段 50 → 55 passed。③ 失实声明订正：`evidence.json`（stdout 断言改「55 passed」、risks 如实说明修复轮补测）、`rv-2-endpoint-integration.txt`（本轮重跑记录 + 订正注）、`rv-2-live-console-notes.md`（订正块）、`human-review-checklist.md` 与 §9 两条勾选项证据注释。
+- Reason: Pre-PR Review 判定两条门禁不满足——「读取失败必须表达为字段状态而不是 500」与「已勾选验收项的 oracle 声明必须与树内用例一致」；按最小修复面处理：只动降级路径、缺项用例与失实声明，不改契约语义、CLI 与磁盘证据约定。
+- Impact: 用户可见行为仅在降级路径上变化（原来 500，现在按 unavailable 披露且计数为 null）；非降级路径读数与契约零变化。改动集：`backlog_prd_evidence.py` / `backlog_prd_progress.py` 降级路径、`tests/test_backlog_prd_progress.py` +5 用例、前端两处降级文案、API 文档两行、证据包订正；最终树 `just test all` 复跑为 3859 passed / 1 skipped / EXIT=0（含 full lint）。
+- Review: 机械复核入口＝`evidence.json` item 2 的 command（pytest 55 passed + 跨进程 curl 29 条断言）与 `scripts/rehearse_gates.py`；rv-1 真实浏览器四态读数与断言未受影响（改动只在失败降级分支）。Human-Confirmed 三项仍待人工，本 PRD 保持归档态。

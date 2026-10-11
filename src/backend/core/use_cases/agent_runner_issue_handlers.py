@@ -50,13 +50,6 @@ from backend.core.use_cases.agent_runner_direct_pr_round import (
     DirectPrPublicationCandidate,
     reset_unstarted_direct_pr_selection,
 )
-from backend.core.use_cases.agent_runner_recovery_selection import (
-    DirectPrHandoffRequest,
-    finish_direct_pr_handoff,
-    admit_claimed_selection,
-    RecoverySelectionRequest,
-    resolve_recovery_selection,
-)
 from backend.core.use_cases.agent_runner_events import (
     find_latest_failure_context_comment,
     has_failure_context_marker,
@@ -72,14 +65,25 @@ from backend.core.use_cases.agent_runner_git import (
     get_current_branch,
     has_changes,
 )
+from backend.core.use_cases.agent_runner_pr_handoff import (
+    _build_pr_handoff_ref_block,
+    _with_pr_handoff_ref,
+)
 from backend.core.use_cases.agent_runner_publication import (
+    LocalCommitReuseRequest,
     _finish_existing_commit_publication,
     _finish_implementation_publication,
     _reuse_existing_local_commit,
     _reuse_local_commit,
-    LocalCommitReuseRequest,
 )
 from backend.core.use_cases.agent_runner_publish import publish_changes
+from backend.core.use_cases.agent_runner_recovery_selection import (
+    DirectPrHandoffRequest,
+    RecoverySelectionRequest,
+    admit_claimed_selection,
+    finish_direct_pr_handoff,
+    resolve_recovery_selection,
+)
 from backend.core.use_cases.agent_runner_rework import build_missing_worktree_comment
 from backend.core.use_cases.agent_runner_supervisor import _run_supervisor_with_repair_loop
 from backend.core.use_cases.agent_runner_validation import (
@@ -102,6 +106,7 @@ from backend.core.use_cases.run_agent_once import (
     choose_agent,
     create_or_reuse_worktree,
     get_head_sha,
+    resolve_implementation_model_selection,
     resolve_repair_agent,
 )
 
@@ -163,6 +168,7 @@ def _process_blocked_resolution(
     repo_path: Path,
     config: AppConfig,
     agent: str,
+    fallback_preset: str | None = None,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None = None,
@@ -182,6 +188,9 @@ def _process_blocked_resolution(
         repo_path: 仓库根目录
         config: 应用配置
         agent: Agent 覆盖
+        fallback_preset: 回退链条轮到本候选时携带的预设名（由
+            :func:`run_issue_with_agent_fallback` 注入）；``None`` 表示沿用
+            implementation 阶段绑定。
         github_client: GitHub 客户端
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
@@ -198,15 +207,13 @@ def _process_blocked_resolution(
 
     selected_agent = choose_agent(issue, config, agent)
     # implementation 阶段绑定的模型选择：换人（CLI --agent 显式指定 / 回退链
-    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入。
-    from backend.core.use_cases.lifecycle_agent_resolution import (
-        resolve_lifecycle_model_selection,
-    )
-    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
-
-    implementation_model_selection = drop_model_selection_for_agent(
+    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入；回退链条轮到
+    # 携带 preset 的候选时改按该候选预设解析（单一入口见 core helper）。
+    implementation_model_selection = resolve_implementation_model_selection(
         selected_agent,
-        resolve_lifecycle_model_selection("implementation", config, issue=issue),
+        config,
+        issue=issue,
+        fallback_preset=fallback_preset,
     )
 
     # 定位 worktree 并确认分支
@@ -295,66 +302,6 @@ def _process_blocked_resolution(
         )
     finally:
         _release_blocked_claim_lock(lock_path)
-
-
-# Draft PR 正文里指向交接评论的那一段的锚点。有了它，重复耗尽时改写的是同一段而
-# 不是越叠越长；也让"正文只是快照、评论才是事实源"这条边界在 PR 上写明。
-_PR_HANDOFF_REF_MARKER = "<!-- iar:failure-context-ref -->"
-
-
-def _build_pr_handoff_ref_block(
-    handoff_url: str,
-    *,
-    attempt_count: int,
-    handoff_comment_posted: bool,
-) -> str:
-    """构造 Draft PR 正文尾部固定附上的交接回链段。
-
-    这一段只是**指向**交接评论的快照说明，不复述结论：交接评论是唯一事实源，PR
-    正文可能落后于它。它也不改变任何状态——能不能签核、合并、归档仍由既有门禁按
-    ``validation/verifier-passed`` 与当前 tree 的证据判定。
-
-    ``handoff_comment_posted`` 为 ``False`` 时（评论写入自身失败）不能再把它写成
-    "权威交接记录"，否则 PR 会指向一条根本不存在的评论；此时退化为指向 Issue 的
-    评论列表，措辞如实降级。
-    """
-    record_line = (
-        f"- Authoritative handoff record (latest round): <{handoff_url}>"
-        if handoff_comment_posted
-        else (
-            "- Handoff record could not be posted to this Issue; see the Issue "
-            f"comment list for whatever the runner managed to report: <{handoff_url}>"
-        )
-    )
-    return "\n".join(
-        [
-            _PR_HANDOFF_REF_MARKER,
-            "",
-            "## Previous Round Handoff",
-            "",
-            f"This Draft PR was published from a **WIP checkpoint** after the runner "
-            f"exhausted its recovery budget ({attempt_count} attempts). The commits "
-            "here are mid-progress work, not a finished implementation, and the "
-            "existence of this PR is not an acceptance result.",
-            "",
-            record_line,
-            "- `validation/verifier-passed` is **absent**, so the existing sign-off, "
-            "merge and archive gates keep refusing this PR by design. Nothing in this "
-            "section changes that, and the gates are not modified by this feature.",
-            "",
-        ]
-    )
-
-
-def _with_pr_handoff_ref(existing_pr_body: str, handoff_ref_block: str) -> str:
-    """把交接回链段固定附到 PR 正文尾部，重复写入时替换而非追加。"""
-    body_without_previous_ref = existing_pr_body
-    if _PR_HANDOFF_REF_MARKER in existing_pr_body:
-        body_without_previous_ref = existing_pr_body.split(_PR_HANDOFF_REF_MARKER, 1)[0]
-    stripped_body = body_without_previous_ref.rstrip()
-    if not stripped_body:
-        return handoff_ref_block
-    return f"{stripped_body}\n\n{handoff_ref_block}"
 
 
 def _resolve_handoff_comment_url(
@@ -582,6 +529,7 @@ def _process_ready_issue(
     repo_path: Path,
     config: AppConfig,
     agent: str,
+    fallback_preset: str | None = None,
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     on_claimed: Callable[[], None] | None = None,
@@ -624,15 +572,13 @@ def _process_ready_issue(
 
     selected_agent = choose_agent(issue, config, agent)
     # implementation 阶段绑定的模型选择：换人（CLI --agent 显式指定 / 回退链
-    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入。
-    from backend.core.use_cases.lifecycle_agent_resolution import (
-        resolve_lifecycle_model_selection,
-    )
-    from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
-
-    implementation_model_selection = drop_model_selection_for_agent(
+    # 换候选）在 drop 里丢弃并记日志，模型 flag 绝不跨 CLI 注入；回退链条轮到
+    # 携带 preset 的候选时改按该候选预设解析（单一入口见 core helper）。
+    implementation_model_selection = resolve_implementation_model_selection(
         selected_agent,
-        resolve_lifecycle_model_selection("implementation", config, issue=issue),
+        config,
+        issue=issue,
+        fallback_preset=fallback_preset,
     )
 
     # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读后确认最早认领者才切 running。

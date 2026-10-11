@@ -2,6 +2,11 @@
 
 把"当前生效值 + 来源层"的计算、以及写回入参的合法性校验收敛在这里，API 路由层
 只做 HTTP 映射，避免业务逻辑落进 ``api/routes``。
+
+本模块只负责 **Agent-only** 旧矩阵（``lifecycle_agents`` 表）与 agent 标签/回退顺序，
+以及两层 scope、字段来源词汇表、``LifecycleAgentsUpdateError`` 等共用底座；九阶段
+「模型设置」聚合视图与其写前校验在 :mod:`~backend.core.use_cases.lifecycle_settings_console`，
+预设引用的完整性门禁在 :mod:`~backend.core.use_cases.lifecycle_settings_integrity`。
 """
 
 from __future__ import annotations
@@ -9,7 +14,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from backend.core.shared.models.agent_runner import AppConfig, AgentSpec
+from backend.core.shared.models.agent_model_preset import (
+    ModelSelection,
+    resolve_model_selection,
+)
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+)
 from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_AUTO,
     LIFECYCLE_AGENT_AUTO_DESCRIPTIONS,
@@ -28,12 +39,31 @@ from backend.core.shared.models.lifecycle_agent import (
 from backend.core.use_cases.lifecycle_agent_resolution import (
     legacy_configured_agent,
     resolve_lifecycle_agent,
-    resolve_lifecycle_model_selection,
 )
 
 SCOPE_GLOBAL = "global"
 SCOPE_REPOSITORY = "repository"
+#: CLI 读取专用：按 cwd 能否唯一解析仓库自动落到 repository 或 global；
+#: 视图本身只接受 :data:`SCOPE_GLOBAL` / :data:`SCOPE_REPOSITORY`，effective
+#: 在上游（CLI / route）解析成二者之一后再取视图。
+SCOPE_EFFECTIVE = "effective"
 VALID_SCOPES: frozenset[str] = frozenset({SCOPE_GLOBAL, SCOPE_REPOSITORY})
+
+#: 聚合视图逐字段来源的取值（前端据此区分"预设声明 / 继承实现 / Agent 默认 /
+#: 该 Agent 不支持该参数"四种语义，绝不混成一个空串）。
+FIELD_SOURCE_PRESET = "preset"
+FIELD_SOURCE_INHERITED = "inherited"
+FIELD_SOURCE_AGENT_DEFAULT = "agent_default"
+FIELD_SOURCE_NOT_SUPPORTED = "not_supported"
+#: 阶段绑定 / 回退候选指向的预设已被删除或未声明时，如实标注该来源，绝不抛错、
+#: 绝不编造生效值（保证九键视图恒可渲染、写成功后读取不 500）。
+FIELD_SOURCE_PRESET_UNRESOLVED = "preset_unresolved"
+
+#: 预设定义来源层（scope=repository 时据全局层对比得出；scope=global 恒为
+#: :data:`LIFECYCLE_SOURCE_GLOBAL`）。
+PRESET_SOURCE_GLOBAL = "global"
+PRESET_SOURCE_REPOSITORY_ONLY = "repository_only"
+PRESET_SOURCE_REPOSITORY_OVERRIDES = "repository_overrides"
 
 
 class LifecycleAgentsUpdateError(ValueError):
@@ -91,13 +121,17 @@ def build_lifecycle_agents_view(
         entry_group = LIFECYCLE_AGENT_ENTRY_BY_KEY[lifecycle_key]
         # 阶段 -> 预设 绑定与生效模型（本 PRD 新增的只读展示字段）：绑定名
         # 取两层显式声明（仓库层 > 全局层），解析结果给出生效的模型/推理档；
-        # 未绑定时三项均为 ``None``（前端渲染为空，行为与过去一致）。
+        # 未绑定时三项均为 ``None``（前端渲染为空，行为与过去一致）。手改出的
+        # 悬空绑定（指向已删除 / 未声明预设）与聚合视图同口径容忍：三项如实为
+        # ``None``、effective_agent 为 ``None``，绝不回落 resolve（那会重新命中
+        # 同一条悬空绑定并抛错、把整个视图打成 500）。
         bound_preset_name = config.lifecycle_presets.declared_value(lifecycle_key)
         bound_selection = (
-            resolve_lifecycle_model_selection(lifecycle_key, config)
+            _resolve_bound_selection(config, bound_preset_name)
             if bound_preset_name is not None
             else None
         )
+        binding_unresolved = bound_preset_name is not None and bound_selection is None
         lifecycles.append(
             {
                 "key": lifecycle_key,
@@ -115,14 +149,18 @@ def build_lifecycle_agents_view(
                 "declared_value": in_scope_layer.get(lifecycle_key),
                 "inherited_value": other_layer.get(lifecycle_key),
                 # ``executor`` 阶段在无实现者上下文时无法解析成具体 agent，用
-                # ``effective_agent=None`` + ``follows_executor`` 如实表达"跟随实现者"。
+                # ``effective_agent=None`` + ``follows_executor`` 如实表达"跟随实现者"；
+                # 悬空绑定同理用 ``None`` 如实表达"该阶段当前无解析得到的 agent"。
                 "effective_agent": (
-                    None if follows_executor else resolve_lifecycle_agent(lifecycle_key, config)
+                    None
+                    if follows_executor or binding_unresolved
+                    else resolve_lifecycle_agent(lifecycle_key, config)
                 ),
                 "follows_executor": follows_executor,
                 "source": _resolve_source_layer(lifecycle_key, config),
-                # 预设绑定视图（纯新增）：绑定的预设名 + 解析后的模型/推理档。
-                "preset": bound_preset_name,
+                # 预设绑定视图（纯新增）：绑定的预设名 + 解析后的模型/推理档；
+                # 悬空绑定时 preset 也如实为 ``None``（旧响应形状不变，不加新字段）。
+                "preset": bound_preset_name if bound_selection is not None else None,
                 "model": bound_selection.model if bound_selection is not None else None,
                 "reasoning_effort": (
                     bound_selection.reasoning_effort if bound_selection is not None else None
@@ -159,6 +197,19 @@ def build_lifecycle_agents_view(
     }
 
 
+def _require_known_lifecycle_key(lifecycle_key: str) -> None:
+    """阶段键必须是 ``LIFECYCLE_AGENT_KEYS`` 成员，否则抛字段级错误。
+
+    Raises:
+        LifecycleAgentsUpdateError: 未知生命周期阶段键。
+    """
+    if lifecycle_key not in LIFECYCLE_AGENT_KEYS:
+        raise LifecycleAgentsUpdateError(
+            f"Unknown lifecycle key '{lifecycle_key}'. "
+            f"Valid keys: {', '.join(LIFECYCLE_AGENT_KEYS)}."
+        )
+
+
 def validate_lifecycle_agents_update(
     values: Mapping[str, Any],
     config: AppConfig,
@@ -177,11 +228,7 @@ def validate_lifecycle_agents_update(
     """
     normalized_values: dict[str, str | None] = {}
     for lifecycle_key, raw_value in values.items():
-        if lifecycle_key not in LIFECYCLE_AGENT_KEYS:
-            raise LifecycleAgentsUpdateError(
-                f"Unknown lifecycle key '{lifecycle_key}'. "
-                f"Valid keys: {', '.join(LIFECYCLE_AGENT_KEYS)}."
-            )
+        _require_known_lifecycle_key(lifecycle_key)
         if raw_value is None:
             normalized_values[lifecycle_key] = None
             continue
@@ -324,21 +371,13 @@ def validate_agent_labels_update(
     return normalized_labels
 
 
-def find_agent_spec(config: AppConfig, agent_name: str) -> AgentSpec | None:
-    """返回已注册 agent 的 spec（供写入前确认），未注册时返回 ``None``。"""
-    return config.agents.get(agent_name)
+def _resolve_bound_selection(config: AppConfig, bound_preset: str) -> ModelSelection | None:
+    """把阶段 / 候选绑定的预设名解析成选择；预设缺失（已删除或未声明）时返回 ``None``。
 
-
-__all__ = [
-    "SCOPE_GLOBAL",
-    "SCOPE_REPOSITORY",
-    "VALID_SCOPES",
-    "LifecycleAgentsUpdateError",
-    "build_agent_fallback_order_view",
-    "build_agent_labels_view",
-    "build_lifecycle_agents_view",
-    "find_agent_spec",
-    "validate_agent_fallback_order_update",
-    "validate_agent_labels_update",
-    "validate_lifecycle_agents_update",
-]
+    与 :func:`resolve_model_selection` 的差别只在"预设不存在"：这里不抛错，交由调用方
+    如实标注 :data:`FIELD_SOURCE_PRESET_UNRESOLVED`。运行态解析（真正拼 argv）仍走
+    ``resolve_model_selection`` 的 fail-fast，视图只负责呈现磁盘事实。
+    """
+    if bound_preset not in config.agent_presets:
+        return None
+    return resolve_model_selection(bound_preset, config)
