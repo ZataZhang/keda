@@ -41,8 +41,8 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 #: 子命令说明子目录。
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
-#: 子命令说明的约定份数（PRD issue-234：恰好八条，多一条少一条都要先过守卫）。
-_EXPECTED_REFERENCE_COUNT = 8
+#: 子命令说明的约定份数（PRD issue-234 与生命周期查询路由：恰好九条）。
+_EXPECTED_REFERENCE_COUNT = 9
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
 _LEGACY_SKILL_NAME = product_identity.LEGACY_OPERATOR_SKILL_NAME
@@ -450,6 +450,14 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("backlog", "ci", "status"): {"--prd", "--json", "--repo", "--repo-id"},
     ("backlog", "ci", "policy"): {"--global", "--prd", "--repo", "--repo-id"},
     ("backlog", "ci", "repair"): {"--prd", "--dry-run", "--repo", "--repo-id"},
+    ("lifecycle",): {
+        "--issue",
+        "--repo-id",
+        "--phase",
+        "--reached",
+        "--output",
+        "--json",
+    },
     ("agent", "doctor"): {
         "--all-profiles",
         "--json",
@@ -475,7 +483,7 @@ def _real_flags_by_path() -> dict[tuple[str, ...], set[str]]:
 def test_packaged_skill_command_examples_match_cli_help() -> None:
     """主文件与每份子命令说明里的 kc 命令示例，所用 flag 必须真实存在于当前 CLI。
 
-    失败信息必须指名来源文件与旗标：内容拆到九份文件后，不指名的守卫会把 agent
+    失败信息必须指名来源文件与旗标：内容拆到十份文件后，不指名的守卫会把 agent
     引到错误的文件里去修（FR-6 / rv-2）。
     """
     allowed_flags = _ALLOWED_FLAGS
@@ -524,7 +532,7 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
 # ── 路由与自我描述（rv-4）────────────────────────────────────────────────────
 
 #: 每条子命令说明的口语关键词：自动触发只认 frontmatter description，路由表对
-#: 模型不可见，因此八条子命令各自至少一个关键词必须出现在 description 里。
+#: 模型不可见，因此每条子命令各自至少一个关键词必须出现在 description 里。
 _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "create-issue.md": ("建 issue", "create an Issue"),
     "issue-inspect.md": ("查 issue", "inspect Issues"),
@@ -534,6 +542,7 @@ _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "daemon.md": ("后台跑", "daemons"),
     "ci.md": ("CI 交付", "auto-repair"),
     "setup-and-config.md": ("装环境", "initialize a repository"),
+    "lifecycle.md": ("查生命周期", "Issue lifecycle"),
 }
 
 
@@ -564,7 +573,7 @@ def _routes_table_rows() -> list[str]:
 
 
 def test_packaged_skill_routes_table_points_at_existing_references() -> None:
-    """路由表恰好八行、每行指向一份真实存在的子命令说明，且全部说明被指向。"""
+    """路由表每行指向一份真实存在的子命令说明，且全部说明被指向。"""
     rows = _routes_table_rows()
     header_row, data_rows = rows[0], rows[1:]
     assert (
