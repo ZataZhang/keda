@@ -363,7 +363,6 @@ No interactive prototype file changes in this PRD.
 
 ## 8. Delivery Dependencies
 
-- Group: none
 - Depends on tasks/issues:
   - none
 - Gate type: none
@@ -513,3 +512,12 @@ No interactive prototype file changes in this PRD.
 - Reason: 需求仍成立，但当前没有紧迫的使用场景，主动从待执行队列移出，避免占用排期与给人"待办"的错觉。`tasks/hold/` 有意不被 `just prd status`、PRD 领锁与验收 hook 扫描（见 `tasks/hold/README.md`）。
 - Impact: 本 PRD 不再出现在 PRD 看板的 `PENDING` 段；不改变任何行为要求、验收判据或 RV oracle。解除暂缓时移回 `tasks/pending/` 并把横幅恢复为 `⬜ 未开工`。
 - Review: 自审通过；确认移动后其余 `tasks/pending/` PRD 不受影响，且 `tasks/hold/` 不被现有工具识别为待办。
+
+### 清理 §8 旧版 Group 字段（工具兼容层移除，2026-10-11）
+
+- Type: doc
+- Before: §8 含旧版 `- Group: none` 字段，依赖 runner 解析器对任务组旧字段的静默忽略才能建 Issue。
+- After: 删除 `- Group: none`；依赖声明保持 `Depends on tasks/issues: none` / `Gate type: none` 不变。
+- Reason: 任务组依赖已从 runner 移除，解析器不再接受 `Group` / `Depends on groups` 旧字段（改为显式报错），本 PRD 解除暂缓后须能正常建 Issue。
+- Impact: 不改变任何行为要求、验收判据或 RV oracle；解除暂缓后 `kc issue create` 不再因旧字段失败。
+- Review: 自审通过；以 `parse_delivery_dependencies` 复跑确认 §8 解析无报错。

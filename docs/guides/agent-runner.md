@@ -259,7 +259,7 @@ PRD 引用只在 `kc issue create` 发布时解析，不会原样写入 Issue bo
 - 引用 PRD 还没有 Issue link 时，命令 fail fast，并提示先创建上游 Issue（`kc issue create` 会把 Issue 链接回写进 PRD），或改成明确的 Issue 编号。
 - 无依赖时可以留空或写 `none`。
 
-> 历史 PRD 里可能残留旧版 `Group` / `Depends on groups` 字段；解析器接受但忽略它们，不再产生任务组依赖。
+> 任务组依赖已移除：PRD 里出现旧版 `Group` / `Depends on groups` 字段会让 `kc issue create` 直接报错（不再静默忽略），请改用 `Depends on tasks/issues` 下的 Issue 编号。归档 PRD 保留旧格式，仅在重新用于建 Issue 时会失败。
 
 ### CLI 参数覆盖
 

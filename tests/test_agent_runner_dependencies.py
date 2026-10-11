@@ -84,18 +84,26 @@ class TestParseDeliveryDependencies:
         assert result.depends_on_prds == ()
         assert result.gate_type == "none"
 
-    def test_legacy_group_fields_are_accepted_and_ignored(self) -> None:
+    def test_legacy_group_field_fails_loudly(self) -> None:
         prd_text = """
 ## Delivery Dependencies
 
 - Group: my-group
-- Depends on groups: group-a, group-b
 - Depends on tasks/issues: #42
 - Gate type: hard
 """
-        result = parse_delivery_dependencies(prd_text)
-        assert result.depends_on_issues == (42,)
-        assert result.gate_type == "hard"
+        with pytest.raises(ValueError, match="Task-group dependencies were removed"):
+            parse_delivery_dependencies(prd_text)
+
+    def test_legacy_depends_on_groups_field_fails_loudly(self) -> None:
+        prd_text = """
+## Delivery Dependencies
+
+- Depends on groups: group-a, group-b
+- Gate type: hard
+"""
+        with pytest.raises(ValueError, match="Task-group dependencies were removed"):
+            parse_delivery_dependencies(prd_text)
 
     def test_prd_filename_references_are_preserved(self) -> None:
         prd_text = """

@@ -661,8 +661,7 @@ def _materialize_prd_dependencies(
     """Resolve PRD path/name dependencies into Issue numbers.
 
     A referenced PRD must carry a real ``- GitHub Issue: .../issues/N`` link;
-    otherwise the command fails fast with an actionable error rather than
-    falling back to an unsatisfiable task-group dependency.
+    otherwise the command fails fast with an actionable error.
     """
     if repo_path is None:
         raise ValueError(

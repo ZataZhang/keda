@@ -57,9 +57,6 @@ _DELIVERY_PRD_PATH_RE = re.compile(
 )
 _NONE_DEPENDENCY_VALUES = {"", "none", "n/a", "na", "-"}
 
-#: 旧版 ``Group`` / ``Depends on groups`` 字段的哨兵值：解析器接受但忽略这些字段。
-_LEGACY_IGNORED_DELIVERY_FIELD = "__legacy_ignored__"
-
 
 def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     """Parse the structured ``Delivery Dependencies`` section from a PRD.
@@ -104,11 +101,6 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
         if field_match:
             raw_key = field_match.group("key").strip()
             key = _normalize_delivery_field_key(raw_key)
-            if key == _LEGACY_IGNORED_DELIVERY_FIELD:
-                # 旧版 ``Group`` / ``Depends on groups`` 已废弃：接受但忽略，
-                # 使历史 PRD 仍可解析，不再产生任务组依赖。
-                current_key = ""
-                continue
             current_key = key
             value = field_match.group("value").strip()
             if value:
@@ -155,12 +147,17 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
 def _normalize_delivery_field_key(raw_key: str) -> str:
     """Normalize a structured Delivery Dependencies field name.
 
-    旧版 ``Group`` / ``Depends on groups`` 字段返回
-    :data:`_LEGACY_IGNORED_DELIVERY_FIELD`，由调用方跳过，不再参与解析。
+    ``Group`` / ``Depends on groups`` 是已移除的任务组旧字段：定向报错而不再
+    静默忽略，避免旧格式被复用时依赖被无声丢掉。
     """
     key = raw_key.strip().lower().replace(" ", "_")
     if key in ("group", "depends_on_groups", "depends_on_group"):
-        return _LEGACY_IGNORED_DELIVERY_FIELD
+        raise ValueError(
+            f"Legacy field in Delivery Dependencies: {raw_key!r}. "
+            "Task-group dependencies were removed; express the dependency "
+            "with GitHub Issue numbers under 'Depends on tasks/issues' "
+            "(for example '#42')."
+        )
     if key in (
         "depends_on_tasks/issues",
         "depends_on_tasks",
@@ -274,8 +271,7 @@ def _looks_like_issue_or_prd_ref(candidate_ref: str) -> bool:
 def parse_dependency_marker(issue_body: str) -> DependencyDeclaration | None:
     """Parse ``iar:depends-on`` hidden markers from an Issue body.
 
-    旧版 marker 中的 ``group:<name>`` token 会被忽略（任务组依赖已移除）；
-    只解析 ``#N`` Issue 引用。
+    只解析 ``#N`` Issue 引用与 ``mode="stack"`` 策略 token。
 
     Args:
         issue_body: Full Issue body Markdown.
