@@ -1062,7 +1062,7 @@ uv run kc workflow install preview --force
 - 剔除按变量名去重告警：某变量在本进程内**首次**被剔除时记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值），之后同一变量再被剔除只记 DEBUG——默认档净化覆盖每一次 `SubprocessRunner.run()`，工具命令单轮可达数十次，逐次 WARNING 会把这条排障信号淹掉。若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
 - 因此**从交互式 AI 会话的 shell 里直接启动 `kc run` / `kc supervise` / `kc issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
 - 白名单档（浏览器 E2E 验证子进程）的 fail-fast 前提校验不因默认档净化而改变：前提不成立时依旧报错，绝不静默回退到任何继承形态
-- 净化约定分两层守护：默认档「`run()` 一处构造、全分支透传」由 `tests/test_process_runner.py` 直接断言；守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 只钉住可以被 `run()` **之外直接调用**的派发点（`run_filtered_claude_stream`、`_run_pty_stream` 与 `output_protocols/` 全目录），新增这类派发点必须自行接入净化环境。Issue #230 之前「工具命令路径不净化」的旧约定已废止
+- 净化约定分两层守护：默认档「`run()` 一处构造、全分支透传」由 `tests/test_process_runner.py` 直接断言；守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 只钉住可以被 `run()` **之外直接调用**的派发点（`process_runner_streams.py` 中的 `run_filtered_claude_stream`、`_run_pty_stream` 与 `output_protocols/` 全目录），新增这类派发点必须自行接入净化环境。Issue #230 之前「工具命令路径不净化」的旧约定已废止
 
 ## 浏览器 E2E 验证命令形态（browser_e2e）
 
@@ -4527,10 +4527,10 @@ Agent Runner 的代码分布在四层架构中：
 - `core/shared/models/agent_runner.py` / `agent_deliberation.py` — 领域模型（frozen dataclasses）
 - `core/shared/interfaces/agent_runner.py` — 抽象端口（`IGitHubClient`、`IProcessRunner`、`IAgentTranscriptRunner`）
 - `core/shared/interfaces/agent_output_view.py` — 终端输出视图抽象端口（`IAgentOutputView`）
-- `core/use_cases/` — 业务用例（`sync_labels`、`create_issue_from_prd`、`run_agent_once`、`run_agent_repositories_once`、`run_agent_daemon`、`agent_review`、`pr_supervisor`、`review_once`、`review_daemon`、`run_agent_deliberation`）
+- `core/use_cases/` — 业务用例（`sync_labels`、`create_issue_from_prd`、`run_agent_once`、`run_agent_repositories_once`、`run_agent_daemon`、`agent_review`、`pr_supervisor`、`review_once`、`review_daemon`、`run_agent_deliberation`）；其中 `agent_runner_agent_selection.py` 收口 Agent 路由与审核/修复角色选择，`agent_runner_resilient_invocation.py` 管理单次 Agent 调用的续传与瞬时错误重试，`agent_review_decisions.py` 负责审核结果解析与合并
 - `engines/agent_runner/factory.py` — 基础设施适配层（实例化实现并注入用例）
 - `engines/agent_runner/live_terminal.py` — 终端 live view 适配器（Rich 自适应分栏/竖向堆叠 / plain fallback）
-- `infrastructure/github_client.py` / `infrastructure/process_runner.py` — 外部系统实现
+- `infrastructure/github_client.py` / `infrastructure/process_runner.py` — 外部系统实现；`process_runner_streams.py` 承担结构化输出解析和 PTY 流处理，`process_runner.py` 保留子进程执行入口与兼容导出
 - `api/cli.py` — CLI 入口
 - `api/routes/agent_runner.py` — FastAPI 只读路由
 

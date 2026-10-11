@@ -22,7 +22,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# process_runner.py 中只有这两个函数是 agent 流式派发点；
+# process_runner_streams.py 中只有这两个函数是 agent 流式派发点；
 # SubprocessRunner.run 默认档也净化工具命令环境，并向 _run_captured_process 传入结果；
 # 该默认档的行为由 tests/test_process_runner.py 覆盖，本守卫仍检查流式派发点显式净化。
 PROCESS_RUNNER_AGENT_SPAWN_FUNCTIONS = frozenset(
@@ -38,7 +38,9 @@ OUTPUT_PROTOCOLS_DIR = (
     REPO_ROOT / "src" / "backend" / "engines" / "agent_runner" / "output_protocols"
 )
 
-PROCESS_RUNNER_PATH = REPO_ROOT / "src" / "backend" / "infrastructure" / "process_runner.py"
+PROCESS_RUNNER_STREAMS_PATH = (
+    REPO_ROOT / "src" / "backend" / "infrastructure" / "process_runner_streams.py"
+)
 
 SANITIZER_NAME = "build_sanitized_child_env"
 
@@ -131,12 +133,14 @@ def test_agent_spawn_sites_pass_sanitized_env() -> None:
     violations: list[str] = []
 
     process_runner_sites = _collect_spawn_sites(
-        PROCESS_RUNNER_PATH, PROCESS_RUNNER_AGENT_SPAWN_FUNCTIONS
+        PROCESS_RUNNER_STREAMS_PATH, PROCESS_RUNNER_AGENT_SPAWN_FUNCTIONS
     )
     found_functions = {site.function for site in process_runner_sites}
     if found_functions != set(PROCESS_RUNNER_AGENT_SPAWN_FUNCTIONS):
         missing = set(PROCESS_RUNNER_AGENT_SPAWN_FUNCTIONS) - found_functions
-        violations.append(f"{PROCESS_RUNNER_PATH}: agent 派发函数缺失或被重命名: {sorted(missing)}")
+        violations.append(
+            f"{PROCESS_RUNNER_STREAMS_PATH}: agent 派发函数缺失或被重命名: {sorted(missing)}"
+        )
 
     protocol_files = sorted(OUTPUT_PROTOCOLS_DIR.glob("*.py"))
     assert protocol_files, f"output_protocols 目录为空: {OUTPUT_PROTOCOLS_DIR}"
