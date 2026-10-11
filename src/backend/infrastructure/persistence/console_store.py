@@ -891,6 +891,12 @@ class SqliteConsoleStore(InvocationEventStoreMixin):
             )
             connection.commit()
 
+    def delete_backlog_settings(self, repo_id: str) -> None:
+        """删除指定仓库的 backlog 设置行（恢复继承＝删行，幂等）。"""
+        with self._connect() as connection:
+            connection.execute("DELETE FROM backlog_settings WHERE repo_id = ?", (repo_id,))
+            connection.commit()
+
     def enqueue_backlog(self, entry: BacklogQueueEntry) -> int:
         """将 PRD 加入 backlog 队列，返回自增 ID；失败时抛出异常。"""
         with self._connect() as connection:

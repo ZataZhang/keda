@@ -405,7 +405,7 @@ def test_cli_parser_review_daemon_default_interval_is_none() -> None:
 
 
 def test_main_daemon_default_interval_uses_config(monkeypatch) -> None:
-    """Typer daemon without --interval should use the configured 120s default."""
+    """不传 --interval 时 daemon 使用配置的 120 秒默认值。"""
     from backend.api.cli import main
 
     monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
@@ -423,6 +423,8 @@ def test_main_daemon_default_interval_uses_config(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all"])
 
@@ -457,7 +459,7 @@ def test_main_review_daemon_default_interval_uses_config(monkeypatch) -> None:
 
 
 def test_main_daemon_interval_override(monkeypatch) -> None:
-    """Typer daemon --interval should override the config default."""
+    """daemon 的 --interval 覆盖配置默认值。"""
     from backend.api.cli import main
 
     monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
@@ -475,6 +477,8 @@ def test_main_daemon_interval_override(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all", "--interval", "300"])
 
@@ -1197,7 +1201,7 @@ def test_main_daemon_cwd_uninitialized_repo_rejected(monkeypatch) -> None:
 
 
 def test_main_daemon_explicit_all_targets_all_repositories(monkeypatch) -> None:
-    """daemon --all should still target all enabled registry entries."""
+    """daemon --all 仍选择所有已启用的仓库条目。"""
     from backend.api.cli import main
 
     monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
@@ -1220,6 +1224,8 @@ def test_main_daemon_explicit_all_targets_all_repositories(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon"),
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
         patch(
             "backend.api.cli_helpers.detect_git_repository_root",
             return_value=Path("/tmp/repo"),
@@ -4105,7 +4111,7 @@ def test_main_run_passes_transcript_runner_factory(monkeypatch) -> None:
 
 
 def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
-    """``iar daemon`` should also inject a transcript runner factory."""
+    """daemon 入口也会注入 transcript runner factory。"""
     from backend.api.cli import main
 
     monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
@@ -4123,6 +4129,8 @@ def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli.create_github_client"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all"])
 

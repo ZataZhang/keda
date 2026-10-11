@@ -27,6 +27,10 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessRecord,
 )
 from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.use_cases.backlog_concurrency import (
+    describe_ceiling_source,
+    resolve_execution_ceiling,
+)
 
 #: supervisor 记录中表示进程仍然存活的状态值。
 _RUNNING_STATUS = "running"
@@ -46,7 +50,14 @@ class BacklogAutopilotState:
         auto_merge_enabled: 两道合并开关 ``autopilot.enabled`` 与
             ``safety.auto_merge`` 都开启时为真，只读展示。
         daemon_running: 该仓库是否存在运行中的 daemon 进程。
-        max_parallel: Backlog 并发上限（来自既有 backlog settings）。
+        policy_max_parallel: Backlog「并发」策略值；``None`` 表示从未保存
+            （继承 runner 容量）。
+        effective_max_parallel: 解析后的单一生效并发上限，与 daemon 认领、
+            补位、全局开始消费的是同一个值。
+        runner_capacity: runner 侧容量（``max_concurrent_issues``），策略只能
+            把生效值压得更低，不会超过它。
+        ceiling_source: 生效值来源：``inherited`` / ``policy`` /
+            ``capped_by_capacity``。
         config_source: Backlog 持久值的来源文件（仓库相对路径）。
         persisted_enabled: 仓库本地 Backlog 配置中的持久值；``None`` 表示文件缺失或键
             未设置（此时生效值来自全局配置默认值）。
@@ -56,7 +67,10 @@ class BacklogAutopilotState:
     enabled: bool
     auto_merge_enabled: bool
     daemon_running: bool
-    max_parallel: int
+    policy_max_parallel: int | None
+    effective_max_parallel: int
+    runner_capacity: int
+    ceiling_source: str
     config_source: str
     persisted_enabled: bool | None
 
@@ -109,10 +123,16 @@ def load_autopilot_state(
     repo_id: str,
     contexts: Sequence[RepositoryRunContext],
     supervisor: IRunnerProcessSupervisor,
-    max_parallel: int,
+    policy_max_parallel: int | None,
     editor: IRepositoryAutopilotSettingsEditor,
 ) -> BacklogAutopilotState:
-    """聚合并返回当前仓库的 Autopilot 状态快照（每次调用都必须 fresh）。"""
+    """聚合并返回当前仓库的 Autopilot 状态快照（每次调用都必须 fresh）。
+
+    容量在本函数内从生效配置读取（``runner.max_concurrent_issues``，非法值按 1
+    兜底），策略值由调用方传入；两者经 ``resolve_execution_ceiling`` 解析成
+    生效上限——与 daemon / 补位 / 全局开始共用同一函数，页面展示的就是闸门
+    实际兑现的值。
+    """
     context = _resolve_context(repo_id, contexts)
     try:
         persisted_enabled = editor.read_enabled(context.repo_path)
@@ -120,6 +140,8 @@ def load_autopilot_state(
         # 受限端口以 ValueError 表达「文件非法 / 键类型不符」：统一转成用例层错误，
         # 让 GET 也返回稳定 4xx 契约，而不是把 infrastructure 异常漏成 500。
         raise BacklogAutopilotError(str(exc)) from exc
+    runner_capacity = max(1, context.config.runner.max_concurrent_issues)
+    effective_max_parallel = resolve_execution_ceiling(policy_max_parallel, runner_capacity)
     return BacklogAutopilotState(
         repo_id=repo_id,
         enabled=bool(context.config.backlog.auto_advance),
@@ -127,7 +149,10 @@ def load_autopilot_state(
             context.config.autopilot.enabled and context.config.safety.auto_merge
         ),
         daemon_running=daemon_is_running(repo_id, supervisor.list_processes()),
-        max_parallel=max_parallel,
+        policy_max_parallel=policy_max_parallel,
+        effective_max_parallel=effective_max_parallel,
+        runner_capacity=runner_capacity,
+        ceiling_source=describe_ceiling_source(policy_max_parallel, effective_max_parallel),
         config_source=_relative_source_name(
             editor.config_source_path(context.repo_path), context.repo_path
         ),
@@ -142,7 +167,7 @@ def set_autopilot_enabled(
     editor: IRepositoryAutopilotSettingsEditor,
     contexts_loader: Callable[[], Sequence[RepositoryRunContext]],
     supervisor: IRunnerProcessSupervisor,
-    max_parallel: int,
+    policy_max_parallel: int | None,
 ) -> BacklogAutopilotState:
     """修改目标仓库 ``backlog.auto_advance``，并以 fresh load 读回作为成功判据。
 
@@ -153,7 +178,7 @@ def set_autopilot_enabled(
         contexts_loader: 重新解析生效配置的加载器（写后必须重新调用，
             以便从磁盘而不是内存拿到最新值）。
         supervisor: 进程监管端口，用于如实报告 daemon 是否在跑。
-        max_parallel: Backlog 并发上限（不受本写回影响，原样透传）。
+        policy_max_parallel: Backlog「并发」策略值（不受本写回影响，原样透传）。
 
     Returns:
         写回并重新加载后的状态快照。
@@ -180,6 +205,6 @@ def set_autopilot_enabled(
         repo_id=repo_id,
         contexts=(fresh_context,),
         supervisor=supervisor,
-        max_parallel=max_parallel,
+        policy_max_parallel=policy_max_parallel,
         editor=editor,
     )
