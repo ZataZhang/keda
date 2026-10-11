@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import IssueSummary, ReviewEventMarker
-from backend.core.use_cases.agent_runner_events import find_latest_unconsumed_marker
+from backend.core.use_cases.agent_runner_workflow import find_latest_unconsumed_marker
 
 _BLOCKED_RESOLUTION_COMPLETION_PHASES = {
     "implementation_complete",
