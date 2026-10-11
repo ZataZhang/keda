@@ -19,6 +19,9 @@ import backend.api.routes.agent_runner_backlog as backlog_routes
 import backend.core.use_cases.backlog_prd_progress as backlog_prd_progress_module
 from backend.api.app import app
 from backend.core.shared.models.agent_runner import AppConfig, CommandResult, RepositoryRunContext
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    extract_realistic_validation_items,
+)
 from backend.core.use_cases.backlog_prd_evidence import build_evidence_manifest
 from backend.core.use_cases.backlog_prd_progress import (
     EvidenceReports,
@@ -181,6 +184,94 @@ def test_parse_validation_plan_reviewer_other_is_null() -> None:
         "## Realistic Validation Plan\n\n```yaml\n- id: rv-1\n  behavior: x\n  reviewer: robot\n```\n"
     )
     assert plan[0].reviewer is None
+
+
+def test_parse_validation_plan_accepts_template_verbatim_suffixed_heading() -> None:
+    """prd skill 模板默认标题带 ``(Oracle 块)`` 后缀：不得因标题更宽而报「未声明验证计划」。
+
+    守卫的正是评审发现 1：旧解析器要求标题在 ``Realistic Validation Plan`` 处即换行，
+    对 ``### 7.6 Realistic Validation Plan (Oracle 块)`` 返回空列表。
+    """
+    suffixed = (
+        "### 7.6 Realistic Validation Plan (Oracle 块)\n\n"
+        "```yaml\n"
+        "- id: rv-1\n"
+        '  behavior: "统计 API 聚合正确"\n'
+        "  reviewer: verifier\n"
+        "- id: rv-2\n"
+        '  behavior: "页面展示并随筛选更新"\n'
+        "  reviewer: human\n"
+        "```\n"
+    )
+    plan = parse_validation_plan(suffixed)
+    assert [item.id for item in plan] == ["rv-1", "rv-2"]
+    assert plan[0].reviewer == "verifier"
+
+
+def test_parse_validation_plan_survives_subheading_before_fence() -> None:
+    """标题与围栏之间夹 ``#### rv-N：`` 子标题时，不得丢弃整份计划。
+
+    守卫的正是评审发现 2：旧解析器遇到围栏前任何 ``#`` 行即 ``return ()``。
+    """
+    with_subheadings = (
+        "### Realistic Validation Plan\n\n"
+        "#### rv-1：托管部署隔离与凭据边界\n\n"
+        "```yaml\n"
+        "- id: rv-1\n"
+        '  behavior: "部署隔离正确"\n'
+        "  reviewer: verifier\n"
+        "```\n\n"
+        "#### rv-2：凭据不落盘\n\n"
+        "```yaml\n"
+        "- id: rv-2\n"
+        '  behavior: "凭据不写进 diff"\n'
+        "  reviewer: human\n"
+        "```\n"
+    )
+    plan = parse_validation_plan(with_subheadings)
+    assert [item.id for item in plan] == ["rv-1"]
+    assert plan[0].summary == "部署隔离正确"
+
+
+def test_parse_validation_plan_parity_with_authoritative_extractor() -> None:
+    """进度读数与权威 RV 解析器对同一份 PRD 必须给出一致的 rv 编号集合。
+
+    守卫的正是评审发现 3：单测不得只对着解析器自己的窄标题假设自证，必须钉住
+    prd skill 实际产出的标题形态，防止进度解析器与权威口径再次漂移。样本一律用
+    ``behavior:``（oracle 契约字段），与权威解析器的强制项对齐；``summary:`` 是进度
+    侧的额外宽松回退，不在两者一致口径内。
+    """
+    samples = {
+        "plain_numbered": (
+            "## 7.6 Realistic Validation Plan\n\n"
+            "```yaml\n"
+            "- id: rv-1\n  behavior: a\n"
+            "- id: rv-2\n  behavior: b\n"
+            "```\n"
+        ),
+        "suffixed_template": (
+            "### 7.6 Realistic Validation Plan (Oracle 块)\n\n"
+            "```yaml\n"
+            "- id: rv-1\n  behavior: a\n  reviewer: human\n"
+            "- id: rv-2\n  behavior: b\n  reviewer: verifier\n"
+            "```\n"
+        ),
+        "subheading_before_fence": (
+            "## Realistic Validation Plan\n\n"
+            "#### rv-1：小标题\n\n"
+            "```yaml\n"
+            "- id: rv-1\n  behavior: a\n"
+            "- id: rv-3\n  behavior: c\n"
+            "```\n"
+        ),
+    }
+    for label, prd_text in samples.items():
+        progress_ids = [item.id for item in parse_validation_plan(prd_text)]
+        authoritative_ids = [
+            line.split(":", 1)[0].removeprefix("- [ ] ").strip()
+            for line in extract_realistic_validation_items(prd_text)
+        ]
+        assert progress_ids == authoritative_ids, label
 
 
 # ── build_prd_progress：来源与优先级 ─────────────────────────────────────────
