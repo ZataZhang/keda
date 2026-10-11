@@ -439,7 +439,7 @@ Verifier-only 且不在本区逐项呈递：端点契约与关联完整性（rv-
 
 #### Validation Acceptance
 
-- [x] `just lint --reuse`、`just lint --full`、受影响 pytest、`just e2e`（新增与旧 spec）、前端 typecheck/build、mkdocs strict 全绿；证据绑定最终代码树。— `just test all` → 3830 passed, 1 skipped；`just lint --reuse` / `just lint --full` 通过；`just e2e` 新 spec 8 passed、旧 spec 5 passed；typecheck/build、`mkdocs build --strict` 通过；绑定见 `<stem>/rv-1-harness-provenance.txt`（repo_head + working_tree_diff_sha256）与 `<stem>/rv-1-final-tree-binding.txt`。
+- [x] `just lint --reuse`、`just lint --full`、受影响 pytest、`just e2e`（新增与旧 spec）、前端 typecheck/build、mkdocs strict 全绿；证据绑定最终代码树。— `just test all` → 3830 passed, 1 skipped；`just lint --reuse` / `just lint --full` 通过；`just e2e` 新 spec 8 passed、旧 spec 5 passed；typecheck/build、`mkdocs build --strict` 通过；绑定见 `<stem>/rv-1-harness-provenance.txt`（repo_head + working_tree_diff_sha256）与 `<stem>/rv-1-final-tree-binding.txt`。**修订**：上述 8 passed 是 4a94bdb0 之前的 7 用例 + setup，未覆盖修复新增用例；Pre-PR 评审后在含修复的树上重跑，rv-3/rv-4 spec 现为 9 passed（8 用例 + setup），见 `<stem>/rv-3-rv-4-e2e-final-tree.txt`，`rv-1-final-tree-binding.txt` 已按该树重写；前端 typecheck/build、pytest、mkdocs strict 亦在该树重跑。
 - [~] 独立 verifier 对 rv-1..rv-4 的来源、真实边界、fresh-state 与反例审查为 PASS。 — runner-owned gate: 独立 verifier 轮次由 runner 在执行器交付门禁之后执行。
 
 #### Delivery Readiness
@@ -495,6 +495,15 @@ Verifier-only 且不在本区逐项呈递：端点契约与关联完整性（rv-
 - **已解决项**：§9 中除 `Human-Confirmed` 两项与一条 runner-owned `[~]`（独立 verifier 轮次）外全部 `[x]` 并附证据；`<stem>` 下的原始证据、四类反例与原型往返均在最终树上重采，绑定记录见 `rv-1-harness-provenance.txt` 与 `rv-1-final-tree-binding.txt`。**未解决项**：独立 verifier 结论与人工验收（均由 runner / 人工在其各自环节完成）。
 
 ## 14. Change Log
+
+### Pre-PR 评审修复：缺口成因分流、事件行 key 稳定化与证据重绑最终树
+
+- Type: code（含 docs / evidence 修订）
+- Before: 尝试展开区的空态只有两态文案，`invocations` 整区缺位（未关联 Issue 或旧响应）时被说成「账本读取失败」，与页面顶部分流后的三类披露口径自相矛盾；`docs/guides/agent-runner.md` 与 `PrdInvocationDetail` docstring 也把「关联 Issue 为空」同时写进 `invocations=null` 与 `available=false` 两条；事件行 React key 只用 `event_type + occurred_at`，同组内同类型同秒事件（账本允许）会撞 key；rv-3/rv-4 的 e2e 日志与 `rv-1-final-tree-binding.txt` 仍绑在 `051e0ec6`（7 用例 + setup），未覆盖 `4a94bdb0` 的新增用例。
+- After: 前端按 `available / unavailable / absent` 三态分别说成因（`prd-lifecycle-timeline.tsx`）；docs 与 DTO docstring 把「无从归属」限定为整区 `null`、「读不到」限定为 `available=false`；事件行 key 追加组内序号（`eventRowKey`）。在含修复的树上重跑 rv-3/rv-4 spec（9 passed）与新写 `rv-3-rv-4-e2e-final-tree.txt`，重写 `rv-1-final-tree-binding.txt`，并把证据报告里「两项人审 oracle 都走真实入口」更正为「真实入口只有 rv-1，原型与 fixture e2e 各按其保真度披露」。
+- Reason: Pre-PR 评审发现交付门禁要求的「证据绑定最终代码树」在 4a94bdb0 之后不再成立，且缺口成因文案与 PRD「三类缺口分别披露」的口径冲突——把没带明细区说成读取失败会把人引去修错误的一端。
+- Impact: 前端展示文案与 key、两处文档措辞、证据包绑定记录；无 API 字段、无采集口径、无执行语义变化。
+- Review: 执行器（评审轮）自验完成，待人工验收；独立 verifier 的 PASS 仍绑 `051e0ec6`，修复后行为需人工或下一轮 verifier 覆盖。
 
 ### 基线守卫同步（`kc lifecycle` 子命令的随包 skill 与 argparse 门面）
 

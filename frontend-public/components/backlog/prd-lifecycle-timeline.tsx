@@ -82,6 +82,47 @@ type AttemptSummary = {
 /** 尝试族事件类型——它们带着 attempt detail，是摘要的唯一事实源。 */
 const ATTEMPT_FAMILY_EVENT_TYPES = new Set(["attempt", "retry", "recovered"]);
 
+/** 调用明细区的缺口成因：可读 / 读取失败 / 响应未携带该区域（旧响应或未关联 Issue）。 */
+type InvocationGapKind = "available" | "unavailable" | "absent";
+
+/**
+ * 判定调用明细区属于哪一种缺口成因。
+ *
+ * 「读不到」与「没带这个区」是两件不同的事，说错成因会让人去修错误的一端。
+ *
+ * @param invocations - 调用明细读取区；``null``/``undefined`` 表示响应未带该区域。
+ * @returns 缺口成因标签。
+ */
+function invocationGapKindOf(
+  invocations: PrdInvocationDetail | null | undefined,
+): InvocationGapKind {
+  if (invocations === null || invocations === undefined) {
+    return "absent";
+  }
+  return invocations.available ? "available" : "unavailable";
+}
+
+/** 尝试展开区没有调用行时按成因分别说明，不把「无从归属」说成「读取失败」。 */
+const ATTEMPT_INVOCATION_EMPTY_TEXT: Record<InvocationGapKind, string> = {
+  available: "这次尝试没有可读到的调用记录（调用观测早于本次执行上线，或该阶段未产生进程调用）。",
+  unavailable: "调用明细不可用：账本读取失败，展开项无法显示调用序列。",
+  absent: "响应未携带调用明细区（旧响应，或该 PRD 没有关联 Issue）：展开项不显示调用序列。",
+};
+
+/**
+ * 生成事件行的稳定 key。
+ *
+ * 同组内同类型同秒的事件是合法的（`event_key` 显式不同时账本会照写），只用
+ * `event_type + occurred_at` 会撞 key，因此带上行序号。
+ *
+ * @param row - 折叠后的事件行。
+ * @param index - 行在该分组内的位置。
+ * @returns 组内唯一的 React key。
+ */
+function eventRowKey(row: EventRow, index: number): string {
+  return `${row.primary.event_type}-${row.primary.occurred_at}-${index}`;
+}
+
 /**
  * 读取一个尝试分组的摘要字段。
  *
@@ -486,16 +527,16 @@ function OtherInvocationBlock({ invocations }: { invocations: PrdInvocationRow[]
  * 一个 Agent 尝试分组：尝试事件行 + 可展开的调用序列。
  *
  * @param props.attempt - 尝试分组。
- * @param props.invocationsAvailable - 调用账本是否可读（不可读时展开区说明原因）。
+ * @param props.invocationGap - 调用明细区的缺口成因，决定展开区空态怎么说。
  * @param props.onSelectEvent - 打开事件抽屉的回调。
  */
 function AttemptGroupBlock({
   attempt,
-  invocationsAvailable,
+  invocationGap,
   onSelectEvent,
 }: {
   attempt: AttemptGroup;
-  invocationsAvailable: boolean;
+  invocationGap: InvocationGapKind;
   onSelectEvent: (event: PrdLifecycleEventView) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -530,8 +571,8 @@ function AttemptGroupBlock({
         data-testid="prd-lifecycle-attempt-events"
         className="divide-y divide-slate-200 dark:divide-slate-800"
       >
-        {attempt.eventRows.map((row) => (
-          <EventRowItem key={`${row.primary.event_type}-${row.primary.occurred_at}`} row={row} onSelectEvent={onSelectEvent} />
+        {attempt.eventRows.map((row, index) => (
+          <EventRowItem key={eventRowKey(row, index)} row={row} onSelectEvent={onSelectEvent} />
         ))}
       </ul>
       {expanded ? (
@@ -540,9 +581,7 @@ function AttemptGroupBlock({
             <InvocationRows invocations={attempt.invocations} />
           ) : (
             <p className="mt-2 rounded border border-dashed border-slate-300 p-2 text-xs text-slate-500 dark:border-slate-700" data-testid="prd-lifecycle-invocation-empty">
-              {invocationsAvailable
-                ? "这次尝试没有可读到的调用记录（调用观测早于本次执行上线，或该阶段未产生进程调用）。"
-                : "调用明细不可用：账本读取失败，展开项无法显示调用序列。"}
+              {ATTEMPT_INVOCATION_EMPTY_TEXT[invocationGap]}
             </p>
           )}
         </div>
@@ -577,6 +616,7 @@ export function PrdLifecycleTimeline({
   }
 
   const { sessions, unattributedRows } = groupSessions(events);
+  const invocationGap = invocationGapKindOf(invocations);
   const invocationRows = invocations?.rows ?? [];
   const sessionRunIds = new Set(sessions.map((session) => session.runId));
   // 调用行带着会话标识，但对应执行会话的生命周期事件没有该标识（旧执行）：这类行
@@ -598,9 +638,9 @@ export function PrdLifecycleTimeline({
           data-testid="prd-lifecycle-flat-events"
           className="divide-y divide-slate-200 dark:divide-slate-800"
         >
-          {unattributedRows.map((row) => (
+          {unattributedRows.map((row, index) => (
             <EventRowItem
-              key={`${row.primary.event_type}-${row.primary.occurred_at}`}
+              key={eventRowKey(row, index)}
               row={row}
               onSelectEvent={onSelectEvent}
             />
@@ -635,9 +675,9 @@ export function PrdLifecycleTimeline({
                   data-testid="prd-lifecycle-session-events"
                   className="divide-y divide-slate-200 dark:divide-slate-800"
                 >
-                  {session.eventRows.map((row) => (
+                  {session.eventRows.map((row, index) => (
                     <EventRowItem
-                      key={`${row.primary.event_type}-${row.primary.occurred_at}`}
+                      key={eventRowKey(row, index)}
                       row={row}
                       onSelectEvent={onSelectEvent}
                     />
@@ -652,7 +692,7 @@ export function PrdLifecycleTimeline({
                         (invocation) => invocation.attempt_number === attempt.attemptNumber,
                       ),
                     }}
-                    invocationsAvailable={invocations?.available ?? false}
+                    invocationGap={invocationGap}
                     onSelectEvent={onSelectEvent}
                   />
                 ))}
@@ -669,9 +709,9 @@ export function PrdLifecycleTimeline({
                 data-testid="prd-lifecycle-unattributed-events"
                 className="divide-y divide-slate-200 dark:divide-slate-800"
               >
-                {unattributedRows.map((row) => (
+                {unattributedRows.map((row, index) => (
                   <EventRowItem
-                    key={`unattributed-${row.primary.event_type}-${row.primary.occurred_at}`}
+                    key={`unattributed-${eventRowKey(row, index)}`}
                     row={row}
                     onSelectEvent={onSelectEvent}
                   />

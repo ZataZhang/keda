@@ -22,8 +22,8 @@ just prd review tasks/archive/P1-FEAT-20261010-092630-lifecycle-invocation-detai
 
 **已替你核对过的内容**
 
-- **两项人审 oracle 都走真实入口。** rv-1 是真实 uvicorn + 真实静态 console + 真实 SQLite + 真实 Chromium（只把外部执行器换成确定性计划 fixture，PRD 允许的边界）；原型往返是真实 Chromium 打开真实站点上的原型页，不注入数据。
-- **证据绑定同一棵最终代码树。** harness 复跑于 `2026-10-11T05:02:17Z`，`repo_head=71f697ae`、`working_tree_diff_sha256=456519c8…`；`rv-1-final-tree-binding.txt` 记录 `code_paths_diff_sha256=e7064086…`（排除交付记录路径）与逐文件 sha256，四只代码路径文件在证据采集后未再改动。结构化 manifest `evidence.json` 由本次交付写入（`tasks/evidence/**` 被 gitignore，只留本机）。
+- **真实入口只有 rv-1 一项。** rv-1 是真实 uvicorn + 真实静态 console + 真实 SQLite + 真实 Chromium（只把外部执行器换成确定性计划 fixture，PRD 允许的边界）。原型往返（`docs/prototypes/prd-lifecycle-observability.html`）与 rv-3/rv-4 的 DOM 断言都跑在注入 fixture 的层级上——前者是 `prototype` 保真度、后者 `mock_boundary` 已在 PRD oracle 里自认——**不得**读作真实入口验证；生产边界（真实 Console 页面 + 真实账本）只由 rv-1 支撑。
+- **证据绑定的代码树分两次。** rv-1..rv-4 的原始日志（`rv-4-e2e.txt` 13:00 等）绑在修复前的树：`repo_head=051e0ec6`，且当时 spec 只有 7 个用例，未覆盖 4a94bdb0 新增的「账本里的每条调用都要么显示、要么被披露」。Pre-PR 评审发现该缺口后，在含评审修复的工作树上重跑，产出 `rv-3-rv-4-e2e-final-tree.txt`（9 passed = 8 用例 + setup，头部记录 `repo_head` 与 `code_paths_diff_sha256`），并重写 `rv-1-final-tree-binding.txt`。**旧日志保留不删**，其结论仅适用于各自记录的树。独立 verifier 的 PASS 绑在 `051e0ec6`（见 `verifier-response.txt` 首行 builder sha），其对抗项正是 4a94bdb0 所修的问题，因此修复后行为尚无独立复核，需由人工验收或下一轮 verifier 覆盖。
 - **全量门禁全绿**：`just test all` → 3830 passed, 1 skipped；`just lint --reuse` / `just lint --full`、前端 typecheck/build、`mkdocs build --strict`、新旧 e2e spec 均通过。
 - **三处基线事实与限制已披露**（见文末「披露与限制」）：基线 `just test all` 的 5 个失败已一并修复；前端 eslint 的 5 个基线错误不在本 PRD 范围；420px 视口横向溢出属既有布局。
 - **没有触碰 CLI 表面**：`git diff --name-only 44a33d6b..HEAD -- src/backend/api/` 为空；`[iar-invocation-*]` 标记未变。

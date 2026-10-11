@@ -4042,7 +4042,7 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
   `finished_at` 与 `duration_seconds` 恒为空，**不补估算时长**；模型字段保持「KC 下发 / 执行器报告 /
   未提供」三态，失败与回退调用独立成行，不并入后续成功调用。
 - **缺口显式披露，绝不推测回填**：`invocations=null`（该 PRD 没有关联 Issue，调用事实无从归属）、
-  `available=false`（账本读端不可用：存储不具备 Issue 级调用读端、读取异常，或关联 Issue 为空）、
+  `available=false`（账本读端不可用：存储不具备 Issue 级调用读端、或读取异常）、
   `available=true` 且 `rows=[]`（账本可读但没有该 Issue 的调用记录，例如早于账本上线的旧库）、
   `truncated=true`（读取触达 500 条上限，历史只是最近一段，本视图不做分页、过滤或搜索）。缺口只影响
   调用明细区，页面其余部分照常渲染。
