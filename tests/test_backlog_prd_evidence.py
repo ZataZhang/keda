@@ -201,6 +201,110 @@ def test_legacy_flat_evidence_dir_keeps_flat_semantics(tmp_path: Path) -> None:
     assert {file.name for file in manifest.files} == {"legacy-report.md"}
 
 
+# ── 候选目录（分支优先）合并与来源标注 ──────────────────────────────────────
+
+
+def _worktree_evidence_dir(tmp_path: Path) -> Path:
+    return tmp_path / "worktree" / "tasks" / "evidence" / PRD_STEM
+
+
+def test_manifest_merges_candidates_worktree_first(tmp_path: Path) -> None:
+    """同名文件取工作区版本并标 worktree，主仓库独有文件保留并标 main。"""
+    repo_root = _repo_with_prd(tmp_path, PENDING_PRD)
+    main_dir = _evidence_dir_for(repo_root, PENDING_PRD)
+    main_dir.mkdir(parents=True)
+    (main_dir / "shared.md").write_text("main content\n", encoding="utf-8")
+    (main_dir / "main-only.md").write_text("main only\n", encoding="utf-8")
+    wt_dir = _worktree_evidence_dir(tmp_path)
+    wt_dir.mkdir(parents=True)
+    (wt_dir / "shared.md").write_text("worktree content\n", encoding="utf-8")
+
+    manifest = build_evidence_manifest(
+        repo_path=repo_root,
+        config=AppConfig(),
+        prd_path=PENDING_PRD,
+        candidates=[(wt_dir, "worktree"), (main_dir, "main")],
+    )
+    by_name = {file.name: file for file in manifest.files}
+    assert manifest.exists is True
+    assert set(by_name) == {"shared.md", "main-only.md"}
+    assert by_name["shared.md"].source == "worktree"
+    assert by_name["main-only.md"].source == "main"
+    # 同名去重后只剩一份，共 2 个可展示文件
+    assert len(manifest.files) == 2
+
+
+def test_artifact_reads_branch_first_content(tmp_path: Path) -> None:
+    """artifact 端点按候选顺序命中：同名文件返回工作区内容。"""
+    repo_root = _repo_with_prd(tmp_path, PENDING_PRD)
+    main_dir = _evidence_dir_for(repo_root, PENDING_PRD)
+    main_dir.mkdir(parents=True)
+    (main_dir / "shared.md").write_text("main content\n", encoding="utf-8")
+    wt_dir = _worktree_evidence_dir(tmp_path)
+    wt_dir.mkdir(parents=True)
+    (wt_dir / "shared.md").write_text("worktree content\n", encoding="utf-8")
+
+    content, _media, returned = read_evidence_artifact(
+        repo_root,
+        AppConfig(),
+        PENDING_PRD,
+        "shared.md",
+        [(wt_dir, "worktree"), (main_dir, "main")],
+    )
+    assert returned == "shared.md"
+    assert content.decode("utf-8") == "worktree content\n"
+
+
+def test_artifact_rejects_symlink_in_worktree_candidate_no_fallback(tmp_path: Path) -> None:
+    """工作区候选里的逃逸链接立即拒绝，绝不静默回落到主仓库同名文件。"""
+    repo_root = _repo_with_prd(tmp_path, PENDING_PRD)
+    main_dir = _evidence_dir_for(repo_root, PENDING_PRD)
+    main_dir.mkdir(parents=True)
+    (main_dir / "leak.md").write_text("safe main copy\n", encoding="utf-8")
+    outside = tmp_path / "outside-secret.md"
+    outside.write_text("outside\n", encoding="utf-8")
+    wt_dir = _worktree_evidence_dir(tmp_path)
+    wt_dir.mkdir(parents=True)
+    (wt_dir / "leak.md").symlink_to(outside)
+
+    with pytest.raises(BacklogPrdEvidenceError):
+        read_evidence_artifact(
+            repo_root,
+            AppConfig(),
+            PENDING_PRD,
+            "leak.md",
+            [(wt_dir, "worktree"), (main_dir, "main")],
+        )
+
+
+def test_manifest_status_field_surfaces_unavailable(tmp_path: Path) -> None:
+    """候选查找失败由调用方传入 unavailable，不把结果伪装成确认空态。"""
+    repo_root = _repo_with_prd(tmp_path, PENDING_PRD)
+    manifest = build_evidence_manifest(
+        repo_path=repo_root,
+        config=AppConfig(),
+        prd_path=PENDING_PRD,
+        candidates=[],
+        status="unavailable",
+    )
+    assert manifest.status == "unavailable"
+    assert manifest.exists is False
+    assert manifest.files == []
+
+
+def test_manifest_defaults_to_complete_without_candidates(tmp_path: Path) -> None:
+    """不提供候选时退化为只读主仓库，status 默认 complete（旧调用方语义不变）。"""
+    repo_root = _repo_with_prd(tmp_path, PENDING_PRD)
+    main_dir = _evidence_dir_for(repo_root, PENDING_PRD)
+    main_dir.mkdir(parents=True)
+    (main_dir / "only.md").write_text("x\n", encoding="utf-8")
+    manifest = build_evidence_manifest(
+        repo_path=repo_root, config=AppConfig(), prd_path=PENDING_PRD
+    )
+    assert manifest.status == "complete"
+    assert {file.name: file.source for file in manifest.files} == {"only.md": "main"}
+
+
 # ── API 契约 ────────────────────────────────────────────────────────────────
 
 

@@ -22,7 +22,9 @@ from backend.api.cli_schema import build_command_schema, render_schema_human
 from backend.api.cli_typer_app import app
 
 #: ``argparse`` 门面未收录的命令：只在 Typer 侧存在，不参与旗标对齐检查。
-FACADE_EXEMPT_COMMANDS = frozenset({"schema", "tokens"})
+#: ``lifecycle`` 与 ``schema``/``tokens`` 同类：命令体直接在 Typer 侧查询并发射，
+#: 没有 ``dispatch_parsed_command`` 执行后端，门面收录只会留下解析得了、执行不了的死条目。
+FACADE_EXEMPT_COMMANDS = frozenset({"schema", "tokens", "lifecycle"})
 
 #: ``--output`` 在这些命令上是**输出目录**，不是格式取值域，必须被排除在机读契约之外。
 DIRECTORY_OUTPUT_COMMANDS = frozenset({"ask", "deliberate"})

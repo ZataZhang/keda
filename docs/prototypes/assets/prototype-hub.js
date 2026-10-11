@@ -41,10 +41,16 @@
     },
     {
       id: 'roadmap-controls-evidence', title: '单 PRD 控制与验收证据', project: 'keda', module: 'Backlog',
-      form: 'image-state', version: 'v1.0', updatedAt: '2026-09-16', availability: 'available', validationLevel: '概念原型',
-      primaryFlow: '查看单 PRD 控制和验收证据界面方案', description: '单 PRD 控制、证据浏览和 Autopilot 相关页面的高保真界面草图。',
+      form: 'image-state', version: 'v2.0', updatedAt: '2026-10-10', availability: 'available', validationLevel: '概念原型',
+      primaryFlow: '在单 PRD 详情头部常驻「清单 / 影响树 / 证据」三个弱信号读数，进入验收证据标签后按计划条目分组浏览产出与未合并来源',
+      description: '单 PRD 控制、验收证据与 Autopilot 草图。v2.0 把详情升级为交付进度信号：头部三读数（清单勾选、影响树 ~触达/可判定 ?无法判定、证据 已产出/计划）以弱信号口径呈现，确认无数据用 `-`、读取不可用单独披露；证据标签从平铺列表升级为按验证条目分组、标注「未合并」来源与「待产出」占位。运行中读数来自执行工作区（主仓库兜底）、归档为终态事实来源。三种关键状态（运行中 / 已归档 / 无计划降级）各有目标图。',
       preview: './assets/roadmap-prd-controls-evidence-autopilot.png', entry: './assets/roadmap-prd-controls-evidence-autopilot.png', source: './roadmap-prd-controls-evidence-autopilot/',
-      provenance: ['./assets/roadmap-prd-controls-evidence-autopilot.prompt/'],
+      provenance: [
+        './assets/roadmap-prd-controls-evidence-autopilot.prompt/',
+        './assets/roadmap-prd-controls-evidence-autopilot-progress-running.png',
+        './assets/roadmap-prd-controls-evidence-autopilot-progress-archived.png',
+        './assets/roadmap-prd-controls-evidence-autopilot-progress-degraded.png',
+      ],
       relationships: [
         { id: 'roadmap-cicd-repair', label: '查看同一 Backlog 页面上的 CI/CD 状态与自动修复' },
         { id: 'prd-lifecycle-observability', label: '查看 PRD 执行时间线与统计' },
