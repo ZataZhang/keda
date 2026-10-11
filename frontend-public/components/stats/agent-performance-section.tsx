@@ -27,6 +27,10 @@ export function AgentPerformanceSection({
 }: AgentPerformanceSectionProps) {
   const hasAttemptGroups = Boolean(stats?.agents.length || stats?.presets.length);
   const hasRunGroups = Boolean(stats?.runs.length);
+  const unboundPresetAttemptCount = stats?.unbound_preset_attempts.reduce(
+    (totalAttemptCount, repositoryCount) => totalAttemptCount + repositoryCount.attempt_count,
+    0,
+  ) ?? 0;
 
   return (
     <Card data-testid="stats-agent-performance">
@@ -76,7 +80,12 @@ export function AgentPerformanceSection({
                 testId="stats-agent-performance-preset-table"
               />
               <p className="mt-2 text-xs text-slate-500" data-testid="stats-agent-performance-unbound">
-                未绑定 / 历史未记录预设：{stats.unbound_preset_attempt_count} 次
+                未绑定 / 历史未记录预设：
+                {stats.repo_id === null && stats.unbound_preset_attempts.length > 0
+                  ? stats.unbound_preset_attempts
+                      .map(({ repo_id, attempt_count }) => `${repo_id}: ${attempt_count} 次`)
+                      .join(" · ")
+                  : `${unboundPresetAttemptCount} 次`}
               </p>
             </section>
 

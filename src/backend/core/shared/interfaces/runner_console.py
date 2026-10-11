@@ -70,7 +70,22 @@ class ProcessLogChunk:
 
 @dataclass(frozen=True)
 class RunRecord:
-    """一次 Issue 处理的运行结果（旁路记录）。"""
+    """一次 Issue 运行结果与任务身份快照（旁路记录）。
+
+    Attributes:
+        repo_id (str): 仓库标识。
+        repo_path (str): 仓库本地路径。
+        issue_number (int): Issue 编号。
+        trigger (str): 运行触发来源。
+        agent (str): 本次运行选择的 Agent。
+        outcome (str): completed、failed 或 blocked。
+        error_summary (str | None): 失败摘要。
+        started_at (str): ISO-8601 UTC 开始时间。
+        finished_at (str): ISO-8601 UTC 结束时间。
+        duration_seconds (float): 本次运行耗时秒数。
+        issue_title (str | None): 运行时保存的 Issue 标题；旧记录为空。
+        issue_url (str | None): 运行时保存的 Issue 网页链接；旧记录为空。
+    """
 
     repo_id: str
     repo_path: str
@@ -82,6 +97,8 @@ class RunRecord:
     started_at: str  # ISO8601 UTC
     finished_at: str  # ISO8601 UTC
     duration_seconds: float
+    issue_title: str | None = None
+    issue_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,7 +108,8 @@ class AttemptRecord:
     与 :class:`backend.core.shared.models.agent_runner.AttemptResult` 同构，
     用于本地 SQLite 持久化，方便在 runner 崩溃或跨 agent fallback 后仍能
     复盘每轮耗时与失败原因。``preset`` / ``model`` 是 schema v6 追加的
-    可空观测列（绑定生效时写入，未绑定 / 被丢弃为 ``None``）。
+    可空观测列；``failure_phase`` 是 schema v11 追加的生命周期阶段字段；
+    ``phase_durations`` 是 schema v12 追加的 ``(阶段名, 秒数)`` 列表，旧记录为空。
     """
 
     repo_id: str
@@ -106,6 +124,8 @@ class AttemptRecord:
     duration_seconds: float
     preset: str | None = None
     model: str | None = None
+    failure_phase: str | None = None
+    phase_durations: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -303,13 +323,13 @@ class IRunHistoryStore(ABC):
 
     @abstractmethod
     def list_agent_performance_records(
-        self, *, repo_id: str | None, since: str
+        self, *, repo_id: str | None, since_date: str
     ) -> AgentPerformanceRecords:
         """读取统计窗口内的轻量 run 与 attempt 投影。
 
         Args:
             repo_id: 仓库过滤；``None`` 表示全部仓库。
-            since: ISO8601 UTC 起始时间，包含边界。
+            since_date: UTC 日历日期下界，包含该日期。
 
         Returns:
             统计所需的持久化投影，不含 attempt 长文本详情。
@@ -729,6 +749,15 @@ class IBacklogStore(ABC):
     @abstractmethod
     def save_backlog_settings(self, settings: BacklogSettingsEntry) -> None:
         """保存或更新 backlog 设置；失败时抛出异常。"""
+        ...
+
+    @abstractmethod
+    def delete_backlog_settings(self, repo_id: str) -> None:
+        """删除指定仓库的 backlog 设置行（恢复继承＝删行）。
+
+        行不存在时应静默成功：删除语义是幂等的「此后没有设置行」。
+        失败时抛出异常。
+        """
         ...
 
     @abstractmethod

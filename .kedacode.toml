@@ -157,8 +157,8 @@ reexecute_cache_enabled = true
 verifier_enabled = true
 # verifier 用哪个 agent（auto=自动挑一个≠builder 的）
 verifier_agent = "qoder"
-# verifier agent 运行超时秒数（默认 1800）
-verifier_timeout_seconds = 3600
+# verifier agent 运行超时秒数；多条 RV 与负控需要延长，静默卡死仍由 inactivity timeout 处理
+verifier_timeout_seconds = 7200
 artifact_health_enabled = true
 # 前端改动（git diff 命中 frontend_paths）是否强制证据目录含真实视觉文件(图片/视频),否则门禁失败(默认开;独立于 verifier)
 frontend_visual_evidence_required = true
@@ -174,6 +174,9 @@ frontend_paths = [
 default_phase = "execution"
 
 [agent_runner.prompts.phases]
+
+[agent_runner.lifecycle_agents]
+review = "qoder"
 
 # Draft PR 创建前的 AI review 门禁（push 之后、PR 之前）
 [agent_runner.pre_pr_review]
@@ -198,7 +201,7 @@ enabled = true
 # 执行 supervisor 的 agent
 supervisor_agent = "auto"
 # supervisor 要求修复时的最大修复 / rebase 次数
-max_repair_attempts = 2
+max_repair_attempts = 3
 # supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数
 max_agent_crash_retries = 5
 # 崩溃重试的初始退避秒数，之后每次重试翻倍
@@ -223,7 +226,7 @@ run_interval_seconds = 120
 # 每轮 Phase 0 审议最大 Issue 数
 max_deliberation_issues = 1
 # 是否在每轮开头对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）；关闭后僵尸不被触碰
-reconcile_stale_attempts = false
+reconcile_stale_attempts = true
 # 对账的 claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale
 reclaim_ttl_seconds = 10800
 

@@ -4,9 +4,9 @@ PRD: [`tasks/archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md`]
 
 ## rv-1 — API 与 SQLite 聚合
 
-- Entry: `uv run pytest tests/test_console_stats.py tests/test_agent_runner_console_api.py -k agent_performance -q`
+- Entry: `uv run pytest --no-testmon tests/test_console_stats.py tests/test_agent_runner_console_api.py -k agent_performance -q`
 - Boundary: 真实 FastAPI 测试路由、core 聚合用例、ConsoleStore SQLite 查询；测试独立写入隔离数据库，再以新连接 fresh-read，并通过新 API 请求读取聚合结果。
-- Check: 仓库和时间过滤、成功 / 非成功次数与比例、失败分类、线性 P50/P90、已删除 preset 快照、空 preset、未知 failure type、同名跨仓库分组和独立 run outcome。
+- Check: UTC 日历日仓库过滤、成功 / 非成功次数与比例、失败分类、线性 P50/P90、已删除 preset 快照、按仓库区分的空 preset、未知 failure type、同名跨仓库分组和独立 run outcome。
 - Expected: API 字段与独立查询到的 SQLite 原始样本一致；不读取当前配置或 `attempt_records.detail`。
 
 ## rv-2 — Stats 页面与静态控制台

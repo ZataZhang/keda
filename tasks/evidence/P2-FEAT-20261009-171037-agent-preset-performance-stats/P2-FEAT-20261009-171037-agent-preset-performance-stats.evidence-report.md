@@ -97,3 +97,11 @@
 - 修复（不改产品源码）：镜像 issue-262 分支 `e202b23d` 的 `.gitignore` 规则新增 `.iar/agent-runner/`，并从工作树移除被跟踪的 `sessions/qoder.json` 与 `sessions/codebuddy.json`（已备份至 `/tmp/issue-263-session-backup/`），使 runner 会话簿记永不进入代码树；`e202b23d` 的 verifier-phase 落盘守卫属该分支交付范围，本分支不重复修改源码。移除后 `git check-ignore --no-index` 确认规则命中，`git status --porcelain` 仅剩本意图内差异。
 - 按 manifest 原命令复跑验证计划：rv-1 `scripts/rv-1-validation.sh` 全绿（统计 API / SQLite 用例 **4 passed、31 deselected**，lifecycle 分位数回归 **1 passed**，三份 HTTP 200 API JSON 数值与既定口径一致，codex 组 3/2、P50 30s、P90 46s、unbound=1），`rv-1-final-tree.txt` 摘要 `0f61c4dc…` 不变；rv-2 `PLAYWRIGHT_STACK_TIMEOUT_MS=45000 UV_CACHE_DIR=/tmp/keda-issue-263-uv-cache just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts` 全绿（**5 passed（25.3s）**，exit 0），`rv-2-e2e-green-final.txt` 与 `rv-2-final-tree.txt` 摘要 `f181829f…` 已重采。`evidence.json` item 2 的 output_summary 同步为该次运行时长。
 - 交付门禁复跑：`git diff --check` 通过；`just test` **14 passed**；`uv run mkdocs build --strict` exit 0。红→绿证据链沿用已提交的负控文件（`rv-1-api-negative-control.txt` 等与 `rv-2-e2e-negative-control.txt`），且 verifier 本轮已独立在源码层面复现过红/绿。
+
+## 与最新 main 冲突整合后的复核（2026-10-11）
+
+- 将最新 `main` 合入 `issue-263` 后，逐项解决 `.gitignore`、Stats 页面、`mkdocs.yml`、`console_store.py` 与 `console_store_lifecycle.py` 五处冲突；保留 main 的 SQLite schema v13 / run detail 行为，并继续将统计查询放在 history mixin。`git diff --check` 与 `just lint --full` 均通过。
+- 统计边界更新为 UTC 日历日期，与既有趋势一致；API 将 `days` 截断到 1–365。未绑定预设计数改为按仓库返回，并在全部仓库页面逐仓显示。核心、API、SQLite 定向验证分别为 `4 passed`、`31 passed`、`32 passed`；最终 `just test` 为 **2188 passed、817 deselected**。
+- 在 `frontend-public/` 中 `pnpm typecheck` 与生产 `pnpm build` 通过。Stats 页面、统计卡片和类型文件的 ESLint 定向检查为 **0 errors**（5 个既有 JSDoc warning）。整仓 `pnpm lint` 仍有 4 个 `react-hooks/set-state-in-effect` 错误，位置均在与最新 `main` 一致且本 PR 未改动的 `run-detail-dialog.tsx` 和三个 backlog 视图；全仓 103 个 JSDoc warning 不影响上述目标文件检查。
+- 本轮真实 Stats 页面 E2E 再跑为 **5 passed**（包括全部仓库 / 单仓筛选、日期窗口、空态、统计端点隔离与窄屏滚动）；`just console-sync` 后从 worktree `kc console` 重新采集桌面及窄屏页面截图。桌面画面显示未绑定次数按仓库分别列出；窄屏表格尺寸为 `clientWidth=173`、`scrollWidth=920`、`overflow-x=auto`。`uv run mkdocs build --strict` 通过。
+- 独立 verifier 需要针对包含这次 main 合并和边界修正的最终提交树复核；本节不代替 verifier 结论，也不提前勾选其 runner-owned Acceptance 项。

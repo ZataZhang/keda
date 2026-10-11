@@ -17,7 +17,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.api.backlog_sync import wake_backlog_scheduler
@@ -379,9 +379,12 @@ def get_console_stats_history(repo_id: str | None = None, days: int = 30) -> dic
 @router.get("/agent-runner/console/stats/agent-performance")
 def get_console_agent_performance_stats(
     repo_id: str | None = None,
-    days: int = Query(default=30, ge=1, le=365),
+    days: int = 30,
 ) -> dict:
-    """按 attempt 与 run 最终结果返回 Agent 执行表现统计。"""
+    """按 attempt 与 run 最终结果返回 Agent 执行表现统计。
+
+    ``days`` 会由 core 截断到 1–365 天，与其他 Stats 统计端点一致。
+    """
     stats = build_agent_performance_stats(
         store=create_console_store(),
         repo_id=repo_id,
@@ -400,14 +403,6 @@ def get_console_prd_lifecycle_stats(repo_id: str | None = None, days: int = 30) 
     """
     stats = build_prd_lifecycle_stats(store=create_console_store(), repo_id=repo_id, days=days)
     return _serialize(stats)
-
-
-@router.get("/agent-runner/console/runs")
-def list_console_runs(repo_id: str | None = None, limit: int = 100) -> dict:
-    """倒序列出最近的运行记录。"""
-    bounded_limit = min(max(limit, 1), 500)
-    runs = create_console_store().list_recent_runs(repo_id=repo_id, limit=bounded_limit)
-    return {"runs": [_serialize(entry) for entry in runs]}
 
 
 @router.get("/agent-runner/console/audit")

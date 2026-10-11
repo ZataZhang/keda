@@ -97,6 +97,14 @@ class RunOutcomePerformanceGroup:
 
 
 @dataclass(frozen=True)
+class UnboundPresetAttemptCount:
+    """一个仓库中没有 preset 快照的 attempt 数量。"""
+
+    repo_id: str
+    attempt_count: int
+
+
+@dataclass(frozen=True)
 class AgentPerformanceStats:
     """Stats 页使用的 Agent / 预设 attempt 与整项任务统计。"""
 
@@ -104,7 +112,7 @@ class AgentPerformanceStats:
     window_days: int
     agents: tuple[AttemptPerformanceGroup, ...]
     presets: tuple[AttemptPerformanceGroup, ...]
-    unbound_preset_attempt_count: int
+    unbound_preset_attempts: tuple[UnboundPresetAttemptCount, ...]
     runs: tuple[RunOutcomePerformanceGroup, ...]
 
 
@@ -293,8 +301,9 @@ def build_agent_performance_stats(
     window_end = reference_now or datetime.now(timezone.utc)
     if window_end.tzinfo is None:
         window_end = window_end.replace(tzinfo=timezone.utc)
-    since = (window_end - timedelta(days=bounded_days)).isoformat(timespec="seconds")
-    records = store.list_agent_performance_records(repo_id=repo_id, since=since)
+    window_end_utc = window_end.astimezone(timezone.utc)
+    since_date = (window_end_utc.date() - timedelta(days=bounded_days)).isoformat()
+    records = store.list_agent_performance_records(repo_id=repo_id, since_date=since_date)
 
     agent_groups: dict[tuple[str, str | None, str, str | None], list[PerformanceAttemptRecord]] = (
         defaultdict(list)
@@ -302,12 +311,12 @@ def build_agent_performance_stats(
     preset_groups: dict[tuple[str, str | None, str, str | None], list[PerformanceAttemptRecord]] = (
         defaultdict(list)
     )
-    unbound_preset_attempt_count = 0
+    unbound_preset_attempt_counts: dict[str, int] = defaultdict(int)
     for attempt_record in records.attempts:
         agent_name = attempt_record.agent or "未记录"
         agent_groups[(attempt_record.repo_id, None, agent_name, None)].append(attempt_record)
         if not attempt_record.preset:
-            unbound_preset_attempt_count += 1
+            unbound_preset_attempt_counts[attempt_record.repo_id] += 1
             continue
         preset_groups[
             (
@@ -346,7 +355,10 @@ def build_agent_performance_stats(
         window_days=bounded_days,
         agents=_build_attempt_performance_groups(agent_groups),
         presets=_build_attempt_performance_groups(preset_groups),
-        unbound_preset_attempt_count=unbound_preset_attempt_count,
+        unbound_preset_attempts=tuple(
+            UnboundPresetAttemptCount(repo_id=unbound_repo_id, attempt_count=attempt_count)
+            for unbound_repo_id, attempt_count in sorted(unbound_preset_attempt_counts.items())
+        ),
         runs=tuple(run_groups),
     )
 

@@ -43,7 +43,10 @@ const PERFORMANCE_STATS = {
       failure_types: [{ failure_type: 'verification_failed', count: 1 }],
     },
   ],
-  unbound_preset_attempt_count: 2,
+  unbound_preset_attempts: [
+    { repo_id: 'keda-main', attempt_count: 2 },
+    { repo_id: 'other-repo', attempt_count: 3 },
+  ],
   runs: [
     {
       repo_id: 'keda-main',
@@ -74,7 +77,7 @@ const EMPTY_PERFORMANCE_STATS = {
   window_days: 30,
   agents: [],
   presets: [],
-  unbound_preset_attempt_count: 0,
+  unbound_preset_attempts: [],
   runs: [],
 }
 
@@ -137,7 +140,9 @@ test.describe('Stats Agent performance', () => {
     await expect(historicalPresetRow).toContainText('keda-main')
     await expect(historicalPresetRow).toContainText('provider/model-x')
     await expect(historicalPresetRow).toContainText('4')
-    await expect(page.getByTestId('stats-agent-performance-unbound')).toContainText('2 次')
+    const unboundPresetCounts = page.getByTestId('stats-agent-performance-unbound')
+    await expect(unboundPresetCounts).toContainText('keda-main: 2 次')
+    await expect(unboundPresetCounts).toContainText('other-repo: 3 次')
 
     const runTable = page.getByTestId('stats-agent-performance-run-table')
     await expect(runTable).toContainText('keda-main')
@@ -158,6 +163,7 @@ test.describe('Stats Agent performance', () => {
     await mockPerformanceStats(page, EMPTY_PERFORMANCE_STATS, 200, requests)
     await openStatsPage(page)
     await expect(page.getByTestId('stats-agent-performance-empty')).toBeVisible()
+    await expect(page.getByTestId('stats-agent-performance-unbound')).toContainText('0 次')
     await expect(page.getByText('暂无可用样本，成功率与耗时显示为 —。').first()).toBeVisible()
     expectCanonicalPerformanceRequests(requests)
 

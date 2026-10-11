@@ -25,6 +25,10 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     run_once,
 )
 from backend.core.use_cases.backlog_actions import advance_backlog_queue
+from backend.core.use_cases.backlog_concurrency import (
+    read_policy_max_parallel,
+    resolve_execution_ceiling,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -350,8 +354,27 @@ def _run_daemon_loop(
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
                 _logger.error("PRD rework phase failed: %s", exc)
 
+            # 统一并发上限：每轮先读 Backlog「并发」策略（没有设置行 = 未设置，
+            # 继承容量），与本轮 runner 容量（flag > 仓库配置，已在 concurrency 里
+            # 解析完）取小，得到一个生效值。补位闸门与认领闸门消费同一个 ceiling，
+            # 页面数字从此在两处同时兑现。策略读取失败不阻断本轮：按未设置回退。
+            policy_max_parallel: int | None = None
+            if backlog_store_factory is not None:
+                try:
+                    policy_max_parallel = read_policy_max_parallel(
+                        backlog_store_factory(), context.repo_id
+                    )
+                except Exception as exc:  # noqa: BLE001 - 读策略失败按未设置回退。
+                    _logger.warning(
+                        "Could not read backlog policy for repository '%s' (%s); "
+                        "this pass inherits runner capacity.",
+                        context.repo_id,
+                        exc,
+                    )
+            execution_ceiling = resolve_execution_ceiling(policy_max_parallel, max(1, concurrency))
+
             # 调度阶段：仅在 ``backlog.auto_advance`` 开启时持续推进 Backlog，先处理
-            # 已完成/失败的 PRD，再将队列补到 max_parallel 并标记 agent/ready。
+            # 已完成/失败的 PRD，再将队列补到生效上限并标记 agent/ready。
             # 在 Phase 2 前运行可让本轮晋升的 PRD 立即启动；调度异常只记录日志，
             # 不会终止 daemon。
             # --autopilot/--no-autopilot 的按次覆盖优先于配置；未传旗标时每轮
@@ -368,6 +391,7 @@ def _run_daemon_loop(
                         github_client=github_client,
                         store=backlog_store_factory(),
                         process_runner=process_runner,
+                        execution_ceiling=execution_ceiling,
                     )
                     if (
                         advance_report.started
@@ -406,6 +430,7 @@ def _run_daemon_loop(
                     repo_id=context.repo_id,
                     concurrency=concurrency,
                     output_view=output_view,
+                    execution_ceiling=execution_ceiling,
                 )
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
                 _logger.error(

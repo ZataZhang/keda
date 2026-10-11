@@ -509,6 +509,27 @@ class IGitHubClient(ABC):
         """
         ...
 
+    def get_pull_request_context_by_number(
+        self, pr_number: int, *, require_success: bool = False
+    ) -> PullRequestContext | None:
+        """按 PR 编号读取上下文，包括已关闭但未合并的 PR。
+
+        聚合重试只允许接纳带有本系统 superseded marker 的已关闭来源 PR；该方法
+        让 core 按稳定 PR 编号读取其 head、base、检查和正文，不依赖 open-only 分支查询。
+
+        Args:
+            pr_number: 目标 Pull Request 编号。
+            require_success: 是否要求查询成功且响应身份完整。
+
+        Returns:
+            PR 上下文；权威查询确认 PR 不存在时返回 ``None``。
+
+        Raises:
+            NotImplementedError: 客户端实现尚未支持按编号读取。
+            RuntimeError: 严格读取失败或响应不完整。
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def list_issue_comments(self, issue_number: int, *, require_success: bool = False) -> list[str]:
         """返回某个 Issue 的原始评论正文列表。
@@ -583,6 +604,25 @@ class IGitHubClient(ABC):
 
         Raises:
             NotImplementedError: When the implementation cannot retarget bases.
+        """
+        raise NotImplementedError
+
+    def close_pull_request(self, pr_number: int, *, comment: str | None = None) -> None:
+        """关闭 Pull Request，并可选写入取代说明。
+
+        批次聚合仅在总 Draft PR 已发布、完整代码树验证通过且必需 GitHub 检查全绿后
+        调用。关闭只改变 PR 状态，保留 PR 页面、评论、审查记录、来源分支与 Issue 记录。
+        与 :meth:`set_pull_request_base` 一样，此端口保持非抽象：只用到关闭能力的
+        聚合实现需要覆盖它；普通调用方不受影响。已关闭 PR 必须按成功空操作处理，供
+        部分失败后的聚合重试保持幂等。
+
+        Args:
+            pr_number: 要关闭的 Pull Request 编号。
+            comment: 可选 Markdown 评论，例如包含总 PR 链接的取代说明。
+
+        Raises:
+            NotImplementedError: 客户端实现不支持关闭 PR 时。
+            RuntimeError: GitHub 调用失败且并非“已经关闭”的幂等情况时。
         """
         raise NotImplementedError
 

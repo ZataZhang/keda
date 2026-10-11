@@ -17,7 +17,7 @@
 - **按 Agent 与预设查看 attempt（单次 Agent 执行）表现**（FR-1、FR-2）：展示样本数、成功/非成功次数与比例、P50/P90 耗时和失败分类。
 - **单独查看整项任务耗时**（FR-3）：按最终任务结果展示端到端耗时，不把任务结果错误归给某个 Agent 或预设。
 - **保留已删除预设的历史统计**（FR-4）：统计读取执行时写入的历史快照，不要求预设仍存在于当前配置。
-- **沿用 Stats 页已有筛选**（FR-5、FR-6）：仓库和时间范围过滤一致，其他 Stats 区块保持原有结果。
+- **沿用 Stats 页已有筛选**（FR-5、FR-6）：仓库和 UTC 日历日时间范围过滤一致，其他 Stats 区块保持原有结果。
 
 # Part A · 人审层 (Review Layer)
 
@@ -94,7 +94,7 @@ Stats 页目前提供实时 GitHub 完成度、按天运行趋势、PRD 生命�
 
 ### Console 运维者与 Agent Runner 使用者
 
-从左侧导航进入 Stats，使用现有仓库选择器和 7 / 30 / 90 天窗口。新增的执行表现区按仓库展示 Agent 与预设统计，并单独显示整项任务按 completed / failed / blocked 汇总的耗时。预设行里的模型来自执行记录；预设是否仍在当前设置中不影响历史行。
+从左侧导航进入 Stats，使用现有仓库选择器和 7 / 30 / 90 天窗口。新增的执行表现区按仓库展示 Agent 与预设统计、没有预设快照的 attempt 数量，并单独显示整项任务按 completed / failed / blocked 汇总的耗时。预设行里的模型来自执行记录；预设是否仍在当前设置中不影响历史行。
 
 ### API 调用方与集成维护者
 
@@ -380,7 +380,7 @@ No external validation required; repository evidence was sufficient.
 
 ### Validation Acceptance
 
-- [x] `uv run pytest tests/test_console_stats.py tests/test_agent_runner_console_api.py -k agent_performance -q` 通过，证据对应 rv-1。
+- [x] `uv run pytest --no-testmon tests/test_console_stats.py tests/test_agent_runner_console_api.py -k agent_performance -q` 通过，证据对应 rv-1。
 - [x] `just e2e tests/playwright-e2e/tests/smoke/stats-agent-performance.spec.ts` 通过，并从真实 `/app/stats` 页面收集 rv-2 截图。证据：`rv-2-e2e-green-final.txt`（5 passed，exit 0）；预设样本数负控 4→5 变红、恢复转绿见 `rv-2-e2e-negative-control.txt`；截图 `rv-2-stats-agent-performance.png` 与窄屏 `rv-2-stats-agent-performance-narrow.png` 由 `just console-sync` 后 worktree `uv run kc console` 服务的真实 `/app/stats` 页面在浏览器中采集。
 - [x] `pnpm typecheck` 与 `pnpm build` 在 `frontend-public/` 通过。证据：`rv-2-typecheck-final.txt`、`rv-2-build-final.txt`。
 - [x] `just console-sync` 后通过 worktree 内 `uv run kc console` 读取 `/app/stats`，确认静态分发版本包含新统计区块。证据：`rv-2-console-sync-green.txt`、`rv-2-console-http-green.txt`（本轮重跑：页面与引用 bundle 均 200，目标 bundle 含新增区块文案）；浏览器渲染证据见 `rv-2-stats-agent-performance.png`（真实 kc console 页面截图）。
@@ -400,10 +400,10 @@ No external validation required; repository evidence was sufficient.
 ## 10. Functional Requirements
 
 - **FR-1:** Agent attempt 汇总：在选定仓库和窗口内，按实际 Agent 展示 attempt 数、成功数、非成功数、成功率、非成功率、P50/P90 耗时和失败类型分布。
-- **FR-2:** 预设 attempt 汇总：只对有历史 preset 快照的 attempt，按仓库、预设名、实际 Agent、模型汇总相同指标；不查询当前配置；空 preset 记录单独计数。
+- **FR-2:** 预设 attempt 汇总：只对有历史 preset 快照的 attempt，按仓库、预设名、实际 Agent、模型汇总相同指标；不查询当前配置；空 preset 记录按仓库单独计数。
 - **FR-3:** 整项任务耗时：按仓库和最终 completed / failed / blocked 分组展示 run 数、P50/P90 耗时；全部仓库视图显示仓库标识；不从 run 的 Agent 字段推导 Agent / preset 的最终成功率。
 - **FR-4:** 历史留存：预设在配置中改名或删除不会改写 SQLite 已保存的 preset / model 记录，也不会使对应历史行消失。
-- **FR-5:** 窗口和仓库：新统计响应遵循 Stats 页当前仓库与天数筛选；全部仓库视图保留 repo 分组，避免同名 preset 被合并。
+- **FR-5:** 窗口和仓库：新统计响应遵循 Stats 页当前仓库与天数筛选；时间下界按 UTC 日历日计算并与运行趋势一致，`days` 截断至 1–365；全部仓库视图保留 repo 分组，避免同名 preset 或未绑定计数被合并。
 - **FR-6:** 隔离与兼容：使用独立只读 API 和 UI 卡片；无数据 / 查询失败有本区块明确状态，既有 Stats 数据、API 和 runner 执行行为不变。
 
 ## 11. Non-Goals

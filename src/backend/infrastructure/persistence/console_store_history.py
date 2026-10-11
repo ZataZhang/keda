@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 
@@ -10,7 +11,7 @@ _logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RunRecord:
-    """一次 Issue 处理的运行结果（与 core 同构）。"""
+    """一次 Issue 处理的运行结果与身份快照（与 core 同构）。"""
 
     repo_id: str
     repo_path: str
@@ -22,6 +23,8 @@ class RunRecord:
     started_at: str
     finished_at: str
     duration_seconds: float
+    issue_title: str | None = None
+    issue_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,8 @@ class AttemptRecord:
     duration_seconds: float
     preset: str | None = None
     model: str | None = None
+    failure_phase: str | None = None
+    phase_durations: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,7 +108,7 @@ class RunHistoryReadMixin:
         """倒序列出最近的运行记录。"""
         query = (
             "SELECT repo_id, repo_path, issue_number, trigger, agent, outcome, "
-            "error_summary, started_at, finished_at, duration_seconds "
+            "error_summary, started_at, finished_at, duration_seconds, issue_title, issue_url "
             "FROM run_records"
         )
         query_params: list[object] = []
@@ -126,6 +131,8 @@ class RunHistoryReadMixin:
                 started_at=record_row["started_at"],
                 finished_at=record_row["finished_at"],
                 duration_seconds=float(record_row["duration_seconds"]),
+                issue_title=record_row["issue_title"],
+                issue_url=record_row["issue_url"],
             )
             for record_row in record_rows
         ]
@@ -139,7 +146,7 @@ class RunHistoryReadMixin:
                 attempt_rows = connection.execute(
                     "SELECT repo_id, issue_number, agent, attempt_number, failure_type, "
                     "recovered, detail, started_at, finished_at, duration_seconds, "
-                    "preset, model "
+                    "preset, model, failure_phase, phase_durations_json "
                     "FROM attempt_records WHERE repo_id = ? AND issue_number = ? "
                     "ORDER BY id DESC LIMIT ?",
                     (repo_id, issue_number, limit),
@@ -147,23 +154,44 @@ class RunHistoryReadMixin:
         except Exception as exc:  # noqa: BLE001 - 旁路历史读取失败不阻断 runner。
             _logger.warning("Failed to list attempt records from %s: %s", self._db_path, exc)
             return []
-        return [
-            AttemptRecord(
-                repo_id=attempt_row["repo_id"],
-                issue_number=int(attempt_row["issue_number"]),
-                agent=attempt_row["agent"],
-                attempt_number=int(attempt_row["attempt_number"]),
-                failure_type=attempt_row["failure_type"],
-                recovered=bool(attempt_row["recovered"]),
-                detail=attempt_row["detail"],
-                started_at=attempt_row["started_at"],
-                finished_at=attempt_row["finished_at"],
-                duration_seconds=float(attempt_row["duration_seconds"]),
-                preset=attempt_row["preset"],
-                model=attempt_row["model"],
+        issue_attempts: list[AttemptRecord] = []
+        for attempt_row in reversed(attempt_rows):
+            try:
+                phase_duration_payload = json.loads(attempt_row["phase_durations_json"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                phase_duration_payload = []
+            phase_durations = (
+                tuple(
+                    (phase_entry["name"], float(phase_entry["seconds"]))
+                    for phase_entry in phase_duration_payload
+                    if isinstance(phase_entry, dict)
+                    and isinstance(phase_entry.get("name"), str)
+                    and phase_entry["name"]
+                    and isinstance(phase_entry.get("seconds"), int | float)
+                    and not isinstance(phase_entry["seconds"], bool)
+                )
+                if isinstance(phase_duration_payload, list)
+                else ()
             )
-            for attempt_row in reversed(attempt_rows)
-        ]
+            issue_attempts.append(
+                AttemptRecord(
+                    repo_id=attempt_row["repo_id"],
+                    issue_number=int(attempt_row["issue_number"]),
+                    agent=attempt_row["agent"],
+                    attempt_number=int(attempt_row["attempt_number"]),
+                    failure_type=attempt_row["failure_type"],
+                    recovered=bool(attempt_row["recovered"]),
+                    detail=attempt_row["detail"],
+                    started_at=attempt_row["started_at"],
+                    finished_at=attempt_row["finished_at"],
+                    duration_seconds=float(attempt_row["duration_seconds"]),
+                    preset=attempt_row["preset"],
+                    model=attempt_row["model"],
+                    failure_phase=attempt_row["failure_phase"],
+                    phase_durations=phase_durations,
+                )
+            )
+        return issue_attempts
 
     def list_recent_audits(self, *, limit: int = 100) -> list[AuditEntry]:
         """倒序列出最近的审计条目。"""
@@ -226,23 +254,23 @@ class RunHistoryReadMixin:
         ]
 
     def list_agent_performance_records(
-        self, *, repo_id: str | None, since: str
+        self, *, repo_id: str | None, since_date: str
     ) -> AgentPerformanceRecords:
-        """读取统计窗口内必要字段，不加载长 attempt 详情。"""
+        """按 UTC 日历窗口读取必要字段，不加载长 attempt 详情。"""
         repo_clause = " AND repo_id = ?" if repo_id is not None else ""
-        query_params: list[object] = [since]
+        query_params: list[object] = [since_date]
         if repo_id is not None:
             query_params.append(repo_id)
         with self._connect() as connection:
             attempt_rows = connection.execute(
                 "SELECT repo_id, agent, failure_type, duration_seconds, preset, model "
-                "FROM attempt_records WHERE started_at >= ?" + repo_clause,
+                "FROM attempt_records WHERE date(started_at) >= date(?)" + repo_clause,
                 query_params,
             ).fetchall()
             run_rows = connection.execute(
                 "SELECT repo_id, outcome, duration_seconds FROM run_records "
-                "WHERE started_at >= ? AND outcome IN ('completed', 'failed', 'blocked')"
-                + repo_clause,
+                "WHERE date(started_at) >= date(?) "
+                "AND outcome IN ('completed', 'failed', 'blocked')" + repo_clause,
                 query_params,
             ).fetchall()
         return AgentPerformanceRecords(
