@@ -34,15 +34,28 @@ export async function fetchBacklogSettings(repoId: string): Promise<BacklogSetti
   return get(`${BASE_PATH}/settings?repo_id=${encodeURIComponent(repoId)}`);
 }
 
+/**
+ * 更新 Backlog 并发策略与/或默认视图（PATCH 语义：省略的字段保持原值）。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.maxParallel - 省略＝不变；``null``＝恢复继承（清除策略，删除设置行）；
+ *   1–10＝设置策略值。
+ * @param params.defaultView - 省略＝不变；后端仅接受 timeline / list。
+ * @returns 写后 fresh 读回的设置快照（含生效上限与来源）。
+ */
 export async function updateBacklogSettings(params: {
   repoId: string;
-  maxParallel: number;
-  defaultView: "timeline" | "list";
+  maxParallel?: number | null;
+  defaultView?: "timeline" | "list";
 }): Promise<BacklogSettings> {
-  return patch(`${BASE_PATH}/settings?repo_id=${encodeURIComponent(params.repoId)}`, {
-    max_parallel: params.maxParallel,
-    default_view: params.defaultView,
-  });
+  const body: Record<string, number | null | string> = {};
+  if (params.maxParallel !== undefined) {
+    body.max_parallel = params.maxParallel;
+  }
+  if (params.defaultView !== undefined) {
+    body.default_view = params.defaultView;
+  }
+  return patch(`${BASE_PATH}/settings?repo_id=${encodeURIComponent(params.repoId)}`, body);
 }
 
 /**
@@ -110,13 +123,20 @@ export async function fetchPrdContent(repoId: string, prdPath: string): Promise<
   });
 }
 
+/**
+ * 触发一次「全局开始」批量启动。
+ *
+ * 批量上限不再来自请求体：服务端按同一解析函数取生效并发上限，且本动作
+ * 不持久化任何设置。
+ *
+ * @param params.repoId - 仓库标识。
+ * @returns 本次批量的 started / queued / skipped 明细。
+ */
 export async function startGlobalBacklog(params: {
   repoId: string;
-  maxParallel: number;
 }): Promise<BacklogGlobalStartResult> {
   return post(`${BASE_PATH}/start-global`, {
     repo_id: params.repoId,
-    max_parallel: params.maxParallel,
   });
 }
 

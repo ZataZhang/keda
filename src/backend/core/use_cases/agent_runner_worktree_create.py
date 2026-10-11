@@ -297,12 +297,10 @@ def create_or_reuse_worktree(
 
 
 def _resolve_repo_id(issue: IssueSummary, worktree_path: Path) -> str:
-    """Derive a stable per-repository identifier for short-term memory paths.
+    """为未注入仓库身份的兼容调用推导短期记忆分区键。
 
-    Uses the worktree directory name as a stable stand-in when no registry
-    lookup is available. Kept dependency-light on purpose: this function
-    lives in the ``core/`` layer and must not reach into ``engines/`` or
-    ``infrastructure/`` to read the registry.
+    正常 runner 应传入 registry 提供的稳定仓库 ID；只有旧调用面没有该值时，
+    才用 worktree 目录名作为回退。核心层不读取 engines 或 infrastructure 中的 registry。
     """
     try:
         return worktree_path.resolve().name or "default"

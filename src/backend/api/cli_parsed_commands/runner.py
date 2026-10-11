@@ -1,4 +1,4 @@
-"""``kc run`` / ``kc daemon`` / ``kc review`` / ``kc review-daemon``
+"""``kc run`` / ``kc daemon`` / ``kc supervise`` / ``kc supervise-daemon``
 / ``kc recover`` / ``kc blocked-continue`` handlers.
 
 Extracted from :mod:`backend.api.cli`'s monolithic ``_run_parsed_command``
@@ -739,7 +739,7 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_review_command(ctx: ParsedCommandContext) -> int:
-    """``kc review``: one supervisor review polling cycle."""
+    """运行一轮 post-PR supervisor 检查。"""
     contexts = _resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -782,7 +782,7 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
-    """``kc review-daemon``: run supervisor review continuously."""
+    """持续运行 post-PR supervisor 检查。"""
     contexts = _resolve_cli_repository_targets(
         parsed=ctx.parsed,
         runner_settings=ctx.runner_settings,
@@ -902,6 +902,7 @@ def run_blocked_continue_command(ctx: ParsedCommandContext) -> int:
         claimed = blocked_continue_issue(
             issue_number=ctx.parsed.issue,
             repo_path=context.repo_path,
+            repo_id=context.repo_id,
             config=context.config,
             agent=ctx.parsed.agent,
             github_client=github_client,

@@ -51,12 +51,14 @@ __all__ = [
     "LifecycleEventType",
     "LifecyclePhase",
     "LifecycleStatus",
+    "LifecycleQuery",
     "build_attempt_event_detail",
     "build_prd_lifecycle_detail",
     "build_prd_lifecycle_stats",
     "classify_durations",
     "derive_current_phase",
     "lifecycle_run_id",
+    "list_issue_lifecycle_details",
     "record_lifecycle_event",
     "record_lifecycle_terminal",
     "resolve_lifecycle_store",
@@ -140,6 +142,23 @@ class LifecycleStatus(str, Enum):
     BLOCKED = "blocked"
     UNBLOCKED = "unblocked"
     FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class LifecycleQuery:
+    """Issue 生命周期查询条件。
+
+    Attributes:
+        repo_id: 可选仓库标识；省略时查询本地账本中的所有仓库。
+        issue_number: 可选 Issue 编号；省略时返回所有有关联 Issue 的生命周期。
+        phase: 可选当前阶段精确筛选值。
+        reached_event: 可选里程碑事件；只保留历史中曾记录该事件的 Issue。
+    """
+
+    repo_id: str | None = None
+    issue_number: int | None = None
+    phase: str | None = None
+    reached_event: str | None = None
 
 
 #: 计入“有效执行”的阶段：只有 Agent 真正在跑的时间。
@@ -676,6 +695,16 @@ def build_prd_lifecycle_detail(
     if run_record is None:
         return _empty_lifecycle_detail(repo_id, prd_path)
 
+    return _build_lifecycle_detail_for_run(lifecycle_store, run_record, now=now)
+
+
+def _build_lifecycle_detail_for_run(
+    lifecycle_store: IPrdLifecycleStore,
+    run_record: PrdLifecycleRunRecord,
+    *,
+    now: datetime | None = None,
+) -> PrdLifecycleDetail:
+    """由一条 run 记录和其事件构建生命周期详情。"""
     try:
         stored_events = lifecycle_store.list_lifecycle_events(run_id=run_record.run_id)
     except Exception as exc:  # noqa: BLE001 - read failure degrades to incomplete.
@@ -685,8 +714,8 @@ def build_prd_lifecycle_detail(
     breakdown = classify_durations(stored_events, finished_at=run_record.finished_at, now=now)
     current_phase = derive_current_phase(run_record, stored_events)
     return PrdLifecycleDetail(
-        repo_id=repo_id,
-        prd_path=prd_path,
+        repo_id=run_record.repo_id,
+        prd_path=run_record.prd_path,
         run_id=run_record.run_id,
         issue_number=run_record.issue_number,
         trigger=run_record.trigger,
@@ -710,6 +739,65 @@ def build_prd_lifecycle_detail(
         ],
         has_data=True,
     )
+
+
+def list_issue_lifecycle_details(
+    *, store: object | None, query: LifecycleQuery, now: datetime | None = None
+) -> list[PrdLifecycleDetail]:
+    """列出 Issue 生命周期，可按当前阶段或曾到达的事件里程碑筛选。
+
+    ``reached_event`` 按追加式历史判断；Issue 后续进入阻塞、失败或完成阶段，
+    仍会保留在该里程碑的查询结果中。
+
+    Args:
+        store: 实现生命周期账本端口的 console store。
+        query: 仓库、Issue、当前阶段和历史里程碑筛选条件。
+        now: 可选的时间基准，供进行中耗时计算使用。
+
+    Returns:
+        list[PrdLifecycleDetail]: 按最近开始时间倒序排列的 Issue 生命周期详情。
+
+    Raises:
+        ValueError: 阶段或事件名称不在生命周期闭集中，或 Issue 编号无效。
+        Exception: 生命周期账本读取失败。
+    """
+    if query.issue_number is not None and query.issue_number <= 0:
+        raise ValueError("issue_number must be a positive integer.")
+    if query.phase is not None and query.phase not in {phase.value for phase in LifecyclePhase}:
+        raise ValueError(f"Unknown lifecycle phase: {query.phase}.")
+    valid_events = {
+        event.value
+        for event in LifecycleEventType
+        if event is not LifecycleEventType.AGENT_TOKEN_USAGE
+    }
+    if query.reached_event is not None and query.reached_event not in valid_events:
+        raise ValueError(f"Unknown lifecycle event: {query.reached_event}.")
+
+    lifecycle_store = resolve_lifecycle_store(store)
+    if lifecycle_store is None:
+        return []
+
+    run_records = lifecycle_store.list_lifecycle_runs(repo_id=query.repo_id)
+    latest_first_records = sorted(
+        run_records,
+        key=lambda run_record: (run_record.started_at, run_record.run_id),
+        reverse=True,
+    )
+    details: list[PrdLifecycleDetail] = []
+    for run_record in latest_first_records:
+        if run_record.issue_number is None:
+            continue
+        if query.issue_number is not None and run_record.issue_number != query.issue_number:
+            continue
+        lifecycle_detail = _build_lifecycle_detail_for_run(lifecycle_store, run_record, now=now)
+        if query.phase is not None and lifecycle_detail.current_phase != query.phase:
+            continue
+        if query.reached_event is not None and not any(
+            event.event_type == query.reached_event for event in lifecycle_detail.events
+        ):
+            continue
+        details.append(lifecycle_detail)
+    return details
 
 
 def build_prd_lifecycle_stats(

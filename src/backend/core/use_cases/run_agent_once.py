@@ -352,7 +352,7 @@ def resolve_supervisor_agent(
 
     生命周期矩阵（或 PRD 覆盖）显式声明了具体 agent 时用它；``fallback_agent``
     描述"配置为 ``auto`` 时用谁"：发布路径传本次实现者（保持历史行为），
-    ``kc review`` 不传，回落到按 Issue 标签路由。
+    ``kc supervise`` 不传，回落到按 Issue 标签路由。
 
     Args:
         issue: 当前 Issue。
@@ -721,10 +721,17 @@ def run_agent_with_prompt(
         """把本次调用自报的会话 id 落在 worktree 局部记录里。
 
         只记 run 用途的会话：fix / closeout / verifier 是另一段独立对话，写进同一个
-        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。落盘是旁路，失败只记
-        日志——续传是增益路径，不能反过来把正常执行拖下水。
+        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。这些调用都走默认
+        ``profile="run"``，profile 一档拦不住，因此以调用阶段为准：只有
+        ``implementation``（主循环与其 recovery 轮次）与未标注阶段的调用才落盘；
+        verifier 等独立对话即使同 profile 也不覆盖——它还顺手把 git 跟踪的
+        ``.iar/agent-runner/sessions/<agent>.json`` 改脏，让「独立 verifier 不得
+        改动代码树」的门禁误报。落盘是旁路，失败只记日志——续传是增益路径，
+        不能反过来把正常执行拖下水。
         """
         if not session_id or profile != AGENT_PROFILE_RUN:
+            return
+        if invocation_phase not in (PHASE_IMPLEMENTATION, PHASE_UNSPECIFIED):
             return
         try:
             save_agent_session_record(
@@ -994,8 +1001,9 @@ def run_agent_until_committed(
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
     model_selection: ModelSelection | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    repo_id: str | None = None,
 ) -> AgentCommitResult:
-    """运行 Agent recovery 状态机并返回最终提交结果。"""
+    """运行 Agent recovery 状态机并返回最终提交结果；``repo_id`` 指稳定仓库 registry id。"""
     from backend.core.use_cases.run_agent_execution_loop import (
         AgentExecutionRequest,
         run_agent_until_committed as run_execution_loop,
@@ -1014,6 +1022,7 @@ def run_agent_until_committed(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=model_selection,
+            repo_id=repo_id,
             # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"
             # （崩溃对账重新入队 / 部分进度续作），而不是新任务被历史会话污染。
             resume_session_id=resolve_resumable_session_id(

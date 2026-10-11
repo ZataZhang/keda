@@ -387,14 +387,6 @@ def get_console_prd_lifecycle_stats(repo_id: str | None = None, days: int = 30) 
     return _serialize(stats)
 
 
-@router.get("/agent-runner/console/runs")
-def list_console_runs(repo_id: str | None = None, limit: int = 100) -> dict:
-    """倒序列出最近的运行记录。"""
-    bounded_limit = min(max(limit, 1), 500)
-    runs = create_console_store().list_recent_runs(repo_id=repo_id, limit=bounded_limit)
-    return {"runs": [_serialize(entry) for entry in runs]}
-
-
 @router.get("/agent-runner/console/audit")
 def list_console_audit(limit: int = 100) -> dict:
     """倒序列出最近的审计条目。"""

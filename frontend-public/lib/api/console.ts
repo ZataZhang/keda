@@ -26,6 +26,8 @@ import type {
   RepositoryCompletionStats,
   RunnerProcessKind,
   RunnerProcessRecord,
+  RunAttemptDetailEntry,
+  RunInvocationDetailEntry,
   RunRecordEntry,
 } from "./types";
 
@@ -290,6 +292,38 @@ export async function fetchRecentRuns(params: {
     `${BASE_PATH}/console/runs?${searchParams.toString()}`,
   );
   return response.runs;
+}
+
+/**
+ * 读取所选运行记录时间窗口内持久化的 Agent 尝试。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.issueNumber - Issue 编号。
+ * @param params.startedAt - ISO-8601 运行开始时间。
+ * @param params.finishedAt - ISO-8601 运行结束时间。
+ * @returns 所选运行窗口内的尝试详情。
+ */
+export async function fetchRunExecutionDetails(params: {
+  repoId: string;
+  issueNumber: number;
+  startedAt: string;
+  finishedAt: string;
+}): Promise<{
+  attempts: RunAttemptDetailEntry[];
+  invocations: RunInvocationDetailEntry[];
+}> {
+  const searchParams = new URLSearchParams({
+    repo_id: params.repoId,
+    issue_number: String(params.issueNumber),
+    started_at: params.startedAt,
+    finished_at: params.finishedAt,
+  });
+  return get<{
+    attempts: RunAttemptDetailEntry[];
+    invocations: RunInvocationDetailEntry[];
+  }>(
+    `${BASE_PATH}/console/runs/attempts?${searchParams.toString()}`,
+  );
 }
 
 export async function fetchAuditLog(limit = 100): Promise<AuditEntry[]> {

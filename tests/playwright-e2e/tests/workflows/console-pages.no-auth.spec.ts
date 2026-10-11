@@ -310,6 +310,265 @@ test.describe('console pages smoke (mocked API)', () => {
     await expect(page.getByText('70%')).toBeVisible()
   })
 
+  test('stats page shows lifecycle details for successful and failed runs', async ({ page }) => {
+    await mockConsoleApi(page)
+    await page.route('**/api/v1/agent-runner/console/runs?**', (route) =>
+      route.fulfill({
+        json: {
+          runs: [
+            {
+              repo_id: 'keda',
+              repo_path: '/Users/me/code/keda',
+              issue_number: 265,
+              issue_title: 'kc hosted runner deployment',
+              issue_url: 'https://github.com/ZataZhang/keda/issues/265',
+              trigger: 'cli_run',
+              agent: 'codex',
+              outcome: 'failed',
+              error_summary:
+                "Command ['git', 'push', 'zata', 'issue-265'] returned non-zero exit status 1.\n\n" +
+                'To ssh://ssh.github.com:443/ZataZhang/keda.git\n' +
+                '! [rejected] issue-265 -> issue-265 (non-fast-forward)\n' +
+                'error: failed to push some refs\n' +
+                'hint: Updates were rejected because the tip of your current branch is behind its remote counterpart.',
+              started_at: '2026-10-10T10:13:03+00:00',
+              finished_at: '2026-10-10T10:55:41+00:00',
+              duration_seconds: 2560,
+            },
+            {
+              repo_id: 'keda',
+              repo_path: '/Users/me/code/keda',
+              issue_number: 263,
+              issue_title: 'agent preset performance stats',
+              issue_url: 'https://github.com/ZataZhang/keda/issues/263',
+              trigger: 'cli_run',
+              agent: 'qoder',
+              outcome: 'failed',
+              error_summary: 'Failed after 12 attempts.',
+              started_at: '2026-10-10T04:51:24+00:00',
+              finished_at: '2026-10-10T05:11:52+00:00',
+              duration_seconds: 1228,
+            },
+            {
+              repo_id: 'keda',
+              repo_path: '/Users/me/code/keda',
+              issue_number: 263,
+              issue_title: 'agent preset performance stats',
+              issue_url: 'https://github.com/ZataZhang/keda/issues/263',
+              trigger: 'cli_run',
+              agent: 'qoder',
+              outcome: 'completed',
+              error_summary: null,
+              started_at: '2026-10-09T22:51:24+00:00',
+              finished_at: '2026-10-09T23:11:52+00:00',
+              duration_seconds: 1228,
+            },
+            {
+              repo_id: 'keda',
+              repo_path: '/Users/me/code/keda',
+              issue_number: 264,
+              issue_title: 'nightly batch aggregate PR',
+              issue_url: 'https://github.com/ZataZhang/keda/issues/264',
+              trigger: 'cli_run',
+              agent: 'codex',
+              outcome: 'completed',
+              error_summary: null,
+              started_at: '2026-10-10T05:21:01+00:00',
+              finished_at: '2026-10-10T06:30:01+00:00',
+              duration_seconds: 4140,
+            },
+          ],
+        },
+      }),
+    )
+    await page.route(
+      '**/api/v1/agent-runner/console/runs/attempts**',
+      async (route) => {
+        const requestedIssueNumber = new URL(route.request().url()).searchParams.get(
+          'issue_number',
+        )
+        const attempts =
+          requestedIssueNumber === '265'
+            ? []
+            : requestedIssueNumber === '264'
+            ? [
+                {
+                  attempt_number: 1,
+                  failure_type: 'success',
+                  recovered: false,
+                  detail: 'Agent produced commits and passed verification.',
+                  agent: 'codex',
+                  started_at: '2026-10-10T05:21:59+00:00',
+                  finished_at: '2026-10-10T06:29:59+00:00',
+                  duration_seconds: 4140,
+                  failure_phase: null,
+                  preset: 'balanced',
+                  model: 'gpt-6.1',
+                  phase_durations: [
+                    { name: 'agent', seconds: 3600 },
+                    { name: 'verification', seconds: 300 },
+                    { name: 'verifier', seconds: 240 },
+                  ],
+                },
+              ]
+            : [
+                {
+                  attempt_number: 1,
+                  failure_type: 'agent_error',
+                  recovered: false,
+                  detail: 'BrokenPipeError: [Errno 32] Broken pipe',
+                  agent: 'qoder',
+                  started_at: '2026-10-10T04:51:59+00:00',
+                  finished_at: '2026-10-10T04:52:09+00:00',
+                  duration_seconds: 10,
+                  failure_phase: 'agent',
+                  preset: 'fast-qoder',
+                  model: 'claude-sonnet-4-5',
+                  phase_durations: [{ name: 'agent', seconds: 9.2 }],
+                },
+              ]
+        const invocations =
+          requestedIssueNumber === '265'
+            ? [
+                {
+                  invocation_id: 'inv-push-failed-1',
+                  phase: 'supervisor_repair',
+                  role: 'implementer',
+                  executor: 'codex',
+                  retry_of: null,
+                  started_at: '2026-10-10T10:13:06+00:00',
+                  finished_at: '2026-10-10T10:26:15+00:00',
+                  duration_seconds: 789,
+                  outcome: 'ok',
+                  requested_model: null,
+                  reported_model: null,
+                  model_source: 'unknown',
+                },
+                {
+                  invocation_id: 'inv-push-failed-2',
+                  phase: 'supervisor',
+                  role: 'supervisor',
+                  executor: 'codex',
+                  retry_of: null,
+                  started_at: '2026-10-10T10:38:39+00:00',
+                  finished_at: '2026-10-10T10:40:49+00:00',
+                  duration_seconds: 130,
+                  outcome: 'ok',
+                  requested_model: null,
+                  reported_model: null,
+                  model_source: 'unknown',
+                },
+                {
+                  invocation_id: 'inv-push-failed-3',
+                  phase: 'supervisor_repair',
+                  role: 'implementer',
+                  executor: 'codex',
+                  retry_of: null,
+                  started_at: '2026-10-10T10:40:58+00:00',
+                  finished_at: '2026-10-10T10:49:44+00:00',
+                  duration_seconds: 526,
+                  outcome: 'ok',
+                  requested_model: null,
+                  reported_model: null,
+                  model_source: 'unknown',
+                },
+              ]
+            : requestedIssueNumber === '264'
+            ? [
+                {
+                  invocation_id: 'inv-success-1',
+                  phase: 'review',
+                  role: 'reviewer',
+                  executor: 'codex',
+                  retry_of: null,
+                  started_at: '2026-10-10T06:25:00+00:00',
+                  finished_at: '2026-10-10T06:29:00+00:00',
+                  duration_seconds: 240,
+                  outcome: 'ok',
+                  requested_model: 'gpt-6.1',
+                  reported_model: 'gpt-6.1',
+                  model_source: 'executor_report',
+                },
+              ]
+            : [
+                {
+                  invocation_id: 'inv-failed-1',
+                  phase: 'implementation',
+                  role: 'implementer',
+                  executor: 'qoder',
+                  retry_of: null,
+                  started_at: '2026-10-10T04:51:59+00:00',
+                  finished_at: '2026-10-10T04:52:09+00:00',
+                  duration_seconds: 10,
+                  outcome: 'error',
+                  requested_model: 'claude-sonnet-4-5',
+                  reported_model: null,
+                  model_source: 'unknown',
+                },
+              ]
+        await route.fulfill({ json: { attempts, invocations } })
+      },
+    )
+
+    await page.goto('/app/stats')
+    await page.getByText('keda · Issue #263').click()
+    await expect(page.getByText('运行时间')).toBeVisible()
+    await expect(page.getByText('最近 2 次运行')).toBeVisible()
+    await expect(
+      page.getByRole('link', {
+        name: '在 GitHub 打开 Issue #263：agent preset performance stats',
+      }),
+    ).toHaveAttribute('href', 'https://github.com/ZataZhang/keda/issues/263')
+    await page.getByRole('button', { name: '查看 keda Issue #263 的运行详情' }).click()
+
+    const detailsDialog = page.getByTestId('run-details-dialog')
+    await expect(detailsDialog).toBeVisible()
+    await expect(detailsDialog).toContainText('Failed after 12 attempts.')
+    await expect(detailsDialog).toContainText('Agent 执行时间线')
+    await detailsDialog.getByText('查看系统原始错误记录').click()
+    await expect(detailsDialog).toContainText(
+      'BrokenPipeError: [Errno 32] Broken pipe',
+    )
+    await expect(detailsDialog).toContainText(
+      /结束时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,
+    )
+    await expect(detailsDialog).toContainText('失败阶段：Agent 执行')
+    await detailsDialog.getByText('重试与生命周期阶段明细（技术记录）').click()
+    await expect(detailsDialog).toContainText('claude-sonnet-4-5')
+    await expect(detailsDialog).toContainText('Agent 执行')
+
+    await page.keyboard.press('Escape')
+    await expect(detailsDialog).not.toBeVisible()
+    await page.getByText('keda · Issue #264').click()
+    await page.getByRole('button', { name: '查看 keda Issue #264 的运行详情' }).click()
+    await expect(detailsDialog).toBeVisible()
+    await expect(detailsDialog).toContainText('本次运行已完成。')
+    await detailsDialog.getByText('重试与生命周期阶段明细（技术记录）').click()
+    await expect(detailsDialog).toContainText('gpt-6.1')
+    await expect(detailsDialog).toContainText('独立复核')
+
+    await page.keyboard.press('Escape')
+    await page.getByText('keda · Issue #265').click()
+    await page.getByRole('button', { name: '查看 keda Issue #265 的运行详情' }).click()
+    await expect(detailsDialog).toBeVisible()
+    await expect(detailsDialog).toContainText('kc hosted runner deployment')
+    await expect(
+      detailsDialog.getByRole('link', { name: '在 GitHub 打开 Issue #265' }),
+    ).toHaveAttribute('href', 'https://github.com/ZataZhang/keda/issues/265')
+    await expect(detailsDialog).toContainText('失败阶段：推送到 GitHub')
+    await expect(detailsDialog).toContainText(
+      '远端分支比本地更新，GitHub 拒绝了推送',
+    )
+    await expect(detailsDialog).toContainText('Agent 调用累计耗时')
+    await expect(detailsDialog).toContainText('Agent 进程正常退出')
+    await expect(detailsDialog).toContainText(
+      '本次没有保存完整的生命周期阶段统计',
+    )
+    await expect(detailsDialog).toContainText(
+      '无法确认具体模型：执行器没有上报，KC 也没有单独指定。',
+    )
+  })
+
   test('repositories page shows registry and audit log', async ({ page }) => {
     await mockConsoleApi(page)
     await page.goto('/app/repositories')

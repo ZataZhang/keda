@@ -1,5 +1,7 @@
 # PRD: KedaCode 托管 Runner 部署与自动资源清理
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/265
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 > ⬜ **验收状态**：未开工。
@@ -14,7 +16,7 @@
 - **本地使用继续免费**（FR-1）：个人和团队可以照常在自己的电脑运行 daemon，无需云端账户或托管服务。
 - **客户专属托管入口**（FR-2、FR-12）：每个客户有独立部署和受保护的 Console URL；客户用运营者签发的一次性引导凭据进入界面完成首次设置，不接入共享多租户控制台。
 - **代码任务与项目集成测试分开**（FR-3、FR-4）：runner 负责代码任务和快速验证；项目数据库等服务由客户 CI 按需启动，required checks 决定 PR 是否通过。
-- **凭据可自助设置且隔离**（FR-5）：客户在 Console 设置、更新和撤销 GitHub 与 Agent 凭据；凭据不会回显或进入日志，只交给该客户的 runner。
+- **凭据可自助设置且隔离**（FR-5）：客户按引导取得并在 Console 设置、更新 GitHub 细粒度 token 与所选 Agent 的供应商 API key；凭据不会回显或进入日志，只交给该客户的 runner。
 - **回收安全且范围明确**（FR-6、FR-7）：按保留策略回收安全的过期 worktree、日志和运行摘要，以及未被使用的镜像缓存；活动资源和客户持久数据受到保护。
 - **磁盘与容器日志有界**（FR-8、FR-9）：空间不足时暂停领取新任务、保留运行中任务；容器日志轮转，避免长期运行无限增长。
 - **清理结果可核查**（FR-10）：运营者能看到扫描、删除、跳过和失败数量及原因；部分失败不会被隐藏。
@@ -22,7 +24,7 @@
 
 # Part A · 人审层 (Review Layer)
 
-## 1. Problem And Interpretation
+## 1. Introduction & Goals
 
 ### Problem Statement
 
@@ -40,27 +42,31 @@ KedaCode 已能把单仓库 daemon 放进 Docker，但现有容器化方案主�
 
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
-| 🤖 自动验证 | 用户继续在自己的电脑运行 `kc daemon` | 不需要托管服务或付费账户；本地执行路径和任务状态语义保持不变 |
-| 👀 人审 + 自动验证 | 客户访问自己的托管 Console URL 并按引导设置 GitHub 与 Agent 凭据 | 未登录访问被拒绝；设置后界面只显示配置状态，不回显凭据；对应 runner 能使用该客户的凭据 |
+| 👀 人审 + 自动验证 | 客户访问专属托管 Console，输入仅授权目标仓库的 GitHub token 和所选 Agent 的供应商 API key | 未登录访问被拒绝；无效或权限不足的凭据不能启用 runner；保存后仅显示状态，对应 runner 能使用该客户的凭据 |
+| 👀 人审 + 自动验证 | 客户按 Console 来源说明创建单仓库 GitHub fine-grained PAT 和受支持 Agent 的 API key，再测试并启动 runner | 页面说明凭据来源、PAT 权限、API 账户/计费要求和同 runner 代码可读凭据的边界；模型测试先显示费用提示并由客户点击确认；删除 KedaCode 副本不会被描述为已撤销上游 key |
 | 👀 人审 + 自动验证 | 未认证访问托管 Console API，或提交无效/过期登录凭据 | 请求被拒绝且不返回客户数据；本地 `kc console` 仍只监听 loopback 并保持本机模式 |
 | 🤖 自动验证 | 托管 runner 处理一个代码 Issue；代码验证需要 PostgreSQL 或 Redis | runner 不安装、不启动、不连接项目中间件；PR 的 CI 检查使用工作流服务并成为合并前检查 |
 | 👀 人审 + 自动验证 | 任务已合并且远端分支已删除；运营者查看资源清理预览后运行清理 | 只有关闭 Issue、无远端分支、干净且已合并的托管 worktree 会被移除；活动、脏或未合并的 worktree 明确跳过并说明原因 |
 | 🤖 自动验证 | 宿主机剩余空间低于配置安全线，daemon 正在处理任务 | 当前任务继续；daemon 不领取下一项任务并输出可诊断的磁盘空间提示 |
 
-### 我默默定了这些
+**我默默定了这些**（没问你、我自己定的歧义点）
 
 - 首个托管试点采用“每个客户一台专用 Linux VM、每个仓库一个 runner 容器”的隔离边界；不共用客户工作目录、认证目录或状态库。
-- 每个客户有独立的 Console URL；客户通过登录后的界面设置、更新和撤销凭据，不要求客户准备主机目录或手工配置容器挂载。
-- 推荐首期由运营者签发一次性引导凭据，客户首次登录后设置 Console 管理员密码；不开放公开注册。具体访问方式待 D-03 确认。
-- 推荐客户提供 GitHub 与模型供应商凭据，并通过 Console 设置；基础设施费和模型用量分开结算，此费用边界仍待 D-01 确认。
-- 凭据由该客户 VM 上的服务安全保存，并通过系统管理的运行时凭据机制交给同一客户的 runner；用户不接触文件挂载配置。凭据保存实现需保证密文/密钥边界，不将秘密写入仓库、Compose 输出或日志。
+- 每个客户有独立的 Console URL；客户通过登录后的界面新增、更新或删除 KedaCode 保存的凭据。上游 revoke 由客户在 GitHub/模型平台执行，不要求客户准备主机目录或手工配置容器挂载。
+- 推荐首期由运营者在客户 VM 本地签发 24 小时有效、单次消费的一次性引导码，客户首次登录后设置 Console 管理员密码；不开放公开注册。具体访问方式待 D-03 确认。
+- 每个仓库首期只选择一个 runner 镜像已预装的 Agent：Claude Code、Codex CLI 或 Kimi Code CLI；使用对应供应商 API key。客户从供应商账户平台创建 key 后直接在 Console 的敏感输入框提交。首期不接收 CLI 配置目录/凭据文件，不复用个人订阅 OAuth 会话，也不接受自定义 API Base URL。
+- GitHub 凭据使用客户创建的 fine-grained personal access token；限定到目标仓库，并授予 KedaCode 完成代码提交、Issue 更新和 PR 创建所需的最小仓库权限。
+- GitHub PAT 限定目标仓库，Agent API key 限定目标 CLI；两者按仓库保存和挂载。Agent/仓库代码运行于同一 runner 时可能读取该 runner 的 key，页面须明示此信任边界。
+- 基础设施费由运营者收取；GitHub 与模型供应商 key 由客户持有并在对应供应商账户计费，此费用边界仍待 D-01 确认。
+- 凭据由该客户 VM 上的服务加密保存，并在 runner 启动时解密到独立的内存文件系统，仅以该 runner 的原生认证文件挂载交付；用户不接触主机路径。密文与解密密钥分开保存，秘密不进入仓库、Compose 明文环境、Docker inspect 内容、命令行参数或日志。
 - daemon 自己的 SQLite 是单机运行元数据，不是客户项目数据库中间件；保留必要状态，只对运行历史按已确认保留期清理。
 - 首期仅托管代码任务的执行和 PR 流程，不替客户执行有状态数据库迁移，也不自动合并 PR。
 - 自动清理默认只作用于显式开启托管维护配置的部署；普通本地 `kc daemon` 保持原样。
 
-### 我理解为不做
+**我理解为不做**（你可能想要、但我读成不在范围内的）
 
 - 不做多租户共享主机、跨客户共享的 SaaS 控制面、公开注册或自动计费；每客户独立部署的 Console URL 与凭据设置界面属于本次范围。
+- 首期不支持消费级订阅账号/OAuth 会话导入、上传完整 CLI 配置目录、任意自定义模型网关或由 KedaCode 代客户创建/撤销供应商 API key；客户在 KedaCode 删除保存副本后，仍须到 GitHub/模型供应商账户撤销原 key。
 - 不做在 runner 容器中为每个项目构建 PostgreSQL/Redis 等服务编排，也不把这些依赖从客户项目中“猜测”出来。
 - 不自动删除未合并、未关闭、仍有远端分支或存在未提交改动的 worktree；不自动清除认证和 agent 会话数据。
 
@@ -70,7 +76,7 @@ KedaCode 已能把单仓库 daemon 放进 Docker，但现有容器化方案主�
 
 - 个人与团队可继续免费在自己的电脑运行 KedaCode daemon。
 - 需要持续在线执行时，可让 KedaCode 运营者把 runner 部署在隔离的云主机上；客户仍从 GitHub Issue 发起工作，从 PR 和 CI 查看结果。
-- 客户收到专属 Console URL，登录后按向导连接 GitHub 仓库，并输入 token 或上传界面明确支持的 Agent 凭据文件；客户无需 SSH 登录 VM、编辑 `.env` 或手动配置宿主机挂载。
+- 客户收到专属 Console URL 和一次性引导码，登录后按向导创建 GitHub fine-grained token、创建所选模型供应商的 API key，再把两者分别粘贴到 Console；页面提供对应官方创建说明和权限清单。客户无需 SSH 登录 VM、上传本地认证目录、编辑 `.env` 或配置宿主机挂载。
 - 客户项目所需数据库测试由客户仓库的 GitHub Actions 等 CI 工作流启动，不占用 daemon 容器，也不需要在宿主机上长期运行中间件。
 - 运营者得到明确的空间清理和磁盘保护策略，减少因长期驻留而人工登录清理的频率。
 - 推荐以部署与维护基础设施为单位收费，模型供应商账户与用量由客户自行管理和支付；具体费用边界待 D-01 确认。
@@ -89,15 +95,15 @@ KedaCode 已能把单仓库 daemon 放进 Docker，但现有容器化方案主�
 
 ### 决策一：首期托管服务的客户隔离与费用边界
 
-推荐“运营者管理的专用 VM，每客户隔离部署；客户提供 GitHub 和模型凭据，模型用量直接由客户向供应商支付，基础设施服务费单独收取”。现有容器是一仓库一个 runner，专用 VM 可沿用该结构，避免首期先建设共享宿主机的跨客户安全隔离。代价是每位客户都有独立 VM 的基础成本，运营者需处理凭据轮换和退订回收。
+推荐“运营者管理的专用 VM，每客户隔离部署；客户提供目标仓库专用 GitHub fine-grained token 和所选 Agent 的供应商 API key，模型用量直接由客户向供应商支付，基础设施服务费单独收取”。现有容器是一仓库一个 runner，专用 VM 可沿用该结构，避免首期先建设共享宿主机的跨客户安全隔离。API key 方式支持无交互、可验证的 runner 启动；代价是客户必须有对应供应商的 API 账户/余额，消费级订阅登录不适用于首期托管模式。
 
-**请确认：** 首期是否采用专用 VM + 客户自带 GitHub/模型凭据 + 模型用量由客户直接支付？备选是客户自有主机（BYOC），由运营者收部署/维护费。多客户共享 VM 超出本 PRD 范围；若选该项，需先补充跨客户安全隔离设计并重新评估范围。
+**请确认：** 首期是否采用专用 VM + 客户为目标仓库创建 fine-grained GitHub token、为所选 Agent 提供供应商 API key + 模型用量由客户直接支付？备选是客户自有主机（BYOC），由运营者收部署/维护费。多客户共享 VM 和消费级订阅/OAuth 凭据导入超出本 PRD 范围；若要支持它们，需另行评估权限、身份和轮换方案。
 
 **验收：** 部署说明明确 VM 所有者、仓库与凭据边界、基础设施费与模型费用的承担方；验证报告证明一个客户无法读取另一客户的仓库、认证目录或 daemon 状态。
 
 ### 决策二：自动清理的保留周期与删除边界
 
-推荐将详细 Issue 输出日志保留 14 天、运行/attempt 摘要保留 90 天；审计记录、队列配置、活动状态和客户认证不按日志策略删除。已关闭 Issue 只有在远端分支已删除、worktree 干净且已合并时才可自动删除；镜像仅清理悬空镜像与过期 build cache，不删 Docker volume。退订时停止 daemon、撤销凭据，再按合同与客户确认的导出/删除流程处置该客户全部数据。较短保留期降低磁盘和敏感输出留存，较长保留期便于故障追溯。
+推荐将详细 Issue 输出日志保留 14 天、运行/attempt 摘要保留 90 天；审计记录、队列配置、活动状态和客户认证不按日志策略删除。已关闭 Issue 只有在远端分支已删除、worktree 干净且已合并时才可自动删除；镜像仅清理悬空镜像与过期 build cache，不删 Docker volume。退订时由客户先在 GitHub/模型供应商平台 revoke 源 key，运营者停止 daemon 并删除 KedaCode 保存的副本，再按合同与客户确认的导出/删除流程处置该客户全部数据。较短保留期降低磁盘和敏感输出留存，较长保留期便于故障追溯。
 
 **请确认：** 是否接受 14 天原始输出、90 天运行摘要并永久保留审计记录直到退订？可以调整日志/摘要周期或要求退订前先导出数据。
 
@@ -105,9 +111,9 @@ KedaCode 已能把单仓库 daemon 放进 Docker，但现有容器化方案主�
 
 ### 决策三：客户如何进入托管 Console 并完成首次设置
 
-推荐每客户独立 URL，由运营者签发一次性引导凭据；客户首次登录后设置该部署的管理员密码，再通过界面设置与验证 GitHub/Agent 凭据。首期不开放自助注册，也不建跨客户账号目录。凭据由该客户实例保存，界面只返回已配置状态；后台再通过受控方式交给该客户的 runner。这样保留客户隔离并避免要求普通用户操作主机目录，代价是运营者仍需为客户签发和重置首次访问凭据。
+推荐每客户独立 URL，由运营者在客户 VM 上运行 `kc console bootstrap-token create --expires-in 24h` 生成 256-bit 随机引导码：命令只显示一次；服务端按部署绑定只保存哈希；24 小时过期、成功消费后原子失效。运营者通过独立安全渠道把原码交给客户，客户只在网页表单输入、不放入 URL。首次成功后客户设置该部署的管理员密码；管理员密码只认证 Console，不交给 runner。引导码丢失/过期时，运营者在 VM 本地使旧码失效并重新签发，保留审计记录。首期不开放注册，也不建跨客户账号目录。GitHub PAT 与 Agent API key 由客户按 Console 官方链接自行创建并提交；服务按仓库加密保存，运行时只交给匹配 runner。这样避免普通用户操作主机目录，代价是运营者仍需安全传递和重发引导码。
 
-**请确认：** 是否接受“每客户独立 URL + 运营者签发一次性引导凭据 + 每个部署一个客户管理员”的首期访问模型？替代方案是让客户使用自己的 SSO/身份代理；公开注册和多客户统一门户不在首期范围。
+**请确认：** 是否接受“每客户独立 URL + 运营者本地签发的一次性引导码（24 小时、单次使用、只存哈希）+ 每个部署一个客户管理员”的首期访问模型？替代方案是让客户使用自己的 SSO/身份代理；公开注册和多客户统一门户不在首期范围。
 
 **验收：** 未认证远程请求被拒绝；有效管理员可以完成引导并设置凭据；无效、过期或已撤销的访问凭据不能进入 Console；本地 Console 仍维持 loopback 单用户模式。
 
@@ -125,9 +131,9 @@ CI 工作流、CLI 参数与 Compose 配置由失败可区分的自动验证覆�
 
 ### 托管服务运营者
 
-在客户专用 Linux VM 上部署 Console 与仓库 runner，为客户生成专属 URL 和首次引导凭据。客户登录 Console 后选择授权仓库、设置 GitHub 与 Agent 凭据并查看连接状态；客户不需要 SSH 登录主机、传 `.env` 文件或准备容器挂载目录。运营者仍通过主机侧工具管理部署、查看维护摘要与处理退订；项目数据库集成测试由 GitHub PR 的 CI 状态提供结果。
+在客户专用 Linux VM 上部署 Console 与仓库 runner，配置 HTTPS 反向代理和专属 URL；运营者在 VM 本地执行 `kc console bootstrap-token create --expires-in 24h`，通过约定的独立安全渠道把一次性码交给客户。客户首次进入后设置 Console 管理员密码，再按 Console 向导输入目标 `owner/repo`，前往 GitHub 创建只授权该仓库的 fine-grained PAT（`Metadata: read`、`Contents: read/write`、`Issues: read/write`、`Pull requests: read/write`），并在 Anthropic Console、OpenAI API Platform 或 Kimi Platform 开通 API 使用、创建所选 Agent 的 API key。客户把 key 粘贴到各自字段；GitHub key 只做只读身份/仓库/权限检查，Agent key 仅在客户显式确认潜在费用后执行最小模型连通性请求。验证通过后服务按仓库加密保存，并在启动 runner 时写入仅该 runner 可挂载的 tmpfs 原生认证配置。客户不需要 SSH 登录主机、传 `.env`/CLI 认证目录或准备容器挂载目录。运营者通过主机侧工具管理部署、查看维护摘要与处理退订；GitHub Actions secrets、项目数据库账号和 TLS 私钥有各自的保管位置，不录入 Console。
 
-客户退订时，运营者先停止 daemon、撤销 GitHub 和模型凭据，按已确认的导出/删除规则清理客户数据，再释放 VM。
+客户退订时，客户先分别在 GitHub 与模型供应商账户撤销源 key；运营者停止 daemon、删除 KedaCode 的加密凭据副本和 Console 登录，再按已确认的导出/删除规则清理客户数据并释放 VM。若客户只在 Console 删除了本地副本，上游 key 仍有效，必须另外 revoke。
 
 ### 托管服务客户（代码任务提交者与 PR 审阅者）
 
@@ -152,7 +158,7 @@ CI 工作流、CLI 参数与 Compose 配置由失败可区分的自动验证覆�
 - **expected behavior**：按客户隔离部署 Console 与 runner；通过受认证界面设置凭据；把代码改动与完整数据库集成测试分开；自动清理有限的临时资源；磁盘不足时停止领取新任务；本地免费路径不变。
 - **explicit scope boundary**：首期托管代码 Issue → agent → PR → CI 流程，并提供每客户 Console URL 和凭据配置；不托管项目运行时，不实现跨客户共享控制面或计费产品。
 
-# Part B · 执行层 (Build Layer)
+# Part B · 执行器层 (Build Layer)
 
 ## 5. Repository Context And Architecture Fit
 
@@ -162,19 +168,39 @@ CI 工作流、CLI 参数与 Compose 配置由失败可区分的自动验证覆�
 - `docker-compose.runner.yml` 已是单仓库 runner；没有 DB/Redis sidecar、没有公开端口，也没有 Docker socket 挂载。它将仓库、container-auth 与 KedaCode 状态目录挂载进容器，重启策略为 `unless-stopped`。
 - `kc container up/down/logs`、认证快照导入、dry-run 与宿主 daemon 互斥检查均已存在。`kc container up` 支持 `--repo`、`--repo-id`、`--gh-token` 和 `--build`；托管文档不得把密钥写进仓库 dotenv 或公开日志。
 - `frontend-public/` 已有 Agent Runner 管理终端和 Settings 页面，但当前 `kc console` 固定监听 `127.0.0.1`；`src/backend/api/routes/local_auth.py` 对任何登录输入都返回固定 local operator，会话不具备公网访问认证。托管 Console 必须增加独立的真实认证模式，不能直接开放当前本机模式。
-- 当前 Console 不提供客户通过界面保存 GitHub/Agent 凭据的 hosted onboarding；容器认证通过 `kc container auth import` 从本机快照生成。托管模式需增加 token 表单或受支持的凭据文件上传、不回显 secret 的更新/验证/撤销入口，并由服务管理 runner 所需凭据，不要求客户手工操作主机文件。
+- 当前 Console 不提供客户通过界面保存 GitHub/Agent 凭据的 hosted onboarding；本地容器认证通过 `kc container auth import` 从用户快照生成。托管模式不复用本机 OAuth/session 快照：只支持目标仓库 fine-grained GitHub token 和 Claude/Codex/Kimi 的供应商 API key 表单；由服务按 provider 生成原生运行时认证文件，不要求客户上传认证目录或操作主机文件。
 - 每日应用日志已有 14 天清理；Issue 执行输出写入目标仓库 `logs/agent-runner/issues/<repo_id>/`，需单独纳入策略。
 - `src/backend/infrastructure/persistence/console_store.py` 将运行、attempt、审计、队列与监控数据写入本地 SQLite。此数据库是 daemon 自身元数据，不是客户项目的 DB middleware；首期只清理明确定义的运行摘要，不清理审计、设置或活动状态。
 - `src/backend/core/use_cases/worktree_cleanup.py` 已有关闭 Issue、远端分支已删除、托管路径、干净且已合并等保护条件；`kc worktree cleanup` 默认 dry-run，支持既有人工检查结果。任何 daemon 自动化不得使用 `force` 绕过安全条件。
 - daemon 同一仓库单进程锁在 `src/backend/core/use_cases/daemon_single_instance.py`；Issue 有独立认领状态与 worktree。自动清理需在一次执行批次完成、并发 worker 已退出后进行，并增加对活动认领的保护。
 - runner 在提交前会运行 `.kedacode.toml` 的 `verification_commands`；CI 失败处理由既有 PR 检查和 `post_pr_supervisor` 能力承担。数据库服务应在客户 GitHub Actions job 中声明。
 
+### 托管凭据的获取、验证与使用
+
+托管 onboarding 涉及三类运行凭据和一类 Console 登录凭据。GitHub token 与 Agent API key 由客户从上游平台创建，再通过 HTTPS Console 的专用敏感输入框提交；表单只显示 provider、仓库、状态、创建/验证时间和到期提醒，不回显 secret。密码/session 仅用于 Console，不进入 runner。下面的 GitHub/Agent 凭据均按仓库保存；即使客户 VM 相同，也不得把一个仓库的凭据挂给另一个仓库的 runner。
+
+| 用途 | 客户从哪里取得 | Console 要求与验证 | runner / 服务用途 |
+|---|---|---|---|
+| 首次 Console 管理员引导码 | 运营者在客户 VM 上运行 `kc console bootstrap-token create --expires-in 24h`；命令生成 256-bit CSPRNG 随机码，只输出一次。运营者通过独立安全渠道交给客户 | 客户在专属 URL 的引导表单输入；码只可用一次、24 小时过期、不可放在 URL；服务端只存带部署绑定的 hash，成功后原子消费并要求设置管理员密码 | 仅用于首次创建该 VM 的 Console 管理员；不交给 runner。管理员密码只用于该 Console，使用带盐密码哈希保存 |
+| GitHub 仓库凭据 | 客户在 GitHub `Settings → Developer settings → Personal access tokens → Fine-grained tokens` 创建；Resource owner 选目标账户/组织，Repository access 只勾选目标仓库，设置到期时间。组织要求审批时，先等管理员批准。官方创建说明：[Fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) | 粘贴到 GitHub 专用字段。创建页显示最小仓库权限：`Metadata: read`、`Contents: read/write`、`Issues: read/write`、`Pull requests: read/write`。保存时只调用只读 API 检查 token 身份、目标仓库可见性和所需权限，不创建测试 Issue/PR；未通过时不能启用该仓库 runner | 只挂给该仓库 runner，用于 `gh` 读取 Issue、更新标签/评论、push 分支和创建 PR。运行于同一 runner 的 Agent 与仓库代码具有读取该 runner 凭据的能力；凭据不能跨仓库或客户共享 |
+| Agent 模型凭据 | 客户先在所选供应商的平台开通 API 使用/计费，再创建 API key：Claude Code → Anthropic Console；Codex CLI → OpenAI API Platform；Kimi Code CLI → Kimi Platform（`platform.kimi.com` 或 `platform.kimi.ai`）。表单“如何创建”链接到各官方认证说明 | 客户选定镜像预装的一个 CLI（Claude Code、Codex、Kimi Code）后粘贴对应 API key。Console 检查所选 provider 与 key 格式匹配；只有用户显式点击“测试连接”并确认费用提示后，才发起一条最小真实模型请求。保存本身不调用模型；无效或额度不足的 key 不能启用 runner | 只挂给该仓库所选 Agent 的 runner。首期使用供应商 API key 和官方默认端点；不接受消费级订阅登录、交互式 OAuth/session、AWS/Vertex 等云身份或自定义 Base URL。运行于该 runner 的 Agent/仓库代码可能读取本 runner 的 key |
+
+更新凭据时先验证新值；验证失败保留旧值，验证成功后原子替换，并重启对应 runner。删除凭据时，服务先停对应 runner、清除本地密文和该仓库 tmpfs 运行目录。Console 的“删除”只删除 KedaCode 持有的副本，不会调用 GitHub/模型供应商撤销 API；页面必须分开提供“删除 KedaCode 中的副本”和上游 revoke 指引，并给出对应平台入口。退订时，客户先在 GitHub/模型平台 revoke 原 key，再由运营者停服务并删除 VM。本地副本已删除不代表上游 key 已失效。GitHub token 过期、模型 key 失效或组织审批待处理时，对应 runner 停止领取新任务并显示可操作的修复提示。
+
+凭据清单和持有人必须在 UI/运维手册中分清：Console 引导码只用于首次创建管理员且一次消费；管理员密码及 session cookie 只用于 Console 登录；GitHub fine-grained PAT 只授权一个目标仓库；Agent API key 只授权该仓库选中的 CLI；GitHub Actions secrets 由客户单独保存在 GitHub 仓库/组织 Settings，供 CI workflow 使用；客户项目数据库账号只在 CI service/job 中配置，不交给 runner/Console；反向代理 TLS 私钥由运营者保存在代理主机，仅保护 HTTPS。首期不收集 Actions secret、数据库账号、用户 SSH 私钥、客户自带 TLS 证书、GitHub App 私钥或任何个人 CLI 登录快照。
+
+GitHub/Agent secret 以仓库为单位用该 VM 的数据密钥加密；解密密钥保存在该 VM OS 账户可读的独立路径（目录 `0700`、文件 `0600`）；secret 明文不得出现在 SQLite、仓库、Compose 或日志，密文仅存放在专用凭据文件中。runner 启动时只把本 runner 所需的原生凭据配置解密到 `/run/kedacode/runner-auth/<repo-id>/`（Linux tmpfs，目录 `0700`、文件 `0600`），再以专属 bind mount 交给容器：GitHub 使用隔离的 `GH_CONFIG_DIR` 文件配置；Claude/Codex/Kimi 分别使用各自 CLI 原生认证文件。Docker 配置只含 mount 目标和路径，不含 key 值；runner 退出、更新或删除凭据后清空该仓库的 tmpfs 目录。服务验证禁止 secret 出现在 Compose environment、`docker inspect` 环境值、命令行参数、日志、审计字段和 SQLite 中。宿主 root/运营者属于该客户 VM 的受信任边界；同一 runner 内运行的 Agent 和仓库代码可能读取本 runner 自己的 GitHub/Agent 凭据，UI 必须明确披露，并指导客户使用单仓库、低权限、可独立轮换的 key。
+
+Provider adapter 固定映射按 runner 镜像锁定的 `CLAUDE_VERSION`、`CODEX_VERSION`、`KIMI_VERSION` 实现并验证：GitHub token 由宿主服务通过 stdin 输入 `gh auth login --with-token`，写入 repo 专属 `GH_CONFIG_DIR/hosts.yml`，容器不设置 `GH_TOKEN`；Claude API key 写入 tmpfs 的 Claude Code `settings.json` 中 `env.ANTHROPIC_API_KEY`；Codex API key 由 `codex login --with-api-key` 从 stdin 读取并生成 tmpfs 中的 `auth.json`；Kimi Code API key 写入 Kimi Code `config.toml` 的 `[providers.kimi].api_key`，不写 Kimi Code OAuth credentials。CLI 版本升级后重跑对应 adapter 和真实 runner 认证验证；未验证的版本或凭据格式必须 fail closed。
+
+供应商参考： [GitHub fine-grained PAT 创建说明](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)、[Claude Code API key 认证](https://code.claude.com/docs/en/authentication)、[Codex API key 认证](https://learn.chatgpt.com/docs/auth) / [OpenAI API key 创建](https://platform.openai.com/api-keys)、[Kimi Code API key 登录](https://moonshotai.github.io/kimi-code/en/guides/getting-started.html) / [Kimi Code provider 配置](https://moonshotai.github.io/kimi-code/en/configuration/providers.html)。
+
 ### 架构边界
 
 遵循 `src/backend/api/ → src/backend/core/ → src/backend/engines/ → src/backend/infrastructure/`：
 
 - API/CLI 负责解析 `kc container gc` 的预览与执行选项。
-- API 托管 Console routes 负责登录/引导和凭据设置请求；core 编排受授权的仓库连接、凭据生命周期与 runner 配置，不能从请求参数接受任意主机路径或命令。
+- API 托管 Console routes 负责登录/引导和敏感 key 设置请求；core 编排受授权的仓库连接、凭据生命周期与 runner 配置，不能从请求参数接受任意主机路径或命令。`kc console bootstrap-token create --expires-in 24h` 是仅在 VM 本地执行的 operator CLI，用于签发首次引导码。
 - core 管理托管维护策略、清理候选判定、磁盘准入和 daemon 批次空闲边界。
 - engines 调用 Docker CLI 或复用现有 worktree 清理，不引入 Docker Python SDK。
 - infrastructure 负责 SQLite 运行历史保留、日志清理、磁盘信息、托管凭据存储与配置读取；每客户实例的凭据密文/权限策略独立。
@@ -184,7 +210,7 @@ CI 工作流、CLI 参数与 Compose 配置由失败可区分的自动验证覆�
 
 ### Frontend Impact
 
-**Frontend impact: `frontend-public/`.** 在现有 Settings 与登录界面基础上增加托管 Console 首次设置、仓库连接、Agent 凭据录入/更新/撤销及连接状态；已保存凭据不可再次读取。托管 URL 必须经过真实认证和 HTTPS 入口；普通本地 `kc console` 仍为 loopback 单用户模式。`frontend-admin/` 不属于本次范围。
+**Frontend impact: `frontend-public/`.** 在现有 Settings 与登录界面基础上增加一次性引导码登录、GitHub fine-grained token 权限引导、Claude/Codex/Kimi API key 表单、显式计费提示的 Agent 连通性测试、更新/删除状态和供应商侧 revoke 指引；已保存 key 不可再次读取，不提供本地目录/文件上传。托管 URL 必须经过真实认证和 HTTPS 入口；普通本地 `kc console` 仍为 loopback 单用户模式。`frontend-admin/` 不属于本次范围。
 
 ### Existing PRD Relationship
 
@@ -198,7 +224,7 @@ CI 工作流、CLI 参数与 Compose 配置由失败可区分的自动验证覆�
 
 ### Recommended Approach
 
-在已有单仓库 Docker runner 和 Agent Runner Console 上补足托管设置入口、认证、凭据生命周期与无人值守资源回收。每个客户在独立 Linux VM 上有自己的 Console URL、配置/凭据存储和 runner。Console 后端继续作为 VM 上的 `kc console` 服务运行并绑定 loopback，由 HTTPS 反向代理提供客户 URL；Console 通过宿主侧受限管理能力操作该 VM 的 runner，不把 Docker socket 暴露给前端或 runner。客户在 Console 设置 GitHub 与 Agent 凭据；服务把凭据安全保存在该客户实例，并只提供给该客户 runner。普通用户无需登录主机、准备目录或手工设置挂载。客户项目数据库/Redis 等服务仍由 CI workflow 按需创建。
+在已有单仓库 Docker runner 和 Agent Runner Console 上补足托管设置入口、认证、凭据生命周期与无人值守资源回收。每个客户在独立 Linux VM 上有自己的 Console URL、加密凭据存储和 runner。运营者通过 VM 本地 `kc console bootstrap-token create --expires-in 24h` 签发一次性引导码；客户登录后粘贴目标仓库 GitHub fine-grained token 和所选 Claude/Codex/Kimi API key。Console 后端继续作为 VM 上的 `kc console` 服务运行并绑定 loopback，由 HTTPS 反向代理提供客户 URL；Console 通过宿主侧受限管理能力操作该 VM 的 runner，不把 Docker socket 暴露给前端或 runner。宿主服务只在 runner 启动期间把该 runner 所需凭据解密到 Linux tmpfs，再通过原生认证配置文件挂载，不把 key 值写入 Compose environment、命令行或 Docker inspect 环境。普通用户无需登录主机、准备目录或手工设置挂载。客户项目数据库/Redis 等服务仍由 CI workflow 按需创建。
 
 首期继续使用每客户独立部署，不新增跨客户共享控制面、中央多客户数据库或自助注册。daemon 的运行状态继续使用该 VM 上已有 SQLite；凭据存储由托管实例单独保护，不得以明文写入 `config.toml`、普通运行记录、Compose 输出或日志。托管 Console 的认证/凭据实现不改变本地 `kc console` 的 loopback 默认。
 
@@ -210,16 +236,16 @@ CI 工作流、CLI 参数与 Compose 配置由失败可区分的自动验证覆�
 
 - 不新增 Cloud Worker、消息队列、服务端任务数据库或容器编排层。
 - 不把本机 no-op 登录直接暴露到公网；托管认证必须 fail-closed，且客户 secret 不能从前端 API 响应、浏览器日志或应用日志取回。
-- 不要求客户上传完整的宿主机认证目录；Console 只接受支持的凭据格式/供应商，服务完成验证、保存、更新、撤销和向本客户 runner 的交付。
+- 不要求客户上传认证目录或文件；Console 只接受受支持供应商的 API key 与 fine-grained GitHub token，通过固定 provider 映射验证、加密保存并交给对应 runner。个人订阅 OAuth、任意目录归档、自定义 Base URL 和未知 provider 均明确拒绝。
 - 不复制一套 worktree cleaner；在现有清理用例上增加托管所需的活动认领保护和批次触发入口。
 - 不在 runner 内安装 Docker daemon，也不把宿主 `/var/run/docker.sock` 挂进容器。
 - 不把每种客户数据库封装成通用 middleware provisioning API。
 
 ### Proposed Solution Summary (实现机制)
 
-运营者为每位客户创建独立 VM、Console URL 和一次性引导凭据；客户登录后在 Console 选择/连接仓库，按界面引导设置 GitHub 与 Agent 凭据并查看配置状态。Console 不再次返回 secret 值；后端将凭据保存在该客户受保护的本地凭据存储中，再由宿主侧容器管理能力提供给对应 runner。用户不需要知道或手工配置宿主目录挂载。托管运行仍复用现有 `kc container up` 与 Compose runner，在托管配置打开维护策略。daemon 每完成一次工作批次、所有 Issue worker 退出后，调用现有安全 worktree cleaner；该批次同时清理过期 Issue 原始日志和运行摘要，并在领取下一项任务前检查磁盘剩余空间。空间不足时保留现有活动任务、不再领取新工作并记录原因。Compose 设置容器 stdout 日志轮转；宿主机 `kc container gc` 清理悬空镜像与超过保留窗口的 build cache，不删卷或活动镜像。CI 是项目集成测试的唯一运行位置，GitHub required checks 是 PR 合并前的门禁。
+运营者为每位客户创建独立 VM 和 Console URL，并运行 `kc console bootstrap-token create --expires-in 24h` 获取只显示一次的引导码。客户收到码后在登录页输入，设置管理员密码，再按 Console 页面提供的官方说明创建单仓库 GitHub fine-grained token（`Metadata: read`、`Contents: read/write`、`Issues: read/write`、`Pull requests: read/write`）和所选 Agent 的 API key（Claude Code/Codex/Kimi Code）。页面链接 Anthropic Console、OpenAI API Platform、Kimi Platform 的认证说明，并说明 API 账户/计费前置条件。客户把 key 粘贴进对应敏感字段；模型测试前显示可能产生供应商 API 费用的确认，只有显式确认后才调用。保存后页面仅显示 provider、仓库、状态、创建/验证时间和到期提醒，不回显 key。托管运行只使用 API key 模式；普通订阅账号、OAuth login 和认证文件不上传。宿主服务按仓库加密保存 key，runner 启动时只在 tmpfs 生成该 runner 自己的 GitHub/Agent 原生配置并挂载到对应容器。同一 runner 的 Agent/仓库代码可能读取自己的凭据。key 更新先验证再原子替换并重启 runner；删除本地副本前停止 runner、擦除 tmpfs，再提示客户去上游平台 revoke 原 key。用户不需要知道或手工配置宿主目录挂载。托管运行仍复用现有 `kc container up` 与 Compose runner，在托管配置打开维护策略。daemon 每完成一次工作批次、所有 Issue worker 退出后，调用现有安全 worktree cleaner；该批次同时清理过期 Issue 原始日志和运行摘要，并在领取下一项任务前检查磁盘剩余空间。空间不足时保留现有活动任务、不再领取新工作并记录原因。Compose 设置容器 stdout 日志轮转；宿主机 `kc container gc` 清理悬空镜像与超过保留窗口的 build cache，不删卷或活动镜像。CI 是项目集成测试的唯一运行位置，GitHub required checks 是 PR 合并前的门禁。
 
-托管任务状态继续使用客户专用 VM 上的现有 SQLite；不创建中心化数据库或项目数据库服务。认证会话和 secret 存储按每客户部署保护，凭据 key 与密文文件不能落在同一公开或仓库路径中。具体初始化/轮换方法由 D-03 确认后的托管认证方案落实。
+托管任务状态继续使用客户专用 VM 上的现有 SQLite；不创建中心化数据库或项目数据库服务。GitHub/Agent key 的密文放在专用托管凭据文件中，per-VM 解密密钥保存在 OS 权限保护的独立路径；不要把明文 key 或解密密钥写入 SQLite、`config.toml`、普通 `.env`、Compose、仓库或日志。运行时明文仅存在 Linux tmpfs 的 repo 专用目录，在容器停止、删除凭据或更新时清除。CLI OAuth/订阅会话和认证目录上传不属于首期支持路径。
 
 ### Alternatives Considered
 
@@ -233,15 +259,17 @@ This section is a living implementation guide based on current repository analys
 
 ### Core Logic
 
-1. 运营者为客户创建独立 VM、HTTPS URL 和一次性引导凭据；托管 Console 通过 TLS 反向代理提供访问，真实认证在 session 失效、登出或凭据撤销后立即拒绝请求。本地 Console 保持 `127.0.0.1`。
-2. 客户首次进入 Console 后选择授权仓库，并通过 token 表单或受支持的凭据文件上传设置 GitHub/Agent 凭据。后端验证支持的格式、保存客户级配置并返回状态；secret 值只在 TLS 请求正文中传输，不写入 URL、浏览器 localStorage、后续 GET、日志或审计明文。更新/撤销后，对应 runner 必须重启或刷新凭据，旧值不能继续使用。
-3. 宿主服务在客户 VM 上自动准备 repo checkout 和隔离工作目录，调用现有 `kc container up` 与 Compose runner；客户不输入主机路径、不编辑 `.env`、不配置 volume。运行时凭据由宿主侧受限管理能力提供给对应 runner；runner 不接触 Docker socket。不要把 secret 放进仓库、Compose 明文环境、审计文本或进程参数。
-4. daemon 按现有生命周期领取 Issue 并完成当前 work batch；等待所有并行 worker 退出后，若托管维护开关开启，执行一次有界清理。每个清理项均有类型、候选数、删除数、跳过原因和空间前后值。
-5. worktree 清理必须遵循现有 `cleanup_iar_worktrees` 守卫，并确认该 Issue 没有活动 claim / worker。验证失败或 GitHub 状态不可查询时 fail-closed：保留 worktree，不尝试强制删除。
-6. 日志清理删除超出已确认保留期的 per-Issue 输出和既有 app 日志；运行摘要仅删除终态且超过摘要保留期的数据。清理必须按显式表/文件类型执行，不能递归删除整个 `logs/`、状态目录或认证目录。
-7. 周期维护检查宿主数据盘可用空间。在配置安全线下不启动新的 Issue；等待当前 worker 结束，打印 free/total 和停领原因。超过恢复线后自动恢复领取，避免频繁抖动。
-8. `kc container gc --dry-run` 展示工作树、日志、运行摘要、容器日志轮转配置与 Docker host cache 的拟处理量；`--apply` 才执行删除。需要 host Docker 权限的操作只从 VM 宿主 CLI 运行；runner 容器中不提供 Docker socket。
-9. CI workflow 按项目声明 Postgres/Redis 等 service containers，并把集成测试作为 PR required check。KedaCode 不伪造或覆盖 GitHub 检查结果。若项目只在 CI 才能验证，PR 保持等待或失败状态，沿用现有 supervisor 语义。
+1. 运营者为客户创建独立 VM 和 HTTPS URL；在 VM 本地运行 `kc console bootstrap-token create --expires-in 24h` 签发 256-bit 随机一次性引导码。服务端只存带部署绑定的哈希；原码只显示一次，由运营者经独立安全渠道发送，客户在网页登录表单输入（不放 URL），成功后原子消费并设置管理员密码。托管 Console 通过 TLS 反向代理提供访问，session 失效、登出或密码撤销后拒绝后续请求。本地 Console 保持 `127.0.0.1`。
+2. Console 首先要求客户填写目标 GitHub `owner/repo`，再引导客户到 GitHub Fine-grained tokens 页面创建 token：Resource owner 选仓库所有者，Repository access 仅选目标仓库，设置过期日，授予 `Metadata: read`、`Contents: read/write`、`Issues: read/write`、`Pull requests: read/write`。客户回到 Console 粘贴 token；后端只用只读 API 验证 token 身份、仓库可见性和权限，不发测试 Issue/PR。权限不足或组织审批未完成时不启用 runner，并提示客户修正或等待审批。
+3. 客户选择 runner 镜像已预装的 Claude Code、Codex CLI 或 Kimi Code CLI；Settings 展示对应官方认证链接和步骤。客户须在对应供应商平台具备 API 使用权限/计费方式，创建 API key 后粘贴到该 provider 的敏感字段。首期不上传 CLI 配置/认证文件，不导入消费级订阅或 OAuth/session，不接受自定义 Base URL。保存只校验 provider/key 格式，不调用模型；客户显式点击“测试连接”、确认可能产生费用后，系统才发起一条最小模型请求。测试失败、额度不足或 key/provider 不匹配时不启用 runner。
+4. 所有 secret 只经 TLS request body 到达后端；不得进入 URL、浏览器 localStorage、后续 GET、日志或审计明文。GitHub 与 Agent key 按仓库加密存储。更新先验证新 key 再原子替换并重启关联 runner；删除本地副本前先停 runner 并清空运行时副本。KedaCode 不代客户 revoke GitHub/模型 key，界面把“删除 KedaCode 副本”和“到上游平台撤销 key”作为两个明确步骤。
+5. 宿主服务在客户 VM 上自动准备 repo checkout 和隔离工作目录，调用现有 `kc container up`/Compose 生命周期，并附带非敏感的 per-runner auth 路径。启动时只解密该 repo 所需 key 到 `/run/kedacode/runner-auth/<repo-id>/` 的 Linux tmpfs，通过容器 bind mount 提供 GitHub CLI 与所选 Agent 的原生认证文件；容器 environment 只含路径，不含 secret 值。停止、更新或撤销后清空目录。runner 不接触 Docker socket；客户不输入主机路径、不编辑 `.env`、不配置 volume。
+6. daemon 按现有生命周期领取 Issue 并完成当前 work batch；等待所有并行 worker 退出后，若托管维护开关开启，执行一次有界清理。每个清理项均有类型、候选数、删除数、跳过原因和空间前后值。
+7. worktree 清理必须遵循现有 `cleanup_iar_worktrees` 守卫，并确认该 Issue 没有活动 claim / worker。验证失败或 GitHub 状态不可查询时 fail-closed：保留 worktree，不尝试强制删除。
+8. 日志清理删除超出已确认保留期的 per-Issue 输出和既有 app 日志；运行摘要仅删除终态且超过摘要保留期的数据。清理必须按显式表/文件类型执行，不能递归删除整个 `logs/`、状态目录或认证目录。
+9. 周期维护检查宿主数据盘可用空间。在配置安全线下不启动新的 Issue；等待当前 worker 结束，打印 free/total 和停领原因。超过恢复线后自动恢复领取，避免频繁抖动。
+10. `kc container gc --dry-run` 展示工作树、日志、运行摘要、容器日志轮转配置与 Docker host cache 的拟处理量；`--apply` 才执行删除。需要 host Docker 权限的操作只从 VM 宿主 CLI 运行；runner 容器中不提供 Docker socket。
+11. CI workflow 按项目声明 Postgres/Redis 等 service containers，并把集成测试作为 PR required check。KedaCode 不伪造或覆盖 GitHub 检查结果。若项目只在 CI 才能验证，PR 保持等待或失败状态，沿用现有 supervisor 语义。
 
 ### Change Impact Tree
 
@@ -251,7 +279,7 @@ This section is a living implementation guide based on current repository analys
 .
 ├── Infrastructure
 │   ├── src/backend/engines/agent_runner/templates/runner_container/docker-compose.runner.yml [修改]
-│   │   【总结】为 runner 容器日志配置大小与文件数轮转，维持无端口、无 Docker socket、无项目 DB sidecar。
+│   │   【总结】为 runner 容器日志配置大小与文件数轮转，并承载托管模式的隔离认证挂载（repo 专属 `GH_CONFIG_DIR` 与 provider 原生认证文件的 bind mount，不含 secret 明文）；维持无端口、无 Docker socket、无项目 DB sidecar。
 │   ├── src/backend/infrastructure/config/agent_runner_settings.py [修改]
 │   │   【总结】声明默认关闭的托管清理、保留周期、磁盘停领阈值与恢复阈值配置。
 │   ├── src/backend/infrastructure/logging/logger.py [修改]
@@ -265,14 +293,14 @@ This section is a living implementation guide based on current repository analys
 ├── Hosted Console And Credentials
 │   ├── src/backend/api/routes/local_auth.py [修改]
 │   │   【总结】保留本地 loopback no-op 模式；为托管 Console 增加 fail-closed 的引导/会话认证。
-│   ├── src/backend/api/routes/agent_runner_hosted_setup.py [新增或合并到现有 Console route]
-│   │   【总结】提供受认证的仓库设置、token/受支持凭据文件录入、验证/更新/撤销 API；响应只含状态，不回传 secret。
+│   ├── src/backend/api/routes/agent_runner_hosted_setup.py [新增]
+│   │   【总结】提供受认证的仓库设置、GitHub PAT/三种 Agent API key 录入、校验/轮换/本地删除 API；响应只含状态，不回传 secret。
 │   ├── src/backend/infrastructure/console/ [修改]
-│   │   【总结】保存每客户凭据并限制宿主权限，通过受控运行时机制交给本客户 runner。
+│   │   【总结】按仓库加密保存 PAT/API key、管理独立解密密钥与 provider adapter；只生成该仓库 runner 所需的 tmpfs 原生认证文件。
 │   ├── frontend-public/app/(auth)/login/ [修改]
 │   │   【总结】增加托管模式的真实登录/首次引导；本地 no-op 会话不用于托管 URL。
 │   ├── frontend-public/app/(app)/app/settings/page.tsx [修改]
-│   │   【总结】扩展现有 Settings 为托管引导、仓库连接和 Agent 凭据配置界面。
+│   │   【总结】提供凭据来源链接、PAT 最小权限清单、provider API key 输入、计费确认、轮换/本地删除和上游 revoke 指引；不收文件/目录上传。
 │   ├── frontend-public/lib/api/auth.ts [修改]
 │   │   【总结】与 hosted login/session API 对接，支持登出与 session 失效处理。
 │   └── frontend-public/lib/api/console.ts [修改]
@@ -292,6 +320,8 @@ This section is a living implementation guide based on current repository analys
 │   └── tests/playwright-e2e/ [修改]
 │       【总结】通过真实 Console 页面完成首次登录、凭据设置和错误状态验证。
 ├── API
+│   ├── src/backend/api/cli_typer_console.py [修改]
+│   │   【总结】增加 VM 本地 `kc console bootstrap-token create --expires-in 24h` 引导码签发入口；不把原码写日志或交给 runner。
 │   ├── src/backend/api/cli_typer_container.py [修改]
 │   │   【总结】增加 `kc container gc` 的 `--dry-run` / `--apply` CLI 入口。
 │   └── src/backend/api/cli_parsed_commands/container.py [修改]
@@ -312,6 +342,8 @@ This section is a living implementation guide based on current repository analys
 └── Docs And Packaged Skill
     ├── docs/prototypes/hosted-runner-onboarding.html + .md [新增]
     │   【总结】呈现受认证首次设置、仓库连接和凭据管理的目标交互。
+    ├── docs/prototypes/assets/prototype-hub.js [修改]
+    │   【总结】在 Prototype Hub registry 注册托管 onboarding 原型（入口、可用状态、关联原型）。
     ├── docs/guides/agent-runner.md [修改]
     │   【总结】说明托管 VM 部署、CI/数据库分界、凭据管理、清理预览/周期及退订删除步骤。
     ├── docs/getting-started/installation.md [修改]
@@ -326,7 +358,7 @@ This section is a living implementation guide based on current repository analys
 
 | 变更点 | 层 | 等级 | 决定因素 | 介入方式与失败区分门禁 |
 |---|---|---|---|---|
-| 托管 Console URL、认证、客户凭据设置与向 runner 交付 | API / infrastructure / frontend | R3 | 公网访问和可调用客户代码/模型的凭据暴露会造成客户账号与代码泄露 | 人工确认 D-03；rv-4 经真实 HTTPS staging URL 验证未认证拒绝、secret 不回显/落日志、runner 归属和撤销；不接受 component preview 作为通过证据 |
+| 托管 Console URL、认证、客户凭据设置与向 runner 交付 | API / infrastructure / frontend | R3 | 公网访问和可调用客户代码/模型的凭据暴露会造成客户账号与代码泄露 | 人工确认 D-03；rv-4 经真实 HTTPS staging URL 验证未认证拒绝、secret 不回显/落日志、repo runner 归属及本地副本删除/上游 revoke 的区别；不接受 component preview 作为通过证据 |
 | 客户 VM、repo 与 credentials 隔离，容器不挂 Docker socket | infrastructure / API | R3 | 凭据和跨客户安全信任边界 | 人工确认 D-01；rv-1 必须在 staging VM 检查真实挂载与权限，并以第二客户作为越权负例 |
 | 日志、SQLite 摘要与 worktree 自动删除 | core / infrastructure | R3 | 不可逆数据删除与并发状态 | 人工确认 D-02；rv-2 对安全候选实删并证明 dirty/active/unmerged 负例保留 |
 | 不在 daemon 容器跑 DB tests、由 GitHub CI service 与 required checks 验收 | core / docs | R2 | 跨越 daemon、GitHub Actions 和 PR 合并状态 | 执行器 + rv-3 staging PR required-check 烟测与失败负例 |
@@ -368,13 +400,22 @@ flowchart TD
     Host --> Runner
 ```
 
-**No project/central database changes in this PRD.** SQLite 继续承担每客户 VM 的现有运行状态；托管访问会话采用 D-03 确认的本地认证存储，客户 secret 使用每实例受保护的凭据存储。若实现需要新增 SQLite schema，executor 必须更新本 PRD、迁移计划与 ER Diagram；不引入外部数据库 middleware。
+**No project/central database changes in this PRD.** SQLite 继续承担每客户 VM 的现有运行状态；托管访问会话采用 D-03 确认的本地认证存储，GitHub/Agent secret 使用每 VM 密钥保护的独立加密凭据存储，并按仓库区分。若实现确需新增 SQLite schema，executor 必须更新本 PRD、迁移计划与 ER Diagram；不引入外部数据库 middleware。
 
-**Low-Fidelity Prototype:** 实现前在现有 `frontend-public` Settings 与登录视觉体系上补充 `docs/prototypes/hosted-runner-onboarding.html` 原型，至少覆盖首次访问、仓库连接、token 输入/受支持凭据文件上传、保存状态、认证失败和凭据撤销。验收呈递并排展示原型与 staging URL 的真实浏览器截图；截图使用虚构凭据和测试仓库，不包含客户 secret。
+**Low-Fidelity Prototype:** 实现前在现有 `frontend-public` Settings 与登录视觉体系上补充 `docs/prototypes/hosted-runner-onboarding.html` 原型，至少覆盖一次性引导码与密码设置、GitHub PAT 来源/权限清单、Agent provider 选择/API key 获取说明、测试连接前的计费提示、保存状态、认证失败、本地删除与上游撤销指引。验收呈递并排展示原型与 staging URL 的真实浏览器截图；截图使用虚构凭据和测试仓库，不包含客户 secret。
 
-**Interactive Prototype Change Log:** 原型尚待创建；实现前按 `docs/prototypes/hosted-runner-onboarding.html` 创建并在 `docs/prototypes/hosted-runner-onboarding.md` 记录关键状态与评审结论。
+**Interactive Prototype Change Log:** 原型尚待创建；实现前按 `docs/prototypes/hosted-runner-onboarding.html` 创建并在 `docs/prototypes/hosted-runner-onboarding.md` 记录关键状态与评审结论，同时注册到 Prototype Hub（更新 `docs/prototypes/assets/prototype-hub.js` 的 registry）。
 
-**External Validation:** 需要 operator-owned staging URL、HTTPS 反向代理和 disposable 测试租户；不使用客户生产仓库或凭据。
+**External Validation:**
+
+| Topic | Source | Checked On | Relevant Finding | Impact On Recommendation |
+|---|---|---|---|---|
+| GitHub fine-grained PAT 权限模型 | [GitHub Docs: Managing your personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) | 2026-10-10 | fine-grained token 可按仓库限定访问并授予细粒度权限，官方推荐替代 classic token | 支撑"单仓库、最小权限、按仓库隔离保存"的凭据模型 |
+| Claude Code API key 认证 | [Claude Code Docs: Authentication](https://code.claude.com/docs/en/authentication) | 2026-10-10 | `ANTHROPIC_API_KEY` 是官方认证方式之一；settings 文件的 `env` 块可注入环境变量 | adapter 将 key 写入 tmpfs 的 `settings.json` env，容器 environment 不含 key 值 |
+| Codex CLI API key 认证 | [Codex Docs: Authentication](https://learn.chatgpt.com/docs/auth) | 2026-10-10 | `codex login --with-api-key` 从 stdin 读取并缓存到 `~/.codex/auth.json`；API key 按 OpenAI Platform 标准费率计费、不占订阅额度 | adapter 用 stdin 输入避免命令行泄露；测试连接前的费用提示与真实计费口径一致 |
+| Kimi Code provider 配置 | [Kimi Code Docs: Providers](https://moonshotai.github.io/kimi-code/en/configuration/providers.html) | 2026-10-10 | API key 写入 `config.toml` 的 `[providers.kimi].api_key`；OAuth 凭据独立于 provider 配置 | adapter 只写 provider api_key、不写 OAuth 凭据；平台入口为 `platform.kimi.com` / `platform.kimi.ai` |
+
+需要 operator-owned staging URL、HTTPS 反向代理和 disposable 测试租户；不使用客户生产仓库或凭据。
 
 ### Realistic Validation Plan
 
@@ -382,21 +423,21 @@ flowchart TD
 
 ```yaml
 - id: rv-1
-  behavior: "客户专用 VM 上启动单仓库 runner；只挂载该客户 repo、状态和 credentials；另一个客户无法读取这些路径。"
+  behavior: "客户专用 VM 上通过 hosted Console 设置单仓库 runner；secret 加密保存在 host，运行期间只以 repo 专属 tmpfs 原生认证文件交给该 runner；另一个仓库/客户无法读取这些路径。"
   reviewer: verifier
-  real_entry: "专用 staging Linux VM 上执行 `kc container up --repo /srv/kedacode-pilot/repo --repo-id pilot --build`，再用 `docker compose -f <packaged-compose> config` 与 `docker inspect <runner-container>` 检查实际资源。"
-  expected: "运行容器只挂载 pilot 的仓库/认证/状态目录，不发布端口、不挂载 Docker socket；secret 不出现在 compose 计划、进程参数或日志。第二客户 VM/账号无法读取 pilot 路径。"
-  mock_boundary: "必须使用真实 Docker Engine、打包后的 runner Compose 和隔离 staging VM；agent API 与 GitHub 外部服务可使用 dry-run/mock，不能 mock Compose 配置解析或实际 mount 权限。"
+  real_entry: "在专用 staging Linux VM 的真实 hosted Console 完成 pilot 仓库和 disposable PAT/API key 设置，再用同 VM 的另一仓库身份和独立第二客户身份尝试读取；由 hosted runner manager 启动 pilot runner，并用 `docker compose config`、`docker inspect` 和宿主 `/run/kedacode/runner-auth/pilot/` 检查实际 mount、运行时文件权限与停止后的 tmpfs 清理。"
+  expected: "持久层只含加密 secret；运行容器只挂载 pilot 的仓库/状态和 pilot tmpfs 凭据文件，不发布端口、不挂载 Docker socket；key 不出现在 Compose environment、docker inspect 环境值、进程参数或日志。runner 停止后 tmpfs 中 pilot 认证目录消失；同 VM 的另一仓库与第二客户 VM/账号无法读取 pilot 的持久或运行时路径。"
+  mock_boundary: "必须使用真实 Docker Engine、打包后的 runner Compose、provider auth adapter 和隔离 staging VM；GitHub/模型 key 使用 disposable staging 凭据，不能 mock Compose 配置解析、加密存储、tmpfs 生命周期或实际 mount 权限。"
   tier: R3
   test_layer: sandbox
   required_for_acceptance: true
-  critical_value_source: "从真实 kc container up 解析出的 repo 路径、state-home、credential 路径与当前 compose environment/mount；不得从 PRD 手工重建预期路径。"
-  must_cross: "kc container up CLI → API parser → core container use case → packaged compose → Docker Engine 创建容器 → 在宿主机以第二客户 OS 身份读取 mount 的负例检查。"
-  forbidden_bypasses: "不允许只断言静态 YAML；不允许 mock docker inspect/mount；不允许使用同一客户 shell 身份证明跨客户隔离；不允许把凭据打印在 --gh-token 参数、compose 展开结果或命令输出中。"
-  fresh_state_probe: "容器启动后重新执行 docker inspect，并从独立的第二客户用户/VM 检查路径权限与可见性。"
-  final_tree_evidence: "保存 compose config、docker inspect 摘要（脱敏）、权限检查与 staging VM 标识；实现树或 Compose/Dockerfile 变化后重跑，并记录最终 Git tree。"
+  critical_value_source: "从 hosted credential API 实际保存的 disposable key、加密存储记录、服务运行时生成的 repo 专属 tmpfs 路径、provider 原生认证文件和真实 compose mount 派生；不得从 PRD 手工重建 key/path。"
+  must_cross: "客户 Console key 提交 → 加密凭据存储 → host runner manager 解密到 tmpfs → provider adapter / GitHub CLI auth config → packaged compose mount → Docker Engine runner → 同 VM 另一仓库与第二客户 OS 身份读取负例。"
+  forbidden_bypasses: "不允许只断言静态 YAML；不允许 mock docker inspect/mount/encryption/provider adapter；不允许使用同一客户 shell 身份证明跨客户隔离；不允许把凭据打印在 `--gh-token` 参数、Compose 展开结果、docker inspect 环境值或命令输出中。"
+  fresh_state_probe: "runner 运行时从新进程验证 GitHub/Agent auth 可用；stop 后重新查 host tmpfs 路径确认消失；再从同 VM 另一仓库服务身份及独立第二客户用户/VM 检查加密存储、挂载路径和可见性。"
+  final_tree_evidence: "保存加密存储权限摘要、Compose config、docker inspect 脱敏摘要、tmpfs 生命周期检查与 staging VM 标识；provider CLI 版本、auth adapter、credential store、Compose/Dockerfile 变化后重跑，并记录最终 Git tree。"
   negative_control: "在测试边界把第二客户 mount 指向 pilot state-home 后重跑隔离断言；负例必须被权限/挂载检查拒绝。"
-  expected_fail: "第二客户身份能列出或读取 pilot 的 credential/state 文件时 rv-1 为红。"
+  expected_fail: "第二客户身份能列出或读取 pilot 的 credential/state/tmpfs 文件、持久文件是明文，或 key 出现在 Compose/inspect/argv/log 时 rv-1 为红。"
 - id: rv-2
   behavior: "托管 GC 预览和执行只回收已确认保留期的日志、终态摘要及安全 worktree，保护活动/脏/未合并/远端仍存在的数据。"
   reviewer: human
@@ -431,22 +472,22 @@ flowchart TD
   negative_control: "在 staging PR 测试分支让集成断言失败，保持 required check 设置不变。"
   expected_fail: "workflow 未启动服务、测试没有运行或故意失败仍显示 required check 成功时 rv-3 为红。"
 - id: rv-4
-  behavior: "客户经专属 HTTPS Console URL 完成认证、选择仓库并设置 GitHub/Agent 凭据；未授权访问被拒绝，secret 只交给对应客户的 runner。"
+  behavior: "客户经专属 HTTPS Console URL 用一次性引导码完成认证，按官方说明创建单仓库 GitHub fine-grained token 和一个受支持的 Agent API key；未授权访问被拒绝，secret 只交给匹配仓库的 runner。"
   reviewer: human
-  real_entry: "在真实浏览器打开专用 staging URL，经实际 TLS 反向代理和 hosted 登录完成首次引导；设置 disposable 测试仓库凭据，启动对应 runner，再更新/撤销一个测试凭据。"
-  expected: "未认证请求（含 API 请求）被拒绝；客户可在真实 Settings 页面完成设置并查看已连接状态；保存后 secret 不再显示，不出现在网络响应、浏览器 console、服务日志或 Docker inspect 明文中；runner 可使用该客户凭据，撤销后不能继续使用；第二客户身份无法读取 pilot 的配置/secret；本地 `kc console` 仍 loopback 且不要求 hosted 登录。"
-  mock_boundary: "必须使用 production frontend build、真实 hosted auth/API、真实 HTTPS proxy、真实本地 secret storage 和真实 runner handoff；使用 disposable 账号/凭据，禁止使用任何客户生产 secret。可 mock 模型付费调用，但不能 mock 认证、持久化、撤销或凭据交付。"
+  real_entry: "在真实浏览器打开专用 staging URL，经实际 TLS 反向代理输入一次性引导码并设置管理员密码；按官方说明创建 disposable 单仓库 GitHub PAT 和 provider API key，粘贴后查看权限检查；显式确认可能计费后运行一次最小 Agent 连接测试，再启动 runner、轮换 key、删除 KedaCode 本地副本，最后在供应商平台 revoke 测试 key。"
+  expected: "一次性引导码成功消费且不能重用；缺权限 PAT、错误 provider key 或未通过 Agent API key 测试不能启用 runner；模型测试需用户确认并真实调用 provider；未认证/API 请求被拒绝；保存后 key 不在响应、浏览器 console、服务日志、Compose environment 或 Docker inspect 环境值中；runner 只获得所属仓库的 GitHub key 和所选 Agent key，stop/删除后 tmpfs 消失；删除 KedaCode 副本后 runner 不再使用本地 key，但上游 key 仍有效，直到客户显式 revoke；revoke 后 provider 拒绝旧 key；第二客户或另一仓库身份无法读取 pilot 凭据；本地 `kc console` 仍 loopback 且不要求 hosted 登录。"
+  mock_boundary: "必须使用 production frontend build、真实 hosted auth/API、真实 HTTPS proxy、真实加密 secret store、tmpfs 和 runner handoff；用 disposable staging repo 与可撤销 API keys。模型测试用一条最小真实调用，预先显示成本提示；不得 mock 认证、权限检查、key 持久化、provider adapter、轮换/删除或 runner 凭据交付。"
   tier: R3
   test_layer: sandbox
   required_for_acceptance: true
   presentation: "tasks/evidence/<prd-stem>/rv-4-console-onboarding.png 与 rv-4-console-onboarding.md；另附同 viewport 的原型图，截图仅用虚构仓库和测试凭据。"
-  critical_value_source: "真实浏览器网络请求/响应、hosted auth session、secret storage 中的持久值、runner 进程可用凭据、撤销后的重新启动探测，以及同 VM/URL 的 tenant identity。"
-  must_cross: "客户浏览器 → HTTPS reverse proxy → hosted Console auth → credential API/storage → host runner manager → Compose runner → GitHub test repository。"
-  forbidden_bypasses: "不得只直接调用 API 或渲染组件；不得在截图、测试报告、命令行、Compose 环境、Docker inspect 或日志中输出 secret；不得用本地 no-op auth、mock secret store 或 mock runner handoff 代替真实边界。"
-  fresh_state_probe: "登出后从新浏览器会话验证拒绝；保存后由新后端进程/runner 读取凭据；撤销后重新启动 runner 并验证旧凭据失效；用独立客户身份再次检查隔离。"
-  final_tree_evidence: "保存原型图、staging 页面截图、脱敏后的 HTTP/auth/storage/handoff 证据和 staging deployment identity；认证、credential storage、runner injection、前端构建或 proxy 配置变化后重跑。"
-  negative_control: "清除 hosted session 后重放 credential API 请求；再尝试使用第二客户 session 请求 pilot credential metadata，并以已撤销 token 探测 staging GitHub API。"
-  expected_fail: "无 session 仍可读取/写入配置、凭据出现在响应或日志、第二客户可访问 pilot 数据，或撤销后 runner 仍使用旧凭据时 rv-4 为红。"
+  critical_value_source: "真实浏览器网络请求/响应、bootstrap-token consumption record、hosted session、脱敏的 PAT 权限信息、加密 secret store、tmpfs 原生认证文件、runner 实际 GitHub/provider 请求，以及上游 revoke 后的新进程探测。"
+  must_cross: "VM 本地 bootstrap-token CLI → 客户浏览器 → HTTPS reverse proxy → hosted auth → credential API → GitHub/provider credential test → 加密 storage → host runner manager/provider adapter → tmpfs bind mount → Compose runner → GitHub test repository 与模型 provider。"
+  forbidden_bypasses: "不得只直接调用 API 或渲染组件；不得在截图、测试报告、命令行、Compose environment、docker inspect 环境值或日志中输出 secret；不得用本地 no-op auth、mock secret store、mock provider check 或 mock runner handoff 代替真实边界；不提交用户订阅/OAuth 会话或生产 key。"
+  fresh_state_probe: "引导码消费后再次提交必须失败；登出后新浏览器会话必须被拒绝；保存后由新后端进程/runner 从加密存储重建 tmpfs 凭据并成功请求；删除 KedaCode 副本后重启 runner 必须因凭据缺失而不能启动 Agent，tmpfs 已清空；此时上游 key 仍有效，单独 revoke 后用新进程确认 provider 拒绝该 key；用另一个仓库和独立客户身份再次检查隔离。"
+  final_tree_evidence: "保存原型图、staging 页面截图、脱敏 HTTP/auth/permissions/storage/handoff 证据、低额模型调用结果和 staging deployment identity；bootstrap command、provider CLI 版本/adapter、credential store、runner mount、前端构建或 proxy 配置变化后重跑。"
+  negative_control: "分别使用缺少 Pull requests: write 权限的 PAT、错误 provider API key、清除 hosted session 后的 credential API 请求、已消费 bootstrap code 重放和第二客户 session 读取 pilot key metadata；各自都应被拒绝。"
+  expected_fail: "一次性码可重用、权限不足或未验证的 Agent key 仍启用 runner、模型测试不显示费用提示、无 session 仍可读写、secret 出现在可见面、tmpfs stop 后仍保留、另一个仓库/客户可读 pilot 凭据、删除本地副本后 runner 仍能使用 key，或上游 revoke 后 provider 仍接受旧 key 时 rv-4 为红。"
 ```
 
 **失败排查：** rv-1 先检查 VM / state-home 的实际 mount 和目录权限，再检查 compose 的 environment 展开；rv-2 先检查 Issue claim、`git status`、远端分支和时间阈值；rv-3 先检查 Actions service health log、测试命令和分支保护 required checks；rv-4 先检查外部认证边界、cookie/CSRF 配置、secret 持久层权限和 runner handoff，不要通过回显 secret 排障。
@@ -455,14 +496,14 @@ flowchart TD
 
 #### 托管部署的操作脚本
 
-1. 为客户建立独立 Linux VM 和 OS 用户，不与其他客户共享工作目录、凭据存储或状态路径；配置专属 HTTPS URL 和 hosted 登录保护。
-2. 运营者签发一次性引导凭据。客户首次登录后选择授权仓库，并在 Console 设置 GitHub 与 Agent 凭据；系统自动准备 checkout 和 runner 运行目录，用户不操作主机路径或 mount。
-3. 服务验证支持的凭据格式，将凭据保存在该客户的受保护存储中；启动/重启该客户 runner 时由宿主侧管理能力提供凭据。不要将 secret 保存进仓库、普通 `.env`、可追踪部署脚本、Compose 明文环境或命令行参数。
-4. 确认该客户 Console session、凭据和 runner 互相对应；验证 secret 更新和撤销后旧值不再由 runner 使用，再开启托管维护配置。
-5. 客户为每个需要数据库服务的测试配置 CI service 与 required check；daemon `verification_commands` 只运行容器可用的快速检查。
-6. 用 `kc container gc --dry-run` 检查维护候选；清理执行日志会记录分类计数、跳过原因、保留时间范围和磁盘空间，但不记录凭据值。
-7. 按客户约定收取 VM/部署维护基础费用；模型供应商账户和用量仍归客户。
-8. 退订时先停 runner、撤销 GitHub 与模型凭据和 Console 登录，再按数据导出/删除约定销毁该 VM。
+1. 为客户建立独立 Linux VM 和 OS 用户，不与其他客户共享工作目录、凭据存储或状态路径；配置 HTTPS 反向代理、专属 URL 与托管登录。代理 TLS 私钥留在运营者代理主机，不录入 Console。
+2. 在该 VM 本地运行 `kc console bootstrap-token create --expires-in 24h`；安全保存终端唯一一次显示的原码，并经独立安全渠道交给客户。客户在网页登录表单输入（不能把码放进 URL），设置 Console 管理员密码。过期/丢失时运营者在 VM 本地使旧码失效并重新签发；不开放注册。
+3. 客户在 Console 填写目标 `owner/repo`。按照官方链接创建 GitHub fine-grained PAT：Resource owner 选仓库所有者、Repository access 只选目标仓库、设置到期日，授予 `Metadata: read`、`Contents: read/write`、`Issues: read/write`、`Pull requests: read/write`。组织审批尚未完成或权限不足时先处理审批/权限，不启动 runner。
+4. 客户选择 Claude Code、Codex 或 Kimi。按照对应 Anthropic Console、OpenAI API Platform 或 Kimi Platform 说明开通 API 使用并创建该供应商 API key，粘贴到匹配的敏感字段。GitHub token 的检查只调用只读 API；模型 key 的“测试连接”会真实请求模型并可能计费，必须在用户显式确认后运行。未测试成功的 Agent key 不能启用 runner。Actions secrets、数据库账号、SSH key、TLS 私钥及本机 OAuth 登录文件都不输入该表单。
+5. 服务按仓库加密保存 PAT/API key；每 VM 解密密钥放在 OS 权限保护的独立路径，secret 不进 SQLite、普通 `.env`、仓库、Compose environment、命令行、Docker inspect 环境值或日志。启动对应 runner 时，宿主服务只把所需原生认证文件解密到 repo 专属 `/run/kedacode/runner-auth/<repo-id>/` tmpfs 并 bind mount。代码和 Agent 在该 runner 中运行，可能读取该 runner 自己的 key；客户应使用单仓库、低权限、可轮换 key。
+6. 新 key 先验证，成功后再原子替换并重启关联 runner；验证失败保留旧值。删除按钮只删 KedaCode 密文并停止对应 runner、清空 tmpfs，不会 revoke 上游 key；客户必须另到 GitHub/模型平台撤销。页面分别显示本地副本状态与上游撤销说明。
+7. 客户为需要数据库服务的测试配置 GitHub Actions service 和 required check；daemon `verification_commands` 只运行 runner 内可执行的快速检查。运营者用 `kc container gc --dry-run` 查看维护候选，再按约定显式执行；摘要记录分类计数、跳过原因、保留期和磁盘空间，不记录 secret。基础设施费用由运营者按约定收取，模型用量归客户供应商账户。
+8. 退订时，客户先到 GitHub 和模型供应商平台 revoke PAT/API key；运营者随后停止 runner、删除 KedaCode 密文与 Console 登录，按数据导出/删除约定清理客户数据并释放 VM。删除 VM 前核对上游 revoke 已完成；Console 删除副本不能代替这一步。
 
 #### 客户 CI 配置者的任务脚本
 
@@ -499,9 +540,9 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 
 | 人需要看的结果 | 呈递内容 | 10 秒自检 |
 |---|---|---|
-| 托管 GC 预览能说明哪些过期输出会删除，以及活动、脏或未合并 worktree 为什么保留 | `tasks/evidence/<prd-stem>/rv-2-gc-preview.txt`；交付时在 PR evidence comment 或完成消息中嵌入对应终端输出 | 查输出中的 `eligible`、`deleted`、`skipped` 分类数量；dirty/active fixture 应在 `skipped` |
-| 自动清理执行后审计可读、凭据仍只对授权 runner 可用，安全候选才消失 | 同一 evidence bundle 中 rv-2 的 apply 与 fresh-process probe 片段 | 对照 dry-run manifest；确认 dirty/active 路径存在、超期 safe 路径不存在，凭据值不可从 Console/API 读取 |
-| 客户能安全完成托管 Console 首次设置 | `rv-4` staging URL（交付时写入 evidence report）+ `tasks/evidence/<prd-stem>/rv-4-console-onboarding.png`；用 `just prd review tasks/pending/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md` 打开评审包，在浏览器访问 staging URL 并与同 viewport 原型截图并排审阅 | 未登录不能读写设置；登录后可配置并看到状态；截图和网络/服务日志中没有凭据值 |
+| 托管 GC 预览能说明哪些过期输出会删除，以及活动、脏或未合并 worktree 为什么保留 | `tasks/evidence/<prd-stem>/rv-2-gc-preview.txt`；交付时在 PR evidence comment 或完成消息中嵌入对应终端输出；本地打开：`open "tasks/evidence/<prd-stem>/rv-2-gc-preview.txt"` | 查输出中的 `eligible`、`deleted`、`skipped` 分类数量；dirty/active fixture 应在 `skipped` |
+| 自动清理执行后审计可读、凭据仍只对授权 runner 可用，安全候选才消失 | `tasks/evidence/<prd-stem>/rv-2-gc-apply.txt` 与 `rv-2-gc-probe.txt`；本地打开：`open "tasks/evidence/<prd-stem>/"` | 对照 dry-run manifest；确认 dirty/active 路径存在、超期 safe 路径不存在，凭据值不可从 Console/API 读取 |
+| 客户能安全完成托管 Console 首次设置和凭据配置 | `rv-4` staging URL（交付时写入 evidence report）+ `tasks/evidence/<prd-stem>/rv-4-console-onboarding.png`；用 `just prd review tasks/pending/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md`（归档后为 `tasks/archive/` 同名文件）打开评审包，在浏览器访问 staging URL 并与同 viewport 原型截图并排审阅 | 能看懂引导码交付、PAT 来源/权限、三种 Agent key 来源/计费和撤销边界；未登录不能读写；secret 不出现在截图、网络日志或服务日志 |
 
 `reviewer: verifier` 且不需人工看图的结果不放在本区：rv-1 隔离/Compose 资源证明、rv-3 GitHub Actions required-check 结果、配置和单测/静态检查。若没有私有 staging 证据发布权限，执行者须在交付说明中给出受限访问的单一 review 入口，不得公开客户凭据或代码。
 
@@ -530,14 +571,19 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 - [ ] 托管维护关闭时，本地 `kc daemon` / `kc container up` 不进入新清理分支；配置默认关闭并有对应的回归证据。
 - [ ] 有效关闭 Issue 的安全 worktree 在 worker 全部结束后被清理；活动、dirty、unmerged、remote-exists 和 GitHub 状态不可用候选都被保留。
 - [ ] 达到磁盘阈值时 active worker 不被杀；该 daemon pass 结束后停领并输出已用/可用空间，空间恢复越过高水位后继续领取。
-- [ ] 过期运行摘要按确定的 keyset/事务边界删除；audit、queue settings、活动队列、已保存的凭据和 provider sessions 不受清理策略误删。
-- [ ] hosted 凭据可从 Console 新建、更新、验证和撤销；API/页面只返回状态，不回显 secret；更新/撤销后只有新值可被对应 runner 使用，其他客户身份无法读取。
+- [ ] 过期运行摘要按确定的 keyset/事务边界删除；audit、queue settings、活动队列、已保存凭据和 Console sessions 不受清理策略误删。
+- [ ] 首次引导码由 VM 本地 CLI 生成、只显示一次、24 小时过期、单次消费且服务端只存哈希；过期或重放均拒绝。
+- [ ] Console 准确指导客户创建单仓库 fine-grained PAT（`Metadata: read`、`Contents: read/write`、`Issues: read/write`、`Pull requests: read/write`）和 Claude/Codex/Kimi provider API key；错误、权限不足、未测试成功或组织待审批的凭据不能启用 runner。
+- [ ] 模型连通性测试在显式费用提示确认后才发起真实最小调用；保存本身不调用模型。Console 提供 API 使用/计费前置条件和上游官方创建/撤销入口。
+- [ ] 凭据可新增、验证、轮换和删除 KedaCode 副本；API/页面只返回状态，不回显 secret。验证失败保留旧值；轮换成功后 runner 只用新值；删除停止对应 runner、清除密文/tmpfs，但明确提示上游 key 仍有效，直到客户主动 revoke。
+- [ ] GitHub/Agent 凭据按仓库隔离；只有匹配 runner 获得对应 auth 文件。测试证明另一个仓库/客户不能读取，并明确披露同一 runner 内的 Agent/代码可读取本 runner 自己的 key。
+- [ ] GitHub Actions secrets、项目 DB 凭据、SSH 私钥和反向代理 TLS 私钥不会进入 hosted credential API；自动清理不会删除加密凭据存储。
 - [ ] Compose JSON log driver 的最大文件尺寸/数量有界；host GC 只清理悬空镜像与过期 build cache，不运行 volume prune，不删除活动容器正在引用的镜像。
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 和 `docs/getting-started/installation.md` 明确本地免费路径、托管 URL/首次登录、仓库连接、客户凭据与模型费用、数据库测试转 CI、磁盘与退订数据处理。
-- [ ] `src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md` 同步准确描述 `kc container gc` 参数、dry-run/apply、默认关闭和“绝不挂 Docker socket”边界。
+- [ ] `docs/guides/agent-runner.md` 和 `docs/getting-started/installation.md` 明确本地免费路径；引导码由谁、如何发放；PAT 创建入口、仓库范围和精确权限；Anthropic/OpenAI/Kimi API key 获取入口、API 账户/计费条件和显式测试费用；密码/session、Actions secrets、DB 凭据、SSH/TLS key 的归属；加密保存/tmpfs 交付、runner 内代码读取风险、本地删除与上游 revoke 的区别；CI、磁盘和退订步骤。
+- [ ] `src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md` 同步 `kc console bootstrap-token create --expires-in 24h` 的签发/重发边界、凭据交付、`kc container gc` 参数、dry-run/apply、默认关闭和“绝不挂 Docker socket”边界。
 - [ ] `mkdocs.yml` 导航与文档实际位置一致，不添加重复入口。
 
 #### Validation Acceptance
@@ -545,7 +591,7 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 - [ ] rv-1 的实际 Compose config、docker inspect、跨客户权限负例和 final tree 标识通过；改动挂载、启动或凭据处理后重跑。
 - [ ] rv-2 真实 `kc container gc` dry-run → 显式 apply → 新 CLI 进程 probe 通过；证据 manifest 证明 dirty/active/unmerged 数据保留。
 - [ ] rv-3 staging PR 的 DB-backed CI service 测试绿；负例能让 required check 红，PR merge gate 不放行。
-- [ ] rv-4 真实 hosted URL 浏览器流程通过；负例证明未认证/API session 失效时拒绝访问，secret 不回显、不出现在日志且撤销后 runner 不再使用旧凭据；与原型图并排的真实截图经过人审。
+- [ ] rv-4 真实 hosted URL 浏览器流程通过；负例证明未认证/API session 失效、引导码重放、PAT 权限不足、错误 provider、未通过 Agent API key 测试时均拒绝；secret 不回显/落日志；删除 KedaCode 副本后 runner 无法再使用本地 key，上游 revoke 后 provider 拒绝旧 key；与原型图并排的真实截图经过人审。
 - [ ] `uv run pytest tests/test_worktree_cleanup.py tests/test_daemon_parallel_concurrency.py tests/test_cli_container.py tests/test_agent_runner_config.py tests/test_console_store.py tests/test_agent_runner_agent_invocation.py -q` 与 `just lint` 通过；相关行为变更后重跑。
 - [ ] `uv run kc container gc --repo <fixture-repo> --dry-run` 真实 CLI 入口退出成功；相同候选的 `--apply` 只在明确指定后执行，fresh process 结果符合 rv-2。该证据与最终实现 Git tree 绑定。
 
@@ -557,18 +603,18 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 
 ## 10. Functional Requirements
 
-- **FR-1 Local free mode:** 本地 `kc daemon` 继续独立运行；托管功能及维护策略默认关闭，不要求新增云端账户或云端连通。
-- **FR-2 Single-tenant hosted runner:** 每个客户部署在独立 Linux VM，支持每仓库一个 Docker runner；客户 Console 有独立 HTTPS URL 并需要认证，runner 容器不对公网开放端口。仓库、状态和运行时凭据由托管服务按客户隔离。
-- **FR-3 No project middleware in runner:** KedaCode runner Compose 不安装、启动或连接客户项目 Postgres/MySQL/Redis/队列；不挂载 Docker socket。客户自行在 CI workflow 声明集成测试服务。
-- **FR-4 CI gate remains authoritative:** 代码任务在 runner 内完成所配置的快速验证并创建 PR；项目级数据库检查必须由 PR CI 执行。GitHub required check 未绿时不得声称 PR 已通过集成验收，也不得绕过现有 merge/status 门禁。
-- **FR-5 Credential handling:** 客户通过受认证 Console 输入 GitHub token 或上传界面明确支持的 Agent CLI 凭据文件，并可验证、更新和撤销；不接受任意目录压缩包。secret 保存后不再由 UI/API 回传，不进入 URL、浏览器本地存储、日志、Compose 明文环境或命令行参数。服务按客户隔离保存凭据并只交付给其 runner；退订先撤销凭据与 Console 登录，再按数据策略处置 VM。
-- **FR-6 Hosted resource cleanup:** 托管维护启用后按已确认周期清理 per-Issue raw logs 和过期终态运行/attempt 摘要；复用 worktree cleaner 的所有安全条件并增加活动认领保护；保留 audit、active state、settings 和 credentials。
-- **FR-7 Safe host Docker cleanup:** `kc container gc` 支持 dry-run 和显式 apply，报告候选、理由、磁盘空间与结果；host cleanup 只处理不被容器引用的悬空镜像和超期 builder cache，不删 volume、bind mount 或活动镜像。
-- **FR-8 Daemon disk guard:** 每轮领取新 Issue 前查看可用空间；低于 configured low-water mark 时暂停新的领取、不杀现有 worker，并给运营者输出容量和恢复条件；越过 recovery watermark 后恢复领取。
-- **FR-9 Bounded container logs:** Compose 为 stdout/stderr 配置有界轮转，避免 Docker daemon log 文件在无人值守运行中无限增长。
-- **FR-10 Operational visibility:** GC 输出逐类展示 scanned/eligible/deleted/skipped/failed 数量、保留期限、跳过原因和错误；部分清理失败返回可监控的非零状态，不掩盖失败。
-- **FR-11 Docs and CLI knowledge:** 更新部署/CI/退订文档与随包 `kedacode-operator` skill，CLI schema/help、配置名和文档保持一致。
-- **FR-12 Hosted Console onboarding:** 每位客户获得独立、受认证的 Console URL，通过引导选择/连接授权仓库并完成凭据配置；未认证或已失效 session 不能读取或修改配置。首次访问采用 D-03 确认的方式；不开放公共注册；普通本地 `kc console` 保持 loopback 本机模式。
+- **FR-1: Local free mode**：本地 `kc daemon` 继续独立运行；托管功能及维护策略默认关闭，不要求新增云端账户或云端连通。
+- **FR-2: Single-tenant hosted runner**：每个客户部署在独立 Linux VM，支持每仓库一个 Docker runner；客户 Console 有独立 HTTPS URL 并需要认证，runner 容器不对公网开放端口。仓库、状态和运行时凭据由托管服务按客户隔离。
+- **FR-3: No project middleware in runner**：KedaCode runner Compose 不安装、启动或连接客户项目 Postgres/MySQL/Redis/队列；不挂载 Docker socket。客户自行在 CI workflow 声明集成测试服务。
+- **FR-4: CI gate remains authoritative**：代码任务在 runner 内完成所配置的快速验证并创建 PR；项目级数据库检查必须由 PR CI 执行。GitHub required check 未绿时不得声称 PR 已通过集成验收，也不得绕过现有 merge/status 门禁。
+- **FR-5: Credential handling**：Console 说明并接收客户创建的单仓库 fine-grained GitHub PAT 与 Claude Code/Codex/Kimi provider API key；列明创建入口、精确权限、API 账户/计费条件、显式模型测试费用提示和同 runner 代码可读凭据的信任边界。不接收 OAuth/session 或认证文件。PAT 通过只读 API 检查；Agent key 只有在显式确认计费后经最小真实模型请求验证。secret 按仓库加密保存并只通过 tmpfs 原生配置交给匹配 runner；不进入 URL、浏览器本地存储、SQLite、日志、Compose environment、inspect 环境值或命令行。更新先验证并原子替换；Console 删除只清理 KedaCode 副本，不代替用户在上游 revoke。Actions secrets、项目 DB 凭据、SSH key 与代理 TLS key 不由此 API 收集。
+- **FR-6: Hosted resource cleanup**：托管维护启用后按已确认周期清理 per-Issue raw logs 和过期终态运行/attempt 摘要；复用 worktree cleaner 的所有安全条件并增加活动认领保护；保留 audit、active state、settings 和 credentials。
+- **FR-7: Safe host Docker cleanup**：`kc container gc` 支持 dry-run 和显式 apply，报告候选、理由、磁盘空间与结果；host cleanup 只处理不被容器引用的悬空镜像和超期 builder cache，不删 volume、bind mount 或活动镜像。
+- **FR-8: Daemon disk guard**：每轮领取新 Issue 前查看可用空间；低于 configured low-water mark 时暂停新的领取、不杀现有 worker，并给运营者输出容量和恢复条件；越过 recovery watermark 后恢复领取。
+- **FR-9: Bounded container logs**：Compose 为 stdout/stderr 配置有界轮转，避免 Docker daemon log 文件在无人值守运行中无限增长。
+- **FR-10: Operational visibility**：GC 输出逐类展示 scanned/eligible/deleted/skipped/failed 数量、保留期限、跳过原因和错误；部分清理失败返回可监控的非零状态，不掩盖失败。
+- **FR-11: Docs and CLI knowledge**：更新部署/CI/退订文档与随包 `kedacode-operator` skill，CLI schema/help、配置名和文档保持一致。
+- **FR-12: Hosted Console onboarding**：每位客户获得独立、受认证的 Console URL。VM 本地 `kc console bootstrap-token create --expires-in 24h` 签发一次性引导码；码经独立渠道交付、只在网页登录表单输入、服务只存哈希、成功消费后设置管理员密码。不开放注册；未认证或已失效 session 不能读写配置；普通本地 `kc console` 保持 loopback 本机模式。重发必须在 VM 本地使旧码失效并留审计记录。
 
 ## 11. Non-Goals
 
@@ -585,9 +631,9 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 
 - **托管安全责任：** 专用 VM 隔离仍要求宿主机安全更新、最小权限、磁盘加密与备份策略；PRD 验证证明部署隔离，不替代云主机日常安全运营。
 - **公网 Console 与凭据责任：** 当前 local auth 是 no-op，不能直接用于公网。托管 URL 必须使用已确认的真实登录/引导模式和 HTTPS；凭据需要被持久保存并交给 runner，必须防止 session 盗用、CSRF、secret 回显、日志泄露与退订后继续可用。宿主 root/运营者仍属于每客户 VM 的受信任边界，产品说明需明确。
-- **凭据工具兼容性：** Agent CLI 的认证格式不同；首期必须列明 UI 支持的供应商和认证格式。未支持的格式不得让客户上传任意认证目录或静默保存，需提示暂不支持。
-- **首次访问恢复：** 一次性引导凭据丢失或过期会阻断客户入门；运营者需有可审计的重发/失效流程，但不能通过公开注册或弱默认密码绕过。
-- **凭据轮换与客户退订：** 客户提供的 CLI credential 可能是可续期 session。必须验证导入/更新/撤销步骤，避免停服后旧凭据仍能调用模型或访问仓库。
+- **凭据工具兼容性：** Agent CLI 认证格式会随 CLI 版本变化；首期仅支持 runner 镜像预装并锁定版本的 Claude Code、Codex、Kimi API key adapter。镜像升级时核验原生认证文件、真实认证和失败关闭行为；其他 provider、OAuth/session、认证文件上传与自定义端点明确提示不支持。
+- **首次访问恢复：** 一次性引导码丢失或过期会阻断客户入门；运营者需在客户 VM 本地可审计地使旧码失效并重发，不能通过公开注册或弱默认密码绕过。
+- **凭据轮换与客户退订：** 首期排除可续期的订阅/OAuth session；GitHub PAT 与 Agent API key 更新先验证再原子替换，旧 key 从 KedaCode runner 摘除但在上游 revoke 前仍有效。退订流程必须将客户上游撤销与 KedaCode 本地删除分为两步并分别留证。
 - **CI 配置因仓库而异：** daemon 无法推断数据库版本、迁移顺序或种子数据；CI 没配置 required check 时会造成项目集成测试缺口，部署前 checklist 必须提醒客户。
 - **清理与诊断取舍：** 14/90 天是推荐值，需由人工确认；改动期限后必须同步说明实际影响。审计和退订数据仍需受限访问。
 - **磁盘门槛：** 一项任务可能大于剩余空间；设计应避免新任务启动后立即失败，必要时由运营者扩容后自动恢复，不能自动删除未知客户文件来腾空间。
@@ -597,15 +643,35 @@ D-01 follows the recommended isolated managed-host model, pending the customer i
 
 | ID | 决策问题 | 当前推荐 | 替代方案 | 原因 | 状态 |
 |---|---|---|---|---|---|
-| D-01 | 首期托管隔离与模型用量如何归属？ | 每客户专用 VM；客户自带 GitHub/模型凭据并直接支付模型费用；运营者收基础设施服务费 | BYOC；多客户共享 VM；运营者包模型费用 | 复用现有单仓库容器并把跨客户边界放到 VM，避免先建共享沙箱和用量计费 | 待人工确认 |
+| D-01 | 首期托管隔离与模型用量如何归属？ | 每客户专用 VM；客户为目标仓库创建 fine-grained PAT、为 Claude/Codex/Kimi 所选 provider 创建 API key 并直接支付模型费用；运营者收基础设施服务费 | BYOC；多客户共享 VM；运营者包模型费用 | 复用现有单仓库容器并把跨客户边界放到 VM；使用可轮换、无交互的上游凭据，避免先建共享沙箱和用量计费 | 待人工确认 |
 | D-02 | 原始日志、运行摘要及退订数据如何保留/删除？ | 原始日志 14 天、运行摘要 90 天、审计保留至退订；safe worktree 与 host cache 自动回收 | 更长保留、退订前强制导出或自定义周期 | 现有 app log 默认 14 天；摘要足以追踪近期任务，审计独立于普通日志 | 待人工确认 |
-| D-03 | 客户如何首次访问托管 Console？ | 每客户专属 URL；运营者签发一次性引导凭据，客户设置该部署的管理员密码；不开放注册 | 客户自有 SSO/身份代理；每客户多用户邀请 | 不需要中央账号目录，普通用户可用浏览器完成配置；降低自助注册滥用与跨客户账号复杂度 | 待人工确认 |
+| D-03 | 客户如何首次访问托管 Console？ | 每客户专属 URL；VM 本地 CLI 签发 256-bit、24 小时、单次使用引导码，服务只存部署绑定哈希；独立渠道交付，首次使用后设管理员密码；不开放注册 | 客户自有 SSO/身份代理；每客户多用户邀请 | 不需要中央账号目录，普通用户可用浏览器完成配置；降低自助注册滥用与跨客户账号复杂度 | 待人工确认 |
 
 ### Final Reconciliation
 
-- Interpretation: updated 2026-10-09 to include per-customer authenticated Console onboarding and UI-managed credentials; pending implementation.
+- Interpretation: updated 2026-10-10 to define the customer-side credential acquisition steps, exact first-run bootstrap handoff, supported GitHub/Agent credential types, runtime delivery, billing prompt, and local deletion versus upstream revocation; pending implementation.
 - Public behavior and contracts: local `kc console` remains loopback-only; hosted access requires D-03 auth model and never returns saved secret values.
 - Related PRD status: reviewed against repository state on 2026-10-09.
 - Requirements and risks: pending implementation.
 - Reconciled differences:
   - the prior draft excluded customer UI and described operator-prepared host paths; this revision includes a dedicated hosted Console setup flow while keeping shared multi-tenant control plane, public signup, and central customer DB out of scope.
+  - hosted credentials are customer-created GitHub fine-grained PATs and provider API keys only; no OAuth/session or auth-file upload. GitHub Actions secrets, project DB credentials, SSH keys, and proxy TLS keys remain in their existing owner-managed locations.
+  - Console deletion removes KedaCode's encrypted copy and runner access; only the upstream GitHub/provider revoke action invalidates the source key.
+
+## Change Log
+
+### 托管 Console 客户设置流程纳入范围（补记 2026-10-10 范围修订）
+- Type: scope
+- Before: 初稿把托管需求读作"Docker runner 上的运维约定与资源清理"，凭据由运营者准备主机路径，客户没有自助设置入口。
+- After: 增加每客户受认证 Console URL、一次性引导码与管理员密码、GitHub fine-grained PAT 与 Claude/Codex/Kimi API key 的在线设置、按仓库加密保存与 tmpfs 交付（FR-2/FR-5/FR-12、D-03、rv-4）。
+- Reason: 客户需要在不接触主机路径与 `.env` 的前提下自助完成凭据设置；跨客户共享控制面与公开注册仍在范围外。
+- Impact: 新增 hosted Console 认证/凭据链路及对应 oracle；本地 `kc console` 的 loopback no-op 模式保持不变。
+- Review: 范围与 D-03 待人工确认；本次仅为补记，与 Final Reconciliation 一致。
+
+### 结构合规修复与 Issue 正文同步
+- Type: doc
+- Before: 章节标题、解读回显块与 FR 条目格式不符合 prd skill 检查器；Issue #257 正文为旧解读且 Realistic Validation 清单缺 rv-4。
+- After: §1 标题改为 `Introduction & Goals`；"我默默定了这些 / 我理解为不做" 改为模板粗体块；FR 条目改为 `- **FR-N: 标题**：` 格式；补 Prototype Hub 注册行、External Validation 来源表和 §9.1 打开命令；同步 Issue #257 正文（含 rv-4）。
+- Reason: 归档门禁 `check_prd_acceptance_checklist.py` 会拒绝原结构；执行 agent 以 Issue 正文为真相源，缺失 rv-4 会使托管 Console 主链不被验收。
+- Impact: 仅格式与记录修复，不改行为、范围与验收语义；验收仍以 §7.6 与 §9 为准。
+- Review: 已重跑检查器确认三项结构错误消除（未开工条目与验收横幅状态除外）。

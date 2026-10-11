@@ -948,15 +948,15 @@ agent_timeout_seconds = 120
 auto_confirm_commands = [
   "labels sync --dry-run",
   "run --dry-run",
-  "review --dry-run",
+  "supervise --dry-run",
   "ask --plan-only",
 ]
 # Commands that prompt the user for confirmation before execution.
 confirm_commands = [
   "run",
   "daemon",
-  "review",
-  "review-daemon",
+  "supervise",
+  "supervise-daemon",
   "issue create",
   "recover",
   "blocked-continue",
@@ -1060,7 +1060,7 @@ stop_timeout_seconds = 30
 # =============================================================================
 # Agent Runner Daemon（常驻轮询）
 # =============================================================================
-# daemon / review-daemon 的默认轮询间隔（秒）。
+# daemon / supervise-daemon 的默认轮询间隔（秒）。
 # CLI 可通过 --interval 覆盖；环境变量 AGENT_RUNNER_REVIEW_INTERVAL_SECONDS
 # 与 AGENT_RUNNER_RUN_INTERVAL_SECONDS 也可以覆盖。
 

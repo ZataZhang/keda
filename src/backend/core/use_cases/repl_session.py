@@ -62,7 +62,7 @@ MAX_TURNS = 64
 _IAR_AVAILABLE_SUBCOMMAND_HINT = (
     "Available `kc` subcommands (`kedacode` and the deprecated `iar` "
     "alias run the same code): "
-    "init, labels, issue, run, daemon, review, review-daemon, recover, "
+    "init, labels, issue, run, daemon, supervise, supervise-daemon, recover, "
     "blocked-continue, ask, deliberate, takeover, worktree, registry, "
     "workflow, completion."
 )

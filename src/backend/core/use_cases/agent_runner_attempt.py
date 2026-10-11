@@ -62,6 +62,16 @@ class AttemptPhaseTimer:
     def __init__(self) -> None:
         """初始化空的阶段累计表。"""
         self._accumulated_seconds: dict[str, float] = {}
+        self._failure_phase: str | None = None
+
+    @property
+    def failure_phase(self) -> str | None:
+        """返回失败分支显式标记的生命周期阶段。"""
+        return self._failure_phase
+
+    def mark_failure_phase(self, phase_name: str) -> None:
+        """标记当前 attempt 失败所在的生命周期阶段。"""
+        self._failure_phase = phase_name
 
     @contextmanager
     def measure(self, phase_name: str) -> Iterator[None]:
