@@ -364,7 +364,7 @@ recovery 轮次。
 执行器进程因墙钟或 inactivity timeout 被杀时，runner 默认允许同一个 session 额外续跑 1 轮；
 这一轮沿用当前阶段原有的超时时限，并在同一 session 里发送继续当前工作区未完成步骤的提示。
 轮数由 `[agent_runner.runner].timeout_resume_attempts` 配置，按 session 持久计数；设为 `0` 可关闭，
-非超时错误不会消耗该预算。预算耗尽后，现有 recovery/fallback 流程仍可继续，但会开新 session，
+非超时错误不会消耗该预算；CLI 续传后即使返回新的 session id，预算也会沿续传链保留。预算耗尽后，现有 recovery/fallback 流程仍可继续，但会开新 session，
 不再反复给已超时的 session 加时间。没有可解析 session id 或 agent 未启用续传时，直接走既有失败恢复。
 
 ```toml

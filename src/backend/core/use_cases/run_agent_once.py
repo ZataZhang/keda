@@ -136,6 +136,7 @@ from backend.core.use_cases.agent_runner_publish import (
 from backend.core.use_cases.agent_runner_session_store import (
     AgentSessionScope,
     consume_agent_timeout_resume_attempt,
+    load_agent_session_record,
     resolve_resumable_session_id,
     save_agent_session_record,
 )
@@ -738,7 +739,16 @@ def run_agent_with_prompt(
         )
     label = f"Issue #{issue.number}: {issue.url}" if issue is not None else None
 
-    def _persist_session_id(session_id: str | None) -> None:
+    session_scope = AgentSessionScope(
+        issue_number=issue.number if issue is not None else None,
+        phase=invocation_phase,
+    )
+
+    def _persist_session_id(
+        session_id: str | None,
+        *,
+        continuation_session_id: str | None = None,
+    ) -> None:
         """把本次调用自报的会话 id 落在 worktree 局部记录里。
 
         只记 implementation（含 recovery）和 deliberate review 会话，并按阶段记录作用域。
@@ -752,15 +762,25 @@ def run_agent_with_prompt(
         ) or (profile == AGENT_PROFILE_DELIBERATE and invocation_phase == PHASE_REVIEW)
         if not session_id or not can_persist_session:
             return
+        previous_record = load_agent_session_record(
+            worktree_path,
+            agent_name,
+            phase=invocation_phase,
+        )
+        if previous_record is None and invocation_phase not in (None, PHASE_IMPLEMENTATION):
+            previous_record = load_agent_session_record(worktree_path, agent_name)
+        carried_timeout_resume_count = (
+            previous_record.timeout_resume_count
+            if previous_record is not None and previous_record.session_id == continuation_session_id
+            else None
+        )
         try:
             save_agent_session_record(
                 worktree_path,
                 agent_name=agent_name,
                 session_id=session_id,
-                scope=AgentSessionScope(
-                    issue_number=issue.number if issue is not None else None,
-                    phase=invocation_phase,
-                ),
+                scope=session_scope,
+                timeout_resume_count=carried_timeout_resume_count,
             )
         except (OSError, ValueError) as exc:
             _logger.warning(
@@ -822,10 +842,16 @@ def run_agent_with_prompt(
             attempt_result = process_runner.run(**run_kwargs)
         except Exception as exc:  # noqa: BLE001 - 旁路落盘后原样抛出，不改变失败语义。
             finish_invocation(observation, exc=exc)
-            _persist_session_id(_session_id_from_exception(exc))
+            _persist_session_id(
+                _session_id_from_exception(exc),
+                continuation_session_id=resume_id,
+            )
             raise
         finish_invocation(observation, result=attempt_result)
-        _persist_session_id(attempt_result.session_id)
+        _persist_session_id(
+            attempt_result.session_id,
+            continuation_session_id=resume_id,
+        )
         return attempt_result
 
     def _invoke_resumable(resume_id: str) -> CommandResult:

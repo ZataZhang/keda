@@ -272,10 +272,16 @@ class _InvocationRunHarness:
 
 
 class _TimeoutSessionRunner:
-    """假进程 runner：每次超时时都自报同一个 session id。"""
+    """假进程 runner：可模拟续传时 CLI 轮换 session id。"""
 
-    def __init__(self, *, succeed_after_resume: bool) -> None:
+    def __init__(
+        self,
+        *,
+        succeed_after_resume: bool,
+        rotate_session_id_on_resume: bool = False,
+    ) -> None:
         self.succeed_after_resume = succeed_after_resume
+        self.rotate_session_id_on_resume = rotate_session_id_on_resume
         self.calls: list[list[str]] = []
 
     def run(
@@ -296,7 +302,10 @@ class _TimeoutSessionRunner:
                 session_id="sess-timeout",
             )
         timeout_error = subprocess.TimeoutExpired(command_list, timeout)
-        setattr(timeout_error, AGENT_SESSION_ID_ATTR_NAME, "sess-timeout")
+        timeout_session_id = "sess-timeout"
+        if resumed and self.rotate_session_id_on_resume:
+            timeout_session_id = f"sess-timeout-{len(self.calls) - 1}"
+        setattr(timeout_error, AGENT_SESSION_ID_ATTR_NAME, timeout_session_id)
         raise timeout_error
 
 
@@ -541,6 +550,26 @@ class TestFailuresAndTimeoutsRecordOutcome:
             OUTCOME_TIMEOUT,
             OUTCOME_TIMEOUT,
         ]
+
+    def test_timeout_resume_budget_survives_session_id_rotation(self, tmp_path: Path) -> None:
+        harness = _InvocationRunHarness(
+            tmp_path,
+            script_body=_silent_script_body(),
+            name="timeout-budget-session-rotation",
+        )
+        process_runner = _TimeoutSessionRunner(
+            succeed_after_resume=False,
+            rotate_session_id_on_resume=True,
+        )
+
+        with pytest.raises(subprocess.TimeoutExpired):
+            harness.invoke(timeout_seconds=7, process_runner=process_runner)
+
+        assert len(process_runner.calls) == 2
+        record = load_agent_session_record(harness.worktree, "claude")
+        assert record is not None
+        assert record.session_id == "sess-timeout-1"
+        assert record.timeout_resume_count == 1
 
     def test_read_only_review_profile_resumes_after_timeout(self, tmp_path: Path) -> None:
         harness = _InvocationRunHarness(
