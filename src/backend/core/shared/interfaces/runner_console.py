@@ -129,6 +129,35 @@ class AttemptRecord:
 
 
 @dataclass(frozen=True)
+class PerformanceAttemptRecord:
+    """统计窗口内用于分组的轻量 attempt 投影。"""
+
+    repo_id: str
+    agent: str
+    failure_type: str
+    duration_seconds: float
+    preset: str | None
+    model: str | None
+
+
+@dataclass(frozen=True)
+class PerformanceRunRecord:
+    """统计窗口内用于整项任务耗时的轻量 run 投影。"""
+
+    repo_id: str
+    outcome: str
+    duration_seconds: float
+
+
+@dataclass(frozen=True)
+class AgentPerformanceRecords:
+    """同一仓库与时间窗口读取到的 attempt 和 run 投影。"""
+
+    attempts: tuple[PerformanceAttemptRecord, ...]
+    runs: tuple[PerformanceRunRecord, ...]
+
+
+@dataclass(frozen=True)
 class AuditEntry:
     """一次管理终端写操作的审计条目。"""
 
@@ -290,6 +319,21 @@ class IRunHistoryStore(ABC):
     @abstractmethod
     def daily_run_trend(self, *, repo_id: str | None, days: int) -> list[DailyRunTrendEntry]:
         """按天聚合最近 ``days`` 天的运行结果。"""
+        ...
+
+    @abstractmethod
+    def list_agent_performance_records(
+        self, *, repo_id: str | None, since_date: str
+    ) -> AgentPerformanceRecords:
+        """读取统计窗口内的轻量 run 与 attempt 投影。
+
+        Args:
+            repo_id: 仓库过滤；``None`` 表示全部仓库。
+            since_date: UTC 日历日期下界，包含该日期。
+
+        Returns:
+            统计所需的持久化投影，不含 attempt 长文本详情。
+        """
         ...
 
 

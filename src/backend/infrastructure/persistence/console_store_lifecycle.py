@@ -1,9 +1,13 @@
-"""Console store 的 PRD lifecycle ledger 持久化实现。"""
+"""管理终端 PRD 生命周期账本的 SQLite 适配。"""
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+
+
+# 以下数据类与 core/shared/interfaces/runner_console.py 中的同名类型
+# 结构一致（鸭子类型实现端口），infrastructure 层禁止导入 core。
 
 
 @dataclass(frozen=True)
@@ -35,15 +39,14 @@ class PrdLifecycleEventRecord:
     status: str = ""
 
 
-class PrdLifecycleConsoleStoreMixin:
-    """提供 PRD 生命周期账本的 SQLite 持久化方法。"""
+class PrdLifecycleStoreMixin:
+    """为 SQLite ConsoleStore 提供 PRD 生命周期账本适配。"""
 
     # ─────────────────────────────────────────────────────────────────────────
-    # PRD lifecycle ledger (IPrdLifecycleStore duck-type implementation)
+    # PRD 生命周期账本（IPrdLifecycleStore 鸭子类型实现）
     #
     # 与 run_records/attempt_records 同为旁路账本，但语义更强：run/event 是
     # 追加式不可变历史（event 只增不改），当前阶段与耗时由 event 聚合得出。
-    # ─────────────────────────────────────────────────────────────────────────
 
     def upsert_lifecycle_run(self, run_record: PrdLifecycleRunRecord) -> None:
         """创建或刷新一个 lifecycle run；失败时抛出异常。"""
@@ -226,6 +229,10 @@ class PrdLifecycleConsoleStoreMixin:
         with self._connect() as connection:
             legacy_row = connection.execute(query, params).fetchone()
         return int(legacy_row["legacy_count"] or 0)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Backlog queue / settings (IBacklogStore duck-type implementation)
+    # ─────────────────────────────────────────────────────────────────────────
 
 
 def _row_to_lifecycle_run(run_row: sqlite3.Row) -> PrdLifecycleRunRecord:

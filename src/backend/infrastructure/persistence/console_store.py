@@ -32,87 +32,17 @@ from backend.infrastructure.persistence.console_store_invocations import (
     CREATE_INVOCATION_EVENTS,
     InvocationEventStoreMixin,
 )
+from backend.infrastructure.persistence.console_store_history import (
+    AttemptRecord,
+    AuditEntry,
+    RunHistoryReadMixin,
+    RunRecord,
+)
 from backend.infrastructure.persistence.console_store_lifecycle import (
-    PrdLifecycleConsoleStoreMixin,
+    PrdLifecycleStoreMixin,
 )
 
 _logger = logging.getLogger(__name__)
-
-
-# 以下数据类与 core/shared/interfaces/runner_console.py 中的同名类型
-# 结构一致（鸭子类型实现端口），infrastructure 层禁止导入 core。
-
-
-@dataclass(frozen=True)
-class RunRecord:
-    """一次 Issue 处理的结果与任务身份快照（与 core 同构）。
-
-    ``issue_title`` 与 ``issue_url`` 是运行时保存的可空快照，既有数据库行为空。
-    """
-
-    repo_id: str
-    repo_path: str
-    issue_number: int
-    trigger: str
-    agent: str
-    outcome: str
-    error_summary: str | None
-    started_at: str
-    finished_at: str
-    duration_seconds: float
-    issue_title: str | None = None
-    issue_url: str | None = None
-
-
-@dataclass(frozen=True)
-class AttemptRecord:
-    """一次 agent execution attempt 的本地记录（与 core 同构）。
-
-    ``preset`` / ``model`` 是 schema v6 追加的可空观测列：绑定生效时写入
-    实际生效的预设名与模型 id，未绑定 / 绑定被丢弃时为 ``None``。
-    ``failure_phase`` 保存失败发生的生命周期阶段；``phase_durations`` 保存
-    各阶段的累计秒数；旧记录为空。
-    """
-
-    repo_id: str
-    issue_number: int
-    agent: str
-    attempt_number: int
-    failure_type: str
-    recovered: bool
-    detail: str
-    started_at: str
-    finished_at: str
-    duration_seconds: float
-    preset: str | None = None
-    model: str | None = None
-    failure_phase: str | None = None
-    phase_durations: tuple[tuple[str, float], ...] = ()
-
-
-@dataclass(frozen=True)
-class AuditEntry:
-    """一次管理终端写操作的审计条目（与 core 同构）。"""
-
-    occurred_at: str
-    actor: str
-    action: str
-    repo_id: str | None
-    issue_number: int | None
-    params_json: str
-    result: str
-    detail: str | None
-
-
-@dataclass(frozen=True)
-class DailyRunTrendEntry:
-    """运行历史按天聚合的一个数据点（与 core 同构）。"""
-
-    day: str
-    completed: int
-    failed: int
-    blocked: int
-    average_duration_seconds: float | None
 
 
 _SCHEMA_VERSION = 13
@@ -282,7 +212,7 @@ _CREATE_PRD_LIFECYCLE_INDEXES = (
 )
 
 
-class SqliteConsoleStore(InvocationEventStoreMixin, PrdLifecycleConsoleStoreMixin):
+class SqliteConsoleStore(RunHistoryReadMixin, PrdLifecycleStoreMixin, InvocationEventStoreMixin):
     """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` /
     ``IBacklogSnapshotStore`` 的 SQLite 实现。
 
@@ -488,155 +418,6 @@ class SqliteConsoleStore(InvocationEventStoreMixin, PrdLifecycleConsoleStoreMixi
                 connection.commit()
         except Exception as exc:  # noqa: BLE001 - side-channel must not break actions.
             _logger.warning("Failed to append audit entry to %s: %s", self._db_path, exc)
-
-    def list_recent_runs(self, *, repo_id: str | None = None, limit: int = 100) -> list[RunRecord]:
-        """倒序列出最近的运行记录。"""
-        query = (
-            "SELECT repo_id, repo_path, issue_number, trigger, agent, outcome, "
-            "error_summary, started_at, finished_at, duration_seconds, issue_title, issue_url "
-            "FROM run_records"
-        )
-        query_params: list[object] = []
-        if repo_id is not None:
-            query += " WHERE repo_id = ?"
-            query_params.append(repo_id)
-        query += " ORDER BY id DESC LIMIT ?"
-        query_params.append(limit)
-        with self._connect() as connection:
-            record_rows = connection.execute(query, query_params).fetchall()
-        return [
-            RunRecord(
-                repo_id=record_row["repo_id"],
-                repo_path=record_row["repo_path"],
-                issue_number=int(record_row["issue_number"]),
-                trigger=record_row["trigger"],
-                agent=record_row["agent"],
-                outcome=record_row["outcome"],
-                error_summary=record_row["error_summary"],
-                started_at=record_row["started_at"],
-                finished_at=record_row["finished_at"],
-                duration_seconds=float(record_row["duration_seconds"]),
-                issue_title=record_row["issue_title"],
-                issue_url=record_row["issue_url"],
-            )
-            for record_row in record_rows
-        ]
-
-    def list_issue_attempts(
-        self, *, repo_id: str, issue_number: int, limit: int = 100
-    ) -> list[AttemptRecord]:
-        """按时间正序列出某个 Issue 的 attempt 记录；失败时降级为空列表。"""
-        try:
-            with self._connect() as connection:
-                attempt_rows = connection.execute(
-                    "SELECT repo_id, issue_number, agent, attempt_number, failure_type, "
-                    "recovered, detail, started_at, finished_at, duration_seconds, "
-                    "preset, model, failure_phase, phase_durations_json "
-                    "FROM attempt_records WHERE repo_id = ? AND issue_number = ? "
-                    "ORDER BY id DESC LIMIT ?",
-                    (repo_id, issue_number, limit),
-                ).fetchall()
-        except Exception as exc:  # noqa: BLE001 - side-channel must not break runs.
-            _logger.warning("Failed to list attempt records from %s: %s", self._db_path, exc)
-            return []
-        issue_attempts: list[AttemptRecord] = []
-        for attempt_row in reversed(attempt_rows):
-            try:
-                phase_duration_payload = json.loads(attempt_row["phase_durations_json"] or "[]")
-            except (json.JSONDecodeError, TypeError):
-                phase_duration_payload = []
-            phase_durations = (
-                tuple(
-                    (phase_entry["name"], float(phase_entry["seconds"]))
-                    for phase_entry in phase_duration_payload
-                    if isinstance(phase_entry, dict)
-                    and isinstance(phase_entry.get("name"), str)
-                    and phase_entry["name"]
-                    and isinstance(phase_entry.get("seconds"), int | float)
-                    and not isinstance(phase_entry["seconds"], bool)
-                )
-                if isinstance(phase_duration_payload, list)
-                else ()
-            )
-            issue_attempts.append(
-                AttemptRecord(
-                    repo_id=attempt_row["repo_id"],
-                    issue_number=int(attempt_row["issue_number"]),
-                    agent=attempt_row["agent"],
-                    attempt_number=int(attempt_row["attempt_number"]),
-                    failure_type=attempt_row["failure_type"],
-                    recovered=bool(attempt_row["recovered"]),
-                    detail=attempt_row["detail"],
-                    started_at=attempt_row["started_at"],
-                    finished_at=attempt_row["finished_at"],
-                    duration_seconds=float(attempt_row["duration_seconds"]),
-                    preset=attempt_row["preset"],
-                    model=attempt_row["model"],
-                    failure_phase=attempt_row["failure_phase"],
-                    phase_durations=phase_durations,
-                )
-            )
-        return issue_attempts
-
-    def list_recent_audits(self, *, limit: int = 100) -> list[AuditEntry]:
-        """倒序列出最近的审计条目。"""
-        with self._connect() as connection:
-            audit_rows = connection.execute(
-                "SELECT occurred_at, actor, action, repo_id, issue_number, "
-                "params_json, result, detail "
-                "FROM audit_logs ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [
-            AuditEntry(
-                occurred_at=audit_row["occurred_at"],
-                actor=audit_row["actor"],
-                action=audit_row["action"],
-                repo_id=audit_row["repo_id"],
-                issue_number=(
-                    int(audit_row["issue_number"])
-                    if audit_row["issue_number"] is not None
-                    else None
-                ),
-                params_json=audit_row["params_json"],
-                result=audit_row["result"],
-                detail=audit_row["detail"],
-            )
-            for audit_row in audit_rows
-        ]
-
-    def daily_run_trend(self, *, repo_id: str | None, days: int) -> list[DailyRunTrendEntry]:
-        """按天聚合最近 ``days`` 天的运行结果。"""
-        query = (
-            "SELECT date(started_at) AS day, "
-            "SUM(CASE WHEN outcome = 'completed' THEN 1 ELSE 0 END) AS completed, "
-            "SUM(CASE WHEN outcome = 'failed' THEN 1 ELSE 0 END) AS failed, "
-            "SUM(CASE WHEN outcome = 'blocked' THEN 1 ELSE 0 END) AS blocked, "
-            "AVG(duration_seconds) AS average_duration_seconds "
-            "FROM run_records "
-            "WHERE date(started_at) >= date('now', ?)"
-        )
-        query_params: list[object] = [f"-{max(days, 1)} days"]
-        if repo_id is not None:
-            query += " AND repo_id = ?"
-            query_params.append(repo_id)
-        query += " GROUP BY day ORDER BY day ASC"
-        with self._connect() as connection:
-            trend_rows = connection.execute(query, query_params).fetchall()
-        return [
-            DailyRunTrendEntry(
-                day=trend_row["day"],
-                completed=int(trend_row["completed"] or 0),
-                failed=int(trend_row["failed"] or 0),
-                blocked=int(trend_row["blocked"] or 0),
-                average_duration_seconds=(
-                    float(trend_row["average_duration_seconds"])
-                    if trend_row["average_duration_seconds"] is not None
-                    else None
-                ),
-            )
-            for trend_row in trend_rows
-        ]
 
     # ─────────────────────────────────────────────────────────────────────────
     # Backlog queue / settings (IBacklogStore duck-type implementation)
