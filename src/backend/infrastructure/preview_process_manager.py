@@ -437,7 +437,7 @@ def read_preview_record(repo_root: Path) -> PreviewProcessRecord | None:
     if not isinstance(record_payload, dict):
         raise PreviewRegistryReadError(f"{registry_path}: record is missing or malformed")
     try:
-        return PreviewProcessRecord(
+        record = PreviewProcessRecord(
             key=str(record_payload["key"]),
             pid=int(record_payload["pid"]),
             process_group=int(record_payload["process_group"]),
@@ -457,6 +457,21 @@ def read_preview_record(repo_root: Path) -> PreviewProcessRecord | None:
     except (KeyError, TypeError, ValueError) as parse_exc:
         logger.warning("preview registry %s is malformed: %s", registry_path, parse_exc)
         raise PreviewRegistryReadError(f"{registry_path}: {parse_exc}") from parse_exc
+    if record.key != PREVIEW_RECORD_KEY:
+        raise PreviewRegistryReadError(f"{registry_path}: unexpected record key {record.key!r}")
+    try:
+        recorded_repo_root = record.cwd.resolve()
+        requested_repo_root = repo_root.resolve()
+    except (OSError, RuntimeError) as resolve_exc:
+        raise PreviewRegistryReadError(
+            f"{registry_path}: repository identity cannot be resolved ({resolve_exc})"
+        ) from resolve_exc
+    if recorded_repo_root != requested_repo_root:
+        raise PreviewRegistryReadError(
+            f"{registry_path}: record belongs to repository {recorded_repo_root}, "
+            f"not {requested_repo_root}"
+        )
+    return record
 
 
 class PreviewRegistryReadError(ValueError):
@@ -725,13 +740,19 @@ def _can_connect(connect_host: str, connect_port: int) -> bool:
 
 def _terminate_process_group(process_group: int) -> str:
     """先 SIGTERM 再限时 SIGKILL 地终止一个进程组，返回人读结论。"""
-    os.killpg(process_group, signal.SIGTERM)
+    try:
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        return "process group had already exited"
     deadline = time.monotonic() + _TERMINATE_GRACE_SECONDS
     while time.monotonic() < deadline:
         if not _process_group_is_running(process_group):
             return "SIGTERM drained the group"
         time.sleep(_TERMINATE_POLL_INTERVAL_SECONDS)
-    os.killpg(process_group, signal.SIGKILL)
+    try:
+        os.killpg(process_group, signal.SIGKILL)
+    except ProcessLookupError:
+        return "process group exited during the SIGTERM grace period"
     return "SIGKILL after the SIGTERM grace period"
 
 
