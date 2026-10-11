@@ -2,7 +2,8 @@
 
 输出协议负责把一个已按调用形态启动的 agent 子进程的 stdout/stderr
 中继成 ：class:`~backend.core.shared.models.agent_runner.CommandResult`：
-通用文本协议逐行透传，流式 JSON 协议则把事件流渲染成可读文本。
+通用文本协议逐行透传，结构化 JSON 协议则把事件流渲染成可读文本并提取
+执行器自报的会话 id。
 
 协议**实现**位于 ``engines/agent_runner/output_protocols/``（经
 ``iar.agent_output_protocols`` entry point 注册）；core 侧（构造器、
@@ -24,6 +25,8 @@ from typing import TYPE_CHECKING
 
 from backend.core.shared.models.agent_spec import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
+    CODEX_JSON_LINES_PROTOCOL_ID,
+    OPENCODE_JSON_LINES_PROTOCOL_ID,
     PI_JSON_LINES_PROTOCOL_ID,
     PLAIN_PROTOCOL_ID,
     PROMPT_DELIVERY_STDIN,
@@ -113,6 +116,8 @@ class IAgentOutputProtocolRegistry(ABC):
 
 __all__ = [
     "CLAUDE_STREAM_JSON_PROTOCOL_ID",
+    "CODEX_JSON_LINES_PROTOCOL_ID",
+    "OPENCODE_JSON_LINES_PROTOCOL_ID",
     "PI_JSON_LINES_PROTOCOL_ID",
     "PLAIN_PROTOCOL_ID",
     "IAgentOutputProtocol",

@@ -149,6 +149,7 @@ class AgentRunnerAgentProfileSettings(BaseModel):
     prompt_delivery: str | None = None
     output_protocol: str | None = None
     tail_args: list[str] | None = None
+    resume_tail_args: list[str] | None = None
     expand: list[str] | None = None
     read_only: bool | None = None
 
@@ -160,7 +161,8 @@ class AgentRunnerAgentSettings(BaseModel):
     agent 时 ``bin`` 与 ``label`` 必填，四种用途 profile 至少声明一种。
     ``model_args`` / ``reasoning_effort_args`` 是模型参数 argv 模板
     （含 ``{model}`` / ``{effort}`` 占位符）；为空表示该 agent 未声明
-    模型选择语法，命中模型绑定时 fail-fast。
+    模型选择语法，命中模型绑定时 fail-fast。``resume_args`` 是通用续传模板；
+    ``resume_tail_args`` 是 profile 级特殊续传尾部模板。
     """
 
     bin: str | None = None
@@ -173,8 +175,8 @@ class AgentRunnerAgentSettings(BaseModel):
     project_skills_dir: str | None = None
     model_args: list[str] | None = None
     reasoning_effort_args: list[str] | None = None
-    # 会话续传能力声明：``supports_resume`` 为真时，恢复轮次把 ``resume_args``
-    # 模板（含 ``{session_id}`` 占位符）注入 argv；未声明的 agent 自然走全新会话。
+    # 会话续传能力声明：``supports_resume`` 为真时，恢复轮次按 profile 注入
+    # ``resume_args`` 或 ``resume_tail_args``（含 ``{session_id}`` 占位符）。
     supports_resume: bool | None = None
     resume_args: list[str] | None = None
     profiles: dict[str, AgentRunnerAgentProfileSettings] = Field(default_factory=dict)
@@ -393,6 +395,8 @@ class AgentRunnerRunnerSettings(BaseModel):
     # In-place retries for transient network/transport errors (Level 1).
     transient_retry_attempts: int = 2
     transient_retry_delay_seconds: int = 10
+    # Extra same-session runs after process timeouts; counted per session.
+    timeout_resume_attempts: int = Field(default=1, ge=0)
     timeout_seconds: int = 14400
     # Whether the lightweight Fix Agent runs when staged verification fails.
     # False escalates staged verification failures straight to full recovery.

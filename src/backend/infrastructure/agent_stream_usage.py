@@ -1,13 +1,13 @@
 """agent 输出流中的旁路观测：token 用量与会话 id。
 
-从 agent CLI 的 stdout 事件流解析官方自报的 usage 统计。当前识别
+从 agent CLI 的原始输出流解析官方自报的 usage 统计。当前识别
 claude stream-json 的 ``result`` 事件形态（``usage`` 携带 input /
 output / cache_read / cache_creation 四个整数字段）；其他 agent 的
 result 事件若同形也能命中，形状不同或拿不到时宽容降级为"无数据"
 （``None``），绝不估算、绝不抛异常影响主流程。
 
-同一逐行观测点顺带捕获 agent CLI 自报的 ``session_id``（claude 的
-``system/init`` 首行事件与末尾 ``result`` 事件都带），崩溃对账与恢复
+同一逐行观测点顺带捕获 agent CLI 自报的 ``session_id``（兼容 Claude / Qoder /
+CodeBuddy、Codex、OpenCode、pi 的结构化事件，以及 Kimi 退出提示），崩溃对账与恢复
 轮次用它回传给 CLI 的 resume 参数。会话的**持有方始终是 agent CLI**，
 本模块只做观测，不自建会话存储。
 """
@@ -15,6 +15,7 @@ result 事件若同形也能命中，形状不同或拿不到时宽容降级为"
 from __future__ import annotations
 
 import json
+import re
 
 from backend.core.shared.interfaces.agent_runner import (
     AGENT_REPORTED_MODEL_ATTR_NAME,
@@ -32,6 +33,7 @@ _USAGE_FIELD_NAMES: tuple[str, ...] = (
 
 #: 会话 id 事件的廉价预检子串（JSON 文本里必然带该字段名）。
 _SESSION_ID_FIELD_NAME = "session_id"
+_KIMI_RESUME_HINT_RE = re.compile(r"To resume this session:\s*kimi\s+-r\s+([A-Za-z0-9_-]+)")
 
 #: 执行器自报模型名的字段名与廉价预检子串。
 _REPORTED_MODEL_FIELD_NAME = "model"
@@ -98,11 +100,17 @@ def extract_session_id_event(line: str) -> str | None:
         line: 子进程的原始单行输出（可能带尾部换行）。
 
     Returns:
-        该行是 JSON 事件且 ``session_id`` 为非空字符串时返回去掉首尾空白的
-        会话 id；非 JSON 行、无该字段、字段非字符串或为空白时返回 ``None``。
+        标准 ``session_id``、Codex ``thread.started.thread_id``、OpenCode
+        ``sessionID``、pi ``session.id`` 或 Kimi resume hint 中的会话 id；
+        非匹配输出返回 ``None``。
     """
-    # 廉价预检：会话事件的 JSON 文本必然含字段名，先排除 plain/PTY 的人类可读输出。
-    if _SESSION_ID_FIELD_NAME not in line:
+    hint_match = _KIMI_RESUME_HINT_RE.search(line)
+    if hint_match is not None:
+        return hint_match.group(1)
+    if not any(
+        field_name in line
+        for field_name in (_SESSION_ID_FIELD_NAME, '"sessionID"', '"thread_id"', '"id"')
+    ):
         return None
     try:
         event_payload = json.loads(line)
@@ -110,7 +118,14 @@ def extract_session_id_event(line: str) -> str | None:
         return None
     if not isinstance(event_payload, dict):
         return None
+    event_type = event_payload.get("type")
     raw_session_id = event_payload.get(_SESSION_ID_FIELD_NAME)
+    if raw_session_id is None:
+        raw_session_id = event_payload.get("sessionID")
+    if raw_session_id is None and event_type == "thread.started":
+        raw_session_id = event_payload.get("thread_id")
+    if raw_session_id is None and event_type == "session":
+        raw_session_id = event_payload.get("id")
     if not isinstance(raw_session_id, str):
         return None
     return raw_session_id.strip() or None
@@ -180,6 +195,11 @@ class StreamUsageCollector:
             parsed_model = None
         if parsed_model is not None:
             self._reported_model = parsed_model
+
+    def observe_text(self, text: str) -> None:
+        """逐行观察一段原始输出文本。"""
+        for line in text.splitlines():
+            self.observe_line(line)
 
     @property
     def usage(self) -> TokenUsage | None:

@@ -67,7 +67,11 @@ from backend.core.use_cases.agent_runner_feedback import (
     format_prd_delivery_failure,
 )
 from backend.core.use_cases.agent_runner_structured_evidence import ValidationEvidenceError
-from backend.core.use_cases.agent_runner_session_store import resolve_resumable_session_id
+from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    mark_agent_session_complete,
+    resolve_resumable_session_id,
+)
 from backend.core.use_cases.agent_runner_validation import (
     ensure_no_misplaced_evidence_helpers,
     ensure_validation_commands_pass,
@@ -149,7 +153,7 @@ def _attempt_resume_session_id(
         request.worktree_path,
         config=request.config,
         agent_name=request.selected_agent,
-        issue_number=request.issue.number,
+        scope=AgentSessionScope(issue_number=request.issue.number),
     )
 
 
@@ -801,6 +805,14 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 failure_type=FailureType.SUCCESS,
                 detail="Agent produced commits and passed verification.",
                 recovered=attempt_index > 0,
+            )
+            mark_agent_session_complete(
+                worktree_path,
+                agent_name=selected_agent,
+                scope=AgentSessionScope(
+                    issue_number=issue.number,
+                    phase=PHASE_IMPLEMENTATION,
+                ),
             )
             return AgentCommitResult(final_verification_results, attempt_results, verifier_verdict)
 

@@ -110,8 +110,8 @@ class CommandResult:
             渲染后的结构化流，而不再嗅探命令行里的 agent 名。
         token_usage: 输出自报的 token 用量；协议未提供或解析不出时为
             ``None``（≠ 0，表示"无数据"而非"零消耗"）。
-        session_id: agent CLI 自报的会话 id（如 claude stream-json 首行
-            ``system/init`` 事件里的 ``session_id``），供崩溃对账后的会话续传
+        session_id: agent CLI 自报的会话 id（不同 CLI 可能来自 JSONL 事件或退出提示），
+            供崩溃对账后的会话续传
             回填给 ``--resume``。协议未解析到或未声明该能力时为 ``None``。
         reported_model: 执行器**自报**的实际模型名（如 claude stream-json
             ``system/init`` 事件里的 ``model``）。只表示"执行器报告了什么"，
@@ -515,6 +515,8 @@ class RunnerConfig:
         transient_retry_attempts: In-place retries granted to transient
             network/transport errors (Level 1 of the escalation ladder).
         transient_retry_delay_seconds: Backoff between transient retries.
+        timeout_resume_attempts: Additional same-session runs allowed after a
+            process timeout; the budget is persisted per session.
         max_concurrent_issues: Maximum Issues processed in parallel within a
             single daemon pass. ``1`` keeps the sequential path (zero
             regression); ``> 1`` enables the thread-pool parallel path.
@@ -548,6 +550,7 @@ class RunnerConfig:
     max_agent_switches: int = 2
     transient_retry_attempts: int = 2
     transient_retry_delay_seconds: int = 10
+    timeout_resume_attempts: int = 1
     timeout_seconds: int = 14400
     fix_agent_enabled: bool = True
     fix_timeout_seconds: int | None = None

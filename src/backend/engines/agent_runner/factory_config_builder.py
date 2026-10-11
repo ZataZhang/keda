@@ -280,6 +280,11 @@ def _merge_profile_settings(
             if profile_settings.tail_args is not None
             else (base_profile.tail_args if base_profile is not None else ())
         ),
+        resume_tail_args=tuple(
+            profile_settings.resume_tail_args
+            if profile_settings.resume_tail_args is not None
+            else (base_profile.resume_tail_args if base_profile is not None else ())
+        ),
         expand=tuple(
             profile_settings.expand
             if profile_settings.expand is not None
@@ -395,7 +400,7 @@ def _merge_agent_settings(
             if agent_settings.reasoning_effort_args is not None
             else (base_spec.reasoning_effort_args if base_spec else ())
         ),
-        # 会话续传能力声明：未声明时回落内置默认（claude 出厂即支持）。
+        # 会话续传能力声明：未声明时回落内置默认。
         supports_resume=(
             agent_settings.supports_resume
             if agent_settings.supports_resume is not None
@@ -577,6 +582,7 @@ def build_app_config_from_settings(
             max_agent_switches=runner_settings.max_agent_switches,
             transient_retry_attempts=runner_settings.transient_retry_attempts,
             transient_retry_delay_seconds=runner_settings.transient_retry_delay_seconds,
+            timeout_resume_attempts=runner_settings.timeout_resume_attempts,
             timeout_seconds=runner_settings.timeout_seconds,
             fix_agent_enabled=runner_settings.fix_agent_enabled,
             fix_timeout_seconds=runner_settings.fix_timeout_seconds,

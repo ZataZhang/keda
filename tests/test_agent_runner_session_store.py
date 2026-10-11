@@ -8,14 +8,18 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
     agent_session_record_path,
+    consume_agent_timeout_resume_attempt,
     load_agent_session_record,
+    mark_agent_session_complete,
     resolve_resumable_session_id,
     save_agent_session_record,
 )
@@ -27,7 +31,7 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
         tmp_path,
         agent_name="claude",
         session_id="sess-abc",
-        issue_number=7,
+        scope=AgentSessionScope(issue_number=7),
     )
     record = load_agent_session_record(tmp_path, "claude")
 
@@ -38,7 +42,15 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
         "sess-abc",
         7,
     )
+    assert record.resume_eligible is True
+    assert record.timeout_resume_count == 0
     assert record.updated_at
+
+
+def test_unspecified_phase_keeps_legacy_record_path(tmp_path: Path) -> None:
+    assert agent_session_record_path(tmp_path, "claude", phase="unspecified") == (
+        agent_session_record_path(tmp_path, "claude")
+    )
 
 
 def test_record_lives_under_gitignored_iar_dir(tmp_path: Path) -> None:
@@ -96,6 +108,8 @@ def test_load_keeps_optional_fields_out_of_shape(tmp_path: Path) -> None:
         None,
         "",
     )
+    assert record.resume_eligible is False
+    assert record.timeout_resume_count == 0
 
 
 class TestResolveResumableSessionId:
@@ -104,11 +118,17 @@ class TestResolveResumableSessionId:
     def test_declared_capability_with_matching_record(self, tmp_path: Path) -> None:
         """claude 出厂声明续传能力 → 记录命中即返回会话 id。"""
         save_agent_session_record(
-            tmp_path, agent_name="claude", session_id="sess-abc", issue_number=7
+            tmp_path,
+            agent_name="claude",
+            session_id="sess-abc",
+            scope=AgentSessionScope(issue_number=7),
         )
         assert (
             resolve_resumable_session_id(
-                tmp_path, config=AppConfig(), agent_name="claude", issue_number=7
+                tmp_path,
+                config=AppConfig(),
+                agent_name="claude",
+                scope=AgentSessionScope(issue_number=7),
             )
             == "sess-abc"
         )
@@ -116,11 +136,15 @@ class TestResolveResumableSessionId:
     def test_agent_without_capability_never_resumes(self, tmp_path: Path) -> None:
         """未声明 ``supports_resume`` 的 CLI 即便留有会话记录也不续传（无硬编码分支）。"""
         config = AppConfig()
-        unresumable_agent = next(
-            name for name, spec in config.agents.items() if not spec.supports_resume
+        unresumable_agent = "claude"
+        config.agents[unresumable_agent] = replace(
+            config.agents[unresumable_agent], supports_resume=False
         )
         save_agent_session_record(
-            tmp_path, agent_name=unresumable_agent, session_id="sess-abc", issue_number=7
+            tmp_path,
+            agent_name=unresumable_agent,
+            session_id="sess-abc",
+            scope=AgentSessionScope(issue_number=7),
         )
 
         assert (
@@ -128,7 +152,7 @@ class TestResolveResumableSessionId:
                 tmp_path,
                 config=config,
                 agent_name=unresumable_agent,
-                issue_number=7,
+                scope=AgentSessionScope(issue_number=7),
             )
             is None
         )
@@ -137,7 +161,10 @@ class TestResolveResumableSessionId:
         """没有记录（首轮 / 记录被清理）→ 全新会话，绝不报错。"""
         assert (
             resolve_resumable_session_id(
-                tmp_path, config=AppConfig(), agent_name="claude", issue_number=7
+                tmp_path,
+                config=AppConfig(),
+                agent_name="claude",
+                scope=AgentSessionScope(issue_number=7),
             )
             is None
         )
@@ -145,11 +172,17 @@ class TestResolveResumableSessionId:
     def test_record_of_other_issue_is_ignored(self, tmp_path: Path) -> None:
         """worktree 复用换 Issue 时，续错会话比不续更糟。"""
         save_agent_session_record(
-            tmp_path, agent_name="claude", session_id="sess-abc", issue_number=7
+            tmp_path,
+            agent_name="claude",
+            session_id="sess-abc",
+            scope=AgentSessionScope(issue_number=7),
         )
         assert (
             resolve_resumable_session_id(
-                tmp_path, config=AppConfig(), agent_name="claude", issue_number=8
+                tmp_path,
+                config=AppConfig(),
+                agent_name="claude",
+                scope=AgentSessionScope(issue_number=8),
             )
             is None
         )
@@ -159,16 +192,99 @@ class TestResolveResumableSessionId:
         save_agent_session_record(tmp_path, agent_name="claude", session_id="sess-abc")
         assert (
             resolve_resumable_session_id(
-                tmp_path, config=AppConfig(), agent_name="claude", issue_number=8
+                tmp_path,
+                config=AppConfig(),
+                agent_name="claude",
+                scope=AgentSessionScope(issue_number=8),
             )
             == "sess-abc"
         )
+
+    def test_completed_session_is_not_resumed(self, tmp_path: Path) -> None:
+        scope = AgentSessionScope(issue_number=7)
+        save_agent_session_record(
+            tmp_path,
+            agent_name="claude",
+            session_id="sess-complete",
+            scope=scope,
+        )
+        mark_agent_session_complete(tmp_path, agent_name="claude", scope=scope)
+
+        assert (
+            resolve_resumable_session_id(
+                tmp_path,
+                config=AppConfig(),
+                agent_name="claude",
+                scope=scope,
+            )
+            is None
+        )
+
+    def test_timeout_resume_budget_is_persisted_per_session(self, tmp_path: Path) -> None:
+        config = AppConfig()
+        scope = AgentSessionScope(issue_number=7)
+        save_agent_session_record(
+            tmp_path,
+            agent_name="claude",
+            session_id="sess-timeout",
+            scope=scope,
+        )
+
+        assert (
+            consume_agent_timeout_resume_attempt(
+                tmp_path,
+                config=config,
+                agent_name="claude",
+                session_id="sess-timeout",
+                scope=scope,
+                max_attempts=1,
+            )
+            == 1
+        )
+        record = load_agent_session_record(tmp_path, "claude")
+        assert record is not None
+        assert record.timeout_resume_count == 1
+        assert (
+            consume_agent_timeout_resume_attempt(
+                tmp_path,
+                config=config,
+                agent_name="claude",
+                session_id="sess-timeout",
+                scope=scope,
+                max_attempts=1,
+            )
+            is None
+        )
+
+    def test_timeout_resume_budget_does_not_transfer_to_new_session(self, tmp_path: Path) -> None:
+        scope = AgentSessionScope(issue_number=7)
+        save_agent_session_record(
+            tmp_path,
+            agent_name="claude",
+            session_id="sess-old",
+            scope=scope,
+            timeout_resume_count=1,
+        )
+        save_agent_session_record(
+            tmp_path,
+            agent_name="claude",
+            session_id="sess-new",
+            scope=scope,
+        )
+
+        record = load_agent_session_record(tmp_path, "claude")
+        assert record is not None
+        assert record.session_id == "sess-new"
+        assert record.timeout_resume_count == 0
 
     def test_unknown_agent_name_is_safe(self, tmp_path: Path) -> None:
         """注册表里没有的 agent 名 → 按"不可续传"处理。"""
         assert (
             resolve_resumable_session_id(
-                tmp_path, config=AppConfig(), agent_name="not-registered", issue_number=7
+                tmp_path,
+                config=AppConfig(),
+                agent_name="not-registered",
+                scope=AgentSessionScope(issue_number=7),
             )
             is None
         )

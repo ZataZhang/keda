@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import threading
 from collections.abc import Callable
 
 from backend.core.shared.interfaces.agent_output_protocol import (
@@ -21,9 +20,10 @@ from backend.core.shared.interfaces.agent_output_protocol import (
 )
 from backend.core.shared.interfaces.output_timestamps import format_timestamped_line
 from backend.core.shared.models.agent_runner import CommandResult
-from backend.core.shared.models.agent_spec import PROMPT_DELIVERY_STDIN
+from backend.engines.agent_runner.output_protocols.structured_json_lines import (
+    relay_structured_json_lines,
+)
 from backend.infrastructure.agent_stream_usage import StreamUsageCollector
-from backend.infrastructure.child_env import build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
 
 
@@ -32,54 +32,10 @@ class PiJsonLinesOutputProtocol:
 
     def relay(self, request: OutputRelayRequest) -> CommandResult:
         """启动 pi 子进程并把 JSON Lines 事件渲染成可读文本。"""
-        write_stdin = (
-            request.prompt_text is not None and request.prompt_delivery == PROMPT_DELIVERY_STDIN
-        )
-        process = subprocess.Popen(
-            list(request.argv),
-            cwd=request.cwd,
-            env=build_sanitized_child_env(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE if write_stdin else subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
-
-        def _write_stdin() -> None:
-            if process.stdin is not None:
-                try:
-                    process.stdin.write(request.prompt_text or "")
-                except BrokenPipeError:
-                    pass
-                process.stdin.close()
-
-        if write_stdin:
-            threading.Thread(target=_write_stdin, daemon=True).start()
-
-        stderr_thread = threading.Thread(
-            target=_pump_stderr, args=(process, request.display_sink), daemon=True
-        )
-        stderr_thread.start()
-        usage_collector = StreamUsageCollector()
-        stdout_text = _relay_events(
-            process,
-            collect_stdout=request.collect_stdout,
-            output_sink=request.output_sink,
-            usage_collector=usage_collector,
-        )
-        stderr_thread.join(timeout=5)
-        return_code = process.returncode if process.returncode is not None else -1
-        return CommandResult(
-            command=tuple(request.argv),
-            return_code=return_code,
-            stdout=stdout_text,
-            stderr="",
-            output_protocol=PI_JSON_LINES_PROTOCOL_ID,
-            token_usage=usage_collector.usage,
-            reported_model=usage_collector.reported_model,
+        return relay_structured_json_lines(
+            request,
+            protocol_id=PI_JSON_LINES_PROTOCOL_ID,
+            line_renderer=_render_line,
         )
 
 

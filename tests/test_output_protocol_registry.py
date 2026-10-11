@@ -1,4 +1,4 @@
-"""输出协议注册表测试（entry point 机制 + 内置三协议）。
+"""输出协议注册表测试（entry point 机制 + 内置协议）。
 
 覆盖：entry point 发现（内置协议与第三方插件走同一条路）、
 加载失败**不静默降级**（直接抛 :class:`OutputProtocolLoadError`）、
@@ -19,7 +19,13 @@ from backend.engines.agent_runner.output_protocols import (
     get_output_protocol_registry,
 )
 
-BUILTIN_PROTOCOL_IDS = ("plain", "claude-stream-json", "pi-json-lines")
+BUILTIN_PROTOCOL_IDS = (
+    "plain",
+    "claude-stream-json",
+    "pi-json-lines",
+    "codex-json-lines",
+    "opencode-json-lines",
+)
 
 
 class _StubEntryPoint:
@@ -73,13 +79,13 @@ def _fake_grouped_entry_points(
 
 
 def test_builtin_protocols_registered_via_entry_points() -> None:
-    """内置三协议经由 entry point group 注册（与第三方插件同一条路）。"""
+    """内置协议经由 entry point group 注册（与第三方插件同一条路）。"""
     registry = EntryPointProtocolRegistry()
     assert set(BUILTIN_PROTOCOL_IDS) <= set(registry.list_ids())
 
 
 def test_builtin_protocols_resolvable_and_relayable() -> None:
-    """三个内置协议都可解析，且实例带 relay 方法。"""
+    """所有内置协议都可解析，且实例带 relay 方法。"""
     registry = EntryPointProtocolRegistry()
     for protocol_id in BUILTIN_PROTOCOL_IDS:
         protocol = registry.resolve(protocol_id)

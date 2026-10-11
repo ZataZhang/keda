@@ -14,7 +14,10 @@ from backend.core.shared.models.agent_runner import (
     RepositoryRunContext,
 )
 from backend.core.use_cases.agent_runner_reclaim import format_claim_marker
-from backend.core.use_cases.agent_runner_session_store import save_agent_session_record
+from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    save_agent_session_record,
+)
 from backend.core.use_cases.run_agent_daemon import run_agent_daemon
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import worktree_site, worktree_site_response
@@ -163,7 +166,7 @@ def test_daemon_reconcile_enabled_resumes_recorded_session(
         worktree_site(tmp_path, 7),
         agent_name="claude",
         session_id="sess-abc",
-        issue_number=7,
+        scope=AgentSessionScope(issue_number=7),
     )
 
     _run_one_daemon_pass(tmp_path, github, reconcile_stale_attempts=True)

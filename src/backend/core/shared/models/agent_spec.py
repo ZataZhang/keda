@@ -10,7 +10,7 @@ argv 片段、提示词投递方式、输出协议）都沉淀为纯数据
 禁止再写死 agent 名。
 
 `argv` 组装语义见 :mod:`backend.core.use_cases.agent_invocation`：
-``[bin] + args(占位符替换) + expanders + tail_args``，再按
+``[bin] + args(占位符替换) + resume_args(若有) + expanders + tail_args``，再按
 ``prompt_delivery`` 决定提示词落在 argv 尾部、指定 flag 后还是 stdin。
 """
 
@@ -31,6 +31,12 @@ CLAUDE_STREAM_JSON_PROTOCOL_ID = "claude-stream-json"
 
 PI_JSON_LINES_PROTOCOL_ID = "pi-json-lines"
 """pi JSON Lines 事件流渲染协议 id。"""
+
+CODEX_JSON_LINES_PROTOCOL_ID = "codex-json-lines"
+"""Codex ``exec --json`` 事件流渲染协议 id。"""
+
+OPENCODE_JSON_LINES_PROTOCOL_ID = "opencode-json-lines"
+"""OpenCode ``run --format json`` 事件流渲染协议 id。"""
 
 # ---------------------------------------------------------------------------
 # 提示词投递方式与用途 profile 的闭集
@@ -86,6 +92,8 @@ class AgentProfileSpec:
             ``iar.agent_output_protocols`` entry point 注册表解析。
         tail_args: 追加在展开器之后、提示词之前的 argv 片段
             （如 codex 的 ``exec`` 子命令）。
+        resume_tail_args: 提供续传 id 时替换 ``tail_args`` 的 argv 片段。
+            用于 Codex 这类续传入口必须切换子命令的 CLI。
         expand: 展开器声明，格式 ``"<expander_name>:<flag>"``，语义是
             "对展开器返回的每个值各追加一次 ``<flag> <value>``
             （如 codex 的 ``git_writable_roots:--add-dir``）。
@@ -98,6 +106,7 @@ class AgentProfileSpec:
     prompt_delivery: str = PROMPT_DELIVERY_ARGV_TAIL
     output_protocol: str = PLAIN_PROTOCOL_ID
     tail_args: tuple[str, ...] = ()
+    resume_tail_args: tuple[str, ...] = ()
     expand: tuple[str, ...] = ()
     read_only: bool = False
 
@@ -165,6 +174,39 @@ class AgentSpec:
         return user_home_path / relative_home / "skills"
 
 
+def _plain_noninteractive_profile(*, read_only: bool) -> AgentProfileSpec:
+    """构造使用 plain 输出协议的通用非交互 profile。"""
+    return AgentProfileSpec(
+        args=("--dangerously-skip-permissions", "-p"),
+        prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+        output_protocol=PLAIN_PROTOCOL_ID,
+        read_only=read_only,
+    )
+
+
+def _claude_compatible_profiles() -> dict[str, AgentProfileSpec]:
+    """构造 Claude 与 CodeBuddy 共用的四种 profile。"""
+    streaming_profile = AgentProfileSpec(
+        args=(
+            "--dangerously-skip-permissions",
+            "--verbose",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+        ),
+        prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+        output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+        read_only=False,
+    )
+    return {
+        AGENT_PROFILE_RUN: streaming_profile,
+        AGENT_PROFILE_DELIBERATE: streaming_profile,
+        AGENT_PROFILE_GENERATE: _plain_noninteractive_profile(read_only=True),
+        AGENT_PROFILE_REPL: _plain_noninteractive_profile(read_only=False),
+    }
+
+
 # ---------------------------------------------------------------------------
 # 内置默认（唯一来源；config.toml / .kedacode.toml 的 [agent_runner.agents.*] 覆盖它）
 # ---------------------------------------------------------------------------
@@ -194,6 +236,8 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # 模型选择：`codex -m/--model <id>`（本机 --help 确认）。推理档需
         # `-c model_reasoning_effort=...`，未核实，保持为空 → 带推理档的绑定 fail-fast。
         model_args=("--model", "{model}"),
+        # Codex 续传用 `exec resume <session_id>` 子命令，见 profile.resume_tail_args。
+        supports_resume=True,
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=(
@@ -207,9 +251,10 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                     "never",
                 ),
                 expand=("git_writable_roots:--add-dir",),
-                tail_args=("exec",),
+                tail_args=("exec", "--json"),
+                resume_tail_args=("exec", "resume", "--json", "{session_id}"),
                 prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
+                output_protocol=CODEX_JSON_LINES_PROTOCOL_ID,
                 read_only=False,
             ),
             AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
@@ -221,9 +266,10 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                     "--ask-for-approval",
                     "never",
                 ),
-                tail_args=("exec",),
+                tail_args=("exec", "--json"),
+                resume_tail_args=("exec", "resume", "--json", "{session_id}"),
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
-                output_protocol=PLAIN_PROTOCOL_ID,
+                output_protocol=CODEX_JSON_LINES_PROTOCOL_ID,
                 read_only=True,
             ),
             AGENT_PROFILE_GENERATE: AgentProfileSpec(
@@ -235,16 +281,18 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                     "--ask-for-approval",
                     "never",
                 ),
-                tail_args=("exec",),
+                tail_args=("exec", "--json"),
+                resume_tail_args=("exec", "resume", "--json", "{session_id}"),
                 prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
+                output_protocol=CODEX_JSON_LINES_PROTOCOL_ID,
                 read_only=True,
             ),
             AGENT_PROFILE_REPL: AgentProfileSpec(
                 args=("--cd", "{cwd}"),
-                tail_args=("exec",),
+                tail_args=("exec", "--json"),
+                resume_tail_args=("exec", "resume", "--json", "{session_id}"),
                 prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
+                output_protocol=CODEX_JSON_LINES_PROTOCOL_ID,
                 read_only=False,
             ),
         },
@@ -276,46 +324,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # session id 来自 stream-json 首行 system/init 事件。
         supports_resume=True,
         resume_args=("--resume", "{session_id}"),
-        profiles={
-            AGENT_PROFILE_RUN: AgentProfileSpec(
-                args=(
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                    "-p",
-                    "--output-format",
-                    "stream-json",
-                    "--include-partial-messages",
-                ),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
-                read_only=False,
-            ),
-            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
-                args=(
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                    "-p",
-                    "--output-format",
-                    "stream-json",
-                    "--include-partial-messages",
-                ),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
-                read_only=False,
-            ),
-            AGENT_PROFILE_GENERATE: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=True,
-            ),
-            AGENT_PROFILE_REPL: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=False,
-            ),
-        },
+        profiles=_claude_compatible_profiles(),
     ),
     "kimi": AgentSpec(
         bin="kimi",
@@ -334,6 +343,9 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         project_skills_dir=".kimi-code/skills",
         # 模型选择：`kimi -m/--model <alias>`（本机 --help 确认）。推理档 flag 未核实，保持为空。
         model_args=("--model", "{model}"),
+        # `kimi --session <id>` 与隐藏别名 `--resume <id>` 按 CLI 文档续传。
+        supports_resume=True,
+        resume_args=("--session", "{session_id}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=(),
@@ -376,6 +388,8 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # 模型选择 `pi --model <pattern>` 与思考档 `pi --thinking <level>`（本机 --help 确认）。
         model_args=("--model", "{model}"),
         reasoning_effort_args=("--thinking", "{effort}"),
+        supports_resume=True,
+        resume_args=("--session", "{session_id}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=("--approve", "--mode", "json"),
@@ -438,46 +452,9 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # 与推理档 `--settings '{"reasoningEffort":"<档>"}'`。
         model_args=("--model", "{model}"),
         reasoning_effort_args=("--settings", '{"reasoningEffort":"{effort}"}'),
-        profiles={
-            AGENT_PROFILE_RUN: AgentProfileSpec(
-                args=(
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                    "-p",
-                    "--output-format",
-                    "stream-json",
-                    "--include-partial-messages",
-                ),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
-                read_only=False,
-            ),
-            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
-                args=(
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                    "-p",
-                    "--output-format",
-                    "stream-json",
-                    "--include-partial-messages",
-                ),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
-                read_only=False,
-            ),
-            AGENT_PROFILE_GENERATE: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=True,
-            ),
-            AGENT_PROFILE_REPL: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=False,
-            ),
-        },
+        supports_resume=True,
+        resume_args=("--resume", "{session_id}"),
+        profiles=_claude_compatible_profiles(),
     ),
     # Qoder CLI CN（@qodercn-ai/qoderclicn）。两点与 claude 不同，均以本机
     # --help 与包内 schema 实测为准：
@@ -511,6 +488,8 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         # auto / none / low / medium / high / xhigh / max / ultracode。
         model_args=("--model", "{model}"),
         reasoning_effort_args=("--reasoning-effort", "{effort}"),
+        supports_resume=True,
+        resume_args=("--resume", "{session_id}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=("--dangerously-skip-permissions", "-p", "-o", "stream-json"),
@@ -524,23 +503,12 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=False,
             ),
-            AGENT_PROFILE_GENERATE: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=True,
-            ),
-            AGENT_PROFILE_REPL: AgentProfileSpec(
-                args=("--dangerously-skip-permissions", "-p"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
-                read_only=False,
-            ),
+            AGENT_PROFILE_GENERATE: _plain_noninteractive_profile(read_only=True),
+            AGENT_PROFILE_REPL: _plain_noninteractive_profile(read_only=False),
         },
     ),
-    # OpenCode。非交互入口是 ``run`` 子命令（消息是位置参数），输出走
-    # ``--format default``（逐行文本）即 plain；``--format json`` 是另一套事件
-    # 形状，本项目没有对应协议，故不启用。**不声明 generate**：它没有任何
+    # OpenCode。非交互入口是 ``run`` 子命令（消息是位置参数），JSON 事件流由
+    # 内置协议渲染并提取 sessionID。**不声明 generate**：它没有任何
     # 沙箱 / 只读开关，声明 read_only 会是无法验证的假声明，只读决策入口
     # （planner / kc ask）需要该字段做门禁，故宁可缺用途也不做假声明。
     # 配置在 ~/.config/opencode/（XDG 路径，容器认证导入会派生为 config/opencode）。
@@ -560,23 +528,25 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         ),
         # 模型选择：`opencode -m/--model provider/model`（本机 --help 确认）。推理档 flag 未核实。
         model_args=("--model", "{model}"),
+        supports_resume=True,
+        resume_args=("--session", "{session_id}"),
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
-                args=("run", "--dangerously-skip-permissions"),
+                args=("run", "--dangerously-skip-permissions", "--format", "json"),
                 prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
+                output_protocol=OPENCODE_JSON_LINES_PROTOCOL_ID,
                 read_only=False,
             ),
             AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
-                args=("run", "--dangerously-skip-permissions"),
+                args=("run", "--dangerously-skip-permissions", "--format", "json"),
                 prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
+                output_protocol=OPENCODE_JSON_LINES_PROTOCOL_ID,
                 read_only=False,
             ),
             AGENT_PROFILE_REPL: AgentProfileSpec(
-                args=("run", "--dangerously-skip-permissions"),
+                args=("run", "--dangerously-skip-permissions", "--format", "json"),
                 prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
-                output_protocol=PLAIN_PROTOCOL_ID,
+                output_protocol=OPENCODE_JSON_LINES_PROTOCOL_ID,
                 read_only=False,
             ),
         },
@@ -597,6 +567,8 @@ __all__ = [
     "AGENT_PROFILE_RUN",
     "BUILTIN_AGENT_SPECS",
     "CLAUDE_STREAM_JSON_PROTOCOL_ID",
+    "CODEX_JSON_LINES_PROTOCOL_ID",
+    "OPENCODE_JSON_LINES_PROTOCOL_ID",
     "PI_JSON_LINES_PROTOCOL_ID",
     "PLAIN_PROTOCOL_ID",
     "AgentProfileSpec",

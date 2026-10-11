@@ -143,7 +143,13 @@ def test_doctor_protocols_lists_registered_ids(
     exit_code = run_agent_doctor_command(_make_context(protocols=True))
     assert exit_code == 0
     listed_ids = capsys.readouterr().out.split()
-    assert {"plain", "claude-stream-json", "pi-json-lines"} <= set(listed_ids)
+    assert {
+        "plain",
+        "claude-stream-json",
+        "pi-json-lines",
+        "codex-json-lines",
+        "opencode-json-lines",
+    } <= set(listed_ids)
 
 
 # ---------------------------------------------------------------------------

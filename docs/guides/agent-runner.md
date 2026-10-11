@@ -343,12 +343,29 @@ Issue / 主机 / PID / 中断时间 / agent / 处置结论（不含 seq）。同
 是在"comment 已写、label 未改回"之间被打断（写序固定为**先 comment 后 label**），重放会补齐那次缺失
 的 label 写回而不再评论一次，因此不存在永久半完成态，也不会并发领取同一 worktree。
 
-会话续传的实现分工：session id 由 agent 输出协议解析（`engines/agent_runner/output_protocols/claude_stream_json.py`），
+会话续传的实现分工：session id 由各 agent 的输出形态解析（Claude、CodeBuddy、Qoder 复用
+`claude-stream-json`；Codex、OpenCode、pi 使用各自的 JSONL 协议；Kimi 解析 CLI 退出时打印的 resume hint），
 core 侧 `agent_runner_session_store.py` 以 tmp + `os.replace` 原子写入 worktree 局部记录
-`.iar/agent-runner/sessions/<agent>.json`；recovery 轮次经 `agent_spec` 的声明式
-`supports_resume` / `resume_args` 模板拼出续传命令行（编排层不硬编码任何 CLI 的参数形态）。
+`.iar/agent-runner/sessions/<agent>.json`（implementation；为兼容旧记录保留），其他阶段使用
+`<agent>.<phase>.json`，例如 pre-PR review 的 `<agent>.review.json`，避免 review 覆盖实现
+recovery 上下文；缺少阶段记录时会回退读取旧版未分阶段记录。记录包含续传资格和该 session
+已消耗的超时续跑轮数：失败/中断后的未完成执行链可以续传，implementation 或 review 完整成功后
+会标记为不可自动续传，避免下一次新执行接上已完成的旧会话。旧记录没有状态时按不可续传处理。
+恢复领取、recovery 轮次和 pre-PR review 的 `run` / `deliberate` 用途经 `agent_spec` 的声明式
+`supports_resume` / `resume_args` 模板拼出续传命令行。Codex 用 profile 级 `resume_tail_args`
+将 `exec` 替换为 `exec resume <session_id>`；编排层不硬编码任何 CLI 的参数形态。
 记录缺失或 agent 未声明能力时**静默降级为全新会话**，降级发生在同一次 attempt 内，不额外消耗
 recovery 轮次。
+
+七个内置 agent 都声明了 CLI 续传参数：Codex、Claude、Kimi、pi、CodeBuddy、Qoder 与 OpenCode。
+会话 id 仍取决于 CLI 是否在被 runner 中断前输出了可解析的 id；尤其 Kimi 当前通过退出提示提供 id，
+因此被强制终止的超时轮次可能没有可续传记录，届时按既有策略重新开新会话。
+
+执行器进程因墙钟或 inactivity timeout 被杀时，runner 默认允许同一个 session 额外续跑 1 轮；
+这一轮沿用当前阶段原有的超时时限，并在同一 session 里发送继续当前工作区未完成步骤的提示。
+轮数由 `[agent_runner.runner].timeout_resume_attempts` 配置，按 session 持久计数；设为 `0` 可关闭，
+非超时错误不会消耗该预算。预算耗尽后，现有 recovery/fallback 流程仍可继续，但会开新 session，
+不再反复给已超时的 session 加时间。没有可解析 session id 或 agent 未启用续传时，直接走既有失败恢复。
 
 ```toml
 [agent_runner.daemon]
@@ -588,10 +605,12 @@ recovery_retry_delay_seconds = 30
 agent_fallback_order = ["qoder", "codex", "claude"]
 # 最多切换 agent 的次数（order=[a,b,c] 且 max_agent_switches=2 时最多尝试 3 个 agent）
 max_agent_switches = 2
-# 瞬时网络错误（socket 断开 / 5xx / 超时）的就地重试次数与退避秒数
+# 瞬时网络/传输错误（socket 断开 / 5xx / 网关超时）的就地重试次数与退避秒数
 transient_retry_attempts = 2
 transient_retry_delay_seconds = 10
-# 单次 agent 执行的 wall-clock 超时（秒）；超时会 kill 子进程并进入 recovery
+# agent 进程超时后，同一 session 额外续跑的轮数；按 session 计，默认再给一轮
+timeout_resume_attempts = 1
+# 单次 agent 执行的 wall-clock 时限（秒）；超时后优先按 timeout_resume_attempts 续跑
 timeout_seconds = 14400
 # 是否启用 Fix Agent 层；false 时 staged 验证失败直接升级完整 Recovery Agent
 fix_agent_enabled = true
@@ -659,7 +678,7 @@ Agent command failed for Issue #19; asking agent to recover (1/5).
    - 只有 Fix Agent 失败后，runner 才会启动完整的 Recovery Agent，基于更完整的上下文重规划实现。
    - Recovery Agent 的 prompt 包含格式化后的 failure summary，以及原始 verification 失败输出（命令、exit code、stdout/stderr），避免重复踩同样的坑。
    - Recovery Agent 使用 `recovery_timeout_seconds` 作为超时预算，未配置时回退到 `timeout_seconds`。
-   - 如果该 agent 在 `agent_spec` 里声明了 `supports_resume`，这一轮**优先续传原会话**（`--resume <session_id>`，session id 来自 worktree 局部记录）而不是把失败摘要塞进一个全新 prompt；没有会话记录或未声明能力时静默降级为全新会话。详见「崩溃对账与 Agent 会话续传」。
+   - 如果该 agent 在 `agent_spec` 里声明了 `supports_resume`，且 worktree 记录仍标记为未完成，这一轮**优先续传原会话**（`--resume <session_id>`，session id 来自 worktree 局部记录）而不是把失败摘要塞进一个全新 prompt；完整成功的 session 不会被下一次新执行复用。详见「崩溃对账与 Agent 会话续传」。
 
 这一分层修复的目的是把大量常见的 lint/类型错误（如 agent 遗漏 import、简单单测失败）用更短的超时和更聚焦的 prompt 解决，避免动辄调用一次完整的 recovery agent。
 
@@ -747,7 +766,7 @@ recovery 预算耗尽不是终点，而是**交班点**。此前只有同一个 
 
 ### 非 claude agent 的实时输出（PTY）
 
-`claude` 用 `--output-format stream-json` 显式吐增量事件，所以一直能实时看到进度。`kimi` / `codex` 没有这种流式协议，而且很多 CLI 在发现 stdout 是管道（非终端）时会把输出从行缓冲切成**块缓冲**——结果就是运行中只看到几个点、最后才一次性打印，期间只有 watchdog 的 `still running after Ns` 心跳。
+`claude`、Codex 与 OpenCode 通过结构化 JSONL 输出事件；pi 也使用自己的 JSONL 事件流。Kimi 与 plain profile 仍可能在 stdout 是管道时把输出从行缓冲切成**块缓冲**，所以 runner 对这些路径使用伪终端（PTY）显示实时进度。
 
 为此 runner 在跑**非 claude** agent 时改用**伪终端（PTY）**：让子进程以为 stdout 是终端，从而恢复行缓冲、实时吐出进度。stdout/stderr 合并到同一 PTY（顺序自然、无双管道死锁），随后接入与 claude 相同的输出通道——并行时进入每个 Issue 各自的面板与日志文件（见下文「并行处理 Issue」）。`still running after Ns` 仍是正常的存活心跳，不是报错。
 
@@ -1033,7 +1052,7 @@ uv run kc workflow install preview --force
 
 ## 子进程环境净化（child env sanitize）
 
-凡经 runner **执行层**派发的子进程都不再原样继承父环境：`SubprocessRunner.run()` 的默认档（agent 内容生成的 plain 路径、git/gh/pytest 等工具命令、验证命令）与 agent 流式派发点（Claude 流式路径、PTY 路径、`plain` / `pi-json-lines` 协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传；`env=None` 不再等于「全量继承 `os.environ`」。console 托管 runner 子进程（`process_supervisor.spawn`）与 `iar container up` 传给 docker compose 的环境（`container_ops._build_compose_env`）同样以净化档为基底，会话私有变量不会沿进程谱系下传。
+凡经 runner **执行层**派发的子进程都不再原样继承父环境：`SubprocessRunner.run()` 的默认档（agent 内容生成的 plain 路径、git/gh/pytest 等工具命令、验证命令）与 agent 流式派发点（结构化 JSONL 协议、PTY 路径、plain 输出协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传；`env=None` 不再等于「全量继承 `os.environ`」。console 托管 runner 子进程（`process_supervisor.spawn`）与 `iar container up` 传给 docker compose 的环境（`container_ops._build_compose_env`）同样以净化档为基底，会话私有变量不会沿进程谱系下传。
 
 - 名单（8 个，硬编码于 `src/backend/infrastructure/child_env.py`）：`SERVER__PORT` 与 `CODEBUDDY_SERVICE_PROXY_URL`、`CODEBUDDY_SESSION_ID`、`CODEBUDDY_CONVERSATION_REQUEST_ID`、`CODEBUDDY_ROOT_REQUEST_ID`、`CODEBUDDY_CONVERSATION_MESSAGE_ID`、`CODEBUDDY_PROJECT_DIR`、`CODEBUDDY_CURRENT_MODEL_ID`
 - 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，最终被 inactivity/timeout watchdog 杀掉，见 2026-09-28 Issue #156 事故）
@@ -1744,7 +1763,7 @@ agent/ready
 2. Runner 立即调用 `push_changes()` 把当前 feature branch 推送到配置 remote（push 不再被 review 阻塞）
 3. Runner 构建 review packet（Issue、PRD、diff、changed paths、verification results、AI standards、review workflow）
 4. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill** 并把 skill 输出的 findings 写进响应的 `findings` JSON 数组；review packet 默认模板（`agent_review.DEFAULT_REVIEW_PROMPT_TEMPLATE`）会显式提示 reviewer 这一行为，并提供 findings schema（`category` / `severity` / `file` / `line` / `title` / `description` / `recommendation`）。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖该模板，未配置时回退到代码默认。
-5. 打开新的 AI session 执行 review，并使用 `[agent_runner.pre_pr_review].timeout_seconds` 限制最长运行时间
+5. 若 reviewer 在当前 worktree / Issue 下已有可续传 session id，就接着该会话执行 review；没有记录时创建新会话。调用使用 `[agent_runner.pre_pr_review].timeout_seconds` 限制最长运行时间
 6. Reviewer 可直接修改 worktree；修改后写入 `.agent-runner/commit-request.json`
 7. Runner 通过 commit proxy 提交 reviewer 修改、重新运行 `verification_commands` 并立即 `push_changes()` 把修复推送到远程分支
 8. Runner 写 Issue comment `Pre-PR Review Result`（含 findings 表格）
@@ -2289,15 +2308,16 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 在把 Issue 标成 `agent/failed` 之前，runner 会按错误性质走一条分级阶梯，尽量自动恢复，而不是一遇错就失败：
 
 1. **瞬时网络/参数错误就地重试（Level 1）**：socket 断开（如 `The socket connection was closed unexpectedly`）、连接重置、网关超时、5xx，以及 provider 返回的 `400 invalid params` / `InvalidParameter` / `BadRequest` / `input should be a valid dictionary` 等临时性参数错误，会用**同一个 agent**就地重试 `transient_retry_attempts` 次（间隔 `transient_retry_delay_seconds` 秒）。实现阶段与 Pre-PR Review 阶段共用这套重试，因此一次 review 抖动或临时参数解析失败不再直接判负。
-2. **同 agent recovery**：验证失败、未产出 commit、其他可修复的请求级错误走既有的 recovery 循环——带着失败摘要重新调用同一个 agent 修复，最多 `max_recovery_attempts` 轮。
-3. **跨 agent fallback（Level 2）**：当某 agent **耗尽 recovery 预算仍失败**，或命中**供应商容量限制**（429 usage limit、529 overloaded——这类同一供应商重试也只会继续失败），runner 会切换到 `agent_fallback_order` 里的下一个 agent，在已落盘的进度上接力。切换次数受 `max_agent_switches` 封顶。配置中列出但本机未安装的 agent（命令不存在）会被自动跳过。
-4. **不切换的情况**：安全违规（禁改路径、分支异常）等不可恢复错误换谁都失败，runner 直接停止、不浪费配额。
+2. **执行器超时续跑**：agent 子进程被墙钟或 inactivity timeout 杀掉，且 runner 收到了该 session id 时，默认在同一会话增加一个当前阶段时限的执行窗口。`timeout_resume_attempts` 限制同一 session 的额外超时续跑轮数；其他错误不消耗此预算。
+3. **同 agent recovery**：验证失败、未产出 commit、其他可修复的请求级错误走既有的 recovery 循环——带着失败摘要重新调用同一个 agent 修复，最多 `max_recovery_attempts` 轮。超时续跑预算耗尽后，recovery 可继续，但会从新 session 开始。
+4. **跨 agent fallback（Level 2）**：当某 agent **耗尽 recovery 预算仍失败**，或命中**供应商容量限制**（429 usage limit、529 overloaded——这类同一供应商重试也只会继续失败），runner 会切换到 `agent_fallback_order` 里的下一个 agent，在已落盘的进度上接力。切换次数受 `max_agent_switches` 封顶。配置中列出但本机未安装的 agent（命令不存在）会被自动跳过。
+5. **不切换的情况**：安全违规（禁改路径、分支异常）等不可恢复错误换谁都失败，runner 直接停止、不浪费配额。
 
 `agent_fallback_order` 默认包含 `["claude", "kimi", "codex"]`，主 agent 失败后会依次尝试链中的下一个可用 agent。未安装的 agent（命令不存在）会被自动跳过。将 `agent_fallback_order` 设为空列表即可关闭跨 agent fallback，回退到单 agent 行为。所有尝试（含跨 agent）都会汇总进失败评论的 **Attempt History** 表，表格包含 **Started (UTC)**（本轮开始时间）、**Agent**（执行 agent）、**Duration**（耗时）和 **Detail**（失败摘要）列；同时每轮 attempt 会实时写入本地 SQLite 运行历史库的 `attempt_records` 表，并更新 GitHub Issue 上一条带 `<!-- iar-attempt-history -->` marker 的增量评论。该实时评论按 `(repo_id, issue_number)` 从 SQLite 轨迹整表重渲染，因此跨 agent fallback 和重新 claim 都会**追加**到同一张表，不会把上一个 agent 的历史行覆盖掉；轨迹超过 50 行时只保留最近 50 行，并在表格上方注明 `Older attempts omitted`。
 
-配置示例见上文 `[agent_runner.runner]`：`agent_fallback_order` / `max_agent_switches` / `transient_retry_attempts` / `transient_retry_delay_seconds`。
+配置示例见上文 `[agent_runner.runner]`：`agent_fallback_order` / `max_agent_switches` / `transient_retry_attempts` / `transient_retry_delay_seconds` / `timeout_resume_attempts`。
 
-阶梯的每一级都是**一次新的真实进程调用**，因此在 per-Issue 日志里各自留下一对 `[iar-invocation-start]` / `[iar-invocation-end]` 标记，并用 `retry_of=` + `retry_reason=`（`transient_failure` / `executor_fallback` / `resume_not_started`）串成链；`executor=` 记的是**实际执行**的那个 agent，所以"到底回退到谁了"不必再从 Attempt History 表反推。字段读法见「Agent 调用记录与停滞诊断（Invocation Tracing）」。
+阶梯的每一级都是**一次新的真实进程调用**，因此在 per-Issue 日志里各自留下一对 `[iar-invocation-start]` / `[iar-invocation-end]` 标记，并用 `retry_of=` + `retry_reason=`（`transient_failure` / `timeout_resume` / `executor_fallback` / `resume_not_started`）串成链；`executor=` 记的是**实际执行**的那个 agent，所以"到底回退到谁了"不必再从 Attempt History 表反推。字段读法见「Agent 调用记录与停滞诊断（Invocation Tracing）」。
 
 ### 并行处理 Issue（`kc daemon --concurrency`）
 
@@ -3620,6 +3640,7 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 | `retry_reason` | 触发场景 |
 |---|---|
 | `transient_failure` | 判定为瞬态错误后的原地重试 |
+| `timeout_resume` | agent 进程超时后续跑同一个 session |
 | `resume_not_started` | 请求了会话续传但 argv 组装不出续传形态，退回全新会话重跑 |
 | `executor_fallback` | 换执行器（`agent_fallback_order` 前进、reviewer / supervisor 候选前进） |
 
@@ -4965,6 +4986,8 @@ agent 级字段：
 | `auth_include` | 相对 `auth_home` 的顶层条目 | 容器认证导入白名单 |
 | `auth_exclude` | 相对 `auth_home` 的子路径 | 容器认证导入排除项（运行时状态、缓存等） |
 | `project_skills_dir` | 相对仓库根的目录 | 项目级 skills 目录 |
+| `supports_resume` | bool | 是否声明 CLI 支持按会话 id 续传 |
+| `resume_args` | 字面量 argv 模板 | 通用续传参数；支持 `{session_id}` 占位符 |
 
 profile 级字段（`profiles.<profile>`，用途为 4 种闭集：`run` / `deliberate` / `generate` / `repl`）：
 
@@ -4973,12 +4996,13 @@ profile 级字段（`profiles.<profile>`，用途为 4 种闭集：`run` / `deli
 | `args` | 字面量 argv 片段 | 支持 `{cwd}` / `{worktree}` / `{prompt}` 占位符；**不做 shell 展开** |
 | `prompt_flag` | 参数名 | 仅 `prompt_delivery = "flag"` 时使用（如 kimi 的 `--prompt`） |
 | `prompt_delivery` | `argv_tail` / `flag` / `stdin` | 提示词投递方式 |
-| `output_protocol` | 已注册协议 id（默认 `plain`） | 经 `kedacode.agent_output_protocols` entry point 注册表解析；内置 `plain` / `claude-stream-json` / `pi-json-lines` |
-| `tail_args` | 字面量 argv 片段 | 追加在展开器之后、提示词之前（如 codex 的 `["exec"]`） |
+| `output_protocol` | 已注册协议 id（默认 `plain`） | 经 `kedacode.agent_output_protocols` entry point 注册表解析；内置 `plain` / `claude-stream-json` / `pi-json-lines` / `codex-json-lines` / `opencode-json-lines` |
+| `tail_args` | 字面量 argv 片段 | 追加在展开器之后、提示词之前（如 codex 的 `["exec", "--json"]`） |
+| `resume_tail_args` | 字面量 argv 模板 | 有续传 id 时替换 `tail_args`；适用于 Codex 这类需要切换续传子命令的 CLI，支持 `{session_id}` |
 | `expand` | `"<展开器>:<flag>"` | 运行期参数注入；展开器为**闭集**（当前仅 `git_writable_roots`），如 codex 的 `"git_writable_roots:--add-dir"` |
 | `read_only` | bool，默认 `false` | 是否为可验证的只读调用；只读决策入口（planner / `kc ask`）以此做 fail-fast 门禁 |
 
-argv 组装顺序：`[bin] + args(占位符替换) + expanders + tail_args`，再按 `prompt_delivery` 决定提示词落在 argv 尾部、指定 flag 后还是 stdin。字段的三层合并语义与 shell 展开边界详见 [配置说明](configuration.md#agent-runner-agent-registry)。
+argv 组装顺序：`[bin] + args(占位符替换) + resume_args(若有) + expanders + tail_args`，再按 `prompt_delivery` 决定提示词落在 argv 尾部、指定 flag 后还是 stdin；当 profile 声明 `resume_tail_args` 且本次确实续传时，它替换 `tail_args`。字段的三层合并语义与 shell 展开边界详见 [配置说明](configuration.md#agent-runner-agent-registry)。
 
 ### 自检流程（`kc agent doctor`）
 
@@ -5014,6 +5038,8 @@ auth_home = "~/.pi/agent"
 auth_include = ["auth.json", "settings.json", "models.json", "skills"]
 auth_exclude = ["sessions", "pi-crash.log", "models-store.json"]
 project_skills_dir = ".pi/skills"
+supports_resume = true
+resume_args = ["--session", "{session_id}"]
 
 [agent_runner.agents.pi.profiles.run]
 args = ["--approve", "--mode", "json"]
@@ -5069,9 +5095,9 @@ pi · run
 
 | agent | bin | 形态要点 |
 |---|---|---|
-| `codebuddy` | `codebuddy` | 与 `claude` 完全同构（`-p` + `--output-format stream-json` + `--include-partial-messages`），四用途齐备，`run` / `deliberate` 复用内置 `claude-stream-json` 协议。配置与凭据在 `~/.codebuddy/`。 |
-| `qoder` | **`qodercn`** | 注册名与可执行名**不一致**：`qoder` 只是本机 shell 别名，`bin` 必须写 `qodercn`，否则 doctor 报 executable not found。它**没有** `--verbose` / `--include-partial-messages`；`run` 用 `-o stream-json`（包内 schema 与 claude 同形）走 `claude-stream-json`；`deliberate` 刻意保留 `-p` 并改用 `stdin` + `plain` —— 流式协议会把 `-p` 从 argv 剥离再经 stdin 投递，而 qoder 在缺 `-p` 时的行为未经验证，保留 `-p` 既不依赖未验证行为，也避免长 transcript 撑爆 argv。配置在 `~/.qoder-cn/`。 |
-| `opencode` | `opencode` | 非交互入口是 `run` 子命令（消息为位置参数）。**只声明 `run` / `deliberate` / `repl` 三个用途，刻意没有 `generate`**：它没有任何沙箱或只读开关，而 planner / `kc ask` 依赖 `generate` 用途上的只读声明做 fail-fast 门禁，声明一个无法验证的"只读"会让门禁形同虚设。需要 planner 时请选别的 agent。输出用 `--format default`（逐行文本）走 `plain`；`--format json` 是另一套事件形状，本项目没有对应协议。配置在 `~/.config/opencode/`（XDG 路径）。 |
+| `codebuddy` | `codebuddy` | 与 `claude` 完全同构（`-p` + `--output-format stream-json` + `--include-partial-messages`），四用途齐备，`run` / `deliberate` 复用内置 `claude-stream-json` 协议，并声明 `--resume <id>`。配置与凭据在 `~/.codebuddy/`。 |
+| `qoder` | **`qodercn`** | 注册名与可执行名**不一致**：`qoder` 只是本机 shell 别名，`bin` 必须写 `qodercn`，否则 doctor 报 executable not found。它**没有** `--verbose` / `--include-partial-messages`；`run` 用 `-o stream-json`（包内 schema 与 claude 同形）走 `claude-stream-json`；`deliberate` 刻意保留 `-p` 并改用 `stdin` + `plain`。续传参数为 `--resume <id>`。配置在 `~/.qoder-cn/`。 |
+| `opencode` | `opencode` | 非交互入口是 `run` 子命令（消息为位置参数）。**只声明 `run` / `deliberate` / `repl` 三个用途，刻意没有 `generate`**：它没有任何沙箱或只读开关，而 planner / `kc ask` 依赖 `generate` 用途上的只读声明做 fail-fast 门禁。输出用 `--format json` 走内置 `opencode-json-lines` 并提取 sessionID，续传参数为 `--session <id>`。配置在 `~/.config/opencode/`（XDG 路径）。 |
 
 > 三者的容器支持不在本轮范围内：runner 镜像目前只预装 claude / codex / kimi，容器里选中它们会在启动子进程时报可执行文件不存在。
 

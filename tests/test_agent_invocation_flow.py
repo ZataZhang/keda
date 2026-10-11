@@ -14,15 +14,25 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
+from backend.core.shared.interfaces.agent_runner import (
+    AGENT_SESSION_ID_ATTR_NAME,
+    IProcessRunner,
+)
 from backend.core.shared.interfaces.runner_console import InvocationEventRecord
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
 from backend.core.shared.models.agent_model_preset import ModelSelection
-from backend.core.shared.models.agent_runner import AppConfig, RunnerConfig
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+    CommandResult,
+    RunnerConfig,
+)
 from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_DELIBERATE,
     AGENT_PROFILE_RUN,
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
     PLAIN_PROTOCOL_ID,
@@ -50,6 +60,7 @@ from backend.core.use_cases.agent_invocation_tracing import (
     build_invocation_trace_context,
     resolve_invocation_log_path,
 )
+from backend.core.use_cases.agent_runner_session_store import load_agent_session_record
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
     issue_output_routing,
@@ -125,7 +136,7 @@ def _silent_script_body() -> str:
 
 
 def _config_with_fake_agent(script_path: str, *, output_protocol: str) -> AppConfig:
-    """把内置 claude 的 run profile 指向假脚本。
+    """把内置 claude 的 run / deliberate profile 指向假脚本。
 
     ``model_args`` / ``reasoning_effort_args`` 必须声明：模型绑定命中未声明模板的
     agent 时 ``build_agent_invocation`` 会 fail-fast，那样就测不到"请求模型"这条
@@ -137,6 +148,8 @@ def _config_with_fake_agent(script_path: str, *, output_protocol: str) -> AppCon
         label=claude_spec.label,
         label_color=claude_spec.label_color,
         label_description=claude_spec.label_description,
+        supports_resume=True,
+        resume_args=claude_spec.resume_args,
         model_args=("--model", "{model}"),
         reasoning_effort_args=("--reasoning-effort", "{effort}"),
         profiles={
@@ -144,7 +157,13 @@ def _config_with_fake_agent(script_path: str, *, output_protocol: str) -> AppCon
                 args=("run", "python", script_path),
                 prompt_delivery="argv_tail",
                 output_protocol=output_protocol,
-            )
+            ),
+            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
+                args=("run", "python", script_path),
+                prompt_delivery="argv_tail",
+                output_protocol=output_protocol,
+                read_only=True,
+            ),
         },
     )
     return AppConfig(
@@ -194,10 +213,12 @@ class _InvocationRunHarness:
         self,
         *,
         phase: str = PHASE_IMPLEMENTATION,
+        profile: str = AGENT_PROFILE_RUN,
         prompt: str = "implement the thing",
         model_selection: ModelSelection | None = None,
         timeout_seconds: int | None = None,
         transient_retry_attempts: int = 0,
+        process_runner: IProcessRunner | None = None,
     ) -> None:
         """在真路由作用域内跑一次真实进程调用（异常原样上抛给调用方断言）。"""
         with issue_output_routing(
@@ -206,7 +227,10 @@ class _InvocationRunHarness:
             log_base=self.log_base,
             output_view=NoOpRunnerLiveView(),
         ) as sink:
-            routed_runner = _OutputRoutedProcessRunner(SubprocessRunner(), sink)
+            routed_runner = _OutputRoutedProcessRunner(
+                process_runner or SubprocessRunner(),
+                sink,
+            )
             with bound_invocation_trace_context(
                 build_invocation_trace_context(
                     repo_id=_REPO_ID,
@@ -221,6 +245,7 @@ class _InvocationRunHarness:
                     routed_runner,
                     config=self.config,
                     capture_output=True,
+                    profile=profile,
                     timeout_seconds=timeout_seconds,
                     transient_retry_attempts=transient_retry_attempts,
                     model_selection=model_selection,
@@ -244,6 +269,35 @@ class _InvocationRunHarness:
 
     def details(self) -> list[dict[str, object]]:
         return [json.loads(event.detail_json) for event in self.events()]
+
+
+class _TimeoutSessionRunner:
+    """假进程 runner：每次超时时都自报同一个 session id。"""
+
+    def __init__(self, *, succeed_after_resume: bool) -> None:
+        self.succeed_after_resume = succeed_after_resume
+        self.calls: list[list[str]] = []
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        command_list = list(command)
+        self.calls.append(command_list)
+        resumed = "--resume" in command_list
+        if resumed and self.succeed_after_resume:
+            return CommandResult(
+                command=tuple(command_list),
+                return_code=0,
+                stdout="done",
+                stderr="",
+                session_id="sess-timeout",
+            )
+        timeout_error = subprocess.TimeoutExpired(command_list, timeout)
+        setattr(timeout_error, AGENT_SESSION_ID_ATTR_NAME, "sess-timeout")
+        raise timeout_error
 
 
 def _marker_lines(log_text: str, marker: str) -> list[str]:
@@ -447,6 +501,66 @@ class TestFailuresAndTimeoutsRecordOutcome:
         end_line = _marker_lines(harness.log_text(), INVOCATION_END_MARKER)[0]
         assert f"outcome={OUTCOME_TIMEOUT}" in end_line
         assert f"failure_category={FAILURE_TIMEOUT}" in end_line
+
+    def test_timeout_resumes_same_session_once_with_a_new_time_window(self, tmp_path: Path) -> None:
+        harness = _InvocationRunHarness(
+            tmp_path,
+            script_body=_silent_script_body(),
+            name="timeout-resume",
+        )
+        process_runner = _TimeoutSessionRunner(succeed_after_resume=True)
+        harness.invoke(timeout_seconds=7, process_runner=process_runner)
+
+        assert len(process_runner.calls) == 2
+        assert "--resume" not in process_runner.calls[0]
+        assert "--resume" in process_runner.calls[1]
+        assert process_runner.calls[1][process_runner.calls[1].index("--resume") + 1] == (
+            "sess-timeout"
+        )
+        details = harness.details()
+        assert details[1]["outcome"] == OUTCOME_TIMEOUT
+        assert details[2]["retry_reason"] == "timeout_resume"
+        assert details[2]["resumed_session_id"] == "sess-timeout"
+        assert details[3]["outcome"] == OUTCOME_OK
+
+    def test_timeout_resume_budget_stops_repeated_timeouts(self, tmp_path: Path) -> None:
+        harness = _InvocationRunHarness(
+            tmp_path,
+            script_body=_silent_script_body(),
+            name="timeout-budget",
+        )
+        process_runner = _TimeoutSessionRunner(succeed_after_resume=False)
+        with pytest.raises(subprocess.TimeoutExpired):
+            harness.invoke(timeout_seconds=7, process_runner=process_runner)
+
+        assert len(process_runner.calls) == 2
+        record = load_agent_session_record(harness.worktree, "claude")
+        assert record is not None
+        assert record.timeout_resume_count == 1
+        assert [detail["outcome"] for detail in harness.details()[1::2]] == [
+            OUTCOME_TIMEOUT,
+            OUTCOME_TIMEOUT,
+        ]
+
+    def test_read_only_review_profile_resumes_after_timeout(self, tmp_path: Path) -> None:
+        harness = _InvocationRunHarness(
+            tmp_path,
+            script_body=_silent_script_body(),
+            name="review-timeout-resume",
+        )
+        process_runner = _TimeoutSessionRunner(succeed_after_resume=True)
+
+        harness.invoke(
+            phase=PHASE_REVIEW,
+            profile=AGENT_PROFILE_DELIBERATE,
+            process_runner=process_runner,
+        )
+
+        assert len(process_runner.calls) == 2
+        assert "--resume" in process_runner.calls[1]
+        record = load_agent_session_record(harness.worktree, "claude", phase=PHASE_REVIEW)
+        assert record is not None
+        assert record.session_id == "sess-timeout"
 
     def test_business_exception_still_propagates_unchanged(self, tmp_path: Path) -> None:
         """观测落盘不得吞掉或改写业务异常（FR-3 的旁路语义）。"""

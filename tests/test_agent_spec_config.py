@@ -278,7 +278,7 @@ def _config_toml_agent_blocks() -> dict[str, dict[str, object]]:
 
 
 def test_config_toml_agent_blocks_match_builtin_specs() -> None:
-    """config.toml 的四个注册块与 BUILTIN_AGENT_SPECS 语义一致（缺省键视同默认值）。
+    """config.toml 的七个注册块与 BUILTIN_AGENT_SPECS 语义一致（缺省键视同默认值）。
 
     config.toml 写出的是"出厂注册块"：与代码默认等价、便于发现与覆盖。
     本守卫防止两处数据漂移——改内置 spec 必须同步 config.toml，反之亦然。
@@ -288,6 +288,7 @@ def test_config_toml_agent_blocks_match_builtin_specs() -> None:
     default_profile = {
         "args": [],
         "tail_args": [],
+        "resume_tail_args": [],
         "expand": [],
         "prompt_flag": None,
         "prompt_delivery": "argv_tail",
@@ -305,6 +306,8 @@ def test_config_toml_agent_blocks_match_builtin_specs() -> None:
             "auth_include": list(agent_spec.auth_include),
             "auth_exclude": list(agent_spec.auth_exclude),
             "project_skills_dir": agent_spec.project_skills_dir,
+            "supports_resume": agent_spec.supports_resume,
+            "resume_args": list(agent_spec.resume_args),
         }
         for field_name, expected_value in scalar_fields.items():
             assert block.get(field_name) == expected_value, (
@@ -320,6 +323,7 @@ def test_config_toml_agent_blocks_match_builtin_specs() -> None:
                 {
                     "args": list(profile_spec.args),
                     "tail_args": list(profile_spec.tail_args),
+                    "resume_tail_args": list(profile_spec.resume_tail_args),
                     "expand": list(profile_spec.expand),
                     "prompt_flag": profile_spec.prompt_flag,
                     "prompt_delivery": profile_spec.prompt_delivery,

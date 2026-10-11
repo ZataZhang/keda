@@ -30,7 +30,11 @@ from backend.core.shared.models.agent_spec import (
 )
 from backend.core.use_cases import run_agent_execution_loop as execution_loop_module
 from backend.core.use_cases import run_agent_once as run_agent_once_module
-from backend.core.use_cases.agent_runner_session_store import load_agent_session_record
+from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    load_agent_session_record,
+    save_agent_session_record,
+)
 from backend.infrastructure.process_runner import SubprocessRunner
 
 _ISSUE = IssueSummary(
@@ -128,6 +132,7 @@ def _run_claims(
     monkeypatch: pytest.MonkeyPatch,
     *,
     supports_resume: bool,
+    previous_attempt_failed: bool = False,
 ) -> list[dict]:
     """连跑两次"领取 → 执行"，返回假 agent 记下的两次 argv 审计。"""
     _patch_loop_gates(monkeypatch)
@@ -141,29 +146,50 @@ def _run_claims(
             "claude": _claude_like_spec(script_path, supports_resume=supports_resume),
         },
     )
+    before_sha = (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if previous_attempt_failed
+        else "0" * 40
+    )
 
     for _ in range(2):
-        run_agent_once_module.run_agent_until_committed(
-            selected_agent="claude",
-            issue=_ISSUE,
-            worktree_path=worktree,
-            config=config,
-            process_runner=SubprocessRunner(),
-            before_sha="0" * 40,
-            expected_branch="issue-7",
-        )
+        try:
+            run_agent_once_module.run_agent_until_committed(
+                selected_agent="claude",
+                issue=_ISSUE,
+                worktree_path=worktree,
+                config=config,
+                process_runner=SubprocessRunner(),
+                before_sha=before_sha,
+                expected_branch="issue-7",
+            )
+        except run_agent_once_module.MaxRetriesExceededError:
+            if not previous_attempt_failed:
+                raise
 
     return [
         json.loads(audit_line) for audit_line in audit_path.read_text(encoding="utf-8").splitlines()
     ]
 
 
-class TestResumeAcrossClaims:
-    """崩溃对账判定「可续传」后，下一次领取真的将原会话续上。"""
+class TestResumeEligibilityAcrossClaims:
+    """只有未完成的执行链才能把旧 session 带到下一次领取。"""
 
-    def test_second_claim_resumes_recorded_session(self, tmp_path: Path, monkeypatch) -> None:
-        """首轮全新会话 → 记录落盘；次轮领取的 argv 带上 ``--resume <首轮 id>``。"""
-        audited_calls = _run_claims(tmp_path, monkeypatch, supports_resume=True)
+    def test_second_claim_does_not_resume_completed_session(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """前一轮完整成功后，第二次新执行必须创建新会话。"""
+        audited_calls = _run_claims(
+            tmp_path,
+            monkeypatch,
+            supports_resume=True,
+        )
 
         assert len(audited_calls) == 2
         first_call, second_call = audited_calls
@@ -173,9 +199,23 @@ class TestResumeAcrossClaims:
         assert record is not None
         assert record.session_id == "sess-fresh"
         assert record.issue_number == _ISSUE.number
+        assert record.resume_eligible is False
 
-        assert second_call["resumed"] is True
-        assert second_call["resumed_session_id"] == "sess-fresh"
+        assert second_call["resumed"] is False
+
+    def test_second_claim_resumes_failed_session(self, tmp_path: Path, monkeypatch) -> None:
+        """前一轮未完成时，下一次领取会接上该 session。"""
+        audited_calls = _run_claims(
+            tmp_path,
+            monkeypatch,
+            supports_resume=True,
+            previous_attempt_failed=True,
+        )
+
+        assert len(audited_calls) == 2
+        assert audited_calls[0]["resumed"] is False
+        assert audited_calls[1]["resumed"] is True
+        assert audited_calls[1]["resumed_session_id"] == "sess-fresh"
 
     def test_agent_without_capability_never_gets_resume_args(
         self, tmp_path: Path, monkeypatch
@@ -205,12 +245,12 @@ class TestAttemptResumeSelection:
 
     def test_first_attempt_uses_injected_id_only(self, tmp_path: Path) -> None:
         """首轮只认领取侧注入的 id：有记录但没注入时仍按全新会话起跑。"""
-        from backend.core.use_cases.agent_runner_session_store import (
-            save_agent_session_record,
-        )
 
         save_agent_session_record(
-            tmp_path, agent_name="claude", session_id="sess-record", issue_number=7
+            tmp_path,
+            agent_name="claude",
+            session_id="sess-record",
+            scope=AgentSessionScope(issue_number=7),
         )
 
         request = self._request(tmp_path)
@@ -230,12 +270,12 @@ class TestAttemptResumeSelection:
 
     def test_recovery_round_reads_back_latest_record(self, tmp_path: Path) -> None:
         """recovery 轮次续的是"上一条自报的会话"，而不是领取时那个。"""
-        from backend.core.use_cases.agent_runner_session_store import (
-            save_agent_session_record,
-        )
 
         save_agent_session_record(
-            tmp_path, agent_name="claude", session_id="sess-latest", issue_number=7
+            tmp_path,
+            agent_name="claude",
+            session_id="sess-latest",
+            scope=AgentSessionScope(issue_number=7),
         )
         request = self._request(tmp_path, resume_session_id="sess-original")
 

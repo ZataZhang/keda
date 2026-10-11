@@ -31,7 +31,10 @@ from backend.core.use_cases.agent_runner_reclaim import (
     format_claim_marker,
 )
 from backend.core.use_cases.agent_runner_reconcile import reconcile_stale_attempts
-from backend.core.use_cases.agent_runner_session_store import save_agent_session_record
+from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    save_agent_session_record,
+)
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import worktree_site, worktree_site_response
 
@@ -371,12 +374,30 @@ class TestReconcileEngine:
             worktree_site(tmp_path, 7),
             agent_name="claude",
             session_id="sess-abc",
-            issue_number=7,
+            scope=AgentSessionScope(issue_number=7),
         )
 
         outcomes = _run_reconcile(tmp_path, github, config)
 
         assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.RESUME]
+        assert config.labels.ready in github.get_issue(7).labels
+
+    def test_completed_session_is_not_used_for_stale_resume(self, tmp_path: Path) -> None:
+        """成功完成的旧会话不因 worktree 里仍有 id 就被当作崩溃续传。"""
+        config = AppConfig()
+        github = FakeGitHubClient()
+        _seed_running_claim(github, config, agent="claude")
+        save_agent_session_record(
+            worktree_site(tmp_path, 7),
+            agent_name="claude",
+            session_id="sess-complete",
+            scope=AgentSessionScope(issue_number=7),
+            resume_eligible=False,
+        )
+
+        outcomes = _run_reconcile(tmp_path, github, config)
+
+        assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
         assert config.labels.ready in github.get_issue(7).labels
 
     def test_session_of_other_issue_does_not_resume(self, tmp_path: Path) -> None:
@@ -388,7 +409,7 @@ class TestReconcileEngine:
             worktree_site(tmp_path, 7),
             agent_name="claude",
             session_id="sess-other",
-            issue_number=999,
+            scope=AgentSessionScope(issue_number=999),
         )
 
         outcomes = _run_reconcile(tmp_path, github, config)

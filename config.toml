@@ -216,13 +216,15 @@ closeout = "codebuddy-glm5_3-flash-max"
 #
 # 本文件内的七个注册块与代码内置默认（BUILTIN_AGENT_SPECS）等价，写出仅为
 # 便于发现与覆盖：未写出的字段逐字段回落内置默认。argv 元素是字面量，
-# 不做 shell 展开；占位符闭集：{cwd} / {prompt} / {worktree} / {model} / {effort}；
+# 不做 shell 展开；占位符闭集：{cwd} / {prompt} / {worktree} / {model} / {effort} / {session_id}；
 # 展开器闭集：git_writable_roots（写法 "git_writable_roots:--add-dir"）。
 #
 # 模型参数模板（本 PRD 新增）：model_args / reasoning_effort_args 声明该 agent
 # 的模型与推理档 flag 语法（{model} / {effort} 占位符）；为空表示未核实语法，
 # 命中模型绑定时 fail-fast。claude（--model）与 codebuddy（--model +
 # --settings reasoningEffort）已核实并以内置默认播种；下方注册块写出仅为示例。
+# 续传参数：supports_resume / resume_args 声明按会话 id 续传；Codex 需要切换子命令，
+# 使用各 profile 的 resume_tail_args 替换正常 tail_args。七个内置 agent 均已声明续传入口。
 #
 # 接入全新 agent 的最小步骤：写一段注册块（bin 与 label 必填，四种用途
 # 至少声明一种；某个用途两侧都不声明即视为该 agent 不提供该用途），
@@ -239,33 +241,39 @@ auth_include = ["auth.json", "skills"]
 auth_exclude = ["sessions", "cache", ".tmp", ".codex-global-state.json", "log", "logs", "history.jsonl"]
 project_skills_dir = ".codex/skills"
 model_args = ["--model", "{model}"]
+supports_resume = true
+resume_args = [] # Codex 使用 profile.resume_tail_args 切换到 exec resume 子命令。
 
 [agent_runner.agents.codex.profiles.run]
 args = ["--cd", "{cwd}", "--sandbox", "workspace-write", "--config", "sandbox_workspace_write.network_access=true", "--ask-for-approval", "never"]
 expand = ["git_writable_roots:--add-dir"]
-tail_args = ["exec"]
+tail_args = ["exec", "--json"]
+resume_tail_args = ["exec", "resume", "--json", "{session_id}"]
 prompt_delivery = "argv_tail"
-output_protocol = "plain"
+output_protocol = "codex-json-lines"
 
 [agent_runner.agents.codex.profiles.deliberate]
 args = ["--cd", "{cwd}", "--sandbox", "read-only", "--ask-for-approval", "never"]
-tail_args = ["exec"]
+tail_args = ["exec", "--json"]
+resume_tail_args = ["exec", "resume", "--json", "{session_id}"]
 prompt_delivery = "stdin"
-output_protocol = "plain"
+output_protocol = "codex-json-lines"
 read_only = true
 
 [agent_runner.agents.codex.profiles.generate]
 args = ["--cd", "{cwd}", "--sandbox", "read-only", "--ask-for-approval", "never"]
-tail_args = ["exec"]
+tail_args = ["exec", "--json"]
+resume_tail_args = ["exec", "resume", "--json", "{session_id}"]
 prompt_delivery = "argv_tail"
-output_protocol = "plain"
+output_protocol = "codex-json-lines"
 read_only = true
 
 [agent_runner.agents.codex.profiles.repl]
 args = ["--cd", "{cwd}"]
-tail_args = ["exec"]
+tail_args = ["exec", "--json"]
+resume_tail_args = ["exec", "resume", "--json", "{session_id}"]
 prompt_delivery = "argv_tail"
-output_protocol = "plain"
+output_protocol = "codex-json-lines"
 
 [agent_runner.agents.claude]
 bin = "claude"
@@ -275,6 +283,8 @@ label_description = "Use Claude Code for local runner execution."
 auth_home = "~/.claude"
 model_args = ["--model", "{model}"]
 auth_include = ["settings.json", "skills"]
+supports_resume = true
+resume_args = ["--resume", "{session_id}"]
 auth_exclude = ["history.jsonl", "file-history", "paste-cache", "plans", "plugins", "cache", "ide", "backups", "telemetry", "todos"]
 project_skills_dir = ".claude/skills"
 
@@ -309,6 +319,8 @@ auth_include = ["config.toml", "credentials", "oauth", "device_id", "skills"]
 auth_exclude = ["sessions", "logs", "cache", "session_index.jsonl", "tmp"]
 project_skills_dir = ".kimi-code/skills"
 model_args = ["--model", "{model}"]
+supports_resume = true
+resume_args = ["--session", "{session_id}"]
 
 [agent_runner.agents.kimi.profiles.run]
 args = []
@@ -350,6 +362,8 @@ auth_exclude = ["sessions", "pi-crash.log", "models-store.json"]
 project_skills_dir = ".pi/skills"
 model_args = ["--model", "{model}"]
 reasoning_effort_args = ["--thinking", "{effort}"]
+supports_resume = true
+resume_args = ["--session", "{session_id}"]
 
 [agent_runner.agents.pi.profiles.run]
 args = ["--approve", "--mode", "json"]
@@ -387,6 +401,8 @@ label_description = "Use CodeBuddy Code for local runner execution."
 auth_home = "~/.codebuddy"
 model_args = ["--model", "{model}"]
 reasoning_effort_args = ["--settings", "{\"reasoningEffort\":\"{effort}\"}"]
+supports_resume = true
+resume_args = ["--resume", "{session_id}"]
 auth_include = ["settings.json", "skills"]
 auth_exclude = ["history.jsonl", "file-history", "sessions", "logs", "plans", "plugins", "cache", "blobs", "traces", "shell-snapshots", "tasks", "teams", "projects", "local_storage", "jobs", "diagnostics", "skills-marketplace"]
 project_skills_dir = ".codebuddy/skills"
@@ -434,6 +450,8 @@ project_skills_dir = ".qoder-cn/skills"
 # 声明后该 agent 才能命中带模型 / 推理档的预设绑定（见 lifecycle_presets）。
 model_args = ["--model", "{model}"]
 reasoning_effort_args = ["--reasoning-effort", "{effort}"]
+supports_resume = true
+resume_args = ["--resume", "{session_id}"]
 
 [agent_runner.agents.qoder.profiles.run]
 args = ["--dangerously-skip-permissions", "-p", "-o", "stream-json"]
@@ -457,8 +475,8 @@ prompt_delivery = "argv_tail"
 output_protocol = "plain"
 
 # opencode 的注册块：内置默认已生效；下面照抄内置值作为"出厂注册块"参考。
-# 事实依据：非交互入口是 run 子命令（消息为位置参数）；--format default 输出
-# 逐行文本（plain），--format json 是另一套事件形状、本项目无对应协议；
+# 事实依据：非交互入口是 run 子命令（消息为位置参数）；--format json 输出
+# JSON 事件流，由 opencode-json-lines 协议渲染并提取 sessionID；
 # 它没有沙箱 / 只读开关，因此不声明 generate 用途（假只读声明会被只读决策
 # 入口的门禁采信）；配置在 ~/.config/opencode/（XDG 路径）。
 [agent_runner.agents.opencode]
@@ -470,21 +488,23 @@ auth_home = "~/.config/opencode"
 auth_include = ["opencode.json", "skills"]
 auth_exclude = ["node_modules", "package.json", "package-lock.json", "tui.jsonc", "plugins"]
 model_args = ["--model", "{model}"]
+supports_resume = true
+resume_args = ["--session", "{session_id}"]
 
 [agent_runner.agents.opencode.profiles.run]
-args = ["run", "--dangerously-skip-permissions"]
+args = ["run", "--dangerously-skip-permissions", "--format", "json"]
 prompt_delivery = "argv_tail"
-output_protocol = "plain"
+output_protocol = "opencode-json-lines"
 
 [agent_runner.agents.opencode.profiles.deliberate]
-args = ["run", "--dangerously-skip-permissions"]
+args = ["run", "--dangerously-skip-permissions", "--format", "json"]
 prompt_delivery = "argv_tail"
-output_protocol = "plain"
+output_protocol = "opencode-json-lines"
 
 [agent_runner.agents.opencode.profiles.repl]
-args = ["run", "--dangerously-skip-permissions"]
+args = ["run", "--dangerously-skip-permissions", "--format", "json"]
 prompt_delivery = "argv_tail"
-output_protocol = "plain"
+output_protocol = "opencode-json-lines"
 
 [agent_runner.labels]
 # codex / claude / kimi 是旧版 labels 段的 agent 路由键，作为兼容覆盖来源
@@ -519,7 +539,9 @@ provision_database = true
 default_agent = "claude"
 max_recovery_attempts = 5
 recovery_retry_delay_seconds = 30
-# Wall-clock timeout for a single agent execution attempt (initial or recovery).
+# 执行器进程超时后，在同一 session 续跑的额外轮数；按 session 计，默认再给一轮。
+timeout_resume_attempts = 1
+# 每轮 agent 执行的 wall-clock 时限（秒）；超时后优先按 timeout_resume_attempts 续跑。
 timeout_seconds = 14400
 # Inactivity timeout: kill the agent if it produces no stdout/stderr for this long.
 inactivity_timeout_seconds = 1200

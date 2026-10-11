@@ -76,6 +76,8 @@ iar = "backend.api.cli:main"
 plain = "backend.engines.agent_runner.output_protocols.plain:PlainOutputProtocol"
 claude-stream-json = "backend.engines.agent_runner.output_protocols.claude_stream_json:ClaudeStreamJsonOutputProtocol"
 pi-json-lines = "backend.engines.agent_runner.output_protocols.pi_json_lines:PiJsonLinesOutputProtocol"
+codex-json-lines = "backend.engines.agent_runner.output_protocols.codex_json_lines:CodexJsonLinesOutputProtocol"
+opencode-json-lines = "backend.engines.agent_runner.output_protocols.opencode_json_lines:OpenCodeJsonLinesOutputProtocol"
 
 [project.optional-dependencies]
 llm = [

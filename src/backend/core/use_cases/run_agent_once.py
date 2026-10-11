@@ -37,6 +37,7 @@ from backend.core.shared.models.agent_runner import (
     describe_verification_command,
 )
 from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_DELIBERATE,
     AGENT_PROFILE_RUN,
     PROMPT_DELIVERY_STDIN,
 )
@@ -51,9 +52,11 @@ from backend.core.use_cases.agent_invocation import (
 from backend.core.use_cases.agent_invocation_tracing import (
     PHASE_FIX,
     PHASE_IMPLEMENTATION,
+    PHASE_REVIEW,
     PHASE_UNSPECIFIED,
     RETRY_REASON_RESUME_NOT_STARTED,
     RETRY_REASON_TRANSIENT,
+    RETRY_REASON_TIMEOUT_RESUME,
     InvocationStartRequest,
     finish_invocation,
     link_next_invocation,
@@ -131,6 +134,8 @@ from backend.core.use_cases.agent_runner_publish import (
     validate_safe_changes,
 )
 from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    consume_agent_timeout_resume_attempt,
     resolve_resumable_session_id,
     save_agent_session_record,
 )
@@ -149,6 +154,12 @@ from backend.core.use_cases.agent_runner_worktree_create import (
 )
 
 _logger = logging.getLogger(__name__)
+
+_TIMEOUT_CONTINUATION_PROMPT = (
+    "The previous agent process was stopped by the runner's execution timeout. "
+    "Continue the existing task from this session and the current worktree state. "
+    "Do not repeat completed work; continue with the next incomplete step."
+)
 
 REPAIR_AGENT_SELF = "self"
 """``repair_agent`` 取值：本阶段的审核者 / supervisor 自己修（默认，历史行为）。"""
@@ -730,26 +741,26 @@ def run_agent_with_prompt(
     def _persist_session_id(session_id: str | None) -> None:
         """把本次调用自报的会话 id 落在 worktree 局部记录里。
 
-        只记 run 用途的会话：fix / closeout / verifier 是另一段独立对话，写进同一个
-        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。这些调用都走默认
-        ``profile="run"``，profile 一档拦不住，因此以调用阶段为准：只有
-        ``implementation``（主循环与其 recovery 轮次）与未标注阶段的调用才落盘；
-        fix、closeout、verifier 等独立对话即使同 profile 也不覆盖。这样既避免
-        恢复时续错会话，也避免改脏 git 跟踪的
-        ``.iar/agent-runner/sessions/<agent>.json``，导致独立 verifier 的洁净树
-        门禁误报。落盘是旁路，失败只记日志——续传是增益路径，不能反过来把正常
-        执行拖下水。
+        只记 implementation（含 recovery）和 deliberate review 会话，并按阶段记录作用域。
+        fix、closeout、verifier 等独立对话即使使用 ``profile="run"`` 也不覆盖可恢复会话，
+        避免恢复时续错对象或污染独立 verifier 的洁净树门禁。落盘是旁路，失败只记日志——
+        续传是增益路径，不能反过来把正常执行拖下水。
         """
-        if not session_id or profile != AGENT_PROFILE_RUN:
-            return
-        if invocation_phase not in (PHASE_IMPLEMENTATION, PHASE_UNSPECIFIED):
+        can_persist_session = (
+            profile == AGENT_PROFILE_RUN
+            and invocation_phase in (PHASE_IMPLEMENTATION, PHASE_UNSPECIFIED)
+        ) or (profile == AGENT_PROFILE_DELIBERATE and invocation_phase == PHASE_REVIEW)
+        if not session_id or not can_persist_session:
             return
         try:
             save_agent_session_record(
                 worktree_path,
                 agent_name=agent_name,
                 session_id=session_id,
-                issue_number=issue.number if issue is not None else None,
+                scope=AgentSessionScope(
+                    issue_number=issue.number if issue is not None else None,
+                    phase=invocation_phase,
+                ),
             )
         except (OSError, ValueError) as exc:
             _logger.warning(
@@ -875,9 +886,9 @@ def _session_id_from_exception(exc: BaseException) -> str | None:
 def _resumed_run_never_started(result: CommandResult) -> bool:
     """续传调用是否"根本没起跑"：非零退出且输出流里没自报过任何会话 id。
 
-    CLI 认下了 ``--resume`` 就会先广播一个新会话 id（claude 的 ``system/init``），
-    因此"无会话 id + 非零退出"是"参数没被接受 / 会话不存在"的可靠信号；反过来，
-    起跑后再失败（超时、跑到一半崩）不能重跑，否则会白扔掉已经取得的进度。
+    JSONL agent 在会话启动时报告新 id，因此"无会话 id + 非零退出"可用来识别
+    未起跑；Kimi 的 id 可能只在退出提示中出现。超时没有可判定的退出码，始终交给
+    上层恢复处理，不能改跑全新会话，否则会白扔掉已经取得的进度。
     """
     return result.return_code != 0 and result.session_id is None
 
@@ -894,12 +905,13 @@ def run_agent_with_prompt_resilient(
 ) -> CommandResult:
     """Run an agent, retrying transient network/transport failures in place.
 
-    Level 1 of the escalation ladder. Only :func:`is_transient_failure` errors
-    (dropped sockets, connection resets, gateway timeouts, 5xx) are retried with
-    the same agent, because re-issuing the request usually succeeds. A missing
-    agent CLI is surfaced as :class:`AgentUnavailableError` so the orchestration
-    layer can skip to the next agent; every other error propagates unchanged so
-    the recovery loop or the cross-agent fallback can handle it.
+    Agent process timeouts first use the configured per-session budget to resume
+    the same CLI session with one more phase-sized time window. Only
+    :func:`is_transient_failure` transport errors (dropped sockets, connection
+    resets, gateway timeouts, 5xx) use the separate in-place retry budget. A
+    missing agent CLI is surfaced as :class:`AgentUnavailableError` so
+    orchestration can skip to the next agent; every other error propagates
+    unchanged to recovery or cross-agent fallback.
 
     ``model_selection``（若传入）先经 :func:`drop_model_selection_for_agent`
     校验：跨 agent 回退或显式 ``--agent`` 换人时丢弃绑定并记日志，本函数内
@@ -936,38 +948,82 @@ def run_agent_with_prompt_resilient(
         )
     agent_call_issue = forwarded_options.get("issue")
     issue_number = agent_call_issue.number if isinstance(agent_call_issue, IssueSummary) else 0
+    agent_config = forwarded_options.get("config")
+    if not isinstance(agent_config, AppConfig):
+        agent_config = AppConfig()
+    raw_phase = forwarded_options.get("invocation_phase", PHASE_UNSPECIFIED)
+    session_scope = AgentSessionScope(
+        issue_number=(
+            agent_call_issue.number if isinstance(agent_call_issue, IssueSummary) else None
+        ),
+        phase=raw_phase if isinstance(raw_phase, str) else PHASE_UNSPECIFIED,
+    )
+    current_prompt = prompt
     for retry_index in range(max_retries + 1):
         if retry_index > 0:
             # 原地瞬态重试是**新的一次实际进程调用**：新建 invocation 并用 retry_of
             # 关联上一次，绝不合并成一条记录（否则"重试了三次才成功"会消失）。
             link_next_invocation(RETRY_REASON_TRANSIENT)
-        try:
-            return run_agent_with_prompt(
-                agent_name,
-                prompt,
-                worktree_path,
-                process_runner,
-                **forwarded_options,
-            )
-        except FileNotFoundError as exc:
-            raise AgentUnavailableError(agent_name) from exc
-        except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
-            if retry_index >= max_retries or not is_transient_failure(exc):
-                raise
-            _logger.warning(
-                "Transient error from agent '%s' for Issue #%d; retrying (%d/%d): %s",
-                agent_name,
-                issue_number,
-                retry_index + 1,
-                max_retries,
-                exc,
-            )
-            wait_before_recovery_attempt(
-                issue_number,
-                recovery_attempt=retry_index + 1,
-                max_recovery_attempts=max_retries,
-                delay_seconds=transient_retry_delay_seconds,
-            )
+        while True:
+            try:
+                return run_agent_with_prompt(
+                    agent_name,
+                    current_prompt,
+                    worktree_path,
+                    process_runner,
+                    **forwarded_options,
+                )
+            except FileNotFoundError as exc:
+                raise AgentUnavailableError(agent_name) from exc
+            except subprocess.TimeoutExpired as exc:
+                requested_session_id = forwarded_options.get("resume_session_id")
+                timeout_session_id = _session_id_from_exception(exc)
+                if timeout_session_id is None and isinstance(requested_session_id, str):
+                    # 已续传的进程可能在再次上报 session id 前超时，仍可接着请求中的 id 续跑。
+                    timeout_session_id = requested_session_id
+                consumed_attempts = (
+                    consume_agent_timeout_resume_attempt(
+                        worktree_path,
+                        config=agent_config,
+                        agent_name=agent_name,
+                        session_id=timeout_session_id,
+                        scope=session_scope,
+                        max_attempts=agent_config.runner.timeout_resume_attempts,
+                    )
+                    if timeout_session_id is not None
+                    else None
+                )
+                if consumed_attempts is None:
+                    raise
+                _logger.warning(
+                    "Agent '%s' timed out for Issue #%d; resuming session with an extra "
+                    "time window (%d/%d).",
+                    agent_name,
+                    issue_number,
+                    consumed_attempts,
+                    agent_config.runner.timeout_resume_attempts,
+                )
+                link_next_invocation(RETRY_REASON_TIMEOUT_RESUME)
+                current_prompt = _TIMEOUT_CONTINUATION_PROMPT
+                forwarded_options["resume_session_id"] = timeout_session_id
+            except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+                if retry_index >= max_retries or not is_transient_failure(exc):
+                    raise
+                _logger.warning(
+                    "Transient error from agent '%s' for Issue #%d; retrying (%d/%d): %s",
+                    agent_name,
+                    issue_number,
+                    retry_index + 1,
+                    max_retries,
+                    exc,
+                )
+                wait_before_recovery_attempt(
+                    issue_number,
+                    recovery_attempt=retry_index + 1,
+                    max_recovery_attempts=max_retries,
+                    delay_seconds=transient_retry_delay_seconds,
+                )
+                break
     raise RuntimeError("unreachable: resilient agent retry loop exited")
 
 
@@ -1013,7 +1069,7 @@ def run_agent_until_committed(
                 worktree_path,
                 config=config,
                 agent_name=selected_agent,
-                issue_number=issue.number,
+                scope=AgentSessionScope(issue_number=issue.number),
             ),
             publish_stage=publish_stage,
         )

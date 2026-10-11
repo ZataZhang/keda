@@ -267,8 +267,11 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "runner.max_agent_switches": (
         "最多切换 agent 次数（order=[a,b,c] 且此值=2 时最多尝试 3 个 agent）"
     ),
-    "runner.transient_retry_attempts": ("瞬时网络错误（socket 断开 / 5xx / 超时）的就地重试次数"),
+    "runner.transient_retry_attempts": (
+        "瞬时网络/传输错误（socket 断开 / 5xx / 网关超时）的就地重试次数"
+    ),
     "runner.transient_retry_delay_seconds": "瞬时错误每次重试前等待的秒数",
+    "runner.timeout_resume_attempts": "单个 agent session 遇到执行超时后，最多续跑的额外轮数（默认 1）",
     "runner.closeout_agent_enabled": (
         "是否启用交付收尾层（Closeout Agent）：清单未勾 / 缺 Change Log / 证据清单字段格式非法 / "
         "前端改动缺视觉证据这四类门禁失败先用一次短命收尾修复，失败才整轮重跑；设 false 回到旧行为"
@@ -366,10 +369,11 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # auth_home / auth_include / auth_exclude（容器认证目录）、
 # project_skills_dir（项目级 skills 目录），以及四种用途 profile：
 # run（主执行）/ deliberate（辩论）/ generate（内容生成）/ repl（交互），
-# 各自可声明 args（argv 片段，字面量，支持 {cwd}/{prompt}/{worktree} 占位符）、
+# 各自可声明 args（argv 片段，字面量，支持 {cwd}/{prompt}/{worktree}/{session_id} 占位符）、
 # prompt_delivery（argv_tail / flag / stdin）、prompt_flag（flag 投递时的参数名）、
-# output_protocol（plain / claude-stream-json / pi-json-lines 或插件协议）、
-# expand（展开器声明，如 "git_writable_roots:--add-dir"）、tail_args、read_only。
+# output_protocol（plain / claude-stream-json / pi-json-lines / codex-json-lines /
+# opencode-json-lines 或插件协议）、expand（展开器声明，如 "git_writable_roots:--add-dir"）、
+# tail_args / resume_tail_args、read_only；agent 级可声明 supports_resume / resume_args。
 #
 # 下面是 pi 的注册块示例（内置默认已生效，无需复制即可用）：
 #
@@ -382,6 +386,8 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # auth_include = ["auth.json", "settings.json", "models.json", "skills"]
 # auth_exclude = ["sessions", "pi-crash.log", "models-store.json"]
 # project_skills_dir = ".pi/skills"
+# supports_resume = true
+# resume_args = ["--session", "{session_id}"]
 #
 # [agent_runner.agents.pi.profiles.run]
 # args = ["--approve", "--mode", "json"]
