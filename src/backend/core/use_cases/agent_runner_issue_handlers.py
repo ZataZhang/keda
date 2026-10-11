@@ -61,6 +61,9 @@ from backend.core.use_cases.agent_runner_events import (
     find_latest_failure_context_comment,
     has_failure_context_marker,
 )
+from backend.core.use_cases.agent_runner_issue_blocked_resolution import (
+    _guard_blocked_issue_has_resolution,
+)
 from backend.core.use_cases.agent_runner_failure import (
     MaxRetriesExceededError,
     format_failure_context_comment,
@@ -85,7 +88,6 @@ from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
 )
 from backend.core.use_cases.agent_runner_workflow import (
-    find_latest_unconsumed_marker,
     transition_issue_workflow_state,
 )
 from backend.core.use_cases.agent_runner_worktree_branch import _ensure_worktree_branch
@@ -134,36 +136,6 @@ RUNTIME_DEPENDENCY_NAMES = (
     "get_current_branch",
     "get_head_sha",
 )
-
-
-_BLOCKED_RESOLUTION_COMPLETION_PHASES = {
-    "implementation_complete",
-    "draft_pr_created",
-    "publish_recovered",
-    "rebase_repair_complete",
-    "blocked_resolution_complete",
-}
-
-
-def _guard_blocked_issue_has_resolution(
-    issue: IssueSummary,
-    github_client: IGitHubClient,
-) -> ReviewEventMarker | None:
-    """检测 blocked Issue 是否包含未消费的 blocked_resolution_requested marker。
-
-    Args:
-        issue: Issue 对象
-        github_client: GitHub 客户端
-
-    Returns:
-        未消费的 blocked_resolution marker，或 None
-    """
-    comments = github_client.list_issue_comments(issue.number)
-    return find_latest_unconsumed_marker(
-        comments,
-        phase="blocked_resolution_requested",
-        completion_phases=_BLOCKED_RESOLUTION_COMPLETION_PHASES,
-    )
 
 
 def _resume_direct_pr_handoff(

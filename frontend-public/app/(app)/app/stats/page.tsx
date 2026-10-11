@@ -10,17 +10,20 @@ import { RunDetailDialog } from "@/components/agent-runner/run-detail-dialog";
 import { RecentRunGroups } from "@/components/agent-runner/recent-run-groups";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AgentPerformanceSection } from "@/components/stats/agent-performance-section";
 import {
   formatLifecycleDuration,
   PHASE_LABELS,
 } from "@/components/backlog/prd-lifecycle-view";
 import {
+  fetchAgentPerformanceStats,
   fetchCompletionStats,
   fetchPrdLifecycleStats,
   fetchRecentRuns,
   fetchRunHistoryTrend,
 } from "@/lib/api/console";
 import type {
+  AgentPerformanceStats,
   DailyRunTrendEntry,
   PrdLifecycleStats,
   PrdTokenUsageEntry,
@@ -30,6 +33,18 @@ import type {
 } from "@/lib/api/types";
 import { formatTokenCount } from "@/components/backlog/prd-lifecycle-view";
 
+type AgentPerformanceQueryState = {
+  filterKey: string;
+  stats: AgentPerformanceStats | null;
+  error: string | null;
+};
+
+type PrdLifecycleQueryState = {
+  filterKey: string;
+  stats: PrdLifecycleStats;
+};
+
+/** 汇总 GitHub 完成度、本地运行趋势、Agent 表现与 PRD 生命周期统计。 */
 export default function StatsPage() {
   const [stats, setStats] = useState<RepositoryCompletionStats[] | null>(null);
   const [trendRepoId, setTrendRepoId] = useState("");
@@ -37,7 +52,21 @@ export default function StatsPage() {
   const [trend, setTrend] = useState<DailyRunTrendEntry[]>([]);
   const [recentRuns, setRecentRuns] = useState<RunRecordEntry[]>([]);
   const [selectedRun, setSelectedRun] = useState<RunRecordEntry | null>(null);
-  const [lifecycleStats, setLifecycleStats] = useState<PrdLifecycleStats | null>(null);
+  const [lifecycleQueryState, setLifecycleQueryState] =
+    useState<PrdLifecycleQueryState | null>(null);
+  const [agentPerformanceQueryState, setAgentPerformanceQueryState] =
+    useState<AgentPerformanceQueryState | null>(null);
+  const agentPerformanceFilterKey = `${trendRepoId}|${trendDays}`;
+  const currentAgentPerformanceQueryState =
+    agentPerformanceQueryState?.filterKey === agentPerformanceFilterKey
+      ? agentPerformanceQueryState
+      : null;
+  const agentPerformanceStats = currentAgentPerformanceQueryState?.stats ?? null;
+  const agentPerformanceError = currentAgentPerformanceQueryState?.error ?? null;
+  const lifecycleStats =
+    lifecycleQueryState?.filterKey === agentPerformanceFilterKey
+      ? lifecycleQueryState.stats
+      : null;
 
   useEffect(() => {
     fetchCompletionStats()
@@ -65,11 +94,40 @@ export default function StatsPage() {
 
   useEffect(() => {
     let isCancelled = false;
-    setLifecycleStats(null);
+    fetchAgentPerformanceStats({ repoId: trendRepoId || undefined, days: trendDays })
+      .then((performanceStats) => {
+        if (!isCancelled) {
+          setAgentPerformanceQueryState({
+            filterKey: agentPerformanceFilterKey,
+            stats: performanceStats,
+            error: null,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCancelled) {
+          return;
+        }
+        setAgentPerformanceQueryState({
+          filterKey: agentPerformanceFilterKey,
+          stats: null,
+          error: error instanceof Error ? error.message : "无法读取 Agent 执行表现。",
+        });
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [trendRepoId, trendDays, agentPerformanceFilterKey]);
+
+  useEffect(() => {
+    let isCancelled = false;
     fetchPrdLifecycleStats({ repoId: trendRepoId || undefined, days: trendDays })
       .then((stats) => {
         if (!isCancelled) {
-          setLifecycleStats(stats);
+          setLifecycleQueryState({
+            filterKey: agentPerformanceFilterKey,
+            stats,
+          });
         }
       })
       .catch((error: unknown) => {
@@ -83,7 +141,7 @@ export default function StatsPage() {
     return () => {
       isCancelled = true;
     };
-  }, [trendRepoId, trendDays]);
+  }, [trendRepoId, trendDays, agentPerformanceFilterKey]);
 
   const trendMax = useMemo(
     () =>
@@ -271,6 +329,11 @@ export default function StatsPage() {
             setSelectedRun(null);
           }
         }}
+      />
+
+      <AgentPerformanceSection
+        stats={agentPerformanceStats}
+        error={agentPerformanceError}
       />
 
       <Card data-testid="stats-prd-lifecycle">

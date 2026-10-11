@@ -249,6 +249,48 @@ export type DailyRunTrendEntry = {
   average_duration_seconds: number | null;
 };
 
+export type FailureTypeCount = {
+  failure_type: string;
+  count: number;
+};
+
+export type AttemptPerformanceGroup = {
+  repo_id: string;
+  agent: string;
+  preset: string | null;
+  model: string | null;
+  attempt_count: number;
+  success_count: number;
+  non_success_count: number;
+  success_rate: number;
+  non_success_rate: number;
+  p50_duration_seconds: number | null;
+  p90_duration_seconds: number | null;
+  failure_types: FailureTypeCount[];
+};
+
+export type RunOutcomePerformanceGroup = {
+  repo_id: string;
+  outcome: "completed" | "failed" | "blocked";
+  run_count: number;
+  p50_duration_seconds: number | null;
+  p90_duration_seconds: number | null;
+};
+
+export type UnboundPresetAttemptCount = {
+  repo_id: string;
+  attempt_count: number;
+};
+
+export type AgentPerformanceStats = {
+  repo_id: string | null;
+  window_days: number;
+  agents: AttemptPerformanceGroup[];
+  presets: AttemptPerformanceGroup[];
+  unbound_preset_attempts: UnboundPresetAttemptCount[];
+  runs: RunOutcomePerformanceGroup[];
+};
+
 export type RunRecordEntry = {
   repo_id: string;
   repo_path: string;
@@ -429,9 +471,17 @@ export type BacklogPrdsResponse = {
   stale: boolean;
 };
 
+/** 生效并发上限的来源：继承 runner 容量 / Backlog 设置 / 被 runner 容量压低。 */
+export type BacklogCeilingSource = "inherited" | "policy" | "capped_by_capacity";
+
 export type BacklogSettings = {
   repo_id: string;
-  max_parallel: number;
+  /** Backlog「并发」策略值；从未保存过时为 null（继承 runner 容量）。 */
+  max_parallel: number | null;
+  /** 解析后的单一生效并发上限，与 daemon 认领、补位、全局开始同值。 */
+  effective_max_parallel: number;
+  runner_capacity: number;
+  ceiling_source: BacklogCeilingSource;
   default_view: "timeline" | "list";
   updated_at: string;
 };
@@ -456,13 +506,18 @@ export type BacklogGlobalStartResult = {
  * `persisted_enabled` 是仓库 `.kedacode.toml` 里的值（缺失时为 null）。
  * `auto_merge_enabled` 表示自动合并的两道配置门都已开启，`daemon_running`
  * 表示后台进程正在运行。三者互相独立。
+ * `max_parallel` 是可空的并发策略值（null = 从未保存），`effective_max_parallel`
+ * 是与 daemon / 补位 / 全局开始共用同一解析函数的生效上限。
  */
 export type BacklogAutopilotState = {
   repo_id: string;
   enabled: boolean;
   auto_merge_enabled: boolean;
   daemon_running: boolean;
-  max_parallel: number;
+  max_parallel: number | null;
+  effective_max_parallel: number;
+  runner_capacity: number;
+  ceiling_source: BacklogCeilingSource;
   config_source: string;
   persisted_enabled: boolean | null;
 };

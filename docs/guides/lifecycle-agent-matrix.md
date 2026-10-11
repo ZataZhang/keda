@@ -1,13 +1,18 @@
 # 生命周期 Agent 矩阵
 
-keda 有九个生命周期阶段，每个阶段调用一个 agent（codex / claude / kimi /
-pi / codebuddy / qoder / opencode 或自定义注册的 agent）。**生命周期 Agent 矩阵**把"阶段 → agent"从
-散落的配置段收敛成一张表，并支持仓库级与 PRD 级覆盖。
-
-九个阶段**不在同一条流水线上**：它们分布在三个互相独立的入口，外加一个横跨全程的
-内容生成阶段——见下文「各阶段在哪触发」一节。
+**生命周期 Agent 矩阵**把"阶段 → agent"从散落的配置段收敛成一张表，并支持仓库级与
+PRD 级覆盖。矩阵中的每个生命周期都有自己的触发条件和职责；它们是独立的配置项，
+不构成固定顺序的一条流水线。一次 Issue 执行可能按条件触发多个阶段，讨论、决策和
+内容生成则由各自入口触发。
 
 > 交互原型：`docs/prototypes/lifecycle-agent-matrix.html`（真实截图 + 覆盖层）。
+
+## 三个独立功能区
+
+下图按职责把矩阵分成三个独立区域。边框表示功能归属，卡片中的条目不表示调用顺序；
+Issue 执行与交付区共享 claim 上下文，但阶段仍按各自触发条件运行。
+
+![生命周期矩阵的三个独立功能区：Issue 执行与交付、讨论与内容生成、独立决策入口](../assets/lifecycle-agent-groups.svg)
 
 ## 键名与取值（权威定义）
 
@@ -41,11 +46,11 @@ pi / codebuddy / qoder / opencode 或自定义注册的 agent）。**生命周�
 
 ## 各阶段在哪触发（消费点）
 
-上一张表回答"这个键能配什么"，这一张回答"配了之后什么时候被读"。九个键分布在
-三个互相独立的 CLI 入口，外加一个横跨全程的内容生成阶段。
+上一张表回答"这个键能配什么"，这一张回答"配了之后什么时候被读"。控制台为方便查找
+会把生命周期放在导航分组下；这些分组只用于呈现，不代表阶段顺序或必须一起运行。
 
 console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、PRD 覆盖抽屉）
-**按同一分组呈现**：组标题与每行触发时机来自只读视图下发，分组事实的唯一代码
+**按同一导航分组呈现**：组标题与每行触发时机来自只读视图下发，分组事实的唯一代码
 定义是 `src/backend/core/shared/models/lifecycle_agent.py` 的
 `LIFECYCLE_AGENT_ENTRY_GROUPS`（前端不持有第二份映射），与本表的三组一一对应：
 
@@ -59,11 +64,11 @@ console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、P
 
 | 触发入口分组 | 组内阶段 | 组说明 |
 |---|---|---|
-| **实现流水线**（`pipeline`） | 实现 / 修复 / 收尾 / 校验 / 审核 / 监督 | `kc run` / `daemon` 认领后，在同一 worktree 的同一次 claim 内依次触发 |
+| **实现流水线**（`pipeline`） | 实现 / 修复 / 收尾 / 校验 / 审核 / 监督 | `kc run` / `daemon` 认领后共享同一 worktree 与 claim 上下文；修复、收尾按失败门禁触发，监督按配置与发布档位触发，也可由 `kc supervise` / `kc supervise-daemon` 单独驱动 |
 | **讨论与内容生成**（`discussion_content`） | 辩论 / 内容生成 | 辩论在 Phase 0 就该 Issue 展开（此时 PRD 尚不存在）；内容生成横切 `kc issue create`、`kc issue create --from-prompt`、Phase 1 与开 Draft PR 四处 |
 | **独立入口**（`standalone`） | 决策 | `kc ask`，不在任何 Issue 流水线上（无 Issue / PRD 上下文） |
 
-逐键消费点（"实现流水线"组的六个阶段都在同一次 claim 内）：
+逐键消费点（"实现流水线"组的六个阶段共享同一次 claim 上下文，但不是每次都全部运行）：
 
 | 键 | 组 | 触发入口 | 代码消费点 |
 |---|---|---|---|
@@ -72,7 +77,7 @@ console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、P
 | `closeout` | 实现流水线 | Phase 2，同一次认领内（交付门禁失败时） | `run_agent_execution_loop.py::_attempt_delivery_closeout` |
 | `verifier` | 实现流水线 | Phase 2，同一次认领内 | `run_verifier_agent.py::_choose_verifier_agent` |
 | `review` | 实现流水线 | Phase 2，同一次认领内（开 Draft PR 前） | `run_agent_once.py::resolve_reviewer_agent` |
-| `supervisor` | 实现流水线 | Phase 2 发布路径**或** `kc review` / `kc review-daemon` | `run_agent_once.py::resolve_supervisor_agent` |
+| `supervisor` | 实现流水线 | Phase 2 发布路径**或** `kc supervise` / `kc supervise-daemon` | `run_agent_once.py::resolve_supervisor_agent` |
 | `deliberate` | 讨论与内容生成 | **Phase 0**：每轮先扫 `agent/deliberate` Issue（此时 PRD 尚不存在） | `agent_runner_deliberation_issues.py::_process_single_deliberation_issue` |
 | `content_generation` | 讨论与内容生成 | **横切四个 target**，见下文 | `generated_prd_content.py::generate_prd_content` / `generated_content.py::generate_issue_content` / `generated_issue_prompt_content.py::generate_issue_prompt_content` / `generate_pr_content` |
 | `planner` | 独立入口 | `kc ask`，不在任何 Issue 流水线上 | `cli_parsed_commands/agent.py::run_ask_command` |
@@ -87,13 +92,15 @@ console 的三处矩阵入口（Settings 全局层、Backlog 仓库行齿轮、P
 - 人手动把标签换成 `agent/rework-prd` 后，**Phase 1** 用 `content_generation` 的
   `prd_from_issue` target 把讨论落成 PRD；
 - **Phase 2** 才是实现流水线：`implementation` / `verifier` / `fix` / `closeout` /
-  `review` / `supervisor` 这六步共享同一个 worktree 与同一次 claim，因此 `executor`
+  `review` / `supervisor` 这六个阶段共享同一个 worktree 与同一次 claim 上下文；
+  `fix` / `closeout` 按失败门禁触发，`supervisor` 受 `post_pr_supervisor.enabled`
+  与发布档位控制（当前全局配置默认启用，`--direct-pr` 跳过）。因此 `executor`
   和多数 `auto` 语义都以"本次实现者"为锚。
 
 完整流程见 [Agent Runner](agent-runner.md) 的「复杂需求：异步 Issue 评论讨论」一节，
 状态机见同页「状态流转与两阶段审查」一节。
 
-**入口 B：`kc review` / `kc review-daemon`。** 只驱动 `supervisor`（对已开 PR 的
+**入口 B：`kc supervise` / `kc supervise-daemon`。** 只驱动 `supervisor`（对已开 PR 的
 Issue 单独跑一轮），因此 `supervisor` 是唯一跨 A / B 两个入口的键。
 
 **入口 C：`kc ask`。** `planner` 的唯一消费点。它既没有 Issue 也没有 PRD 上下文，
@@ -111,9 +118,9 @@ Issue 单独跑一轮），因此 `supervisor` 是唯一跨 A / B 两个入口�
 
 ### 两个容易误判的键
 
-- **`supervisor` 跨入口，同键不同义**：发布路径显式把本次实现者传给
-  `resolve_supervisor_agent`，所以那里的 `auto` 沿用实现者；独立跑 `kc review` /
-  `kc review-daemon` 时拿不到实现者，`auto` 回落成按 Issue 标签路由。
+- **`supervisor` 可由不同入口单独触发**：发布路径显式把本次实现者传给
+  `resolve_supervisor_agent`，所以那里的 `auto` 沿用实现者；独立跑 `kc supervise` /
+  `kc supervise-daemon` 时拿不到实现者，`auto` 回落成按 Issue 标签路由。
 - **`content_generation` 是横切阶段，不是"流水线之外"**：四个 target 分别落在
   `kc issue create`（`issue_from_prd`）、`kc issue create --from-prompt`
   （`issue_from_prompt`，产物**不含 PRD 锚点**，因此提示词与回退模板都不能写出
@@ -184,10 +191,10 @@ PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`impl
 
 Settings 的「Agent 管理」区块用粘性 Tab 分两页：**Tab ①「Agent 标签设置」**
 （默认页）编辑每个 agent 的 GitHub 路由标签名 / 颜色 / 描述——这是 `auto`
-解析 Issue 标签的依据；**Tab ②「生命周期 Agent 设置」**放九行矩阵与
+解析 Issue 标签的依据；**Tab ②「生命周期 Agent 设置」**放生命周期矩阵与
 **agent 回退顺序**。
 
-矩阵行的交互口径（三层一致）：九行按上表的三组**触发入口分组**呈现，组标题
+矩阵行的交互口径（三层一致）：各阶段按上表的三组**导航分组**呈现，组标题
 旁有一行组说明，每行生命周期名下再带一行触发时机；下拉里**只有真实取值**
 （已注册 agent / 该阶段的
 `auto` / fix-closeout 的 `executor`），**当前生效值直接选中**；「当前值来源」列

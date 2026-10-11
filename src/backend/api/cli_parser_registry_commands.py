@@ -70,7 +70,7 @@ def add_registry_commands(subparsers: argparse._SubParsersAction) -> None:
     registry_reinit_parser.add_argument(
         "--start-daemons",
         action="store_true",
-        help="Restart daemon and review-daemon after reinitialization.",
+        help="Restart daemon and supervise-daemon after reinitialization.",
     )
 
     registry_remove_parser = registry_subparsers.add_parser(
@@ -91,7 +91,7 @@ def add_registry_commands(subparsers: argparse._SubParsersAction) -> None:
 
     registry_start_parser = registry_subparsers.add_parser(
         "start",
-        help="Start daemon and review-daemon for registered repositories.",
+        help="Start daemon and supervise-daemon for registered repositories.",
     )
     registry_start_group = registry_start_parser.add_mutually_exclusive_group(required=True)
     registry_start_group.add_argument(
@@ -104,14 +104,16 @@ def add_registry_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Start daemons for all enabled repositories.",
     )
     registry_start_parser.add_argument(
+        "--no-supervise-daemon",
         "--no-review-daemon",
+        dest="no_review_daemon",
         action="store_true",
-        help="Only start/stop the agent daemon, skip the review daemon.",
+        help="Only start the agent daemon, skip post-PR supervision.",
     )
 
     registry_stop_parser = registry_subparsers.add_parser(
         "stop",
-        help="Stop daemon and review-daemon for registered repositories.",
+        help="Stop daemon and supervise-daemon for registered repositories.",
     )
     registry_stop_group = registry_stop_parser.add_mutually_exclusive_group(required=True)
     registry_stop_group.add_argument(
@@ -124,7 +126,9 @@ def add_registry_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Stop daemons for all repositories with running processes.",
     )
     registry_stop_parser.add_argument(
+        "--no-supervise-daemon",
         "--no-review-daemon",
+        dest="no_review_daemon",
         action="store_true",
-        help="Only start/stop the agent daemon, skip the review daemon.",
+        help="Only stop the agent daemon, leave post-PR supervision running.",
     )

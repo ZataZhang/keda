@@ -407,3 +407,14 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - **可用的计划口径**：PRD §7.6 Realistic Validation Plan 是机器契约（顶层 `- id: rv-N` 序列，v3 强制），可解析出计划项数与 human/verifier 分组；产出归属优先用 `evidence.json`（结构化 manifest，已被证据门禁校验，强信号），缺失时回退 `rv-N-*` 文件名前缀（弱信号，旧 PRD 命名不全会低报，须标注"按文件名归属，不代表通过"）；报告三件套状态（plan✓ report✓ verifier:PASS）照 `scripts/shared/just/prd_status.py` 的 EVIDENCE 列。
 - **影响树口径**：CLI 的 FILES 列由 `scripts/shared/just/prd_impact_tree.py` 计算——§7.2 Change Impact Tree 节点 × 分支实际 diff 求交（`~touched/judgeable?unresolvable`，明确弱信号、无分支时显示 `-`）。console 要复用需把解析移植到 backend（scripts 脚本不可 import，且 console 跨仓库服务、各仓 scripts 版本不同步），并复用同一套 worktree/git（merge-base/diff/ls-files）定位。
 - **收敛结论**：建议先写 PRD；两个能力（证据计划/产出、影响树触达）共享同一前置"console 按 PRD 读 worktree 证据与分支 diff"，展示落点建议为 PRD 详情头部进度摘要 + 证据 tab 明细分组；弱信号口径与 CLI 逐条对齐。
+
+## 2026-10-10 18:20 · review-base-freshness
+
+> 那么后期如果想要它能够发现这种最新的更新，是不是只要改提示词就行了？
+>
+> 或者说他能够从Skill里面发现线索。
+
+**AI 派生（非用户原话）**
+- 背景/动机：Issue #273 的执行 worktree 创建后，`main` 又收到 PRD 与原型更新；worktree 仍停在旧提交。pre-PR review 读取 worktree 中的文件和 diff，post-PR supervisor 虽能看到远端 base SHA，但没有基线前进即自动刷新并重审的确定性流程，因此后续更新可能未进入审查上下文。
+- 边界/约束：提示词或 Skill 可以要求 Agent 检查最新 base 并发现变化，但要保证审查内容包含更新，还需流程提供新提交内容，或在基线变化时刷新并重新审查。采用提示词/Skill 提示还是 runner 级确定性检查，尚未决定。
+- 收敛结论：这是 Agent Runner review 输入新鲜度问题，适合后续单独评估是否升级为 PRD；不属于当前生命周期时间线 PRD 的范围。

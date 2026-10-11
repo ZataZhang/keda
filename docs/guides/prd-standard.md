@@ -21,6 +21,13 @@ PRD 的章节结构、Human Review Map（介入与风险地图）、Realistic Va
 - 暂缓（已成形但不排期）：`tasks/hold/` — 需求成立、结构完整，但当前没有紧迫场景，主动从待执行队列移出；**不被** `just prd status`、PRD 领锁与验收 hook 扫描（不出现于「待办」或「等验收」）。约定见 `tasks/hold/README.md`。
 - 文件名支持旧格式 `*-prd-*.md` 与优先级格式 `P0/P1/P2/P3-<TYPE>-YYYYMMDD-HHMMSS-<slug>.md`。
 
+### 单 PRD 与聚合 PR 的验收边界
+
+- 普通 Issue PR 沿用 `iar:merge-acceptance version=1`：正文只关联一个 PRD；该 PR 合并的共同接受范围只覆盖这一份 PRD。
+- 夜间批次总 PR 是窄范围例外，必须同时包含 `iar:aggregate-pr version=1` 来源 marker 与 `iar:merge-acceptance version=2`。v2 正文按仓库相对路径稳定排序，逐个且仅逐个列出来源 Issue 对应的唯一 PRD 集；漏列、重复或多列路径均不合规。
+- 合并 v2 总 PR 授权对正文列出的每份 PRD 分别回填验收记录。每份 PRD 仍须在最终合并 tree 中存在并有独立验证计划、证据报告和 verifier 报告；关闭来源 PR 不接受任何 PRD，也不替代其 `Human-Confirmed` 人工记录。
+- v1 普通 PR 的契约不因聚合例外而升级或改写。没有完整来源 marker 和 v2 集合声明的 PR 不能共同接受多份 PRD。
+
 ### Acceptance Checklist 门禁（pre-commit）
 
 本仓库通过 `pre-commit` 本地 hook（`hooks/shared/check_prd_acceptance_checklist.py`）检查 PRD 的 `Acceptance Checklist` 章节是否仍有未勾选项：
