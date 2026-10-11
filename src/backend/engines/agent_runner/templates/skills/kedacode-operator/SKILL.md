@@ -33,7 +33,7 @@ Every example below uses the current command name `kc`. The legacy `iar` command
 
 - **A read-only request gets a read-only command.** Never start `kc run` or `kc registry start` just because the user asked to *view* progress — an inspect, preview, or "just check" request never becomes execution.
 - **`kc run` requires a target** (breaking change): pass `--issue <N>`, a PRD path (resolved via the PRD's `- GitHub Issue:` link — a PRD without one must first go through `kc issue create`), or `--all-ready` for the historical queue-draining behavior. Bare `kc run` fails with a usage error.
-- **Unknown flag, default, or enum value**: read `kc schema --json` — read-only introspection derived from the live command tree: every command, flag, type, required flag, enum choices, default, and an example — instead of guessing from a table.
+- **Unknown flag, default, or enum value**: read `kc schema --json` — read-only introspection derived from the live command tree: every command, flag, type, required flag, enum choices, default, and an example — instead of guessing from a table. One caveat: `required` reflects the declaration layer only, so the persistent-write commands' `--scope` exports as `required=False` even though omitting it exits `2` — always pass `--scope` (and `--repo-id` for repository writes) on those.
 
 ## Consuming `kc` from a script or another Agent
 

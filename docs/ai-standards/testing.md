@@ -202,6 +202,8 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 
 `just test`（local 档）会先读 `.last_tested_commit` 与 `.last_linted_commit` 两个本地通过标记：test 标记命中时直接跳过 pytest，lint 标记命中时跳过 lint 前置。当 `just test` 真正运行测试并通过后，会同时刷新 test 与 full lint 标记，避免刚跑完 `just test` 后再次执行完整 full lint。本地调用默认使用 `pytest -q` 以压低启动/格式化开销，CI 环境（`CI` 非空）下回退到 `-v` 以保留每条用例的结果输出。CI 环境同时禁用这两条快路径，强制走完整 lint + pytest，避免跨 job/host 的 flag 文件泄漏掩盖回归。提交门禁仍会检查 `just test` 标记。
 
+> **local 档可能一条用例都不跑就判绿。** 本仓 `pyproject.toml` 的 `addopts = "--testmon"` 让 pytest 只跑增量库认为受改动影响的用例；在 `.testmondata` 已覆盖当前代码的热工作树上，`uv run pytest tests/ -q` 会打印 `no tests ran` 并以 **退出码 0** 结束，`just test` 随后照常写回 `.last_tested_commit` 标记。因此 local 档绿 **不等于** 用例被执行过：声称"已验证"前必须看 pytest 摘要里的用例数，或改用 `just test all`（`JUST_FULL_TEST_FLAGS=--no-testmon` 强制全跑）与定向 `uv run pytest <受影响文件> -q --no-testmon` 取得非零用例数的证据。交付与 PRD 验收判据不得引用 local 档的退出码。
+
 交付前建议：
 
 - 日常迭代先跑 `just lint`，确认 staged 变更与真实 pre-commit hook 一致。

@@ -122,6 +122,8 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 
 每个参数导出名称、类型、是否必填、枚举取值（`--output` 的 `["table","json"]` 即由此而来）、默认值与示例；顶层同时给出 `exit_codes` 与命令总数。给 agent 写调用代码前先跑它，而不是抄文档。
 
+> **一处例外要记住**：`agent lifecycle set/unset`、`agent preset set`、`agent fallback candidate …` 这些**持久化写命令**的 `--scope` 在导出里显示 `required=False`，因为必填性由命令实现层在使用文件前校验（缺失即以 `USAGE(2)` 退出并给出建议命令），Typer 声明层因此保持 optional——`required` 字段只反映声明层，不反映这条运行期规则。按导出拼调用代码时**必须**照旧带上 `--scope`（repository 还要 `--repo-id`），否则拿到的是退出码 2。
+
 ## labels sync 详解
 
 `kc labels sync` 会在目标 GitHub 仓库中创建或更新一套标准化的 issue 标签，作为整个 agent-runner 工作流的状态基础设施。

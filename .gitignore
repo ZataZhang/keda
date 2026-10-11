@@ -74,6 +74,10 @@ Thumbs.db
 # tree and break the independent-verifier clean-tree gate.
 .iar/agent-runner/
 
+# TOML 原子写的临时文件（同目录唯一命名，正常路径由 writer 清理）：只在进程被
+# 强杀时可能残留，绝不该进版本控制——它会弄脏 clean-tree 门禁。
+*.toml.tmp
+
 # Realistic Validation evidence packages — local PRD flow (`just ai implement`).
 # Commit only the text reports (*.md: verification-plan / evidence-report /
 # verifier-report); keep raw artifacts (screenshots, recordings, captured

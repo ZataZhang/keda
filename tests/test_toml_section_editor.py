@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,48 @@ def test_delete_of_absent_key_never_creates_file(tmp_path: Path) -> None:
     missing_path = tmp_path / "absent.toml"
     update_toml_table_keys(missing_path, _RUNNER_TABLE, {"max_agent_switches": None})
     assert not missing_path.exists()
+
+
+def test_failed_replace_leaves_file_and_directory_untouched(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """替换失败时原文件一字不动、目录不留临时文件。"""
+    before = config_path.read_bytes()
+    temp_names: list[str] = []
+
+    def _capture_and_fail(temp_path: Path, _target: Path) -> None:
+        temp_names.append(Path(temp_path).name)
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(os, "replace", _capture_and_fail)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 9})
+
+    assert config_path.read_bytes() == before
+    assert temp_names, "写回未经过临时文件"
+    assert not [p for p in config_path.parent.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_successive_writes_use_distinct_temp_names(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """每次落盘的临时文件名互不相同——共用固定名会让并发写互相截断。"""
+    observed: list[str] = []
+    real_replace = os.replace
+
+    def _observe(temp_path: Path, target: Path) -> None:
+        observed.append(Path(temp_path).name)
+        real_replace(temp_path, target)
+
+    monkeypatch.setattr(os, "replace", _observe)
+    update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 3})
+    update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 4})
+
+    assert len(observed) == 2
+    assert observed[0] != observed[1]
+    assert b"max_agent_switches = 4" in config_path.read_bytes()
 
 
 def test_array_table_rewrite_keeps_position_and_comments(config_path: Path) -> None:

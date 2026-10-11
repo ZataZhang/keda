@@ -1,8 +1,8 @@
 """保留式 TOML 表键写回。
 
 用 ``tomlkit`` 做 round-trip 编辑：保留文件中的全部注释、空行与格式，只触碰
-调用方点名的键。写入采用「同目录临时文件 + ``os.replace``」原子替换，避免写坏
-配置文件。
+调用方点名的键。写入采用「同目录唯一临时文件 + ``os.replace``」原子替换，避免
+写坏配置文件（固定临时名会在并发写入时互相截断，故取名必须唯一）。
 
 ``config.toml``（机器级）与 ``.kedacode.toml``（仓库级）共用本模块——两处写回语义
 必须一致：**只写请求里显式给出的键**（值为 ``None`` 表示删除该键），文件其余
@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -78,9 +79,31 @@ def _atomic_dump(resolved_path: Path, document: tomlkit.TOMLDocument) -> None:
     rendered_document = tomlkit.dumps(document)
     if resolved_path.is_file() and resolved_path.read_text(encoding="utf-8") == rendered_document:
         return
-    temp_path = resolved_path.with_name(resolved_path.name + ".tmp")
-    temp_path.write_text(rendered_document, encoding="utf-8")
-    os.replace(temp_path, resolved_path)
+    _replace_file_atomically(resolved_path, rendered_document)
+
+
+def _replace_file_atomically(resolved_path: Path, rendered_document: str) -> None:
+    """经同目录**唯一**临时文件写回，失败时不留下残file、原文件一字不动。
+
+    临时文件名必须唯一：两个写入者（例如 Console 保存与并发 CLI 调用）共用同一个
+    ``<name>.tmp`` 时，后写者会在前者的 ``os.replace`` 之前截断同一文件，原子替换
+    反而可能把写了一半的内容换成正式配置。``tempfile.mkstemp`` 在同目录取名消除该
+    窗口；``finally`` 清理保证异常路径不留未被忽略的临时文件。
+    """
+    temp_fd, temp_name = tempfile.mkstemp(
+        dir=str(resolved_path.parent),
+        prefix=f"{resolved_path.name}.",
+        suffix=".tmp",
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(temp_fd, "w", encoding="utf-8") as temp_handle:
+            temp_handle.write(rendered_document)
+            temp_handle.flush()
+            os.fsync(temp_handle.fileno())
+        os.replace(temp_path, resolved_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def _prune_empty_table(document: tomlkit.TOMLDocument, table_path: Sequence[str]) -> None:

@@ -137,7 +137,9 @@ max_issues = 1
 # 未声明的键继续回落既有配置键，因此**不写本节时行为与今天完全一致**。
 # 跨 agent 回退（主 agent 挂了换下一个）由下面的
 # [agent_runner.runner] agent_fallback_order + max_agent_switches 驱动，
-# 与本节"选主 agent"是两件事。
+# 与本节"选主 agent"是两件事；要给回退候选各绑一个模型预设时，
+# 改用同节的 [[agent_runner.runner.agent_fallback_candidates]] 有序数组表
+# （非空时它是运行时事实源，见 docs/guides/model-presets.md §7.3）。
 #
 # 完整键名与优先级说明见 docs/guides/lifecycle-agent-matrix.md。
 #
@@ -553,6 +555,16 @@ verification_commands = [
 #   一次性绝对化；本节只关心值，不关心解析位置。
 agent_fallback_order = ["qoder", "codex", "claude"]
 max_agent_switches = 4
+# 需要"同一个 agent 用不同模型预设再试一次"时，改用有序数组表：每项是一个
+# (agent, preset) 候选，数组顺序就是候选顺序，max_agent_switches 按候选步数计。
+# 一旦本表非空，它就是回退链的**运行时事实源**，上面的 agent_fallback_order
+# 只作为无预设时的兼容顺序视图；preset 省略表示沿用该候选 agent 的默认模型。
+# 完整语义见 docs/guides/model-presets.md §7.3（网页与 CLI 的写入落点也在该节）。
+# [[agent_runner.runner.agent_fallback_candidates]]
+# agent = "qoder"
+# preset = "qoder-qwen3_8-flash_max"
+# [[agent_runner.runner.agent_fallback_candidates]]
+# agent = "codex"
 [agent_runner.memory]
 enabled = true
 base_dir = ".kedacode/memory"
