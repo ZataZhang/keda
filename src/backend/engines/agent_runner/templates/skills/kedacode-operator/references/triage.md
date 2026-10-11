@@ -35,7 +35,20 @@ What the markers do **not** tell you, so do not over-read them:
 - **Coverage is one process layer on one machine.** Sub-Agents spawned inside an Agent are `unobserved`, and the ledger is the local `~/.kedacode/console.db` — no cross-machine aggregation.
 - **`[iar-invocation-coverage-incomplete]` means the list may be incomplete**, not that the run failed. Business results are unaffected by observation faults.
 
-There is no stall threshold, no stall-judgement program, and no auto-takeover behind these markers: they make a stall *diagnosable*, and the decision plus the recovery command stay with the operator.
+These markers alone stay diagnosable: they carry no threshold and take no action. The optional, **off-by-default** stall supervisor is a separate component — see the next subsection.
+
+### When a stalled run *should* have been cancelled and was not
+
+`[agent_runner.stall_supervisor]` adds a per-attempt observer that asks one read-only Agent whether a frozen attempt is thinking or stuck, and cancels the process group only when the answer is actionable. It writes `[iar-stall-check]`, `[iar-stall-diagnosis]`, `[iar-stall-handoff]`, and `[iar-stall-cancel]` lines into the same per-Issue log, so `kc logs --issue <N>` shows why it acted — or why it did not:
+
+- **Supervision is off** (`enabled = false`, the default): no observer thread, no model call, behavior is byte-for-byte what it was before the feature. Absence of `[iar-stall-*]` lines usually means this.
+- **The call was not supervisable**: only runs with an Issue identity and a run-phase profile get an observer. `kc ask`, deliberation, and read-only diagnosis calls never do.
+- **The supervisor has no read-only `generate` profile**: it self-disables and records one audit line rather than diagnosing with a write-capable Agent.
+- **The verdict was not `stalled`**: `blocked` and `uncertain` hand off (`[iar-stall-handoff]`) and touch nothing. A `stalled` answer missing its summary or evidence is downgraded to `uncertain` — a mis-spelled word does not earn the right to kill a process.
+- **The recheck before cancelling failed**: the attempt had already finished, the scene fingerprint changed while the model was thinking, or `probe_live_attempt` could not confirm that this attempt owns those PIDs. Any of these hands off instead.
+- **A frozen fingerprint is not a frozen stdout**: progress is HEAD, branch, status/diff fingerprints, finished-call count, and last event time — deliberately not log volume, because a loop that prints the same error looks busy and is not progressing.
+
+Cancelling is not a new recovery path: the cancelled attempt flows into the existing failure classification, retry ladder, and gates. Turn it on only when the user accepts that KedaCode may terminate a live writing process; both intervals must be positive or config loading refuses before any spawn.
 
 ## Recover
 

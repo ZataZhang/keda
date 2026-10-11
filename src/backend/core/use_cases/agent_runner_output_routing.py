@@ -33,11 +33,13 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, cast
 
+from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.interfaces.output_timestamps import TimestampedStreamFormatter
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import CommandResult
+from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
 from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
 
 # Logger namespace the per-Issue handler attaches to. All backend modules log
@@ -94,6 +96,8 @@ class _OutputRoutedProcessRunner:
         except (TypeError, ValueError):
             self._accepted_params = set()
 
+    # 适配器遵循 IProcessRunner 的公开关键字契约；只排除签名重复，委托逻辑仍参与扫描。
+    # jscpd:ignore-start
     def run(
         self,
         command: Sequence[str],
@@ -107,7 +111,9 @@ class _OutputRoutedProcessRunner:
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
+        attempt_key: str | None = None,
     ) -> CommandResult:
+        # jscpd:ignore-end
         """Delegate to the wrapped runner, defaulting ``output_sink`` per Issue.
 
         签名与 :class:`IProcessRunner` 逐参数对齐，但只把被包装运行器实际
@@ -124,12 +130,36 @@ class _OutputRoutedProcessRunner:
             "label": label,
             "output_sink": output_sink if output_sink is not None else self._sink,
             "output_protocol": output_protocol,
+            "attempt_key": attempt_key,
         }
         if self._accepted_params:
             run_kwargs = {
                 name: value for name, value in run_kwargs.items() if name in self._accepted_params
             }
         return self._wrapped.run(command, **run_kwargs)
+
+    def probe_live_attempt(self, attempt_key: str) -> AttemptOwnership:
+        """把进程归属复核委托给被包装的执行器——登记册在它手里，包装器不持有进程。
+
+        被包装对象没有这个能力（测试精简 fake）时，用端口自带的 fail-closed 默认
+        实现给出同一个"不可证实"结论：包装器不发明第二套交班语义，监督器因此
+        只会交班、绝不会对陌生进程发信号。
+        """
+        delegate = getattr(self._wrapped, "probe_live_attempt", None)
+        if callable(delegate):
+            return delegate(attempt_key)
+        return IProcessRunner.probe_live_attempt(cast("IProcessRunner", self._wrapped), attempt_key)
+
+    def cancel_live_attempt(
+        self, attempt_key: str, expected: AttemptOwnership
+    ) -> StallCancelOutcome:
+        """精确取消同样只委托给被包装的执行器；无能力时原样拒绝。"""
+        delegate = getattr(self._wrapped, "cancel_live_attempt", None)
+        if callable(delegate):
+            return delegate(attempt_key, expected)
+        return IProcessRunner.cancel_live_attempt(
+            cast("IProcessRunner", self._wrapped), attempt_key, expected
+        )
 
 
 class _IssueLogWriter:

@@ -1,44 +1,44 @@
-"use client";
+"use client"
 
 // 生命周期行的 agent 下拉选择器（全局矩阵与 PRD 覆盖抽屉共用）。
 //
 // 候选值由调用方经 `buildLifecycleOptions` 传入（只含真实可取的值：已注册 agent
 // 以及该阶段允许的 auto / executor），组件只负责渲染与回传选中值。
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+} from "@/components/ui/dropdown-menu"
+import { AgentRunnerOptionRadioItem } from "@/components/agent-runner/agent-runner-option-radio-item"
+import { cn } from "@/lib/utils"
 
 /** 下拉框里的一个候选值。 */
 export type LifecycleOption = {
-  value: string;
-  label: string;
-  description?: string;
-};
+  value: string
+  label: string
+  description?: string
+}
 
 interface LifecycleAgentSelectProps {
   /** 生命周期键（仅用于拼接 data-testid）。 */
-  lifecycleKey: string;
+  lifecycleKey: string
   /** 候选值列表。 */
-  options: LifecycleOption[];
+  options: LifecycleOption[]
   /** 当前选中值。 */
-  value: string;
+  value: string
   /** 选中值变更回调。 */
-  onValueChange: (value: string) => void;
+  onValueChange: (value: string) => void
   /** 为空时要显示的占位符。 */
-  placeholder: string;
+  placeholder: string
   /** data-testid 前缀，区分矩阵与 PRD 抽屉。 */
-  testIdPrefix: string;
+  testIdPrefix: string
   /** 是否禁用。 */
-  disabled?: boolean;
+  disabled?: boolean
   /** 追加到触发按钮上的布局类名。 */
-  className?: string;
+  className?: string
 }
 
 /**
@@ -73,23 +73,16 @@ export function LifecycleAgentSelect({
       <DropdownMenuContent align="start" className="min-w-48">
         <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
           {options.map((option) => (
-            <DropdownMenuRadioItem
+            <AgentRunnerOptionRadioItem
               key={option.value}
               value={option.value}
-              data-testid={`${testIdPrefix}-option-${lifecycleKey}-${option.value}`}
-            >
-              <span className="flex flex-col">
-                <span>{option.label}</span>
-                {option.description ? (
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                    {option.description}
-                  </span>
-                ) : null}
-              </span>
-            </DropdownMenuRadioItem>
+              label={option.label}
+              description={option.description}
+              testId={`${testIdPrefix}-option-${lifecycleKey}-${option.value}`}
+            />
           ))}
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
+  )
 }

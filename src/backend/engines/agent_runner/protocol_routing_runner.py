@@ -29,12 +29,18 @@ from backend.core.shared.models.agent_spec import (
     PROMPT_DELIVERY_ARGV_TAIL,
     PROMPT_DELIVERY_STDIN,
 )
+from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
 from backend.infrastructure.agent_stream_usage import attach_agent_observations
 from backend.infrastructure.process_runner import CommandFailedError
 
 
 class ProtocolRoutingProcessRunner(IProcessRunner):
-    """按 ``output_protocol`` 把非 plain 协议路由到注册表实现的执行器。"""
+    """按 ``output_protocol`` 把非 plain 协议路由到注册表实现的执行器。
+
+    活跃 attempt 的登记册在**内层**通用执行器手里（它才是持有 ``Popen`` 的一层），
+    所以进程归属复核与精确取消都原样委托给内层；本类不实现第二套取消语义，
+    也不会在内层没有能力时假装成功。
+    """
 
     def __init__(
         self,
@@ -45,6 +51,18 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
         self._inner = inner
         self._protocol_registry = protocol_registry
 
+    def probe_live_attempt(self, attempt_key: str) -> AttemptOwnership:
+        """把进程归属复核委托给内层执行器。"""
+        return self._inner.probe_live_attempt(attempt_key)
+
+    def cancel_live_attempt(
+        self, attempt_key: str, expected: AttemptOwnership
+    ) -> StallCancelOutcome:
+        """把精确取消委托给内层执行器（只有它知道自己的进程组）。"""
+        return self._inner.cancel_live_attempt(attempt_key, expected)
+
+    # 这里实现 IProcessRunner 的同一关键字契约；只排除签名重复，路由逻辑仍参与扫描。
+    # jscpd:ignore-start
     def run(
         self,
         command: Sequence[str],
@@ -58,7 +76,9 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
+        attempt_key: str | None = None,
     ) -> CommandResult:
+        # jscpd:ignore-end
         """执行一条命令；非 plain 输出协议交由注册表解析出的实现中继。"""
         if output_protocol is None or output_protocol == PLAIN_PROTOCOL_ID:
             return self._inner.run(
@@ -74,6 +94,7 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
                 # plain agent 调用也把协议 id 传下去：内层据此区分"agent 调用"
                 # 与"普通命令"，只有前者才做 token 用量的事后解析。
                 output_protocol=output_protocol,
+                attempt_key=attempt_key,
             )
         protocol = self._protocol_registry.resolve(output_protocol)
         started_mono = time.monotonic()
@@ -92,6 +113,7 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
                 label=label,
                 collect_stdout=True,
                 output_sink=output_sink,
+                attempt_key=attempt_key,
             )
         )
         result = dataclasses.replace(

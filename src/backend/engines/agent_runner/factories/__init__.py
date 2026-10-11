@@ -15,6 +15,10 @@ from typing import TYPE_CHECKING, Callable, Sequence
 
 from backend.core.shared.interfaces.agent_output_view import IAgentOutputView
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.interfaces.agent_session import (
+    IForegroundSessionLauncher,
+    IPreviewProcessManager,
+)
 from backend.core.shared.interfaces.runner_console import (
     IBacklogStore,
     IRepositoryRegistryEditor,
@@ -74,10 +78,12 @@ __all__ = [
     "create_content_generator",
     "create_console_store",
     "create_event_sink",
+    "create_foreground_session_launcher",
     "create_github_client",
     "create_loop_clock",
     "create_loop_state_store",
     "create_planner_runner",
+    "create_preview_process_manager",
     "create_process_runner",
     "create_process_supervisor",
     "create_registry_editor",
@@ -411,3 +417,25 @@ def create_loop_state_store(state_path: Path | None = None) -> JsonLoopStateStor
 def create_loop_clock() -> SystemClock:
     """Create the production wall-clock implementation for the loop daemon."""
     return SystemClock()
+
+
+def create_foreground_session_launcher() -> IForegroundSessionLauncher:
+    """创建裸 ``kc`` 原生执行器会话的前台启动器。
+
+    与 :func:`create_process_runner` 的分工是刻意的：本启动器**不捕获输出**，
+    provider 继承当前终端的 stdin/stdout/stderr，因此拿到真实 TTY。
+    """
+    from backend.infrastructure.foreground_session_launcher import (
+        SubprocessForegroundSessionLauncher,
+    )
+
+    return SubprocessForegroundSessionLauncher()
+
+
+def create_preview_process_manager() -> IPreviewProcessManager:
+    """创建按需项目预览的受管进程管理器（记录落在本机状态目录）。"""
+    from backend.infrastructure.preview_process_manager import (
+        SubprocessPreviewProcessManager,
+    )
+
+    return SubprocessPreviewProcessManager()

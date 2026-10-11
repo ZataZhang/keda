@@ -1,37 +1,37 @@
-"use client";
+"use client"
 
 // 生命周期设置页共用的「预设单选下拉」：阶段绑定与回退候选绑定都用它，
 // 候选项可包含本次新建、尚未落盘的预设（以 isNew 标注）。
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button"
+import { AgentRunnerOptionRadioItem } from "@/components/agent-runner/agent-runner-option-radio-item"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown-menu"
 
 export interface PresetOption {
-  value: string;
-  label: string;
-  isNew?: boolean;
+  value: string
+  label: string
+  isNew?: boolean
 }
 
 export interface PresetSelectProps {
   /** 当前选中值（空串表示未绑定）。 */
-  value: string;
+  value: string
   /** 候选预设（含本次新建、尚未落盘的预设）。 */
-  options: PresetOption[];
+  options: PresetOption[]
   /** 选中值变更回调。 */
-  onChange: (value: string) => void;
+  onChange: (value: string) => void
   /** data-testid 前缀。 */
-  testId: string;
+  testId: string
   /** 未绑定时的占位文案。 */
-  placeholder?: string;
+  placeholder?: string
   /** 是否允许清空（绑定选择器用）。 */
-  allowClear?: boolean;
+  allowClear?: boolean
 }
 
 /**
@@ -48,7 +48,7 @@ export function PresetSelect({
   placeholder = "未绑定",
   allowClear = false,
 }: PresetSelectProps) {
-  const currentLabel = options.find((option) => option.value === value)?.label;
+  const currentLabel = options.find((option) => option.value === value)?.label
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -65,28 +65,22 @@ export function PresetSelect({
       <DropdownMenuContent align="start" className="min-w-48">
         <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
           {allowClear ? (
-            <DropdownMenuRadioItem
+            <AgentRunnerOptionRadioItem
               value=""
-              data-testid={`${testId}-option-clear`}
-            >
-              {placeholder}
-            </DropdownMenuRadioItem>
+              label={placeholder}
+              testId={`${testId}-option-clear`}
+            />
           ) : null}
           {options.map((option) => (
-            <DropdownMenuRadioItem
+            <AgentRunnerOptionRadioItem
               key={option.value}
               value={option.value}
-              data-testid={`${testId}-option-${option.value}`}
-            >
-              <span className="flex flex-col">
-                <span>{option.label}</span>
-                {option.isNew ? (
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                    本次新建（与绑定一同保存）
-                  </span>
-                ) : null}
-              </span>
-            </DropdownMenuRadioItem>
+              label={option.label}
+              description={
+                option.isNew ? "本次新建（与绑定一同保存）" : undefined
+              }
+              testId={`${testId}-option-${option.value}`}
+            />
           ))}
         </DropdownMenuRadioGroup>
         {options.length === 0 ? (
@@ -96,5 +90,5 @@ export function PresetSelect({
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
+  )
 }
