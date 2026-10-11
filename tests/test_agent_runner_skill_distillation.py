@@ -17,6 +17,7 @@ from backend.core.agent.memory import (
 from backend.core.agent.memory.protocols import ShortTermAttempt, ShortTermContextPayload
 from backend.core.shared.models.agent_runner import (
     AgentCommitResult,
+    AgentFallbackCandidate,
     AppConfig,
     AttemptResult,
     CommandResult,
@@ -28,6 +29,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.agent_runner_skill_distillation import (
     _SkillDistillationRequest,
+    _effective_fallback_agent_names,
     _format_distillation_attempt_history,
     _try_distill_skill_after_success,
 )
@@ -498,3 +500,21 @@ def test_promote_draft_to_skills_moves_file(tmp_path: Path) -> None:
     assert (tmp_path / "promoted" / "ruff-f401.md").is_file()
     promoted_text = (tmp_path / "promoted" / "ruff-f401.md").read_text(encoding="utf-8")
     assert "draft: false" in promoted_text
+
+
+def test_effective_fallback_agent_names_follows_candidate_array() -> None:
+    """提炼证据回显有效候选链：候选数组接管后不报告 stale 旧名单，同 agent 去重。"""
+    config = AppConfig(
+        runner=RunnerConfig(
+            agent_fallback_order=("claude", "kimi", "codex"),
+            agent_fallback_candidates=(
+                AgentFallbackCandidate(agent="codex", preset="x"),
+                AgentFallbackCandidate(agent="claude", preset="y"),
+                AgentFallbackCandidate(agent="claude", preset=None),
+            ),
+        )
+    )
+    assert _effective_fallback_agent_names(config) == ("codex", "claude")
+
+    legacy_config = AppConfig(runner=RunnerConfig(agent_fallback_order=("qoder", "codex")))
+    assert _effective_fallback_agent_names(legacy_config) == ("qoder", "codex")

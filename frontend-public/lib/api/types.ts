@@ -578,6 +578,8 @@ export type BacklogEvidenceFile = {
   media_type: string;
   role: BacklogEvidenceRole;
   artifact_token: string;
+  /** 文件来源：``worktree``（执行工作区、尚未合并）或 ``main``（主仓库）。 */
+  source: "worktree" | "main";
 };
 
 /**
@@ -593,6 +595,93 @@ export type BacklogPrdEvidenceManifest = {
   evidence_dir: string;
   exists: boolean;
   files: BacklogEvidenceFile[];
+  /**
+   * 读取状态：``complete`` 表示候选目录成功枚举；``unavailable`` 表示工作区发现
+   * 失败或多重匹配、无法确定证据来源——此时不得把结果当作「确认无文件」的空态呈现。
+   */
+  status: "complete" | "unavailable";
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRD 交付进度聚合（只读）
+// Keep these aligned with the backend dataclasses in
+// `src/backend/core/use_cases/backlog_prd_progress.py`。所有口径为弱信号：
+// 文件归属 ≠ 验证通过，影响树触碰 ≠ 改对；不可比较显示 null/`-`，读取失败单独
+// 用状态字段披露，不得用空数组或零冒充成功读取。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 验证计划（§7.6）里的一个顶层条目。 */
+export type PrdProgressPlannedItem = {
+  id: string;
+  summary: string;
+  reviewer: string | null;
+};
+
+/** 验收清单勾选读数；``unavailable`` 时 checked/total 为 null。 */
+export type PrdProgressChecklist = {
+  status: "available" | "unavailable";
+  checked: number | null;
+  total: number | null;
+};
+
+/** 报告三件套的「是否已产出」；读取不完整时未知项为 null。 */
+export type PrdProgressReports = {
+  verification_plan: boolean | null;
+  evidence_report: boolean | null;
+  verifier_report: boolean | null;
+};
+
+/** 证据计划 vs 产出的聚合读数。 */
+export type PrdProgressEvidence = {
+  /** null 表示来源不可用（不伪造空计划）；成功读取但无计划时为 ``[]``。 */
+  planned: PrdProgressPlannedItem[] | null;
+  produced_ids: string[];
+  produced_planned_count: number | null;
+  file_count: number | null;
+  /** 产出归属口径：清单映射 / 文件名前缀 / 两者混合 / 无可归属项。 */
+  attribution_source: "manifest" | "filename" | "mixed" | "none";
+  status: "complete" | "partial" | "unavailable";
+  reports: PrdProgressReports;
+};
+
+/** 影响树触达读数（弱信号）；无法计算时整个对象为 null。 */
+export type PrdProgressImpact = {
+  touched: number;
+  judgeable: number;
+  unresolvable: number;
+};
+
+/** 工作区命中信息（不返回本地路径）。 */
+export type PrdProgressWorktree = {
+  branch: string | null;
+};
+
+/** 详情头部与证据标签共用的聚合读数（一次拉取，不轮询）。 */
+export type BacklogPrdProgress = {
+  prd_path: string;
+  prd_stem: string;
+  /** 事实来源：``worktree`` / ``main`` / null（来源不可用）。 */
+  prd_source: string | null;
+  /** 归档终态用 ``not_applicable``；其余见后端 WorktreeMatchStatus。 */
+  worktree_status:
+    | "matched"
+    | "none"
+    | "unavailable"
+    | "ambiguous"
+    | "not_applicable";
+  worktree: PrdProgressWorktree | null;
+  checklist: PrdProgressChecklist;
+  evidence: PrdProgressEvidence;
+  /** impact=null 时由此字段说明原因（`terminal_archive` / `no_worktree` / 等）。 */
+  impact_status:
+    | "available"
+    | "terminal_archive"
+    | "no_worktree"
+    | "no_tree"
+    | "no_nodes"
+    | "no_base"
+    | "unavailable";
+  impact: PrdProgressImpact | null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -625,6 +714,51 @@ export type PrdLifecycleEventView = {
   detail: Record<string, unknown>;
 };
 
+/**
+ * 一次真实进程调用在「执行过程」视图里的展示行。
+ *
+ * 字段与后端 `PrdInvocationRow` 逐字对应，全部来自调用账本已落库的事实：
+ * `outcome` 为闭集语义（ok / failed / timeout / error / unclosed / incomplete），
+ * 未闭合调用的 `finished_at` 与 `duration_seconds` 恒为 null（前端不得估算）；
+ * 模型三态由 requested/reported/model_source 共同表达。
+ */
+export type PrdInvocationRow = {
+  invocation_id: string;
+  run_id: string;
+  attempt_number: number | null;
+  phase: string;
+  role: string;
+  executor: string;
+  outcome: string;
+  failure_category: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  requested_model: string | null;
+  reported_model: string | null;
+  model_source: string | null;
+  token_usage: Record<string, unknown> | null;
+  retry_of: string | null;
+  retry_reason: string | null;
+  exit_code: number | null;
+  log_locator: string | null;
+};
+
+/**
+ * 调用明细读取区（缺口成因必须可区分，不得由前端推测）。
+ *
+ * 三种成因页面各说各话：`available=false` 只表示**账本读不到**（存储不具备 Issue 级
+ * 调用读端，或读取异常）；「该 PRD 没有关联 Issue」是**无从归属**，后端根本不挂这个区
+ * （`PrdLifecycleDetail.invocations` 为 null/缺位）；`available=true` 且 `rows` 为空
+ * 表示账本可读但确实没有记录。`truncated=true` 表示返回条数已达读取上限，展示的不是
+ * 完整历史——此时某个尝试没有行不代表它没调用过。
+ */
+export type PrdInvocationDetail = {
+  available: boolean;
+  truncated: boolean;
+  rows: PrdInvocationRow[];
+};
+
 /** 单个 PRD 的生命周期详情（Backlog 详情“执行过程”标签的数据源）。 */
 export type PrdLifecycleDetail = {
   repo_id: string;
@@ -642,6 +776,8 @@ export type PrdLifecycleDetail = {
   events: PrdLifecycleEventView[];
   /** false 表示该 PRD 还没有任何 lifecycle run/event。 */
   has_data: boolean;
+  /** 旧响应没有该字段，此时按「无调用明细区」处理。 */
+  invocations?: PrdInvocationDetail | null;
 };
 
 /** 仓库级 PRD 生命周期统计中的单行 PRD 明细。 */
@@ -870,27 +1006,6 @@ export type LifecycleAgentEntryGroup = {
   summary: string;
 };
 
-/** 生命周期矩阵某视角的完整视图。 */
-export type LifecycleAgentsView = {
-  scope: LifecycleAgentScope;
-  repo_id: string | null;
-  agents: string[];
-  lifecycles: LifecycleAgentEntry[];
-  /** 触发入口分组，按展示顺序排列。 */
-  entry_groups: LifecycleAgentEntryGroup[];
-  /** 来源层 key -> 中文标签。 */
-  source_layers: Record<string, string>;
-  /** 本层「恢复/删除本键」操作的提示文案。 */
-  restore_hint: string;
-};
-
-/** agent 回退顺序视图。 */
-export type AgentFallbackOrderView = {
-  agent_fallback_order: string[];
-  max_agent_switches: number;
-  agents: string[];
-};
-
 /** 单个 agent 的路由标签配置。 */
 export type AgentLabelEntry = {
   agent: string;
@@ -920,6 +1035,116 @@ export type PrdAgentOverrideUpdateResponse = {
   repo_id: string;
   prd_path: string;
   overrides: Record<string, string>;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 聚合生命周期设置（矩阵 + 模型预设 + 执行器回退候选）
+// 与后端 `build_lifecycle_settings_view` / `build_fallback_candidates_view` 对齐。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 逐字段来源标签（后端 `FIELD_SOURCE_*`）；agent 字段还可能取配置层名。 */
+export type LifecycleFieldSource =
+  | "preset"
+  | "inherited"
+  | "agent_default"
+  | "not_supported";
+
+/** 单个生命周期阶段逐字段的来源。`agent` 除四种来源标签外还可能是层名（global/repository/legacy/builtin）。 */
+export type LifecycleRowFieldSources = {
+  agent: string;
+  preset: string | null;
+  model: string;
+  reasoning_effort: string;
+};
+
+/** 聚合视图里一个生命周期阶段的完整行（含最终生效值、逐字段来源与影响阶段）。 */
+export type LifecycleSettingsRow = {
+  key: LifecycleAgentKey;
+  label: string;
+  /** 该阶段当前绑定的预设名（未绑定为 null）。 */
+  preset_name: string | null;
+  /** 最终生效 agent（跟随实现者且无上下文时可能为 null）。 */
+  effective_agent: string | null;
+  model: string | null;
+  reasoning_effort: string | null;
+  field_sources: LifecycleRowFieldSources;
+  /** fix / closeout 无自绑时整体继承实现阶段解析结果。 */
+  is_inherited: boolean;
+  follows_implementation: boolean;
+  /** 生效 agent 是否声明了 model 参数模板。 */
+  model_supported: boolean;
+  reasoning_effort_supported: boolean;
+  /** 绑定预设共享的其它阶段（改这个预设会牵动的阶段）。 */
+  affected_stages: LifecycleAgentKey[];
+};
+
+/** 预设定义的来源层（scope=repository 时对比全局得出）。 */
+export type PresetDefinitionSource =
+  | "global"
+  | "repository_only"
+  | "repository_overrides";
+
+/** 一个命名模型预设的定义（原子三元组 agent/model/reasoning_effort）。 */
+export type AgentPresetDefinition = {
+  name: string;
+  agent: string;
+  model: string | null;
+  reasoning_effort: string | null;
+  model_supported: boolean;
+  reasoning_effort_supported: boolean;
+  /** 当前绑定了该预设的生命周期阶段。 */
+  bound_stages: LifecycleAgentKey[];
+  source: PresetDefinitionSource;
+};
+
+/** 单个回退候选（agent + 可选的同 agent 预设）在视图里的展开结果。 */
+export type FallbackCandidateRow = {
+  position: number;
+  agent: string;
+  preset: string | null;
+  model: string | null;
+  reasoning_effort: string | null;
+  model_supported: boolean;
+  reasoning_effort_supported: boolean;
+  field_sources: {
+    preset: string | null;
+    model: string;
+    reasoning_effort: string;
+  };
+};
+
+/** 执行器回退候选视图（有序候选 + 候选步数预算 + 可用 agent）。 */
+export type AgentFallbackCandidatesView = {
+  candidates: FallbackCandidateRow[];
+  max_agent_switches: number;
+  /** 预算按候选步数消耗（后端恒为 true）。 */
+  budget_by_candidate_step: boolean;
+  agents: string[];
+};
+
+/** 聚合生命周期设置的完整读写视图。 */
+export type LifecycleSettingsView = {
+  scope: LifecycleAgentScope;
+  repo_id: string | null;
+  agents: string[];
+  lifecycles: LifecycleSettingsRow[];
+  presets: AgentPresetDefinition[];
+  fallback: AgentFallbackCandidatesView;
+  /** 来源标签 -> 中文说明（后端下发，前端只渲染）。 */
+  field_source_vocabulary: Record<string, string>;
+};
+
+/** 预设 upsert 载荷（`model` / `reasoning_effort` 给 null 表示不设置该字段）。 */
+export type AgentPresetPayload = {
+  agent: string;
+  model: string | null;
+  reasoning_effort: string | null;
+};
+
+/** 回退候选写回项（完整期望数组的一项）。 */
+export type FallbackCandidateWriteEntry = {
+  agent: string;
+  preset: string | null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -962,12 +1187,14 @@ export type LaunchOptionsView = {
 /**
  * 「开始此 PRD」的高级选项载荷；全部可选，缺省即不加任何旗标。
  *
- * 每个字段与 `kc run` 同名旗标一一对应，由后端折算为 argv 片段。
+ * 普通发布字段与 `kc run` 同名旗标一一对应，由后端折算为 argv 片段；
+ * `auto_merge_prd` 则将授权持久化到目标 Issue 标签。
  * 直出 PR（`direct_pr`）不在其中：backlog start 的目标按构造就是带 PRD 锚点的
  * Issue，CLI 对该组合硬性拒绝，后端在发起端返回 400，因此前端不暴露该开关。
  */
 export type StartPrdLaunchOptions = {
   fast_merge?: boolean;
+  auto_merge_prd?: boolean;
   agent?: string | null;
   preset?: string | null;
   model?: string | null;

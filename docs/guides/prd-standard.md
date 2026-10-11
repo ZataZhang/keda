@@ -24,6 +24,7 @@ PRD 的章节结构、Human Review Map（介入与风险地图）、Realistic Va
 ### 单 PRD 与聚合 PR 的验收边界
 
 - 普通 Issue PR 沿用 `iar:merge-acceptance version=1`：正文只关联一个 PRD；该 PR 合并的共同接受范围只覆盖这一份 PRD。
+- Backlog 对单个 PRD 显式选择自动合并时，Issue 带 `prd-auto-merge` 标签：这会授权队列跳过独立 verifier 并在其余门禁通过后合并；该设置不产生人工确认，也不要求或触发合并后修改 PRD 的 `Human-Confirmed` 清单、验收横幅或 Change Log。
 - 夜间批次总 PR 是窄范围例外，必须同时包含 `iar:aggregate-pr version=1` 来源 marker 与 `iar:merge-acceptance version=2`。v2 正文按仓库相对路径稳定排序，逐个且仅逐个列出来源 Issue 对应的唯一 PRD 集；漏列、重复或多列路径均不合规。
 - 合并 v2 总 PR 授权对正文列出的每份 PRD 分别回填验收记录。每份 PRD 仍须在最终合并 tree 中存在并有独立验证计划、证据报告和 verifier 报告；关闭来源 PR 不接受任何 PRD，也不替代其 `Human-Confirmed` 人工记录。
 - v1 普通 PR 的契约不因聚合例外而升级或改写。没有完整来源 marker 和 v2 集合声明的 PR 不能共同接受多份 PRD。

@@ -66,10 +66,12 @@ recovery_retry_delay_seconds = 30
 agent_fallback_order = ["qoder", "codebuddy"]
 # 最多切换 agent 次数（order=[a,b,c] 且此值=2 时最多尝试 3 个 agent）
 max_agent_switches = 2
-# 瞬时网络错误（socket 断开 / 5xx / 超时）的就地重试次数
+# 瞬时网络/传输错误（socket 断开 / 5xx / 网关超时）的就地重试次数
 transient_retry_attempts = 2
 # 瞬时错误每次重试前等待的秒数
 transient_retry_delay_seconds = 10
+# agent 进程超时后，在同一 session 续跑的额外轮数；按 session 计，默认再给一轮
+timeout_resume_attempts = 1
 timeout_seconds = 14400
 fix_agent_enabled = true
 inactivity_timeout_seconds = 1200
@@ -199,7 +201,7 @@ review_prompt_template = []
 # 是否启用 post-PR supervisor
 enabled = true
 # 执行 supervisor 的 agent
-supervisor_agent = "auto"
+supervisor_agent = "qoder"
 # supervisor 要求修复时的最大修复 / rebase 次数
 max_repair_attempts = 3
 # supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数

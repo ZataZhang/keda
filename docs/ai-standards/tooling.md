@@ -142,7 +142,7 @@
 - 准备把 pending PRD 归档时，使用 `--check-provided --archive-ready <prd-path>` 显式启用归档门禁：Final Reconciliation 完整，且验收状态横幅与 §9 一致（`Human-Confirmed` 仍有空框 → `🧍 待人工验收`，一个也没有 → `✅ 已验收`；`⬜ 未开工`、缺横幅或认不出状态词都不可归档）；普通 `--check-provided` 不会提前要求这些归档记录
 - hook 只做 `Human-Confirmed` 分组感知的空框扫描，不看横幅，横幅一致性由 skill checker 把关。hook 随模板同步而 skill 可选安装，二者不能互相 import，所以 hook 自带一份轻量分组解析（`###`–`######` 标题或整行加粗标签为分组；嵌套按“包含它的任一层是否人属”判定；前缀匹配 `human-confirmed` 且大小写不敏感），语义须与 skill 的 `prd_contract` 保持一致，改动分组语义时两处一起改
 
-**PRD 归档动作**：独立 verifier `PASS` 且执行侧条目全部完成后，随交付改动（分支 / PR）一并将对应 PRD 从 `tasks/pending/` 移动到 `tasks/archive/`，横幅与 §9 对齐——不等人工验收，也不在合并后另起一次移动。因此“`tasks/archive/` 里有这条 PRD”等价于“代码已落地”。人工验收的结果只回填验收记录；若验收发现 PRD 自身的 oracle / 范围未达成，则把 PRD 移回 `tasks/pending/` 重开（横幅 `⬜ 未开工`、追加 Change Log），需求本身变了则新开关联 PRD。
+**PRD 归档动作**：通常在独立 verifier `PASS` 且执行侧条目全部完成后，随交付改动（分支 / PR）一并将对应 PRD 从 `tasks/pending/` 移动到 `tasks/archive/`，横幅与 §9 对齐——不等人工验收，也不在合并后另起一次移动。因此“`tasks/archive/` 里有这条 PRD”等价于“代码已落地”。人工验收的结果只回填验收记录；若验收发现 PRD 自身的 oracle / 范围未达成，则把 PRD 移回 `tasks/pending/` 重开（横幅 `⬜ 未开工`、追加 Change Log），需求本身变了则新开关联 PRD。例外：Backlog 对单个 PRD 显式选择 `prd-auto-merge` 时，runner 跳过独立 verifier 但保留仓库验证、PR checks 与分支保护；合并队列可越过该 PRD 的 `Human-Confirmed` hold，且不会在合并后修改 PRD 清单、验收横幅或 Change Log。该选择是自动化合并授权，不是人工确认。
 
 这条规则的目标是让“归档”代表执行侧交付完成，同时避免历史归档文档被新标准批量翻旧账。
 

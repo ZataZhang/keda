@@ -46,6 +46,10 @@ class DirectPrStageConflictError(DirectPrPolicyError):
     """调用档位为 FAST 而 Issue 带直发标签：两个档位旁路范围不同，不猜优先级。"""
 
 
+class PrdAutoMergeStageConflictError(DirectPrPolicyError):
+    """PRD 自动合并选择与显式 FAST/DIRECT 档位冲突。"""
+
+
 class DirectPrNotEligibleError(DirectPrPolicyError):
     """目标不满足直发准入（例如带 PRD 锚点）：拒绝直发，不静默降级成完整档继续跑。"""
 
@@ -64,6 +68,8 @@ class PublishStageDecision:
         direct_pr_label: 命中的直发标签名；``None`` 表示本次发布不需要消费标签
             （例如纯 CLI 旗标直发，Issue 上没有标签）。
         issue: fresh 读取后的 Issue（正文用于准入判定）。
+        prd_auto_merge_label: 命中的 PRD 自动合并授权标签；仅该 Issue 的本轮发布与
+            后续合并队列使用，标签保留到合并完成。
     """
 
     publish_stage: PublishStage
@@ -71,6 +77,7 @@ class PublishStageDecision:
     direct_pr_label: str | None
     issue: IssueSummary
     requested_stage: PublishStage | None = None
+    prd_auto_merge_label: str | None = None
 
 
 @dataclass
@@ -116,7 +123,8 @@ def resolve_claim_publish_stage(request: PublishStageSelectionRequest) -> Publis
         raise DirectPrFreshReadError(
             f"Cannot refresh Issue #{request.issue.number}: {exc}"
         ) from exc
-    return replace(request.selection.decision, issue=fresh_issue)
+    decision = replace(request.selection.decision, issue=fresh_issue)
+    return decision
 
 
 def configured_direct_pr_label(config: AppConfig) -> str | None:
@@ -128,6 +136,18 @@ def configured_direct_pr_label(config: AppConfig) -> str | None:
 def issue_carries_direct_pr_label(issue: IssueSummary, config: AppConfig) -> bool:
     """判断 Issue 的标签集合里是否有配置的直发标签（用于快照预筛，不做放行判定）。"""
     label = configured_direct_pr_label(config)
+    return label is not None and label in issue.labels
+
+
+def configured_prd_auto_merge_label(config: AppConfig) -> str | None:
+    """返回配置指定的 PRD 自动合并标签；配置成空串时视为禁用。"""
+    label = (config.labels.prd_auto_merge or "").strip()
+    return label or None
+
+
+def issue_carries_prd_auto_merge_label(issue: IssueSummary, config: AppConfig) -> bool:
+    """检查 Issue 是否带有显式 PRD 自动合并授权标签。"""
+    label = configured_prd_auto_merge_label(config)
     return label is not None and label in issue.labels
 
 
@@ -158,6 +178,7 @@ def resolve_publish_stage(
         DirectPrStageConflictError: FAST 调用档位与直发标签冲突。
     """
     label = configured_direct_pr_label(config)
+    auto_merge_label = configured_prd_auto_merge_label(config)
     from backend.core.use_cases.agent_runner_direct_pr_round import read_direct_pr_round
 
     pending = read_direct_pr_round(github_client, issue)
@@ -184,6 +205,33 @@ def resolve_publish_stage(
         )
 
     label_hit = label is not None and label in fresh_issue.labels
+    auto_merge_hit = auto_merge_label is not None and auto_merge_label in fresh_issue.labels
+    if label_hit and auto_merge_hit:
+        raise PrdAutoMergeStageConflictError(
+            f"Issue #{issue.number} carries both '{label}' and '{auto_merge_label}'; "
+            "remove one publication choice before running it."
+        )
+    if auto_merge_hit:
+        if requested_stage is not PublishStage.NORMAL:
+            raise PrdAutoMergeStageConflictError(
+                f"Issue #{issue.number} carries '{auto_merge_label}', which selects the "
+                "PRD auto-merge path; remove the label before requesting FAST or DIRECT."
+            )
+        decision = PublishStageDecision(
+            publish_stage=PublishStage.PRD_AUTO_MERGE,
+            origin="explicit PRD auto-merge Issue label",
+            direct_pr_label=None,
+            issue=fresh_issue,
+            requested_stage=requested_stage,
+            prd_auto_merge_label=auto_merge_label,
+        )
+        _logger.info(
+            "Issue #%d publish stage resolved: %s (origin: %s).",
+            issue.number,
+            decision.publish_stage.value,
+            decision.origin,
+        )
+        return decision
     if not label_hit:
         origin = (
             ORIGIN_RUN_FLAG if requested_stage is PublishStage.DIRECT else ORIGIN_CALLER_REQUEST
@@ -253,6 +301,17 @@ def ensure_direct_pr_admission(*, decision: PublishStageDecision) -> None:
     )
 
 
+def ensure_prd_auto_merge_admission(*, decision: PublishStageDecision) -> None:
+    """PRD 自动合并授权只适用于正文锚定的单个 PRD Issue。"""
+    if decision.publish_stage is not PublishStage.PRD_AUTO_MERGE:
+        return
+    if extract_prd_path(decision.issue.body) is None:
+        raise DirectPrNotEligibleError(
+            f"Issue #{decision.issue.number} carries the PRD auto-merge label but has no "
+            "PRD anchor; remove the label or link a PRD before running it."
+        )
+
+
 def ensure_direct_pr_dependencies_ready(
     decision: PublishStageDecision, config: AppConfig, github_client: IGitHubClient
 ) -> None:
@@ -304,6 +363,7 @@ def apply_direct_pr_label_policy(
         github_client=github_client,
     )
     ensure_direct_pr_admission(decision=decision)
+    ensure_prd_auto_merge_admission(decision=decision)
     return decision
 
 
@@ -501,11 +561,14 @@ __all__ = [
     "PublishStageDecision",
     "apply_direct_pr_label_policy",
     "configured_direct_pr_label",
+    "configured_prd_auto_merge_label",
     "consume_direct_pr_label",
     "consume_label_after_publication",
     "ensure_direct_pr_admission",
     "find_published_direct_pr",
     "finish_label_cleanup_if_already_published",
     "issue_carries_direct_pr_label",
+    "issue_carries_prd_auto_merge_label",
+    "ensure_prd_auto_merge_admission",
     "resolve_publish_stage",
 ]

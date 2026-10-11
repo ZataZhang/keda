@@ -41,7 +41,7 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 #: 子命令说明子目录。
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
-#: 子命令说明的约定份数（PRD issue-234 与生命周期查询路由：恰好九条）。
+#: 子命令说明的当前份数；新增路由时须同步受管集合与此契约。
 _EXPECTED_REFERENCE_COUNT = 9
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
@@ -425,6 +425,83 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
     ("worktree", "path"): {"--branch"},
     ("agent", "presets"): set(),
+    # issue-262：生命周期 / 预设 / 回退候选的持久化命令面；旗标集合取自
+    # ``kc schema --json`` 真实命令树（写入均需显式 --scope，repo 层 --repo-id）。
+    ("agent", "lifecycle", "list"): {
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+        "--output",
+    },
+    ("agent", "lifecycle", "set"): {
+        "--preset",
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+    },
+    ("agent", "lifecycle", "unset"): {"--scope", "--repo", "--repo-id", "--config", "--json"},
+    ("agent", "preset", "set"): {
+        "--agent",
+        "--model",
+        "--reasoning-effort",
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+    },
+    ("agent", "fallback", "list"): {
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+        "--output",
+    },
+    ("agent", "fallback", "candidate", "add"): {
+        "--agent",
+        "--preset",
+        "--position",
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+    },
+    ("agent", "fallback", "candidate", "remove"): {
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+    },
+    ("agent", "fallback", "candidate", "move"): {
+        "--to",
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+    },
+    ("agent", "fallback", "candidate", "preset", "set"): {
+        "--preset",
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+    },
+    ("agent", "fallback", "candidate", "preset", "unset"): {
+        "--scope",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--json",
+    },
     # ask / deliberate 的 --output 是输出目录，不是格式；取值集合取自
     # ``kc schema --json`` 的运行时派生结果，而非人工记忆。
     ("ask",): {
@@ -452,19 +529,13 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--config",
     },
     ("schema",): {"--json", "--output"},
+    # ``kc lifecycle`` 是只读查询；旗标集合取自 ``kc schema --json`` 的真实命令树。
+    ("lifecycle",): {"--issue", "--repo-id", "--phase", "--reached", "--output", "--json"},
     # `kc backlog ci` 子组（P1-FEAT-20260916-134008）：policy 的 --global 与
     # --prd 互斥；status 的 --json 复用 Console ci_delivery DTO。
     ("backlog", "ci", "status"): {"--prd", "--json", "--repo", "--repo-id"},
     ("backlog", "ci", "policy"): {"--global", "--prd", "--repo", "--repo-id"},
     ("backlog", "ci", "repair"): {"--prd", "--dry-run", "--repo", "--repo-id"},
-    ("lifecycle",): {
-        "--issue",
-        "--repo-id",
-        "--phase",
-        "--reached",
-        "--output",
-        "--json",
-    },
     ("agent", "doctor"): {
         "--all-profiles",
         "--json",
@@ -543,13 +614,13 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
 _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "create-issue.md": ("建 issue", "create an Issue"),
     "issue-inspect.md": ("查 issue", "inspect Issues"),
+    "lifecycle.md": ("查生命周期", "lifecycle", "Issue lifecycle", "lifecycle phases"),
     "run-once.md": ("跑一次", "run one execution pass"),
     "watch.md": ("看进度", "live agent output"),
     "triage.md": ("卡住了", "triage stuck"),
     "daemon.md": ("后台跑", "daemons"),
     "ci.md": ("CI 交付", "auto-repair"),
     "setup-and-config.md": ("装环境", "initialize a repository"),
-    "lifecycle.md": ("查生命周期", "Issue lifecycle"),
 }
 
 
@@ -606,7 +677,7 @@ def test_packaged_skill_routes_table_points_at_existing_references() -> None:
 
 
 def test_packaged_skill_description_covers_every_route_keyword() -> None:
-    """八条子命令各自至少一个触发词可在 frontmatter description 中找到。"""
+    """每条子命令至少一个触发词可在 frontmatter description 中找到。"""
     description_text = _skill_frontmatter_description()
     for reference_name, keywords in _ROUTE_KEYWORDS_BY_REFERENCE.items():
         assert any(

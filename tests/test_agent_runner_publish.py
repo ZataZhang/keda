@@ -416,6 +416,7 @@ def test_publish_failure_category_push_vs_pr_create() -> None:
     """Pre-PR flow: push and PR create are gated separately and report accurately."""
     from backend.core.use_cases.agent_runner_failure import PublishFailureError
     from backend.core.use_cases.agent_runner_publication import (
+        _PushChangesRequest,
         _create_draft_pr_with_recovery_context,
         _push_changes_with_recovery_context,
     )
@@ -460,11 +461,14 @@ def test_publish_failure_category_push_vs_pr_create() -> None:
     )
     with pytest.raises(PublishFailureError) as exc_info:
         _push_changes_with_recovery_context(
-            issue=issue,
-            worktree_path=Path("."),
-            config=AppConfig(),
-            process_runner=fake_runner_push_fail,
-            expected_branch="issue-1",
+            _PushChangesRequest(
+                issue=issue,
+                worktree_path=Path("."),
+                config=AppConfig(),
+                github_client=FakeGitHubClient(),
+                process_runner=fake_runner_push_fail,
+                expected_branch="issue-1",
+            )
         )
     assert exc_info.value.failure_category == PublishFailureCategory.PUSH
 
@@ -856,7 +860,7 @@ def test_pr_handoff_ref_block_replaces_instead_of_stacking() -> None:
     交接评论是唯一事实源，PR 正文只是发布那一刻的快照；回链段要保证人顺链找到的是
     **最新**一条记录，而不是一串互相矛盾的旧链接。
     """
-    from backend.core.use_cases.agent_runner_issue_handlers import (
+    from backend.core.use_cases.agent_runner_pr_handoff import (
         _build_pr_handoff_ref_block,
         _with_pr_handoff_ref,
     )

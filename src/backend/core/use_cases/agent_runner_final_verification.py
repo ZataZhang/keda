@@ -35,8 +35,8 @@ class FinalVerificationRequest:
     #: 兼容旧调用面的快速通道布尔。唯一事实源是 :attr:`publish_stage`，本字段在
     #: ``__post_init__`` 里归一化为该档位的派生视图（不会出现矛盾组合）。
     fast_merge: bool | None = None
-    #: 发布档位：``FAST`` / ``DIRECT`` 都不再重跑 RV 与独立 verifier；``DIRECT``
-    #: 额外意味着上游连 pre-PR review 与仓库验证命令都没跑。
+    #: 发布档位：``FAST`` / ``DIRECT`` 不再重跑 RV 与独立 verifier；``PRD_AUTO_MERGE``
+    #: 保留 RV 重跑，只跳过独立 verifier。
     publish_stage: PublishStage = PublishStage.NORMAL
 
     def __post_init__(self) -> None:
@@ -63,7 +63,7 @@ def ensure_final_verifier_verdict(request: FinalVerificationRequest) -> Validati
             "Final verification requires a clean committed worktree after pre-PR review."
         )
     final_sha = get_head_sha(request.worktree_path, request.process_runner)
-    if request.publish_stage.skips_independent_verification:
+    if request.publish_stage.skips_rv_reexecution:
         # 旁路档位的审计日志：跳过的是验证门禁，不是提交完整性前提（上方 clean-tree
         # 检查照常）。档位来源可能是 CLI 旗标，也可能是 Issue 上的直发标签，因此这里
         # 只声明档位，来源记在认领时的 publish stage resolution 日志里。
@@ -96,6 +96,14 @@ def ensure_final_verifier_verdict(request: FinalVerificationRequest) -> Validati
     ensure_validation_commands_pass(
         request.issue, request.worktree_path, request.config, request.process_runner
     )
+    if request.publish_stage.skips_independent_verification:
+        _logger.info(
+            "PRD auto-merge authorization: final RV evidence and repository commands "
+            "passed for Issue #%d at %s; skipping only the independent verifier.",
+            request.issue.number,
+            final_sha,
+        )
+        return None
     final_verdict = run_verifier_gate(
         request.issue,
         request.worktree_path,

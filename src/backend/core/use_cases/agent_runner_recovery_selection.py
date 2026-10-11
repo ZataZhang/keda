@@ -12,6 +12,7 @@ from backend.core.use_cases.agent_runner_direct_pr_label import (
     PublishStageSelectionRequest,
     ensure_direct_pr_admission,
     ensure_direct_pr_dependencies_ready,
+    ensure_prd_auto_merge_admission,
     finish_label_cleanup_if_already_published,
     resolve_claim_publish_stage,
 )
@@ -133,6 +134,7 @@ def admit_claimed_selection(
         claim_comment_id: 本轮赢家的 CAS 评论 ID。
     """
     ensure_direct_pr_admission(decision=decision)
+    ensure_prd_auto_merge_admission(decision=decision)
     ensure_direct_pr_dependencies_ready(decision, selection.config, selection.github_client)
     if selection.selection is not None and selection.selection.decision is None:
         selection.selection.decision = decision

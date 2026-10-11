@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_final_verification import (
     FinalVerificationRequest,
     ensure_final_verifier_verdict,
@@ -16,7 +17,12 @@ from backend.core.use_cases.run_verifier_agent import ValidationVerdict
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
 
-def _request(tmp_path: Path, *, verified_sha: str | None) -> FinalVerificationRequest:
+def _request(
+    tmp_path: Path,
+    *,
+    verified_sha: str | None,
+    publish_stage: PublishStage = PublishStage.NORMAL,
+) -> FinalVerificationRequest:
     """构造带原复核提交的发布请求。"""
     return FinalVerificationRequest(
         issue=IssueSummary(7, "Example", "https://example.test/7", "body", ()),
@@ -26,6 +32,7 @@ def _request(tmp_path: Path, *, verified_sha: str | None) -> FinalVerificationRe
         selected_agent="codex",
         verified_sha=verified_sha,
         verifier_verdict=ValidationVerdict(risk="green"),
+        publish_stage=publish_stage,
     )
 
 
@@ -79,6 +86,44 @@ def test_final_verification_reuses_same_commit(
     assert verdict is not None and verdict.risk == "green"
 
 
+def test_prd_auto_merge_final_gate_keeps_rv_and_skips_only_verifier(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """review 改动后仍重跑最终证据与仓库命令，只跳过独立 verifier。"""
+    from backend.core.use_cases import agent_runner_final_verification as final_gate
+
+    calls: list[str] = []
+    monkeypatch.setattr(final_gate, "has_changes", lambda *args: False)
+    monkeypatch.setattr(final_gate, "get_head_sha", lambda *args: "review-sha")
+    monkeypatch.setattr(
+        final_gate, "ensure_validation_evidence_ready", lambda *args: calls.append("evidence")
+    )
+    monkeypatch.setattr(
+        final_gate,
+        "ensure_no_misplaced_evidence_helpers",
+        lambda *args: calls.append("helpers"),
+    )
+    monkeypatch.setattr(
+        final_gate, "ensure_validation_commands_pass", lambda *args: calls.append("rv")
+    )
+    monkeypatch.setattr(
+        final_gate,
+        "run_verifier_gate",
+        lambda *args: pytest.fail("PRD auto-merge must skip only the independent verifier"),
+    )
+
+    verdict = ensure_final_verifier_verdict(
+        _request(
+            tmp_path,
+            verified_sha="builder-sha",
+            publish_stage=PublishStage.PRD_AUTO_MERGE,
+        )
+    )
+
+    assert calls == ["evidence", "helpers", "rv"]
+    assert verdict is None
+
+
 def test_final_verification_blocks_dirty_review_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -90,10 +135,17 @@ def test_final_verification_blocks_dirty_review_tree(
         ensure_final_verifier_verdict(_request(tmp_path, verified_sha="builder-sha"))
 
 
-def test_execution_loop_commits_before_independent_verifier(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    ("publish_stage", "expected_verifier"),
+    [(PublishStage.NORMAL, True), (PublishStage.PRD_AUTO_MERGE, False)],
+)
+def test_execution_loop_commits_before_verifier_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    publish_stage: PublishStage,
+    expected_verifier: bool,
 ) -> None:
-    """builder 的未提交工作树不能进入独立 verifier。"""
+    """builder 先提交；单 PRD 授权只跳过 verifier，仍执行 RV 证据与命令。"""
     from backend.core.use_cases import run_agent_execution_loop as execution_loop
     from backend.core.use_cases import run_verifier_agent as verifier_module
 
@@ -111,6 +163,10 @@ def test_execution_loop_commits_before_independent_verifier(
         verification_order.append("verifier")
         return ValidationVerdict(risk="green")
 
+    def _rv_commands(*args: object, **kwargs: object) -> None:
+        assert committed is True
+        verification_order.append("rv-final")
+
     monkeypatch.setattr(execution_loop, "run_agent", lambda *args, **kwargs: None)
     monkeypatch.setattr(execution_loop, "run_verification", lambda *args: [])
     monkeypatch.setattr(execution_loop, "get_head_sha", lambda *args: "new" if committed else "old")
@@ -126,9 +182,7 @@ def test_execution_loop_commits_before_independent_verifier(
     monkeypatch.setattr(
         execution_loop, "warn_legacy_evidence_helpers", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(
-        execution_loop, "ensure_validation_commands_pass", lambda *args, **kwargs: None
-    )
+    monkeypatch.setattr(execution_loop, "ensure_validation_commands_pass", _rv_commands)
     monkeypatch.setattr(verifier_module, "run_verifier_gate", _verify)
     verification_request = _request(tmp_path, verified_sha=None)
 
@@ -141,11 +195,13 @@ def test_execution_loop_commits_before_independent_verifier(
             process_runner=verification_request.process_runner,
             before_sha="old",
             expected_branch="issue-7",
+            publish_stage=publish_stage,
         )
     )
 
-    assert verification_order == ["commit", "verifier"]
-    assert commit_result.verifier_verdict is not None
+    assert verification_order[:2] == ["commit", "rv-final"]
+    assert ("verifier" in verification_order) is expected_verifier
+    assert (commit_result.verifier_verdict is not None) is expected_verifier
 
 
 def test_failed_final_verifier_prevents_draft_pr(

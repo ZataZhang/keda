@@ -36,7 +36,7 @@ KEDA 撞名）。
 | `iar run` | `kc run` |
 | `iar config migrate` | `kc config migrate` |
 
-### 1.2 环境变量（9 个，逐一对应）
+### 1.2 环境变量（10 个，逐一对应）
 
 解析顺序：`KEDACODE_<X>` 优先，`IAR_<X>` 兜底；两者都设且取值不同以 `KEDACODE_*` 为准并警告一次，
 取值相同则静默；仅设旧名时旧值生效并提示一次。
@@ -52,6 +52,7 @@ KEDA 撞名）。
 | `IAR_LOOP_DAEMON_INTERVAL` | `KEDACODE_LOOP_DAEMON_INTERVAL` | loop daemon 轮询间隔 |
 | `IAR_IDEA_INBOX_INBOUND_SECRET` | `KEDACODE_IDEA_INBOX_INBOUND_SECRET` | Idea Inbox 入站签名密钥 |
 | `IAR_SKIP_GH_AUTH_CHECK` | `KEDACODE_SKIP_GH_AUTH_CHECK` | 跳过 gh 鉴权检查 |
+| `IAR_NO_UPDATE_CHECK` | `KEDACODE_NO_UPDATE_CHECK` | 关闭 CLI 启动时的 PyPI 更新检查 |
 
 由本产品派生的子进程（管理终端托管进程、factory 启动的 agent、容器）会**同时**拿到新旧两个变量名，
 因此旧代码读 `IAR_*`、新代码读 `KEDACODE_*` 都不会失败。

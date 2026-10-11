@@ -43,6 +43,7 @@ from backend.infrastructure.config.settings import (
     AgentRunnerWorktreeSettings,
     load_agent_runner_local_settings,
 )
+from backend.infrastructure.config.toml_section_editor import config_write_lock
 from backend.core.shared.interfaces.runner_console import (
     DiscoveredRepositoryEntry,
     IRepositoryRegistryEditor,
@@ -269,8 +270,11 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "runner.max_agent_switches": (
         "最多切换 agent 次数（order=[a,b,c] 且此值=2 时最多尝试 3 个 agent）"
     ),
-    "runner.transient_retry_attempts": ("瞬时网络错误（socket 断开 / 5xx / 超时）的就地重试次数"),
+    "runner.transient_retry_attempts": (
+        "瞬时网络/传输错误（socket 断开 / 5xx / 网关超时）的就地重试次数"
+    ),
     "runner.transient_retry_delay_seconds": "瞬时错误每次重试前等待的秒数",
+    "runner.timeout_resume_attempts": "单个 agent session 遇到执行超时后，最多续跑的额外轮数（默认 1）",
     "runner.closeout_agent_enabled": (
         "是否启用交付收尾层（Closeout Agent）：清单未勾 / 缺 Change Log / 证据清单字段格式非法 / "
         "前端改动缺视觉证据这四类门禁失败先用一次短命收尾修复，失败才整轮重跑；设 false 回到旧行为"
@@ -287,7 +291,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "runner.pre_commit_verification_command": "git add 后、git commit 前额外运行的 pre-commit 命令；失败转 Fix Agent",
     "safety.auto_merge": "是否允许自动合并 PR（强烈建议保持 false；与 agent_runner.autopilot.enabled 同时为 true 才会真正生效）",
     "safety.forbidden_path_patterns": "提交前禁止变更的路径通配模式",
-    "autopilot.enabled": "是否启用快速档（合并队列）；仅当该值与 safety.auto_merge 同时为 true 时 review 才会自动合并",
+    "autopilot.enabled": "是否运行合并队列；全仓自动合并还需 safety.auto_merge=true，单 PRD 可用 prd-auto-merge 标签显式授权",
     "autopilot.merge_method": "合并方式；当前唯一支持 'squash'（非法值在加载期拒绝）",
     "autopilot.require_verifier_pass": "Issue 需要 validation 时是否要求 validation/verifier-passed 标签先存在",
     "autopilot.auto_sign_off": "verifier 绿灯后自动替人工勾选 PR body 的 sign-off 清单（幂等）",
@@ -368,10 +372,11 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # auth_home / auth_include / auth_exclude（容器认证目录）、
 # project_skills_dir（项目级 skills 目录），以及四种用途 profile：
 # run（主执行）/ deliberate（辩论）/ generate（内容生成）/ repl（交互），
-# 各自可声明 args（argv 片段，字面量，支持 {cwd}/{prompt}/{worktree} 占位符）、
+# 各自可声明 args（argv 片段，字面量，支持 {cwd}/{prompt}/{worktree}/{session_id} 占位符）、
 # prompt_delivery（argv_tail / flag / stdin）、prompt_flag（flag 投递时的参数名）、
-# output_protocol（plain / claude-stream-json / pi-json-lines 或插件协议）、
-# expand（展开器声明，如 "git_writable_roots:--add-dir"）、tail_args、read_only。
+# output_protocol（plain / claude-stream-json / pi-json-lines / codex-json-lines /
+# opencode-json-lines 或插件协议）、expand（展开器声明，如 "git_writable_roots:--add-dir"）、
+# tail_args / resume_tail_args、read_only；agent 级可声明 supports_resume / resume_args。
 #
 # 下面是 pi 的注册块示例（内置默认已生效，无需复制即可用）：
 #
@@ -384,6 +389,8 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # auth_include = ["auth.json", "settings.json", "models.json", "skills"]
 # auth_exclude = ["sessions", "pi-crash.log", "models-store.json"]
 # project_skills_dir = ".pi/skills"
+# supports_resume = true
+# resume_args = ["--session", "{session_id}"]
 #
 # [agent_runner.agents.pi.profiles.run]
 # args = ["--approve", "--mode", "json"]
@@ -896,15 +903,19 @@ def initialize_repository_local_config(
             verification_commands=verification_commands,
         )
 
-    if config_path.exists() and not options.force and not options.dry_run:
-        existing_text = config_path.read_text(encoding="utf-8")
-        if existing_text != config_text:
-            raise RepositoryLocalConfigExistsError(config_path)
-        return _make_result(wrote_file=False)
     if options.dry_run:
         return _make_result(wrote_file=False)
 
-    config_path.write_text(config_text, encoding="utf-8")
+    # 读-判-写整段持同一把按路径派生的写锁：flock 是建议锁，锁外的 exists() 检查与
+    # 裸 write_text 能插进 Console / registry 的持锁读-改-写中间，把仓库本地配置顶成
+    # 模板初值并丢掉对方刚写的生命周期段。
+    with config_write_lock(config_path):
+        if config_path.exists() and not options.force:
+            existing_text = config_path.read_text(encoding="utf-8")
+            if existing_text != config_text:
+                raise RepositoryLocalConfigExistsError(config_path)
+            return _make_result(wrote_file=False)
+        config_path.write_text(config_text, encoding="utf-8")
     return _make_result(wrote_file=True)
 
 

@@ -1,6 +1,7 @@
 """输出协议注册表：经 entry point group 发现协议实现。
 
-内置三个协议（``plain`` / ``claude-stream-json`` / ``pi-json-lines``）
+内置协议（``plain`` / ``claude-stream-json`` / ``pi-json-lines`` /
+``codex-json-lines`` / ``opencode-json-lines``）
 与第三方插件走**同一条** entry point 注册路径（group
 ``kedacode.agent_output_protocols``），避免出现零消费者的平行抽象。
 

@@ -111,6 +111,8 @@ verification_commands = [
 
 未覆盖的字段自动继承全局 `[agent_runner]` 默认值。环境变量仍可对全局段生效，但暂不支持通过环境变量覆盖单个仓库的字段。
 
+`[agent_runner.runner].timeout_resume_attempts` 控制 agent 进程超时后同一 session 可额外续跑的轮数，默认 `1`；每一轮沿用当前阶段配置的超时时限，设为 `0` 可关闭。该预算按 session 记录，不影响网络瞬时错误重试或验证失败后的普通 recovery。详细配置见 [Agent Runner 使用指南](agent-runner.md)。
+
 <a id="agent-runner-agent-registry"></a>
 
 ## Agent Runner Agent 注册表配置
@@ -129,8 +131,8 @@ agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 
 ### 边界：配置不做 shell 展开
 
-- `bin` / `args` / `tail_args` / `prompt_flag` 的每个元素都是**字面量**：`$(whoami)`、`a|b`、`*.py` 会原样进入子进程 argv，绝不经 shell 解释。
-- 运行期参数只通过**命名展开器**注入，且展开器是**闭集**（当前仅 `git_writable_roots`）。引用未注册展开器在构造命令时报错并列出全部已命名展开器，不静默忽略。
+- `bin` / `args` / `tail_args` / `resume_tail_args` / `prompt_flag` 的每个元素都是**字面量**：`$(whoami)`、`a|b`、`*.py` 会原样进入子进程 argv，绝不经 shell 解释。
+- 运行期路径参数只通过**命名展开器**注入，且展开器是**闭集**（当前仅 `git_writable_roots`）。引用未注册展开器在构造命令时报错并列出全部已命名展开器，不静默忽略。会话续传则使用 agent/profile 的 `resume_args` / `resume_tail_args` 声明。
 - `output_protocol` 必须指向已注册的输出协议（entry point group `kedacode.agent_output_protocols`），加载失败直接报错，不静默回落 `plain`。
 
 配置完成后用 `uv run kc agent doctor <name> --all-profiles` 自检，确认各用途 argv 与预期逐字节一致。

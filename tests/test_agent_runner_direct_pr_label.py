@@ -149,6 +149,22 @@ def test_label_upgrades_a_normal_claim_to_direct() -> None:
     assert decision.direct_pr_label == "direct-pr"
 
 
+def test_prd_auto_merge_label_selects_its_publish_stage() -> None:
+    """PRD 自动合并标签选中专属档位，并且不由 resolver 改写授权标签。"""
+    github_client = _client(labels=("agent/ready", "prd-auto-merge"), body=_PRD_ANCHORED_BODY)
+
+    decision = resolve_publish_stage(
+        requested_stage=PublishStage.NORMAL,
+        issue=_issue(labels=("agent/ready",), body=_PRD_ANCHORED_BODY),
+        config=AppConfig(),
+        github_client=github_client,
+    )
+
+    assert decision.publish_stage is PublishStage.PRD_AUTO_MERGE
+    assert decision.prd_auto_merge_label == "prd-auto-merge"
+    assert _label_writes(github_client) == []
+
+
 def test_label_under_the_direct_flag_records_both_origins() -> None:
     """旗标本已直发、标签同时命中 → 仍是 DIRECT，来源写明两者都成立。"""
     decision = resolve_publish_stage(
@@ -721,14 +737,22 @@ def test_label_name_survives_the_config_surface() -> None:
     from backend.infrastructure.config.agent_runner_settings import AgentRunnerLabelSettings
 
     assert AgentRunnerLabelSettings().direct_pr == "direct-pr"
+    assert AgentRunnerLabelSettings().prd_auto_merge == "prd-auto-merge"
     built = build_label_config_from_settings(AgentRunnerLabelSettings(), {})
     assert built.direct_pr == "direct-pr"
+    assert built.prd_auto_merge == "prd-auto-merge"
     merged = _merge_label_config(
         LabelConfig(),
         AgentRunnerLabelSettings(direct_pr="ship/now"),
         agent_registry={},
     )
     assert merged.direct_pr == "ship/now"
+    merged_scoped = _merge_label_config(
+        LabelConfig(),
+        AgentRunnerLabelSettings(prd_auto_merge="ship/merge"),
+        agent_registry={},
+    )
+    assert merged_scoped.prd_auto_merge == "ship/merge"
 
 
 # ---------------------------------------------------------------------------

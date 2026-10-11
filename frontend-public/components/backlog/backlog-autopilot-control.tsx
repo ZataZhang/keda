@@ -2,11 +2,12 @@
 
 // Backlog 仓库级自动推进控制条：调度开关键 + 真实运行状态 + 生效并发上限。
 //
-// 页面分别显示 Backlog 自动推进、daemon 运行状态和自动合并是否通过双开关。
+// 页面分别显示 Backlog 自动推进、daemon 运行状态和全局自动合并双开关。
 // 「并发」显示的是后端解析出的生效值与来源（继承 / 设置 / 受容量限制），
 // 并提供最小设置入口（1–10 与恢复继承）；数字与 daemon 认领、补位闸门同源。
 // 「恢复继承」= 删除设置行，已知副作用是默认视图偏好回落到列表（PRD §12），
 // 按钮 title 上如实披露。
+// 单 PRD 自动合并授权位于 PRD 启动选项，不会改动全局合并配置。
 
 import { useState } from "react";
 
@@ -179,8 +180,8 @@ export function BacklogAutopilotControl({
         data-testid="backlog-autopilot-auto-merge"
       >
         {state.auto_merge_enabled
-          ? "自动合并已启用"
-          : "自动合并未启用（需 autopilot.enabled 与 safety.auto_merge 同时开启）"}
+          ? "全局自动合并已启用"
+          : "全局自动合并未启用；Autopilot 开启时可为单个 PRD 显式授权"}
       </span>
 
       {state.persisted_enabled === null ? (

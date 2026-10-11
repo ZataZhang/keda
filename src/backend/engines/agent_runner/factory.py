@@ -21,39 +21,12 @@ importable from this module so callers do not need to migrate their
 
 from __future__ import annotations
 
-from backend.engines.agent_runner.factory_config_builder import (
-    _build_generated_content_config,
-    _build_generated_content_target_config,
-    _build_deliberation_config,
-    _build_memory_config,
-    _build_repl_config,
-    build_app_config_from_settings,
-)
-from backend.engines.agent_runner.factory_config_merge import (
-    _merge_label_config,
-    _merge_prompt_config,
-    _merge_optional_model,
-    merge_repository_config,
-)
-from backend.engines.agent_runner.factory_repository_resolver import (
-    RepositoryResolutionFailure,
-    _anchor_memory_config,
-    _build_merged_repository_context,
-    _build_repository_context_from_settings,
-    _load_enabled_repository_local_settings,
-    _merge_repositories_dict,
-    _repository_identity_key,
-    _repository_settings_for_path,
-    _resolve_anchor_path,
-    find_repository_match_for_path,
-    resolve_repository_targets,
-    resolve_repository_targets_with_diagnostics,
-)
 from backend.engines.agent_runner.factories import (
     build_app_config,
     build_deliberation_config_from_settings,
-    create_content_generator,
+    create_backlog_store,
     create_console_store,
+    create_content_generator,
     create_event_sink,
     create_foreground_session_launcher,
     create_github_client,
@@ -66,7 +39,6 @@ from backend.engines.agent_runner.factories import (
     create_registry_editor,
     create_repl_command_executor,
     create_repository_autopilot_settings_editor,
-    create_backlog_store,
     create_transcript_runner,
     get_agent_runner_settings,
     get_agent_runner_status_data,
@@ -79,6 +51,35 @@ from backend.engines.agent_runner.factories import (
 from backend.engines.agent_runner.factories.content_generators import (
     SafePlannerContentGenerator,
     SubprocessContentGenerator,
+)
+from backend.engines.agent_runner.factory_config_builder import (
+    _build_deliberation_config,
+    _build_generated_content_config,
+    _build_generated_content_target_config,
+    _build_memory_config,
+    _build_repl_config,
+    build_app_config_from_settings,
+)
+from backend.engines.agent_runner.factory_config_merge import (
+    _merge_label_config,
+    _merge_optional_model,
+    _merge_prompt_config,
+    merge_repository_config,
+)
+from backend.engines.agent_runner.factory_repository_resolver import (
+    RepositoryResolutionFailure,
+    _anchor_memory_config,
+    _build_merged_repository_context,
+    _build_repository_context_from_settings,
+    _load_enabled_repository_local_settings,
+    _merge_repositories_dict,
+    _repository_identity_key,
+    _repository_settings_for_path,
+    _resolve_anchor_path,
+    collect_repository_own_presets,
+    find_repository_match_for_path,
+    resolve_repository_targets,
+    resolve_repository_targets_with_diagnostics,
 )
 from backend.engines.agent_runner.interactive_agent_session import (
     NativeSessionPreparation,
@@ -102,9 +103,9 @@ __all__ = [
     "SubprocessContentGenerator",
     "TomlLifecycleSettingsEditor",
     "_anchor_memory_config",
+    "_build_deliberation_config",
     "_build_generated_content_config",
     "_build_generated_content_target_config",
-    "_build_deliberation_config",
     "_build_memory_config",
     "_build_merged_repository_context",
     "_build_repl_config",
@@ -121,8 +122,10 @@ __all__ = [
     "build_app_config_from_settings",
     "build_deliberation_config_from_settings",
     "build_operator_bootstrap",
-    "create_content_generator",
+    "collect_repository_own_presets",
+    "create_backlog_store",
     "create_console_store",
+    "create_content_generator",
     "create_event_sink",
     "create_foreground_session_launcher",
     "create_github_client",
@@ -136,7 +139,6 @@ __all__ = [
     "create_registry_editor",
     "create_repl_command_executor",
     "create_repository_autopilot_settings_editor",
-    "create_backlog_store",
     "create_transcript_runner",
     "daily_log_path",
     "find_repository_match_for_path",

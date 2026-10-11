@@ -37,6 +37,11 @@ from backend.core.use_cases.agent_review_repair import (
     resolve_reviewer_profile,
     run_review_repair_agent,
 )
+from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    mark_agent_session_complete,
+    resolve_resumable_session_id,
+)
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
     AgentUnavailableError,
@@ -629,6 +634,15 @@ def run_pre_pr_review(
                     if split_repair
                     else AGENT_PROFILE_RUN
                 )
+                resume_session_id = resolve_resumable_session_id(
+                    worktree_path,
+                    config=config,
+                    agent_name=candidate_agent,
+                    scope=AgentSessionScope(
+                        issue_number=issue.number,
+                        phase=PHASE_REVIEW,
+                    ),
+                )
                 # 候选索引前进过就说明上一个审核者跑不起来、这里是换人回退：
                 # 先声明替代关系，观测侧才会新建一条独立 invocation 并以 retry_of
                 # 关联，而不是把两次调用合并成一条成功记录。
@@ -647,6 +661,7 @@ def run_pre_pr_review(
                         transient_retry_attempts=(config.runner.transient_retry_attempts),
                         transient_retry_delay_seconds=(config.runner.transient_retry_delay_seconds),
                         profile=candidate_profile,
+                        resume_session_id=resume_session_id,
                         model_selection=drop_model_selection_for_agent(
                             candidate_agent,
                             resolve_lifecycle_model_selection("review", config, issue=issue),
@@ -974,6 +989,14 @@ def run_pre_pr_review(
                 issue.number,
                 cycle,
             )
+            mark_agent_session_complete(
+                worktree_path,
+                agent_name=reviewer_agent,
+                scope=AgentSessionScope(
+                    issue_number=issue.number,
+                    phase=PHASE_REVIEW,
+                ),
+            )
             return current_head, current_verification
 
     # 最后一轮仍未收敛：若 reviewer 已提供最终修复 commit request，runner
@@ -997,6 +1020,14 @@ def run_pre_pr_review(
             "Issue #%d after exhausting %d cycle(s).",
             issue.number,
             max_attempts,
+        )
+        mark_agent_session_complete(
+            worktree_path,
+            agent_name=reviewer_agent,
+            scope=AgentSessionScope(
+                issue_number=issue.number,
+                phase=PHASE_REVIEW,
+            ),
         )
         return current_head, current_verification
     # The per-cycle comment above already recorded findings for the last
@@ -1028,6 +1059,14 @@ def run_pre_pr_review(
         _logger.info(
             "Pre-PR review accepted final approval for Issue #%d on the last cycle.",
             issue.number,
+        )
+        mark_agent_session_complete(
+            worktree_path,
+            agent_name=reviewer_agent,
+            scope=AgentSessionScope(
+                issue_number=issue.number,
+                phase=PHASE_REVIEW,
+            ),
         )
         return current_head, current_verification
 

@@ -139,6 +139,8 @@ COVERAGE_REASON_LOG_LOCATOR_OUT_OF_ROOT = "log_locator_out_of_root"
 
 #: 原地瞬态重试（同一执行器再发一次请求）。
 RETRY_REASON_TRANSIENT = "transient_failure"
+#: agent 进程超时后，在同一会话里额外续跑一个时间窗口。
+RETRY_REASON_TIMEOUT_RESUME = "timeout_resume"
 #: 续传没被 CLI 认下，同一轮改跑全新会话。
 RETRY_REASON_RESUME_NOT_STARTED = "resume_not_started"
 #: 上一个执行器跑不起来（CLI 缺失 / 额度耗尽 / 超时 / 崩溃），换到下一个候选。
@@ -938,6 +940,7 @@ __all__ = [
     "RETRY_REASON_EXECUTOR_FALLBACK",
     "RETRY_REASON_RESUME_NOT_STARTED",
     "RETRY_REASON_TRANSIENT",
+    "RETRY_REASON_TIMEOUT_RESUME",
     "active_invocation_trace_context",
     "bound_invocation_trace_context",
     "build_invocation_run_id",

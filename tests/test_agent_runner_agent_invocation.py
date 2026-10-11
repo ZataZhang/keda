@@ -105,6 +105,7 @@ def test_run_agent_with_prompt_can_capture_output(tmp_path: Path) -> None:
         "--ask-for-approval",
         "never",
         "exec",
+        "--json",
         "Review.",
     )
     fake_runner = FakeProcessRunner(
@@ -413,16 +414,18 @@ class TestSessionResumeInvocation:
         assert "--dangerously-skip-permissions" in agent_argv
         assert agent_argv[-1] == "Continue."
 
-    def test_resume_ignored_for_agent_without_capability(self, tmp_path: Path) -> None:
-        """未声明续传能力的 CLI 拿到 id 也不会认：静默回落全新会话，绝不拼出残参。"""
+    def test_codex_resume_uses_profile_tail_subcommand(self, tmp_path: Path) -> None:
+        """Codex 续传用 profile 尾部子命令替换正常的 ``exec``。"""
         fake_runner = FakeProcessRunner()
 
         run_agent_with_prompt(
             "codex", "Continue.", tmp_path, fake_runner, resume_session_id="sess-abc"
         )
 
-        assert "--resume" not in fake_runner.calls[0]
-        assert all("sess-abc" not in token for token in fake_runner.calls[0])
+        agent_argv = fake_runner.calls[0]
+        assert agent_argv[agent_argv.index("exec") + 1] == "resume"
+        assert agent_argv[agent_argv.index("--json") + 1] == "sess-abc"
+        assert agent_argv[-1] == "Continue."
 
     def test_resume_rejected_before_start_reruns_fresh_in_same_round(self, tmp_path: Path) -> None:
         """``--resume`` 被 CLI 拒掉（非零退出、从未自报会话）→ 本轮内换新会话重跑。"""
@@ -533,7 +536,7 @@ class TestSessionRecordPersistence:
 
         run_agent_with_prompt(
             "claude",
-            "Fix the failure.",
+            "Verify the failure.",
             tmp_path,
             _SessionReportingRunner("sess-other"),
             invocation_phase=invocation_phase,

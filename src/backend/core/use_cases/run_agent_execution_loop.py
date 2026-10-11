@@ -67,7 +67,11 @@ from backend.core.use_cases.agent_runner_feedback import (
     format_prd_delivery_failure,
 )
 from backend.core.use_cases.agent_runner_structured_evidence import ValidationEvidenceError
-from backend.core.use_cases.agent_runner_session_store import resolve_resumable_session_id
+from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    mark_agent_session_complete,
+    resolve_resumable_session_id,
+)
 from backend.core.use_cases.agent_runner_validation import (
     ensure_no_misplaced_evidence_helpers,
     ensure_validation_commands_pass,
@@ -107,6 +111,8 @@ class AgentExecutionRequest:
     #: （fix / closeout / verifier）产出可用 usage 时以 ``(flow, agent, usage)``
     #: 回调；agent 名允许与主 agent 不同（如 verifier 走了候选回退）。
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None
+    #: RV 证据与仓库命令通过后、独立 verifier 启动前调用；用于先发布未签核的 Draft PR。
+    before_verifier_callback: Callable[[], None] | None = None
     #: 实现阶段绑定的模型选择；``None`` 表示无绑定。fix / closeout 未自绑时继承它（同一 agent）。
     model_selection: ModelSelection | None = None
     #: 首轮要续传的原会话 id（崩溃对账判定为「可续传」时由领取侧从 worktree 局部
@@ -149,7 +155,7 @@ def _attempt_resume_session_id(
         request.worktree_path,
         config=request.config,
         agent_name=request.selected_agent,
-        issue_number=request.issue.number,
+        scope=AgentSessionScope(issue_number=request.issue.number),
     )
 
 
@@ -723,10 +729,9 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # Phase 4.5: commit proxy 已固定代码树，先重验 RV，再做独立复验。
         # RED 仍回到同一条 bounded recovery 循环，避免把未提交工作树当作
         # builder SHA 对应的交付物。
-        # 旁路档位：--fast-merge 跳过这两道验证门禁，直发档（CLI 旗标或 Issue 标签）
-        # 同样跳过（其跳过范围严格更大）；builder 失败 / 恢复循环照常。跳过必须留一行
-        # 审计日志，档位来源记在认领时的 publish stage resolution 日志里。
-        if publish_stage.skips_independent_verification:
+        # FAST / DIRECT 跳过两道门禁；PRD_AUTO_MERGE 仍重跑证据与仓库命令，只跳过独立 verifier。
+        # builder 失败 / 恢复循环照常。跳过必须留审计日志，来源记在档位解析日志里。
+        if publish_stage.skips_rv_reexecution:
             verifier_verdict = None
             stage_name, source_note, annotation_name = (
                 ("Fast-merge", "--fast-merge run flag", "fast-track")
@@ -755,17 +760,27 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 with attempt_phases.measure("rv_reexec"):
                     ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
                     ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
-                current_failure_phase = "verifier"
-                with attempt_phases.measure("verifier"):
-                    verifier_verdict = run_verifier_gate(
-                        issue,
-                        worktree_path,
-                        config,
-                        process_runner,
-                        selected_agent,
-                        prd_overrides=prd_overrides,
-                        prd_preset_overrides=prd_preset_overrides,
+                if request.before_verifier_callback is not None:
+                    request.before_verifier_callback()
+                if publish_stage.skips_independent_verification:
+                    verifier_verdict = None
+                    _logger.info(
+                        "PRD auto-merge authorization: RV evidence and repository commands "
+                        "passed for Issue #%d; skipping only the independent verifier.",
+                        issue.number,
                     )
+                else:
+                    current_failure_phase = "verifier"
+                    with attempt_phases.measure("verifier"):
+                        verifier_verdict = run_verifier_gate(
+                            issue,
+                            worktree_path,
+                            config,
+                            process_runner,
+                            selected_agent,
+                            prd_overrides=prd_overrides,
+                            prd_preset_overrides=prd_preset_overrides,
+                        )
                 if verifier_verdict is not None:
                     _emit_agent_usage(
                         request, "verify", verifier_verdict.agent, verifier_verdict.token_usage
@@ -801,6 +816,14 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 failure_type=FailureType.SUCCESS,
                 detail="Agent produced commits and passed verification.",
                 recovered=attempt_index > 0,
+            )
+            mark_agent_session_complete(
+                worktree_path,
+                agent_name=selected_agent,
+                scope=AgentSessionScope(
+                    issue_number=issue.number,
+                    phase=PHASE_IMPLEMENTATION,
+                ),
             )
             return AgentCommitResult(final_verification_results, attempt_results, verifier_verdict)
 

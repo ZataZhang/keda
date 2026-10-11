@@ -47,6 +47,7 @@ def test_agent_runner_reads_root_config_toml(monkeypatch: pytest.MonkeyPatch) ->
     assert app_config.runner.recovery_retry_delay_seconds == 30
     assert app_config.runner.timeout_seconds == 14400
     assert app_config.runner.inactivity_timeout_seconds == 1200
+    assert app_config.runner.timeout_resume_attempts == 1
 
 
 def test_iar_config_resolution_skips_application_config_toml(
@@ -126,6 +127,18 @@ def test_runner_timeout_settings_match_core() -> None:
 
     assert settings.timeout_seconds == core.timeout_seconds
     assert settings.inactivity_timeout_seconds == core.inactivity_timeout_seconds
+    assert settings.timeout_resume_attempts == core.timeout_resume_attempts
+
+
+def test_timeout_resume_attempts_maps_from_settings_to_domain() -> None:
+    """非默认续跑额度必须通过 factory 到达运行时领域配置。"""
+    from backend.engines.agent_runner.factory import build_app_config_from_settings
+    from backend.infrastructure.config.settings import AgentRunnerSettings
+
+    settings = AgentRunnerSettings()
+    settings.runner.timeout_resume_attempts = 2
+
+    assert build_app_config_from_settings(settings).runner.timeout_resume_attempts == 2
 
 
 def test_factory_maps_verifier_timeouts() -> None:
@@ -218,6 +231,7 @@ def test_root_config_toml_declares_closeout_settings() -> None:
     assert "closeout_agent_enabled" in config_toml_text
     assert "closeout_timeout_seconds" in config_toml_text
     assert "closeout_visual_timeout_seconds" in config_toml_text
+    assert "timeout_resume_attempts = 1" in config_toml_text
 
 
 def test_iar_toml_key_table_documents_closeout_settings() -> None:
@@ -227,6 +241,7 @@ def test_iar_toml_key_table_documents_closeout_settings() -> None:
     assert "runner.closeout_agent_enabled" in _IAR_FIELD_COMMENTS
     assert "runner.closeout_timeout_seconds" in _IAR_FIELD_COMMENTS
     assert "runner.closeout_visual_timeout_seconds" in _IAR_FIELD_COMMENTS
+    assert "runner.timeout_resume_attempts" in _IAR_FIELD_COMMENTS
 
 
 def test_generated_content_settings_defaults_match_core_defaults() -> None:

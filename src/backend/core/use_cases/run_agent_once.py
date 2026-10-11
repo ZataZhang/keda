@@ -25,9 +25,10 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.shared.models.agent_model_preset import ModelSelection, resolve_model_selection
 from backend.core.shared.models.agent_runner import (
     AgentCommitResult,
+    AgentFallbackCandidate,
     AppConfig,
     AttemptResult,
     CommandResult,
@@ -36,12 +37,13 @@ from backend.core.shared.models.agent_runner import (
     describe_verification_command,
 )
 from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_DELIBERATE,
     AGENT_PROFILE_GENERATE,
     AGENT_PROFILE_RUN,
     PROMPT_DELIVERY_STDIN,
 )
 from backend.core.shared.models.publish_stage import PublishStage
-from backend.core.use_cases.agent_response_text import extract_agent_response_text
+from backend.core.use_cases.agent_candidate_fallback import effective_fallback_candidates
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
     build_agent_invocation,
@@ -52,9 +54,11 @@ from backend.core.use_cases.agent_invocation import (
 from backend.core.use_cases.agent_invocation_tracing import (
     PHASE_FIX,
     PHASE_IMPLEMENTATION,
+    PHASE_REVIEW,
     PHASE_SUPERVISOR,
     PHASE_UNSPECIFIED,
     RETRY_REASON_RESUME_NOT_STARTED,
+    RETRY_REASON_TIMEOUT_RESUME,
     RETRY_REASON_TRANSIENT,
     InvocationStartRequest,
     active_invocation_trace_context,
@@ -62,17 +66,16 @@ from backend.core.use_cases.agent_invocation_tracing import (
     link_next_invocation,
     start_invocation,
 )
+from backend.core.use_cases.agent_model_selection import (
+    drop_model_selection_for_agent,
+    resolve_implementation_model_selection,
+)
+from backend.core.use_cases.agent_response_text import extract_agent_response_text
 from backend.core.use_cases.agent_runner_attempt import (
     AttemptPhaseTimer,
     _append_attempt_and_notify,
     _make_attempt_result,
     wait_before_recovery_attempt,
-)
-from backend.core.use_cases.agent_runner_stall_supervision import (
-    StallDiagnosisRequest,
-    StallSupervisionRequest,
-    build_supervision_attempt_key,
-    supervised_agent_invocation,
 )
 from backend.core.use_cases.agent_runner_commit import (
     EmptyCommitRequestError,
@@ -135,8 +138,17 @@ from backend.core.use_cases.agent_runner_publish import (
     validate_safe_changes,
 )
 from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    consume_agent_timeout_resume_attempt,
+    load_agent_session_record,
     resolve_resumable_session_id,
     save_agent_session_record,
+)
+from backend.core.use_cases.agent_runner_stall_supervision import (
+    StallDiagnosisRequest,
+    StallSupervisionRequest,
+    build_supervision_attempt_key,
+    supervised_agent_invocation,
 )
 from backend.core.use_cases.agent_runner_validation import (
     build_validation_prompt_line,
@@ -154,6 +166,12 @@ from backend.core.use_cases.agent_runner_worktree_create import (
 
 _logger = logging.getLogger(__name__)
 
+_TIMEOUT_CONTINUATION_PROMPT = (
+    "The previous agent process was stopped by the runner's execution timeout. "
+    "Continue the existing task from this session and the current worktree state. "
+    "Do not repeat completed work; continue with the next incomplete step."
+)
+
 REPAIR_AGENT_SELF = "self"
 """``repair_agent`` 取值：本阶段的审核者 / supervisor 自己修（默认，历史行为）。"""
 
@@ -161,21 +179,21 @@ REPAIR_AGENT_EXECUTOR = "executor"
 """``repair_agent`` 取值：把修复交回本次实现者。"""
 
 __all__ = [
+    "REPAIR_AGENT_EXECUTOR",
+    "REPAIR_AGENT_SELF",
     "AgentRunnerAttemptError",
     "AgentUnavailableError",
+    "AttemptPhaseTimer",
+    "EmptyCommitRequestError",
     "MaxRetriesExceededError",
     "PrdDeliveryError",
     "ProviderCapacityError",
     "PublishFailureError",
-    "EmptyCommitRequestError",
-    "REPAIR_AGENT_EXECUTOR",
-    "REPAIR_AGENT_SELF",
     "UnknownAgentError",
     "UnrecoverableError",
     "VerificationFailedError",
-    "AttemptPhaseTimer",
-    "_ensure_worktree_branch",
     "_append_attempt_and_notify",
+    "_ensure_worktree_branch",
     "_make_attempt_result",
     "_reconcile_worktree_with_remote_branch",
     "_resolve_repo_id",
@@ -216,7 +234,8 @@ __all__ = [
     "list_stageable_paths",
     "publish_changes",
     "repair_agent_is_self",
-    "resolve_agent_fallback_order",
+    "resolve_agent_fallback_candidate_specs",
+    "resolve_implementation_model_selection",
     "resolve_prd_archive_path",
     "resolve_repair_agent",
     "resolve_reviewer_agent",
@@ -263,34 +282,38 @@ def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) ->
     return config.runner.default_agent if config.runner.default_agent != "auto" else "claude"
 
 
-def resolve_agent_fallback_order(
+def resolve_agent_fallback_candidate_specs(
     issue: IssueSummary,
     config: AppConfig,
     override_agent: str,
-) -> list[str]:
-    """Return the ordered list of agents to try for an Issue.
+) -> list[AgentFallbackCandidate]:
+    """返回某 Issue 的有序 ``(agent, preset)`` 回退候选序列。
 
-    The first entry is the primary agent resolved by :func:`choose_agent`.
-    Subsequent entries come from ``config.runner.agent_fallback_order`` with the
-    primary agent and duplicates removed, preserving configured order. When no
-    fallback order is configured the list contains only the primary agent, so
-    the escalation ladder behaves exactly like single-agent runs.
+    首位是 :func:`choose_agent` 解析出的主选 agent，且**不携带**候选 preset
+    （主选的模型绑定来自生命周期预设，与回退候选的预设注入互不混淆）。尾部取
+    :func:`effective_fallback_candidates`（候选数组赢，旧名单映射为无 preset
+    候选），按 ``(agent, preset)`` 对去重——同一 agent 以不同 preset 重复出现是
+    合法配置。这里不设预算上限，``max_agent_switches`` 封顶由阶梯调用方完成。
 
     Args:
-        issue: Issue being processed.
-        config: Agent Runner configuration.
-        override_agent: The ``--agent`` override (``"auto"`` routes by label).
+        issue: 正在处理的 Issue。
+        config: Agent Runner 配置。
+        override_agent: ``--agent`` 覆盖（``"auto"`` 走标签路由）。
 
     Returns:
-        Ordered, de-duplicated agent names to attempt.
+        去重后的候选 spec 列表，主选在首位。
     """
     primary_agent = choose_agent(issue, config, override_agent)
-    fallback_order = [primary_agent]
-    for candidate_agent in config.runner.agent_fallback_order:
-        normalized_agent = candidate_agent.strip()
-        if normalized_agent and normalized_agent not in fallback_order:
-            fallback_order.append(normalized_agent)
-    return fallback_order
+    fallback_specs = [AgentFallbackCandidate(agent=primary_agent)]
+    for candidate in effective_fallback_candidates(config):
+        candidate_spec = AgentFallbackCandidate(
+            agent=candidate.agent.strip(),
+            preset=candidate.preset,
+        )
+        if not candidate_spec.agent or candidate_spec in fallback_specs:
+            continue
+        fallback_specs.append(candidate_spec)
+    return fallback_specs
 
 
 def resolve_repair_agent(
@@ -415,7 +438,6 @@ def _resolve_bound_lifecycle_agent(
     )
     if bound_preset_name is None:
         return None
-    from backend.core.shared.models.agent_model_preset import resolve_model_selection
     from backend.core.use_cases.lifecycle_agent_resolution import _validate_registered
 
     bound_selection = resolve_model_selection(bound_preset_name, config)
@@ -768,7 +790,7 @@ def run_agent_with_prompt(
         if not supervisor_config.enabled or issue is None or profile != AGENT_PROFILE_RUN:
             return None
         # 局部导入：lifecycle_agent_resolution 与本模块互相依赖（同 resolve_verifier_agent）。
-        from backend.core.use_cases.lifecycle_agent_resolution import (  # noqa: PLC0415
+        from backend.core.use_cases.lifecycle_agent_resolution import (
             resolve_lifecycle_agent,
         )
 
@@ -820,28 +842,48 @@ def run_agent_with_prompt(
             diagnose=_run_stall_diagnosis,
         )
 
-    def _persist_session_id(session_id: str | None) -> None:
+    session_scope = AgentSessionScope(
+        issue_number=issue.number if issue is not None else None,
+        phase=invocation_phase,
+    )
+
+    def _persist_session_id(
+        session_id: str | None,
+        *,
+        continuation_session_id: str | None = None,
+    ) -> None:
         """把本次调用自报的会话 id 落在 worktree 局部记录里。
 
-        只记 run 用途的会话：fix / closeout / verifier 是另一段独立对话，写进同一个
-        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。这些调用都走默认
-        ``profile="run"``，profile 一档拦不住，因此以调用阶段为准：只有
-        ``implementation``（主循环与其 recovery 轮次）与未标注阶段的调用才落盘；
-        verifier 等独立对话即使同 profile 也不覆盖——它还顺手把 git 跟踪的
-        ``.iar/agent-runner/sessions/<agent>.json`` 改脏，让「独立 verifier 不得
-        改动代码树」的门禁误报。落盘是旁路，失败只记日志——续传是增益路径，
-        不能反过来把正常执行拖下水。
+        只记 implementation（含 recovery）和 deliberate review 会话，并按阶段记录作用域。
+        fix、closeout、verifier 等独立对话即使使用 ``profile="run"`` 也不覆盖可恢复会话，
+        避免恢复时续错对象或污染独立 verifier 的洁净树门禁。落盘是旁路，失败只记日志——
+        续传是增益路径，不能反过来把正常执行拖下水。
         """
-        if not session_id or profile != AGENT_PROFILE_RUN:
+        can_persist_session = (
+            profile == AGENT_PROFILE_RUN
+            and invocation_phase in (PHASE_IMPLEMENTATION, PHASE_UNSPECIFIED)
+        ) or (profile == AGENT_PROFILE_DELIBERATE and invocation_phase == PHASE_REVIEW)
+        if not session_id or not can_persist_session:
             return
-        if invocation_phase not in (PHASE_IMPLEMENTATION, PHASE_UNSPECIFIED):
-            return
+        previous_record = load_agent_session_record(
+            worktree_path,
+            agent_name,
+            phase=invocation_phase,
+        )
+        if previous_record is None and invocation_phase not in (None, PHASE_IMPLEMENTATION):
+            previous_record = load_agent_session_record(worktree_path, agent_name)
+        carried_timeout_resume_count = (
+            previous_record.timeout_resume_count
+            if previous_record is not None and previous_record.session_id == continuation_session_id
+            else None
+        )
         try:
             save_agent_session_record(
                 worktree_path,
                 agent_name=agent_name,
                 session_id=session_id,
-                issue_number=issue.number if issue is not None else None,
+                scope=session_scope,
+                timeout_resume_count=carried_timeout_resume_count,
             )
         except (OSError, ValueError) as exc:
             _logger.warning(
@@ -914,12 +956,18 @@ def run_agent_with_prompt(
                 if stall_request is None
                 else supervised_agent_invocation(stall_request, _run_attempt)
             )
-        except Exception as exc:  # noqa: BLE001 - 旁路落盘后原样抛出，不改变失败语义。
+        except Exception as exc:
             finish_invocation(observation, exc=exc)
-            _persist_session_id(_session_id_from_exception(exc))
+            _persist_session_id(
+                _session_id_from_exception(exc),
+                continuation_session_id=resume_id,
+            )
             raise
         finish_invocation(observation, result=attempt_result)
-        _persist_session_id(attempt_result.session_id)
+        _persist_session_id(
+            attempt_result.session_id,
+            continuation_session_id=resume_id,
+        )
         return attempt_result
 
     def _invoke_resumable(resume_id: str) -> CommandResult:
@@ -934,7 +982,7 @@ def run_agent_with_prompt(
         failure_detail: str
         try:
             resumed_result = _invoke(resume_id)
-        except Exception as exc:  # noqa: BLE001 - 判据成立才降级，其余原样上抛。
+        except Exception as exc:
             if _session_id_from_exception(exc) is not None:
                 raise
             exit_code = getattr(exc, "returncode", None)
@@ -980,38 +1028,11 @@ def _session_id_from_exception(exc: BaseException) -> str | None:
 def _resumed_run_never_started(result: CommandResult) -> bool:
     """续传调用是否"根本没起跑"：非零退出且输出流里没自报过任何会话 id。
 
-    CLI 认下了 ``--resume`` 就会先广播一个新会话 id（claude 的 ``system/init``），
-    因此"无会话 id + 非零退出"是"参数没被接受 / 会话不存在"的可靠信号；反过来，
-    起跑后再失败（超时、跑到一半崩）不能重跑，否则会白扔掉已经取得的进度。
+    JSONL agent 在会话启动时报告新 id，因此"无会话 id + 非零退出"可用来识别
+    未起跑；Kimi 的 id 可能只在退出提示中出现。超时没有可判定的退出码，始终交给
+    上层恢复处理，不能改跑全新会话，否则会白扔掉已经取得的进度。
     """
     return result.return_code != 0 and result.session_id is None
-
-
-def drop_model_selection_for_agent(
-    agent_name: str,
-    model_selection: ModelSelection | None,
-) -> ModelSelection | None:
-    """执行 agent 与预设声明 agent 不一致时丢弃模型绑定并记日志。
-
-    不同 CLI 的模型命名空间不同（codebuddy 的 ``--settings`` 对 claude 无意义），
-    绝不把 A CLI 的模型参数塞给 B CLI。回退换人与显式 ``--agent`` 换人都走
-    这里——两种情形都表现为"执行 agent != 预设 agent"。
-
-    Returns:
-        匹配时原样返回 ``model_selection``；不匹配（或入参为空）时返回 ``None``。
-    """
-    if model_selection is None:
-        return None
-    if model_selection.agent == agent_name:
-        return model_selection
-    _logger.warning(
-        "model binding dropped on agent switch: preset declares agent '%s' but this "
-        "attempt runs '%s'; the model/effort flags are NOT applied (each CLI has its "
-        "own model namespace).",
-        model_selection.agent,
-        agent_name,
-    )
-    return None
 
 
 def run_agent_with_prompt_resilient(
@@ -1026,12 +1047,13 @@ def run_agent_with_prompt_resilient(
 ) -> CommandResult:
     """Run an agent, retrying transient network/transport failures in place.
 
-    Level 1 of the escalation ladder. Only :func:`is_transient_failure` errors
-    (dropped sockets, connection resets, gateway timeouts, 5xx) are retried with
-    the same agent, because re-issuing the request usually succeeds. A missing
-    agent CLI is surfaced as :class:`AgentUnavailableError` so the orchestration
-    layer can skip to the next agent; every other error propagates unchanged so
-    the recovery loop or the cross-agent fallback can handle it.
+    Agent process timeouts first use the configured per-session budget to resume
+    the same CLI session with one more phase-sized time window. Only
+    :func:`is_transient_failure` transport errors (dropped sockets, connection
+    resets, gateway timeouts, 5xx) use the separate in-place retry budget. A
+    missing agent CLI is surfaced as :class:`AgentUnavailableError` so
+    orchestration can skip to the next agent; every other error propagates
+    unchanged to recovery or cross-agent fallback.
 
     ``model_selection``（若传入）先经 :func:`drop_model_selection_for_agent`
     校验：跨 agent 回退或显式 ``--agent`` 换人时丢弃绑定并记日志，本函数内
@@ -1068,38 +1090,82 @@ def run_agent_with_prompt_resilient(
         )
     agent_call_issue = forwarded_options.get("issue")
     issue_number = agent_call_issue.number if isinstance(agent_call_issue, IssueSummary) else 0
+    agent_config = forwarded_options.get("config")
+    if not isinstance(agent_config, AppConfig):
+        agent_config = AppConfig()
+    raw_phase = forwarded_options.get("invocation_phase", PHASE_UNSPECIFIED)
+    session_scope = AgentSessionScope(
+        issue_number=(
+            agent_call_issue.number if isinstance(agent_call_issue, IssueSummary) else None
+        ),
+        phase=raw_phase if isinstance(raw_phase, str) else PHASE_UNSPECIFIED,
+    )
+    current_prompt = prompt
     for retry_index in range(max_retries + 1):
         if retry_index > 0:
             # 原地瞬态重试是**新的一次实际进程调用**：新建 invocation 并用 retry_of
             # 关联上一次，绝不合并成一条记录（否则"重试了三次才成功"会消失）。
             link_next_invocation(RETRY_REASON_TRANSIENT)
-        try:
-            return run_agent_with_prompt(
-                agent_name,
-                prompt,
-                worktree_path,
-                process_runner,
-                **forwarded_options,
-            )
-        except FileNotFoundError as exc:
-            raise AgentUnavailableError(agent_name) from exc
-        except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
-            if retry_index >= max_retries or not is_transient_failure(exc):
-                raise
-            _logger.warning(
-                "Transient error from agent '%s' for Issue #%d; retrying (%d/%d): %s",
-                agent_name,
-                issue_number,
-                retry_index + 1,
-                max_retries,
-                exc,
-            )
-            wait_before_recovery_attempt(
-                issue_number,
-                recovery_attempt=retry_index + 1,
-                max_recovery_attempts=max_retries,
-                delay_seconds=transient_retry_delay_seconds,
-            )
+        while True:
+            try:
+                return run_agent_with_prompt(
+                    agent_name,
+                    current_prompt,
+                    worktree_path,
+                    process_runner,
+                    **forwarded_options,
+                )
+            except FileNotFoundError as exc:
+                raise AgentUnavailableError(agent_name) from exc
+            except subprocess.TimeoutExpired as exc:
+                requested_session_id = forwarded_options.get("resume_session_id")
+                timeout_session_id = _session_id_from_exception(exc)
+                if timeout_session_id is None and isinstance(requested_session_id, str):
+                    # 已续传的进程可能在再次上报 session id 前超时，仍可接着请求中的 id 续跑。
+                    timeout_session_id = requested_session_id
+                consumed_attempts = (
+                    consume_agent_timeout_resume_attempt(
+                        worktree_path,
+                        config=agent_config,
+                        agent_name=agent_name,
+                        session_id=timeout_session_id,
+                        scope=session_scope,
+                        max_attempts=agent_config.runner.timeout_resume_attempts,
+                    )
+                    if timeout_session_id is not None
+                    else None
+                )
+                if consumed_attempts is None:
+                    raise
+                _logger.warning(
+                    "Agent '%s' timed out for Issue #%d; resuming session with an extra "
+                    "time window (%d/%d).",
+                    agent_name,
+                    issue_number,
+                    consumed_attempts,
+                    agent_config.runner.timeout_resume_attempts,
+                )
+                link_next_invocation(RETRY_REASON_TIMEOUT_RESUME)
+                current_prompt = _TIMEOUT_CONTINUATION_PROMPT
+                forwarded_options["resume_session_id"] = timeout_session_id
+            except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+                if retry_index >= max_retries or not is_transient_failure(exc):
+                    raise
+                _logger.warning(
+                    "Transient error from agent '%s' for Issue #%d; retrying (%d/%d): %s",
+                    agent_name,
+                    issue_number,
+                    retry_index + 1,
+                    max_retries,
+                    exc,
+                )
+                wait_before_recovery_attempt(
+                    issue_number,
+                    recovery_attempt=retry_index + 1,
+                    max_recovery_attempts=max_retries,
+                    delay_seconds=transient_retry_delay_seconds,
+                )
+                break
     raise RuntimeError("unreachable: resilient agent retry loop exited")
 
 
@@ -1115,13 +1181,16 @@ def run_agent_until_committed(
     prompt_override: str | None = None,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
+    before_verifier_callback: Callable[[], None] | None = None,
     model_selection: ModelSelection | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
     repo_id: str | None = None,
 ) -> AgentCommitResult:
-    """运行 Agent recovery 状态机并返回最终提交结果；``repo_id`` 指稳定仓库 registry id。"""
+    """运行 Agent recovery 状态机并返回最终提交结果；可在 verifier 前回调发布 Draft PR。"""
     from backend.core.use_cases.run_agent_execution_loop import (
         AgentExecutionRequest,
+    )
+    from backend.core.use_cases.run_agent_execution_loop import (
         run_agent_until_committed as run_execution_loop,
     )
 
@@ -1137,6 +1206,7 @@ def run_agent_until_committed(
             prompt_override=prompt_override,
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
+            before_verifier_callback=before_verifier_callback,
             model_selection=model_selection,
             repo_id=repo_id,
             # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"
@@ -1145,7 +1215,7 @@ def run_agent_until_committed(
                 worktree_path,
                 config=config,
                 agent_name=selected_agent,
-                issue_number=issue.number,
+                scope=AgentSessionScope(issue_number=issue.number),
             ),
             publish_stage=publish_stage,
         )

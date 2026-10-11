@@ -7,18 +7,20 @@
 // P1-FEAT-20260916-134008 需要追加 CI/CD 标签时传 `additionalTabs` 即可，
 // 不必重构容器或头部动作。
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { fetchPrdProgress } from "@/lib/api/backlog";
+import type { BacklogPrd, BacklogPrdProgress } from "@/lib/api/types";
 import { canStartBacklogPrd, STATE_LABELS, STATE_VARIANTS } from "./prd-card";
 import { PrdContentView } from "./prd-content-view";
 import { PrdEvidenceView } from "./prd-evidence-view";
 import { PrdIssueOutputView } from "./prd-issue-output-view";
 import { PrdLifecycleView } from "./prd-lifecycle-view";
+import { PrdProgressStrip } from "./prd-progress-strip";
 import { cn } from "@/lib/utils";
-import type { BacklogPrd } from "@/lib/api/types";
 
 export const PRD_CONTENT_TAB_ID = "content";
 export const PRD_EVIDENCE_TAB_ID = "evidence";
@@ -30,6 +32,12 @@ export type PrdDetailTab = {
   label: string;
   render: () => ReactNode;
 };
+
+/** 详情头部进度读数的一次性拉取状态（不轮询；失败时不阻塞其余标签）。 */
+type ProgressState =
+  | { forPath: string; status: "loading" }
+  | { forPath: string; status: "ready"; progress: BacklogPrdProgress }
+  | { forPath: string; status: "error"; message: string };
 
 interface PrdDetailProps {
   repoId: string;
@@ -68,6 +76,38 @@ export function PrdDetail({
   enqueuing,
   onOpenStartOptions,
 }: PrdDetailProps) {
+  const [progressState, setProgressState] = useState<ProgressState>({
+    forPath: prd.prd_path,
+    status: "loading",
+  });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchPrdProgress({ repoId, prdPath: prd.prd_path, signal: controller.signal })
+      .then((progress) => {
+        setProgressState({ forPath: prd.prd_path, status: "ready", progress });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setProgressState({
+          forPath: prd.prd_path,
+          status: "error",
+          message: error instanceof Error ? error.message : "读取交付进度失败。",
+        });
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [repoId, prd.prd_path]);
+
+  // 切换 PRD 时（父组件未必按 key 重挂载本面板）用 forPath 判定陈旧：路径不一致即视为
+  // 读取中，避免在 effect 里同步 setState，同时不把上一条 PRD 的读数冒充当前进度。
+  const currentProgress =
+    progressState.forPath === prd.prd_path ? progressState : { status: "loading" as const };
+  const progress = currentProgress.status === "ready" ? currentProgress.progress : null;
+
   const tabs: PrdDetailTab[] = [
     {
       id: PRD_CONTENT_TAB_ID,
@@ -79,7 +119,14 @@ export function PrdDetail({
     {
       id: PRD_EVIDENCE_TAB_ID,
       label: "验收证据",
-      render: () => <PrdEvidenceView key={prd.prd_path} repoId={repoId} prdPath={prd.prd_path} />,
+      render: () => (
+        <PrdEvidenceView
+          key={prd.prd_path}
+          repoId={repoId}
+          prdPath={prd.prd_path}
+          progress={progress}
+        />
+      ),
     },
     {
       id: PRD_LIFECYCLE_TAB_ID,
@@ -188,6 +235,22 @@ export function PrdDetail({
           ) : null}
         </div>
       </div>
+
+      {currentProgress.status === "ready" ? (
+        <PrdProgressStrip progress={currentProgress.progress} />
+      ) : currentProgress.status === "error" ? (
+        <p
+          className="text-xs text-slate-500"
+          data-testid="prd-progress-unavailable"
+          title={currentProgress.message}
+        >
+          交付进度暂不可用（不阻塞其余标签）。
+        </p>
+      ) : (
+        <p className="text-xs text-slate-400" data-testid="prd-progress-loading">
+          交付进度读取中…
+        </p>
+      )}
 
       {prd.block_reason ? (
         <p className="text-xs text-red-600" data-testid="prd-detail-block-reason">

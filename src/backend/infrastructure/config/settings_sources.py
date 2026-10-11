@@ -16,6 +16,8 @@ from pydantic_settings import (
 )
 
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.config_edit import ConfigLockBusyError
+from backend.infrastructure.config.toml_section_editor import config_write_lock
 
 _SETTINGS_FILE_PATH: Path = Path(__file__).resolve()
 #: 全局安装的 ``kc`` 拿不到源码模板时，用来承载 ``[agent_runner.repositories]`` 的最小配置。
@@ -68,13 +70,21 @@ def _ensure_global_config_toml() -> Path | None:
         return None
     try:
         global_dir.mkdir(parents=True, exist_ok=True)
-        global_config.write_text(
-            source_config.read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
+        with config_write_lock(global_config):
+            # 存在性检查要在锁内重做：两个首次启动的进程都在锁外看到"文件还没有"，
+            # 就会各写一份 seed，把先一步的 registry 写入者刚落的段一起截掉。
+            if global_config.is_file():
+                return global_config
+            global_config.write_text(
+                source_config.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
         return global_config
     except OSError:
         return None
+    except ConfigLockBusyError:
+        # 已有写入者持锁在这份配置上动手：本次 seed 退出，交回它写出的结果。
+        return global_config if global_config.is_file() else None
 
 
 def _is_product_config_toml(candidate: Path) -> bool:
@@ -137,9 +147,15 @@ def _seed_registry_config_in_state_home() -> Path | None:
         return target
     try:
         global_dir.mkdir(parents=True, exist_ok=True)
-        target.write_text(_MINIMAL_REGISTRY_CONFIG, encoding="utf-8")
+        with config_write_lock(target):
+            # 同上：seed 前先确认没有别的写入者在持锁期间已经建好这份配置。
+            if target.is_file():
+                return target
+            target.write_text(_MINIMAL_REGISTRY_CONFIG, encoding="utf-8")
     except OSError:
         return None
+    except ConfigLockBusyError:
+        return target if target.is_file() else None
     return target
 
 

@@ -2,8 +2,7 @@
 
 // 「开始此 PRD」的高级选项抽屉（FR-7）。
 //
-// 每一项都对应 `kc run` 的同名旗标，全部默认关闭：缺省提交产生空 options，
-// 后端折算成空 argv，与不打开本抽屉的普通启动逐字节一致。
+// 执行档位默认关闭：普通选项折算成 `kc run` 旗标；PRD 自动合并授权写入单个 Issue 标签。
 //
 // 只列出在本入口真实可成立的选项：直出 PR（--direct-pr）不在这里给——PRD 建的 Issue
 // 一定带 PRD 锚点，而 CLI 对「PRD-backed Issue + --direct-pr」是硬性用法拒绝，勾上它
@@ -76,6 +75,7 @@ export function PrdStartOptionsSheet({
   }, [open, repoId]);
 
   const fastMerge = options.fast_merge ?? false;
+  const autoMergePrd = options.auto_merge_prd ?? false;
   const preset = options.preset ?? "";
 
   return (
@@ -84,7 +84,7 @@ export function PrdStartOptionsSheet({
         <SheetHeader>
           <SheetTitle>启动高级选项</SheetTitle>
           <SheetDescription>
-            全部默认关闭，对应 CLI 同名旗标；保持默认即与普通「开始此 PRD」完全一致。
+            选项默认关闭；保持默认即与普通「开始此 PRD」完全一致。
           </SheetDescription>
         </SheetHeader>
 
@@ -95,11 +95,32 @@ export function PrdStartOptionsSheet({
               <Checkbox
                 checked={fastMerge}
                 onCheckedChange={(checked) =>
-                  setOptions((prev) => ({ ...prev, fast_merge: checked === true }))
+                  setOptions((prev) => ({
+                    ...prev,
+                    fast_merge: checked === true,
+                    auto_merge_prd: checked === true ? false : prev.auto_merge_prd,
+                  }))
                 }
               />
               快合（--fast-merge）
             </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={autoMergePrd}
+                onCheckedChange={(checked) =>
+                  setOptions((prev) => ({
+                    ...prev,
+                    auto_merge_prd: checked === true,
+                    fast_merge: checked === true ? false : prev.fast_merge,
+                  }))
+                }
+              />
+              此 PRD 完成后自动合并
+            </label>
+            <p className="text-xs text-muted-foreground">
+              仅影响这份 PRD：跳过独立 verifier，保留仓库验证命令、PR checks 和分支保护；
+              Autopilot 必须启用。合并后不改 PRD 验收清单或横幅。与快合互斥。
+            </p>
             <p className="text-xs text-muted-foreground">
               直出 PR（--direct-pr）不在本入口提供：PRD 建的 Issue 带 PRD 锚点，CLI
               规定它必须过 PRD 交付门并归档 PRD，因此该组合会在发起端被拒绝。

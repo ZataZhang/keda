@@ -250,7 +250,7 @@ curl -sS \
 
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/evidence`
 
-列出某个 PRD 在仓库中**当前仍保留**的验收证据文件。每次请求重新读盘，不复用任何缓存。
+列出某个 PRD 在仓库中**当前仍保留**的验收证据文件。每次请求重新读盘，不复用任何缓存。运行中的 PRD 走「分支优先、主仓库兜底」：先定位其执行工作区，同名文件取工作区版本，主仓库独有文件保留。
 
 查询参数：
 
@@ -258,17 +258,19 @@ curl -sS \
 
 ```json
 {
-  "prd_path": "tasks/archive/P1-FEAT-20260101-demo.md",
+  "prd_path": "tasks/pending/P1-FEAT-20260101-demo.md",
   "prd_stem": "P1-FEAT-20260101-demo",
   "evidence_dir": "tasks/evidence/P1-FEAT-20260101-demo",
   "exists": true,
+  "status": "complete",
   "files": [
     {
       "name": "P1-FEAT-20260101-demo.evidence-report.md",
       "size_bytes": 2048,
       "media_type": "text/markdown",
       "role": "evidence_report",
-      "artifact_token": "UDE1LUZFQVQtMjAyNjAxMDEtZGVtby5ldmlkZW5jZS1yZXBvcnQubWQ="
+      "artifact_token": "UDE1LUZFQVQtMjAyNjAxMDEtZGVtby5ldmlkZW5jZS1yZXBvcnQubWQ=",
+      "source": "worktree"
     }
   ]
 }
@@ -276,22 +278,67 @@ curl -sS \
 
 - `evidence_dir` 由既有 `resolve_evidence_dir` 解析（默认 `tasks/evidence/<prd-stem>/`，显式 legacy 目录沿用扁平语义）；
 - 只列一层普通非隐藏文件，`scripts/` 子目录与 oracle 源码不会混作证据；`size_bytes` 来自真实 `stat`，不从验收清单勾选数推断；
-- 目录缺失时为 `exists: false` 且 `files` 为空列表，页面据此显示空态；PRD 路径越界返回 `400`。
+- `files[].source`：`worktree`（执行工作区、尚未合并）或 `main`（主仓库）。无候选工作区时统一为 `main`；页面据此对未合并文件加「未合并」标注；
+- `status`：`complete` 表示候选目录成功枚举；`unavailable` 表示工作区发现失败或多重匹配，或某个存在的候选目录枚举失败（无权限等）——此时 `files` 只是可读取到的部分，**不得**把结果当作「确认无文件」的空态呈现；
+- 目录缺失且来源可确定为 `exists: false` 且 `files` 为空列表，页面据此显示空态；PRD 路径越界返回 `400`。
 
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/evidence/{artifact_token}`
 
-受限读取单个证据文件。`artifact_token` 是文件名的 URL-safe base64 编码（取自 manifest 的 `artifact_token` 字段）。
+受限读取单个证据文件。`artifact_token` 是文件名的 URL-safe base64 编码（取自 manifest 的 `artifact_token` 字段）。同名文件按「分支优先、主仓库兜底」解析，第一个命中即返回；校验规则不变。
 
 - 文本类（`text/*`、`application/json`）以 `text/<type>; charset=utf-8` 内联返回；
 - 图片类型内联返回（`Content-Disposition: inline`）；
 - 其余类型以附件形式下载；
 - 所有响应带 `X-Content-Type-Options: nosniff` 与 `Cache-Control: no-store`。
 
-安全边界：token 解码后必须是纯 basename（拒绝 `/`、`\`、`\0`、`.`/`..` 与隐藏文件），解析后的真实路径必须是该 PRD 证据目录的**直接子文件**（挡住符号链接逃逸），单文件上限 10 MiB；任何越界请求返回 `400` 且不泄露仓外内容。
+安全边界：token 解码后必须是纯 basename（拒绝 `/`、`\`、`\0`、`.`/`..` 与隐藏文件），解析后的真实路径必须是某个候选证据目录的**直接子文件**（挡住符号链接逃逸，各候选独立 containment 到本候选根），单文件上限 10 MiB；任何越界请求返回 `400` 且不泄露仓外内容。
+
+### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/progress`
+
+聚合单个 PRD 的交付进度读数（清单 / 证据计划与产出 / 影响树 / 工作区）。每次请求 fresh 读盘，不复用列表快照或缓存。运行中的读数来自真实执行工作区（主仓库兜底），主仓库归档副本是终态事实来源。**所有读数都是弱信号**：文件归属 ≠ 验证通过，影响树触碰 ≠ 改对；不可比较用 `null`，读取失败用各字段状态单独披露，绝不以空数组或零冒充成功读取。
+
+查询参数：
+
+- `repo_id`：仓库标识，必填。
+
+```json
+{
+  "prd_path": "tasks/pending/P1-FEAT-20260101-demo.md",
+  "prd_stem": "P1-FEAT-20260101-demo",
+  "prd_source": "worktree",
+  "worktree_status": "matched",
+  "worktree": { "branch": "issue-256" },
+  "checklist": { "status": "available", "checked": 3, "total": 12 },
+  "evidence": {
+    "planned": [
+      { "id": "rv-1", "summary": "运行中详情显示交付读数", "reviewer": "human" },
+      { "id": "rv-2", "summary": "读取边界与工作区优先级正确", "reviewer": "verifier" },
+      { "id": "rv-3", "summary": "影响树读数与 CLI 一致", "reviewer": "verifier" }
+    ],
+    "produced_ids": ["rv-1", "rv-3"],
+    "produced_planned_count": 2,
+    "file_count": 4,
+    "attribution_source": "manifest",
+    "status": "complete",
+    "reports": { "verification_plan": true, "evidence_report": false, "verifier_report": false }
+  },
+  "impact_status": "available",
+  "impact": { "touched": 7, "judgeable": 12, "unresolvable": 2 }
+}
+```
+
+字段语义：
+
+- `prd_source`：`worktree` / `main` / `null`（来源不可用）；`worktree_status`：`matched`（唯一命中）/ `none`（检索成功但未命中）/ `unavailable`（无法检索）/ `ambiguous`（多重匹配）/ `not_applicable`（主仓库归档终态，无需匹配）；`worktree` 只返回分支名，不返回本地路径。
+- `checklist.status`：`available` / `unavailable`；仅成功读取的空清单记 `0/0`（前端显示 `-`），失败时 `checked/total` 为 `null`。
+- `evidence.planned`：§7.6 验证计划顶层条目（编号 / 摘要 / `human|verifier`）；成功读取但无计划时为 `[]`，来源不可用时为 `null`（不伪造空计划）。`produced_planned_count` 是有可读取文件的不同计划条目数，`file_count` 是合并去重后可展示文件数。`attribution_source`：`manifest`（清单 `item_number` 映射）/ `filename`（`rv-<n>` 前缀回退）/ `mixed` / `none`。`reports` 三件套在完整读取时为布尔，不完整时未知项为 `null`。
+- `evidence.status`：`complete` 表示候选目录成功枚举；`unavailable` 表示来源不可用或某个存在的候选目录枚举失败（无权限等）——此时 `file_count` 与 `produced_planned_count` 为 `null`、`reports` 未知项为 `null`，不得折算成 0。
+- `impact`：`impact_status=available` 时给出 `touched/judgeable/unresolvable`（无法判定节点以 `?n` 披露、不进分母）。`impact` 为 `null` 时由 `impact_status` 说明原因：`terminal_archive`（归档终态不参与分支比较）/ `no_worktree` / `no_tree` / `no_nodes` / `no_base`（无有效 merge-base，显示 `-` 而非 `~0/y`）/ `unavailable`（查询或 git 命令失败）。
+- 归档终态规则同样适用于 progress：主仓库已归档时直接读主仓库、`worktree_status=not_applicable`、`impact_status=terminal_archive`，不受 worktree 查询失败影响。PRD 路径非法/不存在返回 `400`。
 
 ### `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/start`
 
-启动单个 PRD（既有端点，行为不变）。三种 Backlog 视图（依赖图 / 时间轴 / 列表）现在都会经右侧统一详情走这一个端点；成功后该仓的 PRD 列表缓存会立即失效，下一次刷新即可看到新状态。请求体为 `{"repo_id": "..."}`；PRD 不在 `tasks/pending/` 或 `tasks/archive/` 内、或仍被上游依赖阻塞时，由既有依赖门禁返回 `400`。
+启动单个 PRD。三种 Backlog 视图（依赖图 / 时间轴 / 列表）现在都会经右侧统一详情走这一个端点；成功后该仓的 PRD 列表缓存会立即失效，下一次刷新即可看到新状态。基础请求体为 `{"repo_id": "..."}`；可选的 `auto_merge_prd: true` 会给该 Issue 设置单 PRD 自动合并授权标签，只跳过独立 verifier，保留仓库验证命令、PR checks 和分支保护。该选项要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`；合并后不会修改 PRD 人工验收记录。PRD 不在 `tasks/pending/` 或 `tasks/archive/` 内、或仍被上游依赖阻塞时，由既有依赖门禁返回 `400`。
 
 ## 模型模块
 

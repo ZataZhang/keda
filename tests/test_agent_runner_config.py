@@ -149,6 +149,7 @@ def test_runner_settings_escalation_ladder_defaults() -> None:
     assert settings.max_agent_switches == 2
     assert settings.transient_retry_attempts == 2
     assert settings.transient_retry_delay_seconds == 10
+    assert settings.timeout_resume_attempts == 1
 
 
 def test_max_concurrent_issues_default_and_factory_mapping() -> None:

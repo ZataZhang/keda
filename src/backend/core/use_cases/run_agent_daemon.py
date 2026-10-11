@@ -168,8 +168,9 @@ def run_agent_daemon(
         autopilot_override: ``kc daemon --autopilot / --no-autopilot`` 的按次
             覆盖，只作用于 Backlog 自动推进（``True``/``False``），优先级
             ``flag > repo .kedacode.toml > 全局`` 并锁定本次常驻进程；``None`` 表示
-            未传旗标，每轮热读配置。该覆盖**不**影响 review 侧自动合并——
-            合并仍由 ``safety.auto_merge`` + ``autopilot.enabled`` 双开关决定。
+            未传旗标，每轮热读配置。该覆盖**不**影响 review 侧合并队列：
+            全仓自动合并仍由 ``safety.auto_merge`` + ``autopilot.enabled`` 双开关决定；
+            单 PRD 授权不依赖此 Backlog 调度覆盖。
     """
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
 

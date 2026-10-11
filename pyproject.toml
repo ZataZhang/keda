@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # CLI 主命令是 kc，另有同名长写 kedacode 与弃用别名 iar（见 [project.scripts]）。
 # 改名时穷举命令见 PRD 7.5 第 3 条。
 name = "kedacode"
-version = "0.2.1"
+version = "0.3.0"
 description = "KedaCode (kc) — turn GitHub Issues into a local AI agent queue."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +34,9 @@ classifiers = [
 dependencies = [
     "croniter>=3.0.0",
     "fastapi>=0.115.0",
+    # 启动更新检查（cli_update_check）需要在所有 CLI 主路径上比较 PEP 440 版本，
+    # 纯 Python 小包，不重造版本解析轮子。
+    "packaging>=24.0",
     # 注意：pre-commit 刻意不在这里。src/ 与 tests/ 从不 import 它，runner 只是
     # 生成 `uv run pre-commit run --all-files` 这类命令字符串，在**目标仓库**的
     # 环境里作为子进程执行（见 engines/agent_runner/repository_local.py）。
@@ -73,6 +76,8 @@ iar = "backend.api.cli:main"
 plain = "backend.engines.agent_runner.output_protocols.plain:PlainOutputProtocol"
 claude-stream-json = "backend.engines.agent_runner.output_protocols.claude_stream_json:ClaudeStreamJsonOutputProtocol"
 pi-json-lines = "backend.engines.agent_runner.output_protocols.pi_json_lines:PiJsonLinesOutputProtocol"
+codex-json-lines = "backend.engines.agent_runner.output_protocols.codex_json_lines:CodexJsonLinesOutputProtocol"
+opencode-json-lines = "backend.engines.agent_runner.output_protocols.opencode_json_lines:OpenCodeJsonLinesOutputProtocol"
 
 [project.optional-dependencies]
 llm = [

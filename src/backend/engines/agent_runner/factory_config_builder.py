@@ -16,6 +16,7 @@ from backend.core.shared.models.agent_deliberation import (
 from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    AgentFallbackCandidate,
     AutopilotConfig,
     BacklogConfig,
     BrowserE2EVerificationCommand,
@@ -298,6 +299,11 @@ def _merge_profile_settings(
             if profile_settings.tail_args is not None
             else (base_profile.tail_args if base_profile is not None else ())
         ),
+        resume_tail_args=tuple(
+            profile_settings.resume_tail_args
+            if profile_settings.resume_tail_args is not None
+            else (base_profile.resume_tail_args if base_profile is not None else ())
+        ),
         expand=tuple(
             profile_settings.expand
             if profile_settings.expand is not None
@@ -413,7 +419,7 @@ def _merge_agent_settings(
             if agent_settings.reasoning_effort_args is not None
             else (base_spec.reasoning_effort_args if base_spec else ())
         ),
-        # 会话续传能力声明：未声明时回落内置默认（claude 出厂即支持）。
+        # 会话续传能力声明：未声明时回落内置默认。
         supports_resume=(
             agent_settings.supports_resume
             if agent_settings.supports_resume is not None
@@ -562,6 +568,7 @@ def build_label_config_from_settings(
         rework_prd=label_settings.rework_prd,
         deliberate=label_settings.deliberate,
         direct_pr=label_settings.direct_pr,
+        prd_auto_merge=label_settings.prd_auto_merge,
         agent_labels=agent_labels,
     )
 
@@ -716,9 +723,14 @@ def build_app_config_from_settings(
             max_recovery_attempts=runner_settings.max_recovery_attempts,
             recovery_retry_delay_seconds=runner_settings.recovery_retry_delay_seconds,
             agent_fallback_order=tuple(runner_settings.agent_fallback_order),
+            agent_fallback_candidates=tuple(
+                AgentFallbackCandidate(agent=candidate.agent, preset=candidate.preset)
+                for candidate in runner_settings.agent_fallback_candidates
+            ),
             max_agent_switches=runner_settings.max_agent_switches,
             transient_retry_attempts=runner_settings.transient_retry_attempts,
             transient_retry_delay_seconds=runner_settings.transient_retry_delay_seconds,
+            timeout_resume_attempts=runner_settings.timeout_resume_attempts,
             timeout_seconds=runner_settings.timeout_seconds,
             fix_agent_enabled=runner_settings.fix_agent_enabled,
             fix_timeout_seconds=runner_settings.fix_timeout_seconds,

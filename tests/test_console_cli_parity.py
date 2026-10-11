@@ -24,7 +24,9 @@ from backend.core.shared.interfaces.runner_console import (
 )
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    AutopilotConfig,
     IssueSummary,
+    LabelConfig,
     RepositoryRunContext,
 )
 from backend.core.shared.models.backlog import BacklogPrdState
@@ -101,12 +103,12 @@ class _RecordingSupervisor(IRunnerProcessSupervisor):
         raise KeyError(process_id)
 
 
-def _context(repo_path: Path) -> RepositoryRunContext:
+def _context(repo_path: Path, *, autopilot_enabled: bool = False) -> RepositoryRunContext:
     return RepositoryRunContext(
         repo_id=REPO_ID,
         display_name="Keda Test",
         repo_path=repo_path,
-        config=AppConfig(),
+        config=AppConfig(autopilot=AutopilotConfig(enabled=autopilot_enabled)),
     )
 
 
@@ -339,6 +341,81 @@ def test_start_prd_launch_options_reach_argv(tmp_path: Path) -> None:
     assert "--fast-merge" in argv
     assert "--agent" in argv
     assert "codex" in argv
+
+
+def test_start_prd_persists_scoped_auto_merge_authorization(tmp_path: Path) -> None:
+    """单 PRD 选择写入关联 Issue 标签，不转换为影响 runner 验证的 CLI 参数。"""
+    prd_path = _write_prd(tmp_path, "tasks/pending/P1-FEAT-20261008-auto.md", issue_number=42)
+    context = _context(tmp_path, autopilot_enabled=True)
+    github_client = FakeGitHubClient()
+    supervisor = _RecordingSupervisor(spawns=[])
+
+    start_prd(
+        prd_path=prd_path,
+        repo_id=REPO_ID,
+        contexts=[context],
+        github_client=github_client,
+        supervisor=supervisor,
+        store=FakeBacklogStore(repo_id=REPO_ID),
+        runner_command=("uv", "run", "kc"),
+        spawn_cwd=tmp_path,
+        process_runner=FakeProcessRunner(),
+        launch_options=RunnerLaunchOptions(auto_merge_prd=True),
+    )
+
+    label_writes = [call for call in github_client.calls if call["method"] == "edit_issue_labels"]
+    assert any(
+        call["issue_number"] == 42 and "prd-auto-merge" in call["add"] for call in label_writes
+    )
+    assert "prd-auto-merge" in github_client._issue_labels[42]
+    assert supervisor.spawns[0][1] == (
+        "uv",
+        "run",
+        "kc",
+        "run",
+        "--issue",
+        "42",
+        "--repo-id",
+        REPO_ID,
+    )
+
+
+def test_start_prd_can_clear_scoped_auto_merge_when_label_path_is_disabled(
+    tmp_path: Path,
+) -> None:
+    """自动合并标签禁用时，取消勾选仍可正常启动普通 PRD。"""
+    prd_path = _write_prd(tmp_path, "tasks/pending/P1-FEAT-20261008-auto-off.md", issue_number=44)
+    context = RepositoryRunContext(
+        repo_id=REPO_ID,
+        display_name="Keda Test",
+        repo_path=tmp_path,
+        config=AppConfig(
+            labels=LabelConfig(prd_auto_merge=""),
+            autopilot=AutopilotConfig(enabled=True),
+        ),
+    )
+    github_client = FakeGitHubClient()
+    supervisor = _RecordingSupervisor(spawns=[])
+
+    start_prd(
+        prd_path=prd_path,
+        repo_id=REPO_ID,
+        contexts=[context],
+        github_client=github_client,
+        supervisor=supervisor,
+        store=FakeBacklogStore(repo_id=REPO_ID),
+        runner_command=("uv", "run", "kc"),
+        spawn_cwd=tmp_path,
+        process_runner=FakeProcessRunner(),
+        launch_options=RunnerLaunchOptions(auto_merge_prd=False),
+    )
+
+    assert not any(
+        "prd-auto-merge" in call.get("add", []) or "prd-auto-merge" in call.get("remove", [])
+        for call in github_client.calls
+        if call["method"] == "edit_issue_labels"
+    )
+    assert supervisor.spawns
 
 
 def test_start_prd_rejects_direct_pr_on_linked_prd_issue(tmp_path: Path) -> None:

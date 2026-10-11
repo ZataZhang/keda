@@ -293,12 +293,14 @@ def _probe_session_resume(
     worktree_path: Path | None,
     issue_number: int,
 ) -> tuple[bool, str | None]:
-    """查该 agent 是否声明了续传能力，以及 worktree 局部是否留有**本 Issue 的**会话记录。
+    """查该 agent 是否声明了续传能力，以及是否留有本 Issue 的未完成会话。
 
-    记录按 agent 分文件，worktree 却可能被复用到别的 Issue（分支名换号重用、手工
-    挪动）：拿别人的会话续传比不续更糟，因此编号不匹配一律按"无会话"处理。领取侧
+    implementation 会话按 agent 分文件，worktree 却可能被复用到别的 Issue
+    （分支名换号重用、手工挪动）：拿别人的会话续传比不续更糟，因此编号不匹配一律按
+    "无会话"处理。领取侧
+    成功完成的记录与超时续跑预算已耗尽的 session 不会作为恢复会话；领取侧
     :func:`backend.core.use_cases.agent_runner_session_store.resolve_resumable_session_id`
-    用同一道护栏，两处判据不分叉。
+    使用相同判据。
     """
     if claim_agent is None or worktree_path is None:
         return False, None
@@ -307,6 +309,11 @@ def _probe_session_resume(
         return False, None
     record = load_agent_session_record(worktree_path, claim_agent)
     if record is None or (record.issue_number is not None and record.issue_number != issue_number):
+        return True, None
+    timeout_resume_attempts = max(0, pass_context.config.runner.timeout_resume_attempts)
+    if not record.resume_eligible or (
+        timeout_resume_attempts and record.timeout_resume_count >= timeout_resume_attempts
+    ):
         return True, None
     return True, record.session_id
 

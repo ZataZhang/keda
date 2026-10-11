@@ -124,6 +124,7 @@ class AgentRunnerLabelSettings(BaseModel):
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
     direct_pr: str = "direct-pr"
+    prd_auto_merge: str = "prd-auto-merge"
 
     def legacy_agent_label_overrides(self) -> dict[str, str]:
         """返回旧版三个 agent 键中**显式设置**的标签覆盖（供注册表合并）。"""
@@ -150,6 +151,7 @@ class AgentRunnerAgentProfileSettings(BaseModel):
     prompt_delivery: str | None = None
     output_protocol: str | None = None
     tail_args: list[str] | None = None
+    resume_tail_args: list[str] | None = None
     expand: list[str] | None = None
     read_only: bool | None = None
 
@@ -161,7 +163,8 @@ class AgentRunnerAgentSettings(BaseModel):
     agent 时 ``bin`` 与 ``label`` 必填，四种用途 profile 至少声明一种。
     ``model_args`` / ``reasoning_effort_args`` 是模型参数 argv 模板
     （含 ``{model}`` / ``{effort}`` 占位符）；为空表示该 agent 未声明
-    模型选择语法，命中模型绑定时 fail-fast。
+    模型选择语法，命中模型绑定时 fail-fast。``resume_args`` 是通用续传模板；
+    ``resume_tail_args`` 是 profile 级特殊续传尾部模板。
     """
 
     bin: str | None = None
@@ -174,8 +177,8 @@ class AgentRunnerAgentSettings(BaseModel):
     project_skills_dir: str | None = None
     model_args: list[str] | None = None
     reasoning_effort_args: list[str] | None = None
-    # 会话续传能力声明：``supports_resume`` 为真时，恢复轮次把 ``resume_args``
-    # 模板（含 ``{session_id}`` 占位符）注入 argv；未声明的 agent 自然走全新会话。
+    # 会话续传能力声明：``supports_resume`` 为真时，恢复轮次按 profile 注入
+    # ``resume_args`` 或 ``resume_tail_args``（含 ``{session_id}`` 占位符）。
     supports_resume: bool | None = None
     resume_args: list[str] | None = None
     profiles: dict[str, AgentRunnerAgentProfileSettings] = Field(default_factory=dict)
@@ -241,6 +244,32 @@ class AgentRunnerLifecyclePresetsSettings(BaseModel):
         normalized_value = value.strip()
         if not normalized_value:
             raise ValueError("lifecycle preset binding must be a non-empty string")
+        return normalized_value
+
+
+class AgentRunnerFallbackCandidateSettings(BaseModel):
+    """``[[agent_runner.runner.agent_fallback_candidates]]`` 的一条有序回退候选。
+
+    候选 = ``(agent, 可选 preset)``：``agent`` 必填；``preset`` 可空，空表示
+    该候选不注入模型参数（与历史 ``agent_fallback_order`` 逐 agent 等价的形态）。
+    预设是否已定义、``preset.agent`` 是否与候选 agent 一致、同一 ``(agent,
+    preset)`` 是否重复等**语义校验**由写入侧与解析期负责，配置层只校验形状。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str
+    preset: str | None = None
+
+    @field_validator("agent", "preset")
+    @classmethod
+    def _reject_blank_values(cls, value: str | None) -> str | None:
+        """拒绝空字符串；``preset=None`` 表示该候选不绑定预设。"""
+        if value is None:
+            return None
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("fallback candidate field must be a non-empty string")
         return normalized_value
 
 
@@ -361,12 +390,20 @@ class AgentRunnerRunnerSettings(BaseModel):
     # or the provider is capacity-limited. Commands that are not installed on
     # this machine are automatically skipped. Set to [] to disable switching.
     agent_fallback_order: list[str] = Field(default_factory=lambda: ["claude", "kimi", "codex"])
+    # 有序回退候选（agent + 可选 preset）。非空时在运行时**整体接管**
+    # agent_fallback_order（旧字段只作为无预设候选的兼容读取路径）；同一 agent
+    # 可以以不同 preset 重复出现。空列表 = 沿用旧的纯 agent 名单语义。
+    agent_fallback_candidates: list[AgentRunnerFallbackCandidateSettings] = Field(
+        default_factory=list
+    )
     # Maximum number of agent switches before the Issue is marked failed.
     # With order [a, b, c] and max_agent_switches=2, up to 3 agents are tried.
     max_agent_switches: int = 2
     # In-place retries for transient network/transport errors (Level 1).
     transient_retry_attempts: int = 2
     transient_retry_delay_seconds: int = 10
+    # Extra same-session runs after process timeouts; counted per session.
+    timeout_resume_attempts: int = Field(default=1, ge=0)
     timeout_seconds: int = 14400
     # Whether the lightweight Fix Agent runs when staged verification fails.
     # False escalates staged verification failures straight to full recovery.
@@ -432,21 +469,23 @@ class AgentRunnerSafetySettings(BaseModel):
 class AgentRunnerAutopilotSettings(BaseModel):
     """Autopilot / merge queue configuration.
 
-    与 ``AgentRunnerSafetySettings.auto_merge`` 组成"双开关"——只有两者同时
-    为真时合并队列阶段才会被激活。这是历史上 ``safety.auto_merge`` 死开关被
-    真正消费时的防呆保险：早前误设为 ``true`` 的旧环境若未同时打开本段
-    ``enabled``，仍不会开始自动合并。
+    全仓自动合并仍要求本段 ``enabled`` 与
+    ``AgentRunnerSafetySettings.auto_merge`` 同时为真。若 ``auto_merge`` 关闭，
+    合并队列只处理显式带 ``prd-auto-merge`` 标签的单个 PRD；本段 ``enabled``
+    对两种路径都是必要条件。这保留了对早前误设 ``safety.auto_merge = true``
+    的防呆保险。
 
     Attributes:
-        enabled: 主开关；为 ``False`` 时合并队列整段 no-op（严格档行为）。
+        enabled: 主开关；为 ``False`` 时合并队列整段 no-op，包括单 PRD 授权项。
         merge_method: 唯一接受的合并方式：``"squash"``；其它值在配置加载期
             由 :class:`AgentRunnerAutopilotSettings` 的 field_validator 拒
             绝。这是用户锁定的设计决策——单提交便于 ``git revert`` 回退。
         require_verifier_pass: 当该 Issue 需要 validation 时，是否要求
             ``validation/verifier-passed`` 标签先存在才进入合并流程；缺失
             则本轮跳过，留给 verifier / repair。
-        auto_sign_off: 是否在 verifier 绿灯后自动勾选 PR body 的 Realistic
-            Validation sign-off 清单；勾选与 marker 评论均幂等。
+        auto_sign_off: 是否自动勾选 PR body 的 Realistic Validation sign-off
+            清单；普通队列在 verifier 通过后勾选，显式 PRD 自动合并在队列仓库
+            验证命令通过后勾选；勾选与 marker 评论均幂等。
         merge_check_timeout_seconds: 等 PR checks 全绿的最大秒数；超时则
             放弃本轮合并（不阻塞后续 PR）。
     """

@@ -1,8 +1,8 @@
 """agent 命令行黄金快照测试（rv-1 的自动化部分）。
 
 12 条既有命令行（codex / claude / kimi × run / deliberate / generate / repl）
-与改造前逐字节一致是本 PRD 的硬验收线：任何 spec 数据、占位符展开或
-提示词投递语义的回归都会在这里直接变红。pi 的四条命令行是**新增**
+锁定 spec 数据、占位符展开与提示词投递语义。Codex 现有命令行新增 JSONL 输出，
+以便在超时前采集 thread id 并支持续传。pi 的四条命令行是**新增**
 目标形态（无"改造前"可对照），一并锁定防止后续漂移。
 codebuddy / qoder / opencode 共 11 条同样是**新增**目标形态：codebuddy 与
 claude 同构；qoder 的可执行名是 qodercn、run 用 -o stream-json、deliberate
@@ -51,7 +51,7 @@ def plain_worktree(tmp_path: Path) -> Path:
 
 
 def test_golden_codex_run(app_config: AppConfig, plain_worktree: Path) -> None:
-    """codex 主执行：workspace-write 沙箱 + 网络开关 + tail exec + argv 尾提示词。"""
+    """codex 主执行：workspace-write 沙箱 + JSONL 输出 + argv 尾提示词。"""
     invocation = build_agent_invocation("codex", "run", PROMPT, plain_worktree, app_config)
     assert invocation.argv == (
         "codex",
@@ -64,15 +64,16 @@ def test_golden_codex_run(app_config: AppConfig, plain_worktree: Path) -> None:
         "--ask-for-approval",
         "never",
         "exec",
+        "--json",
         PROMPT,
     )
     assert invocation.prompt_delivery == "argv_tail"
-    assert invocation.output_protocol == "plain"
+    assert invocation.output_protocol == "codex-json-lines"
     assert invocation.read_only is False
 
 
 def test_golden_codex_deliberate(app_config: AppConfig, plain_worktree: Path) -> None:
-    """codex 辩论：read-only 沙箱 + tail exec，提示词走 stdin。"""
+    """codex 辩论：read-only 沙箱 + JSONL 输出，提示词走 stdin。"""
     invocation = build_agent_invocation("codex", "deliberate", PROMPT, plain_worktree, app_config)
     assert invocation.argv == (
         "codex",
@@ -83,14 +84,15 @@ def test_golden_codex_deliberate(app_config: AppConfig, plain_worktree: Path) ->
         "--ask-for-approval",
         "never",
         "exec",
+        "--json",
     )
     assert invocation.prompt_delivery == "stdin"
-    assert invocation.output_protocol == "plain"
+    assert invocation.output_protocol == "codex-json-lines"
     assert invocation.read_only is True
 
 
 def test_golden_codex_generate(app_config: AppConfig, plain_worktree: Path) -> None:
-    """codex 内容生成：read-only 沙箱 + tail exec + argv 尾提示词。"""
+    """codex 内容生成：read-only 沙箱 + JSONL 输出 + argv 尾提示词。"""
     invocation = build_agent_invocation("codex", "generate", PROMPT, plain_worktree, app_config)
     assert invocation.argv == (
         "codex",
@@ -101,25 +103,27 @@ def test_golden_codex_generate(app_config: AppConfig, plain_worktree: Path) -> N
         "--ask-for-approval",
         "never",
         "exec",
+        "--json",
         PROMPT,
     )
     assert invocation.prompt_delivery == "argv_tail"
-    assert invocation.output_protocol == "plain"
+    assert invocation.output_protocol == "codex-json-lines"
     assert invocation.read_only is True
 
 
 def test_golden_codex_repl(app_config: AppConfig, plain_worktree: Path) -> None:
-    """codex REPL：仅 --cd + tail exec，无沙箱参数（边界由 REPL 命令执行器把守）。"""
+    """codex REPL：仅 --cd + JSONL 输出，无沙箱参数（边界由 REPL 命令执行器把守）。"""
     invocation = build_agent_invocation("codex", "repl", PROMPT, plain_worktree, app_config)
     assert invocation.argv == (
         "codex",
         "--cd",
         str(plain_worktree),
         "exec",
+        "--json",
         PROMPT,
     )
     assert invocation.prompt_delivery == "argv_tail"
-    assert invocation.output_protocol == "plain"
+    assert invocation.output_protocol == "codex-json-lines"
     assert invocation.read_only is False
 
 
@@ -301,6 +305,7 @@ def test_golden_codex_run_expands_git_writable_roots(app_config: AppConfig, tmp_
         "--add-dir",
         str(main_git_dir.resolve()),
         "exec",
+        "--json",
         PROMPT,
     )
 
@@ -316,11 +321,11 @@ def test_golden_codex_run_expands_commondir(app_config: AppConfig, tmp_path: Pat
     (worktree_path / ".git").write_text(f"gitdir: {main_git_dir}\n", encoding="utf-8")
 
     invocation = build_agent_invocation("codex", "run", PROMPT, worktree_path, app_config)
-    assert invocation.argv[-6:-4] == (
+    assert invocation.argv[-7:-5] == (
         "--add-dir",
         str(main_git_dir.resolve()),
     )
-    assert invocation.argv[-4:-2] == (
+    assert invocation.argv[-5:-3] == (
         "--add-dir",
         str(common_dir.resolve()),
     )
@@ -418,10 +423,17 @@ def test_golden_qoder_repl(app_config: AppConfig, plain_worktree: Path) -> None:
 
 
 def test_golden_opencode_run(app_config: AppConfig, plain_worktree: Path) -> None:
-    """opencode 主执行：run 子命令 + 逐行文本输出。"""
+    """opencode 主执行：run 子命令 + JSONL 输出。"""
     invocation = build_agent_invocation("opencode", "run", PROMPT, plain_worktree, app_config)
-    assert invocation.argv == ("opencode", "run", "--dangerously-skip-permissions", PROMPT)
-    assert invocation.output_protocol == PLAIN_PROTOCOL_ID
+    assert invocation.argv == (
+        "opencode",
+        "run",
+        "--dangerously-skip-permissions",
+        "--format",
+        "json",
+        PROMPT,
+    )
+    assert invocation.output_protocol == "opencode-json-lines"
 
 
 def test_golden_opencode_deliberate(app_config: AppConfig, plain_worktree: Path) -> None:
@@ -429,13 +441,27 @@ def test_golden_opencode_deliberate(app_config: AppConfig, plain_worktree: Path)
     invocation = build_agent_invocation(
         "opencode", "deliberate", PROMPT, plain_worktree, app_config
     )
-    assert invocation.argv == ("opencode", "run", "--dangerously-skip-permissions", PROMPT)
+    assert invocation.argv == (
+        "opencode",
+        "run",
+        "--dangerously-skip-permissions",
+        "--format",
+        "json",
+        PROMPT,
+    )
 
 
 def test_golden_opencode_repl(app_config: AppConfig, plain_worktree: Path) -> None:
     """opencode REPL：同一形态。"""
     invocation = build_agent_invocation("opencode", "repl", PROMPT, plain_worktree, app_config)
-    assert invocation.argv == ("opencode", "run", "--dangerously-skip-permissions", PROMPT)
+    assert invocation.argv == (
+        "opencode",
+        "run",
+        "--dangerously-skip-permissions",
+        "--format",
+        "json",
+        PROMPT,
+    )
 
 
 def test_opencode_has_no_generate_profile(app_config: AppConfig, plain_worktree: Path) -> None:

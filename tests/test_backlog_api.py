@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -13,15 +13,24 @@ from fastapi.testclient import TestClient
 import backend.api.backlog_sync as backlog_sync
 import backend.api.routes.agent_runner_backlog as backlog_routes
 from backend.api.app import app
-from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+    AutopilotConfig,
+    CommandResult,
+    PullRequestContext,
+    RepositoryRunContext,
+)
 from backend.core.use_cases.backlog_actions import BacklogActionError
+from backend.core.use_cases import agent_runner_merge_queue as merge_queue_module
+from backend.core.use_cases.agent_runner_merge_queue import process_merge_queue
 from backend.core.use_cases.backlog_snapshots import (
     build_backlog_task_key,
     persist_backlog_snapshot,
 )
 from backend.core.use_cases.monitor_snapshots import MonitorSyncCoordinator
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
-from tests.conftest import FakeGitHubClient
+from tests.conftest import FakeGitHubClient, FakeProcessRunner
+from tests.support.agent_runner import AWAITING_HUMAN_BANNER, build_acceptance_prd
 
 client = TestClient(app)
 
@@ -328,6 +337,126 @@ def test_start_prd_triggers_one_resync(
     assert response.status_code == 200, response.text
     assert snapshot_wiring.resync_requests == ["keda-main"]
     assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+
+
+def test_start_prd_api_passes_scoped_auto_merge_choice(
+    backlog_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HTTP 请求把单 PRD 自动合并选择交给 core，不折算成 runner CLI 旗标。"""
+    captured: dict[str, object] = {}
+
+    def record_start(**kwargs):
+        captured.update(kwargs)
+        return {"repo_id": "keda-main", "prd_path": "tasks/pending/a.md"}
+
+    monkeypatch.setattr(backlog_routes, "start_prd", record_start)
+    monkeypatch.setattr(backlog_routes, "request_backlog_resync", lambda *_args, **_kwargs: None)
+    encoded = _encode_prd_path("tasks/pending/P1-FEAT-20260101-test.md")
+
+    response = client.post(
+        f"/api/v1/agent-runner/backlog/prds/{encoded}/start",
+        json={"repo_id": "keda-main", "auto_merge_prd": True},
+    )
+
+    assert response.status_code == 200, response.text
+    launch_options = captured["launch_options"]
+    assert launch_options.auto_merge_prd is True
+    assert launch_options.cli_flags() == ()
+
+
+def test_backlog_api_authorization_is_consumed_by_merge_queue(
+    backlog_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """真实 Backlog API 写入的授权由 merge queue fresh read 后消费，且保留其余门禁。"""
+    from types import SimpleNamespace
+
+    repo_dir = backlog_environment["repo_dir"]
+    github_client = backlog_environment["github_client"]
+    pending_prd = repo_dir / "tasks/pending/P1-FEAT-20260101-test.md"
+    prd_text = build_acceptance_prd(AWAITING_HUMAN_BANNER, human_marks=(" ",))
+    linked_prd_text = "- GitHub Issue: https://github.com/example/repo/issues/42\n\n" + prd_text
+    pending_prd.write_text(
+        linked_prd_text,
+        encoding="utf-8",
+    )
+
+    contexts = backlog_routes._resolve_contexts()
+    auto_context = replace(
+        contexts[0],
+        config=replace(contexts[0].config, autopilot=AutopilotConfig(enabled=True)),
+    )
+    monkeypatch.setattr(backlog_routes, "_resolve_contexts", lambda: [auto_context])
+    monkeypatch.setattr(backlog_routes, "request_backlog_resync", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        backlog_routes,
+        "create_process_supervisor",
+        lambda: SimpleNamespace(spawn=lambda **_kwargs: None),
+    )
+    github_client.set_issue_body(42, f"PRD path: `{pending_prd.relative_to(repo_dir).as_posix()}`")
+
+    encoded_prd_path = _encode_prd_path("tasks/pending/P1-FEAT-20260101-test.md")
+    response = client.post(
+        f"/api/v1/agent-runner/backlog/prds/{encoded_prd_path}/start",
+        json={"repo_id": "keda-main", "auto_merge_prd": True},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["issue_number"] == 42
+    issue_after_api_write = github_client.get_issue(42)
+    assert "prd-auto-merge" in issue_after_api_write.labels
+
+    github_client.edit_issue_labels(42, add=["agent/review"], remove=["agent/ready"])
+    issue_for_queue = github_client.get_issue(42)
+    github_client.set_list_issues_by_label_result([issue_for_queue])
+    github_client.set_pr_context(
+        "issue-42",
+        PullRequestContext(
+            pr_url="https://github.com/example/repo/pull/42",
+            branch="issue-42",
+            head_sha="scoped-auto-merge-head",
+            base_sha="base1234",
+            mergeable=True,
+            checks_state="SUCCESS",
+            number=42,
+            body="",
+        ),
+    )
+    github_client.comment_issue(42, "PR Branch: `issue-42`")
+
+    archive_prd = repo_dir / "tasks/archive/P1-FEAT-20260101-test.md"
+    archive_prd.parent.mkdir(parents=True)
+    pending_prd.rename(archive_prd)
+    verification_calls: list[int] = []
+    monkeypatch.setattr(merge_queue_module, "create_or_reuse_worktree", lambda *args: repo_dir)
+    monkeypatch.setattr(merge_queue_module, "execute_rebase", lambda **kwargs: [])
+    monkeypatch.setattr(
+        merge_queue_module,
+        "run_verification",
+        lambda *args: verification_calls.append(42)
+        or [CommandResult(command=("just", "test"), return_code=0, stdout="ok", stderr="")],
+    )
+    monkeypatch.setattr(
+        merge_queue_module, "_diff_paths", lambda *args, **kwargs: (["src/main.py"], False)
+    )
+
+    exit_code, outcomes = process_merge_queue(
+        repo_path=repo_dir,
+        config=auto_context.config,
+        github_client=github_client,
+        process_runner=FakeProcessRunner(),
+        supervisor_agent="auto",
+    )
+
+    assert exit_code == 0
+    assert [outcome.action for outcome in outcomes] == ["merged"]
+    assert verification_calls == [42]
+    assert (
+        len([call for call in github_client.calls if call["method"] == "merge_pull_request"]) == 1
+    )
+    archive_prd_text = archive_prd.read_text(encoding="utf-8")
+    assert archive_prd_text == linked_prd_text
+    assert AWAITING_HUMAN_BANNER in archive_prd_text
+    assert "- [ ] decision 1: answered by a human" in archive_prd_text
 
 
 def test_global_start_triggers_one_resync(

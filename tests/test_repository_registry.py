@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,43 @@ def config_with_repo(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     return config_path, repo_path
+
+
+def test_registry_write_shares_the_atomic_writer_and_keeps_mode(
+    config_with_repo: tuple[Path, Path],
+) -> None:
+    """registry 写入沿用同一份落盘原语：权限位不变、不留下固定名临时文件。
+
+    独立的 ``<name>.tmp`` 会与另一个 ``config.toml`` 写入者（Settings 保存 / 并发 CLI）
+    互相截断；``os.replace`` 还会把 ``mkstemp`` 的 0600 带给目标文件，让机器级配置在每次
+    registry 写入后变成只有属主可读。
+    """
+    import stat
+
+    config_path, _existing = config_with_repo
+    os.chmod(config_path, 0o644)
+    editor = TomlRegistryEditor(config_path)
+
+    editor.add_repository(repo_id="second", path="/tmp/second", display_name=None)
+
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o644
+    assert not list(config_path.parent.glob("*.tmp"))
+    assert 'path = "/tmp/second"' in config_path.read_text(encoding="utf-8")
+
+
+def test_registry_failed_mutation_leaves_file_untouched(
+    config_with_repo: tuple[Path, Path],
+) -> None:
+    """前置校验失败时不落盘：重复添加同一个 repo_id 不改动文件、不留临时文件。"""
+    config_path, _existing = config_with_repo
+    before = config_path.read_bytes()
+    editor = TomlRegistryEditor(config_path)
+
+    with pytest.raises(ValueError, match="already exists"):
+        editor.add_repository(repo_id="existing", path="/tmp/x", display_name=None)
+
+    assert config_path.read_bytes() == before
+    assert not list(config_path.parent.glob("*.tmp"))
 
 
 def test_list_repositories(config_with_repo: tuple[Path, Path]) -> None:

@@ -13,9 +13,10 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from backend.core.shared.interfaces.agent_output_protocol import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
@@ -31,17 +32,17 @@ from backend.core.shared.interfaces.output_timestamps import (
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
-from backend.infrastructure.attempt_process_registry import (
-    probe_attempt_ownership,
-    register_live_attempt,
-    terminate_attempt,
-    unregister_live_attempt,
-)
 from backend.infrastructure.agent_stream_usage import (
     StreamUsageCollector,
     _attach_stream_observations,
     parse_reported_model_from_plain_stdout,
     parse_usage_from_plain_stdout,
+)
+from backend.infrastructure.attempt_process_registry import (
+    probe_attempt_ownership,
+    register_live_attempt,
+    terminate_attempt,
+    unregister_live_attempt,
 )
 from backend.infrastructure.child_env import build_e2e_child_env, build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
@@ -98,7 +99,7 @@ try:
 except ImportError:  # pragma: no cover - pty is POSIX-only (absent on Windows).
     pty = None  # type: ignore[assignment]
 
-# Streaming agents (kimi / codex) block-buffer stdout when it is a pipe, hiding
+# Plain-output agents (such as kimi) block-buffer stdout when it is a pipe, hiding
 # their progress until exit. A pseudo-terminal makes them line-buffer again.
 _PTY_AVAILABLE = pty is not None and hasattr(pty, "openpty")
 
@@ -162,18 +163,13 @@ def _terminate_process_tree(
         ):
             return False
         killable_group_id = expected_process_group
-    if hasattr(os, "killpg"):
-        if not has_expected_identity:
-            try:
-                child_group_id = os.getpgid(process.pid)
-            except OSError:  # 子进程已退出或已被回收。
-                child_group_id = None
-            if (
-                child_group_id is not None
-                and child_group_id > 1
-                and child_group_id != os.getpgid(0)
-            ):
-                killable_group_id = child_group_id
+    if hasattr(os, "killpg") and not has_expected_identity:
+        try:
+            child_group_id = os.getpgid(process.pid)
+        except OSError:  # 子进程已退出或已被回收。
+            child_group_id = None
+        if child_group_id is not None and child_group_id > 1 and child_group_id != os.getpgid(0):
+            killable_group_id = child_group_id
     if killable_group_id is not None:
         try:
             os.killpg(killable_group_id, signal.SIGKILL)
@@ -251,6 +247,21 @@ def _with_available_own_command(command: Sequence[str]) -> Sequence[str]:
     return command_parts
 
 
+def _observe_exception_output(
+    exc: BaseException,
+    usage_collector: StreamUsageCollector | None,
+) -> None:
+    """从 subprocess 超时/失败异常里尽力采集尚未返回的原始输出。"""
+    if usage_collector is None:
+        return
+    for attribute_name in ("output", "stdout", "stderr", "partial_stdout", "partial_stderr"):
+        output_value = getattr(exc, attribute_name, None)
+        if isinstance(output_value, bytes):
+            output_value = output_value.decode("utf-8", errors="replace")
+        if isinstance(output_value, str):
+            usage_collector.observe_text(output_value)
+
+
 class SubprocessRunner:
     """Run commands using the subprocess module.
 
@@ -293,8 +304,8 @@ class SubprocessRunner:
                 non-captured command), rendered text is routed to the sink
                 instead of the shared stdout, so parallel Issue runs can keep
                 each agent's output in its own panel/log without interleaving.
-            output_protocol: agent 调用路径专用的输出协议 id。非 None 的
-                流式协议（当前 ``claude-stream-json``）路由到对应的流式
+            output_protocol: agent 调用路径专用的输出协议 id。非 plain 协议
+                路由到对应的结构化流式
                 渲染执行器，取代旧版对命令行内容的嗅探；``None`` /
                 ``"plain"`` 走通用路径。
             env_profile: 子进程环境变量档名。``None``（默认）走 denylist
@@ -327,8 +338,9 @@ class SubprocessRunner:
             # 无需改动任何调用点。
             child_env = build_sanitized_child_env()
         usage_collector: StreamUsageCollector | None = None
-        if output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID:
+        if output_protocol is not None:
             usage_collector = StreamUsageCollector()
+        if output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID:
             completed = run_filtered_claude_stream(
                 command,
                 cwd=cwd,
@@ -355,6 +367,7 @@ class SubprocessRunner:
                 env=child_env,
                 attempt_key=attempt_key,
                 input_text=input_text,
+                usage_collector=usage_collector,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -367,21 +380,27 @@ class SubprocessRunner:
                 label=label,
                 env=child_env,
                 attempt_key=attempt_key,
+                usage_collector=usage_collector,
             )
             stdout = completed.stdout
             stderr = completed.stderr
         elif capture_output:
-            completed = subprocess.run(
-                list(command),
-                cwd=cwd,
-                check=False,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-                env=child_env,
-            )
+            try:
+                completed = subprocess.run(
+                    list(command),
+                    cwd=cwd,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                    env=child_env,
+                )
+            except BaseException as exc:
+                _observe_exception_output(exc, usage_collector)
+                _attach_stream_observations(exc, usage_collector)
+                raise
             stdout = completed.stdout
             stderr = completed.stderr
         elif _PTY_AVAILABLE:
@@ -396,6 +415,7 @@ class SubprocessRunner:
                 output_sink=output_sink,
                 env=child_env,
                 attempt_key=attempt_key,
+                usage_collector=usage_collector,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -429,6 +449,8 @@ class SubprocessRunner:
                 if process.stdout is not None:
                     for line in process.stdout:
                         watchdog.note_output()
+                        if usage_collector is not None:
+                            usage_collector.observe_line(line)
                         if output_sink is not None:
                             output_sink(line)
                         else:
@@ -439,6 +461,8 @@ class SubprocessRunner:
                 if process.stderr is not None:
                     for line in process.stderr:
                         watchdog.note_output()
+                        if usage_collector is not None:
+                            usage_collector.observe_line(line)
                         if output_sink is not None:
                             output_sink(line)
                         else:
@@ -451,9 +475,10 @@ class SubprocessRunner:
                     partial_stdout="".join(stdout_lines),
                     partial_stderr="".join(stderr_lines),
                 )
-            except BaseException:
+            except BaseException as exc:
                 # BaseException 而不是 Exception：Ctrl-C（KeyboardInterrupt）也必须
                 # 拆掉整个进程组，否则子进程会变成孤儿继续跑。
+                _attach_stream_observations(exc, usage_collector)
                 _terminate_process_tree(process)
                 process.wait()
                 raise
@@ -467,6 +492,9 @@ class SubprocessRunner:
                 stdout=stdout,
                 stderr=stderr,
             )
+        if usage_collector is not None and output_protocol != CLAUDE_STREAM_JSON_PROTOCOL_ID:
+            usage_collector.observe_text(stdout)
+            usage_collector.observe_text(stderr)
         token_usage = usage_collector.usage if usage_collector is not None else None
         reported_model = usage_collector.reported_model if usage_collector is not None else None
         if (
@@ -540,6 +568,7 @@ def _run_captured_process(
     env: dict[str, str] | None = None,
     attempt_key: str | None = None,
     input_text: str | None = None,
+    usage_collector: StreamUsageCollector | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a captured subprocess with heartbeat and optional inactivity logging.
 
@@ -558,6 +587,7 @@ def _run_captured_process(
         input_text: 经 stdin 投递的文本。传入时走 ``communicate(input=...)``
             ——与 :meth:`SubprocessRunner.run` 原先用 ``subprocess.run`` 投递
             stdin 的语义一致（捕获式、无输出活动跟踪）。
+        usage_collector: 可选 agent 输出旁路观测器；捕获输出在返回或超时前解析。
     """
     process = subprocess.Popen(
         list(command),
@@ -588,8 +618,13 @@ def _run_captured_process(
         else:
             stdout, stderr = _communicate_with_activity_tracking(process, watchdog)
             process.wait()
+        if usage_collector is not None:
+            usage_collector.observe_text(stdout)
+            usage_collector.observe_text(stderr)
         watchdog.raise_if_timed_out(partial_stdout=stdout, partial_stderr=stderr)
-    except BaseException:
+    except BaseException as exc:
+        _observe_exception_output(exc, usage_collector)
+        _attach_stream_observations(exc, usage_collector)
         _terminate_process_tree(process)
         process.wait()
         raise
@@ -605,7 +640,7 @@ def _run_captured_process(
 
 def _communicate_with_activity_tracking(
     process: subprocess.Popen[str],
-    watchdog: "_ProcessWatchdog",
+    watchdog: _ProcessWatchdog,
 ) -> tuple[str, str]:
     """Read stdout/stderr while resetting the inactivity timeout on each chunk."""
     stdout_lines: list[str] = []
@@ -867,10 +902,11 @@ def run_filtered_claude_stream(
     display_sink: Callable[[str], None] | None = None,
     label: str | None = None,
     usage_collector: StreamUsageCollector | None = None,
+    line_renderer: Callable[[str], str] | None = None,
     env: dict[str, str] | None = None,
     attempt_key: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run Claude stream-json and print a filtered live view.
+    """Run a structured JSON Lines agent stream and print its readable view.
 
     Args:
         command: Command to run.
@@ -889,6 +925,7 @@ def run_filtered_claude_stream(
         usage_collector: Optional token 用量采集器。提供时，每行原始事件
             在渲染前先交给它观察（原始行只有此处可靠可得；渲染后的
             stdout 重解析会静默丢行）。
+        line_renderer: 可选的事件渲染器；未提供时使用 Claude stream-json 渲染。
         env: 可选的已净化子进程环境（由 :meth:`SubprocessRunner.run`
             传入，避免同一环境重复构造）；``None`` 时本函数自行调用
             :func:`build_sanitized_child_env`，直接调用方无需感知。
@@ -922,7 +959,7 @@ def run_filtered_claude_stream(
         timeout=timeout,
         inactivity_timeout_seconds=inactivity_timeout,
         heartbeat_seconds=_COMMAND_HEARTBEAT_SECONDS,
-        base_label="Claude stream",
+        base_label="Agent stream",
         context_label=label,
         attempt_key=attempt_key,
     )
@@ -959,7 +996,11 @@ def run_filtered_claude_stream(
                 watchdog.note_output()
                 if usage_collector is not None:
                     usage_collector.observe_line(output_line)
-                rendered_text = renderer.render_line(output_line)
+                rendered_text = (
+                    line_renderer(output_line)
+                    if line_renderer is not None
+                    else renderer.render_line(output_line)
+                )
                 if collect_stdout and rendered_text:
                     stdout_lines.append(rendered_text)
                 if rendered_text:
@@ -1021,10 +1062,11 @@ def _run_pty_stream(
     output_sink: Callable[[str], None] | None,
     env: dict[str, str] | None = None,
     attempt_key: str | None = None,
+    usage_collector: StreamUsageCollector | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a streaming command under a pseudo-terminal so it line-buffers.
 
-    Agents such as ``kimi`` / ``codex`` switch stdout to block buffering when it
+    Plain-output agents such as ``kimi`` switch stdout to block buffering when it
     is a pipe, so their progress stays invisible until they exit. Allocating a
     PTY makes them believe stdout is a terminal, restoring live incremental
     output. stdout and stderr are merged onto the PTY (natural ordering, no
@@ -1041,6 +1083,8 @@ def _run_pty_stream(
         output_sink: 可选的可读原始文本回调；行时间戳由消费者添加，本函数不添加。
         env: 可选的已净化子进程环境（由 :meth:`SubprocessRunner.run`
             传入）；``None`` 时本函数自行调用 :func:`build_sanitized_child_env`。
+        usage_collector: 可选 agent 输出旁路观测器；观察 PTY 合并流中的原文。
+        attempt_key: 活跃 attempt 登记键（停滞监督的所有权证据来源）。
 
     Returns:
         CompletedProcess with the collected stdout (stderr merged into it).
@@ -1102,6 +1146,8 @@ def _run_pty_stream(
         if not text:
             return
         collected.append(text)
+        if usage_collector is not None:
+            usage_collector.observe_text(text)
         if output_sink is not None:
             # sink 只收可读原文：时间戳属于消费侧展示，由 per-Issue 路由
             # sink 在落盘 / 上屏前统一加，合议 workspace 文件因此保持干净。
@@ -1135,7 +1181,8 @@ def _run_pty_stream(
             _flush_log_lines(final=True)
         return_code = process.wait(timeout=timeout)
         watchdog.raise_if_timed_out(partial_stdout="".join(collected))
-    except BaseException:
+    except BaseException as exc:
+        _attach_stream_observations(exc, usage_collector)
         _terminate_process_tree(process)
         process.wait()
         raise

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import (
+    AgentFallbackCandidate,
     AppConfig,
     CommandResult,
     IssueSummary,
@@ -843,3 +844,27 @@ def test_verifier_gate_blocks_rather_than_killing_the_issue_when_no_agent_can_ru
     assert "do not invent fixes" in message
     # 候选池被真正走完了，而不是第一次失败就放弃。
     assert attempted == ["kimi", "codex"]
+
+
+def test_choose_verifier_agent_prefers_fallback_candidates_array_over_stale_legacy_order() -> None:
+    """verifier auto 从有效候选链挑第一个 ≠ builder：候选数组写后不读 stale 旧名单。
+
+    旧名单仍是默认的 [claude, kimi, codex]；候选数组 [codex/x, claude/y] 非空时
+    整体接管候选链，第一个 ≠ builder(claude) 的应是 codex 而不是旧名单里的 kimi。
+    """
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    config = AppConfig(
+        runner=RunnerConfig(
+            agent_fallback_order=("claude", "kimi", "codex"),
+            agent_fallback_candidates=(
+                AgentFallbackCandidate(agent="codex", preset="x"),
+                AgentFallbackCandidate(agent="claude", preset="y"),
+            ),
+        )
+    )
+
+    assert rva._choose_verifier_agent(config, "claude") == "codex"
+    # 候选数组里没有可用候选时仍回退旧名单语义。
+    legacy_only = AppConfig(runner=RunnerConfig(agent_fallback_order=("kimi", "codex")))
+    assert rva._choose_verifier_agent(legacy_only, "claude") == "kimi"

@@ -321,8 +321,8 @@ def build_agent_invocation(
         model_selection: 可选的模型选择（阶段预设绑定解析结果）；
             ``None`` 表示不注入任何模型参数，argv 与未启用预设时逐字节一致。
         resume_session_id: 可选的会话续传 id（崩溃对账 / recovery 轮次回填上轮
-            session）。仅当该 agent 声明 ``supports_resume`` 且给出
-            ``resume_args`` 模板时注入；否则静默忽略，调用方经
+            session）。仅当该 agent 声明 ``supports_resume``，且该用途声明
+            ``resume_args`` 或 ``resume_tail_args`` 时注入；否则静默忽略，调用方经
             ``AgentInvocation.resumed_session_id`` 判断是否真的续传。
 
     Returns:
@@ -344,7 +344,12 @@ def build_agent_invocation(
     for arg in profile_spec.args:
         argv.append(_expand_placeholders(arg, worktree_path=worktree_path, prompt=prompt))
     resumed_session_id: str | None = None
-    if resume_session_id and agent_spec.supports_resume and agent_spec.resume_args:
+    profile_resume_tail = profile_spec.resume_tail_args
+    if (
+        resume_session_id
+        and agent_spec.supports_resume
+        and (agent_spec.resume_args or profile_resume_tail)
+    ):
         # 续传模板与模型模板共用同一套占位符展开；注入点固定在基础 args 之后、
         # 模型参数之前，保证提示词的尾部投递位置不变。
         resumed_session_id = resume_session_id
@@ -385,8 +390,20 @@ def build_agent_invocation(
         expanded_values = expander(worktree_path)
         for expanded_value in expanded_values:
             argv.extend([flag, expanded_value])
-    for tail_arg in profile_spec.tail_args:
-        argv.append(_expand_placeholders(tail_arg, worktree_path=worktree_path, prompt=prompt))
+    selected_tail_args = (
+        profile_resume_tail
+        if resumed_session_id is not None and profile_resume_tail
+        else profile_spec.tail_args
+    )
+    for tail_arg in selected_tail_args:
+        argv.append(
+            _expand_placeholders(
+                tail_arg,
+                worktree_path=worktree_path,
+                prompt=prompt,
+                session_value=resumed_session_id,
+            )
+        )
 
     if profile_spec.prompt_delivery == PROMPT_DELIVERY_ARGV_TAIL:
         # 空提示词不占位置参数：原生入口在 bootstrap_enabled = false 时 prompt 为空串，

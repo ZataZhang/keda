@@ -82,8 +82,8 @@ def build_runner_argv(
         repo_id: 目标仓库 ID（传给 ``--repo-id``）。
         issue_number: ``BLOCKED_CONTINUE`` 的目标 Issue；``RUN_ONCE`` 传它时
             定向执行（``kc run --issue N``），缺省走 ``--all-ready``。
-        options: per-run 启动选项，每项映射到 ``kc run`` 的同名旗标。``None``
-            或全部取默认值时不产生任何额外 argv。
+        options: per-run 启动选项。CLI 旗标折算为额外 argv；PRD 自动合并选择由
+            Backlog 用例在启动前写入 Issue 标签，不进入 argv。
 
     Returns:
         完整 argv 元组。
