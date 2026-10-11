@@ -424,7 +424,7 @@ Verifier-only 且不在本区逐项呈递：端点契约与关联完整性（rv-
 #### Architecture & Compatibility Acceptance
 
 - [x] 无新表/迁移/事件类型；`uv run python hooks/shared/check_architecture.py` 通过；core 未 import infrastructure。— `git diff --name-only 44a33d6b..HEAD` 无 `alembic/`；架构检查输出「架构依赖方向全部合法，无违规」；`rg -n "backend.infrastructure" src/backend/core/use_cases/prd_invocation_detail.py` 无命中。
-- [x] 现有端点向后兼容（新增字段，旧客户端忽略）；CLI 表面与 `[iar-invocation-*]` 日志标记未变（rg 断言）。— `git diff --name-only 44a33d6b..HEAD -- src/backend/api/` 为空（路由与解析器零改动）；legacy e2e 用例与旧 spec 覆盖缺字段兼容；`rg -n "iar-invocation-" src/backend` 仍只命中 `agent_invocation_tracing.py` 与随包 skill 文档，未新增/改名标记。
+- [x] 现有端点向后兼容（新增字段，旧客户端忽略）；CLI 命令树、旗标、退出码与 `[iar-invocation-*]` 日志标记未变（rg 断言）。— `git diff --name-only 44a33d6b..HEAD -- src/backend/api/` 为空（路由与解析器零改动）；legacy e2e 用例与旧 spec 覆盖缺字段兼容；`rg -n "iar-invocation-" src/backend` 仍只命中 `agent_invocation_tracing.py` 与随包 skill 文档，未新增/改名标记。**如实披露一处连带效应**：`PrdLifecycleDetail` 新增字段经 `asdict()` 进入 `kc lifecycle --json` 的每条记录，多出一个恒为 `null` 的 `invocations` 键（该命令不查调用账本）；命令表面未动，机器输出是**增量兼容**变化，已在 `docs/guides/agent-runner.md` 的 `kc lifecycle` 小节写明。
 - [x] 行数守卫：修改文件非空行未超 1000 上限（新模块/新组件拆分生效）。— 新模块 `prd_invocation_detail.py` 204 行、新组件 `prd-lifecycle-timeline.tsx` 655 行、格式模块 335 行、容器 310 行；`just lint --reuse` 的 `check-max-file-lines` Passed。
 
 #### Frontend Acceptance
@@ -439,7 +439,7 @@ Verifier-only 且不在本区逐项呈递：端点契约与关联完整性（rv-
 
 #### Validation Acceptance
 
-- [x] `just lint --reuse`、`just lint --full`、受影响 pytest、`just e2e`（新增与旧 spec）、前端 typecheck/build、mkdocs strict 全绿；证据绑定最终代码树。— `just test all` → 3830 passed, 1 skipped；`just lint --reuse` / `just lint --full` 通过；`just e2e` 新 spec 8 passed、旧 spec 5 passed；typecheck/build、`mkdocs build --strict` 通过；绑定见 `<stem>/rv-1-harness-provenance.txt`（repo_head + working_tree_diff_sha256）与 `<stem>/rv-1-final-tree-binding.txt`。**修订**：上述 8 passed 是 4a94bdb0 之前的 7 用例 + setup，未覆盖修复新增用例；Pre-PR 评审后在含修复的树上重跑，rv-3/rv-4 spec 现为 9 passed（8 用例 + setup），见 `<stem>/rv-3-rv-4-e2e-final-tree.txt`，`rv-1-final-tree-binding.txt` 已按该树重写；前端 typecheck/build、pytest、mkdocs strict 亦在该树重跑。
+- [x] `just lint --reuse`、`just lint --full`、受影响 pytest、`just e2e`（新增与旧 spec）、前端 typecheck/build、mkdocs strict 全绿；证据绑定最终代码树。— `just test all` → 3830 passed, 1 skipped；`just lint --reuse` / `just lint --full` 通过；`just e2e` 新 spec 8 passed、旧 spec 5 passed；typecheck/build、`mkdocs build --strict` 通过；绑定见 `<stem>/rv-1-harness-provenance.txt`（repo_head + working_tree_diff_sha256）与 `<stem>/rv-1-final-tree-binding.txt`。**两轮修订**：第一轮（4a94bdb0 后）曾把 rv-3/rv-4 spec 重跑为 9 passed 并重写绑定；第二轮 Pre-PR 评审又改了展开区空态成因、折叠项 key、契约注释、原型与文档，因此旧绑定再次失效——已在含全部评审修复的树上重建静态 console 重跑 rv-1 harness（PASS，fresh read 5 条 → 3 行 = HTTP 3 = 页面 3），并把 rv-3/rv-4 与新写的截断空态断言一并重跑：`just e2e tests/smoke/backlog-prd-lifecycle` → 13 passed（setup + 新 spec 8 用例 + 旧 spec 4 用例），见 `<stem>/rv-3-rv-4-e2e-final-tree.txt`；`rv-1-final-tree-binding.txt` 与 `rv-1-harness-provenance.txt` 按该树重写，pytest 在新模块未变的情况下以 `-o addopts=""` 复跑 51 passed（`just test all` 由 runner 门禁在同一棵树复核）。
 - [~] 独立 verifier 对 rv-1..rv-4 的来源、真实边界、fresh-state 与反例审查为 PASS。 — runner-owned gate: 独立 verifier 轮次由 runner 在执行器交付门禁之后执行。
 
 #### Delivery Readiness
@@ -488,13 +488,22 @@ Verifier-only 且不在本区逐项呈递：端点契约与关联完整性（rv-
 交付前对最终实现树与新证据做一次叙述复核，逐项确认正文没有残留被实现推翻的说法：
 
 - **Interpretation**：§1 行为样例表 7 行的输入与期望结果已在最终树上逐条复验——两会话分组与同秒去重（e2e `rv-4` 两用例 + rv-1 三档截图）、尝试展开的调用行与账本逐条一致（rv-1 harness 三方比对 PASS）、观测徽章为「观测记录」且整页无「未开始」（e2e 断言 + rv-1 `timelineContainsNotStarted=false`）、旧数据/不可用/截断三类披露（e2e 三用例 + `rv-3-pytest`）、真实运行核对（rv-1 harness 的 fresh read ↔ HTTP ↔ 页面）。表格无需删除行，**人审决策集合与验收 oracle 未改动**。
-- **Public behavior and contracts**：端点只新增 `invocations` 字段（旧客户端/旧响应兼容由 legacy e2e 用例与旧 spec 双证）；CLI 表面零变化（`git diff --name-only 44a33d6b..HEAD -- src/backend/api/` 为空，`[iar-invocation-*]` 标记未动）；耗时口径、事件闭集、`status` 映射与观测事件占位语义未改（去噪只在渲染层，抽屉仍显示原始 detail）。实现新增的是 core 读取模块 `prd_invocation_detail.py` 与两个 DTO 字段，调用账本仍是唯一调用事实来源。
+- **Public behavior and contracts**：端点只新增 `invocations` 字段（旧客户端/旧响应兼容由 legacy e2e 用例与旧 spec 双证）；CLI 命令树、旗标、退出码零变化（`git diff --name-only 44a33d6b..HEAD -- src/backend/api/` 为空，`[iar-invocation-*]` 标记未动），但 `PrdLifecycleDetail` 的新字段经 `asdict()` 让 `kc lifecycle --json` 的每条记录多出一个恒为 `null` 的 `invocations` 键——增量兼容、非破坏，已在 `docs/guides/agent-runner.md` 的 `kc lifecycle` 小节写明；耗时口径、事件闭集、`status` 映射与观测事件占位语义未改（去噪只在渲染层，抽屉仍显示原始 detail）。实现新增的是 core 读取模块 `prd_invocation_detail.py` 与两个 DTO 字段，调用账本仍是唯一调用事实来源。
 - **Related PRD status**：§5 的三条关系维持不变——#242/#243 的调用账本、PR #153 的「执行过程」信息层级原样复用；在途 `P1-FEAT-20261009-161453`（保留期清理）尚未落地，本 PRD 的截断披露语义与其兼容，未新增「历史一定完整」的假设；`P1-FEAT-20261009-123512` 不改 Console，与本 PRD 无排序关系；§8 维持 `Depends on tasks/issues: none` 与 `Gate type: none`。
 - **Requirements and risks**：功能一览 7 条 bullet 的锚点覆盖 FR-1…FR-7，逐条复核后仍为真。**披露两处基线事实（非本 PRD 引入）**：① 基线 `44a33d6b` 上 `just test all` 有 5 个失败（`kc lifecycle` 子命令漏同步 argparse 门面守卫与 9 份 references 计数），已在本次交付一并修复，不修则全量测试不绿；② 基线前端 eslint 已有 5 个 `set-state-in-effect` 错误（本 PRD 未触及的文件），因此 §9.2 的前端 lint 口径写成「无新增错误」而非「全绿」，见本文 §9.1 与 Change Log。§12 的三条风险（保留期截断、旧库无标识、读取上限）与实现披露语义一致，420px 视口的横向溢出属既有布局限制并已在 §9.1 披露，均无新增未记录风险。
 - **静态断言复核**：`rg -n "backend.infrastructure" src/backend/core/use_cases/prd_invocation_detail.py` 无命中；`git diff --name-only 44a33d6b..HEAD` 不含 `alembic/`、`src/backend/api/`、`frontend-admin/`；`just lint --reuse` 的 `check-max-file-lines` / `jscpd` / 架构检查全部 Passed；`just test all` → 3830 passed, 1 skipped，`just lint --full` 通过。
 - **已解决项**：§9 中除 `Human-Confirmed` 两项与一条 runner-owned `[~]`（独立 verifier 轮次）外全部 `[x]` 并附证据；`<stem>` 下的原始证据、四类反例与原型往返均在最终树上重采，绑定记录见 `rv-1-harness-provenance.txt` 与 `rv-1-final-tree-binding.txt`。**未解决项**：独立 verifier 结论与人工验收（均由 runner / 人工在其各自环节完成）。
 
 ## 14. Change Log
+
+### Pre-PR 评审第二轮：截断不得被说成「这次尝试没调用过」，并如实记录 `kc lifecycle --json` 的连带键
+
+- Type: code（含 docs / prototype / evidence 修订）
+- Before: 尝试展开区的空态只按 `available` 两态说成因，`truncated=true` 时某次尝试没有调用行会被说成「调用观测早于本次执行上线，或该阶段未产生进程调用」——把「没读到」说成「没发生」，与本 PRD 上一轮刚修好的「缺口按成因分别说」自相矛盾；`frontend-public/lib/api/types.ts` 的契约镜像注释仍把「该 PRD 无从归属调用事实」写进 `available=false` 的语义，与 `PrdInvocationDetail` docstring 和 `docs/guides/agent-runner.md` 已经分开的成因相反；原型 `renderAttemptGroup` 同样只有两态，「失败与重试」（截断场景）给出错误成因；被折叠事件的 React key 仍只用 `event_type + occurred_at`——与上一轮修掉的是同一根因，只修了主行没修折叠项；§9.2 与 Final Reconciliation 用「`src/backend/api/` 路径无改动」证明「CLI 表面零变化」，但 DTO 新增字段经 `asdict()` 已进入 `kc lifecycle --json` 的每条记录（多一个恒为 `null` 的 `invocations` 键），机器输出确实变了而文档没写。
+- After: 空态成因扩为四态（账本可读 / 读取失败 / 响应未携带明细区 / 读取被截断），截断时说「调用记录已截断：读取只返回最近一段，这次尝试的调用序列可能未被包含」；`types.ts` 注释按 `invocations=null` / `available=false` / `rows=[]` 三种成因分开，并写明截断时「某个尝试没有行」不代表它没调用过；原型与原型说明同步同一份四态判定；折叠项 key 追加组内序号；`docs/guides/agent-runner.md` 在 `kc lifecycle` 小节如实记录 `--json` 新增恒为 `null` 的 `invocations` 键（命令树、旗标、退出码不变），并在调用明细小节补「展开区空态按四种成因分别说」；e2e 的 truncated 用例新增该空态断言。
+- Reason: Pre-PR 评审发现「按成因分别披露」在展开区仍有一处误标，而 §1 行为样例与 FR-5 要求每一类缺口说自己的事；同时交付断言拿路径当证据，掩盖了一个真实（虽为增量兼容）的机器输出变化。
+- Impact: 前端空态文案与折叠项 key、契约注释、原型展示与原型说明、两处文档、一条 e2e 断言；无 API 字段、无采集口径、无耗时口径、无执行语义变化。
+- Review: 执行器（评审轮）自验：`just e2e tests/smoke/backlog-prd-lifecycle` → 13 passed（setup + 新 spec 8 用例 + 旧 spec 4 用例，含新增截断空态断言）；`uv run pytest -o addopts="" tests/test_prd_invocation_detail.py tests/test_prd_lifecycle.py` → 51 passed；`pnpm typecheck` 通过、eslint 对改动文件零错误、`uv run mkdocs build --strict` 通过；rv-1 harness 重建静态 console 后在同一棵树重跑 PASS，`rv-1-harness-provenance.txt` / `rv-1-final-tree-binding.txt` 与 `rv-3-rv-4-e2e-final-tree.txt` 均已按该树重写；原型往返重跑 `failureCount=0`。待人工验收；独立 verifier 的 PASS 仍绑 `051e0ec6`，修复后行为需人工或下一轮 verifier 覆盖。
 
 ### Pre-PR 评审修复：缺口成因分流、事件行 key 稳定化与证据重绑最终树
 

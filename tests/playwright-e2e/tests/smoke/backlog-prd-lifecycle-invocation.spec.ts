@@ -554,6 +554,18 @@ test.describe('PRD lifecycle invocation detail timeline', () => {
 
     await expect(page.getByTestId('prd-lifecycle-invocation-notice')).toContainText('已截断')
     await expect(page.getByTestId('prd-lifecycle-session-group')).toHaveCount(2)
+
+    // 截断不得被说成「这次尝试没调用过」：只有读取被截断时，空态要说这个成因。
+    const sessionB = page
+      .getByTestId('prd-lifecycle-session-group')
+      .filter({ hasText: SESSION_B_RUN_ID })
+    await sessionB
+      .locator('[data-attempt-number="2"]')
+      .getByTestId('prd-lifecycle-attempt-toggle')
+      .click()
+    await expect(sessionB.getByTestId('prd-lifecycle-invocation-empty')).toContainText(
+      '调用记录已截断',
+    )
     await screenshot(page, 'rv-3-invocations-truncated.png')
   })
 

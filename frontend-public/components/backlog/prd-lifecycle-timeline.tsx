@@ -82,16 +82,18 @@ type AttemptSummary = {
 /** 尝试族事件类型——它们带着 attempt detail，是摘要的唯一事实源。 */
 const ATTEMPT_FAMILY_EVENT_TYPES = new Set(["attempt", "retry", "recovered"]);
 
-/** 调用明细区的缺口成因：可读 / 读取失败 / 响应未携带该区域（旧响应或未关联 Issue）。 */
-type InvocationGapKind = "available" | "unavailable" | "absent";
+/** 尝试展开区空态的成因：可读 / 读取失败 / 响应未携带该区域 / 读取被截断。 */
+type InvocationGapKind = "available" | "unavailable" | "absent" | "truncated";
 
 /**
- * 判定调用明细区属于哪一种缺口成因。
+ * 判定尝试展开区空态该说哪一种成因。
  *
- * 「读不到」与「没带这个区」是两件不同的事，说错成因会让人去修错误的一端。
+ * 「读不到」「没带这个区」「只读到最近一段」「确实没有记录」是四件不同的事，说错成因
+ * 会让人去修错误的一端：截断时这次尝试的调用**存在**，只是没被返回，不能写成
+ * 「观测早于本次执行上线」。
  *
  * @param invocations - 调用明细读取区；``null``/``undefined`` 表示响应未带该区域。
- * @returns 缺口成因标签。
+ * @returns 空态成因标签；``available`` 表示账本可读且未截断，确实没有这一尝试的记录。
  */
 function invocationGapKindOf(
   invocations: PrdInvocationDetail | null | undefined,
@@ -99,7 +101,10 @@ function invocationGapKindOf(
   if (invocations === null || invocations === undefined) {
     return "absent";
   }
-  return invocations.available ? "available" : "unavailable";
+  if (!invocations.available) {
+    return "unavailable";
+  }
+  return invocations.truncated ? "truncated" : "available";
 }
 
 /** 尝试展开区没有调用行时按成因分别说明，不把「无从归属」说成「读取失败」。 */
@@ -107,6 +112,7 @@ const ATTEMPT_INVOCATION_EMPTY_TEXT: Record<InvocationGapKind, string> = {
   available: "这次尝试没有可读到的调用记录（调用观测早于本次执行上线，或该阶段未产生进程调用）。",
   unavailable: "调用明细不可用：账本读取失败，展开项无法显示调用序列。",
   absent: "响应未携带调用明细区（旧响应，或该 PRD 没有关联 Issue）：展开项不显示调用序列。",
+  truncated: "调用记录已截断：读取只返回最近一段，这次尝试的调用序列可能未被包含。",
 };
 
 /**
@@ -341,9 +347,9 @@ function EventRowItem({
           {summarizeEventDetail(row.primary)}
         </span>
       </button>
-      {row.folded.map((foldedEvent) => (
+      {row.folded.map((foldedEvent, foldedIndex) => (
         <button
-          key={`${foldedEvent.event_type}-${foldedEvent.occurred_at}`}
+          key={`${foldedEvent.event_type}-${foldedEvent.occurred_at}-${foldedIndex}`}
           type="button"
           data-testid={`prd-lifecycle-event-${foldedEvent.event_type}`}
           onClick={() => onSelectEvent(foldedEvent)}

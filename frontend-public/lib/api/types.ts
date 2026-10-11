@@ -601,11 +601,13 @@ export type PrdInvocationRow = {
 };
 
 /**
- * 调用明细读取区（三类缺口必须可区分，不得由前端推测）。
+ * 调用明细读取区（缺口成因必须可区分，不得由前端推测）。
  *
- * `available=false` 表示账本不可读或该 PRD 无从归属调用事实；`available=true`
- * 且 `rows` 为空表示账本可读但确实没有记录——两者的页面文案不同。
- * `truncated=true` 表示返回条数已达读取上限，展示的不是完整历史。
+ * 三种成因页面各说各话：`available=false` 只表示**账本读不到**（存储不具备 Issue 级
+ * 调用读端，或读取异常）；「该 PRD 没有关联 Issue」是**无从归属**，后端根本不挂这个区
+ * （`PrdLifecycleDetail.invocations` 为 null/缺位）；`available=true` 且 `rows` 为空
+ * 表示账本可读但确实没有记录。`truncated=true` 表示返回条数已达读取上限，展示的不是
+ * 完整历史——此时某个尝试没有行不代表它没调用过。
  */
 export type PrdInvocationDetail = {
   available: boolean;

@@ -23,10 +23,10 @@ just prd review tasks/archive/P1-FEAT-20261010-092630-lifecycle-invocation-detai
 **已替你核对过的内容**
 
 - **真实入口只有 rv-1 一项。** rv-1 是真实 uvicorn + 真实静态 console + 真实 SQLite + 真实 Chromium（只把外部执行器换成确定性计划 fixture，PRD 允许的边界）。原型往返（`docs/prototypes/prd-lifecycle-observability.html`）与 rv-3/rv-4 的 DOM 断言都跑在注入 fixture 的层级上——前者是 `prototype` 保真度、后者 `mock_boundary` 已在 PRD oracle 里自认——**不得**读作真实入口验证；生产边界（真实 Console 页面 + 真实账本）只由 rv-1 支撑。
-- **证据绑定的代码树分两次。** rv-1..rv-4 的原始日志（`rv-4-e2e.txt` 13:00 等）绑在修复前的树：`repo_head=051e0ec6`，且当时 spec 只有 7 个用例，未覆盖 4a94bdb0 新增的「账本里的每条调用都要么显示、要么被披露」。Pre-PR 评审发现该缺口后，在含评审修复的工作树上重跑，产出 `rv-3-rv-4-e2e-final-tree.txt`（9 passed = 8 用例 + setup，头部记录 `repo_head` 与 `code_paths_diff_sha256`），并重写 `rv-1-final-tree-binding.txt`。**旧日志保留不删**，其结论仅适用于各自记录的树。独立 verifier 的 PASS 绑在 `051e0ec6`（见 `verifier-response.txt` 首行 builder sha），其对抗项正是 4a94bdb0 所修的问题，因此修复后行为尚无独立复核，需由人工验收或下一轮 verifier 覆盖。
+- **证据绑定的代码树分三轮。** rv-1..rv-4 的原始日志（`rv-4-e2e.txt` 13:00 等）绑在修复前的树：`repo_head=051e0ec6`，且当时 spec 只有 7 个用例，未覆盖 4a94bdb0 新增的「账本里的每条调用都要么显示、要么被披露」。第一轮 Pre-PR 评审后在含修复的树上重跑，产出 `rv-3-rv-4-e2e-final-tree.txt`（9 passed = 8 用例 + setup）并重写 `rv-1-final-tree-binding.txt`。第二轮 Pre-PR 评审又改动的仍是代码路径（展开区空态成因四态化、折叠项 key、`types.ts` 契约注释、原型与其说明文档、新增一条 e2e 断言），于是 rv-1/rv-3/rv-4 与原型往返在同一棵含全部评审修复的树上**再重跑一次**：rv-1 harness 先 `just console-sync` 重建静态 console 再采集（PASS，见 `rv-1-page-vs-ledger.txt` 与三档截图），rv-3/rv-4 与新断言记入 `rv-3-rv-4-e2e-final-tree.txt` 末段（13 passed = setup + 新 spec 8 用例 + 旧 spec 4 用例），绑定重写见 `rv-1-final-tree-binding.txt`。**旧日志保留不删**，其结论仅适用于各自记录的树。独立 verifier 的 PASS 绑在 `051e0ec6`（见 `verifier-response.txt` 首行 builder sha），其对抗项正是 4a94bdb0 所修的问题，因此两轮评审修复后的行为都尚无独立复核，需由人工验收或下一轮 verifier 覆盖。
 - **全量门禁全绿**：`just test all` → 3830 passed, 1 skipped；`just lint --reuse` / `just lint --full`、前端 typecheck/build、`mkdocs build --strict`、新旧 e2e spec 均通过。
 - **三处基线事实与限制已披露**（见文末「披露与限制」）：基线 `just test all` 的 5 个失败已一并修复；前端 eslint 的 5 个基线错误不在本 PRD 范围；420px 视口横向溢出属既有布局。
-- **没有触碰 CLI 表面**：`git diff --name-only 44a33d6b..HEAD -- src/backend/api/` 为空；`[iar-invocation-*]` 标记未变。
+- **没有触碰 CLI 命令表面**：`git diff --name-only 44a33d6b..HEAD -- src/backend/api/` 为空，子命令、旗标、退出码与 `[iar-invocation-*]` 标记都未变。如实记录一处连带效应：`PrdLifecycleDetail` 新增字段经 `asdict()` 让 `kc lifecycle --json` 的每条记录多出一个恒为 `null` 的 `invocations` 键（该命令不查调用账本），属增量兼容，已写入 `docs/guides/agent-runner.md` 的 `kc lifecycle` 小节。
 
 ## 结论摘要
 
@@ -34,10 +34,10 @@ just prd review tasks/archive/P1-FEAT-20261010-092630-lifecycle-invocation-detai
 |---|---|---|
 | rv-1（R2，真实入口） | PASS | `rv-1-page-vs-ledger.txt`、三档截图、`rv-1-harness-provenance.txt` |
 | rv-2（R2，端点契约） | PASS（23 passed） | `rv-2-pytest.txt` |
-| rv-3（R1，三类降级） | PASS（3 passed + 截断用例补跑 1 passed + e2e 4 用例 / 旧 spec 5 passed） | `rv-3-pytest.txt`、`rv-3-e2e.txt`、`rv-3-legacy-spec.txt`、`rv-3-*.png` |
+| rv-3（R1，三类降级） | PASS（3 passed + 截断用例补跑 1 passed + e2e 4 用例 / 旧 spec 5 passed；最终树 e2e 合并重跑 13 passed，含新增「截断时展开区说截断」断言与其反例） | `rv-3-pytest.txt`、`rv-3-e2e.txt`、`rv-3-legacy-spec.txt`、`rv-3-rv-4-e2e-final-tree.txt`、`rv-3-*.png` |
 | rv-4（R1，去噪与抽屉） | PASS（e2e 8 passed） | `e2e/rv-4-*.png` |
-| 原型往返 | PASS（failureCount=0） | `prototype-roundtrip.json` |
-| 反例 | 五类全部按设计变红 | `rv-1/rv-2/rv-3/rv-4-negative-control.txt`、`prototype-roundtrip-negative-control.txt` |
+| 原型往返 | PASS（failureCount=0，两轮评审修复后均在最终树重跑） | `prototype-roundtrip.json` |
+| 反例 | 六类全部按设计变红 | `rv-1/rv-2/rv-3/rv-4-negative-control.txt`、`rv-3-truncated-cause-negative-control.txt`、`prototype-roundtrip-negative-control.txt` |
 | 独立 verifier | ⏳ runner 轮次 | `….verifier-report.md`（待生成） |
 | 人工验收 | 🧍 待人工 | `human-review-checklist.md` |
 
@@ -162,6 +162,7 @@ node scripts/capture_prototype.cjs --base-url http://127.0.0.1:8001
 | rv-2：`retry_of` 展示字段丢弃 | `bash scripts/negative_control_backend.sh rv-2` | 退出码 1，对应用例 `AssertionError`（`rv-2-negative-control.txt`） |
 | rv-3：截断判定写死 `False` | `bash scripts/negative_control_backend.sh rv-3` | 退出码 1，`assert truncated_detail.truncated is True` 失败（`rv-3-negative-control.txt`） |
 | rv-4：前端 `SAME_SECOND_MERGE_GROUPS` 置空 | `PLAYWRIGHT_IDENTIFIER=… bash scripts/negative_control_rv4.sh` | 退出码 1，e2e `2 failed, 6 passed`（`rv-4-negative-control.txt`） |
+| rv-3（第二轮评审新增断言）：`invocationGapKindOf` 的截断分支写死成 `"available"`（即评审前的两态行为） | `bash scripts/negative_control_rv3_truncated_cause.sh` | 退出码 1，`rv-3 truncated ledger discloses the read cap` 变红：`Expected substring: "调用记录已截断"` / `Received string: "这次尝试没有可读到的调用记录（调用观测早于本次执行上线，或该阶段未产生进程调用）。"`——断言确实咬住了「把没读到说成没发生」这类回归（`rv-3-truncated-cause-negative-control.txt`） |
 | 原型：折叠组置空 / 观测事件集合置空 | `bash scripts/negative_control_prototype.sh` | 两次红跑：2 项 / 4 项失败（`prototype-roundtrip-negative-control.txt`） |
 
 所有注入脚本都用临时备份还原源文件（本环境不做 git 写操作）；每次还原后 `git status` 确认代码路径无残留改动。
@@ -181,31 +182,39 @@ node scripts/capture_prototype.cjs --base-url http://127.0.0.1:8001
 | 文档 | `uv run mkdocs build --strict` | 退出码 0 |
 | e2e（新） | `just e2e tests/smoke/backlog-prd-lifecycle-invocation.spec.ts` | 8 passed |
 | e2e（旧，兼容回归） | `just e2e tests/smoke/backlog-prd-lifecycle.spec.ts` | 5 passed（spec 未修改） |
+| e2e（第二轮评审修复后的最终树，两 spec 合并跑） | `PLAYWRIGHT_IDENTIFIER=… PLAYWRIGHT_PASSWORD=… just e2e tests/smoke/backlog-prd-lifecycle` | **13 passed**（setup 1 + 新 spec 8 用例 + 旧 spec 4 用例），新用例含「截断时展开区说截断」断言；见 `rv-3-rv-4-e2e-final-tree.txt` 末段 |
+| rv-1 harness（最终树重建 console 后重跑） | `bash scripts/capture_real_console.sh`（不带 `SKIP_CONSOLE_SYNC`，先 `just console-sync` 再采集） | exit 0，PASS：fresh read 5 条 → 3 行 = HTTP 3 = 页面 3 |
+| 原型往返（最终树） | `python3 -m http.server 8001 --directory docs` + `node scripts/capture_prototype.cjs --base-url http://127.0.0.1:8001` | `failureCount=0`，五套场景 × 桌面/窄屏全部走通，零 pageerror |
 | 人审清单自检 | `scripts/validate_human_review_checklist.cjs` | 3 张卡、4 张内嵌图全部加载、零 pageerror、可生成 Markdown（`human-review-checklist-validation.txt`） |
 | 结构检查 | prd skill 的 `check_human_review_checklist.py` | OK（警告级检查无提示） |
 
 ## 最终树绑定
 
 ```text
-# rv-1-harness-provenance.txt（采集时刻）
-collected_at_utc=2026-10-11T05:02:17Z
-repo_head=71f697aeabae74597abf0e2490afd9bb5ae8ead5
-working_tree_diff_sha256=456519c8bae26d2b81765937c94b91b6c6bad32a0b19242283d102195ad1392a
-
-# rv-1-final-tree-binding.txt（交付记录路径排除后）
-code_paths_diff_sha256=e70640867a6eb1f906329a92c77c8967dea9da4bb7f82c05fe4aba0a6f4fa2ed
+# rv-1-final-tree-binding.txt（第二轮评审修复后，交付记录路径排除后）
+bound_at_utc=2026-10-11T07:19:50Z
+repo_head=2290de391af64e04bf3d36793d2d359509208186
+code_paths_diff_sha256=16d3e20fd7bf7bfc7328a4441b039f80643006e258133328b7cd45d1f9a58bf8
+code_paths_diff_stat: 6 files changed, 57 insertions(+), 19 deletions(-)
 code_path_file_sha256:
-  bfe925a6…  docs/guides/agent-runner.md
-  182cd182…  tests/playwright-e2e/tests/smoke/backlog-prd-lifecycle-invocation.spec.ts
-  71588319…  tests/test_cli_schema.py
-  9e4a2852…  tests/test_kedacode_operator_skill.py
+  d3c62a57…  docs/guides/agent-runner.md
+  e8220e39…  docs/prototypes/assets/prd-lifecycle-observability.js
+  fe6c5a9f…  docs/prototypes/prd-lifecycle-observability.md
+  6022d119…  frontend-public/components/backlog/prd-lifecycle-timeline.tsx
+  be7be8a6…  frontend-public/lib/api/types.ts
+  394981f3…  tests/playwright-e2e/tests/smoke/backlog-prd-lifecycle-invocation.spec.ts
+
+# rv-1-harness-provenance.txt（同一时刻采集，working_tree_diff_sha256 与该树的全量 diff 一致）
+collected_at_utc=2026-10-11T07:19:50Z
+repo_head=2290de391af64e04bf3d36793d2d359509208186
+working_tree_diff_sha256=9d369316fab4e3da91c44cef0688ce6ad7694a61ecd67722ae70e05fed367410
 ```
 
-代码路径改动仅上述 4 个文件（+22/-2、+36、+4/-1、+15/-5），实现主体（`prd_invocation_detail.py`、DTO、前端组件与原型）包含在快照 `71f697ae` 中；`just test all`、e2e、harness 与反例都在该树状态上复跑。此后只写交付记录（PRD 与本目录 `.md`），不再改动代码路径。
+`code_paths_diff_sha256` 是「相对当时 HEAD 的代码路径 diff」的哈希，因此提交后应以 `git diff <记录的 repo_head>..<最终 head> -- . ':(exclude)tasks' | shasum -a 256` 复算；逐文件 sha256 可直接与最终树比对。本轮改动仅限上述 6 个代码路径文件（展开区空态四态化、折叠项 key、契约注释、原型与其说明文档、e2e 断言与文档措辞），此后只写交付记录（PRD 与本目录 `.md`），不再改动代码路径。历史快照（`71f697ae` 与 `4a94bdb0` 两轮的绑定内容）保留在 `rv-1-final-tree-binding.txt` 的旧版本记录与 `rv-3-rv-4-e2e-final-tree.txt` 前段中，其结论只适用于各自绑定的树。
 
 ## 披露与限制
 
-1. **基线守卫修复**：开工时基线 `44a33d6b` 的 `just test all` 有 5 个失败（`kc lifecycle` 子命令上线时漏同步 argparse 门面守卫与随包 skill 的 9 份 references 计数）。本 PRD 一并修复（测试常量/白名单、路由关键词表与 docs 计数），`lifecycle` 与 `schema`/`tokens` 同列 `FACADE_EXEMPT_COMMANDS`（只读 Typer 原生命令，不经 argparse 执行后端）；CLI 表面零变化。详见 PRD Change Log。
+1. **基线守卫修复**：开工时基线 `44a33d6b` 的 `just test all` 有 5 个失败（`kc lifecycle` 子命令上线时漏同步 argparse 门面守卫与随包 skill 的 9 份 references 计数）。本 PRD 一并修复（测试常量/白名单、路由关键词表与 docs 计数），`lifecycle` 与 `schema`/`tokens` 同列 `FACADE_EXEMPT_COMMANDS`（只读 Typer 原生命令，不经 argparse 执行后端）；命令树、旗标与退出码零变化，但 `PrdLifecycleDetail` 的新字段经 `asdict()` 让 `kc lifecycle --json` 的每条记录多出一个恒为 `null` 的 `invocations` 键（增量兼容，已写进 `docs/guides/agent-runner.md` 的 `kc lifecycle` 小节）。详见 PRD Change Log。
 2. **前端 lint 基线为红**：5 个 `set-state-in-effect` 错误位于本 PRD 未触及的文件（基线副本上复现同样 5 个），CI 不跑该 lint；因此前端验收口径为「无新增错误」。若要 eslint 全绿需另开 PRD。
 3. **420px 视口**：真实 Console 多栏布局横向溢出（既有布局、非本 PRD 改动），时间线被挤出视口；该视口只作披露，窄屏可用性由 1100px 窄窗口截图与原型 420px 往返证明。420px 档的展开操作在自动化中用键盘激活完成（页面既有可达路径），已记入观测 JSON。
 4. **rv-1 的 mock 边界**：外部执行器为确定性计划 fixture（两次会话、一次失败重试、一次未闭合调用）；runner 编排、FastAPI、core 组装、SQLite、Next.js 页面与浏览器交互全部真实。未跑完整 runner 调度（会建分支/推 PR，属共享状态变更，本次执行环境禁止）。

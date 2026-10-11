@@ -685,21 +685,38 @@
       </li>`;
   }
 
+  /**
+   * 尝试展开区空态的成因文案（与 prd-lifecycle-timeline 的判定同一份口径）。
+   *
+   * 「读不到」「没带这个区」「只读到最近一段」「确实没有记录」是四件事，说错成因
+   * 会让人去修错误的一端——尤其是截断时这次尝试的调用**存在**，只是没被返回。
+   */
+  function attemptInvocationEmptyText() {
+    const detail = scenarioOf().invocations;
+    if (detail === null || detail === undefined) {
+      return '响应未携带调用明细区（旧响应，或该 PRD 没有关联 Issue）：展开项不显示调用序列。';
+    }
+    if (!detail.available) {
+      return '调用明细不可用：账本读取失败，展开项无法显示调用序列。';
+    }
+    if (detail.truncated) {
+      return '调用记录已截断：读取只返回最近一段，这次尝试的调用序列可能未被包含。';
+    }
+    return '这次尝试没有可读到的调用记录（调用观测早于本次执行上线，或该阶段未产生进程调用）。';
+  }
+
   /** 一个 Agent 尝试分组：尝试事件行 + 可展开的调用序列。 */
   function renderAttemptGroup(runId, attempt) {
     const invocations = invocationsForAttempt(runId, attempt.attemptNumber);
     const expandKey = `${runId}#${attempt.attemptNumber}`;
     const expanded = uiState.expanded.has(expandKey);
-    const available = scenarioOf().invocations?.available ?? false;
     let expandedBody;
     if (!expanded) {
       expandedBody = '';
     } else if (invocations.length > 0) {
       expandedBody = `<ul class="invocation-list">${invocations.map(renderInvocationRow).join('')}</ul>`;
     } else {
-      expandedBody = `<p class="invocation-empty">${available
-        ? '这次尝试没有可读到的调用记录（调用观测早于本次执行上线，或该阶段未产生进程调用）。'
-        : '调用明细不可用：账本读取失败，展开项无法显示调用序列。'}</p>`;
+      expandedBody = `<p class="invocation-empty">${attemptInvocationEmptyText()}</p>`;
     }
     const summary = attemptSummaryParts(attempt);
     return `<div class="attempt-group">

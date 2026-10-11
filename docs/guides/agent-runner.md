@@ -1955,7 +1955,7 @@ kc lifecycle --reached validation_passed --json
 - `--reached <event>` 按事件历史筛选：命中该事件的 Issue 即使后来进入评审、阻塞、失败或完成阶段，仍会保留在结果中。可选值来自生命周期事件闭集；纯观测事件 `agent_token_usage` 不作为里程碑。
 - `--phase <phase>` 只匹配当前阶段，支持 `none`、`queued`、`executing`、`validating`、`reviewing`、`merging`、`blocked`、`failed`、`completed`。
 - `--issue <n>` 显示事件时间线；若不同仓库存在同号 Issue 且没有传 `--repo-id`，会分别显示匹配记录。
-- `--json` 输出每条生命周期的 run、阶段、结局、账本完整性与事件详情，供脚本消费。
+- `--json` 输出每条生命周期的 run、阶段、结局、账本完整性与事件详情，供脚本消费。记录里另带一个 `invocations` 键，本命令下**恒为 `null`**：调用明细只在 Backlog 的 PRD 生命周期详情接口里按 Issue 组装，`kc lifecycle` 不查调用账本，也不改变任何 CLI 参数、退出码或命令树。
 - 数据来自本机 `history_db_path` 指向的 SQLite 生命周期账本。其它机器上的记录不会自动同步到这里；账本没有记录时，命令会报告空结果，不会把它推断成“未开始”。
 - 生命周期阶段是 `queued`、`executing`、`validating`、`reviewing`、`merging`、`blocked`、`failed`、`completed` 等粗粒度阶段；`--reached` 则按更细的历史事件（例如 `validation_passed`）筛选。
 
@@ -4045,7 +4045,8 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
   `available=false`（账本读端不可用：存储不具备 Issue 级调用读端、或读取异常）、
   `available=true` 且 `rows=[]`（账本可读但没有该 Issue 的调用记录，例如早于账本上线的旧库）、
   `truncated=true`（读取触达 500 条上限，历史只是最近一段，本视图不做分页、过滤或搜索）。缺口只影响
-  调用明细区，页面其余部分照常渲染。
+  调用明细区，页面其余部分照常渲染。尝试展开区的空态同样按这四种成因分别说成一句话：截断时某次尝试
+  没有行，要说「读取只返回最近一段」，**不得**写成「这次尝试没调用过」。
 - 生命周期事件 detail 里的 `invocation_run` 键是写侧注入的「该事件发生在哪次执行会话内」（只在 runner
   执行上下文内写、不覆盖调用方已有同名键）。旧事件没有该键时页面回落为平铺列表并说明「无归属」，
   不按时间窗口猜测会话分组。
