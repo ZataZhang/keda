@@ -11,9 +11,9 @@
     },
     {
       id: 'prd-lifecycle-observability', title: 'PRD 生命周期观测与执行分析', project: 'keda', module: 'Backlog / 统计',
-      system: 'Keda Console', form: 'code-native', version: 'v1.2', updatedAt: '2026-10-10', availability: 'available', validationLevel: '交互原型',
-      primaryFlow: '从 Backlog 单 PRD 执行过程浏览六阶段；展开阶段查看整行调用结果与重试关系，再进入仓库统计并返回',
-      description: '基于真实 Backlog 与 Stats 信息架构设计的可点击原型，展示 PRD 生命周期六阶段、整行展开的阶段调用明细、端到端耗时和仓库聚合统计。',
+      system: 'Keda Console', form: 'code-native', version: 'v2.0', updatedAt: '2026-10-11', availability: 'available', validationLevel: '交互原型',
+      primaryFlow: '从 Backlog 单 PRD 执行时间线按「执行会话 → Agent 尝试 → 调用」展开调用明细、查看事件详情，切换五套场景验证去噪与降级披露，并进入仓库级 PRD 耗时统计后返回',
+      description: '基于真实 Backlog 与 Stats 信息架构设计的可点击原型，时间线与 frontend-public 组件同源：同秒 started/claimed 合并成一行、同秒 attempt/retry 折成标记、观测事件走中性徽章；尝试头显示 Agent/失败类别/耗时/是否恢复，展开后是跨会话的调用行（阶段、执行器、终态、重试链、耗时、模型、日志定位）。不可读台账、无归属旧数据、读取截断三类缺口分别显式披露，永不猜测；调用明细不可用时时间线仍完整渲染。',
       preview: '', entry: './prd-lifecycle-observability.html', source: './prd-lifecycle-observability/', provenance: [],
       relationships: [
         { id: 'roadmap-cicd-repair', label: '继续查看 CI/CD 检查与自动修复轮次' },

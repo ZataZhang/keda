@@ -13,8 +13,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AgentPerformanceSection } from "@/components/stats/agent-performance-section";
 import {
   formatLifecycleDuration,
+  formatTokenCount,
   PHASE_LABELS,
-} from "@/components/backlog/prd-lifecycle-view";
+} from "@/components/backlog/prd-lifecycle-format";
 import {
   fetchAgentPerformanceStats,
   fetchCompletionStats,
@@ -31,7 +32,6 @@ import type {
   RunRecordEntry,
   TokenUsageTotals,
 } from "@/lib/api/types";
-import { formatTokenCount } from "@/components/backlog/prd-lifecycle-view";
 
 type AgentPerformanceQueryState = {
   filterKey: string;

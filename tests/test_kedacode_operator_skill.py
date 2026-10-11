@@ -445,16 +445,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--config",
     },
     ("schema",): {"--json", "--output"},
-    # kc lifecycle（issue-274 前序 CLI 表面）：只读生命周期查询，示例用到筛选与
-    # 机读旗标；取值集合已与 ``kc schema --json`` 的运行时派生结果核对。
-    ("lifecycle",): {
-        "--issue",
-        "--repo-id",
-        "--phase",
-        "--reached",
-        "--json",
-        "--output",
-    },
+    # ``kc lifecycle`` 是只读查询；旗标集合取自 ``kc schema --json`` 的真实命令树。
+    ("lifecycle",): {"--issue", "--repo-id", "--phase", "--reached", "--output", "--json"},
     # `kc backlog ci` 子组（P1-FEAT-20260916-134008）：policy 的 --global 与
     # --prd 互斥；status 的 --json 复用 Console ci_delivery DTO。
     ("backlog", "ci", "status"): {"--prd", "--json", "--repo", "--repo-id"},
@@ -538,7 +530,7 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
 _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "create-issue.md": ("建 issue", "create an Issue"),
     "issue-inspect.md": ("查 issue", "inspect Issues"),
-    "lifecycle.md": ("查生命周期", "lifecycle", "Issue lifecycle"),
+    "lifecycle.md": ("查生命周期", "lifecycle", "Issue lifecycle", "lifecycle phases"),
     "run-once.md": ("跑一次", "run one execution pass"),
     "watch.md": ("看进度", "live agent output"),
     "triage.md": ("卡住了", "triage stuck"),

@@ -209,6 +209,87 @@ class PrdLifecycleDetail:
     durations: PrdLifecycleDurations
     events: list[PrdLifecycleEventView]
     has_data: bool
+    invocations: "PrdInvocationDetail | None" = None
+
+
+@dataclass(frozen=True)
+class PrdInvocationRow:
+    """一次真实进程调用在「执行过程」视图里的展示行。
+
+    字段全部来自调用账本已落库的事实（身份取自事件列，其余取自起止事件的
+    ``detail_json``），本视图不新增采集、不推测回填：
+
+    - ``outcome`` 保持账本闭集语义（``ok`` / ``failed`` / ``timeout`` / ``error``
+      / ``unclosed`` / ``incomplete``）；未闭合的调用 ``finished_at`` 与
+      ``duration_seconds`` 恒为 ``None``，前端据此显示"未闭合"而不是估算时长。
+    - 模型三态由 ``requested_model`` / ``reported_model`` / ``model_source``
+      共同表达：未下发与执行器未上报是两件事，不拿配置值冒充实际模型。
+    - ``retry_of`` / ``retry_reason`` 保留重试与换执行器回退的关联，失败调用
+      不会被合并进后续成功调用。
+
+    Attributes:
+        invocation_id: 本次进程调用的唯一 id。
+        run_id: 所属执行会话标识（与调用账本的 ``run_id`` 同源）。
+        attempt_number: recovery 轮次；非 attempt 主体调用为 ``None``。
+        phase: 调用阶段（闭集）。
+        role: 由阶段推导的角色。
+        executor: 实际执行器注册名（回退换人后即为换到的那个）。
+        outcome: 调用终态（闭集）。
+        failure_category: 失败类别；成功调用为 ``None``。
+        started_at: 开始事件时间（ISO8601）。
+        finished_at: 结束事件时间；未闭合为 ``None``。
+        duration_seconds: 墙钟耗时；未闭合为 ``None``。
+        requested_model: 本次实际下发的模型 id；未下发为 ``None``。
+        reported_model: 执行器自报的模型 id；未上报为 ``None``。
+        model_source: 实际模型信息来源；无自报时为 ``unknown``。
+        token_usage: 执行器自报用量；无数据时为 ``None``（≠ 0）。
+        retry_of: 本次调用替代的上一次 invocation id；非重试为 ``None``。
+        retry_reason: 与 :attr:`retry_of` 配套的闭集重试原因。
+        exit_code: 进程退出码；未闭合或未知为 ``None``。
+        log_locator: per-Issue 日志的相对定位，供 grep 回原文。
+    """
+
+    invocation_id: str
+    run_id: str
+    attempt_number: int | None
+    phase: str
+    role: str
+    executor: str
+    outcome: str
+    failure_category: str | None
+    started_at: str | None
+    finished_at: str | None
+    duration_seconds: float | None
+    requested_model: str | None
+    reported_model: str | None
+    model_source: str | None
+    token_usage: dict | None
+    retry_of: str | None
+    retry_reason: str | None
+    exit_code: int | None
+    log_locator: str | None
+
+
+@dataclass(frozen=True)
+class PrdInvocationDetail:
+    """某个 Issue 的调用明细展示集（挂在生命周期详情的 ``invocations`` 上）。
+
+    三个字段就是页面必须如实披露的全部状态，缺任何一项都会让视图"看起来完整"：
+
+    - ``available=False``：调用账本不可读（存储不具备 Issue 级调用读端，或读取异常）。
+      前端显示「调用明细不可用」。
+    - 整个区为 ``None``（生命周期详情的 ``invocations`` 缺位）：该 PRD 没有关联 Issue，
+      调用事实无从归属——与「读不到」是两件事，页面文案不同。
+    - ``available=True`` 且 ``rows=[]``：账本可读但没有该 Issue 的调用记录
+      （早于账本上线的旧库、或该 PRD 尚未跑过 Agent）。
+    - ``truncated=True``：读取条数触达上限，历史只是**最近一段**而非全部。
+
+    ``rows`` 按事件流出场顺序排列（跨执行会话），不做时间窗口推断。
+    """
+
+    available: bool
+    truncated: bool
+    rows: list[PrdInvocationRow]
 
 
 @dataclass(frozen=True)
