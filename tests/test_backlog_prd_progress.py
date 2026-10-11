@@ -16,9 +16,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.api.routes.agent_runner_backlog as backlog_routes
+import backend.core.use_cases.backlog_prd_progress as backlog_prd_progress_module
 from backend.api.app import app
 from backend.core.shared.models.agent_runner import AppConfig, CommandResult, RepositoryRunContext
+from backend.core.use_cases.backlog_prd_evidence import build_evidence_manifest
 from backend.core.use_cases.backlog_prd_progress import (
+    EvidenceReports,
     build_prd_progress,
     parse_validation_plan,
 )
@@ -313,6 +316,70 @@ def test_attribution_filename_fallback_when_manifest_missing(tmp_path: Path) -> 
     assert progress.evidence.produced_ids == ["rv-2"]
 
 
+def test_attribution_filename_fallback_when_manifest_damaged(tmp_path: Path) -> None:
+    """损坏的结构化清单（JSON 解析失败）→ 同样回退文件名前缀，不使端点整体失败。"""
+    repo_root = _make_repo(tmp_path, evidence_files=["rv-2-run.png"])
+    evidence_dir = repo_root / "tasks" / "evidence" / PRD_STEM
+    (evidence_dir / "evidence.json").write_text("{ not valid json", encoding="utf-8")
+
+    progress = build_prd_progress(
+        repo_path=repo_root,
+        config=AppConfig(),
+        prd_path=PENDING_PRD,
+        process_runner=_Runner(porcelain=""),
+    )
+    assert progress.evidence.status == "complete"
+    assert progress.evidence.attribution_source == "filename"
+    assert progress.evidence.produced_ids == ["rv-2"]
+    assert progress.evidence.produced_planned_count == 1
+
+
+def test_unreadable_manifest_falls_back_to_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """结构化清单读取失败（无权限等）→ 回退文件名前缀，不让端点整体失败。"""
+    repo_root = _make_repo(
+        tmp_path, evidence_files=["rv-2-run.png"], evidence_json={"rv-2-run.png": 2}
+    )
+
+    def _raise_permission_denied(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(
+        backlog_prd_progress_module, "load_evidence_manifest", _raise_permission_denied
+    )
+    progress = build_prd_progress(
+        repo_path=repo_root,
+        config=AppConfig(),
+        prd_path=PENDING_PRD,
+        process_runner=_Runner(porcelain=""),
+    )
+    assert progress.evidence.status == "complete"
+    assert progress.evidence.attribution_source == "filename"
+    assert progress.evidence.produced_ids == ["rv-2"]
+
+
+def test_attribution_mixed_when_manifest_and_prefix_both_used(tmp_path: Path) -> None:
+    """同一合并文件集里既用到清单映射又用到前缀回退 → attribution_source=mixed。"""
+    repo_root = _make_repo(
+        tmp_path,
+        evidence_files=["shot.png", "rv-2-run.png"],
+        evidence_json={"shot.png": 1},
+    )
+    progress = build_prd_progress(
+        repo_path=repo_root,
+        config=AppConfig(),
+        prd_path=PENDING_PRD,
+        process_runner=_Runner(porcelain=""),
+    )
+    evidence = progress.evidence
+    assert evidence.status == "complete"
+    assert evidence.attribution_source == "mixed"
+    assert evidence.produced_ids == ["rv-1", "rv-2"]
+    assert evidence.produced_planned_count == 2
+    assert evidence.file_count == 3  # 含 evidence.json 自身
+
+
 def test_attribution_unattributed_does_not_count_planned(tmp_path: Path) -> None:
     """计划外编号不增加 produced_planned_count；无归属文件归其他、attribution=none。"""
     repo_root = _make_repo(tmp_path, evidence_files=["notes.txt", "rv-9-run.png"])
@@ -346,6 +413,44 @@ def test_reports_flags_by_role(tmp_path: Path) -> None:
     assert reports.verification_plan is True
     assert reports.evidence_report is True
     assert reports.verifier_report is False
+
+
+def _block_dir_enumeration(monkeypatch: pytest.MonkeyPatch, blocked_dir_name: str) -> None:
+    """让指定名字的目录在 ``iterdir`` 时抛 PermissionError（模拟无权限枚举）。"""
+    original_iterdir = Path.iterdir
+
+    def _iterdir_with_denied(self: Path):  # noqa: ANN202
+        if self.name == blocked_dir_name:
+            raise PermissionError(f"permission denied: {self}")
+        return original_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", _iterdir_with_denied)
+
+
+def test_unreadable_evidence_dir_marks_unavailable_not_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """证据目录存在但枚举失败 → unavailable 且计数为 null，不伪装成「确认无文件」。"""
+    repo_root = _make_repo(tmp_path, evidence_files=["rv-1-run.png"])
+    _block_dir_enumeration(monkeypatch, PRD_STEM)
+
+    progress = build_prd_progress(
+        repo_path=repo_root,
+        config=AppConfig(),
+        prd_path=PENDING_PRD,
+        process_runner=_Runner(porcelain=""),
+    )
+    evidence = progress.evidence
+    assert evidence.status == "unavailable"
+    assert evidence.file_count is None
+    assert evidence.produced_planned_count is None
+    assert evidence.reports == EvidenceReports(None, None, None)
+
+    manifest = build_evidence_manifest(
+        repo_path=repo_root, config=AppConfig(), prd_path=PENDING_PRD
+    )
+    assert manifest.status == "unavailable"
+    assert manifest.files == []
 
 
 def _manifest_files(repo_root: Path, tmp_path: Path, wt: Path):
@@ -416,3 +521,28 @@ def test_endpoint_progress_missing_prd(progress_api_environment: Path) -> None:
         f"/api/v1/agent-runner/backlog/prds/{_encoded('tasks/pending/nope.md')}/progress?repo_id={REPO_ID}"
     )
     assert response.status_code == 400
+
+
+def test_endpoints_survive_unreadable_evidence_dir(
+    progress_api_environment: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """证据目录枚举失败时两端点都 200 并以 status=unavailable 披露，而不是 500。"""
+    evidence_dir = progress_api_environment / "tasks" / "evidence" / PRD_STEM
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "rv-1-run.png").write_text("x", encoding="utf-8")
+    _block_dir_enumeration(monkeypatch, PRD_STEM)
+
+    progress_response = client.get(
+        f"/api/v1/agent-runner/backlog/prds/{_encoded(PENDING_PRD)}/progress?repo_id={REPO_ID}"
+    )
+    assert progress_response.status_code == 200
+    progress_data = progress_response.json()
+    assert progress_data["evidence"]["status"] == "unavailable"
+    assert progress_data["evidence"]["file_count"] is None
+    assert progress_data["evidence"]["produced_planned_count"] is None
+
+    manifest_response = client.get(
+        f"/api/v1/agent-runner/backlog/prds/{_encoded(PENDING_PRD)}/evidence?repo_id={REPO_ID}"
+    )
+    assert manifest_response.status_code == 200
+    assert manifest_response.json()["status"] == "unavailable"

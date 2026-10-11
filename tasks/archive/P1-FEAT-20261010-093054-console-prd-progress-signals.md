@@ -6,7 +6,7 @@
 
 > 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
-> 已达成：后端 progress/evidence 端点与三个解析模块（worktree 定位 / 影响树移植 / 进度聚合）+ 前端三读数与证据分组；rv-1（真实 `kc console` 进程 + 零 mock 浏览器四态 spec，5 passed + 负控按预期变红 rc=1）、rv-2（TestClient 进程内 HTTP 集成 50 passed + 安全负控 15 passed + 跨进程 curl 29 条断言全通过）、rv-3（真实 git + importlib CLI 逐字段对照 9 passed）全绿；`just frontend-public typecheck`/`build`/`console-sync` rc=0 且同步后的真实页面可见新 UI；改动集 pre-commit 代码类钩子全 Passed。恢复轮 2 另修复 5 条与本 PRD 无关的 baseline 守卫失败（祖先提交 39014730 lifecycle CLI 面未同步；只同步守卫登记常量与豁免集合，旗标契约未削弱），最终树 `just test all`（含 full lint）3854 passed / 1 skipped 全绿。恢复轮 5 用仓库自身门禁复验时发现并修掉一个半截绿灯：runner 以 `bash -lc` 复跑时解析到系统 bash 3.2，`$VAR（` 的全角字节被并入变量名触发 `set -u` 中断而退出码仍为 0，故取证脚本加了「未走到收尾即判失败」哨兵。证据与逐条可复跑命令见 `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/`。
+> 已达成：后端 progress/evidence 端点与三个解析模块（worktree 定位 / 影响树移植 / 进度聚合）+ 前端三读数与证据分组；rv-1（真实 `kc console` 进程 + 零 mock 浏览器四态 spec，5 passed + 负控按预期变红 rc=1）、rv-2（TestClient 进程内 HTTP 集成 55 passed + 安全负控 15 passed + 跨进程 curl 29 条断言全通过）、rv-3（真实 git + importlib CLI 逐字段对照 9 passed）全绿；`just frontend-public typecheck`/`build`/`console-sync` rc=0 且同步后的真实页面可见新 UI；改动集 pre-commit 代码类钩子全 Passed。恢复轮 2 另修复 5 条与本 PRD 无关的 baseline 守卫失败（祖先提交 39014730 lifecycle CLI 面未同步；只同步守卫登记常量与豁免集合，旗标契约未削弱），最终树 `just test all`（含 full lint）3859 passed / 1 skipped 全绿。恢复轮 5 用仓库自身门禁复验时发现并修掉一个半截绿灯：runner 以 `bash -lc` 复跑时解析到系统 bash 3.2，`$VAR（` 的全角字节被并入变量名触发 `set -u` 中断而退出码仍为 0，故取证脚本加了「未走到收尾即判失败」哨兵。Pre-PR Review 修复轮补上证据目录枚举失败的降级路径（原为 500）与损坏/mixed/不可读清单的 5 条 oracle 用例，并订正证据包中的失实覆盖声明。证据与逐条可复跑命令见 `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/`。
 
 本文分两层：Part A 人审层（§1-4）界定「详情页能不能看到交付进度、这些数字怎么读」的可见口径与验收选择；Part B 执行器层（§5-13）给出读取边界、解析移植、失败降级与验证证据。
 
@@ -504,12 +504,12 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 #### Behavior Acceptance
 
 - [x] 计划解析：`planned` 条目的 id/摘要/reviewer 与 PRD §7.6 逐项一致；无 §7.6 时为 `[]`（rv-1、rv-2 + 单测）。<!-- 后端解析由 test_backlog_prd_progress::test_parse_validation_plan_* 全绿覆盖（含 absent→[]、reviewer 其他→null）；页面呈现见 Frontend/rv-1（待真实浏览器） -->
-- [x] 产出归属：清单按 `item_number` 映射（`item_name` 仅作描述），有效时 `attribution_source=manifest`；缺失/损坏时回退 `filename`；若合并文件使用两种来源则为 `mixed`；磁盘存在性始终为唯一事实。`produced_planned_count` 是有文件的不同计划条目数，`file_count` 是合并去重后可展示文件数（rv-2 + 单测）。<!-- test_attribution_manifest_by_item_number / test_attribution_filename_fallback_when_manifest_missing / test_attribution_unattributed_does_not_count_planned -->
+- [x] 产出归属：清单按 `item_number` 映射（`item_name` 仅作描述），有效时 `attribution_source=manifest`；缺失/损坏时回退 `filename`；若合并文件使用两种来源则为 `mixed`；磁盘存在性始终为唯一事实。`produced_planned_count` 是有文件的不同计划条目数，`file_count` 是合并去重后可展示文件数（rv-2 + 单测）。<!-- test_attribution_manifest_by_item_number / test_attribution_filename_fallback_when_manifest_missing / test_attribution_filename_fallback_when_manifest_damaged / test_unreadable_manifest_falls_back_to_prefix / test_attribution_mixed_when_manifest_and_prefix_both_used / test_attribution_unattributed_does_not_count_planned；损坏与 mixed 两条为 Pre-PR Review 修复轮补齐，此前只有「缺失」一条 -->
 - [x] 影响树：有效 merge-base 时 `touched/judgeable/unresolvable` 与 CLI 对照一致；`?n` 不进分母；无工作区/无树/无节点/无基准时 `impact=null` 且状态可区分，计算失败不能返回零（rv-3）。<!-- rv-3-impact-cli-parity.txt：9 passed，importlib 真实 git 逐字段对照 -->
 - [x] 清单进度读数与 PRD 勾选状态一致；无清单区块为 `0/0` 且前端显示 `-`（单测 + rv-1）。<!-- 后端读数单测覆盖；前端已由真实浏览器复核：无计划/无基准 fixture 的清单区块显示 `-`，且 fresh-state 探针在真实磁盘把工作区 PRD 第 3 项取消勾选后重进页面读数变 2/12、恢复后回到 3/12（spec:201-225，rv-1-real-entry-green.txt 用例 2） -->
 - [x] manifest 每个文件带 `source`；同名文件分支优先；artifact 分支优先读取（rv-2）。<!-- test_manifest_merges_candidates_worktree_first / test_artifact_reads_branch_first_content -->
 - [x] 安全边界：越界、隐藏文件、符号链接、超限、畸形 token 全部 400 且不泄露仓外内容（rv-2 + 既有攻击面用例扩展）。<!-- rv-2-security-negative-control.txt：15 passed，pytest.raises / assert status==400 -->
-- [x] 不存在的 PRD 路径 → 400；读取异常（无权限、worktree 查询或目录枚举失败等）→ 字段状态为 unavailable/partial 且未知计数为 null，不伪装成空读数（单测）。<!-- test_endpoint_progress_missing_prd / test_worktree_query_failure_marks_unavailable / test_ambiguous_worktree_marks_unavailable / test_manifest_status_field_surfaces_unavailable -->
+- [x] 不存在的 PRD 路径 → 400；读取异常（无权限、worktree 查询或目录枚举失败等）→ 字段状态为 unavailable/partial 且未知计数为 null，不伪装成空读数（单测）。<!-- test_endpoint_progress_missing_prd / test_worktree_query_failure_marks_unavailable / test_ambiguous_worktree_marks_unavailable / test_manifest_status_field_surfaces_unavailable / test_unreadable_evidence_dir_marks_unavailable_not_empty / test_endpoints_survive_unreadable_evidence_dir（后两条为 Pre-PR Review 修复轮补齐：目录枚举失败此前会让 PermissionError 穿透成 HTTP 500） -->
 
 #### Frontend Acceptance
 
@@ -527,8 +527,8 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 
 #### Validation Acceptance
 
-- [x] 按 §7.6 完成 rv-1…rv-3；rv-1 负控红证（未实现构建上无读数）已保存；证据绑定最终 Git tree，相关改动后重跑。<!-- 三项各自的 command 写在 `evidence.json` 里且可复跑：rv-1 = `scripts/rv1_real_entry.sh --negative`（5 passed + 负控 rc=1 红证），rv-2 = 目标 pytest + `scripts/rv2_live_console.sh`（50 passed + 29 条 curl 断言），rv-3 = `pytest tests/test_backlog_prd_impact.py`（9 passed）。本轮改动后已用仓库自身门禁 `scripts/rehearse_gates.py` 复跑三条命令（rc=0 且 stdout/stderr 断言全满足），证据即该次复跑产物 -->
-- [x] 目标测试集通过：`tests/test_backlog_prd_worktree.py`、`tests/test_backlog_prd_impact.py`、`tests/test_backlog_prd_progress.py`、`tests/test_backlog_prd_evidence.py`，以及 `just test`（跨层契约时 `CI=true just test all`）。<!-- 四个目标文件全绿（9+50 passed，含在最终树全量复检内）；恢复轮 2 修复 5 条无关 baseline 后，最终树 `just test all`（全量收集 -m ''，含 full lint，等价覆盖 CI=true 档要跑的同一套件）3854 passed / 1 skipped / EXIT=0，.last_tested_commit 已写入 HEAD=44a33d6b。见 rv-2-mechanical-gates.txt 恢复轮附录 -->
+- [x] 按 §7.6 完成 rv-1…rv-3；rv-1 负控红证（未实现构建上无读数）已保存；证据绑定最终 Git tree，相关改动后重跑。<!-- 三项各自的 command 写在 `evidence.json` 里且可复跑：rv-1 = `scripts/rv1_real_entry.sh --negative`（5 passed + 负控 rc=1 红证），rv-2 = 目标 pytest + `scripts/rv2_live_console.sh`（55 passed + 29 条 curl 断言，其中 5 条为 Pre-PR Review 修复轮补充），rv-3 = `pytest tests/test_backlog_prd_impact.py`（9 passed）。本轮改动后已用仓库自身门禁 `scripts/rehearse_gates.py` 复跑三条命令（rc=0 且 stdout/stderr 断言全满足），证据即该次复跑产物 -->
+- [x] 目标测试集通过：`tests/test_backlog_prd_worktree.py`、`tests/test_backlog_prd_impact.py`、`tests/test_backlog_prd_progress.py`、`tests/test_backlog_prd_evidence.py`，以及 `just test`（跨层契约时 `CI=true just test all`）。<!-- 四个目标文件全绿（9+55 passed，含在最终树全量复检内）；恢复轮 2 修复 5 条无关 baseline 后，最终树 `just test all`（全量收集 -m ''，含 full lint）在 Pre-PR Review 修复轮复跑为 3859 passed / 1 skipped / EXIT=0，.last_tested_commit 已更新（3854→3859 即修复轮新增的 5 条用例）。见 rv-2-mechanical-gates.txt 恢复轮附录与 Pre-PR Review 修复轮附录 -->
 - [x] 真实入口：真实 console 进程 + curl（rv-2）与浏览器四态（rv-1）；不把 mock 结果冒充真实入口。<!-- 两者均已达成：`uv run kc console --no-browser` 起在只登记 fixture 仓库的隔离 `KEDACODE_CONFIG` 上，curl 29 条断言的转写（请求 URL + 状态码 + PASS）见 `rv-2-live-console.txt`，浏览器四态截图与端点响应原文见 `rv-1-*.png` / `rv-1-*-progress-endpoint.json`；执行 spec 零 `page.route`，TestClient 集成仅作为进程内补充、未被声称为真实入口 -->
 - [~] 独立 verifier 对 R2 证据复核 PASS — runner-owned gate: 独立验证
 - [~] PR 评审与归档按仓库 PRD 工作流执行 — runner-owned gate: 发布与归档
@@ -645,3 +645,11 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 - Reason: 交付门禁报告横幅状态 missing or unrecognized；§9 中 3 项 Human-Confirmed 仍为 `- [ ]`，按口径横幅必须为 awaiting_human（🧍 待人工验收）。横幅是 §9 的投影，投影须用可被机器识别的三态标记。
 - Impact: 仅横幅一行、本条 Change Log 与人审清单呈递件；§9 全部清单项（含 3 个 Human-Confirmed 空框与 2 条 runner-owned `[~]`）、实现、验证命令与既有证据零改动。
 - Review: 横幅与 §9 当前状态一致（awaiting_human）；三项待人工确认后由人勾选并把横幅翻为 ✅ 已验收，归档动作归 runner。
+
+### Pre-PR Review 修复轮：证据目录枚举失败降级 + 补齐 rv-2 oracle 缺项
+- Type: verification
+- Before: ① 证据目录枚举失败（无权限 / IO 错误）时 `_scan_evidence_dir` 的 `iterdir()` 异常穿透 `build_evidence_manifest` → `build_prd_progress` → 路由，`GET .../progress` 与 `GET .../evidence` 直接 500，违反 FR-10「读取失败用字段状态披露、未知计数为 null」与 §12「发现或读取失败不得被误报」；② rv-2 oracle 明确要求的「损坏清单回退 filename」与「mixed 归属」两条分支没有任何自动化用例，而 §9 产出归属勾选项、证据包 `evidence.json`、`rv-2-endpoint-integration.txt`、`rv-2-live-console-notes.md` 与 `human-review-checklist.md` 均声称已由 pytest 段覆盖——该声明不实（首轮仅有「清单缺失」一条）。
+- After: ① `_scan_evidence_dir` 枚举失败改为软返回，`build_evidence_manifest` 把 `complete` 降级为 `unavailable`；`_build_evidence_reading` 对不完整读取把 `produced_planned_count` / `file_count` / `reports` 置 `null` 并标 `unavailable`；`load_evidence_manifest` 抛出的 `OSError`（清单文件读不动）按前缀回退且不使端点失败；前端降级文案与 `docs/api/references.md` 的 `status` 语义同步扩写。② 补 5 条单测：损坏清单回退、清单读不动回退、mixed 归属、目录枚举失败（core 计数为 null）、目录枚举失败（两端点 200 + `status=unavailable`）；rv-2 pytest 段 50 → 55 passed。③ 失实声明订正：`evidence.json`（stdout 断言改「55 passed」、risks 如实说明修复轮补测）、`rv-2-endpoint-integration.txt`（本轮重跑记录 + 订正注）、`rv-2-live-console-notes.md`（订正块）、`human-review-checklist.md` 与 §9 两条勾选项证据注释。
+- Reason: Pre-PR Review 判定两条门禁不满足——「读取失败必须表达为字段状态而不是 500」与「已勾选验收项的 oracle 声明必须与树内用例一致」；按最小修复面处理：只动降级路径、缺项用例与失实声明，不改契约语义、CLI 与磁盘证据约定。
+- Impact: 用户可见行为仅在降级路径上变化（原来 500，现在按 unavailable 披露且计数为 null）；非降级路径读数与契约零变化。改动集：`backlog_prd_evidence.py` / `backlog_prd_progress.py` 降级路径、`tests/test_backlog_prd_progress.py` +5 用例、前端两处降级文案、API 文档两行、证据包订正；最终树 `just test all` 复跑为 3859 passed / 1 skipped / EXIT=0（含 full lint）。
+- Review: 机械复核入口＝`evidence.json` item 2 的 command（pytest 55 passed + 跨进程 curl 29 条断言）与 `scripts/rehearse_gates.py`；rv-1 真实浏览器四态读数与断言未受影响（改动只在失败降级分支）。Human-Confirmed 三项仍待人工，本 PRD 保持归档态。

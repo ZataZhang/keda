@@ -42,10 +42,17 @@ manifest 里再钉住「✅ …全部通过」这条收尾标记与 stderr 的�
 
 ## 为什么这段仍然需要 pytest 那一段
 
-curl 段构造的是「正常 + 越界」两侧的真实 HTTP 行为；损坏清单（JSON 解析失败回退文件名前缀）、
-mixed 归属、worktree 查询失败/多重匹配 → `unavailable` 而非伪装空态等分支，由
-`tests/test_backlog_prd_{progress,worktree,evidence}.py` 的 50 条集成断言覆盖。两段在同一条
-command 里以 `&&` 串联，任一失败即整项红。
+curl 段构造的是「正常 + 越界」两侧的真实 HTTP 行为；worktree 查询失败/多重匹配 → `unavailable`
+而非伪装空态等分支，由 `tests/test_backlog_prd_{progress,worktree,evidence}.py` 的集成断言覆盖
+（评审修复轮后为 55 条）。两段在同一条 command 里以 `&&` 串联，任一失败即整项红。
+
+> **订正（Pre-PR Review 修复轮）**：本文件此前把「损坏清单回退文件名前缀」「mixed 归属」也写成
+> 由 pytest 段覆盖，但首轮树内并没有这两条用例（只有「清单缺失回退」）。评审修复轮已补
+> `test_attribution_filename_fallback_when_manifest_damaged`、
+> `test_unreadable_manifest_falls_back_to_prefix`、
+> `test_attribution_mixed_when_manifest_and_prefix_both_used`，以及两条目录枚举失败降级用例
+> （`test_unreadable_evidence_dir_marks_unavailable_not_empty` /
+> `test_endpoints_survive_unreadable_evidence_dir`），现该声明成立；pytest 计数同步为 55。
 
 ## 验证层级
 

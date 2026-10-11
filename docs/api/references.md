@@ -272,7 +272,7 @@ curl -sS \
 - `evidence_dir` 由既有 `resolve_evidence_dir` 解析（默认 `tasks/evidence/<prd-stem>/`，显式 legacy 目录沿用扁平语义）；
 - 只列一层普通非隐藏文件，`scripts/` 子目录与 oracle 源码不会混作证据；`size_bytes` 来自真实 `stat`，不从验收清单勾选数推断；
 - `files[].source`：`worktree`（执行工作区、尚未合并）或 `main`（主仓库）。无候选工作区时统一为 `main`；页面据此对未合并文件加「未合并」标注；
-- `status`：`complete` 表示候选目录成功枚举；`unavailable` 表示工作区发现失败或多重匹配、无法确定证据来源——此时**不得**把结果当作「确认无文件」的空态呈现；
+- `status`：`complete` 表示候选目录成功枚举；`unavailable` 表示工作区发现失败或多重匹配，或某个存在的候选目录枚举失败（无权限等）——此时 `files` 只是可读取到的部分，**不得**把结果当作「确认无文件」的空态呈现；
 - 目录缺失且来源可确定为 `exists: false` 且 `files` 为空列表，页面据此显示空态；PRD 路径越界返回 `400`。
 
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/evidence/{artifact_token}`
@@ -325,6 +325,7 @@ curl -sS \
 - `prd_source`：`worktree` / `main` / `null`（来源不可用）；`worktree_status`：`matched`（唯一命中）/ `none`（检索成功但未命中）/ `unavailable`（无法检索）/ `ambiguous`（多重匹配）/ `not_applicable`（主仓库归档终态，无需匹配）；`worktree` 只返回分支名，不返回本地路径。
 - `checklist.status`：`available` / `unavailable`；仅成功读取的空清单记 `0/0`（前端显示 `-`），失败时 `checked/total` 为 `null`。
 - `evidence.planned`：§7.6 验证计划顶层条目（编号 / 摘要 / `human|verifier`）；成功读取但无计划时为 `[]`，来源不可用时为 `null`（不伪造空计划）。`produced_planned_count` 是有可读取文件的不同计划条目数，`file_count` 是合并去重后可展示文件数。`attribution_source`：`manifest`（清单 `item_number` 映射）/ `filename`（`rv-<n>` 前缀回退）/ `mixed` / `none`。`reports` 三件套在完整读取时为布尔，不完整时未知项为 `null`。
+- `evidence.status`：`complete` 表示候选目录成功枚举；`unavailable` 表示来源不可用或某个存在的候选目录枚举失败（无权限等）——此时 `file_count` 与 `produced_planned_count` 为 `null`、`reports` 未知项为 `null`，不得折算成 0。
 - `impact`：`impact_status=available` 时给出 `touched/judgeable/unresolvable`（无法判定节点以 `?n` 披露、不进分母）。`impact` 为 `null` 时由 `impact_status` 说明原因：`terminal_archive`（归档终态不参与分支比较）/ `no_worktree` / `no_tree` / `no_nodes` / `no_base`（无有效 merge-base，显示 `-` 而非 `~0/y`）/ `unavailable`（查询或 git 命令失败）。
 - 归档终态规则同样适用于 progress：主仓库已归档时直接读主仓库、`worktree_status=not_applicable`、`impact_status=terminal_archive`，不受 worktree 查询失败影响。PRD 路径非法/不存在返回 `400`。
 

@@ -17,6 +17,7 @@ legacy 扁平目录沿用既有解析语义），而不是 Issue 关闭后会被
 from __future__ import annotations
 
 import base64
+import logging
 import mimetypes
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -34,6 +35,8 @@ from backend.core.use_cases.prd_content_reader import (
 
 #: 单个证据文件的读取上限（10 MiB）：保守值，避免把误放的大文件读进内存。
 MAX_EVIDENCE_FILE_BYTES = 10 * 1024 * 1024
+
+_logger = logging.getLogger(__name__)
 
 _ROLE_EVIDENCE_REPORT = "evidence_report"
 _ROLE_VERIFIER_REPORT = "verifier_report"
@@ -86,8 +89,9 @@ class BacklogPrdEvidenceManifest:
         exists: 证据目录是否存在（任一有效候选目录存在即为真）。
         files: 一层允许展示的文件清单，按名称排序。
         status: 读取状态——``complete`` 表示候选目录成功枚举；``unavailable`` 表示
-            工作区发现失败或多重匹配，无法确定证据来源。此时不得把结果当成「确认无文件」
-            的空态呈现（``exists`` 与 ``files`` 只是无可用来源，不代表磁盘为空）。
+            工作区发现失败或多重匹配，或某个存在的候选目录枚举失败，无法完整确定证据
+            来源。此时不得把结果当成「确认无文件」的空态呈现（``exists`` 与 ``files``
+            只是可读取到的部分，不代表磁盘为空）。
     """
 
     prd_path: str
@@ -186,12 +190,26 @@ def resolve_evidence_dir_for_root(base_path: Path, config: AppConfig, prd_stem: 
     return resolved_dir
 
 
-def _scan_evidence_dir(evidence_dir: Path, source_tag: str) -> list[BacklogEvidenceFile]:
-    """列出一个候选证据目录内一层允许展示的文件（隐藏/子目录/符号链接/超限跳过）。"""
+def _scan_evidence_dir(evidence_dir: Path, source_tag: str) -> list[BacklogEvidenceFile] | None:
+    """列出一个候选证据目录内一层允许展示的文件（隐藏/子目录/符号链接/超限跳过）。
+
+    Args:
+        evidence_dir: 待扫描的候选证据目录。
+        source_tag: 该候选的来源标签（``worktree`` / ``main``）。
+
+    Returns:
+        文件列表；目录不存在时为空列表；目录存在但枚举失败（无权限、IO 错误）时返回
+        ``None``——调用方据此把清单标为不可用，不把读失败呈现为「确认无文件」。
+    """
     if not evidence_dir.is_dir():
         return []
+    try:
+        candidate_paths_list = sorted(evidence_dir.iterdir(), key=lambda path: path.name)
+    except OSError as exc:  # noqa: BLE001 - 目录枚举失败是读取失败，不是「没有文件」
+        _logger.warning("证据目录枚举失败（按不可用处理）: %s: %s", evidence_dir, exc)
+        return None
     scanned_files: list[BacklogEvidenceFile] = []
-    for candidate_path in sorted(evidence_dir.iterdir(), key=lambda path: path.name):
+    for candidate_path in candidate_paths_list:
         if candidate_path.name.startswith("."):
             continue
         if candidate_path.is_symlink() or not candidate_path.is_file():
@@ -242,6 +260,8 @@ def build_evidence_manifest(
         candidates: 有序候选证据目录及其来源标签；为 ``None`` 时只用主仓库目录。
         status: 读取状态透传（工作区发现失败/歧义时由调用方给 ``unavailable``），
             默认 ``complete``；候选为空且来源不可用时不把结果伪装成确认空态。
+            任一存在的候选目录枚举失败时，``complete`` 一律降级为 ``unavailable``
+            （``files`` 只是可读取到的部分，不代表磁盘全集）。
 
     Returns:
         与磁盘一致的证据清单；``evidence_dir`` 恒为主仓库相对路径（用于空态提示）。
@@ -255,20 +275,26 @@ def build_evidence_manifest(
 
     merged_files: dict[str, BacklogEvidenceFile] = {}
     exists_any = False
+    scan_incomplete = False
     for candidate_dir, source_tag in candidate_sequence:
         if candidate_dir.is_dir():
             exists_any = True
-        for manifest_file in _scan_evidence_dir(candidate_dir, source_tag):
+        scanned_files = _scan_evidence_dir(candidate_dir, source_tag)
+        if scanned_files is None:
+            scan_incomplete = True
+            continue
+        for manifest_file in scanned_files:
             # 工作区优先：先出现的目录胜出，后续目录的同名文件被忽略。
             merged_files.setdefault(manifest_file.name, manifest_file)
 
+    effective_status = "unavailable" if scan_incomplete and status == "complete" else status
     return BacklogPrdEvidenceManifest(
         prd_path=prd_path,
         prd_stem=prd_stem,
         evidence_dir=relative_dir,
         exists=exists_any,
         files=sorted(merged_files.values(), key=lambda manifest_file: manifest_file.name),
-        status=status,
+        status=effective_status,
     )
 
 

@@ -2,7 +2,7 @@
 
 - PRD：`tasks/archive/P1-FEAT-20261010-093054-console-prd-progress-signals.md`（执行侧交付完成，runner 已归档），横幅 🧍 待人工验收（人工确认后由人翻 ✅）。
 - Issue：#274 ｜ 分支 `issue-274`。
-- 状态：**执行侧已交付**——后端 progress/evidence 端点与三个解析模块 + 前端三读数与证据分组全部落地，三项真实入口 oracle 全绿（rv-1 零 mock 浏览器 5 passed + 负控红证、rv-2 进程内 50 passed + 安全负控 15 passed + 跨进程 curl 29 条断言、rv-3 真实 git CLI 对照 9 passed），最终树 `just test all` 3854 passed / 1 skipped 全绿。**只剩你对下面 3 项表态**：2 个 Part A 决策 + §9.1 呈递过目。这 3 项就是 PRD §9 `Human-Confirmed` 组的 3 个空框。
+- 状态：**执行侧已交付**——后端 progress/evidence 端点与三个解析模块 + 前端三读数与证据分组全部落地，三项真实入口 oracle 全绿（rv-1 零 mock 浏览器 5 passed + 负控红证、rv-2 进程内 55 passed + 安全负控 15 passed + 跨进程 curl 29 条断言、rv-3 真实 git CLI 对照 9 passed），最终树 `just test all` 3859 passed / 1 skipped 全绿。**只剩你对下面 3 项表态**：2 个 Part A 决策 + §9.1 呈递过目。这 3 项就是 PRD §9 `Human-Confirmed` 组的 3 个空框。
 - 打开本清单：`just prd review tasks/archive/P1-FEAT-20261010-093054-console-prd-progress-signals.md`（本清单为 Markdown 版；本次为无头执行环境的自动收尾轮，无法在真实浏览器自检交互 HTML，故不附交互版，内容以本文件为准）。
 - 证据目录：`tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/`（截图为本地文件、按仓库 `.gitignore` 白名单不入库；`open` 命令在仓库根目录执行）。
 

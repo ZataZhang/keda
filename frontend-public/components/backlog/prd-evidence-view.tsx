@@ -190,7 +190,7 @@ function EvidenceSummaryRow({ progress }: { progress: BacklogPrdProgress }) {
   if (evidence.status === "unavailable" || evidence.planned === null) {
     return (
       <p className="text-xs text-slate-500" data-testid="prd-evidence-summary">
-        证据进度暂不可用（无法确定来源，不代表没有文件）。
+        证据进度暂不可用（读取失败或来源无法确定，不代表没有文件）。
       </p>
     );
   }
@@ -446,8 +446,8 @@ export function PrdEvidenceView({
       >
         <p className="font-medium">证据来源暂不可用</p>
         <p className="mt-1 text-xs">
-          无法确定该 PRD 的执行工作区（发现失败或多重匹配），因此不能列出证据文件——这
-          <strong>不代表</strong>磁盘上没有证据。请稍后重试或核对工作区是否唯一命中。
+          未能完整读取该 PRD 的证据来源（工作区发现失败、多重匹配或目录读取失败），因此不能列出证据文件。
+          <strong>这不代表磁盘上没有证据。</strong>请稍后重试或核对工作区是否唯一命中。
         </p>
       </div>
     );

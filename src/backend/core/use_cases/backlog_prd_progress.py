@@ -466,7 +466,12 @@ def _build_evidence_reading(
     prd_path: str,
     planned: list[PlannedItem] | None,
 ) -> EvidenceReading:
-    """组装产出归属读数：合并候选文件、清单映射优先 / 前缀回退、报告状态。"""
+    """组装产出归属读数：合并候选文件、清单映射优先 / 前缀回退、报告状态。
+
+    目录枚举失败（无权限等）时清单状态为 ``unavailable``：``file_count`` 与
+    ``produced_planned_count`` 保持 ``null``（未知），不折算成零；成功读取但确实没有
+    文件时才返回 ``0``。
+    """
     if not source.source_usable:
         return EvidenceReading(
             planned=None,
@@ -505,6 +510,11 @@ def _build_evidence_reading(
                 repo_path, config, evidence_dir=candidate_dir
             )
         except ValidationEvidenceError:
+            # 清单缺失或损坏：该目录的文件走文件名前缀回退（既有语义）。
+            candidate_manifest = None
+        except OSError as exc:
+            # 清单本身读不动（无权限等）：同样回退前缀，不使端点整体失败。
+            _logger.warning("结构化证据清单读取失败，按前缀回退: %s: %s", candidate_dir, exc)
             candidate_manifest = None
         if candidate_manifest is None:
             continue
@@ -544,6 +554,19 @@ def _build_evidence_reading(
         attribution_source = "mixed"
 
     report_flags = _report_flags(evidence_files)
+    read_complete = manifest.status == "complete"
+    if not read_complete:
+        # 目录枚举失败：文件集合只是可读取到的部分，计数与报告状态未知必须为 null，
+        # 不能把不完整读取伪装成「已产出 0 项」。
+        return EvidenceReading(
+            planned=planned,
+            produced_ids=produced_ids,
+            produced_planned_count=None,
+            file_count=None,
+            attribution_source=attribution_source,
+            status="unavailable",
+            reports=EvidenceReports(None, None, None),
+        )
     return EvidenceReading(
         planned=planned,
         produced_ids=produced_ids,
