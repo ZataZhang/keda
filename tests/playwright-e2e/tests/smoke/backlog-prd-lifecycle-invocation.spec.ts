@@ -502,4 +502,40 @@ test.describe('PRD lifecycle invocation detail timeline', () => {
     await screenshot(page, 'rv-3-legacy-flat-timeline.png')
     await writeEvidence('rv-3-legacy-detail.json', legacyDetail)
   })
+
+  test('未知事件类型与损坏 detail 照常成行渲染且不抛错', async ({ page }) => {
+    const pageErrors: string[] = []
+    page.on('pageerror', (error) => pageErrors.push(error.message))
+
+    const damagedEvents = (MOCK_LIFECYCLE_DETAIL.events as Record<string, unknown>[]).concat([
+      {
+        event_type: 'mystery_event',
+        phase: 'executing',
+        status: 'mystery_status',
+        actor: 'runner',
+        occurred_at: '2026-10-10T11:08:00+00:00',
+        detail: { invocation_run: SESSION_A_RUN_ID },
+      },
+      {
+        event_type: 'validation_started',
+        phase: 'validating',
+        status: 'validation_started',
+        actor: 'runner',
+        occurred_at: '2026-10-10T11:09:00+00:00',
+        // 损坏 detail：读取方必须容错，不得因为形状不对吞掉整行或抛错。
+        detail: 'damaged-detail',
+      },
+    ])
+    await openLifecycleTab(page, { ...MOCK_LIFECYCLE_DETAIL, events: damagedEvents })
+
+    // 未知事件类型保留成行；标签没有词表条目时原样透出，不猜语义也不吞行。
+    const unknownRow = page.getByTestId('prd-lifecycle-event-mystery_event')
+    await expect(unknownRow).toBeVisible()
+    await expect(unknownRow).toContainText('mystery_event')
+    // 损坏 detail 的事件仍渲染为正常一行（标签照旧来自事件类型词表）。
+    await expect(page.getByTestId('prd-lifecycle-event-validation_started')).toContainText(
+      '开始验证',
+    )
+    expect(pageErrors).toEqual([])
+  })
 })
