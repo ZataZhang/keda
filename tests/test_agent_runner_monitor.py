@@ -237,7 +237,7 @@ def test_detect_anomalies_pr_dirty_in_review() -> None:
     )
     error = next(a for a in anomalies if a.type == "pr_dirty_in_review")
     assert error.severity == "error"
-    assert "kc review" in error.suggested_cli
+    assert "kc supervise" in error.suggested_cli
 
 
 def test_detect_anomalies_dirty_worktree_mismatch() -> None:
@@ -383,7 +383,7 @@ def test_build_issue_snapshot_collects_timeline_pr_and_worktree() -> None:
     assert "pr_dirty_in_review" in types
     assert "event_label_mismatch" in types
     assert "kc labels sync" in snapshot.suggested_cli_commands
-    assert "kc review" in snapshot.suggested_cli_commands
+    assert "kc supervise" in snapshot.suggested_cli_commands
 
 
 # ─────────────────────────────────────────────────────────────────────────────

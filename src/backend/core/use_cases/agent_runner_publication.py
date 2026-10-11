@@ -599,6 +599,7 @@ def _finish_implementation_publication(
     content_generator: IContentGenerator | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
     direct_pr_label: str | None = None,
+    repo_id: str | None = None,
 ) -> None:
     """完成新实现的发布流程（完整路径）。
 
@@ -625,6 +626,7 @@ def _finish_implementation_publication(
         direct_pr_label: 本次认领命中的直发标签名；确认 Draft PR 与本次发布同次后由
             认领赢家移除该标签。``None`` 表示档位来自调用侧（如 CLI 旗标）而非标签，
             此时不写任何标签。
+        repo_id: 稳定的仓库 registry id，用于读取对应的短期执行记忆。
     """
     # 导入监督循环（避免循环导入）
     from backend.core.use_cases.agent_runner_supervisor import (
@@ -644,6 +646,7 @@ def _finish_implementation_publication(
             selected_agent=selected_agent,
             process_runner=process_runner,
             content_generator=content_generator,
+            repo_id=repo_id,
         )
     )
 

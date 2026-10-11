@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="400" viewBox="0 0 1160 400" role="img" aria-labelledby="title description">
+  <title id="title">生命周期 Agent 的三个独立功能区</title>
+  <desc id="description">Issue 执行与交付、讨论与内容生成、独立决策入口。各区中的阶段按各自条件触发，不表示执行顺序。</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .panel { stroke: #dbe3ed; stroke-width: 1.4; }
+    .panel-title { fill: #172033; font-size: 19px; font-weight: 700; }
+    .panel-subtitle { fill: #64748b; font-size: 12px; }
+    .node { fill: #ffffff; stroke: #dce4ee; stroke-width: 1.2; }
+    .node-title { fill: #1e293b; font-size: 14px; font-weight: 650; }
+    .node-key { fill: #64748b; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+    .footnote { fill: #64748b; font-size: 12px; }
+  </style>
+
+  <!-- Issue execution and delivery -->
+  <g aria-label="Issue 执行与交付">
+    <rect class="panel" x="18" y="16" width="560" height="340" rx="16" fill="#f7faff"/>
+    <path d="M35 17h526" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+    <text class="panel-title" x="42" y="54">Issue 执行与交付</text>
+    <text class="panel-subtitle" x="42" y="77">共享 claim 上下文 · 按各自条件触发</text>
+
+    <g transform="translate(40 108)">
+      <rect class="node" width="244" height="56" rx="10"/>
+      <rect x="0" y="10" width="4" height="36" rx="2" fill="#3b82f6"/>
+      <text class="node-title" x="17" y="25">实现</text>
+      <text class="node-key" x="17" y="43">implementation</text>
+    </g>
+    <g transform="translate(302 108)">
+      <rect class="node" width="244" height="56" rx="10"/>
+      <rect x="0" y="10" width="4" height="36" rx="2" fill="#3b82f6"/>
+      <text class="node-title" x="17" y="25">修复</text>
+      <text class="node-key" x="17" y="43">fix</text>
+    </g>
+    <g transform="translate(40 178)">
+      <rect class="node" width="244" height="56" rx="10"/>
+      <rect x="0" y="10" width="4" height="36" rx="2" fill="#3b82f6"/>
+      <text class="node-title" x="17" y="25">收尾</text>
+      <text class="node-key" x="17" y="43">closeout</text>
+    </g>
+    <g transform="translate(302 178)">
+      <rect class="node" width="244" height="56" rx="10"/>
+      <rect x="0" y="10" width="4" height="36" rx="2" fill="#3b82f6"/>
+      <text class="node-title" x="17" y="25">校验</text>
+      <text class="node-key" x="17" y="43">verifier</text>
+    </g>
+    <g transform="translate(40 248)">
+      <rect class="node" width="244" height="56" rx="10"/>
+      <rect x="0" y="10" width="4" height="36" rx="2" fill="#3b82f6"/>
+      <text class="node-title" x="17" y="25">审核</text>
+      <text class="node-key" x="17" y="43">review</text>
+    </g>
+    <g transform="translate(302 248)">
+      <rect class="node" width="244" height="56" rx="10"/>
+      <rect x="0" y="10" width="4" height="36" rx="2" fill="#3b82f6"/>
+      <text class="node-title" x="17" y="25">监督</text>
+      <text class="node-key" x="17" y="43">supervisor</text>
+    </g>
+  </g>
+
+  <!-- Discussion and content generation -->
+  <g aria-label="讨论与内容生成">
+    <rect class="panel" x="596" y="16" width="310" height="340" rx="16" fill="#fbf9ff"/>
+    <path d="M613 17h276" stroke="#8b5cf6" stroke-width="3" stroke-linecap="round"/>
+    <text class="panel-title" x="620" y="54">讨论与内容生成</text>
+    <text class="panel-subtitle" x="620" y="77">由各自入口按需调用</text>
+
+    <g transform="translate(620 133)">
+      <rect class="node" width="262" height="64" rx="10"/>
+      <rect x="0" y="12" width="4" height="40" rx="2" fill="#8b5cf6"/>
+      <text class="node-title" x="17" y="28">辩论</text>
+      <text class="node-key" x="17" y="48">deliberate</text>
+    </g>
+    <g transform="translate(620 219)">
+      <rect class="node" width="262" height="64" rx="10"/>
+      <rect x="0" y="12" width="4" height="40" rx="2" fill="#8b5cf6"/>
+      <text class="node-title" x="17" y="28">内容生成</text>
+      <text class="node-key" x="17" y="48">content_generation</text>
+    </g>
+  </g>
+
+  <!-- Standalone decision entry -->
+  <g aria-label="独立决策入口">
+    <rect class="panel" x="924" y="16" width="218" height="340" rx="16" fill="#f6fbfa"/>
+    <path d="M941 17h184" stroke="#14b8a6" stroke-width="3" stroke-linecap="round"/>
+    <text class="panel-title" x="946" y="54" font-size="18">独立决策入口</text>
+    <text class="panel-subtitle" x="946" y="77">无 Issue / PRD 上下文</text>
+
+    <g transform="translate(947 177)">
+      <rect class="node" width="172" height="68" rx="10"/>
+      <rect x="0" y="14" width="4" height="40" rx="2" fill="#14b8a6"/>
+      <text class="node-title" x="17" y="30">决策</text>
+      <text class="node-key" x="17" y="50">planner · kc ask</text>
+    </g>
+  </g>
+
+  <text class="footnote" x="580" y="384" text-anchor="middle">三个独立功能区 · 卡片表示归属，不表示阶段顺序</text>
+</svg>

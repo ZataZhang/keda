@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.core.shared.models.agent_runner import (
@@ -9,7 +10,15 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     RepositoryRunContext,
 )
-from backend.core.use_cases.console_stats import build_completion_stats
+from backend.core.shared.interfaces.runner_console import (
+    AgentPerformanceRecords,
+    PerformanceAttemptRecord,
+    PerformanceRunRecord,
+)
+from backend.core.use_cases.console_stats import (
+    build_agent_performance_stats,
+    build_completion_stats,
+)
 
 
 class FakeStatsGitHubClient:
@@ -108,3 +117,139 @@ def test_completion_stats_isolates_github_failure() -> None:
     stats = build_completion_stats(context=_make_context(), github_client=ExplodingClient())
     assert stats.error is not None
     assert stats.total_tracked == 0
+
+
+def test_agent_performance_stats_uses_attempt_snapshots_and_separate_run_outcomes() -> None:
+    """Attempt 分组使用持久化归属；整项任务结果独立统计。"""
+
+    class InMemoryPerformanceStore:
+        def __init__(self) -> None:
+            self.query: tuple[str | None, str] | None = None
+
+        def list_agent_performance_records(
+            self, *, repo_id: str | None, since_date: str
+        ) -> AgentPerformanceRecords:
+            self.query = (repo_id, since_date)
+            return AgentPerformanceRecords(
+                attempts=(
+                    PerformanceAttemptRecord(
+                        repo_id="keda-main",
+                        agent="codex",
+                        failure_type="success",
+                        duration_seconds=10,
+                        preset="deleted-preset",
+                        model="model-a",
+                    ),
+                    PerformanceAttemptRecord(
+                        repo_id="keda-main",
+                        agent="codex",
+                        failure_type="verification_failed",
+                        duration_seconds=30,
+                        preset="deleted-preset",
+                        model="model-a",
+                    ),
+                    PerformanceAttemptRecord(
+                        repo_id="keda-main",
+                        agent="codex",
+                        failure_type="success",
+                        duration_seconds=20,
+                        preset="deleted-preset",
+                        model="model-b",
+                    ),
+                    PerformanceAttemptRecord(
+                        repo_id="keda-main",
+                        agent="",
+                        failure_type="future_failure_type",
+                        duration_seconds=-1,
+                        preset=None,
+                        model=None,
+                    ),
+                    PerformanceAttemptRecord(
+                        repo_id="other-repo",
+                        agent="claude",
+                        failure_type="success",
+                        duration_seconds=5,
+                        preset=None,
+                        model=None,
+                    ),
+                    PerformanceAttemptRecord(
+                        repo_id="other-repo",
+                        agent="claude",
+                        failure_type="success",
+                        duration_seconds=15,
+                        preset="other-preset",
+                        model="model-c",
+                    ),
+                ),
+                runs=(
+                    PerformanceRunRecord("keda-main", "completed", 45),
+                    PerformanceRunRecord("keda-main", "failed", 15),
+                    PerformanceRunRecord("other-repo", "blocked", 7),
+                    PerformanceRunRecord("keda-main", "not_a_run_outcome", 5),
+                ),
+            )
+
+    performance_store = InMemoryPerformanceStore()
+    reference_now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+    stats = build_agent_performance_stats(
+        store=performance_store,
+        repo_id=None,
+        days=30,
+        reference_now=reference_now,
+    )
+
+    assert performance_store.query == (
+        None,
+        (reference_now.date() - timedelta(days=30)).isoformat(),
+    )
+    assert stats.window_days == 30
+    assert [
+        (repository_count.repo_id, repository_count.attempt_count)
+        for repository_count in stats.unbound_preset_attempts
+    ] == [("keda-main", 1), ("other-repo", 1)]
+    codex_group = next(group for group in stats.agents if group.agent == "codex")
+    assert codex_group.attempt_count == 3
+    assert codex_group.success_count == 2
+    assert codex_group.non_success_count == 1
+    assert codex_group.success_rate == 2 / 3
+    assert codex_group.non_success_rate == 1 / 3
+    assert codex_group.p50_duration_seconds == 20
+    assert codex_group.p90_duration_seconds == 28
+    assert codex_group.failure_types[0].failure_type == "verification_failed"
+    assert codex_group.failure_types[0].count == 1
+    assert len(stats.presets) == 3
+    assert {group.model for group in stats.presets} == {"model-a", "model-b", "model-c"}
+    assert stats.presets[0].preset == "deleted-preset"
+    missing_agent_group = next(group for group in stats.agents if group.agent == "未记录")
+    assert missing_agent_group.success_rate == 0
+    assert missing_agent_group.failure_types[0].failure_type == "future_failure_type"
+    claude_group = next(group for group in stats.agents if group.agent == "claude")
+    assert claude_group.attempt_count == 2
+    assert claude_group.success_count == 2
+    assert claude_group.non_success_count == 0
+    assert [(group.repo_id, group.outcome, group.run_count) for group in stats.runs] == [
+        ("keda-main", "completed", 1),
+        ("keda-main", "failed", 1),
+        ("other-repo", "blocked", 1),
+    ]
+
+
+def test_agent_performance_stats_empty_window_has_no_zero_rate_groups() -> None:
+    """空时间窗口不生成样本组或成功率。"""
+
+    class EmptyPerformanceStore:
+        def list_agent_performance_records(
+            self, *, repo_id: str | None, since_date: str
+        ) -> AgentPerformanceRecords:
+            return AgentPerformanceRecords(attempts=(), runs=())
+
+    stats = build_agent_performance_stats(
+        store=EmptyPerformanceStore(),
+        repo_id=None,
+        days=7,
+    )
+
+    assert stats.agents == ()
+    assert stats.presets == ()
+    assert stats.unbound_preset_attempts == ()
+    assert stats.runs == ()

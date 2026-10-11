@@ -6,20 +6,24 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { RunDetailDialog } from "@/components/agent-runner/run-detail-dialog";
+import { RecentRunGroups } from "@/components/agent-runner/recent-run-groups";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AgentPerformanceSection } from "@/components/stats/agent-performance-section";
 import {
   formatLifecycleDuration,
   PHASE_LABELS,
 } from "@/components/backlog/prd-lifecycle-view";
-import { formatLocalDateTime } from "@/lib/utils";
 import {
+  fetchAgentPerformanceStats,
   fetchCompletionStats,
   fetchPrdLifecycleStats,
   fetchRecentRuns,
   fetchRunHistoryTrend,
 } from "@/lib/api/console";
 import type {
+  AgentPerformanceStats,
   DailyRunTrendEntry,
   PrdLifecycleStats,
   PrdTokenUsageEntry,
@@ -29,13 +33,40 @@ import type {
 } from "@/lib/api/types";
 import { formatTokenCount } from "@/components/backlog/prd-lifecycle-view";
 
+type AgentPerformanceQueryState = {
+  filterKey: string;
+  stats: AgentPerformanceStats | null;
+  error: string | null;
+};
+
+type PrdLifecycleQueryState = {
+  filterKey: string;
+  stats: PrdLifecycleStats;
+};
+
+/** 汇总 GitHub 完成度、本地运行趋势、Agent 表现与 PRD 生命周期统计。 */
 export default function StatsPage() {
   const [stats, setStats] = useState<RepositoryCompletionStats[] | null>(null);
   const [trendRepoId, setTrendRepoId] = useState("");
   const [trendDays, setTrendDays] = useState(30);
   const [trend, setTrend] = useState<DailyRunTrendEntry[]>([]);
   const [recentRuns, setRecentRuns] = useState<RunRecordEntry[]>([]);
-  const [lifecycleStats, setLifecycleStats] = useState<PrdLifecycleStats | null>(null);
+  const [selectedRun, setSelectedRun] = useState<RunRecordEntry | null>(null);
+  const [lifecycleQueryState, setLifecycleQueryState] =
+    useState<PrdLifecycleQueryState | null>(null);
+  const [agentPerformanceQueryState, setAgentPerformanceQueryState] =
+    useState<AgentPerformanceQueryState | null>(null);
+  const agentPerformanceFilterKey = `${trendRepoId}|${trendDays}`;
+  const currentAgentPerformanceQueryState =
+    agentPerformanceQueryState?.filterKey === agentPerformanceFilterKey
+      ? agentPerformanceQueryState
+      : null;
+  const agentPerformanceStats = currentAgentPerformanceQueryState?.stats ?? null;
+  const agentPerformanceError = currentAgentPerformanceQueryState?.error ?? null;
+  const lifecycleStats =
+    lifecycleQueryState?.filterKey === agentPerformanceFilterKey
+      ? lifecycleQueryState.stats
+      : null;
 
   useEffect(() => {
     fetchCompletionStats()
@@ -63,11 +94,40 @@ export default function StatsPage() {
 
   useEffect(() => {
     let isCancelled = false;
-    setLifecycleStats(null);
+    fetchAgentPerformanceStats({ repoId: trendRepoId || undefined, days: trendDays })
+      .then((performanceStats) => {
+        if (!isCancelled) {
+          setAgentPerformanceQueryState({
+            filterKey: agentPerformanceFilterKey,
+            stats: performanceStats,
+            error: null,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCancelled) {
+          return;
+        }
+        setAgentPerformanceQueryState({
+          filterKey: agentPerformanceFilterKey,
+          stats: null,
+          error: error instanceof Error ? error.message : "无法读取 Agent 执行表现。",
+        });
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [trendRepoId, trendDays, agentPerformanceFilterKey]);
+
+  useEffect(() => {
+    let isCancelled = false;
     fetchPrdLifecycleStats({ repoId: trendRepoId || undefined, days: trendDays })
       .then((stats) => {
         if (!isCancelled) {
-          setLifecycleStats(stats);
+          setLifecycleQueryState({
+            filterKey: agentPerformanceFilterKey,
+            stats,
+          });
         }
       })
       .catch((error: unknown) => {
@@ -81,7 +141,7 @@ export default function StatsPage() {
     return () => {
       isCancelled = true;
     };
-  }, [trendRepoId, trendDays]);
+  }, [trendRepoId, trendDays, agentPerformanceFilterKey]);
 
   const trendMax = useMemo(
     () =>
@@ -245,53 +305,36 @@ export default function StatsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">最近运行记录</CardTitle>
+          <CardDescription>
+            按仓库和 Issue 分组；展开后可查看每次运行的详情，包括成功、失败与 Blocked。
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {recentRuns.length === 0 ? (
             <p className="text-sm text-slate-500">暂无运行记录。</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
-                    <th className="py-2 pr-3">时间</th>
-                    <th className="py-2 pr-3">仓库</th>
-                    <th className="py-2 pr-3">Issue</th>
-                    <th className="py-2 pr-3">结果</th>
-                    <th className="py-2 pr-3">触发</th>
-                    <th className="py-2 pr-3">Agent</th>
-                    <th className="py-2 pr-3">耗时</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentRuns.map((run, index) => (
-                    <tr
-                      key={`${run.repo_id}-${run.issue_number}-${run.started_at}-${index}`}
-                      className="border-b border-slate-100 dark:border-slate-800"
-                    >
-                      <td className="py-2 pr-3 font-mono text-[11px] text-slate-500">
-                        {formatLocalDateTime(run.started_at)}
-                      </td>
-                      <td className="py-2 pr-3">{run.repo_id}</td>
-                      <td className="py-2 pr-3 font-mono text-xs">
-                        #{run.issue_number}
-                      </td>
-                      <td className="py-2 pr-3">
-                        <OutcomeBadge outcome={run.outcome} />
-                      </td>
-                      <td className="py-2 pr-3 text-xs">{run.trigger}</td>
-                      <td className="py-2 pr-3 text-xs">{run.agent}</td>
-                      <td className="py-2 pr-3 text-xs">
-                        {formatDuration(run.duration_seconds)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <RecentRunGroups
+              recentRuns={recentRuns}
+              onSelectRun={setSelectedRun}
+            />
           )}
         </CardContent>
       </Card>
+
+      <RunDetailDialog
+        run={selectedRun}
+        open={selectedRun !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) {
+            setSelectedRun(null);
+          }
+        }}
+      />
+
+      <AgentPerformanceSection
+        stats={agentPerformanceStats}
+        error={agentPerformanceError}
+      />
 
       <Card data-testid="stats-prd-lifecycle">
         <CardHeader>
@@ -689,17 +732,4 @@ function CompletionRateBar({ rate }: { rate: number | null }) {
       <span className="text-xs font-medium">{percent}%</span>
     </div>
   );
-}
-
-function OutcomeBadge({ outcome }: { outcome: RunRecordEntry["outcome"] }) {
-  const variant =
-    outcome === "completed" ? "ready" : outcome === "failed" ? "warning" : "default";
-  return <Badge variant={variant}>{outcome}</Badge>;
-}
-
-function formatDuration(durationSeconds: number): string {
-  if (durationSeconds < 60) {
-    return `${Math.round(durationSeconds)}s`;
-  }
-  return `${Math.round(durationSeconds / 60)}m`;
 }

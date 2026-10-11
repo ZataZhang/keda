@@ -575,13 +575,24 @@ class TestTimeline:
     def test_closed_invocation_reports_recorded_outcome(self) -> None:
         store = _FakeInvocationStore()
         with bound_invocation_trace_context(_context(store)):
-            observation = start_invocation(_request())
-            finish_invocation(observation, result=CommandResult((), 0, "", ""))
+            observation = start_invocation(_request(requested_model="claude-sonnet-4-5"))
+            finish_invocation(
+                observation,
+                result=CommandResult(
+                    (),
+                    0,
+                    "",
+                    "",
+                    reported_model="claude-sonnet-4-5-20250929",
+                ),
+            )
         rows = build_invocation_timeline(self._events(store))
         assert len(rows) == 1
         assert rows[0].outcome == OUTCOME_OK
         assert rows[0].finished_at is not None
         assert rows[0].duration_seconds is not None
+        assert rows[0].requested_model == "claude-sonnet-4-5"
+        assert rows[0].reported_model == "claude-sonnet-4-5-20250929"
 
     def test_start_only_defaults_to_unclosed_without_inventing_times(self) -> None:
         store = _FakeInvocationStore()

@@ -100,7 +100,7 @@ def build_runner_argv(
     if kind is RunnerProcessKind.DAEMON:
         return (*command_prefix, "daemon", *launch_flags, *selector)
     if kind is RunnerProcessKind.REVIEW_DAEMON:
-        return (*command_prefix, "review-daemon", *launch_flags, *selector)
+        return (*command_prefix, "supervise-daemon", *launch_flags, *selector)
     if kind is RunnerProcessKind.RUN_ONCE:
         # ``kc run`` 目标必填后的 Console 迁移（FR-7）：带 Issue 编号时定向
         # 执行（开始此 PRD 路径），否则显式 ``--all-ready`` 保留旧的捞队列
@@ -128,7 +128,7 @@ def build_runner_argv(
             )
         return (*command_prefix, "run", "--all-ready", *launch_flags, *selector)
     if kind is RunnerProcessKind.REVIEW_ONCE:
-        return (*command_prefix, "review", *launch_flags, *selector)
+        return (*command_prefix, "supervise", *launch_flags, *selector)
     if kind is RunnerProcessKind.BLOCKED_CONTINUE:
         if issue_number is None or issue_number <= 0:
             raise ConsoleProcessError("blocked_continue requires a positive issue_number.")

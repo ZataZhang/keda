@@ -123,9 +123,10 @@ class IssueTypeChoice(str, Enum):
 
 
 class LogsKindChoice(str, Enum):
-    """Kind selector for ``kc logs``."""
+    """Kind selector for ``kc logs``; legacy process kind stays accepted."""
 
     daemon = "daemon"
+    supervise_daemon = "supervise_daemon"
     review_daemon = "review_daemon"
 
 
@@ -145,6 +146,9 @@ issue_app = typer.Typer(
     help="Create and manage GitHub Issues.",
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
+)
+pr_app = typer.Typer(
+    help="Manage pull requests.", no_args_is_help=True, context_settings=_HELP_CONTEXT
 )
 completion_app = typer.Typer(
     help="Manage shell completion.",
@@ -214,6 +218,7 @@ skill_app = typer.Typer(
 container_app.add_typer(auth_app, name="auth")
 app.add_typer(labels_app, name="labels")
 app.add_typer(issue_app, name="issue")
+app.add_typer(pr_app, name="pr")
 app.add_typer(completion_app, name="completion")
 register_completion_commands(completion_app)
 app.add_typer(worktree_app, name="worktree")
@@ -398,17 +403,16 @@ def _app_callback(
 #
 # Import order matters: Typer preserves the order in which commands register
 # on a Typer app. The original ``cli_typer`` module defined commands in this
-# order: init → registry → labels → issue → run/review/review-daemon/loop-daemon
+# order: init → registry → labels → issue → run/supervise/supervise-daemon/loop-daemon
 # → logs → recover/blocked-continue → ask/repl/deliberate → worktree/workflow
-# → takeover → loop. The modules below are imported in that exact order so
-# ``kc --help`` byte-output stays stable. ``cli_typer_schema`` is appended
-# last: the read-only introspection command only adds a trailing entry and must
-# not reorder the existing ones.
+# → takeover → loop. New read-only commands are appended after that baseline;
+# ``cli_typer_schema`` stays last so it does not reorder existing entries.
 from backend.api import (  # noqa: E402,F401
     cli_typer_init,
     cli_typer_registry,
     cli_typer_labels,
     cli_typer_issue,
+    cli_typer_pr,
     cli_typer_runner,
     cli_typer_recover,
     cli_typer_agent,
@@ -421,6 +425,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_config,
     cli_typer_console,
     cli_typer_tokens,
+    cli_typer_lifecycle,
     cli_typer_skill,
     cli_typer_schema,
 )

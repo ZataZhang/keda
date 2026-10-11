@@ -179,7 +179,7 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
 
     Pre-dispatch validation runs here (deprecated flag warnings,
     ``--repo``/``--repo-id`` exclusivity, the cwd-based default for
-    daemon / review-daemon / logs), then the matching handler from
+    daemon / supervise-daemon / logs), then the matching handler from
     :mod:`backend.api.cli_parsed_commands` is invoked through
     :func:`dispatch_parsed_command`.
 
@@ -216,12 +216,12 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
     # 以下解析与工厂创建也纳入 try：机器模式下任何失败都必须落成 stderr
     # envelope（PRD「任意命令在 JSON 模式下的失败」oracle），不能漏成裸 traceback。
     try:
-        # daemon / review-daemon 在未指定仓库时：
+        # daemon / supervise-daemon 在未指定仓库时：
         # 1. cwd 命中唯一 enabled 注册仓 → 仅处理该仓（与 --repo-id 等价）
         # 2. cwd 命中 disabled 注册仓 → 报错
         # 3. cwd 命中多个 enabled 注册仓 → 报错，要求显式选择
         # 4. cwd 未命中任何注册仓或未初始化 → 报错，不再回退到 --all
-        if parsed.command in ("daemon", "review-daemon", "logs"):
+        if parsed.command in ("daemon", "supervise-daemon", "review-daemon", "logs"):
             if (
                 repo_id is None
                 and repo_override is None
