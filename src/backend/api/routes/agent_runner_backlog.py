@@ -74,6 +74,10 @@ from backend.core.use_cases.backlog_prd_evidence import (
     read_evidence_artifact,
     read_evidence_artifact_text,
 )
+from backend.core.use_cases.backlog_prd_progress import (
+    build_prd_progress,
+    resolve_evidence_lookup,
+)
 from backend.core.use_cases.backlog_prd_scanner import scan_backlog_prds
 from backend.core.use_cases.backlog_state_resolver import (
     BacklogStateResolutionContext,
@@ -399,16 +403,48 @@ def get_backlog_prd_lifecycle(encoded_path: str, repo_id: str) -> dict:
     return _serialize(detail)
 
 
-@router.get("/agent-runner/backlog/prds/{encoded_path}/evidence")
-def get_backlog_prd_evidence(encoded_path: str, repo_id: str) -> dict:
-    """列出某个 PRD 在仓库中仍保留的验收证据文件（每次请求重新读盘）。"""
+@router.get("/agent-runner/backlog/prds/{encoded_path}/progress")
+def get_backlog_prd_progress(encoded_path: str, repo_id: str) -> dict:
+    """聚合单个 PRD 的交付进度读数（清单 / 证据计划与产出 / 影响树 / 工作区）。
+
+    与证据端点同一原则：每次请求 fresh 读盘，不复用列表快照或缓存。运行中的读数来自
+    真实执行工作区（主仓库兜底），主仓库归档副本是终态事实来源；发现失败或多重匹配时
+    来源相关读数标不可用，绝不以主仓库空结果冒充。读取异常通过各字段状态表达。
+    """
     prd_path = _decode_prd_path(encoded_path)
     context = _resolve_context(repo_id)
     try:
+        progress = build_prd_progress(
+            repo_path=context.repo_path,
+            config=context.config,
+            prd_path=prd_path,
+            process_runner=create_process_runner(),
+        )
+    except PrdContentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except BacklogPrdEvidenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize(progress)
+
+
+@router.get("/agent-runner/backlog/prds/{encoded_path}/evidence")
+def get_backlog_prd_evidence(encoded_path: str, repo_id: str) -> dict:
+    """列出某个 PRD 仍保留的验收证据文件（每次请求重新读盘，分支优先、主仓库兜底）。"""
+    prd_path = _decode_prd_path(encoded_path)
+    context = _resolve_context(repo_id)
+    try:
+        candidates, evidence_status = resolve_evidence_lookup(
+            repo_path=context.repo_path,
+            config=context.config,
+            prd_path=prd_path,
+            process_runner=create_process_runner(),
+        )
         manifest = build_evidence_manifest(
             repo_path=context.repo_path,
             config=context.config,
             prd_path=prd_path,
+            candidates=candidates,
+            status=evidence_status,
         )
     except BacklogPrdEvidenceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -419,17 +455,23 @@ def get_backlog_prd_evidence(encoded_path: str, repo_id: str) -> dict:
 def read_backlog_prd_evidence_artifact(
     encoded_path: str, artifact_token: str, repo_id: str
 ) -> Response:
-    """受限读取单个证据文件：文本内联、图片预览、其它类型下载。
+    """受限读取单个证据文件：文本内联、图片预览、其它类型下载（分支优先、主仓库兜底）。
 
-    文件名以 base64url 传递，解码后必须是纯 basename 且为该 PRD 证据目录的
-    直接子文件；越界、符号链接逃逸与超限文件一律 4xx，不泄露仓外内容。
+    文件名以 base64url 传递，解码后必须是纯 basename 且为某个候选证据目录的直接子文件；
+    越界、符号链接逃逸与超限文件一律 4xx，不泄露仓外内容。
     """
     prd_path = _decode_prd_path(encoded_path)
     context = _resolve_context(repo_id)
     try:
         artifact_name = decode_artifact_token(artifact_token)
+        candidates, _evidence_status = resolve_evidence_lookup(
+            repo_path=context.repo_path,
+            config=context.config,
+            prd_path=prd_path,
+            process_runner=create_process_runner(),
+        )
         _content_bytes, media_type, file_name = read_evidence_artifact(
-            context.repo_path, context.config, prd_path, artifact_name
+            context.repo_path, context.config, prd_path, artifact_name, candidates
         )
     except BacklogPrdEvidenceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -437,7 +479,7 @@ def read_backlog_prd_evidence_artifact(
     if media_type.startswith("text/") or media_type in {"application/json"}:
         try:
             text = read_evidence_artifact_text(
-                context.repo_path, context.config, prd_path, artifact_name
+                context.repo_path, context.config, prd_path, artifact_name, candidates
             )
         except BacklogPrdEvidenceError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -447,7 +489,9 @@ def read_backlog_prd_evidence_artifact(
             headers=_artifact_headers(file_name, disposition="inline"),
         )
 
-    content = read_evidence_artifact(context.repo_path, context.config, prd_path, artifact_name)[0]
+    content = read_evidence_artifact(
+        context.repo_path, context.config, prd_path, artifact_name, candidates
+    )[0]
     disposition = "inline" if media_type.startswith("image/") else "attachment"
     return Response(
         content=content,

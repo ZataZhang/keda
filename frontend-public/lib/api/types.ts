@@ -578,6 +578,8 @@ export type BacklogEvidenceFile = {
   media_type: string;
   role: BacklogEvidenceRole;
   artifact_token: string;
+  /** 文件来源：``worktree``（执行工作区、尚未合并）或 ``main``（主仓库）。 */
+  source: "worktree" | "main";
 };
 
 /**
@@ -593,6 +595,93 @@ export type BacklogPrdEvidenceManifest = {
   evidence_dir: string;
   exists: boolean;
   files: BacklogEvidenceFile[];
+  /**
+   * 读取状态：``complete`` 表示候选目录成功枚举；``unavailable`` 表示工作区发现
+   * 失败或多重匹配、无法确定证据来源——此时不得把结果当作「确认无文件」的空态呈现。
+   */
+  status: "complete" | "unavailable";
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRD 交付进度聚合（只读）
+// Keep these aligned with the backend dataclasses in
+// `src/backend/core/use_cases/backlog_prd_progress.py`。所有口径为弱信号：
+// 文件归属 ≠ 验证通过，影响树触碰 ≠ 改对；不可比较显示 null/`-`，读取失败单独
+// 用状态字段披露，不得用空数组或零冒充成功读取。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 验证计划（§7.6）里的一个顶层条目。 */
+export type PrdProgressPlannedItem = {
+  id: string;
+  summary: string;
+  reviewer: string | null;
+};
+
+/** 验收清单勾选读数；``unavailable`` 时 checked/total 为 null。 */
+export type PrdProgressChecklist = {
+  status: "available" | "unavailable";
+  checked: number | null;
+  total: number | null;
+};
+
+/** 报告三件套的「是否已产出」；读取不完整时未知项为 null。 */
+export type PrdProgressReports = {
+  verification_plan: boolean | null;
+  evidence_report: boolean | null;
+  verifier_report: boolean | null;
+};
+
+/** 证据计划 vs 产出的聚合读数。 */
+export type PrdProgressEvidence = {
+  /** null 表示来源不可用（不伪造空计划）；成功读取但无计划时为 ``[]``。 */
+  planned: PrdProgressPlannedItem[] | null;
+  produced_ids: string[];
+  produced_planned_count: number | null;
+  file_count: number | null;
+  /** 产出归属口径：清单映射 / 文件名前缀 / 两者混合 / 无可归属项。 */
+  attribution_source: "manifest" | "filename" | "mixed" | "none";
+  status: "complete" | "partial" | "unavailable";
+  reports: PrdProgressReports;
+};
+
+/** 影响树触达读数（弱信号）；无法计算时整个对象为 null。 */
+export type PrdProgressImpact = {
+  touched: number;
+  judgeable: number;
+  unresolvable: number;
+};
+
+/** 工作区命中信息（不返回本地路径）。 */
+export type PrdProgressWorktree = {
+  branch: string | null;
+};
+
+/** 详情头部与证据标签共用的聚合读数（一次拉取，不轮询）。 */
+export type BacklogPrdProgress = {
+  prd_path: string;
+  prd_stem: string;
+  /** 事实来源：``worktree`` / ``main`` / null（来源不可用）。 */
+  prd_source: string | null;
+  /** 归档终态用 ``not_applicable``；其余见后端 WorktreeMatchStatus。 */
+  worktree_status:
+    | "matched"
+    | "none"
+    | "unavailable"
+    | "ambiguous"
+    | "not_applicable";
+  worktree: PrdProgressWorktree | null;
+  checklist: PrdProgressChecklist;
+  evidence: PrdProgressEvidence;
+  /** impact=null 时由此字段说明原因（`terminal_archive` / `no_worktree` / 等）。 */
+  impact_status:
+    | "available"
+    | "terminal_archive"
+    | "no_worktree"
+    | "no_tree"
+    | "no_nodes"
+    | "no_base"
+    | "unavailable";
+  impact: PrdProgressImpact | null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
