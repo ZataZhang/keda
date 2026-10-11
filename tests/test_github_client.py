@@ -253,7 +253,7 @@ def test_get_pull_request_context_uses_supported_rollup_field(
         "--state",
         "open",
         "--json",
-        "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup",
+        "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup,isDraft",
     )
     fake_runner = FakeProcessRunner(
         responses={
@@ -264,10 +264,13 @@ def test_get_pull_request_context_uses_supported_rollup_field(
                     [
                         {
                             "url": "https://github.com/example/repo/pull/28",
+                            "number": 28,
+                            "body": "",
                             "headRefName": "issue-28",
                             "headRefOid": "head-sha",
                             "baseRefOid": "base-sha",
                             "mergeable": "CONFLICTING",
+                            "isDraft": True,
                             "statusCheckRollup": [
                                 {
                                     "__typename": "CheckRun",
@@ -295,6 +298,7 @@ def test_get_pull_request_context_uses_supported_rollup_field(
 
     assert pr_context is not None
     assert pr_context.pr_url == "https://github.com/example/repo/pull/28"
+    assert pr_context.is_draft is True
     assert pr_context.mergeable is False
     assert pr_context.checks_state == "FAILURE"
     assert pr_context.checks_summary == (
@@ -316,7 +320,7 @@ def test_get_pull_request_context_empty_rollup_has_no_checks_state(
         "--state",
         "open",
         "--json",
-        "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup",
+        "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup,isDraft",
     )
     fake_runner = FakeProcessRunner(
         responses={
@@ -327,10 +331,13 @@ def test_get_pull_request_context_empty_rollup_has_no_checks_state(
                     [
                         {
                             "url": "https://github.com/example/repo/pull/1",
+                            "number": 1,
+                            "body": "",
                             "headRefName": "issue-1",
                             "headRefOid": "head-sha",
                             "baseRefOid": "base-sha",
                             "mergeable": "MERGEABLE",
+                            "isDraft": False,
                             "statusCheckRollup": [],
                         }
                     ]
@@ -345,6 +352,7 @@ def test_get_pull_request_context_empty_rollup_has_no_checks_state(
 
     assert pr_context is not None
     assert pr_context.mergeable is True
+    assert pr_context.is_draft is False
     assert pr_context.checks_state is None
     assert pr_context.checks_summary == ()
 

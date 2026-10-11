@@ -4,10 +4,15 @@ from __future__ import annotations
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
+    AggregateQueueCompletionRequest,
+    check_aggregate_candidate_shortfall,
+    complete_aggregate_queue,
+    log_aggregate_dry_run_preview,
+)
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_dependencies import (
@@ -44,6 +49,10 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     create_or_reuse_worktree,
     run_issue_with_agent_fallback,
 )
+from backend.core.use_cases.agent_runner_orchestration_models import (
+    PrdReworkRequest,
+    RunOnceRequest,
+)
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_invocation_tracing import (
@@ -78,6 +87,7 @@ from backend.core.use_cases.create_prd_from_issue import (
     create_prd_from_issue,
 )
 from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
+from backend.core.use_cases.backlog_concurrency import count_live_running_issues
 
 RUNTIME_DEPENDENCY_NAMES = (
     "_process_ready_issue",
@@ -104,18 +114,6 @@ def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
         return extract_prd_path(issue.body) or ""
     except Exception:  # noqa: BLE001 - observation must not break the run.
         return ""
-
-
-@dataclass(frozen=True)
-class PrdReworkRequest:
-    """一轮 PRD rework Issue 处理请求。"""
-
-    repo_path: Path
-    config: AppConfig
-    github_client: IGitHubClient
-    process_runner: IProcessRunner
-    content_generator: IContentGenerator | None = None
-    max_issues: int = 1
 
 
 def process_prd_rework_issues(request: PrdReworkRequest) -> None:
@@ -356,6 +354,7 @@ def _process_single_issue(
                     content_generator=content_generator,
                     publish_stage=publish_stage,
                     stage_selection=stage_selection,
+                    repo_id=effective_repo_id,
                     on_claimed=prd_activity_lease.start,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
@@ -433,6 +432,7 @@ def _process_single_issue(
                     marker=marker,
                     publish_stage=publish_stage,
                     stage_selection=stage_selection,
+                    repo_id=effective_repo_id,
                 ),
                 on_attempt_recorded=_on_attempt_recorded,
                 on_agent_usage=_emit_agent_usage_event,
@@ -584,33 +584,6 @@ def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueS
         return False
 
 
-@dataclass(frozen=True)
-class RunOnceRequest:
-    """Agent Runner 单轮队列调度请求。"""
-
-    repo_path: Path
-    config: AppConfig
-    dry_run: bool
-    agent: str
-    max_issues: int
-    github_client: IGitHubClient
-    process_runner: IProcessRunner
-    content_generator: IContentGenerator | None = None
-    run_history_store: IRunHistoryStore | None = None
-    run_trigger: str = "cli_run"
-    repo_id: str | None = None
-    concurrency: int = 1
-    output_view: IRunnerLiveView | None = None
-    #: 定向目标 Issue 编号（``kc run --issue``）。非 ``None`` 时只处理该
-    #: Issue（仍走依赖门禁与 claim）；``None`` 保持"按优先级捞队列"行为。
-    target_issue: int | None = None
-    #: 发布档位（``kc run --fast-merge`` / ``--direct-pr``）：本次运行执行 agent
-    #: 之后还剩多少门禁与第二个 agent。``NORMAL`` 即默认全量路径；daemon 与其余
-    #: 调用方传的仍是 ``NORMAL``（默认值），但它是**调用侧请求档位**——认领后
-    #: core 会用 Issue 上的 ``direct-pr`` 标签把它升级为 ``DIRECT``（逐 Issue 独立）。
-    publish_stage: PublishStage = PublishStage.NORMAL
-
-
 def run_once(request: RunOnceRequest) -> int:
     """执行一次轮询处理。
 
@@ -736,11 +709,59 @@ def run_once(request: RunOnceRequest) -> int:
         )
     else:
         ready_issues = github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
+
+    # 统一并发闸门：仅当调用方解析出生效上限且非定向模式时约束 ready 通道的
+    # 新认领。running / blocked / cleanup 通道处理的是已在途或恢复性工作，
+    # 不新增并发，保持原配额。计数失败按 fail-closed 处理：本轮不认领新 Issue，
+    # 宁可不跑也不超发。
+    ready_claim_budget = effective_max_issues
+    running_count_failed = False
+    live_running_count_for_budget = 0
+    live_running_count: int | None = None
+    if request.execution_ceiling is not None and target_issue_summary is None:
+        ceiling = request.execution_ceiling
+        try:
+            live_running_count = count_live_running_issues(
+                github_client,
+                config.labels.running,
+                ceiling,
+            )
+            live_running_count_for_budget = live_running_count
+        except Exception as count_exc:  # noqa: BLE001 - 计数失败即不认领（fail-closed）。
+            _logger.warning(
+                "Failed to count live '%s' Issues for the concurrency ceiling: %s; "
+                "claiming zero new Issues this pass (fail-closed).",
+                config.labels.running,
+                count_exc,
+            )
+            running_count_failed = True
+            live_running_count_for_budget = ceiling
+        ready_claim_budget = min(
+            effective_max_issues,
+            max(0, ceiling - live_running_count_for_budget),
+        )
+        running_count_label = (
+            "unknown"
+            if live_running_count is None
+            else (
+                f"at least {live_running_count}"
+                if live_running_count > ceiling
+                else str(live_running_count)
+            )
+        )
+        _logger.info(
+            "Concurrency ceiling: ceiling=%d running=%s ready_budget=%d",
+            ceiling,
+            running_count_label,
+            ready_claim_budget,
+        )
+
     processed_count = 0
+    ready_claimed_count = 0
     issues_to_process: list[tuple[IssueSummary, str]] = []
 
     for issue in sort_ready_issues(ready_issues):
-        if processed_count >= effective_max_issues:
+        if len(issues_to_process) >= effective_max_issues:
             break
         declaration = parse_dependency_marker(issue.body)
         if declaration is not None:
@@ -748,6 +769,9 @@ def run_once(request: RunOnceRequest) -> int:
                 issues_to_process.append((issue, "direct_pr_cleanup"))
                 processed_count += 1
                 continue
+        if ready_claimed_count >= ready_claim_budget:
+            continue
+        if declaration is not None:
             verdict = evaluate_dependencies(declaration, github_client, config.labels)
             if not verdict.satisfied:
                 mark_dependency_waiting(
@@ -775,6 +799,7 @@ def run_once(request: RunOnceRequest) -> int:
             )
         issues_to_process.append((issue, "ready"))
         processed_count += 1
+        ready_claimed_count += 1
 
     # 发现 running Issue（使用剩余配额）；定向模式只考虑目标 Issue。
     remaining = effective_max_issues - processed_count
@@ -786,9 +811,34 @@ def run_once(request: RunOnceRequest) -> int:
                 else []
             )
         else:
-            running_candidates = github_client.list_review_candidate_issues(
-                [config.labels.running], remaining
-            )
+            try:
+                running_candidates = github_client.list_review_candidate_issues(
+                    [config.labels.running], remaining
+                )
+            except Exception as discovery_exc:
+                if not running_count_failed:
+                    raise
+                _logger.warning(
+                    "Could not query '%s' recovery candidates after the running-count "
+                    "failure (%s); retrying with a bounded open-Issue scan.",
+                    config.labels.running,
+                    discovery_exc,
+                )
+                try:
+                    open_issues = github_client.list_issues_by_label(
+                        None, _READY_DISCOVERY_LIMIT, state="open"
+                    )
+                    running_candidates = [
+                        issue for issue in open_issues if config.labels.running in issue.labels
+                    ][:remaining]
+                except Exception as fallback_exc:  # noqa: BLE001 - preserve the daemon pass.
+                    _logger.warning(
+                        "Could not discover in-flight '%s' recovery candidates after the "
+                        "running-count failure (%s); skipping running recovery this pass.",
+                        config.labels.running,
+                        fallback_exc,
+                    )
+                    running_candidates = []
         for issue in running_candidates:
             if _has_published_direct_pr_handoff(github_client, issue):
                 issues_to_process.append((issue, "direct_pr_cleanup"))
@@ -843,6 +893,11 @@ def run_once(request: RunOnceRequest) -> int:
                     config.labels.blocked,
                 )
 
+    if request.aggregate_pr:
+        candidate_shortfall_exit_code = check_aggregate_candidate_shortfall(len(issues_to_process))
+        if candidate_shortfall_exit_code is not None:
+            return candidate_shortfall_exit_code
+
     if not issues_to_process:
         _logger.info(
             "No open Issues found with label %s, eligible running rework, or blocked resolution.",
@@ -852,6 +907,8 @@ def run_once(request: RunOnceRequest) -> int:
 
     # DRY RUN：仅列出将处理的 Issue，不实际处理（串行、零副作用）。
     if dry_run:
+        if request.aggregate_pr:
+            log_aggregate_dry_run_preview([issue for issue, _ in issues_to_process])
         # 定向模式的候选来自 get_issue（单个目标），不是 ready 列表的 limit 宽度，
         # 因此不能套用同一句「覆盖 N 个候选」的措辞。
         if target_issue_summary is not None:
@@ -937,10 +994,16 @@ def run_once(request: RunOnceRequest) -> int:
                 _logger.error("Serial routing failed for Issue #%d: %s", issue.number, exc)
                 return 1
 
-        exit_code = 0
-        for issue, issue_kind in issues_to_process:
-            exit_code |= _process_serial((issue, issue_kind))
-        return exit_code
+        issue_results = [
+            _process_serial((issue, issue_kind)) for issue, issue_kind in issues_to_process
+        ]
+        return complete_aggregate_queue(
+            AggregateQueueCompletionRequest(
+                run_request=request,
+                issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
+                exit_codes=tuple(issue_results),
+            )
+        )
 
     # 并行路径：线程池同一轮并行处理多个 Issue。每个 Issue 的 agent 输出经
     # output_sink 路由到独立日志文件与（可选）独立看板列，互不交错。
@@ -982,4 +1045,10 @@ def run_once(request: RunOnceRequest) -> int:
             results = list(pool.map(_process_with_routing, issues_to_process))
     finally:
         active_view.close()
-    return 1 if any(results) else 0
+    return complete_aggregate_queue(
+        AggregateQueueCompletionRequest(
+            run_request=request,
+            issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
+            exit_codes=tuple(results),
+        )
+    )

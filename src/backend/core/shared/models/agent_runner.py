@@ -325,6 +325,7 @@ class AttemptResult:
             未产出可用 usage 时为 ``None``。
         preset: 绑定生效时实际使用的预设名（空串 = 未绑定或绑定被丢弃）。
         model: 绑定生效时实际注入的模型 id（空串 = 未注入）。
+        failure_phase: 失败发生的生命周期阶段；成功或旧记录可为空。
     """
 
     attempt_number: int
@@ -341,6 +342,7 @@ class AttemptResult:
     preset: str = ""
     #: 绑定生效时实际注入的模型 id（空串 = 未注入）。
     model: str = ""
+    failure_phase: str | None = None
 
 
 @dataclass(frozen=True)
@@ -867,7 +869,20 @@ class PostPrSupervisorConfig:
 
 @dataclass(frozen=True)
 class PullRequestContext:
-    """Minimal PR context for supervisor decisions."""
+    """供发布、监督与批次聚合使用的 Pull Request 上下文。
+
+    Attributes:
+        pr_url: PR 页面地址。
+        branch: PR head 分支名。
+        head_sha: PR head 提交 SHA。
+        base_sha: PR base 提交 SHA。
+        mergeable: GitHub 当前报告的可合并状态；未知时为 ``None``。
+        checks_state: 汇总后的检查状态；尚无结果或无法确定时为 ``None``。
+        checks_summary: 未通过检查的人读摘要。
+        number: PR 编号；上下文不完整时为 ``None``。
+        body: PR 正文。
+        is_draft: PR 是否仍处于 Draft 状态；未知时为 ``None``。
+    """
 
     pr_url: str
     branch: str
@@ -878,6 +893,7 @@ class PullRequestContext:
     checks_summary: tuple[str, ...] = ()
     number: int | None = None
     body: str = ""
+    is_draft: bool | None = None
 
 
 @dataclass(frozen=True)

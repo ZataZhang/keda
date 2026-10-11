@@ -27,6 +27,7 @@ from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunCont
 from backend.core.shared.models.config_edit import (
     ConfigDocumentInvalidError,
     ConfigKeyMissingError,
+    ConfigLockBusyError,
 )
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
 from backend.core.use_cases.agent_runner_factory import (
@@ -115,10 +116,12 @@ def _write_or_fail_http(operation: Callable[[], None]) -> None:
 
     写回本身已经是一次读-改-写（见
     :func:`backend.infrastructure.config.toml_section_editor.apply_toml_updates`），
-    所以这里的三类失败都保证**文件未被改动**：
+    所以这里的四类失败都保证**文件未被改动**：
 
     - 请求要删的预设 / 要解绑的阶段在本层根本没声明 → ``422``，并说明该改哪一层；
     - 磁盘上的配置不是合法 TOML → ``500``，detail 指向"先修文件"；
+    - 另一个写入者持有该配置的写锁且等满了有界超时 → ``409``：请求本身合法，重试即可，
+      不该被混进"服务端错误"；
     - 纯 I/O 失败（权限、磁盘）→ ``500``。
 
     Args:
@@ -133,6 +136,8 @@ def _write_or_fail_http(operation: Callable[[], None]) -> None:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ConfigDocumentInvalidError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except ConfigLockBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"配置写入失败: {exc}") from exc
 
@@ -166,13 +171,21 @@ class UpdateLifecycleAgentsRequest(BaseModel):
 
 @router.put("/agent-runner/lifecycle-agents")
 def update_lifecycle_agents(request: UpdateLifecycleAgentsRequest) -> dict:
-    """保留式写回矩阵：只写请求里显式给出的键（``null`` 表示删除该键）。"""
-    config, editor = _select_scope_config(request.scope, request.repo_id)
-    try:
-        normalized_values = validate_lifecycle_agents_update(request.values, config)
-    except LifecycleAgentsUpdateError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    _write_or_fail_http(lambda: editor.update_lifecycle_agents(normalized_values))
+    """保留式写回矩阵：只写请求里显式给出的键（``null`` 表示删除该键）。
+
+    校验基线在写锁内取（与聚合保存、回退候选同一规则），失败时文件一字不动。
+    """
+
+    def _validate_and_write() -> None:
+        config, editor = _select_scope_config(request.scope, request.repo_id)
+        with editor.write_transaction():
+            try:
+                normalized_values = validate_lifecycle_agents_update(request.values, config)
+            except LifecycleAgentsUpdateError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            editor.update_lifecycle_agents(normalized_values)
+
+    _write_or_fail_http(_validate_and_write)
     # 写后重读，返回与磁盘一致的生效视图。
     refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)
     return build_lifecycle_agents_view(
@@ -224,9 +237,29 @@ class UpdateLifecycleSettingsRequest(BaseModel):
 
 @router.patch("/agent-runner/lifecycle-settings")
 def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
-    """先完整校验（含同批新建预设的引用），再 sparse 写回预设与阶段绑定。"""
-    config, editor = _select_scope_config(request.scope, request.repo_id)
+    """先完整校验（含同批新建预设的引用），再 sparse 写回预设与阶段绑定。
 
+    校验与写回**同持一把写锁**：预设与绑定按点名键写，但引用完整性校验的基线（本层预设
+    清单、各仓库绑定）若在锁外读，并发写入者就能在"校验通过"与"落盘"之间塞进一次改动，
+    让这次自认安全的删除真的留下悬空引用。
+    """
+
+    def _validate_and_write() -> None:
+        config, editor = _select_scope_config(request.scope, request.repo_id)
+        with editor.write_transaction():
+            _validate_and_apply_lifecycle_settings(request, config, editor)
+
+    _write_or_fail_http(_validate_and_write)
+    refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)
+    return _aggregate_view(refreshed_config, request.scope, request.repo_id)
+
+
+def _validate_and_apply_lifecycle_settings(
+    request: UpdateLifecycleSettingsRequest,
+    config: AppConfig,
+    editor: Any,
+) -> None:
+    """锁内完成"并入本次预设 → 三段校验 → 一次落盘"；任一校验不过都不触达文件。"""
     # 工作副本：把本次预设改动并入，使绑定校验能看到同批新建的预设（不落盘）。
     merged_presets = dict(config.agent_presets)
     preset_updates: dict[str, AgentModelPreset | None] = {}
@@ -267,7 +300,7 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
         # 删除预设前先确认不会留下悬空引用：目标层内未被本次解绑触及的既有绑定 / 候选，
         # 以及（全局删除时）仍引用该全局预设、自身却未自带同名覆盖的仓库绑定，都会让读取端
         # 无法解析生效值。此类操作必须失败且不改文件（FR-7），而非写成功后让页面 / CLI 崩。
-        # 反向（仓库删除被全局同名预设托底的覆盖）不算悬空：引用写后仍解析到全局预设。
+        # 反向（仓库删除被全局同名预设托底）不算悬空：引用写后仍解析到全局预设。
         deleted_names = {name for name, payload in preset_updates.items() if payload is None}
         repository_configs: dict[str, AppConfig] | None = None
         repository_own_presets: dict[str, dict[str, AgentModelPreset]] | None = None
@@ -299,15 +332,10 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
 
     # 预设定义与阶段绑定是**一次**读-改-写：分成"逐个预设写 + 绑定写"时，中途失败会
     # 留下前半已落盘的半套配置，违反「失败时配置文件不发生部分改动」。
-    _write_or_fail_http(
-        lambda: editor.update_presets_and_bindings(
-            preset_updates=normalized_presets,
-            binding_updates=normalized_bindings,
-        )
+    editor.update_presets_and_bindings(
+        preset_updates=normalized_presets,
+        binding_updates=normalized_bindings,
     )
-
-    refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)
-    return _aggregate_view(refreshed_config, request.scope, request.repo_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -343,23 +371,29 @@ def update_agent_fallback_order(request: UpdateFallbackOrderRequest) -> dict:
     这两个键是**机器级**配置（PRD FR-10：Settings 页编辑的就是全局 ``config.toml``），
     因此无论 ``repo_id`` 是否给出，写入目标恒为 ``config.toml``；``repo_id`` 只用于
     选取校验视角（仓库级注册的 agent 也会被认可）。
+
+    校验基线在写锁内取：顺序整段替换，若按锁外快照校验，并发写入者能在"校验通过"与
+    落盘之间改走 agent 注册表，让这次写入落下一个解析不到的顺序。
     """
-    config = _fallback_order_config(request.repo_id)
-    try:
-        normalized_order, normalized_switches = validate_agent_fallback_order_update(
-            request.agent_fallback_order, request.max_agent_switches, config
-        )
-    except LifecycleAgentsUpdateError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
-    _write_or_fail_http(
-        lambda: editor.update_runner_keys(
-            {
-                "agent_fallback_order": normalized_order,
-                "max_agent_switches": normalized_switches,
-            }
-        )
-    )
+
+    def _validate_and_write() -> None:
+        with editor.write_transaction():
+            config = _fallback_order_config(request.repo_id)
+            try:
+                normalized_order, normalized_switches = validate_agent_fallback_order_update(
+                    request.agent_fallback_order, request.max_agent_switches, config
+                )
+            except LifecycleAgentsUpdateError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            editor.update_runner_keys(
+                {
+                    "agent_fallback_order": normalized_order,
+                    "max_agent_switches": normalized_switches,
+                }
+            )
+
+    _write_or_fail_http(_validate_and_write)
     return build_agent_fallback_order_view(_fallback_order_config(request.repo_id))
 
 
@@ -390,22 +424,27 @@ def update_agent_fallback_candidates(request: UpdateFallbackCandidatesRequest) -
 
     与 ``agent_fallback_order`` 同理：候选是**机器级**配置，写入目标恒为全局
     ``config.toml``；``repo_id`` 只用于选取校验视角（认可仓库级注册的 agent 与预设）。
+
+    校验基线在写锁内取，理由与 ``agent_fallback_order`` 相同。
     """
-    config = _fallback_order_config(request.repo_id)
     candidate_entries = [entry.model_dump() for entry in request.candidates]
-    try:
-        normalized_candidates, normalized_switches = validate_fallback_candidates_update(
-            candidate_entries, request.max_agent_switches, config
-        )
-    except LifecycleAgentsUpdateError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
-    # 候选链与其预算是同一件事的两半：分两次写会留下"链已换、预算未换"的半套配置。
-    _write_or_fail_http(
-        lambda: editor.update_fallback_candidates_with_budget(
-            normalized_candidates, max_agent_switches=normalized_switches
-        )
-    )
+
+    def _validate_and_write() -> None:
+        with editor.write_transaction():
+            config = _fallback_order_config(request.repo_id)
+            try:
+                normalized_candidates, normalized_switches = validate_fallback_candidates_update(
+                    candidate_entries, request.max_agent_switches, config
+                )
+            except LifecycleAgentsUpdateError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            # 候选链与其预算是同一件事的两半：分两次写会留下"链已换、预算未换"的半套配置。
+            editor.update_fallback_candidates_with_budget(
+                normalized_candidates, max_agent_switches=normalized_switches
+            )
+
+    _write_or_fail_http(_validate_and_write)
     return build_fallback_candidates_view(_fallback_order_config(request.repo_id))
 
 
@@ -442,15 +481,21 @@ def update_agent_labels(request: UpdateAgentLabelsRequest) -> dict:
 
     与回退顺序同理：agent 路由标签是**机器级**配置（PRD FR-12 的「Agent 标签设置」在
     Settings 页），写入目标恒为 ``config.toml``；``repo_id`` 只用于选取校验视角。
+    校验基线同样在写锁内取。
     """
-    config = _fallback_order_config(request.repo_id)
     label_entries = [entry.model_dump() for entry in request.labels]
-    try:
-        normalized_labels = validate_agent_labels_update(label_entries, config)
-    except LifecycleAgentsUpdateError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
-    _write_or_fail_http(lambda: editor.update_agent_labels(normalized_labels))
+
+    def _validate_and_write() -> None:
+        with editor.write_transaction():
+            config = _fallback_order_config(request.repo_id)
+            try:
+                normalized_labels = validate_agent_labels_update(label_entries, config)
+            except LifecycleAgentsUpdateError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            editor.update_agent_labels(normalized_labels)
+
+    _write_or_fail_http(_validate_and_write)
     return {"labels": build_agent_labels_view(_fallback_order_config(request.repo_id))}
 
 

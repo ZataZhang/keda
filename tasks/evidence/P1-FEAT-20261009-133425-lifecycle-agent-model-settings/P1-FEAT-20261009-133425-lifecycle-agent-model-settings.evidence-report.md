@@ -40,6 +40,7 @@ open "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-2
 | 修复 / 收尾行 | 标注「继承实现阶段」，生效 Agent 显示具体名字 | fix/closeout 继承 |
 | 模型预设区 | 双列卡片（`sonnet-high`、`gpt-review`），卡片标「绑定阶段：review」，下方「新建预设」表单 | 预设是配置单元 |
 | 执行器回退区 | 3 行有序候选，`claude` 出现两次（一次绑 `sonnet-high`、一次跟随执行器默认），`codex` 绑 `gpt-review`；预算 `max_agent_switches=2` 并注明「最多尝试 3 个候选，按候选步数计数」 | FR-9 / FR-10 |
+| 基线声明（第八轮新增断言） | 页首小字与矩阵卡片描述都写明「本页/本表展示全局 / 仓库基线」，并点明「PRD 头部声明与单次运行的 CLI 旗标（`--preset` / `--model` / `--reasoning-effort`）对单个 PRD / 运行**优先生效**」 | §7.6 rv-2 子句「页面不把 PRD/one-shot override 冒充为当前基线」由 `rv2_capture.cjs` 读真实 DOM 文案判定（4 条 check），不再只有 Change Log 的叙述 |
 
 ### 2. 执行器回退候选区（同页放大）
 
@@ -127,6 +128,21 @@ open "tasks/evidence/P1-FEAT-20261009-133425-lifecycle-agent-model-settings/rv-3
 | rv-3 | `scripts/rv3_capture.sh` + `scripts/rv3_delete_integrity.sh` | `RV-3 RESULT: PASS` + `RV-3-DEL RESULT: PASS` | 同上 |
 | 定向复验 | `scripts/rv1_final_tree.sh` | `RV-1-FINAL RESULT: PASS`（389 passed） | `head_commit b10a7e06`，`working_state_tree be8b0ae2…` |
 | 全量测试 | `JUST_FULL_TEST_FLAGS=--no-testmon just test all`（`scripts/r5_just_test_all.sh`） | `R5-FULL-SUITE RESULT: PASS（3866 passed, 1 skipped）` → `rv-just-test-all.txt` | 同上 |
+
+> **第八轮（合并 main + 并发写修复）已在合并后的交付树整体重跑**：`just console-sync` 先用
+> 合并后的前端产物重建 bundle，随后 `rv1_capture` / `rv3_capture` / `rv3_delete_integrity` /
+> `rv2_run`（正控 + `RV2_CJS=rv2_negative_control.cjs` 负控各一次）/ `rv1_final_tree` 全部
+> PASS，真实 Playwright 仍 `7 passed`、负控 `RED-CONFIRMED 3/3`、rv-2 判别性检查失败数 0；
+> `JUST_FULL_TEST_FLAGS=--no-testmon just test all` → `3965 passed, 1 skipped`、exit 0。
+> 本轮 rv-1 / rv-2 / rv-3 产物首部 stamp 为 `head_commit=be1228ee / head_tree=47713888 /
+> working_state_tree=6947101b… / working_tree_clean=no`；采集之后代码树未再改动，只有文档追加，
+> 最后重采的 `rv-just-test-all.txt` 与 `rv-1-final-tree-reverification.txt` 以各自首部 stamp 为准
+> （合并 commit 由 runner 落，其 tree 应与最后一次 stamp 对齐）。代码侧变化集中在写锁本身：`LOCK_NB` + 10s 有界重试（超时报
+> `ConfigLockBusyError` → CLI `CONFLICT(5)` / HTTP 409）、同线程重入放行、锁文件 0600、
+> 四个裸 `write_text` 的写入者改走同一原语、CLI 与 console 的基线读取和校验移进锁内。
+> 另把 §7.6 rv-2 的「页面不把 PRD/one-shot override 冒充为当前基线」补成 4 条真实 DOM 断言
+> （见上表最后一行）。**远端 CI 仍未验证**：本轮不推送，PR 的 check-runs 需在合并落库后由
+> 远端流水线实跑；上表全部是本地证据。
 
 > **本轮（第七轮评审修复）之后**：代码侧改动集中在**唯一一份 TOML 落盘原语**与其调用方——
 > 权限沿用目标现状（不再把 `config.toml` 写成 0600）、`<name>.lock` 跨进程写锁覆盖整个

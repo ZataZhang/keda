@@ -4,10 +4,10 @@
 
 一个**命名预设 = 一组（agent + 模型 + 推理档）**。运维者在配置里定义 `plan` / `work` 之类预设；
 keda 拉起 agent CLI 时按 agent 级声明式模板注入对应的模型与推理深度参数，不用再手工改各 CLI 的
-全局配置。预设再通过 **阶段 → 预设绑定层** 接进九个生命周期阶段——校验用强模型慢推理、实现用快
-模型高推理，整条流水线自动生效，不依赖人在每条命令上传参。
+全局配置。预设再通过 **阶段 → 预设绑定层** 接到各个生命周期——校验可用强模型慢推理、实现可用快
+模型高推理；每个阶段只在自己的触发条件满足时读取绑定，不要求所有阶段连续执行。
 
-完全可选：预设、绑定、命令行旗标三者都可以不设置；任何一层都没设时，九个阶段的行为与过去
+完全可选：预设、绑定、命令行旗标三者都可以不设置；任何一层都没设时，各阶段的行为与过去
 **逐字节一致**（argv 黄金快照零 diff）。
 
 ## 1. 定义预设
@@ -97,7 +97,7 @@ supervisor / planner / content_generation / deliberate）。
 | 命令 | 锚定阶段 | 旗标 |
 |---|---|---|
 | `kc run` / `kc daemon` | implementation | `--preset <名> [--model <id>] [--reasoning-effort <档>]` |
-| `kc review` / `kc review-daemon` | supervisor | 同上 |
+| `kc supervise` / `kc supervise-daemon` | supervisor | 同上 |
 | `kc ask` | planner | 同上 |
 | `kc issue create` | content_generation | 同上 |
 | `kc agent doctor` | what-if 预览 | `--preset` / `--model` / `--reasoning-effort` / `--lifecycle <键>` |
@@ -182,6 +182,10 @@ kc agent fallback candidate move   <position> --to <n>  --scope … [--repo-id <
   模板的 agent 设非空 effort——都在**写文件或调用 agent 前**返回可诊断的非零退出，目标文件字节不变。
 - 目标配置文件本身不是合法 TOML 时，写命令以一般错误（1）退出并提示先修复该文件；原文件一字
   不动，不会被"重写"成一份能解析但丢掉注释与其余段落的新文件。
+- **同一次操作持有一把按目标路径派生的写锁**（`<config>.lock`），覆盖"读基线 → 校验 → 落盘"
+  整段：`config.toml` 同时被页面保存、registry 写入与 CLI 调用改动，串行化才不会互相丢键，
+  也不会用一份过期快照整体替换掉候选数组。抢锁是有界等待，等满仍被占用时以冲突（5）退出，
+  文件不变——这条失败的含义是"原样重试"，不是"设置没写对"。
 - `--scope global` 与 `--repo-id` / `--repo` **互斥**：全局层写的是机器级 `config.toml`，仓库选择器
   在这里没有任何作用，同时给出按用法错误退出（2），不静默落到机器级配置。预设名写入前去掉首尾
   空白，落盘键与可绑定名字始终是同一个。

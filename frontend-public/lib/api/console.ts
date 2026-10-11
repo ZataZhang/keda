@@ -8,6 +8,7 @@
 import { del, get, patch, post, put } from "./client";
 import type {
   AuditEntry,
+  AgentPerformanceStats,
   BatchAddRepositoriesResult,
   ConsoleActionResult,
   ConsoleContext,
@@ -26,6 +27,8 @@ import type {
   RepositoryCompletionStats,
   RunnerProcessKind,
   RunnerProcessRecord,
+  RunAttemptDetailEntry,
+  RunInvocationDetailEntry,
   RunRecordEntry,
 } from "./types";
 
@@ -254,6 +257,27 @@ export async function fetchRunHistoryTrend(params: {
 }
 
 /**
+ * 读取按 Agent / preset attempt 和最终任务结果汇总的执行表现。
+ *
+ * @param params.repoId - 仓库标识；省略表示全部仓库。
+ * @param params.days - 统计窗口天数，默认 30。
+ * @returns 后端已聚合的执行表现数据。
+ */
+export async function fetchAgentPerformanceStats(params: {
+  repoId?: string;
+  days?: number;
+}): Promise<AgentPerformanceStats> {
+  const searchParams = new URLSearchParams();
+  if (params.repoId) {
+    searchParams.set("repo_id", params.repoId);
+  }
+  searchParams.set("days", String(params.days ?? 30));
+  return get<AgentPerformanceStats>(
+    `${BASE_PATH}/console/stats/agent-performance?${searchParams.toString()}`,
+  );
+}
+
+/**
  * 读取 PRD 维度的端到端统计（含均值 / 中位数 / P90 / 阶段瓶颈与 PRD 明细）。
  *
  * 与 `fetchRunHistoryTrend`（单次 runner 调用口径）刻意分开；本接口直接返回
@@ -290,6 +314,38 @@ export async function fetchRecentRuns(params: {
     `${BASE_PATH}/console/runs?${searchParams.toString()}`,
   );
   return response.runs;
+}
+
+/**
+ * 读取所选运行记录时间窗口内持久化的 Agent 尝试。
+ *
+ * @param params.repoId - 仓库标识。
+ * @param params.issueNumber - Issue 编号。
+ * @param params.startedAt - ISO-8601 运行开始时间。
+ * @param params.finishedAt - ISO-8601 运行结束时间。
+ * @returns 所选运行窗口内的尝试详情。
+ */
+export async function fetchRunExecutionDetails(params: {
+  repoId: string;
+  issueNumber: number;
+  startedAt: string;
+  finishedAt: string;
+}): Promise<{
+  attempts: RunAttemptDetailEntry[];
+  invocations: RunInvocationDetailEntry[];
+}> {
+  const searchParams = new URLSearchParams({
+    repo_id: params.repoId,
+    issue_number: String(params.issueNumber),
+    started_at: params.startedAt,
+    finished_at: params.finishedAt,
+  });
+  return get<{
+    attempts: RunAttemptDetailEntry[];
+    invocations: RunInvocationDetailEntry[];
+  }>(
+    `${BASE_PATH}/console/runs/attempts?${searchParams.toString()}`,
+  );
 }
 
 export async function fetchAuditLog(limit = 100): Promise<AuditEntry[]> {

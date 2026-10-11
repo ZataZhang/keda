@@ -1142,3 +1142,45 @@ def test_identical_candidate_write_leaves_config_unchanged(console_env: dict) ->
     runner_section = on_disk["agent_runner"]["runner"]
     assert runner_section["max_agent_switches"] == 1
     assert len(runner_section["agent_fallback_candidates"]) == 2
+
+
+def test_fallback_candidates_write_validates_baseline_under_lock(
+    console_env: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """整段替换的校验基线在写锁内取：锁外读到的快照会被并发写入者整段顶掉。
+
+    探针在校验取基线时抢一次 ``LOCK_EX | LOCK_NB``：抢不到=锁覆盖了"读→校验→写"，
+    抢得到=仍有锁外窗口。写后那次复读在锁外做视图返回，因此序列是 ``[True, False]``。
+    """
+    import fcntl
+
+    from backend.api.routes import agent_runner_lifecycle_agents as lifecycle_routes
+
+    config_path = console_env["config_path"]
+    lock_path = config_path.with_name(config_path.name + ".lock")
+    lock_held_at_baseline: list[bool] = []
+    original_reader = lifecycle_routes._fallback_order_config
+
+    def _probe(repo_id: str | None) -> object:
+        with open(lock_path, "a", encoding="utf-8") as probe_handle:
+            try:
+                fcntl.flock(probe_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                lock_held_at_baseline.append(True)
+            else:
+                fcntl.flock(probe_handle.fileno(), fcntl.LOCK_UN)
+                lock_held_at_baseline.append(False)
+        return original_reader(repo_id)
+
+    monkeypatch.setattr(
+        "backend.api.routes.agent_runner_lifecycle_agents._fallback_order_config", _probe
+    )
+
+    response = console_env["client"].put(
+        "/api/v1/agent-runner/agent-fallback-candidates",
+        json={"candidates": [{"agent": "claude"}], "max_agent_switches": 2},
+    )
+
+    assert response.status_code == 200
+    assert lock_held_at_baseline == [True, False]

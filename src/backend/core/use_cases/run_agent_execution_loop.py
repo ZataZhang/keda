@@ -119,6 +119,8 @@ class AgentExecutionRequest:
     #: :attr:`publish_stage`，本字段在 ``__post_init__`` 里被归一化为该档位的派生视图，
     #: 因此不可能出现「stage=direct 且 fast_merge=True」这类矛盾状态。
     fast_merge: bool | None = None
+    #: 稳定的仓库 registry id；兼容调用未提供时才回退到 worktree 名。
+    repo_id: str | None = None
 
     def __post_init__(self) -> None:
         """把 ``fast_merge`` 布尔收进 :attr:`publish_stage`，并回填其派生视图。"""
@@ -233,7 +235,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         attempt_started_mono = time.monotonic()
         attempt_phases = AttemptPhaseTimer()
         attempt_started_iso = datetime.now(timezone.utc).isoformat()
-        repo_id = _resolve_repo_id(issue, worktree_path)
+        attempt_repo_id = request.repo_id or _resolve_repo_id(issue, worktree_path)
         attempt_record_context = _AttemptRecordContext(
             request=request,
             attempt_index=attempt_index,
@@ -241,7 +243,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             attempt_started_mono=attempt_started_mono,
             attempt_started_iso=attempt_started_iso,
             attempt_results=attempt_results,
-            repo_id=repo_id,
+            repo_id=attempt_repo_id,
             effective_model_selection=model_selection,
         )
 
@@ -340,6 +342,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 exc=exc,
                 detect_provider_errors=True,
             )
+            attempt_phases.mark_failure_phase("agent")
             _record_attempt(
                 attempt_record_context,
                 failure_type=failure_type,
@@ -393,6 +396,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         try:
             ensure_verification_passed(verification_results)
         except VerificationFailedError as exc:
+            attempt_phases.mark_failure_phase("verification")
             failure_type = _classify_and_record_gate_failure(
                 attempt_record_context,
                 detail=format_recovery_failure_summary(
@@ -441,6 +445,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             )
             delivery_gates_revalidated = closeout_result.revalidated
             if not delivery_gates_revalidated:
+                attempt_phases.mark_failure_phase("prd_delivery")
                 failure_type = _classify_and_record_gate_failure(
                     attempt_record_context,
                     detail=format_prd_delivery_detail(str(exc)),
@@ -500,6 +505,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
 
         if evidence_gate_failure is not None:
             exc = evidence_gate_failure
+            attempt_phases.mark_failure_phase("evidence")
             failure_type = _classify_and_record_gate_failure(
                 attempt_record_context,
                 detail=format_validation_evidence_detail(str(exc)),
@@ -627,6 +633,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         issue.number,
                     )
                 else:
+                    attempt_phases.mark_failure_phase("commit")
                     failure_type = _classify_and_record_gate_failure(
                         attempt_record_context,
                         detail=format_recovery_failure_summary(
@@ -660,6 +667,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     attempt_index >= max_recovery_attempts
                     or not is_recoverable_commit_request_error(exc)
                 ):
+                    attempt_phases.mark_failure_phase("commit")
                     failure_type = classify_failure(
                         before_sha=before_sha,
                         after_sha=after_sha,
@@ -688,6 +696,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     verification_results=final_verification_results,
                     exc=None,
                 )
+                attempt_phases.mark_failure_phase("commit")
                 _record_attempt(
                     attempt_record_context,
                     failure_type=failure_type,
@@ -739,12 +748,14 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 annotation_name,
             )
         else:
+            current_failure_phase = "rv_reexec"
             try:
                 from backend.core.use_cases.run_verifier_agent import run_verifier_gate
 
                 with attempt_phases.measure("rv_reexec"):
                     ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
                     ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
+                current_failure_phase = "verifier"
                 with attempt_phases.measure("verifier"):
                     verifier_verdict = run_verifier_gate(
                         issue,
@@ -760,6 +771,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         request, "verify", verifier_verdict.agent, verifier_verdict.token_usage
                     )
             except ValidationEvidenceError as exc:
+                attempt_phases.mark_failure_phase(current_failure_phase)
                 failure_type = _classify_and_record_gate_failure(
                     attempt_record_context,
                     detail=format_validation_evidence_detail(str(exc)),
@@ -802,6 +814,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             verification_results=verification_results,
             exc=None,
         )
+        attempt_phases.mark_failure_phase("agent")
         _record_attempt(
             attempt_record_context,
             failure_type=failure_type,

@@ -9,6 +9,7 @@ from __future__ import annotations
 import fcntl
 import os
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -17,11 +18,14 @@ import tomlkit
 from backend.core.shared.models.config_edit import (
     ConfigDocumentInvalidError,
     ConfigKeyMissingError,
+    ConfigLockBusyError,
 )
+from backend.infrastructure.config import toml_section_editor
 from backend.infrastructure.config.toml_section_editor import (
     ArrayTableUpdate,
     TableKeyUpdate,
     apply_toml_updates,
+    config_write_lock,
     mutate_toml_document,
     update_toml_array_of_tables,
     update_toml_table_keys,
@@ -31,6 +35,12 @@ _RUNNER_TABLE = ("agent_runner", "runner")
 _CANDIDATES_KEY = "agent_fallback_candidates"
 _LIFECYCLE_PRESETS_TABLE = ("agent_runner", "lifecycle_presets")
 _GHOST_PRESET_TABLE = ("agent_runner", "presets", "ghost")
+
+#: 没有 fcntl/msvcrt 的平台上跨进程建议锁不成立：相关断言跳过，而不是"静默通过"。
+requires_advisory_lock = pytest.mark.skipif(
+    toml_section_editor._LOCK_BACKEND == "none",
+    reason="本平台没有 fcntl / msvcrt，跨进程写锁不可验证",
+)
 
 _CONFIG_WITH_ANNOTATED_CANDIDATES = """\
 [agent_runner]
@@ -347,6 +357,103 @@ def test_read_modify_write_holds_exclusive_lock(config_path: Path) -> None:
     mutate_toml_document(config_path, _probe)
 
     assert lock_held_during_write == [True]
+
+
+@requires_advisory_lock
+def test_busy_lock_fails_fast_instead_of_blocking_forever(config_path: Path, monkeypatch) -> None:
+    """别人持锁时：**有界**等待后报错退出，而不是把 CLI 挂死或长期占住 worker。
+
+    锁被占用是本模块对外承诺的失败之一，必须"配置一字未动 + 可诊断错误"，
+    超时上限就是这条承诺的代价：等满就失败，绝不无限等。
+    """
+    lock_path = config_path.with_name(config_path.name + ".lock")
+    with open(lock_path, "a", encoding="utf-8") as holder_handle:
+        fcntl.flock(holder_handle.fileno(), fcntl.LOCK_EX)
+        monkeypatch.setattr(toml_section_editor, "_LOCK_WAIT_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(toml_section_editor, "_LOCK_RETRY_INTERVAL_SECONDS", 0.02)
+        before = config_path.read_bytes()
+        started_at = time.monotonic()
+
+        with pytest.raises(ConfigLockBusyError, match="写锁被另一个写入者持有"):
+            update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 99})
+
+        assert time.monotonic() - started_at < 5
+        fcntl.flock(holder_handle.fileno(), fcntl.LOCK_UN)
+
+    assert config_path.read_bytes() == before
+
+
+@requires_advisory_lock
+def test_lock_is_reentrant_within_one_thread(config_path: Path) -> None:
+    """同线程嵌套取同一把锁必须放行：flock 记在 fd 上，不自救就是自死锁。
+
+    两条真实嵌套都要过：把 :func:`apply_toml_updates` 写进 ``mutate`` 回调，以及
+    调用方先经 :func:`config_write_lock` 圈住"读基线 + 校验"再落盘。
+    """
+    nested_marker = {"applied": False}
+
+    def _mutate(document: tomlkit.TOMLDocument) -> None:
+        apply_toml_updates(
+            config_path,
+            [TableKeyUpdate(_RUNNER_TABLE, {"max_agent_switches": 5})],
+        )
+        nested_marker["applied"] = True
+        document["agent_runner"]["runner"]["max_agent_switches"] = 5
+
+    mutate_toml_document(config_path, _mutate)
+    assert nested_marker["applied"] is True
+
+    with config_write_lock(config_path):
+        apply_toml_updates(
+            config_path,
+            [TableKeyUpdate(_RUNNER_TABLE, {"max_agent_switches": 6})],
+        )
+    assert "max_agent_switches = 6" in config_path.read_text(encoding="utf-8")
+
+
+@requires_advisory_lock
+def test_public_write_lock_is_the_same_lock(config_path: Path) -> None:
+    """对外暴露的锁与内部读-改-写用的是同一把：否则裸写 Text 的写入者仍能插进来。"""
+    lock_path = config_path.with_name(config_path.name + ".lock")
+    with config_write_lock(config_path):
+        with open(lock_path, "a", encoding="utf-8") as probe_handle:
+            with pytest.raises(OSError):
+                fcntl.flock(probe_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_lock_file_is_owner_only(config_path: Path) -> None:
+    """锁文件不含数据，权限必须是 0600，而不是 ``0666 & ~umask`` 的默认宽权限。"""
+    update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 3})
+    lock_path = config_path.with_name(config_path.name + ".lock")
+    assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
+
+
+def test_atomic_replace_carries_target_ownership(config_path: Path, monkeypatch) -> None:
+    """原子替换把目标原本的 uid/gid 搬到临时文件，写后属主不被换成写入进程。"""
+    chown_calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        toml_section_editor.os,
+        "chown",
+        lambda path, uid, gid: chown_calls.append((uid, gid)),
+    )
+
+    update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 3})
+
+    target_stat = config_path.stat()
+    assert chown_calls == [(target_stat.st_uid, target_stat.st_gid)]
+
+
+def test_unprivileged_chown_does_not_abort_the_write(config_path: Path, monkeypatch) -> None:
+    """非特权进程 chown 不动属主时**继续写完**：属主保不住不该把一次合法保存改成失败。"""
+
+    def _deny(_path, _uid, _gid):
+        raise PermissionError("not owner")
+
+    monkeypatch.setattr(toml_section_editor.os, "chown", _deny)
+
+    update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 8})
+
+    assert "max_agent_switches = 8" in config_path.read_text(encoding="utf-8")
 
 
 def test_strict_reader_refuses_missing_config_without_creating_it(tmp_path: Path) -> None:

@@ -52,7 +52,6 @@ from backend.core.use_cases.agent_invocation_tracing import (
     PHASE_FIX,
     PHASE_IMPLEMENTATION,
     PHASE_UNSPECIFIED,
-    PHASE_VERIFICATION,
     RETRY_REASON_RESUME_NOT_STARTED,
     RETRY_REASON_TRANSIENT,
     InvocationStartRequest,
@@ -214,7 +213,6 @@ __all__ = [
     "publish_changes",
     "repair_agent_is_self",
     "resolve_agent_fallback_candidate_specs",
-    "resolve_agent_fallback_order",
     "resolve_implementation_model_selection",
     "resolve_prd_archive_path",
     "resolve_repair_agent",
@@ -296,35 +294,6 @@ def resolve_agent_fallback_candidate_specs(
     return fallback_specs
 
 
-def resolve_agent_fallback_order(
-    issue: IssueSummary,
-    config: AppConfig,
-    override_agent: str,
-) -> list[str]:
-    """Return the ordered list of agents to try for an Issue.
-
-    The first entry is the primary agent resolved by :func:`choose_agent`.
-    Subsequent entries come from the effective fallback chain (``agent_fallback_candidates``
-    wins, otherwise ``agent_fallback_order``) folded to agent names with the
-    primary agent and duplicates removed, preserving configured order. When no
-    fallback order is configured the list contains only the primary agent, so
-    the escalation ladder behaves exactly like single-agent runs.
-
-    Args:
-        issue: Issue being processed.
-        config: Agent Runner configuration.
-        override_agent: The ``--agent`` override (``"auto"`` routes by label).
-
-    Returns:
-        Ordered, de-duplicated agent names to attempt.
-    """
-    agent_names: list[str] = []
-    for candidate_spec in resolve_agent_fallback_candidate_specs(issue, config, override_agent):
-        if candidate_spec.agent not in agent_names:
-            agent_names.append(candidate_spec.agent)
-    return agent_names
-
-
 def resolve_repair_agent(
     raw_setting: str,
     *,
@@ -394,7 +363,7 @@ def resolve_supervisor_agent(
 
     生命周期矩阵（或 PRD 覆盖）显式声明了具体 agent 时用它；``fallback_agent``
     描述"配置为 ``auto`` 时用谁"：发布路径传本次实现者（保持历史行为），
-    ``kc review`` 不传，回落到按 Issue 标签路由。
+    ``kc supervise`` 不传，回落到按 Issue 标签路由。
 
     Args:
         issue: 当前 Issue。
@@ -762,15 +731,18 @@ def run_agent_with_prompt(
         """把本次调用自报的会话 id 落在 worktree 局部记录里。
 
         只记 run 用途的会话：fix / closeout / verifier 是另一段独立对话，写进同一个
-        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。verifier 走 ``run``
-        profile（与实现者同一 CLI 调用形态），所以这道还得按 ``invocation_phase``
-        再挡一层：独立 verifier 门禁要求交付树保持干净，覆盖 worktree 里被跟踪的
-        会话记录会直接把门禁打红、让 green verdict 永远无法被接受。落盘是旁路，
-        失败只记日志——续传是增益路径，不能反过来把正常执行拖下水。
+        per-agent 记录会把主实现会话覆盖掉，恢复时续错对象。这些调用都走默认
+        ``profile="run"``，profile 一档拦不住，因此以调用阶段为准：只有
+        ``implementation``（主循环与其 recovery 轮次）与未标注阶段的调用才落盘；
+        fix、closeout、verifier 等独立对话即使同 profile 也不覆盖。这样既避免
+        恢复时续错会话，也避免改脏 git 跟踪的
+        ``.iar/agent-runner/sessions/<agent>.json``，导致独立 verifier 的洁净树
+        门禁误报。落盘是旁路，失败只记日志——续传是增益路径，不能反过来把正常
+        执行拖下水。
         """
         if not session_id or profile != AGENT_PROFILE_RUN:
             return
-        if invocation_phase == PHASE_VERIFICATION:
+        if invocation_phase not in (PHASE_IMPLEMENTATION, PHASE_UNSPECIFIED):
             return
         try:
             save_agent_session_record(
@@ -1013,8 +985,9 @@ def run_agent_until_committed(
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
     model_selection: ModelSelection | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    repo_id: str | None = None,
 ) -> AgentCommitResult:
-    """运行 Agent recovery 状态机并返回最终提交结果。"""
+    """运行 Agent recovery 状态机并返回最终提交结果；``repo_id`` 指稳定仓库 registry id。"""
     from backend.core.use_cases.run_agent_execution_loop import (
         AgentExecutionRequest,
         run_agent_until_committed as run_execution_loop,
@@ -1033,6 +1006,7 @@ def run_agent_until_committed(
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
             model_selection=model_selection,
+            repo_id=repo_id,
             # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"
             # （崩溃对账重新入队 / 部分进度续作），而不是新任务被历史会话污染。
             resume_session_id=resolve_resumable_session_id(

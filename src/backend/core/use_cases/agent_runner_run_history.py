@@ -16,6 +16,14 @@ from backend.core.shared.models.agent_runner import (
     AttemptResult,
     FailureType,
     IssueSummary,
+    PhaseDuration,
+)
+from backend.core.use_cases.agent_invocation_tracing import (
+    EVENT_INVOCATION_FINISHED,
+    EVENT_INVOCATION_STARTED,
+    InvocationTimelineRow,
+    build_invocation_timeline,
+    resolve_invocation_store,
 )
 
 _logger = logging.getLogger(__name__)
@@ -23,10 +31,17 @@ _logger = logging.getLogger(__name__)
 #: 实时 attempt 历史评论最多渲染的行数，避免评论体随反复 claim 无限增长。
 ATTEMPT_HISTORY_MAX_ROWS = 50
 
+# 单次运行详情查询的历史扫描上限，避免 Issue 长期重试导致无界读取。
+_RUN_ATTEMPT_DETAIL_LIMIT = 5000
+_RUN_INVOCATION_DETAIL_LIMIT = 5000
+
 __all__ = [
     "ATTEMPT_HISTORY_MAX_ROWS",
     "IssueAttemptTrail",
+    "RunAttemptWindow",
     "append_run_record",
+    "load_run_attempt_details",
+    "load_run_invocation_details",
     "load_issue_attempt_trail",
 ]
 
@@ -72,6 +87,8 @@ def append_run_record(
                 started_at=started_at.isoformat(timespec="seconds"),
                 finished_at=finished_at.isoformat(timespec="seconds"),
                 duration_seconds=(finished_at - started_at).total_seconds(),
+                issue_title=issue.title or None,
+                issue_url=issue.url or None,
             )
         )
     except Exception as record_exc:  # noqa: BLE001 - side channel only.
@@ -93,6 +110,16 @@ class IssueAttemptTrail:
 
     attempts: list[AttemptResult]
     older_omitted: bool
+
+
+@dataclass(frozen=True)
+class RunAttemptWindow:
+    """指定一次运行的仓库、Issue 与时间窗口。"""
+
+    repo_id: str
+    issue_number: int
+    started_at: datetime
+    finished_at: datetime
 
 
 def load_issue_attempt_trail(
@@ -140,12 +167,133 @@ def load_issue_attempt_trail(
     )
 
 
+def load_run_attempt_details(
+    *,
+    run_history_store: IRunHistoryStore | None,
+    run_window: RunAttemptWindow,
+) -> list[AttemptResult]:
+    """加载指定运行时间窗口内已持久化的 Agent 尝试详情。
+
+    Args:
+        run_history_store: 运行历史存储；为 ``None`` 时返回空列表。
+        run_window: 本次运行的仓库、Issue 和带时区起止时间。
+
+    Returns:
+        按时间正序排列的尝试详情；读取失败或窗口无效时返回空列表。
+    """
+    if (
+        run_history_store is None
+        or run_window.started_at.utcoffset() is None
+        or run_window.finished_at.utcoffset() is None
+        or run_window.finished_at < run_window.started_at
+    ):
+        return []
+    try:
+        stored_attempts = run_history_store.list_issue_attempts(
+            repo_id=run_window.repo_id,
+            issue_number=run_window.issue_number,
+            limit=_RUN_ATTEMPT_DETAIL_LIMIT,
+        )
+    except Exception as trail_exc:  # noqa: BLE001 - read-only history must not break UI.
+        _logger.warning(
+            "Failed to load run attempt details for Issue #%d: %s",
+            run_window.issue_number,
+            trail_exc,
+        )
+        return []
+
+    normalized_run_start = run_window.started_at.astimezone(timezone.utc)
+    normalized_run_end = run_window.finished_at.astimezone(timezone.utc)
+    matching_attempts: list[AttemptResult] = []
+    for stored_attempt in stored_attempts:
+        attempt_started_at = _parse_attempt_timestamp(stored_attempt.started_at)
+        if attempt_started_at is None:
+            continue
+        if not normalized_run_start <= attempt_started_at <= normalized_run_end:
+            continue
+        rendered_attempt = _stored_attempt_to_result(stored_attempt)
+        if rendered_attempt is not None:
+            matching_attempts.append(rendered_attempt)
+    return matching_attempts
+
+
+def load_run_invocation_details(
+    *,
+    run_history_store: IRunHistoryStore | None,
+    run_window: RunAttemptWindow,
+) -> list[InvocationTimelineRow]:
+    """读取指定运行时间窗口内 Agent 进程调用的执行器、模型与耗时。
+
+    Args:
+        run_history_store: 运行历史存储；不支持调用观测时返回空列表。
+        run_window: 本次运行的仓库、Issue 和带时区起止时间。
+
+    Returns:
+        按调用开始顺序排列的 Agent 调用详情；旧库或读取失败时为空列表。
+    """
+    if (
+        run_history_store is None
+        or run_window.started_at.utcoffset() is None
+        or run_window.finished_at.utcoffset() is None
+        or run_window.finished_at < run_window.started_at
+    ):
+        return []
+    invocation_store = resolve_invocation_store(run_history_store)
+    if invocation_store is None:
+        return []
+    try:
+        invocation_events = invocation_store.list_issue_invocation_events(
+            repo_id=run_window.repo_id,
+            issue_number=run_window.issue_number,
+            limit=_RUN_INVOCATION_DETAIL_LIMIT,
+        )
+    except Exception as invocation_read_error:  # noqa: BLE001 - 观测读取失败不阻断详情页。
+        _logger.warning(
+            "Failed to load invocation details for Issue #%d: %s",
+            run_window.issue_number,
+            invocation_read_error,
+        )
+        return []
+
+    normalized_run_start = run_window.started_at.astimezone(timezone.utc)
+    normalized_run_end = run_window.finished_at.astimezone(timezone.utc)
+    selected_invocation_ids: set[str] = set()
+    for invocation_event in invocation_events:
+        if invocation_event.event_type != EVENT_INVOCATION_STARTED:
+            continue
+        invocation_started_at = _parse_attempt_timestamp(invocation_event.occurred_at)
+        if invocation_started_at is not None and (
+            normalized_run_start <= invocation_started_at <= normalized_run_end
+        ):
+            selected_invocation_ids.add(invocation_event.invocation_id)
+
+    selected_invocation_events = [
+        invocation_event
+        for invocation_event in invocation_events
+        if invocation_event.invocation_id in selected_invocation_ids
+        and invocation_event.event_type in (EVENT_INVOCATION_STARTED, EVENT_INVOCATION_FINISHED)
+    ]
+    return build_invocation_timeline(selected_invocation_events)
+
+
+def _parse_attempt_timestamp(timestamp: str) -> datetime | None:
+    """解析 SQLite 中的 attempt 时间戳，并归一为 UTC。"""
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed_timestamp.tzinfo is None:
+        parsed_timestamp = parsed_timestamp.replace(tzinfo=timezone.utc)
+    return parsed_timestamp.astimezone(timezone.utc)
+
+
 def _stored_attempt_to_result(attempt_record: AttemptRecord) -> AttemptResult | None:
     """把一条已落库的 attempt 记录还原为可渲染的 :class:`AttemptResult`。
 
     ``failure_type`` 落库时写的是枚举字面值；若历史行的取值已不在当前
     :class:`FailureType` 中（例如枚举更名后读到旧库），跳过该行并返回
-    ``None``，而不是让整条轨迹渲染失败。
+    ``None``，而不是让整条轨迹渲染失败。阶段字段新增前的历史行仅对 runner
+    固定生成、能唯一确定阶段的诊断前缀做兼容识别。
     """
     try:
         failure_type = FailureType(attempt_record.failure_type)
@@ -156,6 +304,22 @@ def _stored_attempt_to_result(attempt_record: AttemptRecord) -> AttemptResult | 
             attempt_record.issue_number,
         )
         return None
+    failure_phase = attempt_record.failure_phase
+    if failure_phase is None:
+        if attempt_record.detail.startswith(
+            "Agent command failed before runner verification could start."
+        ):
+            failure_phase = "agent"
+        elif attempt_record.detail.startswith("PRD delivery check failed."):
+            failure_phase = "prd_delivery"
+        elif attempt_record.detail.startswith("Verification before staging failed."):
+            failure_phase = "verification"
+        elif attempt_record.detail.startswith(
+            "Verification after runner staged changes with git add -A failed."
+        ) or attempt_record.detail.startswith("The runner could not process the commit request."):
+            failure_phase = "commit"
+        elif attempt_record.detail == "Agent produced no git commits.":
+            failure_phase = "agent"
     return AttemptResult(
         attempt_number=attempt_record.attempt_number,
         failure_type=failure_type,
@@ -165,4 +329,11 @@ def _stored_attempt_to_result(attempt_record: AttemptRecord) -> AttemptResult | 
         started_at=attempt_record.started_at,
         finished_at=attempt_record.finished_at,
         duration_seconds=attempt_record.duration_seconds,
+        preset=attempt_record.preset or "",
+        model=attempt_record.model or "",
+        failure_phase=failure_phase,
+        phase_durations=tuple(
+            PhaseDuration(name=phase_name, seconds=phase_seconds)
+            for phase_name, phase_seconds in attempt_record.phase_durations
+        ),
     )

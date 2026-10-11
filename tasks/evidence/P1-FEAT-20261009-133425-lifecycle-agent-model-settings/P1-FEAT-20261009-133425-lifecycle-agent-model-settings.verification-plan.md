@@ -52,5 +52,10 @@ uv run mkdocs build --strict
   `just test all`、`uv run mkdocs build --strict`。
 - 前端另有 CI 门禁不在 `just test all` 内：`pnpm run typecheck`、`pnpm run build`
   （`.github/workflows/ci.yml` frontend-build job），交付侧以本地复跑为补充证据。
-- 独立 verifier 裁决与 PRD 归档属 runner 所有（PRD §9 以 `[~]` 标记），执行器不代勾；
-  `Human-Confirmed` 五项同样留待人工。
+- 独立 verifier 裁决与 PRD 归档同为 runner-owned 门禁，第八轮交付时均已完成并按证据回填
+  PRD §9 的 `[x]`（verifier 对 sha `b10a7e06` 出具 PASS，产物 `verifier-response.txt`；
+  PRD 位于 `tasks/archive/`）。仍留待人工的只有 `Human-Confirmed` 五项，验收状态横幅按
+  公式保持 🧍 待人工验收。
+- 远端门禁状态与本地证据分开陈述：本地复跑不等于 GitHub CI 已跑。第八轮把分支合并进
+  main 的最新头（`29a5ea32`）后，须在合并树上重跑本文件列出的全部命令，推送后再以
+  check-runs 的实际结果声明远端状态；在那之前不得写"远端已验证"。

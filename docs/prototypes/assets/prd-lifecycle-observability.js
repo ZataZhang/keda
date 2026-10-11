@@ -17,6 +17,78 @@
     reviewing: '审阅中', merging: '合并中', blocked: '阻塞中', failed: '失败', completed: '已完成',
   };
 
+  // Agent 生命周期的六个产品阶段；每一项对应调用账本的显式 phase，不从 attempt 猜测。
+  const LIFECYCLE_STAGE_FIXTURE = [
+    {
+      key: 'implementation', label: '实现', status: 'done', statusLabel: '已完成',
+      duration: '9h 37m', agent: 'codex',
+      calls: [
+        { time: '00:53:57', attempt: '#1', agent: 'codex', result: '失败', resultClass: 'failed', duration: '24m 17s', model: '未提供', reason: 'no_commits', retry: '首次调用；未产生提交' },
+        { time: '09:38:18', attempt: '#2', agent: 'codex', result: '成功', resultClass: 'passed', duration: '9h 13m', model: '未提供', reason: 'success', retry: '恢复自 #1 · recovered=true' },
+      ],
+    },
+    {
+      key: 'fix', label: '修复', status: 'skipped', statusLabel: '未触发',
+      duration: '—', agent: '—', calls: [], note: '本次恢复发生在实现阶段，没有单独启动修复 Agent。',
+    },
+    {
+      key: 'closeout', label: '收尾', status: 'done', statusLabel: '已完成',
+      duration: '12m 08s', agent: 'codex',
+      calls: [
+        { time: '09:38:18', attempt: '收尾', agent: 'codex', result: '成功', resultClass: 'passed', duration: '12m 08s', model: '未提供', reason: 'evidence_saved', retry: '证据归档与交付整理' },
+      ],
+    },
+    {
+      key: 'verifier', label: '校验', status: 'done', statusLabel: '通过',
+      duration: '31m 24s', agent: 'verifier',
+      calls: [
+        { time: '10:01:21', attempt: '#1', agent: 'verifier', result: '失败', resultClass: 'failed', duration: '18m 02s', model: '未提供', reason: 'evidence_incomplete', retry: '证据缺项，返回执行器补齐' },
+        { time: '10:31:18', attempt: '#2', agent: 'verifier', result: '通过', resultClass: 'passed', duration: '13m 22s', model: '未提供', reason: 'passed', retry: '复核补齐后的最终证据' },
+      ],
+    },
+    {
+      key: 'review', label: '审核', status: 'done', statusLabel: '通过',
+      duration: '14m 06s', agent: 'reviewer',
+      calls: [
+        { time: '10:45:24', attempt: '#1', agent: 'reviewer', result: '通过', resultClass: 'passed', duration: '14m 06s', model: '未提供', reason: 'review_passed', retry: '独立审核完成' },
+      ],
+    },
+    {
+      key: 'supervisor', label: '监督', status: 'running', statusLabel: '进行中',
+      duration: '5m 12s', agent: 'supervisor',
+      calls: [
+        { time: '10:59:30', attempt: '#1', agent: 'supervisor', result: '进行中', resultClass: 'running', duration: '5m 12s', model: '未提供', reason: 'cycle_running', retry: '尚无结束事件；耗时不伪造' },
+      ],
+    },
+  ];
+
+  const FAILURE_STAGE_OVERRIDES = {
+    fix: {
+      status: 'failed', statusLabel: '修复未完成', duration: '21m', agent: 'codex',
+      note: '',
+      calls: [
+        { time: '15:11:04', attempt: '#1', agent: 'codex', result: '失败', resultClass: 'failed', duration: '21m', model: '未提供', reason: 'verification_still_failing', retry: '人工重试后仍未通过' },
+      ],
+    },
+    verifier: {
+      status: 'failed', statusLabel: '连续失败', duration: '29m', agent: 'verifier',
+      calls: [
+        { time: '14:42:00', attempt: '#1', agent: 'verifier', result: '失败', resultClass: 'failed', duration: '9m', model: '未提供', reason: 'e2e_failed', retry: '真实入口断言失败' },
+        { time: '14:51:00', attempt: '#2', agent: 'verifier', result: '失败', resultClass: 'failed', duration: '10m', model: '未提供', reason: 'e2e_failed', retry: '重试后仍失败' },
+        { time: '15:01:00', attempt: '#3', agent: 'verifier', result: '失败', resultClass: 'failed', duration: '10m', model: '未提供', reason: 'evidence_incomplete', retry: '达到重试上限' },
+      ],
+    },
+    review: { status: 'skipped', statusLabel: '未触发', duration: '—', agent: '—', calls: [], note: '校验未通过，尚未进入审核阶段。' },
+    supervisor: { status: 'skipped', statusLabel: '未触发', duration: '—', agent: '—', calls: [], note: '尚未创建可供监督阶段处理的 PR。' },
+  };
+
+  const UNAVAILABLE_STAGE_OVERRIDES = Object.fromEntries(
+    LIFECYCLE_STAGE_FIXTURE.map((stage) => [stage.key, {
+      status: 'unavailable', statusLabel: '明细不可用', duration: '—', agent: '—', calls: [],
+      note: '调用账本读取失败，无法判断此阶段是否触发；空列表不代表未触发。',
+    }]),
+  );
+
   // 用于演示的仓库级统计聚合结果（GET /console/stats/prd-lifecycle）。
   const STATS_FIXTURE = {
     repo_id: 'keda-main',
@@ -39,7 +111,7 @@
     ],
   };
 
-  // 三套稳定场景：正常成功路径、失败重试路径、观测写入降级路径。
+  // 四套稳定场景覆盖正常成功、失败重试、事件观测降级与调用账本不可用路径。
   const SCENARIOS = {
     normal: {
       statusLabel: '进行中', statusClass: 'running', phase: 'reviewing',
@@ -82,6 +154,10 @@
       ],
     },
   };
+  SCENARIOS.invocationUnavailable = {
+    ...SCENARIOS.normal,
+    invocationWarning: '调用明细不可用：调用账本读取失败。执行事件仍可查看，但无法确认六个阶段的状态与调用记录。',
+  };
 
   const EVENT_MARKERS = { failure: '!', wait: '◷', success: '✓', info: '•' };
   const uiState = { view: 'roadmap', scenario: 'normal' };
@@ -97,6 +173,8 @@
     runsBody: document.querySelector('#runs-body'),
     runsSearch: document.querySelector('#runs-search'),
     unlinkedNote: document.querySelector('#unlinked-note'),
+    lifecycleStages: document.querySelector('#lifecycle-stages'),
+    invocationWarning: document.querySelector('#invocation-warning'),
   };
 
   const scenarioOf = () => SCENARIOS[uiState.scenario];
@@ -152,6 +230,74 @@
         <time>${entry.time}</time><span class="event-marker">${EVENT_MARKERS[entry.type] || '•'}</span>
         <span class="timeline-copy"><strong>${entry.title}</strong><small>${entry.detail}</small></span><span class="event-duration">${entry.duration}</span>
       </li>`).join('');
+  }
+
+  function stageOverrides() {
+    if (uiState.scenario === 'failure') return FAILURE_STAGE_OVERRIDES;
+    if (uiState.scenario === 'invocationUnavailable') return UNAVAILABLE_STAGE_OVERRIDES;
+    return {};
+  }
+
+  function renderLifecycleStages() {
+    const overrides = stageOverrides();
+    elements.invocationWarning.hidden = !scenarioOf().invocationWarning;
+    elements.invocationWarning.textContent = scenarioOf().invocationWarning ?? '';
+    const stages = LIFECYCLE_STAGE_FIXTURE.map((stage) => ({
+      ...stage,
+      ...(overrides[stage.key] ?? {}),
+    }));
+    elements.lifecycleStages.innerHTML = stages.map((stage, stageIndex) => {
+      const callCount = stage.calls.length;
+      const hasCalls = callCount > 0;
+      const callRows = stage.calls.map((call, invocationIndex) => `
+        <li class="stage-call">
+          <time>${call.time}</time><span class="stage-call-attempt">${call.attempt}</span>
+          <span class="stage-call-copy"><strong>${call.agent}<span class="call-result is-${call.resultClass}">${call.result}</span></strong><small>${call.reason} · ${call.retry}</small></span>
+          <span class="stage-call-duration">${call.duration}</span>
+          <span class="stage-call-model">模型 ${call.model}</span>
+          <button type="button" class="stage-call-detail hotspot-target" data-stage-invocation="${stageIndex}:${invocationIndex}" aria-label="查看${stage.label}阶段调用详情">详情</button>
+        </li>`).join('');
+      const summary = hasCalls
+        ? `${callCount} 次调用 · ${stage.duration} · ${stage.agent}`
+        : stage.note;
+      return `
+        <li class="stage-item">
+          <details class="stage-card is-${stage.status}">
+            <summary class="stage-summary hotspot-target">
+              <span class="stage-index">${String(stageIndex + 1).padStart(2, '0')}</span>
+              <span class="stage-title"><strong>${stage.label}</strong><code>${stage.key}</code></span>
+              <span class="stage-state">${stage.statusLabel}</span>
+              <span class="stage-summary-meta">${summary}</span>
+            </summary>
+            <div class="stage-body">
+              ${hasCalls ? `<ol class="stage-call-list">${callRows}</ol>` : `<p class="stage-empty">${stage.note}</p>`}
+            </div>
+          </details>
+        </li>`;
+    }).join('');
+  }
+
+  function openStageInvocation(encodedIndex) {
+    const [stageIndex, invocationIndex] = encodedIndex.split(':').map(Number);
+    const overrides = stageOverrides();
+    const stage = LIFECYCLE_STAGE_FIXTURE.map((stageRow) => ({
+      ...stageRow,
+      ...(overrides[stageRow.key] ?? {}),
+    }))[stageIndex];
+    const call = stage?.calls[invocationIndex];
+    if (!stage || !call) return;
+    document.querySelector('#inspector-title').textContent = `${stage.label} · ${call.attempt}`;
+    document.querySelector('#inspector-detail').textContent = `${call.agent} 执行，结果：${call.result}。${call.retry}`;
+    document.querySelector('#inspector-meta').innerHTML = `
+      <div><dt>生命周期阶段</dt><dd>${stage.label}（<code>${stage.key}</code>）</dd></div>
+      <div><dt>发生时间</dt><dd>2026-10-10 ${call.time} +08:00</dd></div>
+      <div><dt>执行器</dt><dd>${call.agent}</dd></div>
+      <div><dt>结果</dt><dd>${call.result} · ${call.reason}</dd></div>
+      <div><dt>耗时</dt><dd>${call.duration}</dd></div>
+      <div><dt>模型</dt><dd>${call.model}</dd></div>
+      <div><dt>重试关系</dt><dd>${call.retry}</dd></div>
+      <div><dt>关联 run</dt><dd><code>${RUN_ID}</code></dd></div>`;
+    elements.inspector.hidden = false;
   }
 
   function renderStats() {
@@ -213,6 +359,7 @@
   function renderAll() {
     renderHeader();
     renderMetrics();
+    renderLifecycleStages();
     renderTimeline();
     if (uiState.view === 'stats') renderStats();
   }
@@ -233,6 +380,8 @@
     }
     const eventRow = event.target.closest('[data-event-index]');
     if (eventRow) openInspector(Number(eventRow.dataset.eventIndex));
+    const invocationDetailButton = event.target.closest('[data-stage-invocation]');
+    if (invocationDetailButton) openStageInvocation(invocationDetailButton.dataset.stageInvocation);
     if (event.target.closest('[data-close-inspector]')) elements.inspector.hidden = true;
   });
 

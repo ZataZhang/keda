@@ -25,7 +25,7 @@ from backend.core.use_cases.run_agent_once import (
     format_attempt_history,
     format_failure_comment,
     format_minimal_failure_comment,
-    resolve_agent_fallback_order,
+    resolve_agent_fallback_candidate_specs,
     resolve_repair_agent,
 )
 from backend.core.use_cases.agent_runner_failure import (
@@ -663,35 +663,44 @@ def test_classify_failure_ignores_provider_errors_by_default() -> None:
     assert failure_type == FailureType.AGENT_ERROR
 
 
-def test_resolve_agent_fallback_order_default_includes_primary_then_chain() -> None:
+def _fallback_agent_names(issue, config, override_agent: str) -> list[str]:
+    """按**生产入口**取候选链并折叠成 agent 名序列。
+
+    阶梯消费的是 :func:`resolve_agent_fallback_candidate_specs` 的 ``(agent, preset)``
+    spec；这里只做名字投影，保证测试钉的是真正被调用的那条链，而不是某个平行实现。
+    """
+    names: list[str] = []
+    for candidate_spec in resolve_agent_fallback_candidate_specs(issue, config, override_agent):
+        if candidate_spec.agent not in names:
+            names.append(candidate_spec.agent)
+    return names
+
+
+def test_fallback_ladder_default_includes_primary_then_chain() -> None:
     """With the default fallback chain, primary agent comes first, then defaults."""
     issue = make_ready_issue()
-    order = resolve_agent_fallback_order(issue, AppConfig(), "auto")
-    assert order == ["codex", "claude", "kimi"]
+    assert _fallback_agent_names(issue, AppConfig(), "auto") == ["codex", "claude", "kimi"]
 
 
-def test_resolve_agent_fallback_order_dedupes_and_preserves_order() -> None:
+def test_fallback_ladder_dedupes_and_preserves_order() -> None:
     """The primary agent is de-duplicated and configured order is preserved."""
     issue = make_ready_issue()
     config = AppConfig(runner=RunnerConfig(agent_fallback_order=("codex", "claude", "kimi")))
-    order = resolve_agent_fallback_order(issue, config, "auto")
-    assert order == ["codex", "claude", "kimi"]
+    assert _fallback_agent_names(issue, config, "auto") == ["codex", "claude", "kimi"]
 
 
-def test_resolve_agent_fallback_order_honors_override_primary() -> None:
+def test_fallback_ladder_honors_override_primary() -> None:
     """An explicit --agent override becomes the primary agent."""
     issue = make_ready_issue()
     config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
-    order = resolve_agent_fallback_order(issue, config, "claude")
-    assert order == ["claude", "codex"]
+    assert _fallback_agent_names(issue, config, "claude") == ["claude", "codex"]
 
 
-def test_resolve_agent_fallback_order_empty_disables_fallback() -> None:
+def test_fallback_ladder_empty_disables_fallback() -> None:
     """Setting the fallback chain to empty disables cross-agent switching."""
     issue = make_ready_issue()
     config = AppConfig(runner=RunnerConfig(agent_fallback_order=()))
-    order = resolve_agent_fallback_order(issue, config, "auto")
-    assert order == ["codex"]
+    assert _fallback_agent_names(issue, config, "auto") == ["codex"]
 
 
 def test_format_attempt_duration_shows_phase_breakdown() -> None:

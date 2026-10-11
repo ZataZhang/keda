@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -9,7 +10,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.api.routes.agent_runner_console as console_routes
+import backend.api.routes.agent_runner_console_runs as console_run_routes
 from backend.api.app import app
+from backend.core.shared.interfaces.runner_console import (
+    AttemptRecord,
+    InvocationEventRecord,
+)
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     RepositoryRunContext,
@@ -60,6 +66,7 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fake_runner_command = [sys.executable, "-u", "-c", "print('fake runner')"]
 
     monkeypatch.setattr(console_routes, "create_console_store", lambda: store)
+    monkeypatch.setattr(console_run_routes, "create_console_store", lambda: store)
     monkeypatch.setattr(console_routes, "create_process_supervisor", lambda: supervisor)
     monkeypatch.setattr(
         console_routes,
@@ -106,6 +113,143 @@ def test_process_lifecycle_via_api(console_environment) -> None:
     stop_response = client.post(f"/api/v1/agent-runner/console/processes/{process_id}/stop")
     assert stop_response.status_code == 200
     assert stop_response.json()["status"] in ("stopped", "exited", "killed")
+
+
+def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> None:
+    """按运行时间窗口读取同一 Issue 的尝试详情，不混入其他运行。"""
+    store = console_environment["store"]
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda-main",
+            issue_number=263,
+            agent="qoder",
+            attempt_number=1,
+            failure_type="agent_error",
+            recovered=False,
+            detail=(
+                "Agent command failed before runner verification could start.\n"
+                "Exception type: BrokenPipeError\n"
+                "[Errno 32] Broken pipe"
+            ),
+            started_at="2026-10-10T04:51:59+00:00",
+            finished_at="2026-10-10T04:52:09+00:00",
+            duration_seconds=10,
+            preset="fast-qoder",
+            model="claude-sonnet-4-5",
+            phase_durations=(("agent", 9.2), ("verification", 0.5)),
+        )
+    )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="keda-main#issue-263#20261010T045124Z-test",
+            event_key="inv-run-details:invocation_started",
+            event_type="invocation_started",
+            invocation_id="inv-run-details",
+            repo_id="keda-main",
+            issue_number=263,
+            phase="implementation",
+            role="implementer",
+            agent="qoder",
+            occurred_at="2026-10-10T04:52:00+00:00",
+            detail_json=json.dumps(
+                {"requested_model": "claude-sonnet-4-5"},
+                ensure_ascii=False,
+            ),
+        )
+    )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="keda-main#issue-263#20261010T045124Z-test",
+            event_key="inv-run-details:invocation_finished",
+            event_type="invocation_finished",
+            invocation_id="inv-run-details",
+            repo_id="keda-main",
+            issue_number=263,
+            phase="implementation",
+            role="implementer",
+            agent="qoder",
+            occurred_at="2026-10-10T04:52:09+00:00",
+            detail_json=json.dumps(
+                {
+                    "requested_model": "claude-sonnet-4-5",
+                    "reported_model": None,
+                    "model_source": "unknown",
+                    "duration_seconds": 9.0,
+                    "outcome": "error",
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda-main",
+            issue_number=263,
+            agent="qoder",
+            attempt_number=2,
+            failure_type="success",
+            recovered=True,
+            detail="recovered in a later run",
+            started_at="2026-10-10T05:12:00+00:00",
+            finished_at="2026-10-10T05:12:05+00:00",
+            duration_seconds=5,
+        )
+    )
+
+    response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 263,
+            "started_at": "2026-10-10T04:51:24+00:00",
+            "finished_at": "2026-10-10T05:11:52+00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    attempts = response.json()["attempts"]
+    assert len(attempts) == 1
+    assert attempts[0]["agent"] == "qoder"
+    assert "BrokenPipeError" in attempts[0]["detail"]
+    assert attempts[0]["failure_phase"] == "agent"
+    assert attempts[0]["preset"] == "fast-qoder"
+    assert attempts[0]["model"] == "claude-sonnet-4-5"
+    assert attempts[0]["phase_durations"] == [
+        {"name": "agent", "seconds": 9.2},
+        {"name": "verification", "seconds": 0.5},
+    ]
+    invocations = response.json()["invocations"]
+    assert len(invocations) == 1
+    assert invocations[0]["phase"] == "implementation"
+    assert invocations[0]["executor"] == "qoder"
+    assert invocations[0]["requested_model"] == "claude-sonnet-4-5"
+    assert invocations[0]["reported_model"] is None
+    assert invocations[0]["duration_seconds"] == 9.0
+
+
+def test_run_attempt_details_reject_invalid_time_window(console_environment) -> None:
+    """拒绝无时区或倒置的运行时间窗口。"""
+    missing_timezone_response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 263,
+            "started_at": "2026-10-10T04:51:24",
+            "finished_at": "2026-10-10T05:11:52+00:00",
+        },
+    )
+    assert missing_timezone_response.status_code == 422
+
+    reversed_window_response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 263,
+            "started_at": "2026-10-10T05:11:52+00:00",
+            "finished_at": "2026-10-10T04:51:24+00:00",
+        },
+    )
+    assert reversed_window_response.status_code == 422
 
 
 def test_duplicate_daemon_rejected_via_api(console_environment) -> None:
@@ -386,6 +530,166 @@ def test_stats_history_empty(console_environment) -> None:
     response = client.get("/api/v1/agent-runner/console/stats/history?days=7")
     assert response.status_code == 200
     assert response.json()["trend"] == []
+
+
+def test_agent_performance_stats_reads_fresh_sqlite_rows_through_api(console_environment) -> None:
+    """真实路由按仓库和时间窗口汇总持久化 attempt 与 run。"""
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+
+    database_path = console_environment["tmp_path"] / "console.db"
+    current_time = datetime.now(timezone.utc).replace(microsecond=0)
+    recent_timestamp = (current_time - timedelta(days=2)).isoformat()
+    older_timestamp = (current_time - timedelta(days=40)).isoformat()
+    run_samples = (
+        ("keda-main", "completed", 40, recent_timestamp),
+        ("keda-main", "completed", 60, recent_timestamp),
+        ("keda-main", "failed", 20, recent_timestamp),
+        ("keda-main", "blocked", 30, recent_timestamp),
+        ("keda-main", "completed", 900, older_timestamp),
+        ("other-repo", "completed", 50, recent_timestamp),
+    )
+    attempt_samples = (
+        ("keda-main", "codex", "success", 10, "removed-preset", "model-a", recent_timestamp),
+        (
+            "keda-main",
+            "codex",
+            "verification_failed",
+            30,
+            "removed-preset",
+            "model-a",
+            recent_timestamp,
+        ),
+        ("keda-main", "codex", "success", 50, "removed-preset", "model-b", recent_timestamp),
+        ("keda-main", "", "future_failure_type", 20, None, None, recent_timestamp),
+        ("keda-main", "claude", "success", 25, "claude-preset", "model-c", recent_timestamp),
+        ("other-repo", "codex", "success", 100, "removed-preset", "model-a", recent_timestamp),
+        ("other-repo", "claude", "success", 15, None, None, recent_timestamp),
+        ("keda-main", "codex", "success", 5000, "removed-preset", "model-a", older_timestamp),
+    )
+    with sqlite3.connect(database_path) as connection:
+        connection.executemany(
+            "INSERT INTO run_records "
+            "(repo_id, repo_path, issue_number, trigger, agent, outcome, error_summary, "
+            "started_at, finished_at, duration_seconds) "
+            "VALUES (?, '/tmp/repo', 1, 'test', 'codex', ?, NULL, ?, ?, ?)",
+            [
+                (repo_id, outcome, started_at, started_at, duration_seconds)
+                for repo_id, outcome, duration_seconds, started_at in run_samples
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO attempt_records "
+            "(repo_id, issue_number, agent, attempt_number, failure_type, recovered, detail, "
+            "started_at, finished_at, duration_seconds, preset, model) "
+            "VALUES (?, 1, ?, 1, ?, 0, 'fixture detail', ?, ?, ?, ?, ?)",
+            [
+                (
+                    repo_id,
+                    agent,
+                    failure_type,
+                    started_at,
+                    started_at,
+                    duration_seconds,
+                    preset,
+                    model,
+                )
+                for repo_id, agent, failure_type, duration_seconds, preset, model, started_at in attempt_samples
+            ],
+        )
+        connection.commit()
+
+    # 由独立 SQLite connection fresh-read 原始样本，核对窗口内关键值。
+    with sqlite3.connect(database_path) as connection:
+        persisted_attempts = connection.execute(
+            "SELECT repo_id, agent, failure_type, duration_seconds, preset, model "
+            "FROM attempt_records WHERE repo_id = 'keda-main' AND date(started_at) >= date(?) "
+            "ORDER BY id",
+            ((current_time.date() - timedelta(days=30)).isoformat(),),
+        ).fetchall()
+        persisted_runs = connection.execute(
+            "SELECT outcome, duration_seconds FROM run_records "
+            "WHERE repo_id = 'keda-main' AND date(started_at) >= date(?) ORDER BY id",
+            ((current_time.date() - timedelta(days=30)).isoformat(),),
+        ).fetchall()
+
+    assert len(persisted_attempts) == 5
+    assert sorted(row[3] for row in persisted_attempts if row[1] == "codex") == [10, 30, 50]
+    assert {row[4:6] for row in persisted_attempts if row[4]} == {
+        ("removed-preset", "model-a"),
+        ("removed-preset", "model-b"),
+        ("claude-preset", "model-c"),
+    }
+    assert len(persisted_runs) == 4
+
+    response = client.get(
+        "/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda-main&days=30"
+    )
+    assert response.status_code == 200, response.text
+    stats = response.json()
+    assert stats["repo_id"] == "keda-main"
+    assert stats["window_days"] == 30
+    codex_group = next(group for group in stats["agents"] if group["agent"] == "codex")
+    assert codex_group["attempt_count"] == len(
+        [row for row in persisted_attempts if row[1] == "codex"]
+    )
+    assert codex_group["success_count"] == 2
+    assert codex_group["non_success_count"] == 1
+    assert codex_group["success_rate"] == 2 / 3
+    assert codex_group["non_success_rate"] == 1 / 3
+    assert codex_group["p50_duration_seconds"] == 30
+    assert codex_group["p90_duration_seconds"] == 46
+    assert codex_group["failure_types"] == [{"failure_type": "verification_failed", "count": 1}]
+    claude_group = next(group for group in stats["agents"] if group["agent"] == "claude")
+    assert claude_group["attempt_count"] == 1
+    assert claude_group["success_count"] == 1
+    assert stats["unbound_preset_attempts"] == [{"repo_id": "keda-main", "attempt_count": 1}]
+    assert len(stats["presets"]) == 3
+    assert {group["model"] for group in stats["presets"]} == {"model-a", "model-b", "model-c"}
+    assert all(group["repo_id"] == "keda-main" for group in stats["presets"])
+    assert {group["outcome"] for group in stats["runs"]} == {"completed", "failed", "blocked"}
+    assert sum(group["run_count"] for group in stats["runs"]) == len(persisted_runs)
+    assert {
+        group["outcome"]: (
+            group["run_count"],
+            group["p50_duration_seconds"],
+            group["p90_duration_seconds"],
+        )
+        for group in stats["runs"]
+    } == {
+        "completed": (2, 50, 58),
+        "failed": (1, 20, 20),
+        "blocked": (1, 30, 30),
+    }
+
+    all_repositories = client.get("/api/v1/agent-runner/console/stats/agent-performance?days=30")
+    assert all_repositories.status_code == 200, all_repositories.text
+    all_stats = all_repositories.json()
+    assert all_stats["repo_id"] is None
+    same_named_presets = [
+        group for group in all_stats["presets"] if group["preset"] == "removed-preset"
+    ]
+    assert {group["repo_id"] for group in same_named_presets} == {"keda-main", "other-repo"}
+    assert all_stats["unbound_preset_attempts"] == [
+        {"repo_id": "keda-main", "attempt_count": 1},
+        {"repo_id": "other-repo", "attempt_count": 1},
+    ]
+    assert {group["repo_id"] for group in all_stats["runs"]} == {"keda-main", "other-repo"}
+    assert all("agent" not in group for group in all_stats["runs"])
+
+    short_window = client.get(
+        "/api/v1/agent-runner/console/stats/agent-performance?repo_id=keda-main&days=1"
+    )
+    assert short_window.status_code == 200, short_window.text
+    assert short_window.json()["agents"] == []
+    assert short_window.json()["runs"] == []
+
+
+def test_agent_performance_stats_clamps_days_like_other_stats_routes(console_environment) -> None:
+    """API 将超界天数按其他 Stats 用例截断到 1–365 天。"""
+    response = client.get("/api/v1/agent-runner/console/stats/agent-performance?days=0")
+    assert response.status_code == 200, response.text
+    assert response.json()["window_days"] == 1
 
 
 def test_audit_endpoint_lists_actions(console_environment) -> None:

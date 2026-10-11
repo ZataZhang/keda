@@ -19,7 +19,14 @@ from backend.api.cli_parsed_commands.agent import (
     run_agent_lifecycle_unset_command,
 )
 from backend.api.cli_parsed_context import ParsedCommandContext
+from backend.api.cli_schema import build_command_schema
 from backend.api.cli_parser import build_parser
+from backend.api.cli_parsed_commands.runner import _validate_aggregate_run_options
+from backend.api.cli_typer_app import app as typer_app
+from backend.core.use_cases.agent_runner_batch_aggregate import (
+    validate_aggregate_candidate_count,
+    validate_aggregate_issue_numbers,
+)
 from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
     RunnerProcessRecord,
@@ -57,6 +64,58 @@ def test_cli_parser_labels_sync() -> None:
     parsed = parser.parse_args(["labels", "sync"])
     assert parsed.command == "labels"
     assert parsed.labels_command == "sync"
+
+
+def test_cli_parser_aggregate_pr_is_opt_in_and_requires_all_ready() -> None:
+    """argparse parser 注册默认关闭的聚合开关与手动入口。"""
+    parser = build_parser()
+    default_run = parser.parse_args(["run", "--all-ready"])
+    aggregate_run = parser.parse_args(["run", "--all-ready", "--aggregate-pr", "--max-issues", "2"])
+    manual_aggregate = parser.parse_args(["pr", "aggregate", "--issue", "101", "--issue", "102"])
+    assert default_run.aggregate_pr is False
+    assert aggregate_run.aggregate_pr is True
+    assert aggregate_run.all_ready is True
+    assert manual_aggregate.command == "pr aggregate"
+    assert manual_aggregate.issues == [101, 102]
+
+
+def test_typer_schema_exposes_aggregate_commands() -> None:
+    """机器 schema 从 Typer 命令树导出两种入口及其默认 / 多选语义。"""
+    schema = build_command_schema(typer_app)
+    command_by_name = {command["name"]: command for command in schema["commands"]}
+    run_options = {option["name"]: option for option in command_by_name["run"]["options"]}
+    aggregate_options = {
+        option["name"]: option for option in command_by_name["pr aggregate"]["options"]
+    }
+    assert run_options["--aggregate-pr"]["default"] is False
+    assert aggregate_options["--issue"]["multiple"] is True
+    assert aggregate_options["--issue"]["required"] is True
+
+
+def test_aggregate_cli_local_validation_rejects_invalid_combinations() -> None:
+    """無倉庫或外部 client 的本地驗證拒絕 bypass 與單 Issue 配額。"""
+    parser = build_parser()
+    valid = parser.parse_args(["run", "--all-ready", "--aggregate-pr", "--max-issues", "2"])
+    _validate_aggregate_run_options(valid, configured_max_issues=1)
+    for arguments in (
+        ["run", "--aggregate-pr", "--max-issues", "2"],
+        ["run", "--all-ready", "--aggregate-pr", "--fast-merge", "--max-issues", "2"],
+        ["run", "--all-ready", "--aggregate-pr", "--direct-pr", "--max-issues", "2"],
+        ["run", "--all-ready", "--aggregate-pr", "--max-issues", "1"],
+    ):
+        parsed = parser.parse_args(arguments)
+        with pytest.raises(CliError):
+            _validate_aggregate_run_options(parsed, configured_max_issues=1)
+
+
+def test_aggregate_issue_and_candidate_count_validation_is_local() -> None:
+    """手动集合与自动实际候选数的纯本地校验都拒绝单成员批次。"""
+    assert validate_aggregate_issue_numbers([101, 102]) == (101, 102)
+    with pytest.raises(ValueError, match="at least 2"):
+        validate_aggregate_issue_numbers([101])
+    assert validate_aggregate_candidate_count(2) == 2
+    with pytest.raises(ValueError, match="at least 2"):
+        validate_aggregate_candidate_count(1)
 
 
 def test_cli_parser_init() -> None:
@@ -412,7 +471,7 @@ def test_cli_parser_review_daemon_default_interval_is_none() -> None:
 
 
 def test_main_daemon_default_interval_uses_config(monkeypatch) -> None:
-    """Typer daemon without --interval should use the configured 120s default."""
+    """不传 --interval 时 daemon 使用配置的 120 秒默认值。"""
     from backend.api.cli import main
 
     monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
@@ -430,6 +489,8 @@ def test_main_daemon_default_interval_uses_config(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all"])
 
@@ -464,7 +525,7 @@ def test_main_review_daemon_default_interval_uses_config(monkeypatch) -> None:
 
 
 def test_main_daemon_interval_override(monkeypatch) -> None:
-    """Typer daemon --interval should override the config default."""
+    """daemon 的 --interval 覆盖配置默认值。"""
     from backend.api.cli import main
 
     monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
@@ -482,6 +543,8 @@ def test_main_daemon_interval_override(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all", "--interval", "300"])
 
@@ -1204,7 +1267,7 @@ def test_main_daemon_cwd_uninitialized_repo_rejected(monkeypatch) -> None:
 
 
 def test_main_daemon_explicit_all_targets_all_repositories(monkeypatch) -> None:
-    """daemon --all should still target all enabled registry entries."""
+    """daemon --all 仍选择所有已启用的仓库条目。"""
     from backend.api.cli import main
 
     monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
@@ -1227,6 +1290,8 @@ def test_main_daemon_explicit_all_targets_all_repositories(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon"),
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
         patch(
             "backend.api.cli_helpers.detect_git_repository_root",
             return_value=Path("/tmp/repo"),
@@ -3072,7 +3137,7 @@ def test_main_registry_reinit_start_daemons_uses_config_directory_cwd(
     assert exit_code == 0, captured.err
     assert "Reinitialized" in _strip_ansi(captured.out)
     assert "Started daemon" in _strip_ansi(captured.out)
-    assert "Started review_daemon" in _strip_ansi(captured.out)
+    assert "Started supervise-daemon" in _strip_ansi(captured.out)
 
     # The local config initializer was invoked as part of reinit.
     mock_init.assert_called_once()
@@ -4112,7 +4177,7 @@ def test_main_run_passes_transcript_runner_factory(monkeypatch) -> None:
 
 
 def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
-    """``iar daemon`` should also inject a transcript runner factory."""
+    """daemon 入口也会注入 transcript runner factory。"""
     from backend.api.cli import main
 
     monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
@@ -4130,6 +4195,8 @@ def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
         patch("backend.api.cli.run_agent_daemon") as mock_daemon,
         patch("backend.api.cli.create_github_client"),
         patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
     ):
         exit_code = main(["daemon", "--all"])
 
@@ -4713,3 +4780,47 @@ def test_agent_lifecycle_unset_on_broken_config_fails_readable(
     assert exc_info.value.code == ExitCode.GENERAL
     assert "不是合法的 TOML" in str(exc_info.value)
     assert config_path.read_text(encoding="utf-8") == corrupt_text
+
+
+def test_agent_fallback_candidate_add_reads_baseline_under_write_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """候选链整段替换：读基线 → 校验 → 落盘必须同持一把写锁，否则丢并发更新。
+
+    锁只保护 ``os.replace`` 那一下，保护不了一份过期的数组快照：基线在锁外读时，另一个
+    写入者在那个窗口里 append 的候选会被本次替换原样抹掉，而命令仍返回成功。探针在基线
+    读取时抢一次 ``LOCK_EX | LOCK_NB``——抢不到才说明整段操作被同一把锁覆盖。
+    """
+    import fcntl
+
+    from backend.api.cli_parsed_commands import agent as agent_commands
+
+    config_path = _global_config_env(tmp_path, monkeypatch, "[agent_runner]\n")
+    lock_path = config_path.with_name(config_path.name + ".lock")
+    lock_held_at_baseline: list[bool] = []
+    original_reader = agent_commands._current_candidate_entries
+
+    def _probe(config):
+        with open(lock_path, "a", encoding="utf-8") as probe_handle:
+            try:
+                fcntl.flock(probe_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                lock_held_at_baseline.append(True)
+            else:
+                fcntl.flock(probe_handle.fileno(), fcntl.LOCK_UN)
+                lock_held_at_baseline.append(False)
+        return original_reader(config)
+
+    monkeypatch.setattr("backend.api.cli_parsed_commands.agent._current_candidate_entries", _probe)
+
+    assert (
+        run_agent_fallback_candidate_add_command(
+            _lifecycle_ctx(scope="global", agent="qoder", preset=None, position=None)
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert lock_held_at_baseline == [True]

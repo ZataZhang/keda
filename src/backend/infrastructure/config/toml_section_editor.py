@@ -3,16 +3,20 @@
 用 ``tomlkit`` 做 round-trip 编辑：保留文件中的全部注释、空行与格式，只触碰
 调用方点名的键。三条落盘规则是这个模块的全部承诺：
 
-1. **原子且不改权限**：写经「同目录唯一临时文件 + ``os.replace``」完成。固定临时名
+1. **原子且不改归属**：写经「同目录唯一临时文件 + ``os.replace``」完成。固定临时名
    在并发写入时会互相截断（后写者在前者 replace 之前截断同一文件，原子替换反而可能
    把写了一半的内容换成正式配置），故取名必须唯一；``tempfile.mkstemp`` 建的是 0600
-   文件，直接替换会把目标配置从 0644 降级成只有属主可读，因此 replace 前必须把目标
-   原有权限位写回临时文件。
+   文件且属于当前进程，直接替换会把目标配置从 0644 降级成只有属主可读、并把属主悄悄
+   换成写入者，因此 replace 前必须把目标原有的权限位与 uid/gid 写回临时文件。
 2. **同文件串行**：一次读-改-写整体持有一把跨进程文件锁（``<name>.lock``）。``os.replace``
    只保证单次写入不撕裂，不保证两个写入者不互相丢键——机器级 ``config.toml`` 同时被
    Console 保存、registry 写入与 CLI 调用改动，仓库级 ``.kedacode.toml`` 同理。锁按目标
    路径派生，故本模块与 :class:`backend.infrastructure.config.registry_editor.TomlRegistryEditor`
-   等不同写入器之间同样互斥。
+   等不同写入器之间同样互斥。这是**建议锁**：只经 :func:`config_write_lock` 直接改
+   ``config.toml`` 的写入者（模板 seed、状态目录搬迁、``kc init``）同样要取它，否则
+   能与持锁写者交错。抢锁是有界非阻塞重试（超时抛
+   :class:`~backend.core.shared.models.config_edit.ConfigLockBusyError`，不挂死），
+   同线程重入放行（否则嵌套调用会在自己的锁上自死锁）。
 3. **一批一次落盘**：一次用户操作涉及的多个段由 :func:`apply_toml_updates` 在**同一次**
    读-改-写里完成；任一段的点名校验不过（含"要删的键本层根本没声明"）就整批不落盘，
    调用方拿到一次明确失败而不是半写状态。
@@ -30,6 +34,8 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
+import threading
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -43,21 +49,71 @@ from tomlkit.items import AoT, Table
 from backend.core.shared.models.config_edit import (
     ConfigDocumentInvalidError,
     ConfigKeyMissingError,
+    ConfigLockBusyError,
 )
 
+#: 锁后端：POSIX ``fcntl.flock`` → Windows ``msvcrt.locking`` → 两者皆无时不加跨进程锁。
+_LOCK_BACKEND: str
 try:
-    from fcntl import LOCK_EX, LOCK_UN, flock as _posix_flock
-except ImportError:  # pragma: no cover - 非 POSIX 平台没有 advisory lock
-    LOCK_EX = LOCK_UN = 0
+    import fcntl
 
-    def _posix_flock(file_descriptor: int, operation: int) -> None:
-        """无 ``fcntl`` 的平台上不加锁：单次写入仍由 ``os.replace`` 保证不撕裂。"""
+    def _try_lock(file_descriptor: int) -> bool:
+        """非阻塞尝试独占锁，被别的进程持有则返回 ``False``。"""
+        try:
+            fcntl.flock(file_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return False
+        return True
+
+    def _unlock(file_descriptor: int) -> None:
+        """释放 :func:`_try_lock` 拿到的锁。"""
+        fcntl.flock(file_descriptor, fcntl.LOCK_UN)
+
+    _LOCK_BACKEND = "fcntl"
+except ImportError:  # pragma: no cover - 仅 Windows 走这一支
+    try:
+        import msvcrt
+
+        def _try_lock(file_descriptor: int) -> bool:
+            """非阻塞锁住首字节；已被占用则返回 ``False``。"""
+            try:
+                os.lseek(file_descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(file_descriptor, msvcrt.LK_NBLCK, 1)
+            except OSError:
+                return False
+            return True
+
+        def _unlock(file_descriptor: int) -> None:
+            """解锁首字节（须与加锁时同一偏移）。"""
+            os.lseek(file_descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(file_descriptor, msvcrt.LK_UNLCK, 1)
+
+        _LOCK_BACKEND = "msvcrt"
+    except ImportError:
+        # 两个后端都没有：跨进程串行化不成立，只剩 os.replace 保证单次写入不撕裂。
+        # 显式命名成 none，让依赖锁的守卫测试在本平台跳过而不是"静默通过"。
+
+        def _try_lock(file_descriptor: int) -> bool:
+            """无锁后端：视为立即拿到锁。"""
+            return True
+
+        def _unlock(file_descriptor: int) -> None:
+            """无锁后端：没有需要释放的东西。"""
+
+        _LOCK_BACKEND = "none"
 
 
 #: 目标文件不存在时新建配置所用的权限位（与 ``mkstemp`` 的 0600 无关）。
 _DEFAULT_NEW_CONFIG_MODE = 0o644
 #: 跨进程锁文件后缀：与目标配置同目录、同前缀，保证同一配置名的写入者排队。
 _LOCK_FILE_SUFFIX = ".lock"
+#: 锁文件权限：rendezvous 点不含数据，只该被属主读写（默认 0666&~umask 太宽）。
+_LOCK_FILE_MODE = 0o600
+#: 抢锁的最长等待：拿不到就失败退出，而不是无限阻塞把 CLI 挂死、
+#: 或在 FastAPI 的 threadpool 里长期占住一个 worker。
+_LOCK_WAIT_TIMEOUT_SECONDS = 10.0
+#: 抢锁重试间隔：写入本身是毫秒级，短间隔足够让并发写者在超时内轮到手。
+_LOCK_RETRY_INTERVAL_SECONDS = 0.05
 
 _PresenceRequirement = Literal["none", "table", "keys"]
 """删除操作对"目标层已存在"的要求：``none`` 允许静默 no-op；``table`` 要求叶子表
@@ -98,6 +154,60 @@ class ArrayTableUpdate:
 
 _TomlUpdate = TableKeyUpdate | ArrayTableUpdate
 
+#: 本线程已持有的锁路径：flock 记在 open file description 上，同进程再开一个 fd 去锁
+#: 同一个文件会等自己，所以重入必须在进入内核之前拦下来。
+_held_lock_paths = threading.local()
+
+
+def _thread_held_locks() -> set[str]:
+    """取本线程当前持有的配置锁集合（首次使用时建）。"""
+    held_paths: set[str] | None = getattr(_held_lock_paths, "paths", None)
+    if held_paths is None:
+        held_paths = set()
+        _held_lock_paths.paths = held_paths
+    return held_paths
+
+
+def _open_lock_file(lock_path: Path) -> int:
+    """打开（必要时以 :data:`_LOCK_FILE_MODE` 新建）锁文件，返回其 fd。
+
+    先 ``O_EXCL`` 再回落 ``O_CREAT``：只有"确实是本进程建出来的"那次才 fchmod，避免
+    把别人建好的锁文件权限改来改去；``O_EXCL`` 分支的 mode 会被 umask 削，所以补一次
+    显式 ``fchmod`` 保证是 0600。
+    """
+    try:
+        created_fd = os.open(
+            str(lock_path),
+            os.O_RDWR | os.O_CREAT | os.O_EXCL,
+            _LOCK_FILE_MODE,
+        )
+    except FileExistsError:
+        return os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
+    os.fchmod(created_fd, _LOCK_FILE_MODE)
+    return created_fd
+
+
+def _acquire_lock_or_fail(file_descriptor: int, resolved_path: Path) -> None:
+    """在有界等待内抢到锁，否则抛 :class:`ConfigLockBusyError`（不无限阻塞）。
+
+    Raises:
+        ConfigLockBusyError: 等待超过 :data:`_LOCK_WAIT_TIMEOUT_SECONDS` 仍被占用。
+    """
+    if _try_lock(file_descriptor):
+        return
+    deadline = time.monotonic() + _LOCK_WAIT_TIMEOUT_SECONDS
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ConfigLockBusyError(
+                f"{resolved_path} 的写锁被另一个写入者持有超过 "
+                f"{_LOCK_WAIT_TIMEOUT_SECONDS:g}s，本次写回未改动任何配置："
+                "请确认没有并发的 kc 写入或 Console 保存，然后重试。"
+            )
+        time.sleep(min(_LOCK_RETRY_INTERVAL_SECONDS, remaining))
+        if _try_lock(file_descriptor):
+            return
+
 
 @contextmanager
 def _config_file_lock(resolved_path: Path) -> Iterator[None]:
@@ -106,16 +216,50 @@ def _config_file_lock(resolved_path: Path) -> Iterator[None]:
     锁文件是零字节的 rendezvous 点，不写内容；``os.replace`` 换掉配置文件的 inode
     也不影响它，因此锁不会被一次成功写入"换手"。进程退出时内核自动释放，崩溃不留死锁。
 
+    两条防护让"有锁"不等于"会挂死"：抢锁走 :func:`_acquire_lock_or_fail` 的**有界**
+    非阻塞重试（超时报 :class:`~backend.core.shared.models.config_edit.ConfigLockBusyError`
+    而不是无限等），并且**同线程重入直接放行**——否则把 :func:`apply_toml_updates`
+    套进 :func:`mutate_toml_document` 的回调里，同一进程会在自己的锁上自死锁。
+
     Args:
         resolved_path: 目标配置文件路径（其父目录须已存在）。
     """
+    lock_key = os.path.realpath(str(resolved_path))
+    held_paths = _thread_held_locks()
+    if lock_key in held_paths:
+        yield
+        return
     lock_path = resolved_path.with_name(resolved_path.name + _LOCK_FILE_SUFFIX)
-    with open(lock_path, "a", encoding="utf-8") as lock_handle:
-        _posix_flock(lock_handle.fileno(), LOCK_EX)
+    file_descriptor = _open_lock_file(lock_path)
+    try:
+        _acquire_lock_or_fail(file_descriptor, resolved_path)
+        held_paths.add(lock_key)
         try:
             yield
         finally:
-            _posix_flock(lock_handle.fileno(), LOCK_UN)
+            held_paths.discard(lock_key)
+            _unlock(file_descriptor)
+    finally:
+        os.close(file_descriptor)
+
+
+@contextmanager
+def config_write_lock(config_path: str | Path) -> Iterator[None]:
+    """对**不走本模块写回路径**的调用方暴露同一把写锁。
+
+    flock 是建议锁：只有都取同一把锁的写入者之间才互斥。``kc`` 的读-改-写在加锁前
+    还要"读基线 + 校验"（候选数组这类整段替换尤其如此），把这段也圈进锁里才不会丢掉
+    并发写入者的改动；同一线程内后续经 :func:`apply_toml_updates` 落盘时重入放行。
+
+    Args:
+        config_path: 目标配置文件路径。
+
+    Raises:
+        ConfigLockBusyError: 有界等待内没拿到锁（目标文件未被改动）。
+        OSError: 锁文件无法创建或打开。
+    """
+    with _config_file_lock(Path(config_path).expanduser()):
+        yield
 
 
 def _table_label(table_path: Sequence[str]) -> str:
@@ -189,9 +333,9 @@ def _existing_table(document: tomlkit.TOMLDocument, table_path: Sequence[str]) -
 def _replace_file_atomically(resolved_path: Path, rendered_document: str) -> None:
     """经同目录**唯一**临时文件写回，失败时不留下残 file、原文件一字不动。
 
-    权限位沿用目标文件现状：``mkstemp`` 建出的临时文件是 0600，不补这一步就会把
-    机器级 ``config.toml`` 从 0644 改成只有属主可读，让其他读取者（含别的 agent 进程）
-    静默失效。
+    权限位与属主/属组都沿用目标文件现状：``mkstemp`` 建出的临时文件是 0600 且属于当前
+    进程，不补这两步就会把机器级 ``config.toml`` 从 0644 降成只有属主可读，或把一份
+    他人/其他用户持有的配置（共享机器、root 属主的机器级配置）静默改成当前用户所有。
     """
     temp_fd, temp_name = tempfile.mkstemp(
         dir=str(resolved_path.parent),
@@ -204,22 +348,52 @@ def _replace_file_atomically(resolved_path: Path, rendered_document: str) -> Non
             temp_handle.write(rendered_document)
             temp_handle.flush()
             os.fsync(temp_handle.fileno())
-        os.chmod(temp_path, _target_file_mode(resolved_path))
+        identity = _target_file_identity(resolved_path)
+        os.chmod(temp_path, identity.mode)
+        _preserve_file_ownership(temp_path, identity)
         os.replace(temp_path, resolved_path)
     finally:
         temp_path.unlink(missing_ok=True)
 
 
-def _target_file_mode(resolved_path: Path) -> int:
-    """取目标文件当前权限位；文件尚不存在时用 :data:`_DEFAULT_NEW_CONFIG_MODE`。
+@dataclass(frozen=True)
+class _FileIdentity:
+    """目标文件写前的归属现状（文件尚不存在时属主/属组为 ``None``）。"""
+
+    mode: int
+    owner_uid: int | None
+    owner_gid: int | None
+
+
+def _target_file_identity(resolved_path: Path) -> _FileIdentity:
+    """取目标文件的权限位与属主/属组；文件尚不存在时用 :data:`_DEFAULT_NEW_CONFIG_MODE`。
 
     Raises:
         OSError: ``stat`` 失败且原因不是"文件不存在"。
     """
     try:
-        return stat.S_IMODE(resolved_path.stat().st_mode)
+        target_stat = resolved_path.stat()
     except FileNotFoundError:
-        return _DEFAULT_NEW_CONFIG_MODE
+        return _FileIdentity(_DEFAULT_NEW_CONFIG_MODE, None, None)
+    return _FileIdentity(
+        stat.S_IMODE(target_stat.st_mode),
+        target_stat.st_uid,
+        target_stat.st_gid,
+    )
+
+
+def _preserve_file_ownership(temp_path: Path, identity: _FileIdentity) -> None:
+    """把目标文件原本的属主/属组搬到临时文件上，``os.replace`` 后 ownership 不变。
+
+    尽力而为：POSIX 只允许特权进程将文件 chown 给别人，非属主的共享写者做不到这一步，
+    此时保持"权限位不变、属主随写入进程"并继续完成写入，不把一次本可成功的保存改成失败。
+    """
+    if identity.owner_uid is None or identity.owner_gid is None:
+        return
+    try:
+        os.chown(temp_path, identity.owner_uid, identity.owner_gid)
+    except OSError:  # pragma: no cover - 非特权进程改不动属主
+        pass
 
 
 def _atomic_dump(resolved_path: Path, document: tomlkit.TOMLDocument) -> None:
@@ -377,6 +551,7 @@ def apply_toml_updates(config_path: str | Path, updates: Sequence[_TomlUpdate]) 
         OSError: 读取或替换目标文件失败。
         ConfigDocumentInvalidError: 现有文件不是合法 TOML。
         ConfigKeyMissingError: 某个更新要求存在的表 / 待删键不在本层。
+        ConfigLockBusyError: 有界等待内没拿到写锁（另一个写入者正持有该文件）。
     """
     if not updates:
         raise ValueError("updates must not be empty.")
@@ -410,6 +585,7 @@ def mutate_toml_document(
     Raises:
         OSError: 文件缺失且 ``create_if_missing=False``，或读取/替换失败。
         ConfigDocumentInvalidError: 现有文件不是合法 TOML。
+        ConfigLockBusyError: 有界等待内没拿到写锁（另一个写入者正持有该文件）。
     """
     resolved_path = Path(config_path).expanduser()
     with _config_file_lock(resolved_path):
@@ -524,6 +700,7 @@ __all__ = [
     "ArrayTableUpdate",
     "TableKeyUpdate",
     "apply_toml_updates",
+    "config_write_lock",
     "mutate_toml_document",
     "update_toml_array_of_tables",
     "update_toml_table_keys",

@@ -10,6 +10,7 @@ import argparse
 import dataclasses
 import shlex
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from backend.core.shared.models.agent_spec import AGENT_PROFILES
 from backend.core.shared.models.config_edit import (
     ConfigDocumentInvalidError,
     ConfigKeyMissingError,
+    ConfigLockBusyError,
 )
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_KEYS
 from backend.core.use_cases.agent_invocation import (
@@ -822,6 +824,8 @@ def _write_or_fail(operation, message_prefix: str = "config write failed"):
     - 要删的预设 / 要解绑的阶段在本层根本没声明 → ``USAGE(2)``：这个操作不会生效，
       报成功等于让用户以为设置已改（该阶段仍按上一层的绑定运行）；
     - 磁盘上的配置不是合法 TOML → ``GENERAL(1)``，并给出"先修文件"的下一步；
+    - 另一个写入者持有该配置的写锁且等满了有界超时 → ``CONFLICT(5)``：操作本身合法，
+      原样重试即可，不该被混进"未分类失败"；
     - 纯 I/O 失败 → ``GENERAL(1)``。
 
     Args:
@@ -839,6 +843,8 @@ def _write_or_fail(operation, message_prefix: str = "config write failed"):
         raise CliError(
             str(exc), code=ExitCode.GENERAL, suggestion="先修复该配置文件再重试写入"
         ) from exc
+    except ConfigLockBusyError as exc:
+        raise CliError(str(exc), code=ExitCode.CONFLICT, suggestion="重试本次写入") from exc
     except OSError as exc:
         raise CliError(
             f"{message_prefix}: {exc}", code=ExitCode.GENERAL, suggestion="kc logs"
@@ -855,24 +861,47 @@ def _current_candidate_entries(config) -> tuple[list[dict[str, Any]], int]:
     return entries, int(view["max_agent_switches"])
 
 
+def _reload_scope_config(target: _LifecycleScopeTarget) -> Any:
+    """在写锁内重取本 scope 的配置基线（磁盘现状可能已被并发写入者改过）。"""
+    fresh_settings = load_fresh_agent_runner_settings()
+    if target.scope == SCOPE_REPOSITORY:
+        return _resolve_repo_context(fresh_settings, target.repo_id, None).config
+    return build_app_config_from_settings(fresh_settings)
+
+
 def _persist_candidate_entries(
-    target: _LifecycleScopeTarget, entries: list[dict[str, Any]], switches: int
+    target: _LifecycleScopeTarget,
+    mutate_entries: Callable[[list[dict[str, Any]]], None],
 ) -> None:
-    """校验完整期望候选数组后整体写回候选链与预算（校验失败不触达文件）。"""
-    try:
-        normalized, normalized_switches = validate_fallback_candidates_update(
-            entries, switches, target.config
-        )
-    except LifecycleAgentsUpdateError as exc:
-        raise CliError(str(exc), code=ExitCode.USAGE, suggestion="kc agent fallback list") from exc
+    """锁内取基线 → 应用本次改动 → 校验 → 整体写回候选链与预算。
+
+    候选链是**整段替换**：基线若在锁外读，另一个写入者在"读—写"窗口里加进去的候选会被
+    这次替换原样抹掉——写锁只保护落盘那一下，保护不了一份过期的基线。故基线读取、位置
+    校验与写回全部圈进 :meth:`write_transaction`（同线程重入放行，不会自死锁）。
+    校验不过（agent 未注册、预设不属于该 agent 等）同样发生在触达文件之前。
+    """
     editor = target.editor()
-    # 候选链与预算同批落盘：分两次 read-modify-write 时，第二次失败会留下
-    # "链已换、预算还是旧的"的半套配置。
-    _write_or_fail(
-        lambda: editor.update_fallback_candidates_with_budget(
-            normalized, max_agent_switches=normalized_switches
-        )
-    )
+
+    def _locked_write() -> None:
+        with editor.write_transaction():
+            baseline_config = _reload_scope_config(target)
+            entries, switches = _current_candidate_entries(baseline_config)
+            mutate_entries(entries)
+            try:
+                normalized, normalized_switches = validate_fallback_candidates_update(
+                    entries, switches, baseline_config
+                )
+            except LifecycleAgentsUpdateError as exc:
+                raise CliError(
+                    str(exc), code=ExitCode.USAGE, suggestion="kc agent fallback list"
+                ) from exc
+            # 候选链与预算同批落盘：分两次 read-modify-write 时，第二次失败会留下
+            # "链已换、预算还是旧的"的半套配置。
+            editor.update_fallback_candidates_with_budget(
+                normalized, max_agent_switches=normalized_switches
+            )
+
+    _write_or_fail(_locked_write)
 
 
 def _candidate_at(entries: list[dict[str, Any]], position: int, command: str) -> dict[str, Any]:
@@ -945,12 +974,13 @@ def run_agent_fallback_list_command(ctx: ParsedCommandContext) -> int:
 def run_agent_fallback_candidate_add_command(ctx: ParsedCommandContext) -> int:
     """``kc agent fallback candidate add``：在有序候选链插入一个 (agent, preset) 候选。"""
     target = _resolve_lifecycle_scope(ctx, allow_effective=False)
-    entries, switches = _current_candidate_entries(target.config)
     new_entry = {"agent": ctx.parsed.agent, "preset": ctx.parsed.preset}
     position = getattr(ctx.parsed, "position", None)
-    if position is None:
-        entries.append(new_entry)
-    else:
+
+    def _insert(entries: list[dict[str, Any]]) -> None:
+        if position is None:
+            entries.append(new_entry)
+            return
         if position < 1 or position > len(entries) + 1:
             raise CliError(
                 f"position {position} out of range (valid: 1..{len(entries) + 1} for append).",
@@ -958,55 +988,62 @@ def run_agent_fallback_candidate_add_command(ctx: ParsedCommandContext) -> int:
                 suggestion="kc agent fallback list",
             )
         entries.insert(position - 1, new_entry)
-    _persist_candidate_entries(target, entries, switches)
+
+    _persist_candidate_entries(target, _insert)
     return _emit_fallback_view(ctx, allow_effective=False)
 
 
 def run_agent_fallback_candidate_remove_command(ctx: ParsedCommandContext) -> int:
     """``kc agent fallback candidate remove <position>``：删除指定位置的候选。"""
     target = _resolve_lifecycle_scope(ctx, allow_effective=False)
-    entries, switches = _current_candidate_entries(target.config)
-    _candidate_at(entries, ctx.parsed.position, "remove")
-    del entries[ctx.parsed.position - 1]
-    _persist_candidate_entries(target, entries, switches)
+
+    def _remove(entries: list[dict[str, Any]]) -> None:
+        _candidate_at(entries, ctx.parsed.position, "remove")
+        del entries[ctx.parsed.position - 1]
+
+    _persist_candidate_entries(target, _remove)
     return _emit_fallback_view(ctx, allow_effective=False)
 
 
 def run_agent_fallback_candidate_move_command(ctx: ParsedCommandContext) -> int:
     """``kc agent fallback candidate move <position> --to``：把候选移动到新位置。"""
     target = _resolve_lifecycle_scope(ctx, allow_effective=False)
-    entries, switches = _current_candidate_entries(target.config)
-    _candidate_at(entries, ctx.parsed.position, "move")
     to = ctx.parsed.to
-    if to < 1 or to > len(entries):
-        raise CliError(
-            f"--to {to} out of range (valid: 1..{len(entries)}).",
-            code=ExitCode.USAGE,
-            suggestion="kc agent fallback list",
-        )
-    moved = entries.pop(ctx.parsed.position - 1)
-    entries.insert(to - 1, moved)
-    _persist_candidate_entries(target, entries, switches)
+
+    def _move(entries: list[dict[str, Any]]) -> None:
+        _candidate_at(entries, ctx.parsed.position, "move")
+        if to < 1 or to > len(entries):
+            raise CliError(
+                f"--to {to} out of range (valid: 1..{len(entries)}).",
+                code=ExitCode.USAGE,
+                suggestion="kc agent fallback list",
+            )
+        moved = entries.pop(ctx.parsed.position - 1)
+        entries.insert(to - 1, moved)
+
+    _persist_candidate_entries(target, _move)
     return _emit_fallback_view(ctx, allow_effective=False)
 
 
 def run_agent_fallback_candidate_preset_set_command(ctx: ParsedCommandContext) -> int:
     """``kc agent fallback candidate preset set <position> --preset``：为候选绑定同 agent 预设。"""
     target = _resolve_lifecycle_scope(ctx, allow_effective=False)
-    entries, switches = _current_candidate_entries(target.config)
-    entry = _candidate_at(entries, ctx.parsed.position, "preset set")
-    entry["preset"] = ctx.parsed.preset
-    _persist_candidate_entries(target, entries, switches)
+
+    def _bind(entries: list[dict[str, Any]]) -> None:
+        _candidate_at(entries, ctx.parsed.position, "preset set")["preset"] = ctx.parsed.preset
+
+    _persist_candidate_entries(target, _bind)
     return _emit_fallback_view(ctx, allow_effective=False)
 
 
 def run_agent_fallback_candidate_preset_unset_command(ctx: ParsedCommandContext) -> int:
     """``kc agent fallback candidate preset unset <position>``：清除候选上的预设绑定。"""
     target = _resolve_lifecycle_scope(ctx, allow_effective=False)
-    entries, switches = _current_candidate_entries(target.config)
-    entry = _candidate_at(entries, ctx.parsed.position, "preset unset")
-    entry["preset"] = None
-    _persist_candidate_entries(target, entries, switches)
+
+    def _unbind(entries: list[dict[str, Any]]) -> None:
+        _candidate_at(entries, ctx.parsed.position, "preset unset")["preset"] = None
+
+    _persist_candidate_entries(target, _unbind)
     return _emit_fallback_view(ctx, allow_effective=False)
 
 

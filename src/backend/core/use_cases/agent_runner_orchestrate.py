@@ -379,6 +379,10 @@ def _persist_attempt_result(
                     duration_seconds=result.duration_seconds,
                     preset=result.preset or None,
                     model=result.model or None,
+                    failure_phase=result.failure_phase,
+                    phase_durations=tuple(
+                        (phase.name, phase.seconds) for phase in result.phase_durations
+                    ),
                 )
             )
         except Exception:  # noqa: BLE001 - side-channel must not break runs
@@ -570,6 +574,8 @@ def run_once(
     output_view: IRunnerLiveView | None = None,
     target_issue: int | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    aggregate_pr: bool = False,
+    execution_ceiling: int | None = None,
 ) -> int:
     """执行一次 Agent Runner 轮询。"""
     module = _orchestration_runtime_module()
@@ -590,5 +596,7 @@ def run_once(
             output_view=output_view,
             target_issue=target_issue,
             publish_stage=publish_stage,
+            aggregate_pr=aggregate_pr,
+            execution_ceiling=execution_ceiling,
         )
     )

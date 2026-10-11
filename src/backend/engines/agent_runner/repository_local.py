@@ -42,6 +42,7 @@ from backend.infrastructure.config.settings import (
     AgentRunnerWorktreeSettings,
     load_agent_runner_local_settings,
 )
+from backend.infrastructure.config.toml_section_editor import config_write_lock
 from backend.core.shared.interfaces.runner_console import (
     DiscoveredRepositoryEntry,
     IRepositoryRegistryEditor,
@@ -252,8 +253,9 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     ),
     "runner.max_issues": "每次轮询每个仓库最多处理多少个 Issue",
     "runner.max_concurrent_issues": (
-        "单轮内并行处理的 Issue 数量：1 为串行（默认）；>1 时同一轮并行跑多个 "
-        "Issue，仅 kc daemon --concurrency 未指定时作为默认值"
+        "单轮内并行处理的 Issue 数量（自动执行的 runner 容量）：1 为串行（默认）；>1 时同一轮并行跑多个 "
+        "Issue，仅 kc daemon --concurrency 未指定时作为默认值；自动调度的生效并发上限 "
+        "= min(Backlog「并发」策略, 本值)，显式 kc run 不受约束"
     ),
     "runner.default_agent": "默认使用的 AI agent：auto / claude / codex / kimi",
     "runner.max_recovery_attempts": "Agent 失败后的最大重试次数",
@@ -326,7 +328,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "post_pr_supervisor.max_agent_crash_retries": "supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数",
     "post_pr_supervisor.crash_retry_initial_backoff_seconds": "崩溃重试的初始退避秒数，之后每次重试翻倍",
     "post_pr_supervisor.crash_retry_max_backoff_seconds": "崩溃重试单次退避等待的最大秒数",
-    "daemon.review_interval_seconds": "review-daemon 轮询间隔秒数",
+    "daemon.review_interval_seconds": "supervise-daemon 轮询间隔秒数",
     "daemon.run_interval_seconds": "daemon 轮询间隔秒数",
     "daemon.max_deliberation_issues": "每轮 Phase 0 审议最大 Issue 数",
     "daemon.reconcile_stale_attempts": "是否在每轮开头对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）；关闭后僵尸不被触碰",
@@ -891,15 +893,19 @@ def initialize_repository_local_config(
             verification_commands=verification_commands,
         )
 
-    if config_path.exists() and not options.force and not options.dry_run:
-        existing_text = config_path.read_text(encoding="utf-8")
-        if existing_text != config_text:
-            raise RepositoryLocalConfigExistsError(config_path)
-        return _make_result(wrote_file=False)
     if options.dry_run:
         return _make_result(wrote_file=False)
 
-    config_path.write_text(config_text, encoding="utf-8")
+    # 读-判-写整段持同一把按路径派生的写锁：flock 是建议锁，锁外的 exists() 检查与
+    # 裸 write_text 能插进 Console / registry 的持锁读-改-写中间，把仓库本地配置顶成
+    # 模板初值并丢掉对方刚写的生命周期段。
+    with config_write_lock(config_path):
+        if config_path.exists() and not options.force:
+            existing_text = config_path.read_text(encoding="utf-8")
+            if existing_text != config_text:
+                raise RepositoryLocalConfigExistsError(config_path)
+            return _make_result(wrote_file=False)
+        config_path.write_text(config_text, encoding="utf-8")
     return _make_result(wrote_file=True)
 
 

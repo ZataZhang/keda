@@ -575,6 +575,147 @@ def test_daemon_without_flag_follows_config_each_pass(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 统一并发上限：daemon 每轮解析并分发同一个 ceiling（PRD P1-FEAT-20261010-011714）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _run_one_daemon_pass_capturing(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    context: RepositoryRunContext,
+    store: object,
+    concurrency: int,
+) -> dict:
+    """跑恰好一轮 daemon（全部执行阶段打桩），返回补位与认领调用的真实 kwargs。"""
+    from types import SimpleNamespace
+
+    import backend.core.use_cases.run_agent_daemon as daemon_module
+    from backend.core.use_cases.run_agent_daemon import run_agent_daemon
+
+    captured: dict = {}
+
+    def fake_advance(**kwargs):
+        captured["advance"] = kwargs
+        return SimpleNamespace(started=(), queued=(), reconciled_completed=0, reconciled_failed=0)
+
+    def fake_run_once(**kwargs):
+        captured["run_once"] = kwargs
+
+    monkeypatch.setattr(daemon_module, "process_prd_rework_issues", lambda **kwargs: None)
+    monkeypatch.setattr(daemon_module, "advance_backlog_queue", fake_advance)
+    monkeypatch.setattr(daemon_module, "run_once", fake_run_once)
+
+    def stop_after_one_pass(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon_module.time, "sleep", stop_after_one_pass)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_agent_daemon(
+            contexts=[context],
+            interval=0,
+            agent="auto",
+            max_issues=1,
+            concurrency=concurrency,
+            process_runner=MagicMock(),
+            github_client_factory=lambda repo_path: MagicMock(),
+            backlog_store_factory=lambda: store,
+            autopilot_override=True,
+        )
+    return captured
+
+
+def _daemon_context(tmp_path: Path) -> RepositoryRunContext:
+    return RepositoryRunContext(
+        repo_id=REPO_ID, display_name="Keda Test", repo_path=tmp_path, config=AppConfig()
+    )
+
+
+def test_daemon_resolves_policy_ceiling_for_both_gates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """策略=2、容量=4 → 同一轮补位闸门与认领闸门拿到同一个 ceiling=2。"""
+    from tests.conftest import FakeBacklogStore
+
+    store = FakeBacklogStore(repo_id=REPO_ID, max_parallel=2)
+    captured = _run_one_daemon_pass_capturing(
+        monkeypatch, context=_daemon_context(tmp_path), store=store, concurrency=4
+    )
+    assert captured["advance"]["execution_ceiling"] == 2
+    assert captured["run_once"]["execution_ceiling"] == 2
+
+
+def test_daemon_inherits_capacity_when_policy_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """从未设置策略（没有设置行）→ 继承容量，且读取绝不物化默认行。"""
+    from tests.conftest import FakeBacklogStore
+
+    store = FakeBacklogStore(repo_id=REPO_ID, max_parallel=None)
+    captured = _run_one_daemon_pass_capturing(
+        monkeypatch, context=_daemon_context(tmp_path), store=store, concurrency=4
+    )
+    assert captured["advance"]["execution_ceiling"] == 4
+    assert captured["run_once"]["execution_ceiling"] == 4
+    assert store.settings is None
+
+
+def test_run_once_targeted_mode_exempt_from_execution_ceiling(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """显式 ``--issue`` 定向不设闸门：不数在途 running，目标照常处理。
+
+    ``RunOnceRequest.execution_ceiling`` 对定向模式整段跳过——人点名的
+    单次运行保持全量语义，与 ``kc run --all-ready`` 一样不受 Backlog
+    策略约束。
+    """
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    config = AppConfig()
+    client = _TargetedGitHubClient(_issue_summary(7, ()))
+    # 若在途计数参与闸门，ceiling=1 会被这 1 个 running 占满、目标被跳过。
+    client.set_list_issues_by_label_result([_issue_summary(21, (config.labels.running,))])
+    with caplog.at_level(logging.INFO):
+        exit_code = run_once(
+            repo_path=tmp_path,
+            config=config,
+            dry_run=True,
+            agent="auto",
+            max_issues=1,
+            github_client=client,
+            process_runner=MagicMock(),
+            target_issue=7,
+            execution_ceiling=1,
+        )
+    assert exit_code == 0
+    assert not [call for call in client.calls if call["method"] == "list_issues_by_label"]
+    assert "would process Issue #7" in caplog.text
+
+
+def test_daemon_policy_read_failure_falls_back_to_capacity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """策略读取异常不阻断本轮：按未设置回退（继承容量）并告警。"""
+
+    class _ExplodingStore:
+        def get_backlog_settings(self, repo_id: str):
+            raise RuntimeError("db locked")
+
+    with caplog.at_level(logging.WARNING):
+        captured = _run_one_daemon_pass_capturing(
+            monkeypatch,
+            context=_daemon_context(tmp_path),
+            store=_ExplodingStore(),
+            concurrency=4,
+        )
+    assert captured["advance"]["execution_ceiling"] == 4
+    assert captured["run_once"]["execution_ceiling"] == 4
+    assert "this pass inherits runner capacity" in caplog.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Console spawn 路径迁移（FR-7）
 # ─────────────────────────────────────────────────────────────────────────────
 

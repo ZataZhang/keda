@@ -119,6 +119,16 @@ export default function BacklogPage() {
   // 轮询节奏用 ref 传递：把 stale 放进 effect 依赖会让每次新鲜度翻转都重建整个
   // 加载流程，表现为列表反复闪骨架屏。
   const snapshotStaleRef = useRef(false);
+  // 入队成功后，快照重扫完成前保留动作接口确认的状态，避免旧快照把 UI 改回未开始。
+  const optimisticEnqueueUpdatesRef = useRef(
+    new Map<
+      string,
+      {
+        state: BacklogPrd["state"];
+        issueNumber: number | null;
+      }
+    >(),
+  );
   const [includeArchived, setIncludeArchived] = useState(false);
   const {
     repositories,
@@ -137,6 +147,7 @@ export default function BacklogPage() {
   const [autopilot, setAutopilot] = useState<BacklogAutopilotState | null>(null);
   const [autopilotLoading, setAutopilotLoading] = useState(true);
   const [autopilotSaving, setAutopilotSaving] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
   // 全局 CI/CD 自动修复开关：与 Autopilot 并列、语义独立的仓库级偏好。
   const [ciRepair, setCiRepair] = useState<BacklogCiRepairGlobalState | null>(null);
   const [ciRepairLoading, setCiRepairLoading] = useState(true);
@@ -168,12 +179,41 @@ export default function BacklogPage() {
         if (signal?.aborted) {
           return [];
         }
-        setPrds(response.prds);
+        const refreshedPrds = response.prds.map((serverPrd) => {
+          const optimisticUpdateKey = `${selectedRepoId}\u0000${serverPrd.prd_path}`;
+          const optimisticUpdate = optimisticEnqueueUpdatesRef.current.get(optimisticUpdateKey);
+          if (!optimisticUpdate) {
+            return serverPrd;
+          }
+          if (serverPrd.state !== "not_started") {
+            // 后端快照已经观察到入队或更后的状态，结束本地覆盖。
+            optimisticEnqueueUpdatesRef.current.delete(optimisticUpdateKey);
+            return serverPrd;
+          }
+          return {
+            ...serverPrd,
+            state: optimisticUpdate.state,
+            issue_number: optimisticUpdate.issueNumber,
+          };
+        });
+        const refreshedPrdPaths = new Set(response.prds.map((serverPrd) => serverPrd.prd_path));
+        const optimisticUpdateKeyPrefix = `${selectedRepoId}\u0000`;
+        for (const optimisticUpdateKey of optimisticEnqueueUpdatesRef.current.keys()) {
+          const optimisticPrdPath = optimisticUpdateKey.slice(optimisticUpdateKeyPrefix.length);
+          if (
+            optimisticUpdateKey.startsWith(optimisticUpdateKeyPrefix) &&
+            !refreshedPrdPaths.has(optimisticPrdPath)
+          ) {
+            // PRD 已离开当前视图（例如被归档），清理对应的本地覆盖状态。
+            optimisticEnqueueUpdatesRef.current.delete(optimisticUpdateKey);
+          }
+        }
+        setPrds(refreshedPrds);
         setSnapshotScannedAt(response.scanned_at);
         setSnapshotStale(response.stale);
         setSnapshotLoadFailed(false);
         snapshotStaleRef.current = response.stale;
-        return response.prds;
+        return refreshedPrds;
       } catch (error) {
         if (signal?.aborted) {
           return [];
@@ -306,6 +346,30 @@ export default function BacklogPage() {
     }
   }
 
+  /** 保存 Backlog「并发」策略（1–10），或以 ``null`` 恢复继承（清除设置行）。 */
+  async function handleUpdatePolicy(maxParallel: number | null): Promise<boolean> {
+    setPolicySaving(true);
+    try {
+      // 响应体是写后 fresh 读回的设置快照，不做乐观 UI 覆盖。
+      const updated = await updateBacklogSettings({ repoId: selectedRepoId, maxParallel });
+      setSettings(updated);
+      // 控制条三态来自 Autopilot 快照，写后一并 fresh 回读保持同源。
+      await loadAutopilot();
+      toast.success(
+        maxParallel === null
+          ? "已恢复继承：并发上限跟随 runner 配置。"
+          : `已保存：生效并发上限 ${updated.effective_max_parallel}。`,
+      );
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存并发设置失败。");
+      await loadAutopilot();
+      return false;
+    } finally {
+      setPolicySaving(false);
+    }
+  }
+
   async function handleToggleCiRepair(enabled: boolean) {
     setCiRepairSaving(true);
     try {
@@ -333,9 +397,10 @@ export default function BacklogPage() {
       return;
     }
     try {
+      // 视图切换只回写 default_view；并发策略是独立入口（控制条编辑器），
+      // 不再被视图切换顺带改写。
       const updated = await updateBacklogSettings({
         repoId: selectedRepoId,
-        maxParallel: settings.max_parallel,
         defaultView: nextView,
       });
       setSettings(updated);
@@ -368,7 +433,32 @@ export default function BacklogPage() {
   async function handleEnqueueReady(prd: BacklogPrd) {
     setEnqueuingPath(prd.prd_path);
     try {
-      await enqueueBacklogPrdReady(selectedRepoId, prd.prd_path);
+      const enqueueResult = await enqueueBacklogPrdReady(selectedRepoId, prd.prd_path);
+      const optimisticUpdateKey = `${selectedRepoId}\u0000${prd.prd_path}`;
+      optimisticEnqueueUpdatesRef.current.set(optimisticUpdateKey, {
+        state: enqueueResult.state,
+        issueNumber: enqueueResult.issue_number,
+      });
+      setPrds((currentPrds) =>
+        currentPrds.map((currentPrd) =>
+          currentPrd.prd_path === prd.prd_path
+            ? {
+                ...currentPrd,
+                state: enqueueResult.state,
+                issue_number: enqueueResult.issue_number,
+              }
+            : currentPrd,
+        ),
+      );
+      setSelectedPrd((currentPrd) =>
+        currentPrd?.prd_path === prd.prd_path
+          ? {
+              ...currentPrd,
+              state: enqueueResult.state,
+              issue_number: enqueueResult.issue_number,
+            }
+          : currentPrd,
+      );
       toast.success(`${prd.title} 已加入就绪队列（未启动）。`);
       const refreshedPrds = await loadData();
       const refreshedPrd = refreshedPrds.find((item) => item.prd_path === prd.prd_path);
@@ -383,15 +473,11 @@ export default function BacklogPage() {
   }
 
   async function handleStartGlobal() {
-    if (!settings) {
-      toast.warning("设置尚未加载。");
-      return;
-    }
     setGlobalStarting(true);
     try {
+      // 批量上限由服务端按「策略与容量」的生效值解析，请求体不再携带并发数。
       const result = await startGlobalBacklog({
         repoId: selectedRepoId,
-        maxParallel: settings.max_parallel,
       });
       toast.success(
         `全局开始完成：启动 ${result.started.length} 个，排队 ${result.queued.length} 个。`,
@@ -569,10 +655,14 @@ export default function BacklogPage() {
         </div>
 
         <BacklogAutopilotControl
+          // 按仓库重建本地组件，避免并发输入草稿跨仓库切换残留、被写到新选中仓库。
+          key={selectedRepoId}
           state={autopilot}
           loading={autopilotLoading}
           saving={autopilotSaving}
           onToggle={(enabled) => void handleToggleAutopilot(enabled)}
+          policySaving={policySaving}
+          onUpdatePolicy={(maxParallel) => handleUpdatePolicy(maxParallel)}
         />
 
         <BacklogCiRepairControl

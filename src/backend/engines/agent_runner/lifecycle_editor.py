@@ -23,7 +23,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 from backend.core.shared.models import product_identity
@@ -32,6 +33,7 @@ from backend.infrastructure.config.toml_section_editor import (
     ArrayTableUpdate,
     TableKeyUpdate,
     apply_toml_updates,
+    config_write_lock,
     update_toml_table_keys,
 )
 
@@ -62,6 +64,22 @@ class TomlLifecycleSettingsEditor:
     def config_path(self) -> Path:
         """返回本编辑器写入的目标文件路径。"""
         return self._config_path
+
+    @contextmanager
+    def write_transaction(self) -> Iterator[None]:
+        """把"读基线 → 校验 → 落盘"整段圈进本文件的写锁。
+
+        ``update_*`` 方法自己持锁完成一次读-改-写，但**整段替换**（候选数组）的基线是
+        调用方在锁外算出来的：并发写入者在那个窗口里加进去的候选会被本次替换原样抹掉。
+        调用方用本上下文把基线读取与校验也放进去，就只剩一把锁覆盖完整的一次操作；
+        同线程内后续调用 ``update_*`` 会重入放行，不会自死锁。
+
+        Raises:
+            ConfigLockBusyError: 有界等待内没拿到写锁（配置未被改动）。
+            OSError: 锁文件无法创建或打开。
+        """
+        with config_write_lock(self._config_path):
+            yield
 
     def update_lifecycle_agents(self, values: Mapping[str, object]) -> None:
         """写回 ``[agent_runner.lifecycle_agents]``（值为 ``None`` 表示删键）。"""

@@ -7,7 +7,7 @@ attempt + 通知增量持久化 + 写短期记忆"样板搬到这里集中承载
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from backend.core.shared.models.agent_model_preset import ModelSelection
@@ -87,8 +87,7 @@ def _record_attempt(
         刚刚记录的 :class:`AttemptResult`。
     """
     effective_selection = context.effective_model_selection
-    _append_attempt_and_notify(
-        context.attempt_results,
+    attempt_result_with_failure_phase = replace(
         _make_attempt_result(
             attempt_number=context.attempt_index + 1,
             failure_type=failure_type,
@@ -102,6 +101,11 @@ def _record_attempt(
             preset=(effective_selection.preset_name if effective_selection is not None else ""),
             model=effective_selection.model if effective_selection is not None else "",
         ),
+        failure_phase=context.attempt_phases.failure_phase,
+    )
+    _append_attempt_and_notify(
+        context.attempt_results,
+        attempt_result_with_failure_phase,
         context.request.on_attempt_recorded,
     )
     recorded_attempt = context.attempt_results[-1]

@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 
+from backend.api.cli_parser_lifecycle_commands import add_lifecycle_commands
 from backend.api.cli_parser_ops_commands import add_ops_commands
+from backend.api.cli_parser_pr_commands import add_pr_commands
 from backend.api.cli_parser_registry_commands import add_registry_commands
 from backend.api.cli_parser_runner_commands import add_runner_commands
 from backend.api.cli_parser_session_commands import add_session_commands
@@ -39,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_setup_commands(subparsers)
     add_runner_commands(subparsers)
     add_session_commands(subparsers)
+    add_pr_commands(subparsers)
     add_registry_commands(subparsers)
     add_ops_commands(subparsers)
+    add_lifecycle_commands(subparsers)
     return parser
