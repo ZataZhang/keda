@@ -179,12 +179,13 @@ def _truncate_summary(summary_text: str) -> str:
 
 
 def _extract_plan_block_lines(prd_text: str) -> tuple[str, ...]:
-    """截取验证计划小节的第一个围栏代码块内容行。
+    """截取验证计划小节的第一个 ``yaml`` 围栏代码块内容行。
 
-    小节边界沿用权威解析器 :func:`_iterate_validation_section_lines` 的口径：标题以
-    ``Realistic Validation`` 前缀匹配（兼容 ``7.6`` 编号前缀与 ``(Oracle 块)`` 后缀），
-    遇到同级或更高级标题才退出，标题与围栏之间的 ``#### rv-N`` 子标题按小节内容收集、
-    不会截断解析。
+    小节边界与围栏语言均沿用权威解析器口径：标题以 ``Realistic Validation`` 前缀匹配
+    （兼容 ``7.6`` 编号前缀与 ``(Oracle 块)`` 后缀），遇到同级或更高级标题才退出，标题与
+    围栏之间的 ``#### rv-N`` 子标题按小节内容收集、不会截断解析。围栏只认 ``yaml`` 语言块，
+    与 :func:`agent_runner_validation_parsing._extract_rv_oracle_entries` 一致——小节里先
+    出现的无语言 / ``text`` 代码块（命令示例等）不会被误当成计划块。
     """
     section_lines = _iterate_validation_section_lines(prd_text)
     block_lines_list: list[str] = []
@@ -193,7 +194,8 @@ def _extract_plan_block_lines(prd_text: str) -> tuple[str, ...]:
         if raw_line_text.lstrip().startswith("```"):
             if is_inside_fence:
                 break
-            is_inside_fence = True
+            if raw_line_text.lstrip().lower().startswith("```yaml"):
+                is_inside_fence = True
             continue
         if is_inside_fence:
             block_lines_list.append(raw_line_text)

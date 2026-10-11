@@ -6,7 +6,7 @@
 
 > 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
-> 已达成：后端 progress/evidence 端点与三个解析模块（worktree 定位 / 影响树移植 / 进度聚合）+ 前端三读数与证据分组；rv-1（真实 `kc console` 进程 + 零 mock 浏览器四态 spec，5 passed + 负控按预期变红 rc=1）、rv-2（TestClient 进程内 HTTP 集成 55 passed + 安全负控 15 passed + 跨进程 curl 29 条断言全通过）、rv-3（真实 git + importlib CLI 逐字段对照 9 passed）全绿；`just frontend-public typecheck`/`build`/`console-sync` rc=0 且同步后的真实页面可见新 UI；改动集 pre-commit 代码类钩子全 Passed。恢复轮 2 另修复 5 条与本 PRD 无关的 baseline 守卫失败（祖先提交 39014730 lifecycle CLI 面未同步；只同步守卫登记常量与豁免集合，旗标契约未削弱），最终树 `just test all`（含 full lint）3859 passed / 1 skipped 全绿。恢复轮 5 用仓库自身门禁复验时发现并修掉一个半截绿灯：runner 以 `bash -lc` 复跑时解析到系统 bash 3.2，`$VAR（` 的全角字节被并入变量名触发 `set -u` 中断而退出码仍为 0，故取证脚本加了「未走到收尾即判失败」哨兵。Pre-PR Review 修复轮补上证据目录枚举失败的降级路径（原为 500）与损坏/mixed/不可读清单的 5 条 oracle 用例，并订正证据包中的失实覆盖声明。证据与逐条可复跑命令见 `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/`。
+> 已达成：后端 progress/evidence 端点与三个解析模块（worktree 定位 / 影响树移植 / 进度聚合）+ 前端三读数与证据分组；rv-1（真实 `kc console` 进程 + 零 mock 浏览器四态 spec，5 passed + 负控按预期变红 rc=1）、rv-2（TestClient 进程内 HTTP 集成 60 passed + 安全负控 15 passed + 跨进程 curl 29 条断言全通过）、rv-3（真实 git + importlib CLI 逐字段对照 9 passed）全绿；`just frontend-public typecheck`/`build`/`console-sync` rc=0 且同步后的真实页面可见新 UI；改动集 pre-commit 代码类钩子全 Passed。恢复轮 2 另修复 5 条与本 PRD 无关的 baseline 守卫失败（祖先提交 39014730 lifecycle CLI 面未同步；只同步守卫登记常量与豁免集合，旗标契约未削弱），最终树 `just test all`（含 full lint）3859 passed / 1 skipped 全绿。恢复轮 5 用仓库自身门禁复验时发现并修掉一个半截绿灯：runner 以 `bash -lc` 复跑时解析到系统 bash 3.2，`$VAR（` 的全角字节被并入变量名触发 `set -u` 中断而退出码仍为 0，故取证脚本加了「未走到收尾即判失败」哨兵。Pre-PR Review 修复轮补上证据目录枚举失败的降级路径（原为 500）与损坏/mixed/不可读清单的 5 条 oracle 用例，并订正证据包中的失实覆盖声明。恢复轮「解析对齐」把进度侧 §7.6 解析改用权威提取器 `_iterate_validation_section_lines`，本轮「围栏语言对齐」再把计划块围栏收紧到 ```yaml 与权威口径一致；rv-2 目标 trio 55→59→**60 passed**，未合并 main 的最终树 `just test all`（含 full lint）复跑为 3864 passed / 1 skipped / EXIT=0。`lifecycle` 门面豁免与 main argparse 门面的矛盾项属合并期处置（见 Change Log「未决」条目），非本 pre-merge worktree 落刀点。证据与逐条可复跑命令见 `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/`。
 
 本文分两层：Part A 人审层（§1-4）界定「详情页能不能看到交付进度、这些数字怎么读」的可见口径与验收选择；Part B 执行器层（§5-13）给出读取边界、解析移植、失败降级与验证证据。
 
@@ -527,8 +527,8 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 
 #### Validation Acceptance
 
-- [x] 按 §7.6 完成 rv-1…rv-3；rv-1 负控红证（未实现构建上无读数）已保存；证据绑定最终 Git tree，相关改动后重跑。<!-- 三项各自的 command 写在 `evidence.json` 里且可复跑：rv-1 = `scripts/rv1_real_entry.sh --negative`（5 passed + 负控 rc=1 红证），rv-2 = 目标 pytest + `scripts/rv2_live_console.sh`（55 passed + 29 条 curl 断言，其中 5 条为 Pre-PR Review 修复轮补充），rv-3 = `pytest tests/test_backlog_prd_impact.py`（9 passed）。本轮改动后已用仓库自身门禁 `scripts/rehearse_gates.py` 复跑三条命令（rc=0 且 stdout/stderr 断言全满足），证据即该次复跑产物 -->
-- [x] 目标测试集通过：`tests/test_backlog_prd_worktree.py`、`tests/test_backlog_prd_impact.py`、`tests/test_backlog_prd_progress.py`、`tests/test_backlog_prd_evidence.py`，以及 `just test`（跨层契约时 `CI=true just test all`）。<!-- 四个目标文件全绿（9+55 passed，含在最终树全量复检内）；恢复轮 2 修复 5 条无关 baseline 后，最终树 `just test all`（全量收集 -m ''，含 full lint）在 Pre-PR Review 修复轮复跑为 3859 passed / 1 skipped / EXIT=0，.last_tested_commit 已更新（3854→3859 即修复轮新增的 5 条用例）。见 rv-2-mechanical-gates.txt 恢复轮附录与 Pre-PR Review 修复轮附录 -->
+- [x] 按 §7.6 完成 rv-1…rv-3；rv-1 负控红证（未实现构建上无读数）已保存；证据绑定最终 Git tree，相关改动后重跑。<!-- 三项各自的 command 写在 `evidence.json` 里且可复跑：rv-1 = `scripts/rv1_real_entry.sh --negative`（5 passed + 负控 rc=1 红证），rv-2 = 目标 pytest + `scripts/rv2_live_console.sh`（60 passed + 29 条 curl 断言；trio 随各修复轮递增：Pre-PR Review +5、恢复轮解析对齐 +4、本轮围栏语言对齐 +1，逐轮命令与用例名见 rv-2-endpoint-integration.txt 分段记录），rv-3 = `pytest tests/test_backlog_prd_impact.py`（9 passed）。本轮改动后 rv-2/rv-3 已在最终工作区复跑（rc=0 且 stdout/stderr 断言全满足，证据即该次复跑产物）；rv-1 的 fixture 计划块用 ```yaml 围栏，本轮仅收紧进度侧围栏语言至 ```yaml，rv-1 四态读数与 spec 结构未受影响，其浏览器证据按评审结论沿用 -->
+- [x] 目标测试集通过：`tests/test_backlog_prd_worktree.py`、`tests/test_backlog_prd_impact.py`、`tests/test_backlog_prd_progress.py`、`tests/test_backlog_prd_evidence.py`，以及 `just test`（跨层契约时 `CI=true just test all`）。<!-- 四个目标文件全绿（9+60 passed，含在最终树全量复检内）；恢复轮 2 修复 5 条无关 baseline 后，最终树 `just test all`（全量收集 -m ''，含 full lint）在 Pre-PR Review 修复轮复跑为 3859 passed / 1 skipped / EXIT=0，.last_tested_commit 已更新（3854→3859 即修复轮新增的 5 条用例）。见 rv-2-mechanical-gates.txt 恢复轮附录与 Pre-PR Review 修复轮附录；本轮「围栏语言对齐」在同一工作区复跑 rv-2 目标 trio 为 **60 passed**（59→60 即本轮新增 1 条围栏守卫），`just test all`（含 full lint）在未合并 main 的交付树复跑为 3864 passed / 1 skipped / EXIT=0（见 mechanical-gates「围栏语言对齐修复轮」段） -->
 - [x] 真实入口：真实 console 进程 + curl（rv-2）与浏览器四态（rv-1）；不把 mock 结果冒充真实入口。<!-- 两者均已达成：`uv run kc console --no-browser` 起在只登记 fixture 仓库的隔离 `KEDACODE_CONFIG` 上，curl 29 条断言的转写（请求 URL + 状态码 + PASS）见 `rv-2-live-console.txt`，浏览器四态截图与端点响应原文见 `rv-1-*.png` / `rv-1-*-progress-endpoint.json`；执行 spec 零 `page.route`，TestClient 集成仅作为进程内补充、未被声称为真实入口 -->
 - [~] 独立 verifier 对 R2 证据复核 PASS — runner-owned gate: 独立验证
 - [~] PR 评审与归档按仓库 PRD 工作流执行 — runner-owned gate: 发布与归档
@@ -653,3 +653,27 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 - Reason: Pre-PR Review 判定两条门禁不满足——「读取失败必须表达为字段状态而不是 500」与「已勾选验收项的 oracle 声明必须与树内用例一致」；按最小修复面处理：只动降级路径、缺项用例与失实声明，不改契约语义、CLI 与磁盘证据约定。
 - Impact: 用户可见行为仅在降级路径上变化（原来 500，现在按 unavailable 披露且计数为 null）；非降级路径读数与契约零变化。改动集：`backlog_prd_evidence.py` / `backlog_prd_progress.py` 降级路径、`tests/test_backlog_prd_progress.py` +5 用例、前端两处降级文案、API 文档两行、证据包订正；最终树 `just test all` 复跑为 3859 passed / 1 skipped / EXIT=0（含 full lint）。
 - Review: 机械复核入口＝`evidence.json` item 2 的 command（pytest 55 passed + 跨进程 curl 29 条断言）与 `scripts/rehearse_gates.py`；rv-1 真实浏览器四态读数与断言未受影响（改动只在失败降级分支）。Human-Confirmed 三项仍待人工，本 PRD 保持归档态。
+
+### 恢复轮「解析对齐」：进度侧 §7.6 解析复用权威提取器（HEAD=5bc4a744，补记）
+- Type: verification
+- Before: `backlog_prd_progress.py` 自带更窄的 §7.6 标题正则（要求标题在 `Realistic Validation Plan` 处即换行）与「围栏前遇 `#` 行即退出」的 `_extract_plan_block_lines`，对带编号前缀 / `(Oracle 块)` 后缀标题、或标题与围栏之间夹 `#### rv-N` 子标题的 PRD 报「未声明验证计划」并显示 `-`——正是本 PRD 要消除的「进度不可见」缺陷反向复现在解析器上。评审 cycle 1 判定为 code-reuse 违规（应复用权威口径、且缺一致性守卫）。
+- After: 删除窄标题正则与围栏前 `#` 退出分支，改为复用权威提取器 `_iterate_validation_section_lines`（前缀匹配编号/后缀标题、把子标题按小节内容收集、围栏内行不当标题）。补守卫：进度侧 3 条（`(Oracle 块)` 后缀标题、子标题夹在围栏前、与 `extract_realistic_validation_items` 的 rv 编号集合 parity）+ 证据侧 1 条 `test_resolution_emits_worktree_candidate_before_main`（工作区候选先于主仓库的顺序回归，此前仅由取证脚本负控捕获）。trio 55 → 59 passed。
+- Reason: 与命令行看板同口径是 §7.6/解读回显的硬约束；影响树有显式 CLI-parity 守卫而计划解析此前没有，需补齐防漂移。
+- Impact: 仅收紧服务端进度解析与守卫测试，CLI 表面、磁盘证据约定、数据库结构不变。**该轮当时漏记 Change Log**（评审 cycle 2 指出），此处按事实补记。
+- Review: 机械复核＝`evidence.json` item 2 command（该轮 pytest 段 59 passed）与新增 parity/focus 用例。
+
+### Post-PR Review 修复轮：围栏语言对齐 ```yaml + rv-2 证据最终树复现
+- Type: verification
+- Before: 评审 cycle 2 判两项阻塞——① 证据包在交付树不可复现：`evidence.json` item 2 的 stdout 断言写死「55 passed」，而解析对齐轮已把 trio 抬到 59、本轮再加 1 条围栏守卫=60，仓库自身门禁 `_validate_stdout_assertions` 据「55 passed」把 rv-2 判失实，且「证据绑定最终 Git tree」的 §9 勾选项缺对应 Change Log 轮；② 进度侧 `_extract_plan_block_lines` 仍取小节**第一个任意语言围栏**，权威提取器只开 ```yaml 块——小节里先出现的无语言 / `text` 代码块（命令示例等）会被误当成计划块并提前截断解析（与刚修复的窄解析器同属一类症状）。
+- After: ① `_extract_plan_block_lines` 改为只认 ```yaml 围栏（与 `_extract_rv_oracle_entries` 一致），补 focus 用例 `test_parse_validation_plan_skips_non_yaml_fence_before_plan` 并在 parity 样本加 `text_fence_before_yaml`，把「进度侧 vs 权威侧」一致性钉到围栏语言这一维。② 在最终工作区复跑 rv-2（pytest trio **60 passed** + `rv2_live_console.sh` 29 条 curl 断言全通过）与 rv-3（9 passed），把 `evidence.json` stdout 断言与 `output_summary`、`rv-2-endpoint-integration.txt`（枚举与树内 60 条用例名一一对应）、`rv-2-mechanical-gates.txt`、`human-review-checklist.md` 及 §9 计数同步为 60；rv-1 的 fixture 计划块用 ```yaml，本轮仅把进度侧围栏收紧至 ```yaml，rv-1 四态读数与浏览器 spec 结构不受影响，其证据按评审结论沿用。③ 补上述两轮的 Change Log。全量 `just test all` 在本交付树复跑 EXIT=0（计数见 rv-2-mechanical-gates.txt 本轮记录）。
+- Reason: 证据必须绑定最终树且声明与树内一致是交付门禁硬要求；围栏语言是同一症状类的残留，两行改动即可与权威口径对齐。
+- Impact: 后端进度解析一处收紧（仅影响「```yaml 计划块前存在无语言/非 yaml 围栏」这一在既有 152 份 PRD 中零实例的形态）+ 1 条守卫用例 + 证据包计数订正 + 两轮 Change Log；用户可见功能、契约、CLI 与磁盘证据约定不变。
+- Review: 机械复核＝`evidence.json` item 2 command（60 passed + 29 curl）与 item 3（9 passed）。`lifecycle` 门面豁免与随包 skill 守卫的 main 矛盾项见下一条，属合并期处置。
+
+### 未决（随 PR 合并 base 处置）：`lifecycle` 门面豁免与随包 skill 守卫
+- Type: verification
+- Before: 评审 cycle 2 指出 `tests/test_cli_schema.py` 的 `FACADE_EXEMPT_COMMANDS` 含 `lifecycle`，与 PR base（29a5ea32 已含 main 的 argparse 门面 d9be15ae）矛盾——合并后 `lifecycle` 有 argparse 门面，该豁免会静默把它从门面对齐检查里剔除、注释「只在 Typer 侧存在」变假；并建议随包 skill 守卫 `tests/test_kedacode_operator_skill.py` 取 main 版本。
+- After: 本交付树（HEAD=5bc4a744，**尚未合并 base**）实测：`lifecycle` 仅有 Typer 实现，`build_parser()` 的 argparse 门面不含该子命令，而它在机读条目集合内——故该豁免在本树是**必需且注释属实**：移除会使 `test_argparse_facade_matches_typer_machine_flags` 报「argparse 门面缺少 lifecycle」变红；两守卫文件本树 37 passed 绿色自洽。结论：本项不在本 worktree 落刀，改由 PR 合并到 base 时取 main 的 argparse 门面版本、去掉 `lifecycle` 豁免（远程 issue-274@ff290d2a 已并入 main 版本，消解方向为以 main 为准）。
+- Reason: 修复规则限定「只改当前 worktree、不合并 main」；在未合并头上按合并后的结论改守卫会破坏当前绿测（已证），属反效果。
+- Impact: 本交付树不动两个守卫文件；合并时冲突消解方向明确为取 main 版本。
+- Review: 合并/复核时确认最终树以 main 的 lifecycle CLI 为唯一实现，避免 Typer-only 重复条目与过期豁免。

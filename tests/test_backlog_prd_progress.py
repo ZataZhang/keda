@@ -233,6 +233,27 @@ def test_parse_validation_plan_survives_subheading_before_fence() -> None:
     assert plan[0].summary == "部署隔离正确"
 
 
+def test_parse_validation_plan_skips_non_yaml_fence_before_plan() -> None:
+    """小节里先出现的无语言 / ``text`` 代码块不得被当成计划块而截断解析。
+
+    守卫评审发现：进度侧围栏须与权威解析器只认 ```yaml 的口径一致，否则命令示例
+    （```text / 无语言）会让进度解析器提前取到错误围栏、报「未声明验证计划」。
+    """
+    with_prose_fence = (
+        "## 7.6 Realistic Validation Plan\n\n"
+        "运行示例：\n\n"
+        "```text\n$ just test\n```\n\n"
+        "```yaml\n"
+        "- id: rv-1\n"
+        '  behavior: "真实页面读数"\n'
+        "  reviewer: human\n"
+        "```\n"
+    )
+    plan = parse_validation_plan(with_prose_fence)
+    assert [item.id for item in plan] == ["rv-1"]
+    assert plan[0].summary == "真实页面读数"
+
+
 def test_parse_validation_plan_parity_with_authoritative_extractor() -> None:
     """进度读数与权威 RV 解析器对同一份 PRD 必须给出一致的 rv 编号集合。
 
@@ -262,6 +283,13 @@ def test_parse_validation_plan_parity_with_authoritative_extractor() -> None:
             "```yaml\n"
             "- id: rv-1\n  behavior: a\n"
             "- id: rv-3\n  behavior: c\n"
+            "```\n"
+        ),
+        "text_fence_before_yaml": (
+            "## 7.6 Realistic Validation Plan\n\n"
+            "```text\n$ just test\n```\n\n"
+            "```yaml\n"
+            "- id: rv-1\n  behavior: a\n"
             "```\n"
         ),
     }
