@@ -19,6 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import click
 import pytest
 
 from backend.core.shared.models.agent_runner import AppConfig
@@ -564,7 +565,7 @@ def test_bare_kc_console_entrypoint_returns_nonzero_for_no_tty() -> None:
     )
 
     assert completed_process.returncode == 1
-    assert "Usage: kc" in completed_process.stdout
+    assert "Usage: kc" in click.unstyle(completed_process.stdout)
 
 
 def test_session_subcommand_requires_a_terminal(

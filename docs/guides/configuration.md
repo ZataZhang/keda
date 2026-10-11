@@ -2,7 +2,7 @@
 
 本项目通过 `src/backend/infrastructure/config/settings.py` 中的 `AppSettings` 统一管理配置，并组合多个子配置模型，实现工程化的配置分层。
 
-配置模型按职责分三个模块：`settings.py`（基础服务设置与 `AppSettings` / `AgentRunnerSettings` 聚合）、`agent_runner_settings.py`（全部 `AgentRunner*Settings` 与仓库级 `.kedacode.toml` 覆盖加载）、`settings_sources.py`（配置文件发现与 TOML 设置源）。`settings.py` 对另外两个模块的名字做再导出，既有的 `from backend.infrastructure.config.settings import ...` 路径保持不变。
+配置模型按职责拆分：`settings.py` 负责基础服务设置与 `AppSettings` / `AgentRunnerSettings` 聚合；`agent_runner_settings_models.py` 定义 Agent Runner 基础配置模型；`agent_runner_generated_content_settings.py` 定义生成内容配置；`agent_runner_repository_settings.py` 负责仓库级 `.kedacode.toml` 覆盖及加载；`settings_sources.py` 负责配置文件发现与 TOML 设置源。`agent_runner_settings.py` 保留为兼容导出入口，`settings.py` 继续再导出原有名称，因此既有导入路径保持不变。
 
 ## 配置来源优先级
 

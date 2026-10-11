@@ -63,7 +63,7 @@ nav:
       - 部署指南: guides/deployment.md
       - 发布流程: guides/release-process.md
       - Agent Runner:
-          - 完整指南与执行统计: guides/agent-runner.md
+          - 完整指南、模块职责与执行统计: guides/agent-runner.md
       - 生命周期 Agent 矩阵: guides/lifecycle-agent-matrix.md
       - Agent 模型预设: guides/model-presets.md
       - PRD 编写规范: guides/prd-standard.md
