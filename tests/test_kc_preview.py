@@ -130,7 +130,12 @@ class RecordingPreviewManager(SubprocessPreviewProcessManager):
 
 
 def _pid_alive(process_pid: int) -> bool:
-    """信号 0 探活（不回收、不发消息）。"""
+    """检查进程是否仍运行；Linux 僵尸进程已退出，即使信号 0 仍命中。"""
+    if sys.platform == "linux":
+        process_info = _linux_process_info(process_pid)
+        if process_info is not None:
+            process_state, _process_group = process_info
+            return process_state not in {"Z", "X", "x"}
     try:
         os.kill(process_pid, 0)
     except ProcessLookupError:
@@ -141,12 +146,45 @@ def _pid_alive(process_pid: int) -> bool:
 
 
 def _process_group_alive(process_group: int) -> bool:
-    """进程组里是否还有活着的成员。"""
+    """进程组里是否还有运行中的成员；Linux 僵尸进程不算存活。"""
+    if sys.platform == "linux":
+        for process_stat_path in Path("/proc").glob("[0-9]*/stat"):
+            try:
+                process_pid = int(process_stat_path.parent.name)
+            except ValueError:
+                continue
+            process_info = _linux_process_info(process_pid)
+            if process_info is None:
+                continue
+            process_state, process_group_id = process_info
+            if process_group_id == process_group and process_state not in {"Z", "X", "x"}:
+                return True
+        return False
     try:
         os.killpg(process_group, 0)
     except (ProcessLookupError, PermissionError, OSError):
         return False
     return True
+
+
+def _linux_process_info(process_pid: int) -> tuple[str, int] | None:
+    """从 Linux ``/proc`` 返回进程状态与进程组，避免把僵尸误判为运行中。"""
+    process_stat_path = Path("/proc") / str(process_pid) / "stat"
+    try:
+        stat_text = process_stat_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    command_end = stat_text.rfind(")")
+    if command_end < 0:
+        return None
+    stat_fields = stat_text[command_end + 1 :].split()
+    if len(stat_fields) < 3:
+        return None
+    try:
+        process_group_id = int(stat_fields[2])
+    except ValueError:
+        return None
+    return stat_fields[0], process_group_id
 
 
 def _grandchild_pid_from_log(log_path: Path) -> int | None:
