@@ -111,6 +111,8 @@ class AgentExecutionRequest:
     #: （fix / closeout / verifier）产出可用 usage 时以 ``(flow, agent, usage)``
     #: 回调；agent 名允许与主 agent 不同（如 verifier 走了候选回退）。
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None
+    #: RV 证据与仓库命令通过后、独立 verifier 启动前调用；用于先发布未签核的 Draft PR。
+    before_verifier_callback: Callable[[], None] | None = None
     #: 实现阶段绑定的模型选择；``None`` 表示无绑定。fix / closeout 未自绑时继承它（同一 agent）。
     model_selection: ModelSelection | None = None
     #: 首轮要续传的原会话 id（崩溃对账判定为「可续传」时由领取侧从 worktree 局部
@@ -759,6 +761,8 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 with attempt_phases.measure("rv_reexec"):
                     ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
                     ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
+                if request.before_verifier_callback is not None:
+                    request.before_verifier_callback()
                 current_failure_phase = "verifier"
                 with attempt_phases.measure("verifier"):
                     verifier_verdict = run_verifier_gate(

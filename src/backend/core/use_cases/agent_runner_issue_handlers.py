@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
@@ -71,10 +72,12 @@ from backend.core.use_cases.agent_runner_pr_handoff import (
 )
 from backend.core.use_cases.agent_runner_publication import (
     LocalCommitReuseRequest,
+    PreVerifierDraftPublicationRequest,
     _finish_existing_commit_publication,
     _finish_implementation_publication,
     _reuse_existing_local_commit,
     _reuse_local_commit,
+    publish_draft_pr_before_verifier,
 )
 from backend.core.use_cases.agent_runner_publish import publish_changes
 from backend.core.use_cases.agent_runner_recovery_selection import (
@@ -134,6 +137,7 @@ RUNTIME_DEPENDENCY_NAMES = (
     "_finish_implementation_publication",
     "_release_blocked_claim_lock",
     "_reuse_existing_local_commit",
+    "publish_draft_pr_before_verifier",
     "_run_supervisor_with_repair_loop",
     "choose_agent",
     "create_or_reuse_worktree",
@@ -253,6 +257,16 @@ def _process_blocked_resolution(
             return
         issue = stage_decision.issue
         publish_stage = stage_decision.publish_stage
+        pre_verifier_publication = PreVerifierDraftPublicationRequest(
+            issue=issue,
+            worktree_path=worktree_path,
+            config=config,
+            github_client=github_client,
+            process_runner=process_runner,
+            expected_branch=current_branch,
+            publish_stage=publish_stage,
+            content_generator=content_generator,
+        )
         # worktree 必须是 clean 的
         if has_changes(worktree_path, process_runner):
             raise RuntimeError(
@@ -280,6 +294,9 @@ def _process_blocked_resolution(
             prompt_override=continuation_prompt,
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
+            before_verifier_callback=partial(
+                publish_draft_pr_before_verifier, pre_verifier_publication
+            ),
             model_selection=implementation_model_selection,
             publish_stage=publish_stage,
             repo_id=repo_id,
@@ -619,6 +636,16 @@ def _process_ready_issue(
     )
     issue = stage_decision.issue
     publish_stage = stage_decision.publish_stage
+    pre_verifier_publication = PreVerifierDraftPublicationRequest(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=config,
+        github_client=github_client,
+        process_runner=process_runner,
+        expected_branch=expected_branch,
+        publish_stage=publish_stage,
+        content_generator=content_generator,
+    )
 
     # 步骤 3: 检查恢复路径
     #
@@ -658,6 +685,7 @@ def _process_ready_issue(
 
     if commit_result is not None:
         # 有已存在的本地 commit 且已达交付标准 → 恢复路径
+        publish_draft_pr_before_verifier(pre_verifier_publication)
         _finish_existing_commit_publication(
             issue=issue,
             worktree_path=worktree_path,
@@ -689,6 +717,9 @@ def _process_ready_issue(
             prompt_override=continuation_prompt,
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
+            before_verifier_callback=partial(
+                publish_draft_pr_before_verifier, pre_verifier_publication
+            ),
             model_selection=implementation_model_selection,
             publish_stage=publish_stage,
             repo_id=repo_id,

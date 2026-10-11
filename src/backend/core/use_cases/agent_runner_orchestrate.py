@@ -62,6 +62,7 @@ from backend.core.use_cases.agent_runner_publication import (
     _finish_existing_commit_publication,
     _finish_implementation_publication,
     _reuse_existing_local_commit,
+    publish_draft_pr_before_verifier,
 )
 from backend.core.use_cases.agent_runner_run_history import (
     ATTEMPT_HISTORY_MAX_ROWS,
@@ -151,6 +152,7 @@ __all__ = [
     "_process_running_rework",
     "_release_blocked_claim_lock",
     "_reuse_existing_local_commit",
+    "publish_draft_pr_before_verifier",
     "_run_supervisor_with_repair_loop",
     "_worktree_needs_rebase_recovery",
     "choose_agent",

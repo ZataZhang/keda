@@ -80,6 +80,32 @@ from backend.core.use_cases.run_verifier_agent import (
 _logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _PushChangesRequest:
+    """分支 push 与清理旧 verifier 标签所需的发布上下文。"""
+
+    issue: IssueSummary
+    worktree_path: Path
+    config: AppConfig
+    github_client: IGitHubClient
+    process_runner: IProcessRunner
+    expected_branch: str
+
+
+@dataclass(frozen=True)
+class PreVerifierDraftPublicationRequest:
+    """独立 verifier 启动前创建 Draft PR 所需的上下文。"""
+
+    issue: IssueSummary
+    worktree_path: Path
+    config: AppConfig
+    github_client: IGitHubClient
+    process_runner: IProcessRunner
+    expected_branch: str
+    publish_stage: PublishStage
+    content_generator: IContentGenerator | None = None
+
+
 def build_implementation_complete_comment(
     *,
     agent: str,
@@ -163,34 +189,73 @@ def build_draft_pr_created_comment(
     )
 
 
-def _push_changes_with_recovery_context(
-    *,
-    issue: IssueSummary,
-    worktree_path: Path,
-    config: AppConfig,
-    process_runner: IProcessRunner,
-    expected_branch: str,
-) -> str:
-    """Push the branch and preserve recovery context on push failures.
-
-    Used both for the initial post-implementation push and for reviewer
-    patches during the pre-PR review loop. Reviewer patches call this via a
-    closure that pins the same ``expected_branch`` and configuration.
-    """
+def _push_changes_with_recovery_context(request: _PushChangesRequest) -> str:
+    """推送分支并在更新已有 PR 前清除过期的 verifier 通过标签。"""
     try:
-        return push_changes(
-            issue,
-            worktree_path,
-            config,
-            process_runner,
-            expected_branch=expected_branch,
+        existing_pr_context = request.github_client.get_pull_request_context(
+            request.expected_branch, require_success=True
         )
-    except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+        if existing_pr_context is not None:
+            if existing_pr_context.number is None:
+                raise RuntimeError(
+                    "无法清理分支 "
+                    f"{request.expected_branch} 上 PR 的 verifier 状态：GitHub 响应缺少 PR 编号。"
+                )
+            request.github_client.edit_issue_labels(
+                existing_pr_context.number,
+                remove=(request.config.labels.verifier_passed,),
+            )
+        return push_changes(
+            request.issue,
+            request.worktree_path,
+            request.config,
+            request.process_runner,
+            expected_branch=request.expected_branch,
+        )
+    except Exception as exc:  # noqa: BLE001 - 标签清理与 push 都是发布边界。
         raise PublishFailureError(
             str(exc),
-            worktree_path=worktree_path,
+            worktree_path=request.worktree_path,
             failure_category=PublishFailureCategory.PUSH,
         ) from exc
+
+
+def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest) -> None:
+    """本地验证通过后先发布 Draft PR；失败时留给最终发布阶段重试。
+
+    Args:
+        request: Draft PR 提前发布所需的 Issue、worktree 与发布依赖。
+    """
+    if request.publish_stage is not PublishStage.NORMAL:
+        return
+    try:
+        _push_changes_with_recovery_context(
+            _PushChangesRequest(
+                issue=request.issue,
+                worktree_path=request.worktree_path,
+                config=request.config,
+                github_client=request.github_client,
+                process_runner=request.process_runner,
+                expected_branch=request.expected_branch,
+            )
+        )
+        _create_draft_pr_with_recovery_context(
+            issue=request.issue,
+            worktree_path=request.worktree_path,
+            config=request.config,
+            github_client=request.github_client,
+            process_runner=request.process_runner,
+            expected_branch=request.expected_branch,
+            content_generator=request.content_generator,
+            publish_stage=request.publish_stage,
+        )
+    except Exception as exc:  # noqa: BLE001 - 提前发布失败不应改变 verifier 结论。
+        _logger.warning(
+            "Could not create the pre-verifier Draft PR for Issue #%d; "
+            "the final publication stage will retry: %s",
+            request.issue.number,
+            exc,
+        )
 
 
 def _create_draft_pr_with_recovery_context(
@@ -204,11 +269,7 @@ def _create_draft_pr_with_recovery_context(
     content_generator: IContentGenerator | None,
     publish_stage: PublishStage = PublishStage.NORMAL,
 ) -> tuple[str, str]:
-    """Create the draft PR (or reuse an existing one) and preserve context.
-
-    Only invoked once the pre-PR review gate has converged, so any failure
-    here is a PR-creation problem and is reported as ``PR_CREATE``.
-    """
+    """创建或复用 Draft PR，并将失败归类为可恢复的 PR 创建错误。"""
     try:
         return create_draft_pr(
             issue,
@@ -234,30 +295,15 @@ def _create_draft_pr_with_recovery_context(
         ) from exc
 
 
-def _make_push_callback(
-    *,
-    issue: IssueSummary,
-    worktree_path: Path,
-    config: AppConfig,
-    process_runner: IProcessRunner,
-    expected_branch: str,
-) -> Callable[[], None]:
-    """Build the push callback used by :func:`run_pre_pr_review`.
+def _make_push_callback(request: _PushChangesRequest) -> Callable[[], None]:
+    """为 :func:`run_pre_pr_review` 构建无参数 push 回调。
 
-    The closure is intentionally parameterless so the review loop can call it
-    after every successful reviewer commit without exposing publication
-    internals. On push failure the callback raises :class:`PublishFailureError`
-    so the runner exits the review cycle with a recoverable context.
+    审查循环会在每次 reviewer commit 后调用它；push 失败时会抛出
+    :class:`PublishFailureError`，由 runner 按可恢复发布错误处理。
     """
 
     def _push() -> None:
-        _push_changes_with_recovery_context(
-            issue=issue,
-            worktree_path=worktree_path,
-            config=config,
-            process_runner=process_runner,
-            expected_branch=expected_branch,
-        )
+        _push_changes_with_recovery_context(request)
 
     return _push
 
@@ -605,9 +651,9 @@ def _finish_implementation_publication(
 
     处理流程：
     1. 评论实现完成信息和验证结果
-    2. 立即 push 实现 commit 到远程（不再被 review 阻塞）
-    3. 运行 pre-PR code review（reviewer 修复会即时 push）
-    4. review 收敛后才创建 Draft PR
+    2. verifier 前已尽力发布未签核的 Draft PR；此处再次 push 确保分支最新
+    3. 运行 pre-PR code review（reviewer 修复会清除旧标签并即时 push）
+    4. review 收敛后复用 Draft PR，并对最终 HEAD 做必要复核
     5. 消费 Issue 上的直发标签（命中过标签时）
     6. 启动 PR 后监督循环（或直接进入 review 标签）
 
@@ -662,23 +708,19 @@ def _finish_implementation_publication(
         ),
     )
 
-    # 步骤 2: 实现 commit 完成后立即 push，使 feature branch 可见。
-    # 后续 reviewer 修复也通过 push_callback 走同一条 push 路径。
-    _push_changes_with_recovery_context(
+    # 步骤 2: verifier 前已经尽力发布 Draft PR；再次 push 确认当前分支可见。
+    # 后续 reviewer 修复也通过 push_callback 走同一条路径，并先清除旧 verifier 标签。
+    push_request = _PushChangesRequest(
         issue=issue,
         worktree_path=worktree_path,
         config=config,
+        github_client=github_client,
         process_runner=process_runner,
         expected_branch=expected_branch,
     )
+    _push_changes_with_recovery_context(push_request)
 
-    push_callback = _make_push_callback(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        process_runner=process_runner,
-        expected_branch=expected_branch,
-    )
+    push_callback = _make_push_callback(push_request)
 
     # 步骤 3: 审核后仅对改变的 HEAD 重新取 RV 与 verifier 结论（快速通道跳过）。
     final_verification_request = FinalVerificationRequest(
@@ -808,9 +850,9 @@ def _finish_existing_commit_publication(
 
     处理流程：
     1. 评论实现完成信息（标记为 recovered）
-    2. 立即 push 本地 commit 到远程
-    3. 运行 pre-PR code review（reviewer 修复会即时 push）
-    4. review 收敛后才创建 Draft PR
+    2. verifier 前已尽力发布未签核的 Draft PR；此处再次 push 确保分支最新
+    3. 运行 pre-PR code review（reviewer 修复会清除旧标签并即时 push）
+    4. review 收敛后复用 Draft PR，并对最终 HEAD 做必要复核
     5. 消费 Issue 上的直发标签（命中过标签时）
     6. 启动 PR 后监督循环（或直接进入 review 标签）
 
@@ -849,22 +891,18 @@ def _finish_existing_commit_publication(
         ),
     )
 
-    # 步骤 2: 立即 push 已存在 commit 到远程（不再被 review 阻塞）
-    _push_changes_with_recovery_context(
+    # 步骤 2: verifier 前已经尽力发布 Draft PR；再次 push 确认当前分支可见。
+    push_request = _PushChangesRequest(
         issue=issue,
         worktree_path=worktree_path,
         config=config,
+        github_client=github_client,
         process_runner=process_runner,
         expected_branch=expected_branch,
     )
+    _push_changes_with_recovery_context(push_request)
 
-    push_callback = _make_push_callback(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        process_runner=process_runner,
-        expected_branch=expected_branch,
-    )
+    push_callback = _make_push_callback(push_request)
 
     # 步骤 3: 复用提交也要审核，并在最终 HEAD 上取得复核结论（快速通道跳过）。
     final_verification_request = FinalVerificationRequest(

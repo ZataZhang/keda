@@ -1065,11 +1065,12 @@ def run_agent_until_committed(
     prompt_override: str | None = None,
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
     on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
+    before_verifier_callback: Callable[[], None] | None = None,
     model_selection: ModelSelection | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
     repo_id: str | None = None,
 ) -> AgentCommitResult:
-    """运行 Agent recovery 状态机并返回最终提交结果；``repo_id`` 指稳定仓库 registry id。"""
+    """运行 Agent recovery 状态机并返回最终提交结果；可在 verifier 前回调发布 Draft PR。"""
     from backend.core.use_cases.run_agent_execution_loop import (
         AgentExecutionRequest,
         run_agent_until_committed as run_execution_loop,
@@ -1087,6 +1088,7 @@ def run_agent_until_committed(
             prompt_override=prompt_override,
             on_attempt_recorded=on_attempt_recorded,
             on_agent_usage=on_agent_usage,
+            before_verifier_callback=before_verifier_callback,
             model_selection=model_selection,
             repo_id=repo_id,
             # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"

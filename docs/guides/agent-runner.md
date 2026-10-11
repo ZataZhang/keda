@@ -141,7 +141,7 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 创建 Issue ─┬─（排队）贴上 agent/ready → daemon 自主挑选并认领（换成 agent/running）
             └─（点名）kc run --issue <N> 直接认领：不要求任何状态标签
                ↓
-        AI 做完 → push → pre-PR review → Draft PR → agent/supervising
+        实现收尾 + 本地验证 → Draft PR（未签核）→ verifier → pre-PR review → agent/supervising
                ↓
         supervisor 通过 → 换成 agent/review → 人工审完关闭
                ↓
@@ -718,7 +718,7 @@ Fix Agent 只挂在「提交前验证失败」这一个入口。代码写完、�
 
 5. **留痕** —— runner 比对收尾前后的 PRD 文本与证据清单，算出「本轮勾了哪几项 / 追加了哪条 Change Log / 新增了哪些证据文件」，以 `delivery_closeout` + `recovered=true` 记一条 attempt，同步到 Issue 的尝试历史评论。**这份记录不采信 agent 自述**——agent 可以在总结里说谎，前后文本差异不会。
 
-runner 在 commit proxy 固定实现提交后复跑 RV，再启动要求工作树干净的独立 verifier。pre-PR review 若提交补丁，runner 在创建 Draft PR 前对新的 HEAD 重新执行 RV 和独立 verifier；复用已有本地提交的发布路径也执行这道最终复核。最终复核失败时不创建 PR，也不沿用旧提交的 verifier 结论。
+runner 在 commit proxy 固定实现提交后复跑 RV，并确认 PRD 执行侧收尾、验证证据与仓库验证命令均已通过；随后先 push 分支并创建或复用 Draft PR，再启动要求工作树干净的独立 verifier。这个 Draft PR 先保持未签核状态，不添加 `validation/verifier-passed`。verifier 通过后才进入 pre-PR review；reviewer 若提交补丁，runner 会先移除已有 verifier 通过标签，再对新的 HEAD 重新执行 RV 和独立 verifier。复用已有本地提交的发布路径也会先发布 Draft PR，再执行发布前审查与最终复核。最终复核失败时保留 Draft PR 供修复，不沿用旧提交的 verifier 结论，也不保留旧的通过标签。
 
 任一环节失败即升级为整轮重跑，与本层落地前的行为一致；同时 runner 会把收尾 pass 对 PRD 的编辑**原样撤销**。验收清单是这几道门禁里唯一没有独立验证源的一道（门禁只问「还有没有未勾项」），失败的收尾若把一个举不出证据的勾留在 worktree 里，随后的完整重跑会把它当成既成事实收下，「举证后才可勾选」就成了空话。越界写入的其他文件不撤销，按设计交给完整重跑重新处理。
 
@@ -1303,7 +1303,7 @@ GitHub 的标签写入没有 compare-and-swap，所以"谁先领走这条 Issue"
 
 ### 快速合并旗标 `--fast-merge`
 
-默认 run 在 builder 提交后会依次跑两道验证门禁——rv re-exec（重跑 PRD 声明的验证命令）与独立 verifier 复核——绿灯后才开 Draft PR。`--fast-merge` 是**本次 run 的一次性快速通道**：builder 提交后**跳过这两道门禁**，直接开 Draft PR，并在正文里显式标注该 PR **未经自动化验证**。
+默认 run 在 builder 提交、PRD 执行侧收尾和仓库验证通过后，先开一个未签核 Draft PR，再运行独立 verifier；通过后才进入常规 pre-PR review 与最终 HEAD 复核。`--fast-merge` 是**本次 run 的一次性快速通道**：builder 提交后**跳过这两道验证门禁**，沿原发布流程开 Draft PR，并在正文里显式标注该 PR **未经自动化验证**。
 
 ```bash
 # 快速通道：完成即开 PR，跳过验证门禁（仅单一目标）
@@ -1742,10 +1742,12 @@ kc run --repo-id owner-repo-a
 agent/ready
     → claim → agent/running
     → implementation agent commit
+    → RV / 证据 / PRD 执行侧收尾通过
+    → push implementation branch + create Draft PR（尚无 verifier label）
+    → independent verifier
     → Issue comment: Implementation Complete
-    → push implementation branch to remote
-    → pre-PR review (仍在 agent/running; reviewer 修复也会 push)
-    → Draft PR creation
+    → pre-PR review (仍在 agent/running; reviewer 修复会清旧标签并重新验证)
+    → reuse or create Draft PR
     → agent/supervising
     → Issue comment: Draft PR Created
     → post-PR supervisor cycle
@@ -1757,17 +1759,19 @@ agent/ready
 
 ### Pre-PR Review
 
-`kc run` 在实现 agent 完成并提交后会先 `git push` 推送到远程分支，再在 Draft PR 创建之前执行一次 pre-PR AI code review：
+新实现路径在实现 agent 完成、PRD 执行侧交付收尾和本地验证通过后，先 `git push` 并创建或复用未签核的 Draft PR，再启动独立 verifier；verifier 通过后才执行 pre-PR AI code review。复用已提交本地 commit 的恢复路径也会先发布 Draft PR，再执行 review 与最终 HEAD 复核：
 
-1. Runner 写 Issue comment `Implementation Complete`
-2. Runner 立即调用 `push_changes()` 把当前 feature branch 推送到配置 remote（push 不再被 review 阻塞）
-3. Runner 构建 review packet（Issue、PRD、diff、changed paths、verification results、AI standards、review workflow）
+1. RV 证据和仓库验证命令通过、PRD 执行侧条目完成并归档后，runner 将分支 push 到配置 remote，并创建或复用 Draft PR；此时不添加 `validation/verifier-passed`
+2. 独立 verifier 对已提交工作树进行验证；失败时进入原有修复循环，后续合格提交更新同一个 Draft PR
+3. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、diff、changed paths、verification results、AI standards、review workflow）
 4. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill** 并把 skill 输出的 findings 写进响应的 `findings` JSON 数组；review packet 默认模板（`agent_review.DEFAULT_REVIEW_PROMPT_TEMPLATE`）会显式提示 reviewer 这一行为，并提供 findings schema（`category` / `severity` / `file` / `line` / `title` / `description` / `recommendation`）。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖该模板，未配置时回退到代码默认。
 5. 若 reviewer 在当前 worktree / Issue 下已有可续传 session id，就接着该会话执行 review；没有记录时创建新会话。调用使用 `[agent_runner.pre_pr_review].timeout_seconds` 限制最长运行时间
 6. Reviewer 可直接修改 worktree；修改后写入 `.agent-runner/commit-request.json`
-7. Runner 通过 commit proxy 提交 reviewer 修改、重新运行 `verification_commands` 并立即 `push_changes()` 把修复推送到远程分支
+7. Runner 通过 commit proxy 提交 reviewer 修改、重新运行 `verification_commands` 并 push 修复；更新 PR head 前先移除已有的 `validation/verifier-passed`，最终复核通过后再加回
 8. Runner 写 Issue comment `Pre-PR Review Result`（含 findings 表格）
-9. Review 通过后才调用 `create_draft_pr()` 创建 Draft PR；review 未收敛时跳过 PR 创建，runner 软失败并写 comment
+9. Review 通过后复用已创建的 Draft PR（或在提前发布失败时补建）；review 未收敛时走软失败路径并写 comment
+
+提前创建的 Draft PR 正文是首次发布时的快照；verifier 修复会更新 PR 分支，但复用已有 PR 时不会重写正文。审查时以 PR 当前 head 和 diff 为准。
 
 review packet 现在是 **修复-再审查收敛模式**：轮数由 `[agent_runner.pre_pr_review].max_attempts` 控制，默认 2 轮。每一轮 reviewer 都可以通过 `commit-request.json` 自修复（runner 仅负责 commit proxy + verification 重新执行 + push callback 把修复推送到远程）。如果 reviewer 在一轮内报出了 findings 却未写 `commit-request.json`，runner 会追加一条提醒并把该轮内重新调用 reviewer 最多 `[agent_runner.pre_pr_review].commit_request_reminder_attempts` 次（默认 1 次），让 reviewer 有机会把 findings 落实为补丁，而不是直接放弃。最后一轮结束后若仍未 `approved` 但 reviewer 已写最终修复 commit request，runner 接受该最终修复并继续发布；否则写一条 findings 评论并走软失败路径（runner 不再抛出硬错误，但调用方会按 `agent/failed` 处理）。Reviewer 解析器会基于 findings 数组重新统计 `critical`/`high`/`medium`/`low` 计数，避免 reviewer 自填数字被信任；若 verdict 为 `approved` 但 findings 非空，verdict 会被降级为 `changes_requested` 以避免漏报。
 
@@ -3521,7 +3525,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
    - **横幅一致性**：skill（v5 起）在契约 JSON 里报告横幅状态。`Human-Confirmed` 组仍有 `- [ ]` 时横幅必须是 `🧍 **验收状态**：待人工验收`（`awaiting_human`），一个都没有时必须是 `✅ **验收状态**：已验收`（`accepted`）；`⬜ 未开工` 与横幅缺失都算不一致。不一致时不归档、不发布，抛 `ACCEPTANCE_BANNER_MISMATCH`，可交给 Closeout Agent：只改横幅这一行并追加一条 Change Log，不得勾选、取消或改写任何复选框。本机 skill 仍是 v3/v4（不报告横幅）时跳过这项检查，只按执行侧判据归档。横幅文本由 skill 解析，keda 不另写横幅解析。
    - **发布前检查**（`push_changes(require_prd_archived=True)`，正常交付路径）：PRD 必须已在 `tasks/archive/`，且执行侧条目与横幅校验通过；仍在 pending（包括带人审空框的情形）一律拒绝。两条既有例外不变：recovery 耗尽后的失败 Draft PR 与 PRD rework 提案传 `require_prd_archived=False`，二者都不调用交付检查，也都不归档——失败交付永不归档。
    - PRD 文件不存在、archive 目录缺失或 `Acceptance Checklist` section 缺失：进入 recovery loop，重试耗尽后标记 `agent/failed`。
-3. **归档时机**：`git mv` 发生在 `git add -A` 之前，归档随实现一起提交，包括仍待人工验收的 PRD。**已归档 ≠ 已验收**：归档只记录执行侧交付完成，验收与否看横幅与 `Human-Confirmed` 组。人在 PR 上确认后勾选人审项、把横幅改为 ✅ 已验收（同一个 PR 的后续提交，或合并后补记；合并时自动补记是后续 PRD）。合并队列对人审未答的 PRD（不论在 pending 还是 archive）一律跳过等人，见"7 步门禁链"下的 PRD hold。
+3. **归档时机**：`git mv` 发生在 `git add -A` 之前，归档随实现一起提交，包括仍待人工验收的 PRD。正常路径在独立 verifier 之前完成这一步；verifier 是后续验收，不改变“归档代表执行侧交付完成”的定义。**已归档 ≠ 已验收**：归档只记录执行侧交付完成，验收与否看横幅与 `Human-Confirmed` 组。人在 PR 上确认后勾选人审项、把横幅改为 ✅ 已验收（同一个 PR 的后续提交，或合并后补记；合并时自动补记是后续 PRD）。合并队列对人审未答的 PRD（不论在 pending 还是 archive）一律跳过等人，见"7 步门禁链"下的 PRD hold。
 4. **Pre-PR Review 与归档的关系**：`build_prd_review_reference()` 读取 worktree 中实际存在的 pending 或 archive 路径。runner 已归档的 PRD 不得被 agent 或 reviewer 挪回 pending；人工验收驳回后是否重开 PRD 由人决定。
 
 > **注意**：runner 不会只因 PRD 的 checkbox 而信任业务完成度；Realistic Validation 与独立 verifier 仍需提供实际证据。Change Log 解释需求为何演进，不能替代任何验收项或证据。
