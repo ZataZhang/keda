@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -40,6 +43,7 @@ from backend.core.use_cases.agent_session_preview import (
 from backend.infrastructure import preview_process_manager
 from backend.infrastructure.process_identity import process_start_time
 from backend.infrastructure.preview_process_manager import (
+    PreviewRegistryReadError,
     SubprocessPreviewProcessManager,
     clear_preview_record,
     read_preview_record,
@@ -331,6 +335,41 @@ def test_silent_dev_command_times_out_without_url(
     assert "ready_timeout_seconds" in outcome.message
 
 
+def test_ready_url_must_be_served_by_the_started_process_group(
+    isolated_state_home: Path,
+    repo_root: Path,
+    dev_server_argv: tuple[str, ...],
+) -> None:
+    """已有陌生进程占着配置端口时，不能把它误报成本次预览已就绪。"""
+    foreign_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    foreign_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    foreign_listener.bind(("127.0.0.1", 0))
+    foreign_listener.listen(1)
+    foreign_port = foreign_listener.getsockname()[1]
+    manager = SubprocessPreviewProcessManager()
+    config = _config_with_preview(
+        PreviewProfile(
+            argv=(*dev_server_argv, "silent"),
+            ready_url=f"http://127.0.0.1:{foreign_port}/",
+            ready_timeout_seconds=1,
+        )
+    )
+
+    try:
+        outcome = run_preview_start(
+            config=config, repo_root=repo_root, confirmed_argv=None, preview_manager=manager
+        )
+
+        assert outcome.exit_ok is False
+        assert outcome.url is None
+        assert "did not report a reachable loopback address" in outcome.message
+        assert read_preview_record(repo_root) is None
+        assert foreign_listener.fileno() >= 0
+    finally:
+        manager.stop_preview(repo_root=repo_root)
+        foreign_listener.close()
+
+
 def test_non_loopback_ready_url_is_rejected_before_any_spawn(
     isolated_state_home: Path, repo_root: Path, dev_server_argv: tuple[str, ...]
 ) -> None:
@@ -423,6 +462,64 @@ def test_second_start_reuses_slot_and_does_not_spawn_a_rival(
     assert "already running" in second.message
     assert read_preview_record(repo_root).pid == first_pid
     run_preview_stop(repo_root=repo_root, preview_manager=manager)
+
+
+def test_concurrent_starts_for_one_repository_keep_one_managed_group(
+    isolated_state_home: Path,
+    repo_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两次同时 start 必须串行；不能留下注册表之外的第二个进程组。"""
+    script_path = tmp_path / "fake_dev_server.py"
+    script_path.write_text(_FAKE_DEV_SERVER, encoding="utf-8")
+    port_argvs = (
+        (sys.executable, str(script_path), str(_free_loopback_port())),
+        (sys.executable, str(script_path), str(_free_loopback_port())),
+    )
+    manager = SubprocessPreviewProcessManager()
+    empty_registry_reads = threading.Barrier(2)
+    original_read = preview_process_manager.read_preview_record
+
+    def synchronized_registry_read(target_repo: Path):
+        record = original_read(target_repo)
+        if record is None:
+            try:
+                empty_registry_reads.wait(timeout=0.3)
+            except threading.BrokenBarrierError:
+                pass
+        return record
+
+    monkeypatch.setattr(preview_process_manager, "read_preview_record", synchronized_registry_read)
+    requests = tuple(
+        PreviewStartRequest(
+            argv=argv,
+            cwd=repo_root,
+            ready_url=None,
+            ready_timeout_seconds=30,
+        )
+        for argv in port_argvs
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = tuple(pool.map(manager.start_preview, requests))
+
+    try:
+        assert sum(outcome.started for outcome in outcomes) == 1
+        registered_record = read_preview_record(repo_root)
+        assert registered_record is not None
+        assert all(
+            not outcome.started or outcome.record == registered_record for outcome in outcomes
+        )
+    finally:
+        for process_group in {
+            outcome.record.process_group for outcome in outcomes if outcome.record is not None
+        }:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        clear_preview_record(repo_root)
 
 
 def test_stop_refuses_when_recorded_process_group_does_not_match(
@@ -554,9 +651,11 @@ def test_status_without_record_is_read_only_and_ok(
 
 
 def test_malformed_registry_version_is_not_trusted(
-    isolated_state_home: Path, repo_root: Path
+    isolated_state_home: Path,
+    repo_root: Path,
+    dev_server_argv: tuple[str, ...],
 ) -> None:
-    """注册表版本或形状不认识时按「无记录」处理，不猜字段、不据此杀进程。"""
+    """注册表版本或形状不认识时按 owner 未知交班，不能启动、覆盖或发送信号。"""
     registry_dir = isolated_state_home / ".kedacode" / "preview"
     registry_dir.mkdir(parents=True, exist_ok=True)
     registry_path = registry_dir / (preview_process_manager.preview_repo_slug(repo_root) + ".json")
@@ -564,9 +663,24 @@ def test_malformed_registry_version_is_not_trusted(
         json.dumps({"version": 999, "record": {"pid": 1234}}), encoding="utf-8"
     )
 
-    assert read_preview_record(repo_root) is None
-    outcome = SubprocessPreviewProcessManager().stop_preview(repo_root=repo_root)
-    assert outcome.stopped is True
+    manager = SubprocessPreviewProcessManager()
+    with pytest.raises(PreviewRegistryReadError, match="unsupported format version"):
+        read_preview_record(repo_root)
+    status = manager.inspect_preview(repo_root=repo_root)
+    started = manager.start_preview(
+        PreviewStartRequest(
+            argv=dev_server_argv,
+            cwd=repo_root,
+            ready_url=None,
+            ready_timeout_seconds=1,
+        )
+    )
+    outcome = manager.stop_preview(repo_root=repo_root)
+
+    assert status.state == PreviewState.FOREIGN
+    assert started.started is False
+    assert "refusing to start another process" in started.message
+    assert outcome.stopped is False
     assert outcome.killed is False
 
 

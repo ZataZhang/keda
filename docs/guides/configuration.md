@@ -286,7 +286,7 @@ ready_timeout_seconds = 60
 - `preview.argv`：已批准的 dev 命令 **argv 数组**（不是 shell 文本）。空列表视为未配置，此时走
   "仓库唯一候选 + 用户显式确认"路径；元素为空字符串是加载期错误。
 - `preview.ready_url`：期望的 ready 地址。主机必须属于回环闭集（`localhost` / `127.0.0.1` / `::1`），
-  非回环主机是**加载期错误**——绑到可路由网卡这条路径在任何进程启动之前就被排除。
+  非回环主机是**加载期错误**；ready 探测还会确认该端口的监听 socket 属于本次命令进程树，避免把既有陌生服务误报为预览。
 - `preview.ready_timeout_seconds`：等待进程自报地址的上限，必须为正数。
 
 仓库层 `.kedacode.toml` 可覆盖以上任意字段（含 `preview.argv`），因此不同仓库能各自声明自己的

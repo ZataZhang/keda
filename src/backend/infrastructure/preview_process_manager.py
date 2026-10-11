@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -29,8 +30,12 @@ import signal
 import socket
 import subprocess
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
+
+import psutil
 
 from backend.core.shared.interfaces.agent_session import (
     IPreviewProcessManager,
@@ -106,8 +111,23 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
                 )
             except ValueError as value_exc:
                 return PreviewStartOutcome(started=False, record=None, message=str(value_exc))
+        with _preview_registry_lock(request.cwd):
+            return self._start_preview_locked(request)
+
+    def _start_preview_locked(self, request: PreviewStartRequest) -> PreviewStartOutcome:
+        """持有仓库锁时执行启动状态机，避免重复启动或覆盖其他调用的记录。"""
         repo_root = request.cwd
-        existing_record = read_preview_record(repo_root)
+        try:
+            existing_record = read_preview_record(repo_root)
+        except PreviewRegistryReadError as registry_exc:
+            return PreviewStartOutcome(
+                started=False,
+                record=None,
+                message=(
+                    f"Preview registry cannot be verified ({registry_exc}); refusing to start "
+                    "another process. Inspect or repair the registry before retrying."
+                ),
+            )
         if existing_record is not None:
             if _pid_is_alive(existing_record.pid):
                 identity_reason = _identity_mismatch_reason(existing_record)
@@ -177,7 +197,17 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
 
     def inspect_preview(self, *, repo_root: Path) -> PreviewStatusOutcome:
         """读取注册表并判定当前预览状态，不启动也不终止任何进程。"""
-        record = read_preview_record(repo_root)
+        try:
+            record = read_preview_record(repo_root)
+        except PreviewRegistryReadError as registry_exc:
+            return PreviewStatusOutcome(
+                state=PreviewState.FOREIGN,
+                record=None,
+                message=(
+                    f"Preview registry cannot be verified ({registry_exc}); "
+                    "no process was inspected or signalled. Repair the registry first."
+                ),
+            )
         if record is None:
             return PreviewStatusOutcome(
                 state=PreviewState.NONE,
@@ -207,11 +237,22 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
                 ),
             )
         if record.url:
+            if _url_is_reachable(
+                record.url, process_pid=record.pid, process_group=record.process_group
+            ):
+                return PreviewStatusOutcome(
+                    state=PreviewState.READY,
+                    record=record,
+                    url=record.url,
+                    message=f"Preview ready at {record.url} (process group {record.process_group}).",
+                )
             return PreviewStatusOutcome(
-                state=PreviewState.READY,
+                state=PreviewState.STARTING,
                 record=record,
-                url=record.url,
-                message=f"Preview ready at {record.url} (process group {record.process_group}).",
+                message=(
+                    f"Preview process (pid {record.pid}) remains registered, but its URL is no "
+                    "longer reachable from a listener in the owned process group."
+                ),
             )
         return PreviewStatusOutcome(
             state=PreviewState.STARTING,
@@ -224,7 +265,23 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
 
     def stop_preview(self, *, repo_root: Path) -> PreviewStopOutcome:
         """只停止注册表里那个身份可证实的进程组。"""
-        record = read_preview_record(repo_root)
+        with _preview_registry_lock(repo_root):
+            return self._stop_preview_locked(repo_root=repo_root)
+
+    def _stop_preview_locked(self, *, repo_root: Path) -> PreviewStopOutcome:
+        """持有仓库锁时执行停止状态机，避免与启动/记录更新交错。"""
+        try:
+            record = read_preview_record(repo_root)
+        except PreviewRegistryReadError as registry_exc:
+            return PreviewStopOutcome(
+                stopped=False,
+                killed=False,
+                record=None,
+                message=(
+                    f"Refusing to stop a preview from an unreadable registry ({registry_exc}); "
+                    "no process was signalled. Inspect or repair the registry first."
+                ),
+            )
         if record is None:
             return PreviewStopOutcome(
                 stopped=True,
@@ -329,7 +386,12 @@ def _await_ready(
                     f"reporting a ready address. Log: {record.log_path}"
                 ),
             )
-        ready_url_candidate = _resolve_ready_url(log_path=record.log_path, expected_url=ready_url)
+        ready_url_candidate = _resolve_ready_url(
+            log_path=record.log_path,
+            expected_url=ready_url,
+            process_pid=record.pid,
+            process_group=record.process_group,
+        )
         if ready_url_candidate is not None:
             ready_record = _record_with_url(record, ready_url_candidate)
             write_preview_record(record.cwd, ready_record)
@@ -359,21 +421,21 @@ def _await_ready(
 
 
 def read_preview_record(repo_root: Path) -> PreviewProcessRecord | None:
-    """读取该仓库的预览记录；无记录或记录不可解析时返回 ``None``。"""
+    """读取预览记录；文件缺失返回 ``None``，存在但不可解析时 fail-closed。"""
     registry_path = _preview_registry_path(repo_root)
-    if not registry_path.exists():
-        return None
     try:
         payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
     except (OSError, ValueError) as read_exc:
         logger.warning("preview registry %s unreadable: %s", registry_path, read_exc)
-        return None
+        raise PreviewRegistryReadError(f"{registry_path}: {read_exc}") from read_exc
     if not isinstance(payload, dict) or payload.get("version") != PREVIEW_REGISTRY_VERSION:
         logger.warning("preview registry %s has an unsupported version", registry_path)
-        return None
+        raise PreviewRegistryReadError(f"{registry_path}: unsupported format version")
     record_payload = payload.get("record")
     if not isinstance(record_payload, dict):
-        return None
+        raise PreviewRegistryReadError(f"{registry_path}: record is missing or malformed")
     try:
         return PreviewProcessRecord(
             key=str(record_payload["key"]),
@@ -394,7 +456,11 @@ def read_preview_record(repo_root: Path) -> PreviewProcessRecord | None:
         )
     except (KeyError, TypeError, ValueError) as parse_exc:
         logger.warning("preview registry %s is malformed: %s", registry_path, parse_exc)
-        return None
+        raise PreviewRegistryReadError(f"{registry_path}: {parse_exc}") from parse_exc
+
+
+class PreviewRegistryReadError(ValueError):
+    """注册表存在但不可验证；调用方不得把它当作空状态覆盖。"""
 
 
 def write_preview_record(repo_root: Path, record: PreviewProcessRecord) -> None:
@@ -433,6 +499,20 @@ def clear_preview_record(repo_root: Path) -> None:
 def _preview_registry_path(repo_root: Path) -> Path:
     """该仓库的注册表文件路径（目录与命名规则由本模块唯一决定）。"""
     return preview_state_dir() / f"{preview_repo_slug(repo_root)}.json"
+
+
+@contextmanager
+def _preview_registry_lock(repo_root: Path) -> Iterator[None]:
+    """跨进程串行化同一仓库的预览启动与停止状态转换。"""
+    state_dir = preview_state_dir()
+    state_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = state_dir / f"{preview_repo_slug(repo_root)}.lock"
+    with lock_path.open("a+b") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def _record_with_url(record: PreviewProcessRecord, url_text: str) -> PreviewProcessRecord:
@@ -532,14 +612,28 @@ def _terminate_fresh_preview_child(child_process: subprocess.Popen) -> None:
         child_process.wait()
 
 
-def _resolve_ready_url(*, log_path: Path, expected_url: str | None) -> str | None:
+def _resolve_ready_url(
+    *,
+    log_path: Path,
+    expected_url: str | None,
+    process_pid: int,
+    process_group: int,
+) -> str | None:
     """给出可回复终端的就绪地址：期望地址与自报地址都要求当前可连通。"""
     if expected_url:
-        return expected_url if _url_is_reachable(expected_url) else None
+        return (
+            expected_url
+            if _url_is_reachable(expected_url, process_pid=process_pid, process_group=process_group)
+            else None
+        )
     reported_url = _scan_reported_loopback_url(log_path)
     if reported_url is None:
         return None
-    return reported_url if _url_is_reachable(reported_url) else None
+    return (
+        reported_url
+        if _url_is_reachable(reported_url, process_pid=process_pid, process_group=process_group)
+        else None
+    )
 
 
 def _scan_reported_loopback_url(log_path: Path) -> str | None:
@@ -569,15 +663,47 @@ def _read_log_tail(log_path: Path) -> str:
     return raw_bytes.decode("utf-8", errors="replace")
 
 
-def _url_is_reachable(url_text: str) -> bool:
-    """该回环地址当前是否可建立 TCP 连接（dev server 真的在监听）。"""
+def _url_is_reachable(url_text: str, *, process_pid: int, process_group: int) -> bool:
+    """该回环地址是否可连通，且监听 socket 属于本次启动的进程组。"""
     try:
         host, port, _path = parse_preview_url(url_text)
     except ValueError:
         return False
     if host not in LOOPBACK_PREVIEW_HOSTS:
         return False
-    return _can_connect(host, port if port is not None else _default_port(url_text))
+    ready_port = port if port is not None else _default_port(url_text)
+    return _can_connect(host, ready_port) and _process_tree_owns_listener(
+        process_pid=process_pid, process_group=process_group, port=ready_port
+    )
+
+
+def _process_tree_owns_listener(*, process_pid: int, process_group: int, port: int) -> bool:
+    """确认监听 socket 属于本次命令及其仍在同一受管组内的后代进程。"""
+    try:
+        root_process = psutil.Process(process_pid)
+    except (psutil.Error, OSError):
+        return False
+    try:
+        process_tree = (root_process, *root_process.children(recursive=True))
+    except (psutil.Error, OSError):
+        # 受限宿主可能禁止枚举子进程；只检查直接子进程本身，绝不把不可见的
+        # 其他进程当作它的 listener。该路径会对 npm 等派生服务 fail-closed。
+        process_tree = (root_process,)
+    for process in process_tree:
+        try:
+            if os.getpgid(process.pid) != process_group:
+                continue
+            listening_sockets = process.net_connections(kind="inet")
+        except (psutil.Error, OSError):
+            continue
+        if any(
+            connection.status == psutil.CONN_LISTEN
+            and connection.laddr
+            and connection.laddr.port == port
+            for connection in listening_sockets
+        ):
+            return True
+    return False
 
 
 def _default_port(url_text: str) -> int:

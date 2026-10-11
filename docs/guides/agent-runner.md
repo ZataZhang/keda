@@ -3700,15 +3700,15 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 
 | 命令 | 语义 |
 |---|---|
-| `kc preview start` | 起仓库的 dev server：配置里有 `[agent_session.preview].argv` 就用它，否则走"仓库唯一候选 + 用户显式确认"路径；等待进程自报地址并在回环校验通过后才报 ready |
+| `kc preview start` | 起仓库的 dev server：配置里有 `[agent_session.preview].argv` 就用它，否则走"仓库唯一候选 + 用户显式确认"路径；地址必须是回环地址、可连通且监听 socket 属于本次启动的进程树/进程组，才报 ready |
 | `kc preview status` | 只读：受管进程状态与回环 URL |
-| `kc preview stop` | 只终止 KC 自己登记的进程组（`attempt_process_registry` 里的 pgid），**绝不**杀陌生进程 |
+| `kc preview stop` | 只终止 KC 预览注册表中身份可复核的进程组，**绝不**杀陌生进程 |
 
 安全边界是刻意的：
 
 - `argv` 必须是**精确参数数组**（如 `["npm", "run", "dev"]`），KC 不经 `sh -c`，因此不存在"把仓库里的字符串当脚本执行"这条路径；空字符串元素在配置加载期就报错。
-- `ready_url` 的主机必须属于回环闭集（`localhost` / `127.0.0.1` / `::1` 等），非回环主机是**加载期错误**，不静默接受；进程自报地址同样要过回环校验（`require_loopback_preview_url`）。
-- 一个仓库同时只有一个受管预览进程：注册表里还活着时 `start` 不再起第二个，而是回报既有 pid / 进程组 / URL，并指名先跑 `kc preview stop`；记录已陈旧（pid 不在）时先清理记录再按新启动处理，不对任何进程发信号。
+- `ready_url` 的主机必须属于回环闭集（`localhost` / `127.0.0.1` / `::1` 等），非回环主机是**加载期错误**，不静默接受；进程自报地址同样要过回环校验（`require_loopback_preview_url`）。TCP 可连通还不够：监听 socket 必须属于本次白名单命令的进程树且仍留在受管进程组中，避免把端口上既有的陌生服务误报为预览。
+- 一个仓库同时只有一个受管预览进程：跨进程锁串行化 `start` 与 `stop`；注册表里还活着时 `start` 不再起第二个，而是回报既有 pid / 进程组 / URL，并指名先跑 `kc preview stop`。损坏、不可读或版本未知的注册表按 owner 未知交班，不覆盖、不启动、不发送信号；确认陈旧（pid 不在）的可读记录才清理后按新启动处理。
 - 隧道（autossh 之类）、外部预览平台、以及任何"用 LLM 猜用户是否想要预览"的自动触发都不是本特性的范围——没有常驻进程、没有额外凭据，需要预览时由人显式说一声。
 
 配置项与默认值见 [配置指南](configuration.md) 的「Agent Session 原生入口与预览配置」。
