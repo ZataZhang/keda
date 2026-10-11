@@ -1,7 +1,7 @@
-"""Console 启动托管 runner 的 per-run 选项（与 ``kc run`` 同名旗标一一对应）。
+"""Console 启动托管 runner 的 per-run 选项。
 
-网页「开始此 PRD」的高级选项不是第二套执行语义：每一项都映射到 ``kc run`` 的
-一个真实旗标，最终由被启动的子进程按 CLI 既有路径解析。因此本模块只负责两件事——
+网页「开始此 PRD」的高级选项复用 ``kc run`` 的真实发布档位；PRD 自动合并选择则
+写入 Issue 标签，供后续 daemon、发布流程和合并队列共同读取。因此本模块负责——
 
 1. 把选项折算成 argv 片段（:meth:`RunnerLaunchOptions.cli_flags`），全部缺省时
    返回**空元组**，使「不带选项」的启动链路与选项引入前逐字节一致；
@@ -40,6 +40,8 @@ class RunnerLaunchOptions:
 
     Attributes:
         fast_merge: ``--fast-merge``：本轮跳过合并前的独立验证门禁。
+        auto_merge_prd: ``True`` 为当前 PRD 授权自动合并，``False`` 撤销授权，
+            ``None`` 保留 Issue 上已有选择；通过 Issue 标签持久化，不是 CLI 旗标。
         direct_pr: ``--direct-pr``：本轮只保留机械步骤，直接开 Draft PR。CLI 只允许
             它作用于**无 PRD 锚点**的 Issue，目标由调用方判定并拒绝。
         agent: ``--agent`` 的取值；``None``、空串或 ``"auto"`` 表示不传该旗标。
@@ -49,6 +51,7 @@ class RunnerLaunchOptions:
     """
 
     fast_merge: bool = False
+    auto_merge_prd: bool | None = None
     direct_pr: bool = False
     agent: str | None = None
     preset: str | None = None
@@ -76,9 +79,12 @@ class RunnerLaunchOptions:
         return flag_values
 
     def is_default(self) -> bool:
-        """是否没有任何选项生效（与 :meth:`cli_flags` 返回空元组同判据）。"""
+        """是否没有任何发布选择或 CLI 覆盖生效。"""
         return not (
-            self.fast_merge or self.direct_pr or any(self._emittable_flag_values().values())
+            self.fast_merge
+            or self.auto_merge_prd is True
+            or self.direct_pr
+            or any(self._emittable_flag_values().values())
         )
 
     def cli_flags(self) -> tuple[str, ...]:
@@ -86,10 +92,10 @@ class RunnerLaunchOptions:
 
         Returns:
             形如 ``("--fast-merge", "--agent", "codex", "--preset", "strong")``
-            的元组；全部缺省时为空元组。
+            的元组。PRD 自动合并是 Issue 标签选择，不出现在 argv 中。
 
         Raises:
-            RunnerLaunchOptionsError: 档位互斥、覆盖旗标缺少 ``preset``，或取值
+            RunnerLaunchOptionsError: 发布档位互斥、覆盖旗标缺少 ``preset``，或取值
                 不是合法的单一 token。
         """
         if self.fast_merge and self.direct_pr:
@@ -97,6 +103,11 @@ class RunnerLaunchOptions:
                 "fast_merge and direct_pr are mutually exclusive; direct_pr already "
                 "includes everything fast_merge skips, so combining them is ambiguous "
                 "rather than stronger."
+            )
+        if self.fast_merge and self.auto_merge_prd is True:
+            raise RunnerLaunchOptionsError(
+                "fast_merge and auto_merge_prd select different verifier behavior; "
+                "choose one per PRD."
             )
         flag_values = self._emittable_flag_values()
         if (flag_values["model"] or flag_values["reasoning_effort"]) and not flag_values["preset"]:

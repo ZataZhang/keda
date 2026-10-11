@@ -288,7 +288,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "runner.pre_commit_verification_command": "git add 后、git commit 前额外运行的 pre-commit 命令；失败转 Fix Agent",
     "safety.auto_merge": "是否允许自动合并 PR（强烈建议保持 false；与 agent_runner.autopilot.enabled 同时为 true 才会真正生效）",
     "safety.forbidden_path_patterns": "提交前禁止变更的路径通配模式",
-    "autopilot.enabled": "是否启用快速档（合并队列）；仅当该值与 safety.auto_merge 同时为 true 时 review 才会自动合并",
+    "autopilot.enabled": "是否运行合并队列；全仓自动合并还需 safety.auto_merge=true，单 PRD 可用 prd-auto-merge 标签显式授权",
     "autopilot.merge_method": "合并方式；当前唯一支持 'squash'（非法值在加载期拒绝）",
     "autopilot.require_verifier_pass": "Issue 需要 validation 时是否要求 validation/verifier-passed 标签先存在",
     "autopilot.auto_sign_off": "verifier 绿灯后自动替人工勾选 PR body 的 sign-off 清单（幂等）",

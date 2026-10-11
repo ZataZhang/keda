@@ -181,6 +181,7 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 | **来源标识** | `source/prd` | 🔵 深蓝 | Issue 关联了仓库内的 PRD 文件 |
 | **异步讨论** | `agent/deliberate` | 🩶 浅灰 | 复杂需求先走 Issue 评论区异步讨论，收敛后换 `agent/rework-prd` 落地 PRD |
 | **发布档位** | `direct-pr` | 🟠 橙 | 一次性直发声明：任何认领方（其他机器、批量队列、daemon）认领后读到它就把该 Issue 解析为直发档。**不是 workflow 状态标签**，发布确认后被认领者消费删除；见下节「Issue 上的 `direct-pr` 标签」 |
+| **PRD 自动合并授权** | `prd-auto-merge` | 🔴 红 | 对单个 PRD 显式授权自动合并；只跳过独立 verifier，其他仓库验证、PR checks 与分支保护照常；见下节「单 PRD 自动合并」 |
 | **任务类型** | `type/feature` | 🔵 | 功能需求 |
 | | `type/refactor` | 🟣 | 代码重构 |
 | | `type/bug` | 🔴 | Bug 修复 |
@@ -1331,6 +1332,30 @@ kc run --issue 42 --direct-pr
 - **两个旁路旗标互斥**：`--fast-merge` 与 `--direct-pr` 同时给出是用法错误（退出码 2）。两者存在感不同（一个跳独立验证，一个连审核与仓库验证一起跳），所以刻意不"取更强者"，避免静默升级掩盖调用者的真实意图。
 - **单一目标限定**：与 `--all-ready` 组合是用法错误——直发档绝不能开启"整队未审核爆发"。旗标只改写敲下它的那台机器；daemon 没有 `--direct-pr` 旗标，也没有对应的全局配置项。要让 daemon 或另一台机器直发某个 Issue，用下面的 Issue 标签，而不是给 daemon 开总闸。不触碰自动合并。
 
+### 单 PRD 自动合并：`prd-auto-merge` 标签
+
+Backlog「开始此 PRD」高级选项中的「此 PRD 完成后自动合并」会给该 PRD 的 Issue 加上
+`prd-auto-merge`。这是单 Issue 的明确授权，不修改全局 `safety.auto_merge`。升级后的 runner
+认领时 fresh 读取该标签，并只对该 Issue 使用 `PRD_AUTO_MERGE` 档位：保留 PRD 交付门、
+Realistic Validation 证据与命令重跑、pre-PR review、post-PR supervisor、合并队列的仓库
+验证命令、禁改路径终扫、PR checks 和 GitHub 分支保护；只跳过独立 verifier。若启用
+`autopilot.auto_sign_off`，队列会在仓库验证命令通过后更新 PR body 的验证签收清单，触发
+原有 required check；不会伪造 `validation/verifier-passed`。
+
+全局 `[autopilot].enabled` 仍须开启，并由 `kc supervise` / `kc supervise-daemon` 的 review pass
+驱动队列。全局 `safety.auto_merge = false` 时，队列只处理带该授权标签的 PRD；其他 Issue 继续
+停在人工 review。选择该项也授权自动化越过 PRD 的 Human-Confirmed hold；PRD 仍须先归档。
+自动合并后不修改 PRD 的 `Human-Confirmed` 清单或验收横幅，也不记录人工验收。
+
+若要在 Issue 上手工设置，先同步标签：
+
+```bash
+kc labels sync
+gh issue edit 42 --add-label prd-auto-merge
+```
+
+标签名可由 `[agent_runner.labels].prd_auto_merge` 覆盖；移除标签可撤销后续自动合并资格。
+
 ### Issue 上的 `direct-pr` 标签：跟着 Issue 走的直发档
 
 恢复发现会优先识别检查点已关联的同轮成功 PR：ready 的新依赖、blocked 缺少 resolution marker、running 的 rework 不阻止只补交接。已有 PR 仅经只读关联证明后入选，并在取得认领/本地锁后再次核对；未发布的选择和历史 PR 不享有这个例外。
@@ -1368,6 +1393,7 @@ kc daemon run            # 升级后的 daemon 认领 #42 后选择直发档
 | NORMAL | 无 | 按配置执行 review、仓库验证命令、RV 重跑、独立 verifier 与 post-PR supervisor。 |
 | FAST | RV 重跑、独立 verifier | pre-PR review Agent、仓库验证命令与配置启用的 supervisor 照常；保留干净已提交树与未验证声明。仅显式单目标，不适用于 stack 上游。 |
 | DIRECT | FAST 两项，再加 pre-PR review Agent、runner 侧仓库验证命令、发布链内联 post-PR supervisor | builder 与发布前提、依赖/认领门禁、无 PRD 且正文可读准入、直发声明、PR CI，以及操作者对最终树的必要验证；不禁止独立后台 review。 |
+| PRD_AUTO_MERGE | 独立 verifier | PRD 交付门、Realistic Validation、仓库验证命令、review Agent、post-PR supervisor、禁改终扫、PR checks 与分支保护；只用于显式授权的单个 PRD。 |
 
 选择档位先看实际影响与可证明结果，不能按文件数或一段理由自动决定：
 
@@ -1406,7 +1432,7 @@ kc daemon --no-autopilot
 ```
 
 - 优先级：**flag > 仓库 `.kedacode.toml` > 全局**；传了旗标即锁定本次常驻进程（之后改 `.kedacode.toml` 不影响本次进程），不传则每轮热读配置。
-- 旗标**只覆盖 Backlog 自动推进**（发现/晋升 pending PRD、补槽）；它**不能**打开自动合并——合并仍由 `safety.auto_merge` + `autopilot.enabled` 配置双开关决定，`process_merge_queue` 在配置未开时保持 no-op。
+- 旗标**只覆盖 Backlog 自动推进**（发现/晋升 pending PRD、补槽）；它不修改全局自动合并设置。全仓自动合并仍由 `safety.auto_merge` + `autopilot.enabled` 双开关决定；单个 PRD 的 `prd-auto-merge` 授权是独立入口，仍要求 `autopilot.enabled`。
 
 ## 多仓库 Registry 兼容
 
@@ -2879,6 +2905,7 @@ codex = "agent/codex"
 claude = "agent/claude"
 kimi = "agent/kimi"
 direct_pr = "direct-pr"     # 跟着 Issue 走的直发档位声明；改名后 kc labels sync 会创建同名标签
+prd_auto_merge = "prd-auto-merge" # 单 PRD 显式自动合并授权；改名后 kc labels sync 会创建同名标签
 
 [agent_runner.git]
 remote = "origin"
@@ -3923,14 +3950,15 @@ core 用例，网页只是入口，不发明第二套执行规则：
 | Issue 详情标签面板（增删） | `kc labels sync` 同源标准集内编辑 | `GET` / `PUT .../console/repositories/{repo_id}/issues/{issue_number}/labels` |
 | Issue 详情 failed 态「恢复发布」 | 复用 `kc recover` 的恢复用例 | `POST .../console/repositories/{repo_id}/issues/{issue_number}/actions`（`recover_failed_publish`） |
 | backlog PRD「加入就绪」 | 建 Issue + 打 ready，绝不启动 runner | `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/enqueue-ready`（无 `console` 段） |
-| backlog「开始此 PRD」高级选项 | 逐项对应 `kc run` 同名旗标（快合 / agent / 预设 / 模型 / 推理力度），**全部默认关闭**；直出 PR 不在其中（见下） | `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/start`，`launch_options` 字段透传 |
+| backlog「开始此 PRD」高级选项 | 快合、agent / 预设 / 模型 / 推理力度默认关闭；「此 PRD 完成后自动合并」将授权写入单 Issue 标签，不修改全局配置；直出 PR 不在其中（见下） | `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/start`，`launch_options` 字段透传 |
 | backlog「一句话建 Issue」 | CLI `kc issue create --from-prompt` 同一用例，`issue_type` 先过 `type/*` 标签纪律 | `POST .../console/repositories/{repo_id}/issues` |
 | 高级选项 sheet 的候选下拉 | 只读列举该仓库的 agent 名单与预设名 | `GET .../console/repositories/{repo_id}/launch-options` |
 
 要点：
 
 - **启动选项的缺省契约不变**：不勾选任何高级选项时，序列化出的 `launch_options`
-  折算成空 argv 片段，发出的 `kc run` 与引入该参数之前逐字节一致（由契约测试锁死）。
+  折算成空 argv 片段，发出的 `kc run` 与引入该参数之前逐字节一致；`auto_merge_prd`
+  是例外，它不进入 argv，而是在启动前持久化为该 Issue 的授权标签。
   非法组合在发起端即被拒绝，而不是在子进程里静默降级：既包括**选项自身**的规则（快合
   与直出 PR 互斥、模型/推理力度未带预设、取值不是单一 token），也包括 CLI 的**目标域**
   规则——队列级 `--all-ready` 不能配任何跳过闸门的旗标（`build_runner_argv` 直接拒绝），
@@ -3941,6 +3969,10 @@ core 用例，网页只是入口，不发明第二套执行规则：
   `direct_pr` 字段，带上它在动 Issue 之前就返回 400 并给出同款原因（`start_prd` 的
   目标域预检），不会留下「提示已开始、进程立刻退出」的半成品。直发档请按 CLI 用法
   作用于无 PRD 锚点的 Issue。
+- **单 PRD 自动合并是独立选择**：勾选后，Backlog 为该 Issue 设置 `prd-auto-merge` 标签，
+  再启动 runner。此项只跳过独立 verifier；Realistic Validation、仓库命令、PR checks 和
+  分支保护照常。它要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`；
+  它也不写回 PRD 的人工验收记录。
 - **「一句话建 Issue」的类型受标签集合约束**：`issue_type` 会拼成 `type/<issue_type>`
   写进 GitHub，因此后端只接受该仓库 `kc labels sync` 已同步的 `type/*` 名（默认
   `feature` / `refactor` / `bug`），越界取值在调用用例之前被拒（400，GitHub 零变化），
@@ -4413,11 +4445,11 @@ Agent Runner 的代码分布在四层架构中：
 
 ## Autopilot 快速档（合并队列）
 
-默认（严格档）下，supervisor approve 的 PR 永远停在 `agent/review` 阶段——等待人工来合并。`autopilot.enabled = true` 切换到 **快速档**：review pass 末尾追加一个"合并队列"阶段，对该仓所有待合并的 PR 串行、自动执行 7 步门禁链后 `squash` 合并进 base 分支。
+默认（严格档）下，supervisor approve 的 PR 永远停在 `agent/review` 阶段——等待人工来合并。`autopilot.enabled = true` 时 review pass 会运行合并队列：全局 `safety.auto_merge = true` 时沿用全仓自动合并；否则只处理显式带有 `prd-auto-merge` 标签的 PRD。后者只跳过独立 verifier，仍通过仓库验证、PR checks 和分支保护后才 squash 合并。
 
 ### 双同意开关
 
-合并队列只在 **两个开关同时为真** 时激活——这是"防呆"设计，也是 `safety.auto_merge` 这个历史死配置第一次真正消费：
+全仓自动合并仍要求 **两个开关同时为真**。单 PRD 的 `prd-auto-merge` 标签是该单个 Issue 的明确授权：它仍要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`。
 
 ```toml
 [safety]
@@ -4427,7 +4459,7 @@ auto_merge = true            # 历史开关：现在真正生效
 enabled = true               # 新键：仓库级显式打开
 ```
 
-任一为假时合并队列整段 **no-op**——supervisor 仍按现状停在 `agent/review`。这意味着历史上即便误把 `safety.auto_merge` 设成 `true`，只要 `[autopilot] enabled` 没显式打开，就**不会**开始自动合并（过往误设的环境零风险）。
+`autopilot.enabled = false` 时合并队列整段 **no-op**。当 `autopilot.enabled = true` 且 `safety.auto_merge = false` 时，未带 `prd-auto-merge` 的 Issue 仍停在 `agent/review`；带该标签的 PRD 才进入单目标自动合并流程。历史上仅误设 `safety.auto_merge = true` 而未启用 autopilot 的环境仍不会自动合并。
 
 > 迁移注意：升级时检查所有仓库；如有 `safety.auto_merge = true` 残留，本 PRD 会把它激活。新键 `autopilot.enabled` 是显式的客户确认入口。
 
@@ -4435,19 +4467,19 @@ enabled = true               # 新键：仓库级显式打开
 
 每条进入合并队列的 PR 都按下列顺序执行；任一步失败则**该 PR 转入既有失败/修复路径**，不阻塞队列中其余 PR：
 
-1. **verifier 门禁**：若 Issue 需要 validation（`validation_required`）且 `autopilot.require_verifier_pass = true`，要求 Issue 已带 `validation/verifier-passed` 标签；缺失则本轮跳过，留给 verifier / repair。
-2. **自动签核**：解析 PR body 的 Realistic Validation sign-off 清单区块，把 `- [ ]` 置 `- [x]` 后 `update_pull_request_body`；若已全勾则幂等跳过。同步发一条 `<!-- iar:auto-sign-off ... -->` 审计评论（带 `iar:event` marker），记录 verifier verdict 来源。
+1. **verifier 门禁**：普通 Issue 若需要 validation（`validation_required`）且 `autopilot.require_verifier_pass = true`，要求 Issue 已带 `validation/verifier-passed` 标签；缺失则本轮跳过。带 `prd-auto-merge` 的单 PRD 按显式授权跳过独立 verifier，不伪造该标签。
+2. **自动签核**：若 `autopilot.auto_sign_off = true`，普通队列沿用 verifier 后的签核；单 PRD 自动合并路径则等仓库验证命令通过后再更新 PR body 的 Realistic Validation 清单并写审计评论。这个 PR body 清单不等于 PRD 的 `Human-Confirmed` 清单。
 3. **rebase**：复用 `pr_supervisor.execute_rebase` 把 PR 分支 rebase 到最新 remote base；冲突走既有 conflict-resolution agent 路径。失败→转 `agent/supervising`，本 PR 跳过。
 4. **全量验证**：在该 Issue 的 worktree 内调用 `agent_runner_git.run_verification(...)` 重跑 `runner.verification_commands`；红→转验证修复路径，本 PR 跳过不合并。
 5. **禁改路径终扫**：取 PR diff 文件清单，用 `safety.forbidden_path_patterns` 做最终匹配（复用 `agent_runner_publish.is_forbidden_path(...)`）；命中→打 `agent/blocked` + 评论，永不自动合并。
-6. **等 checks**：轮询 `get_pull_request_context` 直到 checks 全绿（自动签核后 sign-off check 应翻绿），超时上限 `autopilot.merge_check_timeout_seconds`。
+6. **等 checks**：轮询 `get_pull_request_context` 直到 checks 全绿（适用时自动签核会触发 sign-off check 重跑），超时上限 `autopilot.merge_check_timeout_seconds`。GitHub branch protection 始终保留。
 7. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `iar:event (auto-merged)` 评论、摘除 `agent/review` 标签。
 
-**PRD hold（自动签核之后、rebase 之前）**：PRD-backed Issue 在 rebase 前先读该 Issue worktree 里的 PRD——按实际位置定位（先 `tasks/pending/`，再 `tasks/archive/`）：
+**PRD hold（自动签核之后、rebase 之前）**：PRD-backed Issue 在 rebase 前先读该 Issue worktree 里的 PRD——按实际位置定位（先 `tasks/pending/`，再 `tasks/archive/`）。带 `prd-auto-merge` 的单目标选择授权自动合并越过 Human-Confirmed hold，但不修改 PRD 的清单或验收横幅，也不记录人工验收；PRD 仍必须归档：
 
-- `Human-Confirmed` 组仍有未回答的项（`- [ ]`，以及老 PRD 误标的 `- [~]`，保守口径）→ `skipped_human_review`，本轮不 rebase、不重跑验证、不合并，等人验收。PRD 在交付时就已归档，所以这一判断**不论 PRD 在 pending 还是 archive** 都生效；只看 pending 路径会让自动合并替人行使验收权。
+- `Human-Confirmed` 组仍有未回答的项（`- [ ]`，以及老 PRD 误标的 `- [~]`，保守口径）且 Issue **没有** `prd-auto-merge` → `skipped_human_review`，本轮不 rebase、不重跑验证、不合并，等人验收。显式选择的单 PRD 是该规则的唯一自动合并例外。
 - PRD 仍在 `tasks/pending/` 且无人审待办 → `skipped_prd_pending`（执行侧没交付完）。
-- PRD 已在 `tasks/archive/` 且人审已全部回答 → 继续 rebase 及后续门禁。
+- PRD 已在 `tasks/archive/` → 若人审已全部回答，或 Issue 带 `prd-auto-merge`，继续 rebase 及后续门禁。
 
 人在 PR 分支上勾选人审项并把横幅改为 ✅ 已验收后，下一轮读到最新 PRD 即放行（worktree 需同步到 PR 最新 head，沿用既有行为）。
 
@@ -4646,9 +4678,9 @@ Backlog 顶部为当前选中仓库提供「Backlog 自动推进」开关，写�
 - 页面把三件事分开显示，缺哪件都给出明确降级文案：
   - **Backlog 自动推进是否开启**（自动发现、依赖解锁、队列补位）；
   - **daemon 是否运行中**（状态来自既有 process supervisor 记录；daemon 没跑时显示「自动推进暂不执行」，开关值仍可保存，可用 Processes 页面启动 daemon）；
-  - **自动合并是否启用**（`autopilot.enabled` 与 `safety.auto_merge` 是否同时为真）。
+  - **全局自动合并是否启用**（`autopilot.enabled` 与 `safety.auto_merge` 是否同时为真）；单 PRD 可在启动时单独授权。
 - 同排显示按仓库 `.kedacode.toml` 的 runner 容量解析出的并发上限及来源：「并发 N（继承 runner 配置 / Backlog 设置 / 受 runner 容量限制）」；策略未设置时输入框占位「未设置」，已设置时可点「恢复继承」删除设置行回到跟随容量。daemon 若启动时显式传入 `--concurrency`，该旗标会覆盖本轮容量并可能把 daemon 的实际 ceiling 压得更低；控制条不读取该进程旗标，核对 daemon 当前值应看其 `Concurrency ceiling` 日志。
-- 开启 Backlog 自动推进不会联动开启合并配置；自动合并仍要求 `autopilot.enabled` 与 `safety.auto_merge` 同时为真。Backlog 页面只读显示合并状态，不会替用户改动合并开关。
+- 开启 Backlog 自动推进不会联动开启全局合并配置；全仓自动合并仍要求 `autopilot.enabled` 与 `safety.auto_merge` 同时为真。Backlog 的单 PRD 选项只授权目标 Issue，不改动全局配置。
 - 目标仓没有 `.kedacode.toml`、配置非法或不可写时返回 409，原文件保持不变。
 
 ### 全局调度

@@ -123,6 +123,7 @@ class AgentRunnerLabelSettings(BaseModel):
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
     direct_pr: str = "direct-pr"
+    prd_auto_merge: str = "prd-auto-merge"
 
     def legacy_agent_label_overrides(self) -> dict[str, str]:
         """返回旧版三个 agent 键中**显式设置**的标签覆盖（供注册表合并）。"""
@@ -462,21 +463,23 @@ class AgentRunnerSafetySettings(BaseModel):
 class AgentRunnerAutopilotSettings(BaseModel):
     """Autopilot / merge queue configuration.
 
-    与 ``AgentRunnerSafetySettings.auto_merge`` 组成"双开关"——只有两者同时
-    为真时合并队列阶段才会被激活。这是历史上 ``safety.auto_merge`` 死开关被
-    真正消费时的防呆保险：早前误设为 ``true`` 的旧环境若未同时打开本段
-    ``enabled``，仍不会开始自动合并。
+    全仓自动合并仍要求本段 ``enabled`` 与
+    ``AgentRunnerSafetySettings.auto_merge`` 同时为真。若 ``auto_merge`` 关闭，
+    合并队列只处理显式带 ``prd-auto-merge`` 标签的单个 PRD；本段 ``enabled``
+    对两种路径都是必要条件。这保留了对早前误设 ``safety.auto_merge = true``
+    的防呆保险。
 
     Attributes:
-        enabled: 主开关；为 ``False`` 时合并队列整段 no-op（严格档行为）。
+        enabled: 主开关；为 ``False`` 时合并队列整段 no-op，包括单 PRD 授权项。
         merge_method: 唯一接受的合并方式：``"squash"``；其它值在配置加载期
             由 :class:`AgentRunnerAutopilotSettings` 的 field_validator 拒
             绝。这是用户锁定的设计决策——单提交便于 ``git revert`` 回退。
         require_verifier_pass: 当该 Issue 需要 validation 时，是否要求
             ``validation/verifier-passed`` 标签先存在才进入合并流程；缺失
             则本轮跳过，留给 verifier / repair。
-        auto_sign_off: 是否在 verifier 绿灯后自动勾选 PR body 的 Realistic
-            Validation sign-off 清单；勾选与 marker 评论均幂等。
+        auto_sign_off: 是否自动勾选 PR body 的 Realistic Validation sign-off
+            清单；普通队列在 verifier 通过后勾选，显式 PRD 自动合并在队列仓库
+            验证命令通过后勾选；勾选与 marker 评论均幂等。
         merge_check_timeout_seconds: 等 PR checks 全绿的最大秒数；超时则
             放弃本轮合并（不阻塞后续 PR）。
     """

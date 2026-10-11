@@ -1,16 +1,12 @@
 """Autopilot merge queue: serial squash-merge of supervisor-approved PRs.
 
 快速档（autopilot）下的"合并队列" use case。该 use case 在每个 review pass
-末尾被 :func:`backend.core.use_cases.review_once.review_once` 触发，按
-Issue 号 FIFO **串行**处理所有带 ``agent/review`` 标签的开放 Issue，每条
-走 7 步门禁链：verifier 门禁 → 自动签核 → rebase → 全量验证 → 禁改终扫 →
-checks 全绿 → squash 合并。任一步失败则该 PR 转入既有失败/修复路径并
-``continue`` 下一条，不阻塞其余 PR。rebase 之前还有一道 PRD hold：PRD 的
-Human-Confirmed 组仍有未回答的项就跳过等人（不论 PRD 已归档还是仍在 pending），
-PRD 仍在 pending 也跳过——自动合并不替人验收。
-
-双开关语义：本文件被调用前由 :func:`review_once` 检查 ``autopilot.enabled``
-*AND* ``safety.auto_merge`` 同时为真，任一为假则本段 no-op。
+末尾被 :func:`backend.core.use_cases.review_once.review_once` 触发，按 Issue 号 FIFO
+**串行**处理 ``agent/review`` 上获准合并的 PR。全局自动合并仍要求
+``autopilot.enabled`` 和 ``safety.auto_merge`` 同时为真；单个 PRD 可以通过显式
+``prd-auto-merge`` Issue 标签授权，且只跳过独立 verifier。两条路径都保留仓库验证、
+禁改终扫、PR checks 和 GitHub 分支保护。用户选择单 PRD 自动合并时，该 PRD 的
+Human-Confirmed hold 也不再阻塞；PRD 文件本身不会在合并后被回写。
 
 崩溃重入幂等性：
 - 自动签核前先解析 :class:`ValidationChecklistState`，已全勾则不再改 body
@@ -44,7 +40,8 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.shared.prd_checklist import parse_prd_checklist
 from backend.core.use_cases.agent_runner_closeout import resolve_prd_worktree_path
 from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
-from backend.core.use_cases.agent_runner_feedback import is_prd_archive_path
+from backend.core.use_cases.agent_runner_feedback import extract_prd_path, is_prd_archive_path
+from backend.core.use_cases.agent_runner_direct_pr_label import issue_carries_prd_auto_merge_label
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
     parse_latest_event_marker,
@@ -73,14 +70,12 @@ _MERGED_EVENT_PHASE = "auto_merged"
 # ---------------------------------------------------------------------------
 
 
-def _autopilot_enabled(config: AppConfig) -> bool:
-    """Return True when the dual kill switch is fully armed.
-
-    Requires both ``autopilot.enabled`` *and* ``safety.auto_merge`` to be
-    true. This is the only kill-switch check in the merge queue pipeline;
-    :func:`review_once` calls this before invoking :func:`process_merge_queue`.
-    """
-    return bool(config.autopilot.enabled and config.safety.auto_merge)
+def _issue_auto_merge_authorized(issue: IssueSummary, config: AppConfig) -> bool:
+    """Return whether global settings or this Issue's explicit PRD selection authorizes merge."""
+    return bool(
+        config.autopilot.enabled
+        and (config.safety.auto_merge or issue_carries_prd_auto_merge_label(issue, config))
+    )
 
 
 def _extract_pr_branch_from_comments(comments: list[str]) -> str | None:
@@ -150,6 +145,55 @@ def _has_auto_sign_off_marker(comments: list[str]) -> bool:
     sign-off" comments across restarts.
     """
     return any(_AUTO_SIGN_OFF_MARKER in comment for comment in comments)
+
+
+@dataclass(frozen=True)
+class _AutoSignOffRequest:
+    """PR body 签核更新所需的 Issue、PR 与路径授权上下文。"""
+
+    issue: IssueSummary
+    pr_number: int
+    pr_branch: str
+    pr_body: str | None
+    comments: list[str]
+    github_client: IGitHubClient
+    scoped_prd_auto_merge: bool
+
+
+def _apply_auto_sign_off(request: _AutoSignOffRequest) -> bool:
+    """更新 PR 验证清单，并记录 runner 自动签核的依据。"""
+    if not request.pr_body:
+        return False
+    ticked_body = _tick_sign_off_checklist(request.pr_body)
+    if ticked_body is None or ticked_body == request.pr_body:
+        return False
+    request.github_client.update_pull_request_body(request.pr_number, ticked_body)
+    if _has_auto_sign_off_marker(request.comments):
+        return True
+
+    if request.scoped_prd_auto_merge:
+        note = (
+            "该 PRD 显式选择了自动合并；合并队列已重跑仓库验证命令并通过。"
+            "独立 verifier 按此选择跳过；PR checks 与分支保护仍须通过。"
+        )
+    else:
+        note = (
+            "Verifier 绿灯后已自动勾选 Realistic Validation sign-off 清单"
+            "（机器门禁替换人工勾选，详见 PRD auto-merge-queue）。"
+        )
+    request.github_client.comment_issue(
+        request.issue.number,
+        "## Autopilot auto sign-off\n\n"
+        + note
+        + "\n\n"
+        + format_event_marker(
+            phase="auto_signed_off",
+            cycle=0,
+            action="auto_sign_off",
+            pr_branch=request.pr_branch,
+        ),
+    )
+    return True
 
 
 def _diff_paths(
@@ -265,9 +309,9 @@ def process_merge_queue(
 ) -> tuple[int, list[MergeQueueOutcome]]:
     """Run the autopilot merge queue for one review pass.
 
-    The function is a no-op when :func:`_autopilot_enabled` returns False
-    (the caller in :mod:`review_once` already gated it, but the helper here
-    is a defense-in-depth guarantee).
+    The function is a no-op when autopilot scheduling is disabled. If the
+    global auto-merge switch is off, it only processes Issues carrying the
+    explicit PRD auto-merge label.
 
     Args:
         repo_path: Target repository path.
@@ -283,10 +327,14 @@ def process_merge_queue(
         Issue that was actually processed (skipped lists are included for
         audit but no-op skips are omitted).
     """
-    if not _autopilot_enabled(config):
+    if not config.autopilot.enabled:
         return 0, []
 
     candidates = github_client.list_issues_by_label(config.labels.review, 100, state="open")
+    if not config.safety.auto_merge:
+        candidates = [
+            issue for issue in candidates if issue_carries_prd_auto_merge_label(issue, config)
+        ]
     # FIFO ordering: lower Issue numbers first to keep the audit trail
     # readable and to ensure earlier PRs land on the base branch first.
     candidates = sorted(candidates, key=lambda issue: issue.number)
@@ -337,8 +385,24 @@ def _process_one(
 ) -> MergeQueueOutcome:
     """Run the 7-step gate chain for a single Issue."""
 
-    if not _autopilot_enabled(config):
+    if not config.autopilot.enabled:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
+
+    scoped_prd_auto_merge = issue_carries_prd_auto_merge_label(issue, config)
+    if scoped_prd_auto_merge or not config.safety.auto_merge:
+        try:
+            issue = github_client.get_issue(issue.number)
+        except Exception as exc:
+            _logger.warning("Merge queue could not refresh Issue #%d: %s", issue.number, exc)
+            return MergeQueueOutcome(
+                issue_number=issue.number, action="skipped_issue_refresh_failed"
+            )
+        scoped_prd_auto_merge = issue_carries_prd_auto_merge_label(issue, config)
+    if not _issue_auto_merge_authorized(issue, config):
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
+    prd_anchor = extract_prd_path(issue.body)
+    if scoped_prd_auto_merge and prd_anchor is None:
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_auto_merge_without_prd")
 
     # Stack sequencing: never merge a downstream PR mid-chain — the queue's
     # rebase-onto-remote-base step would overwrite the stacked base. Wait until
@@ -389,7 +453,11 @@ def _process_one(
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_converge_failed")
 
     # Step 1: verifier gate
-    if config.autopilot.require_verifier_pass and validation_required(issue.body, config):
+    if (
+        not scoped_prd_auto_merge
+        and config.autopilot.require_verifier_pass
+        and validation_required(issue.body, config)
+    ):
         if config.labels.verifier_passed not in issue.labels:
             _logger.info(
                 "Issue #%d requires validation but is missing %s label; skipping.",
@@ -411,25 +479,18 @@ def _process_one(
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_pr_contract_missing")
 
     # Step 2: auto sign-off (idempotent)
-    if config.autopilot.auto_sign_off:
-        pr_body_now = pr_context.body
-        if pr_body_now:
-            ticked_body = _tick_sign_off_checklist(pr_body_now)
-            if ticked_body is not None and ticked_body != pr_body_now:
-                github_client.update_pull_request_body(pr_number, ticked_body)
-                if not _has_auto_sign_off_marker(comments):
-                    github_client.comment_issue(
-                        issue.number,
-                        "## Autopilot auto sign-off\n\n"
-                        "Verifier 绿灯后已自动勾选 Realistic Validation sign-off 清单"
-                        "（机器门禁替换人工勾选，详见 PRD auto-merge-queue）。\n\n"
-                        + format_event_marker(
-                            phase="auto_signed_off",
-                            cycle=0,
-                            action="auto_sign_off",
-                            pr_branch=pr_branch,
-                        ),
-                    )
+    if config.autopilot.auto_sign_off and not scoped_prd_auto_merge:
+        _apply_auto_sign_off(
+            _AutoSignOffRequest(
+                issue=issue,
+                pr_number=pr_number,
+                pr_branch=pr_branch,
+                pr_body=pr_context.body,
+                comments=comments,
+                github_client=github_client,
+                scoped_prd_auto_merge=False,
+            )
+        )
 
     # Resolve the worktree for rebase + verification.
     try:
@@ -445,10 +506,12 @@ def _process_one(
     prd_worktree_path = resolve_prd_worktree_path(issue, worktree_path)
     if prd_worktree_path is not None:
         checklist = parse_prd_checklist(prd_worktree_path.read_text(encoding="utf-8"))
-        if checklist.human_pending_items:
+        if checklist.human_pending_items and not scoped_prd_auto_merge:
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_human_review")
         if not is_prd_archive_path(os.path.relpath(prd_worktree_path, worktree_path)):
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_pending")
+    elif scoped_prd_auto_merge:
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_missing")
 
     # Step 3: rebase
     head_before = _safe_head_sha(worktree_path, process_runner)
@@ -494,6 +557,23 @@ def _process_one(
         )
         return MergeQueueOutcome(issue_number=issue.number, action="verification_failed")
 
+    if config.autopilot.auto_sign_off and scoped_prd_auto_merge:
+        sign_off_updated = _apply_auto_sign_off(
+            _AutoSignOffRequest(
+                issue=issue,
+                pr_number=pr_number,
+                pr_branch=pr_branch,
+                pr_body=pr_context.body,
+                comments=comments,
+                github_client=github_client,
+                scoped_prd_auto_merge=True,
+            )
+        )
+        if sign_off_updated:
+            refreshed_after_sign_off = github_client.get_pull_request_context(pr_branch)
+            if refreshed_after_sign_off is not None:
+                pr_context = refreshed_after_sign_off
+
     # Step 5: forbidden-path final scan against the PR diff
     diff_paths, diff_unavailable = _diff_paths(pr_context, config, process_runner, worktree_path)
     if diff_unavailable:
@@ -536,6 +616,22 @@ def _process_one(
     if not checks_green:
         return MergeQueueOutcome(issue_number=issue.number, action="waiting_for_checks")
 
+    # PR checks can take a long time. Re-read the Issue immediately before merge so
+    # removing the per-PRD authorization while checks are running revokes this pass.
+    try:
+        merge_issue = github_client.get_issue(issue.number)
+    except Exception as exc:
+        _logger.warning(
+            "Merge queue could not refresh Issue #%d before merge: %s", issue.number, exc
+        )
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_issue_refresh_failed")
+    if scoped_prd_auto_merge and not issue_carries_prd_auto_merge_label(merge_issue, config):
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_auto_merge_revoked")
+    if scoped_prd_auto_merge and extract_prd_path(merge_issue.body) != prd_anchor:
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_anchor_changed")
+    if not _issue_auto_merge_authorized(merge_issue, config):
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
+
     # Step 7: squash merge + audit
     try:
         github_client.merge_pull_request(pr_number, method=config.autopilot.merge_method)
@@ -553,12 +649,18 @@ def _process_one(
     auto_sign_off_marker = ""
     if any(_AUTO_SIGN_OFF_MARKER in comment for comment in new_comments):
         auto_sign_off_marker = (
-            "\n\n<!-- iar:auto-sign-off version=1 stage=merged verifier_gate=passed -->"
+            "\n\n<!-- iar:auto-sign-off version=1 stage=merged verifier_gate="
+            f"{'skipped' if scoped_prd_auto_merge else 'passed'} -->"
         )
+    merge_summary = (
+        "已通过合并队列门禁并被 ``squash`` 合并；独立 verifier 按 PRD 显式授权跳过。"
+        if scoped_prd_auto_merge
+        else "已通过合并队列的 7 步门禁链并被 ``squash`` 合并。"
+    )
     github_client.comment_issue(
         issue.number,
         "## Agent Runner Auto-Merged\n\n"
-        f"PR #​{pr_number} 已通过合并队列的 7 步门禁链并被 ``squash`` 合并。\n"
+        f"PR #​{pr_number} {merge_summary}\n"
         f"Head: `{head_after_merge}`\n"
         f"Branch: `{pr_branch}`\n\n"
         + format_event_marker(

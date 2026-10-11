@@ -24,7 +24,6 @@ from backend.core.use_cases.agent_runner_lifecycle import (
     record_lifecycle_terminal,
 )
 from backend.core.use_cases.agent_runner_merge_queue import (
-    _autopilot_enabled,
     process_merge_queue,
 )
 from backend.core.use_cases.pr_supervisor import (
@@ -609,12 +608,9 @@ def review_once(
                 actor="review_once",
             )
 
-    # Autopilot 快速档激活时（双开关同时为真），supervisor approve 的 PR 在
-    # supervisor 循环结束后进入合并队列，由 ``process_merge_queue`` 串行
-    # 处理 verifier 门禁、自动签核、rebase、全量验证、禁改终扫、checks
-    # 等待、squash 合并；任一步失败走既有失败/修复路径并不阻塞其余 PR。
-    # 严格档（任一开关为假）整段 no-op，现有行为零变化。
-    if _autopilot_enabled(config) and not dry_run:
+    # Autopilot 启用时运行合并队列：全局 auto_merge 开启则沿用原双开关行为；
+    # 否则队列只处理带单 PRD 显式授权标签的 Issue。
+    if config.autopilot.enabled and not dry_run:
         try:
             merge_exit_code, merge_outcomes = process_merge_queue(
                 repo_path=repo_path,

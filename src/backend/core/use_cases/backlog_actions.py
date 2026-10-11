@@ -41,7 +41,10 @@ from backend.core.shared.models.backlog import (
     BacklogPrd,
     BacklogPrdState,
 )
-from backend.core.shared.models.runner_launch import RunnerLaunchOptions
+from backend.core.shared.models.runner_launch import (
+    RunnerLaunchOptions,
+    RunnerLaunchOptionsError,
+)
 from backend.core.shared.priority import priority_rank
 from backend.core.use_cases.agent_runner_lifecycle import (
     LifecycleEventType,
@@ -214,6 +217,25 @@ def _ensure_ready_label(
     )
 
 
+def _set_prd_auto_merge_label(
+    issue_number: int,
+    context: RepositoryRunContext,
+    github_client: IGitHubClient,
+    enabled: bool,
+) -> None:
+    """将一次 PRD 启动选择写入该 Issue，供执行流程和合并队列读取。"""
+    label = context.config.labels.prd_auto_merge
+    if not label:
+        if not enabled:
+            return
+        raise BacklogActionError("PRD auto-merge label is disabled in repository settings.")
+    github_client.edit_issue_labels(
+        issue_number,
+        add=[label] if enabled else [],
+        remove=[] if enabled else [label],
+    )
+
+
 def _spawn_runner(
     repo_id: str,
     contexts: Sequence[RepositoryRunContext],
@@ -307,7 +329,29 @@ def start_prd(
     prd = next((p for p in prds if p.prd_path == prd_path), None)
     if prd is None:
         raise BacklogActionError(f"PRD not found or not pending: {prd_path}")
+    if launch_options is not None:
+        try:
+            launch_options.cli_flags()
+        except RunnerLaunchOptionsError as exc:
+            raise BacklogActionError(str(exc)) from exc
     _reject_launch_options_incompatible_with_prd(prd, launch_options)
+    if (
+        launch_options
+        and launch_options.auto_merge_prd is True
+        and not context.config.autopilot.enabled
+    ):
+        raise BacklogActionError(
+            "单 PRD 自动合并需要启用 agent_runner.autopilot.enabled；"
+            "safety.auto_merge 无需开启。"
+        )
+    if (
+        launch_options
+        and launch_options.auto_merge_prd is True
+        and not context.config.labels.prd_auto_merge
+    ):
+        raise BacklogActionError(
+            "单 PRD 自动合并标签已在 agent_runner.labels.prd_auto_merge 中禁用。"
+        )
 
     if prd.issue_number is None:
         try:
@@ -338,6 +382,26 @@ def start_prd(
             )
             raise BacklogActionError(f"添加 ready 标签失败: {exc}") from exc
         issue_number = prd.issue_number
+
+    if launch_options and launch_options.auto_merge_prd is not None:
+        try:
+            _set_prd_auto_merge_label(
+                issue_number,
+                context,
+                github_client,
+                enabled=launch_options.auto_merge_prd,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _audit(
+                store,
+                action="start_prd",
+                repo_id=repo_id,
+                prd_path=prd_path,
+                issue_number=issue_number,
+                result="error",
+                detail=str(exc),
+            )
+            raise BacklogActionError(f"设置 PRD 自动合并授权失败: {exc}") from exc
 
     _record_lifecycle(
         store,

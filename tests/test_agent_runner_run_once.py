@@ -180,6 +180,7 @@ def test_run_once_success(tmp_path: Path) -> None:
         branch="issue-123",
         head_sha="after-sha",
         base_sha="before-sha",
+        number=1,
     )
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
@@ -297,6 +298,7 @@ def test_run_once_failure_removes_supervising_label(tmp_path: Path) -> None:
         branch="issue-123",
         head_sha="after-sha",
         base_sha="before-sha",
+        number=1,
     )
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()

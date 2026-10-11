@@ -364,6 +364,11 @@ def parse_fast_merge_marker(text: str) -> int | None:
     return int(match.group("issued")) if match is not None else None
 
 
+def format_prd_auto_merge_marker(issue_number: int) -> str:
+    """Format the audit marker for an explicitly selected PRD auto-merge run."""
+    return f"<!-- iar:prd-auto-merge issued={issue_number} -->"
+
+
 _DIRECT_PR_MARKER_PATTERN = re.compile(r"<!--\s*iar:direct-pr\s+issued=(?P<issued>\d+)\s*-->")
 
 

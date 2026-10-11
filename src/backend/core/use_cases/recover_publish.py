@@ -254,6 +254,7 @@ def _create_recovery_draft_pr(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None,
+    publish_stage: PublishStage,
 ) -> str:
     """为恢复流程创建 Draft PR，失败时评论 Issue 并抛出 ``PublishRecoveryError``。
 
@@ -272,6 +273,7 @@ def _create_recovery_draft_pr(
         process_runner (IProcessRunner): 进程执行器。
         content_generator (IContentGenerator | None): 内容生成器；``None`` 时正常
             发布用例会退回其配置的 template / fallback 正文。
+        publish_stage: 已按当前 Issue 标签解析的发布档位。
 
     Returns:
         str: 新建 PR 的 URL。
@@ -283,16 +285,6 @@ def _create_recovery_draft_pr(
         if recovered_issue is not None:
             from backend.core.use_cases.agent_runner_publish import create_draft_pr
 
-            from backend.core.use_cases.agent_runner_direct_pr_round import read_direct_pr_round
-
-            pending_round = read_direct_pr_round(github_client, recovered_issue)
-            recovered_stage = (
-                PublishStage.DIRECT
-                if pending_round is not None
-                and not pending_round.handoff_complete
-                and not pending_round.abandoned
-                else PublishStage.NORMAL
-            )
             _, pr_url = create_draft_pr(
                 issue=recovered_issue,
                 worktree_path=worktree_path,
@@ -300,7 +292,7 @@ def _create_recovery_draft_pr(
                 github_client=github_client,
                 process_runner=process_runner,
                 content_generator=content_generator,
-                publish_stage=recovered_stage,
+                publish_stage=publish_stage,
             )
             return pr_url
 
@@ -404,6 +396,7 @@ def _recover_publish_issue_owned(
     from backend.core.use_cases.agent_runner_direct_pr_label import (
         resolve_publish_stage,
         ensure_direct_pr_admission,
+        ensure_prd_auto_merge_admission,
         ensure_direct_pr_dependencies_ready,
         consume_label_after_publication,
         DirectPrLabelPublicationRequest,
@@ -467,6 +460,8 @@ def _recover_publish_issue_owned(
                     stage_decision.direct_pr_label,
                     claim_comment_id=claim_bid.comment_id,
                 )
+        else:
+            ensure_prd_auto_merge_admission(decision=stage_decision)
         validate_safe_changes(worktree_path, config, process_runner)
     except Exception as policy_exc:
         raise PublishRecoveryError(
@@ -567,6 +562,7 @@ def _recover_publish_issue_owned(
             github_client=github_client,
             process_runner=process_runner,
             content_generator=content_generator,
+            publish_stage=stage_decision.publish_stage,
         )
 
     # 第 5.5 步：上传验证证据并发 PR 证据评论（要求验证且证据存在时）。

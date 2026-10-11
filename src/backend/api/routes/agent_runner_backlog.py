@@ -777,12 +777,13 @@ def update_backlog_settings(repo_id: str, request: UpdateSettingsRequest) -> dic
 class StartPrdRequest(BaseModel):
     """单个 PRD 开始请求。
 
-    高级选项字段全部可选且默认关闭/缺省，与 ``kc run`` 同名旗标一一对应；
-    全部缺省时启动命令与选项引入前逐字段一致。
+    高级选项字段全部可选且默认关闭/缺省。发布档位字段映射 ``kc run`` 旗标；
+    ``auto_merge_prd`` 在目标 Issue 上持久化授权标签，不映射成 CLI 旗标。
     """
 
     repo_id: str = Field(min_length=1)
     fast_merge: bool = False
+    auto_merge_prd: bool | None = None
     direct_pr: bool = False
     agent: str | None = None
     preset: str | None = None
@@ -793,6 +794,7 @@ class StartPrdRequest(BaseModel):
         """把请求体选项字段折算为 core 启动选项。"""
         return RunnerLaunchOptions(
             fast_merge=self.fast_merge,
+            auto_merge_prd=self.auto_merge_prd,
             direct_pr=self.direct_pr,
             agent=self.agent,
             preset=self.preset,

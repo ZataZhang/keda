@@ -42,7 +42,9 @@ def test_direct_publication_completes_only_after_review_transition(
     process_runner = _runner()
     _forbid_builder(monkeypatch)
     monkeypatch.setattr(publication, "_try_distill_skill_after_success", lambda **_kwargs: None)
-    monkeypatch.setattr(publication, "_push_changes_with_recovery_context", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        publication, "_push_changes_with_recovery_context", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         publication,
         "_review_verify_create_pr",

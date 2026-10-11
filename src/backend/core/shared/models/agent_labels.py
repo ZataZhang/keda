@@ -60,6 +60,11 @@ STANDARD_LABEL_SPECS: tuple[tuple[str, str, str], ...] = (
         "One-shot DIRECT across claimants; consumed after confirmed Draft PR. Not a workflow state.",
     ),
     (
+        "prd-auto-merge",
+        "B60205",
+        "Explicit per-PRD authorization: skip independent verifier and auto-merge after required gates.",
+    ),
+    (
         "validation/pending",
         "FBCA04",
         "Realistic Validation evidence awaits human sign-off on the PR.",
@@ -101,11 +106,12 @@ CONFIGURABLE_LABEL_FIELDS: tuple[tuple[str, str], ...] = (
     ("validation/passed", "validation_passed"),
     ("validation/verifier-passed", "verifier_passed"),
     ("direct-pr", "direct_pr"),
+    ("prd-auto-merge", "prd_auto_merge"),
 )
 
-#: 直发档选择标签的特殊约定：配置可以把它置空表示「本仓库不用直发档」，
-#: 此时该标签既不参与同步，也不属于允许写入的集合。
-_OPTIONAL_BLANKABLE_LABEL_NAME = "direct-pr"
+#: 可选档位标签的特殊约定：配置置空表示本仓库禁用该功能；标签既不参与同步，
+#: 也不属于允许写入的集合。
+_OPTIONAL_BLANKABLE_LABEL_NAMES = frozenset({"direct-pr", "prd-auto-merge"})
 
 
 @dataclass(frozen=True)
@@ -192,7 +198,7 @@ def standard_label_specs(
     resolved_specs: list[LabelSpec] = []
     for standard_name, label_color, label_description in spec_triples:
         effective_name = name_overrides.get(standard_name, standard_name)
-        if standard_name == _OPTIONAL_BLANKABLE_LABEL_NAME:
+        if standard_name in _OPTIONAL_BLANKABLE_LABEL_NAMES:
             effective_name = effective_name.strip()
             if not effective_name:
                 continue

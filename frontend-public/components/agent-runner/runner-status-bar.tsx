@@ -93,7 +93,7 @@ export function RunnerStatusBar() {
         <code className="font-mono">{status.config.running_label}</code>
       </span>
       <span>
-        自动合并 {status.config.auto_merge ? "开" : "关"} · autopilot{" "}
+        全局自动合并 {status.config.auto_merge ? "开" : "关"} · autopilot{" "}
         {status.config.autopilot_enabled ? "开" : "关"}
       </span>
       <span className="ml-auto font-mono text-[11px] text-slate-400">

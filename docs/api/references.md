@@ -338,7 +338,7 @@ curl -sS \
 
 ### `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/start`
 
-启动单个 PRD（既有端点，行为不变）。三种 Backlog 视图（依赖图 / 时间轴 / 列表）现在都会经右侧统一详情走这一个端点；成功后该仓的 PRD 列表缓存会立即失效，下一次刷新即可看到新状态。请求体为 `{"repo_id": "..."}`；PRD 不在 `tasks/pending/` 或 `tasks/archive/` 内、或仍被上游依赖阻塞时，由既有依赖门禁返回 `400`。
+启动单个 PRD。三种 Backlog 视图（依赖图 / 时间轴 / 列表）现在都会经右侧统一详情走这一个端点；成功后该仓的 PRD 列表缓存会立即失效，下一次刷新即可看到新状态。基础请求体为 `{"repo_id": "..."}`；可选的 `auto_merge_prd: true` 会给该 Issue 设置单 PRD 自动合并授权标签，只跳过独立 verifier，保留仓库验证命令、PR checks 和分支保护。该选项要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`；合并后不会修改 PRD 人工验收记录。PRD 不在 `tasks/pending/` 或 `tasks/archive/` 内、或仍被上游依赖阻塞时，由既有依赖门禁返回 `400`。
 
 ## 模型模块
 

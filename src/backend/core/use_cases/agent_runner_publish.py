@@ -16,6 +16,7 @@ from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_dependencies import (
     format_direct_pr_marker,
     format_fast_merge_marker,
+    format_prd_auto_merge_marker,
 )
 from backend.core.use_cases.agent_runner_feedback import (
     assert_prd_archived_for_publish,
@@ -223,8 +224,8 @@ def _format_publish_stage_annotation(
 ) -> str | None:
     """渲染发布档位的自我声明段（marker + 人读说明）。
 
-    两个旁路档位在 PR 正文里留下同族但值不同的 marker，让 reviewer 与下游机器
-    判定都能区分「跳了哪一层」；默认档位不产生任何标注。
+    旁路档位在 PR 正文里留下各自的 marker，让 reviewer 与下游机器判定都能区分
+    「跳了哪一层」；默认档位不产生任何标注。
 
     Args:
         issue_number: 本次发布针对的 Issue 编号。
@@ -244,6 +245,12 @@ def _format_publish_stage_annotation(
             "> **直发档发布**：本 PR 经直发档发布（来自 ``--direct-pr`` 旗标或 Issue 上的 "
             "``direct-pr`` 标签），runner 侧未运行审核 Agent 与仓库验证命令，"
             "质量门禁转移到本 PR 上的 CI；合并前请确认 CI 变绿并人工验证。"
+        )
+    elif publish_stage is PublishStage.PRD_AUTO_MERGE:
+        marker = format_prd_auto_merge_marker(issue_number)
+        human_note = (
+            "> **PRD 自动合并**：该 PRD 显式授权自动合并；仓库验证命令、PR checks 与分支保护照常，"
+            "仅跳过独立 verifier。"
         )
     else:
         return None

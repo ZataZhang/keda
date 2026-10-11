@@ -390,9 +390,9 @@ class _PublicationReviewRequest:
 def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrPublication:
     """审核、复核最终提交，随后创建 Draft PR。"""
     verification_request = request.verification_request
-    # 发布路径本身不变（决策一）：pre-PR review 照常执行（其开关仍是
-    # config.pre_pr_review.enabled）；快速通道旁路的是 verification_request
-    # 携带的两道验证门禁与 PR 标注。直发档再往前一步，连 reviewer agent 也不跑。
+    # 发布路径本身不变：FAST 旁路两道验证门禁，PRD_AUTO_MERGE 只旁路 verifier；
+    # pre-PR review 照常执行（其开关仍是 config.pre_pr_review.enabled）。
+    # DIRECT 再往前一步，连 reviewer agent 也不跑。
     if verification_request.publish_stage.skips_review_and_repo_verification:
         _logger.info(
             "Direct-pr track (PublishStage.DIRECT): skipping the pre-PR review agent "

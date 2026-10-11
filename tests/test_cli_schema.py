@@ -79,6 +79,8 @@ def test_schema_covers_every_leaf_of_the_real_command_tree(schema: dict[str, Any
     import typer.main
 
     def _leaf_names(command: Any, prefix: tuple[str, ...]) -> set[str]:
+        if getattr(command, "hidden", False):
+            return set()
         children = getattr(command, "commands", None)
         if not isinstance(children, dict):
             return {" ".join(prefix)}

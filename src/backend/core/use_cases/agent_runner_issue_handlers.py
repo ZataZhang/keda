@@ -200,8 +200,8 @@ def _process_blocked_resolution(
         content_generator: 可选的 AI 内容生成器
         marker: blocked_resolution_requested 事件标记
         repo_id: 稳定的仓库 registry id，用于短期记忆分区。
-        publish_stage: 发布档位：非 ``NORMAL`` 时跳过 Phase 4.5 验证门禁并在 PR
-            正文打未验证标注；``DIRECT`` 再跳过审核 agent 与仓内验证命令。
+        publish_stage: 发布档位：FAST / DIRECT 跳过 Phase 4.5 的 RV 重跑与 verifier；
+            PRD_AUTO_MERGE 保留 RV 重跑、只跳 verifier；DIRECT 再跳过审核 agent 与仓内验证命令。
     """
     from backend.core.use_cases.agent_runner_publish import validate_safe_changes
     from backend.core.use_cases.run_agent_once import (
@@ -565,9 +565,9 @@ def _process_ready_issue(
     5. 完成发布流程
 
     Args:
-        publish_stage: 调用侧请求的发布档位：非 ``NORMAL`` 时 builder 提交后不再重跑
-            rv_reexec、不启动独立 verifier，直接发布带标注的 PR。Issue 上带直发标签时，
-            认领后的有效档位会被提升到 ``DIRECT``（守护进程与批量因此也能直发）。
+        publish_stage: 调用侧请求的发布档位。FAST / DIRECT 在 builder 提交后不重跑
+            rv_reexec 且不启动独立 verifier；PRD_AUTO_MERGE 保留 rv_reexec、只跳 verifier。
+            Issue 上的发布选择标签会在认领后决定有效档位。
         issue: Issue 对象
         repo_path: 仓库根目录
         config: 应用配置
@@ -973,8 +973,8 @@ def _process_running_publish_recovery(
         github_client: GitHub 客户端
         process_runner: 进程运行器
         content_generator: 可选的 AI 内容生成器
-        publish_stage: 发布档位：非 ``NORMAL`` 时跳过发布前的最终 RV / verifier
-            复核并在 PR 正文打未验证标注。
+        publish_stage: 发布档位：FAST / DIRECT 跳过发布前的最终 RV / verifier 复核；
+            PRD_AUTO_MERGE 仍重跑 RV，只跳过 verifier。
         cleanup_only: 仅补既有 PR 交接；关联失效时拒绝转成普通发布。
     """
     selected_agent = choose_agent(issue, config, agent)

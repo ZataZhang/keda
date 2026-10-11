@@ -41,7 +41,7 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 #: 子命令说明子目录。
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
-#: 子命令说明的约定份数（PRD issue-234 与生命周期查询路由：恰好九条，多一条少一条都要先过守卫）。
+#: 子命令说明的当前份数；新增路由时须同步受管集合与此契约。
 _EXPECTED_REFERENCE_COUNT = 9
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
@@ -603,7 +603,7 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
 # ── 路由与自我描述（rv-4）────────────────────────────────────────────────────
 
 #: 每条子命令说明的口语关键词：自动触发只认 frontmatter description，路由表对
-#: 模型不可见，因此恰好九条子命令各自至少一个关键词必须出现在 description 里。
+#: 模型不可见，因此每条子命令各自至少一个关键词必须出现在 description 里。
 _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "create-issue.md": ("建 issue", "create an Issue"),
     "issue-inspect.md": ("查 issue", "inspect Issues"),
@@ -644,7 +644,7 @@ def _routes_table_rows() -> list[str]:
 
 
 def test_packaged_skill_routes_table_points_at_existing_references() -> None:
-    """路由表恰好九行，每行指向一份真实存在的子命令说明，且全部说明被指向。"""
+    """路由表每行指向一份真实存在的子命令说明，且全部说明被指向。"""
     rows = _routes_table_rows()
     header_row, data_rows = rows[0], rows[1:]
     assert (
@@ -670,7 +670,7 @@ def test_packaged_skill_routes_table_points_at_existing_references() -> None:
 
 
 def test_packaged_skill_description_covers_every_route_keyword() -> None:
-    """九条子命令各自至少一个触发词可在 frontmatter description 中找到。"""
+    """每条子命令至少一个触发词可在 frontmatter description 中找到。"""
     description_text = _skill_frontmatter_description()
     for reference_name, keywords in _ROUTE_KEYWORDS_BY_REFERENCE.items():
         assert any(

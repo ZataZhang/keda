@@ -1,8 +1,7 @@
-"""发布档位（``kc run`` 的 per-run 门禁旁路级别）。
+"""发布档位（``kc run`` 的 per-run 门禁级别）。
 
-执行 agent 结束后还剩多少门禁与第二个 agent，由本档位决定。三个档位是**嵌套**
-关系（``direct`` 的跳过范围严格包含 ``fast``），因此用一个字段而不是两个布尔承载：
-「既是 fast 又是 direct」这类矛盾状态在类型上不可表示。
+执行 agent 结束后还剩多少门禁与第二个 agent，由本档位决定。旁路级别由一个枚举
+承载，避免多个布尔值组成矛盾状态。
 """
 
 from __future__ import annotations
@@ -16,11 +15,17 @@ class PublishStage(str, Enum):
     NORMAL = "normal"
     FAST = "fast"
     DIRECT = "direct"
+    PRD_AUTO_MERGE = "prd_auto_merge"
 
     @property
     def skips_independent_verification(self) -> bool:
-        """是否跳过 Phase 4.5 的 rv 复跑与独立 verifier（``--fast-merge`` 的旁路范围）。"""
+        """是否跳过独立 verifier。"""
         return self is not PublishStage.NORMAL
+
+    @property
+    def skips_rv_reexecution(self) -> bool:
+        """是否跳过 Realistic Validation 重跑；PRD 自动合并仍会运行它。"""
+        return self in {PublishStage.FAST, PublishStage.DIRECT}
 
     @property
     def skips_review_and_repo_verification(self) -> bool:

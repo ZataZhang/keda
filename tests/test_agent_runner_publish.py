@@ -416,6 +416,7 @@ def test_publish_failure_category_push_vs_pr_create() -> None:
     """Pre-PR flow: push and PR create are gated separately and report accurately."""
     from backend.core.use_cases.agent_runner_failure import PublishFailureError
     from backend.core.use_cases.agent_runner_publication import (
+        _PushChangesRequest,
         _create_draft_pr_with_recovery_context,
         _push_changes_with_recovery_context,
     )
@@ -460,11 +461,14 @@ def test_publish_failure_category_push_vs_pr_create() -> None:
     )
     with pytest.raises(PublishFailureError) as exc_info:
         _push_changes_with_recovery_context(
-            issue=issue,
-            worktree_path=Path("."),
-            config=AppConfig(),
-            process_runner=fake_runner_push_fail,
-            expected_branch="issue-1",
+            _PushChangesRequest(
+                issue=issue,
+                worktree_path=Path("."),
+                config=AppConfig(),
+                github_client=FakeGitHubClient(),
+                process_runner=fake_runner_push_fail,
+                expected_branch="issue-1",
+            )
         )
     assert exc_info.value.failure_category == PublishFailureCategory.PUSH
 

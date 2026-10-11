@@ -729,10 +729,9 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         # Phase 4.5: commit proxy 已固定代码树，先重验 RV，再做独立复验。
         # RED 仍回到同一条 bounded recovery 循环，避免把未提交工作树当作
         # builder SHA 对应的交付物。
-        # 旁路档位：--fast-merge 跳过这两道验证门禁，直发档（CLI 旗标或 Issue 标签）
-        # 同样跳过（其跳过范围严格更大）；builder 失败 / 恢复循环照常。跳过必须留一行
-        # 审计日志，档位来源记在认领时的 publish stage resolution 日志里。
-        if publish_stage.skips_independent_verification:
+        # FAST / DIRECT 跳过两道门禁；PRD_AUTO_MERGE 仍重跑证据与仓库命令，只跳过独立 verifier。
+        # builder 失败 / 恢复循环照常。跳过必须留审计日志，来源记在档位解析日志里。
+        if publish_stage.skips_rv_reexecution:
             verifier_verdict = None
             stage_name, source_note, annotation_name = (
                 ("Fast-merge", "--fast-merge run flag", "fast-track")
@@ -763,17 +762,25 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
                 if request.before_verifier_callback is not None:
                     request.before_verifier_callback()
-                current_failure_phase = "verifier"
-                with attempt_phases.measure("verifier"):
-                    verifier_verdict = run_verifier_gate(
-                        issue,
-                        worktree_path,
-                        config,
-                        process_runner,
-                        selected_agent,
-                        prd_overrides=prd_overrides,
-                        prd_preset_overrides=prd_preset_overrides,
+                if publish_stage.skips_independent_verification:
+                    verifier_verdict = None
+                    _logger.info(
+                        "PRD auto-merge authorization: RV evidence and repository commands "
+                        "passed for Issue #%d; skipping only the independent verifier.",
+                        issue.number,
                     )
+                else:
+                    current_failure_phase = "verifier"
+                    with attempt_phases.measure("verifier"):
+                        verifier_verdict = run_verifier_gate(
+                            issue,
+                            worktree_path,
+                            config,
+                            process_runner,
+                            selected_agent,
+                            prd_overrides=prd_overrides,
+                            prd_preset_overrides=prd_preset_overrides,
+                        )
                 if verifier_verdict is not None:
                     _emit_agent_usage(
                         request, "verify", verifier_verdict.agent, verifier_verdict.token_usage

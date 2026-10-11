@@ -254,6 +254,8 @@ class FakeGitHubClient(IGitHubClient):
         return self._issue_url
 
     def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
+        pull_request_url = "https://github.com/example/repo/pull/1"
+        self._open_prs[cwd.name] = pull_request_url
         self.calls.append(
             {
                 "method": "create_draft_pr",
@@ -262,7 +264,7 @@ class FakeGitHubClient(IGitHubClient):
                 "base_branch": base_branch,
             }
         )
-        return "https://github.com/example/repo/pull/1"
+        return pull_request_url
 
     def list_review_candidate_issues(self, labels: Sequence[str], limit: int) -> list[IssueSummary]:
         self.calls.append(

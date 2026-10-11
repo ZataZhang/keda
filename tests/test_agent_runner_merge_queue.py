@@ -15,7 +15,6 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases import agent_runner_merge_queue as merge_queue_module
 from backend.core.use_cases.agent_runner_merge_queue import (
-    _autopilot_enabled,
     _tick_sign_off_checklist,
     process_merge_queue,
 )
@@ -321,7 +320,6 @@ def test_kill_switch_off_returns_no_op(tmp_path, monkeypatch) -> None:
 
 def test_autopilot_off_returns_no_op(tmp_path) -> None:
     config = _make_config(autopilot_enabled=False, auto_merge=True)
-    assert _autopilot_enabled(config) is False
     github = FakeGitHubClient()
     runner = FakeProcessRunner()
     exit_code, outcomes = process_merge_queue(
@@ -476,6 +474,113 @@ def test_prd_hold_prevents_auto_merge_until_the_human_answers(
     assert outcome.action == expected_action
     assert not any(call.get("method") == "merge_pull_request" for call in github.calls)
     assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    ("checks_state", "revoke_authorization", "expected_action"),
+    [
+        ("SUCCESS", False, "merged"),
+        ("FAILURE", False, "waiting_for_checks"),
+        ("SUCCESS", True, "skipped_auto_merge_revoked"),
+    ],
+)
+def test_scoped_prd_auto_merge_consumes_authorization_without_prd_backfill(
+    tmp_path,
+    worktree_path,
+    monkeypatch: pytest.MonkeyPatch,
+    checks_state: str,
+    revoke_authorization: bool,
+    expected_action: str,
+) -> None:
+    """显式授权可跳过 verifier 和 Human-Confirmed hold，但保留 RV/PR checks 且不回写 PRD。"""
+    issue_number = 88
+    branch = f"issue-{issue_number}"
+    head_sha = "scoped-auto-merge-head"
+    prd_body = "PRD path: `tasks/pending/auto-merge.md`"
+    prd_text = build_acceptance_prd(AWAITING_HUMAN_BANNER, human_marks=(" ",))
+    archive_path = worktree_path / "tasks" / "archive" / "auto-merge.md"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_text(prd_text, encoding="utf-8")
+
+    github = FakeGitHubClient()
+    scoped_issue = _make_issue(number=issue_number, labels=("agent/review", "prd-auto-merge"))
+    unselected_issue = _make_issue(number=89, labels=("agent/review",))
+    github.set_list_issues_by_label_result([scoped_issue, unselected_issue])
+    github.set_issue_body(issue_number, prd_body)
+    github.set_issue_labels(issue_number, ("agent/review", "prd-auto-merge"))
+    github.set_pr_context(
+        branch,
+        PullRequestContext(
+            pr_url=f"https://github.com/example/repo/pull/{issue_number}",
+            branch=branch,
+            head_sha=head_sha,
+            base_sha="base1234",
+            mergeable=True,
+            checks_state=checks_state,
+            number=issue_number,
+            body=_UNTICKED_BODY,
+        ),
+    )
+    branch_comment = f"Build complete on PR Branch: `{branch}`."
+    github._issue_comments[issue_number] = [branch_comment]
+    github._issue_comment_entries[issue_number] = [(1, branch_comment)]
+
+    verification_calls: list[int] = []
+    rebase_calls: list[int] = []
+
+    def record_verification(*args, **kwargs):  # noqa: ANN002, ANN003
+        verification_calls.append(issue_number)
+        return [CommandResult(command=("just", "test"), return_code=0, stdout="ok", stderr="")]
+
+    monkeypatch.setattr(merge_queue_module, "run_verification", record_verification)
+
+    def record_rebase(**kwargs):  # noqa: ANN003
+        rebase_calls.append(kwargs["issue"].number)
+        return []
+
+    monkeypatch.setattr(merge_queue_module, "execute_rebase", record_rebase)
+    monkeypatch.setattr(
+        merge_queue_module, "_diff_paths", lambda *args, **kwargs: (["src/main.py"], False)
+    )
+    if revoke_authorization:
+
+        def revoke_before_merge(*args, **kwargs):  # noqa: ANN002, ANN003
+            github.set_issue_labels(issue_number, ("agent/review",))
+            return True, _make_pr_context(branch=branch, number=issue_number)
+
+        monkeypatch.setattr(merge_queue_module, "_wait_for_checks_green", revoke_before_merge)
+
+    config = _make_config(
+        auto_merge=False,
+        require_verifier_pass=True,
+        auto_sign_off=False,
+        merge_check_timeout_seconds=0,
+    )
+    process_runner = FakeProcessRunner(responses=_git_state_responses(branch, head_sha))
+    exit_code, outcomes = process_merge_queue(
+        repo_path=tmp_path,
+        config=config,
+        github_client=github,
+        process_runner=process_runner,
+        supervisor_agent="auto",
+    )
+
+    assert exit_code == 0
+    assert [outcome.issue_number for outcome in outcomes] == [issue_number]
+    assert outcomes[0].action == expected_action
+    assert verification_calls == [issue_number]
+    assert rebase_calls == [issue_number]
+    prd_after_queue = archive_path.read_text(encoding="utf-8")
+    assert prd_after_queue == prd_text
+    assert AWAITING_HUMAN_BANNER in prd_after_queue
+    assert "- [ ] decision 1: answered by a human" in prd_after_queue
+    merge_calls = [call for call in github.calls if call["method"] == "merge_pull_request"]
+    assert (len(merge_calls) == 1) is (expected_action == "merged")
+    assert not any(
+        call["method"] == "edit_issue_labels"
+        and "validation/verifier-passed" in call.get("add", [])
+        for call in github.calls
+    )
 
 
 def _git_state_responses(branch: str, head_sha: str) -> dict[tuple[str, ...], CommandResult]:
