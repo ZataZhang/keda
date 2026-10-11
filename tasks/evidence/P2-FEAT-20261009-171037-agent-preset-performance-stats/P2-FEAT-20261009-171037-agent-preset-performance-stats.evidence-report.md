@@ -105,3 +105,8 @@
 - 在 `frontend-public/` 中 `pnpm typecheck` 与生产 `pnpm build` 通过。Stats 页面、统计卡片和类型文件的 ESLint 定向检查为 **0 errors**（5 个既有 JSDoc warning）。整仓 `pnpm lint` 仍有 4 个 `react-hooks/set-state-in-effect` 错误，位置均在与最新 `main` 一致且本 PR 未改动的 `run-detail-dialog.tsx` 和三个 backlog 视图；全仓 103 个 JSDoc warning 不影响上述目标文件检查。
 - 本轮真实 Stats 页面 E2E 再跑为 **5 passed**（包括全部仓库 / 单仓筛选、日期窗口、空态、统计端点隔离与窄屏滚动）；`just console-sync` 后从 worktree `kc console` 重新采集桌面及窄屏页面截图。桌面画面显示未绑定次数按仓库分别列出；窄屏表格尺寸为 `clientWidth=173`、`scrollWidth=920`、`overflow-x=auto`。`uv run mkdocs build --strict` 通过。
 - 独立 verifier 需要针对包含这次 main 合并和边界修正的最终提交树复核；本节不代替 verifier 结论，也不提前勾选其 runner-owned Acceptance 项。
+
+## 独立 verifier 第一轮复核修复（2026-10-11）
+
+- 第一轮独立复核指出本地 `rv-1-api-json.json` 仍是旧的标量字段形状。已在 `12f73660f472d70fd930227dd925ff93e53b36a8` 上重跑 `bash tasks/evidence/P2-FEAT-20261009-171037-agent-preset-performance-stats/scripts/rv-1-validation.sh`：API / SQLite 定向测试 **4 passed、33 deselected**，lifecycle percentile 回归 **1 passed**；重新捕获 repo-filter、all-repos、1-day 三份 HTTP 200 响应。最终响应包含按仓库分组的 `unbound_preset_attempts`（`keda-main: 1`、`other-repo: 1`），不再包含旧字段；`rv-1-final-tree.txt` 绑定提交 `12f73660f472d70fd930227dd925ff93e53b36a8`。
+- 第一轮指出 PRD 在 verifier gate 仍为 `[~]` 时已处于 `tasks/archive/`。为符合归档门禁，现将 PRD 放回 `tasks/pending/`；第二轮 verifier 通过后再完成 Final Reconciliation 并归档。两项 `Human-Confirmed` 仍待人工确认。
