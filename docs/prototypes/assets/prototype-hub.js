@@ -10,6 +10,14 @@
       relationships: [{ id: 'prd-lifecycle-observability', label: '验证失败后的生命周期与恢复时间线' }],
     },
     {
+      id: 'verifier-human-takeover', title: 'Verifier 运行中的单 Issue 人工接管', project: 'keda', module: 'Agent Runner / Dashboard',
+      system: 'Keda Console', form: 'code-native', version: 'v1.0', updatedAt: '2026-10-11', availability: 'available', validationLevel: '交互原型',
+      primaryFlow: '从 Dashboard 的 Issue 详情确认接管当前 verifier，查看处理中与交接完成；也可切换 verifier 已结束、HEAD 漂移和停止失败状态',
+      description: '基于真实 Dashboard 与 IssueDetail 页面结构的可点击流程演示。用静态数据呈递只停止目标 Issue verifier、保留 Draft PR、取消不产生验证结论的方案；不连接 API 或进程。',
+      preview: '', entry: './verifier-human-takeover.html', source: './verifier-human-takeover.md', provenance: [],
+      relationships: [{ id: 'blocked-draft-pr-surface', label: '查看验证失败后的 Issue 交接与 Draft PR' }],
+    },
+    {
       id: 'prd-lifecycle-observability', title: 'PRD 生命周期观测与执行分析', project: 'keda', module: 'Backlog / 统计',
       system: 'Keda Console', form: 'code-native', version: 'v2.0', updatedAt: '2026-10-11', availability: 'available', validationLevel: '交互原型',
       primaryFlow: '从 Backlog 单 PRD 执行时间线按「执行会话 → Agent 尝试 → 调用」展开调用明细、查看事件详情，切换五套场景验证去噪与降级披露，并进入仓库级 PRD 耗时统计后返回',

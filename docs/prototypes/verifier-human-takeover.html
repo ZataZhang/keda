@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8f8fc" />
+    <title>Verifier 人工接管 · 交互原型</title>
+    <link rel="stylesheet" href="./assets/prototype-chrome.css" />
+    <link rel="stylesheet" href="./assets/verifier-human-takeover.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="app-sidebar" aria-label="KedaCode 主导航">
+        <a class="brand" href="#dashboard" aria-label="KedaCode Dashboard">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <strong>KedaCode</strong>
+        </a>
+        <nav class="primary-nav" aria-label="主导航">
+          <a class="nav-item is-active" href="#dashboard"><span>▦</span>Dashboard</a>
+          <span class="nav-item is-disabled" title="本原型不演示此页面"><span>◷</span>Processes</span>
+          <span class="nav-item is-disabled" title="本原型不演示此页面"><span>⑂</span>Repositories</span>
+          <span class="nav-item is-disabled" title="本原型不演示此页面"><span>▤</span>Stats</span>
+          <span class="nav-item is-disabled" title="本原型不演示此页面"><span>◇</span>Backlog</span>
+          <span class="nav-item is-disabled" title="本原型不演示此页面"><span>✦</span>Ideas</span>
+          <span class="nav-item is-disabled" title="本原型不演示此页面"><span>⚙</span>Settings</span>
+        </nav>
+        <div class="sidebar-footer"><span class="online-dot"></span><span>keda-main · 已连接</span></div>
+      </aside>
+
+      <main class="page-content" id="dashboard">
+        <header class="page-header">
+          <div>
+            <p class="breadcrumb">Agent Runner <span>/</span> Dashboard</p>
+            <h1>运行监控</h1>
+            <p class="page-description">查看仓库中的 Issue 与当前 Runner 状态。</p>
+          </div>
+          <span class="demo-badge"><span></span>交互原型 · 模拟数据</span>
+        </header>
+
+        <section class="summary-strip" aria-label="监控概览">
+          <div><span>仓库</span><strong>3 个</strong></div>
+          <div><span>运行中的 Issue</span><strong>2 个</strong></div>
+          <div><span>最近同步</span><strong>刚刚</strong></div>
+          <button type="button" class="refresh-button" data-hotspot-target aria-label="刷新演示数据">↻ 刷新</button>
+        </section>
+
+        <div class="dashboard-grid">
+          <section class="repository-panel" aria-labelledby="repo-title">
+            <div class="panel-heading">
+              <div><p class="eyebrow">REPOSITORY</p><h2 id="repo-title">keda-main</h2></div>
+              <span class="repo-count">3 Issues</span>
+            </div>
+            <div class="repo-health"><span class="online-dot"></span>GitHub 可访问 <span class="separator">·</span> Runner 在线</div>
+            <div class="issue-list-heading"><strong>监控中的 Issue</strong><span class="text-button-static">全部</span></div>
+            <div class="issue-row is-selected" aria-current="true">
+              <span class="issue-icon issue-icon-running">◌</span>
+              <span class="issue-copy"><strong>#42 · verifier 接管演示</strong><small>独立验证器正在运行</small></span>
+              <span class="issue-status status-running">运行中</span>
+            </div>
+            <div class="issue-row is-muted">
+              <span class="issue-icon issue-icon-review">◉</span>
+              <span class="issue-copy"><strong>#39 · 文档索引更新</strong><small>等待审查</small></span>
+              <span class="issue-status status-review">审查中</span>
+            </div>
+            <div class="issue-row is-muted">
+              <span class="issue-icon issue-icon-ready">✓</span>
+              <span class="issue-copy"><strong>#36 · 配置项校验</strong><small>已完成</small></span>
+              <span class="issue-status status-done">完成</span>
+            </div>
+            <div class="repo-footer"><span>分支</span><code>main</code><span class="footer-spacer"></span><span>最近扫描 14:32</span></div>
+          </section>
+
+          <section class="issue-detail" aria-labelledby="issue-title">
+            <article class="card issue-header-card">
+              <div class="issue-title-row">
+                <div>
+                  <p class="eyebrow">ISSUE DETAIL <span class="issue-number">#42</span></p>
+                  <h2 id="issue-title">verifier 运行中接管单个 Issue</h2>
+                </div>
+                <a class="github-link hotspot-target" href="#pr-context" aria-label="查看关联 PR 信息">关联 PR ↓</a>
+              </div>
+              <div class="labels-row" aria-label="Issue 标签">
+                <span class="label-chip label-agent">agent/review</span>
+                <span class="label-chip label-event">iar:event</span>
+                <span class="label-chip label-priority">P1</span>
+              </div>
+              <div class="issue-meta-grid">
+                <div><span>运行身份</span><strong><code>run-7f3a9c</code></strong></div>
+                <div><span>阶段</span><strong>Independent verifier</strong></div>
+                <div><span>开始时间</span><strong>14:31:08 · 运行 42 秒</strong></div>
+              </div>
+            </article>
+
+            <article class="card verifier-card" id="verifier-card" data-state="running" aria-live="polite">
+              <div class="verifier-card-heading">
+                <div class="verifier-heading-copy">
+                  <span class="verifier-icon" id="verifier-icon" aria-hidden="true">◌</span>
+                  <div><p class="eyebrow">独立验证</p><h3 id="verifier-title">Verifier 正在运行</h3></div>
+                </div>
+                <span class="state-pill" id="verifier-state-pill"><span></span><b>进行中</b></span>
+              </div>
+
+              <div class="verifier-content" id="verifier-content">
+                <p class="verifier-description" id="verifier-description">验证器正在检查当前 Draft PR。接管只会停止这个 Issue 的 verifier。</p>
+                <div class="target-row">
+                  <span>目标提交</span><code id="target-sha">4b19de2</code>
+                  <span class="target-divider"></span>
+                  <span>子进程</span><code>verifier · PID 28417</code>
+                </div>
+                <div class="scope-note" id="scope-note"><span aria-hidden="true">ⓘ</span><span>PR 会保持 Draft。接管不会被记录为验证通过，也不会自动合并。</span></div>
+                <div class="action-row" id="action-row">
+                  <button class="primary-button hotspot-target" id="takeover-button" type="button">接管此 Issue <span aria-hidden="true">→</span></button>
+                  <span class="action-caption">只影响 #42 · 不停止 Runner 或其他 Issue</span>
+                </div>
+              </div>
+
+              <div class="handoff-progress" id="handoff-progress" hidden>
+                <span class="progress-spinner" aria-hidden="true"></span>
+                <div><strong>正在停止 verifier…</strong><p>请求已发送。Runner 尚未确认进程退出，因此还没有完成交接。</p></div>
+                <span class="progress-time">请稍候</span>
+              </div>
+
+              <div class="handoff-result" id="handoff-result" hidden></div>
+            </article>
+
+            <article class="card pr-card" id="pr-context">
+              <div class="pr-card-heading"><div><p class="eyebrow">PULL REQUEST</p><h3>PR #58 · verifier takeover flow</h3></div><span class="draft-pill"><span></span>Draft</span></div>
+              <div class="pr-details">
+                <div><span>Branch</span><code>agent/issue-42-takeover</code></div>
+                <div><span>HEAD</span><code id="pr-sha">4b19de2</code></div>
+                <div><span>验证标签</span><code class="missing-verdict"><span>—</span> validation/verifier-passed</code></div>
+              </div>
+              <div class="pr-card-footer"><span id="pr-note">验证尚未完成。PR 保持 Draft，当前没有 verifier PASS。</span><button type="button" class="outline-button hotspot-target" id="open-pr-button">查看 PR 详情 <span>↗</span></button></div>
+            </article>
+
+            <article class="card timeline-card">
+              <div class="timeline-heading"><h3>事件时间线</h3><span class="text-button-static">最新事件</span></div>
+              <ol class="timeline-list">
+                <li><span class="timeline-mark is-done">✓</span><div><strong>Draft PR 已创建</strong><small>PR #58 · 14:30:52</small></div><span class="timeline-age">42 秒前</span></li>
+                <li class="timeline-current" id="timeline-current"><span class="timeline-mark is-active">◌</span><div><strong id="timeline-title">独立 verifier 开始运行</strong><small id="timeline-note">目标 HEAD 4b19de2 · 14:31:08</small></div><span class="timeline-age" id="timeline-age">现在</span></li>
+              </ol>
+            </article>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="confirm-dialog" id="takeover-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+      <form method="dialog" class="dialog-form" id="takeover-form">
+        <button class="dialog-close hotspot-target" type="button" aria-label="关闭确认框" id="dialog-close">×</button>
+        <span class="dialog-symbol" aria-hidden="true">Ⅱ</span>
+        <p class="eyebrow">人工接管</p>
+        <h2 id="dialog-title">停止 #42 的 verifier？</h2>
+        <p id="dialog-description">Runner 会停止并回收绑定到 <code>run-7f3a9c</code> 与 HEAD <code>4b19de2</code> 的 verifier 子进程。</p>
+        <ul class="dialog-commitments">
+          <li><span>✓</span>只停止这个 Issue 的 verifier</li>
+          <li><span>✓</span>PR #58 保持 Draft</li>
+          <li><span>✓</span>取消不会变成 PASS，也不会自动合并</li>
+        </ul>
+        <div class="dialog-actions">
+          <button class="secondary-button hotspot-target" type="button" id="cancel-takeover">返回</button>
+          <button class="danger-button hotspot-target" type="submit" id="confirm-takeover">停止并交给我</button>
+        </div>
+      </form>
+    </dialog>
+
+    <section class="scenario-menu" id="scenario-menu" hidden aria-label="原型状态切换">
+      <div class="scenario-menu-title"><strong>切换演示状态</strong><span>仅更改本页模拟数据</span></div>
+      <button type="button" data-scenario="running">Verifier 正在运行</button>
+      <button type="button" data-scenario="pending">请求已发出，仍在停止</button>
+      <button type="button" data-scenario="success">已交给你审查</button>
+      <button type="button" data-scenario="completed">Verifier 已先完成</button>
+      <button type="button" data-scenario="stale">PR HEAD 已变化</button>
+      <button type="button" data-scenario="failure">无法停止 verifier</button>
+      <button type="button" data-demo-complete hidden>演示 Runner 确认进程已退出</button>
+    </section>
+
+    <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具">
+      <span class="prototype-chrome__label">原型</span>
+      <a href="./hub.html">⌂ Hub</a>
+      <a href="./verifier-human-takeover.md" target="_blank" rel="noreferrer">ⓘ 说明</a>
+      <button type="button" id="scenario-toggle" aria-expanded="false">⇄ 场景</button>
+      <button type="button" data-hotspot-toggle aria-pressed="true">◎ 可点击区域：开</button>
+      <button type="button" data-prototype-reset>↺ 重置</button>
+    </nav>
+    <script src="./assets/verifier-human-takeover.js"></script>
+    <script src="./assets/prototype-chrome.js"></script>
+  </body>
+</html>
