@@ -7,6 +7,9 @@
 // - 调用序列来自后端 `invocations` 读取区，前端只做归组展示，不按时间窗口猜测归属。
 // - 「不可用」「无归属」「已截断」是三类不同的缺口，页面必须分别披露，任何一类都
 //   不得降级成「看起来没有发生」的空白。
+// - 归属只用显式字段：会话行匹配不到任何已展示尝试的调用（closeout /
+//   content_generation 这类账本里本来就没有尝试编号的调用）挂在会话级「其他调用」，
+//   会话标识对不上任何分组的调用单独披露条数——一条都不能静默消失。
 // - 去噪只作用于展示层：同秒成对事件折叠成一行、重试折叠成尝试行上的标记；被折叠
 //   的原始事件仍可单独点开查看原始 detail，账本内容零改写、零删除。
 
@@ -445,6 +448,41 @@ function FieldRow({
 }
 
 /**
+ * 会话级「其他调用」：账本里存在、但不属于任何已展示尝试的调用行。
+ *
+ * `closeout` / `content_generation` 这类调用本来就没有尝试编号，验证或收尾调用也
+ * 可能落在没有事件的历史尝试上。它们同样是已落库事实，收在这里而不是让它们消失。
+ *
+ * @param props.invocations - 该会话内未关联到尝试的调用行（顺序即账本顺序）。
+ * @returns 可展开的调用行区块。
+ */
+function OtherInvocationBlock({ invocations }: { invocations: PrdInvocationRow[] }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className="mt-2 rounded-md border border-dashed border-slate-300 px-3 dark:border-slate-700"
+      data-testid="prd-lifecycle-other-invocations"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 py-2">
+        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          其他调用（不属于任何已展示的 Agent 尝试）
+        </p>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          data-testid="prd-lifecycle-other-invocations-toggle"
+          onClick={() => setExpanded((current) => !current)}
+          className="text-xs text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300"
+        >
+          {expanded ? "收起调用序列" : `展开调用序列（${invocations.length} 次）`}
+        </button>
+      </div>
+      {expanded ? <InvocationRows invocations={invocations} /> : null}
+    </div>
+  );
+}
+
+/**
  * 一个 Agent 尝试分组：尝试事件行 + 可展开的调用序列。
  *
  * @param props.attempt - 尝试分组。
@@ -539,10 +577,13 @@ export function PrdLifecycleTimeline({
   }
 
   const { sessions, unattributedRows } = groupSessions(events);
-  const invocationRowsByAttempt = (runId: string | null, attemptNumber: number): PrdInvocationRow[] =>
-    (invocations?.rows ?? []).filter(
-      (invocation) => invocation.run_id === runId && invocation.attempt_number === attemptNumber,
-    );
+  const invocationRows = invocations?.rows ?? [];
+  const sessionRunIds = new Set(sessions.map((session) => session.runId));
+  // 调用行带着会话标识，但对应执行会话的生命周期事件没有该标识（旧执行）：这类行
+  // 不进任何分组，只披露条数——按时间窗口把它们塞进某个会话就是编造关联。
+  const unmatchedInvocationCount = invocationRows.filter(
+    (invocation) => !sessionRunIds.has(invocation.run_id),
+  ).length;
 
   return (
     <div className="space-y-3">
@@ -550,6 +591,7 @@ export function PrdLifecycleTimeline({
         invocations={invocations}
         unattributedCount={unattributedRows.length}
         allUnattributed={sessions.length === 0}
+        unmatchedInvocationCount={unmatchedInvocationCount}
       />
       {sessions.length === 0 ? (
         <ul
@@ -566,42 +608,60 @@ export function PrdLifecycleTimeline({
         </ul>
       ) : (
         <div className="space-y-3">
-          {sessions.map((session) => (
-            <section
-              key={session.runId ?? session.firstOccurredAt}
-              data-testid="prd-lifecycle-session-group"
-              className="rounded-md border border-slate-200 px-3 pb-2 dark:border-slate-800"
-            >
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 text-xs text-slate-500">
-                <span className="font-medium text-slate-700 dark:text-slate-200">执行会话</span>
-                <span className="font-mono">{session.runId}</span>
-                <span>开始：{formatLocalDateTime(session.firstOccurredAt)}</span>
-              </div>
-              <ul
-                data-testid="prd-lifecycle-session-events"
-                className="divide-y divide-slate-200 dark:divide-slate-800"
+          {sessions.map((session) => {
+            const sessionInvocationRows = invocationRows.filter(
+              (invocation) => invocation.run_id === session.runId,
+            );
+            const attemptNumbers = new Set(
+              session.attempts.map((attempt) => attempt.attemptNumber),
+            );
+            const otherInvocationRows = sessionInvocationRows.filter(
+              (invocation) =>
+                invocation.attempt_number === null ||
+                !attemptNumbers.has(invocation.attempt_number),
+            );
+            return (
+              <section
+                key={session.runId ?? session.firstOccurredAt}
+                data-testid="prd-lifecycle-session-group"
+                className="rounded-md border border-slate-200 px-3 pb-2 dark:border-slate-800"
               >
-                {session.eventRows.map((row) => (
-                  <EventRowItem
-                    key={`${row.primary.event_type}-${row.primary.occurred_at}`}
-                    row={row}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 text-xs text-slate-500">
+                  <span className="font-medium text-slate-700 dark:text-slate-200">执行会话</span>
+                  <span className="font-mono">{session.runId}</span>
+                  <span>开始：{formatLocalDateTime(session.firstOccurredAt)}</span>
+                </div>
+                <ul
+                  data-testid="prd-lifecycle-session-events"
+                  className="divide-y divide-slate-200 dark:divide-slate-800"
+                >
+                  {session.eventRows.map((row) => (
+                    <EventRowItem
+                      key={`${row.primary.event_type}-${row.primary.occurred_at}`}
+                      row={row}
+                      onSelectEvent={onSelectEvent}
+                    />
+                  ))}
+                </ul>
+                {session.attempts.map((attempt) => (
+                  <AttemptGroupBlock
+                    key={`${session.runId}-attempt-${attempt.attemptNumber}`}
+                    attempt={{
+                      ...attempt,
+                      invocations: sessionInvocationRows.filter(
+                        (invocation) => invocation.attempt_number === attempt.attemptNumber,
+                      ),
+                    }}
+                    invocationsAvailable={invocations?.available ?? false}
                     onSelectEvent={onSelectEvent}
                   />
                 ))}
-              </ul>
-              {session.attempts.map((attempt) => (
-                <AttemptGroupBlock
-                  key={`${session.runId}-attempt-${attempt.attemptNumber}`}
-                  attempt={{
-                    ...attempt,
-                    invocations: invocationRowsByAttempt(session.runId, attempt.attemptNumber),
-                  }}
-                  invocationsAvailable={invocations?.available ?? false}
-                  onSelectEvent={onSelectEvent}
-                />
-              ))}
-            </section>
-          ))}
+                {otherInvocationRows.length > 0 ? (
+                  <OtherInvocationBlock invocations={otherInvocationRows} />
+                ) : null}
+              </section>
+            );
+          })}
           {unattributedRows.length > 0 ? (
             <div data-testid="prd-lifecycle-unattributed-section">
               <p className="text-xs text-slate-500">以下事件没有执行会话标识，保持原顺序平铺：</p>
@@ -634,16 +694,19 @@ export function PrdLifecycleTimeline({
  * @param props.invocations - 调用明细读取区；缺失表示响应未带该区域（旧响应或未关联 Issue）。
  * @param props.unattributedCount - 没有执行会话标识的事件行数（回落平铺的披露依据）。
  * @param props.allUnattributed - 是否整条时间线都没有会话标识（旧记录口径）。
+ * @param props.unmatchedInvocationCount - 账本里有、但所属执行会话在时间线上没有标识的调用行数。
  * @returns 披露文案区块；数据齐备时返回 ``null``。
  */
 function InvocationGapNotice({
   invocations,
   unattributedCount,
   allUnattributed,
+  unmatchedInvocationCount,
 }: {
   invocations: PrdInvocationDetail | null | undefined;
   unattributedCount: number;
   allUnattributed: boolean;
+  unmatchedInvocationCount: number;
 }) {
   const notices: string[] = [];
   if (invocations === null || invocations === undefined) {
@@ -663,6 +726,11 @@ function InvocationGapNotice({
       allUnattributed
         ? "这些事件都没有执行会话标识（旧记录），已按原顺序平铺展示，未并入任何会话。"
         : `其中 ${unattributedCount} 条事件没有执行会话标识，已按原顺序平铺展示，未并入任何会话。`,
+    );
+  }
+  if (unmatchedInvocationCount > 0) {
+    notices.push(
+      `另有 ${unmatchedInvocationCount} 条调用记录所属的执行会话在生命周期事件里没有标识，无法归属，因此不显示其调用序列（也不按时间窗口猜测归属）。`,
     );
   }
   if (notices.length === 0) {

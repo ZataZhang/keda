@@ -4041,13 +4041,18 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
   `outcome` 沿用账本闭集（`ok / failed / timeout / error / unclosed / incomplete`）；未闭合的调用
   `finished_at` 与 `duration_seconds` 恒为空，**不补估算时长**；模型字段保持「KC 下发 / 执行器报告 /
   未提供」三态，失败与回退调用独立成行，不并入后续成功调用。
-- **三类缺口显式披露，绝不推测回填**：`available=false`（账本读端不可用，或该 PRD 没有关联 Issue 因而
-  无从归属）、`available=true` 且 `rows=[]`（账本可读但没有该 Issue 的调用记录，例如早于账本上线的旧库）、
+- **缺口显式披露，绝不推测回填**：`invocations=null`（该 PRD 没有关联 Issue，调用事实无从归属）、
+  `available=false`（账本读端不可用：存储不具备 Issue 级调用读端、读取异常，或关联 Issue 为空）、
+  `available=true` 且 `rows=[]`（账本可读但没有该 Issue 的调用记录，例如早于账本上线的旧库）、
   `truncated=true`（读取触达 500 条上限，历史只是最近一段，本视图不做分页、过滤或搜索）。缺口只影响
   调用明细区，页面其余部分照常渲染。
 - 生命周期事件 detail 里的 `invocation_run` 键是写侧注入的「该事件发生在哪次执行会话内」（只在 runner
   执行上下文内写、不覆盖调用方已有同名键）。旧事件没有该键时页面回落为平铺列表并说明「无归属」，
   不按时间窗口猜测会话分组。
+- **账本返回的每一行都必须在页面上有着落**：行的归属只用显式字段（`run_id` + `attempt_number`）。
+  `attempt_number` 为 `null` 的调用（`closeout` / `content_generation` 等非 attempt 主体调用）与
+  所属尝试没有事件的行，挂在会话级「其他调用」里；`run_id` 对不上任何执行会话分组的行不并入任何
+  分组，只单独披露条数。任何一类都不许既不分组的、又不出现在披露里。
 
 **降级语义**
 

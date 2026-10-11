@@ -135,10 +135,65 @@ const INVOCATION_B_UNCLOSED = {
   log_locator: null,
 }
 
+/**
+ * 会话 A 的收尾调用：账本里 `attempt_number` 恒为 null（非 attempt 主体调用）。
+ * 它必须仍然出现在会话里，不能因为不属于任何尝试就静默消失。
+ */
+const INVOCATION_A_CLOSEOUT = {
+  invocation_id: 'inv-a-closeout',
+  run_id: SESSION_A_RUN_ID,
+  attempt_number: null,
+  phase: 'closeout',
+  role: 'unspecified',
+  executor: 'codex',
+  outcome: 'ok',
+  failure_category: null,
+  started_at: '2026-10-10T11:05:40+00:00',
+  finished_at: '2026-10-10T11:05:55+00:00',
+  duration_seconds: 15.0,
+  requested_model: null,
+  reported_model: null,
+  model_source: null,
+  token_usage: null,
+  retry_of: null,
+  retry_reason: null,
+  exit_code: 0,
+  log_locator: 'logs/inv-a-closeout.log',
+}
+
+/** 会话标识存在、但时间线里没有该会话的生命周期事件：只能披露，不能猜归属。 */
+const INVOCATION_UNKNOWN_SESSION_ORPHAN = {
+  invocation_id: 'inv-c-1-implementation',
+  run_id: 'keda-main#417#session-c',
+  attempt_number: 1,
+  phase: 'implementation',
+  role: 'implementer',
+  executor: 'codex',
+  outcome: 'timeout',
+  failure_category: 'timeout',
+  started_at: '2026-10-10T10:50:00+00:00',
+  finished_at: '2026-10-10T10:59:00+00:00',
+  duration_seconds: 540.0,
+  requested_model: 'gpt-5',
+  reported_model: null,
+  model_source: 'preset',
+  token_usage: null,
+  retry_of: null,
+  retry_reason: null,
+  exit_code: null,
+  log_locator: null,
+}
+
 const MOCK_INVOCATIONS = {
   available: true,
   truncated: false,
-  rows: [INVOCATION_A_IMPLEMENTATION, INVOCATION_A_VERIFICATION_FAILED, INVOCATION_B_UNCLOSED],
+  rows: [
+    INVOCATION_A_IMPLEMENTATION,
+    INVOCATION_A_VERIFICATION_FAILED,
+    INVOCATION_A_CLOSEOUT,
+    INVOCATION_B_UNCLOSED,
+    INVOCATION_UNKNOWN_SESSION_ORPHAN,
+  ],
 }
 
 /**
@@ -429,6 +484,35 @@ test.describe('PRD lifecycle invocation detail timeline', () => {
     await expect(sheet).toContainText(SESSION_B_RUN_ID)
     await page.keyboard.press('Escape')
     await expect(sheet).not.toBeVisible()
+  })
+
+  test('账本里的每条调用都要么显示、要么被披露：非尝试调用与无法归属的调用都不许静默消失', async ({
+    page,
+  }) => {
+    await openLifecycleTab(page, MOCK_LIFECYCLE_DETAIL)
+
+    // 会话级「其他调用」：attempt_number 为 null 的收尾调用挂在会话里，而不是消失。
+    const sessionA = page
+      .getByTestId('prd-lifecycle-session-group')
+      .filter({ hasText: SESSION_A_RUN_ID })
+    const otherBlock = sessionA.getByTestId('prd-lifecycle-other-invocations')
+    await expect(otherBlock).toBeVisible()
+    await expect(otherBlock.getByTestId('prd-lifecycle-invocation-row')).toHaveCount(0)
+    const otherToggle = otherBlock.getByTestId('prd-lifecycle-other-invocations-toggle')
+    await expect(otherToggle).toHaveText('展开调用序列（1 次）')
+    await otherToggle.click()
+    const otherRows = otherBlock.getByTestId('prd-lifecycle-invocation-row')
+    await expect(otherRows).toHaveCount(1)
+    await expect(otherRows).toContainText('交付收尾')
+    await expect(otherRows).toContainText('正常退出')
+    await expect(otherRows).toContainText('logs/inv-a-closeout.log')
+
+    // 会话标识对不上任何执行会话的调用行：披露条数，不按时间窗口塞进某个会话。
+    await expect(page.getByTestId('prd-lifecycle-invocation-notice')).toContainText(
+      '另有 1 条调用记录',
+    )
+    await expect(page.getByTestId('prd-lifecycle-session-group')).toHaveCount(2)
+    await screenshot(page, 'rv-4-non-attempt-invocations-visible.png')
   })
 
   test('rv-3 unavailable invocation ledger is disclosed without blocking the timeline', async ({

@@ -146,6 +146,22 @@
       retry_of: 'inv-b-2-implementation', retry_reason: 'gate timeout', exit_code: null,
       log_locator: 'logs/inv-b-3-fix.log',
     },
+    // 收尾调用不是 attempt 主体：账本里 attempt_number 恒为 null，仍必须看得见。
+    aCloseout: {
+      invocation_id: 'inv-a-closeout', run_id: SESSION_A, attempt_number: null,
+      phase: 'closeout', role: 'unspecified', executor: 'codex', outcome: 'ok',
+      failure_category: null, started_at: '14:43:00', finished_at: '14:43:40', duration_seconds: 40.0,
+      requested_model: null, reported_model: null, token_usage: null,
+      retry_of: null, retry_reason: null, exit_code: 0, log_locator: 'logs/inv-a-closeout.log',
+    },
+    // 账本里存在、但时间线没有该执行会话的生命周期事件：只能披露条数，不能猜归属。
+    ledgerOnlySession: {
+      invocation_id: 'inv-x-1-implementation', run_id: 'keda-main#417#session-x', attempt_number: 1,
+      phase: 'implementation', role: 'implementer', executor: 'codex', outcome: 'timeout',
+      failure_category: 'timeout', started_at: '11:20:00', finished_at: '11:29:00', duration_seconds: 540.0,
+      requested_model: 'gpt-5', reported_model: null, token_usage: null,
+      retry_of: null, retry_reason: null, exit_code: null, log_locator: null,
+    },
   };
 
   // 正常轨迹的事件账本（同一份 fixture 也被「调用明细不可用」「旧记录」复用）。
@@ -300,7 +316,10 @@
       attempts: '2 次', attemptNote: '1 次失败后自动恢复',
       invocations: {
         available: true, truncated: false,
-        rows: [INVOCATIONS.aImplementation, INVOCATIONS.aVerification, INVOCATIONS.bImplementation, INVOCATIONS.bReviewUnclosed],
+        rows: [
+          INVOCATIONS.aImplementation, INVOCATIONS.aVerification, INVOCATIONS.aCloseout,
+          INVOCATIONS.bImplementation, INVOCATIONS.bReviewUnclosed, INVOCATIONS.ledgerOnlySession,
+        ],
       },
       events: NORMAL_EVENTS,
     },
@@ -573,6 +592,28 @@
     );
   }
 
+  /**
+   * 取某执行会话里「不属于任何已展示尝试」的调用行。
+   *
+   * `closeout` / `content_generation` 这类调用在账本里没有尝试编号，验证与收尾调用
+   * 也可能落在没有事件的尝试上。它们同样是已落库事实，收进会话级「其他调用」，
+   * 而不是让它们从页面上静默消失。
+   */
+  function otherInvocationsForSession(runId, attemptNumbers) {
+    return (scenarioOf().invocations?.rows ?? []).filter(
+      (row) =>
+        row.run_id === runId &&
+        (row.attempt_number === null || !attemptNumbers.has(row.attempt_number)),
+    );
+  }
+
+  /** 账本里有、但时间线里没有对应执行会话标识的调用行数（只披露，不猜归属）。 */
+  function unmatchedInvocationCount(sessionRunIds) {
+    return (scenarioOf().invocations?.rows ?? []).filter(
+      (row) => !sessionRunIds.has(row.run_id),
+    ).length;
+  }
+
   /** 尝试行摘要：agent / 失败类别 / 耗时 / 是否恢复，账本没写的不显示。 */
   function attemptSummaryParts(attempt) {
     const source = attempt.eventRows
@@ -673,12 +714,28 @@
       </div>`;
   }
 
+  /** 会话级「其他调用」：账本里存在、但不属于任何已展示尝试的调用行。 */
+  function renderOtherInvocationGroup(runId, invocations) {
+    if (invocations.length === 0) return '';
+    const expandKey = `${runId}#other`;
+    const expanded = uiState.expanded.has(expandKey);
+    return `<div class="other-invocations">
+        <div class="attempt-head">
+          <p>其他调用（不属于任何已展示的 Agent 尝试）</p>
+          <button type="button" class="attempt-toggle" data-other-toggle="${expandKey}" aria-expanded="${expanded}">
+            ${expanded ? '收起调用序列' : `展开调用序列（${invocations.length} 次）`}
+          </button>
+        </div>
+        ${expanded ? `<ul class="invocation-list">${invocations.map(renderInvocationRow).join('')}</ul>` : ''}
+      </div>`;
+  }
+
   /**
    * 三类缺口的显式披露：不可用 / 无归属 / 截断各说一件事。
    *
    * 合并成一句会让读的人无法判断该去修哪里；任何一类都只披露，不吞掉时间线其余渲染。
    */
-  function renderGapNotice(invocations, unattributedCount, allUnattributed) {
+  function renderGapNotice(invocations, unattributedCount, allUnattributed, unmatchedInvocations) {
     const notices = [];
     if (invocations === null || invocations === undefined) {
       notices.push('响应未携带调用明细区（旧记录，或该 PRD 没有关联 Issue）：不显示调用序列，也不按时间窗口猜测归属。');
@@ -695,6 +752,9 @@
         ? '这些事件都没有执行会话标识（旧记录），已按原顺序平铺展示，未并入任何会话。'
         : `其中 ${unattributedCount} 条事件没有执行会话标识，已按原顺序平铺展示，未并入任何会话。`);
     }
+    if (unmatchedInvocations > 0) {
+      notices.push(`另有 ${unmatchedInvocations} 条调用记录所属的执行会话在生命周期事件里没有标识，无法归属，因此不显示其调用序列（也不按时间窗口猜测归属）。`);
+    }
     if (notices.length === 0) return '';
     return `<div class="gap-notice" role="note">${notices.map((notice) => `<p>${notice}</p>`).join('')}</div>`;
   }
@@ -704,18 +764,28 @@
     eventRegistry = [];
     const scenario = scenarioOf();
     const { sessions, unattributedRows } = groupSessions(scenario.events);
-    const notice = renderGapNotice(scenario.invocations, unattributedRows.length, sessions.length === 0);
+    const sessionRunIds = new Set(sessions.map((session) => session.runId));
+    const notice = renderGapNotice(
+      scenario.invocations,
+      unattributedRows.length,
+      sessions.length === 0,
+      unmatchedInvocationCount(sessionRunIds),
+    );
     if (sessions.length === 0) {
       // 整条时间线都没有会话标识：保持单层平铺，不虚构分组。
       elements.timelineRoot.innerHTML = `${notice}<ol class="timeline">${unattributedRows.map(renderEventRow).join('')}</ol>`;
       return;
     }
-    const sessionBlocks = sessions.map((session) => `<section class="timeline-session">
+    const sessionBlocks = sessions.map((session) => {
+      const attemptNumbers = new Set(session.attempts.map((attempt) => attempt.attemptNumber));
+      return `<section class="timeline-session">
           <div class="timeline-session-head"><strong>执行会话</strong><code>${session.runId}</code>
             <span>开始：${session.firstOccurredAt}</span></div>
           <ol class="timeline">${session.eventRows.map(renderEventRow).join('')}</ol>
           ${session.attempts.map((attempt) => renderAttemptGroup(session.runId, attempt)).join('')}
-        </section>`).join('');
+          ${renderOtherInvocationGroup(session.runId, otherInvocationsForSession(session.runId, attemptNumbers))}
+        </section>`;
+    }).join('');
     const unattributedBlock = unattributedRows.length > 0
       ? `<div class="timeline-unattributed"><p>以下事件没有执行会话标识，保持原顺序平铺：</p>
           <ol class="timeline">${unattributedRows.map(renderEventRow).join('')}</ol></div>`
@@ -842,9 +912,9 @@
     if (viewLink) { event.preventDefault(); elements.inspector.hidden = true; showView(viewLink.dataset.viewLink); return; }
     const scenarioButton = event.target.closest('[data-scenario]');
     if (scenarioButton) { selectScenario(scenarioButton.dataset.scenario); return; }
-    const expandButton = event.target.closest('[data-attempt-toggle]');
+    const expandButton = event.target.closest('[data-attempt-toggle],[data-other-toggle]');
     if (expandButton) {
-      const expandKey = expandButton.dataset.attemptToggle;
+      const expandKey = expandButton.dataset.attemptToggle ?? expandButton.dataset.otherToggle;
       if (uiState.expanded.has(expandKey)) uiState.expanded.delete(expandKey);
       else uiState.expanded.add(expandKey);
       renderTimeline();
