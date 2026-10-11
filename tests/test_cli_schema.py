@@ -85,14 +85,18 @@ def test_schema_covers_every_leaf_of_the_real_command_tree(schema: dict[str, Any
         return {
             name
             for child_name, child in children.items()
+            if not getattr(child, "hidden", False)
             for name in _leaf_names(child, (*prefix, child_name))
         }
 
-    expected = _leaf_names(typer.main.get_command(app), ())
+    root_command = typer.main.get_command(app)
+    expected = _leaf_names(root_command, ())
     collected = {entry["name"] for entry in schema["commands"]}
     assert collected == expected
     assert len(schema["commands"]) == len(collected)
     assert {"schema", "tokens", "issue list", "agent doctor"} <= collected
+    assert root_command.commands["review"].hidden
+    assert root_command.commands["review-daemon"].hidden
 
 
 def _machine_output_entries(schema: dict[str, Any]) -> list[dict[str, Any]]:

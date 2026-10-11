@@ -65,10 +65,12 @@ from backend.infrastructure.github_models import (
 )
 from backend.infrastructure.github_pr_ops import (
     comment_pr,
+    close_pull_request,
     create_draft_pr,
     find_merged_pr_by_head,
     find_open_pr_by_head,
     get_pull_request_context,
+    get_pull_request_context_by_number,
     get_remote_base_sha,
     list_pr_comments,
     list_pull_requests_for_issue,
@@ -327,6 +329,12 @@ class GitHubCliClient:
         """
         return get_pull_request_context(self, branch, require_success=require_success)
 
+    def get_pull_request_context_by_number(
+        self, pr_number: int, *, require_success: bool = False
+    ) -> PullRequestContext | None:
+        """按编号读取开放或已关闭 PR 的上下文。"""
+        return get_pull_request_context_by_number(self, pr_number, require_success=require_success)
+
     def comment_pr(self, pr_number: int, body: str) -> None:
         comment_pr(self, pr_number, body)
 
@@ -338,6 +346,10 @@ class GitHubCliClient:
 
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
         merge_pull_request(self, pr_number, method=method)
+
+    def close_pull_request(self, pr_number: int, *, comment: str | None = None) -> None:
+        """关闭 PR，并可选地留下取代说明。"""
+        close_pull_request(self, pr_number, comment=comment)
 
     def list_pr_comments(self, pr_number: int) -> list[str]:
         return list_pr_comments(self, pr_number)

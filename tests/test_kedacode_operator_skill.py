@@ -41,8 +41,7 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 #: 子命令说明子目录。
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
-#: 子命令说明的约定份数（PRD issue-234：恰好八条；`kc lifecycle` 上线成为第九条，
-#: 多一条少一条都要先过守卫）。
+#: 子命令说明的约定份数（PRD issue-234 与生命周期查询路由：恰好九条）。
 _EXPECTED_REFERENCE_COUNT = 9
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
@@ -374,9 +373,11 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--all-ready",
         "--fast-merge",
         "--direct-pr",
+        "--aggregate-pr",
         "--takeover",
         "--yes",
     },
+    ("pr", "aggregate"): {"--issue", "--dry-run"},
     ("daemon", "run"): {
         "--autopilot",
         "--no-autopilot",
@@ -446,7 +447,7 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("schema",): {"--json", "--output"},
     # `kc lifecycle`（只读生命周期查询）：示例用到里程碑/阶段筛选与单 Issue 查看；
     # 旗标集合取自 ``kc schema --json`` 的真实命令树，而非人工记忆。
-    ("lifecycle",): {"--issue", "--repo-id", "--phase", "--reached", "--json"},
+    ("lifecycle",): {"--issue", "--repo-id", "--phase", "--reached", "--output", "--json"},
     # `kc backlog ci` 子组（P1-FEAT-20260916-134008）：policy 的 --global 与
     # --prd 互斥；status 的 --json 复用 Console ci_delivery DTO。
     ("backlog", "ci", "status"): {"--prd", "--json", "--repo", "--repo-id"},
@@ -477,7 +478,7 @@ def _real_flags_by_path() -> dict[tuple[str, ...], set[str]]:
 def test_packaged_skill_command_examples_match_cli_help() -> None:
     """主文件与每份子命令说明里的 kc 命令示例，所用 flag 必须真实存在于当前 CLI。
 
-    失败信息必须指名来源文件与旗标：内容拆到九份文件后，不指名的守卫会把 agent
+    失败信息必须指名来源文件与旗标：内容拆到十份文件后，不指名的守卫会把 agent
     引到错误的文件里去修（FR-6 / rv-2）。
     """
     allowed_flags = _ALLOWED_FLAGS
@@ -530,7 +531,7 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
 _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "create-issue.md": ("建 issue", "create an Issue"),
     "issue-inspect.md": ("查 issue", "inspect Issues"),
-    "lifecycle.md": ("查生命周期", "lifecycle phases"),
+    "lifecycle.md": ("查生命周期", "Issue lifecycle", "lifecycle phases"),
     "run-once.md": ("跑一次", "run one execution pass"),
     "watch.md": ("看进度", "live agent output"),
     "triage.md": ("卡住了", "triage stuck"),

@@ -35,9 +35,9 @@ const LOG_POLL_INTERVAL_MS = 2500;
 
 const KIND_LABELS: Record<RunnerProcessKind, string> = {
   daemon: "daemon（实现队列）",
-  review_daemon: "review-daemon（监督）",
+  review_daemon: "supervise-daemon（PR 后监督）",
   run_once: "run（单轮）",
-  review_once: "review（单轮）",
+  review_once: "supervise（单轮）",
   blocked_continue: "blocked-continue",
 };
 
@@ -103,7 +103,7 @@ export default function ProcessesPage() {
 
   async function handleStop(record: RunnerProcessRecord) {
     const confirmed = window.confirm(
-      `确认停止进程 ${record.process_id}（${record.repo_id} / ${record.kind}）？`,
+      `确认停止进程 ${record.process_id}（${record.repo_id} / ${KIND_LABELS[record.kind]}）？`,
     );
     if (!confirmed) {
       return;
@@ -198,7 +198,7 @@ export default function ProcessesPage() {
                     >
                       <td className="py-2 pr-3 font-medium">{record.repo_id}</td>
                       <td className="py-2 pr-3">
-                        <code className="text-xs">{record.kind}</code>
+                        <code className="text-xs">{KIND_LABELS[record.kind]}</code>
                       </td>
                       <td className="py-2 pr-3 font-mono text-xs">{record.pid}</td>
                       <td className="py-2 pr-3">
@@ -319,7 +319,7 @@ function ProcessLogSheet({
         <SheetHeader>
           <SheetTitle className="text-sm">
             {record
-              ? `日志：${record.repo_id} / ${record.kind}（${record.process_id}）`
+              ? `日志：${record.repo_id} / ${KIND_LABELS[record.kind]}（${record.process_id}）`
               : "日志"}
           </SheetTitle>
         </SheetHeader>

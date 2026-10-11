@@ -10,11 +10,16 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
 - **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，**默认带上 `agent/ready` 直接进队列**（`--no-ready` 可只建 Issue 不排队），并默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
 - **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
-- **review**：单次检查 `agent/supervising` 和 `agent/review` 的 Issues，基于 PR 上下文变化运行 supervisor cycle（兼容旧命令 `review-once`）
-- **review-daemon**：常驻进程，按指定间隔循环执行 `review-once`
+- **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。**同一条聚合资格门对两个入口都一样**：成员 Issue 必须是 open 且已带 `agent/review`，且每个来源 PR 的必需 checks 必须已是 `SUCCESS`；刚发布完的 Issue 通常还停在 `agent/supervising`、Draft PR 的 checks 还是 PENDING，所以单次夜间 `kc run --all-ready --aggregate-pr` 常会在资格阶段被拒，需要等 checks 与标签落定后再补一次 `kc pr aggregate --issue ...`（见「批次聚合的资格门与两次调用」）。
+- **supervise**：单次处理已有 PR 的 Issue，基于 PR 上下文变化运行 post-PR supervisor cycle（兼容旧命令 `review`；历史命令 `review-once` 已删除）
+- **supervise-daemon**：常驻进程，按指定间隔循环执行 post-PR supervisor 检查
 - **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 Backlog 自动推进阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
 - **ask**：受限自然语言决策入口，默认只生成计划，确认后执行白名单动作
 - **worktree cleanup**：清理 GitHub Issue 已关闭、远端分支已删除但本地仍残留的 `issue-<number>` 分支和 KedaCode worktree
+
+`kc review` 和 `kc review-daemon` 仍作为兼容别名接受；新脚本与文档请使用
+`kc supervise` 和 `kc supervise-daemon`。`kc registry start/stop` 的旧参数
+`--no-review-daemon` 也保留为 `--no-supervise-daemon` 的兼容别名。
 
 ## 安装
 
@@ -421,6 +426,12 @@ PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分四层，全部�
 设计原则是**发布端软、合并端硬**：正文格式问题永远不应阻止代码被推送和审阅
 （那会触发恢复循环烧预算），只应阻止"看起来合格"地被自动合并。
 
+> **聚合总 PR 的 v2 契约不在这道硬门里**：`iar:aggregate-contract` 标注没有任何合并
+> 队列消费方（队列只认单 PRD 的 `iar:pr-contract`）。`kc pr aggregate` 在创建总 PR
+> **之前**重算 v2 违规并直接以 `verification` 失败拒绝发布，因此带标注的正文只会出现在
+> 本地 / dry-run 产出里，它是本地门的信号，不是给自动化读的机器门；总 PR 本就保持 Draft
+> 交人工合并。
+
 ## 仓库本地配置
 
 `kc` 默认以当前 Git 仓库作为目标仓库。**首次在目标仓库使用前必须先执行 `kc init`**，否则除 `kc init` 外的所有命令都会失败并提示初始化。
@@ -558,8 +569,8 @@ provision_database = true
 [agent_runner.runner]
 # 每次轮询每个仓库最多处理多少个 Issue
 max_issues = 1
-# 单轮内并行处理的 Issue 数量：1 为串行（默认）；>1 时同一轮并行跑多个 Issue。
-# 仅 `kc daemon --concurrency` 未指定时作为默认值。
+# 单轮内并行处理的 Issue 数量（自动执行的 runner 容量）：1 为串行（默认）；>1 时同一轮并行跑多个 Issue。
+# 仅 `kc daemon --concurrency` 未指定时作为默认值；自动调度的生效并发上限 = min(Backlog「并发」策略, 本值)。
 max_concurrent_issues = 1
 # 默认使用的 AI agent：auto / claude / codex / kimi
 default_agent = "auto"
@@ -961,16 +972,16 @@ for repo in ~/code/*/; do [ -f "$repo/.kedacode.toml" ] && kc config migrate --d
 
 | 命令形态 | 目标解析 |
 |---|---|
-| `kc run` / `kc labels sync` / `kc review` / `kc issue create ...` | 当前 Git 仓库，合并当前仓库 `.kedacode.toml` |
+| `kc run` / `kc labels sync` / `kc supervise` / `kc issue create ...` | 当前 Git 仓库，合并当前仓库 `.kedacode.toml` |
 | `kc run --repo /path/to/repo` | 指定 Git 仓库，合并 `/path/to/repo/.kedacode.toml` |
 | `kc --repo /path/to/repo run` | 等价的顶层 selector 写法，适合把目标仓库放在命令前 |
 | `kc run --repo-id keda` | 从 legacy registry 找到路径，再合并目标仓库 `.kedacode.toml` |
 | `kc run --all` | 显式处理 `config.toml` 中所有 enabled registry entries |
-| `kc daemon` / `kc review-daemon` | 当前已初始化注册仓库；未命中、未初始化或匹配多个时报错 |
+| `kc daemon` / `kc supervise-daemon` | 当前已初始化注册仓库；未命中、未初始化或匹配多个时报错 |
 | `kc daemon --repo-id keda` | 仅处理指定仓库 |
 | `kc daemon --all` | 显式处理 `config.toml` 中所有 enabled registry entries |
 
-历史命令 `kc run-once`、`kc review-once`、`kc issue-from-prd` 和 `kc recover-publish` 已被删除；请改用 `kc run` / `kc review` / `kc issue create` / `kc recover`。
+历史命令 `kc run-once`、`kc review-once`、`kc issue-from-prd` 和 `kc recover-publish` 已被删除；请改用 `kc run` / `kc supervise` / `kc issue create` / `kc recover`。
 
 ## Workflow Templates（`kc workflow install`）
 
@@ -1025,7 +1036,7 @@ uv run kc workflow install preview --force
 - 为什么默认档也要净化：2026-10-07 Issue #229 事故确认，内容生成路径（`kc issue create --from-prompt` 派发的 `codebuddy -p ...`）走 `SubprocessRunner.run()` 且不传环境，当时的默认「全量继承」让 `SERVER__PORT` 原样透传，Issue 正文退化为模板渲染（修复：Issue #230）。环境构造收敛到 `run()` 一处后，**新增 denylist 变量无需改动任何执行层调用点**
 - 已知例外（不经执行层的直接调用）：`core/use_cases/agent_runner_prd_activity.py` 的 PRD 活动锁命令（`git worktree list`、`scripts/shared/just/prd_lock.py`）与 `core/shared/prd_contract_client.py` 的 `prd_contract.py` 调用仍直接 `subprocess.run`，完整继承 `os.environ`。这三处都不监听端口，今日不会复现 `SERVER__PORT` 事故，但「新增名单变量无需改动调用点」只对上面列出的执行层路径成立；把它们接入执行层要改 core 的注入签名（core 不得直接 import infrastructure），动之前按 Issue #230 的口径重新审计
 - 剔除按变量名去重告警：某变量在本进程内**首次**被剔除时记录一条 WARNING：`child env sanitized: removed KEY (value length N)`（不含完整值），之后同一变量再被剔除只记 DEBUG——默认档净化覆盖每一次 `SubprocessRunner.run()`，工具命令单轮可达数十次，逐次 WARNING 会把这条排障信号淹掉。若 agent 运行异常且日志出现该记录，优先怀疑名单误剔
-- 因此**从交互式 AI 会话的 shell 里直接启动 `kc run` / `kc review` / `kc issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
+- 因此**从交互式 AI 会话的 shell 里直接启动 `kc run` / `kc supervise` / `kc issue create --from-prompt` 是安全的**，无需手工 `env -u SERVER__PORT`
 - 白名单档（浏览器 E2E 验证子进程）的 fail-fast 前提校验不因默认档净化而改变：前提不成立时依旧报错，绝不静默回退到任何继承形态
 - 净化约定分两层守护：默认档「`run()` 一处构造、全分支透传」由 `tests/test_process_runner.py` 直接断言；守卫测试 `tests/guards/test_agent_spawn_env_guard.py` 只钉住可以被 `run()` **之外直接调用**的派发点（`run_filtered_claude_stream`、`_run_pty_stream` 与 `output_protocols/` 全目录），新增这类派发点必须自行接入净化环境。Issue #230 之前「工具命令路径不净化」的旧约定已废止
 
@@ -1172,13 +1183,49 @@ kc run tasks/pending/P1-FEAT-xxx.md
 
 # 处理整个 ready 队列（等价旧的 kc run 行为，必须显式）
 kc run --all-ready
+
+# 显式聚合本轮至少两个 Issue（默认关闭；不能与 --direct-pr / --fast-merge 合用）
+kc run --all-ready --aggregate-pr --max-issues 4
+
+# 把不同运行完成的来源 PR 显式组成一批，或重试聚合 / 收尾
+kc pr aggregate --issue 101 --issue 102
 ```
 
 - `--issue` 与 PRD 路径互斥；三者（`--issue` / PRD 路径 / `--all-ready`）都不给时退出码 2（usage error）。
+- `--aggregate-pr` 只能与 `--all-ready` 合用，要求单个仓库和至少两个本轮实际选中的 Issue；`--max-issues` 也必须允许至少两个候选。dry-run 预览会列出批次大小和可识别的 PRD 路径，不认领或写入状态。该选项不能与 `--direct-pr` 或 `--fast-merge` 合用。
+- 每个 Issue 仍先通过现有实现、审核、验证和来源 Draft PR 流程。所有 worker 完成后，runner 从配置的远程 base SHA 建隔离 `batch-*` 分支，按依赖顺序合入 source heads，并对完整 tree 运行仓库验证命令及 PRD 独立 verifier。失败时不发布总 PR，也不关闭来源 PR。
+- 总 PR 使用多 PRD v2 正文列出来源 Issue / PR、去重 PRD、逐任务 evidence links 和 base/head/tree；总 PR 保持 Draft，交给用户审阅并手动合并。仅当总 PR 创建、组合验证和必需 checks 均成功后才关闭来源 PR 并附取代链接；source branch 保留。checks pending/failed 时来源 PR 保持开放。收尾拒绝逐项点名原因：必需 checks 未全绿、批次身份不符（head/base/draft）、以及总 PR 正文与生成结果不符是三条不同诊断——正文差异按 GitHub 的空白规范化后比较，报错不会伪装成 checks 问题，处理方式是用重试命令重新落正文。若收尾部分失败，已关闭来源保留取代记录，未关闭来源保持开放并逐项列出，同时给出 `kc pr aggregate --issue ...` 重试命令。
+- 重试已完成的来源批次：
+
+  ```bash
+  kc pr aggregate --issue 101 --issue 102
+  kc pr aggregate --issue 101 --issue 102 --dry-run
+  ```
+
+  手动入口仅接受同仓库、仍符合门禁（见下节「批次聚合的资格门与两次调用」）且每个 Issue 唯一的来源 PR；自动入口和手动入口都至少需要两个 Issue。系统不跨调用猜测批次、不自动合并总 PR。真实 GitHub PR 创建、checks、关闭评论及远端分支保留状态需在真实服务上确认，不能由本地测试代替。
 - 定向 run 只处理目标 Issue（仍走依赖门禁与 claim）；队列里其他 ready Issue 原封不动。
-- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。
+- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。显式 run（定向与 `--all-ready`）**不受 Backlog「并发」策略约束**：统一并发上限只闸门自动执行路径。
 
 **迁移**：旧脚本/文档里"无目标的 `kc run`"改为 `kc run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
+
+### 批次聚合的资格门与两次调用
+
+聚合只有一个资格判定源：`resolve_batch_sources`（`src/backend/core/use_cases/agent_runner_batch_aggregate_sources.py`）。自动入口（`kc run --all-ready --aggregate-pr`）在本轮全部 worker join 之后调用它，手动入口（`kc pr aggregate`）在第一步就调用它——**两者过的是同一道门**：
+
+| 门禁 | 要求 | 任务刚发布完时的实际状态 |
+|---|---|---|
+| Issue 状态 | 仍为 open，且带 `agent/review` 标签 | NORMAL 档位发布后 Issue 先进 `agent/supervising`；PR 后监督返回 `wait_for_checks` 时就停在那里，本轮不会拿到 `agent/review` |
+| 来源 PR checks | 必需 checks 汇总为 `SUCCESS` | 新建 Draft PR 的 checks 通常是 `PENDING` |
+| 来源 PR 集合 | 每个 Issue 恰好一个未合并来源 PR，且未绕过 review/verification（正文不含 `iar:direct-pr` / `iar:fast-merge`） | 直发档、快速合并档的 Issue 会被拒 |
+
+**后果**：单次夜间 `kc run --all-ready --aggregate-pr` 处理的通常正是"刚跑完"的 Issue，几乎必然卡在前两行，于是整批在 eligibility 阶段被拒绝——不创建总 PR、不关闭来源 PR，日志与错误里给出同一批成员的重试命令。要拿到总 PR，等 checks 跑绿、监督把 Issue 推进到 `agent/review` 之后，再显式补一次：
+
+```bash
+kc pr aggregate --issue 101 --issue 102 --dry-run   # 只核对资格与去重 PRD 集，不写分支不建 PR
+kc pr aggregate --issue 101 --issue 102             # 组合、验证、发布总 Draft PR 并关闭来源
+```
+
+`--dry-run` 走的是同一道门，可以直接当作"这一批现在能不能聚合"的检查。想让一次调用就出总 PR，只有在本轮选中的 Issue **进入队列前**就已经带 review 标签且 checks 全绿时才成立；系统不跨调用猜测批次，也不会为了聚合放宽这两道门。
 
 ### 与 daemon 的互斥范围：只挡队列轮询
 
@@ -1213,7 +1260,7 @@ kc run --issue 42 --takeover --yes
 | `agent/running` 但本机持有者 PID 已不存在 | 放行，交给 running 通道的恢复路径（rework / 发布恢复） |
 | `agent/blocked` 且没有未消费的解除请求 marker | 退出码 5 `conflict`，提示先 `kc blocked-continue --issue <N>` |
 | 读不到、或不是 open | 退出码 3 `not_found` |
-| `agent/review` / `agent/supervising` 等其他状态 | 准入层放行，但 `kc run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `kc review` / review-daemon |
+| `agent/review` / `agent/supervising` 等其他状态 | 准入层放行，但 `kc run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `kc supervise` / supervise-daemon |
 
 **跨机器的认领无法探测远端进程，一律按有效处理（fail-closed）**：抢跑别人正在执行的 Issue 是双跑，而拒绝一次定向只是让人等一等。
 
@@ -1249,7 +1296,7 @@ kc run --issue 42 --fast-merge
 
 ### 直发档旗标 `--direct-pr`
 
-`--fast-merge` 只跳验证门禁，发布路径（review agent、仓库验证命令、supervisor）照常。`--direct-pr` 是**面向没有 PRD 的 Issue 的更粗档位**：builder 提交后，除了 rv re-exec 与独立 verifier，**再跳过 pre-PR review agent 与 runner 侧的验证命令**，并跳过发布链内联调用的 post-PR supervisor，直接开 Draft PR——质量门禁转移到该 PR 上的 CI。它不禁止独立运行的 review-daemon 后续审查，也不改变原有 workflow 标签选择；例如 Issue 仍进入 `agent/supervising` 时，后台 reviewer 可以选中它，DIRECT marker 不是后台审查排除规则。
+`--fast-merge` 只跳验证门禁，发布路径（review agent、仓库验证命令、supervisor）照常。`--direct-pr` 是**面向没有 PRD 的 Issue 的更粗档位**：builder 提交后，除了 rv re-exec 与独立 verifier，**再跳过 pre-PR review agent 与 runner 侧的验证命令**，并跳过发布链内联调用的 post-PR supervisor，直接开 Draft PR——质量门禁转移到该 PR 上的 CI。它不禁止独立运行的 supervise-daemon 后续审查，也不改变原有 workflow 标签选择；例如 Issue 仍进入 `agent/supervising` 时，后台 reviewer 可以选中它，DIRECT marker 不是后台审查排除规则。
 
 ```bash
 # 无 PRD 锚点的 Issue：做完就直接开 Draft PR
@@ -1322,6 +1369,7 @@ kc run --issue 43
 - 前台 `run` **不获取 repo 级 daemon 锁**：`--all-ready` 只做"是否有 daemon 存活"的只读检查（互斥语义见上文），显式单目标连这个检查都不做。所以 run 与 run 之间、定向 run 与 daemon 之间都不互斥。
 - 每个 Issue 自带隔离资源：worktree 在 `.iar-worktrees/issue-<N>`，claim / blocked-claim 锁也按 worktree 独立；状态库走 WAL 容忍并发写。两条命令撞向**同一条 Issue** 时，由首次领取选举裁决归属（见上节），落败方安静跳过。
 - **例外**：`--all-ready` 领的是同一份 ready 队列，两条 `--all-ready` 并发会双 claim，不要这么用。要并发多个 Issue，就给每个 Issue 各发一条 `--issue`。
+- **统一并发上限不挡这里**：Backlog「并发」策略只闸门**自动执行**（daemon 补位/认领、Console「全局开始」）；显式 `kc run` 走的是 `execution_ceiling=None` 的全量语义，人在命令行人工点名的运行不因页面数字被压低。
 - 停止常驻进程没有 `kc daemon stop`：`kc daemon` 只暴露 `run` / `status`，托管进程用 `kc registry stop --repo-id <id>`（对未托管的手动 `kc daemon` 无效，需自行结束进程）。
 
 ### daemon 的 autopilot 按次覆盖
@@ -1362,7 +1410,7 @@ github_repo = "owner/backend-service"
 - `enabled = false` 可临时禁用某个仓库。
 - `github_repo` 是可选的 `owner/name` 字符串；缺省时 `kc issue list` 不会调用 `gh pr list --repo <repo_id>`，PR 列留空、stderr 一次性打印 WARN 指引用户去 `config.toml` 或 `.kedacode.toml` 补字段。**该字段不参与目录名推断**——kc 不做 `git remote` 解析，必须由用户显式声明。
 - registry 通常只保留 `path` 和 `enabled`；仓库级 overrides 仍兼容，但建议迁移到目标仓库的 `.kedacode.toml`。
-- 未指定 `--repo`、`--repo-id` 或 `--all` 时，单仓库命令（如 `kc run`、`kc review`）只处理当前 Git 仓库；`kc daemon` 和 `kc review-daemon` 同样只处理当前已初始化注册仓库，未命中、未初始化或匹配多个时报错。如需监控所有 enabled registry entries，请显式使用 `--all`。
+- 未指定 `--repo`、`--repo-id` 或 `--all` 时，单仓库命令（如 `kc run`、`kc supervise`）只处理当前 Git 仓库；`kc daemon` 和 `kc supervise-daemon` 同样只处理当前已初始化注册仓库，未命中、未初始化或匹配多个时报错。如需监控所有 enabled registry entries，请显式使用 `--all`。
 
 迁移示例：
 
@@ -1422,13 +1470,13 @@ kc registry reinit --repo-id ZataZhang-fsense
 # 显式指定 remote 和 base_branch
 kc registry reinit --repo-id ZataZhang-fsense --remote upstream --base-branch develop
 
-# 重新初始化后立刻重启 daemon 和 review-daemon
+# 重新初始化后立刻重启 daemon 和 supervise-daemon
 kc registry reinit --repo-id ZataZhang-fsense --start-daemons
 ```
 
 #### 取消托管（`kc registry remove`）
 
-停止 daemon/review-daemon 并从 registry 移除条目：
+停止 daemon/supervise-daemon 并从 registry 移除条目：
 
 ```bash
 kc registry remove --repo-id ZataZhang-fsense
@@ -1442,12 +1490,12 @@ kc registry remove --repo-id ZataZhang-fsense
 kc registry list
 ```
 
-输出会列出 `~/.kedacode/config.toml` 中所有已注册仓库，并显示每个仓库的 `daemon` / `review-daemon` 是否在运行，以及对应的进程 ID：
+输出会列出 `~/.kedacode/config.toml` 中所有已注册仓库，并显示每个仓库的 `daemon` / `supervise-daemon` 是否在运行，以及对应的进程 ID：
 
 ```
                             Registered repositories
 ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━┓
-┃ repo_id               ┃ display... ┃ path                   ┃ daemon  ┃ review-daemon ┃
+┃ repo_id               ┃ display... ┃ path                   ┃ daemon  ┃ supervise-daemon ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━┩
 │ ZataZhang-fsense  │ fsense     │ /Users/.../fsense      │ running │ running       │
 │                       │            │                        │ (p123)  │ (p124)        │
@@ -1459,7 +1507,7 @@ kc registry list
 
 > **Managed vs Unmanaged**：
 > - 通过 `kc registry start` / console / `kc takeover` 启动的 daemon 是**托管进程**，会写入 `~/.kedacode/processes.json`，状态显示为 `running (<process_id>)`，可用 `kc registry stop` 停止。
-> - 直接在命令行执行 `kc daemon` / `kc review-daemon` 启动的进程是**未托管进程**。`kc registry list` 会通过扫描系统进程把它们识别出来，状态显示为 `running (unmanaged)`，但**不会**被 `kc registry stop` 停止，也没有独立的日志文件被 `registry` 命令管理。
+> - 直接在命令行执行 `kc daemon` / `kc supervise-daemon` 启动的进程是**未托管进程**。`kc registry list` 会通过扫描系统进程把它们识别出来，状态显示为 `running (unmanaged)`，但**不会**被 `kc registry stop` 停止，也没有独立的日志文件被 `registry` 命令管理。
 > - 同时存在托管与未托管进程时，列表优先显示托管状态。
 
 > **不要混用**：同一时间、同一仓库，建议要么只使用 `kc registry start` 管理 daemon，要么只手动运行 `kc daemon`。混用可能导致两个进程同时 claim 同一仓库的 Issues，且 `registry stop` 不会清理手动启动的进程。
@@ -1468,7 +1516,7 @@ kc registry list
 
 #### 查看 daemon 进程明细（`kc daemon status`）
 
-`kc registry list` 只显示每个仓库 daemon / review-daemon 的汇总状态。如果你需要查看具体进程的 PID、启动时间、可执行路径、命令行、日志文件路径，以及该进程是托管还是未托管，使用：
+`kc registry list` 只显示每个仓库 daemon / supervise-daemon 的汇总状态。如果你需要查看具体进程的 PID、启动时间、可执行路径、命令行、日志文件路径，以及该进程是托管还是未托管，使用：
 
 ```bash
 # 在当前仓库目录下查看当前仓库
@@ -1489,24 +1537,24 @@ kc daemon status --all
 ┃ repo_id ┃ kind          ┃ status        ┃  pid ┃ process_id ┃ started_at ┃ log_path ┃ executable           ┃ command              ┃
 ┡━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
 │ keda-m… │ daemon        │ managed run…  │ 1234 │ abc123def  │ 2026-06-2… │ …/proce… │ kc                  │ kc daemon --repo-i… │
-│ keda-m… │ review_daemon │ unmanaged r…  │ 5678 │ unmanaged… │ 2026-06-2… │ -        │ /usr/bin…            │ /usr/bin/kc review… │
+│ keda-m… │ review_daemon │ unmanaged r…  │ 5678 │ unmanaged… │ 2026-06-2… │ -        │ /usr/bin…            │ /usr/bin/kc supervise… │
 └─────────┴───────────────┴───────────────┴──────┴────────────┴────────────┴──────────┴──────────────────────┴──────────────────────┘
 ```
 
 - `managed running`：通过 `kc registry start` / `kc takeover` / console 启动的托管进程。
-- `unmanaged running`：直接在命令行执行 `kc daemon` / `kc review-daemon` 启动的进程。
+- `unmanaged running`：直接在命令行执行 `kc daemon` / `kc supervise-daemon` 启动的进程。
 - `log_path`：托管进程的真实日志文件路径；`-` 表示未托管进程（无独立日志文件）。
 
 #### 查看进程日志（`kc logs`）
 
-`kc logs` 让你直接从命令行查看 daemon / review-daemon 的进程日志，无需拼接文件路径或打开 Web 管理终端。
+`kc logs` 让你直接从命令行查看 daemon / supervise-daemon 的进程日志，无需拼接文件路径或打开 Web 管理终端。
 
 ```bash
 # 查看当前仓库 daemon 的最近 200 行日志
 kc logs
 
 # 指定仓库和进程类型
-kc logs --repo-id keda-main --kind review_daemon
+kc logs --repo-id keda-main --kind supervise_daemon
 
 # 查看最近 50 行
 kc logs --lines 50
@@ -1514,17 +1562,17 @@ kc logs --lines 50
 # 实时跟随日志（Ctrl-C 退出）
 kc logs -f
 
-# 跟随 review-daemon 日志
-kc logs --kind review_daemon -f
+# 跟随 supervise-daemon 日志
+kc logs --kind supervise_daemon -f
 ```
 
 行为说明：
 
-- `kc logs` 默认查看 `daemon` 进程；`--kind review_daemon` 可切换到 review-daemon。
+- `kc logs` 默认查看 `daemon` 进程；`--kind supervise_daemon` 可切换到 supervise-daemon。
 - `-n / --lines N` 控制初始回看行数（默认 200）。
 - `-f / --follow` 在初始回看后持续输出新增内容，直到 Ctrl-C 或进程退出。
 - 无 running 进程时，打印回退指引（最近进程日志路径或全局 `logs/app-YYYY-MM-DD.log`），退出码 0。
-- 全局日文件名只由 `infrastructure/logging/logger.py` 的 `daily_log_path()` 产出，回退提示与真正在写的文件因此不会漂移；跨午夜的长驻进程（`kc loop-daemon`、`kc registry start` 拉起的 runner / review-daemon）会在下一次写日志时自动切到当天文件，并在切换时按 `log_retention_days`（默认 14）清理过期日志。
+- 全局日文件名只由 `infrastructure/logging/logger.py` 的 `daily_log_path()` 产出，回退提示与真正在写的文件因此不会漂移；跨午夜的长驻进程（`kc loop-daemon`、`kc registry start` 拉起的 runner / supervise-daemon）会在下一次写日志时自动切到当天文件，并在切换时按 `log_retention_days`（默认 14）清理过期日志。
 - 仓库目标推断逻辑与 `kc daemon` 一致：未指定 `--repo-id` 时从当前工作目录推断唯一 enabled 注册仓。
 
 #### 查看单个 Issue 的实时输出（`kc logs --issue`）
@@ -1564,19 +1612,19 @@ kc daemon run --repo-id keda-main --interval 300
 对于已经在 registry 中注册且已 init 的本地仓库（例如你手动 `kc init` 过的 `keda-main`），可以直接用 `start` / `stop` 管理 daemon 生命周期，无需 `reinit --start-daemons`（后者会重置 `.kedacode.toml`）：
 
 ```bash
-# 启动单个仓库的 daemon + review-daemon
+# 启动单个仓库的 daemon + supervise-daemon
 kc registry start --repo-id keda-main
 
-# 只启动 daemon（不启动 review-daemon）
-kc registry start --repo-id keda-main --no-review-daemon
+# 只启动 daemon（不启动 supervise-daemon）
+kc registry start --repo-id keda-main --no-supervise-daemon
 
-# 启动所有 enabled 注册仓的 daemon + review-daemon
+# 启动所有 enabled 注册仓的 daemon + supervise-daemon
 kc registry start --all
 
-# 停止单个仓库的 daemon + review-daemon
+# 停止单个仓库的 daemon + supervise-daemon
 kc registry stop --repo-id keda-main
 
-# 停止所有 running 的 daemon + review-daemon
+# 停止所有 running 的 daemon + supervise-daemon
 kc registry stop --all
 ```
 
@@ -1613,7 +1661,7 @@ kc takeover
    - `gh repo clone <owner>/<repo> ~/.kedacode/repos/<owner>/<repo>`
    - 在新 clone 的仓库执行 `kc init`
    - 写入 `~/.kedacode/config.toml` 的 `[agent_runner.repositories.<repo_id>]`
-6. 默认启动 `kc daemon` 和 `kc review-daemon` 两个托管子进程（在目标仓库路径下启动，因此只监控该仓库）。
+6. 默认启动 `kc daemon` 和 `kc supervise-daemon` 两个托管子进程（在目标仓库路径下启动，因此只监控该仓库）。
 
 > 克隆目标目录 `~/.kedacode/repos/<owner>/<repo>` 已存在时不会被复用：该仓库直接判失败并报错，需人工先改名或移走那个目录（或改 `--clone-root`）再重试。
 
@@ -1642,7 +1690,7 @@ kc takeover --repos owner/repo-a --dry-run
 
 - `~/.kedacode/console.db`：运行历史与审计日志。
 - `~/.kedacode/processes.json`：托管进程 pidfile registry。
-- `~/.kedacode/process-logs/<repo_id>/`：daemon / review-daemon 的 stdout/stderr 日志。
+- `~/.kedacode/process-logs/<repo_id>/`：daemon / supervise-daemon 的 stdout/stderr 日志。
 
 你可以通过 `kc console` 启动管理终端查看、停止、重启这些进程；已运行的 FastAPI 服务也可以直接访问同一组 console API。
 
@@ -1729,7 +1777,7 @@ Issue 评论结构随之增加 `- Repairer: <agent>` 一行（仅非 `self` 模�
 同一批改动顺带修掉了三处静默失效的路由缺陷：
 
 1. `allow_same_agent = false` 时审核者不再硬编码回落到 `codex`，而是从 agent 注册表里取第一个不等于实现者的 agent；注册表里只有实现者一个 agent 时保持原样并打 WARNING。
-2. `kc review` 入口解析 supervisor 的优先级改为「命令行 `--agent` > `[agent_runner.post_pr_supervisor].supervisor_agent` > Issue 标签路由」，与发布路径共用 `resolve_supervisor_agent`。此前该入口完全不读配置里的 supervisor。
+2. `kc supervise` 入口解析 supervisor 的优先级改为「命令行 `--agent` > `[agent_runner.post_pr_supervisor].supervisor_agent` > Issue 标签路由」，与发布路径共用 `resolve_supervisor_agent`。此前该入口完全不读配置里的 supervisor。
 3. 审核 / 修复 / 收尾 / 校验 / 恢复 / 冲突解决等**二级调用点**此前都没有把运行时配置传下去，导致注册表里的自定义 agent 与内置 agent 的参数覆盖在这些阶段被静默忽略（自定义 agent 作审核者会直接报未注册）。现在 `src/backend` 内每个 `run_agent_with_prompt*` 调用点都传 `config`，并由 `tests/test_agent_config_consistency.py::test_every_agent_invocation_call_site_passes_config` 用 AST 守卫防止回退。**已显式配置过 agent 覆盖的仓库，这些阶段第一次会真正按配置执行。**
 
 
@@ -1782,7 +1830,7 @@ Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决�
 supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repair_agent` 只决定**判定需要改代码之后由谁动手**，取值语义与 pre-PR 那一段同名同义：
 
 - `self`（默认）：supervisor 自己执行修复，与历史行为一致。
-- `executor`：交回本次实现者。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `kc review`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。
+- `executor`：交回本次实现者。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `kc supervise`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。
 - `<agent 名>`：指定 agent；未注册时该阶段开始前 fail-fast。
 
 两个修复调用点（supervisor 修复循环、rework 路径）共用解析器 `resolve_repair_agent`，避免两条路径语义分叉。修复提示词由 `build_repair_prompt` 生成，带 Issue 上下文与本轮 findings 清单（rework 路径取 `.iar/state/issue-<N>/findings.json` 里未解决的累积 findings），修复者不必自己重新推断要改什么。
@@ -1801,13 +1849,13 @@ supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repa
 
 ```bash
 # 单次检查所有 supervising/review Issues
-uv run kc review
+uv run kc supervise
 
 # 常驻 review daemon（默认每 120 秒轮询，可在 config.toml [agent_runner.daemon] 调整）
-uv run kc review-daemon
+uv run kc supervise-daemon
 ```
 
-`kc review` / `kc review-daemon` 会：
+`kc supervise` / `kc supervise-daemon` 会：
 - 扫描 `agent/supervising` 和 `agent/review` 的 open Issues
 - 加载 linked PR context、Issue comments、PR comments 和最新 `iar:event` marker
 - 检测以下维度变化：
@@ -1847,7 +1895,7 @@ checks 状态：
 
 注意：merge queue 的自动合并仍会在合并前等待 checks 全绿（见下文"Autopilot 快速档（合并队列）"），这与 supervisor 的动作选择相互独立——进入人工 review 不代表验收完成，也不产生自动合并或归档资格。
 
-`kc review` 的 CLI 日志会打印本轮 outcome，例如 `queued_rebase_pr_branch`、
+`kc supervise` 的 CLI 日志会打印本轮 outcome，例如 `queued_rebase_pr_branch`、
 `approved_for_human_review` 或 `deferred_pr_context_unavailable`。被 queue 的
 rebase/repair 仍由下一次 `kc run` 在 PR branch worktree 中执行。
 
@@ -2025,10 +2073,10 @@ kc daemon
 iar backlog advance
 
 # 单次 review 检查
-kc review
+kc supervise
 
 # Review daemon 模式（默认每 120 秒轮询一次，仅当前已初始化注册仓库；加 --all 才处理所有 enabled registry entries）
-kc review-daemon
+kc supervise-daemon
 
 # 恢复发布失败（仅用于已完成审查后的 push/PR 收尾失败）
 kc recover --issue 5
@@ -2068,7 +2116,7 @@ agent，把仓库上下文与自然语言指令直接转成 KedaCode 子命令�
 
   REPL 把标记里的命令交给命令执行器，执行器按白名单与确认策略运行：
   - 默认白名单覆盖 `init` / `labels` / `issue` / `run` / `daemon` /
-    `review` / `review-daemon` / `recover` / `blocked-continue` / `ask` /
+    `review` / `supervise-daemon` / `recover` / `blocked-continue` / `ask` /
     `deliberate` / `takeover` / `worktree` / `registry` / `workflow` /
     `completion`。
   - 只读 / dry-run 命令自动执行（`labels sync --dry-run`、
@@ -2257,6 +2305,7 @@ kc daemon --concurrency 3
 ```
 
 - **取值来源**：未传 `--concurrency` 时回退到 `[agent_runner.runner].max_concurrent_issues`（默认 `1` = 串行，行为与改动前逐字节一致）。
+- **统一并发上限**：daemon 每轮（无论 Backlog 自动推进开关是否开启）先把 Backlog「并发」策略与该轮容量解析成单一生效值 `ceiling = min(策略, 容量)`（策略从未设置 = 继承容量）。这个 ceiling 同时喂给补位闸门（`kc backlog advance` 同一口径；补位动作仅在 Backlog 自动推进开启时执行）与认领闸门：ready 通道本轮新认领数 = ``max(0, ceiling − 仓库内 open agent/running 标签数)``，占满即本轮零认领；计数查询最多取到 ceiling + 1，超出时日志标为「至少 ceiling + 1」。计数失败按 fail-closed 处理（宁可不领）。如果后续带标签的 running 恢复候选查询也失败，daemon 会用有界的 open Issue 列表重试筛选，以便继续处理既有恢复项；备用扫描也失败时记录原因并跳过该恢复扫描。running / blocked 恢复及 `direct_pr_cleanup` 收尾不新增并发，保持原配额，不受 ceiling 压低。
 - **领取上限**：并行时单轮领取上限抬到 `max(max_issues, concurrency)`，所以单独一个 `--concurrency N` 即可领到并跑 N 个，无需再调 `--max-issues`。
 - **隔离**：每个 Issue 仍各自 worktree / 分支；共享仓库的 worktree 创建被串行化以避开 `.git` 竞争，真正耗时的 agent 执行阶段全程并行。
 - **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）仍逐仓库串行、仓库内 Issue 并行。
@@ -2736,7 +2785,7 @@ cd /path/to/target-repo && uv run --project ~/keda kc daemon
 cd /path/to/target-repo
 
 # 每 120 秒检查一次 supervising/review Issues
-uv run --project ~/keda kc review-daemon
+uv run --project ~/keda kc supervise-daemon
 ```
 
 ### 同一台电脑运行
@@ -2776,7 +2825,7 @@ uv run --project /path/to/keda kc daemon
 | API Key 已设置？ | `echo $OPENAI_API_KEY` / `echo $ANTHROPIC_API_KEY` |
 | 目标仓库路径正确？ | `ls /path/to/target-repo/.git` |
 
-> **自动认证检测**：执行 `kc labels sync`、`kc issue create`、`kc run`、`kc daemon`、`kc review`、`kc review-daemon` 等需要 GitHub API 的命令前，`kc` 会自动检测 `gh` 认证状态。如果认证失效，会提示运行 `gh auth login -h github.com` 并以退出码 1 退出，避免暴露原始异常。
+> **自动认证检测**：执行 `kc labels sync`、`kc issue create`、`kc run`、`kc daemon`、`kc supervise`、`kc supervise-daemon` 等需要 GitHub API 的命令前，`kc` 会自动检测 `gh` 认证状态。如果认证失效，会提示运行 `gh auth login -h github.com` 并以退出码 1 退出，避免暴露原始异常。
 >
 > 在 CI 或脚本环境中，可设置环境变量跳过该检查：
 > ```bash
@@ -2882,7 +2931,7 @@ crash_retry_initial_backoff_seconds = 30
 crash_retry_max_backoff_seconds = 600
 
 [agent_runner.daemon]
-# daemon / review-daemon 的默认轮询间隔（秒），CLI --interval 可覆盖
+# daemon / supervise-daemon 的默认轮询间隔（秒），CLI --interval 可覆盖
 review_interval_seconds = 120
 run_interval_seconds = 120
 # 每轮开头是否对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）。
@@ -3686,8 +3735,8 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 
 | 异常类型 | 触发条件 | severity | 推荐 CLI |
 |---|---|---|---|
-| `label_pr_mismatch` | PR 已创建但 Issue label 不在 `agent/supervising` / `agent/review` / `agent/blocked` / `agent/failed` 中 | warning | `kc labels sync`、`kc review --dry-run` |
-| `pr_dirty_in_review` | PR `mergeable_state` 为 dirty/conflicted 且 label 是 `agent/review` | error | `kc review`、`kc run --max-issues 1` |
+| `label_pr_mismatch` | PR 已创建但 Issue label 不在 `agent/supervising` / `agent/review` / `agent/blocked` / `agent/failed` 中 | warning | `kc labels sync`、`kc supervise --dry-run` |
+| `pr_dirty_in_review` | PR `mergeable_state` 为 dirty/conflicted 且 label 是 `agent/review` | error | `kc supervise`、`kc run --max-issues 1` |
 | `dirty_worktree_mismatch` | worktree 有未提交变更但 label 不是 `agent/running` | warning | `kc run --dry-run`、`git status` |
 | `event_label_mismatch` | 最新 `iar:event` phase 隐含的状态与当前 label 不一致 | warning | `kc labels sync` |
 
@@ -3699,7 +3748,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 ### 建议 CLI 文本
 
-每个 Issue 详情区都会列出当前状态推荐的 `kc` 命令文本（如 `kc review`）。命令旁有**复制**按钮，但**不直接执行**——所有恢复动作仍走 CLI，保留操作审计、避免 UI 端任意 shell。
+每个 Issue 详情区都会列出当前状态推荐的 `kc` 命令文本（如 `kc supervise`）。命令旁有**复制**按钮，但**不直接执行**——所有恢复动作仍走 CLI，保留操作审计、避免 UI 端任意 shell。
 
 ### 显式非目标
 
@@ -3707,7 +3756,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 - 不暴露任何修改 label、comment、PR、worktree 的 API。
 - 不执行任意 shell 命令、不能从 UI 改 label 或触发 agent。
-- 不替代 `kc run` / `kc review` / `kc labels sync` 等恢复命令。
+- 不替代 `kc run` / `kc supervise` / `kc labels sync` 等恢复命令。
 - Dashboard 展示的是本地快照（见「本地快照与后台定时同步」），不再每次进入页面现场扫描；但除快照表与同步设置表外不新增数据库表，也不引入 WebSocket 或独立调度服务；GitHub label/comment/PR 和本地 worktree 仍是事实来源。
 - 不实现自动 rebase 冲突解决；冲突的 Issue 会带 `agent/blocked` 状态出现在监控面板，由人类决定下一步。
 
@@ -3722,7 +3771,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 | Backlog | `/app/backlog` | **首屏落点**。左侧受管理仓库栏 + 右侧当前仓库的 PRD 队列（依赖图 / 时间轴 / 列表三视图） |
 | 总览 | `/app/dashboard` | 队列监控 + 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
 | 进程 | `/app/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
-| 统计 | `/app/stats` | 实时完成度（GitHub 口径）+ 历史趋势与最近运行记录（本地 SQLite 口径） |
+| 统计 | `/app/stats` | 实时完成度、运行趋势、Agent / 预设 attempt 表现、整项任务耗时、PRD 生命周期与 Token 用量 |
 | 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
 | 想法 | `/app/ideas` | 跨项目想法采集、AI 总结、PRD 草稿人审 |
 
@@ -3839,7 +3888,7 @@ core 用例，网页只是入口，不发明第二套执行规则：
 
 | 入口（页面/位置） | 语义（对齐的 CLI/用例） | HTTP 端点 |
 |---|---|---|
-| dashboard 仓库卡片「跑一轮」「复核一轮」 | 一次性 `kc run` / `kc review` 托管子进程 | `POST .../console/repositories/{repo_id}/actions`（`run_once` / `review_once`） |
+| dashboard 仓库卡片「跑一轮」「复核一轮」 | 一次性 `kc run` / `kc supervise` 托管子进程 | `POST .../console/repositories/{repo_id}/actions`（`run_once` / `review_once`） |
 | dashboard runner 状态条 | 读既有 status/health，探测失败降级展示 | `GET /api/v1/agent-runner/status`、`/health` |
 | dashboard 仓库概览「监控中 / 全部」切换 | 全量列举 open Issue，标注是否已被监控收录 | `GET .../console/repositories/{repo_id}/issues` |
 | Issue 详情标签面板（增删） | `kc labels sync` 同源标准集内编辑 | `GET` / `PUT .../console/repositories/{repo_id}/issues/{issue_number}/labels` |
@@ -3921,6 +3970,31 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   Agent 进程调用；两种记录的含义和覆盖范围不同。
   前端通过 `GET .../console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=`
   读取尝试与调用详情，其中时间参数必须为带时区的 ISO-8601。
+
+新增的 Agent 执行表现区与趋势、PRD 生命周期和 Token 汇总共用仓库及时间筛选，
+通过独立只读端点读取：
+
+```text
+GET .../console/stats/agent-performance?repo_id=&days=30
+```
+
+- **Agent / 预设成功率按 attempt 计算**：只有 `failure_type=success` 计为成功；
+  其他已记录分类都计为非成功，并在失败分类中逐项显示。耗时 P50 / P90 对该组
+  全部非负 attempt 耗时使用线性插值，不只计算成功样本。
+- **预设分组读取执行时快照**：按仓库、预设名、实际 Agent 和模型分组。改名或删除
+  当前配置不会改变 SQLite 中已保存的历史；没有预设快照的记录显示在“未绑定 / 历史
+  未记录”计数中，并在全部仓库视图中按仓库分别显示，不会猜测其当时使用的配置。
+- **整项任务耗时单独统计**：按仓库和最终 `completed` / `failed` / `blocked` 结果
+  分组；不把最终结果归给 `run_records.agent`，也不推导 Agent / 预设完成任务的概率。
+- **全部仓库视图保留仓库列**：避免同名预设跨仓库合并。Agent 名称缺失时归入“未记录”。
+- **时间窗口按 UTC 日历日计算**：与运行趋势的日期边界一致；`days` 会截断到 1–365。
+- **数据缺失与读取错误分开呈现**：无样本时显示空态或 `—`；新统计端点读取失败时只
+  显示在新增卡片中，既有 Stats 区块继续独立加载。
+
+该统计只读取现有 `run_records` / `attempt_records`，不新增表或字段，不读取当前配置，
+也不会改变 runner 的执行与 fallback 行为。历史 attempt 未保存 reasoning effort，
+因此同仓库同名预设、同 Agent 和模型但 effort 不同的记录会合并；旧 schema 或未绑定
+记录缺少 preset / model 时，无法进一步还原其配置。
 
 SQLite 只是旁路记录，**不参与 workflow 状态机决策**——GitHub
 labels/comments/PR 与本地 worktree 仍是唯一事实来源；落库失败只产生
@@ -4098,6 +4172,7 @@ POST   /api/v1/agent-runner/console/repositories/{repo}/issues/{n}/actions  {act
 GET    /api/v1/agent-runner/console/stats/overview
 GET    /api/v1/agent-runner/console/stats/history?repo_id=&days=30
 GET    /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=30
+GET    /api/v1/agent-runner/console/stats/agent-performance?repo_id=&days=30
 GET    /api/v1/agent-runner/console/runs?repo_id=&limit=100
 GET    /api/v1/agent-runner/console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=
 GET    /api/v1/agent-runner/console/audit?limit=100
@@ -4356,7 +4431,7 @@ enabled = true               # 新键：仓库级显式打开
 
 ### 串行与 FIFO
 
-合并队列在同一 `kc review` / `kc review-daemon` pass 内按 **Issue 号升序** 串行处理；后一条的 rebase 天然基于前一条合并后的 base 推进。Repository 内没有并发合并——符合 GitHub 的 fast-forward 假设，单 PR 失败不外溢。
+合并队列在同一 `kc supervise` / `kc supervise-daemon` pass 内按 **Issue 号升序** 串行处理；后一条的 rebase 天然基于前一条合并后的 base 推进。Repository 内没有并发合并——符合 GitHub 的 fast-forward 假设，单 PR 失败不外溢。
 
 ### 不在范围内
 
@@ -4424,7 +4499,7 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 ### 权限边界
 
 - **白名单动作**：`show_status`、`run_deliberation`、`create_issue_from_prd`、`mark_issue_ready`、`run_once_dry_run`、`run_once`、`review_once_dry_run`、`review_once`、`needs_clarification`、`no_op`
-- **禁止动作**：`git_push`、`git_merge`、`git_reset`、`daemon`、`review-daemon`、任意 shell 命令、自动 merge、直接关闭 Issue、删除分支等
+- **禁止动作**：`git_push`、`git_merge`、`git_reset`、`daemon`、`supervise-daemon`、任意 shell 命令、自动 merge、直接关闭 Issue、删除分支等
 - **Planner 安全**：只读 planner / `kc ask` 的 agent 必须有**已声明的** `generate` 用途且该用途 `read_only = true`——门禁只读这个声明字段，不按 agent 名白名单判断（`factories/content_generators.py`）。当前内置注册表里 `codex`、`claude`、`kimi`、`pi`、`codebuddy`、`qoder` 都声明了 `read_only = true` 的 `generate`，因此都能作为 planner 启动；`opencode` 没有 `generate` 用途，会被拒绝并指名。注意这只校验**声明**：声明本身是否等于运行时真的只读，取决于各 agent 的 argv 是否带沙箱/只读开关（例如 `codex` 用 `--sandbox read-only`，而 `claude` / `codebuddy` / `qoder` 用的是 `--dangerously-skip-permissions`，不是沙箱级只读）。
 
 ### 确认策略
@@ -4456,7 +4531,7 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 - 页面为两栏布局：左侧是受管理仓库列表（含启用/路径状态点），右侧是当前仓库的 PRD 画布与工具条。
 - 默认只显示 `pending` PRD，勾选「显示已归档」后同时展示 `archived` PRD。
 - 提供三种视图：依赖图（默认，按 PRD 依赖做拓扑分层绘制节点与连线）、时间轴、列表。列表视图按优先级（P0 → P3）与更新时间排序。
-- 「时间轴」「列表」选择会通过 `PATCH /backlog/settings` 回写 `default_view`；「依赖图」是纯前端默认视图，不回写后端（后端 `default_view` 仅接受 `timeline`/`list`）。
+- 「时间轴」「列表」选择会通过 `PATCH /backlog/settings` 回写 `default_view`，但**只有该仓库已经存在「并发」策略行时才会落库**：`backlog_settings` 一行同时承载策略值与视图偏好，且 `max_parallel` 列 NOT NULL（未设置态不落哨兵值，见「全局调度」），所以从未设置过「并发」的仓库切换视图只在当前会话生效，刷新后仍回到默认视图；先设置一个「并发」策略值后，视图偏好即可持久。「依赖图」是纯前端默认视图，不回写后端（后端 `default_view` 仅接受 `timeline`/`list`）。
 - 每个 PRD 卡片展示：标题、当前状态、验收清单进度、关联 Issue、依赖关系与下一步操作。
 
 ### 本地快照与后台刷新
@@ -4522,7 +4597,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 
 启动成功后页面会立刻重新拉取该仓的 PRD 列表，并把详情头部状态刷新为服务端返回的最新状态——不是本地乐观值，也不是只弹一个 toast。
 
-「全局开始」与「停止全局调度」的行为没有变化：前者仍是一次性批量启动，后者仍只清空等待队列。它们与仓库级 Backlog 自动推进开关是两件事，见下两节。
+「全局开始」与「停止全局调度」：前者仍是一次性批量启动，但并发数**不再由这次点击持久化**——它按当前生效并发上限放行（见下文「全局调度」与「持续调度」）；后者仍只清空等待队列。它们与仓库级 Backlog 自动推进开关是两件事，见下两节。
 
 ### 验收证据浏览（归档 PRD）
 
@@ -4543,17 +4618,21 @@ Backlog 顶部为当前选中仓库提供「Backlog 自动推进」开关，写�
   - **Backlog 自动推进是否开启**（自动发现、依赖解锁、队列补位）；
   - **daemon 是否运行中**（状态来自既有 process supervisor 记录；daemon 没跑时显示「自动推进暂不执行」，开关值仍可保存，可用 Processes 页面启动 daemon）；
   - **自动合并是否启用**（`autopilot.enabled` 与 `safety.auto_merge` 是否同时为真）。
+- 同排显示按仓库 `.kedacode.toml` 的 runner 容量解析出的并发上限及来源：「并发 N（继承 runner 配置 / Backlog 设置 / 受 runner 容量限制）」；策略未设置时输入框占位「未设置」，已设置时可点「恢复继承」删除设置行回到跟随容量。daemon 若启动时显式传入 `--concurrency`，该旗标会覆盖本轮容量并可能把 daemon 的实际 ceiling 压得更低；控制条不读取该进程旗标，核对 daemon 当前值应看其 `Concurrency ceiling` 日志。
 - 开启 Backlog 自动推进不会联动开启合并配置；自动合并仍要求 `autopilot.enabled` 与 `safety.auto_merge` 同时为真。Backlog 页面只读显示合并状态，不会替用户改动合并开关。
 - 目标仓没有 `.kedacode.toml`、配置非法或不可写时返回 409，原文件保持不变。
 
 ### 全局调度
 
-在控制面板设置并发数（1–10）后点击「全局开始」：
+Backlog 顶部的「并发」是仓库级**策略**（1–10，可以从未设置），生效并发上限全仓只有一个口径：
 
-- 系统扫描所有无依赖且可安全进入 ready 的 pending PRD。
-- 按优先级排序，同时启动最多 N 个 PRD。
-- 超出槽位的 PRD 进入 `backlog_queue` 等待队列。
-- 点击「停止全局调度」可清空等待队列，已运行的进程不会被中断。
+```text
+ceiling = min(Backlog「并发」策略, runner 容量 max_concurrent_issues)
+```
+
+- 策略从未设置 = **继承容量**（存储层就是「没有设置行」，不再落一行伪造默认值）；策略高于容量时页面同时显示两个数并标明「受 runner 容量限制」；「恢复继承」= 删除该仓设置行（副作用：默认视图一并回到「列表」，且在该行重新建立之前视图偏好无法再持久，见上文「视图说明」）。
+- 点击「全局开始」：按**控制台解析出的生效上限减去仓库内 open `agent/running` Issue 数**一次性批量启动——扫描所有无依赖且可安全进入 ready 的 pending PRD，按优先级排序，同时启动最多 `max(0, ceiling − running)` 个；超出槽位的进入 `backlog_queue` 等待队列。running 数覆盖没有 Backlog PRD 锚点的任务；查询失败时本次全局开始报错且不启动任务。请求体只带 `repo_id`，这次点击**不写设置**；改并发只能通过「并发」输入框落库。若 daemon 使用了显式 `--concurrency`，全局开始仍按仓库配置容量计算；控制台动作与 daemon 运行日志的 ceiling 可能不同，daemon 旗标覆盖的口径见上文。
+- 系统扫描、槽位与等待队列语义不变；「停止全局调度」仍只清空等待队列，已运行的进程不受影响。
 
 ### 持续调度（Continuous Scheduling）
 
@@ -4566,7 +4645,7 @@ Backlog 顶部为当前选中仓库提供「Backlog 自动推进」开关，写�
    - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/backlog` 页面处理后再回到调度。
    - BLOCKED → 保留为 `running`，但**不占槽也不晋升**，等人工解除阻塞。
    - WAITING → 不动，依赖未满足的 PRD 继续等待。
-2. **槽位核算**：`free_slots = max_parallel - RUNNING 条目数`。只有 RUNNING 计数，BLOCKED 不占槽；结果为负时按 0 处理。`max_parallel` **沿用控制台「全局调度」里持久化的并发数**（1–10，缺省 1），不是独立配置项——想调整在途数量就改控制台那个值，或用 `--dry-run` 先预检当前口径。
+2. **槽位核算**：`free_slots = max(0, ceiling - open agent/running 标签数)`。计数覆盖整个仓库，不要求 Issue 有 Backlog PRD 锚点；查询最多读到 ceiling + 1，用于显示超额下限。计数失败时保留对账、跳过本轮新补位并记录原因。`ceiling` 使用统一解析函数 `min(Backlog「并发」策略, 本轮 runner 容量)`（策略未设置 = 继承容量）；daemon 同一轮把同一个结果分发给补位闸门与 Phase 2 认领闸门。这里的 daemon 容量来自显式 `--concurrency`（若提供），否则来自仓库配置；控制台显示与「全局开始」按仓库配置容量解析，所以使用旗标覆盖时它们可能显示更高的 ceiling。「全局开始」与不带显式上限的 `kc backlog advance` 按仓库配置容量自解析。
 3. **晋升（promote）**：候选集 = 队列中 `queued` 的条目 ∪ 新发现的未入队 pending PRD（**发现式入队**）。候选经依赖重算后过滤出 `NOT_STARTED` 且无 `block_reason` 的 PRD，按 `P0 > P1 > P2 > P3`、再按 `updated_at` 升序排序，最多晋升 `free_slots` 个。
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
@@ -4583,7 +4662,7 @@ uv run kc backlog advance --dry-run
 uv run kc backlog advance --repo <repo-id>
 ```
 
-`--dry-run` 会打印对账结果（completed / failed 泊车）、`max_parallel` 与 `free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
+`--dry-run` 会打印对账结果（completed / failed 泊车）、`ceiling=` 生效上限、`running=` 仓库级在跑数（超额时以「at least N」表示下限，查询失败时为 unknown）、`source=` 来源（继承 / 策略 / 受容量限制）、`free_slots`、将要晋升的 PRD 与因槽位不足继续排队的 PRD，但不写库、不建 Issue、不打 label。
 
 #### 幂等与竞态
 

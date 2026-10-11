@@ -717,7 +717,7 @@
           { key: 'closeout', name: '收尾', legacyRef: 'executor', legacyNote: '内置默认：跟随实现阶段', legacySource: 'builtin', allowExecutor: true, trigger: '同一次 claim 内，交付收尾阶段执行。' },
           { key: 'verifier', name: '校验', legacyRef: 'auto', legacyNote: 'validation.verifier_agent 缺省值', legacySource: 'legacy', autoLabel: 'auto（从执行器回退链挑一个不同于实现者的执行器）', trigger: '同一次 claim 内，实现产出后做验证。' },
           { key: 'review', name: '审核', legacyRef: 'auto', legacyNote: 'pre_pr_review.review_agent', legacySource: 'legacy', autoLabel: 'auto（优先挑 ≠ 实现者；allow_same_agent 时沿用实现者）', trigger: '同一次 claim 内，开 Draft PR 前审查。' },
-          { key: 'supervisor', name: '监督', legacyRef: 'auto', legacyNote: 'post_pr_supervisor.supervisor_agent', legacySource: 'legacy', autoLabel: 'auto（发布路径沿用本次实现者）', trigger: '同一次 claim 的发布路径，或 kc review / review-daemon 单独一轮。' },
+          { key: 'supervisor', name: '监督', legacyRef: 'auto', legacyNote: 'post_pr_supervisor.supervisor_agent', legacySource: 'legacy', autoLabel: 'auto（发布路径沿用本次实现者）', trigger: '同一次 claim 的发布路径，或 kc supervise / supervise-daemon 单独一轮。' },
           { key: 'planner', name: '决策', legacyRef: 'claude', legacyNote: 'interactive_decision.default_agent', legacySource: 'legacy', trigger: 'kc ask 交互式决策，不在任何 Issue 流水线上。' },
           { key: 'content_generation', name: '内容生成', legacyRef: 'claude', legacyNote: 'generated_content.default_agent', legacySource: 'legacy', trigger: '横切 kc issue create、Phase 1 Issue→PRD 与开 Draft PR 三处。' },
           { key: 'deliberate', name: '辩论', legacyRef: 'auto', legacyNote: '内置默认：按 agent/deliberate 标签路由', legacySource: 'builtin', autoLabel: 'auto（按 agent/deliberate 标签路由）', trigger: 'Phase 0 就该 Issue 在评论区讨论（此时 PRD 尚不存在）。' },

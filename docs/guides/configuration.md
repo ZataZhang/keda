@@ -140,7 +140,7 @@ agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 - 注册块新增 `model_args` / `reasoning_effort_args`：声明该 agent 的模型与推理档 flag 语法
   （`{model}` / `{effort}` 占位符）。为空表示"未核实语法"，命中带模型/推理档的绑定时 fail-fast。
 - `config.toml` 的 `[agent_runner.presets.<name>]` 段定义命名预设（agent 必填，model /
-  reasoning_effort 可选）；`[agent_runner.lifecycle_presets]` 段把九个生命周期阶段各绑到一个
+  reasoning_effort 可选）；`[agent_runner.lifecycle_presets]` 段可分别为生命周期阶段绑定一个
   预设，绑定后该阶段整体由预设决定（agent + 模型 + 推理档），遮蔽矩阵同键声明。
 - 完整语义、优先级与命令行一次性旗标（`--preset` / `--model` / `--reasoning-effort`）见
   [Agent 模型预设](model-presets.md)。
@@ -213,14 +213,14 @@ agent_timeout_seconds = 120
 auto_confirm_commands = [
   "labels sync --dry-run",
   "run --dry-run",
-  "review --dry-run",
+  "supervise --dry-run",
   "ask --plan-only",
 ]
 confirm_commands = [
   "run",
   "daemon",
-  "review",
-  "review-daemon",
+  "supervise",
+  "supervise-daemon",
   "issue create",
   "recover",
   "blocked-continue",
@@ -310,7 +310,7 @@ tail -f logs/app-$(date +%Y-%m-%d).log
 ### 日志特性
 
 - **按日期划分**：每天生成一个独立的日志文件，如 `app-2026-05-24.log`
-- **长驻进程跨天切换**：跑过午夜的进程（`kc loop-daemon`、`kc registry start` 的 runner / review-daemon）在下一次写日志时自动切到当天的 `app-YYYY-MM-DD.log`，不会继续写进昨天的文件。若新文件因为权限、只读挂载等原因开不出来，日志会继续写进原来的文件并提示一次，等目录恢复后自动补上切换——日志故障不会让业务调用失败
+- **长驻进程跨天切换**：跑过午夜的进程（`kc loop-daemon`、`kc registry start` 的 runner / supervise-daemon）在下一次写日志时自动切到当天的 `app-YYYY-MM-DD.log`，不会继续写进昨天的文件。若新文件因为权限、只读挂载等原因开不出来，日志会继续写进原来的文件并提示一次，等目录恢复后自动补上切换——日志故障不会让业务调用失败
 - **自动清理**：启动时以及每次跨天切换时删除超过 `log_retention_days`（默认 14）天的旧日志文件
 - **时间戳格式**：日志条目使用 `YYYY-MM-DD HH:MM:SS` 格式
 - **终端同步**：`kc` 命令的终端输出带有 `HH:MM:SS` 时间戳前缀

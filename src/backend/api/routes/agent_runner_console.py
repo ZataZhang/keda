@@ -43,6 +43,7 @@ from backend.core.use_cases.console_processes import (
     tail_runner_log,
 )
 from backend.core.use_cases.console_stats import (
+    build_agent_performance_stats,
     build_completion_stats_overview,
     build_run_history_trend,
 )
@@ -373,6 +374,23 @@ def get_console_stats_history(repo_id: str | None = None, days: int = 30) -> dic
         "days": days,
         "trend": [_serialize(entry) for entry in trend],
     }
+
+
+@router.get("/agent-runner/console/stats/agent-performance")
+def get_console_agent_performance_stats(
+    repo_id: str | None = None,
+    days: int = 30,
+) -> dict:
+    """按 attempt 与 run 最终结果返回 Agent 执行表现统计。
+
+    ``days`` 会由 core 截断到 1–365 天，与其他 Stats 统计端点一致。
+    """
+    stats = build_agent_performance_stats(
+        store=create_console_store(),
+        repo_id=repo_id,
+        days=days,
+    )
+    return _serialize(stats)
 
 
 @router.get("/agent-runner/console/stats/prd-lifecycle")

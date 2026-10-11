@@ -27,6 +27,7 @@ PROCESS_GUARD_DEFAULT_HEADROOM=400
 # 已有数百个进程时，会让调用方自身的命令都 fork 不出来。
 apply_process_limit_guard() {
     local process_headroom="${RUN_PROCESS_HEADROOM:-$PROCESS_GUARD_DEFAULT_HEADROOM}"
+    local process_id_list
     local current_process_count
     local process_limit_ceiling
 
@@ -40,7 +41,11 @@ apply_process_limit_guard() {
             ;;
     esac
 
-    current_process_count="$(pgrep -U "$(id -u)" 2>/dev/null | wc -l | tr -d ' ')"
+    if process_id_list="$(pgrep -U "$(id -u)" 2>/dev/null)"; then
+        current_process_count="$(printf '%s\n' "$process_id_list" | wc -l | tr -d ' ')"
+    else
+        current_process_count=0
+    fi
     case "$current_process_count" in
         0|''|*[!0-9]*)
             echo "⚠️  Could not count current processes; skipping process guard"

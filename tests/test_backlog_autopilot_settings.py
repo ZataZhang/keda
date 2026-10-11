@@ -149,14 +149,18 @@ def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
         repo_id=REPO_ID,
         contexts=_contexts_for(repo_root, auto_merge=True)(),
         supervisor=_FakeSupervisor([_daemon_record(REPO_ID)]),
-        max_parallel=3,
+        policy_max_parallel=3,
         editor=_make_editor(),
     )
     assert state.enabled is False
     assert state.persisted_enabled is False
     assert state.auto_merge_enabled is False
     assert state.daemon_running is True
-    assert state.max_parallel == 3
+    # AppConfig() 默认容量为 1：策略 3 高于容量时生效值被容量压低，来源如实标注。
+    assert state.policy_max_parallel == 3
+    assert state.runner_capacity == 1
+    assert state.effective_max_parallel == 1
+    assert state.ceiling_source == "capped_by_capacity"
     assert state.config_source == ".iar.toml"
 
 
@@ -174,7 +178,7 @@ def test_set_backlog_auto_advance_writes_then_reads_back(tmp_path: Path) -> None
         editor=_make_editor(),
         contexts_loader=_contexts_for(repo_root),
         supervisor=_FakeSupervisor([]),
-        max_parallel=2,
+        policy_max_parallel=2,
     )
 
     assert state.enabled is True
@@ -207,7 +211,7 @@ def test_set_backlog_auto_advance_rejects_stale_fresh_loader(tmp_path: Path) -> 
             editor=_make_editor(),
             contexts_loader=stale_loader,
             supervisor=_FakeSupervisor([]),
-            max_parallel=2,
+            policy_max_parallel=2,
         )
 
 
@@ -370,7 +374,11 @@ def test_get_autopilot_endpoint(autopilot_environment) -> None:
     assert data["enabled"] is False
     assert data["auto_merge_enabled"] is False
     assert data["daemon_running"] is False
-    assert data["max_parallel"] == 2
+    # 无设置行 = 未设置：策略为 null，生效值继承 runner 容量（AppConfig 默认 1）。
+    assert data["max_parallel"] is None
+    assert data["effective_max_parallel"] == 1
+    assert data["runner_capacity"] == 1
+    assert data["ceiling_source"] == "inherited"
     assert data["config_source"] == ".iar.toml"
 
 

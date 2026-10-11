@@ -3,7 +3,7 @@
 This module lets ``kc takeover`` discover GitHub repositories via the
 authenticated ``gh`` CLI, clone them into a managed directory, initialize each
 with ``kc init``, register them in the global registry, and optionally start
-managed ``daemon`` and ``review-daemon`` processes.
+managed ``daemon`` and ``supervise-daemon`` processes.
 """
 
 from __future__ import annotations
