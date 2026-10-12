@@ -6,7 +6,7 @@ All dataclasses are frozen and JSON-serializable via the standard route
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -337,6 +337,42 @@ class TokenUsageStats:
 
 
 @dataclass(frozen=True)
+class PrdModelTokenUsageEntry:
+    """一个 PRD 在单个模型上的累计 token 用量。
+
+    Attributes:
+        repo_id: 仓库标识符。
+        prd_path: PRD 相对路径；无法关联时为空。
+        issue_number: GitHub Issue 编号；无法关联时为空。
+        model_id: 调用账本记录的模型标识符。
+        totals: 该 PRD 在该模型上的 token 累计。
+    """
+
+    repo_id: str
+    prd_path: str | None
+    issue_number: int | None
+    model_id: str
+    totals: TokenUsageTotals
+
+
+@dataclass(frozen=True)
+class ModelTokenUsageStats:
+    """调用账本中可归属到模型的 token 用量汇总。
+
+    Attributes:
+        by_model: 模型标识符到 token 汇总的映射。
+        by_agent: Agent 名称到模型用量的嵌套映射。
+        by_prd: PRD（Issue）与模型维度的用量条目。
+        truncated: 是否有 Issue 的调用读取触达历史条数上限。
+    """
+
+    by_model: dict[str, TokenUsageTotals] = field(default_factory=dict)
+    by_agent: dict[str, dict[str, TokenUsageTotals]] = field(default_factory=dict)
+    by_prd: tuple[PrdModelTokenUsageEntry, ...] = ()
+    truncated: bool = False
+
+
+@dataclass(frozen=True)
 class PrdTokenUsageEntry:
     """单个 PRD（Issue）维度的 token 用量累计（CLI ``kc tokens`` 按 PRD 表的数据源）。
 
@@ -360,6 +396,8 @@ class PrdLifecycleStats:
     ``token_usage_by_prd`` 是同一窗口 / 同一批 run 上的 PRD（Issue）维度
     token 汇总（按 ``total_tokens`` 降序，口径与 CLI ``kc tokens`` 的
     「按 PRD」表同源）；账本不可用时降级为空列表。
+    ``token_usage_by_model`` 来自调用观测账本，以实际报告模型优先分组；不
+    能关联模型的旧记录不会被估算或回填。
     """
 
     repo_id: str | None
@@ -376,6 +414,7 @@ class PrdLifecycleStats:
     runs: list[PrdLifecycleStatsRow]
     token_usage: TokenUsageStats
     token_usage_by_prd: list[PrdTokenUsageEntry]
+    token_usage_by_model: ModelTokenUsageStats = field(default_factory=ModelTokenUsageStats)
 
 
 class CiRepairPolicy(str, Enum):

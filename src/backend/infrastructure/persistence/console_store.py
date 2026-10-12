@@ -5,7 +5,7 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 13：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 14：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
@@ -13,7 +13,7 @@
   ``agent_invocation_events`` 通用调用观测账本表，身份不依赖 PRD；v10 新增
   按仓库与归档变体隔离的 ``backlog_prd_snapshots`` 列表快照表；v11 为
   ``attempt_records`` 附加失败阶段；v12 附加生命周期阶段耗时；v13 为运行历史
-  追加可空的 Issue 标题与 URL 快照）。
+  追加可空的 Issue 标题与 URL 快照；v14 新增单行模型 token 价格设置表）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -26,6 +26,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from backend.infrastructure.persistence.console_store_invocations import (
     CREATE_INVOCATION_EVENT_INDEXES,
@@ -45,7 +46,7 @@ from backend.infrastructure.persistence.console_store_lifecycle import (
 _logger = logging.getLogger(__name__)
 
 
-_SCHEMA_VERSION = 13
+_SCHEMA_VERSION = 14
 
 _RUN_V13_ADD_ISSUE_TITLE = "ALTER TABLE run_records ADD COLUMN issue_title TEXT"
 _RUN_V13_ADD_ISSUE_URL = "ALTER TABLE run_records ADD COLUMN issue_url TEXT"
@@ -155,6 +156,14 @@ CREATE TABLE IF NOT EXISTS monitor_settings (
 )
 """
 
+_CREATE_MODEL_PRICING_SETTINGS = """
+CREATE TABLE IF NOT EXISTS model_pricing_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    pricing_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
 # schema v9 -> v10：Backlog 列表快照。同一仓库的"默认视图 / 显示已归档"是两个
 # 独立变体，因此主键是 (repo_id, include_archived) 复合键，两行互不覆盖。
 _CREATE_BACKLOG_PRD_SNAPSHOTS = """
@@ -214,7 +223,7 @@ _CREATE_PRD_LIFECYCLE_INDEXES = (
 
 class SqliteConsoleStore(RunHistoryReadMixin, PrdLifecycleStoreMixin, InvocationEventStoreMixin):
     """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` /
-    ``IBacklogSnapshotStore`` 的 SQLite 实现。
+    ``IBacklogSnapshotStore`` / ``IConsoleModelPricingStore`` 的 SQLite 实现。
 
     各端口都以鸭子类型实现：本类不 import core，仅保证方法签名与 core
     侧同名 dataclass 结构一致。
@@ -326,6 +335,8 @@ class SqliteConsoleStore(RunHistoryReadMixin, PrdLifecycleStoreMixin, Invocation
                 connection.execute(_RUN_V13_ADD_ISSUE_TITLE)
             if "issue_url" not in existing_run_columns:
                 connection.execute(_RUN_V13_ADD_ISSUE_URL)
+        if current_version < 14:
+            connection.execute(_CREATE_MODEL_PRICING_SETTINGS)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 
@@ -605,6 +616,40 @@ class SqliteConsoleStore(RunHistoryReadMixin, PrdLifecycleStoreMixin, Invocation
                     settings.sync_interval_seconds,
                     settings.updated_at,
                 ),
+            )
+            connection.commit()
+
+    def get_model_pricing_payload(self) -> tuple[list[dict[str, object]], str] | None:
+        """读取本机模型价格设置；尚无记录时返回 ``None``。"""
+        with self._connect() as connection:
+            pricing_row = connection.execute(
+                "SELECT pricing_json, updated_at FROM model_pricing_settings WHERE id = 1"
+            ).fetchone()
+        if pricing_row is None:
+            return None
+        parsed_pricing_rows = json.loads(pricing_row["pricing_json"])
+        if not isinstance(parsed_pricing_rows, list) or not all(
+            isinstance(pricing_row_payload, dict) for pricing_row_payload in parsed_pricing_rows
+        ):
+            raise ValueError("本机模型价格设置格式无效。")
+        return (
+            cast(list[dict[str, object]], parsed_pricing_rows),
+            str(pricing_row["updated_at"]),
+        )
+
+    def save_model_pricing_payload(
+        self,
+        pricing_rows: list[dict[str, object]],
+        *,
+        updated_at: str,
+    ) -> None:
+        """保存整份本机模型价格设置；失败时向调用方抛出。"""
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO model_pricing_settings (id, pricing_json, updated_at) "
+                "VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+                "pricing_json=excluded.pricing_json, updated_at=excluded.updated_at",
+                (json.dumps(pricing_rows, ensure_ascii=False, allow_nan=False), updated_at),
             )
             connection.commit()
 

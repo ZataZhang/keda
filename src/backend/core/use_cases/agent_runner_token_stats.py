@@ -20,6 +20,8 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from backend.core.shared.models.backlog import (
+    ModelTokenUsageStats,
+    PrdModelTokenUsageEntry,
     PrdTokenUsageEntry,
     TokenUsageStats,
     TokenUsageTotals,
@@ -35,6 +37,9 @@ _IMPLEMENT_FLOW = "implement"
 
 #: 观测事件的事件类型值。
 _OBSERVATION_EVENT_TYPE = "agent_token_usage"
+
+# 调用事件完成时写入一次 usage，包含该次实际执行所用模型。
+_INVOCATION_FINISHED_EVENT_TYPE = "invocation_finished"
 
 _USAGE_INT_FIELDS: tuple[str, ...] = (
     "input_tokens",
@@ -273,6 +278,136 @@ def build_token_usage_by_prd(
     return entries
 
 
+def build_model_token_usage_stats(
+    *,
+    store: object,
+    run_records: list[object],
+) -> ModelTokenUsageStats:
+    """按模型、Agent 与 PRD 汇总调用账本中可归属的 token 用量。
+
+    调用账本的 run id 是每次 Issue 执行唯一值，而生命周期 run id 是 PRD
+    级身份，因此通过同一仓库 / Issue 的时间窗口关联两本账。``reported_model``
+    优先于 ``requested_model``；两者都缺失时保留为 ``unknown``。旧账本或未提供
+    usage 的调用不估算。
+    """
+    issue_event_reader = getattr(store, "list_issue_invocation_events", None)
+    if not callable(issue_event_reader):
+        return ModelTokenUsageStats()
+
+    run_windows_by_issue: dict[tuple[str, int], list[tuple[object, datetime, datetime | None]]] = {}
+    for run_record in run_records:
+        repo_id = str(getattr(run_record, "repo_id", ""))
+        issue_number = getattr(run_record, "issue_number", None)
+        started_at = _parse_event_timestamp(getattr(run_record, "started_at", None))
+        finished_at = _parse_event_timestamp(getattr(run_record, "finished_at", None))
+        if not repo_id or not isinstance(issue_number, int) or started_at is None:
+            continue
+        issue_key = (repo_id, issue_number)
+        run_windows_by_issue.setdefault(issue_key, []).append((run_record, started_at, finished_at))
+
+    totals_by_model: dict[str, TokenUsageTotals] = {}
+    totals_by_agent_model: dict[str, dict[str, TokenUsageTotals]] = {}
+    totals_by_prd_model: dict[tuple[str, str | None, int | None, str], TokenUsageTotals] = {}
+    history_truncated = False
+    for (repo_id, issue_number), issue_run_windows in run_windows_by_issue.items():
+        try:
+            invocation_events = list(
+                issue_event_reader(repo_id=repo_id, issue_number=issue_number, limit=500)
+            )
+        except Exception as exc:  # noqa: BLE001 - one Issue must not break the Stats page.
+            _logger.warning("Failed to read model usage for %s#%s: %s", repo_id, issue_number, exc)
+            continue
+        history_truncated = history_truncated or len(invocation_events) >= 500
+        for invocation_event in invocation_events:
+            if str(getattr(invocation_event, "event_type", "")) != (
+                _INVOCATION_FINISHED_EVENT_TYPE
+            ):
+                continue
+            occurred_at = _parse_event_timestamp(getattr(invocation_event, "occurred_at", None))
+            if occurred_at is None:
+                continue
+            matching_run_windows = [
+                run_window
+                for run_window in issue_run_windows
+                if run_window[1] <= occurred_at
+                and (run_window[2] is None or occurred_at <= run_window[2])
+            ]
+            if not matching_run_windows:
+                continue
+            run_record = max(matching_run_windows, key=lambda run_window: run_window[1])[0]
+            detail = _parse_detail_json(getattr(invocation_event, "detail_json", "") or "")
+            usage_totals = _totals_from_payload(detail.get("token_usage"))
+            if usage_totals is None:
+                continue
+            reported_model = detail.get("reported_model")
+            requested_model = detail.get("requested_model")
+            model_id = next(
+                (
+                    model_value.strip()
+                    for model_value in (reported_model, requested_model)
+                    if isinstance(model_value, str) and model_value.strip()
+                ),
+                "unknown",
+            )
+            agent_name = str(getattr(invocation_event, "agent", "") or "unknown")
+            _merge_totals(totals_by_model, model_id, usage_totals)
+            agent_model_totals = totals_by_agent_model.setdefault(agent_name, {})
+            _merge_totals(agent_model_totals, model_id, usage_totals)
+            prd_model_key = (
+                repo_id,
+                getattr(run_record, "prd_path", None),
+                issue_number,
+                model_id,
+            )
+            current_prd_totals = totals_by_prd_model.get(prd_model_key, _empty_totals())
+            totals_by_prd_model[prd_model_key] = _combine_totals(current_prd_totals, usage_totals)
+
+    by_prd = tuple(
+        sorted(
+            (
+                PrdModelTokenUsageEntry(
+                    repo_id=repo_id,
+                    prd_path=prd_path,
+                    issue_number=issue_number,
+                    model_id=model_id,
+                    totals=totals,
+                )
+                for (
+                    repo_id,
+                    prd_path,
+                    issue_number,
+                    model_id,
+                ), totals in totals_by_prd_model.items()
+            ),
+            key=lambda entry: (
+                -entry.totals.total_tokens,
+                entry.repo_id,
+                entry.issue_number or 0,
+                entry.model_id,
+            ),
+        )
+    )
+    return ModelTokenUsageStats(
+        by_model=totals_by_model,
+        by_agent=totals_by_agent_model,
+        by_prd=by_prd,
+        truncated=history_truncated,
+    )
+
+
+def _parse_event_timestamp(raw_timestamp: object) -> datetime | None:
+    """解析调用 / lifecycle 时间戳；无效值返回 ``None``。"""
+    if not isinstance(raw_timestamp, str):
+        return None
+    try:
+        parsed_timestamp = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed_timestamp.tzinfo is None:
+        return None
+    return parsed_timestamp.astimezone(timezone.utc)
+
+
 def build_token_usage_stats_for_issue(
     *,
     store: object,
@@ -296,6 +431,7 @@ def build_token_usage_stats_for_issue(
 
 __all__ = [
     "aggregate_token_usage",
+    "build_model_token_usage_stats",
     "build_token_usage_by_prd",
     "build_token_usage_stats_for_issue",
 ]

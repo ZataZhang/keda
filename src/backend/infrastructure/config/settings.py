@@ -275,7 +275,7 @@ class AgentRunnerSettings(BaseSettings):
     # 裸 ``kc`` 原生执行器入口与按需项目预览（顶层 ``[agent_session]`` 段）。
     # 与 ``repl``（旧 Keda REPL）分开：两种交互形态的风险面不同，见模型 docstring。
     session: AgentSessionSettings = Field(default_factory=AgentSessionSettings)
-    # 活跃 attempt 的停滞监督（``[agent_runner.stall_supervisor]``），默认关闭。
+    # 活跃 attempt 的停滞监督（``[agent_runner.stall_supervisor]``），默认开启。
     stall_supervisor: AgentRunnerStallSupervisorSettings = Field(
         default_factory=AgentRunnerStallSupervisorSettings
     )
@@ -307,7 +307,11 @@ class AgentRunnerSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        toml_source = _TomlSectionSource(settings_cls, "agent_runner")
+        toml_source = _TomlSectionSource(
+            settings_cls,
+            "agent_runner",
+            excluded_field_names=frozenset({"repositories"}),
+        )
         session_toml_source = _NestedTomlSectionSource(
             settings_cls,
             "agent_session",

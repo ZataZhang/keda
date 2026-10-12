@@ -75,6 +75,7 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
     // 预设卡片是客户端拉取聚合视图后才渲染的：不等网络静默就 count，会稳定拿到 0，
     // 把"其实有预设"的环境误判成空态分支（该分支断言的是空态提示，于是必然超时）。
     await page.waitForLoadState('networkidle')
+    await page.getByTestId('settings-tab-presets').click()
 
     // 预设区：有预设则渲染卡片，没有则渲染空态提示；新建表单始终在。
     const presetCards = page.locator('[data-testid^="preset-card-"]')
@@ -87,8 +88,9 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
     await expect(page.getByTestId('new-preset-form')).toBeVisible()
     await expect(page.getByTestId('new-preset-add')).toBeVisible()
 
-    // 回退区：候选行 + 追加 / 预算 / 保存控件在。仅断言控件存在与可交互，**不点保存**
+    // 切到执行器回退 Tab；候选行 + 追加 / 预算 / 保存控件在。仅断言控件存在与可交互，**不点保存**
     //（e2e 跑在共享仓库上，写盘会污染真实 config.toml；落盘语义由后端契约测试覆盖）。
+    await page.getByTestId('settings-tab-fallback').click()
     await expect(page.getByTestId('fallback-add')).toBeVisible()
     await expect(page.getByTestId('fallback-switches')).toBeVisible()
     await expect(page.getByTestId('fallback-save')).toBeVisible()

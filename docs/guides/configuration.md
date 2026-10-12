@@ -298,12 +298,13 @@ dev 命令而不改动机器级配置。预览进程**只在用户于执行器�
 ## Agent Runner 停滞监督配置
 
 `config.toml` 的 `[agent_runner.stall_supervisor]` 段控制"活跃 attempt 是否被周期性问一次
-是否停滞"。**默认关闭**是刻意的：开启意味着 KC 会按周期调用模型，并在满足全部所有权校验后
-终止一个正在写代码的子进程。关闭时一次模型都不调用，执行与恢复行为与本特性之前逐字节一致。
+是否停滞"。**默认开启**：仅对 KC 正在执行的、带 Issue 身份的 writer attempt 生效；达到停滞阈值后
+调用只读诊断模型，并且只有通过全部所有权校验才可能终止 writer 子进程。显式设为 `false` 后不调用
+诊断模型，执行与恢复行为与本特性之前逐字节一致。
 
 ```toml
 [agent_runner.stall_supervisor]
-enabled = false
+enabled = true
 check_interval_seconds = 1800
 stalled_after_seconds = 1800
 agent = "auto"

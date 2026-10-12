@@ -587,6 +587,15 @@ max_agent_switches = 4
 # preset = "qoder-qwen3_8-flash_max"
 # [[agent_runner.runner.agent_fallback_candidates]]
 # agent = "codex"
+
+[[agent_runner.runner.agent_fallback_candidates]]
+agent = "qoder"
+
+[[agent_runner.runner.agent_fallback_candidates]]
+agent = "codex"
+
+[[agent_runner.runner.agent_fallback_candidates]]
+agent = "codebuddy"
 [agent_runner.memory]
 enabled = true
 base_dir = ".kedacode/memory"

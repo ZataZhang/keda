@@ -32,6 +32,7 @@ from backend.core.shared.interfaces.runner_console import (
 from backend.core.shared.models.agent_runner import AttemptResult
 from backend.core.shared.statistics import linear_percentile
 from backend.core.shared.models.backlog import (
+    ModelTokenUsageStats,
     PrdInvocationDetail,
     PrdLifecycleDetail,
     PrdLifecycleDurations,
@@ -42,6 +43,7 @@ from backend.core.shared.models.backlog import (
 )
 from backend.core.use_cases.agent_runner_token_stats import (
     aggregate_token_usage,
+    build_model_token_usage_stats,
     build_token_usage_by_prd,
 )
 from backend.core.use_cases.prd_invocation_detail import (
@@ -833,6 +835,7 @@ def build_prd_lifecycle_stats(
             runs=[],
             token_usage=TokenUsageStats(by_flow={}, by_agent={}),
             token_usage_by_prd=[],
+            token_usage_by_model=ModelTokenUsageStats(),
         )
 
     try:
@@ -924,6 +927,15 @@ def build_prd_lifecycle_stats(
         _logger.warning("Failed to build PRD-dimension token usage: %s", exc)
         token_usage_by_prd = []
 
+    try:
+        token_usage_by_model = build_model_token_usage_stats(
+            store=lifecycle_store,
+            run_records=run_records,
+        )
+    except Exception as exc:  # noqa: BLE001 - model costs are an optional Stats section.
+        _logger.warning("Failed to build model-dimension token usage: %s", exc)
+        token_usage_by_model = ModelTokenUsageStats()
+
     return PrdLifecycleStats(
         repo_id=repo_id,
         window_days=bounded_days,
@@ -947,4 +959,5 @@ def build_prd_lifecycle_stats(
         runs=rows,
         token_usage=aggregate_token_usage(window_events),
         token_usage_by_prd=token_usage_by_prd,
+        token_usage_by_model=token_usage_by_model,
     )

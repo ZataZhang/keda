@@ -815,6 +815,8 @@ export type PrdLifecycleStats = {
   incomplete_run_count: number;
   runs: PrdLifecycleStatsRow[];
   token_usage: TokenUsageStats;
+  /** 调用账本按模型、Agent 与 PRD 聚合的 token 用量；旧后端响应缺省时视为空。 */
+  token_usage_by_model?: ModelTokenUsageStats;
   /**
    * PRD（Issue）维度 token 汇总（按 `total_tokens` 降序），与 CLI
    * `kc tokens` 的「按 PRD」表同源同口径。旧响应缺省该字段时按空数组处理。
@@ -860,6 +862,38 @@ export type TokenUsageTotals = {
 export type TokenUsageStats = {
   by_flow: Record<string, TokenUsageTotals>;
   by_agent: Record<string, TokenUsageTotals>;
+};
+
+/** 单个模型的 USD / 百万 token 价格配置。 */
+export type ModelTokenPricing = {
+  model_id: string;
+  input_usd_per_million: number;
+  output_usd_per_million: number;
+  cache_read_usd_per_million: number;
+  cache_creation_usd_per_million: number;
+};
+
+/** 本机管理终端保存的模型价格清单。 */
+export type ModelPricingSettings = {
+  models: ModelTokenPricing[];
+  updated_at: string;
+};
+
+/** 调用账本按模型、Agent 与 PRD 聚合的 token 用量。 */
+export type ModelTokenUsageStats = {
+  by_model: Record<string, TokenUsageTotals>;
+  by_agent: Record<string, Record<string, TokenUsageTotals>>;
+  by_prd: PrdModelTokenUsageEntry[];
+  truncated: boolean;
+};
+
+/** 单个 PRD 在单个模型上的累计用量。 */
+export type PrdModelTokenUsageEntry = {
+  repo_id: string;
+  prd_path: string | null;
+  issue_number: number | null;
+  model_id: string;
+  totals: TokenUsageTotals;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

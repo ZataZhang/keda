@@ -21,6 +21,8 @@ import type {
   IssueLogChunk,
   LaunchOptionsView,
   MonitorSettings,
+  ModelPricingSettings,
+  ModelTokenPricing,
   PrdLifecycleStats,
   ProcessLogChunk,
   RegistryRepositoryEntry,
@@ -299,6 +301,29 @@ export async function fetchPrdLifecycleStats(params: {
   return get<PrdLifecycleStats>(
     `${BASE_PATH}/console/stats/prd-lifecycle?${searchParams.toString()}`,
   );
+}
+
+/**
+ * 读取本机 console 保存的模型 token 价格。
+ *
+ * @returns 按 USD / 百万 token 计价的模型清单。
+ */
+export async function fetchModelPricingSettings(): Promise<ModelPricingSettings> {
+  return get<ModelPricingSettings>(`${BASE_PATH}/console/model-pricing`);
+}
+
+/**
+ * 保存完整的本机模型 token 价格清单。
+ *
+ * @param models - 按 USD / 百万 token 计价的模型清单。
+ * @returns 保存后的清单与更新时间。
+ */
+export async function saveModelPricingSettings(
+  models: ModelTokenPricing[],
+): Promise<ModelPricingSettings> {
+  return put<ModelPricingSettings>(`${BASE_PATH}/console/model-pricing`, {
+    models,
+  });
 }
 
 export async function fetchRecentRuns(params: {

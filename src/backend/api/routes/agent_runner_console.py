@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat
 
 from backend.api.backlog_sync import wake_backlog_scheduler
 from backend.api.monitor_sync import wake_monitor_scheduler
@@ -28,13 +28,19 @@ from backend.core.shared.interfaces.runner_console import (
     IMonitorSnapshotStore,
     RunnerProcessKind,
 )
+from backend.core.shared.interfaces.console_model_pricing import IConsoleModelPricingStore
 from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.shared.models.console_pricing import ModelTokenPricing
 from backend.core.use_cases.console_actions import (
     ConsoleActionError,
     execute_issue_action,
     execute_repository_action,
 )
 from backend.core.use_cases.console_context import resolve_console_context
+from backend.core.use_cases.console_model_pricing import (
+    get_model_pricing_settings,
+    update_model_pricing_settings,
+)
 from backend.core.use_cases.console_processes import (
     ConsoleProcessError,
     start_runner_process,
@@ -403,6 +409,58 @@ def get_console_prd_lifecycle_stats(repo_id: str | None = None, days: int = 30) 
     """
     stats = build_prd_lifecycle_stats(store=create_console_store(), repo_id=repo_id, days=days)
     return _serialize(stats)
+
+
+class ModelTokenPricingRequest(BaseModel):
+    """单个模型的 USD / 百万 token 价格配置。"""
+
+    model_id: str = Field(min_length=1, max_length=200)
+    input_usd_per_million: FiniteFloat = Field(ge=0)
+    output_usd_per_million: FiniteFloat = Field(ge=0)
+    cache_read_usd_per_million: FiniteFloat = Field(ge=0)
+    cache_creation_usd_per_million: FiniteFloat = Field(ge=0)
+
+
+class UpdateModelPricingRequest(BaseModel):
+    """整体替换模型价格清单的请求体。"""
+
+    models: list[ModelTokenPricingRequest] = Field(max_length=100)
+
+
+@router.get("/agent-runner/console/model-pricing")
+def get_console_model_pricing() -> dict:
+    """读取本机持久化的模型 token 价格设置。"""
+    pricing_store = cast(IConsoleModelPricingStore, create_console_store())
+    try:
+        settings = get_model_pricing_settings(pricing_store)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"模型价格设置读取失败: {exc}") from exc
+    return _serialize(settings)
+
+
+@router.put("/agent-runner/console/model-pricing")
+def update_console_model_pricing(request: UpdateModelPricingRequest) -> dict:
+    """校验并保存本机模型 token 价格设置。"""
+    pricing_store = cast(IConsoleModelPricingStore, create_console_store())
+    try:
+        settings = update_model_pricing_settings(
+            pricing_store,
+            models=[
+                ModelTokenPricing(
+                    model_id=model_price.model_id,
+                    input_usd_per_million=model_price.input_usd_per_million,
+                    output_usd_per_million=model_price.output_usd_per_million,
+                    cache_read_usd_per_million=model_price.cache_read_usd_per_million,
+                    cache_creation_usd_per_million=(model_price.cache_creation_usd_per_million),
+                )
+                for model_price in request.models
+            ],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - settings are a user-visible fact path.
+        raise HTTPException(status_code=500, detail=f"模型价格设置保存失败: {exc}") from exc
+    return _serialize(settings)
 
 
 @router.get("/agent-runner/console/audit")

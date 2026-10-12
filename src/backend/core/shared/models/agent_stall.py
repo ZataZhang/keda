@@ -7,7 +7,7 @@
 本模块只放纯数据与纯判定：
 
 - :class:`StallSupervisorConfig` —— ``[agent_runner.stall_supervisor]`` 的运行时
-  视图，默认关闭。
+  视图，默认开启。
 - :class:`ProgressSnapshot` —— 一次现场采样的签名（进展判定的唯一输入）。
 - :class:`SupervisorVerdict` —— 只读诊断结论的闭集。
 - :class:`AttemptOwnership` / :class:`StallCancelOutcome` —— 取消前的所有权证据
@@ -32,8 +32,8 @@ class StallSupervisorConfig:
     """``[agent_runner.stall_supervisor]`` 的运行时视图。
 
     Attributes:
-        enabled: 总开关。``False`` 时监督器一次都不调用模型，也不终止任何进程，
-            执行与恢复行为与本特性之前逐字节一致。
+        enabled: 总开关。``True`` 时监督活跃 attempt；``False`` 时监督器一次都不
+            调用模型，也不终止任何进程，执行与恢复行为与本特性之前逐字节一致。
         check_interval_seconds: 巡检周期（秒），决定模型调用频率下限。
         stalled_after_seconds: 无实质进展判定窗口（秒），决定误中断门槛。
         agent: 诊断用 agent 名；``"auto"`` 走生命周期矩阵的 ``supervisor`` 键。
@@ -41,7 +41,7 @@ class StallSupervisorConfig:
         diagnosis_inactivity_timeout_seconds: 单次诊断调用的无输出上限。
     """
 
-    enabled: bool = False
+    enabled: bool = True
     check_interval_seconds: int = 1800
     stalled_after_seconds: int = 1800
     agent: str = "auto"

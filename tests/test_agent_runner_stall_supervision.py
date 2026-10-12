@@ -6,7 +6,7 @@
   精确击杀后的存活复核、既有 recovery 的入口异常。
 - **可替换**：诊断结论（provider 的作答文本）与 GitHub，PRD 明确允许替换。
 
-被禁止的取巧在这里逐条有对应测试：默认关闭时必须一次模型都不调用、不建线程；
+被禁止的取巧在这里逐条有对应测试：显式关闭时必须一次模型都不调用、不建线程；
 非 ``stalled`` 结论与"归属不可证实 / 现场变了 / 调用已结束"都不得触碰任何进程；
 同一个停滞窗口至多一次诊断。
 """
@@ -649,7 +649,7 @@ def test_supervision_prompt_carries_no_prompt_or_environment(
 def test_disabled_supervision_starts_no_observer_and_calls_no_model(
     tmp_path: Path, writer_argv: Sequence[str], worktree_path: Path
 ) -> None:
-    """默认关闭时：不起线程、不采样、不调模型，结果原样交回。"""
+    """显式关闭时：不起线程、不采样、不调模型，结果原样交回。"""
     runner = SubprocessRunner()
     diagnose_calls: list[StallDiagnosisRequest] = []
     request = _supervision_request(

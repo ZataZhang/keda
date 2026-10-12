@@ -470,14 +470,15 @@ uv run --project /path/to/keda kc init
 
 `config.toml` 同时装两类配置：**KedaCode 自己的** `[agent_runner]`（含生命周期矩阵、registry、超时、验证命令等），以及**宿主应用的** `[app]` / `[database]` / `[preview]` 等。两类按不同规则解析：
 
-- `[agent_runner]`：`KEDACODE_CONFIG` → 从 cwd 向上查找（**只接受带 `[agent_runner]` 表的文件**）→ `~/.kedacode/config.toml`（缺失时从源码根 seed）→ keda 源码根 `config.toml`。模板派生项目在仓库根也有一份同名 `config.toml`，但那是应用配置、不含 `[agent_runner]`，因此不会被当成机器级配置：否则在目标仓库内运行的 runner 会整份顶掉 `~/.kedacode/config.toml`，矩阵、registry、超时等设置全部静默失配（历史上表现为"面板显示实现用 codebuddy、实际领活却用了 claude"）。
+- `[agent_runner]` 全局设置：显式 `KEDACODE_CONFIG` → `<本机状态目录>/config.toml`（通常为 `~/.kedacode/config.toml`）。后者缺失时，首次创建可从 Keda 源码配置播种；创建后始终以状态目录文件为准，**不会按 cwd 搜索或读取项目根 `config.toml`**。因此即使在 Keda 源码仓库内启动服务，也不会让仓库文件抢先覆盖全局生命周期矩阵、预设与超时设置。
+- `[agent_runner.repositories]` 由 registry 专用配置来源加载，不与普通 `[agent_runner]` 设置合并。全局 registry 存在时，项目或源码根 `config.toml` 中残留的仓库条目不会让已移除的仓库重新进入监控；全局 registry 缺失时仍沿用 registry 解析器的兼容回退规则。
 - 其它段（应用自己的配置）：仍按 cwd 向上查找最近的项目 `config.toml`，即目标仓库根那份——`preview_env.py` 等脚本依赖这个语义读到本仓的 `[preview]`。
 
 面板（`kc console`）托管或触发的 runner 子进程，cwd 就是目标仓库（见 `resolve_console_spawn_cwd`）；因此面板会把自己当前生效的机器级 `config.toml` 以 `KEDACODE_CONFIG` 注入子进程，保证"界面上显示的配置"与"实际执行用的配置"是同一份。手动在目标仓库里直接执行 `kc run` / `kc daemon` 且未设 `KEDACODE_CONFIG` 时，机器级配置取 `~/.kedacode/config.toml`——想让某个仓库的每个阶段都用指定 agent，写该仓库 `.kedacode.toml` 的 `[agent_runner.lifecycle_agents]` 是最稳的一层（仓库层覆盖机器层）。
 
 在"选 agent"之上，还可以给阶段绑定**命名模型预设**（`[agent_runner.presets.<name>]` + `[agent_runner.lifecycle_presets]`）：绑定后该阶段整体由预设决定 (agent, 模型, 推理档)，遮蔽矩阵同键声明；换人（fallback / 显式 `--agent`）时**主 agent 的模型绑定自动丢弃**并在日志与 `attempt_records`（`preset` / `model` 列）中标注；被选中的回退候选若自带 `preset`（`[[agent_runner.runner.agent_fallback_candidates]]`）则应用该候选自己的模型 / 推理档。完整语义、优先级与命令行一次性旗标见 [Agent 模型预设](model-presets.md)。
 
-生命周期矩阵、模型预设与执行器回退候选合并到管理终端的**统一设置页** `/app/settings/lifecycle/`：顶部范围选择器切换「全局」（写 `config.toml`）与「仓库」（写该仓库 `.kedacode.toml`），九阶段一行显示最终生效 Agent / 模型 / 推理深度与**逐字段来源**；Backlog 仓库行齿轮进入同一页并预选该仓库，不再另设编辑器。执行器回退候选是**机器级**配置，固定写全局 `config.toml`，不随范围切换改变落点。页面展示的是所选**基线**：PRD 头部覆盖与单次 `--preset/--model/--reasoning-effort` 仍可在其上覆写，页面会提示而不把基线冒充成某个 PRD 的最终值。对应的命令行持久化入口（`kc agent lifecycle|preset|fallback`，写入必须显式 `--scope`，仓库写入必须给 `--repo-id`）见 [Agent 模型预设](model-presets.md) 第 7 节。
+生命周期矩阵、模型预设与执行器回退候选合并到管理终端的**统一设置页** `/app/settings/lifecycle/`：顶部范围选择器切换「全局」（写状态目录的 `config.toml`，通常是 `~/.kedacode/config.toml`）与「仓库」（写该仓库 `.kedacode.toml`）；设置内容通过吸顶 Tab 在「生命周期矩阵」「模型预设」「执行器回退」之间切换，每次显示一个区块；矩阵中九阶段一行显示最终生效 Agent / 模型 / 推理深度与**逐字段来源**。Backlog 仓库行齿轮进入同一页并预选该仓库，不再另设编辑器。执行器回退候选是**机器级**配置，固定写全局状态目录配置，不随范围切换改变落点。页面展示的是所选**基线**：PRD 头部覆盖与单次 `--preset/--model/--reasoning-effort` 仍可在其上覆写，页面会提示而不把基线冒充成某个 PRD 的最终值。对应的命令行持久化入口（`kc agent lifecycle|preset|fallback`，写入必须显式 `--scope`，仓库写入必须给 `--repo-id`）见 [Agent 模型预设](model-presets.md) 第 7 节。
 
 ### `.gitignore` 托管块与 prd skill 契约
 
@@ -3725,10 +3726,10 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 - **调用记录自身不做停滞判定**：tracing 只描述"起了几次、每次谁在跑、跑成什么样"，不引入任何阈值，也不会因为读到缺口就自动重跑、自动换执行器或自动关 Issue。
 - 不引入外部平台 / dashboard / OpenTelemetry，不做模型评分排名或自动选型，不采集完整提示词或任何密钥。
 
-> 历史注记：本节原本还写着"**不设停滞阈值**"。Issue #256 之后，仓库多了一个**默认关闭**的
-> 可选组件——停滞监督（`[agent_runner.stall_supervisor]`，见下文「停滞监督（Stall Supervisor）」），
-> 它会在现场指纹冻结超过 `stalled_after_seconds` 时请模型下一次结论。这是刻意取代，不是漂移：
-> 调用记录仍然只观测，判定与处置都在那个需要显式开启、且每次处置前都要复核所有权的独立组件里。
+> 历史注记：本节原本还写着"**不设停滞阈值**"。Issue #256 之后，仓库加入了可配置的停滞监督
+>（`[agent_runner.stall_supervisor]`，见下文）。它最初默认关闭；当前默认开启，可显式关闭。
+> 监督器会在现场指纹冻结达到阈值后请求模型判断。调用记录仍然只观测，判定与处置由独立组件完成，
+> 且每次处置前都要复核现场与进程所有权。
 
 ### 实现要点
 
@@ -3778,7 +3779,8 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 
 daemon 里一个 writer 卡住时，现状是"没人知道"：日志还在，进程还活着，队列里的 Issue 停在 `agent/running`。停滞监督把这件事变成**可选的、每次处置都要复核所有权的**闭环：到点了先问一次模型"这是长时间思考还是真停滞"，只有拿到可取消的结论、且现场与归属都没变，才终止那个进程组，然后走既有的失败分类与恢复阶梯。
 
-默认关闭。开启意味着 KC 会按周期调用模型，并可能终止一个正在写代码的子进程。
+默认开启。活跃 attempt 每 30 分钟巡检；现场冻结达到阈值后才调用只读诊断模型，并可能终止一个
+正在写代码的子进程。需要停用时，在配置中显式设置 `enabled = false`。
 
 ### 配置
 
@@ -3786,7 +3788,7 @@ daemon 里一个 writer 卡住时，现状是"没人知道"：日志还在，进
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `enabled` | `false` | 总开关 |
+| `enabled` | `true` | 总开关 |
 | `check_interval_seconds` | `1800` | 巡检周期，必须为正 |
 | `stalled_after_seconds` | `1800` | 现场指纹冻结多久才算疑似停滞，必须为正 |
 | `agent` | `"auto"` | 诊断用哪个 agent；必须声明**只读** `generate` profile，否则监督器自我禁用 |
@@ -4233,6 +4235,21 @@ blocked | unblocked | failed`，其中 `merged` 收成 `completed`（已完成�
   agent / 按 PRD），由 `stats/prd-lifecycle` 端点的 `token_usage` 与
   `token_usage_by_prd` 驱动，与 CLI 同源同口径；「按 PRD」表按总量降序，
   同一 PRD 的多次执行合并为一行并显示累计执行次数（`run_count`）。
+
+### 模型 Token 成本估算
+
+Settings →「成本估算」从下拉列表选择近一年实际调用过的模型，也可为新模型手动输入
+  ID；再配置输入、输出、缓存读、缓存写四项 USD / 百万 token 单价。价格配置保存在本机 `console.db`，不会改写 Agent
+  配置或供应商账单；空配置表示尚未设置价格。Stats 页按调用账本中的
+  `reported_model` 优先、`requested_model` 回退进行模型归属，按四项 usage 分别计价。
+  Agent 与 Issue 的费用沿用该模型归属结果；未配置价格的模型显示「待配置」，部分
+  配置时显示已计价金额并标注「部分」。旧记录没有调用模型事实时不推测费用。修改价格后，
+  当前统计窗口会按新价格重新估算，历史价格不做版本化快照。每个 Issue 最多读取最近
+  500 条调用事件；达到上限时页面披露费用可能少计。
+- **模型计价接口**：`GET /api/v1/agent-runner/console/model-pricing` 读取价格清单；
+  `PUT` 整体替换清单，字段为 `model_id`、`input_usd_per_million`、
+  `output_usd_per_million`、`cache_read_usd_per_million` 与
+  `cache_creation_usd_per_million`。单价必须是有限非负数字，模型 ID 不重复。
 - **不干扰**：`agent_token_usage` 不参与阶段推导与时长归属（推导时被
   过滤），写入失败与其它观测事件一样只落日志。
 
@@ -4256,7 +4273,10 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
     cache_creation/total_tokens 与 usage_count）/
     token_usage_by_prd[]（按 PRD（Issue）维度，total_tokens 降序；每条含
     repo_id / prd_path / issue_number / run_count / totals{四项 + total +
-    usage_count}；账本不可用时降级为空数组。响应新增字段，只增不改，
+    usage_count}；账本不可用时降级为空数组）/
+    token_usage_by_model{by_model, by_agent, by_prd[], truncated}（来自 invocation_finished
+    调用账本；reported_model 优先、requested_model 回退，只有真实 usage 进入；
+    不可用时降级为空结构）。响应新增字段，只增不改，
     既有消费者不受影响）
 ```
 

@@ -816,11 +816,11 @@ class AgentSessionSettings(BaseModel):
 
 
 class AgentRunnerStallSupervisorSettings(BaseModel):
-    """``[agent_runner.stall_supervisor]``：活跃 attempt 的停滞监督（默认关闭）。
+    """``[agent_runner.stall_supervisor]``：活跃 attempt 的停滞监督（默认开启）。
 
-    默认关闭是刻意的安全选择：开启意味着 KC 会按周期调用模型，并在满足全部所有权
-    校验后终止一个正在写代码的子进程。关闭时监督器一次都不调用模型，执行与恢复
-    行为与本特性之前逐字节一致。
+    默认开启后，KC 会按周期调用模型；满足停滞结论与全部所有权校验后，可能终止一个
+    正在写代码的子进程。需要关闭时显式设置 ``enabled = false``；关闭后监督器不调用
+    模型，执行与恢复行为与本特性之前逐字节一致。
 
     两个阈值各自独立可覆盖：``check_interval_seconds`` 是巡检周期（决定模型调用
     频率下限），``stalled_after_seconds`` 是"无实质进展"的判定窗口（决定误中断
@@ -829,7 +829,7 @@ class AgentRunnerStallSupervisorSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    enabled: bool = True
     check_interval_seconds: int = Field(default=1800, gt=0)
     stalled_after_seconds: int = Field(default=1800, gt=0)
     # 诊断用 agent；默认走生命周期矩阵的 supervisor 键（与 post-PR 监督同一派生），

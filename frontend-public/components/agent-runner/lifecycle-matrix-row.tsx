@@ -46,6 +46,9 @@ export function MatrixRow({
 }: MatrixRowProps) {
   const vocabularySafe = vocabulary;
   const affected = row.affected_stages.filter((stage) => stage !== row.key);
+  const bindingPlaceholder = row.follows_implementation
+    ? "未绑定（生效值继承实现阶段）"
+    : "未绑定（跟随既有配置）";
   const agentDisplay =
     row.effective_agent ?? (row.follows_implementation ? "跟随实现阶段" : "—");
   return (
@@ -140,12 +143,12 @@ export function MatrixRow({
       </div>
 
       <div className="min-w-0">
-        <Label className="text-[11px] text-slate-500">绑定预设</Label>
+        <Label className="text-[11px] text-slate-500">本阶段绑定预设</Label>
         <PresetSelect
           value={bindingValue}
           options={presetOptions}
           allowClear
-          placeholder="未绑定（跟随既有配置）"
+          placeholder={bindingPlaceholder}
           onChange={onBindingChange}
           testId={`matrix-binding-${row.key}`}
         />

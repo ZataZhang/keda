@@ -2,8 +2,17 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { CONSOLE_NAV_COLLAPSED_KEY, usePersistedBoolean } from "@/lib/console-ui-prefs"
 import {
   Activity,
@@ -12,6 +21,7 @@ import {
   LayoutDashboard,
   Lightbulb,
   Map,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -32,6 +42,7 @@ const navItems = [
 /** Sidebar navigation for authenticated pages. */
 export function AppSidebar() {
   const pathname = usePathname()
+  const { theme, setTheme } = useTheme()
   // 收起偏好跨页面、跨刷新记忆：纯展示选择，不影响路由与数据。
   const [collapsed, setCollapsed] = usePersistedBoolean(CONSOLE_NAV_COLLAPSED_KEY)
 
@@ -56,6 +67,34 @@ export function AppSidebar() {
             <div className="flex-1" />
           </>
         )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size={collapsed ? "icon-sm" : "sm"}
+              className="shrink-0"
+              aria-label="选择配色风格"
+              title="选择配色风格"
+            >
+              <Palette className="size-4" />
+              {collapsed ? <span className="sr-only">主题</span> : "主题"}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>配色风格</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={theme ?? "light"}
+              onValueChange={setTheme}
+            >
+              <DropdownMenuRadioItem value="light">浅色</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">深色</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="system">
+                跟随系统
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           type="button"
           variant="ghost"

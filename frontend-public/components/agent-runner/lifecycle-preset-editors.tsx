@@ -261,12 +261,15 @@ export function NewPresetForm({
           <Input
             id="new-preset-model"
             value={draft.model}
-            placeholder="留空=不设"
+            placeholder="留空=沿用 CLI 默认"
             onChange={(event) =>
               setDraft((c) => ({ ...c, model: event.target.value }))
             }
             data-testid="new-preset-model"
           />
+          <p className="text-xs leading-4 text-muted-foreground">
+            不确定模型名？可让 AI 助手按所选 Agent 推荐模型并帮你补全预设。
+          </p>
         </div>
         <div className="space-y-1">
           <Label className="text-[11px]" htmlFor="new-preset-effort">

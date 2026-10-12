@@ -2,171 +2,305 @@
 
 // 统计页：实时完成度（GitHub 口径）+ 本地运行历史趋势（SQLite 口径）。
 
-import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge";
-import { RunDetailDialog } from "@/components/agent-runner/run-detail-dialog";
-import { RecentRunGroups } from "@/components/agent-runner/recent-run-groups";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AgentPerformanceSection } from "@/components/stats/agent-performance-section";
+import { Badge } from "@/components/ui/badge"
+import { RunDetailDialog } from "@/components/agent-runner/run-detail-dialog"
+import { RecentRunGroups } from "@/components/agent-runner/recent-run-groups"
+import { TokenUsageSection } from "@/components/stats/token-usage-section"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
+import { AgentPerformanceSection } from "@/components/stats/agent-performance-section"
 import {
   formatLifecycleDuration,
-  formatTokenCount,
   PHASE_LABELS,
-} from "@/components/backlog/prd-lifecycle-format";
+} from "@/components/backlog/prd-lifecycle-format"
 import {
   fetchAgentPerformanceStats,
   fetchCompletionStats,
+  fetchModelPricingSettings,
   fetchPrdLifecycleStats,
   fetchRecentRuns,
   fetchRunHistoryTrend,
-} from "@/lib/api/console";
+} from "@/lib/api/console"
 import type {
   AgentPerformanceStats,
   DailyRunTrendEntry,
+  ModelTokenPricing,
   PrdLifecycleStats,
-  PrdTokenUsageEntry,
   RepositoryCompletionStats,
   RunRecordEntry,
-  TokenUsageTotals,
-} from "@/lib/api/types";
+} from "@/lib/api/types"
 
 type AgentPerformanceQueryState = {
-  filterKey: string;
-  stats: AgentPerformanceStats | null;
-  error: string | null;
-};
+  filterKey: string
+  stats: AgentPerformanceStats | null
+  error: string | null
+}
 
 type PrdLifecycleQueryState = {
-  filterKey: string;
-  stats: PrdLifecycleStats;
-};
+  filterKey: string
+  stats: PrdLifecycleStats
+}
 
-/** 汇总 GitHub 完成度、本地运行趋势、Agent 表现与 PRD 生命周期统计。 */
+/** 汇总 GitHub 完成情况、本地运行趋势、模型成本与 PRD 生命周期统计。 */
 export default function StatsPage() {
-  const [stats, setStats] = useState<RepositoryCompletionStats[] | null>(null);
-  const [trendRepoId, setTrendRepoId] = useState("");
-  const [trendDays, setTrendDays] = useState(30);
-  const [trend, setTrend] = useState<DailyRunTrendEntry[]>([]);
-  const [recentRuns, setRecentRuns] = useState<RunRecordEntry[]>([]);
-  const [selectedRun, setSelectedRun] = useState<RunRecordEntry | null>(null);
+  const [stats, setStats] = useState<RepositoryCompletionStats[] | null>(null)
+  const [modelPricing, setModelPricing] = useState<ModelTokenPricing[]>([])
+  const [modelPricingError, setModelPricingError] = useState<string | null>(
+    null
+  )
+  const [trendRepoId, setTrendRepoId] = useState("")
+  const [trendDays, setTrendDays] = useState(30)
+  const [trend, setTrend] = useState<DailyRunTrendEntry[]>([])
+  const [recentRuns, setRecentRuns] = useState<RunRecordEntry[]>([])
+  const [selectedRun, setSelectedRun] = useState<RunRecordEntry | null>(null)
   const [lifecycleQueryState, setLifecycleQueryState] =
-    useState<PrdLifecycleQueryState | null>(null);
+    useState<PrdLifecycleQueryState | null>(null)
   const [agentPerformanceQueryState, setAgentPerformanceQueryState] =
-    useState<AgentPerformanceQueryState | null>(null);
-  const agentPerformanceFilterKey = `${trendRepoId}|${trendDays}`;
+    useState<AgentPerformanceQueryState | null>(null)
+  const agentPerformanceFilterKey = `${trendRepoId}|${trendDays}`
   const currentAgentPerformanceQueryState =
     agentPerformanceQueryState?.filterKey === agentPerformanceFilterKey
       ? agentPerformanceQueryState
-      : null;
-  const agentPerformanceStats = currentAgentPerformanceQueryState?.stats ?? null;
-  const agentPerformanceError = currentAgentPerformanceQueryState?.error ?? null;
+      : null
+  const agentPerformanceStats = currentAgentPerformanceQueryState?.stats ?? null
+  const agentPerformanceError = currentAgentPerformanceQueryState?.error ?? null
   const lifecycleStats =
     lifecycleQueryState?.filterKey === agentPerformanceFilterKey
       ? lifecycleQueryState.stats
-      : null;
+      : null
 
   useEffect(() => {
     fetchCompletionStats()
       .then(setStats)
       .catch((error: unknown) => {
         toast.error(
-          error instanceof Error ? error.message : "无法加载完成度统计。",
-        );
-        setStats([]);
-      });
-  }, []);
+          error instanceof Error ? error.message : "无法加载完成度统计。"
+        )
+        setStats([])
+      })
+  }, [])
+
+  useEffect(() => {
+    fetchModelPricingSettings()
+      .then((settings) => setModelPricing(settings.models))
+      .catch((error: unknown) => {
+        setModelPricingError(
+          error instanceof Error ? error.message : "无法读取模型价格设置。"
+        )
+      })
+  }, [])
 
   useEffect(() => {
     fetchRunHistoryTrend({ repoId: trendRepoId || undefined, days: trendDays })
       .then(setTrend)
       .catch((error: unknown) => {
         toast.error(
-          error instanceof Error ? error.message : "无法加载历史趋势。",
-        );
-      });
+          error instanceof Error ? error.message : "无法加载历史趋势。"
+        )
+      })
     fetchRecentRuns({ repoId: trendRepoId || undefined, limit: 30 })
       .then(setRecentRuns)
-      .catch(() => setRecentRuns([]));
-  }, [trendRepoId, trendDays]);
+      .catch(() => setRecentRuns([]))
+  }, [trendRepoId, trendDays])
 
   useEffect(() => {
-    let isCancelled = false;
-    fetchAgentPerformanceStats({ repoId: trendRepoId || undefined, days: trendDays })
+    let isCancelled = false
+    fetchAgentPerformanceStats({
+      repoId: trendRepoId || undefined,
+      days: trendDays,
+    })
       .then((performanceStats) => {
         if (!isCancelled) {
           setAgentPerformanceQueryState({
             filterKey: agentPerformanceFilterKey,
             stats: performanceStats,
             error: null,
-          });
+          })
         }
       })
       .catch((error: unknown) => {
         if (isCancelled) {
-          return;
+          return
         }
         setAgentPerformanceQueryState({
           filterKey: agentPerformanceFilterKey,
           stats: null,
-          error: error instanceof Error ? error.message : "无法读取 Agent 执行表现。",
-        });
-      });
+          error:
+            error instanceof Error
+              ? error.message
+              : "无法读取 Agent 执行表现。",
+        })
+      })
     return () => {
-      isCancelled = true;
-    };
-  }, [trendRepoId, trendDays, agentPerformanceFilterKey]);
+      isCancelled = true
+    }
+  }, [trendRepoId, trendDays, agentPerformanceFilterKey])
 
   useEffect(() => {
-    let isCancelled = false;
-    fetchPrdLifecycleStats({ repoId: trendRepoId || undefined, days: trendDays })
+    let isCancelled = false
+    fetchPrdLifecycleStats({
+      repoId: trendRepoId || undefined,
+      days: trendDays,
+    })
       .then((stats) => {
         if (!isCancelled) {
           setLifecycleQueryState({
             filterKey: agentPerformanceFilterKey,
             stats,
-          });
+          })
         }
       })
       .catch((error: unknown) => {
         if (isCancelled) {
-          return;
+          return
         }
         toast.error(
-          error instanceof Error ? error.message : "无法加载 PRD 生命周期统计。",
-        );
-      });
+          error instanceof Error ? error.message : "无法加载 PRD 生命周期统计。"
+        )
+      })
     return () => {
-      isCancelled = true;
-    };
-  }, [trendRepoId, trendDays, agentPerformanceFilterKey]);
+      isCancelled = true
+    }
+  }, [trendRepoId, trendDays, agentPerformanceFilterKey])
 
   const trendMax = useMemo(
     () =>
       Math.max(
         1,
-        ...trend.map((entry) => entry.completed + entry.failed + entry.blocked),
+        ...trend.map((entry) => entry.completed + entry.failed + entry.blocked)
       ),
-    [trend],
-  );
+    [trend]
+  )
+  const overviewTotals = useMemo(() => {
+    const repositoryStats = stats ?? []
+    return {
+      completed: repositoryStats.reduce(
+        (sum, entry) => sum + entry.completed,
+        0
+      ),
+      inProgress: repositoryStats.reduce(
+        (sum, entry) => sum + entry.open_in_pipeline,
+        0
+      ),
+      trackedRepositories: repositoryStats.length,
+      recentRuns: trend.reduce(
+        (sum, entry) => sum + entry.completed + entry.failed + entry.blocked,
+        0
+      ),
+    }
+  }, [stats, trend])
+  const selectedRepositoryName =
+    stats?.find((entry) => entry.repo_id === trendRepoId)?.display_name ??
+    "全部仓库"
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-6">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
-          完成度统计
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          实时口径来自 GitHub（closed Issue 含 agent workflow label 计为已处理）；
-          历史趋势来自本地运行记录（CLI 直跑与面板托管共用）。
-        </p>
-      </div>
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
+      <section className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-white via-white to-sky-50/70 p-5 shadow-sm sm:p-7 dark:from-slate-950 dark:via-slate-950 dark:to-sky-950/30">
+        <div className="pointer-events-none absolute -top-16 -right-10 size-56 rounded-full bg-sky-200/25 blur-3xl dark:bg-sky-500/10" />
+        <div className="relative flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
+          <div className="max-w-2xl">
+            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-semibold tracking-[0.16em] text-sky-800 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-300">
+              RUN ANALYTICS
+            </span>
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl dark:text-slate-50">
+              统计与成本
+            </h1>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+              一处查看 GitHub 处理进度、本地运行趋势、Agent
+              表现和按模型价格估算的 token 成本。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 rounded-xl border bg-background/85 p-2 shadow-sm backdrop-blur">
+            <select
+              className="h-9 min-w-36 rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+              value={trendRepoId}
+              onChange={(event) => setTrendRepoId(event.target.value)}
+              aria-label="统计仓库筛选"
+            >
+              <option value="">全部仓库</option>
+              {(stats ?? []).map((entry) => (
+                <option key={entry.repo_id} value={entry.repo_id}>
+                  {entry.display_name}
+                </option>
+              ))}
+            </select>
+            <select
+              className="h-9 min-w-28 rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+              value={trendDays}
+              onChange={(event) => setTrendDays(Number(event.target.value))}
+              aria-label="统计时间范围"
+            >
+              <option value={7}>近 7 天</option>
+              <option value={30}>近 30 天</option>
+              <option value={90}>近 90 天</option>
+            </select>
+          </div>
+        </div>
+      </section>
 
-      <Card>
+      <section
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="运行指标"
+      >
+        <StatsMetric
+          label="已跟踪仓库"
+          value={String(overviewTotals.trackedRepositories)}
+          detail="GitHub 完成度来源"
+        />
+        <StatsMetric
+          label="已处理 Issue"
+          value={String(overviewTotals.completed)}
+          detail="所有已跟踪仓库"
+          accent="emerald"
+        />
+        <StatsMetric
+          label="进行中"
+          value={String(overviewTotals.inProgress)}
+          detail="仍处于 Agent 工作流"
+          accent="sky"
+        />
+        <StatsMetric
+          label={`近 ${trendDays} 天运行`}
+          value={String(overviewTotals.recentRuns)}
+          detail="来自本地运行记录"
+          accent="violet"
+        />
+      </section>
+
+      {lifecycleStats === null ? (
+        <Card className="border-border/70 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">Token 用量与费用</CardTitle>
+            <CardDescription>正在读取调用明细与模型价格…</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-36" />
+          </CardContent>
+        </Card>
+      ) : (
+        <TokenUsageSection
+          stats={lifecycleStats}
+          pricingModels={modelPricing}
+          pricingError={modelPricingError}
+        />
+      )}
+
+      <Card className="gap-4 border-border/70 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-sm">实时完成度（GitHub）</CardTitle>
+          <CardTitle className="text-base">仓库完成度</CardTitle>
+          <CardDescription>
+            GitHub 实时状态；closed Issue 带有 agent workflow label
+            时计为已处理。
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {stats === null ? (
@@ -175,25 +309,29 @@ export default function StatsPage() {
             <p className="text-sm text-slate-500">暂无仓库统计。</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
-                    <th className="py-2 pr-3">仓库</th>
-                    <th className="py-2 pr-3">完成率</th>
-                    <th className="py-2 pr-3">完成</th>
-                    <th className="py-2 pr-3">失败</th>
-                    <th className="py-2 pr-3">Blocked</th>
-                    <th className="py-2 pr-3">进行中</th>
-                    <th className="py-2 pr-3">总计</th>
+              <table className="w-full min-w-[700px] text-left text-sm">
+                <thead className="bg-muted/40 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="rounded-l-lg px-3 py-3 font-medium">仓库</th>
+                    <th className="px-3 py-3 font-medium">完成率</th>
+                    <th className="px-3 py-3 text-right font-medium">完成</th>
+                    <th className="px-3 py-3 text-right font-medium">失败</th>
+                    <th className="px-3 py-3 text-right font-medium">
+                      Blocked
+                    </th>
+                    <th className="px-3 py-3 text-right font-medium">进行中</th>
+                    <th className="rounded-r-lg px-3 py-3 text-right font-medium">
+                      总计
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {stats.map((entry) => (
                     <tr
                       key={entry.repo_id}
-                      className="border-b border-slate-100 dark:border-slate-800"
+                      className="border-b last:border-b-0"
                     >
-                      <td className="py-2 pr-3 font-medium">
+                      <td className="px-3 py-3 font-medium">
                         {entry.display_name}
                         {entry.truncated ? (
                           <Badge variant="warning" className="ml-2 text-[10px]">
@@ -206,20 +344,24 @@ export default function StatsPage() {
                           </Badge>
                         ) : null}
                       </td>
-                      <td className="py-2 pr-3">
+                      <td className="px-3 py-3">
                         <CompletionRateBar rate={entry.completion_rate} />
                       </td>
-                      <td className="py-2 pr-3 text-emerald-700 dark:text-emerald-400">
+                      <td className="px-3 py-3 text-right font-medium text-emerald-700 tabular-nums dark:text-emerald-400">
                         {entry.completed}
                       </td>
-                      <td className="py-2 pr-3 text-red-700 dark:text-red-400">
+                      <td className="px-3 py-3 text-right text-red-700 tabular-nums dark:text-red-400">
                         {entry.failed}
                       </td>
-                      <td className="py-2 pr-3 text-amber-700 dark:text-amber-400">
+                      <td className="px-3 py-3 text-right text-amber-700 tabular-nums dark:text-amber-400">
                         {entry.blocked}
                       </td>
-                      <td className="py-2 pr-3">{entry.open_in_pipeline}</td>
-                      <td className="py-2 pr-3">{entry.total_tracked}</td>
+                      <td className="px-3 py-3 text-right tabular-nums">
+                        {entry.open_in_pipeline}
+                      </td>
+                      <td className="px-3 py-3 text-right font-medium tabular-nums">
+                        {entry.total_tracked}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -229,34 +371,32 @@ export default function StatsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="gap-4 border-border/70 shadow-sm">
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle className="text-sm">历史趋势（本地运行记录）</CardTitle>
-            <div className="flex items-center gap-2">
-              <select
-                className="h-8 rounded-md border border-slate-200 bg-transparent px-2 text-xs dark:border-slate-700"
-                value={trendRepoId}
-                onChange={(event) => setTrendRepoId(event.target.value)}
-                aria-label="趋势仓库筛选"
-              >
-                <option value="">全部仓库</option>
-                {(stats ?? []).map((entry) => (
-                  <option key={entry.repo_id} value={entry.repo_id}>
-                    {entry.display_name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="h-8 rounded-md border border-slate-200 bg-transparent px-2 text-xs dark:border-slate-700"
-                value={trendDays}
-                onChange={(event) => setTrendDays(Number(event.target.value))}
-                aria-label="趋势天数"
-              >
-                <option value={7}>7 天</option>
-                <option value={30}>30 天</option>
-                <option value={90}>90 天</option>
-              </select>
+            <div>
+              <CardTitle className="text-base">运行趋势</CardTitle>
+              <CardDescription className="mt-1">
+                {selectedRepositoryName} · 近 {trendDays} 天 · CLI
+                与面板运行记录
+              </CardDescription>
+            </div>
+            <div
+              className="flex flex-wrap gap-3 text-xs text-muted-foreground"
+              aria-label="趋势图例"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-emerald-500" />
+                完成
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-red-500" />
+                失败
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-amber-500" />
+                Blocked
+              </span>
             </div>
           </div>
         </CardHeader>
@@ -267,46 +407,55 @@ export default function StatsPage() {
               执行后，这里会出现按天聚合的成功/失败曲线。
             </p>
           ) : (
-            <div className="flex items-end gap-1 overflow-x-auto pb-2">
+            <div className="flex items-end gap-1 overflow-x-auto rounded-xl bg-muted/20 px-3 pt-3 pb-2">
               {trend.map((entry) => {
-                const total = entry.completed + entry.failed + entry.blocked;
+                const total = entry.completed + entry.failed + entry.blocked
                 return (
                   <div
                     key={entry.day}
-                    className="flex min-w-7 flex-col items-center gap-1"
+                    className="flex min-w-6 flex-col items-center gap-1"
                     title={`${entry.day}：完成 ${entry.completed} / 失败 ${entry.failed} / blocked ${entry.blocked}`}
                   >
-                    <div className="flex h-32 w-5 flex-col-reverse overflow-hidden rounded-sm bg-slate-100 dark:bg-slate-800">
+                    <div className="flex h-24 w-4 flex-col-reverse overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-800">
                       <div
                         className="w-full bg-emerald-500"
-                        style={{ height: `${(entry.completed / trendMax) * 100}%` }}
+                        style={{
+                          height: `${(entry.completed / trendMax) * 100}%`,
+                        }}
                       />
                       <div
                         className="w-full bg-red-500"
-                        style={{ height: `${(entry.failed / trendMax) * 100}%` }}
+                        style={{
+                          height: `${(entry.failed / trendMax) * 100}%`,
+                        }}
                       />
                       <div
                         className="w-full bg-amber-500"
-                        style={{ height: `${(entry.blocked / trendMax) * 100}%` }}
+                        style={{
+                          height: `${(entry.blocked / trendMax) * 100}%`,
+                        }}
                       />
                     </div>
-                    <span className="text-[10px] text-slate-500">
+                    <span className="text-[10px] text-muted-foreground">
                       {entry.day.slice(5)}
                     </span>
-                    <span className="text-[10px] font-medium">{total}</span>
+                    <span className="text-[10px] font-medium tabular-nums">
+                      {total}
+                    </span>
                   </div>
-                );
+                )
               })}
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="gap-4 border-border/70 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-sm">最近运行记录</CardTitle>
+          <CardTitle className="text-base">最近运行记录</CardTitle>
           <CardDescription>
-            按仓库和 Issue 分组；展开后可查看每次运行的详情，包括成功、失败与 Blocked。
+            按仓库和 Issue 分组；展开后可查看每次运行的详情，包括成功、失败与
+            Blocked。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -326,7 +475,7 @@ export default function StatsPage() {
         open={selectedRun !== null}
         onOpenChange={(isOpen) => {
           if (!isOpen) {
-            setSelectedRun(null);
+            setSelectedRun(null)
           }
         }}
       />
@@ -336,12 +485,16 @@ export default function StatsPage() {
         error={agentPerformanceError}
       />
 
-      <Card data-testid="stats-prd-lifecycle">
+      <Card
+        data-testid="stats-prd-lifecycle"
+        className="gap-4 border-border/70 shadow-sm"
+      >
         <CardHeader>
-          <CardTitle className="text-sm">PRD 执行分析（生命周期口径）</CardTitle>
+          <CardTitle className="text-base">PRD 执行分析</CardTitle>
           <CardDescription>
-            以完整 PRD 生命周期为口径（非单次 runner 调用），共用上方的仓库与时间范围筛选；
-            进行中记录与无法关联 PRD 的旧记录不进入完成分位数。
+            以完整 PRD 生命周期为口径（非单次 runner
+            调用），共用上方的仓库与时间范围筛选； 进行中记录与无法关联 PRD
+            的旧记录不进入完成分位数。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -359,19 +512,27 @@ export default function StatsPage() {
                 />
                 <LifecycleMetricTile
                   label="平均端到端"
-                  value={formatLifecycleDuration(lifecycleStats.average_end_to_end_seconds)}
+                  value={formatLifecycleDuration(
+                    lifecycleStats.average_end_to_end_seconds
+                  )}
                 />
                 <LifecycleMetricTile
                   label="中位数"
-                  value={formatLifecycleDuration(lifecycleStats.median_end_to_end_seconds)}
+                  value={formatLifecycleDuration(
+                    lifecycleStats.median_end_to_end_seconds
+                  )}
                 />
                 <LifecycleMetricTile
                   label="P90"
-                  value={formatLifecycleDuration(lifecycleStats.p90_end_to_end_seconds)}
+                  value={formatLifecycleDuration(
+                    lifecycleStats.p90_end_to_end_seconds
+                  )}
                 />
                 <LifecycleMetricTile
                   label="平均阻塞"
-                  value={formatLifecycleDuration(lifecycleStats.average_blocked_seconds)}
+                  value={formatLifecycleDuration(
+                    lifecycleStats.average_blocked_seconds
+                  )}
                 />
                 <LifecycleMetricTile
                   label="阶段瓶颈"
@@ -380,59 +541,77 @@ export default function StatsPage() {
               </div>
 
               {lifecycleStats.runs.length === 0 ? (
-                <p className="text-sm text-slate-500" data-testid="stats-prd-lifecycle-empty">
+                <p
+                  className="text-sm text-slate-500"
+                  data-testid="stats-prd-lifecycle-empty"
+                >
                   所选范围内暂无 PRD 生命周期记录。
                 </p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead>
-                      <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
-                        <th className="py-2 pr-3">PRD</th>
-                        <th className="py-2 pr-3">Issue</th>
-                        <th className="py-2 pr-3">当前阶段</th>
-                        <th className="py-2 pr-3">端到端</th>
-                        <th className="py-2 pr-3">执行</th>
-                        <th className="py-2 pr-3">等待</th>
-                        <th className="py-2 pr-3">阻塞</th>
-                        <th className="py-2 pr-3">完整性</th>
+                      <tr className="bg-muted/40 text-xs text-muted-foreground">
+                        <th className="rounded-l-lg px-3 py-3 font-medium">
+                          PRD
+                        </th>
+                        <th className="px-3 py-3 font-medium">Issue</th>
+                        <th className="px-3 py-3 font-medium">当前阶段</th>
+                        <th className="px-3 py-3 font-medium">端到端</th>
+                        <th className="px-3 py-3 font-medium">执行</th>
+                        <th className="px-3 py-3 font-medium">等待</th>
+                        <th className="px-3 py-3 font-medium">阻塞</th>
+                        <th className="rounded-r-lg px-3 py-3 font-medium">
+                          完整性
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {lifecycleStats.runs.map((run) => (
                         <tr
                           key={run.run_id}
-                          className="border-b border-slate-100 dark:border-slate-800"
+                          className="border-b last:border-b-0"
                         >
                           <td
-                            className="py-2 pr-3 font-medium"
+                            className="max-w-[280px] truncate px-3 py-3 font-medium"
                             title={run.prd_path}
                           >
                             {prdBasename(run.prd_path)}
                           </td>
-                          <td className="py-2 pr-3 font-mono text-xs">
+                          <td className="px-3 py-3 font-mono text-xs">
                             {run.issue_number ? `#${run.issue_number}` : "—"}
                           </td>
-                          <td className="py-2 pr-3 text-xs">
+                          <td className="px-3 py-3 text-xs">
                             {run.in_progress
                               ? "进行中"
-                              : (PHASE_LABELS[run.current_phase] ?? run.current_phase)}
+                              : (PHASE_LABELS[run.current_phase] ??
+                                run.current_phase)}
                           </td>
-                          <td className="py-2 pr-3 text-xs">
-                            {formatLifecycleDuration(run.durations.end_to_end_seconds)}
+                          <td className="px-3 py-3 text-xs">
+                            {formatLifecycleDuration(
+                              run.durations.end_to_end_seconds
+                            )}
                           </td>
-                          <td className="py-2 pr-3 text-xs">
-                            {formatLifecycleDuration(run.durations.active_seconds)}
+                          <td className="px-3 py-3 text-xs">
+                            {formatLifecycleDuration(
+                              run.durations.active_seconds
+                            )}
                           </td>
-                          <td className="py-2 pr-3 text-xs">
-                            {formatLifecycleDuration(run.durations.waiting_seconds)}
+                          <td className="px-3 py-3 text-xs">
+                            {formatLifecycleDuration(
+                              run.durations.waiting_seconds
+                            )}
                           </td>
-                          <td className="py-2 pr-3 text-xs">
-                            {formatLifecycleDuration(run.durations.blocked_seconds)}
+                          <td className="px-3 py-3 text-xs">
+                            {formatLifecycleDuration(
+                              run.durations.blocked_seconds
+                            )}
                           </td>
-                          <td className="py-2 pr-3 text-xs">
+                          <td className="px-3 py-3 text-xs">
                             {run.history_complete ? (
-                              <span className="text-emerald-700 dark:text-emerald-400">完整</span>
+                              <span className="text-emerald-700 dark:text-emerald-400">
+                                完整
+                              </span>
                             ) : (
                               <Badge variant="warning" className="text-[10px]">
                                 不完整
@@ -447,20 +626,19 @@ export default function StatsPage() {
               )}
 
               <p
-                className="text-xs text-slate-500"
+                className="rounded-lg bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
                 data-testid="stats-prd-lifecycle-disclosure"
               >
-                未关联 PRD 的旧记录 {lifecycleStats.unlinked_run_count} 条（已排除出分位数）；
-                观测不完整的 run {lifecycleStats.incomplete_run_count} 条。
+                未关联 PRD 的旧记录 {lifecycleStats.unlinked_run_count}{" "}
+                条（已排除出分位数）； 观测不完整的 run{" "}
+                {lifecycleStats.incomplete_run_count} 条。
               </p>
-
-              <TokenUsageSection stats={lifecycleStats} />
             </div>
           )}
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }
 
 /**
@@ -471,13 +649,13 @@ export default function StatsPage() {
  */
 function formatBottleneck(stats: PrdLifecycleStats): string {
   if (stats.bottleneck_phase === null) {
-    return "—";
+    return "—"
   }
-  const label = PHASE_LABELS[stats.bottleneck_phase] ?? stats.bottleneck_phase;
+  const label = PHASE_LABELS[stats.bottleneck_phase] ?? stats.bottleneck_phase
   if (stats.bottleneck_phase_seconds === null) {
-    return label;
+    return label
   }
-  return `${label} · ${formatLifecycleDuration(stats.bottleneck_phase_seconds)}`;
+  return `${label} · ${formatLifecycleDuration(stats.bottleneck_phase_seconds)}`
 }
 
 /**
@@ -487,240 +665,61 @@ function formatBottleneck(stats: PrdLifecycleStats): string {
  * @returns 路径最后一段；路径为空时原样返回。
  */
 function prdBasename(prdPath: string): string {
-  const segments = prdPath.split("/");
-  return segments[segments.length - 1] || prdPath;
+  const segments = prdPath.split("/")
+  return segments[segments.length - 1] || prdPath
 }
 
-function LifecycleMetricTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
-    </div>
-  );
-}
-
-/** 流程标识 -> 中文标签；未识别的 flow 原样展示。 */
-const TOKEN_FLOW_LABELS: Record<string, string> = {
-  implement: "实现",
-  verify: "验证",
-  supervise: "评审",
-  fix: "修复",
-  closeout: "收尾",
-};
-
-/**
- * 计算缓存命中率。
- *
- * 口径与后端一致：命中 ÷ 输入侧实际处理量（输入 + 缓存读 + 缓存写）。
- *
- * @param row - 单个分组的 token 累计。
- * @returns 0–1 之间的比率；输入侧为 0（无缓存数据）时返回 null。
- */
-function cacheHitRate(row: TokenUsageTotals): number | null {
-  const inputSide =
-    row.input_tokens + row.cache_read_input_tokens + row.cache_creation_input_tokens;
-  if (inputSide <= 0) {
-    return null;
-  }
-  return row.cache_read_input_tokens / inputSide;
-}
-
-/**
- * PRD 生命周期卡片内的 Token 用量汇总区。
- *
- * 数据来自 lifecycle 事件 detail 的聚合（``token_usage`` 与
- * ``token_usage_by_prd``）；缺 usage 的事件不计入。按流程、按 agent 与
- * 按 PRD（Issue）三张小表分别给出总量、四项明细与缓存命中率。
- *
- * @param props.stats - 仓库级 PRD 生命周期统计。
- * @returns Token 汇总区块；无数据时渲染明确空态。
- */
-function TokenUsageSection({ stats }: { stats: PrdLifecycleStats }) {
-  const byFlow = Object.entries(stats.token_usage?.by_flow ?? {});
-  const byAgent = Object.entries(stats.token_usage?.by_agent ?? {});
-  const byPrd = stats.token_usage_by_prd ?? [];
-  const hasData = byFlow.length > 0 || byAgent.length > 0 || byPrd.length > 0;
-  return (
-    <div data-testid="stats-token-usage" className="space-y-3">
-      <p className="text-sm font-medium">Token 用量</p>
-      {!hasData ? (
-        <p className="text-sm text-slate-500" data-testid="stats-token-usage-empty">
-          所选范围内暂无 token 用量数据（agent 未上报 usage 或为旧记录）。
-        </p>
-      ) : (
-        <>
-          <TokenUsageTable title="按流程" rows={byFlow} />
-          <TokenUsageTable title="按 agent" rows={byAgent} />
-          <PrdTokenUsageTable rows={byPrd} />
-          <p className="text-xs text-slate-500" data-testid="stats-token-usage-note">
-            总量为实际处理量口径（输入 + 输出 + 缓存读 + 缓存写）；缺 usage 的调用不计入，
-            展示为「—」而非 0。
-          </p>
-        </>
-      )}
-    </div>
-  );
-}
-
-/**
- * 渲染「按 PRD（Issue）」Token 用量表（Token 用量区第三张表）。
- *
- * 与 CLI ``kc tokens`` 的按 PRD 表同源同口径：同一 PRD 的多次执行合并为
- * 一行并标注累计执行次数；缺 usage 的行由后端按「缺失排除」口径剔除，
- * 表为空时渲染明确空态而不是全零行。
- *
- * @param props.rows - PRD 维度用量条目（后端已按总量降序）。
- * @returns 按 PRD 用量表，或空态文案。
- */
-function PrdTokenUsageTable({ rows }: { rows: PrdTokenUsageEntry[] }) {
-  const sorted = [...rows].sort(
-    (left, right) => right.totals.total_tokens - left.totals.total_tokens,
-  );
-  return (
-    <div className="overflow-x-auto" data-testid="stats-token-usage-by-prd">
-      <p className="mb-1 text-xs text-slate-500">按 PRD</p>
-      {sorted.length === 0 ? (
-        <p className="text-sm text-slate-500" data-testid="stats-token-usage-by-prd-empty">
-          所选范围内暂无 token 用量数据。
-        </p>
-      ) : (
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
-              <th className="py-2 pr-3">Issue</th>
-              <th className="py-2 pr-3">PRD</th>
-              <th className="py-2 pl-3 text-right">总量</th>
-              <th className="py-2 pl-3 text-right">输入</th>
-              <th className="py-2 pl-3 text-right">输出</th>
-              <th className="py-2 pl-3 text-right">缓存读</th>
-              <th className="py-2 pl-3 text-right">缓存写</th>
-              <th className="py-2 pl-3 text-right">命中率</th>
-              <th className="py-2 pl-3 text-right">调用数</th>
-              <th className="py-2 pl-3 text-right">执行次数</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((entry) => {
-              const totals = entry.totals;
-              const rate = cacheHitRate(totals);
-              return (
-                <tr
-                  key={`${entry.repo_id ?? ""}|${entry.prd_path ?? ""}|${entry.issue_number ?? ""}`}
-                  className="border-b border-slate-100 dark:border-slate-800"
-                >
-                  <td className="py-2 pr-3 font-mono text-xs">
-                    {entry.issue_number === null ? "—" : `#${entry.issue_number}`}
-                  </td>
-                  <td className="py-2 pr-3 font-medium" title={entry.prd_path ?? undefined}>
-                    {entry.prd_path ? prdBasename(entry.prd_path) : "—"}
-                  </td>
-                  <td className="py-2 pl-3 text-right font-semibold">
-                    {formatTokenCount(totals.total_tokens)}
-                  </td>
-                  <td className="py-2 pl-3 text-right text-xs">
-                    {formatTokenCount(totals.input_tokens)}
-                  </td>
-                  <td className="py-2 pl-3 text-right text-xs">
-                    {formatTokenCount(totals.output_tokens)}
-                  </td>
-                  <td className="py-2 pl-3 text-right text-xs">
-                    {formatTokenCount(totals.cache_read_input_tokens)}
-                  </td>
-                  <td className="py-2 pl-3 text-right text-xs">
-                    {formatTokenCount(totals.cache_creation_input_tokens)}
-                  </td>
-                  <td className="py-2 pl-3 text-right text-xs">
-                    {rate === null ? "—" : `${Math.round(rate * 100)}%`}
-                  </td>
-                  <td className="py-2 pl-3 text-right text-xs">{totals.usage_count}</td>
-                  <td className="py-2 pl-3 text-right text-xs">{entry.run_count}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
-}
-
-/**
- * 渲染一张 Token 用量小表（按总量降序）。
- *
- * @param props.title - 表格标题（按流程 / 按 agent）。
- * @param props.rows - 分组键到用量累计的条目列表。
- * @returns 紧凑用量表格。
- */
-function TokenUsageTable({
-  title,
-  rows,
+function LifecycleMetricTile({
+  label,
+  value,
 }: {
-  title: string;
-  rows: [string, TokenUsageTotals][];
+  label: string
+  value: string
 }) {
-  const sorted = [...rows].sort(
-    ([, left], [, right]) => right.total_tokens - left.total_tokens,
-  );
   return (
-    <div className="overflow-x-auto">
-      <p className="mb-1 text-xs text-slate-500">{title}</p>
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
-            <th className="py-2 pr-3">分组</th>
-            <th className="py-2 pl-3 text-right">总量</th>
-            <th className="py-2 pl-3 text-right">输入</th>
-            <th className="py-2 pl-3 text-right">输出</th>
-            <th className="py-2 pl-3 text-right">缓存读</th>
-            <th className="py-2 pl-3 text-right">缓存写</th>
-            <th className="py-2 pl-3 text-right">命中率</th>
-            <th className="py-2 pl-3 text-right">调用数</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map(([key, row]) => {
-            const rate = cacheHitRate(row);
-            const label = TOKEN_FLOW_LABELS[key] ?? key;
-            return (
-              <tr
-                key={key}
-                className="border-b border-slate-100 dark:border-slate-800"
-              >
-                <td className="py-2 pr-3 font-medium">{label}</td>
-                <td className="py-2 pl-3 text-right font-semibold">
-                  {formatTokenCount(row.total_tokens)}
-                </td>
-                <td className="py-2 pl-3 text-right text-xs">
-                  {formatTokenCount(row.input_tokens)}
-                </td>
-                <td className="py-2 pl-3 text-right text-xs">
-                  {formatTokenCount(row.output_tokens)}
-                </td>
-                <td className="py-2 pl-3 text-right text-xs">
-                  {formatTokenCount(row.cache_read_input_tokens)}
-                </td>
-                <td className="py-2 pl-3 text-right text-xs">
-                  {formatTokenCount(row.cache_creation_input_tokens)}
-                </td>
-                <td className="py-2 pl-3 text-right text-xs">
-                  {rate === null ? "—" : `${Math.round(rate * 100)}%`}
-                </td>
-                <td className="py-2 pl-3 text-right text-xs">{row.usage_count}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="rounded-xl border bg-muted/20 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
     </div>
-  );
+  )
+}
+
+/** 展示统计页顶部的一个关键指标。 */
+function StatsMetric({
+  label,
+  value,
+  detail,
+  accent = "slate",
+}: {
+  label: string
+  value: string
+  detail: string
+  accent?: "slate" | "emerald" | "sky" | "violet"
+}) {
+  const accentClass = {
+    slate: "text-slate-950 dark:text-slate-50",
+    emerald: "text-emerald-700 dark:text-emerald-400",
+    sky: "text-sky-700 dark:text-sky-400",
+    violet: "text-violet-700 dark:text-violet-400",
+  }[accent]
+  return (
+    <div className="rounded-xl border border-border/70 bg-card px-4 py-3 shadow-sm">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p
+        className={`mt-1 text-2xl font-semibold tracking-tight tabular-nums ${accentClass}`}
+      >
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+    </div>
+  )
 }
 
 function CompletionRateBar({ rate }: { rate: number | null }) {
   if (rate === null) {
-    return <span className="text-xs text-slate-400">—</span>;
+    return <span className="text-xs text-slate-400">—</span>
   }
-  const percent = Math.round(rate * 100);
+  const percent = Math.round(rate * 100)
   return (
     <div className="flex items-center gap-2">
       <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -731,5 +730,5 @@ function CompletionRateBar({ rate }: { rate: number | null }) {
       </div>
       <span className="text-xs font-medium">{percent}%</span>
     </div>
-  );
+  )
 }

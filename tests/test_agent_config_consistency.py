@@ -90,18 +90,23 @@ def test_iar_config_resolution_skips_application_config_toml(
     assert settings_sources._find_config_toml() == app_config
 
 
-def test_iar_config_resolution_accepts_iar_config_toml(
+def test_iar_config_resolution_uses_global_config_inside_source_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """cwd 树里真正的 IAR ``config.toml`` 仍然优先于 ``~/.iar/config.toml``。
+    """在源码 checkout 中运行时，全局设置仍只来自状态目录配置。
 
-    源码树 / worktree 内开发依赖这条路径（根 config.toml 就是当前生效配置），
-    收紧查找时不能把它一起挡掉。
+    源码根的 ``config.toml`` 即使含有 ``[agent_runner]``，也不能抢先于
+    ``~/.kedacode/config.toml`` 成为运行时全局配置。
     """
+    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     monkeypatch.delenv("IAR_CONFIG", raising=False)
     iar_home = tmp_path / "iar-home"
     iar_home.mkdir()
-    (iar_home / "config.toml").write_text("[agent_runner]\n", encoding="utf-8")
+    machine_config = iar_home / "config.toml"
+    machine_config.write_text(
+        '[agent_runner]\n[agent_runner.runner]\ndefault_agent = "claude"\n',
+        encoding="utf-8",
+    )
     monkeypatch.setattr(settings_sources, "_global_state_dir", lambda: iar_home)
 
     project_root = tmp_path / "keda-checkout"
@@ -114,7 +119,11 @@ def test_iar_config_resolution_accepts_iar_config_toml(
 
     monkeypatch.chdir(project_root / "src")
 
-    assert settings_sources._find_product_config_toml() == project_config
+    assert settings_sources._find_product_config_toml() == machine_config
+    assert settings_sources.resolve_config_toml_path() == machine_config
+    assert build_app_config().runner.default_agent == "claude"
+    # 宿主应用配置仍然按 cwd 搜索。
+    assert settings_sources._find_config_toml() == project_config
 
 
 def test_runner_timeout_settings_match_core() -> None:

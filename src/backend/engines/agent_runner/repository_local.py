@@ -220,7 +220,7 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
     "pre_pr_review": "Draft PR 创建前的 AI review 门禁（push 之后、PR 之前）",
     "post_pr_supervisor": "Draft PR 创建后的自动 supervisor 配置",
     "daemon": "Daemon 轮询与崩溃对账配置（覆盖全局 [agent_runner.daemon] 默认）",
-    "stall_supervisor": "活跃 attempt 停滞监督（默认关闭；启用后才会按周期调用模型）",
+    "stall_supervisor": "活跃 attempt 停滞监督（默认开启；关闭后不再按周期调用模型）",
     "interactive_decision": "交互式决策（kc ask）配置：默认 agent、输出目录、执行确认等",
     "repl": "交互式 REPL（kc 无子命令）配置：默认 agent、审计目录与命令确认策略",
     "deliberation": "多 agent 审议（kc deliberate）配置：轮数、合成 agent、参与角色",

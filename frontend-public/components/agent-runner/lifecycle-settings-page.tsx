@@ -2,8 +2,8 @@
 
 // 生命周期、模型预设与执行器回退的统一设置页（全局层 / 仓库层共用）。
 //
-// 一个页面同时承载三块，全部读自同一份聚合视图 `GET /lifecycle-settings`
-// （core 层把矩阵 / 预设 / 回退折叠成同一解析结果，页面与 CLI 不再各算各的）：
+// 一个页面通过吸顶 Tab 提供三类设置区块，全部读自同一份聚合视图
+// `GET /lifecycle-settings`（core 层把矩阵 / 预设 / 回退折叠成同一解析结果，页面与 CLI 不再各算各的）：
 // - 生命周期矩阵：九阶段各自的最终生效 agent / 模型 / 推理深度 + 逐字段来源，
 //   通过「绑定预设」设定显式值（预设是原子三元组，遮蔽矩阵同键声明）；
 // - 模型预设：新建 / 编辑 / 删除命名预设，编辑前提示共享该预设的受影响阶段；
@@ -12,7 +12,7 @@
 // 写回保持保留式语义：矩阵只提交改动过的预设与绑定（一次 PATCH），回退候选按
 // 完整期望数组写回（PUT）。二者目标文件不同，互不牵连。
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -82,6 +82,14 @@ interface LifecycleSettingsPageProps {
   initialRepoId?: string;
 }
 
+const LIFECYCLE_SETTINGS_TABS = [
+  { id: "matrix", label: "生命周期矩阵" },
+  { id: "presets", label: "模型预设" },
+  { id: "fallback", label: "执行器回退" },
+] as const;
+
+type LifecycleSettingsTab = (typeof LIFECYCLE_SETTINGS_TABS)[number]["id"];
+
 /**
  * 生命周期、模型预设与执行器回退的统一设置页。
  *
@@ -94,6 +102,9 @@ export function LifecycleSettingsPage({
 }: LifecycleSettingsPageProps) {
   const [scope, setScope] = useState<LifecycleAgentScope>(initialScope);
   const [repoId, setRepoId] = useState<string | undefined>(initialRepoId);
+  const [activeSettingsTab, setActiveSettingsTab] =
+    useState<LifecycleSettingsTab>("matrix");
+  const settingsTablistRef = useRef<HTMLElement | null>(null);
   const [repositories, setRepositories] = useState<RegistryRepositoryEntry[]>(
     [],
   );
@@ -520,21 +531,48 @@ export function LifecycleSettingsPage({
     );
   }
 
-  /** 页首区块锚点导航（矩阵 / 预设 / 回退）。 */
+  /** 切换设置区块；重置主滚动区位置，确保新面板从顶部开始显示。 */
+  function switchSettingsTab(nextTab: LifecycleSettingsTab) {
+    if (nextTab === activeSettingsTab) {
+      return;
+    }
+    setActiveSettingsTab(nextTab);
+    const pageScroller = settingsTablistRef.current?.closest("main");
+    if (pageScroller instanceof HTMLElement) {
+      pageScroller.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
+  /** 吸顶 Tab 导航（矩阵 / 预设 / 回退）。 */
   function renderBlockNav() {
     return (
-      <nav className="flex flex-wrap gap-2 text-xs" data-testid="block-nav">
-        <a className="text-slate-600 underline-offset-4 hover:underline dark:text-slate-400" href="#lifecycle-matrix">
-          生命周期矩阵
-        </a>
-        <span className="text-slate-300">·</span>
-        <a className="text-slate-600 underline-offset-4 hover:underline dark:text-slate-400" href="#model-presets">
-          模型预设
-        </a>
-        <span className="text-slate-300">·</span>
-        <a className="text-slate-600 underline-offset-4 hover:underline dark:text-slate-400" href="#executor-fallback">
-          执行器回退
-        </a>
+      <nav
+        ref={settingsTablistRef}
+        role="tablist"
+        aria-label="生命周期设置区块"
+        className="sticky top-0 z-20 -mx-4 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-slate-200 bg-white/95 px-4 pt-2 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95 md:-mx-8 md:px-8"
+        data-testid="block-nav"
+      >
+        {LIFECYCLE_SETTINGS_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            id={`lifecycle-settings-tab-${tab.id}`}
+            type="button"
+            role="tab"
+            aria-selected={activeSettingsTab === tab.id}
+            aria-controls={`lifecycle-settings-panel-${tab.id}`}
+            data-testid={`settings-tab-${tab.id}`}
+            onClick={() => switchSettingsTab(tab.id)}
+            className={cn(
+              "-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors",
+              activeSettingsTab === tab.id
+                ? "border-slate-900 font-medium text-slate-900 dark:border-slate-100 dark:text-slate-50"
+                : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
       </nav>
     );
   }
@@ -967,7 +1005,6 @@ export function LifecycleSettingsPage({
   return (
     <div className="space-y-4" data-testid="lifecycle-settings-page">
       {renderScopeBar()}
-      {renderBlockNav()}
       <p className="text-xs text-slate-500 dark:text-slate-400">
         {view.scope === "global"
           ? "正在编辑：全局 config.toml。"
@@ -977,9 +1014,40 @@ export function LifecycleSettingsPage({
         本页展示全局 / 仓库基线；PRD 头部声明与单次运行的 CLI 旗标（--preset / --model
         / --reasoning-effort）对单个 PRD / 运行优先生效。
       </p>
-      {renderMatrixSection(view)}
-      {renderPresetSection(view)}
-      {renderFallbackSection(view)}
+      {renderBlockNav()}
+      <div
+        id="lifecycle-settings-panel-matrix"
+        role="tabpanel"
+        aria-labelledby="lifecycle-settings-tab-matrix"
+        tabIndex={0}
+        hidden={activeSettingsTab !== "matrix"}
+        className="focus:outline-none"
+        data-testid="settings-tab-panel-matrix"
+      >
+        {renderMatrixSection(view)}
+      </div>
+      <div
+        id="lifecycle-settings-panel-presets"
+        role="tabpanel"
+        aria-labelledby="lifecycle-settings-tab-presets"
+        tabIndex={0}
+        hidden={activeSettingsTab !== "presets"}
+        className="focus:outline-none"
+        data-testid="settings-tab-panel-presets"
+      >
+        {renderPresetSection(view)}
+      </div>
+      <div
+        id="lifecycle-settings-panel-fallback"
+        role="tabpanel"
+        aria-labelledby="lifecycle-settings-tab-fallback"
+        tabIndex={0}
+        hidden={activeSettingsTab !== "fallback"}
+        className="focus:outline-none"
+        data-testid="settings-tab-panel-fallback"
+      >
+        {renderFallbackSection(view)}
+      </div>
     </div>
   );
 }

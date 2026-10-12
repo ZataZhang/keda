@@ -55,18 +55,18 @@ def _global_state_dir() -> Path:
 
 
 def _ensure_global_config_toml() -> Path | None:
-    """Ensure ``<state home>/config.toml`` exists, seeding from the source root.
+    """确保状态目录的全局配置存在；仅在首次创建时从 Keda 源码配置播种。
 
-    This provides a stable configuration home for globally-installed ``kc``
-    invocations outside any project directory. 只有解析结果指向新目录时才可能
-    新建目录；机器上只有旧目录时沿用旧目录，不会悄悄新建 ``~/.kedacode``。
+    正常运行时，状态目录文件是唯一全局配置源；源码根配置不会按 cwd 被直接读取。
+    只有解析结果指向新目录时才可能新建目录；机器上只有旧目录时沿用旧目录，
+    不会悄悄新建 ``~/.kedacode``。
     """
     global_dir = _global_state_dir()
     global_config = global_dir / "config.toml"
     if global_config.is_file():
         return global_config
     source_config = _PROJECT_ROOT_PATH / "config.toml"
-    if not source_config.is_file():
+    if not source_config.is_file() or not _is_product_config_toml(source_config):
         return None
     try:
         global_dir.mkdir(parents=True, exist_ok=True)
@@ -88,12 +88,11 @@ def _ensure_global_config_toml() -> Path | None:
 
 
 def _is_product_config_toml(candidate: Path) -> bool:
-    """判断 ``candidate`` 是否真的是 KedaCode 自己的 ``config.toml``。
+    """判断 ``candidate`` 是否包含可用于首次播种的 KedaCode 配置。
 
-    从 keda 模板派生的项目会在仓库根放一份**应用级** ``config.toml``
-    （``[app]`` / ``[database]`` / ``[preview]`` …）。它与 KedaCode 的机器级配置
-    同名、共享同名段落之外的部分，但**不含** KedaCode 自己的 ``[agent_runner]``
-    段；据此把它挡在"机器级配置"之外，避免它整份顶掉 ``<state home>/config.toml``。
+    运行时全局配置固定来自状态目录；源码根文件只用于首次创建状态目录配置。
+    模板派生项目仓库根的应用级 ``config.toml`` 通常不含 ``[agent_runner]``，
+    因此不能拿来播种全局设置。
 
     Args:
         candidate: 待判定的 ``config.toml`` 路径。
@@ -196,42 +195,28 @@ def _find_config_toml() -> Path | None:
     return _global_then_source_fallback()
 
 
-def _find_product_config_toml() -> Path | None:
-    """Resolve KedaCode's own machine-level config.toml.
+def _find_product_config_toml() -> Path:
+    """解析 KedaCode 的全局 ``config.toml``。
 
-    与 :func:`_find_config_toml` 唯一差别在 cwd 向上查找：只接受带
-    ``[agent_runner]`` 段的文件，即 :func:`_is_product_config_toml` 认得的配置。
-    否则在目标仓库（cwd 就是该仓库）里运行的 runner 会拿该仓库的应用级
-    ``config.toml`` 当机器级配置，``<state home>/config.toml`` 里的生命周期矩阵、
-    registry、超时等设置被整份顶掉。
-
-    Search order:
-    1. ``KEDACODE_CONFIG`` (or its legacy-prefixed equivalent) environment variable, if set.
-    2. Walk upward from the current working directory (product-owned files only).
-    3. ``<state home>/config.toml`` (seeded from the source root if missing).
-    4. keda source root config.toml.
+    显式 ``KEDACODE_CONFIG`` 是可覆盖入口；未设置时始终使用状态目录配置，
+    不按当前工作目录寻找 ``config.toml``。源码根文件只可能在状态目录首次创建时
+    被复制一次，不会在已有全局配置时覆盖它。
     """
     env_config = _resolve_env_config_toml()
     if env_config is not None:
         return env_config
 
-    cwd = Path.cwd()
-    for path in [cwd, *cwd.parents]:
-        candidate = path / "config.toml"
-        if candidate.is_file() and _is_product_config_toml(candidate):
-            return candidate
-
-    return _global_then_source_fallback()
+    global_config = _ensure_global_config_toml()
+    return global_config or (_global_state_dir() / "config.toml")
 
 
 def resolve_config_toml_path() -> Path:
-    """解析当前生效的**机器级** config.toml 路径（找不到时回退到源码根目录）。
+    """解析当前生效的**全局** ``config.toml`` 路径。
 
-    这是 KedaCode 自己那份配置（生命周期矩阵写回、托管进程注入的
-    ``KEDACODE_CONFIG`` 都用它），因此走 :func:`_find_product_config_toml`：
-    目标仓库的应用级 ``config.toml`` 不会被误当成机器级配置。
+    生命周期矩阵写回、托管进程注入的 ``KEDACODE_CONFIG`` 都使用该路径。
+    未设置显式覆盖时，它始终指向状态目录，不会回退读取当前仓库的 ``config.toml``。
     """
-    return _find_product_config_toml() or (_PROJECT_ROOT_PATH / "config.toml")
+    return _find_product_config_toml()
 
 
 def resolve_registry_config_toml_path() -> Path:
@@ -324,23 +309,35 @@ def _load_registry_toml_section_data(section_name: str) -> dict[str, Any]:
 
 
 class _TomlSectionSource(PydanticBaseSettingsSource):
-    """从 config.toml 指定 section 读取配置的自定义源。"""
+    """读取 config.toml 指定 section，并可跳过由专用来源管理的字段。"""
 
-    def __init__(self, settings_cls: type[BaseSettings], section_name: str) -> None:
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        section_name: str,
+        *,
+        excluded_field_names: frozenset[str] = frozenset(),
+    ) -> None:
+        """初始化 TOML 来源及其排除字段。"""
         super().__init__(settings_cls)
         self._section_data: dict[str, Any] = _load_toml_section_data(section_name)
+        self._excluded_field_names = excluded_field_names
 
     def get_field_value(
         self,
         field: Any,  # noqa: ARG002
         field_name: str,
     ) -> tuple[Any, str, bool]:
+        if field_name in self._excluded_field_names:
+            return None, field_name, False
         field_value: Any = self._section_data.get(field_name)
         return field_value, field_name, False
 
     def __call__(self) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for field_name in self.settings_cls.model_fields:
+            if field_name in self._excluded_field_names:
+                continue
             field_value: Any = self._section_data.get(field_name)
             if field_value is not None:
                 result[field_name] = field_value

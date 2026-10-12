@@ -129,8 +129,8 @@ supervisor / planner / content_generation / deliberate）。
 
 ### 7.1 Settings 统一设置页
 
-路由 `/app/settings/lifecycle/`（入口：Settings「Agent 管理」区下方卡片，或 Backlog 仓库行
-齿轮带仓库直接进入并预选）。一页承载三块，页首有锚点导航：
+路由 `/app/settings/lifecycle/`（入口：Settings「Agent 管理」Tab 内的卡片，或 Backlog 仓库行
+齿轮带仓库直接进入并预选）。Settings 主页面 `/app/settings/` 通过吸顶 Tab 区分 Agent 管理、成本估算和关于与账户；生命周期设置页再通过吸顶 Tab 切换以下三块，每次显示一个区块：
 
 - **生命周期矩阵**：九阶段各自的最终生效 Agent / 模型 / 推理深度 / 绑定预设与**逐字段来源**
   （预设 / 继承 / Agent 默认 / 未支持，或来自哪一层）。缺省与不支持如实标示，不猜外部 CLI
@@ -140,6 +140,7 @@ supervisor / planner / content_generation / deliberate）。
   （保存前 422 并点名候选，需先在回退区清除候选绑定）。删除只移除当前范围层的预设表——
   仓库范围删除被全局同名预设托底的覆盖时，阶段 / 候选引用自动回落到全局预设、不算悬空；
   全局删除被仓库继承引用而仓库无自有副本时才是真正的悬空，会被拒绝。
+  新建表单不内置模型目录；不确定模型标识时，可让 AI 助手根据所选 Agent 推荐模型并帮你补充预设，模型也可留空沿用 CLI 默认。
 - **执行器回退候选**：有序候选链，每个候选可选绑定**同 agent** 的预设（见 §7.3）；页面这一区
   **固定写入全局 `config.toml`**，不随生命周期范围切换改变落点。但它显示的是所选范围内的
   **有效**链——若该仓库自己声明了候选数组（§7.2 的 `--scope repository` 写法），仓库数组对该

@@ -1082,7 +1082,7 @@ class AppConfig:
     # 裸 ``kc`` 原生执行器入口与按需项目预览（顶层 ``[agent_session]``）。与
     # ``repl`` 分开是因为两者是不同风险面的两种交互形态，见该模型 docstring。
     agent_session: AgentSessionConfig = field(default_factory=AgentSessionConfig)
-    # 活跃 attempt 的停滞监督（``[agent_runner.stall_supervisor]``），默认关闭。
+    # 活跃 attempt 的停滞监督（``[agent_runner.stall_supervisor]``），默认开启。
     stall_supervisor: StallSupervisorConfig = field(default_factory=StallSupervisorConfig)
     # daemon 层的仓库级对账开关（None = 未声明，沿用调用方全局默认）。
     daemon: DaemonConfig = field(default_factory=DaemonConfig)

@@ -316,3 +316,6 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 # 预设 qoder-qwen3_8-flash_max 定义在全局 config.toml 的 [agent_runner.presets.qoder-qwen3_8-flash_max]。
 [agent_runner.lifecycle_presets]
 implementation = "qoder-qwen3_8-flash_max"
+fix = "qoder-qwen3_8-max_xhigh"
+closeout = "qoder-qwen3_8-max_xhigh"
+review = "qoder-qwen3_8-max_xhigh"
