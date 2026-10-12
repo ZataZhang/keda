@@ -211,7 +211,7 @@ def run_loop_create_command(
     print(
         f"Registered loop '{task.id}' "
         f"(repo_id={task.repo_id}, schedule={task.schedule.expression}, "
-        f"next_fire={task.next_fire_at})."
+        f"next_fire={format_local_display_time(task.next_fire_at) or '—'})."
     )
     return 0
 

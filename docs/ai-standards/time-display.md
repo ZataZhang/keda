@@ -42,4 +42,4 @@ Issue #239 确立的跨入口约定：**记录与机器输出保持 UTC 语义�
 ## 验证入口
 
 - CLI：`TZ` 环境变量覆盖（UTC / Asia/Shanghai / 一个夏令时区），断言人读表格与 JSON 输出各按契约显示；见 `tests/test_cli_time_display.py`。
-- Web：同一瞬间在浏览器改时区核对时间标签与「原始时间」对照行；见 `tests/playwright-e2e/`。
+- Web：时间标签复用 `formatLocalDateTime` / `toLocaleString` 的客户端本地渲染（见「Web 侧实现」），日志视图带墙钟说明文案。`tests/playwright-e2e/` 尚未有时区专项用例；补充时应在 UTC / Asia/Shanghai / 一个夏令时区核对同一瞬间的时间标签。
