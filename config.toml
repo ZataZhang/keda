@@ -115,6 +115,14 @@ minio_seconds = 60
 max_issues = 1
 
 # =============================================================================
+# Native terminal session defaults (`kc` with no subcommand)
+# =============================================================================
+# This machine-wide value is used by bare `kc`; a repository's `.kedacode.toml`
+# may override it, and `kc --agent <name>` overrides it for one invocation.
+[agent_session]
+default_agent = "claude"
+
+# =============================================================================
 # 生命周期 Agent 矩阵（阶段 -> agent）
 # =============================================================================
 # 把"九个生命周期阶段各用哪个 agent"收敛成一张表。键名是闭集（写错键在配置

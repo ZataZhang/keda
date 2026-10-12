@@ -3744,11 +3744,18 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 
 用户在终端里要的是"把这一轮的对话交给 provider"，不是再学一套 KC 子命令。因此 TTY 下直接敲 `kc` 就是原生执行器入口：KC 只负责**选执行器、核对随包 operator skill、投递 bootstrap、然后把终端整个交出去**，不接管对话、不改权限策略、也不擅自启动项目服务。原有的 Keda REPL（KC 解释输出并按白名单执行子命令）仍在 `kc repl`，两者是不同风险面的两种形态，配置表也刻意分开（`[agent_session]` vs `[agent_runner.repl]`）。
 
+裸 `kc` 的机器级默认值写在 KedaCode 全局 `config.toml`（默认 `~/.kedacode/config.toml`）的顶层 `[agent_session]` 中；仓库 `.kedacode.toml` 可按仓库覆盖。`kc --agent <name>` 只覆盖当前这次启动，不会写配置。比如要让所有仓库的裸 `kc` 默认进入 Codex，在全局配置中写：
+
+```toml
+[agent_session]
+default_agent = "codex"
+```
+
 ### 入口路由与退出码
 
 | 场景 | 行为 |
 |---|---|
-| TTY 下裸 `kc` | 等价于 `kc session`：解析 `.agent_session.default_agent`，起该 agent 的 `interactive` profile，stdio / 信号 / **退出码原样转发** |
+| TTY 下裸 `kc` | 等价于 `kc session`：解析 `[agent_session].default_agent`（仓库覆写优先于机器级默认），起该 agent 的 `interactive` profile，stdio / 信号 / **退出码原样转发** |
 | 非 TTY（管道、CI）下裸 `kc` | 打印帮助并以 **1** 退出——把包装层的非零退出码吞成 0，会让脚本把失败当成功 |
 | `kc --help` / 显式子命令 | 照常走 Typer，不被入口回调拦截 |
 | `kc session --agent <name>` | 覆盖默认执行器；该 agent 必须声明 `interactive` profile，否则 fail-fast 报错而不是回退 |

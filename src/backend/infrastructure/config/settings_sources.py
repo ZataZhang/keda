@@ -255,14 +255,15 @@ def resolve_project_root_path() -> Path:
 #: （见 :func:`_find_product_config_toml`）；其余段落属于宿主应用，继续按 cwd 向上查找
 #: 的项目 ``config.toml`` 读取——派生项目里的 ``preview_env.py`` 正是靠这一点读到
 #: 本仓的 ``[preview]``。
-_PRODUCT_OWNED_TOML_SECTIONS = frozenset({"agent_runner"})
+_PRODUCT_OWNED_TOML_SECTIONS = frozenset({"agent_runner", "agent_session"})
 
 
 def _load_toml_section_data(section_name: str) -> dict[str, Any]:
     """从 config.toml 加载指定 section 的配置。
 
-    ``agent_runner`` 段归 KedaCode 自己所有，走机器级配置解析（跳过应用级同名
-    文件）；其它段归宿主应用，沿用按 cwd 向上查找的项目 ``config.toml``。
+    ``agent_runner`` 和 ``agent_session`` 段归 KedaCode 自己所有，走机器级配置解析
+    （跳过应用级同名文件）；其它段归宿主应用，沿用按 cwd 向上查找的项目
+    ``config.toml``。
 
     Args:
         section_name: TOML section 名称。
