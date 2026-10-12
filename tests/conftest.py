@@ -107,6 +107,11 @@ def _isolate_ambient_iar_config() -> Iterator[None]:
     托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``IAR_CONFIG``，指向机器级
     配置。默认解析测试需要从 cwd 查找或临时 HOME 回落，不能被宿主配置覆盖。
     需要覆盖的用例仍用 ``monkeypatch.setenv`` 显式设置；结束恢复两名宿主取值。
+
+    注意本 fixture 只影响**之后重新解析**配置的读取：``settings.config`` 单例在
+    conftest 导入 ``backend`` 时（早于任何 fixture）就已按宿主机配置定型。断言仓库根
+    ``config.toml`` 内容的 golden 用例因此改用 ``tests.support.agent_runner`` 的
+    ``root_config_app_config()``，不要直接吃 ``build_app_config()``。
     """
     previous_values = {
         env_name: os.environ.pop(env_name, None) for env_name in ("KEDACODE_CONFIG", "IAR_CONFIG")

@@ -17,7 +17,7 @@
 
 1. **真实浏览器端到端入口未覆盖（BLOCKER for full acceptance，非已知代码缺陷）**：当前 `verifier-takeover.spec.ts` 使用 `page.route` stub Issue 详情与接管动作 API，只验证真实 Dashboard 组件树上的 UI/API 契约；它没有穿越 Console API → SQLite → runner。该 spec 在本环境也因缺 `tests/playwright-e2e` node_modules 与可登录后端栈未运行。需增加不 stub 产品 API 的真实入口用例并在具备 `just e2e` 环境后运行，生成真实页面截图/trace，核对状态、Issue 范围、HEAD、PR 入口与窄视口布局。PRD §9 对应项以 `[~]` 挂起，`Human-Confirmed` 两项保持未勾。
 2. **独立 verifier 复核**：上表执行侧证据（真实跨进程/真实 SQLite 边界 + 负控先红后绿 + 294 项契约测试 + 前端构建）需独立 verifier 在最终 committed tree 上复核并出具 PASS/REJECT。
-3. **tree 绑定**：证据 `.txt` 已在本轮复核重跑，绑定源代码提交 `7bff2f4be7062eae4036ef7fdfc7a466a88eac20` + record-excluded tree `eb32ac73556c10f5f67b812ecfd5afeb36715bd7`；本报告文本属于排除的证据目录，runner 仍须按机器契约绑定最终提交的完整 tree 与证据哈希。
+3. **tree 绑定**：证据 `.txt` 已在本轮复核重跑，绑定源代码提交 `85d69699fff75d5ee78d683a48aeb78347f7f7b5` + record-excluded tree `356fd11f581a665315176042dfcb8fe8d386b21e`；本报告文本属于排除的证据目录，runner 仍须按机器契约绑定最终提交的完整 tree 与证据哈希。
 
 ## 结论
 

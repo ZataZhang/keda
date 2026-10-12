@@ -4,7 +4,7 @@
 
 按 PRD §7 的 rv-1、rv-2 顺序验证最终工作树。每项先运行能让对应断言变红的负控，再运行修复后路径；证据按 `rv-<item_number>-<slug>.<ext>` 单项保存于本目录，原始输出与全部 RV 脚本位于同目录 `scripts/` 与 `rv-*.txt`，受仓库 `.gitignore` 证据白名单约束（仅 `*.md` 与 `evidence.json` 进入代码 diff，`.txt`/`.png`/`scripts/*.py` 为原始件不入库）。真实入口不替换为 mock；仅在 PRD §7 mock_boundary 明确允许处替换外部 GitHub 与 verifier CLI。
 
-本轮复核源代码提交为 `7bff2f4be7062eae4036ef7fdfc7a466a88eac20`，证据 `.txt` 绑定 record-excluded tree `eb32ac73556c10f5f67b812ecfd5afeb36715bd7`（见各 `rv-*.txt` 绑定块）。后续只更新本证据目录中的报告文本时，该 record-excluded tree 保持不变；runner 仍需在最终提交后按机器契约记录最终 committed tree 与证据哈希。
+本轮复核源代码提交为 `85d69699fff75d5ee78d683a48aeb78347f7f7b5`，证据 `.txt` 绑定 record-excluded tree `356fd11f581a665315176042dfcb8fe8d386b21e`（见各 `rv-*.txt` 绑定块）。后续只更新本证据目录中的报告文本时，该 record-excluded tree 保持不变；runner 仍需在最终提交后按机器契约记录最终 committed tree 与证据哈希。
 
 ## 真实入口与执行环境边界
 
@@ -31,10 +31,13 @@ UV_CACHE_DIR=/private/tmp/issue256-uv-cache uv run pytest -o addopts="" -q --no-
 
 # 门禁
 UV_CACHE_DIR=/private/tmp/issue256-uv-cache just test
+UV_CACHE_DIR=/private/tmp/issue256-uv-cache just test all
 UV_CACHE_DIR=/private/tmp/issue256-uv-cache just lint --full
 (cd frontend-public && pnpm typecheck && pnpm lint && pnpm build)
 ```
 
 pytest 项目 `addopts` 含 `--testmon`，会按文件改动选择性反选用例；本证据链一律用 `-o addopts=""` 关闭 testmon 以全量运行，得到稳定计数。修复后 rv-1 层 119、rv-2 层 175、§9 Validation 第 1 条原列 8 文件合集 274；新增的 `tests/test_agent_runner_issue_control.py` 单独为 20 项。
+
+`just test all`（独立 verifier 的实际门禁命令）首跑为 4 failed / 4245 passed：4 项都是既有 golden 配置断言在托管 runner 环境下读到宿主机器级 `config.toml`（注入的 `KEDACODE_CONFIG`/`IAR_CONFIG` 在 conftest 导入期就把 `settings.config` 单例定型，会话级剥离 fixture 来不及；本机那份相对仓库根缺 PRD map check 规则段且 `pre_pr_review.timeout_seconds` 为 900），与本 PRD 行为无关。测试侧新增 `tests/support/agent_runner.py::root_config_app_config()` 后复跑 **4249 passed / 1 skipped**——断言强度不变、`config.toml` 与生产代码未动。
 
 PRD checker `--check-provided --archive-ready` 现为 PASS（Final Reconciliation 四必填字段完整、验收状态横幅 `🧍 待人工验收` 与 §9 一致：`Human-Confirmed` 两项留空、真实浏览器/PR-runner 相关非人工项以 `[~]` runner-owned gate 表达）。runner-owned 的独立 verifier 门禁与 PR 发布/归档仍为 `[~]`，执行器不代为勾选、不自行 `git mv` 归档。

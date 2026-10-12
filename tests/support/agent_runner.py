@@ -7,8 +7,11 @@ copying fixtures around.
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Sequence
 
@@ -24,7 +27,47 @@ from backend.core.shared.models.agent_runner import (
     WorktreeConfig,
 )
 from backend.core.shared.prd_checklist import parse_prd_checklist
+from backend.engines.agent_runner.factory_config_builder import (
+    build_app_config_from_settings,
+)
+from backend.infrastructure.config.settings import AgentRunnerSettings
 from backend.infrastructure.process_runner import CommandFailedError
+
+#: 宿主（托管 runner 子进程）注入的新旧机器级配置变量名，两者都会顶掉仓库根解析。
+_AMBIENT_CONFIG_ENV_NAMES = ("KEDACODE_CONFIG", "IAR_CONFIG")
+
+
+@contextmanager
+def _without_ambient_config_env() -> Iterator[None]:
+    """临时剥离宿主注入的机器级配置变量，让配置解析回到仓库根 ``config.toml``。"""
+    previous_values = {
+        env_name: os.environ.pop(env_name, None) for env_name in _AMBIENT_CONFIG_ENV_NAMES
+    }
+    try:
+        yield
+    finally:
+        for env_name, previous_value in previous_values.items():
+            if previous_value is None:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = previous_value
+
+
+def root_config_app_config() -> AppConfig:
+    """按**仓库根** ``config.toml`` 装配 ``AppConfig``，供断言真实配置内容的用例使用。
+
+    ``build_app_config()`` 读的是 settings 模块级单例，而该单例在 conftest 导入
+    ``backend`` 的那一刻就已定型——托管 runner 会向子进程注入 ``KEDACODE_CONFIG`` /
+    ``IAR_CONFIG`` 指向机器级 ``config.toml``（``conftest._isolate_ambient_iar_config``
+    在会话开始才剥离，来不及）。因此宿主上那份机器级配置一旦与仓库根漂移，
+    直接用 ``build_app_config()`` 的 golden 断言测的就不是本仓 ``config.toml``。
+    本函数在剥离宿主变量之后重新解析配置源，断言对象固定为仓库根那份。
+
+    Returns:
+        由仓库根 ``config.toml`` 装配的 :class:`AppConfig`。
+    """
+    with _without_ambient_config_env():
+        return build_app_config_from_settings(AgentRunnerSettings())
 
 
 def make_ready_issue() -> IssueSummary:

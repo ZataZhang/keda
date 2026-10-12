@@ -74,8 +74,8 @@
       "evidence_files": [
         "rv-2-verifier-race.txt",
         "rv-2-automated-tests.txt",
-        "rv-validation-8-file-tests.txt",
-        "rv-final-affected-backend-tests.txt"
+        "rv-2-validation-8-file-tests.txt",
+        "rv-2-affected-backend-tests.txt"
       ],
       "output_summary": "rv2_race_and_staleness_probe.py 用真实共享 SQLite（CAS）覆盖五类竞态并逐项独立判定：S1 verifier 先完成→接管被拒为冲突（S1_COMPLETION_WON: True、S1_TAKEOVER_REJECTED_AS_CONFLICT: True、S1_FINAL_STATE_COMPLETED: True、S1_HOLD_UNSET: True，已完成 verdict 保持原样、不改 Issue/PR）；S2 接管先登记→verdict 被阻断、交接确认（S2_TAKEOVER_ACCEPTED / S2_VERDICT_BLOCKED / S2_HANDOFF_CONFIRMED / S2_FINAL_STATE_TAKEN_OVER / S2_HOLD_SET 全 True）；S3 完成与接管真实并发→仅一个终态获胜（S3_EXACTLY_ONE_WINNER: True，不同时记录 PASS 与人工接管）；S4 HEAD 漂移→按发布端 fresh-read 契约丢弃旧 verdict（`validation/verifier-passed` 不写）、置 autopilot hold、合并门阻断（S4_STALE_DISCARDED / S4_FINAL_STATE_STALE / S4_HOLD_SET / S4_GATE_BLOCKS 全 True）；S5 外部已合并→记录 pr_merged 并停止后续（S5_MERGED_RECORDED / S5_FINAL_STATE_PR_MERGED 全 True）。竞态检查点负控：误用初始 head 快照做漂移检测时过期 verdict 会被错误保留，脚本打印 RV2_EXPECTED_FAIL 与 S4_NEG_STALE_NOT_RECORDED: True（检查点有效），整体 RV2_PROBE_OK: True，exit 0。自动化竞态/fail-closed 层（状态机 + 取消 + autopilot_hold 对 merge queue/supervisor/review_once 的阻断，含 require_verifier_pass 关闭时）175 passed。 PRD §9 原列 8 文件集 274 passed，13 个受影响后端模块合集 421 passed。",
       "explanation": "本项验证 FR-4 竞态与过期结果保护与 FR-5 自动合并边界：verifier 完成与接管通过原子 compare-and-set 裁决唯一终态；verdict 应用前后按 fresh-read 的 PR merged 状态与 HEAD 判定，PR 已合并或 HEAD 与 verifier 输入不同时丢弃 verdict、置 autopilot hold、停止后续自动阶段，最终 GitHub 状态与控制记录一致。autopilot_hold 由 merge queue、post-PR supervisor、review_once 三处读取并 fail-closed，即使仓库关闭 require_verifier_pass 也阻断自动合并，只有当前 HEAD 的新 verifier 真实 GREEN 才解除。竞态用真实 SQLite 行级 CAS 与真实线程并发（S3）驱动，判定由新连接的独立探针给出。S4 负控证明漂移检测确实依赖实时 fresh head 而非初始快照。",

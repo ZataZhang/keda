@@ -509,11 +509,11 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 
 #### Validation Acceptance
 
-- [x] uv run pytest tests/test_console_store.py tests/test_console_actions.py tests/test_run_verifier_agent.py tests/test_agent_runner_console_api.py tests/test_agent_runner_merge_queue.py tests/test_agent_runner_supervisor_entrypoints.py tests/test_pr_supervisor.py tests/test_process_runner.py 通过。证据：命令输出归档。〔执行侧已核：该 8 文件合集 `-o addopts=""` 复跑 **274 passed**（rv-1 层 119 + rv-2 层 175 = 294，去掉不在该 8 文件清单内的 `tests/test_agent_runner_issue_control.py` 20 项），见 `rv-validation-8-file-tests.txt`。〕
+- [x] uv run pytest tests/test_console_store.py tests/test_console_actions.py tests/test_run_verifier_agent.py tests/test_agent_runner_console_api.py tests/test_agent_runner_merge_queue.py tests/test_agent_runner_supervisor_entrypoints.py tests/test_pr_supervisor.py tests/test_process_runner.py 通过。证据：命令输出归档。〔执行侧已核：该 8 文件合集 `-o addopts=""` 复跑 **274 passed**（rv-1 层 119 + rv-2 层 175 = 294，去掉不在该 8 文件清单内的 `tests/test_agent_runner_issue_control.py` 20 项），见 `rv-2-validation-8-file-tests.txt`。〕
 - [x] (cd frontend-public && pnpm typecheck && pnpm lint && pnpm build) 通过。证据：三个命令输出归档。〔执行侧已核（合并前评审在最终树复跑）：`pnpm typecheck` exit 0；`pnpm build`（`output: export`）exit 0；`pnpm lint` 对本 PR 改动的 6 个前端文件（`app/(app)/app/dashboard/page.tsx`、`components/agent-runner/issue-detail.tsx`、`components/agent-runner/verifier-takeover-card.tsx`、`lib/api/console.ts`、`lib/api/types.ts`、`lib/api/client.ts`）逐文件 0 error（仅仓库既有 `jsdoc/require-jsdoc` warn），但**仓库全量 exit 1**：3 条基线 `react-hooks/set-state-in-effect` error 位于本 PR 未触碰、也不在 `git diff main...HEAD` 内的 `components/agent-runner/run-detail-dialog.tsx`、`components/backlog/prd-ci-view.tsx`、`components/backlog/prd-lifecycle-view.tsx`，非本 PR 回归，按 §11 范围外留待各自归属修复。〕
 - [~] 通过真实浏览器入口 just e2e tests/workflows/verifier-takeover.spec.ts 验证 UI → API → SQLite → runner → verifier process group，且 fresh read 观察到 handoff；不得用组件预览替代。证据：rv-1 E2E 报告、trace、截图和 final-tree hash。 — runner-owned gate: 真实浏览器 `just e2e` 于 PR review/CI 阶段执行（本环境无 `tests/playwright-e2e` 的 node_modules 与可登录栈，无法本地跑）。执行侧已交付：spec 按真实 Dashboard 入口编写（stub 仅在浏览器边界替换只读快照与接管动作端点，走真实 React 组件树 / Radix Dialog / 轮询回读）；进程/DB/handoff 语义由 `scripts/rv1_takeover_handoff_probe.py` 的真实跨进程 oracle 覆盖（同一 console.db WAL、真实 SubprocessRunner 进程组终止与回收、独立 OS 进程发起 CAS）。
 - [x] rv-2 的 stale run、stale HEAD、verifier completion race 与 merged PR 场景通过；反例能使 oracle 报红。证据：rv-2-verifier-race.txt 和对应测试报告。〔执行侧已核：`RV2_PROBE_OK: True`；负控 `RV2_EXPECTED_FAIL: 误用初始 head 快照时漂移检测失效…（检查点有效）` + `S4_NEG_STALE_NOT_RECORDED: True`；先红后绿均记录在案。〕
-- [x] 所有 R2/R3 行为证据均绑定交付 tree；相关实现变化后已重跑对应 oracle。证据：verification report 中的 tree id。〔执行侧已核：三份 oracle 与两层自动化均在合并前评审修复落地后的最终工作树复跑并绑定 HEAD `ac74d40d` / 交付 tree（见各 `rv-*.txt` 开头绑定块与报告「验证限制」）。R2 浏览器呈递层的 tree 绑定随其未执行的 e2e 一并披露，见上条。〕
+- [x] 所有 R2/R3 行为证据均绑定交付 tree；相关实现变化后已重跑对应 oracle。证据：verification report 中的 tree id。〔执行侧已核：三份 oracle 与两层自动化均在本轮交付工作树复跑并绑定 HEAD `85d69699` / record-excluded tree `356fd11f`（见各 `rv-*.txt` 开头绑定块与报告「验证限制」）。R2 浏览器呈递层的 tree 绑定随其未执行的 e2e 一并披露，见上条。〕
 
 #### Delivery Readiness
 
@@ -619,3 +619,13 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 - 影响：修复树下 rv-1 119 passed、rv-2 175 passed、原列 8 文件合集 274 passed；跨进程接管与 SQLite 竞态探针通过。真实 Console API→SQLite→runner 的浏览器 E2E 未执行，也未被 UI/API stub spec 覆盖；`Human-Confirmed` 项保持未勾选。
 - 复核：实施修复后的 `just test` 增量档为 71 passed、157 deselected；关闭 testmon 对 13 个受影响后端模块复跑 421 passed，其中 rv-1 119、rv-2 175、§9 原列 8 文件集 274 均通过。`just lint --reuse` / `just lint --full`、`uv run mkdocs build --strict`、`pnpm typecheck` 和 `pnpm build` 通过；6 个受影响前端文件逐文件 ESLint 为 0 errors（27 个 JSDoc warnings）。最终提交 tree 由 runner 提交时重新绑定证据。
 - 审核：pre-PR reviewer 修复并记录；待独立 verifier 在最终 committed tree 上复核。
+
+### 证据文件命名合规与 golden 配置的宿主泄漏修复（recovery 尝试 1，executor，2026-10-12）
+
+- 类型：evidence + test（修证据命名/绑定与测试环境泄漏，不改需求、范围与 oracle 定义）
+- 原文：`evidence.json` item 2 列出 `rv-validation-8-file-tests.txt` 与 `rv-final-affected-backend-tests.txt`，两者不匹配机器契约要求的 `rv-<item_number>-<slug>.<ext>`，独立 verifier 的 Realistic Validation 证据检查以「Item 2: evidence file ... does not match the required `rv-2-*` naming pattern」失败；证据 `.txt` 仍绑定上一轮 `7bff2f4b` / `eb32ac73`。同轮另一处阻塞与接管行为无关：托管 runner 向子进程注入 `KEDACODE_CONFIG`/`IAR_CONFIG` 指向机器级 `config.toml`，而 `settings.config` 单例在 conftest 导入 `backend` 时即定型，`_isolate_ambient_iar_config` 的会话级剥离来不及生效，使 `just test all` 首跑 4 failed / 4245 passed（`test_factory_build_app_config_maps_supervising` 读到 900 而非仓库根 1800；3 项 execution prompt 断言读到缺 PRD map check 规则段的旧模板）。
+- 变更后：两个证据文件改名为 `rv-2-validation-8-file-tests.txt`、`rv-2-affected-backend-tests.txt`（旧文件删除，manifest `evidence_files` 与证据报告、验证计划、§9 文本同步改指），并在当前工作树逐字复跑全部 8 份 `.txt`（rv-1 探针/负控/入口层 119、rv-2 竞态探针/竞态层 175、原列 8 文件 274、13 模块 421、前端 typecheck+ESLint+build），统一绑定 HEAD `85d69699` / record-excluded tree `356fd11f`。测试侧新增 `tests/support/agent_runner.py::root_config_app_config()`（剥离宿主注入变量后按仓库根 `config.toml` 重新装配 `AppConfig`），3 处 golden 断言改用它，并在 `tests/conftest.py` 隔离 fixture 的 docstring 标注单例定型时机。
+- 原因：证据文件命名是机器契约硬性项，命名不合规会让证据检查在实现之外失败；golden 断言必须测本仓 `config.toml`，否则任何机器级配置漂移的宿主都给出与 CI 不一致的结果——这是把断言对象固定回它声称要测的文件，不是放宽断言。
+- 影响：`just test all` 在同一注入环境下 **4249 passed / 1 skipped**（此前 4 failed / 4245 passed），`just test` 46 passed、`just lint --full` exit 0、PRD checker `--check-provided --archive-ready` exit 0，证据命名项通过；oracle 计数不变（119/175/274/421），负控仍从真实模板删段转红。§9 勾选状态不变，`Human-Confirmed` 两项与真实浏览器入口 `[~]` 项继续保留。
+- 复核：改名后的 8 份 `.txt` 全部由本轮逐字复跑生成（命令、输出与 exit code 原样入档，无手写数值）；`just test all` 与 `just test` 在本工作树复跑通过。
+- 审核：执行器自记，待独立 verifier 在最终 committed tree 上复核命名合规与 tree 绑定。
