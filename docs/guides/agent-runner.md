@@ -4172,6 +4172,10 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
 
 ### 运行历史与完成度统计
 
+- **区块导航**：Stats 页在标题与筛选区下方提供顶部 Tab 导航「总览 / Token 成本 /
+  Agent 表现 / PRD 执行分析」；点击 Tab 定位到对应区块，页面滚动时同步高亮并吸顶，
+  窄屏可横向浏览，方向键 / Home / End 键盘可操作。仅重组页面信息组织，
+  不改变任何统计 API 与计算口径；总览包含指标卡片、仓库完成度、运行趋势与最近运行记录。
 - **实时口径（GitHub）**：`GET /api/v1/agent-runner/console/stats/overview`
   以 `state=all` 查询全部 workflow label 的 Issue 并去重。closed 且不含
   failed/blocked label 计为 `completed`；单 label 查询命中 200 上限时
