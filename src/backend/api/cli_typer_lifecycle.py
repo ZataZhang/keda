@@ -66,17 +66,15 @@ def _render_lifecycle_table(lifecycle_details: Sequence[PrdLifecycleDetail]) -> 
         )
         prd_label = PurePosixPath(lifecycle_detail.prd_path).name or "—"
         last_event = lifecycle_detail.events[-1] if lifecycle_detail.events else None
+        # 有事件时展示最新事件时间，否则回落到账本 started_at；两者共用同一占位符规则。
+        updated_moment = last_event.occurred_at if last_event else lifecycle_detail.started_at
         table.add_row(
             lifecycle_detail.repo_id,
             issue_label,
             prd_label,
             lifecycle_detail.current_phase,
             last_event.event_type if last_event else "—",
-            (
-                format_local_display_time(last_event.occurred_at)
-                if last_event
-                else (format_local_display_time(lifecycle_detail.started_at) or "—")
-            ),
+            format_local_display_time(updated_moment) or "—",
             "完整" if lifecycle_detail.history_complete else "有缺口",
         )
     return table
@@ -110,7 +108,7 @@ def _render_lifecycle_detail(lifecycle_details: Sequence[PrdLifecycleDetail]) ->
         event_table.add_column("来源")
         for lifecycle_event in lifecycle_detail.events:
             event_table.add_row(
-                format_local_display_time(lifecycle_event.occurred_at),
+                format_local_display_time(lifecycle_event.occurred_at) or "—",
                 lifecycle_event.event_type,
                 lifecycle_event.phase,
                 lifecycle_event.status,

@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "subject": "Issue #239 时间显示统一使用用户当地时区 — Web 真实入口三时区验证",
+  "spec": "tests/playwright-e2e/tests/workflows/time-display-browser-timezone.no-auth.spec.ts",
+  "verification_level": "真实页面入口（Chromium + Next.js 生产路由 /app/backlog + 真实 PRD 详情抽屉与 CI/CD、执行过程标签）；Backlog 读端点与本地会话为确定性 fixture",
+  "why_stubbed": "被验证对象是「同一个 UTC 瞬间在不同浏览器时区下的换算」，源瞬间必须钉死才能三时区对照；真实 GitHub 同步时间每次运行都漂移。换算路径本身（组件、lib/utils::formatLocalDateTime / formatLocalClockTime、浏览器时区）未被替换。",
+  "run_command": "cd frontend-public && pnpm exec next dev -p 3299  (另开终端) ; cd tests/playwright-e2e && PLAYWRIGHT_SKIP_STACK_BOOT=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3299 PLAYWRIGHT_HEALTH_URL=http://127.0.0.1:3299/ TZ_EVIDENCE_DIR=<repo>/tasks/evidence/issue-239-web-timezone/e2e pnpm exec playwright test --project=no-auth tests/workflows/time-display-browser-timezone.no-auth.spec.ts",
+  "run_result": "3 passed (4.6s)，UTC / Asia/Shanghai / America/New_York 三个 timezoneId context 全绿",
+  "instants": {
+    "last_synced_at_and_scanned_at": "2026-06-23T00:00:00+00:00",
+    "dst_fallback_first": "2026-11-01T05:30:00+00:00",
+    "dst_fallback_second": "2026-11-01T06:30:00+00:00"
+  },
+  "items": [
+    {
+      "item_name": "rv-1 同一瞬间在三个浏览器时区下的标签、跨日与夏令时回拨",
+      "evidence_files": [
+        "e2e/browser-timezone-UTC.json",
+        "e2e/browser-timezone-Asia_Shanghai.json",
+        "e2e/browser-timezone-America_New_York.json",
+        "e2e/browser-timezone-UTC-ci-delivery.png",
+        "e2e/browser-timezone-UTC-lifecycle.png",
+        "e2e/browser-timezone-Asia_Shanghai-ci-delivery.png",
+        "e2e/browser-timezone-Asia_Shanghai-lifecycle.png",
+        "e2e/browser-timezone-America_New_York-ci-delivery.png",
+        "e2e/browser-timezone-America_New_York-lifecycle.png"
+      ],
+      "output_summary": "每个用例先在页面内断言 Intl.DateTimeFormat().resolvedOptions().timeZone 就等于本用例声明的时区（证明 timezoneId 覆盖真的生效），再核对同一瞬间的两条标签：CI/CD 标签「最近同步」（formatLocalDateTime）与页头「数据截至」（formatLocalClockTime）。UTC: 2026-06-23 00:00:00 / 00:00:00；Asia/Shanghai: 2026-06-23 08:00:00 / 08:00:00；America/New_York: 2026-06-22 20:00:00 / 20:00:00（同一瞬间跨到前一天，跨日成立）。执行过程标签的时间线两行分别是回拨前后两个真实瞬间：UTC 05:30:00 与 06:30:00、Shanghai 13:30:00 与 14:30:00、New_York 两行都是 01:30:00（EDT/EST 各一次，合法重复小时）。三个用例的 console/pageerror 列表均为空，即无 hydration 报错、无未 stub 的资源报错。",
+      "explanation": "换算发生在客户端且只在数据到达后渲染，因此服务端时区不参与输出，三时区下 SSR 首帧与客户端一致——hydration 断言为空即该结论的现场证据。Web 标签不带偏移，所以 New_York 回拨窗内两个瞬间渲染成同一串墙钟是预期行为，已在 docs/ai-standards/time-display.md「夏令时与边界」写明，避免后续被当成换算错误去『修』。",
+      "negative_control": "把 frontend-public/components/backlog/prd-ci-view.tsx 的 formatLocalDateTime(delivery.last_synced_at) 临时改回直接渲染 delivery.last_synced_at（UTC 原文）后复跑同一命令：三个时区用例全部变红，报错为 Expected substring \"最近同步 2026-06-23 08:00:00\" / Received \"第 1/2 轮 · 最近同步 2026-06-23T00:00:00+00:00\"（UTC 用例同样因缺偏移后缀而失败）。随后还原源码并复跑，恢复 3 passed。因此本用例不是恒真断言。",
+      "risks": "Backlog 读端点与本地会话为 fixture，未覆盖真实后端返回的时间字段格式（该契约由 tests/test_cli_time_display.py 与后端模型测试守住）；仅在 macOS 本机 next dev（Turbopack）上采集，未在 Docker 栈上复跑；截图为 fullPage 单帧，不含交互录像。"
+    },
+    {
+      "item_name": "rv-2 CLI 人读本地化与 JSON 机器契约（同批交付的自动化证据）",
+      "evidence_files": [],
+      "output_summary": "uv run pytest tests/test_cli_time_display.py --no-testmon -q → 18 passed：TZ 覆盖下 loop list / lifecycle 表格与详情、daemon status 表格按本地时区渲染；loop / lifecycle / daemon 三个命令的 --json 分支仍输出账本 UTC 原文（+00:00），且断言本地偏移文本不出现在 JSON 里；空 occurred_at 落到占位符。uv run pytest tests/guards --no-testmon -q → 313 passed, 1 skipped。just test all → 4237 passed, 1 skipped in 249s。SKIP=check-test-flag uv run pre-commit run --all-files → exit 0。uv run mkdocs build --strict → 通过。",
+      "explanation": "停滞监督默认开启的守卫另见 tests/test_agent_config_consistency.py::test_stall_supervisor_is_enabled_by_default 与 tests/test_agent_runner_stall_supervision.py::test_supervision_default_config_enables_the_observer；后者已用注入（把 StallSupervisorConfig.enabled 默认改成 False）验证过会变红，随后还原。",
+      "negative_control": "StallSupervisorConfig.enabled 默认值临时改为 False 时，上述两条新守卫均失败（attempt_key 变为 None、dataclass 默认断言失败），还原后转绿。",
+      "risks": "CLI 侧证据是进程内 TZ 覆盖 + 命令函数直调，未起真实终端；kc 命令的完整 argparse 入口由既有 CLI 测试覆盖。"
+    }
+  ]
+}

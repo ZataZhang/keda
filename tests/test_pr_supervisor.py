@@ -982,7 +982,7 @@ def test_run_post_pr_supervisor_cycle_parses_action() -> None:
                 return CommandResult(
                     command=tuple(command),
                     return_code=0,
-                    stdout=('{"action": "approve_for_human_review", "summary": "LGTM"}')
+                    stdout=('{"action": "approve_for_human_review", ' '"summary": "LGTM"}')
                     if capture_output
                     else "",
                     stderr="",

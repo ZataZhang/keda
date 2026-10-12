@@ -9,8 +9,29 @@ Issue #239 确立的跨入口约定：**记录与机器输出保持 UTC 语义�
 | 数据库 / API JSON / CLI JSON 等机器输出 | UTC，带 `+00:00` 偏移（兼容 `Z`） | 由 `datetime.now(timezone.utc).isoformat(timespec="seconds")` 产生；展示层改动不得触碰这些原文 |
 | Web（frontend-public / frontend-admin）人读时间标签 | 浏览器当前时区 | 只渲染真实瞬间（带偏移的 ISO 字符串）；转换发生在客户端 |
 | CLI 人读输出（表格、提示文案） | 执行机器本地时区 | 用 `backend.api.cli_utils.format_local_display_time`；JSON 分支不得经过该函数 |
+| 面向未知读者的发布产物（GitHub 评论、Issue 正文） | UTC + 显式标注 | 见「发布产物的裁决」 |
 
 不硬编码任何具体时区（如 `Asia/Shanghai`）；也不新增时区设置页或用户配置。
+
+「CLI 人读输出」指 `kc` 命令本身（`src/backend/api/`）。`just` 工具脚本
+（`scripts/shared/just/*.py`）**不在本约定的强制范围内**：它们由 bare `python3` 运行
+（见 `justfile.shared` 的 `python3 ./scripts/shared/just/prd_lock.py …`），导入后端
+helper 会在未安装本包的机器上直接失败，而把换算逻辑复制进脚本又违反
+`docs/ai-standards/code-reuse.md`。这些脚本的终端提示（如 PRD 领锁冲突里的
+`started_at` / `heartbeat_at`）因此按机器契约原样打印 UTC 带偏移文本：时间是**无歧义的真实瞬间**，
+只是未按阅读者本地时区换算。需要本地化时，先把换算 helper 下沉到脚本可共享的层，再改这两处。
+
+## 发布产物的裁决
+
+runner 生成并**发布给未知读者**的文本保留 UTC 并在字段名上显式标注，生成时不猜测任何人
+的时区，发布后也不回填换算：
+
+- `core/use_cases/agent_runner_failure.py` 的尝试历史表（`Started (UTC)`）。
+- `core/use_cases/agent_runner_stale_attempt.py` 的中断现场表（`Interrupted at (UTC)`）。
+
+这与 Issue #239 豁免「已发布的历史 GitHub 评论」同源：评论一旦发布就面向所有时区的读者，
+本地化只会把「谁的本地时间」写成歧义。新增此类发布产物时，照此在列名或字段名里带
+`(UTC)`，不要当作清点遗漏去改；面向单个浏览器/终端读者的界面才走本地换算。
 
 ## 无时区值的处理
 
@@ -35,11 +56,11 @@ Issue #239 确立的跨入口约定：**记录与机器输出保持 UTC 语义�
 
 ## 夏令时与边界
 
-- 夏令时回拨导致同一本地小时出现两次是**合法行为**：展示必须保留偏移（CLI 本地文本带 `±HH:MM`），以便区分两个真实瞬间；不要求消除合法重复小时。
+- 夏令时回拨导致同一本地小时出现两次是**合法行为**：CLI 本地文本带 `±HH:MM` 偏移，可区分两个真实瞬间；Web 标签（`formatLocalDateTime` 产出的 `yyyy-MM-dd HH:mm:ss`）不带偏移，回拨窗口内的两个瞬间会渲染成同一串墙钟——这是预期结果，不得为消除重复小时去猜测来源或改写时间源。
 - 空值显示占位符（`—`），非法值原样回显；跨日由本地字段换算自然处理。
 - 耗时、调度、聚合计算（如按 UTC 日历日的趋势分桶）属于记录侧计算，不因展示改动而变；分桶语义如需按本地日聚合，属于新需求另立 PRD。
 
 ## 验证入口
 
-- CLI：`TZ` 环境变量覆盖（UTC / Asia/Shanghai / 一个夏令时区），断言人读表格与 JSON 输出各按契约显示；见 `tests/test_cli_time_display.py`。
-- Web：时间标签复用 `formatLocalDateTime` / `toLocaleString` 的客户端本地渲染（见「Web 侧实现」），日志视图带墙钟说明文案。`tests/playwright-e2e/` 尚未有时区专项用例；补充时应在 UTC / Asia/Shanghai / 一个夏令时区核对同一瞬间的时间标签。
+- CLI：`TZ` 环境变量覆盖（UTC / Asia/Shanghai / 一个夏令时区），断言人读表格与 JSON 输出各按契约显示；见 `tests/test_cli_time_display.py`（含 loop / lifecycle / daemon 三个命令的 `--json` 分支仍输出 UTC 原文的断言）。
+- Web：时间标签复用 `formatLocalDateTime` / `toLocaleString` 的客户端本地渲染（见「Web 侧实现」），日志视图带墙钟说明文案。真实入口的三时区对照见 `tests/playwright-e2e/tests/workflows/time-display-browser-timezone.no-auth.spec.ts`：同一次运行里用 Playwright `timezoneId` 分别在 UTC / Asia/Shanghai / America/New_York 打开 `/app/backlog`，核对同一瞬间的标签、跨日进位、回拨造成的合法重复小时，并断言无 hydration 报错。该用例走真实浏览器与真实路由，只把 Backlog 读端点与本地会话替换成确定性 fixture（源瞬间必须钉死才能三时区对照），验证层级写在 spec 头部注释里。

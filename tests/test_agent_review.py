@@ -1204,7 +1204,7 @@ def test_run_pre_pr_review_rejects_changes_requested_without_commit_request(
                 return CommandResult(
                     command=command_tuple,
                     return_code=0,
-                    stdout=('{"verdict": "changes_requested", "summary": "missing tests"}'),
+                    stdout=('{"verdict": "changes_requested", ' '"summary": "missing tests"}'),
                     stderr="",
                 )
             return super().run(
@@ -1677,7 +1677,7 @@ def _socket_command_error(command: list[str]) -> CommandFailedError:
     return CommandFailedError(
         1,
         command,
-        output=("[agent error] API Error: The socket connection was closed unexpectedly."),
+        output=("[agent error] API Error: The socket connection was closed " "unexpectedly."),
         stderr="",
     )
 

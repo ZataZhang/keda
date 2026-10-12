@@ -426,6 +426,32 @@ def test_pre_pr_review_prompt_template_normalizes_string() -> None:
     assert settings_empty.review_prompt_template == []
 
 
+def test_stall_supervisor_is_enabled_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """停滞监督出厂默认开启：settings 默认、领域默认、factory 映射三处一致。
+
+    「默认开」是行为变更而非文案：开启后监督器会按周期调用模型，满足条件时
+    可能终止停滞的 writer。因此和 ``pre_pr_review.enabled`` 同级钉住，取值同样
+    来自空 TOML，不吃宿主机 ``~/.kedacode/config.toml`` 的实际配置。
+    """
+    from backend.core.shared.models.agent_stall import StallSupervisorConfig
+    from backend.engines.agent_runner.factory import (
+        build_app_config_from_settings,
+        load_fresh_agent_runner_settings,
+    )
+
+    empty_config = tmp_path / "config.toml"
+    empty_config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("KEDACODE_CONFIG", str(empty_config))
+    agent_runner_settings = load_fresh_agent_runner_settings()
+
+    assert agent_runner_settings.stall_supervisor.enabled is True
+    assert StallSupervisorConfig().enabled is True
+    assert CoreAppConfig().stall_supervisor.enabled is True
+    assert build_app_config_from_settings(agent_runner_settings).stall_supervisor.enabled is True
+
+
 def test_factory_build_app_config_maps_supervising(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

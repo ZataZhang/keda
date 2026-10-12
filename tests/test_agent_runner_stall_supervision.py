@@ -1189,6 +1189,36 @@ def test_run_attempt_with_issue_identity_registers_the_attempt_for_supervision(
     assert isinstance(attempt_key, str) and attempt_key.startswith("issue-77-implement-1-")
 
 
+def test_supervision_default_config_enables_the_observer(worktree_path: Path) -> None:
+    """不写 ``enabled`` 时（出厂默认）带 Issue 身份的 run 仍被登记监督。
+
+    默认翻转成真行为：默认值一旦回退成 ``False``，``attempt_key`` 会变成 ``None``
+    且不会建 observer，本用例即失败。配置层的默认值另见
+    ``test_stall_supervisor_is_enabled_by_default``。
+    """
+    runner = _RecordingRunner()
+
+    run_agent_with_prompt(
+        "fake-writer",
+        "Implement the issue.",
+        worktree_path,
+        runner,
+        config=_supervised_app_config(
+            stall_supervisor=StallSupervisorConfig(
+                check_interval_seconds=_TICK_SECONDS,
+                stalled_after_seconds=0,
+                agent="fake-supervisor",
+            )
+        ),
+        issue=_ISSUE,
+        invocation_phase="implement",
+        invocation_attempt=1,
+    )
+
+    attempt_key = _agent_run_kwargs(runner)[0]["attempt_key"]
+    assert isinstance(attempt_key, str) and attempt_key.startswith("issue-77-implement-1-")
+
+
 def test_supervision_disabled_does_not_touch_the_invocation(worktree_path: Path) -> None:
     """显式关闭开关时：不登记 attempt 键，argv 与本特性之前逐字节一致。
 
