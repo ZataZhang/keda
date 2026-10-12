@@ -16,6 +16,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
     IssueSummary,
+    StallSupervisorConfig,
 )
 from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_DELIBERATE,
@@ -201,7 +202,14 @@ def test_run_agent_with_prompt_logs_issue_context(
     fake_runner = FakeProcessRunner()
 
     with caplog.at_level(logging.INFO, logger="backend.core.use_cases.run_agent_once"):
-        result = run_agent_with_prompt("claude", "Implement.", tmp_path, fake_runner, issue=issue)
+        result = run_agent_with_prompt(
+            "claude",
+            "Implement.",
+            tmp_path,
+            fake_runner,
+            config=AppConfig(stall_supervisor=StallSupervisorConfig(enabled=False)),
+            issue=issue,
+        )
 
     assert result.return_code == 0
     assert fake_runner.labels == ["Issue #23: https://github.com/zata-zhangtao/fsense/issues/23"]
@@ -287,6 +295,7 @@ class _SequencedAgentRunner(FakeProcessRunner):
         input_text=None,
         label=None,
         output_protocol=None,
+        attempt_key: str | None = None,
     ):
         self.calls.append(list(command))
         outcome = self._outcomes[min(self._index, len(self._outcomes) - 1)]

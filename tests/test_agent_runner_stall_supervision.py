@@ -1189,8 +1189,8 @@ def test_run_attempt_with_issue_identity_registers_the_attempt_for_supervision(
     assert isinstance(attempt_key, str) and attempt_key.startswith("issue-77-implement-1-")
 
 
-def test_supervision_off_by_default_does_not_touch_the_invocation(worktree_path: Path) -> None:
-    """默认（关闭）配置下：不登记 attempt 键，argv 与本特性之前逐字节一致。"""
+def test_explicitly_disabled_supervision_does_not_touch_the_invocation(worktree_path: Path) -> None:
+    """显式关闭配置下不登记 attempt 键，argv 与监督功能启用前逐字节一致。"""
     runner = _RecordingRunner()
 
     run_agent_with_prompt(
@@ -1199,7 +1199,7 @@ def test_supervision_off_by_default_does_not_touch_the_invocation(worktree_path:
         worktree_path,
         runner,
         config=_supervised_app_config(
-            stall_supervisor=StallSupervisorConfig(agent="fake-supervisor")
+            stall_supervisor=StallSupervisorConfig(enabled=False, agent="fake-supervisor")
         ),
         issue=_ISSUE,
         invocation_phase="implement",

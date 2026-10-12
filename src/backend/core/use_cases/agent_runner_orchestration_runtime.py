@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import sys
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial

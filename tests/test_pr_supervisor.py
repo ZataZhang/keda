@@ -974,6 +974,7 @@ def test_run_post_pr_supervisor_cycle_parses_action() -> None:
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             if tuple(command)[:1] == ("codex",):
                 self.calls.append(list(command))
@@ -1044,6 +1045,7 @@ class _CrashingAgentRunner(FakeProcessRunner):
         capture_output=True,
         label=None,
         output_protocol=None,
+        attempt_key: str | None = None,
     ):
         if tuple(command)[:1] == ("codex",):
             self.calls.append(list(command))
@@ -1573,6 +1575,7 @@ def test_dirty_worktree_before_supervisor_auto_stash_and_approve(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -1669,6 +1672,7 @@ def test_dirty_worktree_after_approve_blocks_review(tmp_path: Path) -> None:
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -1755,6 +1759,7 @@ def test_supervisor_loop_waits_for_pending_checks_once(tmp_path: Path) -> None:
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -1837,6 +1842,7 @@ def test_supervisor_loop_keeps_agent_approval_under_failed_checks(tmp_path: Path
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -1918,6 +1924,7 @@ def test_supervisor_loop_keeps_agent_approval_under_pending_checks(tmp_path: Pat
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -2007,6 +2014,7 @@ def test_execute_rebase_allows_detached_head_when_active_rebase_target_matches(
             capture_output=True,
             input_text=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "branch", "--show-current"):
@@ -2154,6 +2162,7 @@ def test_execute_rebase_rejects_mismatched_active_rebase_target(
             capture_output=True,
             input_text=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "branch", "--show-current"):
@@ -2276,6 +2285,7 @@ def test_execute_rebase_rejects_unknown_active_rebase_target(
             capture_output=True,
             input_text=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple == ("git", "branch", "--show-current"):
@@ -2980,6 +2990,7 @@ class _SupervisorDispatchRunner(FakeProcessRunner):
         capture_output=True,
         label=None,
         output_protocol=None,
+        attempt_key: str | None = None,
     ):  # type: ignore[override]
         command_tuple = tuple(command)
         agent = command_tuple[0] if command_tuple else ""

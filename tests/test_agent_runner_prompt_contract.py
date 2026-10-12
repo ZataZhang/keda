@@ -42,7 +42,7 @@ from backend.core.use_cases.agent_runner_validation import (
     build_validation_prompt_line,
     resolve_issue_evidence_relpath,
 )
-from backend.engines.agent_runner.factory import build_app_config
+from tests.support.agent_runner import repository_agent_runner_config
 
 _PRD_RELATIVE_PATH = "tasks/pending/P1-FEAT-20990101-000000-demo.md"
 
@@ -124,7 +124,7 @@ _MAP_CHECK_NONE_DECLARATION = "PRD map check: none"
 def _execution_prompt_from_root_config(tmp_path: Path, issue: IssueSummary) -> str:
     """从真实仓库根 ``config.toml`` 渲染 execution prompt。
 
-    必须用 ``build_app_config()`` 装配的 ``PromptConfig``：裸 ``PromptConfig()``
+    必须用仓库根配置装配的 ``PromptConfig``：裸 ``PromptConfig()``
     的 ``phases`` 为空字典，会静默回退到代码内置模板，测不到 config.toml。
 
     Args:
@@ -134,7 +134,7 @@ def _execution_prompt_from_root_config(tmp_path: Path, issue: IssueSummary) -> s
     Returns:
         渲染后的 execution prompt 全文。
     """
-    config = build_app_config()
+    config = repository_agent_runner_config()
     return build_prompt(
         issue,
         _worktree_with_prd(tmp_path),
@@ -225,7 +225,7 @@ def test_prompt_contract_execution_prompt_map_check_negative_control(
 
     证明上面的绿色来自模板里真实存在的规则段，而不是断言写得过于宽松。
     """
-    config = build_app_config()
+    config = repository_agent_runner_config()
     template = config.prompts.phases["execution"]
     stripped_template = _strip_map_check_block(template)
     assert stripped_template != template, "负控失效：真实模板里找不到可删除的规则段"

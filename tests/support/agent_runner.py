@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import Sequence
 
@@ -21,9 +22,18 @@ from backend.core.shared.models.agent_runner import (
     PostPrSupervisorConfig,
     PrePrReviewConfig,
     RunnerConfig,
+    StallSupervisorConfig,
     WorktreeConfig,
 )
 from backend.core.shared.prd_checklist import parse_prd_checklist
+from backend.engines.agent_runner.factory import build_app_config_from_settings
+from backend.infrastructure.config.settings import (
+    AgentRunnerLabelSettings,
+    AgentRunnerPostPrSupervisorSettings,
+    AgentRunnerPrePrReviewSettings,
+    AgentRunnerPromptSettings,
+    AgentRunnerSettings,
+)
 from backend.infrastructure.process_runner import CommandFailedError
 
 
@@ -58,7 +68,7 @@ def config_with_review_disabled(
     recovery_retry_delay_seconds: int = 0,
     agent_fallback_order: tuple[str, ...] = (),
 ) -> AppConfig:
-    """Return a config with pre-PR review and post-PR supervisor disabled.
+    """Return a config with review, post-PR, and stall supervisors disabled.
 
     Cross-agent fallback is disabled by default so that tests of the single-agent
     recovery loop are not affected by the global default fallback chain.
@@ -77,7 +87,40 @@ def config_with_review_disabled(
         worktree=worktree_cfg,
         pre_pr_review=PrePrReviewConfig(enabled=False),
         post_pr_supervisor=PostPrSupervisorConfig(enabled=False),
+        stall_supervisor=StallSupervisorConfig(enabled=False),
     )
+
+
+def repository_agent_runner_config() -> AppConfig:
+    """绕过环境与机器级覆盖，加载测试涉及的仓库 Agent Runner 配置段。"""
+    repository_root = Path(__file__).resolve().parents[2]
+    config_path = repository_root / "config.toml"
+    root_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    agent_runner_data = root_config.get("agent_runner", {})
+    settings = AgentRunnerSettings.model_construct()
+    object.__setattr__(
+        settings,
+        "labels",
+        AgentRunnerLabelSettings.model_validate(agent_runner_data.get("labels", {})),
+    )
+    object.__setattr__(
+        settings,
+        "pre_pr_review",
+        AgentRunnerPrePrReviewSettings.model_validate(agent_runner_data.get("pre_pr_review", {})),
+    )
+    object.__setattr__(
+        settings,
+        "post_pr_supervisor",
+        AgentRunnerPostPrSupervisorSettings.model_validate(
+            agent_runner_data.get("post_pr_supervisor", {})
+        ),
+    )
+    object.__setattr__(
+        settings,
+        "prompts",
+        AgentRunnerPromptSettings.model_validate(agent_runner_data.get("prompts", {})),
+    )
+    return build_app_config_from_settings(settings)
 
 
 def worktree_path_response(

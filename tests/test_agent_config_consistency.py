@@ -18,6 +18,7 @@ from backend.core.use_cases.agent_invocation import (
     resolve_registered_agents,
 )
 from backend.engines.agent_runner.factory import build_app_config
+from tests.support.agent_runner import repository_agent_runner_config
 from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
@@ -428,7 +429,7 @@ def test_pre_pr_review_prompt_template_normalizes_string() -> None:
 
 def test_factory_build_app_config_maps_supervising() -> None:
     """Factory must map the supervising label through to AppConfig."""
-    app_config = build_app_config()
+    app_config = repository_agent_runner_config()
     assert app_config.labels.supervising == "agent/supervising"
     assert app_config.pre_pr_review.enabled is True
     assert app_config.pre_pr_review.timeout_seconds == 1800

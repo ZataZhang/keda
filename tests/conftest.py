@@ -498,6 +498,7 @@ class FakeProcessRunner(IProcessRunner):
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
+        attempt_key: str | None = None,
     ) -> CommandResult:
         command_list = list(command)
         # When the runner wraps verification commands in ``bash -lc``,

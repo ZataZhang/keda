@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_runner import (
     FailureType,
     IssueSummary,
     RunnerConfig,
+    StallSupervisorConfig,
 )
 from backend.core.use_cases.run_agent_once import (
     MaxRetriesExceededError,
@@ -58,18 +59,20 @@ def test_run_agent_until_committed_enters_recovery_after_timeout(
             input_text=None,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             self.attempts += 1
             raise subprocess.TimeoutExpired(cmd=list(command), timeout=timeout)
 
     fake_runner = _TimeoutRunner()
     config = AppConfig(
+        stall_supervisor=StallSupervisorConfig(enabled=False),
         runner=RunnerConfig(
             max_recovery_attempts=1,
             timeout_seconds=5,
             inactivity_timeout_seconds=1,
             recovery_retry_delay_seconds=0,
-        )
+        ),
     )
 
     with pytest.raises(MaxRetriesExceededError):
@@ -93,11 +96,12 @@ def test_run_fix_agent_uses_fix_timeout_seconds(tmp_path: Path) -> None:
     issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
     fake_runner = FakeProcessRunner()
     config = AppConfig(
+        stall_supervisor=StallSupervisorConfig(enabled=False),
         runner=RunnerConfig(
             timeout_seconds=100,
             fix_timeout_seconds=30,
             agent_fallback_order=(),
-        )
+        ),
     )
 
     run_fix_agent(
@@ -121,11 +125,12 @@ def test_run_fix_agent_falls_back_to_timeout_seconds(tmp_path: Path) -> None:
     issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
     fake_runner = FakeProcessRunner()
     config = AppConfig(
+        stall_supervisor=StallSupervisorConfig(enabled=False),
         runner=RunnerConfig(
             timeout_seconds=100,
             fix_timeout_seconds=None,
             agent_fallback_order=(),
-        )
+        ),
     )
 
     run_fix_agent(
@@ -176,6 +181,7 @@ def test_run_agent_until_committed_calls_fix_agent_before_recovery(
             input_text=None,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -229,6 +235,7 @@ def test_run_agent_until_committed_calls_fix_agent_before_recovery(
 
     fake_runner = _FixThenRecoveryRunner()
     config = AppConfig(
+        stall_supervisor=StallSupervisorConfig(enabled=False),
         runner=RunnerConfig(
             max_recovery_attempts=1,
             recovery_retry_delay_seconds=0,
@@ -236,7 +243,7 @@ def test_run_agent_until_committed_calls_fix_agent_before_recovery(
             fix_timeout_seconds=30,
             verification_commands=("just lint",),
             agent_fallback_order=(),
-        )
+        ),
     )
 
     with caplog.at_level(logging.INFO, logger="backend.core.use_cases.run_agent_once"):
@@ -290,6 +297,7 @@ def test_run_agent_until_committed_skips_fix_agent_when_disabled(
             input_text=None,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -314,6 +322,7 @@ def test_run_agent_until_committed_skips_fix_agent_when_disabled(
 
     fake_runner = _StagedFailureRunner()
     config = AppConfig(
+        stall_supervisor=StallSupervisorConfig(enabled=False),
         runner=RunnerConfig(
             max_recovery_attempts=0,
             recovery_retry_delay_seconds=0,
@@ -322,7 +331,7 @@ def test_run_agent_until_committed_skips_fix_agent_when_disabled(
             fix_timeout_seconds=30,
             verification_commands=("just lint",),
             agent_fallback_order=(),
-        )
+        ),
     )
 
     with caplog.at_level(logging.INFO, logger="backend.core.use_cases.run_agent_once"):
@@ -375,6 +384,7 @@ def test_run_agent_until_committed_recovery_uses_recovery_timeout_seconds(
             input_text=None,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -400,6 +410,7 @@ def test_run_agent_until_committed_recovery_uses_recovery_timeout_seconds(
 
     fake_runner = _RecoveryTimeoutRunner()
     config = AppConfig(
+        stall_supervisor=StallSupervisorConfig(enabled=False),
         runner=RunnerConfig(
             max_recovery_attempts=1,
             recovery_retry_delay_seconds=0,
@@ -407,7 +418,7 @@ def test_run_agent_until_committed_recovery_uses_recovery_timeout_seconds(
             recovery_timeout_seconds=60,
             verification_commands=("git diff --check",),
             agent_fallback_order=(),
-        )
+        ),
     )
 
     with pytest.raises(MaxRetriesExceededError):
