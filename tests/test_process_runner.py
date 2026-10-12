@@ -1037,6 +1037,32 @@ def test_takeover_cancel_kills_only_the_target_process_group(tmp_path: Path) -> 
                     pass
 
 
+def test_process_watchdog_cancel_classification_wins_over_timeout() -> None:
+    """同一 tick 里取消与超时都置位时，必须按人工接管分类（Issue #278）。
+
+    若 TimeoutExpired 抢先抛出，上层会走 verifier 超时回退路径，错失交班：
+    Issue 不进 agent/review、不写交接评论，把"人停掉了验证"误报成"验证自己超时"。
+    """
+    watchdog = process_runner_module._ProcessWatchdog(
+        MagicMock(),
+        ["verifier", "cli"],
+        timeout=30,
+        heartbeat_seconds=1,
+        base_label="Command",
+    )
+    watchdog._timed_out = True
+    watchdog._cancelled = True
+
+    watchdog.raise_if_timed_out()  # 取消在场时不得抛 TimeoutExpired。
+    with pytest.raises(InterruptedError, match="takeover cancel request"):
+        watchdog.raise_if_cancelled()
+
+    # 纯超时（未取消）仍须按超时上报，保住既有停滞监督语义。
+    watchdog._cancelled = False
+    with pytest.raises(subprocess.TimeoutExpired):
+        watchdog.raise_if_timed_out()
+
+
 def test_subprocess_runner_keeps_active_process_alive(
     tmp_path: Path,
 ) -> None:

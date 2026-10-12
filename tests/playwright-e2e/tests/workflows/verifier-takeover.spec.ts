@@ -31,7 +31,7 @@ const RUN_ID = 'run-2f15-0001'
 const HEAD_SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
 const TAKEOVER_ACTION_ENDPOINT =
   /\/api\/v1\/agent-runner\/console\/repositories\/[^/]+\/issues\/\d+\/actions$/
-const ISSUE_DETAIL_ENDPOINT = /\/api\/v1\/agent-runner\/issues\/\d+$/
+const ISSUE_DETAIL_ENDPOINT = /\/api\/v1\/agent-runner\/issues\/\d+(\?.*)?$/
 
 /** 活动 verifier 投影，字段与后端 `active_verifier_projection` 同构。 */
 type ActiveVerifierProjection = {
@@ -175,7 +175,13 @@ async function stubTakeoverFlow(
 
   // 接管登记后，控制行随 runner 确认而前进；详情读到的状态必须离开
   // running / takeover_requested，交班才落定为 taken_over。
+  // 状态推进只计 POST 之后的读取：打开 Issue 时 Dashboard 与卡片挂载各会先读
+  // 一次详情，若按原始读取计数，按钮在用户点击前就会被轮询状态吃掉。
   await page.route(ISSUE_DETAIL_ENDPOINT, async (route) => {
+    const prePost = harness.posts.length === 0
+    if (!prePost) {
+      harness.pollCount += 1
+    }
     let verifier: ActiveVerifierProjection
     if (outcome === 'conflict') {
       // HEAD 漂移：后端 409，控制行始终停在 running，绝不误呈交班。
@@ -192,10 +198,10 @@ async function stubTakeoverFlow(
       verifier = {
         run_id: RUN_ID,
         head_sha: HEAD_SHA,
-        state: harness.pollCount === 0 ? 'running' : 'taken_over',
-        can_take_over: harness.pollCount === 0,
+        state: prePost ? 'running' : 'taken_over',
+        can_take_over: prePost,
         pr_number: 101,
-        autopilot_hold: harness.pollCount > 0,
+        autopilot_hold: !prePost,
       }
     } else {
       // requested：首读 running → 确认后 reload 呈 takeover_requested（"正在停止"）
@@ -203,18 +209,16 @@ async function stubTakeoverFlow(
       verifier = {
         run_id: RUN_ID,
         head_sha: HEAD_SHA,
-        state:
-          harness.pollCount === 0
-            ? 'running'
-            : harness.pollCount === 1
-              ? 'takeover_requested'
-              : 'taken_over',
-        can_take_over: harness.pollCount === 0,
+        state: prePost
+          ? 'running'
+          : harness.pollCount === 1
+            ? 'takeover_requested'
+            : 'taken_over',
+        can_take_over: prePost,
         pr_number: 101,
         autopilot_hold: harness.pollCount >= 2,
       }
     }
-    harness.pollCount += 1
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

@@ -427,7 +427,9 @@ def _process_review_candidate(
     if action_result.token_usage is not None:
         _record_agent_usage_event(
             run_history_store=run_history_store,
-            repo_id=repo_id,
+            # 记录键与闸门查询键分离：repo_id 是注册表原值（可能为空），观测事件
+            # 沿用目录名回落；闸门只认注册表 id（空值走 Issue 编号兜底）。
+            repo_id=repo_id or repo_path.name,
             issue=issue,
             flow="supervise",
             agent_name=supervisor_agent,

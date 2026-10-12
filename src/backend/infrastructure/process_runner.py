@@ -775,8 +775,13 @@ class _ProcessWatchdog:
         任何流式输出，如果这里把已收集的 stdout/stderr 丢掉，一次超时就等于
         "什么都没发生"——比如 verifier agent 跑了半小时被杀，操作者只能看到
         一条 "timed out"，看不到它当时判到哪一步。
+
+        人工接管取消（``_cancelled``）优先于超时分类：同一 watchdog tick 里
+        两者都可能置位，但把"人接管并杀掉了进程组"报成超时会让上层走 verifier
+        超时回退路径、错失交班（Issue #278）。此处静默后由
+        :meth:`raise_if_cancelled` 抛 InterruptedError。
         """
-        if self._timed_out:
+        if self._timed_out and not self._cancelled:
             raise subprocess.TimeoutExpired(
                 cmd=list(self._command),
                 timeout=self._effective_timeout,

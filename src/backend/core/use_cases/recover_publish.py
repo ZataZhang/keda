@@ -357,7 +357,8 @@ def _recover_publish_issue_owned(
             交给正常发布用例生成正文（LLM 正文 + contract anchors + checklist）；
             为 ``None`` 时退回配置的 template / fallback 正文。
         repo_id (str | None): 稳定仓库标识（Issue #278），透传给 PR 后监督循环
-            做人工接管闸门（``autopilot_hold``）检查；``None`` 时闸门放行。
+            做人工接管闸门（``autopilot_hold``）检查；``None`` 时闸门按 Issue
+            编号兜底并 fail closed（读不到状态一律按有闸门处理）。
 
     Returns:
         PublishRecoveryResult: 包含分支名、HEAD SHA、PR 链接及是否复用 PR 的结果。

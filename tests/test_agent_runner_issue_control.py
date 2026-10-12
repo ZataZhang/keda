@@ -345,6 +345,31 @@ def test_use_case_request_takeover_unavailable_store_raises(
         )
 
 
+def test_use_case_request_takeover_wraps_storage_errors(
+    tmp_path: Path,
+) -> None:
+    """SQLite busy/locked 等存储层异常必须收敛成 IssueControlUnavailableError。
+
+    否则接管端点会以未处理 500 逃逸且不留审计；接管范围无法确认时必须
+    走"存储不可用"分支（Console 审计 rejected + 400，绝不伪装成交班）。
+    """
+    store = _store(tmp_path)
+
+    def _locked(**_kwargs: object) -> None:
+        raise RuntimeError("sqlite3.OperationalError: database is locked")
+
+    store.request_issue_takeover = _locked  # type: ignore[assignment]
+
+    with pytest.raises(issue_control.IssueControlUnavailableError, match="database is locked"):
+        issue_control.request_verifier_takeover(
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-1",
+            head_sha="abc123",
+            control_store=store,
+        )
+
+
 def test_autopilot_hold_blocks_when_known_repository_store_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -377,6 +402,10 @@ def test_takeover_handoff_does_not_mark_pr_merged_on_github_read_failure(
     assert handle.confirm_takeover() is True
 
     class _UnavailableGitHub:
+        def __init__(self) -> None:
+            self.label_moves: list[tuple[int, tuple[str, ...], tuple[str, ...]]] = []
+            self.comments: list[tuple[int, str]] = []
+
         def get_pull_request_context(self, _branch: str, *, require_success: bool = False):
             assert require_success is True
             raise RuntimeError("GitHub API unavailable")
@@ -384,6 +413,13 @@ def test_takeover_handoff_does_not_mark_pr_merged_on_github_read_failure(
         def find_merged_pr_by_head(self, *_args: object, **_kwargs: object):
             pytest.fail("do not infer merged status after a failed authoritative read")
 
+        def edit_issue_labels(self, number: int, *, add=(), remove=()) -> None:  # noqa: ANN001
+            self.label_moves.append((number, tuple(add), tuple(remove)))
+
+        def comment_issue(self, number: int, body: str) -> None:
+            self.comments.append((number, body))
+
+    github = _UnavailableGitHub()
     issue_control.finalize_verifier_takeover(
         repo_id="repo-a",
         issue=IssueSummary(
@@ -394,7 +430,7 @@ def test_takeover_handoff_does_not_mark_pr_merged_on_github_read_failure(
             labels=(),
         ),
         config=AppConfig(),
-        github_client=_UnavailableGitHub(),  # type: ignore[arg-type]
+        github_client=github,  # type: ignore[arg-type]
         expected_branch="issue-42",
         handle=handle,
     )
@@ -402,6 +438,13 @@ def test_takeover_handoff_does_not_mark_pr_merged_on_github_read_failure(
     row = store.get_issue_run(repo_id="repo-a", issue_number=42)
     assert row.state == STATE_TAKEN_OVER
     assert row.autopilot_hold is True
+    # PR 侧读失败不阻断 Issue 侧交接：转 review 与交接评论必须照常尝试，
+    # 且评论不带失效的 PR 链接。
+    review_label = AppConfig().labels.review
+    running_label = AppConfig().labels.running
+    assert github.label_moves == [(42, (review_label,), (running_label,))]
+    assert len(github.comments) == 1
+    assert "/pull/" not in github.comments[0][1]
 
 
 def test_takeover_handoff_records_merged_only_after_authoritative_confirmation(
@@ -811,3 +854,35 @@ def test_takeover_handoff_records_the_pr_number_from_the_fresh_read(
     row = store.get_issue_run(repo_id="repo-a", issue_number=42)
     assert row.pr_number == 71
     assert row.state == STATE_TAKEN_OVER
+
+
+def test_takeover_sqlite_mirror_constants_match_core_port() -> None:
+    """SQLite 适配器的同构状态/接管常量必须与 core 端口逐字一致。
+
+    ``console_store_takeover`` 按约定镜像 core ``issue_run_control`` 的字符串常量
+    （持久层不导入 core）。任何一侧的笔误都会让状态机静默错分类——例如
+    ``_STATE_TAKEover_REQUESTED`` 拼错时 watchdog 永不命中取消、接管被受理后
+    没人执行。这里用等值断言把"靠约定同步"变成机械契约。
+    """
+    from backend.core.shared.interfaces import issue_run_control as core_port
+    from backend.infrastructure.persistence import console_store_takeover as adapter
+
+    mirrored_states = {
+        "_STATE_RUNNING": core_port.STATE_RUNNING,
+        "_STATE_TAKEOVER_REQUESTED": core_port.STATE_TAKEOVER_REQUESTED,
+        "_STATE_TAKEN_OVER": core_port.STATE_TAKEN_OVER,
+        "_STATE_VERIFIER_COMPLETED": core_port.STATE_VERIFIER_COMPLETED,
+    }
+    for adapter_attr, core_value in mirrored_states.items():
+        assert getattr(adapter, adapter_attr) == core_value
+
+    mirrored_outcomes = {
+        "_TAKEOVER_ACCEPTED": core_port.TAKEOVER_ACCEPTED,
+        "_TAKEOVER_PENDING": core_port.TAKEOVER_PENDING,
+        "_TAKEOVER_HANDED_OVER": core_port.TAKEOVER_HANDED_OVER,
+        "_TAKEOVER_BINDING_MISMATCH": core_port.TAKEOVER_BINDING_MISMATCH,
+        "_TAKEOVER_COMPLETED_CONFLICT": core_port.TAKEOVER_COMPLETED_CONFLICT,
+        "_TAKEOVER_NOT_FOUND": core_port.TAKEOVER_NOT_FOUND,
+    }
+    for adapter_attr, core_value in mirrored_outcomes.items():
+        assert getattr(adapter, adapter_attr) == core_value

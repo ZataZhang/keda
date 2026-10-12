@@ -294,8 +294,8 @@ class IssueActionRequest(BaseModel):
     """Issue 级动作请求体（retry_failed / blocked_continue / recover_failed_publish / take_over_verifier）。"""
 
     action: str = Field(min_length=1)
-    run_id: str | None = None
-    head_sha: str | None = None
+    run_id: str | None = Field(default=None, max_length=128)
+    head_sha: str | None = Field(default=None, max_length=64)
 
 
 @router.post("/agent-runner/console/repositories/{repo_id}/actions")

@@ -24,6 +24,8 @@ import type { ActiveVerifier, ActiveVerifierState } from "@/lib/api/types";
 const POLL_INTERVAL_MS = 1_500;
 /** 超过该时长仍未确认交班，提示"仍在停止"而非静默等待。 */
 const SLOW_HINT_MS = 5_000;
+/** 空闲态刷新间隔：与 Dashboard 快照轮询同档，防接管按钮对着已结束的运行。 */
+const IDLE_REFRESH_MS = 15_000;
 
 const STATE_LABELS: Record<ActiveVerifierState, string> = {
   running: "独立 verifier 运行中",
@@ -74,13 +76,20 @@ export function VerifierTakeoverCard({
   const [slowHint, setSlowHint] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 重读请求序号：只采用最新一次发起的响应，防止乱序回包覆盖新状态。 */
+  const reloadSeqRef = useRef(0);
 
   /** 重读 Issue 详情，只取活动 verifier 投影。 */
   const reload = useCallback(async () => {
+    const issuedSeq = ++reloadSeqRef.current;
     try {
       const detail = await fetchIssueDetail(issueNumber, { repoId });
-      setVerifier(detail.active_verifier ?? null);
-      return detail.active_verifier ?? null;
+      const projectedVerifier = detail.active_verifier ?? null;
+      if (issuedSeq !== reloadSeqRef.current) {
+        return null;
+      }
+      setVerifier(projectedVerifier);
+      return projectedVerifier;
     } catch {
       // 详情读取失败不打断当前展示：保留上一帧，等下一轮轮询或手动刷新。
       return null;
@@ -93,6 +102,18 @@ export function VerifierTakeoverCard({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, [reload]);
+
+  // Dashboard 的快照轮询不会重取已打开 Issue 的详情投影；空闲态按同档节奏
+  // fresh-read，防止接管按钮长期对着一个已经结束的 verifier。
+  useEffect(() => {
+    if (requesting || verifier?.state !== "running") {
+      return;
+    }
+    const idleTimer = setInterval(() => {
+      void reload();
+    }, IDLE_REFRESH_MS);
+    return () => clearInterval(idleTimer);
+  }, [requesting, verifier?.state, reload]);
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current !== null) {
@@ -154,6 +175,9 @@ export function VerifierTakeoverCard({
       return;
     }
     setRequesting(false);
+    // 冲突/失败也要关掉确认对话框：错误提示渲染在卡片里，模态遮罩会把它整个
+    // 挡住，操作员只看到重新可用的「确认接管」按钮，看不到「状态已变化」。
+    setConfirmOpen(false);
     if (result.kind === "conflict") {
       setErrorText(describeConflict(result.outcome));
     } else {

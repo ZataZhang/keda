@@ -600,34 +600,38 @@ def finalize_verifier_takeover(
                 head_sha=rebuilt_row.head_sha,
             )
     pr_context = None
+    pr_read_failed = False
     try:
         pr_context = github_client.get_pull_request_context(expected_branch, require_success=True)
-    except Exception as exc:  # noqa: BLE001 - 无法证明 PR 状态时不伪造交班终态。
+    except Exception as exc:  # noqa: BLE001 - 读不到 PR 不等于可以丢下 Issue 侧交班。
+        # 权威读失败后不得再去推断 merged 状态；但 Issue 侧交接（转 review、
+        # 写评论）不依赖 PR 事实，必须继续——否则一次 gh 瞬断就让 Issue 永远停在
+        # agent/running，而界面已经显示交班完成。taken_over + hold 已随控制行落闸。
+        pr_read_failed = True
         _logger.warning(
             "Issue #%d: takeover handoff could not freshly read the PR for branch %s (%s); "
-            "leaving the handoff state unchanged until GitHub can be read.",
+            "continuing the Issue-side handoff without PR-side convergence.",
             issue.number,
             expected_branch,
             exc,
         )
-        return
 
-    if pr_context is None:
+    if pr_context is None and not pr_read_failed:
         # 开放 PR 查询成功返回空时，必须另行证明它确实已合并，不能把 CLI 错误
         # 或外部关闭误记为 pr_merged。
         try:
             merged_pr_url = github_client.find_merged_pr_by_head(
                 expected_branch, require_success=True
             )
-        except Exception as exc:  # noqa: BLE001 - 无法证明 merge 时不伪造终态。
+        except Exception as exc:  # noqa: BLE001 - 无法证明 merge 时不伪造终态，交班继续。
             _logger.warning(
                 "Issue #%d: takeover handoff could not establish whether branch %s "
-                "was merged (%s); leaving the handoff state unchanged.",
+                "was merged (%s); continuing the Issue-side handoff.",
                 issue.number,
                 expected_branch,
                 exc,
             )
-            return
+            merged_pr_url = None
         if merged_pr_url:
             # PR 已合并：自动阶段到此为止，不改 Issue 标签、不写交班评论。
             # 控制行记 pr_merged（若还能 CAS 成功）。
@@ -801,14 +805,23 @@ def request_verifier_takeover(
         raise IssueControlUnavailableError(
             "Issue run control store is unavailable; takeover cannot be safely scoped."
         )
-    outcome = store.request_issue_takeover(  # type: ignore[attr-defined]
-        repo_id=repo_id,
-        issue_number=issue_number,
-        run_id=run_id,
-        head_sha=head_sha,
-        request_id=str(uuid.uuid4()),
-        requested_at=_utc_now_iso(),
-    )
+    try:
+        outcome = store.request_issue_takeover(  # type: ignore[attr-defined]
+            repo_id=repo_id,
+            issue_number=issue_number,
+            run_id=run_id,
+            head_sha=head_sha,
+            request_id=str(uuid.uuid4()),
+            requested_at=_utc_now_iso(),
+        )
+    except IssueControlUnavailableError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 存储层异常必须收敛成可控的不可用错误。
+        # SQLite busy/locked 等直接逃逸会变成路由 500 且无审计；接管范围无法
+        # 确认时按存储不可用处理（fail closed，Console 侧审计 rejected + 400）。
+        raise IssueControlUnavailableError(
+            f"Issue run control store failed while recording the takeover request: {exc}"
+        ) from exc
     http_status = TAKEOVER_HTTP_STATUS.get(outcome.status, 409)
     return VerifierTakeoverRequestResult(
         outcome=outcome.status,
