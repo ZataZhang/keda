@@ -617,6 +617,7 @@ def test_run_pre_pr_review_runs_agent_and_approves_when_no_changes(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -708,6 +709,7 @@ def test_run_pre_pr_review_commits_reviewer_changes(tmp_path: Path) -> None:
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -792,6 +794,7 @@ class _PatchingReviewRunner(FakeProcessRunner):
         capture_output=True,
         label=None,
         output_protocol=None,
+        attempt_key: str | None = None,
     ):
         command_tuple = tuple(command)
         if command_tuple[:1] == ("codex",):
@@ -946,6 +949,7 @@ def test_run_pre_pr_review_empty_commit_request_with_approval_converges(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1040,6 +1044,7 @@ def test_run_pre_pr_review_uses_commit_request_verdict_when_stdout_unparseable(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1131,6 +1136,7 @@ def test_run_pre_pr_review_empty_commit_request_changes_requested_soft_fails(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1190,6 +1196,7 @@ def test_run_pre_pr_review_rejects_changes_requested_without_commit_request(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1197,7 +1204,7 @@ def test_run_pre_pr_review_rejects_changes_requested_without_commit_request(
                 return CommandResult(
                     command=command_tuple,
                     return_code=0,
-                    stdout=('{"verdict": "changes_requested", ' '"summary": "missing tests"}'),
+                    stdout=('{"verdict": "changes_requested", "summary": "missing tests"}'),
                     stderr="",
                 )
             return super().run(
@@ -1249,6 +1256,7 @@ def test_run_pre_pr_review_passes_configured_timeout(tmp_path: Path) -> None:
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1311,6 +1319,7 @@ def test_run_pre_pr_review_soft_fails_with_findings_on_last_cycle(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1416,6 +1425,7 @@ def test_run_pre_pr_review_reminds_reviewer_then_commits(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1508,6 +1518,7 @@ def test_run_pre_pr_review_zero_reminder_attempts_fails_fast(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1609,6 +1620,7 @@ def test_run_pre_pr_review_last_cycle_final_patch_is_accepted(
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1665,7 +1677,7 @@ def _socket_command_error(command: list[str]) -> CommandFailedError:
     return CommandFailedError(
         1,
         command,
-        output=("[agent error] API Error: The socket connection was closed " "unexpectedly."),
+        output=("[agent error] API Error: The socket connection was closed unexpectedly."),
         stderr="",
     )
 
@@ -1694,6 +1706,7 @@ def test_run_pre_pr_review_retries_transient_reviewer_error(tmp_path: Path) -> N
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1758,6 +1771,7 @@ def test_run_pre_pr_review_escalates_provider_capacity(tmp_path: Path) -> None:
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1830,6 +1844,7 @@ def test_run_pre_pr_review_escalates_on_reviewer_timeout(tmp_path: Path) -> None
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -1959,6 +1974,7 @@ def test_run_pre_pr_review_feeds_commit_failure_to_next_cycle(tmp_path: Path) ->
             capture_output=True,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             if command_tuple[:1] == ("codex",):
@@ -2077,6 +2093,7 @@ class _SplitRepairRunner(FakeProcessRunner):
         label=None,
         output_sink=None,
         output_protocol=None,
+        attempt_key: str | None = None,
     ) -> CommandResult:
         agent_bin = tuple(command)[0]
         if agent_bin not in ("codex", "claude"):
@@ -2312,6 +2329,7 @@ class _ReviewerFallbackRunner(FakeProcessRunner):
         capture_output=True,
         label=None,
         output_protocol=None,
+        attempt_key: str | None = None,
     ):  # type: ignore[override]
         command_tuple = tuple(command)
         agent_name = command_tuple[0] if command_tuple else ""

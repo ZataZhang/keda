@@ -426,9 +426,24 @@ def test_pre_pr_review_prompt_template_normalizes_string() -> None:
     assert settings_empty.review_prompt_template == []
 
 
-def test_factory_build_app_config_maps_supervising() -> None:
-    """Factory must map the supervising label through to AppConfig."""
-    app_config = build_app_config()
+def test_factory_build_app_config_maps_supervising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Factory must map the supervising label through to AppConfig.
+
+    断言的是 settings 模型的代码默认值：装配前把全局配置指向空 TOML，避免本用例
+    被宿主机 ``~/.kedacode/config.toml`` 的实际取值改写（那属于机器状态，不是
+    factory 映射契约）。
+    """
+    from backend.engines.agent_runner.factory import (
+        build_app_config_from_settings,
+        load_fresh_agent_runner_settings,
+    )
+
+    empty_config = tmp_path / "config.toml"
+    empty_config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("KEDACODE_CONFIG", str(empty_config))
+    app_config = build_app_config_from_settings(load_fresh_agent_runner_settings())
     assert app_config.labels.supervising == "agent/supervising"
     assert app_config.pre_pr_review.enabled is True
     assert app_config.pre_pr_review.timeout_seconds == 1800

@@ -176,6 +176,11 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
           {paused ? "继续" : "暂停"}
         </Button>
       </div>
+      {/* 行前缀 [HH:MM:SS] 由 runner 机器写入，缺日期与时区信息，浏览器无法
+          可靠换算，故原样展示、不做时区转换（见 docs/guides/agent-runner.md）。 */}
+      <p className="text-xs text-slate-400" data-testid="prd-issue-output-tz-note">
+        行首时间 [HH:MM:SS] 为 runner 机器的本地墙钟，不含时区，未做浏览器时区换算。
+      </p>
       <pre
         ref={containerRef}
         className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950"

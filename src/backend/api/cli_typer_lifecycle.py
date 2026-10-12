@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# 两个只读 CLI 子命令模块的 typer 样板导入逐字一致，属结构性重复（同
+# core/shared/interfaces/agent_runner.py 的先例），不为此新增抽象层。
+# jscpd:ignore-start
 from collections.abc import Sequence
 from dataclasses import asdict
 from enum import Enum
@@ -22,6 +25,9 @@ from backend.api.cli_output import (
     route_logs_to_stderr,
 )
 from backend.api.cli_typer_app import OutputFormat, OutputOption, _enum_value, app
+from backend.api.cli_utils import format_local_display_time
+
+# jscpd:ignore-end
 from backend.core.shared.models.backlog import PrdLifecycleDetail
 from backend.core.use_cases.agent_runner_factory import create_console_store
 from backend.core.use_cases.agent_runner_lifecycle import (
@@ -66,7 +72,11 @@ def _render_lifecycle_table(lifecycle_details: Sequence[PrdLifecycleDetail]) -> 
             prd_label,
             lifecycle_detail.current_phase,
             last_event.event_type if last_event else "—",
-            last_event.occurred_at if last_event else (lifecycle_detail.started_at or "—"),
+            (
+                format_local_display_time(last_event.occurred_at)
+                if last_event
+                else (format_local_display_time(lifecycle_detail.started_at) or "—")
+            ),
             "完整" if lifecycle_detail.history_complete else "有缺口",
         )
     return table
@@ -100,7 +110,7 @@ def _render_lifecycle_detail(lifecycle_details: Sequence[PrdLifecycleDetail]) ->
         event_table.add_column("来源")
         for lifecycle_event in lifecycle_detail.events:
             event_table.add_row(
-                lifecycle_event.occurred_at,
+                format_local_display_time(lifecycle_event.occurred_at),
                 lifecycle_event.event_type,
                 lifecycle_event.phase,
                 lifecycle_event.status,

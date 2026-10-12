@@ -58,6 +58,7 @@ nav:
       - 文档规范: ai-standards/documentation.md
       - 测试规范: ai-standards/testing.md
       - 工具与命令: ai-standards/tooling.md
+      - 时间显示与时区: ai-standards/time-display.md
   - 使用指南:
       - 配置说明: guides/configuration.md
       - 部署指南: guides/deployment.md

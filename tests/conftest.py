@@ -484,6 +484,7 @@ class FakeProcessRunner(IProcessRunner):
         self.timeouts: list[int | None] = []
         self.inactivity_timeouts: list[int | None] = []
         self.output_sinks: list[Callable[[str], None] | None] = []
+        self.attempt_keys: list[str | None] = []
 
     def run(
         self,
@@ -498,7 +499,14 @@ class FakeProcessRunner(IProcessRunner):
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
+        env_profile: str | None = None,
+        env_allow_extra: Sequence[str] = (),
+        attempt_key: str | None = None,
     ) -> CommandResult:
+        # attempt_key 是停滞监督的登记键（见 IProcessRunner 端口），假实现不登记
+        # 进程，只做记录供断言。
+        del env_profile, env_allow_extra
+        self.attempt_keys.append(attempt_key)
         command_list = list(command)
         # When the runner wraps verification commands in ``bash -lc``,
         # unwrap transparently so test assertions can keep matching the
