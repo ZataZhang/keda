@@ -1,5 +1,7 @@
 # PRD: 多评审模型的 Agent 与模型效果评测
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/284
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 > ⬜ **验收状态**：未开工。
