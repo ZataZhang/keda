@@ -1,5 +1,7 @@
 # PRD: 统一运行时看板与桌面进度窗
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/283
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 > ⬜ **验收状态**：未开工。
