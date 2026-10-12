@@ -7,6 +7,7 @@ lifecycle / loop 渲染路径上的接线，并覆盖跨日与夏令时回拨。
 
 from __future__ import annotations
 
+import os
 import time
 from contextlib import contextmanager
 from io import StringIO
@@ -29,11 +30,18 @@ from backend.core.shared.models.loop import LoopSchedule, LoopScheduleKind, Loop
 @contextmanager
 def _machine_timezone(monkeypatch: pytest.MonkeyPatch, tz_name: str):
     """临时把进程时区切到 ``tz_name``，退出时恢复。"""
+    previous_tz = os.environ.get("TZ")
     monkeypatch.setenv("TZ", tz_name)
     time.tzset()
     try:
         yield
     finally:
+        # 必须在 monkeypatch 回滚之前显式恢复并 tzset，否则 C 库会带着
+        # 本用例的时区泄漏到后续测试。
+        if previous_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous_tz
         time.tzset()
 
 
