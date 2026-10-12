@@ -17,7 +17,7 @@
 
 1. **真实浏览器端到端入口未覆盖（BLOCKER for full acceptance，非已知代码缺陷）**：当前 `verifier-takeover.spec.ts` 使用 `page.route` stub Issue 详情与接管动作 API，只验证真实 Dashboard 组件树上的 UI/API 契约；它没有穿越 Console API → SQLite → runner。该 spec 在本环境也因缺 `tests/playwright-e2e` node_modules 与可登录后端栈未运行。需增加不 stub 产品 API 的真实入口用例并在具备 `just e2e` 环境后运行，生成真实页面截图/trace，核对状态、Issue 范围、HEAD、PR 入口与窄视口布局。PRD §9 对应项以 `[~]` 挂起，`Human-Confirmed` 两项保持未勾。
 2. **独立 verifier 复核**：上表执行侧证据（真实跨进程/真实 SQLite 边界 + 负控先红后绿 + 355 项契约测试 + 前端构建）需独立 verifier 在最终 committed tree 上复核并出具 PASS/REJECT。
-3. **tree 绑定**：证据 `.txt` 已在第三轮评审修复层（golden 配置冲突收敛 + 超长绑定 400 + 文档/随包 skill 同步）落地后的工作树复跑，绑定源代码提交 `7e0eb5af779f4a7dd9264aed395d0a3b00889ca7` + record-excluded tree `b6e92e21facdc8ba87893bfc632735f1a2b3edd3`；本报告文本属于排除的证据目录，runner 仍须按机器契约绑定最终提交的完整 tree 与证据哈希。
+3. **tree 绑定**：8 份证据 `.txt` 已在第四轮评审修复层（`run_verifier_agent.py` 1007 非空行越过 CI 的 1000 行硬门，按 #279 的做法拆成 `agent_runner_verdict.py` / `agent_runner_verifier_response_log.py` / `agent_runner_verdict_pr_effects.py`，编排留在原模块并继续重新导出协议名；纯搬移、无行为变更）落地后的工作树逐字复跑。绑定块改用 reviewer 可解析的写法：`HEAD=abc3a55790e065ae9483d7920f41d12ac18153ea`、`TREE=a295951a7a33200b0a8a723a4da70d6950816eec`（= `git rev-parse abc3a557^{tree}`）、`RUN_ON`（capture 跑在该提交之上的工作树）、`CODE_DELTA`（本轮 4 个拆分文件）、`RECORD_EXCLUDED`（`tasks/pending|archive|evidence` 记录性文件不参与代码断言）。前三轮引用的合成 tree `b6e92e21…` / `e66a427e…` 只能按临时 index 重算配方复核、不可从任何 ref 解析，本轮起不再作为绑定引用。本报告文本属于排除的证据目录；runner 仍须按机器契约绑定最终提交的完整 tree 与证据哈希，并重新发布证据包（rework 刷新会用新 head 改写 PR 的 `iar:validation-evidence` marker 并重传 `iar-evidence/issue-278` 分支）。
 
 ## 结论
 

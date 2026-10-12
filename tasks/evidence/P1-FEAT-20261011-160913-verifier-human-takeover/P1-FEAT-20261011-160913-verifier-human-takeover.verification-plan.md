@@ -4,7 +4,7 @@
 
 按 PRD §7 的 rv-1、rv-2 顺序验证最终工作树。每项先运行能让对应断言变红的负控，再运行修复后路径；证据按 `rv-<item_number>-<slug>.<ext>` 单项保存于本目录，原始输出与全部 RV 脚本位于同目录 `scripts/` 与 `rv-*.txt`，受仓库 `.gitignore` 证据白名单约束（仅 `*.md` 与 `evidence.json` 进入代码 diff，`.txt`/`.png`/`scripts/*.py` 为原始件不入库）。真实入口不替换为 mock；仅在 PRD §7 mock_boundary 明确允许处替换外部 GitHub 与 verifier CLI。
 
-本轮复核源代码提交为 `7e0eb5af779f4a7dd9264aed395d0a3b00889ca7`，证据 `.txt` 绑定 record-excluded tree `b6e92e21facdc8ba87893bfc632735f1a2b3edd3`（第三轮评审修复层落地后的工作树：与 main 的测试冲突收敛、`build_app_config()` 导入期单例泄漏在 conftest 收口、超长接管绑定回 400、随包 skill 与文档同步；见各 `rv-*.txt` 绑定块）。后续只更新本证据目录中的报告文本时，该 record-excluded tree 保持不变；runner 仍需在最终提交后按机器契约记录最终 committed tree 与证据哈希。
+本轮（第四轮评审修复）复核的已提交实现为 `abc3a55790e065ae9483d7920f41d12ac18153ea`，其 tree `a295951a7a33200b0a8a723a4da70d6950816eec` 可由任何 reviewer 用 `git rev-parse abc3a557^{tree}` 解析。8 份证据 `.txt` 在该提交之上、承载本轮拆分改动的工作树上逐字复跑，绑定块给出 `HEAD`/`TREE`/`RUN_ON`/`CODE_DELTA`/`RECORD_EXCLUDED` 五项（见各文件开头），不再引用只能按临时 index 配方重算、且不可从 ref 解析的合成 record-excluded tree（前三轮的 `b6e92e21…` / `e66a427e…`）。本轮改动为把 1007 非空行的 `run_verifier_agent.py` 按 #279 的做法拆成 `agent_runner_verdict.py`（verdict 协议）、`agent_runner_verifier_response_log.py`（原始响应落盘）、`agent_runner_verdict_pr_effects.py`（PR 侧副作用），编排与候选 agent 选择留在原模块、协议名继续重新导出，捕获结果与上一轮逐字一致（135 / 221 / 280 / 523 passed、两支探针 OK）。后续只更新本证据目录中的报告文本时，代码断言不变；runner 仍需在最终提交后按机器契约记录最终 committed tree 与证据哈希。
 
 ## 真实入口与执行环境边界
 
