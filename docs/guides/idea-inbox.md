@@ -69,6 +69,8 @@ tasks/inbox/              →   tasks/pending/   →   tasks/archive/
 > 想法原文...
 ```
 
+头部时间戳与 agent 捕获条目同约定：是**写入机器（服务器本机）的本地墙钟**、无时区后缀；`/ideas` 页面原样展示，不做浏览器时区换算（无时区信息不可换算，见 `docs/ai-standards/time-display.md`）。产品写入路径（`append_idea` 缺省时间戳）遵循同一约定，不得写 UTC 墙钟。
+
 ## 给 AI 的硬性规则
 
 **什么时候写（触发规则）**——默认**不写**，不要把对话变成转写稿：

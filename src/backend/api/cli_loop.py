@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.api.cli_exit_codes import ExitCode
+from backend.api.cli_utils import format_local_display_time
 from backend.api.cli_output import (
     OUTPUT_FORMAT_JSON,
     OUTPUT_FORMAT_TABLE,
@@ -77,7 +78,7 @@ def _format_task_row(task: LoopTask) -> str:
     """Render a single loop entry as a fixed-width row for the table output."""
     schedule = f"{task.schedule.kind.value}:{task.schedule.expression}"
     enabled = "yes" if task.enabled else "no"
-    next_fire = task.next_fire_at or "—"
+    next_fire = format_local_display_time(task.next_fire_at) or "—"
     return (
         f"{task.id:<24} {task.repo_id:<24} {schedule:<28} "
         f"enabled={enabled:<3} next_fire={next_fire}"
@@ -210,7 +211,7 @@ def run_loop_create_command(
     print(
         f"Registered loop '{task.id}' "
         f"(repo_id={task.repo_id}, schedule={task.schedule.expression}, "
-        f"next_fire={task.next_fire_at})."
+        f"next_fire={format_local_display_time(task.next_fire_at) or '—'})."
     )
     return 0
 
@@ -358,12 +359,14 @@ def run_loop_run_now_command(
     if result.status.value == "fired":
         print(
             f"Loop '{result.loop_id}' fired: PRD={result.relative_prd_path}, "
-            f"issue={result.issue_url}, next_fire={result.next_fire_at}."
+            f"issue={result.issue_url}, "
+            f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
         )
     elif result.status.value == "skipped_duplicate":
         print(
             f"Loop '{result.loop_id}' skipped: {result.skipped_reason} "
-            f"PRD={result.relative_prd_path}, next_fire={result.next_fire_at}."
+            f"PRD={result.relative_prd_path}, "
+            f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
         )
     else:  # dry_run
         print(f"Loop '{result.loop_id}' dry-run: {result.skipped_reason}")

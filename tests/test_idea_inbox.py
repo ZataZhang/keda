@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,29 @@ def test_append_idea_creates_initial_file_and_appends_blocks(tmp_path: Path) -> 
     snapshot = read_idea_inbox(repo)
     assert len(snapshot.entries) == 2
     assert snapshot.entries[1].text == "第二条想法\n第二行"
+
+
+def test_append_idea_default_stamp_is_local_wall_clock(tmp_path: Path) -> None:
+    """默认时间戳遵循 docs/guides/idea-inbox.md 的本地墙钟约定（Issue #239）。
+
+    ideas.md 头部时间无时区、展示侧原样读取；若默认值写 UTC 墙钟，
+    页面就会把 UTC 当本地时间显示。
+    """
+    repo = tmp_path / "stamp-repo"
+    repo.mkdir()
+    result = append_idea(
+        repo,
+        source=IdeaInboxSource.FRONTEND,
+        author="alice",
+        text="默认时间戳",
+    )
+    stamp = datetime.fromisoformat(result.entry.occurred_at)
+    assert stamp.tzinfo is None  # 墙钟标签，不带时区。
+    assert (
+        abs(datetime.now().replace(microsecond=0) - stamp.replace(microsecond=0)).total_seconds()
+        < 120
+    )
+    assert stamp.strftime("%Y-%m-%d %H:%M") == result.entry.occurred_at
 
 
 def test_append_idea_rejects_empty_text(repo_dir: Path) -> None:

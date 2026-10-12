@@ -132,8 +132,10 @@ kc loop create github-trending \
 ```
 id                       repo_id                   schedule                     enabled     next_fire
 ---------------------------------------------------------------------------------------------------------
-github-trending          keda                      cron:0 8 * * *               yes         2026-06-24T00:00:00+00:00
+github-trending          keda                      cron:0 8 * * *               yes         2026-06-23T08:00:00+08:00
 ```
+
+- `next_fire` 等时间列按**执行机器本地时区**显示并带本地偏移；账本与 `--json` 机器输出仍是 UTC（`+00:00`）原文，不受显示影响。
 
 ### `kc loop cancel <id>`
 

@@ -264,7 +264,10 @@ def append_idea(
     if not ideas_path.exists():
         _initialize_ideas_file(ideas_path)
     existing = ideas_path.read_text(encoding="utf-8")
-    stamp = occurred_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    # ideas.md 头部时间戳按 docs/guides/idea-inbox.md 约定是**捕获机器本地墙钟**
+    # （agent 用 `date "+%Y-%m-%d %H:%M"` 写入），展示侧原样读取、不做时区换算；
+    # 产品写入的默认值必须遵循同一约定，否则页面会把 UTC 墙钟当本地时间显示。
+    stamp = occurred_at or datetime.now().strftime("%Y-%m-%d %H:%M")
     entry_id = _new_entry_id()
     block = _format_idea_block(
         occurred_at=stamp,

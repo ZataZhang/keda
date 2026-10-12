@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_runner import (
     FailureType,
     IssueSummary,
     RunnerConfig,
+    StallSupervisorConfig,
 )
 from backend.core.use_cases.run_agent_once import (
     MaxRetriesExceededError,
@@ -58,6 +59,7 @@ def test_run_agent_until_committed_enters_recovery_after_timeout(
             input_text=None,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             self.attempts += 1
             raise subprocess.TimeoutExpired(cmd=list(command), timeout=timeout)
@@ -69,7 +71,10 @@ def test_run_agent_until_committed_enters_recovery_after_timeout(
             timeout_seconds=5,
             inactivity_timeout_seconds=1,
             recovery_retry_delay_seconds=0,
-        )
+        ),
+        # 本用例的 oracle 是超时→恢复的 attempt 计数；监督默认开启后 observer
+        # 会经同一 runner 采样进展，显式关闭以保持计数语义纯净。
+        stall_supervisor=StallSupervisorConfig(enabled=False),
     )
 
     with pytest.raises(MaxRetriesExceededError):
@@ -97,7 +102,9 @@ def test_run_fix_agent_uses_fix_timeout_seconds(tmp_path: Path) -> None:
             timeout_seconds=100,
             fix_timeout_seconds=30,
             agent_fallback_order=(),
-        )
+        ),
+        # 断言只看 fix agent 的超时传参；关闭停滞监督避免 observer 采样混入调用记录。
+        stall_supervisor=StallSupervisorConfig(enabled=False),
     )
 
     run_fix_agent(
@@ -125,7 +132,9 @@ def test_run_fix_agent_falls_back_to_timeout_seconds(tmp_path: Path) -> None:
             timeout_seconds=100,
             fix_timeout_seconds=None,
             agent_fallback_order=(),
-        )
+        ),
+        # 同上：本用例只校验 fallback 超时取值。
+        stall_supervisor=StallSupervisorConfig(enabled=False),
     )
 
     run_fix_agent(
@@ -176,6 +185,7 @@ def test_run_agent_until_committed_calls_fix_agent_before_recovery(
             input_text=None,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -290,6 +300,7 @@ def test_run_agent_until_committed_skips_fix_agent_when_disabled(
             input_text=None,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
@@ -375,6 +386,7 @@ def test_run_agent_until_committed_recovery_uses_recovery_timeout_seconds(
             input_text=None,
             label=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             command_tuple = tuple(command)
             self.calls.append(list(command))
