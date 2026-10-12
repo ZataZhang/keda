@@ -122,7 +122,7 @@ def run_agent_daemon(
     max_prd_issues: int = 1,
     transcript_runner_factory: Callable[[Path], IAgentTranscriptRunner] | None = None,
     max_deliberation_issues: int = 1,
-    concurrency: int = 1,
+    concurrency: int | None = None,
     output_view: IRunnerLiveView | None = None,
     reconcile_stale_attempts: bool = False,
     reclaim_ttl_seconds: int | None = None,
@@ -149,8 +149,9 @@ def run_agent_daemon(
             callers that do not assemble a runner).
         max_deliberation_issues: Maximum ``agent/deliberate`` Issues to process
             per Phase 0 pass. Defaults to 1 to bound multi-agent cost.
-        concurrency: Issues processed in parallel within each repository's
-            Phase 2 pass. ``1`` keeps the sequential path (zero regression).
+        concurrency: Optional process-wide override for Issues processed in
+            parallel. When omitted, each repository uses its merged runner
+            configuration; ``1`` keeps that repository's sequential path.
         output_view: Optional live view for parallel runs; each Issue's agent
             output goes to its own panel. ``None`` shows no dashboard (per-Issue
             log files are still written).
@@ -260,7 +261,7 @@ def _run_daemon_loop(
     max_prd_issues: int = 1,
     transcript_runner_factory: Callable[[Path], IAgentTranscriptRunner] | None = None,
     max_deliberation_issues: int = 1,
-    concurrency: int = 1,
+    concurrency: int | None = None,
     output_view: IRunnerLiveView | None = None,
     reconcile_stale_attempts: bool = False,
     reclaim_ttl_seconds: int | None = None,
@@ -355,10 +356,15 @@ def _run_daemon_loop(
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
                 _logger.error("PRD rework phase failed: %s", exc)
 
+            # 未传旗标时使用当前仓库的合并配置；显式旗标覆盖所有目标仓库。
+            repository_concurrency = max(
+                1,
+                context.config.runner.max_concurrent_issues if concurrency is None else concurrency,
+            )
+
             # 统一并发上限：每轮先读 Backlog「并发」策略（没有设置行 = 未设置，
-            # 继承容量），与本轮 runner 容量（flag > 仓库配置，已在 concurrency 里
-            # 解析完）取小，得到一个生效值。补位闸门与认领闸门消费同一个 ceiling，
-            # 页面数字从此在两处同时兑现。策略读取失败不阻断本轮：按未设置回退。
+            # 继承容量），与本仓 runner 容量取小，得到生效值。补位闸门与认领闸门共用该 ceiling，
+            # 页面数字因此与两处调度行为一致。策略读取失败时按未设置回退。
             policy_max_parallel: int | None = None
             if backlog_store_factory is not None:
                 try:
@@ -372,7 +378,9 @@ def _run_daemon_loop(
                         context.repo_id,
                         exc,
                     )
-            execution_ceiling = resolve_execution_ceiling(policy_max_parallel, max(1, concurrency))
+            execution_ceiling = resolve_execution_ceiling(
+                policy_max_parallel, repository_concurrency
+            )
 
             # 调度阶段：仅在 ``backlog.auto_advance`` 开启时持续推进 Backlog，先处理
             # 已完成/失败的 PRD，再将队列补到生效上限并标记 agent/ready。
@@ -429,7 +437,7 @@ def _run_daemon_loop(
                     run_history_store=run_history_store,
                     run_trigger=run_trigger,
                     repo_id=context.repo_id,
-                    concurrency=concurrency,
+                    concurrency=repository_concurrency,
                     output_view=output_view,
                     execution_ceiling=execution_ceiling,
                 )

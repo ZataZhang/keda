@@ -329,7 +329,8 @@ class TokenUsageStats:
     """仓库窗口内的 token 用量汇总（Stats 页 Token 汇总区的数据源）。
 
     ``by_flow`` 按 agent 调用流程分组（``implement`` / ``verify`` /
-    ``supervise`` / ``fix`` / ``closeout``）；``by_agent`` 按 agent 名分组。
+    ``supervise`` / ``fix`` / ``closeout`` / ``content_generation`` / ``unknown``）；
+    ``by_agent`` 按 agent 名分组。
     """
 
     by_flow: dict[str, TokenUsageTotals]

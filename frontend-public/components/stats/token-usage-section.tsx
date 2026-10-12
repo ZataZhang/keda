@@ -28,6 +28,8 @@ const TOKEN_FLOW_LABELS: Record<string, string> = {
   supervise: "评审",
   fix: "修复",
   closeout: "收尾",
+  content_generation: "内容生成",
+  unknown: "未分类",
 }
 
 /**
@@ -89,7 +91,8 @@ export function TokenUsageSection({
           <CardTitle className="text-base">Token 用量与费用</CardTitle>
           <CardDescription>
             按实际调用记录中的模型和四类 token
-            用量估算；价格按本机设置，缺少价格的模型会单独标出。
+            用量估算；缓存命中率按输入侧 token 加权，不含输出。不同模型的缓存实现可能不同。
+            价格按本机设置，缺少价格的模型会单独标出。
           </CardDescription>
         </div>
         <Button asChild size="sm" variant="outline" className="shrink-0">

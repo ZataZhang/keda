@@ -3,7 +3,7 @@
 从 agent CLI 的原始输出流解析官方自报的 usage 统计。当前识别
 claude stream-json 的 ``result`` 事件形态（``usage`` 携带 input /
 output / cache_read / cache_creation 四个整数字段）；其他 agent 的
-result 事件若同形也能命中，形状不同或拿不到时宽容降级为"无数据"
+result 事件只有字段名称和语义一致时才会命中，形状不同或拿不到时宽容降级为"无数据"
 （``None``），绝不估算、绝不抛异常影响主流程。
 
 同一逐行观测点顺带捕获 agent CLI 自报的 ``session_id``（兼容 Claude / Qoder /

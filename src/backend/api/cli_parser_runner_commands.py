@@ -110,6 +110,7 @@ def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help=(
             "Number of Issues to process in parallel per pass. Defaults to "
+            "each target repository's merged "
             "[agent_runner.runner].max_concurrent_issues (1 = sequential). "
             ">1 shows a per-Issue live view on a TTY and writes per-Issue logs."
         ),

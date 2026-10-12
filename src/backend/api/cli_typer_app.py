@@ -316,8 +316,9 @@ ConcurrencyOption = Annotated[
     typer.Option(
         "--concurrency",
         help=(
-            "Issues to process in parallel per pass (default: "
-            "[agent_runner.runner].max_concurrent_issues; 1 = sequential)."
+            "Issues to process in parallel per pass (default: each target "
+            "repository's merged [agent_runner.runner].max_concurrent_issues; "
+            "1 = sequential)."
         ),
     ),
 ]

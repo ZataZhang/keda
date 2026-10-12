@@ -1,16 +1,4 @@
-"""agent token 用量聚合（Stats 页 Token 汇总区的数据源）。
-
-扫描窗口内的生命周期事件，把挂在事件 ``detail_json`` 里的 token 用量按
-**流程**、**agent** 与 **PRD（Issue）** 三个维度汇总。两类来源：
-
-- attempt 族事件（``attempt`` / ``retry`` / ``recovered``）的
-  ``detail.token_usage`` —— 实现/修复主调用，flow 固定为 ``implement``；
-- ``agent_token_usage`` 观测事件的 ``detail`` —— ``detail.flow`` 原样作为
-  flow（``verify`` / ``supervise`` / ``fix`` / ``closeout``）。
-
-缺 ``token_usage`` 的事件不计入；detail 损坏按空 dict 容错（与账本读取
-口径一致）。总量 = 四项之和（实际处理量口径，含缓存读写）。
-"""
+"""Token 用量基础解析与旧生命周期账本兼容。"""
 
 from __future__ import annotations
 
@@ -21,7 +9,6 @@ from datetime import datetime, timedelta, timezone
 
 from backend.core.shared.models.backlog import (
     ModelTokenUsageStats,
-    PrdModelTokenUsageEntry,
     PrdTokenUsageEntry,
     TokenUsageStats,
     TokenUsageTotals,
@@ -29,7 +16,7 @@ from backend.core.shared.models.backlog import (
 
 _logger = logging.getLogger(__name__)
 
-#: attempt 族事件里携带 usage 的事件类型值；其 flow 统一归为实现主调用。
+#: attempt 族事件都携带同一实现流程的 usage；兼容汇总保留历史行为。
 _ATTEMPT_FLOW_EVENT_TYPES = frozenset({"attempt", "retry", "recovered"})
 
 #: attempt 族事件聚合出的 flow 名。
@@ -37,9 +24,6 @@ _IMPLEMENT_FLOW = "implement"
 
 #: 观测事件的事件类型值。
 _OBSERVATION_EVENT_TYPE = "agent_token_usage"
-
-# 调用事件完成时写入一次 usage，包含该次实际执行所用模型。
-_INVOCATION_FINISHED_EVENT_TYPE = "invocation_finished"
 
 _USAGE_INT_FIELDS: tuple[str, ...] = (
     "input_tokens",
@@ -210,27 +194,19 @@ def build_token_usage_by_prd(
     run_records: list[object] | None = None,
     events_by_run: dict[str, list[object]] | None = None,
 ) -> list[PrdTokenUsageEntry]:
-    """把窗口内的 token 用量按 PRD（Issue）维度汇总。
-
-    同一 PRD 的多次 run 合并累计；口径与 :func:`aggregate_token_usage`
-    单源（每条用量先经它同款提取规则校验，再并入 PRD 分组）。
+    """按 PRD 汇总 token 用量，并保留旧模块导入路径。
 
     Args:
-        store: 生命周期账本（鸭子类型：只需 ``list_lifecycle_runs`` /
-            ``list_lifecycle_events`` 两个读方法）；调用方自带
-            ``run_records`` 与 ``events_by_run`` 时不会被读取。
-        repo_id: 仓库过滤；``None`` 表示全部仓库（仅自读账本时生效）。
-        days: 时间窗口天数（内部钳制 1–365；仅自读账本时生效）。
-        now: 统计基准时间；缺省取当前 UTC 时间（仅自读账本时生效）。
-        issue_number: 只统计该 Issue 的 run；``None`` 表示不过滤。
-        run_records: 调用方已持有的窗口内 run 记录；提供时不再
-            ``list_lifecycle_runs``，保证与调用方同一读集、不做二次读库。
-        events_by_run: run_id 到事件列表的映射；提供时单 run 事件直接取
-            用映射（缺失视为无事件），不再 ``list_lifecycle_events``。
+        store: 生命周期与调用账本读取对象。
+        repo_id: 仓库过滤；``None`` 表示全部仓库。
+        days: 时间窗口天数。
+        now: 可选的统计基准时间。
+        issue_number: 可选的 Issue 过滤条件。
+        run_records: 可选的调用方预加载 run 记录。
+        events_by_run: 可选的调用方预加载生命周期事件。
 
     Returns:
-        按 ``total_tokens`` 降序的 :class:`PrdTokenUsageEntry` 列表；无数据
-        返回空列表。
+        按总 token 数降序排列的 PRD 汇总列表。
     """
     window_runs = (
         list(run_records)
@@ -240,42 +216,16 @@ def build_token_usage_by_prd(
     if issue_number is not None:
         window_runs = [record for record in window_runs if record.issue_number == issue_number]
 
-    grouped: dict[tuple, tuple[int, TokenUsageTotals]] = {}
-    for run_record in window_runs:
-        if events_by_run is not None:
-            events = events_by_run.get(run_record.run_id, [])
-        else:
-            events = _run_events(store, run_record.run_id)
-        # 复用 aggregate_token_usage 的单条提取与校验规则：对单 run 事件
-        # 聚合后把各 flow 份合并成该 run 的总量，再并入 PRD 分组。
-        run_stats = aggregate_token_usage(events)
-        run_totals = _sum_totals(run_stats.by_flow.values())
-        if run_totals.usage_count == 0:
-            # 整个 run 无可用用量（agent 未上报 / 全部畸形）：按"缺失排除"
-            # 口径跳过，不为它制造全零行。
-            continue
-        key = (run_record.repo_id, run_record.prd_path, run_record.issue_number)
-        previous_count, previous_totals = grouped.get(key, (0, TokenUsageTotals()))
-        grouped[key] = (previous_count + 1, _combine_totals(previous_totals, run_totals))
-
-    entries = [
-        PrdTokenUsageEntry(
-            repo_id=group_repo_id,
-            prd_path=group_prd_path,
-            issue_number=group_issue_number,
-            run_count=group_run_count,
-            totals=group_totals,
-        )
-        for (
-            group_repo_id,
-            group_prd_path,
-            group_issue_number,
-        ), (group_run_count, group_totals) in grouped.items()
-    ]
-    entries.sort(
-        key=lambda entry: (-entry.totals.total_tokens, entry.repo_id or "", entry.issue_number or 0)
+    from backend.core.use_cases.agent_runner_invocation_token_stats import (
+        build_invocation_token_usage_summary,
     )
-    return entries
+
+    summary = build_invocation_token_usage_summary(
+        store=store,
+        run_records=window_runs,
+        events_by_run=events_by_run,
+    )
+    return list(summary.token_usage_by_prd)
 
 
 def build_model_token_usage_stats(
@@ -283,129 +233,20 @@ def build_model_token_usage_stats(
     store: object,
     run_records: list[object],
 ) -> ModelTokenUsageStats:
-    """按模型、Agent 与 PRD 汇总调用账本中可归属的 token 用量。
+    """按模型汇总 usage，并保留旧模块导入路径。
 
-    调用账本的 run id 是每次 Issue 执行唯一值，而生命周期 run id 是 PRD
-    级身份，因此通过同一仓库 / Issue 的时间窗口关联两本账。``reported_model``
-    优先于 ``requested_model``；两者都缺失时保留为 ``unknown``。旧账本或未提供
-    usage 的调用不估算。
+    Args:
+        store: 生命周期与调用账本读取对象。
+        run_records: 当前统计窗口内已加载的 lifecycle run。
+
+    Returns:
+        模型、Agent 与 PRD 维度的调用 usage 汇总。
     """
-    issue_event_reader = getattr(store, "list_issue_invocation_events", None)
-    if not callable(issue_event_reader):
-        return ModelTokenUsageStats()
-
-    run_windows_by_issue: dict[tuple[str, int], list[tuple[object, datetime, datetime | None]]] = {}
-    for run_record in run_records:
-        repo_id = str(getattr(run_record, "repo_id", ""))
-        issue_number = getattr(run_record, "issue_number", None)
-        started_at = _parse_event_timestamp(getattr(run_record, "started_at", None))
-        finished_at = _parse_event_timestamp(getattr(run_record, "finished_at", None))
-        if not repo_id or not isinstance(issue_number, int) or started_at is None:
-            continue
-        issue_key = (repo_id, issue_number)
-        run_windows_by_issue.setdefault(issue_key, []).append((run_record, started_at, finished_at))
-
-    totals_by_model: dict[str, TokenUsageTotals] = {}
-    totals_by_agent_model: dict[str, dict[str, TokenUsageTotals]] = {}
-    totals_by_prd_model: dict[tuple[str, str | None, int | None, str], TokenUsageTotals] = {}
-    history_truncated = False
-    for (repo_id, issue_number), issue_run_windows in run_windows_by_issue.items():
-        try:
-            invocation_events = list(
-                issue_event_reader(repo_id=repo_id, issue_number=issue_number, limit=500)
-            )
-        except Exception as exc:  # noqa: BLE001 - one Issue must not break the Stats page.
-            _logger.warning("Failed to read model usage for %s#%s: %s", repo_id, issue_number, exc)
-            continue
-        history_truncated = history_truncated or len(invocation_events) >= 500
-        for invocation_event in invocation_events:
-            if str(getattr(invocation_event, "event_type", "")) != (
-                _INVOCATION_FINISHED_EVENT_TYPE
-            ):
-                continue
-            occurred_at = _parse_event_timestamp(getattr(invocation_event, "occurred_at", None))
-            if occurred_at is None:
-                continue
-            matching_run_windows = [
-                run_window
-                for run_window in issue_run_windows
-                if run_window[1] <= occurred_at
-                and (run_window[2] is None or occurred_at <= run_window[2])
-            ]
-            if not matching_run_windows:
-                continue
-            run_record = max(matching_run_windows, key=lambda run_window: run_window[1])[0]
-            detail = _parse_detail_json(getattr(invocation_event, "detail_json", "") or "")
-            usage_totals = _totals_from_payload(detail.get("token_usage"))
-            if usage_totals is None:
-                continue
-            reported_model = detail.get("reported_model")
-            requested_model = detail.get("requested_model")
-            model_id = next(
-                (
-                    model_value.strip()
-                    for model_value in (reported_model, requested_model)
-                    if isinstance(model_value, str) and model_value.strip()
-                ),
-                "unknown",
-            )
-            agent_name = str(getattr(invocation_event, "agent", "") or "unknown")
-            _merge_totals(totals_by_model, model_id, usage_totals)
-            agent_model_totals = totals_by_agent_model.setdefault(agent_name, {})
-            _merge_totals(agent_model_totals, model_id, usage_totals)
-            prd_model_key = (
-                repo_id,
-                getattr(run_record, "prd_path", None),
-                issue_number,
-                model_id,
-            )
-            current_prd_totals = totals_by_prd_model.get(prd_model_key, _empty_totals())
-            totals_by_prd_model[prd_model_key] = _combine_totals(current_prd_totals, usage_totals)
-
-    by_prd = tuple(
-        sorted(
-            (
-                PrdModelTokenUsageEntry(
-                    repo_id=repo_id,
-                    prd_path=prd_path,
-                    issue_number=issue_number,
-                    model_id=model_id,
-                    totals=totals,
-                )
-                for (
-                    repo_id,
-                    prd_path,
-                    issue_number,
-                    model_id,
-                ), totals in totals_by_prd_model.items()
-            ),
-            key=lambda entry: (
-                -entry.totals.total_tokens,
-                entry.repo_id,
-                entry.issue_number or 0,
-                entry.model_id,
-            ),
-        )
-    )
-    return ModelTokenUsageStats(
-        by_model=totals_by_model,
-        by_agent=totals_by_agent_model,
-        by_prd=by_prd,
-        truncated=history_truncated,
+    from backend.core.use_cases.agent_runner_invocation_token_stats import (
+        build_model_token_usage_stats as build_invocation_model_token_usage_stats,
     )
 
-
-def _parse_event_timestamp(raw_timestamp: object) -> datetime | None:
-    """解析调用 / lifecycle 时间戳；无效值返回 ``None``。"""
-    if not isinstance(raw_timestamp, str):
-        return None
-    try:
-        parsed_timestamp = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed_timestamp.tzinfo is None:
-        return None
-    return parsed_timestamp.astimezone(timezone.utc)
+    return build_invocation_model_token_usage_stats(store=store, run_records=run_records)
 
 
 def build_token_usage_stats_for_issue(
@@ -416,17 +257,29 @@ def build_token_usage_stats_for_issue(
     issue_number: int,
     now: datetime | None = None,
 ) -> TokenUsageStats:
-    """构建单个 Issue（PRD）视角的按流程 / 按 agent 汇总。
+    """按单个 Issue 汇总流程与 Agent usage，并保留旧模块导入路径。
 
-    事件提取与分组规则完全复用 :func:`aggregate_token_usage`；本函数只
-    负责把 run 范围收窄到该 Issue。
+    Args:
+        store: 生命周期与调用账本读取对象。
+        repo_id: 仓库过滤；``None`` 表示全部仓库。
+        days: 时间窗口天数。
+        issue_number: Issue 编号。
+        now: 可选的统计基准时间。
+
+    Returns:
+        该 Issue 的流程与 Agent 用量汇总。
     """
-    collected: list[object] = []
-    for run_record in _list_window_runs(store, repo_id=repo_id, days=days, now=now):
-        if run_record.issue_number != issue_number:
-            continue
-        collected.extend(_run_events(store, run_record.run_id))
-    return aggregate_token_usage(collected)
+    from backend.core.use_cases.agent_runner_invocation_token_stats import (
+        build_token_usage_stats_for_issue as build_invocation_token_usage_stats_for_issue,
+    )
+
+    return build_invocation_token_usage_stats_for_issue(
+        store=store,
+        repo_id=repo_id,
+        days=days,
+        issue_number=issue_number,
+        now=now,
+    )
 
 
 __all__ = [

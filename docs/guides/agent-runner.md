@@ -596,7 +596,7 @@ provision_database = true
 # 每次轮询每个仓库最多处理多少个 Issue
 max_issues = 1
 # 单轮内并行处理的 Issue 数量（自动执行的 runner 容量）：1 为串行（默认）；>1 时同一轮并行跑多个 Issue。
-# 仅 `kc daemon --concurrency` 未指定时作为默认值；自动调度的生效并发上限 = min(Backlog「并发」策略, 本值)。
+# daemon 未指定 `--concurrency` 时，各仓库按各自合并配置取值；自动调度的生效并发上限 = min(Backlog「并发」策略, 本值)。
 max_concurrent_issues = 1
 # 默认使用的 AI agent：auto / claude / codex / kimi
 default_agent = "auto"
@@ -1232,7 +1232,7 @@ kc pr aggregate --issue 101 --issue 102
 
   手动入口仅接受同仓库、仍符合门禁（见下节「批次聚合的资格门与两次调用」）且每个 Issue 唯一的来源 PR；自动入口和手动入口都至少需要两个 Issue。系统不跨调用猜测批次、不自动合并总 PR。真实 GitHub PR 创建、checks、关闭评论及远端分支保留状态需在真实服务上确认，不能由本地测试代替。
 - 定向 run 只处理目标 Issue（仍走依赖门禁与 claim）；队列里其他 ready Issue 原封不动。
-- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（默认 `max_concurrent_issues=1`，即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。显式 run（定向与 `--all-ready`）**不受 Backlog「并发」策略约束**：统一并发上限只闸门自动执行路径。
+- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（未指定时各仓库使用合并配置中的 `max_concurrent_issues`，默认 `1` 即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。显式 run（定向与 `--all-ready`）**不受 Backlog「并发」策略约束**：统一并发上限只闸门自动执行路径。
 
 **迁移**：旧脚本/文档里"无目标的 `kc run`"改为 `kc run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
 
@@ -2363,11 +2363,11 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 kc daemon --concurrency 3
 ```
 
-- **取值来源**：未传 `--concurrency` 时回退到 `[agent_runner.runner].max_concurrent_issues`（默认 `1` = 串行，行为与改动前逐字节一致）。
+- **取值来源**：显式 `--concurrency` 覆盖本次 daemon 的所有目标仓库；未传时，每个目标仓库分别读取其合并配置 `[agent_runner.runner].max_concurrent_issues`（默认 `1` = 串行）。`kc daemon --all` 因此按各仓库自己的容量运行。
 - **统一并发上限**：daemon 每轮（无论 Backlog 自动推进开关是否开启）先把 Backlog「并发」策略与该轮容量解析成单一生效值 `ceiling = min(策略, 容量)`（策略从未设置 = 继承容量）。这个 ceiling 同时喂给补位闸门（`kc backlog advance` 同一口径；补位动作仅在 Backlog 自动推进开启时执行）与认领闸门：ready 通道本轮新认领数 = ``max(0, ceiling − 仓库内 open agent/running 标签数)``，占满即本轮零认领；计数查询最多取到 ceiling + 1，超出时日志标为「至少 ceiling + 1」。计数失败按 fail-closed 处理（宁可不领）。如果后续带标签的 running 恢复候选查询也失败，daemon 会用有界的 open Issue 列表重试筛选，以便继续处理既有恢复项；备用扫描也失败时记录原因并跳过该恢复扫描。running / blocked 恢复及 `direct_pr_cleanup` 收尾不新增并发，保持原配额，不受 ceiling 压低。
 - **领取上限**：并行时单轮领取上限抬到 `max(max_issues, concurrency)`，所以单独一个 `--concurrency N` 即可领到并跑 N 个，无需再调 `--max-issues`。
 - **隔离**：每个 Issue 仍各自 worktree / 分支；共享仓库的 worktree 创建被串行化以避开 `.git` 竞争，真正耗时的 agent 执行阶段全程并行。
-- **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）仍逐仓库串行、仓库内 Issue 并行。
+- **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）仍逐仓库串行；每个仓库按自己的容量并行处理 Issue，显式 `--concurrency` 则统一覆盖各仓库。
 - **成本提醒**：`--concurrency N` 即 N 路 agent 同时烧 token，请按额度与机器资源设定。
 
 > “本次优先某个 agent”无需新参数：`kc daemon --agent claude` 已把该 agent 放到 fallback 链首位（见上文 escalation ladder）。
@@ -4223,17 +4223,27 @@ blocked | unblocked | failed`，其中 `merged` 收成 `completed`（已完成�
 历史事件会失去当时语义。`frontend-public` 的 Backlog「执行过程」标签据此渲染逐行
 状态徽章，抽屉「状态」行同源。
 
-**Token 用量统计（agent_token_usage 观测维度）**
+### Token 用量统计与会话续接
 
-每次 agent 子进程调用的官方 usage（claude stream-json 的 `result.usage`）
-在子进程执行层**渲染前**捕获并挂进事件 `detail_json`：
+每次实际 Agent 子进程调用的官方 usage（Claude stream-json 的 `result.usage`，
+其它执行器仅在输出同名且语义一致的字段时采集）在子进程执行层**渲染前**捕获到
+`invocation_finished` 调用账本：
 
-- 实现/修复主调用记入 attempt 族事件的 `detail.token_usage`；验证
-  （verifier）、评审（supervisor）等旁路调用发独立的 `agent_token_usage`
-  观测事件（`detail.flow` ∈ `verify / supervise / fix / closeout`）。
+- **统一口径**：流程、Agent、PRD 与模型统计都从每次实际调用的结束事件汇总，
+  所以模型用量总数与流程/PRD 总数对齐。调用账本完全没有可用 usage 的旧 run
+  才回退到生命周期事件；同一 `AttemptResult` 的 `retry` / `recovered` 事件只是
+  镜像，回退统计只计 `attempt`，避免同一次用量重复相加。模型缺失的旧数据归为
+  `unknown`，不猜模型。
 - **口径**：总量 = 输入 + 输出 + 缓存读 + 缓存写（实际处理量，缓存命中
-  计入）；缓存命中率 = 缓存读 ÷ 输入侧。agent 未上报 usage（部分协议、
-  超时被杀、旧记录）时**不估算**，展示为「—」且不进入汇总。
+  计入）；缓存命中率 = 缓存读 ÷（输入 + 缓存读 + 缓存写），不把输出 token
+  放入分母。汇总命中率按各模型上报的输入侧 token 加权；各模型缓存策略与 usage
+  字段口径可能不同，不宜直接比较。Agent 未上报 usage（部分协议、超时被杀、
+  旧记录）时**不估算**，展示为「—」且不进入汇总；每个 Issue 最多读取最近
+  500 条调用事件，达到上限时相关统计可能少计。
+- **会话续接**：实现阶段的失败恢复会在同一 Issue、同一 Agent 支持续接时传回
+  上一轮 session id；完成的会话不会自动用于新执行。评审等独立阶段使用自己的
+  阶段会话记录。session id 负责让 Agent CLI 接着已有对话工作，缓存命中率则只
+  采用执行器上报的 `cache_read_input_tokens`；续接本身不能保证供应商会报告缓存命中。
 - **CLI 查询**：`kc tokens [--repo-id <id>] [--days <N>] [--issue <n>] [--json]`
   在终端输出按流程 / 按 agent / 按 PRD（Issue）三张汇总表（与 Stats 端点
   同源同口径）；`--issue <n>` 把三张表收窄到单个 Issue，回答"这个 PRD 烧了
@@ -4241,7 +4251,8 @@ blocked | unblocked | failed`，其中 `merged` 收成 `completed`（已完成�
   空态文案。
 - **Stats 页展示**：Stats 页「Token 用量」区渲染同样三张表（按流程 / 按
   agent / 按 PRD），由 `stats/prd-lifecycle` 端点的 `token_usage` 与
-  `token_usage_by_prd` 驱动，与 CLI 同源同口径；「按 PRD」表按总量降序，
+  `token_usage_by_prd` 驱动，与 CLI 同源同口径；模型成本和 token 明细也复用
+  同一调用账本；「按 PRD」表按总量降序，
   同一 PRD 的多次执行合并为一行并显示累计执行次数（`run_count`）。
 
 ### 模型 Token 成本估算

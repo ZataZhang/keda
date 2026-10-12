@@ -41,10 +41,8 @@ from backend.core.shared.models.backlog import (
     PrdLifecycleStatsRow,
     TokenUsageStats,
 )
-from backend.core.use_cases.agent_runner_token_stats import (
-    aggregate_token_usage,
-    build_model_token_usage_stats,
-    build_token_usage_by_prd,
+from backend.core.use_cases.agent_runner_invocation_token_stats import (
+    build_invocation_token_usage_summary,
 )
 from backend.core.use_cases.prd_invocation_detail import (
     build_prd_invocation_detail,
@@ -849,14 +847,12 @@ def build_prd_lifecycle_stats(
     completed_blocked: list[float] = []
     phase_totals: dict[str, float] = {}
     incomplete_count = 0
-    window_events: list[object] = []
     events_by_run: dict[str, list[object]] = {}
     for run_record in run_records:
         try:
             stored_events = lifecycle_store.list_lifecycle_events(run_id=run_record.run_id)
         except Exception:  # noqa: BLE001 - one run must not break the whole stats page.
             stored_events = []
-        window_events.extend(stored_events)
         events_by_run[run_record.run_id] = list(stored_events)
         breakdown = classify_durations(
             stored_events, finished_at=run_record.finished_at, now=reference_now
@@ -912,29 +908,23 @@ def build_prd_lifecycle_stats(
         bottleneck_phase = max(waiting_phase_totals, key=lambda name: waiting_phase_totals[name])
         bottleneck_seconds = waiting_phase_totals[bottleneck_phase]
 
-    # PRD 维度汇总复用已持有的 run_records 与 events_by_run（同一读集，
-    # 不做二次读库）；异常按账本降级语义收敛为空列表，不拖垮 Stats 页。
+    # 流程、Agent、PRD 与模型维度统一从调用账本生成，避免不同页面分区
+    # 混用生命周期事件与实际进程调用，或把 retry / recovered 镜像事件重复相加。
     try:
-        token_usage_by_prd = build_token_usage_by_prd(
+        token_usage_summary = build_invocation_token_usage_summary(
             store=lifecycle_store,
-            repo_id=repo_id,
-            days=bounded_days,
-            now=reference_now,
             run_records=run_records,
             events_by_run=events_by_run,
         )
     except Exception as exc:  # noqa: BLE001 - degraded stats beat a broken page.
-        _logger.warning("Failed to build PRD-dimension token usage: %s", exc)
+        _logger.warning("Failed to build invocation token usage summary: %s", exc)
+        token_usage = TokenUsageStats(by_flow={}, by_agent={})
         token_usage_by_prd = []
-
-    try:
-        token_usage_by_model = build_model_token_usage_stats(
-            store=lifecycle_store,
-            run_records=run_records,
-        )
-    except Exception as exc:  # noqa: BLE001 - model costs are an optional Stats section.
-        _logger.warning("Failed to build model-dimension token usage: %s", exc)
         token_usage_by_model = ModelTokenUsageStats()
+    else:
+        token_usage = token_usage_summary.token_usage
+        token_usage_by_prd = list(token_usage_summary.token_usage_by_prd)
+        token_usage_by_model = token_usage_summary.token_usage_by_model
 
     return PrdLifecycleStats(
         repo_id=repo_id,
@@ -957,7 +947,7 @@ def build_prd_lifecycle_stats(
         unlinked_run_count=unlinked_count,
         incomplete_run_count=incomplete_count,
         runs=rows,
-        token_usage=aggregate_token_usage(window_events),
+        token_usage=token_usage,
         token_usage_by_prd=token_usage_by_prd,
         token_usage_by_model=token_usage_by_model,
     )
