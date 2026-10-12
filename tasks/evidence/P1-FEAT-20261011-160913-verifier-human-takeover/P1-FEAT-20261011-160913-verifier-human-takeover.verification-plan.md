@@ -4,7 +4,7 @@
 
 按 PRD §7 的 rv-1、rv-2 顺序验证最终工作树。每项先运行能让对应断言变红的负控，再运行修复后路径；证据按 `rv-<item_number>-<slug>.<ext>` 单项保存于本目录，原始输出与全部 RV 脚本位于同目录 `scripts/` 与 `rv-*.txt`，受仓库 `.gitignore` 证据白名单约束（仅 `*.md` 与 `evidence.json` 进入代码 diff，`.txt`/`.png`/`scripts/*.py` 为原始件不入库）。真实入口不替换为 mock；仅在 PRD §7 mock_boundary 明确允许处替换外部 GitHub 与 verifier CLI。
 
-当前工作树尚无最终 commit tree：证据 `.txt` 绑定 HEAD `ac74d40d` 与 tracked 工作树（`git stash create` 所得 tree，见各 `rv-automated-tests.txt` 绑定块）；最终 committed tree 与证据哈希由 runner 在提交后绑定。
+本轮复核源代码提交为 `7bff2f4be7062eae4036ef7fdfc7a466a88eac20`，证据 `.txt` 绑定 record-excluded tree `eb32ac73556c10f5f67b812ecfd5afeb36715bd7`（见各 `rv-*.txt` 绑定块）。后续只更新本证据目录中的报告文本时，该 record-excluded tree 保持不变；runner 仍需在最终提交后按机器契约记录最终 committed tree 与证据哈希。
 
 ## 真实入口与执行环境边界
 
