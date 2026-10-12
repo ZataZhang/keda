@@ -3,24 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PRD 生命周期观测 · 交互原型</title>
+    <title>Console 运行时看板与模型评测 · 交互原型</title>
     <link rel="stylesheet" href="./assets/prototype-chrome.css" />
     <link rel="stylesheet" href="./assets/prd-lifecycle-observability.css" />
+    <link rel="stylesheet" href="./assets/runtime-board.css" />
   </head>
   <body>
     <!--
       交互原型（interactive prototype）：静态 fixture 驱动，不接入真实 API / SQLite。
-      shell、色彩与排版参照 frontend-public 的 Backlog 与 Stats 页面；所有数字与事件均为演示数据。
+      shell、色彩与排版参照 frontend-public；所有数字、日志和评测分数均为静态演示数据。
     -->
     <div class="app-shell">
       <aside class="product-sidebar" aria-label="产品导航">
-        <a class="product-brand" href="#roadmap" data-view-link="roadmap"><span>◈</span><strong>KedaCode</strong></a>
+        <a class="product-brand" href="#dashboard" data-view-link="dashboard"><span>◈</span><strong>KedaCode</strong></a>
         <nav>
-          <span class="nav-static" aria-disabled="true" title="Dashboard 不在本原型范围内"><span>⌂</span>Dashboard</span>
+          <button class="is-active" type="button" data-view-link="dashboard"><span>⌂</span>Dashboard</button>
           <span class="nav-static" aria-disabled="true" title="Processes 不在本原型范围内"><span>◉</span>Processes</span>
           <span class="nav-static" aria-disabled="true" title="Repositories 不在本原型范围内"><span>⑂</span>Repositories</span>
+          <button type="button" data-view-link="evaluations"><span>✳</span>模型评测</button>
           <button type="button" data-view-link="stats"><span>▥</span>Stats</button>
-          <button class="is-active" type="button" data-view-link="roadmap"><span>◇</span>Backlog</button>
+          <button type="button" data-view-link="roadmap"><span>◇</span>Backlog</button>
           <span class="nav-static" aria-disabled="true" title="Ideas 不在本原型范围内"><span>✦</span>Ideas</span>
           <a class="nav-link" href="./lifecycle-agent-matrix.html?screen=settings" target="_blank" rel="noopener noreferrer"><span>⚙</span>Settings ↗</a>
         </nav>
@@ -29,9 +31,61 @@
 
       <main class="workspace">
         <header class="topbar">
-          <div><span class="breadcrumb">Agent Runner /</span><strong id="page-title">Backlog</strong></div>
+          <div><span class="breadcrumb">Agent Runner /</span><strong id="page-title">Dashboard</strong></div>
           <div class="simulation-label">交互原型 · 模拟数据</div>
         </header>
+
+        <section class="page is-visible runtime-page" id="dashboard-view" data-view="dashboard">
+          <div class="page-heading runtime-heading">
+            <div><span class="eyebrow">LOCAL AGENT RUNNER</span><h1>统一运行时</h1><p>正在运行、等待与近期完成的任务，都在同一处查看。</p></div>
+            <button class="primary-button widget-launch-button hotspot-target" type="button" data-open-widget>◱ 开启桌面悬浮窗</button>
+          </div>
+          <div class="runtime-summary" aria-label="运行统计">
+            <article><span>运行中</span><strong class="tone-running" id="runtime-count-running">2</strong><small>正在推进</small></article>
+            <article><span>等待 / 审阅</span><strong class="tone-review" id="runtime-count-waiting">1</strong><small>等待下一步</small></article>
+            <article><span>需关注</span><strong class="tone-blocked" id="runtime-count-blocked">1</strong><small>阻塞或失败</small></article>
+            <article><span>本地连接</span><strong class="tone-connected">已连接</strong><small><i class="status-dot"></i>127.0.0.1 Console</small></article>
+          </div>
+          <div class="runtime-toolbar">
+            <div class="runtime-filters" aria-label="按任务状态筛选">
+              <button class="is-active" type="button" data-task-filter="all" aria-pressed="true">全部 <span>4</span></button>
+              <button type="button" data-task-filter="running" aria-pressed="false">运行中</button>
+              <button type="button" data-task-filter="waiting" aria-pressed="false">等待 / 审阅</button>
+              <button type="button" data-task-filter="blocked" aria-pressed="false">需关注</button>
+              <button type="button" data-task-filter="completed" aria-pressed="false">已完成</button>
+            </div>
+            <label class="runtime-search"><span aria-hidden="true">⌕</span><input id="runtime-search" type="search" placeholder="搜索任务、仓库或 Issue" aria-label="搜索任务、仓库或 Issue" /></label>
+          </div>
+          <div class="runtime-layout">
+            <section class="runtime-task-list" id="runtime-task-list" aria-label="运行任务卡片"></section>
+            <aside class="runtime-detail-panel" id="runtime-detail" aria-live="polite" aria-label="选中任务详情"></aside>
+          </div>
+          <p class="runtime-footnote">状态来自本机 Console 的任务生命周期。进度以当前阶段和耗时呈现；没有可信百分比时不估算。</p>
+        </section>
+
+        <section class="page evaluation-page" id="evaluations-view" data-view="evaluations">
+          <div class="page-heading runtime-heading">
+            <div><span class="eyebrow">MODEL & AGENT QUALITY</span><h1>模型与 Agent 评测</h1><p>用同一组固定样本比较执行模型和 Agent 预设；评审模型的评分与确定性检查分开展示。</p></div>
+            <div class="evaluation-actions"><button class="outline-button hotspot-target" type="button" data-open-judge-settings>⚙ 评审模型设置</button><button class="primary-button hotspot-target" type="button" data-open-eval-run>▶ 开始对比</button></div>
+          </div>
+          <div class="evaluation-context"><div><span>评测集</span><strong>agent-runner-golden-v3</strong><small>固定样本 · 12 项 · v3</small></div><div><span>固定基线</span><strong>main · 6f92b3a</strong><small>所有候选从同一 tree hash 开始</small></div><div class="judge-context"><span>当前评审器</span><strong><i class="judge-dot"></i>review-strong <i class="judge-dot secondary"></i>review-crosscheck</strong><small>2 个评分预设 · 最近更新 10:04</small></div></div>
+          <div class="evaluation-metrics">
+            <article class="evaluation-score"><span>有效评审结果</span><strong>66 <small>/ 72</small></strong><small>6 条未评分，未计为 0</small></article>
+            <article><span>确定性通过率</span><strong>91.7%</strong><small>11 / 12 个样本通过检查</small></article>
+            <article><span>样本执行中位耗时</span><strong>5m 42s</strong><small>所有候选 case 的中位数</small></article>
+            <article><span>每样本已知成本</span><strong>$0.18</strong><small>执行 + 评审 · 模拟数据</small></article>
+          </div>
+          <p class="evaluation-feedback" id="evaluation-feedback" role="status" hidden></p>
+          <article class="evaluation-table-card">
+            <div class="card-heading"><div><strong>预设对比</strong><span>同一评测集 · 同一 rubric v2.1 · 评分按维度汇总，分歧单独显示</span></div><label class="dataset-select"><span>批次</span><select aria-label="选择对比批次"><option>2026-10-12 · 3 个预设</option><option>2026-10-08 · 2 个预设</option></select></label></div>
+            <div class="table-wrap evaluation-table-wrap"><table><thead><tr><th>执行预设</th><th>检查通过</th><th>正确性</th><th>完整性</th><th>实现质量</th><th>验证证据</th><th>评审分歧</th><th>耗时中位数</th><th>每样本成本</th><th></th></tr></thead><tbody>
+              <tr><td><strong>codex-work</strong><small>Codex · gpt-5.1-codex</small></td><td><span class="result-good">11 / 12 · 91.7%</span></td><td><strong>4.5 / 5</strong><small>2 位 judge 中位数</small></td><td>4.0 / 5</td><td>4.3 / 5</td><td>3.8 / 5</td><td><span class="agreement-high">0.3 范围</span></td><td>5m 42s</td><td>$0.18</td><td><button class="table-link hotspot-target" type="button" data-open-score-detail>查看样本</button></td></tr>
+              <tr><td><strong>claude-review</strong><small>Claude Code · sonnet-4.5</small></td><td><span class="result-good">10 / 12 · 83.3%</span></td><td><strong>4.2 / 5</strong><small>2 位 judge 中位数</small></td><td>4.0 / 5</td><td>4.1 / 5</td><td>4.0 / 5</td><td><span class="agreement-medium">0.8 范围</span></td><td>4m 58s</td><td>$0.15</td><td><button class="table-link hotspot-target" type="button" data-open-score-detail>查看样本</button></td></tr>
+              <tr><td><strong>kimi-work</strong><small>Kimi Code · kimi-k2</small></td><td><span class="result-warn">8 / 12 · 66.7%</span></td><td><strong>3.7 / 5</strong><small>2 位 judge 中位数</small></td><td>3.5 / 5</td><td>3.8 / 5</td><td>3.6 / 5</td><td><span class="agreement-low">1.4 范围</span></td><td>6m 21s</td><td>$0.09</td><td><button class="table-link hotspot-target" type="button" data-open-score-detail>查看样本</button></td></tr>
+            </tbody></table></div>
+            <p class="evaluation-notice">每维展示独立 judge 分数的中位数与范围；不计算综合总分。评审模型分数用于比较和诊断，不会替代测试、验证器或人工验收结论。6 条未评分结果单独保留，不计入分布。</p>
+          </article>
+        </section>
 
         <section class="page is-visible" id="roadmap-view" data-view="roadmap">
           <div class="page-heading">
@@ -141,6 +195,71 @@
       </main>
     </div>
 
+    <dialog class="runtime-dialog widget-dialog" id="widget-preview-dialog" aria-labelledby="widget-dialog-title">
+      <div class="dialog-heading"><div><span class="eyebrow">DESKTOP COMPANION</span><h2 id="widget-dialog-title">桌面悬浮窗预览</h2></div><button class="icon-button hotspot-target" type="button" aria-label="关闭悬浮窗预览" data-close-widget>×</button></div>
+      <p class="dialog-explainer">独立系统窗口优先显示任务、阶段与已有的改动树触达读数。触达只是文件活动弱信号，不代表任务完成率。</p>
+      <div class="desktop-mock" aria-label="模拟桌面背景">
+        <div class="desktop-topbar"><span>▦ 桌面预览</span><span>Console 在线　10:42</span></div>
+        <section class="mini-runtime-window" aria-label="KedaCode 运行进度悬浮窗">
+          <header><div class="mini-brand-mark">K</div><div class="mini-header-copy"><strong>KedaCode</strong><small><i class="status-dot"></i>4 个任务 · 2 个运行中</small></div><button class="mini-pin is-on" type="button" aria-label="窗口已置顶">⌖</button></header>
+          <div class="mini-run">
+            <div class="mini-run-top"><span class="mini-status status-running">执行中</span><strong>#428 · 工具调用折叠</strong><small>实现阶段 · 12 分钟</small></div>
+            <div class="mini-progress-label"><span>改动树触达</span><strong>7 / 12 <small>弱信号</small></strong></div>
+            <progress class="mini-progress" value="7" max="12" aria-label="改动树触达 7/12；2 个节点不可判定，不代表任务完成率"></progress>
+            <small class="mini-progress-note">?2 个节点不可判定 · 文件触达不等于验收通过</small>
+          </div>
+          <div class="mini-run mini-run--compact">
+            <div class="mini-run-top"><span class="mini-status status-review">审阅中</span><strong>#422 · 调用观测 API</strong><small>等待 verifier · 4 分钟</small></div>
+            <div class="mini-progress-label"><span>改动树触达</span><strong>3 / 5 <small>弱信号</small></strong></div>
+            <progress class="mini-progress" value="3" max="5" aria-label="改动树触达 3/5；不代表任务完成率"></progress>
+          </div>
+          <div class="mini-run mini-run--compact mini-run--blocked"><div class="mini-run-top"><span class="mini-status status-blocked">阻塞中</span><strong>#418 · 上游 CI 未返回</strong><small>等待上游 · 28 分钟</small></div><small class="mini-progress-note">改动树触达暂不可比较</small></div>
+          <div class="mini-run mini-run--compact mini-run--completed"><div class="mini-run-top"><span class="mini-status status-completed">已完成</span><strong>#414 · 模型基准集成</strong><small>已归档 · 31 分钟</small></div><div class="mini-progress-label"><span>改动树触达</span><strong>9 / 10 <small>弱信号</small></strong></div><progress class="mini-progress" value="9" max="10" aria-label="改动树触达 9/10；不代表验收通过"></progress></div>
+          <footer><span>置顶可关闭 · 轻量查看</span><button type="button" class="mini-open-dashboard" data-close-widget>打开完整看板 ↗</button></footer>
+        </section>
+      </div>
+      <div class="dialog-actions"><span>触达数字读取现有 PRD 改动树信号；不可比较时显示原因，不回退为 0。</span><button class="outline-button hotspot-target" type="button" data-close-widget>关闭预览</button></div>
+    </dialog>
+
+    <dialog class="runtime-dialog judge-dialog" id="judge-settings-dialog" aria-labelledby="judge-dialog-title">
+      <div class="dialog-heading"><div><span class="eyebrow">SCORING PROFILES</span><h2 id="judge-dialog-title">评审模型设置</h2></div><button class="icon-button hotspot-target" type="button" aria-label="关闭评审模型设置" data-close-judge-settings>×</button></div>
+      <p class="dialog-explainer">多个评审预设可以并列启用。评审使用纯文本模型调用，无仓库工具；每位评审分别保留各维度分数与依据。</p>
+      <label class="judge-option"><input type="checkbox" checked /><span><strong>review-strong</strong><small>OpenAI · gpt-4 · text only</small></span><b>默认评审</b></label>
+      <label class="judge-option"><input type="checkbox" checked /><span><strong>review-crosscheck</strong><small>Provider B · model-2 · text only</small></span><b>交叉评审</b></label>
+      <label class="judge-option is-muted"><input type="checkbox" /><span><strong>review-fast</strong><small>Provider C · model-3 · 未配置凭据</small></span><b>不可用</b></label>
+      <div class="privacy-note"><strong>每批候选完成后，发送前展示准确 payload</strong><span>逐项查看任务要求、候选摘要、完整代码差异、检查结果、接收 provider/model 和可得费用；不发送凭据、环境变量或原始工具日志。</span></div>
+      <div class="dialog-actions"><span>评测默认不会自动评分；每批都需单独授权。</span><button class="primary-button hotspot-target" type="button" data-save-judge-settings>保存设置</button></div>
+    </dialog>
+
+    <dialog class="runtime-dialog evaluation-setup-dialog" id="evaluation-setup-dialog" aria-labelledby="evaluation-setup-title">
+      <div class="dialog-heading"><div><span class="eyebrow">NEW EVALUATION</span><h2 id="evaluation-setup-title">配置一轮对照评测</h2></div><button class="icon-button hotspot-target" type="button" aria-label="关闭评测配置" data-close-eval-setup>×</button></div>
+      <p class="dialog-explainer">候选使用同一套固定样本和基线，分别在隔离工作区执行；完成后先展示评审内容，不会自动联系评分模型。</p>
+      <div class="evaluation-setup-grid"><label>评测集<select aria-label="选择评测集"><option>agent-runner-golden-v3 · 12 项</option></select></label><label>固定基线<input value="main · 6f92b3a" aria-label="固定基线 commit" readonly /></label></div>
+      <fieldset class="setup-preset-list"><legend>执行预设</legend><label><input type="checkbox" checked /> codex-work <small>12 个独立样本</small></label><label><input type="checkbox" checked /> claude-review <small>12 个独立样本</small></label><label><input type="checkbox" /> kimi-work</label></fieldset>
+      <fieldset class="setup-preset-list"><legend>评审预设</legend><label><input type="checkbox" checked /> review-strong <small>OpenAI · gpt-4</small></label><label><input type="checkbox" checked /> review-crosscheck <small>Provider B · model-2</small></label></fieldset>
+      <div class="privacy-note"><strong>预计 24 次 Agent 执行 · 48 次评审请求</strong><span>请求数量与可得成本会在外发确认前再次显示。此原型不会运行任务、发出模型调用或产生费用。</span></div>
+      <div class="dialog-actions"><span>基线、样本集和 preset 快照会绑定到本次 run。</span><button class="primary-button hotspot-target" type="button" data-start-eval-run>开始本地候选执行</button></div>
+    </dialog>
+
+    <dialog class="runtime-dialog evaluation-payload-dialog" id="evaluation-payload-dialog" aria-labelledby="evaluation-payload-title">
+      <div class="dialog-heading"><div><span class="eyebrow">EXTERNAL REVIEW · EXPLICIT CONSENT</span><h2 id="evaluation-payload-title">发送给评审模型前先检查</h2></div><button class="icon-button hotspot-target" type="button" aria-label="关闭外发预览" data-close-payload-review>×</button></div>
+      <p class="dialog-explainer">候选执行已完成。以下是本批次将分别发给每个评审模型的 payload；先选接收者和样本查看完整文本，再决定是否授权。</p>
+      <div class="payload-recipients"><article><strong>review-strong</strong><span>OpenAI · gpt-4</span><small>4 个候选结果 · 约 8,400 tokens · 估算 $0.24</small></article><article><strong>review-crosscheck</strong><span>Provider B · model-2</span><small>4 个候选结果 · 费用未知</small></article></div>
+      <div class="payload-selectors"><label>接收模型<select id="payload-judge-select" aria-label="选择要预览的评审模型"><option value="review-strong">review-strong · OpenAI / gpt-4</option><option value="review-crosscheck">review-crosscheck · Provider B / model-2</option></select></label><label>候选与样本<select id="payload-case-select" aria-label="选择 payload 样本"><option value="codex-work|sample-07">codex-work · sample-07</option><option value="codex-work|sample-08">codex-work · sample-08</option><option value="claude-review|sample-07">claude-review · sample-07</option><option value="claude-review|sample-08">claude-review · sample-08</option></select></label></div>
+      <div class="payload-preview"><div><strong>将发送的完整内容</strong><span id="payload-preview-counter">1 / 4 · judge prompt + payload</span></div><pre id="payload-preview-content">等待载入所选样本的完整 payload。</pre></div>
+      <label class="payload-consent-check"><input id="payload-consent-checkbox" type="checkbox" />我已检查本批次要发送的数据，并授权向上方列出的模型发送。</label>
+      <div class="privacy-note payload-warning"><strong>此确认会把预览内容发送至所选 provider</strong><span>拒绝后不会发出请求；评测检查结果保留在本地。原始工具日志、环境变量和凭据不在 payload 中。</span></div>
+      <div class="dialog-actions"><span>本批次：2 个模型 × 4 个候选结果；静态原型不发起网络调用。</span><div><button class="outline-button hotspot-target" type="button" data-reject-judges>拒绝发送</button><button class="primary-button hotspot-target" type="button" data-confirm-judges disabled>确认并发送 8 次评审</button></div></div>
+    </dialog>
+
+    <dialog class="runtime-dialog score-detail-dialog" id="score-detail-dialog" aria-labelledby="score-detail-title">
+      <div class="dialog-heading"><div><span class="eyebrow">CASE REVIEW</span><h2 id="score-detail-title">样本 #07 · 文件读取工具限制</h2></div><button class="icon-button hotspot-target" type="button" aria-label="关闭样本评分详情" data-close-score-detail>×</button></div>
+      <div class="score-case-meta"><span>codex-work</span><span>runner-golden-v3</span><span>验证通过 · 2m 14s</span></div>
+      <div class="judge-score-list"><article><header><strong>review-strong · OpenAI / gpt-4</strong><b>有效</b></header><dl class="score-dimensions"><div><dt>正确性</dt><dd>5 / 5</dd></div><div><dt>完整性</dt><dd>4 / 5</dd></div><div><dt>实现质量</dt><dd>4 / 5</dd></div><div><dt>验证证据</dt><dd>4 / 5</dd></div></dl><p>按要求限制读取范围；错误路径有明确拒绝行为。测试覆盖了未注册仓库。</p></article><article class="judge-disagreement"><header><strong>review-crosscheck · Provider B / model-2</strong><b>有效</b></header><dl class="score-dimensions"><div><dt>正确性</dt><dd>4 / 5</dd></div><div><dt>完整性</dt><dd>3 / 5</dd></div><div><dt>实现质量</dt><dd>4 / 5</dd></div><div><dt>验证证据</dt><dd>3 / 5</dd></div></dl><p>实现行为正确；缺失的负向检查让完整性与验证证据不足，不应被正确性分数覆盖。</p></article></div>
+      <p class="disagreement-callout">样本 #07 · 正确性中位数 4.5 / 5 · 分歧范围 4–5 · N=2。其他维度分别计算；不合成为总分，不改变确定性检查结果。</p>
+      <div class="dialog-actions"><span>此窗口使用静态样例，仅演示评分如何呈现。</span><button class="outline-button hotspot-target" type="button" data-close-score-detail>关闭</button></div>
+    </dialog>
+
     <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具">
       <span class="prototype-chrome__label">原型</span>
       <a href="./hub.html">⌂ Hub</a>
@@ -148,6 +267,7 @@
       <button type="button" data-hotspot-toggle aria-pressed="true">◎ 可点击区域：开</button>
       <button type="button" data-prototype-reset>↺ 重置</button>
     </nav>
+    <script src="./assets/runtime-board-prototype.js"></script>
     <script src="./assets/prd-lifecycle-observability.js"></script>
     <script src="./assets/prototype-chrome.js"></script>
   </body>

@@ -2,6 +2,8 @@
 
 本目录用于承载需求评审原型。Prototype Hub 是原型清单、可用状态和相互关系的唯一入口；从 Hub 的原型详情可以打开页面、说明文档、图片来源记录和关联原型。
 
+当前可直接查看 [Console 运行时看板与模型评测原型说明](prd-lifecycle-observability.md)；原型本身从 Prototype Hub 启动。
+
 ## 使用方式
 
 1. 从 [Prototype Hub](hub.html) 搜索原型；名称和缩略图直达原型，选择条目其他区域查看详情与关联原型。
@@ -11,6 +13,7 @@
 ## 目录与规范
 
 - [Prototype Hub（原型总览）](hub.html)
+- [Console 运行时看板与模型评测说明](prd-lifecycle-observability.md)
 - [原型资源说明](assets/README.md)
 
 ## 设计约束

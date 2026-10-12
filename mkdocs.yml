@@ -77,6 +77,7 @@ nav:
   - 原型演示:
       - 概览: prototypes/index.md
       - Prototype Hub: prototypes/hub.html
+      - Console 运行时看板与模型评测: prototypes/prd-lifecycle-observability.md
       - Assets 命名规范: prototypes/assets/README.md
   - 核心概念:
       - Prompt 工程: core/prompt_engineering.md

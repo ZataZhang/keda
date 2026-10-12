@@ -362,7 +362,7 @@
   };
 
   const EVENT_MARKERS = { failure: '!', wait: '◷', success: '•' };
-  const uiState = { view: 'roadmap', scenario: 'normal', expanded: new Set() };
+  const uiState = { view: 'dashboard', scenario: 'normal', expanded: new Set() };
   let eventRegistry = [];
   const elements = {
     timelineRoot: document.querySelector('#timeline-root'),
@@ -881,8 +881,11 @@
     uiState.view = view;
     document.querySelectorAll('[data-view]').forEach((page) => page.classList.toggle('is-visible', page.dataset.view === view));
     document.querySelectorAll('.product-sidebar [data-view-link]').forEach((link) => link.classList.toggle('is-active', link.dataset.viewLink === view));
-    elements.pageTitle.textContent = view === 'stats' ? 'Stats' : 'Backlog';
+    const viewTitles = { dashboard: 'Dashboard', evaluations: '模型评测', stats: 'Stats', roadmap: 'Backlog' };
+    elements.pageTitle.textContent = viewTitles[view] ?? 'Dashboard';
     if (view === 'stats') renderStats();
+    if (view === 'dashboard') window.renderRuntimeDashboard?.();
+    if (view === 'evaluations') window.renderRuntimeEvaluation?.();
     window.location.hash = view;
   }
 
@@ -951,7 +954,7 @@
   // 底部原型 Dock 的「重置」会派发该事件：回到初始场景与 Backlog 视图。
   document.addEventListener('prototype:reset', () => {
     selectScenario('normal');
-    showView('roadmap');
+    showView('dashboard');
   });
 
   document.addEventListener('keyup', (event) => {
@@ -960,10 +963,14 @@
 
   elements.runsSearch.addEventListener('input', renderStats);
   window.addEventListener('hashchange', () => {
-    const requestedView = window.location.hash === '#stats' ? 'stats' : 'roadmap';
+    const hashView = window.location.hash.slice(1);
+    const requestedView = ['dashboard', 'evaluations', 'stats', 'roadmap'].includes(hashView) ? hashView : 'dashboard';
     if (requestedView !== uiState.view) showView(requestedView);
   });
 
   renderAll();
-  showView(window.location.hash === '#stats' ? 'stats' : 'roadmap');
+  const initialView = ['dashboard', 'evaluations', 'stats', 'roadmap'].includes(window.location.hash.slice(1))
+    ? window.location.hash.slice(1)
+    : 'dashboard';
+  showView(initialView);
 })();
