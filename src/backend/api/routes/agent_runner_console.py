@@ -17,7 +17,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field, FiniteFloat
 
 from backend.api.backlog_sync import wake_backlog_scheduler
@@ -290,9 +290,11 @@ class RepositoryActionRequest(BaseModel):
 
 
 class IssueActionRequest(BaseModel):
-    """Issue 级动作请求体（retry_failed / blocked_continue / recover_failed_publish）。"""
+    """Issue 级动作请求体（retry_failed / blocked_continue / recover_failed_publish / take_over_verifier）。"""
 
     action: str = Field(min_length=1)
+    run_id: str | None = None
+    head_sha: str | None = None
 
 
 @router.post("/agent-runner/console/repositories/{repo_id}/actions")
@@ -321,7 +323,7 @@ def execute_console_repository_action(repo_id: str, request: RepositoryActionReq
 
 @router.post("/agent-runner/console/repositories/{repo_id}/issues/{issue_number}/actions")
 def execute_console_issue_action(
-    repo_id: str, issue_number: int, request: IssueActionRequest
+    repo_id: str, issue_number: int, request: IssueActionRequest, response: Response
 ) -> dict:
     """执行 Issue 级白名单动作。"""
     settings = load_fresh_agent_runner_settings()
@@ -342,9 +344,13 @@ def execute_console_issue_action(
             runner_command=settings.console.runner_command,
             spawn_cwd=spawn_cwd,
             process_runner=create_process_runner(),
+            run_id=request.run_id,
+            head_sha=request.head_sha,
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if action_result.takeover_http_status is not None:
+        response.status_code = action_result.takeover_http_status
     return _serialize(action_result)
 
 

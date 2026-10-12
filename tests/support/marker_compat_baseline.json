@@ -534,7 +534,7 @@
             "existing_pr_body": "## Draft PR\n\nbody"
           },
           "method": null,
-          "parser": "backend.core.use_cases.agent_runner_issue_handlers:_with_pr_handoff_ref",
+          "parser": "backend.core.use_cases.agent_runner_pr_handoff:_with_pr_handoff_ref",
           "result": "## Draft PR\n\nbody\n\n<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Authoritative handoff record (latest round): <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
           "text_kwarg": "handoff_ref_block"
         },
@@ -547,7 +547,7 @@
             "handoff_url": "https://github.com/example-org/example-repo/issues/7#issuecomment-999"
           },
           "method": null,
-          "parser": "backend.core.use_cases.agent_runner_issue_handlers:_build_pr_handoff_ref_block",
+          "parser": "backend.core.use_cases.agent_runner_pr_handoff:_build_pr_handoff_ref_block",
           "result": "<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Handoff record could not be posted to this Issue; see the Issue comment list for whatever the runner managed to report: <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
           "text_kwarg": null
         }
@@ -555,7 +555,7 @@
       "writers": [
         {
           "as": "comment",
-          "call": "backend.core.use_cases.agent_runner_issue_handlers:_build_pr_handoff_ref_block",
+          "call": "backend.core.use_cases.agent_runner_pr_handoff:_build_pr_handoff_ref_block",
           "const": null,
           "contains": null,
           "kwargs": {

@@ -297,3 +297,104 @@ def test_recover_failed_publish_error_maps_to_console_action(
             spawn_cwd=tmp_path,
             process_runner=FakeProcessRunner(),
         )
+
+
+def _register_running_run(store: SqliteConsoleStore, *, issue_number: int = 42) -> None:
+    from backend.core.shared.interfaces.issue_run_control import (
+        PHASE_VERIFIER,
+        STATE_RUNNING,
+        IssueRunControlRecord,
+    )
+
+    store.register_issue_run(
+        IssueRunControlRecord(
+            repo_id="keda-main",
+            issue_number=issue_number,
+            run_id="run-1",
+            head_sha="abc123",
+            phase=PHASE_VERIFIER,
+            state=STATE_RUNNING,
+            autopilot_hold=False,
+            started_at="2026-10-12T00:00:00+00:00",
+            pr_number=58,
+        )
+    )
+
+
+def test_take_over_verifier_requires_run_id_and_head_sha(tmp_path: Path) -> None:
+    """缺少运行身份时接管必须被拒绝并审计，绝不写入控制状态。"""
+    store = _make_store(tmp_path)
+    with pytest.raises(ConsoleActionError, match="requires run_id and head_sha"):
+        execute_issue_action(
+            action="take_over_verifier",
+            repo_id="keda-main",
+            issue_number=42,
+            contexts=[_make_context()],
+            github_client_factory=lambda _path: None,
+            supervisor=_make_supervisor(tmp_path),
+            store=store,
+            runner_command=_fake_runner_command(),
+            spawn_cwd=tmp_path,
+            process_runner=FakeProcessRunner(),
+        )
+    audits = store.list_recent_audits(limit=5)
+    assert audits[0].result == "rejected"
+
+
+def test_take_over_verifier_accepted_returns_202_and_audits(tmp_path: Path, monkeypatch) -> None:
+    """合法接管请求把 running 翻到 takeover_requested，返回 202（进程尚未确认停止）。"""
+    from backend.core.use_cases import agent_runner_issue_control as issue_control
+
+    store = _make_store(tmp_path)
+    _register_running_run(store)
+    monkeypatch.setattr(issue_control, "resolve_issue_run_control", lambda: store)
+
+    action_result = execute_issue_action(
+        action="take_over_verifier",
+        repo_id="keda-main",
+        issue_number=42,
+        contexts=[_make_context()],
+        github_client_factory=lambda _path: None,
+        supervisor=_make_supervisor(tmp_path),
+        store=store,
+        runner_command=_fake_runner_command(),
+        spawn_cwd=tmp_path,
+        process_runner=FakeProcessRunner(),
+        run_id="run-1",
+        head_sha="abc123",
+    )
+
+    assert action_result.takeover_http_status == 202
+    assert action_result.takeover_outcome == "accepted"
+    assert action_result.result == "accepted"
+    assert store.get_issue_run(repo_id="keda-main", issue_number=42).state == "takeover_requested"
+
+
+def test_take_over_verifier_stale_head_returns_409_without_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """HEAD 漂移时接管返回 409，控制行仍为 running，副作用为零。"""
+    from backend.core.use_cases import agent_runner_issue_control as issue_control
+
+    store = _make_store(tmp_path)
+    _register_running_run(store)
+    monkeypatch.setattr(issue_control, "resolve_issue_run_control", lambda: store)
+
+    action_result = execute_issue_action(
+        action="take_over_verifier",
+        repo_id="keda-main",
+        issue_number=42,
+        contexts=[_make_context()],
+        github_client_factory=lambda _path: None,
+        supervisor=_make_supervisor(tmp_path),
+        store=store,
+        runner_command=_fake_runner_command(),
+        spawn_cwd=tmp_path,
+        process_runner=FakeProcessRunner(),
+        run_id="run-1",
+        head_sha="STALE_HEAD",
+    )
+
+    assert action_result.takeover_http_status == 409
+    assert action_result.result == "rejected"
+    assert store.get_issue_run(repo_id="keda-main", issue_number=42).state == "running"

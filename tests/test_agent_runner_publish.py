@@ -840,7 +840,8 @@ def test_require_prd_archived_false_appears_only_on_the_exhaustion_path() -> Non
     """
     allowed_relaxed_call_sites = {
         # 本 PRD 新增：recovery 耗尽后发布同源的失败 Draft PR（唯一放宽项）。
-        "backend/core/use_cases/agent_runner_issue_handlers.py",
+        # 交接链路从 ``agent_runner_issue_handlers`` 拆出后落在此模块，放宽点仍只有一处。
+        "backend/core/use_cases/agent_runner_failure_handoff.py",
         # 既有：PRD rework 发布的是尚在 tasks/pending/ 的提案 PRD，本来就未归档。
         "backend/core/use_cases/create_prd_from_issue.py",
     }

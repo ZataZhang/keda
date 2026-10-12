@@ -780,6 +780,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             selected_agent,
                             prd_overrides=prd_overrides,
                             prd_preset_overrides=prd_preset_overrides,
+                            repo_id=request.repo_id,
                         )
                 if verifier_verdict is not None:
                     _emit_agent_usage(

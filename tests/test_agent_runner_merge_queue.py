@@ -345,7 +345,9 @@ def test_fifo_ordering_processes_lowest_issue_first(tmp_path, worktree_path, mon
     cfg = _make_config(merge_check_timeout_seconds=0)
     processed_numbers = []
 
-    def fake_process(repo_path, config, issue, github_client, process_runner, supervisor_agent):  # noqa: ARG001
+    def fake_process(  # noqa: ARG001
+        repo_path, config, issue, github_client, process_runner, supervisor_agent, repo_id
+    ):
         processed_numbers.append(issue.number)
         from backend.core.use_cases.agent_runner_merge_queue import MergeQueueOutcome
 

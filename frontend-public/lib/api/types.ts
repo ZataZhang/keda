@@ -88,6 +88,26 @@ export type LatestEventMarker = {
   pr_comments_count: number | null;
 };
 
+export type ActiveVerifierState =
+  | "running"
+  | "takeover_requested"
+  | "taken_over"
+  | "takeover_failed"
+  | "verifier_completed"
+  | "verifier_stale"
+  | "pr_merged"
+  | "expired";
+
+/** 当前 Issue 受控独立 verifier 的活动投影（后端 fresh read，非缓存推断）。 */
+export type ActiveVerifier = {
+  run_id: string;
+  head_sha: string;
+  state: ActiveVerifierState;
+  can_take_over: boolean;
+  pr_number: number | null;
+  autopilot_hold: boolean;
+};
+
 export type IssueMonitoringSnapshot = {
   number: number;
   title: string;
@@ -103,6 +123,7 @@ export type IssueMonitoringSnapshot = {
   suggested_cli_commands: string[];
   has_anomaly: boolean;
   anomaly_types: AnomalyType[];
+  active_verifier?: ActiveVerifier | null;
 };
 
 export type QueueCounts = {
@@ -226,6 +247,8 @@ export type ConsoleActionResult = {
   result: "accepted" | "rejected" | "error";
   detail: string;
   process: RunnerProcessRecord | null;
+  takeover_http_status?: number | null;
+  takeover_outcome?: string | null;
 };
 
 export type RepositoryCompletionStats = {

@@ -43,6 +43,9 @@ from backend.core.use_cases.agent_runner_git import (
     pop_worktree_stash,
     stash_worktree_changes,
 )
+from backend.core.use_cases.agent_runner_issue_control import (
+    autopilot_hold_blocks,
+)
 from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.run_agent_once import (
     create_or_reuse_worktree,
@@ -254,6 +257,14 @@ def _process_review_candidate(
     repo_id: str = "",
 ) -> str:
     """Run supervisor cycle for a single review candidate."""
+    # 人工接管闸门（Issue #278）：held Issue 一律不进 review 监督，无论
+    # require_verifier_pass 如何配置——闸门只由同 head 的全新 GREEN 清除。
+    if autopilot_hold_blocks(repo_id=repo_id or None, issue_number=issue.number):
+        _logger.info(
+            "Issue #%d is under manual takeover hold; skipping review supervision.",
+            issue.number,
+        )
+        return "skipped_manual_takeover_hold"
     comments = github_client.list_issue_comments(issue.number)
 
     # Guard: if Issue is effectively in agent/running with a pending rework
@@ -647,6 +658,7 @@ def review_once(
                 github_client=github_client,
                 process_runner=process_runner,
                 supervisor_agent=agent,
+                repo_id=effective_repo_id,
             )
             if merge_exit_code != 0:
                 exit_code = merge_exit_code

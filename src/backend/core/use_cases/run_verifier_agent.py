@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -31,6 +31,10 @@ from backend.core.use_cases.agent_candidate_fallback import (
 from backend.core.use_cases.agent_runner_evidence_snapshot import (
     restore_evidence_snapshot,
     snapshot_evidence_dir,
+)
+from backend.core.use_cases.agent_runner_issue_control import (
+    VerifierCancelledByHumanError,
+    begin_verifier_run,
 )
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceManifest,
@@ -303,6 +307,42 @@ def _save_timed_out_verifier_response(
     )
 
 
+def _save_cancelled_verifier_response(
+    cancelled_error: InterruptedError,
+    *,
+    issue: IssueSummary,
+    verifier_agent: str,
+    builder_sha: str,
+    response_log_path: Path | None,
+) -> None:
+    """人工接管取消时,把 verifier 截至被杀的部分输出落盘（Issue #278）。
+
+    与超时落盘同源:接管**不产生 verdict**,但操作者接手审查时值得看到它被
+    停下前判到了哪一步。写盘失败只影响诊断性,不影响取消语义。
+    """
+    captured = str(cancelled_error)
+    _logger.error(
+        "Independent verifier (agent %r) was cancelled by a human takeover for "
+        "Issue #%d; captured %d chars before the kill.",
+        verifier_agent,
+        issue.number,
+        len(captured),
+    )
+    if response_log_path is None:
+        return
+    _write_verifier_response_log(
+        response_log_path,
+        [
+            "# Independent verifier raw response (CANCELLED BY HUMAN TAKEOVER — no verdict)",
+            f"# issue: #{issue.number}",
+            f"# verifier agent: {verifier_agent}",
+            f"# builder sha: {builder_sha}",
+            f"# captured chars: {len(captured)}",
+        ],
+        captured,
+    )
+
+
 def _decode_partial_stream(stream_content: str | bytes | None) -> str:
     """把 ``TimeoutExpired`` 上的部分输出统一成 ``str``。
 
@@ -329,6 +369,7 @@ def run_verifier_agent(
     inactivity_timeout_seconds: int | None = None,
     response_log_path: Path | None = None,
     model_selection: ModelSelection | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ValidationVerdict:
     """Run the independent verifier agent and return its parsed verdict.
 
@@ -345,6 +386,9 @@ def run_verifier_agent(
             能按最慢的真实工作量放宽,同时真卡死仍被及时杀掉。
         response_log_path: 可选,把原始响应写到这里供事后排查(见
             :func:`_write_verifier_response_log`)。
+        cancel_check: 人工接管取消探针（Issue #278），透传给
+            ``process_runner.run``；探针为真时进程树被终止、本函数把
+            ``InterruptedError`` 转译为 ``VerifierCancelledByHumanError``。
 
     Returns:
         ``ValidationVerdict``;verifier 的输出文本作为 ``findings`` 带回。
@@ -352,6 +396,8 @@ def run_verifier_agent(
     Raises:
         subprocess.TimeoutExpired: verifier 超时被杀。抛出前先把已收到的部分
             输出落盘,否则这一轮的判定过程完全无从查证。
+        VerifierCancelledByHumanError: 人工接管取消了本次 verifier（部分输出
+            已落盘、无 verdict）。
     """
     prompt = build_verifier_prompt(issue, builder_sha, manifest)
     try:
@@ -367,6 +413,7 @@ def run_verifier_agent(
             issue=issue,
             model_selection=model_selection,
             invocation_phase=PHASE_VERIFICATION,
+            cancel_check=cancel_check,
         )
     except subprocess.TimeoutExpired as timeout_error:
         _save_timed_out_verifier_response(
@@ -377,6 +424,20 @@ def run_verifier_agent(
             response_log_path=response_log_path,
         )
         raise
+    except InterruptedError as cancelled_error:
+        # 人工接管（Issue #278）：进程树已被 watchdog 回收，这里只负责把
+        # "被取消"与"超时/运行失败"区分开上抛，并保存无 verdict 的部分输出。
+        _save_cancelled_verifier_response(
+            cancelled_error,
+            issue=issue,
+            verifier_agent=verifier_agent,
+            builder_sha=builder_sha,
+            response_log_path=response_log_path,
+        )
+        raise VerifierCancelledByHumanError(
+            f"Independent verifier for Issue #{issue.number} was terminated by a "
+            "human takeover; no verdict was produced."
+        ) from cancelled_error
     response_text = extract_agent_response_text(result)
     verdict = replace(
         parse_verifier_verdict(response_text, findings=response_text.strip()[:4000]),
@@ -594,6 +655,7 @@ def run_verifier_gate(
     *,
     prd_overrides: Mapping[str, str] | None = None,
     prd_preset_overrides: Mapping[str, str] | None = None,
+    repo_id: str | None = None,
 ) -> ValidationVerdict | None:
     """Pre-PR independent-verifier gate (PR#2 T3 integration).
 
@@ -629,6 +691,13 @@ def run_verifier_gate(
         VerifierUnavailableError: 所有候选均无法运行或没有可解析结论；这是 verifier
             侧故障，不会启动 builder repair 循环。
         subprocess.TimeoutExpired: verifier 超时被杀(部分输出已落盘、证据已恢复)。
+        VerifierCancelledByHumanError: 人工接管（Issue #278）终止了本次 verifier，
+            或 verdict 与接管请求的最后竞态中接管获胜；无 verdict 发布。
+
+    Args:
+        repo_id: 稳定仓库标识。提供时（Console 托管运行）在控制存储登记本次
+            verifier 运行并接入取消探针，**开放人工接管窗口**；``None``（未带
+            ``--repo-id`` 的手工 CLI 运行）跳过登记，行为与本特性之前一致。
     """
     if not config.validation.verifier_enabled:
         return None
@@ -672,6 +741,13 @@ def run_verifier_gate(
         ),
     )
     builder_sha = get_head_sha(worktree_path, process_runner)
+    # 人工接管（Issue #278）：verifier 起跑前登记受控运行。repo_id 缺失、旁路
+    # 存储不可用或登记失败时返回 ``None``——照常验证，只是不开放接管窗口。
+    run_handle = begin_verifier_run(
+        repo_id=repo_id,
+        issue_number=issue.number,
+        head_sha=builder_sha,
+    )
     response_log_path = (
         resolve_issue_evidence_dir(worktree_path, config, issue) / _VERIFIER_RESPONSE_FILENAME
     )
@@ -705,9 +781,41 @@ def run_verifier_gate(
                 model_selection=drop_model_selection_for_agent(
                     candidate_agent, verifier_model_selection
                 ),
+                cancel_check=run_handle.cancel_check if run_handle is not None else None,
             )
         except subprocess.TimeoutExpired:
             # 超时按运行事故处理:不伪造 verdict、也不换 agent(与原文语义一致)。
+            if run_handle is not None:
+                run_handle.mark_expired()
+            raise
+        except VerifierCancelledByHumanError:
+            # 人工接管（Issue #278）：进程树已回收。控制存储再次确认 run id 与
+            # HEAD 归属后才映射为"人工取消"交班；确认不了则置 takeover_failed，
+            # 走 verifier 侧停止路径——绝不伪造接管成功，也绝不顺延下一个候选。
+            if run_handle is None:
+                raise
+            confirmed = False
+            try:
+                confirmed = run_handle.confirm_takeover()
+            except Exception as store_exc:  # noqa: BLE001 - 确认失败按未确认处理。
+                _logger.warning(
+                    "Issue #%d: takeover confirmation failed (%s).",
+                    issue.number,
+                    store_exc,
+                )
+            if not confirmed:
+                try:
+                    run_handle.mark_taken_over_failed()
+                except Exception:  # noqa: BLE001 - 状态记不上也不能伪造交班完成。
+                    _logger.warning(
+                        "Issue #%d: could not record takeover_failed after failed confirmation.",
+                        issue.number,
+                    )
+                raise VerifierUnavailableError(
+                    f"Independent verifier for Issue #{issue.number} was interrupted, but the "
+                    "takeover request could not be confirmed against the run control store; "
+                    "the run is stopped without handoff."
+                ) from None
             raise
         except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
             # agent 跑不起来（CLI 缺失 / 额度耗尽 / 进程级失败）不该判死整个 Issue:
@@ -775,6 +883,8 @@ def run_verifier_gate(
         break
 
     if verdict is None:
+        if run_handle is not None:
+            run_handle.mark_expired()
         raise VerifierUnavailableError(
             _format_verifier_unavailable_message(
                 issue_number=issue.number,
@@ -790,6 +900,46 @@ def run_verifier_gate(
             issue.number,
             verifier_agent,
         )
+    if run_handle is not None:
+        # 写 verdict 副作用之前的 compare-and-set（PRD §7.6）：接管请求恰好在
+        # 最后时刻落地时 verdict 不得发布，交班由调用方按取消路径处理。
+        completed = False
+        try:
+            completed = run_handle.mark_completed()
+        except Exception as store_exc:  # noqa: BLE001 - 存储失败不吞掉 verdict。
+            _logger.warning(
+                "Issue #%d: could not record verifier_completed (%s).",
+                issue.number,
+                store_exc,
+            )
+            completed = True
+        if not completed:
+            takeover_confirmed = False
+            try:
+                takeover_confirmed = run_handle.confirm_takeover()
+            except Exception as store_exc:  # noqa: BLE001 - 确认失败按未确认处理。
+                _logger.warning(
+                    "Issue #%d: takeover confirmation failed after verdict race (%s).",
+                    issue.number,
+                    store_exc,
+                )
+            if takeover_confirmed:
+                raise VerifierCancelledByHumanError(
+                    f"Independent verifier verdict for Issue #{issue.number} was discarded: "
+                    "a human takeover request won the final race; no verdict was published."
+                )
+            try:
+                run_handle.mark_taken_over_failed()
+            except Exception:  # noqa: BLE001 - 终态记录失败也不能发布竞态中落败的 verdict。
+                _logger.warning(
+                    "Issue #%d: could not record takeover_failed after verdict race loss.",
+                    issue.number,
+                )
+            raise VerifierUnavailableError(
+                f"Independent verifier finished for Issue #{issue.number}, but a pending "
+                "takeover request left the run control state unverifiable; the verdict is "
+                "not published and the run is stopped."
+            )
     if get_head_sha(worktree_path, process_runner) != builder_sha or has_changes(
         worktree_path, process_runner
     ):
@@ -806,6 +956,17 @@ def run_verifier_gate(
                 response_log_path=response_log_path,
             )
         )
+    if run_handle is not None and verdict.risk == "green":
+        # GREEN 且 HEAD 复核未漂移（上方 fresh 检查已确认仍是 verifier 输入的
+        # builder_sha）：这是 autopilot_hold 的唯一清除路径。
+        try:
+            run_handle.clear_hold_on_green()
+        except Exception as store_exc:  # noqa: BLE001 - 清闸失败留待人审。
+            _logger.warning(
+                "Issue #%d: could not clear autopilot hold on GREEN (%s).",
+                issue.number,
+                store_exc,
+            )
     if verdict.risk == "yellow":
         _logger.warning(
             "Independent verifier returned YELLOW for issue #%d: %s",

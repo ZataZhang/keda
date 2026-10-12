@@ -696,6 +696,7 @@ export default function DashboardPage() {
                     issue={selectedIssue}
                     repoId={selectedIssueRepoId ?? undefined}
                     onLabelsChanged={handleIssueLabelsChanged}
+                    onTakeoverSettled={() => void loadSnapshots()}
                   />
                 </div>
               ) : selectedEntry ? (

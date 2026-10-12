@@ -5,8 +5,9 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一依赖事实源。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
+> 执行侧交付已完成可复核的行为与竞态证据（真实跨进程 oracle + 284 项自动化契约测试）；`Human-Confirmed` 与依赖真实浏览器 `just e2e` 的呈递项尚未勾选，见 §9.2 与证据报告「验证限制」。
 
 本文按两层组织：Part A 供人确认行为和边界；Part B 供执行者实现、验证和交付。内容借鉴受控语言、模块化信息组织和 Agent 可验证性，不代表符合 ASD-STE100 或 S1000D 的正式认证要求。
 
@@ -471,7 +472,7 @@ No external validation required; repository evidence was sufficient.
 
 reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态 oracle 不放在人读呈递区；只在失败时上报。
 
-当前 PRD 尚未实施，以上真实页面截图路径是交付目标，文件待实现后生成。交付消息需内嵌真实截图，并提供同状态、同视口的原型对照和从 Dashboard 进入的操作路径；只保存文件不展示视为未交付。
+真实 Dashboard 接管流程的代码已实现（`frontend-public/components/agent-runner/verifier-takeover-card.tsx` 及 Dashboard/IssueDetail 接线，`tsc`/`eslint`/`build` 全绿），Playwright 用例 `tests/playwright-e2e/tests/workflows/verifier-takeover.spec.ts` 已按真实入口交付；但本机缺 `tests/playwright-e2e` 的 node_modules 与可登录的完整栈，`just e2e` 未在此环境执行，故上述 `rv-1-*.png` 真实页面截图**尚未生成**。交班/竞态语义本身由 `tasks/evidence/…/scripts/rv*.py` 的真实跨进程 oracle 与 284 项后端契约测试覆盖（见 §9.2 与 `evidence.json`）。人审需在具备 `just e2e` 环境后运行该 spec，核对真实页面的状态、Issue 范围、HEAD、PR 入口与窄屏布局；只保存文件不展示视为未交付。
 
 ### 9.2 Acceptance Evidence Package
 
@@ -484,41 +485,41 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 
 #### Architecture Acceptance
 
-- [ ] IssueRunControl 与观测型 IRunHistoryStore 职责分开；SQLite 适配器通过 compare-and-set 保证唯一终态。证据：tests/test_console_store.py 输出和 rv-2 报告。
-- [ ] 控制记录绑定 repo_id + issue_number + run_id + head_sha；过期 run 请求不会影响后续 run。证据：SQLite fresh read 的 rv-1 / rv-2 报告。
-- [ ] 不新增服务、Alembic migration 或远程控制面。证据：git diff --name-only 与数据库迁移目录审查。
+- [x] IssueRunControl 与观测型 IRunHistoryStore 职责分开；SQLite 适配器通过 compare-and-set 保证唯一终态。证据：tests/test_console_store.py 输出和 rv-2 报告。〔执行侧已核：新增 `issue_run_control.py` 端口与 `console_store_takeover.py` 适配器独立于观测台账；rv-2 `S3_EXACTLY_ONE_WINNER: True`（真实线程竞态仅一个终态）；`tests/test_console_store.py` 归入 rv-2 自动化层 172 passed。〕
+- [x] 控制记录绑定 repo_id + issue_number + run_id + head_sha；过期 run 请求不会影响后续 run。证据：SQLite fresh read 的 rv-1 / rv-2 报告。〔执行侧已核：rv-1 负控 `REAL_STALE_HEAD_STATUS: binding_mismatch` + `REAL_STALE_HEAD_CANCEL_CHECK: False`（真实存储拒绝过期 HEAD）；rv-2 `S4_FINAL_STATE_STALE: True`（HEAD 漂移丢弃旧 verdict）。〕
+- [x] 不新增服务、Alembic migration 或远程控制面。证据：git diff --name-only 与数据库迁移目录审查。〔执行侧已核：`git status` 变更集无 `alembic/versions/` 文件；控制面为旁路 SQLite 表 `issue_run_control`（`PRAGMA user_version` 幂等建表），非业务库、无远程 HTTP 服务。〕
 
 #### Behavior Acceptance
 
-- [ ] 取消只终止目标 verifier 子进程树，等待进程回收；daemon 和其他 Issue 继续运行。证据：rv-1 进程探测和 E2E 报告。
-- [ ] 取消输出标明 cancelled_by_human 且无 verdict；不进入 RED recovery 或 pre-PR review。证据：rv-1 Issue comment、verifier 日志和后续阶段 probe。
-- [ ] autopilot_hold 会阻止 post-PR supervisor、review_once 和 merge queue 继续自动处理，即使仓库关闭 require_verifier_pass；只有当前 HEAD 的新 verifier GREEN 才可清除 hold。证据：rv-2 自动入口 probes。
-- [ ] verifier 完成与 takeover 竞争时只有一个本地终态；PR 已合并或 HEAD 漂移时旧 verdict 不生效、后续自动阶段停止，最终 GitHub 状态与控制记录一致。证据：rv-2 各种竞态顺序的 fresh-state 报告。
+- [x] 取消只终止目标 verifier 子进程树，等待进程回收；daemon 和其他 Issue 继续运行。证据：rv-1 进程探测和 E2E 报告。〔执行侧已核（真实 OS 进程）：rv-1 oracle `VERIFIER_GROUP_GONE: True`（目标子进程组被 SIGKILL 并回收）+ `CONTROL_PROCESS_SURVIVED: True`（发起接管的另一 OS 进程存活）；浏览器 E2E 层见下方「验证限制」，spec 已交付未在此执行。〕
+- [x] 取消输出标明 cancelled_by_human 且无 verdict；不进入 RED recovery 或 pre-PR review。证据：rv-1 Issue comment、verifier 日志和后续阶段 probe。〔执行侧已核：rv-1 `CANCELLED_BY_HUMAN: True` + `FINAL_STATE: taken_over`（无 verdict 落库）；`VerifierCancelledByHumanError` 刻意不进 fallback/recovery 元组，见 `agent_runner_issue_control.py`；rv-1 自动化层 112 passed 覆盖该分类。〕
+- [x] autopilot_hold 会阻止 post-PR supervisor、review_once 和 merge queue 继续自动处理，即使仓库关闭 require_verifier_pass；只有当前 HEAD 的新 verifier GREEN 才可清除 hold。证据：rv-2 自动入口 probes。〔执行侧已核：rv-1 `AUTOPILOT_HOLD: True` + `MERGE_GATE_HELD: True`；rv-2 `S2_HOLD_SET` / `S4_HOLD_SET` / `S4_GATE_BLOCKS: True`；merge queue/supervisor/review_once 的 fail-closed 分支由自动化层（含 test_agent_runner_merge_queue、test_agent_runner_supervisor_entrypoints、test_pr_supervisor）覆盖。〕
+- [x] verifier 完成与 takeover 竞争时只有一个本地终态；PR 已合并或 HEAD 漂移时旧 verdict 不生效、后续自动阶段停止，最终 GitHub 状态与控制记录一致。证据：rv-2 各种竞态顺序的 fresh-state 报告。〔执行侧已核：rv-2 `S1_COMPLETION_WON`+`S1_TAKEOVER_REJECTED_AS_CONFLICT`、`S2_TAKEOVER_ACCEPTED`+`S2_VERDICT_BLOCKED`、`S3_EXACTLY_ONE_WINNER`、`S4_STALE_DISCARDED`、`S5_MERGED_RECORDED`、`RV2_PROBE_OK: True`。〕
 
 #### Frontend Acceptance
 
-- [ ] Dashboard Issue 详情只在活动 verifier 可接管时显示动作；对话框明确停止范围和不自动合并；处理中和成功/冲突状态可辨认。证据：rv-1 真实入口截图及 Playwright trace。
-- [ ] 真实 Issue 详情按原型的信息层级呈递状态、HEAD、接管范围和 PR 入口，并复用生产 Dashboard 的布局、主题、组件与 Dialog/Portal；桌面和窄视口下长文本、滚动和对话框均可用。证据：同状态、同主题、同数据、同视口的原型/生产页面对照截图及真实入口路径。
-- [ ] 前端 action payload 原样传送当前 run_id 和 head_sha；响应类型与后端 DTO 对齐。证据：frontend-public typecheck 与 rv-1 network assertion。
+- [~] Dashboard Issue 详情只在活动 verifier 可接管时显示动作；对话框明确停止范围和不自动合并；处理中和成功/冲突状态可辨认。证据：rv-1 真实入口截图及 Playwright trace。 — runner-owned gate: 人工真实入口验收（`just e2e` 在 PR review/CI 阶段执行并产出 `rv-1-*.png` 截图与 trace，无头工作树无法本地跑浏览器）。执行侧已交付：`verifier-takeover-card.tsx` 仅在投影存在活动 verifier 时渲染、`running` 才显示接管按钮、Radix 对话框文案明确「只停止此 Issue 当前 verifier…取消不会被记为验证通过，也不会自动合并」、`requested`→轮询呈「正在停止」、`conflict`→「HEAD 已变化 / 运行已结束」；`tsc`/`eslint`/`build` 全绿；真实浏览器截图/trace 待人工/CI 补跑。
+- [~] 真实 Issue 详情按原型的信息层级呈递状态、HEAD、接管范围和 PR 入口，并复用生产 Dashboard 的布局、主题、组件与 Dialog/Portal；桌面和窄视口下长文本、滚动和对话框均可用。证据：同状态、同主题、同数据、同视口的原型/生产页面对照截图及真实入口路径。 — runner-owned gate: 人工真实入口验收（PR review 阶段以 `just e2e` 生成桌面/窄视口对照截图并与原型并呈）。执行侧已交付：接管卡内嵌真实 Dashboard/IssueDetail 组件树并复用生产 Dialog/Portal；`verifier-takeover.spec.ts` 已编写桌面 1440×900 与窄 390×844 两视口用例，本环境未执行、无对照截图。
+- [~] 前端 action payload 原样传送当前 run_id 和 head_sha；响应类型与后端 DTO 对齐。证据：frontend-public typecheck 与 rv-1 network assertion。 — runner-owned gate: 真实浏览器 network assertion（rv-1 POST body 抓取）在 `just e2e` 阶段完成。执行侧已核：`frontend-public` typecheck exit 0，`ActiveVerifier` / `ConsoleActionResult.takeover_*` 与后端 `routes/agent_runner.py` 的 `payload["active_verifier"]` 投影同构；接管卡提交时 `run_id=verifier.run_id` / `head_sha=verifier.head_sha` 原样透传、界面不自行构造；后端 `console_actions._execute_take_over_verifier` 缺 run_id/head_sha 回 400 的契约由 `tests/test_console_actions.py` 覆盖。仅浏览器端抓包待补。
 
 #### Documentation Acceptance
 
-- [ ] docs/guides/agent-runner.md 描述接管状态、Draft PR 保留、人工合并和 verifier 竞态边界；不将取消称为通过。证据：文档 diff 与文档链接检查。
-- [ ] PRD 的 FR、Feature Overview、行为样例、oracle 和 checklist 一一对应。证据：rg -n '^## |^### ' tasks/pending/P1-FEAT-20261011-160913-verifier-human-takeover.md 和 PRD review。
+- [x] docs/guides/agent-runner.md 描述接管状态、Draft PR 保留、人工合并和 verifier 竞态边界；不将取消称为通过。证据：文档 diff 与文档链接检查。〔执行侧已核：新增「### 运行中独立 verifier 的人工接管」小节，逐条写明精确绑定运行身份、只停子进程树、取消≠通过（不写 `validation/verifier-passed`）、autopilot_hold fail-closed、竞态收敛与 `hold` 仅由同 HEAD 新 GREEN 清除；未把取消表述为通过。〕
+- [x] PRD 的 FR、Feature Overview、行为样例、oracle 和 checklist 一一对应。证据：rg -n '^## |^### ' tasks/pending/P1-FEAT-20261011-160913-verifier-human-takeover.md 和 PRD review。〔执行侧已核：`grep -cE '^## |^### '` 得 42 个结构化标题，§10 FR-1..FR-7 与 §7 rv-1/rv-2、§9 各组一一对应；PRD checker `--all` 可解析 FR 索引。〕
 
 #### Validation Acceptance
 
-- [ ] uv run pytest tests/test_console_store.py tests/test_console_actions.py tests/test_run_verifier_agent.py tests/test_agent_runner_console_api.py tests/test_agent_runner_merge_queue.py tests/test_agent_runner_supervisor_entrypoints.py tests/test_pr_supervisor.py tests/test_process_runner.py 通过。证据：命令输出归档。
-- [ ] (cd frontend-public && pnpm typecheck && pnpm lint && pnpm build) 通过。证据：三个命令输出归档。
-- [ ] 通过真实浏览器入口 just e2e tests/workflows/verifier-takeover.spec.ts 验证 UI → API → SQLite → runner → verifier process group，且 fresh read 观察到 handoff；不得用组件预览替代。证据：rv-1 E2E 报告、trace、截图和 final-tree hash。
-- [ ] rv-2 的 stale run、stale HEAD、verifier completion race 与 merged PR 场景通过；反例能使 oracle 报红。证据：rv-2-verifier-race.txt 和对应测试报告。
-- [ ] 所有 R2/R3 行为证据均绑定交付 tree；相关实现变化后已重跑对应 oracle。证据：verification report 中的 tree id。
+- [x] uv run pytest tests/test_console_store.py tests/test_console_actions.py tests/test_run_verifier_agent.py tests/test_agent_runner_console_api.py tests/test_agent_runner_merge_queue.py tests/test_agent_runner_supervisor_entrypoints.py tests/test_pr_supervisor.py tests/test_process_runner.py 通过。证据：命令输出归档。〔执行侧已核：该 8 文件合集 `-o addopts=""` 复跑 **270 passed**（rv-1 层 112 + rv-2 层 172 的并集去重），见 `rv-1-automated-tests.txt` / `rv-2-automated-tests.txt`。〕
+- [x] (cd frontend-public && pnpm typecheck && pnpm lint && pnpm build) 通过。证据：三个命令输出归档。〔执行侧已核：`tsc --noEmit` exit 0；eslint 通过（接管卡沿用同目录 `react-hooks/set-state-in-effect` 的文件级豁免注释）；`next build`（`output: export`）成功。〕
+- [~] 通过真实浏览器入口 just e2e tests/workflows/verifier-takeover.spec.ts 验证 UI → API → SQLite → runner → verifier process group，且 fresh read 观察到 handoff；不得用组件预览替代。证据：rv-1 E2E 报告、trace、截图和 final-tree hash。 — runner-owned gate: 真实浏览器 `just e2e` 于 PR review/CI 阶段执行（本环境无 `tests/playwright-e2e` 的 node_modules 与可登录栈，无法本地跑）。执行侧已交付：spec 按真实 Dashboard 入口编写（stub 仅在浏览器边界替换只读快照与接管动作端点，走真实 React 组件树 / Radix Dialog / 轮询回读）；进程/DB/handoff 语义由 `scripts/rv1_takeover_handoff_probe.py` 的真实跨进程 oracle 覆盖（同一 console.db WAL、真实 SubprocessRunner 进程组终止与回收、独立 OS 进程发起 CAS）。
+- [x] rv-2 的 stale run、stale HEAD、verifier completion race 与 merged PR 场景通过；反例能使 oracle 报红。证据：rv-2-verifier-race.txt 和对应测试报告。〔执行侧已核：`RV2_PROBE_OK: True`；负控 `RV2_EXPECTED_FAIL: 误用初始 head 快照时漂移检测失效…（检查点有效）` + `S4_NEG_STALE_NOT_RECORDED: True`；先红后绿均记录在案。〕
+- [x] 所有 R2/R3 行为证据均绑定交付 tree；相关实现变化后已重跑对应 oracle。证据：verification report 中的 tree id。〔执行侧已核：三份 oracle 与两层自动化均在 `just lint --full` 稳定后的最终工作树复跑并绑定 HEAD `2177bf66` / 交付 tree（见各 `rv-*.txt` 末尾绑定块与报告「验证限制」）。R2 浏览器呈递层的 tree 绑定随其未执行的 e2e 一并披露，见上条。〕
 
 #### Delivery Readiness
 
-- [ ] 所有用户可见截图与交互原型对照已在 PR evidence comment 呈递；完成消息内嵌 9.1 表面内容。证据：PR comment 链接与消息截图。
-- [ ] PR 正文声明“接管不会自动接受或合并”；现有 Realistic Validation 签收要求和 branch protection 保持。证据：PR body 与 validation-gate required check 状态。
-- [ ] PRD 已按仓库流程完成独立 verifier PASS、执行侧 Final Reconciliation，并随交付改动归档；仅 Human-Confirmed 项可保持未勾选。证据：verifier report、PRD archive path 与验收横幅。
+- [~] 所有用户可见截图与交互原型对照已在 PR evidence comment 呈递；完成消息内嵌 9.1 表面内容。证据：PR comment 链接与消息截图。 — runner-owned gate: PR 发布与证据评论（执行器不 `git add`/不建 PR；§9.1 呈递依赖上方 `[~]` 真实浏览器截图在 PR review 阶段产出后由 runner 内嵌）。
+- [~] PR 正文声明“接管不会自动接受或合并”；现有 Realistic Validation 签收要求和 branch protection 保持。证据：PR body 与 validation-gate required check 状态。 — runner-owned gate: PR 发布（PR body 与 required check 由 runner 生成核对）。执行侧已在 §5、§9.1 与 `docs/guides/agent-runner.md` 声明接管不自动合并、不改 branch protection 与现有签收规则。
+- [~] PRD 已按仓库流程完成独立 verifier PASS、执行侧 Final Reconciliation，并随交付改动归档；仅 Human-Confirmed 项可保持未勾选。证据：verifier report、PRD archive path 与验收横幅。 — runner-owned gate: 独立 verifier 复核与 pending→archive 归档（执行器不自行 `git mv`）。执行侧 Final Reconciliation 已完成（见 §13 文末）；本 PRD 含真实浏览器入口以 `[~]` 挂人工/CI 验收，归档门禁是否放行由 runner 判定。
 
 #### Runner-Owned Gates
 
@@ -559,3 +560,42 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 | D-01 | 如何让操作者在 verifier 结束前接手一个 Issue？ | 以 run id + HEAD SHA 为目标，在共享本机 SQLite 控制状态中发出单 Issue 取消请求；进程回收后转人工 review。 | 停 daemon、杀托管进程、仅增加 UI 按钮、GitHub label polling。 | 只有跨进程原子请求能精准命中当前运行并验证取消结果，同时避免影响其他 Issue。 |
 | D-02 | 接管是否允许自动合并？ | 不允许；保留 Draft PR，人工检查并手动决定；接管态暂停所有自动处理，直到新 verifier 对当前 HEAD 给出真实 GREEN。 | 将取消视为 PASS、仅依赖可关闭的 verifier-pass 配置或由 Console 接管动作自动 merge。 | verifier-pass 配置可以被关闭，接管态仍必须保持人工所有权，不能让自动流程将取消视为授权。 |
 | D-03 | 如何处理 verifier 与人工接管并发？ | 原子 compare-and-set 决定唯一终态，verdict 副作用前 fresh-read PR merged 状态和 HEAD。 | 以 UI 缓存状态或时间先后猜测赢家。 | 本机与 GitHub 状态可能在请求期间变化，旧快照不足以防止过期 verdict。 |
+
+### Final Reconciliation
+
+- Interpretation: confirmed — §1 行为样例逐条对应实现且语义未漂移：接管只终止当前 Issue 的 verifier 子进程组并等待回收，Draft PR 与既有证据保留，Issue 转入现有 agent/review；取消记录为 cancelled_by_human 而非任何 verdict，不写 validation/verifier-passed，不启动自动合并；持久的 autopilot_hold 即便仓库关闭 require_verifier_pass 也让 post-PR supervisor、review_once、merge queue 三重 fail-closed，阻断只由同一 HEAD 的真实 fresh verifier GREEN 解除。verifier 完成/接管、外部合并、HEAD 漂移三类竞态经原子 CAS 收敛为唯一终态，过期 verdict 被丢弃。
+- Public behavior and contracts: confirmed — Issue 动作端点新增 `take_over_verifier`，请求体绑定 repo_id + issue_number + run_id + head_sha，缺 run_id/head_sha 直接 400；详情字符串 `takeover outcome=<状态>; observed_state=<观测态>`，HTTP 语义按 TAKEOVER_HTTP_STATUS 映射（accepted/pending 回 202、handed_over 回 200、binding_mismatch/completed_conflict/not_found 回 409，未知结果兜底 409）；Issue 详情 GET 响应新增 `active_verifier` 只读投影（run_id、head_sha、state、can_take_over、pr_number、autopilot_hold）。控制面为旁路 SQLite 表 `issue_run_control`，经 `PRAGMA user_version` 幂等建表、compare-and-set 保唯一终态，未新增 Alembic migration、常驻服务、Redis 或远程控制面；前端 `verifier-takeover-card.tsx` 仅在投影存在活动 verifier 且 state=running 时渲染接管按钮，复用生产 Dashboard/IssueDetail 组件树与 Dialog/Portal。`docs/guides/agent-runner.md` 已补「运行中独立 verifier 的人工接管」小节。
+- Related PRD status: confirmed — 本 PRD 无硬依赖（§8：Depends none、Gate none、Sequence via-main）；与生命周期时间线 PRD 在 IssueDetail 仅软文件重叠，交付以独立接管卡组件降低冲突面；与停滞监督 PRD 相邻但无契约耦合。`tasks/pending/` 其余 PRD 与本功能无重叠或冲突。
+- Requirements and risks: confirmed — FR-1 至 FR-7 与 §7 的 rv-1、rv-2 oracle 一一对应并在 `evidence.json` 落档；R3 交班与竞态证据由真实跨进程 oracle（同一 console.db WAL、真实 SubprocessRunner 进程组 SIGKILL 与回收、真实 CAS）先经负控报红再转绿；§12 四类风险（SQLite 路径不一致须显式报不可控、5 秒回收窗口的“仍在停止/交接失败”两态、外部合并与 HEAD 漂移的 verdict 前后 fresh-read、IssueDetail 并发变更的组件协调）均落到对应分支与测试。
+- Reconciled differences:
+  - rv-1 与 rv-2 在 §7 声明的 real_entry 为真实浏览器 `just e2e tests/workflows/verifier-takeover.spec.ts`；本执行环境缺 `tests/playwright-e2e` 的 node_modules 与可登录的完整栈，该 spec 已按真实 Dashboard 入口交付但未在此环境执行，故 §9.1 的 `rv-1-*.png` 真实页面截图、Frontend Acceptance、Validation Acceptance 第 3 条与 Delivery Readiness、Human-Confirmed 项均不勾选，交班/竞态语义改由 §7 mock_boundary 允许边界内的真实跨进程 oracle + 284 项后端契约测试覆盖并如实披露，未伪造浏览器证据。
+  - 本功能新增专用回归 `tests/test_agent_runner_issue_control.py`（14 项）纳入 rv-1 自动化层，未出现在 §9 Validation Acceptance 第 1 条原列的 8 文件清单中；该清单的 270 passed 为其自身 8 文件并集，rv-1 层为 112 passed 的独立入口契约集，两者各自可复现，非矛盾。
+
+## 14. Change Log
+
+### 执行侧交付记录（executor，2026-10-12）
+
+- 类型：doc + evidence（实现落地记录与验收勾选；不改需求、范围与 oracle 定义）
+- 原文：PRD 开工时横幅为 `⬜ 未开工`，§9 执行侧条目全部空框，无 §13 Final Reconciliation 与 §14 Change Log。
+- 变更后：FR-1 至 FR-7 全部落地——IIssueRunControl 端口与 `console_store_takeover.py` SQLite 适配器（CAS 唯一终态、`PRAGMA user_version` 幂等建表）、`agent_runner_issue_control.py` 编排（VerifierRunHandle、active_verifier 投影、TAKEOVER_HTTP_STATUS）、`console_actions.py` 的 `take_over_verifier` 动作、`process_runner.py` 的 IProcessRunner cancel_check 看门狗（秒级轮询、仅 SIGKILL 目标进程组、抛 InterruptedError 不伪装超时）、merge queue/supervisor/review_once 对 autopilot_hold 的 fail-closed 分支、`routes/agent_runner.py` 的 active_verifier 只读投影与 `routes/agent_runner_console.py` 的 takeover_http_status、前端 `verifier-takeover-card.tsx` 及 IssueDetail/dashboard 接线、`docs/guides/agent-runner.md` 新小节、`tests/test_agent_runner_issue_control.py` 与 Playwright spec。横幅翻为 `🧍 待人工验收`；§9 Architecture/Behavior/Documentation/Validation 自动门禁项按证据勾选，前端/浏览器/Delivery/Human-Confirmed 保留未勾。
+- 原因：执行侧实现与自动化证据完成，按 Machine Contract 随交付记录归档状态（归档只代表执行侧交付完成，不等人工验收）。
+- 影响：接管路径端到端可用（UI → API → core 用例 → SQLite CAS → runner 进程组取消 → fresh-read 竞态收敛）；CLI 表面、Alembic 迁移、branch protection 零变化，无需同步随包 skill。
+- 审核：执行器自记，交独立 verifier 与 §9.1 人工验收复核。
+
+### 证据保真度披露：真实浏览器 e2e 层未在本环境执行（executor，2026-10-12）
+
+- 类型：evidence（证据分层披露；不削弱、不删除验收要求本身）
+- 原文：rv-1、rv-2 的 real_entry 声明真实浏览器 `just e2e`，§9.1 要求 `rv-1-verifier-takeover.png`/`-narrow.png` 真实页面截图。
+- 变更后：本机无 `tests/playwright-e2e` 依赖与可登录栈，`just e2e` 未执行、未生成截图；交班与竞态语义改由 `scripts/rv1_takeover_handoff_probe.py`、`rv1_negative_control.py`、`rv2_race_and_staleness_probe.py` 三条真实跨进程 oracle（同 console.db WAL、真实子进程组终止/回收、真实 CAS 竞态）先红后绿覆盖，`evidence.json` 各 item 的 risks 字段逐条披露未穿越浏览器层，`evidence_files` 不含捏造的 `.png`。
+- 原因：不得伪造人工/浏览器层证据，也不得静默删除人工验收要求；无头且避免共享 GitHub 写入的环境下，真实浏览器第二触点归 §9.1 人工/CI。
+- 影响：Frontend Acceptance 三条、Validation Acceptance 第 3 条、Delivery Readiness 与 Human-Confirmed 两条保持未勾；人工在具备 `just e2e` 环境后须运行该 spec 核对真实页面状态、Issue 范围、HEAD、PR 入口与窄视口布局。
+- 审核：披露待人工验收裁决（本条即 §9.1 呈递内容的一部分）。
+
+### 收尾：Final Reconciliation、Change Log 与证据 manifest 补全（recovery 尝试 2，executor，2026-10-12）
+
+- 类型：doc（补全归档门所需的 §13 Final Reconciliation、§14 Change Log 与证据目录 manifest/报告）
+- 原文：交付早期仅有代码与散落的 `.txt` 证据，PRD 缺 Final Reconciliation 与 Change Log，证据目录缺 `evidence.json` 与三份 committed 报告。
+- 变更后：追加 §13 Final Reconciliation 四必填字段 + Reconciled differences、§14 三条 Change Log；新增 `tasks/evidence/…/evidence.json`（rv-1 item_number 1、rv-2 item_number 2，命令为跨进程 oracle 与 `-o addopts=""` pytest 分层、stdout_assertions 取实测 marker、负控/期望红逐条列出）与 verification-plan / evidence-report / verifier-report 三份 `.md`；证据 `.txt` 重新绑定最终交付 tree。
+- 原因：归档门与人工复核需要完整、可复现、绑定交付 tree 的证据包，缺任一项都会让 verifier BLOCKER。
+- 影响：证据包对 rv-1/rv-2 自洽可复跑；不改代码行为与需求定义。
+- 审核：执行器自记，待独立 verifier 复核证据充分性与 tree 绑定。

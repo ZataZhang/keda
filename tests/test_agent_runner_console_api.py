@@ -927,3 +927,75 @@ def test_console_version_endpoint_reports_installed_version() -> None:
     payload = response.json()
     assert isinstance(payload["version"], str)
     assert payload["version"]
+
+
+def _seed_running_verifier(store, *, issue_number: int = 7) -> None:
+    """在真实 SQLite 控制表登记一个 running verifier，供接管契约测试读取。"""
+    from backend.core.shared.interfaces.issue_run_control import (
+        PHASE_VERIFIER,
+        STATE_RUNNING,
+        IssueRunControlRecord,
+    )
+
+    store.register_issue_run(
+        IssueRunControlRecord(
+            repo_id="keda-main",
+            issue_number=issue_number,
+            run_id="run-7",
+            head_sha="deadbeef",
+            phase=PHASE_VERIFIER,
+            state=STATE_RUNNING,
+            autopilot_hold=False,
+            started_at="2026-10-12T00:00:00+00:00",
+            pr_number=11,
+        )
+    )
+
+
+def test_take_over_verifier_action_contract_returns_202(console_environment) -> None:
+    """合法接管请求经真实 HTTP 契约返回 202，控制行进入 takeover_requested。"""
+    _seed_running_verifier(console_environment["store"])
+
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/7/actions",
+        json={"action": "take_over_verifier", "run_id": "run-7", "head_sha": "deadbeef"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["takeover_outcome"] == "accepted"
+    assert (
+        console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
+        == "takeover_requested"
+    )
+
+
+def test_take_over_verifier_stale_head_contract_returns_409(console_environment) -> None:
+    """HEAD 不符时返回 409，控制行保持 running、零副作用。"""
+    _seed_running_verifier(console_environment["store"])
+
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/7/actions",
+        json={"action": "take_over_verifier", "run_id": "run-7", "head_sha": "WRONG"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert (
+        console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
+        == "running"
+    )
+
+
+def test_take_over_verifier_missing_identity_returns_400(console_environment) -> None:
+    """缺少 run_id / head_sha 属非法请求，400 且不写控制状态。"""
+    _seed_running_verifier(console_environment["store"])
+
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/7/actions",
+        json={"action": "take_over_verifier"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert (
+        console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
+        == "running"
+    )

@@ -390,6 +390,7 @@ def _process_single_issue(
                     github_client=github_client,
                     process_runner=process_runner,
                     marker=marker,
+                    repo_id=effective_repo_id,
                 ),
             )
         elif issue_kind == "blocked_resolution":
@@ -453,6 +454,7 @@ def _process_single_issue(
                     content_generator=content_generator,
                     publish_stage=publish_stage,
                     stage_selection=stage_selection,
+                    repo_id=effective_repo_id,
                 ),
             )
         _logger.info("Completed Issue #%d: %s", issue.number, issue.title)

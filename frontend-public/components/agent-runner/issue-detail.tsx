@@ -11,6 +11,7 @@ import { CopyableCommand } from "@/components/agent-runner/copyable-command";
 import { IssueLabelEditor } from "@/components/agent-runner/issue-label-editor";
 import type { IssueLabelsChangedInfo } from "@/components/agent-runner/issue-label-editor";
 import { prettyLabel, variantForLabel } from "@/components/agent-runner/label-variant";
+import { VerifierTakeoverCard } from "@/components/agent-runner/verifier-takeover-card";
 
 interface IssueDetailProps {
   issue: IssueMonitoringSnapshot;
@@ -18,9 +19,16 @@ interface IssueDetailProps {
   repoId?: string;
   /** 标签读取/写回后的状态汇报，让父级同步「全部」列表的标签展示。 */
   onLabelsChanged?: (info: IssueLabelsChangedInfo) => void;
+  /** verifier 交班确认后请求父级刷新监控快照（Issue 已翻到 review）。 */
+  onTakeoverSettled?: () => void;
 }
 
-export function IssueDetail({ issue, repoId, onLabelsChanged }: IssueDetailProps) {
+export function IssueDetail({
+  issue,
+  repoId,
+  onLabelsChanged,
+  onTakeoverSettled,
+}: IssueDetailProps) {
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
       <Card>
@@ -57,6 +65,17 @@ export function IssueDetail({ issue, repoId, onLabelsChanged }: IssueDetailProps
           <WorktreeBlock issue={issue} />
         </CardContent>
       </Card>
+
+      {repoId ? (
+        <VerifierTakeoverCard
+          key={`${repoId}:${issue.number}`}
+          repoId={repoId}
+          issueNumber={issue.number}
+          initialVerifier={issue.active_verifier ?? null}
+          prUrl={issue.pr?.url ?? null}
+          onTakeoverSettled={onTakeoverSettled}
+        />
+      ) : null}
 
       {repoId ? (
         <Card>

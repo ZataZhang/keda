@@ -34,6 +34,9 @@ from backend.core.use_cases.agent_runner_git import (
     pop_worktree_stash,
     stash_worktree_changes,
 )
+from backend.core.use_cases.agent_runner_issue_control import (
+    autopilot_hold_blocks,
+)
 from backend.core.use_cases.agent_runner_workflow import (
     transition_issue_workflow_state,
 )
@@ -55,6 +58,7 @@ def _run_supervisor_with_repair_loop(
     pr_context: PullRequestContext,
     supervisor_agent: str,
     executor_agent: str | None = None,
+    repo_id: str | None = None,
 ) -> None:
     """运行 PR 事后监督修复循环。
 
@@ -79,7 +83,17 @@ def _run_supervisor_with_repair_loop(
         supervisor_agent: 监督者 Agent
         executor_agent: 本次实现者；``None`` 表示本入口拿不到，
             ``repair_agent='executor'`` 时按 Issue 标签回落并记录来源
+        repo_id: 注册表仓库 ID；``None`` 时闸门查询放行（与接管窗口不启用一致）。
+            该 Issue 处于人工接管闸门（``autopilot_hold``）时**不启动**任何监督
+            Agent 审查或修复，直接返回——闸门只由同 head 的全新 verifier
+            GREEN 清除。
     """
+    if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
+        _logger.info(
+            "Issue #%d is under manual takeover hold; " "post-PR supervisor not started.",
+            issue.number,
+        )
+        return
     max_repair = max(0, config.post_pr_supervisor.max_repair_attempts)
     repair_agent = resolve_repair_agent(
         config.post_pr_supervisor.repair_agent,

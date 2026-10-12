@@ -38,6 +38,9 @@ class FinalVerificationRequest:
     #: 发布档位：``FAST`` / ``DIRECT`` 不再重跑 RV 与独立 verifier；``PRD_AUTO_MERGE``
     #: 保留 RV 重跑，只跳过独立 verifier。
     publish_stage: PublishStage = PublishStage.NORMAL
+    #: 稳定仓库标识（Issue #278）：仅用于 verdict 发布前的 merged/HEAD 复核与过期
+    #: 结论落闸；``None``（未带 ``--repo-id`` 的手工运行）时复核照常、落闸跳过。
+    repo_id: str | None = None
 
     def __post_init__(self) -> None:
         """把 ``fast_merge`` 布尔收进 :attr:`publish_stage`，并回填其派生视图。"""

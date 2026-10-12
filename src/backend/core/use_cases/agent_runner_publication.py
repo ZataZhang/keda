@@ -53,6 +53,7 @@ from backend.core.use_cases.agent_runner_direct_pr_label import (
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import PublishFailureError
+from backend.core.use_cases.agent_runner_issue_control import discard_stale_verdict
 from backend.core.use_cases.agent_runner_publish import (
     DraftPRCreationError,
     create_draft_pr,
@@ -468,18 +469,69 @@ class _VerifiedPrPublication:
 
 
 def _publish_verified_pr(request: _VerifiedPrPublication) -> None:
-    """统一发布 verifier 结论、Issue 回链和 RV 证据。"""
+    """统一发布 verifier 结论、Issue 回链和 RV 证据。
+
+    verdict 副作用前的 fresh-read 复核（Issue #278 PRD §7.6）：只有 PR 仍开放
+    且 HEAD 等于 verifier 输入提交才允许写 ``validation/verifier-passed``；
+    应用后再次回读，副作用窗口内发生合并或 HEAD 漂移时立即清掉过期标签并
+    落闸（``verifier_stale``），后续自动阶段 fail closed。
+    """
     verification_request = request.verification_request
-    apply_verifier_verdict_to_pr(
-        pr_url=request.pr_url,
-        verdict=request.verdict,
-        issue_number=verification_request.issue.number,
-        verifier_passed_label=verification_request.config.labels.verifier_passed,
-        github_client=request.github_client,
-    )
     publish_sha = get_head_sha(
         verification_request.worktree_path, verification_request.process_runner
     )
+    if request.verdict is not None:
+        verdict_input_sha = verification_request.verified_sha or publish_sha
+        pr_context = request.github_client.get_pull_request_context(request.branch)
+        if pr_context is None or pr_context.head_sha != verdict_input_sha:
+            _logger.warning(
+                "Skipping verifier verdict side effects for Issue #%d: the PR for "
+                "branch %s is no longer open at the verified HEAD %s (takeover race "
+                "or external change); the verdict is stale and must not be published.",
+                verification_request.issue.number,
+                request.branch,
+                verdict_input_sha[:8],
+            )
+            discard_stale_verdict(
+                repo_id=verification_request.repo_id,
+                issue_number=verification_request.issue.number,
+                verdict_input_sha=verdict_input_sha,
+            )
+        else:
+            apply_verifier_verdict_to_pr(
+                pr_url=request.pr_url,
+                verdict=request.verdict,
+                issue_number=verification_request.issue.number,
+                verifier_passed_label=verification_request.config.labels.verifier_passed,
+                github_client=request.github_client,
+            )
+            after_apply = request.github_client.get_pull_request_context(request.branch)
+            if after_apply is None or after_apply.head_sha != verdict_input_sha:
+                # 应用副作用窗口内 PR 被合并或 HEAD 漂移：刚写下的结论标签即刻过期。
+                if pr_context.number is not None and request.verdict.risk == "green":
+                    try:
+                        request.github_client.edit_issue_labels(
+                            pr_context.number,
+                            remove=(verification_request.config.labels.verifier_passed,),
+                        )
+                    except Exception as cleanup_exc:  # noqa: BLE001 - 清理失败只留日志。
+                        _logger.warning(
+                            "Issue #%d: could not remove verifier-passed label from "
+                            "PR #%s after post-apply drift (%s).",
+                            verification_request.issue.number,
+                            pr_context.number,
+                            cleanup_exc,
+                        )
+                discard_stale_verdict(
+                    repo_id=verification_request.repo_id,
+                    issue_number=verification_request.issue.number,
+                    verdict_input_sha=verdict_input_sha,
+                )
+                _logger.warning(
+                    "Issue #%d: PR merged or HEAD drifted during verdict side effects; "
+                    "stale verdict discarded and automatic stages held.",
+                    verification_request.issue.number,
+                )
     _comment_issue_after_publish(
         issue_number=verification_request.issue.number,
         comment_body=build_draft_pr_created_comment(
@@ -753,6 +805,7 @@ def _finish_implementation_publication(
         verified_sha=after_sha,
         verifier_verdict=commit_result.verifier_verdict,
         publish_stage=publish_stage,
+        repo_id=repo_id,
     )
     reviewed_pr = _review_verify_create_pr(
         _PublicationReviewRequest(
@@ -825,6 +878,7 @@ def _finish_implementation_publication(
                 pr_context=pr_context,
                 supervisor_agent=supervisor_agent,
                 executor_agent=selected_agent,
+                repo_id=repo_id,
             )
     else:
         # 未启用监督（或直发档旁路）时直接进入 review 标签
@@ -862,6 +916,7 @@ def _finish_existing_commit_publication(
     commit_result: AgentCommitResult,
     content_generator: IContentGenerator | None = None,
     direct_pr_label: str | None = None,
+    repo_id: str | None = None,
 ) -> None:
     """完成已存在本地 commit 的恢复发布流程。
 
@@ -890,6 +945,8 @@ def _finish_existing_commit_publication(
         expected_branch: 预期的分支名
         commit_result: 已存在的提交结果
         content_generator: 可选的 AI 内容生成器
+        repo_id: 稳定仓库标识（Issue #278），透传给 verdict 发布前的
+            merged/HEAD 复核；``None`` 时复核照常但过期结论不落闸。
     """
     # 导入监督循环（避免循环导入）
     from backend.core.use_cases.agent_runner_supervisor import (
@@ -934,6 +991,7 @@ def _finish_existing_commit_publication(
         verified_sha=None,
         verifier_verdict=commit_result.verifier_verdict,
         publish_stage=publish_stage,
+        repo_id=repo_id,
     )
     reviewed_pr = _review_verify_create_pr(
         _PublicationReviewRequest(
@@ -995,6 +1053,7 @@ def _finish_existing_commit_publication(
                 pr_context=pr_context,
                 supervisor_agent=supervisor_agent,
                 executor_agent=selected_agent,
+                repo_id=repo_id,
             )
     else:
         review_add_labels, review_remove_labels = _review_handoff_label_updates(issue, config)
