@@ -173,8 +173,10 @@ export async function takeOverVerifier(
   } catch (error) {
     if (error instanceof ApiRequestError) {
       const message = error.message ?? "";
-      const outcomeMatch = /outcome=([a-z_]+)/.exec(message);
-      const outcome = outcomeMatch ? outcomeMatch[1] : "";
+      // 409 仍然带回完整的 ConsoleActionResult 正文：从结构化字段读分类，
+      // 不去解析人读的审计 detail 文案（措辞变了界面就静默降级）。
+      const rejected = error.payload as ConsoleActionResult | undefined;
+      const outcome = rejected?.takeover_outcome ?? "";
       if (error.status === 409) {
         return { kind: "conflict", outcome, message };
       }

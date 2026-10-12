@@ -300,6 +300,43 @@ def test_via_main_issue_never_retargets_base(tmp_path, worktree_path) -> None:
     assert not any(c.get("method") == "set_pull_request_base" for c in github.calls)
 
 
+def test_manual_takeover_hold_is_rechecked_immediately_before_merge(
+    tmp_path, worktree_path, monkeypatch
+) -> None:
+    """队列处理期间落下的接管闸门必须在最终合并操作前拦截。"""
+    branch = "issue-72"
+    github = FakeGitHubClient()
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, "abc1234"))
+    issue = IssueSummary(
+        number=72,
+        title="hold race",
+        url="https://github.com/example/repo/issues/72",
+        body="",
+        labels=("agent/review",),
+    )
+    github.set_pr_context(branch, _make_pr_context(branch=branch, number=72))
+    github._issue_comments[72] = [f"PR Branch: `{branch}`"]
+    hold_checks = iter((False, True))
+    monkeypatch.setattr(
+        merge_queue_module,
+        "autopilot_hold_blocks",
+        lambda **_kwargs: next(hold_checks),
+    )
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+        repo_id="repo-a",
+    )
+
+    assert outcome.action == "skipped_manual_takeover_hold"
+    assert not any(call.get("method") == "merge_pull_request" for call in github.calls)
+
+
 def test_kill_switch_off_returns_no_op(tmp_path, monkeypatch) -> None:
     """Both switches must be on; either off is a no-op."""
     github = FakeGitHubClient()

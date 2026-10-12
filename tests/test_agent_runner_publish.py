@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_runner import (
     GeneratedContentTargetConfig,
     GitConfig,
     IssueSummary,
+    PullRequestContext,
     WorktreeConfig,
 )
 from backend.core.use_cases.agent_runner_publish import create_draft_pr, push_changes
@@ -541,6 +542,221 @@ def test_publish_validation_evidence_after_pr_is_best_effort() -> None:
             process_runner=FakeProcessRunner(),
             pr_url="https://github.com/example/repo/pull/1",
         )
+
+
+def test_verified_pr_uses_actual_final_verifier_sha_and_clears_hold_after_fresh_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """review HEAD rerun 的 SHA 綁定 verdict，兩次遠端確認後才清 hold。"""
+    from backend.core.use_cases import agent_runner_publication as publication
+    from backend.core.use_cases.agent_runner_final_verification import FinalVerificationRequest
+    from backend.core.use_cases.agent_runner_publication import _VerifiedPrPublication
+    from backend.core.use_cases.run_verifier_agent import ValidationVerdict
+
+    events: list[str] = []
+    issue = IssueSummary(
+        number=72,
+        title="Final verifier SHA",
+        url="https://github.com/example/repo/issues/72",
+        body="",
+        labels=(),
+    )
+    final_sha = "f" * 40
+    pr_context = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/72",
+        branch="issue-72",
+        head_sha=final_sha,
+        base_sha="a" * 40,
+        mergeable=True,
+        checks_state="SUCCESS",
+        number=72,
+    )
+
+    class _RecordingGitHub(FakeGitHubClient):
+        def get_pull_request_context(
+            self, branch: str, *, require_success: bool = False
+        ) -> PullRequestContext | None:
+            assert require_success is True
+            events.append("fresh-read")
+            return pr_context
+
+    github = _RecordingGitHub()
+    monkeypatch.setattr(publication, "get_head_sha", lambda *_args: final_sha)
+    monkeypatch.setattr(
+        publication,
+        "clear_verifier_hold_after_green",
+        lambda **kwargs: events.append(
+            f"clear:{kwargs['verifier_run_id']}:{kwargs['verifier_input_sha']}"
+        ),
+    )
+    monkeypatch.setattr(
+        publication,
+        "_comment_issue_after_publish",
+        lambda **_kwargs: events.append("comment"),
+    )
+    monkeypatch.setattr(
+        publication,
+        "_publish_validation_evidence_after_pr",
+        lambda **_kwargs: events.append("evidence"),
+    )
+    verdict = ValidationVerdict(
+        risk="green",
+        verifier_input_sha=final_sha,
+        verifier_run_id="final-run",
+    )
+    publish_request = _VerifiedPrPublication(
+        verification_request=FinalVerificationRequest(
+            issue=issue,
+            worktree_path=tmp_path,
+            config=AppConfig(),
+            process_runner=FakeProcessRunner(),
+            selected_agent="claude",
+            verified_sha="old-review-sha",
+            verifier_verdict=None,
+            repo_id="repo-a",
+        ),
+        github_client=github,
+        branch="issue-72",
+        pr_url=pr_context.pr_url,
+        verdict=verdict,
+    )
+
+    published = publication._publish_verified_pr(publish_request)
+
+    assert published is True
+    assert events[:3] == ["fresh-read", "fresh-read", f"clear:final-run:{final_sha}"]
+    assert any(
+        call.get("method") == "edit_issue_labels"
+        and "validation/verifier-passed" in call.get("add", ())
+        for call in github.calls
+    )
+
+
+def test_verified_pr_does_not_publish_after_authoritative_github_read_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """GitHub transport 失败不能被当成 PR 合并或继续发布后续阶段。"""
+    from backend.core.use_cases import agent_runner_publication as publication
+    from backend.core.use_cases.agent_runner_final_verification import FinalVerificationRequest
+    from backend.core.use_cases.agent_runner_publication import _VerifiedPrPublication
+    from backend.core.use_cases.run_verifier_agent import ValidationVerdict
+
+    issue = IssueSummary(
+        number=73,
+        title="GitHub read failure",
+        url="https://github.com/example/repo/issues/73",
+        body="",
+        labels=(),
+    )
+
+    class _UnavailableGitHub(FakeGitHubClient):
+        def get_pull_request_context(
+            self, _branch: str, *, require_success: bool = False
+        ) -> PullRequestContext | None:
+            assert require_success is True
+            raise RuntimeError("GitHub API unavailable")
+
+    github = _UnavailableGitHub()
+    monkeypatch.setattr(publication, "get_head_sha", lambda *_args: "b" * 40)
+    monkeypatch.setattr(
+        publication,
+        "discard_stale_verdict",
+        lambda **_kwargs: pytest.fail("unknown GitHub status must not be marked stale"),
+    )
+    monkeypatch.setattr(
+        publication,
+        "_comment_issue_after_publish",
+        lambda **_kwargs: pytest.fail("no publication side effects after an unknown read"),
+    )
+    publish_request = _VerifiedPrPublication(
+        verification_request=FinalVerificationRequest(
+            issue=issue,
+            worktree_path=tmp_path,
+            config=AppConfig(),
+            process_runner=FakeProcessRunner(),
+            selected_agent="claude",
+            verified_sha="b" * 40,
+            verifier_verdict=None,
+            repo_id="repo-a",
+        ),
+        github_client=github,
+        branch="issue-73",
+        pr_url="https://github.com/example/repo/pull/73",
+        verdict=ValidationVerdict(risk="green", verifier_input_sha="b" * 40),
+    )
+
+    with pytest.raises(RuntimeError, match="GitHub API unavailable"):
+        publication._publish_verified_pr(publish_request)
+
+
+def test_verified_pr_records_external_merge_and_stops_following_publication(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """外部合并被 fresh-read 证实时记录 pr_merged 并停止所有后续发布阶段。"""
+    from backend.core.use_cases import agent_runner_publication as publication
+    from backend.core.use_cases.agent_runner_final_verification import FinalVerificationRequest
+    from backend.core.use_cases.agent_runner_publication import _VerifiedPrPublication
+    from backend.core.use_cases.run_verifier_agent import ValidationVerdict
+
+    issue = IssueSummary(
+        number=74,
+        title="Externally merged",
+        url="https://github.com/example/repo/issues/74",
+        body="",
+        labels=(),
+    )
+
+    class _MergedGitHub(FakeGitHubClient):
+        def get_pull_request_context(
+            self, _branch: str, *, require_success: bool = False
+        ) -> PullRequestContext | None:
+            assert require_success is True
+            return None
+
+        def find_merged_pr_by_head(
+            self, branch: str, *, require_success: bool = False
+        ) -> str | None:
+            assert branch == "issue-74"
+            assert require_success is True
+            return "https://github.com/example/repo/pull/74"
+
+    github = _MergedGitHub()
+    monkeypatch.setattr(publication, "get_head_sha", lambda *_args: "c" * 40)
+    merged_runs: list[tuple[str | None, str]] = []
+    monkeypatch.setattr(
+        publication,
+        "mark_verifier_pr_merged",
+        lambda **kwargs: merged_runs.append((kwargs["verifier_run_id"], str(kwargs["repo_id"]))),
+    )
+    monkeypatch.setattr(
+        publication,
+        "_comment_issue_after_publish",
+        lambda **_kwargs: pytest.fail("merged PR must stop issue comments and later phases"),
+    )
+    publish_request = _VerifiedPrPublication(
+        verification_request=FinalVerificationRequest(
+            issue=issue,
+            worktree_path=tmp_path,
+            config=AppConfig(),
+            process_runner=FakeProcessRunner(),
+            selected_agent="claude",
+            verified_sha="c" * 40,
+            verifier_verdict=None,
+            repo_id="repo-a",
+        ),
+        github_client=github,
+        branch="issue-74",
+        pr_url="https://github.com/example/repo/pull/74",
+        verdict=ValidationVerdict(
+            risk="green", verifier_input_sha="c" * 40, verifier_run_id="run-74"
+        ),
+    )
+
+    published = publication._publish_verified_pr(publish_request)
+
+    assert published is False
+    assert merged_runs == [("run-74", "repo-a")]
+    assert not any(call.get("method") == "edit_issue_labels" for call in github.calls)
 
 
 def test_validate_safe_changes_rejects_forbidden_path(tmp_path: Path) -> None:

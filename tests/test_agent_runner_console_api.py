@@ -970,7 +970,11 @@ def test_take_over_verifier_action_contract_returns_202(console_environment) -> 
 
 
 def test_take_over_verifier_stale_head_contract_returns_409(console_environment) -> None:
-    """HEAD 不符时返回 409，控制行保持 running、零副作用。"""
+    """HEAD 不符时返回 409，控制行保持 running、零副作用。
+
+    409 正文必须仍带结构化的 ``takeover_outcome``：前端据此区分「HEAD 已变化 /
+    运行已结束」，不去解析人读的审计 detail 文案。
+    """
     _seed_running_verifier(console_environment["store"])
 
     response = client.post(
@@ -979,6 +983,7 @@ def test_take_over_verifier_stale_head_contract_returns_409(console_environment)
     )
 
     assert response.status_code == 409, response.text
+    assert response.json()["takeover_outcome"] == "binding_mismatch"
     assert (
         console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
         == "running"

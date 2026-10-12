@@ -99,8 +99,8 @@ class IIssueRunControl(ABC):
         """登记一次新的受控运行（verifier 起跑前调用）。
 
         按 (repo_id, issue_number) upsert：上一轮无论处于什么终态都被新一轮
-        覆盖为 ``running``；``autopilot_hold`` **保留旧值**——闸门只由同 head
-        的全新 GREEN 清除，不能被新一轮登记顺手洗掉。
+        覆盖为 ``running``；``autopilot_hold`` **保留旧值**——闸门只由同 run/head
+        且经发布端 fresh-read 确认的全新 GREEN 清除，不能被新一轮登记顺手洗掉。
 
         Args:
             record: 新控制行；``state`` 必须是 ``running``，``request_id`` /
@@ -125,7 +125,7 @@ class IIssueRunControl(ABC):
         requested_at: str,
     ) -> TakeoverRequestOutcome:
         """CAS：仅当控制行为 ``running`` 且 run_id/head_sha 完全匹配时翻到
-        ``takeover_requested`` 并写入请求信息。
+        ``takeover_requested``、写入请求信息并立即置 ``autopilot_hold``。
 
         不满足匹配时**绝不写任何状态**，只回读并分类。已在
         ``takeover_requested`` 的重复请求幂等返回 ``pending``。
@@ -164,10 +164,12 @@ class IIssueRunControl(ABC):
         ...
 
     @abstractmethod
-    def clear_autopilot_hold(self, *, repo_id: str, issue_number: int, head_sha: str) -> bool:
-        """仅当控制行记录的 head_sha 与给定 ``head_sha`` 一致时清除闸门。
+    def clear_autopilot_hold(
+        self, *, repo_id: str, issue_number: int, run_id: str, head_sha: str
+    ) -> bool:
+        """仅当运行身份与提交都匹配时清除闸门。
 
         这是 ``autopilot_hold`` 唯一的清除路径：**同一 head 上的全新 verifier
-        GREEN**。head 已漂移时返回 ``False``，闸门保持。
+        GREEN**。run 或 head 已变化时返回 ``False``，闸门保持。
         """
         ...

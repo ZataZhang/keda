@@ -748,12 +748,12 @@ runner 在 commit proxy 固定实现提交后复跑 RV，并确认 PRD 执行侧
 
 接管的语义边界（这些是刻意设计，不是缺陷）：
 
-- **精确绑定运行身份**。接管请求只携带页面从 Issue 详情读到的 `run_id` 与 PR `head_sha`，后端以共享的本地 SQLite 控制面（`issue_run_control` 表）做 CAS：仅当控制行仍是本次 `run` 且 HEAD 未漂移时才登记取消意图。HEAD 已变、运行已结束或找不到受控运行时一律回 `409`，界面据此提示「HEAD 已变化 / 运行已结束 / 状态已变化」，绝不伪装成交班成功。
+- **精确绑定运行身份**。接管请求只携带页面从 Issue 详情读到的 `run_id` 与 PR `head_sha`，后端以共享的本地 SQLite 控制面（`issue_run_control` 表）做 CAS：仅当控制行仍是本次 `run` 且 HEAD 未漂移时，原子登记取消意图并立即落下 `autopilot_hold`。HEAD 已变、运行已结束或找不到受控运行时一律回 `409`，界面据此提示「HEAD 已变化 / 运行已结束 / 状态已变化」，绝不伪装成交班成功。
 - **停的是进程树，不是队列**。登记后 runner 侧的进程 watchdog 按秒级探针回读控制行，命中即只 `SIGKILL` 该 verifier 子进程组并回收；父 runner 与被监督的进程都存活。
-- **取消≠通过**。被接管的 verifier **不产出任何 verdict**（没有 PASS/RED/YELLOW，也绝不写 `validation/verifier-passed`），并落一条 `agent/review` + 持久的 `autopilot_hold`。这个保持位让 post-PR supervisor、`review_once` 与 autopilot 合并队列**fail closed**——即便仓库关了 `require_verifier_pass`，也不会把这轮当成验证通过去自动合并。PR 保持 Draft 交人工处理。
+- **取消≠通过**。被接管的 verifier **不产出任何 verdict**（没有 PASS/RED/YELLOW，也绝不写 `validation/verifier-passed`），并落一条 `agent/review`；`autopilot_hold` 在接管 CAS 受理时已生效，不等进程树退出。这个保持位让 post-PR supervisor、`review_once` 与 autopilot 合并队列**fail closed**——即便仓库关了 `require_verifier_pass`，也不会把这轮当成验证通过去自动合并。PR 保持 Draft 交人工处理。
 - **交班以回读为准**。请求返回 `202`（处理中）只代表取消意图已登记，界面继续轮询控制行投影，直到状态离开 `running`/`takeover_requested` 落定为「已交给你审查」才确认交班完成；超过阈值仍未确认时提示「仍在停止」，界面绝不自称「已停止」。
 
-竞态同样按 fail-closed 收敛：若 verifier 恰好在接管登记的同一刻自然完成，二者只有一个赢家胜出（完成→接管拿到 `completed_conflict`，接管→完成落 `taken_over`）；接管之后 HEAD 又漂移，则该运行标为 `verifier_stale`、旧的 verdict 作废；外部把 PR 合并则控制行转 `pr_merged`。`autopilot_hold` 只会被**同一 HEAD 上的一次全新 verifier GREEN** 清除。
+竞态同样按 fail-closed 收敛：若 verifier 恰好在接管登记的同一刻自然完成，二者只有一个赢家胜出（完成→接管拿到 `completed_conflict`，接管→完成落 `taken_over`）；接管之后 HEAD 又漂移，则该运行标为 `verifier_stale`、旧的 verdict 作废；外部把 PR 合并则控制行转 `pr_merged`。`autopilot_hold` 只会在**同一 run、同一 HEAD 的全新 verifier GREEN 发布前后都通过 GitHub fresh-read 核验后**清除；存储不可读或最终合并前发现 hold 时，自动处理继续 fail closed。
 
 > 边界与保真度：接管是「单 Issue、精确 run_id+HEAD」的可控停止，作用域由共享 SQLite 控制面而非进程内状态界定，因此跨 runner/daemon 进程同样成立。它**不**等价于停止整个 runner，也**不**是任何「验证通过」的记录——把它当作「把这轮交回给人」的信号。
 

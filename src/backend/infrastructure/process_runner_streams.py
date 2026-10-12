@@ -98,6 +98,7 @@ def run_filtered_claude_stream(
     line_renderer: Callable[[str], str] | None = None,
     env: dict[str, str] | None = None,
     attempt_key: str | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a structured JSON Lines agent stream and print its readable view.
 
@@ -122,6 +123,7 @@ def run_filtered_claude_stream(
         env: 可选的已净化子进程环境（由 :meth:`SubprocessRunner.run`
             传入，避免同一环境重复构造）；``None`` 时本函数自行调用
             :func:`build_sanitized_child_env`，直接调用方无需感知。
+        cancel_check: 人工接管取消探针，由 watchdog 秒级轮询。
 
     Returns:
         CompletedProcess with collected stdout if requested.
@@ -157,6 +159,7 @@ def run_filtered_claude_stream(
         base_label="Agent stream",
         context_label=label,
         attempt_key=attempt_key,
+        cancel_check=cancel_check,
     )
     watchdog.start()
 
@@ -233,6 +236,7 @@ def run_filtered_claude_stream(
                 process_runner_module.logger.info("Agent output: %s", buffered)
         return_code = process.wait(timeout=timeout)
         watchdog.raise_if_timed_out(partial_stdout="".join(stdout_lines))
+        watchdog.raise_if_cancelled(partial_stdout="".join(stdout_lines))
     except BaseException as exc:
         process_runner_module._attach_stream_observations(exc, usage_collector)
         process_runner_module._terminate_process_tree(process)

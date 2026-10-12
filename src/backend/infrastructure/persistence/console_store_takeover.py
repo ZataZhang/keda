@@ -132,14 +132,14 @@ class IssueRunControlMixin:
         request_id: str,
         requested_at: str,
     ) -> TakeoverRequestResult:
-        """CAS：仅 ``running`` 且 run_id/head_sha 匹配时翻到 ``takeover_requested``。
+        """CAS：仅 ``running`` 且 run_id/head_sha 匹配时翻到 takeover 并立即落闸。
 
         CAS 未命中时**不写任何状态**，只回读当前行并按绑定/状态分类结果。
         """
         with self._connect() as connection:
             cursor = connection.execute(
                 "UPDATE issue_run_control "
-                "SET state = ?, request_id = ?, requested_at = ? "
+                "SET state = ?, request_id = ?, requested_at = ?, autopilot_hold = 1 "
                 "WHERE repo_id = ? AND issue_number = ? AND run_id = ? AND head_sha = ? "
                 "AND state = ?",
                 (
@@ -227,8 +227,10 @@ class IssueRunControlMixin:
             ).fetchone()
         return hold_row is not None
 
-    def clear_autopilot_hold(self, *, repo_id: str, issue_number: int, head_sha: str) -> bool:
-        """仅当控制行停在 ``verifier_completed`` 且 head_sha 一致时清除闸门。
+    def clear_autopilot_hold(
+        self, *, repo_id: str, issue_number: int, run_id: str, head_sha: str
+    ) -> bool:
+        """仅当控制行停在 ``verifier_completed`` 且运行身份、head 一致时清除闸门。
 
         ``state`` 条件防止半路清闸：闸门只允许被**这一轮**在同一 head 上跑完并
         取得 GREEN 的 verifier 打开；正在 running 或已 stale/接管完成的行都不算。
@@ -237,8 +239,8 @@ class IssueRunControlMixin:
             cursor = connection.execute(
                 "UPDATE issue_run_control SET autopilot_hold = 0 "
                 "WHERE repo_id = ? AND issue_number = ? AND autopilot_hold = 1 "
-                "AND head_sha = ? AND state = ?",
-                (repo_id, issue_number, head_sha, _STATE_VERIFIER_COMPLETED),
+                "AND run_id = ? AND head_sha = ? AND state = ?",
+                (repo_id, issue_number, run_id, head_sha, _STATE_VERIFIER_COMPLETED),
             )
             connection.commit()
             return cursor.rowcount == 1

@@ -366,6 +366,7 @@ class SubprocessRunner:
                 usage_collector=usage_collector,
                 env=child_env,
                 attempt_key=attempt_key,
+                cancel_check=cancel_check,
             )
             stdout = completed.stdout
             stderr = completed.stderr

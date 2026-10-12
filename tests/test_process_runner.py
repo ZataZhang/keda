@@ -918,6 +918,25 @@ def test_claude_stream_timeout_exception_carries_partial_output(tmp_path: Path) 
     assert "checked rv-1" in str(exc_info.value.output or "")
 
 
+def test_claude_stream_honors_takeover_cancel_check(tmp_path: Path) -> None:
+    """claude-stream-json 的捕获路径也必须回收目标进程组并抛取消异常。"""
+    import time
+
+    runner = SubprocessRunner()
+    started_at = time.monotonic()
+    script = "import time\nprint('started', flush=True)\ntime.sleep(60)\n"
+
+    with pytest.raises(InterruptedError, match="takeover cancel request"):
+        runner.run(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=30,
+            output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+            cancel_check=lambda: time.monotonic() - started_at >= 1,
+        )
+
+
 def test_subprocess_runner_keeps_active_process_alive(
     tmp_path: Path,
 ) -> None:

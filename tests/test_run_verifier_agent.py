@@ -429,6 +429,85 @@ def test_run_verifier_gate_returns_verdict_on_green(
         _structured_issue(), tmp_path, config, FakeProcessRunner(), "claude"
     )
     assert verdict is not None and verdict.risk == "green"
+    assert verdict.verifier_input_sha == "abc1234"
+    assert verdict.verifier_run_id is None
+
+
+def test_verifier_gate_fails_closed_when_completion_cas_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """持久 CAS 失败时不得返回 verdict，避免 published result 与控制行脱节。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+    from backend.core.use_cases.agent_runner_issue_control import VerifierRunHandle
+
+    _patch_gate_deps(monkeypatch, rva, ValidationVerdict(risk="green"), {})
+
+    class _UnavailableStore:
+        def transition_issue_run(self, **_kwargs: object) -> bool:
+            raise OSError("sqlite unavailable")
+
+    monkeypatch.setattr(
+        rva,
+        "begin_verifier_run",
+        lambda **_kwargs: VerifierRunHandle(
+            store=_UnavailableStore(),
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-1",
+            head_sha="abc1234",
+        ),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    with pytest.raises(rva.VerifierUnavailableError, match="not published"):
+        rva.run_verifier_gate(
+            _structured_issue(),
+            tmp_path,
+            config,
+            FakeProcessRunner(),
+            "claude",
+            repo_id="repo-a",
+        )
+
+
+def test_verifier_gate_binds_verdict_to_control_run_and_input_sha(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """真实 verdict 返回时带上本轮控制身份和 verifier 输入 SHA。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+    from backend.core.use_cases.agent_runner_issue_control import VerifierRunHandle
+
+    _patch_gate_deps(monkeypatch, rva, ValidationVerdict(risk="green"), {})
+
+    class _Store:
+        def transition_issue_run(self, **_kwargs: object) -> bool:
+            return True
+
+    monkeypatch.setattr(
+        rva,
+        "begin_verifier_run",
+        lambda **_kwargs: VerifierRunHandle(
+            store=_Store(),
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-final",
+            head_sha="abc1234",
+        ),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    verdict = rva.run_verifier_gate(
+        _structured_issue(),
+        tmp_path,
+        config,
+        FakeProcessRunner(),
+        "claude",
+        repo_id="repo-a",
+    )
+
+    assert verdict is not None
+    assert verdict.verifier_run_id == "run-final"
+    assert verdict.verifier_input_sha == "abc1234"
 
 
 def test_missing_marker_is_distinguishable_even_with_findings_text() -> None:

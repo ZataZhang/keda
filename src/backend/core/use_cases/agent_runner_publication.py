@@ -45,6 +45,11 @@ from backend.core.use_cases.agent_runner_final_verification import (
     FinalVerificationRequest,
     ensure_final_verifier_verdict,
 )
+from backend.core.use_cases.agent_runner_verifier_publication import (
+    _VerifiedPrPublication,
+    VerifierPublicationDependencies,
+    publish_verified_pr,
+)
 from backend.core.use_cases.agent_runner_direct_pr_round import complete_direct_pr_round
 from backend.core.use_cases.agent_runner_direct_pr_round import DirectPrPublicationCandidate
 from backend.core.use_cases.agent_runner_direct_pr_label import (
@@ -53,7 +58,13 @@ from backend.core.use_cases.agent_runner_direct_pr_label import (
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import PublishFailureError
-from backend.core.use_cases.agent_runner_issue_control import discard_stale_verdict
+from backend.core.use_cases.agent_runner_issue_control import (
+    VerifierCancelledByHumanError,
+    clear_verifier_hold_after_green,
+    discard_stale_verdict,
+    finalize_verifier_takeover,
+    mark_verifier_pr_merged,
+)
 from backend.core.use_cases.agent_runner_publish import (
     DraftPRCreationError,
     create_draft_pr,
@@ -77,10 +88,7 @@ from backend.core.use_cases.run_agent_once import (
     resolve_supervisor_agent,
     run_verification,
 )
-from backend.core.use_cases.run_verifier_agent import (
-    ValidationVerdict,
-    apply_verifier_verdict_to_pr,
-)
+from backend.core.use_cases.run_verifier_agent import apply_verifier_verdict_to_pr
 
 _logger = logging.getLogger(__name__)
 
@@ -457,98 +465,52 @@ def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrP
     )
 
 
-@dataclass(frozen=True)
-class _VerifiedPrPublication:
-    """创建 PR 后发布最终复核结论和证据所需的上下文。"""
+def _review_verify_create_pr_with_takeover_handoff(
+    request: _PublicationReviewRequest,
+) -> _VerifiedPrPublication | None:
+    """审核 + 最终复核 + 建 PR；被人工接管时交班并返回 ``None``（Issue #278）。
 
-    verification_request: FinalVerificationRequest
-    github_client: IGitHubClient
-    branch: str
-    pr_url: str
-    verdict: ValidationVerdict | None
+    最终复核（:func:`ensure_final_verifier_verdict`）会在 HEAD 变化后**重跑**独立
+    verifier，因此它与首跑一样开放接管窗口。取消不是发布流程可以继续消化的失败：
+    进程树已回收、控制行已落闸，收敛 GitHub 事实后调用方必须直接返回——绝不建 PR、
+    不发结论、不进监督。
 
-
-def _publish_verified_pr(request: _VerifiedPrPublication) -> None:
-    """统一发布 verifier 结论、Issue 回链和 RV 证据。
-
-    verdict 副作用前的 fresh-read 复核（Issue #278 PRD §7.6）：只有 PR 仍开放
-    且 HEAD 等于 verifier 输入提交才允许写 ``validation/verifier-passed``；
-    应用后再次回读，副作用窗口内发生合并或 HEAD 漂移时立即清掉过期标签并
-    落闸（``verifier_stale``），后续自动阶段 fail closed。
+    Returns:
+        正常发布上下文；本次运行已被人工接管时为 ``None``。
     """
-    verification_request = request.verification_request
-    publish_sha = get_head_sha(
-        verification_request.worktree_path, verification_request.process_runner
-    )
-    if request.verdict is not None:
-        verdict_input_sha = verification_request.verified_sha or publish_sha
-        pr_context = request.github_client.get_pull_request_context(request.branch)
-        if pr_context is None or pr_context.head_sha != verdict_input_sha:
-            _logger.warning(
-                "Skipping verifier verdict side effects for Issue #%d: the PR for "
-                "branch %s is no longer open at the verified HEAD %s (takeover race "
-                "or external change); the verdict is stale and must not be published.",
-                verification_request.issue.number,
-                request.branch,
-                verdict_input_sha[:8],
-            )
-            discard_stale_verdict(
-                repo_id=verification_request.repo_id,
-                issue_number=verification_request.issue.number,
-                verdict_input_sha=verdict_input_sha,
-            )
-        else:
-            apply_verifier_verdict_to_pr(
-                pr_url=request.pr_url,
-                verdict=request.verdict,
-                issue_number=verification_request.issue.number,
-                verifier_passed_label=verification_request.config.labels.verifier_passed,
-                github_client=request.github_client,
-            )
-            after_apply = request.github_client.get_pull_request_context(request.branch)
-            if after_apply is None or after_apply.head_sha != verdict_input_sha:
-                # 应用副作用窗口内 PR 被合并或 HEAD 漂移：刚写下的结论标签即刻过期。
-                if pr_context.number is not None and request.verdict.risk == "green":
-                    try:
-                        request.github_client.edit_issue_labels(
-                            pr_context.number,
-                            remove=(verification_request.config.labels.verifier_passed,),
-                        )
-                    except Exception as cleanup_exc:  # noqa: BLE001 - 清理失败只留日志。
-                        _logger.warning(
-                            "Issue #%d: could not remove verifier-passed label from "
-                            "PR #%s after post-apply drift (%s).",
-                            verification_request.issue.number,
-                            pr_context.number,
-                            cleanup_exc,
-                        )
-                discard_stale_verdict(
-                    repo_id=verification_request.repo_id,
-                    issue_number=verification_request.issue.number,
-                    verdict_input_sha=verdict_input_sha,
-                )
-                _logger.warning(
-                    "Issue #%d: PR merged or HEAD drifted during verdict side effects; "
-                    "stale verdict discarded and automatic stages held.",
-                    verification_request.issue.number,
-                )
-    _comment_issue_after_publish(
-        issue_number=verification_request.issue.number,
-        comment_body=build_draft_pr_created_comment(
-            pr_url=request.pr_url,
-            branch=request.branch,
-            head_sha=publish_sha,
+    try:
+        return _review_verify_create_pr(request)
+    except VerifierCancelledByHumanError:
+        verification_request = request.verification_request
+        finalize_verifier_takeover(
+            repo_id=verification_request.repo_id,
+            issue=verification_request.issue,
+            config=verification_request.config,
+            github_client=request.github_client,
+            expected_branch=request.expected_branch,
+        )
+        _logger.info(
+            "Issue #%d: independent verifier taken over by a human during final "
+            "verification; publication stopped and handed to manual review.",
+            verification_request.issue.number,
+        )
+        return None
+
+
+def _publish_verified_pr(request: _VerifiedPrPublication) -> bool:
+    """委托独立 verifier 发布用例，保留发布流程的依赖入口。"""
+    return publish_verified_pr(
+        request,
+        VerifierPublicationDependencies(
+            get_head_sha=get_head_sha,
+            apply_verifier_verdict_to_pr=apply_verifier_verdict_to_pr,
+            clear_verifier_hold_after_green=clear_verifier_hold_after_green,
+            discard_stale_verdict=discard_stale_verdict,
+            mark_verifier_pr_merged=mark_verifier_pr_merged,
+            comment_issue_after_publish=_comment_issue_after_publish,
+            draft_pr_created_comment=build_draft_pr_created_comment,
+            publish_validation_evidence_after_pr=_publish_validation_evidence_after_pr,
         ),
-        worktree_path=verification_request.worktree_path,
-        github_client=request.github_client,
-    )
-    _publish_validation_evidence_after_pr(
-        issue=verification_request.issue,
-        worktree_path=verification_request.worktree_path,
-        config=verification_request.config,
-        github_client=request.github_client,
-        process_runner=verification_request.process_runner,
-        pr_url=request.pr_url,
     )
 
 
@@ -807,7 +769,7 @@ def _finish_implementation_publication(
         publish_stage=publish_stage,
         repo_id=repo_id,
     )
-    reviewed_pr = _review_verify_create_pr(
+    reviewed_pr = _review_verify_create_pr_with_takeover_handoff(
         _PublicationReviewRequest(
             verification_request=final_verification_request,
             github_client=github_client,
@@ -817,6 +779,12 @@ def _finish_implementation_publication(
             content_generator=content_generator,
         )
     )
+    if reviewed_pr is None:
+        # 人工接管（Issue #278）：交班已完成，发布流程到此为止。
+        return
+    if _publish_verified_pr(reviewed_pr) is False:
+        # PR 已被外部合并/关闭或 HEAD 漂移：不切换 Issue 标签、不启动后续阶段。
+        return
 
     # 直发标签的消费点：Draft PR 已确认（同仓、同 Issue 分支、同 head、正文带指认本
     # Issue 的 `iar:direct-pr` marker）才移除标签。放在 workflow 标签切换之前——删除
@@ -847,8 +815,6 @@ def _finish_implementation_publication(
             worktree_path=worktree_path,
             github_client=github_client,
         )
-
-    _publish_verified_pr(reviewed_pr)
 
     # 步骤 4: PR 后监督（可选；直发档不进监督）
     if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
@@ -993,7 +959,7 @@ def _finish_existing_commit_publication(
         publish_stage=publish_stage,
         repo_id=repo_id,
     )
-    reviewed_pr = _review_verify_create_pr(
+    reviewed_pr = _review_verify_create_pr_with_takeover_handoff(
         _PublicationReviewRequest(
             verification_request=final_verification_request,
             github_client=github_client,
@@ -1003,6 +969,12 @@ def _finish_existing_commit_publication(
             content_generator=content_generator,
         )
     )
+    if reviewed_pr is None:
+        # 人工接管（Issue #278）：交班已完成，恢复发布流程到此为止。
+        return
+    if _publish_verified_pr(reviewed_pr) is False:
+        # PR 已被外部合并/关闭或 HEAD 漂移：不切换 Issue 标签、不启动后续阶段。
+        return
     # 恢复路径同样只在确认同次 PR 之后消费标签（判据与完整路径完全一致）。
     consume_label_after_publication(
         DirectPrLabelPublicationRequest(
@@ -1025,8 +997,6 @@ def _finish_existing_commit_publication(
             worktree_path=worktree_path,
             github_client=github_client,
         )
-    _publish_verified_pr(reviewed_pr)
-
     # 步骤 4: PR 后监督（可选；直发档不进监督）
     if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
         pr_context = github_client.get_pull_request_context(reviewed_pr.branch)

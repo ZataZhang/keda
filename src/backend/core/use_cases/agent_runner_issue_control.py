@@ -7,10 +7,12 @@ Console API 进程与 runner 进程通过
 - **登记**：独立 verifier 起跑前写入 ``running`` 控制行并交出取消探针
   （:func:`begin_verifier_run`）；``repo_id`` 缺失或旁路存储不可用时**不开放
   接管窗口**，verifier 照常运行——接管是观测面增强，不是验证前提。
-- **终态迁移**：完成（``verifier_completed``，仅由同 head 的全新 GREEN 清闸）、
+- **终态迁移**：完成（``verifier_completed``，仅由同 run/head 的真实 GREEN 且
+  PR fresh-read 仍匹配后清闸）、
   失败/超时/红牌（``expired`` / ``takeover_failed``）、接管确认
   （``takeover_requested → taken_over`` 落闸）。
-- **交班**：取消确认后 :func:`finalize_verifier_takeover` 做 PR fresh-read
+- **交班**：接管 CAS 受理时立即落 hold；取消确认后
+  :func:`finalize_verifier_takeover` 做 PR fresh-read
   （已合并→停止后续阶段；HEAD 漂移→置 ``verifier_stale`` 并清理过期
   ``validation/verifier-passed`` 标签）、Issue 转 ``agent/review``、写
   ``cancelled_by_human`` 交接评论。**绝不**产生或复用任何 verdict 语义。
@@ -18,7 +20,7 @@ Console API 进程与 runner 进程通过
   review_once、merge queue 三个入口 fail closed。
 
 边界与既有约定一致：GitHub labels / PR 仍是交付事实源，控制行只承载控制面
-状态；交班的 GitHub 副作用逐段 best-effort——闸门随控制行 CAS 已经落下，
+状态；交班的 GitHub 副作用逐段 best-effort——闸门随接管请求 CAS 已经落下，
 不能因一条评论发送失败而被回退。
 """
 
@@ -187,7 +189,7 @@ class VerifierRunHandle:
         )
 
     def mark_taken_over_failed(self) -> bool:
-        """无法确认接管归属时置 ``takeover_failed``：交班未完成，闸门不动。"""
+        """无法确认接管归属时置 ``takeover_failed``：交班未完成，已落闸继续保持。"""
         return self._transition(
             from_states=(STATE_TAKEOVER_REQUESTED,),
             to_state=STATE_TAKEOVER_FAILED,
@@ -201,11 +203,12 @@ class VerifierRunHandle:
         return self._transition(from_states=(STATE_RUNNING,), to_state=STATE_VERIFIER_COMPLETED)
 
     def clear_hold_on_green(self) -> bool:
-        """GREEN verdict 落回登记时的 head 才允许清闸（唯一清除路径）。"""
+        """GREEN verdict 落回登记的 run/head 才允许清闸（唯一清除路径）。"""
         return bool(
             self.store.clear_autopilot_hold(  # type: ignore[attr-defined]
                 repo_id=self.repo_id,
                 issue_number=self.issue_number,
+                run_id=self.run_id,
                 head_sha=self.head_sha,
             )
         )
@@ -224,8 +227,12 @@ class VerifierRunHandle:
         )
 
     def mark_merged(self) -> bool:
-        """交班 fresh-read 发现 PR 已被外部合并：``taken_over → pr_merged``。"""
-        return self._transition(from_states=(STATE_TAKEN_OVER,), to_state=STATE_PR_MERGED)
+        """fresh-read 发现 PR 已被外部合并时记录 ``pr_merged``。"""
+        return self._transition(
+            from_states=(STATE_TAKEN_OVER, STATE_VERIFIER_COMPLETED),
+            to_state=STATE_PR_MERGED,
+            autopilot_hold=True,
+        )
 
     def mark_stale(self) -> bool:
         """fresh-read 发现 HEAD 已漂移：``taken_over → verifier_stale``（闸门保持）。"""
@@ -292,14 +299,19 @@ def autopilot_hold_blocks(*, repo_id: str | None, issue_number: int) -> bool:
 
     读库异常按"有闸门"处理（fail closed）：merge queue / supervisor 每轮都会
     重试，一次瞬时 SQLite 失败绝不能变成"闸门没读到、自动合并放行"。
-    ``repo_id`` 缺失或存储不可用时返回 ``False``——从未登记过接管，行为与本
-    特性之前一致。
+    ``repo_id`` 缺失时返回 ``False``，因为这种运行未启用接管控制面；已知仓库
+    但存储解析失败时返回 ``True``，避免读不到持久闸门时自动放行。
     """
     if not repo_id:
         return False
     store = resolve_issue_run_control()
     if store is None:
-        return False
+        _logger.warning(
+            "Issue #%d: cannot read autopilot hold for repository %s; treating as held.",
+            issue_number,
+            repo_id,
+        )
+        return True
     try:
         return bool(
             store.has_autopilot_hold(  # type: ignore[attr-defined]
@@ -319,6 +331,7 @@ def discard_stale_verdict(
     *,
     repo_id: str | None,
     issue_number: int,
+    verifier_run_id: str | None,
     verdict_input_sha: str,
 ) -> bool:
     """verdict 因 PR 合并/HEAD 漂移不可发布时，记 ``verifier_stale`` 并落闸。
@@ -327,10 +340,15 @@ def discard_stale_verdict(
     ``verifier_completed`` 时同语句置 ``autopilot_hold``——此后 supervisor /
     review_once / merge queue 一律 fail closed，直到当前 HEAD 出现全新 GREEN。
 
+    ``verifier_run_id`` 与 ``verdict_input_sha`` 必须同时匹配产出该 verdict 的
+    控制行，才允许改写：不匹配说明新一轮已重新登记，过期 verdict 不得把新运行
+    （即使碰巧是同一 HEAD）拖成 stale。
+
     Returns:
-        是否成功落闸（无控制行 / 状态已不同 → ``False``，调用方只记日志）。
+        是否成功落闸（无运行身份、无控制行 / 控制行已属另一轮 / 状态已不同 →
+        ``False``，调用方只记日志）。
     """
-    if not repo_id:
+    if not repo_id or not verifier_run_id:
         return False
     store = resolve_issue_run_control()
     if store is None:
@@ -339,13 +357,13 @@ def discard_stale_verdict(
         row = store.get_issue_run(  # type: ignore[attr-defined]
             repo_id=repo_id, issue_number=issue_number
         )
-        if row is None or row.head_sha == verdict_input_sha:
+        if row is None or row.run_id != verifier_run_id or row.head_sha != verdict_input_sha:
             return False
         return bool(
             store.transition_issue_run(  # type: ignore[attr-defined]
                 repo_id=repo_id,
                 issue_number=issue_number,
-                run_id=row.run_id,
+                run_id=verifier_run_id,
                 from_states=(STATE_VERIFIER_COMPLETED,),
                 to_state=STATE_VERIFIER_STALE,
                 autopilot_hold=True,
@@ -355,6 +373,70 @@ def discard_stale_verdict(
     except Exception as exc:  # noqa: BLE001 - 闸门记不上时 GitHub 门禁仍在。
         _logger.warning(
             "Issue #%d: could not record verifier_stale for discarded verdict (%s).",
+            issue_number,
+            exc,
+        )
+        return False
+
+
+def clear_verifier_hold_after_green(
+    *,
+    repo_id: str | None,
+    issue_number: int,
+    verifier_run_id: str | None,
+    verifier_input_sha: str,
+) -> bool:
+    """PR fresh-read 确认 GREEN 对应当前 HEAD 后，按运行身份清除闸门。"""
+    if not repo_id or not verifier_run_id:
+        return False
+    store = resolve_issue_run_control()
+    if store is None:
+        return False
+    try:
+        handle = VerifierRunHandle(
+            store=store,
+            repo_id=repo_id,
+            issue_number=issue_number,
+            run_id=verifier_run_id,
+            head_sha=verifier_input_sha,
+        )
+        return handle.clear_hold_on_green()
+    except Exception as exc:  # noqa: BLE001 - 清闸失败保持人工闸门。
+        _logger.warning(
+            "Issue #%d: could not clear autopilot hold after fresh GREEN (%s).",
+            issue_number,
+            exc,
+        )
+        return False
+
+
+def mark_verifier_pr_merged(
+    *,
+    repo_id: str | None,
+    issue_number: int,
+    verifier_run_id: str | None,
+) -> bool:
+    """verifier 完成后 fresh-read 确认 PR 已合并时绑定当前 run 记录终态。"""
+    if not repo_id or not verifier_run_id:
+        return False
+    store = resolve_issue_run_control()
+    if store is None:
+        return False
+    try:
+        return bool(
+            store.transition_issue_run(  # type: ignore[attr-defined]
+                repo_id=repo_id,
+                issue_number=issue_number,
+                run_id=verifier_run_id,
+                from_states=(STATE_VERIFIER_COMPLETED,),
+                to_state=STATE_PR_MERGED,
+                autopilot_hold=True,
+                completed_at=_utc_now_iso(),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - 记录失败不改变 GitHub 判断。
+        _logger.warning(
+            "Issue #%d: could not record pr_merged after verifier completion (%s).",
             issue_number,
             exc,
         )
@@ -437,38 +519,65 @@ def finalize_verifier_takeover(
             )
     pr_context = None
     try:
-        pr_context = github_client.get_pull_request_context(expected_branch)
-    except Exception as exc:  # noqa: BLE001 - fresh-read 失败按"未知"继续人工交班。
+        pr_context = github_client.get_pull_request_context(expected_branch, require_success=True)
+    except Exception as exc:  # noqa: BLE001 - 无法证明 PR 状态时不伪造交班终态。
         _logger.warning(
             "Issue #%d: takeover handoff could not freshly read the PR for branch %s (%s); "
-            "continuing with labels and comment only.",
+            "leaving the handoff state unchanged until GitHub can be read.",
             issue.number,
             expected_branch,
             exc,
         )
+        return
 
     if pr_context is None:
-        # PR 已合并或被外部关闭：自动阶段到此为止，不再改 Issue 标签、不写
-        # 交班评论——GitHub 上已没有可交接的开放 PR，继续动标签只会与合并
-        # 流程自身的状态机打架。控制行记 pr_merged（若还能 CAS 成功）。
-        if handle is not None:
-            try:
-                handle.mark_merged()
-            except Exception as exc:  # noqa: BLE001 - 终态 CAS 失败只影响观测面。
-                _logger.warning(
-                    "Issue #%d: takeover handoff could not record pr_merged (%s).",
-                    issue.number,
-                    exc,
-                )
+        # 开放 PR 查询成功返回空时，必须另行证明它确实已合并，不能把 CLI 错误
+        # 或外部关闭误记为 pr_merged。
+        try:
+            merged_pr_url = github_client.find_merged_pr_by_head(
+                expected_branch, require_success=True
+            )
+        except Exception as exc:  # noqa: BLE001 - 无法证明 merge 时不伪造终态。
+            _logger.warning(
+                "Issue #%d: takeover handoff could not establish whether branch %s "
+                "was merged (%s); leaving the handoff state unchanged.",
+                issue.number,
+                expected_branch,
+                exc,
+            )
+            return
+        if merged_pr_url:
+            # PR 已合并：自动阶段到此为止，不改 Issue 标签、不写交班评论。
+            # 控制行记 pr_merged（若还能 CAS 成功）。
+            if handle is not None:
+                try:
+                    handle.mark_merged()
+                except Exception as exc:  # noqa: BLE001 - 终态 CAS 失败只影响观测面。
+                    _logger.warning(
+                        "Issue #%d: takeover handoff could not record pr_merged (%s).",
+                        issue.number,
+                        exc,
+                    )
+            _logger.info(
+                "Issue #%d: branch %s was externally merged before takeover handoff; "
+                "automatic stages stopped.",
+                issue.number,
+                expected_branch,
+            )
+            return
+
+        # PR 已关闭但没有合并：仍完成人工交接，不过不伪造 pr_merged，且评论
+        # 不会提供已失效的 PR 链接。
         _logger.info(
-            "Issue #%d: Draft PR for branch %s is no longer open at takeover handoff; "
-            "automatic stages stopped.",
+            "Issue #%d: branch %s has no open or merged PR at takeover handoff; "
+            "continuing the Issue handoff without a PR link.",
             issue.number,
             expected_branch,
         )
-        return
 
-    head_drifted = handle is not None and pr_context.head_sha != handle.head_sha
+    head_drifted = (
+        handle is not None and pr_context is not None and pr_context.head_sha != handle.head_sha
+    )
     if head_drifted:
         try:
             handle.mark_stale()  # type: ignore[union-attr]
@@ -481,7 +590,7 @@ def finalize_verifier_takeover(
 
     # 过期 verifier 通过标签必须清掉（PRD §7.5/§7.6）：接管路径没有 verdict，
     # 留着旧标签等于让 merge queue 看到一个不存在的结论。
-    if pr_context.number is not None:
+    if pr_context is not None and pr_context.number is not None:
         try:
             github_client.edit_issue_labels(
                 pr_context.number,
@@ -515,7 +624,7 @@ def finalize_verifier_takeover(
             issue.number,
             build_verifier_takeover_comment(
                 issue.number,
-                pr_url=pr_context.pr_url,
+                pr_url=pr_context.pr_url if pr_context is not None else None,
             ),
         )
     except Exception as exc:  # noqa: BLE001 - 评论失败不回退已完成的交班。
@@ -525,21 +634,25 @@ def finalize_verifier_takeover(
             issue.number,
             exc,
         )
+
     _logger.info(
         "Issue #%d: verifier take-over finalized; %s; Draft PR %s kept as draft.",
         issue.number,
         "HEAD drifted from verifier input (verifier_stale)"
         if head_drifted
         else "handed to human review",
-        f"#{pr_context.number}" if pr_context.number is not None else expected_branch,
+        f"#{pr_context.number}"
+        if pr_context is not None and pr_context.number is not None
+        else expected_branch,
     )
 
 
 class IssueControlUnavailableError(RuntimeError):
     """接管控制存储不可达：不能确定取消范围，一律 fail closed。
 
-    路由据此回 503（而非把"请求已登记"伪装成"进程已停止"），操作者看到可操作
-    的不可控原因，绝不会因此去停整个 daemon。
+    Console action 把它收敛成 ``ConsoleActionError``，路由据此回 400 并带上不可控
+    原因（而非把"请求已登记"伪装成"进程已停止"），操作者看到可操作的失败文案，
+    绝不会因此去停整个 daemon。
     """
 
 

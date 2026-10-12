@@ -655,6 +655,15 @@ def _process_one(
     if not can_auto_merge_issue(merge_issue, config):
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
 
+    # 人工接管可能在长时间检查期间被另一个 Console/runner 进程请求。最终合并
+    # 边界再次回读共享 hold，避免队列使用入口处的旧快照继续 merge。
+    if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
+        _logger.info(
+            "Merge queue stopped Issue #%d at the merge boundary: manual takeover hold.",
+            issue.number,
+        )
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_manual_takeover_hold")
+
     # Step 7: squash merge + audit
     try:
         github_client.merge_pull_request(pr_number, method=config.autopilot.merge_method)

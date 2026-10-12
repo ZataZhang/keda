@@ -1062,7 +1062,9 @@
             "findings": "",
             "marker_found": true,
             "risk": "yellow",
-            "token_usage": null
+            "token_usage": null,
+            "verifier_input_sha": null,
+            "verifier_run_id": null
           },
           "text_kwarg": null
         },
@@ -1079,7 +1081,9 @@
             "findings": "manual findings",
             "marker_found": true,
             "risk": "yellow",
-            "token_usage": null
+            "token_usage": null,
+            "verifier_input_sha": null,
+            "verifier_run_id": null
           },
           "text_kwarg": null
         }
@@ -1116,7 +1120,9 @@
             "findings": "No parseable verifier verdict marker found; treating as blocked (red).",
             "marker_found": false,
             "risk": "red",
-            "token_usage": null
+            "token_usage": null,
+            "verifier_input_sha": null,
+            "verifier_run_id": null
           },
           "text_kwarg": null
         }
@@ -1136,7 +1142,9 @@
                 "findings": "evidence for rv-3 is thin",
                 "marker_found": true,
                 "risk": "yellow",
-                "token_usage": null
+                "token_usage": null,
+                "verifier_input_sha": null,
+                "verifier_run_id": null
               }
             }
           },

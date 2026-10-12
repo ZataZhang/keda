@@ -1,13 +1,15 @@
 /**
  * Realistic validation for the single-Issue verifier human-takeover card.
  *
- * 验证层级：**真实入口**。走 `/app/dashboard` 的真实 React 组件树（快照首屏 →
+ * 验证层级：**浏览器 UI/API 契约（后端端点 stub）**。走 `/app/dashboard` 的真实 React 组件树（快照首屏 →
  * 点 Issue → IssueDetail → VerifierTakeoverCard → Radix 确认对话框 → 轮询交班回读），
- * 只在浏览器边界 stub 后端只读快照与接管动作端点，绝不注入组件内部状态、绝不
- * 用 component preview 冒充真实流程。接管面板是 Issue #278「运行中单 Issue 人工
+ * 通过 `page.route` 替换 Issue 详情与接管动作 API，因此本 spec **不覆盖真实 Console
+ * API → SQLite → runner → verifier 进程组**，不能作为 PRD rv-1/rv-2 声明的
+ * `real_entry` 验收证据。它不注入组件内部状态，也不冒充完整端到端验证。接管面板是
+ * Issue #278「运行中单 Issue 人工
  * 接管」的操作面；本 spec 覆盖确认、等待、结果呈递、失败态与桌面/窄视口布局。
  *
- * 前置依赖（本环境不执行、仅交付代码）：
+ * 前置依赖（运行此 UI/API 契约测试）：
  *   - `just e2e`（或 `pnpm -C tests/playwright-e2e test`）会先经 `setup` 项目登录并
  *     写入 `.auth/session.json`，`chromium` 项目带 storageState 打开真实 Dashboard；
  *   - 前端由 `just run` / dev server 在 `getBaseUrl()` 指向的端口提供。
@@ -227,7 +229,12 @@ async function stubTakeoverFlow(
         status: 409,
         contentType: 'application/json',
         body: JSON.stringify({
+          action: 'take_over_verifier',
+          result: 'rejected',
           detail: 'takeover outcome=binding_mismatch; observed_state=running',
+          process: null,
+          takeover_http_status: 409,
+          takeover_outcome: 'binding_mismatch',
         }),
       })
       return

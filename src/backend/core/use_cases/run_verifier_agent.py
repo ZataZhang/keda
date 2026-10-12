@@ -81,6 +81,8 @@ class ValidationVerdict:
 
     ``agent`` 与 ``token_usage`` 由实际运行 verifier 的调用点回填：候选回退后
     ``agent`` 是真正跑完的 agent；agent 未运行（parse-only 路径）时保持默认值。
+    ``verifier_input_sha`` 与 ``verifier_run_id`` 将真实 verdict 绑定到运行控制行，
+    供发布前 fresh-read、过期隔离和同一运行的 hold 清理使用。
     """
 
     risk: str
@@ -88,6 +90,8 @@ class ValidationVerdict:
     marker_found: bool = True
     agent: str = ""
     token_usage: "TokenUsage | None" = None
+    verifier_input_sha: str | None = None
+    verifier_run_id: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -906,13 +910,16 @@ def run_verifier_gate(
         completed = False
         try:
             completed = run_handle.mark_completed()
-        except Exception as store_exc:  # noqa: BLE001 - 存储失败不吞掉 verdict。
+        except Exception as store_exc:  # noqa: BLE001 - 无法 CAS 时不得发布 verdict。
             _logger.warning(
                 "Issue #%d: could not record verifier_completed (%s).",
                 issue.number,
                 store_exc,
             )
-            completed = True
+            raise VerifierUnavailableError(
+                f"Independent verifier finished for Issue #{issue.number}, but its completion "
+                "could not be atomically recorded; the verdict is not published."
+            ) from store_exc
         if not completed:
             takeover_confirmed = False
             try:
@@ -956,24 +963,17 @@ def run_verifier_gate(
                 response_log_path=response_log_path,
             )
         )
-    if run_handle is not None and verdict.risk == "green":
-        # GREEN 且 HEAD 复核未漂移（上方 fresh 检查已确认仍是 verifier 输入的
-        # builder_sha）：这是 autopilot_hold 的唯一清除路径。
-        try:
-            run_handle.clear_hold_on_green()
-        except Exception as store_exc:  # noqa: BLE001 - 清闸失败留待人审。
-            _logger.warning(
-                "Issue #%d: could not clear autopilot hold on GREEN (%s).",
-                issue.number,
-                store_exc,
-            )
     if verdict.risk == "yellow":
         _logger.warning(
             "Independent verifier returned YELLOW for issue #%d: %s",
             issue.number,
             verdict.findings,
         )
-    return verdict
+    return replace(
+        verdict,
+        verifier_input_sha=builder_sha,
+        verifier_run_id=run_handle.run_id if run_handle is not None else None,
+    )
 
 
 _PR_URL_NUMBER_PATTERN = re.compile(r"/pull/(?P<number>\d+)")
