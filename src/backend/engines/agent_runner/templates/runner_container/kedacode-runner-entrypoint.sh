@@ -23,11 +23,8 @@ TARGET_UID="${RUNNER_UID:-1000}"
 TARGET_GID="${RUNNER_GID:-1000}"
 RUNNER_HOME="/home/runner"
 
-# 一次性把 /home/runner 的属主改成 runtime UID/GID(递归覆盖子目录与隐藏文
-# 件)。如果宿主 UID 就是 1000,chown 是 no-op,零成本。
-# ``/home/runner/.kedacode`` 可能是宿主 bind-mount,其下 ``repos/<...>/.git/objects``
-# 含 read-only 文件,chown 会刷大量 ``Permission denied``。这些是预期噪声
-# (宿主那侧的 git objects 不需要改属主),用 ``2>/dev/null`` 抑制。
+# 一次性把容器私有的 /home/runner 内容改成 runtime UID/GID。托管 Compose 不挂载
+# 宿主状态目录，因此这个递归操作不会触及其它仓库的持久凭据或 Console 状态。
 if [ -d "${RUNNER_HOME}" ]; then
     chown -R "${TARGET_UID}:${TARGET_GID}" "${RUNNER_HOME}" 2>/dev/null || true
 fi

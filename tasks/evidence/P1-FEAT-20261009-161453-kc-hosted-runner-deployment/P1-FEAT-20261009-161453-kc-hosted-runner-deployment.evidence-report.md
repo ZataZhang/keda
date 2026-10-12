@@ -1,34 +1,64 @@
-# 人审导航与验证状态
+# 人审导航 / Human Review Navigation
 
-## 人审导航
+本地证据仅供当前工作树评审；原始图片和终端输出不进入代码 diff。当前没有 staging URL、Pull Request 或 CI run，本报告链接到 [GitHub Issue #265](https://github.com/ZataZhang/keda/issues/265)。截图是从真实 `kc console` 路由经 Chromium 操作采集的 `real user flow`；它们不是客户 HTTPS staging 证明。仓库中没有找到 PRD 指定的托管 Runner 原型，因此不能做原型与实现并排比较，D-03 与 Console 人工审阅仍待人工完成。
 
-| 需要查看的结果 | 当前证据 | 观察结果 / 限制 |
+| 人需要看的结果 | 本地呈递与打开方式 | 10 秒自检 |
 |---|---|---|
-| 托管 GC 预览与 worktree 跳过原因 | `rv-2-worktree-dry-run.txt`、`rv-2-gc-dry-run.txt` | 真实 worktree 预览显示 `would_delete=1, skipped=19`；真实 host GC 为 `Scanned=13 eligible=0 deleted=0 skipped=13 failed=0`。没有 Docker GC eligible 候选，因此未执行 apply。 |
-| 清理与磁盘准入回归 | `rv-2-worktree-cleanup-green.txt`、`rv-2-log-cleanup-green.txt`、`rv-2-summary-retention-green.txt`、`rv-2-disk-gate-green.txt`；对应 red 文件与 manifest | 临时 Git worktree、日志文件、SQLite 摘要和容量快照测试有红绿输出；不是一次真实 hosted daemon apply/fresh-process 探测。 |
-| runner Compose 边界 | `rv-3-compose-contract-green.txt`、`rv-3-compose-negative-red.txt` | 本地单服务/无端口/无 Docker socket 契约通过，注入 PostgreSQL sidecar 的负控失败；尚无 GitHub Actions DB service required-check staging 结果。 |
-| Console 认证 | `rv-4-auth-red.txt`、`rv-4-local-console-green.txt` | 本地 loopback/no-op session 兼容性通过；未认证访问现状返回 200，这是 hosted auth 尚未实现的红色证据。无 staging URL、原型图或 hosted green。 |
+| 托管 GC 预览候选与安全 worktree 保留原因 | `/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-2-gc-apply-fresh-probe.txt`、`rv-2-worktree-cli-preview.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-2-gc-apply-fresh-probe.txt"` | 隔离 Docker 真实 CLI 只删除脚本创建的一个 dangling image：`eligible=1 deleted=1 skipped=29 failed=0`；新进程报告 `eligible=0`；Git probe 因远端分支仍存在而保留 worktree。该局部结果不证明完整日志/SQLite 清理策略。 |
+| 托管 Console 首次设置、凭据状态与登录边界 | `/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-4-console-onboarding.png`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-4-console-onboarding.png"`；[本地图片](rv-4-console-onboarding.png) | 虚构仓库的 Agent key 行显示“未验证”，页面只显示状态/长度；访客与错误口令不能进入凭据面板。图中不含引导码、口令或真实凭据。 |
+| GC apply 的安全范围和可读性 | `/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-2-gc-apply-fresh-probe.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-2-gc-apply-fresh-probe.txt"` | apply 只删候选临时镜像，不删除 29 个 Buildx cache；新 Docker 进程确认镜像已不存在。PRD 指出的 daemon log/SQLite 保留、audit/config/credential fresh-state 仍未证明。 |
 
-原始输出只含各自 RV 项的命令输出；`rv-4-auth-red.txt` 仅打印 HTTP 状态和响应字段名，不包含本机用户值、凭据或客户代码。证据 manifest 位于同目录 `evidence.json`，按 rv-1 至 rv-4 分组；仓库解析器确认 4 组、25 个文件均存在并匹配其 RV 编号。`rv-2-tree-fingerprint.txt` 记录当前工作树指纹，不等同于 runner 生成的最终提交树证据。
+## rv-4 浏览器证据图册（本地图片）
 
-## 本次已实现并验证的本地部分
+以下图片来自真实 `kc console` 页面和同一 1280×900 Chromium viewport。打开任一图片可单独检查；截图均使用虚构 repo、key 与密码。
 
-- 托管维护配置默认关闭；启用后 daemon 只在 worker batch 完成后触发 worktree 与日志清理，并按 90 天截止时间分批清理完成的 run/attempt 摘要。
-- worktree 继续复用原有安全 cleaner；新增活动标签保护，GitHub Issue 状态查询失败时 fail closed。过期 Issue 原始输出清理限于当前仓库对应 repo id 目录中的普通 `.log` 文件，并拒绝符号链接和路径逃逸。
-- 托管 daemon 使用可配置低/高水位：低于低水位时停止启动新 Issue，恢复到高水位后恢复准入；日志输出含 used/free/total 和恢复条件。当前实现也将同一准入检查传给 deliberation 队列。
-- runner Compose 配置 Docker JSON log 轮转；`kc container gc` 有真实 dry-run 与互斥参数负控。host GC 仅预览，没有 eligible 候选可安全 apply。
-- 相关本地测试：关闭 testmon 后 **239 passed**，覆盖 PRD 指定六个核心模块和本次增加的维护、Compose、daemon、deliberation 测试。
+### Hosted Console 已保存凭据状态
 
-## 门禁与外部验证
+![Hosted Console 凭据状态：虚构仓库、未验证状态、无 secret 回显](rv-4-console-onboarding.png)
 
-- `just lint --reuse` 通过。`just lint --full` 在 `SKIP=check-test-flag` 时通过其余 hook；正常 `just lint` 当前因 `.last_tested_commit` 的 working tree fingerprint 过期而失败。没有手工更新测试标记。
-- 最后一次 `just test`（testmon 增量档）为 11 passed、10 failed、4 deselected。10 个失败全部在未修改的 `tests/test_cli_config_migrate.py`，首个 actionable error 为 `cannot verify that no KedaCode process is running (process scanner unavailable)`；sandbox 拒绝 `psutil.process_iter()` 触发的 macOS `sysctl()`，迁移安全检查按设计 fail closed。关闭 testmon 的 PRD 相关模块独立回归为 239 passed。没有放宽检查或修改守卫。
-- `uv run mkdocs build --strict` 退出 0；仍有仓库既有未导航 prototype 页面和链接锚点信息提示。
-- rv-1 staging 隔离 VM、真实 `docker inspect`、credential/tmpfs handoff 和跨客户权限负例未执行。当前 Compose 中仍有 GH_TOKEN environment 映射，不能声称满足 hosted secret 边界。
-- rv-3 没有 staging repo/PR 的 DB-backed GitHub Actions service 绿/红 required-check 与 merge gate 结果。
-- rv-4 的 hosted bootstrap/auth、credential API、加密存储、PAT/provider 验证、真实模型费用确认、tmpfs runner handoff、轮换/删除、上游 revoke 和 production browser screenshots 均未实现或执行。
-- D-01、D-02、D-03 与 GC / Console 人读呈递仍是人工决定，保持未勾选。
+本地图片；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-4-console-onboarding.png"`
 
-## 交付状态
+### 未引导时的访客入口
 
-这次恢复完成的是本地资源维护、磁盘准入、容器 GC 的一部分实现和红绿证据修复，不是完整托管 Runner 产品交付。PRD 保留在 `tasks/pending/`；Human-Confirmed 项保持开放；没有制作 PR、提交或归档证据。归档仍由 runner 的独立 verifier 门禁决定。
+![未认证访问设置页后显示首次引导闸门，未显示凭据面板](rv-4-guest-login-gate.png)
+
+本地图片；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-4-guest-login-gate.png"`
+
+### 首次引导表单
+
+![托管 Console 首次引导表单，输入框为空且没有 secret](rv-4-bootstrap-form.png)
+
+本地图片；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-4-bootstrap-form.png"`
+
+### 已引导后的管理员登录表单
+
+![已引导托管 Console 的管理员口令登录表单](rv-4-hosted-login-form.png)
+
+本地图片；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-4-hosted-login-form.png"`
+
+### 错误口令拒绝
+
+![错误管理员口令被拒绝，仍停留在登录页](rv-4-wrong-password-rejected.png)
+
+本地图片；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-4-wrong-password-rejected.png"`
+
+### 本机模式回退
+
+![hosted 关闭时恢复本机 Console identifier 与 password 登录表单](rv-4-local-mode-login.png)
+
+本地图片；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-265/tasks/evidence/P1-FEAT-20261009-161453-kc-hosted-runner-deployment/rv-4-local-mode-login.png"`
+
+## 自动验证摘要
+
+- `evidence.json` 使用 `version: 1`、`language: "zh-CN"`，按 PRD 的 4 个正整数 checklist item 分组；manifest checker 已验证 40 个纯文件名引用均存在，分组文件数为 10 / 9 / 3 / 18。
+- RV-1：负控证明反向依赖、Docker 依赖和 host-global state mount 会失败；真实 Compose config 与隔离 `down` 通过；托管回归 160 passed。
+- RV-2：活动 worktree、低磁盘、过期日志、互斥参数和文档条款负控均变红；维护回归 244 passed；真实 Git preview 保留 remote-existing worktree；真实 Docker CLI preview/apply/fresh probe 只删除本脚本临时 image；文档、`mkdocs --strict` 与 Skill guard 25 passed。
+- RV-3：PostgreSQL sidecar 负控使单 runner Compose oracle 失败；当前真实 Compose contract tests 2 passed。
+- RV-4：hosted service/auth/handoff 与本机边界测试 62 passed、2 passed；ESLint、TypeScript、Next production build 通过。Linux 浏览器检查以同步前台 `docker run --rm` 运行真实 `kc console`，tmpfs 和容器退出证据见 `rv-4-container-tmpfs.txt`、`rv-4-linux-entrypoint-check.txt`；先记录未认证凭据面板可见断言的预期红，再完成首次引导、凭据保存/不回显、错误口令拒绝、正确登录和本机模式回退。完整 RV-4 命令运行结果在 `rv-4-run-local-result.txt` 记录并检查总耗时小于 300 秒。
+- 所有取证与临时 setup 脚本仅位于本 evidence 目录的 `scripts/` 并被 Git 忽略；`git diff --name-only` 不含 RV 脚本。一次性引导码只在进程内传递，没有写入证据文件。
+
+## 完整 Realistic Validation 尚未完成
+
+本地四项可执行子检查已按 manifest 命令运行；完整 staging oracle 仍未完成：没有客户专用 Linux VM/第二客户身份、专属 HTTPS Console、客户 disposable GitHub/provider 凭据、真实模型计费请求或上游 revoke，也没有 staging PR 的 GitHub Actions service/required-check 绿红结果。RV-2 仍缺 hosted daemon pass 后 raw log/SQLite 摘要删除与 audit/config/queue/credentials 保留的 fresh-state oracle、真实 safe worktree apply，以及真实低磁盘恢复循环。当前浏览器截图没有配套 prototype image，Console 人工审阅仍需 human confirmation。
+
+上述本地证据没有使用客户数据或真实凭据；没有把静态 Compose、单测或 loopback 浏览器结果冒充 staging 行为。PRD 位于 `tasks/archive/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md`；本次没有移动 PRD 或勾选 `Human-Confirmed` 项。归档不代表 staging 验收或人工验收通过。

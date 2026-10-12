@@ -33,6 +33,7 @@ classifiers = [
 # README「安装」一节说明各自何时需要。
 dependencies = [
     "croniter>=3.0.0",
+    "cryptography>=50.0.2",
     "fastapi>=0.115.0",
     # 启动更新检查（cli_update_check）需要在所有 CLI 主路径上比较 PEP 440 版本，
     # 纯 Python 小包，不重造版本解析轮子。

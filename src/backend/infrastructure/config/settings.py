@@ -32,6 +32,7 @@ from backend.infrastructure.config.agent_runner_settings import (
     AgentRunnerGeneratedContentSettings,
     AgentRunnerGeneratedContentTargetSettings,
     AgentRunnerGitSettings,
+    AgentRunnerHostedSettings,
     AgentRunnerInteractiveDecisionSettings,
     AgentRunnerLabelSettings,
     AgentRunnerLifecycleAgentsSettings,
@@ -254,6 +255,7 @@ class AgentRunnerSettings(BaseSettings):
     backlog: AgentRunnerBacklogSettings = Field(default_factory=AgentRunnerBacklogSettings)
     validation: AgentRunnerValidationSettings = Field(default_factory=AgentRunnerValidationSettings)
     console: AgentRunnerConsoleSettings = Field(default_factory=AgentRunnerConsoleSettings)
+    hosted: AgentRunnerHostedSettings = Field(default_factory=AgentRunnerHostedSettings)
     daemon: AgentRunnerDaemonSettings = Field(default_factory=AgentRunnerDaemonSettings)
     prompts: AgentRunnerPromptSettings = Field(default_factory=AgentRunnerPromptSettings)
     pre_pr_review: AgentRunnerPrePrReviewSettings = Field(
@@ -492,6 +494,7 @@ __all__ = [
     "AgentRunnerRepositoryMetadataSettings",
     "AgentRunnerConsoleSettings",
     "AgentRunnerDaemonSettings",
+    "AgentRunnerHostedSettings",
     "AgentRunnerGeneratedContentSettings",
     "AgentRunnerGeneratedContentTargetSettings",
     "AgentRunnerGitSettings",

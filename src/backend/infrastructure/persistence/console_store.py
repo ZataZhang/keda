@@ -42,6 +42,7 @@ from backend.infrastructure.persistence.console_store_history import (
 from backend.infrastructure.persistence.console_store_lifecycle import (
     PrdLifecycleStoreMixin,
 )
+from backend.infrastructure.persistence.console_store_retention import RunSummaryRetentionMixin
 
 _logger = logging.getLogger(__name__)
 
@@ -221,7 +222,12 @@ _CREATE_PRD_LIFECYCLE_INDEXES = (
 )
 
 
-class SqliteConsoleStore(RunHistoryReadMixin, PrdLifecycleStoreMixin, InvocationEventStoreMixin):
+class SqliteConsoleStore(
+    RunHistoryReadMixin,
+    PrdLifecycleStoreMixin,
+    InvocationEventStoreMixin,
+    RunSummaryRetentionMixin,
+):
     """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` /
     ``IBacklogSnapshotStore`` / ``IConsoleModelPricingStore`` 的 SQLite 实现。
 

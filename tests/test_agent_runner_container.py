@@ -71,6 +71,90 @@ def test_runner_compose_is_single_service_without_public_port_or_socket() -> Non
     }
 
 
+def test_hosted_runner_compose_removes_secret_env_and_mounts_tmpfs_auth() -> None:
+    """托管 Compose 变体：environment 不含 GH_TOKEN，凭据走 tmpfs runner-auth 挂载。"""
+    compose_path = ContainerOpsController().resolve_packaged_runner_assets(hosted=True).compose_file
+    compose_settings = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    service_map = compose_settings["services"]
+    runner_service = service_map["iar-runner"]
+    environment = runner_service.get("environment", {})
+    mounted_volumes = [str(volume) for volume in runner_service.get("volumes", [])]
+
+    # 与本地变体同样的资源卫生边界
+    assert set(service_map) == {"iar-runner"}
+    assert "ports" not in runner_service
+    assert runner_service.get("expose", []) == []
+    assert all("docker.sock" not in volume for volume in mounted_volumes)
+    assert runner_service["logging"] == {
+        "driver": "json-file",
+        "options": {"max-size": "10m", "max-file": "5"},
+    }
+
+    # secret 边界：不设 GH_TOKEN，改设 GH_CONFIG_DIR 路径 + tmpfs 原生认证挂载
+    assert "GH_TOKEN" not in environment
+    assert environment.get("GH_CONFIG_DIR") == "/home/runner/.config/gh"
+    assert any("KEDACODE_RUNNER_AUTH_DIR" in volume for volume in mounted_volumes)
+    assert any("/home/runner/.config/gh" in volume for volume in mounted_volumes)
+    assert all("KEDACODE_HOST_STATE_HOME" not in volume for volume in mounted_volumes)
+    assert "runner_state:/home/runner/.kedacode" in mounted_volumes
+    assert compose_settings["volumes"]["runner_state"]["name"] == (
+        "kedacode-hosted-${KEDACODE_REPO_ID:?set by the hosted runner manager}-state"
+    )
+
+
+def test_start_runner_container_hosted_uses_hosted_compose_without_secret_env(
+    tmp_path: Path, fake_global_iar: Path
+) -> None:
+    """``hosted=True`` 编排选托管 compose、传 tmpfs 目录、env 不含 GH_TOKEN。"""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+
+    captured: list[dict] = []
+
+    def fake_runner(argv, *, env, cwd, check):  # noqa: ARG001
+        captured.append(dict(env))
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+    options = StartRunnerContainerOptions(
+        repo_path=repo_path,
+        repo_id="keda",
+        gh_token="ghp_must_not_leak",
+        uid=501,
+        gid=20,
+        process_registry_path=str(fake_global_iar / ".iar" / "processes.json"),
+        dry_run=True,
+        hosted=True,
+        runner_auth_dir="/run/kedacode/runner-auth/keda",
+    )
+    controller = ContainerOpsController()
+    result = start_runner_container(controller, options, runner=fake_runner)
+
+    assert result.assets.compose_file.name == "docker-compose.runner.hosted.yml"
+    assert "GH_TOKEN" not in result.plan.env
+    assert result.plan.env["KEDACODE_RUNNER_AUTH_DIR"] == "/run/kedacode/runner-auth/keda"
+    # dry_run 不调 runner
+    assert captured == []
+
+
+def test_start_runner_container_hosted_requires_auth_dir(
+    tmp_path: Path, fake_global_iar: Path
+) -> None:
+    """``hosted=True`` 缺少 runner_auth_dir 时 fail-closed 抛 ValueError。"""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+
+    options = StartRunnerContainerOptions(
+        repo_path=repo_path,
+        repo_id="keda",
+        process_registry_path=str(fake_global_iar / ".iar" / "processes.json"),
+        dry_run=True,
+        hosted=True,
+    )
+    controller = ContainerOpsController()
+    with pytest.raises(ValueError, match="runner_auth_dir"):
+        start_runner_container(controller, options)
+
+
 def test_container_gc_preview_preserves_referenced_and_recent_resources() -> None:
     """GC 预览只标记未引用悬空镜像及过期、可回收 cache。"""
     now = datetime(2026, 10, 10, tzinfo=UTC)

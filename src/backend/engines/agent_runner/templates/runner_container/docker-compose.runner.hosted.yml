@@ -1,0 +1,79 @@
+# -----------------------------------------------------------------------------
+# KedaCode Runner docker-compose —— 托管（hosted）变体
+#
+# 与本地 docker-compose.runner.yml 的差别只有一处安全边界：本文件**不**在
+# ``environment`` 段写入任何 secret 值。GitHub / Agent 凭据不再走 ``GH_TOKEN``
+# 环境变量，而是由宿主托管服务在 runner 启动期间解密到该仓库专属的 Linux tmpfs
+# 目录（``/run/kedacode/runner-auth/<repo-id>/``），再以 bind mount 挂进容器原生
+# 认证路径（gh / claude / codex / kimi-code）。Docker 配置里只出现挂载目标**路径**，
+# 永远不含 key 值；``docker inspect`` 的 environment 也就读不到 secret。
+#
+# 由谁启动：客户 VM 上受认证 Console 路由调用的宿主管理服务，不把 Docker 能力
+# 暴露给浏览器。``KEDACODE_RUNNER_AUTH_DIR`` 必须由该服务设为 handoff 生成的
+# repo 专属 tmpfs 绝对路径；未设置时 ``:?`` 立即报错，而不是挂到错误目录。
+#
+# 安全边界（与本地变体一致，且 Issue #265 FR-2/FR-3/FR-5 验收口径）：
+#   - 单 service，无 DB / Redis / 消息队列等 middleware sidecar；
+#   - 无对公网监听端口（ports 段不存在），仅 expose: [] 占位；
+#   - 不挂载宿主 Docker socket（``/var/run/docker.sock``）；
+#   - json-file 日志驱动，max-size / max-file 有界，避免无人值守时无限增长。
+# -----------------------------------------------------------------------------
+
+services:
+  iar-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    image: iar-runner:latest
+    container_name: iar-runner
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # 不在 compose 顶层设 user：entrypoint 需以 root chown 容器私有目录
+    # 到 RUNNER_UID/RUNNER_GID 后用 gosu 切过去。
+    working_dir: /workspace/repo
+    environment:
+      # kedacode daemon 入口参数
+      KEDACODE_HOME: /home/runner/.kedacode
+      HOME: /home/runner
+      # 仓库定位（由宿主托管服务注入）
+      REPO_PATH: "${REPO_PATH}"
+      # 仓库 id 同时传新旧两个名字：KEDACODE_REPO_ID 供新包读取；
+      # IAR_REPO_ID 供 KEDA_VERSION 钉到旧版本时旧包读取（legacy-alias）
+      KEDACODE_REPO_ID: "${KEDACODE_REPO_ID:-}"
+      IAR_REPO_ID: "${IAR_REPO_ID:-}" # legacy-alias
+      # 托管模式关键差异：**不设 GH_TOKEN**。gh 从下面挂载的 GH_CONFIG_DIR 读
+      # hosts.yml；该目录是 repo 专属 tmpfs 的 bind mount，只含路径不含 key 值。
+      GH_CONFIG_DIR: /home/runner/.config/gh
+      # 宿主 UID/GID 供 entrypoint chown 后用 gosu 切过去；显式列出避免被
+      # compose environment 段覆盖掉宿主 shell 的同名变量（与本地变体一致）。
+      RUNNER_UID: "${RUNNER_UID:-1000}"
+      RUNNER_GID: "${RUNNER_GID:-1000}"
+      # 不要让 docker 注入的 PATH 覆盖 agent CLI 路径
+      PATH: "/opt/keda/.venv/bin:/home/runner/.local/bin:/usr/local/bin:/usr/bin:/bin"
+    volumes:
+      # 目标仓库挂载为 /workspace/repo
+      - "${REPO_PATH}:/workspace/repo"
+      # 运行时凭据：由宿主托管服务解密到 repo 专属 tmpfs 后按原生认证路径挂载。
+      # 源路径来自 KEDACODE_RUNNER_AUTH_DIR（host_directory(repo_id) 的返回值），
+      # 只含目录/文件**路径**，不含任何 key 明文。每个 repo 一个独立目录，天然
+      # 跨仓库隔离；未选择对应 Agent 时该子目录为空（空 tmpfs 目录不含 secret）。
+      - "${KEDACODE_RUNNER_AUTH_DIR:?set by the hosted runner manager to this repo's tmpfs auth dir}/gh:/home/runner/.config/gh"
+      - "${KEDACODE_RUNNER_AUTH_DIR}/claude:/home/runner/.claude"
+      - "${KEDACODE_RUNNER_AUTH_DIR}/codex:/home/runner/.codex"
+      - "${KEDACODE_RUNNER_AUTH_DIR}/kimi-code:/home/runner/.kimi-code"
+      # 独立的 repo 专属 named volume 持久化 SQLite 历史、审计、队列状态与原始日志。
+      # Docker GC 不 prune volume；runner 只看到这个卷，不会读取宿主全局状态。
+      - "runner_state:/home/runner/.kedacode"
+    # 本 runner 不开对外端口；保留 expose 为扩展位，托管模式同样无 ports 段。
+    expose: []
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    tty: false
+
+volumes:
+  runner_state:
+    name: "kedacode-hosted-${KEDACODE_REPO_ID:?set by the hosted runner manager}-state"
