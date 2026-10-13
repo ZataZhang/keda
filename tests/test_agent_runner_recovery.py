@@ -1208,3 +1208,16 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     assert "checkpoint=none" in handoff_bodies[0]
     assert publish_calls == []
     assert [c for c in fake_client.calls if c["method"] == "create_draft_pr"] == []
+
+
+def test_split_handoff_module_keeps_the_issue_handlers_logger_identity() -> None:
+    """1000 行门禁拆出去的交接模块仍记在 ``agent_runner_issue_handlers`` 名下。
+
+    交接评论 permalink 取不到、回链跳过、交接写入失败这些关键行原本就在 handlers 的
+    logger 下；名字跟着新模块走，操作者按 docs/guides/agent-runner.md 排查时就查不到。
+    """
+    from backend.core.use_cases import agent_runner_failure_handoff as handoff
+    from backend.core.use_cases import agent_runner_issue_handlers as handlers
+
+    for moved_module in (handoff, handlers):
+        assert moved_module._logger.name == ("backend.core.use_cases.agent_runner_issue_handlers")

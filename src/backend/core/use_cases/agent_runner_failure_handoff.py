@@ -42,7 +42,9 @@ from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
 )
 
-_logger = logging.getLogger(__name__)
+# 拆分前这些交接诊断由 ``agent_runner_issue_handlers`` 记录，操作者的 grep 与
+# docs/guides/agent-runner.md 的排查路径都按那个名字找；保持 logger 身份不随模块搬家漂走。
+_logger = logging.getLogger("backend.core.use_cases.agent_runner_issue_handlers")
 
 
 def _resolve_handoff_comment_url(

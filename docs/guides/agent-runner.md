@@ -780,7 +780,7 @@ checkpoint 的 `git add` 只使用 git 仍能匹配的路径（非禁改、且�
 
 recovery 预算耗尽不是终点，而是**交班点**。此前只有同一个 claim 内的重试带着失败上下文（`run_agent_execution_loop` 每轮把 `recovery_failure_summary` 拼进 recovery prompt）；跨 claim 的唯一入口 `build_progress_continuation_prompt` 既不读 Issue 评论、也不读 attempt 历史与 agent 自述，而 `_reuse_existing_local_commit` 又**不跑 verifier gate**——于是"上一轮 verifier 为什么判红"没有任何路径跨过 claim 边界，接手的新 claim 只能从 WIP 快照与 PRD 反推，同一个坑反复踩。
 
-现在耗尽路径补上三步（全部在 `agent_runner_issue_handlers._process_ready_issue` 的耗尽 `except` 分支里）：
+现在耗尽路径补上三步（触发点在 `agent_runner_issue_handlers._process_ready_issue` 的耗尽 `except` 分支，实际写入步骤因单文件 1000 行上限拆到了 `agent_runner_failure_handoff.py`，但**这些行仍记在 logger `backend.core.use_cases.agent_runner_issue_handlers` 名下**——模块文件变了名字没变，按 `grep agent_runner_issue_handlers` 依旧能一次看到整条交接链路的告警）：
 
 1. **写交接记录**：一条带 `<!-- iar:failure-context checkpoint=… attempts=… verifier=… evidence=… -->` marker 的 Issue 评论，正文由 `format_failure_context_comment` 渲染，复用既有的 `format_attempt_history`，verifier 结论取自 `MaxRetriesExceededError.attempt_results[*].detail`。
 2. **发布同源的人读表面**：`checkpoint_sha` 非空时调用既有的 `publish_changes(..., require_prd_archived=False)`，发布或按分支复用同一个 Draft PR，并在 PR 正文尾部固定附一段指向该交接评论的回链（`<!-- iar:failure-context-ref -->`，重复耗尽时替换而非叠加）。
