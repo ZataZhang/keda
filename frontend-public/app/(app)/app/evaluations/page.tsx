@@ -81,7 +81,16 @@ export default function EvaluationsPage() {
     fetchEvaluationPresetOptions()
       .then((options) => {
         setPresetOptions(options);
-        setJudgePresetNames(options.default_judge_presets);
+        // 默认评审预设只预选「目录在场且凭据可用」的项：不可用预设的勾选框是
+        // 禁用的，全量预选会留下一个既无法提交也无法取消的死锁选项。
+        const selectableJudges = new Set(
+          options.judge_presets
+            .filter((preset) => preset.available)
+            .map((preset) => preset.name)
+        );
+        setJudgePresetNames(
+          options.default_judge_presets.filter((name) => selectableJudges.has(name))
+        );
       })
       .catch((error: unknown) => {
         toast.error(

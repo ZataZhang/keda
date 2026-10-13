@@ -2,9 +2,11 @@
 
 执行模型：每个 run 一个后台线程（外层池），run 内矩阵单元（case ×
 execution preset）用小并发线程池执行，上限同时受
-``evaluation.max_concurrency`` 与既有 runner 并发 ceiling 约束。候选之间
-**绝不共享 worktree**；diff 产出后 worktree 即移除，暂存 payload 只在
-等待授权 / 评分期间存在。
+``evaluation.max_concurrency`` 与既有 runner 并发 ceiling 约束；矩阵池的
+上限是 **per-run** 的，因此候选真正落地（worktree + Agent 子进程 + check）
+另外要过一道进程级闸门，保证多个 run 同时在跑时主机上的在飞候选数仍是同一
+个 ceiling，而不是 N × ceiling。候选之间**绝不共享 worktree**；diff 产出后
+worktree 即移除，暂存 payload 只在等待授权 / 评分期间存在。
 """
 
 from __future__ import annotations
@@ -52,6 +54,27 @@ _OUTER_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="evaluati
 _AGENT_SUMMARY_LIMIT = 1200
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+#: 跨 run 共享的候选执行闸门。矩阵池的 ceiling 是 **per-run** 的，而外层池允许
+#: 4 个 run 同时在跑，实际 worktree/Agent 子进程数会叠成 N × ceiling，突破 runner
+#: 主机容量约定。这里用进程级信号量把「同时在跑的候选单元数」压回同一个 ceiling。
+#: 首个进入闸门的调用按其 ceiling 定型，之后所有 run 复用同一实例。
+_HOST_GATE: threading.BoundedSemaphore | None = None
+_HOST_GATE_LOCK = threading.Lock()
+
+
+def _candidate_ceiling(settings: Any) -> int:
+    """候选矩阵的单飞上限：评测自身上限与 runner 主机容量取小。"""
+    return max(1, min(settings.evaluation.max_concurrency, settings.runner.max_concurrent_issues))
+
+
+def _host_gate(settings: Any) -> threading.BoundedSemaphore:
+    """返回进程级候选闸门（懒创建，创建后槽位固定）。"""
+    global _HOST_GATE
+    with _HOST_GATE_LOCK:
+        if _HOST_GATE is None:
+            _HOST_GATE = threading.BoundedSemaphore(_candidate_ceiling(settings))
+        return _HOST_GATE
 
 
 def schedule_run_execution(run_id: str) -> None:
@@ -133,9 +156,7 @@ def run_run_execution(run_id: str) -> None:
         if case_id in cases_by_id
         for preset_snapshot in run.execution_preset_snapshots
     ]
-    ceiling = max(
-        1, min(settings.evaluation.max_concurrency, settings.runner.max_concurrent_issues)
-    )
+    ceiling = _candidate_ceiling(settings)
     staged_entries: list[dict[str, Any]] = []
     lock = threading.Lock()
     with ThreadPoolExecutor(max_workers=ceiling, thread_name_prefix="evaluation-cell") as pool:
@@ -225,92 +246,107 @@ def _execute_cell(
 
     diff_text = ""
     outcome: agent_adapter.CandidateAgentOutcome | None = None
-    try:
-        live_preset = settings.presets.get(preset_name)
-        if live_preset is not None:
-            drifted = preset_snapshot_mismatch(
-                preset_snapshot,
-                {
-                    "agent": live_preset.agent,
-                    "model": live_preset.model,
-                    "reasoning_effort": live_preset.reasoning_effort,
-                },
-            )
-            if drifted:
-                raise ValueError(
-                    f"执行预设 '{preset_name}' 配置在 run 创建后已变化（{', '.join(drifted)}），"
-                    "与冻结快照不一致，为避免不可解释对照已停止执行"
+    with _host_gate(settings):
+        # 闸门排队可能一直在等其他 run 释放槽位，期间本 run 可能已被取消或自愈收敛：
+        # 拿到槽位后重新确认，绝不因为「终于排到了」就补发一次 Agent 调用。
+        queued_row = store.get_evaluation_run(run.run_id)
+        if queued_row is None or queued_row.status != EvaluationRunStatus.running.value:
+            store.save_evaluation_result(
+                dataclasses.replace(
+                    result,
+                    result_status=EvaluationResultStatus.cancelled.value,
+                    updated_at=now_iso(),
                 )
-        workspace.create_detached_worktree(run.repo_path, run.base_commit, worktree_path)
-        result = dataclasses.replace(result, worktree_path=str(worktree_path))
-        store.save_evaluation_result(result)
-        observed_tree = workspace.worktree_tree_hash(worktree_path)
-        if observed_tree != run.base_tree_hash:
-            raise ValueError(
-                f"worktree 基线 tree 不一致: 期望 {run.base_tree_hash}，实际 {observed_tree}"
             )
-        outcome = agent_adapter.run_candidate(
-            preset_name=preset_name,
-            prompt=case.prompt,
-            worktree_path=worktree_path,
-            settings=settings,
-            timeout_seconds=settings.evaluation.agent_timeout_seconds,
-        )
-        diff_text = workspace.collect_diff(worktree_path, run.base_commit)
-    except subprocess.TimeoutExpired:
-        result = dataclasses.replace(
-            result,
-            result_status=EvaluationResultStatus.timeout.value,
-            error="Agent 执行超时",
-            updated_at=now_iso(),
-        )
-        store.save_evaluation_result(result)
-        _cleanup_worktree(run, worktree_path, store, result)
-        return
-    except (ValueError, workspace.EvaluationWorkspaceError) as exc:
-        result = dataclasses.replace(
-            result,
-            result_status=EvaluationResultStatus.failed.value,
-            error=str(exc)[:400],
-            updated_at=now_iso(),
-        )
-        store.save_evaluation_result(result)
-        _cleanup_worktree(run, worktree_path, store, result)
-        return
-
-    if outcome.timed_out:
-        result_status = EvaluationResultStatus.timeout
-    elif outcome.ok:
-        result_status = EvaluationResultStatus.succeeded
-    else:
-        result_status = EvaluationResultStatus.failed
-    check_outcome: checks.CheckRunOutcome | None = None
-    if result_status is EvaluationResultStatus.succeeded:
+            return
         try:
-            check_outcome = checks.run_check_recipe(
-                case.check_recipe, worktree_path, run.check_timeout_seconds
+            live_preset = settings.presets.get(preset_name)
+            if live_preset is not None:
+                drifted = preset_snapshot_mismatch(
+                    preset_snapshot,
+                    {
+                        "agent": live_preset.agent,
+                        "model": live_preset.model,
+                        "reasoning_effort": live_preset.reasoning_effort,
+                    },
+                )
+                if drifted:
+                    raise ValueError(
+                        f"执行预设 '{preset_name}' 配置在 run 创建后已变化（{', '.join(drifted)}），"
+                        "与冻结快照不一致，为避免不可解释对照已停止执行"
+                    )
+            workspace.create_detached_worktree(run.repo_path, run.base_commit, worktree_path)
+            result = dataclasses.replace(result, worktree_path=str(worktree_path))
+            store.save_evaluation_result(result)
+            observed_tree = workspace.worktree_tree_hash(worktree_path)
+            if observed_tree != run.base_tree_hash:
+                raise ValueError(
+                    f"worktree 基线 tree 不一致: 期望 {run.base_tree_hash}，实际 {observed_tree}"
+                )
+            outcome = agent_adapter.run_candidate(
+                preset_name=preset_name,
+                prompt=case.prompt,
+                worktree_path=worktree_path,
+                settings=settings,
+                timeout_seconds=settings.evaluation.agent_timeout_seconds,
             )
-        except ValueError as exc:
-            check_outcome = checks.CheckRunOutcome(
-                status=EvaluationCheckStatus.failed, exit_code=None, output_summary=str(exc)[:200]
+            diff_text = workspace.collect_diff(worktree_path, run.base_commit)
+        except subprocess.TimeoutExpired:
+            result = dataclasses.replace(
+                result,
+                result_status=EvaluationResultStatus.timeout.value,
+                error="Agent 执行超时",
+                updated_at=now_iso(),
             )
-    result = dataclasses.replace(
-        result,
-        result_status=result_status.value,
-        check_status=(
-            check_outcome.status.value if check_outcome else EvaluationCheckStatus.not_run.value
-        ),
-        check_exit_code=check_outcome.exit_code if check_outcome else None,
-        check_output_summary=check_outcome.output_summary if check_outcome else None,
-        agent_summary=_truncate(outcome.summary, _AGENT_SUMMARY_LIMIT),
-        duration_seconds=outcome.duration_seconds,
-        usage_summary=outcome.usage_summary,
-        diff_hash=sha256_text(diff_text),
-        error=_truncate(outcome.error, 400),
-        updated_at=now_iso(),
-    )
-    _cleanup_worktree(run, worktree_path, store, result)
-    store.save_evaluation_result(result)
+            store.save_evaluation_result(result)
+            _cleanup_worktree(run, worktree_path, store, result)
+            return
+        except (ValueError, workspace.EvaluationWorkspaceError) as exc:
+            result = dataclasses.replace(
+                result,
+                result_status=EvaluationResultStatus.failed.value,
+                error=str(exc)[:400],
+                updated_at=now_iso(),
+            )
+            store.save_evaluation_result(result)
+            _cleanup_worktree(run, worktree_path, store, result)
+            return
+
+        if outcome.timed_out:
+            result_status = EvaluationResultStatus.timeout
+        elif outcome.ok:
+            result_status = EvaluationResultStatus.succeeded
+        else:
+            result_status = EvaluationResultStatus.failed
+        check_outcome: checks.CheckRunOutcome | None = None
+        if result_status is EvaluationResultStatus.succeeded:
+            try:
+                check_outcome = checks.run_check_recipe(
+                    case.check_recipe, worktree_path, run.check_timeout_seconds
+                )
+            except ValueError as exc:
+                check_outcome = checks.CheckRunOutcome(
+                    status=EvaluationCheckStatus.failed,
+                    exit_code=None,
+                    output_summary=str(exc)[:200],
+                )
+        result = dataclasses.replace(
+            result,
+            result_status=result_status.value,
+            check_status=(
+                check_outcome.status.value if check_outcome else EvaluationCheckStatus.not_run.value
+            ),
+            check_exit_code=check_outcome.exit_code if check_outcome else None,
+            check_output_summary=check_outcome.output_summary if check_outcome else None,
+            agent_summary=_truncate(outcome.summary, _AGENT_SUMMARY_LIMIT),
+            duration_seconds=outcome.duration_seconds,
+            usage_summary=outcome.usage_summary,
+            diff_hash=sha256_text(diff_text),
+            error=_truncate(outcome.error, 400),
+            updated_at=now_iso(),
+        )
+        _cleanup_worktree(run, worktree_path, store, result)
+        store.save_evaluation_result(result)
 
     if result_status is EvaluationResultStatus.succeeded and run.judge_preset_snapshots:
         payload_text = build_judge_payload_document(

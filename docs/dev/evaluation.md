@@ -38,6 +38,15 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
   `check_recipe`（pytest / unittest / node-test）。
 - run 创建时冻结 suite 内容 hash、base commit 与全部预设快照；此后修改
   suite 文件或 config.toml 不影响历史 run 的解释口径。
+- 冻结口径是**执行前守卫**而不只是展示：候选执行前核对 live 执行预设、评审
+  调用前核对 live 评审预设，任一字段（模型、agent、端点、密钥变量名等）与快照
+  不一致即停止——候选落 `failed`、评审落 `provider_error` 且**零外发**，避免
+  「页面显示 A、实际跑 B」的不可解释对照。
+- 并发上限同时受 `evaluation.max_concurrency` 与 runner 的
+  `max_concurrent_issues` 约束。矩阵池的上限是 **per-run** 的，因此候选真正
+  落地（worktree + Agent 子进程 + check）另过一道进程级闸门：多个 run 同时
+  在跑时，主机上的在飞候选数仍是同一个 ceiling，而不是 N × ceiling。排队拿到
+  槽位后会重新确认 run 仍在 `running`，期间被取消的 run 不会补发 Agent 调用。
 
 ### rubric v1（default-rubric@v1）
 
@@ -52,8 +61,8 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 
 评审响应必须通过 schema 校验：缺维、非整数、越界、多余维度、无法解析、
 显式拒答分别落 `invalid` / `refusal` 状态；调用超时与 provider 错误落
-`timeout` / `provider_error`。**任何失败态都不折算为 0 分**，页面按状态桶
-如实展示。
+`timeout` / `provider_error`；授权前 deny / 取消分别落 `unauthorized` /
+`cancelled` 留痕。**任何失败态都不折算为 0 分**，页面按状态桶如实展示。
 
 ### 汇总口径（版本/hash 跟踪与指标）
 
@@ -77,6 +86,8 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 5. deny 则 run 收尾为 completed，并为每个候选 × 评审者写入 `unauthorized`
    评分行（页面据此区分「评审者被拒绝」与「评审者缺席」），同时清除暂存
    payload。
+6. 在 `awaiting_judge_consent` 上取消（cancel）同理写入 `cancelled` 评分行：
+   两类留痕行的分数域一律为空，只有真实评审才能产生 `valid` 分数。
 
 ### 数据保留与删除
 

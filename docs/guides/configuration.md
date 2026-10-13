@@ -154,8 +154,8 @@ Console「Evaluations」页的多评审模型评测读取 `[agent_runner.evaluat
 
 ```toml
 [agent_runner.evaluation]
-default_judge_presets = ["judge-openai"]   # 页面预选的评审名单，单次 run 可覆盖
-max_concurrency = 2                         # 1–4：评测与 runner 共享主机 capacity
+default_judge_presets = ["judge-openai"]   # 页面预选的评审名单，单次 run 可覆盖；凭据不可解析的默认项不预选
+max_concurrency = 2                         # 1–4：全进程口径的候选并发上限，与 runner 共享主机 capacity
 agent_timeout_seconds = 900
 judge_timeout_seconds = 120
 

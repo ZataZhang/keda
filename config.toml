@@ -205,8 +205,11 @@ reasoning_effort = "xhigh"
 # 评审预设只**引用**模型：model 为 provider registry（models.json）可解析的
 # 模型 id；api_key_env 是密钥所在的环境变量名（值仍只由 .env/环境注入，配置
 # 与数据库都不保存值本身）。base_url 仅用于自托管/OpenAI 兼容端点，非敏感。
-# default_judge_presets 是页面预选的评审名单，单次 run 可覆盖。
+# default_judge_presets 是页面预选的评审名单，单次 run 可覆盖；凭据不可解析的
+# 默认项页面不会预选（勾选框本身是禁用的，预选会留下无法提交也无法取消的选项）。
 # 并发刻意收敛（1–4）：评测是手动离线批量任务，尊重与 runner 相同的主机 capacity。
+# 该上限是**全进程**口径：多个 run 同时在跑时，主机上的在飞候选单元数仍不超过
+# min(max_concurrency, runner.max_concurrent_issues)。
 #
 # [agent_runner.evaluation]
 # default_judge_presets = ["judge-openai"]

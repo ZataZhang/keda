@@ -17,7 +17,7 @@ import logging
 import statistics
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from backend.core.shared.interfaces.evaluation_store import IEvaluationStore
@@ -32,7 +32,6 @@ from backend.core.shared.models.model_evaluation import (
     EvaluationScoreRecord,
     EvaluationScoreStatus,
     EvaluationSuite,
-    build_manifest_hash,
 )
 
 _logger = logging.getLogger(__name__)
@@ -290,11 +289,6 @@ def _aggregate_dimensions(
     return aggregates
 
 
-def manifest_hash_for_entries(entries: Sequence[Mapping[str, Any]]) -> str:
-    """从 manifest 条目列表派生整体 hash（授权绑定的服务端重算口径）。"""
-    return build_manifest_hash([dict(entry) for entry in entries])
-
-
 def recover_interrupted_runs(store: IEvaluationStore) -> int:
     """Console 启动自愈：活跃 run 一律标 interrupted，等待用户显式恢复或删除。
 
@@ -317,63 +311,33 @@ def summarize_run_payload_state(run: EvaluationRunRecord) -> dict[str, Any]:
     }
 
 
-@dataclass(frozen=True)
-class ConsentDecisionOutcome:
-    """授权动作的结果语义：进入 judging / 已拒绝并清理 / 冲突。"""
-
-    new_run_status: EvaluationRunStatus
-    provider_requests_sent: int = 0
-    cleanup_required: bool = False
-    notes: dict[str, Any] = field(default_factory=dict)
-
-
-def apply_consent_outcome(
-    store: IEvaluationStore,
-    run: EvaluationRunRecord,
-    *,
-    approved: bool,
-    current_manifest_hash: str,
-) -> ConsentDecisionOutcome:
-    """在 core 语义层落实授权决策（状态迁移 + 未授权评分行的显式留痕）。
-
-    approve 走 CAS 把 run 推进到 judging；deny 把 run 收尾为 completed，并为
-    每个候选 × judge 组合写入 ``unauthorized`` 评分行——页面据此区分
-    "评审者被拒绝" 与 "评审者缺席"。
-    """
-    validate_consent_request(
-        run=run,
-        requested_manifest_hash=run.manifest_hash or "",
-        current_manifest_hash=current_manifest_hash,
-    )
-    if approved:
-        transition_run(
-            store,
-            run.run_id,
-            expected=list(CONSENT_ELIGIBLE_RUN_STATUSES),
-            new_status=EvaluationRunStatus.judging,
-        )
-        return ConsentDecisionOutcome(new_run_status=EvaluationRunStatus.judging)
-    transition_run(
-        store,
-        run.run_id,
-        expected=list(CONSENT_ELIGIBLE_RUN_STATUSES),
-        new_status=EvaluationRunStatus.completed,
-        finished=True,
-    )
-    return ConsentDecisionOutcome(
-        new_run_status=EvaluationRunStatus.completed,
-        cleanup_required=True,
-        notes={"recorded": "unauthorized_scores"},
-    )
-
-
-def build_unauthorized_scores(
+def build_unreviewed_scores(
     run: EvaluationRunRecord,
     results: Sequence[EvaluationResultRecord],
+    *,
+    score_status: EvaluationScoreStatus,
+    rationale_summary: str,
 ) -> list[EvaluationScoreRecord]:
-    """为拒绝授权的场景生成逐候选 × judge 的 unauthorized 评分行。"""
+    """为「评审者没有评过」的候选 × judge 组合生成独立状态评分行。
+
+    拒绝外发落 ``unauthorized``、取消评测落 ``cancelled``：页面据此区分
+    「评审者被拒绝 / 被取消」与「评审者缺席」，两者都不产生任何分数。
+
+    Args:
+        run: 目标评测 run（提供 judge 快照与 rubric 版本）。
+        results: 该 run 下需要留痕的候选结果。
+        score_status: 留痕状态（永不使用 valid，也永不带分数）。
+        rationale_summary: 页面可读的原因文案。
+
+    Returns:
+        list[EvaluationScoreRecord]: 每个候选 × judge 组合一条空分数行。
+
+    Raises:
+        ValueError: ``score_status`` 是 valid（valid 必须由真实评审派生）。
+    """
+    if score_status is EvaluationScoreStatus.valid:
+        raise ValueError("valid 评分只能来自评审响应，不能由留痕生成")
     created_at = _utc_now_iso()
-    rubric_version = run.rubric_version
     scores: list[EvaluationScoreRecord] = []
     for result in results:
         for judge in run.judge_preset_snapshots:
@@ -386,10 +350,10 @@ def build_unauthorized_scores(
                     execution_preset_id=result.execution_preset_id,
                     judge_preset_id=str(judge.get("preset_name") or ""),
                     judge_model_snapshot=dict(judge),
-                    rubric_version=rubric_version,
-                    score_status=EvaluationScoreStatus.unauthorized.value,
+                    rubric_version=run.rubric_version,
+                    score_status=score_status.value,
                     dimension_scores={},
-                    rationale_summary="用户拒绝外发评审内容，未发送任何评审请求",
+                    rationale_summary=rationale_summary,
                     response_hash=None,
                     duration_seconds=None,
                     usage_summary=None,

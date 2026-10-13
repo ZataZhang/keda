@@ -47,3 +47,28 @@ beta failed）与评分分列；每维中位数可由 fresh SQLite 明细独立�
   注入）确认 oracle 会变红，再跑绿。
 - 临时 fixture suite（`rv284-*.yaml`）与隔离 worktree/暂存 payload 在运行结束后均已清理，
   不进入代码 diff。
+
+## 第二轮 pre-PR 评审后的证据重采集（2026-10-13）
+
+第二轮评审修复（授权前取消留痕 `cancelled` 行、进程级候选并发闸门、core 死代码清理、
+页面默认评审预设只预选可用项）落地后，三个 rv 剧本连同各自负控在**同一工作树**完整重跑并
+全部转绿（`RV1_GREEN` / `RV2_GREEN` / `RV3_GREEN: true`），截图、run JSON、fresh SQLite
+读取、tree stamps 与退化状态报告同批再生成：
+
+| 捕获 | 关键标记 |
+|---|---|
+| `rv-1-rereview-run.txt` | `MOCK_REQUESTS_AT_START: 0`、`AGENT_INVOCATIONS: 4`（闸门生效下矩阵仍全跑）、`SCORE_COUNT: 8` 全 valid、`WORKTREES_PURGED: True` |
+| `rv-1-narrow-rereview-run.txt` | 390×844 `NARROW_NO_PAGE_OVERFLOW: True`、溢出注入负控先红后绿 |
+| `rv-2-rereview-run.txt` | 页面拒绝后 `REQUEST_COUNT_AFTER_PAGE_DENY: 0`、`DENY_SCORE_ROWS_UNAUTHORIZED: True`、过期 hash `STALE_APPROVE_STATUS: 409`、还原后批准 `MOCK_REQUESTS_AFTER_APPROVE_RUN2: 8` |
+| `rv-3-rereview-run.txt` | `ENV1/ENV2_SCENARIOS` 全覆盖、伪 0 分注入被 oracle 检出后还原、`RV3_VERDICT: PASS` |
+| `rv-1-playwright-rereview-run.txt` | 真实 `/app/evaluations/` 页面 spec 3 passed（本轮改动前端预选逻辑后复跑） |
+
+门禁同批复跑：`just test all` 4287 passed / 1 skipped、评测定向 pytest 50 passed
+（含新增 `tests/test_model_evaluation_execution.py` 的漂移/闸门/取消边界用例）、pre-commit
+全绿、`uv run mkdocs build --strict` exit 0、`pnpm typecheck` clean。
+
+**未覆盖与边界披露**：rv-3 的取消场景发生在候选 `running` 期间，不经过本轮新增的
+`awaiting_judge_consent` 取消留痕路径（该路径由 API 层新增用例与 core `build_unreviewed_scores`
+用例覆盖）；真实远端 judge provider 仍未执行，评审边界继续由本地 mock 服务承担真实 HTTP
+调用计数。tree 绑定：`git_head=ef1f253c` + 未提交评审修复（patch sha256 前 16 位
+`5d00dabe75d3aa8c`，含未跟踪的执行边界测试文件），见 `rv-1-tree-stamps.txt` 的 porcelain 计数。

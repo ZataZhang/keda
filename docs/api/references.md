@@ -363,7 +363,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 ### `POST .../runs/{run_id}/start` / `POST .../runs/{run_id}/cancel` / `DELETE .../runs/{run_id}`
 
 - start：`created → queued` 并排程候选执行；本动作**绝不**触发评审调用。
-- cancel：仅 `created/queued/running/awaiting_judge_consent` 可取消（否则 409，`judging` 已获授权不撤回）；取消把未完成候选落 `cancelled` 状态并清除暂存 payload。
+- cancel：仅 `created/queued/running/awaiting_judge_consent` 可取消（否则 409，`judging` 已获授权不撤回）；取消把未完成候选落 `cancelled` 状态并清除暂存 payload。在 `awaiting_judge_consent` 上取消时，还会为已产出的候选 × 评审者写入 `cancelled` 评分行（与 deny 的 `unauthorized` 同理，不产生任何分数）。
 - delete：级联删除 run 的 DB 行、结果、评分与本机暂存 payload / worktree；不存在返回 404。
 
 ### `GET .../runs/{run_id}/judge-preview`
@@ -381,7 +381,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 - run 状态：`created / queued / running / awaiting_judge_consent / judging / completed / cancelled / interrupted`（Console 重启时活跃 run 一律自愈为 `interrupted`，等待用户显式恢复或删除）。
 - 候选结果状态：`pending / running / succeeded / failed / timeout / cancelled`；check 状态：`passed / failed / timeout / not_run`。
-- 评分状态：`valid / invalid / refusal / timeout / provider_error / unauthorized`——**任何非 valid 状态都不折算为 0 分**，聚合只统计 valid 行。
+- 评分状态：`valid / invalid / refusal / timeout / provider_error / unauthorized / cancelled`——**任何非 valid 状态都不折算为 0 分**，聚合只统计 valid 行；`unauthorized` / `cancelled` 是授权前 deny / 取消的留痕行，分数恒为空。
 - 默认不开启评审外发：judge 调用只可能发生在 approve 之后；payload 与响应 hash 落本地账本，持久层不保存 raw prompt、完整 patch、密钥值或环境变量。
 
 ## 模型模块

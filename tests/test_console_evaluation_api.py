@@ -237,6 +237,24 @@ def test_run_detail_contains_summary_and_payload_state(harness: Any) -> None:
     assert missing.status_code == 404
 
 
+def test_cancel_while_awaiting_consent_records_cancelled_review_rows(harness: Any) -> None:
+    """授权前取消也要留痕：页面据此区分「评审被取消」与「没选评审者」，且不发评审。"""
+    run_id = _created_run_id(harness)
+    _seed_result(harness.store, run_id)
+    _advance_to_awaiting(harness, run_id)
+
+    cancelled = client.post(f"{API_BASE}/runs/{run_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert harness.scheduled["judging"] == []
+    scores = harness.store.list_evaluation_scores(run_id)
+    assert [row.score_status for row in scores] == [EvaluationScoreStatus.cancelled.value]
+    assert all(row.dimension_scores == {} for row in scores)
+
+    detail = client.get(f"{API_BASE}/runs/{run_id}").json()
+    assert detail["summary"]["valid_judge_count"] == 0
+
+
 def test_cancel_respects_status_and_delete_cascades(harness: Any) -> None:
     run_id = _created_run_id(harness)
     harness.store.update_evaluation_run_status(

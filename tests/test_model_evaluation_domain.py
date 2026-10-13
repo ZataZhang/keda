@@ -455,9 +455,26 @@ def test_validate_consent_requires_eligible_status_and_hash_match() -> None:
         )
 
 
-def test_unauthorized_scores_are_written_on_deny() -> None:
+def test_unreviewed_score_rows_are_written_for_deny_and_cancel() -> None:
     run = _run(judge_preset_snapshots=[{"preset_name": "j1"}, {"preset_name": "j2"}])
-    scores = evaluation_rules.build_unauthorized_scores(run, [_result()])
-    assert len(scores) == 2
-    assert {score.score_status for score in scores} == {EvaluationScoreStatus.unauthorized.value}
-    assert all("未发送任何评审请求" in (score.rationale_summary or "") for score in scores)
+    for status, expected in (
+        (EvaluationScoreStatus.unauthorized, "unauthorized"),
+        (EvaluationScoreStatus.cancelled, "cancelled"),
+    ):
+        scores = evaluation_rules.build_unreviewed_scores(
+            run,
+            [_result()],
+            score_status=status,
+            rationale_summary=f"留痕：{expected}",
+        )
+        assert [score.score_status for score in scores] == [expected, expected]
+        assert all(score.dimension_scores == {} for score in scores)
+        assert all(score.rationale_summary == f"留痕：{expected}" for score in scores)
+
+    with pytest.raises(ValueError, match="valid"):
+        evaluation_rules.build_unreviewed_scores(
+            run,
+            [_result()],
+            score_status=EvaluationScoreStatus.valid,
+            rationale_summary="不应该发生",
+        )

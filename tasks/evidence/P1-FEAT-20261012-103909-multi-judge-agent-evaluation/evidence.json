@@ -15,7 +15,10 @@
         "rv-1-sqlite-fresh-read.txt",
         "rv-1-tree-stamps.txt",
         "rv-1-narrow-390x844.png",
-        "rv-1-final-tree-run.txt"
+        "rv-1-final-tree-run.txt",
+        "rv-1-rereview-run.txt",
+        "rv-1-narrow-rereview-run.txt",
+        "rv-1-playwright-rereview-run.txt"
       ],
       "output_summary": "headless Chromium 走真实 /app/evaluations/ 页面创建 2×2 矩阵 run 并启动、预览、批准外发至已完成：RESULT_COUNT 4、SCORE_COUNT 8、alpha checks passed / beta failed、MOCK 请求恰 8（两 judge 各 4）、AGENT_INVOCATIONS 4、SQLite user_version 15、四维中位数 {4.5,3.5,3.5,3.0} 与 fresh 连接独立重算一致；重启 Console 后 fresh read 指纹一致；暂存与 worktree 全部清理。窄屏 390×844 完成态页面无横向溢出（390/390）、表格均在 overflow-x-auto 容器内。",
       "explanation": "覆盖 PRD rv-1 的 must_cross：真实导航 → suite/run API → 干净 worktree（同 base tree）→ checks → SQLite → fresh process 读取 → 双 judge → UI 汇总；并补齐 Frontend Acceptance 的 390×844 视口断言与截图。suite hash/base commit/tree stamps 见 rv-1-tree-stamps.txt。",
@@ -112,7 +115,8 @@
         "rv-2-payload-consent.png",
         "rv-2-after-page-deny.png",
         "rv-2-consent-negative-control.txt",
-        "rv-2-final-tree-run.txt"
+        "rv-2-final-tree-run.txt",
+        "rv-2-rereview-run.txt"
       ],
       "output_summary": "run1：预览 manifest hash 与冻结 hash 一致、staged 文件逐 sha256 对齐、预览含真实 diff 与模型名；真实页面点击拒绝后 mock 请求数 0、8 条 unauthorized 行（维度分为空）、聚合全空、暂存清除。run2：篡改首个暂存 payload 后旧 hash 批准 → 409（预览后已变化）且 mock 仍 0；漂移 hash 批准 → 409（≠冻结）；还原原始字节后按冻结 hash 批准 → 200，completed，mock 恰 8（fixture-judge-valid 4 + fixture-judge-valid-alt 4），暂存清除；fresh Console 进程重读两 run 状态一致。",
       "explanation": "覆盖 PRD rv-2 的 must_cross 与 forbidden_bypasses：零 provider 调用发生在授权前；授权三 hash 复核（请求 hash、run 冻结 hash、当前暂存重算 hash）任一不符即 409；拒绝/完成后暂存清理；页面截图为 production capture，非直接渲染 modal。",
@@ -192,9 +196,10 @@
       "command": "python3 tasks/evidence/P1-FEAT-20261012-103909-multi-judge-agent-evaluation/scripts/rv3.py",
       "evidence_files": [
         "rv-3-degraded-states.json",
-        "rv-3-final-tree-run.txt"
+        "rv-3-final-tree-run.txt",
+        "rv-3-rereview-run.txt"
       ],
-      "output_summary": "env1：非法 check_recipe 的 suite 在 /suites 标 invalid 且创建被 400 拒绝；缺 key judge 预设创建 400「不可用」；fixture-slow 候选真实超时 → result timeout + check not_run、0 评分行、聚合空、无暂存；exec×5 judge（valid/refusal/invalid/timeout/provider_error）批准 500 内完成 → 状态桶 {valid:2,refusal:2,invalid:2,timeout:2,provider_error:2}、10 行、无任何 0 值、中位数仅由 valid 行派生；正式账本逐表不变且全 0（monitor/backlog 快照表为 Console lifespan 后台调度器心跳，已排除并注明归因）。env2：取消 running run 200 → cancelled、重复取消 409、mock delta 0；kill -9 后 fresh Console 自愈标 interrupted，该 run Agent 调用数 2→2（无自动重跑）、mock delta 0；删除 run 200 后 404，worktree 与暂存清理。零分折算负控：SQL 注入伪 0 valid 行后聚合 oracle 变红（检出），还原后恢复。",
+      "output_summary": "env1：非法 check_recipe 的 suite 在 /suites 标 invalid 且创建被 404 拒绝（不存在或校验失败）；缺 key judge 预设创建 400「不可用」；fixture-slow 候选真实超时 → result timeout + check not_run、0 评分行、聚合空、无暂存；exec×5 judge（valid/refusal/invalid/timeout/provider_error）批准 500 内完成 → 状态桶 {valid:2,refusal:2,invalid:2,timeout:2,provider_error:2}、10 行、无任何 0 值、中位数仅由 valid 行派生；正式账本逐表不变且全 0（monitor/backlog 快照表为 Console lifespan 后台调度器心跳，已排除并注明归因）。env2：取消 running run 200 → cancelled、重复取消 409、mock delta 0；kill -9 后 fresh Console 自愈标 interrupted，该 run Agent 调用数 2→2（无自动重跑）、mock delta 0；删除 run 200 后 404，worktree 与暂存清理。零分折算负控：SQL 注入伪 0 valid 行后聚合 oracle 变红（检出），还原后恢复。",
       "explanation": "覆盖 PRD rv-3 期望：各失败态独立可解释、不污染正式数据、不折算 0 分、其他候选不受影响；interrupted 不自愈重跑；删除策略级联清理。报告 JSON 内含每场景原始观测。",
       "risks": "settings 下限决定 agent_timeout 最小 10s（已在 Change Log 记录）；provider 错误态由本地 mock 500 触发；agent 子进程孤儿在 kill 后自然结束，计数以 run 级 worktree 路径过滤。",
       "negative_control": "先注入「valid+全 0」缺陷行证明聚合会把伪造 0 分计入（COERCION_DETECTED: True → EXPECTED_FAIL），再还原证明真实失败态不进入分布；badref suite、缺 key 预设、重复取消 409 均为必然变红的红线。",
@@ -229,5 +234,19 @@
     "tree": "e94f24b4",
     "at_local": "2026-10-13T12:22+08:00",
     "note": "rv-1/rv-2/rv-3 三个剧本连同负控在 pre-PR 修复后的最终树完整重跑，全部转绿；各 item 的 rv-<n>-final-tree-run.txt 为本次 stdout 捕获，截图/JSON/DB 读取文件同批再生成。 另复跑 `just e2e tests/workflows/console-evaluations.no-auth.spec.ts`（spec 经修订对齐最终 UI 契约）3 passed，捕获见 rv-1-playwright-spec-run.txt。"
+  },
+  "recollected_at_final_tree_rereview": {
+    "tree": "ef1f253c + reviewer 第二轮修复工作树（patch sha256[:16]=5d00dabe75d3aa8c，含未跟踪的 tests/test_model_evaluation_execution.py）",
+    "at_utc": "2026-10-13T06:10:39+00:00",
+    "note": "第二轮 pre-PR 评审修复（取消留痕、进程级候选闸门、死代码清理、页面默认评审预选）落地后，rv-1 / rv-2 / rv-3 三剧本连同各自负控在同一工作树完整重跑并全部转绿（RV1_GREEN / RV2_GREEN / RV3_GREEN: true；deny 零外发 REQUEST_COUNT_AFTER_PAGE_DENY: 0、过期 hash STALE_APPROVE_STATUS: 409、MOCK_REQUESTS_AFTER_APPROVE_RUN2: 8 与上轮一致）；截图、run JSON、fresh SQLite 读取、tree stamps 与退化状态报告同批再生成。另复跑 `just e2e tests/workflows/console-evaluations.no-auth.spec.ts` 3 passed（捕获 rv-1-playwright-rereview-run.txt）。",
+    "gates": {
+      "just test all": "4287 passed / 1 skipped",
+      "targeted pytest": "tests/test_model_evaluation_domain.py tests/test_model_evaluation_execution.py tests/test_console_evaluation_api.py tests/test_console_evaluation_store.py -o addopts='' → 50 passed",
+      "pre-commit": "passed (SKIP=check-test-flag)",
+      "mkdocs": "uv run mkdocs build --strict exit 0",
+      "typecheck": "pnpm typecheck clean",
+      "playwright": "console-evaluations.no-auth.spec.ts 3 passed"
+    },
+    "unchanged_disclosure": "rv-3 的 cancel 场景在候选 running 期间取消，不触发本轮新增的 awaiting_judge_consent 留痕路径；该路径由 tests/test_console_evaluation_api.py 新增用例与 core 层 build_unreviewed_scores 测试覆盖。真实远端 judge 仍未执行（mock OpenAI-compatible 边界）。"
   }
 }

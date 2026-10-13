@@ -455,7 +455,7 @@ erDiagram
 - [x] 同一 run 固定 suite version/hash、rubric version/hash、base commit/tree hash 和执行/评审模型快照；执行矩阵的每个组合都从干净 worktree 开始，checks 用受限 recipe 执行。（`rv-1` tree manifest 与 run JSON。） — 证据：`rv-1-tree-stamps.txt`（SUITE_HASH_MATCHES_FILE / BASE_COMMIT_MATCHES_REPO / BASE_TREE_UNIFORM 全 True；badref 负控创建 400）、`rv-1-run-detail.json`（矩阵 4 候选 checks 分列 passed/failed）。
 - [x] 每个 judge 在每个 candidate/case 单独留分、维度依据、model/prompt snapshot、耗时、usage/成本可用性和结果状态；修改逐评审值能改变重算摘要。（`rv-1` fresh DB 与 aggregation 重算。） — 证据：`rv-1-sqlite-fresh-read.txt`（8 条逐评审行、user_version 15）、API 中位数与独立 `statistics.median` 重算一致（MEDIAN_RECOMPUTE_MATCH）、单值篡改即改变中位数/范围（MEDIAN_SENSITIVE_TO_DETAIL→EXPECTED_FAIL，还原后 RESTORED_OK）。
 - [x] deterministic check、执行结果、稳定性、latency/cost 与模型评分分区呈现；没有 usage/价格事实时标注未知，不填补估算。（页面截图与 DTO。） — 证据：`rv-1-evaluation-results.png`（checks 徽标与评分分列）、`rv-1-run-detail.json` DTO（duration/usage 与 score 分列；cost 统一 unknown，未造数）。
-- [x] timeout、拒答、无效/缺字段 JSON、取消、provider error、suite 错误、未授权和 interrupted 各自可解释；未评分既不进入评分中位数也不成为 0 分；其他 case/judge 不因单一失败丢失。（`rv-3`。） — 证据：`rv-3-degraded-states.json` 状态桶 {valid:2,refusal:2,invalid:2,timeout:2,provider_error:2} 无任何 0 值、伪 0 分注入被 oracle 检出后还原（COERCION_DETECTED/RESTORED_OK）、suite/缺 key 创建 400、取消 200+重复 409、kill -9 后 interrupted 且 Agent 调用数 2→2。
+- [x] timeout、拒答、无效/缺字段 JSON、取消、provider error、suite 错误、未授权和 interrupted 各自可解释；未评分既不进入评分中位数也不成为 0 分；其他 case/judge 不因单一失败丢失。（`rv-3`。） — 证据：`rv-3-degraded-states.json` 状态桶 {valid:2,refusal:2,invalid:2,timeout:2,provider_error:2} 无任何 0 值、伪 0 分注入被 oracle 检出后还原（COERCION_DETECTED/RESTORED_OK）、无效 suite 创建 404 / 缺 key 评审预设创建 400、取消 200+重复 409、kill -9 后 interrupted 且 Agent 调用数 2→2。
 - [x] 评测 run 不触发正式 Issue / PR /生命周期状态变更，Agent 不接触主工作区；执行 worktree、缓存 payload 和 database run 均能按结束/删除策略清理。（`rv-2`/`rv-3` 清单。） — 证据：`rv-3-degraded-states.json` formal_ledger_untouched（逐表不变且全 0；monitor/backlog 快照表为 Console lifespan 后台调度器心跳，已注明归因）、`rv-1`/`rv-2` STAGING/WORKTREES_PURGED、删除 run 200→404 级联清理。
 
 #### Frontend Acceptance
@@ -571,6 +571,14 @@ erDiagram
 - 原因: 三处均为评审确认的实现缺口而非需求语义变化——PRD 解读回显承诺的「冻结快照」「所批即所发」「错误可解释」需要在配置漂移与并发竞争下仍然成立。
 - 影响: 不改 §10 FR 语义与对外 API 形状（预览响应仅新增/明确既有 `payload_truncated` 字段语义）。rv-1/rv-2/rv-3 证据包采集于修复前树 `ca184bc0`，其断言路径（干净 worktree、hash 三比对、deny 零外发、失败态分列）在修复后行为不变；漂移守卫与 409 映射由修复新增的单元测试与 API/领域测试（`tests/test_model_evaluation_domain.py` 等 44 项）在最终树验证。
 - 审核: reviewer 修复随 pre-PR 门禁提交；`just test all`、pre-commit 与 `uv run mkdocs build --strict` 在最终树通过。
+
+### Pre-PR 复审修复（2026-10-13，reviewer 第二轮）
+- 类型: bug-fix / code-quality / validation / documentation
+- 原文: 第二轮 pre-PR 复审在 `e94f24b4`/`ef1f253c` 之后发现五处交付缺口——①core 残留未被调用的 `apply_consent_outcome` / `ConsentDecisionOutcome` / `manifest_hash_for_entries`，其中 `apply_consent_outcome` 用 `run.manifest_hash` 自己和自己比，一旦被接线授权红线即失效；②在 `awaiting_judge_consent` 上取消只落候选状态，不写任何评审留痕，页面无法区分「评审被取消」与「没选评审者」，`SCORE_STATUS_META.cancelled` 成为不可达文案；③`evaluation.max_concurrency` 与 runner capacity 的取小是 **per-run** 的，外层池允许 4 个 run 并行，主机上在飞候选实际可叠成 N × ceiling，与 `config.toml`/文档承诺的「尊重与 runner 相同的主机 capacity」不符；④页面把 `default_judge_presets` 全量预选，凭据不可解析的默认项对应禁用的勾选框，形成既不能提交也不能取消的死锁；⑤`_execute_cell` / `_execute_judge` 的冻结快照漂移守卫与授权后 payload hash 复校没有任何 engines 边界测试（HTTP 层桩掉了整条执行链）。
+- 变更后: 删除三处死代码（授权语义唯一入口回到 `service.submit_consent` 的三 hash 复校）；`build_unauthorized_scores` 泛化为 `build_unreviewed_scores(run, results, *, score_status, rationale_summary)` 并显式拒绝 `valid`，`cancel_run` 在授权前取消路径复用该 helper 为未评组合补 `cancelled` 行（已评组合跳过，不覆盖 deny/评审结果）；`execution.py` 新增进程级 `_host_gate`（`BoundedSemaphore(min(max_concurrency, runner.max_concurrent_issues))`），候选的 worktree + Agent + check + 清理全程持闸，并在取得槽位后重新确认 run 仍为 `running`，排队期间被取消的单元落 `cancelled` 且零 Agent 调用；`evaluations/page.tsx` 默认评审预设只预选目录在场且 `available` 的项；新增 `tests/test_model_evaluation_execution.py`（候选/评审配置漂移零外发、授权后 payload hash 不符拒发、闸门排队期间取消不补发、跨 run 在飞候选数 == ceiling）与 API 层授权前取消留痕用例；`docs/api/references.md`（cancel 留痕 + 评分状态枚举补 `cancelled`）、`docs/dev/evaluation.md`（冻结快照即执行前守卫、进程级并发口径、deny/cancel 留痕）、`config.toml`（默认预选需可用、并发为全进程口径）同步；§9 证据标注更正为「无效 suite 创建 404 / 缺 key 评审预设创建 400」（与 `rv-3-degraded-states.json` 实测一致）。
+- 原因: ①②属评审确认的实现缺口与状态语义不完整（不改 FR，但 §10「未授权/取消各自可解释」的留痕只实现了 deny 一半）；③是配置注释与文档已承诺却未落实的行为，属需求与实现不一致；④是真实可用性缺陷；⑤是关键红线只有单元测试代证、缺接口/边界级证据。
+- 影响: 对外 API 形状不变（`scores` 里可能多出 `cancelled` 行，前端文案与聚合口径已就位；`valid` 聚合与非 0 折算红线不受影响）。rv-1/rv-2/rv-3 已捕获证据仍绑定其原树语义：rv-3 取消场景发生在 `running`（不产生新留痕行），deny 文案与 hash 语义未改；闸门与漂移守卫的新证据由本轮新增测试提供，live provider 仍未覆盖。
+- 审核: reviewer 修复随 pre-PR 门禁提交；最终树复跑评测定向 pytest、`just test`、pre-commit、`uv run mkdocs build --strict`、`pnpm typecheck` 与评测 Playwright spec（页面本轮有改动）。banner 与 §9 状态不变（仍 `🧍 待人工验收`，Human-Confirmed 两项保持未勾）。
 
 ### 执行期实现偏差与文档同步（2026-10-13，executor）
 - 类型: implementation-deviation / documentation

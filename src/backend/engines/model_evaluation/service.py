@@ -27,6 +27,7 @@ from backend.core.shared.models.model_evaluation import (
     EvaluationRunRecord,
     EvaluationRunStatus,
     EvaluationScoreRecord,
+    EvaluationScoreStatus,
     EvaluationSuite,
     parse_evaluation_suite,
 )
@@ -277,7 +278,12 @@ def start_run(run_id: str) -> EvaluationRunRecord:
 
 
 def cancel_run(run_id: str) -> EvaluationRunRecord:
-    """取消 run：标记 cancelled、把未完成候选落状态并清除暂存 payload。"""
+    """取消 run：标记 cancelled、把未完成候选落状态并清除暂存 payload。
+
+    在 ``awaiting_judge_consent`` 上取消时，为已产出的候选 × judge 组合补
+    ``cancelled`` 评分留痕（不产生任何分数），与 deny 的 ``unauthorized`` 一样
+    让页面能区分「评审者被拒绝 / 被取消」与「根本没选评审者」。
+    """
     store = _store()
     run = _core_run(store.get_evaluation_run(run_id))
     if run is None:
@@ -298,8 +304,28 @@ def cancel_run(run_id: str) -> EvaluationRunRecord:
     except EvaluationStoreConflictError as exc:
         raise EvaluationActionError("conflict", str(exc)) from exc
     _mark_unfinished_results_cancelled(store, run_id)
+    if status is EvaluationRunStatus.awaiting_judge_consent:
+        _record_cancelled_scores(store, run)
     execution.purge_run_artifacts(run_id)
     return _core_run(transitioned)
+
+
+def _record_cancelled_scores(store: Any, run: EvaluationRunRecord) -> None:
+    """授权前取消：为已产出的候选补 ``cancelled`` 留痕，区分「评审被取消」与「评审缺席」。"""
+    scored_pairs = {
+        (str(row.result_id), str(row.judge_preset_id))
+        for row in store.list_evaluation_scores(run.run_id)
+    }
+    results = [_core_result(row) for row in store.list_evaluation_results(run.run_id)]
+    for score in evaluation_rules.build_unreviewed_scores(
+        run,
+        results,
+        score_status=EvaluationScoreStatus.cancelled,
+        rationale_summary="用户在授权前取消了评测，未发送任何评审请求",
+    ):
+        if (score.result_id, score.judge_preset_id) in scored_pairs:
+            continue
+        store.save_evaluation_score(score)
 
 
 def _mark_unfinished_results_cancelled(store: Any, run_id: str) -> None:
@@ -439,7 +465,12 @@ def submit_consent(*, run_id: str, decision: str, manifest_hash: str) -> Evaluat
             raise EvaluationActionError("conflict", str(exc)) from exc
         if decision == "deny":
             results = [_core_result(row) for row in store.list_evaluation_results(run_id)]
-            for score in evaluation_rules.build_unauthorized_scores(run, results):
+            for score in evaluation_rules.build_unreviewed_scores(
+                run,
+                results,
+                score_status=EvaluationScoreStatus.unauthorized,
+                rationale_summary="用户拒绝外发评审内容，未发送任何评审请求",
+            ):
                 store.save_evaluation_score(score)
             execution.purge_run_artifacts(run_id)
     if decision == "approve":
