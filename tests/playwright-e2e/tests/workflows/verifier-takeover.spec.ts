@@ -18,12 +18,18 @@
  *
  * rv-1 缺口（等待人工处置，见 PRD §9 Human-Confirmed）：这里 stub 的两个端点恰好就是
  * PRD §7 rv-1 `must_cross` 要求真实穿过的两段（Issue 详情读 + 接管动作写），所以
- * **本文件即使在完整栈上跑绿也不能充当 rv-1 证据**。关闭 rv-1 只有两条路：① 去掉
+ * **本文件即使在完整栈上跑绿也不能充当 rv-1 证据**。接管动作写这一跳已由
+ * `tasks/evidence/…/scripts/rv1_console_http_real_entry_probe.py` 在真实 ASGI app +
+ * 真实 SQLite CAS + 真实跨进程等待循环与进程组终止上取证（无 `page.route`，仅按 §7
+ * mock_boundary 用阻塞子进程替身 verifier CLI），rv-1 剩下的未跨越段因此只剩**真实浏览器
+ * → /app/dashboard → IssueDetail 的 GitHub 支撑详情读取**。关闭 rv-1 只有两条路：① 去掉
  * `stubTakeoverFlow` 的 `page.route`，在隔离栈（独立 state home + 真实 console.db +
  * 真实 runner 等待环 + 阻塞 verifier 替身；仅按 §7 mock_boundary 替换 GitHub 与
  * verifier CLI）运行本流程，把桌面与窄视口的真实页面截图存为
  * `tasks/evidence/…/rv-1-verifier-takeover.png` / `-narrow.png`；② 由人工明确处置为
  * 「接受跨进程 oracle + 本 UI/API 契约层的组合保真度」。二者之前 rv-1 保持 `[~]`。
+ * 注意 ① 需要把 `gh` 传输替换成确定性替身：在本机直接跑真实栈会把 `autopilot_hold`
+ * 与标签写进操作者的机器级 console.db 和真实 Issue，因此不由 executor 自行执行。
  *
  * 注意：接管动作端点返回的 HTTP 语义即后端 `TAKEOVER_HTTP_STATUS` 映射
  * （202 处理中 / 200 已交班 / 409 目标已变化），此处按真实契约 stub。

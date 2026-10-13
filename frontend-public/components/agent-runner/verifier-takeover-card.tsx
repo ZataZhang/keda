@@ -46,7 +46,7 @@ interface VerifierTakeoverCardProps {
   /** Draft PR 链接（可缺省，缺省时不展示"打开 Draft PR"）。 */
   prUrl?: string | null;
   /** 交班确认后请求父级刷新监控快照（Issue 已翻到 review）。 */
-  onTakeoverSettled?: () => void;
+  onTakeoverSettled?: () => void | Promise<void>;
 }
 
 /**
@@ -130,10 +130,10 @@ export function VerifierTakeoverCard({
   useEffect(() => stopPolling, [stopPolling]);
 
   /** 交班确认后：停止轮询、清除慢提示、通知父级刷新。 */
-  const settleHandover = useCallback(() => {
+  const settleHandover = useCallback(async () => {
     stopPolling();
     setRequesting(false);
-    onTakeoverSettled?.();
+    await onTakeoverSettled?.();
   }, [stopPolling, onTakeoverSettled]);
 
   /** 接管登记后轮询控制行投影，直到离开 running / takeover_requested。 */
@@ -144,7 +144,7 @@ export function VerifierTakeoverCard({
       const fresh = await reload();
       if (fresh && fresh.state !== "running" && fresh.state !== "takeover_requested") {
         if (fresh.state === "taken_over") {
-          settleHandover();
+          await settleHandover();
         } else {
           stopPolling();
           setRequesting(false);

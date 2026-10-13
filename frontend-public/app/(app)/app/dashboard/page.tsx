@@ -99,6 +99,7 @@ export default function DashboardPage() {
   );
   const [selectedIssue, setSelectedIssue] =
     useState<IssueMonitoringSnapshot | null>(null);
+  const [issueLabelRefreshVersion, setIssueLabelRefreshVersion] = useState(0);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [completionStats, setCompletionStats] = useState<
     RepositoryCompletionStats[]
@@ -505,6 +506,16 @@ export default function DashboardPage() {
     return readySlots[0]?.repository.repo_id ?? null;
   }, [selectedRepoId, state, selectedIssueNumber, readySlots]);
 
+  /** 接管确认后重扫所属仓库，让列表和 Issue 详情同步显示 agent/review。 */
+  const handleTakeoverSettled = useCallback(async () => {
+    if (selectedIssueRepoId) {
+      await handleRefreshRepo(selectedIssueRepoId);
+    } else {
+      await loadSnapshots();
+    }
+    setIssueLabelRefreshVersion((version) => version + 1);
+  }, [handleRefreshRepo, loadSnapshots, selectedIssueRepoId]);
+
   const statsByRepoId = useMemo(() => {
     const lookup: Record<string, RepositoryCompletionStats> = {};
     for (const entry of completionStats) {
@@ -695,8 +706,9 @@ export default function DashboardPage() {
                   <IssueDetail
                     issue={selectedIssue}
                     repoId={selectedIssueRepoId ?? undefined}
+                    labelRefreshVersion={issueLabelRefreshVersion}
                     onLabelsChanged={handleIssueLabelsChanged}
-                    onTakeoverSettled={() => void loadSnapshots()}
+                    onTakeoverSettled={handleTakeoverSettled}
                   />
                 </div>
               ) : selectedEntry ? (

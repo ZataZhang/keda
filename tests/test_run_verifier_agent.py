@@ -1041,3 +1041,19 @@ def test_choose_verifier_agent_prefers_fallback_candidates_array_over_stale_lega
     # 候选数组里没有可用候选时仍回退旧名单语义。
     legacy_only = AppConfig(runner=RunnerConfig(agent_fallback_order=("kimi", "codex")))
     assert rva._choose_verifier_agent(legacy_only, "claude") == "kimi"
+
+
+def test_split_verifier_modules_keep_the_run_verifier_agent_logger_identity() -> None:
+    """1000 行门禁拆出去的模块仍记在 ``run_verifier_agent`` 名下。
+
+    操作者按 docs/guides/agent-runner.md 的排查顺序 grep ``run_verifier_agent`` 分辨
+    「被人工接管取消」与「超时」；logger 名跟着模块文件走会让这些关键行查不到。
+    """
+    from backend.core.use_cases import (
+        agent_runner_verdict_pr_effects as verdict_pr_effects,
+    )
+    from backend.core.use_cases import agent_runner_verifier_response_log as response_log
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    for moved_module in (verdict_pr_effects, response_log, rva):
+        assert moved_module._logger.name == "backend.core.use_cases.run_verifier_agent"

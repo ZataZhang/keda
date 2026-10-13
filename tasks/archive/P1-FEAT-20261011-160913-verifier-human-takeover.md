@@ -7,7 +7,7 @@
 
 > 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
-> 执行侧交付已完成可复核的行为与竞态证据（真实跨进程 oracle + rv-1 契约层 135 / rv-2 竞态层 221 自动化测试）；`Human-Confirmed` 与依赖真实浏览器 `just e2e` 的呈递项尚未勾选，见 §9.2 与证据报告「验证限制」。
+> 执行侧已取得可复核的行为、竞态和隔离真实浏览器证据。真实 Dashboard → Console API → SQLite CAS → runner → verifier 进程组链路通过；外部 GitHub 与 verifier CLI 按 mock_boundary 使用隔离替身。桌面/窄视口截图和 Playwright trace 已生成。人工逐图确认、独立 verifier 复核和 PR 证据发布仍待完成，见 §9.2 与证据报告。
 
 本文按两层组织：Part A 供人确认行为和边界；Part B 供执行者实现、验证和交付。内容借鉴受控语言、模块化信息组织和 Agent 可验证性，不代表符合 ASD-STE100 或 S1000D 的正式认证要求。
 
@@ -472,7 +472,7 @@ No external validation required; repository evidence was sufficient.
 
 reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态 oracle 不放在人读呈递区；只在失败时上报。
 
-真实 Dashboard 接管流程的代码已实现（`frontend-public/components/agent-runner/verifier-takeover-card.tsx` 及 Dashboard/IssueDetail 接线）。Playwright 用例 `tests/playwright-e2e/tests/workflows/verifier-takeover.spec.ts` 通过 `page.route` stub Issue 详情与接管动作 API，只覆盖真实组件树上的 UI/API 契约，**不覆盖 PRD 所需的真实 API→SQLite→runner 路径**；被 stub 的这两个端点恰好就是 rv-1 `must_cross` 要真实穿过的两段，所以**即使该 spec 在完整栈上跑绿也不能充当 rv-1 证据**（rv-1 保持 `[~]`，见 §9.2 与下方 Human-Confirmed 处置项）。环境事实（本轮修正）：`just e2e-install` 可落地 `tests/playwright-e2e` 依赖与 chromium（修复轮已在本地装齐），真正缺的是**隔离的可登录全栈**——本机 `kc console` 正在使用机器级 `console.history.db` 与本 Issue 的真实注册表，在其上种一条假 `running` verifier 控制行、再点真实接管，会把在跑的控制面与 `autopilot_hold` 写到操作员真实状态上，故执行侧不在本机跑真实接管。交班/竞态后端语义由 `tasks/evidence/…/scripts/rv*.py` 的真实跨进程 oracle 与后端契约测试覆盖（见 §9.2 与 `evidence.json`）。关闭 rv-1 只需其一：① 去掉 `stubTakeoverFlow` 的 `page.route`，在独立 state home + 独立 console.db + 真实 runner 等待环 + 阻塞 verifier 替身（仅按 §7 mock_boundary 替换 GitHub 与 verifier CLI）的环境跑一次，并把桌面/窄视口真实页面截图存为 `rv-1-verifier-takeover.png` / `-narrow.png`；② 人工明确处置为接受「跨进程 oracle + UI/API 契约层」的组合保真度。只保存文件不展示视为未交付。
+既有 `verifier-takeover.spec.ts` 仍是 API stub 的 UI 契约测试，不计作真实入口证据。本轮新增 opt-in `tests/playwright-e2e/tests/workflows/verifier-takeover-real-entry.spec.ts`，由隔离 harness `tasks/evidence/P1-FEAT-20261011-160913-verifier-human-takeover/scripts/rv1_browser_runner_e2e.py` 启动生产 Dashboard、FastAPI、独立 HOME/console.db 和真实 runner 等待循环；只将外部 GitHub transport 与阻塞 verifier CLI 替换为确定性替身，浏览器侧没有 `page.route`。浏览器捕获实际 issue-detail GET 与 takeover POST，确认 HTTP 202、提交的 run_id/head_sha 与详情投影相同；随后从 SQLite 回读 `taken_over`，确认目标 verifier 子进程退出、Draft PR 保留、Issue 变为 `agent/review` 且 `autopilot_hold` 生效。交班后 Dashboard 重扫仓库并重读标签；页面列表与标签编辑器均显示 review。桌面/窄视口截图、Playwright trace、runner/API 日志及 facts 已写入证据目录。复现命令：`PYTHONPATH=src uv run python tasks/evidence/P1-FEAT-20261011-160913-verifier-human-takeover/scripts/rv1_browser_runner_e2e.py`。真实页面与 prototype 的并排审阅、真实 GitHub transport、独立 verifier 签署和 PR evidence comment 仍未完成；对应 Human-Confirmed 项保持空框，Frontend/Validation runner-owned 项保持 `[~]`。
 
 ### 9.2 Acceptance Evidence Package
 
@@ -482,7 +482,7 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 
 - [ ] 确认接管语义为“只停止当前 Issue 的 verifier；保留 Draft PR；不产生 verifier PASS 或自动合并；之后由操作者手动审查并决定合并”。证据：rv-1-verifier-takeover.png 与 PR evidence comment 中同 viewport 的交互原型 / 真实页面对照。
 - [ ] 确认真实 Dashboard Issue 详情达到原型的信息层级：运行状态、目标 HEAD、接管范围、PR 入口容易辨认，确认/处理中/成功/失败状态清楚，桌面和窄视口都可用。证据：`docs/prototypes/verifier-human-takeover.html` 与真实入口截图 `rv-1-verifier-takeover.png`、`rv-1-verifier-takeover-narrow.png` 按状态和视口配对；完成消息中内嵌呈递物。
-- [ ] **处置 rv-1 真实浏览器入口（第三轮评审提出，执行侧无权代答）**：现交付的 `verifier-takeover.spec.ts` stub 的正是 rv-1 `must_cross` 要穿过的两个端点，因此该层永远不能满足 rv-1，远端 CI 也没有 `tests/playwright-e2e` 入口。请二选一并在本行后记录：① 在隔离栈（独立 state home + 独立 console.db + 真实 runner 等待环 + 阻塞 verifier 替身）上去掉 stub 跑一次真实入口，产出 `rv-1-verifier-takeover.png` / `-narrow.png` 与 trace；② 明确处置为接受「真实跨进程 oracle + 真实组件树 UI/API 契约层」的组合保真度，并写明该处置即 rv-1 的最终验收口径。二者之前 rv-1 与依赖它的前端/Delivery 项保持 `[~]`，不得改勾。
+- [ ] **处置 rv-1 真实浏览器入口**：执行侧已按选项①在隔离栈补跑真实浏览器入口，产出 `rv-1-verifier-takeover.png`、`rv-1-verifier-takeover-narrow.png` 与 `rv-1-verifier-takeover-trace.zip`，并记录实际 POST 绑定、runner 终态及进程组退出。外部 GitHub transport 与 verifier CLI 是 §7 mock_boundary 允许的替身；Dashboard、API、SQLite、runner 与浏览器是真实实现。本项继续留空，供人工核对两视口截图和 prototype 信息层级并确认最终呈递口径。
 
 #### Architecture Acceptance
 
@@ -492,16 +492,16 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 
 #### Behavior Acceptance
 
-- [x] 取消只终止目标 verifier 子进程树，等待进程回收；daemon 和其他 Issue 继续运行。证据：rv-1 进程探测和 E2E 报告。〔执行侧已核（真实 OS 进程）：rv-1 oracle `VERIFIER_GROUP_GONE: True`（目标子进程组被 SIGKILL 并回收）+ `CONTROL_PROCESS_SURVIVED: True`（发起接管的另一 OS 进程存活）；浏览器 E2E 层见下方「验证限制」，spec 已交付未在此执行。〕
+- [x] 取消只终止目标 verifier 子进程树，等待进程回收；daemon 和其他 Issue 继续运行。证据：rv-1 进程探测和 E2E 报告。〔执行侧已核（真实 OS 进程）：rv-1 oracle `VERIFIER_GROUP_GONE: True`（目标子进程组被 SIGKILL 并回收）+ `CONTROL_PROCESS_SURVIVED: True`（发起接管的另一 OS 进程存活）；第六轮新增的 Console HTTP 段探针 `rv1_console_http_real_entry_probe.py` 在同一条真实路径上另证一次——`VERIFIER_GONE: True` 且同仓另一 Issue 的 verifier 替身 `other_verifier_alive=True`（接管只命中目标进程组）。浏览器 E2E 层见下方「验证限制」，spec 已交付未在此执行。〕
 - [x] 取消输出标明 cancelled_by_human 且无 verdict；不进入 RED recovery 或 pre-PR review。证据：rv-1 Issue comment、verifier 日志和后续阶段 probe。〔执行侧已核：rv-1 `CANCELLED_BY_HUMAN: True` + `FINAL_STATE: taken_over`（无 verdict 落库）；`VerifierCancelledByHumanError` 刻意不进 fallback/recovery 元组，见 `agent_runner_issue_control.py`；rv-1 自动化层 135 passed 覆盖该分类。〕
 - [x] autopilot_hold 会阻止 post-PR supervisor、review_once 和 merge queue 继续自动处理，即使仓库关闭 require_verifier_pass；只有当前 HEAD 的新 verifier GREEN 才可清除 hold。证据：rv-2 自动入口 probes。〔执行侧已核：rv-1 `AUTOPILOT_HOLD: True` + `MERGE_GATE_HELD: True`；rv-2 `S2_HOLD_SET` / `S4_HOLD_SET` / `S4_GATE_BLOCKS: True`；merge queue/supervisor/review_once 的 fail-closed 分支由自动化层（含 test_agent_runner_merge_queue、test_agent_runner_supervisor_entrypoints、test_pr_supervisor）覆盖；`discard_stale_verdict` 的绑定方向（只改写产出该 verdict 的那一轮控制行）另有 `test_discard_stale_verdict_holds_the_run_that_produced_it` / `test_discard_stale_verdict_leaves_a_newer_run_untouched` 两项回归。〕
 - [x] verifier 完成与 takeover 竞争时只有一个本地终态；PR 已合并或 HEAD 漂移时旧 verdict 不生效、后续自动阶段停止，最终 GitHub 状态与控制记录一致。证据：rv-2 各种竞态顺序的 fresh-state 报告。〔执行侧已核：rv-2 `S1_COMPLETION_WON`+`S1_TAKEOVER_REJECTED_AS_CONFLICT`、`S2_TAKEOVER_ACCEPTED`+`S2_VERDICT_BLOCKED`、`S3_EXACTLY_ONE_WINNER`、`S4_STALE_DISCARDED`、`S5_MERGED_RECORDED`、`RV2_PROBE_OK: True`。〕
 
 #### Frontend Acceptance
 
-- [~] Dashboard Issue 详情只在活动 verifier 可接管时显示动作；对话框明确停止范围和不自动合并；处理中和成功/冲突状态可辨认。证据：rv-1 真实入口截图及 Playwright trace。 — runner-owned gate: 人工真实入口验收（`just e2e` 在 PR review/CI 阶段执行并产出 `rv-1-*.png` 截图与 trace，无头工作树无法本地跑浏览器）。执行侧已交付：`verifier-takeover-card.tsx` 仅在投影存在活动 verifier 时渲染、`running` 才显示接管按钮、Radix 对话框文案明确「只停止此 Issue 当前 verifier…取消不会被记为验证通过，也不会自动合并」、`requested`→轮询呈「正在停止」、`conflict`→「HEAD 已变化 / 运行已结束」；`tsc`/`eslint`/`build` 全绿；真实浏览器截图/trace 待人工/CI 补跑。
-- [~] 真实 Issue 详情按原型的信息层级呈递状态、HEAD、接管范围和 PR 入口，并复用生产 Dashboard 的布局、主题、组件与 Dialog/Portal；桌面和窄视口下长文本、滚动和对话框均可用。证据：同状态、同主题、同数据、同视口的原型/生产页面对照截图及真实入口路径。 — runner-owned gate: 人工真实入口验收（PR review 阶段以 `just e2e` 生成桌面/窄视口对照截图并与原型并呈）。执行侧已交付：接管卡内嵌真实 Dashboard/IssueDetail 组件树并复用生产 Dialog/Portal；`verifier-takeover.spec.ts` 已编写桌面 1440×900 与窄 390×844 两视口用例，本环境未执行、无对照截图。
-- [~] 前端 action payload 原样传送当前 run_id 和 head_sha；响应类型与后端 DTO 对齐。证据：frontend-public typecheck 与 rv-1 network assertion。 — runner-owned gate: 真实浏览器 network assertion（rv-1 POST body 抓取）在 `just e2e` 阶段完成。执行侧已核：`frontend-public` typecheck exit 0，`ActiveVerifier` / `ConsoleActionResult.takeover_*` 与后端 `routes/agent_runner.py` 的 `payload["active_verifier"]` 投影同构；接管卡提交时 `run_id=verifier.run_id` / `head_sha=verifier.head_sha` 原样透传、界面不自行构造；后端 `console_actions._execute_take_over_verifier` 缺 run_id/head_sha 回 400 的契约由 `tests/test_console_actions.py` 覆盖。仅浏览器端抓包待补。
+- [~] Dashboard Issue 详情只在活动 verifier 可接管时显示动作；对话框明确停止范围和不自动合并；处理中和成功/冲突状态可辨认。证据：`rv-1-verifier-takeover.png`、`rv-1-verifier-takeover-narrow.png`、`rv-1-verifier-takeover-trace.zip` 与真实入口 Playwright 输出。 — 执行侧真实浏览器路径已通过：运行中显示接管动作；真实 POST 返回 202；runner 取消目标进程组后 fresh read 呈「已交给你审查 · verifier 未完成」；无停止中残留提示。最终项仍待独立 verifier 与人工对照 prototype 核验。
+- [~] 真实 Issue 详情按原型的信息层级呈递状态、HEAD、接管范围和 PR 入口，并复用生产 Dashboard 的布局、主题、组件与 Dialog/Portal；桌面和窄视口下长文本、滚动和对话框均可用。证据：真实入口桌面 1440×900、窄视口 390×844 截图与 Playwright trace。 — 两种视口的真实页面截图已生成，确认列表与标签面板都更新为 review；prototype/生产页面的并排视觉核对与人工通过待完成。
+- [~] 前端 action payload 原样传送当前 run_id 和 head_sha；响应类型与后端 DTO 对齐。证据：frontend-public typecheck 与真实浏览器 request assertion。 — Playwright 捕获真实页面 POST body，并断言 `action`、`run_id`、`head_sha` 与此前详情投影相同；后端缺失/超长绑定契约另见 HTTP 与 API 测试。等待独立 verifier 复核最终 tree。
 
 #### Documentation Acceptance
 
@@ -510,15 +510,15 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 
 #### Validation Acceptance
 
-- [x] uv run pytest tests/test_console_store.py tests/test_console_actions.py tests/test_run_verifier_agent.py tests/test_agent_runner_console_api.py tests/test_agent_runner_merge_queue.py tests/test_agent_runner_supervisor_entrypoints.py tests/test_pr_supervisor.py tests/test_process_runner.py 通过。证据：命令输出归档。〔执行侧已核：该 8 文件合集 `-o addopts=""` 在本轮交付树复跑 **280 passed**（rv-1 入口契约层 135、rv-2 竞态/fail-closed 层 221，其中 `tests/test_agent_runner_issue_control.py` 不在该 8 文件清单内、单列于 rv-1 层），见 `rv-2-validation-8-file-tests.txt`。〕
+- [x] uv run pytest tests/test_console_store.py tests/test_console_actions.py tests/test_run_verifier_agent.py tests/test_agent_runner_console_api.py tests/test_agent_runner_merge_queue.py tests/test_agent_runner_supervisor_entrypoints.py tests/test_pr_supervisor.py tests/test_process_runner.py 通过。证据：命令输出归档。〔执行侧已核：该 8 文件合集 `-o addopts=""` 在本轮交付树复跑 **281 passed**（rv-1 入口契约层 135、rv-2 竞态/fail-closed 层 222，其中 `tests/test_agent_runner_issue_control.py` 不在该 8 文件清单内、单列于 rv-1 层），见 `rv-2-validation-8-file-tests.txt`。〕
 - [x] (cd frontend-public && pnpm typecheck && pnpm lint && pnpm build) 通过。证据：三个命令输出归档。〔执行侧已核（合并前评审在最终树复跑）：`pnpm typecheck` exit 0；`pnpm build`（`output: export`）exit 0；`pnpm lint` 对本 PR 改动的 6 个前端文件（`app/(app)/app/dashboard/page.tsx`、`components/agent-runner/issue-detail.tsx`、`components/agent-runner/verifier-takeover-card.tsx`、`lib/api/console.ts`、`lib/api/types.ts`、`lib/api/client.ts`）逐文件 0 error（仅仓库既有 `jsdoc/require-jsdoc` warn），但**仓库全量 exit 1**：3 条基线 `react-hooks/set-state-in-effect` error 位于本 PR 未触碰、也不在 `git diff main...HEAD` 内的 `components/agent-runner/run-detail-dialog.tsx`、`components/backlog/prd-ci-view.tsx`、`components/backlog/prd-lifecycle-view.tsx`，非本 PR 回归，按 §11 范围外留待各自归属修复。〕
-- [~] 通过真实浏览器入口 just e2e tests/workflows/verifier-takeover.spec.ts 验证 UI → API → SQLite → runner → verifier process group，且 fresh read 观察到 handoff；不得用组件预览替代。证据：rv-1 E2E 报告、trace、截图和 final-tree hash。 — runner-owned gate: 真实浏览器 `just e2e` 于 PR review/CI 阶段执行，且**必须先去掉 spec 的两个 `page.route` stub**（被 stub 的 Issue 详情读与接管动作写正是本条要穿过的两段，带 stub 跑绿不构成 rv-1 证据）。处置选项见上方 Human-Confirmed 第三条。执行侧环境事实：`just e2e-install` 可装齐 `tests/playwright-e2e` 依赖与 chromium（修复轮已本地验证），但本机 `kc console` 正占用机器级 `console.history.db` 与本 Issue 的真实注册表，在本机种假 `running` 控制行并点真实接管会污染操作员状态，故执行侧不在本机跑。执行侧已交付：spec 按真实 Dashboard 入口编写（stub 仅在浏览器边界替换只读快照与接管动作端点，走真实 React 组件树 / Radix Dialog / 轮询回读）；进程/DB/handoff 语义由 `scripts/rv1_takeover_handoff_probe.py` 的真实跨进程 oracle 覆盖（同一 console.db WAL、真实 SubprocessRunner 进程组终止与回收、独立 OS 进程发起 CAS）。
+- [~] 通过真实浏览器入口验证 UI → API → SQLite → runner → verifier process group，且 fresh read 观察到 handoff；不得用组件预览替代。证据：`rv-1-browser-runner-e2e.txt`、`rv-1-browser-playwright.txt`、两视口截图、trace 与 `rv-1-browser-runner-facts.json`。 — 隔离的真实 Dashboard E2E 已执行成功：无 `page.route`；POST 返回 202；SQLite/runner 最终态、目标进程退出、Draft PR 保留、Issue review、autopilot hold 和交班 comment 均通过独立断言。外部 GitHub 用 file-backed gh transport；独立 verifier 复核和证据发布仍是 runner-owned gate。
 - [x] rv-2 的 stale run、stale HEAD、verifier completion race 与 merged PR 场景通过；反例能使 oracle 报红。证据：rv-2-verifier-race.txt 和对应测试报告。〔执行侧已核：`RV2_PROBE_OK: True`；负控 `RV2_EXPECTED_FAIL: 误用初始 head 快照时漂移检测失效…（检查点有效）` + `S4_NEG_STALE_NOT_RECORDED: True`；先红后绿均记录在案。〕
-- [x] 所有 R2/R3 行为证据均绑定交付 tree；相关实现变化后已重跑对应 oracle。证据：各 `rv-*.txt` 开头绑定块的 `HEAD`/`TREE`/`RUN_ON`/`CODE_DELTA`/`RECORD_EXCLUDED` 五项，与报告「验证限制 · tree 绑定」。〔执行侧已核（第五轮评审修复层复跑 + 重绑）：三份跨进程 oracle 与四层自动化（rv-1 入口契约 135、rv-2 竞态/fail-closed 221、原列 8 文件合集 280、受影响后端 16 文件合集 523）与前端 `pnpm typecheck` / ESLint（0 errors、27 个既有 JSDoc warnings）/ `pnpm build` 全部在已提交实现 `750d03cb952bb6b6e84f93ce080f0b662f940417` 之上的工作树逐字复跑（exit 0），结果与第四轮逐字一致，`RV1_PROBE_OK` / `RV1_NEGATIVE_CONTROL_OK` / `RV2_PROBE_OK` 与两支负控 marker 全部复现。绑定块五元组现在指向 **capture 实际所在的那棵已提交 tree**：`TREE=412ca52344891abfa4e7f94004e4428822d151f4`（= `git rev-parse 750d03cb^{tree}`，可 `git cat-file -p` 核对，已含拆分出的 `agent_runner_verdict.py` / `agent_runner_verifier_response_log.py` / `agent_runner_verdict_pr_effects.py`）、`CODE_DELTA` 列本轮 3 个非行为文件（随包 `SKILL.md`、`references/triage.md`、`tests/test_kedacode_operator_skill.py`）、`RECORD_EXCLUDED` 声明 `tasks/pending/`、`tasks/archive/`、`tasks/evidence/` 记录性文件不参与代码断言；行为源代码与该 tree 逐字节一致由 `git status --porcelain -- src/**/*.py frontend-public`（空输出）证明。**本条第四轮的写法不成立**：当时绑定 `abc3a557` / `a295951a`，而那棵树是它自己的父提交、不含它 `CODE_DELTA` 声称的三个拆分模块，reviewer 按 `TREE` 解析落不到被测代码上——属绑定错误，非行为差异；前三轮的合成 tree `b6e92e21…` / `e66a427e…` 不可从任何 ref 解析，也早已停用。范围限定：本 `[x]` 只覆盖执行侧可核的部分——runner 落地本轮修复后的最终 committed tree 仍由其按机器契约复跑并绑定，且 `iar-evidence/issue-278` 远端证据包（现 tip `bec30aea`，仍绑不可达的 `e66a427e`）必须由 runner 重传后人方可签收，push 不在执行器权限内。R2 浏览器呈递层的 tree 绑定随其未执行的 e2e 一并披露，见上条与 §9 Human-Confirmed 第 3 条。〕
+- [x] R2/R3 行为证据绑定到可解析的代码 tree，并对后续实现增量补充对应 oracle。证据：历史跨进程/HTTP capture 的 `HEAD`/`TREE`/`CODE_DELTA`，以及本轮真实浏览器 capture 的 code HEAD。〔执行侧已核：原子 CAS、进程组取消、竞态与 stale-head 后端证据沿用既有绑定块；Dashboard handoff 刷新、标签面板重读与 action request assertion 由最终代码 commit 上的 `rv-1-browser-runner-e2e.txt` 覆盖。行为源代码与其后的 PRD/证据报告记录提交分开核对，记录文件不参与代码断言。〕
 
 #### Delivery Readiness
 
-- [~] 所有用户可见截图与交互原型对照已在 PR evidence comment 呈递；完成消息内嵌 9.1 表面内容。证据：PR comment 链接与消息截图。 — runner-owned gate: PR 发布与证据评论（执行器不 `git add`/不建 PR；§9.1 呈递依赖上方 `[~]` 真实浏览器截图在 PR review 阶段产出后由 runner 内嵌）。**重传先于签收**：远端 `iar-evidence/issue-278` 现 tip `bec30aea` 绑的是不可达合成 tree `e66a427e`（比交付提交 `750d03cb` 早三个评审轮），本地证据已按第五轮重绑到 `HEAD=750d03cb` / `TREE=412ca523…`，push 与 marker 改写属 runner 侧动作（`agent_runner_issue_handlers.py:730` → `agent_runner_validation_publication.py:92`）；在新包传上、且 PR 证据评论指向可解析 tree 之前，rv-1 / rv-2 的签署请求都建立在过期包上，不应发出。
+- [~] 所有用户可见截图与交互原型对照已在 PR evidence comment 呈递；完成消息内嵌 9.1 表面内容。证据：PR comment 链接与消息截图。 — 当前真实桌面/窄视口截图和 trace 已在本地证据目录生成；PR evidence comment 与 evidence marker 尚未确认发布。用户已授权提交/推送代码，推送后需确认 runner 发布是否将证据绑定到当前 PR HEAD；Human-Confirmed 页面核对仍待人工。
 - [~] PR 正文声明“接管不会自动接受或合并”；现有 Realistic Validation 签收要求和 branch protection 保持。证据：PR body 与 validation-gate required check 状态。 — runner-owned gate: PR 发布（PR body 与 required check 由 runner 生成核对）。执行侧已在 §5、§9.1 与 `docs/guides/agent-runner.md` 声明接管不自动合并、不改 branch protection 与现有签收规则。
 - [~] PRD 已按仓库流程完成独立 verifier PASS、执行侧 Final Reconciliation，并随交付改动归档；仅 Human-Confirmed 项可保持未勾选。证据：verifier report、PRD archive path 与验收横幅。 — runner-owned gate: 独立 verifier 复核与 pending→archive 归档（执行器不自行 `git mv`）。执行侧 Final Reconciliation 已完成（见 §13 文末）；本 PRD 含真实浏览器入口以 `[~]` 挂人工/CI 验收，归档门禁是否放行由 runner 判定。
 
@@ -570,10 +570,20 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 - Related PRD status: confirmed — 本 PRD 无硬依赖（§8：Depends none、Gate none、Sequence via-main）；与生命周期时间线 PRD 在 IssueDetail 仅软文件重叠，交付以独立接管卡组件降低冲突面；与停滞监督 PRD 相邻但无契约耦合。`tasks/pending/` 其余 PRD 与本功能无重叠或冲突。
 - Requirements and risks: confirmed — FR-1 至 FR-7 与 §7 的 rv-1、rv-2 oracle 一一对应并在 `evidence.json` 落档；R3 交班与竞态证据由真实跨进程 oracle（同一 console.db WAL、真实 SubprocessRunner 进程组 SIGKILL 与回收、真实 CAS）先经负控报红再转绿；§12 四类风险（SQLite 路径不一致须显式报不可控、5 秒回收窗口的“仍在停止/交接失败”两态、外部合并与 HEAD 漂移的 verdict 前后 fresh-read、IssueDetail 并发变更的组件协调）均落到对应分支与测试。
 - Reconciled differences:
-  - rv-1 与 rv-2 在 §7 声明的 real_entry 为真实浏览器 `just e2e tests/workflows/verifier-takeover.spec.ts`；当前 spec stub Issue 详情和接管产品 API，只覆盖 Dashboard 组件树上的 UI/API 契约，不能证明真实 Console API→SQLite→runner 路径。本执行环境可用 `just e2e-install` 装齐 `tests/playwright-e2e` 依赖与 chromium，但没有隔离的可登录全栈（本机 `kc console` 占用机器级 `console.history.db` 与本 Issue 的真实注册表，种假控制行会污染操作员状态），且带 stub 的 spec 本身也过不了 rv-1，故 §9.1 的真实页面截图、Frontend Acceptance、Validation Acceptance 第 3 条与相关 Delivery Readiness、Human-Confirmed 项均保持未勾选；交班/竞态后端语义由真实跨进程 oracle + 契约测试覆盖并如实披露，未伪造浏览器证据；rv-1 的处置选项已作为第 3 条 `Human-Confirmed` 交回人工。
-  - `tests/test_agent_runner_issue_control.py` 当前 33 项纳入 rv-1 自动化层，未出现在 §9 Validation Acceptance 第 1 条原列的 8 文件清单中；该 8 文件合集为 280 passed，rv-1 层为 135、rv-2 层为 221，各自命令可复现。
+  - rv-1 与 rv-2 在 §7 声明的 real_entry：原 `verifier-takeover.spec.ts` 仍是 API stub 契约用例，不作为 rv-1 证据。本轮另以 `RV1_LIVE_E2E=1` 启用的 `verifier-takeover-real-entry.spec.ts` 穿过真实 `/app/dashboard`、Issue 详情 GET、接管 POST、Console API、独立 SQLite CAS、真实 runner 等待循环和 verifier 进程组；隔离 harness 使用独立 HOME/console.db、file-backed `gh` 替身及真实阻塞子进程。浏览器 POST 202 与 run_id/head_sha 绑定、handoff fresh read、`agent/review`、Draft PR、autopilot hold、verifier 进程退出均有断言；桌面/窄视口截图和 trace 已生成。真实 GitHub transport、prototype 并排人工审阅、独立 verifier 复核与 PR 证据发布仍待完成，因此不勾 Human-Confirmed，也不声称人工验收。
+  - `tests/test_agent_runner_issue_control.py` 当前 33 项纳入 rv-1 自动化层，未出现在 §9 Validation Acceptance 第 1 条原列的 8 文件清单中；该 8 文件合集为 281 passed，rv-1 层为 135、rv-2 层为 221，各自命令可复现。
 
 ## 14. Change Log
+
+### 隔离真实浏览器入口与交班后快照刷新（executor，2026-10-13）
+
+- 类型：implementation + evidence（修正交班后 Dashboard 监控/标签快照陈旧，并补真实浏览器入口证据）。
+- 原文：交班卡 fresh-read 已显示 `taken_over`，但父级只读本地监控快照，Issue 列表可能继续显示 `running`；标签编辑器自己的 fresh-read 也停留在交班前。真实浏览器 `real_entry` 曾标为未执行。
+- 变更后：交班确认后重扫所属仓库，并重读标签面板。隔离 Playwright 入口真实走生产 Dashboard/API/SQLite/runner/verifier 进程组，断言 202 响应、run_id/head_sha 原样绑定、handoff、review 标签、Draft PR 保留、hold 与进程退出；桌面/窄视口截图和 trace 已生成。
+- 原因：避免同一页面同时显示“已交给你审查”和旧的 `running` 标签；按既有 PRD mock_boundary 用确定性外部 GitHub 与 verifier CLI 替身，执行无需触碰机器级 Console DB 或真实 Issue。
+- 影响：Dashboard 在 handoff 后呈现一致的 review 状态。Human-Confirmed 项仍未勾；真实 GitHub transport、prototype 并排人工核对、独立 verifier 和 PR evidence publication 未声称完成。
+- 验证：`rv-1-browser-runner-e2e.txt`、`rv-1-browser-playwright.txt`、`rv-1-browser-runner-facts.json`、截图和 trace；运行时 HEAD/最终 tree 在提交后回填证据绑定。
+
 
 ### 执行侧交付记录（executor，2026-10-12）
 

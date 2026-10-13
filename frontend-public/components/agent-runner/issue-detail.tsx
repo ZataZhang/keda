@@ -17,15 +17,18 @@ interface IssueDetailProps {
   issue: IssueMonitoringSnapshot;
   /** 提供后渲染可编辑标签面板（FR-5）。 */
   repoId?: string;
+  /** 标签需要在父级触发重新读取时递增。 */
+  labelRefreshVersion?: number;
   /** 标签读取/写回后的状态汇报，让父级同步「全部」列表的标签展示。 */
   onLabelsChanged?: (info: IssueLabelsChangedInfo) => void;
   /** verifier 交班确认后请求父级刷新监控快照（Issue 已翻到 review）。 */
-  onTakeoverSettled?: () => void;
+  onTakeoverSettled?: () => void | Promise<void>;
 }
 
 export function IssueDetail({
   issue,
   repoId,
+  labelRefreshVersion = 0,
   onLabelsChanged,
   onTakeoverSettled,
 }: IssueDetailProps) {
@@ -84,7 +87,7 @@ export function IssueDetail({
           </CardHeader>
           <CardContent>
             <IssueLabelEditor
-              key={`${repoId}:${issue.number}`}
+              key={`${repoId}:${issue.number}:${labelRefreshVersion}`}
               repoId={repoId}
               issueNumber={issue.number}
               onLabelsChanged={onLabelsChanged}

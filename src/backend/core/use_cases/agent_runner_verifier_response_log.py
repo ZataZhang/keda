@@ -13,7 +13,9 @@ from pathlib import Path
 
 from backend.core.shared.models.agent_runner import IssueSummary
 
-_logger = logging.getLogger(__name__)
+# 拆分前这些诊断由 ``run_verifier_agent`` 记录，操作者的 grep 与 docs/guides/agent-runner.md
+# 的排查顺序都按那个名字找；保持 logger 身份不随模块搬家漂走。
+_logger = logging.getLogger("backend.core.use_cases.run_verifier_agent")
 
 VERIFIER_RESPONSE_FILENAME = "verifier-response.txt"
 
