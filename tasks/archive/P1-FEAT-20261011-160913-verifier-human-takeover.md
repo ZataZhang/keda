@@ -514,7 +514,7 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 - [x] (cd frontend-public && pnpm typecheck && pnpm lint && pnpm build) 通过。证据：三个命令输出归档。〔执行侧已核（合并前评审在最终树复跑）：`pnpm typecheck` exit 0；`pnpm build`（`output: export`）exit 0；`pnpm lint` 对本 PR 改动的 6 个前端文件（`app/(app)/app/dashboard/page.tsx`、`components/agent-runner/issue-detail.tsx`、`components/agent-runner/verifier-takeover-card.tsx`、`lib/api/console.ts`、`lib/api/types.ts`、`lib/api/client.ts`）逐文件 0 error（仅仓库既有 `jsdoc/require-jsdoc` warn），但**仓库全量 exit 1**：3 条基线 `react-hooks/set-state-in-effect` error 位于本 PR 未触碰、也不在 `git diff main...HEAD` 内的 `components/agent-runner/run-detail-dialog.tsx`、`components/backlog/prd-ci-view.tsx`、`components/backlog/prd-lifecycle-view.tsx`，非本 PR 回归，按 §11 范围外留待各自归属修复。〕
 - [~] 通过真实浏览器入口验证 UI → API → SQLite → runner → verifier process group，且 fresh read 观察到 handoff；不得用组件预览替代。证据：`rv-1-browser-runner-e2e.txt`、`rv-1-browser-playwright.txt`、两视口截图、trace 与 `rv-1-browser-runner-facts.json`。 — 隔离的真实 Dashboard E2E 已执行成功：无 `page.route`；POST 返回 202；SQLite/runner 最终态、目标进程退出、Draft PR 保留、Issue review、autopilot hold 和交班 comment 均通过独立断言。外部 GitHub 用 file-backed gh transport；独立 verifier 复核和证据发布仍是 runner-owned gate。
 - [x] rv-2 的 stale run、stale HEAD、verifier completion race 与 merged PR 场景通过；反例能使 oracle 报红。证据：rv-2-verifier-race.txt 和对应测试报告。〔执行侧已核：`RV2_PROBE_OK: True`；负控 `RV2_EXPECTED_FAIL: 误用初始 head 快照时漂移检测失效…（检查点有效）` + `S4_NEG_STALE_NOT_RECORDED: True`；先红后绿均记录在案。〕
-- [x] R2/R3 行为证据绑定到可解析的代码 tree，并对后续实现增量补充对应 oracle。证据：历史跨进程/HTTP capture 的 `HEAD`/`TREE`/`CODE_DELTA`，以及本轮真实浏览器 capture 的 code HEAD。〔执行侧已核：原子 CAS、进程组取消、竞态与 stale-head 后端证据沿用既有绑定块；Dashboard handoff 刷新、标签面板重读与 action request assertion 由最终代码 commit 上的 `rv-1-browser-runner-e2e.txt` 覆盖。行为源代码与其后的 PRD/证据报告记录提交分开核对，记录文件不参与代码断言。〕
+- [x] R2/R3 行为证据绑定到可解析的代码 tree，并对后续实现增量补充对应 oracle。证据：历史跨进程/HTTP capture 的 `HEAD`/`TREE`/`CODE_DELTA`，以及本轮真实浏览器 capture 的 code HEAD。〔执行侧已核：本轮 Dashboard handoff 刷新、标签面板重读与 request assertion 在代码提交 `9d3e0f3fb22dc0d452b4d042f2426856da232a74`（`TREE=9c9caa49e3275ea9f701598cf352ff6a5a25774a`）上运行，`rv-1-browser-runner-facts.json` 与 `rv-1-browser-runner-e2e.txt` 双向记录并可由 git ref 复核。行为源代码均在该 tree；后续 PRD/evidence Markdown 仅为记录更新，不参与行为代码断言。〕
 
 #### Delivery Readiness
 
@@ -582,7 +582,7 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 - 变更后：交班确认后重扫所属仓库，并重读标签面板。隔离 Playwright 入口真实走生产 Dashboard/API/SQLite/runner/verifier 进程组，断言 202 响应、run_id/head_sha 原样绑定、handoff、review 标签、Draft PR 保留、hold 与进程退出；桌面/窄视口截图和 trace 已生成。
 - 原因：避免同一页面同时显示“已交给你审查”和旧的 `running` 标签；按既有 PRD mock_boundary 用确定性外部 GitHub 与 verifier CLI 替身，执行无需触碰机器级 Console DB 或真实 Issue。
 - 影响：Dashboard 在 handoff 后呈现一致的 review 状态。Human-Confirmed 项仍未勾；真实 GitHub transport、prototype 并排人工核对、独立 verifier 和 PR evidence publication 未声称完成。
-- 验证：`rv-1-browser-runner-e2e.txt`、`rv-1-browser-playwright.txt`、`rv-1-browser-runner-facts.json`、截图和 trace；运行时 HEAD/最终 tree 在提交后回填证据绑定。
+- 验证：真实浏览器链路在 `HEAD=9d3e0f3fb22dc0d452b4d042f2426856da232a74` / `TREE=9c9caa49e3275ea9f701598cf352ff6a5a25774a` 运行；`rv-1-browser-runner-e2e.txt`、`rv-1-browser-playwright.txt`、`rv-1-browser-runner-facts.json`、两视口截图和 trace 均记录通过结果。
 
 
 ### 执行侧交付记录（executor，2026-10-12）
