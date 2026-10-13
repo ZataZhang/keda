@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -551,6 +552,27 @@ def build_judge_payload_document(
 def sha256_text(text: str) -> str:
     """返回文本的 sha256 十六进制摘要（payload / response hash 的统一算法）。"""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def preset_snapshot_mismatch(
+    frozen_snapshot: Mapping[str, Any],
+    live_values: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """比较**实时配置**与 run 创建时冻结的预设快照，返回漂移字段名。
+
+    执行/judge 调用前必须核对：页面展示与授权绑定的是冻结快照，若实际
+    生效的配置已经变化（模型、端点等），继续调用会让"所批即所发"失真。
+
+    Args:
+        frozen_snapshot: run 记录中的预设快照（含展示用附加字段）。
+        live_values: 从当前配置解析出的、需要与快照一致的字段子集。
+
+    Returns:
+        tuple[str, ...]: 值不一致的字段名（排序）；完全一致时为空元组。
+    """
+    return tuple(
+        sorted(key for key, value in live_values.items() if frozen_snapshot.get(key) != value)
+    )
 
 
 def build_manifest_hash(entries: list[dict[str, Any]]) -> str:

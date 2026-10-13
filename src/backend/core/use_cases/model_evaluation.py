@@ -153,6 +153,7 @@ def build_run_snapshot(
             "temperature": judge_presets[name].get("temperature"),
             "provider": judge_probes[name].get("provider"),
             "api_key_env": judge_presets[name].get("api_key_env"),
+            "base_url": judge_presets[name].get("base_url"),
             "cost_status": "unknown",
         }
         for name in judge_preset_names

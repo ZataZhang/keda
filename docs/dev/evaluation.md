@@ -70,7 +70,8 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
    `POST start` 只排程候选执行。
 2. 执行完成后 run 进入 `awaiting_judge_consent`：payload（任务说明、执行摘要、
    check 结论、代码 diff）只暂存本机私有临时目录。
-3. 页面预览与实际发送内容**逐字节一致**的完整 payload，并展示 manifest hash。
+3. 页面预览与实际发送内容**逐字节一致**的 payload，并展示 manifest hash
+   （预览上限覆盖 payload 最坏尺寸，极端超长内容截断时显式标记，hash 仍绑定全文）。
 4. 显式 approve 后，服务端重新核对请求 hash、run 冻结 hash 与当前暂存文件
    重算 hash，三者一致才发起评审调用；hash 过期返回冲突并要求重新预览。
 5. deny 则 run 收尾为 completed，并为每个候选 × 评审者写入 `unauthorized`

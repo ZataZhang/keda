@@ -368,7 +368,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 ### `GET .../runs/{run_id}/judge-preview`
 
-返回**与实际发送逐字节一致**的完整 payload 预览：逐条 `payload_preview` / `payload_sha256`、`manifest_hash`、run 冻结的 `frozen_manifest_hash`、`estimated_requests`（条目 × 评审者数）与敏感内容提示。run 不处于 `awaiting_judge_consent` 或暂存 manifest 缺失时返回 409。
+返回与实际发送**逐字节一致**的 payload 预览：逐条 `payload_preview` / `payload_sha256`、`manifest_hash`、run 冻结的 `frozen_manifest_hash`、`estimated_requests`（条目 × 评审者数）与敏感内容提示。预览上限覆盖评审 payload 的最坏尺寸（diff 字节上限加固定开销）；仅极端超长内容会截断并置 `payload_truncated=true`，此时 hash 仍绑定完整暂存文件。run 不处于 `awaiting_judge_consent` 或暂存 manifest 缺失时返回 409。
 
 ### `POST .../runs/{run_id}/judge-consent`
 

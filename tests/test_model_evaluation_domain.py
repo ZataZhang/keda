@@ -23,6 +23,7 @@ from backend.core.shared.models.model_evaluation import (
     build_manifest_hash,
     parse_evaluation_suite,
     parse_judge_response,
+    preset_snapshot_mismatch,
     sha256_text,
 )
 from backend.core.use_cases import model_evaluation as evaluation_rules
@@ -289,6 +290,27 @@ def test_manifest_hash_order_insensitive_and_drift_sensitive() -> None:
     assert build_manifest_hash(entries_a) != build_manifest_hash(drifted)
 
 
+def test_preset_snapshot_mismatch_reports_only_drifted_fields() -> None:
+    frozen = {
+        "preset_name": "j1",
+        "model": "judge-m",
+        "temperature": 0.0,
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": None,
+    }
+    assert preset_snapshot_mismatch(frozen, dict(frozen, preset_name="j1")) == ()
+    live = {
+        "model": "judge-new",
+        "temperature": 0.0,
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": None,
+    }
+    assert preset_snapshot_mismatch(frozen, live) == ("model",)
+    assert preset_snapshot_mismatch(frozen, {"model": "judge-m", "base_url": "https://evil"}) == (
+        "base_url",
+    )
+
+
 # ── run 快照构建 ─────────────────────────────────────────────────────────────
 
 
@@ -321,6 +343,8 @@ def test_build_run_snapshot_freezes_matrix_and_base() -> None:
     assert run.case_ids == ["case-a", "case-b"]
     assert [p["preset_name"] for p in run.execution_preset_snapshots] == ["p1", "p2"]
     assert run.execution_preset_snapshots[0]["cost_status"] == "unknown"
+    # judge 快照必须含外发端点字段，漂移核对才有依据
+    assert run.judge_preset_snapshots[0]["base_url"] is None
 
 
 def test_build_run_snapshot_fail_fast_aggregates_problems() -> None:

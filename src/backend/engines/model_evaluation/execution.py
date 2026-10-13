@@ -33,6 +33,7 @@ from backend.core.shared.models.model_evaluation import (
     build_judge_payload_document,
     build_manifest_hash,
     parse_judge_response,
+    preset_snapshot_mismatch,
     sha256_text,
 )
 from backend.engines.model_evaluation import agent_adapter, checks, judge_client, workspace
@@ -225,6 +226,21 @@ def _execute_cell(
     diff_text = ""
     outcome: agent_adapter.CandidateAgentOutcome | None = None
     try:
+        live_preset = settings.presets.get(preset_name)
+        if live_preset is not None:
+            drifted = preset_snapshot_mismatch(
+                preset_snapshot,
+                {
+                    "agent": live_preset.agent,
+                    "model": live_preset.model,
+                    "reasoning_effort": live_preset.reasoning_effort,
+                },
+            )
+            if drifted:
+                raise ValueError(
+                    f"执行预设 '{preset_name}' 配置在 run 创建后已变化（{', '.join(drifted)}），"
+                    "与冻结快照不一致，为避免不可解释对照已停止执行"
+                )
         workspace.create_detached_worktree(run.repo_path, run.base_commit, worktree_path)
         result = dataclasses.replace(result, worktree_path=str(worktree_path))
         store.save_evaluation_result(result)
@@ -516,6 +532,29 @@ def _execute_judge(
                 score,
                 score_status=EvaluationScoreStatus.provider_error.value,
                 error="评审预设已从配置中移除",
+            )
+        )
+        return
+    drifted = preset_snapshot_mismatch(
+        judge_snapshot,
+        {
+            "model": preset.model,
+            "temperature": preset.temperature,
+            "api_key_env": preset.api_key_env,
+            "base_url": preset.base_url,
+        },
+    )
+    if drifted:
+        # 配置漂移即中止：用户按冻结快照授权外发，实际端点/模型变化后绝不发送。
+        drift_reason = (
+            f"评审预设 '{judge_name}' 配置在 run 创建后已变化"
+            f"（{', '.join(drifted)}），未发起评审请求"
+        )[:400]
+        store.save_evaluation_score(
+            dataclasses.replace(
+                score,
+                score_status=EvaluationScoreStatus.provider_error.value,
+                error=drift_reason,
             )
         )
         return

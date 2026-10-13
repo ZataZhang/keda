@@ -44,8 +44,10 @@ from backend.infrastructure.persistence.console_store_evaluation import (
 _logger = logging.getLogger(__name__)
 
 SUITE_SUBDIR = Path("tasks") / "evaluation-suites"
-#: 单条 payload 预览返回的字符上限（超出部分提示在本地文件中查看）。
-PREVIEW_PAYLOAD_LIMIT = 40_000
+#: 单条 payload 预览返回的字符上限。刻意取 diff 字节上限（60k B，JSON 转义后
+#: 约翻倍）加固定开销之上的宽裕值，保证默认完整展示；仅超长 suite prompt 等
+#: 极端情况会截断，响应以 ``payload_truncated`` 显式标记，hash 仍绑定全文。
+PREVIEW_PAYLOAD_LIMIT = 250_000
 
 _lock = threading.Lock()
 
@@ -285,13 +287,16 @@ def cancel_run(run_id: str) -> EvaluationRunRecord:
         raise EvaluationActionError(
             "conflict", f"run 状态 '{run.status}' 不可取消（judging 已获授权，不撤回）"
         )
-    transitioned = evaluation_rules.transition_run(
-        store,
-        run_id,
-        expected=list(CANCELLABLE_RUN_STATUSES),
-        new_status=EvaluationRunStatus.cancelled,
-        finished=True,
-    )
+    try:
+        transitioned = evaluation_rules.transition_run(
+            store,
+            run_id,
+            expected=list(CANCELLABLE_RUN_STATUSES),
+            new_status=EvaluationRunStatus.cancelled,
+            finished=True,
+        )
+    except EvaluationStoreConflictError as exc:
+        raise EvaluationActionError("conflict", str(exc)) from exc
     _mark_unfinished_results_cancelled(store, run_id)
     execution.purge_run_artifacts(run_id)
     return _core_run(transitioned)
@@ -414,21 +419,25 @@ def submit_consent(*, run_id: str, decision: str, manifest_hash: str) -> Evaluat
             )
         except evaluation_rules.EvaluationValidationError as exc:
             raise EvaluationActionError("conflict", str(exc)) from exc
-        if decision == "approve":
-            evaluation_rules.transition_run(
-                store,
-                run_id,
-                expected=list(evaluation_rules.CONSENT_ELIGIBLE_RUN_STATUSES),
-                new_status=EvaluationRunStatus.judging,
-            )
-        else:
-            evaluation_rules.transition_run(
-                store,
-                run_id,
-                expected=list(evaluation_rules.CONSENT_ELIGIBLE_RUN_STATUSES),
-                new_status=EvaluationRunStatus.completed,
-                finished=True,
-            )
+        try:
+            if decision == "approve":
+                evaluation_rules.transition_run(
+                    store,
+                    run_id,
+                    expected=list(evaluation_rules.CONSENT_ELIGIBLE_RUN_STATUSES),
+                    new_status=EvaluationRunStatus.judging,
+                )
+            else:
+                evaluation_rules.transition_run(
+                    store,
+                    run_id,
+                    expected=list(evaluation_rules.CONSENT_ELIGIBLE_RUN_STATUSES),
+                    new_status=EvaluationRunStatus.completed,
+                    finished=True,
+                )
+        except EvaluationStoreConflictError as exc:
+            raise EvaluationActionError("conflict", str(exc)) from exc
+        if decision == "deny":
             results = [_core_result(row) for row in store.list_evaluation_results(run_id)]
             for score in evaluation_rules.build_unauthorized_scores(run, results):
                 store.save_evaluation_score(score)
