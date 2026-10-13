@@ -4,7 +4,8 @@
 - PR / CI：尚未创建；本目录是 executor 侧实现交付证据。
 - 当前验证层级：**real entry**。rv-1..rv-4 均在一次性真实 `kc console`（隔离 HOME + 源库只读副本或删表副本）+ 真实浏览器上采集；早期 component preview 目标图仍留在 `docs/prototypes/assets/`，仅作 design intent 对照，不再是验收依据。
 - 采集绑定：被验证代码为 commit `3d65d008` 之上的本工作树（未提交实现改动）；rv-1/rv-2/rv-4 隔离档与断连档生成于 2026-10-13 08:51–08:54（+08:00）；rv-3 于 09:27 增补 390×844 companion 窄视口断言，rv-3 与 rv-4 view-degradation 在 09:3x 完成负控注入变红→还原→重建→复跑绿的闭环；其后再无实现改动。
-- runner 恢复轮（2026-10-13 上午）：item-1 命令复跑曾因外部监控同步瞬态（副本库快照那轮 keda issues 不带任何 `agent/*` 标签）在标签前置守卫上 exit 1；10:14 本地逐字复现该红（`rv-1-negative-control.log` 追加段），确认非代码缺陷。spec 因此增加**仅限临时副本库**的确定性标签样本兜底（`scripts/rv1-seed-label-fixture.py`，注入事实写入 provenance）；兜底路径经剥标签模拟验证绿，10:30 真实数据复跑绿且未触发兜底（`label_fixture_seed=null`）。rv-2/rv-3/rv-4 不依赖 `agent/*` 标签，未受影响。
+- runner 恢复轮（2026-10-13 上午）：item-1 命令复跑曾因外部监控同步瞬态（副本库快照那轮 keda issues 不带任何 `agent/*` 标签）在标签前置守卫上 exit 1；10:14 本地逐字复现该红（`rv-1-negative-control.log` 追加段），确认非代码缺陷。spec 因此增加**仅限临时副本库**的确定性标签样本兜底（`scripts/rv1-seed-label-fixture.py`，注入事实写入 provenance）；兜底路径经剥标签模拟验证绿，10:30 真实数据复跑绿且未触发兜底（`label_fixture_seed=null`）。rv-2/rv-3 不吃标签与 open 运行形态，未受该抖动影响；rv-4 另有自身活数据前置，见下一条。
+- runner 恢复轮第二次（item-4）：组合命令复跑 exit 1。本 item 的两个活数据前置（「未收口运行」「progress 读取失败」样本）同样吃本机实时形态，与 item-1 属同一抖动类；另存在 auto 端口与固定 8801–8803 交接窗口的端口收尾竞态。加固：view-degradation spec 第 0 节按缺失条件调用 `scripts/rv4-seed-degradation-fixture.py` 向临时副本库注入确定性样本（注入事实写 `fixture_seed`，兜底路径经剥样本模拟验证绿），rv-console.sh up/down 增加端口 bindable 等待。10:5x 完整组合命令真实数据复跑三段全绿（exit 0，`fixture_seed=null`）。
 
 ### 结果总览
 
@@ -13,7 +14,7 @@
 | rv-1 默认看板/日志续读/调用折叠 | ✅ 绿（10:30 恢复轮复跑，真实数据、未触发兜底） | 一次性隔离真实 Console（`with-rv-console.sh auto copy`，本轮 `http://127.0.0.1:8800/app/dashboard/`） | `rv-1-run.log`、`rv-1-endpoint-provenance.json`（46 任务、label→bucket 一致、`label_fixture_seed=null`）、`rv-1-runtime-dashboard.png`、`rv-1-task-detail-expanded.png`、`rv-1-negative-control.log`（两段真实红灯） |
 | rv-2 桌面小窗链路 + 跨源拒绝 | ✅ 绿（两分支） | 真实 helper/pywebview 进程 + WindowServer 探针；无 helper 分支临时移出 site-packages | `rv-2-run.log`、`rv-2-companion-window-chain.json`、`rv-2-companion-page.png`、`rv-2-missing-helper.{json,png}`、`rv-2-negative-control.log` |
 | rv-3 触达比例与不可比降级 | ✅ 绿 | 真实 progress API → Dashboard/companion DOM | `rv-3-run.log`、`rv-3-impact-readings.json`（34 任务实测）、`rv-3-impact-*.png`、`rv-3-negative-control.log` |
-| rv-4 缺来源/断连只降级受影响视图 | ✅ 绿（三档） | 三 Console 并排：参考 `8801` / 删表 degraded `8802` / 零仓库 fresh `8803` | `rv-4-isolated-run.log`、`rv-4-companion-offline.{json,png}`、`rv-4-isolated-board.json`、`rv-4-source-partial.png`、`rv-4-empty-board.png`、`rv-4-negative-control.log`、`rv-4-isolated-negative-control.log` |
+| rv-4 缺来源/断连只降级受影响视图 | ✅ 绿（三档；10:5x 恢复轮加固后真实数据复跑，`fixture_seed=null`） | 三 Console 并排：参考 `8801` / 删表 degraded `8802` / 零仓库 fresh `8803`（+ copy 档 view-degradation 一段） | `rv-4-run.log`、`rv-4-view-degradation.json`、`rv-4-isolated-run.log`、`rv-4-companion-offline.{json,png}`、`rv-4-isolated-board.json`、`rv-4-source-partial.png`、`rv-4-empty-board.png`、`rv-4-negative-control.log`、`rv-4-isolated-negative-control.log` |
 
 ### 1. rv-1 — 真实生命周期任务看板
 
@@ -34,7 +35,9 @@
 
 ### 4. rv-4 — 缺来源只降级受影响字段
 
-三档一次性 Console 并排（`rv4-isolated.sh`：copy 参考 / 删 `prd_lifecycle` 表的 degraded / 零仓库 fresh）：degraded 档任务行从 46 降到 33，横幅显式披露"部分来源本轮不可读：prd_lifecycle。受影响字段留空，不会折算成零"；触达视图改为"未关联 PRD · 改动树触达不适用"且 0 条比例条；fresh 档空看板不编造任务。断连链路（`rv4-companion-offline.spec.mjs`，50.6s）：kill Console 进程后小窗进入"读不到本机 Console：Network Error"并标注断连前读数为残留，停止冒充最新；恢复后自动跟上、错误与残留提示清除。负控（`rv-4-negative-control.log`）：曾以注入假 0%/空任务成功色的反例复现"注入即失败"，结论并入隔离档。
+copy 档一段（`rv4-view-degradation.spec.mjs`，10:5x 恢复轮加固后真实数据绿）：未收口运行窗口命中真实 keda#283（面板只说「等收口后可读」、0 次 attempts 请求）；progress 读取失败命中真实 keda#234（400「PRD 文件不存在。」），只有触达视图降级、看板 46 行完整、零伪造（`rv-4-run.log`、`rv-4-view-degradation.json`，`fixture_seed=null`）。
+三档一次性 Console 并排（`rv4-isolated.sh`：copy 参考 / 删 `prd_lifecycle` 表的 degraded / 零仓库 fresh）：degraded 档任务行从 46 降到 33，横幅显式披露"部分来源本轮不可读：prd_lifecycle。受影响字段留空，不会折算成零"；触达视图改为"未关联 PRD · 改动树触达不适用"且 0 条比例条；fresh 档空看板不编造任务。断连链路（`rv4-companion-offline.spec.mjs`，50.5s）：kill Console 进程后小窗进入"读不到本机 Console：Network Error"并标注断连前读数为残留，停止冒充最新；恢复后自动跟上、错误与残留提示清除。负控（`rv-4-negative-control.log`）：曾以注入假 0%/空任务成功色的反例复现"注入即失败"，结论并入隔离档。
+恢复轮加固（runner 复跑本 item 曾 exit 1）：view-degradation 的两个活数据前置（未收口运行、读取失败样本）与 item-1 属同一抖动类，spec 第 0 节在样本缺失时以 `scripts/rv4-seed-degradation-fixture.py` 向**临时副本库**注入确定性样本（#900001 attempt 行→未收口窗口；#900003 lifecycle 行→不存在的 PRD 文件，progress 实测 400），注入事实写 `fixture_seed`；剥样本模拟验证兜底绿（`1 passed`、exit 0）。另修复 rv-console.sh 端口收尾竞态（up 前等待端口可绑定、down 后等待释放），消除与固定 8801–8803 的交接窗口干扰。隔离档/断连档前置不吃标签，无需兜底。
 
 ### 执行者已替你核对过什么（自动档）
 

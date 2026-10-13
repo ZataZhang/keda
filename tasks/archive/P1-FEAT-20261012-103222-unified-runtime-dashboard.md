@@ -488,3 +488,12 @@ flowchart LR
 - Reason: keda 会重新执行 RV 命令，检查点不能被外部数据抖动随机打红；同时不得以移除前置守卫、轮询等待或 mock 读路径的方式刷绿。
 - Impact: rv-1 验收命令不变、断言强度不变；evidence 目录新增兜底脚本与两段负控红灯记录，`evidence.json` item-1 的 risks/negative_control 同步更新。
 - Review: 执行器自验记录，待人工验收核对兜底样本是否可接受为「检查点非空洞」的形态。
+
+### Change 3 — rv-4 活数据前置加固与端口收尾竞态修复（runner 恢复轮）
+
+- Type: verification / evidence（不改交付行为与 oracle 语义）
+- Before: rv-4 view-degradation 直接依赖本机实时形态的两个样本——「仍在运行、未收口的任务」（agent/running 标签 + open 运行行）与「progress 读取失败的任务」（盘上恰有失联 PRD）；runner 复跑 item-4 组合命令时因样本缺失类抖动 exit 1（与 Change 2 同类）。另 `with-rv-console.sh auto` 动态端口与隔离档固定 8801–8803 存在交接窗口的端口残留监听竞态。
+- After: spec 第 0 节仅在样本缺失时调用 `scripts/rv4-seed-degradation-fixture.py` 向**临时副本库**注入确定性样本（#900001 attempt 行构成未收口窗口；#900003 lifecycle 行指向不存在的 PRD 文件，progress 端点实测 400），重取摘要后全部真实断言照常执行，注入事实写 `observations.fixture_seed`；rv-console.sh up 启动前等待端口真正可绑定、down kill 后等待端口释放。10:5x 真实数据组合命令复跑三段全绿（exit 0，fixture_seed=null，未收口命中 keda#283、读取失败命中 keda#234）；兜底路径经剥样本模拟独立验证绿。真实 ~/.kedacode 不受影响；隔离档/断连档前置不吃标签，未改动。
+- Reason: keda 会重新执行 RV 命令，检查点不能随机被数据抖动或端口竞态打红；同时不得移除前置守卫或以 mock 刷绿。
+- Impact: rv-4 验收命令与断言强度不变；evidence 目录新增兜底脚本并刷新 rv-4 运行记录/截图/provenance，`evidence.json` item-4 的 explanation/risks/negative_control/expected_fail 同步更新。
+- Review: 执行器自验记录，待人工验收核对兜底样本形态是否可接受为「检查点非空洞」。
