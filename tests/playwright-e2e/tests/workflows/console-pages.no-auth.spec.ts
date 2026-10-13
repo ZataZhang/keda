@@ -117,6 +117,77 @@ const COMPLETION_STATS = {  repositories: [
   ],
 }
 
+/**
+ * 值守看板任务摘要 fixture：与快照 fixture 同一份仓库/Issue 身份，
+ * 覆盖「运行中」和「阻塞」两个分桶，用于断言默认视图渲染的是任务而不是仓库卡片。
+ */
+const RUNTIME_TASKS = {
+  generated_at: '2026-06-11T10:05:00+00:00',
+  tasks: [
+    {
+      repo_id: 'keda-main',
+      issue_number: 21,
+      task_key: 'keda-main#21',
+      repo_display_name: 'Keda Main',
+      issue_title: 'Running Issue',
+      issue_url: 'https://example.test/21',
+      status: 'running',
+      status_reason: 'agent/running',
+      phase: 'implement',
+      agent: 'codex',
+      preset: 'default',
+      model: 'gpt-5.1-codex',
+      attempt_number: 1,
+      prd_path: 'tasks/pending/P1-FEAT-20260611-000000-demo.md',
+      started_at: '2026-06-11T09:35:00+00:00',
+      finished_at: null,
+      duration_seconds: 1800,
+      last_outcome: null,
+      labels: ['agent/running'],
+    },
+    {
+      repo_id: 'keda-main',
+      issue_number: 19,
+      task_key: 'keda-main#19',
+      repo_display_name: 'Keda Main',
+      issue_title: 'Broken Issue',
+      issue_url: 'https://example.test/19',
+      status: 'blocked',
+      status_reason: 'agent/failed',
+      phase: null,
+      agent: null,
+      preset: null,
+      model: null,
+      attempt_number: null,
+      prd_path: null,
+      started_at: '2026-06-11T08:00:00+00:00',
+      finished_at: '2026-06-11T08:10:00+00:00',
+      duration_seconds: 600,
+      last_outcome: 'failed',
+      labels: ['agent/failed'],
+    },
+  ],
+  status_counts: { running: 1, waiting: 0, blocked: 1, completed: 0, unknown: 0 },
+  unavailable_sources: [],
+  missing_repo_ids: [],
+  sync_status: 'ready',
+  scanned_at: MONITORING_OVERVIEW.scanned_at,
+  truncated: false,
+}
+
+/** 桌面小窗状态 fixture：未安装之外的常态（空闲、无窗口）。 */
+const DESKTOP_COMPANION_STATUS = {
+  status: 'idle',
+  console_origin: 'http://127.0.0.1:8765',
+  console_session: 'fixture-session',
+  focus_ticket: 0,
+  close_ticket: 0,
+  detail: null,
+  hint: '桌面小窗未开启。',
+  window_exists: false,
+  companion_url: null,
+}
+
 const PROCESSES = {
   processes: [
     {
@@ -244,6 +315,13 @@ async function mockConsoleApi(page: Page): Promise<void> {
   await page.route('**/api/v1/agent-runner/console/audit**', (route) =>
     route.fulfill({ json: AUDITS }),
   )
+  await page.route('**/api/v1/agent-runner/console/runtime/tasks', (route) =>
+    route.fulfill({ json: RUNTIME_TASKS }),
+  )
+  await page.route(
+    '**/api/v1/agent-runner/console/desktop-companion/status',
+    (route) => route.fulfill({ json: DESKTOP_COMPANION_STATUS }),
+  )
 }
 
 test.describe('console pages smoke (mocked API)', () => {
@@ -252,13 +330,16 @@ test.describe('console pages smoke (mocked API)', () => {
   }) => {
     await mockConsoleApi(page)
     await page.goto('/app/dashboard')
+    // 默认视图是值守看板；本用例断言的是仓库卡片视图的队列与完成度，先切过去。
+    await page.getByTestId('dashboard-view-monitor').click()
     await expect(
       page.getByRole('heading', { name: 'Agent Runner 管理终端' }),
     ).toBeVisible()
     await expect(page.getByText('完成率 70%')).toBeVisible()
     await expect(page.getByText('个已注册仓库无法访问')).toBeVisible()
-    // failed Issue 选中后出现「重试」操作条。
-    await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+    // failed Issue 选中后出现「重试」操作条（用 testid 精确锁定操作条本身：
+    // 标签面板读取失败时也会渲染一个同名「重试」按钮）。
+    await expect(page.getByTestId('issue-retry-failed')).toBeVisible()
   })
 
   test('retry action asks for confirmation and posts whitelisted action', async ({
@@ -284,12 +365,14 @@ test.describe('console pages smoke (mocked API)', () => {
     // 第一次 dismiss 确认框 → 不应发请求。
     page.once('dialog', (dialog) => void dialog.dismiss())
     await page.goto('/app/dashboard')
-    await page.getByRole('button', { name: '重试' }).click()
+    // 「重试」操作条属于仓库监控视图；默认视图已改成值守看板。
+    await page.getByTestId('dashboard-view-monitor').click()
+    await page.getByTestId('issue-retry-failed').click()
     expect(actionRequestBody).toBeNull()
 
     // 第二次 accept 确认框 → 发送白名单动作。
     page.once('dialog', (dialog) => void dialog.accept())
-    await page.getByRole('button', { name: '重试' }).click()
+    await page.getByTestId('issue-retry-failed').click()
     await expect
       .poll(() => actionRequestBody, { timeout: 5_000 })
       .toEqual({ action: 'retry_failed' })

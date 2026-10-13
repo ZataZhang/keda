@@ -3889,6 +3889,21 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 这份设置是全局的：它同时约束 Dashboard 概览与 Backlog 列表两条后台同步循环
 （见「Backlog（待办队列）→ 本地快照与后台刷新」），两条循环共享设置但各自独立调度。
 
+### 值守看板与桌面小窗
+
+`/app/dashboard/` 的**默认视图**是任务值守看板（「仓库监控」仍保留原有的仓库卡片视图，
+仓库级「跑一轮 / 复核一轮」和同步设置都在那一侧）。看板以 Issue 运行为单位列出
+生命周期分桶（运行中 / 等待值守 / 阻塞 / 已完成 / 状态未知）、仓库与 Issue 身份、阶段、
+执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
+调用账本端点（结构化调用默认折叠，折叠只是展示层，原文不做截断）。
+
+数据来源仍然只有已注册仓库的 Console 观测路径（快照 + 运行 / attempt / 生命周期三本账），
+**不与托管进程日志混列**；任一来源读取失败只把该来源标为不可用，不会折叠成「没有任务」。
+
+看板上方还有一个「开启桌面小窗」入口，通过可选的原生 helper 开出一个可置顶的紧凑窗口。
+它未安装时不影响网页看板，只有窗口动作本身不可用。安装、平台依赖、Console origin
+约束与离线排查见 [桌面进度小窗](desktop-companion.md)。
+
 ### 异常检测
 
 后端按以下规则对每个 Issue 推导异常，每条异常都带 `severity`、`message` 和 `suggested_cli`：
@@ -4371,6 +4386,10 @@ GET    /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=30
 GET    /api/v1/agent-runner/console/stats/agent-performance?repo_id=&days=30
 GET    /api/v1/agent-runner/console/runs?repo_id=&limit=100
 GET    /api/v1/agent-runner/console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=
+GET    /api/v1/agent-runner/console/runtime/tasks                      值守看板任务摘要（只读）
+GET    /api/v1/agent-runner/console/desktop-companion/status            桌面小窗状态探针（只读，不要求 Origin）
+POST   /api/v1/agent-runner/console/desktop-companion/window            开启/聚焦桌面小窗（要求同源 Origin）
+POST   /api/v1/agent-runner/console/desktop-companion/window/close      请求桌面小窗关窗（要求同源 Origin）
 GET    /api/v1/agent-runner/console/audit?limit=100
 GET    /api/v1/agent-runner/backlog/prds/{encoded_prd_path}/lifecycle
 GET    /api/v1/agent-runner/repositories

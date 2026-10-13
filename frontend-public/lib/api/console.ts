@@ -15,6 +15,7 @@ import type {
   ConsoleCreatedIssue,
   ConsoleIssueEntry,
   DailyRunTrendEntry,
+  DesktopCompanionState,
   DirectoryBrowseResult,
   DiscoveredRepositoryEntry,
   IssueLabelSnapshot,
@@ -29,6 +30,7 @@ import type {
   RepositoryCompletionStats,
   RunnerProcessKind,
   RunnerProcessRecord,
+  RuntimeTaskSummary,
   RunAttemptDetailEntry,
   RunInvocationDetailEntry,
   RunRecordEntry,
@@ -355,6 +357,7 @@ export async function fetchRunExecutionDetails(params: {
   issueNumber: number;
   startedAt: string;
   finishedAt: string;
+  signal?: AbortSignal;
 }): Promise<{
   attempts: RunAttemptDetailEntry[];
   invocations: RunInvocationDetailEntry[];
@@ -370,6 +373,41 @@ export async function fetchRunExecutionDetails(params: {
     invocations: RunInvocationDetailEntry[];
   }>(
     `${BASE_PATH}/console/runs/attempts?${searchParams.toString()}`,
+    { signal: params.signal },
+  );
+}
+
+// ── 统一运行时看板与桌面 companion ──────────────────────────────────────────
+
+/** 读取看板任务摘要（只来自已注册仓库的 Console 观测路径）。 */
+export async function fetchRuntimeTasks(): Promise<RuntimeTaskSummary> {
+  return get<RuntimeTaskSummary>(`${BASE_PATH}/console/runtime/tasks`);
+}
+
+/** 读取桌面 companion 状态；helper 与网页看板共用这个只读探针。 */
+export async function fetchDesktopCompanionStatus(): Promise<DesktopCompanionState> {
+  return get<DesktopCompanionState>(
+    `${BASE_PATH}/console/desktop-companion/status`,
+  );
+}
+
+/**
+ * 请求开启或聚焦桌面小窗。
+ *
+ * 后端只接受与当前本机 Console 同源的请求，跨源调用会拿到 403。
+ */
+export async function openDesktopCompanionWindow(): Promise<DesktopCompanionState> {
+  return post<DesktopCompanionState>(
+    `${BASE_PATH}/console/desktop-companion/window`,
+    {},
+  );
+}
+
+/** 请求桌面小窗自行关窗退出（不做进程强杀）。 */
+export async function closeDesktopCompanionWindow(): Promise<DesktopCompanionState> {
+  return post<DesktopCompanionState>(
+    `${BASE_PATH}/console/desktop-companion/window/close`,
+    {},
   );
 }
 

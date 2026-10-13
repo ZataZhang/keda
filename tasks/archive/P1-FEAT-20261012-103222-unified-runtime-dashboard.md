@@ -4,7 +4,7 @@
 
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — 2 项 Human-Confirmed 待确认；其余验收项已由执行器自验并附证据（§9）。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本 PRD 分为人审层与执行器层：前四节确认要解决的问题和可见结果；后九节说明实现边界、验证与交付证据。
@@ -348,8 +348,8 @@ flowchart LR
 
 | 要看什么 | 呈递物（实现后填真实截图；当前图是 design intent） | 约 10 秒自检 |
 |---|---|---|
-| Dashboard 默认态、任务卡片、日志与折叠工具调用 | Prototype: `docs/prototypes/assets/runtime-board-preview.png`；production capture: `tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard/rv-1-runtime-dashboard.png` | 打开 `/app/dashboard/`，确认状态卡片在首屏、工具调用默认为折叠。 |
-| 独立桌面窗口与改动树触达比例 | Prototype: `docs/prototypes/assets/runtime-widget-preview.png`；production recording: `tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard/rv-2-native-window.mp4` | 切到其他桌面应用，确认窗口仍可见；读数旁有“弱信号”和 `?2`，无完成率。 |
+| Dashboard 默认态、任务卡片、日志与折叠工具调用 | Prototype: `docs/prototypes/assets/runtime-board-preview.png`；production capture: `tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard/rv-1-runtime-dashboard.png`（折叠初始态）与 `rv-1-task-detail-expanded.png`（展开态），同一真实 Console 会话 | 打开 `/app/dashboard/`，确认状态卡片在首屏、工具调用默认为折叠。 |
+| 独立桌面窗口与改动树触达比例 | Prototype: `docs/prototypes/assets/runtime-widget-preview.png`；production captures: 原生窗口存在性 = `rv-2-companion-window-chain.json`（WindowServer 探针：helper pid 名下 420×620、layer 25 浮动窗口 + Console 日志 `GET /app/companion/ 200`）+ `rv-2-companion-page.png`；触达读数真实呈现 = `rv-3-impact-companion-390.png`（390×844 浏览器窗口的同一小窗 route，keda#284 `14/16 · ?4`）。**披露**：期望的 `rv-2-native-window.mp4` 屏幕录制在本执行环境不可采集（`screencapture` 无屏幕录制权限，见 chain json 的 `screencapture_ok=false`），肉眼置顶/关闭观感留待 Human-Confirmed 项 | 切到其他桌面应用，确认窗口仍可见；读数旁有“弱信号”和 `?2`，无完成率。 |
 
 **当前目标图（component preview / design intent；不是生产入口证明）**
 
@@ -363,7 +363,7 @@ flowchart LR
 > 验证层级：**component preview / design intent**；进度值为目标示例，不是当前 worktree 实时读数。
 > 本地打开：`open docs/prototypes/assets/runtime-widget-preview.png`
 
-交付时每张目标图须与相同状态、视口的生产页面/原生窗口截图或录屏配对；prototype 是 design intent，不能替代实现证据。评审原型可运行 `uv run mkdocs serve -a 127.0.0.1:8000` 后打开 `http://127.0.0.1:8000/prototypes/prd-lifecycle-observability.html#dashboard`；实现后人工验收从 `just prd review tasks/pending/P1-FEAT-20261012-103222-unified-runtime-dashboard.md` 进入。
+交付时每张目标图须与相同状态、视口的生产页面/原生窗口截图或录屏配对；prototype 是 design intent，不能替代实现证据。评审原型可运行 `uv run mkdocs serve -a 127.0.0.1:8000` 后打开 `http://127.0.0.1:8000/prototypes/prd-lifecycle-observability.html#dashboard`；实现后人工验收从 `just prd review tasks/archive/P1-FEAT-20261012-103222-unified-runtime-dashboard.md` 进入。
 
 `reviewer: verifier` 的 API/降级断言、桌面启动来源负控、构建/类型检查和日志偏移一致性被有意留在下方自动验证层，不在本区要求人读报告。
 
@@ -376,44 +376,44 @@ flowchart LR
 
 #### Behavior Acceptance
 
-- [ ] Dashboard 首屏以真实运行态任务为主，包含 running / waiting / blocked / completed 的状态文字+色彩；每张卡片与任务详情中的 repo、Issue、attempt 身份一致（`rv-1` API 摘要记录与截图）。
-- [ ] Issue 日志从真实 offset 接口续读且受后端字节上限约束；工具调用默认折叠，展开从结构化账本展示，不删除原始输出（`rv-1` 响应与展开前后截图）。
-- [ ] 无日志、账本读失败、progress 无基准与 Console 离线状态均显式区分，不映射成空任务、零触达或完成状态（`rv-4` 状态记录）。
+- [x] Dashboard 首屏以真实运行态任务为主，包含 running / waiting / blocked / completed 的状态文字+色彩；每张卡片与任务详情中的 repo、Issue、attempt 身份一致（`rv-1` API 摘要记录与截图）。证据：`rv-1-run.log`（真实 Console 8803 绿）、`rv-1-endpoint-provenance.json`（46 任务，标签→分桶逐条对账 running 15/waiting 1/blocked 14/completed 16）、`rv-1-runtime-dashboard.png`。
+- [x] Issue 日志从真实 offset 接口续读且受后端字节上限约束；工具调用默认折叠，展开从结构化账本展示，不删除原始输出（`rv-1` 响应与展开前后截图）。证据：`rv-1-run.log` fresh-state offset 断言、`rv-1-runtime-dashboard.png`（初始折叠）与 `rv-1-task-detail-expanded.png`（展开）；`rv-1-negative-control.log`（缺日志不串读、不冒充空成功）。
+- [x] 无日志、账本读失败、progress 无基准与 Console 离线状态均显式区分，不映射成空任务、零触达或完成状态（`rv-4` 状态记录）。证据：`rv-4-view-degradation.json`、`rv-4-isolated-board.json`（删 `prd_lifecycle` 表后 33/46 行 + 横幅披露、0 条假触达）、`rv-4-companion-offline.json`（断连/恢复）、`rv-4-isolated-run.log`。
 
 #### Frontend Acceptance
 
-- [ ] `/app/dashboard/` 从项目真实登录后入口作为默认 Console 页面，筛选/搜索/卡片选择/日志折叠在生产 composition 中工作；E2E 报告和 `rv-1-runtime-dashboard.png` 配对齐全。
-- [ ] `/app/companion/` 窄宽度可滚动呈现最多四项完整任务行，无横向溢出；progress 使用 `touched/max judgeable` 且有可访问名称与可见数值（真实浏览器 viewport 390×844 断言与 `rv-3-impact-progress.png`）。
-- [ ] 前端构建 `just frontend-public typecheck`、`just frontend-public build` 通过；`just console-sync` 后由真实 `kc console` 提供新路由/API 组合，保存控制台 URL 与浏览器截图。
+- [x] `/app/dashboard/` 从项目真实登录后入口作为默认 Console 页面，筛选/搜索/卡片选择/日志折叠在生产 composition 中工作；E2E 报告和 `rv-1-runtime-dashboard.png` 配对齐全。证据：`rv-1-run.log` 真实入口绿；`tests/playwright-e2e/tests/smoke/runtime-dashboard.no-auth.spec.ts` 渲染契约回归 10/10 绿。披露：同包 `console-pages.no-auth.spec.ts` 有 5 项失败（stats `运行时间` strict ×2、backlog live-output 超时 ×3），在移除本交付全部改动的干净 HEAD 复跑同样失败，属 main 既有漂移（与 issue-282 stats Tab PR CI 红灯同期），不由本交付引入；本交付反而修复了其中 dashboard-queue 与 retry 两项。
+- [x] `/app/companion/` 窄宽度可滚动呈现最多四项完整任务行，无横向溢出；progress 使用 `touched/max judgeable` 且有可访问名称与可见数值（真实浏览器 viewport 390×844 断言与 `rv-3-impact-progress.png`）。证据：rv-3 spec 内新增 390×844 断言（可见行 ≤4、`scrollWidth` 溢出 0px、`aria-valuenow/max=14/16` 且可见文案 `14/16 · ?4`），截图实际为 `rv-3-impact-companion-390.png`，读数在 `rv-3-impact-readings.json.companion_390x844`。
+- [x] 前端构建 `just frontend-public typecheck`、`just frontend-public build` 通过；`just console-sync` 后由真实 `kc console` 提供新路由/API 组合，保存控制台 URL 与浏览器截图。证据：typecheck 无错、静态导出含 `/app/dashboard` 与 `/app/companion`；rv-1/rv-3/rv-4 各 run log 记录真实 Console URL 与截图。
 
 #### Architecture Acceptance
 
-- [ ] 后端层间依赖维持 `api -> core -> engines -> infrastructure`；core 不直接 `subprocess`，桌面启动仅通过固定 launcher 端口。
-- [ ] 新 launcher 只接受当前 loopback Console、校验同源 POST、拒绝任意外部 URL/命令/路径；`rv-2` 中非同源负控返回拒绝且无窗口。
-- [ ] 任务日志仍走现有 Issue log 读取器；工具调用仍走 lifecycle invocation ledger；影响树解析仅使用现有 progress API，没有第二套检测逻辑（`rg` 搜索和路由契约摘要）。
-- [ ] 桌面依赖可选安装；用户未安装 helper 时 Dashboard 保持可用并显示明确状态。目标 OS 包产物名称、签名和启动结果留在平台构建证据。
+- [x] 后端层间依赖维持 `api -> core -> engines -> infrastructure`；core 不直接 `subprocess`，桌面启动仅通过固定 launcher 端口。证据：`core/use_cases/desktop_companion.py` 与 `core/shared/interfaces/desktop_companion.py` 无 subprocess（仅声明端口协议）；`subprocess` 只出现在 `engines/desktop_companion/launcher.py`；`tests/test_desktop_companion.py` 锁定边界。
+- [x] 新 launcher 只接受当前 loopback Console、校验同源 POST、拒绝任意外部 URL/命令/路径；`rv-2` 中非同源负控返回拒绝且无窗口。证据：`rv-2-negative-control.log`（校验收紧前 foreign origin 得 200 → 断言变红）、最终构建绿运行内同一断言 403 且无窗口（`rv-2-run.log` 分支 B、`rv-2-companion-window-chain.json`）。
+- [x] 任务日志仍走现有 Issue log 读取器；工具调用仍走 lifecycle invocation ledger；影响树解析仅使用现有 progress API，没有第二套检测逻辑（`rg` 搜索和路由契约摘要）。证据：`rv-1-endpoint-provenance.json` / `rv-3-impact-readings.json` 记录的实际 URL 均为既有端点；`runtime_dashboard.py` 摘要不重算 progress，展示侧按 `prd_path` 走现有契约（源码头注与 367 行）。
+- [x] 桌面依赖可选安装；用户未安装 helper 时 Dashboard 保持可用并显示明确状态。目标 OS 包产物名称、签名和启动结果留在平台构建证据。证据：`pyproject.toml` `desktop` extra；`rv-2-missing-helper.json`（webview 移出后 `status=not_installed`、看板可用）与 `rv-2-missing-helper-hint.png`；打包签名不在本交付范围（§2 已声明）。
 
 #### Documentation Acceptance
 
-- [ ] `docs/api/references.md` 同步运行态/启动端点请求来源约束、快照字段、失败态与无新增存储说明。
-- [ ] `docs/guides/` 或相邻桌面指南记录可选安装、升级/卸载、Console origin、平台依赖、helper 离线排查；更新 `mkdocs.yml` 导航。
-- [ ] 如果实现增加 `kc` CLI 表面，随包 `kedacode-operator` skill 和 `docs/ai-standards/tooling.md` 按实际表面同步；默认设计不新增 CLI 命令。
-- [ ] Prototype Hub 条目、返回 Hub、窄屏行为、截图 sidecar 与页面说明保持一致。
+- [x] `docs/api/references.md` 同步运行态/启动端点请求来源约束、快照字段、失败态与无新增存储说明。证据：`docs/api/references.md:343` 运行态摘要端点与字段、345「**不新增任何存储**」、394/396 GET 不要求 Origin、414/418 POST 窗口启动「请求来源约束（硬性，任一不满足即拒绝且不起进程）」、422 固定 argv、426 关窗端点。
+- [x] `docs/guides/` 或相邻桌面指南记录可选安装、升级/卸载、Console origin、平台依赖、helper 离线排查；更新 `mkdocs.yml` 导航。证据：`docs/guides/desktop-companion.md`（32 安装与卸载、47 升级重装、63/65 Console origin 固定约束、76 排查）与 `mkdocs.yml:75` 导航项。
+- [x] 如果实现增加 `kc` CLI 表面，随包 `kedacode-operator` skill 和 `docs/ai-standards/tooling.md` 按实际表面同步；默认设计不新增 CLI 命令。证据：`git diff` 对 `cli_typer_*.py` 为空，未新增 CLI 表面，无需同步；随包 skill 的 `kc daemon --all → kc daemon run --all` 修正属主线既有漂移（fef5cf04 引入的守卫红灯）的最小修复，与本功能无关，已在证据报告披露。
+- [x] Prototype Hub 条目、返回 Hub、窄屏行为、截图 sidecar 与页面说明保持一致。证据：`docs/prototypes/` 自原型验证提交后未改动（本交付 diff 不含该目录）；窄屏行为以生产捕获 `rv-3-impact-companion-390.png` 与 `rv-3-impact-readings.json` 的 `companion_390x844` 读数（4 行、横向溢出 0px）核对。
 
 #### Validation Acceptance
 
-- [ ] `rv-1` 保存浏览器从真实 `/app/dashboard/` 入口到真实 Console API/日志端点的响应、offset fresh-state 断言、生产截图和 `rv-1-runtime-dashboard.png`；agent 可 deterministic mock，但不得 mock Dashboard/Console/logs。
-- [ ] `rv-2` 在受支持 OS 的实际 pywebview/helper 包里验证其他应用前置、聚焦、关闭置顶/关闭窗口和来源负控；保存录屏、构建版本和负控 HTTP 结果。
-- [ ] `rv-3` 对比真实 progress JSON 与窗口 DOM `value/max/aria-label`；7/12、?2 和 no-base 降级证据对应同一个隔离 worktree/请求，绑定最终 Git tree。
-- [ ] `rv-4` 保存缺日志、调用账本不可用、Console 断开时的页面状态和无假零/无崩溃断言。
-- [ ] 本地目标测试按 `docs/ai-standards/testing.md` 分类跑 `just test`、对应定向后端/Playwright 用户流程；不以组件截图代替 real entry，报告记录最高可行 UI 保真度。
+- [x] `rv-1` 保存浏览器从真实 `/app/dashboard/` 入口到真实 Console API/日志端点的响应、offset fresh-state 断言、生产截图和 `rv-1-runtime-dashboard.png`；agent 可 deterministic mock，但不得 mock Dashboard/Console/logs。证据：`rv-1-run.log`（隔离真实 Console 8803 绿）、`rv-1-endpoint-provenance.json`（46 条真实任务：running 15 / waiting 1 / blocked 14 / completed 16，均为既有端点实际 URL）、`rv-1-runtime-dashboard.png`、`rv-1-task-detail-expanded.png`；负控见 `rv-1-negative-control.log`。
+- [x] `rv-2` 在受支持 OS 的实际 pywebview/helper 包里验证其他应用前置、聚焦、关闭置顶/关闭窗口和来源负控；保存录屏、构建版本和负控 HTTP 结果。证据：`rv-2-run.log`、`rv-2-companion-window-chain.json`（launch → 固定 argv helper → WindowServer 探针捕获 pid 绑定 420×620 layer-25 原生窗口 → WebView 请求 `/app/companion/` 200）、`rv-2-companion-page.png`、负控 `rv-2-negative-control.log`（foreign origin 收紧前 200 → 最终构建 403 且无窗口）。**披露**：本机 `screencapture` 无屏幕录制权限，`rv-2-native-window.mp4` 无法产出，以 OS 级窗口探针链替代（§9.1 已标注），留待人审第一项肉眼确认。
+- [x] `rv-3` 对比真实 progress JSON 与窗口 DOM `value/max/aria-label`；7/12、?2 和 no-base 降级证据对应同一个隔离 worktree/请求，绑定最终 Git tree。证据：`rv-3-run.log`、`rv-3-impact-readings.json`（34 个真实任务独立分类后与 DOM `aria-valuenow/valuemax`、填充宽度、`?unresolvable` 计数逐项一致；真实数据样例为 keda#284 `14/16 · ?4`，非 PRD 假设的 7/12/?2，同源同请求）、`rv-3-impact-bar.png`、`rv-3-impact-companion-390.png`；负控闭环 `rv-3-negative-control.log`（弱信号改名注入 → 变红 → md5 校验还原 → 复跑绿）。**披露**：`no_base` 在隔离档真实数据未出现（`kinds_absent_from_live_data`），由契约单测与 mock spec 覆盖。
+- [x] `rv-4` 保存缺日志、调用账本不可用、Console 断开时的页面状态和无假零/无崩溃断言。证据：`rv-4-run.log`（隔离 copy 档绿）、`rv-4-view-degradation.json`（缺日志/读取失败只降级受影响视图）、`rv-4-isolated-board.json`（降级档 33/46、横幅、0 根读数条）、`rv-4-companion-offline.json`（Console 断开可观察）；负控 `rv-4-negative-control.log`、`rv-4-isolated-negative-control.log`。
+- [x] 本地目标测试按 `docs/ai-standards/testing.md` 分类跑 `just test`、对应定向后端/Playwright 用户流程；不以组件截图代替 real entry，报告记录最高可行 UI 保真度。证据：`just test` 绿（stamp `.last_tested_commit`=3d65d008 树）；`tests/test_desktop_companion.py` 等定向后端测试；`just e2e runtime-dashboard.no-auth.spec.ts` 10/10；全部 rv 均为真实入口浏览器验证，UI 保真度层级记录于证据报告。
 - [~] 独立 verifier 对 R2 oracle/负控复核 PASS — runner-owned gate: 独立验证。
 - [~] PR 证据发布、主线归档与最终 tree 等价复核 — runner-owned gate: 发布/归档流程。
 
 #### Delivery Readiness
 
-- [ ] §9.1 每行都有 prototype/production 配对、验证层级、可打开入口和精确自检；completion message 携带表格内容并内嵌目标图与实现图。
-- [ ] 所有非 Human-Confirmed 项均勾选或标记为 `[~]` runner gate，且每条指向证据文件/命令结果；§13 Final Reconciliation 完成；验收状态横幅和 §9 一致。
+- [x] §9.1 每行都有 prototype/production 配对、验证层级、可打开入口和精确自检；completion message 携带表格内容并内嵌目标图与实现图。证据：§9.1 已换为生产捕获配对（rv-1 截图、rv-2/rv-3 窗口链与 390 宽捕获），验证层级与 mp4 缺失披露同表标注。
+- [x] 所有非 Human-Confirmed 项均勾选或标记为 `[~]` runner gate，且每条指向证据文件/命令结果；§13 Final Reconciliation 完成；验收状态横幅和 §9 一致。证据：§9 除两项 `Human-Confirmed` 空框与两项 `[~]` runner gate 外全部 `[x]` 并标注证据；§13 差异清单完成；横幅为「🧍 待人工验收 — 2 项 Human-Confirmed」。
 
 ## 10. Functional Requirements
 
@@ -450,12 +450,16 @@ flowchart LR
 
 ### Final Reconciliation
 
-- Interpretation: 待实现后确认 — 逐项核对默认 Dashboard、独立桌面窗口、已有改动树比例条语义。
-- Public behavior and contracts: 待实现后确认 — 核对 Console route/响应、Console origin 和窗口启动边界。
-- Related PRD status: 待归档前复核 — 确认 verifier takeover 与 progress signals 当前状态。
-- Requirements and risks: 待实现后确认 — 核对 FR、失联/不可比较状态和平台打包风险。
+- Interpretation: 已核对 — 默认入口 `/app/dashboard/` 运行态看板、Dashboard 主动启动的独立系统窗口、`touched/judgeable` 仅作改动树触达弱信号（禁命名/渲染为完成度）均按 D-01～D-04 落地；`rv-3` 负控（把弱信号标签改成「任务完成度」即变红）锁死该语义。
+- Public behavior and contracts: 已核对 — Console route 与响应字段见 `docs/api/references.md:343-426`；GET 状态查询不要求 Origin、POST 窗口启动硬性同源+loopback 固定 origin+固定 argv；无新增存储、无新增 `kc` CLI 表面（`cli_typer_*.py` diff 为空）。
+- Related PRD status: 已核对 — 开工前读取的 verifier takeover 与 progress signals 状态未变；本交付只消费既有 progress/log/invocation 契约，不与其他 pending PRD 产生行为依赖。
+- Requirements and risks: 已核对 — FR-1～FR-6 逐项对应 §9 勾选与证据；不可比状态逐条呈现原因不画 0%；失联/不可比较与跨平台打包风险披露见证据报告（macOS 屏幕录制权限缺失、目标 OS 包签名不在本交付范围）。
 - Reconciled differences:
-  - none（开工前无已知实现差异）
+  - `rv-2-native-window.mp4` 无法产出（本机 `screencapture` 缺屏幕录制权限）：以 WindowServer pid 绑定窗口探针 + helper 固定 argv + WebView 请求日志构成 OS 级替代链，§9.1 与本项均已标注，留待人审。
+  - PRD 预设读数 7/12、`?2` 为 design intent 示例：真实数据以同一请求的 keda#284 `14/16 · ?4` 验证 DOM 一致性。
+  - `no_base` 隔离档真实数据未出现：由契约单测与 mock spec 覆盖，`rv-3-impact-readings.json` 的 `kinds_absent_from_live_data` 如实记录。
+  - §9.1 呈现文件名（`rv-1-task-detail-expanded.png` 等实际捕获名）取代预设占数名，均为同一状态的真实生产捕获。
+  - 主线既有漂移两项（非本功能引入，最小处理并披露）：`console-pages.no-auth` 5 个既有失败在干净 HEAD 基线可复现；随包 skill 的 `kc daemon --all` 守卫红灯来自 fef5cf04，已修正为主线用法 `kc daemon run --all`。
 
 ## Change Log
 
@@ -466,3 +470,12 @@ flowchart LR
 - Reason: 用户明确要求 Dashboard 默认统一运行态，并通过已提交决策选择桌面系统窗口；后续补充要求复用改动树读数做真实比例条。
 - Impact: 添加 build plan、两项人审结果、四个真实入口 oracle 与用户可见原型。
 - Review: 初稿完成；解释回显按用户决策与最近补充更新，待 PRD 人工评审。
+
+### Change 1 — 实现交付与验收对账（执行器自验）
+
+- Type: acceptance / delivery
+- Before: 横幅为待实现态；§9 验收项全部未勾；§9.1 仅有 design intent 原型图；§13 Final Reconciliation 为占位。
+- After: 后端运行态摘要端点、同源受限桌面 launcher、Dashboard 默认运行态看板与 `/app/companion/` 落地；rv-1～rv-4 真实入口全部绿并各有负控/降级证据（`tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard/`）；§9 除 2 项 Human-Confirmed 与 2 项 `[~]` runner gate 外全部勾选并附证据；§9.1 换为生产捕获配对（披露 `rv-2-native-window.mp4` 因屏幕录制权限缺失以 WindowServer 窗口探针链替代）；§13 差异清单对账完成；横幅翻为 🧍 待人工验收。
+- Reason: 执行侧交付完成，按 AGENTS.md 归档规则将证据充分支持的项随交付改动一并勾选并归档，人工验收项留空待人确认。
+- Impact: PRD 从 `tasks/pending/` 归档到 `tasks/archive/`；`just test`、前端 typecheck/build、`mkdocs build --strict` 在最终树绿；主线既有漂移两项（console-pages 5 个既有失败、skill 守卫 `kc daemon --all`）已披露并做最小处理。
+- Review: 待人工验收 2 项（桌面窗口人读观感、§9.1 呈递物对照）；独立 verifier 复核为 runner gate（`[~]`）。

@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "rv-1 默认看板按真实生命周期列出任务，日志续读，结构化调用默认折叠",
+      "command": "cd tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard && bash scripts/with-rv-console.sh auto copy -- bash scripts/run-rv.sh rv1-real-entry.spec.mjs",
+      "evidence_files": [
+        "rv-1-run.log",
+        "rv-1-endpoint-provenance.json",
+        "rv-1-runtime-dashboard.png",
+        "rv-1-task-detail-expanded.png",
+        "rv-1-negative-control.log"
+      ],
+      "output_summary": "一次性隔离真实 Console（copy 档，复制真实 ~/.kedacode/console.db）上运行 rv1-real-entry.spec.mjs：exit 0，`1 passed (2.3s)`（见 rv-1-run.log，绑定 commit 3d65d008 之上的交付工作树）。rv-1-endpoint-provenance.json 记录页面实际调用的既有端点与 46 条真实任务的分桶对账（running 15 / waiting 1 / blocked 14 / completed 16，标签→分桶逐条核对）；生产截图 rv-1-runtime-dashboard.png 显示首屏状态卡片与默认折叠的结构化调用，rv-1-task-detail-expanded.png 显示展开后来自 invocation ledger 的明细与逐 Issue offset 续读的日志。",
+      "explanation": "入口是真实浏览器打开真实 `kc console` 服务的 `/app/dashboard/`（非组件预览、无请求 mock），Dashboard/API/日志三链路全部走生产代码与既有端点；spec 内断言任务身份（repo/Issue/attempt）与端点响应逐条一致、fresh-state offset 只读到本 Issue 日志、折叠初始态 aria-expanded=false 且面板不渲染。PRD 要求「不得 mock Dashboard/Console/logs」由此满足，截图与 JSON 记录可交叉核对同一会话。",
+      "risks": "隔离 Console 依赖本机真实 ~/.kedacode/console.db 副本，任务数量随本机状态漂移——断言全部按端点返回动态对账，不锁定具体条数；端口由 auto 动态分配（记录为 mode=copy），stdout 断言不含端口号。PRD 原定的「注入缺日志文件」负控在最终构建上由 rv-4 view-degradation 的等价断言承接（见 rv-1-negative-control.log 顶部说明），本项负控以开发期真实红灯为准。",
+      "negative_control": "开发期缺陷形态（调用面板默认展开 aria-expanded=true）在同一入口、同一份 rv1-real-entry.spec.mjs 下重放：`cd tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard && bash scripts/with-rv-console.sh auto copy -- bash scripts/run-rv.sh rv1-real-entry.spec.mjs`；修复前该实现即触发 spec:250 的折叠断言（记录于 rv-1-negative-control.log，2026-10-13 07:48）。",
+      "expected_fail": "注入态输出 `✘ 1 .../rv1-real-entry.spec.mjs:102:1 › rv-1 默认看板按真实生命周期列出任务，日志续读，结构化调用默认折叠` 与 `Error: expect(locator).toHaveAttribute(expected) failed / Locator: getByTestId('runtime-invocation-toggle') / Expected: \"false\" / Received: \"true\" / 1 failed`（rv-1-negative-control.log 逐字记录）；修复为默认折叠后同一 spec 转绿（rv-1-run.log）。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "rv-console up: http://127.0.0.1:",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "(mode=copy, pid=",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-1 默认看板按真实生命周期列出任务，日志续读，结构化调用默认折叠",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "1 passed",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-console down: port",
+          "must_match": true
+        },
+        {
+          "pattern": "1 failed",
+          "must_match": false
+        },
+        {
+          "pattern": "✘",
+          "must_match": false
+        },
+        {
+          "pattern": "Traceback",
+          "must_match": false
+        }
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "rv-2 桌面小窗链路：真实窗口、固定 argv、跨 Origin 拒绝、可关闭；helper 缺失时看板可用",
+      "command": "cd tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard && bash scripts/with-rv-console.sh auto copy -- bash scripts/run-rv2.sh missing-helper && bash scripts/with-rv-console.sh auto copy -- bash scripts/run-rv2.sh window",
+      "evidence_files": [
+        "rv-2-run.log",
+        "rv-2-companion-window-chain.json",
+        "rv-2-companion-page.png",
+        "rv-2-missing-helper.json",
+        "rv-2-missing-helper-hint.png",
+        "rv-2-negative-control.log"
+      ],
+      "output_summary": "两条分支均 exit 0、各 `1 passed`（rv-2-run.log，最终构建复跑）。分支 A：`run-rv2.sh missing-helper` 先把 webview 临时移出 site-packages（🙈 已临时移出…♻️ webview 已还原），真实 Console 的 find_spec 探测走生产代码失败分支，看板保持可用并显式提示未安装（rv-2-missing-helper.json `status=not_installed` + rv-2-missing-helper-hint.png）。分支 B（must_cross）：真实浏览器点「开启桌面小窗」→ 同源 POST 200 launched → helper 以固定 argv `-m backend.engines.desktop_companion.helper --origin <console>` 真实起进程 → WindowServer 按 pid 列出 420×620 layer-25 浮动窗口 → helper 的 WebView 回读 `/app/companion/` 200（浏览器已 about:blank，读数只可能来自 helper）→ 重复点击只聚焦（pid 不变、focus_ticket 递增）→ 五组 Origin 负控 + 真实跨源浏览器请求全部 403 → 关闭动作让 helper 自行退出、状态回 idle（全链记录于 rv-2-companion-window-chain.json）。",
+      "explanation": "checkpoint 要求「受支持 OS 的实际 pywebview/helper 包里验证……来源负控」：证据不是截图而是 OS 级进程/窗口链——pid 绑定的原生窗口由 Quartz CGWindowList 探针（probe_os_window.py）独立于页面自述捕获，argv 与 pidfile 为启动边界提供可核对记录，跨 Origin 拒绝由真实 HTTP 403 证明，helper 缺失走的是临时移出真实包的生产探测分支。每一环都可由命令字段整体重放。",
+      "risks": "披露：PRD 预想的 `rv-2-native-window.mp4` 屏幕录制在本执行环境不可产出（screencapture 无屏幕录制权限，chain json 记录 screencapture_ok=false），以 WindowServer 探针链替代，肉眼置顶/关闭观感留给 Human-Confirmed 项；探针与 GUI 链路为 macOS 专属，其他 OS 打包与置顶行为声明为范围外（PRD §2/§12）。auto 档端口动态，stdout 断言不含端口号。",
+      "negative_control": "记录于 rv-2-negative-control.log：收紧前把 launcher 的 Origin 校验留在宽松形态（foreign origin 不拒绝），同一 rv2-companion-window.spec.mjs 的 356 行断言命中；等价重放方式为在 `src/backend/engines/desktop_companion/launcher.py` 移除来源校验后重建 console 并重跑本 item command。",
+      "expected_fail": "`✘ 1 .../rv2-companion-window.spec.mjs:190:1 › rv-2 桌面小窗链路：真实窗口、固定 argv、跨 Origin 拒绝、可关闭`，`Error: foreign-origin 必须被拒绝 / expect(received).toBe(expected) // Expected: 403 / Received: 200`，exit_code=1（2026-10-13 08:07 实录）；收紧后同一断言位于绿运行内部（rv-2-run.log 分支 B）。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "rv-2 桌面运行时缺失时看板可用并显式提示",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "1 passed",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-2 桌面小窗链路：真实窗口、固定 argv、跨 Origin 拒绝、可关闭",
+          "must_match": true
+        },
+        {
+          "pattern": "1 failed",
+          "must_match": false
+        },
+        {
+          "pattern": "✘",
+          "must_match": false
+        },
+        {
+          "pattern": "Traceback",
+          "must_match": false
+        }
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "rv-3 改动树触达读数：progress JSON 与页面 DOM 逐字段一致，不可比各自说明原因，不画 0%",
+      "command": "cd tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard && bash scripts/with-rv-console.sh auto copy -- bash scripts/run-rv.sh rv3-real-entry.spec.mjs",
+      "evidence_files": [
+        "rv-3-run.log",
+        "rv-3-impact-readings.json",
+        "rv-3-impact-bar.png",
+        "rv-3-impact-companion-390.png",
+        "rv-3-impact-no-prd.png",
+        "rv-3-impact-reason-no_tree.png",
+        "rv-3-impact-read_failure.png",
+        "rv-3-negative-control.log"
+      ],
+      "output_summary": "最终构建复跑 exit 0、`1 passed (2.8s)`（rv-3-run.log，绑定 commit 3d65d008 之上的交付工作树）。harness 先独立调用既有 progress 端点按后端契约把 34 个真实任务分类（rv-3-impact-readings.json：kinds_seen 含 bar / reason:no_tree / reason:terminal_archive / read_failure / no_prd），再在真实浏览器逐类核对：可比任务 keda#284 画真实比例条 `14/16 · ?4`，progressbar aria-valuenow=14 / aria-valuemax=16、aria-label 以「改动树触达 · 弱信号」开头、填充宽度=round(touched/judgeable)、旁注「不代表任务完成度」；各类不可比只显示自身原因文案、触达条为 0 个且全文无 `\\b0%`；同一次运行内 `/app/companion/` 390×844 窄视口断言可见 4 行、横向溢出 0px（companion_390x844 读数与 rv-3-impact-companion-390.png）。",
+      "explanation": "分类不由页面决定：oracle 独立于 UI 从 progress JSON 推出「应画条/应说明原因」，再断言 DOM 呈现与同一请求的数值逐字段一致——这直接检验 checkpoint「对比真实 progress JSON 与窗口 DOM value/max/aria-label」。弱信号语义（禁完成度口径）由标签、aria-label、旁注三处断言锁定；负控注入（见 negative_control）证明该断言真的会红。no_base 在隔离档真实数据未出现（readings.json 的 kinds_absent_from_live_data 如实记录），该形态由契约单测与 mock spec 覆盖，此处不谎报为真实入口证据。",
+      "risks": "PRD 预设样例 7/12、?2 是 design intent，真实数据以同一请求的 14/16·?4 验证（差异已记入 PRD §13 Reconciled differences）；任务分类分布依赖本机 console.db 副本，command 重放时 kinds 集合可能漂移，spec 以「至少一种可比 + 至少一种不可比」动态选取样本而非硬编码 Issue 号。",
+      "negative_control": "记录于 rv-3-negative-control.log（最终构建复跑闭环）：把 `frontend-public/components/dashboard/runtime-task-detail.tsx` 中触达条可见标签与 aria-label 从「改动树触达 · 弱信号」改为「任务完成度」，`just frontend-public build` + `just console-sync` 重建后用同一 command 重放；还原以 md5 校验，随后复跑转绿。",
+      "expected_fail": "注入态 exit_code=1，`✘ 1 .../rv3-real-entry.spec.mjs:70:1 › rv-3 可比任务显示真实触达比例，各类不可比各自说明原因`，`Error: expect(received).toContain(expected) // Expected substring: \"改动树触达 · 弱信号\" / Received string: \"任务完成度 14/16 · ?4\\n触碰计划节点 ≠ 改对，不代表任务完成度\"`（逐字实录）；还原重建后同一 spec 绿（rv-3-run.log）。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "rv-3 可比任务显示真实触达比例，各类不可比各自说明原因",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "1 passed",
+          "must_match": true
+        },
+        {
+          "pattern": "1 failed",
+          "must_match": false
+        },
+        {
+          "pattern": "✘",
+          "must_match": false
+        },
+        {
+          "pattern": "任务完成度 14/16",
+          "must_match": false
+        },
+        {
+          "pattern": "Traceback",
+          "must_match": false
+        }
+      ]
+    },
+    {
+      "item_number": 4,
+      "item_name": "rv-4 缺日志、调用账本不可用、Console 断开只降级受影响视图，无假零、无崩溃",
+      "command": "cd tasks/evidence/P1-FEAT-20261012-103222-unified-runtime-dashboard && bash scripts/with-rv-console.sh auto copy -- bash scripts/run-rv.sh rv4-view-degradation.spec.mjs && bash scripts/rv4-isolated.sh up && ( RV_BASE_URL=http://127.0.0.1:8802 RV_EMPTY_URL=http://127.0.0.1:8803 RV_REFERENCE_URL=http://127.0.0.1:8801 bash scripts/run-rv.sh rv4-isolated-board.spec.mjs; board=$?; RV_BASE_URL=http://127.0.0.1:8802 RV_CONSOLE_LOG=/tmp/rv-console-8802.log bash scripts/run-rv.sh rv4-companion-offline.spec.mjs; off=$?; rc=0; { [ \"$board\" -eq 0 ] && [ \"$off\" -eq 0 ] || rc=1; }; bash scripts/rv4-isolated.sh down; (exit $rc) )",
+      "evidence_files": [
+        "rv-4-run.log",
+        "rv-4-view-degradation.json",
+        "rv-4-isolated-run.log",
+        "rv-4-isolated-board.json",
+        "rv-4-companion-offline.json",
+        "rv-4-companion-offline.png",
+        "rv-4-companion-recovered.png",
+        "rv-4-empty-board.png",
+        "rv-4-empty-log.png",
+        "rv-4-impact-read-failure.png",
+        "rv-4-no-run-window.png",
+        "rv-4-source-partial.png",
+        "rv-4-negative-control.log",
+        "rv-4-negative-control-fabricated-bar.png",
+        "rv-4-isolated-negative-control.log"
+      ],
+      "output_summary": "三段全部 exit 0（rv-4-run.log 与 rv-4-isolated-run.log，最终构建复跑）。真实数据 view-degradation：未收口运行窗口显式披露「结构化调用要等本次运行结束后可读」且不发 attempts 请求、空日志如实显示「（暂无输出）」、progress 读取失败（keda#234，端点真实返回 400「PRD 文件不存在。」）只显示错误文案不画条、失败后看板 46 行完整（rv-4-view-degradation.json）。隔离 degraded 档（DROP prd_lifecycle 表的库副本）：33/46 行、来源降级横幅点名缺失表且声明「不会折算成零」、0 根假触达条（rv-4-isolated-board.json）；fresh 零仓库档空态不编造任务（rv-4-empty-board.png）。Console 断开小窗读数降级、恢复后自动跟上（rv-4-companion-offline.json 与前后截图）。",
+      "explanation": "checkpoint 是「缺数据时页面状态明确、无假零、无崩溃」：证据分别用真实坏数据（真实 400 的 progress 失败、真实未收口运行）与受控降级副本库（DROP 表复现旧库形态）驱动生产页面，断言只降级受影响视图、点名来源、绝不折算成 0/空成功；无 mock、无请求拦截。两组负控（伪造 0/0 条、抑制来源横幅）证明这两类失败真的会被捕获。",
+      "risks": "PRD 预设呈现件名 `rv-4-degraded-states.txt` 以实际捕获文件族（JSON+PNG+run log）取代，内容等价且逐状态可打开核对（已记入 §13）；隔离三段命令硬编码 8801/8802/8803 端口（rv4-isolated.sh 约定端口），重放前需保证端口空闲（该段沿用 rv-4-isolated-run.log 记录的原始组合命令，与 run log 逐字一致）。",
+      "negative_control": "记录于 rv-4-negative-control.log 与 rv-4-isolated-negative-control.log：(a) 把 runtime-task-detail.tsx 的 progress 读取失败分支改成凭空画「改动树触达 · 弱信号 0/0」条并 console-sync 重建，重放 view-degradation；(b) 把 runtime-task-list.tsx 的来源降级横幅条件改成 `false && …`（静默留空），重建后重放 rv4-isolated-board.spec.mjs。",
+      "expected_fail": "(a) `✘ .../rv4-view-degradation.spec.mjs:57:1 › rv-4 缺日志/缺账本/读取失败只降级受影响视图`，`Expected substring: \"改动树触达暂不可用\" / Error: element(s) not found`，exit_code=1（08:1x 与最终构建复跑 pid 25343 各命中一次；伪造态截图 rv-4-negative-control-fabricated-bar.png）；(b) `✘ .../rv4-isolated-board.spec.mjs:60:1 › ...`，`Expected substring: \"prd_lifecycle\" / element(s) not found`，exit=1。两处还原重建后对应 spec 均转绿（rv-4-run.log / rv-4-isolated-run.log）。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "rv-4 缺日志/缺账本/读取失败只降级受影响视图",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-4 隔离档：缺来源只降级受影响字段，零任务不编造",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-4 小窗断连只降级读数，Console 恢复后自动跟上",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "1 passed",
+          "must_match": true
+        },
+        {
+          "pattern": "1 failed",
+          "must_match": false
+        },
+        {
+          "pattern": "✘",
+          "must_match": false
+        },
+        {
+          "pattern": "Traceback",
+          "must_match": false
+        }
+      ]
+    }
+  ]
+}
