@@ -32,6 +32,7 @@ from backend.infrastructure.config.agent_runner_settings_models import (
     AgentRunnerDeliberationSettings as AgentRunnerDeliberationSettings,
     AgentRunnerE2eArtifactSettings as AgentRunnerE2eArtifactSettings,
     AgentRunnerE2eVerificationCommandSettings as AgentRunnerE2eVerificationCommandSettings,
+    AgentRunnerEvaluationSettings as AgentRunnerEvaluationSettings,
     AgentRunnerFallbackCandidateSettings as AgentRunnerFallbackCandidateSettings,
     AgentRunnerGitSettings as AgentRunnerGitSettings,
     AgentRunnerInteractiveDecisionSettings as AgentRunnerInteractiveDecisionSettings,
@@ -51,6 +52,7 @@ from backend.infrastructure.config.agent_runner_settings_models import (
     AgentRunnerWorktreeSettings as AgentRunnerWorktreeSettings,
     AgentSessionPreviewSettings as AgentSessionPreviewSettings,
     AgentSessionSettings as AgentSessionSettings,
+    EvaluationJudgePresetSettings as EvaluationJudgePresetSettings,
     _default_runner_command as _default_runner_command,
 )
 
@@ -65,6 +67,7 @@ __all__ = (
     "AgentRunnerDeliberationSettings",
     "AgentRunnerE2eArtifactSettings",
     "AgentRunnerE2eVerificationCommandSettings",
+    "AgentRunnerEvaluationSettings",
     "AgentRunnerFallbackCandidateSettings",
     "AgentRunnerGeneratedContentSettings",
     "AgentRunnerGeneratedContentTargetSettings",
@@ -89,6 +92,7 @@ __all__ = (
     "AgentRunnerWorktreeSettings",
     "AgentSessionPreviewSettings",
     "AgentSessionSettings",
+    "EvaluationJudgePresetSettings",
     "GENERATED_CONTENT_TARGET_NAMES",
     "load_agent_runner_local_settings",
     "logger",

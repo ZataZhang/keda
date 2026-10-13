@@ -17,6 +17,11 @@ import type {
   DailyRunTrendEntry,
   DirectoryBrowseResult,
   DiscoveredRepositoryEntry,
+  EvaluationJudgePreview,
+  EvaluationPresetOptions,
+  EvaluationRun,
+  EvaluationRunDetail,
+  EvaluationSuiteEntry,
   IssueLabelSnapshot,
   IssueLogChunk,
   LaunchOptionsView,
@@ -477,4 +482,89 @@ export async function setRegistryRepositoryEnabled(
  */
 export async function removeRegistryRepository(repoId: string): Promise<void> {
   await del(`${BASE_PATH}/repositories/${encodeURIComponent(repoId)}`);
+}
+
+// ── 模型评测 ────────────────────────────────────────────────────────────────
+
+/** 列出仓库 tasks/evaluation-suites/ 下的评测集及校验状态。 */
+export async function fetchEvaluationSuites(): Promise<EvaluationSuiteEntry[]> {
+  const response = await get<{ suites: EvaluationSuiteEntry[] }>(
+    `${BASE_PATH}/console/evaluation/suites`,
+  );
+  return response.suites;
+}
+
+/** 读取执行预设与评审预设目录（评审可用性探针不发起网络调用）。 */
+export function fetchEvaluationPresetOptions(): Promise<EvaluationPresetOptions> {
+  return get<EvaluationPresetOptions>(`${BASE_PATH}/console/evaluation/presets`);
+}
+
+/** 按创建时间倒序列出全部评测 run。 */
+export async function fetchEvaluationRuns(): Promise<EvaluationRun[]> {
+  const response = await get<{ runs: EvaluationRun[] }>(
+    `${BASE_PATH}/console/evaluation/runs`,
+  );
+  return response.runs;
+}
+
+/** 创建评测 run：校验并冻结快照，不启动任何执行。 */
+export function createEvaluationRun(params: {
+  suite_id: string;
+  execution_presets: string[];
+  judge_presets: string[];
+}): Promise<EvaluationRun> {
+  return post<EvaluationRun>(`${BASE_PATH}/console/evaluation/runs`, params);
+}
+
+/** 读取 run 详情（候选结果 + 逐评审评分 + 派生汇总）。 */
+export function fetchEvaluationRunDetail(
+  runId: string,
+): Promise<EvaluationRunDetail> {
+  return get<EvaluationRunDetail>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}`,
+  );
+}
+
+/** 显式启动候选执行；该动作绝不触发任何评审 provider 调用。 */
+export function startEvaluationRun(runId: string): Promise<EvaluationRun> {
+  return post<EvaluationRun>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/start`,
+  );
+}
+
+/** 取消 run（进入 judging 后不可撤回，后端返回 409）。 */
+export function cancelEvaluationRun(runId: string): Promise<EvaluationRun> {
+  return post<EvaluationRun>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/cancel`,
+  );
+}
+
+/** 删除 run：级联清除 DB 行与本机暂存 payload / worktree。 */
+export function deleteEvaluationRun(runId: string): Promise<void> {
+  return del(`${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}`);
+}
+
+/** 读取待授权评审 payload 预览（manifest hash 一并返回）。 */
+export function fetchEvaluationJudgePreview(
+  runId: string,
+): Promise<EvaluationJudgePreview> {
+  return get<EvaluationJudgePreview>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/judge-preview`,
+  );
+}
+
+/**
+ * 提交评审授权。
+ *
+ * manifest_hash 必须来自同一次预览；服务端会重新核对冻结值与当前暂存
+ * 文件重算值，过期或不符一律 409 且不发起任何 provider 请求。
+ */
+export function submitEvaluationConsent(
+  runId: string,
+  params: { decision: "approve" | "deny"; manifest_hash: string },
+): Promise<EvaluationRun> {
+  return post<EvaluationRun>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/judge-consent`,
+    params,
+  );
 }

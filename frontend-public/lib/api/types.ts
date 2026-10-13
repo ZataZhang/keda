@@ -1276,3 +1276,219 @@ export type RunnerHealthStatus = {
   status: "healthy" | "degraded";
   gh_cli_available: boolean;
 };
+
+// ── 模型评测（Model Evaluation，/agent-runner/console/evaluation/*）
+
+/** 评测 run 状态机取值（与后端 EvaluationRunStatus 逐字对齐）。 */
+export type EvaluationRunStatus =
+  | "created"
+  | "queued"
+  | "running"
+  | "awaiting_judge_consent"
+  | "judging"
+  | "completed"
+  | "cancelled"
+  | "interrupted";
+
+/** 候选执行结果状态（失败态绝不折算为 0 分）。 */
+export type EvaluationResultStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "timeout"
+  | "cancelled";
+
+/** 确定性检查状态。 */
+export type EvaluationCheckStatus = "passed" | "failed" | "timeout" | "not_run";
+
+/** 逐评审评分状态。 */
+export type EvaluationScoreStatus =
+  | "valid"
+  | "refusal"
+  | "invalid"
+  | "timeout"
+  | "provider_error"
+  | "unauthorized"
+  | "cancelled";
+
+/** 评测集单条样本（case）。 */
+export type EvaluationSuiteCase = {
+  case_id: string;
+  prompt: string;
+  check_recipe: string;
+};
+
+/** suite 清单项：registry 目录内一个 YAML 文件的校验视图。 */
+export type EvaluationSuiteEntry = {
+  file: string;
+  valid: boolean;
+  suite_id?: string;
+  version?: string;
+  title?: string;
+  repo_path?: string;
+  base_ref?: string;
+  content_hash?: string;
+  rubric_version?: string;
+  check_timeout_seconds?: number;
+  cases?: EvaluationSuiteCase[];
+  errors: string[];
+};
+
+/** run 内冻结的执行/评审预设快照。 */
+export type EvaluationPresetSnapshot = {
+  preset_name: string;
+  agent?: string;
+  model?: string;
+  temperature?: number | null;
+  reasoning_effort?: string | null;
+  provider?: string | null;
+  api_key_env?: string | null;
+  cost_status?: string;
+  cost_estimate?: number | null;
+};
+
+/** 一个评测 run（快照 + 状态机 + manifest hash）。 */
+export type EvaluationRun = {
+  run_id: string;
+  suite_id: string;
+  suite_version: string;
+  suite_hash: string;
+  rubric_version: string;
+  repo_path: string;
+  base_ref: string;
+  base_commit: string;
+  base_tree_hash: string;
+  execution_preset_snapshots: EvaluationPresetSnapshot[];
+  judge_preset_snapshots: EvaluationPresetSnapshot[];
+  status: EvaluationRunStatus;
+  manifest_hash: string | null;
+  case_ids: string[];
+  check_timeout_seconds: number;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+/** 矩阵单元（case × 执行预设）的候选结果。 */
+export type EvaluationResult = {
+  result_id: string;
+  run_id: string;
+  case_id: string;
+  execution_preset_id: string;
+  execution_model_snapshot: Record<string, unknown>;
+  base_tree_hash: string;
+  worktree_path: string | null;
+  result_status: EvaluationResultStatus;
+  check_status: EvaluationCheckStatus;
+  check_recipe: string;
+  check_exit_code: number | null;
+  check_output_summary: string | null;
+  agent_summary: string | null;
+  duration_seconds: number | null;
+  usage_summary: Record<string, unknown> | null;
+  cost_status: string;
+  diff_hash: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** 单评审 × 单候选的评分行。 */
+export type EvaluationScore = {
+  score_id: string;
+  run_id: string;
+  result_id: string;
+  case_id: string;
+  execution_preset_id: string;
+  judge_preset_id: string;
+  judge_model_snapshot: Record<string, unknown>;
+  rubric_version: string;
+  score_status: EvaluationScoreStatus;
+  dimension_scores: Record<string, number>;
+  rationale_summary: string | null;
+  response_hash: string | null;
+  duration_seconds: number | null;
+  usage_summary: Record<string, unknown> | null;
+  error: string | null;
+  created_at: string;
+};
+
+/** 维度聚合：只统计 valid 评分的 median / min / max / N。 */
+export type EvaluationDimensionAggregate = {
+  dimension: string;
+  median: number | null;
+  minimum: number | null;
+  maximum: number | null;
+  valid_count: number;
+};
+
+/** run 级派生汇总（不保存第二份统计事实）。 */
+export type EvaluationSummary = {
+  aggregates: EvaluationDimensionAggregate[];
+  by_execution_preset: Record<string, EvaluationDimensionAggregate[]>;
+  status_counts: Record<string, number>;
+  valid_judge_count: number;
+};
+
+/** run 详情接口的完整载荷。 */
+export type EvaluationRunDetail = {
+  run: EvaluationRun;
+  results: EvaluationResult[];
+  scores: EvaluationScore[];
+  summary: EvaluationSummary;
+  payload_state: {
+    is_active: boolean;
+    awaiting_consent: boolean;
+    judge_selected: boolean;
+  };
+};
+
+/** 执行/评审预设目录（含评审可用性探针）。 */
+export type EvaluationPresetOptions = {
+  execution_presets: {
+    name: string;
+    agent: string;
+    model: string | null;
+    reasoning_effort: string | null;
+    cost_status: string;
+    cost_estimate: number | null;
+  }[];
+  judge_presets: {
+    name: string;
+    model: string;
+    temperature: number | null;
+    provider: string | null;
+    available: boolean;
+    reason: string | null;
+    api_key_env: string | null;
+    cost_status: string;
+  }[];
+  default_judge_presets: string[];
+  max_concurrency: number;
+  agent_timeout_seconds: number;
+  judge_timeout_seconds: number;
+};
+
+/** 待授权评审 payload 预览（所见即所发）。 */
+export type EvaluationJudgePreview = {
+  run_id: string;
+  manifest_hash: string | null;
+  frozen_manifest_hash: string | null;
+  judge_targets: EvaluationPresetSnapshot[];
+  entries: {
+    result_id: string;
+    case_id: string;
+    execution_preset_id: string;
+    payload_file: string;
+    payload_sha256: string;
+    size_bytes: number;
+    payload_available: boolean;
+    payload_preview: string;
+    payload_truncated: boolean;
+  }[];
+  estimated_requests: number;
+  sensitive_notice: string;
+};

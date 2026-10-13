@@ -199,6 +199,32 @@ model = "Qwen3.8-Max"
 reasoning_effort = "xhigh"
 
 # =============================================================================
+# 模型评测（Console「Evaluations」页）：多评审模型预设
+# =============================================================================
+# 完全可选：不写本节时 Console 正常启动，评测页显示"未配置评审预设"。
+# 评审预设只**引用**模型：model 为 provider registry（models.json）可解析的
+# 模型 id；api_key_env 是密钥所在的环境变量名（值仍只由 .env/环境注入，配置
+# 与数据库都不保存值本身）。base_url 仅用于自托管/OpenAI 兼容端点，非敏感。
+# default_judge_presets 是页面预选的评审名单，单次 run 可覆盖。
+# 并发刻意收敛（1–4）：评测是手动离线批量任务，尊重与 runner 相同的主机 capacity。
+#
+# [agent_runner.evaluation]
+# default_judge_presets = ["judge-openai"]
+# max_concurrency = 2
+# agent_timeout_seconds = 900
+# judge_timeout_seconds = 120
+#
+# [agent_runner.evaluation.judge_presets.judge-openai]
+# model = "gpt-5.1"
+# temperature = 0.0
+# api_key_env = "OPENAI_API_KEY"
+#
+# [agent_runner.evaluation.judge_presets.judge-claude]
+# model = "claude-sonnet-4-5"
+# temperature = 0.0
+# api_key_env = "ANTHROPIC_API_KEY"
+
+# =============================================================================
 # 阶段 -> 预设 绑定（九键闭集，与生命周期矩阵同键）
 # =============================================================================
 # 绑定后该阶段由预设整体决定 (agent, 模型, 推理档)。覆盖优先级（高到低）：

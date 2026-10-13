@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import logging
 import socket
 import threading
 import urllib.request
@@ -25,6 +26,9 @@ import uvicorn
 
 from backend.api.cli_typer_app import console_app, error_console
 from backend.core.use_cases.agent_runner_factory import load_fresh_agent_runner_settings
+from backend.core.use_cases.model_evaluation_runtime import recover_interrupted
+
+_logger = logging.getLogger(__name__)
 
 #: 管理终端的监听地址，**硬编码为回环地址、不可配置**。
 #:
@@ -52,6 +56,21 @@ _CONSOLE_PROBE_TIMEOUT_SECONDS = 0.5
 
 class ConsolePortUnavailableError(RuntimeError):
     """显式指定或扫描窗口内没有任何可用端口时抛出。"""
+
+
+def _recover_evaluation_runs_on_launch() -> None:
+    """console 启动自愈：把上次进程遗留的活跃评测 run 标记为 interrupted。
+
+    best-effort：自愈失败只提示、不阻塞启动；不自动重跑候选执行（可能已
+    产生外部 provider 副作用），用户显式恢复或删除。
+    """
+    try:
+        affected = recover_interrupted()
+    except Exception as exc:  # noqa: BLE001 - 自愈失败不能挡住面板启动
+        _logger.warning("模型评测启动自愈失败: %s", exc)
+        return
+    if affected:
+        typer.echo(f"kc console: {affected} 个未完成评测 run 已标记为 interrupted。")
 
 
 def _port_is_available(host: str, port: int) -> bool:
@@ -193,6 +212,7 @@ def launch_console(*, host: str, port: int, open_browser: bool) -> None:
     """
     console_url = console_url_for(host, port)
     typer.echo(f"kc console listening on {console_url} (Ctrl+C to stop)")
+    _recover_evaluation_runs_on_launch()
     if open_browser:
         browser_timer = threading.Timer(
             _BROWSER_OPEN_DELAY_SECONDS, webbrowser.open, args=(console_url,)

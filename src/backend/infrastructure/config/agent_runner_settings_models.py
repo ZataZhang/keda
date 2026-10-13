@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
+    FiniteFloat,
     Field,
     field_validator,
     model_validator,
@@ -581,6 +582,51 @@ class AgentRunnerConsoleSettings(BaseModel):
                 ),
             )
         return self
+
+
+class EvaluationJudgePresetSettings(BaseModel):
+    """``[agent_runner.evaluation.judge_presets.<name>]``：一个命名评审模型预设。
+
+    评审预设只**引用**模型：``model`` 为 provider registry（models.json）可解析
+    的模型 id；``api_key_env`` 是密钥所在的环境变量名（值仍只由 .env/环境注入，
+    配置与数据库都不保存值本身）。``base_url`` 仅用于自托管/兼容端点，非敏感。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    temperature: FiniteFloat | None = Field(default=None, ge=0.0, le=2.0)
+    api_key_env: str | None = None
+    base_url: str | None = None
+
+    @field_validator("model", "api_key_env", "base_url")
+    @classmethod
+    def _reject_blank_values(cls, value: str | None) -> str | None:
+        """拒绝空字符串；``None`` 表示未声明。"""
+        if value is None:
+            return None
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("judge preset field must be a non-empty string")
+        return normalized_value
+
+
+class AgentRunnerEvaluationSettings(BaseModel):
+    """``[agent_runner.evaluation]``：模型评测（multi-judge）功能配置。
+
+    完全可选：缺段时 Console 正常启动，评测页面显示"未配置评审预设"。
+    ``default_judge_presets`` 是页面预选的评审预设名单，单次 run 可覆盖。
+    并发刻意收敛：评测是手动离线批量任务，必须尊重与 runner 相同的主机
+    capacity，而不是另开一组无界 worker（PRD §5 架构边界）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_judge_presets: list[str] = Field(default_factory=list)
+    max_concurrency: int = Field(default=2, ge=1, le=4)
+    agent_timeout_seconds: int = Field(default=900, ge=10, le=3600)
+    judge_timeout_seconds: int = Field(default=120, ge=5, le=600)
+    judge_presets: dict[str, EvaluationJudgePresetSettings] = Field(default_factory=dict)
 
 
 class AgentRunnerDaemonSettings(BaseModel):

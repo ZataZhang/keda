@@ -147,6 +147,31 @@ agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 - 完整语义、优先级与命令行一次性旗标（`--preset` / `--model` / `--reasoning-effort`）见
   [Agent 模型预设](model-presets.md)。
 
+## Agent Runner 模型评测配置
+
+Console「Evaluations」页的多评审模型评测读取 `[agent_runner.evaluation]` 段；完全可选，
+缺段时 Console 正常启动、页面显示"未配置评审预设"：
+
+```toml
+[agent_runner.evaluation]
+default_judge_presets = ["judge-openai"]   # 页面预选的评审名单，单次 run 可覆盖
+max_concurrency = 2                         # 1–4：评测与 runner 共享主机 capacity
+agent_timeout_seconds = 900
+judge_timeout_seconds = 120
+
+[agent_runner.evaluation.judge_presets.judge-openai]
+model = "gpt-5.1"          # provider registry（models.json）可解析的模型 id
+temperature = 0.0
+api_key_env = "OPENAI_API_KEY"  # 密钥所在环境变量名；值仍只由 .env/环境注入
+base_url = "https://…/v1"       # 可选，自托管/兼容端点；非敏感
+```
+
+- 评审预设只**引用**模型：配置与数据库都不保存密钥值；`model` 解析失败或 env 缺失时
+  页面标记不可用、run 创建 fail-fast，不写入 0 分。
+- 执行侧不新增配置：候选执行复用既有 `[agent_runner.presets.<name>]`。
+- suite YAML、rubric v1、授权流程与结果口径见 [评测与测试](../dev/evaluation.md)，
+  HTTP 契约见 [API 参考](../api/references.md)。
+
 ## Agent Runner Deliberation 配置
 
 `config.toml` 的 `[agent_runner.deliberation]` 段配置多 Agent 合议：

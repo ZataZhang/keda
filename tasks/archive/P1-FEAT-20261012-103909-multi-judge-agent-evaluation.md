@@ -4,7 +4,7 @@
 
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — 执行侧已完成（§9 除 2 项 Human-Confirmed 与 2 项 runner-owned `[~]` gate 外全部勾选，rv-1/rv-2/rv-3 证据见 `tasks/evidence/P1-FEAT-20261012-103909-multi-judge-agent-evaluation/evidence.json`），仅剩 2 项 Human-Confirmed 未确认。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文分为人审层与执行器层：前四节确认评分的含义、用户可见结果与数据边界；后九节定义评测集、评审器、持久化、执行隔离和验收证据。
@@ -439,7 +439,7 @@ erDiagram
 > 验证层级：**component preview / design intent**；授权/拒绝仅切换页面状态，不连接模型 provider。
 > 本地打开：`open docs/prototypes/assets/runtime-consent-preview.png`
 
-交付时每行须提供同状态生产截图/报告，目标图为设计意图，不能替代 run API、SQLite 或实际 payload 授权证据。从真实 Console `/app/evaluations/` 进入；验收材料可用 `just prd review tasks/pending/P1-FEAT-20261012-103909-multi-judge-agent-evaluation.md` 查看。
+交付时每行须提供同状态生产截图/报告，目标图为设计意图，不能替代 run API、SQLite 或实际 payload 授权证据。从真实 Console `/app/evaluations/` 进入；验收材料可用 `just prd review tasks/archive/P1-FEAT-20261012-103909-multi-judge-agent-evaluation.md` 查看（人审清单见 `tasks/evidence/P1-FEAT-20261012-103909-multi-judge-agent-evaluation/human-review-checklist.html`）。
 
 `reviewer: verifier` 的 rubric/schema/failure 单测、状态机与 interrupted 重启断言、并发限流、模型密钥不落库、文档构建和 suite parser 负例属于自动验证，故不列入人读呈递区。
 
@@ -452,45 +452,45 @@ erDiagram
 
 #### Behavior Acceptance
 
-- [ ] 同一 run 固定 suite version/hash、rubric version/hash、base commit/tree hash 和执行/评审模型快照；执行矩阵的每个组合都从干净 worktree 开始，checks 用受限 recipe 执行。（`rv-1` tree manifest 与 run JSON。）
-- [ ] 每个 judge 在每个 candidate/case 单独留分、维度依据、model/prompt snapshot、耗时、usage/成本可用性和结果状态；修改逐评审值能改变重算摘要。（`rv-1` fresh DB 与 aggregation 重算。）
-- [ ] deterministic check、执行结果、稳定性、latency/cost 与模型评分分区呈现；没有 usage/价格事实时标注未知，不填补估算。（页面截图与 DTO。）
-- [ ] timeout、拒答、无效/缺字段 JSON、取消、provider error、suite 错误、未授权和 interrupted 各自可解释；未评分既不进入评分中位数也不成为 0 分；其他 case/judge 不因单一失败丢失。（`rv-3`。）
-- [ ] 评测 run 不触发正式 Issue / PR /生命周期状态变更，Agent 不接触主工作区；执行 worktree、缓存 payload 和 database run 均能按结束/删除策略清理。（`rv-2`/`rv-3` 清单。）
+- [x] 同一 run 固定 suite version/hash、rubric version/hash、base commit/tree hash 和执行/评审模型快照；执行矩阵的每个组合都从干净 worktree 开始，checks 用受限 recipe 执行。（`rv-1` tree manifest 与 run JSON。） — 证据：`rv-1-tree-stamps.txt`（SUITE_HASH_MATCHES_FILE / BASE_COMMIT_MATCHES_REPO / BASE_TREE_UNIFORM 全 True；badref 负控创建 400）、`rv-1-run-detail.json`（矩阵 4 候选 checks 分列 passed/failed）。
+- [x] 每个 judge 在每个 candidate/case 单独留分、维度依据、model/prompt snapshot、耗时、usage/成本可用性和结果状态；修改逐评审值能改变重算摘要。（`rv-1` fresh DB 与 aggregation 重算。） — 证据：`rv-1-sqlite-fresh-read.txt`（8 条逐评审行、user_version 15）、API 中位数与独立 `statistics.median` 重算一致（MEDIAN_RECOMPUTE_MATCH）、单值篡改即改变中位数/范围（MEDIAN_SENSITIVE_TO_DETAIL→EXPECTED_FAIL，还原后 RESTORED_OK）。
+- [x] deterministic check、执行结果、稳定性、latency/cost 与模型评分分区呈现；没有 usage/价格事实时标注未知，不填补估算。（页面截图与 DTO。） — 证据：`rv-1-evaluation-results.png`（checks 徽标与评分分列）、`rv-1-run-detail.json` DTO（duration/usage 与 score 分列；cost 统一 unknown，未造数）。
+- [x] timeout、拒答、无效/缺字段 JSON、取消、provider error、suite 错误、未授权和 interrupted 各自可解释；未评分既不进入评分中位数也不成为 0 分；其他 case/judge 不因单一失败丢失。（`rv-3`。） — 证据：`rv-3-degraded-states.json` 状态桶 {valid:2,refusal:2,invalid:2,timeout:2,provider_error:2} 无任何 0 值、伪 0 分注入被 oracle 检出后还原（COERCION_DETECTED/RESTORED_OK）、suite/缺 key 创建 400、取消 200+重复 409、kill -9 后 interrupted 且 Agent 调用数 2→2。
+- [x] 评测 run 不触发正式 Issue / PR /生命周期状态变更，Agent 不接触主工作区；执行 worktree、缓存 payload 和 database run 均能按结束/删除策略清理。（`rv-2`/`rv-3` 清单。） — 证据：`rv-3-degraded-states.json` formal_ledger_untouched（逐表不变且全 0；monitor/backlog 快照表为 Console lifespan 后台调度器心跳，已注明归因）、`rv-1`/`rv-2` STAGING/WORKTREES_PURGED、删除 run 200→404 级联清理。
 
 #### Frontend Acceptance
 
-- [ ] 从真实 Console 导航进入 `/app/evaluations/` 可选 suite、基线、多个执行预设、多个 judge preset，显示矩阵状态与逐项结果；浏览器刷新后能从 fresh API 读取持久 run。（Playwright user flow + `rv-1-evaluation-results.png`。）
-- [ ] Payload preview 具备 provider/model、任务、summary、Diff 与 check 结果的可读展开、敏感字段提示、费用/usage 可得性和单独确认/拒绝；过期内容需重新确认；拒绝在生产 composition 里可验。（`rv-2`，不以直接渲染 modal 代替页面入口。）
-- [ ] 结果页可以定位 case、execution preset、judge、缺失/失败项；小屏 390×844 可滚动，无横向溢出且不会把表格裁成不可操作。（Playwright viewport 断言与截图。）
+- [x] 从真实 Console 导航进入 `/app/evaluations/` 可选 suite、基线、多个执行预设、多个 judge preset，显示矩阵状态与逐项结果；浏览器刷新后能从 fresh API 读取持久 run。（Playwright user flow + `rv-1-evaluation-results.png`。） — 证据：rv-1 headless Chromium 真实页面全流程（PAGE_* 标记）+ 重启 Console 后 fresh read 一致（FRESH_RESTART_MATCH）；Playwright spec `tests/playwright-e2e/tests/workflows/console-evaluations.no-auth.spec.ts`。
+- [x] Payload preview 具备 provider/model、任务、summary、Diff 与 check 结果的可读展开、敏感字段提示、费用/usage 可得性和单独确认/拒绝；过期内容需重新确认；拒绝在生产 composition 里可验。（`rv-2`，不以直接渲染 modal 代替页面入口。） — 证据：`rv-2-payload-consent.png`（真实 Dialog 展开 diff/模型/manifest hash）、`rv-2-after-page-deny.png`（页面拒绝路径）、篡改后 409 必须重新预览（STALE_APPROVE_CONFLICT + 漂移 hash 亦 409）。
+- [x] 结果页可以定位 case、execution preset、judge、缺失/失败项；小屏 390×844 可滚动，无横向溢出且不会把表格裁成不可操作。（Playwright viewport 断言与截图。） — 证据：`rv-1-narrow-390x844.png` + NARROW_SCROLL_VS_CLIENT 390/390、NARROW_TABLES_IN_SCROLLER true；负控注入 900px 溢出块探针变红（NARROW_OVERFLOW_NEGCONTROL true）。
 
 #### Architecture Acceptance
 
-- [ ] 依赖方向维持 `api -> core -> engines -> infrastructure`；suite 规则、rubric 验证、分数 reducer 属 core；React 页面不自行计算评分口径。
-- [ ] Judge adapter 使用 `create_chat_model` 或经审查等价的无工具 model call；评审请求不复用可运行 shell/仓库工具的 Agent task profile。credential、provider、model 在服务端解析，不由客户端提交密钥。
-- [ ] suite recipe 不拼 shell 字符串，不继承任意用户环境、不在主工作区执行；Agent/模型调用数量受预算和既有并发上限限制；run 创建、授权和删除有幂等/并发状态约束。
-- [ ] SQLite schema 迁移遵守 ConsoleStore `PRAGMA user_version` 路径，升级后现有 Console 日志、Stats、Invocation 查询保持原样；run 删除级联清除相关行和临时文件。
+- [x] 依赖方向维持 `api -> core -> engines -> infrastructure`；suite 规则、rubric 验证、分数 reducer 属 core；React 页面不自行计算评分口径。 — 证据：`src/backend/core/shared/models/model_evaluation.py`（parse/validate/rubric 常量）与 `core/use_cases/model_evaluation.py`（聚合 reducer）；engines 仅做 IO 编排；`frontend-public/components/evaluations/*` 只渲染 API summary 字段，无中位数计算。
+- [x] Judge adapter 使用 `create_chat_model` 或经审查等价的无工具 model call；评审请求不复用可运行 shell/仓库工具的 Agent task profile。credential、provider、model 在服务端解析，不由客户端提交密钥。 — 证据：`engines/model_evaluation/judge_client.py` 经 `create_chat_model`（llm extras，需 `uv sync --extra llm`）；rv-1/rv-2 mock HTTP 计数（8 请求/模型分布 4+4）证明真实调用链；请求体不含 key；预设可用性探针只读本地凭据链。
+- [x] suite recipe 不拼 shell 字符串，不继承任意用户环境、不在主工作区执行；Agent/模型调用数量受预算和既有并发上限限制；run 创建、授权和删除有幂等/并发状态约束。 — 证据：`engines/model_evaluation/checks.py` argv 白名单（pytest/unittest/node-test）、`execution.py` ThreadPoolExecutor ceiling=min(max_concurrency, cells)；rv-1 AGENT_INVOCATIONS=4/MOCK=8 与矩阵严格一致；授权三 hash 复核 409、重复取消 409（rv-2/rv-3）。
+- [x] SQLite schema 迁移遵守 ConsoleStore `PRAGMA user_version` 路径，升级后现有 Console 日志、Stats、Invocation 查询保持原样；run 删除级联清除相关行和临时文件。 — 证据：rv-1 SQLITE_USER_VERSION=15 fresh read；`just test` 4280 passed 覆盖既有 store 测试；rv-3 删除 run → 404 + worktrees/staging 清理，级联见 `console_store_evaluation.py`。
 
 #### Documentation Acceptance
 
-- [ ] `docs/dev/evaluation.md` 记录 suite YAML 字段、版本/hash、授权流程、rubric v1、逐评审解读、删除/保留和无凭据验证入口；`mkdocs.yml` 若新增长期页面则同步导航。
-- [ ] `docs/api/references.md` 记录 suite/run/result/preview/approve/delete APIs，状态枚举、Conflict/error 语义、默认不开启 judge 和 secret/payload 边界。
-- [ ] 如新增 config key，`config.toml`、settings loader 和配置参考文档同步；密钥仍仅由现有 env 注入、`.env.example` 只保留未注释空密钥项，不把预设模型值写为秘密。
-- [ ] Prototype Hub registry、原型返回入口、截图 sidecar、说明页和窄屏行为一致；现有 `/app/stats` 统计仍为单独的历史执行数据入口。
+- [x] `docs/dev/evaluation.md` 记录 suite YAML 字段、版本/hash、授权流程、rubric v1、逐评审解读、删除/保留和无凭据验证入口；`mkdocs.yml` 若新增长期页面则同步导航。 — 证据：重写后的 `docs/dev/evaluation.md`（2026-10-13）+ `tasks/evaluation-suites/README.md`；`uv run mkdocs build --strict` exit 0（`dev/evaluation.md` 已在导航 `mkdocs.yml:93`）。
+- [x] `docs/api/references.md` 记录 suite/run/result/preview/approve/delete APIs，状态枚举、Conflict/error 语义、默认不开启 judge 和 secret/payload 边界。 — 证据：`docs/api/references.md`「模型评测 Console 端点」节（10 端点 + 枚举 + 404/409/400 映射）；`uv run mkdocs build --strict` exit 0。
+- [x] 如新增 config key，`config.toml`、settings loader 和配置参考文档同步；密钥仍仅由现有 env 注入、`.env.example` 只保留未注释空密钥项，不把预设模型值写为秘密。 — 证据：`config.toml` 注释示例段 + `EvaluationJudgePresetSettings`/`AgentRunnerEvaluationSettings`（只存 env 名，不存值）+ `docs/guides/configuration.md`「Agent Runner 模型评测配置」节；`.env.example` 未改动（无新密钥变量）。
+- [x] Prototype Hub registry、原型返回入口、截图 sidecar、说明页和窄屏行为一致；现有 `/app/stats` 统计仍为单独的历史执行数据入口。 — 证据：`docs/prototypes/assets/prototype-hub.js:21-24` 已登记评测流程；`runtime-evaluation-preview.png`/`.source.md` 与 `runtime-consent-preview.png`/`.source.md` sidecar 成对存在；Stats 页未改动，评测入口为独立 `/app/evaluations/`。
 
 #### Validation Acceptance
 
-- [ ] `rv-1` 通过真实 `kc console` 与页面/API、真实 SQLite store/schema、隔离 fixture repo/worktree 采集同批矩阵、fresh process 查询、逐评审记录和摘要重算；provider 在自动测试边界替身可用。
-- [ ] `rv-2` 做拒绝/批准两条真实页面路径；负控用 provider spy 核实拒绝后请求数为零、payload 改变后 approval 失败；live provider run 使用 sanitized suite 与用户 opt-in 凭据，保存 provider/model 与 usage，不提交任何秘密。
-- [ ] `rv-3` 用 suite/provider boundary 注入 timeout/refusal/schema 错误/cancel/restart，在真实 store/API 中证明未评分为非 score 状态、未自动重试、其余结果仍可读取。
-- [ ] 配套 targeted Python 与 Playwright 用户流程、`uv run mkdocs build --strict`、前端 typecheck/build 按 `docs/ai-standards/testing.md` 分类记录；若无法访问真实模型服务，明确披露 live provider 未覆盖，不把 mock 称为 live。
+- [x] `rv-1` 通过真实 `kc console` 与页面/API、真实 SQLite store/schema、隔离 fixture repo/worktree 采集同批矩阵、fresh process 查询、逐评审记录和摘要重算；provider 在自动测试边界替身可用。 — 证据：`evidence.json` item 1（RV1_GREEN + 全部 stdout_assertions 命中，脚本 `scripts/rv1.py`/`scripts/rv_narrow.py`）。
+- [x] `rv-2` 做拒绝/批准两条真实页面路径；负控用 provider spy 核实拒绝后请求数为零、payload 改变后 approval 失败；live provider run 使用 sanitized suite 与用户 opt-in 凭据，保存 provider/model 与 usage，不提交任何秘密。 — 证据：`evidence.json` item 2（REQUEST_COUNT_AFTER_PAGE_DENY: 0、STALE_APPROVE_CONFLICT: True、批准后 mock 恰 8）；**live provider 未执行**（本机无凭据，按 PRD 属用户 opt-in，已在 `rv-2-consent-negative-control.txt` LIVE_PROVIDER_NOTE 披露，mock 不称 live）。
+- [x] `rv-3` 用 suite/provider boundary 注入 timeout/refusal/schema 错误/cancel/restart，在真实 store/API 中证明未评分为非 score 状态、未自动重试、其余结果仍可读取。 — 证据：`evidence.json` item 3 + `rv-3-degraded-states.json`（状态桶、interrupted 调用数 2→2、账本 unchanged）。
+- [x] 配套 targeted Python 与 Playwright 用户流程、`uv run mkdocs build --strict`、前端 typecheck/build 按 `docs/ai-standards/testing.md` 分类记录；若无法访问真实模型服务，明确披露 live provider 未覆盖，不把 mock 称为 live。 — 证据：`uv run pytest tests/test_model_evaluation_domain.py tests/test_console_evaluation_store.py tests/test_console_evaluation_api.py -o addopts=""`（本地核心档）与 `just test` 4280 passed / 1 skipped（2026-10-13 重验）；`uv run mkdocs build --strict` exit 0（文档修正后重跑）；前端 typecheck/build 见任务 #6；live 披露同 item 2。
 - [~] 独立 verifier 对 R2/R3 证据、同基线矩阵和外发授权负控复核 PASS — runner-owned gate。
 - [~] PR 证据发布、主线归档与最终 tree 等价复核 — runner-owned gate。
 
 #### Delivery Readiness
 
-- [ ] §9.1 每行都由相同状态的原型/生产配对及可读产物支撑；completion message 内嵌目标图与实现图，并携带表格内容。
-- [ ] 所有非 Human-Confirmed 项勾选或标 `[~]` runner gate，证据对应具体 run/hash/final tree；§13 Final Reconciliation 完成且 banner 与 §9 状态一致。
+- [x] §9.1 每行都由相同状态的原型/生产配对及可读产物支撑；completion message 内嵌目标图与实现图，并携带表格内容。 — 生产截图 `rv-1-evaluation-results.png` / `rv-2-payload-consent.png` / `rv-2-after-page-deny.png` / `rv-1-narrow-390x844.png` 已与同状态原型配对；completion message 携带 §9.1 表格内容与图片引用。
+- [x] 所有非 Human-Confirmed 项勾选或标 `[~]` runner gate，证据对应具体 run/hash/final tree；§13 Final Reconciliation 完成且 banner 与 §9 状态一致。 — run 标识见 `rv-1-tree-stamps.txt`（PAGE run id、manifest hash、base commit/tree、suite hash）与 `rv-3-degraded-states.json`（各场景 run_id）；`evidence.json` 逐 item 绑定 stdout 断言与证据文件；两条 runner-owned gate 保持 `[~]` 待 PR/verifier 环节。
 
 ## 10. Functional Requirements
 
@@ -531,14 +531,30 @@ erDiagram
 
 ### Final Reconciliation
 
-- Interpretation: 待实现后确认 — 对照固定 suite/base、多个 execution/judge preset、逐项评审和授权决策。
-- Public behavior and contracts: 待实现后确认 — 核对 `/app/evaluations/`、run 状态、payload manifest/consent 与结果 DTO。
-- Related PRD status: 待归档前复核 — 核对运行时 Dashboard 导航、历史 Stats 和 model settings 的当前主线行为。
-- Requirements and risks: 待实现后确认 — 检查数据保留、外发边界、judge 错误态、并发/成本及评分非门禁语义。
+- Interpretation: 已确认 — §1 解读回显五行全部有真实入口证据：同 suite/base 多预设对照与逐维分歧（rv-1）、授权前逐字节预览与显式批准（rv-2 页面批准/拒绝双路径）、失败态独立不折算 0 分（rv-3 状态桶 + 伪 0 分负控）、拒绝/取消零外发（rv-2 REQUEST_COUNT 0 / rv-3 mock delta 0）。
+- Public behavior and contracts: 已确认 — `/app/evaluations/` 页面、run 状态机（created→…→awaiting_judge_consent→judging→completed/cancelled/interrupted）、payload manifest/consent 三 hash 语义与结果 DTO 与 `docs/api/references.md` 一致；400/404/409 映射经 rv-1/rv-2/rv-3 实测。
+- Related PRD status: 已复核 — 运行时 Dashboard（P1-FEAT-20261012-103222）导航与 Stats 历史数据入口未改动；评测为独立 `/app/evaluations/` 路径，judge 分数不参与任何生命周期门禁。
+- Requirements and risks: 已确认 — 数据保留（摘要落库、raw 不落库）、外发边界（授权前零 provider 调用）、judge 错误态分列、并发上限与调用数一致、评分非门禁语义均有证据；残余风险见 §12（live provider 未覆盖、rubric v2、成本事实源）。
 - Reconciled differences:
-  - none（开工前无已知实现差异；agent preset registry 与文本 provider model registry 是不同职责，实施时不得把两者混为一个执行命令。）
+  - 执行期实现偏差与缺陷修复已记录于 Change Log（probe_base 400 化、worktree 父目录清理、rubric 维度文档纠错、llm extras 前置、settings 下限），均不改需求语义；rubric 维度文档名错误为开工前既有文案问题，已修正并与 core 常量对齐。
 
 ## Change Log
+
+### 执行期实现偏差与文档同步（2026-10-13，executor）
+- 类型: implementation-deviation / documentation
+- 原文: Change Impact Tree 建议测试放 `tests/backend/`、Playwright spec 放 `tests/console/model-evaluations.spec.ts`、评测端点直接改 `agent_runner_console.py`；`docs/dev/evaluation.md` 与 `tasks/evaluation-suites/README.md` 把 rubric 维度写成 `code_quality` / `verification`；文档未记录 judge 运行时依赖与评测 settings 下限。
+- 变更后: 三份 Python 测试按仓库既有平铺约定落在 `tests/`（`test_model_evaluation_domain.py`、`test_console_evaluation_store.py`、`test_console_evaluation_api.py`）；Playwright 用户流程 spec 为 `tests/playwright-e2e/tests/workflows/console-evaluations.no-auth.spec.ts`（该包按 smoke/workflows 目录与 `.no-auth` project 组织）；端点放入按域拆分的新模块 `src/backend/api/routes/agent_runner_console_evaluation.py` 并挂载到 app；rubric 维度文档统一更正为 `implementation_quality` / `verification_evidence`（与 core `EVALUATION_RUBRIC_DIMENSIONS` 及前端 `DIMENSION_LABELS` 对齐）；`docs/dev/evaluation.md` 补充 judge 经 `create_chat_model` 无条件 import langchain SDK、新环境需 `uv sync --extra llm` 的前置说明；同文件与 RV harness 记录 `[agent_runner.evaluation]` 下限 `agent_timeout_seconds ≥ 10`、`judge_timeout_seconds ≥ 5`（rv-3 env1 取 10s）；`docs/guides/configuration.md` 增补 `[agent_runner.evaluation]` 配置段说明；`tasks/evaluation-suites/README.md` 作为维护指南留在 registry 目录、不进 mkdocs 导航。
+- 原因: 本仓库不存在 `tests/backend/`，全部既有测试平铺于 `tests/`；playwright-e2e 包按既有目录/project 约定组织 console 页面 specs；路由按域拆分是 Console 既有模式；文档维度名与代码常量不符属开工前既有文案错误；`llm` extras 与 settings 下限是实现后确认的真实运行约束。
+- 影响: 不改 §10 FR 语义与对外 API；测试、路由与文档位置更贴合仓库事实约定；文档与代码常量一致，新环境可据此准备依赖；超时场景构造受 settings 下限约束。
+- 审核: executor 自查完成；`just test`、`uv run mkdocs build --strict` 与 rv-1/rv-2/rv-3 绿灯佐证；无需求语义变化，不需要人工裁决。
+
+### 执行期缺陷修复（2026-10-13，executor）
+- 类型: bug-fix
+- 原文: engines 层 `cancel_run` 向 core `transition_run` 传状态字符串（core 期望枚举）；`workspace.probe_base` 对不可达 `base_ref` 直接抛 `EvaluationWorkspaceError`，run 创建返回 500；逐单元 worktree 移除后 `worktrees/<run_id>/` 空父目录残留；随包 `kedacode-operator` skill 模板写有 `kc daemon --all`，与 CLI help 不符（开工前既有守卫测试 `test_packaged_skill_command_examples_match_cli_help` 失败）。
+- 变更后: `cancel_run` 改传枚举；`probe_base` 不可达基线包成 `ValueError` 走既有校验链返回 400（rv-1 负控 `rv284-badref-suite` 实测 400 且错误消息含「基线」）；新增 `remove_directory_if_empty` 并在 cell pool 收尾调用（rv-1 复验 WORKTREES_PURGED: True）；skill 模板措辞更正为 `kc daemon run --all`。
+- 原因: 前两项为执行期实现缺陷，分别由新增 API 测试与 rv-1 负控捕获；空父目录清理是 run 结束清理策略的应有效果；skill 措辞修复是让 `just test` 门禁通过的既有错误更正，与评测功能无关。
+- 影响: 非法基线路径从 500 收敛为可解释 400；取消路径类型正确；临时工作区目录不再残留；错误语义与 §7.6 校验计划一致，不改变已定义状态机。
+- 审核: executor 修复经 targeted pytest、`just test` 与 rv-1 重跑绿灯验证；属缺陷收敛，无需人工裁决。
 
 ### 初始 PRD
 - Type: scope / architecture / acceptance
