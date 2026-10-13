@@ -460,7 +460,7 @@ erDiagram
 
 #### Frontend Acceptance
 
-- [x] 从真实 Console 导航进入 `/app/evaluations/` 可选 suite、基线、多个执行预设、多个 judge preset，显示矩阵状态与逐项结果；浏览器刷新后能从 fresh API 读取持久 run。（Playwright user flow + `rv-1-evaluation-results.png`。） — 证据：rv-1 headless Chromium 真实页面全流程（PAGE_* 标记）+ 重启 Console 后 fresh read 一致（FRESH_RESTART_MATCH）；Playwright spec `tests/playwright-e2e/tests/workflows/console-evaluations.no-auth.spec.ts`。
+- [x] 从真实 Console 导航进入 `/app/evaluations/` 可选 suite、基线、多个执行预设、多个 judge preset，显示矩阵状态与逐项结果；浏览器刷新后能从 fresh API 读取持久 run。（Playwright user flow + `rv-1-evaluation-results.png`。） — 证据：rv-1 headless Chromium 真实页面全流程（PAGE_* 标记）+ 重启 Console 后 fresh read 一致（FRESH_RESTART_MATCH）；Playwright spec `tests/playwright-e2e/tests/workflows/console-evaluations.no-auth.spec.ts`（2026-10-13 最终树 `just e2e` 复跑 3 passed，捕获 `rv-1-playwright-spec-run.txt`；spec 曾有三处断言写错目标，修订见 Change Log）。
 - [x] Payload preview 具备 provider/model、任务、summary、Diff 与 check 结果的可读展开、敏感字段提示、费用/usage 可得性和单独确认/拒绝；过期内容需重新确认；拒绝在生产 composition 里可验。（`rv-2`，不以直接渲染 modal 代替页面入口。） — 证据：`rv-2-payload-consent.png`（真实 Dialog 展开 diff/模型/manifest hash）、`rv-2-after-page-deny.png`（页面拒绝路径）、篡改后 409 必须重新预览（STALE_APPROVE_CONFLICT + 漂移 hash 亦 409）。
 - [x] 结果页可以定位 case、execution preset、judge、缺失/失败项；小屏 390×844 可滚动，无横向溢出且不会把表格裁成不可操作。（Playwright viewport 断言与截图。） — 证据：`rv-1-narrow-390x844.png` + NARROW_SCROLL_VS_CLIENT 390/390、NARROW_TABLES_IN_SCROLLER true；负控注入 900px 溢出块探针变红（NARROW_OVERFLOW_NEGCONTROL true）。
 
@@ -483,7 +483,7 @@ erDiagram
 - [x] `rv-1` 通过真实 `kc console` 与页面/API、真实 SQLite store/schema、隔离 fixture repo/worktree 采集同批矩阵、fresh process 查询、逐评审记录和摘要重算；provider 在自动测试边界替身可用。 — 证据：`evidence.json` item 1（RV1_GREEN + 全部 stdout_assertions 命中，脚本 `scripts/rv1.py`/`scripts/rv_narrow.py`）。
 - [x] `rv-2` 做拒绝/批准两条真实页面路径；负控用 provider spy 核实拒绝后请求数为零、payload 改变后 approval 失败；live provider run 使用 sanitized suite 与用户 opt-in 凭据，保存 provider/model 与 usage，不提交任何秘密。 — 证据：`evidence.json` item 2（REQUEST_COUNT_AFTER_PAGE_DENY: 0、STALE_APPROVE_CONFLICT: True、批准后 mock 恰 8）；**live provider 未执行**（本机无凭据，按 PRD 属用户 opt-in，已在 `rv-2-consent-negative-control.txt` LIVE_PROVIDER_NOTE 披露，mock 不称 live）。
 - [x] `rv-3` 用 suite/provider boundary 注入 timeout/refusal/schema 错误/cancel/restart，在真实 store/API 中证明未评分为非 score 状态、未自动重试、其余结果仍可读取。 — 证据：`evidence.json` item 3 + `rv-3-degraded-states.json`（状态桶、interrupted 调用数 2→2、账本 unchanged）。
-- [x] 配套 targeted Python 与 Playwright 用户流程、`uv run mkdocs build --strict`、前端 typecheck/build 按 `docs/ai-standards/testing.md` 分类记录；若无法访问真实模型服务，明确披露 live provider 未覆盖，不把 mock 称为 live。 — 证据：`uv run pytest tests/test_model_evaluation_domain.py tests/test_console_evaluation_store.py tests/test_console_evaluation_api.py -o addopts=""`（本地核心档）与 `just test` 4280 passed / 1 skipped（2026-10-13 重验）；`uv run mkdocs build --strict` exit 0（文档修正后重跑）；前端 typecheck/build 见任务 #6；live 披露同 item 2。
+- [x] 配套 targeted Python 与 Playwright 用户流程、`uv run mkdocs build --strict`、前端 typecheck/build 按 `docs/ai-standards/testing.md` 分类记录；若无法访问真实模型服务，明确披露 live provider 未覆盖，不把 mock 称为 live。 — 证据：`uv run pytest tests/test_model_evaluation_domain.py tests/test_console_evaluation_store.py tests/test_console_evaluation_api.py -o addopts=""`（本地核心档）与 `just test` 4280 passed / 1 skipped（2026-10-13 重验）；`uv run mkdocs build --strict` exit 0（文档修正后重跑）；前端 typecheck/build 见任务 #6；live 披露同 item 2。2026-10-13 最终树 `e94f24b4` 复验：定向 44 项 pytest passed、`just e2e` 评测 spec 3 passed、`uv run mkdocs build --strict` exit 0、`pnpm typecheck` clean，RV 剧本重跑记录见 Change Log「最终树证据重采集」。
 - [~] 独立 verifier 对 R2/R3 证据、同基线矩阵和外发授权负控复核 PASS — runner-owned gate。
 - [~] PR 证据发布、主线归档与最终 tree 等价复核 — runner-owned gate。
 
@@ -539,6 +539,38 @@ erDiagram
   - 执行期实现偏差与缺陷修复已记录于 Change Log（probe_base 400 化、worktree 父目录清理、rubric 维度文档纠错、llm extras 前置、settings 下限），均不改需求语义；rubric 维度文档名错误为开工前既有文案问题，已修正并与 core 常量对齐。
 
 ## Change Log
+
+### 交付门禁 flake 修复：kc preview 僵尸误判（2026-10-13，executor）
+- 类型: test
+- 原文: runner 门禁 `just test all` 在 `tests/test_kc_preview.py::test_stop_terminates_the_whole_owned_group` 变红（`assert not _pid_alive(grandchild_pid)`，4280 项其余全绿）。该测试与评测功能无关且与 main 一致：`_pid_alive` 仅在 Linux 分支排除僵尸，macOS 分支用 `os.kill(pid, 0)` 把「已随组退出、launchd 尚未回收」的孙进程僵尸表项误报为存活；产品侧 `_terminate_process_group` 本就在宽限期内轮询到进程组排空才返回。全量并行负载放大回收窗口导致偶发假阳。
+- 变更后: `_pid_alive` 增加 darwin 分支，用 `ps -o state=` 把 `Z` 状态判为已退出；新增 `_wait_pid_gone`（≤5s 轮询）替换两处即时断言——真实存活的孤儿进程（sleep 300）依旧会变红。自证：live→alive、未回收→`_wait_pid_gone` 返回 False、SIGKILL+wait→gone、SIGKILL 不 wait（Z 态）→判死。`tests/test_kc_preview.py` 22 passed，`just test all` 复跑通过。
+- 原因: 门禁必须全绿才可交付；按测试时序缺陷根因修复断言的存活判定，不 skip、不弱化检查。
+- 影响: 仅测试文件；无产品代码与 §10 FR 语义变化。
+- 审核: 执行侧自证（复现→根因→负控→修复→全量复跑）。
+
+### e2e spec 交付缺口修复（2026-10-13，executor）
+- 类型: test / bug-fix（交付物缺陷）
+- 原文: `tests/playwright-e2e/tests/workflows/console-evaluations.no-auth.spec.ts` 随 `ca184bc0` 提交并在 §9 Frontend Acceptance 中被引用为证据，但从未在全栈环境跑通过：①mock `default_judge_presets: ["judge-1"]` 时页面会预选 judge-1，spec 再点击反而取消勾选，创建请求带 `judge_presets: []`；②断言文案「预计请求数： 2」与实际渲染「预计请求数：2」不符；③授权 409 的错误经 sonner toast 呈报，spec 却在对话框容器内找「授权提交失败…」。CI 未接入 Playwright e2e，红 spec 未被门禁发现。
+- 变更后: spec 对齐真实 UI 契约——judge-1 断言预选 `toBeChecked`（不再点击）、文案去掉多余空格、409 错误断言改到 `[data-sonner-toaster]` 并补「对话框保持打开 + run 仍待授权」断言。`just e2e tests/workflows/console-evaluations.no-auth.spec.ts` 在最终树 `e94f24b4` 复跑 **3 passed**（捕获：`rv-1-playwright-spec-run.txt`）。
+- 原因: §9 第 43 项把该 spec 列为 Frontend Acceptance 证据，证据文件本身必须真实可跑绿；三处偏差均为 spec 写错断言目标/文案，产品行为（预选、toast 报错、hash 冲突重新预览）与 PRD 授权红线一致，不改产品代码。
+- 影响: 仅测试文件；不改 §10 FR 语义与 rv-1/rv-2/rv-3 剧本断言。补强「创建/启动绝不触发评审端点」「deny 留 unauthorized 行」「过期 hash 409 保留预览」三条红线的浏览器级回归网。
+- 审核: 执行侧自证（红→修复→绿全记录）；`Human-Confirmed` 不受影响。
+
+### 最终树证据重采集（2026-10-13，executor）
+- 类型: evidence
+- 原文: Pre-PR 评审修复条目声明 rv-1/rv-2/rv-3 证据采集于修复前树 `ca184bc0`，修复后行为由单元测试代证。
+- 变更后: 在最终树 `e94f24b4` 完整重跑三个 RV 剧本（含各自负控先红后绿）与 `rv_narrow.py`，全部转绿；新增 stdout 捕获 `rv-1-final-tree-run.txt` / `rv-2-final-tree-run.txt` / `rv-3-final-tree-run.txt`，截图、run JSON、fresh SQLite 读取与退化状态报告同批再生成；`evidence.json` 登记 `recollected_at_final_tree` 并把三份新捕获并入各 item 的 `evidence_files`。另在最终树重验 44 项评测定向测试（passed）、`uv run mkdocs build --strict`（exit 0）、前端 `pnpm typecheck`（clean）。
+- 原因: 证据完整性要求关键 RV 证据绑定最终实现树；修复触碰了 consent/预览/状态迁移路径，重采集消除对修复前树的依赖。
+- 影响: 不改任何需求语义与代码；rv-1/rv-2/rv-3 验收断言的通过状态由最终树自身证据支撑。
+- 审核: 执行侧自证；banner 与 §9 状态不变（仍 `🧍 待人工验收`，Human-Confirmed 两项保持未勾）。
+
+### Pre-PR 评审修复（2026-10-13，reviewer）
+- 类型: bug-fix / documentation
+- 原文: 首轮 pre-PR 评审发现三处交付缺口——①候选执行与 judge 调用按**实时配置**解析预设，run 创建后配置漂移会让「所批即所发」失真；②payload 预览上限 40k 字符与文档「逐字节一致的完整预览」不符；③consent/cancel 的状态迁移冲突（`EvaluationStoreConflictError`）会以 500 逃逸而非 409。
+- 变更后: 新增 `preset_snapshot_mismatch` 领域函数并在 `_execute_cell` / `_execute_judge` 调用前核对冻结快照（agent/model/reasoning_effort 与 model/temperature/api_key_env/base_url），漂移即停并落可解释失败态、零外发；judge 快照补冻结 `base_url`；预览上限提到 250k 字符（覆盖 diff 字节上限的最坏尺寸），超出显式置 `payload_truncated=true` 且 hash 仍绑定全文；consent/cancel/start 迁移冲突统一映射 409，deny 收尾路径保持写 `unauthorized` 评分行并清除暂存 payload；`docs/api/references.md` 与 `docs/dev/evaluation.md` 同步措辞。
+- 原因: 三处均为评审确认的实现缺口而非需求语义变化——PRD 解读回显承诺的「冻结快照」「所批即所发」「错误可解释」需要在配置漂移与并发竞争下仍然成立。
+- 影响: 不改 §10 FR 语义与对外 API 形状（预览响应仅新增/明确既有 `payload_truncated` 字段语义）。rv-1/rv-2/rv-3 证据包采集于修复前树 `ca184bc0`，其断言路径（干净 worktree、hash 三比对、deny 零外发、失败态分列）在修复后行为不变；漂移守卫与 409 映射由修复新增的单元测试与 API/领域测试（`tests/test_model_evaluation_domain.py` 等 44 项）在最终树验证。
+- 审核: reviewer 修复随 pre-PR 门禁提交；`just test all`、pre-commit 与 `uv run mkdocs build --strict` 在最终树通过。
 
 ### 执行期实现偏差与文档同步（2026-10-13，executor）
 - 类型: implementation-deviation / documentation

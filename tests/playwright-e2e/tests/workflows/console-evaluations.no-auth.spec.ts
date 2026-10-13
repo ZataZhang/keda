@@ -365,7 +365,8 @@ test.describe('Console 模型评测页', () => {
     await expect(page.getByText('演示评测集 · 仓库 /tmp/demo-repo')).toBeVisible()
     await page.getByRole('checkbox', { name: '执行预设 alpha' }).click()
     await page.getByRole('checkbox', { name: '执行预设 beta' }).click()
-    await page.getByRole('checkbox', { name: '评审预设 judge-1' }).click()
+    // 页面按 default_judge_presets 预选 judge-1；点击反而会把已勾选项取消。
+    await expect(page.getByRole('checkbox', { name: '评审预设 judge-1' })).toBeChecked()
     await expect(page.getByRole('checkbox', { name: '评审预设 judge-offline' })).toBeDisabled()
 
     await page.getByTestId('evaluation-create').click()
@@ -411,7 +412,7 @@ test.describe('Console 模型评测页', () => {
     await expect(dialog.locator('code').filter({ hasText: 'hash-await' })).toHaveCount(2)
     await dialog.locator('details').first().click()
     await expect(dialog.getByText('+def fizzbuzz(n): ...')).toBeVisible()
-    await expect(dialog).toContainText('预计请求数： 2')
+    await expect(dialog).toContainText('预计请求数：2')
     await expect(dialog).toContainText('payload 含候选代码差异')
 
     await dialog.getByRole('button', { name: '拒绝外发' }).click()
@@ -436,7 +437,12 @@ test.describe('Console 模型评测页', () => {
       .click()
     const dialog = page.getByRole('dialog')
     await dialog.getByRole('button', { name: '确认外发并评审' }).click()
-    await expect(dialog.getByText('授权提交失败：授权请求的 manifest hash 与 run 冻结值不一致', { exact: false })).toBeVisible()
+    // 提交失败经 sonner toast 呈报（对话框本身保持打开并自动重新预览）。
+    const toaster = page.locator('[data-sonner-toaster]')
+    await expect(
+      toaster.getByText('授权提交失败：授权请求的 manifest hash 与 run 冻结值不一致', { exact: false })
+    ).toBeVisible()
+    await expect(dialog).toBeVisible()
     // run 未被改写：仍处于待授权。
     await expect(page.getByTestId('evaluation-run-detail')).toContainText('待授权评审')
   })
