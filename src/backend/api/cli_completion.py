@@ -6,13 +6,22 @@ Keeping completion logic in a dedicated module prevents ``cli_typer.py`` from
 
 from __future__ import annotations
 
+import os
+import sys
+from collections.abc import Sequence
 from enum import Enum
 from importlib.metadata import entry_points
 from pathlib import Path
 
+import click
 import typer
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
 from typer.completion import get_completion_script
 
+from backend.api.cli_console import error_console
+from backend.api.cli_output import machine_output_requested
 from backend.core.shared.models import product_identity
 
 # 补全协议环境变量名是已安装补全脚本写死的跨版本契约，永久保留旧拼写，因此这里
@@ -24,6 +33,7 @@ _COMPLETION_ENV_VAR = product_identity.COMPLETION_ENV_VAR_NAME
 _USER_CONFIG_DIR_NAME = product_identity.LONG_COMMAND_NAME
 # 与主命令同 target 的 console script 即别名入口，单一事实源是 pyproject [project.scripts]。
 _CLI_ENTRY_POINT_TARGET = "backend.api.cli:main"
+_COMPLETION_HINT_MARKER_PREFIX = ".completion-setup-prompt-shown"
 
 
 class CompletionShellChoice(str, Enum):
@@ -83,37 +93,226 @@ def _append_unique_line(file_path: Path, line: str) -> bool:
     return True
 
 
+def _completion_script_path(shell: CompletionShellChoice, home_path: Path) -> Path:
+    """返回指定 shell 的用户级补全脚本路径。"""
+    if shell is CompletionShellChoice.zsh:
+        return home_path / ".zsh" / "completions" / f"_{_PRIMARY_COMMAND_NAME}"
+    if shell is CompletionShellChoice.bash:
+        return (
+            home_path
+            / ".config"
+            / _USER_CONFIG_DIR_NAME
+            / f"{_PRIMARY_COMMAND_NAME}_completion.bash"
+        )
+    return home_path / ".config" / "fish" / "completions" / f"{_PRIMARY_COMMAND_NAME}.fish"
+
+
+def _completion_profile_path(
+    shell: CompletionShellChoice,
+    home_path: Path,
+) -> Path | None:
+    """返回需要 source 补全脚本的 shell profile；fish 会自动发现脚本。"""
+    if shell is CompletionShellChoice.zsh:
+        return home_path / ".zshrc"
+    if shell is CompletionShellChoice.bash:
+        return home_path / ".bashrc"
+    return None
+
+
+def _completion_source_line(completion_path: Path) -> str:
+    """生成 bash / zsh profile 中加载补全脚本的配置行。"""
+    return f'[ -f "{completion_path}" ] && source "{completion_path}"'
+
+
+def _completion_installation_exists(
+    shell: CompletionShellChoice,
+    home_path: Path,
+) -> bool:
+    """检查补全脚本及其 shell 加载配置是否已由 kc 安装。"""
+    completion_path = _completion_script_path(shell, home_path)
+    if not completion_path.is_file():
+        return False
+    profile_path = _completion_profile_path(shell, home_path)
+    if profile_path is None:
+        return True
+    try:
+        profile_lines = profile_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    return _completion_source_line(completion_path) in profile_lines
+
+
+def _choose_completion_setup(shell: CompletionShellChoice) -> bool:
+    """用方向键选择是否启用补全，默认选择安装。"""
+    selected_index = 0
+    with Live(console=error_console, transient=True, auto_refresh=False) as live_menu:
+        while True:
+            menu_text = Text()
+            menu_text.append(f"Enable {shell.value} shell completion?\n\n", style="bold")
+            menu_choices = ("Install completion (default)", "Not now")
+            for choice_index, choice_text in enumerate(menu_choices):
+                is_selected = choice_index == selected_index
+                cursor = "❯ " if is_selected else "  "
+                menu_text.append(
+                    f"{cursor}{choice_text}\n",
+                    style="bold cyan" if is_selected else "dim",
+                )
+            menu_text.append("\n↑/↓ move · Enter select · q skip", style="dim")
+            live_menu.update(Panel(menu_text, border_style="cyan", expand=False), refresh=True)
+
+            key_buffer = click.getchar()
+            while key_buffer:
+                if key_buffer.startswith(("\x1b[", "\x1bO")):
+                    sequence_end = next(
+                        (
+                            index
+                            for index, sequence_character in enumerate(key_buffer[2:], start=2)
+                            if sequence_character.isalpha()
+                        ),
+                        None,
+                    )
+                    if sequence_end is None:
+                        key_buffer = ""
+                        continue
+                    pressed_key = {"A": "up", "B": "down"}.get(key_buffer[sequence_end], "ignore")
+                    key_buffer = key_buffer[sequence_end + 1 :]
+                elif key_buffer.startswith(("\x00", "\xe0")) and len(key_buffer) > 1:
+                    pressed_key = {"H": "up", "P": "down"}.get(key_buffer[1], "ignore")
+                    key_buffer = key_buffer[2:]
+                else:
+                    key_character = key_buffer[0]
+                    key_buffer = key_buffer[1:]
+                    if key_character in {"\r", "\n"}:
+                        pressed_key = "select"
+                    elif key_character.lower() == "q":
+                        pressed_key = "skip"
+                    else:
+                        pressed_key = "ignore"
+
+                if pressed_key == "up":
+                    selected_index = max(0, selected_index - 1)
+                elif pressed_key == "down":
+                    selected_index = min(1, selected_index + 1)
+                elif pressed_key == "select":
+                    return selected_index == 0
+                elif pressed_key == "skip":
+                    return False
+
+
+def _mark_completion_setup_prompt_shown(marker_path: Path) -> None:
+    """持久化提示状态；写入失败不能阻断 CLI。"""
+    try:
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text("shown\n", encoding="utf-8")
+    except OSError:
+        return
+
+
+def _install_completion_and_report(
+    shell: CompletionShellChoice,
+    *,
+    to_stderr: bool = False,
+) -> None:
+    """安装补全并输出路径及 shell 重载方式。"""
+    completion_path, profile_path = _install_completion_script(shell)
+    covered_command_names = ", ".join((_PRIMARY_COMMAND_NAME, *alias_command_names()))
+    typer.echo(f"Installed {shell.value} completion: {completion_path}", err=to_stderr)
+    typer.echo(
+        f"Completion registered for commands: {covered_command_names}",
+        err=to_stderr,
+    )
+    if profile_path is not None:
+        typer.echo(f"Reload your shell with: source {profile_path}", err=to_stderr)
+    else:
+        typer.echo("Open a new terminal session to activate completion.", err=to_stderr)
+
+
+def maybe_prompt_for_completion_setup(raw_cli_arguments: Sequence[str]) -> bool:
+    """首次交互式使用时询问是否安装 shell 补全。
+
+    Args:
+        raw_cli_arguments: 用户传给 CLI 的原始参数。
+
+    Returns:
+        bool: 本次是否成功安装补全；成功时主命令应退出，让用户重载 shell 后重试。
+    """
+    if not sys.stdin.isatty() or not sys.stderr.isatty():
+        return False
+    if _COMPLETION_ENV_VAR in os.environ or machine_output_requested(raw_cli_arguments):
+        return False
+    if any(argument in {"-h", "--help", "-V", "--version"} for argument in raw_cli_arguments):
+        return False
+    if raw_cli_arguments and raw_cli_arguments[0] == "completion":
+        return False
+
+    shell_name = Path(os.environ.get("SHELL", "")).name.lower()
+    try:
+        shell_choice = CompletionShellChoice(shell_name)
+    except ValueError:
+        shell_choice = None
+
+    try:
+        home_path = Path.home()
+    except (OSError, RuntimeError):
+        return False
+    if shell_choice is not None and _completion_installation_exists(shell_choice, home_path):
+        return False
+
+    marker_shell_name = shell_choice.value if shell_choice is not None else "other"
+    try:
+        marker_path = product_identity.state_home(home_path) / (
+            f"{_COMPLETION_HINT_MARKER_PREFIX}-{marker_shell_name}"
+        )
+        if marker_path.exists():
+            return False
+    except (OSError, RuntimeError):
+        return False
+
+    if shell_choice is None:
+        product_identity.emit_notice_once(
+            "note: kc shell completion supports bash, zsh, and fish. "
+            "Run `kc completion install --help` to choose your shell and enable it."
+        )
+        _mark_completion_setup_prompt_shown(marker_path)
+        return False
+
+    if _choose_completion_setup(shell_choice):
+        try:
+            _install_completion_and_report(shell_choice, to_stderr=True)
+            typer.echo(
+                "Completion is installed. This command will exit now so you can activate it; "
+                "follow the shell activation instruction above, then rerun your `kc` command.",
+                err=True,
+            )
+            return True
+        except OSError as install_error:
+            typer.echo(f"Could not install shell completion: {install_error}", err=True)
+        return False
+
+    typer.echo(
+        f"Skipped. Run `kc completion install --shell {shell_choice.value}` later to enable.",
+        err=True,
+    )
+    _mark_completion_setup_prompt_shown(marker_path)
+    return False
+
+
 def _install_completion_script(
     shell: CompletionShellChoice,
 ) -> tuple[Path, Path | None]:
     """Install KedaCode shell completion and return the script/profile paths."""
     script_content = _completion_script(shell)
     home_path = Path.home()
-    if shell is CompletionShellChoice.zsh:
-        completion_dir = home_path / ".zsh" / "completions"
-        completion_path = completion_dir / f"_{_PRIMARY_COMMAND_NAME}"
-        completion_path.parent.mkdir(parents=True, exist_ok=True)
-        completion_path.write_text(f"{script_content}\n", encoding="utf-8")
-        zshrc_path = home_path / ".zshrc"
-        _append_unique_line(zshrc_path, "autoload -Uz compinit && compinit")
-        source_line = f'[ -f "{completion_path}" ] && source "{completion_path}"'
-        _append_unique_line(zshrc_path, source_line)
-        return completion_path, zshrc_path
-    if shell is CompletionShellChoice.bash:
-        xdg_config_root_path = home_path / ".config" / _USER_CONFIG_DIR_NAME
-        completion_path = xdg_config_root_path / f"{_PRIMARY_COMMAND_NAME}_completion.bash"
-        completion_path.parent.mkdir(parents=True, exist_ok=True)
-        completion_path.write_text(f"{script_content}\n", encoding="utf-8")
-        bashrc_path = home_path / ".bashrc"
-        source_line = f'[ -f "{completion_path}" ] && source "{completion_path}"'
-        _append_unique_line(bashrc_path, source_line)
-        return completion_path, bashrc_path
-    completion_path = (
-        home_path / ".config" / "fish" / "completions" / f"{_PRIMARY_COMMAND_NAME}.fish"
-    )
+    completion_path = _completion_script_path(shell, home_path)
     completion_path.parent.mkdir(parents=True, exist_ok=True)
     completion_path.write_text(f"{script_content}\n", encoding="utf-8")
-    return completion_path, None
+    profile_path = _completion_profile_path(shell, home_path)
+    if profile_path is None:
+        return completion_path, None
+    if shell is CompletionShellChoice.zsh:
+        _append_unique_line(profile_path, "autoload -Uz compinit && compinit")
+    _append_unique_line(profile_path, _completion_source_line(completion_path))
+    return completion_path, profile_path
 
 
 def register_completion_commands(completion_app: typer.Typer) -> None:
@@ -132,12 +331,5 @@ def register_completion_commands(completion_app: typer.Typer) -> None:
         shell: CompletionShellChoice = CompletionShellChoice.zsh,
     ) -> int:
         """Install shell completion for the current user."""
-        completion_path, profile_path = _install_completion_script(shell)
-        covered_command_names = ", ".join((_PRIMARY_COMMAND_NAME, *alias_command_names()))
-        typer.echo(f"Installed {shell.value} completion: {completion_path}")
-        typer.echo(f"Completion registered for commands: {covered_command_names}")
-        if profile_path is not None:
-            typer.echo(f"Reload your shell with: source {profile_path}")
-        else:
-            typer.echo("Open a new terminal session to activate completion.")
+        _install_completion_and_report(shell)
         return 0

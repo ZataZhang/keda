@@ -337,7 +337,7 @@ def _recover_publish_issue_owned(
     不会创建提交、也不会改动工作树内容；它只做校验、推送已有提交并创建/复用 PR。
     当 post-PR supervisor 启用时，恢复后的 PR 会先进入 ``agent/supervising``，
     运行现有 supervisor repair loop，只有 supervisor approve 后才进入
-    ``agent/review``。当 supervisor 禁用时，保留直接进入 ``agent/review`` 的 fallback。
+    ``agent/automated-review-passed``。当 supervisor 禁用时，保留直接进入 ``agent/automated-review-passed`` 的 fallback。
 
     fresh Issue 读取失败时不推送、不创建 PR。NORMAL 保留既有发布与监督流程；标签
     DIRECT 先取得认领归属并持久化选择，认领会切换 workflow 标签，但直发标签只有
@@ -699,14 +699,11 @@ def _recover_publish_issue_owned(
     else:
         # Supervisor 禁用时直接进入 review（fallback）。
         try:
-            github_client.edit_issue_labels(
+            transition_issue_workflow_state(
+                github_client,
                 issue_number,
-                add=[config.labels.review],
-                remove=[
-                    config.labels.failed,
-                    config.labels.running,
-                    config.labels.ready,
-                ],
+                config,
+                config.labels.review,
             )
         except Exception as label_exc:  # noqa: BLE001
             exc = PublishRecoveryError(

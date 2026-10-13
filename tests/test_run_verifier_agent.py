@@ -38,7 +38,7 @@ def _issue() -> IssueSummary:
         title="Dedupe users by email case-insensitively",
         url="https://github.com/example/repo/issues/7",
         body="Users with the same email in different case must be treated as one.",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 
@@ -226,7 +226,7 @@ def _structured_issue() -> IssueSummary:
         title="Demo",
         url="https://github.com/example/repo/issues/7",
         body=body,
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 

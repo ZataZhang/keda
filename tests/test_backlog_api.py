@@ -405,7 +405,9 @@ def test_backlog_api_authorization_is_consumed_by_merge_queue(
     issue_after_api_write = github_client.get_issue(42)
     assert "prd-auto-merge" in issue_after_api_write.labels
 
-    github_client.edit_issue_labels(42, add=["agent/review"], remove=["agent/ready"])
+    github_client.edit_issue_labels(
+        42, add=["agent/automated-review-passed"], remove=["agent/ready"]
+    )
     issue_for_queue = github_client.get_issue(42)
     github_client.set_list_issues_by_label_result([issue_for_queue])
     github_client.set_pr_context(

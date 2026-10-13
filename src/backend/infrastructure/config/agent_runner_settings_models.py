@@ -22,6 +22,9 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_KEYS,
     normalize_lifecycle_agent_value,
 )
+from backend.infrastructure.github_models import LabelConfig as GitHubLabelConfig
+
+_GITHUB_LABEL_DEFAULTS = GitHubLabelConfig()
 
 
 class AgentRunnerLifecycleAgentsSettings(BaseModel):
@@ -95,15 +98,16 @@ class AgentRunnerLabelSettings(BaseModel):
     提供（FR-12：既有仓库的这三个键继续生效，优先级与今天一致）。
     """
 
-    ready: str = "agent/ready"
-    running: str = "agent/running"
-    supervising: str = "agent/supervising"
-    review: str = "agent/review"
-    failed: str = "agent/failed"
-    blocked: str = "agent/blocked"
-    waiting: str = "agent/waiting"
-    validation_pending: str = "validation/pending"
-    validation_passed: str = "validation/passed"
+    ready: str = _GITHUB_LABEL_DEFAULTS.ready
+    running: str = _GITHUB_LABEL_DEFAULTS.running
+    supervising: str = _GITHUB_LABEL_DEFAULTS.supervising
+    review: str = _GITHUB_LABEL_DEFAULTS.review
+    human_review: str = _GITHUB_LABEL_DEFAULTS.human_review
+    failed: str = _GITHUB_LABEL_DEFAULTS.failed
+    blocked: str = _GITHUB_LABEL_DEFAULTS.blocked
+    waiting: str = _GITHUB_LABEL_DEFAULTS.waiting
+    validation_pending: str = _GITHUB_LABEL_DEFAULTS.validation_pending
+    validation_passed: str = _GITHUB_LABEL_DEFAULTS.validation_passed
     verifier_passed: str = "validation/verifier-passed"
     codex: str | None = None
     claude: str | None = None

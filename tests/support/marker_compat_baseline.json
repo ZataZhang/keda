@@ -743,7 +743,7 @@
       "id": "realistic-validation",
       "kind": "iar:realistic-validation",
       "outputs": {
-        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
+        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
       },
       "parses": [
         {
@@ -765,7 +765,7 @@
           "kwargs": {},
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_validation_checklist:reset_validation_checklist",
-          "result": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n<!-- iar:realistic-validation-end -->",
+          "result": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n<!-- iar:realistic-validation-end -->",
           "text_kwarg": null
         }
       ],
@@ -790,7 +790,7 @@
       "id": "realistic-validation-end",
       "kind": "iar:realistic-validation-end",
       "outputs": {
-        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
+        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
       },
       "parses": [
         {
@@ -1429,7 +1429,7 @@
     }
   ],
   "generated_by": ".iar/evidence/scripts/rv-3-marker-snapshot.py",
-  "generated_from_ref": "36c3f734bb9da19fd533c0242d3a9517b0a1feed",
+  "generated_from_ref": "a0a170f5f6e614c9f94bcb8292d59095eee5338d",
   "kinds": [
     "iar-attempt-end",
     "iar-attempt-history",

@@ -53,7 +53,7 @@ Agent Runner 会先创建 Draft PR，再运行独立 verifier。verifier 尚未�
 - 操作者确认后，系统先请求精确运行身份和 HEAD 的取消；只有 verifier 子进程已停止后才报告“已交接”。
 - 接管保留 Draft PR 与现有证据，不自动将 PR 标为 Ready，也不合并。
 - 接管不是验证结论：不产生 PASS、RED、YELLOW，不添加 verifier 通过标签；持久的 autopilot hold 会暂停该 PR 的自动合并，直到当前 HEAD 有新的真实 GREEN。
-- 人工 review 使用现有 agent/review 状态；人工自行打开 PR、检查当前 HEAD，并使用现有 Realistic Validation 签收和仓库保护规则决定是否合并。
+- 人工 review 使用现有 agent/automated-review-passed 状态，并添加 human/awaiting-review；人工自行打开 PR、检查当前 HEAD，并使用现有 Realistic Validation 签收和仓库保护规则决定是否合并。
 - verifier 结果应用前重新读取 PR 状态和 HEAD；已合并或 HEAD 已变化时丢弃旧结果。
 - 当前安装以本机单用户 Console 和共享本地状态库为边界；远程主机上的运行不提供接管操作。
 - 视觉范围限定在 Dashboard 的 Issue 详情和接管确认/结果状态；保留现有 Dashboard 导航和信息架构，交互原型用于表达页面信息层级和状态呈递目标。
@@ -186,7 +186,7 @@ E2E 入口是仓库级 `just e2e`，测试包说明位于 `tests/playwright-e2e/
 - 接管请求携带 UI 读到的 run id 和 HEAD SHA。core 重新读取活动状态并通过 SQLite 原子 compare-and-set 将 running 改为 takeover_requested；运行已结束、HEAD 漂移或 id 不符时返回冲突，不写接受状态。
 - IProcessRunner 增加默认关闭的可选取消检查回调；只有 verifier 调用提供该回调。ProcessRunner 在等待过程中调用回调；若目标请求匹配，则终止并回收当前 verifier 子进程树，再抛出可识别的 InterruptedError。其他调用不传回调，保持现有超时与重试行为。
 - verifier 用例只在 control store 确认存在匹配的 takeover_requested 时，将 InterruptedError 归类为 cancelled_by_human；保存可用的部分输出但不解析 verdict，然后由 runner 完成交接。
-- 交接完成后，用现有状态转换将 Issue 置为 agent/review，写一条带 run id 和 HEAD SHA 的 Issue comment / 审计记录；Draft PR 保持原状。将控制记录状态设为 taken_over 并置 autopilot_hold=true；post-PR supervisor、review_once 和 merge queue 都跳过该 PR，即使 require_verifier_pass 被关闭。只有新 verifier 对当前 HEAD 返回 GREEN 才能清除 hold 并恢复自动处理。
+- 交接完成后，用现有状态转换将 Issue 置为 agent/automated-review-passed 并添加 human/awaiting-review，写一条带 run id 和 HEAD SHA 的 Issue comment / 审计记录；Draft PR 保持原状。将控制记录状态设为 taken_over 并置 autopilot_hold=true；post-PR supervisor、review_once 和 merge queue 都跳过该 PR，即使 require_verifier_pass 被关闭。只有新 verifier 对当前 HEAD 返回 GREEN 才能清除 hold 并恢复自动处理。
 - verifier 正常完成时先原子认领完成状态；然后 fresh-read PR 的 merged 状态与 HEAD。若 PR 已合并，停止后续阶段；若 PR 仍 open 但 HEAD 不同，不应用 verdict，记录 verifier_stale、设置 autopilot_hold 并交由人工检查。任何 verdict side effect 后再次读取 PR；发现期间发生合并或 HEAD 漂移时清理旧 verifier 标签并停止后续阶段。
 - 新表使用现有 Console SQLite schema version 管理；PR 合并 / 关闭后按 Console store 的终态保留策略清理。
 
@@ -207,8 +207,8 @@ This section is a living implementation guide based on current repository analys
 1. **活动状态登记**：在 run_agent_execution_loop.py 进入 verifier 前，用新的 IIssueRunControl 写入当前 execution id、Issue、PR number、PR head SHA 和 running。若当前 Issue 没有 PR、验证未启用或没有活动 verifier，则不开放接管。
 2. **Console 查询**：monitoring use case 将活动控制记录作为可选 DTO 加到 IssueMonitoringSnapshot。不可用或无活动记录时返回 null / can_take_over=false；不得仅从“最新生命周期事件”推测 verifier 仍在运行。
 3. **请求接管**：execute_issue_action 对动作 take_over_verifier 校验仓库、Issue 正数、run id、HEAD SHA，并通过 IIssueRunControl.request_takeover(expected_run_id, expected_head_sha) 原子更新。重复请求幂等返回当前状态；目标变化由专用冲突异常映射为 HTTP 409；其他错误沿用 Console 审计。HTTP 请求最多等待 5 秒；若取消仍在处理，返回 202 和 takeover_requested，界面继续查询状态，不把“请求已登记”伪报为“进程已停止”。
-4. **执行取消**：run_agent_with_prompt_resilient 只在 verifier 调用中传入取消检查回调；ProcessRunner 等待期间以不超过 1 秒的间隔查询 IIssueRunControl。收到匹配请求后，ProcessRunner 只终止 verifier CLI 的子进程组并等待退出，再抛出 InterruptedError；runner 仅在 control store 再次确认 run id 与 HEAD 后将其映射为人工取消。若 runner 确认无法终止或回收目标进程，控制状态转为 takeover_failed；Issue 不转 agent/review，操作者看到可重试的失败原因。等待超过 5 秒本身只代表仍在处理中，不作为取消失败。
-5. **交接完成**：记录 cancelled_by_human，保存可用的部分 verifier 输出并明确无 verdict；清除仅属于 verifier 通过的旧标签；将控制状态设为 taken_over 并置 autopilot_hold=true；Issue 转 agent/review；保留同一个 Draft PR，不自动改为 Ready。
+4. **执行取消**：run_agent_with_prompt_resilient 只在 verifier 调用中传入取消检查回调；ProcessRunner 等待期间以不超过 1 秒的间隔查询 IIssueRunControl。收到匹配请求后，ProcessRunner 只终止 verifier CLI 的子进程组并等待退出，再抛出 InterruptedError；runner 仅在 control store 再次确认 run id 与 HEAD 后将其映射为人工取消。若 runner 确认无法终止或回收目标进程，控制状态转为 takeover_failed；Issue 不转 agent/automated-review-passed，操作者看到可重试的失败原因。等待超过 5 秒本身只代表仍在处理中，不作为取消失败。
+5. **交接完成**：记录 cancelled_by_human，保存可用的部分 verifier 输出并明确无 verdict；清除仅属于 verifier 通过的旧标签；将控制状态设为 taken_over 并置 autopilot_hold=true；Issue 转 agent/automated-review-passed 并添加 human/awaiting-review；保留同一个 Draft PR，不自动改为 Ready。
 6. **正常完成与竞争**：verifier 在写 verdict 前 compare-and-set running -> verifier_completed。如果接管先赢，verdict 不可发布；如果完成先赢，接管请求返回冲突。随后 fresh-read PR；若 PR 已合并，记录 pr_merged 并停止后续阶段；若 PR 仍 open 但 HEAD 已变化，记录 verifier_stale、置 autopilot_hold=true 并交由人工检查，不应用旧 verdict 或启动后续自动阶段。只有 PR 仍 open 且 HEAD 等于 verifier 输入 SHA 时才可应用 verdict。应用 GitHub 副作用后再次读取 PR；若期间发生合并或 HEAD 漂移，立即清理过期 verifier 标签并停止后续阶段。GitHub 的读取与写入不是原子操作，因此 branch protection / required checks 仍是防止外部绕过合并的最终门禁。
 7. **重启与孤儿请求**：控制请求始终带 run id 和 SHA；新 run 不消费旧 run 的待处理请求。进程重启后发现没有对应活动 owner 的待处理行时，标记为失效并要求人工查看，不自动停止其他进程或重放请求。
 8. **界面**：在 IssueDetail 内将当前 verifier 状态、head SHA、PR 链接和接管动作放在同一块。点击后用确认 Dialog 说明“只停止此 Issue verifier；PR 保持 Draft；不会自动合并”。请求期间按钮禁用并显示“正在停止”；超过 5 秒仍未确认时显示“仍在停止，尚未交接”并继续查询；收到 Runner 完成确认后显示“已交给你审查”。将操作错误分为“运行已结束 / HEAD 已变化 / 无法停止”，提供刷新或打开 PR 的具体下一步。低频诊断信息折叠展示，默认先呈递状态和动作。
@@ -400,7 +400,7 @@ erDiagram
   behavior: 操作者从真实 Console Issue 详情接管一个正在运行的 verifier，并只停止该 Issue。
   reviewer: human
   real_entry: "just e2e tests/workflows/verifier-takeover.spec.ts"
-  expected: "真实 Dashboard Issue 详情按原型的信息层级呈递状态、目标 HEAD、作用范围和操作；确认后先显示处理中，目标 verifier 子进程树退出后才显示已交给你审查；Draft PR 和 HEAD 保留；Issue 为 agent/review；daemon 和第二个 Issue 继续运行；没有 verifier verdict 或 validation/verifier-passed；merge queue 不会合并该 PR。桌面 1440×900 与窄视口 390×844 均无内容遮挡、按钮不可达或横向溢出。"
+  expected: "真实 Dashboard Issue 详情按原型的信息层级呈递状态、目标 HEAD、作用范围和操作；确认后先显示处理中，目标 verifier 子进程树退出后才显示已交给你审查；Draft PR 和 HEAD 保留；Issue 为 agent/automated-review-passed 且带 human/awaiting-review；daemon 和第二个 Issue 继续运行；没有 verifier verdict 或 validation/verifier-passed；merge queue 不会合并该 PR。桌面 1440×900 与窄视口 390×844 均无内容遮挡、按钮不可达或横向溢出。"
   mock_boundary: "外部 GitHub CLI/API transport 和 verifier 可由确定性测试替身提供；真实浏览器、Next 页面、FastAPI Console API、SQLite 控制状态、执行编排、进程组终止和进程回收必须真实运行。"
   tier: R3
   test_layer: e2e
@@ -412,7 +412,7 @@ erDiagram
   fresh_state_probe: "使用新的 SQLite connection 和新的 Console 请求读取 terminal control state、Issue label/comment、PR 状态；通过独立进程探测确认目标 verifier PID group 已退出，daemon 与第二个 Issue 的 probe process 仍存活。"
   final_tree_evidence: "保存完整 E2E 报告、测试输出、截图和当前 Git tree；任何控制状态、进程终止、API 或 IssueDetail 变更后重跑，并将证据绑定待交付最终 tree。"
   negative_control: "同一 E2E 测试将 UI 读取的 head_sha 替换为已过期值后再次提交接管；替换仅发生在测试边界。"
-  expected_fail: "API 返回冲突；状态不变；目标 verifier 仍运行；Issue 不转 agent/review；没有 accepted takeover audit。"
+  expected_fail: "API 返回冲突；状态不变；目标 verifier 仍运行；Issue 不转 agent/automated-review-passed、不添加 human/awaiting-review；没有 accepted takeover audit。"
 
 - id: rv-2
   behavior: verifier 完成、人工接管和 PR 外部合并竞争时，只应用当前 run 与当前 HEAD 的有效结果。
@@ -529,7 +529,7 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 
 - **FR-1: 活动 verifier 可识别**：Console 的 Issue 状态必须能区分 verifier 正在运行、已请求接管、已接管、接管失败、验证已过期、已完成、PR 已合并、不可控制和状态未知；只有运行身份和 HEAD SHA 可复核的本机 verifier 可以接管。
 - **FR-2: 精确接管请求**：接管请求必须绑定仓库、Issue、run id 和 HEAD SHA。旧请求、重复请求和状态变化须幂等或明确冲突，不得应用到新 run。
-- **FR-3: 单 Issue 取消与人工交接**：接管确认后只终止该 Issue 当前 verifier 子进程树。runner 回收进程后才可标记交接完成、将 Issue 转至现有 agent/review 并记录 run id 与 HEAD SHA。保留 Draft PR 和验证证据；取消不是 verdict，不设置 validation/verifier-passed，不运行依赖 verifier PASS 的步骤。
+- **FR-3: 单 Issue 取消与人工交接**：接管确认后只终止该 Issue 当前 verifier 子进程树。runner 回收进程后才可标记交接完成、将 Issue 转至现有 agent/automated-review-passed 并添加 human/awaiting-review，记录 run id 与 HEAD SHA。保留 Draft PR 和验证证据；取消不是 verdict，不设置 validation/verifier-passed，不运行依赖 verifier PASS 的步骤。
 - **FR-4: 竞态和过期结果保护**：verifier 完成与接管请求通过原子状态转移裁决；verdict 应用前后 fresh-read GitHub PR 状态。PR 已合并时停止后续阶段；PR HEAD 与 verifier 输入不同时，丢弃 verdict、设置 autopilot hold 并交由人工检查。GitHub 状态读取与写入之间仍存在外部竞态，最终合并保护由仓库 required checks / branch protection 提供。
 - **FR-5: 人工审查和自动合并边界**：接管不会将 Draft PR 标记为 Ready 或调用 merge；操作者必须自行审查当前 HEAD 并使用现有签收 / branch protection 决定手动合并。post-PR supervisor、review_once 和 merge queue 都必须跳过 autopilot_hold=true 的 PR，即使 require_verifier_pass=false；只有新 verifier 对当前 HEAD 给出真实 GREEN 后才可解除自动处理阻断。
 - **FR-6: 可观察失败**：等待超时但 runner 仍在处理时，显示尚未确认并继续查询；owner 不可达、存储不可用、确认无法回收进程或运行身份不匹配时，不得宣称交接完成，须显示可操作错误并记录请求结果。不能确定取消范围时必须 fail closed。

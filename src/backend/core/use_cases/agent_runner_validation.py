@@ -12,7 +12,7 @@
    进入既有 recovery 循环）。
 4. **证据呈现** — 用 git plumbing（``hash-object``/``mktree``/``commit-tree``）
    构造无父提交并 force-push 到 orphan 证据分支，再在 PR 上发证据评论。
-5. **软门禁** — daemon 轮询 ``agent/review`` Issue，按 PR body 勾选状态维护
+5. **软门禁** — daemon 轮询 ``agent/automated-review-passed`` Issue，按 PR body 勾选状态维护
    ``validation/pending`` / ``validation/passed`` label，head 漂移时重置勾选，
    Issue 关闭后清理证据分支。
 

@@ -122,7 +122,7 @@ def test_stack_downstream_skipped_until_upstream_merged(tmp_path) -> None:
         title="downstream",
         url="https://github.com/example/repo/issues/7",
         body='<!-- iar:depends-on #42 mode="stack" -->',
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     outcome = merge_queue_module._process_one(
         repo_path=tmp_path,
@@ -148,7 +148,7 @@ def test_stack_downstream_converges_after_upstream_merged(tmp_path, worktree_pat
         title="downstream",
         url="https://github.com/example/repo/issues/70",
         body='<!-- iar:depends-on #42 mode="stack" -->',
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     github.set_pr_context(branch, _make_pr_context(branch=branch, number=70))
     github._issue_comments[70] = [f"PR Branch: `{branch}`"]
@@ -183,7 +183,7 @@ def test_stack_convergence_retarget_failure_skips(tmp_path, worktree_path) -> No
         title="downstream",
         url="https://github.com/example/repo/issues/70",
         body='<!-- iar:depends-on #42 mode="stack" -->',
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     github.set_pr_context(branch, _make_pr_context(branch=branch, number=70))
     github._issue_comments[70] = [f"PR Branch: `{branch}`"]
@@ -247,7 +247,7 @@ def test_convergence_refreshes_head_before_forbidden_scan(tmp_path, worktree_pat
         title="downstream",
         url="https://github.com/example/repo/issues/70",
         body='<!-- iar:depends-on #42 mode="stack" -->',
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     github._issue_comments[70] = [f"PR Branch: `{branch}`"]
 
@@ -282,7 +282,7 @@ def test_via_main_issue_never_retargets_base(tmp_path, worktree_path) -> None:
         title="plain",
         url="https://github.com/example/repo/issues/71",
         body="",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     github.set_pr_context(branch, _make_pr_context(branch=branch, number=71))
     github._issue_comments[71] = [f"PR Branch: `{branch}`"]
@@ -379,7 +379,9 @@ def test_verifier_missing_label_skips_issue(tmp_path, worktree_path, monkeypatch
     github = FakeGitHubClient()
     runner = FakeProcessRunner()
 
-    github.set_list_issues_by_label_result([_make_issue(number=50, labels=("agent/review",))])
+    github.set_list_issues_by_label_result(
+        [_make_issue(number=50, labels=("agent/automated-review-passed",))]
+    )
 
     issue_body = (
         "## Realistic Validation\n\n- [ ] rv-1: thing\n"  # forces validation_required=True.
@@ -396,7 +398,7 @@ def test_verifier_missing_label_skips_issue(tmp_path, worktree_path, monkeypatch
         title="Issue #50",
         url="https://github.com/example/repo/issues/50",
         body=issue_body,
-        labels=("agent/review",),  # NB: no validation/verifier-passed label
+        labels=("agent/automated-review-passed",),  # NB: no validation/verifier-passed label
     )
     branch_comment = "Build complete on PR Branch: `issue-50`."
     github._issue_comments[50] = [branch_comment]
@@ -447,7 +449,7 @@ def test_prd_hold_prevents_auto_merge_until_the_human_answers(
         title="Human review",
         url="https://github.com/example/repo/issues/70",
         body="PRD path: `tasks/pending/review.md`",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     prd_path = worktree_path / "tasks" / prd_directory / "review.md"
     prd_path.parent.mkdir(parents=True)
@@ -503,11 +505,13 @@ def test_scoped_prd_auto_merge_consumes_authorization_without_prd_backfill(
     archive_path.write_text(prd_text, encoding="utf-8")
 
     github = FakeGitHubClient()
-    scoped_issue = _make_issue(number=issue_number, labels=("agent/review", "prd-auto-merge"))
-    unselected_issue = _make_issue(number=89, labels=("agent/review",))
+    scoped_issue = _make_issue(
+        number=issue_number, labels=("agent/automated-review-passed", "prd-auto-merge")
+    )
+    unselected_issue = _make_issue(number=89, labels=("agent/automated-review-passed",))
     github.set_list_issues_by_label_result([scoped_issue, unselected_issue])
     github.set_issue_body(issue_number, prd_body)
-    github.set_issue_labels(issue_number, ("agent/review", "prd-auto-merge"))
+    github.set_issue_labels(issue_number, ("agent/automated-review-passed", "prd-auto-merge"))
     github.set_pr_context(
         branch,
         PullRequestContext(
@@ -545,7 +549,7 @@ def test_scoped_prd_auto_merge_consumes_authorization_without_prd_backfill(
     if revoke_authorization:
 
         def revoke_before_merge(*args, **kwargs):  # noqa: ANN002, ANN003
-            github.set_issue_labels(issue_number, ("agent/review",))
+            github.set_issue_labels(issue_number, ("agent/automated-review-passed",))
             return True, _make_pr_context(branch=branch, number=issue_number)
 
         monkeypatch.setattr(merge_queue_module, "_wait_for_checks_green", revoke_before_merge)
@@ -610,7 +614,7 @@ def test_archived_prd_awaiting_human_holds_until_the_human_answers(tmp_path, wor
         title="Archived PRD awaiting human review",
         url="https://github.com/example/repo/issues/88",
         body="PRD path: `tasks/pending/review.md`",
-        labels=("agent/review", "validation/verifier-passed"),
+        labels=("agent/automated-review-passed", "validation/verifier-passed"),
     )
     github = FakeGitHubClient()
     github.set_list_issues_by_label_result([issue])
@@ -692,7 +696,9 @@ def test_verifier_passed_then_full_path_merges(tmp_path, worktree_path, monkeypa
         body=_UNTICKED_BODY,
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=99, labels=("agent/review", "validation/verifier-passed"))
+    issue = _make_issue(
+        number=99, labels=("agent/automated-review-passed", "validation/verifier-passed")
+    )
     github._issue_labels[99] = issue.labels
     github.set_list_issues_by_label_result([issue])
 
@@ -754,7 +760,7 @@ def test_idempotent_no_duplicate_sign_off_comment(tmp_path, worktree_path, monke
         body=_UNTICKED_BODY,
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=77, labels=("agent/review",))
+    issue = _make_issue(number=77, labels=("agent/automated-review-passed",))
     github._issue_labels[77] = issue.labels
     branch_comment = "Build complete on PR Branch: `issue-77`."
     github._issue_comments[77] = [branch_comment, "<!-- iar:auto-sign-off previous -->"]
@@ -806,7 +812,7 @@ def test_forbidden_path_blocks_and_comments(tmp_path, worktree_path, monkeypatch
         body="",
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=12, labels=("agent/review",))
+    issue = _make_issue(number=12, labels=("agent/automated-review-passed",))
     github._issue_labels[12] = issue.labels
     github._issue_comments[12] = ["Build complete on PR Branch: `issue-12`."]
     github._issue_comment_entries[12] = [(1, "Build complete on PR Branch: `issue-12`.")]
@@ -850,7 +856,7 @@ def test_verification_red_does_not_merge(tmp_path, worktree_path, monkeypatch) -
         body="",
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=33, labels=("agent/review",))
+    issue = _make_issue(number=33, labels=("agent/automated-review-passed",))
     github._issue_labels[33] = issue.labels
     github._issue_comments[33] = ["Build complete on PR Branch: `issue-33`."]
     github.set_list_issues_by_label_result([issue])
@@ -916,7 +922,7 @@ def test_diff_unavailable_fails_closed(tmp_path, worktree_path, monkeypatch) -> 
         body="",
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=44, labels=("agent/review",))
+    issue = _make_issue(number=44, labels=("agent/automated-review-passed",))
     github._issue_labels[44] = issue.labels
     github._issue_comments[44] = ["Build complete on PR Branch: `issue-44`."]
     github._issue_comment_entries[44] = [(1, "Build complete on PR Branch: `issue-44`.")]

@@ -94,7 +94,7 @@ def _gate_single_issue(
     github_client: IGitHubClient,
     on_validation: ValidationLifecycleCallback | None = None,
 ) -> None:
-    """运行一个 ``agent/review`` Issue 的验证软门禁。"""
+    """运行一个 ``agent/automated-review-passed`` Issue 的验证软门禁。"""
     from backend.core.use_cases.agent_runner_validation import (
         parse_latest_evidence_marker,
         parse_validation_checklist_state,

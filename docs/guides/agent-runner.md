@@ -10,7 +10,7 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
 - **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，**默认带上 `agent/ready` 直接进队列**（`--no-ready` 可只建 Issue 不排队），并默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
 - **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
-- **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。**同一条聚合资格门对两个入口都一样**：成员 Issue 必须是 open 且已带 `agent/review`，且每个来源 PR 的必需 checks 必须已是 `SUCCESS`；刚发布完的 Issue 通常还停在 `agent/supervising`、Draft PR 的 checks 还是 PENDING，所以单次夜间 `kc run --all-ready --aggregate-pr` 常会在资格阶段被拒，需要等 checks 与标签落定后再补一次 `kc pr aggregate --issue ...`（见「批次聚合的资格门与两次调用」）。
+- **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。**同一条聚合资格门对两个入口都一样**：成员 Issue 必须是 open 且已带 `agent/automated-review-passed`，且每个来源 PR 的必需 checks 必须已是 `SUCCESS`；刚发布完的 Issue 通常还停在 `agent/supervising`、Draft PR 的 checks 还是 PENDING，所以单次夜间 `kc run --all-ready --aggregate-pr` 常会在资格阶段被拒，需要等 checks 与标签落定后再补一次 `kc pr aggregate --issue ...`（见「批次聚合的资格门与两次调用」）。
 - **supervise**：单次处理已有 PR 的 Issue，基于 PR 上下文变化运行 post-PR supervisor cycle（兼容旧命令 `review`；历史命令 `review-once` 已删除）
 - **supervise-daemon**：常驻进程，按指定间隔循环执行 post-PR supervisor 检查
 - **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 Backlog 自动推进阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
@@ -64,6 +64,8 @@ kc completion show --shell zsh
 ```
 
 `completion install` 同时支持 `--shell bash` 和 `--shell fish`。
+
+尚未配置补全时，首次在交互式终端运行 `kc` 会询问是否安装 shell 补全，默认选中安装；按上下方向键选择，按 Enter 确认。选择安装后，本次 `kc` 会安装补全并退出，提示用户重载 shell；重载后重新运行刚才的命令。选择“暂不安装”后不再重复询问。非交互调用、机器输出、帮助/版本入口和 shell 补全协议不会显示此菜单。
 
 补全同时覆盖 `kedacode` 别名入口（别名清单从分发的 `[project.scripts]` 元数据派生），
 `kedacode is<Tab>` 与 `kc is<Tab>` 行为一致；旧版本安装的补全重跑一次
@@ -143,7 +145,9 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
                ↓
         实现收尾 + 本地验证 → Draft PR（未签核）→ verifier → pre-PR review → agent/supervising
                ↓
-        supervisor 通过 → 换成 agent/review → 人工审完关闭
+        supervisor 通过 → agent/automated-review-passed
+                        ├─ 需要人工处理 → 加 human/awaiting-review
+                        └─ 获准自动合并 → 进入合并队列
                ↓
         出问题 → 换成 agent/failed 或 agent/blocked
 ```
@@ -152,11 +156,15 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 
 ### Workflow label 互斥
 
-六个 AI 执行状态标签（`agent/ready`、`agent/running`、`agent/supervising`、`agent/review`、`agent/failed`、`agent/blocked`）是互斥的 durable workflow labels。runner 在任何状态切换时都会清理其他 workflow labels，只保留目标状态。这意味着：
+六个 AI 执行状态标签（`agent/ready`、`agent/running`、`agent/supervising`、`agent/automated-review-passed`、`agent/failed`、`agent/blocked`）是互斥的 durable workflow labels。runner 在任何状态切换时都会清理其他 workflow labels，只保留目标状态。这意味着：
 
-- 不会同时出现 `agent/running` + `agent/review`
+- 不会同时出现 `agent/running` + `agent/automated-review-passed`
 - 不会同时出现 `agent/supervising` + `agent/failed`
 - 历史脏状态（如同时贴有多个 workflow labels）会在下一次被处理时自动收敛到单一状态
+
+人工待办标签 `human/awaiting-review` 与 AI 执行状态相互独立：当前策略要求人审时会添加；自动合并获准但 PRD 仍有待人工验收项时，合并队列也会添加。它只表示存在人工待办，不会因为自动合并开关打开就被清除；合并队列确认 PRD 签核完成且文件已归档后清除，策略要求人工审阅的标签则随 Issue 离开自动审查通过状态清除。
+
+升级后，review daemon 会在处理仍带旧 `agent/review` 的开放 Issue 时清理旧标签；若它是唯一 workflow state，则迁移为 `agent/automated-review-passed` 并按当前策略补上人工待办标签；若另有一个状态，则保留那个状态。若还存在多个冲突状态，daemon 会保留 Issue 并记录告警。
 
 工具路由标签（`agent/codex`、`agent/claude`、`agent/kimi`）、类型标签（`type/*`）等非 workflow labels 不会被清理。发布档位标签 `direct-pr` 也属于这一类：状态流转不会替它"消档"，只有认领者在确认 Draft PR 后显式消费它。
 
@@ -167,10 +175,11 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 | **AI 执行状态** | `agent/ready` | 🟢 绿色 | 已进入队列，等待 daemon 自主挑选认领；**不是执行的前置条件**——`kc run --issue <N>` 点名任何 open Issue 都不需要该标签 |
 | | `agent/running` | 🟡 黄色 | 代码正在被修改（首次实现或 PR branch rework）。首次认领由 claim marker 选举裁决，同一时刻只有一个持有者；被存活持有者占用的 Issue，定向 run 会报冲突而不是双跑 |
 | | `agent/supervising` | 🔵 浅蓝 | Draft PR 已创建，自动 post-PR supervisor 正在审查或重新处理 |
-| | `agent/review` | 🔵 蓝色 | 自动总控审查已通过，当前 PR 等待人类 review |
+| | `agent/automated-review-passed` | 🔵 蓝色 | 自动总控审查已通过，后续由人审或获准的自动合并策略处理 |
 | | `agent/failed` | 🔴 红色 | AI runner 执行失败 |
 | | `agent/blocked` | ⬛ 黑色 | AI runner 需要人工介入 |
 | | `agent/waiting` | 🟠 橙色 | Issue 依赖未满足，等待上游 closure |
+| **人工待办** | `human/awaiting-review` | 🟡 黄色 | 仍需人工审阅 PR 或完成 PRD 人工验收；队列确认签核完成且 PRD 已归档，或 Issue 离开 review 状态后清除 |
 | **工具路由** | `agent/codex` | 🟣 紫色 | 指定使用 Codex 执行 |
 | | `agent/claude` | 🩵 浅蓝 | 指定使用 Claude Code 执行 |
 | | `agent/kimi` | 🩷 粉色 | 指定使用 Kimi 执行 |
@@ -1242,11 +1251,11 @@ kc pr aggregate --issue 101 --issue 102
 
 | 门禁 | 要求 | 任务刚发布完时的实际状态 |
 |---|---|---|
-| Issue 状态 | 仍为 open，且带 `agent/review` 标签 | NORMAL 档位发布后 Issue 先进 `agent/supervising`；PR 后监督返回 `wait_for_checks` 时就停在那里，本轮不会拿到 `agent/review` |
+| Issue 状态 | 仍为 open，且带 `agent/automated-review-passed` 标签 | NORMAL 档位发布后 Issue 先进 `agent/supervising`；PR 后监督返回 `wait_for_checks` 时就停在那里，本轮不会拿到 `agent/automated-review-passed` |
 | 来源 PR checks | 必需 checks 汇总为 `SUCCESS` | 新建 Draft PR 的 checks 通常是 `PENDING` |
 | 来源 PR 集合 | 每个 Issue 恰好一个未合并来源 PR，且未绕过 review/verification（正文不含 `iar:direct-pr` / `iar:fast-merge`） | 直发档、快速合并档的 Issue 会被拒 |
 
-**后果**：单次夜间 `kc run --all-ready --aggregate-pr` 处理的通常正是"刚跑完"的 Issue，几乎必然卡在前两行，于是整批在 eligibility 阶段被拒绝——不创建总 PR、不关闭来源 PR，日志与错误里给出同一批成员的重试命令。要拿到总 PR，等 checks 跑绿、监督把 Issue 推进到 `agent/review` 之后，再显式补一次：
+**后果**：单次夜间 `kc run --all-ready --aggregate-pr` 处理的通常正是"刚跑完"的 Issue，几乎必然卡在前两行，于是整批在 eligibility 阶段被拒绝——不创建总 PR、不关闭来源 PR，日志与错误里给出同一批成员的重试命令。要拿到总 PR，等 checks 跑绿、监督把 Issue 推进到 `agent/automated-review-passed` 之后，再显式补一次：
 
 ```bash
 kc pr aggregate --issue 101 --issue 102 --dry-run   # 只核对资格与去重 PRD 集，不写分支不建 PR
@@ -1288,7 +1297,7 @@ kc run --issue 42 --takeover --yes
 | `agent/running` 但本机持有者 PID 已不存在 | 放行，交给 running 通道的恢复路径（rework / 发布恢复） |
 | `agent/blocked` 且没有未消费的解除请求 marker | 退出码 5 `conflict`，提示先 `kc blocked-continue --issue <N>` |
 | 读不到、或不是 open | 退出码 3 `not_found` |
-| `agent/review` / `agent/supervising` 等其他状态 | 准入层放行，但 `kc run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `kc supervise` / supervise-daemon |
+| `agent/automated-review-passed` / `agent/supervising` 等其他状态 | 准入层放行，但 `kc run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `kc supervise` / supervise-daemon |
 
 **跨机器的认领无法探测远端进程，一律按有效处理（fail-closed）**：抢跑别人正在执行的 Issue 是双跑，而拒绝一次定向只是让人等一等。
 
@@ -1393,7 +1402,7 @@ kc daemon run            # 升级后的 daemon 认领 #42 后选择直发档
 - **只选档位，不放宽准入**：标签只决定"走哪一档"，直发档的准入条件仍由同一个 core 入口把关——**带 PRD 锚点的 Issue 一律拒绝**（无法证明不是 PRD-backed 的读取失败同样 fail-closed），依赖门禁照常执行。拒绝发生在 builder 与 PR 创建之前，不会被降级成 `NORMAL` 悄悄跑完。daemon 侧只隔离那一条 Issue，其余照常推进。
 - **生命周期：保留 → 认领者消费 → 待恢复**：执行失败或建 PR 失败时标签**保留**，下一轮照常是直发意图。只有首次认领的胜者在**确认本次发布的那个 Draft PR** 之后删除它，且只删这一个标签；落败方既不建立档位也不删标签。删除失败与建 PR 不是原子操作，此时报告"发布成功、标签清理待恢复"并附上 PR URL，**不宣称本轮完全成功**。
 - **本轮关联先于消费**：准入后的有效档位固定到本执行轮，Agent fallback 与恢复沿用它；运行中增删标签不动态切换阶段。runner 用现有 Issue 评论记录未完成发布轮、候选分支/head 及创建前无历史 PR 的事实。检查点只接受当前凭据作者，或经 fresh GitHub 仓库权限确认可管理 Issue 的作者；不将 authorAssociation 当作权限。检查点或权限查询失败时阻塞，不把失败当成无记录。创建前不存在旧 PR 的证明和同轮关联也使用严格完整 PR 查询：只有成功空列表代表不存在，查询失败、空输出或格式错误不能授权新发布或消费历史 PR。消费需要当前未完成轮关联，以及仓库、Issue、分支/head、DIRECT marker 匹配；历史 PR 即使同分支、同 head、同 marker，也不能自动消费新选择。
-- **下一轮只补交接，不重建**：重新认领或 `kc recover --issue <N>` 先查未完成轮。确认对应的已发布 PR 后，仅补标签删除、移交到 `agent/review` 与完成记录，不重跑 Agent、不重复开 PR。DIRECT 的最终状态不随内联 supervisor 配置改变；只有最终状态切换成功后才完成发布轮检查点，切换失败仍可恢复。标签已删但移交前崩溃时也恢复原轮，不能退成新的 NORMAL 构建；发布后正文或 PRD 锚点变更时，清理专用路径可完成原交接，但不能借此启动新 DIRECT。关联无法核实则报告阻塞，不猜历史 PR 是本轮。
+- **下一轮只补交接，不重建**：重新认领或 `kc recover --issue <N>` 先查未完成轮。确认对应的已发布 PR 后，仅补标签删除、移交到 `agent/automated-review-passed` 与完成记录，不重跑 Agent、不重复开 PR。DIRECT 的最终状态不随内联 supervisor 配置改变；只有最终状态切换成功后才完成发布轮检查点，切换失败仍可恢复。标签已删但移交前崩溃时也恢复原轮，不能退成新的 NORMAL 构建；发布后正文或 PRD 锚点变更时，清理专用路径可完成原交接，但不能借此启动新 DIRECT。关联无法核实则报告阻塞，不猜历史 PR 是本轮。
 - **同名标签没有版本**：等标签消费且 workflow 交接完成后，才为新轮重加标签。清理窗口内并发重加同名标签表达新选择不受支持。同样，创建前无旧 PR 的检查与创建不是原子操作；外部操作者在窗口内手动创建完全同分支/head/marker PR，现有接口不能保证原子归属，需与认领者协调手动发布。
 - **最终树验证责任在人**：标签与旗标一样只声明档位，PR 上的 marker 也不区分来源；直发 PR 的质量门禁转移到该 PR 的 CI 与人工对最终 Git tree 的验证——合并前确认 CI 变绿，并核对 landed tree 就是被验证过的那棵树。
 
@@ -1788,7 +1797,7 @@ agent/ready
     → agent/supervising
     → Issue comment: Draft PR Created
     → post-PR supervisor cycle
-    → supervisor approve → agent/review
+    → supervisor approve → agent/automated-review-passed
     → supervisor repair/rebase → agent/running (existing PR branch rework)
     → supervisor human-input-needed → agent/blocked
     → supervisor failed → agent/failed
@@ -1864,7 +1873,7 @@ Draft PR 创建后，Issue 先进入 `agent/supervising`，并立即运行至少
 2. Supervisor 收集 PR context、Issue comments、PR comments、base branch 状态、CI/check 状态、diff、verification results
 3. 如果 worktree 在只读 supervisor cycle 开始前仍有未提交变更，runner 会自动 `git stash push -u` 把它们临时存起来，cycle 结束后再根据 supervisor 决策恢复（pop）或继续保留（`wait_for_checks`）
 4. Supervisor 输出结构化 action：
-   - `approve_for_human_review` → 恢复 stash 后若 worktree 干净则进入 `agent/review`，仍有未提交变更则进入 `agent/blocked`
+   - `approve_for_human_review` → 恢复 stash 后若 worktree 干净则进入 `agent/automated-review-passed`，仍有未提交变更则进入 `agent/blocked`
    - `repair_pr_branch` / `resolve_conflict` → 恢复 stash 后进入 `agent/running` 做现有 PR branch 修复
    - `rebase_pr_branch` → 恢复 stash 后进入 `agent/running` 做 rebase
    - `wait_for_checks` → 保持 stash 与 `agent/supervising`，等待 PR checks 完成
@@ -1920,7 +1929,7 @@ uv run kc supervise-daemon
 ```
 
 `kc supervise` / `kc supervise-daemon` 会：
-- 扫描 `agent/supervising` 和 `agent/review` 的 open Issues
+- 扫描 `agent/supervising` 和 `agent/automated-review-passed` 的 open Issues
 - 加载 linked PR context、Issue comments、PR comments 和最新 `iar:event` marker
 - 检测以下维度变化：
   - `head_sha` 或 `base_sha` 变化
@@ -1929,7 +1938,7 @@ uv run kc supervise-daemon
   - Issue comments 数量超过最新 supervisor marker 记录的游标
   - PR review comments 数量增加
 - 任一维度变化时，先移回 `agent/supervising`，运行 supervisor cycle
-- 无变化时不重复启动 supervisor；若最新 `post_pr_supervisor` marker 的 action 与当前标签不一致，则按已完成 action 对齐标签（approve → `agent/review`、wait → `agent/supervising`、request input → `agent/blocked`、repair/rebase → `agent/running`）。这能恢复 supervisor 已写结果 marker、但进程在标签更新前退出时留下的滞后状态。
+- 无变化时不重复启动 supervisor；若最新 `post_pr_supervisor` marker 的 action 与当前标签不一致，则按已完成 action 对齐标签（approve → `agent/automated-review-passed`、wait → `agent/supervising`、request input → `agent/blocked`、repair/rebase → `agent/running`）。这能恢复 supervisor 已写结果 marker、但进程在标签更新前退出时留下的滞后状态。
 
 Supervisor 结果评论会把自身写入后的 Issue comment 数量记录进 marker，
 因此 runner 自己写出的 `Agent Runner Post-PR Supervisor` 评论不会触发下一轮重审。
@@ -1955,7 +1964,7 @@ checks 状态：
 - supervisor 输出无法解析、返回未知 action，或返回空 summary 的 `request_human_input` 时，本轮会进入 `agent/failed`，不会生成无原因的 `agent/blocked`；平台不得根据 checks 状态猜测替代动作
 - supervisor agent 进程非零退出且 stdout 中识别不到任何 JSON 决策（如 claude CLI 遇到 API / 网络错误崩溃）时，视为基础设施级失败，会在同一 cycle 内重试至多 `max_agent_crash_retries` 次；重试之间指数退避（从 `crash_retry_initial_backoff_seconds` 起每次翻倍，单次等待封顶 `crash_retry_max_backoff_seconds`，默认 30s 起、上限 10 分钟），以扛住分钟级的 API 提供方中断。重试仍失败才进入 `agent/failed`，summary 会标明是 agent infrastructure failure。非零退出但 stdout 中仍能识别出 JSON 决策时直接使用该决策，不消耗重试次数
 
-这样可以避免 `agent/review` label 覆盖仍需 `kc run` 消费的 rework/rebase 状态。
+这样可以避免 `agent/automated-review-passed` label 覆盖仍需 `kc run` 消费的 rework/rebase 状态。
 
 注意：merge queue 的自动合并仍会在合并前等待 checks 全绿（见下文"Autopilot 快速档（合并队列）"），这与 supervisor 的动作选择相互独立——进入人工 review 不代表验收完成，也不产生自动合并或归档资格。
 
@@ -2445,7 +2454,7 @@ kc daemon --concurrency 3
    gh issue edit <issue-number> --add-label agent/supervising --remove-label agent/failed
    ```
 
-   这样可以避免 runner 从头重跑已经完成的实现流程。如果目标标签是 `agent/review`，则使用对应的 `agent/review` 命令。
+   这样可以避免 runner 从头重跑已经完成的实现流程；按评论中给出的目标标签完成状态切换即可。
 
    也可以在 GitHub 网页上手动编辑 Issue 标签，移除 `agent/failed` 并添加对应的目标标签。
 
@@ -2463,7 +2472,7 @@ kc daemon --concurrency 3
 ### 状态流转回顾
 
 ```
-agent/ready  →  agent/running  →  agent/supervising  →  agent/review  →  关闭
+agent/ready  →  agent/running  →  agent/supervising  →  agent/automated-review-passed  →  关闭
       ↑              ↓                                    ↓
       └──────  agent/failed  ←───────────────────────────┘
               （人工修复后改回 ready）
@@ -2471,10 +2480,10 @@ agent/ready  →  agent/running  →  agent/supervising  →  agent/review  → 
 agent/supervising ── supervisor 要求 rework ──→ agent/running ── 修复/rebase ──→ agent/supervising
 
 # recover 恢复路径（supervisor enabled）
-agent/failed ── recover ──→ agent/supervising ── supervisor approve ──→ agent/review
+agent/failed ── recover ──→ agent/supervising ── supervisor approve ──→ agent/automated-review-passed
 
 # recover 恢复路径（supervisor disabled）
-agent/failed ── recover ──→ agent/review
+agent/failed ── recover ──→ agent/automated-review-passed
 
 # forbidden path blocked 恢复路径
 agent/running ── forbidden path 拦截 ──→ agent/blocked ── blocked-continue ──→ agent/running ── 继续执行 ──→ agent/supervising
@@ -2575,9 +2584,9 @@ agent/blocked ── 人工处理 + blocked-continue ──→ agent/running ─
 
 新建 Draft PR 时，正文复用正常发布路径的 `create_draft_pr` 用例，因此和正常发布一致：内容生成（LLM 正文）+ contract anchors + validation checklist + contract block。内容生成需要内容生成器（`run_recover_command` 装配），生成失败时按 `generated_content` 配置退回 template / fallback。仅当 `get_issue` 失败、拿不到 Issue 标题与正文上下文时才退回确定性极简正文（`Recovered by issue-agent-runner.`）。复用已存在的 PR 时不会改写其正文。
 
-**当 `post_pr_supervisor.enabled = true` 时**，成功恢复后会先进入 `agent/supervising` 并运行 post-PR supervisor；只有 supervisor `approve_for_human_review` 后，Issue 才会进入 `agent/review`。
+**当 `post_pr_supervisor.enabled = true` 时**，成功恢复后会先进入 `agent/supervising` 并运行 post-PR supervisor；只有 supervisor `approve_for_human_review` 后，Issue 才会进入 `agent/automated-review-passed`。
 
-**当 `post_pr_supervisor.enabled = false` 时**，成功恢复后直接移除 `agent/failed` / `agent/running` / `agent/ready`，添加 `agent/review`。
+**当 `post_pr_supervisor.enabled = false` 时**，成功恢复后直接移除 `agent/failed` / `agent/running` / `agent/ready`，添加 `agent/automated-review-passed`。
 
 如果失败发生在 `Refusing to publish forbidden paths: ...` 这类 forbidden path 拦截处，并且人工已经确认这些文件可以提交、手动创建了本地 commit，应改走 `agent/running` 的本地 commit 复用路径，让 `kc run` 执行完整的 verification、pre-PR review、publish 和 post-PR supervisor：
 
@@ -2638,8 +2647,8 @@ uv run kc recover --issue 42 --branch issue-421
 6. 检查是否已有 open PR，有则复用，无则创建 draft PR（正文复用正常发布路径生成；见上文）
 7. 发布成功 comment，记录分支、HEAD SHA、PR URL 和是否复用已有 PR
 8. 更新 Issue labels：
-   - `post_pr_supervisor.enabled = true`：移除 `agent/failed` / `agent/running` / `agent/ready` / `agent/review`，添加 `agent/supervising`，然后运行 supervisor
-   - `post_pr_supervisor.enabled = false`：移除 `agent/failed` / `agent/running` / `agent/ready`，添加 `agent/review`
+   - `post_pr_supervisor.enabled = true`：移除 `agent/failed` / `agent/running` / `agent/ready` / `agent/automated-review-passed`，添加 `agent/supervising`，然后运行 supervisor
+   - `post_pr_supervisor.enabled = false`：移除 `agent/failed` / `agent/running` / `agent/ready`，添加 `agent/automated-review-passed`
 
 ### 安全边界
 
@@ -2690,7 +2699,7 @@ gh issue comment <number> --body "## Agent Runner Publish Recovered
 # ...步骤 1-4 同上...
 
 # 5. 更新 Issue labels 直接到 review
-gh issue edit <number> --add-label agent/review --remove-label agent/failed,agent/running,agent/ready
+gh issue edit <number> --add-label agent/automated-review-passed --remove-label agent/failed,agent/running,agent/ready
 ```
 
 ## 多机部署与操作指南
@@ -2910,7 +2919,8 @@ max_issues = 1
 ready = "agent/ready"
 running = "agent/running"
 supervising = "agent/supervising"
-review = "agent/review"
+review = "agent/automated-review-passed"
+# human_review = "human/awaiting-review"  # 人工待办辅助标签
 failed = "agent/failed"
 blocked = "agent/blocked"
 codex = "agent/codex"
@@ -3902,8 +3912,8 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 
 | 异常类型 | 触发条件 | severity | 推荐 CLI |
 |---|---|---|---|
-| `label_pr_mismatch` | PR 已创建但 Issue label 不在 `agent/supervising` / `agent/review` / `agent/blocked` / `agent/failed` 中 | warning | `kc labels sync`、`kc supervise --dry-run` |
-| `pr_dirty_in_review` | PR `mergeable_state` 为 dirty/conflicted 且 label 是 `agent/review` | error | `kc supervise`、`kc run --max-issues 1` |
+| `label_pr_mismatch` | PR 已创建但 Issue label 不在 `agent/supervising` / `agent/automated-review-passed` / `agent/blocked` / `agent/failed` 中 | warning | `kc labels sync`、`kc supervise --dry-run` |
+| `pr_dirty_in_review` | PR `mergeable_state` 为 dirty/conflicted 且 label 是 `agent/automated-review-passed` | error | `kc supervise`、`kc run --max-issues 1` |
 | `dirty_worktree_mismatch` | worktree 有未提交变更但 label 不是 `agent/running` | warning | `kc run --dry-run`、`git status` |
 | `event_label_mismatch` | 最新 `iar:event` phase 隐含的状态与当前 label 不一致 | warning | `kc labels sync` |
 
@@ -4587,7 +4597,7 @@ Agent Runner 的代码分布在四层架构中：
 
 ## Autopilot 快速档（合并队列）
 
-默认（严格档）下，supervisor approve 的 PR 永远停在 `agent/review` 阶段——等待人工来合并。`autopilot.enabled = true` 时 review pass 会运行合并队列：全局 `safety.auto_merge = true` 时沿用全仓自动合并；否则只处理显式带有 `prd-auto-merge` 标签的 PRD。后者只跳过独立 verifier，仍通过仓库验证、PR checks 和分支保护后才 squash 合并。
+默认（严格档）下，supervisor approve 的 Issue 进入 `agent/automated-review-passed`，并带 `human/awaiting-review` 等待人审或人工签核。`autopilot.enabled = true` 时 review pass 会运行合并队列：全局 `safety.auto_merge = true` 时沿用全仓自动合并；否则只处理显式带有 `prd-auto-merge` 标签的 PRD。获准自动合并的 Issue 通常不带人工待办标签；若 PRD 仍有未完成的人工验收项，合并队列会加上 `human/awaiting-review` 并等待签核。队列仍要求仓库验证、PR checks 和分支保护通过后才 squash 合并。
 
 ### 双同意开关
 
@@ -4601,7 +4611,7 @@ auto_merge = true            # 历史开关：现在真正生效
 enabled = true               # 新键：仓库级显式打开
 ```
 
-`autopilot.enabled = false` 时合并队列整段 **no-op**。当 `autopilot.enabled = true` 且 `safety.auto_merge = false` 时，未带 `prd-auto-merge` 的 Issue 仍停在 `agent/review`；带该标签的 PRD 才进入单目标自动合并流程。历史上仅误设 `safety.auto_merge = true` 而未启用 autopilot 的环境仍不会自动合并。
+`autopilot.enabled = false` 时合并队列整段 **no-op**。当 `autopilot.enabled = true` 且 `safety.auto_merge = false` 时，未带 `prd-auto-merge` 的 Issue 仍停在 `agent/automated-review-passed`；带该标签的 PRD 才进入单目标自动合并流程。历史上仅误设 `safety.auto_merge = true` 而未启用 autopilot 的环境仍不会自动合并。
 
 > 迁移注意：升级时检查所有仓库；如有 `safety.auto_merge = true` 残留，本 PRD 会把它激活。新键 `autopilot.enabled` 是显式的客户确认入口。
 
@@ -4615,11 +4625,11 @@ enabled = true               # 新键：仓库级显式打开
 4. **全量验证**：在该 Issue 的 worktree 内调用 `agent_runner_git.run_verification(...)` 重跑 `runner.verification_commands`；红→转验证修复路径，本 PR 跳过不合并。
 5. **禁改路径终扫**：取 PR diff 文件清单，用 `safety.forbidden_path_patterns` 做最终匹配（复用 `agent_runner_publish.is_forbidden_path(...)`）；命中→打 `agent/blocked` + 评论，永不自动合并。
 6. **等 checks**：轮询 `get_pull_request_context` 直到 checks 全绿（适用时自动签核会触发 sign-off check 重跑），超时上限 `autopilot.merge_check_timeout_seconds`。GitHub branch protection 始终保留。
-7. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `iar:event (auto-merged)` 评论、摘除 `agent/review` 标签。
+7. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `iar:event (auto-merged)` 评论、摘除 `agent/automated-review-passed` 标签。
 
 **PRD hold（自动签核之后、rebase 之前）**：PRD-backed Issue 在 rebase 前先读该 Issue worktree 里的 PRD——按实际位置定位（先 `tasks/pending/`，再 `tasks/archive/`）。带 `prd-auto-merge` 的单目标选择授权自动合并越过 Human-Confirmed hold，但不修改 PRD 的清单或验收横幅，也不记录人工验收；PRD 仍必须归档：
 
-- `Human-Confirmed` 组仍有未回答的项（`- [ ]`，以及老 PRD 误标的 `- [~]`，保守口径）且 Issue **没有** `prd-auto-merge` → `skipped_human_review`，本轮不 rebase、不重跑验证、不合并，等人验收。显式选择的单 PRD 是该规则的唯一自动合并例外。
+- `Human-Confirmed` 组仍有未回答的项（`- [ ]`，以及老 PRD 误标的 `- [~]`，保守口径）且 Issue **没有** `prd-auto-merge` → 添加 `human/awaiting-review` 并返回 `skipped_human_review`，本轮不 rebase、不重跑验证、不合并，等人验收。队列确认签核完成且 PRD 已归档后移除此标签；显式选择的单 PRD 是该规则的唯一自动合并例外。
 - PRD 仍在 `tasks/pending/` 且无人审待办 → `skipped_prd_pending`（执行侧没交付完）。
 - PRD 已在 `tasks/archive/` → 若人审已全部回答，或 Issue 带 `prd-auto-merge`，继续 rebase 及后续门禁。
 
@@ -4783,7 +4793,7 @@ PRD 的 GitHub Issue label 被映射为统一状态：
 | 就绪 | `agent/ready` |
 | 运行中 | `agent/running` |
 | 监督中 | `agent/supervising` |
-| 待审阅 | `agent/review` 或存在 open PR |
+| 待审阅 | `agent/automated-review-passed` 或存在 open PR |
 | 失败 | `agent/failed` |
 | 阻塞 | `agent/blocked` |
 | 已合并 | Issue 关闭且 PR 已合并 |

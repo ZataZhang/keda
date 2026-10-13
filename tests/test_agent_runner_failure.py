@@ -516,13 +516,16 @@ def test_format_failure_comment_transition_to_review_recovery() -> None:
             "edit",
             "99",
             "--add-label",
-            "agent/review",
+            "agent/automated-review-passed",
             "--remove-label",
             "agent/supervising",
         ],
     )
     body = format_failure_comment(exc, issue_number=99)
-    assert "gh issue edit 99 --add-label agent/review --remove-label agent/failed" in body
+    assert (
+        "gh issue edit 99 --add-label agent/automated-review-passed --remove-label agent/failed"
+        in body
+    )
     assert "finished its work" in body
     assert "agent/ready" not in body
 

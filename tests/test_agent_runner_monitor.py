@@ -225,7 +225,7 @@ def test_detect_anomalies_pr_dirty_in_review() -> None:
     """PR mergeable=false while label is review must produce an error anomaly."""
     anomalies = detect_anomalies(
         _ctx(
-            primary_label="agent/review",
+            primary_label="agent/automated-review-passed",
             pr_context=PullRequestContext(
                 pr_url="https://github.com/example/repo/pull/26",
                 branch="issue-1",
@@ -257,7 +257,7 @@ def test_detect_anomalies_event_label_mismatch() -> None:
     """Latest event phase implies supervising but label is review."""
     anomalies = detect_anomalies(
         _ctx(
-            primary_label="agent/review",
+            primary_label="agent/automated-review-passed",
             latest_event_phase="draft_pr_created",
         )
     )
@@ -354,7 +354,7 @@ def test_build_issue_snapshot_collects_timeline_pr_and_worktree() -> None:
                 ),
             }
         )
-        issue = _make_issue(19, labels=("agent/review", "source/prd"))
+        issue = _make_issue(19, labels=("agent/automated-review-passed", "source/prd"))
         snapshot = build_issue_snapshot(
             issue=issue,
             config=config,
@@ -409,7 +409,7 @@ def test_build_repository_overview_aggregates_anomaly_counts(
         client = FakeGitHubClient()
         test_issues = [
             _make_issue(30, labels=("agent/failed",)),
-            _make_issue(31, labels=("agent/review",)),
+            _make_issue(31, labels=("agent/automated-review-passed",)),
             _make_issue(32, labels=("agent/supervising",)),
             _make_issue(33, labels=("agent/running",)),
         ]
@@ -599,7 +599,7 @@ def test_api_overview_returns_serialized_payload(
                         "ready": "agent/ready",
                         "running": "agent/running",
                         "supervising": "agent/supervising",
-                        "review": "agent/review",
+                        "review": "agent/automated-review-passed",
                         "failed": "agent/failed",
                         "blocked": "agent/blocked",
                     },

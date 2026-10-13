@@ -70,7 +70,7 @@
     "recovery_retry_delay_seconds": 30,
     "ready_label": "agent/ready",
     "running_label": "agent/running",
-    "review_label": "agent/review",
+    "review_label": "agent/automated-review-passed",
     "failed_label": "agent/failed",
     "base_branch": "main",
     "remote": "origin",

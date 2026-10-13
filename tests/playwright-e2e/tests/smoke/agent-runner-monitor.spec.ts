@@ -37,7 +37,7 @@ const KEDA_TEST_OVERVIEW: MonitoringRepositoryOverview = {
     ready: 'agent/ready',
     running: 'agent/running',
     supervising: 'agent/supervising',
-    review: 'agent/review',
+    review: 'agent/automated-review-passed',
     failed: 'agent/failed',
     blocked: 'agent/blocked',
   },

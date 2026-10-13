@@ -108,7 +108,7 @@ def test_retry_failed_rejected_when_not_failed(tmp_path: Path) -> None:
         title="Fine",
         url="https://example.test/20",
         body="",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     store = _make_store(tmp_path)
     with pytest.raises(ConsoleActionError):

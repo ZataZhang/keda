@@ -2,7 +2,7 @@
 
 快速档（autopilot）下的"合并队列" use case。该 use case 在每个 review pass
 末尾被 :func:`backend.core.use_cases.review_once.review_once` 触发，按 Issue 号 FIFO
-**串行**处理 ``agent/review`` 上获准合并的 PR。全局自动合并仍要求
+**串行**处理 ``agent/automated-review-passed`` 上获准合并的 PR。全局自动合并仍要求
 ``autopilot.enabled`` 和 ``safety.auto_merge`` 同时为真；单个 PRD 可以通过显式
 ``prd-auto-merge`` Issue 标签授权，且只跳过独立 verifier。两条路径都保留仓库验证、
 禁改终扫、PR checks 和 GitHub 分支保护。用户选择单 PRD 自动合并时，该 PRD 的
@@ -41,7 +41,10 @@ from backend.core.shared.prd_checklist import parse_prd_checklist
 from backend.core.use_cases.agent_runner_closeout import resolve_prd_worktree_path
 from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
 from backend.core.use_cases.agent_runner_feedback import extract_prd_path, is_prd_archive_path
-from backend.core.use_cases.agent_runner_direct_pr_label import issue_carries_prd_auto_merge_label
+from backend.core.use_cases.agent_runner_direct_pr_label import (
+    can_auto_merge_issue,
+    issue_carries_prd_auto_merge_label,
+)
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
     parse_latest_event_marker,
@@ -68,14 +71,6 @@ _MERGED_EVENT_PHASE = "auto_merged"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _issue_auto_merge_authorized(issue: IssueSummary, config: AppConfig) -> bool:
-    """Return whether global settings or this Issue's explicit PRD selection authorizes merge."""
-    return bool(
-        config.autopilot.enabled
-        and (config.safety.auto_merge or issue_carries_prd_auto_merge_label(issue, config))
-    )
 
 
 def _extract_pr_branch_from_comments(comments: list[str]) -> str | None:
@@ -291,7 +286,7 @@ class MergeQueueOutcome:
     """Outcome of one Issue's merge-queue attempt."""
 
     issue_number: int
-    action: str  # "merged" | "skipped_no_pr" | "skipped_no_approval" | "skipped_verifier_missing" | "skipped_pr_contract_missing" | "skipped_already_merged" | "blocked_forbidden" | "waiting_for_checks" | "rebase_failed" | "verification_failed"
+    action: str  # e.g. "merged", "skipped_human_review", or "waiting_for_checks".
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +393,7 @@ def _process_one(
                 issue_number=issue.number, action="skipped_issue_refresh_failed"
             )
         scoped_prd_auto_merge = issue_carries_prd_auto_merge_label(issue, config)
-    if not _issue_auto_merge_authorized(issue, config):
+    if not can_auto_merge_issue(issue, config):
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
     prd_anchor = extract_prd_path(issue.body)
     if scoped_prd_auto_merge and prd_anchor is None:
@@ -507,11 +502,21 @@ def _process_one(
     if prd_worktree_path is not None:
         checklist = parse_prd_checklist(prd_worktree_path.read_text(encoding="utf-8"))
         if checklist.human_pending_items and not scoped_prd_auto_merge:
+            if config.labels.human_review not in issue.labels:
+                github_client.edit_issue_labels(
+                    issue.number,
+                    add=[config.labels.human_review],
+                )
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_human_review")
         if not is_prd_archive_path(os.path.relpath(prd_worktree_path, worktree_path)):
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_pending")
     elif scoped_prd_auto_merge:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_missing")
+    if config.labels.human_review in issue.labels and can_auto_merge_issue(issue, config):
+        github_client.edit_issue_labels(
+            issue.number,
+            remove=[config.labels.human_review],
+        )
 
     # Step 3: rebase
     head_before = _safe_head_sha(worktree_path, process_runner)
@@ -553,7 +558,7 @@ def _process_one(
         github_client.comment_issue(
             issue.number,
             "## Agent Runner Merge Queue — Verification Failed\n\n"
-            "工作区重跑 verification_commands 失败；保留 ``agent/review`` 标签等待修复。\n",
+            "工作区重跑 verification_commands 失败；保留 ``agent/automated-review-passed`` 标签等待修复。\n",
         )
         return MergeQueueOutcome(issue_number=issue.number, action="verification_failed")
 
@@ -629,7 +634,7 @@ def _process_one(
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_auto_merge_revoked")
     if scoped_prd_auto_merge and extract_prd_path(merge_issue.body) != prd_anchor:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_anchor_changed")
-    if not _issue_auto_merge_authorized(merge_issue, config):
+    if not can_auto_merge_issue(merge_issue, config):
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
 
     # Step 7: squash merge + audit
@@ -678,9 +683,12 @@ def _process_one(
         config,
         config.labels.review,  # any non-blocked durable state — Issue is now handled
     )
-    # Best-effort: drop the now-stale `agent/review` label since the PR is merged.
+    # Best-effort: drop the now-stale `agent/automated-review-passed` label since the PR is merged.
     try:
-        github_client.edit_issue_labels(issue.number, remove=[config.labels.review])
+        github_client.edit_issue_labels(
+            issue.number,
+            remove=[config.labels.review, config.labels.human_review],
+        )
     except Exception as exc:  # noqa: BLE001
         _logger.warning(
             "Could not drop %s label from Issue #%d: %s", config.labels.review, issue.number, exc

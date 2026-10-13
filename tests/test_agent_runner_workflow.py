@@ -28,7 +28,7 @@ def test_build_transition_labels_removes_other_workflow_labels() -> None:
     config = AppConfig()
     current = (
         "agent/running",
-        "agent/review",
+        "agent/automated-review-passed",
         "agent/codex",
         "type/feature",
     )

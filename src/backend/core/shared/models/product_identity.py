@@ -174,11 +174,11 @@ class RepositoryConfigResolution:
 
 
 def emit_notice_once(notice_text: str | None) -> None:
-    """把一条提示写到 stderr，同一进程内同一文本只说一次。
+    """把一条面向用户的提示写到 stderr，同一进程内同一文本只说一次。
 
-    全仓唯一的改名类提示出口。任何层都不许用 ``logger`` 输出这类提示，也不许
-    另写一个 stderr 助手：应用日志的 stdout 处理器挂在 root logger 上，人类模式
-    的提示会落进 stdout，配置加载期产生的提示在机器模式同样如此。
+    CLI 提示的唯一出口。任何层都不许用 ``logger`` 输出这类提示，也不许另写
+    一个 stderr 助手：应用日志的 stdout 处理器挂在 root logger 上，人类模式的
+    提示会落进 stdout，而配置加载期产生的提示在机器模式同样如此。
 
     Args:
         notice_text: 提示文本；``None`` 或空串时不输出任何东西。

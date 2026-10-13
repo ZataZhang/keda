@@ -145,7 +145,7 @@ def _issue(body: str = _ISSUE_BODY_WITH_VALIDATION, number: int = 42) -> IssueSu
         title="Demo",
         url=f"https://github.com/example/repo/issues/{number}",
         body=body,
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 
@@ -1307,7 +1307,7 @@ def _gate_setup(
     pr_body: str,
     pr_head: str = "abc1111",
     evidence_head: str | None = "abc1111",
-    issue_labels: tuple[str, ...] = ("agent/review",),
+    issue_labels: tuple[str, ...] = ("agent/automated-review-passed",),
 ) -> tuple[_GateGitHubClient, IssueSummary]:
     review_issue = IssueSummary(
         number=42,
@@ -1447,7 +1447,7 @@ def test_gate_resets_verifier_passed_label_on_head_drift(tmp_path: Path) -> None
         pr_body=_checklist_pr_body(ticked=True),
         pr_head="def2222",  # PR head moved on
         evidence_head="abc1111",  # evidence was captured at old SHA
-        issue_labels=("agent/review", "validation/verifier-passed"),
+        issue_labels=("agent/automated-review-passed", "validation/verifier-passed"),
     )
 
     process_validation_gate(
@@ -1649,7 +1649,7 @@ def _structured_issue(number: int = 42) -> IssueSummary:
         title="Demo",
         url=f"https://github.com/example/repo/issues/{number}",
         body=_STRUCTURED_ISSUE_BODY,
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 
@@ -1785,7 +1785,7 @@ def test_ensure_validation_evidence_ready_rejects_missing_required_field(
                     "- [ ] **行为 B 真实验证**：通过 `demo serve` 验证页面。",
                     "",
                 ),
-                labels=("agent/review",),
+                labels=("agent/automated-review-passed",),
             ),
             tmp_path,
             _legacy_config(),
@@ -1825,7 +1825,7 @@ def test_ensure_validation_evidence_ready_rejects_mismatched_file_number(
                     "- [ ] **行为 B 真实验证**：通过 `demo serve` 验证页面。",
                     "",
                 ),
-                labels=("agent/review",),
+                labels=("agent/automated-review-passed",),
             ),
             tmp_path,
             _legacy_config(),

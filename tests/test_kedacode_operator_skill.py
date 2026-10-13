@@ -840,7 +840,7 @@ def test_packaged_skill_documents_triage_paths() -> None:
         "agent/waiting",
         "agent/running",
         "agent/supervising",
-        "agent/review",
+        "agent/automated-review-passed",
         "agent/failed",
         "agent/blocked",
         "validation/verifier-passed",

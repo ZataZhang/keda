@@ -62,7 +62,11 @@ from backend.core.use_cases.agent_runner_validation import (
     ensure_validation_evidence_ready,
     publish_validation_evidence_best_effort,
 )
-from backend.core.use_cases.agent_runner_workflow import workflow_state_labels
+from backend.core.use_cases.agent_runner_workflow import (
+    build_transition_labels,
+    issue_requires_human_review,
+    workflow_state_labels,
+)
 from backend.core.use_cases.run_agent_once import (
     ensure_prd_delivery_ready,
     ensure_verification_passed,
@@ -78,6 +82,23 @@ from backend.core.use_cases.run_verifier_agent import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _review_handoff_label_updates(
+    issue: IssueSummary,
+    config: AppConfig,
+) -> tuple[list[str], list[str]]:
+    """返回进入自动审查通过状态时要添加和移除的标签。"""
+    next_labels = build_transition_labels(
+        issue.labels,
+        config,
+        config.labels.review,
+        human_review_required=issue_requires_human_review(issue, config),
+    )
+    return (
+        [label for label in next_labels if label not in issue.labels],
+        [label for label in issue.labels if label not in next_labels],
+    )
 
 
 @dataclass(frozen=True)
@@ -609,7 +630,7 @@ def _should_run_post_pr_supervisor(
 
     直发档（``--direct-pr``）不进监督：那是 Draft PR 之后的又一次 agent 调用，而该
     档位的承诺是「建完 PR 只剩机械状态」，因此与未启用监督走同一分支（直接落到
-    ``agent/review``），并留下旗标来源可追溯的审计日志。
+    ``agent/automated-review-passed``），并留下旗标来源可追溯的审计日志。
 
     Args:
         config: 应用配置（提供 ``post_pr_supervisor.enabled`` 与 workflow 标签）。
@@ -807,12 +828,11 @@ def _finish_implementation_publication(
             )
     else:
         # 未启用监督（或直发档旁路）时直接进入 review 标签
+        review_add_labels, review_remove_labels = _review_handoff_label_updates(issue, config)
         _edit_issue_labels_after_publish(
             issue_number=issue.number,
-            add_labels=[config.labels.review],
-            remove_labels=[
-                label for label in workflow_state_labels(config) if label != config.labels.review
-            ],
+            add_labels=review_add_labels,
+            remove_labels=review_remove_labels,
             worktree_path=worktree_path,
             github_client=github_client,
         )
@@ -977,12 +997,11 @@ def _finish_existing_commit_publication(
                 executor_agent=selected_agent,
             )
     else:
+        review_add_labels, review_remove_labels = _review_handoff_label_updates(issue, config)
         _edit_issue_labels_after_publish(
             issue_number=issue.number,
-            add_labels=[config.labels.review],
-            remove_labels=[
-                label for label in workflow_state_labels(config) if label != config.labels.review
-            ],
+            add_labels=review_add_labels,
+            remove_labels=review_remove_labels,
             worktree_path=worktree_path,
             github_client=github_client,
         )

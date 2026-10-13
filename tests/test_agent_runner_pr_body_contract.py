@@ -465,7 +465,7 @@ def test_merge_queue_skips_prs_with_contract_annotation(tmp_path) -> None:
     outcome = _process_one(
         repo_path=tmp_path,
         config=_make_config(require_verifier_pass=False, auto_sign_off=False),
-        issue=_make_issue(number=70, labels=("agent/review",)),
+        issue=_make_issue(number=70, labels=("agent/automated-review-passed",)),
         github_client=github,
         process_runner=FakeProcessRunner(),
         supervisor_agent="auto",
@@ -529,7 +529,7 @@ def test_merge_queue_merges_prs_without_contract_annotation(tmp_path, monkeypatc
     outcome = _process_one(
         repo_path=tmp_path,
         config=_make_config(require_verifier_pass=False, auto_sign_off=False),
-        issue=_make_issue(number=71, labels=("agent/review",)),
+        issue=_make_issue(number=71, labels=("agent/automated-review-passed",)),
         github_client=github,
         process_runner=FakeProcessRunner(),
         supervisor_agent="auto",

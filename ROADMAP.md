@@ -31,7 +31,7 @@
 - **CLI 基础能力已落地**：`iar init`、`iar labels sync`、`iar issue-from-prd`、`iar run-once`、`iar daemon`、`iar review-once`、`iar review-daemon`、`iar recover-publish`、`iar deliberate` 和 `iar worktree` 已接入项目脚本，并通过 `.iar.toml`、`config.toml` 与环境变量配置。
 - **仓库本地配置已落地**：`iar init` 能在目标仓库生成 `.iar.toml`，全局 `config.toml` 主要保留默认值、环境级设置和 legacy repository registry。
 - **人工准入队列已落地**：runner 只处理带有 `agent/ready` label 的代码任务，不会主动挑选未标记任务；支持 `agent/codex`、`agent/claude`、`agent/kimi` 等 agent 路由 label。
-- **标准 label 流转已落地**：支持同步和使用 `agent/ready`、`agent/running`、`agent/supervising`、`agent/review`、`agent/failed`、`agent/blocked` 等队列状态。
+- **标准 label 流转已落地**：支持同步和使用 `agent/ready`、`agent/running`、`agent/supervising`、`agent/automated-review-passed`、`agent/failed`、`agent/blocked` 等队列状态；`human/awaiting-review` 独立标记仍需人工审阅或验收的 Issue。
 - **PRD 到 Issue 的发布链路已落地**：`issue-from-prd` 能从 PRD 创建 GitHub Issue、回写 Issue URL，并支持 `--publish-prd` 在 ready 前提交和推送目标 PRD 文件；不带 `--publish-prd` 的 `--ready` 交互路径会延迟添加 ready label，避免 PRD 尚未发布时被 runner 领取。
 - **多仓库目标解析已落地**：当前目录、`--repo`、`--repo-id` 和 `--all` 均可解析目标仓库；多仓库 registry 继续兼容，但未指定目标时默认处理当前 Git 仓库，不再隐式轮询所有 enabled registry entries。
 - **隔离 worktree 执行链路已落地**：`run-once` 能领取 ready issue、创建或复用 worktree、选择 agent、运行 agent、执行验证、推送分支并创建 Draft PR。
@@ -41,8 +41,8 @@
 - **pre-commit 验证命令已落地**：runner 在 commit 阶段新增 `runner.pre_commit_verification_command`，与既有 `runner.verification_commands` 解耦；记忆/技能晋升与 verifier 阶段不经过该命令。
 - **pre-push AI review 已落地**：实现 agent 提交后、push 前会执行独立 review session；reviewer 修改必须通过同一 commit proxy 和验证命令；空 commit request 会按 reviewer verdict 收敛或软失败，不再被误判为硬失败。
 - **独立 verifier gate 已落地**：Realistic Validation sign-off 由独立 verifier agent 评估——verifier 默认换 agent/model、在干净 worktree 中对抗性验证，通过后打 `validation/verifier-passed` 标签；head 漂移时会自动清除该标签，防止 autopilot 误判。
-- **post-PR supervisor 已落地**：Draft PR 创建后 Issue 进入 `agent/supervising`，supervisor 可批准进入 `agent/review`、请求 repair/rebase/resolve-conflict、转人工 blocked 或标记 failed。
-- **review daemon 宽上下文检测已落地**：`review-once` / `review-daemon` 能扫描 `agent/supervising` 和 `agent/review` Issue，并基于 head/base、CI checks、mergeability、Issue comments 和 PR comments 变化重新运行 supervisor cycle；supervisor 自写评论不会触发无限自循环。
+- **post-PR supervisor 已落地**：Draft PR 创建后 Issue 进入 `agent/supervising`，supervisor 可批准进入 `agent/automated-review-passed`、请求 repair/rebase/resolve-conflict、转人工 blocked 或标记 failed。
+- **review daemon 宽上下文检测已落地**：`review-once` / `review-daemon` 能扫描 `agent/supervising` 和 `agent/automated-review-passed` Issue，并基于 head/base、CI checks、mergeability、Issue comments 和 PR comments 变化重新运行 supervisor cycle；supervisor 自写评论不会触发无限自循环。
 - **rebase 冲突 agent 解决基础能力已落地**：post-PR supervisor 的 rebase 路径遇到冲突时可调用 agent 处理冲突、运行验证并用 `--force-with-lease` 推送。
 - **AI 生成 Issue / PR 内容已落地**：`[agent_runner.generated_content]` 支持 template 和只读 agent 两种模式，并对 Issue 的 PRD anchor 与 PR 的 `Closes #...` anchor 做 fallback 校验。
 - **只读多 agent 合议基础能力已落地**：`iar deliberate` 能运行 architect / skeptic / implementer 等 profile，输出 event stream、transcript、result、session metadata 和隔离 workspace 原始输出。
@@ -141,9 +141,9 @@
 13. runner 执行配置化本地验证（含 pre-commit 验证命令与 `runner.verification_commands`），失败时把日志摘要交回 agent 做有限次数恢复。
 14. runner 做发布前安全检查和 pre-push AI review；reviewer 如需修改，仍通过受限 commit proxy 和配置化验证命令完成。
 15. review 通过后，runner 推送任务分支、创建 Draft PR，并把 Issue 移入 `agent/supervising`。
-16. post-PR supervisor 检查 PR context、Issue/PR comments、diff、验证结果、checks、mergeability 与独立 verifier verdict；通过后进入 `agent/review`，否则可请求 repair/rebase/resolve-conflict、转人工 blocked 或标记 failed。
-17. **快速档仓库**在 `agent/review` 阶段额外挂合并队列：verifier 绿灯后自动勾选 sign-off、rebase 到最新 base、worktree 全量验证重跑、禁改路径终扫、等 checks 全绿，最后 squash 合并并写 `iar:event`（auto-merged）评论；任一步失败走既有失败/修复路径，不阻塞其余 PR。严格档仓库保持原样停在人工 Review。
-18. `review-once` / `review-daemon` 持续观察已进入 `agent/supervising` 或 `agent/review` 的 Issue；当 PR head/base、CI/check、Issue/PR comment 或 mergeability 变化时重新运行 supervisor cycle。
+16. post-PR supervisor 检查 PR context、Issue/PR comments、diff、验证结果、checks、mergeability 与独立 verifier verdict；通过后进入 `agent/automated-review-passed`，否则可请求 repair/rebase/resolve-conflict、转人工 blocked 或标记 failed。
+17. **快速档仓库**在 `agent/automated-review-passed` 阶段额外挂合并队列：verifier 绿灯后自动勾选 sign-off、rebase 到最新 base、worktree 全量验证重跑、禁改路径终扫、等 checks 全绿，最后 squash 合并并写 `iar:event`（auto-merged）评论；任一步失败走既有失败/修复路径，不阻塞其余 PR。严格档仓库保持原样停在人工 Review。
+18. `review-once` / `review-daemon` 持续观察已进入 `agent/supervising` 或 `agent/automated-review-passed` 的 Issue；当 PR head/base、CI/check、Issue/PR comment 或 mergeability 变化时重新运行 supervisor cycle。
 19. **快速档仓库**的 `iar daemon run` 在每轮 pass 头部执行 roadmap 持续调度：对账 running 队列条目（merged/archived → completed、failed → failed 泊车不重试）、按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD，幂等建 Issue / 打 ready 标签交 Phase 2 消费；`iar roadmap advance [--dry-run]` 作为一次性入口。
 20. 发布阶段失败但本地 commit 已存在时，operator 可用 `iar recover-publish` 完成发布收尾；目标状态应与普通 Draft PR 发布一致，进入 supervisor 闭环后再交给人工 review。
 21. 在需求不明确、rebase 冲突无法安全确认、发布失败、验证失败或高风险 review 发现时安全停止，并输出明确的人工处理建议。
@@ -214,12 +214,12 @@ Status: Partially completed.
 
 - 已完成：自动推送任务分支并创建 Draft PR。
 - 已完成：PR body 包含 `Closes #<issue-number>`，Issue comment 记录分支、PR URL 和验证结果。
-- 已完成：Draft PR 创建后 Issue 从 `agent/running` 流转到 `agent/supervising`，supervisor 通过后再进入 `agent/review`。
+- 已完成：Draft PR 创建后 Issue 从 `agent/running` 流转到 `agent/supervising`，supervisor 通过后再进入 `agent/automated-review-passed`。
 - 已完成：可通过 `[agent_runner.generated_content]` 生成更完整的 Issue / PR Markdown，并在锚点缺失时 fallback。
 - 已完成：PRD-backed Issue 发布前会强制检查 Acceptance Checklist，并在完成时归档 PRD。
 - 已完成：发布前会校验 remote、branch 和 forbidden paths，降低错误发布风险。
 - 已完成：`iar recover-publish` 支持发布阶段失败后的显式恢复命令，并可复用已有 open Draft PR。
-- 已完成（新增）：快速档合并队列（verifier 绿灯 → 自动签核 → rebase → 全量验证 → 禁改终扫 → squash 合并）作为 `agent/review` 阶段的延伸，已随 `P1-FEAT-20260703-105322` 交付归档（实现：`src/backend/core/use_cases/agent_runner_merge_queue.py`；测试：`tests/test_agent_runner_merge_queue.py`；门控：`config.toml` 的 `[agent_runner.autopilot]` + `[agent_runner.safety].auto_merge`）。
+- 已完成（新增）：快速档合并队列（verifier 绿灯 → 自动签核 → rebase → 全量验证 → 禁改终扫 → squash 合并）作为 `agent/automated-review-passed` 阶段的延伸，已随 `P1-FEAT-20260703-105322` 交付归档（实现：`src/backend/core/use_cases/agent_runner_merge_queue.py`；测试：`tests/test_agent_runner_merge_queue.py`；门控：`config.toml` 的 `[agent_runner.autopilot]` + `[agent_runner.safety].auto_merge`）。
 - 未完成（本次登记）：`--direct-pr` per-run 档位——执行 agent 结束后只保留机械步骤（runner 受控提交 → push → 建 Draft PR），跳过 pre-PR review 与 runner 验证命令，把门禁转移到 PR 上的 CI。仅限无 PRD 锚点的 Issue，与 `--fast-merge` 互斥。由 `P1-FEAT-20261006-122336` 交付。
 - 未完成：发布恢复成功后仍需与普通 Draft PR 发布保持同样的 post-PR supervisor 安全闭环。
 - 未完成：默认分支 token 匹配、发布失败阶段分类和只读 supervisor dirty guard 仍在 pending PRD 中。
@@ -287,7 +287,7 @@ Status: Completed. 随 `P1-FEAT-20260703-105322` 交付归档；实现 `src/back
 - 快速档开关：在 `.iar.toml` 写入 `[autopilot] enabled = true` 与 `[safety] auto_merge = true`，双开关同时为真才激活；默认全关，严格档仓库零行为变化。
 - 合并队列：review pass 末尾按 Issue 号 FIFO 串行处理 supervisor 已 approve 的 PR，链式门禁（verifier 绿灯 → 自动签核 → rebase 最新 base → worktree 全量验证重跑 → 禁改路径终扫 → checks 全绿 → squash 合并），任一步失败转既有修复路径、不阻塞队列中其余 PR。
 - 自动签核：合并前自动勾选 PR body 的 Realistic Validation sign-off 清单并发 `iar:auto-sign-off` marker 评论；勾选与评论均幂等，崩溃重入不重复动作。
-- 队列状态：复用 `agent/review` 标签与 PR 状态表达进度，无新存储；合并成功后发 `iar:event`（auto-merged）评论、摘除 `agent/review` 标签。
+- 队列状态：复用 `agent/automated-review-passed` 标签与 PR 状态表达进度，无新存储；仍有 PRD 人工验收项时添加 `human/awaiting-review`，待办完成或合并成功后清理；合并成功后发 `iar:event`（auto-merged）评论并摘除自动审查通过标签。
 - 显式逃生：`safety.auto_merge` 维持为死开关等价物直到 `autopilot.enabled` 同时为真；`recover-publish` / 现有 review daemon 行为不被动；`auto_merge` 语义激活需要发布说明显式提示。
 - 跨仓库边界：每仓独立串行合并，不做跨仓库统一编排；merge 方式仅 squash。
 
@@ -308,7 +308,7 @@ Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/back
 1. **autopilot fast-lane 的发布说明（本组唯一剩项）**：合并队列（`P1-FEAT-20260703-105322`）与 roadmap 持续调度（`P1-FEAT-20260703-105330`）**已交付归档**；第三件"执行前 re-grounding 与触碰面避让"已收缩为默认 `execution` 模板内的 `PRD map check` 核验指令并交付（`P1-FEAT-20260703-105340`）。剩余只有 `safety.auto_merge` 语义激活的升级提示与渠道（README / release notes / daemon 启动日志）待定。
 2. **Agent Runner 记忆锚点稳定化落地与防回归**（**已交付归档**）：`P1-BUG-20260704-153640-agent-runner-memory-stable-anchoring` 把所有记忆目录绝对化到目标仓库主检出根、共享写入原子化、证据脚本强制 `git worktree add` 双副本；整套记忆系统"跨 Issue 复用"已生效。
 3. **层迁移善后**（**已交付归档**）：`P1-REFACTOR-20260703-184226-api-engines-layer-migration` 把 `api/` 对 `engines/agent_runner/` 的直连 import 全部清零，架构检查恢复严格态稳定通过；`CLAUDE.md` / `docs/ai-standards/architecture.md` / `docs/architecture/system-design.md` 三处表述一致。
-4. **发布恢复后的 supervisor 安全闭环**：恢复成功后先进入 `agent/supervising`，supervisor approve 后再进入 `agent/review`，并修正分支 token 匹配与发布失败阶段分类。
+4. **发布恢复后的 supervisor 安全闭环**：恢复成功后先进入 `agent/supervising`，supervisor approve 后再进入 `agent/automated-review-passed`，并修正分支 token 匹配与发布失败阶段分类。
 5. **rebase detached HEAD branch guard**：确保 active rebase target 可确认时允许继续，无法确认时安全停止并输出可诊断错误。
 6. **CI rework state recovery、blocked/forbidden resolution 与 process runner 错误可诊断性增强**：从 supervisor 修复回路单点补齐。
 7. **Agent Runner operator 监控面板、异常检测和 Issue 时间线 API**（M9）：已交付，并升级为统一管理终端 + `iar console` 随 wheel 分发一键启动。

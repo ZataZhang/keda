@@ -164,6 +164,7 @@ def _merge_label_config(
         running=override_data.get("running", base_config.running),
         supervising=override_data.get("supervising", base_config.supervising),
         review=override_data.get("review", base_config.review),
+        human_review=override_data.get("human_review", base_config.human_review),
         failed=override_data.get("failed", base_config.failed),
         blocked=override_data.get("blocked", base_config.blocked),
         waiting=override_data.get("waiting", base_config.waiting),

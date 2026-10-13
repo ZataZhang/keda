@@ -362,7 +362,7 @@ def is_transient_failure(exc: BaseException) -> bool:
 #: failure occurs while transitioning to one of these labels, the agent's local
 #: work is already done; recovery should retry the transition rather than
 #: re-run the agent from ``agent/ready``.
-_COMPLETION_WORKFLOW_LABELS = frozenset({"agent/supervising", "agent/review"})
+_COMPLETION_WORKFLOW_LABELS = frozenset({"agent/supervising", "agent/automated-review-passed"})
 
 #: Matches ``gh issue edit <number> ... --add-label <label>`` and captures the
 #: target label, regardless of option order or extra flags.

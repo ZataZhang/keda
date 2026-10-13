@@ -49,7 +49,7 @@ const MONITORING_OVERVIEW = {
         ready: 'agent/ready',
         running: 'agent/running',
         supervising: 'agent/supervising',
-        review: 'agent/review',
+        review: 'agent/automated-review-passed',
         failed: 'agent/failed',
         blocked: 'agent/blocked',
       },

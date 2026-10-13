@@ -26,7 +26,10 @@ import typer
 from typer import _click as typer_click
 
 from backend.api.cli import _run_parsed_command, error_console
-from backend.api.cli_completion import register_completion_commands
+from backend.api.cli_completion import (
+    maybe_prompt_for_completion_setup,
+    register_completion_commands,
+)
 from backend.api.cli_exit_codes import EXIT_CODE_HELP, ExitCode
 from backend.api.cli_output import (
     OUTPUT_FORMAT_JSON,
@@ -499,6 +502,8 @@ def main(argv: list[str] | None = None) -> int:
     """Run the Typer-powered CLI (``kc``; also installed as ``kedacode`` / ``iar``)."""
     args = list(sys.argv[1:] if argv is None else argv)
     _emit_legacy_command_notice(args)
+    if maybe_prompt_for_completion_setup(args):
+        return 0
     # Typer/Click 会在调用根回调前把空参数处理成成功的帮助输出；保留裸命令既有的
     # no-TTY 非零退出语义，TTY 下直接交给原生会话。
     if not args and product_identity.COMPLETION_ENV_VAR_NAME not in os.environ:

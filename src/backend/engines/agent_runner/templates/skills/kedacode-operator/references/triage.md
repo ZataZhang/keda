@@ -13,10 +13,14 @@ The viewing paths tell you what an Agent is doing; the Issue's labels tell you w
 | `agent/ready` | Queued and eligible for the daemon's next autonomous pick. Priority order is defined under Safety and compatibility. **It is not a precondition for execution**: a human-named `kc run --issue <N>` target needs no label at all. | Nothing, or `kc run --all-ready --dry-run` to preview the selection. |
 | `agent/waiting` | A declared dependency is unmet. | Resolve the upstream Issue; do not re-queue. |
 | `agent/running` | Claimed. The claim comment records host, PID, and the selected agent; the first claim is settled by a claim-marker election, so exactly one process wins and the loser withdraws its own comment. | Use the viewing paths on the 看进度 route. An explicit `kc run --issue <N>` against a live claim fails with a conflict naming the holder instead of double-running. |
-| `agent/supervising` / `agent/review` | A PR exists and the supervisor is working or has asked for human review. | A Draft PR is **not** the end of the pipeline; read the supervisor's comment on the PR. |
+| `agent/supervising` | A PR exists and the post-PR supervisor is working or waiting on checks. | Read the supervisor's latest Issue or PR comment. |
+| `agent/automated-review-passed` | The automated post-PR review passed. | Check `human/awaiting-review`; if absent, inspect whether the configured autopilot merge queue is enabled. |
+| `human/awaiting-review` | A human review or PRD acceptance sign-off is still pending. | Review the PR and complete the requested sign-off; this label is separate from the agent workflow state. |
 | `agent/failed` | The pass ended without a publishable result. | Read the `Attempt History` comment, fix the cause, then re-queue. |
 | `agent/blocked` | Needs a human decision (for example forbidden paths). | Resolve the cause, then `kc blocked-continue --issue <N>`. |
 | `validation/verifier-passed` | The independent verifier signed off; a new head commit clears it again. | Nothing until the PR is reviewed. |
+
+The upgraded review daemon cleans the legacy `agent/review` label when it handles an open Issue: a lone legacy state becomes `agent/automated-review-passed`; one additional state is kept as authoritative. If multiple other workflow states conflict, the Issue is left unchanged and the conflict is logged.
 
 ### When a run makes no visible progress
 

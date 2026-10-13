@@ -32,8 +32,11 @@ from backend.core.use_cases.pr_supervisor import (
     run_post_pr_supervisor_cycle,
 )
 from backend.core.use_cases.agent_runner_workflow import (
+    LEGACY_REVIEW_LABEL,
     find_latest_unconsumed_marker,
+    synchronize_human_review_label,
     transition_issue_workflow_state,
+    workflow_state_labels,
 )
 from backend.core.use_cases.agent_runner_git import (
     has_changes,
@@ -547,7 +550,7 @@ def review_once(
     """
     effective_repo_id = repo_id or repo_path.name
     candidates = github_client.list_review_candidate_issues(
-        [config.labels.supervising, config.labels.review], max_issues
+        [config.labels.supervising, config.labels.review, LEGACY_REVIEW_LABEL], max_issues
     )
     if not candidates:
         _logger.info(
@@ -567,6 +570,32 @@ def review_once(
             )
             continue
         try:
+            if LEGACY_REVIEW_LABEL in issue.labels:
+                issue = github_client.get_issue(issue.number)
+                if issue.state.upper() != "OPEN":
+                    continue
+            if LEGACY_REVIEW_LABEL in issue.labels:
+                other_states = [
+                    label
+                    for label in workflow_state_labels(config)
+                    if label not in {LEGACY_REVIEW_LABEL, config.labels.review}
+                    and label in issue.labels
+                ]
+                if len(other_states) > 1:
+                    _logger.warning(
+                        "Issue #%d has legacy review plus conflicting workflow labels %s; "
+                        "leaving it unchanged.",
+                        issue.number,
+                        other_states,
+                    )
+                    continue
+                target_state = other_states[0] if other_states else config.labels.review
+                transition_issue_workflow_state(github_client, issue.number, config, target_state)
+                if target_state not in {config.labels.review, config.labels.supervising}:
+                    continue
+                issue = github_client.get_issue(issue.number)
+            if config.labels.review in issue.labels:
+                synchronize_human_review_label(github_client, issue, config)
             outcome = _process_review_candidate(
                 issue=issue,
                 repo_path=repo_path,

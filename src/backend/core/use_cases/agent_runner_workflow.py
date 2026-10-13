@@ -7,50 +7,77 @@
 from __future__ import annotations
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
-from backend.core.shared.models.agent_runner import AppConfig, ReviewEventMarker
+from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, ReviewEventMarker
+from backend.core.use_cases.agent_runner_direct_pr_label import can_auto_merge_issue
 from backend.core.use_cases.agent_runner_events import _parse_event_marker
+
+LEGACY_REVIEW_LABEL = "agent/review"
 
 
 def workflow_state_labels(config: AppConfig) -> list[str]:
     """返回所有 durable workflow state labels。
 
     这些标签代表 Issue 的生命周期状态，状态切换时会从当前 labels 中
-    移除其他 workflow labels，只保留目标标签。
+    移除其他 workflow labels，只保留目标标签。人工待办标签是独立维度，不在此集合中。
     """
     return [
         config.labels.ready,
         config.labels.running,
         config.labels.supervising,
         config.labels.review,
+        LEGACY_REVIEW_LABEL,
         config.labels.failed,
         config.labels.blocked,
     ]
+
+
+def issue_requires_human_review(issue: IssueSummary, config: AppConfig) -> bool:
+    """判断自动审查通过后是否仍需要人工处理。
+
+    Args:
+        issue: 待判断的 GitHub Issue。
+        config: 当前运行配置。
+
+    Returns:
+        未获自动合并授权时返回 True。
+    """
+    return not can_auto_merge_issue(issue, config)
 
 
 def build_transition_labels(
     current_labels: tuple[str, ...],
     config: AppConfig,
     target_label: str,
+    *,
+    human_review_required: bool = False,
 ) -> list[str]:
     """计算状态切换后的 labels 列表。
 
     规则：
     - 添加 target_label
     - 移除所有其他 durable workflow labels
-    - 保留非 workflow labels（如 agent routing labels、type labels）
+    - 根据目标状态更新人工待办标签
+    - 保留其他非 workflow labels（如 agent routing labels、type labels）
 
     Args:
         current_labels: 当前 Issue 的所有 labels
         config: 应用配置
         target_label: 目标 workflow state label
+        human_review_required: 目标为自动审查通过时，是否仍需人工处理
 
     Returns:
         切换后应设置的完整 labels 列表
     """
     durable = set(workflow_state_labels(config))
-    preserved = [label for label in current_labels if label not in durable]
+    preserved = [
+        label
+        for label in current_labels
+        if label not in durable and label != config.labels.human_review
+    ]
     if target_label not in preserved:
         preserved.append(target_label)
+    if target_label == config.labels.review and human_review_required:
+        preserved.append(config.labels.human_review)
     return preserved
 
 
@@ -74,13 +101,54 @@ def transition_issue_workflow_state(
         (是否成功, 最终 labels 列表)。成功时返回更新后的 labels。
     """
     issue = github_client.get_issue(issue_number)
-    new_labels = build_transition_labels(issue.labels, config, target_label)
+    human_review_required = target_label == config.labels.review and issue_requires_human_review(
+        issue, config
+    )
+    new_labels = build_transition_labels(
+        issue.labels,
+        config,
+        target_label,
+        human_review_required=human_review_required,
+    )
     github_client.edit_issue_labels(
         issue_number,
         add=new_labels,
         remove=[label for label in issue.labels if label not in new_labels],
     )
     return True, new_labels
+
+
+def synchronize_human_review_label(
+    github_client: IGitHubClient,
+    issue: IssueSummary,
+    config: AppConfig,
+) -> bool:
+    """策略需要人工处理时，确保自动审查通过的 Issue 带人工待办标签。
+
+    Args:
+        github_client: 用于读取和更新 Issue 标签的 GitHub 客户端。
+        issue: review 候选 Issue。
+        config: 当前运行配置。
+
+    Returns:
+        本次是否新增了人工待办标签。
+    """
+    current_issue = github_client.get_issue(issue.number)
+    if current_issue.state.upper() != "OPEN" or config.labels.review not in current_issue.labels:
+        return False
+
+    label_present = config.labels.human_review in current_issue.labels
+    label_required = issue_requires_human_review(current_issue, config)
+    # 已存在的人工待办也可能来自 PRD 的 Human-Confirmed hold；自动合并授权
+    # 不代表这类显式人工验收已完成，因此这里只补标签，不按策略清除已有标签。
+    if not label_required or label_present:
+        return False
+
+    github_client.edit_issue_labels(
+        issue.number,
+        add=[config.labels.human_review],
+    )
+    return True
 
 
 def find_latest_unconsumed_marker(

@@ -113,7 +113,10 @@ def test_review_once_detects_checks_state_change_and_triggers_supervisor() -> No
     label_calls = [c for c in client.calls if c["method"] == "edit_issue_labels"]
     # Agent-led CI 决策契约：FAILURE 不再改写 approve，Issue 进入 review。
     assert len(label_calls) == 1
-    assert label_calls[0]["add"] == ["agent/review"]
+    assert label_calls[0]["add"] == [
+        "agent/automated-review-passed",
+        "human/awaiting-review",
+    ]
     assert label_calls[0]["remove"] == ["agent/supervising"]
 
 
@@ -253,7 +256,7 @@ def test_review_once_blocks_conflicting_pr_approval() -> None:
         title="T",
         url="U",
         body="B",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     client = FakeGitHubClient()
     client._remote_base_sha = "def456"
@@ -300,7 +303,7 @@ def test_review_once_blocks_conflicting_pr_approval() -> None:
     label_calls = [c for c in client.calls if c["method"] == "edit_issue_labels"]
     assert label_calls[-1]["add"] == ["agent/running"]
     assert label_calls[-1]["remove"] == ["agent/supervising"]
-    assert not any(call["add"] == ["agent/review"] for call in label_calls)
+    assert not any(call["add"] == ["agent/automated-review-passed"] for call in label_calls)
     comment_calls = [c for c in client.calls if c["method"] == "comment_issue"]
     assert "Action: rebase_pr_branch" in comment_calls[-1]["body"]
 
@@ -312,7 +315,7 @@ def test_review_once_defers_when_full_open_pr_context_is_unavailable() -> None:
         title="T",
         url="U",
         body="B",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     client = FakeGitHubClient()
     client._issue_comments[1] = [
@@ -453,7 +456,7 @@ def test_review_once_skips_after_supervisor_writes_its_own_comment() -> None:
         title="T",
         url="U",
         body="B",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     client = FakeGitHubClient()
     client._remote_base_sha = "def456"
@@ -597,7 +600,10 @@ def test_review_once_reconciles_stale_supervising_label_after_approve() -> None:
     assert mock_cycle.called is False
     label_calls = [call for call in client.calls if call["method"] == "edit_issue_labels"]
     assert len(label_calls) == 1
-    assert label_calls[0]["add"] == ["agent/review"]
+    assert label_calls[0]["add"] == [
+        "agent/automated-review-passed",
+        "human/awaiting-review",
+    ]
     assert label_calls[0]["remove"] == ["agent/supervising"]
 
 
@@ -608,7 +614,7 @@ def test_review_once_moves_review_label_to_supervising_on_change() -> None:
         title="T",
         url="U",
         body="B",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     client = FakeGitHubClient()
     client._remote_base_sha = "def456"
@@ -643,7 +649,7 @@ def test_review_once_moves_review_label_to_supervising_on_change() -> None:
     label_calls = [c for c in client.calls if c["method"] == "edit_issue_labels"]
     # First label call must be review -> supervising (before supervisor)
     assert label_calls[0]["add"] == ["agent/supervising"]
-    assert label_calls[0]["remove"] == ["agent/review"]
+    assert label_calls[0]["remove"] == ["agent/automated-review-passed"]
 
 
 def test_review_once_recovers_branch_from_draft_pr_comment(tmp_path: Path) -> None:
@@ -1007,7 +1013,10 @@ def test_review_once_auto_stashes_dirty_worktree_and_approves() -> None:
     assert ("git", "stash", "pop") in commands
     label_calls = [c for c in client.calls if c["method"] == "edit_issue_labels"]
     assert len(label_calls) == 1
-    assert label_calls[0]["add"] == ["agent/review"]
+    assert label_calls[0]["add"] == [
+        "agent/automated-review-passed",
+        "human/awaiting-review",
+    ]
 
 
 def test_review_once_dirty_worktree_stash_fails_blocked() -> None:

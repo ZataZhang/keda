@@ -559,6 +559,7 @@ def build_label_config_from_settings(
         running=label_settings.running,
         supervising=label_settings.supervising,
         review=label_settings.review,
+        human_review=label_settings.human_review,
         failed=label_settings.failed,
         blocked=label_settings.blocked,
         waiting=label_settings.waiting,

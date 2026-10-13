@@ -60,12 +60,13 @@ class PullRequestSummary:
 
 @dataclass(frozen=True)
 class LabelConfig:
-    """GitHub labels used as runner queue state."""
+    """GitHub labels used for runner workflow state and human follow-up."""
 
     ready: str = "agent/ready"
     running: str = "agent/running"
     supervising: str = "agent/supervising"
-    review: str = "agent/review"
+    review: str = "agent/automated-review-passed"
+    human_review: str = "human/awaiting-review"
     failed: str = "agent/failed"
     blocked: str = "agent/blocked"
     waiting: str = "agent/waiting"

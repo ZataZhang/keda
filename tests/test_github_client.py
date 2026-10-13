@@ -460,7 +460,7 @@ def test_list_review_candidate_issues_uses_or_label_semantics(
         "--state",
         "open",
         "--label",
-        "agent/review",
+        "agent/automated-review-passed",
         "--limit",
         "20",
         "--json",
@@ -486,7 +486,7 @@ def test_list_review_candidate_issues_uses_or_label_semantics(
                             "url": "https://example/92",
                             "labels": [
                                 {"name": "agent/supervising"},
-                                {"name": "agent/review"},
+                                {"name": "agent/automated-review-passed"},
                             ],
                             "body": "",
                         },
@@ -503,7 +503,7 @@ def test_list_review_candidate_issues_uses_or_label_semantics(
                             "number": 91,
                             "title": "review only",
                             "url": "https://example/91",
-                            "labels": [{"name": "agent/review"}],
+                            "labels": [{"name": "agent/automated-review-passed"}],
                             "body": "",
                         },
                         {
@@ -512,7 +512,7 @@ def test_list_review_candidate_issues_uses_or_label_semantics(
                             "url": "https://example/92",
                             "labels": [
                                 {"name": "agent/supervising"},
-                                {"name": "agent/review"},
+                                {"name": "agent/automated-review-passed"},
                             ],
                             "body": "",
                         },
@@ -525,7 +525,7 @@ def test_list_review_candidate_issues_uses_or_label_semantics(
     github_client = GitHubCliClient(tmp_path, fake_runner)
 
     candidates = github_client.list_review_candidate_issues(
-        ["agent/supervising", "agent/review"], 20
+        ["agent/supervising", "agent/automated-review-passed"], 20
     )
 
     candidate_numbers = {candidate.number for candidate in candidates}

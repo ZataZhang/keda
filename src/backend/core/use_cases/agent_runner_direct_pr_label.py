@@ -151,6 +151,22 @@ def issue_carries_prd_auto_merge_label(issue: IssueSummary, config: AppConfig) -
     return label is not None and label in issue.labels
 
 
+def can_auto_merge_issue(issue: IssueSummary, config: AppConfig) -> bool:
+    """检查当前全局设置或 Issue 授权是否允许自动合并。
+
+    Args:
+        issue: 待检查的 GitHub Issue。
+        config: 当前运行配置，包含 autopilot、安全开关和授权标签。
+
+    Returns:
+        自动合并是否获得授权。
+    """
+    return bool(
+        config.autopilot.enabled
+        and (config.safety.auto_merge or issue_carries_prd_auto_merge_label(issue, config))
+    )
+
+
 def resolve_publish_stage(
     *,
     requested_stage: PublishStage,
@@ -560,6 +576,7 @@ __all__ = [
     "DirectPrStageConflictError",
     "PublishStageDecision",
     "apply_direct_pr_label_policy",
+    "can_auto_merge_issue",
     "configured_direct_pr_label",
     "configured_prd_auto_merge_label",
     "consume_direct_pr_label",

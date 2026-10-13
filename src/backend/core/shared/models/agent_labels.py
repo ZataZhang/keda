@@ -36,7 +36,16 @@ STANDARD_LABEL_SPECS: tuple[tuple[str, str, str], ...] = (
         "C5DEF5",
         "PR exists and automatic post-PR supervisor is reviewing or reprocessing.",
     ),
-    ("agent/review", "1D76DB", "AI runner opened work for human review."),
+    (
+        "agent/automated-review-passed",
+        "1D76DB",
+        "Automated post-PR review passed; the Issue can proceed to human review or auto-merge.",
+    ),
+    (
+        "human/awaiting-review",
+        "FBCA04",
+        "A human action is pending: review the PR or complete required acceptance sign-off.",
+    ),
     ("agent/failed", "D73A4A", "AI runner failed and posted details."),
     ("agent/blocked", "000000", "AI runner needs human input."),
     (
@@ -96,7 +105,8 @@ CONFIGURABLE_LABEL_FIELDS: tuple[tuple[str, str], ...] = (
     ("agent/ready", "ready"),
     ("agent/running", "running"),
     ("agent/supervising", "supervising"),
-    ("agent/review", "review"),
+    ("agent/automated-review-passed", "review"),
+    ("human/awaiting-review", "human_review"),
     ("agent/failed", "failed"),
     ("agent/blocked", "blocked"),
     ("agent/waiting", "waiting"),
