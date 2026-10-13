@@ -580,6 +580,14 @@ erDiagram
 - 影响: 对外 API 形状不变（`scores` 里可能多出 `cancelled` 行，前端文案与聚合口径已就位；`valid` 聚合与非 0 折算红线不受影响）。rv-1/rv-2/rv-3 已捕获证据仍绑定其原树语义：rv-3 取消场景发生在 `running`（不产生新留痕行），deny 文案与 hash 语义未改；闸门与漂移守卫的新证据由本轮新增测试提供，live provider 仍未覆盖。
 - 审核: reviewer 修复随 pre-PR 门禁提交；最终树复跑评测定向 pytest、`just test`、pre-commit、`uv run mkdocs build --strict`、`pnpm typecheck` 与评测 Playwright spec（页面本轮有改动）。banner 与 §9 状态不变（仍 `🧍 待人工验收`，Human-Confirmed 两项保持未勾）。
 
+### Pre-PR 复审修复（2026-10-13，reviewer 第三轮）
+- 类型: bug-fix / validation / documentation
+- 原文: 第三轮 pre-PR 复审在 `35332e28` 之后发现两处交付缺口——①页面为活跃 run 显式提供「强制删除」，但 `delete_evaluation_run` 删行后，仍在执行的候选/judge 线程持有内存记录并回写：`evaluation_result` / `evaluation_score` 以 `INSERT OR REPLACE` 重建已被删除的行（`PRAGMA foreign_keys` 未开启），孤儿行永久残留，违背「删除评测 run 后其 SQLite 结果与暂存 payload 一并删除」；且 judging 期间删除后，预先排好的 `_execute_judge` future 仍会继续向 provider 派发调用。②`docs/api/references.md`、`docs/dev/evaluation.md` 与两处 docstring 把 interrupted 自愈描述为「等待用户显式恢复或删除」，但状态机不提供任何 interrupted→可执行 的恢复路径，措辞承诺了不存在的能力。
+- 变更后: `console_store_evaluation.py` 的 `save_evaluation_result` / `save_evaluation_score` 改为 `INSERT OR REPLACE … SELECT … WHERE EXISTS (SELECT 1 FROM evaluation_run WHERE run_id = ?)`，写入与 run 存在性原子绑定，删除后的残余回写被静默丢弃；`_execute_judge` 在每次 provider 调用前自检 run 仍存在且处于 `judging`，被删除的 run 不再追加派发（在飞 HTTP 无法撤回，但不产生新调用与残行）；`docs/dev/evaluation.md` / `docs/api/references.md` 增补强制删除的收敛语义，「显式恢复」措辞统一更正为「新建 run 重跑或删除」（含 `recover_interrupted_runs` docstring 与 `cli_typer_console.py` 自愈注释、`mark_interrupted` 用户可见错误文案）。新增回归测试：`tests/test_console_evaluation_store.py::test_writes_after_run_delete_are_dropped`（删除后回写不留孤儿行，含裸 SQL 计数断言）与 `tests/test_model_evaluation_execution.py::test_judge_dispatch_stops_after_force_delete`（删除后 provider 调用数为 0、零评分行）。
+- 原因: ①是删除生命周期承诺在并发线程模型下的真实破口，属缺陷而非需求变化；②是文档承诺了实现中不存在的恢复能力，属文档与状态机不符。
+- 影响: 对外 API 形状不变；rv-1/rv-2/rv-3 既有证据的删除场景针对终态 run，行为不受本轮修复影响（本轮以引擎/存储边界测试补强活跃 run 强制删除路径）；授权红线、hash 语义、评分聚合口径零变化。
+- 审核: reviewer 修复随 pre-PR 门禁提交；评测定向 pytest 84 passed（`--no-testmon` 强制全跑）、`tests/test_console*` 145 passed、`SKIP=check-test-flag uv run pre-commit run --all-files` exit 0、`uv run mkdocs build --strict` exit 0；banner 与 §9 状态不变（仍 `🧍 待人工验收`，Human-Confirmed 两项保持未勾）。
+
 ### 执行期实现偏差与文档同步（2026-10-13，executor）
 - 类型: implementation-deviation / documentation
 - 原文: Change Impact Tree 建议测试放 `tests/backend/`、Playwright spec 放 `tests/console/model-evaluations.spec.ts`、评测端点直接改 `agent_runner_console.py`；`docs/dev/evaluation.md` 与 `tasks/evaluation-suites/README.md` 把 rubric 维度写成 `code_quality` / `verification`；文档未记录 judge 运行时依赖与评测 settings 下限。

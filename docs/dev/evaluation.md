@@ -94,9 +94,12 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 - 持久层（Console SQLite，`PRAGMA user_version` v15）只存结构化摘要：
   不保存 raw prompt、完整 patch、token 用量原文、环境变量或密钥值。
 - 暂存 payload 与隔离 worktree 在评分完成、拒绝、取消或删除 run 时清除；
-  删除 run 级联清除其结果与评分行。
-- Console 重启自愈：上次进程遗留的活跃 run 一律标 `interrupted`，等待用户
-  显式恢复或删除，绝不自动重跑（避免不可解释的重复 provider 副作用）。
+  删除 run 级联清除其结果与评分行。强制删除仍在执行的 run 时，在飞线程的
+  残余回写按 run 存在性被丢弃，评审派发在调用前自检 run 仍在 `judging`，
+  不会留下孤儿行，也不会为新删除的 run 追加 provider 调用。
+- Console 重启自愈：上次进程遗留的活跃 run 一律标 `interrupted`；不提供
+  续跑，由用户新建 run 重跑或删除，绝不自动重跑（避免不可解释的重复
+  provider 副作用）。
 
 ### 无凭据验证入口
 

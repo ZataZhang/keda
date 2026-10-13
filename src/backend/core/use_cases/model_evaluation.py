@@ -290,7 +290,7 @@ def _aggregate_dimensions(
 
 
 def recover_interrupted_runs(store: IEvaluationStore) -> int:
-    """Console 启动自愈：活跃 run 一律标 interrupted，等待用户显式恢复或删除。
+    """Console 启动自愈：活跃 run 一律标 interrupted，等待用户删除或新建 run 重跑。
 
     不自动重跑 Agent：候选执行可能已产生外部 provider 调用，自动重试会
     把一次手动评测变成不可解释的重复副作用（PRD §6）。

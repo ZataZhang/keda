@@ -342,3 +342,24 @@ def test_judge_payload_drift_after_consent_never_sends(
     assert score.score_status == EvaluationScoreStatus.provider_error.value
     assert "payload 与授权时 manifest hash 不一致" in (score.error or "")
     assert harness.calls["judge"] == []
+
+
+def test_judge_dispatch_stops_after_force_delete(harness: Any) -> None:
+    """judging 期间强制删除 run：未派发的评审单元不再调用 provider，也不留残行。"""
+    run = _run(status=EvaluationRunStatus.judging.value)
+    harness.store.save_evaluation_run(run)
+    result = _result_record(run.run_id)
+    harness.store.save_evaluation_result(result)
+    entry = {
+        "result_id": "res-a",
+        "case_id": "case-a",
+        "execution_preset_id": "alpha",
+        "payload_file": "res-a.json",
+        "payload_sha256": sha256_text("batched payload"),
+    }
+    harness.store.delete_evaluation_run(run.run_id)
+
+    execution._execute_judge(run, entry, "judge-1", {"res-a": result}, harness.settings)
+
+    assert harness.calls["judge"] == []
+    assert harness.store.list_evaluation_scores(run.run_id) == []

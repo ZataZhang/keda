@@ -10,7 +10,10 @@
 ``tests/test_console_evaluation_store.py`` 的镜像断言捕获。
 
 级联删除在代码层显式执行（score → result → run），不依赖每个连接都要打开
-的 ``PRAGMA foreign_keys``；外键声明只作为数据图注释保留。
+的 ``PRAGMA foreign_keys``；外键声明只作为数据图注释保留。评测是后台线程
+编排：候选/judge 单元可能仍持有已删除 run 的内存记录并回写，因此 result 与
+score 的写入用 ``INSERT ... SELECT ... WHERE EXISTS`` 原子绑定 run 存在性，
+run 已删除时写入被静默丢弃，不留孤儿行。
 """
 
 from __future__ import annotations
@@ -290,7 +293,11 @@ class EvaluationStoreMixin:
         return self._row_to_run(row)
 
     def save_evaluation_result(self, result: Any) -> None:
-        """插入或整体覆盖一个候选结果行。"""
+        """插入或整体覆盖一个候选结果行；所属 run 已删除时静默丢弃该写入。
+
+        后台执行线程可能持有已被「强制删除」的 run 的内存记录，写入用
+        ``WHERE EXISTS`` 与 run 存在性原子绑定，避免删除后残留孤儿行。
+        """
         with self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO evaluation_result ("
@@ -300,7 +307,8 @@ class EvaluationStoreMixin:
                 " check_output_summary, agent_summary, duration_seconds,"
                 " usage_summary_json, cost_status, diff_hash, error,"
                 " created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                " WHERE EXISTS (SELECT 1 FROM evaluation_run WHERE run_id = ?)",
                 (
                     result.result_id,
                     result.run_id,
@@ -324,6 +332,7 @@ class EvaluationStoreMixin:
                     result.error,
                     result.created_at,
                     result.updated_at,
+                    result.run_id,
                 ),
             )
 
@@ -346,7 +355,11 @@ class EvaluationStoreMixin:
         return [self._row_to_result(row) for row in rows]
 
     def save_evaluation_score(self, score: Any) -> None:
-        """插入或覆盖一条逐评审评分行（同 result × judge 幂等覆盖）。"""
+        """插入或覆盖一条逐评审评分行（同 result × judge 幂等覆盖）。
+
+        与候选结果同理：所属 run 已被删除（含 judging 期间的强制删除）时，
+        在飞的评审线程回写被静默丢弃，不留孤儿行。
+        """
         with self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO evaluation_score ("
@@ -354,7 +367,8 @@ class EvaluationStoreMixin:
                 " judge_preset_id, judge_model_snapshot_json, rubric_version,"
                 " score_status, dimension_scores_json, rationale_summary,"
                 " response_hash, duration_seconds, usage_summary_json, error, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                " WHERE EXISTS (SELECT 1 FROM evaluation_run WHERE run_id = ?)",
                 (
                     score.score_id,
                     score.run_id,
@@ -374,6 +388,7 @@ class EvaluationStoreMixin:
                     else None,
                     score.error,
                     score.created_at,
+                    score.run_id,
                 ),
             )
 
@@ -413,7 +428,7 @@ class EvaluationStoreMixin:
                 [
                     "interrupted",
                     interrupted_at,
-                    "Console 退出或崩溃时该 run 仍在进行；请显式恢复或删除",
+                    "Console 退出或崩溃时该 run 仍在进行；不支持续跑，请新建 run 重跑或删除",
                     *_INTERRUPTIBLE_STATUSES,
                 ],
             )

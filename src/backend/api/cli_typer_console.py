@@ -62,7 +62,8 @@ def _recover_evaluation_runs_on_launch() -> None:
     """console 启动自愈：把上次进程遗留的活跃评测 run 标记为 interrupted。
 
     best-effort：自愈失败只提示、不阻塞启动；不自动重跑候选执行（可能已
-    产生外部 provider 副作用），用户显式恢复或删除。
+    产生外部 provider 副作用），interrupted run 不可续跑，由用户删除后
+    新建 run 重跑。
     """
     try:
         affected = recover_interrupted()

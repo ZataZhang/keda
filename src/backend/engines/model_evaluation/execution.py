@@ -528,6 +528,11 @@ def _execute_judge(
 ) -> None:
     """执行一次 judge × 候选的评分调用并落库（任何失败独立留状态）。"""
     store = _store()
+    # 强制删除的 run 不再派发新的 provider 调用：future 是预先排好的，
+    # 逐个在调用前确认 run 仍在 judging；残余回写另有 store 层丢弃守卫。
+    live_run = store.get_evaluation_run(run.run_id)
+    if live_run is None or live_run.status != EvaluationRunStatus.judging.value:
+        return
     result = results_by_id.get(str(entry.get("result_id") or ""))
     judge_snapshot = next(
         (

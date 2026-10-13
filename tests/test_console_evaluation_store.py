@@ -233,6 +233,28 @@ def test_delete_run_cascades(tmp_path: Path) -> None:
     assert store.delete_evaluation_run("eval-a") is None
 
 
+def test_writes_after_run_delete_are_dropped(tmp_path: Path) -> None:
+    """强制删除活跃 run 后，在飞线程携带旧记录的回写不得留下孤儿行。"""
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    run = _run(status="running")
+    store.save_evaluation_run(run)
+    store.delete_evaluation_run("eval-a")
+    stale_result = dataclasses.replace(
+        _result(), result_status=EvaluationResultStatus.succeeded.value
+    )
+    stale_score = _score()
+
+    store.save_evaluation_result(stale_result)
+    store.save_evaluation_score(stale_score)
+
+    assert store.list_evaluation_results("eval-a") == []
+    assert store.list_evaluation_scores("eval-a") == []
+    with sqlite3.connect(tmp_path / "console.db") as connection:
+        result_rows = connection.execute("SELECT COUNT(*) FROM evaluation_result").fetchone()[0]
+        score_rows = connection.execute("SELECT COUNT(*) FROM evaluation_score").fetchone()[0]
+    assert (result_rows, score_rows) == (0, 0)
+
+
 def test_mark_interrupted_only_touches_active_runs(tmp_path: Path) -> None:
     store = SqliteConsoleStore(tmp_path / "console.db")
     store.save_evaluation_run(_run("eval-1", status="queued"))

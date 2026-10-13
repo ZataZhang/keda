@@ -379,7 +379,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 ### 状态枚举与外发/密钥边界
 
-- run 状态：`created / queued / running / awaiting_judge_consent / judging / completed / cancelled / interrupted`（Console 重启时活跃 run 一律自愈为 `interrupted`，等待用户显式恢复或删除）。
+- run 状态：`created / queued / running / awaiting_judge_consent / judging / completed / cancelled / interrupted`（Console 重启时活跃 run 一律自愈为 `interrupted`；不提供续跑，用户删除该 run 后用同一 suite 新建 run 重跑）。
 - 候选结果状态：`pending / running / succeeded / failed / timeout / cancelled`；check 状态：`passed / failed / timeout / not_run`。
 - 评分状态：`valid / invalid / refusal / timeout / provider_error / unauthorized / cancelled`——**任何非 valid 状态都不折算为 0 分**，聚合只统计 valid 行；`unauthorized` / `cancelled` 是授权前 deny / 取消的留痕行，分数恒为空。
 - 默认不开启评审外发：judge 调用只可能发生在 approve 之后；payload 与响应 hash 落本地账本，持久层不保存 raw prompt、完整 patch、密钥值或环境变量。
