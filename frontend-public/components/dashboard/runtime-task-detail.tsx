@@ -84,7 +84,7 @@ export function RuntimeTaskImpact({
   enabled = true,
 }: RuntimeTaskImpactProps) {
   // 读数与它的取数键绑在一起：换任务时旧结果天然失效，不需要在 effect 里
-  // 同步 setState 去清空（React 19 会把那 kinds of 重置放大成额外渲染）。
+  // 同步 setState 去清空（React 19 会把这类重置放大成额外渲染）。
   const requestKey = prdPath ? `${repoId}::${prdPath}` : "";
   const [reading, setReading] = useState<{
     key: string;

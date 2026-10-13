@@ -280,6 +280,16 @@ def _http_request(
             id="origin-with-path",
         ),
         pytest.param(
+            ("127.0.0.1", 8313),
+            [("Origin", "http://127.0.0.1:notaport")],
+            id="origin-with-malformed-port",
+        ),
+        pytest.param(
+            ("127.0.0.1", 8313),
+            [("Origin", "http://127.0.0.1:99999")],
+            id="origin-with-out-of-range-port",
+        ),
+        pytest.param(
             ("0.0.0.0", 8313),
             [("Origin", "http://0.0.0.0:8313")],
             id="non-loopback-bind",

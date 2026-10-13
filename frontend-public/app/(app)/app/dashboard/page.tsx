@@ -157,6 +157,12 @@ export default function DashboardPage() {
       const summary = await fetchRuntimeTasks();
       if (signal?.aborted) return;
       setRuntimeSummary(summary);
+      // 选中项跟着新一轮摘要刷新（按 task_key 对位）：否则右侧详情的状态 /
+      // 阶段 / 耗时停在点击那一刻，与左侧列表的实时行不一致。
+      setSelectedTask((prev) => {
+        if (!prev) return prev;
+        return summary.tasks.find((task) => task.task_key === prev.task_key) ?? prev;
+      });
       setRuntimeError(null);
     } catch (error: unknown) {
       if (signal?.aborted) return;

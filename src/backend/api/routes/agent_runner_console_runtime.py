@@ -111,7 +111,15 @@ def _trusted_console_origin(request: Request) -> str:
     if not raw_origin:
         raise HTTPException(status_code=403, detail="缺少 Origin，无法确认同源，拒绝启动桌面窗口。")
     parsed = urlsplit(raw_origin)
-    request_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        request_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        # 端口写成非数字或越界时 urlsplit 直接抛错：按「无法确认同源」拒绝，
+        # 不能让伪造的 Origin 头把请求打成 500。
+        raise HTTPException(
+            status_code=403,
+            detail=f"Origin {raw_origin!r} 端口无法解析，拒绝启动桌面窗口。",
+        ) from exc
     if (
         parsed.scheme != "http"
         or (parsed.hostname or "") not in _LOOPBACK_HOSTS
