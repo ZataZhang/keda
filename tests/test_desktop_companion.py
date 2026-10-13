@@ -1,12 +1,15 @@
 """桌面 companion 的 launcher、origin 边界与 route 校验测试（PRD FR-4 / FR-6 / rv-2）。
 
 系统子进程只在「真的起了什么进程」这一点上做替身记录（argv 是本测试要断言的
-对象本身）；状态判定、工单递增、pidfile 复用防护与 origin 校验都走真实实现。
+对象本身）；状态判定、工单递增、pidfile 复用与归属防护、锁粒度与 origin 校验
+都走真实实现。
 """
 
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -15,7 +18,10 @@ from starlette.requests import Request
 
 import backend.api.routes.agent_runner_console_runtime as runtime_routes
 import backend.engines.desktop_companion.launcher as launcher_module
-from backend.api.routes.agent_runner_console_runtime import _trusted_console_origin
+from backend.api.routes.agent_runner_console_runtime import (
+    _trusted_bound_origin,
+    _trusted_console_origin,
+)
 from backend.core.shared.interfaces.desktop_companion import DesktopCompanionStatus
 import backend.engines.desktop_companion.helper as helper_module
 from backend.engines.desktop_companion.helper import validate_console_origin
@@ -43,7 +49,13 @@ class _FakeProcess:
         return self._exit_code
 
 
-def _launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, process: _FakeProcess):
+def _launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    process: _FakeProcess,
+    *,
+    console_session: str = "session-abc",
+):
     """构造指向临时 pidfile、运行时可用的 launcher。"""
 
     def _fake_popen(args, **kwargs):  # noqa: ANN001, ANN003 - 替身只关心 argv
@@ -55,7 +67,7 @@ def _launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, process: _FakePro
     monkeypatch.setattr(launcher_module, "_pid_is_alive", lambda pid: process.poll() is None)
     return PywebviewCompanionLauncher(
         pidfile_path=tmp_path / "companion.pid",
-        console_session="session-abc",
+        console_session=console_session,
     )
 
 
@@ -71,7 +83,11 @@ def test_open_window_uses_fixed_argv_and_validated_origin(
     assert process.args == [sys.executable, "-m", HELPER_MODULE, "--origin", CONSOLE_ORIGIN]
     assert snapshot.status is DesktopCompanionStatus.LAUNCHED
     assert snapshot.focus_ticket == 1
-    assert (tmp_path / "companion.pid").read_text(encoding="utf-8").startswith("424242")
+    pidfile_lines = (tmp_path / "companion.pid").read_text(encoding="utf-8").split("\n")
+    assert pidfile_lines[0] == "424242"
+    assert pidfile_lines[1] == f"-m {HELPER_MODULE}"
+    # 第三行是归属会话：另一个 Console 进程据此认不出这是自己的窗口。
+    assert pidfile_lines[2] == "session-abc"
 
 
 def test_repeat_activation_focuses_instead_of_spawning_again(
@@ -159,6 +175,71 @@ def test_recycled_pid_is_never_mistaken_for_our_window(
     assert process.args == [sys.executable, "-m", HELPER_MODULE, "--origin", CONSOLE_ORIGIN]
 
 
+def test_another_consoles_window_is_neither_claimed_nor_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pidfile 归别的 Console 会话：不能报「已聚焦」，也不能把别人的窗口关掉。
+
+    工单写在各自 launcher 的内存计数里，本进程递增永远送不到对方 helper 的轮询；
+    把它当自己的窗口会让按钮说谎，还会让第二个入口无法开出自己的小窗。
+    """
+    owner_process = _FakeProcess()
+    owner = _launcher(tmp_path, monkeypatch, owner_process, console_session="session-owner")
+    owner.open_window(console_origin=CONSOLE_ORIGIN)
+
+    ours = _launcher(tmp_path, monkeypatch, owner_process, console_session="session-ours")
+    snapshot = ours.open_window(console_origin=CONSOLE_ORIGIN)
+
+    assert snapshot.status is DesktopCompanionStatus.LAUNCHED
+    assert snapshot.window_exists is True
+    # 对方那份 launcher 仍持有自己的句柄，不受影响。
+    assert owner.snapshot(console_origin=CONSOLE_ORIGIN).status is (DesktopCompanionStatus.RUNNING)
+
+
+def test_same_session_pidfile_counts_as_our_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """会话身份相符时，即使本进程没持有句柄也如实报告「窗口在」。"""
+    process = _FakeProcess()
+    launcher = _launcher(tmp_path, monkeypatch, process)
+    (tmp_path / "companion.pid").write_text(
+        f"999999\n-m {HELPER_MODULE}\nsession-abc\n", encoding="utf-8"
+    )
+
+    snapshot = launcher.snapshot(console_origin=CONSOLE_ORIGIN)
+
+    assert snapshot.status is DesktopCompanionStatus.RUNNING
+    assert snapshot.window_exists is True
+
+
+def test_close_wait_does_not_block_the_status_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """关窗的有界等待不能占着锁：看板与 helper 的状态探针必须随时读得到。"""
+    process = _FakeProcess()
+    launcher = _launcher(tmp_path, monkeypatch, process)
+    launcher.open_window(console_origin=CONSOLE_ORIGIN)
+
+    probe_read_close_ticket: list[bool] = []
+
+    def _probe() -> None:
+        snapshot = launcher.snapshot(console_origin=CONSOLE_ORIGIN)
+        probe_read_close_ticket.append(snapshot.close_ticket == 1)
+
+    closer = threading.Thread(target=lambda: launcher.close_window(wait_seconds=1.0))
+    closer.start()
+    time.sleep(0.2)  # 让 closer 进入等待段（helper 仍在收尾）
+    probe = threading.Thread(target=_probe)
+    probe.start()
+    probe_started = time.monotonic()
+    probe.join(timeout=2.0)
+    probe_elapsed = time.monotonic() - probe_started
+    closer.join(timeout=3.0)
+
+    assert probe_read_close_ticket == [True]
+    assert probe_elapsed < 0.5, f"状态探针被 close_window 的等待阻塞 {probe_elapsed:.2f}s"
+
+
 def _http_request(
     server: tuple[str, int],
     headers: list[tuple[str, str]],
@@ -215,18 +296,45 @@ def test_cross_origin_launch_requests_are_rejected(
 
 
 @pytest.mark.parametrize(
-    ("origin", "expected"),
+    ("server", "origin", "expected"),
     [
-        pytest.param("http://127.0.0.1:8313", "http://127.0.0.1:8313", id="loopback-ip"),
-        # 浏览器用 localhost 访问同一个回环 Console 时，host 别名同样合法。
-        pytest.param("http://localhost:8313", "http://localhost:8313", id="localhost-alias"),
-        pytest.param("http://127.0.0.1:8313/", "http://127.0.0.1:8313", id="trailing-slash"),
+        pytest.param(
+            ("127.0.0.1", 8313),
+            "http://127.0.0.1:8313",
+            "http://127.0.0.1:8313",
+            id="loopback-ip",
+        ),
+        # 回环别名指向同一个 Console，判定同样放行；但窗口地址取绑定侧，
+        # 不回显请求头里的 host。
+        pytest.param(
+            ("127.0.0.1", 8313),
+            "http://localhost:8313",
+            "http://127.0.0.1:8313",
+            id="localhost-alias",
+        ),
+        pytest.param(
+            ("127.0.0.1", 8313),
+            "http://127.0.0.1:8313/",
+            "http://127.0.0.1:8313",
+            id="trailing-slash",
+        ),
+        # IPv6 字面量必须加方括号，否则拼出来的不是合法 URL，helper 只会连到一个
+        # 解析不了的 origin。
+        pytest.param(("::1", 8313), "http://[::1]:8313", "http://[::1]:8313", id="ipv6-loopback"),
     ],
 )
-def test_same_origin_launch_requests_are_accepted(origin: str, expected: str) -> None:
-    """同源 POST 通过校验，并返回规范化 origin 供固定窗口加载。"""
-    request = _http_request(("127.0.0.1", 8313), [("Origin", origin)])
+def test_same_origin_launch_requests_are_accepted(
+    server: tuple[str, int], origin: str, expected: str
+) -> None:
+    """同源 POST 通过校验，返回由实际绑定推出的 origin 供固定窗口加载。"""
+    request = _http_request(server, [("Origin", origin)])
     assert _trusted_console_origin(request) == expected
+
+
+def test_status_probe_reports_the_bound_origin_with_ipv6_brackets() -> None:
+    """只读探针同样按绑定地址给 origin，IPv6 不会漏掉方括号。"""
+    assert _trusted_bound_origin(_http_request(("::1", 8313), [])) == "http://[::1]:8313"
+    assert _trusted_bound_origin(_http_request(("0.0.0.0", 8313), [])) == ""
 
 
 def test_helper_only_loads_loopback_http_origins() -> None:

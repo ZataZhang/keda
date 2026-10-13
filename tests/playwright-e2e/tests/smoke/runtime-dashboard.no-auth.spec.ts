@@ -280,7 +280,7 @@ test.describe('runtime board (mocked API)', () => {
 })
 
 test.describe('desktop companion page (mocked API)', () => {
-  test('lists active tasks compactly and hides the overflow', async ({ page }) => {
+  test('lists active tasks compactly and keeps the overflow scrollable', async ({ page }) => {
     const activeTasks = [1, 2, 3, 4, 5].map((index) => ({
       ...RUNNING_TASK,
       issue_number: 100 + index,
@@ -302,8 +302,12 @@ test.describe('desktop companion page (mocked API)', () => {
     await page.goto('/app/companion')
 
     await expect(page.getByTestId('desktop-companion')).toBeVisible()
-    await expect(page.getByTestId(/desktop-companion-row-/)).toHaveCount(4)
-    await expect(page.getByTestId('desktop-companion-hidden')).toContainText('另有 1 个活动任务')
+    // 超出紧凑高度的任务不丢弃：仍在同一列表里，靠滚动看到。
+    await expect(page.getByTestId(/desktop-companion-row-/)).toHaveCount(5)
+    await expect(page.getByTestId('desktop-companion-list')).toHaveCSS('overflow-y', 'auto')
+    await expect(page.getByTestId('desktop-companion-hidden')).toContainText('滚动')
+    // 每轮只为前四项读取触达读数，第五项显式说明「本轮未取数」，不伪造比例条。
+    await expect(page.getByTestId('runtime-impact-skipped')).toHaveCount(1)
   })
 
   test('disconnected Console tells the operator instead of showing stale rows', async ({

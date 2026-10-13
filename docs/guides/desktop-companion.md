@@ -9,8 +9,8 @@
 
 ## 它解决什么，不解决什么
 
-解决：离开浏览器后仍有一个能置顶、能一眼扫过最多 4 个活动任务的小面板，
-以及一个明确的关窗入口。
+解决：离开浏览器后仍有一个能置顶、能一眼扫过活动任务的小面板（紧凑高度里默认
+呈现前 4 项，其余在窗口内滚动可见），以及一个明确的关窗入口。
 
 不解决：
 
@@ -46,6 +46,10 @@ uv sync
 
 升级就是重装：`uv sync --extra desktop --upgrade-package pywebview`。
 
+注意仓库自带的同步命令会带上**全部** extra：`just sync dev` 与 `just sync all` 底层是
+`uv sync --all-extras`，会把 `desktop` 一起装回来；`just sync`（无参数）等价于上面的
+`uv sync`，即卸载态。
+
 `pywebview` 在不同平台拉起的原生后端不同（macOS 走 PyObjC/Cocoa，Windows 走
 WebView2 或 WinForms，Linux 走 GTK/WebKit）。这类依赖是**运行时按 `import` 探测**的，
 所以「Python 包能导入」不等于「已经做成可双击的桌面 App」——真正的打包发行
@@ -60,15 +64,22 @@ WebView2 或 WinForms，Linux 走 GTK/WebKit）。这类依赖是**运行时按 
 3. 点窗口内的「关闭」请求关窗。后端只发一个关闭工单，由窗口自己退出，
    **不做进程强杀**，因此不会留下半个窗口。
 
+窗口与看板用**同一个刷新节奏**（15 秒一轮任务摘要）；触达读数每轮最多读取窗口里
+前 4 项，滚动到的行写明「本轮未取数」，不会为剩下的行追加取数。
+
 ## Console origin 从哪里来
 
 窗口固定加载 `{console_origin}/app/companion/`，这个 origin **不是**前端或请求体给的：
 
 - 后端取 ASGI `scope["server"]`，即 uvicorn 实际绑定的 host/port。这个值不来自
   `Host` 头，所以伪造 `Host` 改变不了判定结果。
-- 状态变更类的 POST 还要求请求头的 `Origin` 与该绑定**完全一致**：scheme 必须是
-  `http`、主机必须是回环别名、端口必须等于实际端口、且不带 path / query / fragment。
+- 状态变更类的 POST 还要求请求头的 `Origin` 与该绑定同源：scheme 必须是 `http`、
+  主机必须是回环别名（`127.0.0.1` / `localhost` / `[::1]` 指向同一个本机 Console，
+  都算同源）、端口必须等于实际端口、且不带 path / query / fragment。
 - 不一致或缺失 → `403`，并且**不会**启动任何进程。
+- 校验通过后，**窗口地址由绑定地址推出**（IPv6 字面量会补上方括号），不回显
+  请求头里的 host：`localhost` 与 `127.0.0.1` 都能开窗口，但 helper 的启动参数与
+  WebView 加载的 URL 一律写后端自己绑定的那个 origin。
 
 `GET .../desktop-companion/status` 是只读探针，不要求 `Origin`（浏览器对同源 GET
 可能根本不发这个头，原生窗口里的轮询也是普通 HTTP 客户端）。
@@ -80,13 +91,14 @@ WebView2 或 WinForms，Linux 走 GTK/WebKit）。这类依赖是**运行时按 
 | 按钮旁写「桌面运行时未安装」 | `uv run python -c "import webview"`；按上文安装 `desktop` extra |
 | 写「当前操作系统不支持系统窗口」 | 该平台没有可置顶窗口的常规路径，用网页看板 |
 | 点了没出现窗口，状态是 `failed` | 看 `detail` 里的退出码；无 GUI 会话（SSH、cron、`launchd` 后台）是最常见原因 |
-| Console 重启后旧窗口还留着 | 属预期内的短暂现象：窗口按 `console_session` 身份判定前任 Console 已不在，会自行退出 |
+| Console 重启后旧窗口还留着 | 新 Console 按 `console_session` 认不出前任的窗口，因此状态回到「未开启」；再点一次会开一个新窗口，旧窗口按会话身份判定前任 Console 已不在，自行退出 |
 | 窗口显示「读不到 Console」 | Console 停止或端口变了。恢复后窗口自己重新加载；期间看板仍可直接用 |
-| 反复点击开出多个窗口 | 不应发生。检查是否有多个 Console 进程共用同一 pidfile |
+| 同一入口反复点击开出多个窗口 | 不应发生：已存在本入口的窗口时只递增聚焦工单。看到两个窗口通常意味着**有两个 Console 进程**，每个入口各管自己的窗口，互不接管 |
 
-辅助文件与判据：pidfile 名为 `desktop-companion.pid`，并用命令行里的
-`-m backend.engines.desktop_companion.helper` 标记校验，避免 pid 复用把别的进程
-误认成窗口。
+辅助文件与判据：pidfile 名为 `desktop-companion.pid`，三行分别是 helper 的 pid、
+命令行标记 `-m backend.engines.desktop_companion.helper`、写入它的 Console 会话身份。
+命令行标记避免 pid 复用把别的进程误认成窗口，会话身份避免另一个 Console 进程把
+别人的窗口报成「已聚焦」或替对方关窗。
 
 ## 触达读数为什么是「弱信号」
 

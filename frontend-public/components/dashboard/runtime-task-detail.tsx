@@ -64,7 +64,12 @@ interface RuntimeTaskImpactProps {
   prdPath: string | null;
   /** 紧凑模式（桌面小窗）：只留一行读数。 */
   compact?: boolean;
+  /** 本轮是否取数：小窗每轮只读前几项，未取数的行要显式说明，不能静默空着。 */
+  enabled?: boolean;
 }
+
+/** 触达读数刷新节奏：与看板摘要用同一 15 秒轮询，旧读数留到新一轮落地。 */
+const IMPACT_REFRESH_MS = 15_000;
 
 /**
  * 呈递一个任务的改动树触达弱信号（真实读数或逐条原因，二选一）。
@@ -72,7 +77,12 @@ interface RuntimeTaskImpactProps {
  * @param props - 取数键与展示密度。
  * @returns 触达读数面板。
  */
-export function RuntimeTaskImpact({ repoId, prdPath, compact = false }: RuntimeTaskImpactProps) {
+export function RuntimeTaskImpact({
+  repoId,
+  prdPath,
+  compact = false,
+  enabled = true,
+}: RuntimeTaskImpactProps) {
   // 读数与它的取数键绑在一起：换任务时旧结果天然失效，不需要在 effect 里
   // 同步 setState 去清空（React 19 会把那 kinds of 重置放大成额外渲染）。
   const requestKey = prdPath ? `${repoId}::${prdPath}` : "";
@@ -84,15 +94,18 @@ export function RuntimeTaskImpact({ repoId, prdPath, compact = false }: RuntimeT
   const current = reading && reading.key === requestKey ? reading : null;
 
   useEffect(() => {
-    if (!prdPath) {
+    if (!prdPath || !enabled) {
       return;
     }
     const controller = new AbortController();
-    void (async () => {
+    const requestedPrdPath = prdPath;
+
+    /** 读取一次；卸载或换任务后到达的响应由 aborted 拦住。 */
+    async function read() {
       try {
         const progress = await fetchPrdProgress({
           repoId,
-          prdPath,
+          prdPath: requestedPrdPath,
           signal: controller.signal,
         });
         if (controller.signal.aborted) {
@@ -109,9 +122,16 @@ export function RuntimeTaskImpact({ repoId, prdPath, compact = false }: RuntimeT
           error: caught instanceof Error ? caught.message : "影响树读数读取失败",
         });
       }
-    })();
-    return () => controller.abort();
-  }, [repoId, prdPath, requestKey]);
+    }
+
+    void read();
+    // 刷新期间不清空：上一轮读数继续显示，直到这一轮真的落地或失败。
+    const timer = window.setInterval(() => void read(), IMPACT_REFRESH_MS);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [repoId, prdPath, requestKey, enabled]);
 
   if (!prdPath) {
     return (
@@ -121,6 +141,17 @@ export function RuntimeTaskImpact({ repoId, prdPath, compact = false }: RuntimeT
         title="未关联 PRD 时没有可比的影响树，这不是「零触达」。"
       >
         未关联 PRD · 改动树触达不适用
+      </p>
+    );
+  }
+  if (!enabled) {
+    return (
+      <p
+        className="text-xs text-slate-500"
+        data-testid="runtime-impact-skipped"
+        title="小窗每轮只读取前几项触达读数；这里没有条，是因为本轮没取数，不是读不到。"
+      >
+        改动树触达：本轮未取数（小窗每轮最多读取 4 项）
       </p>
     );
   }

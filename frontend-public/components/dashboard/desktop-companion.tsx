@@ -1,13 +1,13 @@
 "use client";
 
-// 桌面 companion 小窗内容：紧凑呈现最多四个活动任务。
+// 桌面 companion 小窗内容：紧凑呈现活动任务，默认四行可见、其余在窗口内滚动。
 //
 // 这个组件既是 `/app/companion/` route 的全部内容，也是原生窗口的可见面：
 // 数据仍走网页看板同一批只读端点（任务摘要 + PRD progress），不另开数据源。
 // 与网页看板的差别只在密度与常驻性——窗口不假装自己知道得更多。
 //
 // 触达读数一律标注「改动树触达 · 弱信号」，且只在可比时画真实比例条；
-// 读不到时逐条说明原因，不画空条、不写 0%。
+// 每轮最多读取前四行，滚动到的行显式写「本轮未取数」，不画空条、不写 0%。
 
 import { useEffect, useState } from "react";
 
@@ -21,11 +21,14 @@ import { formatLocalDateTime } from "@/lib/utils";
 import { RuntimeTaskImpact } from "./runtime-task-detail";
 import { runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
 
-/** 小窗轮询间隔：比网页看板更慢，避免常驻窗口变成额外负载源。 */
-const COMPANION_POLL_MS = 10_000;
+/** 小窗轮询间隔：与网页看板同一节奏（PRD §7.1.5「沿用现有 Dashboard 监控刷新」）。 */
+const COMPANION_POLL_MS = 15_000;
 
-/** 窗口最多同时呈现的活动任务数（超出折叠成计数，不静默丢弃）。 */
+/** 紧凑高度里默认呈现的活动任务数（其余留在同一列表内可滚动看到）。 */
 const MAX_ACTIVE_TASKS = 4;
+
+/** 每轮读取触达读数的条数上限：滚动到的行不擅自增加取数量。 */
+const MAX_IMPACT_READS_PER_ROUND = 4;
 
 /** 活动分桶：值守者离开浏览器后仍需要盯的三类状态。 */
 const ACTIVE_STATUSES = new Set(["running", "blocked", "waiting"]);
@@ -77,11 +80,13 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
   }, [paused]);
 
   const activeTasks = (summary?.tasks ?? []).filter((task) => ACTIVE_STATUSES.has(task.status));
-  const hiddenCount = Math.max(0, activeTasks.length - MAX_ACTIVE_TASKS);
-  const visibleTasks = activeTasks.slice(0, MAX_ACTIVE_TASKS);
+  const overflowCount = Math.max(0, activeTasks.length - MAX_ACTIVE_TASKS);
 
   return (
-    <div className="flex min-h-0 flex-col gap-2 p-3" data-testid="desktop-companion">
+    <div
+      className="flex min-h-0 flex-1 flex-col gap-2 p-3"
+      data-testid="desktop-companion"
+    >
       <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
         <span data-testid="desktop-companion-sync">
           {summary && !error ? `更新于 ${formatLocalDateTime(summary.generated_at)}` : "等待读数…"}
@@ -134,7 +139,7 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
         </p>
       ) : null}
 
-      {visibleTasks.length === 0 && !error ? (
+      {activeTasks.length === 0 && !error ? (
         <p
           className="rounded-md border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500 dark:border-slate-800"
           data-testid="desktop-companion-empty"
@@ -143,7 +148,7 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
         </p>
       ) : null}
 
-      {error && visibleTasks.length > 0 ? (
+      {error && activeTasks.length > 0 ? (
         <p
           className="text-[11px] text-amber-700 dark:text-amber-300"
           data-testid="desktop-companion-stale"
@@ -153,18 +158,23 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
       ) : null}
 
       <ul
-        className={`flex min-h-0 flex-col gap-2 overflow-auto ${error ? "opacity-60" : ""}`}
+        className={`min-h-0 flex-1 flex flex-col gap-2 overflow-auto ${error ? "opacity-60" : ""}`}
         data-testid="desktop-companion-list"
         data-stale={error ? "true" : "false"}
       >
-        {visibleTasks.map((task) => (
-          <CompanionTaskRow key={runtimeTaskKey(task)} task={task} />
+        {activeTasks.map((task, index) => (
+          <CompanionTaskRow
+            key={runtimeTaskKey(task)}
+            task={task}
+            impactRequested={index < MAX_IMPACT_READS_PER_ROUND}
+          />
         ))}
       </ul>
 
-      {hiddenCount > 0 ? (
+      {overflowCount > 0 ? (
         <p className="text-[11px] text-slate-500" data-testid="desktop-companion-hidden">
-          另有 {hiddenCount} 个活动任务未在此窗口展开，完整列表见网页看板。
+          紧凑高度先呈现前 {MAX_ACTIVE_TASKS} 项，向下滚动可看其余 {overflowCount}{" "}
+          项；完整列表与详情见网页看板。
         </p>
       ) : null}
     </div>
@@ -175,9 +185,16 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
  * 小窗里的单行任务：状态、身份、阶段与触达弱信号（紧凑模式）。
  *
  * @param props.task - 摘要里的一条任务。
+ * @param props.impactRequested - 本轮是否为该行读取触达读数（每轮有数量上限）。
  * @returns 紧凑任务行。
  */
-function CompanionTaskRow({ task }: { task: RuntimeTaskEntry }) {
+function CompanionTaskRow({
+  task,
+  impactRequested,
+}: {
+  task: RuntimeTaskEntry;
+  impactRequested: boolean;
+}) {
   const presentation = runtimeStatusPresentation(task.status);
   return (
     <li
@@ -203,7 +220,12 @@ function CompanionTaskRow({ task }: { task: RuntimeTaskEntry }) {
         ) : null}
         <span>{formatLifecycleDuration(task.duration_seconds)}</span>
       </span>
-      <RuntimeTaskImpact repoId={task.repo_id} prdPath={task.prd_path} compact />
+      <RuntimeTaskImpact
+        repoId={task.repo_id}
+        prdPath={task.prd_path}
+        enabled={impactRequested}
+        compact
+      />
     </li>
   );
 }

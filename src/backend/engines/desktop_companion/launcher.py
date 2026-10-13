@@ -32,7 +32,7 @@ from backend.core.shared.interfaces.desktop_companion import (
 )
 from backend.core.shared.models.product_identity import state_home
 
-#: companion 进程身份文件（pid + 命令行校验用），随状态目录走。
+#: companion 进程身份文件（pid + 命令行校验 + 归属 Console 会话），随状态目录走。
 PIDFILE_NAME = "desktop-companion.pid"
 
 #: helper 子进程的模块入口，固定 argv 的第二段，绝不接受调用方替换。
@@ -67,28 +67,57 @@ def platform_supported() -> bool:
     return sys.platform in {"darwin", "win32", "linux"}
 
 
-def _read_pidfile(pidfile_path: Path) -> int | None:
-    """读取 companion pid；文件缺失、损坏或命令行不匹配时返回 ``None``。"""
+def _read_pidfile_entry(pidfile_path: Path) -> tuple[int, str] | None:
+    """读取 pidfile 里的 ``(pid, 所属 Console 会话)``。
+
+    文件缺失、损坏或命令行标记不匹配（pid 被复用成别的进程）时返回 ``None``。
+    会话行为是可选的：旧版本只写两行，此时按「归属未知」处理。
+
+    Args:
+        pidfile_path: companion 身份文件路径。
+
+    Returns:
+        ``tuple[int, str]``：pid 与写入该 pid 的 Console 会话身份（未知时为空串）。
+    """
     try:
         raw = pidfile_path.read_text(encoding="utf-8")
     except OSError:
         return None
-    pid_value, _, argv_marker = raw.partition("\n")
-    if argv_marker.strip() != _HELPER_ARGV_MARKER:
+    lines = raw.split("\n")
+    pid_value = lines[0].strip() if lines else ""
+    argv_marker = lines[1].strip() if len(lines) > 1 else ""
+    owner_session = lines[2].strip() if len(lines) > 2 else ""
+    if argv_marker != _HELPER_ARGV_MARKER:
         # pid 被复用成别的进程：宁认可疑残留，也不把别人的进程当自己的窗口。
         return None
     try:
-        pid = int(pid_value.strip())
+        pid = int(pid_value)
     except ValueError:
         return None
+    return (pid, owner_session)
+
+
+def _read_pidfile(pidfile_path: Path) -> int | None:
+    """读取 pidfile 里的 companion pid；不判定归属，只关心「这个进程还在不在」。"""
+    entry = _read_pidfile_entry(pidfile_path)
+    if entry is None:
+        return None
+    pid, _owner_session = entry
     return pid if _pid_is_alive(pid) else None
 
 
-def _write_pidfile(pidfile_path: Path, pid: int) -> None:
-    """写入 companion pid 与命令行标记；写失败不阻断窗口开启。"""
+def _write_pidfile(pidfile_path: Path, pid: int, console_session: str) -> None:
+    """写入 companion pid、命令行标记与归属会话；写失败不阻断窗口开启。
+
+    归属会话让另一个 Console 进程认不出这是自己的窗口，从而不会把别人的窗口
+    报成「已聚焦」，也不会替别人关窗。
+    """
     try:
         pidfile_path.parent.mkdir(parents=True, exist_ok=True)
-        pidfile_path.write_text(f"{pid}\n{_HELPER_ARGV_MARKER}\n", encoding="utf-8")
+        pidfile_path.write_text(
+            f"{pid}\n{_HELPER_ARGV_MARKER}\n{console_session}\n",
+            encoding="utf-8",
+        )
     except OSError:
         return
 
@@ -157,7 +186,7 @@ class PywebviewCompanionLauncher(DesktopCompanionLauncher):
                     console_origin=console_origin,
                     forced_status=DesktopCompanionStatus.FAILED,
                 )
-            _write_pidfile(self._pidfile_path, self._process.pid)
+            _write_pidfile(self._pidfile_path, self._process.pid, self._console_session)
             self._focus_ticket += 1
             return self._snapshot_locked(
                 console_origin=console_origin,
@@ -170,12 +199,16 @@ class PywebviewCompanionLauncher(DesktopCompanionLauncher):
         有界等待 helper 收尾，是为了让「关闭」这个用户动作立刻得到诚实的状态，
         而不是让前端读到窗口仍在运行的旧快照；超时不报错，因为关窗本来就可能
         被原生循环拖延。
+
+        等待段必须在锁外：状态探针（网页看板与 helper 自身）也要拿这把锁，
+        在锁内 sleep 会把它们一起堵住最长 ``wait_seconds``。
         """
         with self._lock:
             self._close_ticket += 1
-            deadline = time.monotonic() + max(0.0, wait_seconds)
-            while self._running_pid() is not None and time.monotonic() < deadline:
-                time.sleep(0.1)
+        deadline = time.monotonic() + max(0.0, wait_seconds)
+        while self._running_pid() is not None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        with self._lock:
             self._prune_finished_process()
             return self._snapshot_locked(console_origin=None)
 
@@ -193,16 +226,22 @@ class PywebviewCompanionLauncher(DesktopCompanionLauncher):
             self._last_error = None
 
     def _running_pid(self) -> int | None:
-        """返回仍在运行的 companion pid；本进程句柄与 pidfile 双通道判定。"""
+        """返回**本 Console 拥有**且仍在运行的 companion pid，否则 ``None``。"""
         if self._process is not None and self._process.poll() is None:
             return self._process.pid
         self._prune_finished_process()
-        pidfile_pid = _read_pidfile(self._pidfile_path)
-        if pidfile_pid is None:
+        entry = _read_pidfile_entry(self._pidfile_path)
+        if entry is None:
             return None
-        # pidfile 仍在、但我们不持有句柄：可能是上一个 Console 留下的窗口，
-        # 也可能刚被别的入口起起来。状态如实呈现，不另起第二个窗口。
-        return pidfile_pid
+        pid, owner_session = entry
+        if not _pid_is_alive(pid):
+            return None
+        if owner_session != self._console_session:
+            # pidfile 归别的 Console 进程：它的 focus / close 工单写在对方那份
+            # launcher 里，本进程递增永远送不到窗口，所以既不能声称「已聚焦」，
+            # 也不能替别人关窗——各入口各管自己的小窗。
+            return None
+        return pid
 
     def _snapshot_locked(
         self,

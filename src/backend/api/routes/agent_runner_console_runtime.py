@@ -11,9 +11,11 @@
   生命周期账本），不掺托管进程日志，也不新增数据源；
 - **桌面窗口只允许当前 loopback Console 的同源请求启动**：绑定地址与端口取自
   ASGI ``scope["server"]``（由 uvicorn 写入，客户端改不了，伪造 ``Host`` 也改不了），
-  再要求 ``Origin`` 精确等于该回环 origin；因此浏览器扩展、其他本地页面、
-  DNS rebinding 都拿不到启动系统窗口的能力。窗口内容固定为
-  ``{已校验 origin}/app/companion/``，不接受调用方给的 URL、路径或命令。
+  再要求 ``Origin`` 与该绑定同 scheme、同端口、host 属于回环别名且不带路径；
+  因此浏览器扩展、其他本地页面、DNS rebinding 都拿不到启动系统窗口的能力。
+  校验通过后**返回绑定侧 origin**，窗口内容固定为
+  ``{绑定 origin}/app/companion/``，不接受调用方给的 URL、路径、命令，也不回显
+  请求头里的 host。
 """
 
 from __future__ import annotations
@@ -58,25 +60,52 @@ def _enabled_repo_ids() -> list[str]:
     return [context.repo_id for context in contexts]
 
 
-def _trusted_console_origin(request: Request) -> str:
-    """校验请求来自当前 Console 的同源页面，返回规范化 origin。
+def _format_loopback_origin(host: str, port: int) -> str:
+    """拼出回环 origin；IPv6 字面量必须加方括号，否则不是合法 URL。"""
+    hostname = f"[{host}]" if ":" in host else host
+    return f"http://{hostname}:{port}"
+
+
+def _bound_loopback_server(request: Request) -> tuple[str, int]:
+    """取 uvicorn 实际绑定的回环 ``host/port``（不读 ``Host`` 头）。
 
     Args:
         request: FastAPI 请求对象。
 
     Returns:
-        形如 ``http://127.0.0.1:8313`` 的已校验 origin。
+        ``tuple[str, int]``：绑定的主机与端口。
 
     Raises:
-        HTTPException: 403——绑定地址非回环、缺少 ``Origin``，或 origin 与
-            当前 Console 的 host/port 不完全一致。
+        HTTPException: 503——ASGI ``scope["server"]`` 缺失或形状异常；403——绑定
+            地址不是回环。
     """
     server = request.scope.get("server")
     if not server or len(server) != 2:
         raise HTTPException(status_code=503, detail="无法确定 Console 的绑定地址。")
-    bound_host, _, bound_port = str(server[0]), "", int(server[1])
+    bound_host, bound_port = str(server[0]), int(server[1])
     if bound_host not in _LOOPBACK_HOSTS:
         raise HTTPException(status_code=403, detail="桌面窗口仅允许本机回环 Console 启动。")
+    return bound_host, bound_port
+
+
+def _trusted_console_origin(request: Request) -> str:
+    """校验请求来自当前 Console 的同源页面，返回窗口加载用的权威 origin。
+
+    ``Origin`` 头只用于**判定同源**，不会成为窗口地址：回环别名（``localhost`` 与
+    ``127.0.0.1``）指向同一个 Console，但 helper 的 argv 与 WebView 加载的 URL 必须
+    写后端自己绑定的那个 origin，客户端改不了。
+
+    Args:
+        request: FastAPI 请求对象。
+
+    Returns:
+        由绑定地址推出的、形如 ``http://127.0.0.1:8313`` 的已校验 origin。
+
+    Raises:
+        HTTPException: 403 或 503——见 :func:`_bound_loopback_server`，以及缺少
+            ``Origin``、origin 与当前 Console 的 scheme/host 别名/端口不一致。
+    """
+    bound_host, bound_port = _bound_loopback_server(request)
 
     raw_origin = (request.headers.get("origin") or "").strip()
     if not raw_origin:
@@ -95,7 +124,7 @@ def _trusted_console_origin(request: Request) -> str:
             status_code=403,
             detail=f"Origin {raw_origin!r} 与当前本机 Console 不一致，拒绝启动桌面窗口。",
         )
-    return f"http://{parsed.hostname}:{bound_port}"
+    return _format_loopback_origin(bound_host, bound_port)
 
 
 def _trusted_bound_origin(request: Request) -> str:
@@ -106,7 +135,7 @@ def _trusted_bound_origin(request: Request) -> str:
     bound_host, bound_port = str(server[0]), int(server[1])
     if bound_host not in _LOOPBACK_HOSTS:
         return ""
-    return f"http://{bound_host}:{bound_port}"
+    return _format_loopback_origin(bound_host, bound_port)
 
 
 def _companion_launcher() -> DesktopCompanionLauncher:

@@ -24,7 +24,10 @@ export default function CompanionPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col" data-testid="companion-page">
+    <main
+      className="mx-auto flex h-svh min-h-0 w-full max-w-md flex-col"
+      data-testid="companion-page"
+    >
       <DesktopCompanion onClose={() => void handleClose()} />
       {notice ? (
         <p className="px-3 pb-3 text-[11px] text-slate-500" data-testid="companion-close-notice">

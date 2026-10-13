@@ -419,9 +419,9 @@ curl -sS \
 
 - 绑定地址必须来自 ASGI `scope["server"]`（由 uvicorn 按真实 bind 写入，不读 `Host` 头，因此伪造 `Host` 无效），且主机在本机回环集合（`127.0.0.1` / `localhost` / `::1`）内；非回环绑定返回 `403`。
 - `Origin` 必须存在、scheme 为 `http`、主机是回环别名、端口与 Console 实际绑定端口一致、且不带 path / query / fragment；不一致返回 `403`，缺失返回 `403`。
-- 请求体不接受任何命令、主机、端口或路径参数：helper 的加载地址固定为 `{已校验的 console_origin}/app/companion/`，子进程 argv 固定。
+- 请求体不接受任何命令、主机、端口或路径参数：helper 的加载地址固定为 `{由绑定推出的 console_origin}/app/companion/`（IPv6 绑定会补方括号），子进程 argv 固定；`Origin` 头只参与同源判定，不会成为窗口地址。
 
-同一个 Console 进程最多一个窗口：重复调用只递增 `focus_ticket`，由 helper 自己提前台，不再新建进程。
+同一个 Console 进程最多一个窗口：重复调用只递增 `focus_ticket`，由 helper 自己提前台，不再新建进程。窗口身份还带 `console_session`：共用同一状态目录的另一个 Console 进程认不出别人的窗口，既不会把它报成「已聚焦」，也不会替对方关窗，各入口开各自的小窗。
 
 ### `POST /api/v1/agent-runner/console/desktop-companion/window/close`
 
