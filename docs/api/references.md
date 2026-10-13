@@ -346,7 +346,7 @@ curl -sS \
 
 ### `GET /api/v1/agent-runner/console/evaluation/suites`
 
-列出 `tasks/evaluation-suites/` 下的评测集与逐文件校验结果（维护者自查入口，不需要任何凭据）。条目字段：`file`、`valid`、`errors`；校验通过时另含 `suite_id`、`version`、`repo_path`、`base_ref`、`content_hash`、`rubric_version`、`check_timeout_seconds` 与 `cases`。
+列出 `tasks/evaluation-suites/` 下的评测集与逐文件校验结果（维护者自查入口，不需要任何凭据）。条目字段：`file`、`valid`、`errors`；校验通过时另含 `suite_id`、`version`、`repo_path`、`base_ref`、`content_hash`、`rubric_version`、`check_timeout_seconds` 与 `cases`。同一目录内 `suite_id` 重复时，涉及的两个文件**一起**返回 `valid=false`（原因含「重复定义」），与 registry README 口径一致。
 
 ### `GET /api/v1/agent-runner/console/evaluation/presets`
 

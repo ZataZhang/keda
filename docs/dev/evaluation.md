@@ -36,6 +36,9 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 - 必填字段：`id`、`version`（semver）、`repo_path`、`base_ref`、非空 `cases`；
   每条 case 含 `id`（`^[a-z0-9][a-z0-9._-]{0,79}$`）、`prompt` 与白名单
   `check_recipe`（pytest / unittest / node-test）。
+- suite `id` 在 registry 目录内必须唯一：重复定义会让两个文件一起被判
+  invalid（清单接口与页面都据此标红），因为此时「按 id 加载」无法确定取哪个
+  文件，历史 run 的 `suite_hash` 也会失去唯一解释。
 - run 创建时冻结 suite 内容 hash、base commit 与全部预设快照；此后修改
   suite 文件或 config.toml 不影响历史 run 的解释口径。
 - 冻结口径是**执行前守卫**而不只是展示：候选执行前核对 live 执行预设、评审
@@ -96,10 +99,14 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 - 暂存 payload 与隔离 worktree 在评分完成、拒绝、取消或删除 run 时清除；
   删除 run 级联清除其结果与评分行。强制删除仍在执行的 run 时，在飞线程的
   残余回写按 run 存在性被丢弃，评审派发在调用前自检 run 仍在 `judging`，
-  不会留下孤儿行，也不会为新删除的 run 追加 provider 调用。
-- Console 重启自愈：上次进程遗留的活跃 run 一律标 `interrupted`；不提供
-  续跑，由用户新建 run 重跑或删除，绝不自动重跑（避免不可解释的重复
-  provider 副作用）。
+  不会留下孤儿行，也不会为新删除的 run 追加 provider 调用。矩阵收尾同理：
+  并发取消/删除若抢在「进入待授权」这次状态比较并交换之前落地，刚写入的
+  manifest 与候选 diff 会立即清除，不会给停在 `cancelled` 的 run 留残骸。
+- Console 重启自愈：上次进程遗留的活跃 run 一律标 `interrupted`，并一并
+  删掉其暂存 payload（自愈后这些 run 再也走不到授权或拒绝，留下的只会是
+  无人负责的代码差异）；隔离 worktree 的目录清理仍归「删除 run」，避免把
+  git 调用压在启动路径上。不提供续跑，由用户新建 run 重跑或删除，绝不自动
+  重跑（避免不可解释的重复 provider 副作用）。
 
 ### 无凭据验证入口
 

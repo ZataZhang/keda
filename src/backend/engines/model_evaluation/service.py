@@ -98,14 +98,34 @@ def suite_registry_root() -> Path:
 
 
 def list_suites() -> list[dict[str, Any]]:
-    """列出 registry 目录下的 suite 及其校验状态（维护者校验入口）。"""
+    """列出 registry 目录下的 suite 及其校验状态（维护者校验入口）。
+
+    同一目录内重复的 suite id 无法确定 ``load_suite`` 会取哪个文件，因此
+    涉及的两个文件**一起**降级为 invalid，口径与 README 及 ``load_suite``
+    的报错一致，避免页面下拉里出现两个同名可选项。
+    """
     root = suite_registry_root()
-    entries: list[dict[str, Any]] = []
     if not root.is_dir():
-        return entries
-    for path in sorted(root.glob("*.yaml")):
-        entries.append(_describe_suite_file(path))
-    return entries
+        return []
+    entries = [_describe_suite_file(path) for path in sorted(root.glob("*.yaml"))]
+    id_counts: dict[str, int] = {}
+    for entry in entries:
+        if entry["valid"]:
+            suite_id = str(entry["suite_id"])
+            id_counts[suite_id] = id_counts.get(suite_id, 0) + 1
+    duplicated_ids = {suite_id for suite_id, count in id_counts.items() if count > 1}
+    return [_mark_duplicate_suite_entry(entry, duplicated_ids) for entry in entries]
+
+
+def _mark_duplicate_suite_entry(entry: dict[str, Any], duplicated_ids: set[str]) -> dict[str, Any]:
+    """把 id 落在重复集合里的条目改写成可解释的 invalid 条目。"""
+    if not entry["valid"] or entry.get("suite_id") not in duplicated_ids:
+        return entry
+    return {
+        "file": entry["file"],
+        "valid": False,
+        "errors": [f"suite id '{entry['suite_id']}' 在 registry 目录内重复定义"],
+    }
 
 
 def _describe_suite_file(path: Path) -> dict[str, Any]:
@@ -381,8 +401,27 @@ def list_runs() -> list[EvaluationRunRecord]:
 
 
 def recover_interrupted() -> int:
-    """``kc console`` 启动自愈：把上次进程遗留的活跃 run 标记为 interrupted。"""
-    return evaluation_rules.recover_interrupted_runs(_store())
+    """``kc console`` 启动自愈：活跃 run 标 interrupted，并清掉其本机暂存 payload。
+
+    自愈后 run 不再可能走到授权/评分收尾，遗留的暂存内容（候选代码 diff）
+    若不在此处清除就会无主地留在磁盘上。worktree 清理留给 ``delete_run``：
+    那要调 git，不能压在 console 启动路径上。
+    """
+    store = _store()
+    active_statuses = {status.value for status in evaluation_rules.ACTIVE_RUN_STATUSES}
+    stale_run_ids = [
+        str(row.run_id)
+        for row in store.list_evaluation_runs()
+        if str(row.status) in active_statuses
+    ]
+    affected = evaluation_rules.recover_interrupted_runs(store)
+    for run_id in stale_run_ids:
+        execution.purge_run_artifacts(run_id)
+    if affected:
+        _logger.info(
+            "模型评测自愈：清除 %d 个 interrupted run 的暂存 payload。", len(stale_run_ids)
+        )
+    return affected
 
 
 # ─────────────────────────────────────────────────────────────────────────────

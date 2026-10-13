@@ -45,6 +45,9 @@ from backend.engines.model_evaluation.store_adapter import (
     now_iso,
     store as _store,
 )
+from backend.infrastructure.persistence.console_store_evaluation import (
+    EvaluationStoreConflictError,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -177,22 +180,26 @@ def run_run_execution(run_id: str) -> None:
         # 运行期间被取消/打断：清掉可能已写入的暂存 payload，保留本地结果状态。
         purge_run_artifacts(run_id)
         return
-    if run.judge_preset_snapshots and staged_entries:
+    judged = bool(run.judge_preset_snapshots and staged_entries)
+    manifest_hash = None
+    if judged:
         write_manifest(run_id, staged_entries)
         manifest_hash = current_manifest_hash(run_id) or build_manifest_hash(staged_entries)
+    terminal_status = (
+        EvaluationRunStatus.awaiting_judge_consent if judged else EvaluationRunStatus.completed
+    )
+    try:
         store.update_evaluation_run_status(
             run_id,
             expected_statuses=[EvaluationRunStatus.running.value],
-            new_status=EvaluationRunStatus.awaiting_judge_consent.value,
+            new_status=terminal_status.value,
             manifest_hash=manifest_hash,
+            finished=not judged,
         )
-    else:
-        store.update_evaluation_run_status(
-            run_id,
-            expected_statuses=[EvaluationRunStatus.running.value],
-            new_status=EvaluationRunStatus.completed.value,
-            finished=True,
-        )
+    except EvaluationStoreConflictError:
+        # 读取与 CAS 之间被并发 cancel / force delete 抢先：刚写下的 manifest 与
+        # 候选 diff 已无主（run 不在授权态，永远不会有 approve/deny 来清理），立即清除。
+        purge_run_artifacts(run_id)
 
 
 def _execute_cell(

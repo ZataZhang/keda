@@ -191,7 +191,24 @@ def transition_run(
     error: str | None = None,
     finished: bool = False,
 ) -> EvaluationRunRecord:
-    """带守卫的状态迁移；非法来源状态抛 :class:`EvaluationStateConflictError`。"""
+    """带守卫的状态迁移，透传存储层的比较并交换结果。
+
+    Args:
+        store: 评测存储端口。
+        run_id: 目标 run。
+        expected: 允许的来源状态集合。
+        new_status: 目标状态。
+        manifest_hash: 非 ``None`` 时同步冻结。
+        error: 非 ``None`` 时同步写入错误摘要。
+        finished: True 时同时冻结 ``finished_at``。
+
+    Returns:
+        EvaluationRunRecord: 迁移后的最新行。
+
+    Raises:
+        RuntimeError: 来源状态与 ``expected`` 不符（存储层抛出的冲突错误），
+            调用方（engines service）据此转成 409 conflict 语义。
+    """
     return store.update_evaluation_run_status(
         run_id,
         expected_statuses=[status.value for status in expected],

@@ -22,6 +22,7 @@ from backend.core.shared.models.model_evaluation import (
     EvaluationRunRecord,
     EvaluationRunStatus,
     EvaluationScoreStatus,
+    EvaluationSuite,
     EvaluationSuiteCase,
     sha256_text,
 )
@@ -33,6 +34,7 @@ from backend.engines.model_evaluation import (
     workspace,
 )
 from backend.engines.model_evaluation.checks import CheckRunOutcome
+from backend.engines.model_evaluation import service as evaluation_service
 from backend.infrastructure.config.agent_runner_settings_models import (
     AgentRunnerEvaluationSettings,
     AgentRunnerPresetSettings,
@@ -42,6 +44,19 @@ from backend.infrastructure.config.settings import AgentRunnerSettings
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 
 _CASE = EvaluationSuiteCase(case_id="case-a", prompt="实现 FizzBuzz", check_recipe="pytest")
+_SUITE = EvaluationSuite(
+    suite_id="demo-suite",
+    version="1.0.0",
+    title="演示评测集",
+    repo_path="/tmp/repo",
+    base_ref="main",
+    rubric_id="default-rubric",
+    rubric_version="v1",
+    check_timeout_seconds=60,
+    cases=(_CASE,),
+    source_path="demo.yaml",
+    content_hash="hash",
+)
 _SNAPSHOT = {
     "preset_name": "alpha",
     "agent": "codex",
@@ -363,3 +378,71 @@ def test_judge_dispatch_stops_after_force_delete(harness: Any) -> None:
 
     assert harness.calls["judge"] == []
     assert harness.store.list_evaluation_scores(run.run_id) == []
+
+
+def test_finalize_cas_conflict_with_concurrent_cancel_purges_staged_payload(
+    harness: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """收尾读状态与 CAS 之间被并发 cancel 抢先：刚写下的 manifest / 候选 diff 必须清掉。
+
+    这条链路的 leak 只在「已写 manifest，但授权态没落上」时出现：run 停在
+    cancelled，永远不会再有 approve/deny 来清理，暂存的代码差异就成了无主残骸。
+    """
+    run = _run(status=EvaluationRunStatus.queued.value)
+    harness.store.save_evaluation_run(run)
+    real_store = harness.store
+    manifest_writes: list[str] = []
+    real_write_manifest = execution.write_manifest
+
+    def _record_manifest_write(run_id: str, entries: list[dict[str, Any]]) -> None:
+        manifest_writes.append(run_id)
+        real_write_manifest(run_id, entries)
+
+    monkeypatch.setattr(evaluation_service, "load_suite", lambda suite_id: _SUITE)
+    monkeypatch.setattr(
+        "backend.engines.agent_runner.factory.load_fresh_agent_runner_settings",
+        lambda: harness.settings,
+    )
+    monkeypatch.setattr(workspace, "evaluation_root", lambda console_db_path: harness.root)
+    monkeypatch.setattr(execution, "write_manifest", _record_manifest_write)
+    monkeypatch.setattr(execution, "_store", lambda: _CancelDuringConsentStore(real_store))
+
+    execution.run_run_execution(run.run_id)
+
+    assert manifest_writes == [run.run_id]
+    assert len(harness.calls["candidate"]) == 1
+    assert (harness.root / "runs" / run.run_id).exists() is False
+    assert real_store.get_evaluation_run(run.run_id).status == EvaluationRunStatus.cancelled.value
+    assert harness.calls["judge"] == []
+
+
+class _CancelDuringConsentStore:
+    """store 代理：在 running→awaiting_judge_consent 的 CAS 落地前抢先取消该 run。"""
+
+    def __init__(self, inner: Any) -> None:
+        """持有真实 store。"""
+        self._inner = inner
+
+    def update_evaluation_run_status(
+        self,
+        run_id: str,
+        *,
+        expected_statuses: Any,
+        new_status: str,
+        **kwargs: Any,
+    ) -> Any:
+        """授权态的 CAS 之前注入一次并发 cancel，使该次比较并交换必然冲突。"""
+        if new_status == EvaluationRunStatus.awaiting_judge_consent.value:
+            self._inner.update_evaluation_run_status(
+                run_id,
+                expected_statuses=[EvaluationRunStatus.running.value],
+                new_status=EvaluationRunStatus.cancelled.value,
+                finished=True,
+            )
+        return self._inner.update_evaluation_run_status(
+            run_id, expected_statuses=expected_statuses, new_status=new_status, **kwargs
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        """其余方法透传到真实 store。"""
+        return getattr(self._inner, name)

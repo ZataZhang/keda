@@ -20,14 +20,6 @@ from backend.core.shared.models.model_evaluation import (
 )
 
 
-class EvaluationStoreError(RuntimeError):
-    """存储层不变量被破坏（如状态 CAS 冲突）时抛出的端口级错误。"""
-
-
-class EvaluationStateConflictError(EvaluationStoreError):
-    """状态比较并交换失败：当前状态与调用方预期不符。"""
-
-
 class IEvaluationStore(ABC):
     """评测 run / 候选结果 / 逐评审评分的查询、保存、CAS 与级联删除端口。"""
 
@@ -59,7 +51,8 @@ class IEvaluationStore(ABC):
         Args:
             run_id: 目标 run。
             expected_statuses: 允许的来源状态集合；当前状态不在集合内即视为
-                并发冲突，抛 :class:`EvaluationStateConflictError`。
+                并发冲突，由实现方抛出其自身的冲突错误（SQLite 实现为
+                ``EvaluationStoreConflictError``）供调用方转成 409 语义。
             new_status: 目标状态。
             manifest_hash: 非 ``None`` 时同步写入（进入 awaiting_judge_consent 时冻结）。
             error: 非 ``None`` 时同步写入错误摘要。

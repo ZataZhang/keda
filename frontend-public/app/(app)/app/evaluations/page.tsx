@@ -204,7 +204,13 @@ export default function EvaluationsPage() {
     }
   };
 
-  const runAction = async (action: () => Promise<unknown>, successText: string) => {
+  // detailRunId 显式传入而非读闭包：删除当前选中 run 时，闭包里的 selectedRunId
+  // 仍是删除前的值，照它刷新会对已消失的 run 发一次注定 404 的详情请求。
+  const runAction = async (
+    action: () => Promise<unknown>,
+    successText: string,
+    detailRunId: string | null = selectedRunId
+  ) => {
     setBusy(true);
     try {
       await action();
@@ -216,8 +222,8 @@ export default function EvaluationsPage() {
     } finally {
       setBusy(false);
       await refreshRuns();
-      if (selectedRunId) {
-        loadDetail(selectedRunId);
+      if (detailRunId) {
+        loadDetail(detailRunId);
       }
     }
   };
@@ -229,8 +235,14 @@ export default function EvaluationsPage() {
     }
     if (selectedRunId === runId) {
       setSelectedRunId(null);
+      // 详情面板也要一起清空：否则页面上会继续显示一条已不存在的 run。
+      setDetail(null);
     }
-    await runAction(() => deleteEvaluationRun(runId), `run ${runId} 已删除。`);
+    await runAction(
+      () => deleteEvaluationRun(runId),
+      `run ${runId} 已删除。`,
+      selectedRunId === runId ? null : selectedRunId
+    );
   };
 
   // ── 渲染 ────────────────────────────────────────────────────────────────

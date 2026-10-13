@@ -112,7 +112,7 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         execution, "read_staged_payload", lambda run_id, payload_file: '{"diff": "staged"}'
     )
     monkeypatch.setattr(execution, "current_manifest_hash", lambda run_id: _FROZEN_HASH)
-    return SimpleNamespace(store=console_store, scheduled=scheduled)
+    return SimpleNamespace(store=console_store, scheduled=scheduled, suites_dir=suites_dir)
 
 
 def _created_run_id(harness: Any) -> str:
@@ -174,6 +174,51 @@ def test_list_suites_returns_validated_entries(harness: Any) -> None:
     assert entry["valid"] is True
     assert entry["suite_id"] == "demo-suite"
     assert len(entry["cases"]) == 1
+
+
+def test_list_suites_flags_duplicate_suite_ids_across_files(harness: Any) -> None:
+    """README 承诺「重名的两个文件一起校验失败」：registry 自查要真的抓到跨文件重复 id。"""
+    (harness.suites_dir / "demo-copy.yaml").write_text(
+        SUITE_TEXT.replace("title: 演示评测集", "title: 演示评测集副本"), encoding="utf-8"
+    )
+
+    response = client.get(f"{API_BASE}/suites")
+
+    assert response.status_code == 200
+    entries = {entry["file"]: entry for entry in response.json()["suites"]}
+    assert set(entries) == {"demo.yaml", "demo-copy.yaml"}
+    for entry in entries.values():
+        assert entry["valid"] is False
+        assert any("重复定义" in error for error in entry["errors"])
+
+
+def test_recover_interrupted_clears_leftover_staged_payloads(
+    harness: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """重启自愈后 run 不可能再走到授权/收尾，遗留的暂存 payload 必须一并清掉。"""
+    purged: list[str] = []
+    monkeypatch.setattr(execution, "purge_run_artifacts", purged.append)
+    staged_id = _created_run_id(harness)
+    harness.store.update_evaluation_run_status(
+        staged_id,
+        expected_statuses=[EvaluationRunStatus.created.value],
+        new_status=EvaluationRunStatus.awaiting_judge_consent.value,
+        manifest_hash=_FROZEN_HASH,
+    )
+    finished_id = _created_run_id(harness)
+    harness.store.update_evaluation_run_status(
+        finished_id,
+        expected_statuses=[EvaluationRunStatus.created.value],
+        new_status=EvaluationRunStatus.completed.value,
+        finished=True,
+    )
+
+    affected = evaluation_service.recover_interrupted()
+
+    assert affected == 1
+    assert harness.store.get_evaluation_run(staged_id).status == "interrupted"
+    assert purged == [staged_id]
+    assert finished_id not in purged
 
 
 def test_list_presets_exposes_execution_and_available_judges(harness: Any) -> None:
