@@ -20,6 +20,9 @@ from backend.core.shared.models.agent_runner import (
     SupervisorActionResult,
 )
 from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
+from backend.core.use_cases.agent_runner_direct_pr_label import (
+    issue_carries_prd_auto_merge_label,
+)
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
 )
@@ -204,6 +207,13 @@ def build_supervisor_prompt(
         if prd_path_match
         else "If the Issue references a PRD, read it before reviewing."
     )
+    scoped_prd_auto_merge_enabled = issue_carries_prd_auto_merge_label(issue, config)
+    automation_context_lines = [
+        "Automation authorization:",
+        f"- Issue-scoped `prd-auto-merge` authorization: {scoped_prd_auto_merge_enabled}",
+        f"- Autopilot merge queue enabled: {config.autopilot.enabled}",
+        f"- PR-body auto sign-off enabled: {config.autopilot.auto_sign_off}",
+    ]
 
     diff_result = process_runner.run(
         ["git", "diff", f"{config.git.base_branch}...{pr_context.head_sha}"],
@@ -244,6 +254,7 @@ def build_supervisor_prompt(
             f"Checks state: {pr_context.checks_state}",
             "Checks summary:",
             "\n".join(f"- {check}" for check in pr_context.checks_summary) or "(none)",
+            "\n".join(automation_context_lines),
             prd_line,
             "",
             "Issue body:",
@@ -289,6 +300,28 @@ def build_supervisor_prompt(
             "assume jobs ran or succeeded. Choose wait_for_checks or "
             "request_human_input according to whether the PRD requires this "
             "remote gate.",
+            "- Read the canonical PRD's Realistic Validation Plan. When an item is "
+            "marked required for acceptance and its `real_entry` / `mock_boundary` "
+            "define an executable path, missing, stubbed, stale, or unpublished "
+            "evidence is an actionable repair. Return `repair_pr_branch` with the "
+            "concrete work needed to run that path and publish evidence; do not ask "
+            "the user to choose between completing the written requirement and "
+            "accepting weaker evidence.",
+            "- Reserve `request_human_input` for a genuine unresolved product or "
+            "acceptance decision, contradictory requirements, or a required external "
+            "credential/permission that the runner actually cannot use. A missing "
+            "test, screenshot, tree binding, or runner-owned evidence publication is "
+            "not by itself a human decision.",
+            "- If the Issue carries `prd-auto-merge`, that label authorizes the "
+            "Issue-scoped merge path, skips only the independent verifier, and lets "
+            "the merge queue bypass the PRD `Human-Confirmed` hold. It does not waive "
+            "required Realistic Validation evidence, repository verification, PR "
+            "checks, or branch protection.",
+            "- When the only failed check is `Realistic Validation sign-off` and the "
+            "automation context says both the merge queue and auto sign-off are "
+            "enabled, do not request a human to tick the PR-body checklist. The merge "
+            "queue completes that checklist after repository verification; this "
+            "never substitutes for running or reviewing required validation evidence.",
             "- Never describe unexecuted or unverified CI as passed, verified, or "
             "acceptance-complete; approve_for_human_review only means entering "
             "human review and never implies acceptance, auto-merge, or archive "

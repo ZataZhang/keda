@@ -1351,6 +1351,13 @@ Realistic Validation 证据与命令重跑、pre-PR review、post-PR supervisor�
 停在人工 review。选择该项也授权自动化越过 PRD 的 Human-Confirmed hold；PRD 仍须先归档。
 自动合并后不修改 PRD 的 `Human-Confirmed` 清单或验收横幅，也不记录人工验收。
 
+监督器处理 PRD 证据缺口时，以 PRD 中声明的 `required_for_acceptance`、`real_entry` 与
+`mock_boundary` 为准：缺少真实入口运行、证据截图、最终 tree 绑定或 runner 所有的证据发布时，
+应交回执行器按既定验收路径补齐，不要求用户在“完成原要求”和“接受较低保真证据”之间二选一。
+只有需求本身矛盾、验收范围确需变更，或 runner 确实缺少必需的外部凭据/权限时才请求人工输入。
+`prd-auto-merge` 不豁免必需的 Realistic Validation 证据；当合并队列与 `auto_sign_off` 均启用时，
+队列在仓库验证通过后可完成 PR 正文的签收清单，但不能据此声称未执行的验证已经通过。
+
 若要在 Issue 上手工设置，先同步标签：
 
 ```bash
@@ -4603,7 +4610,7 @@ enabled = true               # 新键：仓库级显式打开
 每条进入合并队列的 PR 都按下列顺序执行；任一步失败则**该 PR 转入既有失败/修复路径**，不阻塞队列中其余 PR：
 
 1. **verifier 门禁**：普通 Issue 若需要 validation（`validation_required`）且 `autopilot.require_verifier_pass = true`，要求 Issue 已带 `validation/verifier-passed` 标签；缺失则本轮跳过。带 `prd-auto-merge` 的单 PRD 按显式授权跳过独立 verifier，不伪造该标签。
-2. **自动签核**：若 `autopilot.auto_sign_off = true`，普通队列沿用 verifier 后的签核；单 PRD 自动合并路径则等仓库验证命令通过后再更新 PR body 的 Realistic Validation 清单并写审计评论。这个 PR body 清单不等于 PRD 的 `Human-Confirmed` 清单。
+2. **签收清单**：若 `autopilot.auto_sign_off = true`，普通队列在 verifier 通过后签收；单 PRD 自动合并路径在仓库验证命令通过后签收并写审计评论。GitHub check 只检查 PR body 清单是否完成；清单必须对应已经实际完成的验证。这个 PR body 清单不等于 PRD 的 `Human-Confirmed` 清单。
 3. **rebase**：复用 `pr_supervisor.execute_rebase` 把 PR 分支 rebase 到最新 remote base；冲突走既有 conflict-resolution agent 路径。失败→转 `agent/supervising`，本 PR 跳过。
 4. **全量验证**：在该 Issue 的 worktree 内调用 `agent_runner_git.run_verification(...)` 重跑 `runner.verification_commands`；红→转验证修复路径，本 PR 跳过不合并。
 5. **禁改路径终扫**：取 PR diff 文件清单，用 `safety.forbidden_path_patterns` 做最终匹配（复用 `agent_runner_publish.is_forbidden_path(...)`）；命中→打 `agent/blocked` + 评论，永不自动合并。
