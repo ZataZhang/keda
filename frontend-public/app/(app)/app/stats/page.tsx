@@ -283,26 +283,6 @@ export default function StatsPage() {
         />
       </section>
 
-      <div id={STATS_SECTION_IDS.tokenCost} className="scroll-mt-20">
-        {lifecycleStats === null ? (
-          <Card className="border-border/70 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base">Token 用量与费用</CardTitle>
-              <CardDescription>正在读取调用明细与模型价格…</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Skeleton className="h-36" />
-            </CardContent>
-          </Card>
-        ) : (
-          <TokenUsageSection
-            stats={lifecycleStats}
-            pricingModels={modelPricing}
-            pricingError={modelPricingError}
-          />
-        )}
-      </div>
-
       <Card className="gap-4 border-border/70 shadow-sm">
         <CardHeader>
           <CardTitle className="text-base">仓库完成度</CardTitle>
@@ -488,6 +468,26 @@ export default function StatsPage() {
           }
         }}
       />
+
+      <div id={STATS_SECTION_IDS.tokenCost} className="scroll-mt-20">
+        {lifecycleStats === null ? (
+          <Card className="border-border/70 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Token 用量与费用</CardTitle>
+              <CardDescription>正在读取调用明细与模型价格…</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-36" />
+            </CardContent>
+          </Card>
+        ) : (
+          <TokenUsageSection
+            stats={lifecycleStats}
+            pricingModels={modelPricing}
+            pricingError={modelPricingError}
+          />
+        )}
+      </div>
 
       <div id={STATS_SECTION_IDS.agentPerformance} className="scroll-mt-20">
         <AgentPerformanceSection
