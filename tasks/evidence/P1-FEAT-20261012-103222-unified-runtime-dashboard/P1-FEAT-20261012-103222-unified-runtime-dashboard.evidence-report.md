@@ -4,20 +4,21 @@
 - PR / CI：尚未创建；本目录是 executor 侧实现交付证据。
 - 当前验证层级：**real entry**。rv-1..rv-4 均在一次性真实 `kc console`（隔离 HOME + 源库只读副本或删表副本）+ 真实浏览器上采集；早期 component preview 目标图仍留在 `docs/prototypes/assets/`，仅作 design intent 对照，不再是验收依据。
 - 采集绑定：被验证代码为 commit `3d65d008` 之上的本工作树（未提交实现改动）；rv-1/rv-2/rv-4 隔离档与断连档生成于 2026-10-13 08:51–08:54（+08:00）；rv-3 于 09:27 增补 390×844 companion 窄视口断言，rv-3 与 rv-4 view-degradation 在 09:3x 完成负控注入变红→还原→重建→复跑绿的闭环；其后再无实现改动。
+- runner 恢复轮（2026-10-13 上午）：item-1 命令复跑曾因外部监控同步瞬态（副本库快照那轮 keda issues 不带任何 `agent/*` 标签）在标签前置守卫上 exit 1；10:14 本地逐字复现该红（`rv-1-negative-control.log` 追加段），确认非代码缺陷。spec 因此增加**仅限临时副本库**的确定性标签样本兜底（`scripts/rv1-seed-label-fixture.py`，注入事实写入 provenance）；兜底路径经剥标签模拟验证绿，10:30 真实数据复跑绿且未触发兜底（`label_fixture_seed=null`）。rv-2/rv-3/rv-4 不依赖 `agent/*` 标签，未受影响。
 
 ### 结果总览
 
 | RV | 结论 | 真实入口 | 关键证据 |
 |---|---|---|---|
-| rv-1 默认看板/日志续读/调用折叠 | ✅ 绿 | `http://127.0.0.1:8803/app/dashboard/`（`with-rv-console.sh auto copy`） | `rv-1-run.log`、`rv-1-endpoint-provenance.json`（46 任务、label→bucket 一致）、`rv-1-runtime-dashboard.png`、`rv-1-task-detail-expanded.png`、`rv-1-negative-control.log` |
+| rv-1 默认看板/日志续读/调用折叠 | ✅ 绿（10:30 恢复轮复跑，真实数据、未触发兜底） | 一次性隔离真实 Console（`with-rv-console.sh auto copy`，本轮 `http://127.0.0.1:8800/app/dashboard/`） | `rv-1-run.log`、`rv-1-endpoint-provenance.json`（46 任务、label→bucket 一致、`label_fixture_seed=null`）、`rv-1-runtime-dashboard.png`、`rv-1-task-detail-expanded.png`、`rv-1-negative-control.log`（两段真实红灯） |
 | rv-2 桌面小窗链路 + 跨源拒绝 | ✅ 绿（两分支） | 真实 helper/pywebview 进程 + WindowServer 探针；无 helper 分支临时移出 site-packages | `rv-2-run.log`、`rv-2-companion-window-chain.json`、`rv-2-companion-page.png`、`rv-2-missing-helper.{json,png}`、`rv-2-negative-control.log` |
 | rv-3 触达比例与不可比降级 | ✅ 绿 | 真实 progress API → Dashboard/companion DOM | `rv-3-run.log`、`rv-3-impact-readings.json`（34 任务实测）、`rv-3-impact-*.png`、`rv-3-negative-control.log` |
 | rv-4 缺来源/断连只降级受影响视图 | ✅ 绿（三档） | 三 Console 并排：参考 `8801` / 删表 degraded `8802` / 零仓库 fresh `8803` | `rv-4-isolated-run.log`、`rv-4-companion-offline.{json,png}`、`rv-4-isolated-board.json`、`rv-4-source-partial.png`、`rv-4-empty-board.png`、`rv-4-negative-control.log`、`rv-4-isolated-negative-control.log` |
 
 ### 1. rv-1 — 真实生命周期任务看板
 
-命令：`bash scripts/with-rv-console.sh auto copy -- bash scripts/run-rv.sh rv1-real-entry.spec.mjs`（exit 0）。
-断言链：runtime summary 的 `sync_status=ready`、状态计数（running 15 / waiting 1 / blocked 14 / completed 16）与 Issue 标签逐条对账；选中 Issue 后走真实 `GET .../issues/{n}/logs` 的 offset 续读（端点路径含选中 Issue 身份）、新行出现；结构化调用初始折叠、展开保留原始输出。负控：`rv-1-negative-control.log` 为开发期「默认展开」缺陷被同一 spec 捕获的变红记录（修复后 08:51 复跑绿）；PRD 设计的「缺日志注入」负控在最终构建由 `rv-4-view-degradation` 的空/缺日志不伪造断言承接（`rv-4-negative-control.log` 伪造注入变红）。
+命令：`bash scripts/with-rv-console.sh auto copy -- bash scripts/run-rv.sh rv1-real-entry.spec.mjs`（exit 0；最新绿为 runner 恢复轮后的 10:30 复跑，port 8800/pid 50527，`rv-1-run.log` 逐字）。
+断言链：runtime summary 的 `sync_status=ready`、状态计数（running 15 / waiting 1 / blocked 14 / completed 16）与 Issue 标签逐条对账（label→bucket 交叉核对 7 条非空洞样本）；选中 Issue 后走真实 `GET .../issues/{n}/logs` 的 offset 续读（端点路径含选中 Issue 身份）、新行出现；结构化调用初始折叠、展开保留原始输出。负控：`rv-1-negative-control.log` 记录两段真实红灯——开发期「默认展开」缺陷被同一 spec 捕获（07:48，修复后复跑绿），以及 runner 恢复轮复现的「外部同步瞬态导致副本库零 `agent/*` 标签」前置守卫红（10:14，`Expected: > 0 / Received: 0`，证明检查点拒绝空洞通过）；对应加固为 `scripts/rv1-seed-label-fixture.py`——仅当摘要无任何可派生标签任务时向**临时副本库**注入 #900001/#900002 两条确定性样本并重取摘要，全部断言照常走真实后端与真实页面，注入事实写入 `rv-1-endpoint-provenance.json` 的 `label_fixture_seed`（10:30 真实数据绿运行为 null，未触发兜底；兜底路径由剥标签模拟独立验证 `1 passed`）。PRD 设计的「缺日志注入」负控在最终构建由 `rv-4-view-degradation` 的空/缺日志不伪造断言承接（`rv-4-negative-control.log` 伪造注入变红）。
 
 ### 2. rv-2 — 桌面 helper 真实窗口与来源边界
 

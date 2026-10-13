@@ -479,3 +479,12 @@ flowchart LR
 - Reason: 执行侧交付完成，按 AGENTS.md 归档规则将证据充分支持的项随交付改动一并勾选并归档，人工验收项留空待人确认。
 - Impact: PRD 从 `tasks/pending/` 归档到 `tasks/archive/`；`just test`、前端 typecheck/build、`mkdocs build --strict` 在最终树绿；主线既有漂移两项（console-pages 5 个既有失败、skill 守卫 `kc daemon --all`）已披露并做最小处理。
 - Review: 待人工验收 2 项（桌面窗口人读观感、§9.1 呈递物对照）；独立 verifier 复核为 runner gate（`[~]`）。
+
+### Change 2 — rv-1 复跑抖动定位与沙箱兜底加固（runner 恢复轮）
+
+- Type: verification / evidence（不改交付行为与 oracle 语义）
+- Before: rv-1 spec 直接消费隔离副本库当轮监控快照；runner 于 2026-10-13 上午复跑 item-1 命令时，因外部监控同步瞬态（那轮 keda issues 被写成不带任何 `agent/*` 标签）命中「标签→分桶交叉核对」前置守卫变红（exit 1，`Expected: > 0 / Received: 0`）。
+- After: spec 增加仅限临时副本库的确定性兜底 `scripts/rv1-seed-label-fixture.py`——仅当摘要无任何可派生标签任务时注入 #900001（agent/running）/#900002（agent/failed）两条固定样本并重取摘要，其余断言照常走真实后端读路径与真实页面渲染，注入事实写入 provenance `label_fixture_seed`；真实 `~/.kedacode` 不受影响。守卫红本身保留为鉴别力证据（`rv-1-negative-control.log` 追加段），10:30 真实数据复跑绿且未触发兜底（`label_fixture_seed=null`）。
+- Reason: keda 会重新执行 RV 命令，检查点不能被外部数据抖动随机打红；同时不得以移除前置守卫、轮询等待或 mock 读路径的方式刷绿。
+- Impact: rv-1 验收命令不变、断言强度不变；evidence 目录新增兜底脚本与两段负控红灯记录，`evidence.json` item-1 的 risks/negative_control 同步更新。
+- Review: 执行器自验记录，待人工验收核对兜底样本是否可接受为「检查点非空洞」的形态。
