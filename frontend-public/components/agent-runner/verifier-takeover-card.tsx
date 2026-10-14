@@ -20,7 +20,7 @@ import { fetchIssueDetail } from "@/lib/api/agentRunner";
 import { takeOverVerifier } from "@/lib/api/console";
 import type { ActiveVerifier, ActiveVerifierState } from "@/lib/api/types";
 
-/** 交班回读轮询间隔：接管登记后每 1.5s 重读一次控制行投影。 */
+/** 交班回读轮询间隔：接管在途时每 1.5s 重读一次控制行投影。 */
 const POLL_INTERVAL_MS = 1_500;
 /** 超过该时长仍未确认交班，提示"仍在停止"而非静默等待。 */
 const SLOW_HINT_MS = 5_000;
@@ -37,6 +37,11 @@ const STATE_LABELS: Record<ActiveVerifierState, string> = {
   pr_merged: "PR 已被外部合并",
   expired: "受控运行已过期",
 };
+
+/** 交班尚未落定的投影状态：界面必须继续重读控制行，绝不停在这两个取值上自称结论。 */
+function isAwaitingHandover(state: ActiveVerifierState | null | undefined): boolean {
+  return state === "running" || state === "takeover_requested";
+}
 
 interface VerifierTakeoverCardProps {
   repoId: string;
@@ -103,18 +108,6 @@ export function VerifierTakeoverCard({
     void reload();
   }, [reload]);
 
-  // Dashboard 的快照轮询不会重取已打开 Issue 的详情投影；空闲态按同档节奏
-  // fresh-read，防止接管按钮长期对着一个已经结束的 verifier。
-  useEffect(() => {
-    if (requesting || verifier?.state !== "running") {
-      return;
-    }
-    const idleTimer = setInterval(() => {
-      void reload();
-    }, IDLE_REFRESH_MS);
-    return () => clearInterval(idleTimer);
-  }, [requesting, verifier?.state, reload]);
-
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current !== null) {
       clearInterval(pollTimerRef.current);
@@ -136,22 +129,61 @@ export function VerifierTakeoverCard({
     await onTakeoverSettled?.();
   }, [stopPolling, onTakeoverSettled]);
 
+  /**
+   * 重读落定后的反应：交班确认则通知父级，其余终态停止加速轮询。
+   *
+   * @param fresh - 本次重读到的控制行投影（读取失败时为 ``null``）。
+   */
+  const applyHandoverOutcome = useCallback(
+    async (fresh: ActiveVerifier | null) => {
+      if (!fresh || isAwaitingHandover(fresh.state)) {
+        return;
+      }
+      if (fresh.state === "taken_over") {
+        await settleHandover();
+        return;
+      }
+      stopPolling();
+      setRequesting(false);
+    },
+    [settleHandover, stopPolling],
+  );
+
+  // Dashboard 的快照轮询不会重取已打开 Issue 的详情投影，因此本组件自己按状态节奏
+  // fresh-read：`running` 用空闲档，防止接管按钮长期对着一个已经结束的 verifier；
+  // `takeover_requested` 用交班档——这张卡可能在控制行**已经**被别的操作员翻过之后
+  // 才挂载（页面重载、Issue 重开、第二个终端），此时若只按 running 起步就永远不会再
+  // 读第二次，界面会一直停在「已请求接管，正在停止」，永远不确认交班。
+  useEffect(() => {
+    if (requesting || !isAwaitingHandover(verifier?.state)) {
+      return;
+    }
+    const intervalMs =
+      verifier?.state === "takeover_requested" ? POLL_INTERVAL_MS : IDLE_REFRESH_MS;
+    const idleTimer = setInterval(() => {
+      void reload().then(applyHandoverOutcome);
+    }, intervalMs);
+    return () => clearInterval(idleTimer);
+  }, [requesting, verifier?.state, reload, applyHandoverOutcome]);
+
   /** 接管登记后轮询控制行投影，直到离开 running / takeover_requested。 */
   const startPolling = useCallback(() => {
     stopPolling();
     slowTimerRef.current = setTimeout(() => setSlowHint(true), SLOW_HINT_MS);
     pollTimerRef.current = setInterval(async () => {
-      const fresh = await reload();
-      if (fresh && fresh.state !== "running" && fresh.state !== "takeover_requested") {
-        if (fresh.state === "taken_over") {
-          await settleHandover();
-        } else {
-          stopPolling();
-          setRequesting(false);
-        }
-      }
+      await applyHandoverOutcome(await reload());
     }, POLL_INTERVAL_MS);
-  }, [reload, settleHandover, stopPolling]);
+  }, [applyHandoverOutcome, reload, stopPolling]);
+
+  // 本机没有发起请求、却在读一个在途请求时，"仍在停止"提示同样要计时：
+  // 慢提示的落定由 applyHandoverOutcome → stopPolling 复位，不在清理函数里写状态。
+  useEffect(() => {
+    if (requesting || verifier?.state !== "takeover_requested") {
+      return;
+    }
+    const slowTimer = setTimeout(() => setSlowHint(true), SLOW_HINT_MS);
+    return () => clearTimeout(slowTimer);
+  }, [requesting, verifier?.state]);
 
   /** 提交接管：只发送详情读到的 run_id / head_sha，绝不自行构造。 */
   async function submitTakeover() {
@@ -241,7 +273,18 @@ export function VerifierTakeoverCard({
               接管此 Issue
             </Button>
           ) : null}
-          {requesting ? (
+          {verifier.state === "takeover_failed" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={requesting}
+              data-testid="verifier-takeover-retry"
+              onClick={() => void reload()}
+            >
+              重新读取状态
+            </Button>
+          ) : null}
+          {requesting || verifier.state === "takeover_requested" ? (
             <span
               className="text-xs text-slate-500"
               data-testid="verifier-takeover-status"
@@ -266,6 +309,15 @@ export function VerifierTakeoverCard({
       {verifier.autopilot_hold && verifier.state !== "taken_over" ? (
         <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
           该 Issue 处于人工接管保持位：自动监督已冻结。
+        </p>
+      ) : null}
+      {verifier.state === "takeover_failed" ? (
+        <p
+          className="mt-1 text-xs text-red-700 dark:text-red-300"
+          data-testid="verifier-takeover-failed-hint"
+        >
+          没能确证停止这轮 verifier：它不会产出任何 verdict，保持位继续冻结自动监督。可重新读取状态，
+          等新一轮 verifier 登记后再次接管，或直接人工审查这个 Draft PR。
         </p>
       ) : null}
       {errorText ? (

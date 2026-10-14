@@ -171,6 +171,8 @@ function buildIssueDetail(activeVerifier: ActiveVerifierProjection): unknown {
 type TakeoverHarness = {
   posts: Array<Record<string, unknown>>
   pollCount: number
+  /** 详情读取总次数（含挂载首读）：没有 POST 时，它是"界面有没有在重读"的唯一观测点。 */
+  readCount: number
 }
 
 /**
@@ -179,27 +181,59 @@ type TakeoverHarness = {
  * @param page - Playwright 页面对象。
  * @param monitor - 复用的监控 Dashboard 页面对象。
  * @param outcome - 接管动作返回语义：requested（202 处理中）、handed_over（200
- *   立即交班）、conflict（409 HEAD 变化）。
+ *   立即交班）、conflict（409 HEAD 变化）、mounted-requested（本机从未发过请求，
+ *   挂载时控制行**已经**是 takeover_requested）、failed（takeover_failed 终态）。
  */
 async function stubTakeoverFlow(
   page: Page,
   monitor: AgentRunnerMonitorPage,
-  outcome: 'requested' | 'handed_over' | 'conflict',
+  outcome: 'requested' | 'handed_over' | 'conflict' | 'mounted-requested' | 'failed',
 ): Promise<TakeoverHarness> {
   await monitor.mockSnapshots(SNAPSHOT_WITH_ISSUE)
-  const harness: TakeoverHarness = { posts: [], pollCount: 0 }
+  const harness: TakeoverHarness = { posts: [], pollCount: 0, readCount: 0 }
 
   // 接管登记后，控制行随 runner 确认而前进；详情读到的状态必须离开
   // running / takeover_requested，交班才落定为 taken_over。
   // 状态推进只计 POST 之后的读取：打开 Issue 时 Dashboard 与卡片挂载各会先读
   // 一次详情，若按原始读取计数，按钮在用户点击前就会被轮询状态吃掉。
   await page.route(ISSUE_DETAIL_ENDPOINT, async (route) => {
+    harness.readCount += 1
     const prePost = harness.posts.length === 0
     if (!prePost) {
       harness.pollCount += 1
     }
     let verifier: ActiveVerifierProjection
-    if (outcome === 'conflict') {
+    if (outcome === 'mounted-requested') {
+      // 第二个操作员 / 页面重载：首读就是 takeover_requested，本机从未 POST。
+      // 前三次读取留在在途状态，之后 runner 确认交班。
+      const settled = harness.readCount >= 4
+      verifier = settled
+        ? {
+            run_id: RUN_ID,
+            head_sha: HEAD_SHA,
+            state: 'taken_over',
+            can_take_over: false,
+            pr_number: 101,
+            autopilot_hold: true,
+          }
+        : {
+            run_id: RUN_ID,
+            head_sha: HEAD_SHA,
+            state: 'takeover_requested',
+            can_take_over: false,
+            pr_number: 101,
+            autopilot_hold: true,
+          }
+    } else if (outcome === 'failed') {
+      verifier = {
+        run_id: RUN_ID,
+        head_sha: HEAD_SHA,
+        state: 'takeover_failed',
+        can_take_over: false,
+        pr_number: 101,
+        autopilot_hold: true,
+      }
+    } else if (outcome === 'conflict') {
       // HEAD 漂移：后端 409，控制行始终停在 running，绝不误呈交班。
       verifier = {
         run_id: RUN_ID,
@@ -387,7 +421,70 @@ test.describe('workflows: verifier human takeover', () => {
 
     const card = page.getByTestId('verifier-takeover-card')
     await expect(card).toBeVisible()
+    // 详情面板跟在 Issue 列表下方，窄视口里"滚到卡片"就是操作员实际做的事；
+    // 这里考的是卡片本身在 390 宽下不溢出、动作仍可用，不是它离页面顶部几像素。
+    await card.scrollIntoViewIfNeeded()
     await expect(card).toBeInViewport()
+    const cardBox = await card.boundingBox()
+    expect(cardBox).not.toBeNull()
+    expect(cardBox!.x).toBeGreaterThanOrEqual(0)
+    expect(cardBox!.x + cardBox!.width).toBeLessThanOrEqual(391)
     await expect(page.getByTestId('verifier-takeover-request')).toBeVisible()
+  })
+
+  test('mounted while takeover_requested: keeps re-reading the control row and confirms handover', async ({
+    page,
+  }) => {
+    // 这张卡可能在控制行**已经**被别的操作员翻过之后才挂载（页面重载、Issue 重开、
+    // 第二个终端）。此时本机从未 POST，界面若只在 running 时重读就永远停在
+    // 「已请求接管，正在停止」，既不确认 taken_over，也不再给任何出口。
+    const monitor = new AgentRunnerMonitorPage(page)
+    const harness = await stubTakeoverFlow(page, monitor, 'mounted-requested')
+
+    await monitor.goto()
+    await monitor.expectHeading()
+    await monitor.openIssue(100)
+
+    await expect(page.getByTestId('verifier-takeover-card')).toBeVisible()
+    // 未发起本机请求：接管按钮不该出现，载荷计数必须为 0。
+    expect(harness.posts).toHaveLength(0)
+    await expect(page.getByTestId('verifier-takeover-request')).toHaveCount(0)
+    await expect(page.getByTestId('verifier-takeover-status')).toBeVisible()
+
+    // 交班落定必须由界面持续重读投影得到——不是操作员再点一次。
+    await expect(page.getByText('已交给你审查 · verifier 未完成', { exact: false })).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId('verifier-takeover-open-pr')).toBeVisible()
+    const readsAfterSettle = harness.readCount
+    expect(readsAfterSettle).toBeGreaterThanOrEqual(4)
+    expect(harness.posts).toHaveLength(0)
+  })
+
+  test('takeover_failed stays a retriable terminal state and never claims handover', async ({
+    page,
+  }) => {
+    const monitor = new AgentRunnerMonitorPage(page)
+    const harness = await stubTakeoverFlow(page, monitor, 'failed')
+
+    await monitor.goto()
+    await monitor.expectHeading()
+    await monitor.openIssue(100)
+
+    await expect(page.getByTestId('verifier-takeover-card')).toBeVisible()
+    await expect(
+      page.getByText('接管未能停止进程', { exact: false }),
+    ).toBeVisible()
+    await expect(page.getByTestId('verifier-takeover-failed-hint')).toBeVisible()
+    // 终态但可重试：给出重新读取的出口，绝不伪装成交班完成。
+    await expect(page.getByTestId('verifier-takeover-retry')).toBeVisible()
+    await expect(page.getByTestId('verifier-takeover-open-pr')).toHaveCount(0)
+    await expect(
+      page.getByText('已交给你审查 · verifier 未完成', { exact: false }),
+    ).toHaveCount(0)
+
+    const readsBefore = harness.readCount
+    await page.getByTestId('verifier-takeover-retry').click()
+    await expect.poll(() => harness.readCount).toBeGreaterThan(readsBefore)
   })
 })

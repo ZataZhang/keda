@@ -28,6 +28,10 @@ _TAKEOVER_HANDED_OVER = "handed_over"
 _TAKEOVER_BINDING_MISMATCH = "binding_mismatch"
 _TAKEOVER_COMPLETED_CONFLICT = "completed_conflict"
 _TAKEOVER_NOT_FOUND = "not_found"
+_TAKEOVER_STATE_CHANGE_CONFLICT = "state_change_conflict"
+
+#: CAS 尝试次数：首次未命中且回读仍是 ``running`` 时再试一次，仍不中即按未受理处理。
+_TAKEOVER_CAS_ATTEMPTS = 2
 
 CREATE_ISSUE_RUN_CONTROL = """
 CREATE TABLE IF NOT EXISTS issue_run_control (
@@ -46,6 +50,12 @@ CREATE TABLE IF NOT EXISTS issue_run_control (
     PRIMARY KEY (repo_id, issue_number)
 )
 """
+
+_SELECT_ISSUE_RUN_CONTROL = (
+    "SELECT repo_id, issue_number, pr_number, run_id, head_sha, phase, state, "
+    "autopilot_hold, request_id, requested_at, started_at, completed_at "
+    "FROM issue_run_control WHERE repo_id = ? AND issue_number = ?"
+)
 
 
 @dataclass(frozen=True)
@@ -113,9 +123,7 @@ class IssueRunControlMixin:
         """读取该 Issue 的控制行；从未登记时返回 ``None``。"""
         with self._connect() as connection:
             control_row = connection.execute(
-                "SELECT repo_id, issue_number, pr_number, run_id, head_sha, phase, state, "
-                "autopilot_hold, request_id, requested_at, started_at, completed_at "
-                "FROM issue_run_control WHERE repo_id = ? AND issue_number = ?",
+                _SELECT_ISSUE_RUN_CONTROL,
                 (repo_id, issue_number),
             ).fetchone()
         if control_row is None:
@@ -135,51 +143,27 @@ class IssueRunControlMixin:
         """CAS：仅 ``running`` 且 run_id/head_sha 匹配时翻到 takeover 并立即落闸。
 
         CAS 未命中时**不写任何状态**，只回读当前行并按绑定/状态分类结果。
+        绑定一致却仍读到 ``running``（CAS 与回读之间被并发覆盖的极端竞态）时**重试一次**
+        CAS，并继续要求回读离开 ``running``：``accepted`` / ``pending`` 必须意味着取消意图
+        与 ``autopilot_hold`` 已经持久，否则返回 ``state_change_conflict``（409），绝不把
+        一个没落盘的请求报成受理。
         """
         with self._connect() as connection:
-            cursor = connection.execute(
-                "UPDATE issue_run_control "
-                "SET state = ?, request_id = ?, requested_at = ?, autopilot_hold = 1 "
-                "WHERE repo_id = ? AND issue_number = ? AND run_id = ? AND head_sha = ? "
-                "AND state = ?",
-                (
-                    _STATE_TAKEOVER_REQUESTED,
-                    request_id,
-                    requested_at,
-                    repo_id,
-                    issue_number,
-                    run_id,
-                    head_sha,
-                    _STATE_RUNNING,
-                ),
-            )
-            connection.commit()
-            if cursor.rowcount == 1:
-                return TakeoverRequestResult(
-                    status=_TAKEOVER_ACCEPTED, observed_state=_STATE_TAKEOVER_REQUESTED
+            for _ in range(_TAKEOVER_CAS_ATTEMPTS):
+                outcome = _takeover_cas_once(
+                    connection,
+                    repo_id=repo_id,
+                    issue_number=issue_number,
+                    run_id=run_id,
+                    head_sha=head_sha,
+                    request_id=request_id,
+                    requested_at=requested_at,
                 )
-            control_row = connection.execute(
-                "SELECT repo_id, issue_number, pr_number, run_id, head_sha, phase, state, "
-                "autopilot_hold, request_id, requested_at, started_at, completed_at "
-                "FROM issue_run_control WHERE repo_id = ? AND issue_number = ?",
-                (repo_id, issue_number),
-            ).fetchone()
-        if control_row is None:
-            return TakeoverRequestResult(status=_TAKEOVER_NOT_FOUND)
-        current = _row_to_issue_run_control(control_row)
-        if current.run_id != run_id or current.head_sha != head_sha:
-            return TakeoverRequestResult(
-                status=_TAKEOVER_BINDING_MISMATCH, observed_state=current.state
-            )
-        if current.state == _STATE_TAKEOVER_REQUESTED:
-            return TakeoverRequestResult(status=_TAKEOVER_PENDING, observed_state=current.state)
-        if current.state == _STATE_TAKEN_OVER:
-            return TakeoverRequestResult(status=_TAKEOVER_HANDED_OVER, observed_state=current.state)
-        # 绑定一致却仍是 running：CAS 与回读之间恰好被并发覆盖的极端竞态，幂等按在途处理。
-        if current.state == _STATE_RUNNING:
-            return TakeoverRequestResult(status=_TAKEOVER_PENDING, observed_state=current.state)
+                if outcome is not None:
+                    return outcome
+        # 两次都是"未命中 + 仍读到 running"：取消意图没有写进去。
         return TakeoverRequestResult(
-            status=_TAKEOVER_COMPLETED_CONFLICT, observed_state=current.state
+            status=_TAKEOVER_STATE_CHANGE_CONFLICT, observed_state=_STATE_RUNNING
         )
 
     def transition_issue_run(
@@ -275,6 +259,59 @@ class IssueRunControlMixin:
             )
             connection.commit()
             return cursor.rowcount == 1
+
+
+def _takeover_cas_once(
+    connection: sqlite3.Connection,
+    *,
+    repo_id: str,
+    issue_number: int,
+    run_id: str,
+    head_sha: str,
+    request_id: str,
+    requested_at: str,
+) -> TakeoverRequestResult | None:
+    """跑**一条**接管 CAS 并分类回读结果；``None`` 只表示"未命中且仍读到 running"。
+
+    ``None`` 是给调用方的重试信号：那一刻既没写上取消意图，也没有别家胜出，而一次重试
+    的代价远低于把一个没有持久的请求回成 ``202``（受理）。其余分支都是可返回的终局分类。
+    """
+    cursor = connection.execute(
+        "UPDATE issue_run_control "
+        "SET state = ?, request_id = ?, requested_at = ?, autopilot_hold = 1 "
+        "WHERE repo_id = ? AND issue_number = ? AND run_id = ? AND head_sha = ? "
+        "AND state = ?",
+        (
+            _STATE_TAKEOVER_REQUESTED,
+            request_id,
+            requested_at,
+            repo_id,
+            issue_number,
+            run_id,
+            head_sha,
+            _STATE_RUNNING,
+        ),
+    )
+    connection.commit()
+    if cursor.rowcount == 1:
+        return TakeoverRequestResult(
+            status=_TAKEOVER_ACCEPTED, observed_state=_STATE_TAKEOVER_REQUESTED
+        )
+    control_row = connection.execute(_SELECT_ISSUE_RUN_CONTROL, (repo_id, issue_number)).fetchone()
+    if control_row is None:
+        return TakeoverRequestResult(status=_TAKEOVER_NOT_FOUND)
+    current = _row_to_issue_run_control(control_row)
+    if current.run_id != run_id or current.head_sha != head_sha:
+        return TakeoverRequestResult(
+            status=_TAKEOVER_BINDING_MISMATCH, observed_state=current.state
+        )
+    if current.state == _STATE_TAKEOVER_REQUESTED:
+        return TakeoverRequestResult(status=_TAKEOVER_PENDING, observed_state=current.state)
+    if current.state == _STATE_TAKEN_OVER:
+        return TakeoverRequestResult(status=_TAKEOVER_HANDED_OVER, observed_state=current.state)
+    if current.state == _STATE_RUNNING:
+        return None
+    return TakeoverRequestResult(status=_TAKEOVER_COMPLETED_CONFLICT, observed_state=current.state)
 
 
 def _row_to_issue_run_control(control_row: sqlite3.Row) -> IssueRunControlEntry:

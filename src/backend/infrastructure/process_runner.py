@@ -186,6 +186,32 @@ def _terminate_process_tree(
         return False
 
 
+def _process_termination_identity(
+    process: subprocess.Popen[Any],
+) -> tuple[int | None, float | None]:
+    """创建子进程后立刻读一次**终止身份**（进程组 + 创建时刻）。
+
+    只在这一刻读：子进程退出并被回收后，``os.getpgid(process.pid)`` 读到的是**复用该
+    pid 的别人**，据此发 SIGKILL 就会杀掉无关进程组。任何一次终止调用都必须复用这里
+    的结果，而不是再取一次组号。
+
+    任一项读不到时返回 ``(None, None)``：调用方退回不带身份校验的既有路径——宁可沿用
+    旧的"按当前组号击杀"，也不能因为读不到身份就放弃拆除（管道写端会一直有人持有，
+    ``communicate()`` 于是永远等不到 EOF）。
+    """
+    if not hasattr(os, "getpgid"):  # pragma: no cover - Windows 没有 getpgid。
+        return None, None
+    try:
+        process_group = os.getpgid(process.pid)
+        process_started_at = process_start_time(process.pid)
+    except (OSError, TypeError, ValueError):
+        # 子进程已退出，或句柄根本不是真实 pid（测试替身）。
+        return None, None
+    if process_group is None or process_started_at is None:
+        return None, None
+    return process_group, process_started_at
+
+
 @dataclass(frozen=True)
 class CommandResult:
     """Captured subprocess result.
@@ -647,7 +673,10 @@ def _run_captured_process(
     except BaseException as exc:
         _observe_exception_output(exc, usage_collector)
         _attach_stream_observations(exc, usage_collector)
-        _terminate_process_tree(process)
+        # 二次拆除必须用创建时刻读到的身份：走到这里时 communicate() 已经把子进程
+        # 回收了（接管取消正是先杀后回收才抛的 InterruptedError），再按 pid 取一次
+        # 进程组，读到的可能是复用该 pid 的别的进程。
+        watchdog.terminate()
         process.wait()
         raise
     finally:
@@ -714,6 +743,10 @@ class _ProcessWatchdog:
     ) -> None:
         self._process = process
         self._command = tuple(command)
+        # 终止身份在创建时刻只读一次：接管与取消之后的二次终止都复用这两个值。
+        self._expected_process_group, self._expected_process_started_at = (
+            _process_termination_identity(process)
+        )
         self._timeout = timeout
         self._inactivity_timeout = inactivity_timeout_seconds
         self._effective_timeout: int | None = timeout
@@ -762,6 +795,19 @@ class _ProcessWatchdog:
         """Reset the inactivity timeout clock after observing output."""
         with self._output_lock:
             self._last_output_at = time.monotonic()
+
+    def terminate(self) -> bool:
+        """按**创建时刻读到的身份**终止该子进程组（Issue #278 接管与取消后的二次拆除）。
+
+        与不带身份的 :func:`_terminate_process_tree` 的差别只有一处：进程已经退出并被
+        回收时拒发信号。那一刻 ``process.pid`` 可能已经属于别的进程，再取一次
+        ``os.getpgid`` 就会把信号发给无关进程组。
+        """
+        return _terminate_process_tree(
+            self._process,
+            expected_process_group=self._expected_process_group,
+            expected_process_started_at=self._expected_process_started_at,
+        )
 
     def raise_if_timed_out(
         self,
@@ -871,7 +917,7 @@ class _ProcessWatchdog:
             self._format_label(),
             _summarize_command(self._command),
         )
-        _terminate_process_tree(self._process)
+        self.terminate()
         return True
 
     def _run(self) -> None:

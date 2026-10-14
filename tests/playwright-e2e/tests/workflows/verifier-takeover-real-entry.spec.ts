@@ -94,15 +94,20 @@ test('真实 Dashboard 接管运行中的 verifier 并回读交班状态', async
   await expect.poll(() => detailStates.includes('taken_over')).toBe(true)
   await expect(page.getByTestId('verifier-takeover-status')).toHaveCount(0)
 
+  // 交班后 Issue 应离开 running、落到 review 态。界面 chip 显示的是去掉 `agent/` 前缀后的
+  // 可读名，而那个标签的规范名在仓库里改过一次（`agent/review` → `agent/automated-review-passed`，
+  // 仍由 `config.labels.review` 承载），所以这里按两个可接受名字匹配，不把标签拼写钉死在 spec 里：
+  // 标签改名时这条断言应当继续考"离开 running 且落到 review 态"，而不是红在拼写上。
+  const REVIEW_STATE_CHIP = /^(?:review|automated-review-passed)$/
   const issueRow = page
     .getByRole('listitem')
     .filter({ hasText: 'Verifier takeover live acceptance' })
-  await expect(issueRow.getByText('review', { exact: true })).toBeVisible({
+  await expect(issueRow.getByText(REVIEW_STATE_CHIP)).toBeVisible({
     timeout: 30_000,
   })
   await expect(issueRow.getByText('running', { exact: true })).toHaveCount(0)
   const labelEditor = page.getByTestId('issue-label-editor')
-  await expect(labelEditor.getByText('review', { exact: true })).toBeVisible({
+  await expect(labelEditor.getByText(REVIEW_STATE_CHIP)).toBeVisible({
     timeout: 30_000,
   })
   await expect(labelEditor.getByText('running', { exact: true })).toHaveCount(0)

@@ -65,6 +65,8 @@ TAKEOVER_COMPLETED_CONFLICT = "completed_conflict"
 """verifier 在请求落地前已完成/复核已过期/PR 已合并——没有可停的进程（409）。"""
 TAKEOVER_NOT_FOUND = "not_found"
 """该 (repo_id, issue_number) 没有控制行：当前没有受控 verifier 在跑（409）。"""
+TAKEOVER_STATE_CHANGE_CONFLICT = "state_change_conflict"
+"""CAS 反复未命中且控制行仍读到 ``running``：取消意图没有持久，绝不按受理返回（409）。"""
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,11 @@ class IIssueRunControl(ABC):
 
         不满足匹配时**绝不写任何状态**，只回读并分类。已在
         ``takeover_requested`` 的重复请求幂等返回 ``pending``。
+
+        ``accepted`` 与 ``pending`` 都对调用方承诺"取消意图 + 保持位已经持久"，
+        因此实现必须保证：绑定一致却仍读到 ``running``（CAS 未命中与回读之间的并发
+        窗口）时重试 CAS 并要求回读离开 ``running``，否则返回
+        ``state_change_conflict``，不得把没有落盘的请求报成受理。
         """
         ...
 

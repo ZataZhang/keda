@@ -753,10 +753,10 @@ runner 在 commit proxy 固定实现提交后复跑 RV，并确认 PRD 执行侧
 
 接管的语义边界（这些是刻意设计，不是缺陷）：
 
-- **精确绑定运行身份**。接管请求只携带页面从 Issue 详情读到的 `run_id` 与 PR `head_sha`，后端以共享的本地 SQLite 控制面（`issue_run_control` 表）做 CAS：仅当控制行仍是本次 `run` 且 HEAD 未漂移时，原子登记取消意图并立即落下 `autopilot_hold`。HEAD 已变、运行已结束或找不到受控运行时一律回 `409`，界面据此提示「HEAD 已变化 / 运行已结束 / 状态已变化」，绝不伪装成交班成功。
-- **停的是进程树，不是队列**。登记后 runner 侧的进程 watchdog 按秒级探针回读控制行，命中即只 `SIGKILL` 该 verifier 子进程组并回收；父 runner 与被监督的进程都存活。
-- **取消≠通过**。被接管的 verifier **不产出任何 verdict**（没有 PASS/RED/YELLOW，也绝不写 `validation/verifier-passed`），并落一条 `agent/review`；`autopilot_hold` 在接管 CAS 受理时已生效，不等进程树退出。这个保持位让 post-PR supervisor、`review_once` 与 autopilot 合并队列**fail closed**——即便仓库关了 `require_verifier_pass`，也不会把这轮当成验证通过去自动合并。PR 保持 Draft 交人工处理。
-- **交班以回读为准**。请求返回 `202`（处理中）只代表取消意图已登记，界面继续轮询控制行投影，直到状态离开 `running`/`takeover_requested` 落定为「已交给你审查」才确认交班完成；随后重扫所属仓库并重读详情标签，使 Dashboard 列表和标签面板都更新为人工 review 状态。超过阈值仍未确认时提示「仍在停止」，界面绝不自称「已停止」。
+- **精确绑定运行身份**。接管请求只携带页面从 Issue 详情读到的 `run_id` 与 PR `head_sha`，后端以共享的本地 SQLite 控制面（`issue_run_control` 表）做 CAS：仅当控制行仍是本次 `run` 且 HEAD 未漂移时，原子登记取消意图并立即落下 `autopilot_hold`。HEAD 已变、运行已结束或找不到受控运行时一律回 `409`，界面据此提示「HEAD 已变化 / 运行已结束 / 状态已变化」，绝不伪装成交班成功。`202` 还多一条持久性前提：CAS 未命中却仍读到同一 `run`/HEAD 的 `running` 行（CAS 与回读之间的并发窗口）时，存储层**重试一次**并要求回读离开 `running`；两次都空手就回 `409` 的 `state_change_conflict`——一个没写进库的取消意图不得被记成受理，也不得在 Console 审计里出现 `accepted`。
+- **停的是进程树，不是队列**。登记后 runner 侧的进程 watchdog 按秒级探针回读控制行，命中即只 `SIGKILL` 该 verifier 子进程组并回收；父 runner 与被监督的进程都存活。终止身份（进程组 + 创建时刻）在 `Popen` 之后只读一次，取消落地后的二次拆除复用它——子进程被回收后 `pid` 可能已被复用，再按 `pid` 取一次进程组就会把信号发给无关进程。
+- **取消≠通过**。被接管的 verifier **不产出任何 verdict**（没有 PASS/RED/YELLOW，也绝不写 `validation/verifier-passed`），并落到 review 态标签（由 `config.labels.review` 承载，当前规范名是 `agent/automated-review-passed`；旧文档与旧 capture 里写作 `agent/review` 的是同一个状态位）；`autopilot_hold` 在接管 CAS 受理时已生效，不等进程树退出。这个保持位让 post-PR supervisor、`review_once` 与 autopilot 合并队列**fail closed**——即便仓库关了 `require_verifier_pass`，也不会把这轮当成验证通过去自动合并。PR 保持 Draft 交人工处理。
+- **交班以回读为准**。请求返回 `202`（处理中）只代表取消意图已登记，界面继续轮询控制行投影，直到状态离开 `running`/`takeover_requested` 落定为「已交给你审查」才确认交班完成；随后重扫所属仓库并重读详情标签，使 Dashboard 列表和标签面板都更新为人工 review 状态。超过阈值仍未确认时提示「仍在停止」，界面绝不自称「已停止」。这条轮询**不**以"请求由本机发出"为前提：接管卡可能在控制行已经是 `takeover_requested` 时才挂载（页面重载、Issue 重开、第二个操作员），此时同样按交班节奏继续重读。`takeover_failed` 是终态但不是死路——界面按可重试呈递（说明本轮不会产出 verdict、保持位仍在），并给出重新读取的入口，新一轮 verifier 登记后即可再次接管。
 
 竞态同样按 fail-closed 收敛：若 verifier 恰好在接管登记的同一刻自然完成，二者只有一个赢家胜出（完成→接管拿到 `completed_conflict`，接管→完成落 `taken_over`）；接管之后 HEAD 又漂移，则该运行标为 `verifier_stale`、旧的 verdict 作废；外部把 PR 合并则控制行转 `pr_merged`。`autopilot_hold` 只会在**同一 run、同一 HEAD 的全新 verifier GREEN 发布前后都通过 GitHub fresh-read 核验后**清除；存储不可读或最终合并前发现 hold 时，自动处理继续 fail closed。
 

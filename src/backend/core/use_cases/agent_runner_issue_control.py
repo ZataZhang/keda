@@ -52,6 +52,7 @@ from backend.core.shared.interfaces.issue_run_control import (
     TAKEOVER_HANDED_OVER,
     TAKEOVER_NOT_FOUND,
     TAKEOVER_PENDING,
+    TAKEOVER_STATE_CHANGE_CONFLICT,
     IssueRunControlRecord,
 )
 
@@ -68,6 +69,7 @@ TAKEOVER_HTTP_STATUS: dict[str, int] = {
     TAKEOVER_BINDING_MISMATCH: 409,
     TAKEOVER_COMPLETED_CONFLICT: 409,
     TAKEOVER_NOT_FOUND: 409,
+    TAKEOVER_STATE_CHANGE_CONFLICT: 409,
 }
 
 _logger = logging.getLogger(__name__)

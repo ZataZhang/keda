@@ -1344,7 +1344,7 @@ def test_captured_timeout_reclaims_surviving_pipeline_member(tmp_path: Path) -> 
 
 
 def test_captured_keyboard_interrupt_tears_down_process_group(tmp_path: Path) -> None:
-    """Ctrl-C 也必须整组回收。
+    """Ctrl-C 也必须整组回收，且拆除带着创建时刻读到的身份。
 
     子进程改用独立进程组后，终端产生的 SIGINT 不会再自动送达子进程，
     所以拆除逻辑必须捕获 BaseException 而不只是 Exception。
@@ -1356,11 +1356,99 @@ def test_captured_keyboard_interrupt_tears_down_process_group(tmp_path: Path) ->
         patch.object(process_runner, "_terminate_process_tree") as terminate_mock,
     ):
         fake_process = popen_mock.return_value
+        # 真实 pid 才读得出真实进程组：替身的 pid 会让身份判定退回无校验路径。
+        fake_process.pid = os.getpid()
         fake_process.communicate.side_effect = KeyboardInterrupt
         with pytest.raises(KeyboardInterrupt):
             process_runner._run_captured_process(["sleep", "30"], cwd=tmp_path, timeout=5)
 
-    terminate_mock.assert_called_once_with(fake_process)
+    terminate_mock.assert_called_once()
+    assert terminate_mock.call_args.args == (fake_process,)
+    assert terminate_mock.call_args.kwargs["expected_process_group"] == os.getpgid(os.getpid())
+    assert terminate_mock.call_args.kwargs["expected_process_started_at"] is not None
+
+
+def test_takeover_termination_reuses_identity_captured_at_popen() -> None:
+    """接管取消的两轮拆除都只认创建时刻的进程组，绝不再按 pid 取一次组。
+
+    ``raise_if_cancelled`` 抛进 except 分支时 ``communicate()`` 已经把子进程回收，
+    ``pid`` 随即释放；此时再 ``os.getpgid(process.pid)`` 读到的是**复用该 pid 的别的进程**，
+    据此发 SIGKILL 就会打到无关进程组上（Issue #278 评审 finding）。
+    """
+    from backend.infrastructure import process_runner
+
+    mock_process = MagicMock()
+    mock_process.pid = 4242
+    mock_process.poll.return_value = None
+
+    with (
+        patch.object(process_runner.os, "getpgid", return_value=4242) as getpgid_mock,
+        patch.object(process_runner, "process_start_time", return_value=1234.5),
+        patch.object(process_runner, "_terminate_process_tree") as terminate_mock,
+    ):
+        watchdog = process_runner._ProcessWatchdog(
+            mock_process,
+            ["verifier", "cli"],
+            timeout=30,
+            heartbeat_seconds=1,
+            base_label="Command",
+            cancel_check=lambda: True,
+        )
+        # 身份只在创建时读一次，不是每次拆除都读。
+        assert getpgid_mock.call_count == 1
+        assert watchdog._check_takeover_cancel() is True  # 第一轮：watchdog 命中取消
+        assert watchdog.terminate() is not None  # 第二轮：except 分支的收尾拆除
+
+    assert getpgid_mock.call_count == 1
+    assert terminate_mock.call_count == 2
+    for termination_call in terminate_mock.call_args_list:
+        assert termination_call.args == (mock_process,)
+        assert termination_call.kwargs == {
+            "expected_process_group": 4242,
+            "expected_process_started_at": 1234.5,
+        }
+
+
+def test_claude_stream_takeover_termination_carries_captured_identity(
+    tmp_path: Path,
+) -> None:
+    """claude-stream 的取消收尾拆除同样不得回到"按 pid 现取进程组"的老形状。"""
+    from backend.infrastructure import process_runner
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    class _InterruptingStdout:
+        """流式读取一开头就被外部取消打断的 stdout 替身。"""
+
+        def __iter__(self):
+            raise KeyboardInterrupt
+
+    mock_process = MagicMock()
+    mock_process.pid = 4242
+    mock_process.stdout = _InterruptingStdout()
+    mock_process.stdin = MagicMock()
+    mock_process.poll.return_value = None
+
+    with (
+        patch.object(process_runner.subprocess, "Popen", return_value=mock_process),
+        patch.object(process_runner.os, "getpgid", return_value=4242) as getpgid_mock,
+        patch.object(process_runner, "process_start_time", return_value=1234.5),
+        patch.object(process_runner, "_terminate_process_tree") as terminate_mock,
+    ):
+        with pytest.raises(KeyboardInterrupt):
+            run_filtered_claude_stream(
+                ["claude", "--output-format", "stream-json"],
+                cwd=tmp_path,
+                timeout=30,
+            )
+        # 抛错前 watchdog 已经构造完，getpgid 只在创建时刻被调用过一次。
+        assert getpgid_mock.call_count == 1
+
+    assert getpgid_mock.call_count == 1
+    terminate_mock.assert_called_once_with(
+        mock_process,
+        expected_process_group=4242,
+        expected_process_started_at=1234.5,
+    )
 
 
 def test_command_result_records_duration(tmp_path: Path) -> None:

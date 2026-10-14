@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ from backend.core.shared.interfaces.issue_run_control import (
     TAKEOVER_COMPLETED_CONFLICT,
     TAKEOVER_NOT_FOUND,
     TAKEOVER_PENDING,
+    TAKEOVER_STATE_CHANGE_CONFLICT,
     IssueRunControlRecord,
 )
 from backend.core.shared.models.agent_runner import (
@@ -297,6 +299,122 @@ def test_concurrent_takeover_and_completion_yield_single_terminal_state(tmp_path
     # 恰有一方把 running 翻走：要么进入接管态，要么进入完成态，不能两者兼得。
     assert accepted != completed
     assert final_state in (STATE_TAKEOVER_REQUESTED, STATE_VERIFIER_COMPLETED)
+
+
+class _ZeroRowCursor:
+    """只回答 ``rowcount == 0`` 的游标替身：语句"执行了却没改写任何行"。"""
+
+    rowcount = 0
+
+
+class _TakeoverCasConnection:
+    """透传全部语句，只把接管 CAS 的前若干次 UPDATE 变成"匹配 0 行且不落盘"。"""
+
+    def __init__(self, connection: sqlite3.Connection, store: "_ScriptedTakeoverCasStore") -> None:
+        self._connection = connection
+        self._store = store
+
+    def execute(self, statement: str, parameters: tuple[object, ...] = ()) -> object:
+        is_takeover_cas = "UPDATE issue_run_control" in statement and "request_id = ?" in statement
+        if is_takeover_cas:
+            self._store.cas_attempts += 1
+            if self._store.misses_left > 0:
+                self._store.misses_left -= 1
+                return _ZeroRowCursor()
+        return self._connection.execute(statement, parameters)
+
+    def commit(self) -> None:
+        self._connection.commit()
+
+    def __enter__(self) -> "_TakeoverCasConnection":
+        return self
+
+    def __exit__(self, *exc_info: object) -> object:
+        return self._connection.__exit__(*exc_info)  # type: ignore[arg-type]
+
+
+class _ScriptedTakeoverCasStore(SqliteConsoleStore):
+    """让接管 CAS 的前 ``missed_cas_attempts`` 次 UPDATE 空手的 SQLite 存储。
+
+    "绑定一致却仍读到 running"在真实库里只有 CAS 与回读之间的并发窗口能造出来，
+    回归测试没法可靠地撞时间窗；本存储只固定**这一个事实**（UPDATE 没写成、行也没被
+    别家改写），重试与分类仍走生产代码。
+    """
+
+    def __init__(self, db_path: Path, *, missed_cas_attempts: int) -> None:
+        self.cas_attempts = 0
+        self.misses_left = missed_cas_attempts
+        super().__init__(db_path)
+
+    def _connect(self) -> sqlite3.Connection:  # type: ignore[override]
+        return _TakeoverCasConnection(super()._connect(), self)  # type: ignore[return-value]
+
+
+def test_takeover_cas_miss_with_running_row_never_reports_accepted(tmp_path: Path) -> None:
+    """CAS 反复空手却仍读到 running 时必须拒绝受理：202 承诺的是已持久的取消意图。
+
+    这一条是接管特性里唯一的 fail-open 分支——按旧的"幂等按在途处理"返回 pending 时，
+    路由回 202、Console 把动作审计成 accepted，而库里既没有 request_id 也没落闸，
+    runner 永远看不到取消，verifier 照样能发 PASS 并把合并队列放行。
+    """
+    store = _ScriptedTakeoverCasStore(tmp_path / "console.db", missed_cas_attempts=99)
+    _register(store)
+
+    outcome = store.request_issue_takeover(
+        repo_id="repo-a",
+        issue_number=42,
+        run_id="run-1",
+        head_sha="abc123",
+        request_id="req-1",
+        requested_at="2026-10-12T00:00:01+00:00",
+    )
+
+    assert outcome.status == TAKEOVER_STATE_CHANGE_CONFLICT
+    assert outcome.observed_state == STATE_RUNNING
+    # 未命中不是放弃的理由：必须真的再试一次。
+    assert store.cas_attempts == 2
+    untouched = store.get_issue_run(repo_id="repo-a", issue_number=42)
+    assert untouched.state == STATE_RUNNING
+    assert untouched.request_id is None
+    assert untouched.autopilot_hold is False
+
+
+def test_takeover_cas_retry_lands_the_request_after_a_first_miss(tmp_path: Path) -> None:
+    """首次 CAS 空手、重试命中时必须按受理返回，且取消意图与闸门确实落盘。"""
+    store = _ScriptedTakeoverCasStore(tmp_path / "console.db", missed_cas_attempts=1)
+    _register(store)
+
+    outcome = store.request_issue_takeover(
+        repo_id="repo-a",
+        issue_number=42,
+        run_id="run-1",
+        head_sha="abc123",
+        request_id="req-1",
+        requested_at="2026-10-12T00:00:01+00:00",
+    )
+
+    assert outcome.status == TAKEOVER_ACCEPTED
+    assert store.cas_attempts == 2
+    landed = store.get_issue_run(repo_id="repo-a", issue_number=42)
+    assert landed.state == STATE_TAKEOVER_REQUESTED
+    assert landed.request_id == "req-1"
+    assert landed.autopilot_hold is True
+
+
+def test_use_case_request_takeover_maps_state_change_conflict_to_409(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """未落盘的接管请求对外就是"状态已变化"，绝不借 202 蒙过界面与审计。"""
+    store = _ScriptedTakeoverCasStore(tmp_path / "console.db", missed_cas_attempts=99)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+
+    result = issue_control.request_verifier_takeover(
+        repo_id="repo-a", issue_number=42, run_id="run-1", head_sha="abc123"
+    )
+
+    assert result.outcome == TAKEOVER_STATE_CHANGE_CONFLICT
+    assert result.http_status == 409
 
 
 def _patch_control_store(monkeypatch: pytest.MonkeyPatch, store: SqliteConsoleStore) -> None:
@@ -883,6 +1001,7 @@ def test_takeover_sqlite_mirror_constants_match_core_port() -> None:
         "_TAKEOVER_BINDING_MISMATCH": core_port.TAKEOVER_BINDING_MISMATCH,
         "_TAKEOVER_COMPLETED_CONFLICT": core_port.TAKEOVER_COMPLETED_CONFLICT,
         "_TAKEOVER_NOT_FOUND": core_port.TAKEOVER_NOT_FOUND,
+        "_TAKEOVER_STATE_CHANGE_CONFLICT": core_port.TAKEOVER_STATE_CHANGE_CONFLICT,
     }
     for adapter_attr, core_value in mirrored_outcomes.items():
         assert getattr(adapter, adapter_attr) == core_value

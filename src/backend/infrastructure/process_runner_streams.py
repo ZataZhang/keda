@@ -239,7 +239,9 @@ def run_filtered_claude_stream(
         watchdog.raise_if_cancelled(partial_stdout="".join(stdout_lines))
     except BaseException as exc:
         process_runner_module._attach_stream_observations(exc, usage_collector)
-        process_runner_module._terminate_process_tree(process)
+        # 取消/超时走到这里时子进程可能已被回收，二次拆除必须按创建时刻读到的身份，
+        # 不能再按 pid 取一次进程组（Issue #278）。
+        watchdog.terminate()
         process.wait()
         raise
     finally:
