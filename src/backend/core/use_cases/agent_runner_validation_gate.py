@@ -16,6 +16,7 @@ from backend.core.use_cases.agent_runner_events import (
 )
 from backend.core.use_cases.agent_runner_lifecycle import LifecycleEventType
 from backend.core.use_cases.agent_runner_validation_identity import (
+    EvidenceMarkerV2,
     PrChangeFingerprintRequest,
     compute_pr_change_fingerprint,
 )
@@ -176,7 +177,7 @@ def _gate_single_issue(
     pr_comments = github_client.list_pr_comments(pr_context.number)
     evidence_marker = parse_latest_evidence_marker(pr_comments)
     current_patch_id: str | None = None
-    if evidence_marker is not None and evidence_marker.patch_id is not None:
+    if isinstance(evidence_marker, EvidenceMarkerV2):
         if evidence_marker.head_sha != pr_context.head_sha:
             current_patch_id = compute_pr_change_fingerprint(
                 PrChangeFingerprintRequest(
@@ -215,7 +216,11 @@ def _gate_single_issue(
             build_validation_reset_comment(
                 head_sha=pr_context.head_sha,
                 evidence_head=evidence_marker.head_sha,
-                evidence_patch_id=evidence_marker.patch_id,
+                evidence_patch_id=(
+                    evidence_marker.patch_id
+                    if isinstance(evidence_marker, EvidenceMarkerV2)
+                    else None
+                ),
                 current_patch_id=current_patch_id,
             ),
         )

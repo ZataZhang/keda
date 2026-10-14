@@ -44,18 +44,22 @@ class EvidenceMarker:
         head_sha: 发布证据时的 PR head。
         branch: 存放证据文件的 orphan 分支。
         count: 证据文件数量。
-        base_sha: v2 标记记录的 base 快照，仅供审计。
-        patch_id: v2 标记记录的 PR 改动稳定指纹。
     """
 
     head_sha: str
     branch: str
     count: int
-    base_sha: str | None = None
-    patch_id: str | None = None
 
 
-def format_validation_evidence_marker(marker: EvidenceMarker) -> str:
+@dataclass(frozen=True)
+class EvidenceMarkerV2(EvidenceMarker):
+    """包含 PR 改动指纹的 v2 证据标记。"""
+
+    base_sha: str
+    patch_id: str
+
+
+def format_validation_evidence_marker(marker: EvidenceMarker | EvidenceMarkerV2) -> str:
     """根据是否具备稳定指纹，渲染兼容的 v1 或 v2 评论标记。
 
     Args:
@@ -64,7 +68,7 @@ def format_validation_evidence_marker(marker: EvidenceMarker) -> str:
     Returns:
         ``iar:validation-evidence`` 格式的单行 HTML 注释。
     """
-    if marker.base_sha is not None and marker.patch_id is not None:
+    if isinstance(marker, EvidenceMarkerV2):
         return (
             f"<!-- iar:validation-evidence version=2 head={marker.head_sha} "
             f"base={marker.base_sha} patch={marker.patch_id} branch={marker.branch} "

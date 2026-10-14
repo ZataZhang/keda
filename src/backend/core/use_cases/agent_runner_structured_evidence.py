@@ -31,10 +31,6 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.use_cases.agent_runner_evidence_format import (
     IMAGE_EVIDENCE_SUFFIXES,
 )
-from backend.core.use_cases.agent_runner_validation_identity import (
-    EvidenceMarker,
-    format_validation_evidence_marker,
-)
 
 _STRUCTURED_EVIDENCE_MARKER_PATTERN = re.compile(
     r"<!--\s*iar:structured-evidence\s+"
@@ -905,7 +901,7 @@ def render_structured_evidence_comment(
     base_sha: str | None = None,
     patch_id: str | None = None,
 ) -> str:
-    """Render the structured PR evidence comment grouped by checklist item.
+    """通过独立渲染模块构建结构化证据评论。
 
     Args:
         report: 已校验并按 checklist 分组的证据报告。
@@ -917,82 +913,25 @@ def render_structured_evidence_comment(
         evidence_dir: 解析后的按任务证据目录；缺省时使用配置根目录。
         base_sha: v2 marker 的 PR base 快照；缺省时保留 v1 marker。
         patch_id: v2 marker 的 PR 改动指纹；缺省时保留 v1 marker。
+
+    Returns:
+        按 checklist 分组的 PR 证据评论。
     """
-    language = report.language
-    evidence_marker = EvidenceMarker(
+    from backend.core.use_cases.agent_runner_structured_evidence_rendering import (
+        render_structured_evidence_comment as render_comment,
+    )
+
+    return render_comment(
+        report=report,
+        upload=upload,
+        worktree_path=worktree_path,
+        config=config,
+        pr_url=pr_url,
         head_sha=head_sha,
-        branch=upload.branch,
-        count=len(upload.file_names),
+        evidence_dir=evidence_dir,
         base_sha=base_sha,
         patch_id=patch_id,
     )
-    marker = format_validation_evidence_marker(evidence_marker)
-    has_stable_identity = base_sha is not None and patch_id is not None
-    comment_lines = [
-        marker,
-        "",
-        f"## {_label(language, 'title')}",
-        "",
-        f"- {_label(language, 'branch')}: `{upload.branch}`",
-        f"- {_label(language, 'head')}: `{head_sha}`",
-        *([f"- {_label(language, 'patch')}: `{patch_id}`"] if has_stable_identity else []),
-        f"- {_label(language, 'language')}: `{language}`",
-        "",
-        _label(language, "sign_off"),
-    ]
-
-    for item_report in report.items:
-        block = item_report.block
-        comment_lines.extend(
-            [
-                "",
-                f"### RV-{block.item_number} {block.item_name}",
-                "",
-                f"**{_label(language, 'reproducible_command')}**",
-                f"`{block.command}`",
-                "",
-                f"**{_label(language, 'evidence_files')}**",
-            ]
-        )
-        for file_info in item_report.files:
-            comment_lines.extend(
-                _render_evidence_file_lines(
-                    file_info=file_info,
-                    branch=upload.branch,
-                    pr_url=pr_url,
-                    worktree_path=worktree_path,
-                    config=config,
-                    language=language,
-                    evidence_dir=evidence_dir,
-                )
-            )
-        comment_lines.extend(
-            [
-                "",
-                f"**{_label(language, 'output_summary')}**",
-                block.output_summary,
-                "",
-                f"**{_label(language, 'explanation')}**",
-                block.explanation,
-                "",
-                f"**{_label(language, 'risks')}**",
-                block.risks,
-            ]
-        )
-        if block.negative_control:
-            comment_lines.extend(
-                [
-                    "",
-                    f"**{_label(language, 'negative_control')}**",
-                    f"`{block.negative_control}`",
-                ]
-            )
-            if block.expected_fail:
-                comment_lines.append(
-                    f"- {_label(language, 'expected_fail')}: {block.expected_fail}"
-                )
-
-    return "\n".join(comment_lines)
 
 
 def build_structured_evidence_prompt_suffix(language: str) -> str:
