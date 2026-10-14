@@ -4312,9 +4312,11 @@ Issue 的 `attempt_records` 读取，按尝试编号及生命周期事件的精�
 
 ### Token 用量统计与会话续接
 
-每次实际 Agent 子进程调用的官方 usage（Claude stream-json 的 `result.usage`，
-其它执行器仅在输出同名且语义一致的字段时采集）在子进程执行层**渲染前**捕获到
-`invocation_finished` 调用账本：
+每次实际 Agent 子进程调用的官方 usage 在子进程执行层**渲染前**捕获到
+`invocation_finished` 调用账本。结构化输出中，完整 `assistant.message.usage` 按单次
+模型请求累加；没有可用 assistant 用量时回退到最后一条 `result.usage`。两类字段都需
+符合 input / output / cache_read / cache_creation 的语义；不会把 assistant 请求用量与
+result 汇总重复相加。plain 输出不做渲染，若包含同形 assistant 或 result 事件也按此规则采集：
 
 - **统一口径**：流程、Agent、PRD 与模型统计都从每次实际调用的结束事件汇总，
   所以模型用量总数与流程/PRD 总数对齐。调用账本完全没有可用 usage 的旧 run

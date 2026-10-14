@@ -65,8 +65,9 @@ class AgentCommitResult:
 class TokenUsage:
     """单次 agent 子进程调用的官方 token 用量。
 
-    数据全部来自 agent 输出自报的 usage 统计（如 claude stream-json 的
-    ``result.usage``），系统只解析、不估算；拿不到时上层表达为 ``None``。
+    数据全部来自 agent 输出自报的 usage 统计（如结构化流中的
+    ``assistant.message.usage`` 或 ``result.usage``），系统只解析、不估算；拿不到时
+    上层表达为 ``None``。
     Anthropic 语义下 ``input_tokens`` 不含缓存部分，因此输入侧实际处理量
     = input + cache_read + cache_creation，:attr:`total_tokens` 按此把缓存
     计入总量（实际处理量口径）。
