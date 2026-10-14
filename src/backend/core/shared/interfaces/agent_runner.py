@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     # 仅注解使用：避免 interfaces -> models 的运行时反向依赖。
     from backend.core.shared.models.agent_model_preset import ModelSelection
 
+from backend.core.shared.models.agent_deliberation import (
+    DeliberationEvent,
+)
 from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
@@ -39,11 +42,8 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     PullRequestSummary,
 )
-from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
-from backend.core.shared.models.agent_deliberation import (
-    DeliberationEvent,
-)
 from backend.core.shared.models.agent_spec import AgentSpec
+from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
 
 
 @dataclass(frozen=True)
@@ -407,6 +407,14 @@ class IReplCommandExecutor(ABC):
         ...
 
 
+class GitHubApiRateLimitError(RuntimeError):
+    """GitHub API 报告限流时抛出的可恢复异常。
+
+    用例层捕获此异常后应保留 Issue 当前 workflow 状态，交由下一次 daemon
+    轮询重试；不能把它当作 Agent 执行失败或触发 Agent fallback。
+    """
+
+
 class IGitHubClient(ABC):
     """与 GitHub 交互的端口。
 
@@ -414,6 +422,9 @@ class IGitHubClient(ABC):
     PR 创建与查询等）收敛到一个契约下。core 层用例通过它驱动 GitHub
     工作流，而具体实现（通常基于 GitHub CLI ``gh`` 或 REST API）位于
     下层，可被独立替换与测试。
+
+    实现遇到明确的 API 限流时抛出 :class:`GitHubApiRateLimitError`，调用方保留
+    当前状态并推迟到之后的 daemon 轮询，不应按 Agent 失败处理。
     """
 
     @abstractmethod

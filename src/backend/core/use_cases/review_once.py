@@ -7,7 +7,11 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    IGitHubClient,
+    IProcessRunner,
+)
 from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.shared.models.agent_runner import (
     AppConfig,
@@ -688,6 +692,7 @@ def review_once(
         return 0
 
     exit_code = 0
+    github_api_rate_limited = False
     for issue in candidates:
         if dry_run:
             _logger.info(
@@ -746,6 +751,18 @@ def review_once(
                 outcome=outcome,
                 actor="review_once",
             )
+        except GitHubApiRateLimitError as exc:
+            # Supervisor marker 可能已经成功发布；保留当前 label，让下一轮按 marker
+            # 对齐状态，避免把已完成的判断改写成失败。
+            exit_code = 1
+            github_api_rate_limited = True
+            _logger.warning(
+                "Deferring review for Issue #%d after GitHub API rate limit; "
+                "keeping its current workflow state for the next poll: %s",
+                issue.number,
+                exc,
+            )
+            break
         except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
             exit_code = 1
             transition_issue_workflow_state(
@@ -766,7 +783,7 @@ def review_once(
 
     # Autopilot 启用时运行合并队列：全局 auto_merge 开启则沿用原双开关行为；
     # 否则队列只处理带单 PRD 显式授权标签的 Issue。
-    if config.autopilot.enabled and not dry_run:
+    if config.autopilot.enabled and not dry_run and not github_api_rate_limited:
         try:
             merge_exit_code, merge_outcomes = process_merge_queue(
                 repo_path=repo_path,

@@ -14,11 +14,56 @@ from backend.infrastructure.github_client import (
     GitHubCliClient,
     sanitize_github_body,
 )
-from tests.conftest import FakeProcessRunner
+from tests.conftest import FakeProcessRunner as _FakeProcessRunner
+
+
+class FakeProcessRunner(_FakeProcessRunner):
+    """模拟固定 Git remote 和空 Issue 响应的 GitHub CLI 假执行器。"""
+
+    def __init__(self, responses: dict[tuple[str, ...], CommandResult] | None = None) -> None:
+        super().__init__(responses)
+
+    def run(self, command, *, cwd, check=True, **kwargs):  # type: ignore[override]
+        if tuple(command) == ("git", "remote", "-v"):
+            return CommandResult(
+                command=tuple(command),
+                return_code=0,
+                stdout=(
+                    "origin https://github.com/owner/repo.git (fetch)\n"
+                    "origin https://github.com/owner/repo.git (push)\n"
+                ),
+                stderr="",
+            )
+        result = super().run(command, cwd=cwd, check=check, **kwargs)
+        command_list = list(command)
+        if (
+            not result.stdout
+            and command_list[:4] == ["gh", "api", "-X", "GET"]
+            and len(command_list) > 4
+        ):
+            endpoint_parts = command_list[4].split("/")
+            issue_number = endpoint_parts[-1]
+            if "issues" in endpoint_parts and issue_number.isdigit():
+                return CommandResult(
+                    command=tuple(command),
+                    return_code=0,
+                    stdout=json.dumps(
+                        {
+                            "number": int(issue_number),
+                            "title": "",
+                            "html_url": f"https://github.com/owner/repo/issues/{issue_number}",
+                            "labels": [],
+                            "body": "",
+                            "state": "open",
+                        }
+                    ),
+                    stderr="",
+                )
+        return result
 
 
 class _BodyCapturingRunner(FakeProcessRunner):
-    """Process runner that records the body passed via ``--body-file``."""
+    """记录文件字段中正文内容的进程执行器。"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -29,6 +74,15 @@ class _BodyCapturingRunner(FakeProcessRunner):
         if "--body-file" in command_list:
             body_path = command_list[command_list.index("--body-file") + 1]
             self.body_files.append(Path(body_path).read_text(encoding="utf-8"))
+        else:
+            body_field = next(
+                (token for token in command_list if token.startswith("body=@")),
+                None,
+            )
+            if body_field is not None:
+                self.body_files.append(
+                    Path(body_field.removeprefix("body=@")).read_text(encoding="utf-8")
+                )
         return super().run(command, cwd=cwd, **kwargs)
 
 
@@ -64,7 +118,7 @@ def test_comment_issue_sanitizes_body_before_posting(tmp_path: Path) -> None:
     """A failure comment with raw control characters must be scrubbed.
 
     Regression for Issue #84: agent CLI output embedded raw control bytes,
-    so ``gh issue comment`` got a 400 and the failure reason was never posted.
+    so the GitHub comment endpoint got a 400 and the failure reason was never posted.
     """
     capturing_runner = _BodyCapturingRunner()
     github_client = GitHubCliClient(tmp_path, capturing_runner)
@@ -79,20 +133,10 @@ def test_edit_issue_comment_passes_body_as_gh_api_file_field(tmp_path: Path) -> 
 
     Regression for Issue #89: the field was built as ``body@<file>`` (missing the
     ``=``), so ``gh api`` rejected it with ``invalid key`` on every edit. Only the
-    first write to a comment survived (that path creates via ``gh issue comment``),
+    first write to a comment survived (that path creates via the Issue comments REST endpoint),
     so the in-place-edited attempt-history comment silently froze at its first row.
     """
-    repo_view_command = ("gh", "repo", "view", "--json", "nameWithOwner")
-    fake_runner = FakeProcessRunner(
-        responses={
-            repo_view_command: CommandResult(
-                command=repo_view_command,
-                return_code=0,
-                stdout=json.dumps({"nameWithOwner": "owner/repo"}),
-                stderr="",
-            )
-        }
-    )
+    fake_runner = FakeProcessRunner()
     github_client = GitHubCliClient(tmp_path, fake_runner)
 
     github_client.edit_issue_comment(5029728609, "## Attempt History\n| body |")
@@ -109,15 +153,17 @@ def test_edit_issue_comment_passes_body_as_gh_api_file_field(tmp_path: Path) -> 
 
 
 def test_list_issue_comments_requests_comments_field(tmp_path: Path) -> None:
-    """Issue comment loading should request and parse the comments field."""
+    """Issue 评论读取应解析 REST 分页响应。"""
     command = (
         "gh",
-        "issue",
-        "view",
-        "23",
-        "--comments",
-        "--json",
-        "comments",
+        "api",
+        "-X",
+        "GET",
+        "--paginate",
+        "--slurp",
+        "repos/owner/repo/issues/23/comments",
+        "-F",
+        "per_page=100",
     )
     fake_runner = FakeProcessRunner(
         responses={
@@ -125,7 +171,13 @@ def test_list_issue_comments_requests_comments_field(tmp_path: Path) -> None:
                 command=command,
                 return_code=0,
                 stdout=json.dumps(
-                    {"comments": [{"body": "first"}, {"body": ""}, {"body": "second"}]}
+                    [
+                        [
+                            {"id": 1, "body": "first"},
+                            {"id": 2, "body": ""},
+                            {"id": 3, "body": "second"},
+                        ]
+                    ]
                 ),
                 stderr="",
             )
@@ -136,12 +188,24 @@ def test_list_issue_comments_requests_comments_field(tmp_path: Path) -> None:
     comments = github_client.list_issue_comments(23)
 
     assert comments == ["first", "second"]
-    assert fake_runner.calls == [list(command)]
+    assert fake_runner.calls == [
+        list(command),
+    ]
 
 
 def test_strict_issue_comment_query_raises_on_gh_failure(tmp_path: Path) -> None:
-    """快照扫描严格读取评论时，gh 失败不能伪装成空评论列表。"""
-    command = ("gh", "issue", "view", "23", "--comments", "--json", "comments")
+    """快照扫描严格读取评论时，REST 请求失败不能伪装成空列表。"""
+    command = (
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        "--paginate",
+        "--slurp",
+        "repos/owner/repo/issues/23/comments",
+        "-F",
+        "per_page=100",
+    )
     fake_runner = FakeProcessRunner(
         responses={
             command: CommandResult(
@@ -166,8 +230,17 @@ def test_strict_issue_comment_query_raises_on_gh_failure(tmp_path: Path) -> None
 def test_strict_pr_head_queries_raise_on_gh_failure(
     tmp_path: Path, method_name: str, state: str
 ) -> None:
-    """快照扫描严格查询 PR 状态时，gh 失败不能伪装成 PR 不存在。"""
-    command = ("gh", "pr", "list", "--head", "issue-23", "--state", state, "--json", "url")
+    """严格 REST 查询 PR 状态时，API 失败不能伪装成 PR 不存在。"""
+    query_state = "open" if state == "open" else "closed"
+    command = (
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        f"repos/owner/repo/pulls?state={query_state}&head=owner%3Aissue-23",
+        "-F",
+        "per_page=100",
+    )
     fake_runner = FakeProcessRunner(
         responses={
             command: CommandResult(
@@ -179,6 +252,7 @@ def test_strict_pr_head_queries_raise_on_gh_failure(
         }
     )
     github_client = GitHubCliClient(tmp_path, fake_runner)
+    github_client._owner_repo_cache = "owner/repo"
 
     with pytest.raises(RuntimeError):
         getattr(github_client, method_name)("issue-23", require_success=True)
@@ -192,7 +266,16 @@ def test_strict_pr_head_queries_reject_empty_success_response(
     tmp_path: Path, method_name: str, state: str
 ) -> None:
     """严格 PR 查询的空 stdout 不能被当成成功的无结果响应。"""
-    command = ("gh", "pr", "list", "--head", "issue-23", "--state", state, "--json", "url")
+    query_state = "open" if state == "open" else "closed"
+    command = (
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        f"repos/owner/repo/pulls?state={query_state}&head=owner%3Aissue-23",
+        "-F",
+        "per_page=100",
+    )
     fake_runner = FakeProcessRunner(
         responses={
             command: CommandResult(
@@ -204,35 +287,37 @@ def test_strict_pr_head_queries_reject_empty_success_response(
         }
     )
     github_client = GitHubCliClient(tmp_path, fake_runner)
+    github_client._owner_repo_cache = "owner/repo"
 
     with pytest.raises(RuntimeError, match="empty response"):
         getattr(github_client, method_name)("issue-23", require_success=True)
 
 
 def test_list_pr_comments_requests_comments_field(tmp_path: Path) -> None:
-    """PR comment loading should request and parse the comments field."""
+    """PR conversation comment loading should use the REST comments endpoint."""
     command = (
         "gh",
-        "pr",
-        "view",
-        "26",
-        "--comments",
-        "--json",
-        "comments",
+        "api",
+        "-X",
+        "GET",
+        "--paginate",
+        "--slurp",
+        "repos/owner/repo/issues/26/comments",
+        "-F",
+        "per_page=100",
     )
     fake_runner = FakeProcessRunner(
         responses={
             command: CommandResult(
                 command=command,
                 return_code=0,
-                stdout=json.dumps(
-                    {"comments": [{"body": "review"}, {"body": None}, {"body": "done"}]}
-                ),
+                stdout=json.dumps([[{"body": "review"}, {"body": None}, {"body": "done"}]]),
                 stderr="",
             )
         }
     )
     github_client = GitHubCliClient(tmp_path, fake_runner)
+    github_client._owner_repo_cache = "owner/repo"
 
     comments = github_client.list_pr_comments(26)
 
@@ -243,56 +328,95 @@ def test_list_pr_comments_requests_comments_field(tmp_path: Path) -> None:
 def test_get_pull_request_context_uses_supported_rollup_field(
     tmp_path: Path,
 ) -> None:
-    """PR context loading should use current gh statusCheckRollup output."""
-    command = (
+    """PR context loading should combine REST PR data and check status endpoints."""
+    pr_command = (
         "gh",
-        "pr",
-        "list",
-        "--head",
-        "issue-28",
-        "--state",
-        "open",
-        "--json",
-        "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup,isDraft",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/pulls?state=open&head=owner%3Aissue-28",
+        "-F",
+        "per_page=100",
+    )
+    check_runs_command = (
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        "--paginate",
+        "--slurp",
+        "repos/owner/repo/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/check-runs",
+        "-F",
+        "per_page=100",
+    )
+    statuses_command = (
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/status",
+        "-F",
+        "per_page=100",
     )
     fake_runner = FakeProcessRunner(
         responses={
-            command: CommandResult(
-                command=command,
+            pr_command: CommandResult(
+                command=pr_command,
                 return_code=0,
                 stdout=json.dumps(
                     [
                         {
-                            "url": "https://github.com/example/repo/pull/28",
+                            "html_url": "https://github.com/example/repo/pull/28",
                             "number": 28,
                             "body": "",
-                            "headRefName": "issue-28",
-                            "headRefOid": "head-sha",
-                            "baseRefOid": "base-sha",
-                            "mergeable": "CONFLICTING",
-                            "isDraft": True,
-                            "statusCheckRollup": [
+                            "head": {
+                                "ref": "issue-28",
+                                "sha": "a" * 40,
+                            },
+                            "base": {"sha": "b" * 40},
+                            "mergeable": False,
+                            "draft": True,
+                        }
+                    ]
+                ),
+                stderr="",
+            ),
+            check_runs_command: CommandResult(
+                command=check_runs_command,
+                return_code=0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "total_count": 1,
+                            "check_runs": [
                                 {
-                                    "__typename": "CheckRun",
                                     "name": "lint",
-                                    "status": "COMPLETED",
-                                    "conclusion": "FAILURE",
-                                    "detailsUrl": "https://checks.example/lint",
-                                },
-                                {
-                                    "__typename": "StatusContext",
-                                    "context": "unit",
-                                    "state": "SUCCESS",
-                                },
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                    "details_url": "https://checks.example/lint",
+                                }
                             ],
                         }
                     ]
                 ),
                 stderr="",
-            )
+            ),
+            statuses_command: CommandResult(
+                command=statuses_command,
+                return_code=0,
+                stdout=json.dumps(
+                    {
+                        "state": "success",
+                        "total_count": 1,
+                        "statuses": [{"context": "unit", "state": "success"}],
+                    }
+                ),
+                stderr="",
+            ),
         }
     )
     github_client = GitHubCliClient(tmp_path, fake_runner)
+    github_client._owner_repo_cache = "owner/repo"
 
     pr_context = github_client.get_pull_request_context("issue-28")
 
@@ -304,49 +428,85 @@ def test_get_pull_request_context_uses_supported_rollup_field(
     assert pr_context.checks_summary == (
         "lint (status=COMPLETED, conclusion=FAILURE) https://checks.example/lint",
     )
-    assert fake_runner.calls == [list(command)]
+    assert fake_runner.calls == [
+        list(pr_command),
+        list(check_runs_command),
+        list(statuses_command),
+    ]
 
 
 def test_get_pull_request_context_empty_rollup_has_no_checks_state(
     tmp_path: Path,
 ) -> None:
-    """Empty check rollup should stay compatible with repositories without CI."""
-    command = (
+    """Empty REST check endpoints should stay compatible with repositories without CI."""
+    pr_command = (
         "gh",
-        "pr",
-        "list",
-        "--head",
-        "issue-1",
-        "--state",
-        "open",
-        "--json",
-        "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup,isDraft",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/pulls?state=open&head=owner%3Aissue-1",
+        "-F",
+        "per_page=100",
+    )
+    check_runs_command = (
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        "--paginate",
+        "--slurp",
+        "repos/owner/repo/commits/cccccccccccccccccccccccccccccccccccccccc/check-runs",
+        "-F",
+        "per_page=100",
+    )
+    statuses_command = (
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/commits/cccccccccccccccccccccccccccccccccccccccc/status",
+        "-F",
+        "per_page=100",
     )
     fake_runner = FakeProcessRunner(
         responses={
-            command: CommandResult(
-                command=command,
+            pr_command: CommandResult(
+                command=pr_command,
                 return_code=0,
                 stdout=json.dumps(
                     [
                         {
-                            "url": "https://github.com/example/repo/pull/1",
+                            "html_url": "https://github.com/example/repo/pull/1",
                             "number": 1,
                             "body": "",
-                            "headRefName": "issue-1",
-                            "headRefOid": "head-sha",
-                            "baseRefOid": "base-sha",
-                            "mergeable": "MERGEABLE",
-                            "isDraft": False,
-                            "statusCheckRollup": [],
+                            "head": {
+                                "ref": "issue-1",
+                                "sha": "c" * 40,
+                            },
+                            "base": {"sha": "d" * 40},
+                            "mergeable": True,
+                            "draft": False,
                         }
                     ]
                 ),
                 stderr="",
-            )
+            ),
+            check_runs_command: CommandResult(
+                command=check_runs_command,
+                return_code=0,
+                stdout=json.dumps([{"total_count": 0, "check_runs": []}]),
+                stderr="",
+            ),
+            statuses_command: CommandResult(
+                command=statuses_command,
+                return_code=0,
+                stdout=json.dumps({"state": "pending", "total_count": 0, "statuses": []}),
+                stderr="",
+            ),
         }
     )
     github_client = GitHubCliClient(tmp_path, fake_runner)
+    github_client._owner_repo_cache = "owner/repo"
 
     pr_context = github_client.get_pull_request_context("issue-1")
 
@@ -355,39 +515,51 @@ def test_get_pull_request_context_empty_rollup_has_no_checks_state(
     assert pr_context.is_draft is False
     assert pr_context.checks_state is None
     assert pr_context.checks_summary == ()
+    assert fake_runner.calls == [
+        list(pr_command),
+        list(check_runs_command),
+        list(statuses_command),
+    ]
 
 
 def test_edit_issue_labels_only_removes_attached_labels(tmp_path: Path) -> None:
-    """Label editing should not ask gh to remove labels absent from the Issue."""
-    view_command = (
+    """标签更新不应请求 REST 删除 Issue 上不存在的标签。"""
+    get_issue_command = (
         "gh",
-        "issue",
-        "view",
-        "27",
-        "--json",
-        "labels",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/issues/27",
     )
-    edit_command = (
+    add_label_command = (
         "gh",
-        "issue",
-        "edit",
-        "27",
-        "--add-label",
-        "agent/failed",
-        "--remove-label",
-        "agent/running",
+        "api",
+        "-X",
+        "POST",
+        "repos/owner/repo/issues/27/labels",
+        "-f",
+        "labels[]=agent/failed",
+    )
+    remove_label_command = (
+        "gh",
+        "api",
+        "-X",
+        "DELETE",
+        "repos/owner/repo/issues/27/labels/agent%2Frunning",
     )
     fake_runner = FakeProcessRunner(
         responses={
-            view_command: CommandResult(
-                command=view_command,
+            get_issue_command: CommandResult(
+                command=get_issue_command,
                 return_code=0,
                 stdout=json.dumps(
                     {
+                        "number": 27,
+                        "state": "open",
                         "labels": [
                             {"name": "agent/running"},
                             {"name": "source/prd"},
-                        ]
+                        ],
                     }
                 ),
                 stderr="",
@@ -402,25 +574,30 @@ def test_edit_issue_labels_only_removes_attached_labels(tmp_path: Path) -> None:
         remove=["agent/ready", "agent/running", "agent/supervising"],
     )
 
-    assert fake_runner.calls == [list(view_command), list(edit_command)]
+    assert fake_runner.calls == [
+        list(get_issue_command),
+        list(add_label_command),
+        list(remove_label_command),
+    ]
 
 
 def test_edit_issue_labels_skips_noop_update(tmp_path: Path) -> None:
-    """No-op label updates should not call gh issue edit."""
-    view_command = (
+    """标签更新无变化时不应调用 REST 修改端点。"""
+    get_issue_command = (
         "gh",
-        "issue",
-        "view",
-        "27",
-        "--json",
-        "labels",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/issues/27",
     )
     fake_runner = FakeProcessRunner(
         responses={
-            view_command: CommandResult(
-                command=view_command,
+            get_issue_command: CommandResult(
+                command=get_issue_command,
                 return_code=0,
-                stdout=json.dumps({"labels": [{"name": "agent/failed"}]}),
+                stdout=json.dumps(
+                    {"number": 27, "state": "open", "labels": [{"name": "agent/failed"}]}
+                ),
                 stderr="",
             )
         }
@@ -433,7 +610,9 @@ def test_edit_issue_labels_skips_noop_update(tmp_path: Path) -> None:
         remove=["agent/ready", "agent/running"],
     )
 
-    assert fake_runner.calls == [list(view_command)]
+    assert fake_runner.calls == [
+        list(get_issue_command),
+    ]
 
 
 def test_list_review_candidate_issues_uses_or_label_semantics(
@@ -442,29 +621,29 @@ def test_list_review_candidate_issues_uses_or_label_semantics(
     """Review candidate query must combine results across labels (OR semantics)."""
     supervising_command = (
         "gh",
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--label",
-        "agent/supervising",
-        "--limit",
-        "20",
-        "--json",
-        "number,title,url,labels,body,state",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/issues",
+        "-f",
+        "state=open",
+        "-F",
+        "per_page=20",
+        "-f",
+        "labels=agent/supervising",
     )
     review_command = (
         "gh",
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--label",
-        "agent/automated-review-passed",
-        "--limit",
-        "20",
-        "--json",
-        "number,title,url,labels,body,state",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/issues",
+        "-f",
+        "state=open",
+        "-F",
+        "per_page=20",
+        "-f",
+        "labels=agent/automated-review-passed",
     )
     fake_runner = FakeProcessRunner(
         responses={
@@ -532,7 +711,10 @@ def test_list_review_candidate_issues_uses_or_label_semantics(
     assert candidate_numbers == {90, 91, 92}
     # 92 must appear exactly once even though it matches both labels.
     assert len(candidates) == 3
-    assert fake_runner.calls == [list(supervising_command), list(review_command)]
+    assert fake_runner.calls == [
+        list(supervising_command),
+        list(review_command),
+    ]
 
 
 def test_sync_labels_creates_rework_prd_label(tmp_path: Path) -> None:
@@ -556,19 +738,19 @@ def test_sync_labels_creates_rework_prd_label(tmp_path: Path) -> None:
 
 
 def test_list_rework_prd_issues_filters_label(tmp_path: Path) -> None:
-    """list_rework_prd_issues should query gh with the given label and limit."""
+    """list_rework_prd_issues 应通过 REST 按给定标签和数量上限查询。"""
     command = (
         "gh",
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--label",
-        "agent/rework-prd",
-        "--limit",
-        "5",
-        "--json",
-        "number,title,url,labels,body,state",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/issues",
+        "-f",
+        "state=open",
+        "-F",
+        "per_page=5",
+        "-f",
+        "labels=agent/rework-prd",
     )
     fake_runner = FakeProcessRunner(
         responses={
@@ -580,10 +762,10 @@ def test_list_rework_prd_issues_filters_label(tmp_path: Path) -> None:
                         {
                             "number": 7,
                             "title": "Rework PRD",
-                            "url": "https://example/7",
+                            "html_url": "https://example/7",
                             "labels": [{"name": "agent/rework-prd"}],
                             "body": "",
-                            "state": "OPEN",
+                            "state": "open",
                         }
                     ]
                 ),
@@ -597,11 +779,13 @@ def test_list_rework_prd_issues_filters_label(tmp_path: Path) -> None:
 
     assert len(issues) == 1
     assert issues[0].number == 7
-    assert fake_runner.calls == [list(command)]
+    assert fake_runner.calls == [
+        list(command),
+    ]
 
 
 def test_edit_issue_body_writes_via_file(tmp_path: Path) -> None:
-    """edit_issue_body should use gh issue edit --body-file."""
+    """edit_issue_body 应通过 REST 文件字段提交正文。"""
 
     class CapturingRunner(FakeProcessRunner):
         def __init__(self) -> None:
@@ -619,20 +803,34 @@ def test_edit_issue_body_writes_via_file(tmp_path: Path) -> None:
             input_text=None,
             output_protocol=None,
         ):
-            self.calls.append(list(command))
-            if "--body-file" in command:
-                body_file_path = Path(command[command.index("--body-file") + 1])
+            command_list = list(command)
+            body_field = next(
+                (token for token in command_list if token.startswith("body=@")),
+                None,
+            )
+            if body_field is not None:
+                body_file_path = Path(body_field.removeprefix("body=@"))
                 self.captured_body = body_file_path.read_text(encoding="utf-8")
-            return CommandResult(command=tuple(command), return_code=0, stdout="", stderr="")
+            return super().run(
+                command_list,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+                input_text=input_text,
+                output_protocol=output_protocol,
+            )
 
     runner = CapturingRunner()
     github_client = GitHubCliClient(tmp_path, runner)
 
     github_client.edit_issue_body(9, "New body text.")
 
-    assert len(runner.calls) == 1
-    assert runner.calls[0][:4] == ["gh", "issue", "edit", "9"]
-    assert runner.calls[0][4] == "--body-file"
+    patch_call = next(
+        call for call in runner.calls if call[:2] == ["gh", "api"] and "PATCH" in call
+    )
+    assert patch_call[:5] == ["gh", "api", "-X", "PATCH", "repos/owner/repo/issues/9"]
+    assert any(token.startswith("body=@") for token in patch_call)
     assert runner.captured_body == "New body text."
 
 
@@ -963,17 +1161,17 @@ def test_list_pull_requests_for_issue_empty_when_no_prs(tmp_path: Path) -> None:
 
 
 def test_list_issues_by_label_omits_label_flag_when_none(tmp_path: Path) -> None:
-    """When label is None the gh command must not include --label."""
+    """label 为 None 时 REST 查询应省略 labels 参数。"""
     command_without_label = (
         "gh",
-        "issue",
-        "list",
-        "--state",
-        "all",
-        "--limit",
-        "100",
-        "--json",
-        "number,title,url,labels,body,state",
+        "api",
+        "-X",
+        "GET",
+        "repos/owner/repo/issues",
+        "-f",
+        "state=all",
+        "-F",
+        "per_page=100",
     )
     fake_runner = FakeProcessRunner(
         responses={
@@ -985,7 +1183,7 @@ def test_list_issues_by_label_omits_label_flag_when_none(tmp_path: Path) -> None
                         {
                             "number": 1,
                             "title": "all-issues",
-                            "url": "https://example/1",
+                            "html_url": "https://example/1",
                             "labels": [],
                             "body": "",
                             "state": "OPEN",
@@ -1002,6 +1200,9 @@ def test_list_issues_by_label_omits_label_flag_when_none(tmp_path: Path) -> None
 
     assert len(issues) == 1
     assert issues[0].number == 1
+    assert fake_runner.calls == [
+        list(command_without_label),
+    ]
 
 
 def test_sync_labels_creates_verifier_passed_label(tmp_path: Path) -> None:
@@ -1026,16 +1227,14 @@ def test_sync_labels_creates_verifier_passed_label(tmp_path: Path) -> None:
 
 
 def test_edit_issue_labels_creates_missing_label_and_retries(tmp_path: Path) -> None:
-    """``gh issue edit`` failure on a missing label should auto-create + retry.
+    """REST 标签更新遇到缺失标签时应先创建，再重试。
 
-    Real-world scenario: a fresh repository that never ran ``labels sync``
-    is missing ``validation/verifier-passed``. The runner still tries to
-    add it after a green verifier verdict; instead of crashing, it should
-    ``gh label create --force`` the missing labels and retry the edit.
+    新仓库未运行 ``labels sync``，缺少 ``validation/verifier-passed`` 时，验证通过后
+    runner 仍应创建该标签并重试更新，而不是直接失败。
     """
 
     class _MissingLabelRunner(FakeProcessRunner):
-        """First ``gh issue edit`` fails with a not-found stderr; everything else OK."""
+        """首个 REST 标签添加请求返回缺失标签错误，其他请求成功。"""
 
         def __init__(self) -> None:
             super().__init__()
@@ -1043,7 +1242,10 @@ def test_edit_issue_labels_creates_missing_label_and_retries(tmp_path: Path) -> 
 
         def run(self, command, *, cwd, check=True, **kwargs):  # type: ignore[override]
             command_list = list(command)
-            if command_list[:3] == ["gh", "issue", "edit"] and "--add-label" in command_list:
+            if (
+                command_list[:4] == ["gh", "api", "-X", "POST"]
+                and command_list[4] == "repos/owner/repo/issues/24/labels"
+            ):
                 self.edit_attempts += 1
                 if self.edit_attempts == 1:
                     exc = subprocess.CalledProcessError(
@@ -1065,19 +1267,18 @@ def test_edit_issue_labels_creates_missing_label_and_retries(tmp_path: Path) -> 
 
     github_client.edit_issue_labels(24, add=["validation/verifier-passed"])
 
-    # Order: view (current labels) → gh label create --force → gh issue edit
-    # (retry). The first gh issue edit raises before being recorded in
+    # Order: Issue read → label creation → REST label-add retry.
+    # The first REST label-add raises before being recorded in
     # ``calls`` (the FakeProcessRunner subclass raises before delegating to
     # ``super().run``, mirroring how a real subprocess ``CalledProcessError``
     # surfaces).
     assert fake_runner.calls == [
         [
             "gh",
-            "issue",
-            "view",
-            "24",
-            "--json",
-            "labels",
+            "api",
+            "-X",
+            "GET",
+            "repos/owner/repo/issues/24",
         ],
         [
             "gh",
@@ -1088,11 +1289,12 @@ def test_edit_issue_labels_creates_missing_label_and_retries(tmp_path: Path) -> 
         ],
         [
             "gh",
-            "issue",
-            "edit",
-            "24",
-            "--add-label",
-            "validation/verifier-passed",
+            "api",
+            "-X",
+            "POST",
+            "repos/owner/repo/issues/24/labels",
+            "-f",
+            "labels[]=validation/verifier-passed",
         ],
     ]
     assert fake_runner.edit_attempts == 2
@@ -1108,7 +1310,7 @@ def test_edit_issue_labels_does_not_swallow_unrelated_errors(tmp_path: Path) -> 
     """
 
     class _TransientErrorRunner(FakeProcessRunner):
-        """First ``gh issue edit`` raises a CalledProcessError with a TLS stderr."""
+        """REST 标签添加请求因 TLS 错误抛出 CalledProcessError。"""
 
         def __init__(self) -> None:
             super().__init__()
@@ -1116,13 +1318,17 @@ def test_edit_issue_labels_does_not_swallow_unrelated_errors(tmp_path: Path) -> 
 
         def run(self, command, *, cwd, check=True, **kwargs):  # type: ignore[override]
             command_list = list(command)
-            if command_list[:3] == ["gh", "issue", "edit"]:
+            if (
+                command_list[:4] == ["gh", "api", "-X", "POST"]
+                and command_list[4] == "repos/owner/repo/issues/24/labels"
+            ):
                 self.attempts += 1
                 exc = subprocess.CalledProcessError(
                     returncode=1,
                     cmd=command_list,
                     output="",
-                    stderr="Post https://api.github.com/graphql: net/http: TLS handshake timeout",
+                    stderr="Post https://api.github.com/repos/owner/repo/issues/24/labels: "
+                    "net/http: TLS handshake timeout",
                 )
                 if check:
                     raise exc
@@ -1137,6 +1343,6 @@ def test_edit_issue_labels_does_not_swallow_unrelated_errors(tmp_path: Path) -> 
 
     ensure_calls = [call for call in fake_runner.calls if call[:3] == ["gh", "label", "create"]]
     assert ensure_calls == []
-    # Confirm we did NOT silently retry the edit; only the view call succeeded.
-    edit_calls = [call for call in fake_runner.calls if call[:3] == ["gh", "issue", "edit"]]
-    assert edit_calls == []
+    # The failed label add is not recorded because the fake raises before delegating.
+    add_calls = [call for call in fake_runner.calls if call[:4] == ["gh", "api", "-X", "POST"]]
+    assert add_calls == []

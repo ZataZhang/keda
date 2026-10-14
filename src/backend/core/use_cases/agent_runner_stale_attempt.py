@@ -27,7 +27,8 @@ class StaleAttemptDisposition(Enum):
     Attributes:
         RESUME: 续传恢复——回 ``agent/ready``，下一轮 claim 以会话续传形态接续
             上轮上下文（session 记录留在 worktree 局部，claim 侧自行消费）。
-        REENQUEUE: 重新入队——回 ``agent/ready``，全新会话重跑。
+        REENQUEUE: 重新入队——普通 Issue 回 ``agent/ready``；仍有 post-PR 返工时
+            保留 ``agent/running``，让下一轮进入返工路径。
         FAIL: 判失败——转 ``agent/failed``，附对账报告。
         SKIP: 不触碰——证据不足（无 claim marker、跨机认领、或进程仍存活未过 TTL）。
     """
@@ -43,8 +44,8 @@ class StaleAttemptEvidence:
     """对账判定的输入事实快照（纯数据，配合纯函数判定便于单测直接构造）。
 
     字段只允许来自四类证据源：本机活跃 attempt 状态（claim marker + PID 存活）、
-    Issue label、comment attempt 历史、worktree 文件状态。任何"第二状态源"
-    （库表 / 租约 / 心跳）都不得喂进这里。
+    Issue label、comment 中的 attempt 历史与生命周期 marker、worktree 文件状态。
+    任何"第二状态源"（库表 / 租约 / 心跳）都不得喂进这里。
 
     Attributes:
         worktree_resolvable: worktree 现场是否可解析（路径可得且 git 状态可读）。
@@ -54,6 +55,7 @@ class StaleAttemptEvidence:
         session_id: worktree 局部记录里的上轮会话 id；无记录为 ``None``。
         stale_attempt_count: 本次之前该 Issue 已被对账处置的次数（取自 comment 历史）。
         max_recovery_attempts: 复用的既有恢复预算上限（``runner.max_recovery_attempts``）。
+        pending_rework: 是否存在尚未消费的 post-PR 返工请求。
     """
 
     worktree_resolvable: bool
@@ -63,15 +65,24 @@ class StaleAttemptEvidence:
     session_id: str | None = None
     stale_attempt_count: int = 0
     max_recovery_attempts: int = 0
+    pending_rework: bool = False
 
 
 @dataclass(frozen=True)
 class StaleAttemptDecision:
-    """处置判定的结果：出口 + 一句话原因 + 依据清单。"""
+    """处置判定结果：出口、返工状态、一句话原因与依据清单。
+
+    Attributes:
+        disposition: 对账后的执行处置。
+        reason: 处置原因，供 comment 与日志显示。
+        basis: 判定时使用的证据摘要。
+        pending_rework: 对账时是否仍有未消费的 post-PR 返工请求。
+    """
 
     disposition: StaleAttemptDisposition
     reason: str
     basis: tuple[str, ...]
+    pending_rework: bool = False
 
 
 def decide_stale_attempt_disposition(evidence: StaleAttemptEvidence) -> StaleAttemptDecision:
@@ -83,8 +94,9 @@ def decide_stale_attempt_disposition(evidence: StaleAttemptEvidence) -> StaleAtt
        产生不可解释的二次失败。
     2. 历史对账次数已达 ``max_recovery_attempts`` 预算 → 判失败：跨进程恢复与
        attempt 内 recovery 共用同一预算，不新增预算键。
-    3. 上轮 agent 已知、声明了续传能力、且 worktree 留有 session 记录 → 续传恢复。
-    4. 其余（agent 不可识别 / 不支持续传 / 无会话记录）→ 重新入队，全新会话。
+    3. 仍有未消费的 post-PR 返工 marker → 保留 running，由返工路径重试。
+    4. 上轮 agent 已知、声明了续传能力、且 worktree 留有 session 记录 → 续传恢复。
+    5. 其余（agent 不可识别 / 不支持续传 / 无会话记录）→ 重新入队，全新会话。
 
     Args:
         evidence: 四类证据源汇聚出的事实快照。
@@ -103,12 +115,14 @@ def decide_stale_attempt_disposition(evidence: StaleAttemptEvidence) -> StaleAtt
             f"stale dispositions so far: {evidence.stale_attempt_count} "
             f"(budget {evidence.max_recovery_attempts})"
         ),
+        f"pending post-PR rework: {'yes' if evidence.pending_rework else 'no'}",
     )
     if not evidence.worktree_resolvable:
         return StaleAttemptDecision(
             StaleAttemptDisposition.FAIL,
             "The Issue worktree cannot be resolved, so there is no site to resume " "or re-run on.",
             basis,
+            pending_rework=evidence.pending_rework,
         )
     if evidence.stale_attempt_count >= evidence.max_recovery_attempts:
         return StaleAttemptDecision(
@@ -119,6 +133,18 @@ def decide_stale_attempt_disposition(evidence: StaleAttemptEvidence) -> StaleAtt
                 f"max_recovery_attempts={evidence.max_recovery_attempts})."
             ),
             basis,
+            pending_rework=evidence.pending_rework,
+        )
+    if evidence.pending_rework:
+        return StaleAttemptDecision(
+            StaleAttemptDisposition.REENQUEUE,
+            (
+                "The worktree is intact and a post-PR rework request is still pending, "
+                "so the Issue stays running for the next runner pass to continue the "
+                "repair flow."
+            ),
+            basis,
+            pending_rework=True,
         )
     if evidence.resume_capable and evidence.session_id and evidence.claim_agent:
         return StaleAttemptDecision(
@@ -129,6 +155,7 @@ def decide_stale_attempt_disposition(evidence: StaleAttemptEvidence) -> StaleAtt
                 "conversation."
             ),
             basis,
+            pending_rework=evidence.pending_rework,
         )
     degrade_reason = (
         "unknown claiming agent"
@@ -146,6 +173,7 @@ def decide_stale_attempt_disposition(evidence: StaleAttemptEvidence) -> StaleAtt
             "so the Issue returns to ready for a fresh attempt."
         ),
         basis,
+        pending_rework=evidence.pending_rework,
     )
 
 
@@ -238,12 +266,18 @@ def format_stale_attempt_comment(report: StaleAttemptReport) -> str:
     if report.attempt_history_excerpt:
         lines.extend(["", "### Attempt History (last recorded)", ""])
         lines.append(report.attempt_history_excerpt)
-    lines.extend(["", _next_step_note(decision.disposition)])
+    lines.extend(["", _next_step_note(decision)])
     return "\n".join(lines)
 
 
-def _next_step_note(disposition: StaleAttemptDisposition) -> str:
+def _next_step_note(decision: StaleAttemptDecision) -> str:
     """按处置出口给运营者的一句话下一步说明。"""
+    if decision.pending_rework and decision.disposition is StaleAttemptDisposition.REENQUEUE:
+        return (
+            "The pending post-PR repair stays on `agent/running`; the next runner pass "
+            "continues the repair flow instead of starting ordinary implementation."
+        )
+    disposition = decision.disposition
     if disposition is StaleAttemptDisposition.RESUME:
         return (
             "The Issue is back on `agent/ready`; the next claim resumes the recorded "

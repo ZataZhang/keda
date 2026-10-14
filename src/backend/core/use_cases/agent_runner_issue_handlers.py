@@ -127,6 +127,7 @@ RUNTIME_DEPENDENCY_NAMES = (
     "_finish_implementation_publication",
     "_release_blocked_claim_lock",
     "_reuse_existing_local_commit",
+    "arbitrate_first_claim",
     "publish_draft_pr_before_verifier",
     "_run_supervisor_with_repair_loop",
     "choose_agent",

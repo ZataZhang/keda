@@ -1,6 +1,6 @@
 """Pull-request-side operations for the GitHub CLI client.
 
-Module-level helper functions that drive ``gh pr ...`` invocations. They
+Module-level helper functions that drive ``gh api`` and ``gh pr ...`` calls. They
 take a client-like first argument so the main
 :class:`backend.infrastructure.github_client.GitHubCliClient` can keep its
 method-level public surface while delegating the actual ``gh`` command
@@ -18,7 +18,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Protocol, Sequence
+from urllib.parse import urlencode
 
+from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
 from backend.infrastructure.github_helpers import (
     _STATE_ORDER,
     _aggregate_status_check_rollup,
@@ -39,11 +41,171 @@ class _ClientProtocol(Protocol):
 
     repo_path: Path
 
+    def _get_owner_repo(self) -> str: ...
+
     def _run_with_retry(
         self, command: Sequence[str], *, cwd: Path, check: bool = True
     ) -> object: ...
 
     def _write_body_file(self, temp_dir: str, filename: str, body: str) -> Path: ...
+
+
+def _request_rest_json(
+    client: _ClientProtocol,
+    endpoint: str,
+    *,
+    paginate: bool = False,
+    per_page: bool = False,
+) -> object:
+    """通过 REST API 读取 JSON，并在查询失败时保留可诊断错误。"""
+    command = ["gh", "api", "-X", "GET"]
+    if paginate:
+        command.extend(["--paginate", "--slurp"])
+    command.append(endpoint)
+    if per_page or paginate:
+        command.extend(["-F", "per_page=100"])
+    result = client._run_with_retry(command, cwd=client.repo_path, check=False)
+    if result.return_code != 0:
+        raise RuntimeError(
+            result.stderr.strip() or result.stdout.strip() or "GitHub REST query failed"
+        )
+    if not result.stdout.strip():
+        raise RuntimeError("GitHub REST query returned an empty response.")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("GitHub REST query returned malformed JSON.") from exc
+
+
+def _flatten_rest_pages(raw_pages: object, *, response_key: str | None = None) -> list[dict]:
+    """合并 ``gh api --paginate --slurp`` 返回的分页内容。"""
+    if not isinstance(raw_pages, list):
+        raise RuntimeError("GitHub REST pagination returned an invalid page list.")
+    entries: list[dict] = []
+    for raw_page in raw_pages:
+        page_entries = raw_page
+        if response_key is not None:
+            if not isinstance(raw_page, dict):
+                raise RuntimeError("GitHub REST pagination returned an invalid page object.")
+            page_entries = raw_page.get(response_key)
+        if not isinstance(page_entries, list):
+            raise RuntimeError("GitHub REST pagination returned an invalid entry list.")
+        entries.extend(entry for entry in page_entries if isinstance(entry, dict))
+    return entries
+
+
+def _load_rest_check_rollup(
+    client: _ClientProtocol,
+    head_sha: str,
+    *,
+    require_success: bool,
+) -> tuple[str | None, tuple[str, ...]]:
+    """从 REST check-runs 与 commit statuses 汇总当前 head 的验证状态。"""
+    owner_repo = client._get_owner_repo()
+    try:
+        check_pages = _request_rest_json(
+            client,
+            f"repos/{owner_repo}/commits/{head_sha}/check-runs",
+            paginate=True,
+        )
+        check_runs = _flatten_rest_pages(check_pages, response_key="check_runs")
+        combined_status = _request_rest_json(
+            client,
+            f"repos/{owner_repo}/commits/{head_sha}/status",
+            per_page=True,
+        )
+        if not isinstance(combined_status, dict) or not isinstance(
+            combined_status.get("statuses"), list
+        ):
+            raise RuntimeError("GitHub REST commit status response is incomplete.")
+        commit_statuses = [
+            status for status in combined_status["statuses"] if isinstance(status, dict)
+        ]
+    except GitHubApiRateLimitError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - unknown checks stay unknown outside strict reads.
+        if require_success:
+            raise RuntimeError(f"Cannot load checks for PR head {head_sha}: {exc}") from exc
+        _logger.warning("Unable to load REST checks for PR head %s: %s", head_sha, exc)
+        return None, ()
+
+    normalized_checks = [
+        {
+            "name": check.get("name"),
+            "status": str(check.get("status") or "").upper(),
+            "conclusion": str(check.get("conclusion") or "").upper(),
+            "detailsUrl": check.get("details_url"),
+        }
+        for check in check_runs
+    ]
+    normalized_statuses = [
+        {
+            "context": status.get("context"),
+            "state": str(status.get("state") or "").upper(),
+            "targetUrl": status.get("target_url"),
+        }
+        for status in commit_statuses
+    ]
+    return _aggregate_status_check_rollup(normalized_checks + normalized_statuses)
+
+
+def _build_pull_request_context(
+    client: _ClientProtocol,
+    raw_pr: object,
+    *,
+    require_success: bool,
+) -> PullRequestContext | None:
+    """把 GitHub REST PR 资源转换为 runner 使用的上下文。"""
+    if not isinstance(raw_pr, dict):
+        if require_success:
+            raise RuntimeError("Authoritative REST PR query returned an invalid object.")
+        return None
+    raw_head = raw_pr.get("head")
+    raw_base = raw_pr.get("base")
+    head = raw_head if isinstance(raw_head, dict) else {}
+    base = raw_base if isinstance(raw_base, dict) else {}
+    pr_url = raw_pr.get("html_url")
+    branch = head.get("ref")
+    head_sha = head.get("sha")
+    base_sha = base.get("sha")
+    pr_number = raw_pr.get("number")
+    body = raw_pr.get("body")
+    is_draft = raw_pr.get("draft")
+    if require_success and (
+        not isinstance(pr_url, str)
+        or not pr_url.startswith("https://")
+        or type(pr_number) is not int
+        or pr_number <= 0
+        or not isinstance(branch, str)
+        or not isinstance(head_sha, str)
+        or len(head_sha) != 40
+        or any(character not in "0123456789abcdefABCDEF" for character in head_sha)
+        or not isinstance(base_sha, str)
+        or not isinstance(body, str)
+        or type(is_draft) is not bool
+    ):
+        raise RuntimeError("Authoritative REST PR query returned incomplete identity metadata.")
+    normalized_head_sha = str(head_sha or "")
+    if normalized_head_sha:
+        checks_state, checks_summary = _load_rest_check_rollup(
+            client,
+            normalized_head_sha,
+            require_success=require_success,
+        )
+    else:
+        checks_state, checks_summary = None, ()
+    return PullRequestContext(
+        pr_url=str(pr_url or ""),
+        branch=str(branch or ""),
+        head_sha=normalized_head_sha,
+        base_sha=str(base_sha or ""),
+        mergeable=_normalize_mergeable(raw_pr.get("mergeable")),
+        checks_state=checks_state,
+        checks_summary=checks_summary,
+        number=pr_number if type(pr_number) is int else None,
+        body=str(body or ""),
+        is_draft=is_draft if isinstance(is_draft, bool) else None,
+    )
 
 
 def create_draft_pr(
@@ -91,76 +253,37 @@ def get_pull_request_context(
     Raises:
         RuntimeError: 严格模式不能确认查询成功或返回的 PR 身份。
     """
-    result = client._run_with_retry(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--head",
-            branch,
-            "--state",
-            "open",
-            "--json",
-            "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup,isDraft",
-        ],
-        cwd=client.repo_path,
-        check=False,
-    )
-    if result.return_code != 0:
-        if require_success:
-            raise RuntimeError(f"Cannot establish open PR context for branch {branch}.")
-        _logger.warning(
-            "Unable to load full PR context for branch %s: %s",
-            branch,
-            result.stderr.strip() or f"gh exited with status {result.return_code}",
-        )
-        return None
-    if require_success and not result.stdout.strip():
-        raise RuntimeError("Authoritative PR query returned an empty response.")
     try:
-        raw_prs = json.loads(result.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        if require_success:
-            raise RuntimeError("Authoritative PR query returned malformed JSON.") from exc
+        owner_repo = client._get_owner_repo()
+        owner = owner_repo.split("/", 1)[0]
+        query = urlencode({"state": "open", "head": f"{owner}:{branch}"})
+        raw_prs = _request_rest_json(
+            client,
+            f"repos/{owner_repo}/pulls?{query}",
+            per_page=True,
+        )
+    except GitHubApiRateLimitError:
         raise
+    except Exception as exc:  # noqa: BLE001 - non-strict callers keep their best-effort behavior.
+        if require_success:
+            raise RuntimeError(
+                f"Cannot establish open PR context for branch {branch}: {exc}"
+            ) from exc
+        _logger.warning("Unable to load full PR context for branch %s: %s", branch, exc)
+        return None
+    if not isinstance(raw_prs, list):
+        if require_success:
+            raise RuntimeError("Authoritative REST PR query returned an invalid list.")
+        return None
     if require_success:
         if not isinstance(raw_prs, list) or len(raw_prs) > 1:
             raise RuntimeError("Authoritative PR query returned an ambiguous or invalid list.")
-        if raw_prs:
-            raw_pr = raw_prs[0]
-            if (
-                not isinstance(raw_pr, dict)
-                or not isinstance(raw_pr.get("url"), str)
-                or not raw_pr["url"].startswith("https://")
-                or type(raw_pr.get("number")) is not int
-                or raw_pr["number"] <= 0
-                or raw_pr.get("headRefName") != branch
-                or not isinstance(raw_pr.get("headRefOid"), str)
-                or len(raw_pr["headRefOid"]) != 40
-                or any(
-                    character not in "0123456789abcdefABCDEF" for character in raw_pr["headRefOid"]
-                )
-                or not isinstance(raw_pr.get("body"), str)
-                or type(raw_pr.get("isDraft")) is not bool
-            ):
-                raise RuntimeError("Authoritative PR query returned invalid PR identity metadata.")
     if not raw_prs:
         return None
-    raw_pr = raw_prs[0]
-    checks_state, checks_summary = _aggregate_status_check_rollup(raw_pr.get("statusCheckRollup"))
-    raw_pr_number = raw_pr.get("number")
-    return PullRequestContext(
-        pr_url=str(raw_pr.get("url", "")),
-        branch=str(raw_pr.get("headRefName", branch)),
-        head_sha=str(raw_pr.get("headRefOid", "")),
-        base_sha=str(raw_pr.get("baseRefOid", "")),
-        mergeable=_normalize_mergeable(raw_pr.get("mergeable")),
-        checks_state=checks_state,
-        checks_summary=checks_summary,
-        number=int(raw_pr_number) if raw_pr_number is not None else None,
-        body=str(raw_pr.get("body", "") or ""),
-        is_draft=raw_pr.get("isDraft") if isinstance(raw_pr.get("isDraft"), bool) else None,
-    )
+    pr_context = _build_pull_request_context(client, raw_prs[0], require_success=require_success)
+    if require_success and pr_context is not None and pr_context.branch != branch:
+        raise RuntimeError("Authoritative REST PR query returned a different head branch.")
+    return pr_context
 
 
 def get_pull_request_context_by_number(
@@ -179,59 +302,23 @@ def get_pull_request_context_by_number(
     Raises:
         RuntimeError: 严格读取不能确认该 PR 身份时。
     """
-    result = client._run_with_retry(
-        [
-            "gh",
-            "pr",
-            "view",
-            str(pr_number),
-            "--json",
-            "url,number,body,headRefName,headRefOid,baseRefOid,mergeable,statusCheckRollup,isDraft",
-        ],
-        cwd=client.repo_path,
-        check=False,
-    )
-    if result.return_code != 0:
-        if require_success:
-            raise RuntimeError(f"Cannot establish PR context for PR #{pr_number}.")
-        return None
     try:
-        raw_pr = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        if require_success:
-            raise RuntimeError("Authoritative PR query returned malformed JSON.") from exc
+        raw_pr = _request_rest_json(
+            client,
+            f"repos/{client._get_owner_repo()}/pulls/{pr_number}",
+        )
+    except GitHubApiRateLimitError:
         raise
-    if not isinstance(raw_pr, dict):
+    except Exception as exc:  # noqa: BLE001 - non-strict callers keep their best-effort behavior.
         if require_success:
-            raise RuntimeError("Authoritative PR query returned an invalid object.")
+            raise RuntimeError(f"Cannot establish PR context for PR #{pr_number}: {exc}") from exc
         return None
-    head_sha = raw_pr.get("headRefOid")
-    if require_success and (
-        type(raw_pr.get("number")) is not int
-        or raw_pr.get("number") != pr_number
-        or not isinstance(raw_pr.get("url"), str)
-        or not raw_pr["url"].startswith("https://")
-        or not isinstance(raw_pr.get("headRefName"), str)
-        or not isinstance(head_sha, str)
-        or len(head_sha) != 40
-        or any(character not in "0123456789abcdefABCDEF" for character in head_sha)
-        or not isinstance(raw_pr.get("body"), str)
-        or type(raw_pr.get("isDraft")) is not bool
-    ):
-        raise RuntimeError(f"Authoritative PR query returned invalid identity for PR #{pr_number}.")
-    checks_state, checks_summary = _aggregate_status_check_rollup(raw_pr.get("statusCheckRollup"))
-    return PullRequestContext(
-        pr_url=str(raw_pr.get("url", "")),
-        branch=str(raw_pr.get("headRefName", "")),
-        head_sha=str(head_sha or ""),
-        base_sha=str(raw_pr.get("baseRefOid", "")),
-        mergeable=_normalize_mergeable(raw_pr.get("mergeable")),
-        checks_state=checks_state,
-        checks_summary=checks_summary,
-        number=pr_number,
-        body=str(raw_pr.get("body", "") or ""),
-        is_draft=raw_pr.get("isDraft") if isinstance(raw_pr.get("isDraft"), bool) else None,
-    )
+    pr_context = _build_pull_request_context(client, raw_pr, require_success=require_success)
+    if require_success and pr_context is not None and pr_context.number != pr_number:
+        raise RuntimeError(
+            f"Authoritative REST PR query returned invalid identity for PR #{pr_number}."
+        )
+    return pr_context
 
 
 def comment_pr(client: _ClientProtocol, pr_number: int, body: str) -> None:
@@ -368,24 +455,20 @@ def close_pull_request(
 
 
 def list_pr_comments(client: _ClientProtocol, pr_number: int) -> list[str]:
-    """Return raw comment bodies for a PR."""
-    result = client._run_with_retry(
-        [
-            "gh",
-            "pr",
-            "view",
-            str(pr_number),
-            "--comments",
-            "--json",
-            "comments",
-        ],
-        cwd=client.repo_path,
-        check=False,
-    )
-    if result.return_code != 0:
+    """读取 PR 对话区中的评论正文。"""
+    try:
+        owner_repo = client._get_owner_repo()
+        raw_pages = _request_rest_json(
+            client,
+            f"repos/{owner_repo}/issues/{pr_number}/comments",
+            paginate=True,
+        )
+        comments = _flatten_rest_pages(raw_pages)
+    except GitHubApiRateLimitError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - preserve best-effort comment reads.
+        _logger.warning("Unable to load comments for PR #%d: %s", pr_number, exc)
         return []
-    raw_data = json.loads(result.stdout or "{}")
-    comments = raw_data.get("comments", [])
     return [str(c.get("body", "")) for c in comments if c.get("body")]
 
 
@@ -411,36 +494,34 @@ def _find_pr_by_head_state(
     require_success: bool,
 ) -> str | None:
     """按来源分支和 PR 状态查询 URL，并可要求响应足以证明查询成功。"""
-    result = client._run_with_retry(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--head",
-            branch,
-            "--state",
-            state,
-            "--json",
-            "url",
-        ],
-        cwd=client.repo_path,
-        check=False,
-    )
-    if result.return_code != 0:
-        if require_success:
-            raise RuntimeError(f"Cannot query {state} PRs for branch {branch}.")
-        return None
-    if require_success and not result.stdout.strip():
-        raise RuntimeError(
-            f"{state.title()} PR query returned an empty response for branch {branch}."
+    owner_repo = client._get_owner_repo()
+    owner = owner_repo.split("/", 1)[0]
+    rest_state = "open" if state == "open" else "closed"
+    query = urlencode({"state": rest_state, "head": f"{owner}:{branch}"})
+    try:
+        raw_prs = _request_rest_json(
+            client,
+            f"repos/{owner_repo}/pulls?{query}",
+            per_page=True,
         )
-    raw_prs = json.loads(result.stdout or "[]")
+    except GitHubApiRateLimitError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - preserve the existing strict/best-effort split.
+        if require_success:
+            raise RuntimeError(f"Cannot query {state} PRs for branch {branch}: {exc}") from exc
+        return None
+    if not isinstance(raw_prs, list):
+        if require_success:
+            raise RuntimeError(
+                f"{state.title()} PR query returned an invalid list for branch {branch}."
+            )
+        return None
     if require_success and (
         not isinstance(raw_prs, list)
         or any(
             not isinstance(raw_pr, dict)
-            or not isinstance(raw_pr.get("url"), str)
-            or not raw_pr["url"].startswith("https://")
+            or not isinstance(raw_pr.get("html_url"), str)
+            or not raw_pr["html_url"].startswith("https://")
             for raw_pr in raw_prs
         )
     ):
@@ -449,9 +530,15 @@ def _find_pr_by_head_state(
         )
     if not isinstance(raw_prs, list):
         return None
-    if not raw_prs:
+    matching_prs = [
+        raw_pr
+        for raw_pr in raw_prs
+        if isinstance(raw_pr, dict)
+        and (state == "open" or (state == "merged" and raw_pr.get("merged_at") is not None))
+    ]
+    if not matching_prs:
         return None
-    return str(raw_prs[0].get("url", ""))
+    return str(matching_prs[0].get("html_url", ""))
 
 
 def get_remote_base_sha(client: _ClientProtocol, remote: str, base_branch: str) -> str:

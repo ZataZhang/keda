@@ -27,9 +27,9 @@ from backend.core.use_cases.agent_runner_commit import (
     read_commit_request,
     remove_commit_request,
 )
+from backend.core.use_cases.agent_runner_git import has_rebase_metadata
 from backend.core.use_cases.agent_runner_feedback import (
     build_recovery_prompt,
-    failed_verification_results,
 )
 from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
@@ -118,7 +118,7 @@ def _read_active_rebase_target_branch(
         if rev_parse_result.return_code != 0:
             continue
         head_name_path = worktree_path / Path(rev_parse_result.stdout.strip())
-        if head_name_path.exists():
+        if head_name_path.is_file():
             raw = head_name_path.read_text(encoding="utf-8")
             return _normalize_rebase_target_name(raw)
     return None
@@ -516,6 +516,66 @@ def guard_supervisor_action_for_pr_state(
     return action_result
 
 
+def _current_rebase_conflict_commit(
+    worktree_path: Path,
+    process_runner: IProcessRunner,
+) -> str:
+    """读取当前 rebase 正在重放的提交 SHA。"""
+    result = process_runner.run(
+        ["git", "rev-parse", "REBASE_HEAD"],
+        cwd=worktree_path,
+        check=False,
+    )
+    return result.stdout.strip() if result.return_code == 0 else ""
+
+
+def _is_completed_rebase_for_expected_head(
+    worktree_path: Path,
+    process_runner: IProcessRunner,
+    *,
+    pr_branch: str,
+    expected_head: str,
+    remote: str,
+) -> bool:
+    """确认 worktree 自愈已把预期 PR head 成功 rebase 并完成。"""
+    if get_current_branch(worktree_path, process_runner) != pr_branch:
+        return False
+    if has_rebase_metadata(worktree_path, process_runner):
+        return False
+    if has_changes(worktree_path, process_runner):
+        return False
+
+    original_head_result = process_runner.run(
+        ["git", "rev-parse", "ORIG_HEAD"],
+        cwd=worktree_path,
+        check=False,
+    )
+    if (
+        original_head_result.return_code != 0
+        or original_head_result.stdout.strip() != expected_head
+    ):
+        return False
+
+    reflog_result = process_runner.run(
+        ["git", "reflog", "-1", "--format=%gs", "HEAD"],
+        cwd=worktree_path,
+        check=False,
+    )
+    expected_reflog = f"rebase (finish): returning to refs/heads/{pr_branch}"
+    if reflog_result.return_code != 0 or reflog_result.stdout.strip() != expected_reflog:
+        return False
+
+    remote_tracking_ref = f"refs/remotes/{remote}/{pr_branch}"
+    remote_head_result = process_runner.run(
+        ["git", "rev-parse", remote_tracking_ref],
+        cwd=worktree_path,
+        check=False,
+    )
+    return (
+        remote_head_result.return_code == 0 and remote_head_result.stdout.strip() == expected_head
+    )
+
+
 def execute_rebase(
     *,
     issue: IssueSummary,
@@ -541,17 +601,27 @@ def execute_rebase(
     Returns:
         Verification results after rebase.
     """
-    # 校验 HEAD 与分支，防止在错误状态上执行 rebase
-    current_head = get_head_sha(worktree_path, process_runner)
-    if current_head != expected_head:
-        raise RuntimeError(
-            f"Rebase aborted: HEAD {current_head} does not match expected {expected_head}"
-        )
-
-    _ensure_rebase_context_matches_pr_branch(worktree_path, process_runner, pr_branch)
-
     remote = config.git.remote
     base_branch = config.git.base_branch
+
+    # 校验 HEAD 与分支，防止在错误状态上执行 rebase。
+    current_head = get_head_sha(worktree_path, process_runner)
+    if current_head != expected_head:
+        if not _is_completed_rebase_for_expected_head(
+            worktree_path,
+            process_runner,
+            pr_branch=pr_branch,
+            expected_head=expected_head,
+            remote=remote,
+        ):
+            raise RuntimeError(
+                f"Rebase aborted: HEAD {current_head} does not match expected {expected_head}"
+            )
+        # worktree 自愈已把 expected_head 完整 rebase 到新 head；从该结果继续确认
+        # 最新 base，并通过 force-with-lease 发布，避免因旧 head 检查重复失败。
+        expected_head = current_head
+    else:
+        _ensure_rebase_context_matches_pr_branch(worktree_path, process_runner, pr_branch)
 
     # 拉取最新 base，减少再次冲突概率
     process_runner.run(
@@ -568,7 +638,27 @@ def execute_rebase(
 
     if rebase_result.return_code != 0:
         max_attempts = max(0, config.post_pr_supervisor.max_repair_attempts)
-        for attempt in range(1, max_attempts + 1):
+        attempt = 0
+        invocation_attempt = 0
+        current_conflict_commit = _current_rebase_conflict_commit(
+            worktree_path,
+            process_runner,
+        )
+
+        def reset_attempt_budget_for_next_commit() -> None:
+            """rebase 推进到下一提交时重置该提交的冲突修复次数。"""
+            nonlocal attempt, current_conflict_commit
+            next_conflict_commit = _current_rebase_conflict_commit(
+                worktree_path,
+                process_runner,
+            )
+            if next_conflict_commit and next_conflict_commit != current_conflict_commit:
+                current_conflict_commit = next_conflict_commit
+                attempt = 0
+
+        while attempt < max_attempts:
+            attempt += 1
+            invocation_attempt += 1
             diff_names_result = process_runner.run(
                 ["git", "diff", "--name-only", "--diff-filter=U"],
                 cwd=worktree_path,
@@ -599,6 +689,7 @@ def execute_rebase(
                     )
                     return verification_results
                 # continue 失败说明仍有未解决冲突，进入下一轮让 agent 处理
+                reset_attempt_budget_for_next_commit()
                 continue
 
             if conflicted_files:
@@ -627,7 +718,7 @@ def execute_rebase(
                 issue=issue,
                 model_selection=model_selection,
                 invocation_phase=PHASE_SUPERVISOR,
-                invocation_attempt=attempt,
+                invocation_attempt=invocation_attempt,
             )
 
             # Agent 通过 commit-request.json 显式表达提交意图
@@ -641,16 +732,6 @@ def execute_rebase(
                     raise RuntimeError("Agent requested a commit but produced no file changes.")
                 validate_safe_changes(worktree_path, config, process_runner)
                 process_runner.run(["git", "add", "-A"], cwd=worktree_path)
-                # continue 前验证冲突解决结果
-                verification_results = run_verification(worktree_path, config, process_runner)
-                if failed_verification_results(verification_results):
-                    # 验证失败则取消 staging，让 agent 下一轮继续修
-                    process_runner.run(
-                        ["git", "reset", "--mixed"],
-                        cwd=worktree_path,
-                        check=False,
-                    )
-                    continue
                 continue_result = process_runner.run(
                     ["git", "-c", "core.editor=true", "rebase", "--continue"],
                     cwd=worktree_path,
@@ -671,6 +752,7 @@ def execute_rebase(
                         cwd=worktree_path,
                     )
                     return verification_results
+                reset_attempt_budget_for_next_commit()
             else:
                 # Agent 未写 commit-request 却改文件，拒绝
                 if has_changes(worktree_path, process_runner):
@@ -698,6 +780,7 @@ def execute_rebase(
                         cwd=worktree_path,
                     )
                     return verification_results
+                reset_attempt_budget_for_next_commit()
 
         # 重试用尽后回退 rebase
         process_runner.run(

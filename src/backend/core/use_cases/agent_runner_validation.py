@@ -51,6 +51,7 @@ from backend.core.use_cases.agent_runner_evidence_format import (
 )
 from backend.core.use_cases.agent_runner_feedback import (
     extract_prd_path,
+    format_result_for_recovery,
 )
 from backend.core.use_cases.agent_runner_git import (
     expand_changed_path,
@@ -689,7 +690,8 @@ def _validate_stdout_assertions(block: EvidenceBlock, command_result: CommandRes
 
     Raises:
         ValidationEvidenceError: 任一断言未被满足。错误消息指明断言序号、
-            pattern、source，便于 agent 直接定位改哪条。
+            pattern、source，并附带限长后的命令退出码、stdout 与 stderr，便于
+            agent 和 Console 页面直接定位失败输出。
     """
     for assertion_index, assertion in enumerate(block.stdout_assertions, start=1):
         if _is_stdout_assertion_satisfied(assertion, command_result):
@@ -705,7 +707,9 @@ def _validate_stdout_assertions(block: EvidenceBlock, command_result: CommandRes
             f"{assertion.source} (severity={assertion.severity}, "
             f"command `{block.command}`). An exit code of 0 is not proof the "
             "checkpoint holds — remove `|| true` / `|| echo ok` style fallbacks and "
-            "make the command actually assert, or correct the declared assertion."
+            "make the command actually assert, or correct the declared assertion.\n\n"
+            "Captured command result:\n"
+            f"{format_result_for_recovery(command_result)}"
         )
 
 
@@ -730,7 +734,8 @@ def ensure_validation_commands_pass(
     仍由 ``ensure_validation_evidence_ready`` 单独把关,缓存命中不绕过它。
 
     Raises:
-        ValidationEvidenceError: 任一命令被 keda 复跑后未通过或超时。
+        ValidationEvidenceError: 任一命令被 keda 复跑后未通过或超时；非零退出与
+            stdout 断言失败会在错误详情中附带命令、退出码、stdout 和 stderr。
     """
     if not config.validation.reexecute_commands:
         return
@@ -798,7 +803,8 @@ def ensure_validation_commands_pass(
         if result.return_code != 0:
             raise ValidationEvidenceError(
                 f"Realistic Validation item {block.item_number} failed when keda "
-                f"re-ran its command: `{block.command}` exited {result.return_code}. "
+                "re-ran its command.\n\n"
+                f"{format_result_for_recovery(result)}\n\n"
                 "keda re-executes RV commands to confirm they actually pass — the "
                 "agent's evidence file alone is not trusted. Fix the behavior so the "
                 "command passes (or correct the command). Set "

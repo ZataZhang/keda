@@ -28,15 +28,18 @@ exist so callers can keep using the historical
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 from typing import Sequence
+from urllib.parse import urlsplit
 
+from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
 from backend.core.shared.models.agent_spec import AgentSpec
 from backend.infrastructure.github_helpers import (
+    _GITHUB_API_RATE_LIMIT_PATTERN,
     _RETRYABLE_GH_ERROR_PATTERNS,
     sanitize_github_body,
 )
@@ -52,8 +55,8 @@ from backend.infrastructure.github_issue_ops import (
     list_issue_label_names,
     list_issues_by_label,
     list_ready_issues,
-    list_rework_prd_issues,
     list_review_candidate_issues,
+    list_rework_prd_issues,
 )
 from backend.infrastructure.github_labels import sync_labels
 from backend.infrastructure.github_models import (
@@ -64,8 +67,8 @@ from backend.infrastructure.github_models import (
     PullRequestSummary,
 )
 from backend.infrastructure.github_pr_ops import (
-    comment_pr,
     close_pull_request,
+    comment_pr,
     create_draft_pr,
     find_merged_pr_by_head,
     find_open_pr_by_head,
@@ -102,6 +105,33 @@ _MAX_GH_RETRIES = 3
 _GH_RETRY_DELAY_SECONDS = 1.0
 
 
+def _owner_repo_from_remote_url(remote_url: str) -> str | None:
+    """从 origin remote URL 提取 owner/repository，避免为 REST 路径调用 GraphQL。"""
+    normalized_url = remote_url.strip()
+    if not normalized_url:
+        return None
+    if "://" in normalized_url:
+        remote_path = urlsplit(normalized_url).path
+    elif "@" in normalized_url and ":" in normalized_url.split("@", 1)[1]:
+        remote_path = normalized_url.split(":", 1)[1]
+    else:
+        remote_path = normalized_url
+    path_parts = [part for part in remote_path.strip("/").removesuffix(".git").split("/") if part]
+    if len(path_parts) < 2:
+        return None
+    return "/".join(path_parts[-2:])
+
+
+def _normalize_owner_repo(value: object) -> str | None:
+    """校验配置中的 GitHub 仓库名是否为 ``owner/name``。"""
+    if not isinstance(value, str):
+        return None
+    owner_repo_parts = [part for part in value.strip().strip("/").split("/") if part]
+    if len(owner_repo_parts) != 2:
+        return None
+    return "/".join(owner_repo_parts)
+
+
 class GitHubCliClient:
     """Small wrapper around the GitHub CLI.
 
@@ -118,6 +148,8 @@ class GitHubCliClient:
         """
         self.repo_path = repo_path
         self._runner = process_runner or SubprocessRunner()
+        self._github_api_rate_limited: set[str] = set()
+        self._owner_repo_cache: str | None = None
 
     # --- core invocation primitives -------------------------------------
 
@@ -125,6 +157,33 @@ class GitHubCliClient:
         """Return True when a failed ``gh`` call looks like a transient network error."""
         combined_output = (exc.stdout or "") + "\n" + (exc.stderr or "")
         return any(pattern.search(combined_output) for pattern in _RETRYABLE_GH_ERROR_PATTERNS)
+
+    @staticmethod
+    def _github_api_kind(command: Sequence[str]) -> str | None:
+        """按 GitHub CLI 命令识别它使用的 API 配额类型。"""
+        if len(command) < 2 or command[0] != "gh":
+            return None
+        if command[1] == "api":
+            uses_graphql_endpoint = any(
+                token.lower() == "graphql" or token.lower().endswith("/graphql")
+                for token in command[2:]
+            )
+            return "graphql" if uses_graphql_endpoint else "rest"
+        if command[1] in {"issue", "pr", "repo", "search"}:
+            return "graphql"
+        if command[1] in {"label"}:
+            return "rest"
+        return None
+
+    def _raise_if_rate_limited(self, output_text: str, command: Sequence[str]) -> None:
+        """将 GitHub 明确报告的 API 限流转成用例层可识别的延期信号。"""
+        if _GITHUB_API_RATE_LIMIT_PATTERN.search(output_text):
+            api_kind = self._github_api_kind(command)
+            if api_kind is not None:
+                self._github_api_rate_limited.add(api_kind)
+            raise GitHubApiRateLimitError(
+                "GitHub API rate limit exceeded; the Issue was deferred for a later poll."
+            )
 
     def _run_with_retry(
         self,
@@ -136,17 +195,22 @@ class GitHubCliClient:
         capture_output: bool = True,
         input_text: str | None = None,
     ) -> CommandResult:
-        """Run a ``gh`` command, retrying a limited number of times on transient errors.
+        """执行 ``gh`` 命令，对瞬时网络错误有限重试并按 API 类型隔离限流。
 
-        Retries are only attempted when ``check=True`` and the failure matches
-        one of the known transient network patterns (timeouts, DNS failures,
-        or HTTP 5xx responses from GitHub).
+        GitHub 明确返回限流时立即抛出延期信号；GraphQL 配额耗尽不会阻断 REST 恢复请求。
         """
+
+        api_kind = self._github_api_kind(command)
+        if api_kind in self._github_api_rate_limited:
+            raise GitHubApiRateLimitError(
+                "GitHub API rate limit was reached earlier in this pass; "
+                f"remaining {api_kind} operations were deferred."
+            )
 
         last_exc: subprocess.CalledProcessError | None = None
         for attempt in range(1, _MAX_GH_RETRIES + 1):
             try:
-                return self._runner.run(
+                command_result = self._runner.run(
                     command,
                     cwd=cwd,
                     check=check,
@@ -154,8 +218,19 @@ class GitHubCliClient:
                     capture_output=capture_output,
                     input_text=input_text,
                 )
+                if command_result.return_code != 0:
+                    self._raise_if_rate_limited(
+                        (command_result.stdout or "") + "\n" + (command_result.stderr or ""),
+                        command,
+                    )
+                return command_result
             except subprocess.CalledProcessError as exc:
                 last_exc = exc
+                combined_output = (exc.stdout or "") + "\n" + (exc.stderr or "")
+                try:
+                    self._raise_if_rate_limited(combined_output, command)
+                except GitHubApiRateLimitError as rate_limit_exc:
+                    raise rate_limit_exc from exc
                 if not check or attempt >= _MAX_GH_RETRIES or not self._is_retryable_gh_error(exc):
                     raise
                 _logger.warning(
@@ -170,30 +245,61 @@ class GitHubCliClient:
         raise last_exc  # type: ignore[misc]
 
     def _write_body_file(self, temp_dir: str, filename: str, body: str) -> Path:
-        """Sanitize a Markdown body and write it for a ``--body-file`` flag.
+        """清理 Markdown 正文并写入临时文件，供 GitHub CLI 文件字段读取。
 
-        Routing every body through :func:`sanitize_github_body` keeps raw
-        control characters and oversized payloads from triggering GitHub's
-        ``400 Bad Request`` rejection.
+        所有正文都经过 :func:`sanitize_github_body`，避免控制字符或超长内容触发 GitHub
+        ``400 Bad Request`` 拒绝。
         """
         body_path = Path(temp_dir) / filename
         body_path.write_text(sanitize_github_body(body), encoding="utf-8")
         return body_path
 
     def _get_owner_repo(self) -> str:
-        """Return 'owner/name' for the current repository."""
-        result = self._run_with_retry(
-            ["gh", "repo", "view", "--json", "nameWithOwner"],
+        """从仓库配置或 Git remote 读取 ``owner/name`` 并缓存结果。"""
+        if self._owner_repo_cache is not None:
+            return self._owner_repo_cache
+
+        owner_repo = self._get_owner_repo_from_repository_config()
+        if owner_repo is None:
+            owner_repo = self._get_owner_repo_from_git_remotes()
+        if owner_repo is not None:
+            self._owner_repo_cache = owner_repo
+            return owner_repo
+        raise RuntimeError(
+            "Unable to determine repository owner/name: set "
+            "[agent_runner.repository].github_repo in .kedacode.toml or add a GitHub remote."
+        )
+
+    def _get_owner_repo_from_repository_config(self) -> str | None:
+        """读取仓库级 KedaCode 配置中的 GitHub 仓库名。"""
+        config_path = self.repo_path / ".kedacode.toml"
+        try:
+            raw_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            return None
+        runner_config = raw_config.get("agent_runner")
+        if not isinstance(runner_config, dict):
+            return None
+        repository_config = runner_config.get("repository")
+        if not isinstance(repository_config, dict):
+            return None
+        return _normalize_owner_repo(repository_config.get("github_repo"))
+
+    def _get_owner_repo_from_git_remotes(self) -> str | None:
+        """从任意本地 Git remote 读取仓库名，兼容 remote 不叫 origin 的仓库。"""
+        result = self._runner.run(
+            ["git", "remote", "-v"],
             cwd=self.repo_path,
             check=False,
         )
-        if result.return_code != 0:
-            raise RuntimeError(f"Unable to determine repository owner/name: {result.stderr}")
-        raw_data = json.loads(result.stdout or "{}")
-        owner_repo = raw_data.get("nameWithOwner")
-        if not owner_repo:
-            raise RuntimeError("gh repo view did not return nameWithOwner")
-        return str(owner_repo)
+        for remote_line in (result.stdout or "").splitlines():
+            remote_fields = remote_line.split()
+            if len(remote_fields) < 2:
+                continue
+            owner_repo = _owner_repo_from_remote_url(remote_fields[1])
+            if owner_repo is not None:
+                return owner_repo
+        return None
 
     def _list_issue_label_names(self, issue_number: int) -> set[str]:
         """Convenience wrapper retained for backward compatibility."""

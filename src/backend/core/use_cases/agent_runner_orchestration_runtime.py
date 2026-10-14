@@ -1,12 +1,21 @@
 """Agent Runner 的单轮队列调度实现。"""
 
 from __future__ import annotations
+
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
+
+from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+from backend.core.shared.models.agent_runner import TokenUsage
+from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_invocation_tracing import (
+    bound_invocation_trace_context,
+    build_invocation_trace_context,
+)
 from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
     AggregateQueueCompletionRequest,
     check_aggregate_candidate_shortfall,
@@ -21,11 +30,19 @@ from backend.core.use_cases.agent_runner_dependencies import (
     mark_dependency_waiting,
     parse_dependency_marker,
 )
+from backend.core.use_cases.agent_runner_direct_pr_label import PublishStageSelection
 from backend.core.use_cases.agent_runner_failure_marking import (
     _mark_issue_blocked,
     _mark_issue_failed,
 )
+from backend.core.use_cases.agent_runner_lifecycle import (
+    LifecycleEventType,
+    build_attempt_event_detail,
+    record_lifecycle_event,
+    record_lifecycle_terminal,
+)
 from backend.core.use_cases.agent_runner_orchestrate import (
+    _READY_DISCOVERY_LIMIT,
     AppConfig,
     AttemptResult,
     ForbiddenBlockedError,
@@ -35,7 +52,6 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     IRunHistoryStore,
     IRunnerLiveView,
     IssueSummary,
-    _READY_DISCOVERY_LIMIT,
     _append_run_record_locked,
     _guard_blocked_issue_has_resolution,
     _guard_running_issue_is_rework,
@@ -53,41 +69,28 @@ from backend.core.use_cases.agent_runner_orchestration_models import (
     PrdReworkRequest,
     RunOnceRequest,
 )
-from backend.core.shared.models.agent_runner import TokenUsage
-from backend.core.shared.models.publish_stage import PublishStage
-from backend.core.use_cases.agent_invocation_tracing import (
-    bound_invocation_trace_context,
-    build_invocation_trace_context,
-)
-from backend.core.use_cases.agent_runner_direct_pr_label import PublishStageSelection
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
     issue_output_routing,
-)
-from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
-from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
-from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
-from backend.core.use_cases.agent_runner_lifecycle import (
-    LifecycleEventType,
-    build_attempt_event_detail,
-    record_lifecycle_event,
-    record_lifecycle_terminal,
-)
-from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
-from backend.core.use_cases.agent_runner_worktree_probe import (
-    _has_existing_local_commit_ready_for_publish,
-    _worktree_needs_rebase_recovery,
 )
 from backend.core.use_cases.agent_runner_prd_activity import (
     PrdActivityConflictError,
     PrdActivityLease,
 )
+from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
+from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
+from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
+from backend.core.use_cases.agent_runner_worktree_probe import (
+    _has_existing_local_commit_ready_for_publish,
+    _worktree_needs_rebase_recovery,
+)
+from backend.core.use_cases.backlog_concurrency import count_live_running_issues
 from backend.core.use_cases.create_prd_from_issue import (
     CreatePrdFromIssueRequest,
     create_prd_from_issue,
 )
+from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
-from backend.core.use_cases.backlog_concurrency import count_live_running_issues
 
 RUNTIME_DEPENDENCY_NAMES = (
     "_process_ready_issue",
@@ -119,11 +122,8 @@ def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
 def process_prd_rework_issues(request: PrdReworkRequest) -> None:
     """处理标记为 PRD rework 的 Issue。
 
-    在正常的 ready Issue 执行之前调用：为每个 Issue 建/复用 ``issue-<N>``
-    worktree，在 worktree 内生成或重写 PRD、commit 进 ``issue-<N>`` 分支并经
-    draft PR 落地，随后更新 Issue body/labels/comments。主工作树保持干净。
-    单个 Issue 失败时记录错误并继续处理后续 Issue，不让 PRD 生成阶段污染
-    ready Issue 执行阶段。
+    ready 执行前为每个 Issue 建/复用 ``issue-<N>`` worktree，生成/重写 PRD，
+    提交到对应分支并经 draft PR 发布，再更新 Issue；失败只记录并继续，不影响主工作树和 ready 队列。
 
     Args:
         repo_path: 目标仓库路径。
@@ -237,7 +237,7 @@ def _process_single_issue(
         event_type=LifecycleEventType.STARTED,
         actor="runner",
         occurred_at=run_started_at.isoformat(timespec="seconds"),
-        detail={"agent": selected_agent, "issue_kind": issue_kind},
+        detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
     )
     record_lifecycle_event(
         store=run_history_store,
@@ -248,7 +248,7 @@ def _process_single_issue(
         event_type=LifecycleEventType.CLAIMED,
         actor="runner",
         occurred_at=run_started_at.isoformat(timespec="seconds"),
-        detail={"agent": selected_agent, "issue_kind": issue_kind},
+        detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
     )
 
     def _on_attempt_recorded(result: AttemptResult, attempt_results: list[AttemptResult]) -> None:
@@ -481,6 +481,10 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 0
+    except GitHubApiRateLimitError:
+        output_view.update_status(issue.number, "skipped")
+        raise
+
     except ForbiddenBlockedError as exc:
         _mark_issue_blocked(
             issue=issue,

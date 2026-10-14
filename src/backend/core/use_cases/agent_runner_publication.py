@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -246,7 +247,9 @@ def _push_changes_with_recovery_context(request: _PushChangesRequest) -> str:
             request.process_runner,
             expected_branch=request.expected_branch,
         )
-    except Exception as exc:  # noqa: BLE001 - 标签清理与 push 都是发布边界。
+    except Exception as exc:  # 标签清理与 push 都是发布边界。
+        if isinstance(exc, GitHubApiRateLimitError):
+            raise
         raise PublishFailureError(
             str(exc),
             worktree_path=request.worktree_path,
@@ -283,6 +286,8 @@ def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest
             content_generator=request.content_generator,
             publish_stage=request.publish_stage,
         )
+    except GitHubApiRateLimitError:
+        raise
     except Exception as exc:  # noqa: BLE001 - 提前发布失败不应改变 verifier 结论。
         _logger.warning(
             "Could not create the pre-verifier Draft PR for Issue #%d; "
@@ -316,12 +321,16 @@ def _create_draft_pr_with_recovery_context(
             publish_stage=publish_stage,
         )
     except DraftPRCreationError as exc:
+        if isinstance(exc.__cause__, GitHubApiRateLimitError):
+            raise exc.__cause__ from exc
         raise PublishFailureError(
             str(exc),
             worktree_path=worktree_path,
             failure_category=PublishFailureCategory.PR_CREATE,
         ) from exc
     except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+        if isinstance(exc, GitHubApiRateLimitError):
+            raise
         raise PublishFailureError(
             str(exc),
             worktree_path=worktree_path,
@@ -357,7 +366,9 @@ def _edit_issue_labels_after_publish(
             add=add_labels,
             remove=remove_labels,
         )
-    except Exception as exc:  # noqa: BLE001 - surface category for recovery.
+    except Exception as exc:  # surface category for recovery.
+        if isinstance(exc, GitHubApiRateLimitError):
+            raise
         raise PublishFailureError(
             f"Failed to update labels after publish: {exc}",
             worktree_path=worktree_path,
@@ -375,7 +386,9 @@ def _comment_issue_after_publish(
     """Post a publish comment and preserve recovery context on GitHub failures."""
     try:
         github_client.comment_issue(issue_number, comment_body)
-    except Exception as exc:  # noqa: BLE001 - surface category for recovery.
+    except Exception as exc:  # surface category for recovery.
+        if isinstance(exc, GitHubApiRateLimitError):
+            raise
         raise PublishFailureError(
             f"Failed to post draft PR comment: {exc}",
             worktree_path=worktree_path,

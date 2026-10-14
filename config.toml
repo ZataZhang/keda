@@ -714,6 +714,7 @@ supervisor_agent = "auto"
 #   executor - 交回本次实现者；拿不到本次实现者时按 Issue 标签回落并在日志中注明来源
 #   其它     - 任意已注册 agent 名
 repair_agent = "self"
+# rebase 按当前待重放提交限制冲突修复次数；成功推进到下一提交后重置
 max_repair_attempts = 2
 max_agent_crash_retries = 5
 crash_retry_initial_backoff_seconds = 30

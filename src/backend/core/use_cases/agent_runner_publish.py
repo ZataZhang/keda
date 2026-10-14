@@ -7,6 +7,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -27,20 +28,6 @@ from backend.core.use_cases.agent_runner_git import (
     list_changed_paths,
     list_git_remotes,
 )
-from backend.core.use_cases.agent_runner_validation import (
-    build_validation_checklist_block,
-    ensure_no_evidence_paths_in_changes,
-    extract_realistic_validation_items,
-    validation_required,
-    resolve_issue_evidence_relpath,
-)
-from backend.core.use_cases.agent_runner_pr_fallback import build_pr_fallback_body
-from backend.core.use_cases.generated_content import (
-    build_pr_context,
-    generate_pr_content,
-)
-from backend.core.use_cases.generated_prd_content import ensure_prd_machine_contract_available
-from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
 from backend.core.use_cases.agent_runner_pr_body_contract import (
     append_missing_contract_anchors,
     build_contract_annotation_block,
@@ -48,6 +35,20 @@ from backend.core.use_cases.agent_runner_pr_body_contract import (
     find_pr_body_contract_violations,
     load_prd_publish_contract,
 )
+from backend.core.use_cases.agent_runner_pr_fallback import build_pr_fallback_body
+from backend.core.use_cases.agent_runner_validation import (
+    build_validation_checklist_block,
+    ensure_no_evidence_paths_in_changes,
+    extract_realistic_validation_items,
+    resolve_issue_evidence_relpath,
+    validation_required,
+)
+from backend.core.use_cases.generated_content import (
+    build_pr_context,
+    generate_pr_content,
+)
+from backend.core.use_cases.generated_prd_content import ensure_prd_machine_contract_available
+from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
 
 
 class DraftPRCreationError(RuntimeError):
@@ -237,7 +238,7 @@ def _format_publish_stage_annotation(
     if publish_stage is PublishStage.FAST:
         marker = format_fast_merge_marker(issue_number)
         human_note = (
-            "> **快速通道发布**：本 PR 经快速通道发布，未经过自动化验证门禁，" "合并前请人工验证。"
+            "> **快速通道发布**：本 PR 经快速通道发布，未经过自动化验证门禁，合并前请人工验证。"
         )
     elif publish_stage is PublishStage.DIRECT:
         marker = format_direct_pr_marker(issue_number)
@@ -430,6 +431,8 @@ def create_draft_pr(
             base_branch=config.git.base_branch,
             cwd=worktree_path,
         )
+    except GitHubApiRateLimitError:
+        raise
     except Exception as exc:
         raise DraftPRCreationError(str(exc)) from exc
     if active_direct_round:

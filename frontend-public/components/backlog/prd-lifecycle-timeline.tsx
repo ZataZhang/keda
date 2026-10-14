@@ -1,6 +1,7 @@
 "use client";
 
-// PRD「执行过程」时间线：执行会话 → Agent 尝试 → 调用 三级分组与展示层去噪。
+// PRD「执行过程」视图：先按实现 / 修复 / 收尾 / 校验 / 审核 / 监督展示业务阶段，
+// 再提供执行会话 → Agent 尝试 → 调用的完整事件轨迹。
 //
 // 事实源分工是这里所有判断的前提：
 // - 阶段与耗时口径来自后端生命周期账本，前端只做格式化（口径见 prd-lifecycle-format）。
@@ -14,25 +15,21 @@
 //   的原始事件仍可单独点开查看原始 detail，账本内容零改写、零删除。
 
 import { useState } from "react";
-import type { ReactNode } from "react";
 
 import {
-  describeInvocationModel,
-  EVENT_TYPE_LABELS,
-  eventStatusLabel,
   formatLifecycleDuration,
-  INVOCATION_PHASE_LABELS,
-  INVOCATION_ROLE_LABELS,
   INVOCATION_RUN_DETAIL_KEY,
-  invocationOutcomeBadge,
-  isObservationEvent,
-  PHASE_LABELS,
-  phaseBadgeVariant,
-  statusBadgeVariant,
-  summarizeEventDetail,
-  summarizeTokenUsage,
 } from "@/components/backlog/prd-lifecycle-format";
-import { Badge } from "@/components/ui/badge";
+import {
+  EventRowItem,
+  invocationGapKindOf,
+  InvocationRows,
+} from "@/components/backlog/prd-lifecycle-row-components";
+import type {
+  EventRow,
+  InvocationGapKind,
+  PrdLifecycleDisplayProps,
+} from "@/components/backlog/prd-lifecycle-row-components";
 import { formatLocalDateTime } from "@/lib/utils";
 import type {
   PrdInvocationDetail,
@@ -49,12 +46,6 @@ const SAME_SECOND_MERGE_GROUPS: string[][] = [
 
 /** attempt detail 里表示「这次没失败」的字面值，摘要中不作为失败类别展示。 */
 const SUCCESS_FAILURE_TYPE = "success";
-
-/** 折叠后的一行：主事件 + 同秒被折叠进来的事件（仍各自可点开原始 detail）。 */
-type EventRow = {
-  primary: PrdLifecycleEventView;
-  folded: PrdLifecycleEventView[];
-};
 
 /** 一个执行会话分组：会话标识 + 会话级事件行 + 各 Agent 尝试分组。 */
 type SessionGroup = {
@@ -81,31 +72,6 @@ type AttemptSummary = {
 
 /** 尝试族事件类型——它们带着 attempt detail，是摘要的唯一事实源。 */
 const ATTEMPT_FAMILY_EVENT_TYPES = new Set(["attempt", "retry", "recovered"]);
-
-/** 尝试展开区空态的成因：可读 / 读取失败 / 响应未携带该区域 / 读取被截断。 */
-type InvocationGapKind = "available" | "unavailable" | "absent" | "truncated";
-
-/**
- * 判定尝试展开区空态该说哪一种成因。
- *
- * 「读不到」「没带这个区」「只读到最近一段」「确实没有记录」是四件不同的事，说错成因
- * 会让人去修错误的一端：截断时这次尝试的调用**存在**，只是没被返回，不能写成
- * 「观测早于本次执行上线」。
- *
- * @param invocations - 调用明细读取区；``null``/``undefined`` 表示响应未带该区域。
- * @returns 空态成因标签；``available`` 表示账本可读且未截断，确实没有这一尝试的记录。
- */
-function invocationGapKindOf(
-  invocations: PrdInvocationDetail | null | undefined,
-): InvocationGapKind {
-  if (invocations === null || invocations === undefined) {
-    return "absent";
-  }
-  if (!invocations.available) {
-    return "unavailable";
-  }
-  return invocations.truncated ? "truncated" : "available";
-}
 
 /** 尝试展开区没有调用行时按成因分别说明，不把「无从归属」说成「读取失败」。 */
 const ATTEMPT_INVOCATION_EMPTY_TEXT: Record<InvocationGapKind, string> = {
@@ -315,195 +281,26 @@ function attemptSummaryParts(summary: AttemptSummary): string | null {
 }
 
 /**
- * 渲染单个事件行（主事件 + 同秒折叠项）。
- *
- * 主事件的 testid 落在按钮本身（沿用既有交互契约：点行即开抽屉），折叠项各自
- * 成一个小按钮，同样可点开原始 detail——去噪只减少行数，不减少可达的信息。
- *
- * @param props.row - 折叠后的行。
- * @param props.onSelectEvent - 打开事件抽屉的回调（折叠项同样可点开）。
- * @returns 一行 `<li>`。
- */
-function EventRowItem({
-  row,
-  onSelectEvent,
-}: {
-  row: EventRow;
-  onSelectEvent: (event: PrdLifecycleEventView) => void;
-}) {
-  return (
-    <li className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 text-sm">
-      <button
-        type="button"
-        data-testid={`prd-lifecycle-event-${row.primary.event_type}`}
-        onClick={() => onSelectEvent(row.primary)}
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-900"
-      >
-        <time className="font-mono text-[11px] text-slate-500">
-          {formatLocalDateTime(row.primary.occurred_at)}
-        </time>
-        <EventBadgePair event={row.primary} />
-        <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-          {summarizeEventDetail(row.primary)}
-        </span>
-      </button>
-      {row.folded.map((foldedEvent, foldedIndex) => (
-        <button
-          key={`${foldedEvent.event_type}-${foldedEvent.occurred_at}-${foldedIndex}`}
-          type="button"
-          data-testid={`prd-lifecycle-event-${foldedEvent.event_type}`}
-          onClick={() => onSelectEvent(foldedEvent)}
-          className="flex items-center gap-x-2 rounded border border-slate-200 px-2 py-0.5 text-xs transition-colors hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-        >
-          <span className="text-slate-400">+</span>
-          <EventBadgePair event={foldedEvent} inline />
-        </button>
-      ))}
-    </li>
-  );
-}
-
-/**
- * 事件标题与状态徽章。
- *
- * 纯观测事件（Token 用量）使用中性文案，不借用阶段语义，避免出现
- * 「Token 用量 · 未开始」这类与事实不符的徽章。
- *
- * @param props.event - 单条生命周期事件。
- * @param props.inline - 折叠项里省略时间戳后的紧凑形态。
- * @returns 标题 + 徽章片段。
- */
-function EventBadgePair({ event, inline = false }: { event: PrdLifecycleEventView; inline?: boolean }) {
-  if (isObservationEvent(event.event_type)) {
-    return (
-      <>
-        <span className="font-medium">{EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}</span>
-        <Badge variant="default" data-testid={`prd-lifecycle-event-status-${event.event_type}`}>
-          观测记录
-        </Badge>
-        {!inline ? <span className="text-xs text-slate-500">{event.actor}</span> : null}
-      </>
-    );
-  }
-  const statusForBadge = event.status && event.status !== "none" ? event.status : null;
-  return (
-    <>
-      <span className="font-medium">{EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}</span>
-      {statusForBadge ? (
-        <Badge variant={statusBadgeVariant(statusForBadge)} data-testid={`prd-lifecycle-event-status-${event.event_type}`}>
-          {eventStatusLabel(statusForBadge)}
-        </Badge>
-      ) : (
-        <Badge variant={phaseBadgeVariant(event.phase)} data-testid={`prd-lifecycle-event-status-${event.event_type}`}>
-          {PHASE_LABELS[event.phase] ?? event.phase}
-        </Badge>
-      )}
-      {!inline ? <span className="text-xs text-slate-500">{event.actor}</span> : null}
-    </>
-  );
-}
-
-/**
- * 展开一次的调用行列表。
- *
- * @param props.invocations - 该尝试的调用行（顺序即账本顺序）。
- * @returns 调用行列表。
- */
-function InvocationRows({ invocations }: { invocations: PrdInvocationRow[] }) {
-  return (
-    <ul className="mt-2 space-y-2">
-      {invocations.map((invocation, index) => {
-        const outcomeBadge = invocationOutcomeBadge(invocation.outcome);
-        const tokensSummary = summarizeTokenUsage(invocation.token_usage);
-        return (
-          <li
-            key={invocation.invocation_id}
-            data-testid="prd-lifecycle-invocation-row"
-            className="rounded-md border border-slate-200 px-3 py-2 text-xs dark:border-slate-800"
-          >
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-slate-500">第 {index + 1} 次调用</span>
-              <span className="font-medium">
-                {INVOCATION_PHASE_LABELS[invocation.phase] ?? invocation.phase}
-              </span>
-              <span className="text-slate-500">
-                {invocation.executor || "Agent 未记录"}
-                {invocation.role
-                  ? ` · ${INVOCATION_ROLE_LABELS[invocation.role] ?? invocation.role}`
-                  : ""}
-              </span>
-              <Badge variant={outcomeBadge.variant}>{outcomeBadge.label}</Badge>
-              {invocation.retry_of ? (
-                <span className="text-slate-500" data-testid="prd-lifecycle-invocation-retry-of">
-                  替代上一次调用{invocation.retry_reason ? `（${invocation.retry_reason}）` : ""}
-                </span>
-              ) : null}
-            </div>
-            <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
-              <FieldRow label="开始">{formatLocalDateTime(invocation.started_at ?? "")}</FieldRow>
-              <FieldRow label="结束" testId="prd-lifecycle-invocation-finished">
-                {invocation.finished_at ? formatLocalDateTime(invocation.finished_at) : "未闭合"}
-              </FieldRow>
-              <FieldRow label="耗时" testId="prd-lifecycle-invocation-duration">
-                {/* 未闭合调用的 duration 恒为 null：显示未记录，不估算。 */}
-                {invocation.duration_seconds === null ? "未记录" : formatLifecycleDuration(invocation.duration_seconds)}
-              </FieldRow>
-              <FieldRow label="模型">{describeInvocationModel(invocation)}</FieldRow>
-              {invocation.failure_category ? (
-                <FieldRow label="失败类别">{invocation.failure_category}</FieldRow>
-              ) : null}
-              {invocation.exit_code !== null ? (
-                <FieldRow label="退出码">{invocation.exit_code}</FieldRow>
-              ) : null}
-              {tokensSummary ? <FieldRow label="用量">{tokensSummary}</FieldRow> : null}
-              {invocation.log_locator ? (
-                <FieldRow label="日志">
-                  <span className="break-all font-mono">{invocation.log_locator}</span>
-                </FieldRow>
-              ) : null}
-            </dl>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/**
- * 调用行里的一个「标签：值」字段。
- *
- * @param props.label - 字段名。
- * @param props.testId - 可选 testid，供端到端断言定位固定字段。
- * @param props.children - 已格式化的字段值。
- * @returns 一行 dt/dd。
- */
-function FieldRow({
-  label,
-  testId,
-  children,
-}: {
-  label: string;
-  testId?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex gap-2" data-testid={testId}>
-      <dt className="shrink-0 text-slate-500">{label}</dt>
-      <dd className="min-w-0 break-words font-medium">{children}</dd>
-    </div>
-  );
-}
-
-/**
  * 会话级「其他调用」：账本里存在、但不属于任何已展示尝试的调用行。
  *
  * `closeout` / `content_generation` 这类调用本来就没有尝试编号，验证或收尾调用也
  * 可能落在没有事件的历史尝试上。它们同样是已落库事实，收在这里而不是让它们消失。
  *
  * @param props.invocations - 该会话内未关联到尝试的调用行（顺序即账本顺序）。
+ * @param props.lifecycleEvents - 用于关联实现调用来源和尝试结论的会话事件。
  * @returns 可展开的调用行区块。
  */
-function OtherInvocationBlock({ invocations }: { invocations: PrdInvocationRow[] }) {
+function OtherInvocationBlock({
+  invocations,
+  lifecycleEvents,
+  attemptDetails,
+  attemptDetailsStatus,
+}: {
+  invocations: PrdInvocationRow[];
+  lifecycleEvents: PrdLifecycleEventView[];
+  attemptDetails: PrdLifecycleDisplayProps["attemptDetails"];
+  attemptDetailsStatus: PrdLifecycleDisplayProps["attemptDetailsStatus"];
+}) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div
@@ -524,7 +321,14 @@ function OtherInvocationBlock({ invocations }: { invocations: PrdInvocationRow[]
           {expanded ? "收起调用序列" : `展开调用序列（${invocations.length} 次）`}
         </button>
       </div>
-      {expanded ? <InvocationRows invocations={invocations} /> : null}
+      {expanded ? (
+        <InvocationRows
+          invocations={invocations}
+          lifecycleEvents={lifecycleEvents}
+          attemptDetails={attemptDetails}
+          attemptDetailsStatus={attemptDetailsStatus}
+        />
+      ) : null}
     </div>
   );
 }
@@ -533,24 +337,31 @@ function OtherInvocationBlock({ invocations }: { invocations: PrdInvocationRow[]
  * 一个 Agent 尝试分组：尝试事件行 + 可展开的调用序列。
  *
  * @param props.attempt - 尝试分组。
+ * @param props.lifecycleEvents - 用于关联实现调用来源和尝试结论的会话事件。
  * @param props.invocationGap - 调用明细区的缺口成因，决定展开区空态怎么说。
  * @param props.onSelectEvent - 打开事件抽屉的回调。
  */
 function AttemptGroupBlock({
   attempt,
+  lifecycleEvents,
   invocationGap,
   onSelectEvent,
+  attemptDetails,
+  attemptDetailsStatus,
 }: {
   attempt: AttemptGroup;
+  lifecycleEvents: PrdLifecycleEventView[];
   invocationGap: InvocationGapKind;
   onSelectEvent: (event: PrdLifecycleEventView) => void;
+  attemptDetails: PrdLifecycleDisplayProps["attemptDetails"];
+  attemptDetailsStatus: PrdLifecycleDisplayProps["attemptDetailsStatus"];
 }) {
   const [expanded, setExpanded] = useState(false);
   const invocationCount = attempt.invocations.length;
   const summary = attemptSummaryOf(attempt);
   return (
     <div
-      className="mt-2 rounded-md border border-slate-200 px-3 dark:border-slate-800"
+      className="ml-3 mt-2 rounded-lg border border-slate-200 bg-white px-3 dark:border-slate-800 dark:bg-slate-950"
       data-testid="prd-lifecycle-attempt-group"
       data-attempt-number={attempt.attemptNumber}
     >
@@ -568,23 +379,30 @@ function AttemptGroupBlock({
           aria-expanded={expanded}
           data-testid="prd-lifecycle-attempt-toggle"
           onClick={() => setExpanded((current) => !current)}
-          className="text-xs text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300"
+          className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-medium text-violet-800 transition-colors hover:bg-violet-100 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-900/50"
         >
           {expanded ? "收起调用序列" : `展开调用序列（${invocationCount} 次）`}
         </button>
       </div>
-      <ul
-        data-testid="prd-lifecycle-attempt-events"
-        className="divide-y divide-slate-200 dark:divide-slate-800"
-      >
+      <ul data-testid="prd-lifecycle-attempt-events">
         {attempt.eventRows.map((row, index) => (
-          <EventRowItem key={eventRowKey(row, index)} row={row} onSelectEvent={onSelectEvent} />
+          <EventRowItem
+            key={eventRowKey(row, index)}
+            row={row}
+            onSelectEvent={onSelectEvent}
+            isLast={index === attempt.eventRows.length - 1}
+          />
         ))}
       </ul>
       {expanded ? (
         <div className="pb-3">
           {invocationCount > 0 ? (
-            <InvocationRows invocations={attempt.invocations} />
+            <InvocationRows
+              invocations={attempt.invocations}
+              lifecycleEvents={lifecycleEvents}
+              attemptDetails={attemptDetails}
+              attemptDetailsStatus={attemptDetailsStatus}
+            />
           ) : (
             <p className="mt-2 rounded border border-dashed border-slate-300 p-2 text-xs text-slate-500 dark:border-slate-700" data-testid="prd-lifecycle-invocation-empty">
               {ATTEMPT_INVOCATION_EMPTY_TEXT[invocationGap]}
@@ -607,13 +425,13 @@ function AttemptGroupBlock({
 export function PrdLifecycleTimeline({
   events,
   invocations,
+  attemptDetails,
+  attemptDetailsStatus,
   onSelectEvent,
-}: {
-  events: PrdLifecycleEventView[];
-  invocations: PrdInvocationDetail | null | undefined;
-  onSelectEvent: (event: PrdLifecycleEventView) => void;
-}) {
-  if (events.length === 0) {
+}: PrdLifecycleDisplayProps) {
+  const invocationGap = invocationGapKindOf(invocations);
+  const invocationRows = invocations?.rows ?? [];
+  if (events.length === 0 && invocationRows.length === 0) {
     return (
       <p className="text-xs text-slate-500" data-testid="prd-lifecycle-timeline-empty">
         暂无生命周期事件。
@@ -622,8 +440,6 @@ export function PrdLifecycleTimeline({
   }
 
   const { sessions, unattributedRows } = groupSessions(events);
-  const invocationGap = invocationGapKindOf(invocations);
-  const invocationRows = invocations?.rows ?? [];
   const sessionRunIds = new Set(sessions.map((session) => session.runId));
   // 调用行带着会话标识，但对应执行会话的生命周期事件没有该标识（旧执行）：这类行
   // 不进任何分组，只披露条数——按时间窗口把它们塞进某个会话就是编造关联。
@@ -642,13 +458,14 @@ export function PrdLifecycleTimeline({
       {sessions.length === 0 ? (
         <ul
           data-testid="prd-lifecycle-flat-events"
-          className="divide-y divide-slate-200 dark:divide-slate-800"
+          className="rounded-xl border border-slate-200 bg-white px-3 dark:border-slate-800 dark:bg-slate-950"
         >
           {unattributedRows.map((row, index) => (
             <EventRowItem
               key={eventRowKey(row, index)}
               row={row}
               onSelectEvent={onSelectEvent}
+              isLast={index === unattributedRows.length - 1}
             />
           ))}
         </ul>
@@ -670,22 +487,22 @@ export function PrdLifecycleTimeline({
               <section
                 key={session.runId ?? session.firstOccurredAt}
                 data-testid="prd-lifecycle-session-group"
-                className="rounded-md border border-slate-200 px-3 pb-2 dark:border-slate-800"
+                className="rounded-xl border border-violet-200/80 bg-violet-50/30 px-4 pb-3 shadow-sm dark:border-violet-900/70 dark:bg-violet-950/10"
               >
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 text-xs text-slate-500">
-                  <span className="font-medium text-slate-700 dark:text-slate-200">执行会话</span>
-                  <span className="font-mono">{session.runId}</span>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-violet-100 py-2 text-xs text-slate-500 dark:border-violet-950">
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">执行会话</span>
+                  <span className="break-all font-mono text-violet-700 dark:text-violet-300">
+                    {session.runId}
+                  </span>
                   <span>开始：{formatLocalDateTime(session.firstOccurredAt)}</span>
                 </div>
-                <ul
-                  data-testid="prd-lifecycle-session-events"
-                  className="divide-y divide-slate-200 dark:divide-slate-800"
-                >
+                <ul data-testid="prd-lifecycle-session-events">
                   {session.eventRows.map((row, index) => (
                     <EventRowItem
                       key={eventRowKey(row, index)}
                       row={row}
                       onSelectEvent={onSelectEvent}
+                      isLast={index === session.eventRows.length - 1}
                     />
                   ))}
                 </ul>
@@ -698,12 +515,20 @@ export function PrdLifecycleTimeline({
                         (invocation) => invocation.attempt_number === attempt.attemptNumber,
                       ),
                     }}
+                    lifecycleEvents={events}
                     invocationGap={invocationGap}
                     onSelectEvent={onSelectEvent}
+                    attemptDetails={attemptDetails}
+                    attemptDetailsStatus={attemptDetailsStatus}
                   />
                 ))}
                 {otherInvocationRows.length > 0 ? (
-                  <OtherInvocationBlock invocations={otherInvocationRows} />
+                  <OtherInvocationBlock
+                    invocations={otherInvocationRows}
+                    lifecycleEvents={events}
+                    attemptDetails={attemptDetails}
+                    attemptDetailsStatus={attemptDetailsStatus}
+                  />
                 ) : null}
               </section>
             );
@@ -713,13 +538,14 @@ export function PrdLifecycleTimeline({
               <p className="text-xs text-slate-500">以下事件没有执行会话标识，保持原顺序平铺：</p>
               <ul
                 data-testid="prd-lifecycle-unattributed-events"
-                className="divide-y divide-slate-200 dark:divide-slate-800"
+                className="mt-2 rounded-xl border border-slate-200 bg-white px-3 dark:border-slate-800 dark:bg-slate-950"
               >
                 {unattributedRows.map((row, index) => (
                   <EventRowItem
                     key={`unattributed-${eventRowKey(row, index)}`}
                     row={row}
                     onSelectEvent={onSelectEvent}
+                    isLast={index === unattributedRows.length - 1}
                   />
                 ))}
               </ul>
@@ -776,7 +602,7 @@ function InvocationGapNotice({
   }
   if (unmatchedInvocationCount > 0) {
     notices.push(
-      `另有 ${unmatchedInvocationCount} 条调用记录所属的执行会话在生命周期事件里没有标识，无法归属，因此不显示其调用序列（也不按时间窗口猜测归属）。`,
+      `另有 ${unmatchedInvocationCount} 条调用记录的执行会话没有对应事件标识；它们已按明确的调用 phase 列在上方阶段总览，不并入下方任何事件会话。`,
     );
   }
   if (notices.length === 0) {

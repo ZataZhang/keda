@@ -371,6 +371,11 @@ _GH_ISSUE_EDIT_ADD_LABEL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_REBASE_HEAD_MISMATCH_PATTERN = re.compile(
+    r"Rebase aborted:\s*HEAD\s+[0-9a-f]{7,40}\s+does not match expected\s+[0-9a-f]{7,40}",
+    re.IGNORECASE,
+)
+
 
 def _detect_transition_target_label(exc: BaseException) -> str | None:
     """Return the target workflow label if ``exc`` is a failed transition.
@@ -404,6 +409,11 @@ def _detect_transition_target_label(exc: BaseException) -> str | None:
 def _is_completion_workflow_label(label: str) -> bool:
     """Return whether ``label`` represents a post-implementation workflow state."""
     return label in _COMPLETION_WORKFLOW_LABELS
+
+
+def _is_rebase_head_mismatch_failure(failure_text: str) -> bool:
+    """判断失败是否为 PR rebase 后 HEAD 与旧预期值不匹配。"""
+    return _REBASE_HEAD_MISMATCH_PATTERN.search(failure_text) is not None
 
 
 def detect_usage_limit_root_cause(failure_text: str) -> str | None:
@@ -547,21 +557,20 @@ def format_failure_comment(
     *,
     issue_number: int | None = None,
 ) -> str:
-    """Build a failure comment with root-cause summary and attempt history.
+    """构建包含根因、尝试历史和恢复建议的失败评论。
 
-    Known failure signatures (currently API usage limits) are surfaced as a
-    bolded root-cause line at the top. A ``CalledProcessError`` cause is
-    rendered with the short command name and truncated output instead of
-    ``str(exc)``, which would echo the entire agent prompt.
+    已知错误特征（当前包括 API 限额）会在评论顶部展示根因摘要。
+    ``CalledProcessError`` 的原因会使用简短命令名和截断后的输出，避免把完整
+    Agent 提示词写进 Issue。rebase 后 HEAD 与旧预期值不匹配时，评论提示续接
+    已有 PR 的发布/监督流程，不会建议重新启动实现任务。
 
     Args:
-        exc: The exception that caused the failure.
-        attempt_results: Optional attempt history rendered as a table.
-        issue_number: When provided, a recovery guidance section with a
-            copy-pastable relabel command is appended to the comment. If the
-            exception is a failed workflow-label transition to a completion
-            state (e.g. ``agent/supervising``), the guidance retries that
-            transition instead of falling back to ``agent/ready``.
+        exc: 导致失败的异常。
+        attempt_results: 可选的尝试历史表格。
+        issue_number: 提供后会在评论末尾添加恢复建议；具体命令根据失败阶段决定。
+
+    Returns:
+        格式化后的 Markdown 评论正文。
     """
     cause = exc.__cause__
     if isinstance(cause, subprocess.CalledProcessError):
@@ -609,6 +618,28 @@ def format_failure_comment(
                     f"(`git worktree remove <repo>-worktrees/tasks/issue-{issue_number}`). "
                     "See the 失败重跑 section in `docs/guides/agent-runner.md` "
                     "for the full procedure.",
+                    "",
+                ]
+            )
+        elif _is_rebase_head_mismatch_failure(searchable_failure_text):
+            lines.extend(
+                [
+                    "### How To Recover",
+                    "",
+                    "The supervisor found that the PR branch HEAD changed during rebase. "
+                    "The rebase may already have completed, so do not relabel this Issue "
+                    "to `agent/ready` and start a new implementation pass.",
+                    "",
+                    "If the Issue worktree contains the rebased branch and the PR already "
+                    "exists, resume publication and supervision with:",
+                    "",
+                    "```bash",
+                    f"kc recover --issue {issue_number}",
+                    "```",
+                    "",
+                    "If the worktree and PR head do not match, inspect both before retrying; "
+                    "do not delete a dirty worktree. See the “已有 PR 的 rebase HEAD 不匹配” "
+                    "row in the `docs/guides/agent-runner.md` recovery table.",
                     "",
                 ]
             )
@@ -821,19 +852,17 @@ def format_failure_context_comment(
 
 
 def format_minimal_failure_comment(exc: BaseException, *, issue_number: int | None = None) -> str:
-    """Build a compact failure comment used as a posting fallback.
+    """构建完整失败评论无法发布时使用的精简评论。
 
-    The full failure report embeds agent command output, which GitHub can
-    reject (oversized or control characters). When that happens the caller
-    falls back to this short, structured summary so the operator still learns
-    that the run failed and how to recover, instead of the reason being lost.
+    完整报告可能因包含过长输出或控制字符而被 GitHub 拒绝。此时使用短摘要保留
+    失败原因和恢复方式；rebase HEAD 不匹配仍引导续接已有 PR，而不是重新排队。
 
     Args:
-        exc: The exception that caused the failure.
-        issue_number: When provided, a copy-pastable relabel command is
-            appended so the operator can re-queue the Issue. If the exception
-            is a failed workflow-label transition to a completion state, the
-            guidance retries that transition instead of ``agent/ready``.
+        exc: 导致失败的异常。
+        issue_number: 提供后会按失败阶段附加可复制的恢复命令。
+
+    Returns:
+        精简版 Markdown 失败评论正文。
     """
     exc_message = str(exc).strip()
     failure_summary = exc_message.splitlines()[0] if exc_message else type(exc).__name__
@@ -860,6 +889,21 @@ def format_minimal_failure_comment(exc: BaseException, *, issue_number: int | No
                     "```bash",
                     f"gh issue edit {issue_number} "
                     f"--add-label {transition_label} --remove-label agent/failed",
+                    "```",
+                ]
+            )
+        elif _is_rebase_head_mismatch_failure(exc_message):
+            lines.extend(
+                [
+                    "",
+                    "### How To Recover",
+                    "",
+                    "The rebase may already have completed. If the PR branch contains the "
+                    "rebased head, resume its publish/review workflow instead of marking "
+                    "the Issue `agent/ready`:",
+                    "",
+                    "```bash",
+                    f"kc recover --issue {issue_number}",
                     "```",
                 ]
             )

@@ -332,16 +332,18 @@ rebase 到最新 base 时进程退出），会把 Issue 的 worktree 留在 **de
 |---|---|
 | 本机活跃 attempt 状态 | Issue 上最近一条 claim 标记（`<!-- iar:claim host= pid= started_at= agent= -->`）与该 PID 是否存活 |
 | Issue label | 是否仍是 `agent/running`（已关闭、已改别的状态一律不碰） |
-| comment attempt history | 该 Issue 此前已被对账处置的次数（决定恢复预算是否耗尽） |
+| Issue comments | attempt history 用于恢复预算；生命周期 marker 用于识别尚未完成的 post-PR 返工 |
 | worktree 现场文件状态 | `kc worktree path` 可得、目录存在且 `.git` 指针仍在 |
 
 处置出口**恰好三个**，每个都写一条 `## Stale Attempt Reconciled` comment，四要素齐全（中断时间 /
 中断原因分类 / 处置结论 / 依据），表格风格与既有 Attempt History 一致：
 
 1. `resume-session`（续传恢复）：worktree 完好 + 上轮 agent 声明了续传能力 + worktree 里留有
-   session 记录 → 回 `agent/ready`，下一轮 claim 直接续上原会话。
-2. `re-enqueue`（重新入队）：上述任一条件不满足（agent 不可识别 / 不支持续传 / 无会话记录）→ 回
-   `agent/ready`，全新会话重跑。
+   session 记录 → 普通实现任务回 `agent/ready`，下一轮 claim 直接续上原会话。
+2. `re-enqueue`（重新入队）：上述任一条件不满足（agent 不可识别 / 不支持续传 / 无会话记录）→
+   普通实现任务回 `agent/ready`，全新会话重跑。如果 comments 中仍有未消费的
+   `post_pr_rework_requested` marker，则保留 `agent/running`，下一轮按返工路径执行，
+   不重新启动普通实现。
 3. `mark-failed`（判失败）：worktree 不可解析（路径不存在或 `.git` 指针丢失，重跑只会在坏目录上
    白跑一轮），或跨进程恢复预算已耗尽（复用既有 `runner.max_recovery_attempts`，不新增预算键）。
 
@@ -349,7 +351,7 @@ rebase 到最新 base 时进程退出），会把 Issue 的 worktree 留在 **de
 一律原样保留——宁可漏对账，也不把健康任务重新入队造成双跑。
 
 对账动作幂等：comment 末尾带隐藏标记 `<!-- iar:reconcile hash="<16hex>" seq="<n>" -->`，hash 覆盖
-Issue / 主机 / PID / 中断时间 / agent / 处置结论（不含 seq）。同一判定重放时零新增 comment；若上次
+Issue / 主机 / PID / 中断时间 / agent / 处置结论 / 是否仍有返工（不含 seq）。同一判定重放时零新增 comment；若上次
 是在"comment 已写、label 未改回"之间被打断（写序固定为**先 comment 后 label**），重放会补齐那次缺失
 的 label 写回而不再评论一次，因此不存在永久半完成态，也不会并发领取同一 worktree。
 
@@ -577,8 +579,8 @@ id = "target-repo"
 enabled = true
 # 管理终端 / 日志中显示的友好名称
 display_name = "target-repo"
-# 可选：GitHub owner/name（``gh pr list --repo`` 使用）。
-# 缺省时 ``kc issue list`` 的 PR 列为空 + stderr 一次性 WARN。
+# 可选：GitHub owner/name；GitHub API 操作优先使用此值。
+# 缺省时从 Git remote URL 推断；两者都缺失时明确报配置错误，不查询 GitHub 元数据。
 github_repo = "owner/target-repo"
 
 # Git 发布配置：推送 remote、目标基础分支 base_branch
@@ -914,7 +916,7 @@ supervisor_agent = "auto"
 # executor（交回本次实现者，拿不到本次实现者时按 Issue 标签回落并在日志中注明来源）/
 # 任意已注册 agent 名
 repair_agent = "self"
-# supervisor 要求修复时的最大修复 / rebase 次数
+# supervisor 自动修复轮数上限；rebase 冲突按当前待重放提交计数，推进后重置
 max_repair_attempts = 2
 # supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数
 max_agent_crash_retries = 5
@@ -1191,7 +1193,8 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 1. **远程分支对齐**：如果 `refs/remotes/<remote>/issue-<number>` 存在，则 fetch 并仅当本地分支是其祖先、且 worktree 干净时做 fast-forward；dirty、diverged 或本地领先场景会保留本地状态并失败/继续，不会 destructive reset。
 2. **分支状态自愈**：如果 worktree 处于 detached HEAD（例如 post-PR supervisor 正在 rebase 或被人工 checkout 到某个 commit），runner 会尝试自动恢复：
-   - 处于 active rebase 时：无冲突则 `rebase --continue`；有冲突则调用配置的 AI agent 解决冲突并继续 rebase，和 post-PR supervisor 的冲突解决策略一致。只有 agent 在 `max_repair_attempts` 次尝试后仍无法解决，才会 fallback 到 `rebase --abort` 并 checkout 目标分支。
+   - 处于 active rebase 时：无冲突则 `rebase --continue`；有冲突则调用配置的 AI agent 解决冲突并继续 rebase，和 post-PR supervisor 的冲突解决策略一致。`max_repair_attempts` 限制同一待重放提交的冲突修复次数；rebase 成功推进到下一提交后计数重置，并在整个 rebase 完成后统一验证。agent 在该提交的次数上限内仍无法解决，才会 fallback 到 `rebase --abort` 并 checkout 目标分支。
+   - 如果这次自愈替 post-PR supervisor 完成了 rebase，后续 supervisor 会校验原始 head、rebase 完成记录、worktree 清洁状态和远端跟踪 head，再从已 rebased head 继续最终验证与发布。
    - 单纯 detached HEAD：若 `issue-<number>` 分支不存在或当前 HEAD 领先于该分支，则把分支指到当前 HEAD 并 checkout；若已分叉则报错，避免静默丢失历史。
 
 如果恢复失败，runner 会把 Issue 标记为 `failed` 并给出可操作的错误信息；成功则继续正常执行 agent、验证和发布流程。
@@ -1501,7 +1504,8 @@ github_repo = "owner/backend-service"
 
 - 每个仓库必须有 `path`（本地绝对路径）。
 - `enabled = false` 可临时禁用某个仓库。
-- `github_repo` 是可选的 `owner/name` 字符串；缺省时 `kc issue list` 不会调用 `gh pr list --repo <repo_id>`，PR 列留空、stderr 一次性打印 WARN 指引用户去 `config.toml` 或 `.kedacode.toml` 补字段。**该字段不参与目录名推断**——kc 不做 `git remote` 解析，必须由用户显式声明。
+- `github_repo` 是可选的 `owner/name` 字符串，供 `kc issue list` 的 PR 列以及 GitHub API 操作使用；缺省时，GitHub API 客户端从目标仓库的 Git remote URL 推断仓库身份。两处都无法提供仓库身份时会提示配置该字段，不会调用 `gh repo view` 查询 GitHub 元数据。
+- registry 配置中的 `github_repo` 仅供 `kc issue list` 查询 PR 列；GitHub API 操作仍从目标仓库自身的 `.kedacode.toml` 或 Git remote 解析仓库身份。
 - registry 通常只保留 `path` 和 `enabled`；仓库级 overrides 仍兼容，但建议迁移到目标仓库的 `.kedacode.toml`。
 - 未指定 `--repo`、`--repo-id` 或 `--all` 时，单仓库命令（如 `kc run`、`kc supervise`）只处理当前 Git 仓库；`kc daemon` 和 `kc supervise-daemon` 同样只处理当前已初始化注册仓库，未命中、未初始化或匹配多个时报错。如需监控所有 enabled registry entries，请显式使用 `--all`。
 
@@ -1964,6 +1968,10 @@ uv run kc supervise-daemon
 - 任一维度变化时，先移回 `agent/supervising`，运行 supervisor cycle
 - 无变化时不重复启动 supervisor；若最新 `post_pr_supervisor` marker 的 action 与当前标签不一致，则按已完成 action 对齐标签（approve → `agent/automated-review-passed`、wait/repair/rebase → `agent/supervising`、request input → `agent/blocked`）。pending rework marker 在 supervising 下会由 review pass 恢复执行；旧的 runner-owned marker 仍由 `kc run` 消费。
 
+Issue 队列扫描、Issue 详情/评论读取、标签和评论写入，以及 PR 上下文、检查状态、按分支查 PR 和 PR 对话评论都使用 GitHub REST API，避免 daemon 高频轮询消耗 GraphQL 配额。GraphQL 与 REST 限流熔断按 API 类型隔离；剩余的 GitHub CLI 搜索路径触发 GraphQL 限流时会延期本轮，不把 Issue 改成失败状态。
+
+GitHub API 明确返回限流时，runner 和 supervisor 会把本轮标记为延期，不触发 Agent fallback，也不把 Issue 改成 `agent/failed`；保留当前 workflow label 与已写入的事件 marker，由下一次 daemon 轮询重试。Supervisor 结果 marker 已发布、但最终标签交接被限流时，下一轮会沿用上述 marker 对齐逻辑，不会重复调用 Supervisor。
+
 Supervisor 结果评论会把自身写入后的 Issue comment 数量记录进 marker，
 因此 runner 自己写出的 `Agent Runner Post-PR Supervisor` 评论不会触发下一轮重审。
 
@@ -2376,7 +2384,7 @@ After fixing the root cause, manually re-add `agent/rework-prd` to retry.
 
 Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处理。以下是将失败 Issue 重新置为可执行状态的完整流程。
 
-> 非 publish 阶段失败的 `Agent Runner Failed` 评论末尾自带 `How To Recover` 段，包含可直接复制的 relabel 命令和本章节指向；publish 阶段失败的评论则提示 `kc recover`。两类评论的指引与本章节命令保持一致。
+> 普通实现失败的 `Agent Runner Failed` 评论末尾自带 relabel 指引；发布失败与已有 PR 的 rebase HEAD 不匹配则提示 `kc recover`。后者可能发生在 rebase 已完成、supervisor 仍持有旧 HEAD 时，不要把 Issue 重新标为 `agent/ready`。
 
 ### 错误分级与 fallback 链（escalation ladder）
 
@@ -2588,7 +2596,7 @@ agent/blocked ── 人工处理 + blocked-continue ──→ agent/running ─
 ### 何时使用 recover
 
 - Agent 已执行完毕，本地 commit 已存在
-- 发布阶段因网络错误、GitHub CLI 认证过期、API 限流等原因失败
+- 发布阶段因网络错误、GitHub CLI 认证过期或其他未被自动延期的 API 错误失败；明确的 GitHub API 限流会保留当前状态并由下一轮 daemon 重试
 - Issue 失败 comment 中包含 `kc recover --issue <number>` 提示
 - 该本地 commit 已经由正常 runner 路径完成过配置启用的 pre-PR review，失败点只在 push、PR 创建或 label/comment 更新等发布收尾阶段
 
@@ -3366,6 +3374,7 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
 - `severity`：仅用于失败信息标注，缺省 `high`
 
 断言未通过时抛 `ValidationEvidenceError`，与 exit code 非零走同一条 recovery 循环，且不会被写进 RV 复跑缓存。旧 manifest（无该字段）行为不变，只校验退出码。
+RV 命令非零退出或 stdout 断言失败时，尝试详情会保留失败命令、退出码及限长后的 stdout/stderr；Backlog 在“失败原因”中先展示摘要，展开可读完整诊断。普通仓库验证命令也沿用同一输出呈现口径。
 
 commit 前门禁           要求验证但证据与清单不匹配 → 进入 recovery，
                         重试耗尽后 agent/failed。
@@ -3769,6 +3778,7 @@ Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still r
 | 情况 | 既有路径 |
 |---|---|
 | 发布环节失败（代码是好的，push / PR / 状态没写成） | `kc recover --issue <N>` |
+| 已有 PR 的 rebase 报 `HEAD ... does not match expected` | 检查 Issue worktree 与 PR head；若 rebase 已完成，用 `kc recover --issue <N>` 续接发布与 supervisor，不要重新排入 `agent/ready` |
 | 需要重跑 | 修好原因后把 label 改回 `agent/ready`，下一轮 pass 领取 |
 | daemon 死了留下僵尸 attempt | 每轮 tick 开头的崩溃对账自动处置（`resume-session` / `re-enqueue` / `mark-failed`），见「崩溃对账与 Agent 会话续传」 |
 | 需要人决策（如 forbidden path） | 处理原因后 `kc blocked-continue --issue <N>` |
@@ -4272,7 +4282,33 @@ blocked | unblocked | failed`，其中 `merged` 收成 `completed`（已完成�
 记为 `none`，前端据此不渲染误导徽章。v8 之前的历史行 `status` 为空串，序列化时回落
 按 `event_type` 派生（`status_for_event_type`），**绝不取 run 的当前状态**——否则
 历史事件会失去当时语义。`frontend-public` 的 Backlog「执行过程」标签据此渲染逐行
-状态徽章，抽屉「状态」行同源。
+状态徽章，抽屉「状态」行同源。选中 PRD 后，Backlog 会折叠全局设置条并提供重新展开入口；
+仓库栏与 PRD 视图也会临时收起，让详情占满主内容区，页头可展开左侧栏进行切换，关闭详情后恢复常规布局。
+执行过程页分开展示阶段、运行状态
+与记录完整性，耗时指标按可用宽度自动排布。执行过程主视图固定展示实现、修复、收尾、校验、
+审核、监督六类业务阶段，并按「生命周期阶段 / 触发时机 / 做什么 / 本 PRD 记录」呈现；窄屏改为
+逐阶段字段布局，并用编号节点与纵向连线表示阶段顺序。阶段描述保留条件触发语义；例如修复阶段会在
+验证、审查或分支同步发现问题后发生，也可能因后续门禁问题再次进入。调用按 `invocation.phase` 的明确映射归类，`implementation_completed`、
+`validation_*`、`review_*` 等里程碑按事件类型归类；未记录的阶段仍保留空态，不按时间推测归属。
+运行中的阶段卡片以本次 run 的完整调用与里程碑记录标出最高已到达位置，按固定顺序只前进、不因重试或恢复调用回退；最近调用仍按真实 `invocation.phase` 单独归类。位置说明显示在线性顺序中的序号（如第 2/6 步），不表示前序门禁已经通过；修复、收尾等条件阶段只在相应问题触发时进入。调用明细不可用或已截断时，不根据执行中状态猜测更细的业务阶段。
+顶部「最近记录阶段」仍反映最近一条生命周期阶段事件（如执行中、验证中、审阅中），它是运行状态，不是六步进度位置。
+未标明阶段的失败原因显示在阶段列表之后。事件会话、Agent 尝试与调用的完整纵向轨迹收在可展开
+的次级区域。`failed`、`validation_failed`
+和 `review_failed` 事件若带有 `error_summary`，阶段卡片或失败行会直接显示原因（过长时显示前
+320 字并提示点击查看全文）；其它字段仍可在事件详情抽屉中查看。
+实现阶段展开调用明细时，每条进程调用分别显示「调用原因」「发起入口」「执行路径」与所属
+「Agent 尝试结论」：`retry_of` / `retry_reason` 解释同一尝试中的进程重试；后续 Agent 尝试则按同一
+`run_id` 下前一 `attempt_number` 的 `attempt.failure_type` 说明为何进入恢复调用。`started.run_trigger`
+说明会话由 `kc run`、`kc daemon`、Console 单次启动或 Console 守护进程发起；`started.issue_kind`
+只说明 Runner 采用的执行路径。特别是 `ready` 表示常规实现路径，定向启动也可能进入该路径，不能据此
+推断是谁把 Issue 重新放回队列或为何再次执行。缺少对应账本字段时明确显示「历史记录未保存」或
+「上游原因未记录」，不按时间邻近推测。当前尝试结论按同一会话和编号关联 `attempt` 事件。进程
+`outcome=ok` / 退出码 0 只说明该子进程正常退出，不代表所属 Agent 尝试已经通过实现门禁；
+尝试结论以生命周期 `attempt` 事件为准。进程调用明细中的失败阶段与完整诊断从同一
+Issue 的 `attempt_records` 读取，按尝试编号及生命周期事件的精确 `started_at` 关联；因此
+门禁失败但 Agent 子进程退出码为 0 时，页面会在该尝试的进程调用上显示实际失败阶段和原因，
+并列显示进程终态与尝试状态（例如「正常退出」+「尝试异常」）。后续恢复调用也会标出它由哪一阶段的失败
+触发。尝试明细读取失败或无法精确关联时会明确说明，不从时间邻近关系猜测。
 
 ### Token 用量统计与会话续接
 
@@ -4362,6 +4398,12 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
   `outcome` 沿用账本闭集（`ok / failed / timeout / error / unclosed / incomplete`）；未闭合的调用
   `finished_at` 与 `duration_seconds` 恒为空，**不补估算时长**；模型字段保持「KC 下发 / 执行器报告 /
   未提供」三态，失败与回退调用独立成行，不并入后续成功调用。
+- Backlog 展示实现调用时分开展示三个事实：调用重试取 `retry_of / retry_reason`，Agent 恢复调用
+  取同一 `run_id` 的前一 `attempt` 事件；会话发起入口取 `started.run_trigger`，执行路径取
+  `started.issue_kind`。`issue_kind=ready` 只表示进入常规实现路径，定向启动也可能走该路径，不能解释
+  Issue 为何再次进入 ready；该上游因果没有明确记录时显示未记录，不从相邻时间或 GitHub 外部状态补猜。
+  调用所属尝试的结论取同一 `run_id + attempt_number` 的 `attempt` 事件。进程 `outcome` 是子进程结局，
+  不能代替尝试结论。
 - **缺口显式披露，绝不推测回填**：`invocations=null`（该 PRD 没有关联 Issue，调用事实无从归属）、
   `available=false`（账本读端不可用：存储不具备 Issue 级调用读端、或读取异常）、
   `available=true` 且 `rows=[]`（账本可读但没有该 Issue 的调用记录，例如早于账本上线的旧库）、
@@ -4809,7 +4851,7 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 ### PRD 原文浏览
 
-在任一视图（依赖图 / 时间轴 / 列表）选中 PRD，右侧会以 **master-detail** 方式打开统一详情：左侧画布保持原样（依赖图的上下游关系因此不会丢失），详情头部展示标题、状态、路径与动作，下方是可扩展的标签容器。
+在任一视图（依赖图 / 时间轴 / 列表）选中 PRD，会打开统一详情：默认临时收起左侧仓库栏与 PRD 视图，让详情占满主内容区；页头「显示左侧栏」可恢复导航与 PRD 画布，关闭详情后回到常规布局。展开左侧栏后，列表与详情之间的分隔线可拖动调整比例；聚焦分隔线后可用左右方向键微调，按住 Shift 加大步长。详情头部展示标题、状态、路径与动作，下方是可扩展的标签容器。
 
 - 默认标签「PRD 原文」按需拉取该 PRD 的完整 Markdown 原文并渲染——标题层级、表格、代码块与验收清单的勾选状态都会保留。窄屏自动退化为上下堆叠，不引入 modal 或第二个路由。
 - 原文经只读端点 `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/content` 获取，路径编码与「开始此 PRD」按钮复用同一套 base64url 约定。

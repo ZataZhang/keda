@@ -37,6 +37,8 @@ from backend.core.use_cases.agent_runner_workflow import transition_issue_workfl
 #: 来自「每个进程对它看到的同一批投标算出同一个赢家」，宽限只是压缩「双方都还
 #: 看不见对方评论」的传播窗口，不是判据本身，因此取 1 秒而非更大值。
 CLAIM_ARBITRATION_GRACE_SECONDS = 1.0
+_CLAIM_ARBITRATION_READBACK_RETRIES = 2
+_CLAIM_ARBITRATION_READBACK_RETRY_DELAY_SECONDS = 1.0
 
 #: 只有落在这个时间窗内的认领标记才算「同一轮的并发投标」。历史认领（同一个
 #: Issue 的早先轮次、rework、发布恢复）必须被排除，否则一个旧的更早时间戳会让
@@ -245,23 +247,35 @@ def arbitrate_first_claim(
     if grace_seconds > 0:
         sleeper(grace_seconds)
 
-    try:
-        entries = github_client.list_issue_comment_entries(issue_number)
-    except Exception as exc:  # noqa: BLE001 - 无法回读就无法证明自己赢，本轮放弃
-        raise ClaimArbitrationLost(
-            f"Could not read back claim comments for Issue #{issue_number}: {exc}"
-        ) from exc
+    own_bid: ClaimBid | None = None
+    bids: list[ClaimBid] = []
+    for read_attempt in range(_CLAIM_ARBITRATION_READBACK_RETRIES + 1):
+        try:
+            entries = github_client.list_issue_comment_entries(issue_number)
+        except Exception as exc:  # noqa: BLE001 - 无法回读就无法证明自己赢，本轮放弃
+            raise ClaimArbitrationLost(
+                f"Could not read back claim comments for Issue #{issue_number}: {exc}"
+            ) from exc
 
-    bids = concurrent_bids(entries, this_host=this_host, now=effective_now, pid_alive=pid_alive)
-    own_bid = next(
-        (
-            candidate
-            for candidate in bids
-            if (candidate.host, candidate.pid, candidate.started_at)
-            == (bid.host, bid.pid, bid.started_at)
-        ),
-        None,
-    )
+        bids = concurrent_bids(
+            entries,
+            this_host=this_host,
+            now=effective_now,
+            pid_alive=pid_alive,
+        )
+        own_bid = next(
+            (
+                candidate
+                for candidate in bids
+                if (candidate.host, candidate.pid, candidate.started_at)
+                == (bid.host, bid.pid, bid.started_at)
+            ),
+            None,
+        )
+        if own_bid is not None or read_attempt == _CLAIM_ARBITRATION_READBACK_RETRIES:
+            break
+        sleeper(_CLAIM_ARBITRATION_READBACK_RETRY_DELAY_SECONDS)
+
     if own_bid is None:
         raise ClaimArbitrationLost(
             f"Own claim marker for Issue #{issue_number} was not visible on read-back; "
