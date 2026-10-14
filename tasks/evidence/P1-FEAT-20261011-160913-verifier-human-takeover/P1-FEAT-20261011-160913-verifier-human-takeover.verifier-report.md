@@ -37,3 +37,9 @@
 3. **rv-2 的真实入口 capture 新增。** `rv-2-real-entry-console-race.txt`（脚本 `scripts/rv2_real_entry_console_race_probe.py`，31 条判定、`RV2_ALL_OK: True`、item 2 整条 manifest command exit 0）进入证据包，路径数 45 → **47**；§7 rv-1 / rv-2 的 `real_entry` 已从打桩 spec 改指可执行真实入口。helper 级 `rv-2-verifier-race.txt` 保留为补充，不再是 real_entry。
 4. **本轮未关闭的一段（不勾成完成）。** rv-1 的「daemon 和第二个 Issue 继续运行」与 `negative_control`（过期 `head_sha` → 409）目前是在**真实 Console HTTP + 真实 SQLite** 层跑绿的（`STALE_HEAD_STATUS: 409 outcome=binding_mismatch other_issue_state=running other_verifier_alive=True other_accepted_audits=0`），**不在同一次浏览器运行内**；harness 的 gh transport 与 runner 脚本模板按单一 issue 写死，扩展点是那里。§9 的 rv-1 项与两条 Human-Confirmed 项因此保持 `[~]` / 空框。
 5. **`Validate Template` 红灯的处置不变。** 唯一剩余超限文件是 `src/backend/core/use_cases/pr_supervisor.py`（本树 1015 非空行、main 已 1091），blob 与 base 一致且不在本 PR 文件集内，属 main 侧既有债（仓库挂在 `fix-ci-python-file-line-limits`），`hooks/max_file_lines.allowlist.txt` 禁止新增豁免——不在本 PR 拆分。
+
+## 第十三轮门禁说明（2026-10-15）
+
+本报告仍是 executor 证据整理，不声称独立 verifier 已运行或通过。Issue #278 明确带有 `prd-auto-merge`，PR body 也记录了该授权；按仓库契约，独立 verifier 与 PRD `Human-Confirmed` hold 可跳过，但真实验证证据、仓库命令、PR checks 和分支保护不得跳过。
+
+本轮 supervisor 生命周期代码在提交 `ea61702470b5be64509b4181a2d4ceaeb1cd9cce` 上完成捕获，manifest 的 stdout 断言全部命中；main-only rebase 稳定性测试 `test_pr_change_fingerprint_survives_main_rebase_and_evidence_updates` 为 1 passed。GitHub `Realistic Validation sign-off` 在签收清单更新前仍失败；由队列在仓库验证通过后执行授权的自动签收，执行前不把它记为通过。

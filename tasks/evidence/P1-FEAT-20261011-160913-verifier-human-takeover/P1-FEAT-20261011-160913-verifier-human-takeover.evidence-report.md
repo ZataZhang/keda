@@ -66,3 +66,13 @@ rv-1、rv-2 的执行侧证据涵盖真实跨进程/SQLite、Console HTTP、负�
 3. **rv-2 的真实入口 capture 新增。** `rv-2-real-entry-console-race.txt`（脚本 `scripts/rv2_real_entry_console_race_probe.py`，31 条判定、`RV2_ALL_OK: True`、item 2 整条 manifest command exit 0）进入证据包，路径数 45 → **47**；§7 rv-1 / rv-2 的 `real_entry` 已从打桩 spec 改指可执行真实入口。helper 级 `rv-2-verifier-race.txt` 保留为补充，不再是 real_entry。
 4. **本轮未关闭的一段（不勾成完成）。** rv-1 的「daemon 和第二个 Issue 继续运行」与 `negative_control`（过期 `head_sha` → 409）目前是在**真实 Console HTTP + 真实 SQLite** 层跑绿的（`STALE_HEAD_STATUS: 409 outcome=binding_mismatch other_issue_state=running other_verifier_alive=True other_accepted_audits=0`），**不在同一次浏览器运行内**；harness 的 gh transport 与 runner 脚本模板按单一 issue 写死，扩展点是那里。§9 的 rv-1 项与两条 Human-Confirmed 项因此保持 `[~]` / 空框。
 5. **`Validate Template` 红灯的处置不变。** 唯一剩余超限文件是 `src/backend/core/use_cases/pr_supervisor.py`（本树 1015 非空行、main 已 1091），blob 与 base 一致且不在本 PR 文件集内，属 main 侧既有债（仓库挂在 `fix-ci-python-file-line-limits`），`hooks/max_file_lines.allowlist.txt` 禁止新增豁免——不在本 PR 拆分。
+
+## 第十三轮复核（executor，2026-10-15）——Supervisor 线性返工与证据身份
+
+本节覆盖本轮已完成的代码与证据复核；本节中的新结果优先于上方历史计数和“等待重录”描述。
+
+- **交付代码**：capture 在已推送的源代码提交 `ea61702470b5be64509b4181a2d4ceaeb1cd9cce`（tree `6c077fb1ed3216b2ede4e07bbe859ce03cd574f5`）上运行。该提交把 PR 分支的 rework/rebase 留在 `agent/supervising`，通过下次 review pass 按当前 PR head 恢复中断；`pr_supervisor.py` 的消息构造器拆到 `pr_supervisor_messages.py`，此前超行数门禁由此修复。Roadmap 与 `docs/guides/agent-runner.md` 已同步生命周期与用户拥有验证规则的方向。
+- **证据重录**：`rv_recapture_all.sh` 已在该代码 tree 上重录 rv-1/rv-2、浏览器 runner 与自动化测试；Playwright 真实浏览器链路为 **2 passed (16.2s)**，runner facts 中接管、目标进程退出、Draft PR 保留、Issue 转 review 和无 verifier-pass 标签等声明均为 True。manifest 两条 command 的 stdout 断言由 `rv_stdout_assertions.py` 逐条复核通过（item 1 为 42 条、item 2 为 30 条，`RV_STDOUT_ASSERTIONS: OK`）。自动化计数为 rv-1 **142 passed**，rv-2 链 **228 / 287 / 556 passed**。
+- **main-only 更新判据**：针对 `test_pr_change_fingerprint_survives_main_rebase_and_evidence_updates` 的复跑结果为 **1 passed**。当前稳定指纹以 PR 改动为范围，求 base 与 head 的 merge-base 后计算 patch-id，并排除 `tasks/evidence/**`；因此 main 单独前进或纯 rebase 不改变 PR patch 指纹。PR 自身改动变化仍会使证据失效。
+- **远端边界**：本轮源代码 head 的 GitHub checks 中，真实安装、构建、模板与前端检查通过；`Realistic Validation sign-off` 当时仍失败，因为 PR body 尚未签收。Issue 的 `prd-auto-merge` 只允许跳过独立 verifier 和 PRD 人工 hold，不免除仓库验证、该 sign-off、其余 checks 或分支保护。签收须由合并队列在仓库验证通过后完成。本报告不把该 check 写成已通过。
+- **发布判据**：本地 capture 证明行为和 stdout；GitHub 上的 `iar:validation-evidence` v2 marker 与 orphan evidence branch 才是发布事实源。marker 应显示当前 PR head、base、稳定 patch-id 和完整 evidence branch；不能用旧 v1 marker 或本地文件存在推断发布成功。

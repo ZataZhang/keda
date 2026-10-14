@@ -101,3 +101,11 @@ PRD checker `--check-provided --archive-ready` 现为 PASS（Final Reconciliatio
 3. **rv-2 的真实入口 capture 新增。** `rv-2-real-entry-console-race.txt`（脚本 `scripts/rv2_real_entry_console_race_probe.py`，31 条判定、`RV2_ALL_OK: True`、item 2 整条 manifest command exit 0）进入证据包，路径数 45 → **47**；§7 rv-1 / rv-2 的 `real_entry` 已从打桩 spec 改指可执行真实入口。helper 级 `rv-2-verifier-race.txt` 保留为补充，不再是 real_entry。
 4. **本轮未关闭的一段（不勾成完成）。** rv-1 的「daemon 和第二个 Issue 继续运行」与 `negative_control`（过期 `head_sha` → 409）目前是在**真实 Console HTTP + 真实 SQLite** 层跑绿的（`STALE_HEAD_STATUS: 409 outcome=binding_mismatch other_issue_state=running other_verifier_alive=True other_accepted_audits=0`），**不在同一次浏览器运行内**；harness 的 gh transport 与 runner 脚本模板按单一 issue 写死，扩展点是那里。§9 的 rv-1 项与两条 Human-Confirmed 项因此保持 `[~]` / 空框。
 5. **`Validate Template` 红灯的处置不变。** 唯一剩余超限文件是 `src/backend/core/use_cases/pr_supervisor.py`（本树 1015 非空行、main 已 1091），blob 与 base 一致且不在本 PR 文件集内，属 main 侧既有债（仓库挂在 `fix-ci-python-file-line-limits`），`hooks/max_file_lines.allowlist.txt` 禁止新增豁免——不在本 PR 拆分。
+
+## 第十三轮交付验证（2026-10-15）
+
+- 捕获代码 head：`ea61702470b5be64509b4181a2d4ceaeb1cd9cce` / tree `6c077fb1ed3216b2ede4e07bbe859ce03cd574f5`；`src/`、`tests/`、`docs/`、`frontend-public/` 在 capture 时无未提交变化。交付记录 tree 在本轮报告和 manifest 定稿后由 `rv_bind_tree.sh` 计算并重绑。
+- `rv_recapture_all.sh` 已重录两个真实入口与所有 manifest 自动化命令；`rv_stdout_assertions.py` 逐条对照 command 自身 stdout 通过，item 1 的 42 条与 item 2 的 30 条断言全部命中。测试计数：rv-1 入口 **142 passed**；rv-2 命令链 **228 / 287 / 556 passed**；Dashboard + API + SQLite + runner + verifier 子进程浏览器链 **2 passed (16.2s)**。
+- main 更新稳定性定向验证：`uv run pytest -o addopts='' tests/test_agent_runner_validation_identity.py::test_pr_change_fingerprint_survives_main_rebase_and_evidence_updates -q --no-testmon`，结果 **1 passed**。该 oracle 构造 main 前进/rebase 与 evidence-only 更新，确认 PR patch-id 不变；PR 自身的有效改动仍触发新证据要求。
+- 本次 source head 的 CI 曾有一个预期中的暂红：`Realistic Validation sign-off` 因 PR body checklist 尚未由队列签收；其他已结束检查通过。`prd-auto-merge` 允许跳过独立 verifier 与 PRD 人工 hold，但队列仍须完成仓库验证、PR body sign-off、所有 PR checks 和分支保护。
+- `DELIVERY_TREE` 的最终值以本提交前重绑后的 `.txt` capture 头为准；GitHub evidence v2 marker 另须在发布后检查 `head`、`base`、`patch` 与 evidence branch，不能沿用旧 v1 marker。
