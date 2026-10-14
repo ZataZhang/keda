@@ -43,3 +43,9 @@
 本报告仍是 executor 证据整理，不声称独立 verifier 已运行或通过。Issue #278 明确带有 `prd-auto-merge`，PR body 也记录了该授权；按仓库契约，独立 verifier 与 PRD `Human-Confirmed` hold 可跳过，但真实验证证据、仓库命令、PR checks 和分支保护不得跳过。
 
 本轮 supervisor 生命周期代码在提交 `ea61702470b5be64509b4181a2d4ceaeb1cd9cce` 上完成捕获，manifest 的 stdout 断言全部命中；main-only rebase 稳定性测试 `test_pr_change_fingerprint_survives_main_rebase_and_evidence_updates` 为 1 passed。GitHub `Realistic Validation sign-off` 在签收清单更新前仍失败；由队列在仓库验证通过后执行授权的自动签收，执行前不把它记为通过。
+
+## 第十四轮门禁说明（executor，2026-10-15）
+
+本报告仍是 executor 证据整理，不声称独立 verifier 已运行或通过。本轮修复的是本 PRD 自己写下却未落实的一条行为：交班除 review 态外还要落 `human/awaiting-review`（FR-3、§1 What The User Gets、rv-1 `expected`；rv-1 `expected_fail` 把缺它当负控信号）。真实浏览器入口实测该标签已落（`ISSUE_ADDED_HUMAN_TODO: True`），rv-1 与 rv-2 的其余判定逻辑、HTTP/CLI 契约与 verdict 规则一字未改。
+
+证据绑定与计数见本报告「第十四轮评审修复」小节；`Realistic Validation sign-off` 仍需 PR 证据 marker 指向最终推送 head 后才可能转绿，marker 的 `head_sha` 由 runner 在推送后现取（`agent_runner_validation_gate.py` 在 marker head 与 PR head 不一致时判 stale 并重置清单）。main 新推进带来的三处合并冲突按 PRD §14 第十四轮记的口径在 rebase 侧解决，本分支不预先 merge main。

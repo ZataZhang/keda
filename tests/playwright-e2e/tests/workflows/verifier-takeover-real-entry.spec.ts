@@ -111,6 +111,14 @@ test('真实 Dashboard 接管运行中的 verifier 并回读交班状态', async
     timeout: 30_000,
   })
   await expect(labelEditor.getByText('running', { exact: true })).toHaveCount(0)
+  // rv-1 的 expected 写的是「Issue 为 agent/automated-review-passed **且带 human/awaiting-review**」。
+  // 人工待办是独立于 workflow state 的维度，交班必须在同一次写入里把它落上：只落 review 态时，
+  // 带 prd-auto-merge 的 Issue 会得到「自动审查已过、却没有人工待办」的空档，而 autopilot_hold
+  // 已经闸住 supervisor / review_once / merge queue。界面 chip 显示去掉命名空间前缀后的可读名。
+  const HUMAN_TODO_CHIP = /^awaiting-review$/
+  await expect(labelEditor.getByText(HUMAN_TODO_CHIP)).toBeVisible({
+    timeout: 30_000,
+  })
   await expect(page.getByText(/rv1-issue-278 已刷新/)).toBeHidden({ timeout: 10_000 })
 
   await page.screenshot({

@@ -507,11 +507,12 @@ def test_takeover_handoff_does_not_mark_pr_merged_on_github_read_failure(
     row = store.get_issue_run(repo_id="repo-a", issue_number=42)
     assert row.state == STATE_TAKEN_OVER
     assert row.autopilot_hold is True
-    # PR 侧读失败不阻断 Issue 侧交接：转 review 与交接评论必须照常尝试，
+    # PR 侧读失败不阻断 Issue 侧交接：转 review、补人工待办与交接评论必须照常尝试，
     # 且评论不带失效的 PR 链接。
     review_label = AppConfig().labels.review
+    human_review_label = AppConfig().labels.human_review
     running_label = AppConfig().labels.running
-    assert github.label_moves == [(42, (review_label,), (running_label,))]
+    assert github.label_moves == [(42, (review_label, human_review_label), (running_label,))]
     assert len(github.comments) == 1
     assert "/pull/" not in github.comments[0][1]
 

@@ -564,7 +564,7 @@ def finalize_verifier_takeover(
     expected_branch: str,
     handle: VerifierRunHandle | None = None,
 ) -> None:
-    """取消确认后的交班：PR fresh-read、清理过期标签、转 review、写交接评论。
+    """取消确认后的交班：PR fresh-read、清理过期标签、转 review 并补人工待办、写交接评论。
 
     调用点在 ``_process_ready_issue`` / ``_process_blocked_resolution`` 捕获
     :class:`VerifierCancelledByHumanError` 处——此时进程树已终止、控制行已
@@ -708,17 +708,22 @@ def finalize_verifier_takeover(
                 exc,
             )
 
+    # 交班同时落 review 状态与人工待办标签（PRD FR-3 / rv-1 expected）：接管的语义是
+    # "这件事交给人"，而 synchronize_human_review_label 只给未获自动合并授权的 Issue 补
+    # 待办——本 Issue 带着 prd-auto-merge，单靠它会让 autopilot_hold 已经闸住 supervisor、
+    # review_once 与 merge queue，界面上却没有任何人工待办可寻。
     try:
         github_client.edit_issue_labels(
             issue.number,
-            add=(config.labels.review,),
+            add=(config.labels.review, config.labels.human_review),
             remove=(config.labels.running,),
         )
     except Exception as exc:  # noqa: BLE001 - 标签失败时评论仍给出人审入口。
         _logger.warning(
-            "Issue #%d: takeover handoff could not move labels to %r (%s).",
+            "Issue #%d: takeover handoff could not move labels to %r + %r (%s).",
             issue.number,
             config.labels.review,
+            config.labels.human_review,
             exc,
         )
 
