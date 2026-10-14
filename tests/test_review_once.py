@@ -16,7 +16,10 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     SupervisorActionResult,
 )
-from backend.core.use_cases.agent_runner_events import format_event_marker
+from backend.core.use_cases.agent_runner_events import (
+    format_event_marker,
+    parse_latest_pending_rework_marker,
+)
 from backend.core.use_cases.agent_runner_workflow import workflow_state_labels
 from backend.core.use_cases.pr_supervisor import build_supervisor_result_comment
 from backend.core.use_cases.review_once import (
@@ -291,6 +294,7 @@ def test_review_once_blocks_conflicting_pr_approval() -> None:
             "backend.core.use_cases.review_once.run_post_pr_supervisor_cycle",
             return_value=_supervisor_approve(),
         ),
+        patch("backend.core.use_cases.review_once._process_running_rework") as process_rework,
     ):
         outcome = _process_review_candidate(
             issue=issue,
@@ -301,13 +305,15 @@ def test_review_once_blocks_conflicting_pr_approval() -> None:
             process_runner=fake_runner,
         )
 
-    assert outcome == "queued_rebase_pr_branch"
+    assert outcome == "processed_supervisor_rework"
+    assert process_rework.call_args.kwargs["supervisor_owned"] is True
     label_calls = [c for c in client.calls if c["method"] == "edit_issue_labels"]
-    assert label_calls[-1]["add"] == ["agent/running"]
-    assert label_calls[-1]["remove"] == ["agent/supervising"]
+    assert not any("agent/running" in call["add"] for call in label_calls)
+    assert any("agent/supervising" in call["add"] for call in label_calls)
     assert not any(call["add"] == ["agent/automated-review-passed"] for call in label_calls)
     comment_calls = [c for c in client.calls if c["method"] == "comment_issue"]
     assert "Action: rebase_pr_branch" in comment_calls[-1]["body"]
+    assert "stays in `agent/supervising`" in comment_calls[-1]["body"]
 
 
 def test_review_once_defers_when_full_open_pr_context_is_unavailable() -> None:
@@ -349,8 +355,8 @@ def test_review_once_defers_when_full_open_pr_context_is_unavailable() -> None:
     assert not any(call["method"] == "edit_issue_labels" for call in client.calls)
 
 
-def test_review_once_logs_queued_rebase_outcome(caplog) -> None:
-    """Polling logs should distinguish queued rebase from completed review."""
+def test_review_once_logs_supervisor_rebase_outcome(caplog) -> None:
+    """Polling logs should distinguish completed supervisor rework from approval."""
     config = AppConfig()
     issue = IssueSummary(
         number=1,
@@ -390,6 +396,7 @@ def test_review_once_logs_queued_rebase_outcome(caplog) -> None:
             "backend.core.use_cases.review_once.run_post_pr_supervisor_cycle",
             return_value=_supervisor_approve(),
         ),
+        patch("backend.core.use_cases.review_once._process_running_rework"),
         caplog.at_level(logging.INFO),
     ):
         exit_code = review_once(
@@ -403,7 +410,7 @@ def test_review_once_logs_queued_rebase_outcome(caplog) -> None:
         )
 
     assert exit_code == 0
-    assert "queued_rebase_pr_branch" in caplog.text
+    assert "processed_supervisor_rework" in caplog.text
     assert "Reviewed Issue" not in caplog.text
 
 
@@ -1178,8 +1185,8 @@ def test_resolve_supervisor_agent_precedence() -> None:
     assert resolve_supervisor_agent(issue, AppConfig(), "auto", fallback_agent="pi") == "pi"
 
 
-def test_code_review_repair_queues_when_ci_policy_disabled() -> None:
-    """CI 开关关闭时仍把纯代码审查修复交回运行器。"""
+def test_code_review_repair_runs_inside_supervising_when_ci_policy_disabled() -> None:
+    """CI 开关关闭时仍允许纯代码审查修复，并保持在 supervising 生命周期。"""
     config = AppConfig()
     issue = IssueSummary(
         number=1, title="T", url="U", body="B", labels=(config.labels.supervising,)
@@ -1200,6 +1207,7 @@ def test_code_review_repair_queues_when_ci_policy_disabled() -> None:
                 action="repair_pr_branch", repair_scope="code_review"
             ),
         ),
+        patch("backend.core.use_cases.review_once._process_running_rework") as process_rework,
     ):
         outcome = _process_review_candidate(
             issue=issue,
@@ -1209,6 +1217,150 @@ def test_code_review_repair_queues_when_ci_policy_disabled() -> None:
             github_client=client,
             process_runner=FakeProcessRunner(),
         )
-    assert outcome == "queued_repair_pr_branch"
-    assert config.labels.running in client._issue_labels[1]
+    assert outcome == "processed_supervisor_rework"
+    process_rework.assert_called_once()
+    assert process_rework.call_args.kwargs["supervisor_owned"] is True
+    assert config.labels.running not in client._issue_labels[1]
+    assert config.labels.supervising in client._issue_labels[1]
     assert any("post_pr_rework_requested" in comment for comment in client.list_issue_comments(1))
+
+
+def test_review_once_resumes_pending_supervisor_rework_without_new_review() -> None:
+    """supervising 下的 pending marker 会在中断后续跑，不会重新请求评审。"""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=1, title="T", url="U", body="B", labels=(config.labels.supervising,)
+    )
+    client = FakeGitHubClient()
+    client._issue_labels[1] = issue.labels
+    client._issue_comments[1] = [
+        format_event_marker(
+            phase="post_pr_rework_requested",
+            cycle=1,
+            head_sha="abc123",
+            pr_branch="issue-1",
+            action="repair_pr_branch",
+        )
+    ]
+    client._pr_contexts["issue-1"] = _make_pr_context(head_sha="abc123")
+
+    with (
+        patch("backend.core.use_cases.review_once.resolve_supervisor_agent", return_value="codex"),
+        patch("backend.core.use_cases.review_once.run_post_pr_supervisor_cycle") as run_cycle,
+        patch("backend.core.use_cases.review_once._process_running_rework") as process_rework,
+    ):
+        outcome = _process_review_candidate(
+            issue=issue,
+            repo_path=Path("."),
+            config=config,
+            agent="auto",
+            github_client=client,
+            process_runner=FakeProcessRunner(),
+        )
+
+    assert outcome == "processed_supervisor_rework"
+    assert process_rework.call_args.kwargs["supervisor_owned"] is True
+    assert process_rework.call_args.kwargs["marker"].action == "repair_pr_branch"
+    run_cycle.assert_not_called()
+    assert not any(
+        call["method"] == "edit_issue_labels" and config.labels.running in call["add"]
+        for call in client.calls
+    )
+
+
+def test_review_once_replaces_stale_rework_with_review_of_current_head() -> None:
+    """PR head 漂移后应消费旧 marker，并重新评审当前 head。"""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=1, title="T", url="U", body="B", labels=(config.labels.supervising,)
+    )
+    client = FakeGitHubClient()
+    client._issue_labels[1] = issue.labels
+    client._issue_comments[1] = [
+        format_event_marker(
+            phase="post_pr_rework_requested",
+            cycle=1,
+            head_sha="a11111",
+            pr_branch="issue-1",
+            action="repair_pr_branch",
+        )
+    ]
+    client._pr_contexts["issue-1"] = _make_pr_context(head_sha="b22222")
+
+    with (
+        patch(
+            "backend.core.use_cases.review_once.create_or_reuse_worktree",
+            return_value=Path("."),
+        ),
+        patch("backend.core.use_cases.review_once.resolve_supervisor_agent", return_value="codex"),
+        patch(
+            "backend.core.use_cases.review_once.run_post_pr_supervisor_cycle",
+            return_value=SupervisorActionResult(action="wait_for_checks"),
+        ) as run_cycle,
+        patch("backend.core.use_cases.review_once._process_running_rework") as process_rework,
+    ):
+        outcome = _process_review_candidate(
+            issue=issue,
+            repo_path=Path("."),
+            config=config,
+            agent="auto",
+            github_client=client,
+            process_runner=FakeProcessRunner(),
+        )
+
+    comments = client.list_issue_comments(1)
+    assert outcome == "waiting_for_checks"
+    assert process_rework.called is False
+    run_cycle.assert_called_once()
+    assert parse_latest_pending_rework_marker(comments) is None
+    assert any("Post-PR Rework Superseded" in comment for comment in comments)
+
+
+@pytest.mark.parametrize("phase", ("rebase_repair_complete", "post_pr_rework_superseded"))
+def test_review_once_runs_supervisor_after_rework_terminal_marker(phase: str) -> None:
+    """修复完成或旧请求作废的 marker 后必须继续评审当前 PR。"""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=1, title="T", url="U", body="B", labels=(config.labels.supervising,)
+    )
+    client = FakeGitHubClient()
+    client._issue_labels[1] = issue.labels
+    client._remote_base_sha = "def456"
+    client._issue_comments[1] = [
+        format_event_marker(
+            phase="draft_pr_created",
+            cycle=1,
+            head_sha="abc123",
+            pr_branch="issue-1",
+        ),
+        format_event_marker(
+            phase=phase,
+            cycle=1,
+            head_sha="abc123",
+            pr_branch="issue-1",
+        ),
+    ]
+    client._pr_contexts["issue-1"] = _make_pr_context(head_sha="abc123")
+
+    with (
+        patch(
+            "backend.core.use_cases.review_once.create_or_reuse_worktree",
+            return_value=Path("."),
+        ),
+        patch("backend.core.use_cases.review_once.resolve_supervisor_agent", return_value="codex"),
+        patch(
+            "backend.core.use_cases.review_once.run_post_pr_supervisor_cycle",
+            return_value=SupervisorActionResult(action="wait_for_checks"),
+        ) as run_cycle,
+    ):
+        outcome = _process_review_candidate(
+            issue=issue,
+            repo_path=Path("."),
+            config=config,
+            agent="auto",
+            github_client=client,
+            process_runner=FakeProcessRunner(),
+        )
+
+    assert outcome == "waiting_for_checks"
+    run_cycle.assert_called_once()

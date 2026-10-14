@@ -30,6 +30,7 @@ _REWORK_COMPLETION_PHASES = {
     "draft_pr_created",
     "publish_recovered",
     "rebase_repair_complete",
+    "post_pr_rework_superseded",
 }
 
 
@@ -142,6 +143,20 @@ def parse_latest_event_marker(comments: list[str]) -> ReviewEventMarker | None:
         marker = _parse_event_marker(comment_body)
         if marker is not None:
             return marker
+    return None
+
+
+def extract_pr_branch_from_comments(comment_bodies: list[str]) -> str | None:
+    """从 Issue 评论里提取最近出现的 PR branch。"""
+    for comment_body in reversed(comment_bodies):
+        marker = parse_latest_event_marker([comment_body])
+        if marker is not None and marker.pr_branch:
+            return marker.pr_branch
+
+        for pattern in (r"PR Branch:\s*`([^`]+)`", r"Branch:\s*`([^`]+)`"):
+            match = re.search(pattern, comment_body)
+            if match:
+                return match.group(1)
     return None
 
 

@@ -90,11 +90,11 @@ from backend.core.use_cases.agent_runner_workflow import (
 from backend.core.use_cases.agent_runner_worktree_branch import _ensure_worktree_branch
 from backend.core.use_cases.agent_runner_worktree_probe import _find_worktree_path_for_issue
 from backend.core.use_cases.pr_supervisor import (
-    build_rebase_repair_complete_comment,
     execute_rebase,
     execute_repair,
 )
 from backend.core.use_cases.pr_supervisor_findings import _load_previous_findings
+from backend.core.use_cases.pr_supervisor_messages import build_rebase_repair_complete_comment
 from backend.core.use_cases.run_agent_once import (
     choose_agent,
     create_or_reuse_worktree,
@@ -619,12 +619,13 @@ def _process_running_rework(
     process_runner: IProcessRunner,
     marker: ReviewEventMarker,
     repo_id: str | None = None,
+    supervisor_owned: bool = False,
     **kwargs: object,
 ) -> None:
-    """处理带 rework 标记的 running Issue。
+    """处理带 rework 标记的 Issue。
 
-    当 Issue 有 post_pr_rework_requested 事件标记时进入此路径。
-    监督者之前已请求修复，现在执行修复操作。
+    runner 恢复旧的 ``agent/running`` 返工时，生命周期仍走 runner 状态；Supervisor
+    自己恢复或执行修复时，始终保持 ``agent/supervising``，并把后续复审留给下一轮。
 
     Args:
         issue: Issue 对象
@@ -636,10 +637,22 @@ def _process_running_rework(
         marker: 事件标记（包含动作类型和分支信息）
         repo_id: 稳定仓库标识（Issue #278），透传给 rework 后的监督循环做
             人工接管闸门（``autopilot_hold``）检查。
+        supervisor_owned: 是否由 post-PR supervisor 执行；为真时不进入 running，也不
+            在当前 review pass 内再次启动 supervisor cycle。
     """
     pr_branch = marker.pr_branch
     if pr_branch is None:
         raise RuntimeError("Rework marker missing pr_branch")
+
+    if supervisor_owned:
+        supervisor_agent = choose_agent(issue, config, agent)
+        arbitrate_first_claim(
+            issue_number=issue.number,
+            github_client=github_client,
+            config=config,
+            selected_agent=supervisor_agent,
+            target_label=config.labels.supervising,
+        )
 
     # 定位 worktree；缺失时进入 blocked 并给出可操作的恢复说明。
     try:
@@ -739,6 +752,11 @@ def _process_running_rework(
 
     # 标记为 supervising 并获取 PR 上下文
     transition_issue_workflow_state(github_client, issue.number, config, config.labels.supervising)
+
+    # Review daemon 的这次调用已经是 supervisor 触发的 repair。让下一轮按 PR/head/check
+    # 变化重新评审，避免在同一调用栈里重复启动 cycle 或把返工转交给 runner。
+    if supervisor_owned:
+        return
 
     # 修复后再次运行监督循环
     if config.post_pr_supervisor.enabled:

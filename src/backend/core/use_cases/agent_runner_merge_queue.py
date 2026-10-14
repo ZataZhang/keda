@@ -49,8 +49,8 @@ from backend.core.use_cases.agent_runner_issue_control import (
     autopilot_hold_blocks,
 )
 from backend.core.use_cases.agent_runner_events import (
+    extract_pr_branch_from_comments,
     format_event_marker,
-    parse_latest_event_marker,
 )
 from backend.core.use_cases.agent_runner_git import (
     list_changed_paths,
@@ -74,30 +74,6 @@ _MERGED_EVENT_PHASE = "auto_merged"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _extract_pr_branch_from_comments(comments: list[str]) -> str | None:
-    """Extract the latest known PR branch from Issue comments.
-
-    Mirrors :func:`backend.core.use_cases.review_once._extract_pr_branch_from_comments`
-    so the merge queue and the supervisor cycle agree on which branches are
-    recognized — both parse ``iar:event`` markers first, then fall back to the
-    ``PR Branch: \\`…\\``` / ``Branch: \\`…\\``` plaintext patterns.
-    """
-    for comment_body in reversed(comments):
-        marker = parse_latest_event_marker([comment_body])
-        if marker is not None and marker.pr_branch:
-            return marker.pr_branch
-
-        branch_patterns = (
-            r"PR Branch:\s*`([^`]+)`",
-            r"Branch:\s*`([^`]+)`",
-        )
-        for branch_pattern in branch_patterns:
-            branch_match = re.search(branch_pattern, comment_body)
-            if branch_match:
-                return branch_match.group(1)
-    return None
 
 
 def _tick_sign_off_checklist(pr_body: str) -> str | None:
@@ -438,7 +414,7 @@ def _process_one(
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_stack_pending")
 
     comments = github_client.list_issue_comments(issue.number)
-    pr_branch = _extract_pr_branch_from_comments(comments)
+    pr_branch = extract_pr_branch_from_comments(comments)
     if pr_branch is None:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_no_pr")
 

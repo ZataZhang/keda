@@ -83,7 +83,7 @@ from backend.core.use_cases.backlog_state_resolver import (
     BacklogStateResolutionContext,
     resolve_backlog_states,
 )
-from backend.core.use_cases.review_once import _extract_pr_branch_from_comments
+from backend.core.use_cases.agent_runner_events import extract_pr_branch_from_comments
 
 _logger = logging.getLogger(__name__)
 
@@ -539,7 +539,7 @@ def _resolve_prd_ci_context(repo_id: str, prd_path: str):
         )
     github_client = create_github_client(context.repo_path)
     issue_comments = github_client.list_issue_comments(prd.issue_number)
-    pr_branch = _extract_pr_branch_from_comments(issue_comments)
+    pr_branch = extract_pr_branch_from_comments(issue_comments)
     pr_context = None
     if pr_branch is not None:
         pr_context = github_client.get_pull_request_context(pr_branch)

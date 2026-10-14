@@ -173,8 +173,8 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 | 类别 | 标签 | 颜色 | 作用 |
 |---|---|---|---|
 | **AI 执行状态** | `agent/ready` | 🟢 绿色 | 已进入队列，等待 daemon 自主挑选认领；**不是执行的前置条件**——`kc run --issue <N>` 点名任何 open Issue 都不需要该标签 |
-| | `agent/running` | 🟡 黄色 | 代码正在被修改（首次实现或 PR branch rework）。首次认领由 claim marker 选举裁决，同一时刻只有一个持有者；被存活持有者占用的 Issue，定向 run 会报冲突而不是双跑 |
-| | `agent/supervising` | 🔵 浅蓝 | Draft PR 已创建，自动 post-PR supervisor 正在审查或重新处理 |
+| | `agent/running` | 🟡 黄色 | runner 正在执行首次实现或恢复旧的 runner-owned rework。首次认领由 claim marker 选举裁决，同一时刻只有一个持有者；Supervisor 自己发起的 PR 修复留在 `agent/supervising` |
+| | `agent/supervising` | 🔵 浅蓝 | Draft PR 已创建，Supervisor 正在审查、执行 PR branch repair/rebase 或等待外部状态 |
 | | `agent/automated-review-passed` | 🔵 蓝色 | 自动总控审查已通过，后续由人审或获准的自动合并策略处理 |
 | | `agent/failed` | 🔴 红色 | AI runner 执行失败 |
 | | `agent/blocked` | ⬛ 黑色 | AI runner 需要人工介入 |
@@ -1822,7 +1822,7 @@ agent/ready
     → Issue comment: Draft PR Created
     → post-PR supervisor cycle
     → supervisor approve → agent/automated-review-passed
-    → supervisor repair/rebase → agent/running (existing PR branch rework)
+    → supervisor repair/rebase → configured repair agent runs within agent/supervising → review next pass
     → supervisor human-input-needed → agent/blocked
     → supervisor failed → agent/failed
 ```
@@ -1898,15 +1898,15 @@ Draft PR 创建后，Issue 先进入 `agent/supervising`，并立即运行至少
 3. 如果 worktree 在只读 supervisor cycle 开始前仍有未提交变更，runner 会自动 `git stash push -u` 把它们临时存起来，cycle 结束后再根据 supervisor 决策恢复（pop）或继续保留（`wait_for_checks`）
 4. Supervisor 输出结构化 action：
    - `approve_for_human_review` → 恢复 stash 后若 worktree 干净则进入 `agent/automated-review-passed`，仍有未提交变更则进入 `agent/blocked`
-   - `repair_pr_branch` / `resolve_conflict` → 恢复 stash 后进入 `agent/running` 做现有 PR branch 修复
-   - `rebase_pr_branch` → 恢复 stash 后进入 `agent/running` 做 rebase
+   - `repair_pr_branch` / `resolve_conflict` → 恢复 stash 后调用配置的 repair agent，在 `agent/supervising` 内修复现有 PR branch
+   - `rebase_pr_branch` → 恢复 stash 后在 `agent/supervising` 内执行 rebase
    - `wait_for_checks` → 保持 stash 与 `agent/supervising`，等待 PR checks 完成
    - `request_human_input` → 恢复 stash 后进入 `agent/blocked`，但必须带有可操作 summary
    - `mark_failed` → 恢复 stash 后进入 `agent/failed`
 
-5. 需要代码修改时，runner 先写 `post_pr_rework_requested` event marker，再切到 `agent/running`
-6. 后续 `kc run` 检测到该 pending marker 和 open PR 后，在现有 PR branch 上执行 rework
-7. rework 成功后写 `rebase_repair_complete` marker，再进入后续 supervision/review 流程
+5. 执行前先写 `post_pr_rework_requested` event marker，Issue 保持 `agent/supervising`；post-PR repair/rebase 不重新排进 builder 的 `agent/running` 队列
+6. 修复在当前 supervisor pass 内执行；若进程中断，后续 review pass 会核对 marker 对应的 PR head 后续跑。marker 已过期时记录 `post_pr_rework_superseded` 并针对当前 PR context 重新评审
+7. rework 成功后写 `rebase_repair_complete` marker，后续 review pass 根据 PR、checks 与评论变化继续监督
 
 #### Supervisor diff 分层注入与跨 cycle finding 累积
 
@@ -1927,7 +1927,7 @@ Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决�
 supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repair_agent` 只决定**判定需要改代码之后由谁动手**，取值语义与 pre-PR 那一段同名同义：
 
 - `self`（默认）：supervisor 自己执行修复，与历史行为一致。
-- `executor`：交回本次实现者。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `kc supervise`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。
+- `executor`：使用本次实现者作为 repair agent。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `kc supervise`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。无论选哪个 repair agent，Supervisor 触发的修复都在 `agent/supervising` 生命周期内执行。
 - `<agent 名>`：指定 agent；未注册时该阶段开始前 fail-fast。
 
 两个修复调用点（supervisor 修复循环、rework 路径）共用解析器 `resolve_repair_agent`，避免两条路径语义分叉。修复提示词由 `build_repair_prompt` 生成，带 Issue 上下文与本轮 findings 清单（rework 路径取 `.iar/state/issue-<N>/findings.json` 里未解决的累积 findings），修复者不必自己重新推断要改什么。
@@ -1962,7 +1962,7 @@ uv run kc supervise-daemon
   - Issue comments 数量超过最新 supervisor marker 记录的游标
   - PR review comments 数量增加
 - 任一维度变化时，先移回 `agent/supervising`，运行 supervisor cycle
-- 无变化时不重复启动 supervisor；若最新 `post_pr_supervisor` marker 的 action 与当前标签不一致，则按已完成 action 对齐标签（approve → `agent/automated-review-passed`、wait → `agent/supervising`、request input → `agent/blocked`、repair/rebase → `agent/running`）。这能恢复 supervisor 已写结果 marker、但进程在标签更新前退出时留下的滞后状态。
+- 无变化时不重复启动 supervisor；若最新 `post_pr_supervisor` marker 的 action 与当前标签不一致，则按已完成 action 对齐标签（approve → `agent/automated-review-passed`、wait/repair/rebase → `agent/supervising`、request input → `agent/blocked`）。pending rework marker 在 supervising 下会由 review pass 恢复执行；旧的 runner-owned marker 仍由 `kc run` 消费。
 
 Supervisor 结果评论会把自身写入后的 Issue comment 数量记录进 marker，
 因此 runner 自己写出的 `Agent Runner Post-PR Supervisor` 评论不会触发下一轮重审。
@@ -1988,7 +1988,7 @@ checks 状态：
 - supervisor 输出无法解析、返回未知 action，或返回空 summary 的 `request_human_input` 时，本轮会进入 `agent/failed`，不会生成无原因的 `agent/blocked`；平台不得根据 checks 状态猜测替代动作
 - supervisor agent 进程非零退出且 stdout 中识别不到任何 JSON 决策（如 claude CLI 遇到 API / 网络错误崩溃）时，视为基础设施级失败，会在同一 cycle 内重试至多 `max_agent_crash_retries` 次；重试之间指数退避（从 `crash_retry_initial_backoff_seconds` 起每次翻倍，单次等待封顶 `crash_retry_max_backoff_seconds`，默认 30s 起、上限 10 分钟），以扛住分钟级的 API 提供方中断。重试仍失败才进入 `agent/failed`，summary 会标明是 agent infrastructure failure。非零退出但 stdout 中仍能识别出 JSON 决策时直接使用该决策，不消耗重试次数
 
-这样可以避免 `agent/automated-review-passed` label 覆盖仍需 `kc run` 消费的 rework/rebase 状态。
+这样可确保 pending rework 不被一次新的 supervisor 结果覆盖；supervising 下的请求由 review pass 续跑，只有旧的 runner-owned `agent/running` 请求才由 `kc run` 消费。
 
 注意：merge queue 的自动合并仍会在合并前等待 checks 全绿（见下文"Autopilot 快速档（合并队列）"），这与 supervisor 的动作选择相互独立——进入人工 review 不代表验收完成，也不产生自动合并或归档资格。
 
@@ -1998,13 +1998,13 @@ rebase/repair 仍由下一次 `kc run` 在 PR branch worktree 中执行。
 
 ### Rework Guard
 
-`kc run` 遇到 `agent/running` Issue 时，不会自动视为 rework。只有同时满足以下条件才会进入现有 PR branch rework 路径：
+`kc run` 遇到 `agent/running` Issue 时，不会自动视为 rework。只有同时满足以下条件才会进入旧的 runner-owned PR branch rework 路径：
 
 1. Issue comments 中存在尚未被 `rebase_repair_complete`、`draft_pr_created`、`implementation_complete` 或 `publish_recovered` 消费的 `phase=post_pr_rework_requested` marker
 2. 该 marker 包含 PR branch
 3. 该 PR branch 仍有 open PR，且 marker 中的 `head_sha` 与 open PR 当前 head 一致；不一致说明 PR 已被外部更新，旧的 rework 请求不再安全
 
-后续 `post_pr_supervisor` 这类观察类 marker 不会覆盖 pending rework marker；只有明确的完成/发布类 marker 才会消费旧 rework 请求。
+后续 `post_pr_supervisor` 这类观察类 marker 不会覆盖 pending rework marker；只有明确的完成/发布类 marker 才会消费旧 rework 请求。新的 post-PR supervisor repair 保持 `agent/supervising`，由 review pass 执行或在进程中断后恢复，不走这条 `kc run` 路径。
 
 如果 pending rework 存在但对应 worktree 路径已不存在（例如被手动删除），runner 会将 Issue 转入 `agent/blocked` 并写评论说明缺失路径与恢复步骤，而不是在错误的目录上执行 repair/rebase。
 
@@ -2501,7 +2501,7 @@ agent/ready  →  agent/running  →  agent/supervising  →  agent/automated-re
       └──────  agent/failed  ←───────────────────────────┘
               （人工修复后改回 ready）
 
-agent/supervising ── supervisor 要求 rework ──→ agent/running ── 修复/rebase ──→ agent/supervising
+agent/supervising ── supervisor repair/rebase（同一生命周期内执行）──→ agent/supervising
 
 # recover 恢复路径（supervisor enabled）
 agent/failed ── recover ──→ agent/supervising ── supervisor approve ──→ agent/automated-review-passed
@@ -3411,7 +3411,7 @@ publish                 - diff 混入证据产物（.md 报告以外的证据路
                         验收重点：命令可复现、输出摘要合理、解释成立、
                         风险说明充分、SHA-256 与本地复现结果一致。
 
-签收与证据的关联使用 PR 改动身份，不把当前 main/base 的提交号当成证据身份。新发布的
+当前 Realistic Validation 签收兼容路径使用 PR 改动身份，不把当前 main/base 的提交号当成证据身份；这不是其他验证 provider 必须遵循的通用规则。M12 将把门禁身份与有效性策略迁移到仓库用户定义的验证契约。新发布的
 `iar:validation-evidence version=2` marker 同时记录捕获时的 head/base 与 PR contribution
 patch-id。门禁先取 PR head 与当前 base 的共同祖先，再对 PR 改动计算 `git patch-id --stable`，
 并排除 `tasks/evidence/` 发布产物目录。PRD 本身仍包含在指纹中，因此验收范围变化会使旧签收
@@ -4934,11 +4934,11 @@ uv run kc backlog advance --repo <repo-id>
 - **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- iar:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
 - **最终生效值**由服务端按 `显式 on/off ?? fresh 全局值` 计算（`on → true`、`off → false`、`inherit → 全局值`），API/CLI 只回显，前端不得自行推断。
 
-Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 可正常交回 executor，避免 CI 全绿时仍因 CI 自动修复关闭而滞留。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。Supervisor 评论回显范围，便于核对实际政策。
+Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 不受 CI 自动修复开关影响。获准的修复都由 Supervisor 生命周期内的配置 repair agent 执行，Issue 保持 `agent/supervising`，不会重新认领 builder。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。Supervisor 评论回显范围，便于核对实际政策。
 
 #### 多轮修复与重入去重
 
-Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；推送新 head 后重新等待 checks，允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求（daemon 重入、页面重试、手动/自动路径）幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。
+Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；修复由 Supervisor 生命周期内的配置 repair agent 执行，Issue 不退回 `agent/running`。推送新 head 后等待下一轮 review pass 检查 PR/check 状态；允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。
 
 #### CLI 一等入口：kc backlog ci
 
