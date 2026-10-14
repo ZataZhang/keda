@@ -31,6 +31,10 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.use_cases.agent_runner_evidence_format import (
     IMAGE_EVIDENCE_SUFFIXES,
 )
+from backend.core.use_cases.agent_runner_validation_identity import (
+    EvidenceMarker,
+    format_validation_evidence_marker,
+)
 
 _STRUCTURED_EVIDENCE_MARKER_PATTERN = re.compile(
     r"<!--\s*iar:structured-evidence\s+"
@@ -188,6 +192,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "title": "Realistic Validation Evidence",
         "branch": "证据分支",
         "head": "捕获代码版本",
+        "patch": "PR 改动指纹（patch-id）",
         "language": "语言",
         "sign_off": "审阅证据后，在 PR 正文的 Realistic Validation 清单中逐项勾选。",
         "reproducible_command": "可复现命令",
@@ -207,6 +212,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "title": "Realistic Validation Evidence",
         "branch": "Evidence branch",
         "head": "Code head at capture time",
+        "patch": "PR contribution fingerprint (patch-id)",
         "language": "Language",
         "sign_off": "Review the evidence below, then tick each item in the PR body Realistic Validation checklist.",
         "reproducible_command": "Reproducible command",
@@ -896,13 +902,32 @@ def render_structured_evidence_comment(
     head_sha: str,
     *,
     evidence_dir: Path | None = None,
+    base_sha: str | None = None,
+    patch_id: str | None = None,
 ) -> str:
-    """Render the structured PR evidence comment grouped by checklist item."""
+    """Render the structured PR evidence comment grouped by checklist item.
+
+    Args:
+        report: 已校验并按 checklist 分组的证据报告。
+        upload: 上传到 orphan evidence branch 的文件清单。
+        worktree_path: 生成和读取证据的仓库工作树。
+        config: Agent Runner 配置。
+        pr_url: 关联 Pull Request 的页面地址。
+        head_sha: 发布证据时 PR 的 head。
+        evidence_dir: 解析后的按任务证据目录；缺省时使用配置根目录。
+        base_sha: v2 marker 的 PR base 快照；缺省时保留 v1 marker。
+        patch_id: v2 marker 的 PR 改动指纹；缺省时保留 v1 marker。
+    """
     language = report.language
-    marker = (
-        f"<!-- iar:validation-evidence version=1 head={head_sha} "
-        f"branch={upload.branch} count={len(upload.file_names)} -->"
+    evidence_marker = EvidenceMarker(
+        head_sha=head_sha,
+        branch=upload.branch,
+        count=len(upload.file_names),
+        base_sha=base_sha,
+        patch_id=patch_id,
     )
+    marker = format_validation_evidence_marker(evidence_marker)
+    has_stable_identity = base_sha is not None and patch_id is not None
     comment_lines = [
         marker,
         "",
@@ -910,6 +935,7 @@ def render_structured_evidence_comment(
         "",
         f"- {_label(language, 'branch')}: `{upload.branch}`",
         f"- {_label(language, 'head')}: `{head_sha}`",
+        *([f"- {_label(language, 'patch')}: `{patch_id}`"] if has_stable_identity else []),
         f"- {_label(language, 'language')}: `{language}`",
         "",
         _label(language, "sign_off"),

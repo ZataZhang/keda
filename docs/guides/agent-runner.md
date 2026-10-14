@@ -3409,6 +3409,15 @@ publish                 - diff 混入证据产物（.md 报告以外的证据路
                         验收重点：命令可复现、输出摘要合理、解释成立、
                         风险说明充分、SHA-256 与本地复现结果一致。
 
+签收与证据的关联使用 PR 改动身份，不把当前 main/base 的提交号当成证据身份。新发布的
+`iar:validation-evidence version=2` marker 同时记录捕获时的 head/base 与 PR contribution
+patch-id。门禁先取 PR head 与当前 base 的共同祖先，再对 PR 改动计算 `git patch-id --stable`，
+并排除 `tasks/evidence/` 发布产物目录。PRD 本身仍包含在指纹中，因此验收范围变化会使旧签收
+失效。main 单独前进、PR 随后 rebase，或只更新 evidence 发布产物，都不会要求重新跑真实验证；
+PR 的功能改动或 PRD 验收范围变化时才会清空签收并要求重新验证。若本地缺少对应 Git 对象且无法
+从 remote 取回，门禁保持验证待处理，不会把“身份无法计算”伪报成“证据已过期”。旧 `version=1`
+marker 继续按精确 head SHA 检查。
+
 相关 marker 一览（均为 `<!-- iar:... -->` 隐藏注释）：
 
 | Marker | 位置 | 含义 |
@@ -3418,7 +3427,8 @@ publish                 - diff 混入证据产物（.md 报告以外的证据路
 | `iar:evidence-format-waived reason="..."` | Issue body | 按任务关闭逐项格式对账（证据仍必须存在） |
 | `iar:evidence-format item=N kind=xxx` | Issue body | agent 解析的格式要求标记（优先于正则） |
 | `iar:realistic-validation version=1 total=N` … `iar:realistic-validation-end` | PR body | 人工签收清单区块边界 |
-| `iar:validation-evidence version=1 head=<sha> branch=<branch> count=N` | PR comment | 证据评论锚点（head 用于检测勾选后漂移） |
+| `iar:validation-evidence version=1 head=<sha> branch=<branch> count=N` | PR comment | 旧版证据评论锚点（按精确 head 检测漂移） |
+| `iar:validation-evidence version=2 head=<sha> base=<sha> patch=<sha> branch=<branch> count=N` | PR comment | 证据锚点（按 PR 改动 patch-id 检测漂移；base/head 仅供审计） |
 | `iar:event phase=validation_passed` | Issue comment | 人工签收完成审计（按 head 去重） |
 | `iar:event phase=validation_reset` | PR comment | 签收因新 push 失效被重置 |
 

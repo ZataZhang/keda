@@ -303,6 +303,20 @@ class FakeGitHubClient(IGitHubClient):
         self.calls.append({"method": "get_pull_request_context", "branch": branch})
         return self._pr_contexts.get(branch)
 
+    def get_pull_request_context_by_number(
+        self, pr_number: int, *, require_success: bool = False
+    ) -> object | None:
+        """按编号返回已登记的 PR fixture。"""
+        self.calls.append({"method": "get_pull_request_context_by_number", "pr_number": pr_number})
+        return next(
+            (
+                context
+                for context in self._pr_contexts.values()
+                if getattr(context, "number", None) == pr_number
+            ),
+            None,
+        )
+
     def set_pr_context(self, branch: str, context: object | None) -> None:
         """Inject a deterministic ``get_pull_request_context`` response for tests."""
         self._pr_contexts[branch] = context

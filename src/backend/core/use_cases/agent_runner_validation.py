@@ -13,7 +13,7 @@
 4. **证据呈现** — 用 git plumbing（``hash-object``/``mktree``/``commit-tree``）
    构造无父提交并 force-push 到 orphan 证据分支，再在 PR 上发证据评论。
 5. **软门禁** — daemon 轮询 ``agent/automated-review-passed`` Issue，按 PR body 勾选状态维护
-   ``validation/pending`` / ``validation/passed`` label，head 漂移时重置勾选，
+   ``validation/pending`` / ``validation/passed`` label，PR 改动身份变化时重置勾选，
    Issue 关闭后清理证据分支。
 
 所有 hidden marker 与 ``agent_runner_events.py`` 的 ``iar:event`` 同型
@@ -27,7 +27,6 @@ import json
 import logging
 import re
 import subprocess
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -95,6 +94,9 @@ from backend.core.use_cases.agent_runner_validation_gate import (
     cleanup_closed_issue_evidence_branches as cleanup_closed_issue_evidence_branches,
     process_validation_gate as process_validation_gate,
 )
+from backend.core.use_cases.agent_runner_validation_identity import (
+    EvidenceMarker as EvidenceMarker,
+)
 from backend.core.use_cases.agent_runner_validation_publication import (
     EvidenceUpload as EvidenceUpload,
     build_evidence_comment as build_evidence_comment,
@@ -107,14 +109,6 @@ from backend.core.use_cases.agent_runner_validation_publication import (
 )
 
 _logger = logging.getLogger(__name__)
-_EVIDENCE_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:validation-evidence\s+"
-    r"version=(?P<version>\d+)\s+"
-    r"head=(?P<head>[a-f0-9]+)\s+"
-    r"branch=(?P<branch>[^\s>]+)\s+"
-    r"count=(?P<count>\d+)"
-    r"\s*-->"
-)
 _PR_URL_PATTERN = re.compile(
     r"https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
 )
@@ -147,15 +141,6 @@ _RV_SCRIPT_SUFFIXES = frozenset(
 )
 _EVIDENCE_UPLOAD_SKIP_DIRS = frozenset({"__pycache__", "node_modules"})
 _EVIDENCE_UPLOAD_SKIP_SUFFIXES = frozenset({".pyc", ".pyo"})
-
-
-@dataclass(frozen=True)
-class EvidenceMarker:
-    """Parsed iar:validation-evidence hidden marker from a PR comment."""
-
-    head_sha: str
-    branch: str
-    count: int
 
 
 # ---------------------------------------------------------------------------
