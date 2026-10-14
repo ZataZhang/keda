@@ -670,6 +670,8 @@ def test_process_watchdog_logs_heartbeat_and_kills_on_timeout() -> None:
 
     mock_process = MagicMock()
     mock_process.poll.return_value = None
+    # 真实 pid 才读得出真实进程组：替身 pid 会让身份判定退回无校验路径。
+    mock_process.pid = os.getpid()
     watchdog = process_runner._ProcessWatchdog(
         mock_process,
         ["slow", "command"],
@@ -699,7 +701,14 @@ def test_process_watchdog_logs_heartbeat_and_kills_on_timeout() -> None:
         2,
         "slow command",
     )
-    terminate_mock.assert_called_once_with(mock_process)
+    # 拆除必须带上创建时刻读到的身份，不能只按 pid 现取一次进程组。
+    assert watchdog._expected_process_group == os.getpgid(os.getpid())
+    assert watchdog._expected_process_started_at is not None
+    terminate_mock.assert_called_once_with(
+        mock_process,
+        expected_process_group=watchdog._expected_process_group,
+        expected_process_started_at=watchdog._expected_process_started_at,
+    )
 
 
 def test_process_watchdog_includes_context_label_in_logs() -> None:
@@ -759,6 +768,8 @@ def test_process_watchdog_kills_on_inactivity_timeout() -> None:
 
     mock_process = MagicMock()
     mock_process.poll.return_value = None
+    # 真实 pid 才读得出真实进程组：替身 pid 会让身份判定退回无校验路径。
+    mock_process.pid = os.getpid()
     watchdog = process_runner._ProcessWatchdog(
         mock_process,
         ["slow", "command"],
@@ -777,7 +788,14 @@ def test_process_watchdog_kills_on_inactivity_timeout() -> None:
     ):
         watchdog._run()
 
-    terminate_mock.assert_called_once_with(mock_process)
+    # 拆除必须带上创建时刻读到的身份，不能只按 pid 现取一次进程组。
+    assert watchdog._expected_process_group == os.getpgid(os.getpid())
+    assert watchdog._expected_process_started_at is not None
+    terminate_mock.assert_called_once_with(
+        mock_process,
+        expected_process_group=watchdog._expected_process_group,
+        expected_process_started_at=watchdog._expected_process_started_at,
+    )
 
 
 def test_process_watchdog_does_not_kill_on_inactivity_when_output_is_active() -> None:

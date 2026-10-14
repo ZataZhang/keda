@@ -33,6 +33,7 @@ from backend.engines.agent_runner.factory import (
     resolve_repository_targets_with_diagnostics,
 )
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+from tests.support.issue_run_control import ScriptedTakeoverCasStore
 
 client = TestClient(app)
 
@@ -988,6 +989,45 @@ def test_take_over_verifier_stale_head_contract_returns_409(console_environment)
         console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
         == "running"
     )
+
+
+def test_take_over_verifier_unpersisted_cas_returns_409(
+    console_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CAS 反复空手却仍读到 running 时，HTTP 契约回 409 且审计不得记成受理。
+
+    202 承诺的是"取消意图与控制行已持久"。未落盘却回受理是接管特性里唯一的
+    fail-open 分支：runner 观察不到取消、verifier 照样能发 PASS 并放行合并队列，
+    而 Console 界面还会显示一条并没有发生的接管。这里把同一判据钉在 HTTP 层，
+    而不是只依赖存储层与用例层的断言。
+    """
+    flaky_store = ScriptedTakeoverCasStore(
+        console_environment["tmp_path"] / "flaky-console.db",
+        missed_cas_attempts=99,
+    )
+    monkeypatch.setattr(console_routes, "create_console_store", lambda: flaky_store)
+    _seed_running_verifier(flaky_store)
+
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/7/actions",
+        json={"action": "take_over_verifier", "run_id": "run-7", "head_sha": "deadbeef"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["takeover_outcome"] == "state_change_conflict"
+    # 未命中必须真的重试过：一次空手不构成放弃受理的理由。
+    assert flaky_store.cas_attempts == 2
+    assert (
+        flaky_store.get_issue_run(repo_id="keda-main", issue_number=7).state == "running"
+    ), "拒绝受理时不得留下任何取消意图或闸门"
+    takeover_audits = [
+        audit_entry
+        for audit_entry in flaky_store.list_recent_audits(limit=20)
+        if audit_entry.action == "take_over_verifier"
+    ]
+    assert [a.result for a in takeover_audits] == [
+        "rejected"
+    ], "没有落盘的接管请求不能产生 accepted 审计记录"
 
 
 def test_take_over_verifier_missing_identity_returns_400(console_environment) -> None:

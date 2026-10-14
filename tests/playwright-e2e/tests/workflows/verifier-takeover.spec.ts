@@ -16,18 +16,18 @@
  * 若没有可登录的完整栈，本用例无法运行——这是浏览器层的诚实边界，交班语义本身
  * 由 `tasks/evidence/.../scripts/rv*.py` 的真实跨进程 oracle 与后端契约测试覆盖。
  *
- * rv-1 缺口（等待人工处置，见 PRD §9 Human-Confirmed）：这里 stub 的两个端点恰好就是
- * PRD §7 rv-1 `must_cross` 要求真实穿过的两段（Issue 详情读 + 接管动作写），所以
- * **本文件即使在完整栈上跑绿也不能充当 rv-1 证据**。接管动作写这一跳已由
- * `tasks/evidence/…/scripts/rv1_console_http_real_entry_probe.py` 在真实 ASGI app +
- * 真实 SQLite CAS + 真实跨进程等待循环与进程组终止上取证（无 `page.route`，仅按 §7
- * mock_boundary 用阻塞子进程替身 verifier CLI），rv-1 剩下的未跨越段因此只剩**真实浏览器
- * → /app/dashboard → IssueDetail 的 GitHub 支撑详情读取**。关闭 rv-1 只有两条路：① 去掉
- * `stubTakeoverFlow` 的 `page.route`，在隔离栈（独立 state home + 真实 console.db +
- * 真实 runner 等待环 + 阻塞 verifier 替身；仅按 §7 mock_boundary 替换 GitHub 与
- * verifier CLI）运行本流程，把桌面与窄视口的真实页面截图存为
- * `tasks/evidence/…/rv-1-verifier-takeover.png` / `-narrow.png`；② 由人工明确处置为
- * 「接受跨进程 oracle + 本 UI/API 契约层的组合保真度」。二者之前 rv-1 保持 `[~]`。
+ * rv-1 的真实浏览器入口**不在本文件**，也不需要一个「人工处置」来补：它由同目录的
+ * `verifier-takeover-real-entry.spec.ts` 承担——由
+ * `tasks/evidence/…/scripts/rv1_browser_runner_e2e.py` 在隔离 state home + 专属
+ * `console.db` 上起真实 uvicorn Console API、真实 pnpm dev Dashboard 与真实 runner
+ * 子进程，再以 `RV1_LIVE_E2E=1` 运行该 spec（无 `page.route`，只按 §7 mock_boundary
+ * 替换 GitHub transport 与 verifier CLI），桌面 1440×900 与窄视口 390×844 的真实页面
+ * 截图存为 `tasks/evidence/…/rv-1-verifier-takeover.png` / `-narrow.png`，并留 trace 与
+ * `rv-1-browser-runner-facts.json`。PRD §7 rv-1/rv-2 的 `real_entry` 已改指那条路径。
+ * 本文件的职责因此收敛为**界面/API 契约层**：在真实组件树上钉住 stub 响应的契约形状
+ * （`binding_mismatch` 的 409 呈递、mounted-requested 时继续重读投影、`takeover_failed`
+ * 终态可重读），这些用例不需要真实后端、也不声称穿过 `must_cross`。二者相加才是 rv-1 的
+ * 完整证据面，任何一边单独跑绿都不算。
  * 注意 ① 需要把 `gh` 传输替换成确定性替身：在本机直接跑真实栈会把 `autopilot_hold`
  * 与标签写进操作者的机器级 console.db 和真实 Issue，因此不由 executor 自行执行。
  *

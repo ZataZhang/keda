@@ -10,7 +10,9 @@ from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.use_cases.agent_runner_final_verification import FinalVerificationRequest
 from backend.core.use_cases.run_verifier_agent import ValidationVerdict
 
-_logger = logging.getLogger(__name__)
+# 拆分前发布侧的告警由 ``agent_runner_publication`` 记录，操作者按 docs/guides/agent-runner.md
+# 的排查顺序 grep 那个名字找「verdict 不再可发布」这类行；保持 logger 身份不随模块搬家漂走。
+_logger = logging.getLogger("backend.core.use_cases.agent_runner_publication")
 
 
 @dataclass(frozen=True)

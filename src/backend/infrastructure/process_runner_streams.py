@@ -389,7 +389,7 @@ def _run_pty_stream(
         watchdog.raise_if_timed_out(partial_stdout="".join(collected))
     except BaseException as exc:
         process_runner_module._attach_stream_observations(exc, usage_collector)
-        process_runner_module._terminate_process_tree(process)
+        watchdog.terminate()
         process.wait()
         raise
     finally:

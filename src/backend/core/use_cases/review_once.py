@@ -23,6 +23,9 @@ from backend.core.use_cases.agent_runner_lifecycle import (
     record_lifecycle_event,
     record_lifecycle_terminal,
 )
+from backend.core.use_cases.agent_runner_issue_control import (
+    autopilot_hold_blocks,
+)
 from backend.core.use_cases.agent_runner_merge_queue import (
     process_merge_queue,
 )
@@ -42,9 +45,6 @@ from backend.core.use_cases.agent_runner_git import (
     has_changes,
     pop_worktree_stash,
     stash_worktree_changes,
-)
-from backend.core.use_cases.agent_runner_issue_control import (
-    autopilot_hold_blocks,
 )
 from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.run_agent_once import (

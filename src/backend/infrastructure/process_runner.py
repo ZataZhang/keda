@@ -522,7 +522,7 @@ class SubprocessRunner:
                 # BaseException 而不是 Exception：Ctrl-C（KeyboardInterrupt）也必须
                 # 拆掉整个进程组，否则子进程会变成孤儿继续跑。
                 _attach_stream_observations(exc, usage_collector)
-                _terminate_process_tree(process)
+                watchdog.terminate()
                 process.wait()
                 raise
             finally:
@@ -871,7 +871,7 @@ class _ProcessWatchdog:
                 elapsed_seconds,
                 _summarize_command(self._command),
             )
-            _terminate_process_tree(self._process)
+            self.terminate()
             return True
         if self._inactivity_timeout is not None:
             with self._output_lock:
@@ -886,7 +886,7 @@ class _ProcessWatchdog:
                     inactive_seconds,
                     _summarize_command(self._command),
                 )
-                _terminate_process_tree(self._process)
+                self.terminate()
                 return True
         return False
 

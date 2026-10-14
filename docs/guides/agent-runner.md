@@ -762,6 +762,8 @@ runner 在 commit proxy 固定实现提交后复跑 RV，并确认 PRD 执行侧
 
 日志关键字：`cancelled by a human takeover` / `timed out after` / `Could not save verifier response to` / `Verifier GREEN for issue`。等待循环的代码因单文件 1000 行上限拆到了 `agent_runner_verifier_response_log.py`（响应落盘、超时、人工接管取消）与 `agent_runner_verdict_pr_effects.py`（verdict 的 PR 侧副作用），但**这些行仍记在 logger `backend.core.use_cases.run_verifier_agent` 名下**——模块文件变了名字没变，按 `grep run_verifier_agent` 依旧能一次看到「被人工接管取消」与「超时」两类关键行，不必按新文件名分别搜。
 
+接管与发布的竞态还有两条行：`takeover race or external change`（verdict 已不适用于当前 HEAD，作废不发）与 `PR merged or HEAD drifted during verdict side effects`（副作用中途 PR 被外部合并/HEAD 漂移，旧 verdict 作废并落保持位）。它们出自 `agent_runner_verifier_publication.py`，同样**记在拆分前的 `backend.core.use_cases.agent_runner_publication` 名下**，按发布流程 `grep agent_runner_publication` 即可与其余发布告警一并看到，不必按新文件名搜。
+
 > 边界与保真度：接管是「单 Issue、精确 run_id+HEAD」的可控停止，作用域由共享 SQLite 控制面而非进程内状态界定，因此跨 runner/daemon 进程同样成立。它**不**等价于停止整个 runner，也**不**是任何「验证通过」的记录——把它当作「把这轮交回给人」的信号。
 
 ### WIP checkpoint 不合并

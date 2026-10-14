@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -43,8 +42,7 @@ from backend.core.use_cases.agent_runner_validation import (
     build_validation_prompt_line,
     resolve_issue_evidence_relpath,
 )
-from backend.engines.agent_runner.factory import build_app_config_from_settings
-from backend.infrastructure.config.settings import AgentRunnerSettings
+from tests.support.agent_runner import root_config_app_config
 
 _PRD_RELATIVE_PATH = "tasks/pending/P1-FEAT-20990101-000000-demo.md"
 
@@ -123,27 +121,6 @@ _MAP_CHECK_IMPLEMENT_AS_SPECIFIED = "implement it as specified"
 _MAP_CHECK_NONE_DECLARATION = "PRD map check: none"
 
 
-_ROOT_CONFIG_TOML = Path(__file__).resolve().parents[1] / "config.toml"
-
-
-def _root_config_app_config() -> AppConfig:
-    """按仓库根 ``config.toml`` 装配 ``AppConfig``，不受宿主状态目录配置影响。
-
-    ``build_app_config()`` 解析的是运行时全局配置（``~/.kedacode/config.toml``），
-    机器上的状态目录可能与仓库根漂移；本契约的 oracle 是仓库根模板，因此显式把
-    ``KEDACODE_CONFIG`` 指向仓库根再新鲜加载。
-    """
-    previous_env = os.environ.get("KEDACODE_CONFIG")
-    os.environ["KEDACODE_CONFIG"] = str(_ROOT_CONFIG_TOML)
-    try:
-        return build_app_config_from_settings(AgentRunnerSettings())
-    finally:
-        if previous_env is None:
-            del os.environ["KEDACODE_CONFIG"]
-        else:
-            os.environ["KEDACODE_CONFIG"] = previous_env
-
-
 def _execution_prompt_from_root_config(tmp_path: Path, issue: IssueSummary) -> str:
     """从真实仓库根 ``config.toml`` 渲染 execution prompt。
 
@@ -157,7 +134,7 @@ def _execution_prompt_from_root_config(tmp_path: Path, issue: IssueSummary) -> s
     Returns:
         渲染后的 execution prompt 全文。
     """
-    config = _root_config_app_config()
+    config = root_config_app_config()
     return build_prompt(
         issue,
         _worktree_with_prd(tmp_path),
@@ -248,7 +225,7 @@ def test_prompt_contract_execution_prompt_map_check_negative_control(
 
     证明上面的绿色来自模板里真实存在的规则段，而不是断言写得过于宽松。
     """
-    config = _root_config_app_config()
+    config = root_config_app_config()
     template = config.prompts.phases["execution"]
     stripped_template = _strip_map_check_block(template)
     assert stripped_template != template, "负控失效：真实模板里找不到可删除的规则段"

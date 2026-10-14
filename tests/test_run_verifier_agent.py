@@ -1057,3 +1057,20 @@ def test_split_verifier_modules_keep_the_run_verifier_agent_logger_identity() ->
 
     for moved_module in (verdict_pr_effects, response_log, rva):
         assert moved_module._logger.name == "backend.core.use_cases.run_verifier_agent"
+
+
+def test_split_publication_module_keeps_the_publication_logger_identity() -> None:
+    """拆出去的 verifier 发布模块仍记在 ``agent_runner_publication`` 名下。
+
+    「takeover race or external change」「PR merged or HEAD drifted」这几行是判断
+    接管与发布竞态谁赢了的唯一线索，它们来自发布流程而非验证流程；logger 名跟着模块
+    文件走，按发布流程 grep 的人就查不到这些行。
+    """
+    from backend.core.use_cases import agent_runner_publication as publication
+    from backend.core.use_cases import agent_runner_verifier_publication as verifier_publication
+
+    assert (
+        verifier_publication._logger.name
+        == publication._logger.name
+        == "backend.core.use_cases.agent_runner_publication"
+    )
