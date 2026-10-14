@@ -16,11 +16,21 @@
  * 若没有可登录的完整栈，本用例无法运行——这是浏览器层的诚实边界，交班语义本身
  * 由 `tasks/evidence/.../scripts/rv*.py` 的真实跨进程 oracle 与后端契约测试覆盖。
  *
+ * rv-1 缺口（等待人工处置，见 PRD §9 Human-Confirmed）：这里 stub 的两个端点恰好就是
+ * PRD §7 rv-1 `must_cross` 要求真实穿过的两段（Issue 详情读 + 接管动作写），所以
+ * **本文件即使在完整栈上跑绿也不能充当 rv-1 证据**。关闭 rv-1 只有两条路：① 去掉
+ * `stubTakeoverFlow` 的 `page.route`，在隔离栈（独立 state home + 真实 console.db +
+ * 真实 runner 等待环 + 阻塞 verifier 替身；仅按 §7 mock_boundary 替换 GitHub 与
+ * verifier CLI）运行本流程，把桌面与窄视口的真实页面截图存为
+ * `tasks/evidence/…/rv-1-verifier-takeover.png` / `-narrow.png`；② 由人工明确处置为
+ * 「接受跨进程 oracle + 本 UI/API 契约层的组合保真度」。二者之前 rv-1 保持 `[~]`。
+ *
  * 注意：接管动作端点返回的 HTTP 语义即后端 `TAKEOVER_HTTP_STATUS` 映射
  * （202 处理中 / 200 已交班 / 409 目标已变化），此处按真实契约 stub。
  */
 
 import { expect, test } from '../../fixtures/session.fixture'
+import type { Page } from '@playwright/test'
 import {
   AgentRunnerMonitorPage,
   type MonitoringRepositoryOverview,
@@ -166,7 +176,7 @@ type TakeoverHarness = {
  *   立即交班）、conflict（409 HEAD 变化）。
  */
 async function stubTakeoverFlow(
-  page: import('@playwright/test').Page,
+  page: Page,
   monitor: AgentRunnerMonitorPage,
   outcome: 'requested' | 'handed_over' | 'conflict',
 ): Promise<TakeoverHarness> {

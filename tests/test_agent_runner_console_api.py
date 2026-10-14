@@ -1004,3 +1004,30 @@ def test_take_over_verifier_missing_identity_returns_400(console_environment) ->
         console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
         == "running"
     )
+
+
+def test_take_over_verifier_oversized_identity_returns_400(console_environment) -> None:
+    """超长绑定按契约回 400（不是 pydantic 的 422），长度护栏仍在存储之前生效。
+
+    文档承诺「缺绑定 → 400」，操作员侧把 400 当作「绑定畸形或已过期，去刷新详情」；
+    若超长漂成 422，前端与 ``kc`` 的分支处理就会漏掉这一类。
+    """
+    _seed_running_verifier(console_environment["store"])
+
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/7/actions",
+        json={
+            "action": "take_over_verifier",
+            "run_id": "run-" + "7" * 200,
+            "head_sha": "d" * 200,
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    detail = response.json()["detail"]
+    assert "run_id must be at most 128 characters." in detail
+    assert "head_sha must be at most 64 characters." in detail
+    assert (
+        console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
+        == "running"
+    )

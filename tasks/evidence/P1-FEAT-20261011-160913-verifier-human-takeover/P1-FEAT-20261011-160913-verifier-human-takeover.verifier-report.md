@@ -9,7 +9,7 @@
 | RV-1 · 真实跨进程接管与精确进程组取消 | `scripts/rv1_takeover_handoff_probe.py`：接管 CAS 由另一 OS 进程写入同一 console.db WAL，runner `cancel_check` 看门狗 1.0s 内仅对 verifier 进程组 SIGKILL 并回收后抛 InterruptedError；独立探针判定 `FINAL_STATE: taken_over`、`CANCELLED_BY_HUMAN`、`HANDOFF_CONFIRMED`、`AUTOPILOT_HOLD`、`VERIFIER_GROUP_GONE`、`CONTROL_PROCESS_SURVIVED`（对照进程存活）、`MERGE_GATE_HELD` 全 True，`RV1_PROBE_OK: True`。 | Executor evidence present；独立复核。 |
 | RV-1 · 过期 head 绑定负控 | `rv1_negative_control.py`：真实代码对过期 head 返回 `binding_mismatch` 且不取消（`REAL_STALE_HEAD_CANCEL_CHECK: False`）；降级 head 比对后同一过期请求被接受为 `takeover_requested` 并触发取消（`BUGGY_STALE_HEAD_STATUS: accepted`），打印 `RV1_EXPECTED_FAIL` 与 `RV1_NEGATIVE_CONTROL_OK: True`。 | 检查点有效（先红后绿）；独立复核。 |
 | RV-2 · 竞态与过期结果保护 | `rv2_race_and_staleness_probe.py`：真实 SQLite CAS + 真实线程并发覆盖 S1 完成先赢 / S2 接管先赢阻断 verdict / S3 唯一终态 / S4 HEAD 漂移丢弃旧 verdict+置 hold+门阻断 / S5 外部合并停止后续，`RV2_PROBE_OK: True`；S4 初始快照负控红→绿（`S4_NEG_STALE_NOT_RECORDED: True`）。 | Executor evidence present；独立复核。 |
-| 自动化契约层 | rv-1 入口层 134 passed（含 `tests/test_agent_runner_issue_control.py` 及修复层新增用例：接管请求存储异常 fail-closed、SQLite 镜像常量对齐、PR 读失败仍完成 Issue 侧交班、取消分类优先于超时分类）；rv-2 竞态/fail-closed 层 221 passed（merge queue/supervisor/review_once/interactive_decision 对 autopilot_hold 阻断，含 require_verifier_pass 关闭与无 repo_id 兜底）；§9 Validation 第 1 条原列 8 文件合集 279 passed。 | Executor evidence present；独立复核。 |
+| 自动化契约层 | rv-1 入口层 135 passed（含 `tests/test_agent_runner_issue_control.py` 及修复层新增用例：接管请求存储异常 fail-closed、SQLite 镜像常量对齐、PR 读失败仍完成 Issue 侧交班、取消分类优先于超时分类）；rv-2 竞态/fail-closed 层 221 passed（merge queue/supervisor/review_once/interactive_decision 对 autopilot_hold 阻断，含 require_verifier_pass 关闭与无 repo_id 兜底）；§9 Validation 第 1 条原列 8 文件合集 280 passed。 | Executor evidence present；独立复核。 |
 | 前端 | `frontend-public` `pnpm typecheck` exit 0、`pnpm build`（output:export）exit 0；`pnpm lint` 对本 PR 改动的 6 个前端文件逐文件 0 error（仅既有 `jsdoc/require-jsdoc` warn），仓库全量 exit 1 来自 3 条**基线** `react-hooks/set-state-in-effect` error（`run-detail-dialog.tsx`、`prd-ci-view.tsx`、`prd-lifecycle-view.tsx`，均不在 `git diff main...HEAD` 内，非本 PR 回归）。接管卡 `verifier-takeover-card.tsx` 仅在投影存在活动 verifier 且 state=running 时渲染接管按钮，复用生产 Dialog/Portal。 | Executor evidence present；独立复核。 |
 | PRD/evidence 结构 | `check_prd_acceptance_checklist.py --check-provided --archive-ready` PASS；`evidence.json` 两项正整数编号、纯文件名、文件存在、`stdout_assertions` 全为字面 marker（无 `.*`）、命令链无 `|| true`。 | Executor evidence present；独立复核。 |
 
@@ -17,7 +17,7 @@
 
 1. **真实浏览器端到端入口未覆盖（BLOCKER for full acceptance，非已知代码缺陷）**：当前 `verifier-takeover.spec.ts` 使用 `page.route` stub Issue 详情与接管动作 API，只验证真实 Dashboard 组件树上的 UI/API 契约；它没有穿越 Console API → SQLite → runner。该 spec 在本环境也因缺 `tests/playwright-e2e` node_modules 与可登录后端栈未运行。需增加不 stub 产品 API 的真实入口用例并在具备 `just e2e` 环境后运行，生成真实页面截图/trace，核对状态、Issue 范围、HEAD、PR 入口与窄视口布局。PRD §9 对应项以 `[~]` 挂起，`Human-Confirmed` 两项保持未勾。
 2. **独立 verifier 复核**：上表执行侧证据（真实跨进程/真实 SQLite 边界 + 负控先红后绿 + 355 项契约测试 + 前端构建）需独立 verifier 在最终 committed tree 上复核并出具 PASS/REJECT。
-3. **tree 绑定**：证据 `.txt` 已在第二轮合并前评审修复层落地后的工作树复跑，绑定源代码提交 `5e2a8386e926c050dca7a434e3ce1a7b802257d4` + record-excluded tree `e66a427ee823856c8a4521535ff83923b27daab6`；本报告文本属于排除的证据目录，runner 仍须按机器契约绑定最终提交的完整 tree 与证据哈希。
+3. **tree 绑定**：证据 `.txt` 已在第三轮评审修复层（golden 配置冲突收敛 + 超长绑定 400 + 文档/随包 skill 同步）落地后的工作树复跑，绑定源代码提交 `7e0eb5af779f4a7dd9264aed395d0a3b00889ca7` + record-excluded tree `b6e92e21facdc8ba87893bfc632735f1a2b3edd3`；本报告文本属于排除的证据目录，runner 仍须按机器契约绑定最终提交的完整 tree 与证据哈希。
 
 ## 结论
 

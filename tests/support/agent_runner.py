@@ -37,13 +37,26 @@ from backend.infrastructure.process_runner import CommandFailedError
 #: 宿主（托管 runner 子进程）注入的新旧机器级配置变量名，两者都会顶掉仓库根解析。
 _AMBIENT_CONFIG_ENV_NAMES = ("KEDACODE_CONFIG", "IAR_CONFIG")
 
+#: golden 断言的唯一来源：仓库根 ``config.toml``（tests/support/agent_runner.py → 上两级）。
+_ROOT_CONFIG_TOML = Path(__file__).resolve().parents[2] / "config.toml"
+
 
 @contextmanager
-def without_ambient_config_env() -> Iterator[None]:
-    """临时剥离宿主注入的机器级配置变量，让配置解析回到仓库根 ``config.toml``。"""
+def _ambient_config_env(config_toml: Path | None = None) -> Iterator[None]:
+    """块内改写宿主注入的机器级配置变量，结束时恢复原值。
+
+    Args:
+        config_toml: 要显式钉住的 ``config.toml``；``None`` 表示只剥离两名变量，
+            让解析回到默认发现顺序。旧前缀 ``IAR_CONFIG`` 始终剥离，避免它盖过 pin。
+
+    Yields:
+        ``None``。
+    """
     previous_values = {
         env_name: os.environ.pop(env_name, None) for env_name in _AMBIENT_CONFIG_ENV_NAMES
     }
+    if config_toml is not None:
+        os.environ["KEDACODE_CONFIG"] = str(config_toml)
     try:
         yield
     finally:
@@ -54,33 +67,58 @@ def without_ambient_config_env() -> Iterator[None]:
                 os.environ[env_name] = previous_value
 
 
+def pinned_root_config_env() -> Iterator[None]:
+    """在块内把机器级配置显式钉到仓库根 ``config.toml``。
+
+    仅剥离宿主变量是不够的：``[agent_runner]`` 段按 ``KEDACODE_CONFIG`` → 状态目录
+    （``~/.kedacode/config.toml``）的顺序解析，机器上那份一旦与仓库根漂移（本仓的
+    托管 runner 就是这么注入的），剥离变量后重新解析读到的仍是宿主配置而非仓库根。
+    显式 pin 让 golden 断言在任何机器上都指向同一个来源。
+
+    Returns:
+        把 ``KEDACODE_CONFIG`` 指向仓库根的配置环境上下文管理器。
+    """
+    return _ambient_config_env(_ROOT_CONFIG_TOML)
+
+
+def default_config_discovery_env() -> Iterator[None]:
+    """在块内剥离宿主注入的机器级变量，让配置解析走默认发现顺序。
+
+    Returns:
+        剥离 ``KEDACODE_CONFIG`` / ``IAR_CONFIG`` 的配置环境上下文管理器。
+    """
+    return _ambient_config_env()
+
+
 def root_config_app_config() -> AppConfig:
     """按**仓库根** ``config.toml`` 装配 ``AppConfig``，供断言真实配置内容的用例使用。
 
     ``build_app_config()`` 读的是 settings 模块级单例，而该单例在 conftest 导入
     ``backend`` 的那一刻就已定型——托管 runner 会向子进程注入 ``KEDACODE_CONFIG`` /
     ``IAR_CONFIG`` 指向机器级 ``config.toml``（``conftest._isolate_ambient_iar_config``
-    在会话开始才剥离，来不及）。因此宿主上那份机器级配置一旦与仓库根漂移，
-    直接用 ``build_app_config()`` 的 golden 断言测的就不是本仓 ``config.toml``。
-    本函数在剥离宿主变量之后重新解析配置源，断言对象固定为仓库根那份。
+    在会话开始才剥离并重建，早于它的导入期取值不受它约束）。因此宿主上那份机器级配置
+    一旦与仓库根漂移，直接用 ``build_app_config()`` 的 golden 断言测的就不是本仓
+    ``config.toml``。本函数显式把配置来源钉到仓库根后重新装配，断言对象固定为那份。
 
     Returns:
         由仓库根 ``config.toml`` 装配的 :class:`AppConfig`。
     """
-    with without_ambient_config_env():
+    with pinned_root_config_env():
         return build_app_config_from_settings(AgentRunnerSettings())
 
 
 def root_config_toml_path() -> Path:
-    """返回剥离宿主注入变量后解析到的 ``config.toml`` 路径（golden 断言的来源检查）。
+    """返回按默认发现顺序解析到的 ``config.toml`` 路径（golden 断言的来源检查）。
 
     与 :func:`root_config_app_config` 同一前提：不断言"当前进程恰好读到的那份"，
-    而断言本仓根那份配置确实是来源。
+    而断言本仓根那份配置确实是来源。这里剥掉宿主注入的新旧变量后走默认发现
+    （``KEDACODE_CONFIG`` → cwd 向上 → 状态目录 → 源码根），因此它检查的是发现顺序
+    本身，而不是某个显式 pin 的结果。
 
     Returns:
         配置发现结果（正常情况下是仓库根 ``config.toml``）。
     """
-    with without_ambient_config_env():
+    with default_config_discovery_env():
         return settings_sources._find_config_toml()
 
 

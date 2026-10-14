@@ -749,7 +749,7 @@ runner 在 commit proxy 固定实现提交后复跑 RV，并确认 PRD 执行侧
 界面上的状态与动作都来自两个契约名，排查时按这两个键搜：
 
 - **`active_verifier`**：Issue 详情响应（`GET /agent-runner/issues/{issue_number}`）新增的只读字段，由 `active_verifier_projection()` fresh-read 控制行得到，字段为 `run_id`、`head_sha`、`state`、`can_take_over`、`pr_number`、`autopilot_hold`。`state` 取值就是控制行状态机的八个值：`running` / `takeover_requested` / `taken_over` / `takeover_failed` / `verifier_completed` / `verifier_stale` / `pr_merged` / `expired`。没有受控运行时该字段缺省，界面不显示接管按钮——状态**不**从生命周期事件推断。
-- **`take_over_verifier`**：Issue 级白名单动作（`POST /agent-runner/console/repositories/{repo_id}/issues/{issue_number}/actions`，body 带 `action`、`run_id`、`head_sha`），与 `retry_failed` / `blocked_continue` / `recover_failed_publish` 同一入口。缺 `run_id` 或 `head_sha` 直接 `400`。它跟 `kc run --takeover`（停 daemon 并接管其**全部**在途 Issue）不是同一件事，后者是全局、破坏性的。
+- **`take_over_verifier`**：Issue 级白名单动作（`POST /agent-runner/console/repositories/{repo_id}/issues/{issue_number}/actions`，body 带 `action`、`run_id`、`head_sha`），与 `retry_failed` / `blocked_continue` / `recover_failed_publish` 同一入口。缺 `run_id` 或 `head_sha`、或绑定超长（`run_id` > 128、`head_sha` > 64）一律直接 `400`——长度护栏在 handler 里，不让模型校验把它漂成 `422`。它跟 `kc run --takeover`（停 daemon 并接管其**全部**在途 Issue）不是同一件事，后者是全局、破坏性的。
 
 接管的语义边界（这些是刻意设计，不是缺陷）：
 
