@@ -83,10 +83,10 @@ def _run_supervisor_with_repair_loop(
         supervisor_agent: 监督者 Agent
         executor_agent: 本次实现者；``None`` 表示本入口拿不到，
             ``repair_agent='executor'`` 时按 Issue 标签回落并记录来源
-        repo_id: 注册表仓库 ID；``None`` 时闸门查询放行（与接管窗口不启用一致）。
-            该 Issue 处于人工接管闸门（``autopilot_hold``）时**不启动**任何监督
-            Agent 审查或修复，直接返回——闸门只由同 head 的全新 verifier
-            GREEN 清除。
+        repo_id: 注册表仓库 ID；``None`` 时闸门按 Issue 编号兜底查询，查不到证据
+            一律按有闸门处理（FR-5 fail closed）。该 Issue 处于人工接管闸门
+            （``autopilot_hold``）时**不启动**任何监督 Agent 审查或修复，直接返回——
+            闸门只由同 head 的全新 verifier GREEN 清除。
     """
     if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
         _logger.info(

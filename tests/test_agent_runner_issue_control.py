@@ -8,15 +8,18 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from backend.core.shared.interfaces.issue_run_control import (
     PHASE_VERIFIER,
+    STATE_EXPIRED,
     STATE_PR_MERGED,
     STATE_RUNNING,
     STATE_TAKEN_OVER,
+    STATE_TAKEOVER_FAILED,
     STATE_TAKEOVER_REQUESTED,
     STATE_VERIFIER_COMPLETED,
     STATE_VERIFIER_STALE,
@@ -27,7 +30,11 @@ from backend.core.shared.interfaces.issue_run_control import (
     TAKEOVER_PENDING,
     IssueRunControlRecord,
 )
-from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+    IssueSummary,
+    PullRequestContext,
+)
 from backend.core.use_cases import agent_runner_issue_control as issue_control
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 
@@ -37,7 +44,11 @@ def _store(tmp_path: Path) -> SqliteConsoleStore:
 
 
 def _register(
-    store: SqliteConsoleStore, *, run_id: str = "run-1", head_sha: str = "abc123"
+    store: SqliteConsoleStore,
+    *,
+    run_id: str = "run-1",
+    head_sha: str = "abc123",
+    pr_number: int | None = 58,
 ) -> None:
     store.register_issue_run(
         IssueRunControlRecord(
@@ -49,8 +60,25 @@ def _register(
             state=STATE_RUNNING,
             autopilot_hold=False,
             started_at="2026-10-12T00:00:00+00:00",
-            pr_number=58,
+            pr_number=pr_number,
         )
+    )
+
+
+def _request_takeover(
+    store: SqliteConsoleStore,
+    *,
+    run_id: str = "run-1",
+    head_sha: str = "abc123",
+    requested_at: str = "2026-10-12T00:00:01+00:00",
+) -> None:
+    store.request_issue_takeover(
+        repo_id="repo-a",
+        issue_number=42,
+        run_id=run_id,
+        head_sha=head_sha,
+        request_id="req-1",
+        requested_at=requested_at,
     )
 
 
@@ -323,7 +351,9 @@ def test_autopilot_hold_blocks_when_known_repository_store_is_unavailable(
     monkeypatch.setattr(issue_control, "resolve_issue_run_control", lambda: None)
 
     assert issue_control.autopilot_hold_blocks(repo_id="repo-a", issue_number=42) is True
-    assert issue_control.autopilot_hold_blocks(repo_id=None, issue_number=42) is False
+    # repo_id 解析不出来时也不再放行：无法证明"没有闸门"就不能放行自动处理（FR-5/FR-6）。
+    assert issue_control.autopilot_hold_blocks(repo_id=None, issue_number=42) is True
+    assert issue_control.autopilot_hold_blocks(repo_id="", issue_number=42) is True
 
 
 def test_takeover_handoff_does_not_mark_pr_merged_on_github_read_failure(
@@ -536,3 +566,248 @@ def test_discard_stale_verdict_does_not_touch_newer_run_on_same_head(
     assert row.run_id == "new-run"
     assert row.state == STATE_RUNNING
     assert row.autopilot_hold is False
+
+
+def test_autopilot_hold_blocks_when_hold_is_registered_under_the_registry_repo_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """按注册表 id 落闸后，解析不出 repo_id 的入口也必须看到闸门。
+
+    回归 Issue #278 评审发现的失效形态：runner 用注册表 ``repo_id`` 登记控制行，
+    而 Console 的 review_once 入口未转发 repo_id，于是按 ``repo_path.name`` 查——
+    查不到行就当作"没有闸门"，被人工接管的 Issue 重新进入监督与合并队列，即使
+    仓库关闭了 ``require_verifier_pass``。
+    """
+    store = _store(tmp_path)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+    _request_takeover(store)
+
+    assert issue_control.autopilot_hold_blocks(repo_id="repo-a", issue_number=42) is True
+    assert issue_control.autopilot_hold_blocks(repo_id=None, issue_number=42) is True
+    assert issue_control.autopilot_hold_blocks(repo_id="", issue_number=42) is True
+
+
+def test_autopilot_hold_blocks_are_scoped_to_the_other_repository(tmp_path: Path) -> None:
+    """另一仓库的同号 Issue 不影响本仓的精确查询（闸门判定不跨仓放行也不跨仓误伤）。"""
+    store = _store(tmp_path)
+    _register(store)
+    _request_takeover(store)
+
+    assert store.has_autopilot_hold(repo_id="repo-a", issue_number=42) is True
+    assert store.has_autopilot_hold(repo_id="repo-b", issue_number=42) is False
+    assert store.has_autopilot_hold_for_issue(issue_number=42) is True
+    assert store.has_autopilot_hold_for_issue(issue_number=7) is False
+
+
+def test_orphaned_takeover_request_is_invalidated_and_stays_on_hold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """owner 随重启消失后，悬空的接管请求收敛成 takeover_failed（PRD §7.7、FR-6）。"""
+    store = _store(tmp_path)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+    _request_takeover(store, requested_at="2026-10-12T00:00:01+00:00")
+
+    invalidated = issue_control.invalidate_orphaned_takeover_requests(
+        repo_id="repo-a",
+        issue_number=42,
+        now=datetime(2026, 10, 12, 0, 5, tzinfo=timezone.utc),
+    )
+
+    assert invalidated is True
+    row = store.get_issue_run(repo_id="repo-a", issue_number=42)
+    assert row.state == STATE_TAKEOVER_FAILED
+    assert row.completed_at is not None
+    # 请求已经落下的闸门不因 owner 消失而自动打开。
+    assert row.autopilot_hold is True
+
+
+def test_takeover_request_inside_the_window_is_not_declared_orphaned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """看门狗最多 1 秒一轮，窗口内的请求仍在收尾：不能抢先判死。"""
+    store = _store(tmp_path)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+    _request_takeover(store, requested_at="2026-10-12T00:00:01+00:00")
+
+    invalidated = issue_control.invalidate_orphaned_takeover_requests(
+        repo_id="repo-a",
+        issue_number=42,
+        now=datetime(2026, 10, 12, 0, 0, 30, tzinfo=timezone.utc),
+    )
+
+    assert invalidated is False
+    assert store.get_issue_run(repo_id="repo-a", issue_number=42).state == STATE_TAKEOVER_REQUESTED
+
+
+def test_running_row_is_never_orphaned_by_age(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``running`` 行的 owner 是 verifier 自己的等待循环，由 mark_expired 收敛。"""
+    store = _store(tmp_path)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+
+    invalidated = issue_control.invalidate_orphaned_takeover_requests(
+        repo_id="repo-a",
+        issue_number=42,
+        now=datetime(2027, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert invalidated is False
+    assert store.get_issue_run(repo_id="repo-a", issue_number=42).state == STATE_RUNNING
+
+
+def test_active_verifier_projection_surfaces_orphaned_request_as_retryable_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """界面读取时收敛孤儿请求：操作者看到可重试失败，而不是永远"仍在停止"。"""
+    store = _store(tmp_path)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+    _request_takeover(store, requested_at="2020-01-01T00:00:01+00:00")
+
+    projection = issue_control.active_verifier_projection(repo_id="repo-a", issue_number=42)
+
+    assert projection is not None
+    assert projection.state == STATE_TAKEOVER_FAILED
+    assert projection.can_take_over is False
+    assert projection.autopilot_hold is True
+
+
+def test_mark_verdict_unpublished_reclaims_the_completed_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CAS 赢了却没发布结论（树漂移 / RED）时收回 verifier_completed，避免假完成态。"""
+    store = _store(tmp_path)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+    handle = issue_control.VerifierRunHandle(
+        store=store, repo_id="repo-a", issue_number=42, run_id="run-1", head_sha="abc123"
+    )
+    assert handle.mark_completed() is True
+
+    assert handle.mark_verdict_unpublished() is True
+
+    row = store.get_issue_run(repo_id="repo-a", issue_number=42)
+    assert row.state == STATE_EXPIRED
+    assert row.completed_at is not None
+
+
+def test_mark_verdict_unpublished_after_takeover_lands_records_takeover_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """接管恰好在最后时刻落地时，收回动作不得掩盖交班状态。"""
+    store = _store(tmp_path)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+    handle = issue_control.VerifierRunHandle(
+        store=store, repo_id="repo-a", issue_number=42, run_id="run-1", head_sha="abc123"
+    )
+    _request_takeover(store)
+
+    assert handle.mark_verdict_unpublished() is True
+
+    row = store.get_issue_run(repo_id="repo-a", issue_number=42)
+    assert row.state == STATE_TAKEOVER_FAILED
+    assert row.autopilot_hold is True
+
+
+def test_mark_verdict_unpublished_leaves_handoff_terminal_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """已完成交班（taken_over）的行不被收回——交班终态优先于观测面清理。"""
+    store = _store(tmp_path)
+    _register(store)
+    _patch_control_store(monkeypatch, store)
+    handle = issue_control.VerifierRunHandle(
+        store=store, repo_id="repo-a", issue_number=42, run_id="run-1", head_sha="abc123"
+    )
+    _request_takeover(store)
+    assert handle.confirm_takeover() is True
+
+    assert handle.mark_verdict_unpublished() is False
+
+    assert store.get_issue_run(repo_id="repo-a", issue_number=42).state == STATE_TAKEN_OVER
+
+
+def test_attach_pr_number_writes_only_the_owning_run_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """登记时不知道 PR 编号，交班 fresh-read 后按 run 绑定回写；新一轮不受影响。"""
+    store = _store(tmp_path)
+    _register(store, pr_number=None)
+    _patch_control_store(monkeypatch, store)
+    handle = issue_control.VerifierRunHandle(
+        store=store, repo_id="repo-a", issue_number=42, run_id="run-1", head_sha="abc123"
+    )
+    assert store.get_issue_run(repo_id="repo-a", issue_number=42).pr_number is None
+
+    assert handle.attach_pr_number(71) is True
+    assert store.get_issue_run(repo_id="repo-a", issue_number=42).pr_number == 71
+
+    _register(store, run_id="run-2", pr_number=None)
+    assert handle.attach_pr_number(72) is False
+    assert store.get_issue_run(repo_id="repo-a", issue_number=42).pr_number is None
+
+
+def test_takeover_handoff_records_the_pr_number_from_the_fresh_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-7：交班把 fresh-read 的 Draft PR 编号落到控制行，界面不再依赖另一次读取。"""
+    store = _store(tmp_path)
+    _register(store, pr_number=None)
+    _patch_control_store(monkeypatch, store)
+    handle = issue_control.VerifierRunHandle(
+        store=store, repo_id="repo-a", issue_number=42, run_id="run-1", head_sha="abc123"
+    )
+    _request_takeover(store)
+    assert handle.confirm_takeover() is True
+
+    class _OpenDraftGitHub:
+        def __init__(self) -> None:
+            self.label_edits: list[tuple[int, tuple[str, ...], tuple[str, ...]]] = []
+            self.comments: list[str] = []
+
+        def get_pull_request_context(
+            self, branch: str, *, require_success: bool = False
+        ) -> PullRequestContext:
+            assert require_success is True
+            return PullRequestContext(
+                pr_url="https://github.com/example/repo/pull/71",
+                branch=branch,
+                head_sha="abc123",
+                base_sha="base123",
+                number=71,
+                is_draft=True,
+            )
+
+        def edit_issue_labels(
+            self, number: int, *, add: tuple[str, ...] = (), remove: tuple[str, ...] = ()
+        ) -> None:
+            self.label_edits.append((number, tuple(add), tuple(remove)))
+
+        def comment_issue(self, number: int, body: str) -> None:
+            self.comments.append(body)
+
+    github_client = _OpenDraftGitHub()
+    issue_control.finalize_verifier_takeover(
+        repo_id="repo-a",
+        issue=IssueSummary(
+            number=42,
+            title="Takeover",
+            url="https://github.com/example/repo/issues/42",
+            body="",
+            labels=(),
+        ),
+        config=AppConfig(),
+        github_client=github_client,  # type: ignore[arg-type]
+        expected_branch="issue-42",
+        handle=handle,
+    )
+
+    row = store.get_issue_run(repo_id="repo-a", issue_number=42)
+    assert row.pr_number == 71
+    assert row.state == STATE_TAKEN_OVER

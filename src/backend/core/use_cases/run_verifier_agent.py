@@ -34,6 +34,7 @@ from backend.core.use_cases.agent_runner_evidence_snapshot import (
 )
 from backend.core.use_cases.agent_runner_issue_control import (
     VerifierCancelledByHumanError,
+    VerifierRunHandle,
     begin_verifier_run,
 )
 from backend.core.use_cases.agent_runner_structured_evidence import (
@@ -650,6 +651,37 @@ def _format_verifier_block_message(
     )
 
 
+def _reject_unpublished_verdict(
+    run_handle: VerifierRunHandle | None, issue_number: int, error: ValidationEvidenceError
+) -> ValidationEvidenceError:
+    """结论最终没有发布时收回 ``verifier_completed``，并把原异常交回调用点 ``raise``。
+
+    ``mark_completed`` 的 CAS 早于树漂移与 RED 两道检查：结论被这两道检查拒绝时
+    控制行若仍停在 ``verifier_completed``，FR-1 的状态分类就会在整段 RED recovery
+    窗口里对着一个从未落到 PR 上的 verdict 报"验证已完成"。收回为 ``expired``；
+    接管恰好在同一时刻落地时改记 ``takeover_failed``。收回动作失败只记日志，绝不
+    掩盖原始结论错误，也绝不伪造交班。
+    """
+    if run_handle is None:
+        return error
+    try:
+        reclaimed = run_handle.mark_verdict_unpublished()
+    except Exception as store_exc:  # noqa: BLE001 - 状态收回失败不改变 verifier 结论。
+        _logger.warning(
+            "Issue #%d: could not reclaim verifier_completed after an unpublished " "verdict (%s).",
+            issue_number,
+            store_exc,
+        )
+        return error
+    if not reclaimed:
+        _logger.info(
+            "Issue #%d: verdict was not published and the control row was already "
+            "settled by another terminal transition.",
+            issue_number,
+        )
+    return error
+
+
 def run_verifier_gate(
     issue: IssueSummary,
     worktree_path: Path,
@@ -950,18 +982,26 @@ def run_verifier_gate(
     if get_head_sha(worktree_path, process_runner) != builder_sha or has_changes(
         worktree_path, process_runner
     ):
-        raise ValidationEvidenceError(
-            "Independent verifier changed the committed code tree; restore its "
-            "negative-control edits before accepting a verdict."
+        raise _reject_unpublished_verdict(
+            run_handle,
+            issue.number,
+            ValidationEvidenceError(
+                "Independent verifier changed the committed code tree; restore its "
+                "negative-control edits before accepting a verdict."
+            ),
         )
     if verdict.blocks:
-        raise ValidationEvidenceError(
-            _format_verifier_block_message(
-                verdict=verdict,
-                verifier_agent=chosen_agent,
-                issue_number=issue.number,
-                response_log_path=response_log_path,
-            )
+        raise _reject_unpublished_verdict(
+            run_handle,
+            issue.number,
+            ValidationEvidenceError(
+                _format_verifier_block_message(
+                    verdict=verdict,
+                    verifier_agent=chosen_agent,
+                    issue_number=issue.number,
+                    response_log_path=response_log_path,
+                )
+            ),
         )
     if verdict.risk == "yellow":
         _logger.warning(

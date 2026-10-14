@@ -13,12 +13,14 @@
   ``agent_invocation_events`` 通用调用观测账本表，身份不依赖 PRD；v10 新增
   按仓库与归档变体隔离的 ``backlog_prd_snapshots`` 列表快照表；v11 为
   ``attempt_records`` 附加失败阶段；v12 附加生命周期阶段耗时；v13 为运行历史
-  追加可空的 Issue 标题与 URL 快照；v14 新增单行模型 token 价格设置表，并新增
-  单 Issue 人工接管（Issue #278）的 ``issue_run_control`` 控制表——Console 与
-  runner 跨进程 CAS 的唯一介质）。
+  追加可空的 Issue 标题与 URL 快照；v14 新增单行模型 token 价格设置表）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
+- ``issue_run_control``（单 Issue 人工接管控制表，Issue #278）**不占用**版本号：
+  建表挂在版本门之外、无条件幂等执行（见 ``_migrate`` 与
+  :mod:`backend.infrastructure.persistence.console_store_takeover`）。并行分支各自
+  递增 ``_SCHEMA_VERSION`` 时不会互相顶掉，机器级共享库也不会因同号而跳过建表。
 """
 
 from __future__ import annotations
@@ -260,11 +262,11 @@ class SqliteConsoleStore(
         return connection
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
-        # v14 两张新表（model_pricing_settings 与 issue_run_control）都带 IF NOT
-        # EXISTS，**无条件**幂等建表后再看版本号：机器级共享库
-        # （~/.kedacode/console.db）的 user_version 可能被并行分支同号迁移置满，
-        # 若只挂在 `current_version < 14` 分支上会被整体跳过，对应表的读写随即
-        # 命中 "no such table"。建表在本地版本门之外，兜底幂等。
+        # 两张表都带 IF NOT EXISTS，**无条件**幂等建表后再看版本号：机器级共享库
+        # （~/.kedacode/console.db）的 user_version 可能被并行分支的同号迁移置满，
+        # 若只挂在 `current_version < 14` 分支上会被整体跳过，对应表的读写随即命中
+        # "no such table"。接管控制表 issue_run_control（Issue #278）不占用版本号，
+        # 建表恒在版本门之外（见 console_store_takeover）。
         connection.execute(_CREATE_MODEL_PRICING_SETTINGS)
         connection.execute(CREATE_ISSUE_RUN_CONTROL)
         current_version_row = connection.execute("PRAGMA user_version").fetchone()
@@ -355,11 +357,9 @@ class SqliteConsoleStore(
             if "issue_url" not in existing_run_columns:
                 connection.execute(_RUN_V13_ADD_ISSUE_URL)
         if current_version < 14:
-            # 附加式迁移：新增单行模型 token 价格设置表，以及单 Issue 人工接管
-            # 控制行 issue_run_control（Issue #278）；两张表建表均带
-            # IF NOT EXISTS，重复迁移幂等。
+            # 附加式迁移：新增单行模型 token 价格设置表；建表带 IF NOT EXISTS，
+            # 重复迁移幂等。接管控制表 issue_run_control 不在版本门内建表。
             connection.execute(_CREATE_MODEL_PRICING_SETTINGS)
-            connection.execute(CREATE_ISSUE_RUN_CONTROL)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 

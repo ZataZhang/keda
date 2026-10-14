@@ -256,7 +256,11 @@ def _process_review_candidate(
     run_history_store: IRunHistoryStore | None = None,
     repo_id: str = "",
 ) -> str:
-    """Run supervisor cycle for a single review candidate."""
+    """Run supervisor cycle for a single review candidate.
+
+    ``repo_id`` 必须是**注册表**仓库 id：接管控制行按注册表 id 登记，传目录名或留空
+    都查不到那一行，会把正在被人工接管的 Issue 放回监督流程（FR-5）。
+    """
     # 人工接管闸门（Issue #278）：held Issue 一律不进 review 监督，无论
     # require_verifier_pass 如何配置——闸门只由同 head 的全新 GREEN 清除。
     if autopilot_hold_blocks(repo_id=repo_id or None, issue_number=issue.number):
@@ -553,8 +557,11 @@ def review_once(
         process_runner: Runner for executing subprocess commands.
         run_history_store: Optional PRD lifecycle side-channel store; ``None``
             keeps the previous behaviour with no lifecycle events.
-        repo_id: Repository id recorded with lifecycle events; defaults to the
-            repository directory name.
+        repo_id: 注册表仓库 id。用于**两件事**：生命周期事件的记录键，以及人工接管
+            闸门（Issue #278）的查询键。记录键缺省回落到仓库目录名；闸门查询键
+            **不**跟着回落——控制行按注册表 id 登记，用目录名去查会查不到行、把正在
+            被人工接管的 Issue 放回监督与合并队列（FR-5）。调用方没给 repo_id 时，
+            闸门按 Issue 编号兜底并 fail closed。
 
     Returns:
         Exit code (0 on success, 1 if any issue failed).
@@ -615,7 +622,7 @@ def review_once(
                 github_client=github_client,
                 process_runner=process_runner,
                 run_history_store=run_history_store,
-                repo_id=effective_repo_id,
+                repo_id=repo_id or "",
             )
             _logger.info(
                 "Review outcome for Issue #%d: %s (%s)",
@@ -658,7 +665,7 @@ def review_once(
                 github_client=github_client,
                 process_runner=process_runner,
                 supervisor_agent=agent,
-                repo_id=effective_repo_id,
+                repo_id=repo_id,
             )
             if merge_exit_code != 0:
                 exit_code = merge_exit_code

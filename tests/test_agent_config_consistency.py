@@ -29,20 +29,21 @@ from backend.infrastructure.config.settings import (
     AgentRunnerSettings,
 )
 from backend.infrastructure.github_client import LabelConfig as InfraLabelConfig
+from tests.support.agent_runner import root_config_app_config, root_config_toml_path
 
 import pytest
 
 
-def test_agent_runner_reads_root_config_toml(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_runner_reads_root_config_toml() -> None:
     """Agent runner settings should load the repository root config.toml."""
-    # ``IAR_CONFIG`` 优先于仓库根发现；IAR agent 注入的是别的 worktree 的配置，
-    # 会把本用例的"读仓库根 config.toml"前提整个顶掉。
-    monkeypatch.delenv("IAR_CONFIG", raising=False)
     repository_root = Path(__file__).resolve().parents[1]
-    app_config = build_app_config()
+    # ``KEDACODE_CONFIG`` / ``IAR_CONFIG`` 优先于仓库根发现；IAR agent 注入的是别的
+    # worktree 的配置，会把本用例的"读仓库根 config.toml"前提整个顶掉，因此来源检查
+    # 与装配都走剥离宿主变量后的路径（build_app_config() 读的是导入期定型的单例）。
+    assert root_config_toml_path() == repository_root / "config.toml"
+    app_config = root_config_app_config()
 
     assert settings_module._PROJECT_ROOT_PATH == repository_root
-    assert settings_sources._find_config_toml() == repository_root / "config.toml"
     assert app_config.runner.default_agent == "claude"
     assert app_config.runner.recovery_retry_delay_seconds == 30
     assert app_config.runner.timeout_seconds == 14400
@@ -326,9 +327,8 @@ def test_label_config_includes_waiting() -> None:
 
 def test_factory_build_app_config_maps_waiting() -> None:
     """Factory must map the waiting label through to AppConfig."""
-    from backend.engines.agent_runner.factory import build_app_config
-
-    app_config = build_app_config()
+    # 断言对象是仓库根 config.toml 的真实取值，故绕开导入期定型的 settings 单例。
+    app_config = root_config_app_config()
     assert app_config.labels.waiting == "agent/waiting"
 
 

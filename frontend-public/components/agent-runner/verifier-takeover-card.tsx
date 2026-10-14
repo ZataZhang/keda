@@ -1,5 +1,4 @@
 "use client";
-/* eslint-disable react-hooks/set-state-in-effect */
 
 // 单 Issue verifier 人工接管面板：仅在详情投影显示有受控独立 verifier 时出现，
 // 请求只登记取消意图，交班与否以回读控制行状态为准，界面绝不自称"已停止"。
@@ -89,6 +88,9 @@ export function VerifierTakeoverCard({
   }, [repoId, issueNumber]);
 
   useEffect(() => {
+    // reload() 只在 fetch 完成后的回调里 setState，不是同步级联渲染；规则的静态
+    // 分析看穿不了 `void reload()`，因此这里逐行豁免，而不是整文件关闭该规则。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, [reload]);
 

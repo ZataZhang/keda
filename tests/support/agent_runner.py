@@ -30,6 +30,7 @@ from backend.core.shared.prd_checklist import parse_prd_checklist
 from backend.engines.agent_runner.factory_config_builder import (
     build_app_config_from_settings,
 )
+from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import AgentRunnerSettings
 from backend.infrastructure.process_runner import CommandFailedError
 
@@ -38,7 +39,7 @@ _AMBIENT_CONFIG_ENV_NAMES = ("KEDACODE_CONFIG", "IAR_CONFIG")
 
 
 @contextmanager
-def _without_ambient_config_env() -> Iterator[None]:
+def without_ambient_config_env() -> Iterator[None]:
     """临时剥离宿主注入的机器级配置变量，让配置解析回到仓库根 ``config.toml``。"""
     previous_values = {
         env_name: os.environ.pop(env_name, None) for env_name in _AMBIENT_CONFIG_ENV_NAMES
@@ -66,8 +67,21 @@ def root_config_app_config() -> AppConfig:
     Returns:
         由仓库根 ``config.toml`` 装配的 :class:`AppConfig`。
     """
-    with _without_ambient_config_env():
+    with without_ambient_config_env():
         return build_app_config_from_settings(AgentRunnerSettings())
+
+
+def root_config_toml_path() -> Path:
+    """返回剥离宿主注入变量后解析到的 ``config.toml`` 路径（golden 断言的来源检查）。
+
+    与 :func:`root_config_app_config` 同一前提：不断言"当前进程恰好读到的那份"，
+    而断言本仓根那份配置确实是来源。
+
+    Returns:
+        配置发现结果（正常情况下是仓库根 ``config.toml``）。
+    """
+    with without_ambient_config_env():
+        return settings_sources._find_config_toml()
 
 
 def make_ready_issue() -> IssueSummary:

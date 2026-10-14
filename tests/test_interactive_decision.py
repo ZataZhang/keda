@@ -639,3 +639,35 @@ def test_run_interactive_decision_rejects_when_disabled(
         github_client_factory=lambda path: MagicMock(),
     )
     assert exit_code == 1
+
+
+def test_execute_review_once_forwards_the_registry_repo_id(
+    monkeypatch: pytest.MonkeyPatch, mock_context: MagicMock
+) -> None:
+    """接管闸门按注册表 repo_id 登记控制行，review_once 入口必须原样转发（FR-5）。
+
+    少转一个 repo_id，闸门查询就落到 ``repo_path.name``：查不到行 ⇒ 视作"没有
+    闸门" ⇒ 正在被人工接管的 Issue 重新进入监督与合并队列。
+    """
+    from backend.core.use_cases import interactive_decision
+
+    recorded: dict[str, object] = {}
+
+    def _fake_review_once(**kwargs: object) -> int:
+        recorded.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(interactive_decision, "review_once", _fake_review_once)
+    action = DecisionAction(
+        action_id="A1",
+        action_type=DecisionActionType.REVIEW_ONCE,
+        title="Review once",
+        rationale="test",
+    )
+
+    result = interactive_decision._execute_review_once(
+        action, mock_context, False, MagicMock(), MagicMock()
+    )
+
+    assert result["status"] == "completed"
+    assert recorded["repo_id"] == "test-repo"

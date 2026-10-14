@@ -937,6 +937,106 @@ def test_claude_stream_honors_takeover_cancel_check(tmp_path: Path) -> None:
         )
 
 
+def _pid_alive(pid: int) -> bool:
+    """进程是否仍在；``PermissionError`` 说明进程存在但不属于当前用户。"""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_pid_gone(pid: int, timeout_seconds: float = 10.0) -> bool:
+    """在限定窗口内确认进程已退出并被回收（直接子进程需要 reap，僵尸不算消失）。"""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                return True
+        except ChildProcessError:
+            return True  # 已由父进程（或被收养的 init）回收。
+        if not _pid_alive(pid):
+            return True
+        time.sleep(0.05)
+    return not _pid_alive(pid)
+
+
+def test_takeover_cancel_kills_only_the_target_process_group(tmp_path: Path) -> None:
+    """取消只终结目标进程组：孙进程一并回收，旁观进程与 runner 自己存活。
+
+    这是 PRD 不变量 2 的回归面。跨进程 oracle
+    （``scripts/rv1_takeover_handoff_probe.py``）已经真跑过一次，但回归套件必须自己
+    守住这条边界——把 ``killpg`` 的范围写错（杀整棵进程树之外的东西、或只杀直接子
+    进程）时必须有测试变红，而不是等 CI 上没人跑的浏览器层去发现。
+    """
+    runner = SubprocessRunner()
+    pid_file = tmp_path / "pids.json"
+    script = (
+        "import json, os, subprocess, sys, time\n"
+        "outside = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(600)'],\n"
+        "    start_new_session=True,\n"
+        "    stdout=subprocess.DEVNULL,\n"
+        "    stderr=subprocess.DEVNULL,\n"
+        ")\n"
+        "grandchild = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
+        "    json.dump(\n"
+        "        {\n"
+        "            'pid': os.getpid(),\n"
+        "            'pgid': os.getpgid(0),\n"
+        "            'grandchild': grandchild.pid,\n"
+        "            'outside': outside.pid,\n"
+        "        },\n"
+        "        handle,\n"
+        "    )\n"
+        "time.sleep(600)\n"
+    )
+    started_at = time.monotonic()
+    identities: dict[str, int] = {}
+
+    def _cancel_when_identities_are_known() -> bool:
+        """子进程把三类 PID 都写盘之后才请求取消，否则断言对象还不存在。"""
+        if time.monotonic() - started_at < 0.5:
+            return False
+        try:
+            return bool(json.loads(pid_file.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return False
+
+    try:
+        with pytest.raises(InterruptedError, match="takeover cancel request"):
+            runner.run(
+                [sys.executable, "-c", script, str(pid_file)],
+                cwd=tmp_path,
+                capture_output=True,
+                timeout=30,
+                cancel_check=_cancel_when_identities_are_known,
+            )
+        identities = json.loads(pid_file.read_text(encoding="utf-8"))
+
+        # 子进程确实落在自己的进程组里（组 id == pid），否则"只杀这一组"无从谈起。
+        assert identities["pgid"] == identities["pid"]
+        assert identities["pgid"] != os.getpgid(0)
+        # 目标组整体消失：直接子进程与它拉起的孙进程都被终止并回收。
+        assert _wait_pid_gone(identities["pid"]) is True
+        assert _wait_pid_gone(identities["grandchild"]) is True
+        # 旁观者（另一进程组）没被牵连——daemon / 其他 Issue 的进程走的是这条边界。
+        assert _pid_alive(identities["outside"]) is True
+        # runner 自己（测试进程）当然还活着。
+        assert _pid_alive(os.getpid()) is True
+    finally:
+        for key in ("outside", "grandchild", "pid"):
+            process_id = identities.get(key)
+            if process_id is not None and _pid_alive(process_id):
+                try:
+                    os.kill(process_id, signal.SIGKILL)
+                except OSError:
+                    pass
+
+
 def test_subprocess_runner_keeps_active_process_alive(
     tmp_path: Path,
 ) -> None:

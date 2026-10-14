@@ -510,6 +510,100 @@ def test_verifier_gate_binds_verdict_to_control_run_and_input_sha(
     assert verdict.verifier_input_sha == "abc1234"
 
 
+def test_verifier_gate_reclaims_completed_row_when_verdict_is_red(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """RED 结论不发布：控制行必须从 ``verifier_completed`` 收回，否则界面在整段
+    RED recovery 窗口里对着一个从未落到 PR 上的 verdict 报"验证已完成"（FR-1）。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+    from backend.core.use_cases.agent_runner_issue_control import VerifierRunHandle
+
+    _patch_gate_deps(monkeypatch, rva, ValidationVerdict(risk="red", findings="broke X"), {})
+
+    transitions: list[tuple[tuple[str, ...], str]] = []
+
+    class _RecordingStore:
+        def transition_issue_run(self, **kwargs: object) -> bool:
+            transitions.append((kwargs["from_states"], kwargs["to_state"]))  # type: ignore[arg-type]
+            return True
+
+    monkeypatch.setattr(
+        rva,
+        "begin_verifier_run",
+        lambda **_kwargs: VerifierRunHandle(
+            store=_RecordingStore(),
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-1",
+            head_sha="abc1234",
+        ),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    with pytest.raises(ValidationEvidenceError, match="returned RED"):
+        rva.run_verifier_gate(
+            _structured_issue(),
+            tmp_path,
+            config,
+            FakeProcessRunner(),
+            "claude",
+            repo_id="repo-a",
+        )
+
+    assert transitions == [
+        (("running",), "verifier_completed"),
+        (("verifier_completed",), "expired"),
+    ]
+
+
+def test_verifier_gate_reclaims_completed_row_when_tree_drifted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """verifier 改动代码树时同样收回完成态，且不改写已落地的接管终态。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+    from backend.core.use_cases.agent_runner_issue_control import VerifierRunHandle
+
+    monkeypatch.setattr(rva, "load_evidence_manifest", lambda *a, **k: _manifest())
+    head_reads = iter(["abc1234", "drifted"])
+    monkeypatch.setattr(rva, "get_head_sha", lambda *a, **k: next(head_reads))
+    monkeypatch.setattr(rva, "run_verifier_agent", lambda *a, **k: ValidationVerdict(risk="green"))
+
+    transitions: list[tuple[tuple[str, ...], str]] = []
+
+    class _RecordingStore:
+        def transition_issue_run(self, **kwargs: object) -> bool:
+            transitions.append((kwargs["from_states"], kwargs["to_state"]))  # type: ignore[arg-type]
+            return True
+
+    monkeypatch.setattr(
+        rva,
+        "begin_verifier_run",
+        lambda **_kwargs: VerifierRunHandle(
+            store=_RecordingStore(),
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-1",
+            head_sha="abc1234",
+        ),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    with pytest.raises(ValidationEvidenceError, match="changed the committed code tree"):
+        rva.run_verifier_gate(
+            _structured_issue(),
+            tmp_path,
+            config,
+            FakeProcessRunner(),
+            "claude",
+            repo_id="repo-a",
+        )
+
+    assert transitions == [
+        (("running",), "verifier_completed"),
+        (("verifier_completed",), "expired"),
+    ]
+
+
 def test_missing_marker_is_distinguishable_even_with_findings_text() -> None:
     """漏 marker 必须能与"真判 red"区分,且不能依赖 findings 是否为空。
 

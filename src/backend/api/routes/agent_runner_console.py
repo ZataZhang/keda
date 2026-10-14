@@ -17,12 +17,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, FiniteFloat
 
 from backend.api.backlog_sync import wake_backlog_scheduler
 from backend.api.monitor_sync import wake_monitor_scheduler
 from backend.api.response_cache import TTLResponseCache
+from backend.api.routes.agent_runner_console_takeover import build_issue_action_response
 from backend.api.version_info import resolve_keda_version
 from backend.core.shared.interfaces.runner_console import (
     IMonitorSnapshotStore,
@@ -323,7 +324,7 @@ def execute_console_repository_action(repo_id: str, request: RepositoryActionReq
 
 @router.post("/agent-runner/console/repositories/{repo_id}/issues/{issue_number}/actions")
 def execute_console_issue_action(
-    repo_id: str, issue_number: int, request: IssueActionRequest, response: Response
+    repo_id: str, issue_number: int, request: IssueActionRequest
 ) -> dict:
     """执行 Issue 级白名单动作。"""
     settings = load_fresh_agent_runner_settings()
@@ -349,9 +350,9 @@ def execute_console_issue_action(
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if action_result.takeover_http_status is not None:
-        response.status_code = action_result.takeover_http_status
-    return _serialize(action_result)
+    return build_issue_action_response(
+        _serialize(action_result), action_result.takeover_http_status
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

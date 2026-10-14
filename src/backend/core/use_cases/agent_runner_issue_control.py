@@ -8,16 +8,19 @@ Console API 进程与 runner 进程通过
   （:func:`begin_verifier_run`）；``repo_id`` 缺失或旁路存储不可用时**不开放
   接管窗口**，verifier 照常运行——接管是观测面增强，不是验证前提。
 - **终态迁移**：完成（``verifier_completed``，仅由同 run/head 的真实 GREEN 且
-  PR fresh-read 仍匹配后清闸）、
-  失败/超时/红牌（``expired`` / ``takeover_failed``）、接管确认
-  （``takeover_requested → taken_over`` 落闸）。
+  PR fresh-read 仍匹配后清闸）、CAS 赢了却未发布结论（树漂移 / RED → 收回
+  ``expired``）、失败/超时/红牌（``expired`` / ``takeover_failed``）、接管确认
+  （``takeover_requested → taken_over`` 落闸）、重启后无人认领的孤儿请求
+  （:func:`invalidate_orphaned_takeover_requests`，PRD §7.7：标记失效、保持落闸、
+  交人查看，绝不停进程或重放请求）。
 - **交班**：接管 CAS 受理时立即落 hold；取消确认后
   :func:`finalize_verifier_takeover` 做 PR fresh-read
   （已合并→停止后续阶段；HEAD 漂移→置 ``verifier_stale`` 并清理过期
   ``validation/verifier-passed`` 标签）、Issue 转 ``agent/review``、写
-  ``cancelled_by_human`` 交接评论。**绝不**产生或复用任何 verdict 语义。
+  ``cancelled_by_human`` 交接评论，并把 fresh-read 的 PR 编号回写控制行供界面使用。
+  **绝不**产生或复用任何 verdict 语义。
 - **闸门观测**：:func:`autopilot_hold_blocks` 供 post-PR supervisor、
-  review_once、merge queue 三个入口 fail closed。
+  review_once、merge queue 三个入口 fail closed——解析不出归属仓库时同样落闸。
 
 边界与既有约定一致：GitHub labels / PR 仍是交付事实源，控制行只承载控制面
 状态；交班的 GitHub 副作用逐段 best-effort——闸门随接管请求 CAS 已经落下，
@@ -33,6 +36,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from backend.core.shared.interfaces.issue_run_control import (
+    OPEN_STATES,
     PHASE_VERIFIER,
     STATE_EXPIRED,
     STATE_PR_MERGED,
@@ -67,6 +71,12 @@ TAKEOVER_HTTP_STATUS: dict[str, int] = {
 }
 
 _logger = logging.getLogger(__name__)
+
+#: 孤儿接管请求的判定窗口（PRD §7.7）：请求登记后超过这么久仍未被产出它的
+#: runner 收敛成 ``taken_over`` / ``takeover_failed``，说明 owner 已不在（进程重启、
+#: 被杀或崩溃）。runner 侧的取消看门狗以 ≤1 秒轮询、终止+回收只多几秒，120 秒是
+#: 该节奏的数量级放大，不会把仍在正常收尾的运行误判成孤儿。
+TAKEOVER_ORPHAN_GRACE_SECONDS = 120
 
 #: 交班评论的 hidden marker：语义是"人工接管、无 verdict"，与
 #: ``iar:verifier-verdict`` 互斥——解析器绝不从这条记录推断任何结论。
@@ -106,7 +116,9 @@ def resolve_issue_run_control() -> object | None:
         "request_issue_takeover",
         "transition_issue_run",
         "has_autopilot_hold",
+        "has_autopilot_hold_for_issue",
         "clear_autopilot_hold",
+        "set_issue_run_pr_number",
     )
     if not all(hasattr(store, method_name) for method_name in required_methods):
         _logger.warning("Console store lacks issue run control; takeover disabled.")
@@ -226,6 +238,22 @@ class VerifierRunHandle:
             to_state=STATE_TAKEOVER_FAILED,
         )
 
+    def mark_verdict_unpublished(self) -> bool:
+        """CAS 赢了``running → verifier_completed``却最终没发布结论：收回完成态。
+
+        verifier 之后的树漂移与 RED 检查都会抛 ``ValidationEvidenceError``：结论
+        从未落到 PR 上，控制行却仍停在 ``verifier_completed``，FR-1 的状态分类会
+        对整段 RED recovery 窗口报"验证已完成"。这里把它收回 ``expired``（本轮无
+        可交付结论）；接管请求恰好在同一时刻落地时改记 ``takeover_failed``——
+        两种情况都不掩盖已落闸门，也不把交班伪报成成功。
+        """
+        if self._transition(from_states=(STATE_VERIFIER_COMPLETED,), to_state=STATE_EXPIRED):
+            return True
+        return self._transition(
+            from_states=(STATE_TAKEOVER_REQUESTED,),
+            to_state=STATE_TAKEOVER_FAILED,
+        )
+
     def mark_merged(self) -> bool:
         """fresh-read 发现 PR 已被外部合并时记录 ``pr_merged``。"""
         return self._transition(
@@ -237,6 +265,22 @@ class VerifierRunHandle:
     def mark_stale(self) -> bool:
         """fresh-read 发现 HEAD 已漂移：``taken_over → verifier_stale``（闸门保持）。"""
         return self._transition(from_states=(STATE_TAKEN_OVER,), to_state=STATE_VERIFIER_STALE)
+
+    def attach_pr_number(self, pr_number: int) -> bool:
+        """把 fresh-read 得到的 Draft PR 编号补写回本轮控制行。
+
+        登记发生在 Draft PR 发布前后不久，注册表未必已带 PR 链接（首跑时
+        ``issue.pr`` 还是空）；FR-7 的"保留的 Draft PR"入口因此需要控制行上也
+        有权威编号。仅改写 ``run_id`` 属于本轮的行，绝不覆盖新一轮运行。
+        """
+        return bool(
+            self.store.set_issue_run_pr_number(  # type: ignore[attr-defined]
+                repo_id=self.repo_id,
+                issue_number=self.issue_number,
+                run_id=self.run_id,
+                pr_number=pr_number,
+            )
+        )
 
 
 def begin_verifier_run(
@@ -250,6 +294,11 @@ def begin_verifier_run(
     以下情况**照常运行 verifier**，只关闭接管入口并记一条日志：
     ``repo_id`` 未知（未带 ``--repo-id`` 的手工 CLI 运行）、旁路存储不可用、
     登记写入失败。绝不允许接管基础设施把验证本身打断。
+
+    ``pr_number`` 在登记时刻**故意留空**：verifier 先于 Draft PR 的编号进入本函数
+    的调用面（``IssueSummary`` 不带 PR 链接），权威编号由交班 fresh-read 经
+    :meth:`VerifierRunHandle.attach_pr_number` 回写，避免用一个恒为 ``None`` 的
+    参数假装已登记。
     """
     if not repo_id or not head_sha:
         _logger.debug(
@@ -294,16 +343,49 @@ def begin_verifier_run(
     )
 
 
+def _autopilot_hold_blocks_without_repo_id(*, issue_number: int) -> bool:
+    """``repo_id`` 解析不出来时的兜底：退一步按 Issue 编号问存储有没有落闸的行。
+
+    控制行按**注册表 repo_id** 登记，而调用方手里可能只有目录名 / worktree 名，甚至
+    什么都没有（FR-5 的失效形态：按错 key 查不到那一行，被人工接管的 Issue 重新进入
+    review 监督与 merge queue）。这里不猜 key，而是问"这个 Issue 编号有没有落着
+    autopilot_hold 的行"：查不到、存储不可达或读失败一律按有闸门处理。跨仓库同号
+    Issue 最多让自动处理多等一轮，方向仍是 fail closed，不会放行错误结论。
+    """
+    store = resolve_issue_run_control()
+    if store is None:
+        _logger.warning(
+            "Issue #%d: autopilot hold cannot be consulted without a resolved repo_id "
+            "and the run control store is unavailable; treating as held.",
+            issue_number,
+        )
+        return True
+    try:
+        return bool(
+            store.has_autopilot_hold_for_issue(  # type: ignore[attr-defined]
+                issue_number=issue_number
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - 读不到闸门状态时不放行。
+        _logger.warning(
+            "Issue #%d: repository-less autopilot hold check failed (%s); treating as held.",
+            issue_number,
+            exc,
+        )
+        return True
+
+
 def autopilot_hold_blocks(*, repo_id: str | None, issue_number: int) -> bool:
     """该 Issue 是否处于人工接管闸门：post-PR 自动阶段一律 fail closed。
 
     读库异常按"有闸门"处理（fail closed）：merge queue / supervisor 每轮都会
-    重试，一次瞬时 SQLite 失败绝不能变成"闸门没读到、自动合并放行"。
-    ``repo_id`` 缺失时返回 ``False``，因为这种运行未启用接管控制面；已知仓库
-    但存储解析失败时返回 ``True``，避免读不到持久闸门时自动放行。
+    重试，一次瞬时 SQLite 失败绝不能变成"闸门没读到、自动合并放行"。已知仓库但
+    存储解析失败时同样返回 ``True``。``repo_id`` 缺失时**不再**直接放行：按错 key
+    查询与不查询都无法证明"没有闸门"，交给
+    :func:`_autopilot_hold_blocks_without_repo_id` 兜底。
     """
     if not repo_id:
-        return False
+        return _autopilot_hold_blocks_without_repo_id(issue_number=issue_number)
     store = resolve_issue_run_control()
     if store is None:
         _logger.warning(
@@ -588,6 +670,21 @@ def finalize_verifier_takeover(
                 exc,
             )
 
+    # 登记时拿不到 PR 编号（首跑的 Draft PR 刚由 before_verifier_callback 建好，
+    # 内存里的 IssueSummary 还没有 pr 链接）。这里的 fresh-read 是本 run 唯一权威
+    # 的 PR 身份来源，补写回控制行后，FR-7 的"保留的 Draft PR"入口不再依赖另一次
+    # Issue 读取。写失败只影响观测面——交班继续。
+    if handle is not None and pr_context is not None and pr_context.number is not None:
+        try:
+            handle.attach_pr_number(pr_context.number)
+        except Exception as exc:  # noqa: BLE001 - 补写 PR 编号失败不阻断交班。
+            _logger.warning(
+                "Issue #%d: takeover handoff could not record PR #%s on the control row (%s).",
+                issue.number,
+                pr_context.number,
+                exc,
+            )
+
     # 过期 verifier 通过标签必须清掉（PRD §7.5/§7.6）：接管路径没有 verdict，
     # 留着旧标签等于让 merge queue 看到一个不存在的结论。
     if pr_context is not None and pr_context.number is not None:
@@ -732,6 +829,103 @@ class ActiveVerifierProjection:
     autopilot_hold: bool
 
 
+def _past_takeover_orphan_window(
+    requested_at: str | None, *, now: datetime | None, grace_seconds: int
+) -> bool:
+    """接管请求是否已超过"owner 应当收敛它"的宽限窗口。
+
+    时间戳缺失或不可解析时返回 ``False``：判据不足时**不**把仍在收尾的运行写成
+    失败，界面对它继续显示处理中，由 runner 的终态迁移负责收敛。
+    """
+    if not requested_at:
+        return False
+    try:
+        requested = datetime.fromisoformat(requested_at)
+    except ValueError:
+        return False
+    if requested.tzinfo is None:
+        requested = requested.replace(tzinfo=timezone.utc)
+    reference = now or datetime.now(timezone.utc)
+    return (reference - requested).total_seconds() > grace_seconds
+
+
+def _invalidate_orphan_takeover_row(
+    store: object, row: object, *, now: datetime | None, grace_seconds: int
+) -> bool:
+    """把一条无活 owner 认领的 ``takeover_requested`` 行收敛成 ``takeover_failed``。
+
+    只改写这一行（``run_id`` 绑定），不改 Issue 标签、不停任何进程、不重放请求；
+    ``autopilot_hold`` 保持置位——请求已经落下的闸门不会因 owner 消失而自动打开。
+    """
+    if row is None or row.state not in OPEN_STATES:  # type: ignore[union-attr]
+        return False
+    if row.state != STATE_TAKEOVER_REQUESTED:  # type: ignore[union-attr]
+        # running 行的 owner 就是 verifier 自己的等待循环，由 mark_expired 收敛，
+        # 不能凭年龄推断它已经死掉（长 verifier 运行本来就远超本窗口）。
+        return False
+    if not _past_takeover_orphan_window(
+        row.requested_at,  # type: ignore[union-attr]
+        now=now,
+        grace_seconds=grace_seconds,
+    ):
+        return False
+    invalidated = bool(
+        store.transition_issue_run(  # type: ignore[attr-defined]
+            repo_id=row.repo_id,  # type: ignore[union-attr]
+            issue_number=row.issue_number,  # type: ignore[union-attr]
+            run_id=row.run_id,  # type: ignore[union-attr]
+            from_states=(STATE_TAKEOVER_REQUESTED,),
+            to_state=STATE_TAKEOVER_FAILED,
+            completed_at=_utc_now_iso(),
+        )
+    )
+    if invalidated:
+        _logger.warning(
+            "Issue #%d: takeover request %r for run %s (requested_at=%s) has no live "
+            "owner after %ds; marked takeover_failed and kept on autopilot hold. "
+            "Nothing was killed and the request was not replayed — a restart dropped "
+            "the run that owned it, so a human has to inspect and retry.",
+            row.issue_number,  # type: ignore[union-attr]
+            row.request_id,  # type: ignore[union-attr]
+            row.run_id,  # type: ignore[union-attr]
+            row.requested_at,  # type: ignore[union-attr]
+            grace_seconds,
+        )
+    return invalidated
+
+
+def invalidate_orphaned_takeover_requests(
+    *,
+    repo_id: str | None,
+    issue_number: int,
+    now: datetime | None = None,
+    grace_seconds: int = TAKEOVER_ORPHAN_GRACE_SECONDS,
+) -> bool:
+    """重启/崩溃后遗留的接管请求：标记失效并交人查看（PRD §7.7、FR-6）。
+
+    Returns:
+        是否真的收敛了一条孤儿请求（无 repo_id / 无控制行 / 仍在窗口内 / 存储
+        不可用或写入失败都返回 ``False``，调用方只记日志，绝不据此声称交班完成）。
+    """
+    if not repo_id:
+        return False
+    store = resolve_issue_run_control()
+    if store is None:
+        return False
+    try:
+        row = store.get_issue_run(  # type: ignore[attr-defined]
+            repo_id=repo_id, issue_number=issue_number
+        )
+        return _invalidate_orphan_takeover_row(store, row, now=now, grace_seconds=grace_seconds)
+    except Exception as exc:  # noqa: BLE001 - 失效收敛失败不阻断观测面读取。
+        _logger.warning(
+            "Issue #%d: could not invalidate an orphaned takeover request (%s).",
+            issue_number,
+            exc,
+        )
+        return False
+
+
 def active_verifier_projection(
     *,
     repo_id: str | None,
@@ -741,6 +935,9 @@ def active_verifier_projection(
 
     ``can_take_over`` 只在控制行为 ``running`` 时为真——已请求 / 已交班 /
     已完成 / HEAD 漂移均不可再发起接管。绝不仅凭"最新生命周期事件"推测运行中。
+
+    读之前先做一次孤儿收敛（PRD §7.7）：owner 随重启消失时，界面必须落到可重试
+    的 ``takeover_failed``，而不是永远显示"仍在停止"。
     """
     if not repo_id:
         return None
@@ -751,6 +948,12 @@ def active_verifier_projection(
         row = store.get_issue_run(  # type: ignore[attr-defined]
             repo_id=repo_id, issue_number=issue_number
         )
+        if _invalidate_orphan_takeover_row(
+            store, row, now=None, grace_seconds=TAKEOVER_ORPHAN_GRACE_SECONDS
+        ):
+            row = store.get_issue_run(  # type: ignore[attr-defined]
+                repo_id=repo_id, issue_number=issue_number
+            )
     except Exception as exc:  # noqa: BLE001 - 读不到活动态时不展示接管。
         _logger.warning(
             "Issue #%d: active verifier projection read failed (%s); hiding takeover.",

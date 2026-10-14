@@ -34,10 +34,12 @@ from dataclasses import dataclass
 PHASE_VERIFIER = "verifier"
 
 # 控制行状态机取值。迁移边（全部经 CAS）：
-#   running → takeover_requested            （接管请求胜出）
+#   running → takeover_requested          （接管请求胜出）
 #   running → verifier_completed / verifier_stale / pr_merged / expired
-#   takeover_requested → taken_over         （runner 确认进程树已终止并完成交班）
-#   takeover_requested → takeover_failed    （无法证实终止，交班未完成）
+#   takeover_requested → taken_over       （runner 确认进程树已终止并完成交班）
+#   takeover_requested → takeover_failed  （无法证实终止，交班未完成；含重启后
+#                                          无人认领的孤儿请求，PRD §7.7）
+#   verifier_completed → expired          （CAS 赢了但结论最终未发布：树漂移 / RED）
 STATE_RUNNING = "running"
 STATE_TAKEOVER_REQUESTED = "takeover_requested"
 STATE_TAKEN_OVER = "taken_over"
@@ -164,6 +166,16 @@ class IIssueRunControl(ABC):
         ...
 
     @abstractmethod
+    def has_autopilot_hold_for_issue(self, *, issue_number: int) -> bool:
+        """**不限仓库**地回答"该 Issue 编号是否落着闸门"。
+
+        仅用于调用方解析不出 ``repo_id`` 时的 fail-closed 兜底：按错 key 查询查不到
+        行，等于把正在被人工接管的 Issue 放回自动流程（FR-5）。跨仓库同号 Issue 的
+        代价是自动处理多等一轮，方向仍是保守侧，因此本方法**不**用于任何放行判断。
+        """
+        ...
+
+    @abstractmethod
     def clear_autopilot_hold(
         self, *, repo_id: str, issue_number: int, run_id: str, head_sha: str
     ) -> bool:
@@ -171,5 +183,18 @@ class IIssueRunControl(ABC):
 
         这是 ``autopilot_hold`` 唯一的清除路径：**同一 head 上的全新 verifier
         GREEN**。run 或 head 已变化时返回 ``False``，闸门保持。
+        """
+        ...
+
+    @abstractmethod
+    def set_issue_run_pr_number(
+        self, *, repo_id: str, issue_number: int, run_id: str, pr_number: int
+    ) -> bool:
+        """把关联 PR 编号补写到**本轮**运行行。
+
+        登记发生在 Draft PR 刚刚发布、调用方手里还没有 PR 身份的时刻；交班
+        fresh-read 拿到权威编号后用它回填，界面与后续阶段就不必再另行读取 Issue。
+        ``run_id`` 不匹配（新一轮已重新登记同一 Issue）时返回 ``False``，绝不
+        改写别的运行的行。
         """
         ...

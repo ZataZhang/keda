@@ -746,6 +746,11 @@ runner 在 commit proxy 固定实现提交后复跑 RV，并确认 PRD 执行侧
 
 独立 verifier 在 Draft PR 发布后启动、要求工作树干净，且可能长时间占用一个 worktree。当操作员判断某个 Issue 的这轮验证方向不对、想立刻自己接手 PR 时，可以在管理终端的该 Issue 详情里点「接管此 Issue」，**只停这一个 Issue 当前正在跑的 verifier**——不动 daemon、不影响同仓其他 Issue、也不停整个 runner。
 
+界面上的状态与动作都来自两个契约名，排查时按这两个键搜：
+
+- **`active_verifier`**：Issue 详情响应（`GET /agent-runner/issues/{issue_number}`）新增的只读字段，由 `active_verifier_projection()` fresh-read 控制行得到，字段为 `run_id`、`head_sha`、`state`、`can_take_over`、`pr_number`、`autopilot_hold`。`state` 取值就是控制行状态机的八个值：`running` / `takeover_requested` / `taken_over` / `takeover_failed` / `verifier_completed` / `verifier_stale` / `pr_merged` / `expired`。没有受控运行时该字段缺省，界面不显示接管按钮——状态**不**从生命周期事件推断。
+- **`take_over_verifier`**：Issue 级白名单动作（`POST /agent-runner/console/repositories/{repo_id}/issues/{issue_number}/actions`，body 带 `action`、`run_id`、`head_sha`），与 `retry_failed` / `blocked_continue` / `recover_failed_publish` 同一入口。缺 `run_id` 或 `head_sha` 直接 `400`。它跟 `kc run --takeover`（停 daemon 并接管其**全部**在途 Issue）不是同一件事，后者是全局、破坏性的。
+
 接管的语义边界（这些是刻意设计，不是缺陷）：
 
 - **精确绑定运行身份**。接管请求只携带页面从 Issue 详情读到的 `run_id` 与 PR `head_sha`，后端以共享的本地 SQLite 控制面（`issue_run_control` 表）做 CAS：仅当控制行仍是本次 `run` 且 HEAD 未漂移时，原子登记取消意图并立即落下 `autopilot_hold`。HEAD 已变、运行已结束或找不到受控运行时一律回 `409`，界面据此提示「HEAD 已变化 / 运行已结束 / 状态已变化」，绝不伪装成交班成功。

@@ -227,6 +227,20 @@ class IssueRunControlMixin:
             ).fetchone()
         return hold_row is not None
 
+    def has_autopilot_hold_for_issue(self, *, issue_number: int) -> bool:
+        """**任意**仓库下该 Issue 编号是否落着闸门（调用方解析不出 repo_id 时的兜底）。
+
+        只服务 fail-closed 判定：控制行按注册表 repo_id 登记，按错的 key 查会查不到
+        行、把被人工接管的 Issue 放回自动流程。跨仓库同号最多让自动处理多等一轮。
+        """
+        with self._connect() as connection:
+            hold_row = connection.execute(
+                "SELECT 1 FROM issue_run_control "
+                "WHERE issue_number = ? AND autopilot_hold = 1 LIMIT 1",
+                (issue_number,),
+            ).fetchone()
+        return hold_row is not None
+
     def clear_autopilot_hold(
         self, *, repo_id: str, issue_number: int, run_id: str, head_sha: str
     ) -> bool:
@@ -241,6 +255,23 @@ class IssueRunControlMixin:
                 "WHERE repo_id = ? AND issue_number = ? AND autopilot_hold = 1 "
                 "AND run_id = ? AND head_sha = ? AND state = ?",
                 (repo_id, issue_number, run_id, head_sha, _STATE_VERIFIER_COMPLETED),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+    def set_issue_run_pr_number(
+        self, *, repo_id: str, issue_number: int, run_id: str, pr_number: int
+    ) -> bool:
+        """把 PR 编号补写到本轮运行行（登记时 PR 尚未存在的情况）。
+
+        仅按 ``run_id`` 绑定改写：新一轮已重新登记该 Issue 时 rowcount 为 0，
+        过期交班不会把别的运行的行盖上编号。
+        """
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE issue_run_control SET pr_number = ? "
+                "WHERE repo_id = ? AND issue_number = ? AND run_id = ?",
+                (int(pr_number), repo_id, issue_number, run_id),
             )
             connection.commit()
             return cursor.rowcount == 1

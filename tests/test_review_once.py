@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
@@ -720,6 +722,60 @@ def test_review_once_recovers_branch_from_draft_pr_comment(tmp_path: Path) -> No
         "branch": "issue-23",
     } in fake_client.calls
     assert not any(call["method"] == "find_open_pr_by_head" for call in fake_client.calls)
+
+
+def test_review_once_consults_takeover_gate_with_the_registry_repo_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """接管闸门按调用方给的注册表 repo_id 查询，绝不拿目录名当键（FR-5）。
+
+    控制行由 runner 用注册表 repo_id 登记；若 review_once 用 ``repo_path.name``
+    去查，查不到行就等于"没有闸门"，一个正在被人工接管的 Issue 会重新进入监督
+    流程与合并队列。调用方没给 repo_id 时传 ``None``，由闸门自己兜底并 fail closed。
+    """
+    from backend.core.use_cases import review_once as review_module
+
+    config = AppConfig()
+    issue = IssueSummary(
+        number=23,
+        title="Feature",
+        url="https://github.com/example/repo/issues/23",
+        body="Do the work.",
+        labels=(config.labels.review,),
+    )
+    fake_client = FakeGitHubClient()
+    fake_client.list_review_candidate_issues = lambda labels, limit: [issue]
+    queried_repo_ids: list[str | None] = []
+
+    def _record_gate(*, repo_id: str | None, issue_number: int) -> bool:
+        queried_repo_ids.append(repo_id)
+        return True
+
+    monkeypatch.setattr(review_module, "autopilot_hold_blocks", _record_gate)
+
+    review_module.review_once(
+        repo_path=tmp_path,
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=FakeProcessRunner(),
+        repo_id="registry/repo-a",
+    )
+    assert queried_repo_ids == ["registry/repo-a"]
+
+    queried_repo_ids.clear()
+    review_module.review_once(
+        repo_path=tmp_path,
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=FakeProcessRunner(),
+    )
+    assert queried_repo_ids == [None]
 
 
 def test_review_once_cleans_dirty_workflow_labels() -> None:
