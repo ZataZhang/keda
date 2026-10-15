@@ -100,11 +100,21 @@ AGENT_PROFILE_GENERATE = "generate"
 AGENT_PROFILE_REPL = "repl"
 """REPL 用途（``kc repl``，允许在用户确认模型内写文件）。"""
 
+AGENT_PROFILE_JUDGE = "judge"
+"""评审打分用途（模型评测的 judge 调用）。
+
+与 ``generate`` 的区别：``generate`` 的 ``read_only`` 只承诺"不写文件"，工具仍可
+读取任意路径；本用途要求 agent 声明**禁用全部内置工具**的开关（如 ``--tools ""`` /
+``--no-tools``），让评审只能看到投递进来的 payload。没有这类开关的 agent 不声明
+本用途，评测页据此把它标为"不可作为评审"，而不是假装隔离。
+"""
+
 AGENT_PROFILES: tuple[str, ...] = (
     AGENT_PROFILE_RUN,
     AGENT_PROFILE_DELIBERATE,
     AGENT_PROFILE_GENERATE,
     AGENT_PROFILE_REPL,
+    AGENT_PROFILE_JUDGE,
 )
 
 INTERACTIVE_PROFILE_ID = "interactive"
@@ -236,6 +246,19 @@ def _plain_noninteractive_profile(*, read_only: bool) -> AgentProfileSpec:
     )
 
 
+def _tools_disabled_judge_profile() -> AgentProfileSpec:
+    """Claude 系 CLI（claude / codebuddy / qodercn）的评审形态：``--tools ""`` 关闭全部内置工具。
+
+    不带 ``--dangerously-skip-permissions``：没有可用工具就没有需要放行的权限。
+    """
+    return AgentProfileSpec(
+        args=("--tools", "", "-p"),
+        prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+        output_protocol=PLAIN_PROTOCOL_ID,
+        read_only=True,
+    )
+
+
 def _permissioned_plain_profiles() -> dict[str, AgentProfileSpec]:
     """为 provider 的 plain generate / repl 声明共享的非交互命令形态。"""
     return {
@@ -262,6 +285,7 @@ def _claude_compatible_profiles() -> dict[str, AgentProfileSpec]:
     return {
         AGENT_PROFILE_RUN: streaming_profile,
         AGENT_PROFILE_DELIBERATE: streaming_profile,
+        AGENT_PROFILE_JUDGE: _tools_disabled_judge_profile(),
         **_permissioned_plain_profiles(),
     }
 
@@ -493,6 +517,12 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=True,
             ),
+            AGENT_PROFILE_JUDGE: AgentProfileSpec(
+                args=("--no-tools", "--print"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=PLAIN_PROTOCOL_ID,
+                read_only=True,
+            ),
             AGENT_PROFILE_REPL: AgentProfileSpec(
                 args=("--approve", "--print"),
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
@@ -587,6 +617,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=False,
             ),
+            AGENT_PROFILE_JUDGE: _tools_disabled_judge_profile(),
             **_permissioned_plain_profiles(),
         },
     ),

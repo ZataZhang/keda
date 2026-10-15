@@ -39,7 +39,7 @@ function buildRun(overrides: Record<string, unknown>): MockRun {
     base_commit: 'abc123def456',
     base_tree_hash: 'tree-demo',
     execution_preset_snapshots: [{ preset_name: 'alpha', agent: 'codex', model: 'gpt-a' }],
-    judge_preset_snapshots: [{ preset_name: 'judge-1', model: 'gpt-judge' }],
+    judge_preset_snapshots: [{ preset_name: 'judge-1', agent: 'claude', model: 'model-judge' }],
     status: 'created',
     manifest_hash: null,
     case_ids: ['case-a'],
@@ -110,7 +110,7 @@ const AWAITING_SCORES = [
     case_id: 'case-a',
     execution_preset_id: 'alpha',
     judge_preset_id: 'judge-1',
-    judge_model_snapshot: { preset_name: 'judge-1', model: 'gpt-judge' },
+    judge_model_snapshot: { preset_name: 'judge-1', agent: 'claude', model: 'model-judge' },
     rubric_version: 'v1',
     score_status: 'valid',
     dimension_scores: {
@@ -223,8 +223,8 @@ async function mockEvaluationApi(page: Page): Promise<EvaluationState> {
       { name: 'beta', agent: 'claude', model: 'claude-b', reasoning_effort: 'high', cost_status: 'unknown', cost_estimate: null },
     ],
     judge_presets: [
-      { name: 'judge-1', model: 'gpt-judge', temperature: 0, provider: 'openai', available: true, reason: null, api_key_env: 'OPENAI_API_KEY', cost_status: 'unknown' },
-      { name: 'judge-offline', model: 'x', temperature: 0, provider: null, available: false, reason: '缺少凭据', api_key_env: null, cost_status: 'unknown' },
+      { name: 'judge-1', agent: 'claude', model: 'model-judge', reasoning_effort: null, available: true, reason: null, cost_status: 'unknown' },
+      { name: 'judge-offline', agent: 'codex', model: 'x', reasoning_effort: null, available: false, reason: "agent 'codex' 未声明可禁用工具的 judge 形态", cost_status: 'unknown' },
     ],
     default_judge_presets: ['judge-1'],
     max_concurrency: 2,

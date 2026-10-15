@@ -52,7 +52,6 @@ from backend.infrastructure.config.agent_runner_settings_models import (
     AgentRunnerWorktreeSettings as AgentRunnerWorktreeSettings,
     AgentSessionPreviewSettings as AgentSessionPreviewSettings,
     AgentSessionSettings as AgentSessionSettings,
-    EvaluationJudgePresetSettings as EvaluationJudgePresetSettings,
     _default_runner_command as _default_runner_command,
 )
 
@@ -92,7 +91,6 @@ __all__ = (
     "AgentRunnerWorktreeSettings",
     "AgentSessionPreviewSettings",
     "AgentSessionSettings",
-    "EvaluationJudgePresetSettings",
     "GENERATED_CONTENT_TARGET_NAMES",
     "load_agent_runner_local_settings",
     "logger",

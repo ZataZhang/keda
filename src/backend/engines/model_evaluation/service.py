@@ -1,7 +1,7 @@
 """模型评测的 Console 侧编排入口：run 生命周期动作与授权流程。
 
 core 只管规则；本模块把规则接到真实边界上——SQLite store（鸭子端口）、
-git 工作区、Agent 执行池、judge provider 工厂。API 路由通过
+git 工作区、Agent 执行池、评审（judge）调用边界。API 路由通过
 ``core.use_cases.model_evaluation_runtime`` 薄 facade 调用这里。
 
 生命周期红线：
@@ -183,7 +183,7 @@ def load_suite(suite_id: str) -> EvaluationSuite:
 
 
 def list_preset_options() -> dict[str, Any]:
-    """返回页面可选的执行预设与评审预设清单（provider/model、可得费用、可用性）。"""
+    """返回页面可选的执行预设与评审预设清单（agent/model、可得费用、评审可用性）。"""
     settings = load_fresh_agent_runner_settings()
     execution_presets = [
         {
@@ -197,17 +197,16 @@ def list_preset_options() -> dict[str, Any]:
         for name, preset in sorted(settings.presets.items())
     ]
     judge_items: list[dict[str, Any]] = []
-    for name, preset in sorted(settings.evaluation.judge_presets.items()):
-        availability = _probe_judge(preset)
+    for name, preset in sorted(settings.presets.items()):
+        availability = judge_client.probe_judge_availability(name, settings)
         judge_items.append(
             {
                 "name": name,
+                "agent": preset.agent,
                 "model": preset.model,
-                "temperature": preset.temperature,
-                "provider": availability.provider,
+                "reasoning_effort": preset.reasoning_effort,
                 "available": availability.available,
                 "reason": availability.reason,
-                "api_key_env": preset.api_key_env,
                 "cost_status": "unknown",
             }
         )
@@ -219,17 +218,6 @@ def list_preset_options() -> dict[str, Any]:
         "agent_timeout_seconds": settings.evaluation.agent_timeout_seconds,
         "judge_timeout_seconds": settings.evaluation.judge_timeout_seconds,
     }
-
-
-def _probe_judge(preset: Any) -> judge_client.JudgeAvailability:
-    """用真实 models.json 凭据链探测评审预设可用性（不发起网络调用）。"""
-    from backend.infrastructure.models.model_loader import resolve_model_credentials
-
-    return judge_client.probe_judge_availability(
-        preset,
-        credential_resolver=lambda name, api_key: resolve_model_credentials(name, api_key=api_key),
-        infer_provider=lambda name: "anthropic" if "claude" in name.lower() else "openai",
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -251,23 +239,15 @@ def create_run(
         }
         for name, preset in settings.presets.items()
     }
-    judge_map = {
-        name: {
-            "model": preset.model,
-            "temperature": preset.temperature,
-            "api_key_env": preset.api_key_env,
-            "base_url": preset.base_url,
-        }
-        for name, preset in settings.evaluation.judge_presets.items()
-    }
     try:
         run = evaluation_rules.build_run_snapshot(
             suite=suite,
             execution_preset_names=execution_presets,
             judge_preset_names=judge_presets,
             execution_presets=preset_map,
-            judge_presets=judge_map,
-            judge_availability_probe=lambda name: dataclasses.asdict(_probe_judge(judge_map[name])),
+            judge_availability_probe=lambda name: dataclasses.asdict(
+                judge_client.probe_judge_availability(name, settings)
+            ),
             base_probe=workspace.probe_base,
         )
     except evaluation_rules.EvaluationValidationError as exc:

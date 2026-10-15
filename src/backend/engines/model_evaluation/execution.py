@@ -572,7 +572,7 @@ def _execute_judge(
             dataclasses.replace(score, error="候选结果缺失，未发起评审请求")
         )
         return
-    preset = settings.evaluation.judge_presets.get(judge_name)
+    preset = settings.presets.get(judge_name)
     payload_text = read_staged_payload(run.run_id, str(entry.get("payload_file") or ""))
     if preset is None:
         store.save_evaluation_score(
@@ -586,10 +586,9 @@ def _execute_judge(
     drifted = preset_snapshot_mismatch(
         judge_snapshot,
         {
+            "agent": preset.agent,
             "model": preset.model,
-            "temperature": preset.temperature,
-            "api_key_env": preset.api_key_env,
-            "base_url": preset.base_url,
+            "reasoning_effort": preset.reasoning_effort,
         },
     )
     if drifted:
@@ -626,9 +625,9 @@ def _execute_judge(
         )
         return
     outcome = judge_client.invoke_judge(
-        preset,
-        payload_text,
-        model_factory=_chat_model_factory(),
+        preset_name=judge_name,
+        payload_text=payload_text,
+        settings=settings,
         timeout_seconds=settings.evaluation.judge_timeout_seconds,
     )
     if outcome.error_status is not None:
@@ -659,21 +658,6 @@ def _execute_judge(
             else "响应不符合 rubric schema",
         )
     )
-
-
-def _chat_model_factory() -> Any:
-    """返回真实 provider 工厂（infrastructure ``create_chat_model``）。"""
-    from backend.infrastructure.models.model_loader import create_chat_model
-
-    def factory(model: str, **kwargs: Any) -> Any:
-        return create_chat_model(
-            model,
-            temperature=kwargs.get("temperature", 0.0),
-            api_key=kwargs.get("api_key"),
-            client_kwargs=kwargs.get("client_kwargs") or None,
-        )
-
-    return factory
 
 
 def _safe(name: str) -> str:

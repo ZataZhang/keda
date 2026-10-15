@@ -20,7 +20,7 @@ PRD: [`tasks/archive/P1-FEAT-20261012-103909-multi-judge-agent-evaluation.md`](.
 
 ![多执行模型、多评审者的结果对照（生产截图）](rv-1-evaluation-results.png)
 
-> 验证层级：production capture；候选执行来自本地 fixture repo 的隔离 worktree，judge 调用由本地 mock provider 承接（外发边界见证据报告）。约 10 秒自检：两个执行预设与两个 judge 可展开；确定性 checks 与评分**不同列**；逐维分数、理由、中位数与分歧范围可见；页面上没有任何加权总分或通过/失败门禁。
+> 验证层级：production capture；候选执行来自本地 fixture repo 的隔离 worktree，评审调用由 fixture 评审 CLI 进程承接，经真实 judge 进程边界（空目录 + 禁工具，外发边界见证据报告）。约 10 秒自检：两个执行预设与两个 judge 可展开；确定性 checks 与评分**不同列**；逐维分数、理由、中位数与分歧范围可见；页面上没有任何加权总分或通过/失败门禁。
 
 目标图（component preview / design intent，不是生产入口证明）：
 
@@ -36,7 +36,7 @@ PRD: [`tasks/archive/P1-FEAT-20261012-103909-multi-judge-agent-evaluation.md`](.
 
 **PRD 原文（§2 决策二，请确认段）：**
 
-> **请确认：** 候选执行按启动时显示并选择的 Agent provider/model 运行；评分模型只有当前页面确认的评审模型会接收预览中列明的内容，确认前不发起 judge 请求。评测暂存 payload 只在等待授权 / 评分期间本地保存，完成、拒绝或取消后删除；长期保留结构化分数、简短依据、来源快照与 hash，不保留 API key、原始工具日志或完整代码差异。
+> **请确认：** 候选执行按启动时显示并选择的 Agent 预设运行；评审由所选评审预设的 agent CLI 以禁用工具、空目录形态运行，只有当前页面确认的评审预设会收到预览中列明的内容（该 CLI 会联系其自己的模型服务），确认前不发起 judge 请求。评测暂存 payload 只在等待授权 / 评分期间本地保存，完成、拒绝或取消后删除；长期保留结构化分数、简短依据、来源快照与 hash，不保留 API key、原始工具日志或完整代码差异。
 
 **PRD 原文（§9 Human-Confirmed 第 2 项）：**
 
@@ -46,9 +46,9 @@ PRD: [`tasks/archive/P1-FEAT-20261012-103909-multi-judge-agent-evaluation.md`](.
 
 ![评审 payload 预览与逐次授权（生产截图）](rv-2-payload-consent.png)
 
-> 验证层级：production capture（真实 `/app/evaluations/` 页面展开的预览 Dialog，非直接渲染 modal）。约 10 秒自检：可见目标 provider/模型、任务说明、执行摘要、真实 Diff 与 checks；批准后实际发送内容与预览 hash 逐字节一致。
+> 验证层级：production capture（真实 `/app/evaluations/` 页面展开的预览 Dialog，非直接渲染 modal）。约 10 秒自检：可见目标评审预设（agent/模型）、任务说明、执行摘要、真实 Diff 与 checks；批准后实际发送内容与预览 hash 逐字节一致。
 
-拒绝路径负控：页面点击拒绝后 provider 调用数为 0、8 条 unauthorized 行维度分为空、聚合为空、暂存清除（见 [rv-2-consent-negative-control.txt](rv-2-consent-negative-control.txt) 与 [rv-2-after-page-deny.png](rv-2-after-page-deny.png)）。
+拒绝路径负控：页面点击拒绝后评审进程调用数为 0、8 条 unauthorized 行维度分为空、聚合为空、暂存清除（见 [rv-2-consent-negative-control.txt](rv-2-consent-negative-control.txt) 与 [rv-2-after-page-deny.png](rv-2-after-page-deny.png)）。
 
 目标图（component preview / design intent）：
 

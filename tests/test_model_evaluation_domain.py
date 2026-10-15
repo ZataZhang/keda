@@ -293,21 +293,15 @@ def test_manifest_hash_order_insensitive_and_drift_sensitive() -> None:
 def test_preset_snapshot_mismatch_reports_only_drifted_fields() -> None:
     frozen = {
         "preset_name": "j1",
+        "agent": "claude",
         "model": "judge-m",
-        "temperature": 0.0,
-        "api_key_env": "OPENAI_API_KEY",
-        "base_url": None,
+        "reasoning_effort": None,
     }
     assert preset_snapshot_mismatch(frozen, dict(frozen, preset_name="j1")) == ()
-    live = {
-        "model": "judge-new",
-        "temperature": 0.0,
-        "api_key_env": "OPENAI_API_KEY",
-        "base_url": None,
-    }
+    live = {"agent": "claude", "model": "judge-new", "reasoning_effort": None}
     assert preset_snapshot_mismatch(frozen, live) == ("model",)
-    assert preset_snapshot_mismatch(frozen, {"model": "judge-m", "base_url": "https://evil"}) == (
-        "base_url",
+    assert preset_snapshot_mismatch(frozen, dict(live, model="judge-m", agent="codex")) == (
+        "agent",
     )
 
 
@@ -322,14 +316,9 @@ def _snapshot_kwargs(**overrides: Any) -> dict[str, Any]:
         "execution_presets": {
             "p1": {"agent": "claude", "model": "m-a", "reasoning_effort": None},
             "p2": {"agent": "codex", "model": None, "reasoning_effort": None},
+            "j1": {"agent": "claude", "model": "judge-m", "reasoning_effort": None},
         },
-        "judge_presets": {"j1": {"model": "judge-m", "temperature": 0.0}},
-        "judge_availability_probe": lambda name: {
-            "available": True,
-            "provider": "openai",
-            "model": "judge-m",
-            "reason": None,
-        },
+        "judge_availability_probe": lambda name: {"available": True, "reason": None},
         "base_probe": lambda repo, ref: ("commit123", "tree456"),
     }
     kwargs.update(overrides)
@@ -343,8 +332,10 @@ def test_build_run_snapshot_freezes_matrix_and_base() -> None:
     assert run.case_ids == ["case-a", "case-b"]
     assert [p["preset_name"] for p in run.execution_preset_snapshots] == ["p1", "p2"]
     assert run.execution_preset_snapshots[0]["cost_status"] == "unknown"
-    # judge 快照必须含外发端点字段，漂移核对才有依据
-    assert run.judge_preset_snapshots[0]["base_url"] is None
+    # 评审预设复用执行预设：快照与执行快照同形，漂移核对（agent/model/effort）才有依据
+    assert run.judge_preset_snapshots[0]["preset_name"] == "j1"
+    assert run.judge_preset_snapshots[0]["agent"] == "claude"
+    assert run.judge_preset_snapshots[0]["model"] == "judge-m"
 
 
 def test_build_run_snapshot_fail_fast_aggregates_problems() -> None:
@@ -353,17 +344,18 @@ def test_build_run_snapshot_fail_fast_aggregates_problems() -> None:
             **_snapshot_kwargs(
                 execution_preset_names=["p1", "ghost"],
                 judge_preset_names=["j-offline"],
-                judge_presets={"j-offline": {"model": "x"}},
+                execution_presets={
+                    "p1": {"agent": "claude", "model": "m-a", "reasoning_effort": None},
+                    "j-offline": {"agent": "codex", "model": "x", "reasoning_effort": None},
+                },
                 judge_availability_probe=lambda name: {
                     "available": False,
-                    "provider": None,
-                    "model": "x",
-                    "reason": "凭据缺失",
+                    "reason": "未声明可禁用工具的 judge 形态",
                 },
             )
         )
     message = str(excinfo.value)
-    assert "ghost" in message and "j-offline" in message and "凭据缺失" in message
+    assert "ghost" in message and "j-offline" in message and "judge 形态" in message
 
 
 def test_build_run_snapshot_rejects_matrix_over_ceiling() -> None:

@@ -363,7 +363,7 @@ export default function EvaluationsPage() {
                 <Skeleton className="h-20" />
               ) : presetOptions.judge_presets.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  未定义 [agent_runner.evaluation.judge_presets.*]；本轮只做
+                  未定义任何预设（[agent_runner.presets.*]）；本轮只做
                   确定性检查对照。
                 </p>
               ) : (
@@ -389,9 +389,10 @@ export default function EvaluationsPage() {
                           </Badge>
                         ) : null}
                         <span className="block text-xs text-muted-foreground">
-                          {preset.model} · {preset.provider ?? "?"}
-                          {preset.temperature !== null
-                            ? ` · temp ${preset.temperature}`
+                          {preset.agent}
+                          {preset.model ? ` · ${preset.model}` : ""}
+                          {preset.reasoning_effort
+                            ? ` · ${preset.reasoning_effort}`
                             : ""}
                           {preset.reason ? ` · ${preset.reason}` : ""}
                         </span>

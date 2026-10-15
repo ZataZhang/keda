@@ -1339,11 +1339,8 @@ export type EvaluationSuiteEntry = {
 export type EvaluationPresetSnapshot = {
   preset_name: string;
   agent?: string;
-  model?: string;
-  temperature?: number | null;
+  model?: string | null;
   reasoning_effort?: string | null;
-  provider?: string | null;
-  api_key_env?: string | null;
   cost_status?: string;
   cost_estimate?: number | null;
 };
@@ -1456,14 +1453,14 @@ export type EvaluationPresetOptions = {
     cost_status: string;
     cost_estimate: number | null;
   }[];
+  /** 评审预设即执行预设；available=false 表示该 agent 无法保证"只读 payload"。 */
   judge_presets: {
     name: string;
-    model: string;
-    temperature: number | null;
-    provider: string | null;
+    agent: string;
+    model: string | null;
+    reasoning_effort: string | null;
     available: boolean;
     reason: string | null;
-    api_key_env: string | null;
     cost_status: string;
   }[];
   default_judge_presets: string[];

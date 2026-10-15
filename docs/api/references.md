@@ -350,7 +350,7 @@ curl -sS \
 
 ### `GET /api/v1/agent-runner/console/evaluation/presets`
 
-页面下拉数据：`execution_presets`（来自既有 `[agent_runner.presets.<name>]`）、`judge_presets`（来自 `[agent_runner.evaluation.judge_presets.<name>]`，含 `available` / `reason` 可用性探针——只解析本地凭据链，**不发起网络调用**）、`default_judge_presets` 与并发/超时配置。所有条目 `cost_status` 固定为 `unknown`。
+页面下拉数据：`execution_presets`（来自既有 `[agent_runner.presets.<name>]`）、`judge_presets`（评审预设即同一份执行预设，逐项带 `agent` / `model` / `reasoning_effort` 与 `available` / `reason` 可用性探针——只检查 agent 是否声明禁用工具的 `judge` 形态且 CLI 在 PATH 上，**不起进程、不发起网络调用**；codex / kimi / opencode 等无该形态的 agent 为 `available=false`）、`default_judge_presets` 与并发/超时配置。所有条目 `cost_status` 固定为 `unknown`。
 
 ### `GET /api/v1/agent-runner/console/evaluation/runs` / `POST .../runs`
 

@@ -158,7 +158,7 @@ export function RunDetailPanel({
               : run.judge_preset_snapshots
                   .map(
                     (preset) =>
-                      `${preset.preset_name}（${preset.model} · ${preset.provider ?? "?"}）`,
+                      `${preset.preset_name}（${preset.agent ?? "?"} · ${preset.model ?? "默认模型"}）`,
                   )
                   .join("；")}
           </span>

@@ -114,7 +114,7 @@ def run_candidate(
             usage_summary=None,
             error=str(exc)[:400],
         )
-    usage = _usage_of(result)
+    usage = usage_of(result)
     summary = _summary_of(result)
     return CandidateAgentOutcome(
         ok=getattr(result, "return_code", 1) == 0,
@@ -127,7 +127,7 @@ def run_candidate(
     )
 
 
-def _usage_of(result: Any) -> dict[str, Any] | None:
+def usage_of(result: Any) -> dict[str, Any] | None:
     """把自报 token usage 收敛成 JSON 友好的摘要；无数据返回 ``None``。"""
     usage = getattr(result, "token_usage", None)
     if usage is None:

@@ -525,7 +525,7 @@ export function fetchEvaluationRunDetail(
   );
 }
 
-/** 显式启动候选执行；该动作绝不触发任何评审 provider 调用。 */
+/** 显式启动候选执行；该动作绝不触发任何评审调用。 */
 export function startEvaluationRun(runId: string): Promise<EvaluationRun> {
   return post<EvaluationRun>(
     `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/start`,
@@ -557,7 +557,7 @@ export function fetchEvaluationJudgePreview(
  * 提交评审授权。
  *
  * manifest_hash 必须来自同一次预览；服务端会重新核对冻结值与当前暂存
- * 文件重算值，过期或不符一律 409 且不发起任何 provider 请求。
+ * 文件重算值，过期或不符一律 409 且不发起任何评审调用。
  */
 export function submitEvaluationConsent(
   runId: string,

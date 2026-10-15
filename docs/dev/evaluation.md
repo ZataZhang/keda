@@ -26,8 +26,14 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
   Issue 或 PRD 的完成证据。
 - 确定性检查（checks）与评审评分**分列存储、互不折算**：check 结论
   passed/failed/timeout/not_run 不产生分数，评分也不改写 check 结论。
-- 运行时依赖 `llm` extras：judge 调用走 `create_chat_model`，无条件 import
-  langchain provider SDK；新环境先 `uv sync --extra llm`。
+- 评审复用现有 Agent 执行器，**不引入 provider SDK、API key 或额外依赖**：评审预设
+  就是 `[agent_runner.presets.*]`，调用走与候选执行同一个进程边界，认证沿用各 agent
+  CLI 自己的配置（如 `~/.claude`）。
+- 评审隔离：agent 的 `judge` profile 声明**禁用全部内置工具**（claude / codebuddy /
+  qoder 为 `--tools ""`，pi 为 `--no-tools`），且进程 cwd 是每次新建的空临时目录，
+  评审只能读到授权预览过的 payload。没有该开关的 agent（codex、kimi、opencode）
+  不声明 `judge` 形态，评测页把它们标为"不可用"并给出原因，创建 run 时直接拒绝，
+  不假装隔离。注意：agent CLI 仍会联系其自己的模型服务，这正是外发授权要覆盖的范围。
 
 ### 评测集（suite）
 
@@ -78,7 +84,7 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 
 ### 评审授权流程（外发边界）
 
-1. 候选执行完成（或被拒绝评审）之前，**零 provider 评审调用**。
+1. 候选执行完成（或被拒绝评审）之前，**零评审调用**。
    `POST start` 只排程候选执行。
 2. 执行完成后 run 进入 `awaiting_judge_consent`：payload（任务说明、执行摘要、
    check 结论、代码 diff）只暂存本机私有临时目录。
@@ -99,22 +105,23 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 - 暂存 payload 与隔离 worktree 在评分完成、拒绝、取消或删除 run 时清除；
   删除 run 级联清除其结果与评分行。强制删除仍在执行的 run 时，在飞线程的
   残余回写按 run 存在性被丢弃，评审派发在调用前自检 run 仍在 `judging`，
-  不会留下孤儿行，也不会为新删除的 run 追加 provider 调用。矩阵收尾同理：
+  不会留下孤儿行，也不会为新删除的 run 追加评审调用。矩阵收尾同理：
   并发取消/删除若抢在「进入待授权」这次状态比较并交换之前落地，刚写入的
   manifest 与候选 diff 会立即清除，不会给停在 `cancelled` 的 run 留残骸。
 - Console 重启自愈：上次进程遗留的活跃 run 一律标 `interrupted`，并一并
   删掉其暂存 payload（自愈后这些 run 再也走不到授权或拒绝，留下的只会是
   无人负责的代码差异）；隔离 worktree 的目录清理仍归「删除 run」，避免把
   git 调用压在启动路径上。不提供续跑，由用户新建 run 重跑或删除，绝不自动
-  重跑（避免不可解释的重复 provider 副作用）。
+  重跑（避免不可解释的重复外部调用副作用）。
 
 ### 无凭据验证入口
 
-评审模型调用是唯一的外部边界；其余链路可在**没有任何 API key** 的情况下验证：
+评审调用是唯一的外部边界；其余链路可在**没有任何 agent 登录态**的情况下验证：
 
 - suite 校验：`GET /api/v1/agent-runner/console/evaluation/suites`（页面清单同源）。
 - run 创建/启动/取消/删除、payload 预览与 deny 路径均不需要凭据；judge 预设
-  可用性探针只查本地凭据链是否可解析，不发起网络调用。
+  可用性探针只检查"agent 是否声明 judge 形态、CLI 是否在 PATH 上"，不起进程、
+  不发起网络调用。
 - 授权前的「零外发」可用本地请求计数负控复验（见
   `tasks/evidence/P1-FEAT-20261012-103909-multi-judge-agent-evaluation/`）。
 

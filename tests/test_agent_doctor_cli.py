@@ -105,6 +105,7 @@ def test_doctor_json_all_profiles_matches_golden(
     assert [entry["profile"] for entry in entries] == [
         "deliberate",
         "generate",
+        "judge",
         "repl",
         "run",
     ]

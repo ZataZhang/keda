@@ -42,7 +42,7 @@
 **我默默定了这些**
 
 - 一次对比固定评测集版本、基线 commit、执行预设快照和评分 rubric 版本；每个执行预设与样本组合从干净隔离 worktree 启动，避免前一个候选结果污染后一个。
-- 执行模型从已有 Agent / 模型预设中选择；评审模型使用多个独立的命名评分预设，通过只处理文本、不使用代码工具的评分调用与执行器隔离。
+- 执行模型从已有 Agent / 模型预设中选择；评审模型也从同一份预设里选（评审预设就是执行预设，不另设模型目录与密钥），由该预设的 agent CLI 以声明的 `judge` 形态运行：进程在空临时目录里启动，且禁用全部内置工具，只能读到投递进来的 payload。没有这类禁用开关的 agent（如 codex、kimi、opencode）不能当评审，页面标为“不可用”。
 - 候选 Agent 执行会按用户选择的执行预设联系其配置的模型提供方；开始运行前列出执行预设、provider/model 和可得费用估算。此运行启动动作与候选完成后对评分模型 payload 的逐次授权分开，评审未授权时不发送任何 judge 请求。
 - 默认 rubric 采用 1–5 分锚定量表，按正确性/任务要求、完整性与范围、实现质量、验证证据分别给分和简短理由；不默认生成加权总分。若某维度少于两位有效评审者，不展示“多数意见”或合成结论。
 - 汇总以各维度的中位数、最小—最大范围和有效评分数呈现；单个评审者、单个样本与任何无效/失败状态都可展开查看。
@@ -55,7 +55,7 @@
 - 不把 LLM 评分当作测试、独立 verifier、人工验收或发布门禁，不自动据此选择默认模型或修改执行路由。
 - 不为任意仓库自动生成黄金集、不从历史任务中静默抽取 Prompt / Diff，也不提供大规模基准托管和跨组织排行榜。
 - 不在 v1 中做通用 rubric 编辑器、统计显著性检验、模型价格抓取或 token 价格推断。
-- 不允许评审模型调用工具、访问被评代码仓库或更改候选产物；不将评测任务提交 PR、写回正式 Issue 生命周期或影响实际 Agent Runner 队列。
+- 不允许评审调用工具、访问被评代码仓库或更改候选产物（靠 agent 的 `judge` 形态禁用工具 + 空临时目录实现，不靠提示词约束）；不将评测任务提交 PR、写回正式 Issue 生命周期或影响实际 Agent Runner 队列。
 
 请把它读成：使用者用固定且可追溯的样本与基线并行比较执行 Agent / 模型预设；候选执行结果先经过确定性检查，再由用户选择的多个纯文本评审模型独立评分。网页按样本呈现自动检查和每个评审者的结果，按评分维度呈现中位数与分歧。评分可以帮助比较，但永不代替测试或验收。执行结束后，系统先呈现确切外发内容，用户确认后才联系评审模型。
 
@@ -108,13 +108,13 @@ Executor 与 verifier 负责评测样本格式和版本校验、干净 worktree 
 
 ### Agent / 模型配置维护者
 
-维护者继续在现有 Agent Runner 设置中定义执行预设；评测页面从该清单选择执行候选。评审模型使用独立的命名模型预设，引用已有 provider / model 配置；页面允许配置多个默认评审者，也允许单次 run 覆盖。实际密钥仍只从既有环境注入，不通过浏览器或评测数据库回显。
+维护者继续在现有 Agent Runner 设置中定义执行预设；评测页面从该清单选择执行候选。评审预设就是同一份执行预设，不新增模型目录；页面允许在 `[agent_runner.evaluation].default_judge_presets` 配置多个默认评审者，也允许单次 run 覆盖。评审不需要 API key：认证沿用各 agent CLI 自己的配置（如 `~/.claude`），评测数据库与浏览器都不接触凭据。
 
 ### 兼容与迁移影响
 
 - Console SQLite 增加独立的 evaluation run、case result 和 judge score 记录；启动时沿用现有 `PRAGMA user_version` 路径做向前兼容 schema 升级，不改已有运行日志、Issue、Stats 或 invocation 表。
 - 原有 Agent 执行、Stats 成功率、Verifier/验收流程和 `kc` 命令行为不变；评测是新的手动 Console 页面/API，不作为 daemon 队列任务。
-- 新增的是评测集 YAML 格式与评审模型 preset 引用，不新增密钥变量或复制一份 provider 凭据；空评测配置仍允许 Console 正常启动，评审调用需用户显式配置。
+- 新增的是评测集 YAML 格式与一个新的 agent 调用用途 `judge`（禁用全部内置工具，仅 claude / codebuddy / qoder / pi 声明；`kc agent list` / `kc agent doctor --all-profiles` 会多出一项）；不新增密钥变量、不引入 provider SDK / `llm` extra；空评测配置仍允许 Console 正常启动，评审可用性取决于所选预设的 agent 是否声明 `judge`。
 - 每次 run 按明确动作创建本地隔离工作区；已完成/已取消 run 自动清理临时工作区和暂存 payload，结果数据库按用户选择删除。
 
 ## 4. Requirement Shape
@@ -134,7 +134,7 @@ Executor 与 verifier 负责评测样本格式和版本校验、干净 worktree 
 
 - `docs/dev/evaluation.md` 已写黄金样本、版本跟踪、质量/时延/稳定性/成本指标，当前 TODO 明确缺 suite 格式与自动入口；本 PRD 需要把建议变成一条本地 Console 产品路径。
 - 执行 Agent / 模型选择已有 `AgentModelPreset`，形态为 `(agent, model, reasoning_effort)`，来源为 `[agent_runner.presets.<name>]`；评测候选复用此快照，不重新定义执行模型目录。
-- infrastructure 已有 `create_chat_model`、provider 配置解析及环境变量密钥加载，适合构造无工具的评分模型调用。评审预设只命名并引用模型 id，不把 Agent CLI 当作评审 API，不向评分模型绑定仓库工具。
+- 评审复用现有 Agent 执行器的唯一进程边界 `run_agent_with_prompt`，新增 agent 调用用途 `judge`（`AGENT_PROFILE_JUDGE`）：profile 声明禁用全部内置工具的开关（`--tools ""` / `--no-tools`），调用时 cwd 是每次新建的空临时目录。不引入 `create_chat_model` / provider SDK，也不需要 API key——这与 keda「编排 agent 工具」的定位一致，评审与候选共用同一套预设、认证与可观测。
 - Console 持久层是 SQLite 独立账本并使用 `PRAGMA user_version` 管理 schema；评测新增表要按该存储自身版本增量升级，不能修改或假设 Alembic 版本。
 - 历史 Agent / 预设 Stats PRD `tasks/archive/P2-FEAT-20261009-171037-agent-preset-performance-stats.md` 汇总不受控的历史 attempt；它回答频次、结果与时长，不提供相同样本的对照实验。本 PRD 新建受控评测，不重算或覆盖其统计。
 
@@ -150,9 +150,9 @@ Executor 与 verifier 负责评测样本格式和版本校验、干净 worktree 
 
 ### Recommended Approach
 
-在现有 Console 增加手动、版本化的对照评测闭环：suite 以仓库内 YAML 固定样本与检查 recipe；每个执行 preset × case 组合都从固定 base commit 的干净隔离 worktree 启动，结束后独立运行检查。候选结果先本地持久化并展示确定性数据，默认暂停，不调用任何 judge。用户确认具体 payload 和选定评审模型后，用现有 `create_chat_model` provider 工厂逐个执行无工具请求；结构化校验每位评审的量表、依据和错误态。页面比较每个执行预设、样本和评审模型，并显示维度中位数与分歧范围。
+在现有 Console 增加手动、版本化的对照评测闭环：suite 以仓库内 YAML 固定样本与检查 recipe；每个执行 preset × case 组合都从固定 base commit 的干净隔离 worktree 启动，结束后独立运行检查。候选结果先本地持久化并展示确定性数据，默认暂停，不调用任何 judge。用户确认具体 payload 和选定评审预设后，用该预设 agent 的 `judge` 形态（空临时目录 + 禁用全部内置工具）逐个起评审进程，prompt 即授权预览过的 payload（逐字节一致）；结构化校验每位评审的量表、依据和错误态。页面比较每个执行预设、样本和评审模型，并显示维度中位数与分歧范围。
 
-执行侧继续读取已有 `[agent_runner.presets.<name>]`。评审侧在 `config.toml` 中新增命名 judge preset 清单（model id + 可选温度/参数），只引用现有 provider 注册和 `OPENAI_API_KEY` 等环境密钥；允许配置多个默认评审预设，并可在每次运行时覆盖选择。Provider 不可用、API key 缺失或模型不在 provider registry 时启动前 fail-fast，不写入 0 分。
+执行侧与评审侧都读取已有 `[agent_runner.presets.<name>]`，不新增模型目录或密钥；`[agent_runner.evaluation].default_judge_presets` 给出页面预选名单，每次运行可覆盖。评审可用性探针只做本地检查（agent 是否声明 `judge` 形态、CLI 是否在 PATH 上）：预设的 agent 没有 `judge` 形态或 CLI 缺失时，页面标不可用，创建 run 启动前 fail-fast，不写入 0 分。
 
 Suite 文件只接受明确结构：稳定 suite id / semver、版本、repo fixture、固定 base ref、rubric id / version、case id / task prompt 和命名 validation recipe。Recipe 映射到受限 argv，不允许 shell 拼接；限制超时、并发、环境继承与输出大小。评测工作区只允许写在运行专用根目录，不提交 PR/commit，也不触碰用户主工作区；完成、取消、失败恢复后按策略清理。Console 全局退出或崩溃后的 run 标为 interrupted，由用户显式恢复或删除，不自动重跑可能产生外部副作用的 Agent。
 
@@ -167,7 +167,7 @@ Suite 文件只接受明确结构：稳定 suite id / semver、版本、repo fix
 1. Suite registry 从固定仓库目录加载和校验 suite；内容 hash + 版本进入 run 快照。
 2. 创建 run 时固定 case、基线 ref、执行 preset 的解析快照、rubric 版本和所选 judge presets；空 suite / 失效 preset / dirty base 等问题在执行前阻止启动。
 3. `evaluation_run` 排程 `evaluation_result`；每个 case/preset 对应独立 worktree，运行 Agent 时使用已有 runner adapter，但评测 run 不进入 Issue lifecycle。完成后记录 agent exit/status、命名验证 recipe 结果、wall time 和可得 usage/cost。
-4. Agent 完成后生成分评审模型的 payload。精确待审 payload 存在 Console 私有临时目录且仅在 waiting-consent/judging 期间保留；数据库留 hash。预览后用户确认，服务端重新核对 run/payload hash，再调用无工具的 `create_chat_model`。拒绝/取消不发出请求。
+4. Agent 完成后生成分评审模型的 payload。精确待审 payload 存在 Console 私有临时目录且仅在 waiting-consent/judging 期间保留；数据库留 hash。预览后用户确认，服务端重新核对 run/payload hash，再以 `judge` 形态起评审进程（空目录、禁工具）。拒绝/取消不发出请求。
 5. 每个 `evaluation_score` 存 judge preset 与解析后模型快照、prompt/rubric 版本、每维分数、短理由、状态、耗时、usage、response hash。中位数/范围从数据库明细实时派生，避免保存双份统计事实。
 6. UI 提供 suite、执行 preset、judge 多选和基线配置；比较页展示每个候选、case 检查、每位 judge 和维度汇总；运行删除操作级联删除本地结果并清理该 run 的残余临时 payload/worktree。
 
@@ -180,7 +180,8 @@ Suite 文件只接受明确结构：稳定 suite id / semver、版本、repo fix
 - **直接把历史 Stats 增加 LLM 分数：** 不采用。历史 attempt 样本、基线和提示不一致，不可作为同条件实验；也会混淆运营统计与主观评审。
 - **将任务 Diff 自动发给默认强模型并在后台评分：** 不采用。代码外发不可撤回，成本受数据规模影响；每次发送都必须展示目标和准确内容并经用户确认。
 - **用平均总分替代逐评审结果：** 不采用。平均可能隐藏分歧和评审失败；当前没有用户确认的权重或校准样本。
-- **评审模型复用能运行 repo tools 的 Agent CLI：** 不采用。评分调用读取的是显式摘要和 Diff，不需要命令/文件工具；无工具模型请求减少权限边界和提示注入面。
+- **评审走独立的 provider SDK（`create_chat_model` + langchain）：** 初稿采用，后撤回（见 Change Log）。它要求另配 API key、引入 `llm` extra，与本机 CLI 认证（cc-switch 文件式认证）脱节，也偏离 keda 编排 agent 工具的定位。
+- **评审直接复用带工具的执行 profile（`run` / `generate`）：** 不采用。实测 `generate` 的 `read_only` 只防写不防读，评审仍能读到目录外文件；评审必须用禁用全部内置工具的 `judge` 形态。
 - **云端基准、自动 CI 回归门槛：** 暂缓。现阶段先验证固定样本的本地对照是否能帮助用户选型；只有同一套样本被持续复用、人工评审成本明显时，再评估自动调度或 CI 阈值。
 
 ## 7. Implementation Guide
@@ -194,7 +195,7 @@ This section is a living implementation guide based on current repository analys
 3. 检查结果记录命名 recipe、exit code、通过/失败、超时或未运行及有限输出摘要。检查命令只允许 argv + 受限 cwd，禁止 `shell=True`、suite 提供任意解释器脚本、继承完整用户环境或访问主工作区。
 4. 评分 rubric v1 具备稳定 id/version、四个 1–5 分维度、每档含义和短文本证据字段。模型响应必须过 schema 和数值范围校验；缺项、额外格式无法解析、拒答、timeout、provider error 分别留状态，结果不能化为零分。
 5. 汇总只按 `valid` judge scores 计算每维中位数 / min / max / N；任何未完成候选均带状态，页面不得把未完成矩阵排除后仍称全批次完成。单个有效 judge 只显示其分数和 `1 位评审`，不显示“评审一致”。
-6. 审批边界：浏览器先取得 payload manifest/hash 与可读完整预览；批准 API 绑定 run id、judge preset 集与 manifest hash，服务端重新校验当前待审 payload hash 后才向 provider 发出请求。过期 hash 返回冲突并要求重新查看。
+6. 审批边界：浏览器先取得 payload manifest/hash 与可读完整预览；批准 API 绑定 run id、judge preset 集与 manifest hash，服务端重新校验当前待审 payload hash 后才起评审进程。过期 hash 返回冲突并要求重新查看。
 7. 临时 payload、worktree 生命周期与 run state 一致。评分完成、拒绝或取消后删除暂存 payload；持久层不存 raw prompt、完整 patch、token、环境变量或密钥。评审摘要限制长度且写入本地账本；run 删除级联清除其结果和缓存文件。
 8. 自动评分默认为 false；评测开始 API 不能同时触发模型评审。只能通过单独的授权动作推进 `awaiting-judge-consent -> judging`；无网络调用结果是该默认值的可验证条件。
 
@@ -209,7 +210,7 @@ This section is a living implementation guide based on current repository analys
 ├── tasks/evaluation-suites/example.yaml [新增]
 │   【总结】提供不含私有 Issue 内容、可在隔离仓库中运行的 suite 样例
 ├── config.toml [修改]
-│   【总结】增加可选的多个默认评审预设名称及 model-id 引用示例，不写密钥
+│   【总结】增加可选的默认评审预设名单示例（引用已有执行预设名），不写密钥
 ├── src/backend/core/shared/models/model_evaluation.py [新增]
 │   【总结】定义 suite、run、case、rubric、judge 结果与阶段状态的领域值对象
 ├── src/backend/core/shared/interfaces/evaluation_store.py [新增]
@@ -217,9 +218,9 @@ This section is a living implementation guide based on current repository analys
 ├── src/backend/core/use_cases/model_evaluation.py [新增]
 │   【总结】校验评测矩阵、隔离执行编排、显式评分授权、逐评审解析与维度汇总
 ├── src/backend/engines/model_evaluation/ [新增目录]
-│   【总结】用现有 Agent Runner 执行候选，用 create_chat_model 发送无工具结构化 judge 请求
+│   【总结】用现有 Agent Runner 执行候选，用 agent 的 judge 形态（空目录 + 禁工具）发起结构化评审
 ├── src/backend/infrastructure/config/ [修改]
-│   【总结】解析评审模型 preset 引用并复用现有模型/provider 凭据加载，不持久化密钥值
+│   【总结】评审预设复用执行预设并探测 judge 形态可用性，不涉及也不持久化任何密钥
 ├── src/backend/infrastructure/persistence/console_store.py [修改]
 │   【总结】为 run、候选结果、逐评审评分增添独立 SQLite 表并安全推进 PRAGMA user_version
 ├── src/backend/api/routes/agent_runner_console.py [修改]
@@ -278,7 +279,7 @@ flowchart TD
     D --> E["Console SQLite 保存候选状态、检查、时延和 usage"]
     E --> F["生成 judge payload 并显示 provider、model 与确切预览"]
     F -->|"拒绝或取消"| G["保留本地检查结果，judge 状态为未授权/已取消"]
-    F -->|"显式确认且 hash 仍匹配"| H["无工具 model adapter 分别调用每个 judge preset"]
+    F -->|"显式确认且 hash 仍匹配"| H["以 judge 形态（空目录 + 禁工具）分别起每个评审预设的 agent 进程"]
     H --> I["校验结构化逐维分数、简短理由和错误状态"]
     I --> J["逐样本逐 judge 保存；从明细计算中位数与分歧范围"]
     J --> K["Console 对比视图：检查与 LLM 评分分开展示"]
@@ -340,7 +341,7 @@ erDiagram
   reviewer: human
   real_entry: "启动 `uv run kc console`，打开命令输出的 loopback origin 下 `/app/evaluations/`，以隔离的 sanitized fixture suite 启动一轮至少两个 execution preset × 两个 judge preset 对照。"
   expected: "开始前页面准确显示每个 execution preset 的 provider/model 与可得费用估算（未知即明确显示未知）；用户确认运行后，每个 case/preset 均从同一 base tree 独立 worktree 开始；run 与结果在真实 Console SQLite 中 fresh connection 可读；相同 fixture judge 结果按逐维数值算出的中位数、范围、有效数与页面一致；确定性 checks、耗时、LLM 分数分别列示；拒答/坏结果不计为 0 分。"
-  mock_boundary: "Console route/page、SQLite、状态迁移、suite/base/worktree 隔离、矩阵和 rubric 汇总都必须真实；运行 Agent/provider 与 chat model 可在 engines/provider 接口替身稳定返回，不连接真实模型；suite 和 repo 使用小型本地隔离 fixture。真实模型调用另经 opt-in sandbox，不把 fixture 结果称 live。"
+  mock_boundary: "Console route/page、SQLite、状态迁移、suite/base/worktree 隔离、矩阵和 rubric 汇总都必须真实；运行 Agent 与评审 agent CLI 可由 fixture 进程替身稳定返回（评审仍经真实 `run_agent_with_prompt(profile=judge)` 起进程），不连接真实模型；suite 和 repo 使用小型本地隔离 fixture。真实模型调用另经 opt-in sandbox，不把 fixture 结果称 live。"
   tier: R2
   test_layer: e2e
   required_for_acceptance: true
@@ -356,25 +357,25 @@ erDiagram
   behavior: "每次外部评审只发送用户当前预览过并明确批准的 payload；拒绝、取消、payload 过期或 provider 未配置时不得联系 judge。"
   reviewer: human
   real_entry: "在真实 Console `/app/evaluations/` 完成一个 sanitized local run，打开 judge payload preview，选择一个已配置远端 judge preset 后分别执行拒绝与批准流程；live provider 仅 opt-in。"
-  expected: "拒绝时 provider spy/request count 为零；批准要求当前 run 和 manifest hash 匹配，外发模型/提供方与预览一致；真实 opt-in 请求返回后留下评分与 usage（如 provider 给出），拒绝/取消后临时 payload 清除。"
-  mock_boundary: "真实 UI、授权 API、payload manifest/hash 校验、SQLite、临时文件生命周期、配置解析与批准状态 CAS 必须真实；网络 provider 在 no-credential 验证中由 test boundary spy 替代；live sandbox 用真实已配置模型且发送 sanitized payload，不作为无凭据 fallback 的替代。"
+  expected: "拒绝时评审进程调用数为零；批准要求当前 run 和 manifest hash 匹配，评审进程收到的 prompt 与预览逐字节一致、目标评审预设（agent/model）与预览一致；真实 opt-in 评审返回后留下评分与 usage（如 agent 自报），拒绝/取消后临时 payload 清除。"
+  mock_boundary: "真实 UI、授权 API、payload manifest/hash 校验、SQLite、临时文件生命周期、配置解析与批准状态 CAS 必须真实；评审 agent CLI 在无登录态验证中由 fixture 进程替代（记录调用数、cwd 内容与 prompt 哈希）；live 验证用真实已登录的 claude/codebuddy/qoder 且发送 sanitized payload，不作为无登录态 fallback 的替代。"
   tier: R3
   test_layer: e2e
   required_for_acceptance: true
-  presentation: "授权确认截图、拒绝路径 provider-call-count 报告与可选 live 请求摘要：tasks/evidence/P1-FEAT-20261012-103909-multi-judge-agent-evaluation/rv-2-payload-consent.png / rv-2-consent-negative-control.txt；10 秒检查：预览中可读见目标模型、任务、Diff 和 checks；拒绝后调用数为 0。"
-  critical_value_source: "浏览器收到的 payload manifest/hash、Console 授权请求中的 run id/judge preset/hash、provider adapter 收到的 exact serialized content hash 与最终请求模型。"
+  presentation: "授权确认截图、拒绝路径评审进程调用数报告与可选 live 请求摘要：tasks/evidence/P1-FEAT-20261012-103909-multi-judge-agent-evaluation/rv-2-payload-consent.png / rv-2-consent-negative-control.txt；10 秒检查：预览中可读见目标模型、任务、Diff 和 checks；拒绝后调用数为 0。"
+  critical_value_source: "浏览器收到的 payload manifest/hash、Console 授权请求中的 run id/judge preset/hash、评审进程实际收到 prompt 的 sha256 与最终评审预设。"
   must_cross: "Console 页 payload preview → 用户确认/拒绝 → 授权 API → 当前 payload hash fresh compare → provider adapter → 同一 run 的 judge score 保存/拒绝状态 → fresh UI/API 读取。"
   forbidden_bypasses: "run start 时隐式打分；浏览器直接调用 provider；用预览摘要替代实际发送 payload；不校验过期 manifest；向 provider 发送 API key/raw environment/tool transcript；拒绝后仍异步排队评分。"
   fresh_state_probe: "先在新浏览器 session 用与页面同源真实 API 拒绝一次并查看 spy count；再创建另一 run 批准一次，换 fresh Console process 查询对应 score/状态与 payload 文件清理状态。"
-  final_tree_evidence: "保存预览截图、request hash 对照、负控调用数、临时目录前后清单、相关配置名（不含密钥）和最终 working tree stamp；授权、序列化、provider 路由或清理变化后必须复跑。"
-  negative_control: "经真实页面点击拒绝后检查 test-boundary provider spy 请求数；另在 test boundary 让 payload 在预览后变化再批准。"
-  expected_fail: "拒绝流程任何 judge 请求数大于 0 即判失败；payload 改变后批准必须返回 conflict 且 provider 请求数仍为 0。"
+  final_tree_evidence: "保存预览截图、request hash 对照、负控调用数、临时目录前后清单、相关配置名（不含密钥）和最终 working tree stamp；授权、序列化、judge 形态或清理变化后必须复跑。"
+  negative_control: "经真实页面点击拒绝后检查评审进程调用数；另在 test boundary 让 payload 在预览后变化再批准。"
+  expected_fail: "拒绝流程任何 judge 请求数大于 0 即判失败；payload 改变后批准必须返回 conflict 且评审进程调用数仍为 0。"
 - id: rv-3
   behavior: "评测被取消、超时、suite 不可用或模型输出不符合 rubric schema 时保留可解释的独立状态，不污染正式 Agent Runner 数据或产生零分。"
   reviewer: verifier
-  real_entry: "`uv run kc console` → `/app/evaluations/`；通过真实 run API 启动隔离 fixture suite，并在 engines 边界注入 timeout、refusal、malformed JSON、cancel 与缺 provider。"
+  real_entry: "`uv run kc console` → `/app/evaluations/`；通过真实 run API 启动隔离 fixture suite，并在评审进程边界注入 timeout、refusal、malformed JSON、非零退出、cancel 与无 judge 形态的预设。"
   expected: "对应 case/judge 按实际状态结束；其他候选和 judge 仍可完成；非 score 状态不参与分布统计；正式 Issue、PR、生命周期日志和主工作区均不变；Console restart 后未完成 run 标记 interrupted，不自动重新调用 Agent。"
-  mock_boundary: "真实 suite parser、状态机、SQLite、HTTP route、临时 worktree cleanup 和 Console 页面必须真实；provider/Agent 响应只在其专属 adapter boundary 可模拟。"
+  mock_boundary: "真实 suite parser、状态机、SQLite、HTTP route、临时 worktree cleanup 和 Console 页面必须真实；Agent / 评审响应只在其专属进程边界由 fixture 模拟。"
   tier: R1
   test_layer: integration
   required_for_acceptance: true
@@ -467,7 +468,7 @@ erDiagram
 #### Architecture Acceptance
 
 - [x] 依赖方向维持 `api -> core -> engines -> infrastructure`；suite 规则、rubric 验证、分数 reducer 属 core；React 页面不自行计算评分口径。 — 证据：`src/backend/core/shared/models/model_evaluation.py`（parse/validate/rubric 常量）与 `core/use_cases/model_evaluation.py`（聚合 reducer）；engines 仅做 IO 编排；`frontend-public/components/evaluations/*` 只渲染 API summary 字段，无中位数计算。
-- [x] Judge adapter 使用 `create_chat_model` 或经审查等价的无工具 model call；评审请求不复用可运行 shell/仓库工具的 Agent task profile。credential、provider、model 在服务端解析，不由客户端提交密钥。 — 证据：`engines/model_evaluation/judge_client.py` 经 `create_chat_model`（llm extras，需 `uv sync --extra llm`）；rv-1/rv-2 mock HTTP 计数（8 请求/模型分布 4+4）证明真实调用链；请求体不含 key；预设可用性探针只读本地凭据链。
+- [x] 评审经 agent 的 `judge` 形态调用（空临时目录 + 禁用全部内置工具），不复用可运行 shell/仓库工具的 `run` / `generate` profile；预设与认证在服务端解析，客户端不提交任何凭据。 — 证据：`engines/model_evaluation/judge_client.py` 经 `run_agent_with_prompt(profile="judge")`；`tests/test_model_evaluation_judge_client.py`（argv、空目录、prompt 逐字节、失败映射）；实测 `claude`/`codebuddy`/`qoder` 在 `--tools ""` 下读不到目录外文件；rv-1 `JUDGE_CWD_EMPTY_TEMP_DIR: True`、rv-2 `JUDGE_PROMPT_SHA256_EQUALS_APPROVED_PAYLOADS: True`。
 - [x] suite recipe 不拼 shell 字符串，不继承任意用户环境、不在主工作区执行；Agent/模型调用数量受预算和既有并发上限限制；run 创建、授权和删除有幂等/并发状态约束。 — 证据：`engines/model_evaluation/checks.py` argv 白名单（pytest/unittest/node-test）、`execution.py` ThreadPoolExecutor ceiling=min(max_concurrency, cells)；rv-1 AGENT_INVOCATIONS=4/MOCK=8 与矩阵严格一致；授权三 hash 复核 409、重复取消 409（rv-2/rv-3）。
 - [x] SQLite schema 迁移遵守 ConsoleStore `PRAGMA user_version` 路径，升级后现有 Console 日志、Stats、Invocation 查询保持原样；run 删除级联清除相关行和临时文件。 — 证据：rv-1 SQLITE_USER_VERSION=15 fresh read；`just test` 4280 passed 覆盖既有 store 测试；rv-3 删除 run → 404 + worktrees/staging 清理，级联见 `console_store_evaluation.py`。
 
@@ -475,15 +476,15 @@ erDiagram
 
 - [x] `docs/dev/evaluation.md` 记录 suite YAML 字段、版本/hash、授权流程、rubric v1、逐评审解读、删除/保留和无凭据验证入口；`mkdocs.yml` 若新增长期页面则同步导航。 — 证据：重写后的 `docs/dev/evaluation.md`（2026-10-13）+ `tasks/evaluation-suites/README.md`；`uv run mkdocs build --strict` exit 0（`dev/evaluation.md` 已在导航 `mkdocs.yml:93`）。
 - [x] `docs/api/references.md` 记录 suite/run/result/preview/approve/delete APIs，状态枚举、Conflict/error 语义、默认不开启 judge 和 secret/payload 边界。 — 证据：`docs/api/references.md`「模型评测 Console 端点」节（10 端点 + 枚举 + 404/409/400 映射）；`uv run mkdocs build --strict` exit 0。
-- [x] 如新增 config key，`config.toml`、settings loader 和配置参考文档同步；密钥仍仅由现有 env 注入、`.env.example` 只保留未注释空密钥项，不把预设模型值写为秘密。 — 证据：`config.toml` 注释示例段 + `EvaluationJudgePresetSettings`/`AgentRunnerEvaluationSettings`（只存 env 名，不存值）+ `docs/guides/configuration.md`「Agent Runner 模型评测配置」节；`.env.example` 未改动（无新密钥变量）。
+- [x] 如新增 config key，`config.toml`、settings loader 和配置参考文档同步；密钥仍仅由现有 env 注入、`.env.example` 只保留未注释空密钥项，不把预设模型值写为秘密。 — 证据：`config.toml` 注释示例段（含 claude/codebuddy/qoder/pi 的 `judge` profile 出厂注册块）+ `AgentRunnerEvaluationSettings`（不再有评审预设表）+ `docs/guides/configuration.md`「Agent Runner 模型评测配置」节；`.env.example` 未改动（无新密钥变量）。
 - [x] Prototype Hub registry、原型返回入口、截图 sidecar、说明页和窄屏行为一致；现有 `/app/stats` 统计仍为单独的历史执行数据入口。 — 证据：`docs/prototypes/assets/prototype-hub.js:21-24` 已登记评测流程；`runtime-evaluation-preview.png`/`.source.md` 与 `runtime-consent-preview.png`/`.source.md` sidecar 成对存在；Stats 页未改动，评测入口为独立 `/app/evaluations/`。
 
 #### Validation Acceptance
 
-- [x] `rv-1` 通过真实 `kc console` 与页面/API、真实 SQLite store/schema、隔离 fixture repo/worktree 采集同批矩阵、fresh process 查询、逐评审记录和摘要重算；provider 在自动测试边界替身可用。 — 证据：`evidence.json` item 1（RV1_GREEN + 全部 stdout_assertions 命中，脚本 `scripts/rv1.py`/`scripts/rv_narrow.py`）。
-- [x] `rv-2` 做拒绝/批准两条真实页面路径；负控用 provider spy 核实拒绝后请求数为零、payload 改变后 approval 失败；live provider run 使用 sanitized suite 与用户 opt-in 凭据，保存 provider/model 与 usage，不提交任何秘密。 — 证据：`evidence.json` item 2（REQUEST_COUNT_AFTER_PAGE_DENY: 0、STALE_APPROVE_CONFLICT: True、批准后 mock 恰 8）；**live provider 未执行**（本机无凭据，按 PRD 属用户 opt-in，已在 `rv-2-consent-negative-control.txt` LIVE_PROVIDER_NOTE 披露，mock 不称 live）。
-- [x] `rv-3` 用 suite/provider boundary 注入 timeout/refusal/schema 错误/cancel/restart，在真实 store/API 中证明未评分为非 score 状态、未自动重试、其余结果仍可读取。 — 证据：`evidence.json` item 3 + `rv-3-degraded-states.json`（状态桶、interrupted 调用数 2→2、账本 unchanged）。
-- [x] 配套 targeted Python 与 Playwright 用户流程、`uv run mkdocs build --strict`、前端 typecheck/build 按 `docs/ai-standards/testing.md` 分类记录；若无法访问真实模型服务，明确披露 live provider 未覆盖，不把 mock 称为 live。 — 证据：`uv run pytest tests/test_model_evaluation_domain.py tests/test_console_evaluation_store.py tests/test_console_evaluation_api.py -o addopts=""`（本地核心档）与 `just test` 4280 passed / 1 skipped（2026-10-13 重验）；`uv run mkdocs build --strict` exit 0（文档修正后重跑）；前端 typecheck/build 见任务 #6；live 披露同 item 2。2026-10-13 最终树 `e94f24b4` 复验：定向 44 项 pytest passed、`just e2e` 评测 spec 3 passed、`uv run mkdocs build --strict` exit 0、`pnpm typecheck` clean，RV 剧本重跑记录见 Change Log「最终树证据重采集」。
+- [x] `rv-1` 通过真实 `kc console` 与页面/API、真实 SQLite store/schema、隔离 fixture repo/worktree 采集同批矩阵、fresh process 查询、逐评审记录和摘要重算；评审 agent CLI 在自动测试边界由 fixture 进程替身。 — 证据：`evidence.json` item 1（RV1_GREEN + 全部 stdout_assertions 命中，脚本 `scripts/rv1.py`/`scripts/rv_narrow.py`）。
+- [x] `rv-2` 做拒绝/批准两条真实页面路径；负控用评审进程调用计数核实拒绝后为零、payload 改变后 approval 失败；真实 agent 评审 run 使用 sanitized suite 与用户 opt-in，不提交任何秘密。 — 证据：`evidence.json` item 2（REQUEST_COUNT_AFTER_PAGE_DENY: 0、STALE_APPROVE_CONFLICT: True、批准后评审进程恰 8 次、评审 prompt 的 sha256 与授权 payload 逐一相等）；**真实 agent 评审未执行**（按 PRD 属用户 opt-in，已在 `rv-2-consent-negative-control.txt` LIVE_JUDGE_NOTE 披露，fixture 不称 live）。
+- [x] `rv-3` 用 suite/评审进程边界注入 timeout/refusal/schema 错误/非零退出/cancel/restart，在真实 store/API 中证明未评分为非 score 状态、未自动重试、其余结果仍可读取。 — 证据：`evidence.json` item 3 + `rv-3-degraded-states.json`（状态桶、interrupted 调用数 2→2、账本 unchanged）。
+- [x] 配套 targeted Python 与 Playwright 用户流程、`uv run mkdocs build --strict`、前端 typecheck/build 按 `docs/ai-standards/testing.md` 分类记录；若无法运行真实 agent 评审，明确披露未覆盖，不把 fixture 称为 live。 — 证据：`uv run pytest tests/test_model_evaluation_domain.py tests/test_console_evaluation_store.py tests/test_console_evaluation_api.py -o addopts=""`（本地核心档）与 `just test` 4280 passed / 1 skipped（2026-10-13 重验）；`uv run mkdocs build --strict` exit 0（文档修正后重跑）；前端 typecheck/build 见任务 #6；live 披露同 item 2。2026-10-13 最终树 `e94f24b4` 复验：定向 44 项 pytest passed、`just e2e` 评测 spec 3 passed、`uv run mkdocs build --strict` exit 0、`pnpm typecheck` clean，RV 剧本重跑记录见 Change Log「最终树证据重采集」。
 - [~] 独立 verifier 对 R2/R3 证据、同基线矩阵和外发授权负控复核 PASS — runner-owned gate。
 - [~] PR 证据发布、主线归档与最终 tree 等价复核 — runner-owned gate。
 
@@ -496,9 +497,9 @@ erDiagram
 
 - **FR-1**：用户可从 Console 导航启动一轮手动评测；选择一个版本化 suite、固定 base ref/rubric、两个或更多 execution preset；suite version、内容 hash、base commit/tree 和解析 preset snapshot 在 run 创建时固定。
 - **FR-2**：run 为每个 execution preset × case 建立独立干净 worktree，运行 Agent 和 suite 声明的命名 deterministic check recipe；结果包含状态、exit/check outcome、wall time 与真实可得 usage/cost，不改正式 Issue/PR/main worktree。
-- **FR-3**：可配置多个有名 judge presets 并为单个 run 选择一个或多个；judge 使用无工具的文本模型调用，按 rubric v1 独立评审每个 candidate/case，逐 judge 保存模型版本、维度评分、短依据、耗时、usage、hash 与错误态。
+- **FR-3**：可配置多个有名 judge presets 并为单个 run 选择一个或多个；评审复用执行预设，以 agent 的 `judge` 形态（空临时目录 + 禁用全部内置工具）调用，按 rubric v1 独立评审每个 candidate/case，逐 judge 保存模型版本、维度评分、短依据、耗时、usage、hash 与错误态。
 - **FR-4**：结果页将确定性 check、Agent 运行指标与 LLM 评分分开展示；同一维度从有效 judge 明细动态计算中位数、min/max 分歧范围和 N；无效/失败/未授权结果永不变为零分，页面不生成默认 weighted total 或 pass gate。
-- **FR-5**：Agent 运行结束默认停在 `awaiting-judge-consent`；预览显示每个目标 provider/model 及准确 payload。用户批准后服务端检查 preview hash 一致才调用 judge；拒绝、取消、过期 hash 不发请求。运行开始、CI、CLI、daemon 不触发自动评分。
+- **FR-5**：Agent 运行结束默认停在 `awaiting-judge-consent`；预览显示每个目标评审预设（agent/model）及准确 payload，并提示 agent CLI 会联系其自己的模型服务。用户批准后服务端检查 preview hash 一致才调用 judge；拒绝、取消、过期 hash 不发请求。运行开始、CI、CLI、daemon 不触发自动评分。
 - **FR-6**：Console SQLite 持久保存 run、case result 和逐 judge score 快照，支持 fresh read、按条件过滤与删除；暂存 payload/worktree 有限生命周期，密钥和原始工具 transcript 不落库。Console 重启后未完成任务标记 interrupted，不自动执行重复的 Agent/provider 请求。
 
 ## 11. Non-Goals
@@ -507,24 +508,25 @@ erDiagram
 - 不新增 `kc` CLI 子命令/旗标、CI 自动评分、自动选择模型、主观总分权重或质量门槛。
 - 不导入任意外部 benchmark 服务、不自动采集 Issues、不建设 suite Web CRUD 编辑器/多租户共享/排行榜。
 - 不在 judge prompt 或本地持久层放原始 API key、完整环境、全部 Agent tool transcript 或 entire repository archive。
-- 不支持评审模型 tool calling / function calling，不让 judge 在 candidate worktree 内执行；不因评分重跑已完成的 Agent。
+- 不让评审使用工具（agent 无禁用开关则不可作评审），不让 judge 在 candidate worktree 或仓库内运行；不引入 provider SDK 或 API key 体系；不因评分重跑已完成的 Agent。
 
 ## 12. Risks And Follow-Ups
 
 - **同样本仍可能有环境差异**：固定 base tree、依赖安装规则、超时和 worktree；在 run 详情显示运行环境快照，不能把一次随机波动描述为稳定优劣。
 - **LLM judge 自身偏差**：每位评审者独立展示；每维中位数与范围不能代替原始判断。用户可增加评审者或人工复核，不做统计显著性承诺。
-- **代码外发和提示注入**：payload 视为不可信代码文本，仅由无工具 model call 读取；无自动发送，展示精确内容与接收 provider，每次 run 重新授权；用户批准前显示内容可能含机密的提示。
+- **代码外发和提示注入**：payload 视为不可信代码文本，仅由空目录里禁用工具的评审进程读取；无自动发送，展示精确内容与接收评审的 agent/model，每次 run 重新授权；agent CLI 本身会联系其模型服务，这是授权要覆盖的范围；用户批准前显示内容可能含机密的提示。
 - **并发/成本增长**：候选数量 × case 数 × judge 数构成调用上界；创建 run 前显示请求数、并发限制及能获取到的成本信息，单 run 有最大矩阵大小/超时，不以未知价推断金额。
 - **Console SQLite 成长**：默认只保留短评分理由和结构化指标；run 删除级联清理，提供列表中本地数据大小或记录数量，以触发清理策略后续评估。
 - **历史重评与 rubric 改版**：v1 不用新 rubric 悄悄覆盖旧分数；如要比较历史产物需独立“重新评审”用户动作和新的 consent/payload hash，留待实际用户需要后再做。
-- **模型 registry 一致性**：judge alias 引用 provider 已知 model id；缺凭据或 model/provider 无法解析时显示不可用，不用执行 Agent preset 回退。
+- **评审隔离的覆盖面**：只有声明了禁用全部内置工具开关的 agent 可当评审（claude / codebuddy / qoder 实测通过，pi 按其 `--no-tools` 声明；codebuddy / qoder 在工具被拒时偶尔会输出工具调用文本，由 rubric schema 校验落 `invalid`，不折算 0 分）；codex、kimi、opencode 没有等价开关，不声明 `judge`，宁可不可用也不假装隔离。
+- **评审认证依赖各 agent CLI 自己的登录态**：CLI 未登录时评审落 `provider_error` 并带 stderr 摘要，不影响候选结果。
 
 ## 13. Decision Log
 
 | ID | Decision | Chosen | Rejected | Rationale |
 |---|---|---|---|---|
 | D-01 | 执行效果比较单位 | 同一 suite version × base tree 的隔离 case/preset 矩阵 | 不同时间的历史 attempt 汇总 | 控制任务难度与代码基线，结果更可解释并可复验。 |
-| D-02 | 评审模型配置 | 多个命名 judge preset 引用现有 provider/model registry 与 env 凭据 | 复用有 shell / repo tool 的执行 Agent 评审 | judge 只需文本推理；独立模型调用避免把任务工具权限交给评审者。 |
+| D-02 | 评审模型配置 | 评审预设即执行预设，经 agent 的 `judge` 形态（空临时目录 + 禁用全部内置工具）调用 | 独立 provider SDK（`create_chat_model` + API key）；直接复用带工具的 `run` / `generate` profile | keda 定位是编排 agent 工具，评审与候选应共用同一套预设与认证，不另起 provider 体系；`generate` 的只读声明实测挡不住读文件，必须专用禁工具形态。（2026-10-15 取代初稿的独立 provider 方案。） |
 | D-03 | 分数聚合 | 每位评审者原始结果 + 每维中位数/范围/N | 默认加权总分或 pass/fail | 让用户看到分歧，避免把尚未校准的主观值当作真值。 |
 | D-04 | 外发时机 | 单次 run 的 payload 预览后显式授权 | 自动后台评分 | 代码外发不可撤回且可能产生费用，需要明确逐次确认。 |
 | D-05 | 结果用途 | 辅助比较，人工结合确定性证据解释 | 自动进入 CI/合并/路由决策 | 项目当前没有经校准的评分阈值，自动门禁会放大 judge 偏差。 |
@@ -534,11 +536,19 @@ erDiagram
 - Interpretation: 已确认 — §1 解读回显五行全部有真实入口证据：同 suite/base 多预设对照与逐维分歧（rv-1）、授权前逐字节预览与显式批准（rv-2 页面批准/拒绝双路径）、失败态独立不折算 0 分（rv-3 状态桶 + 伪 0 分负控）、拒绝/取消零外发（rv-2 REQUEST_COUNT 0 / rv-3 mock delta 0）。
 - Public behavior and contracts: 已确认 — `/app/evaluations/` 页面、run 状态机（created→…→awaiting_judge_consent→judging→completed/cancelled/interrupted）、payload manifest/consent 三 hash 语义与结果 DTO 与 `docs/api/references.md` 一致；400/404/409 映射经 rv-1/rv-2/rv-3 实测。
 - Related PRD status: 已复核 — 运行时 Dashboard（P1-FEAT-20261012-103222）导航与 Stats 历史数据入口未改动；评测为独立 `/app/evaluations/` 路径，judge 分数不参与任何生命周期门禁。
-- Requirements and risks: 已确认 — 数据保留（摘要落库、raw 不落库）、外发边界（授权前零 provider 调用）、judge 错误态分列、并发上限与调用数一致、评分非门禁语义均有证据；残余风险见 §12（live provider 未覆盖、rubric v2、成本事实源）。
+- Requirements and risks: 已确认 — 数据保留（摘要落库、raw 不落库）、外发边界（授权前零评审调用）、judge 错误态分列、并发上限与调用数一致、评分非门禁语义均有证据；残余风险见 §12（真实 agent 评审未覆盖、rubric v2、成本事实源）。
 - Reconciled differences:
-  - 执行期实现偏差与缺陷修复已记录于 Change Log（probe_base 400 化、worktree 父目录清理、rubric 维度文档纠错、llm extras 前置、settings 下限），均不改需求语义；rubric 维度文档名错误为开工前既有文案问题，已修正并与 core 常量对齐。
+  - 执行期实现偏差与缺陷修复已记录于 Change Log（probe_base 400 化、worktree 父目录清理、rubric 维度文档纠错、settings 下限；初稿的 llm extras 前置已随评审改走 agent 执行器而取消），均不改需求语义；rubric 维度文档名错误为开工前既有文案问题，已修正并与 core 常量对齐。
 
 ## Change Log
+
+### 评审改走现有 Agent 执行器（2026-10-15，executor）
+- 类型: scope / architecture
+- 原文: 评审用独立的 provider 体系：`config.toml` 新增 `[agent_runner.evaluation.judge_presets.*]`（model / temperature / `api_key_env` / `base_url`），经 `create_chat_model` + langchain 发无工具请求，需 `llm` extra 与 API key；PRD §2 / §6 / §7 / D-02 并明确否决“复用 Agent CLI 当评审”。
+- 变更后: 评审预设**就是**执行预设（`[agent_runner.presets.*]`），不再有 judge 预设表、`create_chat_model`、provider SDK、`llm` extra 或 API key。新增 agent 调用用途 `judge`（`AGENT_PROFILE_JUDGE`）：claude / codebuddy / qoder 为 `--tools "" -p`，pi 为 `--no-tools --print`；评审经唯一进程边界 `run_agent_with_prompt(profile="judge")` 起进程，cwd 为每次新建的空临时目录，prompt 即授权预览过的 payload（逐字节一致，不加任何前后缀）。codex / kimi / opencode 没有禁用工具的开关，不声明 `judge`，评测页标“不可用”且创建 run 时 fail-fast。评审快照与执行快照同形（agent / model / reasoning_effort），漂移守卫据此核对。授权预览、hash 复核、零外发、评分与检查分列、非 `valid` 不折算 0 分、评分非门禁等语义不变。
+- 原因: 用户明确指出 keda 的定位是 agent 工具的编排，评审再引入外部 provider 体系是把事情搞复杂；且本机 CLI 认证是文件式（cc-switch），API key 路径在此机器上根本接不上，初稿的评审只能靠 mock 验证。实测（空目录里让评审读目录外 `secret.txt`）：claude / codebuddy / qoder 默认 `generate` 形态会泄露内容，加 `--tools ""` 后均读不到；codex 的 `--sandbox read-only` 只防写不防读——所以必须新增专用禁工具用途而不是复用 `generate`。
+- 影响: §10 FR-3 / FR-5 措辞随之改为评审复用执行预设与 judge 形态；`kc agent list` / `kc agent doctor --all-profiles` 多出 `judge` 一项（随包 `kedacode-operator` skill 的 setup-and-config 参考与 `docs/guides/agent-runner.md` 已同步）；Console API 的评审预设项由 provider/temperature/api_key_env 改为 agent/reasoning_effort；页面评审清单列出全部预设并标注不可用原因；`[agent_runner.evaluation]` 不再接受 `judge_presets`（功能尚未合入 main，无迁移负担）。已采集的 rv-1/rv-2/rv-3 证据（mock HTTP provider）整体作废并在同一工作树重采集：评审子进程改为 fixture 评审 CLI（`scripts/fixture_judge.py`），新增 `JUDGE_CWD_EMPTY_TEMP_DIR` 与 `JUDGE_PROMPT_SHA256_EQUALS_APPROVED_PAYLOADS` 断言，三剧本及负控全部转绿。真实 claude / codebuddy / qoder 评审仍未在证据中执行（用户 opt-in）。
+- 审核: 执行侧自证（实测隔离 → 实现 → 单测 → 三剧本重采集 → Playwright spec 复跑）；`Human-Confirmed` 两项保持未勾，请人工验收时按本条的新边界（评审由 agent CLI 以禁工具形态运行、CLI 会联系自己的模型服务）确认外发范围。
 
 ### 交付门禁 flake 修复：kc preview 僵尸误判（2026-10-13，executor）
 - 类型: test

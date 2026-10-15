@@ -38,7 +38,6 @@ from backend.engines.model_evaluation import service as evaluation_service
 from backend.infrastructure.config.agent_runner_settings_models import (
     AgentRunnerEvaluationSettings,
     AgentRunnerPresetSettings,
-    EvaluationJudgePresetSettings,
 )
 from backend.infrastructure.config.settings import AgentRunnerSettings
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
@@ -65,10 +64,9 @@ _SNAPSHOT = {
 }
 _JUDGE_SNAPSHOT = {
     "preset_name": "judge-1",
-    "model": "gpt-judge",
-    "temperature": None,
-    "api_key_env": None,
-    "base_url": None,
+    "agent": "claude",
+    "model": "model-judge",
+    "reasoning_effort": None,
 }
 
 
@@ -139,10 +137,12 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     """把执行矩阵接到 tmp store / 假 git / 记录型 Agent 与 provider 桩。"""
     store = SqliteConsoleStore(tmp_path / "console.db")
     settings = AgentRunnerSettings(
-        presets={"alpha": AgentRunnerPresetSettings(agent="codex", model="gpt-alpha")},
+        presets={
+            "alpha": AgentRunnerPresetSettings(agent="codex", model="gpt-alpha"),
+            "judge-1": AgentRunnerPresetSettings(agent="claude", model="model-judge"),
+        },
         evaluation=AgentRunnerEvaluationSettings(
             max_concurrency=1,
-            judge_presets={"judge-1": EvaluationJudgePresetSettings(model="gpt-judge")},
             default_judge_presets=["judge-1"],
         ),
     )
@@ -317,7 +317,7 @@ def test_judge_config_drift_never_sends_payload(harness: Any) -> None:
     """评审预设配置漂移：落 provider_error，绝不把 payload 发给 provider。"""
     run = _run(
         status=EvaluationRunStatus.judging.value,
-        judge_preset_snapshots=[dict(_JUDGE_SNAPSHOT, model="gpt-judge-old")],
+        judge_preset_snapshots=[dict(_JUDGE_SNAPSHOT, model="model-judge-old")],
     )
     harness.store.save_evaluation_run(run)
     result = _result_record(run.run_id)

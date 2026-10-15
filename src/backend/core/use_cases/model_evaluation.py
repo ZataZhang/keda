@@ -76,7 +76,6 @@ def build_run_snapshot(
     execution_preset_names: Sequence[str],
     judge_preset_names: Sequence[str],
     execution_presets: Mapping[str, Mapping[str, Any]],
-    judge_presets: Mapping[str, Mapping[str, Any]],
     judge_availability_probe: Callable[[str], Mapping[str, Any]],
     base_probe: Callable[[str, str], tuple[str, str]],
 ) -> EvaluationRunRecord:
@@ -86,13 +85,14 @@ def build_run_snapshot(
         suite: 已通过 :func:`parse_evaluation_suite` 的评测集。
         execution_preset_names: 用户选择的执行预设名单（≥2 才有对照意义，
             但 1 个也允许，页面负责提示）。
-        judge_preset_names: 用户选择的评审预设名单；为空表示本轮只做
-            确定性检查对照，候选完成后不进入评审授权。
+        judge_preset_names: 用户选择的评审预设名单（取自同一份执行预设清单）；
+            为空表示本轮只做确定性检查对照，候选完成后不进入评审授权。
         execution_presets: 预设名 -> 解析后的 ``(agent, model, reasoning_effort)``
-            快照字典（来自现有 agent_runner 配置，不重新定义模型目录）。
-        judge_presets: 评审预设名 -> 配置字典（model/temperature/base_url/api_key_env）。
-        judge_availability_probe: engines 注入的凭据/模型可解析性探针；返回
-            ``{"available": bool, "provider": str, "model": str, "reason": str}``。
+            快照字典（来自现有 agent_runner 配置，不重新定义模型目录）；评审预设
+            复用它，因此评审快照与执行快照同形。
+        judge_availability_probe: engines 注入的评审可用性探针（agent 是否声明
+            禁用工具的 judge 形态、CLI 是否可执行）；返回
+            ``{"available": bool, "reason": str}``。
         base_probe: engines 注入的基线探针，``(repo_path, base_ref)`` ->
             ``(commit, tree_hash)``；repo 不可达或 ref 解析失败抛 ValueError。
 
@@ -108,7 +108,7 @@ def build_run_snapshot(
     unknown_execution = [name for name in execution_preset_names if name not in execution_presets]
     if unknown_execution:
         problems.append(f"执行预设不存在: {', '.join(unknown_execution)}")
-    unknown_judge = [name for name in judge_preset_names if name not in judge_presets]
+    unknown_judge = [name for name in judge_preset_names if name not in execution_presets]
     if unknown_judge:
         problems.append(f"评审预设不存在: {', '.join(unknown_judge)}")
     matrix_cells = len(suite.cases) * len(execution_preset_names)
@@ -117,14 +117,14 @@ def build_run_snapshot(
             f"矩阵规模 {matrix_cells} 超过上限 {MAX_EVALUATION_MATRIX_CELLS}（cases × presets）"
         )
 
-    judge_probes: dict[str, Mapping[str, Any]] = {}
     for judge_name in judge_preset_names:
+        if judge_name in unknown_judge:
+            continue
         probe = judge_availability_probe(judge_name)
         if not probe.get("available"):
             problems.append(
-                f"评审预设 '{judge_name}' 不可用: {probe.get('reason') or '凭据或模型无法解析'}"
+                f"评审预设 '{judge_name}' 不可用: {probe.get('reason') or '无法作为评审'}"
             )
-        judge_probes[judge_name] = probe
 
     try:
         base_commit, base_tree_hash = base_probe(suite.repo_path, suite.base_ref)
@@ -148,11 +148,7 @@ def build_run_snapshot(
     judge_snapshots = [
         {
             "preset_name": name,
-            "model": str(judge_presets[name].get("model") or ""),
-            "temperature": judge_presets[name].get("temperature"),
-            "provider": judge_probes[name].get("provider"),
-            "api_key_env": judge_presets[name].get("api_key_env"),
-            "base_url": judge_presets[name].get("base_url"),
+            **dict(execution_presets[name]),
             "cost_status": "unknown",
         }
         for name in judge_preset_names

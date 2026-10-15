@@ -1,7 +1,7 @@
 "use client";
 
 // 评审授权对话框：预览即实际发送内容（逐字节一致），approve/deny 必须携带
-// 预览返回的 manifest hash；hash 缺失或过期时后端 409，绝不发起任何 provider 请求。
+// 预览返回的 manifest hash；hash 缺失或过期时后端 409，绝不发起任何评审调用。
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -109,8 +109,9 @@ export function ConsentPreviewDialog({
         <DialogHeader>
           <DialogTitle>评审外发授权</DialogTitle>
           <DialogDescription>
-            以下 payload 将【原样】发送给所选评审模型；未授权前不会发起任何
-            provider 请求。发送后无法由本机撤回。
+            以下 payload 将【原样】作为 prompt 交给所选评审预设对应的 agent CLI
+            （空目录、禁用工具运行，CLI 会联系其自己的模型服务）；未授权前不会发起
+            任何评审调用。发送后无法由本机撤回。
           </DialogDescription>
         </DialogHeader>
         {currentError ? (
@@ -135,6 +136,7 @@ export function ConsentPreviewDialog({
                 {currentPreview.judge_targets.map((target) => (
                   <Badge key={target.preset_name} variant="review" className="mr-1">
                     {target.preset_name}
+                    {target.agent ? ` · ${target.agent}` : ""}
                     {target.model ? ` · ${target.model}` : ""}
                   </Badge>
                 ))}

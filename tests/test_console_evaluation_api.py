@@ -1,7 +1,7 @@
 """模型评测 Console API 路由行为测试。
 
 链路走真实的 ``route → core facade → engines service → SQLite store``，
-只把外部边界（git 基线探针、后台执行/评审排程、judge 凭据探针、
+只把外部边界（git 基线探针、后台执行/评审排程、judge 可用性探针、
 payload 暂存文件）替换为可观测的桩，验证 HTTP 语义映射与授权红线：
 未 approve 之前绝不发起评审排程，hash 不符一律 409。
 """
@@ -29,7 +29,6 @@ from backend.engines.model_evaluation import workspace
 from backend.infrastructure.config.agent_runner_settings_models import (
     AgentRunnerEvaluationSettings,
     AgentRunnerPresetSettings,
-    EvaluationJudgePresetSettings,
 )
 from backend.infrastructure.config.settings import AgentRunnerSettings
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
@@ -77,11 +76,9 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         presets={
             "alpha": AgentRunnerPresetSettings(agent="codex", model="gpt-alpha"),
             "beta": AgentRunnerPresetSettings(agent="claude", model="claude-beta"),
+            "judge-1": AgentRunnerPresetSettings(agent="claude", model="model-judge"),
         },
         evaluation=AgentRunnerEvaluationSettings(
-            judge_presets={
-                "judge-1": EvaluationJudgePresetSettings(model="gpt-judge"),
-            },
             default_judge_presets=["judge-1"],
         ),
     )
@@ -90,10 +87,10 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(evaluation_service, "load_fresh_agent_runner_settings", lambda: settings)
     monkeypatch.setattr(evaluation_service, "resolve_project_root_path", lambda: project_root)
     monkeypatch.setattr(
-        evaluation_service,
-        "_probe_judge",
-        lambda preset: judge_client.JudgeAvailability(
-            available=True, provider="openai", model="gpt-judge", reason=None
+        judge_client,
+        "probe_judge_availability",
+        lambda preset_name, settings: judge_client.JudgeAvailability(
+            available=True, agent="claude", model="model-judge", reason=None
         ),
     )
     monkeypatch.setattr(
