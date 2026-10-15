@@ -28,15 +28,23 @@ exist so callers can keep using the historical
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import subprocess
 import time
 import tomllib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlsplit
 
 from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.interfaces.github_api_budget import (
+    API_KIND_GRAPHQL,
+    API_KIND_REST,
+    IGitHubApiBudget,
+)
 from backend.core.shared.models.agent_spec import AgentSpec
 from backend.infrastructure.github_helpers import (
     _GITHUB_API_RATE_LIMIT_PATTERN,
@@ -105,6 +113,63 @@ _MAX_GH_RETRIES = 3
 # Delay between retries in seconds.
 _GH_RETRY_DELAY_SECONDS = 1.0
 
+# ``gh api rate_limit`` 的资源名与额度类型的对应关系（REST 在 GitHub 那边叫 ``core``）。
+_RATE_LIMIT_RESOURCE_BY_KIND = {API_KIND_GRAPHQL: "graphql", API_KIND_REST: "core"}
+# 读不到重置时间时的保守暂停时长。
+_FALLBACK_RATE_LIMIT_PAUSE = timedelta(minutes=10)
+_RATE_LIMIT_PROBE_TIMEOUT_SECONDS = 15
+
+# ``gh api`` 里消耗下一个参数作为取值的选项；识别端点路径时要跳过它们。
+_GH_API_VALUE_OPTIONS = frozenset(
+    {
+        "-X",
+        "--method",
+        "-f",
+        "-F",
+        "--field",
+        "--raw-field",
+        "-H",
+        "--header",
+        "-q",
+        "--jq",
+        "--input",
+        "-t",
+        "--template",
+        "--cache",
+        "--hostname",
+    }
+)
+_REPO_PREFIX_PATTERN = re.compile(r"^repos/[^/]+/[^/]+/")
+
+
+def _gh_operation_label(command: Sequence[str]) -> str:
+    """把 ``gh`` 命令压成不含编号与仓库名的操作标签，用于用量账本聚合。
+
+    ``gh issue create ...`` → ``issue create``；
+    ``gh api -X GET repos/o/r/issues/12/comments`` → ``api GET issues/N/comments``。
+    """
+    if len(command) < 2 or command[0] != "gh":
+        return "other"
+    if command[1] != "api":
+        return (
+            " ".join(command[1:3])
+            if len(command) > 2 and not command[2].startswith("-")
+            else command[1]
+        )
+    method = "GET"
+    endpoint = ""
+    arguments = iter(command[2:])
+    for argument in arguments:
+        if argument in {"-X", "--method"}:
+            method = next(arguments, "GET").upper()
+        elif argument in _GH_API_VALUE_OPTIONS:
+            next(arguments, None)
+        elif not argument.startswith("-") and not endpoint:
+            endpoint = argument
+    endpoint = _REPO_PREFIX_PATTERN.sub("", endpoint.split("?", 1)[0])
+    endpoint = re.sub(r"\d+", "N", endpoint)
+    return f"api {method} {endpoint}".strip()
+
 
 def _owner_repo_from_remote_url(remote_url: str) -> str | None:
     """从 origin remote URL 提取 owner/repository，避免为 REST 路径调用 GraphQL。"""
@@ -140,15 +205,22 @@ class GitHubCliClient:
     ``backend.core.shared.interfaces.agent_runner`` via duck typing.
     """
 
-    def __init__(self, repo_path: Path, process_runner: SubprocessRunner | None = None) -> None:
+    def __init__(
+        self,
+        repo_path: Path,
+        process_runner: SubprocessRunner | None = None,
+        api_budget: IGitHubApiBudget | None = None,
+    ) -> None:
         """Create the client.
 
         Args:
             repo_path: Target repository path.
             process_runner: Optional process runner to use for gh commands.
+            api_budget: 跨进程共享的额度预算；省略时不记账也不受暂停闸门约束。
         """
         self.repo_path = repo_path
         self._runner = process_runner or SubprocessRunner()
+        self._api_budget = api_budget
         self._github_api_rate_limited: set[str] = set()
         self._owner_repo_cache: str | None = None
 
@@ -182,9 +254,61 @@ class GitHubCliClient:
             api_kind = self._github_api_kind(command)
             if api_kind is not None:
                 self._github_api_rate_limited.add(api_kind)
+                self._note_budget_exhausted(api_kind)
             raise GitHubApiRateLimitError(
                 "GitHub API rate limit exceeded; the Issue was deferred for a later poll."
             )
+
+    def _fetch_rate_limit_resources(self) -> dict[str, dict[str, object]] | None:
+        """读取 ``gh api rate_limit``；该端点本身不消耗额度，限流期间也能调用。"""
+        try:
+            probe_result = self._runner.run(
+                ["gh", "api", "rate_limit"],
+                cwd=self.repo_path,
+                check=False,
+                timeout=_RATE_LIMIT_PROBE_TIMEOUT_SECONDS,
+            )
+            if probe_result.return_code != 0:
+                return None
+            resources = json.loads(probe_result.stdout or "{}").get("resources")
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+        return resources if isinstance(resources, dict) else None
+
+    def _note_budget_exhausted(self, api_kind: str) -> None:
+        """限流时让所有进程暂停到真实重置时间；读不到时用保守的固定时长。"""
+        if self._api_budget is None:
+            return
+        resume_at = datetime.now(timezone.utc) + _FALLBACK_RATE_LIMIT_PAUSE
+        resources = self._fetch_rate_limit_resources()
+        resource = (resources or {}).get(_RATE_LIMIT_RESOURCE_BY_KIND.get(api_kind, ""))
+        if isinstance(resource, dict) and isinstance(resource.get("reset"), int):
+            resume_at = datetime.fromtimestamp(resource["reset"], tz=timezone.utc)
+        self._api_budget.record_rate_limited(api_kind, resume_at)
+
+    def _probe_budget_if_due(self) -> None:
+        """每隔一段时间（跨进程合计）免费探测一次额度，见底就提前整体暂停。"""
+        if self._api_budget is None or not self._api_budget.probe_due():
+            return
+        resources = self._fetch_rate_limit_resources()
+        if resources is None:
+            return
+        for api_kind, resource_name in _RATE_LIMIT_RESOURCE_BY_KIND.items():
+            resource = resources.get(resource_name)
+            if not isinstance(resource, dict):
+                continue
+            remaining, limit, reset = (
+                resource.get("remaining"),
+                resource.get("limit"),
+                resource.get("reset"),
+            )
+            if isinstance(remaining, int) and isinstance(limit, int) and isinstance(reset, int):
+                self._api_budget.record_probe(
+                    api_kind,
+                    remaining=remaining,
+                    limit=limit,
+                    reset_at=datetime.fromtimestamp(reset, tz=timezone.utc),
+                )
 
     def _run_with_retry(
         self,
@@ -208,8 +332,15 @@ class GitHubCliClient:
                 f"remaining {api_kind} operations were deferred."
             )
 
+        if self._api_budget is not None and api_kind is not None:
+            # 先探测再判断：探测免费，且能撤销已经过期的暂停标记。
+            self._probe_budget_if_due()
+            self._api_budget.ensure_available(api_kind)
+
         last_exc: subprocess.CalledProcessError | None = None
         for attempt in range(1, _MAX_GH_RETRIES + 1):
+            if self._api_budget is not None and api_kind is not None:
+                self._api_budget.record_call(api_kind, _gh_operation_label(command))
             try:
                 command_result = self._runner.run(
                     command,

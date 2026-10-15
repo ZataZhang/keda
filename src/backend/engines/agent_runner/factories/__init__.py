@@ -10,6 +10,7 @@ continues to re-export them for backward compatibility.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
@@ -44,6 +45,10 @@ from backend.engines.agent_runner.factory_config_builder import (
 from backend.engines.agent_runner.factory_repository_resolver import (
     resolve_repository_targets,
     resolve_repository_targets_with_diagnostics,
+)
+from backend.engines.agent_runner.persistence.github_api_budget_json import (
+    JsonGitHubApiBudget,
+    resolve_github_api_budget_path,
 )
 from backend.engines.agent_runner.persistence.loop_state_json import (
     JsonLoopStateStore,
@@ -81,6 +86,7 @@ __all__ = [
     "create_foreground_session_launcher",
     "create_github_client",
     "create_loop_clock",
+    "create_github_api_budget",
     "create_loop_state_store",
     "create_planner_runner",
     "create_preview_process_manager",
@@ -374,11 +380,34 @@ def create_event_sink(
     return _sink
 
 
+_GITHUB_API_BUDGETS: dict[Path, JsonGitHubApiBudget] = {}
+
+
+def _process_source_label() -> str:
+    """用启动命令的前两段（如 ``kc daemon``）标记本进程，作为用量账本的来源。"""
+    command_parts = [Path(sys.argv[0]).name, *sys.argv[1:2]] if sys.argv and sys.argv[0] else []
+    return " ".join(part for part in command_parts if part and not part.startswith("-"))
+
+
+def create_github_api_budget() -> JsonGitHubApiBudget:
+    """返回本进程共用的 GitHub API 额度预算（按账本路径各一个实例）。
+
+    同一进程里的所有 client 共用一个实例，计数才能攒在一起批量落盘；跨进程的
+    共享靠账本文件本身。
+    """
+    budget_path = resolve_github_api_budget_path().resolve()
+    if budget_path not in _GITHUB_API_BUDGETS:
+        _GITHUB_API_BUDGETS[budget_path] = JsonGitHubApiBudget(
+            budget_path, source=_process_source_label()
+        )
+    return _GITHUB_API_BUDGETS[budget_path]
+
+
 def create_github_client(
     repo_path: Path, process_runner: SubprocessRunner | None = None
 ) -> GitHubCliClient:
-    """Create a new GitHub CLI client instance."""
-    return GitHubCliClient(repo_path, process_runner)
+    """Create a new GitHub CLI client instance wired to the shared API budget."""
+    return GitHubCliClient(repo_path, process_runner, api_budget=create_github_api_budget())
 
 
 def create_repl_command_executor(

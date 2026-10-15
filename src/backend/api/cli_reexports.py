@@ -74,6 +74,7 @@ from backend.core.use_cases.agent_runner_factory import (  # noqa: E402,F401
 from backend.core.use_cases.agent_runner_factory import (
     create_content_generator,
     create_event_sink,
+    create_github_api_budget,
     create_github_client,
     create_loop_clock,
     create_loop_state_store,
@@ -107,6 +108,7 @@ __all__ = [
     "create_content_generator",
     "create_default_session_id",
     "create_event_sink",
+    "create_github_api_budget",
     "create_github_client",
     "create_issue_from_prd",
     "create_issue_from_prompt",

@@ -42,6 +42,7 @@ from backend.core.shared.models.agent_runner import (
     ReviewEventMarker,
     TokenUsage,
 )
+from backend.core.shared.models.pass_activity import PassActivity
 from backend.core.shared.models.publish_stage import (
     PublishStage,
 )
@@ -587,6 +588,7 @@ def run_once(
     publish_stage: PublishStage = PublishStage.NORMAL,
     aggregate_pr: bool = False,
     execution_ceiling: int | None = None,
+    pass_activity: PassActivity | None = None,
 ) -> int:
     """执行一次 Agent Runner 轮询。"""
     module = _orchestration_runtime_module()
@@ -609,5 +611,6 @@ def run_once(
             publish_stage=publish_stage,
             aggregate_pr=aggregate_pr,
             execution_ceiling=execution_ceiling,
+            pass_activity=pass_activity,
         )
     )

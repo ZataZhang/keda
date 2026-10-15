@@ -16,10 +16,19 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.interfaces.github_api_budget import IGitHubApiBudget
 from backend.core.shared.interfaces.runner_console import IBacklogStore, IRunHistoryStore
 from backend.core.shared.interfaces.loop_scheduler import ILoopClock, ILoopStateStore
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+from backend.core.shared.models.pass_activity import PassActivity
+from backend.core.use_cases.agent_daemon_pacing import (
+    IDLE_BACKOFF_MAX_FACTOR,
+    USAGE_LOG_INTERVAL_SECONDS,
+    budget_pause_sleep_seconds,
+    format_usage_summary,
+    next_poll_interval,
+)
 from backend.core.use_cases.agent_daemon_loops import (
     _AgentDaemonLoopRequest,
     AgentDaemonLoopPassRequest,
@@ -136,6 +145,8 @@ def run_agent_daemon(
     autopilot_override: bool | None = None,
     loop_state_store_factory: Callable[[], ILoopStateStore] | None = None,
     loop_clock: ILoopClock | None = None,
+    api_budget: IGitHubApiBudget | None = None,
+    idle_backoff_max_factor: int = IDLE_BACKOFF_MAX_FACTOR,
 ) -> None:
     """Run the queue poller forever across all target repositories.
 
@@ -183,6 +194,10 @@ def run_agent_daemon(
         loop_state_store_factory: 普通 agent daemon 承载的 persistent loop 状态存储工厂；
             省略时不运行 loop 阶段。
         loop_clock: 可选 agent-daemon loop 阶段使用的时钟。
+        api_budget: 跨进程共享的 GitHub API 额度预算；额度暂停期内整轮跳过轮询，
+            避免发出注定失败的请求。省略时不做额度闸门。
+        idle_backoff_max_factor: 连续空闲时轮询间隔最多拉长到基础间隔的几倍；
+            ``1`` 关闭退避。
     """
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
 
@@ -220,6 +235,8 @@ def run_agent_daemon(
                 autopilot_override=autopilot_override,
                 loop_state_store_factory=loop_state_store_factory,
                 loop_clock=loop_clock,
+                api_budget=api_budget,
+                idle_backoff_max_factor=idle_backoff_max_factor,
             )
         )
     finally:
@@ -284,6 +301,9 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     autopilot_override = request.autopilot_override
     loop_state_store_factory = request.loop_state_store_factory
     loop_clock = request.loop_clock
+    api_budget = request.api_budget
+    idle_streak = 0
+    last_usage_log_monotonic = time.monotonic()
     loop_state_store = (
         loop_state_store_factory()
         if loop_state_store_factory is not None and loop_clock is not None
@@ -292,6 +312,16 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     if loop_state_store_factory is not None and loop_clock is None:
         _logger.warning("Agent-daemon loop stage is disabled because no loop clock was provided.")
     while True:
+        pause_sleep_seconds = budget_pause_sleep_seconds(api_budget)
+        if pause_sleep_seconds > 0:
+            _logger.warning(
+                "GitHub API budget is paused; skipping this round and re-checking in %.0fs.",
+                pause_sleep_seconds,
+            )
+            time.sleep(pause_sleep_seconds)
+            continue
+        round_ready_found = 0
+        round_failed = False
         for context in contexts:
             _logger.info(
                 "Daemon pass for repository '%s' (%s).",
@@ -474,6 +504,7 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                         exc,
                     )
 
+            pass_activity = PassActivity()
             try:
                 # Phase 2: Ready issue execution.
                 run_once(
@@ -491,12 +522,28 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                     concurrency=repository_concurrency,
                     output_view=output_view,
                     execution_ceiling=execution_ceiling,
+                    pass_activity=pass_activity,
                 )
+                round_ready_found += pass_activity.ready_found
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
+                round_failed = True
                 _logger.error(
                     "Daemon pass failed for repository '%s': %s",
                     context.repo_id,
                     exc,
                 )
-        _logger.info("Sleeping for %d seconds before next poll.", interval)
-        time.sleep(interval)
+        if (
+            api_budget is not None
+            and time.monotonic() - last_usage_log_monotonic >= USAGE_LOG_INTERVAL_SECONDS
+        ):
+            last_usage_log_monotonic = time.monotonic()
+            _logger.info("GitHub API usage this hour: %s", format_usage_summary(api_budget))
+        # 有活或出错都算“不空闲”：出错时状态未知，不应该借机拉长间隔。
+        idle_streak = 0 if (round_failed or round_ready_found > 0) else idle_streak + 1
+        sleep_seconds = next_poll_interval(interval, idle_streak, request.idle_backoff_max_factor)
+        _logger.info(
+            "Sleeping for %d seconds before next poll (idle rounds: %d).",
+            sleep_seconds,
+            idle_streak,
+        )
+        time.sleep(sleep_seconds)

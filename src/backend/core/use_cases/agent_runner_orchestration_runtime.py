@@ -638,6 +638,8 @@ def run_once(request: RunOnceRequest) -> int:
         )
     else:
         ready_issues = github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
+        if request.pass_activity is not None:
+            request.pass_activity.ready_found = len(ready_issues)
 
     # 统一并发闸门：仅当调用方解析出生效上限且非定向模式时约束 ready 通道的
     # 新认领。running / blocked / cleanup 通道处理的是已在途或恢复性工作，

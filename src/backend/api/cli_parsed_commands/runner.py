@@ -755,6 +755,8 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             # loop-daemon 仍只推进默认的 loop-daemon recipe。
             loop_state_store_factory=_cli.create_loop_state_store,
             loop_clock=_cli.create_loop_clock(),
+            # 与 Monitor、CLI 共用同一份额度账本：撞限流或额度见底时全员暂停到重置。
+            api_budget=_cli.create_github_api_budget(),
         )
     finally:
         _cli.release_daemon_locks(acquired_daemon_locks)

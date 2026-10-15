@@ -308,6 +308,7 @@ from backend.api.cli_reexports import (  # noqa: E402,F401
     create_content_generator,
     create_default_session_id,
     create_event_sink,
+    create_github_api_budget,
     create_issue_from_prd,
     create_issue_from_prompt,
     create_loop_clock,

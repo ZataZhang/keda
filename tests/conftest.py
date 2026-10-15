@@ -735,3 +735,27 @@ class FakeBacklogStore(IBacklogStore):
     def write_count(self) -> int:
         """Total number of store writes (enqueue + update + clear)."""
         return len(self.enqueue_calls) + len(self.update_calls) + self.clear_calls
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_github_api_budget(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """把 GitHub API 额度账本指到临时目录，测试不会写进真实的本机状态目录。
+
+    ``create_github_client`` 现在会给每个 client 接上跨进程共享的额度账本；不隔离的话，
+    任何走工厂创建 client 的测试都可能读到（甚至写入）开发机上真实的暂停状态。
+    """
+    from backend.engines.agent_runner.persistence.github_api_budget_json import (
+        BUDGET_PATH_ENV_VAR,
+    )
+
+    previous_value = os.environ.get(BUDGET_PATH_ENV_VAR)
+    os.environ[BUDGET_PATH_ENV_VAR] = str(
+        tmp_path_factory.mktemp("github-api-budget") / "github-api-budget.json"
+    )
+    try:
+        yield
+    finally:
+        if previous_value is None:
+            os.environ.pop(BUDGET_PATH_ENV_VAR, None)
+        else:
+            os.environ[BUDGET_PATH_ENV_VAR] = previous_value

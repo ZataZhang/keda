@@ -1991,6 +1991,22 @@ Issue 队列扫描、Issue 详情/评论读取、标签和评论写入，以及 
 
 GitHub API 明确返回限流时，runner 和 supervisor 会把本轮标记为延期，不触发 Agent fallback，也不把 Issue 改成 `agent/failed`；保留当前 workflow label 与已写入的事件 marker，由下一次 daemon 轮询重试。Supervisor 结果 marker 已发布、但最终标签交接被限流时，下一轮会沿用上述 marker 对齐逻辑，不会重复调用 Supervisor。
 
+#### 跨进程共享的额度预算与用量账本
+
+所有 `gh` 调用共用同一个账号额度（GraphQL 与 REST 各 5000/小时），而 daemon、Monitor（`kc console`）、CLI 是各自独立的进程。`create_github_client` 创建的每个 client 都接上同一份账本 `<本机状态目录>/github-api-budget.json`（可用环境变量 `KC_GITHUB_API_BUDGET_PATH` 改位置），它做两件事：
+
+- **暂停闸门**：任何进程撞到限流，会立刻去 `gh api rate_limit`（该端点不消耗额度）读真实重置时间，把对应类型（GraphQL / REST 分开计）标记为暂停到那个时刻；之后**所有进程**在暂停期内都不再发该类型请求（直接抛 `GitHubApiRateLimitError`），而不是各自重试、把日志写满。每 5 分钟（跨进程合计一次）还会免费探测一次额度，剩余低于 `max(50, 5%)` 就提前整体暂停；探测到额度已充足则撤销过期的暂停标记。
+- **用量账本**：每次真实请求按 `<进程来源> <graphql|rest>:<操作>` 计数（编号与仓库名已抹掉，如 `kc daemon rest:api GET issues/N/comments`），按小时保留 24 小时。计数先攒在内存里，每 10 次或 10 秒批量落盘，所以不会成为额外的 I/O 负担。daemon 每小时记一行汇总日志 `GitHub API usage this hour: total=…; …`，列出前 8 类；因为账本是所有进程共用的，这一行反映的是整台机器本小时各来源的消耗，可以直接回答“额度被谁用掉了”。想看完整数据：`jq '.usage' <账本路径>`。
+
+写入账本时持有旁路 `.lock` 的排他锁并在持锁后重新读盘合并，多个进程同时记账不会互相覆盖。
+
+#### daemon 的额度暂停与空闲退避
+
+- **暂停期整轮跳过**：账本处于暂停期时，daemon 不再发起本轮轮询（日志 `GitHub API budget is paused; skipping this round`），睡到暂停结束（单次最多 5 分钟，之后重新检查，因为别的进程的探测可能已让额度提前恢复）。
+- **空闲退避**：连续 2 个轮次没有读到任何 ready Issue 之后，轮询间隔每多一个空闲轮次翻倍，最多拉长到基础 `--interval` 的 4 倍（默认 120 秒 → 最长 480 秒）；一旦读到 ready Issue、或某轮出错，立即恢复基础间隔。退避的代价是新打上 `agent/ready` 的 Issue 最长要多等几分钟才会被认领，loop 的到期触发同理；`run_agent_daemon(idle_backoff_max_factor=1)` 可关闭退避。
+
+> **常驻 daemon 升级后必须重启**：daemon 在启动时一次性加载代码。本页描述的 REST 化读取、暂停闸门与退避，只对**重启之后**的进程生效；长期不重启的旧 daemon 会继续用旧的 GraphQL `gh issue list` 轮询，那正是此前持续限流的主因。
+
 Supervisor 结果评论会把自身写入后的 Issue comment 数量记录进 marker，
 因此 runner 自己写出的 `Agent Runner Post-PR Supervisor` 评论不会触发下一轮重审。
 

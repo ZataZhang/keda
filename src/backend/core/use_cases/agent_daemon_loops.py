@@ -13,6 +13,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.interfaces.github_api_budget import IGitHubApiBudget
 from backend.core.shared.interfaces.loop_scheduler import ILoopClock, ILoopStateStore
 from backend.core.shared.interfaces.runner_console import IBacklogStore, IRunHistoryStore
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
@@ -48,6 +49,8 @@ class _AgentDaemonLoopRequest:
     autopilot_override: bool | None
     loop_state_store_factory: Callable[[], ILoopStateStore] | None
     loop_clock: ILoopClock | None
+    api_budget: IGitHubApiBudget | None
+    idle_backoff_max_factor: int
 
 
 @dataclass(frozen=True)

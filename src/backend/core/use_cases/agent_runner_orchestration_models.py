@@ -13,6 +13,7 @@ from backend.core.shared.interfaces.agent_runner import (
 from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.pass_activity import PassActivity
 from backend.core.shared.models.publish_stage import PublishStage
 
 
@@ -61,3 +62,5 @@ class RunOnceRequest:
     #: 闸门——人显式点名的路径（``kc run --issue`` / 控制台单PRD 开始）保持全量。
     #: running / blocked / cleanup 通道是恢复性处理，不新增并发，不受该值约束。
     execution_ceiling: int | None = None
+    #: daemon 传入的活动信号：``run_once`` 读到 ready 队列后回填数量，daemon 据此判断空闲。
+    pass_activity: PassActivity | None = None
