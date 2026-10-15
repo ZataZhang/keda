@@ -31,11 +31,12 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.interfaces.loop_scheduler import ILoopClock
+from backend.core.shared.interfaces.loop_scheduler import ILoopClock, ILoopStateStore
 from backend.core.shared.models.agent_runner import LabelConfig
 from backend.core.shared.models.loop import (
     LoopFireResult,
     LoopFireStatus,
+    LoopManager,
     LoopTask,
 )
 from backend.core.use_cases.create_issue_from_prd import (
@@ -48,7 +49,10 @@ from backend.core.use_cases.loop_recipe import (
     render_loop_recipe,
     render_loop_recipe_title,
 )
-from backend.core.use_cases.loop_scheduler import compute_next_fire
+from backend.core.use_cases.loop_scheduler import (
+    compute_next_fire,
+    localize_loop_datetime,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -127,6 +131,104 @@ def _issue_already_exists(
         )
         return False
     return any(day_token in issue.title for issue in issues)
+
+
+def _active_loop_issue_reason(
+    github_client: IGitHubClient,
+    *,
+    loop_id: str,
+    labels_config: LabelConfig,
+    limit: int = 50,
+) -> str | None:
+    """判断 agent-daemon loop 是否仍有未完成的开放 Issue。
+
+    该判断采用 fail-closed：开放 Issue 没有已知终态标签时也视为活动中，避免
+    新增 runner 状态或读取不完整时产生重叠的每日任务。
+
+    Args:
+        github_client: 用于查询 loop Issue 的 GitHub 客户端。
+        loop_id: loop 标识，对应 ``loop/<id>`` 标签。
+        labels_config: runner 工作流标签配置。
+        limit: 最多检查的开放 Issue 数量。
+
+    Returns:
+        需要暂停时返回人读原因；没有活动 Issue 时返回 ``None``。
+
+    Raises:
+        RuntimeError: 无法安全读取 GitHub 状态时抛出。
+    """
+    label = f"loop/{loop_id}"
+    try:
+        issues = github_client.list_issues_by_label(label, limit, state="open")
+    except Exception as exc:  # noqa: BLE001 - pausing is safer than overlap.
+        raise RuntimeError(
+            f"Could not inspect active Issues for loop {loop_id!r}; fire paused."
+        ) from exc
+
+    active_labels = (
+        labels_config.ready,
+        labels_config.running,
+        labels_config.supervising,
+        labels_config.failed,
+        labels_config.blocked,
+        labels_config.waiting,
+        labels_config.validation_pending,
+        labels_config.rework_prd,
+        labels_config.deliberate,
+    )
+    terminal_labels = {labels_config.review, labels_config.human_review}
+    for issue in issues:
+        issue_labels = set(issue.labels)
+        matched_active_label = next(
+            (label_name for label_name in active_labels if label_name in issue_labels),
+            None,
+        )
+        if matched_active_label is not None:
+            return f"open Issue #{issue.number} has active label {matched_active_label!r}"
+        if not issue_labels.intersection(terminal_labels):
+            return f"open Issue #{issue.number} has no terminal runner label"
+    return None
+
+
+def _skip_when_reason(skip_when: str | None, variables: dict[str, str]) -> str | None:
+    """按 ``pre_command`` 变量求值 ``skip_when``，命中时返回人读原因。
+
+    条件形如 ``KEY=value1,value2``：变量存在且取值在列表内才算命中；变量缺失
+    视为不命中（fail-open），避免前置命令异常时悄悄吞掉本次触发。
+
+    Args:
+        skip_when: recipe 声明的跳过条件；为空表示不跳过。
+        variables: ``pre_command`` 注入的模板变量。
+
+    Returns:
+        命中时的原因文本；否则 ``None``。
+    """
+    if not skip_when:
+        return None
+    variable_name, _, raw_values = skip_when.partition("=")
+    variable_name = variable_name.strip()
+    allowed_values = {value.strip() for value in raw_values.split(",")}
+    actual_value = variables.get(variable_name)
+    if actual_value is not None and actual_value.strip() in allowed_values:
+        return f"skip_when {skip_when!r} matched ({variable_name}={actual_value.strip()})"
+    return None
+
+
+def _persist_skip_reason(
+    state_store: ILoopStateStore,
+    task: LoopTask,
+    *,
+    reason: str,
+    next_fire_at: str | None = None,
+) -> None:
+    """记录本次未造票的原因；内容没变化时不写状态文件，避免每轮重写。"""
+    updated = replace(
+        task,
+        last_skip_reason=reason,
+        next_fire_at=next_fire_at if next_fire_at is not None else task.next_fire_at,
+    )
+    if updated != task:
+        state_store.upsert_task(updated)
 
 
 # ---------------------------------------------------------------------------
@@ -215,9 +317,36 @@ def fire_loop(
         ValueError: When the recipe is malformed.
     """
     recipe = parse_loop_recipe(task.recipe_path)
-    fire_at = clock.now().astimezone(timezone.utc)
+    effective_timezone_name = task.timezone_name or recipe.timezone_name
+    fire_at_utc = clock.now().astimezone(timezone.utc)
+    fire_at = localize_loop_datetime(
+        fire_at_utc,
+        timezone_name=effective_timezone_name,
+    )
     day_token = fire_at.strftime("%Y-%m-%d")
     effective_labels = labels_config or LabelConfig()
+
+    prd_path = build_prd_path(
+        repo_path,
+        loop_id=task.slug or task.id,
+        priority=task.priority,
+        fire_at=fire_at,
+    )
+
+    if not dry_run and task.managed_by == LoopManager.AGENT_DAEMON.value:
+        active_reason = _active_loop_issue_reason(
+            github_client,
+            loop_id=task.id,
+            labels_config=effective_labels,
+        )
+        if active_reason is not None:
+            _persist_skip_reason(state_store, task, reason=active_reason)
+            return LoopFireResult(
+                loop_id=task.id,
+                status=LoopFireStatus.SKIPPED_ACTIVE,
+                skipped_reason=active_reason,
+                next_fire_at=task.next_fire_at,
+            )
 
     extra_variables: dict[str, str] = {}
     if task.pre_command:
@@ -225,6 +354,27 @@ def fire_loop(
             task.pre_command,
             cwd=task.recipe_path.parent,
             process_runner=process_runner,
+        )
+
+    skip_reason = _skip_when_reason(task.skip_when, extra_variables)
+    if skip_reason is not None:
+        next_skip_dt = compute_next_fire(
+            task.schedule,
+            after=fire_at_utc,
+            timezone_name=effective_timezone_name,
+        )
+        if not dry_run:
+            _persist_skip_reason(
+                state_store,
+                task,
+                reason=skip_reason,
+                next_fire_at=next_skip_dt.isoformat(),
+            )
+        return LoopFireResult(
+            loop_id=task.id,
+            status=LoopFireStatus.DRY_RUN if dry_run else LoopFireStatus.SKIPPED_CONDITION,
+            skipped_reason=(f"Would skip: {skip_reason}" if dry_run else skip_reason),
+            next_fire_at=next_skip_dt.isoformat(),
         )
 
     rendered_body = render_loop_recipe(
@@ -238,15 +388,12 @@ def fire_loop(
         extra_variables=extra_variables,
     )
     issue_title = rendered_title or recipe.id
-    prd_path = build_prd_path(
-        repo_path,
-        loop_id=task.slug or task.id,
-        priority=task.priority,
-        fire_at=fire_at,
-    )
-
     if dry_run:
-        next_fire_dt = compute_next_fire(task.schedule, after=fire_at)
+        next_fire_dt = compute_next_fire(
+            task.schedule,
+            after=fire_at_utc,
+            timezone_name=effective_timezone_name,
+        )
         return LoopFireResult(
             loop_id=task.id,
             status=LoopFireStatus.DRY_RUN,
@@ -268,10 +415,14 @@ def fire_loop(
         loop_id=task.id,
         day_token=day_token,
     ):
-        next_fire_dt = compute_next_fire(task.schedule, after=fire_at)
+        next_fire_dt = compute_next_fire(
+            task.schedule,
+            after=fire_at_utc,
+            timezone_name=effective_timezone_name,
+        )
         updated = replace(
             task,
-            last_fire_at=fire_at.isoformat(),
+            last_fire_at=fire_at_utc.isoformat(),
             next_fire_at=next_fire_dt.isoformat(),
         )
         state_store.upsert_task(updated)
@@ -323,12 +474,17 @@ def fire_loop(
         else:
             github_client.edit_issue_labels(issue_number, add=extra_labels)
 
-    next_fire_dt = compute_next_fire(task.schedule, after=fire_at)
+    next_fire_dt = compute_next_fire(
+        task.schedule,
+        after=fire_at_utc,
+        timezone_name=effective_timezone_name,
+    )
     updated = replace(
         task,
-        last_fire_at=fire_at.isoformat(),
+        last_fire_at=fire_at_utc.isoformat(),
         next_fire_at=next_fire_dt.isoformat(),
         fire_count=task.fire_count + 1,
+        last_skip_reason=None,
     )
     state_store.upsert_task(updated)
 

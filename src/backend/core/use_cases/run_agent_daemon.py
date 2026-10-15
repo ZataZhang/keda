@@ -17,8 +17,14 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.interfaces.runner_console import IBacklogStore, IRunHistoryStore
+from backend.core.shared.interfaces.loop_scheduler import ILoopClock, ILoopStateStore
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+from backend.core.use_cases.agent_daemon_loops import (
+    _AgentDaemonLoopRequest,
+    AgentDaemonLoopPassRequest,
+    run_agent_daemon_loop_pass,
+)
 from backend.core.use_cases import agent_runner_reconcile
 from backend.core.use_cases.agent_runner_orchestrate import (
     process_prd_rework_issues,
@@ -128,6 +134,8 @@ def run_agent_daemon(
     reclaim_ttl_seconds: int | None = None,
     backlog_store_factory: Callable[[], IBacklogStore] | None = None,
     autopilot_override: bool | None = None,
+    loop_state_store_factory: Callable[[], ILoopStateStore] | None = None,
+    loop_clock: ILoopClock | None = None,
 ) -> None:
     """Run the queue poller forever across all target repositories.
 
@@ -172,6 +180,9 @@ def run_agent_daemon(
             未传旗标，每轮热读配置。该覆盖**不**影响 review 侧合并队列：
             全仓自动合并仍由 ``safety.auto_merge`` + ``autopilot.enabled`` 双开关决定；
             单 PRD 授权不依赖此 Backlog 调度覆盖。
+        loop_state_store_factory: 普通 agent daemon 承载的 persistent loop 状态存储工厂；
+            省略时不运行 loop 阶段。
+        loop_clock: 可选 agent-daemon loop 阶段使用的时钟。
     """
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
 
@@ -188,24 +199,28 @@ def run_agent_daemon(
 
     try:
         _run_daemon_loop(
-            contexts=contexts,
-            interval=interval,
-            agent=agent,
-            max_issues=max_issues,
-            process_runner=process_runner,
-            github_client_factory=github_client_factory,
-            content_generator_factory=content_generator_factory,
-            run_history_store=run_history_store,
-            run_trigger=run_trigger,
-            max_prd_issues=max_prd_issues,
-            transcript_runner_factory=transcript_runner_factory,
-            max_deliberation_issues=max_deliberation_issues,
-            concurrency=concurrency,
-            output_view=output_view,
-            reconcile_stale_attempts=reconcile_stale_attempts,
-            reclaim_ttl_seconds=reclaim_ttl_seconds,
-            backlog_store_factory=backlog_store_factory,
-            autopilot_override=autopilot_override,
+            _AgentDaemonLoopRequest(
+                contexts=contexts,
+                interval=interval,
+                agent=agent,
+                max_issues=max_issues,
+                process_runner=process_runner,
+                github_client_factory=github_client_factory,
+                content_generator_factory=content_generator_factory,
+                run_history_store=run_history_store,
+                run_trigger=run_trigger,
+                max_prd_issues=max_prd_issues,
+                transcript_runner_factory=transcript_runner_factory,
+                max_deliberation_issues=max_deliberation_issues,
+                concurrency=concurrency,
+                output_view=output_view,
+                reconcile_stale_attempts=reconcile_stale_attempts,
+                reclaim_ttl_seconds=reclaim_ttl_seconds,
+                backlog_store_factory=backlog_store_factory,
+                autopilot_override=autopilot_override,
+                loop_state_store_factory=loop_state_store_factory,
+                loop_clock=loop_clock,
+            )
         )
     finally:
         try:
@@ -247,28 +262,35 @@ def _resolve_reconcile_settings(
     return enabled, ttl_seconds
 
 
-def _run_daemon_loop(
-    *,
-    contexts: list[RepositoryRunContext],
-    interval: int,
-    agent: str,
-    max_issues: int,
-    process_runner: IProcessRunner,
-    github_client_factory: Callable[[Path], IGitHubClient],
-    content_generator_factory: Callable[[Path], IContentGenerator] | None = None,
-    run_history_store: IRunHistoryStore | None = None,
-    run_trigger: str = "cli_daemon",
-    max_prd_issues: int = 1,
-    transcript_runner_factory: Callable[[Path], IAgentTranscriptRunner] | None = None,
-    max_deliberation_issues: int = 1,
-    concurrency: int | None = None,
-    output_view: IRunnerLiveView | None = None,
-    reconcile_stale_attempts: bool = False,
-    reclaim_ttl_seconds: int | None = None,
-    backlog_store_factory: Callable[[], IBacklogStore] | None = None,
-    autopilot_override: bool | None = None,
-) -> None:
+def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     """daemon 主循环（由 :func:`run_agent_daemon` 包装信号钩子后调用）。"""
+    contexts = request.contexts
+    interval = request.interval
+    agent = request.agent
+    max_issues = request.max_issues
+    process_runner = request.process_runner
+    github_client_factory = request.github_client_factory
+    content_generator_factory = request.content_generator_factory
+    run_history_store = request.run_history_store
+    run_trigger = request.run_trigger
+    max_prd_issues = request.max_prd_issues
+    transcript_runner_factory = request.transcript_runner_factory
+    max_deliberation_issues = request.max_deliberation_issues
+    concurrency = request.concurrency
+    output_view = request.output_view
+    reconcile_stale_attempts = request.reconcile_stale_attempts
+    reclaim_ttl_seconds = request.reclaim_ttl_seconds
+    backlog_store_factory = request.backlog_store_factory
+    autopilot_override = request.autopilot_override
+    loop_state_store_factory = request.loop_state_store_factory
+    loop_clock = request.loop_clock
+    loop_state_store = (
+        loop_state_store_factory()
+        if loop_state_store_factory is not None and loop_clock is not None
+        else None
+    )
+    if loop_state_store_factory is not None and loop_clock is None:
+        _logger.warning("Agent-daemon loop stage is disabled because no loop clock was provided.")
     while True:
         for context in contexts:
             _logger.info(
@@ -282,6 +304,35 @@ def _run_daemon_loop(
                 if content_generator_factory is not None
                 else None
             )
+
+            # Agent-daemon loop 在普通队列阶段前推进：本轮刚创建的 Issue 可以
+            # 直接进入 Phase 2，daemon 停止期间则不会产生下一轮 loop Issue。
+            if loop_state_store is not None and loop_clock is not None:
+                try:
+                    loop_outcomes = run_agent_daemon_loop_pass(
+                        AgentDaemonLoopPassRequest(
+                            repo_id=context.repo_id,
+                            repo_path=context.repo_path,
+                            state_store=loop_state_store,
+                            github_client=github_client,
+                            process_runner=process_runner,
+                            clock=loop_clock,
+                            content_generator=content_generator,
+                            labels_config=context.config.labels,
+                        )
+                    )
+                    if loop_outcomes:
+                        _logger.info(
+                            "Agent-daemon loop pass for '%s': %s",
+                            context.repo_id,
+                            ", ".join(f"{loop_id}={status}" for loop_id, status in loop_outcomes),
+                        )
+                except Exception as exc:  # noqa: BLE001 - daemon must survive loop faults.
+                    _logger.error(
+                        "Agent-daemon loop phase failed for repository '%s': %s",
+                        context.repo_id,
+                        exc,
+                    )
 
             # Phase -1: 崩溃对账。daemon 被 SIGKILL / 崩溃 / 关机打断时，Issue 会
             # 停在 agent/running 而无人回收。这里扫描本机认领、认领进程已死（或

@@ -79,10 +79,13 @@ def _format_task_row(task: LoopTask) -> str:
     schedule = f"{task.schedule.kind.value}:{task.schedule.expression}"
     enabled = "yes" if task.enabled else "no"
     next_fire = format_local_display_time(task.next_fire_at) or "—"
-    return (
+    row_text = (
         f"{task.id:<24} {task.repo_id:<24} {schedule:<28} "
         f"enabled={enabled:<3} next_fire={next_fire}"
     )
+    if task.last_skip_reason:
+        row_text += f"\n{'':<24} ↳ 最近未造票: {task.last_skip_reason}"
+    return row_text
 
 
 def _print_loop_table(tasks: list[LoopTask]) -> None:
@@ -366,6 +369,16 @@ def run_loop_run_now_command(
         print(
             f"Loop '{result.loop_id}' skipped: {result.skipped_reason} "
             f"PRD={result.relative_prd_path}, "
+            f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
+        )
+    elif result.status.value == "skipped_condition":
+        print(
+            f"Loop '{result.loop_id}' skipped: {result.skipped_reason} "
+            f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
+        )
+    elif result.status.value == "skipped_active":
+        print(
+            f"Loop '{result.loop_id}' paused: {result.skipped_reason} "
             f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
         )
     else:  # dry_run

@@ -751,6 +751,10 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             # --autopilot/--no-autopilot 的按次覆盖（None = 未传，热读配置）。
             backlog_store_factory=_cli.create_backlog_store,
             autopilot_override=getattr(ctx.parsed, "autopilot_override", None),
+            # 普通 daemon 承载 managed_by=agent-daemon 的 persistent loop；
+            # loop-daemon 仍只推进默认的 loop-daemon recipe。
+            loop_state_store_factory=_cli.create_loop_state_store,
+            loop_clock=_cli.create_loop_clock(),
         )
     finally:
         _cli.release_daemon_locks(acquired_daemon_locks)

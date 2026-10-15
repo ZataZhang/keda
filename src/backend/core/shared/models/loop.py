@@ -29,6 +29,13 @@ class LoopScheduleKind(str, Enum):
     INTERVAL = "interval"
 
 
+class LoopManager(str, Enum):
+    """Loop 的常驻推进者。"""
+
+    LOOP_DAEMON = "loop-daemon"
+    AGENT_DAEMON = "agent-daemon"
+
+
 _INTERVAL_PATTERN = re.compile(r"^(?P<value>\d+)(?P<unit>[mhd])$")
 
 
@@ -109,6 +116,8 @@ class LoopRecipe:
         pre_command: Optional shell command whose ``KEY=value`` stdout lines are
             injected as template variables before rendering.
         timezone_name: Optional IANA timezone name for cron scheduling.
+        managed_by: 推进该 loop 的常驻 daemon。
+        skip_when: 触发前的跳过条件 ``KEY=value[,value]``，按 ``pre_command`` 注入的变量求值。
         priority: PRD priority tag used in the generated filename
             (``P0`` / ``P1`` / ``P2`` / ``P3``).
         slug: Optional short slug for the generated PRD filename. Defaults to
@@ -123,6 +132,8 @@ class LoopRecipe:
     issue_type: str = "feature"
     agent: str = "auto"
     labels: tuple[str, ...] = ()
+    managed_by: str = field(default=LoopManager.LOOP_DAEMON.value, kw_only=True)
+    skip_when: str | None = field(default=None, kw_only=True)
     publish_prd: bool = True
     queue_ready: bool = True
     run_now: bool = False
@@ -185,6 +196,10 @@ class LoopTask:
         run_now: Whether to invoke the runner immediately after Issue creation.
         pre_command: Optional pre-fire shell command.
         timezone_name: Optional IANA timezone name for cron schedules.
+        managed_by: 推进该任务的常驻 daemon。
+        skip_when: 触发前的跳过条件，语义同 :class:`LoopRecipe`。
+        last_skip_reason: 最近一次未造票的原因（活动 Issue 暂停 / 条件跳过）；
+            成功触发后清空，供 ``kc loop list`` 展示。
     """
 
     id: str
@@ -203,6 +218,9 @@ class LoopTask:
     agent: str = "auto"
     labels: tuple[str, ...] = ()
     publish_prd: bool = True
+    managed_by: str = field(default=LoopManager.LOOP_DAEMON.value, kw_only=True)
+    skip_when: str | None = field(default=None, kw_only=True)
+    last_skip_reason: str | None = field(default=None, kw_only=True)
     queue_ready: bool = True
     run_now: bool = False
     pre_command: str | None = None
@@ -219,6 +237,8 @@ class LoopFireStatus(str, Enum):
 
     FIRED = "fired"
     SKIPPED_DUPLICATE = "skipped_duplicate"
+    SKIPPED_ACTIVE = "skipped_active"
+    SKIPPED_CONDITION = "skipped_condition"
     DRY_RUN = "dry_run"
 
 

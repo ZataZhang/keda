@@ -15,13 +15,21 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - 非 POSIX 平台退化为无锁
+    fcntl = None  # type: ignore[assignment]
+
 from backend.core.shared.interfaces.loop_scheduler import ILoopStateStore
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.loop import (
+    LoopManager,
     LoopSchedule,
     LoopScheduleKind,
     LoopTask,
@@ -79,6 +87,9 @@ def _task_from_dict(payload: dict[str, Any]) -> LoopTask:
         run_now=bool(payload.get("run_now", False)),
         pre_command=payload.get("pre_command"),
         timezone_name=payload.get("timezone_name"),
+        managed_by=str(payload.get("managed_by", LoopManager.LOOP_DAEMON.value)),
+        skip_when=payload.get("skip_when"),
+        last_skip_reason=payload.get("last_skip_reason"),
     )
 
 
@@ -108,6 +119,9 @@ def _task_to_dict(task: LoopTask) -> dict[str, Any]:
         "run_now": task.run_now,
         "pre_command": task.pre_command,
         "timezone_name": task.timezone_name,
+        "managed_by": task.managed_by,
+        "skip_when": task.skip_when,
+        "last_skip_reason": task.last_skip_reason,
     }
 
 
@@ -120,9 +134,10 @@ class JsonLoopStateStore(ILoopStateStore):
     """Persist loops to a JSON file under ``<local state directory>/loop-state.json``.
 
     The store keeps an in-memory cache that is lazily populated on first
-    access and refreshed by :meth:`load`. Concurrent writers are tolerated
-    only at the granularity of full-file replacement; the MVP warns about
-    this in the user-facing guide.
+    access and refreshed by :meth:`load`. 写入（upsert / delete）持有旁路
+    ``.lock`` 文件的 ``flock``，并在持锁后重新读盘再合并，所以 loop-daemon 与
+    普通 daemon 同时推进各自的 loop 也不会互相覆盖对方的更新；没有 ``fcntl``
+    的平台退化为整文件替换。
     """
 
     def __init__(self, state_path: Path | None = None) -> None:
@@ -182,20 +197,38 @@ class JsonLoopStateStore(ILoopStateStore):
         self._ensure_loaded()
         return self._tasks_by_id.get(loop_id)
 
+    @contextmanager
+    def _write_lock(self) -> Iterator[None]:
+        """持有状态文件的排他锁；平台不支持 ``fcntl`` 时不加锁。"""
+        if fcntl is None:
+            yield
+            return
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self._state_path.with_suffix(self._state_path.suffix + ".lock")
+        with open(lock_path, "a", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
     def upsert_task(self, task: LoopTask) -> None:
         """Insert or replace the task entry and persist to disk."""
-        self._ensure_loaded()
-        self._tasks_by_id[task.id] = task
-        self._flush()
+        with self._write_lock():
+            # 持锁后重新读盘：别的进程在我们缓存之后写过的其他 loop 不能被覆盖掉。
+            self.load()
+            self._tasks_by_id[task.id] = task
+            self._flush()
 
     def delete_task(self, loop_id: str) -> bool:
         """Remove a task by id, returning whether anything was removed."""
-        self._ensure_loaded()
-        removed = self._tasks_by_id.pop(loop_id, None)
-        if removed is None:
-            return False
-        self._flush()
-        return True
+        with self._write_lock():
+            self.load()
+            removed = self._tasks_by_id.pop(loop_id, None)
+            if removed is None:
+                return False
+            self._flush()
+            return True
 
     def _flush(self) -> None:
         """Write the in-memory cache to disk atomically."""

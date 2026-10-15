@@ -45,6 +45,7 @@ repo_id: keda-main
     assert recipe.publish_prd is True
     assert recipe.queue_ready is True
     assert recipe.run_now is False
+    assert recipe.managed_by == "loop-daemon"
     assert recipe.default_labels() == ("loop/github-trending",)
 
 
@@ -67,6 +68,7 @@ priority: P1
 slug: hourly-trending
 pre_command: echo "ready=ok"
 timezone: UTC
+managed_by: agent-daemon
 ---
 
 Body
@@ -85,6 +87,7 @@ Body
     assert recipe.slug == "hourly-trending"
     assert recipe.pre_command == 'echo "ready=ok"'
     assert recipe.timezone_name == "UTC"
+    assert recipe.managed_by == "agent-daemon"
     assert recipe.effective_slug() == "hourly-trending"
     assert recipe.all_labels() == ("loop/hourly", "area/docs", "priority/high")
 
@@ -145,6 +148,21 @@ issue_type: typo
 """,
     )
     with pytest.raises(ValueError, match="issue_type"):
+        parse_loop_recipe(recipe_path)
+
+
+def test_parse_loop_recipe_invalid_manager_raises(tmp_path: Path) -> None:
+    recipe_path = _write_recipe(
+        tmp_path,
+        """---
+id: invalid-manager
+schedule: 0 8 * * *
+repo_id: keda-main
+managed_by: unknown-daemon
+---
+""",
+    )
+    with pytest.raises(ValueError, match="managed_by"):
         parse_loop_recipe(recipe_path)
 
 
@@ -284,3 +302,19 @@ Body
         source_path=tmp_path / "t.md",
     )
     assert recipe.source_path == tmp_path / "t.md"
+
+
+def test_recipe_skip_when_is_parsed_and_validated(tmp_path: Path) -> None:
+    """skip_when 形如 KEY=v1,v2；格式不对在解析期报错。"""
+    from backend.core.use_cases.loop_recipe import parse_loop_recipe_text
+
+    base_text = '---\nid: demo\nschedule: "0 1 * * *"\nrepo_id: r\n{extra}---\n\nbody\n'
+    recipe = parse_loop_recipe_text(
+        base_text.format(extra="skip_when: last_ci_status=success,none\n"),
+        source_path=tmp_path / "demo.md",
+    )
+    assert recipe.skip_when == "last_ci_status=success,none"
+    with pytest.raises(ValueError, match="skip_when"):
+        parse_loop_recipe_text(
+            base_text.format(extra="skip_when: nonsense\n"), source_path=tmp_path / "demo.md"
+        )
