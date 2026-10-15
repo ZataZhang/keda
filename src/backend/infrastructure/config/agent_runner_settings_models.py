@@ -22,6 +22,9 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_KEYS,
     normalize_lifecycle_agent_value,
 )
+from backend.infrastructure.github_models import LabelConfig as GitHubLabelConfig
+
+_GITHUB_LABEL_DEFAULTS = GitHubLabelConfig()
 
 
 class AgentRunnerLifecycleAgentsSettings(BaseModel):
@@ -95,15 +98,16 @@ class AgentRunnerLabelSettings(BaseModel):
     提供（FR-12：既有仓库的这三个键继续生效，优先级与今天一致）。
     """
 
-    ready: str = "agent/ready"
-    running: str = "agent/running"
-    supervising: str = "agent/supervising"
-    review: str = "agent/review"
-    failed: str = "agent/failed"
-    blocked: str = "agent/blocked"
-    waiting: str = "agent/waiting"
-    validation_pending: str = "validation/pending"
-    validation_passed: str = "validation/passed"
+    ready: str = _GITHUB_LABEL_DEFAULTS.ready
+    running: str = _GITHUB_LABEL_DEFAULTS.running
+    supervising: str = _GITHUB_LABEL_DEFAULTS.supervising
+    review: str = _GITHUB_LABEL_DEFAULTS.review
+    human_review: str = _GITHUB_LABEL_DEFAULTS.human_review
+    failed: str = _GITHUB_LABEL_DEFAULTS.failed
+    blocked: str = _GITHUB_LABEL_DEFAULTS.blocked
+    waiting: str = _GITHUB_LABEL_DEFAULTS.waiting
+    validation_pending: str = _GITHUB_LABEL_DEFAULTS.validation_pending
+    validation_passed: str = _GITHUB_LABEL_DEFAULTS.validation_passed
     verifier_passed: str = "validation/verifier-passed"
     codex: str | None = None
     claude: str | None = None
@@ -111,6 +115,7 @@ class AgentRunnerLabelSettings(BaseModel):
     rework_prd: str = "agent/rework-prd"
     deliberate: str = "agent/deliberate"
     direct_pr: str = "direct-pr"
+    auto_merge: str = _GITHUB_LABEL_DEFAULTS.auto_merge
     prd_auto_merge: str = "prd-auto-merge"
 
     def legacy_agent_label_overrides(self) -> dict[str, str]:
@@ -458,12 +463,13 @@ class AgentRunnerAutopilotSettings(BaseModel):
 
     全仓自动合并仍要求本段 ``enabled`` 与
     ``AgentRunnerSafetySettings.auto_merge`` 同时为真。若 ``auto_merge`` 关闭，
-    合并队列只处理显式带 ``prd-auto-merge`` 标签的单个 PRD；本段 ``enabled``
-    对两种路径都是必要条件。这保留了对早前误设 ``safety.auto_merge = true``
+    合并队列只处理显式带 ``auto-merge`` 或 ``prd-auto-merge`` 标签的 Issue；本段
+    ``enabled`` 对全局与两种 Issue 级路径都是必要条件。这保留了对早前误设
+    ``safety.auto_merge = true``
     的防呆保险。
 
     Attributes:
-        enabled: 主开关；为 ``False`` 时合并队列整段 no-op，包括单 PRD 授权项。
+        enabled: 主开关；为 ``False`` 时合并队列整段 no-op，包括 Issue 级标签授权。
         merge_method: 唯一接受的合并方式：``"squash"``；其它值在配置加载期
             由 :class:`AgentRunnerAutopilotSettings` 的 field_validator 拒
             绝。这是用户锁定的设计决策——单提交便于 ``git revert`` 回退。

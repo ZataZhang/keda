@@ -14,9 +14,9 @@ import re
 from typing import TYPE_CHECKING
 
 from backend.infrastructure.github_models import (
-    PullRequestSummary,
     _BODY_TRUNCATION_MARKER,
     _MAX_GITHUB_BODY_LENGTH,
+    PullRequestSummary,
 )
 
 if TYPE_CHECKING:
@@ -51,6 +51,14 @@ _RETRYABLE_GH_ERROR_PATTERNS = (
     # 掩盖真正的请求错误。
     re.compile(r"non-200 OK status code:\s*400.*Whoa there!", re.IGNORECASE | re.DOTALL),
 )
+
+_GITHUB_API_RATE_LIMIT_PATTERN = re.compile(
+    r"(?:api\s+rate\s+limit(?:\s+\w+){0,3}\s+exceeded|"
+    r"secondary\s+rate\s+limit|rate\s+limit\s+exceeded|abuse detection|"
+    r"HTTP\s+429|non-200 OK status code:\s*429|429\s+Too Many Requests)",
+    re.IGNORECASE,
+)
+
 
 #: Extracts the numeric comment ID from a GitHub issue comment URL.
 _COMMENT_ID_URL_PATTERN = re.compile(r"/issues/(?:\d+)#issuecomment-(\d+)")
@@ -254,6 +262,7 @@ def _aggregate_status_check_rollup(
 
 __all__ = [
     "_CHECK_FAILURE_STATES",
+    "_GITHUB_API_RATE_LIMIT_PATTERN",
     "_RETRYABLE_GH_ERROR_PATTERNS",
     "_STATE_ORDER",
     "_aggregate_status_check_rollup",

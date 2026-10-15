@@ -516,13 +516,16 @@ def test_format_failure_comment_transition_to_review_recovery() -> None:
             "edit",
             "99",
             "--add-label",
-            "agent/review",
+            "agent/automated-review-passed",
             "--remove-label",
             "agent/supervising",
         ],
     )
     body = format_failure_comment(exc, issue_number=99)
-    assert "gh issue edit 99 --add-label agent/review --remove-label agent/failed" in body
+    assert (
+        "gh issue edit 99 --add-label agent/automated-review-passed --remove-label agent/failed"
+        in body
+    )
     assert "finished its work" in body
     assert "agent/ready" not in body
 
@@ -592,6 +595,8 @@ def test_is_transient_failure_matches_network_errors(message: str) -> None:
         "Error 529 overloaded",
         "too many requests",
         "rate limit exceeded",
+        "Billing daily count exceeded",
+        "You've reached your daily usage limit for Chat. Come back tomorrow.",
     ],
 )
 def test_is_provider_capacity_failure_matches_capacity_errors(message: str) -> None:

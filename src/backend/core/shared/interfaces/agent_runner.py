@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     # 仅注解使用：避免 interfaces -> models 的运行时反向依赖。
     from backend.core.shared.models.agent_model_preset import ModelSelection
 
+from backend.core.shared.models.agent_deliberation import (
+    DeliberationEvent,
+)
 from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
@@ -39,11 +42,8 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     PullRequestSummary,
 )
-from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
-from backend.core.shared.models.agent_deliberation import (
-    DeliberationEvent,
-)
 from backend.core.shared.models.agent_spec import AgentSpec
+from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
 
 
 @dataclass(frozen=True)
@@ -152,6 +152,7 @@ class IProcessRunner(ABC):
         env_profile: str | None = None,
         env_allow_extra: Sequence[str] = (),
         attempt_key: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> CommandResult:
         # jscpd:ignore-end
         """运行一条命令并捕获其结果。
@@ -210,6 +211,14 @@ class IProcessRunner(ABC):
                 时实现端把这次真实子进程登记在册，监督器随后可以据此复核进程归属并
                 精确取消；``None``（默认）不登记，适用于 git / gh / 验证命令等一切
                 非 attempt 主体调用。实现端**必须**能在没有登记时安全返回"不可证实"。
+            cancel_check: 外部取消探针（Issue #278 人工接管）。非 ``None`` 时实现端
+                在既有 watchdog 秒级 tick 上轮询该回调，返回 ``True`` 即终止**该子
+                进程自己的进程组**（与超时击杀同一棵树路径）并抛
+                ``InterruptedError``——绝不把取消伪装成 ``TimeoutExpired``。前提与
+                E2E 白名单档一致：要求 ``capture_output=True`` 且带 ``timeout``，
+                否则实现端直接报错，不做静默降级；``None``（默认）不轮询，行为与
+                本特性之前逐字节一致。探针自身抛错时实现端记日志并按"未取消"继续，
+                一次旁路读取失败不得杀掉正在工作的 agent。
 
         Returns:
             CommandResult: 包含退出码与（按需）捕获到的 stdout/stderr
@@ -398,6 +407,14 @@ class IReplCommandExecutor(ABC):
         ...
 
 
+class GitHubApiRateLimitError(RuntimeError):
+    """GitHub API 报告限流时抛出的可恢复异常。
+
+    用例层捕获此异常后应保留 Issue 当前 workflow 状态，交由下一次 daemon
+    轮询重试；不能把它当作 Agent 执行失败或触发 Agent fallback。
+    """
+
+
 class IGitHubClient(ABC):
     """与 GitHub 交互的端口。
 
@@ -405,6 +422,9 @@ class IGitHubClient(ABC):
     PR 创建与查询等）收敛到一个契约下。core 层用例通过它驱动 GitHub
     工作流，而具体实现（通常基于 GitHub CLI ``gh`` 或 REST API）位于
     下层，可被独立替换与测试。
+
+    实现遇到明确的 API 限流时抛出 :class:`GitHubApiRateLimitError`，调用方保留
+    当前状态并推迟到之后的 daemon 轮询，不应按 Agent 失败处理。
     """
 
     @abstractmethod
@@ -657,6 +677,22 @@ class IGitHubClient(ABC):
 
         Raises:
             NotImplementedError: When the implementation cannot retarget bases.
+        """
+        raise NotImplementedError
+
+    def mark_pull_request_ready(self, pr_number: int) -> None:
+        """将已通过自动合并门禁的 Draft PR 标记为可审阅。
+
+        合并队列只在 PRD 自动合并授权和本地门禁均通过后调用此操作；随后必须重新
+        读取 PR 上下文并等待 GitHub checks。该能力保持为可选端口，以兼容不运行
+        自动合并队列的旧客户端；不支持时合并队列必须 fail closed。
+
+        Args:
+            pr_number: 目标 Pull Request 编号。
+
+        Raises:
+            NotImplementedError: 客户端不支持将 Draft PR 转为 Ready。
+            RuntimeError: GitHub 调用失败。
         """
         raise NotImplementedError
 

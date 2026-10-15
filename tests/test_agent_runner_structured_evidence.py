@@ -51,7 +51,7 @@ def _issue(body: str = _ISSUE_BODY, number: int = 42) -> IssueSummary:
         title="Demo",
         url=f"https://github.com/example/repo/issues/{number}",
         body=body,
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 

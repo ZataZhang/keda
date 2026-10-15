@@ -22,17 +22,22 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
 )
 from backend.core.use_cases.pr_supervisor import (
-    build_rebase_repair_complete_comment,
-    build_rework_intent_comment,
     build_supervisor_result_comment,
     execute_rebase,
     execute_repair,
     run_post_pr_supervisor_cycle,
 )
+from backend.core.use_cases.pr_supervisor_messages import (
+    build_rebase_repair_complete_comment,
+    build_rework_intent_comment,
+)
 from backend.core.use_cases.agent_runner_git import (
     has_changes,
     pop_worktree_stash,
     stash_worktree_changes,
+)
+from backend.core.use_cases.agent_runner_issue_control import (
+    autopilot_hold_blocks,
 )
 from backend.core.use_cases.agent_runner_workflow import (
     transition_issue_workflow_state,
@@ -55,6 +60,7 @@ def _run_supervisor_with_repair_loop(
     pr_context: PullRequestContext,
     supervisor_agent: str,
     executor_agent: str | None = None,
+    repo_id: str | None = None,
 ) -> None:
     """运行 PR 事后监督修复循环。
 
@@ -79,7 +85,17 @@ def _run_supervisor_with_repair_loop(
         supervisor_agent: 监督者 Agent
         executor_agent: 本次实现者；``None`` 表示本入口拿不到，
             ``repair_agent='executor'`` 时按 Issue 标签回落并记录来源
+        repo_id: 注册表仓库 ID；``None`` 时闸门按 Issue 编号兜底查询，查不到证据
+            一律按有闸门处理（FR-5 fail closed）。该 Issue 处于人工接管闸门
+            （``autopilot_hold``）时**不启动**任何监督 Agent 审查或修复，直接返回——
+            闸门只由同 head 的全新 verifier GREEN 清除。
     """
+    if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
+        _logger.info(
+            "Issue #%d is under manual takeover hold; " "post-PR supervisor not started.",
+            issue.number,
+        )
+        return
     max_repair = max(0, config.post_pr_supervisor.max_repair_attempts)
     repair_agent = resolve_repair_agent(
         config.post_pr_supervisor.repair_agent,
@@ -102,6 +118,12 @@ def _run_supervisor_with_repair_loop(
         repair_agent, supervisor_model_selection
     )
     current_pr_context = pr_context
+
+    # 进入 supervisor 的 post-PR 路径后，修复/rebase 也始终属于 supervising 阶段。
+    if config.labels.supervising not in issue.labels:
+        transition_issue_workflow_state(
+            github_client, issue.number, config, config.labels.supervising
+        )
 
     # 循环：最多 max_repair + 1 次修复尝试
     for cycle in range(1, max_repair + 2):
@@ -218,18 +240,25 @@ def _run_supervisor_with_repair_loop(
             )
             return
 
-        # 修复/冲突解决
-        if action_result.action in ("repair_pr_branch", "resolve_conflict"):
+        if action_result.action in (
+            "repair_pr_branch",
+            "resolve_conflict",
+            "rebase_pr_branch",
+        ):
+            is_rebase = action_result.action == "rebase_pr_branch"
             if cycle > max_repair:
-                # 超过最大修复次数，标记为 blocked
                 if stashed:
                     pop_worktree_stash(worktree_path, process_runner)
                 github_client.comment_issue(
                     issue.number,
                     build_supervisor_result_comment(
-                        action="max_repair_exceeded",
+                        action="max_rebase_exceeded" if is_rebase else "max_repair_exceeded",
                         supervisor=supervisor_agent,
-                        summary="Max repair attempts exceeded; moving to blocked.",
+                        summary=(
+                            "Max rebase attempts exceeded; moving to blocked."
+                            if is_rebase
+                            else "Max repair attempts exceeded; moving to blocked."
+                        ),
                         findings_counts={},
                         verification_status="",
                         head_sha=current_pr_context.head_sha,
@@ -247,114 +276,50 @@ def _run_supervisor_with_repair_loop(
                     action=action_result.action,
                     pr_branch=current_pr_context.branch,
                     head_sha=current_pr_context.head_sha,
+                    execution_owner="supervisor",
                 ),
-            )
-            transition_issue_workflow_state(
-                github_client, issue.number, config, config.labels.running
             )
             if stashed:
                 pop_worktree_stash(worktree_path, process_runner)
-            verification_results = execute_repair(
-                issue=issue,
-                worktree_path=worktree_path,
-                config=config,
-                process_runner=process_runner,
-                pr_branch=current_pr_context.branch,
-                expected_head=current_pr_context.head_sha,
-                repair_agent=repair_agent,
-                findings=action_result.findings_detail,
-                model_selection=repair_model_selection,
-            )
-            repair_sha = get_head_sha(worktree_path, process_runner)
+            if is_rebase:
+                verification_results = execute_rebase(
+                    issue=issue,
+                    worktree_path=worktree_path,
+                    config=config,
+                    process_runner=process_runner,
+                    pr_branch=current_pr_context.branch,
+                    expected_head=current_pr_context.head_sha,
+                    supervisor_agent=supervisor_agent,
+                    model_selection=repair_model_selection,
+                )
+            else:
+                verification_results = execute_repair(
+                    issue=issue,
+                    worktree_path=worktree_path,
+                    config=config,
+                    process_runner=process_runner,
+                    pr_branch=current_pr_context.branch,
+                    expected_head=current_pr_context.head_sha,
+                    repair_agent=repair_agent,
+                    findings=action_result.findings_detail,
+                    model_selection=repair_model_selection,
+                )
+            completed_head = get_head_sha(worktree_path, process_runner)
             github_client.comment_issue(
                 issue.number,
                 build_rebase_repair_complete_comment(
                     action=action_result.action,
-                    head_sha=repair_sha,
+                    head_sha=completed_head,
                     verification_passed=all(
                         result.return_code == 0 for result in verification_results
                     ),
                 ),
-            )
-            transition_issue_workflow_state(
-                github_client, issue.number, config, config.labels.supervising
             )
             # 更新完整 PR 上下文后再继续循环，避免未知 mergeability 被批准。
             refreshed_pr_context = github_client.get_pull_request_context(current_pr_context.branch)
             if refreshed_pr_context is None:
                 _logger.warning(
-                    "Deferring post-repair supervisor for Issue #%d branch %s: "
-                    "complete PR context is unavailable.",
-                    issue.number,
-                    current_pr_context.branch,
-                )
-                return
-            current_pr_context = refreshed_pr_context
-            continue
-
-        # Rebase
-        if action_result.action == "rebase_pr_branch":
-            if cycle > max_repair:
-                if stashed:
-                    pop_worktree_stash(worktree_path, process_runner)
-                github_client.comment_issue(
-                    issue.number,
-                    build_supervisor_result_comment(
-                        action="max_rebase_exceeded",
-                        supervisor=supervisor_agent,
-                        summary="Max rebase attempts exceeded; moving to blocked.",
-                        findings_counts={},
-                        verification_status="",
-                        head_sha=current_pr_context.head_sha,
-                        cycle=cycle,
-                    ),
-                )
-                transition_issue_workflow_state(
-                    github_client, issue.number, config, config.labels.blocked
-                )
-                return
-
-            github_client.comment_issue(
-                issue.number,
-                build_rework_intent_comment(
-                    action=action_result.action,
-                    pr_branch=current_pr_context.branch,
-                    head_sha=current_pr_context.head_sha,
-                ),
-            )
-            transition_issue_workflow_state(
-                github_client, issue.number, config, config.labels.running
-            )
-            if stashed:
-                pop_worktree_stash(worktree_path, process_runner)
-            verification_results = execute_rebase(
-                issue=issue,
-                worktree_path=worktree_path,
-                config=config,
-                process_runner=process_runner,
-                pr_branch=current_pr_context.branch,
-                expected_head=current_pr_context.head_sha,
-                supervisor_agent=supervisor_agent,
-                model_selection=repair_model_selection,
-            )
-            rebase_sha = get_head_sha(worktree_path, process_runner)
-            github_client.comment_issue(
-                issue.number,
-                build_rebase_repair_complete_comment(
-                    action=action_result.action,
-                    head_sha=rebase_sha,
-                    verification_passed=all(
-                        result.return_code == 0 for result in verification_results
-                    ),
-                ),
-            )
-            transition_issue_workflow_state(
-                github_client, issue.number, config, config.labels.supervising
-            )
-            refreshed_pr_context = github_client.get_pull_request_context(current_pr_context.branch)
-            if refreshed_pr_context is None:
-                _logger.warning(
-                    "Deferring post-rebase supervisor for Issue #%d branch %s: "
+                    "Deferring post-rework supervisor for Issue #%d branch %s: "
                     "complete PR context is unavailable.",
                     issue.number,
                     current_pr_context.branch,

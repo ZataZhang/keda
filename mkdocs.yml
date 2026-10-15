@@ -72,6 +72,7 @@ nav:
       - Review Workflow: guides/review-workflow.md
       - Skill Lifecycle: guides/skill-lifecycle.md
       - Codex macOS 通知: guides/codex-notifications.md
+      - 桌面进度小窗: guides/desktop-companion.md
       - 从 iar 迁移到 kc: guides/migrating-from-iar.md
       - Loop 定时任务: guides/loop.md
   - 原型演示:

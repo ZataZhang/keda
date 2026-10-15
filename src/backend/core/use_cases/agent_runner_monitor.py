@@ -45,7 +45,7 @@ QUEUE_LABELS: tuple[str, ...] = (
     "agent/ready",
     "agent/running",
     "agent/supervising",
-    "agent/review",
+    "agent/automated-review-passed",
     "agent/failed",
     "agent/blocked",
 )
@@ -369,7 +369,7 @@ def _derive_suggested_cli(
         _add("kc labels sync")
     if has_pr and primary_label not in {
         "agent/supervising",
-        "agent/review",
+        "agent/automated-review-passed",
         "agent/blocked",
         "agent/failed",
     }:
@@ -396,7 +396,7 @@ def _derive_suggested_cli(
 _POST_PR_LABELS: frozenset[str] = frozenset(
     {
         "agent/supervising",
-        "agent/review",
+        "agent/automated-review-passed",
         "agent/blocked",
         "agent/failed",
     }
@@ -450,7 +450,7 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
             )
         )
 
-    if context.primary_label == "agent/review" and pr_dirty:
+    if context.primary_label == "agent/automated-review-passed" and pr_dirty:
         anomalies.append(
             Anomaly(
                 type="pr_dirty_in_review",

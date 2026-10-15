@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, FiniteFloat
 from backend.api.backlog_sync import wake_backlog_scheduler
 from backend.api.monitor_sync import wake_monitor_scheduler
 from backend.api.response_cache import TTLResponseCache
+from backend.api.routes.agent_runner_console_takeover import build_issue_action_response
 from backend.api.version_info import resolve_keda_version
 from backend.core.shared.interfaces.runner_console import (
     IMonitorSnapshotStore,
@@ -290,9 +291,41 @@ class RepositoryActionRequest(BaseModel):
 
 
 class IssueActionRequest(BaseModel):
-    """Issue 级动作请求体（retry_failed / blocked_continue / recover_failed_publish）。"""
+    """Issue 级动作请求体（retry_failed / blocked_continue / recover_failed_publish / take_over_verifier）。"""
 
     action: str = Field(min_length=1)
+    # 绑定长度上限由 handler 校验（见 :func:`_validate_issue_action_bindings`），不写进
+    # pydantic ``max_length``：接管契约把畸形/过期绑定统一承诺为 400（docs/guides/
+    # agent-runner.md 的 take_over_verifier 段），模型层截断会被 FastAPI 变成 422。
+    run_id: str | None = None
+    head_sha: str | None = None
+
+
+#: 绑定字段长度上限（与 run id / git SHA 的实际产生格式同级），超出即畸形请求。
+_MAX_TAKEOVER_RUN_ID_LENGTH = 128
+_MAX_TAKEOVER_HEAD_SHA_LENGTH = 64
+
+
+def _validate_issue_action_bindings(request: IssueActionRequest) -> None:
+    """把超长绑定挡在文档承诺的 400 里，同时保留进入存储前的长度护栏。
+
+    Args:
+        request: 已解析的 Issue 级动作请求体。
+
+    Raises:
+        HTTPException: 任一绑定字段超长（400，与缺绑定同一路径）。
+    """
+    binding_candidates: tuple[tuple[str, str | None, int], ...] = (
+        ("run_id", request.run_id, _MAX_TAKEOVER_RUN_ID_LENGTH),
+        ("head_sha", request.head_sha, _MAX_TAKEOVER_HEAD_SHA_LENGTH),
+    )
+    violations: list[str] = [
+        f"{field_name} must be at most {max_length} characters."
+        for field_name, field_value, max_length in binding_candidates
+        if isinstance(field_value, str) and len(field_value) > max_length
+    ]
+    if violations:
+        raise HTTPException(status_code=400, detail=" ".join(violations))
 
 
 @router.post("/agent-runner/console/repositories/{repo_id}/actions")
@@ -324,6 +357,7 @@ def execute_console_issue_action(
     repo_id: str, issue_number: int, request: IssueActionRequest
 ) -> dict:
     """执行 Issue 级白名单动作。"""
+    _validate_issue_action_bindings(request)
     settings = load_fresh_agent_runner_settings()
     contexts = _resolve_contexts()
     try:
@@ -342,10 +376,14 @@ def execute_console_issue_action(
             runner_command=settings.console.runner_command,
             spawn_cwd=spawn_cwd,
             process_runner=create_process_runner(),
+            run_id=request.run_id,
+            head_sha=request.head_sha,
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize(action_result)
+    return build_issue_action_response(
+        _serialize(action_result), action_result.takeover_http_status
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

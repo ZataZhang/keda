@@ -1,11 +1,11 @@
 name: Validation Gate
 
-# Realistic Validation 人工签收硬门禁：
+# Realistic Validation 签收完整性门禁：
 # 解析 PR body 中由 KedaCode 注入的 <!-- iar:realistic-validation ... --> 区块，
 # 该标记是跨版本 wire 契约，名字永久不变。
 # 存在未勾选项则 check 失败。配合 branch protection 将本 check 设为
-# required，即可物理阻止未经人工确认验证证据的 PR 被合并。
-# 人工在 PR body 点勾会触发 `edited` 事件自动重跑本 check。
+# required，即可阻止签收清单未完成的 PR 合并。人工审查或授权的自动签收
+# 路径都可更新清单；此 workflow 只检查完整性，不判断签收者身份或证据质量。
 
 on:
   pull_request:
@@ -64,9 +64,9 @@ jobs:
           )
           if unchecked_count > 0 or checked_count < declared_total:
               print(
-                  "Realistic Validation sign-off incomplete: a human must "
-                  "review the evidence comment on this PR and tick every "
-                  "checklist item in the PR description before merge."
+                  "Realistic Validation sign-off incomplete: verify the "
+                  "evidence and complete every checklist item through the "
+                  "configured review or authorized auto-sign-off path before merge."
               )
               sys.exit(1)
           print("Realistic Validation sign-off complete; gate passes.")

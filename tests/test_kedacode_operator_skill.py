@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -389,6 +390,25 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--repo-id",
         "--all",
     },
+    # ``kc daemon --all`` 走的是 daemon 组自己的回调（不写 ``run`` 也能起守护），
+    # ``build_command_schema`` 只导出叶子命令，所以这条路径由
+    # ``_group_callback_flags_by_path()`` 从真实命令树补出来；旗标照抄派生结果，
+    # 不凭记忆放行 schema 里查不到的名字。
+    ("daemon",): {
+        "--autopilot",
+        "--no-autopilot",
+        "--interval",
+        "--agent",
+        "--max-issues",
+        "--concurrency",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--all",
+        "--preset",
+        "--model",
+        "--reasoning-effort",
+    },
     ("logs",): {"--repo", "--repo-id", "--issue", "--follow", "--lines", "-n", "-f", "--kind"},
     ("issue", "list"): {"--repo", "--repo-id", "--state", "--label", "--limit"},
     # issue-215：--from-prompt 与 PRD 路径互斥，--require-validation 是验收小节的
@@ -552,12 +572,87 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
 
 
 def _real_flags_by_path() -> dict[tuple[str, ...], set[str]]:
-    """从真实 Typer 命令树派生「命令路径 → 全部旗标名（含短旗标与 secondary）」。"""
+    """从真实 Typer 命令树派生「命令路径 → 全部旗标名（含短旗标与 secondary）」。
+
+    叶子命令来自 ``build_command_schema``；「组回调自己就能执行」的入口（如
+    ``kc daemon --all``）不在叶子集合里，由 ``_group_callback_flags_by_path()``
+    补齐，否则这类路径永远只能凭记忆放行——正是本守卫要防的漂移方向。
+    """
     schema = build_command_schema(app)
-    return {
+    flags_by_path = {
         tuple(command["path"]): {name for option in command["options"] for name in option["names"]}
         for command in schema["commands"]
     }
+    for group_path, group_flags in _group_callback_flags_by_path().items():
+        flags_by_path.setdefault(group_path, set()).update(group_flags)
+    return flags_by_path
+
+
+def _group_callback_flags_by_path() -> dict[tuple[str, ...], set[str]]:
+    """收集「自身声明了旗标的命令组」路径 → 旗标名（``kc daemon --all`` 那类入口）。"""
+    import click
+    from typer.main import get_command
+
+    flags_by_path: dict[tuple[str, ...], set[str]] = {}
+
+    def _walk(command: Any, path: tuple[str, ...]) -> None:
+        children = getattr(command, "commands", None)
+        if not children:
+            return
+        own_flags = {
+            name
+            for param in getattr(command, "params", ())
+            for name in list(param.opts) + list(getattr(param, "secondary_opts", None) or [])
+        }
+        if path and own_flags:
+            flags_by_path[path] = own_flags
+        context = click.Context(command)
+        for name in command.list_commands(context):
+            subcommand = command.get_command(context, name)
+            if subcommand is None or getattr(subcommand, "hidden", False):
+                continue
+            _walk(subcommand, (*path, name))
+
+    _walk(get_command(app), ())
+    return flags_by_path
+
+
+def _check_command_examples(
+    source_name: str, source_text: str, allowed_flags: dict[tuple[str, ...], set[str]]
+) -> None:
+    """对一份受管文本跑「kc 示例旗标 ⊆ 白名单」判定，失败信息指名来源文件。"""
+    # 提取反引号内的 kc 命令示例。
+    examples = re.findall(r"`(kc [^`]+)`", source_text)
+    assert examples, f"{source_name} 应至少包含一条 kc 命令示例（否则该并入邻近说明）"
+
+    # 每个子命令的合法 flag 集合见模块级 ``_ALLOWED_FLAGS``：覆盖面是精选集，
+    # 示例中出现集合之外的 flag 即视为与 CLI 漂移。
+    for example in examples:
+        tokens = example.split()
+        subcommand = tuple(
+            token
+            for token in tokens[1:]
+            if not token.startswith("-") and not _PLACEHOLDER.fullmatch(token)
+        )
+        # ``kc --help`` 这类纯 flag 形式没有子命令，跳过；``start|stop``
+        # 这类紧凑写法先按分隔符拆开再逐个匹配。
+        if not subcommand:
+            continue
+        subcommand = tuple(part for token in subcommand for part in token.split("|"))
+        # 组入口与它的叶子同时在白名单时必须取**最长**匹配：``kc daemon run --all``
+        # 若先命中 ``("daemon",)``，判定用的是组回调那套旗标，会误报漂移。
+        key = next(
+            (
+                candidate
+                for candidate in sorted(allowed_flags, key=len, reverse=True)
+                if list(subcommand[: len(candidate)]) == list(candidate)
+            ),
+            None,
+        )
+        assert key is not None, f"{source_name}: 未收录的命令示例：{example}"
+        # ``--help`` 是所有子命令都支持的元 flag，不参与漂移判定。
+        unknown = _flags_of(tokens) - allowed_flags[key] - {"--help", "-h"}
+        assert not unknown, f"{source_name}: {example} 使用了 --help 中不存在的 flag：{unknown}"
 
 
 def test_packaged_skill_command_examples_match_cli_help() -> None:
@@ -568,36 +663,31 @@ def test_packaged_skill_command_examples_match_cli_help() -> None:
     """
     allowed_flags = _ALLOWED_FLAGS
     for source_name, source_text in _packaged_skill_texts_by_source():
-        # 提取反引号内的 kc 命令示例。
-        examples = re.findall(r"`(kc [^`]+)`", source_text)
-        assert examples, f"{source_name} 应至少包含一条 kc 命令示例（否则该并入邻近说明）"
+        _check_command_examples(source_name, source_text, allowed_flags)
 
-        # 每个子命令的合法 flag 集合见模块级 ``_ALLOWED_FLAGS``：覆盖面是精选集，
-        # 示例中出现集合之外的 flag 即视为与 CLI 漂移。
-        for example in examples:
-            tokens = example.split()
-            subcommand = tuple(
-                token
-                for token in tokens[1:]
-                if not token.startswith("-") and not _PLACEHOLDER.fullmatch(token)
-            )
-            # ``kc --help`` 这类纯 flag 形式没有子命令，跳过；``start|stop``
-            # 这类紧凑写法先按分隔符拆开再逐个匹配。
-            if not subcommand:
-                continue
-            subcommand = tuple(part for token in subcommand for part in token.split("|"))
-            key = next(
-                (
-                    candidate
-                    for candidate in allowed_flags
-                    if list(subcommand[: len(candidate)]) == list(candidate)
-                ),
-                None,
-            )
-            assert key is not None, f"{source_name}: 未收录的命令示例：{example}"
-            # ``--help`` 是所有子命令都支持的元 flag，不参与漂移判定。
-            unknown = _flags_of(tokens) - allowed_flags[key] - {"--help", "-h"}
-            assert not unknown, f"{source_name}: {example} 使用了 --help 中不存在的 flag：{unknown}"
+
+def test_packaged_skill_drift_guard_admits_the_daemon_group_entry() -> None:
+    """``kc daemon --all`` 这类组回调入口必须被守卫认下，同时旗标判定不得放宽。
+
+    这条示例来自 main 的并发修改（SKILL.md 与 references/daemon.md），本分支单独
+    看不到它，只在 PR 的合并 ref 上被守卫读到，故按同一判定单独取证（Issue #278
+    评审第 5 轮：合并 ref 上守卫红在「未收录的命令示例」）。
+    """
+    _check_command_examples("merged-ref", "容量按仓库解析：`kc daemon --all`", _ALLOWED_FLAGS)
+    # 收录该路径不等于放行任意旗标。
+    with pytest.raises(AssertionError, match="不存在的 flag"):
+        _check_command_examples("merged-ref", "`kc daemon --not-a-flag`", _ALLOWED_FLAGS)
+
+
+def test_packaged_skill_drift_guard_prefers_the_longest_command_path() -> None:
+    """组入口排在叶子之前时仍须取最长匹配，否则旗标判定会用错集合而假绿。"""
+    ordered_flags: dict[tuple[str, ...], set[str]] = {
+        ("daemon",): {"--all", "--preset"},
+        ("daemon", "run"): {"--all"},
+    }
+    _check_command_examples("group-first", "`kc daemon --preset fast`", ordered_flags)
+    with pytest.raises(AssertionError, match="不存在的 flag"):
+        _check_command_examples("group-first", "`kc daemon run --preset fast`", ordered_flags)
 
 
 def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
@@ -840,7 +930,7 @@ def test_packaged_skill_documents_triage_paths() -> None:
         "agent/waiting",
         "agent/running",
         "agent/supervising",
-        "agent/review",
+        "agent/automated-review-passed",
         "agent/failed",
         "agent/blocked",
         "validation/verifier-passed",

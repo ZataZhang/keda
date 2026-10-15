@@ -21,11 +21,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.core.use_cases.agent_runner_skill_distillation import (
-    _SkillDistillationRequest,
-    _try_distill_skill_after_success,
-)
 from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -41,28 +38,50 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_review import run_pre_pr_review
+from backend.core.use_cases.agent_runner_direct_pr_label import (
+    DirectPrLabelPublicationRequest,
+    consume_label_after_publication,
+)
+from backend.core.use_cases.agent_runner_direct_pr_round import (
+    DirectPrPublicationCandidate,
+    complete_direct_pr_round,
+)
+from backend.core.use_cases.agent_runner_events import format_event_marker
+from backend.core.use_cases.agent_runner_failure import PublishFailureError
 from backend.core.use_cases.agent_runner_final_verification import (
     FinalVerificationRequest,
     ensure_final_verifier_verdict,
 )
-from backend.core.use_cases.agent_runner_direct_pr_round import complete_direct_pr_round
-from backend.core.use_cases.agent_runner_direct_pr_round import DirectPrPublicationCandidate
-from backend.core.use_cases.agent_runner_direct_pr_label import (
-    consume_label_after_publication,
-    DirectPrLabelPublicationRequest,
-)
-from backend.core.use_cases.agent_runner_events import format_event_marker
-from backend.core.use_cases.agent_runner_failure import PublishFailureError
 from backend.core.use_cases.agent_runner_publish import (
     DraftPRCreationError,
     create_draft_pr,
     push_changes,
 )
+from backend.core.use_cases.agent_runner_skill_distillation import (
+    _SkillDistillationRequest,
+    _try_distill_skill_after_success,
+)
 from backend.core.use_cases.agent_runner_validation import (
     ensure_validation_evidence_ready,
     publish_validation_evidence_best_effort,
 )
-from backend.core.use_cases.agent_runner_workflow import workflow_state_labels
+from backend.core.use_cases.agent_runner_issue_control import (
+    VerifierCancelledByHumanError,
+    clear_verifier_hold_after_green,
+    discard_stale_verdict,
+    finalize_verifier_takeover,
+    mark_verifier_pr_merged,
+)
+from backend.core.use_cases.agent_runner_verifier_publication import (
+    VerifierPublicationDependencies,
+    _VerifiedPrPublication,
+    publish_verified_pr,
+)
+from backend.core.use_cases.agent_runner_workflow import (
+    build_transition_labels,
+    issue_requires_human_review,
+    workflow_state_labels,
+)
 from backend.core.use_cases.run_agent_once import (
     ensure_prd_delivery_ready,
     ensure_verification_passed,
@@ -73,11 +92,27 @@ from backend.core.use_cases.run_agent_once import (
     run_verification,
 )
 from backend.core.use_cases.run_verifier_agent import (
-    ValidationVerdict,
     apply_verifier_verdict_to_pr,
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _review_handoff_label_updates(
+    issue: IssueSummary,
+    config: AppConfig,
+) -> tuple[list[str], list[str]]:
+    """返回进入自动审查通过状态时要添加和移除的标签。"""
+    next_labels = build_transition_labels(
+        issue.labels,
+        config,
+        config.labels.review,
+        human_review_required=issue_requires_human_review(issue, config),
+    )
+    return (
+        [label for label in next_labels if label not in issue.labels],
+        [label for label in issue.labels if label not in next_labels],
+    )
 
 
 @dataclass(frozen=True)
@@ -212,7 +247,9 @@ def _push_changes_with_recovery_context(request: _PushChangesRequest) -> str:
             request.process_runner,
             expected_branch=request.expected_branch,
         )
-    except Exception as exc:  # noqa: BLE001 - 标签清理与 push 都是发布边界。
+    except Exception as exc:  # 标签清理与 push 都是发布边界。
+        if isinstance(exc, GitHubApiRateLimitError):
+            raise
         raise PublishFailureError(
             str(exc),
             worktree_path=request.worktree_path,
@@ -249,6 +286,8 @@ def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest
             content_generator=request.content_generator,
             publish_stage=request.publish_stage,
         )
+    except GitHubApiRateLimitError:
+        raise
     except Exception as exc:  # noqa: BLE001 - 提前发布失败不应改变 verifier 结论。
         _logger.warning(
             "Could not create the pre-verifier Draft PR for Issue #%d; "
@@ -282,12 +321,16 @@ def _create_draft_pr_with_recovery_context(
             publish_stage=publish_stage,
         )
     except DraftPRCreationError as exc:
+        if isinstance(exc.__cause__, GitHubApiRateLimitError):
+            raise exc.__cause__ from exc
         raise PublishFailureError(
             str(exc),
             worktree_path=worktree_path,
             failure_category=PublishFailureCategory.PR_CREATE,
         ) from exc
     except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+        if isinstance(exc, GitHubApiRateLimitError):
+            raise
         raise PublishFailureError(
             str(exc),
             worktree_path=worktree_path,
@@ -323,7 +366,9 @@ def _edit_issue_labels_after_publish(
             add=add_labels,
             remove=remove_labels,
         )
-    except Exception as exc:  # noqa: BLE001 - surface category for recovery.
+    except Exception as exc:  # surface category for recovery.
+        if isinstance(exc, GitHubApiRateLimitError):
+            raise
         raise PublishFailureError(
             f"Failed to update labels after publish: {exc}",
             worktree_path=worktree_path,
@@ -341,7 +386,9 @@ def _comment_issue_after_publish(
     """Post a publish comment and preserve recovery context on GitHub failures."""
     try:
         github_client.comment_issue(issue_number, comment_body)
-    except Exception as exc:  # noqa: BLE001 - surface category for recovery.
+    except Exception as exc:  # surface category for recovery.
+        if isinstance(exc, GitHubApiRateLimitError):
+            raise
         raise PublishFailureError(
             f"Failed to post draft PR comment: {exc}",
             worktree_path=worktree_path,
@@ -435,47 +482,52 @@ def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrP
     )
 
 
-@dataclass(frozen=True)
-class _VerifiedPrPublication:
-    """创建 PR 后发布最终复核结论和证据所需的上下文。"""
+def _review_verify_create_pr_with_takeover_handoff(
+    request: _PublicationReviewRequest,
+) -> _VerifiedPrPublication | None:
+    """审核 + 最终复核 + 建 PR；被人工接管时交班并返回 ``None``（Issue #278）。
 
-    verification_request: FinalVerificationRequest
-    github_client: IGitHubClient
-    branch: str
-    pr_url: str
-    verdict: ValidationVerdict | None
+    最终复核（:func:`ensure_final_verifier_verdict`）会在 HEAD 变化后**重跑**独立
+    verifier，因此它与首跑一样开放接管窗口。取消不是发布流程可以继续消化的失败：
+    进程树已回收、控制行已落闸，收敛 GitHub 事实后调用方必须直接返回——绝不建 PR、
+    不发结论、不进监督。
+
+    Returns:
+        正常发布上下文；本次运行已被人工接管时为 ``None``。
+    """
+    try:
+        return _review_verify_create_pr(request)
+    except VerifierCancelledByHumanError:
+        verification_request = request.verification_request
+        finalize_verifier_takeover(
+            repo_id=verification_request.repo_id,
+            issue=verification_request.issue,
+            config=verification_request.config,
+            github_client=request.github_client,
+            expected_branch=request.expected_branch,
+        )
+        _logger.info(
+            "Issue #%d: independent verifier taken over by a human during final "
+            "verification; publication stopped and handed to manual review.",
+            verification_request.issue.number,
+        )
+        return None
 
 
-def _publish_verified_pr(request: _VerifiedPrPublication) -> None:
-    """统一发布 verifier 结论、Issue 回链和 RV 证据。"""
-    verification_request = request.verification_request
-    apply_verifier_verdict_to_pr(
-        pr_url=request.pr_url,
-        verdict=request.verdict,
-        issue_number=verification_request.issue.number,
-        verifier_passed_label=verification_request.config.labels.verifier_passed,
-        github_client=request.github_client,
-    )
-    publish_sha = get_head_sha(
-        verification_request.worktree_path, verification_request.process_runner
-    )
-    _comment_issue_after_publish(
-        issue_number=verification_request.issue.number,
-        comment_body=build_draft_pr_created_comment(
-            pr_url=request.pr_url,
-            branch=request.branch,
-            head_sha=publish_sha,
+def _publish_verified_pr(request: _VerifiedPrPublication) -> bool:
+    """委托独立 verifier 发布用例，保留发布流程的依赖入口。"""
+    return publish_verified_pr(
+        request,
+        VerifierPublicationDependencies(
+            get_head_sha=get_head_sha,
+            apply_verifier_verdict_to_pr=apply_verifier_verdict_to_pr,
+            clear_verifier_hold_after_green=clear_verifier_hold_after_green,
+            discard_stale_verdict=discard_stale_verdict,
+            mark_verifier_pr_merged=mark_verifier_pr_merged,
+            comment_issue_after_publish=_comment_issue_after_publish,
+            draft_pr_created_comment=build_draft_pr_created_comment,
+            publish_validation_evidence_after_pr=_publish_validation_evidence_after_pr,
         ),
-        worktree_path=verification_request.worktree_path,
-        github_client=request.github_client,
-    )
-    _publish_validation_evidence_after_pr(
-        issue=verification_request.issue,
-        worktree_path=verification_request.worktree_path,
-        config=verification_request.config,
-        github_client=request.github_client,
-        process_runner=verification_request.process_runner,
-        pr_url=request.pr_url,
     )
 
 
@@ -609,7 +661,7 @@ def _should_run_post_pr_supervisor(
 
     直发档（``--direct-pr``）不进监督：那是 Draft PR 之后的又一次 agent 调用，而该
     档位的承诺是「建完 PR 只剩机械状态」，因此与未启用监督走同一分支（直接落到
-    ``agent/review``），并留下旗标来源可追溯的审计日志。
+    ``agent/automated-review-passed``），并留下旗标来源可追溯的审计日志。
 
     Args:
         config: 应用配置（提供 ``post_pr_supervisor.enabled`` 与 workflow 标签）。
@@ -732,8 +784,9 @@ def _finish_implementation_publication(
         verified_sha=after_sha,
         verifier_verdict=commit_result.verifier_verdict,
         publish_stage=publish_stage,
+        repo_id=repo_id,
     )
-    reviewed_pr = _review_verify_create_pr(
+    reviewed_pr = _review_verify_create_pr_with_takeover_handoff(
         _PublicationReviewRequest(
             verification_request=final_verification_request,
             github_client=github_client,
@@ -743,6 +796,12 @@ def _finish_implementation_publication(
             content_generator=content_generator,
         )
     )
+    if reviewed_pr is None:
+        # 人工接管（Issue #278）：交班已完成，发布流程到此为止。
+        return
+    if _publish_verified_pr(reviewed_pr) is False:
+        # PR 已被外部合并/关闭或 HEAD 漂移：不切换 Issue 标签、不启动后续阶段。
+        return
 
     # 直发标签的消费点：Draft PR 已确认（同仓、同 Issue 分支、同 head、正文带指认本
     # Issue 的 `iar:direct-pr` marker）才移除标签。放在 workflow 标签切换之前——删除
@@ -774,8 +833,6 @@ def _finish_implementation_publication(
             github_client=github_client,
         )
 
-    _publish_verified_pr(reviewed_pr)
-
     # 步骤 4: PR 后监督（可选；直发档不进监督）
     if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
         # 获取 PR 上下文（如果已存在）
@@ -804,15 +861,15 @@ def _finish_implementation_publication(
                 pr_context=pr_context,
                 supervisor_agent=supervisor_agent,
                 executor_agent=selected_agent,
+                repo_id=repo_id,
             )
     else:
         # 未启用监督（或直发档旁路）时直接进入 review 标签
+        review_add_labels, review_remove_labels = _review_handoff_label_updates(issue, config)
         _edit_issue_labels_after_publish(
             issue_number=issue.number,
-            add_labels=[config.labels.review],
-            remove_labels=[
-                label for label in workflow_state_labels(config) if label != config.labels.review
-            ],
+            add_labels=review_add_labels,
+            remove_labels=review_remove_labels,
             worktree_path=worktree_path,
             github_client=github_client,
         )
@@ -842,6 +899,7 @@ def _finish_existing_commit_publication(
     commit_result: AgentCommitResult,
     content_generator: IContentGenerator | None = None,
     direct_pr_label: str | None = None,
+    repo_id: str | None = None,
 ) -> None:
     """完成已存在本地 commit 的恢复发布流程。
 
@@ -870,6 +928,8 @@ def _finish_existing_commit_publication(
         expected_branch: 预期的分支名
         commit_result: 已存在的提交结果
         content_generator: 可选的 AI 内容生成器
+        repo_id: 稳定仓库标识（Issue #278），透传给 verdict 发布前的
+            merged/HEAD 复核；``None`` 时复核照常但过期结论不落闸。
     """
     # 导入监督循环（避免循环导入）
     from backend.core.use_cases.agent_runner_supervisor import (
@@ -914,8 +974,9 @@ def _finish_existing_commit_publication(
         verified_sha=None,
         verifier_verdict=commit_result.verifier_verdict,
         publish_stage=publish_stage,
+        repo_id=repo_id,
     )
-    reviewed_pr = _review_verify_create_pr(
+    reviewed_pr = _review_verify_create_pr_with_takeover_handoff(
         _PublicationReviewRequest(
             verification_request=final_verification_request,
             github_client=github_client,
@@ -925,6 +986,12 @@ def _finish_existing_commit_publication(
             content_generator=content_generator,
         )
     )
+    if reviewed_pr is None:
+        # 人工接管（Issue #278）：交班已完成，恢复发布流程到此为止。
+        return
+    if _publish_verified_pr(reviewed_pr) is False:
+        # PR 已被外部合并/关闭或 HEAD 漂移：不切换 Issue 标签、不启动后续阶段。
+        return
     # 恢复路径同样只在确认同次 PR 之后消费标签（判据与完整路径完全一致）。
     consume_label_after_publication(
         DirectPrLabelPublicationRequest(
@@ -947,8 +1014,6 @@ def _finish_existing_commit_publication(
             worktree_path=worktree_path,
             github_client=github_client,
         )
-    _publish_verified_pr(reviewed_pr)
-
     # 步骤 4: PR 后监督（可选；直发档不进监督）
     if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
         pr_context = github_client.get_pull_request_context(reviewed_pr.branch)
@@ -975,14 +1040,14 @@ def _finish_existing_commit_publication(
                 pr_context=pr_context,
                 supervisor_agent=supervisor_agent,
                 executor_agent=selected_agent,
+                repo_id=repo_id,
             )
     else:
+        review_add_labels, review_remove_labels = _review_handoff_label_updates(issue, config)
         _edit_issue_labels_after_publish(
             issue_number=issue.number,
-            add_labels=[config.labels.review],
-            remove_labels=[
-                label for label in workflow_state_labels(config) if label != config.labels.review
-            ],
+            add_labels=review_add_labels,
+            remove_labels=review_remove_labels,
             worktree_path=worktree_path,
             github_client=github_client,
         )

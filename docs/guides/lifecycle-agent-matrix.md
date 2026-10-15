@@ -292,7 +292,7 @@ implementation 执行器阶梯按 **`(agent, preset)` spec** 遍历，其序列�
 - Phase 0 异步讨论与 Phase 0 / 1 / 2 三段式：见 [Agent Runner](agent-runner.md)
   的「复杂需求：异步 Issue 评论讨论」一节。
 - Issue 状态机与两阶段审查（`agent/ready` → `agent/running` → `agent/supervising`
-  → `agent/review`）：见 [Agent Runner](agent-runner.md) 的「状态流转与两阶段审查」
+  → `agent/automated-review-passed`）：见 [Agent Runner](agent-runner.md) 的「状态流转与两阶段审查」
   一节——那是**标签状态**的流转，与本页的**阶段 → agent**是两个正交维度。
 - `[agent_runner.generated_content]` 的四个 target 与模板字段：见
   [Agent Runner](agent-runner.md) 的「Generated Content 配置」一节。

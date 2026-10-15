@@ -186,6 +186,32 @@ def _terminate_process_tree(
         return False
 
 
+def _process_termination_identity(
+    process: subprocess.Popen[Any],
+) -> tuple[int | None, float | None]:
+    """创建子进程后立刻读一次**终止身份**（进程组 + 创建时刻）。
+
+    只在这一刻读：子进程退出并被回收后，``os.getpgid(process.pid)`` 读到的是**复用该
+    pid 的别人**，据此发 SIGKILL 就会杀掉无关进程组。任何一次终止调用都必须复用这里
+    的结果，而不是再取一次组号。
+
+    任一项读不到时返回 ``(None, None)``：调用方退回不带身份校验的既有路径——宁可沿用
+    旧的"按当前组号击杀"，也不能因为读不到身份就放弃拆除（管道写端会一直有人持有，
+    ``communicate()`` 于是永远等不到 EOF）。
+    """
+    if not hasattr(os, "getpgid"):  # pragma: no cover - Windows 没有 getpgid。
+        return None, None
+    try:
+        process_group = os.getpgid(process.pid)
+        process_started_at = process_start_time(process.pid)
+    except (OSError, TypeError, ValueError):
+        # 子进程已退出，或句柄根本不是真实 pid（测试替身）。
+        return None, None
+    if process_group is None or process_started_at is None:
+        return None, None
+    return process_group, process_started_at
+
+
 @dataclass(frozen=True)
 class CommandResult:
     """Captured subprocess result.
@@ -287,6 +313,7 @@ class SubprocessRunner:
         env_profile: str | None = None,
         env_allow_extra: Sequence[str] = (),
         attempt_key: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> CommandResult:
         """Run a subprocess and capture output.
 
@@ -324,6 +351,10 @@ class SubprocessRunner:
                 :mod:`backend.infrastructure.attempt_process_registry`，供停滞监督
                 当场复核归属并精确取消（Issue #256 FR-6/FR-7）；``None``（默认）
                 不登记，行为与本特性之前一致。
+            cancel_check: 外部取消探针（Issue #278 人工接管）。非 ``None`` 时在
+                watchdog 的秒级 tick 上轮询，返回 ``True`` 即终止该子进程自己的
+                进程组并抛 ``InterruptedError``；要求 ``capture_output=True`` 且带
+                ``timeout``，否则报错、不静默降级。探针抛错按"未取消"继续。
         """
         command = _with_available_own_command(command)
         started_mono: float = time.monotonic()
@@ -339,6 +370,13 @@ class SubprocessRunner:
             # 默认档也净化：env 构造收敛在本方法一处，新增 denylist 变量
             # 无需改动任何调用点。
             child_env = build_sanitized_child_env()
+        if cancel_check is not None and not (capture_output and timeout is not None):
+            raise ValueError(
+                "cancel_check requires capture_output=True and a wall-clock timeout: "
+                "cancellation is enforced by the watchdog that only exists on the "
+                "captured-with-timeout path. Refusing to silently ignore the probe "
+                "(a takeover request would otherwise never reach the process)."
+            )
         usage_collector: StreamUsageCollector | None = None
         if output_protocol is not None:
             usage_collector = StreamUsageCollector()
@@ -354,6 +392,7 @@ class SubprocessRunner:
                 usage_collector=usage_collector,
                 env=child_env,
                 attempt_key=attempt_key,
+                cancel_check=cancel_check,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -370,6 +409,7 @@ class SubprocessRunner:
                 attempt_key=attempt_key,
                 input_text=input_text,
                 usage_collector=usage_collector,
+                cancel_check=cancel_check,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -383,6 +423,7 @@ class SubprocessRunner:
                 env=child_env,
                 attempt_key=attempt_key,
                 usage_collector=usage_collector,
+                cancel_check=cancel_check,
             )
             stdout = completed.stdout
             stderr = completed.stderr
@@ -481,7 +522,7 @@ class SubprocessRunner:
                 # BaseException 而不是 Exception：Ctrl-C（KeyboardInterrupt）也必须
                 # 拆掉整个进程组，否则子进程会变成孤儿继续跑。
                 _attach_stream_observations(exc, usage_collector)
-                _terminate_process_tree(process)
+                watchdog.terminate()
                 process.wait()
                 raise
             finally:
@@ -571,6 +612,7 @@ def _run_captured_process(
     attempt_key: str | None = None,
     input_text: str | None = None,
     usage_collector: StreamUsageCollector | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a captured subprocess with heartbeat and optional inactivity logging.
 
@@ -590,6 +632,8 @@ def _run_captured_process(
             ——与 :meth:`SubprocessRunner.run` 原先用 ``subprocess.run`` 投递
             stdin 的语义一致（捕获式、无输出活动跟踪）。
         usage_collector: 可选 agent 输出旁路观测器；捕获输出在返回或超时前解析。
+        cancel_check: 人工接管取消探针，由 watchdog 秒级 tick 轮询；命中即
+            终止进程组并在捕获返回后抛 InterruptedError（Issue #278）。
     """
     process = subprocess.Popen(
         list(command),
@@ -612,6 +656,7 @@ def _run_captured_process(
         base_label="Command",
         context_label=label,
         attempt_key=attempt_key,
+        cancel_check=cancel_check,
     )
     watchdog.start()
     try:
@@ -624,10 +669,14 @@ def _run_captured_process(
             usage_collector.observe_text(stdout)
             usage_collector.observe_text(stderr)
         watchdog.raise_if_timed_out(partial_stdout=stdout, partial_stderr=stderr)
+        watchdog.raise_if_cancelled(partial_stdout=stdout, partial_stderr=stderr)
     except BaseException as exc:
         _observe_exception_output(exc, usage_collector)
         _attach_stream_observations(exc, usage_collector)
-        _terminate_process_tree(process)
+        # 二次拆除必须用创建时刻读到的身份：走到这里时 communicate() 已经把子进程
+        # 回收了（接管取消正是先杀后回收才抛的 InterruptedError），再按 pid 取一次
+        # 进程组，读到的可能是复用该 pid 的别的进程。
+        watchdog.terminate()
         process.wait()
         raise
     finally:
@@ -690,9 +739,14 @@ class _ProcessWatchdog:
         base_label: str,
         context_label: str | None = None,
         attempt_key: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> None:
         self._process = process
         self._command = tuple(command)
+        # 终止身份在创建时刻只读一次：接管与取消之后的二次终止都复用这两个值。
+        self._expected_process_group, self._expected_process_started_at = (
+            _process_termination_identity(process)
+        )
         self._timeout = timeout
         self._inactivity_timeout = inactivity_timeout_seconds
         self._effective_timeout: int | None = timeout
@@ -700,6 +754,9 @@ class _ProcessWatchdog:
         self._base_label = base_label
         self._context_label = context_label
         self._attempt_key = attempt_key
+        self._cancel_check = cancel_check
+        self._cancelled = False
+        self._cancel_check_error_logged = False
         self._started_at = time.monotonic()
         self._last_output_at = self._started_at
         self._output_lock = threading.Lock()
@@ -739,6 +796,19 @@ class _ProcessWatchdog:
         with self._output_lock:
             self._last_output_at = time.monotonic()
 
+    def terminate(self) -> bool:
+        """按**创建时刻读到的身份**终止该子进程组（Issue #278 接管与取消后的二次拆除）。
+
+        与不带身份的 :func:`_terminate_process_tree` 的差别只有一处：进程已经退出并被
+        回收时拒发信号。那一刻 ``process.pid`` 可能已经属于别的进程，再取一次
+        ``os.getpgid`` 就会把信号发给无关进程组。
+        """
+        return _terminate_process_tree(
+            self._process,
+            expected_process_group=self._expected_process_group,
+            expected_process_started_at=self._expected_process_started_at,
+        )
+
     def raise_if_timed_out(
         self,
         *,
@@ -751,13 +821,36 @@ class _ProcessWatchdog:
         任何流式输出，如果这里把已收集的 stdout/stderr 丢掉，一次超时就等于
         "什么都没发生"——比如 verifier agent 跑了半小时被杀，操作者只能看到
         一条 "timed out"，看不到它当时判到哪一步。
+
+        人工接管取消（``_cancelled``）优先于超时分类：同一 watchdog tick 里
+        两者都可能置位，但把"人接管并杀掉了进程组"报成超时会让上层走 verifier
+        超时回退路径、错失交班（Issue #278）。此处静默后由
+        :meth:`raise_if_cancelled` 抛 InterruptedError。
         """
-        if self._timed_out:
+        if self._timed_out and not self._cancelled:
             raise subprocess.TimeoutExpired(
                 cmd=list(self._command),
                 timeout=self._effective_timeout,
                 output=partial_stdout,
                 stderr=partial_stderr,
+            )
+
+    def raise_if_cancelled(
+        self,
+        *,
+        partial_stdout: str | None = None,
+        partial_stderr: str | None = None,
+    ) -> None:
+        """人工接管取消时抛 InterruptedError（Issue #278）。
+
+        绝不复用 TimeoutExpired：超时会被上层归类为 verifier 超时并触发
+        候选回退/重试，而"人被接管"必须原样上抛、不重试、不换 agent。
+        """
+        if self._cancelled:
+            raise InterruptedError(
+                f"Terminated by takeover cancel request: {_summarize_command(self._command)}"
+                + (f"\npartial stdout: {partial_stdout}" if partial_stdout else "")
+                + (f"\npartial stderr: {partial_stderr}" if partial_stderr else "")
             )
 
     def _format_label(self) -> str:
@@ -778,7 +871,7 @@ class _ProcessWatchdog:
                 elapsed_seconds,
                 _summarize_command(self._command),
             )
-            _terminate_process_tree(self._process)
+            self.terminate()
             return True
         if self._inactivity_timeout is not None:
             with self._output_lock:
@@ -793,9 +886,39 @@ class _ProcessWatchdog:
                     inactive_seconds,
                     _summarize_command(self._command),
                 )
-                _terminate_process_tree(self._process)
+                self.terminate()
                 return True
         return False
+
+    def _check_takeover_cancel(self) -> bool:
+        """轮询人工接管探针；命中则终止整个进程组并返回 True（Issue #278）。
+
+        探针本身抛错（如旁路 SQLite 瞬时锁失败）按"未取消"继续跑：取消是
+        高代价动作，绝不能因一次读库失败就杀掉正在工作的 verifier 进程。
+        抛错只记一次日志，避免每秒刷屏。
+        """
+        if self._cancel_check is None or self._cancelled:
+            return False
+        try:
+            if not self._cancel_check():
+                return False
+        except Exception as exc:  # noqa: BLE001 - probe failure must not kill the process.
+            if not self._cancel_check_error_logged:
+                self._cancel_check_error_logged = True
+                logger.warning(
+                    "%s cancel_check probe failed; treating as not cancelled: %s",
+                    self._format_label(),
+                    exc,
+                )
+            return False
+        self._cancelled = True
+        logger.error(
+            "%s takeover cancel requested; terminating: %s",
+            self._format_label(),
+            _summarize_command(self._command),
+        )
+        self.terminate()
+        return True
 
     def _run(self) -> None:
         next_heartbeat_at = self._heartbeat_seconds
@@ -813,6 +936,8 @@ class _ProcessWatchdog:
                 )
                 next_heartbeat_at += self._heartbeat_seconds
             if self._check_timeouts(elapsed_seconds):
+                return
+            if self._check_takeover_cancel():
                 return
 
 

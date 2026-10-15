@@ -20,14 +20,14 @@ from tests.test_agent_runner_direct_pr_label import _issue
 
 _CANDIDATE = DirectPrPublicationCandidate("issue-7", "a" * 40)
 _URL = "https://github.com/example/repo/pull/91"
+# REST API field names (get_pull_request_context now calls the REST pulls endpoint).
 _ROW = dict(
-    url=_URL,
+    html_url=_URL,
     number=91,
     body=format_direct_pr_marker(7),
-    headRefName="issue-7",
-    headRefOid="a" * 40,
-    baseRefOid="b" * 40,
-    isDraft=False,
+    head={"ref": "issue-7", "sha": "a" * 40},
+    base={"sha": "b" * 40},
+    draft=False,
 )
 
 
@@ -40,10 +40,22 @@ def _client(monkeypatch, tmp_path, reply):
 
     def query(command, *, cwd, check=True):
         queries.append(tuple(command))
+        # check-runs use --paginate --slurp; always return a valid empty page list
+        # so _load_rest_check_rollup does not interfere with PR identity assertions.
+        if "--paginate" in command:
+            return CommandResult(tuple(command), 0, '[{"check_runs": []}]', "")
+        # commit status endpoint: return a valid empty statuses object.
+        endpoint = next((a for a in command if a.startswith("repos/")), "")
+        if "/status" in endpoint:
+            return CommandResult(tuple(command), 0, '{"statuses": []}', "")
         return_code, stdout = responses[0]
         return CommandResult(tuple(command), return_code, stdout, "query unavailable")
 
     monkeypatch.setattr(client, "_run_with_retry", query)
+    # get_pull_request_context uses _get_owner_repo() to build the REST URL
+    # before calling _run_with_retry; tmp_path has no git remote or config file,
+    # so stub it out to keep the test focused on the round-trip logic.
+    monkeypatch.setattr(client, "_get_owner_repo", lambda: "example/repo")
     for method in ("list_issue_comment_entries", "comment_issue", "edit_issue_comment"):
         monkeypatch.setattr(client, method, getattr(comments, method))
     save_direct_pr_selection(client, _issue(), "direct-pr", claim_comment_id=91)
@@ -61,8 +73,8 @@ def _client(monkeypatch, tmp_path, reply):
         (0, "{}"),
         (0, '["wrong row"]'),
         (0, "[{}]"),
-        (0, json.dumps([{**_ROW, "headRefOid": ""}])),
-        (0, json.dumps([{**_ROW, "headRefName": "other"}])),
+        (0, json.dumps([{**_ROW, "head": {"ref": "issue-7", "sha": ""}}])),
+        (0, json.dumps([{**_ROW, "head": {"ref": "other", "sha": "a" * 40}}])),
         (0, json.dumps([{**_ROW, "number": True}])),
         (0, json.dumps([_ROW, _ROW])),
     ],

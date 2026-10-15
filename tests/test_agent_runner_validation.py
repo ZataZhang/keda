@@ -145,7 +145,7 @@ def _issue(body: str = _ISSUE_BODY_WITH_VALIDATION, number: int = 42) -> IssueSu
         title="Demo",
         url=f"https://github.com/example/repo/issues/{number}",
         body=body,
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 
@@ -1101,6 +1101,32 @@ def test_build_evidence_comment_embeds_images_and_quotes_text(
     assert evidence_marker.count == 2
 
 
+def test_build_evidence_comment_records_stable_pr_identity(tmp_path: Path) -> None:
+    """New evidence comments expose a v2 patch identity while v1 remains compatible."""
+    worktree_path, _evidence_dir = _evidence_worktree(tmp_path)
+    base_sha = "b" * 40
+    patch_id = "c" * 40
+    comment = build_evidence_comment(
+        upload=EvidenceUpload(
+            branch="iar-evidence/issue-42",
+            commit_sha="commit1",
+            file_names=("rv-1-shot.png",),
+        ),
+        worktree_path=worktree_path,
+        config=_legacy_config(),
+        pr_url="https://github.com/example/repo/pull/7",
+        head_sha="a" * 40,
+        base_sha=base_sha,
+        patch_id=patch_id,
+    )
+
+    evidence_marker = parse_latest_evidence_marker([comment])
+    assert evidence_marker is not None
+    assert evidence_marker.base_sha == base_sha
+    assert evidence_marker.patch_id == patch_id
+    assert f"version=2 head={'a' * 40} base={base_sha} patch={patch_id}" in comment
+
+
 def test_parse_pr_number() -> None:
     """PR numbers parse from canonical GitHub URLs."""
     assert parse_pr_number("https://github.com/example/repo/pull/123") == 123
@@ -1153,6 +1179,74 @@ def test_publish_validation_evidence_posts_pr_comment(tmp_path: Path) -> None:
     assert len(pr_comment_calls) == 1
     assert pr_comment_calls[0]["pr_number"] == 7
     assert "iar:validation-evidence" in pr_comment_calls[0]["body"]
+
+
+def test_publish_validation_evidence_binds_stable_pr_identity(tmp_path: Path) -> None:
+    """Evidence publication emits v2 when current PR Git objects are available."""
+    worktree_path, evidence_dir = _evidence_worktree(tmp_path)
+    config = _legacy_config()
+    base_sha = "a" * 40
+    head_sha = "b" * 40
+    patch_id = "d" * 40
+    fake_client = FakeGitHubClient()
+    fake_client.set_pr_context(
+        "task/42",
+        PullRequestContext(
+            pr_url="https://github.com/example/repo/pull/7",
+            branch="task/42",
+            head_sha=head_sha,
+            base_sha=base_sha,
+            number=7,
+        ),
+    )
+    responses = {
+        (
+            "git",
+            "hash-object",
+            "-w",
+            "--",
+            str(evidence_dir / "rv-1-shot.png"),
+        ): CommandResult(("git",), 0, "blob1\n", ""),
+        (
+            "git",
+            "hash-object",
+            "-w",
+            "--",
+            str(evidence_dir / "rv-2-cli.txt"),
+        ): CommandResult(("git",), 0, "blob2\n", ""),
+        ("git", "mktree"): CommandResult(("git", "mktree"), 0, "tree1\n", ""),
+        (
+            "git",
+            "commit-tree",
+            "tree1",
+            "-m",
+            "Realistic Validation evidence for issue #42",
+        ): CommandResult(("git",), 0, "commit1\n", ""),
+        **_patch_identity_responses(
+            base_sha=base_sha,
+            head_sha=head_sha,
+            merge_base_sha="c" * 40,
+            patch_id=patch_id,
+        ),
+    }
+
+    upload = publish_validation_evidence(
+        issue=_issue(),
+        worktree_path=worktree_path,
+        config=config,
+        github_client=fake_client,
+        process_runner=FakeProcessRunner(responses=responses),
+        pr_url="https://github.com/example/repo/pull/7",
+        head_sha=head_sha,
+    )
+
+    assert upload is not None
+    comment = next(call["body"] for call in fake_client.calls if call["method"] == "comment_pr")
+    marker = parse_latest_evidence_marker([comment])
+    assert marker is not None
+    assert marker.base_sha == base_sha
+    assert marker.head_sha == head_sha
+    assert marker.patch_id == patch_id
 
 
 def test_publish_validation_evidence_skips_when_not_required(
@@ -1306,8 +1400,11 @@ def _gate_setup(
     *,
     pr_body: str,
     pr_head: str = "abc1111",
+    pr_base: str = "basesha",
     evidence_head: str | None = "abc1111",
-    issue_labels: tuple[str, ...] = ("agent/review",),
+    evidence_base: str | None = None,
+    evidence_patch_id: str | None = None,
+    issue_labels: tuple[str, ...] = ("agent/automated-review-passed",),
 ) -> tuple[_GateGitHubClient, IssueSummary]:
     review_issue = IssueSummary(
         number=42,
@@ -1333,15 +1430,22 @@ def _gate_setup(
         pr_url="https://github.com/example/repo/pull/7",
         branch="task/42",
         head_sha=pr_head,
-        base_sha="basesha",
+        base_sha=pr_base,
         number=7,
         body=pr_body,
     )
     if evidence_head is not None:
-        gate_client._pr_comments[7] = [
-            f"<!-- iar:validation-evidence version=1 head={evidence_head} "
-            "branch=iar-evidence/issue-42 count=2 -->"
-        ]
+        if evidence_patch_id is not None:
+            gate_client._pr_comments[7] = [
+                f"<!-- iar:validation-evidence version=2 head={evidence_head} "
+                f"base={evidence_base or 'b' * 40} patch={evidence_patch_id} "
+                "branch=iar-evidence/issue-42 count=2 -->"
+            ]
+        else:
+            gate_client._pr_comments[7] = [
+                f"<!-- iar:validation-evidence version=1 head={evidence_head} "
+                "branch=iar-evidence/issue-42 count=2 -->"
+            ]
     return gate_client, review_issue
 
 
@@ -1441,13 +1545,184 @@ def test_gate_resets_stale_sign_off(tmp_path: Path) -> None:
     assert label_calls[0]["add"] == ["validation/pending"]
 
 
+def _patch_identity_responses(
+    *, base_sha: str, head_sha: str, merge_base_sha: str, patch_id: str
+) -> dict[tuple[str, ...], CommandResult]:
+    """Return Git responses for a v2 validation identity check."""
+    diff_command = (
+        "git",
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-color",
+        merge_base_sha,
+        head_sha,
+        "--",
+        ".",
+        ":(exclude)tasks/evidence/**",
+    )
+    return {
+        ("git", "cat-file", "-e", f"{base_sha}^{{commit}}"): CommandResult(
+            ("git", "cat-file", "-e", f"{base_sha}^{{commit}}"), 0, "", ""
+        ),
+        ("git", "cat-file", "-e", f"{head_sha}^{{commit}}"): CommandResult(
+            ("git", "cat-file", "-e", f"{head_sha}^{{commit}}"), 0, "", ""
+        ),
+        ("git", "merge-base", base_sha, head_sha): CommandResult(
+            ("git", "merge-base", base_sha, head_sha), 0, f"{merge_base_sha}\n", ""
+        ),
+        diff_command: CommandResult(diff_command, 0, "diff --git a/app.py b/app.py\n", ""),
+        ("git", "patch-id", "--stable"): CommandResult(
+            ("git", "patch-id", "--stable"), 0, f"{patch_id} {head_sha}\n", ""
+        ),
+    }
+
+
+def _patch_identity_runner(
+    *, base_sha: str, head_sha: str, merge_base_sha: str, patch_id: str
+) -> FakeProcessRunner:
+    """Return a process runner with v2 validation identity responses."""
+    return FakeProcessRunner(
+        responses=_patch_identity_responses(
+            base_sha=base_sha,
+            head_sha=head_sha,
+            merge_base_sha=merge_base_sha,
+            patch_id=patch_id,
+        )
+    )
+
+
+def test_gate_keeps_sign_off_when_pr_change_survives_main_rebase(tmp_path: Path) -> None:
+    """A changed base/head pair does not invalidate an unchanged PR patch."""
+    base_sha = "a" * 40
+    head_sha = "c" * 40
+    merge_base_sha = "b" * 40
+    patch_id = "d" * 40
+    gate_client, _review_issue = _gate_setup(
+        pr_body=_checklist_pr_body(ticked=True),
+        pr_head=head_sha,
+        pr_base=base_sha,
+        evidence_head="e" * 40,
+        evidence_base="f" * 40,
+        evidence_patch_id=patch_id,
+    )
+
+    process_validation_gate(
+        repo_path=tmp_path,
+        config=AppConfig(),
+        github_client=gate_client,
+        process_runner=_patch_identity_runner(
+            base_sha=base_sha,
+            head_sha=head_sha,
+            merge_base_sha=merge_base_sha,
+            patch_id=patch_id,
+        ),
+    )
+
+    assert all(call["method"] != "update_pull_request_body" for call in gate_client.calls)
+    assert all(call["method"] != "comment_pr" for call in gate_client.calls)
+    label_calls = [call for call in gate_client.calls if call["method"] == "edit_issue_labels"]
+    assert label_calls[0]["add"] == ["validation/passed"]
+
+
+def test_gate_resets_sign_off_when_pr_contribution_changes(tmp_path: Path) -> None:
+    """A v2 marker still resets the checklist when the PR patch actually changes."""
+    base_sha = "a" * 40
+    head_sha = "c" * 40
+    merge_base_sha = "b" * 40
+    evidence_patch_id = "d" * 40
+    current_patch_id = "e" * 40
+    gate_client, _review_issue = _gate_setup(
+        pr_body=_checklist_pr_body(ticked=True),
+        pr_head=head_sha,
+        pr_base=base_sha,
+        evidence_head="f" * 40,
+        evidence_base="1" * 40,
+        evidence_patch_id=evidence_patch_id,
+    )
+
+    process_validation_gate(
+        repo_path=tmp_path,
+        config=AppConfig(),
+        github_client=gate_client,
+        process_runner=_patch_identity_runner(
+            base_sha=base_sha,
+            head_sha=head_sha,
+            merge_base_sha=merge_base_sha,
+            patch_id=current_patch_id,
+        ),
+    )
+
+    body_update = next(
+        call for call in gate_client.calls if call["method"] == "update_pull_request_body"
+    )
+    reset_state = parse_validation_checklist_state(body_update["body"])
+    assert reset_state is not None
+    assert reset_state.unchecked_count == 2
+    reset_comment = next(
+        call["body"] for call in gate_client.calls if call["method"] == "comment_pr"
+    )
+    assert evidence_patch_id in reset_comment
+    assert current_patch_id in reset_comment
+
+
+def test_gate_keeps_validation_pending_when_patch_identity_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    """Unavailable Git objects block validation without falsely resetting evidence."""
+    base_sha = "a" * 40
+    head_sha = "c" * 40
+    evidence_patch_id = "d" * 40
+    config = AppConfig()
+    unavailable_runner = FakeProcessRunner(
+        responses={
+            ("git", "cat-file", "-e", f"{base_sha}^{{commit}}"): CommandResult(
+                ("git", "cat-file", "-e", f"{base_sha}^{{commit}}"), 1, "", "missing"
+            ),
+            (
+                "git",
+                "fetch",
+                "--no-tags",
+                config.git.remote,
+                base_sha,
+            ): CommandResult(
+                ("git", "fetch", "--no-tags", config.git.remote, base_sha),
+                1,
+                "",
+                "not fetchable",
+            ),
+        }
+    )
+    gate_client, _review_issue = _gate_setup(
+        pr_body=_checklist_pr_body(ticked=True),
+        pr_head=head_sha,
+        pr_base=base_sha,
+        evidence_head="e" * 40,
+        evidence_patch_id=evidence_patch_id,
+        issue_labels=("agent/automated-review-passed", "validation/verifier-passed"),
+    )
+
+    process_validation_gate(
+        repo_path=tmp_path,
+        config=config,
+        github_client=gate_client,
+        process_runner=unavailable_runner,
+    )
+
+    assert all(call["method"] != "update_pull_request_body" for call in gate_client.calls)
+    label_changes = [call for call in gate_client.calls if call["method"] == "edit_issue_labels"]
+    assert label_changes[0]["add"] == ["validation/pending"]
+    assert label_changes[0]["remove"] == ["validation/passed"]
+    assert label_changes[1]["remove"] == ["validation/verifier-passed"]
+
+
 def test_gate_resets_verifier_passed_label_on_head_drift(tmp_path: Path) -> None:
     """Head drift clears `validation/verifier-passed` (stale verdict guard, FR-5/6)."""
     gate_client, _review_issue = _gate_setup(
         pr_body=_checklist_pr_body(ticked=True),
         pr_head="def2222",  # PR head moved on
         evidence_head="abc1111",  # evidence was captured at old SHA
-        issue_labels=("agent/review", "validation/verifier-passed"),
+        issue_labels=("agent/automated-review-passed", "validation/verifier-passed"),
     )
 
     process_validation_gate(
@@ -1649,7 +1924,7 @@ def _structured_issue(number: int = 42) -> IssueSummary:
         title="Demo",
         url=f"https://github.com/example/repo/issues/{number}",
         body=_STRUCTURED_ISSUE_BODY,
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 
@@ -1785,7 +2060,7 @@ def test_ensure_validation_evidence_ready_rejects_missing_required_field(
                     "- [ ] **行为 B 真实验证**：通过 `demo serve` 验证页面。",
                     "",
                 ),
-                labels=("agent/review",),
+                labels=("agent/automated-review-passed",),
             ),
             tmp_path,
             _legacy_config(),
@@ -1825,7 +2100,7 @@ def test_ensure_validation_evidence_ready_rejects_mismatched_file_number(
                     "- [ ] **行为 B 真实验证**：通过 `demo serve` 验证页面。",
                     "",
                 ),
-                labels=("agent/review",),
+                labels=("agent/automated-review-passed",),
             ),
             tmp_path,
             _legacy_config(),
@@ -2157,11 +2432,15 @@ def test_build_evidence_comment_uses_structured_rendering(
         pr_url="https://github.com/example/repo/pull/7",
         head_sha="abc1234",
         issue_body=_STRUCTURED_ISSUE_BODY,
+        base_sha="b" * 40,
+        patch_id="c" * 40,
     )
 
     assert "### RV-1" in comment
     assert "### RV-2" in comment
     assert "语言" in comment
+    assert "version=2" in comment
+    assert "PR 改动指纹（patch-id）" in comment
 
 
 def test_build_evidence_comment_uses_legacy_rendering_without_marker(

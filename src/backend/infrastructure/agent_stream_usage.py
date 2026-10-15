@@ -1,10 +1,10 @@
 """agent 输出流中的旁路观测：token 用量与会话 id。
 
-从 agent CLI 的原始输出流解析官方自报的 usage 统计。当前识别
-claude stream-json 的 ``result`` 事件形态（``usage`` 携带 input /
-output / cache_read / cache_creation 四个整数字段）；其他 agent 的
-result 事件只有字段名称和语义一致时才会命中，形状不同或拿不到时宽容降级为"无数据"
-（``None``），绝不估算、绝不抛异常影响主流程。
+从 agent CLI 的原始输出流解析官方自报的 usage 统计。支持 ``result.usage`` 与
+``assistant.message.usage`` 两种事件形态，字段均须与 input / output / cache_read /
+cache_creation 的语义一致；完整 assistant 消息按单次模型请求累计，最终结果用量作为
+兼容回退。形状不同或拿不到时宽容降级为"无数据"（``None``），绝不估算、绝不抛异常
+影响主流程。
 
 同一逐行观测点顺带捕获 agent CLI 自报的 ``session_id``（兼容 Claude / Qoder /
 CodeBuddy、Codex、OpenCode、pi 的结构化事件，以及 Kimi 退出提示），崩溃对账与恢复
@@ -50,24 +50,17 @@ def extract_usage_event(line: str) -> TokenUsage | None:
         返回 :class:`TokenUsage`；非 JSON 行、非 result 事件、usage 缺失或
         全部字段非法时返回 ``None``。
     """
-    # 廉价预检：result 事件的 JSON 文本必然含 "result" 子串，先排除绝大多数
-    # 非 JSON 行（plain/PTY 的人类可读输出），避免逐行 json.loads 的异常开销。
-    if "result" not in line:
+    parsed_event = _extract_stream_usage_event(line)
+    if parsed_event is None or parsed_event[0] != "result":
         return None
-    try:
-        event_payload = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(event_payload, dict) or event_payload.get("type") != "result":
-        return None
-    return build_token_usage(event_payload.get("usage"))
+    return parsed_event[1]
 
 
 def build_token_usage(usage_payload: object) -> TokenUsage | None:
     """把 usage dict 宽容地转成 :class:`TokenUsage`。
 
     Args:
-        usage_payload: result 事件里的 ``usage`` 值；非 dict 直接 ``None``。
+        usage_payload: assistant 或 result 事件里的 ``usage`` 值；非 dict 直接 ``None``。
 
     Returns:
         四个字段中至少一个为合法非负整数时返回实例（缺失字段记 0，与
@@ -91,6 +84,32 @@ def build_token_usage(usage_payload: object) -> TokenUsage | None:
         cache_read_input_tokens=field_values.get("cache_read_input_tokens", 0),
         cache_creation_input_tokens=field_values.get("cache_creation_input_tokens", 0),
     )
+
+
+def _extract_stream_usage_event(line: str) -> tuple[str, TokenUsage] | None:
+    """提取完整 assistant 消息或最终 result 事件中的 usage。"""
+    if '"usage"' not in line or not any(
+        event_name in line for event_name in ('"assistant"', '"result"')
+    ):
+        return None
+    try:
+        event_payload = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(event_payload, dict):
+        return None
+    event_type = event_payload.get("type")
+    if event_type == "assistant":
+        message_payload = event_payload.get("message")
+        if not isinstance(message_payload, dict):
+            return None
+        usage_payload = message_payload.get("usage")
+    elif event_type == "result":
+        usage_payload = event_payload.get("usage")
+    else:
+        return None
+    parsed_usage = build_token_usage(usage_payload)
+    return (event_type, parsed_usage) if parsed_usage is not None else None
 
 
 def extract_session_id_event(line: str) -> str | None:
@@ -162,27 +181,44 @@ def extract_reported_model_event(line: str) -> str | None:
 
 
 class StreamUsageCollector:
-    """流式采集器：逐行观察原始 stdout，保留最近一次解析出的用量、会话 id 与模型名。
+    """流式采集器：逐行观察原始 stdout，收集用量、会话 id 与模型名。
 
-    claude 的 stream-json 流里 result 事件出现在末尾且只有一个；若出现
-    多个，以最后一次为准（与"最终结果"语义一致）。所有方法都不抛异常——
-    用量采集是旁路，任何解析问题都静默降级为"无数据"。
+    完整 assistant 消息里的 usage 是单次请求用量，按调用累计；若流里没有可用的
+    assistant 用量，则回退到最后一条 result usage。两种来源不相加，避免重复统计。
+    所有方法都不抛异常——用量采集是旁路，任何解析问题都静默降级为"无数据"。
     """
 
     def __init__(self) -> None:
         """初始化为"尚未观察到任何用量、会话 id 或模型名"。"""
         self._usage: TokenUsage | None = None
+        self._assistant_usage: TokenUsage | None = None
         self._session_id: str | None = None
         self._reported_model: str | None = None
 
     def observe_line(self, line: str) -> None:
         """观察一行原始输出；解析失败静默跳过。"""
         try:
-            parsed_usage = extract_usage_event(line)
+            parsed_usage_event = _extract_stream_usage_event(line)
         except Exception:  # pragma: no cover - 防御性兜底：采集绝不影响主流程
-            parsed_usage = None
-        if parsed_usage is not None:
-            self._usage = parsed_usage
+            parsed_usage_event = None
+        if parsed_usage_event is not None:
+            event_type, parsed_usage = parsed_usage_event
+            if event_type == "assistant":
+                previous_usage = self._assistant_usage or TokenUsage()
+                self._assistant_usage = TokenUsage(
+                    input_tokens=previous_usage.input_tokens + parsed_usage.input_tokens,
+                    output_tokens=previous_usage.output_tokens + parsed_usage.output_tokens,
+                    cache_read_input_tokens=(
+                        previous_usage.cache_read_input_tokens
+                        + parsed_usage.cache_read_input_tokens
+                    ),
+                    cache_creation_input_tokens=(
+                        previous_usage.cache_creation_input_tokens
+                        + parsed_usage.cache_creation_input_tokens
+                    ),
+                )
+            else:
+                self._usage = parsed_usage
         try:
             parsed_session_id = extract_session_id_event(line)
         except Exception:  # pragma: no cover - 防御性兜底：同上
@@ -203,8 +239,12 @@ class StreamUsageCollector:
 
     @property
     def usage(self) -> TokenUsage | None:
-        """最近一次解析出的用量；整条流无 result usage 时为 ``None``。"""
-        return self._usage
+        """返回 assistant 请求用量累计值，或缺少时回退到最终 result usage。"""
+        if self._assistant_usage is not None and self._assistant_usage.total_tokens > 0:
+            return self._assistant_usage
+        if self._usage is not None:
+            return self._usage
+        return self._assistant_usage
 
     @property
     def session_id(self) -> str | None:
@@ -229,20 +269,19 @@ def parse_usage_from_plain_stdout(stdout: str) -> TokenUsage | None:
     """对未渲染的 plain / PTY stdout 做事后容错解析。
 
     适用于走通用执行路径的 agent（kimi / codex 等）：它们的 stdout 没有被
-    渲染改写，若末尾恰好有同形的 result 事件行即可命中；否则返回 ``None``。
+    渲染改写，若包含 assistant 请求用量或同形的 result 事件行即可命中；否则返回
+    ``None``。
 
     Args:
         stdout: 子进程完整 stdout 文本。
 
     Returns:
-        最后一条可解析出的用量；整段输出无 result usage 时为 ``None``。
+        assistant 请求用量累计值，或缺少时回退到最后一条 result usage；无可解析用量时
+        返回 ``None``。
     """
-    final_usage: TokenUsage | None = None
-    for line in stdout.splitlines():
-        parsed_usage = extract_usage_event(line)
-        if parsed_usage is not None:
-            final_usage = parsed_usage
-    return final_usage
+    usage_collector = StreamUsageCollector()
+    usage_collector.observe_text(stdout)
+    return usage_collector.usage
 
 
 def parse_reported_model_from_plain_stdout(stdout: str) -> str | None:

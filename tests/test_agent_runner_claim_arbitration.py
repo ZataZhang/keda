@@ -67,6 +67,30 @@ def test_sole_bidder_wins_and_issue_becomes_running() -> None:
     assert "agent/running" in labels_call["add"]
 
 
+def test_supervisor_rework_claim_keeps_supervising_label() -> None:
+    """Supervisor 返工仲裁可串行化执行，且不会重新进入 running。"""
+    client = FakeGitHubClient()
+
+    arbitrate_first_claim(
+        issue_number=42,
+        github_client=client,
+        config=AppConfig(),
+        selected_agent="claude",
+        grace_seconds=0.0,
+        host=HOST,
+        pid=111,
+        started_at=NOW,
+        sleeper=lambda _seconds: None,
+        pid_alive=lambda candidate: candidate == 111,
+        now=NOW,
+        target_label="agent/supervising",
+    )
+
+    labels_call = next(call for call in client.calls if call["method"] == "edit_issue_labels")
+    assert labels_call["add"] == ["agent/supervising"]
+    assert "agent/running" not in labels_call["add"]
+
+
 def test_winner_hook_runs_before_running_label_transition() -> None:
     """互斥准入在赢家切 running 前执行，锁冲突不会留下假 running 标签。"""
     client = FakeGitHubClient()

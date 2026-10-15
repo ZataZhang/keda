@@ -77,6 +77,8 @@ uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
 pipx install kedacode
 ```
 
+`uv tool install` 不会自动配置 shell 补全。在 bash、zsh 或 fish 中，若尚未配置，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中安装；选择安装后本次命令会先退出，提示重载 shell，再重新运行刚才的 `kc` 命令。也可以按所用 shell 执行一次 `kc completion install --shell <bash|zsh|fish>`（选择其中一个）。详细步骤见下方「安装 shell 自动补全」。
+
 **install.sh（自动选择 `uv` / `pipx` / `pip --user`，零 sudo，失败有明确提示）：**
 
 ```bash

@@ -44,8 +44,8 @@ def run_agent_with_prompt_resilient(
         agent_call_options: 原样透传给 :func:`run_agent_with_prompt` 的关键字参数
             （`config` / `capture_output` / `timeout_seconds` /
             `inactivity_timeout_seconds` / `issue` / `profile` /
-            `model_selection`），两个入口共用同一份参数契约，避免逐字段重复
-            声明而漂移。
+            `model_selection` / `cancel_check`），两个入口共用同一份参数契约，
+            避免逐字段重复声明而漂移。
 
     Returns:
         The successful :class:`CommandResult`.
@@ -127,6 +127,10 @@ def run_agent_with_prompt_resilient(
                 )
                 current_prompt = run_agent_once_module._TIMEOUT_CONTINUATION_PROMPT
                 forwarded_options["resume_session_id"] = timeout_session_id
+            except InterruptedError:
+                # 人工接管取消（Issue #278）：InterruptedError 是 OSError 子类，
+                # 绝不进瞬时重试——人被接管后原地重试会把刚杀的 verifier 又拉起来。
+                raise
             except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
                 if retry_index >= max_retries or not run_agent_once_module.is_transient_failure(
                     exc

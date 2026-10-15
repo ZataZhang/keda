@@ -51,24 +51,16 @@ from backend.core.use_cases.agent_runner_direct_pr_round import (
     DirectPrPublicationCandidate,
     reset_unstarted_direct_pr_selection,
 )
-from backend.core.use_cases.agent_runner_events import (
-    find_latest_failure_context_comment,
-    has_failure_context_marker,
-)
 from backend.core.use_cases.agent_runner_issue_blocked_resolution import (
     _guard_blocked_issue_has_resolution,
 )
-from backend.core.use_cases.agent_runner_failure import (
-    MaxRetriesExceededError,
-    format_failure_context_comment,
+from backend.core.use_cases.agent_runner_failure_handoff import (
+    _read_previous_failure_context,
+    _record_failure_handoff,
 )
 from backend.core.use_cases.agent_runner_git import (
     get_current_branch,
     has_changes,
-)
-from backend.core.use_cases.agent_runner_pr_handoff import (
-    _build_pr_handoff_ref_block,
-    _with_pr_handoff_ref,
 )
 from backend.core.use_cases.agent_runner_publication import (
     LocalCommitReuseRequest,
@@ -79,7 +71,6 @@ from backend.core.use_cases.agent_runner_publication import (
     _reuse_local_commit,
     publish_draft_pr_before_verifier,
 )
-from backend.core.use_cases.agent_runner_publish import publish_changes
 from backend.core.use_cases.agent_runner_recovery_selection import (
     DirectPrHandoffRequest,
     RecoverySelectionRequest,
@@ -92,7 +83,6 @@ from backend.core.use_cases.agent_runner_supervisor import _run_supervisor_with_
 from backend.core.use_cases.agent_runner_validation import (
     ValidationEvidenceError,
     publish_validation_evidence_best_effort,
-    resolve_issue_evidence_relpath,
 )
 from backend.core.use_cases.agent_runner_workflow import (
     transition_issue_workflow_state,
@@ -100,11 +90,11 @@ from backend.core.use_cases.agent_runner_workflow import (
 from backend.core.use_cases.agent_runner_worktree_branch import _ensure_worktree_branch
 from backend.core.use_cases.agent_runner_worktree_probe import _find_worktree_path_for_issue
 from backend.core.use_cases.pr_supervisor import (
-    build_rebase_repair_complete_comment,
     execute_rebase,
     execute_repair,
 )
 from backend.core.use_cases.pr_supervisor_findings import _load_previous_findings
+from backend.core.use_cases.pr_supervisor_messages import build_rebase_repair_complete_comment
 from backend.core.use_cases.run_agent_once import (
     choose_agent,
     create_or_reuse_worktree,
@@ -137,6 +127,7 @@ RUNTIME_DEPENDENCY_NAMES = (
     "_finish_implementation_publication",
     "_release_blocked_claim_lock",
     "_reuse_existing_local_commit",
+    "arbitrate_first_claim",
     "publish_draft_pr_before_verifier",
     "_run_supervisor_with_repair_loop",
     "choose_agent",
@@ -203,6 +194,10 @@ def _process_blocked_resolution(
         publish_stage: 发布档位：FAST / DIRECT 跳过 Phase 4.5 的 RV 重跑与 verifier；
             PRD_AUTO_MERGE 保留 RV 重跑、只跳 verifier；DIRECT 再跳过审核 agent 与仓内验证命令。
     """
+    from backend.core.use_cases.agent_runner_issue_control import (
+        VerifierCancelledByHumanError,
+        finalize_verifier_takeover,
+    )
     from backend.core.use_cases.agent_runner_publish import validate_safe_changes
     from backend.core.use_cases.run_agent_once import (
         build_blocked_continuation_prompt,
@@ -283,24 +278,40 @@ def _process_blocked_resolution(
         )
         before_sha = get_head_sha(worktree_path, process_runner)
 
-        commit_result = run_agent_until_committed(
-            selected_agent=selected_agent,
-            issue=issue,
-            worktree_path=worktree_path,
-            config=config,
-            process_runner=process_runner,
-            before_sha=before_sha,
-            expected_branch=current_branch,
-            prompt_override=continuation_prompt,
-            on_attempt_recorded=on_attempt_recorded,
-            on_agent_usage=on_agent_usage,
-            before_verifier_callback=partial(
-                publish_draft_pr_before_verifier, pre_verifier_publication
-            ),
-            model_selection=implementation_model_selection,
-            publish_stage=publish_stage,
-            repo_id=repo_id,
-        )
+        try:
+            commit_result = run_agent_until_committed(
+                selected_agent=selected_agent,
+                issue=issue,
+                worktree_path=worktree_path,
+                config=config,
+                process_runner=process_runner,
+                before_sha=before_sha,
+                expected_branch=current_branch,
+                prompt_override=continuation_prompt,
+                on_attempt_recorded=on_attempt_recorded,
+                on_agent_usage=on_agent_usage,
+                before_verifier_callback=partial(
+                    publish_draft_pr_before_verifier, pre_verifier_publication
+                ),
+                model_selection=implementation_model_selection,
+                publish_stage=publish_stage,
+                repo_id=repo_id,
+            )
+        except VerifierCancelledByHumanError:
+            # 人工接管（Issue #278）：解阻续作路径与首跑同样交班——verifier
+            # 进程树已回收、控制行已落闸，收敛 GitHub 事实后正常返回。
+            finalize_verifier_takeover(
+                repo_id=repo_id,
+                issue=issue,
+                config=config,
+                github_client=github_client,
+                expected_branch=current_branch,
+            )
+            _logger.info(
+                "Issue #%d: verifier during blocked resolution taken over by a human.",
+                issue.number,
+            )
+            return
 
         # 完成发布流程
         _finish_implementation_publication(
@@ -319,223 +330,6 @@ def _process_blocked_resolution(
         )
     finally:
         _release_blocked_claim_lock(lock_path)
-
-
-def _resolve_handoff_comment_url(
-    issue: IssueSummary,
-    github_client: IGitHubClient,
-) -> str:
-    """定位刚写下的交接评论并返回其 permalink。
-
-    端口上的 :meth:`IGitHubClient.comment_issue` 不返回评论 ID，因此回读评论列表按
-    marker 找最近一条。读不到时退回 Issue URL——回链的目的是让人顺路找到最新结论，
-    落到 Issue 上仍然找得到，不能因为拿不到 permalink 就放弃发布。
-    """
-    try:
-        comment_entries = github_client.list_issue_comment_entries(issue.number)
-    except Exception as entries_exc:  # noqa: BLE001 - 回链尽力而为，不阻断发布
-        _logger.warning(
-            "Cannot resolve handoff comment permalink for Issue #%d: %s",
-            issue.number,
-            entries_exc,
-        )
-        return issue.url
-    for comment_id, comment_body in reversed(comment_entries):
-        if comment_id and has_failure_context_marker(comment_body):
-            return f"{issue.url}#issuecomment-{comment_id}"
-    return issue.url
-
-
-def _attach_handoff_ref_to_draft_pr(
-    *,
-    issue: IssueSummary,
-    github_client: IGitHubClient,
-    branch: str,
-    handoff_url: str,
-    attempt_count: int,
-    handoff_comment_posted: bool,
-) -> None:
-    """把交接回链固定附到该分支的 PR 正文尾部。
-
-    内容生成被关闭（回落到 ``fallback_body``）或复用既有 PR 未改写正文时，
-    ``create_draft_pr`` 都不会带上这段上下文，因此回链在发布之后单独补一次，
-    使 FR-6 的"无论哪种形态人都能顺链找到最新结论"成立。
-    """
-    pr_context = github_client.get_pull_request_context(branch)
-    if pr_context is None or pr_context.number is None:
-        _logger.warning(
-            "Skipping handoff back-link on the Draft PR for Issue #%d: "
-            "PR context for branch %s is unavailable.",
-            issue.number,
-            branch,
-        )
-        return
-    github_client.update_pull_request_body(
-        pr_context.number,
-        _with_pr_handoff_ref(
-            pr_context.body,
-            _build_pr_handoff_ref_block(
-                handoff_url,
-                attempt_count=attempt_count,
-                handoff_comment_posted=handoff_comment_posted,
-            ),
-        ),
-    )
-
-
-def _read_previous_failure_context(
-    issue: IssueSummary,
-    github_client: IGitHubClient,
-) -> str:
-    """按 latest-wins 取上一轮的交接记录正文，供续作 prompt 回灌。
-
-    只取最近一条、不取全部评论：Issue 历史里既有噪音也有早已修复的旧失败，注入越多
-    下一轮越可能被过期信息带偏。读不到或解析不出时返回空串（fail-closed 到"没有上一
-    轮上下文"），既不阻断续作也不伪造上下文。
-    """
-    try:
-        comment_bodies = github_client.list_issue_comments(issue.number)
-    except Exception as comments_exc:  # noqa: BLE001 - 缺上下文照常续作
-        _logger.warning(
-            "Cannot read Issue #%d comments for failure-context reflow: %s",
-            issue.number,
-            comments_exc,
-        )
-        return ""
-    return find_latest_failure_context_comment(comment_bodies) or ""
-
-
-def _record_failure_handoff(
-    *,
-    issue: IssueSummary,
-    worktree_path: Path,
-    config: AppConfig,
-    github_client: IGitHubClient,
-    process_runner: IProcessRunner,
-    failure_exc: MaxRetriesExceededError,
-    checkpoint_sha: str | None,
-    expected_branch: str,
-    content_generator: IContentGenerator | None,
-) -> None:
-    """recovery 耗尽时写交接记录，并在存在安全 commit 时发布同源的 Draft PR。
-
-    处理顺序是刻意排定的：先由调用方 checkpoint、再写交接记录（**无论有没有快照**，
-    因为"无 commit 也要交班"是必须覆盖的一格）、有快照才发布 PR。
-
-    整层 best-effort：**包括渲染本身在内的任何一步抛错都只记日志、绝不上抛**。交接
-    写挂了不能把"验证没过"变成"报告写挂了"，原始 ``MaxRetriesExceededError`` 必须
-    照常由调用方抛出。渲染之所以也要包进来，是因为它并不比评论调用更安全：
-    ``attempt_results`` 的形状、证据路径解析、以及 :func:`format_failure_context_comment`
-    里对 verifier verdict 的解析都可能抛；只包评论会留下这条缺口。
-    """
-    try:
-        _write_failure_handoff(
-            issue=issue,
-            worktree_path=worktree_path,
-            config=config,
-            github_client=github_client,
-            process_runner=process_runner,
-            failure_exc=failure_exc,
-            checkpoint_sha=checkpoint_sha,
-            expected_branch=expected_branch,
-            content_generator=content_generator,
-        )
-    except Exception as handoff_exc:  # noqa: BLE001 - 交接失败绝不掩盖原始失败
-        _logger.error(
-            "Failed to record the failure handoff for Issue #%d: %s "
-            "(the original recovery exhaustion is still being raised).",
-            issue.number,
-            handoff_exc,
-        )
-
-
-def _write_failure_handoff(
-    *,
-    issue: IssueSummary,
-    worktree_path: Path,
-    config: AppConfig,
-    github_client: IGitHubClient,
-    process_runner: IProcessRunner,
-    failure_exc: MaxRetriesExceededError,
-    checkpoint_sha: str | None,
-    expected_branch: str,
-    content_generator: IContentGenerator | None,
-) -> None:
-    """交接记录与失败 Draft PR 的实际写入步骤，由 :func:`_record_failure_handoff` 包护。
-
-    评论 / 发布 / 回链三步各自吞异常，好让"评论写挂了但仍然发布了 PR"这类部分成功
-    如实留在日志里；渲染与快照分支留在外层守卫内。
-    """
-    attempt_results = list(failure_exc.attempt_results)
-    handoff_body = format_failure_context_comment(
-        failure_exc,
-        attempt_results,
-        issue_number=issue.number,
-        checkpoint_sha=checkpoint_sha,
-        evidence_dir=resolve_issue_evidence_relpath(config, issue),
-    )
-    # 评论没写成功时不能继续宣称"权威交接记录"，否则 PR 正文会指向一条不存在的评论。
-    handoff_url = issue.url
-    handoff_comment_posted = False
-    try:
-        github_client.comment_issue(issue.number, handoff_body)
-    except Exception as comment_exc:  # noqa: BLE001 - 保留原始失败
-        _logger.error(
-            "Failed to write the failure handoff comment on Issue #%d: %s",
-            issue.number,
-            comment_exc,
-        )
-    else:
-        handoff_comment_posted = True
-        handoff_url = _resolve_handoff_comment_url(issue, github_client)
-
-    if checkpoint_sha is None:
-        _logger.info(
-            "Issue #%d exhausted recovery without a safely publishable commit; "
-            "handoff record written, no Draft PR published.",
-            issue.number,
-        )
-        return
-
-    # 本 PRD 唯一放宽的安全检查是 require_prd_archived=False，且只在这条耗尽路径上
-    # 显式传入。注意此刻在途改动已被 checkpoint 提交，push 侧的 forbidden/evidence
-    # 检查按未提交状态取变更集、对已提交内容实际是空转；真正的禁改路径隔离发生在
-    # checkpoint 的 staging（checkpoint_uncommitted_progress 显式排除禁改路径）。放宽
-    # 的只有归档这一项，其余检查调用照旧执行。
-    try:
-        branch, _pr_url = publish_changes(
-            issue,
-            worktree_path,
-            config,
-            github_client,
-            process_runner,
-            expected_branch=expected_branch,
-            content_generator=content_generator,
-            require_prd_archived=False,
-        )
-    except Exception as publish_exc:  # noqa: BLE001 - 发布失败不掩盖原始失败
-        _logger.error(
-            "Failed to publish the failure Draft PR for Issue #%d: %s",
-            issue.number,
-            publish_exc,
-        )
-        return
-
-    try:
-        _attach_handoff_ref_to_draft_pr(
-            issue=issue,
-            github_client=github_client,
-            branch=branch,
-            handoff_url=handoff_url,
-            attempt_count=len(attempt_results),
-            handoff_comment_posted=handoff_comment_posted,
-        )
-    except Exception as ref_exc:  # noqa: BLE001 - 回链失败不掩盖原始失败
-        _logger.error(
-            "Failed to attach the handoff back-link to the Draft PR for Issue #%d: %s",
-            issue.number,
-            ref_exc,
-        )
 
 
 def _process_ready_issue(
@@ -577,6 +371,10 @@ def _process_ready_issue(
         content_generator: 可选的 AI 内容生成器
         repo_id: 稳定的仓库 registry id，用于短期记忆分区。
     """
+    from backend.core.use_cases.agent_runner_issue_control import (
+        VerifierCancelledByHumanError,
+        finalize_verifier_takeover,
+    )
     from backend.core.use_cases.run_agent_once import (
         MaxRetriesExceededError,
         PrdDeliveryError,
@@ -698,6 +496,7 @@ def _process_ready_issue(
             content_generator=content_generator,
             publish_stage=publish_stage,
             direct_pr_label=stage_decision.direct_pr_label,
+            repo_id=repo_id,
         )
         return
 
@@ -724,6 +523,23 @@ def _process_ready_issue(
             publish_stage=publish_stage,
             repo_id=repo_id,
         )
+    except VerifierCancelledByHumanError:
+        # 人工接管（Issue #278）：verifier 进程树已回收、控制行已落闸，交班
+        # 收敛 GitHub 侧事实后**正常返回**——不 checkpoint、不写失败交接、
+        # 也不进换 agent 回退：人被接管不是一次可由下一个 agent 修复的失败。
+        finalize_verifier_takeover(
+            repo_id=repo_id,
+            issue=issue,
+            config=config,
+            github_client=github_client,
+            expected_branch=expected_branch,
+        )
+        _logger.info(
+            "Issue #%d: independent verifier taken over by a human; run handed off "
+            "to manual review.",
+            issue.number,
+        )
+        return
     except (
         MaxRetriesExceededError,
         ProviderCapacityError,
@@ -803,12 +619,14 @@ def _process_running_rework(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     marker: ReviewEventMarker,
+    repo_id: str | None = None,
+    supervisor_owned: bool = False,
     **kwargs: object,
 ) -> None:
-    """处理带 rework 标记的 running Issue。
+    """处理带 rework 标记的 Issue。
 
-    当 Issue 有 post_pr_rework_requested 事件标记时进入此路径。
-    监督者之前已请求修复，现在执行修复操作。
+    runner 恢复旧的 ``agent/running`` 返工时，生命周期仍走 runner 状态；Supervisor
+    自己恢复或执行修复时，始终保持 ``agent/supervising``，并把后续复审留给下一轮。
 
     Args:
         issue: Issue 对象
@@ -818,10 +636,24 @@ def _process_running_rework(
         github_client: GitHub 客户端
         process_runner: 进程运行器
         marker: 事件标记（包含动作类型和分支信息）
+        repo_id: 稳定仓库标识（Issue #278），透传给 rework 后的监督循环做
+            人工接管闸门（``autopilot_hold``）检查。
+        supervisor_owned: 是否由 post-PR supervisor 执行；为真时不进入 running，也不
+            在当前 review pass 内再次启动 supervisor cycle。
     """
     pr_branch = marker.pr_branch
     if pr_branch is None:
         raise RuntimeError("Rework marker missing pr_branch")
+
+    if supervisor_owned:
+        supervisor_agent = choose_agent(issue, config, agent)
+        arbitrate_first_claim(
+            issue_number=issue.number,
+            github_client=github_client,
+            config=config,
+            selected_agent=supervisor_agent,
+            target_label=config.labels.supervising,
+        )
 
     # 定位 worktree；缺失时进入 blocked 并给出可操作的恢复说明。
     try:
@@ -922,6 +754,11 @@ def _process_running_rework(
     # 标记为 supervising 并获取 PR 上下文
     transition_issue_workflow_state(github_client, issue.number, config, config.labels.supervising)
 
+    # Review daemon 的这次调用已经是 supervisor 触发的 repair。让下一轮按 PR/head/check
+    # 变化重新评审，避免在同一调用栈里重复启动 cycle 或把返工转交给 runner。
+    if supervisor_owned:
+        return
+
     # 修复后再次运行监督循环
     if config.post_pr_supervisor.enabled:
         pr_context = github_client.get_pull_request_context(pr_branch)
@@ -941,6 +778,7 @@ def _process_running_rework(
             process_runner=process_runner,
             pr_context=pr_context,
             supervisor_agent=supervisor_agent,
+            repo_id=repo_id,
         )
     else:
         transition_issue_workflow_state(github_client, issue.number, config, config.labels.review)
@@ -958,6 +796,7 @@ def _process_running_publish_recovery(
     publish_stage: PublishStage = PublishStage.NORMAL,
     stage_selection: PublishStageSelection | None = None,
     cleanup_only: bool = False,
+    repo_id: str | None = None,
     **kwargs: object,
 ) -> None:
     """恢复 running Issue 的发布流程。
@@ -976,6 +815,8 @@ def _process_running_publish_recovery(
         publish_stage: 发布档位：FAST / DIRECT 跳过发布前的最终 RV / verifier 复核；
             PRD_AUTO_MERGE 仍重跑 RV，只跳过 verifier。
         cleanup_only: 仅补既有 PR 交接；关联失效时拒绝转成普通发布。
+        repo_id: 稳定仓库标识（Issue #278），透传给恢复发布路径做 verdict
+            发布守卫与 PR 后监督的人工接管闸门检查。
     """
     selected_agent = choose_agent(issue, config, agent)
 
@@ -1044,6 +885,7 @@ def _process_running_publish_recovery(
             content_generator=content_generator,
             publish_stage=publish_stage,
             direct_pr_label=stage_decision.direct_pr_label,
+            repo_id=repo_id,
         )
     finally:
         _release_blocked_claim_lock(lock_path)

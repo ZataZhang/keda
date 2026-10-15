@@ -57,6 +57,7 @@ from backend.core.use_cases.agent_runner_blocked_claim import (
 )
 from backend.core.use_cases.agent_runner_claim_arbitration import (
     ClaimArbitrationLost,
+    arbitrate_first_claim,
 )
 from backend.core.use_cases.agent_runner_publication import (
     _finish_existing_commit_publication,
@@ -137,6 +138,7 @@ _logger = logging.getLogger(__name__)
 # 内没有直接调用点，仍必须保留在命名空间里。
 __all__ = [
     "BlockedWorktreeClaimedError",
+    "arbitrate_first_claim",
     "_acquire_blocked_claim_lock",
     "_ensure_worktree_branch",
     "_find_worktree_path_for_issue",

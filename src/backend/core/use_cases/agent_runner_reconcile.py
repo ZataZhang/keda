@@ -31,6 +31,7 @@ from typing import Callable
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.use_cases.agent_runner_failure import ATTEMPT_HISTORY_HEADING
+from backend.core.use_cases.agent_runner_events import parse_latest_pending_rework_marker
 from backend.core.use_cases.agent_runner_reclaim import (
     ClaimMarkerDetail,
     classify_claim_staleness,
@@ -249,6 +250,7 @@ def _collect_stale_attempt_evidence(
         session_id=session_id,
         stale_attempt_count=_count_reconcile_dispositions(comments),
         max_recovery_attempts=max(0, pass_context.config.runner.max_recovery_attempts),
+        pending_rework=parse_latest_pending_rework_marker(comments) is not None,
     )
 
 
@@ -347,10 +349,10 @@ def _reconcile_content_hash(
 ) -> str:
     """把本次判定的输入折成一个 16 位 content hash（FR-5 去重键）。
 
-    同一僵尸（同一 claim）、同一结论 → 同一 hash → 重放不再写评论。**不把对账
+    同一僵尸（同一 claim）、同一结论与返工状态 → 同一 hash → 重放不再写评论。**不把对账
     次数折进来**：comment 写成功但 label 变更失败时，下一轮次数已经 +1，若参与
-    hash 就会把同一次中断再写一遍。现场或结论变化（例如人工补了 session 记录后
-    改判续传）则 hash 变化，允许留下新的对账记录。
+    hash 就会把同一次中断再写一遍。现场、结论或返工状态变化（例如人工补了
+    session 记录后改判续传）则 hash 变化，允许留下新的对账记录。
     """
     hash_source = "|".join(
         (
@@ -360,6 +362,7 @@ def _reconcile_content_hash(
             claim.started_at.isoformat() if claim.started_at is not None else "",
             claim.agent or "",
             decision.disposition.value,
+            str(decision.pending_rework),
         )
     )
     return hashlib.sha256(hash_source.encode("utf-8")).hexdigest()[:16]
@@ -402,11 +405,12 @@ def _apply_disposition(
         )
     github_client = pass_context.github_client
     config = pass_context.config
-    target_label = (
-        config.labels.failed
-        if decision.disposition is StaleAttemptDisposition.FAIL
-        else config.labels.ready
-    )
+    if decision.disposition is StaleAttemptDisposition.FAIL:
+        target_label = config.labels.failed
+    elif decision.pending_rework:
+        target_label = config.labels.running
+    else:
+        target_label = config.labels.ready
     issue_before = github_client.get_issue(issue.number)
     if config.labels.running not in issue_before.labels:
         return ReconcileOutcome(

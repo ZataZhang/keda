@@ -164,6 +164,7 @@ def _merge_label_config(
         running=override_data.get("running", base_config.running),
         supervising=override_data.get("supervising", base_config.supervising),
         review=override_data.get("review", base_config.review),
+        human_review=override_data.get("human_review", base_config.human_review),
         failed=override_data.get("failed", base_config.failed),
         blocked=override_data.get("blocked", base_config.blocked),
         waiting=override_data.get("waiting", base_config.waiting),
@@ -173,6 +174,7 @@ def _merge_label_config(
         rework_prd=override_data.get("rework_prd", base_config.rework_prd),
         deliberate=override_data.get("deliberate", base_config.deliberate),
         direct_pr=override_data.get("direct_pr", base_config.direct_pr),
+        auto_merge=override_data.get("auto_merge", base_config.auto_merge),
         prd_auto_merge=override_data.get("prd_auto_merge", base_config.prd_auto_merge),
         agent_labels=agent_labels,
     )

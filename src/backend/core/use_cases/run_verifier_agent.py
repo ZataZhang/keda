@@ -1,16 +1,15 @@
-"""Independent verifier agent — verdict protocol (PR#2 T3).
+"""Independent verifier agent — 运行与门禁编排 (PR#2 T3)。
 
 T3 在 builder 提交之后、开 PR 之前,由一个**独立 verifier agent**(尽量换一个
 model、在 builder 提交点的干净 worktree)从需求意图独立复现真实入口并对抗性
 证伪,产出结构化 verdict 喂给发布门禁。
 
-本模块先承载 **verdict 协议**:模型、隐藏 marker、以及确定性解析。解析遵循
-fail-safe——没有可解析的 verdict(verifier 没产出 / 产出畸形)一律按 ``red``
-(阻断)处理,绝不让"无判定"静默放行。所有 marker 与 ``agent_runner_events``
-的 ``iar:`` hidden marker 同型。
-
-后续切片再加 ``build_verifier_prompt`` 与 ``run_verifier_agent``(agent 调用、
-干净 worktree、编排接入),以及 daemon 的"人工签收 + verifier-passed"双门禁。
+本模块只负责**编排**:候选 agent 选择与回退、干净 worktree 前置条件、证据快照
+与恢复、人工接管取消探针、verdict 发布前的 CAS,以及 fail-safe 阻断消息。verdict
+协议本身(结论模型 / 隐藏 marker / prompt 组装)在 :mod:`agent_runner_verdict`,
+原始响应落盘在 :mod:`agent_runner_verifier_response_log`,verdict 的 PR 侧副作用
+在 :mod:`agent_runner_verdict_pr_effects`。协议与落盘的名字在本模块重新导出,
+既有调用点仍按 ``run_verifier_agent`` 这条导入路径使用。
 """
 
 from __future__ import annotations
@@ -18,12 +17,12 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 
-from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
-from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, TokenUsage
+from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.use_cases.agent_candidate_fallback import (
     build_agent_candidates,
     effective_fallback_candidates,
@@ -32,16 +31,38 @@ from backend.core.use_cases.agent_runner_evidence_snapshot import (
     restore_evidence_snapshot,
     snapshot_evidence_dir,
 )
+from backend.core.use_cases.agent_runner_failure import is_provider_capacity_failure
+from backend.core.use_cases.agent_runner_issue_control import (
+    VerifierCancelledByHumanError,
+    VerifierRunHandle,
+    begin_verifier_run,
+)
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceManifest,
     ValidationEvidenceError,
     has_structured_evidence_marker,
     load_evidence_manifest,
 )
-from backend.core.use_cases.agent_runner_failure import is_provider_capacity_failure
 from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_dir,
     validation_required,
+)
+from backend.core.use_cases.agent_runner_verdict import (
+    ValidationVerdict as ValidationVerdict,
+    VerifierUnavailableError as VerifierUnavailableError,
+    build_verifier_prompt as build_verifier_prompt,
+    format_verifier_verdict_marker as format_verifier_verdict_marker,
+    parse_verifier_verdict as parse_verifier_verdict,
+)
+from backend.core.use_cases.agent_runner_verdict_pr_effects import (
+    apply_verifier_verdict_to_pr as apply_verifier_verdict_to_pr,
+    build_verifier_yellow_comment as build_verifier_yellow_comment,
+)
+from backend.core.use_cases.agent_runner_verifier_response_log import (
+    VERIFIER_RESPONSE_FILENAME,
+    save_cancelled_verifier_response,
+    save_timed_out_verifier_response,
+    write_verifier_response_log,
 )
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.use_cases.agent_invocation_tracing import PHASE_VERIFICATION
@@ -54,266 +75,6 @@ from backend.core.use_cases.run_agent_once import (
 )
 
 _logger = logging.getLogger(__name__)
-
-_VALID_RISKS: tuple[str, ...] = ("green", "yellow", "red")
-_VERDICT_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:verifier-verdict\s+risk=(?P<risk>green|yellow|red)\s*-->"
-)
-_NO_VERDICT_FINDINGS = "No parseable verifier verdict marker found; treating as blocked (red)."
-_VERIFIER_RESPONSE_FILENAME = "verifier-response.txt"
-
-
-@dataclass(frozen=True)
-class ValidationVerdict:
-    """Independent verifier's structured verdict.
-
-    ``risk`` 取值 {``green``, ``yellow``, ``red``}:green/yellow 放行(yellow
-    附警告评论、不阻断),red 阻断发布并打回 builder。``findings`` 是人读的
-    发现说明(对抗验证中发现的缝隙 / 风险)。
-
-    ``marker_found`` 区分"verifier 真的判了 red"与"verifier 没吐出 verdict
-    marker、被 fail-safe 当成 red"。两者都阻断,但成因完全不同:后者是 verifier
-    侧的协议/可靠性故障,不代表 builder 的改动有缺陷。
-
-    ``agent`` 与 ``token_usage`` 由实际运行 verifier 的调用点回填：候选回退后
-    ``agent`` 是真正跑完的 agent；agent 未运行（parse-only 路径）时保持默认值。
-    """
-
-    risk: str
-    findings: str = ""
-    marker_found: bool = True
-    agent: str = ""
-    token_usage: "TokenUsage | None" = None
-
-    @property
-    def passed(self) -> bool:
-        """green 或 yellow 视为放行(yellow 仅警告,不阻断发布)。"""
-        return self.risk in ("green", "yellow")
-
-    @property
-    def blocks(self) -> bool:
-        """red 阻断发布,走 repair 循环打回 builder。"""
-        return self.risk == "red"
-
-    @property
-    def missing_marker(self) -> bool:
-        """verifier 没有产出可解析的 verdict marker(fail-safe 记为 red)。"""
-        return not self.marker_found
-
-
-class VerifierUnavailableError(RuntimeError):
-    """候选 verifier 全部不可用或未能给出可解析结论，停止而不让 builder 盲修。"""
-
-
-def format_verifier_verdict_marker(risk: str) -> str:
-    """Format the hidden ``iar:verifier-verdict`` marker for a PR/Issue comment."""
-    if risk not in _VALID_RISKS:
-        raise ValueError(f"invalid verifier risk: {risk!r}; expected one of {_VALID_RISKS}")
-    return f"<!-- iar:verifier-verdict risk={risk} -->"
-
-
-def parse_verifier_verdict(text: str, *, findings: str = "") -> ValidationVerdict:
-    """Deterministically parse the latest verifier-verdict marker from ``text``.
-
-    Fail-safe:没有可解析的 marker 一律返回 ``red``——绝不把"无判定"当成
-    通过。纯确定性解析,不引入 LLM。当文本里有多个 marker(例如 repair 后
-    重新裁决),取最后一个。
-
-    Args:
-        text: verifier agent 的输出 / PR 评论文本。
-        findings: 可选的人读发现说明,原样带入 verdict。
-
-    Returns:
-        解析出的 ``ValidationVerdict``;无 / 畸形 marker 时为 red。
-    """
-    latest_match = None
-    for latest_match in _VERDICT_MARKER_PATTERN.finditer(text):
-        pass
-    if latest_match is None:
-        # findings 仍带回原始输出以便排查,但 marker_found=False 才是"没判定"的
-        # 唯一可靠信号——以前只靠 findings 是否等于哨兵字符串来区分,而调用方
-        # 总会填入响应文本,于是哨兵永远走不到,红判与漏 marker 无法分辨。
-        return ValidationVerdict(
-            risk="red",
-            findings=findings or _NO_VERDICT_FINDINGS,
-            marker_found=False,
-        )
-    return ValidationVerdict(risk=latest_match.group("risk"), findings=findings)
-
-
-def build_verifier_prompt(
-    issue: IssueSummary,
-    builder_sha: str,
-    manifest: EvidenceManifest,
-) -> str:
-    """Assemble the independent-verifier prompt.
-
-    给 verifier 注入需求意图(issue 正文)与验收 oracle(manifest 各项的真实
-    入口命令 / 负控 / 期望失败),并下达"从意图独立出题、亲自跑真实入口、对抗
-    证伪、跑负控、给 verdict"的指令;明令不许信 builder 的绿,确认不了即 red。
-    """
-    oracle_lines: list[str] = []
-    for block in manifest.items:
-        oracle_lines.append(f"- Item {block.item_number} ({block.item_name}):")
-        oracle_lines.append(f"    real entry / command: {block.command}")
-        if block.negative_control:
-            oracle_lines.append(f"    negative control (must go RED): {block.negative_control}")
-        if block.expected_fail:
-            oracle_lines.append(f"    expected failure: {block.expected_fail}")
-        if block.evidence_files:
-            files = ", ".join(block.evidence_files)
-            oracle_lines.append(f"    evidence artifacts on disk: {files}")
-        for spec in block.expected_artifacts:
-            claim = f" (key claim: {spec.key_claim!r})" if spec.key_claim else ""
-            oracle_lines.append(
-                f"    expected artifact: {spec.path} mime={spec.mime}"
-                f" min_size={spec.min_size} min_duration={spec.min_duration_seconds}"
-                f"{claim}"
-            )
-    oracle_block = "\n".join(oracle_lines) or "(no structured oracle items)"
-
-    return "\n".join(
-        [
-            f"You are an INDEPENDENT verifier for issue #{issue.number}: "
-            f'"{issue.title}". A different agent (the builder) already implemented',
-            f"it at commit {builder_sha} in this worktree. Your job is NOT to trust",
-            "their work — it is to independently decide whether the feature actually",
-            "does what was asked, and to try to prove it does NOT.",
-            "",
-            "What it is supposed to do (derive your OWN checks from this; do not just",
-            "re-run the builder's tests):",
-            issue.body.strip(),
-            "",
-            "The acceptance oracle it was meant to satisfy:",
-            oracle_block,
-            "",
-            "Do this:",
-            '1. From the intent above, independently decide what "working" means.',
-            "   Do not assume the builder tested the right thing.",
-            "2. Run the real entry point yourself in this worktree and observe the",
-            "   result with your own eyes. Do not mock or stub the thing under test.",
-            '3. Adversarially probe the gap between "tests pass" and "a real user runs',
-            '   it and it works": edge cases, empty/invalid input, the real end-to-end',
-            "   path, anything the happy-path tests would miss.",
-            "4. Run each negative control to confirm the check actually goes RED when",
-            "   the feature is broken — a test that cannot fail proves nothing.",
-            "5. Verdict: green = you independently confirmed it (incl. adversarial",
-            "   probes); yellow = main path works but a real, non-blocking gap/risk",
-            "   (state it); red = does NOT match the intent, OR you found a break, OR",
-            "   you could not independently confirm it.",
-            "",
-            "Multimodal evidence: the manifest's `evidence artifacts` may include",
-            "images (.png/.jpg), videos (.webm/.mp4), audio, or other non-text",
-            "files. Handle them with whatever your model natively supports — read",
-            "the image directly if you can, use `ffmpeg` to extract a frame from",
-            "a video if you can, listen to audio if you can. If you cannot read",
-            "the artifact yourself, fall back to shell metadata: `stat <path>` for",
-            "size, `file --mime <path>` for type, `ffprobe <path>` for duration /",
-            "resolution. Never trust the file's existence or size alone — a 0-byte",
-            "screenshot or a video with no frames is not evidence. State in your",
-            "findings which artifacts you actually inspected and how.",
-            "",
-            "When the oracle includes `key_claim` assertions on an artifact, apply",
-            "the D-14c fairness rule: IF you are a multimodal model that CAN read",
-            "the file directly, verify the key_claim and report what you actually",
-            "saw (green if confirmed, red if contradicted). IF you are a TEXT-ONLY",
-            "model that CANNOT read images/video/audio, state 'I am text-only and",
-            "cannot visually verify the key_claim; only file metadata was checked'.",
-            "Encourage a self-downgrade to yellow in that case — but NEVER return",
-            "red solely because you cannot read a non-text artifact. Red is for",
-            "proven breaks only, not model-capability gaps.",
-            "",
-            "Be a skeptic. If you cannot independently confirm it works, the verdict",
-            "is RED — do not give the builder the benefit of the doubt.",
-            "",
-            "End your report with concrete findings (what you ran, what you observed,",
-            "any gap between intent and behavior), then exactly one final line:",
-            "<!-- iar:verifier-verdict risk=green -->   (or yellow, or red)",
-        ]
-    )
-
-
-def _write_verifier_response_log(
-    response_log_path: Path,
-    header_lines: list[str],
-    response_text: str,
-) -> Path | None:
-    """把 verifier 的原始响应落盘,便于事后分辨"真红"与"漏 marker"。
-
-    verifier 以 ``capture_output`` 运行,输出不进 stdout 也不逐行落日志;一旦
-    判定阻断,操作者事后无从查证它到底说了什么。写盘失败绝不能影响门禁本身。
-
-    Returns:
-        实际写入的路径;写入失败时返回 ``None``。
-    """
-    try:
-        response_log_path.parent.mkdir(parents=True, exist_ok=True)
-        response_log_path.write_text(
-            "\n".join([*header_lines, "", response_text]),
-            encoding="utf-8",
-        )
-    except OSError as write_error:
-        _logger.warning(
-            "Could not save verifier response to %s: %s",
-            response_log_path,
-            write_error,
-        )
-        return None
-    return response_log_path
-
-
-def _save_timed_out_verifier_response(
-    timeout_error: subprocess.TimeoutExpired,
-    *,
-    issue: IssueSummary,
-    verifier_agent: str,
-    builder_sha: str,
-    response_log_path: Path | None,
-) -> None:
-    """超时被杀时,把 verifier 已经产出的部分输出落盘。
-
-    verifier 以 ``capture_output`` 运行,输出既不进 stdout 也不逐行落日志:超时
-    这条路径上如果不落盘,一次"跑了半小时被杀"就只剩一行 ``timed out``,连它判
-    到第几项、是不是已经发现了问题都看不到。写盘只为可诊断性,失败不影响门禁。
-    """
-    partial_output = _decode_partial_stream(timeout_error.output)
-    partial_stderr = _decode_partial_stream(timeout_error.stderr)
-    _logger.error(
-        "Independent verifier (agent %r) timed out after %ss for Issue #%d; "
-        "captured %d chars of partial output before the kill.",
-        verifier_agent,
-        timeout_error.timeout,
-        issue.number,
-        len(partial_output),
-    )
-    if response_log_path is None:
-        return
-    _write_verifier_response_log(
-        response_log_path,
-        [
-            "# Independent verifier raw response (TIMED OUT — no verdict)",
-            f"# issue: #{issue.number}",
-            f"# verifier agent: {verifier_agent}",
-            f"# builder sha: {builder_sha}",
-            f"# timeout seconds: {timeout_error.timeout}",
-            f"# partial stdout chars: {len(partial_output)}",
-            f"# partial stderr chars: {len(partial_stderr)}",
-        ],
-        "\n".join(part for part in (partial_output, partial_stderr) if part),
-    )
-
-
-def _decode_partial_stream(stream_content: str | bytes | None) -> str:
-    """把 ``TimeoutExpired`` 上的部分输出统一成 ``str``。
-
-    同一个属性在 text 模式下是 ``str``、在 bytes 模式下是 ``bytes``,而超时路径
-    不该因为解码细节再抛一次异常。
-    """
-    if stream_content is None:
-        return ""
-    if isinstance(stream_content, bytes):
-        return stream_content.decode("utf-8", errors="replace")
-    return stream_content
 
 
 def run_verifier_agent(
@@ -329,6 +90,7 @@ def run_verifier_agent(
     inactivity_timeout_seconds: int | None = None,
     response_log_path: Path | None = None,
     model_selection: ModelSelection | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ValidationVerdict:
     """Run the independent verifier agent and return its parsed verdict.
 
@@ -344,7 +106,10 @@ def run_verifier_agent(
         inactivity_timeout_seconds: 连续无输出多久判卡死。与墙钟并存,让墙钟
             能按最慢的真实工作量放宽,同时真卡死仍被及时杀掉。
         response_log_path: 可选,把原始响应写到这里供事后排查(见
-            :func:`_write_verifier_response_log`)。
+            :func:`write_verifier_response_log`)。
+        cancel_check: 人工接管取消探针（Issue #278），透传给
+            ``process_runner.run``；探针为真时进程树被终止、本函数把
+            ``InterruptedError`` 转译为 ``VerifierCancelledByHumanError``。
 
     Returns:
         ``ValidationVerdict``;verifier 的输出文本作为 ``findings`` 带回。
@@ -352,6 +117,8 @@ def run_verifier_agent(
     Raises:
         subprocess.TimeoutExpired: verifier 超时被杀。抛出前先把已收到的部分
             输出落盘,否则这一轮的判定过程完全无从查证。
+        VerifierCancelledByHumanError: 人工接管取消了本次 verifier（部分输出
+            已落盘、无 verdict）。
     """
     prompt = build_verifier_prompt(issue, builder_sha, manifest)
     try:
@@ -367,9 +134,10 @@ def run_verifier_agent(
             issue=issue,
             model_selection=model_selection,
             invocation_phase=PHASE_VERIFICATION,
+            cancel_check=cancel_check,
         )
     except subprocess.TimeoutExpired as timeout_error:
-        _save_timed_out_verifier_response(
+        save_timed_out_verifier_response(
             timeout_error,
             issue=issue,
             verifier_agent=verifier_agent,
@@ -377,6 +145,20 @@ def run_verifier_agent(
             response_log_path=response_log_path,
         )
         raise
+    except InterruptedError as cancelled_error:
+        # 人工接管（Issue #278）：进程树已被 watchdog 回收，这里只负责把
+        # "被取消"与"超时/运行失败"区分开上抛，并保存无 verdict 的部分输出。
+        save_cancelled_verifier_response(
+            cancelled_error,
+            issue=issue,
+            verifier_agent=verifier_agent,
+            builder_sha=builder_sha,
+            response_log_path=response_log_path,
+        )
+        raise VerifierCancelledByHumanError(
+            f"Independent verifier for Issue #{issue.number} was terminated by a "
+            "human takeover; no verdict was produced."
+        ) from cancelled_error
     response_text = extract_agent_response_text(result)
     verdict = replace(
         parse_verifier_verdict(response_text, findings=response_text.strip()[:4000]),
@@ -387,7 +169,7 @@ def run_verifier_agent(
 
     saved_log_path: Path | None = None
     if response_log_path is not None:
-        saved_log_path = _write_verifier_response_log(
+        saved_log_path = write_verifier_response_log(
             response_log_path,
             [
                 "# Independent verifier raw response",
@@ -585,6 +367,37 @@ def _format_verifier_block_message(
     )
 
 
+def _reject_unpublished_verdict(
+    run_handle: VerifierRunHandle | None, issue_number: int, error: ValidationEvidenceError
+) -> ValidationEvidenceError:
+    """结论最终没有发布时收回 ``verifier_completed``，并把原异常交回调用点 ``raise``。
+
+    ``mark_completed`` 的 CAS 早于树漂移与 RED 两道检查：结论被这两道检查拒绝时
+    控制行若仍停在 ``verifier_completed``，FR-1 的状态分类就会在整段 RED recovery
+    窗口里对着一个从未落到 PR 上的 verdict 报"验证已完成"。收回为 ``expired``；
+    接管恰好在同一时刻落地时改记 ``takeover_failed``。收回动作失败只记日志，绝不
+    掩盖原始结论错误，也绝不伪造交班。
+    """
+    if run_handle is None:
+        return error
+    try:
+        reclaimed = run_handle.mark_verdict_unpublished()
+    except Exception as store_exc:  # noqa: BLE001 - 状态收回失败不改变 verifier 结论。
+        _logger.warning(
+            "Issue #%d: could not reclaim verifier_completed after an unpublished " "verdict (%s).",
+            issue_number,
+            store_exc,
+        )
+        return error
+    if not reclaimed:
+        _logger.info(
+            "Issue #%d: verdict was not published and the control row was already "
+            "settled by another terminal transition.",
+            issue_number,
+        )
+    return error
+
+
 def run_verifier_gate(
     issue: IssueSummary,
     worktree_path: Path,
@@ -594,6 +407,7 @@ def run_verifier_gate(
     *,
     prd_overrides: Mapping[str, str] | None = None,
     prd_preset_overrides: Mapping[str, str] | None = None,
+    repo_id: str | None = None,
 ) -> ValidationVerdict | None:
     """Pre-PR independent-verifier gate (PR#2 T3 integration).
 
@@ -629,6 +443,13 @@ def run_verifier_gate(
         VerifierUnavailableError: 所有候选均无法运行或没有可解析结论；这是 verifier
             侧故障，不会启动 builder repair 循环。
         subprocess.TimeoutExpired: verifier 超时被杀(部分输出已落盘、证据已恢复)。
+        VerifierCancelledByHumanError: 人工接管（Issue #278）终止了本次 verifier，
+            或 verdict 与接管请求的最后竞态中接管获胜；无 verdict 发布。
+
+    Args:
+        repo_id: 稳定仓库标识。提供时（Console 托管运行）在控制存储登记本次
+            verifier 运行并接入取消探针，**开放人工接管窗口**；``None``（未带
+            ``--repo-id`` 的手工 CLI 运行）跳过登记，行为与本特性之前一致。
     """
     if not config.validation.verifier_enabled:
         return None
@@ -672,8 +493,15 @@ def run_verifier_gate(
         ),
     )
     builder_sha = get_head_sha(worktree_path, process_runner)
+    # 人工接管（Issue #278）：verifier 起跑前登记受控运行。repo_id 缺失、旁路
+    # 存储不可用或登记失败时返回 ``None``——照常验证，只是不开放接管窗口。
+    run_handle = begin_verifier_run(
+        repo_id=repo_id,
+        issue_number=issue.number,
+        head_sha=builder_sha,
+    )
     response_log_path = (
-        resolve_issue_evidence_dir(worktree_path, config, issue) / _VERIFIER_RESPONSE_FILENAME
+        resolve_issue_evidence_dir(worktree_path, config, issue) / VERIFIER_RESPONSE_FILENAME
     )
     candidate_agents = _verifier_candidate_agents(config, builder_agent, verifier_agent)
     chosen_agent = verifier_agent
@@ -705,9 +533,41 @@ def run_verifier_gate(
                 model_selection=drop_model_selection_for_agent(
                     candidate_agent, verifier_model_selection
                 ),
+                cancel_check=run_handle.cancel_check if run_handle is not None else None,
             )
         except subprocess.TimeoutExpired:
             # 超时按运行事故处理:不伪造 verdict、也不换 agent(与原文语义一致)。
+            if run_handle is not None:
+                run_handle.mark_expired()
+            raise
+        except VerifierCancelledByHumanError:
+            # 人工接管（Issue #278）：进程树已回收。控制存储再次确认 run id 与
+            # HEAD 归属后才映射为"人工取消"交班；确认不了则置 takeover_failed，
+            # 走 verifier 侧停止路径——绝不伪造接管成功，也绝不顺延下一个候选。
+            if run_handle is None:
+                raise
+            confirmed = False
+            try:
+                confirmed = run_handle.confirm_takeover()
+            except Exception as store_exc:  # noqa: BLE001 - 确认失败按未确认处理。
+                _logger.warning(
+                    "Issue #%d: takeover confirmation failed (%s).",
+                    issue.number,
+                    store_exc,
+                )
+            if not confirmed:
+                try:
+                    run_handle.mark_taken_over_failed()
+                except Exception:  # noqa: BLE001 - 状态记不上也不能伪造交班完成。
+                    _logger.warning(
+                        "Issue #%d: could not record takeover_failed after failed confirmation.",
+                        issue.number,
+                    )
+                raise VerifierUnavailableError(
+                    f"Independent verifier for Issue #{issue.number} was interrupted, but the "
+                    "takeover request could not be confirmed against the run control store; "
+                    "the run is stopped without handoff."
+                ) from None
             raise
         except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
             # agent 跑不起来（CLI 缺失 / 额度耗尽 / 进程级失败）不该判死整个 Issue:
@@ -734,7 +594,7 @@ def run_verifier_gate(
         finally:
             restore_evidence_snapshot(
                 evidence_snapshot,
-                keep_filenames=(_VERIFIER_RESPONSE_FILENAME,),
+                keep_filenames=(VERIFIER_RESPONSE_FILENAME,),
             )
         if candidate_verdict.missing_marker:
             protocol_failure_observed = True
@@ -775,6 +635,8 @@ def run_verifier_gate(
         break
 
     if verdict is None:
+        if run_handle is not None:
+            run_handle.mark_expired()
         raise VerifierUnavailableError(
             _format_verifier_unavailable_message(
                 issue_number=issue.number,
@@ -790,21 +652,72 @@ def run_verifier_gate(
             issue.number,
             verifier_agent,
         )
+    if run_handle is not None:
+        # 写 verdict 副作用之前的 compare-and-set（PRD §7.6）：接管请求恰好在
+        # 最后时刻落地时 verdict 不得发布，交班由调用方按取消路径处理。
+        completed = False
+        try:
+            completed = run_handle.mark_completed()
+        except Exception as store_exc:  # noqa: BLE001 - 无法 CAS 时不得发布 verdict。
+            _logger.warning(
+                "Issue #%d: could not record verifier_completed (%s).",
+                issue.number,
+                store_exc,
+            )
+            raise VerifierUnavailableError(
+                f"Independent verifier finished for Issue #{issue.number}, but its completion "
+                "could not be atomically recorded; the verdict is not published."
+            ) from store_exc
+        if not completed:
+            takeover_confirmed = False
+            try:
+                takeover_confirmed = run_handle.confirm_takeover()
+            except Exception as store_exc:  # noqa: BLE001 - 确认失败按未确认处理。
+                _logger.warning(
+                    "Issue #%d: takeover confirmation failed after verdict race (%s).",
+                    issue.number,
+                    store_exc,
+                )
+            if takeover_confirmed:
+                raise VerifierCancelledByHumanError(
+                    f"Independent verifier verdict for Issue #{issue.number} was discarded: "
+                    "a human takeover request won the final race; no verdict was published."
+                )
+            try:
+                run_handle.mark_taken_over_failed()
+            except Exception:  # noqa: BLE001 - 终态记录失败也不能发布竞态中落败的 verdict。
+                _logger.warning(
+                    "Issue #%d: could not record takeover_failed after verdict race loss.",
+                    issue.number,
+                )
+            raise VerifierUnavailableError(
+                f"Independent verifier finished for Issue #{issue.number}, but a pending "
+                "takeover request left the run control state unverifiable; the verdict is "
+                "not published and the run is stopped."
+            )
     if get_head_sha(worktree_path, process_runner) != builder_sha or has_changes(
         worktree_path, process_runner
     ):
-        raise ValidationEvidenceError(
-            "Independent verifier changed the committed code tree; restore its "
-            "negative-control edits before accepting a verdict."
+        raise _reject_unpublished_verdict(
+            run_handle,
+            issue.number,
+            ValidationEvidenceError(
+                "Independent verifier changed the committed code tree; restore its "
+                "negative-control edits before accepting a verdict."
+            ),
         )
     if verdict.blocks:
-        raise ValidationEvidenceError(
-            _format_verifier_block_message(
-                verdict=verdict,
-                verifier_agent=chosen_agent,
-                issue_number=issue.number,
-                response_log_path=response_log_path,
-            )
+        raise _reject_unpublished_verdict(
+            run_handle,
+            issue.number,
+            ValidationEvidenceError(
+                _format_verifier_block_message(
+                    verdict=verdict,
+                    verifier_agent=chosen_agent,
+                    issue_number=issue.number,
+                    response_log_path=response_log_path,
+                )
+            ),
         )
     if verdict.risk == "yellow":
         _logger.warning(
@@ -812,93 +725,8 @@ def run_verifier_gate(
             issue.number,
             verdict.findings,
         )
-    return verdict
-
-
-_PR_URL_NUMBER_PATTERN = re.compile(r"/pull/(?P<number>\d+)")
-
-
-def _extract_pr_number(pr_url: str) -> int | None:
-    """Extract the PR number from a GitHub PR URL.
-
-    Returns ``None`` when the URL does not contain a parseable PR number,
-    so callers can skip the post-PR verifier side effects gracefully.
-    """
-    match = _PR_URL_NUMBER_PATTERN.search(pr_url)
-    if match is None:
-        return None
-    return int(match.group("number"))
-
-
-def build_verifier_yellow_comment(verdict: ValidationVerdict, issue_number: int) -> str:
-    """Build the PR warning comment for a yellow verifier verdict.
-
-    ``yellow`` 不阻断发布,但要在 PR 上贴一条可见的警告评论,把 verifier 的
-    findings 交给人审者——避免"verifier 提了风险但没人看到"。评论带 hidden
-    marker,后续可幂等更新或清除。
-    """
-    return "\n".join(
-        [
-            "<!-- iar:verifier-warning risk=yellow -->",
-            "",
-            "## ⚠️ Independent verifier returned YELLOW",
-            "",
-            f"The independent verifier ran for issue #{issue_number} and found a "
-            "non-blocking risk. Review the findings below before merging:",
-            "",
-            "<details>",
-            "<summary>Verifier findings</summary>",
-            "",
-            verdict.findings.strip() or "(no findings emitted)",
-            "",
-            "</details>",
-        ]
+    return replace(
+        verdict,
+        verifier_input_sha=builder_sha,
+        verifier_run_id=run_handle.run_id if run_handle is not None else None,
     )
-
-
-def apply_verifier_verdict_to_pr(
-    pr_url: str,
-    verdict: ValidationVerdict | None,
-    issue_number: int,
-    *,
-    verifier_passed_label: str,
-    github_client: IGitHubClient,
-) -> None:
-    """Apply the verifier verdict to the PR after it is created.
-
-    pre-PR verifier 跑完后,verdict 的副作用在 PR 创建后落地:
-
-    - ``green`` → 置 ``validation/verifier-passed`` label,为后续 autopilot
-      合并队列提供显式状态位。
-    - ``yellow`` → 贴警告评论(findings 给人审者看),不阻断发布。
-    - ``None`` (verifier 未启用 / issue 不要求验证) → 无操作。
-    - ``red`` 不会到这里(pre-PR 阶段已抛 ``ValidationEvidenceError`` 进 recovery)。
-
-    PR number 从 ``pr_url`` 解析;解析失败时记日志并跳过,不阻断发布。
-    """
-    if verdict is None:
-        return
-    pr_number = _extract_pr_number(pr_url)
-    if pr_number is None:
-        _logger.warning(
-            "Could not parse PR number from URL %r; skipping verifier verdict "
-            "side effects for issue #%d.",
-            pr_url,
-            issue_number,
-        )
-        return
-    if verdict.risk == "green":
-        github_client.edit_issue_labels(pr_number, add=(verifier_passed_label,))
-        _logger.info(
-            "Verifier GREEN for issue #%d: set label %r on PR #%d.",
-            issue_number,
-            verifier_passed_label,
-            pr_number,
-        )
-    elif verdict.risk == "yellow":
-        github_client.comment_pr(pr_number, build_verifier_yellow_comment(verdict, issue_number))
-        _logger.info(
-            "Verifier YELLOW for issue #%d: posted warning comment on PR #%d.",
-            issue_number,
-            pr_number,
-        )

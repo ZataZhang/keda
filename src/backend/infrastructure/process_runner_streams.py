@@ -7,7 +7,9 @@ import json
 import os
 import select
 import subprocess
+import sys
 import threading
+from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ class ClaudeStreamRenderer:
         self._tool_use_ids: set[str] = set()
         self._saw_text_delta = False
         self._printed_text_content = False
+        self._last_assistant_text = ""
 
     def render_line(self, line: str) -> str:
         """Return display text for one stream-json line."""
@@ -65,6 +68,14 @@ class ClaudeStreamRenderer:
         for content_block in content_blocks:
             if not isinstance(content_block, dict):
                 continue
+            if content_block.get("type") == "text":
+                # qoder 等执行器把额度/鉴权类失败原因塞进一整条 assistant 文本消息、
+                # 之后只发一个不带文本的 error result；这里只记下最近一条，不渲染，
+                # 失败时由 ``_render_result`` 兜底带出，成功路径的输出保持不变。
+                assistant_text = str(content_block.get("text") or "").strip()
+                if assistant_text:
+                    self._last_assistant_text = assistant_text
+                continue
             if content_block.get("type") != "tool_use":
                 continue
             tool_use_id = str(content_block.get("id", ""))
@@ -76,11 +87,19 @@ class ClaudeStreamRenderer:
 
     def _render_result(self, event_payload: dict[str, Any]) -> str:
         result_text = str(event_payload.get("result") or "").strip()
-        is_error = bool(event_payload.get("is_error"))
+        result_subtype = str(event_payload.get("subtype") or "")
+        is_error = bool(event_payload.get("is_error")) or result_subtype.startswith("error")
+        if is_error and not result_text:
+            result_text = self._last_assistant_text or result_subtype
         if not result_text or (not is_error and self._printed_text_content):
             return ""
         prefix = "[agent error] " if is_error else "[agent result] "
         return f"\n{prefix}{result_text}\n"
+
+
+# agent 流式调用的 stderr 只保留尾部这么多行：失败原因（鉴权、额度、参数错误）几乎总在
+# 进程退出前最后几行，更早的内容对诊断没有增益，也避免长跑进程把内存撑大。
+_STDERR_TAIL_MAX_LINES = 200
 
 
 def run_filtered_claude_stream(
@@ -98,6 +117,7 @@ def run_filtered_claude_stream(
     line_renderer: Callable[[str], str] | None = None,
     env: dict[str, str] | None = None,
     attempt_key: str | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a structured JSON Lines agent stream and print its readable view.
 
@@ -112,8 +132,10 @@ def run_filtered_claude_stream(
         output_sink: Optional callback for rendered text chunks (raw readable
             text; line timestamps are added by the consumers, not here).
         display_sink: Optional callback for stderr lines (display only).
-            When provided, stderr is drained on a background thread and
-            routed here instead of leaking raw onto the terminal.
+            When provided, stderr lines are routed here instead of leaking
+            raw onto the terminal; when omitted they are echoed to
+            ``sys.stderr`` so the terminal view is unchanged. Either way the
+            last ``_STDERR_TAIL_MAX_LINES`` lines are also kept for the result.
         label: Optional label for heartbeat/timeout logs.
         usage_collector: Optional token 用量采集器。提供时，每行原始事件
             在渲染前先交给它观察（原始行只有此处可靠可得；渲染后的
@@ -122,25 +144,26 @@ def run_filtered_claude_stream(
         env: 可选的已净化子进程环境（由 :meth:`SubprocessRunner.run`
             传入，避免同一环境重复构造）；``None`` 时本函数自行调用
             :func:`build_sanitized_child_env`，直接调用方无需感知。
+        cancel_check: 人工接管取消探针，由 watchdog 秒级轮询。
 
     Returns:
-        CompletedProcess with collected stdout if requested.
+        CompletedProcess with collected stdout if requested and the tail of
+        stderr (never the full stream), so a failing run can report why.
 
     Raises:
         subprocess.TimeoutExpired: 墙钟或静默期超时被看门狗杀掉时抛出，异常的
             ``output`` 带着杀进程前渲染出的输出（``collect_stdout=False`` 时为空，
-            因为那种调用本来就没在收集）。stderr 走 ``display_sink``，不收集。
+            因为那种调用本来就没在收集）。``partial_stderr`` 带着杀进程前收集到的 stderr 尾部。
     """
     from backend.infrastructure import process_runner as process_runner_module
 
     renderer = ClaudeStreamRenderer()
-    capture_stderr = display_sink is not None
     process = subprocess.Popen(
         list(command),
         cwd=cwd,
         env=env if env is not None else process_runner_module.build_sanitized_child_env(),
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE if capture_stderr else None,
+        stderr=subprocess.PIPE,
         stdin=subprocess.PIPE,
         text=True,
         encoding="utf-8",
@@ -157,20 +180,32 @@ def run_filtered_claude_stream(
         base_label="Agent stream",
         context_label=label,
         attempt_key=attempt_key,
+        cancel_check=cancel_check,
     )
     watchdog.start()
+
+    stderr_tail_lines: deque[str] = deque(maxlen=_STDERR_TAIL_MAX_LINES)
+    stderr_tail_lock = threading.Lock()
+
+    def _stderr_tail_text() -> str:
+        with stderr_tail_lock:
+            return "".join(stderr_tail_lines)
 
     def _pump_stderr() -> None:
         if process.stderr is None:
             return
         for stderr_line in process.stderr:
             watchdog.note_output()
-            display_sink(stderr_line)
+            with stderr_tail_lock:
+                stderr_tail_lines.append(stderr_line)
+            if display_sink is not None:
+                display_sink(stderr_line)
+            else:
+                sys.stderr.write(stderr_line)
+                sys.stderr.flush()
 
-    stderr_thread: threading.Thread | None = None
-    if capture_stderr:
-        stderr_thread = threading.Thread(target=_pump_stderr, daemon=True)
-        stderr_thread.start()
+    stderr_thread = threading.Thread(target=_pump_stderr, daemon=True)
+    stderr_thread.start()
     if prompt_text is not None:
         # Write stdin in a background thread to avoid deadlock
         # when the pipe buffer fills up before the child reads.
@@ -232,21 +267,27 @@ def run_filtered_claude_stream(
             if buffered:
                 process_runner_module.logger.info("Agent output: %s", buffered)
         return_code = process.wait(timeout=timeout)
-        watchdog.raise_if_timed_out(partial_stdout="".join(stdout_lines))
+        watchdog.raise_if_timed_out(
+            partial_stdout="".join(stdout_lines), partial_stderr=_stderr_tail_text()
+        )
+        watchdog.raise_if_cancelled(
+            partial_stdout="".join(stdout_lines), partial_stderr=_stderr_tail_text()
+        )
     except BaseException as exc:
         process_runner_module._attach_stream_observations(exc, usage_collector)
-        process_runner_module._terminate_process_tree(process)
+        # 取消/超时走到这里时子进程可能已被回收，二次拆除必须按创建时刻读到的身份，
+        # 不能再按 pid 取一次进程组（Issue #278）。
+        watchdog.terminate()
         process.wait()
         raise
     finally:
         watchdog.stop()
-    if stderr_thread is not None:
-        stderr_thread.join(timeout=5)
+    stderr_thread.join(timeout=5)
     return subprocess.CompletedProcess(
         args=list(command),
         returncode=return_code,
         stdout="".join(stdout_lines),
-        stderr="",
+        stderr=_stderr_tail_text(),
     )
 
 
@@ -383,7 +424,7 @@ def _run_pty_stream(
         watchdog.raise_if_timed_out(partial_stdout="".join(collected))
     except BaseException as exc:
         process_runner_module._attach_stream_observations(exc, usage_collector)
-        process_runner_module._terminate_process_tree(process)
+        watchdog.terminate()
         process.wait()
         raise
     finally:

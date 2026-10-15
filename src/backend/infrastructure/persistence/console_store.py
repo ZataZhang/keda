@@ -19,6 +19,10 @@
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
+- ``issue_run_control``（单 Issue 人工接管控制表，Issue #278）**不占用**版本号：
+  建表挂在版本门之外、无条件幂等执行（见 ``_migrate`` 与
+  :mod:`backend.infrastructure.persistence.console_store_takeover`）。并行分支各自
+  递增 ``_SCHEMA_VERSION`` 时不会互相顶掉，机器级共享库也不会因同号而跳过建表。
 """
 
 from __future__ import annotations
@@ -50,6 +54,10 @@ from backend.infrastructure.persistence.console_store_invocations import (
 )
 from backend.infrastructure.persistence.console_store_lifecycle import (
     PrdLifecycleStoreMixin,
+)
+from backend.infrastructure.persistence.console_store_takeover import (
+    CREATE_ISSUE_RUN_CONTROL,
+    IssueRunControlMixin,
 )
 
 _logger = logging.getLogger(__name__)
@@ -231,10 +239,15 @@ _CREATE_PRD_LIFECYCLE_INDEXES = (
 
 
 class SqliteConsoleStore(
-    RunHistoryReadMixin, PrdLifecycleStoreMixin, InvocationEventStoreMixin, EvaluationStoreMixin
+    RunHistoryReadMixin,
+    PrdLifecycleStoreMixin,
+    InvocationEventStoreMixin,
+    IssueRunControlMixin,
+    EvaluationStoreMixin,
 ):
     """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` /
-    ``IBacklogSnapshotStore`` / ``IConsoleModelPricingStore`` 的 SQLite 实现。
+    ``IBacklogSnapshotStore`` / ``IConsoleModelPricingStore`` / ``IIssueRunControl``
+    的 SQLite 实现。
 
     各端口都以鸭子类型实现：本类不 import core，仅保证方法签名与 core
     侧同名 dataclass 结构一致。
@@ -259,6 +272,13 @@ class SqliteConsoleStore(
         return connection
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
+        # 两张表都带 IF NOT EXISTS，**无条件**幂等建表后再看版本号：机器级共享库
+        # （~/.kedacode/console.db）的 user_version 可能被并行分支的同号迁移置满，
+        # 若只挂在 `current_version < 14` 分支上会被整体跳过，对应表的读写随即命中
+        # "no such table"。接管控制表 issue_run_control（Issue #278）不占用版本号，
+        # 建表恒在版本门之外（见 console_store_takeover）。
+        connection.execute(_CREATE_MODEL_PRICING_SETTINGS)
+        connection.execute(CREATE_ISSUE_RUN_CONTROL)
         current_version_row = connection.execute("PRAGMA user_version").fetchone()
         current_version = int(current_version_row[0])
         if current_version >= _SCHEMA_VERSION:
@@ -347,6 +367,8 @@ class SqliteConsoleStore(
             if "issue_url" not in existing_run_columns:
                 connection.execute(_RUN_V13_ADD_ISSUE_URL)
         if current_version < 14:
+            # 附加式迁移：新增单行模型 token 价格设置表；建表带 IF NOT EXISTS，
+            # 重复迁移幂等。接管控制表 issue_run_control 不在版本门内建表。
             connection.execute(_CREATE_MODEL_PRICING_SETTINGS)
         if current_version < 15:
             # 附加式迁移：模型评测三张独立表 + 索引，既有表、行与列值原样保留。

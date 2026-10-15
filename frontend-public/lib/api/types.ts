@@ -88,6 +88,26 @@ export type LatestEventMarker = {
   pr_comments_count: number | null;
 };
 
+export type ActiveVerifierState =
+  | "running"
+  | "takeover_requested"
+  | "taken_over"
+  | "takeover_failed"
+  | "verifier_completed"
+  | "verifier_stale"
+  | "pr_merged"
+  | "expired";
+
+/** 当前 Issue 受控独立 verifier 的活动投影（后端 fresh read，非缓存推断）。 */
+export type ActiveVerifier = {
+  run_id: string;
+  head_sha: string;
+  state: ActiveVerifierState;
+  can_take_over: boolean;
+  pr_number: number | null;
+  autopilot_hold: boolean;
+};
+
 export type IssueMonitoringSnapshot = {
   number: number;
   title: string;
@@ -103,6 +123,7 @@ export type IssueMonitoringSnapshot = {
   suggested_cli_commands: string[];
   has_anomaly: boolean;
   anomaly_types: AnomalyType[];
+  active_verifier?: ActiveVerifier | null;
 };
 
 export type QueueCounts = {
@@ -226,6 +247,8 @@ export type ConsoleActionResult = {
   result: "accepted" | "rejected" | "error";
   detail: string;
   process: RunnerProcessRecord | null;
+  takeover_http_status?: number | null;
+  takeover_outcome?: string | null;
 };
 
 export type RepositoryCompletionStats = {
@@ -1488,4 +1511,77 @@ export type EvaluationJudgePreview = {
   }[];
   estimated_requests: number;
   sensitive_notice: string;
+};
+
+// ── 统一运行时看板与桌面 companion（GET /console/runtime/tasks 等）
+
+/** 任务生命周期分桶，与后端 `RuntimeTaskStatus` 取值一一对应。 */
+export type RuntimeTaskStatus =
+  | "running"
+  | "waiting"
+  | "blocked"
+  | "completed"
+  | "unknown";
+
+/**
+ * 看板上的一个 Issue 运行任务。
+ *
+ * 只带身份与运行观测字段：改动树触达读数不在这里，展示侧按 `prd_path`
+ * 走现有 progress 契约取数，避免出现第二份检测实现。
+ */
+export type RuntimeTaskEntry = {
+  repo_id: string;
+  issue_number: number;
+  task_key: string;
+  repo_display_name: string | null;
+  issue_title: string | null;
+  issue_url: string | null;
+  status: RuntimeTaskStatus;
+  status_reason: string | null;
+  phase: string | null;
+  agent: string | null;
+  preset: string | null;
+  model: string | null;
+  attempt_number: number | null;
+  prd_path: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  last_outcome: string | null;
+  labels: string[];
+};
+
+/** 看板任务摘要：列表 + 分桶计数 + 数据来源可用性披露。 */
+export type RuntimeTaskSummary = {
+  generated_at: string;
+  tasks: RuntimeTaskEntry[];
+  status_counts: Record<RuntimeTaskStatus, number>;
+  unavailable_sources: string[];
+  missing_repo_ids: string[];
+  sync_status: string;
+  scanned_at: string | null;
+  truncated: boolean;
+};
+
+/** 桌面 companion 状态分桶，与后端 `DesktopCompanionStatus` 对齐。 */
+export type DesktopCompanionStatus =
+  | "launched"
+  | "focused"
+  | "running"
+  | "idle"
+  | "not_installed"
+  | "unsupported_platform"
+  | "failed";
+
+/** companion 快照载荷；`companion_url` 仅在窗口确实存在时非空。 */
+export type DesktopCompanionState = {
+  status: DesktopCompanionStatus;
+  console_origin: string | null;
+  console_session: string;
+  focus_ticket: number;
+  close_ticket: number;
+  detail: string | null;
+  hint: string;
+  window_exists: boolean;
+  companion_url: string | null;
 };

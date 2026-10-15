@@ -873,6 +873,7 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
             github_client=github_client,
             process_runner=ctx.process_runner,
             content_generator=content_generator,
+            repo_id=context.repo_id,
         )
         logger.info(
             "Publish recovered for Issue #%d: %s",

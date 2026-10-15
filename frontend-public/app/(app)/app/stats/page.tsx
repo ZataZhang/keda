@@ -17,6 +17,10 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  STATS_SECTION_IDS,
+  StatsSectionTabs,
+} from "@/components/stats/stats-section-tabs"
 import { AgentPerformanceSection } from "@/components/stats/agent-performance-section"
 import {
   formatLifecycleDuration,
@@ -247,8 +251,13 @@ export default function StatsPage() {
         </div>
       </section>
 
+      <StatsSectionTabs />
+
       <section
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        id={STATS_SECTION_IDS.overview}
+        role="tabpanel"
+        aria-labelledby="stats-section-tab-overview"
+        className="grid scroll-mt-20 gap-3 sm:grid-cols-2 xl:grid-cols-4"
         aria-label="运行指标"
       >
         <StatsMetric
@@ -275,24 +284,6 @@ export default function StatsPage() {
           accent="violet"
         />
       </section>
-
-      {lifecycleStats === null ? (
-        <Card className="border-border/70 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base">Token 用量与费用</CardTitle>
-            <CardDescription>正在读取调用明细与模型价格…</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-36" />
-          </CardContent>
-        </Card>
-      ) : (
-        <TokenUsageSection
-          stats={lifecycleStats}
-          pricingModels={modelPricing}
-          pricingError={modelPricingError}
-        />
-      )}
 
       <Card className="gap-4 border-border/70 shadow-sm">
         <CardHeader>
@@ -480,163 +471,205 @@ export default function StatsPage() {
         }}
       />
 
-      <AgentPerformanceSection
-        stats={agentPerformanceStats}
-        error={agentPerformanceError}
-      />
-
-      <Card
-        data-testid="stats-prd-lifecycle"
-        className="gap-4 border-border/70 shadow-sm"
+      <div
+        id={STATS_SECTION_IDS.tokenCost}
+        role="tabpanel"
+        aria-labelledby="stats-section-tab-tokenCost"
+        className="scroll-mt-20"
       >
-        <CardHeader>
-          <CardTitle className="text-base">PRD 执行分析</CardTitle>
-          <CardDescription>
-            以完整 PRD 生命周期为口径（非单次 runner
-            调用），共用上方的仓库与时间范围筛选； 进行中记录与无法关联 PRD
-            的旧记录不进入完成分位数。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {lifecycleStats === null ? (
-            <Skeleton className="h-24" />
-          ) : (
-            <div className="space-y-4">
-              <div
-                className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"
-                data-testid="stats-prd-lifecycle-metrics"
-              >
-                <LifecycleMetricTile
-                  label="已完成 PRD 数"
-                  value={String(lifecycleStats.completed_runs)}
-                />
-                <LifecycleMetricTile
-                  label="平均端到端"
-                  value={formatLifecycleDuration(
-                    lifecycleStats.average_end_to_end_seconds
-                  )}
-                />
-                <LifecycleMetricTile
-                  label="中位数"
-                  value={formatLifecycleDuration(
-                    lifecycleStats.median_end_to_end_seconds
-                  )}
-                />
-                <LifecycleMetricTile
-                  label="P90"
-                  value={formatLifecycleDuration(
-                    lifecycleStats.p90_end_to_end_seconds
-                  )}
-                />
-                <LifecycleMetricTile
-                  label="平均阻塞"
-                  value={formatLifecycleDuration(
-                    lifecycleStats.average_blocked_seconds
-                  )}
-                />
-                <LifecycleMetricTile
-                  label="阶段瓶颈"
-                  value={formatBottleneck(lifecycleStats)}
-                />
-              </div>
+        {lifecycleStats === null ? (
+          <Card className="border-border/70 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Token 用量与费用</CardTitle>
+              <CardDescription>正在读取调用明细与模型价格…</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-36" />
+            </CardContent>
+          </Card>
+        ) : (
+          <TokenUsageSection
+            stats={lifecycleStats}
+            pricingModels={modelPricing}
+            pricingError={modelPricingError}
+          />
+        )}
+      </div>
 
-              {lifecycleStats.runs.length === 0 ? (
-                <p
-                  className="text-sm text-slate-500"
-                  data-testid="stats-prd-lifecycle-empty"
+      <div
+        id={STATS_SECTION_IDS.agentPerformance}
+        role="tabpanel"
+        aria-labelledby="stats-section-tab-agentPerformance"
+        className="scroll-mt-20"
+      >
+        <AgentPerformanceSection
+          stats={agentPerformanceStats}
+          error={agentPerformanceError}
+        />
+      </div>
+
+      <div
+        id={STATS_SECTION_IDS.prdExecution}
+        role="tabpanel"
+        aria-labelledby="stats-section-tab-prdExecution"
+        className="scroll-mt-20"
+      >
+        <Card
+          data-testid="stats-prd-lifecycle"
+          className="gap-4 border-border/70 shadow-sm"
+        >
+          <CardHeader>
+            <CardTitle className="text-base">PRD 执行分析</CardTitle>
+            <CardDescription>
+              以完整 PRD 生命周期为口径（非单次 runner
+              调用），共用上方的仓库与时间范围筛选； 进行中记录与无法关联 PRD
+              的旧记录不进入完成分位数。
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {lifecycleStats === null ? (
+              <Skeleton className="h-24" />
+            ) : (
+              <div className="space-y-4">
+                <div
+                  className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"
+                  data-testid="stats-prd-lifecycle-metrics"
                 >
-                  所选范围内暂无 PRD 生命周期记录。
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="bg-muted/40 text-xs text-muted-foreground">
-                        <th className="rounded-l-lg px-3 py-3 font-medium">
-                          PRD
-                        </th>
-                        <th className="px-3 py-3 font-medium">Issue</th>
-                        <th className="px-3 py-3 font-medium">当前阶段</th>
-                        <th className="px-3 py-3 font-medium">端到端</th>
-                        <th className="px-3 py-3 font-medium">执行</th>
-                        <th className="px-3 py-3 font-medium">等待</th>
-                        <th className="px-3 py-3 font-medium">阻塞</th>
-                        <th className="rounded-r-lg px-3 py-3 font-medium">
-                          完整性
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lifecycleStats.runs.map((run) => (
-                        <tr
-                          key={run.run_id}
-                          className="border-b last:border-b-0"
-                        >
-                          <td
-                            className="max-w-[280px] truncate px-3 py-3 font-medium"
-                            title={run.prd_path}
-                          >
-                            {prdBasename(run.prd_path)}
-                          </td>
-                          <td className="px-3 py-3 font-mono text-xs">
-                            {run.issue_number ? `#${run.issue_number}` : "—"}
-                          </td>
-                          <td className="px-3 py-3 text-xs">
-                            {run.in_progress
-                              ? "进行中"
-                              : (PHASE_LABELS[run.current_phase] ??
-                                run.current_phase)}
-                          </td>
-                          <td className="px-3 py-3 text-xs">
-                            {formatLifecycleDuration(
-                              run.durations.end_to_end_seconds
-                            )}
-                          </td>
-                          <td className="px-3 py-3 text-xs">
-                            {formatLifecycleDuration(
-                              run.durations.active_seconds
-                            )}
-                          </td>
-                          <td className="px-3 py-3 text-xs">
-                            {formatLifecycleDuration(
-                              run.durations.waiting_seconds
-                            )}
-                          </td>
-                          <td className="px-3 py-3 text-xs">
-                            {formatLifecycleDuration(
-                              run.durations.blocked_seconds
-                            )}
-                          </td>
-                          <td className="px-3 py-3 text-xs">
-                            {run.history_complete ? (
-                              <span className="text-emerald-700 dark:text-emerald-400">
-                                完整
-                              </span>
-                            ) : (
-                              <Badge variant="warning" className="text-[10px]">
-                                不完整
-                              </Badge>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <LifecycleMetricTile
+                    label="已完成 PRD 数"
+                    value={String(lifecycleStats.completed_runs)}
+                  />
+                  <LifecycleMetricTile
+                    label="平均端到端"
+                    value={formatLifecycleDuration(
+                      lifecycleStats.average_end_to_end_seconds
+                    )}
+                  />
+                  <LifecycleMetricTile
+                    label="中位数"
+                    value={formatLifecycleDuration(
+                      lifecycleStats.median_end_to_end_seconds
+                    )}
+                  />
+                  <LifecycleMetricTile
+                    label="P90"
+                    value={formatLifecycleDuration(
+                      lifecycleStats.p90_end_to_end_seconds
+                    )}
+                  />
+                  <LifecycleMetricTile
+                    label="平均阻塞"
+                    value={formatLifecycleDuration(
+                      lifecycleStats.average_blocked_seconds
+                    )}
+                  />
+                  <LifecycleMetricTile
+                    label="阶段瓶颈"
+                    value={formatBottleneck(lifecycleStats)}
+                  />
                 </div>
-              )}
 
-              <p
-                className="rounded-lg bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
-                data-testid="stats-prd-lifecycle-disclosure"
-              >
-                未关联 PRD 的旧记录 {lifecycleStats.unlinked_run_count}{" "}
-                条（已排除出分位数）； 观测不完整的 run{" "}
-                {lifecycleStats.incomplete_run_count} 条。
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                {lifecycleStats.runs.length === 0 ? (
+                  <p
+                    className="text-sm text-slate-500"
+                    data-testid="stats-prd-lifecycle-empty"
+                  >
+                    所选范围内暂无 PRD 生命周期记录。
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="bg-muted/40 text-xs text-muted-foreground">
+                          <th className="rounded-l-lg px-3 py-3 font-medium">
+                            PRD
+                          </th>
+                          <th className="px-3 py-3 font-medium">Issue</th>
+                          <th className="px-3 py-3 font-medium">当前阶段</th>
+                          <th className="px-3 py-3 font-medium">端到端</th>
+                          <th className="px-3 py-3 font-medium">执行</th>
+                          <th className="px-3 py-3 font-medium">等待</th>
+                          <th className="px-3 py-3 font-medium">阻塞</th>
+                          <th className="rounded-r-lg px-3 py-3 font-medium">
+                            完整性
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lifecycleStats.runs.map((run) => (
+                          <tr
+                            key={run.run_id}
+                            className="border-b last:border-b-0"
+                          >
+                            <td
+                              className="max-w-[280px] truncate px-3 py-3 font-medium"
+                              title={run.prd_path}
+                            >
+                              {prdBasename(run.prd_path)}
+                            </td>
+                            <td className="px-3 py-3 font-mono text-xs">
+                              {run.issue_number ? `#${run.issue_number}` : "—"}
+                            </td>
+                            <td className="px-3 py-3 text-xs">
+                              {run.in_progress
+                                ? "进行中"
+                                : (PHASE_LABELS[run.current_phase] ??
+                                  run.current_phase)}
+                            </td>
+                            <td className="px-3 py-3 text-xs">
+                              {formatLifecycleDuration(
+                                run.durations.end_to_end_seconds
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-xs">
+                              {formatLifecycleDuration(
+                                run.durations.active_seconds
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-xs">
+                              {formatLifecycleDuration(
+                                run.durations.waiting_seconds
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-xs">
+                              {formatLifecycleDuration(
+                                run.durations.blocked_seconds
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-xs">
+                              {run.history_complete ? (
+                                <span className="text-emerald-700 dark:text-emerald-400">
+                                  完整
+                                </span>
+                              ) : (
+                                <Badge
+                                  variant="warning"
+                                  className="text-[10px]"
+                                >
+                                  不完整
+                                </Badge>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <p
+                  className="rounded-lg bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+                  data-testid="stats-prd-lifecycle-disclosure"
+                >
+                  未关联 PRD 的旧记录 {lifecycleStats.unlinked_run_count}{" "}
+                  条（已排除出分位数）； 观测不完整的 run{" "}
+                  {lifecycleStats.incomplete_run_count} 条。
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

@@ -52,6 +52,16 @@ def _result_event_line(usage: object) -> str:
     return json.dumps(payload)
 
 
+def _assistant_event_line(usage: object) -> str:
+    """构造一行包含单次请求用量的 assistant 事件 JSON。"""
+    return json.dumps(
+        {
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [], "usage": usage},
+        }
+    )
+
+
 class TestExtractUsageEvent:
     """extract_usage_event 的解析与容错。"""
 
@@ -103,12 +113,62 @@ class TestExtractUsageEvent:
 
 
 class TestStreamUsageCollector:
-    """流式收集器：保留最后一个 result usage，任何行都不抛异常。"""
+    """流式收集器：累计 assistant 请求用量，兼容最后一个 result usage。"""
 
     def test_collects_last_usage(self) -> None:
         collector = StreamUsageCollector()
         collector.observe_line('{"type": "assistant", "message": {}}')
         collector.observe_line(_result_event_line({"input_tokens": 1}))
+        collector.observe_line(_result_event_line(_FIXED_USAGE))
+        assert collector.usage == TokenUsage(
+            input_tokens=1200,
+            output_tokens=340,
+            cache_read_input_tokens=800,
+            cache_creation_input_tokens=120,
+        )
+
+    def test_accumulates_assistant_request_usage_and_uses_it_over_zero_result(self) -> None:
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            _assistant_event_line(
+                {
+                    "input_tokens": 1200,
+                    "output_tokens": 340,
+                    "cache_read_input_tokens": 800,
+                    "cache_creation_input_tokens": 120,
+                }
+            )
+        )
+        collector.observe_line(
+            _assistant_event_line(
+                {
+                    "input_tokens": 300,
+                    "output_tokens": 60,
+                    "cache_read_input_tokens": 200,
+                    "cache_creation_input_tokens": 30,
+                }
+            )
+        )
+        collector.observe_line(
+            _result_event_line(
+                {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                }
+            )
+        )
+        assert collector.usage == TokenUsage(
+            input_tokens=1500,
+            output_tokens=400,
+            cache_read_input_tokens=1000,
+            cache_creation_input_tokens=150,
+        )
+
+    def test_falls_back_to_result_when_assistant_usage_is_absent(self) -> None:
+        collector = StreamUsageCollector()
+        collector.observe_line(_assistant_event_line(None))
         collector.observe_line(_result_event_line(_FIXED_USAGE))
         assert collector.usage == TokenUsage(
             input_tokens=1200,
@@ -136,6 +196,18 @@ class TestParseUsageFromPlainStdout:
 
     def test_no_usage_returns_none(self) -> None:
         assert parse_usage_from_plain_stdout("no json here\nat all") is None
+
+    def test_sums_assistant_request_usage(self) -> None:
+        stdout = "\n".join(
+            [
+                _assistant_event_line({"input_tokens": 7, "output_tokens": 2}),
+                _assistant_event_line({"input_tokens": 11, "output_tokens": 3}),
+            ]
+        )
+        assert parse_usage_from_plain_stdout(stdout) == TokenUsage(
+            input_tokens=18,
+            output_tokens=5,
+        )
 
 
 class TestSubprocessRunnerTokenUsage:
@@ -175,6 +247,31 @@ class TestSubprocessRunnerTokenUsage:
             cache_read_input_tokens=800,
             cache_creation_input_tokens=120,
         )
+
+    def test_structured_stream_collects_assistant_usage(self, tmp_path: Path) -> None:
+        runner = SubprocessRunner()
+        command = self._write_fake_agent(
+            tmp_path,
+            [
+                _assistant_event_line({"input_tokens": 19, "output_tokens": 5}),
+                _result_event_line(
+                    {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                    }
+                ),
+            ],
+        )
+        result = runner.run(
+            command,
+            cwd=tmp_path,
+            check=False,
+            timeout=60,
+            output_protocol="claude-stream-json",
+        )
+        assert result.token_usage == TokenUsage(input_tokens=19, output_tokens=5)
 
     def test_plain_agent_path_without_usage_is_none(self, tmp_path: Path) -> None:
         runner = SubprocessRunner()

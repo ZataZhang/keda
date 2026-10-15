@@ -36,7 +36,16 @@ STANDARD_LABEL_SPECS: tuple[tuple[str, str, str], ...] = (
         "C5DEF5",
         "PR exists and automatic post-PR supervisor is reviewing or reprocessing.",
     ),
-    ("agent/review", "1D76DB", "AI runner opened work for human review."),
+    (
+        "agent/automated-review-passed",
+        "1D76DB",
+        "Automated post-PR review passed; the Issue can proceed to human review or auto-merge.",
+    ),
+    (
+        "human/awaiting-review",
+        "FBCA04",
+        "A human action is pending: review the PR or complete required acceptance sign-off.",
+    ),
     ("agent/failed", "D73A4A", "AI runner failed and posted details."),
     ("agent/blocked", "000000", "AI runner needs human input."),
     (
@@ -58,6 +67,11 @@ STANDARD_LABEL_SPECS: tuple[tuple[str, str, str], ...] = (
         "direct-pr",
         "D93F0B",
         "One-shot DIRECT across claimants; consumed after confirmed Draft PR. Not a workflow state.",
+    ),
+    (
+        "auto-merge",
+        "B60205",
+        "Per-Issue auto-merge opt-in; normal verification, PR checks and PRD sign-off still apply.",
     ),
     (
         "prd-auto-merge",
@@ -96,7 +110,8 @@ CONFIGURABLE_LABEL_FIELDS: tuple[tuple[str, str], ...] = (
     ("agent/ready", "ready"),
     ("agent/running", "running"),
     ("agent/supervising", "supervising"),
-    ("agent/review", "review"),
+    ("agent/automated-review-passed", "review"),
+    ("human/awaiting-review", "human_review"),
     ("agent/failed", "failed"),
     ("agent/blocked", "blocked"),
     ("agent/waiting", "waiting"),
@@ -106,12 +121,13 @@ CONFIGURABLE_LABEL_FIELDS: tuple[tuple[str, str], ...] = (
     ("validation/passed", "validation_passed"),
     ("validation/verifier-passed", "verifier_passed"),
     ("direct-pr", "direct_pr"),
+    ("auto-merge", "auto_merge"),
     ("prd-auto-merge", "prd_auto_merge"),
 )
 
 #: 可选档位标签的特殊约定：配置置空表示本仓库禁用该功能；标签既不参与同步，
 #: 也不属于允许写入的集合。
-_OPTIONAL_BLANKABLE_LABEL_NAMES = frozenset({"direct-pr", "prd-auto-merge"})
+_OPTIONAL_BLANKABLE_LABEL_NAMES = frozenset({"direct-pr", "auto-merge", "prd-auto-merge"})
 
 
 @dataclass(frozen=True)

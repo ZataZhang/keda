@@ -434,6 +434,7 @@ def run_agent_with_prompt(
     resume_session_id: str | None = None,
     invocation_phase: str = PHASE_UNSPECIFIED,
     invocation_attempt: int | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> CommandResult:
     """Run an agent with a prepared prompt.
 
@@ -455,6 +456,9 @@ def run_agent_with_prompt(
             :data:`~backend.core.use_cases.agent_invocation_tracing.KNOWN_PHASES`
             之一）；只有调用点知道，因此显式传入，不在此处猜测。
         invocation_attempt: recovery 轮次（1 起）；非 attempt 主体调用为 ``None``。
+        cancel_check: 可选人工接管取消探针（Issue #278）。非 ``None`` 时透传给
+            ``process_runner.run``：探针为真即终止本次 agent 进程树并抛
+            ``InterruptedError``；默认 ``None`` 时 run_kwargs 与本参数之前一致。
 
     停滞监督（Issue #256）在**这里**接入，因为本函数是唯一真实进程边界：只有
     ``profile="run"`` 且带 Issue 身份、且 ``[agent_runner.stall_supervisor].enabled``
@@ -659,6 +663,10 @@ def run_agent_with_prompt(
         }
         if inactivity_timeout_seconds is not None:
             run_kwargs["inactivity_timeout"] = inactivity_timeout_seconds
+        if cancel_check is not None:
+            # 条件传递：与 inactivity_timeout 同理，老 FakeProcessRunner 签名里没有
+            # 这个参数，默认调用路径的 argv 与 run_kwargs 必须逐字节不变。
+            run_kwargs["cancel_check"] = cancel_check
         if attempt_invocation.prompt_delivery == PROMPT_DELIVERY_STDIN:
             run_kwargs["input_text"] = prompt
         # 监督上下文每次进入都新建：attempt_key 唯一到"这一次真实进程调用"，

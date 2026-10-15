@@ -57,7 +57,7 @@ def test_direct_publication_completes_only_after_review_transition(
     failures = []
 
     def edit_labels(number, *, add=(), remove=()):
-        if fail and "agent/review" in add and not failures:
+        if fail and "agent/automated-review-passed" in add and not failures:
             failures.append(number)
             raise RuntimeError("final review transition unavailable")
         return original_edit(number, add=add, remove=remove)
@@ -101,7 +101,7 @@ def test_direct_publication_completes_only_after_review_transition(
     completed = read_direct_pr_round(client, client.get_issue(_NUMBER))
     assert completed is not None and completed.handoff_complete and completed.pr_url == _URL
     labels = client.get_issue(_NUMBER).labels
-    assert "agent/review" in labels and "agent/supervising" not in labels
+    assert "agent/automated-review-passed" in labels and "agent/supervising" not in labels
     assert client.create_count == 0
     assert not any(list(command)[:2] == ["git", "push"] for command in process_runner.calls)
     assert not any(command and command[0] == "just" for command in process_runner.calls)

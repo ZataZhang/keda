@@ -688,6 +688,7 @@ def _execute_review_once(
         max_issues=max_issues,
         github_client=github_client,
         process_runner=process_runner,
+        repo_id=context.repo_id,
     )
     status = "completed" if exit_code == 0 else "failed"
     return {
