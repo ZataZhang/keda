@@ -255,6 +255,8 @@ export default function StatsPage() {
 
       <section
         id={STATS_SECTION_IDS.overview}
+        role="tabpanel"
+        aria-labelledby="stats-section-tab-overview"
         className="grid scroll-mt-20 gap-3 sm:grid-cols-2 xl:grid-cols-4"
         aria-label="运行指标"
       >
@@ -469,7 +471,12 @@ export default function StatsPage() {
         }}
       />
 
-      <div id={STATS_SECTION_IDS.tokenCost} className="scroll-mt-20">
+      <div
+        id={STATS_SECTION_IDS.tokenCost}
+        role="tabpanel"
+        aria-labelledby="stats-section-tab-tokenCost"
+        className="scroll-mt-20"
+      >
         {lifecycleStats === null ? (
           <Card className="border-border/70 shadow-sm">
             <CardHeader>
@@ -489,14 +496,24 @@ export default function StatsPage() {
         )}
       </div>
 
-      <div id={STATS_SECTION_IDS.agentPerformance} className="scroll-mt-20">
+      <div
+        id={STATS_SECTION_IDS.agentPerformance}
+        role="tabpanel"
+        aria-labelledby="stats-section-tab-agentPerformance"
+        className="scroll-mt-20"
+      >
         <AgentPerformanceSection
           stats={agentPerformanceStats}
           error={agentPerformanceError}
         />
       </div>
 
-      <div id={STATS_SECTION_IDS.prdExecution} className="scroll-mt-20">
+      <div
+        id={STATS_SECTION_IDS.prdExecution}
+        role="tabpanel"
+        aria-labelledby="stats-section-tab-prdExecution"
+        className="scroll-mt-20"
+      >
         <Card
           data-testid="stats-prd-lifecycle"
           className="gap-4 border-border/70 shadow-sm"

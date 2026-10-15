@@ -25,8 +25,6 @@ const STATS_SECTION_TABS: readonly StatsSectionTab[] = [
   { key: "prdExecution", label: "PRD 执行分析" },
 ]
 
-/** 区块顶部越过导航下沿该距离（px）内即视为当前区块；需覆盖锚点 scroll-mt-20 的留白。 */
-const ACTIVE_SECTION_OFFSET_PX = 24
 
 /**
  * 统计区块顶部导航：点击平滑滚动到对应区块，页面滚动时同步高亮，
@@ -91,9 +89,13 @@ export function StatsSectionTabs() {
       }
       let currentKey = sections[0].key
       for (const section of sections) {
+        // 用区块自身的 scrollMarginTop（计算值，单位 px）作为阈值，
+        // 而非固定像素常量，避免大根字号时阈值与实际留白不匹配。
+        const scrollMargin =
+          parseFloat(getComputedStyle(section.element).scrollMarginTop) || 0
         if (
           section.element.getBoundingClientRect().top <=
-          navBottom + ACTIVE_SECTION_OFFSET_PX
+          navBottom + scrollMargin
         ) {
           currentKey = section.key
         }
