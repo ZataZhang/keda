@@ -26,7 +26,7 @@ helper 会在未安装本包的机器上直接失败，而把换算逻辑复制�
 runner 生成并**发布给未知读者**的文本保留 UTC 并在字段名上显式标注，生成时不猜测任何人
 的时区，发布后也不回填换算：
 
-- `core/use_cases/agent_runner_failure.py` 的尝试历史表（`Started (UTC)`）。
+- `core/use_cases/agent_runner_failure_format.py` 的尝试历史表（`Started (UTC)`）。
 - `core/use_cases/agent_runner_stale_attempt.py` 的中断现场表（`Interrupted at (UTC)`）。
 
 这与 Issue #239 豁免「已发布的历史 GitHub 评论」同源：评论一旦发布就面向所有时区的读者，
