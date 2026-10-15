@@ -13,7 +13,7 @@ from datetime import timezone
 from enum import Enum
 
 from backend.core.shared.models.agent_runner import FailureType
-from backend.core.use_cases.agent_runner_failure import _ATTEMPT_START_MISSING_DISPLAY
+from backend.core.use_cases.agent_runner_failure_format import _ATTEMPT_START_MISSING_DISPLAY
 from backend.core.use_cases.agent_runner_reclaim import ClaimMarkerDetail
 
 
