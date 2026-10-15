@@ -534,6 +534,7 @@ deliberate = "agent/deliberate"
 # 直发档选择标签：非 workflow 状态标签，认领后 fresh read 命中即按 DIRECT 执行，
 # 一次成功发布后由认领赢家消费（移除）。改名不影响其语义。
 direct_pr = "direct-pr"
+auto_merge = "auto-merge" # 通用 Issue 自动合并授权；不要求 PRD，不跳过验证门禁
 
 [agent_runner.git]
 remote = "zata"
@@ -638,6 +639,8 @@ forbidden_path_patterns = [
 # checks 全绿 → squash 合并。两个开关同时为真才生效（"双同意"），保证
 # 历史上的 `safety.auto_merge = true` 不会单独触发自动合并，需仓库
 # 显式在本段开启 ``enabled = true``。
+# ``enabled = true`` 且 ``safety.auto_merge = false`` 时，也可用 Issue 的
+# ``auto-merge``（通用）或 ``prd-auto-merge``（PRD 专用）标签单独授权。
 #
 # 迁移提示：本段首次落地后，任何已设为 ``safety.auto_merge = true`` 的环境
 # 若不同时把下面 ``enabled`` 设为 ``true``，仍然回到"等人工合并"的现状——

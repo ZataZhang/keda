@@ -421,6 +421,7 @@ def test_backlog_api_authorization_is_consumed_by_merge_queue(
             checks_state="SUCCESS",
             number=42,
             body="",
+            is_draft=False,
         ),
     )
     github_client.comment_issue(42, "PR Branch: `issue-42`")

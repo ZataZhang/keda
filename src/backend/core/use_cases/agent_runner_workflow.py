@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, ReviewEventMarker
-from backend.core.use_cases.agent_runner_direct_pr_label import can_auto_merge_issue
+from backend.core.use_cases.agent_runner_merge_authorization import can_auto_merge_issue
 from backend.core.use_cases.agent_runner_events import _parse_event_marker
 
 LEGACY_REVIEW_LABEL = "agent/review"

@@ -20,7 +20,7 @@ from backend.core.shared.models.agent_runner import (
     SupervisorActionResult,
 )
 from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
-from backend.core.use_cases.agent_runner_direct_pr_label import (
+from backend.core.use_cases.agent_runner_merge_authorization import (
     issue_carries_prd_auto_merge_label,
 )
 from backend.core.use_cases.agent_runner_commit import (

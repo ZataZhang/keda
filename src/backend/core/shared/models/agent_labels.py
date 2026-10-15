@@ -69,6 +69,11 @@ STANDARD_LABEL_SPECS: tuple[tuple[str, str, str], ...] = (
         "One-shot DIRECT across claimants; consumed after confirmed Draft PR. Not a workflow state.",
     ),
     (
+        "auto-merge",
+        "B60205",
+        "Per-Issue auto-merge opt-in; normal verification, PR checks and PRD sign-off still apply.",
+    ),
+    (
         "prd-auto-merge",
         "B60205",
         "Explicit per-PRD authorization: skip independent verifier and auto-merge after required gates.",
@@ -116,12 +121,13 @@ CONFIGURABLE_LABEL_FIELDS: tuple[tuple[str, str], ...] = (
     ("validation/passed", "validation_passed"),
     ("validation/verifier-passed", "verifier_passed"),
     ("direct-pr", "direct_pr"),
+    ("auto-merge", "auto_merge"),
     ("prd-auto-merge", "prd_auto_merge"),
 )
 
 #: 可选档位标签的特殊约定：配置置空表示本仓库禁用该功能；标签既不参与同步，
 #: 也不属于允许写入的集合。
-_OPTIONAL_BLANKABLE_LABEL_NAMES = frozenset({"direct-pr", "prd-auto-merge"})
+_OPTIONAL_BLANKABLE_LABEL_NAMES = frozenset({"direct-pr", "auto-merge", "prd-auto-merge"})
 
 
 @dataclass(frozen=True)

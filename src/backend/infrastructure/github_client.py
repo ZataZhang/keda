@@ -77,6 +77,7 @@ from backend.infrastructure.github_pr_ops import (
     get_remote_base_sha,
     list_pr_comments,
     list_pull_requests_for_issue,
+    mark_pull_request_ready,
     merge_pull_request,
     set_pull_request_base,
     update_pull_request_body,
@@ -449,6 +450,10 @@ class GitHubCliClient:
 
     def set_pull_request_base(self, pr_number: int, base_branch: str) -> None:
         set_pull_request_base(self, pr_number, base_branch)
+
+    def mark_pull_request_ready(self, pr_number: int) -> None:
+        """将 Draft PR 转为可审阅状态。"""
+        mark_pull_request_ready(self, pr_number)
 
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
         merge_pull_request(self, pr_number, method=method)

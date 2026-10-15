@@ -379,6 +379,20 @@ def set_pull_request_base(client: _ClientProtocol, pr_number: int, base_branch: 
     )
 
 
+def mark_pull_request_ready(client: _ClientProtocol, pr_number: int) -> None:
+    """将 Draft Pull Request 转为 Ready for review。"""
+    result = client._run_with_retry(
+        ["gh", "pr", "ready", str(pr_number)],
+        cwd=client.repo_path,
+        check=False,
+    )
+    if result.return_code != 0:
+        raise RuntimeError(
+            f"gh pr ready failed for PR #{pr_number}: "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+
+
 def merge_pull_request(client: _ClientProtocol, pr_number: int, *, method: str = "squash") -> None:
     """Merge a Pull Request using ``gh pr merge`` with the requested method.
 

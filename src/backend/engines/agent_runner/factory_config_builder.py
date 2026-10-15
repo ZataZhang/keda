@@ -569,6 +569,7 @@ def build_label_config_from_settings(
         rework_prd=label_settings.rework_prd,
         deliberate=label_settings.deliberate,
         direct_pr=label_settings.direct_pr,
+        auto_merge=label_settings.auto_merge,
         prd_auto_merge=label_settings.prd_auto_merge,
         agent_labels=agent_labels,
     )

@@ -680,6 +680,22 @@ class IGitHubClient(ABC):
         """
         raise NotImplementedError
 
+    def mark_pull_request_ready(self, pr_number: int) -> None:
+        """将已通过自动合并门禁的 Draft PR 标记为可审阅。
+
+        合并队列只在 PRD 自动合并授权和本地门禁均通过后调用此操作；随后必须重新
+        读取 PR 上下文并等待 GitHub checks。该能力保持为可选端口，以兼容不运行
+        自动合并队列的旧客户端；不支持时合并队列必须 fail closed。
+
+        Args:
+            pr_number: 目标 Pull Request 编号。
+
+        Raises:
+            NotImplementedError: 客户端不支持将 Draft PR 转为 Ready。
+            RuntimeError: GitHub 调用失败。
+        """
+        raise NotImplementedError
+
     def close_pull_request(self, pr_number: int, *, comment: str | None = None) -> None:
         """关闭 Pull Request，并可选写入取代说明。
 

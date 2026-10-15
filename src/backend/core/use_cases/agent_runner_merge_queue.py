@@ -3,10 +3,11 @@
 快速档（autopilot）下的"合并队列" use case。该 use case 在每个 review pass
 末尾被 :func:`backend.core.use_cases.review_once.review_once` 触发，按 Issue 号 FIFO
 **串行**处理 ``agent/automated-review-passed`` 上获准合并的 PR。全局自动合并仍要求
-``autopilot.enabled`` 和 ``safety.auto_merge`` 同时为真；单个 PRD 可以通过显式
-``prd-auto-merge`` Issue 标签授权，且只跳过独立 verifier。两条路径都保留仓库验证、
-禁改终扫、PR checks 和 GitHub 分支保护。用户选择单 PRD 自动合并时，该 PRD 的
-Human-Confirmed hold 也不再阻塞；PRD 文件本身不会在合并后被回写。
+``autopilot.enabled`` 和 ``safety.auto_merge`` 同时为真；单个 Issue 可通过
+``auto-merge`` 标签获得通用自动合并资格，不要求 PRD，也不跳过验证门禁。单个 PRD
+仍可通过 ``prd-auto-merge`` 标签使用 PRD 专属路径，该路径跳过独立 verifier 并越过
+Human-Confirmed hold。所有路径都保留仓库验证、禁改终扫、PR checks 和 GitHub 分支保护；
+PRD 文件本身不会在合并后被回写。
 
 崩溃重入幂等性：
 - 自动签核前先解析 :class:`ValidationChecklistState`，已全勾则不再改 body
@@ -41,12 +42,17 @@ from backend.core.shared.prd_checklist import parse_prd_checklist
 from backend.core.use_cases.agent_runner_closeout import resolve_prd_worktree_path
 from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
 from backend.core.use_cases.agent_runner_feedback import extract_prd_path, is_prd_archive_path
-from backend.core.use_cases.agent_runner_direct_pr_label import (
+from backend.core.use_cases.agent_runner_merge_authorization import (
     can_auto_merge_issue,
     issue_carries_prd_auto_merge_label,
 )
 from backend.core.use_cases.agent_runner_issue_control import (
     autopilot_hold_blocks,
+)
+from backend.core.use_cases.agent_runner_merge_queue_readiness import (
+    PullRequestReadinessRequest,
+    ensure_pull_request_ready,
+    merge_authorization_skip_action,
 )
 from backend.core.use_cases.agent_runner_events import (
     extract_pr_branch_from_comments,
@@ -285,8 +291,8 @@ def process_merge_queue(
     """Run the autopilot merge queue for one review pass.
 
     The function is a no-op when autopilot scheduling is disabled. If the
-    global auto-merge switch is off, it only processes Issues carrying the
-    explicit PRD auto-merge label.
+    global auto-merge switch is off, it only processes Issues carrying either
+    the generic ``auto-merge`` label or the PRD-specific ``prd-auto-merge`` label.
 
     Args:
         repo_path: Target repository path.
@@ -309,9 +315,7 @@ def process_merge_queue(
 
     candidates = github_client.list_issues_by_label(config.labels.review, 100, state="open")
     if not config.safety.auto_merge:
-        candidates = [
-            issue for issue in candidates if issue_carries_prd_auto_merge_label(issue, config)
-        ]
+        candidates = [issue for issue in candidates if can_auto_merge_issue(issue, config)]
     # FIFO ordering: lower Issue numbers first to keep the audit trail
     # readable and to ensure earlier PRs land on the base branch first.
     candidates = sorted(candidates, key=lambda issue: issue.number)
@@ -362,13 +366,13 @@ def _process_one(
     supervisor_agent: str,
     repo_id: str | None = None,
 ) -> MergeQueueOutcome:
-    """Run the 7-step gate chain for a single Issue."""
+    """Run the 8-step gate chain for a single Issue."""
 
     if not config.autopilot.enabled:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
 
     # 人工接管闸门（Issue #278）：held Issue 绝不自动合并——即使
-    # require_verifier_pass 关闭或带 prd-auto-merge 显式授权标签；闸门
+    # require_verifier_pass 关闭或带 Issue 级自动合并授权标签；闸门
     # 只由同 head 的全新 verifier GREEN 清除。
     if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
         _logger.info(
@@ -605,8 +609,48 @@ def _process_one(
         )
         return MergeQueueOutcome(issue_number=issue.number, action="blocked_forbidden")
 
-    # Step 6: wait for checks
-    checks_green, _latest_context = _wait_for_checks_green(
+    # Step 6: 先就绪 Draft PR，再读取可能由 Ready 事件触发的 GitHub checks。
+    if pr_context.is_draft is None:
+        _logger.warning("Merge queue cannot confirm draft state for PR #%d.", pr_number)
+        return MergeQueueOutcome(issue_number=issue.number, action="waiting_for_pr_ready")
+    if pr_context.is_draft is True:
+        authorization_skip_action = merge_authorization_skip_action(
+            github_client,
+            issue,
+            config,
+            prd_anchor,
+        )
+        if authorization_skip_action is not None:
+            return MergeQueueOutcome(
+                issue_number=issue.number,
+                action=authorization_skip_action,
+            )
+        if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
+            _logger.info(
+                "Merge queue kept Draft PR #%d for Issue #%d under manual takeover hold.",
+                pr_number,
+                issue.number,
+            )
+            return MergeQueueOutcome(
+                issue_number=issue.number,
+                action="skipped_manual_takeover_hold",
+            )
+
+        ready_context = ensure_pull_request_ready(
+            PullRequestReadinessRequest(
+                github_client=github_client,
+                issue_number=issue.number,
+                pr_number=pr_number,
+                pr_branch=pr_branch,
+                comments=comments,
+            )
+        )
+        if ready_context is None:
+            return MergeQueueOutcome(issue_number=issue.number, action="waiting_for_pr_ready")
+        pr_context = ready_context
+
+    # 转为 Ready 后再读取 checks，避免沿用 Draft 阶段的旧状态。
+    checks_green, latest_context = _wait_for_checks_green(
         pr_context,
         config,
         github_client,
@@ -614,22 +658,20 @@ def _process_one(
     )
     if not checks_green:
         return MergeQueueOutcome(issue_number=issue.number, action="waiting_for_checks")
+    if latest_context is None or latest_context.is_draft is not False:
+        return MergeQueueOutcome(issue_number=issue.number, action="waiting_for_pr_ready")
 
+    # Step 7: checks 等待期间复核 Issue 授权、PRD 锚点和人工接管闸门。
     # PR checks can take a long time. Re-read the Issue immediately before merge so
-    # removing the per-PRD authorization while checks are running revokes this pass.
-    try:
-        merge_issue = github_client.get_issue(issue.number)
-    except Exception as exc:
-        _logger.warning(
-            "Merge queue could not refresh Issue #%d before merge: %s", issue.number, exc
-        )
-        return MergeQueueOutcome(issue_number=issue.number, action="skipped_issue_refresh_failed")
-    if scoped_prd_auto_merge and not issue_carries_prd_auto_merge_label(merge_issue, config):
-        return MergeQueueOutcome(issue_number=issue.number, action="skipped_auto_merge_revoked")
-    if scoped_prd_auto_merge and extract_prd_path(merge_issue.body) != prd_anchor:
-        return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_anchor_changed")
-    if not can_auto_merge_issue(merge_issue, config):
-        return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
+    # removing the Issue-level authorization while checks are running revokes this pass.
+    authorization_skip_action = merge_authorization_skip_action(
+        github_client,
+        issue,
+        config,
+        prd_anchor,
+    )
+    if authorization_skip_action is not None:
+        return MergeQueueOutcome(issue_number=issue.number, action=authorization_skip_action)
 
     # 人工接管可能在长时间检查期间被另一个 Console/runner 进程请求。最终合并
     # 边界再次回读共享 hold，避免队列使用入口处的旧快照继续 merge。
@@ -640,7 +682,7 @@ def _process_one(
         )
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_manual_takeover_hold")
 
-    # Step 7: squash merge + audit
+    # Step 8: squash merge + audit
     try:
         github_client.merge_pull_request(pr_number, method=config.autopilot.merge_method)
     except Exception as exc:  # noqa: BLE001 - runtime errors route through blocked.
@@ -663,7 +705,7 @@ def _process_one(
     merge_summary = (
         "已通过合并队列门禁并被 ``squash`` 合并；独立 verifier 按 PRD 显式授权跳过。"
         if scoped_prd_auto_merge
-        else "已通过合并队列的 7 步门禁链并被 ``squash`` 合并。"
+        else "已通过合并队列的 8 步门禁链并被 ``squash`` 合并。"
     )
     github_client.comment_issue(
         issue.number,

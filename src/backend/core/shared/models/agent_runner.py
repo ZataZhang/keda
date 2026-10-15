@@ -436,7 +436,9 @@ class LabelConfig:
     # 直发档选择标签：不是 workflow 状态标签，状态切换必须保留它，
     # 由认领赢家在一次成功发布后消费（移除）。
     direct_pr: str = "direct-pr"
-    # PRD 单目标自动合并授权：选择后跳过独立 verifier，但保留仓库验证与 PR checks。
+    # Issue 单目标自动合并授权：不依赖 PRD，不跳过 verifier、PRD 人工验收或其他门禁。
+    auto_merge: str = "auto-merge"
+    # PRD 单目标自动合并授权：跳过独立 verifier，但保留仓库验证与 PR checks。
     prd_auto_merge: str = "prd-auto-merge"
     # agent 路由标签由 agent 注册表派生（agent 名 -> spec.label），
     # 注册顺序即 choose_agent 的标签匹配顺序。
@@ -674,15 +676,17 @@ class AutopilotConfig:
     """Autopilot / merge queue configuration.
 
     该字段决定 **review pass 末尾是否启用合并队列消费**。全仓自动合并仍需要
-    ``safety.auto_merge`` 同时为真；该开关关闭时，合并队列只处理带有单 PRD
-    ``prd-auto-merge`` 显式授权标签的 Issue。这种"双开关"设计专门为了防止
+    ``safety.auto_merge`` 同时为真；该开关关闭时，合并队列可处理带有通用
+    ``auto-merge`` 或单 PRD ``prd-auto-merge`` 显式授权标签的 Issue。两种标签授权
+    都要求通过对应验证门禁；只有 ``prd-auto-merge`` 会跳过独立 verifier 和
+    PRD Human-Confirmed hold。这种"双开关"设计专门为了防止
     :class:`SafetyConfig.auto_merge` 死开关"突然激活"——历史上
     ``safety.auto_merge`` 一直是死配置，从未被代码消费；现在它真正生效，
     任何早前误设 ``true`` 的环境若没同时开启 ``autopilot.enabled`` 新键
     也不会开始自动合并，提供一层防呆保护。
 
     Attributes:
-        enabled: 主开关；为 ``False`` 时合并队列整段 no-op，包括单 PRD 授权项。
+        enabled: 主开关；为 ``False`` 时合并队列整段 no-op，包括 Issue 级自动合并标签授权。
             独立于 ``safety.auto_merge`` 是为了"双开关"语义。
         merge_method: 唯一接受的合并方式：``"squash"``。其它值在配置加载期
             由 ``AutopilotConfig`` 校验期拒绝。这是用户锁定的设计决策——

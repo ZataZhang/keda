@@ -522,6 +522,38 @@ def test_get_pull_request_context_empty_rollup_has_no_checks_state(
     ]
 
 
+def test_mark_pull_request_ready_uses_gh_pr_ready(tmp_path: Path) -> None:
+    """GitHub adapter 使用 gh 的 Draft-to-Ready 命令。"""
+    command = ("gh", "pr", "ready", "281")
+    fake_runner = FakeProcessRunner(
+        responses={command: CommandResult(command=command, return_code=0, stdout="", stderr="")}
+    )
+    github_client = GitHubCliClient(tmp_path, fake_runner)
+
+    github_client.mark_pull_request_ready(281)
+
+    assert fake_runner.calls == [list(command)]
+
+
+def test_mark_pull_request_ready_raises_when_gh_rejects_transition(tmp_path: Path) -> None:
+    """GitHub 拒绝 Ready 转换时 adapter 必须报告失败。"""
+    command = ("gh", "pr", "ready", "281")
+    fake_runner = FakeProcessRunner(
+        responses={
+            command: CommandResult(
+                command=command,
+                return_code=1,
+                stdout="",
+                stderr="GitHub unavailable",
+            )
+        }
+    )
+    github_client = GitHubCliClient(tmp_path, fake_runner)
+
+    with pytest.raises(RuntimeError, match="gh pr ready failed for PR #281"):
+        github_client.mark_pull_request_ready(281)
+
+
 def test_edit_issue_labels_only_removes_attached_labels(tmp_path: Path) -> None:
     """标签更新不应请求 REST 删除 Issue 上不存在的标签。"""
     get_issue_command = (

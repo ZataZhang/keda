@@ -27,6 +27,7 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
     LabelConfig,
+    PullRequestContext,
     PullRequestSummary,
 )
 
@@ -242,6 +243,14 @@ class FakeGitHubClient(IGitHubClient):
     def set_set_pr_base_error(self, error: Exception | None) -> None:
         """Inject a failure for ``set_pull_request_base`` (stack convergence tests)."""
         self._set_pr_base_error = error
+
+    def mark_pull_request_ready(self, pr_number: int) -> None:
+        """记录模拟的 Draft-to-Ready 状态转换。"""
+        self.calls.append({"method": "mark_pull_request_ready", "pr_number": pr_number})
+        for pr_branch, pr_context in self._pr_contexts.items():
+            if isinstance(pr_context, PullRequestContext) and pr_context.number == pr_number:
+                self._pr_contexts[pr_branch] = replace(pr_context, is_draft=False)
+                return
 
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
         self.calls.append(

@@ -174,6 +174,7 @@ def _merge_label_config(
         rework_prd=override_data.get("rework_prd", base_config.rework_prd),
         deliberate=override_data.get("deliberate", base_config.deliberate),
         direct_pr=override_data.get("direct_pr", base_config.direct_pr),
+        auto_merge=override_data.get("auto_merge", base_config.auto_merge),
         prd_auto_merge=override_data.get("prd_auto_merge", base_config.prd_auto_merge),
         agent_labels=agent_labels,
     )

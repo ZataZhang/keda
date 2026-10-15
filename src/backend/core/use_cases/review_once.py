@@ -781,7 +781,7 @@ def review_once(
             )
 
     # Autopilot 启用时运行合并队列：全局 auto_merge 开启则沿用原双开关行为；
-    # 否则队列只处理带单 PRD 显式授权标签的 Issue。
+    # 否则队列只处理带通用 Issue 授权或单 PRD 显式授权标签的 Issue。
     if config.autopilot.enabled and not dry_run and not github_api_rate_limited:
         try:
             merge_exit_code, merge_outcomes = process_merge_queue(

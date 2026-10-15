@@ -76,6 +76,8 @@ class LabelConfig:
     deliberate: str = "agent/deliberate"
     # 直发档选择标签（非 workflow 状态标签）；与 core ``LabelConfig`` 保持一致。
     direct_pr: str = "direct-pr"
+    # 通用 Issue 自动合并授权；与 core ``LabelConfig`` 保持一致。
+    auto_merge: str = "auto-merge"
     # agent 路由标签由 agent 注册表派生（agent 名 -> spec.label）。
     agent_labels: dict[str, str] = field(
         default_factory=lambda: {

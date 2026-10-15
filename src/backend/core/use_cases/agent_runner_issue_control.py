@@ -709,9 +709,9 @@ def finalize_verifier_takeover(
             )
 
     # 交班同时落 review 状态与人工待办标签（PRD FR-3 / rv-1 expected）：接管的语义是
-    # "这件事交给人"，而 synchronize_human_review_label 只给未获自动合并授权的 Issue 补
-    # 待办——本 Issue 带着 prd-auto-merge，单靠它会让 autopilot_hold 已经闸住 supervisor、
-    # review_once 与 merge queue，界面上却没有任何人工待办可寻。
+    # "这件事交给人"，而 synchronize_human_review_label 会跳过带自动合并授权的 Issue
+    # （auto-merge 或 prd-auto-merge）——若不在交班时直接补待办，autopilot_hold 虽已闸住
+    # supervisor、review_once 与 merge queue，界面上却没有任何人工待办可寻。
     try:
         github_client.edit_issue_labels(
             issue.number,

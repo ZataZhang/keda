@@ -190,6 +190,7 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 | **来源标识** | `source/prd` | 🔵 深蓝 | Issue 关联了仓库内的 PRD 文件 |
 | **异步讨论** | `agent/deliberate` | 🩶 浅灰 | 复杂需求先走 Issue 评论区异步讨论，收敛后换 `agent/rework-prd` 落地 PRD |
 | **发布档位** | `direct-pr` | 🟠 橙 | 一次性直发声明：任何认领方（其他机器、批量队列、daemon）认领后读到它就把该 Issue 解析为直发档。**不是 workflow 状态标签**，发布确认后被认领者消费删除；见下节「Issue 上的 `direct-pr` 标签」 |
+| **Issue 自动合并授权** | `auto-merge` | 🔴 红 | 对任意 Issue 显式授权进入自动合并队列；不要求 PRD，也不跳过正常验证、PR checks 或 PRD 人工验收；见下节「通用 Issue 自动合并」 |
 | **PRD 自动合并授权** | `prd-auto-merge` | 🔴 红 | 对单个 PRD 显式授权自动合并；只跳过独立 verifier，其他仓库验证、PR checks 与分支保护照常；见下节「单 PRD 自动合并」 |
 | **任务类型** | `type/feature` | 🔵 | 功能需求 |
 | | `type/refactor` | 🟣 | 代码重构 |
@@ -757,7 +758,7 @@ runner 在 commit proxy 固定实现提交后复跑 RV，并确认 PRD 执行侧
 
 - **精确绑定运行身份**。接管请求只携带页面从 Issue 详情读到的 `run_id` 与 PR `head_sha`，后端以共享的本地 SQLite 控制面（`issue_run_control` 表）做 CAS：仅当控制行仍是本次 `run` 且 HEAD 未漂移时，原子登记取消意图并立即落下 `autopilot_hold`。HEAD 已变、运行已结束或找不到受控运行时一律回 `409`，界面据此提示「HEAD 已变化 / 运行已结束 / 状态已变化」，绝不伪装成交班成功。`202` 还多一条持久性前提：CAS 未命中却仍读到同一 `run`/HEAD 的 `running` 行（CAS 与回读之间的并发窗口）时，存储层**重试一次**并要求回读离开 `running`；两次都空手就回 `409` 的 `state_change_conflict`——一个没写进库的取消意图不得被记成受理，也不得在 Console 审计里出现 `accepted`。
 - **停的是进程树，不是队列**。登记后 runner 侧的进程 watchdog 按秒级探针回读控制行，命中即只 `SIGKILL` 该 verifier 子进程组并回收；父 runner 与被监督的进程都存活。终止身份（进程组 + 创建时刻）在 `Popen` 之后只读一次，取消落地后的二次拆除复用它——子进程被回收后 `pid` 可能已被复用，再按 `pid` 取一次进程组就会把信号发给无关进程。
-- **取消≠通过**。被接管的 verifier **不产出任何 verdict**（没有 PASS/RED/YELLOW，也绝不写 `validation/verifier-passed`），并落到 review 态标签（由 `config.labels.review` 承载，当前规范名是 `agent/automated-review-passed`；旧文档与旧 capture 里写作 `agent/review` 的是同一个状态位），**同一次写入补上人工待办标签 `human/awaiting-review`**（`config.labels.human_review`）：交班的语义就是「这轮交给人」，而 `synchronize_human_review_label()` 只给未获自动合并授权的 Issue 补待办，带 `prd-auto-merge` 的 Issue 若走那条路会得到「自动审查已过、却没有人工待办」的空档——保持位已经闸住 supervisor / `review_once` / merge queue，没有人被通知。人工待办是独立维度，不属于互斥的 workflow labels，因此可与 review 态并存；`autopilot_hold` 在接管 CAS 受理时已生效，不等进程树退出。这个保持位让 post-PR supervisor、`review_once` 与 autopilot 合并队列**fail closed**——即便仓库关了 `require_verifier_pass`，也不会把这轮当成验证通过去自动合并。PR 保持 Draft 交人工处理。
+- **取消≠通过**。被接管的 verifier **不产出任何 verdict**（没有 PASS/RED/YELLOW，也绝不写 `validation/verifier-passed`），并落到 review 态标签（由 `config.labels.review` 承载，当前规范名是 `agent/automated-review-passed`；旧文档与旧 capture 里写作 `agent/review` 的是同一个状态位），**同一次写入补上人工待办标签 `human/awaiting-review`**（`config.labels.human_review`）：交班的语义就是「这轮交给人」，而 `synchronize_human_review_label()` 会跳过获自动合并授权的 Issue（`auto-merge` 或 `prd-auto-merge`），若交班时不直接补待办，`autopilot_hold` 虽已闸住 supervisor / `review_once` / merge queue，界面上却没有任何人工待办可寻。人工待办是独立维度，不属于互斥的 workflow labels，因此可与 review 态并存；`autopilot_hold` 在接管 CAS 受理时已生效，不等进程树退出。这个保持位让 post-PR supervisor、`review_once` 与 autopilot 合并队列**fail closed**——即便仓库关了 `require_verifier_pass`，也不会把这轮当成验证通过去自动合并。PR 保持 Draft 交人工处理。
 - **交班以回读为准**。请求返回 `202`（处理中）只代表取消意图已登记，界面继续轮询控制行投影，直到状态离开 `running`/`takeover_requested` 落定为「已交给你审查」才确认交班完成；随后重扫所属仓库并重读详情标签，使 Dashboard 列表和标签面板都更新为人工 review 状态。超过阈值仍未确认时提示「仍在停止」，界面绝不自称「已停止」。这条轮询**不**以"请求由本机发出"为前提：接管卡可能在控制行已经是 `takeover_requested` 时才挂载（页面重载、Issue 重开、第二个操作员），此时同样按交班节奏继续重读。`takeover_failed` 是终态但不是死路——界面按可重试呈递（说明本轮不会产出 verdict、保持位仍在），并给出重新读取的入口，新一轮 verifier 登记后即可再次接管。
 
 竞态同样按 fail-closed 收敛：若 verifier 恰好在接管登记的同一刻自然完成，二者只有一个赢家胜出（完成→接管拿到 `completed_conflict`，接管→完成落 `taken_over`）；接管之后 HEAD 又漂移，则该运行标为 `verifier_stale`、旧的 verdict 作废；外部把 PR 合并则控制行转 `pr_merged`。`autopilot_hold` 只会在**同一 run、同一 HEAD 的全新 verifier GREEN 发布前后都通过 GitHub fresh-read 核验后**清除；存储不可读或最终合并前发现 hold 时，自动处理继续 fail closed。
@@ -1372,6 +1373,23 @@ kc run --issue 42 --direct-pr
 - **两个旁路旗标互斥**：`--fast-merge` 与 `--direct-pr` 同时给出是用法错误（退出码 2）。两者存在感不同（一个跳独立验证，一个连审核与仓库验证一起跳），所以刻意不"取更强者"，避免静默升级掩盖调用者的真实意图。
 - **单一目标限定**：与 `--all-ready` 组合是用法错误——直发档绝不能开启"整队未审核爆发"。旗标只改写敲下它的那台机器；daemon 没有 `--direct-pr` 旗标，也没有对应的全局配置项。要让 daemon 或另一台机器直发某个 Issue，用下面的 Issue 标签，而不是给 daemon 开总闸。不触碰自动合并。
 
+### 通用 Issue 自动合并：`auto-merge` 标签
+
+给任意已完成实现和自动审查的 Issue 加上 `auto-merge`，即可在不打开全局
+`safety.auto_merge` 的情况下，显式允许它进入自动合并队列。**不要求 Issue 有 `PRD path:`
+锚点，也不要求仓库存在 PRD 文件**；该标签只表示合并授权，不指定要检查什么，也不改变现有检查规则。
+
+`autopilot.enabled = true` 仍须开启。队列照常执行配置的 verifier 策略、
+`runner.verification_commands`、禁改路径终扫、PR checks 和 GitHub 分支保护。自定义 review prompt
+会继续影响自动审查；实际阻止合并的机器门禁由配置的验证命令、verifier 策略和 GitHub checks
+执行。若 Issue 关联 PRD 且 `Human-Confirmed` 尚有待办，队列仍会等待人工验收；通用标签不跳过
+PRD hold。可在 `[agent_runner.labels].auto_merge` 自定义标签名，并运行 `kc labels sync` 同步。
+
+```bash
+kc labels sync
+gh issue edit 42 --add-label auto-merge
+```
+
 ### 单 PRD 自动合并：`prd-auto-merge` 标签
 
 Backlog「开始此 PRD」高级选项中的「此 PRD 完成后自动合并」会给该 PRD 的 Issue 加上
@@ -1383,8 +1401,9 @@ Realistic Validation 证据与命令重跑、pre-PR review、post-PR supervisor�
 原有 required check；不会伪造 `validation/verifier-passed`。
 
 全局 `[autopilot].enabled` 仍须开启，并由 `kc supervise` / `kc supervise-daemon` 的 review pass
-驱动队列。全局 `safety.auto_merge = false` 时，队列只处理带该授权标签的 PRD；其他 Issue 继续
-停在人工 review。选择该项也授权自动化越过 PRD 的 Human-Confirmed hold；PRD 仍须先归档。
+驱动队列。全局 `safety.auto_merge = false` 时，队列处理带 `auto-merge` 的任意 Issue，或带该
+PRD 专用授权标签的 PRD；没有这两种标签的 Issue 继续停在人工 review。选择 `prd-auto-merge`
+也授权自动化越过 PRD 的 Human-Confirmed hold；PRD 仍须先归档。
 自动合并后不修改 PRD 的 `Human-Confirmed` 清单或验收横幅，也不记录人工验收。
 
 监督器处理 PRD 证据缺口时，以 PRD 中声明的 `required_for_acceptance`、`real_entry` 与
@@ -1394,7 +1413,7 @@ Realistic Validation 证据与命令重跑、pre-PR review、post-PR supervisor�
 `prd-auto-merge` 不豁免必需的 Realistic Validation 证据；当合并队列与 `auto_sign_off` 均启用时，
 队列在仓库验证通过后可完成 PR 正文的签收清单，但不能据此声称未执行的验证已经通过。
 
-若要在 Issue 上手工设置，先同步标签：
+若要为单个 PRD 手工设置，先同步标签：
 
 ```bash
 kc labels sync
@@ -2959,6 +2978,7 @@ codex = "agent/codex"
 claude = "agent/claude"
 kimi = "agent/kimi"
 direct_pr = "direct-pr"     # 跟着 Issue 走的直发档位声明；改名后 kc labels sync 会创建同名标签
+auto_merge = "auto-merge"   # 单 Issue 自动合并授权；无须 PRD，不绕过正常门禁
 prd_auto_merge = "prd-auto-merge" # 单 PRD 显式自动合并授权；改名后 kc labels sync 会创建同名标签
 
 [agent_runner.git]
@@ -3617,7 +3637,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
    - **横幅一致性**：skill（v5 起）在契约 JSON 里报告横幅状态。`Human-Confirmed` 组仍有 `- [ ]` 时横幅必须是 `🧍 **验收状态**：待人工验收`（`awaiting_human`），一个都没有时必须是 `✅ **验收状态**：已验收`（`accepted`）；`⬜ 未开工` 与横幅缺失都算不一致。不一致时不归档、不发布，抛 `ACCEPTANCE_BANNER_MISMATCH`，可交给 Closeout Agent：只改横幅这一行并追加一条 Change Log，不得勾选、取消或改写任何复选框。本机 skill 仍是 v3/v4（不报告横幅）时跳过这项检查，只按执行侧判据归档。横幅文本由 skill 解析，keda 不另写横幅解析。
    - **发布前检查**（`push_changes(require_prd_archived=True)`，正常交付路径）：PRD 必须已在 `tasks/archive/`，且执行侧条目与横幅校验通过；仍在 pending（包括带人审空框的情形）一律拒绝。两条既有例外不变：recovery 耗尽后的失败 Draft PR 与 PRD rework 提案传 `require_prd_archived=False`，二者都不调用交付检查，也都不归档——失败交付永不归档。
    - PRD 文件不存在、archive 目录缺失或 `Acceptance Checklist` section 缺失：进入 recovery loop，重试耗尽后标记 `agent/failed`。
-3. **归档时机**：`git mv` 发生在 `git add -A` 之前，归档随实现一起提交，包括仍待人工验收的 PRD。正常路径在独立 verifier 之前完成这一步；verifier 是后续验收，不改变“归档代表执行侧交付完成”的定义。**已归档 ≠ 已验收**：归档只记录执行侧交付完成，验收与否看横幅与 `Human-Confirmed` 组。人在 PR 上确认后勾选人审项、把横幅改为 ✅ 已验收（同一个 PR 的后续提交，或合并后补记；合并时自动补记是后续 PRD）。合并队列对人审未答的 PRD（不论在 pending 还是 archive）一律跳过等人，见"7 步门禁链"下的 PRD hold。
+3. **归档时机**：`git mv` 发生在 `git add -A` 之前，归档随实现一起提交，包括仍待人工验收的 PRD。正常路径在独立 verifier 之前完成这一步；verifier 是后续验收，不改变“归档代表执行侧交付完成”的定义。**已归档 ≠ 已验收**：归档只记录执行侧交付完成，验收与否看横幅与 `Human-Confirmed` 组。人在 PR 上确认后勾选人审项、把横幅改为 ✅ 已验收（同一个 PR 的后续提交，或合并后补记；合并时自动补记是后续 PRD）。合并队列对人审未答的 PRD（不论在 pending 还是 archive）一律跳过等人，见"8 步门禁链"下的 PRD hold。
 4. **Pre-PR Review 与归档的关系**：`build_prd_review_reference()` 读取 worktree 中实际存在的 pending 或 archive 路径。runner 已归档的 PRD 不得被 agent 或 reviewer 挪回 pending；人工验收驳回后是否重开 PRD 由人决定。
 
 > **注意**：runner 不会只因 PRD 的 checkbox 而信任业务完成度；Realistic Validation 与独立 verifier 仍需提供实际证据。Change Log 解释需求为何演进，不能替代任何验收项或证据。
@@ -4698,11 +4718,11 @@ Agent Runner 的代码分布在四层架构中：
 
 ## Autopilot 快速档（合并队列）
 
-默认（严格档）下，supervisor approve 的 Issue 进入 `agent/automated-review-passed`，并带 `human/awaiting-review` 等待人审或人工签核。`autopilot.enabled = true` 时 review pass 会运行合并队列：全局 `safety.auto_merge = true` 时沿用全仓自动合并；否则只处理显式带有 `prd-auto-merge` 标签的 PRD。获准自动合并的 Issue 通常不带人工待办标签；若 PRD 仍有未完成的人工验收项，合并队列会加上 `human/awaiting-review` 并等待签核。队列仍要求仓库验证、PR checks 和分支保护通过后才 squash 合并。
+默认（严格档）下，supervisor approve 的 Issue 进入 `agent/automated-review-passed`，并带 `human/awaiting-review` 等待人审或人工签核。`autopilot.enabled = true` 时 review pass 会运行合并队列：全局 `safety.auto_merge = true` 时沿用全仓自动合并；否则处理显式带有 `auto-merge` 的任意 Issue，以及带有 `prd-auto-merge` 的 PRD。`auto-merge` 不要求 PRD，也不绕过正常验证或 PRD 人工验收；`prd-auto-merge` 另有 PRD 专用语义。获准自动合并的 Issue 通常不带人工待办标签；若 PRD 仍有未完成的人工验收项，合并队列会加上 `human/awaiting-review` 并等待签核。队列仍要求仓库验证、PR checks 和分支保护通过后才 squash 合并。
 
 ### 双同意开关
 
-全仓自动合并仍要求 **两个开关同时为真**。单 PRD 的 `prd-auto-merge` 标签是该单个 Issue 的明确授权：它仍要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`。
+全仓自动合并仍要求 **两个开关同时为真**。单个 Issue 的 `auto-merge` 或 `prd-auto-merge` 标签是该 Issue 的明确授权：两者都要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`。其中 `auto-merge` 不要求 PRD，`prd-auto-merge` 保留 PRD 专用语义。
 
 ```toml
 [safety]
@@ -4712,25 +4732,26 @@ auto_merge = true            # 历史开关：现在真正生效
 enabled = true               # 新键：仓库级显式打开
 ```
 
-`autopilot.enabled = false` 时合并队列整段 **no-op**。当 `autopilot.enabled = true` 且 `safety.auto_merge = false` 时，未带 `prd-auto-merge` 的 Issue 仍停在 `agent/automated-review-passed`；带该标签的 PRD 才进入单目标自动合并流程。历史上仅误设 `safety.auto_merge = true` 而未启用 autopilot 的环境仍不会自动合并。
+`autopilot.enabled = false` 时合并队列整段 **no-op**。当 `autopilot.enabled = true` 且 `safety.auto_merge = false` 时，未带 `auto-merge` 或 `prd-auto-merge` 的 Issue 仍停在 `agent/automated-review-passed`；带 `auto-merge` 的 Issue 按普通门禁进入队列，带 `prd-auto-merge` 的 PRD 才使用 PRD 专属流程。历史上仅误设 `safety.auto_merge = true` 而未启用 autopilot 的环境仍不会自动合并。
 
 > 迁移注意：升级时检查所有仓库；如有 `safety.auto_merge = true` 残留，本 PRD 会把它激活。新键 `autopilot.enabled` 是显式的客户确认入口。
 
-### 7 步门禁链
+### 8 步门禁链
 
-每条进入合并队列的 PR 都按下列顺序执行；任一步失败则**该 PR 转入既有失败/修复路径**，不阻塞队列中其余 PR：
+每条进入合并队列的 PR 都按下列顺序执行；门禁未满足时不合并，并按情况进入既有修复/阻塞路径或等待下一轮，不阻塞队列中其余 PR：
 
 1. **verifier 门禁**：普通 Issue 若需要 validation（`validation_required`）且 `autopilot.require_verifier_pass = true`，要求 Issue 已带 `validation/verifier-passed` 标签；缺失则本轮跳过。带 `prd-auto-merge` 的单 PRD 按显式授权跳过独立 verifier，不伪造该标签。
 2. **签收清单**：若 `autopilot.auto_sign_off = true`，普通队列在 verifier 通过后签收；单 PRD 自动合并路径在仓库验证命令通过后签收并写审计评论。GitHub check 只检查 PR body 清单是否完成；清单必须对应已经实际完成的验证。这个 PR body 清单不等于 PRD 的 `Human-Confirmed` 清单。
 3. **rebase**：复用 `pr_supervisor.execute_rebase` 把 PR 分支 rebase 到最新 remote base；冲突走既有 conflict-resolution agent 路径。失败→转 `agent/supervising`，本 PR 跳过。
 4. **全量验证**：在该 Issue 的 worktree 内调用 `agent_runner_git.run_verification(...)` 重跑 `runner.verification_commands`；红→转验证修复路径，本 PR 跳过不合并。
 5. **禁改路径终扫**：取 PR diff 文件清单，用 `safety.forbidden_path_patterns` 做最终匹配（复用 `agent_runner_publish.is_forbidden_path(...)`）；命中→打 `agent/blocked` + 评论，永不自动合并。
-6. **等 checks**：轮询 `get_pull_request_context` 直到 checks 全绿（适用时自动签核会触发 sign-off check 重跑），超时上限 `autopilot.merge_check_timeout_seconds`。GitHub branch protection 始终保留。
-7. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `iar:event (auto-merged)` 评论、摘除 `agent/automated-review-passed` 标签。
+6. **PR 就绪与 checks**：本地验证及禁改路径终扫通过后，重新读取 Issue 的自动合并授权；只有 `prd-auto-merge` 路径还要求 PRD 锚点与开始时一致。再检查 `autopilot_hold`；任一未通过都保持 Draft。门禁仍通过时，若 PR 为 Draft，调用 `IGitHubClient.mark_pull_request_ready(pr_number)` 转为 Ready；重新读取 PR 状态，未确认 Ready 就保留 `agent/automated-review-passed` 并留待下一轮重试。Ready 转换后才轮询 checks，避免使用 Draft 时的旧状态快照；超时上限 `autopilot.merge_check_timeout_seconds`。GitHub branch protection 始终保留。
+7. **合并前复核**：checks 等待期间再次读取 Issue 的自动合并授权；只有 `prd-auto-merge` 路径还复核 PRD 锚点。授权撤销、适用的锚点变化或人工接管均停止本轮，不回退 Issue 生命周期。
+8. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `iar:event (auto-merged)` 评论、摘除 `agent/automated-review-passed` 标签。
 
-**PRD hold（自动签核之后、rebase 之前）**：PRD-backed Issue 在 rebase 前先读该 Issue worktree 里的 PRD——按实际位置定位（先 `tasks/pending/`，再 `tasks/archive/`）。带 `prd-auto-merge` 的单目标选择授权自动合并越过 Human-Confirmed hold，但不修改 PRD 的清单或验收横幅，也不记录人工验收；PRD 仍必须归档：
+**PRD hold（自动签核之后、rebase 之前）**：PRD-backed Issue 在 rebase 前先读该 Issue worktree 里的 PRD——按实际位置定位（先 `tasks/pending/`，再 `tasks/archive/`）。只有 `prd-auto-merge` 这项 PRD 专用授权可以越过 Human-Confirmed hold；通用 `auto-merge` 仍等待人工验收。获准越过 hold 时不修改 PRD 的清单或验收横幅，也不记录人工验收；PRD 仍必须归档：
 
-- `Human-Confirmed` 组仍有未回答的项（`- [ ]`，以及老 PRD 误标的 `- [~]`，保守口径）且 Issue **没有** `prd-auto-merge` → 添加 `human/awaiting-review` 并返回 `skipped_human_review`，本轮不 rebase、不重跑验证、不合并，等人验收。队列确认签核完成且 PRD 已归档后移除此标签；显式选择的单 PRD 是该规则的唯一自动合并例外。
+- `Human-Confirmed` 组仍有未回答的项（`- [ ]`，以及老 PRD 误标的 `- [~]`，保守口径）且 Issue **没有** `prd-auto-merge` → 即使带通用 `auto-merge`，也添加 `human/awaiting-review` 并返回 `skipped_human_review`，本轮不 rebase、不重跑验证、不合并，等人验收。队列确认签核完成且 PRD 已归档后移除此标签；显式选择的单 PRD 是该规则的唯一自动合并例外。
 - PRD 仍在 `tasks/pending/` 且无人审待办 → `skipped_prd_pending`（执行侧没交付完）。
 - PRD 已在 `tasks/archive/` → 若人审已全部回答，或 Issue 带 `prd-auto-merge`，继续 rebase 及后续门禁。
 
