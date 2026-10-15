@@ -267,6 +267,7 @@ _USAGE_LIMIT_RESET_AT_PATTERN = re.compile(
 #: 仅在该调用点开启），所以放宽到裸 "usage limit" 不会误伤验证输出。
 _PROVIDER_CAPACITY_HINT_PATTERN = re.compile(
     r"usage limit"
+    r"|daily count exceeded"
     r"|insufficient_quota"
     r"|request rejected \(429\)"
     r"|\b429\b"

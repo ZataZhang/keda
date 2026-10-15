@@ -595,6 +595,8 @@ def test_is_transient_failure_matches_network_errors(message: str) -> None:
         "Error 529 overloaded",
         "too many requests",
         "rate limit exceeded",
+        "Billing daily count exceeded",
+        "You've reached your daily usage limit for Chat. Come back tomorrow.",
     ],
 )
 def test_is_provider_capacity_failure_matches_capacity_errors(message: str) -> None:

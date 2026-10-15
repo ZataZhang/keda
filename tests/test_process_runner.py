@@ -465,6 +465,176 @@ def test_run_filtered_claude_stream_output_sink_keeps_tool_lines_raw(
     assert completed_process.stdout == "\n[agent tool] Bash: ls\n"
 
 
+def _stderr_writer_command(*, line_count: int, exit_code: int) -> list[str]:
+    """构造一个只往 stderr 逐行写 ``err-<n>`` 然后以指定退出码结束的真实子进程命令。"""
+    script = (
+        "import sys\n"
+        f"for index in range({line_count}):\n"
+        "    sys.stderr.write(f'err-{index}\\n')\n"
+        f"sys.exit({exit_code})\n"
+    )
+    return [sys.executable, "-c", script]
+
+
+def test_run_filtered_claude_stream_returns_stderr_tail_and_echoes_without_sink(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """没有 display_sink 时 stderr 照旧回显到终端，同时带回结果供失败原因使用。"""
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    completed_process = run_filtered_claude_stream(
+        _stderr_writer_command(line_count=3, exit_code=1),
+        cwd=tmp_path,
+        timeout=30,
+        collect_stdout=True,
+    )
+
+    assert completed_process.returncode == 1
+    assert completed_process.stderr == "err-0\nerr-1\nerr-2\n"
+    assert capsys.readouterr().err == "err-0\nerr-1\nerr-2\n"
+
+
+def test_run_filtered_claude_stream_display_sink_still_receives_stderr_lines(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """有 display_sink 时 stderr 只交给回调、不回显终端，结果里仍保留尾部。"""
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    displayed_stderr_lines: list[str] = []
+
+    completed_process = run_filtered_claude_stream(
+        _stderr_writer_command(line_count=2, exit_code=0),
+        cwd=tmp_path,
+        timeout=30,
+        display_sink=displayed_stderr_lines.append,
+    )
+
+    assert displayed_stderr_lines == ["err-0\n", "err-1\n"]
+    assert completed_process.stderr == "err-0\nerr-1\n"
+    assert capsys.readouterr().err == ""
+
+
+def test_run_filtered_claude_stream_stderr_tail_is_bounded(tmp_path: Path) -> None:
+    """stderr 只保留最后 ``_STDERR_TAIL_MAX_LINES`` 行，长跑进程不会撑大内存。"""
+    from backend.infrastructure import process_runner_streams
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    emitted_line_count = process_runner_streams._STDERR_TAIL_MAX_LINES + 50
+
+    completed_process = run_filtered_claude_stream(
+        _stderr_writer_command(line_count=emitted_line_count, exit_code=0),
+        cwd=tmp_path,
+        timeout=30,
+        display_sink=lambda _line: None,
+    )
+
+    kept_lines = completed_process.stderr.splitlines()
+    assert len(kept_lines) == process_runner_streams._STDERR_TAIL_MAX_LINES
+    assert kept_lines[0] == "err-50"
+    assert kept_lines[-1] == f"err-{emitted_line_count - 1}"
+
+
+def test_runner_run_failure_carries_stream_stderr_into_command_failed_error(
+    tmp_path: Path,
+) -> None:
+    """agent 流式调用非零退出时，失败异常要带上 stderr（Issue 评论里的失败原因出处）。"""
+    runner = SubprocessRunner()
+
+    with pytest.raises(subprocess.CalledProcessError) as failure_info:
+        runner.run(
+            _stderr_writer_command(line_count=1, exit_code=7),
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=30,
+            output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+            check=True,
+        )
+
+    assert failure_info.value.returncode == 7
+    assert failure_info.value.stderr == "err-0\n"
+
+
+_QUOTA_LIMIT_TEXT = "You've reached your daily usage limit for Chat. Come back tomorrow."
+
+
+def _whole_assistant_text_event(text: str) -> str:
+    """qoder 风格：整条 assistant 文本消息，没有 stream_event 的 text_delta。"""
+    return _json_line(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+    )
+
+
+def test_renderer_surfaces_last_assistant_text_when_error_result_has_no_text() -> None:
+    """失败的 result 不带文本时，带出最近一条 assistant 文本（额度/鉴权原因所在）。"""
+    renderer = ClaudeStreamRenderer()
+
+    assert renderer.render_line(_whole_assistant_text_event(_QUOTA_LIMIT_TEXT)) == ""
+    error_output = renderer.render_line(
+        _json_line({"type": "result", "subtype": "error_during_execution"})
+    )
+
+    assert error_output == f"\n[agent error] {_QUOTA_LIMIT_TEXT}\n"
+
+
+def test_renderer_error_result_without_any_text_falls_back_to_subtype() -> None:
+    """既无 result 文本也无 assistant 文本时，至少带出 subtype，不再整行丢弃。"""
+    renderer = ClaudeStreamRenderer()
+
+    error_output = renderer.render_line(
+        _json_line({"type": "result", "subtype": "error_during_execution"})
+    )
+
+    assert error_output == "\n[agent error] error_during_execution\n"
+
+
+def test_renderer_success_result_output_is_unchanged_by_assistant_text() -> None:
+    """成功路径不变：assistant 文本不被渲染，成功 result 仍按原样输出。"""
+    renderer = ClaudeStreamRenderer()
+
+    assert renderer.render_line(_whole_assistant_text_event("working on it")) == ""
+    success_output = renderer.render_line(
+        _json_line({"type": "result", "subtype": "success", "result": "done"})
+    )
+
+    assert success_output == "\n[agent result] done\n"
+
+
+def test_runner_run_quota_failure_is_classified_as_provider_capacity(tmp_path: Path) -> None:
+    """qoder 额度耗尽（stdout 整条文本 + 无文本 error result + 退出码 1）要能被判成容量错误。"""
+    from backend.core.use_cases.agent_runner_failure import (
+        is_provider_capacity_failure,
+        is_transient_failure,
+    )
+
+    stream_lines = [
+        _whole_assistant_text_event(_QUOTA_LIMIT_TEXT),
+        _json_line({"type": "result", "subtype": "error_during_execution"}),
+    ]
+    script = (
+        "import sys\n"
+        f"for stream_line in {stream_lines!r}:\n"
+        "    sys.stdout.write(stream_line)\n"
+        "    sys.stdout.flush()\n"
+        "sys.exit(1)\n"
+    )
+
+    with pytest.raises(subprocess.CalledProcessError) as failure_info:
+        SubprocessRunner().run(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=30,
+            output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+            check=True,
+        )
+
+    assert _QUOTA_LIMIT_TEXT in str(failure_info.value.output)
+    assert is_provider_capacity_failure(failure_info.value)
+    assert not is_transient_failure(failure_info.value)
+
+
 def test_relay_process_stdout_output_sink_preserves_line_boundaries() -> None:
     """Non-Claude transcript streaming should keep stdout line endings."""
     from backend.engines.agent_runner.output_protocols.plain import _relay_process_stdout
