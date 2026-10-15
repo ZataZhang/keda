@@ -872,8 +872,8 @@ prompt = [
 ]
 
 [agent_runner.generated_content.draft_pr]
-# 默认用确定性正文发布；显式开启后才调用 AI 内容生成。
-enabled = false
+# Agent 生成为默认路径；模板仅在 agent 失败时兜底（fallback = "template"）。
+enabled = true
 mode = "agent"
 output = "markdown"
 include_commit_log = true
@@ -882,9 +882,10 @@ title_template = "[Agent] {issue_title}"
 # 未配置自定义模板时复用带提交/证据链接的内置事实正文。
 body_template = ""
 agent = "auto"
-timeout_seconds = 120
+timeout_seconds = 1200
 prompt = [
   "Generate a concise, readable draft PR description.",
+  "The PR title MUST be in English regardless of the issue language.",
   "The first non-empty line must be: Closes #{issue_number}",
   "Use these sections: Summary, Validation, Risk, Reviewer Notes.",
   "",

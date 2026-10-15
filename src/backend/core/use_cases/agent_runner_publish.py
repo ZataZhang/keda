@@ -400,6 +400,12 @@ def create_draft_pr(
         pr_title = generated.title
         pr_body = generated.body
         is_agent_authored_body = generated.source == "agent"
+        if gc_config.draft_pr.enabled and generated.source != "agent":
+            pr_body = (
+                f"{pr_body}\n\n"
+                f"<!-- iar: draft-pr-source={generated.source};"
+                f" reason=agent-timeout-or-no-output -->"
+            )
 
     # 确定性正文（fallback / body_template）没有 agent 可教，契约锚点由代码补齐；
     # agent 撰写的正文缺锚点则交给下面的软门标注，暴露"agent 无视教学"。
