@@ -340,6 +340,93 @@ curl -sS \
 
 启动单个 PRD。三种 Backlog 视图（依赖图 / 时间轴 / 列表）现在都会经右侧统一详情走这一个端点；成功后该仓的 PRD 列表缓存会立即失效，下一次刷新即可看到新状态。基础请求体为 `{"repo_id": "..."}`；可选的 `auto_merge_prd: true` 会给该 Issue 设置单 PRD 自动合并授权标签，只跳过独立 verifier，保留仓库验证命令、PR checks 和分支保护。该选项要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`；合并后不会修改 PRD 人工验收记录。PRD 不在 `tasks/pending/` 或 `tasks/archive/` 内、或仍被上游依赖阻塞时，由既有依赖门禁返回 `400`。
 
+### `GET /api/v1/agent-runner/console/runtime/tasks`
+
+值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增任何存储**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。
+
+- 数据范围严格绑定当前 registry 的启用仓库：账本按 `repo_id` 逐仓库读取，已删除或禁用的仓库即使仍有历史运行行也不会回到看板。
+- 状态分桶由 `agent/*` 标签推导（`agent/review` 与 `agent/ready` 同归 `waiting`）；没有可判定标签时依次回落到「Issue 已关闭」、运行账本终态、`unknown`，未知不折算成零。
+- 分桶顺序为 `running` → `waiting` → `blocked` → `completed` → `unknown`，同状态内按开始时间新者在前。
+- `duration_seconds` 对运行中的任务由「attempt 开始时间 → 生成时间」推算，是如实的已耗时，不是任何百分比。
+
+```json
+{
+  "generated_at": "2026-10-12T12:00:00+00:00",
+  "tasks": [
+    {
+      "repo_id": "keda",
+      "issue_number": 283,
+      "task_key": "keda#283",
+      "repo_display_name": "KedaCode",
+      "issue_title": "统一运行时看板与桌面进度窗",
+      "issue_url": "https://github.com/…/issues/283",
+      "status": "running",
+      "status_reason": "agent/running",
+      "phase": "implement",
+      "agent": "claude",
+      "preset": "fast",
+      "model": "…",
+      "attempt_number": 2,
+      "prd_path": "tasks/archive/P1-FEAT-20261012-103222-unified-runtime-dashboard.md",
+      "started_at": "2026-10-12T11:30:00+00:00",
+      "finished_at": null,
+      "duration_seconds": 1800.0,
+      "last_outcome": null,
+      "labels": ["agent/running"]
+    }
+  ],
+  "status_counts": { "running": 1, "waiting": 0, "blocked": 0, "completed": 0, "unknown": 0 },
+  "unavailable_sources": [],
+  "missing_repo_ids": [],
+  "sync_status": "ready",
+  "scanned_at": "2026-10-12T11:59:00+00:00",
+  "truncated": false
+}
+```
+
+字段语义：
+
+- `unavailable_sources`：读取失败或整体不可信的数据来源名（`monitor_snapshot` / `run_history` / `prd_lifecycle` / `attempt_ledger`）。任一来源失败只把该来源标为不可用，不折叠成「没有任务」。
+- `sync_status` / `scanned_at` / `missing_repo_ids`：直接透传快照读路径的结果，`pending_first_sync` 表示整体还不可信。
+- `truncated`：任务数超过 100 行上限时为 `true`，此时列表是排序后的前 100 条；历史复盘请看 Stats 页面。
+- **改动树触达读数不在本响应里**：摘要只带 `prd_path`，展示侧按它调用 `GET …/backlog/prds/{encoded_path}/progress`，避免出现第二份影响树检测逻辑。
+
+### `GET /api/v1/agent-runner/console/desktop-companion/status`
+
+桌面小窗状态探针，只读，网页看板与原生 helper 共用。GET 不要求 `Origin`（浏览器对同源 GET 可能不带该头）。
+
+```json
+{
+  "status": "running",
+  "console_origin": "http://127.0.0.1:8765",
+  "console_session": "3f2b…",
+  "focus_ticket": 2,
+  "close_ticket": 0,
+  "detail": null,
+  "hint": "桌面小窗正在运行。",
+  "window_exists": true,
+  "companion_url": "http://127.0.0.1:8765/app/companion/"
+}
+```
+
+`status` 取值：`launched` / `focused` / `running` / `idle` / `not_installed` / `unsupported_platform` / `failed`。`companion_url` 仅在 `window_exists=true` 时非空，避免把「可以开」画成「已经开着」。`console_session` 是本次 Console 进程的身份串，helper 用它识别上一个 Console 留下的孤儿窗口并自行退出。
+
+### `POST /api/v1/agent-runner/console/desktop-companion/window`
+
+开启或聚焦桌面小窗。响应体与 status 探针同构，`status` 为 `launched`（新建）或 `focused`（已存在，只带到前台）。
+
+请求来源约束（**硬性**，任一不满足即拒绝且不起进程）：
+
+- 绑定地址必须来自 ASGI `scope["server"]`（由 uvicorn 按真实 bind 写入，不读 `Host` 头，因此伪造 `Host` 无效），且主机在本机回环集合（`127.0.0.1` / `localhost` / `::1`）内；非回环绑定返回 `403`。
+- `Origin` 必须存在、scheme 为 `http`、主机是回环别名、端口与 Console 实际绑定端口一致、且不带 path / query / fragment；不一致返回 `403`，缺失返回 `403`。
+- 请求体不接受任何命令、主机、端口或路径参数：helper 的加载地址固定为 `{由绑定推出的 console_origin}/app/companion/`（IPv6 绑定会补方括号），子进程 argv 固定；`Origin` 头只参与同源判定，不会成为窗口地址。
+
+同一个 Console 进程最多一个窗口：重复调用只递增 `focus_ticket`，由 helper 自己提前台，不再新建进程。窗口身份还带 `console_session`：共用同一状态目录的另一个 Console 进程认不出别人的窗口，既不会把它报成「已聚焦」，也不会替对方关窗，各入口开各自的小窗。
+
+### `POST /api/v1/agent-runner/console/desktop-companion/window/close`
+
+请求小窗自行关窗退出（同样要求同源 `Origin`）。后端只递增 `close_ticket`，**不 kill 进程**，因此窗口不会被半路截断；返回的 `status` 在 helper 退出后为 `idle`。
+
 ## 模型模块
 
 ### `backend.infrastructure.models.model_loader`

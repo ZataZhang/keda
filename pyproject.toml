@@ -93,6 +93,11 @@ db = [
 backup = [
     "boto3>=1.37.0",
 ]
+# 桌面 companion 的可选运行时：未安装时 Web 看板照常可用，
+# Console 侧只会把开启小窗的动作标为「未安装」。
+desktop = [
+    "pywebview>=5.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

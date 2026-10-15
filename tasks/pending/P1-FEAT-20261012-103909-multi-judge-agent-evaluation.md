@@ -141,7 +141,7 @@ Executor 与 verifier 负责评测样本格式和版本校验、干净 worktree 
 ### 架构边界与相关 PRD
 
 - suite 解析、样本约束、状态迁移、评分校验与汇总放 `core`；HTTP 与 DTO 在 `api`；执行器适配和只读评审调用在 `engines`；SQLite/provider 调用等基础设施留在 `infrastructure`。依赖方向保持 `api -> core -> engines -> infrastructure`。
-- `tasks/pending/P1-FEAT-20261012-103222-unified-runtime-dashboard.md` 添加 Dashboard 与导航入口，可能与评测页使用同一导航/前端 API 类型文件，但两者交付无前后置行为依赖；实施时协调共享文件。
+- `tasks/archive/P1-FEAT-20261012-103222-unified-runtime-dashboard.md` 添加 Dashboard 与导航入口，可能与评测页使用同一导航/前端 API 类型文件，但两者交付无前后置行为依赖；实施时协调共享文件。
 - `tasks/archive/P1-FEAT-20261009-133425-lifecycle-agent-model-settings.md` 与当前 lifecycle settings 提供执行预设定义；本 PRD 只读取执行预设，并增加评审模型 preset 引用配置，不更改生命周期九阶段绑定。
 - `tasks/archive/P1-FEAT-20261010-011714-unified-auto-concurrency-ceiling.md` 定义现有 runner 并发资源约束；离线评测必须尊重同一主机 capacity，不能另开一组无界 worker。
 - `frontend-admin/` 不承载 Console 用户入口；改动仅落在 `frontend-public/` 与 Console API。
