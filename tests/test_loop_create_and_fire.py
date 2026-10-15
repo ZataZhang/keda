@@ -59,6 +59,8 @@ issue_type: feature
 agent: auto
 priority: P2
 slug: trending
+# 本文件测 PRD 模式；不写 output 则默认 issue
+output: prd
 labels:
   - area/docs
 ---

@@ -30,6 +30,7 @@ from backend.core.shared.interfaces.loop_scheduler import ILoopStateStore
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.loop import (
     LoopManager,
+    LoopOutput,
     LoopSchedule,
     LoopScheduleKind,
     LoopTask,
@@ -89,6 +90,7 @@ def _task_from_dict(payload: dict[str, Any]) -> LoopTask:
         timezone_name=payload.get("timezone_name"),
         managed_by=str(payload.get("managed_by", LoopManager.LOOP_DAEMON.value)),
         skip_when=payload.get("skip_when"),
+        output=str(payload.get("output", LoopOutput.PRD.value)),
         last_skip_reason=payload.get("last_skip_reason"),
     )
 
@@ -121,6 +123,7 @@ def _task_to_dict(task: LoopTask) -> dict[str, Any]:
         "timezone_name": task.timezone_name,
         "managed_by": task.managed_by,
         "skip_when": task.skip_when,
+        "output": task.output,
         "last_skip_reason": task.last_skip_reason,
     }
 

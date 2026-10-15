@@ -75,6 +75,7 @@ def _task_from_recipe(
         timezone_name=recipe.timezone_name,
         managed_by=recipe.managed_by,
         skip_when=recipe.skip_when,
+        output=recipe.output,
     )
 
 

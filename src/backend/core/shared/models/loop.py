@@ -36,6 +36,15 @@ class LoopManager(str, Enum):
     AGENT_DAEMON = "agent-daemon"
 
 
+class LoopOutput(str, Enum):
+    """每次触发产出什么。"""
+
+    #: 渲染一份带时间戳的 PRD 并与 Issue 一一绑定（走完整 PRD 生命周期）。
+    PRD = "prd"
+    #: 只创建一个不带 PRD 的普通 Issue，配方正文直接作为 Issue 正文（新配方的默认值）。
+    ISSUE = "issue"
+
+
 _INTERVAL_PATTERN = re.compile(r"^(?P<value>\d+)(?P<unit>[mhd])$")
 
 
@@ -118,6 +127,7 @@ class LoopRecipe:
         timezone_name: Optional IANA timezone name for cron scheduling.
         managed_by: 推进该 loop 的常驻 daemon。
         skip_when: 触发前的跳过条件 ``KEY=value[,value]``，按 ``pre_command`` 注入的变量求值。
+        output: 每次触发的产出形态（``issue`` 或 ``prd``），配方默认 ``issue``。
         priority: PRD priority tag used in the generated filename
             (``P0`` / ``P1`` / ``P2`` / ``P3``).
         slug: Optional short slug for the generated PRD filename. Defaults to
@@ -134,6 +144,7 @@ class LoopRecipe:
     labels: tuple[str, ...] = ()
     managed_by: str = field(default=LoopManager.LOOP_DAEMON.value, kw_only=True)
     skip_when: str | None = field(default=None, kw_only=True)
+    output: str = field(default=LoopOutput.ISSUE.value, kw_only=True)
     publish_prd: bool = True
     queue_ready: bool = True
     run_now: bool = False
@@ -198,6 +209,9 @@ class LoopTask:
         timezone_name: Optional IANA timezone name for cron schedules.
         managed_by: 推进该任务的常驻 daemon。
         skip_when: 触发前的跳过条件，语义同 :class:`LoopRecipe`。
+        output: 每次触发的产出形态，语义同 :class:`LoopRecipe`。注意默认值是 ``prd``：
+            它代表“状态文件里没有该字段的旧条目”，保证已登记的 loop 行为不变；新登记的
+            任务总是由配方带着显式的 ``output`` 进来，默认 ``issue``。
         last_skip_reason: 最近一次未造票的原因（活动 Issue 暂停 / 条件跳过）；
             成功触发后清空，供 ``kc loop list`` 展示。
     """
@@ -220,6 +234,7 @@ class LoopTask:
     publish_prd: bool = True
     managed_by: str = field(default=LoopManager.LOOP_DAEMON.value, kw_only=True)
     skip_when: str | None = field(default=None, kw_only=True)
+    output: str = field(default=LoopOutput.PRD.value, kw_only=True)
     last_skip_reason: str | None = field(default=None, kw_only=True)
     queue_ready: bool = True
     run_now: bool = False

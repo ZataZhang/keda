@@ -318,3 +318,44 @@ def test_recipe_skip_when_is_parsed_and_validated(tmp_path: Path) -> None:
         parse_loop_recipe_text(
             base_text.format(extra="skip_when: nonsense\n"), source_path=tmp_path / "demo.md"
         )
+
+
+def test_recipe_output_defaults_to_issue_and_rejects_unknown_values(tmp_path: Path) -> None:
+    from backend.core.use_cases.loop_recipe import parse_loop_recipe_text
+
+    base_text = '---\nid: demo\nschedule: "0 1 * * *"\nrepo_id: r\n{extra}---\n\nbody\n'
+    default_recipe = parse_loop_recipe_text(
+        base_text.format(extra=""), source_path=tmp_path / "d.md"
+    )
+    assert default_recipe.output == "issue"  # 新配方默认不生成 PRD
+    prd_recipe = parse_loop_recipe_text(
+        base_text.format(extra="output: prd\n"), source_path=tmp_path / "d.md"
+    )
+    assert prd_recipe.output == "prd"
+    with pytest.raises(ValueError, match="output"):
+        parse_loop_recipe_text(
+            base_text.format(extra="output: markdown\n"), source_path=tmp_path / "d.md"
+        )
+
+
+def test_recipe_examples_in_the_loop_guide_all_parse(tmp_path: Path) -> None:
+    """docs/guides/loop.md 里的每个配方示例都必须能被真实解析器解析。
+
+    配方的简易 YAML 解析器只忽略**整行**注释，行内 ``# ...`` 会被当成值的一部分
+    （``schedule`` 会直接解析失败）。示例是给人照抄的，不能带这种写法。
+    """
+    import re
+
+    from backend.core.use_cases.loop_recipe import parse_loop_recipe_text
+
+    guide_text = (Path(__file__).resolve().parents[1] / "docs" / "guides" / "loop.md").read_text(
+        encoding="utf-8"
+    )
+    recipe_blocks = re.findall(
+        r"```(?:markdown|yaml)\n(---\nid:.*?\n---\n.*?)```", guide_text, re.S
+    )
+    assert recipe_blocks, "没有在文档里找到配方示例"
+    for recipe_block in recipe_blocks:
+        # 文档里的 <占位符> 换成可解析的实值。
+        concrete_text = re.sub(r"<[^>\n]+>", "x", recipe_block)
+        parse_loop_recipe_text(concrete_text, source_path=tmp_path / "example.md")

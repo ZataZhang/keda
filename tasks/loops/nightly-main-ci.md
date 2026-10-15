@@ -7,7 +7,7 @@ issue_type: bug
 agent: auto
 labels:
   - scope/ci
-publish_prd: false
+output: issue
 queue_ready: true
 run_now: false
 timezone: Asia/Shanghai

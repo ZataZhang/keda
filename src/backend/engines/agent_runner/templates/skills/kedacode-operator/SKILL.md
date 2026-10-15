@@ -1,6 +1,6 @@
 ---
 name: kedacode-operator
-description: Use KedaCode (kc) when the user asks to operate the KedaCode CLI or its managed runner — 装环境与查 Agent 配置 (initialize a repository, inspect agent presets/models), 建 issue (create an Issue from a PRD file or from a one-line request), 查 issue (inspect Issues and the ready queue), 查生命周期 (show current Issue lifecycle phases and filter by reached milestones), 跑一次 (run one execution pass, preview or execute), 看进度 (watch progress and per-Issue live agent output), 卡住了 (triage stuck, blocked, or failed Issues, or hand one Issue's running verifier over to a human), 后台跑 (run and manage daemons in the background), or CI 交付 (observe CI status, set the auto-repair policy, request one manual repair). Read-only requests never start execution.
+description: Use KedaCode (kc) when the user asks to operate the KedaCode CLI or its managed runner — 装环境与查 Agent 配置 (initialize a repository, inspect agent presets/models), 建 issue (create an Issue from a PRD file or from a one-line request), 查 issue (inspect Issues and the ready queue), 查生命周期 (show current Issue lifecycle phases and filter by reached milestones), 跑一次 (run one execution pass, preview or execute), 看进度 (watch progress and per-Issue live agent output), 卡住了 (triage stuck, blocked, or failed Issues, or hand one Issue's running verifier over to a human), 后台跑 (run and manage daemons in the background), 定时任务 (register, preview and manage recurring loops that create Issues on a schedule), or CI 交付 (observe CI status, set the auto-repair policy, request one manual repair). Read-only requests never start execution.
 ---
 
 # KedaCode Operator
@@ -17,6 +17,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 | 跑一次或聚合已完成批次 | 跑一下 / 跑一次 / 执行这个 Issue / run this / 快速通道发 PR / 直接发 PR / 夜间任务总 PR / 聚合来源 PR / 重试批次 PR | `${CODEBUDDY_SKILL_DIR}/references/run-once.md` |
 | 看进度 | 看看 197 现在什么情况 / 到哪了 / 实时输出 / logs / tail / `/ps` | `${CODEBUDDY_SKILL_DIR}/references/watch.md` |
 | 卡住了 | 怎么不动了 / 卡住了 / 失败了 / agent/blocked / 恢复 / 人工接管这个 Issue 的验证 | `${CODEBUDDY_SKILL_DIR}/references/triage.md` |
+| 定时任务 | 每天几点跑 / 定时检查 / 周期性任务 / 夜间巡检 / loop / kc loop | `${CODEBUDDY_SKILL_DIR}/references/loop.md` |
 | 后台跑 | 挂后台 / 让它自己跑 / daemon / 起守护 / 停掉它 | `${CODEBUDDY_SKILL_DIR}/references/daemon.md` |
 | CI 交付 | CI 状态 / checks 怎么样 / 自动修复 / 修一下 CI / backlog ci | `${CODEBUDDY_SKILL_DIR}/references/ci.md` |
 | 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 修复 operator skill / kc skill repair-operator / 有哪些模型预设 / agent doctor / 生命周期矩阵 / 九阶段生效模型 / kc agent lifecycle / kc agent preset / 回退候选 / kc agent fallback / 这个命令收什么旗标 / 裸 kc 进哪个入口 / kc session 与 kc repl 的区别 / 起个预览 / 起 dev server | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |

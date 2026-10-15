@@ -21,6 +21,9 @@ def test_nightly_main_ci_recipe_uses_agent_daemon() -> None:
     assert recipe.timezone_name == "Asia/Shanghai"
     assert recipe.labels == ("scope/ci",)
     assert recipe.pre_command is not None
+    # 每晚只建普通 Issue，不生成 PRD；CI 正常的夜晚由 skip_when 直接跳过。
+    assert recipe.output == "issue"
+    assert recipe.skip_when == "last_ci_status=success,none"
 
 
 def test_nightly_main_ci_recipe_renders_ci_status() -> None:

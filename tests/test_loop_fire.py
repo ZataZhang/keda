@@ -607,3 +607,105 @@ def test_agent_daemon_loop_fires_once_previous_issue_is_closed(
     )
 
     assert result.status is LoopFireStatus.FIRED
+
+
+# --- output: issue（不带 PRD 的普通 Issue）-----------------------------------
+
+
+def test_issue_output_creates_plain_issue_without_prd_file(
+    task: LoopTask, repo_path: Path, tmp_path: Path
+) -> None:
+    """output=issue：不写 PRD 文件、不走 PRD 链接回写，配方正文原文进 Issue 正文。"""
+    issue_task = replace(task, output="issue")
+    fake_github = FakeGitHubClient(issue_url="https://github.com/example/fire-demo/issues/55")
+    fake_github.set_list_issues_by_label_result([])
+    state_store = JsonLoopStateStore(tmp_path / "loop-state.json")
+
+    result = fire_loop(
+        issue_task,
+        repo_path=repo_path,
+        github_client=fake_github,
+        process_runner=FakeProcessRunner(),
+        state_store=state_store,
+        clock=FixedClock(datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc)),
+    )
+
+    assert result.status is LoopFireStatus.FIRED
+    assert result.issue_number == 55
+    assert result.prd_path is None and result.relative_prd_path is None
+    assert not (repo_path / "tasks").exists()  # 没有任何 PRD 文件
+    created_issue_calls = [call for call in fake_github.calls if call["method"] == "create_issue"]
+    assert len(created_issue_calls) == 1
+    issue_body = str(created_issue_calls[0]["body"])
+    assert "Fetch trending list." in issue_body  # 配方正文是完整的，不只是开头一段
+    assert "PRD path:" not in issue_body  # 不带 PRD 锚点
+
+
+def test_issue_output_dry_run_says_no_prd_file(
+    task: LoopTask, repo_path: Path, tmp_path: Path
+) -> None:
+    issue_task = replace(task, output="issue")
+    result = fire_loop(
+        issue_task,
+        repo_path=repo_path,
+        github_client=FakeGitHubClient(),
+        process_runner=FakeProcessRunner(),
+        state_store=JsonLoopStateStore(tmp_path / "loop-state.json"),
+        clock=FixedClock(datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc)),
+        dry_run=True,
+    )
+    assert result.status is LoopFireStatus.DRY_RUN
+    assert result.relative_prd_path is None
+    assert "plain Issue" in (result.skipped_reason or "")
+    assert not (repo_path / "tasks").exists()
+
+
+def test_default_output_is_prd_and_still_writes_the_prd_file(
+    task: LoopTask, repo_path: Path, tmp_path: Path
+) -> None:
+    """兼容性：不声明 output 的 loop 行为不变，仍然生成 PRD 文件。"""
+    assert task.output == "prd"
+    fake_github = FakeGitHubClient(issue_url="https://github.com/example/fire-demo/issues/56")
+    fake_github.set_list_issues_by_label_result([])
+    result = fire_loop(
+        task,
+        repo_path=repo_path,
+        github_client=fake_github,
+        process_runner=FakeProcessRunner(),
+        state_store=JsonLoopStateStore(tmp_path / "loop-state.json"),
+        clock=FixedClock(datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc)),
+    )
+    assert result.relative_prd_path is not None
+    assert (repo_path / result.relative_prd_path).is_file()
+
+
+def test_output_survives_state_store_round_trip(task: LoopTask, tmp_path: Path) -> None:
+    state_path = tmp_path / "loop-state.json"
+    JsonLoopStateStore(state_path).upsert_task(replace(task, output="issue"))
+    reloaded_task = JsonLoopStateStore(state_path).get_task(task.id)
+    assert reloaded_task is not None and reloaded_task.output == "issue"
+
+
+def test_legacy_state_entry_without_output_keeps_running_as_prd(tmp_path: Path) -> None:
+    """已登记的旧 loop（状态文件里没有 output 字段）不受新默认值影响，仍按 prd 运行。"""
+    import json
+
+    state_path = tmp_path / "loop-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "tasks": [
+                    {
+                        "id": "legacy-loop",
+                        "recipe_path": str(tmp_path / "legacy.md"),
+                        "repo_id": "r",
+                        "schedule": {"kind": "cron", "expression": "0 1 * * *"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    legacy_task = JsonLoopStateStore(state_path).get_task("legacy-loop")
+    assert legacy_task is not None and legacy_task.output == "prd"

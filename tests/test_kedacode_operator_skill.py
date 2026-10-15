@@ -43,7 +43,7 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
 #: 子命令说明的当前份数；新增路由时须同步受管集合与此契约。
-_EXPECTED_REFERENCE_COUNT = 9
+_EXPECTED_REFERENCE_COUNT = 10
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
 _LEGACY_SKILL_NAME = product_identity.LEGACY_OPERATOR_SKILL_NAME
@@ -394,6 +394,10 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # ``build_command_schema`` 只导出叶子命令，所以这条路径由
     # ``_group_callback_flags_by_path()`` 从真实命令树补出来；旗标照抄派生结果，
     # 不凭记忆放行 schema 里查不到的名字。
+    ("loop", "create"): {"--recipe", "--cron", "--every", "--repo-id", "--repo", "--force"},
+    ("loop", "list"): {"--json"},
+    ("loop", "run"): {"--now", "--dry-run", "--repo-id", "--repo"},
+    ("loop", "cancel"): set(),
     ("daemon",): {
         "--autopilot",
         "--no-autopilot",
@@ -711,6 +715,7 @@ _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "watch.md": ("看进度", "live agent output"),
     "triage.md": ("卡住了", "triage stuck"),
     "daemon.md": ("后台跑", "daemons"),
+    "loop.md": ("定时任务", "recurring loops"),
     "ci.md": ("CI 交付", "auto-repair"),
     "setup-and-config.md": ("装环境", "initialize a repository"),
 }
@@ -944,3 +949,26 @@ def test_packaged_skill_documents_triage_paths() -> None:
     assert "kc recover --issue <N>" in text
     assert "agent/ready --remove-label agent/failed" in text
     assert "kc worktree path --branch issue-<N>" in text
+
+
+def test_packaged_skill_documents_loop_creation_end_to_end() -> None:
+    """loop 路由必须讲清：CLI 只登记配方、谁推进、产出什么、预演与重新登记、暂停规则。"""
+    loop_text = (_PACKAGED_REFERENCES_DIR / "loop.md").read_text(encoding="utf-8")
+    for required_fragment in (
+        "does not write one",  # CLI 登记已有配方，不替人写配方
+        "tasks/loops/<id>.md",
+        "--recipe",
+        "managed_by",
+        "agent-daemon",
+        "output",
+        "skip_when",
+        "pre_command",
+        "--dry-run",
+        "--force",  # 改了配方要重新登记
+        "copied into the state at registration",
+        "open `loop/<id>` Issue",  # 暂停规则：上一轮 Issue 仍开放就等
+        "kc loop cancel",
+    ):
+        assert required_fragment in loop_text, f"loop.md 缺少：{required_fragment}"
+    # 主文件的路由表必须能把“定时任务”路由到这份说明。
+    assert "references/loop.md" in _PACKAGED_SKILL.read_text(encoding="utf-8")

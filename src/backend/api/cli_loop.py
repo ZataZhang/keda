@@ -214,6 +214,7 @@ def run_loop_create_command(
     print(
         f"Registered loop '{task.id}' "
         f"(repo_id={task.repo_id}, schedule={task.schedule.expression}, "
+        f"output={task.output}, "
         f"next_fire={format_local_display_time(task.next_fire_at) or '—'})."
     )
     return 0
@@ -361,14 +362,14 @@ def run_loop_run_now_command(
         return 1
     if result.status.value == "fired":
         print(
-            f"Loop '{result.loop_id}' fired: PRD={result.relative_prd_path}, "
+            f"Loop '{result.loop_id}' fired: PRD={result.relative_prd_path or '(none)'}, "
             f"issue={result.issue_url}, "
             f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
         )
     elif result.status.value == "skipped_duplicate":
         print(
             f"Loop '{result.loop_id}' skipped: {result.skipped_reason} "
-            f"PRD={result.relative_prd_path}, "
+            f"PRD={result.relative_prd_path or '(none)'}, "
             f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
         )
     elif result.status.value == "skipped_condition":

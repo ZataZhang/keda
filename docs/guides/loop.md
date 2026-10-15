@@ -48,6 +48,7 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 | `agent` |  | enum | `auto` | 合法值由 agent 注册表派生：`auto`（按标签路由）或任一已注册 agent 名（如 `claude` / `codex` / `kimi` / `pi`，以及 `[agent_runner.agents.<name>]` 里自定义注册的 agent）。 |
 | `labels` |  | list | `[]` | 除默认 `loop/<id>` 外附加的 GitHub labels。 |
 | `publish_prd` |  | bool | `true` | 创建 Issue 前是否 commit/push PRD。 |
+| `output` |  | enum | `issue` | 每次触发的产出：`issue`（默认）**不生成任何 PRD**，配方正文原文直接作为普通 Issue 的正文（`publish_prd` 在此模式下无意义）；`prd` 渲染一份带时间戳的 PRD 并与 Issue 一一绑定（走完整 PRD 生命周期，`publish_prd: true` 时还会提交并推送到 base 分支）。已经登记过、状态文件里没有该字段的旧 loop 仍按 `prd` 运行，不受默认值变化影响；重新登记旧配方时才会换成新默认值，需要旧行为请显式写 `output: prd`。 |
 | `queue_ready` |  | bool | `true` | 是否贴 `agent/ready` 标签让 runner 认领。 |
 | `run_now` |  | bool | `false` | 造票后是否立即调用 `run_agent_repositories_once`。 |
 | `pre_command` |  | string | `null` | 触发前执行的 shell 命令，stdout 中 `KEY=value` 行会被注入模板变量。 |
@@ -64,6 +65,13 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 一次，所以未合并的修复 PR 不会被下一轮重复劳动。未声明 `managed_by` 的旧 recipe 继续由
 `kc loop-daemon` 推进，未声明 `managed_by` 的旧 recipe 继续由 `kc loop-daemon` 推进，
 不会被普通 daemon 重复触发。
+
+`output: issue` 适合“每天重复做同一件事”的 loop（如夜间巡检 CI）：PRD 是一次性的生命周期
+（完成后归档、与 Issue 一对一链接、证据按 PRD 分目录），并不适合每晚复用。该模式下触发只会
+创建一个不带 `PRD path:` 锚点的普通 Issue，因此不会生成 PRD 文件、不往 `main` 推送、也不会
+留下需要清理的本地文件；agent 在 Issue 正文里拿到的是配方的完整规则，证据目录按
+`issue-<N>` 走，Issue 不会出现在按 PRD 扫描的 Backlog 页面里。代价是没有 PRD 的验收清单与
+证据 manifest，交付是否合格由 PR 上的 CI 把关。
 
 `skip_when` 可让 loop 在“无事可做”时不造票，例如 `skip_when: last_ci_status=success,none`：
 触发时先执行 `pre_command`，变量命中列表就跳过本次（不建 Issue、不消耗 agent），并把
@@ -100,6 +108,8 @@ issue_type: feature
 agent: auto
 labels:
   - area/discovery
+# 本例是 PRD 风格（带验收清单）；不写 output 则默认 issue
+output: prd
 publish_prd: true
 queue_ready: true
 run_now: false
@@ -305,16 +315,22 @@ triage 决策树 recipe 与普通 recipe 字段集完全一致（见上方"完�
 ```yaml
 ---
 id: nightly-cleanup-<scope-coverage-name>
-schedule: "0 2 * * *"   # 或 "30 2 * * *" 等错峰时间
+# 或 "30 2 * * *" 等错峰时间
+schedule: "0 2 * * *"
 repo_id: <registered-repo-id>
-priority: P1            # P1 适合需要长期稳定运行的整理 loop
+# P1 适合需要长期稳定运行的整理 loop
+priority: P1
 issue_type: feature
 agent: auto
 labels:
-  - loop/cleanup        # 默认 loop/<id> 自动加，这里只加额外 label
+  # 默认 loop/<id> 自动加，这里只加额外 label
+  - loop/cleanup
+# PRD 风格；不写 output 则默认 issue
+output: prd
 publish_prd: true
 queue_ready: true
-run_now: true           # 当晚就让 agent runner 接管，不排队
+# 当晚就让 agent runner 接管，不排队
+run_now: true
 timezone: Asia/Shanghai
 slug: nightly-cleanup-<scope-coverage-name>
 pre_command: "<单行 shell 命令，stdout 输出 KEY=value 行>"

@@ -37,11 +37,16 @@ from backend.core.shared.models.loop import (
     LoopFireResult,
     LoopFireStatus,
     LoopManager,
+    LoopOutput,
     LoopTask,
 )
 from backend.core.use_cases.create_issue_from_prd import (
     IssueFromPrdRequest,
     create_issue_from_prd,
+)
+from backend.core.use_cases.create_issue_from_prompt import (
+    IssueFromPromptRequest,
+    create_issue_from_prompt,
 )
 from backend.core.use_cases.loop_recipe import (
     parse_loop_recipe,
@@ -318,11 +323,16 @@ def fire_loop(
     day_token = fire_at.strftime("%Y-%m-%d")
     effective_labels = labels_config or LabelConfig()
 
-    prd_path = build_prd_path(
-        repo_path,
-        loop_id=task.slug or task.id,
-        priority=task.priority,
-        fire_at=fire_at,
+    # ``output: issue`` 的 loop 不产生 PRD 文件：配方正文直接成为 Issue 正文。
+    prd_path = (
+        build_prd_path(
+            repo_path,
+            loop_id=task.slug or task.id,
+            priority=task.priority,
+            fire_at=fire_at,
+        )
+        if task.output == LoopOutput.PRD.value
+        else None
     )
 
     if not dry_run and task.managed_by == LoopManager.AGENT_DAEMON.value:
@@ -382,21 +392,28 @@ def fire_loop(
             after=fire_at_utc,
             timezone_name=effective_timezone_name,
         )
+        output_text = (
+            f"render PRD at {prd_path}"
+            if prd_path is not None
+            else "create a plain Issue (no PRD file)"
+        )
         return LoopFireResult(
             loop_id=task.id,
             status=LoopFireStatus.DRY_RUN,
             prd_path=prd_path,
-            relative_prd_path=prd_path.relative_to(repo_path),
+            relative_prd_path=prd_path.relative_to(repo_path) if prd_path is not None else None,
             skipped_reason=(
-                f"Would render PRD at {prd_path} with title "
+                f"Would {output_text} with title "
                 f"{issue_title!r} and labels {list(recipe.all_labels())}; "
                 f"next fire at {next_fire_dt.isoformat()}."
             ),
             next_fire_at=next_fire_dt.isoformat(),
         )
 
-    prd_path.parent.mkdir(parents=True, exist_ok=True)
-    prd_path.write_text(rendered_body, encoding="utf-8")
+    relative_prd_path = prd_path.relative_to(repo_path) if prd_path is not None else None
+    if prd_path is not None:
+        prd_path.parent.mkdir(parents=True, exist_ok=True)
+        prd_path.write_text(rendered_body, encoding="utf-8")
 
     if _issue_already_exists(
         github_client,
@@ -418,7 +435,7 @@ def fire_loop(
             loop_id=task.id,
             status=LoopFireStatus.SKIPPED_DUPLICATE,
             prd_path=prd_path,
-            relative_prd_path=prd_path.relative_to(repo_path),
+            relative_prd_path=relative_prd_path,
             skipped_reason=(
                 f"Open Issue with label loop/{task.id} already exists for "
                 f"{day_token}; skipped creation."
@@ -426,26 +443,13 @@ def fire_loop(
             next_fire_at=next_fire_dt.isoformat(),
         )
 
-    relative_prd_path = prd_path.relative_to(repo_path)
-    issue_url = create_issue_from_prd(
-        request=IssueFromPrdRequest(
-            repo_path=repo_path,
-            prd_path=prd_path,
-            issue_type=task.issue_type,
-            title_override=f"[{task.issue_type.title()}] {issue_title}",
-            queue_ready=task.queue_ready,
-            issue_agent=task.agent,
-            labels_config=effective_labels,
-            force=False,
-            publish_prd=task.publish_prd,
-            git_remote="origin",
-            git_base_branch="main",
-            generated_content_config=None,
-            depends_on=(),
-            parse_evidence_format_with_agent=False,
-            validation_language="zh-CN",
-            structured_evidence=True,
-        ),
+    issue_url = _create_loop_issue(
+        task,
+        prd_path=prd_path,
+        rendered_body=rendered_body,
+        issue_title=issue_title,
+        repo_path=repo_path,
+        labels_config=effective_labels,
         github_client=github_client,
         process_runner=process_runner,
         content_generator=content_generator,
@@ -484,6 +488,65 @@ def fire_loop(
         issue_url=issue_url,
         issue_number=issue_number,
         next_fire_at=next_fire_dt.isoformat(),
+    )
+
+
+def _create_loop_issue(
+    task: LoopTask,
+    *,
+    prd_path: Path | None,
+    rendered_body: str,
+    issue_title: str,
+    repo_path: Path,
+    labels_config: LabelConfig,
+    github_client: IGitHubClient,
+    process_runner: IProcessRunner,
+    content_generator: IContentGenerator | None,
+) -> str:
+    """按 loop 的产出形态创建 Issue，返回 Issue URL。
+
+    ``output: prd``：PRD 已写入磁盘，走完整的“从 PRD 建 Issue”流程（含 PRD 链接回写）。
+    ``output: issue``：不碰任何 PRD 文件，配方正文原文作为 Issue 正文，Issue 与 PRD
+    生命周期（归档、一对一链接、按 PRD 分目录的证据）完全无关。
+    """
+    issue_title_text = f"[{task.issue_type.title()}] {issue_title}"
+    if prd_path is None:
+        return create_issue_from_prompt(
+            request=IssueFromPromptRequest(
+                repo_path=repo_path,
+                prompt_text=rendered_body,
+                issue_type=task.issue_type,
+                title_override=issue_title_text,
+                queue_ready=task.queue_ready,
+                issue_agent=task.agent,
+                labels_config=labels_config,
+                generated_content_config=None,
+            ),
+            github_client=github_client,
+            content_generator=content_generator,
+        )
+    return create_issue_from_prd(
+        request=IssueFromPrdRequest(
+            repo_path=repo_path,
+            prd_path=prd_path,
+            issue_type=task.issue_type,
+            title_override=issue_title_text,
+            queue_ready=task.queue_ready,
+            issue_agent=task.agent,
+            labels_config=labels_config,
+            force=False,
+            publish_prd=task.publish_prd,
+            git_remote="origin",
+            git_base_branch="main",
+            generated_content_config=None,
+            depends_on=(),
+            parse_evidence_format_with_agent=False,
+            validation_language="zh-CN",
+            structured_evidence=True,
+        ),
+        github_client=github_client,
+        process_runner=process_runner,
+        content_generator=content_generator,
     )
 
 
