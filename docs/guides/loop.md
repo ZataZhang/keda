@@ -57,16 +57,18 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 | `slug` |  | string | `<id>` | 生成 PRD 文件名中的 slug。 |
 
 `managed_by: agent-daemon` 是需要与现有 Issue runner 串起来的循环任务的推荐模式。
-普通 daemon 停止时不会创建下一轮 Issue；到期但上一轮 Issue 仍处于
-`agent/ready`、`agent/running`、`agent/failed`、`agent/blocked` 等活动状态时，
-本轮会暂停且保留原 `next_fire_at`，待活动 Issue 进入 `agent/automated-review-passed`
-等终态后再补发一次。未声明 `managed_by` 的旧 recipe 继续由 `kc loop-daemon` 推进，
+普通 daemon 停止时不会创建下一轮 Issue；到期但上一轮 `loop/<id>` Issue **仍是开放状态**
+（不论处于 `agent/running`、`agent/failed`，还是“PR 已建、等人工审核”的
+`agent/automated-review-passed` / `human/awaiting-review`）时，本轮会暂停且保留原
+`next_fire_at`。只有上一轮 Issue 被关闭（交付 PR 合并后 `Closes #N` 自动关闭）才会补发
+一次，所以未合并的修复 PR 不会被下一轮重复劳动。未声明 `managed_by` 的旧 recipe 继续由
+`kc loop-daemon` 推进，未声明 `managed_by` 的旧 recipe 继续由 `kc loop-daemon` 推进，
 不会被普通 daemon 重复触发。
 
 `skip_when` 可让 loop 在“无事可做”时不造票，例如 `skip_when: last_ci_status=success,none`：
 触发时先执行 `pre_command`，变量命中列表就跳过本次（不建 Issue、不消耗 agent），并把
 `next_fire_at` 推进到下一个调度点。变量缺失视为不命中，照常触发。`kc loop list` 会在对应行
-下显示“最近未造票”的原因（条件跳过，或因上一轮 Issue 仍在活动而暂停），成功触发后清空。
+下显示“最近未造票”的原因（条件跳过，或因上一轮 Issue 仍未关闭而暂停），成功触发后清空。
 
 所有调度计算使用 recipe 的 `timezone`；状态文件中的 `created_at`、`last_fire_at` 和
 `next_fire_at` 仍以带 `+00:00` 偏移的 UTC 保存，模板里的日期和 Issue 标题使用 recipe

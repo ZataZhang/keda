@@ -137,25 +137,28 @@ def _active_loop_issue_reason(
     github_client: IGitHubClient,
     *,
     loop_id: str,
-    labels_config: LabelConfig,
     limit: int = 50,
 ) -> str | None:
-    """判断 agent-daemon loop 是否仍有未完成的开放 Issue。
+    """判断 agent-daemon loop 的上一轮 Issue 是否还没结束。
 
-    该判断采用 fail-closed：开放 Issue 没有已知终态标签时也视为活动中，避免
-    新增 runner 状态或读取不完整时产生重叠的每日任务。
+    规则只有一条：只要带 ``loop/<id>`` 标签的 Issue 仍是开放状态，就不触发下一轮。
+    交付 PR 合并后 ``Closes #N`` 会关闭 Issue，那时才放行；因此“PR 已建、等人工审核”
+    这类中间状态也算未结束，不会让下一轮重复做同一件事、与未合并的 PR 冲突。
+
+    不靠 workflow 标签推断“算不算完成”：标签集合会随 runner 状态演进，漏判一个就会
+    产生重叠任务；而 Issue 是否关闭是 GitHub 上唯一确定的终态。
 
     Args:
         github_client: 用于查询 loop Issue 的 GitHub 客户端。
         loop_id: loop 标识，对应 ``loop/<id>`` 标签。
-        labels_config: runner 工作流标签配置。
         limit: 最多检查的开放 Issue 数量。
 
     Returns:
-        需要暂停时返回人读原因；没有活动 Issue 时返回 ``None``。
+        需要暂停时返回人读原因（含 Issue 编号与当前 workflow 标签）；上一轮已关闭
+        时返回 ``None``。
 
     Raises:
-        RuntimeError: 无法安全读取 GitHub 状态时抛出。
+        RuntimeError: 无法安全读取 GitHub 状态时抛出（宁可暂停也不重叠触发）。
     """
     label = f"loop/{loop_id}"
     try:
@@ -164,30 +167,19 @@ def _active_loop_issue_reason(
         raise RuntimeError(
             f"Could not inspect active Issues for loop {loop_id!r}; fire paused."
         ) from exc
-
-    active_labels = (
-        labels_config.ready,
-        labels_config.running,
-        labels_config.supervising,
-        labels_config.failed,
-        labels_config.blocked,
-        labels_config.waiting,
-        labels_config.validation_pending,
-        labels_config.rework_prd,
-        labels_config.deliberate,
+    if not issues:
+        return None
+    previous_issue = issues[0]
+    workflow_labels = [
+        label_name
+        for label_name in previous_issue.labels
+        if label_name.startswith(("agent/", "human/"))
+    ]
+    state_text = ", ".join(workflow_labels) if workflow_labels else "no runner label"
+    return (
+        f"previous Issue #{previous_issue.number} is still open ({state_text}); "
+        "the next fire waits until it is closed (its PR merged)"
     )
-    terminal_labels = {labels_config.review, labels_config.human_review}
-    for issue in issues:
-        issue_labels = set(issue.labels)
-        matched_active_label = next(
-            (label_name for label_name in active_labels if label_name in issue_labels),
-            None,
-        )
-        if matched_active_label is not None:
-            return f"open Issue #{issue.number} has active label {matched_active_label!r}"
-        if not issue_labels.intersection(terminal_labels):
-            return f"open Issue #{issue.number} has no terminal runner label"
-    return None
 
 
 def _skip_when_reason(skip_when: str | None, variables: dict[str, str]) -> str | None:
@@ -334,11 +326,7 @@ def fire_loop(
     )
 
     if not dry_run and task.managed_by == LoopManager.AGENT_DAEMON.value:
-        active_reason = _active_loop_issue_reason(
-            github_client,
-            loop_id=task.id,
-            labels_config=effective_labels,
-        )
+        active_reason = _active_loop_issue_reason(github_client, loop_id=task.id)
         if active_reason is not None:
             _persist_skip_reason(state_store, task, reason=active_reason)
             return LoopFireResult(

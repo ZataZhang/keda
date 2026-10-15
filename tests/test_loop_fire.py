@@ -537,3 +537,73 @@ def test_active_pause_persists_visible_reason(
     assert saved_task is not None
     assert "#77" in (saved_task.last_skip_reason or "")
     assert saved_task.next_fire_at == active_task.next_fire_at
+
+
+@pytest.mark.parametrize(
+    "previous_labels",
+    [
+        ("loop/github-trending", "agent/automated-review-passed", "human/awaiting-review"),
+        ("loop/github-trending", "agent/review"),
+        ("loop/github-trending",),
+    ],
+)
+def test_agent_daemon_loop_waits_for_previous_issue_to_close(
+    task: LoopTask, repo_path: Path, tmp_path: Path, previous_labels: tuple[str, ...]
+) -> None:
+    """上一轮 Issue 只要还开着（含“PR 已建、等人工审核”），就不触发下一轮。"""
+    waiting_task = replace(
+        task, managed_by="agent-daemon", next_fire_at="2026-06-23T08:00:00+00:00"
+    )
+    fake_github = FakeGitHubClient()
+    fake_github.set_list_issues_by_label_result(
+        [
+            IssueSummary(
+                number=288,
+                title="Nightly task",
+                url="https://example/issues/288",
+                body="",
+                labels=previous_labels,
+            )
+        ]
+    )
+    state_store = JsonLoopStateStore(tmp_path / "loop-state.json")
+    state_store.upsert_task(waiting_task)
+
+    result = fire_loop(
+        waiting_task,
+        repo_path=repo_path,
+        github_client=fake_github,
+        process_runner=FakeProcessRunner(),
+        state_store=state_store,
+        clock=FixedClock(datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc)),
+    )
+
+    assert result.status is LoopFireStatus.SKIPPED_ACTIVE
+    assert "#288" in (result.skipped_reason or "")
+    assert "closed" in (result.skipped_reason or "")
+    assert result.next_fire_at == waiting_task.next_fire_at
+    assert not [call for call in fake_github.calls if call["method"] == "create_issue"]
+
+
+def test_agent_daemon_loop_fires_once_previous_issue_is_closed(
+    task: LoopTask, repo_path: Path, tmp_path: Path
+) -> None:
+    """上一轮 Issue 已关闭（开放列表为空）时才放行，并保留原到期槽位补发一次。"""
+    waiting_task = replace(
+        task, managed_by="agent-daemon", next_fire_at="2026-06-23T08:00:00+00:00"
+    )
+    fake_github = FakeGitHubClient(issue_url="https://github.com/example/fire-demo/issues/300")
+    fake_github.set_list_issues_by_label_result([])
+    state_store = JsonLoopStateStore(tmp_path / "loop-state.json")
+    state_store.upsert_task(waiting_task)
+
+    result = fire_loop(
+        waiting_task,
+        repo_path=repo_path,
+        github_client=fake_github,
+        process_runner=FakeProcessRunner(),
+        state_store=state_store,
+        clock=FixedClock(datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc)),
+    )
+
+    assert result.status is LoopFireStatus.FIRED

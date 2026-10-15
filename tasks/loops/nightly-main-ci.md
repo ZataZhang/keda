@@ -7,14 +7,14 @@ issue_type: bug
 agent: auto
 labels:
   - scope/ci
-publish_prd: true
+publish_prd: false
 queue_ready: true
 run_now: false
 timezone: Asia/Shanghai
 priority: P1
 slug: nightly-main-ci
 skip_when: last_ci_status=success,none
-pre_command: 'status="$(gh run list --branch main --limit 1 --json conclusion -q ".[] | .conclusion" 2>/dev/null)" && if [ -n "$status" ]; then printf "last_ci_status=%s\n" "$status"; else printf "last_ci_status=none\n"; fi || printf "last_ci_status=unavailable\n"'
+pre_command: 'status="$(gh run list --branch main --status completed --limit 1 --json conclusion -q ".[] | .conclusion" 2>/dev/null)" && if [ -n "$status" ]; then printf "last_ci_status=%s\n" "$status"; else printf "last_ci_status=none\n"; fi || printf "last_ci_status=unavailable\n"'
 ---
 
 # Main CI 夜间巡检 — {{date}}
