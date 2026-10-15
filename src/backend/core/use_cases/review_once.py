@@ -301,7 +301,6 @@ def _process_review_candidate(
         return "skipped_manual_takeover_hold"
     comments = github_client.list_issue_comments(issue.number)
     pending_rework = parse_latest_pending_rework_marker(comments)
-
     # 已处于 running 的旧返工仍由 runner 处理；Supervisor 新发起的修复保持
     # supervising，并在中断后由后续 review pass 恢复。
     if config.labels.running in issue.labels:

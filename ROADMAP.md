@@ -102,7 +102,7 @@
 - **不把 provider 规则变成平台规则**：KedaCode 不以内部计算的 commit SHA、tree SHA、PR diff 指纹或固定证据格式作为通用验证有效性 oracle。某个检查若需要 revision 绑定，应由该检查/provider 自己定义并报告，生命周期只消费其结果与状态。
 - **Supervisor 的职责**：监督器应在 `agent/supervising` 内完成它拥有的生命周期收尾（例如对账、发布、重新关联检查结果、repair/rebase PR branch）。需要代码修改时使用配置的 repair agent 在当前监督周期执行；不能因 `repair_pr_branch` 把 Issue 交回 `agent/running`，从而让生命周期倒退并重复认领。
 - **路线调整**：新增 M12「User-Owned Validation Gates And Lifecycle」，作为验证、PR review 与自动合并之间的边界整理。现有 Realistic Validation / verifier 流程作为兼容迁移对象，不再扩大其平台内置 oracle。
-- **当前状态**：用户定义验证门禁的配置契约仍待实施；Supervisor repair/rebase 留在 supervising 的生命周期边界已在本次改动中落地。现有 Realistic Validation 兼容路径保留 v2 PR 改动指纹，确保 main-only 更新或 rebase 不会使该验证签收误判过期；这是当前门禁的兼容实现，不是平台要求其他验证 provider 采用的通用规则。M12 应迁移该边界到用户定义的门禁契约。
+- **当前状态**：用户定义验证门禁的配置契约仍待实施；Supervisor repair/rebase 留在 supervising 的生命周期边界已在本次改动中落地。此前本地尝试的内部 diff 指纹方案已撤回，不构成交付行为。
 
 ### 自 2026-09-17 快照以来已交付
 
@@ -320,7 +320,7 @@ Status: Partially implemented (2026-10-15：Supervisor repair/rebase 留在 supe
 
 - 仓库用户配置要运行或观察的验证门禁及其必需性；优先复用现有 `runner.verification_commands`、pre-commit 命令和 GitHub checks，不另造固定的 KedaCode 验证清单。
 - KedaCode 提供统一生命周期：启动/观察检查、记录可审计结果、等待外部 CI、把真实失败交给 Supervisor/执行器修复，并在结果变化后继续监督。
-- 通用验证判定由配置的命令、workflow 或 provider 负责；生命周期不要求其他门禁采用 SHA/tree/diff 指纹。现有 Realistic Validation 兼容路径以稳定 PR patch-id 区分 PR 自身改动与 main-only 更新，防止 rebase 误清签收；这项专用兼容规则应在 M12 迁移到用户定义的门禁契约，而不扩展为所有 provider 的统一 oracle。
+- 验证判定由配置的命令、workflow 或 provider 负责。生命周期不自行推断 SHA/tree/diff 指纹等平台内部规则来宣告证据过期；检查需要 revision 绑定时，由对应检查契约表达。
 - Supervisor 在 supervising 阶段完成对账、结果发布、repair/rebase 和中断恢复；需要代码修改时调用配置的 repair agent，不通过 `agent/running` 重新认领 builder。
 - 迁移现有 Realistic Validation、独立 verifier、自动签收与 merge queue 的验证依赖，定义兼容/弃用边界，避免现有仓库无配置时静默改变门禁语义。
 - 验收至少覆盖：不同仓库可配置不同验证政策；失败、未运行、等待和通过能走正确生命周期；监督器收尾不会触发无意义的 builder 重跑；自动合并只消费用户声明的必需门禁结果。
